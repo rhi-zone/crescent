@@ -26,13 +26,14 @@ local GLOBAL_FLAGS = {
 
 --- Parse global flags out of argv.
 -- Returns opts table and remaining args (command + subcommand args).
+--:: CrOpts = { verbose: boolean, jobs: integer | nil, registry: string | nil, no_color: boolean }
 function M.parse_global_flags(argv)
 	local opts = {
 		verbose  = false,
 		jobs     = nil,
 		registry = nil,
 		no_color = false,
-	}
+	} --[[:! CrOpts]]
 	local rest = {}
 
 	for i = 1, #argv do
@@ -67,19 +68,21 @@ end
 local function load_pkg_lua()
 	local ok, result = pcall(loadfile, "pkg.lua")
 	if not ok or not result then return nil end
-	local ok2, t = pcall(result)
+	local result_ = result --[[:! () -> unknown]]
+	local ok2, t = pcall(result_)
 	if not ok2 or type(t) ~= "table" then return nil end
 	return t
 end
 
 -- Inject global opts back into an args list for subcommands that understand them.
 -- Prepends --verbose, --jobs=N, --registry=URL, --no-color as appropriate.
+--: (CrOpts, { [integer]: string }) -> { [integer]: string }
 local function inject_global_opts(opts, args)
-	local injected = {}
+	local injected = {} --: { [integer]: string }
 	if opts.verbose  then injected[#injected + 1] = "--verbose" end
 	if opts.no_color then injected[#injected + 1] = "--no-color" end
-	if opts.jobs     then injected[#injected + 1] = "--jobs=" .. opts.jobs end
-	if opts.registry then injected[#injected + 1] = "--registry=" .. opts.registry end
+	if opts.jobs     then injected[#injected + 1] = "--jobs=" .. tostring(opts.jobs) end
+	if opts.registry then injected[#injected + 1] = "--registry=" .. tostring(opts.registry) end
 	for _, v in ipairs(args) do
 		injected[#injected + 1] = v
 	end
@@ -89,9 +92,11 @@ end
 -- Split PATH env var into a list of directory strings.
 local function path_dirs()
 	local path_env = os.getenv("PATH") or ""
-	local sep = package.config:sub(1, 1) == "\\" and ";" or ":"
+	local pkg_config = package.config --[[:! string]]
+	local sep = pkg_config:sub(1, 1) == "\\" and ";" or ":"
 	local dirs = {}
-	for dir in (path_env .. sep):gmatch("([^" .. sep .. "]*)" .. sep) do
+	for dir_raw in (path_env .. sep):gmatch("([^" .. sep .. "]*)" .. sep) do
+		local dir = tostring(dir_raw)
 		if dir ~= "" then dirs[#dirs + 1] = dir end
 	end
 	return dirs
@@ -99,6 +104,7 @@ end
 
 -- Try to load and return a cr-<cmd>.lua module from a directory.
 -- Returns the module table, or nil if not found or no .main export.
+--: (string, string) -> { main: (unknown) -> unknown } | nil
 local function try_load_cr_cmd(dir, cmd)
 	-- Normalise trailing slash.
 	local slash = dir:sub(-1) == "/" and "" or "/"
@@ -109,12 +115,14 @@ local function try_load_cr_cmd(dir, cmd)
 		io.stderr:write(("cr: error loading %q: %s\n"):format(path, tostring(err)))
 		return nil
 	end
-	local ok, mod = pcall(chunk)
+	local chunk_ = chunk --[[:! () -> unknown]]
+	local ok, mod = pcall(chunk_)
 	if not ok then
 		io.stderr:write(("cr: error in %q: %s\n"):format(path, tostring(mod)))
 		return nil
 	end
-	if type(mod) ~= "table" or type(mod.main) ~= "function" then
+	local mod_ = mod --[[:! { [string]: unknown }]]
+	if type(mod) ~= "table" or type(mod_.main) ~= "function" then
 		io.stderr:write(("cr: %q has no main() export\n"):format(path))
 		return nil
 	end

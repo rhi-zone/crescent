@@ -18,7 +18,7 @@ end
 local M = {}
 M._tier = "pure"
 
-local bit = bit  -- LuaJIT global
+local bit = require("bit")
 local band, bxor, bor, lshift, rshift, tobit =
   bit.band, bit.bxor, bit.bor, bit.lshift, bit.rshift, bit.tobit
 local floor, ceil, log, huge = math.floor, math.ceil, math.log, math.huge
@@ -29,7 +29,7 @@ local floor, ceil, log, huge = math.floor, math.ceil, math.log, math.huge
 
 -- FNV-1a 32-bit hash with seed mixing — safe 16-bit multiply to stay in range.
 local function hash32(s, seed)
-  local h = bxor(2166136261, seed or 0)
+  local h = bxor(math.floor(2166136261), seed or 0)
   for i = 1, #s do
     h = bxor(h, string.byte(s, i))
     -- Multiply by FNV prime 16777619 using 16-bit halves to avoid float overflow.
@@ -50,7 +50,7 @@ end
 local function make_seeds(d)
   local seeds = {}
   for i = 1, d do
-    seeds[i] = band(i * 2654435761 + 1013904223, 0xffffffff)
+    seeds[i] = band(math.floor(i * 2654435761 + 1013904223), math.floor(0xffffffff))
   end
   return seeds
 end
@@ -67,8 +67,12 @@ local function pack_u32(t, v)
 end
 
 -- Unpack a big-endian uint32 from string s at byte offset (1-based).
+--: (string, integer) -> integer
 local function unpack_u32(s, off)
-  local b1, b2, b3, b4 = string.byte(s, off, off + 3)
+  local b1 = (string.byte(s, off, off) or 0) --[[:! integer]]
+  local b2 = (string.byte(s, off + 1, off + 1) or 0) --[[:! integer]]
+  local b3 = (string.byte(s, off + 2, off + 2) or 0) --[[:! integer]]
+  local b4 = (string.byte(s, off + 3, off + 3) or 0) --[[:! integer]]
   return bor(lshift(b1, 24), lshift(b2, 16), lshift(b3, 8), b4)
 end
 
@@ -76,27 +80,30 @@ end
 -- CMS metatable
 -- ---------------------------------------------------------------------------
 
+--:: CMS = { _w: integer, _d: integer, _seeds: { [integer]: integer }, _counters: { [integer]: number }, _total: number, _heavy: { [string]: number } | nil, update: (CMS, unknown, number | nil) -> nil, update_conservative: (CMS, unknown, number | nil) -> nil, query: (CMS, unknown) -> number, merge: (CMS, CMS) -> (CMS | nil, string | nil), reset: (CMS) -> nil, total: (CMS) -> number, width: (CMS) -> integer, depth: (CMS) -> integer, serialize: (CMS) -> string, heavy_hitters: (CMS, integer | nil) -> ({ [integer]: { [integer]: unknown } } | nil, string | nil) }
 local CMS = {}
 CMS.__index = CMS
 
 -- update(element, amount): increment frequency of element by amount (default 1).
 function CMS:update(element, amount)
+  local self_ = self --[[:! CMS]]
   amount = amount or 1
   local s     = type(element) == "string" and element or tostring(element)
-  local w     = self._w
-  local d     = self._d
-  local seeds = self._seeds
-  local cnt   = self._counters
+  local w     = self_._w
+  local d     = self_._d
+  local seeds = self_._seeds
+  local cnt   = self_._counters
   for i = 0, d - 1 do
     local j = band(hash32(s, seeds[i + 1]), 0x7fffffff) % w
     local idx = i * w + j + 1
     cnt[idx] = cnt[idx] + amount
   end
-  self._total = self._total + amount
+  self_._total = self_._total + amount
   -- Track heavy hitters if enabled.
-  if self._heavy then
-    local cur = self._heavy[s] or 0
-    self._heavy[s] = cur + amount
+  if self_._heavy then
+    local heavy_ = self_._heavy --[[:! { [string]: number }]]
+    local cur = heavy_[s] or 0
+    heavy_[s] = cur + amount
   end
 end
 
@@ -104,12 +111,13 @@ end
 -- For each row, only increment if current counter < current minimum (query value).
 -- Reduces overcount at the cost of slightly more CPU.
 function CMS:update_conservative(element, amount)
+  local self_ = self --[[:! CMS]]
   amount = amount or 1
   local s     = type(element) == "string" and element or tostring(element)
-  local w     = self._w
-  local d     = self._d
-  local seeds = self._seeds
-  local cnt   = self._counters
+  local w     = self_._w
+  local d     = self_._d
+  local seeds = self_._seeds
+  local cnt   = self_._counters
   -- First pass: compute current minimum (= query value).
   local min_val = huge
   local idxs    = {}
@@ -127,20 +135,22 @@ function CMS:update_conservative(element, amount)
       cnt[idx] = target
     end
   end
-  self._total = self._total + amount
-  if self._heavy then
-    local cur = self._heavy[s] or 0
-    self._heavy[s] = cur + amount
+  self_._total = self_._total + amount
+  if self_._heavy then
+    local heavy_ = self_._heavy --[[:! { [string]: number }]]
+    local cur = heavy_[s] or 0
+    heavy_[s] = cur + amount
   end
 end
 
 -- query(element): return minimum counter value — the frequency estimate.
 function CMS:query(element)
+  local self_ = self --[[:! CMS]]
   local s     = type(element) == "string" and element or tostring(element)
-  local w     = self._w
-  local d     = self._d
-  local seeds = self._seeds
-  local cnt   = self._counters
+  local w     = self_._w
+  local d     = self_._d
+  local seeds = self_._seeds
+  local cnt   = self_._counters
   local min_val = huge
   for i = 0, d - 1 do
     local j = band(hash32(s, seeds[i + 1]), 0x7fffffff) % w
@@ -154,69 +164,79 @@ end
 -- Both sketches must have identical width and depth.
 -- Returns self, err.
 function CMS:merge(other)
-  if self._w ~= other._w or self._d ~= other._d then
+  local self_ = self --[[:! CMS]]
+  local other_ = other --[[:! CMS]]
+  if self_._w ~= other_._w or self_._d ~= other_._d then
     return nil, "count_min:merge: incompatible dimensions (w or d mismatch)"
   end
-  local cnt1 = self._counters
-  local cnt2 = other._counters
-  local n    = self._w * self._d
+  local cnt1 = self_._counters
+  local cnt2 = other_._counters
+  local n    = self_._w * self_._d
   for i = 1, n do
     cnt1[i] = cnt1[i] + cnt2[i]
   end
-  self._total = self._total + other._total
-  if self._heavy and other._heavy then
-    for k, v in pairs(other._heavy) do
-      self._heavy[k] = (self._heavy[k] or 0) + v
+  self_._total = self_._total + other_._total
+  if self_._heavy and other_._heavy then
+    local h1_ = self_._heavy --[[:! { [string]: number }]]
+    local h2_ = other_._heavy --[[:! { [string]: number }]]
+    for k, v in pairs(h2_) do
+      h1_[k] = (h1_[k] or 0) + v
     end
   end
-  return self
+  return self_
 end
 
 -- reset(): set all counters to zero, reset total.
 function CMS:reset()
-  local cnt = self._counters
-  local n   = self._w * self._d
+  local self_ = self --[[:! CMS]]
+  local cnt = self_._counters
+  local n   = self_._w * self_._d
   for i = 1, n do cnt[i] = 0 end
-  self._total = 0
-  if self._heavy then
-    for k in pairs(self._heavy) do self._heavy[k] = nil end
+  self_._total = 0
+  if self_._heavy then
+    local heavy_ = self_._heavy --[[:! { [string]: number }]]
+    for k in pairs(heavy_) do heavy_[k] = 0; heavy_[k] = nil --[[: any]] end
   end
 end
 
 -- total(): total number of updates (sum of all amounts).
 function CMS:total()
-  return self._total
+  local self_ = self --[[:! CMS]]
+  return self_._total
 end
 
 -- width(): counters per row.
 function CMS:width()
-  return self._w
+  local self_ = self --[[:! CMS]]
+  return self_._w
 end
 
 -- depth(): number of rows (hash functions).
 function CMS:depth()
-  return self._d
+  local self_ = self --[[:! CMS]]
+  return self_._d
 end
 
 -- serialize(): pack sketch into a binary string.
 -- Header (16 bytes): d (4B), w (4B), total_lo (4B), total_hi (4B)
 -- Body: d*w uint32 counters (4 bytes each, big-endian).
 function CMS:serialize()
+  local self_ = self --[[:! CMS]]
   local t   = {}
-  local d   = self._d
-  local w   = self._w
-  local tot = self._total
+  local d   = self_._d
+  local w   = self_._w
+  local tot = self_._total
   -- Split total into two 32-bit halves (lo = lower 32 bits, hi = upper bits).
   -- LuaJIT numbers are doubles; support up to 2^53 safely.
   local lo  = tot % 0x100000000
   local hi  = floor(tot / 0x100000000)
-  pack_u32(t, d)
-  pack_u32(t, w)
-  pack_u32(t, lo)
-  pack_u32(t, hi)
-  local cnt = self._counters
+  pack_u32(t, d --[[:! integer]])
+  pack_u32(t, w --[[:! integer]])
+  pack_u32(t, math.floor(lo))
+  pack_u32(t, math.floor(hi))
+  local cnt = self_._counters
   for i = 1, d * w do
-    pack_u32(t, cnt[i])
+    pack_u32(t, math.floor(cnt[i]))
   end
   return table.concat(t)
 end
@@ -225,11 +245,13 @@ end
 -- Only available when sketch was created with track_heavy=true.
 -- Returns {{element, count}, ...} or (nil, err).
 function CMS:heavy_hitters(k)
-  if not self._heavy then
+  local self_ = self --[[:! CMS]]
+  if not self_._heavy then
     return nil, "count_min:heavy_hitters: sketch not created with track_heavy=true"
   end
+  local heavy_ = self_._heavy --[[:! { [string]: number }]]
   local list = {}
-  for elem, cnt in pairs(self._heavy) do
+  for elem, cnt in pairs(heavy_) do
     list[#list + 1] = { elem, cnt }
   end
   table.sort(list, function(a, b) return a[2] > b[2] end)
@@ -314,8 +336,8 @@ function M.deserialize(s)
   end
   -- Reconstruct total from lo/hi halves.
   -- unpack_u32 returns a signed Lua number via bor/lshift; coerce to unsigned.
-  local lo_n = lo
-  local hi_n = hi
+  local lo_n = lo --: number
+  local hi_n = hi --: number
   if lo_n < 0 then lo_n = lo_n + 0x100000000 end
   if hi_n < 0 then hi_n = hi_n + 0x100000000 end
   local total = hi_n * 0x100000000 + lo_n

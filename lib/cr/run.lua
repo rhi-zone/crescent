@@ -51,8 +51,10 @@ function M.main(argv)
 		io.stderr:write("cr run: " .. tostring(err) .. "\n")
 		os.exit(1)
 	end
+	--: () -> nil
+	local chunk_ = chunk --[[:! () -> nil]]
 
-	local ok, run_err = pcall(chunk)
+	local ok, run_err = pcall(chunk_)
 	if not ok then
 		io.stderr:write("cr run: " .. tostring(run_err) .. "\n")
 		os.exit(1)

@@ -30,6 +30,9 @@ end
 
 local sqlite = require("lib.sqlite")
 local json   = require("lib.format.json")
+local json_any = json --[[: any]]
+--: { encode: (unknown) -> (string | nil, string | nil), decode: (string) -> (unknown, string | nil) }
+local json_ = json_any
 
 local M = {}
 
@@ -38,11 +41,11 @@ local M = {}
 local function uuid()
 	return string.format(
 		"%08x-%04x-4%03x-%04x-%012x",
-		math.random(0, 0xffffffff),
-		math.random(0, 0xffff),
-		math.random(0, 0xfff),
-		math.random(0x8000, 0xbfff),
-		math.random(0, 0xffffffffffff)
+		math.random(0, math.floor(0xffffffff)),
+		math.random(0, math.floor(0xffff)),
+		math.random(0, math.floor(0xfff)),
+		math.random(math.floor(0x8000), math.floor(0xbfff)),
+		math.random(0, math.floor(0xffffffffffff))
 	)
 end
 
@@ -77,13 +80,14 @@ local function db_execute(db, sql, ...)
 	return db:execute(sql, ...)
 end
 
+--:: Db = { _db: any, _time_fn: () -> integer, create_session: (Db, string, unknown) -> (unknown, string | nil), get_session: (Db, string) -> (unknown, string | nil), list_sessions: (Db, string) -> (unknown, string | nil), delete_session: (Db, string) -> (boolean | nil, string | nil), add_message: (Db, string, string | nil, string, string, unknown) -> (unknown, string | nil), get_message: (Db, string) -> (unknown, string | nil), get_children: (Db, string) -> (unknown, string | nil), get_canonical_path: (Db, string) -> (unknown, string | nil), swipe_to: (Db, string) -> (boolean | nil, string | nil), update_message: (Db, string, { [string]: unknown }) -> (unknown, string | nil), delete_subtree: (Db, string) -> (unknown, string | nil), get_roots: (Db, string) -> (unknown, string | nil), get_root_children: (Db, string) -> (unknown, string | nil) }
 local db_mt = {}
 db_mt.__index = db_mt
 
 -- encode_metadata: encode a Lua table (or nil) to JSON string or nil.
 local function encode_metadata(meta)
 	if meta == nil then return nil end
-	local s, err = json.encode(meta)
+	local s, err = json_.encode(meta)
 	if not s then return nil, "conversation: json encode metadata: " .. tostring(err) end
 	return s
 end
@@ -91,7 +95,7 @@ end
 -- decode_metadata: decode a JSON string or nil to a Lua value.
 local function decode_metadata(s)
 	if s == nil then return nil end
-	local v, err = json.decode(s)
+	local v, err = json_.decode(tostring(s))
 	if v == nil and err then return nil, "conversation: json decode metadata: " .. tostring(err) end
 	return v
 end
@@ -105,11 +109,13 @@ end
 
 -- create_session(app_id, metadata?) -> session | nil, err
 db_mt.create_session = function(self, app_id, metadata)
+	local self_ = self --[[:! Db]]
 	local id = uuid()
-	local now = self._time_fn()
+	local now = self_._time_fn()
 	local meta_s, merr = encode_metadata(metadata)
 	if merr then return nil, merr end
-	local ok, err = self._db:execute(
+	local db_ = self_._db
+	local ok, err = db_:execute(
 		"INSERT INTO sessions (id, app_id, created_at, metadata) VALUES (?, ?, ?, ?)",
 		id, app_id, now, meta_s
 	)
@@ -119,7 +125,8 @@ end
 
 -- get_session(id) -> session | nil, err
 db_mt.get_session = function(self, id)
-	local iter, err = self._db:query(
+	local self_ = self --[[:! Db]]
+	local iter, err = self_._db:query(
 		"SELECT id, app_id, created_at, metadata FROM sessions WHERE id = ?",
 		id
 	)
@@ -133,7 +140,8 @@ end
 
 -- list_sessions(app_id) -> sessions[] | nil, err  (ordered by created_at DESC)
 db_mt.list_sessions = function(self, app_id)
-	local iter, err = self._db:query(
+	local self_ = self --[[:! Db]]
+	local iter, err = self_._db:query(
 		"SELECT id, app_id, created_at, metadata FROM sessions WHERE app_id = ? ORDER BY created_at DESC",
 		app_id
 	)
@@ -152,9 +160,10 @@ end
 
 -- delete_session(id) -> true | nil, err  (cascades to messages via FK)
 db_mt.delete_session = function(self, id)
-	local ok, err = self._db:execute("PRAGMA foreign_keys = ON")
+	local self_ = self --[[:! Db]]
+	local ok, err = self_._db:execute("PRAGMA foreign_keys = ON")
 	if not ok then return nil, err end
-	ok, err = self._db:execute("DELETE FROM sessions WHERE id = ?", id)
+	ok, err = self_._db:execute("DELETE FROM sessions WHERE id = ?", id)
 	if not ok then return nil, err end
 	return true
 end
@@ -164,11 +173,12 @@ end
 -- add_message(session_id, parent_id, role, content, metadata?) -> msg | nil, err
 -- Also updates parent's canonical_child_id to the new message id.
 db_mt.add_message = function(self, session_id, parent_id, role, content, metadata)
+	local self_ = self --[[:! Db]]
 	local id = uuid()
-	local now = self._time_fn()
+	local now = self_._time_fn()
 	local meta_s, merr = encode_metadata(metadata)
 	if merr then return nil, merr end
-	local ok, err = self._db:execute(
+	local ok, err = self_._db:execute(
 		"INSERT INTO messages (id, session_id, parent_id, role, content, created_at, canonical_child_id, metadata)"
 		.. " VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
 		id, session_id, parent_id, role, content, now, meta_s
@@ -176,7 +186,7 @@ db_mt.add_message = function(self, session_id, parent_id, role, content, metadat
 	if not ok then return nil, err end
 	-- Update parent's canonical_child_id if there is a parent.
 	if parent_id ~= nil then
-		ok, err = self._db:execute(
+		ok, err = self_._db:execute(
 			"UPDATE messages SET canonical_child_id = ? WHERE id = ?",
 			id, parent_id
 		)
@@ -196,7 +206,8 @@ end
 
 -- get_message(id) -> msg | nil, err
 db_mt.get_message = function(self, id)
-	local iter, err = self._db:query(
+	local self_ = self --[[:! Db]]
+	local iter, err = self_._db:query(
 		"SELECT id, session_id, parent_id, role, content, created_at, canonical_child_id, metadata"
 		.. " FROM messages WHERE id = ?",
 		id
@@ -220,7 +231,8 @@ end
 
 -- get_children(message_id) -> msgs[] | nil, err
 db_mt.get_children = function(self, message_id)
-	local iter, err = self._db:query(
+	local self_ = self --[[:! Db]]
+	local iter, err = self_._db:query(
 		"SELECT id, session_id, parent_id, role, content, created_at, canonical_child_id, metadata"
 		.. " FROM messages WHERE parent_id = ?",
 		message_id
@@ -279,7 +291,8 @@ end
 -- get_canonical_path(session_id) -> msgs[] | nil, err
 -- Returns the path from the root message to the leaf, following canonical_child_id.
 db_mt.get_canonical_path = function(self, session_id)
-	local db = self._db
+	local self_ = self --[[:! Db]]
+	local db = self_._db
 	-- Find root (message with no parent in this session).
 	local iter, err = db:query(
 		"SELECT id, session_id, parent_id, role, content, created_at, canonical_child_id, metadata"
@@ -325,7 +338,8 @@ end
 -- swipe_to(message_id) -> true | nil, err
 -- Sets message's parent's canonical_child_id to message_id.
 db_mt.swipe_to = function(self, message_id)
-	local db = self._db
+	local self_ = self --[[:! Db]]
+	local db = self_._db
 	-- Fetch the parent_id of this message inline (avoids self: narrowing issue).
 	local parent_id, ferr = fetch_msg_parent(db, message_id)
 	if parent_id == nil then
@@ -346,9 +360,10 @@ end
 -- Updates mutable fields: content, metadata, canonical_child_id.
 -- Only updates fields present in the table.
 db_mt.update_message = function(self, id, fields)
-	local db = self._db
+	local self_ = self --[[:! Db]]
+	local db = self_._db
 	-- Validate existence.
-	local existing, err = self:get_message(id)
+	local existing, err = self_:get_message(id)
 	if not existing then return nil, err end
 	local sets = {}
 	local vals = {}
@@ -375,18 +390,20 @@ db_mt.update_message = function(self, id, fields)
 		unpack(vals)
 	)
 	if not ok then return nil, uerr end
-	return self:get_message(id)
+	return self_:get_message(id)
 end
 
 -- delete_subtree(message_id) -> {deleted=N} | nil, err
 -- Deletes a message and all its descendants via recursive CTE.
 -- Updates parent's canonical_child_id after deletion.
 db_mt.delete_subtree = function(self, message_id)
-	local db = self._db
+	local self_ = self --[[:! Db]]
+	local db = self_._db
 	-- Validate existence and get parent_id.
-	local msg, err = self:get_message(message_id)
+	local msg, err = self_:get_message(message_id)
 	if not msg then return nil, err end
-	local parent_id = msg.parent_id
+	local msg_ = msg --[[:! { parent_id: unknown, ... }]]
+	local parent_id = msg_.parent_id
 	-- Collect descendant IDs via recursive CTE.
 	local iter, qerr = db:query(
 		"WITH RECURSIVE subtree(id) AS ("
@@ -416,7 +433,7 @@ db_mt.delete_subtree = function(self, message_id)
 	end
 	-- Update parent's canonical_child_id.
 	if parent_id ~= nil then
-		local children, cerr = self:get_children(parent_id)
+		local children, cerr = self_:get_children(tostring(parent_id))
 		if not children then return nil, cerr end
 		if #children > 0 then
 			local ok, uerr = db_execute(db,
@@ -438,7 +455,8 @@ end
 -- get_roots(session_id) -> msgs[] | nil, err
 -- Returns all root messages (parent_id IS NULL) in a session.
 db_mt.get_roots = function(self, session_id)
-	local db = self._db
+	local self_ = self --[[:! Db]]
+	local db = self_._db
 	local iter, err = db:query(
 		"SELECT id, session_id, parent_id, role, content, created_at, canonical_child_id, metadata"
 		.. " FROM messages WHERE session_id = ? AND parent_id IS NULL ORDER BY created_at ASC",
@@ -469,7 +487,8 @@ end
 -- get_root_children(session_id) -> msgs[] | nil, err
 -- Gets children of the root message (parent_id IS NULL) in a session.
 db_mt.get_root_children = function(self, session_id)
-	local db = self._db
+	local self_ = self --[[:! Db]]
+	local db = self_._db
 	local iter, err = db:query(
 		"SELECT id FROM messages WHERE session_id = ? AND parent_id IS NULL",
 		session_id
@@ -480,7 +499,7 @@ db_mt.get_root_children = function(self, session_id)
 		return nil, "conversation: no root message in session: " .. tostring(session_id)
 	end
 	if root_id == nil then return nil, "conversation: get_root_children query error: " .. tostring(qerr) end
-	return self:get_children(root_id)
+	return self_:get_children(tostring(root_id))
 end
 
 -- ── open ──────────────────────────────────────────────────────────────────────
