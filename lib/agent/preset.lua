@@ -56,7 +56,9 @@ function M.run(name, inputs, caps)
 
 	--: any
 	local spec_any = spec
-	return leaf_mod.run(task_def, s, caps, spec_any)
+	--: any
+	local caps_any = caps
+	return leaf_mod.run(task_def, s, caps_any, spec_any)
 end
 
 return M
