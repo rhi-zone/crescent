@@ -63,7 +63,7 @@
 --:: }
 --:: module "ffi": {
 --::   cdef:     (string) -> nil,
---::   new:      (<T>(ct: Ctype<T>, init: T | nil) -> T) & (<S: Keys<CTypeMap>>(ct: S, init: CTypeMap[S] | nil) -> CTypeMap[S]),
+--::   new:      (<T>(ct: Ctype<T>, init: T | nil) -> T) & (<S: Keys<CTypeMap>>(ct: S, init: CTypeMap[S] | nil) -> CTypeMap[S]) & ((ct: string, count: integer, init: unknown | nil) -> unknown) & ((ct: string, init: unknown | nil) -> unknown),
 --::   cast:     (<T, U>(ct: Ctype<T>, obj: U) -> T) & (<S: Keys<CTypeMap>, U>(ct: S, obj: U) -> CTypeMap[S]),
 --::   sizeof:   (ct: string | Ctype<unknown>) -> integer,
 --::   typeof:   (<T>(ct: Ctype<T>) -> Ctype<T>) & (<S: Keys<CTypeMap>>(ct: S) -> Ctype<CTypeMap[S]>),
@@ -113,7 +113,7 @@
 --::     gmatch:  <P: string>(s: string, pattern: P) -> (() -> $PatternReturn<P>),
 --::     gsub:    (s: string, pattern: string, repl: string | ((string) -> (string | nil)) | { [string]: string, ... }, n: integer | nil) -> (string, integer),
 --::     rep:     (s: string, n: integer, sep: string | nil) -> string,
---::     byte:    (s: string, i: integer | nil, j: integer | nil) -> ...(integer),
+--::     byte:    ((s: string, i: integer | nil) -> integer | nil) & ((s: string, i: integer, j: integer) -> ...(integer)),
 --::     char:    (...integer) -> string,
 --::     upper:   (s: string) -> string,
 --::     lower:   (s: string) -> string,
