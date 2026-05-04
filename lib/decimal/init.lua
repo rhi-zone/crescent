@@ -16,10 +16,13 @@ local max    = math.max
 local min    = math.min
 local huge   = math.huge
 
+--:: Decimal = { coeff: number, exp: number }
+
 -- ── Internal helpers ──────────────────────────────────────────────────────────
 
 -- Remove trailing zeros from coefficient, adjust exponent accordingly.
 -- Special case: zero always normalizes to {0, 0}.
+--: (number, number) -> (number, number)
 local function normalize(coeff, exp)
   if coeff == 0 then return 0, 0 end
   while coeff % 10 == 0 do
@@ -30,12 +33,14 @@ local function normalize(coeff, exp)
 end
 
 -- Construct a decimal table (internal, skips normalization).
+--: (number, number) -> Decimal
 local function make(coeff, exp)
   return { coeff = coeff, exp = exp }
 end
 
 -- Align two decimals to the same exponent for add/sub/cmp.
 -- Returns ac, bc, common_exp.
+--: (Decimal, Decimal) -> (number, number, number)
 local function align(a, b)
   if a.exp == b.exp then return a.coeff, b.coeff, a.exp end
   if a.exp > b.exp then
@@ -51,6 +56,7 @@ end
 
 -- Round a raw integer coefficient that sits at `exp` to `places` decimal places.
 -- Returns new_coeff, new_exp.
+--: (number, number, number, string | nil) -> (number, number)
 local function round_coeff(coeff, exp, places, mode)
   local target_exp = -places
   if exp >= target_exp then
@@ -84,9 +90,9 @@ local function round_coeff(coeff, exp, places, mode)
       round_up = (truncated % 2) ~= 0
     end
   elseif mode == "floor" then
-    round_up = sign < 0 and remainder ~= 0
+    round_up = (sign < 0 and remainder ~= 0) and true or false
   elseif mode == "ceil" then
-    round_up = sign > 0 and remainder ~= 0
+    round_up = (sign > 0 and remainder ~= 0) and true or false
   elseif mode == "truncate" then
     round_up = false
   else
@@ -115,37 +121,48 @@ function M.new(value, scale)
   end
 
   if t == "string" then
+    local value_str = value --[[:! string]]
     -- Handle scientific notation: [sign][digits][.digits][e[+-]digits]
     local sign_str, int_part, frac_part, e_sign, e_digits =
-      value:match("^([+-]?)(%d+)%.?(%d*)[eE]([+-]?)(%d+)$")
+      value_str:match("^([+-]?)(%d+)%.?(%d*)[eE]([+-]?)(%d+)$")
 
     if sign_str then
       -- Scientific notation
-      local mantissa_exp = -(#frac_part)
-      local digits_str   = int_part .. frac_part
-      coeff = tonumber(digits_str)
-      exp   = mantissa_exp + (e_sign == "-" and -1 or 1) * tonumber(e_digits)
+      local frac_part_ = frac_part --[[:! string]]
+      local int_part_  = int_part  --[[:! string]]
+      local e_digits_  = e_digits  --[[:! string]]
+      local e_sign_    = e_sign    --[[:! string]]
+      local mantissa_exp = -(#frac_part_)
+      local digits_str   = int_part_ .. frac_part_
+      coeff = tonumber(digits_str) or 0
+      local e_num = tonumber(e_digits_) or 0
+      exp   = mantissa_exp + (e_sign_ == "-" and -1 or 1) * e_num
       if sign_str == "-" then coeff = -coeff end
     else
       -- Plain decimal: [sign][digits][.digits]
-      local s, i, f = value:match("^([+-]?)(%d+)%.?(%d*)$")
+      local s, i, f = value_str:match("^([+-]?)(%d+)%.?(%d*)$")
       if not s then
         return nil, "decimal.new: cannot parse '" .. tostring(value) .. "'"
       end
-      frac_part = f or ""
-      coeff = tonumber(i .. frac_part)
+      local s_ = s --[[:! string]]
+      local i_ = i --[[:! string]]
+      local f_ = f --[[:! string]]
+      frac_part = f_ or ""
+      coeff = tonumber(i_ .. frac_part) or 0
       exp   = -(#frac_part)
-      if s == "-" then coeff = -coeff end
+      if s_ == "-" then coeff = -coeff end
     end
   else
     return nil, "decimal.new: unsupported type " .. t
   end
 
-  coeff, exp = normalize(coeff, exp)
-  local d = make(coeff, exp)
+  local coeff_ = (coeff or 0) --[[:! number]]
+  local exp_   = (exp or 0)   --[[:! number]]
+  coeff_, exp_ = normalize(coeff_, exp_)
+  local d = make(coeff_, exp_)
 
   if scale then
-    local nc, ne = round_coeff(coeff, exp, scale, "half_up")
+    local nc, ne = round_coeff(coeff_, exp_, scale, "half_up")
     d = make(nc, ne)
   end
 
@@ -165,7 +182,7 @@ end
 local decimal_mt  -- forward declaration; set at bottom
 
 local function wrap(coeff, exp)
-  local c, e = normalize(coeff, --[[:! number]] exp)
+  local c, e = normalize(coeff, exp)
   local d = make(c, e)
   setmetatable(d, decimal_mt)
   return d
@@ -173,24 +190,33 @@ end
 
 --- Add two decimals.
 function M.add(a, b)
-  local ac, bc, e = align(a, b)
+  local a_ = a --[[:! Decimal]]
+  local b_ = b --[[:! Decimal]]
+  local ac, bc, e = align(a_, b_)
   return wrap(ac + bc, e)
 end
 
 --- Subtract b from a.
 function M.sub(a, b)
-  local ac, bc, e = align(a, b)
+  local a_ = a --[[:! Decimal]]
+  local b_ = b --[[:! Decimal]]
+  local ac, bc, e = align(a_, b_)
   return wrap(ac - bc, e)
 end
 
 --- Multiply two decimals.
 function M.mul(a, b)
-  return wrap(a.coeff * b.coeff, a.exp + b.exp)
+  local a_ = a --[[:! Decimal]]
+  local b_ = b --[[:! Decimal]]
+  return wrap(a_.coeff * b_.coeff, a_.exp + b_.exp)
 end
 
 --- Divide a by b, result has `scale` decimal places (default 10).
+--: (Decimal, Decimal, integer | nil) -> (Decimal | nil, string | nil)
 function M.div(a, b, scale)
-  if b.coeff == 0 then
+  local a_ = a --[[:! Decimal]]
+  local b_ = b --[[:! Decimal]]
+  if b_.coeff == 0 then
     return nil, "decimal.div: division by zero"
   end
   scale = scale or 10
@@ -199,15 +225,15 @@ function M.div(a, b, scale)
   -- result = value(a)/value(b) = (a.coeff/b.coeff) * 10^(a.exp - b.exp)
   -- We want result_coeff * 10^(-scale) = result, so:
   --   result_coeff = a.coeff * 10^(a.exp - b.exp + scale) / b.coeff
-  local extra = a.exp - b.exp + scale   -- may be negative
+  local extra = a_.exp - b_.exp + scale   -- may be negative
   local scaled_a
   if extra >= 0 then
-    scaled_a = a.coeff * (10 ^ extra)
+    scaled_a = a_.coeff * (10 ^ extra)
   else
-    scaled_a = a.coeff / (10 ^ (-extra))
+    scaled_a = a_.coeff / (10 ^ (-extra))
   end
   -- Perform rounding at the last digit (half_up).
-  local raw       = scaled_a / b.coeff
+  local raw       = scaled_a / b_.coeff
   local sign_r    = raw < 0 and -1 or 1
   local araw      = abs(raw)
   local int_part  = floor(araw)
@@ -223,20 +249,23 @@ end
 
 --- Negate a decimal.
 function M.neg(a)
-  return wrap(-a.coeff, a.exp)
+  local a_ = a --[[:! Decimal]]
+  return wrap(-a_.coeff, a_.exp)
 end
 
 --- Absolute value.
 function M.abs_val(a)
-  return wrap(abs(a.coeff), a.exp)
+  local a_ = a --[[:! Decimal]]
+  return wrap(abs(a_.coeff), a_.exp)
 end
 
 -- ── Rounding ──────────────────────────────────────────────────────────────────
 
 --- Round to `places` decimal places using `mode`.
 function M.round(a, places, mode)
+  local a_ = a --[[:! Decimal]]
   places = places or 0
-  local nc, ne = round_coeff(a.coeff, a.exp, places, mode or "half_up")
+  local nc, ne = round_coeff(a_.coeff, a_.exp, places, mode or "half_up")
   return wrap(nc, ne)
 end
 
@@ -244,7 +273,9 @@ end
 
 --- Compare two decimals. Returns -1, 0, or 1.
 function M.cmp(a, b)
-  local ac, bc, _ = align(a, b)
+  local a_ = a --[[:! Decimal]]
+  local b_ = b --[[:! Decimal]]
+  local ac, bc, _ = align(a_, b_)
   if ac < bc then return -1
   elseif ac > bc then return 1
   else return 0
@@ -259,8 +290,9 @@ function M.le(a, b)  return M.cmp(a, b) <= 0  end
 
 --- Convert to string representation (e.g. "1.23", "100", "-0.05").
 function M.to_string(a)
-  local coeff = a.coeff
-  local exp   = a.exp
+  local a_ = a --[[:! Decimal]]
+  local coeff = a_.coeff
+  local exp   = a_.exp
 
   if exp == 0 then
     return tostring(coeff)
@@ -277,25 +309,27 @@ function M.to_string(a)
 
   if exp > 0 then
     -- Positive exponent: append zeros
-    return sign_str .. s .. string.rep("0", exp)
+    return sign_str .. s .. string.rep("0", math.floor(exp) --[[:! integer]])
   else
     -- Negative exponent: insert decimal point
     local dec_pos = #s + exp   -- position of decimal point from left
     if dec_pos <= 0 then
       -- Need leading zeros after "0."
-      return sign_str .. "0." .. string.rep("0", -dec_pos) .. s
+      return sign_str .. "0." .. string.rep("0", math.floor(-dec_pos) --[[:! integer]]) .. s
     elseif dec_pos >= #s then
       -- No fractional part (shouldn't happen after normalize, but defensive)
       return sign_str .. s
     else
-      return sign_str .. s:sub(1, dec_pos) .. "." .. s:sub(dec_pos + 1)
+      local dp = math.floor(dec_pos) --[[:! integer]]
+      return sign_str .. s:sub(1, dp) .. "." .. s:sub(dp + 1)
     end
   end
 end
 
 --- Convert to Lua number (may lose precision).
 function M.to_number(a)
-  return a.coeff * (10 ^ a.exp)
+  local a_ = a --[[:! Decimal]]
+  return a_.coeff * (10 ^ a_.exp)
 end
 
 --- Convert to integer (truncates fractional part).
@@ -305,17 +339,19 @@ end
 
 --- Number of decimal places (positive = fractional digits).
 function M.scale(a)
-  if a.exp >= 0 then return 0 end
-  return -a.exp
+  local a_ = a --[[:! Decimal]]
+  if a_.exp >= 0 then return 0 end
+  return -a_.exp
 end
 
 -- ── Properties ────────────────────────────────────────────────────────────────
 
-function M.is_zero(a)     return a.coeff == 0          end
-function M.is_negative(a) return a.coeff < 0            end
+function M.is_zero(a)     local a_ = a --[[:! Decimal]]; return a_.coeff == 0          end
+function M.is_negative(a) local a_ = a --[[:! Decimal]]; return a_.coeff < 0            end
 function M.sign(a)
-  if a.coeff > 0 then return 1
-  elseif a.coeff < 0 then return -1
+  local a_ = a --[[:! Decimal]]
+  if a_.coeff > 0 then return 1
+  elseif a_.coeff < 0 then return -1
   else return 0
   end
 end
@@ -344,7 +380,7 @@ function M.average(decimals)
   for i = 1, #decimals do
     s = M.add(s, decimals[i])
   end
-  return M.div(s, M.new(#decimals), 10)
+  return M.div(s --[[:! Decimal]], M.new(#decimals) --[[:! Decimal]], 10)
 end
 
 -- ── Metamethods ───────────────────────────────────────────────────────────────
@@ -362,7 +398,8 @@ decimal_mt = {
 
   -- Method-style access: d:add(b), d:round(2), etc.
   __index = function(self, key)
-    local fn = M[key]
+    local M_ = M --[[: any]]
+    local fn = M_[key]
     if fn then
       return function(s, ...) return fn(s, ...) end
     end
@@ -370,6 +407,7 @@ decimal_mt = {
 }
 
 -- Wrap the internal `make` so all public decimals carry the metatable.
+--: (number, number) -> Decimal
 local function new_decimal(coeff, exp)
   local d = make(coeff, exp)
   setmetatable(d, decimal_mt)
@@ -378,7 +416,7 @@ end
 
 -- Re-implement wrap with metatable.
 wrap = function(coeff, exp)
-  local c, e = normalize(coeff, --[[:! number]] exp)
+  local c, e = normalize(coeff, exp)
   return new_decimal(c, e)
 end
 
