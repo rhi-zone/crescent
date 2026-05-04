@@ -143,6 +143,13 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+25)
+
+- [x] `lib/units/init.lua` (11 → 0, commit 7652fbe) — annotated def() param as { [string]: number | boolean }; cast precision to integer before concat
+- [x] `lib/workflow/init.lua` (10 → 0, commit 7652fbe) — WfDef/WfInst/HookList/HistEntry type aliases; self_ casts in all methods; typed errs/queue/visited/breaks arrays; string narrowing for start_/name_; inst.step() called via inst.step(self_) to avoid unknown self
+- [x] `lib/word_wrap/init.lua` (18 → 0, commit 7652fbe) — annotated greedy/optimal/justify/truncate params with integer width; typed wlen/cost/brk/breaks/result_lines arrays; phi-join casts for space/line_len/current_len using local cl_ intermediates
+- [x] `lib/trie/init.lua` (24 → 0, commit 7652fbe) — TrieNode type alias (with optional has_value/value); annotated walk() as (TrieNode,string)->TrieNode|nil; self_ casts in all methods; typed buf/results/stack arrays; --[[: any]] for nil array-element assignments; TrieNode constructor includes has_value=nil,value=nil fields
+
 ## Done in current session (session N+24)
 
 - [x] `lib/compress/init.lua` (1 → 0, commit 48464ac) — cast pcall fallback `impl` via `--[[: any]]` on both the assignment and return
