@@ -10,10 +10,13 @@ M._tier = "pure"
 
 local bit = require("bit")
 
+--:: Registry = { _flags: { [string]: any }, _overrides: { [string]: any }, _listeners: { [integer]: any }, ... }
+
 -- Deterministic hash of a string → float in [0, 1).
 -- Uses a simple FNV-1a variant, good enough for consistent rollout.
+--: (string) -> number
 local function hash_to_float(s)
-  local h = 2166136261  -- FNV offset basis (uint32)
+  local h = math.floor(2166136261)  -- FNV offset basis (uint32)
   for i = 1, #s do
     h = bit.bxor(h, string.byte(s, i))
     -- FNV prime multiply, keep in 32-bit range via modulo
@@ -28,11 +31,9 @@ local Registry = {}
 Registry.__index = Registry
 
 -- Create a new flag registry.
+--: () -> Registry
 function M.new()
-  local self = setmetatable({}, Registry)
-  self._flags = {}      -- name → flag def + state
-  self._overrides = {}  -- name → forced value
-  self._listeners = {}  -- array of {event, fn}
+  local self = setmetatable({ _flags = {}, _overrides = {}, _listeners = {} }, Registry) --[[: any]] --[[:! Registry]]
   return self
 end
 
@@ -58,25 +59,30 @@ function M.from_snapshot(snapshot)
 end
 
 -- Internal: emit a change event.
+--: (Registry, string, any, any) -> nil
 local function emit(self, name, old_val, new_val)
-  for _, listener in ipairs(self._listeners) do
-    if listener.event == "change" then
-      listener.fn(name, old_val, new_val)
+  local self_ = self --[[:! Registry]]
+  for _, listener in ipairs(self_._listeners) do
+    local l = listener --[[:! { event: string, fn: (string, any, any) -> any }]]
+    if l.event == "change" then
+      l.fn(name, old_val, new_val)
     end
   end
 end
 
 -- Internal: get current effective boolean value for a flag, given optional ctx.
 -- Returns value, err.
+--: (Registry, string, { user_id: any, ... } | nil) -> (any, string | nil)
 local function eval_flag(self, name, ctx)
-  local flag = self._flags[name]
+  local self_ = self --[[:! Registry]]
+  local flag = self_._flags[name]
   if not flag then
     return nil, "unknown flag: " .. tostring(name)
   end
 
   -- Override takes highest precedence.
-  if self._overrides[name] ~= nil then
-    return self._overrides[name], nil
+  if self_._overrides[name] ~= nil then
+    return self_._overrides[name], nil
   end
 
   -- Programmatic set takes next precedence.
@@ -155,7 +161,7 @@ function Registry:variant(name, ctx)
 
   -- Weighted selection using consistent hash.
   local user_id = ctx and ctx.user_id or ""
-  local h = hash_to_float(tostring(user_id) .. name .. ":variant")
+  local h = hash_to_float(tostring(user_id) .. tostring(name) .. ":variant") --: number
   local total = 0
   for _, v in ipairs(flag.variants) do
     total = total + (v.weight or 1)

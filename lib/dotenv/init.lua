@@ -18,7 +18,7 @@ M._tier = "pure"
 -- Process double-quoted escape sequences: \n \t \\ \" \r
 --: (string) -> string
 local function unescape_double(s)
-  return (s:gsub("\\(.)", function(c)
+  local r, _ = s:gsub("\\(.)", function(c)
     if c == "n"  then return "\n"
     elseif c == "t"  then return "\t"
     elseif c == "r"  then return "\r"
@@ -26,25 +26,28 @@ local function unescape_double(s)
     elseif c == '"'  then return '"'
     else return "\\" .. c  -- leave unknown escapes as-is
     end
-  end))
+  end)
+  return r
 end
 
 -- Expand ${VAR} and $VAR references in a string, looking up vars then env_fn.
 --: (string, { [string]: string }, ((string) -> string | nil) | nil) -> string
 local function expand_vars(s, vars, env_fn)
   -- ${VAR} form
-  s = s:gsub("%${([A-Za-z_][A-Za-z0-9_]*)}", function(name)
+  local r1, _ = s:gsub("%${([A-Za-z_][A-Za-z0-9_]*)}", function(name)
     local v = vars[name]
     if v ~= nil then return v end
-    return env_fn and env_fn(name) or ""
+    if env_fn then return env_fn(name) or "" end
+    return ""
   end)
   -- $VAR form (not followed by { or alphanumeric to avoid double-expansion)
-  s = s:gsub("%$([A-Za-z_][A-Za-z0-9_]*)", function(name)
+  local r2, __ = (r1 --[[:! string]]):gsub("%$([A-Za-z_][A-Za-z0-9_]*)", function(name)
     local v = vars[name]
     if v ~= nil then return v end
-    return env_fn and env_fn(name) or ""
+    if env_fn then return env_fn(name) or "" end
+    return ""
   end)
-  return s
+  return r2 --[[:! string]]
 end
 
 -- ---------------------------------------------------------------------------
@@ -188,14 +191,14 @@ function M.load_files(read_fn, paths, opts)
   if type(read_fn) ~= "function" then
     error("dotenv.load_files: read_fn function is required")
   end
-  opts = opts or {}
-  local env_fn = opts.env_fn
+  local opts_ = (opts or {}) --[[:! { existing: boolean | nil, env_fn: ((string) -> string | nil) | nil }]]
+  local env_fn = opts_.env_fn
   local result = {}
   for _, path in ipairs(paths) do
     local vars, err = M.load(read_fn, path, env_fn)
     if not vars then return nil, err end
     for k, v in pairs(vars) do
-      if not opts.existing or result[k] == nil then
+      if not opts_.existing or result[k] == nil then
         result[k] = v
       end
     end
@@ -229,13 +232,13 @@ end
 -- Values containing spaces, #, ", ', =, or \n are double-quoted.
 --: ({ [string]: string }, { sorted: boolean | nil } | nil) -> string
 function M.stringify(vars, opts)
-  opts = opts or {}
+  local opts_ = (opts or {}) --[[:! { sorted: boolean | nil }]]
   local lines = {}
 
   -- Optionally sort for deterministic output
   local keys = {}
   for k in pairs(vars) do keys[#keys+1] = k end
-  if opts.sorted ~= false then
+  if opts_.sorted ~= false then
     table.sort(keys)
   end
 
