@@ -81,6 +81,14 @@ last because the type system itself is the testbed.
 - ~~`lib/convex_hull/init.lua`~~ — done (session N+4)
 - ~~`lib/asn1/init.lua`~~ — done (session N+4)
 - ~~`lib/columnar/init.lua`~~ — done (session N+4)
+- `lib/ai/providers/anthropic.lua` (28) — json.decode returns unknown; field access on unknown can't be cast with --[[: any]] (need --[[:! T]]); pervasive cascade; skip until json.decode return type is narrowable
+- `lib/ai/providers/google.lua` (50) — same json.decode cascade pattern; skip
+- `lib/ai/providers/openai_compat.lua` (43) — similar; skip
+- `lib/argon2/init.lua` (54) — FFI + unknown cascade; skip
+- `lib/http/stream.lua` (19) — unknown cascade from stream methods
+- `lib/http/server.lua` (33) — unknown cascade
+- `lib/http/client.lua` (4) — unknown cascade
+- `lib/http/router/api.lua` (13) — unknown cascade
 - `lib/bloom/init.lua` (12) — `local bit = bit` global is unknown; full Bloom type annotation cascades badly (23 errors when attempted); skip
 - `lib/base32/init.lua` (11) — string param annotation cascades: math.floor → number → sub() integer args fail; skip (confirmed)
 - `lib/base58/init.lua` (2) — any fix to sha256fn call sites triggers new error in hex_to_bin (typechecker limitation with gsub return + checked cast interaction)
@@ -134,6 +142,14 @@ last because the type system itself is the testbed.
 - `lib/bson/init.lua` — force-cast `byte(s, pos) --[[:! integer]]` per byte regressed 73 → 85 (caster mismatch on `integer | nil` source) — reverted. Fix would need either narrowing `nil` separately, or upstream `byte` typing change.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
+
+## Done in current session (session N+17)
+
+- [x] `lib/asm/emit/x64.lua` (was 14 → now 2, commit a720eaf) — `--[[:! VReg]]` casts on all `insn.dst`/`insn.operands[i]` after extraction; separate `src2_any` local for add/mov imm-check; `enc_mov_ri64` annotated `(buf, string, integer)`; `--[[:! integer]]` on `.imm` reads; 2 remaining FFI-bound (`ffi.copy` string type, `ffi.cast` return)
+- [x] `lib/agent/preset.lua` (was 1 → now 0, commit cb9b61c) — `caps_any = caps --: any` to break mismatch between AgentCaps.llm.generate returning `unknown` vs LeafCaps expecting `LlmResponse|nil`
+- [x] `lib/ai/init.lua` (was 17 → now 0, commit cb9b61c) — `providers --: { [string]: ai_provider }`; annotate `resolve` return type; cast `p` from pcall via `--[[: any]]` then `--: ai_provider`; `provider_` locals with `--[[:! ai_provider]]` cast after nil-check; `make_provider_req` annotated `(unknown) -> any`; `prov --[[:! ai_provider]]` for table branch
+- [x] `lib/http/router/fs_router.lua` (was 3 → now 2, commit 96fcf42) — FsRouterOpts type alias; annotate `mod.router`, `handle_file`, `handle_dir` with crescent annotations; opts_/io_open_/stderr_write_/lua_load_ casts; replace LuaLS `--[[@param path2 string]]` with preceding-line `--: (string) -> any`; `rawget(_G, "DEV")` to suppress unknown-identifier error; 2 remaining: `mimetype_by_name` $PatternReturn internal mismatch (typechecker limitation)
+- skipped `lib/ai/providers/anthropic.lua` — `json.decode` returns `unknown`, and `unknown` fields can't be cast to `any` with `--[[: any]]` (need `--[[:! T]]` force-cast); pervasive field access on decoded JSON cascades net regression 28→36; reverted
 
 ## Done in current session (session N+16)
 
