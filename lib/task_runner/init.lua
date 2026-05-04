@@ -9,13 +9,19 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: TaskDef = { desc: string | nil, deps: { [integer]: string }, run: ((unknown) -> unknown) | nil, once: boolean | nil, timeout: number | nil, tags: { [integer]: string } }
+--:: TaskResult = { ok: boolean, value: unknown, err: string | nil, duration_ms: integer }
+--:: Runner = { _tasks: { [string]: TaskDef }, _hooks: { [string]: { [integer]: (...unknown) -> unknown } }, _executor: unknown, _log_fn: (string, string) -> nil, _clock_fn: () -> number, run: (Runner, string | { [integer]: string }) -> { [string]: TaskResult }, ... }
+
 -- ── Internal helpers ───────────────────────────────────────────────────────────
 
 -- Topological sort via iterative DFS. Returns ordered list or (nil, errmsg) on cycle.
 local function topo_sort(tasks, roots)
   -- roots: list of task names to include (and their transitive deps)
   local order = {}
+  --: { [string]: boolean | nil }
   local visited = {}   -- "done"
+  --: { [string]: boolean | nil }
   local in_stack = {}  -- cycle detection
 
   local function visit(name)
@@ -125,18 +131,20 @@ function M.new(opts)
   end
 
   -- ── Internal: execute an ordered list, skipping already-done tasks ───────────
+  --: (Runner, { [integer]: string }, { [string]: TaskResult }, { [string]: boolean }) -> ({ [string]: TaskResult } | nil, string | nil, string | nil)
   local function execute_plan(runner_, order, results, done_set)
+    local runner__ = runner_ --[[:! Runner]]
     for _, name in ipairs(order) do
       if done_set[name] then
         -- already ran (shared dep or once-flagged)
       else
-        local def = runner_._tasks[name]
+        local def = runner__._tasks[name]
         local ctx = {
           _name    = name,
-          _runner  = runner_,
+          _runner  = runner__,
           _results = results,
           log = function(self, msg)
-            runner_._log_fn(self._name, msg)
+            runner__._log_fn(self._name, msg)
           end,
           result = function(self, dep_name)
             local r = self._results[dep_name]
@@ -145,8 +153,8 @@ function M.new(opts)
           end,
         }
 
-        fire(runner_, "task:start", name)
-        local t0 = runner_._clock_fn()
+        fire(runner__, "task:start", name)
+        local t0 = runner__._clock_fn()
         local ok, value_or_err
 
         if def.run then
@@ -156,19 +164,19 @@ function M.new(opts)
           ok, value_or_err = true, true
         end
 
-        local duration_ms = math.floor((runner_._clock_fn() - t0) * 1000 + 0.5)
+        local duration_ms = math.floor((runner__._clock_fn() - t0) * 1000 + 0.5) --[[:! integer]]
 
         if ok then
-          local result = { ok = true, value = value_or_err, duration_ms = duration_ms }
+          local result = { ok = true, value = value_or_err, err = nil, duration_ms = duration_ms } --[[:! TaskResult]]
           results[name] = result
           done_set[name] = true
-          fire(runner_, "task:done", name, result)
+          fire(runner__, "task:done", name, result)
         else
           -- value_or_err is the error message from pcall
-          local result = { ok = false, err = tostring(value_or_err), duration_ms = duration_ms }
+          local result = { ok = false, err = tostring(value_or_err), value = nil, duration_ms = duration_ms } --[[:! TaskResult]]
           results[name] = result
           done_set[name] = true
-          fire(runner_, "task:error", name, tostring(value_or_err))
+          fire(runner__, "task:error", name, tostring(value_or_err))
           -- Stop: dependents cannot run if a dep failed.
           -- We return here; remaining tasks in the plan that depend on this
           -- will be absent from results (caller can detect).
@@ -204,14 +212,16 @@ function M.new(opts)
 
   -- ── run_all() ───────────────────────────────────────────────────────────────
   function runner:run_all()
-    local names = all_task_names(self._tasks)
-    return self:run(names)
+    local self_ = self --[[:! Runner]]
+    local names = all_task_names(self_._tasks)
+    return self_:run(names)
   end
 
   -- ── run_tagged(tag) ─────────────────────────────────────────────────────────
   function runner:run_tagged(tag)
+    local self_ = self --[[:! Runner]]
     local tagged = {}
-    for name, def in pairs(self._tasks) do
+    for name, def in pairs(self_._tasks) do
       for _, t in ipairs(def.tags) do
         if t == tag then
           tagged[#tagged + 1] = name
@@ -223,7 +233,7 @@ function M.new(opts)
     if #tagged == 0 then
       return {}, nil
     end
-    return self:run(tagged)
+    return self_:run(tagged)
   end
 
   -- ── watch(name, opts) ───────────────────────────────────────────────────────

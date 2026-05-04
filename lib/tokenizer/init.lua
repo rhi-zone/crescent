@@ -21,6 +21,10 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: TokState = { _stack: { [integer]: string }, push: (TokState, string) -> nil, pop: (TokState) -> nil, current: (TokState) -> string | nil, ... }
+--:: TokRule = { kind: string, type: string | nil, pat: string, transform: ((string, TokState) -> string) | nil }
+--:: TokLexer = { _rules: { [integer]: TokRule }, _keywords: { [string]: boolean }, _modes: { [string]: TokLexer }, ... }
+
 -- ---------------------------------------------------------------------------
 -- State object (passed to transform functions in mode lexers)
 -- ---------------------------------------------------------------------------
@@ -29,19 +33,23 @@ local State = {}
 State.__index = State
 
 local function new_state()
-  return setmetatable({ _stack = {} }, State)
+  local st = setmetatable({ _stack = {} }, State) --[[: any]]
+  return st --[[:! TokState]]
 end
 
 function State:push(mode)
-  self._stack[#self._stack + 1] = mode
+  local self_ = self --[[:! TokState]]
+  self_._stack[#self_._stack + 1] = mode
 end
 
 function State:pop()
-  self._stack[#self._stack] = nil
+  local self_ = self --[[:! TokState]]
+  self_._stack[#self_._stack] = nil
 end
 
 function State:current()
-  return self._stack[#self._stack]
+  local self_ = self --[[:! TokState]]
+  return self_._stack[#self_._stack]
 end
 
 -- ---------------------------------------------------------------------------
@@ -52,12 +60,16 @@ local Lexer = {}
 Lexer.__index = Lexer
 
 -- Create a new lexer builder.
+--: () -> TokLexer
 function M.new()
-  return setmetatable({
-    _rules    = {},  -- { kind="token"|"skip", type=str, pat=str, transform=fn|nil }
-    _keywords = {},  -- set of keyword strings
-    _modes    = {},  -- { [name] = sublexer }
-  }, Lexer)
+  --: { [integer]: TokRule }
+  local rules = {}
+  --: { [string]: boolean }
+  local keywords = {}
+  --: { [string]: TokLexer }
+  local modes = {}
+  local lx = setmetatable({ _rules = rules, _keywords = keywords, _modes = modes }, Lexer) --[[: any]]
+  return lx --[[:! TokLexer]]
 end
 
 -- Add a token rule. transform(value, state?) may return a modified value.
@@ -99,6 +111,7 @@ end
 -- Returns kind, ttype, matched_string, transform | nil on no match.
 -- ---------------------------------------------------------------------------
 
+--: ({ [integer]: TokRule }, string, integer) -> (string | nil, string | nil, string | nil, ((string, TokState) -> string) | nil)
 local function try_rules(rules, input, pos)
   for _, rule in ipairs(rules) do
     -- Anchor to current position using %f[] or plain sub+match.
@@ -120,6 +133,7 @@ end
 -- ---------------------------------------------------------------------------
 
 function Lexer:tokenize(input)
+  local self_ = self --[[:! TokLexer]]
   local tokens = {}
   local state  = new_state()
   local pos    = 1
@@ -130,7 +144,7 @@ function Lexer:tokenize(input)
   while pos <= len do
     -- Determine which lexer to use based on current mode.
     local mode      = state:current()
-    local active    = (mode and self._modes[mode]) or self
+    local active    = (mode and self_._modes[mode]) or self_
     local rules     = active._rules
     local keywords  = active._keywords
 
@@ -146,20 +160,21 @@ function Lexer:tokenize(input)
       }
     end
 
-    local value = matched
+    local matched_ = matched --[[:! string]]
+    local value = matched_
 
     if kind == "token" then
       if transform then
-        value = transform(value, state)
+        value = transform(value --[[:! string]], state)
       end
       -- Reclassify IDENT as keyword if applicable.
       local effective_type = ttype
-      if ttype == "IDENT" and self._keywords[matched] then
+      if ttype == "IDENT" and self_._keywords[matched] then
         effective_type = matched
       end
       -- Also reclassify from sublexer's keywords.
-      if mode and self._modes[mode] then
-        local sub = self._modes[mode]
+      if mode and self_._modes[mode] then
+        local sub = self_._modes[mode]
         if ttype == "IDENT" and sub._keywords[matched] then
           effective_type = matched
         end
@@ -174,7 +189,7 @@ function Lexer:tokenize(input)
     -- For "skip" rules, no token is emitted.
 
     -- Advance position and update line/col.
-    local advance = #matched
+    local advance = #matched_
     for i = pos, pos + advance - 1 do
       if input:sub(i, i) == "\n" then
         line = line + 1

@@ -427,7 +427,8 @@ M.render_full = function(write_fn, flush_fn, getenv, widget)
   if type(flush_fn) ~= "function" then error("tui.render_full: flush_fn is required") end
   if type(getenv) ~= "function" then error("tui.render_full: getenv is required") end
   local w, h = M.size(getenv)
-  write_fn(ansi.clear() .. M.render(--[[: any]] widget, 1, 1, w, h))
+  local widget_ = widget --[[:! { render: unknown, ... }]]
+  write_fn(ansi.clear() .. M.render(widget_, 1, 1, w, h))
   flush_fn()
 end
 

@@ -19,6 +19,8 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: SMInstance = { _def: unknown, _state: string, context: unknown, ... }
+
 -- ── helpers ────────────────────────────────────────────────────────────────────
 
 -- Deep-copy a value (tables only — context may contain nested tables).
@@ -59,20 +61,22 @@ local function validate_def(def)
   end
   -- Validate all transition targets reference defined states.
   for sname, sdef in pairs(def.states) do
+    local sname_ = tostring(sname)
     if type(sdef) ~= "table" then
-      return nil, "state_machine.new: state '" .. sname .. "' must be a table"
+      return nil, "state_machine.new: state '" .. sname_ .. "' must be a table"
     end
     if sdef.on ~= nil then
       if type(sdef.on) ~= "table" then
-        return nil, "state_machine.new: state '" .. sname .. "'.on must be a table"
+        return nil, "state_machine.new: state '" .. sname_ .. "'.on must be a table"
       end
       for event, spec in pairs(sdef.on) do
+        local event_ = tostring(event)
         local t = normalise_trans(spec)
         if t == nil then
-          return nil, "state_machine.new: transition spec for '" .. sname .. "'." .. event .. " is invalid"
+          return nil, "state_machine.new: transition spec for '" .. sname_ .. "'." .. event_ .. " is invalid"
         end
         if def.states[t.target] == nil then
-          return nil, "state_machine.new: transition '" .. sname .. "' --" .. event .. "--> '" .. t.target .. "' target is not defined"
+          return nil, "state_machine.new: transition '" .. sname_ .. "' --" .. event_ .. "--> '" .. tostring(t.target) .. "' target is not defined"
         end
       end
     end
@@ -186,10 +190,8 @@ function M.new(def)
   local ok, err = validate_def(def)
   if not ok then return nil, err end
 
-  local sm = setmetatable({}, SM)
-  sm._def     = def
-  sm._state   = def.initial
-  sm.context  = deep_copy(def.context or {})
+  local sm_any = setmetatable({ _def = def, _state = def.initial, context = deep_copy(def.context or {}) }, SM) --[[: any]]
+  local sm = sm_any --[[:! SMInstance]]
 
   -- Fire on_enter for the initial state.
   local isdef = def.states[def.initial]

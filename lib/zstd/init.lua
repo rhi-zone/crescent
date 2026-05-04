@@ -28,7 +28,7 @@ local ZSTD_MAGIC = "\x28\xb5\x2f\xfd"
 
 --: (string) -> boolean
 local function is_zstd(data)
-  return type(data) == "string" and #data >= 4 and data:sub(1, 4) == ZSTD_MAGIC
+  return (type(data) == "string" and #data >= 4 and data:sub(1, 4) == ZSTD_MAGIC) and true or false
 end
 
 -- ── FFI tier ──────────────────────────────────────────────────────────────────
@@ -68,7 +68,8 @@ if ok_ffi then
     end
 
     -- 2. Scan LD_LIBRARY_PATH
-    local ldpath = (os and os.getenv and os.getenv("LD_LIBRARY_PATH")) or ""
+    local ldpath_ = (os and os.getenv and os.getenv("LD_LIBRARY_PATH")) or ""
+    local ldpath = ldpath_ --[[:! string]]
     for dir in (ldpath .. ":"):gmatch("([^:]*):") do
       if dir ~= "" then
         for _, suf in ipairs(suffixes) do
@@ -79,7 +80,8 @@ if ok_ffi then
     end
 
     -- 3. Scan NIX_LDFLAGS (-L dirs)
-    local ldflags = (os and os.getenv and os.getenv("NIX_LDFLAGS")) or ""
+    local ldflags_ = (os and os.getenv and os.getenv("NIX_LDFLAGS")) or ""
+    local ldflags = ldflags_ --[[:! string]]
     for dir in ldflags:gmatch("-L(%S+)") do
       for _, suf in ipairs(suffixes) do
         local ok, lib = pcall(ffi.load, dir .. suf)
@@ -88,7 +90,8 @@ if ok_ffi then
     end
 
     -- 4. Common profile paths
-    local home = (os and os.getenv and os.getenv("HOME")) or ""
+    local home_ = (os and os.getenv and os.getenv("HOME")) or ""
+    local home = home_ --[[:! string]]
     local profile_dirs = {
       "/run/current-system/sw/lib",
       home .. "/.nix-profile/lib",
@@ -139,12 +142,12 @@ if ok_ffi then
 
     -- ── compress ──────────────────────────────────────────────────────────────
 
-    --: (string, (table | nil)) -> ((string | nil), (string | nil))
+    --: (string, ({ level: integer | nil } | nil)) -> ((string | nil), (string | nil))
     function M.compress(input, opts)
       if type(input) ~= "string" then
         return nil, "zstd.compress: expected string"
       end
-      opts = opts or {}
+      opts = opts or {} --[[:! { level: integer | nil }]]
       local level = opts.level or 3
 
       local src_size = #input
@@ -171,14 +174,15 @@ if ok_ffi then
       -- Probe the frame content size.
       local content_size = zlib.ZSTD_getFrameContentSize(compressed, src_size)
 
-      local dst_cap
       if content_size == CONTENTSIZE_ERROR then
         return nil, "zstd.decompress: not a valid zstd frame"
-      elseif content_size == CONTENTSIZE_UNKNOWN then
+      end
+      local dst_cap = 1 --: number
+      if content_size == CONTENTSIZE_UNKNOWN then
         -- Size not stored in frame: start with 4x guess, grow as needed.
-        dst_cap = src_size * 4 + 256
+        dst_cap = (src_size * 4 + 256) --[[:! number]]
       else
-        dst_cap = tonumber(content_size)
+        dst_cap = (tonumber(content_size) or (src_size * 4 + 256)) --[[:! number]]
       end
 
       -- When size is known, one iteration suffices.
@@ -209,7 +213,7 @@ end
 if not M._tier then
   M._tier = "stub"
 
-  --: (string, (table | nil)) -> (nil, string)
+  --: (string, ({ level: integer | nil } | nil)) -> (nil, string)
   function M.compress(_, _)
     return nil, "zstd: libzstd not available"
   end
