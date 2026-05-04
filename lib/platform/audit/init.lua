@@ -79,14 +79,14 @@ function M.open(db_path, opts)
 	-- sha1_fn: prefer injected, fall back to lib.hash.sha1.
 	-- Same `any` escape as time_fn above.
 	local sha1_fn_any = --[[:! ((string) -> string) | nil]] o.sha1_fn
-	--: (string) -> string
-	local sha1_fn
+	local sha1_fn_
 	if sha1_fn_any then
-		sha1_fn = sha1_fn_any
+		sha1_fn_ = sha1_fn_any
 	else
 		local sha1_mod = require("lib.hash.sha1")
-		sha1_fn = sha1_mod.sha1
+		sha1_fn_ = sha1_mod.sha1
 	end
+	sha1_fn_ = sha1_fn_ --[[:! (string) -> string]]
 
 	-- Build the log object with methods attached directly (no metatable needed).
 	-- This pattern avoids the `self` field-access limitation in the typechecker.
@@ -94,7 +94,7 @@ function M.open(db_path, opts)
 	local log = {
 		_db      = real_db,
 		_time_fn = time_fn,
-		_sha1_fn = sha1_fn,
+		_sha1_fn = sha1_fn_,
 	}
 
 	-- append(event_type, payload) -> true | nil, err
@@ -103,18 +103,17 @@ function M.open(db_path, opts)
 			return nil, "audit.append: event_type must be a non-empty string"
 		end
 		-- Encode payload as JSON.
-		local payload_str --: string
-		if payload_tbl == nil then
-			payload_str = "{}"
-		else
+		local payload_str = "{}" --: string
+		if payload_tbl ~= nil then
 			-- `any`: json.encode accepts any table; checker doesn't narrow payload_tbl
 			-- to non-nil here even though it was checked above.
 			local ptbl_any = payload_tbl --: any
-			local enc, enc_err = json.encode(ptbl_any)
+			local json_any = json --[[: any]]
+			local enc, enc_err = json_any.encode(ptbl_any)
 			if type(enc) ~= "string" then
 				return nil, "audit.append: payload encode failed: " .. tostring(enc_err)
 			end
-			payload_str = enc
+			payload_str = enc --[[:! string]]
 		end
 
 		-- Extract app_id from payload if present.

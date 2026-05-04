@@ -5,9 +5,10 @@ local mod = {}
 --[[@param handler fun (write: fun(_: string), close: fun()): fun (_: string)]] --[[@param port integer]] --[[@param epoll? epoll]]
 mod.server = function (handler, port, epoll)
 	return socket_.server(function (client, state)
-		state = state or { handler = handler(function (s) client:send(s) end, function () client:close() end) }
-		local received = client:receive()
-		if received then  state.handler(received) else client:close() end
+		local client_ = client --[[: any]]
+		state = state or { handler = handler(function (s) client_:send(s) end, function () client_:close() end) }
+		local received = client_:receive()
+		if received then  state.handler(received) else client_:close() end
 		return state
 	end, port, epoll)
 end

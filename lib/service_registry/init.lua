@@ -176,11 +176,14 @@ function M.new(opts)
   -- ── Discovery ────────────────────────────────────────────────────────────
 
   local function tags_match(inst_tags, filter_tags)
-    if not filter_tags or #filter_tags == 0 then return true end
+    --: unknown
+    --: unknown
+    if not filter_tags or #(filter_tags --[[:! { [integer]: string }]]) == 0 then return true end
     -- build a set of instance tags
-    local tag_set = {}
-    for i = 1, #inst_tags do
-      tag_set[inst_tags[i]] = true
+    local tag_set = {} --: { [string]: boolean }
+    local inst_tags_ = inst_tags --[[:! { [integer]: string }]]
+    for i = 1, #inst_tags_ do
+      tag_set[inst_tags_[i]] = true
     end
     for i = 1, #filter_tags do
       if not tag_set[filter_tags[i]] then
@@ -197,7 +200,8 @@ function M.new(opts)
     if not instances then return {} end
     local result = {}
     for _, inst in pairs(instances) do
-      if is_visible(inst) and tags_match(inst.tags, filter.tags) then
+      local inst_ = inst --[[:! { _healthy: boolean | nil, tags: unknown, ... }]]
+      if is_visible(inst_) and tags_match(inst_.tags, filter.tags) then
         result[#result + 1] = inst
       end
     end
