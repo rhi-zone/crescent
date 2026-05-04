@@ -30,17 +30,18 @@ local M = {}
 -- Returns a statement proxy that checks revocation before each operation.
 --: (unknown, () -> boolean) -> unknown
 local function wrap_stmt(raw_stmt, is_revoked)
+	local stmt_any = raw_stmt --[[:! { exec: (...unknown) -> unknown, rows: (...unknown) -> unknown, close: () -> nil }]]
 	return {
 		exec = function(...)
 			if is_revoked() then return nil, "db: capability revoked" end
-			return raw_stmt:exec(...)
+			return stmt_any.exec(stmt_any, ...)
 		end,
 		rows = function(...)
 			if is_revoked() then return nil, "db: capability revoked" end
-			return raw_stmt:rows(...)
+			return stmt_any.rows(stmt_any, ...)
 		end,
 		close = function()
-			raw_stmt:close()
+			stmt_any.close(stmt_any)
 		end,
 	}
 end

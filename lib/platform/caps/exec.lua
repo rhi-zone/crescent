@@ -108,15 +108,7 @@ local function expand_args_table(args_tbl, schema)
 			local flong  = flag.long
 			--: string | nil
 			local fshort = flag.short
-			--: string
-			local token
-			if flong then
-				token = flong
-			elseif fshort then
-				token = fshort
-			else
-				token = "--" .. key
-			end
+			local token = (flong or fshort or ("--" .. key))
 
 			if val == true then
 				result[#result + 1] = token
@@ -295,12 +287,13 @@ function M.new(manifest_entry, opts)
 		-- Build narrowed_binaries: for each requested binary, intersect allow lists.
 		local narrowed_binaries = {}
 		for bin_name, sub_spec in pairs(sub_binaries_decl) do
+			local bin_name_ = tostring(bin_name)
 			--: any
-			local parent_spec = binaries_spec[bin_name]
+			local parent_spec = binaries_spec[bin_name_]
 			--: string[] | nil
 			local parent_allow = parent_spec.allow
-			--: string[] | nil
-			local sub_allow = sub_spec.allow
+			local sub_spec_ = sub_spec --[[:! { allow: { [integer]: string } | nil, ... }]]
+			local sub_allow = sub_spec_.allow
 
 			local final_allow
 			if sub_allow == nil then
@@ -312,13 +305,14 @@ function M.new(manifest_entry, opts)
 			else
 				-- Both specify allow lists: sub must be a subset of parent.
 				local parent_set = build_allow_set(parent_allow)
-				for i = 1, #sub_allow do
-					if not parent_set[sub_allow[i]] then
-						return nil, "attenuate: sub allow '" .. sub_allow[i] ..
-							"' not in parent allow for binary: " .. bin_name
+				local sub_allow_ = sub_allow --[[:! { [integer]: string }]]
+				for i = 1, #sub_allow_ do
+					if not parent_set[sub_allow_[i]] then
+						return nil, "attenuate: sub allow '" .. sub_allow_[i] ..
+							"' not in parent allow for binary: " .. bin_name_
 					end
 				end
-				final_allow = sub_allow
+				final_allow = sub_allow_
 			end
 
 			narrowed_binaries[bin_name] = {

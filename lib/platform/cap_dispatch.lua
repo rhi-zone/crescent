@@ -2,7 +2,7 @@ if not package.path:find("./?/init.lua", 1, true) then package.path = "./?/init.
 
 local M = {}
 
-local CAP_MODULES = {
+local CAP_MODULES = --[[:! { [string]: string }]] {
 	cli         = "lib.platform.caps.cli",
 	db          = "lib.platform.caps.db",
 	exec        = "lib.platform.caps.exec",
@@ -23,11 +23,14 @@ local CAP_MODULES = {
 }
 
 function M.risk(decl)
-	local path = CAP_MODULES[decl.type]
+	local decl_ = decl --[[:! { type: string, ... }]]
+	local path = CAP_MODULES[decl_.type]
 	if not path then return nil end
-	local mod = require(path)
-	if not mod.risk then return nil end
-	return mod.risk(decl)
+	local mod_raw = require(path)
+	local mod_ = mod_raw --[[:! { risk: unknown | nil }]]
+	if not mod_.risk then return nil end
+	local risk_fn = mod_.risk --[[:! (unknown) -> unknown]]
+	return risk_fn(decl_)
 end
 
 return M

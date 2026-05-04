@@ -110,7 +110,8 @@ function M.open(db_path, opts)
 				data_tbl[k] = v
 			end
 		end
-		local encoded, enc_err = json.encode(data_tbl)
+		local json_any = json --[[: any]]
+		local encoded, enc_err = json_any.encode(data_tbl)
 		if type(encoded) ~= "string" then
 			return nil, "session_store.put: encode failed: " .. tostring(enc_err)
 		end
@@ -151,9 +152,10 @@ function M.open(db_path, opts)
 		if ls + ttl_val < now then return nil end
 
 		-- Decode extra fields from data JSON.
-		local data = json.decode(data_str or "{}") or {}
+		local json_any2 = json --[[: any]]
+		local data = json_any2.decode(data_str or "{}") or {}
 		-- `any` escape for setting last_seen back into unknown-typed data table.
-		local rec_any = data --: any
+		local rec_any = data --[[:! { last_seen: unknown, ... }]]
 		rec_any.last_seen = ls
 		return data
 	end
@@ -177,8 +179,10 @@ function M.open(db_path, opts)
 		if not iter then return false end
 		local last_seen = iter()
 		if last_seen == nil then return false end
-		local ls = tonumber(last_seen) --: number | nil
-		if not ls or ls + ttl_val < now then return false end
+		local ls = tonumber(last_seen)
+		if not ls then return false end
+		local ls_ = ls --[[:! number]]
+		if ls_ + ttl_val < now then return false end
 
 		db:execute(
 			"UPDATE sessions SET last_seen = ? WHERE session_id = ?",

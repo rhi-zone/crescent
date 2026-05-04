@@ -38,10 +38,11 @@ end
 -- compose_focus(signal, lens1, lens2, ...) -> Signal T
 -- Focus through a chain of lenses in one call.
 function M.compose_focus(sig, ...)
-	local lenses = {...}
-	local lens = lenses[1]
+	local lenses = {...} --: { [integer]: { get: unknown, set: unknown } }
+	local lens = lenses[1] --[[:! { get: (unknown) -> unknown, set: (unknown, unknown) -> unknown }]]
 	for i = 2, #lenses do
-		lens = Lens.compose(lens, lenses[i])
+		local next_lens = lenses[i] --[[:! { get: (unknown) -> unknown, set: (unknown, unknown) -> unknown }]]
+		lens = Lens.compose(lens, next_lens)
 	end
 	return R.focused(sig, lens)
 end
