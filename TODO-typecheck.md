@@ -155,6 +155,39 @@ last because the type system itself is the testbed.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+34)
+
+- [x] `lib/service_registry/init.lua` (2 → 0, commit 728bacb) — cast inst to open record in discover loop; annotate tags_match params
+- [x] `lib/kv_store/init.lua` (3 → 0, commit 728bacb) — cast self._store to any in ns:values/clear/each
+- [x] `lib/tcp/server.lua` (3 → 0, commit 728bacb) — cast client to any for method calls
+- [x] `lib/platform/audit/init.lua` (3 → 0, commit 728bacb) — fix sha1_fn initializer; restructure payload_str; bypass json.encode via any
+- [x] `lib/platform/cap_dispatch.lua` (3 → 0, commit 7076914) — annotate CAP_MODULES; cast decl and mod
+- [x] `lib/platform/caps/db.lua` (3 → 0, commit 7076914) — cast raw_stmt to typed shape for method calls
+- [x] `lib/platform/caps/exec.lua` (3 → 0, commit 7076914) — fix token initializer; cast sub_spec/bin_name/sub_allow
+- [x] `lib/platform/session_store/init.lua` (3 → 0, commit 7076914) — any-intermediate for json calls; split ls nil-check
+- [x] `lib/reactive_optics/init.lua` (3 → 0, commit 7076914) — annotate lenses varargs; cast lens elements
+- [x] `lib/unified/rehype_accessible_emojis/init.lua` (3 → 0, commit bae0462) — fix number→integer in utf8_char_len/starts_with_at/find_emoji
+- [x] `lib/unified/rehype_infer_description/init.lua` (3 → 0, commit bae0462) — forward-declare find_first_p; cast word_end; fix truncate annotation
+- [x] `lib/unified/retext_intensify/init.lua` (3 → 0, commit bae0462) — cast nlcst to any; cast node.children
+- [x] `lib/unified/retext_simplify/init.lua` (3 → 0, commit bae0462) — cast nlcst to any; cast node.children in walk/walk_node
+- [x] `lib/web/reactive_dom/init.lua` (3 → 0, commit bae0462) — tostring(v) for el.value; cast unsub via any
+- [x] `lib/fp/optics/lens/init.lua` (4 → 0, commit 77c65ec) — LensT alias; cast lens params throughout
+- [x] `lib/fp/optics/iso/init.lua` (3 → 0, commit 77c65ec) — IsoT alias; cast iso params throughout
+- [x] `lib/fp/optics/prism/init.lua` (3 → 0, commit 77c65ec) — PrismT alias; cast prism params; open-record cast for ma_.value
+- [x] `lib/mud_cp/client.lua` (3 → 0, commit 77c65ec) — cast multiline_messages result; cast s to string in callback
+- [x] `lib/encode/base64/bench.lua` (3 → 0, commit 77c65ec) — BenchVariant type alias; cast base64 modules via any
+- [x] `lib/encode/base64/base64url.lua` (4 → 0, commit 492a6a7) — cast base64 to any; fix encode annotation
+- [x] `lib/github/init.lua` (4 → 0, commit 492a6a7) — cast json/http to any; remove make_headers return annotation
+- [x] `lib/hash/crc32/init.lua` (4 → 0, commit 492a6a7) — add bit require; cast setmetatable result for reset
+- [x] `lib/platform/apps/library/adapter.lua` (3 → 0, commit 492a6a7) — cast idx; cast row.tags/on_open
+- [x] `lib/unified/retext_contractions/init.lua` (2 → 0, commit 8ace416) — cast nlcst to any
+- [x] `lib/unified/retext_equality/init.lua` (2 → 0, commit 8ace416) — cast nlcst to any; cast node.children
+- [x] `lib/unified/retext_indefinite_article/init.lua` (3 → 0, commit 8ace416) — cast nlcst to any; cast word param; cast node.children
+- [x] `lib/unified/retext_passive/init.lua` (2 → 0, commit 8ace416) — cast nlcst to any; cast node.children
+- [x] `lib/unified/retext_repeated_words/init.lua` (2 → 0, commit 8ace416) — cast nlcst to any; cast node.children
+- [x] `lib/unified/retext_sentence_spacing/init.lua` (2 → 0, commit 8ace416) — cast nlcst to any; cast node.children
+- `lib/dns/format.lua` (60) — skipped: adding bit require triggers cascade from typed bit.lshift/rshift requiring integer args; pervasive `s:byte(i)` returns `integer | nil` cascades; too many changes needed
+
 ## Done in current session (session N+33)
 
 - [x] `lib/text_diff/init.lua` (26 → 0, commit acbc3a1) — annotate changed_idx/hunks/lines as typed arrays; cast hstart/hend; fix ctx with force-cast; annotate fuzzy_find params and prev/curr DP arrays; annotate split_words param; cast edits via any intermediate
