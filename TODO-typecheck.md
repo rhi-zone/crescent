@@ -135,6 +135,13 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+16)
+
+- [x] `lib/deque/init.lua` (was 31 → now 0, commit f48a220) — Deque type alias with all method sigs; self_ casts in all methods; inline field init in constructor; typed arr in to_array
+- [x] `lib/disjoint_set/init.lua` (was 29 → now 0, commit f48a220) — BasicDSU/NamedDSU/PersistentDSU/WeightedDSU type aliases with full method sigs; inline field init in all constructors; self_ casts throughout; M.new annotated as (integer|nil) -> BasicDSU
+- [x] `lib/duration/init.lua` (was 20 → now 0, commit f48a220) — Duration/DurationParts/DurationComponents type aliases; self_ casts in all methods; tonumber|nil guards (or 0); table.insert for typed array appends; UNIT annotated as { [string]: number }; gsub multi-return captured; parts() annotated -> DurationComponents
+- [x] `lib/datetime/init.lua` (was 18 → now 0, commit f48a220) — days_in_month return typed { [integer]: integer }; tonumber|nil guards; named param annotation → positional; frac_rest narrowed via local; gsub multi-return captured; h/mi/sc initialized as `0 --: number`
+
 ## Done in current session (session N+15)
 
 - [x] `lib/css/embed.lua` (was 3 → now 0) — replaced `table` annotation with concrete shapes for sheet/css_mod params and return type
