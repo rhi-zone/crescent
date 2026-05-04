@@ -30,6 +30,7 @@ local function mk_comp(f, args) return { kind = "comp", functor = f, args = args
 
 local NIL_ATOM = mk_atom("[]")
 
+--: (elems: { [integer]: PrologTerm }, tail: PrologTerm | nil) -> PrologTerm
 local function mk_list(elems, tail)
   local t = tail or NIL_ATOM
   for i = #elems, 1, -1 do
@@ -405,7 +406,9 @@ local function parse_goals(src)
       goals[#goals+1] = t
     end
   end
-  flatten_conj(term --[[:! PrologTerm]])
+  local term_any = term --[[: any]]
+  local term_ = term_any --[[:! PrologTerm]]
+  flatten_conj(term_)
   return goals
 end
 
@@ -668,8 +671,10 @@ end
 --: (any, string) -> (boolean | nil, string | nil)
 function DB:retract(clause_str)
   local head, body = parse_clause(clause_str)
-  if not head then return nil, body end
-  local key = pred_key(head) --[[:! string]]
+  if not head then return nil, body --[[:! string]] end
+  local head_ = head --[[:! PrologTerm]]
+  local body_ = body --[[:! { [integer]: PrologTerm }]]
+  local key = pred_key(head_) --[[:! string]]
   local clauses = self._clauses[key]
   if not clauses then return nil, "no clauses for " .. key end
   -- find first clause whose head unifies with the given head
@@ -677,20 +682,22 @@ function DB:retract(clause_str)
     local clause = clauses[i]
     local mapping = {}
     local head_copy = copy_term(clause.head, mapping)
-    local env = unify({}, head_copy, head)
+    local env = unify({}, head_copy, head_)
     if env then
       -- also check body if provided
       local body_match = true
       local clause_body = clause.body --[[:! { [integer]: PrologTerm }]]
-      if #body > 0 and #clause_body ~= #body then
+      if #body_ > 0 and #clause_body ~= #body_ then
         body_match = false
-      elseif #body > 0 then
-        local env2 = env --[[: { [string]: PrologTerm }]]
-        for j = 1, #body do
+      elseif #body_ > 0 then
+        local env_any = env --[[: any]]
+        local env2 = env_any --[[:! { [string]: PrologTerm }]]
+        for j = 1, #body_ do
           local body_copy = copy_term(clause_body[j], mapping)
-          env2 = unify(env2, body_copy, body[j])
-          if not env2 then body_match = false break end
-          env2 = env2 --[[: { [string]: PrologTerm }]]
+          local env2_next = unify(env2, body_copy, body_[j])
+          if not env2_next then body_match = false break end
+          local env2n_any = env2_next --[[: any]]
+          env2 = env2n_any --[[:! { [string]: PrologTerm }]]
         end
         if env2 then env = env2 end
       end
@@ -871,9 +878,12 @@ solve = function(db, goals, env, depth)
   if ARITH_CMP[functor] and arity == 2 then
     local a, e1 = eval_arith(env, goal.args[1])
     if not a then error(e1) end
+    local a_ = (a or 0) --[[:! number]]
     local b, e2 = eval_arith(env, goal.args[2])
     if not b then error(e2) end
-    if ARITH_CMP[functor](a, b) then
+    local b_ = (b or 0) --[[:! number]]
+    local cmp_fn = ARITH_CMP[functor] --[[:! (number, number) -> boolean]]
+    if cmp_fn(a_, b_) then
       solve(db, rest, env, depth + 1)
     end
     return
@@ -1033,7 +1043,9 @@ solve = function(db, goals, env, depth)
   end
 
   -- ---- User-defined predicates (clauses) ----
-  local key2 = functor .. "/" .. arity
+  local functor_ = functor --[[:! string]]
+  local arity_ = arity --[[:! integer]]
+  local key2 = functor_ .. "/" .. arity_
   local clauses = db._clauses[key2]
   if not clauses or #clauses == 0 then
     -- No clauses: silently fail (standard Prolog behavior for unknown predicates)
@@ -1076,10 +1088,12 @@ end
 
 -- Extract variable bindings from env for the original query variables
 -- Returns a table mapping user-visible variable names to string values.
+--: (env: { [string]: PrologTerm }, query_vars: { [string]: PrologTerm }) -> { [string]: string }
 local function extract_bindings(env, query_vars)
   local result = {}
   for name, term in pairs(query_vars) do
-    local val = deref(env, term) --[[:! PrologTerm]]
+    local term_ = term --[[:! PrologTerm]]
+    local val = deref(env, term_) --[[:! PrologTerm]]
     result[name] = term_to_string(env, val)
   end
   return result
@@ -1134,7 +1148,8 @@ function DB:query(goal_str)
     end
     if val == nil then return nil end
     -- val is the environment that was yielded
-    return extract_bindings(val, query_vars)
+    local val_ = val --[[:! { [string]: PrologTerm }]]
+    return extract_bindings(val_, query_vars)
   end
 end
 
