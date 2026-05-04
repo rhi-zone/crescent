@@ -137,22 +137,23 @@ end
 
 -- Estimate the number of distinct elements.
 function HLL:count()
-  local m    = self._m
-  local regs = self._regs
+  local m    = self._m --[[:! integer]]
+  local regs = self._regs --[[:! { [integer]: number }]]
   -- Compute harmonic mean denominator Z and count empty registers V.
-  local Z = 0
+  local Z = 0 --: number
   local V = 0
   for i = 1, m do
     local r = regs[i]
     Z = Z + 2 ^ (-r)
     if r == 0 then V = V + 1 end
   end
-  local E = self._alpha * m * m / Z
+  local E = self._alpha --[[:! number]] * m * m / Z
   -- Small-range correction: use linear counting when estimate is small and
   -- there are empty registers (Flajolet et al. §4).
   if E <= 2.5 * m and V > 0 then
     E = m * log(m / V)
   end
+  E = E --[[:! number]]
   -- Large-range correction for 32-bit hash space saturation (§4).
   local two32 = 4294967296  -- 2^32
   if E > two32 / 30 then

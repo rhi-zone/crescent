@@ -72,36 +72,38 @@ end
 
 --- Set key to value. Promotes to MRU. Evicts LRU if at capacity.
 function Cache:set(key, value)
-  local node = self._map[key]
+  local self_ = self --[[:! { _len: integer, _cap: integer, _map: { [any]: any }, _tail: any, _on_evict: ((any, any) -> nil) | nil, _head: any }]]
+  local node = self_._map[key]
   if node then
     node[2] = value
     _unlink(node)
-    _insert_front(self, node)
+    _insert_front(self_, node)
     return
   end
   -- Evict LRU if full.
-  if self._len == self._cap then
-    local lru = self._tail[3]  -- node just before tail sentinel
+  if self_._len == self_._cap then
+    local lru = self_._tail[3]  -- node just before tail sentinel
     _unlink(lru)
-    self._map[lru[1]] = nil
-    self._len = self._len - 1
-    if self._on_evict then
-      self._on_evict(lru[1], lru[2])
+    self_._map[lru[1]] = nil
+    self_._len = self_._len - 1
+    if self_._on_evict then
+      self_._on_evict(lru[1], lru[2])
     end
   end
   local new_node = { key, value, nil, nil }
-  self._map[key] = new_node
-  _insert_front(self, new_node)
-  self._len = self._len + 1
+  self_._map[key] = new_node
+  _insert_front(self_, new_node)
+  self_._len = self_._len + 1
 end
 
 --- Delete a key. Returns true if it existed, false otherwise.
 function Cache:delete(key)
-  local node = self._map[key]
+  local self_ = self --[[:! { _len: integer, _map: { [any]: any } }]]
+  local node = self_._map[key]
   if not node then return false end
   _unlink(node)
-  self._map[key] = nil
-  self._len = self._len - 1
+  self_._map[key] = nil
+  self_._len = self_._len - 1
   return true
 end
 

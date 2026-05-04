@@ -17,7 +17,7 @@ end
 --
 -- Stores: root.data.keywords = { {word="lua", count=5}, ... }
 
-local nlcst = require("lib.unified.nlcst")
+local nlcst = require("lib.unified.nlcst") --[[: any]]
 
 local M = {}
 
@@ -51,7 +51,8 @@ local function collect_words(root)
       return
     end
     if node.children then
-      for i = 1, #node.children do walk(node.children[i]) end
+      local nc = node.children --[[:! { [integer]: any }]]
+      for i = 1, #nc do walk(nc[i]) end
     end
   end
   walk(root)
@@ -59,7 +60,7 @@ local function collect_words(root)
 end
 
 local function transformer(root, opts)
-  local maximum = (opts and opts.maximum) or 10
+  local maximum = ((opts and opts.maximum) or 10) --[[:! integer]]
 
   local words = collect_words(root)
 
@@ -68,7 +69,7 @@ local function transformer(root, opts)
   for i = 1, #words do
     local w = words[i]
     if not STOPWORDS[w] and #w > 1 then
-      freq[w] = (freq[w] or 0) + 1
+      freq[w] = ((freq[w] or 0) --[[:! integer]]) + 1
     end
   end
 

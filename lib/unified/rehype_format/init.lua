@@ -42,16 +42,16 @@ end
 
 --: (any) -> boolean
 local function is_whitespace_text(node)
-  return node.type == "text" and (node.value or ""):match("^%s*$") ~= nil
+  return (node.type == "text" and (node.value or ""):match("^%s*$") ~= nil) and true or false
 end
 
 -- ── Formatter ─────────────────────────────────────────────────────────────────
 
 local format_node  -- forward declaration
 
---: (any, number, string, boolean) -> nil
+--: (any, integer, string, boolean) -> nil
 local function format_children(node, depth, indent, in_pre)
-  local children = node.children
+  local children = node.children --[[:! { [integer]: any }]]
   if not children or #children == 0 then return end
 
   local pad = string.rep(indent, depth)
@@ -77,6 +77,7 @@ local function format_children(node, depth, indent, in_pre)
 end
 
 --: (any, number, string, boolean) -> nil
+-- (any, integer, string, boolean) -> nil
 format_node = function(node, depth, indent, in_pre)
   if node.type ~= "element" then return end
 
@@ -86,11 +87,13 @@ format_node = function(node, depth, indent, in_pre)
   -- Never reformat inside <pre>.
   if in_pre then return end
 
-  if BLOCK[tag] and node.children and #node.children > 0 then
+  if BLOCK[tag] and node.children then
+    local nc = node.children --[[:! { [integer]: any }]]
+    if #nc <= 0 then return end
     -- Only reformat if there's at least one non-whitespace child or a block child;
     -- skip elements whose only children are already-whitespace text nodes.
     local has_real = false
-    for _, ch in ipairs(node.children) do
+    for _, ch in ipairs(nc) do
       if not is_whitespace_text(ch) then
         has_real = true
         break
