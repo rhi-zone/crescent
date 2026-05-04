@@ -17,7 +17,7 @@ end
 
 local ok, impl = pcall(require, "lib.compress.system")
 if not ok then
-  impl = require("lib.compress.pure")
+  impl = require("lib.compress.pure") --[[: any]]
 end
 
-return impl
+return impl --[[: any]]

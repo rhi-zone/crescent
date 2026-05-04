@@ -47,6 +47,7 @@ if ok_ffi then
 
   -- Try to load a library by scanning multiple candidate paths/names.
   -- Returns: library handle or nil
+  --: (names: { [integer]: string }, suffixes: { [integer]: string }) -> (any | nil)
   local function try_load(names, suffixes)
     -- 1. Standard names (works when the lib is on LD_LIBRARY_PATH)
     for _, name in ipairs(names) do
@@ -55,7 +56,7 @@ if ok_ffi then
     end
 
     -- 2. Scan LD_LIBRARY_PATH
-    local ldpath = (os and os.getenv and os.getenv("LD_LIBRARY_PATH")) or ""
+    local ldpath = ((os and os.getenv and os.getenv("LD_LIBRARY_PATH")) or "") --[[:! string]]
     for dir in (ldpath .. ":"):gmatch("([^:]*):") do
       if dir ~= "" then
         for _, suf in ipairs(suffixes) do
@@ -66,7 +67,7 @@ if ok_ffi then
     end
 
     -- 3. Scan NIX_LDFLAGS (-L dirs)
-    local ldflags = (os and os.getenv and os.getenv("NIX_LDFLAGS")) or ""
+    local ldflags = ((os and os.getenv and os.getenv("NIX_LDFLAGS")) or "") --[[:! string]]
     for dir in ldflags:gmatch("-L(%S+)") do
       for _, suf in ipairs(suffixes) do
         local ok, lib = pcall(ffi.load, dir .. suf)
@@ -75,7 +76,7 @@ if ok_ffi then
     end
 
     -- 4. Common profile paths
-    local home = (os and os.getenv and os.getenv("HOME")) or ""
+    local home = ((os and os.getenv and os.getenv("HOME")) or "") --[[:! string]]
     local profile_dirs = {
       "/run/current-system/sw/lib",
       home .. "/.nix-profile/lib",
@@ -153,7 +154,7 @@ if ok_ffi then
 
     -- ── compress ──────────────────────────────────────────────────────────────
 
-    --: (string, (table | nil)) -> ((string | nil), (string | nil))
+    --: (string, ({ [string]: unknown } | nil)) -> ((string | nil), (string | nil))
     function M.compress(input, opts)
       if not enc_lib then
         return nil, "brotli: libbrotlienc not available"
@@ -195,7 +196,7 @@ if not M._tier then
     return nil, "brotli: libbrotlidec not available"
   end
 
-  --: (string, (table | nil)) -> (nil, string)
+  --: (string, ({ [string]: unknown } | nil)) -> (nil, string)
   function M.compress(_, _)
     return nil, "brotli: libbrotlienc not available"
   end

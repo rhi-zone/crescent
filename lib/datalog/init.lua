@@ -7,7 +7,7 @@ local M = {}
 local concat = table.concat
 
 --- Hash a tuple into a string key for dedup.
---: (tuple: {string}) -> string
+--: (tuple: { [integer]: string }) -> string
 local function tuple_key(tuple)
   return concat(tuple, "\0")
 end
@@ -16,21 +16,21 @@ end
 --: (s: string) -> boolean
 local function is_var(s)
   local b = s:byte(1)
-  return b >= 65 and b <= 90 -- A-Z
+  return (b ~= nil and b >= 65 and b <= 90) and true or false -- A-Z
 end
 
---: Database
-local DB = {}
+local DB = {} --[[: any]]
 DB.__index = DB
 
 --: () -> Database
 function M.new()
-  local self = setmetatable({}, DB)
-  self._facts = {}      -- predicate -> { [tuple_key] = tuple }
-  self._rules = {}      -- predicate -> { {head_vars, body, guard} }
-  self._dirty = true    -- whether derived facts need recomputation
-  self._derived = {}    -- predicate -> { [tuple_key] = tuple } (derived facts)
-  return self
+  local self = setmetatable({
+    _facts = {},    -- predicate -> { [tuple_key] = tuple }
+    _rules = {},    -- predicate -> { {head_vars, body, guard} }
+    _dirty = true,  -- whether derived facts need recomputation
+    _derived = {},  -- predicate -> { [tuple_key] = tuple } (derived facts)
+  }, DB) --[[: any]]
+  return self --[[:! Database]]
 end
 
 --- Assert a single fact.
@@ -50,11 +50,12 @@ function DB:assert(predicate, ...)
 end
 
 --- Assert multiple facts at once.
---: (self: Database, fact_list: {{string}}) -> ()
+--: (self: Database, fact_list: { [integer]: { [integer]: string } }) -> ()
 function DB:assert_all(fact_list)
+  local self_ = self --[[: any]]
   for i = 1, #fact_list do
     local f = fact_list[i]
-    self:assert(f[1], unpack(f, 2))
+    self_:assert(f[1], unpack(f, 2))
   end
 end
 
