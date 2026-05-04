@@ -36,11 +36,14 @@ end
 -- The pattern is anchored at pos
 function M.char_class(pattern)
   return function(input, pos)
-    local s, e = input:find("^" .. pattern, pos)
+    local input_ = input --[[:! string]]
+    local local_pos = pos --[[:! integer]]
+    local s, e = input_:find("^" .. pattern, local_pos)
     if s then
-      return input:sub(s, e), e + 1
+      local e_ = e --[[:! integer]]
+      return input_:sub(s, e_), e_ + 1
     end
-    return nil, "expected " .. pattern .. " at position " .. pos
+    return nil, "expected " .. pattern .. " at position " .. local_pos
   end
 end
 
@@ -63,20 +66,26 @@ end
 
 -- Match a letter [a-zA-Z]
 M.letter = function(input, pos)
-  local s, e = input:find("^[a-zA-Z]", pos)
+  local input_ = input --[[:! string]]
+  local pos_ = pos --[[:! integer]]
+  local s, e = input_:find("^[a-zA-Z]", pos_)
   if s then
-    return input:sub(s, e), e + 1
+    local e_ = e --[[:! integer]]
+    return input_:sub(s, e_), e_ + 1
   end
-  return nil, "expected letter at position " .. pos
+  return nil, "expected letter at position " .. pos_
 end
 
 -- Match whitespace (one character)
 M.whitespace = function(input, pos)
-  local s, e = input:find("^%s", pos)
+  local input_ = input --[[:! string]]
+  local pos_ = pos --[[:! integer]]
+  local s, e = input_:find("^%s", pos_)
   if s then
-    return input:sub(s, e), e + 1
+    local e_ = e --[[:! integer]]
+    return input_:sub(s, e_), e_ + 1
   end
-  return nil, "expected whitespace at position " .. pos
+  return nil, "expected whitespace at position " .. pos_
 end
 
 -- Match end of input
@@ -105,7 +114,7 @@ end
 
 -- Sequence: all must match, returns array of results
 function M.seq(...)
-  local parsers = {...}
+  local parsers = {...} --: { [integer]: (unknown, unknown) -> unknown }
   local n = #parsers
   return function(input, pos)
     local results = {}
@@ -124,7 +133,7 @@ end
 
 -- Ordered choice: first to succeed wins
 function M.choice(...)
-  local parsers = {...}
+  local parsers = {...} --: { [integer]: (unknown, unknown) -> unknown }
   local n = #parsers
   return function(input, pos)
     local last_err
@@ -293,7 +302,8 @@ function M.lazy(fn)
     if p == nil then
       p = fn()
     end
-    return p(input, pos)
+    local p_fn = p --[[:! (unknown, unknown) -> unknown]]
+    return p_fn(input, pos)
   end
 end
 

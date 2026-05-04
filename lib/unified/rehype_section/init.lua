@@ -30,10 +30,11 @@ local M = {}
 
 local HEADING_DEPTH = { h1=1, h2=2, h3=3, h4=4, h5=5, h6=6 }
 
---: (any) -> any
+--: (any) -> integer | nil
 local function heading_depth(node)
   if node.type == "element" then
-    return HEADING_DEPTH[node.tag]
+    local val = HEADING_DEPTH[node.tag]
+  return val --[[:! integer | nil]]
   end
   return nil
 end
@@ -61,10 +62,11 @@ local function sectionize(nodes)
   local pre = {}      -- nodes before any heading
   local stack = {}    -- open section entries
 
-  --: (any) -> nil
+  --: () -> any
   local function top_children()
     if #stack > 0 then
-      return stack[#stack].children
+      local top = stack[#stack] --[[:! { children: any, depth: integer }]]
+      return top.children
     end
     return pre
   end
@@ -73,11 +75,19 @@ local function sectionize(nodes)
     local d = heading_depth(node)
     if d then
       -- Close sections that are at depth >= d.
-      while #stack > 0 and stack[#stack].depth >= d do
-        local closed = table.remove(stack)
-        local sec = make_section(closed.children)
+      while #stack > 0 do
+        local stk_top = stack[#stack] --[[:! { depth: integer, children: { [integer]: any } }]]
+        if stk_top.depth < d then break end
+        local closed_ = table.remove(stack) --[[:! { children: { [integer]: any } }]]
+        local sec = make_section(closed_.children)
         -- Append the closed section to the new top.
-        local parent = #stack > 0 and stack[#stack].children or pre
+        local parent
+        if #stack > 0 then
+          local stk2 = stack[#stack] --[[:! { children: { [integer]: any } }]]
+          parent = stk2.children
+        else
+          parent = pre
+        end
         parent[#parent + 1] = sec
       end
       -- Open a new section at depth d with this heading.
