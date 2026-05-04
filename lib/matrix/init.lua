@@ -73,7 +73,8 @@ end
 --- Create a zero matrix.
 --: (r: number, c: number) -> matrix
 function M.zeros(r, c)
-  return M.new(r, c)
+  local m, _ = M.new(r, c)
+  return m --[[:! matrix]]
 end
 
 --- Create a matrix of ones.
@@ -121,7 +122,7 @@ function M.solve(A, b)
     return nil, "matrix must be square"
   end
   -- Build augmented matrix as array of rows for pivoting
-  local aug = {}
+  local aug = {} --: { [integer]: { [integer]: number } }
   local ad = A._data
   local bd = b._data
   if not bd or #bd ~= n or b._cols ~= 1 then
@@ -168,7 +169,7 @@ function M.solve(A, b)
     end
   end
   -- Back substitution
-  local x = {}
+  local x = {} --: { [integer]: number }
   for i = n, 1, -1 do
     local row = aug[i]
     local s = row[n + 1]
@@ -177,7 +178,7 @@ function M.solve(A, b)
     end
     x[i] = s / row[i]
   end
-  return setmetatable({ _rows = n, _cols = 1, _data = x }, Mt)
+  return setmetatable({ _rows = n, _cols = 1, _data = x }, Mt) --[[: any]] --[[:! matrix]]
 end
 
 -- Instance methods
@@ -224,48 +225,54 @@ function M:col(j)
 end
 
 --- Element-wise addition.
---: (other: matrix) -> (matrix | nil, string | nil)
+--: (self: matrix, other: matrix) -> (matrix | nil, string | nil)
 function M:add(other)
-  local r, c = self._rows, self._cols
-  if r ~= other._rows or c ~= other._cols then
-    return nil, "dimension mismatch: " .. r .. "x" .. c .. " vs " .. other._rows .. "x" .. other._cols
+  local self_ = self --[[:! matrix]]
+  local other_ = other --[[:! matrix]]
+  local r, c = self_._rows, self_._cols
+  if r ~= other_._rows or c ~= other_._cols then
+    return nil, "dimension mismatch: " .. r .. "x" .. c .. " vs " .. other_._rows .. "x" .. other_._cols
   end
   local n = r * c
-  local a, b = self._data, other._data
+  local a, b = self_._data, other_._data
   local d = {}
   for i = 1, n do d[i] = a[i] + b[i] end
-  return setmetatable({ _rows = r, _cols = c, _data = d }, Mt)
+  return setmetatable({ _rows = r, _cols = c, _data = d }, Mt) --[[: any]] --[[:! matrix]]
 end
 
 --- Element-wise subtraction.
---: (other: matrix) -> (matrix | nil, string | nil)
+--: (self: matrix, other: matrix) -> (matrix | nil, string | nil)
 function M:sub(other)
-  local r, c = self._rows, self._cols
-  if r ~= other._rows or c ~= other._cols then
-    return nil, "dimension mismatch: " .. r .. "x" .. c .. " vs " .. other._rows .. "x" .. other._cols
+  local self_ = self --[[:! matrix]]
+  local other_ = other --[[:! matrix]]
+  local r, c = self_._rows, self_._cols
+  if r ~= other_._rows or c ~= other_._cols then
+    return nil, "dimension mismatch: " .. r .. "x" .. c .. " vs " .. other_._rows .. "x" .. other_._cols
   end
   local n = r * c
-  local a, b = self._data, other._data
+  local a, b = self_._data, other_._data
   local d = {}
   for i = 1, n do d[i] = a[i] - b[i] end
-  return setmetatable({ _rows = r, _cols = c, _data = d }, Mt)
+  return setmetatable({ _rows = r, _cols = c, _data = d }, Mt) --[[: any]] --[[:! matrix]]
 end
 
 --- Matrix multiplication.
---: (other: matrix) -> (matrix | nil, string | nil)
+--: (self: matrix, other: matrix) -> (matrix | nil, string | nil)
 function M:mul(other)
-  local ar, ac = self._rows, self._cols
-  local br, bc = other._rows, other._cols
+  local self_ = self --[[:! matrix]]
+  local other_ = other --[[:! matrix]]
+  local ar, ac = self_._rows, self_._cols
+  local br, bc = other_._rows, other_._cols
   if ac ~= br then
     return nil, "inner dimensions mismatch: " .. ac .. " vs " .. br
   end
-  local a, b = self._data, other._data
+  local a, b = self_._data, other_._data
   local d = {}
   local k = 0
   for i = 1, ar do
     local a_base = (i - 1) * ac
     for j = 1, bc do
-      local s = 0
+      local s = 0 --: number
       for p = 1, ac do
         s = s + a[a_base + p] * b[(p - 1) * bc + j]
       end
@@ -273,7 +280,7 @@ function M:mul(other)
       d[k] = s
     end
   end
-  return setmetatable({ _rows = ar, _cols = bc, _data = d }, Mt)
+  return setmetatable({ _rows = ar, _cols = bc, _data = d }, Mt) --[[: any]] --[[:! matrix]]
 end
 
 --- Scalar multiplication.
@@ -295,8 +302,9 @@ end
 --- Transpose.
 --: () -> matrix
 function M:transpose()
-  local r, c = self._rows, self._cols
-  local a = self._data
+  local self_ = self --[[:! matrix]]
+  local r, c = self_._rows, self_._cols
+  local a = self_._data
   local d = {}
   for i = 1, r do
     local base = (i - 1) * c
@@ -304,19 +312,21 @@ function M:transpose()
       d[(j - 1) * r + i] = a[base + j]
     end
   end
-  return setmetatable({ _rows = c, _cols = r, _data = d }, Mt)
+  return setmetatable({ _rows = c, _cols = r, _data = d }, Mt) --[[: any]] --[[:! matrix]]
 end
 
 --- Trace (sum of diagonal elements).
---: () -> number | (nil, string)
+--: (self: matrix) -> (number | nil, string | nil)
 function M:trace()
-  if self._rows ~= self._cols then
-    return nil, "trace requires square matrix"
+  local self_ = self --[[:! matrix]]
+  if self_._rows ~= self_._cols then
+    local nil_ = nil --[[: number | nil]]
+    return nil_, "trace requires square matrix"
   end
-  local n = self._rows
-  local c = self._cols
-  local d = self._data
-  local s = 0
+  local n = self_._rows
+  local c = self_._cols
+  local d = self_._data
+  local s = 0 --: number
   for i = 1, n do
     s = s + d[(i - 1) * c + i]
   end
@@ -324,27 +334,29 @@ function M:trace()
 end
 
 --- Determinant via LU decomposition with partial pivoting.
---: () -> number | (nil, string)
+--: (self: matrix) -> (number | nil, string | nil)
 function M:det()
-  if self._rows ~= self._cols then
-    return nil, "determinant requires square matrix"
+  local self_ = self --[[:! matrix]]
+  if self_._rows ~= self_._cols then
+    local nil_ = nil --[[: number | nil]]
+    return nil_, "determinant requires square matrix"
   end
-  local n = self._rows
-  if n == 1 then return self._data[1] end
+  local n = self_._rows
+  if n == 1 then return self_._data[1] end
   if n == 2 then
-    local d = self._data
+    local d = self_._data
     return d[1] * d[4] - d[2] * d[3]
   end
   -- Copy to working matrix (array of rows)
-  local d = self._data
-  local rows = {}
+  local d = self_._data
+  local rows = {} --: { [integer]: { [integer]: number } }
   for i = 1, n do
-    local row = {}
+    local row = {} --: { [integer]: number }
     local base = (i - 1) * n
     for j = 1, n do row[j] = d[base + j] end
     rows[i] = row
   end
-  local sign = 1
+  local sign = 1 --: number
   for k = 1, n do
     -- Partial pivoting
     local max_val = abs(rows[k][k])
@@ -381,15 +393,16 @@ end
 -- Returns (nil, errmsg) if singular.
 --: () -> (matrix | nil, string | nil)
 function M:inverse()
-  if self._rows ~= self._cols then
+  local self_ = self --[[:! matrix]]
+  if self_._rows ~= self_._cols then
     return nil, "inverse requires square matrix"
   end
-  local n = self._rows
-  local d = self._data
+  local n = self_._rows
+  local d = self_._data
   -- Build [A | I] augmented matrix
-  local aug = {}
+  local aug = {} --: { [integer]: { [integer]: number } }
   for i = 1, n do
-    local row = {}
+    local row = {} --: { [integer]: number }
     local base = (i - 1) * n
     for j = 1, n do row[j] = d[base + j] end
     for j = 1, n do row[n + j] = (i == j) and 1 or 0 end
@@ -500,8 +513,9 @@ end
 --- Return array of row arrays.
 --: () -> { [number]: { [number]: number } }
 function M:to_rows()
-  local r, c = self._rows, self._cols
-  local a = self._data
+  local self_ = self --[[:! matrix]]
+  local r, c = self_._rows, self_._cols
+  local a = self_._data
   local out = {}
   for i = 1, r do
     local row = {}
@@ -515,30 +529,34 @@ end
 --- Frobenius norm.
 --: () -> number
 function M:norm()
-  local n = self._rows * self._cols
-  local a = self._data
-  local s = 0
+  local self_ = self --[[:! matrix]]
+  local n = self_._rows * self_._cols
+  local a = self_._data
+  local s = 0 --: number
   for i = 1, n do s = s + a[i] * a[i] end
   return sqrt(s)
 end
 
 --- Frobenius inner product (element-wise multiply then sum).
---: (other: matrix) -> number | (nil, string)
+--: (self: matrix, other: matrix) -> (number | nil, string | nil)
 function M:dot(other)
-  if self._rows ~= other._rows or self._cols ~= other._cols then
+  local self_ = self --[[:! matrix]]
+  local other_ = other --[[:! matrix]]
+  if self_._rows ~= other_._rows or self_._cols ~= other_._cols then
     return nil, "dimension mismatch"
   end
-  local n = self._rows * self._cols
-  local a, b = self._data, other._data
-  local s = 0
+  local n = self_._rows * self_._cols
+  local a, b = self_._data, other_._data
+  local s = 0 --: number
   for i = 1, n do s = s + a[i] * b[i] end
   return s
 end
 
 --- String representation.
 Mt.__tostring = function(self)
-  local r, c = self._rows, self._cols
-  local d = self._data
+  local self_ = self --[[:! matrix]]
+  local r, c = self_._rows, self_._cols
+  local d = self_._data
   local lines = {}
   for i = 1, r do
     local vals = {}
@@ -565,15 +583,17 @@ end
 -- The existing size() returns two values; shape() returns a table.
 --: () -> { [number]: number }
 function M:shape()
-  return { self._rows, self._cols }
+  local self_ = self --[[:! matrix]]
+  return { self_._rows, self_._cols }
 end
 
 --- Diagonal elements as a flat Lua array.
 --: () -> { [number]: number }
 function M:diagonal()
-  local n = self._rows < self._cols and self._rows or self._cols
-  local c = self._cols
-  local d = self._data
+  local self_ = self --[[:! matrix]]
+  local n = self_._rows < self_._cols and self_._rows or self_._cols
+  local c = self_._cols
+  local d = self_._data
   local out = {}
   for i = 1, n do out[i] = d[(i - 1) * c + i] end
   return out
@@ -582,9 +602,10 @@ end
 --- Sum of all elements.
 --: () -> number
 function M:sum()
-  local n = self._rows * self._cols
-  local a = self._data
-  local s = 0
+  local self_ = self --[[:! matrix]]
+  local n = self_._rows * self_._cols
+  local a = self_._data
+  local s = 0 --: number
   for i = 1, n do s = s + a[i] end
   return s
 end
@@ -592,8 +613,9 @@ end
 --- Minimum element.
 --: () -> number
 function M:min()
-  local a = self._data
-  local n = self._rows * self._cols
+  local self_ = self --[[:! matrix]]
+  local a = self_._data
+  local n = self_._rows * self_._cols
   local m = a[1]
   for i = 2, n do if a[i] < m then m = a[i] end end
   return m
@@ -602,8 +624,9 @@ end
 --- Maximum element.
 --: () -> number
 function M:max()
-  local a = self._data
-  local n = self._rows * self._cols
+  local self_ = self --[[:! matrix]]
+  local a = self_._data
+  local n = self_._rows * self_._cols
   local m = a[1]
   for i = 2, n do if a[i] > m then m = a[i] end end
   return m
@@ -633,17 +656,18 @@ end
 -- Returns L (lower triangular, unit diagonal) and U (upper triangular).
 -- Pivoting is absorbed into U; the decomposition satisfies P*A = L*U for some
 -- permutation P, and L*U approximates A up to row swaps.
---: () -> (matrix, (matrix | nil, string | nil))
+--: (self: matrix) -> (matrix | nil, string | nil)
 function M:lu()
-  if self._rows ~= self._cols then
+  local self_ = self --[[:! matrix]]
+  if self_._rows ~= self_._cols then
     return nil, "LU decomposition requires square matrix"
   end
-  local n = self._rows
+  local n = self_._rows
   -- Copy into mutable 2D array
-  local a = {}
-  local d = self._data
+  local a = {} --: { [integer]: { [integer]: number } }
+  local d = self_._data
   for i = 1, n do
-    a[i] = {}
+    a[i] = {} --[[:! { [integer]: number }]]
     local base = (i - 1) * n
     for j = 1, n do a[i][j] = d[base + j] end
   end
@@ -690,13 +714,14 @@ end
 --- Submatrix from (r1,c1) to (r2,c2) inclusive (1-indexed).
 --: (self: matrix, r1: number, c1: number, r2: number, c2: number) -> (matrix | nil, string | nil)
 function M:slice(r1, c1, r2, c2)
-  local r, c = self._rows, self._cols
+  local self_ = self --[[:! matrix]]
+  local r, c = self_._rows, self_._cols
   if r1 < 1 or c1 < 1 or r2 > r or c2 > c or r1 > r2 or c1 > c2 then
     return nil, "slice indices out of range"
   end
   local nr = r2 - r1 + 1
   local nc = c2 - c1 + 1
-  local d = self._data
+  local d = self_._data
   local out = {}
   local k = 0
   for i = r1, r2 do
@@ -710,16 +735,24 @@ function M:slice(r1, c1, r2, c2)
 end
 
 --- Approximate element-wise equality with tolerance.
---: (other: matrix, tol: (number | nil)) -> boolean
+--: (self: matrix, other: matrix, tol: (number | nil)) -> boolean
 function M:approx_eq(other, tol)
-  return self:eq(other, tol or 1e-9)
+  local eps = tol or 1e-9
+  local other_ = other --[[:! matrix]]
+  local self_ = self --[[:! matrix]]
+  if self_._rows ~= other_._rows or self_._cols ~= other_._cols then return false end
+  local n = self_._rows * self_._cols
+  local a, b = self_._data, other_._data
+  for i = 1, n do if math.abs(a[i] - b[i]) > eps then return false end end
+  return true
 end
 
 --- Formatted string like "[[1 2 3]\n [4 5 6]]".
 --: () -> string
 function M:to_string()
-  local r, c = self._rows, self._cols
-  local d = self._data
+  local self_ = self --[[:! matrix]]
+  local r, c = self_._rows, self_._cols
+  local d = self_._data
   local function fmt(v)
     if v == floor(v) and abs(v) < 1e15 then
       return tostring(floor(v))
@@ -756,9 +789,9 @@ end
 
 --- __mul: matrix*matrix → matrix multiply; matrix*number or number*matrix → scalar.
 Mt.__mul = function(a, b)
-  if type(b) == "number" then return a:scale(b) end
-  if type(a) == "number" then return b:scale(a) end
-  return a:mul(b)
+  if type(b) == "number" then return M.scale(a --[[:! matrix]], b) end
+  if type(a) == "number" then return M.scale(b --[[:! matrix]], a) end
+  return M.mul(a --[[:! matrix]], b)
 end
 
 Mt.__unm = function(a)

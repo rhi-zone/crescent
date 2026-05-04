@@ -292,21 +292,23 @@ end
 -- ---------------------------------------------------------------------------
 
 -- BLAKE2s initialization vectors (32-bit, same primes)
-local S_IV = {
-  0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A,
-  0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19,
+local S_IV = --[[:! { [integer]: integer } ]] {
+  math.floor(0x6A09E667), math.floor(0xBB67AE85), math.floor(0x3C6EF372), math.floor(0xA54FF53A),
+  math.floor(0x510E527F), math.floor(0x9B05688C), math.floor(0x1F83D9AB), math.floor(0x5BE0CD19),
 }
 
 -- Rotate uint32 right by n bits (bit.* treats values as signed 32-bit).
---: (number, number) -> number
+--: (integer, integer) -> integer
 local function rotr32(v, n)
-  return bit.bor(bit.rshift(v, n), bit.lshift(v, 32 - n))
+  return bit.bor(bit.rshift(v, n), bit.lshift(v, (32 - n) --[[:! integer]]))
 end
 
 -- Read 4 bytes from string s at byte offset (0-based), little-endian → uint32.
---: (string, number) -> number
+--: (string, integer) -> integer
 local function read_u32_le(s, off)
-  local b0, b1, b2, b3 = string.byte(s, off + 1, off + 4)
+  local off1 = (off + 1) --[[:! integer]]
+  local off4 = (off + 4) --[[:! integer]]
+  local b0, b1, b2, b3 = string.byte(s, off1, off4)
   b0 = b0 or 0; b1 = b1 or 0; b2 = b2 or 0; b3 = b3 or 0
   return bit.bor(b0, bit.lshift(b1, 8), bit.lshift(b2, 16), bit.lshift(b3, 24))
 end
@@ -315,10 +317,11 @@ end
 -- block: 64-byte string (already zero-padded)
 -- t_lo, t_hi: counter (low and high 32-bit words)
 -- last: boolean
+--: ({ [integer]: integer }, string, integer, integer, boolean) -> nil
 local function s_compress(h, block, t_lo, t_hi, last)
   local m = {} --: { [integer]: integer }
   for i = 0, 15 do
-    m[i] = read_u32_le(block, i * 4)
+    m[i] = read_u32_le(block, (i * 4) --[[:! integer]])
   end
 
   local v = --[[: { [integer]: integer } ]] {
@@ -420,7 +423,7 @@ local function blake2s_raw(input, hash_len, key)
 
   local key_len = #key
 
-  local h = {}
+  local h = {} --: { [integer]: integer }
   for i = 1, 8 do h[i] = S_IV[i] end
 
   -- Parameter block: h[1] ^= 0x01010000 ^ (key_len << 8) ^ hash_len
@@ -497,8 +500,8 @@ end
 
 --: (string, { hash_len: integer | nil, key: string | nil } | nil) -> (string | nil, string | nil)
 function M.b_binary(input, opts)
-  opts = opts or {}
-  return blake2b_raw(input, opts.hash_len or 64, opts.key or "")
+  local opts_ = (opts or {}) --[[:! { hash_len: integer | nil, key: string | nil }]]
+  return blake2b_raw(input, opts_.hash_len or 64, opts_.key or "")
 end
 
 --: (string, { hash_len: integer | nil, key: string | nil } | nil) -> (string | nil, string | nil)
@@ -510,8 +513,8 @@ end
 
 --: (string, { hash_len: integer | nil, key: string | nil } | nil) -> (string | nil, string | nil)
 function M.s_binary(input, opts)
-  opts = opts or {}
-  return blake2s_raw(input, opts.hash_len or 32, opts.key or "")
+  local opts_ = (opts or {}) --[[:! { hash_len: integer | nil, key: string | nil }]]
+  return blake2s_raw(input, opts_.hash_len or 32, opts_.key or "")
 end
 
 --: (string, { hash_len: integer | nil, key: string | nil } | nil) -> (string | nil, string | nil)
