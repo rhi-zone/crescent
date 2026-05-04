@@ -216,6 +216,7 @@ end
 
 -- MOV r64, imm64 (REX.W + B8+rd)
 -- Uses 64-bit immediate for full range.
+--: ({ [integer]: integer }, string, integer) -> nil
 local function enc_mov_ri64(buf, dst_reg, imm)
   local d = gpr_num(dst_reg)
   rex(buf, 1, 0, 0, d >= 8 and 1 or 0)
@@ -519,8 +520,8 @@ M.compile = function(desc, alloc, abi, ctype)
 
     if op == "load" then
       -- load(dst, ptr_vreg, offset_imm?)
-      local dst_vreg = insn.dst
-      local ptr_vreg = insn.operands[1]
+      local dst_vreg = insn.dst --[[:! VReg]]
+      local ptr_vreg = insn.operands[1] --[[:! VReg]]
       local off_imm  = insn.operands[2]
       local offset   = (off_imm and off_imm.imm) or 0
       local dst_phys = phys_for_vreg(dst_vreg, assignment)
@@ -537,8 +538,8 @@ M.compile = function(desc, alloc, abi, ctype)
 
     elseif op == "store" then
       -- store(ptr_vreg, src_vreg, offset_imm?)
-      local ptr_vreg = insn.operands[1]
-      local src_vreg = insn.operands[2]
+      local ptr_vreg = insn.operands[1] --[[:! VReg]]
+      local src_vreg = insn.operands[2] --[[:! VReg]]
       local off_imm  = insn.operands[3]
       local offset   = (off_imm and off_imm.imm) or 0
       local src_phys = phys_for_vreg(src_vreg, assignment)
@@ -553,9 +554,9 @@ M.compile = function(desc, alloc, abi, ctype)
       end
 
     elseif op == "mul" then
-      local dst_vreg  = insn.dst
-      local src1_vreg = insn.operands[1]
-      local src2_vreg = insn.operands[2]
+      local dst_vreg  = insn.dst --[[:! VReg]]
+      local src1_vreg = insn.operands[1] --[[:! VReg]]
+      local src2_vreg = insn.operands[2] --[[:! VReg]]
       local dst_phys  = phys_for_vreg(dst_vreg, assignment)
       local s1_phys   = phys_for_vreg(src1_vreg, assignment)
       local s2_phys   = phys_for_vreg(src2_vreg, assignment)
@@ -566,11 +567,11 @@ M.compile = function(desc, alloc, abi, ctype)
       end
 
     elseif op == "add" then
-      local dst_vreg  = insn.dst
-      local src1_vreg = insn.operands[1]
-      local src2_vreg = insn.operands[2]
+      local dst_vreg  = insn.dst --[[:! VReg]]
+      local src1_vreg = insn.operands[1] --[[:! VReg]]
+      local src2_any  = insn.operands[2] --[[:! { [string]: unknown }]]
       -- src2 might be an immediate.
-      if src2_vreg and src2_vreg.imm ~= nil then
+      if src2_any and src2_any.imm ~= nil then
         -- add r64, imm
         local dst_phys = assignment[dst_vreg.id]
         -- src1 must be the same register as dst (in-place add).
@@ -581,8 +582,9 @@ M.compile = function(desc, alloc, abi, ctype)
             enc_mov_rr(buf, dst_phys, s1_phys)
           end
         end
-        enc_add_ri(buf, dst_phys, src2_vreg.imm)
+        enc_add_ri(buf, dst_phys, src2_any.imm --[[:! integer]])
       else
+        local src2_vreg = src2_any --[[:! VReg]]
         local dst_phys = phys_for_vreg(dst_vreg, assignment)
         local s1_phys  = phys_for_vreg(src1_vreg, assignment)
         local s2_phys  = phys_for_vreg(src2_vreg, assignment)
@@ -594,9 +596,9 @@ M.compile = function(desc, alloc, abi, ctype)
       end
 
     elseif op == "sub" then
-      local dst_vreg  = insn.dst
-      local src1_vreg = insn.operands[1]
-      local src2_vreg = insn.operands[2]
+      local dst_vreg  = insn.dst --[[:! VReg]]
+      local src1_vreg = insn.operands[1] --[[:! VReg]]
+      local src2_vreg = insn.operands[2] --[[:! VReg]]
       local dst_phys  = phys_for_vreg(dst_vreg, assignment)
       local s1_phys   = phys_for_vreg(src1_vreg, assignment)
       local s2_phys   = phys_for_vreg(src2_vreg, assignment)
@@ -607,9 +609,9 @@ M.compile = function(desc, alloc, abi, ctype)
       end
 
     elseif op == "div" then
-      local dst_vreg  = insn.dst
-      local src1_vreg = insn.operands[1]
-      local src2_vreg = insn.operands[2]
+      local dst_vreg  = insn.dst --[[:! VReg]]
+      local src1_vreg = insn.operands[1] --[[:! VReg]]
+      local src2_vreg = insn.operands[2] --[[:! VReg]]
       local dst_phys  = phys_for_vreg(dst_vreg, assignment)
       local s1_phys   = phys_for_vreg(src1_vreg, assignment)
       local s2_phys   = phys_for_vreg(src2_vreg, assignment)
@@ -621,9 +623,9 @@ M.compile = function(desc, alloc, abi, ctype)
 
     elseif op == "fma" then
       -- fma(dst=a, b, c) → a = a*b + c  (VFMADD213PS)
-      local dst_vreg  = insn.dst
-      local src1_vreg = insn.operands[1]
-      local src2_vreg = insn.operands[2]
+      local dst_vreg  = insn.dst --[[:! VReg]]
+      local src1_vreg = insn.operands[1] --[[:! VReg]]
+      local src2_vreg = insn.operands[2] --[[:! VReg]]
       local dst_phys  = phys_for_vreg(dst_vreg, assignment)
       local s1_phys   = phys_for_vreg(src1_vreg, assignment)
       local s2_phys   = phys_for_vreg(src2_vreg, assignment)
@@ -635,15 +637,15 @@ M.compile = function(desc, alloc, abi, ctype)
 
     elseif op == "cmp" or op == "cmp_lt" then
       -- cmp(a, b) — compare a < b (sets flags for JL).
-      local a_vreg = insn.operands[1]
-      local b_vreg = insn.operands[2]
+      local a_vreg = insn.operands[1] --[[:! VReg]]
+      local b_vreg = insn.operands[2] --[[:! VReg]]
       local a_phys = assignment[a_vreg.id]
       local b_phys = assignment[b_vreg.id]
       enc_cmp_rr(buf, a_phys, b_phys)
 
     elseif op == "loop" then
       -- Backward branch to label.  We emit a 6-byte JL rel32 placeholder.
-      local lbl = insn.operands[1]
+      local lbl = insn.operands[1] --[[:! Label]]
       local patch_start = buf_len(buf)
       -- Reserve 6 bytes: 0F 8C + 4 bytes rel32.
       emit_bytes(buf, 0x0F, 0x8C, 0, 0, 0, 0)
@@ -656,14 +658,15 @@ M.compile = function(desc, alloc, abi, ctype)
 
     elseif op == "mov" then
       -- mov(dst, src_imm_or_vreg)
-      local dst_vreg = insn.dst
-      local src = insn.operands[1]
+      local dst_vreg = insn.dst --[[:! VReg]]
+      local src_any  = insn.operands[1] --[[:! { [string]: unknown }]]
       local dst_phys = assignment[dst_vreg.id]
-      if src.imm ~= nil then
+      if src_any.imm ~= nil then
         -- mov r64, imm
-        enc_mov_ri64(buf, dst_phys, src.imm)
+        enc_mov_ri64(buf, dst_phys, src_any.imm --[[:! integer]])
       else
         -- mov r64, r64
+        local src = src_any --[[:! VReg]]
         local s_phys = assignment[src.id]
         enc_mov_rr(buf, dst_phys, s_phys)
       end
