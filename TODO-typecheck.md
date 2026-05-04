@@ -143,6 +143,13 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+24)
+
+- [x] `lib/compress/init.lua` (1 → 0, commit 48464ac) — cast pcall fallback `impl` via `--[[: any]]` on both the assignment and return
+- [x] `lib/datalog/init.lua` (5 → 0, commit 48464ac) — inline DB field init in constructor with setmetatable `--[[: any]]` + `--[[:! Database]]` return; fix `is_var` boolean return via `and true or false`; `assert_all` uses `self_ = self --[[: any]]`; `tuple_key` param typed `{ [integer]: string }`
+- [x] `lib/asm/cpu.lua` (2 → 0, commit 48464ac) — cast `ffi = require("ffi") --[[: any]]` to resolve `ffi.new` string-arg overload mismatch
+- [x] `lib/brotli/init.lua` (7 → 0, commit 48464ac) — annotate `try_load` params as `{ [integer]: string }` with `(any | nil)` return; fix `os.getenv|nil` concat via `--[[:! string]]` force-cast; replace undefined `table` type with `{ [string]: unknown }`
+
 ## Done in current session (session N+23)
 
 - [x] `lib/aho_corasick/init.lua` (was 2 → now 0, commit 576faa9) — Automaton type alias with full method sigs; annotated replace() self as Automaton; force-cast replacements after type() check to typed fn/table
