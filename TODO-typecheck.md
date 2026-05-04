@@ -144,6 +144,13 @@ last because the type system itself is the testbed.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+30)
+
+- [x] `lib/widget/init.lua` (2 → 0, commit 89144ba) — any-cast `state_sig` as intermediate to call `.set`/`.update` on unknown signal return
+- [x] `lib/dynamic_library/init.lua` (3 → 0, commit 89144ba) — cast `dl_ffi = ffi.C --[[: any]]`; removes stale LuaLS-style `@class`/`@type` annotations
+- [x] `lib/vm/init.lua` (3 → 0, commit 89144ba) — added Machine type alias with typed fields + `step` method sig; `self_ = self --[[:! Machine]]` in step/steps/run; any-cast `handlers` table for opcode dispatch
+- [x] `lib/crc/init.lua` (12 → 0, commit 89144ba) — added `GenericCrcOpts` type alias; annotated `M.generic` opts fields; `(string.byte(data,i)) or 0 --[[:! integer]]` casts; `width_`/`crc_`/`xorout_` locals; fixed return annotation to `(number|nil, string|nil)`
+
 ## Done in current session (session N+29)
 
 - [x] `lib/css_parser/init.lua` (53 → 0, commit 7f43a0f) — i2/i3/depth phi-join recasts; self_ in SelectorParser/TokenStream methods; any→T casts on constructors; stream_ force-casts in parse_block/collect_until/parse_at_rule; parent/prev in CssElement; attr.value/pseudo.arg nil-guards; stringify_compound annotated
