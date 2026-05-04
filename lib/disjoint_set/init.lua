@@ -9,93 +9,109 @@ M._tier = "pure"
 -- Basic DSU: path compression + union by rank
 -- Elements labeled 0..n-1 for fixed-size, or auto-extended for dynamic.
 
+--:: BasicDSU = { _parent: { [integer]: integer }, _rank: { [integer]: integer }, _size: { [integer]: integer }, _count: integer, _ensure: (BasicDSU, integer) -> (), find: (BasicDSU, integer) -> integer, union: (BasicDSU, integer, integer) -> boolean, connected: (BasicDSU, integer, integer) -> boolean, component_size: (BasicDSU, integer) -> integer, count: (BasicDSU) -> integer, components: (BasicDSU) -> { [integer]: { [integer]: integer } } }
+--:: NamedDSU = { _inner: BasicDSU, _name_to_id: { [string]: integer }, _id_to_name: { [integer]: string }, _next_id: integer, _id: (NamedDSU, string) -> integer, find: (NamedDSU, string) -> string, union: (NamedDSU, string, string) -> boolean, connected: (NamedDSU, string, string) -> boolean, component: (NamedDSU, string) -> { [integer]: string }, components: (NamedDSU) -> { [string]: { [integer]: string } } }
+--:: PersistentDSU = { _parent: { [integer]: integer }, _rank: { [integer]: integer }, _size: { [integer]: integer }, _count: integer, _undo: { [integer]: { [integer]: any } }, _find_root: (PersistentDSU, integer) -> integer, find: (PersistentDSU, integer) -> integer, union: (PersistentDSU, integer, integer) -> boolean, connected: (PersistentDSU, integer, integer) -> boolean, component_size: (PersistentDSU, integer) -> integer, count: (PersistentDSU) -> integer, save: (PersistentDSU) -> integer, restore: (PersistentDSU, integer) -> () }
+--:: WeightedDSU = { _parent: { [integer]: integer }, _rank: { [integer]: integer }, _size: { [integer]: integer }, _weight: { [integer]: integer }, _bipartite: boolean, _count: integer, _find: (WeightedDSU, integer) -> (integer, integer), find: (WeightedDSU, integer) -> integer, merge: (WeightedDSU, integer, integer, integer) -> boolean, diff: (WeightedDSU, integer, integer) -> (integer | nil), is_bipartite: (WeightedDSU) -> boolean, connected: (WeightedDSU, integer, integer) -> boolean, count: (WeightedDSU) -> integer }
+
 local BasicDSU = {}
 BasicDSU.__index = BasicDSU
 
+--: ((integer | nil)) -> BasicDSU
 function M.new(n)
-  local self = setmetatable({}, BasicDSU)
-  self._parent = {}
-  self._rank = {}
-  self._size = {}
-  self._count = 0
+  local self = setmetatable({
+    _parent = {},
+    _rank = {},
+    _size = {},
+    _count = 0,
+  }, BasicDSU) --[[: any]]
+  local self_ = self --[[:! BasicDSU]]
   if n then
     for i = 0, n - 1 do
-      self._parent[i] = i
-      self._rank[i] = 0
-      self._size[i] = 1
+      self_._parent[i] = i
+      self_._rank[i] = 0
+      self_._size[i] = 1
     end
-    self._count = n
+    self_._count = n
   end
-  return self
+  return self_
 end
 
 -- Ensure element x exists (for dynamic mode)
 function BasicDSU:_ensure(x)
-  if self._parent[x] == nil then
-    self._parent[x] = x
-    self._rank[x] = 0
-    self._size[x] = 1
-    self._count = self._count + 1
+  local self_ = self --[[:! BasicDSU]]
+  if self_._parent[x] == nil then
+    self_._parent[x] = x
+    self_._rank[x] = 0
+    self_._size[x] = 1
+    self_._count = self_._count + 1
   end
 end
 
 function BasicDSU:find(x)
-  self:_ensure(x)
+  local self_ = self --[[:! BasicDSU]]
+  self_:_ensure(x)
   -- Path compression: iterative two-pass
   local root = x
-  while self._parent[root] ~= root do
-    root = self._parent[root]
+  while self_._parent[root] ~= root do
+    root = self_._parent[root]
   end
   -- Compress path
   local cur = x
   while cur ~= root do
-    local next = self._parent[cur]
-    self._parent[cur] = root
+    local next = self_._parent[cur]
+    self_._parent[cur] = root
     cur = next
   end
   return root
 end
 
 function BasicDSU:union(x, y)
-  local rx = self:find(x)
-  local ry = self:find(y)
+  local self_ = self --[[:! BasicDSU]]
+  local rx = self_:find(x)
+  local ry = self_:find(y)
   if rx == ry then return false end
   -- Union by rank
-  local rankx = self._rank[rx]
-  local ranky = self._rank[ry]
+  local rankx = self_._rank[rx]
+  local ranky = self_._rank[ry]
   if rankx < ranky then
     rx, ry = ry, rx
+    rankx, ranky = ranky, rankx
   end
   -- ry becomes child of rx
-  self._parent[ry] = rx
-  self._size[rx] = self._size[rx] + self._size[ry]
+  self_._parent[ry] = rx
+  self_._size[rx] = self_._size[rx] + self_._size[ry]
   if rankx == ranky then
-    self._rank[rx] = self._rank[rx] + 1
+    self_._rank[rx] = self_._rank[rx] + 1
   end
-  self._count = self._count - 1
+  self_._count = self_._count - 1
   return true
 end
 
 function BasicDSU:connected(x, y)
-  return self:find(x) == self:find(y)
+  local self_ = self --[[:! BasicDSU]]
+  return self_:find(x) == self_:find(y)
 end
 
 function BasicDSU:component_size(x)
-  return self._size[self:find(x)]
+  local self_ = self --[[:! BasicDSU]]
+  return self_._size[self_:find(x)]
 end
 
 function BasicDSU:count()
-  return self._count
+  local self_ = self --[[:! BasicDSU]]
+  return self_._count
 end
 
 function BasicDSU:components()
+  local self_ = self --[[:! BasicDSU]]
   -- Group elements by root
-  local groups = {}
-  local root_index = {}
-  for k, _ in pairs(self._parent) do
-    local r = self:find(k)
+  local groups = {} --: { [integer]: { [integer]: integer } }
+  local root_index = {} --: { [integer]: integer }
+  for k, _ in pairs(self_._parent) do
+    local r = self_:find(k)
     if root_index[r] == nil then
-      local g = {}
+      local g = {} --: { [integer]: integer }
       groups[#groups + 1] = g
       root_index[r] = #groups
     end
@@ -110,48 +126,54 @@ local NamedDSU = {}
 NamedDSU.__index = NamedDSU
 
 function M.named()
-  local self = setmetatable({}, NamedDSU)
-  self._inner = M.new()
-  self._name_to_id = {}
-  self._id_to_name = {}
-  self._next_id = 0
-  return self
+  local self = setmetatable({
+    _inner = M.new(),
+    _name_to_id = {},
+    _id_to_name = {},
+    _next_id = 0,
+  }, NamedDSU) --[[: any]]
+  return self --[[:! NamedDSU]]
 end
 
 function NamedDSU:_id(name)
-  if self._name_to_id[name] == nil then
-    local id = self._next_id
-    self._next_id = id + 1
-    self._name_to_id[name] = id
-    self._id_to_name[id] = name
-    self._inner:_ensure(id)
+  local self_ = self --[[:! NamedDSU]]
+  if self_._name_to_id[name] == nil then
+    local id = self_._next_id
+    self_._next_id = id + 1
+    self_._name_to_id[name] = id
+    self_._id_to_name[id] = name
+    self_._inner:_ensure(id)
   end
-  return self._name_to_id[name]
+  return self_._name_to_id[name]
 end
 
 function NamedDSU:find(name)
-  local id = self:_id(name)
-  local root_id = self._inner:find(id)
-  return self._id_to_name[root_id]
+  local self_ = self --[[:! NamedDSU]]
+  local id = self_:_id(name)
+  local root_id = self_._inner:find(id)
+  return self_._id_to_name[root_id]
 end
 
 function NamedDSU:union(x, y)
-  local ix = self:_id(x)
-  local iy = self:_id(y)
-  return self._inner:union(ix, iy)
+  local self_ = self --[[:! NamedDSU]]
+  local ix = self_:_id(x)
+  local iy = self_:_id(y)
+  return self_._inner:union(ix, iy)
 end
 
 function NamedDSU:connected(x, y)
-  local ix = self:_id(x)
-  local iy = self:_id(y)
-  return self._inner:connected(ix, iy)
+  local self_ = self --[[:! NamedDSU]]
+  local ix = self_:_id(x)
+  local iy = self_:_id(y)
+  return self_._inner:connected(ix, iy)
 end
 
 function NamedDSU:component(name)
-  local target_root = self._inner:find(self:_id(name))
-  local result = {}
-  for n, id in pairs(self._name_to_id) do
-    if self._inner:find(id) == target_root then
+  local self_ = self --[[:! NamedDSU]]
+  local target_root = self_._inner:find(self_:_id(name))
+  local result = {} --: { [integer]: string }
+  for n, id in pairs(self_._name_to_id) do
+    if self_._inner:find(id) == target_root then
       result[#result + 1] = n
     end
   end
@@ -159,11 +181,12 @@ function NamedDSU:component(name)
 end
 
 function NamedDSU:components()
+  local self_ = self --[[:! NamedDSU]]
   -- Returns table of root_name -> [member, ...]
-  local groups = {}
-  for name, id in pairs(self._name_to_id) do
-    local root_id = self._inner:find(id)
-    local root_name = self._id_to_name[root_id]
+  local groups = {} --: { [string]: { [integer]: string } }
+  for name, id in pairs(self_._name_to_id) do
+    local root_id = self_._inner:find(id)
+    local root_name = self_._id_to_name[root_id]
     if groups[root_name] == nil then
       groups[root_name] = {}
     end
@@ -179,95 +202,106 @@ local PersistentDSU = {}
 PersistentDSU.__index = PersistentDSU
 
 function M.persistent(n)
-  local self = setmetatable({}, PersistentDSU)
-  self._parent = {}
-  self._rank = {}
-  self._size = {}
-  self._count = n or 0
-  self._undo = {}  -- stack of {node, field, old_value}
+  local self = setmetatable({
+    _parent = {},
+    _rank = {},
+    _size = {},
+    _count = n or 0,
+    _undo = {},
+  }, PersistentDSU) --[[: any]]
+  local self_ = self --[[:! PersistentDSU]]
   if n then
     for i = 0, n - 1 do
-      self._parent[i] = i
-      self._rank[i] = 0
-      self._size[i] = 1
+      self_._parent[i] = i
+      self_._rank[i] = 0
+      self_._size[i] = 1
     end
   end
-  return self
+  return self_
 end
 
 function PersistentDSU:_find_root(x)
+  local self_ = self --[[:! PersistentDSU]]
   -- No path compression — just walk up
-  while self._parent[x] ~= x do
-    x = self._parent[x]
+  while self_._parent[x] ~= x do
+    x = self_._parent[x]
   end
   return x
 end
 
 function PersistentDSU:find(x)
-  return self:_find_root(x)
+  local self_ = self --[[:! PersistentDSU]]
+  return self_:_find_root(x)
 end
 
 function PersistentDSU:union(x, y)
-  local rx = self:_find_root(x)
-  local ry = self:_find_root(y)
+  local self_ = self --[[:! PersistentDSU]]
+  local rx = self_:_find_root(x)
+  local ry = self_:_find_root(y)
   if rx == ry then return false end
 
-  local rankx = self._rank[rx]
-  local ranky = self._rank[ry]
+  local rankx = self_._rank[rx]
+  local ranky = self_._rank[ry]
   if rankx < ranky then
     rx, ry = ry, rx
+    rankx, ranky = ranky, rankx
   end
 
   -- Record undo entries before mutating
-  local undo = self._undo
-  undo[#undo + 1] = { "parent", ry, self._parent[ry] }
-  undo[#undo + 1] = { "size", rx, self._size[rx] }
-  undo[#undo + 1] = { "count", nil, self._count }
+  local undo = self_._undo
+  undo[#undo + 1] = { "parent", ry, self_._parent[ry] } --[[: any]]
+  undo[#undo + 1] = { "size",   rx, self_._size[rx]   } --[[: any]]
+  undo[#undo + 1] = { "count",  0,  self_._count       } --[[: any]]
 
-  self._parent[ry] = rx
-  self._size[rx] = self._size[rx] + self._size[ry]
-  self._count = self._count - 1
+  self_._parent[ry] = rx
+  self_._size[rx] = self_._size[rx] + self_._size[ry]
+  self_._count = self_._count - 1
 
   if rankx == ranky then
-    undo[#undo + 1] = { "rank", rx, self._rank[rx] }
-    self._rank[rx] = self._rank[rx] + 1
+    undo[#undo + 1] = { "rank", rx, self_._rank[rx] } --[[: any]]
+    self_._rank[rx] = self_._rank[rx] + 1
   end
 
   return true
 end
 
 function PersistentDSU:connected(x, y)
-  return self:_find_root(x) == self:_find_root(y)
+  local self_ = self --[[:! PersistentDSU]]
+  return self_:_find_root(x) == self_:_find_root(y)
 end
 
 function PersistentDSU:component_size(x)
-  return self._size[self:_find_root(x)]
+  local self_ = self --[[:! PersistentDSU]]
+  return self_._size[self_:_find_root(x)]
 end
 
 function PersistentDSU:count()
-  return self._count
+  local self_ = self --[[:! PersistentDSU]]
+  return self_._count
 end
 
 function PersistentDSU:save()
-  return #self._undo
+  local self_ = self --[[:! PersistentDSU]]
+  return #self_._undo
 end
 
 function PersistentDSU:restore(depth)
-  local undo = self._undo
+  local self_ = self --[[:! PersistentDSU]]
+  local undo = self_._undo
   while #undo > depth do
-    local entry = undo[#undo]
+    local entry = undo[#undo] --[[: any]]
     undo[#undo] = nil
-    local field = entry[1]
-    local node = entry[2]
-    local old_val = entry[3]
+    local field = entry[1] --[[:! string]]
+    local node  = entry[2] --[[:! integer]]
+    local old_val = entry[3] --[[:! integer]]
     if field == "parent" then
-      self._parent[node] = old_val
+      self_._parent[node] = old_val
     elseif field == "rank" then
-      self._rank[node] = old_val
+      self_._rank[node] = old_val
     elseif field == "size" then
-      self._size[node] = old_val
+      self_._size[node] = old_val
     elseif field == "count" then
-      self._count = old_val
+      self_._count = old_val
     end
   end
 end
@@ -278,58 +312,63 @@ local WeightedDSU = {}
 WeightedDSU.__index = WeightedDSU
 
 function M.weighted(n)
-  local self = setmetatable({}, WeightedDSU)
-  self._parent = {}
-  self._rank = {}
-  self._size = {}
-  self._weight = {}  -- parity relative to parent
-  self._bipartite = true
-  self._count = n or 0
+  local self = setmetatable({
+    _parent    = {},
+    _rank      = {},
+    _size      = {},
+    _weight    = {},
+    _bipartite = true,
+    _count     = n or 0,
+  }, WeightedDSU) --[[: any]]
+  local self_ = self --[[:! WeightedDSU]]
   if n then
     for i = 0, n - 1 do
-      self._parent[i] = i
-      self._rank[i] = 0
-      self._size[i] = 1
-      self._weight[i] = 0
+      self_._parent[i] = i
+      self_._rank[i] = 0
+      self_._size[i] = 1
+      self_._weight[i] = 0
     end
   end
-  return self
+  return self_
 end
 
 -- Returns root, accumulated parity from x to root
 function WeightedDSU:_find(x)
-  if self._parent[x] == x then
+  local self_ = self --[[:! WeightedDSU]]
+  if self_._parent[x] == x then
     return x, 0
   end
-  local root, parent_parity = self:_find(self._parent[x])
+  local root, parent_parity = self_:_find(self_._parent[x])
   -- Path compression: update weight to be relative to root directly
-  local new_weight = (self._weight[x] + parent_parity) % 2
-  self._parent[x] = root
-  self._weight[x] = new_weight
+  local new_weight = (self_._weight[x] + parent_parity) % 2
+  self_._parent[x] = root
+  self_._weight[x] = new_weight
   return root, new_weight
 end
 
 function WeightedDSU:find(x)
-  local root, _ = self:_find(x)
+  local self_ = self --[[:! WeightedDSU]]
+  local root, _ = self_:_find(x)
   return root
 end
 
 -- merge(x, y, w): require that diff(x, y) == w (0 or 1)
 -- returns true if they were in different components, false if same component
 function WeightedDSU:merge(x, y, w)
+  local self_ = self --[[:! WeightedDSU]]
   w = w or 0
-  local rx, wx = self:_find(x)
-  local ry, wy = self:_find(y)
+  local rx, wx = self_:_find(x)
+  local ry, wy = self_:_find(y)
   if rx == ry then
     -- Check if existing parity matches
     if (wx + wy) % 2 ~= w % 2 then
-      self._bipartite = false
+      self_._bipartite = false
     end
     return false
   end
   -- Union by rank; attach ry under rx
-  local rankx = self._rank[rx]
-  local ranky = self._rank[ry]
+  local rankx = self_._rank[rx]
+  local ranky = self_._rank[ry]
   -- We need: weight_rx_of_x XOR weight_ry_of_y XOR edge_w = 0
   -- i.e., new weight of ry relative to rx = wx XOR w XOR wy
   local new_ry_weight = (wx + w + wy) % 2
@@ -337,40 +376,45 @@ function WeightedDSU:merge(x, y, w)
     -- Swap: ry becomes new root, rx becomes child of ry
     -- weight of rx relative to ry = new_ry_weight (symmetric)
     local tmp_r = rx; rx = ry; ry = tmp_r
-    local tmp_w = wx; wx = wy; wy = tmp_w
+    rankx, ranky = ranky, rankx
     -- Recompute: new_ry_weight was (old_wx + w + old_wy) % 2
     -- Now ry is old rx, and we need weight of (old rx) under (old ry)
     -- same value: new_ry_weight stays the same
+    local _ = tmp_r; _ = ranky
   end
   -- ry under rx
-  self._parent[ry] = rx
-  self._weight[ry] = new_ry_weight
-  self._size[rx] = self._size[rx] + self._size[ry]
+  self_._parent[ry] = rx
+  self_._weight[ry] = new_ry_weight
+  self_._size[rx] = self_._size[rx] + self_._size[ry]
   if rankx == ranky then
-    self._rank[rx] = self._rank[rx] + 1
+    self_._rank[rx] = self_._rank[rx] + 1
   end
-  self._count = self._count - 1
+  self_._count = self_._count - 1
   return true
 end
 
 -- diff(x, y): parity difference between x and y; nil if different components
 function WeightedDSU:diff(x, y)
-  local rx, wx = self:_find(x)
-  local ry, wy = self:_find(y)
+  local self_ = self --[[:! WeightedDSU]]
+  local rx, wx = self_:_find(x)
+  local ry, wy = self_:_find(y)
   if rx ~= ry then return nil end
   return (wx + wy) % 2
 end
 
 function WeightedDSU:is_bipartite()
-  return self._bipartite
+  local self_ = self --[[:! WeightedDSU]]
+  return self_._bipartite
 end
 
 function WeightedDSU:connected(x, y)
-  return self:find(x) == self:find(y)
+  local self_ = self --[[:! WeightedDSU]]
+  return self_:find(x) == self_:find(y)
 end
 
 function WeightedDSU:count()
-  return self._count
+  local self_ = self --[[:! WeightedDSU]]
+  return self_._count
 end
 
 return M

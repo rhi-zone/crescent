@@ -21,9 +21,9 @@ M.is_leap = is_leap
 -- Days in each month for a given year
 --: (number, number) -> number
 local function days_in_month(year, month)
-  local days = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
+  local days = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 } --: { [integer]: integer }
   if month == 2 and is_leap(year) then return 29 end
-  return days[month]
+  return days[month] or 31
 end
 
 M.days_in_month = days_in_month
@@ -45,9 +45,9 @@ end
 
 -- ── Current time ─────────────────────────────────────────────────────────────
 
---: (time_fn: () -> { year: number, month: number, day: number, hour: number, min: number, sec: number }) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }
+--: (() -> { year: number, month: number, day: number, hour: number, min: number, sec: number }) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }
 function M.now(time_fn)
-  local t = time_fn()
+  local t = time_fn() --: { year: number, month: number, day: number, hour: number, min: number, sec: number }
   return {
     year   = t.year,
     month  = t.month,
@@ -90,7 +90,7 @@ local function parse_offset(s)
   if s == "Z" or s == "z" then return 0 end
   local sign, h, m = s:match("^([+-])(%d%d):?(%d%d)$")
   if not sign then return nil, "invalid offset: " .. s end
-  local offset = (tonumber(h) * 3600 + tonumber(m) * 60)
+  local offset = ((tonumber(h) or 0) * 3600 + (tonumber(m) or 0) * 60)
   if sign == "-" then offset = -offset end
   return offset
 end
@@ -109,10 +109,14 @@ function M.parse_iso(s)
   -- Date portion
   local y, mo, d = s:match("^(%d%d%d%d)-(%d%d)-(%d%d)")
   if not y then return nil, "invalid ISO 8601 date: " .. s end
-  y, mo, d = tonumber(y), tonumber(mo), tonumber(d)
+  y  = tonumber(y)  or 1970
+  mo = tonumber(mo) or 1
+  d  = tonumber(d)  or 1
 
   -- Time portion (optional)
-  local h, mi, sc = 0, 0, 0
+  local h  = 0 --: number
+  local mi = 0 --: number
+  local sc = 0 --: number
   local offset = nil
   local rest = s:sub(11)  -- after "YYYY-MM-DD"
 
@@ -132,16 +136,19 @@ function M.parse_iso(s)
       if not th then return nil, "invalid ISO 8601 time: " .. rest end
       ts = "00"
     end
-    h, mi, sc = tonumber(th), tonumber(tm), tonumber(ts)
+    h  = tonumber(th) or 0
+    mi = tonumber(tm) or 0
+    sc = tonumber(ts) or 0
 
     -- Skip fractional seconds if present
-    if frac_rest and frac_rest:sub(1,1) == "." then
-      frac_rest = frac_rest:match("^%.[%d]+(.*)")
+    local frac_rest_ = frac_rest --[[:! string]]
+    if frac_rest_ ~= "" and frac_rest_:sub(1,1) == "." then
+      frac_rest_ = frac_rest_:match("^%.[%d]+(.*)") --[[:! string]]
     end
 
     -- Offset
-    if frac_rest and frac_rest ~= "" then
-      local off, err = parse_offset(frac_rest)
+    if frac_rest_ ~= "" then
+      local off, err = parse_offset(frac_rest_)
       if not off then return nil, err end
       offset = off
     end
@@ -155,10 +162,10 @@ function M.parse_iso(s)
 end
 
 -- Parse a Unix timestamp (integer or float seconds since 1970-01-01T00:00:00Z).
---: (number, date_fn: (string, number) -> { year: number, month: number, day: number, hour: number, min: number, sec: number }) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number }
+--: (number, (string, number) -> { year: number, month: number, day: number, hour: number, min: number, sec: number }) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number }
 function M.from_unix(ts, date_fn)
   -- Use date_fn with "!*t" to get UTC broken-down time
-  local t = date_fn("!*t", math.floor(ts))
+  local t = date_fn("!*t", math.floor(ts)) --: { year: number, month: number, day: number, hour: number, min: number, sec: number }
   return {
     year   = t.year,
     month  = t.month,
@@ -231,7 +238,7 @@ end
 -- %Z: "+HH:MM" / "-HH:MM" / "Z" / "" (unspecified)
 --: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }, string) -> string
 function M.format(dt, fmt)
-  return (fmt:gsub("%%(.)", function(c)
+  local result, _ = fmt:gsub("%%(.)", function(c)
     if c == "Y" then return pad4(dt.year)
     elseif c == "m" then return pad2(dt.month)
     elseif c == "d" then return pad2(dt.day)
@@ -242,7 +249,8 @@ function M.format(dt, fmt)
     elseif c == "%" then return "%"
     else return "%" .. c
     end
-  end))
+  end)
+  return result
 end
 
 -- ── Arithmetic ───────────────────────────────────────────────────────────────

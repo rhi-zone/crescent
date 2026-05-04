@@ -14,11 +14,16 @@ M._tier = "pure"
 -- Internal constructor
 -- ---------------------------------------------------------------------------
 
+--:: Duration = { _secs: number }
+--:: DurationParts = { weeks: (number | nil), days: (number | nil), hours: (number | nil), minutes: (number | nil), seconds: (number | nil), milliseconds: (number | nil) }
+--:: DurationComponents = { sign: integer, days: number, hours: number, minutes: number, seconds: number, milliseconds: number }
+
 local Duration = {}
 Duration.__index = Duration
 
 local function new_raw(secs)
-  return setmetatable({ _secs = secs }, Duration)
+  local self = setmetatable({ _secs = secs }, Duration) --[[: any]]
+  return self --[[:! Duration]]
 end
 
 -- ---------------------------------------------------------------------------
@@ -32,15 +37,16 @@ end
 
 -- D.from_parts({ days, hours, minutes, seconds, milliseconds }) — named parts.
 -- All fields optional, default 0. Negative parts are summed as-is.
+--: ((DurationParts | nil)) -> Duration
 function M.from_parts(parts)
-  parts = parts or {}
-  local secs = 0
-  secs = secs + (parts.weeks        or 0) * 604800
-  secs = secs + (parts.days         or 0) * 86400
-  secs = secs + (parts.hours        or 0) * 3600
-  secs = secs + (parts.minutes      or 0) * 60
-  secs = secs + (parts.seconds      or 0)
-  secs = secs + (parts.milliseconds or 0) * 0.001
+  local p = parts or {} --[[:! DurationParts]]
+  local secs = 0 --: number
+  secs = secs + (p.weeks        or 0) * 604800
+  secs = secs + (p.days         or 0) * 86400
+  secs = secs + (p.hours        or 0) * 3600
+  secs = secs + (p.minutes      or 0) * 60
+  secs = secs + (p.seconds      or 0)
+  secs = secs + (p.milliseconds or 0) * 0.001
   return new_raw(secs)
 end
 
@@ -49,6 +55,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Unit multipliers (to seconds).
+--: { [string]: number }
 local UNIT = {
   w = 604800, week = 604800, weeks = 604800,
   d = 86400,  day  = 86400,  days  = 86400,
@@ -56,7 +63,7 @@ local UNIT = {
   m = 60,     min  = 60,     minute = 60, minutes = 60,
   s = 1,      sec  = 1,      second = 1, seconds = 1,
   ms = 0.001, millisecond = 0.001, milliseconds = 0.001,
-}
+} --[[:! { [string]: number }]]
 
 -- Parse a human string like "1h30m45s", "1:30:45", "90m", "1.5h", "-30s", "90".
 -- Returns (duration) or (nil, errmsg).
@@ -79,26 +86,26 @@ function M.parse(s)
 
   -- Bare number → seconds.
   if s:match("^%d+%.?%d*$") then
-    return new_raw(sign * tonumber(s))
+    return new_raw(sign * (tonumber(s) or 0))
   end
 
   -- HH:MM:SS[.mmm] or MM:SS[.mmm] — colon format.
   do
     local h, m, sec_s = s:match("^(%d+):(%d+):(%d+%.?%d*)$")
     if h then
-      local total = tonumber(h) * 3600 + tonumber(m) * 60 + tonumber(sec_s)
+      local total = (tonumber(h) or 0) * 3600 + (tonumber(m) or 0) * 60 + (tonumber(sec_s) or 0)
       return new_raw(sign * total)
     end
     local m2, sec_s2 = s:match("^(%d+):(%d+%.?%d*)$")
     if m2 then
-      local total = tonumber(m2) * 60 + tonumber(sec_s2)
+      local total = (tonumber(m2) or 0) * 60 + (tonumber(sec_s2) or 0)
       return new_raw(sign * total)
     end
   end
 
   -- Composite unit string: "1h 30m 45s", "2d4h30m", "500ms", etc.
   -- Accept optional spaces between tokens.
-  local total = 0
+  local total = 0 --: number
   local pos = 1
   local matched_any = false
   local lower = s:lower()
@@ -106,37 +113,42 @@ function M.parse(s)
   while pos <= #lower do
     -- Skip optional spaces.
     local sp = lower:match("^%s+", pos)
-    if sp then pos = pos + #sp end
-    if pos > #lower then break end
+    if sp then pos = pos + #(sp --[[:! string]]) end
+    local pos_ = pos --[[:! integer]]
+    if pos_ > #lower then break end
+    pos = pos_
 
     -- Number (int or decimal).
     local num_s = lower:match("^%d+%.?%d*", pos)
     if not num_s then
       return nil, "duration.parse: unexpected character at position " .. pos .. " in '" .. orig .. "'"
     end
-    local num = tonumber(num_s)
-    pos = pos + #num_s
+    local num = tonumber(num_s) or 0
+    pos = pos + #(num_s --[[:! string]])
 
     -- Optional space before unit.
     local sp2 = lower:match("^%s*", pos)
-    pos = pos + #sp2
+    pos = pos + #(sp2 --[[:! string]])
 
     -- Unit (longest match first to handle "ms" before "m").
-    local unit_mult = nil
+    local unit_mult = 0 --: number
+    local found_unit = false
     -- Try multi-char units first (longest).
     for _, try in ipairs({ "milliseconds", "millisecond", "minutes", "minute", "seconds", "second", "hours", "hour", "weeks", "week", "days", "day", "min", "ms" }) do
       if lower:sub(pos, pos + #try - 1) == try then
         unit_mult = UNIT[try]
         pos = pos + #try
+        found_unit = true
         break
       end
     end
-    if not unit_mult then
+    if not found_unit then
       -- Single-char units.
       local uc = lower:sub(pos, pos)
       if UNIT[uc] then
         unit_mult = UNIT[uc]
         pos = pos + 1
+        found_unit = true
       else
         return nil, "duration.parse: unknown unit '" .. lower:sub(pos) .. "' in '" .. orig .. "'"
       end
@@ -157,11 +169,11 @@ end
 -- Access — total values
 -- ---------------------------------------------------------------------------
 
-function Duration:total_seconds()      return self._secs end
-function Duration:total_milliseconds() return self._secs * 1000 end
-function Duration:total_minutes()      return self._secs / 60 end
-function Duration:total_hours()        return self._secs / 3600 end
-function Duration:total_days()         return self._secs / 86400 end
+function Duration:total_seconds()      local self_ = self --[[:! Duration]]; return self_._secs end
+function Duration:total_milliseconds() local self_ = self --[[:! Duration]]; return self_._secs * 1000 end
+function Duration:total_minutes()      local self_ = self --[[:! Duration]]; return self_._secs / 60 end
+function Duration:total_hours()        local self_ = self --[[:! Duration]]; return self_._secs / 3600 end
+function Duration:total_days()         local self_ = self --[[:! Duration]]; return self_._secs / 86400 end
 
 -- ---------------------------------------------------------------------------
 -- Component decomposition
@@ -169,8 +181,10 @@ function Duration:total_days()         return self._secs / 86400 end
 
 -- Returns { sign=1|-1, weeks=.., days=.., hours=.., minutes=.., seconds=.., milliseconds=.. }
 -- All component fields are non-negative integers except milliseconds (non-negative integer ms).
+--: (Duration) -> DurationComponents
 function Duration:parts()
-  local s = self._secs
+  local self_ = self --[[:! Duration]]
+  local s = self_._secs
   local sign = 1
   if s < 0 then
     sign = -1
@@ -238,12 +252,12 @@ function Duration:format(fmt)
     return sign_str .. table.concat(parts, "")
 
   elseif fmt == "long" then
-    local parts = {}
-    if p.days > 0    then parts[#parts+1] = plural(p.days,    "day") end
-    if p.hours > 0   then parts[#parts+1] = plural(p.hours,   "hour") end
-    if p.minutes > 0 then parts[#parts+1] = plural(p.minutes, "minute") end
-    if p.seconds > 0 then parts[#parts+1] = plural(p.seconds, "second") end
-    if p.milliseconds > 0 then parts[#parts+1] = plural(p.milliseconds, "millisecond") end
+    local parts = {} --: { [integer]: string }
+    if p.days > 0    then table.insert(parts, plural(p.days,    "day")) end
+    if p.hours > 0   then table.insert(parts, plural(p.hours,   "hour")) end
+    if p.minutes > 0 then table.insert(parts, plural(p.minutes, "minute")) end
+    if p.seconds > 0 then table.insert(parts, plural(p.seconds, "second")) end
+    if p.milliseconds > 0 then table.insert(parts, plural(p.milliseconds, "millisecond")) end
     if #parts == 0 then return "0 seconds" end
     local joined
     if #parts == 1 then
@@ -251,10 +265,10 @@ function Duration:format(fmt)
     elseif #parts == 2 then
       joined = parts[1] .. " and " .. parts[2]
     else
-      local last = table.remove(parts)
+      local last = table.remove(parts) --[[: any]] --[[:! string]]
       joined = table.concat(parts, ", ") .. ", and " .. last
     end
-    return sign_str .. joined
+    return sign_str .. (joined or "")
 
   elseif fmt == "iso" then
     -- ISO 8601: PT1H30M45S, P1DT2H, etc.
@@ -290,22 +304,22 @@ end
 -- Arithmetic
 -- ---------------------------------------------------------------------------
 
-function Duration:add(other)  return new_raw(self._secs + other._secs) end
-function Duration:sub(other)  return new_raw(self._secs - other._secs) end
-function Duration:mul(n)      return new_raw(self._secs * n) end
-function Duration:div(n)      return new_raw(self._secs / n) end
-function Duration:neg()       return new_raw(-self._secs) end
-function Duration:abs()       return new_raw(math.abs(self._secs)) end
+function Duration:add(other)  local self_ = self --[[:! Duration]]; local o_ = other --[[:! Duration]]; return new_raw(self_._secs + o_._secs) end
+function Duration:sub(other)  local self_ = self --[[:! Duration]]; local o_ = other --[[:! Duration]]; return new_raw(self_._secs - o_._secs) end
+function Duration:mul(n)      local self_ = self --[[:! Duration]]; return new_raw(self_._secs * n) end
+function Duration:div(n)      local self_ = self --[[:! Duration]]; return new_raw(self_._secs / n) end
+function Duration:neg()       local self_ = self --[[:! Duration]]; return new_raw(-self_._secs) end
+function Duration:abs()       local self_ = self --[[:! Duration]]; return new_raw(math.abs(self_._secs)) end
 
 -- ---------------------------------------------------------------------------
 -- Comparison
 -- ---------------------------------------------------------------------------
 
-function Duration:eq(other)  return self._secs == other._secs end
-function Duration:lt(other)  return self._secs <  other._secs end
-function Duration:lte(other) return self._secs <= other._secs end
-function Duration:gt(other)  return self._secs >  other._secs end
-function Duration:gte(other) return self._secs >= other._secs end
+function Duration:eq(other)  local self_ = self --[[:! Duration]]; local o_ = other --[[:! Duration]]; return self_._secs == o_._secs end
+function Duration:lt(other)  local self_ = self --[[:! Duration]]; local o_ = other --[[:! Duration]]; return self_._secs <  o_._secs end
+function Duration:lte(other) local self_ = self --[[:! Duration]]; local o_ = other --[[:! Duration]]; return self_._secs <= o_._secs end
+function Duration:gt(other)  local self_ = self --[[:! Duration]]; local o_ = other --[[:! Duration]]; return self_._secs >  o_._secs end
+function Duration:gte(other) local self_ = self --[[:! Duration]]; local o_ = other --[[:! Duration]]; return self_._secs >= o_._secs end
 
 -- ---------------------------------------------------------------------------
 -- Utilities
