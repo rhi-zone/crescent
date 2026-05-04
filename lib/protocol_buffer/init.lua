@@ -158,6 +158,7 @@ local TYPE_WIRE = {
 -- ── Varint ────────────────────────────────────────────────────────────────────
 
 -- Encode a non-negative integer as a varint using math (handles > 2^31 safely).
+--: (number) -> string
 local function encode_varint64(n)
   if n == 0 then return "\0" end
   local bytes = {}
@@ -200,27 +201,32 @@ local function encode_varint_signed(n)
   local b5 = tonumber(b[5]) --[[:! integer]]
   local b6 = tonumber(b[6]) --[[:! integer]]
   local b7 = tonumber(b[7]) --[[:! integer]]
-  local g = {
-    band(b0, 0x7F),
-    bor(rshift(b0, 7), band(lshift(band(b1, 0x3F), 1), 0x7F)),
-    bor(rshift(b1, 6), band(lshift(band(b2, 0x1F), 2), 0x7F)),
-    bor(rshift(b2, 5), band(lshift(band(b3, 0x0F), 3), 0x7F)),
-    bor(rshift(b3, 4), band(lshift(band(b4, 0x07), 4), 0x7F)),
-    bor(rshift(b4, 3), band(lshift(band(b5, 0x03), 5), 0x7F)),
-    bor(rshift(b5, 2), band(lshift(band(b6, 0x01), 6), 0x7F)),
-    band(rshift(b6, 1), 0x7F),
-    band(b7, 0x7F),
-    band(rshift(b7, 7), 0x7F),
-  }
+  local g0 = band(b0, 0x7F)
+  local g1 = bor(rshift(b0, 7), band(lshift(band(b1, 0x3F), 1), 0x7F))
+  local g2 = bor(rshift(b1, 6), band(lshift(band(b2, 0x1F), 2), 0x7F))
+  local g3 = bor(rshift(b2, 5), band(lshift(band(b3, 0x0F), 3), 0x7F))
+  local g4 = bor(rshift(b3, 4), band(lshift(band(b4, 0x07), 4), 0x7F))
+  local g5 = bor(rshift(b4, 3), band(lshift(band(b5, 0x03), 5), 0x7F))
+  local g6 = bor(rshift(b5, 2), band(lshift(band(b6, 0x01), 6), 0x7F))
+  local g7 = band(rshift(b6, 1), 0x7F)
+  local g8 = band(b7, 0x7F)
+  local g9 = band(rshift(b7, 7), 0x7F)
   -- All 10 bytes emitted (protobuf always uses 10 bytes for negative ints)
-  for i = 1, 9 do
-    bytes[i] = string.char(bor(g[i], 0x80))
-  end
-  bytes[10] = string.char(g[10])
+  bytes[1]  = string.char(bor(g0, 0x80))
+  bytes[2]  = string.char(bor(g1, 0x80))
+  bytes[3]  = string.char(bor(g2, 0x80))
+  bytes[4]  = string.char(bor(g3, 0x80))
+  bytes[5]  = string.char(bor(g4, 0x80))
+  bytes[6]  = string.char(bor(g5, 0x80))
+  bytes[7]  = string.char(bor(g6, 0x80))
+  bytes[8]  = string.char(bor(g7, 0x80))
+  bytes[9]  = string.char(bor(g8, 0x80))
+  bytes[10] = string.char(g9)
   return table.concat(bytes)
 end
 
 -- Public encode_varint: handles both non-negative and negative integers.
+--: (number) -> string
 function M.encode_varint(n)
   if n >= 0 then
     return encode_varint64(n)
@@ -232,13 +238,14 @@ end
 -- Decode a varint from bytes at offset (1-based).
 -- Returns (value, next_offset) or (nil, errmsg).
 -- For 10-byte varints (negative int64), reconstructs as Lua number (may lose precision > 2^53).
+--: (string, integer) -> (number | nil, integer | string)
 function M.decode_varint(bytes, offset)
-  local result = 0
+  local result = 0 --: number
   local shift = 0
   local len = #bytes
   local byte_count = 0
   while offset <= len do
-    local byte_v = string.byte(bytes, offset)
+    local byte_v = (string.byte(bytes, offset, offset) or 0) --[[:! integer]]
     offset = offset + 1
     byte_count = byte_count + 1
     result = result + band(byte_v, 0x7f) * (2 ^ shift)
@@ -256,14 +263,15 @@ end
 -- Decode a signed varint (int32/int64) — handles 10-byte negative encoding.
 -- Reconstructs the sign by re-reading via FFI int64 union.
 local _dec_buf = ffi.new("pb_int64_t")
+--: (string, integer) -> (number | nil, integer | string)
 local function decode_signed_varint(bytes, offset)
-  local result = 0
+  local result = 0 --: number
   local shift = 0
   local len = #bytes
   local byte_count = 0
-  local raw_bytes = {}
+  local raw_bytes = {} --: { [integer]: integer }
   while offset <= len do
-    local byte_v = string.byte(bytes, offset)
+    local byte_v = (string.byte(bytes, offset, offset) or 0) --[[:! integer]]
     offset = offset + 1
     byte_count = byte_count + 1
     raw_bytes[byte_count] = byte_v
@@ -289,9 +297,9 @@ local function decode_signed_varint(bytes, offset)
     -- payload is 7 bits; may span two bytes
     local lo_part = band(lshift(payload, bit_off), 0xFF)
     local hi_part = rshift(payload, 8 - bit_off)
-    _dec_buf.b[byte_idx] = bor(tonumber(_dec_buf.b[byte_idx]), lo_part)
+    _dec_buf.b[byte_idx] = bor((tonumber(_dec_buf.b[byte_idx]) or 0) --[[:! integer]], lo_part)
     if byte_idx + 1 < 8 then
-      _dec_buf.b[byte_idx + 1] = bor(tonumber(_dec_buf.b[byte_idx + 1]), hi_part)
+      _dec_buf.b[byte_idx + 1] = bor((tonumber(_dec_buf.b[byte_idx + 1]) or 0) --[[:! integer]], hi_part)
     end
     bit_pos = bit_pos + 7
   end
@@ -309,6 +317,7 @@ function M.encode_zigzag(n)
 end
 
 -- ZigZag decoding: maps unsigned integers to signed.
+--: (number) -> number
 function M.decode_zigzag(n)
   if n % 2 == 0 then
     return n / 2
@@ -326,33 +335,37 @@ end
 
 -- Encode a single field value given its type string.
 -- Returns encoded bytes or (nil, err).
+--: (string, unknown, { [string]: unknown } | nil) -> (string | nil, string | nil)
 local function encode_value(type_str, value, schema)
   if type_str == "int32" or type_str == "int64" or
      type_str == "uint32" or type_str == "uint64" or type_str == "enum" then
-    return M.encode_varint(value)
+    return M.encode_varint(value --[[:! number]])
   elseif type_str == "sint32" or type_str == "sint64" then
-    return encode_varint64(M.encode_zigzag(value))
+    return encode_varint64(M.encode_zigzag(value --[[:! number]]))
   elseif type_str == "bool" then
-    return M.encode_varint(value and 1 or 0)
+    local bv = value --[[:! boolean]]
+    return M.encode_varint(bv and 1 or 0)
   elseif type_str == "string" or type_str == "bytes" then
-    return M.encode_varint(#value) .. value
+    local sv = value --[[:! string]]
+    return M.encode_varint(#sv) .. sv
   elseif type_str == "message" then
     if not schema then return nil, "protocol_buffer: message field missing schema" end
-    local inner, err = M.encode(schema, value)
+    local inner, err = M.encode(schema, value --[[:! { [string]: unknown }]])
     if not inner then return nil, err end
-    return M.encode_varint(#inner) .. inner
+    local inner_ = inner --[[:! string]]
+    return M.encode_varint(#inner_) .. inner_
   elseif type_str == "fixed32" then
-    return pack_uint32(value)
+    return pack_uint32(value --[[:! number]])
   elseif type_str == "sfixed32" then
-    return pack_int32(value)
+    return pack_int32(value --[[:! number]])
   elseif type_str == "float" then
-    return pack_float(value)
+    return pack_float(value --[[:! number]])
   elseif type_str == "fixed64" then
-    return pack_uint64(value)
+    return pack_uint64(value --[[:! number]])
   elseif type_str == "sfixed64" then
-    return pack_int64(value)
+    return pack_int64(value --[[:! number]])
   elseif type_str == "double" then
-    return pack_double(value)
+    return pack_double(value --[[:! number]])
   else
     return nil, "protocol_buffer: unknown type: " .. tostring(type_str)
   end
@@ -378,16 +391,18 @@ local function decode_value(type_str, wire_type, bytes, offset, schema)
     return v, next
   elseif wire_type == M.WIRE_LEN then
     local len, next_off = M.decode_varint(bytes, offset)
-    if not len then return nil, next_off end
-    local data = bytes:sub(next_off, next_off + len - 1)
-    if #data < len then return nil, "protocol_buffer: truncated length-delimited field" end
+    if not len then return nil, next_off --[[:! string]] end
+    local len_ = math.floor(len --[[:! number]])
+    local next_off_ = next_off --[[:! integer]]
+    local data = bytes:sub(next_off_, next_off_ + len_ - 1)
+    if #data < len_ then return nil, "protocol_buffer: truncated length-delimited field" end
     if type_str == "message" then
       if not schema then return nil, "protocol_buffer: message field missing schema" end
       local msg, err = M.decode(schema, data)
       if not msg then return nil, err end
-      return msg, next_off + len
+      return msg, next_off_ + len_
     else
-      return data, next_off + len
+      return data, next_off_ + len_
     end
   elseif wire_type == M.WIRE_32BIT then
     if offset + 3 > #bytes + 1 then return nil, "protocol_buffer: truncated 32-bit field" end
@@ -442,27 +457,29 @@ end
 -- WIRE_LEN value is the raw bytes (without length prefix).
 -- Returns (fields_array, nil) or (nil, errmsg).
 function M.decode_raw(bytes)
-  local fields = {}
+  local fields = {} --: { [integer]: unknown }
   local offset = 1
   local len = #bytes
   while offset <= len do
     local tag, next_off = M.decode_varint(bytes, offset)
-    if not tag then return nil, next_off end
-    offset = next_off
+    if not tag then return nil, next_off --[[:! string]] end
+    offset = next_off --[[:! integer]]
     local field_number = math.floor(tag / 8)
     local wire_type = tag % 8
     if wire_type == M.WIRE_VARINT then
       local v, no = M.decode_varint(bytes, offset)
-      if not v then return nil, no end
+      if not v then return nil, no --[[:! string]] end
       fields[#fields + 1] = {field_number, wire_type, v}
-      offset = no
+      offset = no --[[:! integer]]
     elseif wire_type == M.WIRE_LEN then
       local flen, no = M.decode_varint(bytes, offset)
-      if not flen then return nil, no end
-      local data = bytes:sub(no, no + flen - 1)
-      if #data < flen then return nil, "protocol_buffer: truncated length-delimited data" end
+      if not flen then return nil, no --[[:! string]] end
+      local flen_ = math.floor(flen --[[:! number]])
+      local no_ = no --[[:! integer]]
+      local data = bytes:sub(no_, no_ + flen_ - 1)
+      if #data < flen_ then return nil, "protocol_buffer: truncated length-delimited data" end
       fields[#fields + 1] = {field_number, wire_type, data}
-      offset = no + flen
+      offset = no_ + flen_
     elseif wire_type == M.WIRE_32BIT then
       if offset + 3 > len then return nil, "protocol_buffer: truncated 32-bit field" end
       fields[#fields + 1] = {field_number, wire_type, bytes:sub(offset, offset + 3)}
@@ -491,6 +508,7 @@ end
 
 -- Encode a Lua table using schema.
 -- Returns (bytes_string, nil) or (nil, errmsg).
+--: ({ [string]: unknown }, { [string]: unknown }) -> (string | nil, string | nil)
 function M.encode(schema, msg)
   local parts = {}
   -- Collect and sort by field_number for deterministic output
@@ -502,9 +520,9 @@ function M.encode(schema, msg)
 
   for i = 1, #ordered do
     local name = ordered[i].name
-    local spec = ordered[i].spec
-    local field_number = spec[1]
-    local type_str     = spec[2]
+    local spec = ordered[i].spec --[[:! { [string]: unknown, ... }]]
+    local field_number = spec[1] --[[:! integer]]
+    local type_str     = spec[2] --[[:! string]]
     local required     = spec.required
     local repeated     = spec.repeated
     local packed       = spec.packed
@@ -526,8 +544,9 @@ function M.encode(schema, msg)
       if packed and wire == M.WIRE_VARINT then
         -- Pack all values into one length-delimited field
         local packed_parts = {}
+        local nested_schema_ = nested_schema --[[:! { [string]: unknown } | nil]]
         for j = 1, #value do
-          local enc, err = encode_value(type_str, value[j], nested_schema)
+          local enc, err = encode_value(type_str, value[j], nested_schema_)
           if enc == nil then return nil, err end
           packed_parts[j] = enc
         end
@@ -536,8 +555,9 @@ function M.encode(schema, msg)
         parts[#parts + 1] = M.encode_varint(#payload)
         parts[#parts + 1] = payload
       else
+        local nested_schema_ = nested_schema --[[:! { [string]: unknown } | nil]]
         for j = 1, #value do
-          local enc, err = encode_value(type_str, value[j], nested_schema)
+          local enc, err = encode_value(type_str, value[j], nested_schema_)
           if enc == nil then return nil, err end
           parts[#parts + 1] = M.field_tag(field_number, --[[:! integer]] wire)
           parts[#parts + 1] = enc
@@ -548,7 +568,7 @@ function M.encode(schema, msg)
       if wire == nil then
         return nil, "protocol_buffer: unknown type: " .. tostring(type_str)
       end
-      local enc, err = encode_value(type_str, value, nested_schema)
+      local enc, err = encode_value(type_str, value, nested_schema --[[:! { [string]: unknown } | nil]])
       if enc == nil then return nil, err end
       parts[#parts + 1] = M.field_tag(field_number, --[[:! integer]] wire)
       parts[#parts + 1] = enc
@@ -562,7 +582,7 @@ end
 -- Returns (msg_table, nil) or (nil, errmsg).
 function M.decode(schema, bytes)
   local number_map = build_number_map(schema)
-  local msg = {}
+  local msg = {} --[[:! { [string]: unknown, ... }]]
   local offset = 1
   local len = #bytes
 
@@ -573,8 +593,8 @@ function M.decode(schema, bytes)
 
   while offset <= len do
     local tag, next_off = M.decode_varint(bytes, offset)
-    if not tag then return nil, next_off end
-    offset = next_off
+    if not tag then return nil, next_off --[[:! string]] end
+    offset = next_off --[[:! integer]]
 
     local field_number = math.floor(tag / 8)
     local wire_type = tag % 8
@@ -587,9 +607,9 @@ function M.decode(schema, bytes)
     local field_info = number_map[field_number]
 
     if field_info then
-      local name = field_info.name
-      local spec = field_info.spec
-      local type_str = spec[2]
+      local name = field_info.name --[[:! string]]
+      local spec = field_info.spec --[[:! { [string]: unknown, ... }]]
+      local type_str = spec[2] --[[:! string]]
       local repeated = spec.repeated
       local packed = spec.packed
       local nested_schema = spec.schema
@@ -597,11 +617,13 @@ function M.decode(schema, bytes)
       -- Handle packed repeated (LEN wire type for numeric types)
       if packed and wire_type == M.WIRE_LEN then
         local flen, no = M.decode_varint(bytes, offset)
-        if not flen then return nil, no end
-        local inner = bytes:sub(no, no + flen - 1)
-        if #inner < flen then return nil, "protocol_buffer: truncated packed field" end
-        offset = no + flen
-        local arr = msg[name] or {}
+        if not flen then return nil, no --[[:! string]] end
+        local flen_ = math.floor(flen --[[:! number]])
+        local no_ = no --[[:! integer]]
+        local inner = bytes:sub(no_, no_ + flen_ - 1)
+        if #inner < flen_ then return nil, "protocol_buffer: truncated packed field" end
+        offset = no_ + flen_
+        local arr = (msg[name] or {}) --[[:! { [integer]: unknown }]]
         local ioff = 1
         while ioff <= #inner do
           local v, noff
@@ -610,25 +632,30 @@ function M.decode(schema, bytes)
           else
             v, noff = M.decode_varint(inner, ioff)
           end
-          if not v then return nil, noff end
+          if not v then return nil, noff --[[:! string]] end
+          local v_ = v --[[:! number]]
+          local vout --: unknown
           if type_str == "sint32" or type_str == "sint64" then
-            v = M.decode_zigzag(v)
+            vout = M.decode_zigzag(v_)
           elseif type_str == "bool" then
-            v = v ~= 0
+            vout = v_ ~= 0
+          else
+            vout = v_
           end
-          arr[#arr + 1] = v
-          ioff = noff
+          arr[#arr + 1] = vout
+          ioff = noff --[[:! integer]]
         end
         msg[name] = arr
       else
         local value, no = decode_value(type_str, wire_type, bytes, offset, nested_schema)
         if value == nil then return nil, no end
-        offset = no
+        local value_ = value --[[:! unknown]]
+        offset = (no --[[: any]]) --[[:! integer]]
         if repeated then
-          local arr = msg[name]
-          arr[#arr + 1] = value
+          local arr = msg[name] --[[:! { [integer]: unknown }]]
+          arr[#arr + 1] = value_
         else
-          msg[name] = value
+          msg[name] = value_
         end
       end
     else
@@ -636,12 +663,15 @@ function M.decode(schema, bytes)
       local raw_value, no
       if wire_type == M.WIRE_VARINT then
         raw_value, no = M.decode_varint(bytes, offset)
-        if not raw_value then return nil, no end
+        if not raw_value then return nil, no --[[:! string]] end
+        no = no --[[:! integer]]
       elseif wire_type == M.WIRE_LEN then
         local flen, fno = M.decode_varint(bytes, offset)
-        if not flen then return nil, fno end
-        raw_value = bytes:sub(fno, fno + flen - 1)
-        no = fno + flen
+        if not flen then return nil, fno --[[:! string]] end
+        local flen_ = math.floor(flen --[[:! number]])
+        local fno_ = fno --[[:! integer]]
+        raw_value = bytes:sub(fno_, fno_ + flen_ - 1)
+        no = fno_ + flen_
       elseif wire_type == M.WIRE_32BIT then
         raw_value = bytes:sub(offset, offset + 3)
         no = offset + 4
@@ -651,7 +681,7 @@ function M.decode(schema, bytes)
       end
       if not msg._unknown then msg._unknown = {} end
       msg._unknown[#msg._unknown + 1] = {field_number, wire_type, raw_value}
-      offset = no
+      offset = (no --[[: any]]) --[[:! integer]]
     end
   end
 
