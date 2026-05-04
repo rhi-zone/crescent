@@ -88,6 +88,7 @@ local function parse_class(pat, pos)
   local neg = false
   if pos <= #pat and pat:byte(pos) == 94 then -- ^
     neg = true; pos = pos + 1
+    pos = pos --[[:! integer]]
   end
   local ranges = {}
   local shortcuts = {}
@@ -141,6 +142,7 @@ local function parse_class(pat, pos)
         ranges[#ranges + 1] = { lo, lo }
       end
     end
+    pos = pos --[[:! integer]]
   end
   return parse_error("unterminated character class")
 end
@@ -175,9 +177,9 @@ end
 local parse_alt  -- forward declaration
 
 -- emit helpers: append instruction and return its index
---: (Insns, Instr) -> integer
+--: (Insns, any) -> integer
 local function emit(insns, instr)
-  insns[#insns + 1] = instr
+  insns[#insns + 1] = instr --[[:! Instr]]
   return #insns
 end
 
@@ -215,12 +217,13 @@ end
 -- Returns frag or (nil, errmsg)
 local parse_concat -- forward declaration
 
+--: (Insns, string, { [integer]: integer }, { [integer]: integer }) -> (Frag | nil, string | nil)
 parse_alt = function(insns, pat, pos, gc)
   local f, err = parse_concat(insns, pat, pos, gc)
   if not f then return nil, err end
   -- Check for |
   if pos[1] <= #pat and pat:byte(pos[1]) == 124 then
-    local alts = { f }
+    local alts = --[[:! { [integer]: Frag }]] { f }
     while pos[1] <= #pat and pat:byte(pos[1]) == 124 do
       pos[1] = pos[1] + 1
       local alt, e = parse_concat(insns, pat, pos, gc)
@@ -235,10 +238,11 @@ parse_alt = function(insns, pat, pos, gc)
     local all_outs = {}
     -- We need to wire alts together with SPLITs
     -- Walk backwards: last alt is already a frag, chain splits before it
-    local combined = alts[#alts]
+    local combined = alts[#alts] --[[:! Frag]]
     for i = #alts - 1, 1, -1 do
-      local split_pc = emit(insns, { op = OP_SPLIT, x = alts[i].start, y = combined.start })
-      combined = frag(split_pc, concat_outs(alts[i].outs, combined.outs))
+      local alts_i = alts[i] --[[:! Frag]]
+      local split_pc = emit(insns, { op = OP_SPLIT, x = alts_i.start, y = combined.start })
+      combined = frag(split_pc, concat_outs(alts_i.outs, combined.outs)) --[[:! Frag]]
     end
     return combined
   end
@@ -246,6 +250,7 @@ parse_alt = function(insns, pat, pos, gc)
 end
 
 -- Parse a single "atom" (no quantifier). Returns frag or (nil, errmsg) or nil for end of input.
+--: (Insns, string, { [integer]: integer }, { [integer]: integer }) -> (Frag | nil, string | nil)
 local function parse_atom(insns, pat, pos, gc)
   if pos[1] > #pat then return nil end
   local b = pat:byte(pos[1])
@@ -271,6 +276,7 @@ local function parse_atom(insns, pat, pos, gc)
     end
     local inner, e = parse_alt(insns, pat, pos, gc)
     if not inner then return nil, e end
+    local inner_ = inner --[[:! Frag]]
     if pos[1] > #pat or pat:byte(pos[1]) ~= 41 then
       return parse_error("unterminated group")
     end
@@ -278,9 +284,9 @@ local function parse_atom(insns, pat, pos, gc)
     if capture then
       local close_pc = emit(insns, { op = OP_SAVE, n = (group_idx - 1) * 2 + 1 })
       -- open_save.x = inner.start (so simulation follows x, not pc+1)
-      insns[open_pc].x = inner.start
+      insns[open_pc].x = inner_.start
       -- patch inner's outs to close_save (so alternatives converge at close_save)
-      patch_outs(insns, inner.outs, close_pc)
+      patch_outs(insns, inner_.outs, close_pc)
       -- close_save.x is the out of the group frag (patched by caller to next instruction)
       return frag(open_pc, { { close_pc, "x" } })
     else
@@ -301,14 +307,12 @@ local function parse_atom(insns, pat, pos, gc)
   elseif b == 91 then -- [
     pos[1] = pos[1] + 1
     local cls, e = parse_class(pat, pos[1])
-    if not cls then return nil, e end
+    if not cls then return nil, e --[[:! string]] end
+    local cls_ = cls --[[:! Cls]]
     -- parse_class returns (cls, new_pos) on success, (nil, err) on failure
-    -- But we hijacked the return: parse_class returns cls table + new pos, OR nil+errmsg
-    -- Wait — parse_class returns (table, pos) or (nil, errmsg). Let me re-check.
-    -- parse_class(pat, pos) returns {ranges,...}, new_pos   OR  nil, errmsg
-    -- Here e is actually new_pos when cls is non-nil. Let me fix:
-    pos[1] = e  -- e = new_pos returned from parse_class
-    local pc = emit(insns, { op = OP_CLASS, cls = cls })
+    -- e is actually new_pos when cls is non-nil
+    pos[1] = e --[[:! integer]]  -- e = new_pos returned from parse_class
+    local pc = emit(insns, { op = OP_CLASS, cls = cls_ })
     return frag(pc, { { pc, "x" } })
   elseif b == 92 then -- backslash
     pos[1] = pos[1] + 1
@@ -343,29 +347,43 @@ local function parse_atom(insns, pat, pos, gc)
 end
 
 -- Parse a quantifier {n}, {n,}, {n,m} at pos, returns (min, max, new_pos) or nil
+--: (string, integer) -> (number | nil, number | nil, integer | nil)
 local function parse_brace_quant(pat, pos)
   -- pos points to '{'
   if pos > #pat then return nil end
   local i = pos + 1
   -- parse n
   local n_start = i
-  while i <= #pat and pat:byte(i) >= 48 and pat:byte(i) <= 57 do i = i + 1 end
+  while i <= #pat do
+    local bi = (string.byte(pat, i) or 0) --[[:! integer]]
+    if bi < 48 or bi > 57 then break end
+    i = i + 1
+    i = i --[[:! integer]]
+  end
   if i == n_start then return nil end  -- no digits
-  local n = tonumber(pat:sub(n_start, i - 1))
+  local n = (tonumber(pat:sub(n_start, i - 1)) or 0) --[[:! number]]
   if i > #pat then return nil end
-  local b = pat:byte(i)
+  local b = (string.byte(pat, i) or 0) --[[:! integer]]
   if b == 125 then -- {n}
     return n, n, i + 1
   elseif b == 44 then -- ,
     i = i + 1
-    if i <= #pat and pat:byte(i) == 125 then -- {n,}
+    i = i --[[:! integer]]
+    local bi2 = (string.byte(pat, i) or 0) --[[:! integer]]
+    if i <= #pat and bi2 == 125 then -- {n,}
       return n, math.huge, i + 1
     end
     local m_start = i
-    while i <= #pat and pat:byte(i) >= 48 and pat:byte(i) <= 57 do i = i + 1 end
+    while i <= #pat do
+      local bj = (string.byte(pat, i) or 0) --[[:! integer]]
+      if bj < 48 or bj > 57 then break end
+      i = i + 1
+      i = i --[[:! integer]]
+    end
     if i == m_start then return nil end
-    local m = tonumber(pat:sub(m_start, i - 1))
-    if i > #pat or pat:byte(i) ~= 125 then return nil end
+    local m = (tonumber(pat:sub(m_start, i - 1)) or 0) --[[:! number]]
+    local bk = (string.byte(pat, i) or 0) --[[:! integer]]
+    if i > #pat or bk ~= 125 then return nil end
     if m < n then return nil end
     return n, m, i + 1
   end
@@ -393,15 +411,16 @@ local function clone_frag(insns, from, to)
   local new_start = #insns + 1
   for i = from, to do
     local src = insns[i]
-    local dst = { op = src.op }
-    if src.op == OP_CHAR then dst.c = src.c
-    elseif src.op == OP_CLASS then dst.cls = src.cls
+    local src_ = src --[[: any]]
+    local dst = { op = src.op } --[[: any]]
+    if src.op == OP_CHAR then dst.c = src_.c
+    elseif src.op == OP_CLASS then dst.cls = src_.cls
     elseif src.op == OP_SPLIT then
-      dst.x = src.x and src.x + offset
-      dst.y = src.y and src.y + offset
+      dst.x = src_.x and src_.x + offset
+      dst.y = src_.y and src_.y + offset
     elseif src.op == OP_JUMP then
-      dst.x = src.x and src.x + offset
-    elseif src.op == OP_SAVE then dst.n = src.n
+      dst.x = src_.x and src_.x + offset
+    elseif src.op == OP_SAVE then dst.n = src_.n
     end
     insns[#insns + 1] = dst
   end
@@ -490,9 +509,9 @@ local function apply_quant(insns, atom_from, atom_to, atom_outs, min, max)
       -- The outs of the original atom were atom_outs. The clones have outs at the same relative
       -- positions, shifted by offset. Rebuild:
       local clone_offset = clone_start - prev_from
-      local new_outs = {}
+      local new_outs = --[[:! Outs]] {}
       for i = 1, #prev_outs do
-        new_outs[i] = { prev_outs[i][1] + clone_offset, prev_outs[i][2] }
+        new_outs[i] = { (prev_outs[i][1] --[[:! integer]]) + clone_offset, prev_outs[i][2] }
       end
       -- But wait: prev_outs for the first copy are atom_outs which have already been patched
       -- to 0 (they haven't been patched yet to clone_start above). clone_frag copies x=0
@@ -520,9 +539,9 @@ local function apply_quant(insns, atom_from, atom_to, atom_outs, min, max)
       local clone_to = #insns
       patch_outs(insns, prev_outs, clone_start)
       local clone_offset = clone_start - prev_from
-      local new_outs = {}
+      local new_outs = --[[:! Outs]] {}
       for i = 1, #prev_outs do
-        new_outs[i] = { prev_outs[i][1] + clone_offset, prev_outs[i][2] }
+        new_outs[i] = { (prev_outs[i][1] --[[:! integer]]) + clone_offset, prev_outs[i][2] }
       end
       prev_outs = new_outs
       prev_from = clone_start
@@ -538,9 +557,9 @@ local function apply_quant(insns, atom_from, atom_to, atom_outs, min, max)
       patch_outs(insns, prev_outs, split_pc)
       -- tail loops back to split
       local tail_offset = tail_start - atom_from
-      local tail_outs = {}
+      local tail_outs = --[[:! Outs]] {}
       for i = 1, #atom_outs do
-        tail_outs[i] = { atom_outs[i][1] + tail_offset, atom_outs[i][2] }
+        tail_outs[i] = { (atom_outs[i][1] --[[:! integer]]) + tail_offset, atom_outs[i][2] }
       end
       patch_outs(insns, tail_outs, split_pc)
       return frag(atom_from, { { split_pc, "y" } })
@@ -555,9 +574,9 @@ local function apply_quant(insns, atom_from, atom_to, atom_outs, min, max)
       local split_pc = emit(insns, { op = OP_SPLIT, x = clone_start, y = 0 })
       patch_outs(insns, all_outs, split_pc)
       local clone_offset = clone_start - atom_from
-      local clone_outs = {}
+      local clone_outs = --[[:! Outs]] {}
       for i = 1, #atom_outs do
-        clone_outs[i] = { atom_outs[i][1] + clone_offset, atom_outs[i][2] }
+        clone_outs[i] = { (atom_outs[i][1] --[[:! integer]]) + clone_offset, atom_outs[i][2] }
       end
       all_outs = concat_outs(clone_outs, { { split_pc, "y" } })
       prev_from = clone_start
@@ -567,8 +586,9 @@ local function apply_quant(insns, atom_from, atom_to, atom_outs, min, max)
   end
 end
 
+--: (Insns, string, { [integer]: integer }, { [integer]: integer }) -> (Frag | nil, string | nil)
 parse_concat = function(insns, pat, pos, gc)
-  local frags = {}
+  local frags = --[[:! { [integer]: Frag }]] {}
   while pos[1] <= #pat do
     local b = pat:byte(pos[1])
     if b == 41 or b == 124 then break end  -- ) or |
@@ -594,7 +614,7 @@ parse_concat = function(insns, pat, pos, gc)
       elseif q == 123 then -- {
         local qmin, qmax, qend = parse_brace_quant(pat, pos[1])
         if qmin then
-          min, max = qmin, qmax; pos[1] = qend
+          min, max = qmin, qmax; pos[1] = qend --[[:! integer]]
         end
       end
       -- Consume optional lazy marker (not implemented, treated as greedy)
@@ -610,7 +630,9 @@ parse_concat = function(insns, pat, pos, gc)
         -- Ignore quantifier on anchors
         frags[#frags + 1] = af
       else
-        af = apply_quant(insns, atom_from, atom_to, af.outs, min, max)
+        local min_ = min --[[:! number]]
+        local max_ = max --[[:! number]]
+        af = apply_quant(insns, atom_from, atom_to, af.outs, min_, max_)
       end
     end
 
@@ -625,15 +647,19 @@ parse_concat = function(insns, pat, pos, gc)
 
   -- Chain frags together: each frag's outs patch to next frag's start
   for i = 1, #frags - 1 do
-    patch_outs(insns, frags[i].outs, frags[i + 1].start)
+    local fi = frags[i] --[[:! Frag]]
+    local fi1 = frags[i + 1] --[[:! Frag]]
+    patch_outs(insns, fi.outs, fi1.start)
   end
-  return frag(frags[1].start, frags[#frags].outs)
+  local first = frags[1] --[[:! Frag]]
+  local last = frags[#frags] --[[:! Frag]]
+  return frag(first.start, last.outs)
 end
 
 local function compile_pattern(pat)
-  local insns = {}
-  local gc = { 0 }  -- group counter
-  local pos = { 1 }
+  local insns = --[[:! Insns]] {}
+  local gc = --[[:! { [integer]: integer }]] { 0 }  -- group counter
+  local pos = --[[:! { [integer]: integer }]] { 1 }
 
   local f, e = parse_alt(insns, pat, pos, gc)
   if not f then return nil, e end
@@ -719,29 +745,32 @@ local function nfa_run(prog, subject, init, anchored)
 
   local best_start, best_end, best_caps = nil, nil, nil
 
+  --:: Thread = { pc: integer, caps: { [integer]: integer } }
+  --:: ThreadList = { [integer]: Thread }
   for start = init, anchored and init or slen + 1 do
-    local clist = {}
-    local visited = {}
+    local clist = --[[:! ThreadList]] {}
+    local visited = --[[:! { [integer]: unknown }]] {}
     add_thread(insns, clist, 1, new_caps(), start, slen, visited)
 
     -- Check if initial state is already MATCH (empty pattern)
     for i = 1, #clist do
-      if insns[clist[i].pc].op == OP_MATCH then
+      local ci = clist[i] --[[:! Thread]]
+      if insns[ci.pc].op == OP_MATCH then
         best_start = start
         best_end = start
-        best_caps = clist[i].caps
+        best_caps = ci.caps
         break
       end
     end
 
-    local pos = start
+    local pos = start --: integer
     while #clist > 0 and pos <= slen do
       local b = subject:byte(pos)
-      local nlist = {}
-      local nvisited = {}
+      local nlist = --[[:! ThreadList]] {}
+      local nvisited = --[[:! { [integer]: unknown }]] {}
 
       for i = 1, #clist do
-        local t = clist[i]
+        local t = clist[i] --[[:! Thread]]
         local instr = insns[t.pc]
         local op = instr.op
         local matched = false
@@ -762,13 +791,16 @@ local function nfa_run(prog, subject, init, anchored)
 
       -- Check for MATCH in new list (following epsilons already done in add_thread)
       for i = 1, #clist do
-        if insns[clist[i].pc].op == OP_MATCH then
+        local ci = clist[i] --[[:! Thread]]
+        if insns[ci.pc].op == OP_MATCH then
           -- Leftmost longest: prefer earlier start; for same start, prefer longer
-          if not best_start or start < best_start
-              or (start == best_start and pos > best_end) then
+          local best_start_ = best_start --[[:! integer]]
+          local best_end_ = best_end --[[:! integer]]
+          if not best_start or start < best_start_
+              or (start == best_start_ and pos > best_end_) then
             best_start = start
             best_end = pos
-            best_caps = clist[i].caps
+            best_caps = ci.caps
           end
         end
       end
@@ -787,8 +819,9 @@ local function nfa_run(prog, subject, init, anchored)
 end
 
 -- Extract capture strings from caps array
+--: (string, { [integer]: integer }, integer) -> { [integer]: string | boolean }
 local function extract_caps(subject, caps, ngroups)
-  local result = {}
+  local result = --[[:! { [integer]: string | boolean }]] {}
   for i = 1, ngroups do
     local s = caps[i * 2 - 1]
     local e = caps[i * 2]
@@ -814,41 +847,45 @@ end
 function Re:find(str, init)
   local s, e, caps = nfa_run(self._prog, str, init or 1, false)
   if not s then return nil end
+  local e_ = e --[[:! integer]]
   if self._prog.ngroups > 0 then
-    local cs = extract_caps(str, caps, self._prog.ngroups)
-    return s, e - 1, unpack(cs)
+    local cs = extract_caps(str, caps --[[:! { [integer]: integer }]], self._prog.ngroups)
+    return s, e_ - 1, unpack(cs)
   end
-  return s, e - 1
+  return s, e_ - 1
 end
 
 function Re:match(str)
   local s, e, caps = nfa_run(self._prog, str, 1, false)
   if not s then return nil end
+  local e_ = e --[[:! integer]]
   if self._prog.ngroups > 0 then
-    local cs = extract_caps(str, caps, self._prog.ngroups)
-    return e - 1, unpack(cs)
+    local cs = extract_caps(str, caps --[[:! { [integer]: integer }]], self._prog.ngroups)
+    return e_ - 1, unpack(cs)
   end
-  return e - 1
+  return e_ - 1
 end
 
 function Re:find_all(str)
   local results = {}
-  local pos = 1
+  local pos = 1 --: integer
   local slen = #str
   while pos <= slen + 1 do
     local s, e, caps = nfa_run(self._prog, str, pos, false)
     if not s then break end
-    local entry = { s, e - 1 }
+    local e_ = e --[[:! integer]]
+    local entry = { s, e_ - 1 }
     if self._prog.ngroups > 0 then
-      local cs = extract_caps(str, caps, self._prog.ngroups)
+      local cs = extract_caps(str, caps --[[:! { [integer]: integer }]], self._prog.ngroups)
       for i = 1, #cs do entry[#entry + 1] = cs[i] end
     end
     results[#results + 1] = entry
-    if e == s then
+    if e_ == s then
       pos = s + 1  -- avoid infinite loop on empty match
     else
-      pos = e
+      pos = e_
     end
+    pos = pos --[[:! integer]]
   end
   return results
 end
@@ -873,24 +910,26 @@ end
 function Re:sub(str, repl, n)
   local parts = {}
   local count = 0
-  local pos = 1
+  local pos = 1 --: integer
   local slen = #str
   local limit = n or 1
   while pos <= slen + 1 do
     if count >= limit then break end
     local s, e, caps = nfa_run(self._prog, str, pos, false)
     if not s then break end
+    local e_ = e --[[:! integer]]
     if s > pos then parts[#parts + 1] = str:sub(pos, s - 1) end
-    local full = str:sub(s, e - 1)
-    local caps_arr = self._prog.ngroups > 0 and extract_caps(str, caps, self._prog.ngroups) or {}
+    local full = str:sub(s, e_ - 1)
+    local caps_arr = self._prog.ngroups > 0 and extract_caps(str, caps --[[:! { [integer]: integer }]], self._prog.ngroups) or {}
     parts[#parts + 1] = apply_repl(repl, full, caps_arr, self._prog.ngroups)
     count = count + 1
-    if e == s then
+    if e_ == s then
       if s <= slen then parts[#parts + 1] = str:sub(s, s) end
       pos = s + 1
     else
-      pos = e
+      pos = e_
     end
+    pos = pos --[[:! integer]]
   end
   if pos <= slen then parts[#parts + 1] = str:sub(pos) end
   return table.concat(parts), count
@@ -899,22 +938,24 @@ end
 function Re:gsub(str, repl)
   local parts = {}
   local count = 0
-  local pos = 1
+  local pos = 1 --: integer
   local slen = #str
   while pos <= slen + 1 do
     local s, e, caps = nfa_run(self._prog, str, pos, false)
     if not s then break end
+    local e_ = e --[[:! integer]]
     if s > pos then parts[#parts + 1] = str:sub(pos, s - 1) end
-    local full = str:sub(s, e - 1)
-    local caps_arr = self._prog.ngroups > 0 and extract_caps(str, caps, self._prog.ngroups) or {}
+    local full = str:sub(s, e_ - 1)
+    local caps_arr = self._prog.ngroups > 0 and extract_caps(str, caps --[[:! { [integer]: integer }]], self._prog.ngroups) or {}
     parts[#parts + 1] = apply_repl(repl, full, caps_arr, self._prog.ngroups)
     count = count + 1
-    if e == s then
+    if e_ == s then
       if s <= slen then parts[#parts + 1] = str:sub(s, s) end
       pos = s + 1
     else
-      pos = e
+      pos = e_
     end
+    pos = pos --[[:! integer]]
   end
   if pos <= slen then parts[#parts + 1] = str:sub(pos) end
   return table.concat(parts), count
@@ -922,20 +963,22 @@ end
 
 function Re:split(str, max_splits)
   local result = {}
-  local pos = 1
+  local pos = 1 --: integer
   local slen = #str
   local count = 0
   while pos <= slen do
     if max_splits and count >= max_splits then break end
     local s, e, _ = nfa_run(self._prog, str, pos, false)
     if not s then break end
+    local e_ = e --[[:! integer]]
     result[#result + 1] = str:sub(pos, s - 1)
     count = count + 1
-    if e == s then
+    if e_ == s then
       pos = s + 1
     else
-      pos = e
+      pos = e_
     end
+    pos = pos --[[:! integer]]
   end
   result[#result + 1] = str:sub(pos)
   return result

@@ -96,6 +96,7 @@ end
 -- Automaton object
 -- ---------------------------------------------------------------------------
 
+--:: Automaton = { _goto: { [integer]: { [integer]: integer } }, _fail: { [integer]: integer }, _output: { [integer]: { [integer]: { [integer]: unknown } } | nil }, _patterns: { [integer]: string }, search: (self: Automaton, text: string) -> { [integer]: { [integer]: unknown } }, search_cb: (self: Automaton, text: string, cb: (integer, string, integer) -> nil) -> nil, find: (self: Automaton, text: string) -> (integer | nil, string | nil, integer | nil), contains: (self: Automaton, text: string) -> boolean, replace: (self: Automaton, text: string, replacements: unknown) -> string, patterns: (self: Automaton) -> { [integer]: string }, count: (self: Automaton) -> integer }
 local Automaton = {}
 Automaton.__index = Automaton
 
@@ -175,7 +176,7 @@ end
 
 -- Replace all occurrences.
 -- replacements: table {[pattern]=replacement} or function(pattern, start) -> string
---: (self: { ... }, text: string, replacements: unknown) -> string
+--: (self: Automaton, text: string, replacements: unknown) -> string
 function Automaton:replace(text, replacements)
   -- Collect all matches, sorted by start then by length (longest first for overlaps).
   local matches = self:search(text)
@@ -211,9 +212,11 @@ function Automaton:replace(text, replacements)
       local rep
       local t = type(replacements)
       if t == "function" then
-        rep = replacements(best[2], best[1])
+        local replacements_fn = replacements --[[:! (string, integer) -> string]]
+        rep = replacements_fn(best[2], best[1])
       else
-        rep = replacements[best[2]]
+        local replacements_tbl = replacements --[[:! { [string]: string }]]
+        rep = replacements_tbl[best[2]]
         if rep == nil then rep = best[2] end
       end
       parts[#parts + 1] = rep
