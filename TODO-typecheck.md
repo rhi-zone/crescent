@@ -155,6 +155,12 @@ last because the type system itself is the testbed.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+39)
+
+- [x] `lib/lz4/init.lua` (20 → 0, commit da500ec) — annotate flush_sequence params; or-0 byte() returns; annotate ht as { [integer]: integer }; math.floor on hash4 modulo; integer casts for offs/match_len/match_offset; any intermediates for pcall/xxh and compressed_block
+- [x] `lib/doc/cli.lua` (9 → 0, commit fad57d4) — local DocExport/DocResult aliases; force-cast result_u to DocResult; nil-safe err concat; cast exp.doc/exp.line after truthiness guard; any/string cast chain for pcall-encoded JSON
+- [x] `lib/crypto/aes/init.lua` (18 → 0, commit 630b694) — annotate W as { [integer]: { [integer]: integer } }; temp as { [integer]: integer }; or-0 byte() W init; any/cast for byte() multi-return blocks; nonce_s/data_s in ctr_crypt; s_raw/s split in decrypt loop
+
 ## Done in current session (session N+38)
 
 - [x] `lib/linux/proc.lua` (1 → 0, commit b85823c) — inline ret initialization to avoid shape mismatch on reassignment

@@ -1,5 +1,6 @@
 -- Display formatters for decoded DNS RDATA (see RFC 1035 §3.3, RFC 3596 §2.2, RFC 4034 §2–5)
 local dns = require("lib.dns.format")
+local bit = require("bit")
 
 local mod = {}
 
@@ -17,7 +18,7 @@ mod.formatters = {
 	--[[@diagnostic disable-next-line: deprecated]]
 	[dns.type.MG] = domain_parts_to_string,
 	--[[@diagnostic disable-next-line: deprecated]]
-	[dns.type.MINFO] = function (x) x.rmailbx = domain_parts_to_string(x.rmailbx); x.emailbx = domain_parts_to_string(x.emailbx); return x end,
+	[dns.type.MINFO] = function (x_u) local x = (x_u --[[: any]]) --[[:! { rmailbx: { [integer]: string | number }, emailbx: { [integer]: string | number }, ... }]]; (x --[[: any]]).rmailbx = domain_parts_to_string(x.rmailbx); (x --[[: any]]).emailbx = domain_parts_to_string(x.emailbx); return x end,
 	--[[@diagnostic disable-next-line: deprecated]]
 	[dns.type.MR] = domain_parts_to_string,
 	--[[@diagnostic disable-next-line: param-type-mismatch]]
@@ -25,13 +26,14 @@ mod.formatters = {
 	[dns.type.NS] = domain_parts_to_string,
 	[dns.type.PTR] = domain_parts_to_string,
 	--[[@diagnostic disable-next-line: param-type-mismatch]]
-	[dns.type.SOA] = function (x) x.mname = domain_parts_to_string(x.mname); x.rname = domain_parts_to_string(x.rname); return x end,
+	[dns.type.SOA] = function (x_u) local x = (x_u --[[: any]]) --[[:! { mname: { [integer]: string | number }, rname: { [integer]: string | number }, ... }]]; (x --[[: any]]).mname = domain_parts_to_string(x.mname); (x --[[: any]]).rname = domain_parts_to_string(x.rname); return x end,
 	[dns.type.TXT] = function (strs) return table.concat(strs, "\t") end,
 	[dns.type.A] = function (arr) return table.concat(arr, ".") end,
 	[dns.type.AAAA] = function (arr)
-		local s = string.char(unpack(arr)):gsub("..", function (m) --[[@param m string]]
+		local s = string.char(unpack(arr)):gsub("..", function (m_u)
+			local m = m_u --[[:! string]]
 			local b1, b2 = m:byte(1, 2)
-			return string.format(":%x", bit.bor(bit.lshift(b1, 8), b2))
+			return string.format(":%x", bit.bor(bit.lshift(b1 or 0, 8), b2 or 0))
 		end):sub(2)
 		local max0s = ""
 		for m in s:gmatch("[0:][0:]+") do if #m > #max0s then max0s = m end end
