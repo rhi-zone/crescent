@@ -160,6 +160,15 @@ last because the type system itself is the testbed.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+43)
+
+- [x] `lib/exec/help.lua` (1 → 0) — `(desc or ""):match(...)` to guard nil desc from try_command_line
+- [x] `lib/exec/make_api.lua` (1 → 0) — initialize `local token = ""` to satisfy `--: string` annotation
+- [x] `lib/path/path_unsafe.lua` (1 → 0) — annotate function params via `--: string` locals + force-cast; `(path_ --[[:! string]]):gmatch(...)` to call on narrowed string; guard `find` nil returns with `or i`
+- [x] `lib/fuse/readonly.lua` (1 → 0) — replace bare `bit` global with `require("bit")`
+- skipped `lib/fs/dir_list.lua` (1) — ULL number literal at line 317; same as time/init.lua family; typechecker limitation
+- skipped `lib/hyperloglog/init.lua` (1) — `require("bit")` cascades 1→6 (bit ops produce number instead of integer); net regression; skip
+
 ## Done in current session (session N+42)
 
 - [x] `lib/asm/emit/x64.lua` (2 → 0, commit ccd8f68) — any-intermediate for ffi.copy string arg; any→force-cast for ffi.cast return

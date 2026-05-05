@@ -61,7 +61,7 @@ local function expand_flags(flags_tbl, flag_idents, flags_list)
 			--: string | nil
 			local fshort = flag.short
 			--: string
-			local token
+			local token = ""
 			if flong then
 				token = flong
 			elseif fshort then

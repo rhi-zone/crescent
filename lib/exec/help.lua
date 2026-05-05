@@ -290,7 +290,7 @@ function M.parse(text)
 			if name and name ~= "help" and not name:match("^%-") then
 				schema.subcommands[name] = {
 					name = name,
-					description = desc:match("^%s*(.-)%s*$"),
+					description = (desc or ""):match("^%s*(.-)%s*$"),
 					flags = {},
 					positional = {},
 					subcommands = {},

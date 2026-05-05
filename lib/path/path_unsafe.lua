@@ -1,18 +1,22 @@
 local mod = {}
 
 --[[@param base string]] --[[@param path string]]
+--: (string, string) -> string
 mod.resolve = function (base, path)
-	base = base:gsub("/$", "")
-	--[[@type string]]
-	if path:byte(1) == 0x2f --[["/"]] then path = path:sub(2) end
+	--: string
+	local base_ = base --[[:! string]]
+	--: string
+	local path_ = path --[[:! string]]
+	base_ = base_:gsub("/$", "")
+	if path_:byte(1) == 0x2f --[["/"]] then path_ = path_:sub(2) end
 	local path_parts = {} --[[@type string[] ]]
 	local i = 1
-	while i < #base do
-		local start, end_ = base:find("[^/]*", i)
-		path_parts[#path_parts+1] = base:sub(start, end_)
-		i = end_ + 2
+	while i < #base_ do
+		local start, end_ = base_:find("[^/]*", i)
+		path_parts[#path_parts+1] = base_:sub(start or i, end_ or i)
+		i = (end_ or i) + 2
 	end
-	local path_it = path:gmatch("([^/]+)")
+	local path_it = (path_ --[[:! string]]):gmatch("([^/]+)") --[[:! () -> string | nil]]
 	--[[TODO: check if this is safe]]
 	while true do
 		local part = path_it()

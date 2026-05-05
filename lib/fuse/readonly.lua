@@ -1,4 +1,5 @@
 local fuse = require("lib.fuse")
+local bit = require("bit")
 
 local mod = {}
 
