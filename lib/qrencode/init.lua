@@ -48,21 +48,26 @@
 
 local mod = {}
 
+local bit = require("bit")
 local bxor = bit.bxor
 local min = math.min; local fmod = math.fmod; local floor = math.floor; local abs = math.abs
 local sub = string.sub; local rep = string.rep; local match = string.match; local gsub = string.gsub
 local format = string.format
 
+--: { [string]: string }
 local binary_a = { ["0"] = "000", ["1"] = "001", ["2"] = "010", ["3"] = "011", ["4"] = "100", ["5"] = "101", ["6"] = "110",
 	["7"] = "111" }
+--: { [string]: string }
 local binary_as = { ["0"] = "", ["1"] = "1", ["2"] = "10", ["3"] = "11", ["4"] = "100", ["5"] = "101", ["6"] = "110",
 	["7"] = "111" }
 
 -- Return the binary representation of the number `x` with the width of `digits`.
---[[@param x integer]] --[[@param digits integer]]
+--: (x: integer, digits: integer) -> string
 local binary = function (x, digits)
 	local s = format("%o", x)
-	s = binary_as[sub(s, 1, 1)] .. gsub(sub(s, 2), "(.)", binary_a)
+	local s1 = binary_as[sub(s, 1, 1)]
+	local s2, _ = gsub(sub(s, 2), "(.)", binary_a)
+	s = s1 .. s2
 	return rep("0", digits-#s) .. s
 end
 
@@ -99,6 +104,7 @@ end
 
 -- The capacity (number of codewords) of each version (1-40) for error correction levels 1-4 (LMQH).
 -- The higher the ec level, the lower the capacity of the version. Taken from spec, tables 7-11.
+--: { [integer]: { [integer]: integer } }
 local capacity = {
 	{  19,   16,   13, 	9}, {  34,   28,   22,   16}, {  55,   44,   34,   26}, {  80,   64,   48,   36},
 	{ 108,   86,   62,   46}, { 136,  108,   76,   60}, { 156,  124,   88,   66}, { 194,  154,  110,   86},
@@ -121,7 +127,15 @@ local get_version_eclevel = function (len, mode, requested_ec_level)
 	if mode == 4 then local_mode = 3
 	elseif mode == 8 then local_mode = 4 end
 
-	local bits, digits, modebits, c
+	--: integer
+	local bits = 0
+	--: integer
+	local digits = 0
+	--: integer
+	local modebits = 0
+	--: integer
+	local c = 0
+	--: { [integer]: { [integer]: integer } }
 	local tab = { { 10, 9, 8, 8 }, { 12, 11, 16, 10 }, { 14, 13, 16, 12 } }
 	local minversion = 40
 	local maxec_level = requested_ec_level or 1
@@ -162,8 +176,10 @@ local get_length = function (str, version, mode)
 	local i = mode
 	if mode == 4 then i = 3
 	elseif mode == 8 then i = 4 end
+	--: { [integer]: { [integer]: integer } }
 	local tab = { {10, 9, 8, 8}, {12, 11, 16, 10}, {14, 13, 16, 12} }
-	local digits
+	--: integer
+	local digits = 0
 	if version < 10 then digits = tab[1][i]
 	elseif version < 27 then digits = tab[2][i]
 	elseif version <= 40 then digits = tab[3][i]
@@ -202,6 +218,7 @@ end
 --- **Alphanumeric**: take two characters and encode them in 11 bits
 --- **Binary**: take one octet and encode it in 8 bits
 
+--: { [integer]: integer }
 local asciitbl = {
 			-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,  -- 0x01-0x0f
 	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,  -- 0x10-0x1f
@@ -215,9 +232,10 @@ local asciitbl = {
 --[[@param str string]]
 local encode_string_numeric = function (str)
 	local bitstring = ""
-	local int
-	_ = string.gsub(str, "..?.?", function(a)
-		int = tonumber(a) --[[@type integer]]
+	--: integer
+	local int = 0
+	local _s, _n = string.gsub(str, "..?.?", function(a)
+		int = math.floor(tonumber(a) or 0) --[[:! integer]]
 		if #a == 3 then bitstring = bitstring .. binary(int, 10)
 		elseif #a == 2 then bitstring = bitstring .. binary(int, 7)
 		else bitstring = bitstring .. binary(int, 4) end
@@ -230,16 +248,20 @@ end
 --[[@param str string]]
 local encode_string_ascii = function (str)
 	local bitstring = ""
-	local int
-	local b1, b2
-	_ = gsub(str, "..?", function(a)
+	--: integer
+	local int = 0
+	--: integer
+	local b1 = 0
+	--: integer
+	local b2 = 0
+	local _s2, _n2 = gsub(str, "..?", function(a)
 		if #a == 2 then
-			b1 = asciitbl[string.byte(string.sub(a, 1, 1))]
-			b2 = asciitbl[string.byte(string.sub(a, 2, 2))]
+			b1 = asciitbl[string.byte(string.sub(a, 1, 1)) or 1]
+			b2 = asciitbl[string.byte(string.sub(a, 2, 2)) or 1]
 			int = b1 * 45 + b2
 			bitstring = bitstring .. binary(int, 11)
 		else
-			int = asciitbl[string.byte(a)]
+			int = asciitbl[string.byte(a) or 1]
 			bitstring = bitstring .. binary(int, 6)
 		end
 		end)
@@ -273,16 +295,15 @@ end
 
 --[[Encoding the codeword is not enough. We need to make sure that]]
 --[[the length of the binary string is equal to the number of codewords of the version.]]
+--: (version: integer, ec_level: integer, data: string) -> string
 local add_pad_data = function (version, ec_level, data)
-	local count_to_pad, missing_digits
 	local cpty = capacity[version][ec_level] * 8
-	count_to_pad = min(4, cpty - #data)
+	local count_to_pad = floor(min(4, cpty - #data)) --[[:! integer]]
 	if count_to_pad > 0 then
 		data = data .. rep("0", count_to_pad)
 	end
 	if fmod(#data, 8) ~= 0 then
-		missing_digits = 8 - fmod(#data, 8)
-		--[[@diagnostic disable-next-line: param-type-mismatch]]
+		local missing_digits = floor(8 - fmod(#data, 8)) --[[:! integer]]
 		data = data .. rep("0", missing_digits)
 	end
 	--[[add "11101100" and "00010001" until enough data]]
@@ -351,6 +372,7 @@ local int_alpha = {
 
 --[[We only need the polynomial generators for block sizes 7, 10, 13, 15, 16, 17, 18, 20, 22, 24, 26, 28, and 30. Version]]
 --[[2 of the qr codes don't need larger ones (as opposed to version 1). The table has the format x^1*ɑ^21 + x^2*a^102 ...]]
+--: { [integer]: { [integer]: integer } }
 local generator_polynomial = {
 	 [7] = { 21, 102, 238, 149, 146, 229,  87,   0},
 	[10] = { 45,  32,  94,  64,  70, 118,  61,  46,  67, 251,   0 },
@@ -376,7 +398,8 @@ end
 
 --[[Return a table that has 0's in the first entries and then the alpha representation of the generator polynominal]]
 local get_generator_polynominal_adjusted = function (num_ec_codewords, highest_exponent)
-	local gp_alpha = {[0]=0}
+	local gp_alpha = {} --: { [integer]: integer }
+	gp_alpha[0] = 0
 	for i=0, highest_exponent - num_ec_codewords - 1 do
 		gp_alpha[i] = 0
 	end
@@ -460,6 +483,7 @@ end
 --[[ec level. Each entry has two or four fields, the odd files are the number of repetitions for the]]
 --[[folowing block info. The first entry of the block is the total number of codewords in the block,]]
 --[[the second entry is the number of data codewords. The third is not important.]]
+--: { [integer]: { [integer]: { [integer]: unknown } } }
 local ecblocks = {
 	{{  1, { 26, 19, 2}                 },   {  1, {26, 16, 4}},                  {  1, {26, 13, 6}},                  {  1, {26, 9, 8}               }},
 	{{  1, { 44, 34, 4}                 },   {  1, {44, 28, 8}},                  {  1, {44, 22, 11}},                  {  1, {44, 16, 14}               }},
@@ -505,6 +529,7 @@ local ecblocks = {
 
 --[[The bits that must be 0 if the version does fill the complete matrix.]]
 --[[Example: for version 1, no bits need to be added after arranging the data, for version 2 we need to add 7 bits at the end.]]
+--: { [integer]: integer }
 local remainder = {0, 7, 7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0}
 
 --[[This is the formula for table 1 in the spec:]]
@@ -554,18 +579,21 @@ local arrange_codewords_and_calculate_ec = function (version, ec_level, data)
 	end
 	--[[If the size of the data is not enough for the codeword, we add 0s and two special bytes until finished.]]
 	local blocks = ecblocks[version][ec_level]
-	local size_datablock_bytes, size_ecblock_bytes
-	local datablocks = {}
-	local final_ecblocks = {}
+	local size_datablock_bytes = 0
+	local size_ecblock_bytes = 0
+	local datablocks = {} --: { [integer]: string }
+	local final_ecblocks = {} --: { [integer]: string }
 	local count = 1
 	local pos = 0
+	--: integer
 	local cpty_ec_bits = 0
-	for i=1, #blocks/2 do
-		for _=1, blocks[2*i - 1] do
-			size_datablock_bytes = blocks[2*i][2]
-			size_ecblock_bytes   = blocks[2*i][1] - blocks[2*i][2]
+	for i=1, floor(#blocks/2) do
+		for _=1, (blocks[2*i - 1] --[[:! integer]]) do
+			local bi = blocks[2*i] --[[:! { [integer]: integer }]]
+			size_datablock_bytes = bi[2]
+			size_ecblock_bytes   = bi[1] - size_datablock_bytes
 			cpty_ec_bits = cpty_ec_bits + size_ecblock_bytes * 8
-			datablocks[#datablocks + 1] = string.sub(data, pos * 8 + 1, ( pos + size_datablock_bytes)*8)
+			datablocks[#datablocks + 1] = string.sub(data, pos * 8 + 1, (pos + size_datablock_bytes)*8)
 			local tmp_tab = calculate_error_correction(datablocks[#datablocks], size_ecblock_bytes)
 			local tmp_str = ""
 			for x=1, #tmp_tab do
@@ -684,6 +712,7 @@ end
 --[[(that is: top left, top right and bottom left.)]]
 
 --[[For each version, where should we place the alignment patterns? See table E.1 of the spec]]
+--: { [integer]: { [integer]: integer } }
 local alignment_pattern = {
 	{}, {6, 18}, {6, 22}, {6, 26}, {6, 30}, {6, 34}, --[[1-6]]
 	{6, 22, 38}, {6, 24, 42}, {6, 26, 46}, {6, 28, 50}, {6, 30, 54}, {6, 32, 58}, {6, 34, 62}, --[[7-13]]
@@ -747,6 +776,7 @@ end
 
 --[[The first index is ec level (LMQH, 1-4), the second is the mask (0-7). This bitstring of length 15 is to be used]]
 --[[as mandatory pattern in the qrcode. Mask -1 is for debugging purpose only and is the "noop" mask.]]
+--: { [integer]: { [integer]: string } }
 local typeinfo = {
 	{ [-1] = "111111111111111", [0] = "111011111000100", "111001011110011", "111110110101010", "111100010011101", "110011000101111", "110001100011000", "110110001000001", "110100101110110" },
 	{ [-1] = "111111111111111", [0] = "101010000010010", "101000100100101", "101111001111100", "101101101001011", "100010111111001", "100000011001110", "100111110010111", "100101010100000" },
@@ -787,6 +817,7 @@ end
 
 --[[Bits for version information 7-40]]
 --[[The reversed strings from https://www.thonky.com/qr-code-tutorial/format-version-tables]]
+--: { [integer]: string }
 local version_information = {"001010010011111000", "001111011010000100", "100110010101100100", "110010110010010100",
 	"011011111101110100", "010001101110001100", "111000100001101100", "101100000110011100", "000101001001111100",
 	"000111101101000010", "101110100010100010", "111010000101010010", "010011001010110010", "011001011001001010",
@@ -884,12 +915,10 @@ local get_pixel_with_mask = function (mask, x, y, value)
 	end
 	if invert then
 		--[[value = 1? -> -1, value = 0? -> 1]]
-		--[[@diagnostic disable-next-line: return-type-mismatch]]
-		return 1 - 2 * tonumber(value)
+		return 1 - 2 * (tonumber(value) or 0)
 	else
 		--[[value = 1? -> 1, value = 0? -> -1]]
-		--[[@diagnostic disable-next-line: return-type-mismatch]]
-		return -1 + 2*tonumber(value)
+		return -1 + 2*(tonumber(value) or 0)
 	end
 end
 
@@ -969,13 +998,16 @@ local calculate_penalty = function (matrix)
 	--[[1: Adjacent modules in row/column in same color]]
 	--[[--------------------------------------------]]
 	--[[No. of modules = (5+i)  -> 3 + i]]
-	local last_bit_blank -- < 0:  blank, > 0: black
-	local is_blank
-	local number_of_consecutive_bits
+	--: boolean
+	local last_bit_blank = false -- < 0:  blank, > 0: black
+	--: boolean
+	local is_blank = false
+	--: integer
+	local number_of_consecutive_bits = 0
 	--[[first: vertical]]
 	for x = 1, size do
 		number_of_consecutive_bits = 0
-		last_bit_blank = nil
+		last_bit_blank = false
 		for y = 1, size do
 			if matrix[x][y] > 0 then
 				--[[small optimization: this is for penalty 4]]
@@ -1001,7 +1033,7 @@ local calculate_penalty = function (matrix)
 	--[[now horizontal]]
 	for y = 1, size do
 		number_of_consecutive_bits = 0
-		last_bit_blank = nil
+		last_bit_blank = false
 		for x = 1, size do
 			is_blank = matrix[x][y] < 0
 			if last_bit_blank == is_blank then
@@ -1106,10 +1138,11 @@ end
 --[[penalty (score) each.]]
 local get_matrix_with_lowest_penalty = function (version, ec_level, data)
 	local tab, penalty
-	local tab_min_penalty, min_penalty
+	local tab_min_penalty, min_penalty_n = get_matrix_and_penalty(version, ec_level, data, 0)
+	--: integer
+	local min_penalty = min_penalty_n
 
 	--[[try masks 0-7]]
-	tab_min_penalty, min_penalty = get_matrix_and_penalty(version, ec_level, data, 0)
 	for i=1, 7 do
 		tab, penalty = get_matrix_and_penalty(version, ec_level, data, i)
 		if penalty < min_penalty then
