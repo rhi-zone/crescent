@@ -12,6 +12,8 @@ local M = {}
 
 M._tier = "pure"
 
+--:: Spline = { eval: (self: Spline, x: number) -> number, eval_array: (self: Spline, qxs: { [integer]: number }) -> { [integer]: number }, deriv: (self: Spline, x: number) -> number, ... }
+
 local sqrt = math.sqrt
 local floor = math.floor
 local abs   = math.abs
@@ -65,6 +67,7 @@ end
 
 -- Binary search: returns index i such that xs[i] <= x < xs[i+1].
 -- Returns 1 if x <= xs[1], n-1 if x >= xs[n].
+--: (xs: { [integer]: number }, x: number) -> integer
 local function bisect(xs, x)
   local lo, hi = 1, #xs
   if x <= xs[lo] then return lo end
@@ -76,7 +79,7 @@ local function bisect(xs, x)
   return lo
 end
 
---: ({number}, {number}, number) -> number
+--: (xs: { [integer]: number }, ys: { [integer]: number }, x: number) -> number
 M.piecewise_linear = function(xs, ys, x)
   local i = bisect(xs, x)
   local dx = xs[i+1] - xs[i]
@@ -112,7 +115,7 @@ local function thomas(a, b, c, d)
 end
 
 -- Returns a spline object with :eval(x), :eval_array(xs), :deriv(x).
---: ({number}, {number}) -> table
+--: (xs: { [integer]: number }, ys: { [integer]: number }) -> Spline
 M.cubic_spline = function(xs, ys)
   local n = #xs - 1  -- number of intervals
   assert(n >= 1, "cubic_spline: need at least 2 points")
@@ -179,8 +182,9 @@ M.cubic_spline = function(xs, ys)
   local spline = { _xs = xs, _ys = ys, _h = h, _M = Mfull, _n = n }
 
   function spline:_segment(x)
-    local i = bisect(self._xs, x)
-    if i > self._n then i = self._n end
+    local i = bisect(self._xs --[[:! { [integer]: number }]], x)
+    local n_ = self._n --[[:! integer]]
+    if i > n_ then i = n_ end
     return i
   end
 
@@ -226,7 +230,7 @@ end
 
 -- Returns a spline that passes through all (xs, ys) control points.
 -- Uses centripetal parameterization with uniform spacing (standard Catmull-Rom).
---: ({number}, {number}) -> table
+--: (xs: { [integer]: number }, ys: { [integer]: number }) -> Spline
 M.catmull_rom = function(xs, ys)
   local n = #xs
   assert(n >= 2, "catmull_rom: need at least 2 points")
@@ -297,7 +301,7 @@ end
 -- Monotone cubic spline (Fritsch-Carlson)
 -- ---------------------------------------------------------------------------
 
---: ({number}, {number}) -> table
+--: (xs: { [integer]: number }, ys: { [integer]: number }) -> Spline
 M.monotone_cubic = function(xs, ys)
   local n = #xs
   assert(n >= 2, "monotone_cubic: need at least 2 points")
@@ -383,12 +387,14 @@ end
 -- Lagrange interpolation
 -- ---------------------------------------------------------------------------
 
---: ({number}, {number}, number) -> number
+--: (xs: { [integer]: number }, ys: { [integer]: number }, x: number) -> number
 M.lagrange = function(xs, ys, x)
   local n = #xs
-  local result = 0
+  --: number
+  local result = 0.0
   for i = 1, n do
-    local basis = 1
+    --: number
+    local basis = 1.0
     for j = 1, n do
       if j ~= i then
         basis = basis * (x - xs[j]) / (xs[i] - xs[j])
@@ -404,7 +410,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Returns divided-difference table (only the first row, i.e. coefficients).
---: ({number}, {number}) -> {number}
+--: (xs: { [integer]: number }, ys: { [integer]: number }) -> { [integer]: number }
 M.newton_interp = function(xs, ys)
   local n = #xs
   local dd = {}
@@ -418,7 +424,7 @@ M.newton_interp = function(xs, ys)
   return dd  -- dd[1]=f[x1], dd[2]=f[x1,x2], ... (Newton forward coefficients)
 end
 
---: ({number}, {number}, number) -> number
+--: (coeffs: { [integer]: number }, xs: { [integer]: number }, x: number) -> number
 M.newton_eval = function(coeffs, xs, x)
   local n = #coeffs
   local result = coeffs[n]
@@ -432,7 +438,7 @@ end
 -- Bezier (de Casteljau)
 -- ---------------------------------------------------------------------------
 
---: ({{number, number}}, number) -> (number, number)
+--: (pts: { [integer]: { [integer]: number } }, t: number) -> (number, number)
 M.bezier = function(pts, t)
   -- Work on a local copy (flat pairs)
   local n = #pts
@@ -468,7 +474,7 @@ local function bspline_basis(knots, i, p, t)
   return left + right
 end
 
---: ({{number,number}}, {number}, number, number) -> (number, number)
+--: (control_points: { [integer]: { [integer]: number } }, knots: { [integer]: number }, degree: number, t: number) -> (number, number)
 M.bspline = function(control_points, knots, degree, t)
   local n = #control_points
   -- Clamp t to valid domain
@@ -478,11 +484,15 @@ M.bspline = function(control_points, knots, degree, t)
   if t >= t_hi then t = t_hi - 1e-10 end
   if t < t_lo  then t = t_lo end
 
-  local rx, ry = 0, 0
+  --: number
+  local rx = 0.0
+  --: number
+  local ry = 0.0
   for i = 1, n do
     local b = bspline_basis(knots, i, degree, t)
-    rx = rx + control_points[i][1] * b
-    ry = ry + control_points[i][2] * b
+    local cp = control_points[i] --[[:! { [integer]: number }]]
+    rx = rx + cp[1] * b
+    ry = ry + cp[2] * b
   end
   return rx, ry
 end
@@ -491,10 +501,17 @@ end
 -- Linear regression
 -- ---------------------------------------------------------------------------
 
---: ({number}, {number}) -> (number, number, number)
+--: (xs: { [integer]: number }, ys: { [integer]: number }) -> (number, number, number)
 M.linear_regression = function(xs, ys)
   local n = #xs
-  local sx, sy, sxx, sxy = 0, 0, 0, 0
+  --: number
+  local sx = 0.0
+  --: number
+  local sy = 0.0
+  --: number
+  local sxx = 0.0
+  --: number
+  local sxy = 0.0
   for i = 1, n do
     sx  = sx  + xs[i]
     sy  = sy  + ys[i]
@@ -502,16 +519,22 @@ M.linear_regression = function(xs, ys)
     sxy = sxy + xs[i] * ys[i]
   end
   local denom = n * sxx - sx * sx
-  local a, b
+  --: number
+  local a = 0.0
+  --: number
+  local b = 0.0
   if denom == 0 then
-    a = 0; b = sy / n
+    a = 0.0; b = sy / n
   else
     a = (n * sxy - sx * sy) / denom
     b = (sy - a * sx) / n
   end
   -- R²
   local ymean = sy / n
-  local ss_tot, ss_res = 0, 0
+  --: number
+  local ss_tot = 0.0
+  --: number
+  local ss_res = 0.0
   for i = 1, n do
     ss_tot = ss_tot + (ys[i] - ymean)^2
     local yhat = a * xs[i] + b
@@ -525,7 +548,7 @@ end
 -- Polynomial evaluation
 -- ---------------------------------------------------------------------------
 
---: ({number}, number) -> number
+--: (coeffs: { [integer]: number }, x: number) -> number
 M.poly_eval = function(coeffs, x)
   -- Horner's method; coeffs[1]=c0, coeffs[d+1]=cd
   local n = #coeffs
@@ -542,12 +565,13 @@ end
 
 -- Solve lower-triangular system (actually we use a direct approach via
 -- normal equations with Gaussian elimination).
+--: (A: { [integer]: { [integer]: number } }, b: { [integer]: number }) -> { [integer]: number }
 local function mat_solve(A, b)
   -- A is n×n (1-indexed rows and cols), b is n-vector
   -- Returns solution x via partial-pivot Gaussian elimination
   local n = #b
-  -- Augmented matrix
-  local M2 = {}
+  -- Augmented matrix (any to allow 2D unknown indexing)
+  local M2 = {} --[[: any]]
   for i = 1, n do
     M2[i] = {}
     for j = 1, n do M2[i][j] = A[i][j] end
@@ -555,48 +579,51 @@ local function mat_solve(A, b)
   end
   for col = 1, n do
     -- Pivot
-    local max_val, max_row = abs(M2[col][col]), col
+    local max_val, max_row = abs(M2[col][col] --[[: number]]), col
     for row = col+1, n do
-      if abs(M2[row][col]) > max_val then
-        max_val = abs(M2[row][col]); max_row = row
+      if abs(M2[row][col] --[[: number]]) > max_val then
+        max_val = abs(M2[row][col] --[[: number]]); max_row = row
       end
     end
     M2[col], M2[max_row] = M2[max_row], M2[col]
-    local pivot = M2[col][col]
+    local pivot = M2[col][col] --[[: number]]
     if abs(pivot) < 1e-14 then
       -- Singular — return zeros
-      local x = {}; for i = 1, n do x[i] = 0 end; return x
+      local x = {} --[[: { [integer]: number }]]
+      for i = 1, n do x[i] = 0.0 end
+      return x
     end
     for row = 1, n do
       if row ~= col then
-        local factor = M2[row][col] / pivot
+        local factor = M2[row][col] --[[: number]] / pivot
         for j = col, n+1 do
-          M2[row][j] = M2[row][j] - factor * M2[col][j]
+          M2[row][j] = M2[row][j] --[[: number]] - factor * (M2[col][j] --[[: number]])
         end
       end
     end
     -- Normalize pivot row
-    for j = col, n+1 do M2[col][j] = M2[col][j] / pivot end
+    for j = col, n+1 do M2[col][j] = M2[col][j] --[[: number]] / pivot end
   end
   local x = {}
   for i = 1, n do x[i] = M2[i][n+1] end
   return x
 end
 
---: ({number}, {number}, number) -> ({number}, number)
+--: (xs: { [integer]: number }, ys: { [integer]: number }, degree: number) -> ({ [integer]: number }, number)
 M.poly_regression = function(xs, ys, degree)
   local n = #xs
   local d = degree + 1  -- number of coefficients
 
   -- Build Vandermonde-based normal equations: (V^T V) c = V^T y
   -- ATA[i][j] = sum_k x_k^(i+j-2)
-  local ATA = {}
-  local ATy = {}
+  local ATA = {} --: { [integer]: { [integer]: number } }
+  local ATy = {} --: { [integer]: number }
   for i = 1, d do
     ATA[i] = {}
-    ATy[i] = 0
+    ATy[i] = 0.0
     for j = 1, d do
-      local s = 0
+      --: number
+      local s = 0.0
       for k = 1, n do s = s + xs[k]^(i+j-2) end
       ATA[i][j] = s
     end
@@ -606,10 +633,14 @@ M.poly_regression = function(xs, ys, degree)
   local coeffs = mat_solve(ATA, ATy)
 
   -- R²
-  local ymean = 0
+  --: number
+  local ymean = 0.0
   for i = 1, n do ymean = ymean + ys[i] end
   ymean = ymean / n
-  local ss_tot, ss_res = 0, 0
+  --: number
+  local ss_tot = 0.0
+  --: number
+  local ss_res = 0.0
   for i = 1, n do
     ss_tot = ss_tot + (ys[i] - ymean)^2
     local yhat = M.poly_eval(coeffs, xs[i])
@@ -623,7 +654,7 @@ end
 -- Nearest neighbor
 -- ---------------------------------------------------------------------------
 
---: ({number}, {number}, number) -> number
+--: (xs: { [integer]: number }, ys: { [integer]: number }, x: number) -> number
 M.nearest = function(xs, ys, x)
   local n = #xs
   local best_i = 1
