@@ -116,7 +116,7 @@ function M.from_hex(hex)
   if #clean % 2 ~= 0 then
     return nil, "hex string has odd length"
   end
-  local t = {}
+  local t = {} --[[: any]]
   for i = 1, #clean, 2 do
     local hi = clean:sub(i, i)
     local lo = clean:sub(i + 1, i + 1)
@@ -133,7 +133,7 @@ end
 -- @param dump_str  string produced by dump()
 -- @return          binary string
 function M.parse(dump_str)
-  local bytes = {}
+  local bytes = {} --[[: any]]
   for line in (dump_str .. "\n"):gmatch("([^\n]*)\n") do
     -- strip optional diff prefix ("> " or "< " or "  ")
     local rest = line:gsub("^[><]?%s", "")

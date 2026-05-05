@@ -214,7 +214,7 @@ local function next_token(lex)
 	elseif (b >= 0x41 and b <= 0x5A) or (b >= 0x61 and b <= 0x7A) or b == 0x5F then
 		local s, e = find(src, "^[_%a][_%w]*", pos)
 		local name = sub(src, s, e)
-		lex.pos = e + 1
+		lex.pos = (e or pos) + 1
 		return { kind = TK.NAME, value = name }
 	end
 	return lex_error(lex, ("unexpected character %q"):format(string.char(b)))
