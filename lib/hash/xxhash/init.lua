@@ -37,7 +37,7 @@ end
 -- Read uint32 little-endian from string at 1-based offset.
 local function read32(s, i)
 	local b0, b1, b2, b3 = byte(s, i, i + 3)
-	return tobit(b0 + b1 * 256 + b2 * 65536 + b3 * 16777216)
+	return tobit((b0 or 0) + (b1 or 0) * 256 + (b2 or 0) * 65536 + (b3 or 0) * 16777216)
 end
 
 local function round32(acc, input)
@@ -93,7 +93,7 @@ function M.xxh32(data, seed)
 
 	-- Remaining bytes
 	while i <= len do
-		h = mul32(rol(tobit(h + mul32(byte(data, i), PRIME32_5)), 11), PRIME32_1)
+		h = mul32(rol(tobit(h + mul32(byte(data, i) or 0, PRIME32_5)), 11), PRIME32_1)
 		i = i + 1
 	end
 
@@ -102,33 +102,37 @@ end
 
 -- ── xxHash32 streaming ──────────────────────────────────────────────────────
 
+--:: H32State = { _seed: integer, _v1: integer, _v2: integer, _v3: integer, _v4: integer, _total_len: integer, _buf: string, _large: boolean }
+
 local H32 = {}
 H32.__index = H32
 
 function H32:reset(seed)
+	local s = self --[[:! H32State]]
 	seed = tobit(seed or 0)
-	self._seed = seed
-	self._v1 = tobit(seed + PRIME32_1 + PRIME32_2)
-	self._v2 = tobit(seed + PRIME32_2)
-	self._v3 = seed
-	self._v4 = tobit(seed - PRIME32_1)
-	self._total_len = 0
-	self._buf = ""
-	self._large = false
+	s._seed = seed
+	s._v1 = tobit(seed + PRIME32_1 + PRIME32_2)
+	s._v2 = tobit(seed + PRIME32_2)
+	s._v3 = seed
+	s._v4 = tobit(seed - PRIME32_1)
+	s._total_len = 0
+	s._buf = ""
+	s._large = false
 end
 
 function H32:update(data)
+	local s = self --[[:! H32State]]
 	if type(data) ~= "string" then return nil, "xxh32: update expects a string" end
-	self._total_len = self._total_len + #data
-	if #self._buf > 0 then
-		data = self._buf .. data
-		self._buf = ""
+	s._total_len = s._total_len + #data
+	if #s._buf > 0 then
+		data = s._buf .. data
+		s._buf = ""
 	end
 	local len = #data
 	local i = 1
 	if len >= 16 then
-		self._large = true
-		local v1, v2, v3, v4 = self._v1, self._v2, self._v3, self._v4
+		s._large = true
+		local v1, v2, v3, v4 = s._v1, s._v2, s._v3, s._v4
 		local limit = len - 15
 		while i <= limit do
 			v1 = round32(v1, read32(data, i))
@@ -137,20 +141,21 @@ function H32:update(data)
 			v4 = round32(v4, read32(data, i + 12))
 			i = i + 16
 		end
-		self._v1, self._v2, self._v3, self._v4 = v1, v2, v3, v4
+		s._v1, s._v2, s._v3, s._v4 = v1, v2, v3, v4
 	end
-	if i <= len then self._buf = data:sub(i) end
+	if i <= len then s._buf = string.sub(data, i) end
 end
 
 function H32:digest()
+	local s = self --[[:! H32State]]
 	local h
-	if self._large then
-		h = tobit(rol(self._v1, 1) + rol(self._v2, 7) + rol(self._v3, 12) + rol(self._v4, 18))
+	if s._large then
+		h = tobit(rol(s._v1, 1) + rol(s._v2, 7) + rol(s._v3, 12) + rol(s._v4, 18))
 	else
-		h = tobit(self._seed + PRIME32_5)
+		h = tobit(s._seed + PRIME32_5)
 	end
-	h = tobit(h + self._total_len)
-	local buf = self._buf
+	h = tobit(h + s._total_len)
+	local buf = s._buf
 	local blen = #buf
 	local i = 1
 	while i <= blen - 3 do
@@ -158,16 +163,18 @@ function H32:digest()
 		i = i + 4
 	end
 	while i <= blen do
-		h = mul32(rol(tobit(h + mul32(byte(buf, i), PRIME32_5)), 11), PRIME32_1)
+		h = mul32(rol(tobit(h + mul32(byte(buf, i) or 0, PRIME32_5)), 11), PRIME32_1)
 		i = i + 1
 	end
 	return u32(avalanche32(h))
 end
 
 function M.new32(seed)
-	local self = setmetatable({}, H32)
-	self:reset(seed)
-	return self
+	local hany = setmetatable({}, H32) --[[: any]]
+	local h = hany --[[:! H32State]]
+	local r = H32.reset --[[:! (H32State, integer | nil) -> nil]]
+	r(h, seed)
+	return h
 end
 
 -- ── xxHash64 (FFI uint64_t) ─────────────────────────────────────────────────
@@ -175,7 +182,7 @@ end
 local ffi_ok, ffi = pcall(require, "ffi")
 
 if ffi_ok then
-	local uint64 = ffi.typeof("uint64_t")
+	local uint64 = ffi.typeof("uint64_t") --[[: any]]
 
 	local P1 = ffi.cast("uint64_t", 0x9E3779B185EBCA87ULL)
 	local P2 = ffi.cast("uint64_t", 0xC2B2AE3D27D4EB4FULL)
@@ -309,33 +316,37 @@ if ffi_ok then
 
 	-- ── xxHash64 streaming ──────────────────────────────────────────────────
 
+	--:: H64State = { _seed: any, _v1: any, _v2: any, _v3: any, _v4: any, _total_len: integer, _buf: string, _large: boolean }
+
 	local H64 = {}
 	H64.__index = H64
 
 	function H64:reset(seed)
+		local st = self --[[:! H64State]]
 		local s = uint64(seed or 0)
-		self._seed = s
-		self._v1 = s + P1 + P2
-		self._v2 = s + P2
-		self._v3 = s
-		self._v4 = s - P1
-		self._total_len = 0
-		self._buf = ""
-		self._large = false
+		st._seed = s
+		st._v1 = s + P1 + P2
+		st._v2 = s + P2
+		st._v3 = s
+		st._v4 = s - P1
+		st._total_len = 0
+		st._buf = ""
+		st._large = false
 	end
 
 	function H64:update(data)
+		local st = self --[[:! H64State]]
 		if type(data) ~= "string" then return nil, "xxh64: update expects a string" end
-		self._total_len = self._total_len + #data
-		if #self._buf > 0 then
-			data = self._buf .. data
-			self._buf = ""
+		st._total_len = st._total_len + #data
+		if #st._buf > 0 then
+			data = st._buf .. data
+			st._buf = ""
 		end
 		local len = #data
 		local i = 1
 		if len >= 32 then
-			self._large = true
-			local v1, v2, v3, v4 = self._v1, self._v2, self._v3, self._v4
+			st._large = true
+			local v1, v2, v3, v4 = st._v1, st._v2, st._v3, st._v4
 			local limit = len - 31
 			while i <= limit do
 				v1 = round64(v1, read64(data, i))
@@ -344,25 +355,26 @@ if ffi_ok then
 				v4 = round64(v4, read64(data, i + 24))
 				i = i + 32
 			end
-			self._v1, self._v2, self._v3, self._v4 = v1, v2, v3, v4
+			st._v1, st._v2, st._v3, st._v4 = v1, v2, v3, v4
 		end
-		if i <= len then self._buf = data:sub(i) end
+		if i <= len then st._buf = string.sub(data, i) end
 	end
 
 	function H64:digest()
+		local st = self --[[:! H64State]]
 		local h
-		if self._large then
-			local v1, v2, v3, v4 = self._v1, self._v2, self._v3, self._v4
+		if st._large then
+			local v1, v2, v3, v4 = st._v1, st._v2, st._v3, st._v4
 			h = rol64(v1, 1) + rol64(v2, 7) + rol64(v3, 12) + rol64(v4, 18)
 			h = merge_round64(h, v1)
 			h = merge_round64(h, v2)
 			h = merge_round64(h, v3)
 			h = merge_round64(h, v4)
 		else
-			h = self._seed + P5
+			h = st._seed + P5
 		end
-		h = h + uint64(self._total_len)
-		local buf = self._buf
+		h = h + uint64(st._total_len)
+		local buf = st._buf
 		local blen = #buf
 		local i = 1
 		while i <= blen - 7 do
@@ -376,23 +388,25 @@ if ffi_ok then
 			i = i + 4
 		end
 		while i <= blen do
-			h = rol64(xor64(h, uint64(byte(buf, i)) * P5), 11) * P1
+			h = rol64(xor64(h, uint64(byte(buf, i) or 0) * P5), 11) * P1
 			i = i + 1
 		end
 		return to_hex64(avalanche64(h))
 	end
 
 	function M.new64(seed)
-		local self = setmetatable({}, H64)
-		self:reset(seed)
-		return self
+		local hany = setmetatable({}, H64) --[[: any]]
+		local h = hany --[[:! H64State]]
+		local r = H64.reset --[[:! (H64State, integer | nil) -> nil]]
+		r(h, seed)
+		return h
 	end
 else
 	-- No FFI: xxHash64 unavailable
-	M.xxh64 = function()
+	M.xxh64 = function(_data, _seed)
 		return nil, "xxh64 requires LuaJIT FFI"
 	end
-	M.new64 = function()
+	M.new64 = function(_seed)
 		return nil, "xxh64 requires LuaJIT FFI"
 	end
 end

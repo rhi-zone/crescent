@@ -7,6 +7,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+local bit    = require("bit")
 local band   = bit.band
 local bxor   = bit.bxor
 local bor    = bit.bor
@@ -35,23 +36,24 @@ end
 -- ── ChaCha20-Poly1305 ──────────────────────────────────────────────────────
 
 -- Read a 32-bit little-endian word from a string at offset (0-based).
---: (string, number) -> number
+--: (string, integer) -> integer
 local function u32le(s, off)
 	local a, b, c, d = string.byte(s, off + 1, off + 4)
-	return tobit(a + b * 0x100 + c * 0x10000 + d * 0x1000000)
+	return tobit((a or 0) + (b or 0) * 0x100 + (c or 0) * 0x10000 + (d or 0) * 0x1000000)
 end
 
 -- Write a 32-bit little-endian word to a table of bytes.
---: (table, number, number) -> ()
+--: ({ [integer]: integer }, integer, number) -> ()
 local function put_u32le(t, pos, v)
-	t[pos]     = band(v, 0xff)
-	t[pos + 1] = band(rshift(v, 8), 0xff)
-	t[pos + 2] = band(rshift(v, 16), 0xff)
-	t[pos + 3] = band(rshift(v, 24), 0xff)
+	local vi = math.floor(v) --[[:! integer]]
+	t[pos]     = band(vi, 0xff)
+	t[pos + 1] = band(rshift(vi, 8), 0xff)
+	t[pos + 2] = band(rshift(vi, 16), 0xff)
+	t[pos + 3] = band(rshift(vi, 24), 0xff)
 end
 
 -- ChaCha20 quarter round.
---: (table, number, number, number, number) -> ()
+--: ({ [integer]: integer }, integer, integer, integer, integer) -> ()
 local function quarter_round(s, a, b, c, d)
 	s[a] = tobit(s[a] + s[b]); s[d] = rol(bxor(s[d], s[a]), 16)
 	s[c] = tobit(s[c] + s[d]); s[b] = rol(bxor(s[b], s[c]), 12)
@@ -61,10 +63,10 @@ end
 
 -- ChaCha20 block function. Returns 64 bytes of keystream.
 -- state: 16 uint32 words, counter at index 13 (1-based).
---: (table) -> string
+--: ({ [integer]: integer }) -> string
 local function chacha20_block(state)
 	-- Working copy
-	local s = {}
+	local s = {} --[[:! { [integer]: integer }]]
 	for i = 1, 16 do s[i] = state[i] end
 
 	-- 20 rounds (10 double rounds)
@@ -82,17 +84,17 @@ local function chacha20_block(state)
 	end
 
 	-- Add original state
-	local out = {}
+	local out = {} --[[:! { [integer]: integer }]]
 	for i = 1, 16 do
 		put_u32le(out, (i - 1) * 4 + 1, tobit(s[i] + state[i]))
 	end
-	local bytes = {}
+	local bytes = {} --[[:! { [integer]: string }]]
 	for i = 1, 64 do bytes[i] = string.char(out[i]) end
 	return table.concat(bytes)
 end
 
 -- Initialize ChaCha20 state from key (32 bytes), nonce (12 bytes), counter.
---: (string, string, number) -> table
+--: (string, string, integer) -> { [integer]: integer }
 local function chacha20_init(key, nonce, counter)
 	return {
 		-- "expand 32-byte k"
@@ -108,7 +110,7 @@ local function chacha20_init(key, nonce, counter)
 end
 
 -- Encrypt/decrypt with ChaCha20 (XOR with keystream).
---: (string, string, number, string) -> string
+--: (string, string, integer, string) -> string
 local function chacha20_crypt(key, nonce, counter, data)
 	if #data == 0 then return "" end
 	local state = chacha20_init(key, nonce, counter)
@@ -117,9 +119,9 @@ local function chacha20_crypt(key, nonce, counter, data)
 	while pos <= #data do
 		local ks = chacha20_block(state)
 		local chunk_len = math.min(64, #data - pos + 1)
-		local out = {}
+		local out = {} --[[:! { [integer]: string }]]
 		for i = 1, chunk_len do
-			out[i] = string.char(bxor(string.byte(data, pos + i - 1), string.byte(ks, i)))
+			out[i] = string.char(bxor(string.byte(data, pos + i - 1) or 0, string.byte(ks, i) or 0))
 		end
 		blocks[#blocks + 1] = table.concat(out)
 		pos = pos + 64
@@ -156,10 +158,10 @@ end
 --: (string, string) -> string
 local function poly1305_mac(key, msg)
 	-- Parse and clamp r from first 16 bytes of key (little-endian 4x32-bit words)
-	local r0 = band(u32le(key, 0), 0x0fffffff)
-	local r1 = band(u32le(key, 4), 0x0ffffffc)
-	local r2 = band(u32le(key, 8), 0x0ffffffc)
-	local r3 = band(u32le(key, 12), 0x0ffffffc)
+	local r0 = band(u32le(key, 0), 0x0fffffff) --[[:! number]]
+	local r1 = band(u32le(key, 4), 0x0ffffffc) --[[:! number]]
+	local r2 = band(u32le(key, 8), 0x0ffffffc) --[[:! number]]
+	local r3 = band(u32le(key, 12), 0x0ffffffc) --[[:! number]]
 	-- Make unsigned
 	if r0 < 0 then r0 = r0 + 0x100000000 end
 	if r1 < 0 then r1 = r1 + 0x100000000 end
@@ -180,13 +182,17 @@ local function poly1305_mac(key, msg)
 	local sr4 = rr4 * 5
 
 	-- s from last 16 bytes (as unsigned numbers)
-	local us0 = u32le(key, 16); if us0 < 0 then us0 = us0 + 0x100000000 end
-	local us1 = u32le(key, 20); if us1 < 0 then us1 = us1 + 0x100000000 end
-	local us2 = u32le(key, 24); if us2 < 0 then us2 = us2 + 0x100000000 end
-	local us3 = u32le(key, 28); if us3 < 0 then us3 = us3 + 0x100000000 end
+	local us0 = u32le(key, 16) --[[:! number]]; if us0 < 0 then us0 = us0 + 0x100000000 end
+	local us1 = u32le(key, 20) --[[:! number]]; if us1 < 0 then us1 = us1 + 0x100000000 end
+	local us2 = u32le(key, 24) --[[:! number]]; if us2 < 0 then us2 = us2 + 0x100000000 end
+	local us3 = u32le(key, 28) --[[:! number]]; if us3 < 0 then us3 = us3 + 0x100000000 end
 
 	-- Accumulator h = 0 (5 limbs, as Lua numbers)
-	local h0, h1, h2, h3, h4 = 0, 0, 0, 0, 0
+	local h0 = 0.0 --[[:! number]]
+	local h1 = 0.0 --[[:! number]]
+	local h2 = 0.0 --[[:! number]]
+	local h3 = 0.0 --[[:! number]]
+	local h4 = 0.0 --[[:! number]]
 
 	-- Convert r limbs to uint64 for multiplication
 	local R0 = u64(rr0)
@@ -205,26 +211,29 @@ local function poly1305_mac(key, msg)
 		local chunk = math.min(16, len - pos)
 
 		-- Read block bytes into 4 LE uint32 words (as Lua unsigned numbers)
-		local t0, t1, t2, t3 = 0, 0, 0, 0
+		local t0 = 0.0 --[[:! number]]
+		local t1 = 0.0 --[[:! number]]
+		local t2 = 0.0 --[[:! number]]
+		local t3 = 0.0 --[[:! number]]
 		if chunk >= 4 then
-			t0 = u32le(msg, pos); if t0 < 0 then t0 = t0 + 0x100000000 end
+			t0 = u32le(msg, pos) --[[:! number]]; if t0 < 0 then t0 = t0 + 0x100000000 end
 		else
-			for i = 0, chunk - 1 do t0 = t0 + string.byte(msg, pos + i + 1) * (256 ^ i) end
+			for i = 0, chunk - 1 do t0 = t0 + (string.byte(msg, pos + i + 1) or 0) * (256 ^ i) end
 		end
 		if chunk >= 8 then
-			t1 = u32le(msg, pos + 4); if t1 < 0 then t1 = t1 + 0x100000000 end
+			t1 = u32le(msg, pos + 4) --[[:! number]]; if t1 < 0 then t1 = t1 + 0x100000000 end
 		elseif chunk > 4 then
-			for i = 0, chunk - 5 do t1 = t1 + string.byte(msg, pos + i + 5) * (256 ^ i) end
+			for i = 0, chunk - 5 do t1 = t1 + (string.byte(msg, pos + i + 5) or 0) * (256 ^ i) end
 		end
 		if chunk >= 12 then
-			t2 = u32le(msg, pos + 8); if t2 < 0 then t2 = t2 + 0x100000000 end
+			t2 = u32le(msg, pos + 8) --[[:! number]]; if t2 < 0 then t2 = t2 + 0x100000000 end
 		elseif chunk > 8 then
-			for i = 0, chunk - 9 do t2 = t2 + string.byte(msg, pos + i + 9) * (256 ^ i) end
+			for i = 0, chunk - 9 do t2 = t2 + (string.byte(msg, pos + i + 9) or 0) * (256 ^ i) end
 		end
 		if chunk >= 16 then
-			t3 = u32le(msg, pos + 12); if t3 < 0 then t3 = t3 + 0x100000000 end
+			t3 = u32le(msg, pos + 12) --[[:! number]]; if t3 < 0 then t3 = t3 + 0x100000000 end
 		elseif chunk > 12 then
-			for i = 0, chunk - 13 do t3 = t3 + string.byte(msg, pos + i + 13) * (256 ^ i) end
+			for i = 0, chunk - 13 do t3 = t3 + (string.byte(msg, pos + i + 13) or 0) * (256 ^ i) end
 		end
 
 		-- Decompose block + sentinel into 5 x 26-bit limbs
@@ -274,26 +283,21 @@ local function poly1305_mac(key, msg)
 
 		-- Carry propagation (extract 26-bit limbs from uint64_t)
 		local MASK26 = 0x3ffffff
-		local c
-		c = d0 / 0x4000000ULL  -- use ULL division for truncation
-		-- Actually: LuaJIT uint64 division truncates. But we need to use tonumber for the limb.
-		-- Approach: use tonumber on the masked result.
-
 		-- For carry propagation with uint64:
-		h0 = u64_to_num(d0 % 0x4000000)
+		h0 = u64_to_num(d0 % 0x4000000) or 0.0
 		d1 = d1 + (d0 - d0 % 0x4000000) / 0x4000000
-		h1 = u64_to_num(d1 % 0x4000000)
+		h1 = u64_to_num(d1 % 0x4000000) or 0.0
 		d2 = d2 + (d1 - d1 % 0x4000000) / 0x4000000
-		h2 = u64_to_num(d2 % 0x4000000)
+		h2 = u64_to_num(d2 % 0x4000000) or 0.0
 		d3 = d3 + (d2 - d2 % 0x4000000) / 0x4000000
-		h3 = u64_to_num(d3 % 0x4000000)
+		h3 = u64_to_num(d3 % 0x4000000) or 0.0
 		d4 = d4 + (d3 - d3 % 0x4000000) / 0x4000000
-		h4 = u64_to_num(d4 % 0x4000000)
-		local carry_top = u64_to_num((d4 - d4 % 0x4000000) / 0x4000000)
+		h4 = u64_to_num(d4 % 0x4000000) or 0.0
+		local carry_top = u64_to_num((d4 - d4 % 0x4000000) / 0x4000000) or 0.0
 		h0 = h0 + carry_top * 5
-		c = math.floor(h0 / 0x4000000)
-		h0 = h0 - c * 0x4000000
-		h1 = h1 + c
+		local c2 = math.floor(h0 / 0x4000000) or 0.0
+		h0 = h0 - c2 * 0x4000000
+		h1 = h1 + c2
 
 		pos = pos + 16
 	end
@@ -369,7 +373,7 @@ local function le64(n)
 end
 
 -- ChaCha20-Poly1305 AEAD encrypt (RFC 8439).
---: (string, string, string, string | nil) -> (string, nil) | (nil, string)
+--: (string, string, string, string | nil) -> (string | nil, string | nil)
 function M.chacha20_encrypt(key, nonce, plaintext, aad)
 	if #key ~= 32 then return nil, "key must be 32 bytes" end
 	if #nonce ~= 12 then return nil, "nonce must be 12 bytes" end
@@ -392,7 +396,7 @@ function M.chacha20_encrypt(key, nonce, plaintext, aad)
 end
 
 -- ChaCha20-Poly1305 AEAD decrypt (RFC 8439).
---: (string, string, string, string | nil) -> (string, nil) | (nil, string)
+--: (string, string, string, string | nil) -> (string | nil, string | nil)
 function M.chacha20_decrypt(key, nonce, ciphertext_with_tag, aad)
 	if #key ~= 32 then return nil, "key must be 32 bytes" end
 	if #nonce ~= 12 then return nil, "nonce must be 12 bytes" end
@@ -416,7 +420,7 @@ function M.chacha20_decrypt(key, nonce, ciphertext_with_tag, aad)
 	-- Constant-time comparison
 	local diff = 0
 	for i = 1, 16 do
-		diff = bor(diff, bxor(string.byte(tag, i), string.byte(expected_tag, i)))
+		diff = bor(diff, bxor(string.byte(tag, i) or 0, string.byte(expected_tag, i) or 0))
 	end
 	if diff ~= 0 then
 		return nil, "authentication failed"
@@ -435,7 +439,7 @@ local function hmac_sha256_bin(key, msg)
 	return hmac.sha256_binary(key, msg)
 end
 
---: (string, string | nil, string | nil, number | nil) -> (string, nil) | (nil, string)
+--: (string, string | nil, string | nil, integer | nil) -> (string | nil, string | nil)
 function M.hkdf(ikm, salt, info, length)
 	length = length or 32
 	info = info or ""
@@ -443,9 +447,7 @@ function M.hkdf(ikm, salt, info, length)
 	if length <= 0 then return nil, "length must be positive" end
 
 	-- HKDF-Extract
-	if not salt or #salt == 0 then
-		salt = string.rep("\0", 32)
-	end
+	salt = (salt and #salt > 0) and salt or string.rep("\0", 32)
 	local prk = hmac_sha256_bin(salt, ikm)
 
 	-- HKDF-Expand
@@ -462,7 +464,7 @@ end
 
 -- ── Random bytes ────────────────────────────────────────────────────────────
 
---: ((number) -> string, number) -> (string, nil) | (nil, string)
+--: ((integer) -> string, integer) -> (string | nil, string | nil)
 function M.random_bytes(random_bytes_fn, n)
 	if type(random_bytes_fn) ~= "function" then
 		error("crypto.pure.random_bytes: random_bytes_fn function is required")

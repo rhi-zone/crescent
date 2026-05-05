@@ -37,7 +37,7 @@ local concat = table.concat
 -- FFI uint64 helpers
 -- ---------------------------------------------------------------------------
 
-local U64    = ffi.typeof("uint64_t")
+local U64    = ffi.typeof("uint64_t") --[[: any]]
 local U0     = U64(0)
 local U5     = U64(5)
 local U256   = U64(256)
@@ -50,7 +50,7 @@ local SHIFT26 = U64(67108864)   -- 2^26
 
 --: (string) -> string
 local function clamp_r(r)
-  local t = { sbyte(r, 1, 16) }
+  local t = { sbyte(r, 1, 16) } --[[:! { [integer]: integer }]]
   t[4]  = band(t[4],  15)
   t[8]  = band(t[8],  15)
   t[12] = band(t[12], 15)
@@ -66,6 +66,7 @@ end
 -- limbs stored as uint64_t.  Value = n0 + n1·2^26 + n2·2^52 + n3·2^78 + n4·2^104.
 -- ---------------------------------------------------------------------------
 
+--: ({ [integer]: integer }) -> (any, any, any, any, any)
 local function decode_26(b)
   local n0 = U64(b[1])
     + U64(b[2]) * U64(256)
@@ -103,15 +104,16 @@ end
 -- in place during finish — it reads from it then returns a fresh tag.
 -- ---------------------------------------------------------------------------
 
+--:: Poly1305Ctx = { h0: any, h1: any, h2: any, h3: any, h4: any, r0: any, r1: any, r2: any, r3: any, r4: any, r1_5: any, r2_5: any, r3_5: any, r4_5: any, s_str: string, buf: string, done: boolean, update: (any, string) -> (any | nil, string | nil), finish: (any) -> (string | nil, string | nil) }
 -- Process a single 16-byte (or shorter final) block, updating h limbs.
---: (table, table, number) -> nil
+--: (Poly1305Ctx, { [integer]: integer }, number) -> nil
 local function process_block(ctx, n, blocklen)
   local n0, n1, n2, n3, n4 = decode_26(n)
 
   -- Add the 2^(8*blocklen) bit ("hibit") to the appropriate limb.
   local bit_pos    = 8 * blocklen
   local limb_idx   = math.floor(bit_pos / 26)
-  local bit_in_limb = bit_pos % 26
+  local bit_in_limb = math.floor(bit_pos % 26)
   local add_val    = U64(lshift(1, bit_in_limb))
   if     limb_idx == 0 then n0 = n0 + add_val
   elseif limb_idx == 1 then n1 = n1 + add_val
@@ -154,7 +156,7 @@ local function process_block(ctx, n, blocklen)
 end
 
 -- Finalise: apply full reduction mod (2^130-5) and add s, returning a 16-byte tag.
---: (table) -> string
+--: (Poly1305Ctx) -> string
 local function finalise(ctx)
   local h0, h1, h2, h3, h4 = ctx.h0, ctx.h1, ctx.h2, ctx.h3, ctx.h4
 
@@ -167,7 +169,7 @@ local function finalise(ctx)
   local g3 = h3 + c; c = g3 / SHIFT26
   local g4 = h4 + c
   -- use_g == 1 when h >= p (carry propagated through all limbs).
-  local use_g  = tonumber(g4 / SHIFT26)
+  local use_g  = tonumber(g4 / SHIFT26) or 0
   local keep_h = 1 - use_g
   h0 = h0 * U64(keep_h) + band(g0, MASK26) * U64(use_g)
   h1 = h1 * U64(keep_h) + band(g1, MASK26) * U64(use_g)
@@ -183,23 +185,23 @@ local function finalise(ctx)
   local hi64  = h2_hi + h3 * U64(0x4000) + h4 * U64(0x10000000000ULL)
 
   -- Extract bytes from lo64 then hi64.
-  local out = {}
+  local out = {} --[[:! { [integer]: integer }]]
   local v = lo64
   for i = 1, 8 do
-    out[i] = tonumber(band(v, U64(0xff)))
+    out[i] = math.floor(tonumber(band(v, U64(0xff))) or 0) --[[:! integer]]
     v = v / U256
   end
   v = hi64
   for i = 9, 16 do
-    out[i] = tonumber(band(v, U64(0xff)))
+    out[i] = math.floor(tonumber(band(v, U64(0xff))) or 0) --[[:! integer]]
     v = v / U256
   end
 
   -- Add s mod 2^128 (little-endian byte addition with carry).
-  local sb    = { sbyte(ctx.s_str, 1, 16) }
+  local sb    = { sbyte(ctx.s_str, 1, 16) } --[[:! { [integer]: integer }]]
   local carry = 0
   for i = 1, 16 do
-    local sum = out[i] + sb[i] + carry
+    local sum = (out[i] or 0) + sb[i] + carry
     out[i] = sum % 256
     carry  = math.floor(sum / 256)
   end
@@ -212,7 +214,7 @@ end
 -- Returns a context table, or nil+errmsg on bad input.
 -- ---------------------------------------------------------------------------
 
---: (string) -> (table | nil, string | nil)
+--: (string) -> (any | nil, string | nil)
 local function new_ctx(key)
   if type(key) ~= "string" then
     return nil, "key must be a string"
@@ -222,7 +224,7 @@ local function new_ctx(key)
   end
 
   local r_str = clamp_r(key:sub(1, 16))
-  local rb    = { sbyte(r_str, 1, 16) }
+  local rb    = { sbyte(r_str, 1, 16) } --[[:! { [integer]: integer }]]
   local r0, r1, r2, r3, r4 = decode_26(rb)
 
   local ctx = {
@@ -249,55 +251,55 @@ end
 local Ctx = {}
 Ctx.__index = Ctx
 
---: (string) -> (table | nil, string | nil)
 function Ctx:update(chunk)
-  if self.done then
+  local s = self --[[:! Poly1305Ctx]]
+  if s.done then
     return nil, "cannot update a finished context"
   end
   if type(chunk) ~= "string" then
     return nil, "chunk must be a string"
   end
-  if chunk == "" then return self end
+  if chunk == "" then return s end
 
-  local data = self.buf .. chunk
-  self.buf = ""
+  local data = s.buf .. chunk
+  s.buf = ""
   local pos = 1
   local len = #data
 
   while pos + 15 <= len do
-    local n = { sbyte(data, pos, pos + 15) }
-    process_block(self, n, 16)
+    local n = { sbyte(data, pos, pos + 15) } --[[:! { [integer]: integer }]]
+    process_block(s, n, 16)
     pos = pos + 16
   end
 
   -- Keep any leftover bytes < 16 in the buffer.
   if pos <= len then
-    self.buf = data:sub(pos)
+    s.buf = data:sub(pos) or ""
   end
 
-  return self
+  return s
 end
 
---: () -> (string | nil, string | nil)
 function Ctx:finish()
-  if self.done then
+  local s = self --[[:! Poly1305Ctx]]
+  if s.done then
     return nil, "context already finished"
   end
-  self.done = true
+  s.done = true
 
   -- Process final partial block (may be empty if message is block-aligned).
-  local buf = self.buf
+  local buf = s.buf
   if #buf > 0 then
     local blocklen = #buf
     -- Zero-pad to 16 bytes.
-    local n = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+    local n = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } --[[:! { [integer]: integer }]]
     for i = 1, blocklen do
-      n[i] = sbyte(buf, i)
+      n[i] = sbyte(buf, i) or 0
     end
-    process_block(self, n, blocklen)
+    process_block(s, n, blocklen)
   end
 
-  return finalise(self)
+  return finalise(s)
 end
 
 -- ---------------------------------------------------------------------------
@@ -306,7 +308,7 @@ end
 
 --- Create a streaming Poly1305 context.
 -- Returns ctx (with :update() / :finish() methods), or nil+errmsg.
---: (string) -> (table | nil, string | nil)
+--: (string) -> (any | nil, string | nil)
 function M.new(key)
   local ctx, err = new_ctx(key)
   if not ctx then return nil, err end
@@ -349,7 +351,7 @@ function M.verify(key, message, tag)
   -- Constant-time comparison: accumulate XOR differences.
   local diff = 0
   for i = 1, 16 do
-    diff = bor(diff, bxor(sbyte(tag, i), sbyte(expected, i)))
+    diff = bor(diff, bxor(sbyte(tag, i) or 0, sbyte(expected, i) or 0))
   end
   return diff == 0
 end
