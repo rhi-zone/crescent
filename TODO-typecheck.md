@@ -130,7 +130,7 @@ last because the type system itself is the testbed.
 - `lib/crypto/pure.lua` (1) — malformed number (ULL suffix); typechecker limitation
 - `lib/ed25519/init.lua` (1) — malformed number (ULL suffix); typechecker limitation
 - `lib/levenshtein/init.lua` (24) — `prev, curr = curr, prev` swap pattern incompatible with typed tables; `{ [integer]: T }` annotation creates assignment errors on swap; structural limitation
-- `lib/css/init.lua` (10) — `table` undefined type in annotations; changing render_media annotation cascades new errors; net neutral; structural limitation in render loop
+- ~~`lib/css/init.lua`~~ — DONE (10 → 2, session N+45) — concrete shape on render_media items, force-cast parts array, table.insert for render fn; 2 remaining from embed_mod signature mismatch (structural)
 
 ## Skipped in prior runs (with reason)
 
@@ -159,6 +159,10 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
+
+## Done in current session (session N+45)
+
+- [x] `lib/css/init.lua` (10 → 2) — concrete shape on render_media items param; `--[[:! { [integer]: string }]]` force-cast on parts; `table.insert` for render_rule/keyframes/media/property; concrete annotation on M.embed sheet param; 2 remaining from embed_mod structural mismatch (unfixable)
 
 ## Done in current session (session N+44)
 

@@ -200,7 +200,7 @@ M.render_keyframes = function(kf)
 end
 
 -- Renders a @media block, with optional indent prefix for nested media.
---: (block: { _type: string, query: string, items: table }, indent: (string | nil)) -> string
+--: (block: { _type: string, query: string, items: { [integer]: { _type: string, ... } } }, indent: (string | nil)) -> string
 M.render_media = function(block, indent)
   indent = indent or ""
   local parts = { indent .. "@media " .. block.query .. " {" }
@@ -225,16 +225,16 @@ end
 
 --: (sheet: { _type: string, items: { [number]: { _type: string, selector: { _str: string, ... } | string, decls: { [string]: CssValue }, ... } } }) -> string
 M.render = function(sheet)
-  local parts = {}
+  local parts = {} --[[:! { [integer]: string }]]
   for _, item in ipairs(sheet.items) do
     if item._type == "rule" then
-      parts[#parts + 1] = M.render_rule(item)
+      table.insert(parts, M.render_rule(item))
     elseif item._type == "keyframes" then
-      parts[#parts + 1] = M.render_keyframes(item)
+      table.insert(parts, M.render_keyframes(item))
     elseif item._type == "media" then
-      parts[#parts + 1] = M.render_media(item)
+      table.insert(parts, M.render_media(item))
     elseif item._type == "property" then
-      parts[#parts + 1] = M.render_property(item)
+      table.insert(parts, M.render_property(item))
     end
   end
   return table.concat(parts, "\n\n")
@@ -242,7 +242,7 @@ end
 
 -- M.embed(sheet) — renders sheet to a <style> block and returns class name map.
 -- Convenience wrapper: passes M itself as css_mod to avoid circular require.
---: (sheet: table) -> (string, table)
+--: (sheet: { [string]: unknown }) -> (string, { [string]: unknown })
 M.embed = function(sheet) return embed_mod.embed(sheet, M) end
 
 return M
