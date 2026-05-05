@@ -1,6 +1,6 @@
 if not package.path:find("./?/init.lua", 1, true) then package.path = "./?/init.lua;" .. package.path end
 
---:: Vec = { data: unknown, n: integer }
+--:: Vec = { data?: unknown, n: integer, [integer]: number, ... }
 
 local M = {}
 
@@ -21,7 +21,8 @@ if has_ffi then
     for i = 1, n do
       data[i - 1] = t[i]
     end
-    return setmetatable({ data = data, n = n }, vec_mt)
+    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
+    return r_ --[[:! Vec]]
   end
 
   --: (v: Vec) -> string
@@ -40,7 +41,8 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = 0.0
     end
-    return setmetatable({ data = data, n = n }, vec_mt)
+    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
+    return r_ --[[:! Vec]]
   end
 
   --: (n: number) -> Vec
@@ -49,7 +51,8 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = 1.0
     end
-    return setmetatable({ data = data, n = n }, vec_mt)
+    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
+    return r_ --[[:! Vec]]
   end
 
   --: (n: number) -> Vec
@@ -58,7 +61,8 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = math.random()
     end
-    return setmetatable({ data = data, n = n }, vec_mt)
+    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
+    return r_ --[[:! Vec]]
   end
 
   --: (start: number, stop: number, n: number) -> Vec
@@ -66,13 +70,15 @@ if has_ffi then
     local data = double_arr(n)
     if n <= 1 then
       if n == 1 then data[0] = start end
-      return setmetatable({ data = data, n = n }, vec_mt)
+      local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
+      return r_ --[[:! Vec]]
     end
     local step = (stop - start) / (n - 1)
     for i = 0, n - 1 do
       data[i] = start + i * step
     end
-    return setmetatable({ data = data, n = n }, vec_mt)
+    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
+    return r_ --[[:! Vec]]
   end
 
   --: (v: Vec) -> number
@@ -88,7 +94,8 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = ad[i] + bd[i]
     end
-    return setmetatable({ data = data, n = n }, vec_mt)
+    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
+    return r_ --[[:! Vec]]
   end
 
   --: (a: Vec, b: Vec) -> Vec
@@ -99,7 +106,8 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = ad[i] - bd[i]
     end
-    return setmetatable({ data = data, n = n }, vec_mt)
+    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
+    return r_ --[[:! Vec]]
   end
 
   --: (a: Vec, b: Vec) -> Vec
@@ -110,7 +118,8 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = ad[i] * bd[i]
     end
-    return setmetatable({ data = data, n = n }, vec_mt)
+    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
+    return r_ --[[:! Vec]]
   end
 
   --: (a: Vec, b: Vec) -> Vec
@@ -121,7 +130,8 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = ad[i] / bd[i]
     end
-    return setmetatable({ data = data, n = n }, vec_mt)
+    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
+    return r_ --[[:! Vec]]
   end
 
   --: (a: Vec, s: number) -> Vec
@@ -132,7 +142,8 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = ad[i] * s
     end
-    return setmetatable({ data = data, n = n }, vec_mt)
+    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
+    return r_ --[[:! Vec]]
   end
 
   --: (a: Vec) -> Vec
@@ -143,7 +154,8 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = -ad[i]
     end
-    return setmetatable({ data = data, n = n }, vec_mt)
+    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
+    return r_ --[[:! Vec]]
   end
 
   --: (a: Vec, b: Vec) -> number
@@ -288,7 +300,8 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = ad[i] * inv
     end
-    return setmetatable({ data = data, n = n }, vec_mt)
+    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
+    return r_ --[[:! Vec]]
   end
 
   --: (v: Vec, i: number) -> number
@@ -335,7 +348,7 @@ else
     for i = 1, n do
       v[i] = t[i] + 0.0
     end
-    return v
+    return v --[[:! Vec]]
   end
 
   --: (n: number) -> Vec
@@ -344,7 +357,7 @@ else
     for i = 1, n do
       v[i] = 0.0
     end
-    return v
+    return v --[[:! Vec]]
   end
 
   --: (n: number) -> Vec
@@ -353,7 +366,7 @@ else
     for i = 1, n do
       v[i] = 1.0
     end
-    return v
+    return v --[[:! Vec]]
   end
 
   --: (n: number) -> Vec
@@ -362,7 +375,7 @@ else
     for i = 1, n do
       v[i] = math.random()
     end
-    return v
+    return v --[[:! Vec]]
   end
 
   --: (start: number, stop: number, n: number) -> Vec
@@ -370,13 +383,13 @@ else
     local v = { n = n }
     if n <= 1 then
       if n == 1 then v[1] = start end
-      return v
+      return v --[[:! Vec]]
     end
     local step = (stop - start) / (n - 1)
     for i = 1, n do
       v[i] = start + (i - 1) * step
     end
-    return v
+    return v --[[:! Vec]]
   end
 
   --: (v: Vec) -> number
@@ -391,7 +404,7 @@ else
     for i = 1, n do
       c[i] = a[i] + b[i]
     end
-    return c
+    return c --[[:! Vec]]
   end
 
   --: (a: Vec, b: Vec) -> Vec
@@ -401,7 +414,7 @@ else
     for i = 1, n do
       c[i] = a[i] - b[i]
     end
-    return c
+    return c --[[:! Vec]]
   end
 
   --: (a: Vec, b: Vec) -> Vec
@@ -411,7 +424,7 @@ else
     for i = 1, n do
       c[i] = a[i] * b[i]
     end
-    return c
+    return c --[[:! Vec]]
   end
 
   --: (a: Vec, b: Vec) -> Vec
@@ -421,7 +434,7 @@ else
     for i = 1, n do
       c[i] = a[i] / b[i]
     end
-    return c
+    return c --[[:! Vec]]
   end
 
   --: (a: Vec, s: number) -> Vec
@@ -431,7 +444,7 @@ else
     for i = 1, n do
       c[i] = a[i] * s
     end
-    return c
+    return c --[[:! Vec]]
   end
 
   --: (a: Vec) -> Vec
@@ -441,12 +454,13 @@ else
     for i = 1, n do
       c[i] = -a[i]
     end
-    return c
+    return c --[[:! Vec]]
   end
 
   --: (a: Vec, b: Vec) -> number
   function M.dot(a, b)
     local n = a.n
+    --: number
     local s = 0.0
     for i = 1, n do
       s = s + a[i] * b[i]
@@ -457,6 +471,7 @@ else
   --: (a: Vec) -> number
   function M.norm(a)
     local n = a.n
+    --: number
     local s = 0.0
     for i = 1, n do
       local v = a[i]
@@ -468,6 +483,7 @@ else
   --: (a: Vec) -> number
   function M.norm1(a)
     local n = a.n
+    --: number
     local s = 0.0
     for i = 1, n do
       local v = a[i]
@@ -480,6 +496,7 @@ else
   --: (a: Vec) -> number
   function M.sum(a)
     local n = a.n
+    --: number
     local s = 0.0
     for i = 1, n do
       s = s + a[i]
@@ -539,7 +556,12 @@ else
   --: (a: Vec, b: Vec) -> number
   function M.cosine(a, b)
     local n = a.n
-    local d, na, nb = 0.0, 0.0, 0.0
+    --: number
+    local d = 0.0
+    --: number
+    local na = 0.0
+    --: number
+    local nb = 0.0
     for i = 1, n do
       local ai, bi = a[i], b[i]
       d = d + ai * bi
@@ -554,6 +576,7 @@ else
   --: (a: Vec, b: Vec) -> number
   function M.distance(a, b)
     local n = a.n
+    --: number
     local s = 0.0
     for i = 1, n do
       local d = a[i] - b[i]
@@ -565,6 +588,7 @@ else
   --: (a: Vec) -> Vec
   function M.normalize(a)
     local n = a.n
+    --: number
     local s = 0.0
     for i = 1, n do
       local v = a[i]
@@ -575,7 +599,7 @@ else
     for i = 1, n do
       c[i] = a[i] * inv
     end
-    return c
+    return c --[[:! Vec]]
   end
 
   --: (v: Vec, i: number) -> number
