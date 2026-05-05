@@ -46,8 +46,8 @@ function M.match(str, pattern, opts)
   local plen = #pattern
 
   while si <= slen and pi <= plen do
-    local sc = str:byte(si)
-    local pc = pattern:byte(pi)
+    local sc = str:byte(si) or 0
+    local pc = pattern:byte(pi) or 0
     if not case_sensitive then
       sc = char_lower(sc)
       pc = char_lower(pc)
@@ -188,9 +188,9 @@ function M.positions(str, pattern, opts)
                 add = add + BONUS_CONSECUTIVE
               end
               -- Word boundary bonus
-              local prev_char = str_cmp:byte(prev_si)  -- not used directly; need original
-              local curr_char = str:byte(si2)
-              local prev_orig = str:byte(prev_si)
+              local prev_char = str_cmp:byte(prev_si) or 0  -- not used directly; need original
+              local curr_char = str:byte(si2) or 0
+              local prev_orig = str:byte(prev_si) or 0
               if is_word_boundary(prev_orig, curr_char) then
                 add = add + BONUS_WORD_BOUNDARY
               end
@@ -271,8 +271,8 @@ function M.positions(str, pattern, opts)
               local gap = si2 - prev_si - 1
               add = add - PENALTY_GAP * gap
               if gap == 0 then add = add + BONUS_CONSECUTIVE end
-              local curr_char = str:byte(si2)
-              local prev_orig = str:byte(prev_si)
+              local curr_char = str:byte(si2) or 0
+              local prev_orig = str:byte(prev_si) or 0
               if is_word_boundary(prev_orig, curr_char) then
                 add = add + BONUS_WORD_BOUNDARY
               end

@@ -117,7 +117,7 @@ M.hex = {
 --- ROT13 codec: rotate ASCII letters by 13 positions. Self-inverse.
 --: (string) -> string
 local function rot13_char(c)
-  local b = string.byte(c, 1)
+  local b = string.byte(c, 1) or 0
   if b >= 65 and b <= 90 then return string.char((b - 65 + 13) % 26 + 65) end
   if b >= 97 and b <= 122 then return string.char((b - 97 + 13) % 26 + 97) end
   return c

@@ -305,7 +305,7 @@ decode_value = function(data, pos)
     return nil, "cbor.decode: unexpected end of input"
   end
 
-  local b = string.byte(data, pos)
+  local b = string.byte(data, pos) or 0
   local major = math.floor(b / 32)
   local info  = b % 32
   pos = pos + 1

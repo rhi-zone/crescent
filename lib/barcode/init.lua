@@ -89,7 +89,7 @@ function M.code128(s)
   end
   -- Check all chars are encodable in Code B (ASCII 32-126)
   for i = 1, #s do
-    local b = s:byte(i)
+    local b = s:byte(i) or 0
     if b < 32 or b > 126 then
       return nil, "code128: character at position " .. i .. " (byte " .. b .. ") not encodable in Code B (ASCII 32-126)"
     end
@@ -225,7 +225,7 @@ function M.ean13(s)
     return nil, "ean13: expected 12 or 13 digits, got " .. #s
   end
   for i = 1, #s do
-    local b = s:byte(i)
+    local b = s:byte(i) or 0
     if b < 48 or b > 57 then
       return nil, "ean13: non-digit at position " .. i
     end
@@ -297,7 +297,7 @@ function M.ean8(s)
     return nil, "ean8: expected 7 or 8 digits, got " .. #s
   end
   for i = 1, #s do
-    local b = s:byte(i)
+    local b = s:byte(i) or 0
     if b < 48 or b > 57 then
       return nil, "ean8: non-digit at position " .. i
     end
@@ -360,7 +360,7 @@ function M.upca(s)
     return nil, "upca: expected 11 or 12 digits, got " .. #s
   end
   for i = 1, #s do
-    local b = s:byte(i)
+    local b = s:byte(i) or 0
     if b < 48 or b > 57 then
       return nil, "upca: non-digit at position " .. i
     end

@@ -77,7 +77,7 @@ local function encode_string(s, buf, n)
         local start = 1
         local i = 1
         while i <= len do
-            local b = str_byte(s, i)
+            local b = str_byte(s, i) or 0
             local esc = ESC[b]
             if esc then
                 -- Flush safe run before this byte.
@@ -285,7 +285,7 @@ local function decode_string()
     local buf = nil   -- lazy: only allocated when escapes present
 
     while _pos <= _len do
-        local b = str_byte(_src, _pos)
+        local b = str_byte(_src, _pos) or 0
         if b == 0x22 then  -- closing "
             local result
             if buf then
@@ -315,7 +315,7 @@ local function decode_string()
             end
             _pos = _pos + 1  -- consume backslash
             if _pos > _len then decode_error("truncated escape sequence") end
-            local esc = str_byte(_src, _pos)
+            local esc = str_byte(_src, _pos) or 0
             _pos = _pos + 1
             if esc == 0x22 then buf[#buf + 1] = '"'
             elseif esc == 0x5C then buf[#buf + 1] = '\\'
@@ -326,8 +326,9 @@ local function decode_string()
             elseif esc == 0x72 then buf[#buf + 1] = '\r'
             elseif esc == 0x74 then buf[#buf + 1] = '\t'
             elseif esc == 0x75 then  -- \uXXXX
-                local cp = parse_hex4(_src, _pos)
-                if not cp then decode_error("invalid \\u escape") end
+                local cp_raw = parse_hex4(_src, _pos)
+                if not cp_raw then decode_error("invalid \\u escape") end
+                local cp = cp_raw or 0
                 _pos = _pos + 4
                 -- Surrogate pair handling.
                 if cp >= 0xD800 and cp <= 0xDBFF then
@@ -336,7 +337,7 @@ local function decode_string()
                         local cp2 = parse_hex4(_src, _pos + 2)
                         if cp2 and cp2 >= 0xDC00 and cp2 <= 0xDFFF then
                             _pos = _pos + 6
-                            cp = 0x10000 + (cp - 0xD800) * 0x400 + (cp2 - 0xDC00)
+                            cp = 0x10000 + (cp - 0xD800) * 0x400 + ((cp2 or 0) - 0xDC00)
                             buf[#buf + 1] = codepoint_to_utf8(cp)
                         else
                             decode_error("unpaired high surrogate")
@@ -366,13 +367,13 @@ local function decode_number()
     -- Optional minus.
     if str_byte(_src, _pos) == 0x2D then _pos = _pos + 1 end
     if _pos > _len then decode_error("truncated number") end
-    local b = str_byte(_src, _pos)
+    local b = str_byte(_src, _pos) or 0
     if b == 0x30 then  -- leading zero: only "0", "0.xxx", "0eXXX" allowed
         _pos = _pos + 1
     elseif b >= 0x31 and b <= 0x39 then  -- 1-9
         _pos = _pos + 1
         while _pos <= _len do
-            b = str_byte(_src, _pos)
+            b = str_byte(_src, _pos) or 0
             if b >= 0x30 and b <= 0x39 then _pos = _pos + 1
             else break end
         end
@@ -384,7 +385,7 @@ local function decode_number()
         _pos = _pos + 1
         local had_digit = false
         while _pos <= _len do
-            b = str_byte(_src, _pos)
+            b = str_byte(_src, _pos) or 0
             if b >= 0x30 and b <= 0x39 then _pos = _pos + 1; had_digit = true
             else break end
         end
@@ -392,16 +393,16 @@ local function decode_number()
     end
     -- Optional exponent.
     if _pos <= _len then
-        b = str_byte(_src, _pos)
+        b = str_byte(_src, _pos) or 0
         if b == 0x65 or b == 0x45 then  -- e or E
             _pos = _pos + 1
             if _pos <= _len then
-                b = str_byte(_src, _pos)
+                b = str_byte(_src, _pos) or 0
                 if b == 0x2B or b == 0x2D then _pos = _pos + 1 end
             end
             local had_digit = false
             while _pos <= _len do
-                b = str_byte(_src, _pos)
+                b = str_byte(_src, _pos) or 0
                 if b >= 0x30 and b <= 0x39 then _pos = _pos + 1; had_digit = true
                 else break end
             end
@@ -445,7 +446,7 @@ local function decode_raw(s, null_sentinel)
     end
 
     if _pos > _len then decode_error("unexpected end of input") end
-    local b = str_byte(_src, _pos)
+    local b = str_byte(_src, _pos) or 0
     _pos = _pos + 1
 
     if b == 0x22 then          -- " → string (leaf)
@@ -478,13 +479,13 @@ local function decode_raw(s, null_sentinel)
             local npos = nstart
             if b == 0x2D then npos = npos + 1 end
             if npos > _len then decode_error("truncated number") end
-            nb = str_byte(_src, npos)
+            nb = str_byte(_src, npos) or 0
             if nb == 0x30 then  -- leading zero
                 npos = npos + 1
             elseif nb >= 0x31 and nb <= 0x39 then
                 npos = npos + 1
                 while npos <= _len do
-                    nb = str_byte(_src, npos)
+                    nb = str_byte(_src, npos) or 0
                     if nb >= 0x30 and nb <= 0x39 then npos = npos + 1
                     else break end
                 end
@@ -496,7 +497,7 @@ local function decode_raw(s, null_sentinel)
                 npos = npos + 1
                 local had = false
                 while npos <= _len do
-                    nb = str_byte(_src, npos)
+                    nb = str_byte(_src, npos) or 0
                     if nb >= 0x30 and nb <= 0x39 then npos = npos + 1; had = true
                     else break end
                 end
@@ -504,16 +505,16 @@ local function decode_raw(s, null_sentinel)
             end
             -- Optional exponent.
             if npos <= _len then
-                nb = str_byte(_src, npos)
+                nb = str_byte(_src, npos) or 0
                 if nb == 0x65 or nb == 0x45 then
                     npos = npos + 1
                     if npos <= _len then
-                        nb = str_byte(_src, npos)
+                        nb = str_byte(_src, npos) or 0
                         if nb == 0x2B or nb == 0x2D then npos = npos + 1 end
                     end
                     local had = false
                     while npos <= _len do
-                        nb = str_byte(_src, npos)
+                        nb = str_byte(_src, npos) or 0
                         if nb >= 0x30 and nb <= 0x39 then npos = npos + 1; had = true
                         else break end
                     end

@@ -58,7 +58,7 @@ local function decode_value(s, i, n)
 	while i <= n and WS[byte(s, i)] do i = i + 1 end
 	if i > n then return nil, nil, "unexpected end of input" end
 
-	local b = byte(s, i)
+	local b = byte(s, i) or 0
 
 	-- string
 	if b == 0x22 then -- '"'
@@ -103,7 +103,7 @@ decode_string = function(s, i, n)
 	local parts = {}
 	local start = i
 	while i <= n do
-		local b = byte(s, i)
+		local b = byte(s, i) or 0
 		if b == 0x22 then -- closing '"'
 			parts[#parts + 1] = sub(s, start, i - 1)
 			return concat(parts), i + 1, nil
@@ -111,7 +111,7 @@ decode_string = function(s, i, n)
 			parts[#parts + 1] = sub(s, start, i - 1)
 			i = i + 1
 			if i > n then return nil, nil, "unexpected end of string escape" end
-			local e = byte(s, i)
+			local e = byte(s, i) or 0
 			if e == 0x22 then parts[#parts + 1] = "\""
 			elseif e == 0x5C then parts[#parts + 1] = "\\"
 			elseif e == 0x2F then parts[#parts + 1] = "/"

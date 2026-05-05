@@ -165,8 +165,9 @@ function M.crc32(data, init)
   -- `init` is the unsigned double returned by a previous call.  Convert to
   -- signed 32-bit before XOR so the bit library works correctly.
   local crc = bxor(bit.tobit(init or 0), 0xFFFFFFFF)
-  for i = 1, #data do
-    local byte = string.byte(data, i)
+  local s = data --[[:! string]]
+  for i = 1, #s do
+    local byte = string.byte(s, i) or 0
     local idx = band(bxor(crc, byte), 0xFF)
     crc = bxor(rshift(crc, 8), CRC32_TABLE[idx])
   end
@@ -176,8 +177,9 @@ end
 --- CRC-32C / Castagnoli (iSCSI, Btrfs, SCTP).
 function M.crc32c(data, init)
   local crc = bxor(bit.tobit(init or 0), 0xFFFFFFFF)
-  for i = 1, #data do
-    local byte = string.byte(data, i)
+  local s = data --[[:! string]]
+  for i = 1, #s do
+    local byte = string.byte(s, i) or 0
     local idx = band(bxor(crc, byte), 0xFF)
     crc = bxor(rshift(crc, 8), CRC32C_TABLE[idx])
   end
@@ -198,8 +200,9 @@ end
 --- CRC-16/IBM (a.k.a. CRC-16/ARC, Modbus style, reflected).
 function M.crc16(data, init)
   local crc = init or 0
-  for i = 1, #data do
-    local byte = string.byte(data, i)
+  local s = data --[[:! string]]
+  for i = 1, #s do
+    local byte = string.byte(s, i) or 0
     local idx = band(bxor(crc, byte), 0xFF)
     crc = bxor(rshift(crc, 8), CRC16_TABLE[idx])
   end
@@ -209,8 +212,9 @@ end
 --- CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF, MSB-first).
 function M.crc16_ccitt(data, init)
   local crc = init or 0xFFFF
-  for i = 1, #data do
-    local byte = string.byte(data, i)
+  local s = data --[[:! string]]
+  for i = 1, #s do
+    local byte = string.byte(s, i) or 0
     local idx = band(bxor(rshift(crc, 8), byte), 0xFF)
     crc = bxor(lshift(crc, 8), CRC16_CCITT_TABLE[idx])
     crc = band(crc, 0xFFFF)
@@ -230,8 +234,9 @@ end
 --- CRC-8 (poly 0x07, init 0x00, MSB-first).
 function M.crc8(data, init)
   local crc = init or 0
-  for i = 1, #data do
-    local byte = string.byte(data, i)
+  local s = data --[[:! string]]
+  for i = 1, #s do
+    local byte = string.byte(s, i) or 0
     local idx = band(bxor(crc, byte), 0xFF)
     crc = CRC8_TABLE[idx]
   end
@@ -241,8 +246,9 @@ end
 --- CRC-8/MAXIM (poly 0x31, reflected, init 0x00).
 function M.crc8_maxim(data, init)
   local crc = init or 0
-  for i = 1, #data do
-    local byte = string.byte(data, i)
+  local s = data --[[:! string]]
+  for i = 1, #s do
+    local byte = string.byte(s, i) or 0
     local idx = band(bxor(crc, byte), 0xFF)
     crc = bxor(rshift(crc, 8), CRC8_MAXIM_TABLE[idx])
     crc = band(crc, 0xFF)
@@ -263,8 +269,9 @@ end
 function M.crc64(data, init_hi, init_lo)
   local crc_hi = bxor(bit.tobit(init_hi or 0), 0xFFFFFFFF)
   local crc_lo = bxor(bit.tobit(init_lo or 0), 0xFFFFFFFF)
-  for i = 1, #data do
-    local byte = string.byte(data, i)
+  local s = data --[[:! string]]
+  for i = 1, #s do
+    local byte = string.byte(s, i) or 0
     local idx = band(bxor(crc_lo, byte), 0xFF)
     local tlo = CRC64_TABLE_LO[idx]
     local thi = CRC64_TABLE_HI[idx]

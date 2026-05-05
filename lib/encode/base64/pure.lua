@@ -51,7 +51,7 @@ M.encode = function(str, opts)
     local k = 1
     for i = 1, n - lastn, 3 do
         local a, b, c = str:byte(i, i + 2)
-        local v = a * 0x10000 + b * 0x100 + c
+        local v = (a or 0) * 0x10000 + (b or 0) * 0x100 + (c or 0)
         t[k] = string.char(
             enc[band(rshift(v, 18), 0x3f)],
             enc[band(rshift(v, 12), 0x3f)],
@@ -62,7 +62,7 @@ M.encode = function(str, opts)
     end
     if lastn == 2 then
         local a, b = str:byte(n - 1, n)
-        local v = a * 0x10000 + b * 0x100
+        local v = (a or 0) * 0x10000 + (b or 0) * 0x100
         if pad then
             t[k] = string.char(enc[band(rshift(v,18),0x3f)], enc[band(rshift(v,12),0x3f)], enc[band(rshift(v,6),0x3f)], PAD)
         else

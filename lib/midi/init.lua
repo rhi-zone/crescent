@@ -21,15 +21,15 @@ local floor = math.floor
 --: (string, integer) -> (integer | nil, integer | nil)
 local function vlq_decode(data, pos)
     local v = 0
-    --: integer | nil
-    local b = nil
-    repeat
-        b = byte(data, pos)
-        if b == nil then return nil, nil end
-        v = bor(lshift(v, 7), band(b --[[:! integer]], 0x7F))
+    local raw = byte(data, pos)
+    while raw ~= nil do
+        local b = raw or 0
+        v = bor(lshift(v, 7), band(b, 0x7F))
         pos = pos + 1
-    until band(b --[[:! integer]], 0x80) == 0
-    return v, pos
+        if band(b, 0x80) == 0 then return v, pos end
+        raw = byte(data, pos)
+    end
+    return nil, nil
 end
 
 -- Encode an integer as VLQ bytes, appended to table t.
@@ -143,11 +143,11 @@ local function parse_track(data, start, len)
         pos = npos --[[:! integer]]
         tick = tick + (delta --[[:! integer]])
 
-        local status_byte = byte(data, pos)
-        if status_byte == nil then
+        local status_byte_raw = byte(data, pos)
+        if status_byte_raw == nil then
             return nil, "unexpected end of track data"
         end
-        local sb = status_byte --[[:! integer]]
+        local sb = status_byte_raw or 0
 
         local status = 0
         if band(sb, 0x80) ~= 0 then
@@ -171,9 +171,9 @@ local function parse_track(data, start, len)
 
         if status == 0xFF then
             -- Meta event
-            local subtype = byte(data, pos)
-            if subtype == nil then return nil, "truncated meta event" end
-            local subtype_i = subtype --[[:! integer]]
+            local subtype_raw = byte(data, pos)
+            if subtype_raw == nil then return nil, "truncated meta event" end
+            local subtype_i = subtype_raw or 0
             pos = pos + 1
             local meta_len, npos2 = vlq_decode(data, pos)
             if not meta_len then return nil, "truncated meta length" end

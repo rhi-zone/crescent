@@ -43,9 +43,10 @@ end
 
 -- Convert binary string to lowercase hex string.
 local function binary_to_hex(bin)
+  local s = bin --[[:! string]]
   local parts = {}
-  for i = 1, #bin do
-    parts[i] = string.format("%02x", string.byte(bin, i))
+  for i = 1, #s do
+    parts[i] = string.format("%02x", string.byte(s, i) or 0)
   end
   return table.concat(parts)
 end
@@ -149,9 +150,11 @@ function M.verify(password, salt, iterations, derived_key, opts)
   -- Timing-safe byte-by-byte comparison.
   if #candidate ~= #stored then return false end
   local diff = 0
-  for i = 1, #stored do
-    local bc = (string.byte(candidate, i, i) or 0) --[[:! integer]]
-    local bs = (string.byte(stored, i, i) or 0) --[[:! integer]]
+  local sc = candidate --[[:! string]]
+  local ss = stored --[[:! string]]
+  for i = 1, #ss do
+    local bc = (string.byte(sc, i, i) or 0) --[[:! integer]]
+    local bs = (string.byte(ss, i, i) or 0) --[[:! integer]]
     diff = bit.bor(diff, bit.bxor(bc, bs))
   end
   return diff == 0

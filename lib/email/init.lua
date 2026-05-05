@@ -94,7 +94,7 @@ local function qp_encode(str)
 	local i = 1
 	local n = #str
 	while i <= n do
-		local b = str:byte(i)
+		local b = str:byte(i) or 0
 		-- Pass through CRLF as-is
 		if b == 13 and i < n and str:byte(i + 1) == 10 then
 			lines[#lines + 1] = table.concat(line)
@@ -155,8 +155,8 @@ end
 --: (string) -> boolean
 local function has_non_ascii(str)
 	for i = 1, #str do
-		local b = str:sub(i, i):byte()
-		if b and b > 127 then return true end
+		local b = str:sub(i, i):byte() or 0
+		if b > 127 then return true end
 	end
 	return false
 end

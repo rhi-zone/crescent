@@ -160,7 +160,7 @@ function M.decode_symbols(bits_string, total_bits, tree)
   -- Unpack bytes back to bit string (only use total_bits significant bits)
   local bits = {}
   for i = 1, #bits_string do
-    local byte = string.byte(bits_string, i)
+    local byte = string.byte(bits_string, i) or 0
     for j = 7, 0, -1 do
       bits[#bits + 1] = bit.band(bit.rshift(byte, j), 1) == 1 and "1" or "0"
     end

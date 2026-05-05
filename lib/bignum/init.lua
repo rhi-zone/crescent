@@ -63,8 +63,7 @@ mt.__index = M
 -- Get a single byte at position i as integer.
 --: (s: string, i: number) -> integer
 local function getbyte(s, i)
-  local r = (byte(s, --[[:! integer]] i))
-  return --[[:! integer]] r
+  return byte(s, --[[:! integer]] i) or 0
 end
 
 -- Build a string from a table of byte values, handling LuaJIT's unpack limit.

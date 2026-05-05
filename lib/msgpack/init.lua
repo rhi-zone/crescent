@@ -289,37 +289,37 @@ end
 
 --: (string, integer) -> (number, integer)
 local function decode_uint8(s, pos)
-	local b = byte(s, pos)
+	local b = byte(s, pos) or 0
 	return b, pos + 1
 end
 
 --: (string, integer) -> (number, integer)
 local function decode_uint16(s, pos)
-	local b1 = byte(s, pos)
-	local b2 = byte(s, pos + 1)
+	local b1 = byte(s, pos) or 0
+	local b2 = byte(s, pos + 1) or 0
 	return b1 * 256 + b2, pos + 2
 end
 
 --: (string, integer) -> (number, integer)
 local function decode_uint32(s, pos)
-	local b1 = byte(s, pos)
-	local b2 = byte(s, pos + 1)
-	local b3 = byte(s, pos + 2)
-	local b4 = byte(s, pos + 3)
+	local b1 = byte(s, pos) or 0
+	local b2 = byte(s, pos + 1) or 0
+	local b3 = byte(s, pos + 2) or 0
+	local b4 = byte(s, pos + 3) or 0
 	return b1 * 16777216 + b2 * 65536 + b3 * 256 + b4, pos + 4
 end
 
 --: (string, integer) -> (number, integer)
 local function decode_int8(s, pos)
-	local n = byte(s, pos)
+	local n = byte(s, pos) or 0
 	if n >= 128 then n = n - 256 end
 	return n, pos + 1
 end
 
 --: (string, integer) -> (number, integer)
 local function decode_int16(s, pos)
-	local b1 = byte(s, pos)
-	local b2 = byte(s, pos + 1)
+	local b1 = byte(s, pos) or 0
+	local b2 = byte(s, pos + 1) or 0
 	local n = b1 * 256 + b2
 	if n >= 32768 then n = n - 65536 end
 	return n, pos + 2
@@ -327,10 +327,10 @@ end
 
 --: (string, integer) -> (number, integer)
 local function decode_int32(s, pos)
-	local b1 = byte(s, pos)
-	local b2 = byte(s, pos + 1)
-	local b3 = byte(s, pos + 2)
-	local b4 = byte(s, pos + 3)
+	local b1 = byte(s, pos) or 0
+	local b2 = byte(s, pos + 1) or 0
+	local b3 = byte(s, pos + 2) or 0
+	local b4 = byte(s, pos + 3) or 0
 	local n = b1 * 16777216 + b2 * 65536 + b3 * 256 + b4
 	if n >= 2147483648 then n = n - 4294967296 end
 	return n, pos + 4
@@ -356,10 +356,10 @@ end
 
 --: (string, integer) -> (number, integer)
 local function decode_float32(s, pos)
-	local b1 = byte(s, pos)
-	local b2 = byte(s, pos + 1)
-	local b3 = byte(s, pos + 2)
-	local b4 = byte(s, pos + 3)
+	local b1 = byte(s, pos) or 0
+	local b2 = byte(s, pos + 1) or 0
+	local b3 = byte(s, pos + 2) or 0
+	local b4 = byte(s, pos + 3) or 0
 	local sign = 1
 	if b1 >= 128 then sign = -1; b1 = b1 - 128 end
 	local exp = b1 * 2 + floor(b2 / 128)
@@ -377,14 +377,14 @@ end
 
 --: (string, integer) -> (number, integer)
 local function decode_float64(s, pos)
-	local b1 = byte(s, pos)
-	local b2 = byte(s, pos + 1)
-	local b3 = byte(s, pos + 2)
-	local b4 = byte(s, pos + 3)
-	local b5 = byte(s, pos + 4)
-	local b6 = byte(s, pos + 5)
-	local b7 = byte(s, pos + 6)
-	local b8 = byte(s, pos + 7)
+	local b1 = byte(s, pos) or 0
+	local b2 = byte(s, pos + 1) or 0
+	local b3 = byte(s, pos + 2) or 0
+	local b4 = byte(s, pos + 3) or 0
+	local b5 = byte(s, pos + 4) or 0
+	local b6 = byte(s, pos + 5) or 0
+	local b7 = byte(s, pos + 6) or 0
+	local b8 = byte(s, pos + 7) or 0
 	local sign = 1
 	if b1 >= 128 then sign = -1; b1 = b1 - 128 end
 	local exp = b1 * 16 + floor(b2 / 16)
@@ -409,7 +409,7 @@ decode_one = function(s, pos)
 	if pos > #s then
 		return nil, "unexpected end of input"
 	end
-	local b = byte(s, pos)
+	local b = byte(s, pos) or 0
 
 	-- positive fixint: 0x00..0x7f
 	if b <= 0x7f then
@@ -467,7 +467,7 @@ decode_one = function(s, pos)
 
 	-- bin8
 	if b == 0xc4 then
-		local len = byte(s, pos + 1)
+		local len = byte(s, pos + 1) or 0
 		return sub(s, pos + 2, pos + 1 + len), pos + 2 + len
 	end
 
@@ -521,7 +521,7 @@ decode_one = function(s, pos)
 
 	-- str8
 	if b == 0xd9 then
-		local len = byte(s, pos + 1)
+		local len = byte(s, pos + 1) or 0
 		return sub(s, pos + 2, pos + 1 + len), pos + 2 + len
 	end
 

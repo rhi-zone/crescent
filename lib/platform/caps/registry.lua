@@ -93,9 +93,7 @@ end
 -- Read a single byte from a string at position i, or 0 if out of range.
 --: (string, integer) -> integer
 local function byte_at(s, i)
-	local b = s:byte(i)
-	if not b then return 0 end
-	return b
+	return s:byte(i) or 0
 end
 
 -- Convert UTF-16LE bytes to UTF-8. Stops at null codepoint.

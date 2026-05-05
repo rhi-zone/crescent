@@ -44,17 +44,20 @@ local sformat = string.format
 -- ---------------------------------------------------------------------------
 
 local function to_hex(s)
+  local str = s --[[:! string]]
   local t = {}
-  for i = 1, #s do t[i] = sformat("%02x", sbyte(s, i)) end
+  for i = 1, #str do t[i] = sformat("%02x", sbyte(str, i) or 0) end
   return table.concat(t)
 end
 
 -- Constant-time comparison of two strings.
 local function ct_eq(a, b)
-  if #a ~= #b then return false end
+  local sa = a --[[:! string]]
+  local sb = b --[[:! string]]
+  if #sa ~= #sb then return false end
   local diff = 0
-  for i = 1, #a do
-    diff = bor(diff, bxor(sbyte(a, i), sbyte(b, i)))
+  for i = 1, #sa do
+    diff = bor(diff, bxor(sbyte(sa, i) or 0, sbyte(sb, i) or 0))
   end
   return diff == 0
 end

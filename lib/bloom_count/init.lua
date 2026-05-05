@@ -23,8 +23,7 @@ local LN2 = log(2)
 local function fnv1a(s, seed)
   local h = band(math.floor(2166136261) + seed * 16777619, 0xFFFFFFFF) --[[:! integer]]
   for i = 1, #s do
-    local b_, _, _ = string.byte(s, i, i)
-    local b = b_ --[[:! integer]]
+    local b = string.byte(s, i) or 0
     h = band(bxor(h, b) * 16777619, 0xFFFFFFFF)
   end
   return h
@@ -36,8 +35,7 @@ local function hash_pair(s)
   local h1 = fnv1a(s, 0)
   local h2 = 0 --: integer
   for i = 1, #s do
-    local b_, _, _ = string.byte(s, i, i)
-    local b = b_ --[[:! integer]]
+    local b = string.byte(s, i) or 0
     h2 = band(h2 * 31 + b, 0xFFFFFFFF)
   end
   -- h2 must be odd to ensure all m slots are reachable

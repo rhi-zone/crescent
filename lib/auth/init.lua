@@ -88,9 +88,9 @@ function M.constant_time_eq(a, b)
 	if #a ~= #b then return false end
 	local diff = 0 --: integer
 	for i = 1, #a do
-		local ba_, _, _ = string.byte(a, i, i)
-		local bb_, _, _ = string.byte(b, i, i)
-		diff = bor(diff, bxor(ba_ --[[:! integer]], bb_ --[[:! integer]]))
+		local ba_ = string.byte(a, i, i) or 0
+		local bb_ = string.byte(b, i, i) or 0
+		diff = bor(diff, bxor(ba_, bb_))
 	end
 	return diff == 0
 end
@@ -271,9 +271,9 @@ local function xor_strings(a, b)
 	local schar = string.char
 	local out = {}
 	for i = 1, #a do
-		local ba_, _, _ = sbyte(a, i, i)
-		local bb_, _, _ = sbyte(b, i, i)
-		out[i] = schar(bxor(ba_ --[[:! integer]], bb_ --[[:! integer]]))
+		local ba_ = sbyte(a, i, i) or 0
+		local bb_ = sbyte(b, i, i) or 0
+		out[i] = schar(bxor(ba_, bb_))
 	end
 	return table.concat(out)
 end

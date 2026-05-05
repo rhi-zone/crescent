@@ -340,7 +340,7 @@ local function hash_pair(data)
   local h1 = FNV_OFFSET
   local h2 = 2246822519  -- different seed
   for i = 1, #data do
-    local b = data:byte(i)
+    local b = data:byte(i) or 0
     h1 = bxor(h1, b)
     h1 = (h1 * FNV_PRIME) % 4294967296
     h2 = bxor(h2, b)

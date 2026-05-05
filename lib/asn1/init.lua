@@ -210,7 +210,7 @@ function M.decode_oid(value_bytes)
   if vlen == 0 then
     return nil, "empty OID value"
   end
-  local first = byte(value_bytes, 1)
+  local first = byte(value_bytes, 1) or 0
   -- First byte encodes first two components: 40*c1 + c2
   -- c1 can only be 0, 1, or 2.  For c1=2, c2 may exceed 39.
   local c1, c2
@@ -229,7 +229,7 @@ function M.decode_oid(value_bytes)
       if i > vlen then
         return nil, "unexpected end of data in OID component"
       end
-      local b = byte(value_bytes, i)
+      local b = byte(value_bytes, i) or 0
       i = i + 1
       val = val * 128 + band(b, 0x7f)
       if band(b, 0x80) == 0 then break end
@@ -244,7 +244,7 @@ function M.decode_bit_string(value_bytes)
   if slen(value_bytes) == 0 then
     return nil, "empty BIT STRING value"
   end
-  local unused = byte(value_bytes, 1)
+  local unused = byte(value_bytes, 1) or 0
   if unused > 7 then
     return nil, "unused bits count out of range: " .. unused
   end

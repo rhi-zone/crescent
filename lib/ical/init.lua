@@ -540,7 +540,7 @@ local function fold_line(line)
     end
     -- Walk back from e until we're at a safe UTF-8 boundary
     while e > pos do
-      local b = byte(line, e)
+      local b = byte(line, e) or 0
       -- If b is a continuation byte (10xxxxxx), step back
       if b >= 0x80 and b < 0xC0 then
         e = e - 1

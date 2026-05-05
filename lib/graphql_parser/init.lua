@@ -75,14 +75,15 @@ end
 --: (Lexer) -> unknown
 local function read_name(lex)
   local start = lex.pos
-  local c = byte(lex.src, start)
-  if not c then return nil end
+  local c_raw = byte(lex.src, start)
+  if not c_raw then return nil end
+  local c = c_raw or 0
   if not (c == 95 or (c >= 65 and c <= 90) or (c >= 97 and c <= 122)) then
     return nil
   end
   local p = start + 1
   while p <= lex.len do
-    c = byte(lex.src, p)
+    c = byte(lex.src, p) or 0
     if c == 95 or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) then
       p = p + 1
     else
@@ -101,17 +102,17 @@ end
 local function read_number(lex)
   local start = lex.pos
   local is_float = false
-  local c = byte(lex.src, lex.pos)
+  local c = byte(lex.src, lex.pos) or 0
   -- optional minus
   if c == 45 then lex.pos = lex.pos + 1 end
   -- integer part
-  c = byte(lex.src, lex.pos)
+  c = byte(lex.src, lex.pos) or 0
   if c == 48 then -- leading zero: must be followed by non-digit
     lex.pos = lex.pos + 1
-  elseif c and c >= 49 and c <= 57 then
+  elseif c >= 49 and c <= 57 then
     lex.pos = lex.pos + 1
     while lex.pos <= lex.len do
-      c = byte(lex.src, lex.pos)
+      c = byte(lex.src, lex.pos) or 0
       if c >= 48 and c <= 57 then lex.pos = lex.pos + 1 else break end
     end
   else
@@ -119,24 +120,24 @@ local function read_number(lex)
     return nil
   end
   -- fractional part
-  c = byte(lex.src, lex.pos)
+  c = byte(lex.src, lex.pos) or 0
   if c == 46 then -- '.'
     is_float = true
     lex.pos = lex.pos + 1
     while lex.pos <= lex.len do
-      c = byte(lex.src, lex.pos)
+      c = byte(lex.src, lex.pos) or 0
       if c >= 48 and c <= 57 then lex.pos = lex.pos + 1 else break end
     end
   end
   -- exponent
-  c = byte(lex.src, lex.pos)
+  c = byte(lex.src, lex.pos) or 0
   if c == 101 or c == 69 then -- 'e' or 'E'
     is_float = true
     lex.pos = lex.pos + 1
-    c = byte(lex.src, lex.pos)
+    c = byte(lex.src, lex.pos) or 0
     if c == 43 or c == 45 then lex.pos = lex.pos + 1 end
     while lex.pos <= lex.len do
-      c = byte(lex.src, lex.pos)
+      c = byte(lex.src, lex.pos) or 0
       if c >= 48 and c <= 57 then lex.pos = lex.pos + 1 else break end
     end
   end

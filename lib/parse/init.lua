@@ -72,11 +72,11 @@ end
 
 --: (lo: string, hi: string) -> (input: string, pos: integer) -> (string, integer) | (nil, integer, string)
 function M.range(lo, hi)
-  local lo_b = lo:byte(1)
-  local hi_b = hi:byte(1)
+  local lo_b = lo:byte(1) or 0
+  local hi_b = hi:byte(1) or 0
   return function(input, pos)
-    local b = input:byte(pos)
-    if b and b >= lo_b and b <= hi_b then
+    local b_raw = input:byte(pos)
+    if b_raw and b_raw >= lo_b and b_raw <= hi_b then
       return input:sub(pos, pos), pos + 1
     end
     return nil, pos, "expected character in range '" .. lo .. "'-'" .. hi .. "'"

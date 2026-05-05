@@ -62,10 +62,10 @@ end
 -- Read a big-endian uint32 from string at 1-based offset.
 --: (string, integer) -> integer
 local function u32be(s, off)
-	local a = math.floor(tonumber(string.byte(s, off))     or 0)
-	local b = math.floor(tonumber(string.byte(s, off + 1)) or 0)
-	local c = math.floor(tonumber(string.byte(s, off + 2)) or 0)
-	local d = math.floor(tonumber(string.byte(s, off + 3)) or 0)
+	local a = string.byte(s, off)     or 0
+	local b = string.byte(s, off + 1) or 0
+	local c = string.byte(s, off + 2) or 0
+	local d = string.byte(s, off + 3) or 0
 	-- Use unsigned arithmetic via tobit trick: build the value then mask.
 	-- For values where MSB is set, the double sum is correct; tobit signs it.
 	return tobit(a * 0x1000000 + b * 0x10000 + c * 0x100 + d)
@@ -74,10 +74,10 @@ end
 -- Read a little-endian uint32 from string at 0-based offset.
 --: (string, integer) -> integer
 local function u32le(s, off)
-	local a = math.floor(tonumber(string.byte(s, off + 1)) or 0)
-	local b = math.floor(tonumber(string.byte(s, off + 2)) or 0)
-	local c = math.floor(tonumber(string.byte(s, off + 3)) or 0)
-	local d = math.floor(tonumber(string.byte(s, off + 4)) or 0)
+	local a = string.byte(s, off + 1) or 0
+	local b = string.byte(s, off + 2) or 0
+	local c = string.byte(s, off + 3) or 0
+	local d = string.byte(s, off + 4) or 0
 	return tobit(a + b * 0x100 + c * 0x10000 + d * 0x1000000)
 end
 
@@ -770,22 +770,22 @@ function M.poly1305(key, msg)
 		if chunk >= 4 then
 			t0 = unsigned(u32le(msg, pos))
 		else
-			for i = 0, chunk - 1 do t0 = t0 + (math.floor(tonumber(string.byte(msg, pos + i + 1)) or 0)) * (256 ^ i) end
+			for i = 0, chunk - 1 do t0 = t0 + (string.byte(msg, pos + i + 1) or 0) * (256 ^ i) end
 		end
 		if chunk >= 8 then
 			t1 = unsigned(u32le(msg, pos + 4))
 		elseif chunk > 4 then
-			for i = 0, chunk - 5 do t1 = t1 + (math.floor(tonumber(string.byte(msg, pos + i + 5)) or 0)) * (256 ^ i) end
+			for i = 0, chunk - 5 do t1 = t1 + (string.byte(msg, pos + i + 5) or 0) * (256 ^ i) end
 		end
 		if chunk >= 12 then
 			t2 = unsigned(u32le(msg, pos + 8))
 		elseif chunk > 8 then
-			for i = 0, chunk - 9 do t2 = t2 + (math.floor(tonumber(string.byte(msg, pos + i + 9)) or 0)) * (256 ^ i) end
+			for i = 0, chunk - 9 do t2 = t2 + (string.byte(msg, pos + i + 9) or 0) * (256 ^ i) end
 		end
 		if chunk >= 16 then
 			t3 = unsigned(u32le(msg, pos + 12))
 		elseif chunk > 12 then
-			for i = 0, chunk - 13 do t3 = t3 + (math.floor(tonumber(string.byte(msg, pos + i + 13)) or 0)) * (256 ^ i) end
+			for i = 0, chunk - 13 do t3 = t3 + (string.byte(msg, pos + i + 13) or 0) * (256 ^ i) end
 		end
 
 		-- Decompose block into 5 x 26-bit limbs and add sentinel.

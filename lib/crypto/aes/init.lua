@@ -125,7 +125,8 @@ local Rcon = {
 -- ---------------------------------------------------------------------------
 
 local function key_expand(key)
-  local klen = #key
+  local key_s = key --[[:! string]]
+  local klen = #key_s
   local nk   -- words in key
   local nr   -- rounds
   if klen == 16 then
@@ -141,7 +142,7 @@ local function key_expand(key)
   local w = {}  -- expanded key words (each word = 4 bytes stored as 4 entries)
   -- Copy key into w as individual bytes
   for i = 1, klen do
-    w[i] = byte(key, i)
+    w[i] = byte(key_s, i)
   end
 
   local total_words = (nr + 1) * 4  -- 4 words per round
@@ -152,7 +153,7 @@ local function key_expand(key)
   local W = {}
   for wi = 1, nk do
     local base = (wi - 1) * 4 + 1
-    W[wi] = { byte(key, base), byte(key, base+1), byte(key, base+2), byte(key, base+3) }
+    W[wi] = { byte(key_s, base), byte(key_s, base+1), byte(key_s, base+2), byte(key_s, base+3) }
   end
 
   local rcon_i = 1
@@ -367,7 +368,8 @@ function M.encrypt_block(key, block)
   end
   local rk, nr = get_round_keys(key)
   if not rk then return nil, nr end
-  local s = { byte(block, 1, 16) }
+  local block_s = block --[[:! string]]
+  local s = { byte(block_s, 1, 16) }
   encrypt_block_raw(rk, nr, s)
   return char(unpack(s))
 end
@@ -381,7 +383,8 @@ function M.decrypt_block(key, block)
   end
   local rk, nr = get_round_keys(key)
   if not rk then return nil, nr end
-  local s = { byte(block, 1, 16) }
+  local block_s = block --[[:! string]]
+  local s = { byte(block_s, 1, 16) }
   decrypt_block_raw(rk, nr, s)
   return char(unpack(s))
 end
@@ -397,23 +400,24 @@ function M.pad(data, block_size)
 end
 
 function M.unpad(data)
-  if #data == 0 then
+  local data_s = data --[[:! string]]
+  if #data_s == 0 then
     return nil, "empty data"
   end
-  local pad_len = byte(data, #data)
+  local pad_len = byte(data_s, #data_s) or 0
   if pad_len == 0 or pad_len > 16 then
     return nil, "invalid PKCS#7 padding byte: " .. pad_len
   end
-  if #data < pad_len then
+  if #data_s < pad_len then
     return nil, "data shorter than padding length"
   end
   -- Validate all padding bytes
-  for i = #data - pad_len + 1, #data do
-    if byte(data, i) ~= pad_len then
+  for i = #data_s - pad_len + 1, #data_s do
+    if byte(data_s, i) ~= pad_len then
       return nil, "invalid PKCS#7 padding"
     end
   end
-  return data:sub(1, #data - pad_len)
+  return data_s:sub(1, #data_s - pad_len)
 end
 
 -- ---------------------------------------------------------------------------

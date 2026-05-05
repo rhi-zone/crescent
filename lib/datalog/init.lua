@@ -15,8 +15,8 @@ end
 --- Check if a string is a variable name (starts with uppercase letter).
 --: (s: string) -> boolean
 local function is_var(s)
-  local b = s:byte(1)
-  return (b ~= nil and b >= 65 and b <= 90) and true or false -- A-Z
+  local b = s:byte(1) or 0
+  return (b >= 65 and b <= 90) and true or false -- A-Z
 end
 
 local DB = {} --[[: any]]

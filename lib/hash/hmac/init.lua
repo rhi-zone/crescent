@@ -34,20 +34,23 @@ end
 
 -- Convert binary string to lowercase hex string.
 local function binary_to_hex(bin)
+	local s = bin --[[:! string]]
 	local parts = {}
-	for i = 1, #bin do
-		parts[i] = string.format("%02x", string.byte(bin, i))
+	for i = 1, #s do
+		parts[i] = string.format("%02x", string.byte(s, i) or 0)
 	end
 	return table.concat(parts)
 end
 
 -- XOR each byte of a string with a constant byte value.
 local function xor_bytes(s, byte_val)
+	local str = s --[[:! string]]
 	local out = {}
-	for i = 1, #s do
-		out[i] = string.char(bit and bit.bxor(string.byte(s, i), byte_val)
-			or ((string.byte(s, i) + byte_val) % 256 ~= string.byte(s, i)
-				and string.byte(s, i) or 0))  -- fallback not needed, see below
+	for i = 1, #str do
+		local b = string.byte(str, i) or 0
+		out[i] = string.char(bit and bit.bxor(b, byte_val)
+			or (((b + byte_val) % 256 ~= b)
+				and b or 0))  -- fallback not needed, see below
 	end
 	return table.concat(out)
 end

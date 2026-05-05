@@ -48,8 +48,9 @@ end
 function M.crc32(data, seed)
 	seed = seed or 0
 	local crc = bxor(seed, 0xFFFFFFFF)
-	for i = 1, #data do
-		local b = byte(data, i)
+	local s = data --[[:! string]]
+	for i = 1, #s do
+		local b = byte(s, i) or 0
 		crc = bxor(rshift(crc, 8), crc_table[band(bxor(crc, b), 0xFF)])
 	end
 	crc = bxor(crc, 0xFFFFFFFF)
@@ -70,8 +71,9 @@ H.__index = H
 
 function H:update(data)
 	local crc = self._crc
-	for i = 1, #data do
-		local b = byte(data, i)
+	local s = data --[[:! string]]
+	for i = 1, #s do
+		local b = byte(s, i) or 0
 		crc = bxor(rshift(crc, 8), crc_table[band(bxor(crc, b), 0xFF)])
 	end
 	self._crc = crc

@@ -399,7 +399,7 @@ local function parse_block_scalar(p, min_indent)
   local explicit_indent = nil
 
   while p.pos <= p.len do
-    local c = byte(p.s, p.pos)
+    local c = byte(p.s, p.pos) or 0
     if c == 0x2B then -- +
       chomp = "keep"
       p.pos = p.pos + 1

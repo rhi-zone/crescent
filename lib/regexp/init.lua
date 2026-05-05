@@ -765,7 +765,7 @@ local function nfa_run(prog, subject, init, anchored)
 
     local pos = start --: integer
     while #clist > 0 and pos <= slen do
-      local b = subject:byte(pos)
+      local b = subject:byte(pos) or 0
       local nlist = --[[:! ThreadList]] {}
       local nvisited = --[[:! { [integer]: unknown }]] {}
 

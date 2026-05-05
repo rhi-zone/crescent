@@ -57,14 +57,14 @@ end
 -- 8 bytes big-endian → IEEE 754 double
 --: (string, integer) -> number
 local function decode_double(s, pos)
-  local b1i = byte(s, pos)
-  local b2i = byte(s, pos + 1)
-  local b3i = byte(s, pos + 2)
-  local b4i = byte(s, pos + 3)
-  local b5i = byte(s, pos + 4)
-  local b6i = byte(s, pos + 5)
-  local b7i = byte(s, pos + 6)
-  local b8i = byte(s, pos + 7)
+  local b1i = byte(s, pos) or 0
+  local b2i = byte(s, pos + 1) or 0
+  local b3i = byte(s, pos + 2) or 0
+  local b4i = byte(s, pos + 3) or 0
+  local b5i = byte(s, pos + 4) or 0
+  local b6i = byte(s, pos + 5) or 0
+  local b7i = byte(s, pos + 6) or 0
+  local b8i = byte(s, pos + 7) or 0
   local sign = b1i >= 128 and -1 or 1
   local exp = (b1i % 128) * 16 + floor(b2i / 16)
   local frac = (b2i % 16) * 2^48 + b3i * 2^40 + b4i * 2^32
@@ -82,10 +82,10 @@ end
 -- 4 bytes big-endian → IEEE 754 float
 --: (string, integer) -> number
 local function decode_float(s, pos)
-  local b1i = byte(s, pos)
-  local b2i = byte(s, pos + 1)
-  local b3i = byte(s, pos + 2)
-  local b4i = byte(s, pos + 3)
+  local b1i = byte(s, pos) or 0
+  local b2i = byte(s, pos + 1) or 0
+  local b3i = byte(s, pos + 2) or 0
+  local b4i = byte(s, pos + 3) or 0
   local sign = b1i >= 128 and -1 or 1
   local exp = (b1i % 128) * 2 + floor(b2i / 128)
   local frac = (b2i % 128) * 2^16 + b3i * 2^8 + b4i
@@ -397,7 +397,7 @@ decode = function(s, pos)
   if b == 0xc4 then
     local ok, err = check_len(s, pos + 1, 1)
     if not ok then return nil, err end
-    local n = byte(s, pos + 1)
+    local n = byte(s, pos + 1) or 0
     ok, err = check_len(s, pos + 2, n)
     if not ok then return nil, err end
     return sub(s, pos + 2, pos + 1 + n), pos + 2 + n
@@ -407,8 +407,8 @@ decode = function(s, pos)
   if b == 0xc5 then
     local ok, err = check_len(s, pos + 1, 2)
     if not ok then return nil, err end
-    local _b1 = byte(s, pos + 1)
-    local _b2 = byte(s, pos + 2)
+    local _b1 = byte(s, pos + 1) or 0
+    local _b2 = byte(s, pos + 2) or 0
     local n = _b1 * 256 + _b2
     ok, err = check_len(s, pos + 3, n)
     if not ok then return nil, err end
@@ -419,10 +419,10 @@ decode = function(s, pos)
   if b == 0xc6 then
     local ok, err = check_len(s, pos + 1, 4)
     if not ok then return nil, err end
-    local _b1 = byte(s, pos + 1)
-    local _b2 = byte(s, pos + 2)
-    local _b3 = byte(s, pos + 3)
-    local _b4 = byte(s, pos + 4)
+    local _b1 = byte(s, pos + 1) or 0
+    local _b2 = byte(s, pos + 2) or 0
+    local _b3 = byte(s, pos + 3) or 0
+    local _b4 = byte(s, pos + 4) or 0
     local n = floor(_b1 * 2^24 + _b2 * 2^16 + _b3 * 2^8 + _b4)
     ok, err = check_len(s, pos + 5, n)
     if not ok then return nil, err end
@@ -453,15 +453,15 @@ decode = function(s, pos)
   if b == 0xcc then
     local ok, err = check_len(s, pos + 1, 1)
     if not ok then return nil, err end
-    return byte(s, pos + 1), pos + 2
+    return byte(s, pos + 1) or 0, pos + 2
   end
 
   -- uint16
   if b == 0xcd then
     local ok, err = check_len(s, pos + 1, 2)
     if not ok then return nil, err end
-    local _u1 = byte(s, pos + 1)
-    local _u2 = byte(s, pos + 2)
+    local _u1 = byte(s, pos + 1) or 0
+    local _u2 = byte(s, pos + 2) or 0
     return _u1 * 256 + _u2, pos + 3
   end
 
@@ -469,10 +469,10 @@ decode = function(s, pos)
   if b == 0xce then
     local ok, err = check_len(s, pos + 1, 4)
     if not ok then return nil, err end
-    local _u1 = byte(s, pos + 1)
-    local _u2 = byte(s, pos + 2)
-    local _u3 = byte(s, pos + 3)
-    local _u4 = byte(s, pos + 4)
+    local _u1 = byte(s, pos + 1) or 0
+    local _u2 = byte(s, pos + 2) or 0
+    local _u3 = byte(s, pos + 3) or 0
+    local _u4 = byte(s, pos + 4) or 0
     return _u1 * 2^24 + _u2 * 2^16 + _u3 * 2^8 + _u4, pos + 5
   end
 
@@ -480,14 +480,14 @@ decode = function(s, pos)
   if b == 0xcf then
     local ok, err = check_len(s, pos + 1, 8)
     if not ok then return nil, err end
-    local _u1 = byte(s, pos + 1)
-    local _u2 = byte(s, pos + 2)
-    local _u3 = byte(s, pos + 3)
-    local _u4 = byte(s, pos + 4)
-    local _u5 = byte(s, pos + 5)
-    local _u6 = byte(s, pos + 6)
-    local _u7 = byte(s, pos + 7)
-    local _u8 = byte(s, pos + 8)
+    local _u1 = byte(s, pos + 1) or 0
+    local _u2 = byte(s, pos + 2) or 0
+    local _u3 = byte(s, pos + 3) or 0
+    local _u4 = byte(s, pos + 4) or 0
+    local _u5 = byte(s, pos + 5) or 0
+    local _u6 = byte(s, pos + 6) or 0
+    local _u7 = byte(s, pos + 7) or 0
+    local _u8 = byte(s, pos + 8) or 0
     return _u1 * 2^56 + _u2 * 2^48 + _u3 * 2^40 + _u4 * 2^32
          + _u5 * 2^24 + _u6 * 2^16 + _u7 * 2^8 + _u8, pos + 9
   end
@@ -496,7 +496,7 @@ decode = function(s, pos)
   if b == 0xd0 then
     local ok, err = check_len(s, pos + 1, 1)
     if not ok then return nil, err end
-    local v = byte(s, pos + 1)
+    local v = byte(s, pos + 1) or 0
     if v >= 128 then v = v - 256 end
     return v, pos + 2
   end
@@ -505,8 +505,8 @@ decode = function(s, pos)
   if b == 0xd1 then
     local ok, err = check_len(s, pos + 1, 2)
     if not ok then return nil, err end
-    local _i1 = byte(s, pos + 1)
-    local _i2 = byte(s, pos + 2)
+    local _i1 = byte(s, pos + 1) or 0
+    local _i2 = byte(s, pos + 2) or 0
     local v = _i1 * 256 + _i2
     if v >= 32768 then v = v - 65536 end
     return v, pos + 3
@@ -516,10 +516,10 @@ decode = function(s, pos)
   if b == 0xd2 then
     local ok, err = check_len(s, pos + 1, 4)
     if not ok then return nil, err end
-    local _i1 = byte(s, pos + 1)
-    local _i2 = byte(s, pos + 2)
-    local _i3 = byte(s, pos + 3)
-    local _i4 = byte(s, pos + 4)
+    local _i1 = byte(s, pos + 1) or 0
+    local _i2 = byte(s, pos + 2) or 0
+    local _i3 = byte(s, pos + 3) or 0
+    local _i4 = byte(s, pos + 4) or 0
     local v = _i1 * 2^24 + _i2 * 2^16 + _i3 * 2^8 + _i4
     if v >= 2^31 then v = v - 2^32 end
     return v, pos + 5
@@ -531,14 +531,14 @@ decode = function(s, pos)
   if b == 0xd3 then
     local ok, err = check_len(s, pos + 1, 8)
     if not ok then return nil, err end
-    local _i1 = byte(s, pos + 1)
-    local _i2 = byte(s, pos + 2)
-    local _i3 = byte(s, pos + 3)
-    local _i4 = byte(s, pos + 4)
-    local _i5 = byte(s, pos + 5)
-    local _i6 = byte(s, pos + 6)
-    local _i7 = byte(s, pos + 7)
-    local _i8 = byte(s, pos + 8)
+    local _i1 = byte(s, pos + 1) or 0
+    local _i2 = byte(s, pos + 2) or 0
+    local _i3 = byte(s, pos + 3) or 0
+    local _i4 = byte(s, pos + 4) or 0
+    local _i5 = byte(s, pos + 5) or 0
+    local _i6 = byte(s, pos + 6) or 0
+    local _i7 = byte(s, pos + 7) or 0
+    local _i8 = byte(s, pos + 8) or 0
     local hi = _i1 * 2^24 + _i2 * 2^16 + _i3 * 2^8 + _i4
     local lo = _i5 * 2^24 + _i6 * 2^16 + _i7 * 2^8 + _i8
     -- Sign-extend: if hi >= 2^31, the number is negative
@@ -552,7 +552,7 @@ decode = function(s, pos)
   if b == 0xd9 then
     local ok, err = check_len(s, pos + 1, 1)
     if not ok then return nil, err end
-    local n = byte(s, pos + 1)
+    local n = byte(s, pos + 1) or 0
     ok, err = check_len(s, pos + 2, n)
     if not ok then return nil, err end
     return sub(s, pos + 2, pos + 1 + n), pos + 2 + n
@@ -562,8 +562,8 @@ decode = function(s, pos)
   if b == 0xda then
     local ok, err = check_len(s, pos + 1, 2)
     if not ok then return nil, err end
-    local _s1 = byte(s, pos + 1)
-    local _s2 = byte(s, pos + 2)
+    local _s1 = byte(s, pos + 1) or 0
+    local _s2 = byte(s, pos + 2) or 0
     local n = _s1 * 256 + _s2
     ok, err = check_len(s, pos + 3, n)
     if not ok then return nil, err end
@@ -574,10 +574,10 @@ decode = function(s, pos)
   if b == 0xdb then
     local ok, err = check_len(s, pos + 1, 4)
     if not ok then return nil, err end
-    local _s1 = byte(s, pos + 1)
-    local _s2 = byte(s, pos + 2)
-    local _s3 = byte(s, pos + 3)
-    local _s4 = byte(s, pos + 4)
+    local _s1 = byte(s, pos + 1) or 0
+    local _s2 = byte(s, pos + 2) or 0
+    local _s3 = byte(s, pos + 3) or 0
+    local _s4 = byte(s, pos + 4) or 0
     local n = floor(_s1 * 2^24 + _s2 * 2^16 + _s3 * 2^8 + _s4)
     ok, err = check_len(s, pos + 5, n)
     if not ok then return nil, err end
@@ -588,8 +588,8 @@ decode = function(s, pos)
   if b == 0xdc then
     local ok, err = check_len(s, pos + 1, 2)
     if not ok then return nil, err end
-    local _a1 = byte(s, pos + 1)
-    local _a2 = byte(s, pos + 2)
+    local _a1 = byte(s, pos + 1) or 0
+    local _a2 = byte(s, pos + 2) or 0
     local n = _a1 * 256 + _a2
     local t = {}
     local p = pos + 3
@@ -606,10 +606,10 @@ decode = function(s, pos)
   if b == 0xdd then
     local ok, err = check_len(s, pos + 1, 4)
     if not ok then return nil, err end
-    local _a1 = byte(s, pos + 1)
-    local _a2 = byte(s, pos + 2)
-    local _a3 = byte(s, pos + 3)
-    local _a4 = byte(s, pos + 4)
+    local _a1 = byte(s, pos + 1) or 0
+    local _a2 = byte(s, pos + 2) or 0
+    local _a3 = byte(s, pos + 3) or 0
+    local _a4 = byte(s, pos + 4) or 0
     local n = _a1 * 2^24 + _a2 * 2^16 + _a3 * 2^8 + _a4
     local t = {}
     local p = pos + 5
@@ -626,8 +626,8 @@ decode = function(s, pos)
   if b == 0xde then
     local ok, err = check_len(s, pos + 1, 2)
     if not ok then return nil, err end
-    local _m1 = byte(s, pos + 1)
-    local _m2 = byte(s, pos + 2)
+    local _m1 = byte(s, pos + 1) or 0
+    local _m2 = byte(s, pos + 2) or 0
     local n = _m1 * 256 + _m2
     local t = {}
     local p = pos + 3
@@ -646,10 +646,10 @@ decode = function(s, pos)
   if b == 0xdf then
     local ok, err = check_len(s, pos + 1, 4)
     if not ok then return nil, err end
-    local _m1 = byte(s, pos + 1)
-    local _m2 = byte(s, pos + 2)
-    local _m3 = byte(s, pos + 3)
-    local _m4 = byte(s, pos + 4)
+    local _m1 = byte(s, pos + 1) or 0
+    local _m2 = byte(s, pos + 2) or 0
+    local _m3 = byte(s, pos + 3) or 0
+    local _m4 = byte(s, pos + 4) or 0
     local n = _m1 * 2^24 + _m2 * 2^16 + _m3 * 2^8 + _m4
     local t = {}
     local p = pos + 5

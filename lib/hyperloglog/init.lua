@@ -234,7 +234,7 @@ function M.deserialize(s)
   if type(s) ~= "string" or #s < 1 then
     return nil, "hyperloglog.deserialize: invalid input"
   end
-  local b = string.byte(s, 1)
+  local b = string.byte(s, 1) or 0
   if b < 4 or b > 16 then
     return nil, "hyperloglog.deserialize: invalid precision byte " .. tostring(b)
   end

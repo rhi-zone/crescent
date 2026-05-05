@@ -22,8 +22,9 @@ local LN2 = log(2)
 -- FNV-1a 32-bit hash of a string, seeded by an integer offset (for double hashing)
 local function fnv1a(s, seed)
   local h = band(2166136261 + seed * 16777619, 0xFFFFFFFF)
-  for i = 1, #s do
-    local b = string.byte(s, i)
+  local str = s --[[:! string]]
+  for i = 1, #str do
+    local b = string.byte(str, i) or 0
     h = band(h, 0xFFFFFFFF)
     h = band(bit.bxor(h, b) * 16777619, 0xFFFFFFFF)
   end
@@ -35,8 +36,9 @@ local function hash_pair(s)
   local h1 = fnv1a(s, 0)
   -- Simple polynomial second hash — different enough from FNV-1a
   local h2 = 0
-  for i = 1, #s do
-    h2 = band(h2 * 31 + string.byte(s, i), 0xFFFFFFFF)
+  local str = s --[[:! string]]
+  for i = 1, #str do
+    h2 = band(h2 * 31 + (string.byte(str, i) or 0), 0xFFFFFFFF)
   end
   -- h2 must be odd to avoid degeneracy in double hashing (ensures all m slots reachable)
   h2 = bor(h2, 1)
@@ -277,14 +279,15 @@ end
 -- Format (8-byte header): 4-byte big-endian m, 4-byte big-endian k, then nwords*4 bytes.
 -- The optional second argument k is ignored when using the new format (k is in header).
 function M.from_string(s, _k_ignored)
-  local nbytes = #s
+  local str = s --[[:! string]]
+  local nbytes = #str
   -- Minimum: 8-byte header + 0 data words
   if nbytes < 8 or (nbytes - 8) % 4 ~= 0 then
     return nil, "bloom.from_string: invalid serialized string (bad length)"
   end
-  local mh1, mh2, mh3, mh4 = string.byte(s, 1, 4)
+  local mh1, mh2, mh3, mh4 = string.byte(str, 1, 4)
   local m = bor(lshift(mh1, 24), lshift(mh2, 16), lshift(mh3, 8), mh4)
-  local kh1, kh2, kh3, kh4 = string.byte(s, 5, 8)
+  local kh1, kh2, kh3, kh4 = string.byte(str, 5, 8)
   local k = bor(lshift(kh1, 24), lshift(kh2, 16), lshift(kh3, 8), kh4)
   if k == 0 then
     return nil, "bloom.from_string: invalid serialized string (k=0)"
@@ -293,7 +296,7 @@ function M.from_string(s, _k_ignored)
   local bits = {}
   for i = 1, nwords do
     local off = 8 + (i - 1) * 4 + 1
-    local b1, b2, b3, b4 = string.byte(s, off, off + 3)
+    local b1, b2, b3, b4 = string.byte(str, off, off + 3)
     bits[i] = bor(
       lshift(b1, 24),
       lshift(b2, 16),

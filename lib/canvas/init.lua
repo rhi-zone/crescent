@@ -461,7 +461,7 @@ end
 function Canvas:text(x, y, str, r, g, b, a)
   local cx = x
   for i = 1, #str do
-    local code = str:byte(i)
+    local code = str:byte(i) or 0
     local glyph = FONT[code - 31]  -- index 1 = space (32)
     if glyph then
       for row = 1, FONT_H do

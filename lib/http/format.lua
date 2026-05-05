@@ -143,9 +143,9 @@ mod.parse_response = function(s, i)
 	end
 	-- RFC 9112 §4 — status-code is exactly 3 decimal digits
 	if #status_str ~= 3 then return nil, nil, "invalid status code" end
-	local b1 = byte(status_str, 1)
-	local b2 = byte(status_str, 2)
-	local b3 = byte(status_str, 3)
+	local b1 = byte(status_str, 1) or 0
+	local b2 = byte(status_str, 2) or 0
+	local b3 = byte(status_str, 3) or 0
 	if b1 < 48 or b1 > 57 or b2 < 48 or b2 > 57 or b3 < 48 or b3 > 57 then
 		return nil, nil, "invalid status code"
 	end

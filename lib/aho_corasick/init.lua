@@ -106,9 +106,10 @@ function Automaton:search_cb(text, cb)
   local fail_table = self._fail
   local output_table = self._output
   local node = 1
-  local n = #text
+  local s = text --[[:! string]]
+  local n = #s
   for i = 1, n do
-    local c = byte(text, i)
+    local c = byte(s, i)
     -- Follow failure links until we find a transition or reach root
     while node ~= 1 and not goto_table[node][c] do
       node = fail_table[node]
@@ -161,9 +162,10 @@ function Automaton:contains(text)
   local fail_table = self._fail
   local output_table = self._output
   local node = 1
-  local n = #text
+  local s = text --[[:! string]]
+  local n = #s
   for i = 1, n do
-    local c = byte(text, i)
+    local c = byte(s, i)
     while node ~= 1 and not goto_table[node][c] do
       node = fail_table[node]
     end
