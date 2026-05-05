@@ -45,7 +45,8 @@ local function fft_inplace(re, im, invert)
     local wi = math_sin(ang)
     local half = len / 2
     for i = 0, n - 1, len do
-      local wre, wim = 1.0, 0.0
+      local wre = 1.0 --: number
+      local wim = 0.0 --: number
       for k = 0, half - 1 do
         local ui = i + k + 1
         local vi = i + k + half + 1
@@ -181,14 +182,16 @@ end
 
 -- Window functions — return array of n weights.
 
+--: (integer) -> { [integer]: number }
 function M.window_rect(n)
-  local w = {}
+  local w = {} --: { [integer]: number }
   for i = 1, n do w[i] = 1.0 end
   return w
 end
 
+--: (integer) -> { [integer]: number }
 function M.window_hann(n)
-  local w = {}
+  local w = {} --: { [integer]: number }
   local nm1 = n - 1
   for i = 1, n do
     w[i] = 0.5 * (1.0 - math_cos(2.0 * PI * (i - 1) / nm1))
@@ -196,8 +199,9 @@ function M.window_hann(n)
   return w
 end
 
+--: (integer) -> { [integer]: number }
 function M.window_hamming(n)
-  local w = {}
+  local w = {} --: { [integer]: number }
   local nm1 = n - 1
   for i = 1, n do
     w[i] = 0.54 - 0.46 * math_cos(2.0 * PI * (i - 1) / nm1)
@@ -205,8 +209,9 @@ function M.window_hamming(n)
   return w
 end
 
+--: (integer) -> { [integer]: number }
 function M.window_blackman(n)
-  local w = {}
+  local w = {} --: { [integer]: number }
   local nm1 = n - 1
   for i = 1, n do
     local x = 2.0 * PI * (i - 1) / nm1
@@ -215,8 +220,9 @@ function M.window_blackman(n)
   return w
 end
 
+--: (integer) -> { [integer]: number }
 function M.window_bartlett(n)
-  local w = {}
+  local w = {} --: { [integer]: number }
   local half = (n - 1) / 2.0
   for i = 1, n do
     w[i] = 1.0 - math_abs((i - 1 - half) / half)
@@ -245,50 +251,53 @@ end
 -- cutoff: normalized cutoff frequency 0..0.5 (0.5 = Nyquist).
 -- n_taps: number of taps (odd; default 31).
 -- Returns array of filter coefficients.
+--: (number, integer | nil) -> { [integer]: number }
 function M.lpf(cutoff, n_taps)
-  n_taps = n_taps or 31
-  if n_taps % 2 == 0 then n_taps = n_taps + 1 end
-  local M_c = (n_taps - 1) / 2.0
-  local win = M.window_hann(n_taps)
-  local h = {}
-  local sum = 0.0
-  for i = 1, n_taps do
+  local n_taps_ = (n_taps or 31) --: integer
+  if n_taps_ % 2 == 0 then n_taps_ = n_taps_ + 1 end
+  local M_c = (n_taps_ - 1) / 2.0
+  local win = M.window_hann(n_taps_)
+  local h = {} --: { [integer]: number }
+  local sum = 0.0 --: number
+  for i = 1, n_taps_ do
     local t = i - 1 - M_c
     h[i] = 2.0 * cutoff * sinc(2.0 * cutoff * t) * win[i]
     sum = sum + h[i]
   end
-  for i = 1, n_taps do h[i] = h[i] / sum end
+  for i = 1, n_taps_ do h[i] = h[i] / sum end
   return h
 end
 
 -- FIR high-pass filter via spectral inversion of LPF.
+--: (number, integer | nil) -> { [integer]: number }
 function M.hpf(cutoff, n_taps)
-  n_taps = n_taps or 31
-  if n_taps % 2 == 0 then n_taps = n_taps + 1 end
-  local h = M.lpf(cutoff, n_taps)
-  local center = (n_taps + 1) / 2
-  for i = 1, n_taps do h[i] = -h[i] end
-  h[center] = h[center] + 1.0
+  local n_taps_ = (n_taps or 31) --: integer
+  if n_taps_ % 2 == 0 then n_taps_ = n_taps_ + 1 end
+  local h = M.lpf(cutoff, n_taps_)
+  local center = math_floor((n_taps_ + 1) / 2)
+  for i = 1, n_taps_ do h[i] = -(h[i] or 0.0) end
+  h[center] = (h[center] or 0.0) + 1.0
   return h
 end
 
 -- FIR band-pass filter (difference of two windowed-sinc lowpass kernels).
+--: (number, number, integer | nil) -> { [integer]: number }
 function M.bpf(low_cutoff, high_cutoff, n_taps)
-  n_taps = n_taps or 31
-  if n_taps % 2 == 0 then n_taps = n_taps + 1 end
-  local M_c = (n_taps - 1) / 2.0
-  local win = M.window_hann(n_taps)
-  local h = {}
-  local peak = 0.0
-  for i = 1, n_taps do
+  local n_taps_ = (n_taps or 31) --: integer
+  if n_taps_ % 2 == 0 then n_taps_ = n_taps_ + 1 end
+  local M_c = (n_taps_ - 1) / 2.0
+  local win = M.window_hann(n_taps_)
+  local h = {} --: { [integer]: number }
+  local peak = 0.0 --: number
+  for i = 1, n_taps_ do
     local t = i - 1 - M_c
     h[i] = (2.0 * high_cutoff * sinc(2.0 * high_cutoff * t)
-            - 2.0 * low_cutoff * sinc(2.0 * low_cutoff * t)) * win[i]
+            - 2.0 * low_cutoff * sinc(2.0 * low_cutoff * t)) * (win[i] or 0.0)
     local a = math_abs(h[i])
     if a > peak then peak = a end
   end
   if peak > 0.0 then
-    for i = 1, n_taps do h[i] = h[i] / peak end
+    for i = 1, n_taps_ do h[i] = h[i] / peak end
   end
   return h
 end
@@ -322,7 +331,12 @@ function M.biquad(filter_type, fs, f0, Q)
   local cos_w = math_cos(omega)
   local sin_w = math_sin(omega)
   local alpha = sin_w / (2.0 * Q)
-  local b0, b1, b2, a0, a1, a2
+  local b0 --: number | nil
+  local b1 --: number | nil
+  local b2 --: number | nil
+  local a0 --: number | nil
+  local a1 --: number | nil
+  local a2 --: number | nil
   if filter_type == "lowpass" then
     b0 = (1.0 - cos_w) / 2.0
     b1 =  1.0 - cos_w
@@ -354,16 +368,20 @@ function M.biquad(filter_type, fs, f0, Q)
   else
     return nil, "biquad: unknown filter type: " .. tostring(filter_type)
   end
+  local a0_ = (a0 or 1.0) --[[:! number]]
   return {
-    b0 = b0 / a0,
-    b1 = b1 / a0,
-    b2 = b2 / a0,
-    a1 = a1 / a0,
-    a2 = a2 / a0,
+    b0 = (b0 or 0.0) --[[:! number]] / a0_,
+    b1 = (b1 or 0.0) --[[:! number]] / a0_,
+    b2 = (b2 or 0.0) --[[:! number]] / a0_,
+    a1 = (a1 or 0.0) --[[:! number]] / a0_,
+    a2 = (a2 or 0.0) --[[:! number]] / a0_,
   }
 end
 
+--:: BiquadCoeff = { b0: number, b1: number, b2: number, a1: number, a2: number }
+
 -- Apply a biquad filter to a signal (direct form II transposed).
+--: ({ [integer]: number }, BiquadCoeff) -> { [integer]: number }
 function M.apply_biquad(signal, coeff)
   local n = #signal
   local result = {}
@@ -372,7 +390,8 @@ function M.apply_biquad(signal, coeff)
   local b2 = coeff.b2
   local a1 = coeff.a1
   local a2 = coeff.a2
-  local d1, d2 = 0.0, 0.0
+  local d1 = 0.0 --: number
+  local d2 = 0.0 --: number
   for i = 1, n do
     local x = signal[i]
     local y = b0 * x + d1
@@ -439,7 +458,7 @@ end
 
 -- Maximum absolute sample value.
 function M.peak(signal)
-  local p = 0.0
+  local p = 0.0 --: number
   for i = 1, #signal do
     local a = math_abs(signal[i])
     if a > p then p = a end
@@ -499,11 +518,11 @@ end
 
 -- Square wave.
 function M.square(n, freq, amplitude)
-  amplitude = amplitude or 1.0
+  local amplitude_ = (amplitude or 1.0) --: number
   local result = {}
   local two_pi_f = 2.0 * PI * freq
   for i = 1, n do
-    result[i] = math_sin(two_pi_f * (i - 1)) >= 0.0 and amplitude or -amplitude
+    result[i] = math_sin(two_pi_f * (i - 1)) >= 0.0 and amplitude_ or -amplitude_
   end
   return result
 end
@@ -538,10 +557,10 @@ end
 
 -- Impulse: 1.0 at position pos (1-indexed), 0 elsewhere.
 function M.impulse(n, pos)
-  pos = pos or 1
-  local result = {}
+  local pos_ = (pos or 1) --: integer
+  local result = {} --: { [integer]: number }
   for i = 1, n do result[i] = 0.0 end
-  if pos >= 1 and pos <= n then result[pos] = 1.0 end
+  if pos_ >= 1 and pos_ <= n then result[pos_] = 1.0 end
   return result
 end
 
