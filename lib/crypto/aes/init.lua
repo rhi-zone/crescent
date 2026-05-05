@@ -35,7 +35,7 @@ M._tier = "pure"
 -- AES S-box and inverse S-box (standard FIPS 197 values)
 -- ---------------------------------------------------------------------------
 
-local S = {
+local S = { --: { [integer]: integer }
   0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,
   0xca,0x82,0xc9,0x7d,0xfa,0x59,0x47,0xf0,0xad,0xd4,0xa2,0xaf,0x9c,0xa4,0x72,0xc0,
   0xb7,0xfd,0x93,0x26,0x36,0x3f,0xf7,0xcc,0x34,0xa5,0xe5,0xf1,0x71,0xd8,0x31,0x15,
@@ -150,16 +150,16 @@ local function key_expand(key)
 
   -- We'll store words flat: word i occupies w[(i-1)*4+1 .. i*4]
   -- Re-represent: store as array of 4-byte groups
-  local W = {}
+  local W = {} --: { [integer]: { [integer]: integer } }
   for wi = 1, nk do
     local base = (wi - 1) * 4 + 1
-    W[wi] = { byte(key_s, base), byte(key_s, base+1), byte(key_s, base+2), byte(key_s, base+3) }
+    W[wi] = { byte(key_s, base) or 0, byte(key_s, base+1) or 0, byte(key_s, base+2) or 0, byte(key_s, base+3) or 0 }
   end
 
   local rcon_i = 1
   for wi = nk + 1, total_words do
     local prev = W[wi - 1]
-    local temp = { prev[1], prev[2], prev[3], prev[4] }
+    local temp = { prev[1], prev[2], prev[3], prev[4] } --: { [integer]: integer }
     if (wi - 1) % nk == 0 then
       -- RotWord then SubWord then XOR Rcon
       local t = temp[1]
@@ -476,9 +476,9 @@ function M.cbc_encrypt(key, plaintext, iv)
   local padded_s = padded --[[:! string]]
   local iv_s = iv --[[:! string]]
   local out = {}
-  local prev = { byte(iv_s, 1, 16) }
+  local prev = ({byte(iv_s, 1, 16)} --[[: any]]) --[[:! { [integer]: integer }]]
   for i = 1, #padded_s, 16 do
-    local s = { byte(padded_s, i, i + 15) }
+    local s = ({byte(padded_s, i, i + 15)} --[[: any]]) --[[:! { [integer]: integer }]]
     -- XOR with previous ciphertext block (or IV for first block)
     for j = 1, 16 do
       s[j] = bxor(s[j], prev[j])
@@ -503,11 +503,12 @@ function M.cbc_decrypt(key, ciphertext, iv)
   end
   local iv_s = iv --[[:! string]]
   local out = {}
-  local prev = { byte(iv_s, 1, 16) }
+  local prev = ({byte(iv_s, 1, 16)} --[[: any]]) --[[:! { [integer]: integer }]]
   for i = 1, #ct_s, 16 do
-    local ct_block = { byte(ct_s, i, i + 15) }
-    local s = { unpack(ct_block) }  -- copy for decrypt
-    decrypt_block_raw(rk, nr, s)
+    local ct_block = ({byte(ct_s, i, i + 15)} --[[: any]]) --[[:! { [integer]: integer }]]
+    local s_raw = {unpack(ct_block)}  -- copy for decrypt
+    local s = (s_raw --[[: any]]) --[[:! { [integer]: integer }]]
+    decrypt_block_raw(rk, nr, s_raw)
     -- XOR with previous ciphertext block (or IV)
     for j = 1, 16 do
       s[j] = bxor(s[j], prev[j])
@@ -537,22 +538,24 @@ end
 local function ctr_crypt(key, data, nonce)
   local rk, nr = get_round_keys(key)
   if not rk then return nil, nr end
-  if #nonce ~= 16 then
+  local nonce_s = nonce --[[:! string]]
+  local data_s = data --[[:! string]]
+  if #nonce_s ~= 16 then
     return nil, "nonce must be 16 bytes"
   end
-  local ctr = { byte(nonce, 1, 16) }
+  local ctr = ({byte(nonce_s, 1, 16)} --[[: any]]) --[[:! { [integer]: integer }]]
   local out = {}
-  local dlen = #data
+  local dlen = #data_s
   local i = 1
   while i <= dlen do
     -- Encrypt counter block to get keystream block
-    local ks = { unpack(ctr) }
+    local ks = ({unpack(ctr)} --[[: any]]) --[[:! { [integer]: integer }]]
     encrypt_block_raw(rk, nr, ks)
     -- XOR with plaintext/ciphertext bytes
     local block_end = math.min(i + 15, dlen)
     local block_bytes = {}
     for j = 1, block_end - i + 1 do
-      block_bytes[j] = char(bxor(byte(data, i + j - 1), ks[j]))
+      block_bytes[j] = char(bxor(ks[j], byte(data_s, i + j - 1) or 0))
     end
     out[#out + 1] = table.concat(block_bytes)
     increment_counter(ctr)
