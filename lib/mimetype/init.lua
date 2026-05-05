@@ -11,7 +11,7 @@ local M = {}
 --[[@return string? mimetype]]
 --: (string) -> string | nil
 M.by_name = function(filename)
-	return by_name.mimetype(filename)
+	return (by_name.mimetype --[[: any]])(filename)
 end
 
 --[[@param buffer string]]
@@ -27,7 +27,7 @@ end
 --[[@return string? mimetype]]
 --: (string, string) -> string | nil
 M.detect = function(filename, buffer)
-	local mt = by_name.mimetype(filename)
+	local mt = (by_name.mimetype --[[: any]])(filename)
 	if mt then return mt end
 	local _, mt2 = by_contents.mimetype(buffer)
 	return mt2

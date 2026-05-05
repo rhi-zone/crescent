@@ -8,26 +8,29 @@ local M = {}
 M._tier = "pure"
 
 -- Platform detection via package.config (first char is dir separator)
-local _plat_sep = package.config:sub(1, 1)
+local _plat_sep = (package.config --[[:! string]]):sub(1, 1)
 M.sep     = _plat_sep
 M.altsep  = _plat_sep == "\\" and "/" or nil
 M.pathsep = _plat_sep == "\\" and ";" or ":"
 M.devnull = _plat_sep == "\\" and "nul" or "/dev/null"
 
 -- Normalize input: treat both / and \ as separators (always use / internally)
+--: (string) -> string
 local function norm_seps(s)
-	return (s:gsub("\\", "/"))
+	local r, _ = s:gsub("\\", "/"); return r
 end
 
 -- Convert output back to platform sep
+--: (string) -> string
 local function to_native(s)
 	if M.sep == "/" then return s end
-	return (s:gsub("/", "\\"))
+	local r, _ = s:gsub("/", "\\"); return r
 end
 
 -- Split a normalized (forward-slash) path into drive and rest.
 -- On Unix, drive is always "".
 -- On Windows, drive can be "C:" for drive-letter paths.
+--: (string) -> (string, string)
 local function splitdrive(p)
 	if p:match("^%a:/") or p:match("^%a:$") then
 		return p:sub(1, 2), p:sub(3)
@@ -36,6 +39,7 @@ local function splitdrive(p)
 end
 
 -- Check if path is absolute (internal, uses normalized forward slashes).
+--: (string) -> boolean
 local function is_abs_norm(n)
 	if n:sub(1, 1) == "/" then return true end
 	-- Windows: C:/ or UNC //
@@ -166,13 +170,13 @@ M.normalize = function(p)
 		parts[#parts + 1] = part
 	end
 
-	local stack = {}
+	local stack = {} --: { [integer]: string }
 	for _, part in ipairs(parts) do
 		if part == "." then
 			-- skip
 		elseif part == ".." then
 			if #stack > 0 and stack[#stack] ~= ".." then
-				stack[#stack] = nil
+				stack[#stack] = nil --[[: any]]
 			elseif not is_abs then
 				stack[#stack + 1] = ".."
 			end
@@ -257,32 +261,35 @@ end
 M.commonpath = function(paths)
 	if not paths or #paths == 0 then return "" end
 
-	local all_parts = {}
+	local all_parts = {} --: { [integer]: { [integer]: string } }
 	for _, path in ipairs(paths) do
 		local n = norm_seps(M.normalize(path))
-		local t = {}
+		local t = {} --: { [integer]: string }
 		for part in n:gmatch("[^/]+") do
 			t[#t + 1] = part
 		end
 		all_parts[#all_parts + 1] = t
 	end
 
-	local min_len = #all_parts[1]
+	local ap1 = all_parts[1] --[[:! { [integer]: string }]]
+	local min_len = #ap1
 	for i = 2, #all_parts do
-		if #all_parts[i] < min_len then min_len = #all_parts[i] end
+		local api = all_parts[i] --[[:! { [integer]: string }]]
+		if #api < min_len then min_len = #api end
 	end
 
-	local common = {}
+	local common = {} --: { [integer]: string }
 	for i = 1, min_len do
-		local val = all_parts[1][i]
-		local match = true
+		local val = ap1[i]
+		local matched = true
 		for j = 2, #all_parts do
-			if all_parts[j][i] ~= val then
-				match = false
+			local apj = all_parts[j] --[[:! { [integer]: string }]]
+			if apj[i] ~= val then
+				matched = false
 				break
 			end
 		end
-		if match then
+		if matched then
 			common[#common + 1] = val
 		else
 			break

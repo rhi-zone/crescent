@@ -4,7 +4,10 @@ end
 
 local manifest = {}
 
+--:: ManifestTbl = { name: string, version: string, description: string | nil, license: string | nil, deps: { [string]: unknown } | nil, registries: { [integer]: string } | nil, scripts: { [string]: string } | nil }
+
 -- Validate a manifest table. Returns true on success or nil, err on failure.
+--: (unknown) -> (boolean | nil, string | nil)
 function manifest.validate(tbl)
 	if type(tbl) ~= "table" then
 		return nil, "manifest must be a table"
@@ -118,6 +121,7 @@ function manifest.dep_include(dep_value)
 end
 
 -- Load a pkg.lua manifest from disk. Returns the table on success or nil, err.
+--: (string) -> (ManifestTbl | nil, string | nil)
 function manifest.load(path)
 	local chunk, load_err = loadfile(path)
 	if not chunk then
@@ -131,10 +135,10 @@ function manifest.load(path)
 
 	local valid, err = manifest.validate(result)
 	if not valid then
-		return nil, "invalid manifest '" .. path .. "': " .. err
+		return nil, "invalid manifest '" .. path .. "': " .. (err or "")
 	end
 
-	return result
+	return result --[[:! ManifestTbl]]
 end
 
 -- Escape a string for use as a Lua string literal.
@@ -143,10 +147,11 @@ local function lua_string(s)
 end
 
 -- Write a manifest table to a pkg.lua file at path. Returns true or nil, err.
+--: (string, ManifestTbl) -> (boolean | nil, string | nil)
 function manifest.write(path, tbl)
 	local valid, err = manifest.validate(tbl)
 	if not valid then
-		return nil, "cannot write invalid manifest: " .. err
+		return nil, "cannot write invalid manifest: " .. (err or "")
 	end
 
 	local lines = {}
@@ -155,11 +160,11 @@ function manifest.write(path, tbl)
 	lines[#lines + 1] = "  version     = " .. lua_string(tbl.version) .. ","
 
 	if tbl.description ~= nil then
-		lines[#lines + 1] = "  description = " .. lua_string(tbl.description) .. ","
+		lines[#lines + 1] = "  description = " .. lua_string(tbl.description --[[:! string]]) .. ","
 	end
 
 	if tbl.license ~= nil then
-		lines[#lines + 1] = "  license     = " .. lua_string(tbl.license) .. ","
+		lines[#lines + 1] = "  license     = " .. lua_string(tbl.license --[[:! string]]) .. ","
 	end
 
 	-- deps block (always written, empty or not, to make the file self-documenting)
@@ -174,19 +179,15 @@ function manifest.write(path, tbl)
 		table.sort(dep_keys)
 		for _, k in ipairs(dep_keys) do
 			-- Use bare identifier syntax if valid, bracket notation otherwise (e.g. names with hyphens)
-			local key_str
-			if k:match("^[a-zA-Z_][a-zA-Z0-9_]*$") then
-				key_str = k
-			else
-				key_str = "[" .. lua_string(k) .. "]"
-			end
-			local v = tbl.deps[k]
+			local key_str = k:match("^[a-zA-Z_][a-zA-Z0-9_]*$") and k or ("[" .. lua_string(k) .. "]")
+			local v = tbl.deps and tbl.deps[k] --[[: any]]
 			if type(v) == "string" then
-				lines[#lines + 1] = "    " .. key_str .. " = " .. lua_string(v) .. ","
+				lines[#lines + 1] = "    " .. key_str .. " = " .. lua_string(v --[[:! string]]) .. ","
 			else
 				-- { constraint = "^1.0", include = "v2/**" } form
-				local inc = v.include or "**"
-				lines[#lines + 1] = "    " .. key_str .. " = { constraint = " .. lua_string(v.constraint) .. ", include = " .. lua_string(inc) .. " },"
+				local vt = v --[[:! { constraint: string, include: string | nil }]]
+				local inc = vt.include or "**"
+				lines[#lines + 1] = "    " .. key_str .. " = { constraint = " .. lua_string(vt.constraint) .. ", include = " .. lua_string(inc) .. " },"
 			end
 		end
 	end
@@ -194,12 +195,16 @@ function manifest.write(path, tbl)
 	lines[#lines + 1] = "  },"
 
 	-- registries block (only written when non-empty)
-	if tbl.registries ~= nil and #tbl.registries > 0 then
-		lines[#lines + 1] = "  registries = {"
-		for _, url in ipairs(tbl.registries) do
-			lines[#lines + 1] = "    " .. lua_string(url) .. ","
+	local regs = tbl.registries
+	if regs ~= nil then
+		local regs_ = regs --[[:! { [integer]: string }]]
+		if #regs_ > 0 then
+			lines[#lines + 1] = "  registries = {"
+			for _, url in ipairs(regs_) do
+				lines[#lines + 1] = "    " .. lua_string(url) .. ","
+			end
+			lines[#lines + 1] = "  },"
 		end
-		lines[#lines + 1] = "  },"
 	end
 
 	-- scripts block (only written when non-empty)
@@ -211,14 +216,10 @@ function manifest.write(path, tbl)
 		if #script_keys > 0 then
 			table.sort(script_keys)
 			lines[#lines + 1] = "  scripts = {"
+			local scripts_ = tbl.scripts --[[:! { [string]: string }]]
 			for _, k in ipairs(script_keys) do
-				local key_str
-				if k:match("^[a-zA-Z_][a-zA-Z0-9_]*$") then
-					key_str = k
-				else
-					key_str = "[" .. lua_string(k) .. "]"
-				end
-				lines[#lines + 1] = "    " .. key_str .. " = " .. lua_string(tbl.scripts[k]) .. ","
+				local key_str = k:match("^[a-zA-Z_][a-zA-Z0-9_]*$") and k or ("[" .. lua_string(k) .. "]")
+				lines[#lines + 1] = "    " .. key_str .. " = " .. lua_string(scripts_[k]) .. ","
 			end
 			lines[#lines + 1] = "  },"
 		end

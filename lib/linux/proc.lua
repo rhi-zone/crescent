@@ -20,10 +20,9 @@ end
 mod.uptime = function ()
 	local f = io.open("/proc/uptime")
 	if not f then return nil, "could not open " .. "/proc/uptime" end
-	local ret = {}
 	local line = f:read("*line")
 	local uptime, idle = match(line, "(%d+%.%d+) (%d+%.%d+)")
-	ret = { uptime = tonumber(uptime), idle = tonumber(idle) }
+	local ret = { uptime = tonumber(uptime), idle = tonumber(idle) }
 	f:close()
 	return ret
 end

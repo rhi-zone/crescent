@@ -27,9 +27,10 @@ local M = {}
 -- ── line splitting ────────────────────────────────────────────────────────────
 
 -- Split a string into lines (without \n). "" → {}.
+--: (string) -> { [integer]: string }
 local function split_lines(s)
 	if s == "" then return {} end
-	local lines = {}
+	local lines = {} --: { [integer]: string }
 	local pos, len = 1, #s
 	while pos <= len do
 		local nl = s:find("\n", pos, true)
@@ -64,9 +65,9 @@ function M.diff(a_str, b_str)
 
 	-- Keep a snapshot of v after each d step for backtracking.
 	-- trace[d + 1] = table mapping (k + off) → x at that step.
-	local trace = {}
+	local trace = {} --: { [integer]: { [integer]: number } }
 
-	local v = {}
+	local v = {} --: { [integer]: number }
 	-- Bootstrap: diagonal 0, extend from (0,0).
 	do
 		local x = 0
@@ -87,15 +88,15 @@ function M.diff(a_str, b_str)
 	local final_d = -1
 
 	for d = 1, n + m do
-		local sv = {}
+		local sv = {} --: { [integer]: number }
 		for k = -d, d, 2 do
 			local x
-			local vkm1 = v[k - 1 + off]
-			local vkp1 = v[k + 1 + off]
-			if k == -d or (k ~= d and (vkm1 or 0) < (vkp1 or 0)) then
-				x = vkp1 or 0   -- move down
+			local vkm1 = v[k - 1 + off] or 0 --: number
+			local vkp1 = v[k + 1 + off] or 0 --: number
+			if k == -d or (k ~= d and vkm1 < vkp1) then
+				x = vkp1   -- move down
 			else
-				x = (vkm1 or 0) + 1  -- move right (delete)
+				x = vkm1 + 1  -- move right (delete)
 			end
 			local y = x - k
 			while x < n and y < m and a[x + 1] == b[y + 1] do
@@ -119,19 +120,19 @@ function M.diff(a_str, b_str)
 
 	-- Backtrack through the trace to reconstruct the edit.
 	-- We collect (kind, ...) steps in reverse order, then reverse.
-	local steps = {}
+	local steps = {} --: { [integer]: any }
 	local x, y = n, m
 
 	for d = final_d, 1, -1 do
-		local prev = trace[d]  -- snapshot at step d-1 (trace[d] = snapshot after step d-1)
+		local prev = trace[d]
 		local k = x - y
 
 		-- Determine move direction at step d for diagonal k.
-		local prev_vkm1 = prev and prev[k - 1 + off]
-		local prev_vkp1 = prev and prev[k + 1 + off]
+		local prev_vkm1 = (prev and prev[k - 1 + off] or 0) --: number
+		local prev_vkp1 = (prev and prev[k + 1 + off] or 0) --: number
 
 		local came_down
-		if k == -d or (k ~= d and (prev_vkm1 or 0) < (prev_vkp1 or 0)) then
+		if k == -d or (k ~= d and prev_vkm1 < prev_vkp1) then
 			came_down = true   -- moved down from k+1 (insert from b)
 		else
 			came_down = false  -- moved right from k-1 (delete from a)
@@ -139,7 +140,7 @@ function M.diff(a_str, b_str)
 
 		local px, py  -- position before the snake at this step
 		if came_down then
-			px = prev_vkp1 or 0
+			px = prev_vkp1
 			py = px - (k + 1)
 			-- After move down: y increases by 1, x stays.
 			-- Snake: (px, py+1) → (x, y).
@@ -150,7 +151,7 @@ function M.diff(a_str, b_str)
 			x = px
 			y = py
 		else
-			px = (prev_vkm1 or 0)
+			px = prev_vkm1
 			py = px - (k - 1)
 			-- After move right: x increases by 1, y stays.
 			-- Snake: (px+1, py) → (x, y).
@@ -173,9 +174,10 @@ function M.diff(a_str, b_str)
 	while lo < hi do steps[lo], steps[hi] = steps[hi], steps[lo]; lo = lo + 1; hi = hi - 1 end
 
 	-- Build edit script.
-	local script = {}
+	--:: ScriptEntry = { op: string, lines: { [integer]: string } }
+	local script = {} --: { [integer]: ScriptEntry }
 	local function push(op, line)
-		local last = script[#script]
+		local last = script[#script] --[[:! ScriptEntry | nil]]
 		if last and last.op == op then
 			last.lines[#last.lines + 1] = line
 		else
@@ -203,18 +205,20 @@ end
 -- "keep": base_lines == other_lines (unchanged lines from base).
 -- "change": base_lines = deleted a-lines; other_lines = inserted b-lines.
 --   Pure inserts have empty base_lines; pure deletes have empty other_lines.
+--:: Hunk = { kind: string, base_lines: { [integer]: string }, other_lines: { [integer]: string } }
 local function to_hunks(script)
-	local hunks = {}
+	local hunks = {} --: { [integer]: Hunk }
 	local i = 1
 	while i <= #script do
-		local e = script[i]
+		local e = script[i] --[[:! ScriptEntry]]
 		if e.op == "keep" then
 			hunks[#hunks + 1] = { kind = "keep", base_lines = e.lines, other_lines = e.lines }
 			i = i + 1
 		else
-			local del, ins = {}, {}
-			while i <= #script and script[i].op ~= "keep" do
-				local se = script[i]
+			local del = {} --: { [integer]: string }
+			local ins = {} --: { [integer]: string }
+			while i <= #script and (script[i] --[[:! ScriptEntry]]).op ~= "keep" do
+				local se = script[i] --[[:! ScriptEntry]]
 				if se.op == "delete" then
 					for _, l in ipairs(se.lines) do del[#del + 1] = l end
 				else
@@ -256,22 +260,26 @@ function M.merge3(base_str, ours_str, theirs_str)
 	-- Returns nil when exhausted.
 	local function cur_o()
 		if oi > #ho then return nil end
-		local h = ho[oi]
-		if oi_off == 0 then return h end
+		local h = ho[oi] --[[:! Hunk]]
+		local off_ = oi_off --: number
+		if off_ == 0 then return h end
 		-- Return a virtual trimmed hunk.
-		local bl, ol = {}, {}
-		for j = oi_off + 1, #h.base_lines  do bl[#bl + 1] = h.base_lines[j] end
-		for j = oi_off + 1, #h.other_lines do ol[#ol + 1] = h.other_lines[j] end
+		local bl = {} --: { [integer]: string }
+		local ol = {} --: { [integer]: string }
+		for j = off_ + 1, #h.base_lines  do bl[#bl + 1] = h.base_lines[j] end
+		for j = off_ + 1, #h.other_lines do ol[#ol + 1] = h.other_lines[j] end
 		return { kind = h.kind, base_lines = bl, other_lines = ol }
 	end
 
 	local function cur_t()
 		if ti > #ht then return nil end
-		local h = ht[ti]
-		if ti_off == 0 then return h end
-		local bl, ol = {}, {}
-		for j = ti_off + 1, #h.base_lines  do bl[#bl + 1] = h.base_lines[j] end
-		for j = ti_off + 1, #h.other_lines do ol[#ol + 1] = h.other_lines[j] end
+		local h = ht[ti] --[[:! Hunk]]
+		local off_ = ti_off --: number
+		if off_ == 0 then return h end
+		local bl = {} --: { [integer]: string }
+		local ol = {} --: { [integer]: string }
+		for j = off_ + 1, #h.base_lines  do bl[#bl + 1] = h.base_lines[j] end
+		for j = off_ + 1, #h.other_lines do ol[#ol + 1] = h.other_lines[j] end
 		return { kind = h.kind, base_lines = bl, other_lines = ol }
 	end
 
