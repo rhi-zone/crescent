@@ -13,14 +13,14 @@ local FIELD_BOUNDS = {
   { 0, 6 },   -- day of week (0=Sun, 6=Sat)
 }
 
-local FIELD_NAMES = { "minute", "hour", "day-of-month", "month", "day-of-week" }
+local FIELD_NAMES = { "minute", "hour", "day-of-month", "month", "day-of-week" } --: { [integer]: string }
 
-local MONTH_NAMES = {
+local MONTH_NAMES = { --: { [string]: integer }
   jan = 1, feb = 2, mar = 3, apr = 4, may = 5, jun = 6,
   jul = 7, aug = 8, sep = 9, oct = 10, nov = 11, dec = 12,
 }
 
-local DOW_NAMES = {
+local DOW_NAMES = { --: { [string]: integer }
   sun = 0, mon = 1, tue = 2, wed = 3, thu = 4, fri = 5, sat = 6,
 }
 
@@ -35,6 +35,7 @@ local SHORTHANDS = {
 }
 
 -- Resolve a name to a number for month/dow fields
+--: (string, integer) -> (number | nil)
 local function resolve_name(s, field_idx)
   local low = s:lower()
   if field_idx == 4 then
@@ -48,6 +49,7 @@ local function resolve_name(s, field_idx)
 end
 
 -- Parse a single value (number or name), return number or nil+err
+--: (string, integer) -> (number | nil, string | nil)
 local function parse_value(s, field_idx)
   local n = tonumber(s)
   if n then
@@ -159,6 +161,7 @@ local function days_in_month(month, year)
 end
 
 -- Expr methods
+--:: Expr = { minutes: { [integer]: boolean }, hours: { [integer]: boolean }, doms: { [integer]: boolean }, months: { [integer]: boolean }, dows: { [integer]: boolean }, _expr: string, _date_fn: any, _time_fn: any, ... }
 local Expr = {}
 Expr.__index = Expr
 
@@ -176,7 +179,9 @@ end
 
 --: (self: Expr) -> boolean
 function Expr:matches_now()
-  return self:matches(self._time_fn())
+  local self_ = self --[[:! Expr]]
+  local time_fn = self_._time_fn --[[:! () -> number]]
+  return Expr.matches(self_, time_fn())
 end
 
 -- Find next valid value >= val in sorted array, or nil if none
@@ -427,10 +432,11 @@ end
 
 --: (self: Expr, time: number, n: number) -> { [number]: number }
 function Expr:next_n(time, n)
+  local self_ = self --[[:! Expr]]
   local results = {}
-  local t = time
+  local t = time --: number | nil
   for _ = 1, n do
-    t = self:next(t)
+    t = Expr.next(self_, t or 0)
     if not t then break end
     results[#results + 1] = t
   end
@@ -439,8 +445,8 @@ end
 
 -- Human-readable descriptions
 
-local DOW_LABELS = { [0] = "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" }
-local MONTH_LABELS = { "January", "February", "March", "April", "May", "June",
+local DOW_LABELS = { [0] = "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" } --: { [integer]: string }
+local MONTH_LABELS = { "January", "February", "March", "April", "May", "June", --: { [integer]: string }
   "July", "August", "September", "October", "November", "December" }
 
 local function is_star(set, lo, hi)
@@ -474,7 +480,7 @@ end
 
 --: (self: Expr) -> string
 function Expr:describe()
-  local parts = {}
+  local parts = {} --: { [integer]: string }
 
   local min_star = is_star(self.minutes, 0, 59)
   local hour_star = is_star(self.hours, 0, 23)
@@ -584,7 +590,7 @@ function M.parse(expr, opts)
   if expanded then expr = expanded end
 
   -- Split into fields
-  local fields = {}
+  local fields = {} --: { [integer]: string }
   for field in expr:gmatch("%S+") do
     fields[#fields + 1] = field
   end
@@ -612,7 +618,7 @@ function M.parse(expr, opts)
   dows, err = parse_field(fields[5], 5)
   if not dows then return nil, err end
 
-  local self = setmetatable({
+  local self_any = setmetatable({
     minutes = minutes,
     hours = hours,
     doms = doms,
@@ -621,7 +627,8 @@ function M.parse(expr, opts)
     _expr = expr,
     _date_fn = opts.date_fn,
     _time_fn = opts.time_fn,
-  }, Expr)
+  }, Expr) --[[: any]]
+  local self = self_any --[[:! Expr]]
 
   return self
 end
