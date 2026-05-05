@@ -61,6 +61,8 @@ nix develop                  # Dev shell for contributors (bun, etc.)
 
 **Do the right thing, don't hedge.** When the correct approach is clear, implement it. Amount of work is never a reason to do something worse.
 
+**"Pragmatic" is not a category. It is a euphemism for wrong.** When the correct type is `integer | nil` and callers don't handle the nil case, the callers are wrong — not the type. Choosing an incorrect type signature to avoid fixing callers is context poisoning: every future session sees the wrong type, builds on it, and the error compounds. The regressions caused by a correct fix are work to be done, not a reason to revert to an incorrect solution. Never propose "pragmatic but slightly unsound" as an option — it is not an option. If a fix is correct, ship it and fix the consequences.
+
 **No half-measures.** A design that requires X to be safe must ship with X. Implementing the unsafe version "for now" and deferring X is not a step toward the right design — it's a lie that accumulates. If X is hard, do X. If X is genuinely separable (the current code is correct without it, not just less capable), say so explicitly and put it in TODO.md. "We'll add it later" with no TODO entry means it never happens.
 
 **"Out of scope" is not a reason to omit.** Scope is not a budget for correctness. If a security property, invariant, or design constraint applies to the thing being built, it is in scope by definition. Deferring it because it's inconvenient is not scoping — it's avoidance. The only legitimate reason to omit something is that it genuinely does not apply yet (no caller, no user, no data). That reason must survive scrutiny: if challenged, justify it, don't just re-assert it.
