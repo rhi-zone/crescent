@@ -160,6 +160,13 @@ last because the type system itself is the testbed.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+40)
+
+- [x] `lib/vec/init.lua` (48 → 0, commit 2ecab84) — Vec type updated to `{ data?: unknown, n: integer, [integer]: number, ... }`; FFI tier: any-intermediate + force-cast on all setmetatable returns; pure tier: --[[:! Vec]] on all v/c returns, --: number on all 0.0 accumulators; cosine d/na/nb split to separate annotated locals
+- [x] `lib/interpolation/init.lua` (50 → 0, commit 4f5a5ef) — Spline type alias with eval/eval_array/deriv methods; {number} → { [integer]: number } in all 15 annotations; bisect annotated; mat_solve annotated with any-cast for M2 2D indexing; 0.0 accumulator annotations in lagrange/bspline/linear_regression/poly_regression; --: number splits for cosine-like sums
+- [x] `lib/game_math/init.lua` (50 → 0, commit 757a268) — replaced all self:method() calls with mt.method(self) to avoid closed-type method lookup failures; annotated M.quat with number|nil params + any-intermediate setmetatable; --[[:! boolean]] casts for and-chain returns; __mul/__div with explicit force-casts on a/b params
+- [x] `lib/qrencode/init.lua` (49 → 0, commit 7ad9a73) — added bit require; annotated binary_a/binary_as/capacity/asciitbl/typeinfo/version_information/alignment_pattern/remainder/ecblocks/generator_polynomial tables with concrete types; binary function fixed (s1+s2 split, gsub multi-return); int/digits/bits/modebits/c pre-declared; tonumber or-0 for math; datablocks/final_ecblocks as string arrays; min_penalty/last_bit_blank initialized; blocks force-cast chain
+
 ## Done in current session (session N+39)
 
 - [x] `lib/lz4/init.lua` (20 → 0, commit da500ec) — annotate flush_sequence params; or-0 byte() returns; annotate ht as { [integer]: integer }; math.floor on hash4 modulo; integer casts for offs/match_len/match_offset; any intermediates for pcall/xxh and compressed_block
