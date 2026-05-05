@@ -8,6 +8,8 @@ end
 
 local doc    = require("lib.doc")
 local json   = require("lib.format.json")
+--:: DocExport = { name: string, type: string, doc: string | nil, line: integer | nil }
+--:: DocResult = { file: string, exports: { [integer]: DocExport } }
 
 local M = {}
 
@@ -53,7 +55,7 @@ function M.main(argv)
     for _, filename in ipairs(files) do
         local result, err = doc.generate(filename)
         if err then
-            io.stderr:write("error: " .. filename .. ": " .. err .. "\n")
+            io.stderr:write("error: " .. filename .. ": " .. (err or "") .. "\n")
             had_error = true
         else
             results[#results + 1] = result
@@ -65,7 +67,8 @@ function M.main(argv)
     elseif format == "markdown" then
         io.write(doc.format_markdown(results))
     elseif format == "text" then
-        for _, result in ipairs(results) do
+        for _, result_u in ipairs(results) do
+            local result = result_u --[[:! DocResult]]
             io.write("# " .. result.file .. "\n\n")
             if #result.exports == 0 then
                 io.write("(no exports)\n\n")
@@ -73,10 +76,10 @@ function M.main(argv)
                 for _, exp in ipairs(result.exports) do
                     io.write(exp.name .. ": " .. exp.type .. "\n")
                     if exp.doc then
-                        io.write("  " .. exp.doc .. "\n")
+                        io.write("  " .. (exp.doc --[[:! string]]) .. "\n")
                     end
                     if exp.line then
-                        io.write("  line " .. exp.line .. "\n")
+                        io.write("  line " .. (exp.line --[[:! integer]]) .. "\n")
                     end
                     io.write("\n")
                 end
@@ -92,7 +95,7 @@ function M.main(argv)
         end
         local ok, encoded = pcall(json.encode, output)
         if ok then
-            io.write(encoded .. "\n")
+            io.write(((encoded --[[: any]]) --[[:! string]]) .. "\n")
         else
             io.stderr:write("json encode error: " .. tostring(encoded) .. "\n")
             had_error = true
