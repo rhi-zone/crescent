@@ -11,29 +11,29 @@ local M = {}
 M._tier = "pure"
 
 --:: Select = { _table: string, _columns: { [integer]: string } | nil, _raw_cols: string | nil, _joins: { [integer]: unknown }, _wheres: { [integer]: unknown }, _order: string | nil, _group: string | nil, _having: unknown, _limit: integer | nil, _offset: integer | nil, _count: boolean, _exists: boolean }
---:: Insert = { _table: string, _columns: { [integer]: string } | nil, _values: { [integer]: unknown }, _on_conflict: unknown, _returning: { [integer]: string } | nil }
---:: Update = { _table: string, _sets: { [integer]: unknown }, _wheres: { [integer]: unknown }, _returning: { [integer]: string } | nil }
+--:: Insert = { _table: string, _rows: { [integer]: unknown } | nil, _vals: unknown, _on_conflict: unknown, _returning: { [integer]: string } | nil }
+--:: Update = { _table: string, _set: unknown, _wheres: { [integer]: unknown }, _returning: { [integer]: string } | nil }
 --:: Delete = { _table: string, _wheres: { [integer]: unknown }, _returning: { [integer]: string } | nil }
 --:: Union = { _queries: { [integer]: unknown }, _all: boolean }
 
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
---: (table) -> table
+--: ({ [string]: unknown }) -> { [string]: unknown }
 local function shallow_copy(t)
 	local out = {}
 	for k, v in pairs(t) do out[k] = v end
 	return out
 end
 
---: (table) -> table
+--: ({ [integer]: unknown }) -> { [integer]: unknown }
 local function copy_array(t)
-	local out = {}
+	local out = {} --[[: any]]
 	for i = 1, #t do out[i] = t[i] end
-	return out
+	return out --[[:! { [integer]: unknown }]]
 end
 
 -- Append all items from src into dst.
---: (table, table) -> nil
+--: ({ [integer]: unknown }, { [integer]: unknown }) -> nil
 local function extend(dst, src)
 	for i = 1, #src do dst[#dst + 1] = src[i] end
 end
@@ -45,14 +45,15 @@ end
 -- We flatten everything at build time using standard SQL precedence.
 
 -- Build the WHERE string and collect params from a _wheres list.
---: (table) -> (string, table)
+--: ({ [integer]: unknown }) -> (string | nil, { [integer]: unknown })
 local function build_where(wheres)
 	if #wheres == 0 then return nil, {} end
 	local parts = {}
 	local params = {}
 	for _, w in ipairs(wheres) do
-		parts[#parts + 1] = { kind = w.kind, sql = w.sql }
-		extend(params, w.params)
+		local w_ = w --[[:! { kind: string, sql: string, params: { [integer]: unknown } }]]
+		parts[#parts + 1] = { kind = w_.kind, sql = w_.sql }
+		extend(params, w_.params)
 	end
 	-- Join: first clause has no connector; subsequent use their kind.
 	local buf = {}
@@ -74,7 +75,7 @@ Select.__index = Select
 -- Internal constructor (used by M.select).
 --: (string) -> Select
 local function new_select(table_name)
-	return setmetatable({
+	return (setmetatable({
 		_table    = table_name,
 		_columns  = nil,   -- nil = *, table = list of column strings
 		_raw_cols = nil,   -- raw column fragment (string)
@@ -87,19 +88,20 @@ local function new_select(table_name)
 		_offset   = nil,
 		_count    = false,
 		_exists   = false,
-	}, Select)
+	}, Select) --[[: any]]) --[[:! Select]]
 end
 
 -- Clone self, applying fn(copy) -> copy.
---: (Select, (table) -> table) -> Select
+--: (Select, (Select) -> Select) -> Select
 local function sel_clone(self, fn)
-	local q = shallow_copy(self)
-	q._joins   = copy_array(self._joins)
-	q._wheres  = copy_array(self._wheres)
+	local q = shallow_copy(self) --[[:! Select]]
+	q._joins   = copy_array(self._joins) --[[:! { [integer]: unknown }]]
+	q._wheres  = copy_array(self._wheres) --[[:! { [integer]: unknown }]]
 	if self._having then
-		q._having = { sql = self._having.sql, params = copy_array(self._having.params) }
+		local h_ = self._having --[[:! { sql: unknown, params: { [integer]: unknown } }]]
+		q._having = { sql = h_.sql, params = copy_array(h_.params) --[[:! { [integer]: unknown }]] }
 	end
-	return setmetatable(fn(q), Select)
+	return setmetatable(fn(q), Select) --[[:! Select]]
 end
 
 --: (Select, ...unknown) -> Select
@@ -181,25 +183,27 @@ function Select:where_or(clause, ...)
 end
 
 -- WHERE col IN (v1, v2, ...) or WHERE col IN (subquery)
---: (Select, string, table|Select) -> Select
+--: (Select, string, { [integer]: unknown } | Select) -> Select
 function Select:where_in(col, values)
 	return sel_clone(self, function(q)
 		if type(values) == "table" and getmetatable(values) == Select then
 			-- subquery
-			local sub_sql, sub_params = values:build()
+			local sel_ = values --[[: any]]
+			local sub_sql, sub_params = sel_:build()
 			q._wheres[#q._wheres + 1] = {
 				kind = "and",
-				sql  = col .. " IN (" .. sub_sql .. ")",
+				sql  = col .. " IN (" .. (sub_sql or "") .. ")",
 				params = sub_params,
 			}
 		else
 			-- array of values
+			local arr_ = values --[[:! { [integer]: unknown }]]
 			local placeholders = {}
-			for i = 1, #values do placeholders[i] = "?" end
+			for i = 1, #arr_ do placeholders[i] = "?" end
 			q._wheres[#q._wheres + 1] = {
 				kind   = "and",
 				sql    = col .. " IN (" .. table.concat(placeholders, ", ") .. ")",
-				params = copy_array(values),
+				params = copy_array(arr_),
 			}
 		end
 		return q
@@ -207,23 +211,25 @@ function Select:where_in(col, values)
 end
 
 -- WHERE col NOT IN (...)
---: (Select, string, table|Select) -> Select
+--: (Select, string, { [integer]: unknown } | Select) -> Select
 function Select:where_not_in(col, values)
 	return sel_clone(self, function(q)
 		if type(values) == "table" and getmetatable(values) == Select then
-			local sub_sql, sub_params = values:build()
+			local sel_ = values --[[: any]]
+			local sub_sql, sub_params = sel_:build()
 			q._wheres[#q._wheres + 1] = {
 				kind   = "and",
-				sql    = col .. " NOT IN (" .. sub_sql .. ")",
+				sql    = col .. " NOT IN (" .. (sub_sql or "") .. ")",
 				params = sub_params,
 			}
 		else
+			local arr_ = values --[[:! { [integer]: unknown }]]
 			local placeholders = {}
-			for i = 1, #values do placeholders[i] = "?" end
+			for i = 1, #arr_ do placeholders[i] = "?" end
 			q._wheres[#q._wheres + 1] = {
 				kind   = "and",
 				sql    = col .. " NOT IN (" .. table.concat(placeholders, ", ") .. ")",
-				params = copy_array(values),
+				params = copy_array(arr_),
 			}
 		end
 		return q
@@ -287,7 +293,7 @@ end
 -- ORDER BY columns (comma-separated string or variadic column names).
 --: (Select, ...unknown) -> Select
 function Select:order_by(...)
-	local cols = { ... }
+	local cols = { ... } --[[: any]]
 	return sel_clone(self, function(q)
 		q._order = table.concat(cols, ", ")
 		return q
@@ -297,7 +303,7 @@ end
 -- GROUP BY columns.
 --: (Select, ...unknown) -> Select
 function Select:group_by(...)
-	local cols = { ... }
+	local cols = { ... } --[[: any]]
 	return sel_clone(self, function(q)
 		q._group = table.concat(cols, ", ")
 		return q
@@ -325,7 +331,7 @@ function Select:offset(val)
 end
 
 -- Build the inner SELECT (without EXISTS wrapper).
---: (Select) -> (string, table)
+--: (Select) -> (string, { [integer]: unknown })
 local function build_select_inner(self)
 	local col_fragment
 	if self._count then
@@ -342,7 +348,8 @@ local function build_select_inner(self)
 
 	-- JOINs
 	for _, j in ipairs(self._joins) do
-		sql = sql .. " " .. j.kind .. " JOIN " .. j.tbl .. " ON " .. j.on
+		local j_ = j --[[:! { kind: string, tbl: string, on: string }]]
+		sql = sql .. " " .. j_.kind .. " JOIN " .. j_.tbl .. " ON " .. j_.on
 	end
 
 	local params = {}
@@ -361,8 +368,9 @@ local function build_select_inner(self)
 
 	-- HAVING
 	if self._having then
-		sql = sql .. " HAVING " .. self._having.sql
-		extend(params, self._having.params)
+		local hav_ = self._having --[[:! { sql: string, params: { [integer]: unknown } }]]
+		sql = sql .. " HAVING " .. hav_.sql
+		extend(params, hav_.params)
 	end
 
 	-- ORDER BY
@@ -377,7 +385,7 @@ local function build_select_inner(self)
 	return sql, params
 end
 
---: (Select) -> (string, table)
+--: (Select) -> (string | nil, { [integer]: unknown })
 function Select:build()
 	local sql, params = build_select_inner(self)
 	if self._exists then
@@ -396,30 +404,30 @@ Insert.__index = Insert
 
 --: (string) -> Insert
 local function new_insert(table_name)
-	return setmetatable({
+	return (setmetatable({
 		_table = table_name,
 		_rows  = nil,   -- array of row tables (multi-row)
 		_vals  = nil,   -- single row table
-	}, Insert)
+	}, Insert) --[[: any]]) --[[:! Insert]]
 end
 
---: (Insert, table) -> Insert
+--: (Insert, { [string]: unknown }) -> Insert
 function Insert:values(vals)
-	local q = shallow_copy(self)
+	local q = shallow_copy(self) --[[:! Insert]]
 	q._vals = vals
 	q._rows = nil
-	return setmetatable(q, Insert)
+	return setmetatable(q, Insert) --[[:! Insert]]
 end
 
---: (Insert, table[]) -> Insert
+--: (Insert, { [integer]: { [string]: unknown } }) -> Insert
 function Insert:rows(row_list)
-	local q = shallow_copy(self)
-	q._rows = row_list
+	local q = shallow_copy(self) --[[:! Insert]]
+	q._rows = row_list --[[:! { [integer]: unknown } | nil]]
 	q._vals = nil
-	return setmetatable(q, Insert)
+	return setmetatable(q, Insert) --[[:! Insert]]
 end
 
---: (Insert) -> (string, table)
+--: (Insert) -> (string | nil, { [integer]: unknown } | string)
 function Insert:build()
 	local rows
 	if self._rows then
@@ -464,21 +472,21 @@ Update.__index = Update
 
 --: (string) -> Update
 local function new_update(table_name)
-	return setmetatable({
+	return (setmetatable({
 		_table        = table_name,
 		_set          = nil,
 		_wheres       = {},
-	}, Update)
+	}, Update) --[[: any]]) --[[:! Update]]
 end
 
---: (Update, table) -> Update
+--: (Update, (Update) -> Update) -> Update
 local function upd_clone(self, fn)
-	local q = shallow_copy(self)
-	q._wheres = copy_array(self._wheres)
-	return setmetatable(fn(q), Update)
+	local q = shallow_copy(self) --[[:! Update]]
+	q._wheres = copy_array(self._wheres) --[[:! { [integer]: unknown }]]
+	return setmetatable(fn(q), Update) --[[:! Update]]
 end
 
---: (Update, table) -> Update
+--: (Update, { [string]: unknown }) -> Update
 function Update:set(vals)
 	return upd_clone(self, function(q) q._set = vals; return q end)
 end
@@ -492,19 +500,20 @@ function Update:where(clause, ...)
 	end)
 end
 
---: (Update) -> (string, table)
+--: (Update) -> (string | nil, { [integer]: unknown } | string)
 function Update:build()
 	if not self._set then return nil, "update: no set() called" end
+	local set_ = self._set --[[:! { [string]: unknown }]]
 
-	local keys = {}
-	for k in pairs(self._set) do keys[#keys + 1] = k end
+	local keys = {} --: { [integer]: string }
+	for k in pairs(set_) do keys[#keys + 1] = k end
 	table.sort(keys)
 
-	local assignments = {}
-	local params = {}
+	local assignments = {} --: { [integer]: string }
+	local params = {} --: { [integer]: unknown }
 	for _, k in ipairs(keys) do
 		assignments[#assignments + 1] = k .. " = ?"
-		params[#params + 1] = self._set[k]
+		params[#params + 1] = set_[k]
 	end
 
 	local sql = "UPDATE " .. self._table .. " SET " .. table.concat(assignments, ", ")
@@ -525,17 +534,17 @@ Delete.__index = Delete
 
 --: (string) -> Delete
 local function new_delete(table_name)
-	return setmetatable({
+	return (setmetatable({
 		_table  = table_name,
 		_wheres = {},
-	}, Delete)
+	}, Delete) --[[: any]]) --[[:! Delete]]
 end
 
---: (Delete, (table) -> table) -> Delete
+--: (Delete, (Delete) -> Delete) -> Delete
 local function del_clone(self, fn)
-	local q = shallow_copy(self)
-	q._wheres = copy_array(self._wheres)
-	return setmetatable(fn(q), Delete)
+	local q = shallow_copy(self) --[[:! Delete]]
+	q._wheres = copy_array(self._wheres) --[[:! { [integer]: unknown }]]
+	return setmetatable(fn(q), Delete) --[[:! Delete]]
 end
 
 --: (Delete, string, ...unknown) -> Delete
@@ -547,7 +556,7 @@ function Delete:where(clause, ...)
 	end)
 end
 
---: (Delete) -> (string, table)
+--: (Delete) -> (string | nil, { [integer]: unknown } | string)
 function Delete:build()
 	local sql = "DELETE FROM " .. self._table
 	local where_sql, where_params = build_where(self._wheres)
@@ -564,25 +573,26 @@ Union.__index = Union
 
 --: (Select[]) -> Union
 local function new_union(queries)
-	return setmetatable({ _queries = queries, _all = false }, Union)
+	return (setmetatable({ _queries = queries, _all = false }, Union) --[[: any]]) --[[:! Union]]
 end
 
 -- Use UNION ALL instead of UNION (keeps duplicates).
 --: (Union) -> Union
 function Union:all()
-	local q = shallow_copy(self)
-	q._queries = copy_array(self._queries)
+	local q = shallow_copy(self) --[[:! Union]]
+	q._queries = copy_array(self._queries) --[[:! { [integer]: unknown }]]
 	q._all = true
-	return setmetatable(q, Union)
+	return setmetatable(q, Union) --[[:! Union]]
 end
 
---: (Union) -> (string, table)
+--: (Union) -> (string, { [integer]: unknown })
 function Union:build()
-	local parts  = {}
-	local params = {}
+	local parts  = {} --: { [integer]: string }
+	local params = {} --: { [integer]: unknown }
 	local kw     = self._all and " UNION ALL " or " UNION "
 	for _, q in ipairs(self._queries) do
-		local s, p = q:build()
+		local q_ = q --[[:! { build: (unknown) -> (string, { [integer]: unknown }), ... }]]
+		local s, p = q_.build(q_)
 		parts[#parts + 1]  = s
 		extend(params, p)
 	end
@@ -614,7 +624,7 @@ end
 -- M.union(q1, q2, ...) or M.union({q1, q2, ...})
 --: (...Select) -> Union
 function M.union(...)
-	local args = { ... }
+	local args = { ... } --[[: any]]
 	if type(args[1]) == "table" and getmetatable(args[1]) ~= Select then
 		return new_union(args[1])
 	end
