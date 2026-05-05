@@ -69,7 +69,7 @@ local math_huge  = math.huge
 local type_fn    = type
 
 -- Pre-built escape table: ESC_TABLE[byte_value] = replacement string, or false.
-local ESC_TABLE = {}
+local ESC_TABLE = {} --: { [integer]: string | boolean }
 for i = 0, 255 do ESC_TABLE[i] = false end
 for i = 0, 31 do
     ESC_TABLE[i] = str_format("\\u%04X", i)
@@ -85,12 +85,13 @@ ESC_TABLE[0x09] = "\\t"
 local ESC_PAT = '[%z\1-\31"\\]'
 
 local function ffi_encode_string(s, buf, n)
+    n = n --[[:! integer]]
     buf[n] = '"'; n = n + 1
     if not str_find(s, ESC_PAT) then
         buf[n] = s; n = n + 1
     else
         local len = #s
-        local ptr = ffi.cast("const uint8_t *", s)
+        local ptr = ffi.cast("const uint8_t *", s) --[[: any]]
         local start = 0
         local i = 0
         while i < len do
@@ -98,15 +99,17 @@ local function ffi_encode_string(s, buf, n)
             local esc = ESC_TABLE[b]
             if esc then
                 if i > start then
-                    buf[n] = ffi.string(ptr + start, i - start); n = n + 1
+                    local ffi_str = ffi.string --[[: any]]
+                    buf[n] = ffi_str(ptr + start, i - start); n = n + 1
                 end
-                buf[n] = esc; n = n + 1
+                buf[n] = esc --[[:! string]]; n = n + 1
                 start = i + 1
             end
             i = i + 1
         end
         if start < len then
-            buf[n] = ffi.string(ptr + start, len - start); n = n + 1
+            local ffi_str = ffi.string --[[: any]]
+            buf[n] = ffi_str(ptr + start, len - start); n = n + 1
         end
     end
     buf[n] = '"'; n = n + 1
@@ -116,15 +119,17 @@ end
 local ffi_encode_value
 
 local function ffi_encode_table(t, buf, n, null_sentinel, visited, depth)
+    n = n --[[:! integer]]
     if depth > 512 then error("maximum nesting depth (512) exceeded") end
     if visited[t] then error("circular reference detected") end
     visited[t] = true
 
-    local len = #t
+    local t_ = t --[[: any]]
+    local len = #t_
     local is_array = len > 0
     if is_array then
         local count = 0
-        for _ in pairs(t) do count = count + 1 end
+        for _ in pairs(t_) do count = count + 1 end
         if count ~= len then is_array = false end
     end
 
@@ -132,21 +137,22 @@ local function ffi_encode_table(t, buf, n, null_sentinel, visited, depth)
         buf[n] = "["; n = n + 1
         for i = 1, len do
             if i > 1 then buf[n] = ","; n = n + 1 end
-            n = ffi_encode_value(t[i], buf, n, null_sentinel, visited, depth + 1)
+            n = (ffi_encode_value(t_[i], buf, n, null_sentinel, visited, depth + 1) --[[:! integer]])
         end
         buf[n] = "]"; n = n + 1
     else
         buf[n] = "{"; n = n + 1
         local first = true
-        for k, v in pairs(t) do
+        for k, v in pairs(t_) do
             if type_fn(k) ~= "string" then
                 error("object key must be a string, got " .. type_fn(k))
             end
+            local k_ = k --[[:! string]]
             if not first then buf[n] = ","; n = n + 1 end
             first = false
-            n = ffi_encode_string(k, buf, n)
+            n = ffi_encode_string(k_, buf, n)
             buf[n] = ":"; n = n + 1
-            n = ffi_encode_value(v, buf, n, null_sentinel, visited, depth + 1)
+            n = (ffi_encode_value(v, buf, n, null_sentinel, visited, depth + 1) --[[:! integer]])
         end
         buf[n] = "}"; n = n + 1
     end
@@ -156,6 +162,7 @@ local function ffi_encode_table(t, buf, n, null_sentinel, visited, depth)
 end
 
 ffi_encode_value = function(v, buf, n, null_sentinel, visited, depth)
+    n = n --[[:! integer]]
     local t = type_fn(v)
     if v == null_sentinel then
         buf[n] = "null"; n = n + 1
@@ -173,7 +180,8 @@ ffi_encode_value = function(v, buf, n, null_sentinel, visited, depth)
             buf[n] = str_format("%.17g", v); n = n + 1
         end
     elseif t == "string" then
-        n = ffi_encode_string(v, buf, n)
+        local v_str = v --[[: any]]
+        n = ffi_encode_string(v_str, buf, n)
     elseif t == "table" then
         n = ffi_encode_table(v, buf, n, null_sentinel, visited, depth)
     else
@@ -225,11 +233,11 @@ local function codepoint_to_utf8(cp)
     end
 end
 
-local _ptr8   -- const uint8_t* (0-indexed byte access for token dispatch and numbers)
-local _src    -- Lua string (1-indexed; kept alive; used for str_find/str_sub)
-local _len    -- #_src
-local _pos    -- 0-indexed current position
-local _null
+local _ptr8 --: any
+local _src  = "" --: string
+local _len  = 0  --: integer
+local _pos  = 0  --: integer
+local _null --: unknown
 
 local function decode_error(msg)
     error("unexpected token at offset " .. _pos .. ": " .. msg, 2)
@@ -396,8 +404,8 @@ local function skip_ws()
     if _pos >= _len then return end
     local b = _ptr8[_pos]
     if b ~= 0x20 and b ~= 0x09 and b ~= 0x0A and b ~= 0x0D then return end
-    local nws = str_find(_src, WS_SKIP_PAT, _pos + 1)  -- +1: 0→1-indexed
-    _pos = nws and (nws - 1) or _len  -- back to 0-indexed
+    local nws, _ = str_find(_src, WS_SKIP_PAT, _pos + 1)  -- +1: 0→1-indexed
+    _pos = nws and ((nws --[[:! integer]]) - 1) or _len  -- back to 0-indexed
 end
 
 local function decode_array()
