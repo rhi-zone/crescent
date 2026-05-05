@@ -425,14 +425,15 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.ecb_encrypt(key, plaintext)
-  if #plaintext % 16 ~= 0 then
+  local pt = plaintext --[[:! string]]
+  if #pt % 16 ~= 0 then
     return nil, "plaintext length must be a multiple of 16 bytes"
   end
   local rk, nr = get_round_keys(key)
   if not rk then return nil, nr end
   local out = {}
-  for i = 1, #plaintext, 16 do
-    local s = { byte(plaintext, i, i + 15) }
+  for i = 1, #pt, 16 do
+    local s = { byte(pt, i, i + 15) }
     encrypt_block_raw(rk, nr, s)
     out[#out + 1] = char(unpack(s))
   end
@@ -440,14 +441,15 @@ function M.ecb_encrypt(key, plaintext)
 end
 
 function M.ecb_decrypt(key, ciphertext)
-  if #ciphertext % 16 ~= 0 then
+  local ct = ciphertext --[[:! string]]
+  if #ct % 16 ~= 0 then
     return nil, "ciphertext length must be a multiple of 16 bytes"
   end
   local rk, nr = get_round_keys(key)
   if not rk then return nil, nr end
   local out = {}
-  for i = 1, #ciphertext, 16 do
-    local s = { byte(ciphertext, i, i + 15) }
+  for i = 1, #ct, 16 do
+    local s = { byte(ct, i, i + 15) }
     decrypt_block_raw(rk, nr, s)
     out[#out + 1] = char(unpack(s))
   end
@@ -471,10 +473,12 @@ function M.cbc_encrypt(key, plaintext, iv)
   end
   -- Apply PKCS#7 padding
   local padded = M.pad(plaintext, 16)
+  local padded_s = padded --[[:! string]]
+  local iv_s = iv --[[:! string]]
   local out = {}
-  local prev = { byte(iv, 1, 16) }
-  for i = 1, #padded, 16 do
-    local s = { byte(padded, i, i + 15) }
+  local prev = { byte(iv_s, 1, 16) }
+  for i = 1, #padded_s, 16 do
+    local s = { byte(padded_s, i, i + 15) }
     -- XOR with previous ciphertext block (or IV for first block)
     for j = 1, 16 do
       s[j] = bxor(s[j], prev[j])
@@ -487,7 +491,8 @@ function M.cbc_encrypt(key, plaintext, iv)
 end
 
 function M.cbc_decrypt(key, ciphertext, iv)
-  if #ciphertext % 16 ~= 0 then
+  local ct_s = ciphertext --[[:! string]]
+  if #ct_s % 16 ~= 0 then
     return nil, "ciphertext length must be a multiple of 16 bytes"
   end
   local rk, nr = get_round_keys(key)
@@ -496,10 +501,11 @@ function M.cbc_decrypt(key, ciphertext, iv)
   if #iv ~= 16 then
     return nil, "iv must be 16 bytes"
   end
+  local iv_s = iv --[[:! string]]
   local out = {}
-  local prev = { byte(iv, 1, 16) }
-  for i = 1, #ciphertext, 16 do
-    local ct_block = { byte(ciphertext, i, i + 15) }
+  local prev = { byte(iv_s, 1, 16) }
+  for i = 1, #ct_s, 16 do
+    local ct_block = { byte(ct_s, i, i + 15) }
     local s = { unpack(ct_block) }  -- copy for decrypt
     decrypt_block_raw(rk, nr, s)
     -- XOR with previous ciphertext block (or IV)
