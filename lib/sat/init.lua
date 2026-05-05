@@ -11,6 +11,9 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: FormulaObj = { _vars: { [string]: integer }, _clauses: { [integer]: { [integer]: integer } }, _nvars: integer }
+--:: CnfFormula = { clauses: { [integer]: { [integer]: integer } }, vars: integer | nil }
+
 -- ---------------------------------------------------------------------------
 -- Internal DPLL engine
 -- ---------------------------------------------------------------------------
@@ -149,6 +152,7 @@ end
 -- Returns true, assignment on first solution (solve mode).
 -- In collect mode, always returns false after exhausting the search space.
 local function dpll(clauses, nvars, assignment, collect)
+  local collect_any = collect --[[: any]]
   -- Unit propagation: work on a copy of both clauses and assignment.
   local new_assignment = {}
   for k, v in pairs(assignment) do new_assignment[k] = v end
@@ -157,7 +161,7 @@ local function dpll(clauses, nvars, assignment, collect)
 
   -- Pure literal elimination (loop until fixpoint).
   -- Disabled in collect mode: PLE skips branches, so it would miss solutions.
-  if not collect then
+  if not collect_any then
     local changed = true
     while changed do
       clauses, changed = pure_literal_elim(clauses, new_assignment)
@@ -170,10 +174,10 @@ local function dpll(clauses, nvars, assignment, collect)
 
   -- All clauses satisfied and all variables assigned?
   if #clauses == 0 and var == nil then
-    if collect then
+    if collect_any then
       local copy = {}
       for k, v in pairs(new_assignment) do copy[k] = v end
-      collect[#collect + 1] = copy
+      collect_any[#collect_any + 1] = copy
       return false, nil  -- keep searching
     end
     return true, new_assignment
@@ -182,16 +186,16 @@ local function dpll(clauses, nvars, assignment, collect)
   -- All clauses satisfied but free variables remain: enumerate them in collect mode.
   if #clauses == 0 then
     -- var is unassigned but no clauses constrain it.
-    if collect then
+    if collect_any then
       -- Branch on var to enumerate both assignments.
       local a_true = {}
       for k, v in pairs(new_assignment) do a_true[k] = v end
       a_true[var] = true
-      dpll({}, nvars, a_true, collect)
+      dpll({}, nvars, a_true, collect_any)
       local a_false = {}
       for k, v in pairs(new_assignment) do a_false[k] = v end
       a_false[var] = false
-      dpll({}, nvars, a_false, collect)
+      dpll({}, nvars, a_false, collect_any)
       return false, nil
     end
     -- solve mode: just pick false for remaining vars.
@@ -209,21 +213,23 @@ local function dpll(clauses, nvars, assignment, collect)
   -- Branch var = true.
   local c_true = apply_assignment(clauses, var, true)
   if c_true ~= nil then
+    local c_true_ = (c_true --[[: any]]) --[[:! { [integer]: { [integer]: integer } }]]
     local a_true = {}
     for k, v in pairs(new_assignment) do a_true[k] = v end
     a_true[var] = true
-    local ok, result = dpll(c_true, nvars, a_true, collect)
-    if not collect and ok then return true, result end
+    local ok, result = dpll(c_true_, nvars, a_true, collect_any)
+    if not collect_any and ok then return true, result end
   end
 
   -- Branch var = false.
   local c_false = apply_assignment(clauses, var, false)
   if c_false ~= nil then
+    local c_false_ = (c_false --[[: any]]) --[[:! { [integer]: { [integer]: integer } }]]
     local a_false = {}
     for k, v in pairs(new_assignment) do a_false[k] = v end
     a_false[var] = false
-    local ok, result = dpll(c_false, nvars, a_false, collect)
-    if not collect and ok then return true, result end
+    local ok, result = dpll(c_false_, nvars, a_false, collect_any)
+    if not collect_any and ok then return true, result end
   end
 
   return false, nil
@@ -236,25 +242,27 @@ end
 --- Solve a CNF formula.
 -- formula: { clauses = {{lit,...},...}, vars = n }
 -- Returns { sat = true, assignment = {[var]=bool,...} } or { sat = false }.
+--: (CnfFormula) -> { sat: boolean, assignment: { [integer]: boolean } | nil }
 function M.solve(formula)
   local clauses = copy_clauses(formula.clauses)
-  local nvars = formula.vars or 0
+  local nvars = (formula.vars or 0) --[[:! integer]]
   local ok, assignment = dpll(clauses, nvars, {}, nil)
   if ok then
     return { sat = true, assignment = assignment }
   else
-    return { sat = false }
+    return { sat = false, assignment = nil }
   end
 end
 
 --- Enumerate all satisfying assignments.
 -- Returns array of assignment tables.
+--: (CnfFormula, unknown) -> { [integer]: { [integer]: boolean } }
 function M.solve_all(formula, _opts)
   local clauses = copy_clauses(formula.clauses)
-  local nvars = formula.vars or 0
-  local collect = {}
+  local nvars = (formula.vars or 0) --[[:! integer]]
+  local collect = {} --[[: any]]
   dpll(clauses, nvars, {}, collect)
-  return collect
+  return collect --[[:! { [integer]: { [integer]: boolean } }]]
 end
 
 --- Count the number of satisfying assignments.
@@ -280,37 +288,41 @@ end
 
 --- Declare a named variable; returns its positive literal id.
 function Formula:var(name)
-  if self._vars[name] then return self._vars[name] end
-  self._nvars = self._nvars + 1
-  local id = self._nvars
-  self._vars[name] = id
+  local self_ = self --[[:! FormulaObj]]
+  if self_._vars[name] then return self_._vars[name] end
+  self_._nvars = self_._nvars + 1
+  local id = self_._nvars
+  self_._vars[name] = id
   return id
 end
 
 --- Add a clause (vararg literals).
 function Formula:clause(...)
+  local self_ = self --[[:! FormulaObj]]
   local lits = { ... }
-  self._clauses[#self._clauses + 1] = lits
+  self_._clauses[#self_._clauses + 1] = lits --[[: any]]
 end
 
 --- Solve and return { sat, assignment? } with named variables.
 function Formula:solve()
-  local raw = M.solve({ clauses = self._clauses, vars = self._nvars })
-  if not raw.sat then return { sat = false } end
-  local named = {}
-  for name, id in pairs(self._vars) do
-    named[name] = raw.assignment[id]
+  local self_ = self --[[:! FormulaObj]]
+  local raw = M.solve({ clauses = self_._clauses, vars = self_._nvars })
+  if not raw.sat then return { sat = false, assignment = nil } end
+  local named = {} --[[: any]]
+  for name, id in pairs(self_._vars) do
+    named[name] = (raw.assignment --[[: any]])[id]
   end
   return { sat = true, assignment = named }
 end
 
 --- Enumerate all solutions with named variables.
 function Formula:solve_all()
-  local raws = M.solve_all({ clauses = self._clauses, vars = self._nvars })
+  local self_ = self --[[:! FormulaObj]]
+  local raws = M.solve_all({ clauses = self_._clauses, vars = self_._nvars }, nil)
   local results = {}
   for i = 1, #raws do
-    local named = {}
-    for name, id in pairs(self._vars) do
+    local named = {} --[[: any]]
+    for name, id in pairs(self_._vars) do
       named[name] = raws[i][id]
     end
     results[i] = named
@@ -346,9 +358,10 @@ end
 
 --- Exactly-one: exactly one of vars is true.
 -- Returns combined at-least-one + at-most-one clauses.
+local enc_any = M.encodings --[[: any]]
 function M.encodings.exactly_one(vars)
-  local clauses = M.encodings.at_least_one(vars)
-  local amo = M.encodings.at_most_one(vars)
+  local clauses = enc_any.at_least_one(vars)
+  local amo = enc_any.at_most_one(vars)
   for i = 1, #amo do clauses[#clauses + 1] = amo[i] end
   return clauses
 end

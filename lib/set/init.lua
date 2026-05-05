@@ -11,9 +11,10 @@ Set.__index = Set
 
 --: (unknown) -> string
 function Set:__tostring()
-  local parts = {}
-  for v in pairs(self._data) do
-    parts[#parts + 1] = tostring(v)
+  local self_ = self --[[:! Set]]
+  local parts = {} --: { [integer]: string }
+  for v in pairs(self_._data) do
+    parts[#parts + 1] = tostring(v) --[[:! string]]
   end
   table.sort(parts)
   return "Set{" .. table.concat(parts, ", ") .. "}"
@@ -28,31 +29,34 @@ end
 function M.from_array(arr)
   local s = M.new()
   for i = 1, #arr do
-    s:add(arr[i])
+    Set.add(s, arr[i])
   end
   return s
 end
 
 --: (unknown) -> nil
 function Set:add(v)
+  local self_ = self --[[:! Set]]
   if v == nil then return nil, "cannot add nil to set" end
-  if not self._data[v] then
-    self._data[v] = true
-    self._size = self._size + 1
+  if not self_._data[v] then
+    self_._data[v] = true
+    self_._size = self_._size + 1
   end
 end
 
 --: (unknown) -> nil
 function Set:remove(v)
-  if self._data[v] then
-    self._data[v] = nil
-    self._size = self._size - 1
+  local self_ = self --[[:! Set]]
+  if self_._data[v] then
+    self_._data[v] = nil
+    self_._size = self_._size - 1
   end
 end
 
 --: (unknown) -> boolean
 function Set:has(v)
-  return self._data[v] == true
+  local self_ = self --[[:! Set]]
+  return self_._data[v] == true
 end
 
 --: () -> number
@@ -81,9 +85,10 @@ end
 
 --: (Set) -> Set
 function Set:union(other)
-  local result = self:copy()
+  local self_ = self --[[:! Set]]
+  local result = Set.copy(self_)
   for v in pairs(other._data) do
-    result:add(v)
+    Set.add(result, v)
   end
   return result
 end
@@ -170,16 +175,17 @@ function Set:eq(other)
   return true
 end
 
---: ((unknown) -> unknown) -> Set
+--: (Set, (unknown) -> unknown) -> Set
 function Set:map(fn)
+  local self_ = self --[[:! Set]]
   local result = M.new()
-  for v in pairs(self._data) do
-    result:add(fn(v))
+  for v in pairs(self_._data) do
+    Set.add(result, fn(v))
   end
   return result
 end
 
---: ((unknown) -> boolean) -> Set
+--: (Set, (unknown) -> boolean) -> Set
 function Set:filter(fn)
   local result = M.new()
   for v in pairs(self._data) do
@@ -191,10 +197,11 @@ function Set:filter(fn)
   return result
 end
 
---: (unknown, (unknown, unknown) -> unknown) -> unknown
+--: (Set, unknown, (unknown, unknown) -> unknown) -> unknown
 function Set:reduce(init, fn)
+  local self_ = self --[[:! Set]]
   local acc = init
-  for v in pairs(self._data) do
+  for v in pairs(self_._data) do
     acc = fn(acc, v)
   end
   return acc
@@ -209,11 +216,12 @@ end
 
 --: () -> Set
 function Set:copy()
+  local self_ = self --[[:! Set]]
   local result = M.new()
-  for v in pairs(self._data) do
+  for v in pairs(self_._data) do
     result._data[v] = true
   end
-  result._size = self._size
+  result._size = self_._size
   return result
 end
 

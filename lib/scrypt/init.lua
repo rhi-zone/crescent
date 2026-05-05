@@ -36,10 +36,11 @@ local function rotl32(v, n)
 end
 
 -- Convert binary string to lowercase hex.
+--: (string) -> string
 local function to_hex(s)
   local t = {}
   for i = 1, #s do
-    t[i] = string.format("%02x", string.byte(s, i))
+    t[i] = string.format("%02x", (string.byte(s, i) or 0) --[[:! integer]])
   end
   return table.concat(t)
 end
@@ -285,7 +286,8 @@ function M.derive(password, salt, N, r, p, dklen)
   if type(N) ~= "number" or N < 2 or math.floor(N) ~= N then
     return nil, "scrypt: N must be an integer >= 2"
   end
-  if band(N, N - 1) ~= 0 then
+  local N_ = math.floor(N) --[[:! integer]]
+  if band(N_, N_ - 1) ~= 0 then
     return nil, "scrypt: N must be a power of 2"
   end
   if type(r) ~= "number" or r < 1 or math.floor(r) ~= r then
@@ -302,8 +304,8 @@ function M.derive(password, salt, N, r, p, dklen)
   local block_size = 128 * r
 
   -- Step 1: B = PBKDF2-HMAC-SHA256(P, S, 1, p * 128 * r)
-  local B, err = pbkdf2.derive(password, salt, 1, p * block_size)
-  if not B then return nil, "scrypt: pbkdf2 (step 1) failed: " .. err end
+  local B, err = pbkdf2.derive(password, salt, 1, p * block_size, { alg = nil })
+  if not B then return nil, "scrypt: pbkdf2 (step 1) failed: " .. (err or "") end
 
   -- Step 2: For each block, run scryptROMix.
   local blocks = {}
@@ -314,8 +316,8 @@ function M.derive(password, salt, N, r, p, dklen)
   B = table.concat(blocks)
 
   -- Step 3: DK = PBKDF2-HMAC-SHA256(P, B, 1, dkLen)
-  local dk, err2 = pbkdf2.derive(password, B, 1, dklen)
-  if not dk then return nil, "scrypt: pbkdf2 (step 3) failed: " .. err2 end
+  local dk, err2 = pbkdf2.derive(password, B --[[:! string]], 1, dklen, { alg = nil })
+  if not dk then return nil, "scrypt: pbkdf2 (step 3) failed: " .. (err2 or "") end
 
   return dk
 end
@@ -340,9 +342,13 @@ function M.verify(password, salt, N, r, p, derived_key, opts)
   local candidate, err = M.derive(password, salt, N, r, p, dklen)
   if not candidate then return nil, err end
   if #candidate ~= dklen then return false end
+  local candidate_ = candidate --[[:! string]]
+  local stored_ = stored --[[:! string]]
   local diff = 0
   for i = 1, dklen do
-    diff = bor(diff, bxor(string.byte(candidate, i), string.byte(stored, i)))
+    diff = bor(diff, bxor(
+      (string.byte(candidate_, i) or 0) --[[:! integer]],
+      (string.byte(stored_, i) or 0) --[[:! integer]]))
   end
   return diff == 0
 end

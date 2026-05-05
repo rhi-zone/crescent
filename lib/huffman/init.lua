@@ -7,15 +7,18 @@ local bit = require("bit")
 local M = {}
 M._tier = "pure"
 
+--:: HuffNode = { freq: number, sym: unknown, left: HuffNode | nil, right: HuffNode | nil }
+
 -- Build a Huffman tree from a frequency table.
 -- freqs: {symbol = count, ...}
 -- Returns: root node of Huffman tree, or nil, errmsg
+--: ({ [unknown]: number }) -> (HuffNode | nil, string | nil)
 function M.build_tree(freqs)
   if type(freqs) ~= "table" then
     return nil, "freqs must be a table"
   end
 
-  local nodes = {}
+  local nodes = {} --: { [integer]: HuffNode }
   for sym, freq in pairs(freqs) do
     if type(freq) ~= "number" or freq < 0 then
       return nil, "frequency for symbol " .. tostring(sym) .. " must be a non-negative number"
@@ -48,8 +51,8 @@ function M.build_tree(freqs)
 
   while #nodes > 1 do
     table.sort(nodes, node_lt)
-    local left = table.remove(nodes, 1)
-    local right = table.remove(nodes, 1)
+    local left = table.remove(nodes, 1) --[[:! HuffNode]]
+    local right = table.remove(nodes, 1) --[[:! HuffNode]]
     nodes[#nodes + 1] = {
       freq = left.freq + right.freq,
       sym = nil,
@@ -62,6 +65,7 @@ function M.build_tree(freqs)
 end
 
 -- DFS traversal to assign bit-string codes to each leaf symbol.
+--: (HuffNode, string, { [unknown]: string }) -> nil
 local function build_codes_dfs(node, prefix, codes)
   if node.sym ~= nil then
     -- Single-symbol tree: assign "0" if prefix is empty
@@ -88,6 +92,7 @@ function M.build_codes(tree)
 end
 
 -- Pack a binary string of '0'/'1' characters into bytes.
+--: (string) -> string
 local function pack_bits(bits)
   local bytes = {}
   for i = 1, #bits, 8 do
@@ -203,9 +208,9 @@ function M.compress(str)
   end
 
   -- Compute byte frequencies
-  local freqs = {}
+  local freqs = {} --: { [integer]: number }
   for i = 1, #str do
-    local b = string.byte(str, i)
+    local b = (string.byte(str, i) or 0) --[[:! integer]]
     freqs[b] = (freqs[b] or 0) + 1
   end
 
@@ -260,10 +265,11 @@ function M.decompress(encoded, metadata)
   if symbols == nil then
     return nil, derr
   end
+  local symbols_ = (symbols --[[: any]]) --[[:! { [integer]: integer }]]
 
   local chars = {}
-  for i = 1, #symbols do
-    chars[i] = string.char(symbols[i])
+  for i = 1, #symbols_ do
+    chars[i] = string.char(symbols_[i])
   end
 
   return table.concat(chars)
@@ -271,6 +277,7 @@ end
 
 -- Get code lengths (depth of each leaf) from a tree.
 -- Returns: {symbol = length, ...}
+--: (HuffNode, integer, { [unknown]: integer }) -> nil
 local function code_lengths_dfs(node, depth, lengths)
   if node.sym ~= nil then
     lengths[node.sym] = depth == 0 and 1 or depth
@@ -297,17 +304,19 @@ end
 -- Symbols with same length get consecutive codes; longer = left-shifted.
 -- symbol_lengths: {symbol = length, ...}
 -- Returns: {symbol = bitstring, ...}
+--: ({ [unknown]: integer }) -> ({ [unknown]: string } | nil, string | nil)
 function M.canonical_codes(symbol_lengths)
   if type(symbol_lengths) ~= "table" then
     return nil, "symbol_lengths must be a table"
   end
 
   -- Collect (symbol, length) pairs and sort by (length, symbol)
-  local pairs_list = {}
+  local pairs_list = {} --: { [integer]: { sym: unknown, len: integer } }
   for sym, len in pairs(symbol_lengths) do
-    pairs_list[#pairs_list + 1] = { sym = sym, len = len }
+    pairs_list[#pairs_list + 1] = { sym = sym, len = len --[[:! integer]] }
   end
-  table.sort(pairs_list, function(a, b)
+  local sort_any = table.sort --[[: any]]
+  sort_any(pairs_list, function(a, b)
     if a.len ~= b.len then
       return a.len < b.len
     end
@@ -419,22 +428,25 @@ function M.deserialize_freqs(s)
 end
 
 -- Shannon entropy in bits.
+--: ({ [unknown]: number }) -> (number | nil, string | nil)
 function M.entropy(freqs)
   if type(freqs) ~= "table" then
     return nil, "freqs must be a table"
   end
-  local total = 0
-  for _, freq in pairs(freqs) do
-    total = total + freq
+  local freqs_ = freqs --[[: any]]
+  local total = 0 --: number
+  for _, freq in pairs(freqs_) do
+    total = total + (freq --[[:! number]])
   end
   if total == 0 then
     return 0
   end
-  local h = 0
+  local h = 0 --: number
   local log2 = math.log(2)
-  for _, freq in pairs(freqs) do
-    if freq > 0 then
-      local p = freq / total
+  for _, freq in pairs(freqs_) do
+    local freq_ = freq --[[:! number]]
+    if freq_ > 0 then
+      local p = freq_ / total
       h = h - p * math.log(p) / log2
     end
   end
@@ -442,6 +454,7 @@ function M.entropy(freqs)
 end
 
 -- Expected bits per symbol given a code table and frequency table.
+--: ({ [unknown]: number }, { [unknown]: string }) -> (number | nil, string | nil)
 function M.expected_length(freqs, codes)
   if type(freqs) ~= "table" then
     return nil, "freqs must be a table"
@@ -449,20 +462,22 @@ function M.expected_length(freqs, codes)
   if type(codes) ~= "table" then
     return nil, "codes must be a table"
   end
-  local total = 0
-  for _, freq in pairs(freqs) do
-    total = total + freq
+  local freqs_ = freqs --[[: any]]
+  local codes_ = codes --[[: any]]
+  local total = 0 --: number
+  for _, freq in pairs(freqs_) do
+    total = total + (freq --[[:! number]])
   end
   if total == 0 then
     return 0
   end
-  local avg = 0
-  for sym, freq in pairs(freqs) do
-    local code = codes[sym]
+  local avg = 0 --: number
+  for sym, freq in pairs(freqs_) do
+    local code = codes_[sym]
     if code == nil then
       return nil, "no code for symbol: " .. tostring(sym)
     end
-    avg = avg + (freq / total) * #code
+    avg = avg + ((freq --[[:! number]]) / total) * #code
   end
   return avg
 end
