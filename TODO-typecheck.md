@@ -155,6 +155,13 @@ last because the type system itself is the testbed.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+37)
+
+- [x] `lib/toml/init.lua` (8 → 0, commit df46d95) — (byte(s,pos) or 0) --[[:! integer]] in skip_ws/skip_ws_and_newlines/skip_to_newline/parse_simple_key/needs_basic_quote/escape_basic_string/quote_key
+- [x] `lib/cuckoo/init.lua` (26 → 0, commit df46d95) — require("bit"); CuckooFilter type alias; self_ casts in all methods; typed bucket helpers; (byte or 0) casts; opts_ annotation for M.new
+- [x] `lib/embed/init.lua` (14 → 0, commit df46d95) — fix return annotations to (T|nil, string|nil); any-cast setmetatable result through local; score_fn_ cast; filter_ any-cast for nil-callable guard
+- [x] `lib/event/init.lua` (29 → 0, commit df46d95) — Emitter/EventObj/Listener type aliases; self_ casts in all methods; fix return annotations; typed to_call array with _order field
+
 ## Done in current session (session N+36)
 
 - [x] `lib/scrypt/init.lua` (8 → 0, commit 692c395) — annotate to_hex param; N_ math.floor cast; pbkdf2.derive with {alg=nil} opts; (err or "") for nil concat; candidate_/stored_ string casts with byte() or-0
