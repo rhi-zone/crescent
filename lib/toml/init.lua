@@ -104,7 +104,7 @@ end
 local function skip_ws(st)
   local s, pos, len = st.s, st.pos, st.len
   while pos <= len do
-    local b = byte(s, pos)
+    local b = (byte(s, pos) or 0) --[[:! integer]]
     if not is_ws(b) then break end
     pos = pos + 1
   end
@@ -115,7 +115,7 @@ end
 local function skip_ws_and_newlines(st)
   local s, pos, len = st.s, st.pos, st.len
   while pos <= len do
-    local b = byte(s, pos)
+    local b = (byte(s, pos) or 0) --[[:! integer]]
     if b == BYTE_NL then
       st.line = st.line + 1
       pos = pos + 1
@@ -143,7 +143,7 @@ end
 local function skip_to_newline(st)
   local s, pos, len = st.s, st.pos, st.len
   while pos <= len do
-    local b = byte(s, pos)
+    local b = (byte(s, pos) or 0) --[[:! integer]]
     if b == BYTE_NL or b == BYTE_CR then break end
     if b == BYTE_HASH then
       while pos <= len and byte(s, pos) ~= BYTE_NL and byte(s, pos) ~= BYTE_CR do
@@ -766,7 +766,7 @@ parse_datetime = _parse_datetime
 local function parse_simple_key(st)
   local s, pos, len = st.s, st.pos, st.len
   if pos > len then return nil, "line " .. st.line .. ": expected key" end
-  local b = byte(s, pos)
+  local b = (byte(s, pos) or 0) --[[:! integer]]
   if b == BYTE_QUOTE or b == BYTE_APOS then
     return parse_string(st)
   end
@@ -1169,7 +1169,7 @@ end
 --: (string) -> boolean
 local function needs_basic_quote(s)
   for i = 1, #s do
-    local b = byte(s, i)
+    local b = (byte(s, i) or 0) --[[:! integer]]
     if not is_bare_key_char(b) then return true end
   end
   return false
@@ -1183,7 +1183,7 @@ local function escape_basic_string(s)
   local i = 1
   local len = #s
   while i <= len do
-    local b = byte(s, i)
+    local b = (byte(s, i) or 0) --[[:! integer]]
     if b == BYTE_QUOTE then
       n = n + 1; parts[n] = '\\"'
     elseif b == BYTE_BSLASH then
@@ -1205,7 +1205,7 @@ local function escape_basic_string(s)
       local start = i
       i = i + 1
       while i <= len do
-        b = byte(s, i)
+        b = (byte(s, i) or 0) --[[:! integer]]
         if b == BYTE_QUOTE or b == BYTE_BSLASH or b == BYTE_NL or b == BYTE_CR
            or b == BYTE_TAB or b == 8 or b == 12 or (b < 0x20 and b ~= BYTE_TAB) then
           break
@@ -1229,7 +1229,7 @@ local function quote_key(k)
     -- check if literal would work (no ' or control chars)
     local can_literal = true
     for i = 1, #k do
-      local b = byte(k, i)
+      local b = (byte(k, i) or 0) --[[:! integer]]
       if b == BYTE_APOS or b < 0x20 then
         can_literal = false
         break

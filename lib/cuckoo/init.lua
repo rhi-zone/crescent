@@ -11,7 +11,7 @@ end
 local M = {}
 M._tier = "pure"
 
-local bit = bit  -- LuaJIT global
+local bit = require("bit")
 local band, bor, bxor, lshift, rshift, tobit =
   bit.band, bit.bor, bit.bxor, bit.lshift, bit.rshift, bit.tobit
 local floor, ceil, log = math.floor, math.ceil, math.log
@@ -26,7 +26,7 @@ local byte, char = string.byte, string.char
 local function fnv1a32(s, seed)
   local h = tobit(seed or 2166136261)
   for i = 1, #s do
-    h = bxor(h, byte(s, i))
+    h = bxor(h, (byte(s, i) or 0) --[[:! integer]])
     -- Multiply by FNV prime 16777619 using 16-bit splits to stay within 53-bit mantissa.
     local a = band(h, 0xffff)            -- lower 16 bits
     local b = band(rshift(h, 16), 0xffff) -- upper 16 bits (logical via mask)
@@ -59,6 +59,7 @@ end
 -- Flat storage: self._data[bucket_index * bucket_size + slot + 1], 1-based.
 -- Value 0 = empty slot. Fingerprints are always >= 1.
 
+--: ({ [integer]: integer }, integer, integer, integer) -> integer | nil
 local function bucket_find(data, base, bucket_size, fp)
   for s = 0, bucket_size - 1 do
     if data[base + s] == fp then return s end
@@ -66,6 +67,7 @@ local function bucket_find(data, base, bucket_size, fp)
   return nil
 end
 
+--: ({ [integer]: integer }, integer, integer, integer) -> boolean
 local function bucket_insert(data, base, bucket_size, fp)
   for s = 0, bucket_size - 1 do
     if data[base + s] == 0 then
@@ -76,6 +78,7 @@ local function bucket_insert(data, base, bucket_size, fp)
   return false
 end
 
+--: ({ [integer]: integer }, integer, integer, integer) -> boolean
 local function bucket_delete(data, base, bucket_size, fp)
   for s = 0, bucket_size - 1 do
     if data[base + s] == fp then
@@ -90,6 +93,8 @@ end
 -- Filter object
 -- ---------------------------------------------------------------------------
 
+--:: CuckooFilter = { _data: { [integer]: integer }, _num_buckets: integer, _bucket_size: integer, _fp_bits: integer, _fp_mask: integer, _max_kicks: integer, _count: integer, _capacity: integer }
+
 local Filter = {}
 Filter.__index = Filter
 
@@ -100,9 +105,11 @@ local function to_key(v)
 end
 
 -- Compute fingerprint and two bucket indices for element s.
+--: (CuckooFilter, string) -> (integer, integer, integer)
 local function fingerprints(self, s)
-  local fp_mask = self._fp_mask
-  local num_buckets = self._num_buckets
+  local self_ = self --[[:! CuckooFilter]]
+  local fp_mask = self_._fp_mask
+  local num_buckets = self_._num_buckets
   local fp = band(fnv1a32(s, 0xdeadbeef), fp_mask)
   if fp == 0 then fp = 1 end  -- 0 is reserved for empty slots
 
@@ -113,30 +120,33 @@ local function fingerprints(self, s)
 end
 
 -- Alternate bucket given current bucket index and fingerprint.
+--: (CuckooFilter, integer, integer) -> integer
 local function alt_index(self, i, fp)
-  return band(bxor(i, band(hash_fp(fp), self._num_buckets - 1)), self._num_buckets - 1)
+  local self_ = self --[[:! CuckooFilter]]
+  return band(bxor(i, band(hash_fp(fp), self_._num_buckets - 1)), self_._num_buckets - 1)
 end
 
 function Filter:insert(element)
+  local self_ = self --[[:! CuckooFilter]]
   local s = to_key(element)
-  local fp, i1, i2 = fingerprints(self, s)
-  local data = self._data
-  local bs = self._bucket_size
+  local fp, i1, i2 = fingerprints(self_, s)
+  local data = self_._data
+  local bs = self_._bucket_size
 
   -- Try direct insert into i1 or i2.
   if bucket_insert(data, i1 * bs, bs, fp) then
-    self._count = self._count + 1
+    self_._count = self_._count + 1
     return true
   end
   if bucket_insert(data, i2 * bs, bs, fp) then
-    self._count = self._count + 1
+    self_._count = self_._count + 1
     return true
   end
 
   -- Both full — cuckoo eviction loop.
   -- Randomly pick starting bucket (deterministic: use i1 ^ fp for spread).
   local i = (band(i1 + fp, 1) == 0) and i1 or i2
-  local max_kicks = self._max_kicks
+  local max_kicks = self_._max_kicks
   for _ = 1, max_kicks do
     -- Evict a random (deterministic) entry from bucket i.
     -- Pick slot via a simple rotation based on current fp.
@@ -146,9 +156,9 @@ function Filter:insert(element)
     data[base + slot] = fp
     fp = evicted
     -- Move evicted fingerprint to its alternate bucket.
-    i = alt_index(self, i, fp)
+    i = alt_index(self_, i, fp)
     if bucket_insert(data, i * bs, bs, fp) then
-      self._count = self._count + 1
+      self_._count = self_._count + 1
       return true
     end
   end
@@ -158,53 +168,59 @@ function Filter:insert(element)
 end
 
 function Filter:contains(element)
+  local self_ = self --[[:! CuckooFilter]]
   local s = to_key(element)
-  local fp, i1, i2 = fingerprints(self, s)
-  local data = self._data
-  local bs = self._bucket_size
+  local fp, i1, i2 = fingerprints(self_, s)
+  local data = self_._data
+  local bs = self_._bucket_size
   return bucket_find(data, i1 * bs, bs, fp) ~= nil
       or bucket_find(data, i2 * bs, bs, fp) ~= nil
 end
 
 function Filter:delete(element)
+  local self_ = self --[[:! CuckooFilter]]
   local s = to_key(element)
-  local fp, i1, i2 = fingerprints(self, s)
-  local data = self._data
-  local bs = self._bucket_size
+  local fp, i1, i2 = fingerprints(self_, s)
+  local data = self_._data
+  local bs = self_._bucket_size
   if bucket_delete(data, i1 * bs, bs, fp) then
-    self._count = self._count - 1
+    self_._count = self_._count - 1
     return true
   end
   if bucket_delete(data, i2 * bs, bs, fp) then
-    self._count = self._count - 1
+    self_._count = self_._count - 1
     return true
   end
   return false
 end
 
 function Filter:count()
-  return self._count
+  local self_ = self --[[:! CuckooFilter]]
+  return self_._count
 end
 
 function Filter:capacity()
-  return self._capacity
+  local self_ = self --[[:! CuckooFilter]]
+  return self_._capacity
 end
 
 function Filter:false_positive_rate()
   -- Theoretical FPR: (1 - (1 - 1/2^f)^(2*b))
   -- where f = fingerprint bits, b = bucket size.
   -- Approximation: 2b / 2^f
-  local f = self._fp_bits
-  local b = self._bucket_size
+  local self_ = self --[[:! CuckooFilter]]
+  local f = self_._fp_bits
+  local b = self_._bucket_size
   return (2 * b) / (2 ^ f)
 end
 
 function Filter:load_factor()
-  local total = self._num_buckets * self._bucket_size
+  local self_ = self --[[:! CuckooFilter]]
+  local total = self_._num_buckets * self_._bucket_size
   if total == 0 then return 0 end
   -- Count actual filled slots by scanning (data is 0-indexed).
   local filled = 0
-  local data = self._data
+  local data = self_._data
   for i = 0, total - 1 do
     if data[i] ~= 0 then filled = filled + 1 end
   end
@@ -221,12 +237,13 @@ end
 -- entries * bytes_per_fp bytes.
 
 function Filter:serialize()
-  local nb = self._num_buckets
-  local bs = self._bucket_size
-  local fp_bits = self._fp_bits
-  local max_kicks = self._max_kicks
-  local count = self._count
-  local data = self._data
+  local self_ = self --[[:! CuckooFilter]]
+  local nb = self_._num_buckets
+  local bs = self_._bucket_size
+  local fp_bits = self_._fp_bits
+  local max_kicks = self_._max_kicks
+  local count = self_._count
+  local data = self_._data
   local total = nb * bs
 
   -- Bytes per fingerprint: 1 for 4/8 bits, 2 for 16 bits.
@@ -270,14 +287,15 @@ end
 -- opts.fingerprint_bits: 4, 8, or 16 (default 8).
 -- opts.bucket_size: 2 or 4 (default 4).
 -- opts.max_kicks: max eviction attempts (default 500).
+--: (integer, { fingerprint_bits?: integer, bucket_size?: integer, max_kicks?: integer } | nil) -> (CuckooFilter | nil, string | nil)
 function M.new(capacity, opts)
   if not capacity or capacity < 1 then
     return nil, "cuckoo.new: capacity must be >= 1"
   end
-  opts = opts or {}
-  local fp_bits    = opts.fingerprint_bits or 8
-  local bucket_size = opts.bucket_size or 4
-  local max_kicks  = opts.max_kicks or 500
+  local opts_ = opts or {} --[[:! { fingerprint_bits?: integer, bucket_size?: integer, max_kicks?: integer }]]
+  local fp_bits    = opts_.fingerprint_bits or 8
+  local bucket_size = opts_.bucket_size or 4
+  local max_kicks  = opts_.max_kicks or 500
 
   if fp_bits ~= 4 and fp_bits ~= 8 and fp_bits ~= 16 then
     return nil, "cuckoo.new: fingerprint_bits must be 4, 8, or 16"
@@ -296,7 +314,7 @@ function M.new(capacity, opts)
   local total = num_buckets * bucket_size
 
   -- Initialize flat data array (all 0 = empty). 0-indexed: data[0] to data[total-1].
-  local data = {}
+  local data = {} --: { [integer]: integer }
   for i = 0, total - 1 do data[i] = 0 end
 
   return setmetatable({
@@ -316,13 +334,21 @@ function M.deserialize(s)
   if type(s) ~= "string" or #s < 12 then
     return nil, "cuckoo.deserialize: invalid data (too short)"
   end
-  local b1,b2,b3,b4 = byte(s, 1, 4)
+  local b1_,b2_,b3_,b4_ = byte(s, 1, 4)
+  local b1 = (b1_ or 0) --[[:! integer]]
+  local b2 = (b2_ or 0) --[[:! integer]]
+  local b3 = (b3_ or 0) --[[:! integer]]
+  local b4 = (b4_ or 0) --[[:! integer]]
   local nb = bor(lshift(b1, 24), lshift(b2, 16), lshift(b3, 8), b4)
-  local bs_byte, fp_bits, mk_hi, mk_lo = byte(s, 5, 8)
-  local bucket_size = bs_byte
-  local fp_bits_val = fp_bits
-  local max_kicks = bor(lshift(mk_hi, 8), mk_lo)
-  local c1,c2,c3,c4 = byte(s, 9, 12)
+  local bs_byte_, fp_bits_, mk_hi_, mk_lo_ = byte(s, 5, 8)
+  local bucket_size = (bs_byte_ or 0) --[[:! integer]]
+  local fp_bits_val = (fp_bits_ or 0) --[[:! integer]]
+  local max_kicks = bor(lshift((mk_hi_ or 0) --[[:! integer]], 8), (mk_lo_ or 0) --[[:! integer]])
+  local c1_,c2_,c3_,c4_ = byte(s, 9, 12)
+  local c1 = (c1_ or 0) --[[:! integer]]
+  local c2 = (c2_ or 0) --[[:! integer]]
+  local c3 = (c3_ or 0) --[[:! integer]]
+  local c4 = (c4_ or 0) --[[:! integer]]
   local count = bor(lshift(c1, 24), lshift(c2, 16), lshift(c3, 8), c4)
 
   if nb < 1 or bucket_size < 1 or fp_bits_val < 1 then
@@ -336,16 +362,18 @@ function M.deserialize(s)
     return nil, "cuckoo.deserialize: data length mismatch (got " .. #s .. ", expected " .. expected_len .. ")"
   end
 
-  local data = {}
+  local data = {} --: { [integer]: integer }
   local offset = 13
   if bpf == 1 then
     for i = 0, total - 1 do
-      data[i] = byte(s, offset)
+      data[i] = (byte(s, offset) or 0) --[[:! integer]]
       offset = offset + 1
     end
   else
     for i = 0, total - 1 do
-      local hi, lo = byte(s, offset, offset + 1)
+      local hi_, lo_ = byte(s, offset, offset + 1)
+      local hi = (hi_ or 0) --[[:! integer]]
+      local lo = (lo_ or 0) --[[:! integer]]
       data[i] = bor(lshift(hi, 8), lo)
       offset = offset + 2
     end

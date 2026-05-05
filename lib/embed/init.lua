@@ -15,7 +15,7 @@ local M = {}
 local idx_mt = {}
 idx_mt.__index = idx_mt
 
---: (opts: { dims: number, metric: (string | nil) }) -> Index
+--: (opts: { dims: number, metric: (string | nil) }) -> (Index | nil, string | nil)
 function M.index(opts)
   local dims = opts.dims
   if not dims or dims < 1 then
@@ -25,16 +25,17 @@ function M.index(opts)
   if metric ~= "cosine" and metric ~= "euclidean" and metric ~= "dot" then
     return nil, "metric must be 'cosine', 'euclidean', or 'dot'"
   end
-  return setmetatable({
+  local result = setmetatable({
     _dims = dims,
     _metric = metric,
     _entries = {},  -- id -> { id, vector, metadata }
     _ids = {},      -- ordered list of ids for iteration
     _id_set = {},   -- id -> index in _ids
-  }, idx_mt)
+  }, idx_mt) --[[: any]]
+  return result --[[:! Index]]
 end
 
---: (self: Index, id: string, vector: Vec, metadata: (Metadata | nil)) -> (true) | (nil, string)
+--: (self: Index, id: string, vector: Vec, metadata: (Metadata | nil)) -> (boolean | nil, string | nil)
 function idx_mt:add(id, vector, metadata)
   if vec.len(vector) ~= self._dims then
     return nil, "vector dimension mismatch: expected " .. self._dims .. ", got " .. vec.len(vector)
@@ -52,26 +53,27 @@ function idx_mt:add(id, vector, metadata)
   return true
 end
 
---: (self: Index, items: { Entry }) -> (true) | (nil, string)
+--: (self: Index, items: { Entry }) -> (boolean | nil, string | nil)
 function idx_mt:add_batch(items)
+  local self_ = self --[[: any]]
   for i = 1, #items do
     local item = items[i]
-    local ok, err = self:add(item.id, item.vector, item.metadata)
+    local ok, err = self_:add(item.id, item.vector, item.metadata)
     if not ok then
-      return nil, "item " .. i .. ": " .. err
+      return nil, "item " .. i .. ": " .. (err or "")
     end
   end
   return true
 end
 
---: (self: Index, query: Vec, k: number, opts: ({ filter: (((meta: (Metadata | nil)) -> boolean) | nil) } | nil)) -> { SearchResult } | (nil, string)
+--: (self: Index, query: Vec, k: number, opts: ({ filter: (((meta: (Metadata | nil)) -> boolean) | nil) } | nil)) -> ({ [integer]: SearchResult } | nil, string | nil)
 function idx_mt:search(query, k, opts)
   if vec.len(query) ~= self._dims then
     return nil, "query dimension mismatch: expected " .. self._dims .. ", got " .. vec.len(query)
   end
   local filter = opts and opts.filter
   local metric = self._metric
-  local score_fn
+  local score_fn --: ((Vec, Vec) -> number) | nil
   if metric == "cosine" then
     score_fn = vec.cosine
   elseif metric == "dot" then
@@ -80,6 +82,7 @@ function idx_mt:search(query, k, opts)
     -- euclidean: negate distance so higher = better for sorting
     score_fn = function(a, b) return -vec.distance(a, b) end
   end
+  local score_fn_ = score_fn --[[:! (Vec, Vec) -> number]]
 
   -- Collect candidates
   local candidates = {}
@@ -88,8 +91,9 @@ function idx_mt:search(query, k, opts)
   local ids = self._ids
   for i = 1, #ids do
     local entry = entries[ids[i]]
-    if not filter or filter(entry.metadata) then
-      local s = score_fn(query, entry.vector)
+    local filter_ = filter --[[: any]]
+    if not filter or filter_(entry.metadata) then
+      local s = score_fn_(query, entry.vector)
       n = n + 1
       candidates[n] = { id = entry.id, score = s, metadata = entry.metadata }
     end
@@ -165,17 +169,18 @@ function idx_mt:serialize()
   }
 end
 
---: (data: Serialized) -> Index | (nil, string)
+--: (data: Serialized) -> (Index | nil, string | nil)
 function M.deserialize(data)
   if not data.dims then return nil, "missing dims" end
   local idx, err = M.index({ dims = data.dims, metric = data.metric or "cosine" })
   if not idx then return nil, err end
+  local idx_ = idx --[[: any]]
   local items = data.items
   if items then
     for i = 1, #items do
       local item = items[i]
       local v = vec.new(item.vector)
-      local ok, add_err = idx:add(item.id, v, item.metadata)
+      local ok, add_err = idx_:add(item.id, v, item.metadata)
       if not ok then return nil, add_err end
     end
   end

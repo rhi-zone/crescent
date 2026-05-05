@@ -8,10 +8,9 @@ end
 
 local M = {}
 
---:: Emitter = { ... }
---:: Event = { ... }
-
 --:: Listener = { fn: (...unknown) -> unknown, priority: number, once: boolean, id: number }
+--:: Emitter = { _listeners: { [string]: { [integer]: Listener } } }
+--:: EventObj = { name: string, args: { [integer]: unknown }, _stopped: boolean }
 
 local Emitter = {}
 Emitter.__index = Emitter
@@ -21,9 +20,8 @@ local _next_id = 0
 --- Create a new event emitter.
 --: () -> Emitter
 function M.new()
-  local self = setmetatable({}, Emitter)
-  self._listeners = {} --: { [string]: { Listener } }
-  return self
+  local result = setmetatable({ _listeners = {} }, Emitter) --[[: any]]
+  return result --[[:! Emitter]]
 end
 
 --- Convert a wildcard pattern to a Lua pattern.
@@ -59,43 +57,45 @@ end
 
 --- Register a listener for an event name (or wildcard pattern).
 -- Returns a unique listener id for later removal via off_by_id.
---: (string, (...unknown) -> unknown, ({ priority: number } | nil)) -> number
+--: (Emitter, string, (...unknown) -> unknown, ({ priority: number, once?: boolean } | nil)) -> (integer | nil, string | nil)
 function Emitter:on(name, fn, opts)
   if type(name) ~= "string" then return nil, "event name must be a string" end
   if type(fn) ~= "function" then return nil, "listener must be a function" end
+  local self_ = self --[[:! Emitter]]
   _next_id = _next_id + 1
   local id = _next_id
   local priority = (opts and opts.priority) or 0
   local once = (opts and opts.once) or false
-  local entry = { fn = fn, priority = priority, once = once, id = id }
-  local listeners = self._listeners[name]
+  local entry = { fn = fn, priority = priority, once = once and true or false, id = id }
+  local listeners = self_._listeners[name]
   if not listeners then
-    listeners = {}
-    self._listeners[name] = listeners
+    listeners = {} --: { [integer]: Listener }
+    self_._listeners[name] = listeners
   end
   insert_sorted(listeners, entry)
   return id
 end
 
 --- Register a listener that fires only once.
---: (string, (...unknown) -> unknown, ({ priority: number } | nil)) -> number
+--: (Emitter, string, (...unknown) -> unknown, ({ priority: number, once?: boolean } | nil)) -> (integer | nil, string | nil)
 function Emitter:once(name, fn, opts)
-  local o = { once = true }
-  if opts then o.priority = opts.priority end
-  return self:on(name, fn, o)
+  local self_ = self --[[: any]]
+  local o = { once = true, priority = opts and opts.priority or 0 }
+  return self_:on(name, fn, o)
 end
 
 --- Remove listener(s).
 -- off(name, fn) removes a specific listener.
 -- off(name) removes all listeners for that event.
---: (string, (((...unknown) -> unknown) | nil)) -> ()
+--: (Emitter, string, (((...unknown) -> unknown) | nil)) -> nil
 function Emitter:off(name, fn)
-  if type(name) ~= "string" then return nil, "event name must be a string" end
+  if type(name) ~= "string" then return end
+  local self_ = self --[[:! Emitter]]
   if not fn then
-    self._listeners[name] = nil
+    self_._listeners[name] = nil
     return
   end
-  local listeners = self._listeners[name]
+  local listeners = self_._listeners[name]
   if not listeners then return end
   for i = #listeners, 1, -1 do
     if listeners[i].fn == fn then
@@ -103,19 +103,20 @@ function Emitter:off(name, fn)
     end
   end
   if #listeners == 0 then
-    self._listeners[name] = nil
+    self_._listeners[name] = nil
   end
 end
 
 --- Remove a listener by its unique id.
---: (number) -> boolean
+--: (Emitter, integer) -> boolean
 function Emitter:off_by_id(id)
-  for name, listeners in pairs(self._listeners) do
+  local self_ = self --[[:! Emitter]]
+  for name, listeners in pairs(self_._listeners) do
     for i = #listeners, 1, -1 do
       if listeners[i].id == id then
         table.remove(listeners, i)
         if #listeners == 0 then
-          self._listeners[name] = nil
+          self_._listeners[name] = nil
         end
         return true
       end
@@ -128,42 +129,45 @@ end
 local Event = {}
 Event.__index = Event
 
---: () -> Event
+--: (string, { [integer]: unknown }) -> EventObj
 local function new_event(name, args)
-  return setmetatable({ name = name, args = args, _stopped = false }, Event)
+  local result = setmetatable({ name = name, args = args, _stopped = false }, Event) --[[: any]]
+  return result --[[:! EventObj]]
 end
 
 --- Stop propagation to remaining listeners.
---: () -> ()
+--: (EventObj) -> nil
 function Event:stop()
-  self._stopped = true
+  local self_ = self --[[:! EventObj]]
+  self_._stopped = true
 end
 
 --- Emit an event, calling all matching listeners.
 -- Exact-match listeners run first, then wildcard listeners.
 -- Returns true if any listener was called, false otherwise.
---: (string, ...unknown) -> boolean
+--: (Emitter, string, ...unknown) -> boolean
 function Emitter:emit(name, ...)
-  if type(name) ~= "string" then return nil, "event name must be a string" end
+  if type(name) ~= "string" then return false end
+  local self_ = self --[[:! Emitter]]
   local evt = new_event(name, { ... })
   local called = false
 
   -- Collect all matching listener entries: exact match first, then wildcards.
-  local to_call = {}
-  local exact = self._listeners[name]
+  local to_call = {} --: { [integer]: { entry: Listener, key: string, _order: integer } }
+  local exact = self_._listeners[name]
   if exact then
     for i = 1, #exact do
-      to_call[#to_call + 1] = { entry = exact[i], key = name }
+      to_call[#to_call + 1] = { entry = exact[i], key = name, _order = 0 }
     end
   end
 
   -- Wildcard matches
-  for pattern, listeners in pairs(self._listeners) do
+  for pattern, listeners in pairs(self_._listeners) do
     if pattern ~= name and is_wildcard(pattern) then
       local lua_pat = wildcard_to_pattern(pattern)
       if name:find(lua_pat) then
         for i = 1, #listeners do
-          to_call[#to_call + 1] = { entry = listeners[i], key = pattern }
+          to_call[#to_call + 1] = { entry = listeners[i], key = pattern, _order = 0 }
         end
       end
     end
@@ -190,7 +194,7 @@ function Emitter:emit(name, ...)
     local item = to_call[i]
     local entry = item.entry
     -- Check if entry was already removed (e.g. by a previous listener calling off)
-    local key_listeners = self._listeners[item.key]
+    local key_listeners = self_._listeners[item.key]
     if key_listeners then
       local still_present = false
       for j = 1, #key_listeners do
@@ -211,7 +215,7 @@ function Emitter:emit(name, ...)
             end
           end
           if #key_listeners == 0 then
-            self._listeners[item.key] = nil
+            self_._listeners[item.key] = nil
           end
         end
         if evt._stopped then break end
@@ -224,10 +228,11 @@ end
 
 --- Return an array of listener functions for a given event name.
 -- Only returns exact-match listeners (not wildcard).
---: (string) -> { ((...unknown) -> unknown) }
+--: (Emitter, string) -> { [integer]: (...unknown) -> unknown }
 function Emitter:listeners(name)
-  local result = {}
-  local listeners = self._listeners[name]
+  local self_ = self --[[:! Emitter]]
+  local result = {} --: { [integer]: (...unknown) -> unknown }
+  local listeners = self_._listeners[name]
   if listeners then
     for i = 1, #listeners do
       result[#result + 1] = listeners[i].fn
@@ -237,25 +242,27 @@ function Emitter:listeners(name)
 end
 
 --- Return the count of listeners for a given event name.
---: (string) -> number
+--: (Emitter, string) -> integer
 function Emitter:listener_count(name)
-  local listeners = self._listeners[name]
+  local self_ = self --[[:! Emitter]]
+  local listeners = self_._listeners[name]
   return listeners and #listeners or 0
 end
 
 --- Return an array of all event names that have listeners.
---: () -> { string }
+--: (Emitter) -> { [integer]: string }
 function Emitter:event_names()
-  local result = {}
-  for name in pairs(self._listeners) do
+  local self_ = self --[[:! Emitter]]
+  local result = {} --: { [integer]: string }
+  for name in pairs(self_._listeners) do
     result[#result + 1] = name
   end
-  table.sort(result)
+  table.sort(result --[[: any]])
   return result
 end
 
 --- Mixin: add event emitter methods to any table.
---: (table) -> table
+--: (unknown) -> unknown
 function M.mixin(target)
   target._listeners = {}
   for k, v in pairs(Emitter) do
