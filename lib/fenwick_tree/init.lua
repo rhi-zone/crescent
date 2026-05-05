@@ -11,6 +11,9 @@ local band = require("bit").band
 local M = {}
 M._tier = "pure"
 
+--:: BIT = { n: integer, data: { [integer]: number }, _pts: ({ [integer]: number } | nil) }
+--:: BITOP = { n: integer, data: { [integer]: unknown }, _pts: { [integer]: unknown }, _combine: ((unknown, unknown) -> unknown), _identity: unknown, _point_update: ((unknown, unknown) -> unknown) }
+
 -- ---------------------------------------------------------------------------
 -- Internal helpers
 -- ---------------------------------------------------------------------------
@@ -52,7 +55,7 @@ function M.from_array(arr)
   return t
 end
 
--- Add delta to index i (1-indexed).
+--: (self: BIT, i: integer, delta: number) -> ()
 function BIT:update(i, delta)
   if self._pts then self._pts[i] = self._pts[i] + delta end
   local data, n = self.data, self.n
@@ -62,22 +65,25 @@ function BIT:update(i, delta)
   end
 end
 
--- Set index i to val.
+--: (self: BIT, i: integer, val: number) -> ()
 function BIT:set(i, val)
-  local cur = self:get(i)
-  self:update(i, val - cur)
+  local self_ = self --[[:! BIT]]
+  local cur = BIT.get(self_, i)
+  BIT.update(self_, i, val - cur)
 end
 
--- Get the point value at index i.
+--: (self: BIT, i: integer) -> number
 function BIT:get(i)
-  if self._pts then return self._pts[i] end
+  local self_ = self --[[:! BIT]]
+  if self_._pts then return self_._pts[i] end
   -- Fall back to prefix difference
-  return self:prefix(i) - self:prefix(i - 1)
+  return BIT.prefix(self_, i) - BIT.prefix(self_, i - 1)
 end
 
--- Prefix sum of [1..i].
+--: (self: BIT, i: integer) -> number
 function BIT:prefix(i)
-  local s, data = 0, self.data
+  local self_ = self --[[:! BIT]]
+  local s, data = 0, self_.data
   while i > 0 do
     s = s + data[i]
     i = i - lsb(i)
@@ -85,9 +91,10 @@ function BIT:prefix(i)
   return s
 end
 
--- Range sum of [l..r].
+--: (self: BIT, l: integer, r: integer) -> number
 function BIT:query(l, r)
-  return self:prefix(r) - self:prefix(l - 1)
+  local self_ = self --[[:! BIT]]
+  return BIT.prefix(self_, r) - BIT.prefix(self_, l - 1)
 end
 
 -- Find smallest index where prefix_sum >= k (binary lifting), O(log n).
@@ -97,15 +104,15 @@ function BIT:find_kth(k)
   local log = 1
   local n = self.n
   while log <= n do log = log * 2 end
-  log = log / 2
+  log = math.floor(log / 2)
   local data = self.data
   while log >= 1 do
     local next = pos + log
     if next <= n and data[next] < k then
       k = k - data[next]
-      pos = next
+      pos = next --[[:! integer]]
     end
-    log = log / 2
+    log = math.floor(log / 2)
   end
   local idx = pos + 1
   if idx > n then return nil end
@@ -117,11 +124,12 @@ function BIT:len()
   return self.n
 end
 
--- Return an array of point values.
+--: (self: BIT) -> { [integer]: number }
 function BIT:to_array()
+  local self_ = self --[[:! BIT]]
   local arr = {}
-  for i = 1, self.n do
-    arr[i] = self:get(i)
+  for i = 1, self_.n do
+    arr[i] = BIT.get(self_, i)
   end
   return arr
 end
@@ -207,9 +215,11 @@ function M.new_op(n, opts)
   return t
 end
 
+--: (self: BITOP, i: integer, val: unknown) -> ()
 function BITOP:update(i, val)
-  local combine = self._combine
-  local pt = self._point_update(self._pts[i], val)
+  local self_ = self --[[:! BITOP]]
+  local combine = self_._combine
+  local pt = self_._point_update(self_._pts[i], val)
   self._pts[i] = pt
   local data, n = self.data, self.n
   -- Re-build affected cells by recomputing from scratch via point values
@@ -228,8 +238,10 @@ function BITOP:update(i, val)
   end
 end
 
+--: (self: BITOP, i: integer) -> unknown
 function BITOP:prefix(i)
-  local s, data, combine = self._identity, self.data, self._combine
+  local self_ = self --[[:! BITOP]]
+  local s, data, combine = self_._identity, self_.data, self_._combine
   while i > 0 do
     s = combine(s, data[i])
     i = i - lsb(i)

@@ -74,8 +74,7 @@ end
 -- cash_flows[1] is period 0 (usually the initial investment, negative).
 --: (number, { [number]: number }) -> number
 M.npv = function(rate, cash_flows)
-  local total --: number
-  total = 0.0
+  local total = 0.0 --: number
   for i, cf in ipairs(cash_flows) do
     total = total + cf / (1 + rate) ^ (i - 1)
   end
@@ -91,10 +90,8 @@ M.irr = function(cash_flows, initial_guess)
   local tol = 1e-10
 
   for _ = 1, max_iter do
-    local npv --: number
-    npv = 0.0
-    local dnpv --: number
-    dnpv = 0.0
+    local npv = 0.0 --: number
+    local dnpv = 0.0 --: number
     for i, cf in ipairs(cash_flows) do
       local t = i - 1
       local denom = (1 + rate) ^ t
@@ -273,8 +270,7 @@ end
 M.mean_return = function(prices)
   local rets, err = M.returns(prices)
   if not rets then return nil, err end
-  local sum --: number
-  sum = 0.0
+  local sum = 0.0 --: number
   for _, r in ipairs(rets) do sum = sum + r end
   return sum / #rets
 end
@@ -289,12 +285,10 @@ M.volatility = function(prices)
     lr[i] = log(prices[i + 1] / prices[i])
   end
   local n = #lr
-  local sum --: number
-  sum = 0.0
+  local sum = 0.0 --: number
   for _, r in ipairs(lr) do sum = sum + r end
   local mean = sum / n
-  local var --: number
-  var = 0.0
+  local var = 0.0 --: number
   for _, r in ipairs(lr) do var = var + (r - mean) ^ 2 end
   return sqrt(var / n)
 end
@@ -316,8 +310,7 @@ end
 --: ({ [number]: number }) -> ({ drawdown: number, peak_idx: number, trough_idx: number } | nil, string)
 M.max_drawdown = function(prices)
   if #prices < 2 then return nil, "need at least 2 prices" end
-  local max_dd --: number
-  max_dd = 0.0
+  local max_dd = 0.0 --: number
   local peak_idx = 1
   local trough_idx = 1
   local cur_peak = prices[1]

@@ -4,7 +4,7 @@ local vec = require("lib.vec")
 
 local M = {}
 
---:: Vec = { data: unknown, n: integer }
+--:: Vec = { data?: unknown, n: integer, [integer]: number }
 --:: Metadata = { [string]: unknown }
 --:: Entry = { id: string, vector: Vec, metadata: (Metadata | nil) }
 --:: SearchResult = { id: string, score: number, metadata: (Metadata | nil) }
