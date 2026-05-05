@@ -160,6 +160,14 @@ last because the type system itself is the testbed.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+41)
+
+- [x] `lib/format/json/ffi.lua` (63 → 0, commit d7c2f20) — ESC_TABLE typed as { [integer]: string | boolean }; upvalue annotations for _ptr8/src/len/pos; any-cast ffi.cast/ffi.string; n force-casts in encode functions; any-intermediate for encode_string call
+- [x] `lib/query_builder/init.lua` (52 → 0, commit 7bd2c77) — replaced 'table' annotations; fixed Insert/Update type aliases (_rows/_vals/_set); any→T casts for setmetatable returns; copy_array result casts; where clause entry casts; any-locals for pairs/ipairs unknowns
+- [x] `lib/siphash/init.lua` (45 → 4, commit 600ac68) — any-cast ffi.typeof(U64); any-cast string.byte for multi-return; integer params in rotl64/read_u64_le/u64; concrete hash_pair return shape; bytes array typed as string[]
+- skipped `lib/dns/format.lua` (55) — adding bit require cascades: lshift/bor now typed, byte() multi-return nil propagates to every arithmetic site; pervasive
+- skipped `lib/semver/init.lua` (45) — Version type with methods causes disjoint setmetatable cast; constraint solver section adds more errors; net regression attempted
+
 ## Done in current session (session N+40)
 
 - [x] `lib/vec/init.lua` (48 → 0, commit 2ecab84) — Vec type updated to `{ data?: unknown, n: integer, [integer]: number, ... }`; FFI tier: any-intermediate + force-cast on all setmetatable returns; pure tier: --[[:! Vec]] on all v/c returns, --: number on all 0.0 accumulators; cosine d/na/nb split to separate annotated locals
