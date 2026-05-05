@@ -46,11 +46,11 @@ function vec2_mt:cross(o) return self.x * o.y - self.y * o.x        end  -- scal
 --: (Vec2) -> number
 function vec2_mt:len_sq() return self.x * self.x + self.y * self.y  end
 --: (Vec2) -> number
-function vec2_mt:len()    return sqrt(self:len_sq())                 end
+function vec2_mt:len()    return sqrt(vec2_mt.len_sq(self))          end
 
 --: (Vec2) -> Vec2
 function vec2_mt:normalize()
-  local l = self:len()
+  local l = vec2_mt.len(self)
   if l == 0 then return M.vec2(0, 0) end
   return M.vec2(self.x / l, self.y / l)
 end
@@ -85,15 +85,15 @@ end
 
 --: (Vec2, Vec2) -> Vec2
 function vec2_mt:reflect(n)
-  local d = 2 * self:dot(n)
+  local d = 2 * vec2_mt.dot(self, n)
   return M.vec2(self.x - d * n.x, self.y - d * n.y)
 end
 
 --: (Vec2, Vec2) -> Vec2
 function vec2_mt:project(o)
-  local d = o:dot(o)
+  local d = vec2_mt.dot(o, o)
   if d == 0 then return M.vec2(0, 0) end
-  local s = self:dot(o) / d
+  local s = vec2_mt.dot(self, o) / d
   return M.vec2(o.x * s, o.y * s)
 end
 
@@ -119,28 +119,28 @@ end
 
 --: (Vec2, Vec2) -> boolean
 function vec2_mt:eq(o)
-  return self.x == o.x and self.y == o.y
+  return (self.x == o.x and self.y == o.y) --[[:! boolean]]
 end
 
 --: (Vec2, Vec2) -> Vec2
-function vec2_mt:__add(o)      return self:add(o)           end
+function vec2_mt:__add(o)      return vec2_mt.add(self, o)  end
 --: (Vec2, Vec2) -> Vec2
-function vec2_mt:__sub(o)      return self:sub(o)           end
+function vec2_mt:__sub(o)      return vec2_mt.sub(self, o)  end
 --: (Vec2) -> Vec2
 function vec2_mt:__unm()       return M.vec2(-self.x, -self.y) end
 --: (Vec2, Vec2) -> boolean
-function vec2_mt:__eq(o)       return self:eq(o)            end
+function vec2_mt:__eq(o)       return vec2_mt.eq(self, o)   end
 --: (Vec2) -> string
 function vec2_mt:__tostring()
   return "vec2(" .. self.x .. ", " .. self.y .. ")"
 end
 function vec2_mt.__mul(a, b)
-  if type(a) == "number" then return b:mul(a) end
-  if type(b) == "number" then return a:mul(b) end
+  if type(a) == "number" then return vec2_mt.mul(b --[[:! Vec2]], a --[[:! number]]) end
+  if type(b) == "number" then return vec2_mt.mul(a --[[:! Vec2]], b --[[:! number]]) end
   error("vec2 * vec2 is ambiguous: use :dot() or :cross() explicitly", 2)
 end
 function vec2_mt.__div(a, b)
-  if type(b) == "number" then return a:div(b) end
+  if type(b) == "number" then return vec2_mt.div(a --[[:! Vec2]], b --[[:! number]]) end
   error("vec2 / vec2 is not defined", 2)
 end
 
@@ -167,7 +167,7 @@ function vec3_mt:dot(o)   return self.x*o.x + self.y*o.y + self.z*o.z          e
 --: (Vec3) -> number
 function vec3_mt:len_sq() return self.x*self.x + self.y*self.y + self.z*self.z end
 --: (Vec3) -> number
-function vec3_mt:len()    return sqrt(self:len_sq())                            end
+function vec3_mt:len()    return sqrt(vec3_mt.len_sq(self))                     end
 
 --: (Vec3, Vec3) -> Vec3
 function vec3_mt:cross(o)
@@ -180,7 +180,7 @@ end
 
 --: (Vec3) -> Vec3
 function vec3_mt:normalize()
-  local l = self:len()
+  local l = vec3_mt.len(self)
   if l == 0 then return M.vec3(0, 0, 0) end
   return M.vec3(self.x/l, self.y/l, self.z/l)
 end
@@ -208,42 +208,42 @@ end
 
 --: (Vec3, Vec3) -> Vec3
 function vec3_mt:reflect(n)
-  local d = 2 * self:dot(n)
+  local d = 2 * vec3_mt.dot(self, n)
   return M.vec3(self.x - d*n.x, self.y - d*n.y, self.z - d*n.z)
 end
 
 --: (Vec3, Vec3) -> Vec3
 function vec3_mt:project(o)
-  local d = o:dot(o)
+  local d = vec3_mt.dot(o, o)
   if d == 0 then return M.vec3(0, 0, 0) end
-  local s = self:dot(o) / d
+  local s = vec3_mt.dot(self, o) / d
   return M.vec3(o.x*s, o.y*s, o.z*s)
 end
 
 --: (Vec3, Vec3) -> boolean
 function vec3_mt:eq(o)
-  return self.x == o.x and self.y == o.y and self.z == o.z
+  return (self.x == o.x and self.y == o.y and self.z == o.z) --[[:! boolean]]
 end
 
 --: (Vec3, Vec3) -> Vec3
-function vec3_mt:__add(o)  return self:add(o)                    end
+function vec3_mt:__add(o)  return vec3_mt.add(self, o)           end
 --: (Vec3, Vec3) -> Vec3
-function vec3_mt:__sub(o)  return self:sub(o)                    end
+function vec3_mt:__sub(o)  return vec3_mt.sub(self, o)           end
 --: (Vec3) -> Vec3
 function vec3_mt:__unm()   return M.vec3(-self.x, -self.y, -self.z) end
 --: (Vec3, Vec3) -> boolean
-function vec3_mt:__eq(o)   return self:eq(o)                     end
+function vec3_mt:__eq(o)   return vec3_mt.eq(self, o)            end
 --: (Vec3) -> string
 function vec3_mt:__tostring()
   return "vec3(" .. self.x .. ", " .. self.y .. ", " .. self.z .. ")"
 end
 function vec3_mt.__mul(a, b)
-  if type(a) == "number" then return b:mul(a) end
-  if type(b) == "number" then return a:mul(b) end
+  if type(a) == "number" then return vec3_mt.mul(b --[[:! Vec3]], a --[[:! number]]) end
+  if type(b) == "number" then return vec3_mt.mul(a --[[:! Vec3]], b --[[:! number]]) end
   error("vec3 * vec3 is ambiguous: use :dot() or :cross() explicitly", 2)
 end
 function vec3_mt.__div(a, b)
-  if type(b) == "number" then return a:div(b) end
+  if type(b) == "number" then return vec3_mt.div(a --[[:! Vec3]], b --[[:! number]]) end
   error("vec3 / vec3 is not defined", 2)
 end
 
@@ -385,7 +385,7 @@ function mat4_mt:inverse()
 end
 
 --: (Mat4, Mat4) -> Mat4
-function mat4_mt:__mul(o) return self:mul(o) end
+function mat4_mt:__mul(o) return mat4_mt.mul(self, o) end
 
 --: (Mat4) -> string
 function mat4_mt:__tostring()
@@ -513,8 +513,10 @@ end
 local quat_mt = {}
 quat_mt.__index = quat_mt
 
+--: (w: number | nil, x: number | nil, y: number | nil, z: number | nil) -> Quat
 function M.quat(w, x, y, z)
-  return setmetatable({ w = w or 1, x = x or 0, y = y or 0, z = z or 0 }, quat_mt)
+  local r_ = setmetatable({ w = w or 1.0, x = x or 0.0, y = y or 0.0, z = z or 0.0 }, quat_mt) --[[: any]]
+  return r_ --[[:! Quat]]
 end
 
 function M.quat_identity()
@@ -528,12 +530,12 @@ end
 
 --: (Quat) -> number
 function quat_mt:len()
-  return sqrt(self:len_sq())
+  return sqrt(quat_mt.len_sq(self))
 end
 
 --: (Quat) -> Quat
 function quat_mt:normalize()
-  local l = self:len()
+  local l = quat_mt.len(self)
   if l == 0 then return M.quat(1, 0, 0, 0) end
   return M.quat(self.w/l, self.x/l, self.y/l, self.z/l)
 end
@@ -545,7 +547,7 @@ end
 
 --: (Quat) -> (Quat | nil, string | nil)
 function quat_mt:inverse()
-  local lsq = self:len_sq()
+  local lsq = quat_mt.len_sq(self)
   if lsq == 0 then return nil, "zero quaternion has no inverse" end
   return M.quat(self.w/lsq, -self.x/lsq, -self.y/lsq, -self.z/lsq)
 end
@@ -569,7 +571,7 @@ end
 
 --: (Quat, Quat, number) -> Quat
 function quat_mt:slerp(o, t)
-  local dot = self:dot(o)
+  local dot = quat_mt.dot(self, o)
   -- clamp dot to [-1,1]
   if dot < -1 then dot = -1 elseif dot > 1 then dot = 1 end
   -- if quats are in opposite hemispheres, negate one
@@ -586,7 +588,7 @@ function quat_mt:slerp(o, t)
       self.y + (by - self.y) * t,
       self.z + (bz - self.z) * t
     )
-    return q:normalize()
+    return quat_mt.normalize(q)
   end
   local theta0 = math.acos(dot)
   local theta  = theta0 * t
@@ -618,7 +620,7 @@ end
 
 --: (Quat) -> (Vec3, number)
 function quat_mt:to_axis_angle()
-  local q = self:normalize()
+  local q = quat_mt.normalize(self)
   local w = q.w
   if w > 1 then w = 1 elseif w < -1 then w = -1 end
   local angle = 2 * math.acos(w)
@@ -631,7 +633,7 @@ end
 
 --: (Vec3, number) -> Quat
 function M.quat_from_axis_angle(axis, angle)
-  local a = axis:normalize()
+  local a = vec3_mt.normalize(axis)
   local s = sin(angle * 0.5)
   return M.quat(cos(angle * 0.5), a.x*s, a.y*s, a.z*s)
 end
@@ -650,7 +652,7 @@ function M.quat_from_euler(pitch, yaw, roll)
 end
 
 --: (Quat, Quat) -> Quat
-function quat_mt:__mul(o) return self:mul(o) end
+function quat_mt:__mul(o) return quat_mt.mul(self, o) end
 --: (Quat) -> string
 function quat_mt:__tostring()
   return "quat(" .. self.w .. ", " .. self.x .. ", " .. self.y .. ", " .. self.z .. ")"
@@ -698,16 +700,16 @@ end
 
 --: (Aabb, Vec3) -> boolean
 function aabb_mt:contains(p)
-  return p.x >= self.min.x and p.x <= self.max.x
+  return (p.x >= self.min.x and p.x <= self.max.x
      and p.y >= self.min.y and p.y <= self.max.y
-     and p.z >= self.min.z and p.z <= self.max.z
+     and p.z >= self.min.z and p.z <= self.max.z) --[[:! boolean]]
 end
 
 --: (Aabb, Aabb) -> boolean
 function aabb_mt:intersects(o)
-  return self.min.x <= o.max.x and self.max.x >= o.min.x
+  return (self.min.x <= o.max.x and self.max.x >= o.min.x
      and self.min.y <= o.max.y and self.max.y >= o.min.y
-     and self.min.z <= o.max.z and self.max.z >= o.min.z
+     and self.min.z <= o.max.z and self.max.z >= o.min.z) --[[:! boolean]]
 end
 
 --: (Aabb, Aabb) -> Aabb
