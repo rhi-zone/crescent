@@ -126,6 +126,11 @@ last because the type system itself is the testbed.
 - `lib/xpath/init.lua` (122) — Parser methods have unknown `self` (need 20-method type alias with all signatures); DOM nodes `n.children` is unknown; `eval_expr` forward-declared untyped cascades through all evaluation; pervasive
 - `lib/unified/mdast/init.lua` (168) — diverse error types: integer↔string in mixed arrays, `integer | nil` arithmetic, multi-type union argument mismatches; restructuring needed
 - `lib/time/init.lua` (1) — `0x100000000ULL` syntax not supported by typechecker parser (malformed number); FFI-bound
+- `lib/chacha20/init.lua` (1) — malformed number (ULL suffix); typechecker limitation
+- `lib/crypto/pure.lua` (1) — malformed number (ULL suffix); typechecker limitation
+- `lib/ed25519/init.lua` (1) — malformed number (ULL suffix); typechecker limitation
+- `lib/levenshtein/init.lua` (24) — `prev, curr = curr, prev` swap pattern incompatible with typed tables; `{ [integer]: T }` annotation creates assignment errors on swap; structural limitation
+- `lib/css/init.lua` (10) — `table` undefined type in annotations; changing render_media annotation cascades new errors; net neutral; structural limitation in render loop
 
 ## Skipped in prior runs (with reason)
 
