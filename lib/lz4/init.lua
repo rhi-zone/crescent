@@ -43,12 +43,12 @@ M._tier = "pure"
 
 local function read_u16_le(s, i)
 	local a, b = byte(s, i, i + 1)
-	return a + b * 256
+	return (a or 0) + (b or 0) * 256
 end
 
 local function read_u32_le(s, i)
 	local a, b, c, d = byte(s, i, i + 3)
-	return a + b * 256 + c * 65536 + d * 16777216
+	return (a or 0) + (b or 0) * 256 + (c or 0) * 65536 + (d or 0) * 16777216
 end
 
 local function write_u16_le(v)
@@ -91,14 +91,14 @@ function M.decompress_block(compressed, opts)
 
 	while ip <= clen do
 		-- Read token
-		local token = byte(compressed, ip)
+		local token = byte(compressed, ip) or 0
 		ip = ip + 1
 
 		-- Decode literal length
 		local lit_len = rshift(token, 4)
 		if lit_len == 15 then
 			while ip <= clen do
-				local extra = byte(compressed, ip)
+				local extra = byte(compressed, ip) or 0
 				ip = ip + 1
 				lit_len = lit_len + extra
 				if extra ~= 255 then break end
@@ -111,7 +111,7 @@ function M.decompress_block(compressed, opts)
 				return nil, "decompress_block: literal run overflows input"
 			end
 			for i = ip, ip + lit_len - 1 do
-				local b = byte(compressed, i)
+				local b = byte(compressed, i) or 0
 				decoded[out_len] = b
 				out_len = out_len + 1
 			end
@@ -135,7 +135,7 @@ function M.decompress_block(compressed, opts)
 		local match_len = band(token, 0x0F) + 4  -- minimum match is 4
 		if band(token, 0x0F) == 15 then
 			while ip <= clen do
-				local extra = byte(compressed, ip)
+				local extra = byte(compressed, ip) or 0
 				ip = ip + 1
 				match_len = match_len + extra
 				if extra ~= 255 then break end
@@ -183,6 +183,7 @@ end
 -- lit_start, lit_end: 1-based inclusive positions in input string
 -- match_offset: 0 means no match (last sequence or forced flush)
 -- match_len: 0 means no match
+--: (string, integer, integer, integer, integer, { [integer]: string }) -> nil
 local function flush_sequence(input, lit_start, lit_end, match_offset, match_len, out)
 	local lit_len = lit_end - lit_start + 1
 	if lit_start > lit_end then lit_len = 0 end
@@ -219,7 +220,7 @@ end
 local function hash4(input, i)
 	local a, b, c, d = byte(input, i, i + 3)
 	-- Simple polynomial hash, fits in Lua number (doubles are exact for integers < 2^53)
-	return (a + b * 256 + c * 65536 + d * 16777216) * 2654435761 % 65536
+	return math.floor(((a or 0) + (b or 0) * 256 + (c or 0) * 65536 + (d or 0) * 16777216) * 2654435761 % 65536)
 end
 
 -- Compress input to LZ4 block format (greedy, not optimal).
@@ -236,7 +237,7 @@ function M.compress_block(input)
 
 	local out = {}
 	-- Hash table: hash → last seen 1-based position
-	local ht = {}
+	local ht = {} --: { [integer]: integer }
 	-- Current literal run start (1-based)
 	local lit_start = 1
 	local ip = 1  -- current position (1-based)
@@ -250,16 +251,16 @@ function M.compress_block(input)
 		local candidate = ht[h]
 		ht[h] = ip
 
-		local match_len = 0
-		local match_offset = 0
+		local match_len = 0 --: integer
+		local match_offset = 0 --: integer
 
 		if candidate ~= nil and candidate >= 1 and ip - candidate <= 65535 then
 			-- Verify match (at least 4 bytes)
-			local offs = ip - candidate
+			local offs = (ip - candidate) --[[:! integer]]
 			local max_match = n - ip + 1  -- can't go past end of input
-			local ml = 0
+			local ml = 0 --: integer
 			-- Compare bytes
-			local a1, a2 = ip, candidate
+			local a1, a2 = ip, candidate --: integer
 			while ml < max_match do
 				if byte(input, a1 + ml) ~= byte(input, a2 + ml) then break end
 				ml = ml + 1
@@ -306,10 +307,14 @@ local FRAME_BD  = 0x70
 -- HC = (xxhash32(header, 0) >> 8) & 0xFF  where header = FLG..BD
 local function compute_hc(flg, bd)
 	local ok_xxh, xxh = pcall(require, "lib.hash.xxhash")
-	if ok_xxh and xxh.xxh32 then
-		local header_bytes = char(flg, bd)
-		local h = xxh.xxh32(header_bytes, 0)
-		return band(rshift(h, 8), 0xFF)
+	if ok_xxh then
+		local xxh_any = xxh --[[: any]]
+		local xxh_ = xxh_any --[[:! { xxh32: function, ... }]]
+		if xxh_.xxh32 then
+			local header_bytes = char(flg, bd)
+			local h = (xxh_.xxh32(header_bytes, 0) --[[: any]]) --[[:! integer]]
+			return band(rshift(h, 8), 0xFF)
+		end
 	end
 	-- Fallback: hardcoded HC for FLG=0x60, BD=0x70
 	-- xxh32("\x60\x70", 0) = 0x789F73AA → (>> 8) & 0xFF = 0x73
@@ -341,7 +346,7 @@ function M.decompress(data)
 
 	-- Parse FLG byte
 	if ip > len then return nil, "decompress: truncated frame header (FLG)" end
-	local flg = byte(data, ip); ip = ip + 1
+	local flg = byte(data, ip) or 0; ip = ip + 1
 
 	-- Version bits (7-6) must be 01
 	local version = band(rshift(flg, 6), 0x03)
@@ -398,9 +403,9 @@ function M.decompress(data)
 		else
 			local decompressed, err = M.decompress_block(block_data)
 			if decompressed == nil then
-				return nil, "decompress: block decompression failed: " .. err
+				return nil, "decompress: block decompression failed: " .. (err or "")
 			end
-			out_parts[#out_parts + 1] = decompressed
+			out_parts[#out_parts + 1] = decompressed --[[:! string]]
 		end
 	end
 
@@ -416,8 +421,9 @@ function M.compress(input)
 
 	local compressed_block, err = M.compress_block(input)
 	if compressed_block == nil then
-		return nil, "compress: " .. err
+		return nil, "compress: " .. (err or "")
 	end
+	local compressed_block_ = (compressed_block --[[: any]]) --[[:! string]]
 
 	-- Frame header
 	local header = FRAME_MAGIC_BYTES
@@ -426,10 +432,10 @@ function M.compress(input)
 		.. char(FRAME_HC)
 
 	-- Data block: 4-byte LE size + block data
-	local block_size = #compressed_block
+	local block_size = #compressed_block_
 	local frame = header
 		.. write_u32_le(block_size)
-		.. compressed_block
+		.. compressed_block_
 		.. "\x00\x00\x00\x00"  -- end mark
 
 	return frame, nil
