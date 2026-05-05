@@ -155,6 +155,13 @@ last because the type system itself is the testbed.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+36)
+
+- [x] `lib/scrypt/init.lua` (8 → 0, commit 692c395) — annotate to_hex param; N_ math.floor cast; pbkdf2.derive with {alg=nil} opts; (err or "") for nil concat; candidate_/stored_ string casts with byte() or-0
+- [x] `lib/set/init.lua` (13 → 0, commit 692c395) — Set type alias; self_ casts in all methods; { [integer]: string } parts array; tostring --[[:! string]] cast; method annotations include self param; Set.method(self_) direct calls
+- [x] `lib/sat/init.lua` (7 → 0, commit 692c395) — FormulaObj/CnfFormula type aliases; collect_any --[[: any]] intermediate in dpll; self_ casts in Formula methods; c_true_/c_false_ (any)→T casts; nvars integer cast; enc_any for encodings.at_least_one/at_most_one
+- [x] `lib/huffman/init.lua` (19 → 0, commit 692c395) — HuffNode type alias; annotate build_codes_dfs/code_lengths_dfs/pack_bits/entropy/expected_length; pairs_list typed; sort_any for sort comparator; symbols_ any→T cast; freqs_ any intermediate for pairs iteration
+
 ## Done in current session (session N+35)
 
 - [x] `lib/entity_component/init.lua` (7 → 0, commit 61114de) — self_ pattern in entity/destroy/clear/add/remove; sys_ cast for system descriptor in World:run
