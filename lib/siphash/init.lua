@@ -22,14 +22,14 @@ M._tier = "pure"
 
 --:: uint64_t = integer
 
-local U64 = ffi.typeof("uint64_t")
+local U64 = ffi.typeof("uint64_t") --[[: any]]
 
 -- Bitmask for isolating lower 32 bits (used in hash_pair).
 local MASK32 = U64(0xffffffff)
 
 -- Build a uint64_t from two 32-bit halves.
 -- Required for constants > 2^53 (Lua doubles lose precision for large integer literals).
---: (number, number) -> uint64_t
+--: (integer, integer) -> uint64_t
 local function u64(hi32, lo32)
   return U64(hi32) * U64(0x100000000) + U64(lo32)
 end
@@ -39,16 +39,17 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Rotate uint64_t left by n bits.
---: (uint64_t, number) -> uint64_t
+--: (uint64_t, integer) -> uint64_t
 local function rotl64(v, n)
   return bit.bor(bit.lshift(v, n), bit.rshift(v, 64 - n))
 end
 
 -- Read 8 bytes from string s starting at byte index i (1-based), little-endian.
 -- Built from two 32-bit halves to avoid double-precision loss for the high word.
---: (string, number) -> uint64_t
+--: (string, integer) -> uint64_t
 local function read_u64_le(s, i)
-  local b0, b1, b2, b3, b4, b5, b6, b7 = string.byte(s, i, i + 7)
+  local byte_ = string.byte --[[: any]]
+  local b0, b1, b2, b3, b4, b5, b6, b7 = byte_(s, i, i + 7)
   local lo = U64(b0) + U64(b1) * U64(256) + U64(b2) * U64(65536) + U64(b3) * U64(16777216)
   local hi = U64(b4) + U64(b5) * U64(256) + U64(b6) * U64(65536) + U64(b7) * U64(16777216)
   return lo + hi * U64(0x100000000)
@@ -65,10 +66,11 @@ end
 --: (uint64_t) -> string
 local function u64_to_hex_le(v)
   -- Extract 8 bytes in little-endian order.
-  local bytes = {}
+  local bytes = {} --: { [integer]: string }
   local tmp = v
+  local sfmt = string.format --[[: any]]
   for i = 1, 8 do
-    bytes[i] = string.format("%02x", tonumber(bit.band(tmp, U64(0xff))))
+    bytes[i] = sfmt("%02x", tonumber(bit.band(tmp, U64(0xff))) or 0)
     tmp = bit.rshift(tmp, 8)
   end
   return table.concat(bytes)
@@ -189,7 +191,7 @@ function M.hash_hex(key, msg)
   return u64_to_hex_le(h)
 end
 
---: (string, string) -> (table | nil, string)
+--: (string, string) -> ({ lo: number | nil, hi: number | nil } | nil, string | nil)
 function M.hash_pair(key, msg)
   local h, err = siphash(key, msg, 2, 4)
   if not h then return nil, err end
