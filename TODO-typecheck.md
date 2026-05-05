@@ -160,6 +160,13 @@ last because the type system itself is the testbed.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+42)
+
+- [x] `lib/asm/emit/x64.lua` (2 → 0, commit ccd8f68) — any-intermediate for ffi.copy string arg; any→force-cast for ffi.cast return
+- [x] `lib/embed/init.lua` (4 → 0, commit ccd8f68) — Vec alias updated to include [integer]: number indexer to match vec.len signature
+- [x] `lib/fenwick_tree/init.lua` (8 → 0, commit ccd8f68) — BIT/BITOP type aliases; annotated methods; math.floor for integer division; self_ casts via BIT.method(self_) pattern for prototype methods
+- [x] `lib/finance/init.lua` (7 → 0, commit ccd8f68) — collapsed local-then-assign into inline initializer (= 0.0) for all number accumulators
+
 ## Done in current session (session N+41)
 
 - [x] `lib/format/json/ffi.lua` (63 → 0, commit d7c2f20) — ESC_TABLE typed as { [integer]: string | boolean }; upvalue annotations for _ptr8/src/len/pos; any-cast ffi.cast/ffi.string; n force-casts in encode functions; any-intermediate for encode_string call
