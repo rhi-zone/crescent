@@ -160,6 +160,13 @@ last because the type system itself is the testbed.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+44)
+
+- [x] `lib/dsp/init.lua` (28 → 0, commit 4a866af) — preceding-line function annotations for window/filter fns; split `wre, wim = 1.0, 0.0` to annotated locals; BiquadCoeff type alias; b0..a2 as `number | nil` with any-intermediate casts; d1/d2 float accumulators; amplitude_ local for square wave; impulse pos_ and typed result array
+- [x] `lib/command/init.lua` (25 → 0, commit 4a866af) — define HistCmd/HistEntry/HistObj type aliases; annotate push_undo/raw_execute; raw_undo/raw_redo entry_ force-casts; self_ casts in all History prototype methods; any-intermediate for setmetatable return
+- [x] `lib/cron/init.lua` (37 → 0, commit d9810c6) — Expr type alias; FIELD_NAMES/MONTH_NAMES/DOW_NAMES/MONTH_LABELS/DOW_LABELS typed; annotate resolve_name/parse_value; fields/parts as string arrays; self_ + Expr.method() calls in matches_now/next_n; any-intermediate setmetatable
+- [x] `lib/csv_query/init.lua` (28 → 0, commit d9810c6) — DataFrame type alias; new_df/copy_cols/copy_row annotated; pcall csv optional pattern; self_ casts in all 20 DataFrame methods; typed rows/cols accumulators; replace insert() with [#t+1]= for polymorphic insert avoidance
+
 ## Done in current session (session N+43)
 
 - [x] `lib/exec/help.lua` (1 → 0) — `(desc or ""):match(...)` to guard nil desc from try_command_line
