@@ -66,7 +66,6 @@ end
 -- limbs stored as uint64_t.  Value = n0 + n1·2^26 + n2·2^52 + n3·2^78 + n4·2^104.
 -- ---------------------------------------------------------------------------
 
---: (table) -> uint64_t, uint64_t, uint64_t, uint64_t, uint64_t
 local function decode_26(b)
   local n0 = U64(b[1])
     + U64(b[2]) * U64(256)
@@ -213,7 +212,7 @@ end
 -- Returns a context table, or nil+errmsg on bad input.
 -- ---------------------------------------------------------------------------
 
---: (string) -> table | nil, string | nil
+--: (string) -> (table | nil, string | nil)
 local function new_ctx(key)
   if type(key) ~= "string" then
     return nil, "key must be a string"
@@ -250,7 +249,7 @@ end
 local Ctx = {}
 Ctx.__index = Ctx
 
---: (string) -> table | nil, string | nil
+--: (string) -> (table | nil, string | nil)
 function Ctx:update(chunk)
   if self.done then
     return nil, "cannot update a finished context"
@@ -279,7 +278,7 @@ function Ctx:update(chunk)
   return self
 end
 
---: () -> string | nil, string | nil
+--: () -> (string | nil, string | nil)
 function Ctx:finish()
   if self.done then
     return nil, "context already finished"
@@ -307,7 +306,7 @@ end
 
 --- Create a streaming Poly1305 context.
 -- Returns ctx (with :update() / :finish() methods), or nil+errmsg.
---: (string) -> table | nil, string | nil
+--: (string) -> (table | nil, string | nil)
 function M.new(key)
   local ctx, err = new_ctx(key)
   if not ctx then return nil, err end
@@ -317,7 +316,7 @@ end
 
 --- Compute Poly1305 MAC over message with key.
 -- Returns 16-byte binary tag, or nil+errmsg.
---: (string, string) -> string | nil, string | nil
+--: (string, string) -> (string | nil, string | nil)
 function M.auth(key, message)
   if type(message) ~= "string" then
     return nil, "message must be a string"
@@ -330,7 +329,7 @@ function M.auth(key, message)
 end
 
 --- Like auth() but returns a 32-character lowercase hex string.
---: (string, string) -> string | nil, string | nil
+--: (string, string) -> (string | nil, string | nil)
 function M.auth_hex(key, message)
   local tag, err = M.auth(key, message)
   if not tag then return nil, err end

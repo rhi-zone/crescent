@@ -226,7 +226,7 @@ Duration.__tostring = Duration.format
 
 -- ── Duration constructors ─────────────────────────────────────────────────────
 
---: (number, string) -> Duration?, string?
+--: (number, string) -> (Duration | nil, string | nil)
 function M.duration(amount, unit)
   local mul = UNIT_NS[unit]
   if not mul then return nil, "unknown duration unit: " .. tostring(unit) end
@@ -269,7 +269,7 @@ local PARSE_UNIT = {
   ns  = 1,          nanosecond  = 1,         nanoseconds  = 1,
 }
 
---: (string) -> Duration?, string?
+--: (string) -> (Duration | nil, string | nil)
 function M.duration_parse(s)
   if type(s) ~= "string" then return nil, "expected string" end
   local total_ns = 0
@@ -336,7 +336,7 @@ end
 local Timestamp = {}
 Timestamp.__index = Timestamp
 
---: (number, number?) -> Timestamp
+--: (number, number | nil) -> Timestamp
 local function make_ts(sec, ns)
   ns = ns or 0
   -- normalise: _ns must be in [0, NS_PER_S)
@@ -481,7 +481,7 @@ local function ymd_to_days(y, mo, d)
   return era * 146097 + doe - 719468
 end
 
---: (string) -> Timestamp?, string?
+--: (string) -> (Timestamp | nil, string | nil)
 function M.parse_rfc3339(s)
   if type(s) ~= "string" then return nil, "expected string" end
   -- Full: 2024-01-15T10:30:00Z  or  2024-01-15T10:30:00+05:30

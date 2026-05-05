@@ -58,7 +58,7 @@ local function u32(v)
 	return v
 end
 
---: (data: string, seed: number?) -> number
+--: (data: string, seed: number | nil) -> number
 function M.xxh32(data, seed)
 	seed = tobit(seed or 0)
 	local len = #data
@@ -304,7 +304,7 @@ if ffi_ok then
 		return to_hex64(avalanche64(h))
 	end
 
-	--: (data: string, seed: number?) -> string
+	--: (data: string, seed: number | nil) -> string
 	M.xxh64 = xxh64_oneshot
 
 	-- ── xxHash64 streaming ──────────────────────────────────────────────────

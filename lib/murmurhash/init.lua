@@ -131,7 +131,7 @@ local C3_128x86 = 0x38b34ae5
 local C4_128x86 = 0xa1e38b93
 
 -- Returns h1, h2, h3, h4 as four 32-bit integers.
---: (string, integer | nil) -> integer, integer, integer, integer
+--: (string, integer | nil) -> (integer, integer, integer, integer)
 function M.x86_128(key, seed)
   if type(key) ~= "string" then
     return nil, "key must be a string"

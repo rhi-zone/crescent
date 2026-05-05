@@ -166,7 +166,6 @@ end
 -- The 26-bit limb boundaries fall at bits 0,26,52,78,104, which straddle byte
 -- boundaries — each limb overlaps two bytes at its edges.
 -- b[1..16]: the 16 message/key bytes; any high bit is added by the caller.
---: (table) -> uint64_t, uint64_t, uint64_t, uint64_t, uint64_t
 local function decode_26(b)
   -- n0: bits  0..25 — all of b[1..3], bottom 2 bits of b[4].
   local n0 = U64(b[1])
@@ -330,7 +329,7 @@ end
 -- Input validation
 -- ---------------------------------------------------------------------------
 
---: (string, string, string | nil, number | nil) -> boolean | nil, string | nil
+--: (string, string, string | nil, number | nil) -> (boolean | nil, string | nil)
 local function validate(key, nonce, msg, counter)
   if type(key) ~= "string" or #key ~= 32 then
     return nil, "key must be a 32-byte string"
@@ -370,7 +369,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- ChaCha20 encrypt (counter defaults to 1 per RFC 7539 §2.4).
---: (string, string, string, number | nil) -> string | nil, string | nil
+--: (string, string, string, number | nil) -> (string | nil, string | nil)
 function M.encrypt(key, nonce, plaintext, counter)
   local ok, err = validate(key, nonce, plaintext, counter)
   if not ok then return nil, err end
@@ -378,7 +377,7 @@ function M.encrypt(key, nonce, plaintext, counter)
 end
 
 -- ChaCha20 decrypt (identical to encrypt — XOR is its own inverse).
---: (string, string, string, number | nil) -> string | nil, string | nil
+--: (string, string, string, number | nil) -> (string | nil, string | nil)
 function M.decrypt(key, nonce, ciphertext, counter)
   local ok, err = validate(key, nonce, ciphertext, counter)
   if not ok then return nil, err end
@@ -386,7 +385,7 @@ function M.decrypt(key, nonce, ciphertext, counter)
 end
 
 -- Generate n bytes of raw keystream (counter defaults to 0).
---: (string, string, number, number | nil) -> string | nil, string | nil
+--: (string, string, number, number | nil) -> (string | nil, string | nil)
 function M.keystream(key, nonce, n, counter)
   local ok, err = validate(key, nonce, nil, counter)
   if not ok then return nil, err end
@@ -398,7 +397,7 @@ function M.keystream(key, nonce, n, counter)
 end
 
 -- ChaCha20-Poly1305 AEAD encrypt (RFC 7539 §2.6).
---: (string, string, string, string | nil) -> string | nil, string | nil
+--: (string, string, string, string | nil) -> (string | nil, string | nil)
 function M.aead_encrypt(key, nonce, plaintext, aad)
   local ok, err = validate(key, nonce, plaintext, nil)
   if not ok then return nil, err end
@@ -414,7 +413,7 @@ function M.aead_encrypt(key, nonce, plaintext, aad)
 end
 
 -- ChaCha20-Poly1305 AEAD decrypt and verify (RFC 7539 §2.6).
---: (string, string, string, string | nil) -> string | nil, string | nil
+--: (string, string, string, string | nil) -> (string | nil, string | nil)
 function M.aead_decrypt(key, nonce, ciphertext_with_tag, aad)
   local ok, err = validate(key, nonce, ciphertext_with_tag, nil)
   if not ok then return nil, err end

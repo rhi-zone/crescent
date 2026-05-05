@@ -556,6 +556,15 @@ function Lexer:_read_number()
     if self.b == EOF then
         str = ffi.string(self.src + start, self.srclen - start)
     end
+    -- Strip LuaJIT integer suffixes (ULL, LL, UL, L, case-insensitive)
+    -- e.g. 0x1ULL, 255ULL, 0xFF00LL
+    do
+        local s = str --: string
+        s = (string.gsub(s, "[Uu][Ll][Ll]$", ""))
+        s = (string.gsub(s, "[Ll][Ll]$", ""))
+        s = (string.gsub(s, "[Uu][Ll]$", ""))
+        str = (string.gsub(s, "[Ll]$", ""))
+    end
     local xraw = tonumber(str)
     if not xraw then self:error("malformed number") end
     return xraw or 0
