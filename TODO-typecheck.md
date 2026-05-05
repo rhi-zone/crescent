@@ -155,6 +155,14 @@ last because the type system itself is the testbed.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+38)
+
+- [x] `lib/linux/proc.lua` (1 → 0, commit b85823c) — inline ret initialization to avoid shape mismatch on reassignment
+- [x] `lib/mimetype/init.lua` (2 → 0, commit b85823c) — any-cast by_name.mimetype to bypass $PatternReturn mismatch
+- [x] `lib/path/init.lua` (11 → 0, commit b85823c) — annotate norm_seps/to_native/splitdrive/is_abs_norm; cast package.config; typed stack; typed all_parts locals in commonpath
+- [x] `lib/merge3/init.lua` (20 → 0, commit b85823c) — annotate split_lines/v/sv/trace/steps/script/hunks; or-0 for vkm1/vkp1; off_ locals to avoid never-narrowing after == 0 guard; ScriptEntry/Hunk type aliases
+- [x] `lib/pkg/manifest.lua` (9 → 0, commit b85823c) — ManifestTbl type alias; annotate load/write/validate; ternary key_str; cast description/license after nil-check; regs_ local for registries
+
 ## Done in current session (session N+37)
 
 - [x] `lib/toml/init.lua` (8 → 0, commit df46d95) — (byte(s,pos) or 0) --[[:! integer]] in skip_ws/skip_ws_and_newlines/skip_to_newline/parse_simple_key/needs_basic_quote/escape_basic_string/quote_key
