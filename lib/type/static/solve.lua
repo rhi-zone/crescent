@@ -1688,6 +1688,25 @@ local function solve_compare(ctx, c)
             if k == LIT_NUMBER or k == LIT_INTEGER then return "number" end
             if k == LIT_STRING then return "string" end
         end
+        -- TAG_UNION: orderable iff every arm is orderable and they agree on the
+        -- kind ("number" vs "string").  A phi-join of two integer branches can
+        -- produce an `integer | integer` union (different unresolved TAG_VAR IDs
+        -- that both resolve to T_INTEGER after solving); without this branch,
+        -- such unions would always produce a false "cannot compare" error.
+        if t.tag == TAG_UNION then
+            local kind = nil  -- "number" or "string" once determined
+            for i = t.data[0], t.data[0] + t.data[1] - 1 do
+                -- lists:get returns unknown in non-self-check mode; cast to integer
+                -- so the recursive call doesn't widen is_orderable's tid parameter type.
+                local mk = is_orderable(ctx, ctx.lists:get(i) --[[:! integer]])
+                if mk == false then return false end  -- non-orderable arm
+                if mk == true then return true end    -- any/unknown/var arm → defer to caller
+                -- mk is "number" or "string"
+                if kind == nil then kind = mk
+                elseif kind ~= mk then return false end  -- mixed number/string
+            end
+            return kind or false  -- empty union → false
+        end
         return false
     end
 

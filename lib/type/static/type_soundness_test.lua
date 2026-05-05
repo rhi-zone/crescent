@@ -3623,3 +3623,60 @@ local x = 3.14
 ]])
     end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Phi-join union normalization (integer|integer should not cause errors)
+-- ---------------------------------------------------------------------------
+assert.describe("phi-join: branch merge produces correct types", function()
+    assert.it("comparison after if/else phi-join: integer|integer < integer is valid", function()
+        -- Two branches both assign integer results via arithmetic.
+        -- The phi-join creates an `integer | integer` union (two different
+        -- unresolved TAG_VAR nodes both resolving to T_INTEGER).
+        -- Comparison on this union must succeed (not error with
+        -- "cannot compare `integer | integer` with `<`").
+        no_errors([[
+local a = 0
+local b = 0
+if true then
+  a = a + 1
+  b = b + 1
+else
+  a = a + 2
+  b = b + 2
+end
+local c = a < b
+local d = a <= b
+local e = b > a
+]])
+    end)
+
+    assert.it("arithmetic after if/else phi-join: integer|integer + integer is valid", function()
+        no_errors([[
+local a = 0
+local b = 0
+if true then
+  a = a + 1
+  b = b + 1
+else
+  a = a + 2
+  b = b + 2
+end
+local c = a + b
+local d = a * b
+local e = a - b
+]])
+    end)
+
+    assert.it("phi-join display: integer|integer union collapses in display", function()
+        -- After normalize_unions, both members resolve to the same T_INTEGER.
+        -- The display should not show `integer | integer`.
+        -- We verify indirectly: if the union caused a comparison error, it would
+        -- display as `integer | integer`; the no_errors check confirms it does not.
+        no_errors([[
+local x = 0
+if true then x = x + 1 else x = x + 2 end
+local y = x < 5
+local z = x + 1
+]])
+    end)
+end)

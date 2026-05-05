@@ -20,6 +20,13 @@ local M = {}
 local function run_v3(source, filename, parent_scope, pool, cri_loader, opts)
     local ctx, constraints = constrain_mod.generate(source, filename, parent_scope, pool, cri_loader, opts)
     solve_mod.solve(ctx, constraints)
+    -- Post-solve normalization: rebuild union member lists using resolved type IDs,
+    -- deduplicating members that were structurally equal after solving.  This fixes
+    -- the phi-join artifact where two branches producing the same primitive type
+    -- (e.g. both `integer`) via different unresolved TAG_VAR nodes end up as an
+    -- `integer | integer` union.  Must run after solve so that union-find chains
+    -- are fully resolved.
+    types_mod.normalize_unions(ctx)
     return ctx.err, ctx
 end
 
@@ -204,6 +211,14 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
         end
     end
 
+    -- Whether any dep returned nil due to a circular dependency during this check.
+    -- When true, the result is "tainted" (some types are unknown) and must not be
+    -- written to the disk cache — a cached tainted result would be returned on the
+    -- next check of the same file even when the circular dep is absent, producing
+    -- spurious errors.  The session cache is still populated so the current
+    -- multi-file session can proceed without re-running the check.
+    local had_circular_dep = false
+
     -- Build a cri_loader for require() type resolution.
     -- Recursively checks dependencies and caches their export types.
     -- Also records the source hash of each resolved dep into dep_hashes.
@@ -231,7 +246,7 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
         end
 
         -- Guard: skip if the dependency is currently being checked (cycle prevention).
-        if _checking[dep_path] then return nil end
+        if _checking[dep_path] then had_circular_dep = true; return nil end
 
         -- Check session cache first.
         -- Type IDs are arena-local: never return a dep_ctx type ID directly.
@@ -386,7 +401,10 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
         local ok_ser, cri_bytes = pcall(cri_write.serialize, ctx, exp_map, alias_list, diags)
         if ok_ser then
             cri_bytes_stored = cri_bytes
-            if src_hash then
+            -- Skip disk cache write when a circular dep was encountered: the result
+            -- contains unknown types for the circular dep's module, so caching it
+            -- would poison subsequent checks of the same file in non-circular contexts.
+            if src_hash and not had_circular_dep then
                 cache_mod.store(src_hash, cri_bytes, dep_hashes)
             end
         end

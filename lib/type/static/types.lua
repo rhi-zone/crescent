@@ -738,6 +738,84 @@ union_has = function(ctx, flat, tid)
     return false
 end
 
+-- Post-solve normalization: rebuild all union nodes so their member lists use
+-- resolved (find()ed) type IDs and have duplicates removed.  Called once after
+-- solve.solve() finishes, before any diagnostics are emitted.
+--
+-- Why this is needed: the phi-join during constraint generation calls make_union
+-- with fresh unresolved TAG_VAR nodes (e.g. the result vars of C_ARITH
+-- constraints that haven't been solved yet).  Two vars that both eventually
+-- resolve to the same primitive (e.g. T_INTEGER) are not structurally equal at
+-- construction time (different data[0] unique IDs), so both end up in the union
+-- list.  After solving they both chain to the same root via union-find, but the
+-- list stored in the union node still holds the original var IDs.
+--
+-- Normalization: for each TAG_UNION node, rebuild its member list by following
+-- find() on every slot and deduplicating with struct_equal (which also calls
+-- find()).  If two members resolve to the same root ID, only one is kept.
+--
+-- The rebuilt list is appended to the list pool (append-only), and the union
+-- node's data[0]/data[1] pointers are updated in-place.  A union that collapses
+-- to one element is left as a 1-slot TAG_UNION rather than being converted to a
+-- redirect, because the arena does not support tag changes (other nodes hold the
+-- union's ID and expect TAG_UNION).  All downstream code that iterates union
+-- members handles 1-element unions correctly.
+--: (Ctx) -> ()
+function M.normalize_unions(ctx)
+    --: integer
+    local type_count = ctx.types.len
+    -- Iterate all type nodes except singletons 0-7.
+    --: integer
+    local uid = 8
+    while uid < type_count do
+        --: TypeSlot
+        local ut = ctx.types:get(uid)
+        if ut.tag == TAG_UNION then
+            --: integer
+            local us = ut.data[0]
+            --: integer
+            local ul = ut.data[1]
+            -- Build a deduplicated flat list using resolved member IDs.
+            --: { [integer]: integer, ... }
+            local flat = {}
+            for uj = us, us + ul - 1 do
+                --: integer
+                local umid = M.find(ctx, ctx.lists:get(uj) --[[:! integer]])
+                --: TypeSlot
+                local umt = ctx.types:get(umid)
+                if umt.tag ~= TAG_NEVER
+                   and not union_has(ctx, flat, umid)
+                   and not flat_has_supertype(ctx, flat, umid) then
+                    remove_subsumed(ctx, flat, umt.tag)
+                    flat[#flat + 1] = umid
+                end
+            end
+            -- Only rewrite the list when something actually changed.
+            local changed = (#flat ~= ul)
+            if not changed then
+                for ui = 1, ul do
+                    if flat[ui] ~= M.find(ctx, ctx.lists:get(us + ui - 1) --[[:! integer]]) then
+                        changed = true; break
+                    end
+                end
+            end
+            if changed then
+                --: integer
+                local um = ctx.lists:mark()
+                for _, ufid in ipairs(flat) do ctx.lists:push(ufid) end
+                local ums, uml = ctx.lists:since(um)
+                -- Re-fetch ut: lists:push may grow the list pool which could
+                -- trigger a realloc, but the type arena is separate so ut is
+                -- still valid.  Nonetheless, re-fetch for safety.
+                ut = ctx.types:get(uid)
+                ut.data[0] = ums
+                ut.data[1] = uml
+            end
+        end
+        uid = uid + 1
+    end
+end
+
 -- Look up a named field in a table type. Returns (FieldEntry*, field_arena_id) or nil.
 -- Skips opaque-key fields (FLAG_OPAQUE_KEY): those are matched by opaque key lookup, not by name.
 --: (Ctx, integer, integer) -> (FieldEntry | nil, integer | nil)
@@ -776,14 +854,17 @@ function M.table_meta_field(ctx, tbl_tid, name_id)
     local t = ctx.types:get(tbl_tid)
     for i = t.data[5], t.data[5] + t.data[6] - 1 do
         local fid = ctx.lists:get(i)
-        local fe = ctx.fields:get(fid)
+        --: FieldEntry
+        local fe = ctx.fields:get(fid) --[[:! FieldEntry]]
         if fe.name_id == name_id then return fe, fid end
         if fe.name_id == -1 then
             -- Spread placeholder: resolve the inner type and search its meta slots.
-            local sp_t  = ctx.types:get(M.find(ctx, fe.type_id))
+            --: TypeSlot
+            local sp_t  = ctx.types:get(M.find(ctx, fe.type_id)) --[[:! TypeSlot]]
             if sp_t.tag == TAG_SPREAD then
                 local inner_tid = M.find(ctx, sp_t.data[0])
-                local inner_t   = ctx.types:get(inner_tid)
+                --: TypeSlot
+                local inner_t   = ctx.types:get(inner_tid) --[[:! TypeSlot]]
                 if inner_t.tag == TAG_TABLE then
                     local found_fe, found_fid = M.table_meta_field(ctx, inner_tid, name_id)
                     if found_fe then return found_fe, found_fid end
@@ -1044,8 +1125,11 @@ function M.display(ctx, tid, seen)
 
     if tag == TAG_UNION then
         local parts = {}
+        --: { [string]: boolean, ... }
+        local dedup = {}
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            parts[#parts + 1] = M.display(ctx, ctx.lists:get(i), seen)
+            local s = M.display(ctx, ctx.lists:get(i), seen)
+            if not dedup[s] then dedup[s] = true; parts[#parts + 1] = s end
         end
         return table.concat(parts, " | ")
     end
