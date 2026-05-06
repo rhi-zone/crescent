@@ -46,9 +46,9 @@ local FUNS = {
   floor = math.floor,
   ceil  = math.ceil,
   round = function(x) return math.floor(x + 0.5) end,
-}
+} --[[:! { [string]: function }]]
 
-local CONSTS = { pi = math.pi, e = math.exp(1) } --: { [string]: number }
+local CONSTS = { pi = math.pi, e = math.exp(1) } --[[:! { [string]: number }]]
 
 -- ─── lexer ─────────────────────────────────────────────────────────────────
 
@@ -56,7 +56,19 @@ local CONSTS = { pi = math.pi, e = math.exp(1) } --: { [string]: number }
 -- Each token: {type, value, pos}
 
 --:: Token = { type: string, value: unknown, pos: integer }
---:: Expr = { op: string, ... }
+--:: ExprNum     = { op: "num",     value: number }
+--:: ExprVar     = { op: "var",     name: string }
+--:: ExprCall    = { op: "call",    name: string, args: Expr[] }
+--:: ExprNeg     = { op: "neg",     arg: Expr }
+--:: ExprAdd     = { op: "add",     left: Expr, right: Expr }
+--:: ExprSub     = { op: "sub",     left: Expr, right: Expr }
+--:: ExprMul     = { op: "mul",     left: Expr, right: Expr }
+--:: ExprDiv     = { op: "div",     left: Expr, right: Expr }
+--:: ExprPow     = { op: "pow",     left: Expr, right: Expr }
+--:: ExprMod     = { op: "mod",     left: Expr, right: Expr }
+--:: ExprCmp     = { op: "cmp",     cmp: string, left: Expr, right: Expr }
+--:: ExprTernary = { op: "ternary", cond: Expr, then_: Expr, else_: Expr }
+--:: Expr = ExprNum | ExprVar | ExprCall | ExprNeg | ExprAdd | ExprSub | ExprMul | ExprDiv | ExprPow | ExprMod | ExprCmp | ExprTernary
 
 local function lex(src)
   local tokens = --[[:! Token[] ]] {}
@@ -308,85 +320,99 @@ end
 
 -- ─── evaluator ─────────────────────────────────────────────────────────────
 
+local eval_ast
 --: (Expr, { [string]: number } | nil) -> (number | nil, string | nil)
-local function eval_ast(ast, env)
-  local op = ast.op
-  if op == "num" then
-    return ast.value --[[:! number]]
-  elseif op == "var" then
-    local name = ast.name --[[:! string]]
-    local cv = CONSTS[name] --: number | nil
-    if cv then return cv end
-    if env then
-      local ev = env[name]
-      if ev ~= nil then return ev end
-    end
+eval_ast = function(ast, env)
+  if ast.op == "num" then
+    return ast.value
+  elseif ast.op == "var" then
+    local name = ast.name
+    if CONSTS[name] then return CONSTS[name] end
+    if env and env[name] ~= nil then return env[name] end
     return nil, "undefined variable '" .. name .. "'"
-  elseif op == "call" then
-    local fn = FUNS[ast.name --[[:! string]]]
-    if not fn then return nil, "unknown function '" .. (ast.name --[[:! string]]) .. "'" end
-    local vals = {} --: { [integer]: number }
-    local args = ast.args --[[:! { [integer]: Expr }]]
-    for i, a in ipairs(args) do
+  elseif ast.op == "call" then
+    local fn = FUNS[ast.name]
+    if not fn then return nil, "unknown function '" .. ast.name .. "'" end
+    local vals = {} --[[:! { [integer]: number, ... }]]
+    for i, a in ipairs(ast.args) do
       local v, err = eval_ast(a, env)
       if v == nil then return nil, err end
       vals[i] = v --[[:! number]]
     end
-    local fn_ = fn --[[:! (...number) -> number]]
-    return fn_(unpack(vals))
-  elseif op == "neg" then
-    local v, err = eval_ast(ast.arg --[[:! Expr]], env)
+    return fn(unpack(vals))
+  elseif ast.op == "neg" then
+    local v, err = eval_ast(ast.arg, env)
     if v == nil then return nil, err end
-    local v_ = v --[[:! number]]
-    return -v_
-  elseif op == "add" or op == "sub" or op == "mul" or op == "div" or
-         op == "pow" or op == "mod" then
-    local l, err = eval_ast(ast.left --[[:! Expr]], env)
+    return -(v --[[:! number]])
+  elseif ast.op == "add" then
+    local l, err = eval_ast(ast.left, env)
     if l == nil then return nil, err end
-    local l_ = l --[[:! number]]
-    local r, rerr = eval_ast(ast.right --[[:! Expr]], env)
+    local r, rerr = eval_ast(ast.right, env)
     if r == nil then return nil, rerr end
-    local r_ = r --[[:! number]]
-    if op == "add" then return l_ + r_
-    elseif op == "sub" then return l_ - r_
-    elseif op == "mul" then return l_ * r_
-    elseif op == "div" then return l_ / r_
-    elseif op == "pow" then return l_ ^ r_
-    elseif op == "mod" then return l_ % r_
-    end
-  elseif op == "cmp" then
-    local l, err = eval_ast(ast.left --[[:! Expr]], env)
+    return (l --[[:! number]]) + (r --[[:! number]])
+  elseif ast.op == "sub" then
+    local l, err = eval_ast(ast.left, env)
     if l == nil then return nil, err end
-    local l_ = l --[[:! number]]
-    local r, rerr = eval_ast(ast.right --[[:! Expr]], env)
+    local r, rerr = eval_ast(ast.right, env)
     if r == nil then return nil, rerr end
-    local r_ = r --[[:! number]]
-    local cmp = ast.cmp --[[:! string]]
-    local result --: boolean | nil
-    if cmp == "<"  then result = l_ < r_
-    elseif cmp == "<=" then result = l_ <= r_
-    elseif cmp == ">"  then result = l_ > r_
-    elseif cmp == ">=" then result = l_ >= r_
-    elseif cmp == "==" then result = l_ == r_
-    elseif cmp == "!=" then result = l_ ~= r_
+    return (l --[[:! number]]) - (r --[[:! number]])
+  elseif ast.op == "mul" then
+    local l, err = eval_ast(ast.left, env)
+    if l == nil then return nil, err end
+    local r, rerr = eval_ast(ast.right, env)
+    if r == nil then return nil, rerr end
+    return (l --[[:! number]]) * (r --[[:! number]])
+  elseif ast.op == "div" then
+    local l, err = eval_ast(ast.left, env)
+    if l == nil then return nil, err end
+    local r, rerr = eval_ast(ast.right, env)
+    if r == nil then return nil, rerr end
+    return (l --[[:! number]]) / (r --[[:! number]])
+  elseif ast.op == "pow" then
+    local l, err = eval_ast(ast.left, env)
+    if l == nil then return nil, err end
+    local r, rerr = eval_ast(ast.right, env)
+    if r == nil then return nil, rerr end
+    return (l --[[:! number]]) ^ (r --[[:! number]])
+  elseif ast.op == "mod" then
+    local l, err = eval_ast(ast.left, env)
+    if l == nil then return nil, err end
+    local r, rerr = eval_ast(ast.right, env)
+    if r == nil then return nil, rerr end
+    return (l --[[:! number]]) % (r --[[:! number]])
+  elseif ast.op == "cmp" then
+    local l, err = eval_ast(ast.left, env)
+    if l == nil then return nil, err end
+    local r, rerr = eval_ast(ast.right, env)
+    if r == nil then return nil, rerr end
+    local lv = l --[[:! number]]
+    local rv = r --[[:! number]]
+    local cmp = ast.cmp
+    local result
+    if cmp == "<"  then result = lv < rv
+    elseif cmp == "<=" then result = lv <= rv
+    elseif cmp == ">"  then result = lv > rv
+    elseif cmp == ">=" then result = lv >= rv
+    elseif cmp == "==" then result = lv == rv
+    elseif cmp == "!=" then result = lv ~= rv
     end
     return result and 1 or 0
-  elseif op == "ternary" then
-    local c, err = eval_ast(ast.cond --[[:! Expr]], env)
+  elseif ast.op == "ternary" then
+    local c, err = eval_ast(ast.cond, env)
     if c == nil then return nil, err end
     if c ~= 0 then
-      return eval_ast(ast.then_ --[[:! Expr]], env)
+      return eval_ast(ast.then_, env)
     else
-      return eval_ast(ast.else_ --[[:! Expr]], env)
+      return eval_ast(ast.else_, env)
     end
   end
-  return nil, "unknown AST op '" .. tostring(op) .. "'"
+  return nil, "unknown AST op '" .. tostring(ast.op) .. "'"
 end
 
 -- ─── to_string ─────────────────────────────────────────────────────────────
 
 -- Operator precedence for parenthesisation
-local PREC = { --: { [string]: integer }
+local PREC = {
   ternary = 1,
   cmp     = 2,
   add     = 3, sub = 3,
@@ -394,134 +420,113 @@ local PREC = { --: { [string]: integer }
   pow     = 6,
   neg     = 5,
   num     = 10, var = 10, call = 10,
-}
+} --[[:! { [string]: integer }]]
 
+local to_string
 --: (Expr, integer, boolean) -> string
-local function to_string(ast, parent_prec, is_right)
-  local op = ast.op
-  if op == "num" then
-    local v = ast.value --[[:! number]]
+to_string = function(ast, parent_prec, is_right)
+  if ast.op == "num" then
+    local v = ast.value
     if v == math.floor(v) and math.abs(v) < 1e15 then
       return tostring(math.floor(v))
     end
     return tostring(v)
-  elseif op == "var" then
-    return ast.name --[[:! string]]
-  elseif op == "call" then
-    local args_ = ast.args --[[:! { [integer]: Expr }]]
-    local args = {} --: { [integer]: string }
-    for _, a in ipairs(args_) do table.insert(args, to_string(a, 0, false)) end
-    return (ast.name --[[:! string]]) .. "(" .. table.concat(args, ", ") .. ")"
-  elseif op == "neg" then
-    local arg_ = ast.arg --[[:! Expr]]
-    local inner = to_string(arg_, PREC.neg, false)
+  elseif ast.op == "var" then
+    return ast.name
+  elseif ast.op == "call" then
+    local args = {}
+    for i, a in ipairs(ast.args) do args[i] = to_string(a, 0, false) end
+    return ast.name .. "(" .. table.concat(args, ", ") .. ")"
+  elseif ast.op == "neg" then
+    local inner = to_string(ast.arg, PREC.neg, false)
     -- wrap if inner has lower precedence
-    local arg_prec = PREC[arg_.op] --: integer | nil
+    local arg_prec = PREC[ast.arg.op]
     if arg_prec and arg_prec < PREC.neg then
       inner = "(" .. inner .. ")"
     end
     return "-" .. inner
-  elseif op == "add" or op == "sub" or op == "mul" or op == "div" or
-         op == "mod" or op == "pow" then
-    local syms = {add="+", sub="-", mul="*", div="/", mod="%", pow="^"}
-    local prec = PREC[op] --[[:! integer]]
-    local left_ = ast.left --[[:! Expr]]
-    local right_ = ast.right --[[:! Expr]]
-    local ls = to_string(left_,  prec, false)
-    local rs = to_string(right_, prec, true)
+  elseif ast.op == "add" or ast.op == "sub" or ast.op == "mul" or ast.op == "div" or
+         ast.op == "mod" or ast.op == "pow" then
+    local b = ast --[[:! ExprAdd]]
+    local op = b.op
+    local prec = PREC[op] or 0
+    local left = b.left
+    local right = b.right
+    local ls = to_string(left,  prec, false)
+    local rs = to_string(right, prec, true)
     -- parenthesise left if strictly lower precedence
-    local lprec = PREC[left_.op] --: integer | nil
+    local lprec = PREC[left.op]
     if lprec and lprec < prec then
       ls = "(" .. ls .. ")"
     end
     -- parenthesise right if:
     --   lower precedence, OR same prec and left-assoc op on right of left-assoc
-    local rprec = PREC[right_.op] --: integer | nil
+    local rprec = PREC[right.op]
     if rprec then
       local need_paren = rprec < prec
       -- for left-assoc ops, same-prec right child needs parens (e.g. a-(b+c))
       if op ~= "pow" and rprec == prec then need_paren = true end
       if need_paren then rs = "(" .. rs .. ")" end
     end
-    local sym = syms[op] --[[:! string]]
+    local sym = op == "add" and "+" or op == "sub" and "-" or op == "mul" and "*"
+             or op == "div" and "/" or op == "mod" and "%" or "^"
     return ls .. " " .. sym .. " " .. rs
-  elseif op == "cmp" then
-    local l = to_string(ast.left --[[:! Expr]],  PREC.cmp, false)
-    local r = to_string(ast.right --[[:! Expr]], PREC.cmp, true)
-    return l .. " " .. (ast.cmp --[[:! string]]) .. " " .. r
-  elseif op == "ternary" then
-    local c = to_string(ast.cond --[[:! Expr]],  PREC.ternary, false)
-    local t = to_string(ast.then_ --[[:! Expr]], PREC.ternary, false)
-    local e = to_string(ast.else_ --[[:! Expr]], PREC.ternary, true)
+  elseif ast.op == "cmp" then
+    local l = to_string(ast.left,  PREC.cmp, false)
+    local r = to_string(ast.right, PREC.cmp, true)
+    return l .. " " .. ast.cmp .. " " .. r
+  elseif ast.op == "ternary" then
+    local c = to_string(ast.cond,  PREC.ternary, false)
+    local t = to_string(ast.then_, PREC.ternary, false)
+    local e = to_string(ast.else_, PREC.ternary, true)
     return c .. " ? " .. t .. " : " .. e
   end
   return "<?>"
 end
 
--- ─── symbolic helpers (used by simplify and diff) ─────────────────────────
-
---: (number) -> Expr
-local function make_num(v) return --[[:! Expr]] {op="num", value=v} end
-local ZERO = make_num(0)
-local ONE  = make_num(1)
-
---: (Expr, Expr) -> Expr
-local function make_add(a, b) return --[[:! Expr]] {op="add", left=a, right=b} end
---: (Expr, Expr) -> Expr
-local function make_sub(a, b) return --[[:! Expr]] {op="sub", left=a, right=b} end
---: (Expr, Expr) -> Expr
-local function make_mul(a, b) return --[[:! Expr]] {op="mul", left=a, right=b} end
---: (Expr, Expr) -> Expr
-local function make_div(a, b) return --[[:! Expr]] {op="div", left=a, right=b} end
---: (Expr, Expr) -> Expr
-local function make_pow(a, b) return --[[:! Expr]] {op="pow", left=a, right=b} end
---: (Expr) -> Expr
-local function make_neg(a)    return --[[:! Expr]] {op="neg", arg=a} end
---: (string, { [integer]: Expr }) -> Expr
-local function make_call(name, args) return --[[:! Expr]] {op="call", name=name, args=args} end
-
 -- ─── simplify ──────────────────────────────────────────────────────────────
 -- Constant folding: if all children evaluate to numbers, replace with num node.
 
+local simplify
 --: (Expr) -> Expr
-local function simplify(ast)
-  local op = ast.op
-  if op == "num" or op == "var" then return ast end
+simplify = function(ast)
+  if ast.op == "num" or ast.op == "var" then return ast --[[:! Expr]] end
 
-  if op == "neg" then
-    local a = simplify(ast.arg --[[:! Expr]])
-    if a.op == "num" then return make_num(-(a.value --[[:! number]])) end
-    return make_neg(a)
-  elseif op == "call" then
-    local ast_args = ast.args --[[:! { [integer]: Expr }]]
-    local args = {} --: { [integer]: Expr }
+  if ast.op == "neg" then
+    local a = simplify(ast.arg)
+    if a.op == "num" then return {op="num", value=-a.value} --[[:! Expr]] end
+    return {op="neg", arg=a} --[[:! Expr]]
+  elseif ast.op == "call" then
+    local args = ast.args  -- simplified args array, will be filled by simplifying
+    local sargs = {} --[[:! Arr<Expr>]]
     local all_num = true
-    local nargs = 0
-    for _, a in ipairs(ast_args) do
-      nargs = nargs + 1
-      local sa = simplify(a)
-      rawset(args, nargs, sa)
-      if sa.op ~= "num" then all_num = false end
+    for i, a in ipairs(args) do
+      local ae = a --[[:! Expr]]
+      sargs[i] = simplify(ae)
+      if sargs[i].op ~= "num" then all_num = false end
     end
     if all_num then
-      local fn = FUNS[ast.name --[[:! string]]]
+      local fn = FUNS[ast.name]
       if fn then
-        local vals = {} --: { [integer]: number }
-        for i, a in ipairs(args) do vals[i] = a.value --[[:! number]] end
-        local fn_ = fn --[[:! (...number) -> number]]
-        local v = fn_(unpack(vals))
-        return make_num(v)
+        local vals = {} --[[:! { [integer]: number, ... }]]
+        for i, a in ipairs(sargs) do
+          local ae = a --[[:! Expr]]
+          if ae.op == "num" then vals[i] = ae.value end
+        end
+        local v = fn(unpack(vals))
+        return {op="num", value=v} --[[:! Expr]]
       end
     end
-    return make_call(ast.name --[[:! string]], args)
-  elseif op == "add" or op == "sub" or op == "mul" or op == "div" or
-         op == "pow" or op == "mod" then
-    local l = simplify(ast.left --[[:! Expr]])
-    local r = simplify(ast.right --[[:! Expr]])
+    return {op="call", name=ast.name, args=sargs} --[[:! Expr]]
+  elseif ast.op == "add" or ast.op == "sub" or ast.op == "mul" or ast.op == "div" or
+         ast.op == "pow" or ast.op == "mod" then
+    local b = ast --[[:! ExprAdd]]
+    local op = b.op
+    local l = simplify(b.left)
+    local r = simplify(b.right)
     if l.op == "num" and r.op == "num" then
-      local lv = l.value --[[:! number]]
-      local rv = r.value --[[:! number]]
-      local v = 0 --: number
+      local lv, rv = l.value, r.value
+      local v = 0
       if op == "add" then v = lv + rv
       elseif op == "sub" then v = lv - rv
       elseif op == "mul" then v = lv * rv
@@ -529,36 +534,35 @@ local function simplify(ast)
       elseif op == "pow" then v = lv ^ rv
       elseif op == "mod" then v = lv % rv
       end
-      return make_num(v)
+      return {op="num", value=v} --[[:! Expr]]
     end
     -- algebraic identities
-    local lnum = l.op == "num" and (l.value --[[:! number]]) or nil --: number | nil
-    local rnum = r.op == "num" and (r.value --[[:! number]]) or nil --: number | nil
+    local lval = l.op == "num" and l.value or nil
+    local rval = r.op == "num" and r.value or nil
     if op == "mul" then
-      if lnum == 0 or rnum == 0 then return make_num(0) end
-      if lnum == 1 then return r end
-      if rnum == 1 then return l end
+      if lval == 0 or rval == 0 then return {op="num", value=0} --[[:! Expr]] end
+      if lval == 1 then return r --[[:! Expr]] end
+      if rval == 1 then return l --[[:! Expr]] end
     elseif op == "add" then
-      if lnum == 0 then return r end
-      if rnum == 0 then return l end
+      if lval == 0 then return r --[[:! Expr]] end
+      if rval == 0 then return l --[[:! Expr]] end
     elseif op == "sub" then
-      if rnum == 0 then return l end
+      if rval == 0 then return l --[[:! Expr]] end
     elseif op == "div" then
-      if rnum == 1 then return l end
+      if rval == 1 then return l --[[:! Expr]] end
     elseif op == "pow" then
-      if rnum == 0 then return make_num(1) end
-      if rnum == 1 then return l end
-      if lnum == 1 then return make_num(1) end
+      if rval == 0 then return {op="num", value=1} --[[:! Expr]] end
+      if rval == 1 then return l --[[:! Expr]] end
+      if lval == 1 then return {op="num", value=1} --[[:! Expr]] end
     end
-    return --[[:! Expr]] {op=op, left=l, right=r}
-  elseif op == "cmp" then
-    local l = simplify(ast.left --[[:! Expr]])
-    local r = simplify(ast.right --[[:! Expr]])
+    return {op=op, left=l, right=r} --[[:! Expr]]
+  elseif ast.op == "cmp" then
+    local l = simplify(ast.left)
+    local r = simplify(ast.right)
     if l.op == "num" and r.op == "num" then
-      local lv = l.value --[[:! number]]
-      local rv = r.value --[[:! number]]
-      local cmp = ast.cmp --[[:! string]]
-      local result --: boolean | nil
+      local lv, rv = l.value, r.value
+      local cmp = ast.cmp
+      local result
       if cmp == "<"  then result = lv < rv
       elseif cmp == "<=" then result = lv <= rv
       elseif cmp == ">"  then result = lv > rv
@@ -566,17 +570,18 @@ local function simplify(ast)
       elseif cmp == "==" then result = lv == rv
       elseif cmp == "!=" then result = lv ~= rv
       end
-      return make_num(result and 1 or 0)
+      return {op="num", value=result and 1 or 0} --[[:! Expr]]
     end
-    return --[[:! Expr]] {op="cmp", cmp=ast.cmp --[[:! string]], left=l, right=r}
-  elseif op == "ternary" then
-    local c = simplify(ast.cond --[[:! Expr]])
-    local t = simplify(ast.then_ --[[:! Expr]])
-    local e = simplify(ast.else_ --[[:! Expr]])
+    return {op="cmp", cmp=ast.cmp, left=l, right=r} --[[:! Expr]]
+  elseif ast.op == "ternary" then
+    local c = simplify(ast.cond)
+    local t = simplify(ast.then_)
+    local e = simplify(ast.else_)
     if c.op == "num" then
-      return (c.value --[[:! number]]) ~= 0 and t or e
+      if c.value ~= 0 then return t --[[:! Expr]] end
+      return e --[[:! Expr]]
     end
-    return --[[:! Expr]] {op="ternary", cond=c, then_=t, else_=e}
+    return {op="ternary", cond=c, then_=t, else_=e} --[[:! Expr]]
   end
   return ast
 end
@@ -585,54 +590,70 @@ end
 
 local diff  -- forward declaration
 
+--: (number) -> Expr
+local function make_num(v) return {op="num", value=v} --[[:! Expr]] end
+local ZERO = make_num(0)
+local ONE  = make_num(1)
+
+--: (Expr, Expr) -> Expr
+local function make_add(a, b) return {op="add", left=a, right=b} --[[:! Expr]] end
+--: (Expr, Expr) -> Expr
+local function make_sub(a, b) return {op="sub", left=a, right=b} --[[:! Expr]] end
+--: (Expr, Expr) -> Expr
+local function make_mul(a, b) return {op="mul", left=a, right=b} --[[:! Expr]] end
+--: (Expr, Expr) -> Expr
+local function make_div(a, b) return {op="div", left=a, right=b} --[[:! Expr]] end
+--: (Expr, Expr) -> Expr
+local function make_pow(a, b) return {op="pow", left=a, right=b} --[[:! Expr]] end
+--: (Expr) -> Expr
+local function make_neg(a)    return {op="neg", arg=a} --[[:! Expr]] end
+--: (string, Arr<Expr>) -> Expr
+local function make_call(name, args) return {op="call", name=name, args=args} --[[:! Expr]] end
+
 --: (Expr, string) -> Expr
 diff = function(ast, var)
-  local op = ast.op
-  if op == "num" then
+  if ast.op == "num" then
     return ZERO
-  elseif op == "var" then
-    return (ast.name --[[:! string]]) == var and ONE or ZERO
-  elseif op == "neg" then
-    return make_neg(diff(ast.arg --[[:! Expr]], var))
-  elseif op == "add" then
-    return make_add(diff(ast.left --[[:! Expr]], var), diff(ast.right --[[:! Expr]], var))
-  elseif op == "sub" then
-    return make_sub(diff(ast.left --[[:! Expr]], var), diff(ast.right --[[:! Expr]], var))
-  elseif op == "mul" then
+  elseif ast.op == "var" then
+    return ast.name == var and ONE or ZERO
+  elseif ast.op == "neg" then
+    return make_neg(diff(ast.arg, var))
+  elseif ast.op == "add" then
+    return make_add(diff(ast.left, var), diff(ast.right, var))
+  elseif ast.op == "sub" then
+    return make_sub(diff(ast.left, var), diff(ast.right, var))
+  elseif ast.op == "mul" then
     -- product rule: u'v + uv'
-    local left = ast.left --[[:! Expr]]
-    local right = ast.right --[[:! Expr]]
     return make_add(
-      make_mul(diff(left, var), right),
-      make_mul(left, diff(right, var))
+      make_mul(diff(ast.left, var), ast.right),
+      make_mul(ast.left, diff(ast.right, var))
     )
-  elseif op == "div" then
+  elseif ast.op == "div" then
     -- quotient rule: (u'v - uv') / v^2
-    local left = ast.left --[[:! Expr]]
-    local right = ast.right --[[:! Expr]]
     return make_div(
       make_sub(
-        make_mul(diff(left, var), right),
-        make_mul(left, diff(right, var))
+        make_mul(diff(ast.left, var), ast.right),
+        make_mul(ast.left, diff(ast.right, var))
       ),
-      make_pow(right, make_num(2))
+      make_pow(ast.right, make_num(2))
     )
-  elseif op == "pow" then
-    local base = ast.left --[[:! Expr]]
-    local exp_ = ast.right --[[:! Expr]]
+  elseif ast.op == "pow" then
+    local base = ast.left
+    local exp_ = ast.right
     -- check if exponent is a constant
     if exp_.op == "num" then
       -- d/dx(u^n) = n * u^(n-1) * u'
-      local n = exp_.value --[[:! number]]
+      local en = exp_ --[[:! ExprNum]]
+      local n = en.value
       return simplify(make_mul(
         make_mul(make_num(n), make_pow(base, make_num(n-1))),
         diff(base, var)
       ))
     elseif base.op == "num" then
       -- d/dx(a^v) = a^v * ln(a) * v'
-      local bv = base.value --[[:! number]]
+      local bn = base --[[:! ExprNum]]
       return simplify(make_mul(
-        make_mul(ast, make_num(math.log(bv))),
+        make_mul(ast, make_num(math.log(bn.value))),
         diff(exp_, var)
       ))
     else
@@ -640,31 +661,31 @@ diff = function(ast, var)
       return simplify(make_mul(
         ast,
         make_add(
-          make_mul(diff(exp_, var), make_call("log", {base})),
+          make_mul(diff(exp_, var), make_call("log", {base} --[[:! Arr<Expr>]])),
           make_mul(exp_, make_div(diff(base, var), base))
         )
       ))
     end
-  elseif op == "mod" then
+  elseif ast.op == "mod" then
     -- d/dx(u % v) treated as u - v*floor(u/v)
     -- derivative of floor = 0 a.e., so approx: u'
-    return diff(ast.left --[[:! Expr]], var)
-  elseif op == "call" then
-    local name = ast.name --[[:! string]]
-    local args = ast.args --[[:! { [integer]: Expr }]]
-    local x = args[1]
+    return diff(ast.left, var)
+  elseif ast.op == "call" then
+    local name = ast.name
+    local args = ast.args
+    local x = args[1] --[[:! Expr]]
     if name == "sin" then
       -- d/dx sin(u) = cos(u) * u'
-      return simplify(make_mul(make_call("cos", {x}), diff(x, var)))
+      return simplify(make_mul(make_call("cos", {x} --[[:! Arr<Expr>]]), diff(x, var)))
     elseif name == "cos" then
       -- d/dx cos(u) = -sin(u) * u'
-      return simplify(make_mul(make_neg(make_call("sin", {x})), diff(x, var)))
+      return simplify(make_mul(make_neg(make_call("sin", {x} --[[:! Arr<Expr>]])), diff(x, var)))
     elseif name == "tan" then
       -- d/dx tan(u) = u' / cos^2(u)
-      return simplify(make_div(diff(x, var), make_pow(make_call("cos", {x}), make_num(2))))
+      return simplify(make_div(diff(x, var), make_pow(make_call("cos", {x} --[[:! Arr<Expr>]]), make_num(2))))
     elseif name == "sqrt" then
       -- d/dx sqrt(u) = u' / (2*sqrt(u))
-      return simplify(make_div(diff(x, var), make_mul(make_num(2), make_call("sqrt", {x}))))
+      return simplify(make_div(diff(x, var), make_mul(make_num(2), make_call("sqrt", {x} --[[:! Arr<Expr>]]))))
     elseif name == "exp" then
       -- d/dx exp(u) = exp(u) * u'
       return simplify(make_mul(ast, diff(x, var)))
@@ -679,11 +700,11 @@ diff = function(ast, var)
     elseif name == "asin" then
       -- d/dx asin(u) = u' / sqrt(1 - u^2)
       return simplify(make_div(diff(x, var),
-        make_call("sqrt", {make_sub(make_num(1), make_pow(x, make_num(2)))})))
+        make_call("sqrt", {make_sub(make_num(1), make_pow(x, make_num(2)))} --[[:! Arr<Expr>]])))
     elseif name == "acos" then
       -- d/dx acos(u) = -u' / sqrt(1 - u^2)
       return simplify(make_neg(make_div(diff(x, var),
-        make_call("sqrt", {make_sub(make_num(1), make_pow(x, make_num(2)))}))))
+        make_call("sqrt", {make_sub(make_num(1), make_pow(x, make_num(2)))} --[[:! Arr<Expr>]]))))
     elseif name == "atan" then
       -- d/dx atan(u) = u' / (1 + u^2)
       return simplify(make_div(diff(x, var),
@@ -698,8 +719,8 @@ diff = function(ast, var)
     elseif name == "atan2" then
       -- atan2(y, x): treat as atan(y/x) for single-variable diff
       -- d/dx atan2(y,x) = (x*y' - y*x') / (x^2 + y^2)
-      local y_arg = args[1]
-      local x_arg = args[2]
+      local y_arg = args[1] --[[:! Expr]]
+      local x_arg = args[2] --[[:! Expr]]
       return simplify(make_div(
         make_sub(
           make_mul(x_arg, diff(y_arg, var)),
@@ -710,7 +731,7 @@ diff = function(ast, var)
     end
     -- fallback: treat as constant w.r.t. var
     return ZERO
-  elseif op == "cmp" or op == "ternary" then
+  elseif ast.op == "cmp" or ast.op == "ternary" then
     -- not differentiable in general
     return ZERO
   end
@@ -719,30 +740,32 @@ end
 
 -- ─── vars ──────────────────────────────────────────────────────────────────
 
+local vars
 --: (Expr, { [string]: boolean } | nil) -> { [string]: boolean }
-local function vars(ast, out)
-  out = out or {}
-  local op = ast.op
-  if op == "var" then
-    local name = ast.name --[[:! string]]
-    if not CONSTS[name] then
-      out[name] = true
+vars = function(ast, out)
+  out = out or {} --[[:! { [string]: boolean }]]
+  if ast.op == "var" then
+    if not CONSTS[ast.name] then
+      out[ast.name] = true
     end
-  elseif op == "neg" then
-    vars(ast.arg --[[:! Expr]], out)
-  elseif op == "call" then
-    for _, a in ipairs(ast.args --[[:! { [integer]: Expr }]]) do vars(a, out) end
-  elseif op == "add" or op == "sub" or op == "mul" or op == "div" or
-         op == "pow" or op == "mod" then
-    vars(ast.left --[[:! Expr]], out)
-    vars(ast.right --[[:! Expr]], out)
-  elseif op == "cmp" then
-    vars(ast.left --[[:! Expr]], out)
-    vars(ast.right --[[:! Expr]], out)
-  elseif op == "ternary" then
-    vars(ast.cond --[[:! Expr]], out)
-    vars(ast.then_ --[[:! Expr]], out)
-    vars(ast.else_ --[[:! Expr]], out)
+  elseif ast.op == "neg" then
+    vars(ast.arg, out)
+  elseif ast.op == "call" then
+    for _, a in ipairs(ast.args) do vars(a, out) end
+  elseif ast.op == "add" or ast.op == "sub" or ast.op == "mul" or ast.op == "div" or
+         ast.op == "pow" or ast.op == "mod" then
+    local b = ast --[[:! ExprAdd]]
+    vars(b.left, out)
+    vars(b.right, out)
+  elseif ast.op == "cmp" then
+    local cm = ast --[[:! ExprCmp]]
+    vars(cm.left, out)
+    vars(cm.right, out)
+  elseif ast.op == "ternary" then
+    local te = ast --[[:! ExprTernary]]
+    vars(te.cond, out)
+    vars(te.then_, out)
+    vars(te.else_, out)
   end
   return out
 end
