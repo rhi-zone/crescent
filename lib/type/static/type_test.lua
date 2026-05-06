@@ -4545,6 +4545,38 @@ local obj = setmetatable({x = 1}, MyClass)
 ]])
     end)
 
+    assert.it("setmetatable: prototype methods accessible via __index named field", function()
+        -- Proto.__index = Proto (runtime assignment) — common Lua prototype pattern.
+        -- setmetatable({}, Proto) should expose Proto's methods without a force cast.
+        v3_no_errors([[
+--:: Proto = { greet: (Proto) -> string, ... }
+local Proto = {}
+Proto.__index = Proto
+--: (Proto) -> string
+function Proto:greet() return "hello" end
+local obj = setmetatable({}, Proto)
+local s = obj:greet()
+--: string
+local function check() return s end
+]])
+    end)
+
+    assert.it("setmetatable: prototype methods accessible via #__index meta slot", function()
+        -- Explicit #__index meta-slot annotation — both paths should work.
+        v3_no_errors([==[
+--:: Proto = { greet: (Proto) -> string, ... }
+--:: MyMeta = { #__index: Proto }
+local Proto = {}
+local meta = Proto --[[:! MyMeta]]
+--: (Proto) -> string
+function Proto:greet() return "hello" end
+local obj = setmetatable({}, meta)
+local s = obj:greet()
+--: string
+local function check() return s end
+]==])
+    end)
+
     assert.it("union might-also-be: number|nil passed where number expected", function()
         v3_has_error([[
 --: (number) -> number

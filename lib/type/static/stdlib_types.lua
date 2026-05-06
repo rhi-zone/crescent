@@ -35,7 +35,7 @@
 --:: Open<T>         = match T { { ...%Rest } => { ...Rest, ... } }
 --:: Closed<T>       = match T { { ...%Rest } => { ...Rest } }
 --:: declare next = <T>(t: T, k: Keys<T> | nil) -> (Keys<T> | nil, Values<T> | nil)
---:: declare setmetatable = <T, MT>(t: T, mt: MT) -> T & { #...MT }
+--:: declare setmetatable = <T, MT>(t: T, mt: MT) -> T & MT & { #...MT }
 --:: MetaOf<T> = match T { { #...%M } => M, _ => nil }
 --:: declare getmetatable = <T>(t: T) -> MetaOf<T>
 --:: declare collectgarbage = (opt: string | nil, arg: number | nil) -> number | boolean

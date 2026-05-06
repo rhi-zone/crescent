@@ -221,7 +221,7 @@ local function resolve_deferred_intrinsic(ctx, tid)
     local intrinsic_mod = require("lib.type.static.intrinsic")
     -- stable_id is stored in data[3]; 0 means not set.
     local stable = t.data[3]
-    return intrinsic_mod.expand(ctx, ct.data[0], arg_ids, stable)
+    return (intrinsic_mod.expand(ctx, ct.data[0], arg_ids, stable) --[[:! integer]])
 end
 
 -- Widen a literal type to its base type at argument position.
@@ -356,6 +356,30 @@ local ARITH_OPS_SET = {
     __add = true, __sub = true, __mul = true,
     __div = true, __mod = true, __pow = true, __unm = true,
 }
+
+-- Follow the __index prototype chain to find a field.
+-- Checks both #__index meta-slots (declared with the # syntax) and __index as a
+-- regular named field (the common runtime pattern: Proto.__index = Proto).
+-- Returns (type_id, flags) if found, (nil, nil) if not.
+-- depth-limited to prevent cycles in pathological type definitions.
+--: (Ctx, integer, integer, integer) -> (integer | nil, integer | nil)
+local function field_via_index_chain(ctx, tbl_tid, name_id, depth)
+    if depth > 8 then return nil, nil end
+    local fe = types_mod.table_field(ctx, tbl_tid, name_id)
+    if fe then return find(ctx, (fe.type_id --[[:! integer]])), (fe.flags --[[:! integer]]) end
+    local idx_name_id = intern_mod.intern(ctx.pool, "__index")
+    -- Check #__index meta-slot first (explicit annotation), then __index named field
+    -- (common runtime pattern: Proto.__index = Proto).
+    local idx_fe = types_mod.table_meta_field(ctx, tbl_tid, idx_name_id)
+                or types_mod.table_field(ctx, tbl_tid, idx_name_id)
+    if not idx_fe then return nil, nil end
+    local idx_tid = find(ctx, (idx_fe.type_id --[[:! integer]]))
+    local idx_t = ctx.types:get(idx_tid)
+    if idx_t.tag == TAG_TABLE then
+        return field_via_index_chain(ctx, idx_tid, name_id, depth + 1)
+    end
+    return nil, nil
+end
 
 -- Check metamethod on a TABLE type (not primitives — prim_meta lookup not needed here).
 --: (Ctx, integer, string) -> integer | nil
@@ -1065,6 +1089,18 @@ local function solve_index(ctx, c)
             end
             i = i + 2
         end
+        -- __index prototype chain: Lua metatable lookup.
+        -- Handles setmetatable({}, Proto) where Proto has the field.
+        do
+            local proto_ft, proto_flags = field_via_index_chain(ctx, obj_tid, name_id, 0)
+            if proto_ft then
+                if proto_flags and band(proto_flags, defs.FLAG_OPTIONAL) ~= 0 then
+                    proto_ft = types_mod.make_union(ctx, { proto_ft, ctx.T_NIL })
+                end
+                unify_mod.unify(ctx, res_tid, proto_ft)
+                return true
+            end
+        end
         -- Open table: field may exist
         if obj_t.data[4] >= 0 then
             bind_to(ctx, res_tid, ctx.T_UNKNOWN)
@@ -1235,9 +1271,16 @@ local function solve_index(ctx, c)
                 if fe then
                     field_types[#field_types + 1] = find(ctx, fe.type_id)
                     all_miss = false
-                elseif mt.data[4] >= 0 then
-                    any_open = true
-                    all_miss = false
+                else
+                    -- Also follow __index prototype chain for this member.
+                    local proto_ft = field_via_index_chain(ctx, mid, name_id, 0)
+                    if proto_ft then
+                        field_types[#field_types + 1] = proto_ft
+                        all_miss = false
+                    elseif mt.data[4] >= 0 then
+                        any_open = true
+                        all_miss = false
+                    end
                 end
             elseif mt.tag == TAG_ANY then
                 bind_to(ctx, res_tid, ctx.T_ANY)
