@@ -458,7 +458,6 @@ decode_value = function(data, pos)
       local arg, npos = read_arg(data, info, pos)
       if npos == nil then return nil, arg end
       arg = arg --[[:! integer]]
-    arg = arg --[[:! integer]]
       local sign16 = math.floor(arg / (2^15))
       local exp16  = math.floor(arg / (2^10)) % 32
       local mant16 = arg % (2^10)
@@ -477,7 +476,6 @@ decode_value = function(data, pos)
       local arg, npos = read_arg(data, info, pos)
       if npos == nil then return nil, arg end
       arg = arg --[[:! integer]]
-    arg = arg --[[:! integer]]
       local sign32 = math.floor(arg / (2^31)) % 2
       local exp32  = math.floor(arg / (2^23)) % 256
       local mant32 = arg % (2^23)
@@ -503,7 +501,6 @@ decode_value = function(data, pos)
       local arg, npos = read_arg(data, info, pos)
       if npos == nil then return nil, arg end
       arg = arg --[[:! integer]]
-    arg = arg --[[:! integer]]
       return nil, "cbor.decode: unsupported simple value: " .. arg
     end
   end

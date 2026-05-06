@@ -308,9 +308,7 @@ M.cleanup_semantic = function(diffs)
   -- Deep copy
   local d = {} --: { [integer]: { [integer]: string } }
   for i, v in ipairs(diffs) do
-    local v1 = v[1] --[[:! string]]
-    local v2 = v[2] --[[:! string]]
-    d[i] = { v1, v2 }
+    d[i] = { v[1], v[2] }
   end
 
   -- Repeatedly shift non-equal runs right to word boundaries.
@@ -401,9 +399,7 @@ M.cleanup_efficiency = function(diffs, edit_cost)
   edit_cost = edit_cost or 4
   local d = {} --: { [integer]: { [integer]: string } }
   for i, v in ipairs(diffs) do
-    local v1 = v[1] --[[:! string]]
-    local v2 = v[2] --[[:! string]]
-    d[i] = { v1, v2 }
+    d[i] = { v[1], v[2] }
   end
 
   local changed = true
@@ -756,7 +752,7 @@ M.fuzzy_find = function(text, pattern, opts)
       end
       prev = curr
     end
-    local dist = prev[pat_len] --[[:! integer]]
+    local dist = prev[pat_len]
     local score = 1.0 - dist / pat_len
     if score > best_score and score >= threshold then
       best_score = score

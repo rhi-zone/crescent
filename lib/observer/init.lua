@@ -137,48 +137,48 @@ end
 function M.of(...)
   local args = { ... }
   local n = select("#", ...)
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     for i = 1, n do
-      if s._done then return end
-      s:next(args[i])
+      if subscriber._done then return end
+      subscriber:next(args[i])
     end
-    s:complete()
+    subscriber:complete()
   end)
 end
 
 -- Obs.from(t): emit each element of array t
 function M.from(t)
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     for i = 1, #t do
-      if s._done then return end
-      s:next(t[i])
+      if subscriber._done then return end
+      subscriber:next(t[i])
     end
-    s:complete()
+    subscriber:complete()
   end)
 end
 
 -- Obs.range(start, stop[, step]): emit integers
 function M.range(start, stop, step)
   step = step or 1
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local i = start
     while (step > 0 and i <= stop) or (step < 0 and i >= stop) do
-      if s._done then return end
-      s:next(i)
+      if subscriber._done then return end
+      subscriber:next(i)
       i = i + step
     end
-    s:complete()
+    subscriber:complete()
   end)
 end
 
 -- Obs.empty(): complete immediately
 function M.empty()
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
-    s:complete()
+    subscriber:complete()
   end)
 end
 
@@ -189,18 +189,18 @@ end
 
 -- Obs.error(msg): error immediately
 function M.error(msg)
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
-    s:error(msg)
+    subscriber:error(msg)
   end)
 end
 
 -- Obs.defer(fn): create observable lazily per subscription
 function M.defer(fn)
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local inner = fn() --[[:! Observable]]
-    return inner._subscribe(s)
+    return inner._subscribe(subscriber)
   end)
 end
 
@@ -211,12 +211,12 @@ end
 --: (Observable, (unknown) -> unknown) -> Observable
 function Observable:map(fn)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     return source:subscribe({
-      next     = function(v) s:next(fn(v)) end,
-      error    = function(e) s:error(e) end,
-      complete = function()  s:complete() end,
+      next     = function(v) subscriber:next(fn(v)) end,
+      error    = function(e) subscriber:error(e) end,
+      complete = function()  subscriber:complete() end,
     })
   end)
 end
@@ -224,12 +224,12 @@ end
 --: (Observable, (unknown) -> boolean) -> Observable
 function Observable:filter(pred)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     return source:subscribe({
-      next     = function(v) if pred(v) then s:next(v) end end,
-      error    = function(e) s:error(e) end,
-      complete = function()  s:complete() end,
+      next     = function(v) if pred(v) then subscriber:next(v) end end,
+      error    = function(e) subscriber:error(e) end,
+      complete = function()  subscriber:complete() end,
     })
   end)
 end
@@ -237,29 +237,29 @@ end
 --: (Observable, integer) -> Observable
 function Observable:take(n)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local count = 0
     -- sub may be nil during synchronous emission (local x = expr gotcha),
-    -- so use s._done flag to stop; unsubscribe lazily after subscribe returns.
+    -- so use subscriber._done flag to stop; unsubscribe lazily after subscribe returns.
     local sub
     sub = source:subscribe({
       next = function(v)
-        if s._done then return end
+        if subscriber._done then return end
         if count < n then
           count = count + 1
-          s:next(v)
+          subscriber:next(v)
           if count == n then
-            s:complete()  -- sets s._done; unsubscribe handled below
+            subscriber:complete()  -- sets subscriber._done; unsubscribe handled below
           end
         end
       end,
-      error    = function(e) s:error(e) end,
-      complete = function()  s:complete() end,
+      error    = function(e) subscriber:error(e) end,
+      complete = function()  subscriber:complete() end,
     })
     -- If the source completed synchronously inside subscribe, sub is already
     -- assigned here; unsubscribe to release resources.
-    if s._done and sub then sub:unsubscribe() end
+    if subscriber._done and sub then sub:unsubscribe() end
     return sub
   end)
 end
@@ -267,16 +267,16 @@ end
 --: (Observable, integer) -> Observable
 function Observable:drop(n)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local count = 0
     return source:subscribe({
       next = function(v)
         if count < n then count = count + 1
-        else s:next(v) end
+        else subscriber:next(v) end
       end,
-      error    = function(e) s:error(e) end,
-      complete = function()  s:complete() end,
+      error    = function(e) subscriber:error(e) end,
+      complete = function()  subscriber:complete() end,
     })
   end)
 end
@@ -284,22 +284,22 @@ end
 --: (Observable, (unknown) -> boolean) -> Observable
 function Observable:take_while(pred)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local sub
     sub = source:subscribe({
       next = function(v)
-        if s._done then return end
+        if subscriber._done then return end
         if pred(v) then
-          s:next(v)
+          subscriber:next(v)
         else
-          s:complete()  -- sets s._done; sub unsubscribed below
+          subscriber:complete()  -- sets subscriber._done; sub unsubscribed below
         end
       end,
-      error    = function(e) s:error(e) end,
-      complete = function()  s:complete() end,
+      error    = function(e) subscriber:error(e) end,
+      complete = function()  subscriber:complete() end,
     })
-    if s._done and sub then sub:unsubscribe() end
+    if subscriber._done and sub then sub:unsubscribe() end
     return sub
   end)
 end
@@ -307,22 +307,22 @@ end
 --: (Observable, (unknown) -> boolean) -> Observable
 function Observable:drop_while(pred)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local dropping = true
     return source:subscribe({
       next = function(v)
         if dropping then
           if not pred(v) then
             dropping = false
-            s:next(v)
+            subscriber:next(v)
           end
         else
-          s:next(v)
+          subscriber:next(v)
         end
       end,
-      error    = function(e) s:error(e) end,
-      complete = function()  s:complete() end,
+      error    = function(e) subscriber:error(e) end,
+      complete = function()  subscriber:complete() end,
     })
   end)
 end
@@ -330,20 +330,20 @@ end
 --: (Observable, (unknown) -> Observable) -> Observable
 function Observable:flat_map(fn)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     return source:subscribe({
       next = function(v)
-        if s._done then return end
+        if subscriber._done then return end
         local inner = fn(v)
         inner:subscribe({
-          next     = function(iv) s:next(iv) end,
-          error    = function(e)  s:error(e) end,
+          next     = function(iv) subscriber:next(iv) end,
+          error    = function(e)  subscriber:error(e) end,
           complete = function()   end,
         })
       end,
-      error    = function(e) s:error(e) end,
-      complete = function()  s:complete() end,
+      error    = function(e) subscriber:error(e) end,
+      complete = function()  subscriber:complete() end,
     })
   end)
 end
@@ -354,20 +354,20 @@ Observable.merge_map = Observable.flat_map
 --: (Observable, (unknown) -> Observable) -> Observable
 function Observable:concat_map(fn)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     return source:subscribe({
       next = function(v)
-        if s._done then return end
+        if subscriber._done then return end
         local inner = fn(v)
         inner:subscribe({
-          next     = function(iv) s:next(iv) end,
-          error    = function(e)  s:error(e) end,
+          next     = function(iv) subscriber:next(iv) end,
+          error    = function(e)  subscriber:error(e) end,
           complete = function()   end,  -- synchronous: inner completes before next outer
         })
       end,
-      error    = function(e) s:error(e) end,
-      complete = function()  s:complete() end,
+      error    = function(e) subscriber:error(e) end,
+      complete = function()  subscriber:complete() end,
     })
   end)
 end
@@ -375,13 +375,13 @@ end
 --: (Observable, (unknown, unknown) -> unknown, unknown) -> Observable
 function Observable:reduce(fn, seed)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local acc = seed
     return source:subscribe({
       next     = function(v) acc = fn(acc, v) end,
-      error    = function(e) s:error(e) end,
-      complete = function()  s:next(acc); s:complete() end,
+      error    = function(e) subscriber:error(e) end,
+      complete = function()  subscriber:next(acc); subscriber:complete() end,
     })
   end)
 end
@@ -389,16 +389,16 @@ end
 --: (Observable, (unknown, unknown) -> unknown, unknown) -> Observable
 function Observable:scan(fn, seed)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local acc = seed
     return source:subscribe({
       next = function(v)
         acc = fn(acc, v)
-        s:next(acc)
+        subscriber:next(acc)
       end,
-      error    = function(e) s:error(e) end,
-      complete = function()  s:complete() end,
+      error    = function(e) subscriber:error(e) end,
+      complete = function()  subscriber:complete() end,
     })
   end)
 end
@@ -406,19 +406,19 @@ end
 --: (Observable) -> Observable
 function Observable:distinct()
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local NONE = {}
     local prev = NONE --[[:! unknown]]
     return source:subscribe({
       next = function(v)
         if prev == NONE or prev ~= v then
           prev = v
-          s:next(v)
+          subscriber:next(v)
         end
       end,
-      error    = function(e) s:error(e) end,
-      complete = function()  s:complete() end,
+      error    = function(e) subscriber:error(e) end,
+      complete = function()  subscriber:complete() end,
     })
   end)
 end
@@ -429,12 +429,12 @@ Observable.distinct_until_changed = Observable.distinct
 --: (Observable, (unknown) -> nil) -> Observable
 function Observable:do_next(fn)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     return source:subscribe({
-      next     = function(v) fn(v); s:next(v) end,
-      error    = function(e) s:error(e) end,
-      complete = function()  s:complete() end,
+      next     = function(v) fn(v); subscriber:next(v) end,
+      error    = function(e) subscriber:error(e) end,
+      complete = function()  subscriber:complete() end,
     })
   end)
 end
@@ -442,12 +442,12 @@ end
 --: (Observable, (unknown) -> nil) -> Observable
 function Observable:do_error(fn)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     return source:subscribe({
-      next     = function(v) s:next(v) end,
-      error    = function(e) fn(e); s:error(e) end,
-      complete = function()  s:complete() end,
+      next     = function(v) subscriber:next(v) end,
+      error    = function(e) fn(e); subscriber:error(e) end,
+      complete = function()  subscriber:complete() end,
     })
   end)
 end
@@ -455,12 +455,12 @@ end
 --: (Observable, () -> nil) -> Observable
 function Observable:do_complete(fn)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     return source:subscribe({
-      next     = function(v) s:next(v) end,
-      error    = function(e) s:error(e) end,
-      complete = function()  fn(); s:complete() end,
+      next     = function(v) subscriber:next(v) end,
+      error    = function(e) subscriber:error(e) end,
+      complete = function()  fn(); subscriber:complete() end,
     })
   end)
 end
@@ -468,19 +468,19 @@ end
 --: (Observable, (unknown) -> Observable) -> Observable
 function Observable:catch(fn)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     return source:subscribe({
-      next     = function(v) s:next(v) end,
+      next     = function(v) subscriber:next(v) end,
       error    = function(e)
         local recovery = fn(e)
         recovery:subscribe({
-          next     = function(v) s:next(v) end,
-          error    = function(e2) s:error(e2) end,
-          complete = function()   s:complete() end,
+          next     = function(v) subscriber:next(v) end,
+          error    = function(e2) subscriber:error(e2) end,
+          complete = function()   subscriber:complete() end,
         })
       end,
-      complete = function() s:complete() end,
+      complete = function() subscriber:complete() end,
     })
   end)
 end
@@ -488,21 +488,21 @@ end
 --: (Observable, integer) -> Observable
 function Observable:retry(n)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local attempts = 0
     local function attempt()
       source:subscribe({
-        next  = function(v) s:next(v) end,
+        next  = function(v) subscriber:next(v) end,
         error = function(e)
           if attempts < n then
             attempts = attempts + 1
             attempt()
           else
-            s:error(e)
+            subscriber:error(e)
           end
         end,
-        complete = function() s:complete() end,
+        complete = function() subscriber:complete() end,
       })
     end
     attempt()
@@ -516,23 +516,23 @@ function Observable:timeout(ms, clock_fn)
   if not clock_fn then error("observer:timeout: clock_fn is required") end
   local source = self
   local cfn = clock_fn
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local deadline = cfn() + ms
     return source:subscribe({
       next = function(v)
         if cfn() > deadline then
-          s:error("timeout")
+          subscriber:error("timeout")
         else
-          s:next(v)
+          subscriber:next(v)
         end
       end,
-      error    = function(e) s:error(e) end,
+      error    = function(e) subscriber:error(e) end,
       complete = function()
         if cfn() > deadline then
-          s:error("timeout")
+          subscriber:error("timeout")
         else
-          s:complete()
+          subscriber:complete()
         end
       end,
     })
@@ -542,18 +542,18 @@ end
 --: (Observable, unknown) -> Observable
 function Observable:default_if_empty(default_val)
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local had_value = false
     return source:subscribe({
       next = function(v)
         had_value = true
-        s:next(v)
+        subscriber:next(v)
       end,
-      error    = function(e) s:error(e) end,
+      error    = function(e) subscriber:error(e) end,
       complete = function()
-        if not had_value then s:next(default_val) end
-        s:complete()
+        if not had_value then subscriber:next(default_val) end
+        subscriber:complete()
       end,
     })
   end)
@@ -567,8 +567,8 @@ end
 --: (Observable) -> Observable
 function Observable:last()
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local last_val
     local had_value = false
     return source:subscribe({
@@ -576,10 +576,10 @@ function Observable:last()
         last_val = v
         had_value = true
       end,
-      error    = function(e) s:error(e) end,
+      error    = function(e) subscriber:error(e) end,
       complete = function()
-        if had_value then s:next(last_val) end
-        s:complete()
+        if had_value then subscriber:next(last_val) end
+        subscriber:complete()
       end,
     })
   end)
@@ -609,30 +609,30 @@ end
 
 function Observable:min()
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local m
     return source:subscribe({
       next = function(v)
         if m == nil or v < m then m = v end
       end,
-      error    = function(e) s:error(e) end,
-      complete = function()  if m ~= nil then s:next(m) end; s:complete() end,
+      error    = function(e) subscriber:error(e) end,
+      complete = function()  if m ~= nil then subscriber:next(m) end; subscriber:complete() end,
     })
   end)
 end
 
 function Observable:max()
   local source = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local m
     return source:subscribe({
       next = function(v)
         if m == nil or v > m then m = v end
       end,
-      error    = function(e) s:error(e) end,
-      complete = function()  if m ~= nil then s:next(m) end; s:complete() end,
+      error    = function(e) subscriber:error(e) end,
+      complete = function()  if m ~= nil then subscriber:next(m) end; subscriber:complete() end,
     })
   end)
 end
@@ -644,19 +644,19 @@ end
 -- Obs.merge(...): interleave values from multiple observables
 function M.merge(...)
   local sources = { ... }
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local subs = {} --[[:! { [integer]: Subscription }]]
     local completed = 0
     local total = #sources
     for i = 1, total do
       local src = sources[i] --[[:! Observable]]
       subs[i] = src:subscribe({
-        next  = function(v) s:next(v) end,
-        error = function(e) s:error(e) end,
+        next  = function(v) subscriber:next(v) end,
+        error = function(e) subscriber:error(e) end,
         complete = function()
           completed = completed + 1
-          if completed == total then s:complete() end
+          if completed == total then subscriber:complete() end
         end,
       })
     end
@@ -667,19 +667,19 @@ end
 -- Obs.concat(...): subscribe sequentially
 function M.concat(...)
   local sources = { ... }
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local idx = 0
     local function next_source()
       idx = idx + 1
       if idx > #sources then
-        s:complete()
+        subscriber:complete()
         return
       end
       local src = sources[idx] --[[:! Observable]]
       src:subscribe({
-        next     = function(v) s:next(v) end,
-        error    = function(e) s:error(e) end,
+        next     = function(v) subscriber:next(v) end,
+        error    = function(e) subscriber:error(e) end,
         complete = next_source,
       })
     end
@@ -698,8 +698,8 @@ function M.zip(...)
   end
   local sources = args
   local n = #sources
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local buffers = {} --[[:! { [integer]: { [integer]: unknown } }]]
     local completed_mask = {} --[[:! { [integer]: boolean }]]
     for i = 1, n do buffers[i] = {}; completed_mask[i] = false end
@@ -713,9 +713,9 @@ function M.zip(...)
         vals[i] = table.remove(buffers[i], 1)
       end
       if combine_fn then
-        s:next(combine_fn(unpack(vals)))
+        subscriber:next(combine_fn(unpack(vals)))
       else
-        s:next(vals)
+        subscriber:next(vals)
       end
     end
 
@@ -724,7 +724,7 @@ function M.zip(...)
       for i = 1, n do
         if not completed_mask[i] then return end
       end
-      s:complete()
+      subscriber:complete()
     end
 
     local subs = {} --[[:! { [integer]: Subscription }]]
@@ -736,7 +736,7 @@ function M.zip(...)
           buffers[idx][#buffers[idx] + 1] = v
           try_emit()
         end,
-        error    = function(e) s:error(e) end,
+        error    = function(e) subscriber:error(e) end,
         complete = function()  check_done(idx) end,
       })
     end
@@ -748,8 +748,8 @@ end
 function M.combine_latest(...)
   local sources = { ... }
   local n = #sources
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
     local latest = {}
     local has_value = {} --[[:! { [integer]: boolean }]]
     local completed_count = 0
@@ -769,13 +769,13 @@ function M.combine_latest(...)
           if ready == n then
             local vals = {}
             for j = 1, n do vals[j] = latest[j] end
-            s:next(vals)
+            subscriber:next(vals)
           end
         end,
-        error = function(e) s:error(e) end,
+        error = function(e) subscriber:error(e) end,
         complete = function()
           completed_count = completed_count + 1
-          if completed_count == n then s:complete() end
+          if completed_count == n then subscriber:complete() end
         end,
       })
     end
@@ -861,9 +861,9 @@ end
 -- We wrap it as an Observable for operator use.
 function Subject:as_observable()
   local self_ref = self
+  --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local s = subscriber --[[:! Subscriber]]
-    return self_ref:subscribe(s._obs)
+    return self_ref:subscribe(subscriber._obs)
   end)
 end
 

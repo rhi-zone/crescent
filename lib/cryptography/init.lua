@@ -348,14 +348,14 @@ local function sha512_compress(msg, offset, h)
 	-- Load 16 big-endian 64-bit words (each word = 2 x 32-bit).
 	for i = 0, 15 do
 		local o = offset + i * 8
-		local a  = (string.byte(msg, o + 1, o + 1) or 0) --[[:! integer]]
-		local b  = (string.byte(msg, o + 2, o + 2) or 0) --[[:! integer]]
-		local c  = (string.byte(msg, o + 3, o + 3) or 0) --[[:! integer]]
-		local d  = (string.byte(msg, o + 4, o + 4) or 0) --[[:! integer]]
-		local e  = (string.byte(msg, o + 5, o + 5) or 0) --[[:! integer]]
-		local f  = (string.byte(msg, o + 6, o + 6) or 0) --[[:! integer]]
-		local g  = (string.byte(msg, o + 7, o + 7) or 0) --[[:! integer]]
-		local hb = (string.byte(msg, o + 8, o + 8) or 0) --[[:! integer]]
+		local a  = string.byte(msg, o + 1, o + 1) or 0
+		local b  = string.byte(msg, o + 2, o + 2) or 0
+		local c  = string.byte(msg, o + 3, o + 3) or 0
+		local d  = string.byte(msg, o + 4, o + 4) or 0
+		local e  = string.byte(msg, o + 5, o + 5) or 0
+		local f  = string.byte(msg, o + 6, o + 6) or 0
+		local g  = string.byte(msg, o + 7, o + 7) or 0
+		local hb = string.byte(msg, o + 8, o + 8) or 0
 		W[i * 2 + 1] = a * 0x1000000 + b * 0x10000 + c * 0x100 + d  -- hi
 		W[i * 2 + 2] = e * 0x1000000 + f * 0x10000 + g * 0x100 + hb -- lo
 	end
@@ -525,8 +525,7 @@ local function hmac(hash_fn, block_size, key, data)
 	local ipad_key = {} --: { [integer]: string }
 	local opad_key = {} --: { [integer]: string }
 	for i = 1, block_size do
-		local kb_raw = string.byte(key, i, i) or 0
-		local kb = kb_raw --[[:! integer]]
+		local kb = string.byte(key, i, i) or 0
 		ipad_key[i] = string.char(bxor(kb, 0x36))
 		opad_key[i] = string.char(bxor(kb, 0x5c))
 	end
@@ -605,10 +604,8 @@ function M.pbkdf2(password, salt, iterations, key_len, hash)
 			-- XOR f with u byte-by-byte.
 			local ft = {} --: { [integer]: string }
 			for j = 1, hlen do
-				local fb_raw = string.byte(f, j, j) or 0
-				local ub_raw = string.byte(u, j, j) or 0
-				local fb = fb_raw --[[:! integer]]
-				local ub = ub_raw --[[:! integer]]
+				local fb = string.byte(f, j, j) or 0
+				local ub = string.byte(u, j, j) or 0
 				ft[j] = string.char(bxor(fb, ub))
 			end
 			f = table.concat(ft)
@@ -696,7 +693,7 @@ function M.chacha20(key, nonce, counter, data)
 		local chunk_len = math.min(64, dlen - pos + 1)
 		local out       = {}
 		for i = 1, chunk_len do
-			out[i] = string.char(bxor((string.byte(data, pos + i - 1, pos + i - 1) or 0) --[[:! integer]], (string.byte(ks, i, i) or 0) --[[:! integer]]))
+			out[i] = string.char(bxor(string.byte(data, pos + i - 1, pos + i - 1) or 0, string.byte(ks, i, i) or 0))
 		end
 		blocks[#blocks + 1] = table.concat(out)
 		pos = pos + 64
@@ -974,7 +971,7 @@ function M.ct_eq(a, b)
 	if #a ~= #b then return false end
 	local diff = 0
 	for i = 1, #a do
-		diff = bor(diff, bxor((string.byte(a, i, i) or 0) --[[:! integer]], (string.byte(b, i, i) or 0) --[[:! integer]]))
+		diff = bor(diff, bxor(string.byte(a, i, i) or 0, string.byte(b, i, i) or 0))
 	end
 	return diff == 0
 end

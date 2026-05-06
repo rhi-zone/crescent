@@ -37,7 +37,8 @@ function M.new(capacity, opts)
 end
 
 -- Detach a node from the doubly-linked list.
-local function _detach(self --[[:! Cache]], node --[[:! CacheNode]])
+--: (Cache, CacheNode) -> nil
+local function _detach(self, node)
   local p, n = node.prev, node.next
   if p then p.next = n else self._head = n end
   if n then n.prev = p else self._tail = p end
@@ -46,7 +47,8 @@ local function _detach(self --[[:! Cache]], node --[[:! CacheNode]])
 end
 
 -- Push a node to the head (most recent).
-local function _push_head(self --[[:! Cache]], node --[[:! CacheNode]])
+--: (Cache, CacheNode) -> nil
+local function _push_head(self, node)
   node.prev = nil
   node.next = self._head
   if self._head then self._head.prev = node end
@@ -55,7 +57,8 @@ local function _push_head(self --[[:! Cache]], node --[[:! CacheNode]])
 end
 
 -- Move an existing node to the head.
-local function _promote(self --[[:! Cache]], node --[[:! CacheNode]])
+--: (Cache, CacheNode) -> nil
+local function _promote(self, node)
   if node == self._head then return end
   _detach(self, node)
   _push_head(self, node)
@@ -63,29 +66,31 @@ end
 
 -- Check if a node has expired. If expired, remove it and fire on_evict.
 -- Returns true if the node was expired and removed.
-local function _check_expired(self --[[:! Cache]], node --[[:! CacheNode]])
+--: (Cache, CacheNode) -> boolean
+local function _check_expired(self, node)
   local expires_at = node.expires_at
   if not expires_at then return false end
   local at = expires_at --[[:! number]]
   local clock = self._clock
   if not clock then return false end
-  if clock() < at then return false end
+  if (clock --[[:! () -> number]])() < at then return false end
   _detach(self, node)
   self._map[node.key] = nil
-  self._size = (self._size --[[:! integer]]) - 1
+  self._size = self._size - 1
   local evict = self._on_evict
   if evict then (evict --[[:! (unknown, unknown) -> nil]])(node.key, node.value) end
   return true
 end
 
 -- Evict the tail (least recently used) node.
-local function _evict_tail(self --[[:! Cache]])
+--: (Cache) -> nil
+local function _evict_tail(self)
   local node = self._tail
   if not node then return end
-  local n = node
+  local n = node --[[:! CacheNode]]
   _detach(self, n)
   self._map[n.key] = nil
-  self._size = (self._size --[[:! integer]]) - 1
+  self._size = self._size - 1
   local evict = self._on_evict
   if evict then (evict --[[:! (unknown, unknown) -> nil]])(n.key, n.value) end
 end

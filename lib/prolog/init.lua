@@ -361,7 +361,7 @@ end
 -- A rule: head :- goal1, goal2, ...
 --: (string) -> (PrologTerm | nil, { [integer]: PrologTerm } | nil | string)
 local function parse_clause(src)
-  src = (src:gsub("%.%s*$", "") --[[: string]])  -- strip trailing dot
+  src = (src:gsub("%.%s*$", ""))  -- strip trailing dot
   local toks = lex(src)
   if #toks == 0 then return nil, "empty clause" end
   local term, np = parse_term(toks, 1, 1200)
@@ -390,6 +390,7 @@ local function parse_clause(src)
 end
 
 -- Parse a goal string into a list of goals
+--: (string) -> ({ [integer]: PrologTerm } | nil, string | nil)
 local function parse_goals(src)
   src = src:gsub("%.%s*$", "")
   local toks = lex(src)
@@ -513,7 +514,7 @@ local function term_to_string(env, t)
   if t.kind == "var" then
     -- Strip the _N suffix added by copy_term to show original name
     local tname = t.name --[[:! string]]
-    return (tname:match("^([^_]+)") or tname) --[[: string]]
+    return (tname:match("^([^_]+)") or tname)
   elseif t.kind == "atom" then
     return (t.name --[[:! string]])
   elseif t.kind == "num" then
@@ -929,9 +930,9 @@ solve = function(db, goals, env, depth)
     end
     local e2 = unify(env, name_arg, mk_atom(tostring(tname)))
     if e2 then
-      e2 = unify(e2, arity_arg, mk_num(tarity))
-      if e2 then
-        solve(db, rest, e2, depth + 1)
+      local e3 = unify(e2, arity_arg, mk_num(tarity))
+      if e3 then
+        solve(db, rest, e3, depth + 1)
       end
     end
     return
@@ -1126,13 +1127,12 @@ end
 function DB:query(goal_str)
   local goals, err = parse_goals(goal_str)
   if not goals then return nil, err end
-  local goals_ = goals --[[:! { [integer]: PrologTerm }]]
-  if #goals_ == 0 then return nil, "empty query" end
+  if #goals == 0 then return nil, "empty query" end
 
-  local query_vars = collect_vars(goals_)
+  local query_vars = collect_vars(goals)
 
   local co = coroutine.create(function()
-    solve(self, goals_, {}, 0)
+    solve(self, goals, {}, 0)
   end)
 
   return function()

@@ -557,7 +557,7 @@ parse_value = function(lex)
   -- Object value {...}
   if c == byte("{") then
     advance(lex, 1)
-    local fields = {} --[[:! { [integer]: any }]] --[[:! { [integer]: any }]]
+    local fields = {} --[[:! { [integer]: any }]]
     while true do
       skip_ignored(lex)
       if peek(lex) == byte("}") then advance(lex, 1); break end
@@ -1371,7 +1371,7 @@ local function print_value(node)
     local parts = {} --[[:! { [integer]: string }]]
     for _, f in ipairs(node_.fields --[[:! { [integer]: unknown }]]) do
       local f_ = f --[[:! { name: { value: string, ... }, value: unknown, ... }]]
-      parts[#parts + 1] = (f_.name.value .. ": " .. print_value(f_.value)) --[[:! string]]
+      parts[#parts + 1] = f_.name.value .. ": " .. print_value(f_.value)
     end
     return "{" .. concat(parts, ", ") .. "}"
   end
@@ -1385,7 +1385,7 @@ local function print_arguments(args)
   local parts = {} --[[:! { [integer]: string }]]
   for _, arg in ipairs(args_) do
     local arg_ = arg --[[:! { name: { value: string, ... }, value: unknown, ... }]]
-    parts[#parts + 1] = (arg_.name.value .. ": " .. print_value(arg_.value)) --[[:! string]]
+    parts[#parts + 1] = arg_.name.value .. ": " .. print_value(arg_.value)
   end
   return "(" .. concat(parts, ", ") .. ")"
 end
@@ -1483,7 +1483,7 @@ end
 
 print_node = function(node, indent)
   indent = indent or 0
-  node = (node --[[:! { [string]: unknown, ... }]]) --[[: any]]
+  node = node --[[: any]]
   local k = node.kind
 
   if k == "Document" then

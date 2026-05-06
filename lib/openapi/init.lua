@@ -138,7 +138,7 @@ function M.validate_schema(value, schema, path)
 		if sch.type then
 			local st = sch.type
 			local vt = type_of(val)
-			local ok = false --[[:! boolean]]
+			local ok = false
 			if st == "string" then
 				ok = vt == "string"
 			elseif st == "number" then
