@@ -40,14 +40,14 @@ local concat = table.concat
 
 -- Read 4 bytes from string s at 1-based position i as a little-endian uint32.
 -- tobit converts to signed 32-bit so bit ops work correctly.
---: (string, number) -> number
+--: (string, integer) -> integer
 local function read_u32_le(s, i)
   local b0, b1, b2, b3 = sbyte(s, i, i + 3)
-  return tobit(b0 + b1 * 256 + b2 * 65536 + b3 * 16777216)
+  return tobit((b0 or 0) + (b1 or 0) * 256 + (b2 or 0) * 65536 + (b3 or 0) * 16777216)
 end
 
 -- Write a 32-bit value as 4 little-endian bytes.
---: (number) -> string
+--: (integer) -> string
 local function write_u32_le(v)
   local b0 = band(v,           0xff)
   local b1 = band(rshift(v,  8), 0xff)
@@ -57,6 +57,7 @@ local function write_u32_le(v)
 end
 
 -- ChaCha20 initial state constants ("expand 32-byte k" LE words).
+--: { [integer]: integer }
 local SIGMA = {
   tobit(0x61707865),  -- "expa"
   tobit(0x3320646e),  -- "nd 3"
@@ -65,9 +66,9 @@ local SIGMA = {
 }
 
 -- Quarter round applied in-place to state table s at 1-based indices.
---: (table, number, number, number, number) -> nil
+--: ({ [integer]: integer }, integer, integer, integer, integer) -> nil
 local function quarter_round(s, ai, bi, ci, di)
-  local a, b, c, d = s[ai], s[bi], s[ci], s[di]
+  local a, b, c, d = s[ai] or 0, s[bi] or 0, s[ci] or 0, s[di] or 0
   a = tobit(a + b); d = rol(bxor(d, a), 16)
   c = tobit(c + d); b = rol(bxor(b, c), 12)
   a = tobit(a + b); d = rol(bxor(d, a),  8)
@@ -76,10 +77,11 @@ local function quarter_round(s, ai, bi, ci, di)
 end
 
 -- Produce one 64-byte ChaCha20 keystream block.
---: (string, number, string) -> string
+--: (string, integer, string) -> string
 local function chacha20_block(key, counter, nonce)
+  --: { [integer]: integer }
   local s = {
-    SIGMA[1], SIGMA[2], SIGMA[3], SIGMA[4],
+    SIGMA[1] or 0, SIGMA[2] or 0, SIGMA[3] or 0, SIGMA[4] or 0,
     read_u32_le(key,  1), read_u32_le(key,  5),
     read_u32_le(key,  9), read_u32_le(key, 13),
     read_u32_le(key, 17), read_u32_le(key, 21),
@@ -88,8 +90,9 @@ local function chacha20_block(key, counter, nonce)
     read_u32_le(nonce, 1), read_u32_le(nonce, 5), read_u32_le(nonce, 9),
   }
   -- Save initial state for final addition.
+  --: { [integer]: integer }
   local t = {}
-  for i = 1, 16 do t[i] = s[i] end
+  for i = 1, 16 do t[i] = s[i] or 0 end
 
   -- 10 double-rounds (20 rounds total).
   for _ = 1, 10 do
@@ -106,13 +109,13 @@ local function chacha20_block(key, counter, nonce)
   -- Add initial state back.
   local out = {}
   for i = 1, 16 do
-    out[i] = write_u32_le(tobit(s[i] + t[i]))
+    out[i] = write_u32_le(tobit((s[i] or 0) + (t[i] or 0)))
   end
   return concat(out)
 end
 
 -- XOR msg with ChaCha20 keystream starting at block counter.
---: (string, string, string, number) -> string
+--: (string, string, string, integer) -> string
 local function chacha20_xor(key, nonce, msg, counter)
   local len = #msg
   if len == 0 then return "" end
@@ -124,7 +127,7 @@ local function chacha20_xor(key, nonce, msg, counter)
     local chunk_end = math.min(pos + 63, len)
     local t = {}
     for i = 1, chunk_end - pos + 1 do
-      t[i] = schar(bxor(sbyte(msg, pos + i - 1), sbyte(ks, i)))
+      t[i] = schar(bxor(sbyte(msg, pos + i - 1) or 0, sbyte(ks, i) or 0))
     end
     out[blk + 1] = concat(t)
     pos = pos + 64
@@ -151,7 +154,9 @@ local SHIFT26 = U64(67108864)   -- 2^26
 -- Clamp Poly1305 r value per RFC 7539 §2.5.
 --: (string) -> string
 local function clamp_r(r)
-  local t = { sbyte(r, 1, 16) }
+  --: { [integer]: integer }
+  local t = {}
+  for i = 1, 16 do t[i] = sbyte(r, i) or 0 end
   t[4]  = band(t[4],  15)
   t[8]  = band(t[8],  15)
   t[12] = band(t[12], 15)
@@ -166,31 +171,34 @@ end
 -- The 26-bit limb boundaries fall at bits 0,26,52,78,104, which straddle byte
 -- boundaries — each limb overlaps two bytes at its edges.
 -- b[1..16]: the 16 message/key bytes; any high bit is added by the caller.
+-- Returns five uint64_t cdata limbs; annotated any because the typechecker has
+-- no model for FFI cdata types — they are genuinely opaque cdata values.
+--: ({ [integer]: integer }) -> (any, any, any, any, any)
 local function decode_26(b)
   -- n0: bits  0..25 — all of b[1..3], bottom 2 bits of b[4].
-  local n0 = U64(b[1])
-    + U64(b[2]) * U64(256)
-    + U64(b[3]) * U64(65536)
-    + U64(band(b[4], 3)) * U64(16777216)       -- 2^24
+  local n0 = U64(b[1] or 0)
+    + U64(b[2] or 0) * U64(256)
+    + U64(b[3] or 0) * U64(65536)
+    + U64(band(b[4] or 0, 3)) * U64(16777216)       -- 2^24
   -- n1: bits 26..51 — top 6 bits of b[4], all of b[5,6], bottom 4 bits of b[7].
-  local n1 = U64(rshift(b[4], 2))              -- b[4]>>2, at position 0 of n1
-    + U64(b[5]) * U64(64)                       -- 2^6
-    + U64(b[6]) * U64(16384)                    -- 2^14
-    + U64(band(b[7], 15)) * U64(4194304)        -- 2^22 (4 bits, not 2)
+  local n1 = U64(rshift(b[4] or 0, 2))              -- b[4]>>2, at position 0 of n1
+    + U64(b[5] or 0) * U64(64)                       -- 2^6
+    + U64(b[6] or 0) * U64(16384)                    -- 2^14
+    + U64(band(b[7] or 0, 15)) * U64(4194304)        -- 2^22 (4 bits, not 2)
   -- n2: bits 52..77 — top 4 bits of b[7], all of b[8,9], bottom 6 bits of b[10].
-  local n2 = U64(rshift(b[7], 4))              -- b[7]>>4, at position 0 of n2
-    + U64(b[8]) * U64(16)                       -- 2^4
-    + U64(b[9]) * U64(4096)                     -- 2^12
-    + U64(band(b[10], 63)) * U64(1048576)       -- 2^20 (6 bits, not 2)
+  local n2 = U64(rshift(b[7] or 0, 4))              -- b[7]>>4, at position 0 of n2
+    + U64(b[8] or 0) * U64(16)                       -- 2^4
+    + U64(b[9] or 0) * U64(4096)                     -- 2^12
+    + U64(band(b[10] or 0, 63)) * U64(1048576)       -- 2^20 (6 bits, not 2)
   -- n3: bits 78..103 — top 2 bits of b[10], all of b[11,12,13].
-  local n3 = U64(rshift(b[10], 6))             -- b[10]>>6, at position 0 of n3
-    + U64(b[11]) * U64(4)                       -- 2^2
-    + U64(b[12]) * U64(1024)                    -- 2^10
-    + U64(b[13]) * U64(262144)                  -- 2^18
+  local n3 = U64(rshift(b[10] or 0, 6))             -- b[10]>>6, at position 0 of n3
+    + U64(b[11] or 0) * U64(4)                       -- 2^2
+    + U64(b[12] or 0) * U64(1024)                    -- 2^10
+    + U64(b[13] or 0) * U64(262144)                  -- 2^18
   -- n4: bits 104..127 — all of b[14,15,16] (and any high bit added by caller).
-  local n4 = U64(b[14])
-    + U64(b[15]) * U64(256)                     -- 2^8
-    + U64(b[16]) * U64(65536)                   -- 2^16
+  local n4 = U64(b[14] or 0)
+    + U64(b[15] or 0) * U64(256)                     -- 2^8
+    + U64(b[16] or 0) * U64(65536)                   -- 2^16
   return n0, n1, n2, n3, n4
 end
 
@@ -200,7 +208,9 @@ local function poly1305_mac(key32, msg)
   local r_str = clamp_r(key32:sub(1, 16))
   local s_str = key32:sub(17, 32)
 
-  local rb = { sbyte(r_str, 1, 16) }
+  --: { [integer]: integer }
+  local rb = {}
+  for i = 1, 16 do rb[i] = sbyte(r_str, i) or 0 end
   local r0, r1, r2, r3, r4 = decode_26(rb)
   local r1_5 = r1 * U5
   local r2_5 = r2 * U5
@@ -217,9 +227,10 @@ local function poly1305_mac(key32, msg)
     local blocklen = remaining >= 16 and 16 or remaining
 
     -- Read block into byte table (zero-padded to 16).
+    --: { [integer]: integer }
     local n = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
     for i = 1, blocklen do
-      n[i] = sbyte(msg, pos + i - 1)
+      n[i] = sbyte(msg, pos + i - 1) or 0
     end
     local n0, n1, n2, n3, n4 = decode_26(n)
     -- Add 2^(8*blocklen): the "1" bit that turns the block into a field element.
@@ -280,13 +291,13 @@ local function poly1305_mac(key32, msg)
   local g3 = h3 + c; c = g3 / SHIFT26
   local g4 = h4 + c
   -- If g4 >= 2^26 the carry propagated all the way through, meaning h >= 2^130-5.
-  local use_g = tonumber(g4 / SHIFT26)  -- 1 if h >= p, else 0
+  local use_g = (tonumber(g4 / SHIFT26) or 0) --[[:! integer]]  -- 1 if h >= p, else 0
   local keep_h = 1 - use_g
   h0 = h0 * U64(keep_h) + band(g0, MASK26) * U64(use_g)
-  h1 = h1 * U64(keep_h) + band(g1, MASK26) * U64(use_g)
-  h2 = h2 * U64(keep_h) + band(g2, MASK26) * U64(use_g)
-  h3 = h3 * U64(keep_h) + band(g3, MASK26) * U64(use_g)
-  h4 = h4 * U64(keep_h) + band(g4, MASK26) * U64(use_g)
+  h1 = h1 * U64(keep_h) + band(g1 --[[:! integer]], MASK26) * U64(use_g)
+  h2 = h2 * U64(keep_h) + band(g2 --[[:! integer]], MASK26) * U64(use_g)
+  h3 = h3 * U64(keep_h) + band(g3 --[[:! integer]], MASK26) * U64(use_g)
+  h4 = h4 * U64(keep_h) + band(g4 --[[:! integer]], MASK26) * U64(use_g)
 
   -- Serialize h as 16 LE bytes, then add s (mod 2^128).
   -- h = h0 + h1*2^26 + h2*2^52 + h3*2^78 + h4*2^104.
@@ -301,25 +312,30 @@ local function poly1305_mac(key32, msg)
   -- h4 * 2^(104-64) = h4 * 2^40 = h4 * 0x10000000000
 
   -- Extract bytes from lo64 (8 bytes) and hi64 (8 bytes).
+  -- tonumber of uint64_t cdata returns a Lua number; force-cast to integer is
+  -- correct here since the masked value is always 0-255.
+  --: { [integer]: integer }
   local out = {}
   local v = lo64
   for i = 1, 8 do
-    out[i] = tonumber(band(v, U64(0xff)))
+    out[i] = (tonumber(band(v --[[:! integer]], U64(0xff))) or 0) --[[:! integer]]
     v = v / U256
   end
   v = hi64
   for i = 9, 16 do
-    out[i] = tonumber(band(v, U64(0xff)))
+    out[i] = (tonumber(band(v --[[:! integer]], U64(0xff))) or 0) --[[:! integer]]
     v = v / U256
   end
 
   -- Add s mod 2^128.
-  local sb = { sbyte(s_str, 1, 16) }
+  --: { [integer]: integer }
+  local sb = {}
+  for i = 1, 16 do sb[i] = sbyte(s_str, i) or 0 end
   local carry = 0
   for i = 1, 16 do
     local sum = out[i] + sb[i] + carry
-    out[i] = sum % 256
-    carry = math.floor(sum / 256)
+    out[i] = sum % 256 --[[:! integer]]
+    carry = math.floor(sum / 256) --[[:! integer]]
   end
 
   return schar(unpack(out))
@@ -373,7 +389,7 @@ end
 function M.encrypt(key, nonce, plaintext, counter)
   local ok, err = validate(key, nonce, plaintext, counter)
   if not ok then return nil, err end
-  return chacha20_xor(key, nonce, plaintext, counter or 1), nil
+  return chacha20_xor(key, nonce, plaintext, (counter or 1) --[[:! integer]]), nil
 end
 
 -- ChaCha20 decrypt (identical to encrypt — XOR is its own inverse).
@@ -381,7 +397,7 @@ end
 function M.decrypt(key, nonce, ciphertext, counter)
   local ok, err = validate(key, nonce, ciphertext, counter)
   if not ok then return nil, err end
-  return chacha20_xor(key, nonce, ciphertext, counter or 1), nil
+  return chacha20_xor(key, nonce, ciphertext, (counter or 1) --[[:! integer]]), nil
 end
 
 -- Generate n bytes of raw keystream (counter defaults to 0).
@@ -393,7 +409,7 @@ function M.keystream(key, nonce, n, counter)
     return nil, "n must be a non-negative integer"
   end
   if n == 0 then return "", nil end
-  return chacha20_xor(key, nonce, ("\0"):rep(n), counter or 0), nil
+  return chacha20_xor(key, nonce, ("\0"):rep(n --[[:! integer]]), (counter or 0) --[[:! integer]]), nil
 end
 
 -- ChaCha20-Poly1305 AEAD encrypt (RFC 7539 §2.6).
@@ -434,7 +450,7 @@ function M.aead_decrypt(key, nonce, ciphertext_with_tag, aad)
   -- Constant-time comparison.
   local diff = 0
   for i = 1, 16 do
-    diff = bor(diff, bxor(sbyte(received_tag, i), sbyte(expected_tag, i)))
+    diff = bor(diff, bxor(sbyte(received_tag, i) or 0, sbyte(expected_tag, i) or 0))
   end
   if diff ~= 0 then
     return nil, "authentication failed"
