@@ -40,10 +40,9 @@ end
 -- Insert a key with an associated value (default true).
 --: (self: Trie, key: string, value: (unknown | nil)) -> ()
 function M:insert(key, value)
-  local self_ = self --[[:! Trie]]
   if type(key) ~= "string" then return nil, "key must be a string" end
   if value == nil then value = true end
-  local node = self_._root
+  local node = self._root
   for i = 1, #key do
     local ch = key:byte(i)
     local node_ = node --[[:! TrieNode]]
@@ -54,7 +53,7 @@ function M:insert(key, value)
   end
   local node_ = node --[[:! TrieNode]]
   if node_.value == nil then
-    self_._size = self_._size + 1
+    self._size = self._size + 1
   end
   node_.value = value
   node_.has_value = true
@@ -63,9 +62,8 @@ end
 -- Exact match lookup. Returns value or nil.
 --: (self: Trie, key: string) -> (unknown | nil)
 function M:get(key)
-  local self_ = self --[[:! Trie]]
   if type(key) ~= "string" then return nil, "key must be a string" end
-  local node = walk(self_._root, key)
+  local node = walk(self._root, key)
   if node and node.has_value then return node.value end
   return nil
 end
@@ -73,39 +71,35 @@ end
 -- Returns true if the exact key exists.
 --: (self: Trie, key: string) -> boolean
 function M:has(key)
-  local self_ = self --[[:! Trie]]
   if type(key) ~= "string" then return false end
-  local node = walk(self_._root, key)
+  local node = walk(self._root, key)
   return (node ~= nil and node.has_value == true) and true or false
 end
 
 -- Remove a key. Returns old value or nil.
 --: (self: Trie, key: string) -> (unknown | nil)
 function M:remove(key)
-  local self_ = self --[[:! Trie]]
   if type(key) ~= "string" then return nil, "key must be a string" end
-  local node = walk(self_._root, key)
+  local node = walk(self._root, key)
   if not node or not node.has_value then return nil end
   local old = node.value
   node.value = nil
   node.has_value = false
-  self_._size = self_._size - 1
+  self._size = self._size - 1
   return old
 end
 
 -- Number of keys stored.
 --: (self: Trie) -> number
 function M:size()
-  local self_ = self --[[:! Trie]]
-  return self_._size
+  return self._size
 end
 
 -- Returns true if any stored key starts with prefix.
 --: (self: Trie, prefix: string) -> boolean
 function M:has_prefix(prefix)
-  local self_ = self --[[:! Trie]]
   if type(prefix) ~= "string" then return false end
-  local node = walk(self_._root, prefix)
+  local node = walk(self._root, prefix)
   if not node then return false end
   -- The subtree is non-empty if this node has a value or has children with values.
   if node.has_value then return true end
@@ -197,9 +191,8 @@ end
 -- Array of {key, value} for all keys starting with prefix (sorted).
 --: (self: Trie, prefix: string) -> { [integer]: { [integer]: unknown } }
 function M:find_prefix(prefix)
-  local self_ = self --[[:! Trie]]
   if type(prefix) ~= "string" then return {} end
-  local node = walk(self_._root, prefix)
+  local node = walk(self._root, prefix)
   if not node then return {} end
   local buf = {} --: { [integer]: integer }
   for i = 1, #prefix do buf[i] = prefix:byte(i) end
@@ -211,9 +204,8 @@ end
 -- Number of keys starting with prefix.
 --: (self: Trie, prefix: string) -> number
 function M:count_prefix(prefix)
-  local self_ = self --[[:! Trie]]
   if type(prefix) ~= "string" then return 0 end
-  local node = walk(self_._root, prefix)
+  local node = walk(self._root, prefix)
   if not node then return 0 end
   return count_subtree(node)
 end
@@ -222,9 +214,8 @@ end
 -- Returns (key, value) or nil.
 --: (self: Trie, str: string) -> ((string | nil), (unknown | nil))
 function M:longest_prefix(str)
-  local self_ = self --[[:! Trie]]
   if type(str) ~= "string" then return nil end
-  local node = self_._root --: TrieNode | nil
+  local node = self._root --: TrieNode | nil
   local last_key --: string | nil
   local last_val --: unknown | nil
   local node0 = node --[[:! TrieNode]]
@@ -249,9 +240,8 @@ end
 -- Up to limit keys starting with prefix (sorted). Default limit: all.
 --: (self: Trie, prefix: string, limit: (integer | nil)) -> { [integer]: string }
 function M:autocomplete(prefix, limit)
-  local self_ = self --[[:! Trie]]
   if type(prefix) ~= "string" then return {} end
-  local node = walk(self_._root, prefix)
+  local node = walk(self._root, prefix)
   if not node then return {} end
   local buf = {} --: { [integer]: integer }
   for i = 1, #prefix do buf[i] = prefix:byte(i) end
@@ -267,18 +257,16 @@ end
 -- Array of all keys (sorted).
 --: (self: Trie) -> { [integer]: string }
 function M:keys()
-  local self_ = self --[[:! Trie]]
   local results = {} --: { [integer]: string }
-  collect_keys(self_._root, {}, results)
+  collect_keys(self._root, {}, results)
   return results
 end
 
 -- Array of all values (key-sorted order).
 --: (self: Trie) -> { [integer]: unknown }
 function M:values()
-  local self_ = self --[[:! Trie]]
   local results = {} --: { [integer]: { [integer]: unknown } }
-  collect(self_._root, {}, results)
+  collect(self._root, {}, results)
   local vals = {} --: { [integer]: unknown }
   for i = 1, #results do
     vals[i] = results[i][2]
@@ -289,9 +277,8 @@ end
 -- Iterator: key, value (sorted order).
 --: (self: Trie) -> () -> ((string | nil), (unknown | nil))
 function M:pairs()
-  local self_ = self --[[:! Trie]]
   local results = {} --: { [integer]: { [integer]: unknown } }
-  collect(self_._root, {}, results)
+  collect(self._root, {}, results)
   local i = 0
   return function()
     i = i + 1
@@ -306,17 +293,15 @@ end
 -- Remove all keys.
 --: (self: Trie) -> ()
 function M:clear()
-  local self_ = self --[[:! Trie]]
-  self_._root = { children = {}, has_value = nil, value = nil }
-  self_._size = 0
+  self._root = { children = {}, has_value = nil, value = nil }
+  self._size = 0
 end
 
 -- Aliases for spec-compatible API names.
 -- delete: alias for remove. Returns true if key existed, false if not.
 --: (self: Trie, key: string) -> boolean
 function M:delete(key)
-  local self_ = self --[[:! Trie]]
-  local old = M.remove(self_, key)
+  local old = M.remove(self, key)
   return old ~= nil
 end
 

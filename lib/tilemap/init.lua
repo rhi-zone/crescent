@@ -28,12 +28,11 @@ end
 
 --: (self: Heap, key: integer, priority: number) -> nil
 function Heap:push(key, priority)
-  local self_ = self --[[:! Heap]]
-  self_._size = self_._size + 1
-  self_._data[self_._size] = { key = key, p = priority }
+  self._size = self._size + 1
+  self._data[self._size] = { key = key, p = priority }
   -- sift up
-  local i = self_._size
-  local d = self_._data
+  local i = self._size
+  local d = self._data
   while i > 1 do
     local parent = math.floor(i / 2)
     if d[parent].p > d[i].p then
@@ -47,16 +46,15 @@ end
 
 --: (self: Heap) -> integer | nil
 function Heap:pop()
-  local self_ = self --[[:! Heap]]
-  if self_._size == 0 then return nil end
-  local d = self_._data
+  if self._size == 0 then return nil end
+  local d = self._data
   local top = d[1].key
-  d[1] = d[self_._size]
-  d[self_._size] = nil --[[: any]]
-  self_._size = self_._size - 1
+  d[1] = d[self._size]
+  d[self._size] = nil --[[: any]]
+  self._size = self._size - 1
   -- sift down
   local i = 1
-  local n = self_._size
+  local n = self._size
   while true do
     local left = i * 2
     local right = i * 2 + 1
@@ -72,8 +70,7 @@ end
 
 --: (self: Heap) -> boolean
 function Heap:empty()
-  local self_ = self --[[:! Heap]]
-  return self_._size == 0
+  return self._size == 0
 end
 
 -- ========================
@@ -113,51 +110,45 @@ end
 
 --: (self: TileMap) -> number
 function TileMap:width()
-  local self_ = self --[[:! TileMap]]
-  return self_._width
+  return self._width
 end
 
 --: (self: TileMap) -> number
 function TileMap:height()
-  local self_ = self --[[:! TileMap]]
-  return self_._height
+  return self._height
 end
 
 --: (self: TileMap, x: number, y: number) -> boolean
 function TileMap:in_bounds(x, y)
-  local self_ = self --[[:! TileMap]]
-  return (x >= 0 and x < self_._width and y >= 0 and y < self_._height) and true or false
+  return (x >= 0 and x < self._width and y >= 0 and y < self._height) and true or false
 end
 
 --- Get tile at (x, y), 0-indexed. Returns nil if out of bounds.
 --: (self: TileMap, x: number, y: number) -> unknown | nil
 function TileMap:get(x, y)
-  local self_ = self --[[:! TileMap]]
-  if not self_:in_bounds(x, y) then return nil end
-  return self_._tiles[y * self_._width + x + 1]
+  if not self:in_bounds(x, y) then return nil end
+  return self._tiles[y * self._width + x + 1]
 end
 
 --- Set tile at (x, y), 0-indexed. Returns nil, errmsg if out of bounds.
 --: (self: TileMap, x: number, y: number, value: unknown) -> (boolean | nil, string | nil)
 function TileMap:set(x, y, value)
-  local self_ = self --[[:! TileMap]]
-  if not self_:in_bounds(x, y) then
+  if not self:in_bounds(x, y) then
     return nil, "coordinates out of bounds"
   end
-  self_._tiles[y * self_._width + x + 1] = value
+  self._tiles[y * self._width + x + 1] = value
   return true
 end
 
 --- Fill a rectangle with value. Clamps to map bounds.
 --: (self: TileMap, x: number, y: number, w: number, h: number, value: unknown) -> nil
 function TileMap:fill(x, y, w, h, value)
-  local self_ = self --[[:! TileMap]]
   local x1 = x < 0 and 0 or x
   local y1 = y < 0 and 0 or y
-  local x2 = (x + w - 1) >= self_._width and (self_._width - 1) or (x + w - 1)
-  local y2 = (y + h - 1) >= self_._height and (self_._height - 1) or (y + h - 1)
-  local width = self_._width
-  local tiles = self_._tiles
+  local x2 = (x + w - 1) >= self._width and (self._width - 1) or (x + w - 1)
+  local y2 = (y + h - 1) >= self._height and (self._height - 1) or (y + h - 1)
+  local width = self._width
+  local tiles = self._tiles
   for ry = y1, y2 do
     local base = ry * width
     for rx = x1, x2 do
@@ -169,35 +160,33 @@ end
 --- Fill the outer border with value.
 --: (self: TileMap, value: unknown) -> nil
 function TileMap:fill_border(value)
-  local self_ = self --[[:! TileMap]]
-  local w = self_._width
-  local h = self_._height
+  local w = self._width
+  local h = self._height
   -- top and bottom rows
-  self_:fill(0, 0, w, 1, value)
-  self_:fill(0, h - 1, w, 1, value)
+  self:fill(0, 0, w, 1, value)
+  self:fill(0, h - 1, w, 1, value)
   -- left and right columns (excluding corners already filled)
   if h > 2 then
-    self_:fill(0, 1, 1, h - 2, value)
-    self_:fill(w - 1, 1, 1, h - 2, value)
+    self:fill(0, 1, 1, h - 2, value)
+    self:fill(w - 1, 1, 1, h - 2, value)
   end
 end
 
 --- Copy a rectangular region to another position. Regions may overlap.
 --: (self: TileMap, src_x: number, src_y: number, w: number, h: number, dst_x: number, dst_y: number) -> nil
 function TileMap:copy_region(src_x, src_y, w, h, dst_x, dst_y)
-  local self_ = self --[[:! TileMap]]
   -- collect source tiles first (handles overlap)
   local buf = {}
   for ry = 0, h - 1 do
     for rx = 0, w - 1 do
-      buf[ry * w + rx + 1] = self_:get(src_x + rx, src_y + ry)
+      buf[ry * w + rx + 1] = self:get(src_x + rx, src_y + ry)
     end
   end
   for ry = 0, h - 1 do
     for rx = 0, w - 1 do
       local v = buf[ry * w + rx + 1]
       if v ~= nil then
-        self_:set(dst_x + rx, dst_y + ry, v)
+        self:set(dst_x + rx, dst_y + ry, v)
       end
     end
   end
@@ -206,14 +195,13 @@ end
 --- Flood fill starting at (x, y), replacing existing value with new value.
 --: (self: TileMap, x: number, y: number, value: unknown) -> nil
 function TileMap:flood_fill(x, y, value)
-  local self_ = self --[[:! TileMap]]
-  if not self_:in_bounds(x, y) then return end
-  local old = self_:get(x, y)
+  if not self:in_bounds(x, y) then return end
+  local old = self:get(x, y)
   if old == value then return end
   local queue = {} --: { [integer]: { [integer]: number } }
   local head = 1
   queue[1] = { x, y }
-  self_:set(x, y, value)
+  self:set(x, y, value)
   while head <= #queue do
     local cell = queue[head]
     head = head + 1
@@ -223,8 +211,8 @@ function TileMap:flood_fill(x, y, value)
     for _, d in ipairs(dirs) do
       local d_ = d --[[:! Dir]]
       local nx, ny = cx + d_[1], cy + d_[2]
-      if self_:in_bounds(nx, ny) and self_:get(nx, ny) == old then
-        self_:set(nx, ny, value)
+      if self:in_bounds(nx, ny) and self:get(nx, ny) == old then
+        self:set(nx, ny, value)
         queue[#queue + 1] = { nx, ny }
       end
     end
@@ -235,11 +223,10 @@ end
 -- Returns array of {x, y} (0-indexed).
 --: (self: TileMap, value: unknown) -> { [integer]: { [integer]: number } }
 function TileMap:find(value)
-  local self_ = self --[[:! TileMap]]
   local result = {} --: { [integer]: { [integer]: number } }
-  local w = self_._width
-  local h = self_._height
-  local tiles = self_._tiles
+  local w = self._width
+  local h = self._height
+  local tiles = self._tiles
   for i = 1, w * h do
     if tiles[i] == value then
       local idx = i - 1
@@ -252,10 +239,9 @@ end
 --- Count tiles with given value.
 --: (self: TileMap, value: unknown) -> integer
 function TileMap:count(value)
-  local self_ = self --[[:! TileMap]]
   local n = 0
-  local tiles = self_._tiles
-  for i = 1, self_._width * self_._height do
+  local tiles = self._tiles
+  for i = 1, self._width * self._height do
     if tiles[i] == value then n = n + 1 end
   end
   return n
@@ -264,14 +250,13 @@ end
 --- Return 4-directional neighbors as array of {x, y, value}.
 --: (self: TileMap, x: number, y: number) -> { [integer]: { [integer]: unknown } }
 function TileMap:neighbors4(x, y)
-  local self_ = self --[[:! TileMap]]
   local result = {} --: { [integer]: { [integer]: unknown } }
   local dirs = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } } --: { [integer]: Dir }
   for _, d in ipairs(dirs) do
     local d_ = d --[[:! Dir]]
     local nx, ny = x + d_[1], y + d_[2]
-    if self_:in_bounds(nx, ny) then
-      result[#result + 1] = { nx, ny, self_:get(nx, ny) }
+    if self:in_bounds(nx, ny) then
+      result[#result + 1] = { nx, ny, self:get(nx, ny) }
     end
   end
   return result
@@ -280,14 +265,13 @@ end
 --- Return 8-directional neighbors as array of {x, y, value}.
 --: (self: TileMap, x: number, y: number) -> { [integer]: { [integer]: unknown } }
 function TileMap:neighbors8(x, y)
-  local self_ = self --[[:! TileMap]]
   local result = {} --: { [integer]: { [integer]: unknown } }
   for dy = -1, 1 do
     for dx = -1, 1 do
       if not (dx == 0 and dy == 0) then
         local nx, ny = x + dx, y + dy
-        if self_:in_bounds(nx, ny) then
-          result[#result + 1] = { nx, ny, self_:get(nx, ny) }
+        if self:in_bounds(nx, ny) then
+          result[#result + 1] = { nx, ny, self:get(nx, ny) }
         end
       end
     end
@@ -310,9 +294,8 @@ end
 -- Returns array of {x, y} from start to goal (inclusive), or nil, errmsg.
 --: (self: TileMap, sx: number, sy: number, gx: number, gy: number, opts: { passable: ((unknown) -> boolean) | nil, diagonal: boolean | nil, heuristic: string | nil } | nil) -> ({ [integer]: { [integer]: number } } | nil, string | nil)
 function TileMap:astar(sx, sy, gx, gy, opts)
-  local self_ = self --[[:! TileMap]]
   local opts_ = (opts or {}) --[[:! { passable: ((unknown) -> boolean) | nil, diagonal: boolean | nil, heuristic: string | nil }]]
-  local w = self_._width
+  local w = self._width
   local passable = opts_.passable or function(t) return t ~= 0 end
   local diagonal = opts_.diagonal or false
   local hname = opts_.heuristic or "manhattan"
@@ -332,10 +315,10 @@ function TileMap:astar(sx, sy, gx, gy, opts)
     end
   end
 
-  if not self_:in_bounds(sx, sy) then return nil, "start out of bounds" end
-  if not self_:in_bounds(gx, gy) then return nil, "goal out of bounds" end
-  if not passable(self_:get(sx, sy)) then return nil, "start is not passable" end
-  if not passable(self_:get(gx, gy)) then return nil, "goal is not passable" end
+  if not self:in_bounds(sx, sy) then return nil, "start out of bounds" end
+  if not self:in_bounds(gx, gy) then return nil, "goal out of bounds" end
+  if not passable(self:get(sx, sy)) then return nil, "start is not passable" end
+  if not passable(self:get(gx, gy)) then return nil, "goal is not passable" end
 
   local start_k = key(sx, sy, w)
   local goal_k = key(gx, gy, w)
@@ -345,8 +328,7 @@ function TileMap:astar(sx, sy, gx, gy, opts)
   local came_from = {} --: { [integer]: integer | nil }
   local closed = {} --: { [integer]: boolean }
 
-  local open_ = open --[[:! Heap]]
-  open_:push(start_k, heuristic(sx, sy))
+  open:push(start_k, heuristic(sx, sy))
 
   local dirs4 = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } } --: { [integer]: Dir }
   local dirs8 = {
@@ -355,8 +337,8 @@ function TileMap:astar(sx, sy, gx, gy, opts)
   } --: { [integer]: Dir }
   local dirs = (diagonal and dirs8 or dirs4) --[[:! { [integer]: Dir }]]
 
-  while not open_:empty() do
-    local cur_k = open_:pop()
+  while not open:empty() do
+    local cur_k = open:pop()
     local cur_k_ = cur_k --[[:! integer]]
     if closed[cur_k_] then goto continue end
     closed[cur_k_] = true
@@ -381,7 +363,7 @@ function TileMap:astar(sx, sy, gx, gy, opts)
     for _, d in ipairs(dirs) do
       local d_ = d --[[:! Dir]]
       local nx, ny = cur_x + d_[1], cur_y + d_[2]
-      if self_:in_bounds(nx, ny) and passable(self_:get(nx, ny)) then
+      if self:in_bounds(nx, ny) and passable(self:get(nx, ny)) then
         local nk = key(nx, ny, w)
         if not closed[nk] then
           local move_cost = (d[1] ~= 0 and d[2] ~= 0) and 1.41421356 or 1
@@ -389,7 +371,7 @@ function TileMap:astar(sx, sy, gx, gy, opts)
           if g[nk] == nil or new_g < g[nk] then
             g[nk] = new_g
             came_from[nk] = cur_k_
-            open_:push(nk, new_g + heuristic(nx, ny))
+            open:push(nk, new_g + heuristic(nx, ny))
           end
         end
       end
@@ -411,17 +393,18 @@ local function make_rng(seed)
   if not seed then error("tilemap: seed is required") end
   local state = seed --: integer
   local rng = {
+    --: (self: Rng) -> integer
     next = function(self)
       state = math.floor((state * 1664525 + 1013904223) % 4294967296)
       return state
     end,
+    --: (self: Rng, lo: integer, hi: integer) -> integer
     range = function(self, lo, hi)
-      local s = self --[[:! Rng]]
-      return lo + (s:next() % (hi - lo + 1))
+      return lo + (self:next() % (hi - lo + 1))
     end,
+    --: (self: Rng) -> number
     float = function(self)
-      local s = self --[[:! Rng]]
-      return s:next() / 4294967295
+      return self:next() / 4294967295
     end,
   } --[[: any]]
   return rng --[[:! Rng]]
@@ -569,15 +552,14 @@ end
 -- For simplicity, clamps tile values to [0, 255].
 --: (self: TileMap) -> string
 function TileMap:serialize()
-  local self_ = self --[[:! TileMap]]
   local parts = {}
-  local tiles = self_._tiles
+  local tiles = self._tiles
   for i = 1, #tiles do
     local v = tiles[i] --[[:! number]]
     if v < 0 then v = 0 elseif v > 255 then v = 255 end
     parts[i] = string.format("%02x", v)
   end
-  return self_._width .. ":" .. self_._height .. ":" .. table.concat(parts)
+  return self._width .. ":" .. self._height .. ":" .. table.concat(parts)
 end
 
 --- Deserialize a tilemap from a serialized string.

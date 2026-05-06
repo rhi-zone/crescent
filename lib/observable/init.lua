@@ -22,7 +22,7 @@ Observable.__index = Observable
 --- It may return a teardown function.
 --: (SubscribeFn) -> Observable
 function M.create(subscribe_fn)
-  return setmetatable({ _subscribe = subscribe_fn }, Observable) --[[:! Observable]]
+  return setmetatable({ _subscribe = subscribe_fn }, Observable)
 end
 
 --- Create an observable that emits the given values then completes.
@@ -75,7 +75,7 @@ local function safe_observer(raw)
   return setmetatable({
     _raw = raw,
     _stopped = false,
-  }, SafeObserver) --[[:! SafeObserverT]]
+  }, SafeObserver)
 end
 
 --: (SafeObserverT, unknown) -> nil

@@ -61,9 +61,9 @@ mt.__index = M
 -- ── String utilities ─────────────────────────────────────────────────────────
 
 -- Get a single byte at position i as integer.
---: (s: string, i: number) -> integer
+--: (s: string, i: integer) -> integer
 local function getbyte(s, i)
-  return byte(s, --[[:! integer]] i) or 0
+  return byte(s, i) or 0
 end
 
 -- Build a string from a table of byte values, handling LuaJIT's unpack limit.
@@ -320,7 +320,7 @@ end
 --: (v: number | string | Bignum) -> (Bignum | nil, string | nil)
 function M.new(v)
   if type(v) == "table" and getmetatable(v) == mt then
-    local bv = --[[:! Bignum]] v
+    local bv = v --[[:! Bignum]]
     return setmetatable({ s = bv.s, digits = bv.digits, exp = bv.exp }, mt)
   end
   if type(v) == "number" then
@@ -333,7 +333,7 @@ function M.new(v)
   if type(v) ~= "string" then
     return nil, "bignum.new: expected string or number, got " .. type(v)
   end
-  local vs = --[[:! string]] v
+  local vs = v --[[: string]]
   local str = string.match(vs, "^%s*(.-)%s*$") or ""
   if str == "" then return nil, "bignum.new: empty string" end
 
@@ -363,7 +363,9 @@ function M.new(v)
     end
   end
 
-  local all_digits = (--[[:! string]] int_part) .. (--[[:! string]] frac_part)
+  local ip = int_part --[[:! string]]
+  local fp = frac_part --[[:! string]]
+  local all_digits = ip .. fp
   if all_digits == "" then
     return nil, "bignum.new: no digits found in: " .. tostring(v)
   end
@@ -372,7 +374,7 @@ function M.new(v)
   end
 
   -- exp = number of digits before the decimal point + scientific exponent
-  local exp = #(--[[:! string]] int_part) + exp_offset
+  local exp = #ip + exp_offset
   return make(s, all_digits, exp)
 end
 

@@ -104,12 +104,12 @@ end
 
 --- Register an event listener.
 -- event: "done" | "error" | "drain"
+--: (AQObj, string, any) -> nil
 function Queue:on(event, fn)
-  local self_ = self --[[:! AQObj]]
-  if not self_._listeners[event] then
-    self_._listeners[event] = {}
+  if not self._listeners[event] then
+    self._listeners[event] = {}
   end
-  local list = self_._listeners[event]
+  local list = self._listeners[event]
   list[#list + 1] = fn
 end
 
@@ -126,80 +126,80 @@ end
 -- fn_or_spec may be:
 --   function(done) ... done(err, result) end
 --   { fn=fn, priority=N, id="...", data={...} }
+--: (AQObj, unknown) -> AQTask
 function Queue:push(fn_or_spec)
-  local self_ = self --[[:! AQObj]]
   local spec
   if type(fn_or_spec) == "function" then
     spec = { fn = fn_or_spec } --[[:! { fn: (AQDoneCb) -> nil, priority: integer | nil, id: any, data: any }]]
   else
     spec = fn_or_spec --[[:! { fn: (AQDoneCb) -> nil, priority: integer | nil, id: any, data: any }]]
   end
-  self_._seq = self_._seq + 1
+  self._seq = self._seq + 1
   local task = {
     fn           = spec.fn,
     priority     = spec.priority or 10,
     id           = spec.id,
     data         = spec.data,
-    seq          = self_._seq,
-    retries_left = self_._retry,
+    seq          = self._seq,
+    retries_left = self._retry,
     cancelled    = false,
     retry_after  = nil --[[:! number | nil]],
   } --[[: any]] --[[:! AQTask]]
-  pq_insert(self_._pending, task)
-  self_._stats.pending = self_._stats.pending + 1
+  pq_insert(self._pending, task)
+  self._stats.pending = self._stats.pending + 1
   return task
 end
 
 --- Pause the queue. No new tasks will be started until resume().
+--: (AQObj) -> nil
 function Queue:pause()
-  local self_ = self --[[:! AQObj]]
-  self_._paused = true
+  self._paused = true
 end
 
 --- Resume the queue.
+--: (AQObj) -> nil
 function Queue:resume()
-  local self_ = self --[[:! AQObj]]
-  self_._paused = false
+  self._paused = false
 end
 
 --- Cancel a task by id. If it is pending it will be skipped; active tasks
 --- are marked cancelled but may still run to completion in this tick.
+--: (AQObj, any) -> nil
 function Queue:cancel(id)
-  local self_ = self --[[:! AQObj]]
   -- Mark pending tasks
-  for i = 1, #self_._pending do
-    if self_._pending[i].id == id then
-      self_._pending[i].cancelled = true
+  for i = 1, #self._pending do
+    if self._pending[i].id == id then
+      self._pending[i].cancelled = true
     end
   end
   -- Mark active tasks
-  for i = 1, #self_._active do
-    if self_._active[i].task.id == id then
-      self_._active[i].task.cancelled = true
+  for i = 1, #self._active do
+    if self._active[i].task.id == id then
+      self._active[i].task.cancelled = true
     end
   end
 end
 
 --- Cancel all pending tasks.
+--: (AQObj) -> nil
 function Queue:cancel_all()
-  local self_ = self --[[:! AQObj]]
-  for i = 1, #self_._pending do
-    self_._pending[i].cancelled = true
+  for i = 1, #self._pending do
+    self._pending[i].cancelled = true
   end
 end
 
 --- Remove all pending tasks (does not affect active ones).
+--: (AQObj) -> nil
 function Queue:clear()
-  local self_ = self --[[:! AQObj]]
-  local removed = #self_._pending
-  self_._pending = {}
-  self_._stats.pending = math.max(0, self_._stats.pending - removed)
+  local removed = #self._pending
+  self._pending = {}
+  self._stats.pending = math.max(0, self._stats.pending - removed)
 end
 
 --- Return current statistics.
+--: (AQObj) -> AQStats
 function Queue:stats()
-  local self_ = self --[[:! AQObj]]
-  local s = self_._stats
+  local s = self._stats
   return {
     pending   = s.pending,
     active    = s.active,
@@ -314,19 +314,19 @@ end
 --- Advance the scheduler by one tick.
 -- clock: optional current time (os.clock() value). Defaults to os.clock().
 -- Returns (active_count, pending_count).
+--: (AQObj, number | nil) -> (integer, integer)
 function Queue:tick(clock)
-  local self_ = self --[[:! AQObj]]
-  local clock_ = clock or self_._clock_fn() --: number
+  local clock_ = clock or self._clock_fn() --: number
 
   -- 1. Continue any active coroutines that have not finished yet.
   local i = 1
-  while i <= #self_._active do
-    local state = self_._active[i]
+  while i <= #self._active do
+    local state = self._active[i]
     local task  = state.task
 
     -- Check timeout
-    if self_._timeout and not state.done then
-      if clock_ - state.started_at >= self_._timeout then
+    if self._timeout and not state.done then
+      if clock_ - state.started_at >= self._timeout then
         state.done = true
         state.err  = "timeout"
       end
@@ -348,12 +348,12 @@ function Queue:tick(clock)
 
       if err and task.retries_left > 0 then
         -- Remove from active first
-        arr_remove(self_._active, i)
-        self_._stats.active = math.max(0, self_._stats.active - 1)
-        reschedule_retry(self_, task, clock_)
+        arr_remove(self._active, i)
+        self._stats.active = math.max(0, self._stats.active - 1)
+        reschedule_retry(self, task, clock_)
         -- don't advance i, next element shifted down
       else
-        finish_task(self_, state, err, result)
+        finish_task(self, state, err, result)
         -- don't advance i
       end
     else
@@ -362,61 +362,61 @@ function Queue:tick(clock)
   end
 
   -- 2. Start new tasks if capacity allows and queue is not paused.
-  if not self_._paused then
+  if not self._paused then
     -- Remove cancelled pending tasks first
     local j = 1
-    while j <= #self_._pending do
-      local task = self_._pending[j]
+    while j <= #self._pending do
+      local task = self._pending[j]
       if task.cancelled then
-        arr_remove(self_._pending, j)
-        self_._stats.pending = math.max(0, self_._stats.pending - 1)
+        arr_remove(self._pending, j)
+        self._stats.pending = math.max(0, self._stats.pending - 1)
       else
         j = j + 1
       end
     end
 
-    while #self_._active < self_._concurrency
-        and #self_._pending > 0
-        and rate_ok(self_, clock_) do
-      local task = self_._pending[1]
+    while #self._active < self._concurrency
+        and #self._pending > 0
+        and rate_ok(self, clock_) do
+      local task = self._pending[1]
 
       -- Skip tasks whose retry_after hasn't elapsed yet.
       if task.retry_after and clock_ < task.retry_after then
         break
       end
 
-      arr_remove(self_._pending, 1)
-      self_._stats.pending = math.max(0, self_._stats.pending - 1)
+      arr_remove(self._pending, 1)
+      self._stats.pending = math.max(0, self._stats.pending - 1)
 
-      rate_consume(self_)
-      start_task(self_, task, clock_)
+      rate_consume(self)
+      start_task(self, task, clock_)
     end
   end
 
   -- 3. Emit drain if both queues are empty.
-  if #self_._active == 0 and #self_._pending == 0 then
-    emit(self_, "drain")
+  if #self._active == 0 and #self._pending == 0 then
+    emit(self, "drain")
   end
 
-  return #self_._active, #self_._pending
+  return #self._active, #self._pending
 end
 
 --- Drive tick() until all tasks are complete.
 -- Uses os.clock() for time advancement. Advances clock by retry_delay
 -- as needed so retries eventually run.
+--: (AQObj) -> nil
 function Queue:run_all()
-  local self_ = self --[[:! AQObj]]
-  local clock = self_._clock_fn()
+  local clock = self._clock_fn()
   local max_iterations = 100000  -- safety guard
   local iter = 0
   while iter < max_iterations do
     iter = iter + 1
-    local active, pending = Queue.tick(self_, clock)
+    local active, pending = Queue.tick(self, clock)
     if active == 0 and pending == 0 then break end
 
     -- If there are pending tasks with retry_after in the future, advance clock.
     local min_retry = math.huge
-    for _, task in ipairs(self_._pending) do
+    for _, task in ipairs(self._pending) do
       local ra = task.retry_after
       if ra then
         local ra_ = ra --[[:! number]]
@@ -435,8 +435,9 @@ function Queue:run_all()
 end
 
 --- Wait until the queue is empty (synchronous; equivalent to run_all for pure Lua).
+--: (AQObj) -> nil
 function Queue:drain()
-  self:run_all()
+  Queue.run_all(self)
 end
 
 -- ---------------------------------------------------------------------------
@@ -472,74 +473,74 @@ end
 --- Add an item to the batcher.
 -- clock: optional current time (os.clock() value). Used to record when the
 -- first item in a bucket arrived, so flush(clock) can respect the delay.
+--: (BatcherObj, any, number | nil) -> nil
 function Batcher:push(item, clock)
-  local self_ = self --[[:! BatcherObj]]
-  local key = self_._key and self_._key(item) or "__default__"
+  local key = self._key and self._key(item) or "__default__"
   local key_ = key --[[:! string]]
-  if not self_._buckets[key_] then
-    self_._buckets[key_] = {}
-    self_._bucket_order[#self_._bucket_order + 1] = key_
-    self_._first_at[key_] = clock or self_._clock_fn()
+  if not self._buckets[key_] then
+    self._buckets[key_] = {}
+    self._bucket_order[#self._bucket_order + 1] = key_
+    self._first_at[key_] = clock or self._clock_fn()
   end
-  local bucket = self_._buckets[key_]
+  local bucket = self._buckets[key_]
   bucket[#bucket + 1] = item
 
   -- Auto-flush if batch_size reached
-  if #bucket >= self_._batch_size then
-    Batcher._flush_key(self_, key_)
+  if #bucket >= self._batch_size then
+    Batcher._flush_key(self, key_)
   end
 end
 
 --- Flush a specific key bucket.
+--: (BatcherObj, string) -> nil
 function Batcher:_flush_key(key)
-  local self_ = self --[[:! BatcherObj]]
-  local bucket = self_._buckets[key]
+  local bucket = self._buckets[key]
   if not bucket or #bucket == 0 then return end
 
   local batch = bucket
-  self_._buckets[key] = nil
-  self_._first_at[key] = nil
+  self._buckets[key] = nil
+  self._first_at[key] = nil
 
   -- Remove from order list
-  for i = 1, #self_._bucket_order do
-    if self_._bucket_order[i] == key then
-      arr_remove(self_._bucket_order, i)
+  for i = 1, #self._bucket_order do
+    if self._bucket_order[i] == key then
+      arr_remove(self._bucket_order, i)
       break
     end
   end
 
-  if self_._process then
-    self_._process(batch, function(err, result)
+  if self._process then
+    self._process(batch, function(err, result)
     end)
   end
 end
 
 --- Flush all pending items, respecting delay.
 -- clock: optional current time. Buckets whose delay has elapsed are flushed.
+--: (BatcherObj, number | nil) -> nil
 function Batcher:flush(clock)
-  local self_ = self --[[:! BatcherObj]]
-  local clock_ = clock or self_._clock_fn() --: number
+  local clock_ = clock or self._clock_fn() --: number
   local keys_to_flush = {} --: { [integer]: string }
-  for _, key in ipairs(self_._bucket_order) do
-    local first = self_._first_at[key]
-    if first and (clock_ - first) >= self_._delay then
+  for _, key in ipairs(self._bucket_order) do
+    local first = self._first_at[key]
+    if first and (clock_ - first) >= self._delay then
       keys_to_flush[#keys_to_flush + 1] = key
     end
   end
   for _, key in ipairs(keys_to_flush) do
-    Batcher._flush_key(self_, key)
+    Batcher._flush_key(self, key)
   end
 end
 
 --- Flush all pending items immediately regardless of delay.
+--: (BatcherObj) -> nil
 function Batcher:flush_all()
-  local self_ = self --[[:! BatcherObj]]
   local keys = {} --: { [integer]: string }
-  for _, key in ipairs(self_._bucket_order) do
+  for _, key in ipairs(self._bucket_order) do
     keys[#keys + 1] = key
   end
   for _, key in ipairs(keys) do
-    Batcher._flush_key(self_, key)
+    Batcher._flush_key(self, key)
   end
 end
 

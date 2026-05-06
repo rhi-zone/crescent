@@ -10,6 +10,8 @@ M._tier = "pure"
 --:: LeafNode = { type: string, label: any, counts: LabelCounts, total: integer }
 --:: BranchNode = { type: string, feature: string, children: { [any]: any }, default_label: any, counts: LabelCounts, total: integer }
 --:: TreeNode = { type: string, label: any, counts: LabelCounts, total: integer, feature: string, children: { [any]: any }, default_label: any }
+--:: Tree = { _root: TreeNode, predict: (self: Tree, example: unknown) -> unknown, predict_proba: (self: Tree, example: unknown) -> { [string]: number }, predict_all: (self: Tree, examples: { [integer]: any }) -> { [integer]: unknown }, accuracy: (self: Tree, test_dataset: { [integer]: any }) -> number, depth: (self: Tree) -> integer, node_count: (self: Tree) -> integer, feature_importance: (self: Tree) -> { [string]: number }, print: (self: Tree) -> string, to_rules: (self: Tree) -> { [integer]: string }, serialize: (self: Tree) -> unknown }
+--:: Forest = { _trees: { [integer]: Tree }, predict: (self: Forest, example: unknown) -> unknown, predict_proba: (self: Forest, example: unknown) -> { [string]: number }, accuracy: (self: Forest, test_dataset: { [integer]: any }) -> number, feature_importance: (self: Forest) -> { [string]: number } }
 
 -- Math helpers
 
@@ -464,71 +466,71 @@ end
 local Tree = {}
 Tree.__index = Tree
 
+--: (self: Tree, example: unknown) -> unknown
 function Tree:predict(example)
-  local root_ = self._root --[[:! TreeNode]]
-  return traverse(root_, example)
+  return traverse(self._root, example)
 end
 
+--: (self: Tree, example: unknown) -> { [string]: number }
 function Tree:predict_proba(example)
-  local root_ = self._root --[[:! TreeNode]]
-  return traverse_proba(root_, example)
+  return traverse_proba(self._root, example)
 end
 
+--: (self: Tree, examples: { [integer]: any }) -> { [integer]: unknown }
 function Tree:predict_all(examples)
-  local root_ = self._root --[[:! TreeNode]]
   local results = {}
   for i, ex in ipairs(examples) do
-    results[i] = traverse(root_, ex)
+    results[i] = traverse(self._root, ex)
   end
   return results
 end
 
+--: (self: Tree, test_dataset: { [integer]: any }) -> number
 function Tree:accuracy(test_dataset)
-  local root_ = self._root --[[:! TreeNode]]
   local correct = 0
   local total = #test_dataset
   if total == 0 then return 1.0 end
   for _, ex in ipairs(test_dataset) do
-    if traverse(root_, ex) == ex.label then
+    if traverse(self._root, ex) == ex.label then
       correct = correct + 1
     end
   end
   return correct / total
 end
 
+--: (self: Tree) -> integer
 function Tree:depth()
-  local root_ = self._root --[[:! TreeNode]]
-  return tree_depth(root_)
+  return tree_depth(self._root)
 end
 
+--: (self: Tree) -> integer
 function Tree:node_count()
-  local root_ = self._root --[[:! TreeNode]]
-  return tree_node_count(root_)
+  return tree_node_count(self._root)
 end
 
+--: (self: Tree) -> { [string]: number }
 function Tree:feature_importance()
-  local root_ = self._root --[[:! TreeNode]]
   local importance = {} --: { [string]: number }
-  collect_importance(root_, root_.total, importance)
+  collect_importance(self._root, self._root.total, importance)
   return normalize_scores(importance)
 end
 
+--: (self: Tree) -> string
 function Tree:print()
-  local root_ = self._root --[[:! TreeNode]]
-  return tree_to_string(root_, nil, nil)
+  return tree_to_string(self._root, nil, nil)
 end
 
+--: (self: Tree) -> { [integer]: string }
 function Tree:to_rules()
-  local root_ = self._root --[[:! TreeNode]]
   local rules = {} --: { [integer]: string }
   local path = {} --: { [integer]: string }
-  collect_rules(root_, path, rules)
+  collect_rules(self._root, path, rules)
   return rules
 end
 
+--: (self: Tree) -> unknown
 function Tree:serialize()
-  local root_ = self._root --[[:! TreeNode]]
-  return serialize_node(root_)
+  return serialize_node(self._root)
 end
 
 -- Main train function
@@ -565,12 +567,13 @@ end
 local Forest = {}
 Forest.__index = Forest
 
+--:: Forest = { _trees: { [integer]: Tree } }
+
+--: (self: Forest, example: unknown) -> unknown
 function Forest:predict(example)
-  local trees_ = self._trees --[[:! { [integer]: any }]]
   local votes = {} --: { [string]: integer }
-  for _, tree in ipairs(trees_) do
-    local tree_ = tree --[[: any]]
-    local lbl = tostring(tree_:predict(example))
+  for _, tree in ipairs(self._trees) do
+    local lbl = tostring(tree:predict(example))
     votes[lbl] = (votes[lbl] or 0) + 1
   end
   local best_lbl, best_cnt = nil, -1
@@ -583,13 +586,12 @@ function Forest:predict(example)
   return best_lbl
 end
 
+--: (self: Forest, example: unknown) -> { [string]: number }
 function Forest:predict_proba(example)
-  local trees_ = self._trees --[[:! { [integer]: any }]]
   local sum_proba = {} --: { [string]: number }
-  local n = #trees_
-  for _, tree in ipairs(trees_) do
-    local tree_ = tree --[[: any]]
-    local proba = tree_:predict_proba(example) --[[:! { [string]: number }]]
+  local n = #self._trees
+  for _, tree in ipairs(self._trees) do
+    local proba = tree:predict_proba(example)
     for lbl, p in pairs(proba) do
       sum_proba[lbl] = (sum_proba[lbl] or 0) + p
     end
@@ -601,17 +603,16 @@ function Forest:predict_proba(example)
   return avg
 end
 
+--: (self: Forest, test_dataset: { [integer]: any }) -> number
 function Forest:accuracy(test_dataset)
-  local trees_ = self._trees --[[:! { [integer]: any }]]
   local correct = 0
   local total = #test_dataset
   if total == 0 then return 1.0 end
   for _, ex in ipairs(test_dataset) do
     -- predict by voting directly to avoid self-type issue
     local votes = {} --: { [string]: integer }
-    for _, tree in ipairs(trees_) do
-      local tree_ = tree --[[: any]]
-      local lbl = tostring(tree_:predict(ex))
+    for _, tree in ipairs(self._trees) do
+      local lbl = tostring(tree:predict(ex))
       votes[lbl] = (votes[lbl] or 0) + 1
     end
     local best_lbl, best_cnt = nil, -1
@@ -625,13 +626,12 @@ function Forest:accuracy(test_dataset)
   return correct / total
 end
 
+--: (self: Forest) -> { [string]: number }
 function Forest:feature_importance()
-  local trees_ = self._trees --[[:! { [integer]: any }]]
   local sum_importance = {} --: { [string]: number }
-  local n = #trees_
-  for _, tree in ipairs(trees_) do
-    local tree_ = tree --[[: any]]
-    local imp = tree_:feature_importance() --[[:! { [string]: number }]]
+  local n = #self._trees
+  for _, tree in ipairs(self._trees) do
+    local imp = tree:feature_importance()
     for f, score in pairs(imp) do
       sum_importance[f] = (sum_importance[f] or 0) + score
     end

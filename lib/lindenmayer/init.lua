@@ -135,8 +135,8 @@ local function apply_rules_once(s, plain, ctx_rules, rng)
     -- Check parametric context rules first
     if ctx_rules[ch] then
       local sym, params, end_pos = match_parametric(s, i)
-      if sym and params then
-        local end_pos_ = end_pos --[[:! integer]]
+      if sym and params and end_pos then
+        local end_pos_ = end_pos
         for _, crule in ipairs(ctx_rules[sym]) do
           if crule.kind == "parametric" then
             local vfn = crule.value --[[:! (...unknown) -> unknown]]
@@ -172,7 +172,7 @@ local function apply_rules_once(s, plain, ctx_rules, rng)
           if match then
             local value = crule.value
             if type(value) == "string" then
-              parts_[#parts + 1] = value --[[:! string]]
+              parts_[#parts + 1] = value
             elseif type(value) == "function" then
               local vfn2 = value --[[:! (...unknown) -> string]]
               parts_[#parts + 1] = vfn2({})
@@ -191,7 +191,7 @@ local function apply_rules_once(s, plain, ctx_rules, rng)
         if rule == nil then
           parts_[#parts + 1] = ch
         elseif type(rule) == "string" then
-          parts_[#parts + 1] = rule --[[:! string]]
+          parts_[#parts + 1] = rule
         elseif type(rule) == "function" then
           local rfn = rule --[[:! (...unknown) -> string]]
           parts_[#parts + 1] = rfn({})
@@ -293,10 +293,10 @@ local function compute_bounds(cmds)
   local seen = false
   for _, cmd in ipairs(cmds) do
     if cmd.type == "line" or cmd.type == "move" then
-      local x1 = cmd.x1 --[[:! number]]
-      local y1 = cmd.y1 --[[:! number]]
-      local x2 = cmd.x2 --[[:! number]]
-      local y2 = cmd.y2 --[[:! number]]
+      local x1 = cmd.x1
+      local y1 = cmd.y1
+      local x2 = cmd.x2
+      local y2 = cmd.y2
       if not seen then
         min_x, min_y = x1, y1
         max_x, max_y = x1, y1
@@ -394,10 +394,9 @@ function Ls:generate(n)
   if type(n) ~= "number" or n < 0 or n ~= math.floor(n) then
     return nil, "generate: n must be a non-negative integer"
   end
-  local self_ = self --[[:! LsObj]]
-  local s = self_._axiom
+  local s = self._axiom
   for _ = 1, n do
-    s = apply_rules_once(s, self_._plain, self_._ctx, self_._rng)
+    s = apply_rules_once(s, self._plain, self._ctx, self._rng)
   end
   return s
 end
@@ -407,10 +406,9 @@ function Ls:interpret(str, opts)
   if type(str) ~= "string" then
     return nil, "interpret: argument must be a string"
   end
-  local self_ = self --[[:! LsObj]]
   local merged = {} --[[: any]]
   if opts then for k, v in pairs(opts) do merged --[[: any]][k] = v end end
-  if merged.angle == nil then merged.angle = self_._angle end
+  if merged.angle == nil then merged.angle = self._angle end
   return interpret_string(str, merged --[[:! LsOpts]])
 end
 
@@ -427,10 +425,9 @@ function Ls:to_svg(str, opts)
   if type(str) ~= "string" then
     return nil, "to_svg: first argument must be a string"
   end
-  local self_ = self --[[:! LsObj]]
   local merged = {} --[[: any]]
   if opts then for k, v in pairs(opts) do merged --[[: any]][k] = v end end
-  if merged.angle == nil then merged.angle = self_._angle end
+  if merged.angle == nil then merged.angle = self._angle end
   local cmds = interpret_string(str, merged --[[:! LsOpts]])
   return to_svg(cmds, opts)
 end

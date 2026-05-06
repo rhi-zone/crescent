@@ -152,119 +152,119 @@ end
 
 -- history:execute(command, ...) -> undo_data or (nil, err)
 -- All args after command are forwarded to command.execute
+--: (self: HistObj, command: HistCmd, ...any) -> any
 function History:execute(command, ...)
-  local self_ = self --[[:! HistObj]]
   local args_list = { ... } --: { [integer]: any }
 
-  if self_._batch then
+  if self._batch then
     -- Accumulate into batch
-    local undo_data, err = raw_execute(command --[[:! HistCmd]], args_list)
+    local undo_data, err = raw_execute(command, args_list)
     if undo_data == nil and err then return nil, err end
     local entry_any = {
-      command   = command --[[:! HistCmd]],
+      command   = command,
       args_list = args_list,
       undo_data = undo_data,
-      time      = self_._time_fn(),
+      time      = self._time_fn(),
       name      = nil,
       is_batch  = false,
       batch_entries = nil,
     } --[[: any]]
     local entry = entry_any --[[:! HistEntry]]
-    local batch = self_._batch --[[:! { [integer]: HistEntry }]]
+    local batch = self._batch --[[:! { [integer]: HistEntry }]]
     batch[#batch + 1] = entry
-    local on_exec = self_._on_exec
+    local on_exec = self._on_exec
     if on_exec then on_exec(command, ...) end
-    local rec = self_._recording
+    local rec = self._recording
     if rec then
       local recording = rec --[[:! { [integer]: { command: HistCmd, args_list: { [integer]: any } } }]]
-      recording[#recording + 1] = { command = command --[[:! HistCmd]], args_list = args_list }
+      recording[#recording + 1] = { command = command, args_list = args_list }
     end
     return undo_data
   end
 
-  local undo_data, err = raw_execute(command --[[:! HistCmd]], args_list)
+  local undo_data, err = raw_execute(command, args_list)
   if undo_data == nil and err then return nil, err end
 
   local entry = {
-    command   = command --[[:! HistCmd]],
+    command   = command,
     args_list = args_list,
     undo_data = undo_data,
-    time      = self_._time_fn(),
-    name      = (command --[[:! HistCmd]]).name,
+    time      = self._time_fn(),
+    name      = command.name,
     is_batch  = false,
     batch_entries = nil,
   } --: HistEntry
-  push_undo(self_, entry)
+  push_undo(self, entry)
   -- New execute clears redo stack
-  self_._redo = {}
+  self._redo = {}
 
-  local on_exec = self_._on_exec
+  local on_exec = self._on_exec
   if on_exec then on_exec(command, ...) end
-  local rec = self_._recording
+  local rec = self._recording
   if rec then
     local recording = rec --[[:! { [integer]: { command: HistCmd, args_list: { [integer]: any } } }]]
-    recording[#recording + 1] = { command = command --[[:! HistCmd]], args_list = args_list }
+    recording[#recording + 1] = { command = command, args_list = args_list }
   end
   return undo_data
 end
 
 -- history:undo(...) -> bool
 -- Varargs are passed as the first args to command.undo (ctx, state — same as execute)
+--: (self: HistObj, ...any) -> (boolean | nil, string | nil)
 function History:undo(...)
-  local self_ = self --[[:! HistObj]]
-  local stack = self_._undo
+  local stack = self._undo
   if #stack == 0 then return false end
   local entry = stack[#stack]
   local ok, err = raw_undo(entry)
   if not ok then return false, err end
   stack[#stack] = nil
-  self_._redo[#self_._redo + 1] = entry
-  local on_undo = self_._on_undo
+  self._redo[#self._redo + 1] = entry
+  local on_undo = self._on_undo
   if on_undo then on_undo(entry.command or entry) end
   return true
 end
 
 -- history:redo(...) -> bool
+--: (self: HistObj, ...any) -> (boolean | nil, string | nil)
 function History:redo(...)
-  local self_ = self --[[:! HistObj]]
-  local stack = self_._redo
+  local stack = self._redo
   if #stack == 0 then return false end
   local entry = stack[#stack]
-  local _, err = raw_redo(entry, self_._time_fn)
+  local _, err = raw_redo(entry, self._time_fn)
   if err then return false, err end
   stack[#stack] = nil
-  push_undo(self_, entry)
-  local on_redo = self_._on_redo
+  push_undo(self, entry)
+  local on_redo = self._on_redo
   if on_redo then on_redo(entry.command or entry) end
   return true
 end
 
+--: (self: HistObj) -> boolean
 function History:can_undo()
-  local self_ = self --[[:! HistObj]]
-  return #self_._undo > 0
+  return #self._undo > 0
 end
 
+--: (self: HistObj) -> boolean
 function History:can_redo()
-  local self_ = self --[[:! HistObj]]
-  return #self_._redo > 0
+  return #self._redo > 0
 end
 
+--: (self: HistObj) -> integer
 function History:undo_depth()
-  local self_ = self --[[:! HistObj]]
-  return #self_._undo
+  return #self._undo
 end
 
+--: (self: HistObj) -> integer
 function History:redo_depth()
-  local self_ = self --[[:! HistObj]]
-  return #self_._redo
+  return #self._redo
 end
 
 -- history:entries() -> array of { command, args, time }
+--: (self: HistObj) -> { [integer]: any }
 function History:entries()
-  local self_ = self --[[:! HistObj]]
   local result = {}
-  for i = 1, #self_._undo do
-    local e = self_._undo[i]
+  for i = 1, #self._undo do
+    local e = self._undo[i]
     result[i] = {
       command = e.command or e,
       name    = e.name or (e.command and e.command.name),
@@ -279,42 +279,42 @@ end
 -- Batch / Transaction
 -- ---------------------------------------------------------------------------
 
+--: (self: HistObj) -> nil
 function History:begin_batch()
-  local self_ = self --[[:! HistObj]]
-  if self_._batch then
+  if self._batch then
     error("begin_batch called while batch already in progress")
   end
-  self_._batch = {}
+  self._batch = {}
 end
 
+--: (self: HistObj, name: string | nil) -> nil
 function History:commit_batch(name)
-  local self_ = self --[[:! HistObj]]
-  if not self_._batch then
+  if not self._batch then
     error("commit_batch called without begin_batch")
   end
-  local entries = self_._batch --[[:! { [integer]: HistEntry }]]
-  self_._batch = nil
+  local entries = self._batch --[[:! { [integer]: HistEntry }]]
+  self._batch = nil
   if #entries == 0 then return end
   local batch_entry = {
     is_batch      = true,
     batch_entries = entries,
     name          = name or "batch",
-    time          = self_._time_fn(),
+    time          = self._time_fn(),
     command       = { name = name or "batch", execute = nil, undo = nil, description = nil },
     args_list     = {},
     undo_data     = nil,
   } --[[:! HistEntry]]
-  push_undo(self_, batch_entry)
-  self_._redo = {}
+  push_undo(self, batch_entry)
+  self._redo = {}
 end
 
+--: (self: HistObj) -> nil
 function History:rollback_batch()
-  local self_ = self --[[:! HistObj]]
-  if not self_._batch then
+  if not self._batch then
     error("rollback_batch called without begin_batch")
   end
-  local entries = self_._batch --[[:! { [integer]: HistEntry }]]
-  self_._batch = nil
+  local entries = self._batch --[[:! { [integer]: HistEntry }]]
+  self._batch = nil
   -- Undo all accumulated entries in reverse
   for i = #entries, 1, -1 do
     raw_undo(entries[i])
@@ -323,15 +323,15 @@ end
 
 -- history:transaction(name, fn) -> true or (false, err)
 -- fn errors cause rollback of all commands executed during the transaction
+--: (self: HistObj, name: string | nil, fn: () -> nil) -> (boolean, string | nil)
 function History:transaction(name, fn)
-  local self_ = self --[[:! HistObj]]
-  History.begin_batch(self_)
+  History.begin_batch(self)
   local ok, err = pcall(fn)
   if ok then
-    History.commit_batch(self_, name)
+    History.commit_batch(self, name)
     return true
   else
-    History.rollback_batch(self_)
+    History.rollback_batch(self)
     return false, err
   end
 end
@@ -340,15 +340,15 @@ end
 -- Clear
 -- ---------------------------------------------------------------------------
 
+--: (self: HistObj) -> nil
 function History:clear()
-  local self_ = self --[[:! HistObj]]
-  self_._undo = {}
-  self_._redo = {}
+  self._undo = {}
+  self._redo = {}
 end
 
+--: (self: HistObj) -> nil
 function History:clear_redo()
-  local self_ = self --[[:! HistObj]]
-  self_._redo = {}
+  self._redo = {}
 end
 
 -- ---------------------------------------------------------------------------
@@ -356,29 +356,29 @@ end
 -- ---------------------------------------------------------------------------
 
 -- history:record() — starts recording subsequent execute calls
+--: (self: HistObj) -> nil
 function History:record()
-  local self_ = self --[[:! HistObj]]
-  if self_._recording then
+  if self._recording then
     error("record called while already recording")
   end
-  self_._recording = {}
+  self._recording = {}
 end
 
 -- history:stop_record() -> macro (list of {command, args_list})
+--: (self: HistObj) -> any
 function History:stop_record()
-  local self_ = self --[[:! HistObj]]
-  if not self_._recording then
+  if not self._recording then
     error("stop_record called without record")
   end
-  local macro = self_._recording
-  self_._recording = nil
+  local macro = self._recording
+  self._recording = nil
   return macro
 end
 
 -- history:play(macro, ...) — replay a macro; same varargs prepend is NOT done;
 -- the recorded args_list is replayed verbatim (the state/ctx were captured at record time)
+--: (self: HistObj, macro: { [integer]: any }, ...any) -> (boolean | nil, string | nil)
 function History:play(macro, ...)
-  local self_ = self --[[:! HistObj]]
   for i = 1, #macro do
     local step = macro[i]
     -- If caller passed new args, use them; otherwise use recorded args
@@ -405,14 +405,14 @@ function History:play(macro, ...)
       command   = step.command,
       args_list = al_,
       undo_data = undo_data,
-      time      = self_._time_fn(),
+      time      = self._time_fn(),
       name      = step.command.name,
       is_batch  = false,
       batch_entries = nil,
     } --: HistEntry
-    push_undo(self_, entry)
-    self_._redo = {}
-    local on_exec = self_._on_exec
+    push_undo(self, entry)
+    self._redo = {}
+    local on_exec = self._on_exec
     if on_exec then on_exec(step.command, unpack(al_)) end
   end
   return true

@@ -94,48 +94,48 @@ end
 local date_mt = {}
 date_mt.__index = date_mt
 
+--: (self: Date) -> boolean
 function date_mt:is_leap_year()
-  local self_ = self --[[:! Date]]
-  return is_leap(self_.year)
+  return is_leap(self.year)
 end
 
+--: (self: Date) -> integer
 function date_mt:days_in_month()
-  local self_ = self --[[:! Date]]
-  return days_in_month(self_.year, self_.month)
+  return days_in_month(self.year, self.month)
 end
 
+--: (self: Date) -> integer
 function date_mt:day_of_year()
-  local self_ = self --[[:! Date]]
-  return day_of_year(self_.year, self_.month, self_.day)
+  return day_of_year(self.year, self.month, self.day)
 end
 
+--: (self: Date) -> integer
 function date_mt:to_ordinal()
-  local self_ = self --[[:! Date]]
-  return to_ordinal(self_.year, self_.month, self_.day)
+  return to_ordinal(self.year, self.month, self.day)
 end
 
 -- ISO weekday: 1=Mon .. 7=Sun
 -- 0001-01-01 was a Monday (ordinal=1), so:
 --   ordinal % 7 == 1 → Monday
 --   ordinal % 7 == 2 → Tuesday ... 0 → Sunday
+--: (self: Date) -> integer
 function date_mt:day_of_week()
-  local self_ = self --[[:! Date]]
-  local r = to_ordinal(self_.year, self_.month, self_.day) % 7
+  local r = to_ordinal(self.year, self.month, self.day) % 7
   if r == 0 then return 7 end
   return r
 end
 
 -- ISO week number
 -- ISO week 1 contains Jan 4. Week starts on Monday.
+--: (self: Date) -> integer
 function date_mt:week_of_year()
-  local self_ = self --[[:! Date]]
-  local ord = to_ordinal(self_.year, self_.month, self_.day)
-  local dow_raw = to_ordinal(self_.year, self_.month, self_.day) % 7
+  local ord = to_ordinal(self.year, self.month, self.day)
+  local dow_raw = to_ordinal(self.year, self.month, self.day) % 7
   local dow = (dow_raw == 0 and 7 or dow_raw) --[[:! integer]]  -- 1=Mon..7=Sun
   -- Start of ISO week containing this date
   local week_start = ord - (dow - 1)
   -- Jan 4 of this year's ordinal
-  local jan4 = to_ordinal(self_.year, 1, 4)
+  local jan4 = to_ordinal(self.year, 1, 4)
   -- Start of week containing Jan 4
   local jan4_dow = jan4 % 7
   if jan4_dow == 0 then jan4_dow = 7 end
@@ -145,14 +145,14 @@ function date_mt:week_of_year()
 
   if week < 1 then
     -- Belongs to last week of previous year
-    local jan4_prev = to_ordinal(self_.year - 1, 1, 4)
+    local jan4_prev = to_ordinal(self.year - 1, 1, 4)
     local jan4_prev_dow = jan4_prev % 7
     if jan4_prev_dow == 0 then jan4_prev_dow = 7 end
     local w1_prev = jan4_prev - (jan4_prev_dow - 1)
     return math.floor((week_start - w1_prev) / 7) + 1
   elseif week > 52 then
     -- Check if week 53 exists; otherwise belongs to week 1 of next year
-    local jan4_next = to_ordinal(self_.year + 1, 1, 4)
+    local jan4_next = to_ordinal(self.year + 1, 1, 4)
     local jan4_next_dow = jan4_next % 7
     if jan4_next_dow == 0 then jan4_next_dow = 7 end
     local w1_next = jan4_next - (jan4_next_dow - 1)
@@ -164,27 +164,26 @@ function date_mt:week_of_year()
   return week
 end
 
+--: (self: Date) -> string
 function date_mt:to_iso()
-  local self_ = self --[[:! Date]]
-  return string.format("%04d-%02d-%02d", self_.year, self_.month, self_.day)
+  return string.format("%04d-%02d-%02d", self.year, self.month, self.day)
 end
 
+--: (self: Date) -> string
 function date_mt:__tostring()
-  return self:to_iso() --[[:! string]]
+  return string.format("%04d-%02d-%02d", self.year, self.month, self.day)
 end
 
 function date_mt:__eq(b)
-  local self_ = self --[[:! Date]]
   local b_ = b --[[:! Date]]
-  return self_.year == b_.year and self_.month == b_.month and self_.day == b_.day
+  return self.year == b_.year and self.month == b_.month and self.day == b_.day
 end
 
 function date_mt:__lt(b)
-  local self_ = self --[[:! Date]]
   local b_ = b --[[:! Date]]
-  if self_.year ~= b_.year then return self_.year < b_.year end
-  if self_.month ~= b_.month then return self_.month < b_.month end
-  return self_.day < b_.day
+  if self.year ~= b_.year then return self.year < b_.year end
+  if self.month ~= b_.month then return self.month < b_.month end
+  return self.day < b_.day
 end
 
 function date_mt:__le(b)
@@ -245,44 +244,42 @@ function M.from_iso(s)
   )
 end
 
+--: (self: Date, n: integer) -> Date
 function date_mt:add_days(n)
-  local self_ = self --[[:! Date]]
-  return M.from_ordinal(to_ordinal(self_.year, self_.month, self_.day) + n)
+  return M.from_ordinal(to_ordinal(self.year, self.month, self.day) + n)
 end
 
+--: (self: Date, n: integer) -> Date
 function date_mt:add_months(n)
-  local self_ = self --[[:! Date]]
-  local y = self_.year
-  local m = self_.month + n
+  local y = self.year
+  local m = self.month + n
   -- Normalize month
   y = y + math.floor((m - 1) / 12)
   m = ((m - 1) % 12) + 1
   -- Clamp day to valid range
-  local d = math.min(self_.day, days_in_month(y, m))
+  local d = math.min(self.day, days_in_month(y, m))
   return make_date(y, m, d)
 end
 
+--: (self: Date, n: integer) -> Date
 function date_mt:add_years(n)
-  local self_ = self --[[:! Date]]
-  local y = self_.year + n
-  local d = math.min(self_.day, days_in_month(y, self_.month))
-  return make_date(y, self_.month, d)
+  local y = self.year + n
+  local d = math.min(self.day, days_in_month(y, self.month))
+  return make_date(y, self.month, d)
 end
 
+--: (self: Date, b: Date) -> integer
 function date_mt:diff_days(b)
-  local self_ = self --[[:! Date]]
-  local b_ = b --[[:! Date]]
-  return to_ordinal(self_.year, self_.month, self_.day) - to_ordinal(b_.year, b_.month, b_.day)
+  return to_ordinal(self.year, self.month, self.day) - to_ordinal(b.year, b.month, b.day)
 end
 
 -- Range iterator: inclusive [start, stop], step_days default 1
+--: (start: Date, stop: Date, step_days: integer | nil) -> (() -> Date | nil)
 function M.range(start, stop, step_days)
-  local start_ = start --[[:! Date]]
-  local stop_ = stop --[[:! Date]]
   step_days = step_days or 1
   local step = step_days --[[:! integer]]
-  local cur_ord = to_ordinal(start_.year, start_.month, start_.day)
-  local stop_ord = to_ordinal(stop_.year, stop_.month, stop_.day)
+  local cur_ord = to_ordinal(start.year, start.month, start.day)
+  local stop_ord = to_ordinal(stop.year, stop.month, stop.day)
   local forward = step > 0
   return function()
     if forward and cur_ord > stop_ord then return nil end
@@ -316,10 +313,10 @@ function M.recur(opts)
   return r
 end
 
+--: (self: Recur) -> nil
 function recur_mt:reset()
-  local self_ = self --[[:! Recur]]
-  self_._current = self_._start
-  self_._n = 0
+  self._current = self._start
+  self._n = 0
 end
 
 -- Check if a date matches by_day / by_month_day filters
@@ -345,68 +342,68 @@ local function matches_filters(d, by_day, by_month_day)
   return true
 end
 
+--: (self: Recur) -> Date | nil
 function recur_mt:next()
-  local self_ = self --[[:! Recur]]
-  local freq = self_._freq
-  local interval = self_._interval --[[:! integer]]
+  local freq = self._freq
+  local interval = self._interval --[[:! integer]]
 
   while true do
-    local d = self_._current --[[:! Date | nil]]
+    local d = self._current --[[:! Date | nil]]
     if d == nil then return nil end
 
     -- Check count limit
-    if self_._count and self_._n >= (self_._count --[[:! integer]]) then return nil end
+    if self._count and self._n >= (self._count --[[:! integer]]) then return nil end
 
     -- Advance current for next call
     if freq == "daily" then
       local new_ord = to_ordinal(d.year, d.month, d.day) + interval
       local ny, nm, nd = from_ordinal(new_ord)
-      self_._current = make_date(ny, nm, nd)
+      self._current = make_date(ny, nm, nd)
     elseif freq == "weekly" then
       local new_ord = to_ordinal(d.year, d.month, d.day) + interval * 7
       local ny, nm, nd = from_ordinal(new_ord)
-      self_._current = make_date(ny, nm, nd)
+      self._current = make_date(ny, nm, nd)
     elseif freq == "monthly" then
       local m = d.month + interval
       local y = d.year + math.floor((m - 1) / 12)
       m = ((m - 1) % 12) + 1
       local day = math.min(d.day, days_in_month(y, m))
-      self_._current = make_date(y, m, day)
+      self._current = make_date(y, m, day)
     elseif freq == "yearly" then
       local y = d.year + interval
       local day = math.min(d.day, days_in_month(y, d.month))
-      self_._current = make_date(y, d.month, day)
+      self._current = make_date(y, d.month, day)
     else
-      self_._current = nil
+      self._current = nil
     end
 
     -- Check filters
-    if matches_filters(d, self_._by_day, self_._by_month_day) then
-      self_._n = self_._n + 1
+    if matches_filters(d, self._by_day, self._by_month_day) then
+      self._n = self._n + 1
       return d
     end
   end
 end
 
+--: (self: Recur, n: integer) -> { [integer]: Date }
 function recur_mt:take(n)
-  local self_ = self --[[:! Recur]]
   local result = {}
   for i = 1, n do
-    local d = recur_mt.next(self_) --[[:! Date | nil]]
+    local d = recur_mt.next(self) --[[:! Date | nil]]
     if d == nil then break end
     result[i] = d
   end
   return result
 end
 
+--: (self: Recur) -> ({ [integer]: Date } | nil, string | nil)
 function recur_mt:all()
-  local self_ = self --[[:! Recur]]
-  if not self_._count and not self_._until then
+  if not self._count and not self._until then
     return nil, "all() requires count or until to be set"
   end
   local result = {}
   while true do
-    local d = recur_mt.next(self_) --[[:! Date | nil]]
+    local d = recur_mt.next(self) --[[:! Date | nil]]
     if d == nil then break end
     result[#result + 1] = d
   end

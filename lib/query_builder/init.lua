@@ -18,18 +18,18 @@ M._tier = "pure"
 
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
---: ({ [string]: unknown }) -> { [string]: unknown }
+--: <T: { [string]: unknown, ... }>(T) -> T
 local function shallow_copy(t)
-	local out = {}
+	local out = {} --[[: any]]
 	for k, v in pairs(t) do out[k] = v end
 	return out
 end
 
 --: ({ [integer]: unknown }) -> { [integer]: unknown }
 local function copy_array(t)
-	local out = {} --[[: any]]
+	local out = {} --: { [integer]: unknown }
 	for i = 1, #t do out[i] = t[i] end
-	return out --[[:! { [integer]: unknown }]]
+	return out
 end
 
 -- Append all items from src into dst.
@@ -94,12 +94,12 @@ end
 -- Clone self, applying fn(copy) -> copy.
 --: (Select, (Select) -> Select) -> Select
 local function sel_clone(self, fn)
-	local q = shallow_copy(self) --[[:! Select]]
-	q._joins   = copy_array(self._joins) --[[:! { [integer]: unknown }]]
-	q._wheres  = copy_array(self._wheres) --[[:! { [integer]: unknown }]]
+	local q = shallow_copy(self)
+	q._joins   = copy_array(self._joins)
+	q._wheres  = copy_array(self._wheres)
 	if self._having then
 		local h_ = self._having --[[:! { sql: unknown, params: { [integer]: unknown } }]]
-		q._having = { sql = h_.sql, params = copy_array(h_.params) --[[:! { [integer]: unknown }]] }
+		q._having = { sql = h_.sql, params = copy_array(h_.params) }
 	end
 	return setmetatable(fn(q), Select) --[[:! Select]]
 end
@@ -413,7 +413,7 @@ end
 
 --: (Insert, { [string]: unknown }) -> Insert
 function Insert:values(vals)
-	local q = shallow_copy(self) --[[:! Insert]]
+	local q = shallow_copy(self)
 	q._vals = vals
 	q._rows = nil
 	return setmetatable(q, Insert) --[[:! Insert]]
@@ -421,7 +421,7 @@ end
 
 --: (Insert, { [integer]: { [string]: unknown } }) -> Insert
 function Insert:rows(row_list)
-	local q = shallow_copy(self) --[[:! Insert]]
+	local q = shallow_copy(self)
 	q._rows = row_list --[[:! { [integer]: unknown } | nil]]
 	q._vals = nil
 	return setmetatable(q, Insert) --[[:! Insert]]
@@ -481,8 +481,8 @@ end
 
 --: (Update, (Update) -> Update) -> Update
 local function upd_clone(self, fn)
-	local q = shallow_copy(self) --[[:! Update]]
-	q._wheres = copy_array(self._wheres) --[[:! { [integer]: unknown }]]
+	local q = shallow_copy(self)
+	q._wheres = copy_array(self._wheres)
 	return setmetatable(fn(q), Update) --[[:! Update]]
 end
 
@@ -542,8 +542,8 @@ end
 
 --: (Delete, (Delete) -> Delete) -> Delete
 local function del_clone(self, fn)
-	local q = shallow_copy(self) --[[:! Delete]]
-	q._wheres = copy_array(self._wheres) --[[:! { [integer]: unknown }]]
+	local q = shallow_copy(self)
+	q._wheres = copy_array(self._wheres)
 	return setmetatable(fn(q), Delete) --[[:! Delete]]
 end
 
@@ -579,8 +579,8 @@ end
 -- Use UNION ALL instead of UNION (keeps duplicates).
 --: (Union) -> Union
 function Union:all()
-	local q = shallow_copy(self) --[[:! Union]]
-	q._queries = copy_array(self._queries) --[[:! { [integer]: unknown }]]
+	local q = shallow_copy(self)
+	q._queries = copy_array(self._queries)
 	q._all = true
 	return setmetatable(q, Union) --[[:! Union]]
 end

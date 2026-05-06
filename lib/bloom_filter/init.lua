@@ -13,6 +13,7 @@ local M = {}
 M._tier = "pure"
 
 -- FNV-1a hash (32-bit)
+--: (string) -> integer
 local function fnv1a(s)
   local h = math.floor(2166136261) --[[:! integer]]
   for i = 1, #s do
@@ -25,11 +26,12 @@ local function fnv1a(s)
 end
 
 -- djb2 hash (32-bit)
+--: (string) -> integer
 local function djb2(s)
-  local h = 5381
+  local h = 5381 --: integer
   for i = 1, #s do
     -- h = h * 33 + c
-    h = band(h * 33 + s:byte(i), 0xFFFFFFFF)
+    h = band(h * 33 + (s:byte(i) or 0), 0xFFFFFFFF)
   end
   return h
 end
@@ -103,22 +105,22 @@ end
 local bloom_mt = {}
 bloom_mt.__index = bloom_mt
 
+--: (BloomFilter, string) -> nil
 function bloom_mt:add(item)
-  local self_ = self --[[:! BloomFilter]]
   local h1 = fnv1a(item)
   local h2 = djb2(item)
-  for i = 0, self_._k - 1 do
-    bitarray_set(self_._bits, hash_i(h1, h2, i, self_._m))
+  for i = 0, self._k - 1 do
+    bitarray_set(self._bits, hash_i(h1, h2, i, self._m))
   end
-  self_._count_approx = self_._count_approx + 1
+  self._count_approx = self._count_approx + 1
 end
 
+--: (BloomFilter, string) -> boolean
 function bloom_mt:contains(item)
-  local self_ = self --[[:! BloomFilter]]
   local h1 = fnv1a(item)
   local h2 = djb2(item)
-  for i = 0, self_._k - 1 do
-    if not bitarray_get(self_._bits, hash_i(h1, h2, i, self_._m)) then
+  for i = 0, self._k - 1 do
+    if not bitarray_get(self._bits, hash_i(h1, h2, i, self._m)) then
       return false
     end
   end
@@ -127,22 +129,22 @@ end
 
 -- Estimated current FPR based on number of inserted elements
 -- fpr = (1 - e^(-k*n/m))^k
+--: (BloomFilter) -> number
 function bloom_mt:false_positive_rate()
-  local self_ = self --[[:! BloomFilter]]
-  local n = self_._count_approx
-  local k = self_._k
-  local m = self_._m
+  local n = self._count_approx
+  local k = self._k
+  local m = self._m
   return math.pow(1 - math.exp(-k * n / m), k)
 end
 
 -- Estimated element count via formula: n = -m/k * ln(1 - X/m)
 -- where X = number of set bits
+--: (BloomFilter) -> number
 function bloom_mt:count()
-  local self_ = self --[[:! BloomFilter]]
   local set_bits = 0 --: integer
-  local words = math.ceil(self_._m / 32)
+  local words = math.ceil(self._m / 32)
   for w = 1, words do
-    local v = self_._bits[w]
+    local v = self._bits[w]
     -- popcount via Brian Kernighan
     while v ~= 0 do
       v = band(v, v - 1)
@@ -150,14 +152,14 @@ function bloom_mt:count()
     end
   end
   if set_bits == 0 then return 0 end
-  if set_bits >= self_._m then return math.huge end
-  return -self_._m / self_._k * math.log(1 - set_bits / self_._m)
+  if set_bits >= self._m then return math.huge end
+  return -self._m / self._k * math.log(1 - set_bits / self._m)
 end
 
+--: (BloomFilter) -> nil
 function bloom_mt:clear()
-  local self_ = self --[[:! BloomFilter]]
-  bitarray_clear(self_._bits)
-  self_._count_approx = 0
+  bitarray_clear(self._bits)
+  self._count_approx = 0
 end
 
 -- M.new(opts) -> filter or (nil, errmsg)
@@ -215,37 +217,37 @@ local function counter_dec(arr, pos)
   return true
 end
 
+--: (CountingFilter, string) -> nil
 function counting_mt:add(item)
-  local self_ = self --[[:! CountingFilter]]
   local h1 = fnv1a(item)
   local h2 = djb2(item)
-  for i = 0, self_._k - 1 do
-    counter_inc(self_._counters, hash_i(h1, h2, i, self_._m))
+  for i = 0, self._k - 1 do
+    counter_inc(self._counters, hash_i(h1, h2, i, self._m))
   end
 end
 
+--: (CountingFilter, string) -> boolean
 function counting_mt:remove(item)
-  local self_ = self --[[:! CountingFilter]]
   local h1 = fnv1a(item)
   local h2 = djb2(item)
   -- Check all counters are > 0 before decrementing
-  for i = 0, self_._k - 1 do
-    if counter_get(self_._counters, hash_i(h1, h2, i, self_._m)) == 0 then
+  for i = 0, self._k - 1 do
+    if counter_get(self._counters, hash_i(h1, h2, i, self._m)) == 0 then
       return false
     end
   end
-  for i = 0, self_._k - 1 do
-    counter_dec(self_._counters, hash_i(h1, h2, i, self_._m))
+  for i = 0, self._k - 1 do
+    counter_dec(self._counters, hash_i(h1, h2, i, self._m))
   end
   return true
 end
 
+--: (CountingFilter, string) -> boolean
 function counting_mt:contains(item)
-  local self_ = self --[[:! CountingFilter]]
   local h1 = fnv1a(item)
   local h2 = djb2(item)
-  for i = 0, self_._k - 1 do
-    if counter_get(self_._counters, hash_i(h1, h2, i, self_._m)) == 0 then
+  for i = 0, self._k - 1 do
+    if counter_get(self._counters, hash_i(h1, h2, i, self._m)) == 0 then
       return false
     end
   end
@@ -272,14 +274,14 @@ end
 local scalable_mt = {}
 scalable_mt.__index = scalable_mt
 
+--: (ScalableBloom, string) -> nil
 function scalable_mt:add(item)
-  local self_ = self --[[:! ScalableBloom]]
   -- Check if current layer is full
-  local layer = self_._layers[#self_._layers]
+  local layer = self._layers[#self._layers]
   if layer._count_approx >= (layer._capacity or 0) then
     -- Add a new layer with larger capacity and tighter error rate
-    local new_capacity = (layer._capacity or 0) * self_._growth_factor
-    local new_error_rate = (layer._error_rate or 0.01) * self_._tightening_ratio
+    local new_capacity = (layer._capacity or 0) * self._growth_factor
+    local new_error_rate = (layer._error_rate or 0.01) * self._tightening_ratio
     local new_m = optimal_m(new_capacity, new_error_rate)
     local new_k = optimal_k(new_m, new_capacity)
     layer = setmetatable({
@@ -290,24 +292,24 @@ function scalable_mt:add(item)
       _capacity = new_capacity,
       _error_rate = new_error_rate,
     }, bloom_mt)
-    self_._layers[#self_._layers + 1] = layer
+    self._layers[#self._layers + 1] = layer
   end
   layer:add(item)
 end
 
+--: (ScalableBloom, string) -> boolean
 function scalable_mt:contains(item)
-  local self_ = self --[[:! ScalableBloom]]
-  for i = #self_._layers, 1, -1 do
-    if self_._layers[i]:contains(item) then
+  for i = #self._layers, 1, -1 do
+    if self._layers[i]:contains(item) then
       return true
     end
   end
   return false
 end
 
+--: (ScalableBloom) -> integer
 function scalable_mt:layers()
-  local self_ = self --[[:! ScalableBloom]]
-  return #self_._layers
+  return #self._layers
 end
 
 -- M.scalable(opts) -> filter or (nil, errmsg)

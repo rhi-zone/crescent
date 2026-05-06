@@ -28,7 +28,7 @@ Subscription.__index = Subscription
 
 --: ((() -> nil) | nil) -> Subscription
 local function new_subscription(unsub_fn)
-  return setmetatable({ _closed = false, _unsub = unsub_fn }, Subscription) --[[:! Subscription]]
+  return setmetatable({ _closed = false, _unsub = unsub_fn }, Subscription)
 end
 
 --: (Subscription) -> nil
@@ -58,7 +58,7 @@ Subscriber.__index = Subscriber
 
 --: (Observer, Subscription) -> Subscriber
 local function new_subscriber(observer, subscription)
-  return setmetatable({ _obs = observer, _sub = subscription, _done = false }, Subscriber) --[[:! Subscriber]]
+  return setmetatable({ _obs = observer, _sub = subscription, _done = false }, Subscriber)
 end
 
 --: (Subscriber, unknown) -> nil
@@ -95,7 +95,7 @@ Observable.__index = Observable
 
 --: (SubscribeFn) -> Observable
 local function new_observable(subscribe_fn)
-  return setmetatable({ _subscribe = subscribe_fn }, Observable) --[[:! Observable]]
+  return setmetatable({ _subscribe = subscribe_fn }, Observable)
 end
 
 -- Normalize observer argument: fn shorthand → {next=fn}

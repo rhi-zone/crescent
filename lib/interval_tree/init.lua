@@ -37,8 +37,8 @@ end
 --: (ITreeNode) -> nil
 local function update_max(n)
   local m = n.hi
-  local lm = max_hi(n.left --[[:! ITreeNode | nil]])
-  local rm = max_hi(n.right --[[:! ITreeNode | nil]])
+  local lm = max_hi(n.left)
+  local rm = max_hi(n.right)
   if lm > m then m = lm end
   if rm > m then m = rm end
   n.max_hi = m
@@ -54,9 +54,9 @@ local function bst_insert(root, lo, hi, data)
     return node_new(lo, hi, data)
   end
   if lo < root.lo or (lo == root.lo and hi < root.hi) then
-    root.left = bst_insert(root.left --[[:! ITreeNode | nil]], lo, hi, data)
+    root.left = bst_insert(root.left, lo, hi, data)
   else
-    root.right = bst_insert(root.right --[[:! ITreeNode | nil]], lo, hi, data)
+    root.right = bst_insert(root.right, lo, hi, data)
   end
   update_max(root)
   return root
@@ -69,7 +69,7 @@ end
 
 --: (ITreeNode) -> ITreeNode
 local function find_min(n)
-  while n.left do n = n.left --[[:! ITreeNode]] end
+  while n.left do n = n.left end
   return n
 end
 
@@ -79,23 +79,23 @@ local function bst_delete(root, lo, hi, data, removed)
   local new_left, new_right --: ITreeNode | nil
   local rm2 --: { [integer]: boolean } | nil
   if lo < root.lo or (lo == root.lo and hi < root.hi) then
-    new_left, rm2 = bst_delete(root.left --[[:! ITreeNode | nil]], lo, hi, data, removed)
+    new_left, rm2 = bst_delete(root.left, lo, hi, data, removed)
     root.left = new_left; removed = rm2
   elseif lo > root.lo or (lo == root.lo and hi > root.hi) then
-    new_right, rm2 = bst_delete(root.right --[[:! ITreeNode | nil]], lo, hi, data, removed)
+    new_right, rm2 = bst_delete(root.right, lo, hi, data, removed)
     root.right = new_right; removed = rm2
   else
     -- lo and hi match; check data if provided
     if data ~= nil and root.data ~= data then
       -- same lo/hi but different data — try right subtree (duplicates go right)
-      new_right, rm2 = bst_delete(root.right --[[:! ITreeNode | nil]], lo, hi, data, removed)
+      new_right, rm2 = bst_delete(root.right, lo, hi, data, removed)
       root.right = new_right; removed = rm2
     else
       removed[1] = true
       if root.left == nil then
-        return root.right --[[:! ITreeNode | nil]], removed
+        return root.right, removed
       elseif root.right == nil then
-        return root.left --[[:! ITreeNode | nil]], removed
+        return root.left, removed
       else
         -- Replace with in-order successor
         local succ = find_min(root.right --[[:! ITreeNode]])
@@ -103,7 +103,7 @@ local function bst_delete(root, lo, hi, data, removed)
         root.hi = succ.hi
         root.data = succ.data
         -- Delete successor from right subtree (no data filter — exact match)
-        new_right, rm2 = bst_delete(root.right --[[:! ITreeNode | nil]], succ.lo, succ.hi, nil, removed)
+        new_right, rm2 = bst_delete(root.right, succ.lo, succ.hi, nil, removed)
         root.right = new_right; removed = rm2
       end
     end
@@ -116,19 +116,20 @@ end
 -- Stabbing query: all intervals [lo,hi] where lo <= point <= hi
 -- ---------------------------------------------------------------------------
 
+--: (node: ITreeNode | nil, point: number, result: { [integer]: unknown }) -> nil
 local function stab_collect(node, point, result)
   if node == nil then return end
   -- Prune: if max_hi of subtree < point, no interval can contain it
   if node.max_hi < point then return end
   -- Recurse left
-  stab_collect(node.left --[[:! ITreeNode | nil]], point, result)
+  stab_collect(node.left, point, result)
   -- Check this node
   if node.lo <= point and point <= node.hi then
     result[#result + 1] = { lo = node.lo, hi = node.hi, data = node.data }
   end
   -- Prune right: if node.lo > point, no right subtree node can have lo <= point
   if node.lo > point then return end
-  stab_collect(node.right --[[:! ITreeNode | nil]], point, result)
+  stab_collect(node.right, point, result)
 end
 
 -- ---------------------------------------------------------------------------
@@ -136,19 +137,20 @@ end
 -- Two intervals [a,b] and [c,d] overlap iff a <= d and c <= b
 -- ---------------------------------------------------------------------------
 
+--: (node: ITreeNode | nil, qlo: number, qhi: number, result: { [integer]: unknown }) -> nil
 local function overlap_collect(node, qlo, qhi, result)
   if node == nil then return end
   -- Prune: subtree max_hi < qlo means no interval can reach qlo
   if node.max_hi < qlo then return end
   -- Recurse left
-  overlap_collect(node.left --[[:! ITreeNode | nil]], qlo, qhi, result)
+  overlap_collect(node.left, qlo, qhi, result)
   -- Check this node
   if node.lo <= qhi and node.hi >= qlo then
     result[#result + 1] = { lo = node.lo, hi = node.hi, data = node.data }
   end
   -- Prune right: if node.lo > qhi, right subtree has lo > qhi too
   if node.lo > qhi then return end
-  overlap_collect(node.right --[[:! ITreeNode | nil]], qlo, qhi, result)
+  overlap_collect(node.right, qlo, qhi, result)
 end
 
 -- ---------------------------------------------------------------------------
@@ -156,17 +158,18 @@ end
 -- i.e. qlo <= lo and hi <= qhi
 -- ---------------------------------------------------------------------------
 
+--: (node: ITreeNode | nil, qlo: number, qhi: number, result: { [integer]: unknown }) -> nil
 local function contained_collect(node, qlo, qhi, result)
   if node == nil then return end
   if node.max_hi < qlo then return end
   -- Recurse left
-  contained_collect(node.left --[[:! ITreeNode | nil]], qlo, qhi, result)
+  contained_collect(node.left, qlo, qhi, result)
   -- Check this node
   if node.lo >= qlo and node.hi <= qhi then
     result[#result + 1] = { lo = node.lo, hi = node.hi, data = node.data }
   end
   if node.lo > qhi then return end
-  contained_collect(node.right --[[:! ITreeNode | nil]], qlo, qhi, result)
+  contained_collect(node.right, qlo, qhi, result)
 end
 
 -- ---------------------------------------------------------------------------
@@ -174,6 +177,7 @@ end
 -- Distance = 0 if point is inside, else min(|point - lo|, |point - hi|)
 -- ---------------------------------------------------------------------------
 
+--: (lo: number, hi: number, point: number) -> number
 local function interval_dist(lo, hi, point)
   if point >= lo and point <= hi then return 0 end
   local dl = abs(point - lo)
@@ -181,25 +185,26 @@ local function interval_dist(lo, hi, point)
   return dl < dh and dl or dh
 end
 
+--: (node: ITreeNode | nil, point: number, best: { [integer]: unknown }) -> { [integer]: unknown }
 local function nearest_walk(node, point, best)
   if node == nil then return best end
   -- Pruning: minimum possible distance from subtree
   -- If point > max_hi, nearest end is max_hi; distance is point - max_hi
   if node.max_hi < point then
     local min_dist = point - node.max_hi
-    if best[2] ~= nil and min_dist >= best[2] then return best end
+    if best[2] ~= nil and min_dist >= best[2] --[[:! number]] then return best end
   end
   -- Recurse left first (may contain closer intervals)
-  best = nearest_walk(node.left --[[:! ITreeNode | nil]], point, best)
+  best = nearest_walk(node.left, point, best)
   -- Check this node
   local d = interval_dist(node.lo, node.hi, point)
-  if best[2] == nil or d < best[2] then
+  if best[2] == nil or d < best[2] --[[:! number]] then
     best[1] = node
     best[2] = d
   end
   if d == 0 then return best end  -- can't do better
   -- Recurse right
-  best = nearest_walk(node.right --[[:! ITreeNode | nil]], point, best)
+  best = nearest_walk(node.right, point, best)
   return best
 end
 
@@ -207,11 +212,12 @@ end
 -- In-order traversal
 -- ---------------------------------------------------------------------------
 
+--: (node: ITreeNode | nil, fn: (number, number, any) -> nil) -> nil
 local function each_inorder(node, fn)
   if node == nil then return end
-  each_inorder(node.left --[[:! ITreeNode | nil]], fn)
+  each_inorder(node.left, fn)
   fn(node.lo, node.hi, node.data)
-  each_inorder(node.right --[[:! ITreeNode | nil]], fn)
+  each_inorder(node.right, fn)
 end
 
 -- ---------------------------------------------------------------------------
@@ -221,7 +227,7 @@ end
 --: (ITreeNode | nil) -> integer
 local function count_nodes(node)
   if node == nil then return 0 end
-  return 1 + count_nodes(node.left --[[:! ITreeNode | nil]]) + count_nodes(node.right --[[:! ITreeNode | nil]])
+  return 1 + count_nodes(node.left) + count_nodes(node.right)
 end
 
 -- ---------------------------------------------------------------------------
@@ -231,72 +237,73 @@ end
 local Tree = {}
 Tree.__index = Tree
 
+--: () -> ITreeObj
 function M.tree()
   return setmetatable({ _root = nil, _n = 0 }, Tree)
 end
 
+--: (self: ITreeObj, lo: number, hi: number, data: any) -> nil
 function Tree:insert(lo, hi, data)
-  local self_ = self --[[:! ITreeObj]]
-  self_._root = bst_insert(self_._root, lo, hi, data)
-  self_._n = self_._n + 1
+  self._root = bst_insert(self._root, lo, hi, data)
+  self._n = self._n + 1
 end
 
 -- Returns true if deleted, false if not found.
+--: (self: ITreeObj, lo: number, hi: number, data: any) -> boolean
 function Tree:delete(lo, hi, data)
-  local self_ = self --[[:! ITreeObj]]
   local removed = {} --: { [integer]: boolean }
   removed[1] = false
-  self_._root, removed = bst_delete(self_._root, lo, hi, data, removed)
+  self._root, removed = bst_delete(self._root, lo, hi, data, removed)
   if removed[1] then
-    self_._n = self_._n - 1
+    self._n = self._n - 1
     return true
   end
   return false
 end
 
 -- Point stabbing: returns array of {lo, hi, data} for all intervals containing point.
+--: (self: ITreeObj, point: number) -> { [integer]: unknown }
 function Tree:stab(point)
-  local self_ = self --[[:! ITreeObj]]
   local result = {}
-  stab_collect(self_._root, point, result)
+  stab_collect(self._root, point, result)
   return result
 end
 
 -- Overlap query: returns array of {lo, hi, data} for all intervals overlapping [lo, hi].
+--: (self: ITreeObj, lo: number, hi: number) -> { [integer]: unknown }
 function Tree:overlap(lo, hi)
-  local self_ = self --[[:! ITreeObj]]
   local result = {}
-  overlap_collect(self_._root, lo, hi, result)
+  overlap_collect(self._root, lo, hi, result)
   return result
 end
 
 -- Containment query: returns array of {lo, hi, data} for intervals fully inside [lo, hi].
+--: (self: ITreeObj, lo: number, hi: number) -> { [integer]: unknown }
 function Tree:contained(lo, hi)
-  local self_ = self --[[:! ITreeObj]]
   local result = {}
-  contained_collect(self_._root, lo, hi, result)
+  contained_collect(self._root, lo, hi, result)
   return result
 end
 
 -- Nearest interval to point. Returns {lo, hi, data} or nil.
+--: (self: ITreeObj, point: number) -> { lo: number, hi: number, data: any } | nil
 function Tree:nearest(point)
-  local self_ = self --[[:! ITreeObj]]
-  local best = nearest_walk(self_._root, point, { nil, nil })
+  local best = nearest_walk(self._root, point, { nil, nil })
   if best[1] == nil then return nil end
   local n = best[1] --[[:! ITreeNode]]
   return { lo = n.lo, hi = n.hi, data = n.data }
 end
 
 -- In-order traversal: calls fn(lo, hi, data) for each interval in sorted order.
+--: (self: ITreeObj, fn: (number, number, any) -> nil) -> nil
 function Tree:each(fn)
-  local self_ = self --[[:! ITreeObj]]
-  each_inorder(self_._root, fn)
+  each_inorder(self._root, fn)
 end
 
 -- Number of intervals in the tree.
+--: (self: ITreeObj) -> integer
 function Tree:len()
-  local self_ = self --[[:! ITreeObj]]
-  return self_._n
+  return self._n
 end
 
 M.Tree = Tree
@@ -328,9 +335,8 @@ function M.from_array(intervals)
     if a[1] ~= b[1] then return a[1] < b[1] end
     return a[2] < b[2]
   end)
-  local t_ = t --[[:! ITreeObj]]
-  t_._root = build_balanced(sorted, 1, #sorted)
-  t_._n = #sorted
+  t._root = build_balanced(sorted, 1, #sorted)
+  t._n = #sorted
   return t
 end
 
