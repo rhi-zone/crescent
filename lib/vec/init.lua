@@ -21,8 +21,7 @@ if has_ffi then
     for i = 1, n do
       data[i - 1] = t[i]
     end
-    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
-    return r_ --[[:! Vec]]
+    return setmetatable({ data = data, n = n }, vec_mt)
   end
 
   --: (v: Vec) -> string
@@ -41,8 +40,7 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = 0.0
     end
-    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
-    return r_ --[[:! Vec]]
+    return setmetatable({ data = data, n = n }, vec_mt) --[[:! Vec]]
   end
 
   --: (n: number) -> Vec
@@ -51,8 +49,7 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = 1.0
     end
-    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
-    return r_ --[[:! Vec]]
+    return setmetatable({ data = data, n = n }, vec_mt) --[[:! Vec]]
   end
 
   --: (n: number) -> Vec
@@ -61,8 +58,7 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = math.random()
     end
-    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
-    return r_ --[[:! Vec]]
+    return setmetatable({ data = data, n = n }, vec_mt) --[[:! Vec]]
   end
 
   --: (start: number, stop: number, n: number) -> Vec
@@ -70,15 +66,13 @@ if has_ffi then
     local data = double_arr(n)
     if n <= 1 then
       if n == 1 then data[0] = start end
-      local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
-      return r_ --[[:! Vec]]
+      return setmetatable({ data = data, n = n }, vec_mt) --[[:! Vec]]
     end
     local step = (stop - start) / (n - 1)
     for i = 0, n - 1 do
       data[i] = start + i * step
     end
-    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
-    return r_ --[[:! Vec]]
+    return setmetatable({ data = data, n = n }, vec_mt) --[[:! Vec]]
   end
 
   --: (v: Vec) -> number
@@ -94,8 +88,7 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = ad[i] + bd[i]
     end
-    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
-    return r_ --[[:! Vec]]
+    return setmetatable({ data = data, n = n }, vec_mt)
   end
 
   --: (a: Vec, b: Vec) -> Vec
@@ -106,8 +99,7 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = ad[i] - bd[i]
     end
-    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
-    return r_ --[[:! Vec]]
+    return setmetatable({ data = data, n = n }, vec_mt)
   end
 
   --: (a: Vec, b: Vec) -> Vec
@@ -118,8 +110,7 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = ad[i] * bd[i]
     end
-    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
-    return r_ --[[:! Vec]]
+    return setmetatable({ data = data, n = n }, vec_mt)
   end
 
   --: (a: Vec, b: Vec) -> Vec
@@ -130,8 +121,7 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = ad[i] / bd[i]
     end
-    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
-    return r_ --[[:! Vec]]
+    return setmetatable({ data = data, n = n }, vec_mt)
   end
 
   --: (a: Vec, s: number) -> Vec
@@ -142,8 +132,7 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = ad[i] * s
     end
-    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
-    return r_ --[[:! Vec]]
+    return setmetatable({ data = data, n = n }, vec_mt)
   end
 
   --: (a: Vec) -> Vec
@@ -154,8 +143,7 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = -ad[i]
     end
-    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
-    return r_ --[[:! Vec]]
+    return setmetatable({ data = data, n = n }, vec_mt)
   end
 
   --: (a: Vec, b: Vec) -> number
@@ -300,8 +288,7 @@ if has_ffi then
     for i = 0, n - 1 do
       data[i] = ad[i] * inv
     end
-    local r_ = setmetatable({ data = data, n = n }, vec_mt) --[[: any]]
-    return r_ --[[:! Vec]]
+    return setmetatable({ data = data, n = n }, vec_mt)
   end
 
   --: (v: Vec, i: number) -> number

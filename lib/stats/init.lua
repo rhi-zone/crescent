@@ -70,9 +70,9 @@ function M.median(data --[[ : NumArr ]])
   local s = sorted(data)
   local n = #s
   if n % 2 == 1 then
-    return s[(n + 1) / 2 --[[:! integer]]]
+    return s[(n + 1) / 2]
   else
-    return (s[n / 2 --[[:! integer]]] + s[n / 2 + 1 --[[:! integer]]]) / 2
+    return (s[n / 2] + s[n / 2 + 1]) / 2
   end
 end
 
@@ -129,7 +129,7 @@ function M.trimmed_mean(data --[[ : NumArr ]], trim --[[ : number | nil ]])
   end
   local s = sorted(data)
   local n = #s
-  local k = floor(n * trim_) --[[:! integer]]
+  local k = floor(n * trim_)
   local sum = 0 --: number
   local count = 0
   for i = k + 1, n - k do
@@ -272,7 +272,7 @@ function M.quantile(data --[[ : NumArr ]], p)
   local n = #s
   if n == 1 then return s[1] end
   local h = p * (n - 1) + 1   -- 1-based virtual index
-  local lo = floor(h) --[[:! integer]]
+  local lo = floor(h)
   local hi = lo + 1
   if hi > n then return s[n] end
   local frac = h - lo
@@ -979,7 +979,7 @@ function M.histogram(data --[[ : NumArr ]], n_bins --[[ : integer | nil ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
   local n = #data
-  local nb = n_bins or (ceil(log(n) / log(2)) + 1 --[[:! integer]])
+  local nb = n_bins or (ceil(log(n) / log(2)) + 1)
   if nb < 1 then return nil, "histogram: n_bins must be >= 1" end
   local mn = M.min(data) --[[:! number]]
   local mx = M.max(data) --[[:! number]]
@@ -993,7 +993,7 @@ function M.histogram(data --[[ : NumArr ]], n_bins --[[ : integer | nil ]])
   for i = 0, nb do edges[i + 1] = mn + i * width end
   for i = 1, nb do counts[i] = 0 end
   for i = 1, n do
-    local idx = floor((data[i] - mn) / width) + 1 --[[:! integer]]
+    local idx = floor((data[i] - mn) / width) + 1
     if idx > nb then idx = nb end  -- clamp max to last bin
     counts[idx] = counts[idx] + 1
   end

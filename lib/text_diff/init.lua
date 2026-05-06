@@ -43,7 +43,7 @@ local function myers_forward(a, b)
       else
         x0 = v[offset + k - 1] + 1
       end
-      local x = x0 --[[:! integer]]
+      local x = x0
       local y = x - k --: integer
       while x < n and y < m and a[x + 1] == b[y + 1] do
         x = x + 1
@@ -89,13 +89,13 @@ local function myers_backtrack(a, b, trace, d_final, offset)
     else
       prev_k0 = k - 1
     end
-    local prev_k = prev_k0 --[[:! integer]]
+    local prev_k = prev_k0
 
     local prev_x = 0 --: integer
     if d > 0 and prev_snap then
       prev_x = prev_snap[offset + prev_k]
     end
-    local prev_x_ = prev_x --[[:! integer]]
+    local prev_x_ = prev_x
     local prev_y = prev_x_ - prev_k --: integer
 
     local diag_start_x = 0 --: integer
@@ -110,8 +110,8 @@ local function myers_backtrack(a, b, trace, d_final, offset)
       end
     end
 
-    local dsx = diag_start_x --[[:! integer]]
-    local dsy = diag_start_y --[[:! integer]]
+    local dsx = diag_start_x
+    local dsy = diag_start_y
     if x > dsx then
       ns = ns + 1
       stack[ns] = { "equal", dsx + 1, x, dsy + 1, y }
@@ -238,8 +238,8 @@ M.diff = function(text1, text2, _opts)
     local fwd_trace, fwd_d, fwd_offset = myers_forward(a, b)
     if fwd_trace then
       local trace_ = fwd_trace --[[:! { [integer]: { [integer]: integer } }]]
-      local d_final_ = (fwd_d or 0) --[[:! integer]]
-      local offset_ = (fwd_offset or 0) --[[:! integer]]
+      local d_final_ = (fwd_d or 0)
+      local offset_ = (fwd_offset or 0)
       local inner = myers_backtrack(a, b, trace_, d_final_, offset_)
       for _, op in ipairs(inner) do
         nd = nd + 1
@@ -495,7 +495,7 @@ end
 M.to_unified = function(diffs, from, to, opts)
   opts = opts or {}
   local ctx_ = opts.context
-  local ctx = (ctx_ ~= nil and ctx_ or 3) --[[:! integer]]
+  local ctx = (ctx_ ~= nil and ctx_ or 3)
   from = from or "a"
   to = to or "b"
 

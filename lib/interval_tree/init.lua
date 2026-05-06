@@ -40,9 +40,8 @@ local function update_max(n)
   local lm = max_hi(n.left --[[:! ITreeNode | nil]])
   local rm = max_hi(n.right --[[:! ITreeNode | nil]])
   if lm > m then m = lm end
-  local m_ = m --[[:! number]]
-  if rm > m_ then m_ = rm end
-  n.max_hi = m_
+  if rm > m then m = rm end
+  n.max_hi = m
 end
 
 -- ---------------------------------------------------------------------------
@@ -233,7 +232,7 @@ local Tree = {}
 Tree.__index = Tree
 
 function M.tree()
-  return setmetatable({ _root = nil, _n = 0 }, Tree) --[[: any]] --[[:! ITreeObj]]
+  return setmetatable({ _root = nil, _n = 0 }, Tree)
 end
 
 function Tree:insert(lo, hi, data)

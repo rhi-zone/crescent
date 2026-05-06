@@ -21,7 +21,7 @@ local LN2 = log(2)
 -- FNV-1a 32-bit hash
 --: (s: string, seed: integer) -> integer
 local function fnv1a(s, seed)
-  local h = band(math.floor(2166136261) + seed * 16777619, 0xFFFFFFFF) --[[:! integer]]
+  local h = band(math.floor(2166136261) + seed * 16777619, 0xFFFFFFFF)
   for i = 1, #s do
     local b = string.byte(s, i) or 0
     h = band(bxor(h, b) * 16777619, 0xFFFFFFFF)
@@ -46,7 +46,7 @@ end
 -- Optimal bit count: m = -n * ln(p) / (ln 2)^2
 --: (n: number, p: number) -> integer
 local function optimal_m(n, p)
-  return ceil(-n * log(p) / (LN2 * LN2)) --[[:! integer]]
+  return ceil(-n * log(p) / (LN2 * LN2))
 end
 
 -- Optimal hash count: k = (m/n) * ln(2)
@@ -148,14 +148,14 @@ end
 -- opts.capacity, opts.error_rate (default 0.01), opts.counter_bits (default 4)
 function M.counting(opts)
   opts = opts or {}
-  local n = (opts.capacity or 1000) --[[:! number]]
-  local p = (opts.error_rate or 0.01) --[[:! number]]
+  local n = (opts.capacity or 1000)
+  local p = (opts.error_rate or 0.01)
   if n < 1 or p <= 0 or p >= 1 then
     return nil, "bloom_count.counting: capacity must be >= 1 and 0 < error_rate < 1"
   end
   local m = optimal_m(n, p)
   local k = opts.hash_count and (opts.hash_count --[[:! integer]]) or optimal_k(m, n)
-  local bits = (opts.counter_bits or 4) --[[:! integer]]
+  local bits = (opts.counter_bits or 4)
   local max = (bits >= 32) and 0x7FFFFFFF or (lshift(1, bits) - 1) --[[:! integer]]
   local counters = {}
   for i = 0, m - 1 do counters[i] = 0 end
@@ -235,7 +235,7 @@ function CF:add(item)
   local max_kicks = self_._max_kicks
   for _ = 1, max_kicks do
     -- Pick a random entry in cur_b to evict
-    local slot = math.random(bsz) --[[:! integer]]
+    local slot = math.random(bsz)
     local evicted = buckets[cur_b][slot]
     buckets[cur_b][slot] = cur_fp
     cur_fp = evicted
@@ -469,9 +469,9 @@ end
 -- opts.initial_capacity (default 100), opts.error_rate (default 0.01), opts.growth_factor (default 2)
 function M.scalable(opts)
   opts = opts or {}
-  local initial_capacity = (opts.initial_capacity or 100) --[[:! number]]
-  local error_rate = (opts.error_rate or 0.01) --[[:! number]]
-  local growth_factor = (opts.growth_factor or 2) --[[:! number]]
+  local initial_capacity = (opts.initial_capacity or 100)
+  local error_rate = (opts.error_rate or 0.01)
+  local growth_factor = (opts.growth_factor or 2)
   local first = make_inner_bloom(initial_capacity, error_rate)
   return setmetatable({
     _filters          = { first },

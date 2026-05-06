@@ -64,7 +64,7 @@ end
 -- Check if a node has expired. If expired, remove it and fire on_evict.
 -- Returns true if the node was expired and removed.
 local function _check_expired(self --[[:! Cache]], node --[[:! CacheNode]])
-  local expires_at = node.expires_at --[[:! number | nil]]
+  local expires_at = node.expires_at
   if not expires_at then return false end
   local at = expires_at --[[:! number]]
   local clock = self._clock
@@ -82,7 +82,7 @@ end
 local function _evict_tail(self --[[:! Cache]])
   local node = self._tail
   if not node then return end
-  local n = node --[[:! CacheNode]]
+  local n = node
   _detach(self, n)
   self._map[n.key] = nil
   self._size = (self._size --[[:! integer]]) - 1

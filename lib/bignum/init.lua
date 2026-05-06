@@ -116,16 +116,16 @@ local function make(s, digits, exp)
 
   -- 3. Canonicalize zero
   if digits == "0" or s == 0 then
-    return --[[:! Bignum]] setmetatable({ s = 0, digits = "0", exp = 0 }, mt)
+    return setmetatable({ s = 0, digits = "0", exp = 0 }, mt)
   end
 
-  return --[[:! Bignum]] setmetatable({ s = s, digits = digits, exp = exp }, mt)
+  return setmetatable({ s = s, digits = digits, exp = exp }, mt)
 end
 
 -- Return a new bignum that is zero.
 --: () -> Bignum
 local function zero()
-  return --[[:! Bignum]] setmetatable({ s = 0, digits = "0", exp = 0 }, mt)
+  return setmetatable({ s = 0, digits = "0", exp = 0 }, mt)
 end
 
 -- Return string padded with leading zeros to length n.
@@ -321,7 +321,7 @@ end
 function M.new(v)
   if type(v) == "table" and getmetatable(v) == mt then
     local bv = --[[:! Bignum]] v
-    return --[[:! Bignum]] setmetatable({ s = bv.s, digits = bv.digits, exp = bv.exp }, mt)
+    return setmetatable({ s = bv.s, digits = bv.digits, exp = bv.exp }, mt)
   end
   if type(v) == "number" then
     if v == floor(v) and abs(v) < 1e15 then
@@ -423,7 +423,7 @@ function M.sub(a, b)
   if b.s == 0 then
     return --[[:! Bignum]] select(1, M.new(a))
   end
-  local neg_b = --[[:! Bignum]] setmetatable({ s = -b.s, digits = b.digits, exp = b.exp }, mt)
+  local neg_b = setmetatable({ s = -b.s, digits = b.digits, exp = b.exp }, mt)
   local r = M.add(a, neg_b)
   return r
 end
@@ -476,13 +476,13 @@ end
 --: (a: Bignum) -> Bignum
 function M.neg(a)
   if a.s == 0 then return zero() end
-  return --[[:! Bignum]] setmetatable({ s = -a.s, digits = a.digits, exp = a.exp }, mt)
+  return setmetatable({ s = -a.s, digits = a.digits, exp = a.exp }, mt)
 end
 
 --: (a: Bignum) -> Bignum
 function M.abs(a)
   if a.s == 0 then return zero() end
-  return --[[:! Bignum]] setmetatable({ s = 1, digits = a.digits, exp = a.exp }, mt)
+  return setmetatable({ s = 1, digits = a.digits, exp = a.exp }, mt)
 end
 
 -- ── Comparison ───────────────────────────────────────────────────────────────

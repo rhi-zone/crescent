@@ -70,7 +70,7 @@ local function parse_attrs(xml, pos)
   local len = #xml
   while pos <= len do
     -- skip whitespace
-    pos = ((xml:match("^%s*()", pos) --[[:! integer | nil]]) or pos) --[[:! integer]]
+    pos = ((xml:match("^%s*()", pos) --[[:! integer | nil]]) or pos)
     local c = xml:sub(pos, pos)
     if c == ">" then
       return attrs, false, pos + 1
@@ -86,12 +86,12 @@ local function parse_attrs(xml, pos)
     end
     pos = after_name --[[:! integer]]
     -- optional whitespace + '='
-    pos = ((xml:match("^%s*()", pos) --[[:! integer | nil]]) or pos) --[[:! integer]]
+    pos = ((xml:match("^%s*()", pos) --[[:! integer | nil]]) or pos)
     if xml:sub(pos, pos) ~= "=" then
       return nil, "expected '=' after attribute name '" .. aname .. "'"
     end
     pos = pos + 1
-    pos = ((xml:match("^%s*()", pos) --[[:! integer | nil]]) or pos) --[[:! integer]]
+    pos = ((xml:match("^%s*()", pos) --[[:! integer | nil]]) or pos)
     -- quoted value
     local q = xml:sub(pos, pos)
     if q ~= '"' and q ~= "'" then

@@ -488,7 +488,7 @@ function M.rle_encode(cells)
       local row_min_x = row_xs[1]
       local row_max_x = row_xs[#row_xs]
       local xs_set = {} --: { [integer]: boolean }
-      for _, rx in ipairs(row_xs) do xs_set[rx --[[:! integer]]] = true end
+      for _, rx in ipairs(row_xs) do xs_set[rx] = true end
 
       -- Encode row as run-length of b/o.
       -- Only encode up to the last alive cell (trailing dead cells omitted).

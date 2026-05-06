@@ -178,7 +178,7 @@ function M.solve(A, b)
     end
     x[i] = s / row[i]
   end
-  return setmetatable({ _rows = n, _cols = 1, _data = x }, Mt) --[[: any]] --[[:! matrix]]
+  return setmetatable({ _rows = n, _cols = 1, _data = x }, Mt)
 end
 
 -- Instance methods
@@ -237,7 +237,7 @@ function M:add(other)
   local a, b = self_._data, other_._data
   local d = {}
   for i = 1, n do d[i] = a[i] + b[i] end
-  return setmetatable({ _rows = r, _cols = c, _data = d }, Mt) --[[: any]] --[[:! matrix]]
+  return setmetatable({ _rows = r, _cols = c, _data = d }, Mt)
 end
 
 --- Element-wise subtraction.
@@ -253,7 +253,7 @@ function M:sub(other)
   local a, b = self_._data, other_._data
   local d = {}
   for i = 1, n do d[i] = a[i] - b[i] end
-  return setmetatable({ _rows = r, _cols = c, _data = d }, Mt) --[[: any]] --[[:! matrix]]
+  return setmetatable({ _rows = r, _cols = c, _data = d }, Mt)
 end
 
 --- Matrix multiplication.
@@ -280,7 +280,7 @@ function M:mul(other)
       d[k] = s
     end
   end
-  return setmetatable({ _rows = ar, _cols = bc, _data = d }, Mt) --[[: any]] --[[:! matrix]]
+  return setmetatable({ _rows = ar, _cols = bc, _data = d }, Mt)
 end
 
 --- Scalar multiplication.
@@ -312,7 +312,7 @@ function M:transpose()
       d[(j - 1) * r + i] = a[base + j]
     end
   end
-  return setmetatable({ _rows = c, _cols = r, _data = d }, Mt) --[[: any]] --[[:! matrix]]
+  return setmetatable({ _rows = c, _cols = r, _data = d }, Mt)
 end
 
 --- Trace (sum of diagonal elements).

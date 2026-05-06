@@ -76,14 +76,14 @@ Config.__index = Config
 -- opts.env_reader: function(name) -> string|nil  (default: os.getenv)
 function M.new(opts)
   opts = opts or {}
-  local self = (setmetatable({
+  local self = setmetatable({
     _defaults = {},
     _layers = {},
     _env_prefix = nil,
     _args_table = nil,
     _env_reader = nil,
     _ns_prefix = nil,
-  }, Config) --[[: any]]) --[[:! Config]]
+  }, Config)
   self._env_reader = opts.env_reader --[[: any]]
   return self
 end
@@ -252,14 +252,14 @@ end
 -- Return a namespaced view: all lookups prepend prefix + "."
 function Config:ns(prefix)
   local self_ = self --[[:! Config]]
-  local ns = (setmetatable({
+  local ns = setmetatable({
     _defaults = self_._defaults,
     _layers = self_._layers,
     _env_prefix = self_._env_prefix,
     _args_table = self_._args_table,
     _env_reader = self_._env_reader,
     _ns_prefix = (self_._ns_prefix and (self_._ns_prefix .. ".") or "") .. prefix,
-  }, Config) --[[: any]]) --[[:! Config]]
+  }, Config)
   return ns
 end
 

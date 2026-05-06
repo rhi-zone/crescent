@@ -165,11 +165,9 @@ local function apply_rules_once(s, plain, ctx_rules, rng)
         for _, crule in ipairs(ctx_rules[ch]) do
           local match = false --: boolean
           if crule.kind == "context_l" then
-            local i_ = i --[[:! number]]
-            match = (i_ > 1 and s:sub(i - 1, i - 1) == crule.left) and true or false
+            match = (i > 1 and s:sub(i - 1, i - 1) == crule.left) and true or false
           elseif crule.kind == "context_r" then
-            local i_ = i --[[:! number]]
-            match = (i_ < n and s:sub(i + 1, i + 1) == crule.right) and true or false
+            match = (i < n and s:sub(i + 1, i + 1) == crule.right) and true or false
           end
           if match then
             local value = crule.value
@@ -272,7 +270,7 @@ local function interpret_string(s, opts)
     elseif ch == "(" then
       -- skip parametric value "(n)" — turtle doesn't act on it
       local close = s:find(")", i + 1, true)
-      if close then i = (close) --[[:! integer]] end
+      if close then i = close end
     end
     -- all other symbols ignored in turtle
 

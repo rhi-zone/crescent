@@ -420,7 +420,7 @@ function M.table(opts)
     return nil, "table() requires a columns definition"
   end
 
-  local t = (setmetatable({ _schema = {}, _columns = {}, _col_index = {}, _count = 0 }, Table) --[[: any]]) --[[:! ColTable]]
+  local t = setmetatable({ _schema = {}, _columns = {}, _col_index = {}, _count = 0 }, Table)
 
   for i, col_def in ipairs(opts.columns) do
     local col_def_ = col_def --[[:! ColDef]]

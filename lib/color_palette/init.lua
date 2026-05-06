@@ -62,18 +62,15 @@ local function hsl_norm_to_rgb(h, s, l)
   local function hue2rgb(p, q, t)
     local tv = t --: number
     if tv < 0 then tv = tv + 1 end
-    tv = tv --[[:! number]]
     if tv > 1 then tv = tv - 1 end
-    tv = tv --[[:! number]]
     if tv < 1/6 then return p + (q - p) * 6 * tv end
     if tv < 1/2 then return q end
     if tv < 2/3 then return p + (q - p) * (2/3 - tv) * 6 end
     return p
   end
   local q = l < 0.5 and l * (1 + s) or l + s - l * s
-  local q_ = q --[[:! number]]
-  local p = 2 * l - q_
-  return hue2rgb(p, q_, h + 1/3), hue2rgb(p, q_, h), hue2rgb(p, q_, h - 1/3)
+  local p = 2 * l - q
+  return hue2rgb(p, q, h + 1/3), hue2rgb(p, q, h), hue2rgb(p, q, h - 1/3)
 end
 
 -- sRGB linearize (for luminance / contrast)

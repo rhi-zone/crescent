@@ -156,8 +156,8 @@ function M.new(value, scale)
     return nil, "decimal.new: unsupported type " .. t
   end
 
-  local coeff_ = (coeff or 0) --[[:! number]]
-  local exp_   = (exp or 0)   --[[:! number]]
+  local coeff_ = (coeff or 0)
+  local exp_   = (exp or 0)
   coeff_, exp_ = normalize(coeff_, exp_)
   local d = make(coeff_, exp_)
 
@@ -309,18 +309,18 @@ function M.to_string(a)
 
   if exp > 0 then
     -- Positive exponent: append zeros
-    return sign_str .. s .. string.rep("0", math.floor(exp) --[[:! integer]])
+    return sign_str .. s .. string.rep("0", math.floor(exp))
   else
     -- Negative exponent: insert decimal point
     local dec_pos = #s + exp   -- position of decimal point from left
     if dec_pos <= 0 then
       -- Need leading zeros after "0."
-      return sign_str .. "0." .. string.rep("0", math.floor(-dec_pos) --[[:! integer]]) .. s
+      return sign_str .. "0." .. string.rep("0", math.floor(-dec_pos)) .. s
     elseif dec_pos >= #s then
       -- No fractional part (shouldn't happen after normalize, but defensive)
       return sign_str .. s
     else
-      local dp = math.floor(dec_pos) --[[:! integer]]
+      local dp = math.floor(dec_pos)
       return sign_str .. s:sub(1, dp) .. "." .. s:sub(dp + 1)
     end
   end

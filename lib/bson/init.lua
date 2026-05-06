@@ -60,7 +60,7 @@ end
 -- ── little-endian pack helpers ───────────────────────────────────────────────
 
 local function pack_i32(n)
-	local ni = math.floor(n) --[[:! integer]]
+	local ni = math.floor(n)
 	ni = bit.tobit(ni)
 	return char(
 		bit.band(ni, 0xff),
@@ -176,10 +176,10 @@ end
 
 --: (string, integer) -> (integer, integer)
 local function unpack_i32(s, pos)
-	local b1 = (byte(s, pos) or 0) --[[:! integer]]
-	local b2 = (byte(s, pos + 1) or 0) --[[:! integer]]
-	local b3 = (byte(s, pos + 2) or 0) --[[:! integer]]
-	local b4 = (byte(s, pos + 3) or 0) --[[:! integer]]
+	local b1 = (byte(s, pos) or 0)
+	local b2 = (byte(s, pos + 1) or 0)
+	local b3 = (byte(s, pos + 2) or 0)
+	local b4 = (byte(s, pos + 3) or 0)
 	local n = (b1 + b2 * 256 + b3 * 65536 + b4 * 16777216) --[[: number]]
 	if n >= 2147483648 then n = n - 4294967296 end
 	return n --[[:! integer]], pos + 4
@@ -187,10 +187,10 @@ end
 
 --: (string, integer) -> (integer, integer)
 local function unpack_u32(s, pos)
-	local b1 = (byte(s, pos) or 0) --[[:! integer]]
-	local b2 = (byte(s, pos + 1) or 0) --[[:! integer]]
-	local b3 = (byte(s, pos + 2) or 0) --[[:! integer]]
-	local b4 = (byte(s, pos + 3) or 0) --[[:! integer]]
+	local b1 = (byte(s, pos) or 0)
+	local b2 = (byte(s, pos + 1) or 0)
+	local b3 = (byte(s, pos + 2) or 0)
+	local b4 = (byte(s, pos + 3) or 0)
 	local n = (b1 + b2 * 256 + b3 * 65536 + b4 * 16777216) --[[: number]]
 	return n --[[:! integer]], pos + 4
 end
@@ -217,7 +217,7 @@ if ffi then
 	--: (string, integer) -> (number, integer)
 	unpack_double = function(s, pos)
 		for i = 0, 7 do
-			_tmp[i] = (byte(s, pos + i) or 0) --[[:! integer]]
+			_tmp[i] = (byte(s, pos + i) or 0)
 		end
 		return tonumber(_dptr[0]) or 0, pos + 8
 	end
@@ -225,14 +225,14 @@ else
 	local huge = math.huge
 	--: (string, integer) -> (number, integer)
 	unpack_double = function(s, pos)
-		local b1 = (byte(s, pos) or 0) --[[:! integer]]
-		local b2 = (byte(s, pos + 1) or 0) --[[:! integer]]
-		local b3 = (byte(s, pos + 2) or 0) --[[:! integer]]
-		local b4 = (byte(s, pos + 3) or 0) --[[:! integer]]
-		local b5 = (byte(s, pos + 4) or 0) --[[:! integer]]
-		local b6 = (byte(s, pos + 5) or 0) --[[:! integer]]
-		local b7 = (byte(s, pos + 6) or 0) --[[:! integer]]
-		local b8 = (byte(s, pos + 7) or 0) --[[:! integer]]
+		local b1 = (byte(s, pos) or 0)
+		local b2 = (byte(s, pos + 1) or 0)
+		local b3 = (byte(s, pos + 2) or 0)
+		local b4 = (byte(s, pos + 3) or 0)
+		local b5 = (byte(s, pos + 4) or 0)
+		local b6 = (byte(s, pos + 5) or 0)
+		local b7 = (byte(s, pos + 6) or 0)
+		local b8 = (byte(s, pos + 7) or 0)
 		-- little-endian: b1=byte0(lsb), b8=byte7(msb)
 		local sign = 1 --: number
 		local b8_ = b8 --: number
@@ -476,13 +476,13 @@ local function decode_document(s, pos)
 			local val_2, cur_2 = decode_document(s, cur)
 			if not val_2 then return nil, tostring(cur_2) end
 			val = val_2
-			cur = (tonumber(cur_2) or cur) --[[:! integer]]
+			cur = (tonumber(cur_2) or cur)
 
 		elseif tbyte == 0x04 then
 			-- array (document with "0","1",... keys → convert to Lua array)
 			local arr_t, cur_2 = decode_document(s, cur)
 			if not arr_t then return nil, tostring(cur_2) end
-			cur = (tonumber(cur_2) or cur) --[[:! integer]]
+			cur = (tonumber(cur_2) or cur)
 			-- arr_t has string keys "0","1","2"... — convert to 1-indexed Lua array
 			local arr = {}
 			for k, v in pairs(arr_t) do
@@ -499,7 +499,7 @@ local function decode_document(s, pos)
 			local blen
 			blen, cur = unpack_i32(s, cur)
 			if cur > slen then return nil, "truncated binary subtype" end
-			local subtype = (byte(s, cur) or 0) --[[:! integer]]
+			local subtype = (byte(s, cur) or 0)
 			cur = cur + 1
 			if cur + blen - 1 > slen then return nil, "truncated binary data" end
 			val = M.binary(sub(s, cur, cur + blen - 1), subtype)
@@ -507,7 +507,7 @@ local function decode_document(s, pos)
 
 		elseif tbyte == 0x08 then
 			-- boolean
-			local bval = (byte(s, cur) or 0) --[[:! integer]]
+			local bval = (byte(s, cur) or 0)
 			cur = cur + 1
 			val = (bval == 0x01)
 
@@ -556,7 +556,7 @@ function M.decode(bytes, pos)
 		return nil, nil, "expected string"
 	end
 	pos = pos or 1
-	local pos_ = math.floor(pos) --[[:! integer]]
+	local pos_ = math.floor(pos)
 	if #bytes == 0 then
 		return nil, nil, "empty input"
 	end

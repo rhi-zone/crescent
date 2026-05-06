@@ -26,7 +26,7 @@ local byte, char = string.byte, string.char
 local function fnv1a32(s, seed)
   local h = tobit(seed or 2166136261)
   for i = 1, #s do
-    h = bxor(h, (byte(s, i) or 0) --[[:! integer]])
+    h = bxor(h, (byte(s, i) or 0))
     -- Multiply by FNV prime 16777619 using 16-bit splits to stay within 53-bit mantissa.
     local a = band(h, 0xffff)            -- lower 16 bits
     local b = band(rshift(h, 16), 0xffff) -- upper 16 bits (logical via mask)
@@ -335,20 +335,20 @@ function M.deserialize(s)
     return nil, "cuckoo.deserialize: invalid data (too short)"
   end
   local b1_,b2_,b3_,b4_ = byte(s, 1, 4)
-  local b1 = (b1_ or 0) --[[:! integer]]
-  local b2 = (b2_ or 0) --[[:! integer]]
-  local b3 = (b3_ or 0) --[[:! integer]]
-  local b4 = (b4_ or 0) --[[:! integer]]
+  local b1 = (b1_ or 0)
+  local b2 = (b2_ or 0)
+  local b3 = (b3_ or 0)
+  local b4 = (b4_ or 0)
   local nb = bor(lshift(b1, 24), lshift(b2, 16), lshift(b3, 8), b4)
   local bs_byte_, fp_bits_, mk_hi_, mk_lo_ = byte(s, 5, 8)
-  local bucket_size = (bs_byte_ or 0) --[[:! integer]]
-  local fp_bits_val = (fp_bits_ or 0) --[[:! integer]]
-  local max_kicks = bor(lshift((mk_hi_ or 0) --[[:! integer]], 8), (mk_lo_ or 0) --[[:! integer]])
+  local bucket_size = (bs_byte_ or 0)
+  local fp_bits_val = (fp_bits_ or 0)
+  local max_kicks = bor(lshift((mk_hi_ or 0), 8), (mk_lo_ or 0))
   local c1_,c2_,c3_,c4_ = byte(s, 9, 12)
-  local c1 = (c1_ or 0) --[[:! integer]]
-  local c2 = (c2_ or 0) --[[:! integer]]
-  local c3 = (c3_ or 0) --[[:! integer]]
-  local c4 = (c4_ or 0) --[[:! integer]]
+  local c1 = (c1_ or 0)
+  local c2 = (c2_ or 0)
+  local c3 = (c3_ or 0)
+  local c4 = (c4_ or 0)
   local count = bor(lshift(c1, 24), lshift(c2, 16), lshift(c3, 8), c4)
 
   if nb < 1 or bucket_size < 1 or fp_bits_val < 1 then
@@ -366,14 +366,14 @@ function M.deserialize(s)
   local offset = 13
   if bpf == 1 then
     for i = 0, total - 1 do
-      data[i] = (byte(s, offset) or 0) --[[:! integer]]
+      data[i] = (byte(s, offset) or 0)
       offset = offset + 1
     end
   else
     for i = 0, total - 1 do
       local hi_, lo_ = byte(s, offset, offset + 1)
-      local hi = (hi_ or 0) --[[:! integer]]
-      local lo = (lo_ or 0) --[[:! integer]]
+      local hi = (hi_ or 0)
+      local lo = (lo_ or 0)
       data[i] = bor(lshift(hi, 8), lo)
       offset = offset + 2
     end

@@ -28,7 +28,7 @@ local function gen_boundary(seed)
     math.randomseed(seed_)
     local t = {} --: { [integer]: string }
     for _ = 1, 24 do
-        local r = (math.floor(math.random() * #BOUNDARY_CHARS) + 1) --[[:! integer]]
+        local r = math.floor(math.random() * #BOUNDARY_CHARS) + 1
         table.insert(t, string.sub(BOUNDARY_CHARS, r, r))
     end
     return concat(t)
@@ -178,17 +178,17 @@ function M.encode(parts, boundary, seed)
         local p_ = p --[[:! { [string]: unknown }]]
         if p_["headers"] then
             local h_ = p_["headers"] --[[:! HeaderMap]]
-            local b_ = (p_["body"] or "") --[[:! string]]
+            local b_ = (p_["body"] or "")
             Builder.part(mp, h_, b_)
         elseif p_["filename"] then
             local name_ = p_["name"] --[[:! string]]
             local fn_ = p_["filename"] --[[:! string]]
-            local data_ = (p_["data"] or "") --[[:! string]]
+            local data_ = (p_["data"] or "")
             local type_ = p_["type"] --[[:! string | nil]]
             Builder.file(mp, name_, fn_, data_, type_)
         else
             local name_ = p_["name"] --[[:! string]]
-            local val_ = (p_["value"] or "") --[[:! string]]
+            local val_ = (p_["value"] or "")
             Builder.field(mp, name_, val_)
         end
     end
@@ -290,7 +290,7 @@ function M.decode(body, boundary)
                 local hname, hval = parse_header_line(line)
                 if hname then
                     local hname_ = hname --[[:! string]]
-                    local hval_ = (hval or "") --[[:! string]]
+                    local hval_ = (hval or "")
                     headers[hname_] = hval_
                 end
             end

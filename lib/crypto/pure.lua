@@ -45,7 +45,7 @@ end
 -- Write a 32-bit little-endian word to a table of bytes.
 --: ({ [integer]: integer }, integer, number) -> ()
 local function put_u32le(t, pos, v)
-	local vi = math.floor(v) --[[:! integer]]
+	local vi = math.floor(v)
 	t[pos]     = band(vi, 0xff)
 	t[pos + 1] = band(rshift(vi, 8), 0xff)
 	t[pos + 2] = band(rshift(vi, 16), 0xff)
