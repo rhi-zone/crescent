@@ -338,6 +338,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/knn/` — k-nearest neighbors. Status: stable.
 - `lib/lindenmayer/`, `lib/lsystem/` — L-systems; `lsystem` is parallel/older. Status: stable.
 - `lib/luhn/` — Luhn checksum. Status: stable.
+- `lib/math/` — math utilities: `tointeger(x) -> integer | nil`. Status: stable.
 - `lib/math_ext/` — extended math.*. Status: stable.
 - `lib/minimax/` — minimax + αβ + iterative deepening + MCTS. Status: stable.
 - `lib/neural/`, `lib/neural_net/` — feedforward NN with backprop. Status: stable. **Two parallel impls.**
