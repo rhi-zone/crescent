@@ -32,6 +32,7 @@ local TAG_TYPE_CALL    = defs.TAG_TYPE_CALL
 local TAG_INTRINSIC    = defs.TAG_INTRINSIC
 local TAG_FFIC         = defs.TAG_FFIC
 local TAG_SPREAD       = defs.TAG_SPREAD
+local TAG_INDEX_TYPE   = defs.TAG_INDEX_TYPE
 
 local LIT_INTEGER   = defs.LIT_INTEGER
 local LIT_NUMBER    = defs.LIT_NUMBER
@@ -189,6 +190,25 @@ local function resolve_deferred_intrinsic(ctx, tid)
         t = inner_t
         tid = inner_tid
     end
+    -- TAG_INDEX_TYPE: evaluate T[K] when both subject and key are now concrete.
+    -- Arises when a generic return type like CTypeMap[S] has S bound after arg unification.
+    if t.tag == TAG_INDEX_TYPE then
+        local subj_tid = find(ctx, t.data[0])
+        local key_tid  = find(ctx, t.data[1])
+        local st = ctx.types:get(subj_tid)
+        local kt = ctx.types:get(key_tid)
+        if st.tag ~= TAG_VAR and st.tag ~= TAG_ROWVAR and st.tag ~= TAG_NAMED
+            and kt.tag ~= TAG_VAR and kt.tag ~= TAG_ROWVAR and kt.tag ~= TAG_NAMED then
+            local match_mod = require("lib.type.static.match")
+            local result --: integer | nil
+            result = match_mod.lookup_index(ctx, subj_tid, key_tid) --[[:! integer | nil]]
+            if result ~= nil then
+                return result --[[: integer]]
+            end
+        end
+        return tid
+    end
+
     if t.tag ~= TAG_TYPE_CALL then return tid end
     local callee_id = find(ctx, t.data[0])
     local ct = ctx.types:get(callee_id)
@@ -1514,7 +1534,9 @@ local function solve_callable(ctx, c)
                 if rl == 0 then
                     bind_to(ctx, ret_tid, ctx.T_NIL)
                 else
-                    bind_to(ctx, ret_tid, find(ctx, ctx.lists:get(ft.data[2])))
+                    local first_ret = find(ctx, ctx.lists:get(ft.data[2]))
+                    first_ret = resolve_deferred_intrinsic(ctx, first_ret)
+                    bind_to(ctx, ret_tid, first_ret)
                 end
                 return true
             end
@@ -2119,11 +2141,27 @@ local function solve_check_args(ctx, c)
                 end
             end
             if ok then
+                -- Bind params of the winning overload so that generic TVs in the
+                -- return type get resolved (e.g. CTypeMap[S_fresh]).
+                for j = 0, ft.data[1] - 1 do
+                    local pexp = ctx.lists:get(ft.data[0] + j) --[[: integer]]
+                    local exp_p = find(ctx, pexp)
+                    local pact = arg_tids[j + 1]
+                    if pact then
+                        local ept = ctx.types:get(exp_p)
+                        if ept.tag == TAG_VAR or ept.tag == TAG_ROWVAR
+                          or contains_free_var(ctx, exp_p) then
+                            unify_mod.unify(ctx, find(ctx, pact), exp_p)
+                        end
+                    end
+                end
                 local rl = ft.data[3]
                 if rl == 0 then
                     bind_to(ctx, ret_tid, ctx.T_NIL)
                 else
-                    bind_to(ctx, ret_tid, find(ctx, ctx.lists:get(ft.data[2])))
+                    local first_ret = find(ctx, ctx.lists:get(ft.data[2]))
+                    first_ret = resolve_deferred_intrinsic(ctx, first_ret)
+                    bind_to(ctx, ret_tid, first_ret)
                 end
                 return true
             end

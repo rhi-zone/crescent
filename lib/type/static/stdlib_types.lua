@@ -47,7 +47,7 @@
 --:: declare newproxy = (mt: boolean | { [string]: unknown, ... } | nil) -> unknown
 --:: declare rawprint = (s: string) -> ()
 --:: declare _VERSION = string
---:: Ctype<T> = $Opaque<T>
+--:: Ctype<T> = $Opaque<T> & ((...unknown) -> T)
 --:: Ptr<T> = T & { [0]: T }
 --:: Arr<T> = { [integer]: T, ... }
 --:: CTypeMap = {
