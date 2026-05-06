@@ -377,7 +377,7 @@ end
 function Color:mix(other, t)
   local self_ = self --[[:! ColorObj]]
   local other_ = other --[[:! ColorObj]]
-  local t_ = (t or 0.5) --[[:! number]]
+  local t_ = (t or 0.5)
   local r = round(self_._r + (other_._r - self_._r) * t_)
   local g = round(self_._g + (other_._g - self_._g) * t_)
   local b = round(self_._b + (other_._b - self_._b) * t_)

@@ -878,10 +878,10 @@ solve = function(db, goals, env, depth)
   if ARITH_CMP[functor] and arity == 2 then
     local a, e1 = eval_arith(env, goal.args[1])
     if not a then error(e1) end
-    local a_ = (a or 0) --[[:! number]]
+    local a_ = (a or 0)
     local b, e2 = eval_arith(env, goal.args[2])
     if not b then error(e2) end
-    local b_ = (b or 0) --[[:! number]]
+    local b_ = (b or 0)
     local cmp_fn = ARITH_CMP[functor] --[[:! (number, number) -> boolean]]
     if cmp_fn(a_, b_) then
       solve(db, rest, env, depth + 1)
@@ -1021,7 +1021,7 @@ solve = function(db, goals, env, depth)
       local nv = num_t.value --[[:! number]]
       local s = tostring(math.floor(nv) == nv and math.floor(nv) or nv) --[[:! string]]
       local codes = {}
-      for ci = 1, #s do codes[ci] = mk_num((string.byte(s, ci) or 0) --[[:! integer]]) end
+      for ci = 1, #s do codes[ci] = mk_num((string.byte(s, ci) or 0)) end
       local list_term = mk_list(codes)
       local e2 = unify(env, goal.args[2], list_term)
       if e2 then solve(db, rest, e2, depth + 1) end
@@ -1034,7 +1034,7 @@ solve = function(db, goals, env, depth)
     if atom_t.kind == "atom" then
       local s = atom_t.name --[[:! string]]
       local codes = {}
-      for ci = 1, #s do codes[ci] = mk_num((string.byte(s, ci) or 0) --[[:! integer]]) end
+      for ci = 1, #s do codes[ci] = mk_num((string.byte(s, ci) or 0)) end
       local list_term = mk_list(codes)
       local e2 = unify(env, goal.args[2], list_term)
       if e2 then solve(db, rest, e2, depth + 1) end

@@ -88,7 +88,6 @@ local function parse_class(pat, pos)
   local neg = false
   if pos <= #pat and pat:byte(pos) == 94 then -- ^
     neg = true; pos = pos + 1
-    pos = pos --[[:! integer]]
   end
   local ranges = {}
   local shortcuts = {}
@@ -142,7 +141,6 @@ local function parse_class(pat, pos)
         ranges[#ranges + 1] = { lo, lo }
       end
     end
-    pos = pos --[[:! integer]]
   end
   return parse_error("unterminated character class")
 end
@@ -355,34 +353,31 @@ local function parse_brace_quant(pat, pos)
   -- parse n
   local n_start = i
   while i <= #pat do
-    local bi = (string.byte(pat, i) or 0) --[[:! integer]]
+    local bi = (string.byte(pat, i) or 0)
     if bi < 48 or bi > 57 then break end
     i = i + 1
-    i = i --[[:! integer]]
   end
   if i == n_start then return nil end  -- no digits
-  local n = (tonumber(pat:sub(n_start, i - 1)) or 0) --[[:! number]]
+  local n = (tonumber(pat:sub(n_start, i - 1)) or 0)
   if i > #pat then return nil end
-  local b = (string.byte(pat, i) or 0) --[[:! integer]]
+  local b = (string.byte(pat, i) or 0)
   if b == 125 then -- {n}
     return n, n, i + 1
   elseif b == 44 then -- ,
     i = i + 1
-    i = i --[[:! integer]]
-    local bi2 = (string.byte(pat, i) or 0) --[[:! integer]]
+    local bi2 = (string.byte(pat, i) or 0)
     if i <= #pat and bi2 == 125 then -- {n,}
       return n, math.huge, i + 1
     end
     local m_start = i
     while i <= #pat do
-      local bj = (string.byte(pat, i) or 0) --[[:! integer]]
+      local bj = (string.byte(pat, i) or 0)
       if bj < 48 or bj > 57 then break end
       i = i + 1
-      i = i --[[:! integer]]
     end
     if i == m_start then return nil end
-    local m = (tonumber(pat:sub(m_start, i - 1)) or 0) --[[:! number]]
-    local bk = (string.byte(pat, i) or 0) --[[:! integer]]
+    local m = (tonumber(pat:sub(m_start, i - 1)) or 0)
+    local bk = (string.byte(pat, i) or 0)
     if i > #pat or bk ~= 125 then return nil end
     if m < n then return nil end
     return n, m, i + 1
@@ -885,7 +880,6 @@ function Re:find_all(str)
     else
       pos = e_
     end
-    pos = pos --[[:! integer]]
   end
   return results
 end
@@ -929,7 +923,6 @@ function Re:sub(str, repl, n)
     else
       pos = e_
     end
-    pos = pos --[[:! integer]]
   end
   if pos <= slen then parts[#parts + 1] = str:sub(pos) end
   return table.concat(parts), count
@@ -955,7 +948,6 @@ function Re:gsub(str, repl)
     else
       pos = e_
     end
-    pos = pos --[[:! integer]]
   end
   if pos <= slen then parts[#parts + 1] = str:sub(pos) end
   return table.concat(parts), count
@@ -978,7 +970,6 @@ function Re:split(str, max_splits)
     else
       pos = e_
     end
-    pos = pos --[[:! integer]]
   end
   result[#result + 1] = str:sub(pos)
   return result

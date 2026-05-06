@@ -40,7 +40,7 @@ end
 
 --: (string, integer, integer, integer, integer, boolean) -> (string|nil, integer, string, string|nil)
 local function parse_field(s, pos, len, sep_b, quot_b, do_trim)
-  local c = (byte(s, pos)) or 0 --[[:! integer]]
+  local c = (byte(s, pos)) or 0
 
   if c == quot_b then
     -- Quoted field — collect everything until unescaped closing quote
@@ -49,9 +49,9 @@ local function parse_field(s, pos, len, sep_b, quot_b, do_trim)
     local nparts = 0
     local start = pos
     while pos <= len do
-      c = (byte(s, pos)) or 0 --[[:! integer]]
+      c = (byte(s, pos)) or 0
       if c == quot_b then
-        if pos + 1 <= len and ((byte(s, pos + 1)) or 0 --[[:! integer]]) == quot_b then
+        if pos + 1 <= len and ((byte(s, pos + 1)) or 0) == quot_b then
           -- "" → escaped quote
           nparts = nparts + 1
           parts[nparts] = sub(s, start, pos)  -- includes the first "
@@ -80,12 +80,12 @@ local function parse_field(s, pos, len, sep_b, quot_b, do_trim)
     if pos > len then
       return field, pos, "eof"
     end
-    c = (byte(s, pos)) or 0 --[[:! integer]]
+    c = (byte(s, pos)) or 0
     if c == sep_b then
       return field, pos + 1, "delim"
     elseif c == BYTE_CR then
       pos = pos + 1
-      if pos <= len and ((byte(s, pos)) or 0 --[[:! integer]]) == BYTE_LF then pos = pos + 1 end
+      if pos <= len and ((byte(s, pos)) or 0) == BYTE_LF then pos = pos + 1 end
       return field, pos, "newline"
     elseif c == BYTE_LF then
       return field, pos + 1, "newline"
@@ -97,7 +97,7 @@ local function parse_field(s, pos, len, sep_b, quot_b, do_trim)
   -- Unquoted field — scan to separator or newline
   local start = pos
   while pos <= len do
-    c = (byte(s, pos)) or 0 --[[:! integer]]
+    c = (byte(s, pos)) or 0
     if c == sep_b then
       local field = sub(s, start, pos - 1)
       if do_trim then field = (field:match("^%s*(.-)%s*$")) or field --[[:! string]] end
@@ -106,7 +106,7 @@ local function parse_field(s, pos, len, sep_b, quot_b, do_trim)
       local field = sub(s, start, pos - 1)
       if do_trim then field = (field:match("^%s*(.-)%s*$")) or field --[[:! string]] end
       pos = pos + 1
-      if pos <= len and ((byte(s, pos)) or 0 --[[:! integer]]) == BYTE_LF then pos = pos + 1 end
+      if pos <= len and ((byte(s, pos)) or 0) == BYTE_LF then pos = pos + 1 end
       return field, pos, "newline"
     elseif c == BYTE_LF then
       local field = sub(s, start, pos - 1)
@@ -145,8 +145,8 @@ function M.decode(s, opts)
 
   local _sep_b_raw  = byte(sep_str --[[:! string]],  1)
   local _quot_b_raw = byte(quot_str --[[:! string]], 1)
-  local sep_b  = (_sep_b_raw  or 44) --[[:! integer]]
-  local quot_b = (_quot_b_raw or 34) --[[:! integer]]
+  local sep_b  = (_sep_b_raw  or 44)
+  local quot_b = (_quot_b_raw or 34)
   local len    = #s
   local pos    = 1
 
@@ -155,12 +155,12 @@ function M.decode(s, opts)
   local nrow = 0
 
   while pos <= len do
-    local c = (byte(s, pos)) or 0 --[[:! integer]]
+    local c = (byte(s, pos)) or 0
 
     -- Blank line (newline at start of row position)
     if c == BYTE_CR then
       pos = pos + 1
-      if pos <= len and ((byte(s, pos)) or 0 --[[:! integer]]) == BYTE_LF then pos = pos + 1 end
+      if pos <= len and ((byte(s, pos)) or 0) == BYTE_LF then pos = pos + 1 end
       nrow = nrow + 1
       rows[nrow] = {}
     elseif c == BYTE_LF then
@@ -390,15 +390,15 @@ function Decoder:_process()
 
   local quot_str = ((ds._opts and (ds._opts.quote or '"')) or '"') --[[:! string]]
   local _quot_b_r = byte(quot_str, 1)
-  local quot_b   = (_quot_b_r or 34) --[[:! integer]]
+  local quot_b   = (_quot_b_r or 34)
 
   while pos <= len do
-    local c = (byte(buf, pos)) or 0 --[[:! integer]]
+    local c = (byte(buf, pos)) or 0
     if c == quot_b then
       in_q = not in_q
     elseif not in_q and (c == BYTE_LF or c == BYTE_CR) then
       local row_str = sub(buf, last + 1, pos - 1)
-      if c == BYTE_CR and pos + 1 <= len and ((byte(buf, pos + 1)) or 0 --[[:! integer]]) == BYTE_LF then
+      if c == BYTE_CR and pos + 1 <= len and ((byte(buf, pos + 1)) or 0) == BYTE_LF then
         pos = pos + 1
       end
       last = pos

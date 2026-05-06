@@ -245,7 +245,7 @@ function M.decode_varint(bytes, offset)
   local len = #bytes
   local byte_count = 0
   while offset <= len do
-    local byte_v = (string.byte(bytes, offset, offset) or 0) --[[:! integer]]
+    local byte_v = (string.byte(bytes, offset, offset) or 0)
     offset = offset + 1
     byte_count = byte_count + 1
     result = result + band(byte_v, 0x7f) * (2 ^ shift)
@@ -271,7 +271,7 @@ local function decode_signed_varint(bytes, offset)
   local byte_count = 0
   local raw_bytes = {} --: { [integer]: integer }
   while offset <= len do
-    local byte_v = (string.byte(bytes, offset, offset) or 0) --[[:! integer]]
+    local byte_v = (string.byte(bytes, offset, offset) or 0)
     offset = offset + 1
     byte_count = byte_count + 1
     raw_bytes[byte_count] = byte_v
@@ -392,7 +392,7 @@ local function decode_value(type_str, wire_type, bytes, offset, schema)
   elseif wire_type == M.WIRE_LEN then
     local len, next_off = M.decode_varint(bytes, offset)
     if not len then return nil, next_off --[[:! string]] end
-    local len_ = math.floor(len --[[:! number]])
+    local len_ = math.floor(len)
     local next_off_ = next_off --[[:! integer]]
     local data = bytes:sub(next_off_, next_off_ + len_ - 1)
     if #data < len_ then return nil, "protocol_buffer: truncated length-delimited field" end
@@ -474,7 +474,7 @@ function M.decode_raw(bytes)
     elseif wire_type == M.WIRE_LEN then
       local flen, no = M.decode_varint(bytes, offset)
       if not flen then return nil, no --[[:! string]] end
-      local flen_ = math.floor(flen --[[:! number]])
+      local flen_ = math.floor(flen)
       local no_ = no --[[:! integer]]
       local data = bytes:sub(no_, no_ + flen_ - 1)
       if #data < flen_ then return nil, "protocol_buffer: truncated length-delimited data" end
@@ -618,7 +618,7 @@ function M.decode(schema, bytes)
       if packed and wire_type == M.WIRE_LEN then
         local flen, no = M.decode_varint(bytes, offset)
         if not flen then return nil, no --[[:! string]] end
-        local flen_ = math.floor(flen --[[:! number]])
+        local flen_ = math.floor(flen)
         local no_ = no --[[:! integer]]
         local inner = bytes:sub(no_, no_ + flen_ - 1)
         if #inner < flen_ then return nil, "protocol_buffer: truncated packed field" end
@@ -664,11 +664,10 @@ function M.decode(schema, bytes)
       if wire_type == M.WIRE_VARINT then
         raw_value, no = M.decode_varint(bytes, offset)
         if not raw_value then return nil, no --[[:! string]] end
-        no = no --[[:! integer]]
       elseif wire_type == M.WIRE_LEN then
         local flen, fno = M.decode_varint(bytes, offset)
         if not flen then return nil, fno --[[:! string]] end
-        local flen_ = math.floor(flen --[[:! number]])
+        local flen_ = math.floor(flen)
         local fno_ = fno --[[:! integer]]
         raw_value = bytes:sub(fno_, fno_ + flen_ - 1)
         no = fno_ + flen_

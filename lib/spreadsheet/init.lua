@@ -80,10 +80,10 @@ local function parse_range(s)
   local ra = parse_ref(a)
   local rb = parse_ref(b)
   if not ra or not rb then return nil end
-  local r1 = math.min(ra.row, rb.row) --[[:! integer]]
-  local r2 = math.max(ra.row, rb.row) --[[:! integer]]
-  local c1 = math.min(ra.col, rb.col) --[[:! integer]]
-  local c2 = math.max(ra.col, rb.col) --[[:! integer]]
+  local r1 = math.min(ra.row, rb.row)
+  local r2 = math.max(ra.row, rb.row)
+  local c1 = math.min(ra.col, rb.col)
+  local c2 = math.max(ra.col, rb.col)
   return { r1 = r1, c1 = c1, r2 = r2, c2 = c2 }
 end
 

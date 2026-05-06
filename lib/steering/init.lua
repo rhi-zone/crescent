@@ -552,7 +552,7 @@ function M.combine(behaviors)
 
   for _, entry in ipairs(behaviors_) do
     local fn     = entry[1] --[[: any]]
-    local weight = (entry.weight or 1.0) --[[:! number]]
+    local weight = (entry.weight or 1.0)
     -- entry[2] is agent, entry[3..n] are additional args
     local args = {}
     for i = 2, #entry do
