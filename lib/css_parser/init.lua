@@ -19,11 +19,11 @@ local type, tostring, pairs, ipairs, next = type, tostring, pairs, ipairs, next
 
 -- Character predicates
 local function is_ident_start(c)
-  return c == "_" or c == "-" or (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or ((byte(c, 1) or 0) --[[:! integer]]) > 127
+  return c == "_" or c == "-" or (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (byte(c, 1) or 0) > 127
 end
 
 local function is_ident_char(c)
-  return c == "_" or c == "-" or (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9") or ((byte(c, 1) or 0) --[[:! integer]]) > 127
+  return c == "_" or c == "-" or (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9") or (byte(c, 1) or 0) > 127
 end
 
 local function is_digit(c)
@@ -50,12 +50,10 @@ local function read_ident(s, i, n)
   else
     i = i + 1
   end
-  local i_ = i --[[:! integer]]
-  while i_ <= n and is_ident_char(sub(s, i_, i_)) do
-    i_ = i_ + 1
+  while i <= n and is_ident_char(sub(s, i, i)) do
+    i = i + 1
   end
-  local i_out = i_ --[[:! integer]]
-  return sub(s, start, i_out - 1), i_out
+  return sub(s, start, i - 1), i
 end
 
 -- Read a string starting after the opening quote (quote is char q)
@@ -98,24 +96,21 @@ local function read_number(s, i, n)
   if i <= n and (sub(s, i, i) == "+" or sub(s, i, i) == "-") then
     i = i + 1
   end
-  local i_ = i --[[:! integer]]
-  while i_ <= n and is_digit(sub(s, i_, i_)) do i_ = i_ + 1 end
-  if i_ <= n and sub(s, i_, i_) == "." and i_ + 1 <= n and is_digit(sub(s, i_ + 1, i_ + 1)) then
-    i_ = i_ + 1 -- consume "."
-    while i_ <= n and is_digit(sub(s, i_, i_)) do i_ = i_ + 1 end
+  while i <= n and is_digit(sub(s, i, i)) do i = i + 1 end
+  if i <= n and sub(s, i, i) == "." and i + 1 <= n and is_digit(sub(s, i + 1, i + 1)) then
+    i = i + 1 -- consume "."
+    while i <= n and is_digit(sub(s, i, i)) do i = i + 1 end
   end
   -- optional exponent
-  local i__ = i_ --[[:! integer]]
-  if i__ <= n and (sub(s, i__, i__) == "e" or sub(s, i__, i__) == "E") then
-    local j = i__ + 1
+  if i <= n and (sub(s, i, i) == "e" or sub(s, i, i) == "E") then
+    local j = i + 1
     if j <= n and (sub(s, j, j) == "+" or sub(s, j, j) == "-") then j = j + 1 end
-    local j_ = j --[[:! integer]]
-    if j_ <= n and is_digit(sub(s, j_, j_)) then
-      i__ = j_ --[[:! integer]]
-      while i__ <= n and is_digit(sub(s, i__, i__)) do i__ = i__ + 1 end
+    if j <= n and is_digit(sub(s, j, j)) then
+      i = j
+      while i <= n and is_digit(sub(s, i, i)) do i = i + 1 end
     end
   end
-  return sub(s, start, i__ - 1), i__
+  return sub(s, start, i - 1), i
 end
 
 -- Read url() contents (after the opening paren)
@@ -340,7 +335,6 @@ local function new_selector_parser(s)
   local n = #s
   local i = 1
   while i <= n do
-    i = i --[[:! integer]]
     local c = sub(s, i, i)
     if is_whitespace(c) then
       -- collapse whitespace to single token
@@ -357,14 +351,14 @@ local function new_selector_parser(s)
       if i <= n and is_ident_start(sub(s, i, i)) then
         local name, ni = read_ident(s, i, n)
         insert(tokens, { type = "class", value = name })
-        i = ni --[[:! integer]]
+        i = ni
       end
     elseif c == "#" then
       i = i + 1
       if i <= n and is_ident_start(sub(s, i, i)) then
         local name, ni = read_ident(s, i, n)
         insert(tokens, { type = "id", value = name })
-        i = ni --[[:! integer]]
+        i = ni
       end
     elseif c == "*" then
       insert(tokens, { type = "universal" })
@@ -378,9 +372,9 @@ local function new_selector_parser(s)
       if i <= n and is_ident_start(sub(s, i, i)) then
         local an_, ai_ = read_ident(s, i, n)
         attr_name = an_
-        i = ai_ --[[:! integer]]
+        i = ai_
       end
-      local i2 = i --[[:! integer]]
+      local i2 = i
       local op = nil
       local attr_val = nil
       if i2 <= n and sub(s, i2, i2) ~= "]" then
@@ -393,28 +387,25 @@ local function new_selector_parser(s)
             op = "="
             i2 = i2 + 1
           end
-          i2 = i2 --[[:! integer]]
           -- skip ws
           while i2 <= n and is_whitespace(sub(s, i2, i2)) do i2 = i2 + 1 end
-          i2 = i2 --[[:! integer]]
           -- read value
           if i2 <= n and (sub(s, i2, i2) == '"' or sub(s, i2, i2) == "'") then
             local q = sub(s, i2, i2)
             local av_, ni_ = read_string(s, i2 + 1, n, q)
             attr_val = av_
-            i2 = ni_ --[[:! integer]]
+            i2 = ni_
           elseif i2 <= n then
             local vs = i2
             while i2 <= n and sub(s, i2, i2) ~= "]" and not is_whitespace(sub(s, i2, i2)) do i2 = i2 + 1 end
             attr_val = sub(s, vs, i2 - 1)
           end
-          i2 = i2 --[[:! integer]]
         end
       end
       -- skip to closing bracket
       while i2 <= n and sub(s, i2, i2) ~= "]" do i2 = i2 + 1 end
       if i2 <= n then i2 = i2 + 1 end -- consume "]"
-      i = i2 --[[:! integer]]
+      i = i2
       insert(tokens, { type = "attr", name = attr_name, op = op, value = attr_val })
     elseif c == ":" then
       i = i + 1
@@ -423,10 +414,10 @@ local function new_selector_parser(s)
         is_element = true
         i = i + 1
       end
-      local i3 = i --[[:! integer]]
+      local i3 = i
       if i3 <= n and is_ident_start(sub(s, i3, i3)) then
         local name, ni = read_ident(s, i3, n)
-        i3 = ni --[[:! integer]]
+        i3 = ni
         -- check for functional pseudo
         if i3 <= n and sub(s, i3, i3) == "(" then
           i3 = i3 + 1
@@ -434,11 +425,8 @@ local function new_selector_parser(s)
           local arg_start = i3
           local depth = 1 --: integer
           while i3 <= n and depth > 0 do
-            i3 = i3 --[[:! integer]]
-            depth = depth --[[:! integer]]
             if sub(s, i3, i3) == "(" then depth = depth + 1
             elseif sub(s, i3, i3) == ")" then depth = depth - 1 end
-            depth = depth --[[:! integer]]
             if depth > 0 then i3 = i3 + 1 else break end
           end
           local arg = trim(sub(s, arg_start, i3 - 1))
@@ -448,11 +436,11 @@ local function new_selector_parser(s)
           insert(tokens, { type = "pseudo", name = name, element = is_element })
         end
       end
-      i = i3 --[[:! integer]]
+      i = i3
     elseif is_ident_start(c) then
       local name, ni = read_ident(s, i, n)
       insert(tokens, { type = "ident", value = name })
-      i = ni --[[:! integer]]
+      i = ni
     else
       i = i + 1 -- skip unknown
     end

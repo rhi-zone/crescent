@@ -94,44 +94,34 @@ end
 
 function PNCounter:increment(n)
   local self_ = self --[[:! PNCounter]]
-  local pos_ = self_._pos --[[:! GCounter]]
-  pos_:increment(n)
+  self_._pos:increment(n)
 end
 
 function PNCounter:decrement(n)
   local self_ = self --[[:! PNCounter]]
-  local neg_ = self_._neg --[[:! GCounter]]
-  neg_:increment(n)
+  self_._neg:increment(n)
 end
 
 --: () -> number
 function PNCounter:value()
   local self_ = self --[[:! PNCounter]]
-  local pos_ = self_._pos --[[:! GCounter]]
-  local neg_ = self_._neg --[[:! GCounter]]
-  return pos_:value() - neg_:value()
+  return self_._pos:value() - self_._neg:value()
 end
 
 --: (PNCounter) -> nil
 function PNCounter:merge(other)
   local self_ = self --[[:! PNCounter]]
   local other_ = other --[[:! PNCounter]]
-  local pos_ = self_._pos --[[:! GCounter]]
-  local neg_ = self_._neg --[[:! GCounter]]
-  local opos_ = other_._pos --[[:! GCounter]]
-  local oneg_ = other_._neg --[[:! GCounter]]
-  pos_:merge(opos_)
-  neg_:merge(oneg_)
+  self_._pos:merge(other_._pos)
+  self_._neg:merge(other_._neg)
 end
 
 --: () -> PNCounter
 function PNCounter:clone()
   local self_ = self --[[:! PNCounter]]
   local c = M.pncounter(self_._id)
-  local pos_ = self_._pos --[[:! GCounter]]
-  local neg_ = self_._neg --[[:! GCounter]]
-  c._pos = pos_:clone()
-  c._neg = neg_:clone()
+  c._pos = self_._pos:clone()
+  c._neg = self_._neg:clone()
   return c
 end
 
@@ -139,11 +129,7 @@ end
 function PNCounter:eq(other)
   local self_ = self --[[:! PNCounter]]
   local other_ = other --[[:! PNCounter]]
-  local pos_ = self_._pos --[[:! GCounter]]
-  local neg_ = self_._neg --[[:! GCounter]]
-  local opos_ = other_._pos --[[:! GCounter]]
-  local oneg_ = other_._neg --[[:! GCounter]]
-  return pos_:eq(opos_) and neg_:eq(oneg_) and true or false
+  return self_._pos:eq(other_._pos) and self_._neg:eq(other_._neg) and true or false
 end
 
 -- ─── LWW-Register ────────────────────────────────────────────────────────────

@@ -46,9 +46,9 @@ end
 local function be_to_uint(s, pos, n)
   local v = 0 --: number
   for i = pos, pos + n - 1 do
-    v = v * 256 + (byte(s, i) or 0) --[[:! integer]]
+    v = v * 256 + (byte(s, i) or 0)
   end
-  return floor(v) --[[:! integer]], pos + n
+  return floor(v), pos + n
 end
 
 -- Decode `n` bytes starting at `pos` as little-endian unsigned integer.
@@ -57,10 +57,10 @@ local function le_to_uint(s, pos, n)
   local v = 0 --: number
   local mul = 1 --: number
   for i = pos, pos + n - 1 do
-    v = v + (byte(s, i) or 0) --[[:! integer]] * mul
+    v = v + (byte(s, i) or 0) * mul
     mul = mul * 256
   end
-  return floor(v) --[[:! integer]], pos + n
+  return floor(v), pos + n
 end
 
 -- ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ function M.decode_varint(s, pos)
     if pos > len then
       return nil, "decode_varint: incomplete varint"
     end
-    local b = (byte(s, pos) or 0) --[[:! integer]]
+    local b = (byte(s, pos) or 0)
     pos = pos + 1
     consumed = consumed + 1
     v = v + (b % 128) * (2 ^ shift)
@@ -106,7 +106,7 @@ function M.decode_varint(s, pos)
       return nil, "decode_varint: varint too large"
     end
   end
-  return floor(v) --[[:! integer]], consumed
+  return floor(v), consumed
 end
 
 -- ---------------------------------------------------------------------------
@@ -285,9 +285,9 @@ end
 -- opts.include_length: whether length field includes itself (default false)
 function M.length_prefixed(opts)
   opts = opts or {}
-  local lsz = (opts.length_size or 4) --[[:! integer]]
+  local lsz = (opts.length_size or 4)
   local endian = opts.endian or "big"
-  local max_size = (opts.max_frame_size or (4 * 1024 * 1024)) --[[:! integer]]
+  local max_size = (opts.max_frame_size or (4 * 1024 * 1024))
   local include_length = (opts.include_length or false) --[[:! boolean]]
 
   if lsz ~= 1 and lsz ~= 2 and lsz ~= 4 and lsz ~= 8 then
@@ -396,8 +396,8 @@ end
 -- opts.strip_delimiter: whether to strip delimiter from decoded payload (default true)
 function M.delimited(opts)
   opts = opts or {}
-  local delim = (opts.delimiter or "\n") --[[:! string]]
-  local max_size = (opts.max_frame_size or (64 * 1024)) --[[:! integer]]
+  local delim = (opts.delimiter or "\n")
+  local max_size = (opts.max_frame_size or (64 * 1024))
   local strip = opts.strip_delimiter
   if strip == nil then strip = true end
 
@@ -480,7 +480,7 @@ function M.fixed(opts)
     error("fixed: size must be a positive integer")
   end
   local sz = sz_raw --[[:! integer]]
-  local pad_byte = (opts.pad or 0) --[[:! integer]]
+  local pad_byte = (opts.pad or 0)
 
   local codec = {}
 
@@ -561,10 +561,10 @@ end
 -- opts.max_frame_size: max value size (default 64KB)
 function M.tlv(opts)
   opts = opts or {}
-  local tsz = (opts.type_size or 1) --[[:! integer]]
-  local lsz = (opts.length_size or 2) --[[:! integer]]
+  local tsz = (opts.type_size or 1)
+  local lsz = (opts.length_size or 2)
   local endian = opts.endian or "big"
-  local max_size = (opts.max_frame_size or (64 * 1024)) --[[:! integer]]
+  local max_size = (opts.max_frame_size or (64 * 1024))
 
   local codec = {}
 

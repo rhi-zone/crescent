@@ -159,7 +159,7 @@ function TileMap:fill(x, y, w, h, value)
   local width = self_._width
   local tiles = self_._tiles
   for ry = y1, y2 do
-    local base = ry * width --[[:! number]]
+    local base = ry * width
     for rx = x1, x2 do
       tiles[base + rx + 1] = value
     end
@@ -323,7 +323,6 @@ function TileMap:astar(sx, sy, gx, gy, opts)
     local dy = y - gy
     if dx < 0 then dx = -dx end
     if dy < 0 then dy = -dy end
-    dx = dx --[[:! number]]; dy = dy --[[:! number]]
     if hname == "euclidean" then
       return math.sqrt(dx * dx + dy * dy)
     elseif hname == "chebyshev" then
@@ -440,7 +439,7 @@ function M.random_rooms(width, height, opts)
   local num_rooms = opts.num_rooms or 5
   local min_size = opts.min_size or 3
   local max_size = opts.max_size or 8
-  local rng = make_rng(opts.seed --[[:! integer]])
+  local rng = make_rng(opts.seed)
 
   local map_res = M.new(width, height, { default_tile = 0 } --[[: any]])
   local map = map_res --[[:! TileMap]]

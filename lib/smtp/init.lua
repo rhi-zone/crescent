@@ -183,7 +183,7 @@ local function quoted_printable_encode(s)
 	local i = 1
 	while i <= #s do
 		local c_raw = s:byte(i)
-		local c = (c_raw or 0) --[[:! integer]]
+		local c = (c_raw or 0)
 		--: string | nil
 		local encoded
 		if c == 13 and s:byte(i+1) == 10 then
@@ -589,17 +589,17 @@ M.base64_decode = function(s)
 		local c1 = decode[s:sub(i+1, i+1)] or 0
 		local c2 = decode[s:sub(i+2, i+2)]
 		local c3 = decode[s:sub(i+3, i+3)]
-		local b0 = math.floor(c0 * 4 + math.floor(c1 / 16)) --[[:! integer]]
+		local b0 = math.floor(c0 * 4 + math.floor(c1 / 16))
 		table.insert(out, string.char(b0))
 		if c2 ~= nil then
 			local c2_ = c2 --[[:! integer]]
-			local b1 = math.floor((c1 % 16) * 16 + math.floor(c2_ / 4)) --[[:! integer]]
+			local b1 = math.floor((c1 % 16) * 16 + math.floor(c2_ / 4))
 			table.insert(out, string.char(b1))
 		end
 		if c3 ~= nil then
 			local c2_ = (c2 or 0) --[[:! integer]]
 			local c3_ = c3 --[[:! integer]]
-			local b2 = math.floor((c2_ % 4) * 64 + c3_) --[[:! integer]]
+			local b2 = math.floor((c2_ % 4) * 64 + c3_)
 			table.insert(out, string.char(b2))
 		end
 		i = i + 4

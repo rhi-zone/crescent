@@ -102,7 +102,7 @@ function M.highlight(text, terms, opts)
     else
       result[#result + 1] = word
     end
-    pos = (we or pos) --[[:! integer]] + 1
+    pos = (we or pos) + 1
   end
   return table.concat(result)
 end
@@ -390,7 +390,7 @@ function M.index(opts)
 
     elseif qt == "fuzzy" then
       local word = q.word --[[:! string]]
-      local max_dist = (q.max_dist or 1) --[[:! number]]
+      local max_dist = (q.max_dist or 1)
       local result = {}
       for term in pairs(inverted) do
         local term_ = term --[[:! string]]
@@ -453,7 +453,7 @@ function M.index(opts)
     elseif qt == "fuzzy" then
       -- collect all terms within distance
       local word = q.word --[[:! string]]
-      local max_dist = (q.max_dist or 1) --[[:! number]]
+      local max_dist = (q.max_dist or 1)
       local terms = {} --: { [integer]: string }
       for term in pairs(inverted) do
         local term_ = term --[[:! string]]
@@ -544,9 +544,9 @@ function M.index(opts)
   --: (query: query, opts: ({ limit: (number | nil), offset: (number | nil), scorer: (string | nil), explain: (boolean | nil) } | nil)) -> { results: { [integer]: unknown }, total: number }
   function idx:search(query, opts)
     opts = opts or {} --[[:! { limit: number | nil, offset: number | nil, scorer: string | nil, explain: boolean | nil }]]
-    local limit  = ((opts.limit)  or 10) --[[:! number]]
-    local offset = ((opts.offset) or 0)  --[[:! number]]
-    local scorer = (opts.scorer or "bm25") --[[:! string]]
+    local limit  = (opts.limit  or 10)
+    local offset = (opts.offset or 0)
+    local scorer = (opts.scorer or "bm25")
     local explain = opts.explain or false
 
     local matching = eval_query(query --[[: any]])

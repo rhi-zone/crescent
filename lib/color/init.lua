@@ -16,8 +16,7 @@ local function _color(r, g, b, a)
   local gv = g --[[:! number]]
   local bv = b --[[:! number]]
   local av = a --[[:! number|nil]]
-  local obj = setmetatable({ _r = rv, _g = gv, _b = bv, _a = av or 1.0 }, Color) --[[: any]]
-  return obj --[[:! ColorObj]]
+  return setmetatable({ _r = rv, _g = gv, _b = bv, _a = av or 1.0 }, Color)
 end
 
 -- Clamp a number to [lo, hi]

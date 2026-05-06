@@ -109,14 +109,14 @@ else
   unpack_f64 = function(data, pos)
     local b1, b2, b3, b4 = string.byte(data, pos, pos+3)
     local b5, b6, b7, b8 = string.byte(data, pos+4, pos+7)
-    local _b1 = b1 or 0 --[[:! integer]]
-    local _b2 = b2 or 0 --[[:! integer]]
-    local _b3 = b3 or 0 --[[:! integer]]
-    local _b4 = b4 or 0 --[[:! integer]]
-    local _b5 = b5 or 0 --[[:! integer]]
-    local _b6 = b6 or 0 --[[:! integer]]
-    local _b7 = b7 or 0 --[[:! integer]]
-    local _b8 = b8 or 0 --[[:! integer]]
+    local _b1 = b1 or 0
+    local _b2 = b2 or 0
+    local _b3 = b3 or 0
+    local _b4 = b4 or 0
+    local _b5 = b5 or 0
+    local _b6 = b6 or 0
+    local _b7 = b7 or 0
+    local _b8 = b8 or 0
     local sign = math.floor(_b1 / 0x80)
     local exp  = (_b1 % 0x80) * 16 + math.floor(_b2 / 16)
     local mant = (_b2 % 16) * (2^48)
@@ -261,7 +261,7 @@ local function read_arg(data, info, pos)
   elseif info == 24 then
     if pos > #data then return nil, "cbor.decode: truncated" end
     local byte1 = string.byte(data, pos) or 0
-    return byte1 --[[:! integer]], pos + 1
+    return byte1, pos + 1
   elseif info == 25 then
     if pos + 1 > #data then return nil, "cbor.decode: truncated" end
     local hi, _ = string.byte(data, pos, pos)
@@ -272,23 +272,23 @@ local function read_arg(data, info, pos)
   elseif info == 26 then
     if pos + 3 > #data then return nil, "cbor.decode: truncated" end
     local b1, b2, b3, b4 = string.byte(data, pos, pos+3)
-    local _b1 = b1 or 0 --[[:! integer]]
-    local _b2 = b2 or 0 --[[:! integer]]
-    local _b3 = b3 or 0 --[[:! integer]]
-    local _b4 = b4 or 0 --[[:! integer]]
+    local _b1 = b1 or 0
+    local _b2 = b2 or 0
+    local _b3 = b3 or 0
+    local _b4 = b4 or 0
     return ((_b1 * 256 + _b2) * 256 + _b3) * 256 + _b4, pos + 4
   elseif info == 27 then
     if pos + 7 > #data then return nil, "cbor.decode: truncated" end
     local b1, b2, b3, b4 = string.byte(data, pos, pos+3)
     local b5, b6, b7, b8 = string.byte(data, pos+4, pos+7)
-    local _b1 = b1 or 0 --[[:! integer]]
-    local _b2 = b2 or 0 --[[:! integer]]
-    local _b3 = b3 or 0 --[[:! integer]]
-    local _b4 = b4 or 0 --[[:! integer]]
-    local _b5 = b5 or 0 --[[:! integer]]
-    local _b6 = b6 or 0 --[[:! integer]]
-    local _b7 = b7 or 0 --[[:! integer]]
-    local _b8 = b8 or 0 --[[:! integer]]
+    local _b1 = b1 or 0
+    local _b2 = b2 or 0
+    local _b3 = b3 or 0
+    local _b4 = b4 or 0
+    local _b5 = b5 or 0
+    local _b6 = b6 or 0
+    local _b7 = b7 or 0
+    local _b8 = b8 or 0
     local hi = ((_b1 * 256 + _b2) * 256 + _b3) * 256 + _b4
     local lo = ((_b5 * 256 + _b6) * 256 + _b7) * 256 + _b8
     return hi * (2^32) + lo, pos + 8

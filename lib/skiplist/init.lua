@@ -68,7 +68,7 @@ function M.new(seed, cmp)
     _level = 1,  -- current max level in use
     _size = 0,
   } --[[:! Skiplist]]
-  return setmetatable(sl, SL) --[[:! Skiplist]]
+  return setmetatable(sl, SL)
 end
 
 -- Internal: find predecessors at each level for a given key.

@@ -46,7 +46,7 @@ local function tick_sequence(node, bb)
   local node_ = node --[[:! BTNode]]
   local children = node_.children --[[:! { [integer]: BTNode }]]
   local start = node_.state.child_idx or 1
-  for i = start --[[:! integer]], #children do
+  for i = start, #children do
     local status = tick_node(children[i], bb)
     if status == FAILURE then
       node_.state.child_idx = 1
@@ -66,7 +66,7 @@ local function tick_selector(node, bb)
   local node_ = node --[[:! BTNode]]
   local children = node_.children --[[:! { [integer]: BTNode }]]
   local start = node_.state.child_idx or 1
-  for i = start --[[:! integer]], #children do
+  for i = start, #children do
     local status = tick_node(children[i], bb)
     if status == SUCCESS then
       node_.state.child_idx = 1
@@ -101,7 +101,7 @@ local function tick_parallel(node, bb)
   elseif threshold == "any" then needed = 1
   else needed = threshold --[[:! integer]]
   end
-  local needed_ = needed --[[:! integer]]
+  local needed_ = needed
   if successes >= needed_ then return SUCCESS end
   if failures > (n - needed_) then return FAILURE end
   return RUNNING
@@ -116,7 +116,7 @@ local function tick_random_sequence(node, bb)
   end
   local children = node_.state.shuffled --[[:! { [integer]: BTNode }]]
   local start = node_.state.child_idx or 1
-  for i = start --[[:! integer]], #children do
+  for i = start, #children do
     local status = tick_node(children[i], bb)
     if status == FAILURE then
       node_.state.shuffled   = nil
@@ -140,7 +140,7 @@ local function tick_random_selector(node, bb)
   end
   local children = node_.state.shuffled --[[:! { [integer]: BTNode }]]
   local start = node_.state.child_idx or 1
-  for i = start --[[:! integer]], #children do
+  for i = start, #children do
     local status = tick_node(children[i], bb)
     if status == SUCCESS then
       node_.state.shuffled  = nil
@@ -244,8 +244,8 @@ end
 
 local function tick_cooldown(node, bb)
   local node_ = node --[[:! BTNode]]
-  local cooldown_until = node_.state.cooldown_until --[[:! integer | nil]] or 0
-  local tick_count     = node_.state.tick_count --[[:! integer | nil]] or 0
+  local cooldown_until = node_.state.cooldown_until or 0
+  local tick_count     = node_.state.tick_count or 0
   tick_count = tick_count + 1
   node_.state.tick_count = tick_count
   if tick_count <= cooldown_until then

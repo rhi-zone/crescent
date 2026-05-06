@@ -196,7 +196,7 @@ function Cache:get(key)
     self_._stats.misses = self_._stats.misses + 1
     return nil
   end
-  self_._stats.hits = (self_._stats.hits + 1) --[[:! number]]
+  self_._stats.hits = self_._stats.hits + 1
   local now_ = self_._clock()
   node_.last_access = now_
   node_.hit_count   = node_.hit_count + 1
@@ -220,7 +220,7 @@ function Cache:get_with_meta(key)
     self_._stats.misses = self_._stats.misses + 1
     return nil, nil
   end
-  self_._stats.hits = (self_._stats.hits + 1) --[[:! number]]
+  self_._stats.hits = self_._stats.hits + 1
   local now_ = self_._clock()
   node_.last_access = now_
   node_.hit_count   = node_.hit_count + 1

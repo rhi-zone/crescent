@@ -327,22 +327,20 @@ function System:_kill_actor(actor, reason)
 
   -- Notify linked actors
   for linked_pid in pairs(actor_._links) do
-    local lp_ = linked_pid --[[:! integer]]
-    local linked = self_._actors[lp_]
+    local linked = self_._actors[linked_pid]
     if linked and linked._status == "running" then
       -- Remove reciprocal link first to avoid re-notification
       linked._links[pid] = nil
       -- Send exit signal
-      self_:send(lp_, {type = "exit", pid = pid, reason = reason})
+      self_:send(linked_pid, {type = "exit", pid = pid, reason = reason})
     end
   end
 
   -- Notify monitors
   for ref, observer_pid in pairs(actor_._monitors) do
-    local op_ = observer_pid --[[:! integer]]
-    local observer = self_._actors[op_]
+    local observer = self_._actors[observer_pid]
     if observer and observer._status == "running" then
-      self_:send(op_, {type = "down", pid = pid, ref = ref, reason = reason})
+      self_:send(observer_pid, {type = "down", pid = pid, ref = ref, reason = reason})
     end
   end
 

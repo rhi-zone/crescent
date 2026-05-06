@@ -300,8 +300,8 @@ local recur_mt = {}
 recur_mt.__index = recur_mt
 
 function M.recur(opts)
-  local freq = (opts.freq or "daily") --[[:! string]]
-  local interval = (opts.interval or 1) --[[:! integer]]
+  local freq = (opts.freq or "daily")
+  local interval = (opts.interval or 1)
   local r = setmetatable({
     _start = opts.start,
     _freq = freq,

@@ -67,23 +67,23 @@ end
 
 --: (string, integer) -> (integer, integer)
 local function read_u8(data, pos)
-    local v = ((byte(data, pos)) or 0) --[[:! integer]]
+    local v = ((byte(data, pos)) or 0)
     return v, pos + 1
 end
 
 --: (string, integer) -> (integer, integer)
 local function read_u16(data, pos)
-    local a = ((byte(data, pos)) or 0) --[[:! integer]]
-    local b = ((byte(data, pos + 1)) or 0) --[[:! integer]]
+    local a = ((byte(data, pos)) or 0)
+    local b = ((byte(data, pos + 1)) or 0)
     return bor(lshift(a, 8), b), pos + 2
 end
 
 --: (string, integer) -> (number, integer)
 local function read_u32(data, pos)
-    local a = ((byte(data, pos)) or 0) --[[:! integer]]
-    local b = ((byte(data, pos + 1)) or 0) --[[:! integer]]
-    local c = ((byte(data, pos + 2)) or 0) --[[:! integer]]
-    local d = ((byte(data, pos + 3)) or 0) --[[:! integer]]
+    local a = ((byte(data, pos)) or 0)
+    local b = ((byte(data, pos + 1)) or 0)
+    local c = ((byte(data, pos + 2)) or 0)
+    local d = ((byte(data, pos + 3)) or 0)
     -- Use float arithmetic to avoid signed 32-bit overflow in LuaJIT
     return a * 0x1000000 + b * 0x10000 + c * 0x100 + d, pos + 4
 end
@@ -187,9 +187,9 @@ local function parse_track(data, start, len)
                 table.insert(events, { type = "end_of_track", tick = tick })
             elseif subtype_i == 0x51 then
                 -- Tempo: 3 bytes, microseconds per beat
-                local a = ((byte(meta_data, 1)) or 0) --[[:! integer]]
-                local b = ((byte(meta_data, 2)) or 0) --[[:! integer]]
-                local c = ((byte(meta_data, 3)) or 0) --[[:! integer]]
+                local a = ((byte(meta_data, 1)) or 0)
+                local b = ((byte(meta_data, 2)) or 0)
+                local c = ((byte(meta_data, 3)) or 0)
                 local uspb = a * 0x10000 + b * 0x100 + c
                 local bpm = 60000000 / uspb
                 table.insert(events, {
@@ -200,8 +200,8 @@ local function parse_track(data, start, len)
                 })
             elseif subtype_i == 0x58 then
                 -- Time signature
-                local nn = ((byte(meta_data, 1)) or 0) --[[:! integer]]
-                local dd = ((byte(meta_data, 2)) or 0) --[[:! integer]]
+                local nn = ((byte(meta_data, 1)) or 0)
+                local dd = ((byte(meta_data, 2)) or 0)
                 table.insert(events, {
                     type = "time_signature",
                     numerator = nn,
@@ -210,8 +210,8 @@ local function parse_track(data, start, len)
                 })
             elseif subtype_i == 0x59 then
                 -- Key signature
-                local sf = ((byte(meta_data, 1)) or 0) --[[:! integer]]
-                local mi = ((byte(meta_data, 2)) or 0) --[[:! integer]]
+                local sf = ((byte(meta_data, 1)) or 0)
+                local mi = ((byte(meta_data, 2)) or 0)
                 -- sf is signed (-7 to 7)
                 if sf >= 128 then sf = sf - 256 end
                 table.insert(events, {
@@ -253,8 +253,8 @@ local function parse_track(data, start, len)
 
         elseif msg_type == 0x08 then
             -- Note off
-            local note = ((byte(data, pos)) or 0) --[[:! integer]]
-            local vel  = ((byte(data, pos + 1)) or 0) --[[:! integer]]
+            local note = ((byte(data, pos)) or 0)
+            local vel  = ((byte(data, pos + 1)) or 0)
             pos = pos + 2
             table.insert(events, {
                 type = "note_off",
@@ -266,8 +266,8 @@ local function parse_track(data, start, len)
 
         elseif msg_type == 0x09 then
             -- Note on (velocity 0 = note off semantically, but we preserve it)
-            local note = ((byte(data, pos)) or 0) --[[:! integer]]
-            local vel  = ((byte(data, pos + 1)) or 0) --[[:! integer]]
+            local note = ((byte(data, pos)) or 0)
+            local vel  = ((byte(data, pos + 1)) or 0)
             pos = pos + 2
             table.insert(events, {
                 type = "note_on",
@@ -279,8 +279,8 @@ local function parse_track(data, start, len)
 
         elseif msg_type == 0x0A then
             -- Polyphonic key pressure / aftertouch
-            local note     = ((byte(data, pos)) or 0) --[[:! integer]]
-            local pressure = ((byte(data, pos + 1)) or 0) --[[:! integer]]
+            local note     = ((byte(data, pos)) or 0)
+            local pressure = ((byte(data, pos + 1)) or 0)
             pos = pos + 2
             table.insert(events, {
                 type = "aftertouch",
@@ -292,8 +292,8 @@ local function parse_track(data, start, len)
 
         elseif msg_type == 0x0B then
             -- Control change
-            local ctrl = ((byte(data, pos)) or 0) --[[:! integer]]
-            local val  = ((byte(data, pos + 1)) or 0) --[[:! integer]]
+            local ctrl = ((byte(data, pos)) or 0)
+            local val  = ((byte(data, pos + 1)) or 0)
             pos = pos + 2
             table.insert(events, {
                 type = "control_change",
@@ -305,7 +305,7 @@ local function parse_track(data, start, len)
 
         elseif msg_type == 0x0C then
             -- Program change
-            local prog = ((byte(data, pos)) or 0) --[[:! integer]]
+            local prog = ((byte(data, pos)) or 0)
             pos = pos + 1
             table.insert(events, {
                 type = "program_change",
@@ -316,7 +316,7 @@ local function parse_track(data, start, len)
 
         elseif msg_type == 0x0D then
             -- Channel pressure
-            local pressure = ((byte(data, pos)) or 0) --[[:! integer]]
+            local pressure = ((byte(data, pos)) or 0)
             pos = pos + 1
             table.insert(events, {
                 type = "channel_pressure",
@@ -327,8 +327,8 @@ local function parse_track(data, start, len)
 
         elseif msg_type == 0x0E then
             -- Pitch bend: two 7-bit bytes, LSB first
-            local lsb = ((byte(data, pos)) or 0) --[[:! integer]]
-            local msb = ((byte(data, pos + 1)) or 0) --[[:! integer]]
+            local lsb = ((byte(data, pos)) or 0)
+            local msb = ((byte(data, pos + 1)) or 0)
             pos = pos + 2
             local raw = bor(lsb, lshift(msb, 7))
             local value = raw - 8192  -- center at 0

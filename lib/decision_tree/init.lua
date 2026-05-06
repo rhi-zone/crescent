@@ -646,10 +646,10 @@ end
 -- Simple LCG RNG (no external deps)
 --: (integer | nil) -> any
 local function make_rng(seed)
-  local state = (seed or 12345) --[[:! integer]]
+  local state = (seed or 12345)
   return {
     next = function(self)
-      state = math.floor((state * 1664525 + 1013904223) % (2^32)) --[[:! integer]]
+      state = math.floor((state * 1664525 + 1013904223) % (2^32))
       return state
     end,
     float = function(self)
@@ -715,7 +715,7 @@ function M.forest(dataset, opts)
   local all_features = all_features_raw --[[:! { [integer]: string }]]
   local k = resolve_max_features(max_features_spec, #all_features)
 
-  local seed_ = (seed or 42) --[[:! integer]]
+  local seed_ = (seed or 42)
   local rng = make_rng(seed_)
   local trees = {}
 

@@ -310,9 +310,7 @@ function Circuit:solve_dc()
 		if comp.type == "R" then
 			local vp = (comp.np == 0) and 0.0 or x[comp.np]
 			local vn = (comp.nn == 0) and 0.0 or x[comp.nn]
-			local vp_ = vp --[[:! number]]
-			local vn_ = vn --[[:! number]]
-			branch_currents[comp.name] = (vp_ - vn_) / comp.value
+			branch_currents[comp.name] = (vp - vn) / comp.value
 		elseif comp.type == "I" then
 			branch_currents[comp.name] = comp.value
 		end
@@ -326,9 +324,7 @@ function Circuit:solve_dc()
 		local cur = branch_currents[name] or 0.0
 		local vp = (comp.np == 0) and 0.0 or x[comp.np]
 		local vn = (comp.nn == 0) and 0.0 or x[comp.nn]
-		local vp_ = vp --[[:! number]]
-		local vn_ = vn --[[:! number]]
-		local v_drop = vp_ - vn_
+		local v_drop = vp - vn
 		local p = v_drop * cur
 		power[name] = p
 		if comp.type == "R" then total_power = total_power + p end
