@@ -2,6 +2,8 @@ if not package.path:find("?/init.lua", 1, true) then
   package.path = package.path .. ";./?/init.lua"
 end
 
+local math2 = require("lib.math")
+
 local mod = {}
 
 local hex_alphabet = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f" } --: { [integer]: string }
@@ -26,7 +28,7 @@ end
 mod.urlencode_to_string = function (urlencoded)
 	-- TODO: error if invalid
 	local gsub_any2 = urlencoded.gsub --[[: any]]
-	return gsub_any2(urlencoded, "%%([0-9a-fA-F][0-9a-fA-F])", function (code) return string.char((tonumber(code, 16) or 0) --[[:! integer]]) end)
+	return gsub_any2(urlencoded, "%%([0-9a-fA-F][0-9a-fA-F])", function (code) return string.char(math2.tointeger(tonumber(code, 16)) or 0) end)
 end
 
 return mod

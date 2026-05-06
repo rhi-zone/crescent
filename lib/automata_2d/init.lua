@@ -8,6 +8,8 @@ end
 local M = {}
 M._tier = "pure"
 
+local math2 = require("lib.math")
+
 --:: RuleFn = (integer, integer) -> integer
 --:: DenseGrid = { _w: integer, _h: integer, _wrap: boolean, _rule: RuleFn, _buf: { [integer]: integer }, _gen: integer }
 --:: SparseGrid = { _cells: { [string]: boolean }, _rule: RuleFn }
@@ -21,7 +23,7 @@ local function key(x, y) return x .. "," .. y end
 --: (string) -> (integer, integer)
 local function unkey(k)
   local x, y = k:match("^(-?%d+),(-?%d+)$")
-  return (tonumber(x) or 0) --[[:! integer]], (tonumber(y) or 0) --[[:! integer]]
+  return math2.tointeger(x) or 0, math2.tointeger(y) or 0
 end
 
 -- BIG is kept for the RLE encoder's internal set (non-negative coords only in RLE output).
@@ -393,7 +395,7 @@ function M.rle_decode(rle_str)
   for i = 1, #data do
     local c = data:sub(i, i)
     if c:match("%d") then
-      run = run * 10 + (tonumber(c) or 0) --[[:! integer]]
+      run = run * 10 + (math2.tointeger(c) or 0)
     elseif c == "b" then
       -- Dead cells: advance x.
       local count = run == 0 and 1 or run

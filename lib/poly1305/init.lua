@@ -14,6 +14,7 @@ if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
 end
 
+local math2 = require("lib.math")
 local ffi = require("ffi")
 local bit = require("bit")
 
@@ -188,12 +189,12 @@ local function finalise(ctx)
   local out = {} --[[:! { [integer]: integer }]]
   local v = lo64
   for i = 1, 8 do
-    out[i] = math.floor(tonumber(band(v, U64(0xff))) or 0) --[[:! integer]]
+    out[i] = math2.tointeger(tonumber(band(v, U64(0xff)))) or 0
     v = v / U256
   end
   v = hi64
   for i = 9, 16 do
-    out[i] = math.floor(tonumber(band(v, U64(0xff))) or 0) --[[:! integer]]
+    out[i] = math2.tointeger(tonumber(band(v, U64(0xff)))) or 0
     v = v / U256
   end
 

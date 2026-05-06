@@ -48,6 +48,7 @@
 
 local mod = {}
 
+local math2 = require("lib.math")
 local bit = require("bit")
 local bxor = bit.bxor
 local min = math.min; local fmod = math.fmod; local floor = math.floor; local abs = math.abs
@@ -235,7 +236,7 @@ local encode_string_numeric = function (str)
 	--: integer
 	local int = 0
 	local _s, _n = string.gsub(str, "..?.?", function(a)
-		int = math.floor(tonumber(a) or 0) --[[:! integer]]
+		int = math2.tointeger(a) or 0
 		if #a == 3 then bitstring = bitstring .. binary(int, 10)
 		elseif #a == 2 then bitstring = bitstring .. binary(int, 7)
 		else bitstring = bitstring .. binary(int, 4) end

@@ -10,6 +10,7 @@ end
 local M = {}
 M._tier = "pure"
 
+local math2 = require("lib.math")
 local floor, sqrt = math.floor, math.sqrt
 local sort = table.sort
 local concat = table.concat
@@ -53,7 +54,7 @@ local function read_int(st)
   local j = i
   while j <= #s and s:sub(j, j):match("%d") do j = j + 1 end
   st.pos = j
-  return tonumber(s:sub(i, j - 1)) --[[:! integer]]
+  return math2.tointeger(s:sub(i, j - 1))
 end
 
 -- Forward declarations

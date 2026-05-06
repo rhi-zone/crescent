@@ -17,6 +17,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local base64 = require("lib.encode.base64") --[[:! { encode: (string) -> string, decode: (string) -> string | nil }]]
+local math2 = require("lib.math")
 
 local M = {}
 
@@ -646,7 +647,7 @@ local function smtp_read_response(transport)
 		line_s = line_s:gsub("\r?\n$", "")
 		lines[#lines + 1] = line_s
 		-- SMTP multiline: "250-..." continues, "250 ..." is final
-		local code = tonumber(line_s:sub(1, 3)) --[[:! integer | nil]]
+		local code = math2.tointeger(line_s:sub(1, 3))
 		if not code then
 			return nil, "invalid SMTP response: " .. line_s
 		end

@@ -13,6 +13,7 @@ if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
 end
 
+local math2 = require("lib.math")
 local bit = require("bit")
 local ffi = require("ffi")
 
@@ -291,7 +292,7 @@ local function poly1305_mac(key32, msg)
   local g3 = h3 + c; c = g3 / SHIFT26
   local g4 = h4 + c
   -- If g4 >= 2^26 the carry propagated all the way through, meaning h >= 2^130-5.
-  local use_g = (tonumber(g4 / SHIFT26) or 0) --[[:! integer]]  -- 1 if h >= p, else 0
+  local use_g = math2.tointeger(tonumber(g4 / SHIFT26)) or 0  -- 1 if h >= p, else 0
   local keep_h = 1 - use_g
   h0 = h0 * U64(keep_h) + band(g0, MASK26) * U64(use_g)
   h1 = h1 * U64(keep_h) + band(g1 --[[:! integer]], MASK26) * U64(use_g)
@@ -312,18 +313,17 @@ local function poly1305_mac(key32, msg)
   -- h4 * 2^(104-64) = h4 * 2^40 = h4 * 0x10000000000
 
   -- Extract bytes from lo64 (8 bytes) and hi64 (8 bytes).
-  -- tonumber of uint64_t cdata returns a Lua number; force-cast to integer is
-  -- correct here since the masked value is always 0-255.
+  -- tonumber of uint64_t cdata returns a Lua number; masked value is always 0-255.
   --: { [integer]: integer }
   local out = {}
   local v = lo64
   for i = 1, 8 do
-    out[i] = (tonumber(band(v --[[:! integer]], U64(0xff))) or 0) --[[:! integer]]
+    out[i] = math2.tointeger(tonumber(band(v --[[:! integer]], U64(0xff)))) or 0
     v = v / U256
   end
   v = hi64
   for i = 9, 16 do
-    out[i] = (tonumber(band(v --[[:! integer]], U64(0xff))) or 0) --[[:! integer]]
+    out[i] = math2.tointeger(tonumber(band(v --[[:! integer]], U64(0xff)))) or 0
     v = v / U256
   end
 

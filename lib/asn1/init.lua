@@ -9,6 +9,7 @@ end
 local M = {}
 M._tier = "pure"
 
+local math2 = require("lib.math")
 local bit = require("bit")
 local band, bor, bxor = bit.band, bit.bor, bit.bxor
 local rshift, lshift = bit.rshift, bit.lshift
@@ -404,7 +405,7 @@ function M.encode_integer(n)
     if #hex % 2 ~= 0 then hex = "0" .. hex end
     for i = 1, #hex, 2 do
       local chunk = "0x" .. sub(hex, i, i + 1)
-      bytes[#bytes + 1] = math.floor(tonumber(chunk) or 0) --[[:! integer]]
+      bytes[#bytes + 1] = math2.tointeger(chunk) or 0
     end
     -- Strip leading zeros (but keep at least one byte)
     while #bytes > 1 and bytes[1] == 0 and band(bytes[2] --[[:! integer]], 0x80) == 0 do

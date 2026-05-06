@@ -9,6 +9,8 @@ end
 local M = {}
 M._tier = "pure"
 
+local math2 = require("lib.math")
+
 -- ---------------------------------------------------------------------------
 -- Error sentinel values
 -- ---------------------------------------------------------------------------
@@ -812,7 +814,7 @@ local function eval_node(node, sheet, visiting)
     local col_str, row_num = clean:match("^([A-Za-z]+)(%d+)$")
     if not col_str then return ERR_REF end
     col_str = col_str:upper()
-    row_num = tonumber(row_num --[[:! string]]) --[[:! integer]]
+    row_num = math2.tointeger(row_num --[[:! string]]) or 0
     -- bounds check
     if row_num < 1 or row_num > sheet_._max_rows then return ERR_REF end
     local c = col_to_num(col_str)
@@ -1012,7 +1014,7 @@ function Sheet:set(ref, value)
   -- Validate
   local col_str, row_num = clean:match("^([A-Za-z]+)(%d+)$")
   if not col_str then return nil, "invalid cell reference: " .. ref end
-  row_num = tonumber(row_num --[[:! string]]) --[[:! integer]]
+  row_num = math2.tointeger(row_num --[[:! string]]) or 0
   local col_num = col_to_num(col_str)
   if row_num < 1 or row_num > self._max_rows then return nil, ERR_REF end
   if col_num < 1 or col_num > self._max_cols then return nil, ERR_REF end
@@ -1166,7 +1168,7 @@ function Sheet:to_csv()
   for key in pairs(self._cells) do
     local col_str, row_num = key:match("^([A-Za-z]+)(%d+)$")
     if col_str then
-      local r = tonumber(row_num --[[:! string]]) --[[:! integer]]
+      local r = math2.tointeger(row_num --[[:! string]]) or 0
       local c = col_to_num(col_str)
       if r > max_row then max_row = r end
       if c > max_col then max_col = c end

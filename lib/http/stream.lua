@@ -3,6 +3,8 @@
 -- Transport-agnostic: wraps a recv_fn() closure that returns bytes.
 -- Works with raw sockets, TLS sockets, or test mocks.
 
+local math2 = require("lib.math")
+
 local mod = {}
 
 --:: http_stream = { _recv: () -> string | nil, _buf: string, _pos: integer, _headers: { [string]: string[] } | nil, _status: integer | nil, _status_text: string | nil, _version: string | nil, _eof: boolean, read_headers: (self: http_stream) -> ({ [string]: string[] } | nil, string | nil), status: (self: http_stream) -> integer | nil, read_body: (self: http_stream) -> (string | nil, string | nil), chunks: (self: http_stream) -> () -> string | nil, events: (self: http_stream) -> () -> { event: string | nil, data: string, id: string | nil } | nil }
@@ -76,7 +78,7 @@ function mt.__index:read_headers()
 	if not version_raw then return nil, "invalid status line" end
 
 	self_._version = version_raw
-	self_._status = math.floor(tonumber(status_raw) or 0) --[[:! integer]]
+	self_._status = math2.tointeger(status_raw) or 0
 	self_._status_text = status_text
 
 	-- parse headers
@@ -114,7 +116,7 @@ function mt.__index:read_body()
 
 	local cl = headers["content-length"]
 	if cl then
-		local len = math.floor(tonumber(cl[1]) or 0) --[[:! integer]]
+		local len = math2.tointeger(cl[1]) or 0
 		if not len or len == 0 then return nil, "invalid content-length" end
 		-- fill buffer until we have enough
 		while buf_len(self_) < len and not self_._eof do
@@ -168,7 +170,7 @@ function mt.__index:chunks()
 		local hex = size_line:match("^([0-9a-fA-F]+)")
 		if not hex then done = true; return nil end
 
-		local size = math.floor(tonumber(hex, 16) or 0) --[[:! integer]]
+		local size = (math2.tointeger(tonumber(hex, 16)) or 0)
 		if not size or size == 0 then done = true; return nil end
 
 		-- read chunk data + trailing \r\n

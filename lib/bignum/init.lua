@@ -29,6 +29,7 @@ end
 local M = {}
 M._tier = "pure"
 
+local math2 = require("lib.math")
 local floor  = math.floor
 local abs    = math.abs
 local max    = math.max
@@ -349,7 +350,7 @@ function M.new(v)
   local mantissa, exp_str = string.match(str, "^([^eE]+)[eE]([+-]?%d+)$")
   local exp_offset = 0 --: integer
   if mantissa then
-    exp_offset = --[[:! integer]] (tonumber(exp_str) or 0)
+    exp_offset = math2.tointeger(exp_str) or 0
     str = mantissa
   end
 

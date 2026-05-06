@@ -16,6 +16,7 @@ do
 	if ffi_ok then ffi = ffi_ end
 end
 
+local math2 = require("lib.math")
 local bit = require("bit")
 local byte = string.byte
 local char = string.char
@@ -582,7 +583,7 @@ function M.decode_all(bytes)
 		local t, npos = decode_document(bytes, pos)
 		if not t then return nil, tostring(npos) end  -- npos holds errmsg when t is nil
 		results[#results + 1] = t
-		pos = (tonumber(npos) or pos) --[[:! integer]]
+		pos = math2.tointeger(npos) or pos
 	end
 	return results
 end

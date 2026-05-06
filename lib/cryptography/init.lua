@@ -24,6 +24,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+local math2  = require("lib.math")
 local bit    = require("bit")
 local band   = bit.band
 local bxor   = bit.bxor
@@ -55,7 +56,7 @@ end
 function M.unhex(s)
 	if #s % 2 ~= 0 then return nil end
 	if s:find("[^0-9a-fA-F]") then return nil end
-	local result = (s:gsub("..", function(h) return string.char((tonumber(h, 16) or 0) --[[:! integer]]) end)) --[[: string]]
+	local result = (s:gsub("..", function(h) return string.char(math2.tointeger(tonumber(h, 16)) or 0) end)) --[[: string]]
 	return result
 end
 

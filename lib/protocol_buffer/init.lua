@@ -11,6 +11,7 @@ M._tier = "pure"
 local bit = require("bit")
 local band, bor, lshift, rshift, arshift = bit.band, bit.bor, bit.lshift, bit.rshift, bit.arshift
 local ffi = require("ffi")
+local math2 = require("lib.math")
 
 -- FFI types for float/double/fixed encoding without string.pack
 ffi.cdef([[
@@ -193,14 +194,14 @@ local function encode_varint_signed(n)
   -- group 7: bits 49-55 = b[6]>>1
   -- group 8: bits 56-62 = b[7] & 0x7F
   -- group 9: bit  63    = b[7] >> 7
-  local b0 = tonumber(b[0]) --[[:! integer]]
-  local b1 = tonumber(b[1]) --[[:! integer]]
-  local b2 = tonumber(b[2]) --[[:! integer]]
-  local b3 = tonumber(b[3]) --[[:! integer]]
-  local b4 = tonumber(b[4]) --[[:! integer]]
-  local b5 = tonumber(b[5]) --[[:! integer]]
-  local b6 = tonumber(b[6]) --[[:! integer]]
-  local b7 = tonumber(b[7]) --[[:! integer]]
+  local b0 = math2.tointeger(b[0]) or 0
+  local b1 = math2.tointeger(b[1]) or 0
+  local b2 = math2.tointeger(b[2]) or 0
+  local b3 = math2.tointeger(b[3]) or 0
+  local b4 = math2.tointeger(b[4]) or 0
+  local b5 = math2.tointeger(b[5]) or 0
+  local b6 = math2.tointeger(b[6]) or 0
+  local b7 = math2.tointeger(b[7]) or 0
   local g0 = band(b0, 0x7F)
   local g1 = bor(rshift(b0, 7), band(lshift(band(b1, 0x3F), 1), 0x7F))
   local g2 = bor(rshift(b1, 6), band(lshift(band(b2, 0x1F), 2), 0x7F))
@@ -297,9 +298,9 @@ local function decode_signed_varint(bytes, offset)
     -- payload is 7 bits; may span two bytes
     local lo_part = band(lshift(payload, bit_off), 0xFF)
     local hi_part = rshift(payload, 8 - bit_off)
-    _dec_buf.b[byte_idx] = bor((tonumber(_dec_buf.b[byte_idx]) or 0) --[[:! integer]], lo_part)
+    _dec_buf.b[byte_idx] = bor(math2.tointeger(_dec_buf.b[byte_idx]) or 0, lo_part)
     if byte_idx + 1 < 8 then
-      _dec_buf.b[byte_idx + 1] = bor((tonumber(_dec_buf.b[byte_idx + 1]) or 0) --[[:! integer]], hi_part)
+      _dec_buf.b[byte_idx + 1] = bor(math2.tointeger(_dec_buf.b[byte_idx + 1]) or 0, hi_part)
     end
     bit_pos = bit_pos + 7
   end

@@ -14,6 +14,7 @@ local byte, char, sub, find, match, gmatch, gsub, rep, len =
   string.gmatch, string.gsub, string.rep, string.len
 local concat, insert = table.concat, table.insert
 local floor = math.floor
+local math2 = require("lib.math")
 
 -- ---------------------------------------------------------------------------
 -- Date/time utilities
@@ -32,12 +33,12 @@ function M.parse_datetime(s)
     match(s, "^(%d%d%d%d)(%d%d)(%d%d)T(%d%d)(%d%d)(%d%d)(Z?)$")
   if year then
     return {
-      year  = tonumber(year) --[[:! integer]],
-      month = tonumber(month) --[[:! integer]],
-      day   = tonumber(day) --[[:! integer]],
-      hour  = tonumber(hour) --[[:! integer]],
-      min   = tonumber(min) --[[:! integer]],
-      sec   = tonumber(sec) --[[:! integer]],
+      year  = math2.tointeger(year) or 0,
+      month = math2.tointeger(month) or 0,
+      day   = math2.tointeger(day) or 0,
+      hour  = math2.tointeger(hour) or 0,
+      min   = math2.tointeger(min) or 0,
+      sec   = math2.tointeger(sec) or 0,
       utc   = utc == "Z",
     }
   end
@@ -45,9 +46,9 @@ function M.parse_datetime(s)
   year, month, day = match(s, "^(%d%d%d%d)(%d%d)(%d%d)$")
   if year then
     return {
-      year  = tonumber(year) --[[:! integer]],
-      month = tonumber(month) --[[:! integer]],
-      day   = tonumber(day) --[[:! integer]],
+      year  = math2.tointeger(year) or 0,
+      month = math2.tointeger(month) or 0,
+      day   = math2.tointeger(day) or 0,
     }
   end
   return nil, "invalid datetime: " .. s
@@ -59,7 +60,7 @@ function M.parse_date(s)
   if not s then return nil, "nil input" end
   local year, month, day = match(s, "^(%d%d%d%d)(%d%d)(%d%d)$")
   if not year then return nil, "invalid date: " .. s end
-  return { year = tonumber(year) --[[:! integer]], month = tonumber(month) --[[:! integer]], day = tonumber(day) --[[:! integer]] }
+  return { year = math2.tointeger(year) or 0, month = math2.tointeger(month) or 0, day = math2.tointeger(day) or 0 }
 end
 
 --- Format a datetime table to iCalendar DATE-TIME string.
@@ -96,9 +97,9 @@ function M.parse_rrule(s)
       if key == "FREQ" then
         r.freq = val:upper()
       elseif key == "INTERVAL" then
-        r.interval = tonumber(val) --[[:! integer]]
+        r.interval = math2.tointeger(val)
       elseif key == "COUNT" then
-        r.count = tonumber(val) --[[:! integer]]
+        r.count = math2.tointeger(val)
       elseif key == "UNTIL" then
         r["until"] = M.parse_datetime(val) or val
       elseif key == "WKST" then
@@ -114,30 +115,30 @@ function M.parse_rrule(s)
         r.bymonthday = {} --: { [integer]: integer }
         local bymonthday_ = r.bymonthday --[[:! { [integer]: integer }]]
         for d in gmatch(val, "[^,]+") do
-          bymonthday_[#bymonthday_+1] = tonumber(d) --[[:! integer]]
+          bymonthday_[#bymonthday_+1] = math2.tointeger(d) or 0
         end
       elseif key == "BYMONTH" then
         r.bymonth = {} --: { [integer]: integer }
         local bymonth_ = r.bymonth --[[:! { [integer]: integer }]]
         for mo in gmatch(val, "[^,]+") do
-          bymonth_[#bymonth_+1] = tonumber(mo) --[[:! integer]]
+          bymonth_[#bymonth_+1] = math2.tointeger(mo) or 0
         end
       elseif key == "BYHOUR" then
         r.byhour = {} --: { [integer]: integer }
         local byhour_ = r.byhour --[[:! { [integer]: integer }]]
-        for h in gmatch(val, "[^,]+") do byhour_[#byhour_+1] = tonumber(h) --[[:! integer]] end
+        for h in gmatch(val, "[^,]+") do byhour_[#byhour_+1] = math2.tointeger(h) or 0 end
       elseif key == "BYMINUTE" then
         r.byminute = {} --: { [integer]: integer }
         local byminute_ = r.byminute --[[:! { [integer]: integer }]]
-        for m in gmatch(val, "[^,]+") do byminute_[#byminute_+1] = tonumber(m) --[[:! integer]] end
+        for m in gmatch(val, "[^,]+") do byminute_[#byminute_+1] = math2.tointeger(m) or 0 end
       elseif key == "BYSECOND" then
         r.bysecond = {} --: { [integer]: integer }
         local bysecond_ = r.bysecond --[[:! { [integer]: integer }]]
-        for sec in gmatch(val, "[^,]+") do bysecond_[#bysecond_+1] = tonumber(sec) --[[:! integer]] end
+        for sec in gmatch(val, "[^,]+") do bysecond_[#bysecond_+1] = math2.tointeger(sec) or 0 end
       elseif key == "BYSETPOS" then
         r.bysetpos = {} --: { [integer]: integer }
         local bysetpos_ = r.bysetpos --[[:! { [integer]: integer }]]
-        for p in gmatch(val, "[^,]+") do bysetpos_[#bysetpos_+1] = tonumber(p) --[[:! integer]] end
+        for p in gmatch(val, "[^,]+") do bysetpos_[#bysetpos_+1] = math2.tointeger(p) or 0 end
       else
         r[key:lower()] = val
       end

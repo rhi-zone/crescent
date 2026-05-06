@@ -7,6 +7,8 @@ end
 -- formatting). Not a full CommonMark parser — designed for practical use cases.
 -- For full CommonMark compliance, see lib/unified/.
 
+local math2 = require("lib.math")
+
 local M = {}
 
 M._tier = "pure"
@@ -330,7 +332,7 @@ local function parse_blocks(lines)
     -- Ordered list: 1. 2. etc.
     elseif line:match("^[ \t]*%d+%. ") then
       local items = {}
-      local start = (tonumber(line:match("^[ \t]*(%d+)%.")) or 1) --[[:! integer]]
+      local start = math2.tointeger(line:match("^[ \t]*(%d+)%.")) or 1
       while i <= n and (lines[i]:match("^[ \t]*%d+%. ") or (not is_blank(lines[i]) and #items > 0)) do
         if lines[i]:match("^[ \t]*%d+%. ") then
           items[#items + 1] = lines[i]:match("^[ \t]*%d+%. (.*)")
