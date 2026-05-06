@@ -21,6 +21,7 @@ local bnot = bit.bnot
 local lshift = bit.lshift
 local rshift = bit.rshift
 local rol = bit.rol
+local tobit = bit.tobit
 
 local M = {}
 
@@ -29,6 +30,7 @@ M._tier = "pure"
 -- ── MD5 constants ────────────────────────────────────────────────────────────
 
 -- T[i] = floor(2^32 * abs(sin(i))) for i = 1..64
+--: { [integer]: number }
 local T = {
 	0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee,
 	0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
@@ -49,6 +51,7 @@ local T = {
 }
 
 -- Per-round shift amounts
+--: { [integer]: integer }
 local S = {
 	7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
 	5,  9, 14, 20, 5,  9, 14, 20, 5,  9, 14, 20, 5,  9, 14, 20,
@@ -57,6 +60,7 @@ local S = {
 }
 
 -- Message word index per round (0-indexed into the 16-word block)
+--: { [integer]: integer }
 local G_IDX = {
 	0, 1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15,
 	1, 6, 11,  0,  5, 10, 15,  4,  9, 14,  3,  8, 13,  2,  7, 12,
@@ -74,28 +78,32 @@ local floor = math.floor
 
 -- ── Helper: read a 32-bit little-endian word from a byte string ──────────────
 
+--: (string, integer) -> integer
 local function le32(s, i)
 	local b0, b1, b2, b3 = byte(s, i, i + 3)
-	return bor(b0, lshift(b1, 8), lshift(b2, 16), lshift(b3, 24))
+	return bor(b0 or 0, lshift(b1 or 0, 8), lshift(b2 or 0, 16), lshift(b3 or 0, 24))
 end
 
 -- ── Helper: write a 32-bit value as 4 little-endian bytes ────────────────────
 
+--: (number) -> string
 local function to_le32(v)
+	local vi = v --[[:! integer]]
 	return char(
-		band(v, 0xff),
-		band(rshift(v, 8), 0xff),
-		band(rshift(v, 16), 0xff),
-		band(rshift(v, 24), 0xff)
+		band(vi, 0xff),
+		band(rshift(vi, 8), 0xff),
+		band(rshift(vi, 16), 0xff),
+		band(rshift(vi, 24), 0xff)
 	)
 end
 
 -- ── Helper: convert 16 raw bytes to 32-char hex ─────────────────────────────
 
+--: (string) -> string
 local function raw_to_hex(raw)
 	local parts = {}
 	for i = 1, 16 do
-		local b = byte(raw, i)
+		local b = byte(raw, i) or 0
 		parts[#parts + 1] = sub(HEX, rshift(b, 4) + 1, rshift(b, 4) + 1)
 			.. sub(HEX, band(b, 0xf) + 1, band(b, 0xf) + 1)
 	end
@@ -104,9 +112,10 @@ end
 
 -- ── Core: process one 64-byte block ─────────────────────────────────────────
 
+--: (string, integer, integer, integer, integer, integer) -> (number, number, number, number)
 local function process_block(block, offset, a, b, c, d)
 	-- Read 16 little-endian 32-bit words
-	local m = {}
+	local m = {} --: { [integer]: integer }
 	for i = 0, 15 do
 		m[i] = le32(block, offset + i * 4)
 	end
@@ -114,26 +123,27 @@ local function process_block(block, offset, a, b, c, d)
 	local aa, bb, cc, dd = a, b, c, d
 
 	for i = 1, 64 do
-		local f, g
+		local f = 0 --: integer
+		local g = 0 --: integer
 		if i <= 16 then
 			f = bor(band(b, c), band(bnot(b), d))
-			g = G_IDX[i]
+			g = G_IDX[i] or 0
 		elseif i <= 32 then
 			f = bor(band(d, b), band(bnot(d), c))
-			g = G_IDX[i]
+			g = G_IDX[i] or 0
 		elseif i <= 48 then
 			f = bxor(b, c, d)
-			g = G_IDX[i]
+			g = G_IDX[i] or 0
 		else
 			f = bxor(c, bor(b, bnot(d)))
-			g = G_IDX[i]
+			g = G_IDX[i] or 0
 		end
 
-		f = f + a + T[i] + m[g]
+		f = tobit(f + a + (T[i] or 0) + (m[g] or 0))
 		a = d
 		d = c
 		c = b
-		b = b + rol(f, S[i])
+		b = tobit(b + rol(f, S[i] or 0))
 	end
 
 	return aa + a, bb + b, cc + c, dd + d
@@ -167,13 +177,14 @@ local function digest_raw(data)
 	end
 
 	local padded = pad_message(data)
-	local a = 0x67452301
-	local b = 0xefcdab89
-	local c = 0x98badcfe
-	local d = 0x10325476
+	local a = 0x67452301 --: integer
+	local b = tobit(0xefcdab89) --: integer
+	local c = tobit(0x98badcfe) --: integer
+	local d = 0x10325476 --: integer
 
 	for i = 1, #padded, 64 do
-		a, b, c, d = process_block(padded, i, a, b, c, d)
+		local na, nb, nc, nd = process_block(padded, i, a, b, c, d)
+		a = tobit(na); b = tobit(nb); c = tobit(nc); d = tobit(nd)
 	end
 
 	return to_le32(a) .. to_le32(b) .. to_le32(c) .. to_le32(d)
@@ -189,9 +200,12 @@ end
 
 -- ── Streaming hasher ────────────────────────────────────────────────────────
 
+--:: HasherState = { _a: integer, _b: integer, _c: integer, _d: integer, _buf: string, _len: integer }
+
 local Hasher = {}
 Hasher.__index = Hasher
 
+--: (self: HasherState, string) -> (HasherState | nil, string | nil)
 function Hasher:update(data)
 	if type(data) ~= "string" then
 		return nil, "md5: expected string"
@@ -203,8 +217,8 @@ function Hasher:update(data)
 	local buf = self._buf
 	local off = 1
 	while #buf - off + 1 >= 64 do
-		self._a, self._b, self._c, self._d =
-			process_block(buf, off, self._a, self._b, self._c, self._d)
+		local na, nb, nc, nd = process_block(buf, off, self._a, self._b, self._c, self._d)
+		self._a = tobit(na); self._b = tobit(nb); self._c = tobit(nc); self._d = tobit(nd)
 		off = off + 64
 	end
 	if off > 1 then
@@ -213,6 +227,7 @@ function Hasher:update(data)
 	return self
 end
 
+--: (self: HasherState) -> string
 function Hasher:digest_raw()
 	-- Finalize without mutating state (allow continued use after digest)
 	local remaining = self._buf
@@ -227,7 +242,8 @@ function Hasher:digest_raw()
 
 	local a, b, c, d = self._a, self._b, self._c, self._d
 	for i = 1, #padded, 64 do
-		a, b, c, d = process_block(padded, i, a, b, c, d)
+		local na, nb, nc, nd = process_block(padded, i, a, b, c, d)
+		a = tobit(na); b = tobit(nb); c = tobit(nc); d = tobit(nd)
 	end
 
 	return to_le32(a) .. to_le32(b) .. to_le32(c) .. to_le32(d)
@@ -238,10 +254,10 @@ function Hasher:digest()
 end
 
 function Hasher:reset()
-	self._a = 0x67452301
-	self._b = 0xefcdab89
-	self._c = 0x98badcfe
-	self._d = 0x10325476
+	self._a = 0x67452301 --: integer
+	self._b = tobit(0xefcdab89) --: integer
+	self._c = tobit(0x98badcfe) --: integer
+	self._d = 0x10325476 --: integer
 	self._buf = ""
 	self._len = 0
 	return self

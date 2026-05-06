@@ -48,8 +48,10 @@ local function convert_messages(messages)
 end
 
 --- Convert neutral ai_tool list to OpenAI format.
+--: (ai_tool[] | nil) -> unknown
 local function convert_tools(tools)
-	if not tools or #tools == 0 then return nil end
+	if not tools then return nil end
+	if #tools == 0 then return nil end
 	local result = {}
 	for i = 1, #tools do
 		local t = tools[i]
@@ -66,6 +68,7 @@ local function convert_tools(tools)
 end
 
 --- Parse OpenAI chat response into neutral ai_response.
+--: (string) -> (ai_response | nil, string | nil)
 local function parse_chat_response(body)
 	local data, err = json.decode(body)
 	if not data then return nil, "json decode: " .. (err or "unknown") end

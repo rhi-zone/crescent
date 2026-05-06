@@ -251,7 +251,7 @@ end
 --- Check a single init.lua file against all stdlib conventions.
 -- Returns an array of { file, line, rule, message } diagnostics.
 -- The file is assumed to NOT be a test file.
---: (string) -> table
+--: (string) -> { file: string, line: integer, rule: string, message: string }[]
 M.check_file = function(filepath)
   local src, err = read_file(filepath)
   if not src then
@@ -273,7 +273,7 @@ end
 
 --- Find all init.lua files under dir (excluding *_test.lua and archive/) and
 -- run check_file on each. Returns array of diagnostics.
---: (string) -> table
+--: (string) -> { file: string, line: integer, rule: string, message: string }[]
 M.check_dir = function(dir)
   local handle = io.popen(
     'find ' .. dir ..

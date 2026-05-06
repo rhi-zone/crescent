@@ -99,7 +99,7 @@ local I = index_mt.__index
 
 -- ── Open / close ────────────────────────────────────────────────────────────
 
---: (string) -> table | (nil, string)
+--: (string) -> { _db: unknown, ... } | (nil, string)
 function M.open(db_path)
 	local db, err = sqlite.open(db_path)
 	if not db then return nil, err end
@@ -154,7 +154,7 @@ end
 -- If an app with the same path exists, its row is updated in place (id
 -- preserved) so derived tables (app_tags, apps_fts) stay consistent. New
 -- apps get a fresh id via INSERT.
---: (string, table, number) -> number | (nil, string)
+--: (string, { name: string | nil, meta: { tags: string[], description: string | nil, ... } | nil, ... }, number) -> number | (nil, string)
 function I:install(app_path, manifest, timestamp)
 	if not app_path or app_path == "" then
 		return nil, "index: app_path is required"
@@ -295,7 +295,7 @@ end
 -- ── Query ───────────────────────────────────────────────────────────────────
 
 -- Parse a row from the query iterator into a table.
---: (number, string, string, string, string, number) -> table
+--: (number, string, string, string, string, number) -> { id: number, name: string, path: string, manifest_json: string, manifest: { ... } | nil, tags_json: string, tags: string[], installed_at: number }
 local function row_from_query(id, name, path, manifest_json, tags_json, installed_at)
 	return {
 		id = id,
@@ -310,7 +310,7 @@ local function row_from_query(id, name, path, manifest_json, tags_json, installe
 end
 
 -- Get a single app by id.
---: (number) -> table | nil
+--: (number) -> { id: number, name: string, path: string, manifest_json: string, manifest: { ... } | nil, tags_json: string, tags: string[], installed_at: number } | nil
 function I:get(id)
 	local iter, err = self._db:query(
 		"SELECT id, name, path, manifest_json, tags_json, installed_at FROM apps WHERE id = ?", id
@@ -333,7 +333,7 @@ local COLS = "a.id, a.name, a.path, a.manifest_json, a.tags_json, a.installed_at
 
 -- List all apps, optionally filtered by tag. Tag filter uses the app_tags
 -- join, not json_each — O(matches) via idx_app_tags_tag_app.
---: ((table | nil)) -> table[]
+--: ({ tag: string, ... } | nil) -> { id: number, name: string, path: string, manifest_json: string, manifest: { ... } | nil, tags_json: string, tags: string[], installed_at: number }[]
 function I:list(filter)
 	local sql, args
 	if filter and filter.tag then
@@ -361,7 +361,7 @@ end
 
 -- Full-text search via apps_fts (trigram tokenizer). Case-insensitive
 -- substring match on name, description, and path.
---: (string) -> table[]
+--: (string) -> { id: number, name: string, path: string, manifest_json: string, manifest: { ... } | nil, tags_json: string, tags: string[], installed_at: number }[]
 function I:search(query)
 	-- FTS match is pushed into a subquery so SQLite evaluates it once —
 	-- joining apps_fts directly lets the planner pick a per-row MATCH,

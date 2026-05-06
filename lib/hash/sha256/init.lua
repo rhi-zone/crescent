@@ -15,6 +15,7 @@ local M = {}
 -- ── SHA-256 constants (shared across tiers) ───────────────────────────────────
 
 -- First 32 bits of fractional parts of cube roots of first 64 primes.
+--: { [integer]: number }
 local K = {
 	0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
 	0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -63,15 +64,17 @@ local function try_system()
 
 	-- Verify the SHA256 symbol is accessible.
 	local probe_buf = ffi.new("unsigned char[32]")
-	local ok2, err2 = pcall(lib_typed.SHA256, ffi.cast("const unsigned char *", ""), 0, probe_buf)
+	local sha256_fn = lib_typed.SHA256 --[[: any]]
+	local ok2, err2 = pcall(sha256_fn, ffi.cast("const unsigned char *", ""), 0, probe_buf)
 	if not ok2 then error("SHA256 symbol not callable: " .. tostring(err2)) end
 
+	local sha256_typed = sha256_fn --[[:! (cdata, integer, cdata) -> cdata]]
 	return function(s)
 		local result = ffi.new("unsigned char[32]")
-		lib_typed.SHA256(ffi.cast("const unsigned char *", s), #s, result)
+		sha256_typed(ffi.cast("const unsigned char *", s --[[:! ""]]), #s, result)
 		local parts = {}
 		for i = 0, 31 do
-			local b = result[i]
+			local b = result[i] --[[:! integer]]
 			parts[#parts + 1] = HEX:sub(rshift(b, 4) + 1, rshift(b, 4) + 1)
 				.. HEX:sub(bit.band(b, 0xf) + 1, bit.band(b, 0xf) + 1)
 		end
@@ -210,40 +213,55 @@ local function make_lua()
 	-- We need: XOR, AND, NOT, right-rotate.
 	-- Use LuaJIT's bit library if available; else fall back to math.
 
-	local _bxor, _band, _bnot, _rshift, _lshift, _rrotate
+	-- Pure-math fallback for standard Lua 5.1 without bit lib.
+	local function bitval(x, n)
+		return math.floor(x / (2 ^ n)) % 2
+	end
+	local function fold(a, b, op, bits)
+		local result = 0 --: number
+		for i = 0, bits - 1 do
+			if op(bitval(a, i), bitval(b, i)) == 1 then
+				result = result + 2 ^ i
+			end
+		end
+		return result
+	end
+
+	--: (...number) -> number
+	local _bxor = function(a, b, c)
+		local r = fold(u32(a or 0), u32(b or 0), function(x,y) return x ~= y and 1 or 0 end, 32)
+		if c ~= nil then r = fold(r, u32(c), function(x,y) return x ~= y and 1 or 0 end, 32) end
+		return r
+	end
+	--: (...number) -> number
+	local _band = function(a, b, c)
+		local r = fold(u32(a or 0), u32(b or 0), function(x,y) return x == 1 and y == 1 and 1 or 0 end, 32)
+		if c ~= nil then r = fold(r, u32(c), function(x,y) return x == 1 and y == 1 and 1 or 0 end, 32) end
+		return r
+	end
+	--: (number) -> number
+	local _bnot = function(a) return u32(0xffffffff - u32(a)) end
+	--: (number, number) -> number
+	local _rshift = function(a, n) return math.floor(u32(a) / (2 ^ n)) end
+	--: (number, number) -> number
+	local _lshift = function(a, n) return u32(u32(a) * (2 ^ n)) end
+	--: (number, number) -> number
+	local _rrotate = function(a, n) a = u32(a); return u32(_rshift(a, n) + _lshift(a, 32 - n)) end
 
 	local ok_bit, bit_mod = pcall(require, "bit")
 	if ok_bit then
-		_bxor   = bit_mod.bxor
-		_band   = bit_mod.band
-		_bnot   = bit_mod.bnot
-		_rshift = bit_mod.rshift
-		_lshift = bit_mod.lshift
-		_rrotate = bit_mod.ror
-	else
-		-- Pure-math fallback for standard Lua 5.1 without bit lib.
-		local function bitval(x, n)
-			return math.floor(x / (2 ^ n)) % 2
-		end
-		local function fold(a, b, op, bits)
-			local result = 0
-			for i = 0, bits - 1 do
-				if op(bitval(a, i), bitval(b, i)) == 1 then
-					result = result + 2 ^ i
-				end
-			end
-			return result
-		end
-		_bxor = function(a, b) return fold(u32(a), u32(b), function(x,y) return x ~= y and 1 or 0 end, 32) end
-		_band = function(a, b) return fold(u32(a), u32(b), function(x,y) return x == 1 and y == 1 and 1 or 0 end, 32) end
-		_bnot = function(a) return u32(0xffffffff - u32(a)) end  -- same as XOR with MASK
-		_rshift = function(a, n) return math.floor(u32(a) / (2 ^ n)) end
-		_lshift = function(a, n) return u32(u32(a) * (2 ^ n)) end
-		_rrotate = function(a, n) a = u32(a); return u32(_rshift(a, n) + _lshift(a, 32 - n)) end
+		local bm_u = bit_mod --[[: unknown]]
+		local bm = bm_u --[[:! { bxor: (...number) -> number, band: (...number) -> number, bnot: (number) -> number, rshift: (number, number) -> number, lshift: (number, number) -> number, ror: (number, number) -> number, ... }]]
+		_bxor   = bm.bxor
+		_band   = bm.band
+		_bnot   = bm.bnot
+		_rshift = bm.rshift
+		_lshift = bm.lshift
+		_rrotate = bm.ror
 	end
 
-	local W2  = {}
-	local blk = {}  -- 64-byte block buffer (Lua table of bytes)
+	local W2  = {} --: { [integer]: number }
+	local blk = {} --: { [integer]: number }
 	for i = 1, 64 do W2[i] = 0; blk[i] = 0 end
 
 	-- Compress one 64-byte block stored in blk[1..64].
@@ -288,10 +306,11 @@ local function make_lua()
 
 	-- Process input in 64-byte (512-bit) blocks, streaming from the string.
 	-- Avoids building a full byte-table for large inputs.
+	--: (string) -> string
 	return function(s)
 		local len = #s
 
-		local h = {
+		local h = { --: { [integer]: number }
 			0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
 			0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
 		}
@@ -301,7 +320,7 @@ local function make_lua()
 		for b_idx = 0, nfull - 1 do
 			local base = b_idx * 64 + 1  -- 1-indexed string position
 			for j = 1, 64 do
-				blk[j] = string.byte(s, base + j - 1)
+				blk[j] = string.byte(s, base + j - 1) or 0
 			end
 			compress_block(h)
 		end
@@ -313,7 +332,7 @@ local function make_lua()
 
 		-- Fill blk with remaining bytes.
 		for j = 1, rem_len do
-			blk[j] = string.byte(s, rem_start + j - 1)
+			blk[j] = string.byte(s, rem_start + j - 1) or 0
 		end
 
 		-- Append 0x80 sentinel.

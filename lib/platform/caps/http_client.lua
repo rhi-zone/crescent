@@ -298,7 +298,7 @@ end
 -- Returns true when req_path is permitted by the whitelist.
 -- paths: nil/empty = allow all; otherwise exact match OR prefix match when
 -- the whitelist entry ends with "/".
---: (table | nil, string) -> boolean
+--: (string[] | nil, string) -> boolean
 local function path_allowed(paths, req_path)
 	if not paths or #paths == 0 then return true end
 	for i = 1, #paths do
@@ -376,7 +376,7 @@ function M.http_client_cap(opts)
 	cap.methods = allowed_methods
 
 	-- Non-streaming request.
-	--: (table) -> (table | nil, string)
+	--: ({ method: string, path: string, headers: { [string]: string } | nil, body: string | nil, ... }) -> ({ status: integer, headers: { [string]: string }, body: string | nil } | nil, string)
 	function cap.request(req)
 		if revoked then return nil, "capability revoked" end
 		if not req then return nil, "http_client: missing request" end
@@ -436,7 +436,7 @@ function M.http_client_cap(opts)
 
 	-- Streaming request. Calls on_chunk(data) for each received chunk.
 	-- Returns { status, headers } on success (body delivered via callbacks).
-	--: (table, (string) -> nil) -> (table | nil, string)
+	--: ({ method: string, path: string, headers: { [string]: string } | nil, body: string | nil, ... }, (string) -> nil) -> ({ status: integer, headers: { [string]: string } } | nil, string)
 	function cap.request_stream(req, on_chunk)
 		if revoked then return nil, "capability revoked" end
 		if not req then return nil, "http_client: missing request" end

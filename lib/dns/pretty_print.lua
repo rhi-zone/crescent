@@ -30,14 +30,16 @@ mod.formatters = {
 	[dns.type.TXT] = function (strs) return table.concat(strs, "\t") end,
 	[dns.type.A] = function (arr) return table.concat(arr, ".") end,
 	[dns.type.AAAA] = function (arr)
-		local s = string.char(unpack(arr)):gsub("..", function (m_u)
-			local m = m_u --[[:! string]]
-			local b1, b2 = m:byte(1, 2)
-			return string.format(":%x", bit.bor(bit.lshift(b1 or 0, 8), b2 or 0))
-		end):sub(2)
+		-- Convert 16 bytes to IPv6 hex notation
+		local arr_t = arr --[[:! { [integer]: integer }]]
+		local hex_parts = {}
+		for idx = 1, 16, 2 do
+			hex_parts[#hex_parts+1] = string.format("%x", bit.bor(bit.lshift(arr_t[idx] or 0, 8), arr_t[idx+1] or 0))
+		end
+		local s = table.concat(hex_parts, ":")
 		local max0s = ""
 		for m in s:gmatch("[0:][0:]+") do if #m > #max0s then max0s = m end end
-		return #max0s > 0 and s:gsub(max0s, "::", 1) or s
+		return (#max0s > 0 and s:gsub(max0s, "::", 1) or s) --: string
 	end,
 	[dns.type.DS] = function (x)
 		x.algorithm = dns.dnssec_algorithm_name[x.algorithm] or x.algorithm

@@ -15,46 +15,50 @@ local tonumber = tonumber
 local type = type
 
 -- Character constants
-local NEWLINE    = byte("\n")
-local CR         = byte("\r")
-local SPACE      = byte(" ")
-local TAB        = byte("\t")
-local HASH       = byte("#")
-local EQUALS     = byte("=")
-local DOT        = byte(".")
-local COMMA      = byte(",")
-local LBRACKET   = byte("[")
-local RBRACKET   = byte("]")
-local LBRACE     = byte("{")
-local RBRACE     = byte("}")
-local DQUOTE     = byte('"')
-local SQUOTE     = byte("'")
-local BACKSLASH  = byte("\\")
-local PLUS       = byte("+")
-local MINUS      = byte("-")
-local UNDERSCORE = byte("_")
-local COLON      = byte(":")
-local CHAR_T     = byte("T")
-local CHAR_t     = byte("t")
-local CHAR_Z     = byte("Z")
-local CHAR_z     = byte("z")
-local CHAR_0     = byte("0")
-local CHAR_9     = byte("9")
-local CHAR_a     = byte("a")
-local CHAR_f     = byte("f")
-local CHAR_A     = byte("A")
-local CHAR_F     = byte("F")
+local NEWLINE    = byte("\n") --[[:! integer]]
+local CR         = byte("\r") --[[:! integer]]
+local SPACE      = byte(" ")  --[[:! integer]]
+local TAB        = byte("\t") --[[:! integer]]
+local HASH       = byte("#")  --[[:! integer]]
+local EQUALS     = byte("=")  --[[:! integer]]
+local DOT        = byte(".")  --[[:! integer]]
+local COMMA      = byte(",")  --[[:! integer]]
+local LBRACKET   = byte("[")  --[[:! integer]]
+local RBRACKET   = byte("]")  --[[:! integer]]
+local LBRACE     = byte("{")  --[[:! integer]]
+local RBRACE     = byte("}")  --[[:! integer]]
+local DQUOTE     = byte('"')  --[[:! integer]]
+local SQUOTE     = byte("'")  --[[:! integer]]
+local BACKSLASH  = byte("\\") --[[:! integer]]
+local PLUS       = byte("+")  --[[:! integer]]
+local MINUS      = byte("-")  --[[:! integer]]
+local UNDERSCORE = byte("_")  --[[:! integer]]
+local COLON      = byte(":")  --[[:! integer]]
+local CHAR_T     = byte("T")  --[[:! integer]]
+local CHAR_t     = byte("t")  --[[:! integer]]
+local CHAR_Z     = byte("Z")  --[[:! integer]]
+local CHAR_z     = byte("z")  --[[:! integer]]
+local CHAR_0     = byte("0")  --[[:! integer]]
+local CHAR_9     = byte("9")  --[[:! integer]]
+local CHAR_a     = byte("a")  --[[:! integer]]
+local CHAR_f     = byte("f")  --[[:! integer]]
+local CHAR_A     = byte("A")  --[[:! integer]]
+local CHAR_F     = byte("F")  --[[:! integer]]
 
 --: (integer | nil) -> boolean
 local function is_digit(c)
   if not c then return false end
-  return c >= CHAR_0 and c <= CHAR_9
+  if c >= CHAR_0 and c <= CHAR_9 then return true end
+  return false
 end
 
 --: (integer | nil) -> boolean
 local function is_hex(c)
   if not c then return false end
-  return (c >= CHAR_0 and c <= CHAR_9) or (c >= CHAR_a and c <= CHAR_f) or (c >= CHAR_A and c <= CHAR_F)
+  if c >= CHAR_0 and c <= CHAR_9 then return true end
+  if c >= CHAR_a and c <= CHAR_f then return true end
+  if c >= CHAR_A and c <= CHAR_F then return true end
+  return false
 end
 
 --: (integer | nil) -> boolean
@@ -220,10 +224,10 @@ end
 local parse_value
 
 -- Parse basic (double-quoted) string
---: (Parser) -> (unknown, string | nil)
+--: (Parser) -> (string | nil, string | nil)
 local function parse_basic_string(p)
   advance(p) -- skip opening "
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   while p.pos <= p.len do
     local c = byte(p.str, p.pos)
     if c == DQUOTE then
@@ -243,7 +247,7 @@ local function parse_basic_string(p)
         if #hex ~= 4 or not hex:match("^%x+$") then
           return err(p, "invalid \\u escape")
         end
-        local cp = tonumber(hex, 16)
+        local cp = tonumber(hex, 16) --[[:! integer]]
         local u = unicode_to_utf8(cp)
         if not u then return err(p, "invalid unicode codepoint") end
         parts[#parts + 1] = u
@@ -254,7 +258,7 @@ local function parse_basic_string(p)
         if #hex ~= 8 or not hex:match("^%x+$") then
           return err(p, "invalid \\U escape")
         end
-        local cp = tonumber(hex, 16)
+        local cp = tonumber(hex, 16) --[[:! integer]]
         local u = unicode_to_utf8(cp)
         if not u then return err(p, "invalid unicode codepoint") end
         parts[#parts + 1] = u
@@ -280,7 +284,7 @@ local function parse_basic_string(p)
 end
 
 -- Parse multiline basic string
---: (Parser) -> (unknown, string | nil)
+--: (Parser) -> (string | nil, string | nil)
 local function parse_ml_basic_string(p)
   -- skip opening """
   p.pos = p.pos + 3
@@ -298,7 +302,7 @@ local function parse_ml_basic_string(p)
       end
     end
   end
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   while p.pos <= p.len do
     local c = byte(p.str, p.pos)
     if c == DQUOTE then
@@ -355,7 +359,10 @@ local function parse_ml_basic_string(p)
           if #hex ~= 4 or not hex:match("^%x+$") then
             return err(p, "invalid \\u escape")
           end
-          parts[#parts + 1] = unicode_to_utf8(tonumber(hex, 16))
+          local cp4 = tonumber(hex, 16) --[[:! integer]]
+          local uu = unicode_to_utf8(cp4)
+          if not uu then return err(p, "invalid unicode codepoint") end
+          parts[#parts + 1] = uu
           p.pos = p.pos + 4
         elseif ec == byte("U") then
           p.pos = p.pos + 1
@@ -363,7 +370,10 @@ local function parse_ml_basic_string(p)
           if #hex ~= 8 or not hex:match("^%x+$") then
             return err(p, "invalid \\U escape")
           end
-          parts[#parts + 1] = unicode_to_utf8(tonumber(hex, 16))
+          local cp8 = tonumber(hex, 16) --[[:! integer]]
+          local uu = unicode_to_utf8(cp8)
+          if not uu then return err(p, "invalid unicode codepoint") end
+          parts[#parts + 1] = uu
           p.pos = p.pos + 8
         else
           return err(p, format("invalid escape '\\%s'", string.char(ec)))
@@ -395,7 +405,7 @@ local function parse_ml_basic_string(p)
 end
 
 -- Parse literal (single-quoted) string
---: (Parser) -> (unknown, string | nil)
+--: (Parser) -> (string | nil, string | nil)
 local function parse_literal_string(p)
   advance(p) -- skip opening '
   local start = p.pos
@@ -414,7 +424,7 @@ local function parse_literal_string(p)
 end
 
 -- Parse multiline literal string
---: (Parser) -> (unknown, string | nil)
+--: (Parser) -> (string | nil, string | nil)
 local function parse_ml_literal_string(p)
   p.pos = p.pos + 3 -- skip opening '''
   -- skip immediate newline
@@ -431,7 +441,7 @@ local function parse_ml_literal_string(p)
       end
     end
   end
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   while p.pos <= p.len do
     local c = byte(p.str, p.pos)
     if c == SQUOTE then
@@ -478,7 +488,7 @@ local function parse_ml_literal_string(p)
 end
 
 -- Parse any string type
---: (Parser) -> (unknown, string | nil)
+--: (Parser) -> (string | nil, string | nil)
 local function parse_string(p)
   local c1 = byte(p.str, p.pos)
   if c1 == DQUOTE then
@@ -497,7 +507,7 @@ local function parse_string(p)
 end
 
 -- Parse a bare key
---: (Parser) -> (unknown, string | nil)
+--: (Parser) -> (string | nil, string | nil)
 local function parse_bare_key(p)
   local start = p.pos
   while p.pos <= p.len and is_bare_key_char(byte(p.str, p.pos)) do
@@ -510,7 +520,7 @@ local function parse_bare_key(p)
 end
 
 -- Parse a simple key (bare or quoted)
---: (Parser) -> (unknown, string | nil)
+--: (Parser) -> (string | nil, string | nil)
 local function parse_simple_key(p)
   local c = peek(p)
   if c == DQUOTE then
@@ -530,7 +540,7 @@ local function parse_simple_key(p)
 end
 
 -- Parse a dotted key, returns list of key parts
---: (Parser) -> (unknown, string | nil)
+--: (Parser) -> ({ [integer]: string } | nil, string | nil)
 local function parse_key(p)
   local keys = {}
   local k, e = parse_simple_key(p)
@@ -596,13 +606,14 @@ local function parse_number(p)
       end
       local raw = sub(p.str, hex_start, p.pos - 1):gsub("_", "")
       if #raw == 0 then return err(p, "invalid hex integer") end
-      return sign * tonumber(raw, 16)
+      return sign * (tonumber(raw, 16) --[[:! number]])
     elseif c2 == byte("o") or c2 == byte("O") then
       p.pos = p.pos + 2
       local oct_start = p.pos
+      local CHAR_7 = byte("7") --[[:! integer]]
       while p.pos <= p.len do
-        local cc = byte(p.str, p.pos)
-        if cc >= byte("0") and cc <= byte("7") then
+        local cc = byte(p.str, p.pos) or 0
+        if cc >= CHAR_0 and cc <= CHAR_7 then
           p.pos = p.pos + 1
         elseif cc == UNDERSCORE then
           p.pos = p.pos + 1
@@ -612,13 +623,14 @@ local function parse_number(p)
       end
       local raw = sub(p.str, oct_start, p.pos - 1):gsub("_", "")
       if #raw == 0 then return err(p, "invalid octal integer") end
-      return sign * tonumber(raw, 8)
+      return sign * (tonumber(raw, 8) --[[:! number]])
     elseif c2 == byte("b") or c2 == byte("B") then
       p.pos = p.pos + 2
       local bin_start = p.pos
+      local CHAR_1 = byte("1") --[[:! integer]]
       while p.pos <= p.len do
-        local cc = byte(p.str, p.pos)
-        if cc == byte("0") or cc == byte("1") then
+        local cc = byte(p.str, p.pos) or 0
+        if cc == CHAR_0 or cc == CHAR_1 then
           p.pos = p.pos + 1
         elseif cc == UNDERSCORE then
           p.pos = p.pos + 1
@@ -628,7 +640,7 @@ local function parse_number(p)
       end
       local raw = sub(p.str, bin_start, p.pos - 1):gsub("_", "")
       if #raw == 0 then return err(p, "invalid binary integer") end
-      return sign * tonumber(raw, 2)
+      return sign * (tonumber(raw, 2) --[[:! number]])
     end
   end
 
@@ -998,10 +1010,10 @@ function M.decode(str)
   end
 
   local p = new_parser(str)
-  local root = {}
-  local current = root  -- current table for key/value pairs
-  local current_path = {} -- path of current table header
-  local defined = {}    -- tracks table definitions
+  local root = {} --: { [string]: unknown }
+  local current = root  --: { [string]: unknown }
+  local current_path = {} --: { [integer]: string }
+  local defined = {} --: { [string]: string }
 
   while p.pos <= p.len do
     skip_ws(p)
@@ -1060,10 +1072,10 @@ function M.decode(str)
         elseif type(target[k]) ~= "table" then
           return err(p, format("key '%s' already exists as non-table", k))
         end
-        local v = target[k]
+        local v = target[k] --[[:! { [string]: unknown }]]
         -- If it's an array of tables, navigate to the last element
         if #v > 0 and type(v[1]) == "table" and defined[path_to_string(path)] == "array" then
-          target = v[#v]
+          target = v[#v] --[[:! { [string]: unknown }]]
         else
           target = v
         end
@@ -1086,7 +1098,8 @@ function M.decode(str)
           return err(p, format("key '%s' already exists", final_key))
         end
         local new_tbl = {}
-        target[final_key][#target[final_key] + 1] = new_tbl
+        local aot = target[final_key] --[[:! { [integer]: { [string]: unknown } }]]
+        aot[#aot + 1] = new_tbl
         current = new_tbl
         current_path = path
       else
@@ -1102,7 +1115,7 @@ function M.decode(str)
           return err(p, format("key '%s' already exists as non-table", final_key))
         end
         defined[ps] = "table"
-        current = target[final_key]
+        current = target[final_key] --[[:! { [string]: unknown }]]
         current_path = path
       end
 
@@ -1133,7 +1146,7 @@ function M.decode(str)
         elseif type(target[k]) ~= "table" then
           return err(p, format("key '%s' already exists as non-table", k))
         end
-        target = target[k]
+        target = target[k] --[[:! { [string]: unknown }]]
       end
       local final_key = keys[#keys]
       if target[final_key] ~= nil then

@@ -11,7 +11,7 @@ end
 local M = {}
 M._tier = "pure"
 
---:: Interval = { lo: number, hi: number, lo_closed: boolean, hi_closed: boolean }
+--:: Interval = { lo: number, hi: number, lo_closed: boolean, hi_closed: boolean, is_empty: (self: Interval) -> boolean, overlaps: (self: Interval, Interval) -> boolean, intersection: (self: Interval, Interval) -> Interval, union: (self: Interval, Interval) -> Interval, contains: (self: Interval, number) -> boolean, before: (self: Interval, Interval) -> boolean, eq: (self: Interval, Interval) -> boolean, mul: (self: Interval, Interval) -> Interval, add: (self: Interval, Interval) -> Interval, sub: (self: Interval, Interval) -> Interval, div: (self: Interval, Interval) -> (Interval | nil, string | nil) }
 
 local floor = math.floor
 local huge = math.huge
@@ -52,10 +52,11 @@ end
 function M.new(lo, hi, lo_closed, hi_closed)
   if lo_closed == nil then lo_closed = true end
   if hi_closed == nil then hi_closed = true end
-  return setmetatable({
+  local raw = setmetatable({
     lo = lo, hi = hi,
     lo_closed = lo_closed, hi_closed = hi_closed,
-  }, Interval)
+  }, Interval) --[[: unknown]]
+  return raw --[[:! Interval]]
 end
 
 -- Named constructors.
@@ -118,11 +119,11 @@ function Interval:midpoint() return (self.lo + self.hi) / 2 end
 
 -- True if both ends are closed.
 --: (Interval) -> boolean
-function Interval:is_closed() return self.lo_closed and self.hi_closed end
+function Interval:is_closed() return (self.lo_closed and self.hi_closed) == true end
 
 -- True if both ends are open.
 --: (Interval) -> boolean
-function Interval:is_open() return not self.lo_closed and not self.hi_closed end
+function Interval:is_open() return (not self.lo_closed and not self.hi_closed) == true end
 
 -- True if the interval is empty.
 -- lo > hi is always empty. lo == hi is empty unless both ends are closed.
@@ -143,7 +144,7 @@ function Interval:contains(v)
   if self:is_empty() then return false end
   local lo_ok = self.lo_closed and v >= self.lo or v > self.lo
   local hi_ok = self.hi_closed and v <= self.hi or v < self.hi
-  return lo_ok and hi_ok
+  return (lo_ok and hi_ok) == true
 end
 
 -- True if other interval is entirely within self.
@@ -179,8 +180,8 @@ function Interval:overlaps(other)
   if self:is_empty() or other:is_empty() then return false end
   if self.hi < other.lo then return false end
   if other.hi < self.lo then return false end
-  if self.hi == other.lo then return self.hi_closed and other.lo_closed end
-  if other.hi == self.lo then return other.hi_closed and self.lo_closed end
+  if self.hi == other.lo then return (self.hi_closed and other.lo_closed) == true end
+  if other.hi == self.lo then return (other.hi_closed and self.lo_closed) == true end
   return true
 end
 
@@ -425,8 +426,8 @@ end
 --: (Interval, Interval) -> boolean
 function Interval:eq(other)
   if self:is_empty() and other:is_empty() then return true end
-  return self.lo == other.lo and self.hi == other.hi
-    and self.lo_closed == other.lo_closed and self.hi_closed == other.hi_closed
+  return (self.lo == other.lo and self.hi == other.hi
+    and self.lo_closed == other.lo_closed and self.hi_closed == other.hi_closed) == true
 end
 
 --: (Interval, Interval) -> boolean
@@ -483,6 +484,8 @@ M.Range = Range
 -- Interval set
 -- ---------------------------------------------------------------------------
 
+--:: IntervalSet = { intervals: { [integer]: Interval }, n: integer, normalize: (self: IntervalSet) -> IntervalSet, ... }
+
 local Set = {}
 -- Method lookup takes priority over identically-named instance fields (e.g. 'intervals').
 Set.__index = function(t, k)
@@ -493,10 +496,12 @@ end
 
 -- Create an interval set from a list of intervals.
 -- Call :normalize() to sort and merge overlapping intervals.
+--: (Arr<Interval> | nil) -> IntervalSet
 function M.set(intervals)
-  local s = setmetatable({ intervals = {}, n = 0 }, Set)
-  for i = 1, #intervals do
-    s.intervals[i] = intervals[i]
+  local s = setmetatable({ intervals = {}, n = 0 }, Set) --[[:! IntervalSet]]
+  local ivs = intervals or {}
+  for i = 1, #ivs do
+    s.intervals[i] = ivs[i] --[[:! Interval]]
     s.n = i
   end
   return s
@@ -509,12 +514,12 @@ function Set:normalize()
   if n == 0 then return self end
   table.sort(ivs, function(a, b)
     if a.lo ~= b.lo then return a.lo < b.lo end
-    return a.lo_closed and not b.lo_closed
+    return (a.lo_closed and not b.lo_closed) == true
   end)
-  local merged = { ivs[1] }
+  local merged = { ivs[1] } --: { [integer]: Interval }
   for i = 2, n do
-    local prev = merged[#merged]
-    local cur = ivs[i]
+    local prev = merged[#merged] --[[:! Interval]]
+    local cur = ivs[i] --[[:! Interval]]
     local touches = prev:overlaps(cur)
     if not touches then
       if prev.hi == cur.lo and (prev.hi_closed or cur.lo_closed) then
@@ -569,6 +574,7 @@ function Set:intersection(other)
 end
 
 -- Add an interval to the set, merging with any that overlap or touch.
+--: (self: IntervalSet, Interval) -> IntervalSet
 function Set:add(iv)
   if iv:is_empty() then return self end
   self.n = self.n + 1
@@ -625,14 +631,15 @@ M.Set = Set
 function M.merge(intervals)
   local n = #intervals
   if n == 0 then return {} end
-  local sorted = {}
+  local sorted = {} --: { [integer]: Interval }
   for i = 1, n do sorted[i] = intervals[i] end
   table.sort(sorted, function(a, b) return a.lo < b.lo end)
-  local result = { M.new(sorted[1].lo, sorted[1].hi) }
+  local iv1 = sorted[1] --[[:! Interval]]
+  local result = { M.new(iv1.lo, iv1.hi) } --: { [integer]: Interval }
   local ri = 1
   for i = 2, n do
-    local cur = result[ri]
-    local s = sorted[i]
+    local cur = result[ri] --[[:! Interval]]
+    local s = sorted[i] --[[:! Interval]]
     if s.lo <= cur.hi then
       if s.hi > cur.hi then cur.hi = s.hi end
     else
@@ -688,20 +695,24 @@ end
 -- Interval tree (sorted array with max-endpoint annotation)
 -- ---------------------------------------------------------------------------
 
+--:: TreeEntry = { [integer]: unknown }
+--:: IntervalTree = { entries: { [integer]: TreeEntry }, n: integer, ... }
+
 local Tree = {}
 Tree.__index = Tree
 
 function M.tree()
-  return setmetatable({ entries = {}, n = 0 }, Tree)
+  return setmetatable({ entries = {}, n = 0 }, Tree) --[[:! IntervalTree]]
 end
 
 -- Binary search: first entry index with lo >= val.
+--: ({ [integer]: TreeEntry }, integer, number) -> integer
 local function lower_bound(entries, n, val)
   local lo, hi = 1, n
   local result = n + 1
   while lo <= hi do
     local mid = lo + floor((hi - lo) / 2)
-    if entries[mid][1].lo >= val then
+    if (entries[mid][1] --[[:! Interval]]).lo >= val then
       result = mid
       hi = mid - 1
     else
@@ -712,17 +723,21 @@ local function lower_bound(entries, n, val)
 end
 
 -- Recompute max_hi suffix from position `from` to end.
+--: ({ [integer]: TreeEntry }, integer, integer) -> nil
 local function recompute_max(entries, n, from)
   if n == 0 then return end
   if from > n then from = n end
-  entries[n][3] = entries[n][1].hi
+  local en = entries[n]
+  en[3] = (en[1] --[[:! Interval]]).hi
   for i = n - 1, from, -1 do
-    local h = entries[i][1].hi
-    local nm = entries[i + 1][3]
-    entries[i][3] = h > nm and h or nm
+    local ei = entries[i]
+    local h = (ei[1] --[[:! Interval]]).hi
+    local nm = entries[i + 1][3] --[[:! number]]
+    ei[3] = h > nm and h or nm
   end
 end
 
+--: (self: IntervalTree, Interval, unknown) -> nil
 function Tree:insert(iv, data)
   local entries = self.entries
   local n = self.n
@@ -733,14 +748,16 @@ function Tree:insert(iv, data)
   recompute_max(entries, self.n, pos)
 end
 
+--: (self: IntervalTree, Interval) -> boolean
 function Tree:remove(iv)
   local entries = self.entries
   local n = self.n
   for i = 1, n do
     local e = entries[i]
-    if e[1].lo == iv.lo and e[1].hi == iv.hi then
+    local ei = e[1] --[[:! Interval]]
+    if ei.lo == iv.lo and ei.hi == iv.hi then
       for j = i, n - 1 do entries[j] = entries[j + 1] end
-      entries[n] = nil
+      entries[n] = nil --[[: any]]
       self.n = n - 1
       if self.n > 0 then
         recompute_max(entries, self.n, i > self.n and self.n or i)

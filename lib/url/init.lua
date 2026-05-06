@@ -20,7 +20,7 @@ local concat = table.concat
 local sort = table.sort
 
 -- Lookup table: byte -> true if unreserved (RFC 3986 Section 2.3)
-local unreserved = {}
+local unreserved = {} --: { [integer]: boolean }
 for i = 0, 255 do unreserved[i] = false end
 for i = byte("A"), byte("Z") do unreserved[i] = true end
 for i = byte("a"), byte("z") do unreserved[i] = true end
@@ -57,9 +57,11 @@ end
 --- Percent-decode a string.
 --: (string) -> string
 function M.decode(s)
-  return (gsub(gsub(s, "+", " "), "%%(%x%x)", function(hex)
+  local s2 = gsub(s, "+", " ") --[[: any]]; s2 = s2 --[[:! string]]
+  local result = gsub(s2, "%%(%x%x)", function(hex)
     return char(tonumber(hex, 16))
-  end))
+  end) --[[: any]]; result = result --[[:! string]]
+  return result
 end
 
 --- Parse a query string into a table.
@@ -138,6 +140,7 @@ local function remove_dot_segments(path)
         seg_end = find(path, "/", 1, true)
       end
       if seg_end then
+        seg_end = seg_end --[[:! integer]]
         n = n + 1
         out[n] = sub(path, seg_start, seg_end - 1)
         path = sub(path, seg_end)
@@ -154,13 +157,13 @@ end
 --- Parse a URL string into components (RFC 3986).
 -- Returns a table with: scheme, userinfo, host, port, path, query, fragment.
 -- Returns (nil, errmsg) on invalid input.
---: (string) -> { scheme: (string | nil), userinfo: (string | nil), host: (string | nil), port: (number | nil), path: string, query: (string | nil), fragment: (string | nil) } | (nil, string)
+--: (string) -> ({ scheme: string | nil, userinfo: string | nil, host: string | nil, port: number | nil, path: string | nil, query: string | nil, fragment: string | nil } | nil, string | nil)
 function M.parse(s)
   if type(s) ~= "string" then
     return nil, "url.parse: expected string, got " .. type(s)
   end
 
-  local u = {}
+  local u = {} --[[: any]]
   local rest = s
 
   -- Fragment
@@ -212,6 +215,7 @@ function M.parse(s)
       -- IPv6 address
       local bracket_end = find(authority, "]", 2, true)
       if bracket_end then
+        bracket_end = bracket_end --[[:! integer]]
         u.host = sub(authority, 1, bracket_end)
         local port_str = sub(authority, bracket_end + 1)
         if sub(port_str, 1, 1) == ":" then
@@ -291,20 +295,22 @@ function M.build(u)
 end
 
 --- Resolve a relative reference against a base URL (RFC 3986 Section 5.2.2).
---: (string, string) -> string | (nil, string)
+--: (string, string) -> (string | nil, string | nil)
 function M.resolve(base, ref)
   local r, err = M.parse(ref)
   if not r then return nil, err end
+  r = r --[[: any]]
 
   local b
   if type(base) == "string" then
     b, err = M.parse(base)
     if not b then return nil, err end
+    b = b --[[: any]]
   else
-    b = base
+    b = base --[[: any]]
   end
 
-  local t = {}
+  local t = {} --[[: any]]
 
   if r.scheme then
     t.scheme = r.scheme
@@ -367,7 +373,7 @@ end
 
 --- Join a base URL with a relative path.
 -- Alias for resolve.
---: (string, string) -> string | (nil, string)
+--: (string, string) -> (string | nil, string | nil)
 function M.join(base, relative)
   return M.resolve(base, relative)
 end
@@ -384,10 +390,11 @@ local default_ports = {
 --- Normalize a URL (RFC 3986 Section 6.2.2 + 6.2.3).
 -- Lowercases scheme and host, removes default port, removes dot segments,
 -- decodes unreserved percent-encoded characters.
---: (string) -> string | (nil, string)
+--: (string) -> (string | nil, string | nil)
 function M.normalize(s)
   local u, err = M.parse(s)
   if not u then return nil, err end
+  u = u --[[: any]]
 
   -- Lowercase scheme (already done in parse)
 
@@ -409,6 +416,7 @@ function M.normalize(s)
   -- Decode unreserved percent-encoded chars in path
   if u.path then
     u.path = gsub(u.path, "%%(%x%x)", function(hex)
+      hex = hex --[[: any]]; hex = hex --[[:! string]]
       local b = tonumber(hex, 16)
       if unreserved[b] then
         return char(b)

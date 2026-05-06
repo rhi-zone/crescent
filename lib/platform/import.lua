@@ -45,7 +45,7 @@ local M = {}
 -- ── Card metadata extraction ────────────────────────────────────────────────
 
 -- Extract metadata from a CCv2 chara tEXt chunk.
---: (string) -> (table | nil, string)
+--: (string) -> ({ name: string | nil, description: string, tags: string[], ... } | nil, string)
 local function extract_card_meta(png_bytes)
 	local chunks, err = png.read(png_bytes)
 	if not chunks then return nil, "import: PNG parse failed: " .. tostring(err) end
@@ -81,7 +81,7 @@ end
 -- ── Bundle ──────────────────────────────────────────────────────────────────
 
 -- Build a tarball from runtime files + manifest, gzip, base64.
---: (table[], table) -> (string | nil, string)
+--: ({ name: string, data: string }[], { name: string, ... }) -> (string | nil, string)
 local function bundle_runtime(runtime_files, manifest)
 	-- Add manifest.json to the tarball entries.
 	local entries = {}
@@ -104,7 +104,7 @@ end
 
 -- ── Import ──────────────────────────────────────────────────────────────────
 
---: (table) -> (string, table | nil, string)
+--: ({ png_bytes: string, runtime_files: { name: string, data: string }[], runtime_manifest: { name: string | nil, dom_entry: string | nil, ... }, apps_dir: string, write_fn: (string, string) -> (true | nil, string), timestamp: number, index: { install: (unknown, string, { ... }, number) -> (number | nil, string), ... } | nil }) -> (string | nil, { name: string, ... } | nil, string)
 function M.import_card(opts)
 	if not opts then return nil, "import: opts required" end
 	if not opts.png_bytes then return nil, "import: png_bytes required" end

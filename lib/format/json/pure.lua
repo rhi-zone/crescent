@@ -66,6 +66,7 @@ local ESC_PAT = '[%z\1-\31"\\]'
 
 -- Encode a Lua string into a JSON string (with surrounding quotes).
 -- Appends to `buf` starting at index `n`; returns new `n`.
+--: (s: string, buf: { [integer]: string }, n: integer) -> integer
 local function encode_string(s, buf, n)
     buf[n] = '"'; n = n + 1
     -- Fast path: no escaping needed.
@@ -102,6 +103,7 @@ end
 local encode_value
 
 -- Encode a Lua table. Determines array vs object heuristic.
+--: (t: { [unknown]: unknown }, buf: { [integer]: string }, n: integer, null_sentinel: unknown, visited: { [unknown]: boolean | nil }, depth: integer) -> integer
 local function encode_table(t, buf, n, null_sentinel, visited, depth)
     if depth > 512 then
         error("maximum nesting depth (512) exceeded")
@@ -150,6 +152,7 @@ local function encode_table(t, buf, n, null_sentinel, visited, depth)
 end
 
 -- Encode any Lua value to JSON, appending to `buf` at index `n`.
+--: (v: unknown, buf: { [integer]: string }, n: integer, null_sentinel: unknown, visited: { [unknown]: boolean | nil }, depth: integer) -> integer
 encode_value = function(v, buf, n, null_sentinel, visited, depth)
     local t = type_fn(v)
     if v == null_sentinel then
@@ -417,8 +420,9 @@ end
 
 -- Pre-allocated stack frames to avoid GC pressure.
 -- Each frame: { t=table, is_array=bool, key=string|nil, n=int }
-local _stack = {}
-for _i = 1, 512 do _stack[_i] = {t=nil, is_array=false, key=nil, n=0} end
+--:: DecodeFrame = { t: { [unknown]: unknown } | nil, is_array: boolean, key: string | nil, n: integer }
+local _stack = {} --: { [integer]: DecodeFrame }
+for _i = 1, 512 do _stack[_i] = {t=nil, is_array=false, key=nil, n=0} --[[:! DecodeFrame]] end
 
 -- Iterative decoder: replaces mutually-recursive decode_value/decode_array/
 -- decode_object. The entire parse path is a single function with goto-based

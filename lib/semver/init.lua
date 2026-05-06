@@ -7,11 +7,15 @@ end
 
 local M = {}
 
+--:: Version = { major: integer, minor: integer, patch: integer, prerelease: string | nil, build: string | nil, ... }
+
 local Version = {}
 Version.__index = Version
 
 -- Format a version as a string.
+--: (self: Version) -> string
 function Version:__tostring()
+	local self = self --[[:! Version]]
 	local s = self.major .. "." .. self.minor .. "." .. self.patch
 	if self.prerelease then
 		s = s .. "-" .. self.prerelease
@@ -23,18 +27,22 @@ function Version:__tostring()
 end
 
 function Version:__eq(other)
+	local self = self --[[:! Version]]
 	return self:cmp(other) == 0
 end
 
 function Version:__lt(other)
+	local self = self --[[:! Version]]
 	return self:cmp(other) < 0
 end
 
 function Version:__le(other)
+	local self = self --[[:! Version]]
 	return self:cmp(other) <= 0
 end
 
 -- Parse prerelease identifiers into a list of string|integer.
+--: (string | nil) -> { [integer]: string | number } | nil
 local function parse_prerelease_ids(s)
 	if not s or s == "" then return nil end
 	local ids = {}
@@ -51,6 +59,7 @@ end
 
 -- Compare two prerelease identifier lists per SemVer 2.0.0 section 11.
 -- nil (release) > any prerelease list.
+--: ({ [integer]: string | number } | nil, { [integer]: string | number } | nil) -> integer
 local function cmp_prerelease(a_ids, b_ids)
 	if a_ids == nil and b_ids == nil then return 0 end
 	if a_ids == nil then return 1 end
@@ -60,18 +69,20 @@ local function cmp_prerelease(a_ids, b_ids)
 		local ai, bi = a_ids[i], b_ids[i]
 		if ai == nil then return -1 end -- shorter < longer
 		if bi == nil then return 1 end
-		local ai_num = type(ai) == "number"
-		local bi_num = type(bi) == "number"
-		if ai_num and bi_num then
-			if ai < bi then return -1 end
-			if ai > bi then return 1 end
-		elseif ai_num then
+		if type(ai) == "number" and type(bi) == "number" then
+			local ain = ai --[[:! number]]
+			local bin = bi --[[:! number]]
+			if ain < bin then return -1 end
+			if ain > bin then return 1 end
+		elseif type(ai) == "number" then
 			return -1 -- numeric < string
-		elseif bi_num then
+		elseif type(bi) == "number" then
 			return 1
 		else
-			if ai < bi then return -1 end
-			if ai > bi then return 1 end
+			local ais = ai --[[:! string]]
+			local bis = bi --[[:! string]]
+			if ais < bis then return -1 end
+			if ais > bis then return 1 end
 		end
 	end
 	return 0
@@ -80,6 +91,8 @@ end
 -- Compare this version to another. Returns -1, 0, or 1.
 -- Build metadata is ignored per SemVer 2.0.0.
 function Version:cmp(other)
+	local self = self --[[:! Version]]
+	local other = other --[[:! Version]]
 	if self.major ~= other.major then
 		return self.major < other.major and -1 or 1
 	end
@@ -89,33 +102,57 @@ function Version:cmp(other)
 	if self.patch ~= other.patch then
 		return self.patch < other.patch and -1 or 1
 	end
-	local a_ids = parse_prerelease_ids(self.prerelease)
-	local b_ids = parse_prerelease_ids(other.prerelease)
+	local a_ids = parse_prerelease_ids(self.prerelease --[[:! string | nil]])
+	local b_ids = parse_prerelease_ids(other.prerelease --[[:! string | nil]])
 	return cmp_prerelease(a_ids, b_ids)
 end
 
-function Version:eq(other) return self:cmp(other) == 0 end
-function Version:lt(other) return self:cmp(other) < 0 end
-function Version:le(other) return self:cmp(other) <= 0 end
-function Version:gt(other) return self:cmp(other) > 0 end
-function Version:ge(other) return self:cmp(other) >= 0 end
+function Version:eq(other)
+	local self = self --[[:! Version]]
+	return self:cmp(other) == 0
+end
+function Version:lt(other)
+	local self = self --[[:! Version]]
+	return self:cmp(other) < 0
+end
+function Version:le(other)
+	local self = self --[[:! Version]]
+	return self:cmp(other) <= 0
+end
+function Version:gt(other)
+	local self = self --[[:! Version]]
+	return self:cmp(other) > 0
+end
+function Version:ge(other)
+	local self = self --[[:! Version]]
+	return self:cmp(other) >= 0
+end
 
 -- Return a new version with major incremented, minor/patch reset, prerelease/build cleared.
 function Version:inc_major()
-	return M.new(self.major + 1, 0, 0)
+	local self = self --[[:! Version]]
+	return M.new(self.major + 1, 0, 0, nil, nil)
 end
 
 -- Return a new version with minor incremented, patch reset, prerelease/build cleared.
 function Version:inc_minor()
-	return M.new(self.major, self.minor + 1, 0)
+	local self = self --[[:! Version]]
+	local maj = self.major --[[:! integer]]
+	local min = self.minor --[[:! integer]]
+	return M.new(maj, min + 1, 0, nil, nil)
 end
 
 -- Return a new version with patch incremented, prerelease/build cleared.
 function Version:inc_patch()
-	return M.new(self.major, self.minor, self.patch + 1)
+	local self = self --[[:! Version]]
+	local maj = self.major --[[:! integer]]
+	local min = self.minor --[[:! integer]]
+	local pat = self.patch --[[:! integer]]
+	return M.new(maj, min, pat + 1, nil, nil)
 end
 
 -- Create a version object from components.
+--: (integer, integer, integer, string | nil, string | nil) -> Version
 function M.new(major, minor, patch, prerelease, build)
 	local v = setmetatable({
 		major = major,
@@ -172,39 +209,38 @@ function M.parse(str)
 		return nil, "empty version string"
 	end
 
-	local s = str
 	-- Extract build metadata
 	local build_str
-	local plus = s:find("+", 1, true)
+	local plus = str:find("+", 1, true)
+	local core = plus and str:sub(1, plus - 1) or str
 	if plus then
-		build_str = s:sub(plus + 1)
-		s = s:sub(1, plus - 1)
+		build_str = str:sub(plus + 1)
 		if build_str == "" then
 			return nil, "invalid version: empty build metadata: " .. str
 		end
 		local ok, err = validate_build(build_str)
 		if not ok then
-			return nil, "invalid version: " .. err .. ": " .. str
+			return nil, "invalid version: " .. (err or "") .. ": " .. str
 		end
 	end
 
 	-- Extract prerelease
 	local pre_str
-	local dash = s:find("-", 1, true)
+	local dash = core:find("-", 1, true)
+	local pre_core = dash and core:sub(1, dash - 1) or core
 	if dash then
-		pre_str = s:sub(dash + 1)
-		s = s:sub(1, dash - 1)
+		pre_str = core:sub(dash + 1)
 		if pre_str == "" then
 			return nil, "invalid version: empty prerelease: " .. str
 		end
 		local ok, err = validate_prerelease(pre_str)
 		if not ok then
-			return nil, "invalid version: " .. err .. ": " .. str
+			return nil, "invalid version: " .. (err or "") .. ": " .. str
 		end
 	end
 
 	-- Parse core version
-	local maj_s, min_s, pat_s = s:match("^(%d+)%.(%d+)%.(%d+)$")
+	local maj_s, min_s, pat_s = pre_core:match("^(%d+)%.(%d+)%.(%d+)$")
 	if not maj_s then
 		return nil, "invalid version (expected MAJOR.MINOR.PATCH): " .. str
 	end
@@ -216,7 +252,7 @@ function M.parse(str)
 		return nil, "invalid version: leading zeros not allowed: " .. str
 	end
 
-	return M.new(tonumber(maj_s), tonumber(min_s), tonumber(pat_s), pre_str, build_str)
+	return M.new(tonumber(maj_s) --[[:! integer]], tonumber(min_s) --[[:! integer]], tonumber(pat_s) --[[:! integer]], pre_str, build_str)
 end
 
 --- Check if a string is a valid semver version.
@@ -261,21 +297,23 @@ local Constraint = {}
 Constraint.__index = Constraint
 
 -- Internal: create a version for boundary comparison (no prerelease/build).
+--: (integer, integer, integer) -> Version
 local function ver(maj, min, pat)
-	return M.new(maj, min, pat)
+	return M.new(maj, min, pat, nil, nil)
 end
 
 -- Parse a partial version used in wildcard/tilde constraints.
--- Returns major, minor, patch (any may be nil).
+-- Returns major, minor, patch (any may be nil), has_wildcard.
+--: (string) -> (integer | nil, integer | nil, integer | nil, boolean)
 local function parse_partial(s)
 	-- x/X/* wildcards
 	local maj_s, min_s, pat_s = s:match("^(%d+)%.(%d+)%.([xX%*])$")
 	if maj_s then
-		return tonumber(maj_s), tonumber(min_s), nil, true
+		return tonumber(maj_s) --[[:! integer]], tonumber(min_s) --[[:! integer]], nil, true
 	end
 	maj_s, min_s = s:match("^(%d+)%.([xX%*])$")
 	if maj_s then
-		return tonumber(maj_s), nil, nil, true
+		return tonumber(maj_s) --[[:! integer]], nil, nil, true
 	end
 	if s:match("^[xX%*]$") then
 		return nil, nil, nil, true
@@ -283,17 +321,17 @@ local function parse_partial(s)
 	-- Full version
 	maj_s, min_s, pat_s = s:match("^(%d+)%.(%d+)%.(%d+)$")
 	if maj_s then
-		return tonumber(maj_s), tonumber(min_s), tonumber(pat_s), false
+		return tonumber(maj_s) --[[:! integer]], tonumber(min_s) --[[:! integer]], tonumber(pat_s) --[[:! integer]], false
 	end
 	-- Two-part
 	maj_s, min_s = s:match("^(%d+)%.(%d+)$")
 	if maj_s then
-		return tonumber(maj_s), tonumber(min_s), nil, false
+		return tonumber(maj_s) --[[:! integer]], tonumber(min_s) --[[:! integer]], nil, false
 	end
 	-- One-part
 	maj_s = s:match("^(%d+)$")
 	if maj_s then
-		return tonumber(maj_s), nil, nil, false
+		return tonumber(maj_s) --[[:! integer]], nil, nil, false
 	end
 	return nil, nil, nil, false
 end
@@ -301,37 +339,37 @@ end
 -- Parse a single constraint token into a list of {op, version} bounds.
 -- Returns list of {op, version} or nil, err.
 local function parse_single_constraint(s)
-	s = s:match("^%s*(.-)%s*$")
-	if s == "" or s == "*" or s == "x" or s == "X" then
+	local st = s:match("^%s*(.-)%s*$") or s
+	if st == "" or st == "*" or st == "x" or st == "X" then
 		return {{ op = "*" }}
 	end
 
 	-- Caret range: ^M.m.p
-	local rest = s:match("^%^(.+)$")
+	local rest = st:match("^%^(.+)$")
 	if rest then
 		local maj, min, pat = parse_partial(rest)
-		if maj == nil then return nil, "invalid caret constraint: " .. s end
-		min = min or 0
-		pat = pat or 0
-		local lower = ver(maj, min, pat)
+		if maj == nil then return nil, "invalid caret constraint: " .. st end
+		local imin = min or 0
+		local ipat = pat or 0
+		local lower = ver(maj, imin, ipat)
 		local upper
 		if maj ~= 0 then
 			upper = ver(maj + 1, 0, 0)
-		elseif min ~= 0 then
-			upper = ver(0, min + 1, 0)
+		elseif imin ~= 0 then
+			upper = ver(0, imin + 1, 0)
 		else
-			upper = ver(0, 0, pat + 1)
+			upper = ver(0, 0, ipat + 1)
 		end
 		return {{ op = ">=", version = lower }, { op = "<", version = upper }}
 	end
 
 	-- Tilde range: ~M.m.p
-	rest = s:match("^~(.+)$")
+	rest = st:match("^~(.+)$")
 	if rest then
 		local maj, min, pat = parse_partial(rest)
-		if maj == nil then return nil, "invalid tilde constraint: " .. s end
+		if maj == nil then return nil, "invalid tilde constraint: " .. st end
 		local lower, upper
-		if pat ~= nil then
+		if pat ~= nil and min ~= nil then
 			lower = ver(maj, min, pat)
 			upper = ver(maj, min + 1, 0)
 		elseif min ~= nil then
@@ -345,21 +383,25 @@ local function parse_single_constraint(s)
 	end
 
 	-- Wildcard ranges: 1.2.x, 1.x, 1.x.x, etc.
-	local maj, min, pat, has_wildcard = parse_partial(s)
+	local maj, min, pat, has_wildcard = parse_partial(st)
 	if has_wildcard then
 		if maj == nil then
 			return {{ op = "*" }}
 		elseif min == nil then
-			return {{ op = ">=", version = ver(maj, 0, 0) }, { op = "<", version = ver(maj + 1, 0, 0) }}
+			local imaj = maj --[[:! integer]]
+			return {{ op = ">=", version = ver(imaj, 0, 0) }, { op = "<", version = ver(imaj + 1, 0, 0) }}
 		else
-			return {{ op = ">=", version = ver(maj, min, 0) }, { op = "<", version = ver(maj, min + 1, 0) }}
+			local imaj = maj --[[:! integer]]
+			local imin = min --[[:! integer]]
+			return {{ op = ">=", version = ver(imaj, imin, 0) }, { op = "<", version = ver(imaj, imin + 1, 0) }}
 		end
 	end
 
 	-- Comparison operators: >=, <=, >, <, =
 	for _, op in ipairs({ ">=", "<=", ">", "<", "=" }) do
-		local pat_str = "^" .. op:gsub("[<>=]", function(c) return "%" .. c end) .. "(.+)$"
-		rest = s:match(pat_str)
+		local escaped = (op:gsub("[<>=]", function(c) return "%" .. c end))
+		local pat_str = "^" .. escaped .. "(.+)$"
+		rest = st:match(pat_str)
 		if rest then
 			local v, err = M.parse(rest)
 			if not v then return nil, err end
@@ -368,8 +410,8 @@ local function parse_single_constraint(s)
 	end
 
 	-- Bare version = exact match
-	local v, err = M.parse(s)
-	if not v then return nil, "invalid constraint: " .. s .. ": " .. (err or "") end
+	local v, err = M.parse(st)
+	if not v then return nil, "invalid constraint: " .. st .. ": " .. (err or "") end
 	return {{ op = "=", version = v }}
 end
 

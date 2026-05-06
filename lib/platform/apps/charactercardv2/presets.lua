@@ -119,7 +119,7 @@ local DEFAULT_PROMPTS = {
 	},
 }
 
---: () -> { connections: table[], generations: table[], prompts: table[] }
+--: () -> { connections: { ... }[], generations: { ... }[], prompts: { ... }[] }
 function M.get_defaults()
 	-- Deep copy defaults so callers can't mutate them.
 	local function copy_list(src)
@@ -150,7 +150,7 @@ end
 
 --- Load all presets for all types.
 --- If a type has no stored presets, returns the defaults.
---: (table) -> { connections: table[], generations: table[], prompts: table[], active: { connection: (string | nil), generation: (string | nil), prompt: (string | nil) } }
+--: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }) -> { connections: { ... }[], generations: { ... }[], prompts: { ... }[], active: { connection: (string | nil), generation: (string | nil), prompt: (string | nil) } }
 function M.load_all(kv)
 	local result = {}
 	for ptype in pairs(VALID_TYPES) do
@@ -170,7 +170,7 @@ function M.load_all(kv)
 end
 
 --- Save or update a preset. If a preset with the same name exists, it is replaced.
---: (table, string, string, table) -> (true | nil, string)
+--: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string, string, { name: string, ... }) -> (true | nil, string)
 function M.save(kv, ptype, name, preset)
 	local ok, err = validate_type(ptype)
 	if not ok then return nil, err end
@@ -202,7 +202,7 @@ function M.save(kv, ptype, name, preset)
 end
 
 --- Delete a preset by name.
---: (table, string, string) -> (true | nil, string)
+--: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string, string) -> (true | nil, string)
 function M.delete(kv, ptype, name)
 	local ok, err = validate_type(ptype)
 	if not ok then return nil, err end
@@ -235,7 +235,7 @@ function M.delete(kv, ptype, name)
 end
 
 --- Get the active preset for a type.
---: (table, string) -> table | nil
+--: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string) -> { name: string, ... } | nil
 function M.get_active(kv, ptype)
 	local ok, err = validate_type(ptype)
 	if not ok then return nil end
@@ -259,7 +259,7 @@ function M.get_active(kv, ptype)
 end
 
 --- Set the active preset by name.
---: (table, string, string) -> (true | nil, string)
+--: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string, string) -> (true | nil, string)
 function M.set_active(kv, ptype, name)
 	local ok, err = validate_type(ptype)
 	if not ok then return nil, err end
@@ -290,13 +290,13 @@ end
 -- ── Import / Export ────────────────────────────────────────────────────────
 
 --- Export a preset to a JSON string.
---: (table) -> string
+--: ({ name: string, ... }) -> string
 function M.export_preset(preset)
 	return json.encode(preset)
 end
 
 --- Import a preset from a JSON string.
---: (string) -> (table | nil, string)
+--: (string) -> ({ name: string, ... } | nil, string)
 function M.import_preset(json_string)
 	if not json_string or type(json_string) ~= "string" or #json_string == 0 then
 		return nil, "empty input"

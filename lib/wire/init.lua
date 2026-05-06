@@ -9,6 +9,10 @@ end
 local M = {}
 M._tier = "ffi"
 
+--:: Writer = { _buf: { [integer]: string }, _len: integer, uint8: (Writer, integer) -> nil, uint16_le: (Writer, integer) -> nil, uint16_be: (Writer, integer) -> nil, uint32_le: (Writer, integer) -> nil, uint32_be: (Writer, integer) -> nil, varint: (Writer, integer) -> nil, bytes: (Writer, string) -> nil, build: (Writer) -> string, ... }
+--:: Reader = { _data: string, _pos: integer, peek: (Reader, integer) -> (string | nil, string | nil), bytes: (Reader, integer) -> (string | nil, string | nil), uint8: (Reader) -> (integer | nil, string | nil), uint16_le: (Reader) -> (integer | nil, string | nil), uint16_be: (Reader) -> (integer | nil, string | nil), uint32_le: (Reader) -> (integer | nil, string | nil), uint32_be: (Reader) -> (integer | nil, string | nil), varint: (Reader) -> (integer | nil, string | nil), remaining: (Reader) -> integer, pos: (Reader) -> integer, ... }
+--:: Unframer = { _buf: string, _opts: { prefix: string | nil, ... }, ... }
+
 local byte   = string.byte
 local char   = string.char
 local sub    = string.sub
@@ -33,8 +37,9 @@ local _f64u = ffi.new("wire_f64u")
 local Writer = {}
 Writer.__index = Writer
 
+--: () -> Writer
 function M.writer()
-	return setmetatable({ _buf = {}, _len = 0 }, Writer)
+	return setmetatable({ _buf = {}, _len = 0 }, Writer) --[[:! Writer]]
 end
 
 function Writer:len()
@@ -50,12 +55,16 @@ function Writer:build()
 	return table.concat(self._buf)
 end
 
+--: (Writer, integer) -> nil
 local function w_byte(self, b)
+	local self = self --[[:! Writer]]
 	self._buf[#self._buf + 1] = char(b)
 	self._len = self._len + 1
 end
 
+--: (Writer, string) -> nil
 local function w_raw(self, s)
+	local self = self --[[:! Writer]]
 	self._buf[#self._buf + 1] = s
 	self._len = self._len + #s
 end
@@ -162,6 +171,7 @@ function Writer:bytes(s)
 	w_raw(self, s)
 end
 
+--: (self: Writer, string, integer) -> nil
 function Writer:bytes_n(s, n)
 	if #s >= n then
 		w_raw(self, sub(s, 1, n))
@@ -198,183 +208,232 @@ end
 local Reader = {}
 Reader.__index = Reader
 
+--: (string) -> Reader
 function M.reader(data)
-	return setmetatable({ _data = data, _pos = 1 }, Reader)
+	return setmetatable({ _data = data, _pos = 1 }, Reader) --[[:! Reader]]
 end
 
 function Reader:pos()
-	return self._pos
+	local rd = self --[[:! Reader]]
+	return rd._pos
 end
 
 function Reader:remaining()
-	return #self._data - self._pos + 1
+	local rd = self --[[:! Reader]]
+	return #rd._data - rd._pos + 1
 end
 
 function Reader:at_end()
-	return self._pos > #self._data
+	local rd = self --[[:! Reader]]
+	return rd._pos > #rd._data
 end
 
 function Reader:seek(pos)
-	self._pos = pos
+	local rd = self --[[:! Reader]]
+	rd._pos = pos
 end
 
+--: (self: Reader, integer) -> (string | nil, string | nil)
 function Reader:peek(n)
-	local e = self._pos + n - 1
-	if e > #self._data then
+	local rd = self --[[:! Reader]]
+	local e = rd._pos + n - 1
+	if e > #rd._data then
 		return nil, "unexpected end of data"
 	end
-	return sub(self._data, self._pos, e)
+	return sub(rd._data, rd._pos, e)
 end
 
+--: (self: Reader, integer) -> (boolean | nil, string | nil)
 function Reader:skip(n)
-	if self._pos + n - 1 > #self._data then
+	local rd = self --[[:! Reader]]
+	if rd._pos + n - 1 > #rd._data then
 		return nil, "unexpected end of data"
 	end
-	self._pos = self._pos + n
+	rd._pos = rd._pos + n
 	return true
 end
 
 function Reader:bytes(n)
-	local s, err = self:peek(n)
+	local rd = self --[[:! Reader]]
+	local s, err = rd:peek(n)
 	if not s then return nil, err end
-	self._pos = self._pos + n
+	s = s --[[:! string]]
+	rd._pos = rd._pos + n
 	return s
 end
 
 function Reader:uint8()
-	if self._pos > #self._data then
+	local rd = self --[[:! Reader]]
+	if rd._pos > #rd._data then
 		return nil, "unexpected end of data"
 	end
-	local b = byte(self._data, self._pos)
-	self._pos = self._pos + 1
+	local b = byte(rd._data, rd._pos)
+	rd._pos = rd._pos + 1
 	return b
 end
 
 function Reader:uint16_le()
-	local s, err = self:bytes(2)
+	local rd = self --[[:! Reader]]
+	local s, err = rd:bytes(2)
 	if not s then return nil, err end
-	local b0, b1 = byte(s, 1, 2)
+	s = s --[[:! string]]
+	local b0 = byte(s, 1) or 0
+	local b1 = byte(s, 2) or 0
 	return bor(b0, lshift(b1, 8))
 end
 
 function Reader:uint16_be()
-	local s, err = self:bytes(2)
+	local rd = self --[[:! Reader]]
+	local s, err = rd:bytes(2)
 	if not s then return nil, err end
-	local b0, b1 = byte(s, 1, 2)
+	s = s --[[:! string]]
+	local b0 = byte(s, 1) or 0
+	local b1 = byte(s, 2) or 0
 	return bor(lshift(b0, 8), b1)
 end
 
 function Reader:uint32_le()
-	local s, err = self:bytes(4)
+	local rd = self --[[:! Reader]]
+	local s, err = rd:bytes(4)
 	if not s then return nil, err end
-	local b0, b1, b2, b3 = byte(s, 1, 4)
+	s = s --[[:! string]]
+	local b0 = byte(s, 1) or 0
+	local b1 = byte(s, 2) or 0
+	local b2 = byte(s, 3) or 0
+	local b3 = byte(s, 4) or 0
 	-- use bit.bor to avoid sign issues; cast to number
 	local v = bor(bor(b0, lshift(b1, 8)), bor(lshift(b2, 16), lshift(b3, 24)))
 	-- bor on LuaJIT returns signed int32; convert to unsigned lua number
-	if v < 0 then v = v + 4294967296 end
+	if v < 0 then v = (v + 4294967296) --[[:! integer]] end
 	return v
 end
 
 function Reader:uint32_be()
-	local s, err = self:bytes(4)
+	local rd = self --[[:! Reader]]
+	local s, err = rd:bytes(4)
 	if not s then return nil, err end
-	local b0, b1, b2, b3 = byte(s, 1, 4)
+	s = s --[[:! string]]
+	local b0 = byte(s, 1) or 0
+	local b1 = byte(s, 2) or 0
+	local b2 = byte(s, 3) or 0
+	local b3 = byte(s, 4) or 0
 	local v = bor(bor(lshift(b0, 24), lshift(b1, 16)), bor(lshift(b2, 8), b3))
-	if v < 0 then v = v + 4294967296 end
+	if v < 0 then v = (v + 4294967296) --[[:! integer]] end
 	return v
 end
 
 function Reader:int8()
-	local v, err = self:uint8()
+	local rd = self --[[:! Reader]]
+	local v, err = rd:uint8()
 	if not v then return nil, err end
+	v = v --[[: any]]; v = v --[[:! integer]]
 	return (v >= 0x80) and (v - 0x100) or v
 end
 
 function Reader:int16_le()
-	local v, err = self:uint16_le()
+	local rd = self --[[:! Reader]]
+	local v, err = rd:uint16_le()
 	if not v then return nil, err end
+	v = v --[[: any]]; v = v --[[:! integer]]
 	return (v >= 0x8000) and (v - 0x10000) or v
 end
 
 function Reader:int16_be()
-	local v, err = self:uint16_be()
+	local rd = self --[[:! Reader]]
+	local v, err = rd:uint16_be()
 	if not v then return nil, err end
+	v = v --[[: any]]; v = v --[[:! integer]]
 	return (v >= 0x8000) and (v - 0x10000) or v
 end
 
 function Reader:int32_le()
-	local v, err = self:uint32_le()
+	local rd = self --[[:! Reader]]
+	local v, err = rd:uint32_le()
 	if not v then return nil, err end
+	v = v --[[: any]]; v = v --[[:! integer]]
 	-- v is unsigned 0..4294967295; sign-extend
 	if v >= 0x80000000 then return v - 4294967296 end
 	return v
 end
 
 function Reader:int32_be()
-	local v, err = self:uint32_be()
+	local rd = self --[[:! Reader]]
+	local v, err = rd:uint32_be()
 	if not v then return nil, err end
+	v = v --[[: any]]; v = v --[[:! integer]]
 	if v >= 0x80000000 then return v - 4294967296 end
 	return v
 end
 
 function Reader:float_le()
-	local s, err = self:bytes(4)
+	local rd = self --[[:! Reader]]
+	local s, err = rd:bytes(4)
 	if not s then return nil, err end
-	_f32u.b[0] = byte(s,1); _f32u.b[1] = byte(s,2)
-	_f32u.b[2] = byte(s,3); _f32u.b[3] = byte(s,4)
+	s = s --[[:! string]]
+	_f32u.b[0] = byte(s,1) or 0; _f32u.b[1] = byte(s,2) or 0
+	_f32u.b[2] = byte(s,3) or 0; _f32u.b[3] = byte(s,4) or 0
 	return _f32u.f
 end
 
 function Reader:float_be()
-	local s, err = self:bytes(4)
+	local rd = self --[[:! Reader]]
+	local s, err = rd:bytes(4)
 	if not s then return nil, err end
-	_f32u.b[3] = byte(s,1); _f32u.b[2] = byte(s,2)
-	_f32u.b[1] = byte(s,3); _f32u.b[0] = byte(s,4)
+	s = s --[[:! string]]
+	_f32u.b[3] = byte(s,1) or 0; _f32u.b[2] = byte(s,2) or 0
+	_f32u.b[1] = byte(s,3) or 0; _f32u.b[0] = byte(s,4) or 0
 	return _f32u.f
 end
 
 function Reader:double_le()
-	local s, err = self:bytes(8)
+	local rd = self --[[:! Reader]]
+	local s, err = rd:bytes(8)
 	if not s then return nil, err end
-	_f64u.b[0] = byte(s,1); _f64u.b[1] = byte(s,2)
-	_f64u.b[2] = byte(s,3); _f64u.b[3] = byte(s,4)
-	_f64u.b[4] = byte(s,5); _f64u.b[5] = byte(s,6)
-	_f64u.b[6] = byte(s,7); _f64u.b[7] = byte(s,8)
+	s = s --[[:! string]]
+	_f64u.b[0] = byte(s,1) or 0; _f64u.b[1] = byte(s,2) or 0
+	_f64u.b[2] = byte(s,3) or 0; _f64u.b[3] = byte(s,4) or 0
+	_f64u.b[4] = byte(s,5) or 0; _f64u.b[5] = byte(s,6) or 0
+	_f64u.b[6] = byte(s,7) or 0; _f64u.b[7] = byte(s,8) or 0
 	return _f64u.d
 end
 
 function Reader:double_be()
-	local s, err = self:bytes(8)
+	local rd = self --[[:! Reader]]
+	local s, err = rd:bytes(8)
 	if not s then return nil, err end
-	_f64u.b[7] = byte(s,1); _f64u.b[6] = byte(s,2)
-	_f64u.b[5] = byte(s,3); _f64u.b[4] = byte(s,4)
-	_f64u.b[3] = byte(s,5); _f64u.b[2] = byte(s,6)
-	_f64u.b[1] = byte(s,7); _f64u.b[0] = byte(s,8)
+	s = s --[[:! string]]
+	_f64u.b[7] = byte(s,1) or 0; _f64u.b[6] = byte(s,2) or 0
+	_f64u.b[5] = byte(s,3) or 0; _f64u.b[4] = byte(s,4) or 0
+	_f64u.b[3] = byte(s,5) or 0; _f64u.b[2] = byte(s,6) or 0
+	_f64u.b[1] = byte(s,7) or 0; _f64u.b[0] = byte(s,8) or 0
 	return _f64u.d
 end
 
 function Reader:varint()
 	-- LEB128 unsigned
+	local rd = self --[[:! Reader]]
 	local result = 0
 	local shift  = 0
 	while true do
-		if self._pos > #self._data then
+		if rd._pos > #rd._data then
 			return nil, "unexpected end of data"
 		end
-		local b = byte(self._data, self._pos)
-		self._pos = self._pos + 1
+		local b = byte(rd._data, rd._pos) or 0
+		rd._pos = rd._pos + 1
 		result = bor(result, lshift(band(b, 0x7f), shift))
 		if band(b, 0x80) == 0 then break end
 		shift = shift + 7
 	end
 	-- result may be negative if bit 31 set; convert to unsigned
-	if result < 0 then result = result + 4294967296 end
+	if result < 0 then result = (result + 4294967296) --[[:! integer]] end
 	return result
 end
 
 function Reader:varint_signed()
-	local zz, err = self:varint()
+	local rd = self --[[:! Reader]]
+	local zz, err = rd:varint()
 	if not zz then return nil, err end
+	zz = zz --[[: any]]; zz = zz --[[:! integer]]
 	-- zigzag decode
 	if band(zz, 1) == 0 then
 		return rshift(zz, 1)
@@ -384,27 +443,31 @@ function Reader:varint_signed()
 end
 
 function Reader:str8()
-	local n, err = self:uint8()
+	local rd = self --[[:! Reader]]
+	local n, err = rd:uint8()
 	if not n then return nil, err end
-	return self:bytes(n)
+	return rd:bytes(n --[[:! integer]])
 end
 
 function Reader:str16()
-	local n, err = self:uint16_le()
+	local rd = self --[[:! Reader]]
+	local n, err = rd:uint16_le()
 	if not n then return nil, err end
-	return self:bytes(n)
+	return rd:bytes(n --[[:! integer]])
 end
 
 function Reader:str32()
-	local n, err = self:uint32_le()
+	local rd = self --[[:! Reader]]
+	local n, err = rd:uint32_le()
 	if not n then return nil, err end
-	return self:bytes(n)
+	return rd:bytes(n --[[:! integer]])
 end
 
 function Reader:str_varint()
-	local n, err = self:varint()
+	local rd = self --[[:! Reader]]
+	local n, err = rd:varint()
 	if not n then return nil, err end
-	return self:bytes(n)
+	return rd:bytes(n --[[:! integer]])
 end
 
 -- ---------------------------------------------------------------------------
@@ -454,8 +517,9 @@ function M.unframe(data, opts)
 		return nil, "unknown prefix type: " .. tostring(prefix)
 	end
 	if not n then return nil, err end
-	local payload, perr = r:bytes(n)
+	local payload, perr = r:bytes(n --[[:! integer]])
 	if not payload then return nil, perr end
+	payload = payload --[[:! string]]
 	local remaining = sub(data, r:pos())
 	return payload, remaining
 end
@@ -472,14 +536,16 @@ function M.unframer(opts)
 end
 
 function Unframer:feed(chunk)
-	self._buf = self._buf .. chunk
+	local uf = self --[[:! Unframer]]
+	uf._buf = uf._buf .. chunk
 end
 
 -- Returns next complete message payload, or nil if not enough data yet.
 -- On hard error returns nil, errmsg.
 function Unframer:next()
-	local prefix = self._opts.prefix or "u32_be"
-	local r = M.reader(self._buf)
+	local uf = self --[[:! Unframer]]
+	local prefix = uf._opts.prefix or "u32_be"
+	local r = M.reader(uf._buf)
 
 	-- Try to read length prefix
 	local n, err
@@ -502,13 +568,15 @@ function Unframer:next()
 		return nil
 	end
 
+	local msglen = n --[[:! integer]]
 	-- Check if full payload is available
-	if r:remaining() < n then
+	if r:remaining() < msglen then
 		return nil
 	end
 
-	local payload = sub(self._buf, r:pos(), r:pos() + n - 1)
-	self._buf = sub(self._buf, r:pos() + n)
+	local rpos = r:pos()
+	local payload = sub(uf._buf, rpos, rpos + msglen - 1)
+	uf._buf = sub(uf._buf, rpos + msglen)
 	return payload
 end
 

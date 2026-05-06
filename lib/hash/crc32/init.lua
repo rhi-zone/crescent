@@ -55,7 +55,7 @@ function M.crc32(data, seed)
 	end
 	crc = bxor(crc, 0xFFFFFFFF)
 	-- Ensure unsigned (LuaJIT bit ops return signed int32)
-	if crc < 0 then crc = crc + 4294967296 end
+	if crc < 0 then crc = (crc + 4294967296) --[[:! integer]] end
 	return crc
 end
 
@@ -81,7 +81,7 @@ end
 
 function H:digest()
 	local crc = bxor(self._crc, 0xFFFFFFFF)
-	if crc < 0 then crc = crc + 4294967296 end
+	if crc < 0 then crc = (crc + 4294967296) --[[:! integer]] end
 	return crc
 end
 

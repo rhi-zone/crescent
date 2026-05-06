@@ -275,7 +275,7 @@ end
 
 -- ── Training ────────────────────────────────────────────────────────────────
 
---: (X: number[][], y: number[], opts: (table | nil)) -> Model
+--: (X: number[][], y: number[], opts: ({ n_estimators: integer | nil, max_depth: integer | nil, learning_rate: number | nil, min_samples_split: integer | nil, min_samples_leaf: integer | nil, subsample: number | nil, colsample: number | nil, lambda: number | nil, gamma: number | nil, objective: string | nil, seed: integer | nil, ... } | nil)) -> Model
 function M.train(X, y, opts)
   opts = opts or {}
   local n_estimators = opts.n_estimators or 100

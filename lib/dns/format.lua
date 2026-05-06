@@ -8,6 +8,18 @@ local lshift = bit.lshift; local rshift = bit.rshift; local band = bit.band
 local bor = bit.bor; local char = string.char; local byte = string.byte
 local sub = string.sub; local concat = table.concat
 
+-- Helper: read N bytes from s at position i, returning integers (0 if out of bounds)
+--: (string, integer) -> (integer, integer)
+local function read2(s, i)
+	local b1, b2 = byte(s, i, i+1)
+	return b1 or 0, b2 or 0
+end
+--: (string, integer) -> (integer, integer, integer, integer)
+local function read4(s, i)
+	local b1, b2, b3, b4 = byte(s, i, i+3)
+	return b1 or 0, b2 or 0, b3 or 0, b4 or 0
+end
+
 -- LINT: disallow duplicate values
 
 -- RFC 1035 §3.2.2 — TYPE values
@@ -116,24 +128,26 @@ for k, v in pairs(mod.type) do mod.type_name[v] = k end
 
 -- RFC 1035 §4.1.4 — Name compression
 -- RFC 1035 §3.1 — Label format
-mod.string_to_domain_name = function (s, i) --[[@param s string]] --[[@param i integer]]
+--: (string, integer | nil) -> ({ [integer]: string }, integer)
+mod.string_to_domain_name = function (s, i)
 	i = i or 1
-	local length = byte(s, i)
-	local parts = {} --[[@type string[] ]]
+	local length = byte(s, i) or 0 --: integer
+	local parts = {} --: { [integer]: string }
 	while length > 0 and length <= 0x3f do
 		parts[#parts+1] = sub(s, i + 1, i + length)
 		i = i + length + 1
-		length = byte(s, i)
+		length = byte(s, i) or 0
 	end
 	i = i + (length > 0x3f and 2 or 1)
 	local l = i - 2
 	while length > 0x3f do -- pointer
-		l = bor(lshift(band(length, 0x3f), 8), byte(s, l + 1)) + 1
-		length = byte(s, l)
+		l = bor(lshift(band(length, 0x3f), 8), byte(s, l + 1) or 0) + 1
+		length = byte(s, l) or 0
 		while length > 0 and length <= 0x3f do
-			parts[#parts+1] = sub(s, l + 1, l + length)
+			local lbl = sub(s, l + 1, l + length)
+			parts[#parts+1] = lbl
 			l = l + length + 1
-			length = byte(s, l)
+			length = byte(s, l) or 0
 		end
 	end
 	parts[#parts+1] = ""
@@ -154,15 +168,16 @@ mod.decoders = {
 	-- RFC 1035 §3.3.1
 	[mod.type.CNAME] = mod.string_to_domain_name,
 	-- RFC 1035 §3.3.2
-	[mod.type.HINFO] = function (s, i) --[[@param s string]]
+	--: (string, integer | nil) -> ({ cpu: string, os: string }, integer)
+	[mod.type.HINFO] = function (s, i)
 		i = i or 1
-		local length = s:byte(i)
-		local cpu = s:sub(i + 1, i + length)
+		local length = byte(s, i) or 0 --: integer
+		local cpu = sub(s, i + 1, i + length)
 		i = i + length + 1
-		length = s:byte(i)
-		local os = s:sub(i + 1, i + length)
+		length = byte(s, i) or 0
+		local os_str = sub(s, i + 1, i + length)
 		i = i + length + 1
-		return { cpu = cpu, os = os }, i
+		return { cpu = cpu, os = os_str }, i
 	end,
 	-- RFC 1035 §3.3.3 --[[@diagnostic disable-next-line: deprecated]]
 	[mod.type.MB] = mod.string_to_domain_name,
@@ -183,8 +198,9 @@ mod.decoders = {
 	[mod.type.MR] = mod.string_to_domain_name,
 	-- RFC 1035 §3.3.9
 	[mod.type.MX] = function (s, i)
+		s = s --[[:! string]]
 		i = i or 1
-		local b1, b2 = s:byte(i, i + 1)
+		local b1, b2 = read2(s, i)
 		local preference = bor(lshift(b1, 8), b2)
 		local exchange
 		exchange, i = mod.string_to_domain_name(s, i + 2)
@@ -197,73 +213,85 @@ mod.decoders = {
 	-- RFC 1035 §3.3.12
 	[mod.type.PTR] = mod.string_to_domain_name,
 	-- RFC 1035 §3.3.13
-	[mod.type.SOA] = function (s, i) --[[@param s string]] --[[@param i integer]]
+	[mod.type.SOA] = function (s, i)
+		s = s --[[:! string]]
 		i = i or 1
 		local mname, rname
 		mname, i = mod.string_to_domain_name(s, i)
 		rname, i = mod.string_to_domain_name(s, i)
-		local b1, b2, b3, b4 = s:byte(i, i + 3)
+		local b1, b2, b3, b4 = read4(s, i)
 		local serial = bor(lshift(b1, 24), lshift(b2, 16), lshift(b3, 8), b4)
-		b1, b2, b3, b4 = s:byte(i + 4, i + 7)
+		b1, b2, b3, b4 = read4(s, i + 4)
 		local refresh = bor(lshift(b1, 24), lshift(b2, 16), lshift(b3, 8), b4)
-		b1, b2, b3, b4 = s:byte(i + 8, i + 11)
+		b1, b2, b3, b4 = read4(s, i + 8)
 		local retry = bor(lshift(b1, 24), lshift(b2, 16), lshift(b3, 8), b4)
-		b1, b2, b3, b4 = s:byte(i + 12, i + 15)
+		b1, b2, b3, b4 = read4(s, i + 12)
 		local expire = bor(lshift(b1, 24), lshift(b2, 16), lshift(b3, 8), b4)
-		b1, b2, b3, b4 = s:byte(i + 16, i + 19)
+		b1, b2, b3, b4 = read4(s, i + 16)
 		local minimum = bor(lshift(b1, 24), lshift(b2, 16), lshift(b3, 8), b4)
 		return { mname = mname, rname = rname, serial = serial, refresh = refresh, retry = retry, expire = expire, minimum = minimum }, i + 20
 	end,
 	-- RFC 1035 §3.3.14
-	[mod.type.TXT] = function (s, i, length) --[[@param s string]]
-		i = i or 1
-		local end_ = i + length - 1
+	[mod.type.TXT] = function (s, i, length)
+		s = s --[[:! string]]
+		i = (i or 1) --[[:! integer]]
+		local end_ = i + (length --[[:! integer]]) - 1
 		local ret = {}
 		while i <= end_ do
-			local length2 = s:byte(i)
-			ret[#ret+1] = s:sub(i + 1, i + length2)
+			local length2 = byte(s, i) or 0
+			local txt = sub(s, i + 1, i + length2)
+			ret[#ret+1] = txt
 			i = i + length2 + 1
 		end
 		return ret, i
 	end,
 	-- RFC 1035 §3.4.1
-	[mod.type.A] = function (s, i) i = i or 1; return { s:byte(i, i + 3) }, i + 4 end, --[[@param s string]]
+	[mod.type.A] = function (s, i)
+		s = s --[[:! string]]; i = (i or 1) --[[:! integer]]
+		return { byte(s, i, i + 3) }, i + 4
+	end,
 	-- RFC 1035 §3.4.2 --[[@diagnostic disable-next-line: deprecated]]
-	[mod.type.WKS] = function (s, i, length) --[[@param s string]] --[[@param length integer]]
-		i = i or 1; return { address = { s:byte(i, i + 3) }, protocol = s:byte(i + 4), bitmap = s:sub(i + 5, i + length - 1) }, i + length
+	[mod.type.WKS] = function (s, i, length)
+		s = s --[[:! string]]; i = (i or 1) --[[:! integer]]
+		return { address = { byte(s, i, i + 3) }, protocol = byte(s, i + 4) or 0, bitmap = sub(s, i + 5, i + (length --[[:! integer]]) - 1) }, i + (length --[[:! integer]])
 	end,
 	-- RFC 3596 §2.2 — AAAA RDATA
-	[mod.type.AAAA] = function (s, i) i = i or 1; return { s:byte(i, i + 15) }, i + 16 end, --[[@param s string]]
+	[mod.type.AAAA] = function (s, i)
+		s = s --[[:! string]]; i = (i or 1) --[[:! integer]]
+		return { byte(s, i, i + 15) }, i + 16
+	end,
 	-- RFC 4034 §5
-	[mod.type.DS] = function (s, i, length) --[[@param s string]]
+	[mod.type.DS] = function (s, i, length)
+		s = s --[[:! string]]
 		i = i or 1
-		local b1, b2 = s:byte(i, i + 1)
+		local b1, b2 = read2(s, i)
 		local key_tag = bor(lshift(b1, 8), b2)
-		local algorithm = s:byte(i + 2)
-		local digest_type = s:byte(i + 3)
-		local digest = s:sub(i + 4, i + length - 1)
-		return { key_tag = key_tag, algorithm = algorithm, digest_type = digest_type, digest = digest }, i + length
+		local algorithm = byte(s, i + 2) or 0
+		local digest_type = byte(s, i + 3) or 0
+		local digest = sub(s, i + 4, i + (length --[[:! integer]]) - 1)
+		return { key_tag = key_tag, algorithm = algorithm, digest_type = digest_type, digest = digest }, i + (length --[[:! integer]])
 	end,
 	-- RFC 4034 §3
-	[mod.type.RRSIG] = function (s, i, length) --[[@param s string]]
-		local end_ = i + length
+	[mod.type.RRSIG] = function (s, i, length)
+		s = s --[[:! string]]
 		i = i or 1
-		local b1, b2 = s:byte(i, i + 1)
+		local end_ = i + (length --[[:! integer]])
+		local b1, b2 = read2(s, i)
 		local type_covered = bor(lshift(b1, 8), b2)
-		local algorithm = s:byte(i + 2)
-		local labels = s:byte(i + 3)
+		local algorithm = byte(s, i + 2) or 0
+		local labels = byte(s, i + 3) or 0
 		local b3, b4
-		b1, b2, b3, b4 = s:byte(i + 4, i + 7)
+		b1, b2, b3, b4 = read4(s, i + 4)
 		local original_ttl = bor(lshift(b1, 24), lshift(b2, 16), lshift(b3, 8), b4)
-		b1, b2, b3, b4 = s:byte(i + 8, i + 11)
+		b1, b2, b3, b4 = read4(s, i + 8)
 		local signature_expiration = bor(lshift(b1, 24), lshift(b2, 16), lshift(b3, 8), b4)
-		b1, b2, b3, b4 = s:byte(i + 12, i + 15)
+		b1, b2, b3, b4 = read4(s, i + 12)
 		local signature_inception = bor(lshift(b1, 24), lshift(b2, 16), lshift(b3, 8), b4)
-		b1, b2 = s:byte(i + 16, i + 17)
+		b1, b2 = read2(s, i + 16)
 		local key_tag = bor(lshift(b1, 8), b2)
 		local signers_name
 		signers_name, i = mod.string_to_domain_name(s, i + 18)
-		local signature = s:sub(i, end_ - 1)
+		local signature = sub(s, i, end_ - 1)
 		return {
 			type_covered = type_covered, algorithm = algorithm, labels = labels, original_ttl = original_ttl,
 			signature_expiration = signature_expiration, signature_inception = signature_inception, key_tag = key_tag,
@@ -271,20 +299,21 @@ mod.decoders = {
 		}, end_
 	end,
 	-- RFC 4034 §4
-	[mod.type.NSEC] = function (s, i, length) --[[@param s string]]
-		i = i or 1
-		local end_ = i + length
+	[mod.type.NSEC] = function (s, i, length)
+		s = s --[[:! string]]
+		i = (i or 1) --[[:! integer]]
+		local end_ = i + (length --[[:! integer]])
 		local next_domain_name
 		next_domain_name, i = mod.string_to_domain_name(s, i)
 		local types = {}
 		while i < end_ do
-			local upper_bits = lshift(s:byte(i), 8)
-			local length2 = s:byte(i + 1)
+			local upper_bits = lshift(byte(s, i) or 0, 8)
+			local length2 = byte(s, i + 1) or 0
 			if length2 == 0 then break end
 			i = i + 2
 			for j = 0, length2 - 1 do
 				local type_start = bor(upper_bits, lshift(j, 3))
-				local n = s:byte(i + j)
+				local n = byte(s, i + j) or 0
 				if n ~= 0 then
 					if band(n, 0x80) ~= 0 then types[#types+1] = type_start + 0 end
 					if band(n, 0x40) ~= 0 then types[#types+1] = type_start + 1 end
@@ -302,15 +331,16 @@ mod.decoders = {
 	end,
 	-- RFC 4034 §2
 	[mod.type.DNSKEY] = function (s, i, length)
+		s = s --[[:! string]]
 		i = i or 1
-		local b1, b2 = s:byte(i, i + 1)
+		local b1, b2 = read2(s, i)
 		local flags = bor(lshift(b1, 8), b2)
 		return {
 			is_zone_key = band(flags, 0x0100) ~= 0, is_secure_entry_point = band(flags, 0x0001) ~= 0,
-			protocol = s:byte(i + 2), --[[for backward compatibility only. MUST be 3.]]
-			algorithm = s:byte(i + 3),
-			public_key = s:sub(i + 4, i + length - 1),
-		}, i + length
+			protocol = byte(s, i + 2) or 0,
+			algorithm = byte(s, i + 3) or 0,
+			public_key = sub(s, i + 4, i + (length --[[:! integer]]) - 1),
+		}, i + (length --[[:! integer]])
 	end,
 }
 
@@ -355,35 +385,40 @@ mod.encoders = {
 	end,
 	-- RFC 1035 §3.4.1
 	[mod.type.A] = function(arr)
-		return char(arr[1], arr[2], arr[3], arr[4])
+		local a = arr --[[:! { [integer]: integer }]]
+		return char(a[1], a[2], a[3], a[4])
 	end,
 	-- RFC 3596 §2.2
 	[mod.type.AAAA] = function(arr)
+		local a = arr --[[:! { [integer]: integer }]]
 		return char(
-			arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7], arr[8],
-			arr[9], arr[10], arr[11], arr[12], arr[13], arr[14], arr[15], arr[16]
+			a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8],
+			a[9], a[10], a[11], a[12], a[13], a[14], a[15], a[16]
 		)
 	end,
 	-- RFC 1035 §3.3.9
 	[mod.type.MX] = function(rec)
-		local parts = mod.domain_name_to_string(rec.exchange)
-		return char(rshift(rec.preference, 8), band(rec.preference, 0xff)) .. parts
+		local r = rec --[[:! { preference: integer, exchange: { [integer]: string } }]]
+		local parts = mod.domain_name_to_string(r.exchange)
+		return char(rshift(r.preference, 8), band(r.preference, 0xff)) .. parts
 	end,
 	-- RFC 1035 §3.3.13
 	[mod.type.SOA] = function(rec)
-		local mname = mod.domain_name_to_string(rec.mname)
-		local rname = mod.domain_name_to_string(rec.rname)
+		local r = rec --[[:! { mname: { [integer]: string }, rname: { [integer]: string }, serial: integer, refresh: integer, retry: integer, expire: integer, minimum: integer }]]
+		local mname = mod.domain_name_to_string(r.mname)
+		local rname = mod.domain_name_to_string(r.rname)
 		return mname .. rname .. char(
-			rshift(rec.serial, 24), band(rshift(rec.serial, 16), 0xff), band(rshift(rec.serial, 8), 0xff), band(rec.serial, 0xff),
-			rshift(rec.refresh, 24), band(rshift(rec.refresh, 16), 0xff), band(rshift(rec.refresh, 8), 0xff), band(rec.refresh, 0xff),
-			rshift(rec.retry, 24), band(rshift(rec.retry, 16), 0xff), band(rshift(rec.retry, 8), 0xff), band(rec.retry, 0xff),
-			rshift(rec.expire, 24), band(rshift(rec.expire, 16), 0xff), band(rshift(rec.expire, 8), 0xff), band(rec.expire, 0xff),
-			rshift(rec.minimum, 24), band(rshift(rec.minimum, 16), 0xff), band(rshift(rec.minimum, 8), 0xff), band(rec.minimum, 0xff)
+			rshift(r.serial, 24), band(rshift(r.serial, 16), 0xff), band(rshift(r.serial, 8), 0xff), band(r.serial, 0xff),
+			rshift(r.refresh, 24), band(rshift(r.refresh, 16), 0xff), band(rshift(r.refresh, 8), 0xff), band(r.refresh, 0xff),
+			rshift(r.retry, 24), band(rshift(r.retry, 16), 0xff), band(rshift(r.retry, 8), 0xff), band(r.retry, 0xff),
+			rshift(r.expire, 24), band(rshift(r.expire, 16), 0xff), band(rshift(r.expire, 8), 0xff), band(r.expire, 0xff),
+			rshift(r.minimum, 24), band(rshift(r.minimum, 16), 0xff), band(rshift(r.minimum, 8), 0xff), band(r.minimum, 0xff)
 		)
 	end,
 	-- RFC 1035 §3.3.2
 	[mod.type.HINFO] = function(rec)
-		return char(#rec.cpu) .. rec.cpu .. char(#rec.os) .. rec.os
+		local r = rec --[[:! { cpu: string, os: string }]]
+		return char(#r.cpu) .. r.cpu .. char(#r.os) .. r.os
 	end,
 }
 
@@ -422,7 +457,10 @@ for k, v in pairs(mod.response_code) do mod.response_code_name[v] = k end
 -- RFC 1035 §4.1.1 — Header
 -- RFC 1035 §4.1.2 — Question
 -- RFC 1035 §4.1.3 — Resource record
---[[@param msg dns_message]]
+--:: DnsQuestion = { name: { [integer]: string }, type: integer, class: integer }
+--:: DnsResource = { name: { [integer]: string }, type: integer, class: integer, ttl: integer, data: string }
+--:: DnsMessage = { id?: integer, questions?: { [integer]: DnsQuestion }, answers?: { [integer]: DnsResource }, nameservers?: { [integer]: DnsResource }, additional?: { [integer]: DnsResource }, opcode?: integer, is_response?: boolean, is_query?: boolean, is_authoritative?: boolean, is_truncated?: boolean, is_recursion_desired?: boolean, is_recursion_available?: boolean, response_code?: integer }
+--: (DnsMessage) -> string
 mod.dns_message_to_string = function (msg)
 	local question_count = #(msg.questions or empty_table)
 	local answer_count = #(msg.answers or empty_table)
@@ -430,21 +468,22 @@ mod.dns_message_to_string = function (msg)
 	local additional_count = #(msg.additional or empty_table)
 	local parts = {}
 	local i = 1
-	local next = char(
-		rshift(msg.id or 0, 8), band(msg.id or 0, 0xff),
-		bor(
-			(msg.is_response or (msg.is_query == false)) and 0x80 or 0,
-			lshift(msg.opcode or mod.opcode.QUERY, 3),
-			msg.is_authoritative and 0x4 or 0,
-			msg.is_truncated and 0x2 or 0,
-			msg.is_recursion_desired and 0x1 or 0
-		),
-		bor(msg.is_recursion_available and 0x80 or 0, msg.response_code or 0),
-		rshift(question_count, 8), band(question_count, 0xff),
-		rshift(answer_count, 8), band(answer_count, 0xff),
-		rshift(nameserver_count, 8), band(nameserver_count, 0xff),
-		rshift(additional_count, 8), band(additional_count, 0xff)
+	local h_id_hi = rshift(msg.id or 0, 8)
+	local h_id_lo = band(msg.id or 0, 0xff)
+	local h_flags1 = bor(
+		(msg.is_response or (msg.is_query == false)) and 0x80 or 0,
+		lshift(msg.opcode or mod.opcode.QUERY, 3),
+		msg.is_authoritative and 0x4 or 0,
+		msg.is_truncated and 0x2 or 0,
+		msg.is_recursion_desired and 0x1 or 0
 	)
+	local h_flags2 = bor(msg.is_recursion_available and 0x80 or 0, msg.response_code or 0)
+	local qc_hi = rshift(question_count, 8); local qc_lo = band(question_count, 0xff)
+	local ac_hi = rshift(answer_count, 8); local ac_lo = band(answer_count, 0xff)
+	local nc_hi = rshift(nameserver_count, 8); local nc_lo = band(nameserver_count, 0xff)
+	local adc_hi = rshift(additional_count, 8); local adc_lo = band(additional_count, 0xff)
+	local next = char(h_id_hi, h_id_lo) .. char(h_flags1, h_flags2)
+		.. char(qc_hi, qc_lo) .. char(ac_hi, ac_lo) .. char(nc_hi, nc_lo) .. char(adc_hi, adc_lo)
 	parts[#parts+1] = next
 	i = i + #next
 	for _, q in ipairs(msg.questions or empty_table) do
@@ -453,12 +492,14 @@ mod.dns_message_to_string = function (msg)
 			assert(#part <= 0x3f, "dns_message_to_string: name part too long")
 			parts2[#parts2+1] = char(#part) .. part
 		end
-		parts2[#parts2+1] = char(rshift(q.type, 8), band(q.type, 0xff), rshift(q.class, 8), band(q.class, 0xff))
+		local qt_hi = rshift(q.type, 8); local qt_lo = band(q.type, 0xff)
+		local qc_hi = rshift(q.class, 8); local qc_lo = band(q.class, 0xff)
+		parts2[#parts2+1] = char(qt_hi, qt_lo, qc_hi, qc_lo)
 		next = concat(parts2)
 		parts[#parts+1] = next
 		i = i + #next
 	end
-	local name_cache = {} --[[@type table<string, integer>]]
+	local name_cache = {} --: { [string]: integer }
 	for _, resources in ipairs({ msg.answers, msg.nameservers, msg.additional }) do
 		for _, res in ipairs(resources) do
 			local parts2 = {}
@@ -468,7 +509,8 @@ mod.dns_message_to_string = function (msg)
 				assert(#part <= 0x3f, "dns_message_to_string: name part too long")
 				local cached_i = name_cache[name_rest]
 				if cached_i then
-					parts2[#parts2+1] = char(bor(0xc0, rshift(cached_i, 8)), band(cached_i, 0xff))
+					local cp_hi = bor(0xc0, rshift(cached_i, 8)); local cp_lo = band(cached_i, 0xff)
+					parts2[#parts2+1] = char(cp_hi, cp_lo)
 					break
 				else
 					name_cache[name_rest] = j - 1
@@ -478,11 +520,12 @@ mod.dns_message_to_string = function (msg)
 				name_rest = sub(name_rest, #part + 1)
 			end
 			local length = #res.data
-			parts2[#parts2+1] = char(
-				rshift(res.type, 8), band(res.type, 0xff), rshift(res.class, 8), band(res.class, 0xff),
-				rshift(res.ttl, 24), band(rshift(res.ttl, 16), 0xff), band(rshift(res.ttl, 8), 0xff), band(res.ttl, 0xff),
-				rshift(length, 8), band(length, 0xff)
-			)
+			local rt_hi = rshift(res.type, 8); local rt_lo = band(res.type, 0xff)
+			local rc_hi = rshift(res.class, 8); local rc_lo = band(res.class, 0xff)
+			local ttl_b1 = rshift(res.ttl, 24); local ttl_b2 = band(rshift(res.ttl, 16), 0xff)
+			local ttl_b3 = band(rshift(res.ttl, 8), 0xff); local ttl_b4 = band(res.ttl, 0xff)
+			local len_hi = rshift(length, 8); local len_lo = band(length, 0xff)
+			parts2[#parts2+1] = char(rt_hi, rt_lo, rc_hi, rc_lo, ttl_b1, ttl_b2, ttl_b3, ttl_b4, len_hi, len_lo)
 			next = concat(parts2)
 			parts[#parts+1] = next
 			i = i + #next
@@ -497,14 +540,16 @@ end
 -- RFC 1035 §4.1.2 — Question
 -- RFC 1035 §4.1.3 — Resource record
 --[[@param s string]]
+--: (string) -> { [string]: unknown }
 mod.string_to_dns_message = function (s)
 	assert(#s >= 12, "string_to_dns_message: message too short, length was " .. #s)
 	--[[@class dns_message]]
 	local ret = {}
-	local b1, b2
-	b1, b2 = byte(s, 1, 2)
+	local b1 = 0 --: integer
+	local b2 = 0 --: integer
+	b1, b2 = read2(s, 1)
 	ret.id = bor(lshift(b1, 8), b2)
-	b1 = byte(s, 3)
+	b1 = byte(s, 3) or 0
 	local qr = band(b1, 0x80)
 	ret.is_query = qr == 0
 	ret.is_response = qr ~= 0
@@ -512,34 +557,34 @@ mod.string_to_dns_message = function (s)
 	ret.is_authoritative = band(b1, 0x4) ~= 0
 	ret.is_truncated = band(b1, 0x2) ~= 0
 	ret.is_recursion_desired = band(b1, 0x1) ~= 0
-	b1 = byte(s, 4) -- LINT: sequential, consecutive byte()
+	b1 = byte(s, 4) or 0 -- LINT: sequential, consecutive byte()
 	ret.is_recursion_available = band(b1, 0x80) ~= 0
 	-- band(b, 0x70) must be 0 - we will ignore
 
 	ret.response_code = band(b1, 0xf) --[[@type dns_response_code]]
-	b1, b2 = byte(s, 5, 6)
-	-- LINT: unconditional reassignment without usage of previous value
-	-- and unconditional reassignment in general
+	b1, b2 = read2(s, 5)
 	local question_count = bor(lshift(b1, 8), b2) -- usually 1
-	b1, b2 = byte(s, 7, 8)
+	b1, b2 = read2(s, 7)
 	local answer_count = bor(lshift(b1, 8), b2)
-	b1, b2 = byte(s, 9, 10)
+	b1, b2 = read2(s, 9)
 	local nameserver_count = bor(lshift(b1, 8), b2)
-	b1, b2 = byte(s, 11, 12)
+	b1, b2 = read2(s, 11)
 	local additional_count = bor(lshift(b1, 8), b2)
 	local i = 13
 	local questions = {} --[[@type dns_question[] ]]
-	local b3, b4
+	local b3 = 0 --: integer
+	local b4 = 0 --: integer
 	for j = 1, question_count do
 		local parts = {} --[[@type string[] ]]
-		local length = byte(s, i)
+		local length = byte(s, i) or 0 --: integer
 		while length > 0 do
-			parts[#parts+1] = sub(s, i + 1, i + length)
+			local lbl = sub(s, i + 1, i + length)
+			parts[#parts+1] = lbl
 			i = i + length + 1
-			length = byte(s, i)
+			length = byte(s, i) or 0
 		end
 		parts[#parts+1] = ""
-		b1, b2, b3, b4 = byte(s, i + 1, i + 4)
+		b1, b2, b3, b4 = read4(s, i + 1)
 		-- LINT: linear values - @usages 1, @usages 2, @maxusages 1
 		--[[@class dns_question]]
 		questions[j] = {
@@ -556,14 +601,14 @@ mod.string_to_dns_message = function (s)
 		for k = 1, count do
 			local parts
 			parts, i = mod.string_to_domain_name(s, i)
-			b1, b2, b3, b4 = byte(s, i, i + 3)
+			b1, b2, b3, b4 = read4(s, i)
 			local type = bor(lshift(b1, 8), b2)
 			local class = bor(lshift(b3, 8), b4)
-			b1, b2, b3, b4 = byte(s, i + 4, i + 7)
+			b1, b2, b3, b4 = read4(s, i + 4)
 			local ttl = bor(lshift(b1, 24), lshift(b2, 16), lshift(b3, 8), b4)
-			if bit.band(ttl, 0x80000000) ~= 0 then ttl = ttl - 0x100000000 end
-			b1, b2 = byte(s, i + 8, i + 9)
-			local length = bor(lshift(b1, 8), b2)
+			if bit.band(ttl, 0x80000000) ~= 0 then ttl = (ttl - 0x100000000) --[[:! integer]] end
+			local lb1, lb2 = read2(s, i + 8)
+			local length = bor(lshift(lb1, 8), lb2)
 			local data_i = i + 10
 			i = data_i + length
 			--[[@class dns_resource]]

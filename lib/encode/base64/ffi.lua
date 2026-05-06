@@ -23,21 +23,23 @@ local STD = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 local URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
 -- Build 64-entry encode table (index 0..63 → byte value).
+--: (string) -> cdata
 local function make_enc_ffi(chars)
     local enc = ffi.new("uint8_t[64]")
     for i = 1, 64 do
-        enc[i - 1] = chars:byte(i)
+        enc[i - 1] = chars:byte(i) or 0
     end
     return enc
 end
 
 -- Build 256-entry decode table (byte value 0..255 → 6-bit value or 0xFF for invalid).
 -- Whitespace bytes (0x20, 0x09, 0x0A, 0x0D) map to 0xFE (skip sentinel).
+--: (string) -> cdata
 local function make_dec_ffi(chars)
     local dec = ffi.new("uint8_t[256]")
     for i = 0, 255 do dec[i] = 0xFF end
     for i = 1, 64 do
-        dec[chars:byte(i)] = i - 1
+        dec[chars:byte(i) or 0] = i - 1
     end
     -- Whitespace → skip sentinel
     dec[0x20] = 0xFE
@@ -104,7 +106,7 @@ end
 -- Decode base64 string to binary.
 -- opts.url = true → URL-safe alphabet
 -- Whitespace is skipped inline. Returns nil, err on invalid input.
---: (string, { url: boolean | nil } | nil) -> string
+--: (string, { url: boolean | nil } | nil) -> (string | nil, string | nil)
 M.decode = function(b64, opts)
     local dec = (opts and opts.url) and url_dec or std_dec
     local n = #b64
@@ -114,8 +116,8 @@ M.decode = function(b64, opts)
 
     -- First pass: collect non-whitespace, non-padding bytes and count padding.
     -- We build a Lua table of effective bytes to avoid a second FFI allocation.
-    local bytes = {}
-    local nb = 0
+    local bytes = {} --: { [integer]: integer }
+    local nb = 0 --: integer
     local padding = 0
     local saw_pad = false
     for i = 0, n - 1 do

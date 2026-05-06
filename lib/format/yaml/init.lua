@@ -70,7 +70,7 @@ local function current_char(p)
   return sub(p.s, p.pos, p.pos)
 end
 
---: (Parser) -> unknown
+--: (Parser) -> string
 local function rest_of_line(p)
   local nl = find(p.s, "\n", p.pos, true)
   if nl then
@@ -154,7 +154,7 @@ local function expect_newline_or_end(p)
   return false
 end
 
---: (Parser) -> unknown
+--: (Parser) -> integer
 local function get_indent(p)
   local col = 0
   local i = p.pos
@@ -198,7 +198,7 @@ local function parse_hex_escape(p, n)
     return nil, format("invalid hex escape at position %d", p.pos)
   end
   p.pos = p.pos + n
-  local code = tonumber(hex, 16)
+  local code = tonumber(hex, 16) --[[:! number]]
   if code < 0x80 then
     return string.char(code)
   elseif code < 0x800 then
@@ -225,7 +225,7 @@ end
 --: (Parser) -> unknown
 local function parse_double_quoted(p)
   p.pos = p.pos + 1 -- skip opening "
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   while p.pos <= p.len do
     local c = byte(p.s, p.pos)
     if c == 0x22 then -- "
@@ -276,7 +276,7 @@ end
 --: (Parser) -> unknown
 local function parse_single_quoted(p)
   p.pos = p.pos + 1 -- skip opening '
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   while p.pos <= p.len do
     local c = byte(p.s, p.pos)
     if c == 0x27 then -- '
@@ -297,7 +297,7 @@ local function parse_single_quoted(p)
 end
 
 -- Parse a plain scalar (unquoted), stopping at flow indicators in flow context
---: (Parser, boolean) -> unknown
+--: (Parser, boolean) -> string
 local function parse_plain_scalar(p, in_flow)
   local start = p.pos
   local last_non_space = p.pos - 1
@@ -340,6 +340,7 @@ local function parse_plain_scalar(p, in_flow)
 end
 
 -- Resolve a plain scalar to its typed value
+--: (string) -> unknown
 local function resolve_scalar(s)
   if s == "" or s == "~" or s == "null" or s == "Null" or s == "NULL" then
     return nil
@@ -370,7 +371,7 @@ local function resolve_scalar(s)
   local oct_match = s:match("^(%-?)0o([0-7]+)$") or s:match("^(%+?)0o([0-7]+)$")
   if oct_match then
     local sign, digits = s:match("^([%-%+]?)0o([0-7]+)$")
-    local val = tonumber(digits, 8)
+    local val = tonumber(digits, 8) --[[:! number]]
     if sign == "-" then val = -val end
     return val
   end
@@ -427,8 +428,8 @@ local function parse_block_scalar(p, min_indent)
   end
 
   -- Collect content lines
-  local lines = {}
-  local content_indent = nil
+  local lines = {} --: { [integer]: string }
+  local content_indent = nil --: integer | nil
 
   while p.pos <= p.len do
     -- Check if this line is blank
@@ -458,8 +459,9 @@ local function parse_block_scalar(p, min_indent)
           content_indent = indent
         end
       end
+      local ci = content_indent --[[:! integer]]
 
-      if indent < content_indent then
+      if indent < ci then
         -- This line is less indented than content - end of block scalar
         p.pos = line_start
         break
@@ -467,17 +469,16 @@ local function parse_block_scalar(p, min_indent)
 
       -- Read the rest of the line
       local nl = find(p.s, "\n", p.pos, true)
-      local line_end
+      local line_end = p.len
       if nl then
-        line_end = nl - 1
+        local nl_int = nl --[[:! integer]]
+        line_end = nl_int - 1
         if line_end >= p.pos and byte(p.s, line_end) == 0x0D then
           line_end = line_end - 1
         end
-      else
-        line_end = p.len
       end
 
-      local line_content = rep(" ", indent - content_indent) .. sub(p.s, p.pos, line_end)
+      local line_content = rep(" ", indent - ci) .. sub(p.s, p.pos, line_end)
       lines[#lines + 1] = line_content
 
       if nl then
@@ -491,7 +492,7 @@ local function parse_block_scalar(p, min_indent)
   -- Remove trailing blank lines for chomp processing
   local trailing_newlines = 0
   while #lines > 0 and lines[#lines] == "" do
-    lines[#lines] = nil
+    table.remove(lines)
     trailing_newlines = trailing_newlines + 1
   end
 
@@ -500,7 +501,7 @@ local function parse_block_scalar(p, min_indent)
     result = concat(lines, "\n")
   else
     -- Folded: replace single newlines (between non-blank lines) with spaces
-    local folded = {}
+    local folded = {} --: { [integer]: string }
     for i = 1, #lines do
       if lines[i] == "" then
         folded[#folded + 1] = "\n"
@@ -590,8 +591,7 @@ local function parse_flow_mapping(p)
       if not k and err then return nil, err end
       key = k
     else
-      key = parse_plain_scalar(p, true)
-      key = resolve_scalar(key)
+      key = resolve_scalar(parse_plain_scalar(p, true))
     end
 
     skip_spaces(p)
@@ -728,7 +728,8 @@ local function parse_block_mapping(p, indent, first_at_pos)
   local result = {}
   local first = first_at_pos
   while not at_end(p) do
-    local saved, cur_indent
+    local saved = p.pos
+    local cur_indent = 0
     if first then
       first = false
       saved = p.pos

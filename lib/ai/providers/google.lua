@@ -64,8 +64,10 @@ local function convert_messages(messages)
 end
 
 --- Convert neutral tools to Google format.
+--: (ai_tool[] | nil) -> unknown
 local function convert_tools(tools)
-	if not tools or #tools == 0 then return nil end
+	if not tools then return nil end
+	if #tools == 0 then return nil end
 	local declarations = {}
 	for i = 1, #tools do
 		local t = tools[i]

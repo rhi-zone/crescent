@@ -33,11 +33,13 @@ local buf4 = ffi.new("uint8_t[4]")
 local _read_random
 do
   local has_getrandom = false
+  local ffi_C = ffi.C --[[: any]]
+  local ffi_cast = ffi.cast --[[: any]]
   if SYS_getrandom then
     -- Probe: try reading 1 byte
     local probe = ffi.new("uint8_t[1]")
-    local ret = ffi.C.syscall(ffi.cast("long", SYS_getrandom),
-      ffi.cast("void*", probe), ffi.cast("size_t", 1), ffi.cast("long", 0))
+    local ret = ffi_C.syscall(ffi_cast("long", SYS_getrandom),
+      ffi_cast("void*", probe), ffi_cast("size_t", 1), ffi_cast("long", 0))
     if ret == 1 then has_getrandom = true end
   end
 
@@ -45,12 +47,12 @@ do
     _read_random = function(dst, n)
       local total = 0
       while total < n do
-        local ret = ffi.C.syscall(ffi.cast("long", SYS_getrandom),
-          ffi.cast("void*", dst + total),
-          ffi.cast("size_t", n - total),
-          ffi.cast("long", 0))
+        local ret = ffi_C.syscall(ffi_cast("long", SYS_getrandom),
+          ffi_cast("void*", dst + total),
+          ffi_cast("size_t", n - total),
+          ffi_cast("long", 0))
         if ret < 0 then return nil, "getrandom() failed" end
-        total = total + tonumber(ret)
+        total = (total + (tonumber(ret) or 0)) --[[:! integer]]
       end
       return true
     end
@@ -59,7 +61,7 @@ do
     local urandom_fd
     local function get_fd()
       if urandom_fd then return urandom_fd end
-      local fd = ffi.C.open("/dev/urandom", O_RDONLY)
+      local fd = ffi_C.open("/dev/urandom", O_RDONLY)
       if fd < 0 then return nil end
       urandom_fd = fd
       return fd
@@ -69,9 +71,9 @@ do
       if not fd then return nil, "failed to open /dev/urandom" end
       local total = 0
       while total < n do
-        local ret = ffi.C.read(fd, dst + total, n - total)
+        local ret = ffi_C.read(fd, dst + total, n - total)
         if ret <= 0 then return nil, "read from /dev/urandom failed" end
-        total = total + tonumber(ret)
+        total = (total + (tonumber(ret) or 0)) --[[:! integer]]
       end
       return true
     end
@@ -140,7 +142,7 @@ function mod.int(min, max)
       if not ok then return nil, err end
       local v = buf4[0] + buf4[1] * 0x100 + buf4[2] * 0x10000 + buf4[3] * 0x1000000
       v = v % (umask + 1)
-      if v <= range then return min + v end
+      if v <= range then return (min + v) --[[:! integer]] end
     end
   else
     -- Large range (>32-bit), use u64
@@ -148,7 +150,7 @@ function mod.int(min, max)
       local v, err = mod.u64()
       if not v then return nil, err end
       v = v % (range + 1)
-      if v <= range then return min + v end
+      if v <= range then return (min + v) --[[:! integer]] end
     end
   end
 end
@@ -220,13 +222,13 @@ function mod.uuid()
   -- Set variant (10xx) in byte 8: high 2 bits = 10
   dst[8] = bit.bor(bit.band(dst[8], 0x3F), 0x80)
 
-  local h = {}
+  local h = {} --: { [integer]: string }
   for i = 0, 15 do
     local b = dst[i]
     local hi = bit.rshift(b, 4) + 1
     local lo = bit.band(b, 0x0F) + 1
-    h[#h + 1] = hex_chars:sub(hi, hi)
-    h[#h + 1] = hex_chars:sub(lo, lo)
+    local ch = hex_chars:sub(hi, hi); h[#h + 1] = ch
+    local cl = hex_chars:sub(lo, lo); h[#h + 1] = cl
   end
   -- 8-4-4-4-12
   return h[1]..h[2]..h[3]..h[4]..h[5]..h[6]..h[7]..h[8].."-"..

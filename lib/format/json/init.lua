@@ -63,4 +63,6 @@ M._tier        = tier
 M._impl        = impl
 M.schema       = require("lib.format.json.schema")
 
+--:: module "lib.format.json": { encode: (unknown) -> (string | nil, string | nil), decode: (string) -> (unknown, string | nil), null: {}, _tier: string, _encode_raw: (unknown) -> string, _decode_raw: (string) -> unknown, value_to_json: (unknown) -> string, json_to_value: (string) -> unknown, schema: unknown }
+
 return M

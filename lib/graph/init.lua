@@ -9,6 +9,8 @@ M._tier = "pure"
 -- Graph object
 -- ---------------------------------------------------------------------------
 
+--:: Graph = { _directed: boolean, _nodes: { [unknown]: unknown }, _adj: { [unknown]: { [unknown]: unknown } }, _in_adj: { [unknown]: { [unknown]: unknown } } | nil, _nedges: integer, ... }
+
 local Graph = {}
 Graph.__index = Graph
 
@@ -16,7 +18,7 @@ Graph.__index = Graph
 -- opts.directed: boolean, default false
 --: ({ directed: boolean | nil } | nil) -> Graph
 function M.new(opts)
-  opts = opts or {}
+  opts = opts or {} --[[:! { directed: boolean | nil }]]
   local directed = opts.directed and true or false
   local self = setmetatable({
     _directed = directed,
@@ -48,18 +50,18 @@ end
 -- Auto-creates nodes. For undirected graphs both directions share the same
 -- data table reference.
 function Graph:add_edge(u, v, data)
-  if not self._nodes[u] then self:add_node(u) end
-  if not self._nodes[v] then self:add_node(v) end
+  if not self._nodes[u] then (self --[[: any]]):add_node(u) end
+  if not self._nodes[v] then (self --[[: any]]):add_node(v) end
   local edata = data ~= nil and data or true
   if self._directed then
     if not self._adj[u][v] then
-      self._nedges = self._nedges + 1
+      self._nedges = (self._nedges --[[:! integer]]) + 1
     end
     self._adj[u][v]   = edata
     self._in_adj[v][u] = edata
   else
     if not self._adj[u][v] then
-      self._nedges = self._nedges + 1
+      self._nedges = (self._nedges --[[:! integer]]) + 1
     end
     self._adj[u][v] = edata
     self._adj[v][u] = edata
@@ -76,7 +78,7 @@ function Graph:remove_edge(u, v)
   else
     self._adj[v][u] = nil
   end
-  self._nedges = self._nedges - 1
+  self._nedges = (self._nedges --[[:! integer]]) - 1
   return true
 end
 
@@ -90,13 +92,13 @@ function Graph:remove_node(id)
     else
       self._adj[nb][id] = nil
     end
-    self._nedges = self._nedges - 1
+    self._nedges = (self._nedges --[[:! integer]]) - 1
   end
   -- Remove incoming edges (directed only)
   if self._directed then
     for nb in pairs(self._in_adj[id]) do
       self._adj[nb][id] = nil
-      self._nedges = self._nedges - 1
+      self._nedges = (self._nedges --[[:! integer]]) - 1
     end
     self._in_adj[id] = nil
   end
@@ -146,7 +148,7 @@ end
 
 -- In-neighbors for directed graphs; same as neighbors for undirected.
 function Graph:in_neighbors(id)
-  if not self._directed then return self:neighbors(id) end
+  if not self._directed then return (self --[[: any]]):neighbors(id) end
   if not self._in_adj[id] then return {} end
   local r = {}
   for nb in pairs(self._in_adj[id]) do r[#r+1] = nb end
@@ -173,7 +175,7 @@ function Graph:out_degree(id)
 end
 
 function Graph:in_degree(id)
-  if not self._directed then return self:degree(id) end
+  if not self._directed then return (self --[[: any]]):degree(id) end
   if not self._in_adj[id] then return 0 end
   local n = 0
   for _ in pairs(self._in_adj[id]) do n = n + 1 end
@@ -240,6 +242,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- BFS from start. Returns order (array) and parent table (id -> parent_id).
+--: (any, unknown) -> ({ [integer]: unknown } | nil, { [unknown]: unknown } | nil)
 function M.bfs(g, start)
   if not g:has_node(start) then return nil, "start node not found" end
   local order   = {}
@@ -264,6 +267,7 @@ function M.bfs(g, start)
 end
 
 -- DFS from start. Returns order (array) and parent table (id -> parent_id).
+--: (any, unknown) -> ({ [integer]: unknown } | nil, { [unknown]: unknown } | nil)
 function M.dfs(g, start)
   if not g:has_node(start) then return nil, "start node not found" end
   local order   = {}
@@ -291,6 +295,7 @@ end
 -- Dijkstra shortest path.
 -- Edge weight is taken from edge_data(u,v).weight (number), or 1 if absent.
 -- Returns (dist_table, path_array) on success, (nil, errmsg) on failure.
+--: (any, unknown, unknown) -> (unknown | nil, unknown)
 function M.shortest_path(g, start, target)
   if not g:has_node(start)  then return nil, "start node not found"  end
   if not g:has_node(target) then return nil, "target node not found" end
@@ -344,6 +349,7 @@ end
 
 -- Topological sort (Kahn's algorithm, directed graphs only).
 -- Returns sorted array on success, (nil, errmsg) if cycle or undirected.
+--: (any) -> ({ [integer]: unknown } | nil, string | nil)
 function M.topological_sort(g)
   if not g._directed then
     return nil, "topological sort requires a directed graph"
@@ -372,7 +378,7 @@ function M.topological_sort(g)
     table.sort(nbs)
     for i = 1, #nbs do
       local v = nbs[i]
-      indegree[v] = indegree[v] - 1
+      indegree[v] = (indegree[v] --[[:! integer]]) - 1
       if indegree[v] == 0 then queue[#queue+1] = v end
     end
   end
@@ -384,6 +390,7 @@ function M.topological_sort(g)
 end
 
 -- Connected components (undirected). Returns array of arrays of node ids.
+--: (any) -> { [integer]: { [integer]: unknown } }
 function M.components(g)
   local visited = {}
   local comps   = {}
@@ -391,9 +398,11 @@ function M.components(g)
     if not visited[id] then
       local order = M.bfs(g, id)
       local comp  = {}
-      for i = 1, #order do
-        visited[order[i]] = true
-        comp[i] = order[i]
+      if order then
+        for i = 1, #order do
+          visited[order[i]] = true
+          comp[i] = order[i]
+        end
       end
       comps[#comps+1] = comp
     end
@@ -404,12 +413,14 @@ end
 -- Cycle detection.
 -- Directed: true if any back edge (DFS 3-color).
 -- Undirected: true if BFS finds cross-edge to visited non-parent.
+--: (any) -> boolean
 function M.has_cycle(g)
   if g._directed then
     local color = {}
     for id in g:nodes() do color[id] = 0 end
 
-    local function visit(u)
+    local visit
+    visit = function(u)
       color[u] = 1
       for _, v in ipairs(g:out_neighbors(u)) do
         if color[v] == 1 then return true end
@@ -451,11 +462,12 @@ end
 
 -- Minimum spanning tree (Kruskal, undirected only).
 -- Returns array of {from, to, data}, or (nil, errmsg) for directed graphs.
+--: (any) -> (unknown | nil, string | nil)
 function M.mst(g)
   if g._directed then return nil, "MST requires an undirected graph" end
 
   -- Collect edges with weights
-  local edges = {}
+  local edges = {} --: { [integer]: { from: any, to: any, data: any, weight: number } }
   for e in g:edges() do
     local w = (type(e[3]) == "table" and type(e[3].weight) == "number")
               and e[3].weight or 1
@@ -481,7 +493,7 @@ function M.mst(g)
     if rx == ry then return false end
     if uf_rank[rx] < uf_rank[ry] then rx, ry = ry, rx end
     uf_par[ry] = rx
-    if uf_rank[rx] == uf_rank[ry] then uf_rank[rx] = uf_rank[rx] + 1 end
+    if uf_rank[rx] == uf_rank[ry] then uf_rank[rx] = (uf_rank[rx] --[[:! integer]]) + 1 end
     return true
   end
 
@@ -497,10 +509,11 @@ end
 
 -- Strongly-connected components (Tarjan's algorithm, directed graphs).
 -- Returns array of arrays of node ids.
+--: (any) -> { [integer]: { [integer]: unknown } }
 function M.strongly_connected(g)
   local idx_ctr  = 0
   local stk      = {}
-  local on_stk   = {}
+  local on_stk   = {} --: { [unknown]: boolean }
   local idx      = {}
   local lowlink  = {}
   local result   = {}
@@ -540,8 +553,9 @@ function M.strongly_connected(g)
 end
 
 -- Transpose a directed graph (reverse all edges). Returns a new Graph.
+--: (any) -> Graph
 function M.transpose(g)
-  local t = M.new({directed = g._directed})
+  local t = M.new({directed = g._directed}) --[[: any]]
   for id in g:nodes() do
     t:add_node(id, g:node_data(id))
   end

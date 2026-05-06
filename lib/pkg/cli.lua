@@ -48,6 +48,7 @@ local function info(fmt, ...)
 end
 
 -- Run a shell command for side effects. Returns true or nil, err.
+--: (string) -> (boolean | nil, string | nil)
 local function run_cmd(cmd)
 	local ok = os.execute(cmd)
 	if ok ~= 0 and ok ~= true then
@@ -57,6 +58,7 @@ local function run_cmd(cmd)
 end
 
 -- Fetch URL and return body string, or nil, err.
+--: (string) -> (string | nil, string | nil)
 local function http_get(url)
 	local fh, err = io.popen(("curl -fsSL %q"):format(url), "r")
 	if not fh then
@@ -82,13 +84,18 @@ end
 
 -- ── argument parsing ─────────────────────────────────────────────────────────
 
+--:: ParsedArgs = { command: string | nil, args: { [integer]: string }, verbose: boolean, frozen: boolean, dry_run: boolean, force: boolean, merge: boolean, overwrite: boolean, strict: boolean, skip_check: boolean, workspace: boolean, registry: string, jobs: integer }
+
 --- Parse argv into { command, args, flags }.
 -- Global flags (--verbose, --registry=X, --jobs=N, --frozen, --force, --merge) are extracted.
 -- Remaining positional args are left in the args list.
+--: ({ [integer]: string, ... }) -> ParsedArgs
 function M.parse_args(argv)
+	local result_command = nil --: string | nil
+	local result_args = {} --: { [integer]: string }
 	local result = {
-		command    = nil,
-		args       = {},
+		command    = result_command,
+		args       = result_args,
 		verbose    = false,
 		frozen     = false,
 		dry_run    = false,
@@ -100,12 +107,12 @@ function M.parse_args(argv)
 		workspace  = false,
 		registry   = DEFAULT_REGISTRY,
 		jobs       = 0,
-	}
+	} --: ParsedArgs
 
 	local i = 0
 	-- argv may be 0-indexed (arg table from luajit) or 1-indexed
 	-- Normalise: collect into a plain 1-indexed list starting after index 0.
-	local list = {}
+	local list = {} --: { [integer]: string }
 	-- Support both arg[1..n] (test callers) and raw tables
 	for j = 1, #argv do
 		list[#list + 1] = argv[j]
@@ -131,19 +138,19 @@ function M.parse_args(argv)
 		elseif v == "--skip-check" then
 			result.skip_check = true
 		elseif v:sub(1, 11) == "--registry=" then
-			result.registry = v:sub(12)
+			result.registry = (v:sub(12) --[[:! string]])
 		elseif v:sub(1, 7) == "--jobs=" then
-			local n = tonumber(v:sub(8))
+			local n = tonumber(v:sub(8) --[[:! string]])
 			if n and n >= 0 then
 				result.jobs = math.floor(n)
 			end
 		elseif v:sub(1, 2) == "--" then
 			-- unknown flag — pass through as positional (commands may handle it)
-			result.args[#result.args + 1] = v
+			result.args[#result.args + 1] = (v --[[:! string]])
 		elseif result.command == nil then
-			result.command = v
+			result.command = (v --[[:! string]])
 		else
-			result.args[#result.args + 1] = v
+			result.args[#result.args + 1] = (v --[[:! string]])
 		end
 	end
 
@@ -152,6 +159,7 @@ end
 
 --- Parse a package specifier like "sha1" or "sha1@1.0.0".
 -- Returns name, constraint where constraint is "*" for bare names or "=1.0.0" for pinned.
+--: (string) -> (string, string)
 function M.parse_pkg_spec(spec)
 	local at = spec:find("@", 1, true)
 	if at then
@@ -165,6 +173,7 @@ end
 -- ── commands ─────────────────────────────────────────────────────────────────
 
 --- cr install [--frozen] [--force] [--workspace]
+--: (string, ParsedArgs) -> boolean
 local function cmd_install(project_dir, parsed)
 	-- Workspace detection: if --workspace flag is set or workspace.lua exists in
 	-- any ancestor, use the workspace root as project_dir.
@@ -219,6 +228,7 @@ local function cmd_install(project_dir, parsed)
 end
 
 --- cr add <name[@version]>
+--: (string, ParsedArgs) -> boolean
 local function cmd_add(project_dir, parsed)
 	local spec = parsed.args[1]
 	if not spec then
@@ -265,7 +275,7 @@ local function cmd_add(project_dir, parsed)
 
 	m.deps[name] = constraint
 
-	local write_ok, write_err = manifest.write(pkg_path, m)
+	local write_ok, write_err = manifest.write(pkg_path, m --[[: any]])
 	if not write_ok then
 		stderr("add: failed to write pkg.lua: %s", tostring(write_err))
 		return false
@@ -276,6 +286,7 @@ local function cmd_add(project_dir, parsed)
 end
 
 --- cr remove <name>
+--: (string, ParsedArgs) -> boolean
 local function cmd_remove(project_dir, parsed)
 	local name = parsed.args[1]
 	if not name then
@@ -301,7 +312,7 @@ local function cmd_remove(project_dir, parsed)
 
 	m.deps[name] = nil
 
-	local write_ok, write_err = manifest.write(pkg_path, m)
+	local write_ok, write_err = manifest.write(pkg_path, m --[[: any]])
 	if not write_ok then
 		stderr("remove: failed to write pkg.lua: %s", tostring(write_err))
 		return false
@@ -359,6 +370,7 @@ end
 --   5. Clean up stashes and update lockfile with merged tree hashes.
 --
 -- --overwrite: discard local changes (maps to install --force).
+--: (string, ParsedArgs) -> boolean
 local function cmd_update(project_dir, parsed)
 	local target       = parsed.args[1]  -- nil means update all
 	local do_merge     = parsed.merge
@@ -366,19 +378,19 @@ local function cmd_update(project_dir, parsed)
 
 	-- Load lockfile
 	local lock_path = project_dir .. "/crescent.lock"
-	local entries = {}
+	local entries = {} --: { [string]: unknown }
 	if path_exists(lock_path) then
 		local l, l_err = lock.load(lock_path)
 		if not l then
 			stderr("update: failed to parse crescent.lock: %s", tostring(l_err))
 			return false
 		end
-		entries = l
+		entries = l --[[:! { [string]: unknown }]]
 	end
 
 	if do_merge then
 		-- ── Phase 1: identify locally-modified packages in the target set ─────
-		local target_names = {}
+		local target_names = {} --: { [string]: unknown }
 		if target then
 			target_names[target] = entries[target]
 		else
@@ -637,6 +649,7 @@ end
 -- Removes <name> from crescent.lock (and pkg.lua deps if present), but leaves
 -- lib/<name>/ untouched. After eject the package manager no longer manages
 -- that directory — it is owned by the project.
+--: (string, ParsedArgs) -> boolean
 local function cmd_eject(project_dir, parsed)
 	local name = parsed.args[1]
 	if not name then
@@ -679,7 +692,7 @@ local function cmd_eject(project_dir, parsed)
 			m.deps = m.deps or {}
 			if m.deps[name] then
 				m.deps[name] = nil
-				manifest.write(pkg_path, m)  -- ignore write errors; lock already updated
+				manifest.write(pkg_path, m --[[: any]])  -- ignore write errors; lock already updated
 			else
 				io.stderr:write(("warning: %q is not in pkg.lua deps (lockfile entry removed anyway)\n"):format(name))
 			end

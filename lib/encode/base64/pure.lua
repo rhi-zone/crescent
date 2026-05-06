@@ -16,18 +16,20 @@ local STD = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 -- URL-safe alphabet (RFC 4648 §5): A-Z a-z 0-9 - _
 local URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
+--: (string) -> { [integer]: integer }
 local function make_enc(chars)
     local enc = {}
     for i = 1, 64 do
-        enc[i - 1] = chars:byte(i)
+        enc[i - 1] = chars:byte(i) or 0
     end
     return enc
 end
 
+--: (string) -> { [integer]: integer }
 local function make_dec(chars)
     local dec = {}
     for i = 1, 64 do
-        dec[chars:byte(i)] = i - 1
+        dec[chars:byte(i) or 0] = i - 1
     end
     return dec
 end
@@ -69,7 +71,7 @@ M.encode = function(str, opts)
             t[k] = string.char(enc[band(rshift(v,18),0x3f)], enc[band(rshift(v,12),0x3f)], enc[band(rshift(v,6),0x3f)])
         end
     elseif lastn == 1 then
-        local v = str:byte(n) * 0x10000
+        local v = (str:byte(n) or 0) * 0x10000
         if pad then
             t[k] = string.char(enc[band(rshift(v,18),0x3f)], enc[band(rshift(v,12),0x3f)], PAD, PAD)
         else
@@ -82,7 +84,7 @@ end
 -- Decode base64 string to binary.
 -- opts.url = true → URL-safe alphabet (- _ instead of + /)
 -- Whitespace (space, tab, CR, LF) is skipped inline. Returns nil, err on invalid input.
---: (string, { url: boolean | nil } | nil) -> string
+--: (string, { url: boolean | nil } | nil) -> (string | nil, string | nil)
 M.decode = function(b64, opts)
     local dec = (opts and opts.url) and url_dec or std_dec
     local n = #b64
@@ -90,12 +92,12 @@ M.decode = function(b64, opts)
 
     -- Collect non-whitespace bytes inline, stripping padding as we go.
     -- We need to know the effective length first to detect bad-length errors.
-    local bytes = {}
-    local nb = 0
+    local bytes = {} --: { [integer]: integer }
+    local nb = 0 --: integer
     local padding = 0
     local saw_pad = false
     for i = 1, n do
-        local byte = b64:byte(i)
+        local byte = b64:byte(i) or 0
         -- Skip whitespace: space(0x20), tab(0x09), LF(0x0A), CR(0x0D)
         if byte == 0x20 or byte == 0x09 or byte == 0x0A or byte == 0x0D then
             -- skip

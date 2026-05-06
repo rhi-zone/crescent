@@ -15,7 +15,7 @@ local _passes = {}
 local DEFAULT_SEVERITY = "warning"
 
 -- Register a named rule pass. Called by each pass module's own require().
---: (string, { name: string, description: string, check: function }) -> ()
+--: (string, { name: string, description: string, check: (unknown, unknown, string, string, unknown) -> nil }) -> ()
 function M.register(name, pass)
     _passes[#_passes + 1] = { name = name, pass = pass }
 end
@@ -25,7 +25,7 @@ end
 -- err_ctx:  diagnostic context to receive warnings/errors
 -- filepath: source file path (string)
 -- policy:   optional table { [rule_name] = "error"|"warning"|"off" }
---: (table | nil, table, string, table | nil) -> ()
+--: ({ ... } | nil, { ... }, string, { [string]: string } | nil) -> ()
 function M.run(ctx, err_ctx, filepath, policy)
     if not ctx then return end
     policy = policy or {}

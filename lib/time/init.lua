@@ -14,6 +14,9 @@ local ffi = require("ffi")
 local M = {}
 M._tier = "ffi"
 
+--:: Duration = { _ns: number, components: (Duration) -> { days: number, hours: number, minutes: number, seconds: number, ms: number }, ... }
+--:: Timestamp = { _sec: number, _ns: number, ... }
+
 -- ── FFI wall-clock (preserved from original) ─────────────────────────────────
 
 if jit and jit.os == "Windows" then
@@ -26,11 +29,11 @@ if jit and jit.os == "Windows" then
     void GetSystemTimeAsFileTime(LPFILETIME lpSystemTimeAsFileTime);
   ]]
   local time_ffi = ffi.C
-  local _tv = ffi.new("FILETIME[1]")
+  local _tv = ffi.new("FILETIME[1]") --[[: any]]
   --: () -> number
   M.time = function()
     time_ffi.GetSystemTimeAsFileTime(_tv)
-    return tonumber((_tv[0].dwHighDateTime * 0x100000000ULL + _tv[0].dwLowDateTime) / 10000000ULL - 11644473600ULL)
+    return tonumber((_tv[0].dwHighDateTime * 0x100000000ULL + _tv[0].dwLowDateTime) / 10000000ULL - 11644473600ULL) or 0
   end
 else
   -- Linux / macOS / BSD
@@ -46,12 +49,12 @@ else
     void gettimeofday(struct timeval *tv, struct timezone *tz);
   ]])
   if ok then
-    local time_ffi = ffi.C
-    local _tv = ffi.new("struct timeval [1]")
+    local time_ffi = ffi.C --[[: any]]
+    local _tv = ffi.new("struct timeval [1]") --[[: any]]
     --: () -> number
     M.time = function()
       time_ffi.gettimeofday(_tv, nil)
-      return tonumber(_tv[0].tv_sec) + tonumber(_tv[0].tv_usec) / 1000000
+      return (tonumber(_tv[0].tv_sec) or 0) + (tonumber(_tv[0].tv_usec) or 0) / 1000000
     end
   else
     -- Fallback: no gettimeofday available
@@ -110,7 +113,8 @@ function Duration:to_days()    return self._ns / NS_PER_DAY end
 
 --: () -> { days: number, hours: number, minutes: number, seconds: number, ms: number }
 function Duration:components()
-  local total_ns = math.abs(self._ns)
+  local dr = self --[[:! Duration]]
+  local total_ns = math.abs(dr._ns)
   local days    = math.floor(total_ns / NS_PER_DAY)
   local rem     = total_ns - days * NS_PER_DAY
   local hours   = math.floor(rem / NS_PER_H)
@@ -125,49 +129,59 @@ end
 
 --: () -> Duration
 function Duration:abs()
-  return setmetatable({ _ns = math.abs(self._ns) }, Duration)
+  local dr = self --[[:! Duration]]
+  return setmetatable({ _ns = math.abs(dr._ns) }, Duration) --[[:! Duration]]
 end
 
 -- __unm
 function Duration:__unm()
-  return setmetatable({ _ns = -self._ns }, Duration)
+  local dr = self --[[:! Duration]]
+  return setmetatable({ _ns = -dr._ns }, Duration) --[[:! Duration]]
 end
 
 -- __add
 function Duration.__add(a, b)
-  return setmetatable({ _ns = a._ns + b._ns }, Duration)
+  local a = a --[[:! Duration]]; local b = b --[[:! Duration]]
+  return setmetatable({ _ns = a._ns + b._ns }, Duration) --[[:! Duration]]
 end
 
 -- __sub
 function Duration.__sub(a, b)
-  return setmetatable({ _ns = a._ns - b._ns }, Duration)
+  local a = a --[[:! Duration]]; local b = b --[[:! Duration]]
+  return setmetatable({ _ns = a._ns - b._ns }, Duration) --[[:! Duration]]
 end
 
 -- __mul  (Duration * number  or  number * Duration)
 function Duration.__mul(a, b)
   if type(a) == "number" then
-    return setmetatable({ _ns = math.floor(a * b._ns) }, Duration)
+    local an = a --[[:! number]]; local bd = b --[[:! Duration]]
+    return setmetatable({ _ns = math.floor(an * bd._ns) }, Duration) --[[:! Duration]]
   end
-  return setmetatable({ _ns = math.floor(a._ns * b) }, Duration)
+  local ad = a --[[:! Duration]]; local bn = b --[[:! number]]
+  return setmetatable({ _ns = math.floor(ad._ns * bn) }, Duration) --[[:! Duration]]
 end
 
 -- __div  (Duration / number)
 function Duration.__div(a, b)
-  return setmetatable({ _ns = math.floor(a._ns / b) }, Duration)
+  local ad = a --[[:! Duration]]; local bn = b --[[:! number]]
+  return setmetatable({ _ns = math.floor(ad._ns / bn) }, Duration) --[[:! Duration]]
 end
 
 -- __eq
 function Duration.__eq(a, b)
+  local a = a --[[:! Duration]]; local b = b --[[:! Duration]]
   return a._ns == b._ns
 end
 
 -- __lt
 function Duration.__lt(a, b)
+  local a = a --[[:! Duration]]; local b = b --[[:! Duration]]
   return a._ns < b._ns
 end
 
 -- __le
 function Duration.__le(a, b)
+  local a = a --[[:! Duration]]; local b = b --[[:! Duration]]
   return a._ns <= b._ns
 end
 
@@ -177,20 +191,22 @@ local function fmt_int(n) return tostring(math.floor(n)) end
 
 --: () -> string
 function Duration:format()
-  local c = self:components()
+  local dr = self --[[:! Duration]]
+  local c = dr:components()
   local parts = {}
   if c.days > 0 then parts[#parts+1] = fmt_int(c.days) .. "d" end
   parts[#parts+1] = fmt_int(c.hours)   .. "h"
   parts[#parts+1] = fmt_int(c.minutes) .. "m"
   parts[#parts+1] = fmt_int(c.seconds) .. "s"
   local s = table.concat(parts, " ")
-  if self._ns < 0 then s = "-" .. s end
+  if dr._ns < 0 then s = "-" .. s end
   return s
 end
 
 --: () -> string
 function Duration:format_short()
-  local c = self:components()
+  local dr = self --[[:! Duration]]
+  local c = dr:components()
   local parts = {}
   if c.days    > 0 then parts[#parts+1] = fmt_int(c.days)    .. "d" end
   if c.hours   > 0 then parts[#parts+1] = fmt_int(c.hours)   .. "h" end
@@ -199,17 +215,18 @@ function Duration:format_short()
   if c.ms      > 0 then parts[#parts+1] = fmt_int(c.ms)      .. "ms" end
   if #parts == 0 then
     -- sub-millisecond or exactly zero
-    if self._ns == 0 then return "0s" end
-    return fmt_int(self._ns) .. "ns"
+    if dr._ns == 0 then return "0s" end
+    return fmt_int(dr._ns) .. "ns"
   end
   local s = table.concat(parts, " ")
-  if self._ns < 0 then s = "-" .. s end
+  if dr._ns < 0 then s = "-" .. s end
   return s
 end
 
 --: () -> string
 function Duration:format_precise()
-  local c = self:components()
+  local dr = self --[[:! Duration]]
+  local c = dr:components()
   local parts = {}
   if c.days > 0 then parts[#parts+1] = fmt_int(c.days) .. "d" end
   parts[#parts+1] = fmt_int(c.hours)   .. "h"
@@ -218,7 +235,7 @@ function Duration:format_precise()
   local sec_frac = string.format("%d.%03d", c.seconds, c.ms) .. "s"
   parts[#parts+1] = sec_frac
   local s = table.concat(parts, " ")
-  if self._ns < 0 then s = "-" .. s end
+  if dr._ns < 0 then s = "-" .. s end
   return s
 end
 
@@ -230,27 +247,28 @@ Duration.__tostring = Duration.format
 function M.duration(amount, unit)
   local mul = UNIT_NS[unit]
   if not mul then return nil, "unknown duration unit: " .. tostring(unit) end
-  return setmetatable({ _ns = math.floor(amount * mul) }, Duration)
+  mul = mul --[[:! number]]
+  return setmetatable({ _ns = math.floor(amount * mul) }, Duration) --[[:! Duration]]
 end
 
 --: (number) -> Duration
 function M.duration_ns(ns)
-  return setmetatable({ _ns = math.floor(ns) }, Duration)
+  return setmetatable({ _ns = math.floor(ns) }, Duration) --[[:! Duration]]
 end
 
 --: (number) -> Duration
 function M.duration_us(us)
-  return setmetatable({ _ns = math.floor(us * NS_PER_US) }, Duration)
+  return setmetatable({ _ns = math.floor(us * NS_PER_US) }, Duration) --[[:! Duration]]
 end
 
 --: (number) -> Duration
 function M.duration_ms(ms)
-  return setmetatable({ _ns = math.floor(ms * NS_PER_MS) }, Duration)
+  return setmetatable({ _ns = math.floor(ms * NS_PER_MS) }, Duration) --[[:! Duration]]
 end
 
 --: (number) -> Duration
 function M.duration_s(s)
-  return setmetatable({ _ns = math.floor(s * NS_PER_S) }, Duration)
+  return setmetatable({ _ns = math.floor(s * NS_PER_S) }, Duration) --[[:! Duration]]
 end
 
 -- ── Duration parser ───────────────────────────────────────────────────────────
@@ -293,12 +311,12 @@ function M.duration_parse(s)
     if not num_s then
       return nil, "expected number at position " .. pos .. " in: " .. s
     end
-    pos = ne
+    pos = (ne --[[: any]]) --[[:! integer]]
     local num = tonumber(num_s)
 
     -- skip optional whitespace between number and unit
     local _, ue = s:find("^%s*", pos)
-    if ue then pos = ue + 1 end
+    if ue then pos = (ue --[[:! integer]]) + 1 end
 
     -- unit: greedy match longest first
     local unit_mul = nil
@@ -317,9 +335,10 @@ function M.duration_parse(s)
     if not unit_mul then
       return nil, "unknown unit at position " .. pos .. " in: " .. s
     end
+    unit_mul = unit_mul --[[:! number]]
     pos = pos + unit_len
 
-    total_ns = total_ns + sign * math.floor(num * unit_mul)
+    total_ns = total_ns + sign * math.floor((num or 0) * unit_mul)
     matched_any = true
   end
 
@@ -327,7 +346,7 @@ function M.duration_parse(s)
     return nil, "empty duration string"
   end
 
-  return setmetatable({ _ns = total_ns }, Duration)
+  return setmetatable({ _ns = total_ns }, Duration) --[[:! Duration]]
 end
 
 -- ── Timestamp ─────────────────────────────────────────────────────────────────
@@ -345,59 +364,75 @@ local function make_ts(sec, ns)
     ns = ns - extra_s * NS_PER_S
     sec = sec + extra_s
   end
-  return setmetatable({ _sec = math.floor(sec), _ns = math.floor(ns) }, Timestamp)
+  return setmetatable({ _sec = math.floor(sec), _ns = math.floor(ns) }, Timestamp) --[[:! Timestamp]]
 end
 
 --: () -> number
-function Timestamp:to_unix()    return self._sec end
+function Timestamp:to_unix()
+  local ts = self --[[:! Timestamp]]
+  return ts._sec
+end
 --: () -> number
-function Timestamp:to_unix_ms() return self._sec * 1000 + math.floor(self._ns / NS_PER_MS) end
+function Timestamp:to_unix_ms()
+  local ts = self --[[:! Timestamp]]
+  return ts._sec * 1000 + math.floor(ts._ns / NS_PER_MS)
+end
 --: () -> { secs: number, ns: number }
-function Timestamp:to_unix_ns() return { secs = self._sec, ns = self._ns } end
+function Timestamp:to_unix_ns()
+  local ts = self --[[:! Timestamp]]
+  return { secs = ts._sec, ns = ts._ns }
+end
 
 -- Timestamp + Duration → Timestamp
 -- Timestamp - Duration → Timestamp
 -- Timestamp - Timestamp → Duration
 function Timestamp.__add(a, b)
   -- a: Timestamp, b: Duration
-  local new_ns = a._ns + b._ns
+  local at = a --[[:! Timestamp]]; local bd = b --[[:! Duration]]
+  local new_ns = at._ns + bd._ns
   local extra_s = math.floor(new_ns / NS_PER_S)
-  return make_ts(a._sec + extra_s, new_ns - extra_s * NS_PER_S)
+  return make_ts(at._sec + extra_s, new_ns - extra_s * NS_PER_S)
 end
 
 function Timestamp.__sub(a, b)
+  local at = a --[[:! Timestamp]]
   if getmetatable(b) == Duration then
     -- Timestamp - Duration → Timestamp
-    local new_ns = a._ns - b._ns
+    local bd = b --[[:! Duration]]
+    local new_ns = at._ns - bd._ns
     local extra_s = math.floor(new_ns / NS_PER_S)
     -- extra_s may be negative; make_ts normalises
-    return make_ts(a._sec + extra_s, new_ns - extra_s * NS_PER_S)
+    return make_ts(at._sec + extra_s, new_ns - extra_s * NS_PER_S)
   else
     -- Timestamp - Timestamp → Duration
-    local diff_s  = a._sec - b._sec
-    local diff_ns = a._ns  - b._ns
-    return setmetatable({ _ns = diff_s * NS_PER_S + diff_ns }, Duration)
+    local bt = b --[[:! Timestamp]]
+    local diff_s  = at._sec - bt._sec
+    local diff_ns = at._ns  - bt._ns
+    return setmetatable({ _ns = diff_s * NS_PER_S + diff_ns }, Duration) --[[:! Duration]]
   end
 end
 
 function Timestamp.__eq(a, b)
-  return a._sec == b._sec and a._ns == b._ns
+  local at = a --[[:! Timestamp]]; local bt = b --[[:! Timestamp]]
+  return at._sec == bt._sec and at._ns == bt._ns
 end
 
 function Timestamp.__lt(a, b)
-  if a._sec ~= b._sec then return a._sec < b._sec end
-  return a._ns < b._ns
+  local at = a --[[:! Timestamp]]; local bt = b --[[:! Timestamp]]
+  if at._sec ~= bt._sec then return at._sec < bt._sec end
+  return at._ns < bt._ns
 end
 
 function Timestamp.__le(a, b)
-  if a._sec ~= b._sec then return a._sec < b._sec end
-  return a._ns <= b._ns
+  local at = a --[[:! Timestamp]]; local bt = b --[[:! Timestamp]]
+  if at._sec ~= bt._sec then return at._sec < bt._sec end
+  return at._ns <= bt._ns
 end
 
 -- Calendar decomposition (UTC) using os.date
---: (Timestamp) -> table
+--: (Timestamp) -> { year: integer, month: integer, day: integer, hour: integer, min: integer, sec: integer, wday: integer, yday: integer, isdst: boolean }
 local function ts_utc(t)
-  return os.date("!*t", t._sec)
+  return os.date("!*t", t._sec --[[:! integer]]) --[[: any]] --[[:! { year: integer, month: integer, day: integer, hour: integer, min: integer, sec: integer, wday: integer, yday: integer, isdst: boolean }]]
 end
 
 -- Formatting helpers
@@ -408,28 +443,28 @@ local function p4(n)  return string.format("%04d", n) end
 
 --: () -> string
 function Timestamp:format_rfc3339()
-  local t = ts_utc(self)
+  local t = ts_utc(self --[[:! Timestamp]])
   return p4(t.year) .. "-" .. p2(t.month) .. "-" .. p2(t.day)
       .. "T" .. p2(t.hour) .. ":" .. p2(t.min) .. ":" .. p2(t.sec) .. "Z"
 end
 
 --: () -> string
 function Timestamp:format_date()
-  local t = ts_utc(self)
+  local t = ts_utc(self --[[:! Timestamp]])
   return p4(t.year) .. "-" .. p2(t.month) .. "-" .. p2(t.day)
 end
 
 --: () -> string
 function Timestamp:format_time()
-  local t = ts_utc(self)
+  local t = ts_utc(self --[[:! Timestamp]])
   return p2(t.hour) .. ":" .. p2(t.min) .. ":" .. p2(t.sec)
 end
 
 -- strftime-style format: %Y %m %d %H %M %S %Z (always "UTC")
---: (string) -> string
+--: (self: Timestamp, string) -> string
 function Timestamp:format(fmt)
-  local t = ts_utc(self)
-  return (fmt:gsub("%%(.)", function(c)
+  local t = ts_utc(self --[[:! Timestamp]])
+  local result = fmt:gsub("%%(.)", function(c)
     if     c == "Y" then return p4(t.year)
     elseif c == "m" then return p2(t.month)
     elseif c == "d" then return p2(t.day)
@@ -440,7 +475,8 @@ function Timestamp:format(fmt)
     elseif c == "%" then return "%"
     else return "%" .. c
     end
-  end))
+  end) --[[: any]]; result = result --[[:! string]]
+  return result
 end
 
 Timestamp.__tostring = Timestamp.format_rfc3339
@@ -486,9 +522,12 @@ function M.parse_rfc3339(s)
   if type(s) ~= "string" then return nil, "expected string" end
   -- Full: 2024-01-15T10:30:00Z  or  2024-01-15T10:30:00+05:30
   -- Date-only: 2024-01-15
-  local y, mo, d = s:match("^(%d%d%d%d)-(%d%d)-(%d%d)")
-  if not y then return nil, "invalid RFC 3339: " .. s end
-  y, mo, d = tonumber(y), tonumber(mo), tonumber(d)
+  local ys, mos, ds = s:match("^(%d%d%d%d)-(%d%d)-(%d%d)")
+  if not ys then return nil, "invalid RFC 3339: " .. s end
+  ys = ys --[[:! string]]; mos = mos --[[:! string]]; ds = ds --[[:! string]]
+  local y = (tonumber(ys) or 0) --[[:! number]]
+  local mo = (tonumber(mos) or 0) --[[:! number]]
+  local d = (tonumber(ds) or 0) --[[:! number]]
 
   local h, mi, sc, frac_ns, off_s = 0, 0, 0, 0, 0
   local rest = s:sub(11)
@@ -506,28 +545,35 @@ function M.parse_rfc3339(s)
       if not th then return nil, "invalid time in RFC 3339: " .. rest end
       ts = "00"
     end
-    h, mi, sc = tonumber(th), tonumber(tm), tonumber(ts)
+    h = (tonumber(th) or 0) --[[:! integer]]
+    mi = (tonumber(tm) or 0) --[[:! integer]]
+    sc = (tonumber(ts) or 0) --[[:! integer]]
 
     -- Fractional seconds
-    if after and after:sub(1,1) == "." then
-      local frac_str
-      frac_str, after = after:match("^%.(%d+)(.*)")
-      if frac_str then
-        -- pad or truncate to 9 digits for nanoseconds
-        local padded = (frac_str .. "000000000"):sub(1, 9)
-        frac_ns = tonumber(padded)
+    if after then
+      local after2 = after --[[:! string]]
+      if after2:sub(1,1) == "." then
+        local frac_str
+        frac_str, after = after2:match("^%.(%d+)(.*)")
+        if frac_str then
+          -- pad or truncate to 9 digits for nanoseconds
+          local padded = (frac_str .. "000000000"):sub(1, 9)
+          frac_ns = (tonumber(padded) or 0) --[[:! integer]]
+        end
       end
     end
 
     -- Offset
     if after and after ~= "" then
-      local a = after
+      local a = (after --[[: any]]) --[[:! string]]
       if a == "Z" or a == "z" then
         off_s = 0
       else
         local sign, oh, om = a:match("^([+-])(%d%d):?(%d%d)$")
         if not sign then return nil, "invalid offset: " .. a end
-        off_s = tonumber(oh) * 3600 + tonumber(om) * 60
+        oh = (oh --[[: any]]) --[[:! string]]
+        om = (om --[[: any]]) --[[:! string]]
+        off_s = ((tonumber(oh) or 0) * 3600 + (tonumber(om) or 0) * 60) --[[:! integer]]
         if sign == "-" then off_s = -off_s end
       end
     end
