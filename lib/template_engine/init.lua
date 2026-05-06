@@ -84,7 +84,7 @@ local function lex(src)
       if strip_after  then inner = (inner --[[:! string]]):sub(1, -2) end
       inner = (inner --[[:! string]]):match("^%s*(.-)%s*$") --[[:! string]]
       if strip_before and #tokens > 0 and tokens[#tokens].type == "text" then
-        local last = tokens[#tokens] --[[:! TextToken]]
+        local last = tokens[#tokens]
         last.value = last.value:gsub("%s*$", "")
       end
       tokens[#tokens + 1] = { type = "tag", value = inner, strip_after = strip_after,
@@ -749,8 +749,9 @@ function Env:compile(src)
         local block_overrides = {}
 
         -- Pre-pass: collect blocks for inheritance
-        local s2_nodes = (self2 --[[:! { _nodes: { [integer]: ASTNode }, _env: { _loader: unknown, _filters: unknown, _autoescape: boolean } }]])._nodes
-        local s2_env = (self2 --[[:! { _nodes: { [integer]: ASTNode }, _env: { _loader: unknown, _filters: unknown, _autoescape: boolean } }]])._env
+        local self2_ = self2 --[[:! { _nodes: { [integer]: ASTNode }, _env: { _loader: unknown, _filters: unknown, _autoescape: boolean } }]]
+        local s2_nodes = self2_._nodes
+        local s2_env = self2_._env
         local ext_node = find_extends(s2_nodes)
         if ext_node then
           -- Collect all blocks defined in child

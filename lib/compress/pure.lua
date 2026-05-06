@@ -409,32 +409,28 @@ local function inflate(input, opts)
       return nil, "unsupported gzip compression method"
     end
     local flg = byte1(input, 4)
-    pos = math.floor(11) --[[:! integer]] -- skip ID1, ID2, CM, FLG, MTIME(4), XFL, OS
+    pos = 11 -- skip ID1, ID2, CM, FLG, MTIME(4), XFL, OS
 
     -- FEXTRA
     if band(flg, 4) ~= 0 then
       if pos + 1 > #input then return nil, "truncated gzip header (FEXTRA)" end
-      local xlen = byte1(input, pos) + byte1(input, pos + 1) * 256 --[[:! integer]]
+      local xlen = byte1(input, pos) + byte1(input, pos + 1) * 256
       pos = pos + 2 + xlen
     end
-    pos = pos --[[:! integer]]
     -- FNAME
     if band(flg, 8) ~= 0 then
       while pos <= #input and byte1(input, pos) ~= 0 do pos = pos + 1 end
       pos = pos + 1 -- skip null terminator
     end
-    pos = pos --[[:! integer]]
     -- FCOMMENT
     if band(flg, 16) ~= 0 then
       while pos <= #input and byte1(input, pos) ~= 0 do pos = pos + 1 end
       pos = pos + 1
     end
-    pos = pos --[[:! integer]]
     -- FHCRC
     if band(flg, 2) ~= 0 then
       pos = pos + 2
     end
-    pos = pos --[[:! integer]]
 
     if pos > #input then return nil, "truncated gzip header" end
 

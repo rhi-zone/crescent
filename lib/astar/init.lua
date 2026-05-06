@@ -236,8 +236,8 @@ end
 local function heuristic_chebyshev(r1, c1, r2, c2)
   local dr = r1 - r2
   local dc = c1 - c2
-  dr = (dr < 0 and -dr or dr) --[[:! number]]
-  dc = (dc < 0 and -dc or dc) --[[:! number]]
+  dr = dr < 0 and -dr or dr
+  dc = dc < 0 and -dc or dc
   return dr > dc and dr or dc
 end
 
@@ -302,10 +302,9 @@ function M.grid_astar(grid, start, goal, opts)
       local path = {}
       local k = cur_key --: integer | nil
       while k do
-        local ki = k --[[:! integer]]
-        local r, c = decode(ki)
+        local r, c = decode(k)
         table.insert(path, 1, { r, c })
-        k = came_from[ki]
+        k = came_from[k]
       end
       return path, g_score[cur_key]
     end

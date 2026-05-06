@@ -33,28 +33,23 @@ vec2_mt.__index = vec2_mt
 
 --: (Vec2, Vec2) -> Vec2
 function vec2_mt:add(b)
-  local b_ = b --[[:! Vec2]]
-  return M.vec2(self.x + b_.x, self.y + b_.y)
+  return M.vec2(self.x + b.x, self.y + b.y)
 end
 --: (Vec2, Vec2) -> Vec2
 function vec2_mt:sub(b)
-  local b_ = b --[[:! Vec2]]
-  return M.vec2(self.x - b_.x, self.y - b_.y)
+  return M.vec2(self.x - b.x, self.y - b.y)
 end
 --: (Vec2, number) -> Vec2
 function vec2_mt:mul(s)
-  local s_ = s --[[:! number]]
-  return M.vec2(self.x * s_, self.y * s_)
+  return M.vec2(self.x * s, self.y * s)
 end
 --: (Vec2, number) -> Vec2
 function vec2_mt:div(s)
-  local s_ = s --[[:! number]]
-  return M.vec2(self.x / s_, self.y / s_)
+  return M.vec2(self.x / s, self.y / s)
 end
 --: (Vec2, Vec2) -> number
 function vec2_mt:dot(b)
-  local b_ = b --[[:! Vec2]]
-  return self.x * b_.x + self.y * b_.y
+  return self.x * b.x + self.y * b.y
 end
 
 --: (Vec2) -> number
@@ -76,27 +71,24 @@ end
 
 --: (Vec2, number) -> Vec2
 function vec2_mt:limit(max_len)
-  local max_len_ = max_len --[[:! number]]
   local lsq = self:length_sq()
-  if lsq > max_len_ * max_len_ then
-    return self:normalize():mul(max_len_)
+  if lsq > max_len * max_len then
+    return self:normalize():mul(max_len)
   end
   return M.vec2(self.x, self.y)
 end
 
 --: (Vec2, Vec2) -> number
 function vec2_mt:dist(b)
-  local b_ = b --[[:! Vec2]]
-  local dx = self.x - b_.x
-  local dy = self.y - b_.y
+  local dx = self.x - b.x
+  local dy = self.y - b.y
   return math_sqrt(dx * dx + dy * dy)
 end
 
 --: (Vec2, Vec2) -> number
 function vec2_mt:dist_sq(b)
-  local b_ = b --[[:! Vec2]]
-  local dx = self.x - b_.x
-  local dy = self.y - b_.y
+  local dx = self.x - b.x
+  local dy = self.y - b.y
   return dx * dx + dy * dy
 end
 
@@ -107,16 +99,14 @@ end
 
 --: (Vec2, number) -> Vec2
 function vec2_mt:rotate(theta)
-  local theta_ = theta --[[:! number]]
-  local c = math_cos(theta_)
-  local s = math_sin(theta_)
+  local c = math_cos(theta)
+  local s = math_sin(theta)
   return M.vec2(self.x * c - self.y * s, self.x * s + self.y * c)
 end
 
 --: (Vec2, Vec2, number) -> Vec2
 function vec2_mt:lerp(b, t)
-  local b_ = b --[[:! Vec2]] local t_ = t --[[:! number]]
-  return M.vec2(self.x + (b_.x - self.x) * t_, self.y + (b_.y - self.y) * t_)
+  return M.vec2(self.x + (b.x - self.x) * t, self.y + (b.y - self.y) * t)
 end
 
 --: (Vec2) -> string
@@ -150,12 +140,10 @@ agent_mt.__index = agent_mt
 --- Integrate force over dt, clamp velocity to max_speed.
 --: (Agent, Vec2, number) -> nil
 function agent_mt:update(force, dt)
-  local force_ = force --[[:! Vec2]]
-  local dt_ = dt --[[:! number]]
   -- acceleration = force / mass
-  local acc = force_:mul(dt_ / self.mass)
+  local acc = force:mul(dt / self.mass)
   self.velocity = self.velocity:add(acc):limit(self.max_speed)
-  self.position = self.position:add(self.velocity:mul(dt_))
+  self.position = self.position:add(self.velocity:mul(dt))
 end
 
 --- Construct an agent.
@@ -197,10 +185,10 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Steer toward target_pos at full speed.
+--: (Agent, Vec2) -> Vec2
 function M.seek(agent, target_pos)
-  local agent_ = agent --[[:! Agent]] local tp_ = target_pos --[[:! Vec2]]
-  local desired = desired_velocity_toward(agent_, tp_, agent_.max_speed)
-  return steering_force(agent_, desired)
+  local desired = desired_velocity_toward(agent, target_pos, agent.max_speed)
+  return steering_force(agent, desired)
 end
 
 -- ---------------------------------------------------------------------------
@@ -208,13 +196,13 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Steer away from threat_pos at full speed.
+--: (Agent, Vec2) -> Vec2
 function M.flee(agent, threat_pos)
-  local agent_ = agent --[[:! Agent]] local tp_ = threat_pos --[[:! Vec2]]
-  local d = agent_.position:sub(tp_) --[[:! Vec2]]
+  local d = agent.position:sub(threat_pos) --[[:! Vec2]]
   local len = d:length()
   if len < 1e-12 then return M.vec2(0, 0) end
-  local desired = d:mul(agent_.max_speed / len)
-  return steering_force(agent_, desired)
+  local desired = d:mul(agent.max_speed / len) --[[:! Vec2]]
+  return steering_force(agent, desired)
 end
 
 -- ---------------------------------------------------------------------------
@@ -223,30 +211,29 @@ end
 
 --- Seek with deceleration inside slow_radius; stop inside stop_radius.
 -- opts: { slow_radius=50, stop_radius=5 }
+--: (Agent, Vec2, { slow_radius: number | nil, stop_radius: number | nil } | nil) -> Vec2
 function M.arrive(agent, target_pos, opts)
-  local agent_ = agent --[[:! Agent]] local tp_ = target_pos --[[:! Vec2]]
-  --: { slow_radius: number | nil, stop_radius: number | nil }
-  local opts_ = opts or {}
+  local opts_ = (opts or {}) --[[:! { slow_radius: number | nil, stop_radius: number | nil }]]
   local slow_radius = opts_.slow_radius or 50
   local stop_radius = opts_.stop_radius or 5
 
-  local d = tp_:sub(agent_.position)
+  local d = target_pos:sub(agent.position)
   local dist = d:length()
 
   if dist < stop_radius then
     -- Brake: desired velocity = zero (steer toward zero)
-    return steering_force(agent_, M.vec2(0, 0))
+    return steering_force(agent, M.vec2(0, 0))
   end
 
-  local speed = agent_.max_speed
+  local speed = agent.max_speed
   if dist < slow_radius then
-    speed = agent_.max_speed * (dist / slow_radius)
+    speed = agent.max_speed * (dist / slow_radius)
   else
-    speed = agent_.max_speed
+    speed = agent.max_speed
   end
 
   local desired = d:mul(speed / dist)
-  return steering_force(agent_, desired)
+  return steering_force(agent, desired)
 end
 
 -- ---------------------------------------------------------------------------
@@ -254,14 +241,14 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Steer toward the predicted future position of target_agent.
+--: (Agent, Agent) -> Vec2
 function M.pursue(agent, target_agent)
-  local agent_ = agent --[[:! Agent]] local ta_ = target_agent --[[:! Agent]]
-  local to_target = ta_.position:sub(agent_.position)
+  local to_target = target_agent.position:sub(agent.position)
   local dist      = to_target:length()
   -- prediction horizon: time to close gap at max_speed, capped
-  local ahead     = dist / (agent_.max_speed + 1e-12)
-  local future    = ta_.position:add(ta_.velocity:mul(ahead))
-  return M.seek(agent_, future)
+  local ahead     = dist / (agent.max_speed + 1e-12)
+  local future    = target_agent.position:add(target_agent.velocity:mul(ahead))
+  return M.seek(agent, future)
 end
 
 -- ---------------------------------------------------------------------------
@@ -269,13 +256,13 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Flee from the predicted future position of threat_agent.
+--: (Agent, Agent) -> Vec2
 function M.evade(agent, threat_agent)
-  local agent_ = agent --[[:! Agent]] local ta_ = threat_agent --[[:! Agent]]
-  local to_threat = ta_.position:sub(agent_.position)
+  local to_threat = threat_agent.position:sub(agent.position)
   local dist      = to_threat:length()
-  local ahead     = dist / (agent_.max_speed + 1e-12)
-  local future    = ta_.position:add(ta_.velocity:mul(ahead))
-  return M.flee(agent_, future)
+  local ahead     = dist / (agent.max_speed + 1e-12)
+  local future    = threat_agent.position:add(threat_agent.velocity:mul(ahead))
+  return M.flee(agent, future)
 end
 
 -- ---------------------------------------------------------------------------
@@ -285,33 +272,32 @@ end
 --- Wander: random steering on a circle projected ahead of the agent.
 -- opts: { radius=20, distance=30, jitter=0.5, seed=42 }
 -- NOTE: mutates agent._wander_angle for continuity.
+--: (Agent, { radius: number | nil, distance: number | nil, jitter: number | nil, seed: integer | nil } | nil) -> Vec2
 function M.wander(agent, opts)
-  local agent_ = agent --[[:! Agent]]
-  --: { radius: number | nil, distance: number | nil, jitter: number | nil, seed: integer | nil }
-  local opts_ = opts or {}
+  local opts_ = (opts or {}) --[[:! { radius: number | nil, distance: number | nil, jitter: number | nil, seed: integer | nil }]]
   local radius   = opts_.radius   or 20
   local distance = opts_.distance or 30
   local jitter   = opts_.jitter   or 0.5
 
   -- Optionally seed once; thereafter use math.random
-  if opts_.seed and not agent_._wander_seeded then
+  if opts_.seed and not agent._wander_seeded then
     math.randomseed(opts_.seed)
-    agent_._wander_seeded = true
+    agent._wander_seeded = true
   end
 
   -- Displace the wander angle by a random amount
-  agent_._wander_angle = agent_._wander_angle + (math_random() * 2 - 1) * jitter
+  agent._wander_angle = agent._wander_angle + (math_random() * 2 - 1) * jitter
 
   -- Point on wander circle in local space, translated to world space
-  local ahead = agent_.velocity:normalize():mul(distance)
+  local ahead = agent.velocity:normalize():mul(distance)
   if ahead:length() < 1e-12 then
     ahead = M.vec2(distance, 0)
   end
-  local circle_center = agent_.position:add(ahead)
-  local displacement = M.from_angle(agent_._wander_angle):mul(radius)
+  local circle_center = agent.position:add(ahead)
+  local displacement = M.from_angle(agent._wander_angle):mul(radius)
   local target = circle_center:add(displacement)
 
-  return M.seek(agent_, target)
+  return M.seek(agent, target)
 end
 
 -- ---------------------------------------------------------------------------
@@ -321,17 +307,16 @@ end
 --- Steer to avoid circular obstacles.
 -- obstacles: array of { position=vec2, radius=number }
 -- opts: { lookahead=40 }
+--: (Agent, { [integer]: { position: Vec2, radius: number } }, { lookahead: number | nil } | nil) -> Vec2
 function M.obstacle_avoidance(agent, obstacles, opts)
-  local agent_ = agent --[[:! Agent]]
-  --: { lookahead: number | nil }
-  local opts_ = opts or {}
+  local opts_ = (opts or {}) --[[:! { lookahead: number | nil }]]
   local lookahead = opts_.lookahead or 40
 
-  local speed = agent_.velocity:length()
+  local speed = agent.velocity:length()
   if speed < 1e-12 then return M.vec2(0, 0) end
 
-  local vel_norm = agent_.velocity:normalize() --[[:! Vec2]]
-  local ahead = agent_.position:add(vel_norm:mul(lookahead)) --[[:! Vec2]]
+  local vel_norm = agent.velocity:normalize() --[[:! Vec2]]
+  local ahead = agent.position:add(vel_norm:mul(lookahead) --[[:! Vec2]]) --[[:! Vec2]]
 
   -- Find the closest obstacle that intersects the lookahead ray
   --: { position: Vec2, radius: number } | nil
@@ -343,7 +328,7 @@ function M.obstacle_avoidance(agent, obstacles, opts)
     -- Approximate: check if obstacle center is within (obs.radius) of the ahead point
     local d = ahead:dist(obs_.position)
     if d < obs_.radius then
-      local dist_to_agent = agent_.position:dist(obs_.position)
+      local dist_to_agent = agent.position:dist(obs_.position)
       if dist_to_agent < min_dist then
         min_dist = dist_to_agent
         most_threatening = obs_
@@ -355,9 +340,8 @@ function M.obstacle_avoidance(agent, obstacles, opts)
   local mt_ = most_threatening --[[:! { position: Vec2, radius: number }]]
 
   -- Avoidance force: push directly away from obstacle center
-  local away_dir = ahead:sub(mt_.position) --[[:! Vec2]]
-  local away = away_dir:normalize():mul(agent_.max_force) --[[:! Vec2]]
-  return away
+  local away = ahead:sub(mt_.position) --[[:! Vec2]]
+  return away:normalize():mul(agent.max_force) --[[:! Vec2]]
 end
 
 -- ---------------------------------------------------------------------------
@@ -369,10 +353,9 @@ end
 --   normal points away from the wall surface (into the open space).
 -- The agent tries to maintain a distance of ~opts.desired_dist from the wall.
 -- opts: { desired_dist=20, lookahead=30 }
+--: (Agent, { [integer]: { a: Vec2, b: Vec2, normal: Vec2, _closest_pt: Vec2 | nil } }, { desired_dist: number | nil, lookahead: number | nil } | nil) -> Vec2
 function M.wall_follow(agent, walls, opts)
-  local agent_ = agent --[[:! Agent]]
-  --: { desired_dist: number | nil, lookahead: number | nil }
-  local opts_ = opts or {}
+  local opts_ = (opts or {}) --[[:! { desired_dist: number | nil, lookahead: number | nil }]]
   local desired_dist = opts_.desired_dist or 20
   local lookahead    = opts_.lookahead    or 30
 
@@ -387,15 +370,15 @@ function M.wall_follow(agent, walls, opts)
     local wall_ = wall --[[:! { a: Vec2, b: Vec2, normal: Vec2, _closest_pt: Vec2 | nil }]]
     -- Project agent position onto the wall segment
     local ab  = wall_.b:sub(wall_.a) --[[:! Vec2]]
-    local ap  = agent_.position:sub(wall_.a) --[[:! Vec2]]
+    local ap  = agent.position:sub(wall_.a) --[[:! Vec2]]
     local len_sq = ab:dot(ab)
     --: number
     local t   = 0.0
     if len_sq > 1e-12 then
       t = math_max(0, math_min(1, ap:dot(ab) / len_sq))
     end
-    local closest_pt = wall_.a:add(ab:mul(t))
-    local dist = agent_.position:dist(closest_pt)
+    local closest_pt = wall_.a:add(ab:mul(t) --[[:! Vec2]])
+    local dist = agent.position:dist(closest_pt)
     if dist < min_dist then
       min_dist     = dist
       closest_wall = wall_
@@ -405,14 +388,13 @@ function M.wall_follow(agent, walls, opts)
   end
 
   if not closest_wall then return M.vec2(0, 0) end
-  local cw_ = closest_wall --[[:! { a: Vec2, b: Vec2, normal: Vec2, _closest_pt: Vec2 | nil }]]
 
   -- Steer parallel to wall but corrected toward desired_dist
-  local n    = cw_.normal:normalize()
+  local n    = closest_wall.normal:normalize() --[[:! Vec2]]
   local diff = min_dist - desired_dist
   -- Correction: push toward or away from wall
-  local correction = n:mul(diff * agent_.max_force / (desired_dist + 1e-12))
-  return correction:limit(agent_.max_force)
+  local correction = n:mul(diff * agent.max_force / (desired_dist + 1e-12)) --[[:! Vec2]]
+  return correction:limit(agent.max_force) --[[:! Vec2]]
 end
 
 -- ---------------------------------------------------------------------------
@@ -421,26 +403,23 @@ end
 
 --- Follow a path (array of vec2 waypoints).
 -- opts: { radius=10 }  -- radius within which a waypoint is considered reached
+--: (Agent, { [integer]: Vec2 }, { radius: number | nil } | nil) -> Vec2
 function M.path_follow(agent, path, opts)
-  local agent_ = agent --[[:! Agent]]
-  --: { radius: number | nil }
-  local opts_ = opts or {}
+  local opts_ = (opts or {}) --[[:! { radius: number | nil }]]
   local radius = opts_.radius or 10
 
   if not path or #path == 0 then return M.vec2(0, 0) end
 
   -- Find the current target: first waypoint outside the radius
-  --: { [integer]: Vec2 }
-  local path_ = path --[[:! { [integer]: Vec2 }]]
-  local target = path_[#path_]  -- default to last
-  for i = 1, #path_ do
-    if agent_.position:dist(path_[i]) > radius then
-      target = path_[i]
+  local target = path[#path]  -- default to last
+  for i = 1, #path do
+    if agent.position:dist(path[i]) > radius then
+      target = path[i]
       break
     end
   end
 
-  return M.seek(agent_, target)
+  return M.seek(agent, target)
 end
 
 -- ---------------------------------------------------------------------------
@@ -450,22 +429,21 @@ end
 --- Steer away from nearby neighbors.
 -- neighbors: array of agents
 -- opts: { radius=30 }
+--: (Agent, { [integer]: Agent }, { radius: number | nil } | nil) -> Vec2
 function M.separation(agent, neighbors, opts)
-  local agent_ = agent --[[:! Agent]]
-  --: { radius: number | nil }
-  local opts_ = opts or {}
+  local opts_ = (opts or {}) --[[:! { radius: number | nil }]]
   local radius = opts_.radius or 30
 
   local force = M.vec2(0, 0)
-  local count = 0
+  local count = 0 --: integer
 
   for _, other in ipairs(neighbors) do
     local other_ = other --[[:! Agent]]
-    if other_ ~= agent_ then
-      local dsq = agent_.position:dist_sq(other_.position)
+    if other_ ~= agent then
+      local dsq = agent.position:dist_sq(other_.position)
       if dsq < radius * radius and dsq > 1e-12 then
         local d   = math_sqrt(dsq)
-        local away = agent_.position:sub(other_.position):mul(1 / d) --[[: Vec2]]
+        local away = agent.position:sub(other_.position):mul(1 / d) --[[: Vec2]]
         -- Weight by inverse distance
         force = force:add(away:mul(radius / d))
         count = count + 1
@@ -473,10 +451,9 @@ function M.separation(agent, neighbors, opts)
     end
   end
 
-  local count_ = count --[[:! integer]]
-  if count_ == 0 then return M.vec2(0, 0) end
-  force = force:mul(1 / count_)
-  return force:limit(agent_.max_force)
+  if count == 0 then return M.vec2(0, 0) end
+  force = force:mul(1 / count)
+  return force:limit(agent.max_force)
 end
 
 -- ---------------------------------------------------------------------------
@@ -484,29 +461,28 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Steer toward the average position of neighbors.
+--: (Agent, { [integer]: Agent }) -> Vec2
 function M.cohesion(agent, neighbors)
-  local agent_ = agent --[[:! Agent]]
   if not neighbors or #neighbors == 0 then return M.vec2(0, 0) end
 
   --: number
   local cx = 0
   --: number
   local cy = 0
-  local count  = 0
+  local count = 0 --: integer
 
   for _, other in ipairs(neighbors) do
     local other_ = other --[[:! Agent]]
-    if other_ ~= agent_ then
+    if other_ ~= agent then
       cx    = cx + other_.position.x
       cy    = cy + other_.position.y
       count = count + 1
     end
   end
 
-  local count_ = count --[[:! integer]]
-  if count_ == 0 then return M.vec2(0, 0) end
-  local center = M.vec2(cx / count_, cy / count_)
-  return M.seek(agent_, center)
+  if count == 0 then return M.vec2(0, 0) end
+  local center = M.vec2(cx / count, cy / count)
+  return M.seek(agent, center)
 end
 
 -- ---------------------------------------------------------------------------
@@ -514,33 +490,32 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Steer toward the average heading of neighbors.
+--: (Agent, { [integer]: Agent }) -> Vec2
 function M.alignment(agent, neighbors)
-  local agent_ = agent --[[:! Agent]]
   if not neighbors or #neighbors == 0 then return M.vec2(0, 0) end
 
   --: number
   local vx = 0
   --: number
   local vy = 0
-  local count  = 0
+  local count = 0 --: integer
 
   for _, other in ipairs(neighbors) do
     local other_ = other --[[:! Agent]]
-    if other_ ~= agent_ then
+    if other_ ~= agent then
       vx    = vx + other_.velocity.x
       vy    = vy + other_.velocity.y
       count = count + 1
     end
   end
 
-  local count_ = count --[[:! integer]]
-  if count_ == 0 then return M.vec2(0, 0) end
+  if count == 0 then return M.vec2(0, 0) end
 
-  local avg_vel = M.vec2(vx / count_, vy / count_)
+  local avg_vel = M.vec2(vx / count, vy / count)
   local len     = avg_vel:length()
   if len < 1e-12 then return M.vec2(0, 0) end
-  local desired = avg_vel:mul(agent_.max_speed / len)
-  return steering_force(agent_, desired)
+  local desired = avg_vel:mul(agent.max_speed / len)
+  return steering_force(agent, desired)
 end
 
 -- ---------------------------------------------------------------------------
@@ -595,9 +570,9 @@ function M.flock(agents, opts)
   local forces = {}
   for i, ag in ipairs(agents) do
     local ag_ = ag --[[:! Agent]]
-    local sep = M.separation(ag_, agents, { radius = sep_radius })
-    local coh = M.cohesion(ag_, agents)
-    local ali = M.alignment(ag_, agents)
+    local sep = M.separation(ag_, agents --[[:! { [integer]: Agent }]], { radius = sep_radius })
+    local coh = M.cohesion(ag_, agents --[[:! { [integer]: Agent }]])
+    local ali = M.alignment(ag_, agents --[[:! { [integer]: Agent }]])
     forces[i] = sep:mul(sw):add(coh:mul(cw)):add(ali:mul(aw)):limit(ag_.max_force)
   end
 

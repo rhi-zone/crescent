@@ -38,13 +38,16 @@ local function rotl32(x, r)
   return bor(lshift(x, r), rshift(x, 32 - r))
 end
 
+local FMIX32_C1 = math.floor(0x85ebca6b) --: integer
+local FMIX32_C2 = math.floor(0xc2b2ae35) --: integer
+
 -- Final mix of a 32-bit hash block — force all bits to avalanche.
 --: (integer) -> integer
 local function fmix32(h)
   h = bxor(h, rshift(h, 16))
-  h = mul32(h, math.floor(0x85ebca6b) --[[:! integer]])
+  h = mul32(h, FMIX32_C1)
   h = bxor(h, rshift(h, 13))
-  h = mul32(h, math.floor(0xc2b2ae35) --[[:! integer]])
+  h = mul32(h, FMIX32_C2)
   h = bxor(h, rshift(h, 16))
   return h
 end
@@ -69,8 +72,9 @@ end
 -- MurmurHash3_x86_32
 -- ---------------------------------------------------------------------------
 
-local C1_32 = math.floor(0xcc9e2d51) --[[:! integer]]
-local C2_32 = math.floor(0x1b873593) --[[:! integer]]
+local C1_32 = math.floor(0xcc9e2d51) --: integer
+local C2_32 = math.floor(0x1b873593) --: integer
+local C3_32 = math.floor(0xe6546b64) --: integer
 
 --: (string, integer | nil) -> (integer | nil, string | nil)
 function M.x86_32(key, seed)
@@ -91,7 +95,7 @@ function M.x86_32(key, seed)
     k1 = mul32(k1, C2_32)
     h1 = bxor(h1, k1)
     h1 = rotl32(h1, 13)
-    h1 = tobit(mul32(h1, 5) + tobit(math.floor(0xe6546b64) --[[:! integer]]))
+    h1 = tobit(mul32(h1, 5) + tobit(C3_32))
   end
 
   -- Tail: remaining bytes
@@ -125,10 +129,14 @@ end
 -- MurmurHash3_x86_128
 -- ---------------------------------------------------------------------------
 
-local C1_128x86 = math.floor(0x239b961b) --[[:! integer]]
-local C2_128x86 = math.floor(0xab0e9789) --[[:! integer]]
-local C3_128x86 = math.floor(0x38b34ae5) --[[:! integer]]
-local C4_128x86 = math.floor(0xa1e38b93) --[[:! integer]]
+local C1_128x86 = math.floor(0x239b961b) --: integer
+local C2_128x86 = math.floor(0xab0e9789) --: integer
+local C3_128x86 = math.floor(0x38b34ae5) --: integer
+local C4_128x86 = math.floor(0xa1e38b93) --: integer
+local C5_128x86 = math.floor(0x561ccd1b) --: integer
+local C6_128x86 = math.floor(0x0bcaa747) --: integer
+local C7_128x86 = math.floor(0x96cd1c35) --: integer
+local C8_128x86 = math.floor(0x32ac3b17) --: integer
 
 -- Returns h1, h2, h3, h4 as four 32-bit integers.
 --: (string, integer | nil) -> (integer | nil, integer | string | nil, integer | nil, integer | nil)
@@ -154,16 +162,16 @@ function M.x86_128(key, seed)
     local k4 = read_u32_le(key, base + 12)
 
     k1 = mul32(k1, C1_128x86); k1 = rotl32(k1, 15); k1 = mul32(k1, C2_128x86); h1 = bxor(h1, k1)
-    h1 = rotl32(h1, 19); h1 = tobit(mul32(tobit(h1 + h2), 5) + tobit(math.floor(0x561ccd1b) --[[:! integer]]))
+    h1 = rotl32(h1, 19); h1 = tobit(mul32(tobit(h1 + h2), 5) + tobit(C5_128x86))
 
     k2 = mul32(k2, C2_128x86); k2 = rotl32(k2, 16); k2 = mul32(k2, C3_128x86); h2 = bxor(h2, k2)
-    h2 = rotl32(h2, 17); h2 = tobit(mul32(tobit(h2 + h3), 5) + tobit(math.floor(0x0bcaa747) --[[:! integer]]))
+    h2 = rotl32(h2, 17); h2 = tobit(mul32(tobit(h2 + h3), 5) + tobit(C6_128x86))
 
     k3 = mul32(k3, C3_128x86); k3 = rotl32(k3, 17); k3 = mul32(k3, C4_128x86); h3 = bxor(h3, k3)
-    h3 = rotl32(h3, 15); h3 = tobit(mul32(tobit(h3 + h4), 5) + tobit(math.floor(0x96cd1c35) --[[:! integer]]))
+    h3 = rotl32(h3, 15); h3 = tobit(mul32(tobit(h3 + h4), 5) + tobit(C7_128x86))
 
     k4 = mul32(k4, C4_128x86); k4 = rotl32(k4, 18); k4 = mul32(k4, C1_128x86); h4 = bxor(h4, k4)
-    h4 = rotl32(h4, 13); h4 = tobit(mul32(tobit(h4 + h1), 5) + tobit(math.floor(0x32ac3b17) --[[:! integer]]))
+    h4 = rotl32(h4, 13); h4 = tobit(mul32(tobit(h4 + h1), 5) + tobit(C8_128x86))
   end
 
   -- Tail

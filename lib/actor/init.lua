@@ -36,8 +36,9 @@ local co_yield   = coroutine.yield
 local ActorCtx = {}
 ActorCtx.__index = ActorCtx
 
+--: (ActorCtxShape, number|nil) -> any
 function ActorCtx:receive(timeout_ms)
-  local self_ = self --[[:! ActorCtxShape]]
+  local self_ = self --[[: ActorCtxShape]]
   -- If mailbox already has a message, return it immediately.
   local mailbox = self_._actor._mailbox
   if #mailbox > 0 then
@@ -45,7 +46,7 @@ function ActorCtx:receive(timeout_ms)
   end
   -- Otherwise yield back to the scheduler, which will resume us when a message
   -- arrives (or the timeout fires).
-  local sys_ = self_._system --[[:! SystemShape]]
+  local sys_ = self_._system --[[: SystemShape]]
   local clock_fn = sys_._clock_fn
   local deadline --: number|nil
   if timeout_ms then
@@ -65,25 +66,29 @@ function ActorCtx:receive(timeout_ms)
   end
 end
 
+--: (ActorCtxShape, integer, any) -> any
 function ActorCtx:send(pid, msg)
-  local self_ = self --[[:! ActorCtxShape]]
-  local sys_ = self_._system --[[:! SystemShape]]
+  local self_ = self --[[: ActorCtxShape]]
+  local sys_ = self_._system --[[: SystemShape]]
   return sys_:send(pid, msg)
 end
 
+--: (ActorCtxShape) -> integer
 function ActorCtx:self()
-  local self_ = self --[[:! ActorCtxShape]]
+  local self_ = self --[[: ActorCtxShape]]
   return self_._actor._pid
 end
 
+--: (ActorCtxShape) -> string|nil
 function ActorCtx:name()
-  local self_ = self --[[:! ActorCtxShape]]
+  local self_ = self --[[: ActorCtxShape]]
   return self_._actor._name
 end
 
+--: (ActorCtxShape, integer) -> boolean|nil
 function ActorCtx:link(pid)
-  local self_ = self --[[:! ActorCtxShape]]
-  local sys_ = self_._system --[[:! SystemShape]]
+  local self_ = self --[[: ActorCtxShape]]
+  local sys_ = self_._system --[[: SystemShape]]
   local target = sys_._actors[pid]
   if not target then return nil, "actor not found" end
   -- Bidirectional link
@@ -92,9 +97,10 @@ function ActorCtx:link(pid)
   return true
 end
 
+--: (ActorCtxShape, integer) -> integer
 function ActorCtx:monitor(pid)
-  local self_ = self --[[:! ActorCtxShape]]
-  local sys_ = self_._system --[[:! SystemShape]]
+  local self_ = self --[[: ActorCtxShape]]
+  local sys_ = self_._system --[[: SystemShape]]
   local target = sys_._actors[pid]
   if not target then
     -- Already dead — send :down immediately next step
@@ -108,9 +114,10 @@ function ActorCtx:monitor(pid)
   return ref
 end
 
+--: (ActorCtxShape, any, any) -> integer
 function ActorCtx:spawn(fn, opts)
-  local self_ = self --[[:! ActorCtxShape]]
-  local sys_ = self_._system --[[:! SystemShape]]
+  local self_ = self --[[: ActorCtxShape]]
+  local sys_ = self_._system --[[: SystemShape]]
   return sys_:spawn(fn, opts)
 end
 
@@ -168,15 +175,17 @@ function M.system(opts)
   return sys
 end
 
+--: (SystemShape) -> integer
 function System:_next_ref()
-  local self_ = self --[[:! SystemShape]]
+  local self_ = self --[[: SystemShape]]
   local r = self_._next_ref_id
   self_._next_ref_id = r + 1
   return r
 end
 
+--: (SystemShape, any, any) -> integer
 function System:spawn(fn, opts)
-  local self_ = self --[[:! SystemShape]]
+  local self_ = self --[[: SystemShape]]
   opts = opts or {}
   local opts_ = opts --[[:! { name: string|nil, restart: string|nil, mailbox_size: integer|nil }]]
   local pid = self_._next_pid
@@ -191,8 +200,9 @@ function System:spawn(fn, opts)
   return pid
 end
 
+--: (SystemShape, integer, any) -> boolean|nil
 function System:send(pid, msg)
-  local self_ = self --[[:! SystemShape]]
+  local self_ = self --[[: SystemShape]]
   local actor = self_._actors[pid]
   if not actor or actor._status ~= "running" then
     return nil, "actor not found or dead"
@@ -212,8 +222,8 @@ end
 
 --: (SystemShape, integer, any, number|nil) -> any
 function System:call(pid, msg, timeout_ms)
-  local self_ = self --[[:! SystemShape]]
-  local timeout_ms_ = timeout_ms --[[:! number|nil]]
+  local self_ = self --[[: SystemShape]]
+  local timeout_ms_ = timeout_ms --[[: number|nil]]
   -- We need a temporary "caller" mechanism without a real actor for the
   -- return channel. We use a single-element result table and a unique reply_to
   -- pid: the pid of a synthetic receiver actor.
@@ -261,26 +271,30 @@ function System:call(pid, msg, timeout_ms)
   return result_box[1]
 end
 
+--: (SystemShape, string) -> integer|nil
 function System:whereis(name)
-  local self_ = self --[[:! SystemShape]]
+  local self_ = self --[[: SystemShape]]
   return self_._names[name]
 end
 
+--: (SystemShape, integer) -> nil
 function System:stop(pid)
-  local self_ = self --[[:! SystemShape]]
+  local self_ = self --[[: SystemShape]]
   local actor = self_._actors[pid]
   if not actor then return end
   self_:_kill_actor(actor, "stopped")
 end
 
+--: (SystemShape, integer) -> boolean
 function System:alive(pid)
-  local self_ = self --[[:! SystemShape]]
+  local self_ = self --[[: SystemShape]]
   local actor = self_._actors[pid]
-  return actor ~= nil and actor._status == "running"
+  return (actor ~= nil and actor._status == "running") and true or false
 end
 
+--: (SystemShape) -> integer
 function System:actor_count()
-  local self_ = self --[[:! SystemShape]]
+  local self_ = self --[[: SystemShape]]
   local n = 0
   for _ in pairs(self_._actors) do
     n = n + 1
@@ -289,9 +303,10 @@ function System:actor_count()
 end
 
 -- Resume an actor's coroutine, catching errors, and handle exit.
+--: (SystemShape, ActorRecord) -> nil
 function System:_resume_actor(actor)
-  local self_ = self --[[:! SystemShape]]
-  local actor_ = actor --[[:! ActorRecord]]
+  local self_ = self --[[: SystemShape]]
+  local actor_ = actor --[[: ActorRecord]]
   if actor_._status ~= "running" then return end
   local co_ = actor_._co --[[: any]]
   if co_status(co_) == "dead" then
@@ -312,9 +327,10 @@ function System:_resume_actor(actor)
   end
 end
 
+--: (SystemShape, ActorRecord, string) -> nil
 function System:_kill_actor(actor, reason)
-  local self_ = self --[[:! SystemShape]]
-  local actor_ = actor --[[:! ActorRecord]]
+  local self_ = self --[[: SystemShape]]
+  local actor_ = actor --[[: ActorRecord]]
   if actor_._status == "dead" then return end
   actor_._status = "dead"
   actor_._exit_reason = reason
@@ -348,8 +364,9 @@ function System:_kill_actor(actor, reason)
   self_._actors[pid] = nil
 end
 
+--: (SystemShape) -> nil
 function System:step()
-  local self_ = self --[[:! SystemShape]]
+  local self_ = self --[[: SystemShape]]
   -- Collect actors to step (snapshot — actors may die during step)
   local to_step = {} --: { [integer]: ActorRecord }
   local now = self_._clock_fn()
@@ -373,15 +390,17 @@ function System:step()
   end
 end
 
+--: (SystemShape, integer) -> nil
 function System:run(n)
-  local self_ = self --[[:! SystemShape]]
+  local self_ = self --[[: SystemShape]]
   for _ = 1, n do
     self_:step()
   end
 end
 
+--: (SystemShape) -> nil
 function System:run_until_idle()
-  local self_ = self --[[:! SystemShape]]
+  local self_ = self --[[: SystemShape]]
   local max = 100000
   for _ = 1, max do
     -- Check if any actor has pending messages or timed-out deadlines
@@ -410,8 +429,9 @@ end
 local Supervisor = {}
 Supervisor.__index = Supervisor
 
+--: (SystemShape, any) -> any
 function System:supervisor(opts)
-  local self_ = self --[[:! SystemShape]]
+  local self_ = self --[[: SystemShape]]
   opts = opts or {}
   local opts_ = opts --[[:! { strategy: string|nil, max_restarts: integer|nil, period: number|nil, name: string|nil, children: { [integer]: any }|nil }]]
   local sup = setmetatable({
@@ -469,8 +489,9 @@ end
 --:: FailureRec = { times: { [integer]: number } }
 
 -- Spawn the coroutine for an already-registered child entry.
+--: (SupervisorShape, any) -> integer
 function Supervisor:_spawn_child(entry)
-  local self_ = self --[[:! SupervisorShape]]
+  local self_ = self --[[: SupervisorShape]]
   local sys_ = self_._system
   local entry_ = entry --[[:! ChildEntry]]
   local child_id = entry_.id
@@ -493,8 +514,9 @@ function Supervisor:_spawn_child(entry)
   return pid
 end
 
+--: (SupervisorShape, any) -> integer|nil
 function Supervisor:_start_child(spec)
-  local self_ = self --[[:! SupervisorShape]]
+  local self_ = self --[[: SupervisorShape]]
   local spec_ = spec --[[:! ChildEntry]]
   -- Register and spawn a new child (used for dynamic child addition or restart).
   local entry = {
@@ -511,8 +533,9 @@ function Supervisor:_start_child(spec)
   return entry_.pid
 end
 
+--: (SupervisorShape, string) -> any
 function Supervisor:_find_child(id)
-  local self_ = self --[[:! SupervisorShape]]
+  local self_ = self --[[: SupervisorShape]]
   for i, c in ipairs(self_._children) do
     local c_ = c --[[:! ChildEntry]]
     if c_.id == id then return c_, i end
@@ -520,8 +543,9 @@ function Supervisor:_find_child(id)
   return nil, nil
 end
 
+--: (SupervisorShape, any, string) -> boolean
 function Supervisor:_should_restart(child, reason)
-  local child_ = child --[[:! ChildEntry]]
+  local child_ = child --[[: ChildEntry]]
   local r = child_.restart
   if r == "permanent" then return true end
   if r == "temporary" then return false end
@@ -529,8 +553,9 @@ function Supervisor:_should_restart(child, reason)
   return false
 end
 
+--: (SupervisorShape, string) -> integer
 function Supervisor:_record_failure(id)
-  local self_ = self --[[:! SupervisorShape]]
+  local self_ = self --[[: SupervisorShape]]
   local now = self_._system._clock_fn()
   local rec = self_._failures[id] --[[:! FailureRec]]
   -- Prune old failures outside the period window
@@ -548,8 +573,9 @@ function Supervisor:_record_failure(id)
   return #times
 end
 
+--: (SupervisorShape, string, string, any) -> nil
 function Supervisor:_handle_exit(id, reason, ctx)
-  local self_ = self --[[:! SupervisorShape]]
+  local self_ = self --[[: SupervisorShape]]
   local child = self_:_find_child(id)
   if not child then return end
   local child_ = child --[[:! ChildEntry]]
@@ -630,8 +656,9 @@ function Supervisor:_handle_exit(id, reason, ctx)
   end
 end
 
+--: (SupervisorShape, string) -> integer|nil
 function Supervisor:get_pid(id)
-  local self_ = self --[[:! SupervisorShape]]
+  local self_ = self --[[: SupervisorShape]]
   local child = self_:_find_child(id)
   if child then
     local child_ = child --[[:! ChildEntry]]

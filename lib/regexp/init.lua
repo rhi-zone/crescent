@@ -221,7 +221,7 @@ parse_alt = function(insns, pat, pos, gc)
   if not f then return nil, err end
   -- Check for |
   if pos[1] <= #pat and pat:byte(pos[1]) == 124 then
-    local alts = --[[:! { [integer]: Frag }]] { f }
+    local alts = --[[: { [integer]: Frag }]] { f }
     while pos[1] <= #pat and pat:byte(pos[1]) == 124 do
       pos[1] = pos[1] + 1
       local alt, e = parse_concat(insns, pat, pos, gc)
@@ -504,7 +504,7 @@ local function apply_quant(insns, atom_from, atom_to, atom_outs, min, max)
       -- The outs of the original atom were atom_outs. The clones have outs at the same relative
       -- positions, shifted by offset. Rebuild:
       local clone_offset = clone_start - prev_from
-      local new_outs = --[[:! Outs]] {}
+      local new_outs = --[[: Outs]] {}
       for i = 1, #prev_outs do
         new_outs[i] = { (prev_outs[i][1] --[[:! integer]]) + clone_offset, prev_outs[i][2] }
       end
@@ -534,7 +534,7 @@ local function apply_quant(insns, atom_from, atom_to, atom_outs, min, max)
       local clone_to = #insns
       patch_outs(insns, prev_outs, clone_start)
       local clone_offset = clone_start - prev_from
-      local new_outs = --[[:! Outs]] {}
+      local new_outs = --[[: Outs]] {}
       for i = 1, #prev_outs do
         new_outs[i] = { (prev_outs[i][1] --[[:! integer]]) + clone_offset, prev_outs[i][2] }
       end
@@ -552,7 +552,7 @@ local function apply_quant(insns, atom_from, atom_to, atom_outs, min, max)
       patch_outs(insns, prev_outs, split_pc)
       -- tail loops back to split
       local tail_offset = tail_start - atom_from
-      local tail_outs = --[[:! Outs]] {}
+      local tail_outs = --[[: Outs]] {}
       for i = 1, #atom_outs do
         tail_outs[i] = { (atom_outs[i][1] --[[:! integer]]) + tail_offset, atom_outs[i][2] }
       end
@@ -569,7 +569,7 @@ local function apply_quant(insns, atom_from, atom_to, atom_outs, min, max)
       local split_pc = emit(insns, { op = OP_SPLIT, x = clone_start, y = 0 })
       patch_outs(insns, all_outs, split_pc)
       local clone_offset = clone_start - atom_from
-      local clone_outs = --[[:! Outs]] {}
+      local clone_outs = --[[: Outs]] {}
       for i = 1, #atom_outs do
         clone_outs[i] = { (atom_outs[i][1] --[[:! integer]]) + clone_offset, atom_outs[i][2] }
       end
@@ -583,7 +583,7 @@ end
 
 --: (Insns, string, { [integer]: integer }, { [integer]: integer }) -> (Frag | nil, string | nil)
 parse_concat = function(insns, pat, pos, gc)
-  local frags = --[[:! { [integer]: Frag }]] {}
+  local frags = --[[: { [integer]: Frag }]] {}
   while pos[1] <= #pat do
     local b = pat:byte(pos[1])
     if b == 41 or b == 124 then break end  -- ) or |
@@ -652,9 +652,9 @@ parse_concat = function(insns, pat, pos, gc)
 end
 
 local function compile_pattern(pat)
-  local insns = --[[:! Insns]] {}
-  local gc = --[[:! { [integer]: integer }]] { 0 }  -- group counter
-  local pos = --[[:! { [integer]: integer }]] { 1 }
+  local insns = --[[: Insns]] {}
+  local gc = --[[: { [integer]: integer }]] { 0 }  -- group counter
+  local pos = --[[: { [integer]: integer }]] { 1 }
 
   local f, e = parse_alt(insns, pat, pos, gc)
   if not f then return nil, e end
@@ -743,8 +743,8 @@ local function nfa_run(prog, subject, init, anchored)
   --:: Thread = { pc: integer, caps: { [integer]: integer } }
   --:: ThreadList = { [integer]: Thread }
   for start = init, anchored and init or slen + 1 do
-    local clist = --[[:! ThreadList]] {}
-    local visited = --[[:! { [integer]: unknown }]] {}
+    local clist = --[[: ThreadList]] {}
+    local visited = --[[: { [integer]: unknown }]] {}
     add_thread(insns, clist, 1, new_caps(), start, slen, visited)
 
     -- Check if initial state is already MATCH (empty pattern)
@@ -761,8 +761,8 @@ local function nfa_run(prog, subject, init, anchored)
     local pos = start --: integer
     while #clist > 0 and pos <= slen do
       local b = subject:byte(pos) or 0
-      local nlist = --[[:! ThreadList]] {}
-      local nvisited = --[[:! { [integer]: unknown }]] {}
+      local nlist = --[[: ThreadList]] {}
+      local nvisited = --[[: { [integer]: unknown }]] {}
 
       for i = 1, #clist do
         local t = clist[i] --[[:! Thread]]
@@ -816,7 +816,7 @@ end
 -- Extract capture strings from caps array
 --: (string, { [integer]: integer }, integer) -> { [integer]: string | boolean }
 local function extract_caps(subject, caps, ngroups)
-  local result = --[[:! { [integer]: string | boolean }]] {}
+  local result = --[[: { [integer]: string | boolean }]] {}
   for i = 1, ngroups do
     local s = caps[i * 2 - 1]
     local e = caps[i * 2]

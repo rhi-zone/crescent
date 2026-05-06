@@ -701,10 +701,10 @@ local function emit_params(ctx, ps, pl, has_vararg, ann_content)
                 end
                 local typed_parts = {}
                 for i, pname in ipairs(param_parts --[[:! { [integer]: string }]]) do
-                    if types_list[i] and not (pname --[[:! string]]):match("^%.%.%.") then
-                        typed_parts[i] = (pname --[[:! string]]) .. ": " .. (types_list[i] --[[:! string]])
+                    if types_list[i] and not pname:match("^%.%.%.") then
+                        typed_parts[i] = pname .. ": " .. (types_list[i] --[[:! string]])
                     else
-                        typed_parts[i] = pname --[[:! string]]
+                        typed_parts[i] = pname
                     end
                 end
                 return table.concat(typed_parts, ", ")
@@ -1103,8 +1103,8 @@ local function emit_decl_annotations(ctx)
             -- content like "Foo = { x: integer }"
             local name, body = ann.content:match("^([%a_][%w_]*)%s*=%s*(.+)$")
             if name and body then
-                local ts_body = ann_to_ts(body) or (body --[[:! string]])
-                lines[#lines + 1] = "export type " .. (name --[[:! string]]) .. " = " .. ts_body .. ";"
+                local ts_body = ann_to_ts(body) or body --[[:! string]]
+                lines[#lines + 1] = "export type " .. name .. " = " .. ts_body .. ";"
             end
         end
     end

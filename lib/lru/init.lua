@@ -786,14 +786,14 @@ end
 --: (TwoQ, unknown) -> boolean
 function TwoQ:in_queue(key)
   local node = self._map[key]
-  return (node ~= nil and node.queue == "in") --[[:! boolean]]
+  return (node ~= nil and node.queue == "in") and true or false
 end
 
 -- "out" queue (LRU) membership: true if key is in the "out" queue.
 --: (TwoQ, unknown) -> boolean
 function TwoQ:out_queue(key)
   local node = self._map[key]
-  return (node ~= nil and node.queue == "out") --[[:! boolean]]
+  return (node ~= nil and node.queue == "out") and true or false
 end
 
 -- True if key is in the ghost set (evicted from "out" but not yet re-inserted).

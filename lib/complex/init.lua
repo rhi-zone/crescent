@@ -165,46 +165,46 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Magnitude |z| = sqrt(re^2 + im^2).
+--: (Complex) -> number
 function mt:abs()
-  local self_ = self --[[:! Complex]]
-  return sqrt(self_.re * self_.re + self_.im * self_.im)
+  return sqrt(self.re * self.re + self.im * self.im)
 end
 
 -- Argument (angle) of z in radians, in (-π, π].
+--: (Complex) -> number
 function mt:arg()
-  local self_ = self --[[:! Complex]]
-  return atan2(self_.im, self_.re)
+  return atan2(self.im, self.re)
 end
 
 -- Complex conjugate: re - im*i.
+--: (Complex) -> Complex
 function mt:conj()
-  local self_ = self --[[:! Complex]]
-  return _new(self_.re, -self_.im)
+  return _new(self.re, -self.im)
 end
 
 -- Square: z * z.
+--: (Complex) -> Complex
 function mt:sq()
-  local self_ = self --[[:! Complex]]
-  return _new(self_.re * self_.re - self_.im * self_.im,
-              2 * self_.re * self_.im)
+  return _new(self.re * self.re - self.im * self.im,
+              2 * self.re * self.im)
 end
 
 -- Return (r, theta) polar decomposition.
+--: (Complex) -> (number, number)
 function mt:polar()
-  local self_ = self --[[:! Complex]]
-  return self_:abs(), self_:arg()
+  return self:abs(), self:arg()
 end
 
 -- True when imaginary part is zero.
+--: (Complex) -> boolean
 function mt:is_real()
-  local self_ = self --[[:! Complex]]
-  return self_.im == 0
+  return self.im == 0
 end
 
 -- True when both parts are zero.
+--: (Complex) -> boolean
 function mt:is_zero()
-  local self_ = self --[[:! Complex]]
-  return self_.re == 0 and self_.im == 0
+  return (self.re == 0 and self.im == 0) and true or false
 end
 
 -- ---------------------------------------------------------------------------

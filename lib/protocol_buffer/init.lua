@@ -680,7 +680,7 @@ function M.decode(schema, bytes)
       end
       if not msg._unknown then msg._unknown = {} end
       msg._unknown[#msg._unknown + 1] = {field_number, wire_type, raw_value}
-      offset = (no --[[: any]]) --[[:! integer]]
+      offset = no --[[:! integer]]
     end
   end
 

@@ -40,9 +40,8 @@ function M.new(capacity)
   local buf = {} --: ChanBuf
   local sq  = {} --: SendQ
   local rq  = {} --: RecvQ
-  local cap_ = capacity --[[:! integer]]
   return setmetatable({
-    _cap     = cap_,
+    _cap     = capacity --[[:! integer]],
     _buf     = buf,
     _head    = 1,
     _tail    = 1,
@@ -73,6 +72,7 @@ end
 
 -- ── send ─────────────────────────────────────────────────────────────────────
 
+--: (ChanObj, unknown) -> (boolean | nil, string | nil)
 function Chan:send(value)
   local self_ = self --[[:! ChanObj]]
   if self_._closed then
@@ -110,6 +110,8 @@ function Chan:send(value)
   end
   return true
 end
+
+--: (ChanObj) -> (unknown, boolean)
 
 -- ── recv ─────────────────────────────────────────────────────────────────────
 
@@ -240,9 +242,12 @@ end
 
 -- ── state queries ─────────────────────────────────────────────────────────────
 
-function Chan:len()       local s = self --[[:! ChanObj]]; return s._len      end
-function Chan:cap()       local s = self --[[:! ChanObj]]; return s._cap      end
-function Chan:is_closed() local s = self --[[:! ChanObj]]; return s._closed   end
+--: (ChanObj) -> integer
+function Chan:len()       return self._len      end
+--: (ChanObj) -> integer
+function Chan:cap()       return self._cap      end
+--: (ChanObj) -> boolean
+function Chan:is_closed() return self._closed   end
 
 -- ── select ────────────────────────────────────────────────────────────────────
 

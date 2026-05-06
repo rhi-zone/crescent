@@ -243,27 +243,27 @@ function Sched:every(interval_seconds, fn, opts)
 end
 
 -- Register a hook called when a task completes successfully.
+--: (SchedObj, (Task) -> unknown) -> nil
 function Sched:on_task_done(fn)
-  local self_ = self --[[:! SchedObj]]
-  self_._done_hook = fn
+  self._done_hook = fn
 end
 
 -- Register a hook called when a task fails.
+--: (SchedObj, (Task, string | nil) -> unknown) -> nil
 function Sched:on_task_failed(fn)
-  local self_ = self --[[:! SchedObj]]
-  self_._failed_hook = fn
+  self._failed_hook = fn
 end
 
 -- Cancel a task: mark it and remove from ready queue if present.
+--: (SchedObj, Task) -> nil
 function Sched:cancel(task)
-  local self_ = self --[[:! SchedObj]]
   if task.status == "done" or task.status == "failed" then return end
   task._cancelled = true
   task.status = "done"  -- treat as done so done() can return true
   -- Remove from ready queue
-  local ready_any = self_._ready --[[: any]]
-  for i = 1, #self_._ready do
-    if self_._ready[i] == task then
+  local ready_any = self._ready --[[: any]]
+  for i = 1, #self._ready do
+    if self._ready[i] == task then
       table.remove(ready_any, i)
       break
     end
@@ -272,6 +272,7 @@ function Sched:cancel(task)
 end
 
 -- Run one scheduling step.
+--: (SchedObj) -> nil
 function Sched:step()
   local self_ = self --[[:! SchedObj]]
   self_._steps = self_._steps + 1
@@ -346,33 +347,33 @@ end
 
 -- Run until all tasks are done or failed.
 -- Safety limit: max_steps (default 1,000,000).
+--: (SchedObj, integer | nil) -> nil
 function Sched:run(max_steps)
-  local self_ = self --[[:! SchedObj]]
   max_steps = max_steps or 1000000
   local i = 0
-  while i < max_steps and not self_:done() do
-    self_:step()
+  while i < max_steps and not self:done() do
+    self:step()
     i = i + 1
     -- If nothing is ready and nothing is sleeping but we're not done, break.
-    if #self_._ready == 0 and #self_._sleeping == 0 then break end
+    if #self._ready == 0 and #self._sleeping == 0 then break end
   end
 end
 
 -- Run at most n_steps steps.
+--: (SchedObj, integer) -> nil
 function Sched:run_for(n_steps)
-  local self_ = self --[[:! SchedObj]]
   for _ = 1, n_steps do
-    if self_:done() then break end
-    self_:step()
+    if self:done() then break end
+    self:step()
   end
 end
 
 -- Number of active tasks (not done/failed).
+--: (SchedObj) -> integer
 function Sched:task_count()
-  local self_ = self --[[:! SchedObj]]
   local n = 0
-  for i = 1, #self_._all_tasks do
-    local t = self_._all_tasks[i]
+  for i = 1, #self._all_tasks do
+    local t = self._all_tasks[i]
     if t.status ~= "done" and t.status ~= "failed" and not t._cancelled then
       n = n + 1
     end
@@ -381,10 +382,10 @@ function Sched:task_count()
 end
 
 -- True when all tasks are done or failed.
+--: (SchedObj) -> boolean
 function Sched:done()
-  local self_ = self --[[:! SchedObj]]
-  for i = 1, #self_._all_tasks do
-    local t = self_._all_tasks[i]
+  for i = 1, #self._all_tasks do
+    local t = self._all_tasks[i]
     if t.status ~= "done" and t.status ~= "failed" then
       return false
     end
@@ -393,11 +394,11 @@ function Sched:done()
 end
 
 -- Statistics snapshot.
+--: (SchedObj) -> { total: integer, done: integer, failed: integer, pending: integer, steps: integer }
 function Sched:stats()
-  local self_ = self --[[:! SchedObj]]
   local total, done, failed, pending = 0, 0, 0, 0
-  for i = 1, #self_._all_tasks do
-    local t = self_._all_tasks[i]
+  for i = 1, #self._all_tasks do
+    local t = self._all_tasks[i]
     total = total + 1
     if t.status == "done" or t._cancelled then
       done = done + 1
@@ -407,7 +408,7 @@ function Sched:stats()
       pending = pending + 1
     end
   end
-  return { total = total, done = done, failed = failed, pending = pending, steps = self_._steps }
+  return { total = total, done = done, failed = failed, pending = pending, steps = self._steps }
 end
 
 return M

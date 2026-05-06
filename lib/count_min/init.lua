@@ -85,23 +85,23 @@ local CMS = {}
 CMS.__index = CMS
 
 -- update(element, amount): increment frequency of element by amount (default 1).
+--: (CMS, unknown, number | nil) -> nil
 function CMS:update(element, amount)
-  local self_ = self --[[:! CMS]]
   amount = amount or 1
   local s     = type(element) == "string" and element or tostring(element)
-  local w     = self_._w
-  local d     = self_._d
-  local seeds = self_._seeds
-  local cnt   = self_._counters
+  local w     = self._w
+  local d     = self._d
+  local seeds = self._seeds
+  local cnt   = self._counters
   for i = 0, d - 1 do
     local j = band(hash32(s, seeds[i + 1]), 0x7fffffff) % w
     local idx = i * w + j + 1
     cnt[idx] = cnt[idx] + amount
   end
-  self_._total = self_._total + amount
+  self._total = self._total + amount
   -- Track heavy hitters if enabled.
-  if self_._heavy then
-    local heavy_ = self_._heavy --[[:! { [string]: number }]]
+  if self._heavy then
+    local heavy_ = self._heavy --[[:! { [string]: number }]]
     local cur = heavy_[s] or 0
     heavy_[s] = cur + amount
   end
@@ -110,14 +110,14 @@ end
 -- update_conservative(element, amount): conservative update variant.
 -- For each row, only increment if current counter < current minimum (query value).
 -- Reduces overcount at the cost of slightly more CPU.
+--: (CMS, unknown, number | nil) -> nil
 function CMS:update_conservative(element, amount)
-  local self_ = self --[[:! CMS]]
   amount = amount or 1
   local s     = type(element) == "string" and element or tostring(element)
-  local w     = self_._w
-  local d     = self_._d
-  local seeds = self_._seeds
-  local cnt   = self_._counters
+  local w     = self._w
+  local d     = self._d
+  local seeds = self._seeds
+  local cnt   = self._counters
   -- First pass: compute current minimum (= query value).
   local min_val = huge
   local idxs    = {}
@@ -135,22 +135,22 @@ function CMS:update_conservative(element, amount)
       cnt[idx] = target
     end
   end
-  self_._total = self_._total + amount
-  if self_._heavy then
-    local heavy_ = self_._heavy --[[:! { [string]: number }]]
+  self._total = self._total + amount
+  if self._heavy then
+    local heavy_ = self._heavy --[[:! { [string]: number }]]
     local cur = heavy_[s] or 0
     heavy_[s] = cur + amount
   end
 end
 
 -- query(element): return minimum counter value — the frequency estimate.
+--: (CMS, unknown) -> number
 function CMS:query(element)
-  local self_ = self --[[:! CMS]]
   local s     = type(element) == "string" and element or tostring(element)
-  local w     = self_._w
-  local d     = self_._d
-  local seeds = self_._seeds
-  local cnt   = self_._counters
+  local w     = self._w
+  local d     = self._d
+  local seeds = self._seeds
+  local cnt   = self._counters
   local min_val = huge
   for i = 0, d - 1 do
     local j = band(hash32(s, seeds[i + 1]), 0x7fffffff) % w
@@ -163,69 +163,69 @@ end
 -- merge(other): add other's counters into self in-place.
 -- Both sketches must have identical width and depth.
 -- Returns self, err.
+--: (CMS, CMS) -> (CMS | nil, string | nil)
 function CMS:merge(other)
-  local self_ = self --[[:! CMS]]
   local other_ = other --[[:! CMS]]
-  if self_._w ~= other_._w or self_._d ~= other_._d then
+  if self._w ~= other_._w or self._d ~= other_._d then
     return nil, "count_min:merge: incompatible dimensions (w or d mismatch)"
   end
-  local cnt1 = self_._counters
+  local cnt1 = self._counters
   local cnt2 = other_._counters
-  local n    = self_._w * self_._d
+  local n    = self._w * self._d
   for i = 1, n do
     cnt1[i] = cnt1[i] + cnt2[i]
   end
-  self_._total = self_._total + other_._total
-  if self_._heavy and other_._heavy then
-    local h1_ = self_._heavy --[[:! { [string]: number }]]
+  self._total = self._total + other_._total
+  if self._heavy and other_._heavy then
+    local h1_ = self._heavy --[[:! { [string]: number }]]
     local h2_ = other_._heavy --[[:! { [string]: number }]]
     for k, v in pairs(h2_) do
       h1_[k] = (h1_[k] or 0) + v
     end
   end
-  return self_
+  return self --[[:! CMS]]
 end
 
 -- reset(): set all counters to zero, reset total.
+--: (CMS) -> nil
 function CMS:reset()
-  local self_ = self --[[:! CMS]]
-  local cnt = self_._counters
-  local n   = self_._w * self_._d
+  local cnt = self._counters
+  local n   = self._w * self._d
   for i = 1, n do cnt[i] = 0 end
-  self_._total = 0
-  if self_._heavy then
-    local heavy_ = self_._heavy --[[:! { [string]: number }]]
+  self._total = 0
+  if self._heavy then
+    local heavy_ = self._heavy --[[:! { [string]: number }]]
     for k in pairs(heavy_) do heavy_[k] = 0; heavy_[k] = nil --[[: any]] end
   end
 end
 
 -- total(): total number of updates (sum of all amounts).
+--: (CMS) -> number
 function CMS:total()
-  local self_ = self --[[:! CMS]]
-  return self_._total
+  return self._total
 end
 
 -- width(): counters per row.
+--: (CMS) -> integer
 function CMS:width()
-  local self_ = self --[[:! CMS]]
-  return self_._w
+  return self._w
 end
 
 -- depth(): number of rows (hash functions).
+--: (CMS) -> integer
 function CMS:depth()
-  local self_ = self --[[:! CMS]]
-  return self_._d
+  return self._d
 end
 
 -- serialize(): pack sketch into a binary string.
 -- Header (16 bytes): d (4B), w (4B), total_lo (4B), total_hi (4B)
 -- Body: d*w uint32 counters (4 bytes each, big-endian).
+--: (CMS) -> string
 function CMS:serialize()
-  local self_ = self --[[:! CMS]]
   local t   = {}
-  local d   = self_._d
-  local w   = self_._w
-  local tot = self_._total
+  local d   = self._d
+  local w   = self._w
+  local tot = self._total
   -- Split total into two 32-bit halves (lo = lower 32 bits, hi = upper bits).
   -- LuaJIT numbers are doubles; support up to 2^53 safely.
   local lo  = tot % 0x100000000
@@ -234,7 +234,7 @@ function CMS:serialize()
   pack_u32(t, w --[[:! integer]])
   pack_u32(t, math.floor(lo))
   pack_u32(t, math.floor(hi))
-  local cnt = self_._counters
+  local cnt = self._counters
   for i = 1, d * w do
     pack_u32(t, math.floor(cnt[i]))
   end
@@ -244,12 +244,12 @@ end
 -- heavy_hitters(k): return top-k elements by estimated count (descending).
 -- Only available when sketch was created with track_heavy=true.
 -- Returns {{element, count}, ...} or (nil, err).
+--: (CMS, integer | nil) -> ({ [integer]: { [integer]: unknown } } | nil, string | nil)
 function CMS:heavy_hitters(k)
-  local self_ = self --[[:! CMS]]
-  if not self_._heavy then
+  if not self._heavy then
     return nil, "count_min:heavy_hitters: sketch not created with track_heavy=true"
   end
-  local heavy_ = self_._heavy --[[:! { [string]: number }]]
+  local heavy_ = self._heavy --[[:! { [string]: number }]]
   local list = {}
   for elem, cnt in pairs(heavy_) do
     list[#list + 1] = { elem, cnt }

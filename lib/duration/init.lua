@@ -169,11 +169,16 @@ end
 -- Access — total values
 -- ---------------------------------------------------------------------------
 
-function Duration:total_seconds()      local self_ = self --[[:! Duration]]; return self_._secs end
-function Duration:total_milliseconds() local self_ = self --[[:! Duration]]; return self_._secs * 1000 end
-function Duration:total_minutes()      local self_ = self --[[:! Duration]]; return self_._secs / 60 end
-function Duration:total_hours()        local self_ = self --[[:! Duration]]; return self_._secs / 3600 end
-function Duration:total_days()         local self_ = self --[[:! Duration]]; return self_._secs / 86400 end
+--: (Duration) -> number
+function Duration:total_seconds()      return self._secs end
+--: (Duration) -> number
+function Duration:total_milliseconds() return self._secs * 1000 end
+--: (Duration) -> number
+function Duration:total_minutes()      return self._secs / 60 end
+--: (Duration) -> number
+function Duration:total_hours()        return self._secs / 3600 end
+--: (Duration) -> number
+function Duration:total_days()         return self._secs / 86400 end
 
 -- ---------------------------------------------------------------------------
 -- Component decomposition
@@ -183,8 +188,7 @@ function Duration:total_days()         local self_ = self --[[:! Duration]]; ret
 -- All component fields are non-negative integers except milliseconds (non-negative integer ms).
 --: (Duration) -> DurationComponents
 function Duration:parts()
-  local self_ = self --[[:! Duration]]
-  local s = self_._secs
+  local s = self._secs
   local sign = 1
   if s < 0 then
     sign = -1
@@ -304,22 +308,33 @@ end
 -- Arithmetic
 -- ---------------------------------------------------------------------------
 
-function Duration:add(other)  local self_ = self --[[:! Duration]]; local o_ = other --[[:! Duration]]; return new_raw(self_._secs + o_._secs) end
-function Duration:sub(other)  local self_ = self --[[:! Duration]]; local o_ = other --[[:! Duration]]; return new_raw(self_._secs - o_._secs) end
-function Duration:mul(n)      local self_ = self --[[:! Duration]]; return new_raw(self_._secs * n) end
-function Duration:div(n)      local self_ = self --[[:! Duration]]; return new_raw(self_._secs / n) end
-function Duration:neg()       local self_ = self --[[:! Duration]]; return new_raw(-self_._secs) end
-function Duration:abs()       local self_ = self --[[:! Duration]]; return new_raw(math.abs(self_._secs)) end
+--: (Duration, Duration) -> Duration
+function Duration:add(other)  return new_raw(self._secs + (other --[[:! Duration]])._secs) end
+--: (Duration, Duration) -> Duration
+function Duration:sub(other)  return new_raw(self._secs - (other --[[:! Duration]])._secs) end
+--: (Duration, number) -> Duration
+function Duration:mul(n)      return new_raw(self._secs * n) end
+--: (Duration, number) -> Duration
+function Duration:div(n)      return new_raw(self._secs / n) end
+--: (Duration) -> Duration
+function Duration:neg()       return new_raw(-self._secs) end
+--: (Duration) -> Duration
+function Duration:abs()       return new_raw(math.abs(self._secs)) end
 
 -- ---------------------------------------------------------------------------
 -- Comparison
 -- ---------------------------------------------------------------------------
 
-function Duration:eq(other)  local self_ = self --[[:! Duration]]; local o_ = other --[[:! Duration]]; return self_._secs == o_._secs end
-function Duration:lt(other)  local self_ = self --[[:! Duration]]; local o_ = other --[[:! Duration]]; return self_._secs <  o_._secs end
-function Duration:lte(other) local self_ = self --[[:! Duration]]; local o_ = other --[[:! Duration]]; return self_._secs <= o_._secs end
-function Duration:gt(other)  local self_ = self --[[:! Duration]]; local o_ = other --[[:! Duration]]; return self_._secs >  o_._secs end
-function Duration:gte(other) local self_ = self --[[:! Duration]]; local o_ = other --[[:! Duration]]; return self_._secs >= o_._secs end
+--: (Duration, Duration) -> boolean
+function Duration:eq(other)  return self._secs == (other --[[:! Duration]])._secs end
+--: (Duration, Duration) -> boolean
+function Duration:lt(other)  return self._secs <  (other --[[:! Duration]])._secs end
+--: (Duration, Duration) -> boolean
+function Duration:lte(other) return self._secs <= (other --[[:! Duration]])._secs end
+--: (Duration, Duration) -> boolean
+function Duration:gt(other)  return self._secs >  (other --[[:! Duration]])._secs end
+--: (Duration, Duration) -> boolean
+function Duration:gte(other) return self._secs >= (other --[[:! Duration]])._secs end
 
 -- ---------------------------------------------------------------------------
 -- Utilities
