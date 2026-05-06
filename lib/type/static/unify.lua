@@ -1118,11 +1118,17 @@ end
 --     contains the other's witness).
 --   - If a is a union, overlap iff some member of a overlaps with b
 --     (and symmetrically for b).
+--   - If a is an intersection, overlap iff no member has a field that conflicts
+--     with b's required fields (structural no-conflict check). This handles
+--     setmetatable result types and other intersection patterns.
+--   - If both are tables, same structural no-conflict check (handles casting
+--     a table with MORE fields to a table with FEWER fields).
 --   - Otherwise no overlap (atomic mismatch like string vs integer).
 --
--- This is intentionally weaker than full intersection nonemptiness — it does
--- not solve open-world structural overlap problems. It is sufficient for the
--- two cases the force cast targets: unknown→T and (A|B)→A.
+-- The structural no-conflict check is intentionally weaker than subtyping: two
+-- table types overlap when their shared fields are type-compatible, even if
+-- one has extra fields the other doesn't. This allows `{x,y} --[[:! {x}]]`
+-- (structural subtype) and intersection narrowing with setmetatable results.
 --: (Ctx, integer, integer) -> boolean
 function M.types_overlap(ctx, a, b)
     a = find(ctx, a)
@@ -1148,6 +1154,80 @@ function M.types_overlap(ctx, a, b)
             if M.types_overlap(ctx, a, ctx.lists:get(i)) then return true end
         end
         return false
+    end
+    -- Structural field compatibility: check that shared fields don't conflict.
+    -- Two table types conflict on a field when both declare the field required
+    -- and the field types are incompatible in both directions (neither is a
+    -- subtype of the other). Extra fields on one side never prevent overlap.
+    --
+    -- When ta is an intersection, gather named fields from each TABLE member
+    -- and check them against b's required fields.  This handles the common
+    -- setmetatable pattern: `{x: 1} & {#?: ...{__index: {get: fn}}}` overlaps
+    -- with `{get: fn, x: integer}` because `x: 1` and `x: integer` are
+    -- compatible (1 <: integer), and the `get` field is absent from the
+    -- intersection's named fields so there is no conflict.
+    --
+    -- The symmetric case (tb is an intersection) is handled by swapping roles.
+    local function fields_compatible(tbl_tid, other_tid)
+        -- For each required named field in `other_tid` (a TAG_TABLE), check
+        -- if `tbl_tid` (also a TAG_TABLE) has a conflicting declaration.
+        local other_t = ctx.types:get(other_tid)
+        for i = other_t.data[0], other_t.data[0] + other_t.data[1] - 1 do
+            local bfe = ctx.fields:get(ctx.lists:get(i))
+            if band(bfe.flags, FLAG_OPTIONAL) ~= 0 then goto compat_next end
+            local afe = types_mod.table_field(ctx, tbl_tid, bfe.name_id)
+            if afe then
+                -- Same field in both: types must overlap (no conflict).
+                local at = find(ctx, (afe --[[:! FieldEntry]]).type_id)
+                local bt = find(ctx, bfe.type_id)
+                if not M.try_unify(ctx, at, bt) and not M.try_unify(ctx, bt, at) then
+                    return false  -- field type conflict: cannot have common witness
+                end
+            end
+            -- Field absent in tbl_tid but required in other: no conflict
+            -- (tbl_tid may have extra fields or the combined type is fine).
+            ::compat_next::
+        end
+        return true
+    end
+
+    if ta.tag == TAG_INTERSECTION then
+        -- Check each TABLE member against b for field conflicts.
+        -- If NO member conflicts, the intersection overlaps with b.
+        local any_conflict = false
+        for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+            local mid = find(ctx, ctx.lists:get(i))
+            local mt = ctx.types:get(mid)
+            if mt.tag == TAG_TABLE then
+                if tb.tag == TAG_TABLE and not fields_compatible(mid, b) then
+                    any_conflict = true; break
+                end
+            end
+        end
+        if not any_conflict then return true end
+    end
+    if tb.tag == TAG_INTERSECTION then
+        -- Symmetric: check each TABLE member of tb against a.
+        local any_conflict = false
+        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+            local mid = find(ctx, ctx.lists:get(i))
+            local mt = ctx.types:get(mid)
+            if mt.tag == TAG_TABLE then
+                if ta.tag == TAG_TABLE and not fields_compatible(mid, a) then
+                    any_conflict = true; break
+                end
+            end
+        end
+        if not any_conflict then return true end
+    end
+    -- Direct table-to-table: check shared fields are type-compatible in either
+    -- direction.  This allows `{x: integer, y: string} --[[:! {x: integer}]]`
+    -- where the actual has more fields than the expected type (structural width
+    -- subtyping for force casts).
+    if ta.tag == TAG_TABLE and tb.tag == TAG_TABLE then
+        if fields_compatible(a, b) and fields_compatible(b, a) then
+            return true
+        end
     end
     return false
 end
