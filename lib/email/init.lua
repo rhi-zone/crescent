@@ -17,6 +17,10 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local base64 = require("lib.encode.base64")
+--:: Base64Encode = (string) -> string
+--:: Base64Decode = (string) -> (string | nil)
+local b64_encode = --[[:! Base64Encode]] base64.encode
+local b64_decode = --[[:! Base64Decode]] base64.decode
 
 local M = {}
 
@@ -165,28 +169,32 @@ end
 --: (string) -> string
 local function encode_header_value(str)
 	if not has_non_ascii(str) then return str end
-	return "=?UTF-8?B?" .. (base64.encode(str) --[[:! string]]) .. "?="
+	return "=?UTF-8?B?" .. b64_encode(str) .. "?="
 end
 
 -- Decode RFC 2047 encoded-word
 --: (string) -> string
 local function decode_header_value(str)
-	local result = str:gsub("=?([^?]+)?([BbQq])?([^?]*)?=", function(charset, encoding, data)
-		if not encoding or not data then return str end
-		encoding = encoding:upper()
-		if encoding == "B" then
-			return (base64.decode(data) --[[:! string | nil]]) or data
-		elseif encoding == "Q" then
+	local result, _ = str:gsub("=?([^?]+)?([BbQq])?([^?]*)?=", function(charset, enc, data) --[[ gsub 3-capture callback ]]
+		local _ = charset
+		local encoding = enc
+		if type(encoding) ~= "string" or type(data) ~= "string" then return str end
+		local enc_s = encoding --[[:! string]]
+		local data_s = data --[[:! string]]
+		enc_s = enc_s:upper()
+		if enc_s == "B" then
+			return b64_decode(data_s) or data_s
+		elseif enc_s == "Q" then
 			-- Q encoding: _ = space, =XX = hex
-			local decoded = data:gsub("_", " ")
-			decoded = decoded:gsub("=(%x%x)", function(hex)
+			local decoded, _ = data_s:gsub("_", " ")
+			decoded, _ = decoded:gsub("=(%x%x)", function(hex)
 				local cp = tonumber(hex, 16)
 				if not cp then return "" end
 				return string.char(cp)
 			end)
 			return decoded
 		end
-		return data
+		return data_s
 	end)
 	return result
 end
@@ -195,7 +203,7 @@ end
 
 --: (string) -> string
 local function base64_encode_wrapped(data)
-	local encoded = base64.encode(data) --[[:! string]]
+	local encoded = b64_encode(data)
 	local lines = {}
 	for i = 1, #encoded, 76 do
 		lines[#lines + 1] = encoded:sub(i, i + 75)
@@ -281,10 +289,10 @@ local function build_body(msg)
 			.. qp_encode(msg.html)
 	end
 
-	local parts = {}
+	local parts = {} --: { [integer]: string }
 
 	-- Build the text/html content part
-	local content_part
+	local content_part = "" --: string
 	if has_text and has_html then
 		local alt_boundary = generate_boundary()
 		local alt_parts = {}
@@ -307,7 +315,7 @@ local function build_body(msg)
 					alt_parts[#alt_parts + 1] = "Content-Transfer-Encoding: base64\r\n"
 					alt_parts[#alt_parts + 1] = "Content-Disposition: inline; filename=\"" .. att.filename .. "\"\r\n"
 					if att.cid then
-						alt_parts[#alt_parts + 1] = "Content-ID: <" .. att.cid .. ">\r\n"
+						alt_parts[#alt_parts + 1] = "Content-ID: <" .. (att.cid --[[:! string]]) .. ">\r\n"
 					end
 					alt_parts[#alt_parts + 1] = "\r\n" .. base64_encode_wrapped(att.data)
 				end
@@ -337,13 +345,13 @@ local function build_body(msg)
 					rel_parts[#rel_parts + 1] = "Content-Transfer-Encoding: base64\r\n"
 					rel_parts[#rel_parts + 1] = "Content-Disposition: inline; filename=\"" .. att.filename .. "\"\r\n"
 					if att.cid then
-						rel_parts[#rel_parts + 1] = "Content-ID: <" .. att.cid .. ">\r\n"
+						rel_parts[#rel_parts + 1] = "Content-ID: <" .. (att.cid --[[:! string]]) .. ">\r\n"
 					end
 					rel_parts[#rel_parts + 1] = "\r\n" .. base64_encode_wrapped(att.data)
 				end
 			end
 			rel_parts[#rel_parts + 1] = "\r\n--" .. rel_boundary .. "--\r\n"
-			content_part = table.concat(rel_parts)
+			content_part = table.concat(rel_parts) --[[:! string]]
 		else
 			content_part = "Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n"
 				.. qp_encode(msg.html)
@@ -480,8 +488,10 @@ local function parse_mime_parts(body, boundary)
 			part_data = part_data:sub(1, -2)
 		end
 
-		local part_headers, body_start = parse_headers(part_data)
-		local part_body = part_data:sub(body_start)
+		local pd = part_data --[[:! string]]
+		local part_headers, body_start = parse_headers(pd)
+		local body_start_ = body_start --[[:! integer]]
+		local part_body = pd:sub(body_start_)
 		parts[#parts + 1] = {
 			headers = part_headers,
 			body = part_body,
@@ -509,7 +519,7 @@ local function decode_body(body, encoding)
 	if encoding == "quoted-printable" then
 		return qp_decode(body)
 	elseif encoding == "base64" then
-		return base64.decode(body) or body
+		return b64_decode(body) or body
 	end
 	return body
 end
@@ -558,9 +568,9 @@ function M.parse(raw)
 	end
 
 	local headers, body_start = parse_headers(raw)
-	local body = raw:sub(body_start)
+	local body = raw:sub(body_start --[[:! integer]])
 
-	local msg = {
+	local msg = --[[:! { from: string | nil, to: { [integer]: string }, cc: { [integer]: string }, bcc: { [integer]: string }, subject: string, text: string | nil, html: string | nil, headers: { [string]: string }, reply_to: string | nil, attachments: { [integer]: Attachment } }]] {
 		from = headers["from"],
 		to = {},
 		cc = {},
@@ -617,21 +627,24 @@ end
 
 -- ── SMTP Client ──────────────────────────────────────────────────────────
 
+--:: SMTPTransport = { send: (any, string) -> nil, recv: (any) -> (string | nil, string | nil), close: (any) -> nil, ... }
+--:: SMTPObj = { _transport: SMTPTransport, _capabilities: { [integer]: string }, ... }
+
 local SMTP = {}
 SMTP.__index = SMTP
 
 -- Read an SMTP response line (or multiline).
 -- Returns status code and full response text.
---: (any) -> (integer | nil, string | nil)
+--: (SMTPTransport) -> (number | nil, string | nil)
 local function smtp_read_response(transport)
 	local lines = {}
 	while true do
-		local line, err = transport:recv()
-		if not line then
+		local line_raw, err = transport:recv()
+		if not line_raw then
 			return nil, err or "connection closed"
 		end
 		-- Strip trailing CRLF
-		line = line:gsub("\r?\n$", "")
+		local line, _ = (line_raw --[[:! string]]):gsub("\r?\n$", "")
 		lines[#lines + 1] = line
 		-- SMTP multiline: "250-..." continues, "250 ..." is final
 		local code = tonumber(line:sub(1, 3))
@@ -645,19 +658,20 @@ local function smtp_read_response(transport)
 end
 
 -- Connect to SMTP server
---: ({ host: string, port: integer, transport: unknown }) -> (any | nil, string | nil)
+--: ({ host: string, port: integer, transport: SMTPTransport | nil }) -> (SMTPObj | nil, string | nil)
 function M.smtp_connect(opts)
 	if not opts.transport then
 		return nil, "transport required"
 	end
+	local transport = opts.transport --[[:! SMTPTransport]]
 
-	local smtp = setmetatable({
-		_transport = opts.transport,
+	local smtp = --[[:! SMTPObj]] setmetatable({
+		_transport = transport,
 		_capabilities = {},
 	}, SMTP)
 
 	-- Read server greeting
-	local code, resp = smtp_read_response(--[[:! { recv: any, send: any }]] opts.transport)
+	local code, resp = smtp_read_response(transport)
 	if not code then return nil, resp end
 	if code ~= 220 then
 		return nil, "unexpected greeting: " .. (resp or "")
@@ -667,71 +681,78 @@ function M.smtp_connect(opts)
 end
 
 -- Send EHLO
---: (string) -> (boolean | nil, string | nil)
-function SMTP:ehlo(domain)
-	self._transport:send("EHLO " .. domain .. "\r\n")
-	local code, resp = smtp_read_response(self._transport)
+--: (SMTPObj, string) -> (boolean | nil, string | nil)
+function SMTP.ehlo(self, domain)
+	local self_ = self --[[:! SMTPObj]]
+	self_._transport:send("EHLO " .. domain .. "\r\n")
+	local code, resp = smtp_read_response(self_._transport)
 	if not code then return nil, resp end
 	if code ~= 250 then
 		return nil, "EHLO failed: " .. (resp or "")
 	end
 	-- Parse capabilities from multiline response
-	self._capabilities = {}
-	for line in resp:gmatch("[^\n]+") do
+	self_._capabilities = {}
+	local resp_ = resp --[[:! string]]
+	for line in resp_:gmatch("[^\n]+") do
 		local cap = line:sub(5) -- skip "250 " or "250-"
-		self._capabilities[#self._capabilities + 1] = cap
+		self_._capabilities[#self_._capabilities + 1] = cap
 	end
 	return true, nil
 end
 
 -- Send STARTTLS
---: (unknown) -> (boolean | nil, string | nil)
-function SMTP:starttls(tls_context)
-	self._transport:send("STARTTLS\r\n")
-	local code, resp = smtp_read_response(self._transport)
+--: (SMTPObj, unknown) -> (boolean | nil, string | nil)
+function SMTP.starttls(self, tls_context)
+	local self_ = self --[[:! SMTPObj]]
+	self_._transport:send("STARTTLS\r\n")
+	local code, resp = smtp_read_response(self_._transport)
 	if not code then return nil, resp end
 	if code ~= 220 then
 		return nil, "STARTTLS failed: " .. (resp or "")
 	end
-	-- Upgrade transport to TLS if supported
-	if self._transport.upgrade_tls then
-		local ok, err = self._transport:upgrade_tls(tls_context)
+	-- Upgrade transport to TLS if supported (optional extension)
+	-- SMTPTransport is open (...) so upgrade_tls may exist at runtime; go through unknown
+	local transport_unk = self_._transport --[[: unknown]]
+	local has_tls = transport_unk --[[:! { upgrade_tls: ((any, unknown) -> (boolean | nil, string | nil)) | nil, ... }]]
+	if has_tls.upgrade_tls then
+		local ok, err = has_tls:upgrade_tls(tls_context)
 		if not ok then return nil, err end
 	end
 	return true, nil
 end
 
 -- Authenticate
---: (string, string, string) -> (boolean | nil, string | nil)
-function SMTP:auth(method, username, password)
+--: (SMTPObj, string, string, string) -> (boolean | nil, string | nil)
+function SMTP.auth(self, method, username, password)
+	local self_ = self --[[:! SMTPObj]]
 	method = method:upper()
 	if method == "PLAIN" then
-		local credentials = base64.encode("\0" .. username .. "\0" .. password)
-		self._transport:send("AUTH PLAIN " .. credentials .. "\r\n")
-		local code, resp = smtp_read_response(self._transport)
+		local credentials = b64_encode("\0" .. username .. "\0" .. password)
+		self_._transport:send("AUTH PLAIN " .. credentials .. "\r\n")
+		local code, resp = smtp_read_response(self_._transport)
 		if not code then return nil, resp end
 		if code ~= 235 then
 			return nil, "AUTH PLAIN failed: " .. (resp or "")
 		end
 		return true, nil
 	elseif method == "LOGIN" then
-		self._transport:send("AUTH LOGIN\r\n")
-		local code, resp = smtp_read_response(self._transport)
+		self_._transport:send("AUTH LOGIN\r\n")
+		local code, resp = smtp_read_response(self_._transport)
 		if not code then return nil, resp end
 		if code ~= 334 then
 			return nil, "AUTH LOGIN failed: " .. (resp or "")
 		end
-		self._transport:send(base64.encode(username) .. "\r\n")
-		code, resp = smtp_read_response(self._transport)
-		if not code then return nil, resp end
-		if code ~= 334 then
-			return nil, "AUTH LOGIN username rejected: " .. (resp or "")
+		self_._transport:send(b64_encode(username) .. "\r\n")
+		local code2, resp2 = smtp_read_response(self_._transport)
+		if not code2 then return nil, resp2 end
+		if code2 ~= 334 then
+			return nil, "AUTH LOGIN username rejected: " .. (resp2 or "")
 		end
-		self._transport:send(base64.encode(password) .. "\r\n")
-		code, resp = smtp_read_response(self._transport)
-		if not code then return nil, resp end
-		if code ~= 235 then
-			return nil, "AUTH LOGIN failed: " .. (resp or "")
+		self_._transport:send(b64_encode(password) .. "\r\n")
+		local code3, resp3 = smtp_read_response(self_._transport)
+		if not code3 then return nil, resp3 end
+		if code3 ~= 235 then
+			return nil, "AUTH LOGIN failed: " .. (resp3 or "")
 		end
 		return true, nil
 	else
@@ -740,11 +761,12 @@ function SMTP:auth(method, username, password)
 end
 
 -- Send a message
---: (any) -> (boolean | nil, string | nil)
-function SMTP:send(msg)
-	local raw, err = msg:to_string()
+--: (SMTPObj, MessageObj) -> (boolean | nil, string | nil)
+function SMTP.send(self, msg)
+	local self_ = self --[[:! SMTPObj]]
+	local raw, err = Message.to_string(msg)
 	if not raw then return nil, err end
-	return self:send_raw({
+	return SMTP.send_raw(self_, {
 		from = msg.from,
 		to = msg.to,
 		cc = msg.cc,
@@ -754,18 +776,19 @@ function SMTP:send(msg)
 end
 
 -- Send raw email data
---: ({ from: string, to: { string } | nil, cc: { string } | nil, bcc: { string } | nil, data: string }) -> (boolean | nil, string | nil)
-function SMTP:send_raw(opts)
+--: (SMTPObj, { from: string, to: { [integer]: string } | nil, cc: { [integer]: string } | nil, bcc: { [integer]: string } | nil, data: string }) -> (boolean | nil, string | nil)
+function SMTP.send_raw(self, opts)
+	local self_ = self --[[:! SMTPObj]]
 	-- MAIL FROM
-	self._transport:send("MAIL FROM:<" .. opts.from .. ">\r\n")
-	local code, resp = smtp_read_response(self._transport)
+	self_._transport:send("MAIL FROM:<" .. opts.from .. ">\r\n")
+	local code, resp = smtp_read_response(self_._transport)
 	if not code then return nil, resp end
 	if code ~= 250 then
 		return nil, "MAIL FROM rejected: " .. (resp or "")
 	end
 
 	-- RCPT TO for all recipients
-	local all_rcpts = {}
+	local all_rcpts = {} --: { [integer]: string }
 	if opts.to then
 		for _, addr in ipairs(opts.to) do all_rcpts[#all_rcpts + 1] = addr end
 	end
@@ -777,98 +800,108 @@ function SMTP:send_raw(opts)
 	end
 
 	for _, addr in ipairs(all_rcpts) do
-		self._transport:send("RCPT TO:<" .. addr .. ">\r\n")
-		code, resp = smtp_read_response(self._transport)
-		if not code then return nil, resp end
-		if code ~= 250 then
-			return nil, "RCPT TO <" .. addr .. "> rejected: " .. (resp or "")
+		self_._transport:send("RCPT TO:<" .. addr .. ">\r\n")
+		local rcpt_code, rcpt_resp = smtp_read_response(self_._transport)
+		if not rcpt_code then return nil, rcpt_resp end
+		if rcpt_code ~= 250 then
+			return nil, "RCPT TO <" .. addr .. "> rejected: " .. (rcpt_resp or "")
 		end
 	end
 
 	-- DATA
-	self._transport:send("DATA\r\n")
-	code, resp = smtp_read_response(self._transport)
-	if not code then return nil, resp end
-	if code ~= 354 then
-		return nil, "DATA rejected: " .. (resp or "")
+	self_._transport:send("DATA\r\n")
+	local data_code, data_resp = smtp_read_response(self_._transport)
+	if not data_code then return nil, data_resp end
+	if data_code ~= 354 then
+		return nil, "DATA rejected: " .. (data_resp or "")
 	end
 
 	-- Send message data with dot-stuffing
-	local data = opts.data
+	local raw_data = opts.data --[[:! string]]
 	-- Ensure CRLF line endings
-	if not data:find("\r\n", 1, true) then
-		data = data:gsub("\n", "\r\n")
+	local data = raw_data
+	if not raw_data:find("\r\n", 1, true) then
+		data = (raw_data:gsub("\n", "\r\n"))
 	end
 	-- Dot-stuffing: lines starting with . get an extra .
-	data = data:gsub("\r\n%.", "\r\n..")
-	self._transport:send(data .. "\r\n.\r\n")
+	local data2 = data --[[:! string]]
+	local data_stuffed = (data2:gsub("\r\n%.", "\r\n.."))
+	self_._transport:send(data_stuffed .. "\r\n.\r\n")
 
-	code, resp = smtp_read_response(self._transport)
-	if not code then return nil, resp end
-	if code ~= 250 then
-		return nil, "DATA content rejected: " .. (resp or "")
+	local end_code, end_resp = smtp_read_response(self_._transport)
+	if not end_code then return nil, end_resp end
+	if end_code ~= 250 then
+		return nil, "DATA content rejected: " .. (end_resp or "")
 	end
 
 	return true, nil
 end
 
 -- Quit
---: () -> (boolean | nil, string | nil)
-function SMTP:quit()
-	self._transport:send("QUIT\r\n")
-	local code, resp = smtp_read_response(self._transport)
+--: (SMTPObj) -> (boolean | nil, string | nil)
+function SMTP.quit(self)
+	local self_ = self --[[:! SMTPObj]]
+	self_._transport:send("QUIT\r\n")
+	local code, resp = smtp_read_response(self_._transport)
 	if not code then return nil, resp end
 	if code ~= 221 then
 		return nil, "QUIT failed: " .. (resp or "")
 	end
-	self._transport:close()
+	self_._transport:close()
 	return true, nil
 end
 
 -- ── Mock Transport ───────────────────────────────────────────────────────
 
+--:: MockTransport = { send: (any, string) -> nil, recv: (any) -> (string | nil, string | nil), close: (any) -> nil, sent: { [integer]: string }, _lines: { [integer]: string }, _pos: integer, _closed: boolean }
+
 -- Create a mock transport for testing.
 -- responses: array of strings the server will send (one per recv() call)
 -- Returns: transport object with :send(), :recv(), :close() and .sent (array of sent strings)
---: ({ string }) -> ({ send: (any, string) -> nil, recv: (any) -> (string | nil, string | nil), close: (any) -> nil, sent: { string } })
+--: ({ [integer]: string } | nil) -> MockTransport
 function M.mock_transport(responses)
 	-- Split multiline responses into individual lines for realistic socket behavior.
-	local lines = {}
+	local lines = {} --: { [integer]: string }
 	for _, resp in ipairs(responses or {}) do
 		local pos = 1
 		while pos <= #resp do
 			local nl = resp:find("\r\n", pos, true) or resp:find("\n", pos, true)
 			if nl then
-				local crlf = resp:byte(nl) == 13
-				local line = resp:sub(pos, crlf and nl + 1 or nl)
+				local nl_ = nl --[[:! integer]]
+				local crlf = resp:byte(nl_) == 13
+				local line = resp:sub(pos, crlf and nl_ + 1 or nl_)
 				lines[#lines + 1] = line
-				pos = crlf and nl + 2 or nl + 1
+				pos = crlf and nl_ + 2 or nl_ + 1
 			else
 				lines[#lines + 1] = resp:sub(pos)
 				break
 			end
 		end
 	end
+	local sent_buf = {} --: { [integer]: string }
 	local t = {
-		sent = {},
+		sent = sent_buf,
 		_lines = lines,
 		_pos = 1,
 		_closed = false,
 	}
 	function t:send(data)
-		self.sent[#self.sent + 1] = data
+		local self_ = self --[[:! MockTransport]]
+		self_.sent[#self_.sent + 1] = data
 	end
 	function t:recv()
-		if self._closed then return nil, "closed" end
-		if self._pos > #self._lines then return nil, "no more responses" end
-		local line = self._lines[self._pos]
-		self._pos = self._pos + 1
+		local self_ = self --[[:! MockTransport]]
+		if self_._closed then return nil, "closed" end
+		if self_._pos > #self_._lines then return nil, "no more responses" end
+		local line = self_._lines[self_._pos]
+		self_._pos = self_._pos + 1
 		return line, nil
 	end
 	function t:close()
-		self._closed = true
+		local self_ = self --[[:! MockTransport]]
+		self_._closed = true
 	end
-	return t
+	return --[[:! MockTransport]] t
 end
 
 return M
