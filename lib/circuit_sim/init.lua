@@ -91,19 +91,19 @@ end
 local Result = {}
 Result.__index = Result
 
+--: (ResultShape, string) -> number | nil
 function Result:voltage(name)
-	local self_ = self --[[:! ResultShape]]
-	return self_._voltages[name]
+	return self._voltages[name]
 end
 
+--: (ResultShape, string) -> number | nil
 function Result:current(name)
-	local self_ = self --[[:! ResultShape]]
-	return self_._currents[name]
+	return self._currents[name]
 end
 
+--: (ResultShape, string) -> number | nil
 function Result:power(name)
-	local self_ = self --[[:! ResultShape]]
-	return self_._power[name]
+	return self._power[name]
 end
 
 -- Circuit object
@@ -122,86 +122,86 @@ function M.new()
 end
 
 -- Register a named node, returns its id (1-based, 0 = ground)
+--: (CircuitShape, string) -> integer
 function Circuit:node(name)
-	local self_ = self --[[:! CircuitShape]]
 	if name == "0" or name == "gnd" or name == "GND" then
 		return 0
 	end
-	if self_._nodes[name] then
-		return self_._nodes[name]
+	if self._nodes[name] then
+		return self._nodes[name]
 	end
-	self_._node_count = self_._node_count + 1
-	local id = self_._node_count
-	self_._nodes[name] = id
-	self_._node_names[id] = name
+	self._node_count = self._node_count + 1
+	local id = self._node_count
+	self._nodes[name] = id
+	self._node_names[id] = name
 	return id
 end
 
 -- Get or register node by id or name
+--: (CircuitShape, any) -> integer
 function Circuit:_ensure_node(n)
-	local self_ = self --[[:! CircuitShape]]
 	if type(n) == "number" then
 		local n_ = n --[[:! integer]]
 		if n_ == 0 then return 0 end
 		-- Register numeric nodes without a name if not already named
-		if not self_._node_names[n_] then
-			if n_ > self_._node_count then self_._node_count = n_ end
-			self_._node_names[n_] = tostring(n_)
-			self_._nodes[tostring(n_)] = n_
+		if not self._node_names[n_] then
+			if n_ > self._node_count then self._node_count = n_ end
+			self._node_names[n_] = tostring(n_)
+			self._nodes[tostring(n_)] = n_
 		end
 		return n_
 	end
-	return self_:node(n --[[:! string]])
+	return self:node(n --[[:! string]])
 end
 
+--: (CircuitShape, string, any, any, number) -> CircuitShape
 function Circuit:resistor(name, np, nn, r)
-	local self_ = self --[[:! CircuitShape]]
-	local np_ = self_:_ensure_node(np)
-	local nn_ = self_:_ensure_node(nn)
+	local np_ = self:_ensure_node(np)
+	local nn_ = self:_ensure_node(nn)
 	local r_ = r --[[:! number]]
 	local comp = { type = "R", name = name --[[:! string]], np = np_, nn = nn_, value = r_ }
-	self_._components[#self_._components + 1] = comp
-	return self_
+	self._components[#self._components + 1] = comp
+	return self
 end
 
+--: (CircuitShape, string, any, any, number) -> CircuitShape
 function Circuit:voltage_source(name, np, nn, v)
-	local self_ = self --[[:! CircuitShape]]
-	local np_ = self_:_ensure_node(np)
-	local nn_ = self_:_ensure_node(nn)
+	local np_ = self:_ensure_node(np)
+	local nn_ = self:_ensure_node(nn)
 	local v_ = v --[[:! number]]
 	local comp = { type = "V", name = name --[[:! string]], np = np_, nn = nn_, value = v_ }
-	self_._components[#self_._components + 1] = comp
-	self_._vsources[#self_._vsources + 1] = comp
-	return self_
+	self._components[#self._components + 1] = comp
+	self._vsources[#self._vsources + 1] = comp
+	return self
 end
 
+--: (CircuitShape, string, any, any, number) -> CircuitShape
 function Circuit:current_source(name, np, nn, i)
-	local self_ = self --[[:! CircuitShape]]
-	local np_ = self_:_ensure_node(np)
-	local nn_ = self_:_ensure_node(nn)
+	local np_ = self:_ensure_node(np)
+	local nn_ = self:_ensure_node(nn)
 	local i_ = i --[[:! number]]
 	local comp = { type = "I", name = name --[[:! string]], np = np_, nn = nn_, value = i_ }
-	self_._components[#self_._components + 1] = comp
-	return self_
+	self._components[#self._components + 1] = comp
+	return self
 end
 
 -- Wire = 0Ω resistance (implemented as voltage source with 0V)
+--: (CircuitShape, string, any, any) -> CircuitShape
 function Circuit:wire(name, np, nn)
-	local self_ = self --[[:! CircuitShape]]
-	local np_ = self_:_ensure_node(np)
-	local nn_ = self_:_ensure_node(nn)
+	local np_ = self:_ensure_node(np)
+	local nn_ = self:_ensure_node(nn)
 	local comp = { type = "V", name = name --[[:! string]], np = np_, nn = nn_, value = 0.0 }
-	self_._components[#self_._components + 1] = comp
-	self_._vsources[#self_._vsources + 1] = comp
-	return self_
+	self._components[#self._components + 1] = comp
+	self._vsources[#self._vsources + 1] = comp
+	return self
 end
 
 -- Build the MNA matrix. Returns A, b, size, vsource_idx_map
 -- vsource_idx_map: vsource_name -> extra variable index (1-based into vsources)
+--: (CircuitShape) -> any
 function Circuit:_build_mna()
-	local self_ = self --[[:! CircuitShape]]
-	local N = self_._node_count    -- number of non-ground nodes
-	local Nv = #self_._vsources    -- number of voltage sources / wires
+	local N = self._node_count    -- number of non-ground nodes
+	local Nv = #self._vsources    -- number of voltage sources / wires
 	local sz = N + Nv             -- total system size
 
 	-- Initialize A and b
@@ -222,11 +222,11 @@ function Circuit:_build_mna()
 
 	-- Build vsource index map
 	local vsource_idx = {} --: { [string]: integer }
-	for k, vs in ipairs(self_._vsources) do
+	for k, vs in ipairs(self._vsources) do
 		vsource_idx[vs.name] = k
 	end
 
-	for _, comp in ipairs(self_._components) do
+	for _, comp in ipairs(self._components) do
 		local t = comp.type
 		local i = comp.np   -- positive node (0 = ground)
 		local j = comp.nn   -- negative node (0 = ground)
@@ -266,9 +266,9 @@ end
 
 -- Solve DC operating point
 -- Returns Result object or (nil, errmsg)
+--: (CircuitShape) -> any
 function Circuit:solve_dc()
-	local self_ = self --[[:! CircuitShape]]
-	local mna = {self_:_build_mna()} --[[:! { [integer]: any }]]
+	local mna = {self:_build_mna()} --[[:! { [integer]: any }]]
 	local A_ = mna[1] --[[:! NumMatrix]]
 	local b_ = mna[2] --[[:! NumVec]]
 	local sz_ = mna[3] --[[:! integer]]
@@ -294,7 +294,7 @@ function Circuit:solve_dc()
 
 	-- Extract node voltages
 	local node_voltages = { ["0"] = 0.0, gnd = 0.0 } --: { [string]: number }
-	for id, name in pairs(self_._node_names) do
+	for id, name in pairs(self._node_names) do
 		local id_ = id --[[:! integer]]
 		node_voltages[name] = x[id_]
 	end
@@ -306,7 +306,7 @@ function Circuit:solve_dc()
 		branch_currents[name] = x[N_ + k]
 	end
 	-- For resistors: I = (V_np - V_nn) / R
-	for _, comp in ipairs(self_._components) do
+	for _, comp in ipairs(self._components) do
 		if comp.type == "R" then
 			local vp = (comp.np == 0) and 0.0 or x[comp.np]
 			local vn = (comp.nn == 0) and 0.0 or x[comp.nn]
@@ -319,7 +319,7 @@ function Circuit:solve_dc()
 	-- Compute power
 	local power = { total = 0.0 } --: { [string]: number }
 	local total_power = 0.0 --: number
-	for _, comp in ipairs(self_._components) do
+	for _, comp in ipairs(self._components) do
 		local name = comp.name
 		local cur = branch_currents[name] or 0.0
 		local vp = (comp.np == 0) and 0.0 or x[comp.np]
@@ -343,12 +343,12 @@ end
 
 -- Parameter sweep: change a component value and solve for each
 -- comp_name: component name, param: "voltage"/"current"/"resistance", values: array
+--: (CircuitShape, string, string, any) -> any
 function Circuit:sweep(comp_name, param, values)
-	local self_ = self --[[:! CircuitShape]]
 	local values_ = values --[[:! { [integer]: number }]]
 	-- Find the component
 	local target = nil --: CompRecord|nil
-	for _, comp in ipairs(self_._components) do
+	for _, comp in ipairs(self._components) do
 		if comp.name == comp_name then
 			target = comp
 			break
@@ -364,7 +364,7 @@ function Circuit:sweep(comp_name, param, values)
 	for i = 1, #values_ do
 		target_.value = values_[i]
 		-- Rebuild vsources list if needed (type change not supported)
-		local result, err = self_:solve_dc()
+		local result, err = self:solve_dc()
 		if not result then
 			target_.value = original
 			return nil, err

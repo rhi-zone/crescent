@@ -30,18 +30,18 @@ local function heap_new()
   return setmetatable({ n = 0 }, Heap) --[[:! HeapT]]
 end
 
+--: (HeapT, number, unknown) -> ()
 function Heap:push(priority, value)
-  local self_ = self --[[:! HeapT]]
-  self_.n = self_.n + 1
-  local i = self_.n
-  self_[i] = { priority, value }
+  self.n = self.n + 1
+  local i = self.n
+  self[i] = { priority, value }
   -- sift up
   while i > 1 do
     local parent = math.floor(i / 2)
-    local ep = self_[parent]
-    local ei = self_[i]
+    local ep = self[parent]
+    local ei = self[i]
     if ep and ei and (ep[1] --[[:! number]]) > (ei[1] --[[:! number]]) then
-      self_[parent], self_[i] = self_[i], self_[parent]
+      self[parent], self[i] = self[i], self[parent]
       i = parent
     else
       break
@@ -49,41 +49,41 @@ function Heap:push(priority, value)
   end
 end
 
+--: (HeapT) -> (number | nil, unknown)
 function Heap:pop()
-  local self_ = self --[[:! HeapT]]
-  if self_.n == 0 then return nil end
-  local top = self_[1]
-  self_[1] = self_[self_.n]
-  self_[self_.n] = nil
-  self_.n = self_.n - 1
+  if self.n == 0 then return nil end
+  local top = self[1]
+  self[1] = self[self.n]
+  self[self.n] = nil
+  self.n = self.n - 1
   -- sift down
   local i = 1
   while true do
     local l, r, smallest = i * 2, i * 2 + 1, i
-    if l <= self_.n then
-      local el = self_[l]
-      local es = self_[smallest]
+    if l <= self.n then
+      local el = self[l]
+      local es = self[smallest]
       if el and es and (el[1] --[[:! number]]) < (es[1] --[[:! number]]) then
         smallest = l
       end
     end
-    if r <= self_.n then
-      local er = self_[r]
-      local es = self_[smallest]
+    if r <= self.n then
+      local er = self[r]
+      local es = self[smallest]
       if er and es and (er[1] --[[:! number]]) < (es[1] --[[:! number]]) then
         smallest = r
       end
     end
     if smallest == i then break end
-    self_[i], self_[smallest] = self_[smallest], self_[i]
+    self[i], self[smallest] = self[smallest], self[i]
     i = smallest
   end
   return top[1] --[[:! number]], top[2]
 end
 
+--: (HeapT) -> boolean
 function Heap:empty()
-  local self_ = self --[[:! HeapT]]
-  return self_.n == 0
+  return self.n == 0
 end
 
 -- ────────────────────────────────────────────────────────────────────
@@ -366,9 +366,9 @@ end
 
 --- BFS from start node.
 -- Returns { order, distances, parents }
+--: (GraphT, unknown) -> ({ order: { [integer]: unknown, ... }, distances: { [unknown]: integer }, parents: { [unknown]: unknown } } | nil, string | nil)
 function M.bfs(graph, start)
-  local g = graph --[[:! GraphT]]
-  if not g:has_node(start) then
+  if not graph:has_node(start) then
     return nil, "graph: node not found: " .. tostring(start)
   end
   local order = {} --[[:! { [integer]: unknown, ... }]]
@@ -381,7 +381,7 @@ function M.bfs(graph, start)
   while head <= #queue do
     local node = queue[head]; head = head + 1
     order[#order + 1] = node
-    for _, e in ipairs(g:neighbors(node)) do
+    for _, e in ipairs(graph:neighbors(node)) do
       if distances[e.node] == nil then
         distances[e.node] = (distances[node] or 0) + 1
         parents[e.node] = node
@@ -394,12 +394,12 @@ end
 
 --- BFS shortest path (by hop count).
 -- Returns array of nodes from start to goal, or nil if unreachable.
+--: (GraphT, unknown, unknown) -> ({ [integer]: unknown } | nil, string | nil)
 function M.bfs_path(graph, start, goal)
-  local g = graph --[[:! GraphT]]
-  if not g:has_node(start) then
+  if not graph:has_node(start) then
     return nil, "graph: node not found: " .. tostring(start)
   end
-  if not g:has_node(goal) then
+  if not graph:has_node(goal) then
     return nil, "graph: node not found: " .. tostring(goal)
   end
   if start == goal then return { start } --[[:! { [integer]: unknown }]] end
@@ -408,7 +408,7 @@ function M.bfs_path(graph, start, goal)
   local head = 1
   while head <= #queue do
     local node = queue[head]; head = head + 1
-    for _, e in ipairs(g:neighbors(node)) do
+    for _, e in ipairs(graph:neighbors(node)) do
       if parents[e.node] == nil then
         parents[e.node] = node
         if e.node == goal then
@@ -440,9 +440,9 @@ end
 --- DFS from start node.
 -- Returns { order, discovery, finish, parents }
 -- discovery[node] = step when first visited, finish[node] = step when done
+--: (GraphT, unknown) -> ({ order: { [integer]: unknown, ... }, discovery: { [unknown]: integer }, finish: { [unknown]: integer }, parents: { [unknown]: unknown } } | nil, string | nil)
 function M.dfs(graph, start)
-  local g = graph --[[:! GraphT]]
-  if not g:has_node(start) then
+  if not graph:has_node(start) then
     return nil, "graph: node not found: " .. tostring(start)
   end
   local order, discovery, finish, parents = {}, {}, {}, {}
@@ -453,7 +453,7 @@ function M.dfs(graph, start)
     timer = timer + 1
     discovery[node] = timer
     order[#order + 1] = node
-    for _, e in ipairs(g:neighbors(node)) do
+    for _, e in ipairs(graph:neighbors(node)) do
       if discovery[e.node] == nil then
         parents[e.node] = node
         visit(e.node)
@@ -473,15 +473,15 @@ end
 
 --- Dijkstra's algorithm from start node (non-negative weights).
 -- Returns { distances, parents }
+--: (GraphT, unknown) -> ({ distances: { [unknown]: number }, parents: { [unknown]: unknown } } | nil, string | nil)
 function M.dijkstra(graph, start)
-  local g = graph --[[:! GraphT]]
-  if not g:has_node(start) then
+  if not graph:has_node(start) then
     return nil, "graph: node not found: " .. tostring(start)
   end
   local dist = {} --[[:! { [unknown]: number }]]
   local parents = {} --[[:! { [unknown]: unknown }]]
   local visited = {}
-  for _, id in ipairs(g:nodes()) do
+  for _, id in ipairs(graph:nodes()) do
     dist[id] = math.huge
   end
   dist[start] = 0
@@ -495,7 +495,7 @@ function M.dijkstra(graph, start)
     local dv = d --[[:! number]]
     if not visited[node] then
       visited[node] = true
-      for _, e in ipairs(g:neighbors(node)) do
+      for _, e in ipairs(graph:neighbors(node)) do
         local nd = dv + e.weight
         if nd < dist[e.node] then
           dist[e.node] = nd
@@ -511,8 +511,8 @@ end
 
 --- Dijkstra path from start to goal.
 -- Returns { path, distance } or nil if unreachable.
+--: (GraphT, unknown, unknown) -> ({ path: { [integer]: unknown, ... }, distance: number } | nil, string | nil)
 function M.dijkstra_path(graph, start, goal)
-  local g = graph --[[:! GraphT]]
   local result, err = M.dijkstra(graph, start)
   if not result then return nil, err end
   if result.distances[goal] == math.huge then return nil end
@@ -538,11 +538,10 @@ end
 -- Returns { path, cost } or nil if unreachable.
 --: (GraphT, unknown, unknown, (unknown) -> number) -> ({ path: { [integer]: unknown, ... }, cost: number } | nil, string | nil)
 function M.astar(graph, start, goal, heuristic)
-  local g = graph --[[:! GraphT]]
-  if not g:has_node(start) then
+  if not graph:has_node(start) then
     return nil, "graph: node not found: " .. tostring(start)
   end
-  if not g:has_node(goal) then
+  if not graph:has_node(goal) then
     return nil, "graph: node not found: " .. tostring(goal)
   end
   local g_score = {} --[[:! { [unknown]: number }]]
@@ -551,7 +550,7 @@ function M.astar(graph, start, goal, heuristic)
   local closed = {}
 
   local h_start = heuristic(start)  -- call before loop to avoid type corruption
-  for _, id in ipairs(g:nodes()) do
+  for _, id in ipairs(graph:nodes()) do
     g_score[id] = math.huge
     f_score[id] = math.huge
   end
@@ -579,7 +578,7 @@ function M.astar(graph, start, goal, heuristic)
     end
     if not closed[node] then
       closed[node] = true
-      for _, e in ipairs(g:neighbors(node)) do
+      for _, e in ipairs(graph:neighbors(node)) do
         if not closed[e.node] then
           local tentative_g = g_score[node] + e.weight
           if tentative_g < (g_score[e.node] or math.huge) then
@@ -603,18 +602,18 @@ end
 --- Bellman-Ford from start (handles negative weights, detects negative cycles).
 -- Returns { distances, parents }, err
 -- err = "graph: negative cycle detected" if one exists
+--: (GraphT, unknown) -> ({ distances: { [unknown]: number }, parents: { [unknown]: unknown } } | nil, string | nil)
 function M.bellman_ford(graph, start)
-  local g = graph --[[:! GraphT]]
-  if not g:has_node(start) then
+  if not graph:has_node(start) then
     return nil, "graph: node not found: " .. tostring(start)
   end
-  local nodes = g:nodes()
-  local edges = g:edges()
+  local nodes = graph:nodes()
+  local edges = graph:edges()
   -- for undirected we need both directions
   local all_edges = {} --[[:! Arr<EdgeEntry>]]
   for _, e in ipairs(edges) do
     all_edges[#all_edges + 1] = e
-    if not g._directed then
+    if not graph._directed then
       all_edges[#all_edges + 1] = { from = e.to, to = e.from, weight = e.weight } --[[:! EdgeEntry]]
     end
   end
@@ -660,9 +659,9 @@ end
 --- Floyd-Warshall all-pairs shortest paths.
 -- Returns { dist, next } where dist[i][j] is shortest distance,
 -- next[i][j] is next node on shortest path from i to j.
+--: (GraphT) -> { dist: { [unknown]: { [unknown]: number, ... } }, next: { [unknown]: { [unknown]: unknown, ... } } }
 function M.floyd_warshall(graph)
-  local g = graph --[[:! GraphT]]
-  local nodes = g:nodes()
+  local nodes = graph:nodes()
   local n = #nodes
   local idx = {}
   for i, id in ipairs(nodes) do idx[id] = i end
@@ -683,14 +682,14 @@ function M.floyd_warshall(graph)
   end
 
   -- initialize from edges
-  for _, e in ipairs(g:edges()) do
+  for _, e in ipairs(graph:edges()) do
     local fi, ti = idx[e.from], idx[e.to]
     if fi and ti then
       if e.weight < dist[fi][ti] then
         dist[fi][ti] = e.weight
         nxt[fi][ti] = e.to
       end
-      if not g._directed then
+      if not graph._directed then
         if e.weight < dist[ti][fi] then
           dist[ti][fi] = e.weight
           nxt[ti][fi] = e.from
@@ -737,14 +736,14 @@ end
 
 --- Topological sort of a directed graph (Kahn's algorithm).
 -- Returns order_array, err  (err if cycle detected)
+--: (GraphT) -> ({ [integer]: unknown, ... } | nil, string | nil)
 function M.topological_sort(graph)
-  local g = graph --[[:! GraphT]]
   local in_degree = {} --[[:! { [unknown]: integer }]]
-  local nodes = g:nodes()
+  local nodes = graph:nodes()
   for _, id in ipairs(nodes) do in_degree[id] = 0 end
 
   for _, id in ipairs(nodes) do
-    for _, e in ipairs(g:neighbors(id)) do
+    for _, e in ipairs(graph:neighbors(id)) do
       in_degree[e.node] = (in_degree[e.node] or 0) + 1
     end
   end
@@ -762,7 +761,7 @@ function M.topological_sort(graph)
     local node = queue[head]; head = head + 1
     order[#order + 1] = node
     local nbs = {}
-    for _, e in ipairs(g:neighbors(node)) do nbs[#nbs + 1] = e.node end
+    for _, e in ipairs(graph:neighbors(node)) do nbs[#nbs + 1] = e.node end
     table.sort(nbs, function(a, b) return tostring(a) < tostring(b) end)
     for _, nb in ipairs(nbs) do
       in_degree[nb] = in_degree[nb] - 1
@@ -778,18 +777,18 @@ end
 
 --- Detect if graph has a cycle.
 -- Works for both directed and undirected graphs.
+--: (GraphT) -> boolean
 function M.has_cycle(graph)
-  local g = graph --[[:! GraphT]]
-  if g._directed then
+  if graph._directed then
     -- DFS-based cycle detection for directed graphs
     local WHITE, GRAY, BLACK = 0, 1, 2
     local color = {} --[[:! { [unknown]: integer }]]
-    for _, id in ipairs(g:nodes()) do color[id] = WHITE end
+    for _, id in ipairs(graph:nodes()) do color[id] = WHITE end
 
     local dfs_visit
     dfs_visit = function(node)
       color[node] = GRAY
-      for _, e in ipairs(g:neighbors(node)) do
+      for _, e in ipairs(graph:neighbors(node)) do
         local en = e
         if color[en.node] == GRAY then return true end
         if color[en.node] == WHITE then
@@ -800,7 +799,7 @@ function M.has_cycle(graph)
       return false
     end
 
-    for _, id in ipairs(g:nodes()) do
+    for _, id in ipairs(graph:nodes()) do
       if color[id] == WHITE then
         if dfs_visit(id) then return true end
       end
@@ -809,7 +808,7 @@ function M.has_cycle(graph)
   else
     -- Union-Find for undirected
     local uf = uf_new()
-    for _, e in ipairs(g:edges()) do
+    for _, e in ipairs(graph:edges()) do
       if not uf_union(uf, e.from, e.to) then return true end
     end
     return false
@@ -822,12 +821,12 @@ end
 
 --- Connected components for undirected graph.
 -- Returns list of lists of node ids.
+--: (GraphT) -> { [integer]: { [integer]: unknown, ... }, ... }
 function M.connected_components(graph)
-  local g = graph --[[:! GraphT]]
   local visited = {}
   local components = {}
 
-  for _, start in ipairs(g:nodes()) do
+  for _, start in ipairs(graph:nodes()) do
     if not visited[start] then
       local comp = {}
       local queue = { start }
@@ -836,7 +835,7 @@ function M.connected_components(graph)
       while head <= #queue do
         local node = queue[head]; head = head + 1
         comp[#comp + 1] = node
-        for _, e in ipairs(g:neighbors(node)) do
+        for _, e in ipairs(graph:neighbors(node)) do
           if not visited[e.node] then
             visited[e.node] = true
             queue[#queue + 1] = e.node
@@ -851,9 +850,9 @@ function M.connected_components(graph)
 end
 
 --- Is the (undirected) graph connected?
+--: (GraphT) -> boolean
 function M.is_connected(graph)
-  local g = graph --[[:! GraphT]]
-  local nodes = g:nodes()
+  local nodes = graph:nodes()
   if #nodes == 0 then return true end
   local comps = M.connected_components(graph)
   return #comps == 1
@@ -861,10 +860,10 @@ end
 
 --- Is bipartite? (2-colorable)
 -- Returns bool, coloring (node -> 0 or 1)
+--: (GraphT) -> (boolean, { [unknown]: integer } | nil)
 function M.is_bipartite(graph)
-  local g = graph --[[:! GraphT]]
   local color = {} --[[:! { [unknown]: integer }]]
-  local nodes = g:nodes()
+  local nodes = graph:nodes()
 
   for _, start in ipairs(nodes) do
     if color[start] == nil then
@@ -873,7 +872,7 @@ function M.is_bipartite(graph)
       local head = 1
       while head <= #queue do
         local node = queue[head]; head = head + 1
-        for _, e in ipairs(g:neighbors(node)) do
+        for _, e in ipairs(graph:neighbors(node)) do
           if color[e.node] == nil then
             color[e.node] = 1 - color[node]
             queue[#queue + 1] = e.node
@@ -894,8 +893,8 @@ end
 
 --- Tarjan's SCC algorithm for directed graphs.
 -- Returns list of SCCs (each SCC is a list of node ids), in reverse topological order.
+--: (GraphT) -> { [integer]: { [integer]: unknown, ... }, ... }
 function M.strongly_connected_components(graph)
-  local g = graph --[[:! GraphT]]
   local index_counter = 0
   local stack = {}
   local lowlink = {} --[[:! { [unknown]: integer }]]
@@ -910,7 +909,7 @@ function M.strongly_connected_components(graph)
     stack[#stack + 1] = v
     on_stack[v] = true
 
-    for _, e in ipairs(g:neighbors(v)) do
+    for _, e in ipairs(graph:neighbors(v)) do
       local w = e.node
       if index[w] == nil then
         strongconnect(w)
@@ -933,7 +932,7 @@ function M.strongly_connected_components(graph)
     end
   end
 
-  for _, v in ipairs(g:nodes()) do
+  for _, v in ipairs(graph:nodes()) do
     if index[v] == nil then
       strongconnect(v)
     end
@@ -946,9 +945,9 @@ end
 -- Minimum / Maximum Spanning Tree (Kruskal's)
 -- ────────────────────────────────────────────────────────────────────
 
+--: (GraphT, boolean) -> (Arr<EdgeEntry>, number)
 local function kruskal(graph, maximize)
-  local g = graph --[[:! GraphT]]
-  local edges = g:edges()
+  local edges = graph:edges()
   table.sort(edges, function(a, b)
     local ae = a --[[:! EdgeEntry]]
     local be = b --[[:! EdgeEntry]]
@@ -969,15 +968,15 @@ end
 
 --- Minimum spanning tree (Kruskal's).
 -- Returns mst_edges, total_weight
+--: (GraphT) -> (Arr<EdgeEntry>, number)
 function M.minimum_spanning_tree(graph)
-  local g = graph --[[:! GraphT]]
   return kruskal(graph, false)
 end
 
 --- Maximum spanning tree (Kruskal's with reversed sort).
 -- Returns mst_edges, total_weight
+--: (GraphT) -> (Arr<EdgeEntry>, number)
 function M.maximum_spanning_tree(graph)
-  local g = graph --[[:! GraphT]]
   return kruskal(graph, true)
 end
 
@@ -988,12 +987,12 @@ end
 --- Edmonds-Karp max flow from source to sink.
 -- Returns { flow, flow_edges }
 -- flow_edges: list of { from, to, flow, capacity }
+--: (GraphT, unknown, unknown) -> ({ flow: number, flow_edges: { [integer]: { from: unknown, to: unknown, flow: number, capacity: number }, ... } } | nil, string | nil)
 function M.max_flow(graph, source, sink)
-  local g = graph --[[:! GraphT]]
-  if not g:has_node(source) then
+  if not graph:has_node(source) then
     return nil, "graph: node not found: " .. tostring(source)
   end
-  if not g:has_node(sink) then
+  if not graph:has_node(sink) then
     return nil, "graph: node not found: " .. tostring(sink)
   end
 
@@ -1007,10 +1006,10 @@ function M.max_flow(graph, source, sink)
     if not cap[v][u] then cap[v][u] = 0 end
   end
 
-  for _, e in ipairs(g:edges()) do
+  for _, e in ipairs(graph:edges()) do
     ensure(e.from, e.to)
     cap[e.from][e.to] = cap[e.from][e.to] + e.weight
-    if not g._directed then
+    if not graph._directed then
       cap[e.to][e.from] = cap[e.to][e.from] + e.weight
     end
   end
@@ -1091,9 +1090,9 @@ end
 
 --- Degree centrality: (degree / (n-1)) for each node.
 -- For directed graphs uses total degree (in + out).
+--: (GraphT) -> { [unknown]: number }
 function M.degree_centrality(graph)
-  local g = graph --[[:! GraphT]]
-  local nodes = g:nodes()
+  local nodes = graph:nodes()
   local n = #nodes
   if n <= 1 then
     local result = {}
@@ -1102,10 +1101,10 @@ function M.degree_centrality(graph)
   end
   local result = {} --[[:! { [unknown]: number }]]
   for _, id in ipairs(nodes) do
-    local deg = #g:neighbors(id)
-    if g._directed then
+    local deg = #graph:neighbors(id)
+    if graph._directed then
       -- add in-degree
-      deg = deg + #(g._radj[id] or {} --[[:! Arr<AdjEntry>]])
+      deg = deg + #(graph._radj[id] or {} --[[:! Arr<AdjEntry>]])
     end
     result[id] = deg / (n - 1)
   end
@@ -1114,9 +1113,9 @@ end
 
 --- Betweenness centrality (normalized, Brandes algorithm).
 -- Returns { node -> centrality }
+--: (GraphT) -> { [unknown]: number }
 function M.betweenness_centrality(graph)
-  local g = graph --[[:! GraphT]]
-  local nodes = g:nodes()
+  local nodes = graph:nodes()
   local n = #nodes
   local bc = {} --[[:! { [unknown]: number }]]
   for _, id in ipairs(nodes) do bc[id] = 0 end
@@ -1139,7 +1138,7 @@ function M.betweenness_centrality(graph)
     while head <= #queue do
       local v = queue[head]; head = head + 1
       stack[#stack + 1] = v
-      for _, e in ipairs(g:neighbors(v)) do
+      for _, e in ipairs(graph:neighbors(v)) do
         local w = e.node
         if dist2[w] < 0 then
           queue[#queue + 1] = w
@@ -1166,7 +1165,7 @@ function M.betweenness_centrality(graph)
 
   -- normalize
   local norm = n > 2 and 1 / ((n - 1) * (n - 2)) or 1
-  if not g._directed then norm = norm * 2 end
+  if not graph._directed then norm = norm * 2 end
   for _, id in ipairs(nodes) do
     bc[id] = bc[id] * norm
   end

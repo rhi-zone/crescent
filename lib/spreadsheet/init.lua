@@ -34,7 +34,7 @@ local function parse_cell_ref(s)
   local abs_col, col_str, abs_row, row_str =
     s:match("^(%$?)([A-Za-z]+)(%$?)(%d+)$")
   if not col_str then return nil end
-  return col_str:upper(), tonumber(row_str) --[[:! integer]], abs_col == "$", abs_row == "$"
+  return col_str:upper(), tonumber(row_str), abs_col == "$", abs_row == "$"
 end
 
 -- Convert column letter(s) to 1-based integer (A=1, Z=26, AA=27, ...)
@@ -104,7 +104,7 @@ local TK = {
   EOF    = "EOF",
 }
 
---:: SpreadToken = { type: string, ... }
+--:: SpreadToken = { type: string, value?: any, is_range?: boolean, ... }
 --:: SpreadNode = { type: string, op?: string, value?: any, left?: SpreadNode, right?: SpreadNode, operand?: SpreadNode, name?: string, args?: { [integer]: SpreadNode }, ... }
 --:: ParserState = { tokens: { [integer]: SpreadToken }, pos: integer, peek: (ParserState) -> SpreadToken, consume: (ParserState) -> SpreadToken, expect: (ParserState, string) -> SpreadToken, expr: (ParserState) -> SpreadNode, comparison: (ParserState) -> SpreadNode, concat: (ParserState) -> SpreadNode, additive: (ParserState) -> SpreadNode, multiplicative: (ParserState) -> SpreadNode, power: (ParserState) -> SpreadNode, unary: (ParserState) -> SpreadNode, primary: (ParserState) -> SpreadNode }
 
@@ -155,7 +155,7 @@ local function lex(src)
       local two = src:sub(i, i+1)
       if two == "<=" or two == ">=" or two == "<>" then
         tokens[#tokens+1] = { type = TK.OP, value = two }
-        i = (i + 2) --[[:! integer]]
+        i = i + 2
       else
         tokens[#tokens+1] = { type = TK.OP, value = c }
         advance()
@@ -197,15 +197,13 @@ local function lex(src)
           if j <= n and (src:sub(j,j) == "$" or src:sub(j,j):match("[A-Za-z]")) then
             -- consume range
             j = j + 0
-            if src:sub(j,j) == "$" then j = (j + 1) --[[:! integer]] end
-            j = j --[[:! integer]]
-            while j <= n and src:sub(j,j):match("[A-Za-z]") do j = (j + 1) --[[:! integer]] end
-            if src:sub(j,j) == "$" then j = (j + 1) --[[:! integer]] end
-            j = j --[[:! integer]]
-            while j <= n and src:sub(j,j):match("%d") do j = (j + 1) --[[:! integer]] end
+            if src:sub(j,j) == "$" then j = j + 1 end
+            while j <= n and src:sub(j,j):match("[A-Za-z]") do j = j + 1 end
+            if src:sub(j,j) == "$" then j = j + 1 end
+            while j <= n and src:sub(j,j):match("%d") do j = j + 1 end
             local range_str = src:sub(start, j-1)
             tokens[#tokens+1] = { type = TK.REF, value = range_str, is_range = true }
-            i = j --[[:! integer]]
+            i = j
           else
             tokens[#tokens+1] = { type = TK.REF, value = word, is_range = false }
           end
@@ -244,21 +242,21 @@ local NT = {
 local function Parser(tokens)
   local p = { tokens = tokens, pos = 1 } --[[: any]]
 
+  --: (ParserState) -> SpreadToken
   function p:peek()
-    local self_ = self --[[:! ParserState]]
-    return self_.tokens[self_.pos]
+    return self.tokens[self.pos]
   end
 
+  --: (ParserState) -> SpreadToken
   function p:consume()
-    local self_ = self --[[:! ParserState]]
-    local t = self_.tokens[self_.pos]
-    self_.pos = (self_.pos + 1) --[[:! integer]]
+    local t = self.tokens[self.pos]
+    self.pos = self.pos + 1
     return t
   end
 
+  --: (ParserState, string) -> SpreadToken
   function p:expect(typ)
-    local self_ = self --[[:! ParserState]]
-    local t = self_:consume()
+    local t = self:consume()
     if t.type ~= typ then
       error("expected " .. typ .. " got " .. t.type)
     end
@@ -266,131 +264,131 @@ local function Parser(tokens)
   end
 
   -- expr → comparison
+  --: (ParserState) -> SpreadNode
   function p:expr()
-    local self_ = self --[[:! ParserState]]
-    return self_:comparison()
+    return self:comparison()
   end
 
   -- comparison → concat ((<|>|<=|>=|=|<>) concat)*
+  --: (ParserState) -> SpreadNode
   function p:comparison()
-    local self_ = self --[[:! ParserState]]
-    local left = self_:concat()
-    local tk = self_:peek()
+    local left = self:concat()
+    local tk = self:peek()
     while tk.type == TK.OP and
           (tk.value == "<" or tk.value == ">" or tk.value == "<=" or
            tk.value == ">=" or tk.value == "=" or tk.value == "<>") do
-      self_:consume()
-      local right = self_:concat()
+      self:consume()
+      local right = self:concat()
       left = { type = NT.BINOP, op = (tk.value --[[:! string]]), left = left, right = right }
-      tk = self_:peek()
+      tk = self:peek()
     end
     return left
   end
 
   -- concat → additive (& additive)*
+  --: (ParserState) -> SpreadNode
   function p:concat()
-    local self_ = self --[[:! ParserState]]
-    local left = self_:additive()
-    while self_:peek().type == TK.OP and self_:peek().value == "&" do
-      self_:consume()
-      local right = self_:additive()
+    local left = self:additive()
+    while self:peek().type == TK.OP and self:peek().value == "&" do
+      self:consume()
+      local right = self:additive()
       left = { type = NT.BINOP, op = "&", left = left, right = right }
     end
     return left
   end
 
   -- additive → multiplicative ((+|-) multiplicative)*
+  --: (ParserState) -> SpreadNode
   function p:additive()
-    local self_ = self --[[:! ParserState]]
-    local left = self_:multiplicative()
-    local tk = self_:peek()
+    local left = self:multiplicative()
+    local tk = self:peek()
     while tk.type == TK.OP and (tk.value == "+" or tk.value == "-") do
-      self_:consume()
-      local right = self_:multiplicative()
+      self:consume()
+      local right = self:multiplicative()
       left = { type = NT.BINOP, op = (tk.value --[[:! string]]), left = left, right = right }
-      tk = self_:peek()
+      tk = self:peek()
     end
     return left
   end
 
   -- multiplicative → power ((*|/) power)*
+  --: (ParserState) -> SpreadNode
   function p:multiplicative()
-    local self_ = self --[[:! ParserState]]
-    local left = self_:power()
-    local tk = self_:peek()
+    local left = self:power()
+    local tk = self:peek()
     while tk.type == TK.OP and (tk.value == "*" or tk.value == "/") do
-      self_:consume()
-      local right = self_:power()
+      self:consume()
+      local right = self:power()
       left = { type = NT.BINOP, op = (tk.value --[[:! string]]), left = left, right = right }
-      tk = self_:peek()
+      tk = self:peek()
     end
     return left
   end
 
   -- power → unary (^ unary)*  (right-assoc)
+  --: (ParserState) -> SpreadNode
   function p:power()
-    local self_ = self --[[:! ParserState]]
-    local base = self_:unary()
-    if self_:peek().type == TK.OP and self_:peek().value == "^" then
-      self_:consume()
-      local exp = self_:power() -- right-recursive
+    local base = self:unary()
+    if self:peek().type == TK.OP and self:peek().value == "^" then
+      self:consume()
+      local exp = self:power() -- right-recursive
       return { type = NT.BINOP, op = "^", left = base, right = exp }
     end
     return base
   end
 
   -- unary → -? primary
+  --: (ParserState) -> SpreadNode
   function p:unary()
-    local self_ = self --[[:! ParserState]]
-    if self_:peek().type == TK.OP and self_:peek().value == "-" then
-      self_:consume()
-      local operand = self_:primary()
+    if self:peek().type == TK.OP and self:peek().value == "-" then
+      self:consume()
+      local operand = self:primary()
       return { type = NT.UNOP, op = "-", operand = operand }
     end
-    return self_:primary()
+    return self:primary()
   end
 
   -- primary → NUM | STR | REF(range) | NAME(args) | ( expr )
+  --: (ParserState) -> SpreadNode
   function p:primary()
-    local self_ = self --[[:! ParserState]]
-    local tk = self_:peek()
+    local tk = self:peek()
     if tk.type == TK.NUM then
-      self_:consume()
+      self:consume()
       return { type = NT.NUM, value = tk.value }
     elseif tk.type == TK.STR then
-      self_:consume()
+      self:consume()
       return { type = NT.STR, value = tk.value }
     elseif tk.type == TK.REF then
-      self_:consume()
-      if (tk --[[: { type: string, is_range: boolean | nil, ... }]]).is_range then
+      self:consume()
+      if tk.is_range then
         return { type = NT.RANGE, value = tk.value }
       else
         return { type = NT.REF, value = tk.value }
       end
     elseif tk.type == TK.NAME then
       -- Could be TRUE/FALSE literals or a function call
-      self_:consume()
+      self:consume()
       if tk.value == "TRUE" then
         return { type = NT.NUM, value = true }
       elseif tk.value == "FALSE" then
         return { type = NT.NUM, value = false }
       end
       -- function call
-      self_:expect(TK.LPAREN)
+      self:expect(TK.LPAREN)
       local args = {}
-      if self_:peek().type ~= TK.RPAREN then
-        args[#args+1] = self_:expr()
-        while self_:peek().type == TK.COMMA do
-          self_:consume()
-          args[#args+1] = self_:expr()
+      if self:peek().type ~= TK.RPAREN then
+        args[#args+1] = self:expr()
+        while self:peek().type == TK.COMMA do
+          self:consume()
+          args[#args+1] = self:expr()
         end
       end
-      self_:expect(TK.RPAREN)
+      self:expect(TK.RPAREN)
       return { type = NT.CALL, name = tk.value, args = args }
     elseif tk.type == TK.LPAREN then
-      self_:consume()
-      local e = self_:expr()
-      self_:expect(TK.RPAREN)
+      self:consume()
+      local e = self:expr()
+      self:expect(TK.RPAREN)
       return e
     else
       error("unexpected token: " .. tk.type .. " " .. tostring(tk.value))
@@ -968,18 +966,17 @@ Sheet.__index = Sheet
 
 --: (SheetType, string, { [string]: boolean } | nil) -> ()
 function Sheet:_invalidate(key, seen)
-  local self_ = self --[[:! SheetType]]
   seen = seen or {}
   if seen[key] then return end
   seen[key] = true
   -- Mark this cell's cached value as dirty
-  local cell = self_._cells[key]
+  local cell = self._cells[key]
   if cell then (cell --[[:! { dirty: boolean, ... }]]).dirty = true end
   -- Propagate to dependents
-  local dependents = self_._dependents[key]
+  local dependents = self._dependents[key]
   if dependents then
     for dep_key in pairs(dependents) do
-      self_:_invalidate(dep_key --[[:! string]], seen)
+      self:_invalidate(dep_key --[[:! string]], seen)
     end
   end
 end
@@ -1163,11 +1160,10 @@ end
 
 --: (SheetType) -> string
 function Sheet:to_csv()
-  local self_ = self --[[:! SheetType]]
   -- Find used extents
   local max_row = 0
   local max_col = 0
-  for key in pairs(self_._cells) do
+  for key in pairs(self._cells) do
     local col_str, row_num = key:match("^([A-Za-z]+)(%d+)$")
     if col_str then
       local r = tonumber(row_num --[[:! string]]) --[[:! integer]]
@@ -1182,7 +1178,7 @@ function Sheet:to_csv()
     local row = {}
     for c = 1, max_col do
       local key = cell_key(num_to_col(c), r)
-      local val = self_:_get_computed(key)
+      local val = self:_get_computed(key)
       row[#row+1] = csv_escape(val)
     end
     lines[#lines+1] = table.concat(row, ",")

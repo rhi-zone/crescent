@@ -124,10 +124,9 @@ end
 
 -- Register a handler for an event: "evict", "expire", "set".
 -- Only one handler per event; calling on() again replaces the previous one.
---: (self: Cache, event: string, handler: (unknown, unknown) -> nil) -> nil
+--: (Cache, string, (unknown, unknown) -> nil) -> nil
 function Cache:on(event, handler)
-  local self_ = self --[[:! Cache]]
-  self_._handlers[event] = handler
+  self._handlers[event] = handler
 end
 
 -- ── Core operations ───────────────────────────────────────────────────────────
@@ -146,22 +145,21 @@ end
 -- Set a key-value pair. ttl (seconds) overrides the cache default for this entry.
 -- Pass ttl=0 to store with no expiry regardless of the default.
 -- Fires the "set" event.
---: (self: Cache, key: unknown, value: unknown, ttl: number | nil) -> nil
+--: (Cache, unknown, unknown, number | nil) -> nil
 function Cache:set(key, value, ttl)
-  local self_ = self --[[:! Cache]]
-  local now = self_._clock()
-  local node = self_._map[key]
+  local now = self._clock()
+  local node = self._map[key]
   if node then
     local node_ = node --[[:! LruNode]]
     node_.value       = value
     node_.created_at  = now
     node_.last_access = now
     node_.hit_count   = 0
-    node_.expires_at  = _resolve_expiry(now, ttl, self_._ttl)
-    _promote(self_, node_)
+    node_.expires_at  = _resolve_expiry(now, ttl, self._ttl)
+    _promote(self, node_)
   else
-    if self_._size >= self_._cap then
-      _evict_tail(self_)
+    if self._size >= self._cap then
+      _evict_tail(self)
     end
     local newnode = {
       key         = key,
@@ -171,60 +169,58 @@ function Cache:set(key, value, ttl)
       created_at  = now,
       last_access = now,
       hit_count   = 0,
-      expires_at  = _resolve_expiry(now, ttl, self_._ttl),
+      expires_at  = _resolve_expiry(now, ttl, self._ttl),
     } --[[:! LruNode]]
-    self_._map[key] = newnode
-    self_._size = self_._size + 1
-    _push_head(self_, newnode)
+    self._map[key] = newnode
+    self._size = self._size + 1
+    _push_head(self, newnode)
   end
-  self_._stats.sets = self_._stats.sets + 1
-  _emit(self_, "set", key, value)
+  self._stats.sets = self._stats.sets + 1
+  _emit(self, "set", key, value)
 end
 
 -- Get the value for a key, promoting it to MRU.
 -- Returns nil if missing or expired.
---: (self: Cache, key: unknown) -> unknown | nil
+--: (Cache, unknown) -> unknown | nil
 function Cache:get(key)
-  local self_ = self --[[:! Cache]]
-  local node = self_._map[key]
+  local node = self._map[key]
   if not node then
-    self_._stats.misses = self_._stats.misses + 1
+    self._stats.misses = self._stats.misses + 1
     return nil
   end
   local node_ = node --[[:! LruNode]]
-  if _remove_expired(self_, node_) then
-    self_._stats.misses = self_._stats.misses + 1
+  if _remove_expired(self, node_) then
+    self._stats.misses = self._stats.misses + 1
     return nil
   end
-  self_._stats.hits = self_._stats.hits + 1
-  local now_ = self_._clock()
+  self._stats.hits = self._stats.hits + 1
+  local now_ = self._clock()
   node_.last_access = now_
   node_.hit_count   = node_.hit_count + 1
-  _promote(self_, node_)
+  _promote(self, node_)
   return node_.value
 end
 
 -- Get value and metadata for a key, promoting it to MRU.
 -- Returns nil, nil if missing or expired.
 -- meta: {expires_at, created_at, last_accessed, hit_count}
---: (self: Cache, key: unknown) -> (unknown | nil, { expires_at: number | nil, created_at: number, last_accessed: number, hit_count: number } | nil)
+--: (Cache, unknown) -> (unknown | nil, { expires_at: number | nil, created_at: number, last_accessed: number, hit_count: number } | nil)
 function Cache:get_with_meta(key)
-  local self_ = self --[[:! Cache]]
-  local node = self_._map[key]
+  local node = self._map[key]
   if not node then
-    self_._stats.misses = self_._stats.misses + 1
+    self._stats.misses = self._stats.misses + 1
     return nil, nil
   end
   local node_ = node --[[:! LruNode]]
-  if _remove_expired(self_, node_) then
-    self_._stats.misses = self_._stats.misses + 1
+  if _remove_expired(self, node_) then
+    self._stats.misses = self._stats.misses + 1
     return nil, nil
   end
-  self_._stats.hits = self_._stats.hits + 1
-  local now_ = self_._clock()
+  self._stats.hits = self._stats.hits + 1
+  local now_ = self._clock()
   node_.last_access = now_
   node_.hit_count   = node_.hit_count + 1
-  _promote(self_, node_)
+  _promote(self, node_)
   return node_.value, {
     expires_at    = node_.expires_at,
     created_at    = node_.created_at,
@@ -234,62 +230,57 @@ function Cache:get_with_meta(key)
 end
 
 -- Get value without updating LRU order. Returns nil if missing or expired.
---: (self: Cache, key: unknown) -> unknown | nil
+--: (Cache, unknown) -> unknown | nil
 function Cache:peek(key)
-  local self_ = self --[[:! Cache]]
-  local node = self_._map[key]
+  local node = self._map[key]
   if not node then return nil end
   local node_ = node --[[:! LruNode]]
-  if _remove_expired(self_, node_) then return nil end
+  if _remove_expired(self, node_) then return nil end
   return node_.value
 end
 
 -- Check existence without updating LRU order or stats.
 -- Returns false if missing OR expired.
---: (self: Cache, key: unknown) -> boolean
+--: (Cache, unknown) -> boolean
 function Cache:has(key)
-  local self_ = self --[[:! Cache]]
-  local node = self_._map[key]
+  local node = self._map[key]
   if not node then return false end
   local node_ = node --[[:! LruNode]]
-  if _remove_expired(self_, node_) then return false end
+  if _remove_expired(self, node_) then return false end
   return true
 end
 
 -- True if the key exists and its TTL has elapsed; false if missing or not expired.
---: (self: Cache, key: unknown) -> boolean
+--: (Cache, unknown) -> boolean
 function Cache:is_expired(key)
-  local self_ = self --[[:! Cache]]
-  local node = self_._map[key]
+  local node = self._map[key]
   if not node then return false end
   local node_ = node --[[:! LruNode]]
   if not node_.expires_at then return false end
-  return self_._clock() >= node_.expires_at
+  return self._clock() >= node_.expires_at
 end
 
 -- Delete a key. Returns the old value, or nil if not found.
 -- Does NOT fire "evict" or "expire".
---: (self: Cache, key: unknown) -> unknown | nil
+--: (Cache, unknown) -> unknown | nil
 function Cache:delete(key)
-  local self_ = self --[[:! Cache]]
-  local node = self_._map[key]
+  local node = self._map[key]
   if not node then return nil end
   local node_ = node --[[:! LruNode]]
-  _detach(self_, node_)
-  self_._map[key] = nil
-  self_._size = self_._size - 1
-  self_._stats.deletes = self_._stats.deletes + 1
+  _detach(self, node_)
+  self._map[key] = nil
+  self._size = self._size - 1
+  self._stats.deletes = self._stats.deletes + 1
   return node_.value
 end
 
 -- Remove all entries. Does NOT fire events or update stats.
---: (self: Cache) -> nil
+--: (Cache) -> nil
 function Cache:clear()
-  local self_ = self --[[:! Cache]]
-  self_._map  = {}
-  self_._head = nil
-  self_._tail = nil
-  self_._size = 0
+  self._map  = {}
+  self._head = nil
+  self._tail = nil
+  self._size = 0
 end
 
 -- ── TTL management ────────────────────────────────────────────────────────────
@@ -297,16 +288,15 @@ end
 -- Reset the TTL timer for key without changing its value.
 -- If the entry has no TTL (and no default_ttl), this is a no-op.
 -- Returns true if the key exists and is not expired, false otherwise.
---: (self: Cache, key: unknown) -> boolean
+--: (Cache, unknown) -> boolean
 function Cache:touch(key)
-  local self_ = self --[[:! Cache]]
-  local node = self_._map[key]
+  local node = self._map[key]
   if not node then return false end
   local node_ = node --[[:! LruNode]]
-  if _remove_expired(self_, node_) then return false end
-  local t = self_._ttl
+  if _remove_expired(self, node_) then return false end
+  local t = self._ttl
   if node_.expires_at and t then
-    node_.expires_at = self_._clock() + (t --[[:! number]])
+    node_.expires_at = self._clock() + (t --[[:! number]])
   end
   return true
 end
@@ -314,17 +304,16 @@ end
 -- Extend the TTL of key by extra_seconds beyond its current expiry.
 -- If the entry has no expiry, sets expiry to now + extra_seconds.
 -- Returns true if the key exists and is not expired, false otherwise.
---: (self: Cache, key: unknown, extra_seconds: number) -> boolean
+--: (Cache, unknown, number) -> boolean
 function Cache:extend(key, extra_seconds)
-  local self_ = self --[[:! Cache]]
-  local node = self_._map[key]
+  local node = self._map[key]
   if not node then return false end
   local node_ = node --[[:! LruNode]]
-  if _remove_expired(self_, node_) then return false end
+  if _remove_expired(self, node_) then return false end
   if node_.expires_at then
     node_.expires_at = node_.expires_at + extra_seconds
   else
-    node_.expires_at = self_._clock() + extra_seconds
+    node_.expires_at = self._clock() + extra_seconds
   end
   return true
 end
@@ -332,33 +321,31 @@ end
 -- Immediately expire a key (sets its expiry to the past).
 -- Returns true if the key existed, false if missing.
 -- The entry is lazily removed on the next access.
---: (self: Cache, key: unknown) -> boolean
+--: (Cache, unknown) -> boolean
 function Cache:expire(key)
-  local self_ = self --[[:! Cache]]
-  local node = self_._map[key]
+  local node = self._map[key]
   if not node then return false end
   local node_ = node --[[:! LruNode]]
-  node_.expires_at = self_._clock() - 1
+  node_.expires_at = self._clock() - 1
   return true
 end
 
 -- ── Bulk operations ───────────────────────────────────────────────────────────
 
 -- Remove all expired entries immediately. Returns the count of removed entries.
---: (self: Cache) -> number
+--: (Cache) -> number
 function Cache:evict_expired()
-  local self_ = self --[[:! Cache]]
   local removed = 0
-  local node = self_._head
+  local node = self._head
   while node do
     local node_ = node --[[:! LruNode]]
     local nxt = node_.next
-    if node_.expires_at and self_._clock() >= node_.expires_at then
-      _detach(self_, node_)
-      self_._map[node_.key] = nil
-      self_._size = self_._size - 1
-      self_._stats.expirations = self_._stats.expirations + 1
-      _emit(self_, "expire", node_.key, node_.value)
+    if node_.expires_at and self._clock() >= node_.expires_at then
+      _detach(self, node_)
+      self._map[node_.key] = nil
+      self._size = self._size - 1
+      self._stats.expirations = self._stats.expirations + 1
+      _emit(self, "expire", node_.key, node_.value)
       removed = removed + 1
     end
     node = nxt
@@ -369,39 +356,35 @@ end
 -- ── Size / capacity ───────────────────────────────────────────────────────────
 
 -- Current number of entries (O(1); does not scan for expired items).
---: (self: Cache) -> number
+--: (Cache) -> number
 function Cache:size()
-  local self_ = self --[[:! Cache]]
-  return self_._size
+  return self._size
 end
 
 -- Maximum capacity.
---: (self: Cache) -> number
+--: (Cache) -> number
 function Cache:capacity()
-  local self_ = self --[[:! Cache]]
-  return self_._cap
+  return self._cap
 end
 
 -- True when size() == capacity().
---: (self: Cache) -> boolean
+--: (Cache) -> boolean
 function Cache:full()
-  local self_ = self --[[:! Cache]]
-  return self_._size >= self_._cap
+  return self._size >= self._cap
 end
 
 -- ── Iteration ─────────────────────────────────────────────────────────────────
 
 -- Iterator over (key, value) pairs, MRU first. Skips expired entries (lazy remove).
---: (self: Cache) -> (() -> (unknown | nil, unknown | nil))
+--: (Cache) -> (() -> (unknown | nil, unknown | nil))
 function Cache:pairs()
-  local self_ = self --[[:! Cache]]
-  local node = self_._head
+  local node = self._head
   return function()
     while node do
       local node_ = node --[[:! LruNode]]
       local current = node_
       node = node_.next
-      if not _remove_expired(self_, current) then
+      if not _remove_expired(self, current) then
         return current.key, current.value
       end
     end
@@ -410,15 +393,14 @@ function Cache:pairs()
 end
 
 -- Array of non-expired keys, MRU first.
---: (self: Cache) -> { [number]: unknown }
+--: (Cache) -> { [number]: unknown }
 function Cache:keys()
-  local self_ = self --[[:! Cache]]
   local result = {}
-  local node = self_._head
+  local node = self._head
   while node do
     local node_ = node --[[:! LruNode]]
     local nxt = node_.next
-    if not _remove_expired(self_, node_) then
+    if not _remove_expired(self, node_) then
       result[#result + 1] = node_.key
     end
     node = nxt
@@ -427,15 +409,14 @@ function Cache:keys()
 end
 
 -- Array of non-expired values, MRU first.
---: (self: Cache) -> { [number]: unknown }
+--: (Cache) -> { [number]: unknown }
 function Cache:values()
-  local self_ = self --[[:! Cache]]
   local result = {}
-  local node = self_._head
+  local node = self._head
   while node do
     local node_ = node --[[:! LruNode]]
     local nxt = node_.next
-    if not _remove_expired(self_, node_) then
+    if not _remove_expired(self, node_) then
       result[#result + 1] = node_.value
     end
     node = nxt
@@ -444,15 +425,14 @@ function Cache:values()
 end
 
 -- Array of {key, value} pairs, MRU first.
---: (self: Cache) -> { [number]: { [number]: unknown } }
+--: (Cache) -> { [number]: { [number]: unknown } }
 function Cache:entries()
-  local self_ = self --[[:! Cache]]
   local result = {}
-  local node = self_._head
+  local node = self._head
   while node do
     local node_ = node --[[:! LruNode]]
     local nxt = node_.next
-    if not _remove_expired(self_, node_) then
+    if not _remove_expired(self, node_) then
       result[#result + 1] = { node_.key, node_.value }
     end
     node = nxt
@@ -463,19 +443,17 @@ end
 -- ── Statistics ────────────────────────────────────────────────────────────────
 
 -- Hits / (hits + misses) since creation or last reset_stats. Returns 0 when no lookups.
---: (self: Cache) -> number
+--: (Cache) -> number
 function Cache:hit_rate()
-  local self_ = self --[[:! Cache]]
-  local total = self_._stats.hits + self_._stats.misses
+  local total = self._stats.hits + self._stats.misses
   if total == 0 then return 0 end
-  return self_._stats.hits / total
+  return self._stats.hits / total
 end
 
 -- Snapshot of all counters plus hit_rate.
---: (self: Cache) -> { hits: number, misses: number, sets: number, deletes: number, evictions: number, expirations: number, hit_rate: number }
+--: (Cache) -> { hits: number, misses: number, sets: number, deletes: number, evictions: number, expirations: number, hit_rate: number }
 function Cache:stats()
-  local self_ = self --[[:! Cache]]
-  local s = self_._stats
+  local s = self._stats
   local total = s.hits + s.misses
   return {
     hits        = s.hits,
@@ -489,10 +467,9 @@ function Cache:stats()
 end
 
 -- Reset all counters to zero.
---: (self: Cache) -> nil
+--: (Cache) -> nil
 function Cache:reset_stats()
-  local self_ = self --[[:! Cache]]
-  local s = self_._stats
+  local s = self._stats
   s.hits        = 0
   s.misses      = 0
   s.sets        = 0

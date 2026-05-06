@@ -31,87 +31,97 @@ local math_random = math.random
 local vec2_mt = {}
 vec2_mt.__index = vec2_mt
 
+--: (Vec2, Vec2) -> Vec2
 function vec2_mt:add(b)
-  local self_ = self --[[:! Vec2]] local b_ = b --[[:! Vec2]]
-  return M.vec2(self_.x + b_.x, self_.y + b_.y)
+  local b_ = b --[[:! Vec2]]
+  return M.vec2(self.x + b_.x, self.y + b_.y)
 end
+--: (Vec2, Vec2) -> Vec2
 function vec2_mt:sub(b)
-  local self_ = self --[[:! Vec2]] local b_ = b --[[:! Vec2]]
-  return M.vec2(self_.x - b_.x, self_.y - b_.y)
+  local b_ = b --[[:! Vec2]]
+  return M.vec2(self.x - b_.x, self.y - b_.y)
 end
+--: (Vec2, number) -> Vec2
 function vec2_mt:mul(s)
-  local self_ = self --[[:! Vec2]] local s_ = s --[[:! number]]
-  return M.vec2(self_.x * s_, self_.y * s_)
+  local s_ = s --[[:! number]]
+  return M.vec2(self.x * s_, self.y * s_)
 end
+--: (Vec2, number) -> Vec2
 function vec2_mt:div(s)
-  local self_ = self --[[:! Vec2]] local s_ = s --[[:! number]]
-  return M.vec2(self_.x / s_, self_.y / s_)
+  local s_ = s --[[:! number]]
+  return M.vec2(self.x / s_, self.y / s_)
 end
+--: (Vec2, Vec2) -> number
 function vec2_mt:dot(b)
-  local self_ = self --[[:! Vec2]] local b_ = b --[[:! Vec2]]
-  return self_.x * b_.x + self_.y * b_.y
+  local b_ = b --[[:! Vec2]]
+  return self.x * b_.x + self.y * b_.y
 end
 
+--: (Vec2) -> number
 function vec2_mt:length_sq()
-  local self_ = self --[[:! Vec2]]
-  return self_.x * self_.x + self_.y * self_.y
+  return self.x * self.x + self.y * self.y
 end
 
+--: (Vec2) -> number
 function vec2_mt:length()
-  local self_ = self --[[:! Vec2]]
-  return math_sqrt(self_.x * self_.x + self_.y * self_.y)
+  return math_sqrt(self.x * self.x + self.y * self.y)
 end
 
+--: (Vec2) -> Vec2
 function vec2_mt:normalize()
-  local self_ = self --[[:! Vec2]]
-  local len = self_:length()
+  local len = self:length()
   if len < 1e-12 then return M.vec2(0, 0) end
-  return M.vec2(self_.x / len, self_.y / len)
+  return M.vec2(self.x / len, self.y / len)
 end
 
+--: (Vec2, number) -> Vec2
 function vec2_mt:limit(max_len)
-  local self_ = self --[[:! Vec2]] local max_len_ = max_len --[[:! number]]
-  local lsq = self_:length_sq()
+  local max_len_ = max_len --[[:! number]]
+  local lsq = self:length_sq()
   if lsq > max_len_ * max_len_ then
-    return self_:normalize():mul(max_len_)
+    return self:normalize():mul(max_len_)
   end
-  return M.vec2(self_.x, self_.y)
+  return M.vec2(self.x, self.y)
 end
 
+--: (Vec2, Vec2) -> number
 function vec2_mt:dist(b)
-  local self_ = self --[[:! Vec2]] local b_ = b --[[:! Vec2]]
-  local dx = self_.x - b_.x
-  local dy = self_.y - b_.y
+  local b_ = b --[[:! Vec2]]
+  local dx = self.x - b_.x
+  local dy = self.y - b_.y
   return math_sqrt(dx * dx + dy * dy)
 end
 
+--: (Vec2, Vec2) -> number
 function vec2_mt:dist_sq(b)
-  local self_ = self --[[:! Vec2]] local b_ = b --[[:! Vec2]]
-  local dx = self_.x - b_.x
-  local dy = self_.y - b_.y
+  local b_ = b --[[:! Vec2]]
+  local dx = self.x - b_.x
+  local dy = self.y - b_.y
   return dx * dx + dy * dy
 end
 
+--: (Vec2) -> number
 function vec2_mt:angle()
-  local self_ = self --[[:! Vec2]]
-  return math_atan2(self_.y, self_.x)
+  return math_atan2(self.y, self.x)
 end
 
+--: (Vec2, number) -> Vec2
 function vec2_mt:rotate(theta)
-  local self_ = self --[[:! Vec2]] local theta_ = theta --[[:! number]]
+  local theta_ = theta --[[:! number]]
   local c = math_cos(theta_)
   local s = math_sin(theta_)
-  return M.vec2(self_.x * c - self_.y * s, self_.x * s + self_.y * c)
+  return M.vec2(self.x * c - self.y * s, self.x * s + self.y * c)
 end
 
+--: (Vec2, Vec2, number) -> Vec2
 function vec2_mt:lerp(b, t)
-  local self_ = self --[[:! Vec2]] local b_ = b --[[:! Vec2]] local t_ = t --[[:! number]]
-  return M.vec2(self_.x + (b_.x - self_.x) * t_, self_.y + (b_.y - self_.y) * t_)
+  local b_ = b --[[:! Vec2]] local t_ = t --[[:! number]]
+  return M.vec2(self.x + (b_.x - self.x) * t_, self.y + (b_.y - self.y) * t_)
 end
 
+--: (Vec2) -> string
 function vec2_mt:__tostring()
-  local self_ = self --[[:! Vec2]]
-  return "vec2(" .. self_.x .. ", " .. self_.y .. ")"
+  return "vec2(" .. self.x .. ", " .. self.y .. ")"
 end
 
 --- Construct a vec2.
@@ -138,14 +148,14 @@ local agent_mt = {}
 agent_mt.__index = agent_mt
 
 --- Integrate force over dt, clamp velocity to max_speed.
+--: (Agent, Vec2, number) -> nil
 function agent_mt:update(force, dt)
-  local self_ = self --[[:! Agent]]
   local force_ = force --[[:! Vec2]]
   local dt_ = dt --[[:! number]]
   -- acceleration = force / mass
-  local acc = force_:mul(dt_ / self_.mass)
-  self_.velocity = self_.velocity:add(acc):limit(self_.max_speed)
-  self_.position = self_.position:add(self_.velocity:mul(dt_))
+  local acc = force_:mul(dt_ / self.mass)
+  self.velocity = self.velocity:add(acc):limit(self.max_speed)
+  self.position = self.position:add(self.velocity:mul(dt_))
 end
 
 --- Construct an agent.
@@ -455,7 +465,7 @@ function M.separation(agent, neighbors, opts)
       local dsq = agent_.position:dist_sq(other_.position)
       if dsq < radius * radius and dsq > 1e-12 then
         local d   = math_sqrt(dsq)
-        local away = agent_.position:sub(other_.position):mul(1 / d)
+        local away = agent_.position:sub(other_.position):mul(1 / d) --[[: Vec2]]
         -- Weight by inverse distance
         force = force:add(away:mul(radius / d))
         count = count + 1
