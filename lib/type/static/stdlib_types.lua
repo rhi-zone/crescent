@@ -81,7 +81,7 @@
 --::   C:        $FfiC,
 --::   ...
 --:: }
---:: module "bit": {
+--:: BitLib = {
 --::   tobit:   (x: number) -> integer,
 --::   tohex:   (x: integer, n: integer | nil) -> string,
 --::   bnot:    (x: integer) -> integer,
@@ -95,6 +95,8 @@
 --::   rol:     (x: integer, n: integer) -> integer,
 --::   ror:     (x: integer, n: integer) -> integer
 --:: }
+--:: module "bit": BitLib
+--:: declare bit = BitLib
 --:: declare _G = $GlobalScope
 --:: declare package = { path: string, cpath: string, loaded: { [string]: unknown, ... }, preload: { [string]: unknown, ... }, ... }
 --:: declare arg = { [integer]: string, ... }
@@ -144,8 +146,8 @@
 --::     ceil:       (x: number) -> integer,
 --::     abs:        (x: number) -> number,
 --::     sqrt:       (x: number) -> number,
---::     max:        (x: number, ...number) -> number,
---::     min:        (x: number, ...number) -> number,
+--::     max:        ((x: integer, ...integer) -> integer) & ((x: number, ...number) -> number),
+--::     min:        ((x: integer, ...integer) -> integer) & ((x: number, ...number) -> number),
 --::     random:     (m: integer | nil, n: integer | nil) -> number,
 --::     randomseed: (x: number) -> (),
 --::     sin:        (x: number) -> number,
