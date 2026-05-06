@@ -530,6 +530,10 @@ end
 -- Solve a deferred `or` expression: C_OR = { C_OR, left_tid, right_tid, result_tid, line, col }
 -- Defers while left_tid is still a free TAG_VAR (not yet resolved).
 -- Once concrete: result = subtract(left, nil) | right.
+-- Special case: when left is T_UNKNOWN and right is a non-falsy typed default,
+-- result is right. `unknown or 0` means the programmer is asserting the result
+-- type via the fallback — the or-default IS the narrowing. Not applied when right
+-- is falsy (nil, false literal) because those don't carry type information.
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_or(ctx, c)
@@ -543,9 +547,23 @@ local function solve_or(ctx, c)
         return false  -- defer
     end
 
-    local non_nil_left = types_mod.subtract(ctx, left, ctx.T_NIL)
     local right = find(ctx, right_tid)
-    local resolved = types_mod.make_union(ctx, { non_nil_left, right })
+    local resolved
+    if left == ctx.T_UNKNOWN then
+        -- Only narrow when the default is a non-falsy typed value: not nil, not false.
+        -- `unknown or false` / `unknown or nil` don't assert the result type.
+        local rt = ctx.types:get(right)
+        local is_falsy = right == ctx.T_NIL or rt.tag == TAG_NIL
+            or (rt.tag == TAG_LITERAL and rt.data[0] == defs.LIT_BOOLEAN and rt.data[1] == 0)
+        if not is_falsy then
+            resolved = right
+        else
+            resolved = types_mod.make_union(ctx, { ctx.T_UNKNOWN, right })
+        end
+    else
+        local non_nil_left = types_mod.subtract(ctx, left, ctx.T_NIL)
+        resolved = types_mod.make_union(ctx, { non_nil_left, right })
+    end
     unify_mod.unify(ctx, result_tid, resolved)
     return true
 end

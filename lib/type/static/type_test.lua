@@ -2341,6 +2341,38 @@ local flag = false
 local x = flag or "yes"
 ]])
     end)
+    assert.it("unknown or 0 → integer (or-default is an inference source)", function()
+        -- Open record field access returns unknown. The 'or default' pattern should
+        -- type the result as the default's type — the programmer is asserting the
+        -- left is compatible and the fallback types the result.
+        no_errors([[
+--: { [string]: unknown }
+local opts = {}
+local n = opts.count or 0
+--: integer
+local function check() return n end
+]])
+    end)
+    assert.it("unknown or 'str' → string", function()
+        no_errors([[
+--: { [string]: unknown }
+local opts = {}
+local s = opts.name or "default"
+--: string
+local function check() return s end
+]])
+    end)
+    assert.it("unknown or false does NOT narrow to boolean (false is falsy, right side only when left is nil/false)", function()
+        -- unknown or false: left could be truthy non-boolean; result is unknown|false = unknown
+        -- This is correct — false as a default doesn't assert the result type
+        no_errors([[
+--: { [string]: unknown }
+local opts = {}
+local b = opts.flag or false
+--: unknown
+local function check() return b end
+]])
+    end)
 end)
 
 assert.describe("checker: branch-join / post-if type merging", function()
