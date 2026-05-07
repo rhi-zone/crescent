@@ -6,7 +6,8 @@ local mod = {}
 local _pass = 0
 local _fail = 0
 local _skip = 0
-local _tests = {}    -- list of { name, ok, skipped, pass, fail, err } from it() blocks
+--:: TestRecord = { name: string, ok: boolean, pass: integer, fail: integer, err: string | nil, skipped?: boolean, reason?: unknown }
+local _tests = {} --[[: TestRecord[] ]]
 local _describe = {} -- current describe-path stack
 
 -- Sentinel table used to distinguish skip throws from real errors.
@@ -100,7 +101,7 @@ mod.it = function(name, fn)
 	local n_fail = _fail - pre_fail
 	_tests[#_tests + 1] = {
 		name = full,
-		ok   = ok and n_fail == 0,
+		ok   = (ok and n_fail == 0) and true or false,
 		pass = n_pass,
 		fail = n_fail,
 		err  = not ok and tostring(err) or nil,

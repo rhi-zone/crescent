@@ -2,10 +2,10 @@ if not package.path:find("./?/init.lua", 1, true) then package.path = "./?/init.
 
 --:: mustache_ctx = { [string]: unknown }
 --:: mustache_partials = { [string]: string }
---:: mustache_token = { [string]: unknown }
+--:: mustache_token = { type: string, value: string, key: string, escape: boolean, inverted: boolean, tokens: mustache_template, raw_text: string, indent: string, [string]: unknown }
 --:: mustache_template = { [integer]: mustache_token }
---: { render: (string, mustache_ctx, (mustache_partials | nil)) -> ((string | nil), (string | nil)), compile: (string) -> ((mustache_template | nil), (string | nil)) }
-local M = {}
+--:: mustache_compiled = { _tokens: mustache_template, render: (mustache_compiled, mustache_ctx, (mustache_partials | nil)) -> ((string | nil), (string | nil)) }
+local M = {} --[[: { render: (string, mustache_ctx, (mustache_partials | nil)) -> ((string | nil), (string | nil)), compile: (string) -> ((mustache_compiled | nil), (string | nil)), [string]: unknown }]]
 
 -- HTML escape map
 local escape_map = {

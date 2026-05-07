@@ -4,7 +4,8 @@ local urlencode = require("lib.encode.urlencode").string_to_urlencode
 
 local mod = {}
 
-mod.readers = {} --[[@type table<string, (fun(s: string, i: integer): {type:string;}, integer)>]]
+--: { [string]: (string, integer, integer | nil) -> (unknown, integer) }
+mod.readers = {}
 
 --[[@type fun(s: string, i: integer, prefix_i?: integer): {type:string;}, integer]]
 mod.readers.normal = function (s, i, prefix_i)
@@ -14,6 +15,7 @@ mod.readers.normal = function (s, i, prefix_i)
 	if prefix_i then i = prefix_i end
 end
 
+--: (string, integer) -> (unknown, integer)
 mod.readers.heading = function (s, i)
 	local start = i
 	local level = 0
@@ -51,7 +53,7 @@ mod.readers_by_character[0x5f --[[_]]] = mod.readers.bold_or_italics
 mod.readers_by_character[0x60 --[[`]]] = mod.readers.code
 mod.readers_by_character[0x7e --[[~]]] = mod.readers.strikethrough
 
---[[@param s string]]
+--: (string, integer | nil) -> (unknown, integer)
 mod.string_to_tree = function (s, i)
 	i = i or 1
 	local parts = {}
@@ -141,7 +143,8 @@ mod.tree_to_html = tree_to_html
 
 --[[IMPL]]
 
-require("dep.pretty_print").pretty_print(mod.string_to_tree([[
+local pp = require("dep.pretty_print") --[[:! { pretty_print: (unknown) -> () }]]
+pp.pretty_print(mod.string_to_tree([[
 # heading
 
 ]]))

@@ -20,6 +20,7 @@ local API_URL = "api.anthropic.com"
 local API_PATH = "/v1/messages"
 local API_VERSION = "2023-06-01"
 
+--: (req: ai_request) -> (string | nil, string | nil)
 local function get_api_key(req)
 	local key = req and req.api_key
 	if not key then return nil, "api_key is required" end
@@ -28,6 +29,7 @@ end
 
 --- Convert neutral ai_message list to Anthropic format.
 -- Extracts system messages to top-level, maps the rest.
+--: (messages: ai_message[]) -> (unknown[], string | nil)
 local function convert_messages(messages)
 	local system_parts = {}
 	local converted = {}
@@ -56,6 +58,7 @@ local function convert_messages(messages)
 end
 
 --- Convert neutral ai_tool list to Anthropic format.
+--: (tools: ai_tool[] | nil) -> unknown[] | nil
 local function convert_tools(tools)
 	if not tools or #tools == 0 then return nil end
 	local result = {}
@@ -71,6 +74,7 @@ local function convert_tools(tools)
 end
 
 --- Parse Anthropic response into neutral ai_response.
+--: (body: string) -> (ai_response | nil, string | nil)
 local function parse_response(body)
 	local data, err = json.decode(body)
 	if not data then return nil, "json decode: " .. (err or "unknown") end

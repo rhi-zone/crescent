@@ -821,14 +821,17 @@ do
 	if socket.initialize then assert(socket.initialize()) end
 end
 
+--: (string) -> { lookup: { [string]: integer }, reverse: { [integer]: string }, strict_reverse: (integer) -> string, strict_lookup: (string) -> integer }
 local capture_flags = function(what)
-	local flags = {}
-	local reverse = {}
+	local flags = {} --[[: { [string]: integer }]]
+	local reverse = {} --[[: { [integer]: string }]]
 	for k, v in pairs(e) do
-		if k:sub(0, #what) == what then
-			k = k:sub(#what + 1):lower()
-			reverse[v] = k
-			flags[k] = v
+		local ks = tostring(k)
+		if ks:sub(0, #what) == what then
+			local kn = ks:sub(#what + 1):lower()
+			local vi = tonumber(v) --[[:! integer]]
+			reverse[vi] = kn
+			flags[kn] = vi
 		end
 	end
 	return {

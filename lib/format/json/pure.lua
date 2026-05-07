@@ -46,7 +46,7 @@ local type_fn     = type
 -- Escape table for the 256 possible byte values.
 -- Built once at module load; indexed by byte value (0-255).
 -- nil means: emit the byte as-is (no escaping needed).
-local ESC = {}
+local ESC = {} --[[: { [integer]: string }]]
 -- Control characters U+0000..U+001F
 for i = 0, 31 do
     ESC[i] = str_format("\\u%04X", i)
@@ -100,7 +100,7 @@ local function encode_string(s, buf, n)
 end
 
 -- Forward declaration for mutual recursion.
-local encode_value
+local encode_value --: ((v: unknown, buf: { [integer]: string }, n: integer, null_sentinel: unknown, visited: { [unknown]: boolean | nil }, depth: integer) -> integer) | nil
 
 -- Encode a Lua table. Determines array vs object heuristic.
 --: (t: { [unknown]: unknown }, buf: { [integer]: string }, n: integer, null_sentinel: unknown, visited: { [unknown]: boolean | nil }, depth: integer) -> integer
@@ -124,11 +124,12 @@ local function encode_table(t, buf, n, null_sentinel, visited, depth)
         if count ~= len then is_array = false end
     end
 
+    local ev = encode_value --[[:! (v: unknown, buf: { [integer]: string }, n: integer, null_sentinel: unknown, visited: { [unknown]: boolean | nil }, depth: integer) -> integer]]
     if is_array then
         buf[n] = "["; n = n + 1
         for i = 1, len do
             if i > 1 then buf[n] = ","; n = n + 1 end
-            n = encode_value(t[i], buf, n, null_sentinel, visited, depth + 1)
+            n = ev(t[i], buf, n, null_sentinel, visited, depth + 1)
         end
         buf[n] = "]"; n = n + 1
     else
@@ -140,9 +141,9 @@ local function encode_table(t, buf, n, null_sentinel, visited, depth)
             end
             if not first then buf[n] = ","; n = n + 1 end
             first = false
-            n = encode_string(k, buf, n)
+            n = encode_string(k --[[:! string]], buf, n) --[[:! integer]]
             buf[n] = ":"; n = n + 1
-            n = encode_value(v, buf, n, null_sentinel, visited, depth + 1)
+            n = ev(v, buf, n, null_sentinel, visited, depth + 1)
         end
         buf[n] = "}"; n = n + 1
     end
@@ -163,19 +164,20 @@ encode_value = function(v, buf, n, null_sentinel, visited, depth)
     elseif t == "boolean" then
         buf[n] = v and "true" or "false"; n = n + 1
     elseif t == "number" then
-        if v ~= v or v == math_huge or v == -math_huge then
+        local vn = v --[[:! number]]
+        if vn ~= vn or vn == math_huge or vn == -math_huge then
             error("invalid number (nan or inf)")
         end
         -- Use integer formatting for values that are exact integers in safe range.
-        if v == math_floor(v) and v >= -2^53 and v <= 2^53 then
-            buf[n] = str_format("%d", v); n = n + 1
+        if vn == math_floor(vn) and vn >= -2^53 and vn <= 2^53 then
+            buf[n] = str_format("%d", vn); n = n + 1
         else
-            buf[n] = str_format("%.17g", v); n = n + 1
+            buf[n] = str_format("%.17g", vn); n = n + 1
         end
     elseif t == "string" then
-        n = encode_string(v, buf, n)
+        n = encode_string(v --[[:! string]], buf, n)
     elseif t == "table" then
-        n = encode_table(v, buf, n, null_sentinel, visited, depth)
+        n = encode_table(v --[[:! { [unknown]: unknown }]], buf, n, null_sentinel, visited, depth)
     else
         error("cannot encode value of type " .. t)
     end

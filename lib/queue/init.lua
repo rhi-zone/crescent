@@ -11,17 +11,27 @@ M._tier = "pure"
 
 local floor = math.floor
 
+--:: PQState = { _heap: { [integer]: unknown }, _size: integer, _cmp: (unknown, unknown) -> boolean, push: (PQState, unknown) -> (), pop: (PQState) -> unknown, is_empty: (PQState) -> boolean }
+--:: FIFOState = { _buf: { [integer]: unknown }, _head: integer, _tail: integer, _size: integer, _cap: integer, push: (FIFOState, unknown) -> () }
+--:: RBState = { _buf: { [integer]: unknown }, _head: integer, _tail: integer, _size: integer, _cap: integer }
+
 -- ---------------------------------------------------------------------------
 -- Priority Queue (binary min-heap)
 -- ---------------------------------------------------------------------------
 
 -- Default comparator: min-heap (smaller values have higher priority)
-local function default_cmp(a, b) return a < b end
+--: (unknown, unknown) -> boolean
+local function default_cmp(a, b)
+  local x = a --[[:! number]]
+  local y = b --[[:! number]]
+  return x < y
+end
 
 local PQ = {}
 PQ.__index = PQ
 
 --- Push a value onto the heap.
+--: (self: PQState, v: unknown) -> ()
 function PQ:push(v)
   local heap = self._heap
   local n = self._size + 1
@@ -42,11 +52,13 @@ function PQ:push(v)
 end
 
 --- Push all values from an array onto the heap.
+--: (self: PQState, arr: { [integer]: unknown }) -> ()
 function PQ:push_all(arr)
   for i = 1, #arr do self:push(arr[i]) end
 end
 
 --- Remove and return the top (highest-priority) element. Returns nil if empty.
+--: (self: PQState) -> unknown
 function PQ:pop()
   local n = self._size
   if n == 0 then return nil end
@@ -78,16 +90,19 @@ function PQ:pop()
 end
 
 --- Return the top element without removing it. Returns nil if empty.
+--: (self: PQState) -> unknown
 function PQ:peek()
   return self._heap[1]
 end
 
 --- Return the number of elements.
+--: (self: PQState) -> integer
 function PQ:size()
   return self._size
 end
 
 --- Return true if the heap is empty.
+--: (self: PQState) -> boolean
 function PQ:is_empty()
   return self._size == 0
 end
@@ -101,6 +116,7 @@ end
 
 --- Build a heap from an existing array in O(n) using Floyd's algorithm.
 -- The source array is not modified. Returns a new heap.
+--: (arr: { [integer]: unknown }, cmp: ((unknown, unknown) -> boolean) | nil) -> PQState
 function M.heapify(arr, cmp)
   local n    = #arr
   local heap = {}
@@ -143,6 +159,7 @@ FIFO.__index = FIFO
 local FIFO_INIT_CAP = 8
 
 --- Enqueue a value at the back (alias: enqueue).
+--: (self: FIFOState, v: unknown) -> ()
 function FIFO:push(v)
   local size = self._size
   local cap  = self._cap
@@ -169,6 +186,7 @@ end
 FIFO.enqueue = FIFO.push
 
 --- Dequeue from the front. Returns nil if empty (alias: dequeue).
+--: (self: FIFOState) -> unknown
 function FIFO:pop()
   if self._size == 0 then return nil end
   local head      = self._head
@@ -181,12 +199,14 @@ end
 FIFO.dequeue = FIFO.pop
 
 --- Return the front element without removing it. Returns nil if empty.
+--: (self: FIFOState) -> unknown
 function FIFO:peek()
   if self._size == 0 then return nil end
   return self._buf[self._head]
 end
 
 --- Add a value to the front.
+--: (self: FIFOState, v: unknown) -> ()
 function FIFO:push_front(v)
   local size = self._size
   local cap  = self._cap
@@ -213,6 +233,7 @@ function FIFO:push_front(v)
 end
 
 --- Remove and return the back element. Returns nil if empty.
+--: (self: FIFOState) -> unknown
 function FIFO:pop_back()
   if self._size == 0 then return nil end
   local tail      = (self._tail - 2) % self._cap + 1
@@ -224,11 +245,13 @@ function FIFO:pop_back()
 end
 
 --- Enqueue all values from an array (in order) at the back.
+--: (self: FIFOState, arr: { [integer]: unknown }) -> ()
 function FIFO:push_all(arr)
   for i = 1, #arr do self:push(arr[i]) end
 end
 
 --- Return a snapshot of all elements as an array in FIFO order (front first).
+--: (self: FIFOState) -> { [integer]: unknown }
 function FIFO:to_array()
   local result = {}
   local buf    = self._buf
@@ -241,16 +264,19 @@ function FIFO:to_array()
 end
 
 --- Return the number of elements.
+--: (self: FIFOState) -> integer
 function FIFO:size()
   return self._size
 end
 
 --- Return true if empty.
+--: (self: FIFOState) -> boolean
 function FIFO:is_empty()
   return self._size == 0
 end
 
 --- Remove all elements. Capacity is kept.
+--: (self: FIFOState) -> ()
 function FIFO:clear()
   self._buf  = {}
   self._head = 1
@@ -277,6 +303,7 @@ local RB = {}
 RB.__index = RB
 
 --- Push a value. Overwrites the oldest element when at capacity.
+--: (self: RBState, v: unknown) -> ()
 function RB:push(v)
   local cap  = self._cap
   local tail = self._tail
@@ -291,6 +318,7 @@ function RB:push(v)
 end
 
 --- Remove and return the oldest element. Returns nil if empty.
+--: (self: RBState) -> unknown
 function RB:pop()
   if self._size == 0 then return nil end
   local head      = self._head
@@ -302,32 +330,38 @@ function RB:pop()
 end
 
 --- Return the oldest element without removing it. Returns nil if empty.
+--: (self: RBState) -> unknown
 function RB:peek()
   if self._size == 0 then return nil end
   return self._buf[self._head]
 end
 
 --- Return the number of elements currently stored.
+--: (self: RBState) -> integer
 function RB:size()
   return self._size
 end
 
 --- Return true if no elements are stored.
+--: (self: RBState) -> boolean
 function RB:is_empty()
   return self._size == 0
 end
 
 --- Return true when at capacity (next push overwrites oldest).
+--: (self: RBState) -> boolean
 function RB:is_full()
   return self._size == self._cap
 end
 
 --- Return the fixed capacity.
+--: (self: RBState) -> integer
 function RB:capacity()
   return self._cap
 end
 
 --- Return all elements as an array from oldest to newest.
+--: (self: RBState) -> { [integer]: unknown }
 function RB:to_array()
   local result = {}
   local buf    = self._buf

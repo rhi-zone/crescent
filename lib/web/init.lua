@@ -31,9 +31,16 @@ local format = string.format
 
 -- ── Query string parsing ─────────────────────────────────────────────────────
 
+--: (string) -> string
+local function url_decode(s)
+	local r = s:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) or 0) end) --[[: any]]
+	r = r:gsub("+", " ")
+	return tostring(r)
+end
+
 --: (string) -> { [string]: string }
 local function parse_query(qs)
-	local params = {}
+	local params = {} --[[: { [string]: string }]]
 	local pos = 1
 	local len = #qs
 	while pos <= len do
@@ -44,16 +51,9 @@ local function parse_query(qs)
 		if eq then
 			local key = sub(pair, 1, eq - 1)
 			local val = sub(pair, eq + 1)
-			-- Decode percent-encoding
-			key = key:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
-			val = val:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
-			key = key:gsub("+", " ")
-			val = val:gsub("+", " ")
-			params[key] = val
+			params[url_decode(key)] = url_decode(val)
 		elseif #pair > 0 then
-			local key = pair:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
-			key = key:gsub("+", " ")
-			params[key] = ""
+			params[url_decode(pair)] = ""
 		end
 	end
 	return params
@@ -233,7 +233,8 @@ function App:handle(req)
 	-- Parse query string from path
 	local qmark = find(req.path, "?", 1, true)
 	if qmark then
-		req.query = parse_query(sub(req.path, qmark + 1))
+		local q = parse_query(sub(req.path, qmark + 1)) --[[:! { [string]: string }]]
+		req.query = q
 		req.path = sub(req.path, 1, qmark - 1)
 	else
 		req.query = req.query or {}
@@ -306,14 +307,16 @@ end
 
 --: ((web_logger_opts | nil)) -> web_middleware
 function M.logger(opts)
-	--: ((string | nil)) -> (string) -> ()
-	local log_fn = opts and opts.log or print
-	local clock = opts and opts.clock or clock_default
+	local log_fn = (opts and opts.log) or print
+	local clock = (opts and opts.clock) or clock_default
 	if not clock then error("web.logger: requires opts.clock (function returning seconds)", 2) end
+	local clock_nn = clock --[[:! () -> number]]
+	--: (req: web_request, res: web_response, next: () -> nil) -> nil
 	return function(req, res, next)
-		req._start_time = clock()
+		req._start_time = clock_nn()
 		next()
-		local elapsed = clock() - req._start_time
+		local start = req._start_time --[[:! number]]
+		local elapsed = clock_nn() - start
 		log_fn(format("%s %s %d %.3fms", req.method, req.path, res.status, elapsed * 1000))
 	end
 end
@@ -328,10 +331,11 @@ function M.cors(opts)
 	local headers_allowed = opts.headers or { "Content-Type", "Authorization", "X-CSRF-Token" }
 	local max_age = opts.max_age or "86400"
 
-	local origin_str = concat(origins, ", ")
-	local methods_str = concat(methods, ", ")
-	local headers_str = concat(headers_allowed, ", ")
+	local origin_str = concat(origins --[[:! { [integer]: string | number }]], ", ")
+	local methods_str = concat(methods --[[:! { [integer]: string | number }]], ", ")
+	local headers_str = concat(headers_allowed --[[:! { [integer]: string | number }]], ", ")
 
+	--: (req: web_request, res: web_response, next: () -> nil) -> nil
 	return function(req, res, next)
 		res.headers["Access-Control-Allow-Origin"] = { origin_str }
 		res.headers["Access-Control-Allow-Methods"] = { methods_str }
@@ -368,6 +372,7 @@ function M.static(url_prefix, dir, read_fn)
 
 	local prefix_len = #url_prefix
 
+	--: (req: web_request, res: web_response, next: () -> nil) -> nil
 	return function(req, res, next)
 		if req.method ~= "GET" and req.method ~= "HEAD" then
 			next()

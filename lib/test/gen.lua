@@ -12,12 +12,18 @@ end
 
 local G = {}
 
+--:: Rng = { seed: number, next: (self: Rng) -> number, float: (self: Rng) -> number, int: (self: Rng, lo: number, hi: number) -> number, bool: (self: Rng) -> boolean, pick: <T>(self: Rng, t: T[]) -> T }
+--:: Generator<T> = { generate: (rng: Rng, sz: integer) -> T, shrink: (v: T) -> T[] }
+--:: StringOpts = { charset?: string, min?: integer, max?: integer }
+--:: ListOpts = { min?: integer, max?: integer }
+
 -- === PRNG (LCG in double arithmetic — no bit.* dependency) ===
 
 local LCG_MOD = 2^32
 local LCG_A   = 1664525
 local LCG_C   = 1013904223
 
+--: (seed: number | nil) -> Rng
 function G.make_rng(seed)
 	local state = math.floor(seed or os.time()) % LCG_MOD
 	if state == 0 then state = 12345 end
@@ -80,6 +86,7 @@ G.uint = G.int(0, 2^31 - 1)
 G.byte = G.int(0, 255)
 
 -- Float in [lo, hi].  Shrinks by halving distance to 0.
+--: (lo: number | nil, hi: number | nil) -> Generator<number>
 function G.float(lo, hi)
 	lo = lo or 0.0
 	hi = hi or 1.0
@@ -95,11 +102,12 @@ end
 
 -- String from a charset.  opts: { charset=string, min=int, max=int }
 -- Shrinks by removing characters (prefix, suffix, halve).
+--: (opts: StringOpts | nil) -> { generate: (rng: Rng, sz: integer) -> string, shrink: (v: string) -> string[] }
 function G.string(opts)
-	opts = opts or {}
-	local charset = opts.charset or "abcdefghijklmnopqrstuvwxyz"
-	local min_len = opts.min or 0
-	local max_fn  = opts.max  -- nil → use size
+	local o = opts or {}
+	local charset = o.charset or "abcdefghijklmnopqrstuvwxyz"
+	local min_len = o.min or 0
+	local max_fn  = o.max  -- nil → use size
 	return {
 		generate = function(rng, sz)
 			local top  = max_fn or math.min(sz, 20)
@@ -116,13 +124,13 @@ function G.string(opts)
 			if #v <= min_len then return {} end
 			local candidates = {}
 			-- Remove last char
-			if #v - 1 >= min_len then candidates[#candidates+1] = v:sub(1, #v - 1) end
+			if #v - 1 >= min_len then candidates[#candidates+1] = string.sub(v, 1, #v - 1) end
 			-- Remove first char
-			if #v - 1 >= min_len and #v > 1 then candidates[#candidates+1] = v:sub(2) end
+			if #v - 1 >= min_len and #v > 1 then candidates[#candidates+1] = string.sub(v, 2) end
 			-- Halve
 			local half = math.floor(#v / 2)
 			if half >= min_len and half < #v - 1 then
-				candidates[#candidates+1] = v:sub(1, half)
+				candidates[#candidates+1] = string.sub(v, 1, half)
 			end
 			return candidates
 		end,
@@ -131,10 +139,11 @@ end
 
 -- List of elements.  opts: { min=int, max=int }
 -- Shrinks by removing elements, then by shrinking individual elements.
+--: <T>(elem_gen: Generator<T>, opts: ListOpts | nil) -> Generator<T[]>
 function G.list(elem_gen, opts)
-	opts = opts or {}
-	local min_len = opts.min or 0
-	local max_fn  = opts.max  -- nil → use size
+	local o = opts or {}
+	local min_len = o.min or 0
+	local max_fn  = o.max  -- nil → use size
 	return {
 		generate = function(rng, sz)
 			local top = max_fn or sz
@@ -169,10 +178,11 @@ function G.list(elem_gen, opts)
 end
 
 -- Table with generated keys and values.  opts: { min=int, max=int }
+--: <K, V>(k_gen: Generator<K>, v_gen: Generator<V>, opts: ListOpts | nil) -> Generator<{ [K]: V }>
 function G.table(k_gen, v_gen, opts)
-	opts = opts or {}
-	local min_n = opts.min or 0
-	local max_n = opts.max or 5
+	local o = opts or {}
+	local min_n = o.min or 0
+	local max_n = o.max or 5
 	return {
 		generate = function(rng, sz)
 			local n   = rng:int(min_n, math.max(min_n, math.min(max_n, sz)))
