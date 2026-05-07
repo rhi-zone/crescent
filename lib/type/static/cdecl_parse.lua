@@ -89,8 +89,7 @@ end
 -- Check current token is TK_IDENT with a specific intern_id.
 --: (CdeclParser, integer) -> boolean
 local function check_kw(p, kw_id)
-    if p.lex.tk == TK_IDENT and p.lex.val == kw_id then return true end
-    return false
+    return p.lex.tk == TK_IDENT and p.lex.val == kw_id
 end
 
 -- Consume current token if it matches tk; return true on success.

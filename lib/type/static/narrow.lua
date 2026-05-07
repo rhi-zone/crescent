@@ -39,16 +39,7 @@ local i32x2_to_double = defs.i32x2_to_double
 
 local M = {}
 
---:: NarrowInfoNilCheck     = { kind: "nil_check", name_id: integer, positive: boolean }
---:: NarrowInfoFieldDisc    = { kind: "field_disc", name_id: integer, field_name_id: integer, lit_kind: integer, lit_intern_id: integer, lit_intern_hi?: integer, positive: boolean }
---:: NarrowInfoLitEq        = { kind: "lit_eq", name_id: integer, lit_kind: integer, lit_id: number, positive: boolean }
---:: NarrowInfoEnumEq       = { kind: "enum_eq", name_id: integer, member_tid: integer, positive: boolean }
---:: NarrowInfoFieldPres    = { kind: "field_presence", obj_name_id: integer, field_name_id: integer, positive: boolean }
---:: NarrowInfoTypeCheck    = { kind: "type_check", name_id: integer, type_str: string, positive: boolean }
---:: NarrowInfoGuardCheck   = { kind: "guard_check", name_id: integer, guard_type_id: integer, positive: boolean }
---:: NarrowInfoInner        = NarrowInfoNilCheck | NarrowInfoFieldDisc | NarrowInfoLitEq | NarrowInfoEnumEq | NarrowInfoFieldPres | NarrowInfoTypeCheck | NarrowInfoGuardCheck
---:: NarrowInfoNegation     = { kind: "negation", inner: NarrowInfoInner }
---:: NarrowInfo             = NarrowInfoInner | NarrowInfoNegation
+--:: NarrowInfo = { kind: string, inner?: { kind: string, name_id?: integer, obj_name_id?: integer, field_name_id?: integer, positive?: boolean, type_str?: string, member_tid?: integer, lit_intern_id?: integer, lit_id?: integer, ... }, name_id?: integer, obj_name_id?: integer, field_name_id?: integer, positive?: boolean, type_str?: string, member_tid?: integer, lit_intern_id?: integer, lit_kind?: integer, lit_id?: integer, ... }
 
 -- Extract narrowing information from a test expression node.
 -- Returns a narrowing_info table or nil.
@@ -81,9 +72,9 @@ local function extract_narrowing(ctx, nid)
         local callee = ctx.nodes:get(n.data[0])
         if callee and callee.kind == NODE_IDENTIFIER then
             local env_mod = require("lib.type.static.env")
-            local callee_tid_raw = env_mod.lookup(ctx.scope, callee.data[0])
-            if callee_tid_raw then
-                local callee_tid = types_mod.find(ctx, callee_tid_raw)
+            local callee_tid = env_mod.lookup(ctx.scope, callee.data[0])
+            if callee_tid then
+                callee_tid = types_mod.find(ctx, callee_tid)
                 local pred = ctx.pool._type_predicates
                     and ctx.pool._type_predicates[callee_tid]
                 if pred and n.data[2] > pred.param_idx then
@@ -113,8 +104,10 @@ local function extract_narrowing(ctx, nid)
 
     if n.kind == NODE_UNARY_EXPR and n.data[0] == OP_NOT then
         local inner = extract_narrowing(ctx, n.data[1])
-        if not inner then return nil end
-        return { kind = "negation", inner = inner }
+        if inner then
+            return { kind = "negation", inner = inner }
+        end
+        return nil
     end
 
     if n.kind == NODE_BINARY_EXPR then
@@ -567,9 +560,9 @@ local function propagate_multi_ret_narrowing(ctx, name_id, narrowed_tid, is_trut
             if truthy == nil then return true end  -- uncertain: keep arm (conservative)
             return truthy == is_truthy
         end)
-    if surviving == nil then return end
+    if not surviving or #surviving == 0 then return end
+    --: { [integer]: integer, ... }
     local surviving_arms = surviving
-    if #surviving_arms == 0 then return end
     -- Re-derive ALL correlated bindings (including name_id itself) from surviving arms.
     -- This overrides apply_narrowing's result for the primary binding when it cannot
     -- narrow an unbound TAG_VAR (e.g. string.find: slot_var subtract nil = unchanged).
