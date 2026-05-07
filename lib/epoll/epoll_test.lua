@@ -1,6 +1,15 @@
 local ffi = require("ffi")
 if ffi.os ~= "Linux" then return end
 
+ffi.cdef([[
+  struct timespec { long tv_sec; long tv_nsec; };
+  struct itimerspec { struct timespec it_interval; struct timespec it_value; };
+  int timerfd_create(int clockid, int flags);
+  int timerfd_settime(int fd, int flags, void *new_value, void *old_value);
+  long read(int fd, void *buf, unsigned long count);
+  int close(int fd);
+]])
+
 local T = require("lib.test.assert")
 
 -- Check that epoll syscalls are available

@@ -21,6 +21,7 @@ local M = {}
 -- ── pure-Lua directory walker ─────────────────────────────────────────────────
 -- Walk dir recursively; call fn(filepath) for each regular *.lua file found.
 -- Uses io.popen("find") — same pattern as the rest of lib/pkg/*.lua.
+--: (string, (string) -> nil) -> (boolean | nil, string | nil)
 local function walk_lua_files(dir, fn)
 	local fh = io.popen(("find %q -type f -name '*.lua' | sort"):format(dir), "r")
 	if not fh then
@@ -151,6 +152,8 @@ end
 --     },
 --     warnings = { string, ... },
 --   }
+--:: ScanResult = { ok: boolean, phantoms: { name: string, file: string, line: integer, require_path: string }[], warnings: string[] }
+--: (string) -> ScanResult
 function M.scan(pkg_dir)
 	local result = { ok = true, phantoms = {}, warnings = {} }
 

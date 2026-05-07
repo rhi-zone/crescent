@@ -20,6 +20,34 @@ if not ok then
 	-- Clear partial require cache entry so future attempts can retry.
 	package.loaded["lib.regex.system"] = nil
 end
-if ok and type(mod) == "table" then return mod end
+local impl_raw = (ok and type(mod) == "table") and mod or require("lib.regex.pure")
+local impl_u = impl_raw --[[: any]]
+local impl_t = impl_u --[[:! { compile: unknown, match: unknown, find: unknown, gmatch: unknown, gsub: unknown, split: unknown, _tier: unknown, ... }]]
 
-return require("lib.regex.pure")
+--:: RegexCompile = (pattern: string, flags: string | nil) -> (unknown, string | nil)
+--:: RegexMatch = (pattern: string, subject: string, init: integer | nil) -> unknown
+--:: RegexFind = (pattern: string, subject: string, init: integer | nil) -> unknown
+--:: RegexGmatch = (pattern: string, subject: string) -> unknown
+--:: RegexGsub = (pattern: string, subject: string, replacement: unknown, n: integer | nil) -> unknown
+--:: RegexSplit = (pattern: string, subject: string) -> unknown
+--:: RegexModule = {
+--::     compile: RegexCompile,
+--::     match:   RegexMatch,
+--::     find:    RegexFind,
+--::     gmatch:  RegexGmatch,
+--::     gsub:    RegexGsub,
+--::     split:   RegexSplit,
+--::     _tier:   string,
+--:: }
+--: RegexModule
+local M = {
+	compile = impl_t.compile --[[:! RegexCompile]],
+	match   = impl_t.match   --[[:! RegexMatch]],
+	find    = impl_t.find    --[[:! RegexFind]],
+	gmatch  = impl_t.gmatch  --[[:! RegexGmatch]],
+	gsub    = impl_t.gsub    --[[:! RegexGsub]],
+	split   = impl_t.split   --[[:! RegexSplit]],
+	_tier   = impl_t._tier   --[[:! string]],
+}
+
+return M

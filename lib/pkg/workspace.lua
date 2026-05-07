@@ -36,10 +36,11 @@ local function path_exists(path)
 end
 
 -- Return the parent directory of path, or nil if already at root.
+--: (string) -> string
 local function parent_dir(path)
 	-- Strip trailing slash
-	path = path:gsub("/$", "")
-	local parent = path:match("^(.*)/[^/]+$")
+	local trimmed = path:gsub("/$", "")
+	local parent = trimmed:match("^(.*)/[^/]+$")
 	if not parent or parent == "" then
 		return "/"
 	end
@@ -48,27 +49,31 @@ end
 
 -- Canonicalise a relative path by joining dir + "/" + rel, collapsing ".." etc.
 -- Simple implementation: shell-free, handles common cases.
+--: (string, string) -> string
 local function join_path(dir, rel)
 	if rel:sub(1, 1) == "/" then
 		return rel
 	end
-	return dir:gsub("/$", "") .. "/" .. rel
+	local trimmed = dir:gsub("/$", "")
+	return trimmed .. "/" .. rel
 end
 
 -- ── workspace.load ────────────────────────────────────────────────────────────
 
 --- Load workspace.lua from dir.
 -- Returns {members=[path,...]} on success, or nil, err on failure.
+--: (string) -> ({ members: string[], ... } | nil, string | nil)
 function workspace.load(dir)
-	local ws_path = dir:gsub("/$", "") .. "/workspace.lua"
+	local trimmed_dir = dir:gsub("/$", "")
+	local ws_path = trimmed_dir .. "/workspace.lua"
 	local chunk, load_err = loadfile(ws_path)
 	if not chunk then
-		return nil, "failed to load workspace.lua from '" .. dir .. "': " .. tostring(load_err)
+		return nil, "failed to load workspace.lua from '" .. trimmed_dir .. "': " .. tostring(load_err)
 	end
 
 	local ok, result = pcall(chunk)
 	if not ok then
-		return nil, "failed to execute workspace.lua in '" .. dir .. "': " .. tostring(result)
+		return nil, "failed to execute workspace.lua in '" .. trimmed_dir .. "': " .. tostring(result)
 	end
 
 	-- Validate
@@ -100,6 +105,7 @@ end
 --- Find the workspace root by walking up from dir.
 -- Returns workspace_root_path if a workspace.lua is found in dir or any
 -- ancestor, or nil if not in a workspace.
+--: (string) -> string | nil
 function workspace.find_root(dir)
 	-- Canonicalise: convert relative "." to absolute if needed.
 	-- We use the os.execute / io.popen approach only as a last resort.
@@ -108,17 +114,20 @@ function workspace.find_root(dir)
 	if start == "." or start:sub(1, 2) == "./" then
 		local fh = io.popen("pwd", "r")
 		if fh then
-			local cwd = fh:read("*a"):gsub("%s+$", "")
+			local raw = fh:read("*a")
 			fh:close()
-			if start == "." then
-				start = cwd
-			else
-				start = cwd .. "/" .. start:sub(3)
+			if raw then
+				local cwd = raw:gsub("%s+$", "")
+				if start == "." then
+					start = cwd
+				else
+					start = cwd .. "/" .. start:sub(3)
+				end
 			end
 		end
 	end
 
-	local current = start:gsub("/$", "")
+	local current = (start --[[:! string]]):gsub("/$", "") --[[: string]]
 	-- Guard against infinite loops: stop at filesystem root.
 	local max_depth = 64
 	local depth = 0
@@ -153,7 +162,7 @@ function workspace.collect_constraints(workspace_dir)
 		return nil, ws_err
 	end
 
-	local all_constraints = {}  -- name → [{constraint, from}, ...]
+	local all_constraints = {} --: { [string]: { constraint: string, from: string }[] }
 
 	local function add_constraint(name, constraint, from)
 		if not all_constraints[name] then
@@ -175,7 +184,7 @@ function workspace.collect_constraints(workspace_dir)
 		local deps = m.deps or {}
 
 		for dep_name, dep_value in pairs(deps) do
-			local c = manifest.dep_constraint(dep_value)
+			local c = manifest.dep_constraint(dep_value --[[:! string | { constraint: string, include?: string }]])
 			add_constraint(dep_name, c, from_label)
 		end
 	end

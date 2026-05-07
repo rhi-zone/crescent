@@ -20,6 +20,7 @@ local M = {}
 local ffi_ok, ffi = pcall(require, "ffi")
 
 if ffi_ok then
+  --: (pixels: string, src_w: integer, src_h: integer, dst_w: integer, dst_h: integer, channels: integer) -> (string | nil, string | nil)
   function M.resize_nn(pixels, src_w, src_h, dst_w, dst_h, channels)
     if src_w <= 0 or src_h <= 0 or dst_w <= 0 or dst_h <= 0 or channels <= 0 then
       return nil, "invalid dimensions"
@@ -47,6 +48,7 @@ if ffi_ok then
   end
 else
   -- Pure-Lua fallback: build output as table of single-char strings.
+  --: (pixels: string, src_w: integer, src_h: integer, dst_w: integer, dst_h: integer, channels: integer) -> (string | nil, string | nil)
   function M.resize_nn(pixels, src_w, src_h, dst_w, dst_h, channels)
     if src_w <= 0 or src_h <= 0 or dst_w <= 0 or dst_h <= 0 or channels <= 0 then
       return nil, "invalid dimensions"

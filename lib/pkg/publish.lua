@@ -25,6 +25,7 @@ local M = {}
 
 -- ── helpers ───────────────────────────────────────────────────────────────────
 
+--: ({ verbose?: boolean, ... } | nil, string, ...unknown) -> nil
 local function log(opts, fmt, ...)
 	if opts and opts.verbose then
 		io.stderr:write(("[crescent] " .. fmt .. "\n"):format(...))
@@ -32,6 +33,7 @@ local function log(opts, fmt, ...)
 end
 
 -- Run a shell command for side effects. Returns true or nil, err.
+--: (string) -> (boolean | nil, string | nil)
 local function run_cmd(cmd)
 	local ok = os.execute(cmd)
 	if ok ~= 0 and ok ~= true then
@@ -85,6 +87,7 @@ end
 -- If m.files is a list, use it directly (relative paths as-is).
 -- Otherwise walk dir for *.lua files applying default exclusion rules.
 -- Returns a sorted list of relative paths, or nil, err.
+--: (string, { files?: string[], ... }) -> (string[] | nil, string | nil)
 function M.collect_files(dir, m)
 	-- Explicit files list from manifest takes precedence.
 	if m.files ~= nil then
@@ -112,7 +115,8 @@ function M.collect_files(dir, m)
 	end
 
 	local files = {}
-	local prefix = dir:gsub("/$", "") .. "/"
+	local trimmed = dir:gsub("/$", "")
+	local prefix = trimmed .. "/"
 	for path in out:gmatch("[^\n]+") do
 		if path ~= "" then
 			-- Compute relative path
@@ -140,6 +144,7 @@ end
 -- Build a .tar.gz from a list of relative paths rooted at dir.
 -- dest_path: where to write the tarball.
 -- Returns true or nil, err.
+--: (string, string[], string) -> (boolean | nil, string | nil)
 function M.build_tarball(dir, files, dest_path)
 	if #files == 0 then
 		return nil, "no files to package"
@@ -173,16 +178,17 @@ end
 -- ── checksum ──────────────────────────────────────────────────────────────────
 
 -- Compute sha256 hex of a file. Returns hex string or nil, err.
+--: (string) -> (string | nil, string | nil)
 function M.sha256_file(path)
 	local out, err = popen_read(("sha256sum %q 2>/dev/null"):format(path))
 	if out and out ~= "" then
 		local hex = out:match("^(%x+)")
-		if hex and #hex == 64 then return hex end
+		if type(hex) == "string" and #hex == 64 then return hex end
 	end
 	out, err = popen_read(("openssl dgst -sha256 %q 2>/dev/null"):format(path))
 	if out and out ~= "" then
 		local hex = out:match("(%x+)$")
-		if hex and #hex == 64 then return hex end
+		if type(hex) == "string" and #hex == 64 then return hex end
 	end
 	return nil, "could not compute sha256 for " .. tostring(path)
 end
@@ -219,8 +225,9 @@ end
 --     4. Return a structured error on 409 Conflict (version already published).
 --   The function signature and return contract are stable; only the body needs
 --   replacing.
+--: (string, string, string, string, string, string | nil, { verbose?: boolean } | nil) -> (boolean | nil, string | nil)
 local function upload(name, version, tarball_path, checksum_hex, registry, auth_token, opts)
-	local base = registry:gsub("/$", "")
+	local base = (registry:gsub("/$", ""))
 	local tarball_url  = ("%s/%s/%s.tar.gz"):format(base, name, version)
 	local checksum_url = ("%s/%s/%s.sha256"):format(base, name, version)
 
@@ -273,9 +280,12 @@ end
 --   verbose  = false
 --
 -- Returns { ok=bool, name=str, version=str, tarball=str, checksum=str, error=str|nil }
+--:: PublishOpts = { registry?: string, dry_run?: boolean, verbose?: boolean, auth_token?: string }
+--:: PublishResult = { ok: boolean, name?: string, version?: string, tarball?: string, checksum?: string, error?: string }
+--: (string, PublishOpts | nil) -> PublishResult
 function M.run(project_dir, opts)
-	opts = opts or {}
-	local result = { ok = false }
+	opts = opts or {} --[[: PublishOpts]]
+	local result = { ok = false } --[[: PublishResult]]
 
 	-- 1. Load manifest
 	local pkg_path = project_dir .. "/pkg.lua"
@@ -284,11 +294,12 @@ function M.run(project_dir, opts)
 		return result
 	end
 
-	local m, m_err = manifest.load(pkg_path)
-	if not m then
+	local m_, m_err = manifest.load(pkg_path)
+	if not m_ then
 		result.error = tostring(m_err)
 		return result
 	end
+	local m = m_ --[[:! ManifestTbl]]
 
 	result.name    = m.name
 	result.version = m.version
@@ -318,7 +329,7 @@ function M.run(project_dir, opts)
 	local tarball_path = os.tmpname() .. ".tar.gz"
 	local tar_ok, tar_err = M.build_tarball(project_dir, files, tarball_path)
 	if not tar_ok then
-		result.error = tar_err
+		result.error = tostring(tar_err)
 		return result
 	end
 
@@ -326,7 +337,7 @@ function M.run(project_dir, opts)
 	local hex, cs_err = M.sha256_file(tarball_path)
 	if not hex then
 		os.remove(tarball_path)
-		result.error = tostring(cs_err)
+		result.error = cs_err or "checksum failed"
 		return result
 	end
 
@@ -357,7 +368,7 @@ function M.run(project_dir, opts)
 	os.remove(tarball_path)
 
 	if not up_ok then
-		result.error = up_err
+		result.error = up_err or "upload failed"
 		return result
 	end
 

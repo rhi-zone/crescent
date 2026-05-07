@@ -36,8 +36,11 @@ end
 -- ── Script directory resolution ───────────────────────────────────────────────
 -- debug.getinfo returns "@./lib/..." — strip "@" and normalize "./" prefix.
 
+--: () -> string
 local function script_dir()
-  local src = debug.getinfo(1, "S").source
+  local info = debug.getinfo(1, "S") or {}
+  local src = info.source
+  if type(src) ~= "string" then return "." end
   -- Strip leading "@"
   local path = src:gsub("^@", "")
   -- Normalize "./" prefix (debug.getinfo may return "@./lib/...")

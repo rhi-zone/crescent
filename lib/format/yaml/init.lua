@@ -222,7 +222,7 @@ local function parse_hex_escape(p, n)
   end
 end
 
---: (Parser) -> unknown
+--: (Parser) -> (string | nil, string | nil)
 local function parse_double_quoted(p)
   p.pos = p.pos + 1 -- skip opening "
   local parts = {} --: { [integer]: string }
@@ -241,17 +241,17 @@ local function parse_double_quoted(p)
         p.pos = p.pos + 1
         local ch, err = parse_hex_escape(p, 2)
         if not ch then return nil, err end
-        parts[#parts + 1] = ch
+        parts[#parts + 1] = ch --[[:! string]]
       elseif esc_char == "u" then
         p.pos = p.pos + 1
         local ch, err = parse_hex_escape(p, 4)
         if not ch then return nil, err end
-        parts[#parts + 1] = ch
+        parts[#parts + 1] = ch --[[:! string]]
       elseif esc_char == "U" then
         p.pos = p.pos + 1
         local ch, err = parse_hex_escape(p, 8)
         if not ch then return nil, err end
-        parts[#parts + 1] = ch
+        parts[#parts + 1] = ch --[[:! string]]
       elseif DOUBLE_ESCAPES[esc_char] then
         parts[#parts + 1] = DOUBLE_ESCAPES[esc_char]
         p.pos = p.pos + 1
@@ -266,14 +266,15 @@ local function parse_double_quoted(p)
         return nil, format("unknown escape '\\%s' at position %d", esc_char, p.pos)
       end
     else
-      parts[#parts + 1] = sub(p.s, p.pos, p.pos)
+      local ch_text = sub(p.s, p.pos, p.pos) --[[: string]]
+      parts[#parts + 1] = ch_text
       p.pos = p.pos + 1
     end
   end
   return nil, "unterminated double-quoted string"
 end
 
---: (Parser) -> unknown
+--: (Parser) -> (string | nil, string | nil)
 local function parse_single_quoted(p)
   p.pos = p.pos + 1 -- skip opening '
   local parts = {} --: { [integer]: string }
@@ -289,7 +290,8 @@ local function parse_single_quoted(p)
         return concat(parts)
       end
     else
-      parts[#parts + 1] = sub(p.s, p.pos, p.pos)
+      local ch_text = sub(p.s, p.pos, p.pos) --[[: string]]
+      parts[#parts + 1] = ch_text
       p.pos = p.pos + 1
     end
   end
@@ -738,7 +740,7 @@ local function parse_block_mapping(p, indent, first_at_pos)
       skip_blank_lines(p)
       if at_end(p) then break end
 
-      cur_indent = get_indent(p)
+      cur_indent = get_indent(p) --[[:! integer]]
       if cur_indent ~= indent then
         break
       end
@@ -780,8 +782,8 @@ local function parse_block_mapping(p, indent, first_at_pos)
       -- Explicit key indicator
       p.pos = p.pos + 1
       skip_spaces(p)
-      key = parse_plain_scalar(p, false)
-      key = resolve_scalar(key)
+      local plain_key = parse_plain_scalar(p, false)
+      key = resolve_scalar(plain_key)
       expect_newline_or_end(p)
       skip_blank_lines(p)
       -- Now expect the value
@@ -792,16 +794,16 @@ local function parse_block_mapping(p, indent, first_at_pos)
       end
     else
       -- Handle anchor on key line
-      key = parse_plain_scalar(p, false)
+      local plain_key = parse_plain_scalar(p, false)
       -- The key includes everything up to ": " so we need to find the colon
-      local colon_pos = find(key, ": ", 1, true)
+      local colon_pos = find(plain_key, ": ", 1, true)
       if colon_pos then
-        local real_key = sub(key, 1, colon_pos - 1)
+        local real_key = sub(plain_key, 1, colon_pos - 1)
         -- Rewind to after the key
         p.pos = saved + cur_indent + colon_pos + 1
         key = resolve_scalar(real_key)
       else
-        key = resolve_scalar(key)
+        key = resolve_scalar(plain_key)
       end
     end
 
@@ -908,7 +910,7 @@ parse_value = function(p, min_indent, in_flow)
     end
     anchor_name = sub(p.s, anchor_start, p.pos - 1)
     skip_spaces(p)
-    c = peek(p)
+    c = peek(p) --[[: integer | nil]]
   end
 
   -- Alias
@@ -1103,7 +1105,7 @@ function M.decode(s)
   return val
 end
 
---: (s: string) -> ({ [number]: unknown }, (string | nil))
+--: (s: string) -> ({ [number]: unknown } | nil, (string | nil))
 function M.decode_all(s)
   if type(s) ~= "string" then
     return nil, "expected string"
@@ -1191,39 +1193,43 @@ local function sorted_keys(t)
   return keys
 end
 
+--: (unknown) -> string
 local function encode_flow_value(val)
   local t = type(val)
   if val == nil then
     return "null"
-  elseif t == "boolean" then
+  elseif type(val) == "boolean" then
     return val and "true" or "false"
-  elseif t == "number" then
-    if val ~= val then return ".nan" end
-    if val == huge then return ".inf" end
-    if val == -huge then return "-.inf" end
-    if val == math.floor(val) and val > -1e15 and val < 1e15 then
-      return format("%d", val)
+  elseif type(val) == "number" then
+    local n = val --[[:! number]]
+    if n ~= n then return ".nan" end
+    if n == huge then return ".inf" end
+    if n == -huge then return "-.inf" end
+    if n == math.floor(n) and n > -1e15 and n < 1e15 then
+      return format("%d", n)
     end
-    return tostring(val)
-  elseif t == "string" then
-    if needs_quoting(val) then
-      return quote_string(val)
+    return tostring(n)
+  elseif type(val) == "string" then
+    local s = val --[[:! string]]
+    if needs_quoting(s) then
+      return quote_string(s)
     end
-    return val
-  elseif t == "table" then
-    if is_sequence(val) then
-      local items = {}
-      for i = 1, #val do
-        items[i] = encode_flow_value(val[i])
+    return s
+  elseif type(val) == "table" then
+    local tb = val --[[:! { [string]: unknown, [integer]: unknown }]]
+    if is_sequence(tb) then
+      local items = {} --: { [integer]: string }
+      for i = 1, #tb do
+        items[i] = encode_flow_value(tb[i])
       end
       return "[" .. concat(items, ", ") .. "]"
     else
-      local items = {}
-      local keys = sorted_keys(val)
+      local items = {} --: { [integer]: string }
+      local keys = sorted_keys(tb)
       for _, k in ipairs(keys) do
         local ks = tostring(k)
         if needs_quoting(ks) then ks = quote_string(ks) end
-        items[#items + 1] = ks .. ": " .. encode_flow_value(val[k])
+        items[#items + 1] = ks .. ": " .. encode_flow_value(tb[k --[[:! string]]])
       end
       return "{" .. concat(items, ", ") .. "}"
     end
@@ -1231,41 +1237,44 @@ local function encode_flow_value(val)
   return tostring(val)
 end
 
+--: (unknown, string, integer, { indent?: number, flow_level?: number } | nil) -> string
 encode_value = function(val, indent_str, depth, opts)
-  local t = type(val)
   local flow_level = opts and opts.flow_level
 
   if val == nil then
     return "null"
-  elseif t == "boolean" then
+  elseif type(val) == "boolean" then
     return val and "true" or "false"
-  elseif t == "number" then
-    if val ~= val then return ".nan" end
-    if val == huge then return ".inf" end
-    if val == -huge then return "-.inf" end
-    if val == math.floor(val) and val > -1e15 and val < 1e15 then
-      return format("%d", val)
+  elseif type(val) == "number" then
+    local n = val --[[:! number]]
+    if n ~= n then return ".nan" end
+    if n == huge then return ".inf" end
+    if n == -huge then return "-.inf" end
+    if n == math.floor(n) and n > -1e15 and n < 1e15 then
+      return format("%d", n)
     end
-    return tostring(val)
-  elseif t == "string" then
-    if needs_quoting(val) then
-      return quote_string(val)
+    return tostring(n)
+  elseif type(val) == "string" then
+    local s = val --[[:! string]]
+    if needs_quoting(s) then
+      return quote_string(s)
     end
-    return val
-  elseif t == "table" then
-    if flow_level and depth >= flow_level then
-      return encode_flow_value(val)
+    return s
+  elseif type(val) == "table" then
+    local val_t = val --[[:! { [string]: unknown, [integer]: unknown }]]
+    if flow_level ~= nil and depth >= (flow_level --[[:! number]]) then
+      return encode_flow_value(val_t)
     end
 
     local indent_size = (opts and opts.indent) or 2
-    local child_prefix = indent_str .. rep(" ", indent_size)
+    local child_prefix = indent_str .. rep(" ", indent_size --[[:! integer]])
 
-    if is_sequence(val) then
+    if is_sequence(val_t) then
       if #val == 0 then return "[]" end
       local lines = {}
       for i = 1, #val do
         local v = val[i]
-        if type(v) == "table" and not (flow_level and depth + 1 >= flow_level) then
+        if type(v) == "table" and not (flow_level ~= nil and depth + 1 >= (flow_level --[[:! number]])) then
           local child = encode_value(v, child_prefix, depth + 1, opts)
           -- For nested structures, put on next line
           if is_sequence(v) and #v > 0 then
@@ -1296,7 +1305,7 @@ encode_value = function(val, indent_str, depth, opts)
         local ks = tostring(k)
         if needs_quoting(ks) then ks = quote_string(ks) end
         local v = val[k]
-        if type(v) == "table" and not (flow_level and depth + 1 >= flow_level) then
+        if type(v) == "table" and not (flow_level ~= nil and depth + 1 >= (flow_level --[[:! number]])) then
           local child = encode_value(v, child_prefix, depth + 1, opts)
           if is_sequence(v) and #v > 0 then
             lines[#lines + 1] = indent_str .. ks .. ":\n" .. child
@@ -1320,7 +1329,7 @@ encode_value = function(val, indent_str, depth, opts)
   return tostring(val)
 end
 
---: (val: unknown, opts: ({ indent: (number | nil), flow_level: (number | nil) } | nil)) -> string
+--: (val: unknown, opts: ({ indent?: number, flow_level?: number } | nil)) -> string
 function M.encode(val, opts)
   return encode_value(val, "", 0, opts) .. "\n"
 end

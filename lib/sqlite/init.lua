@@ -45,7 +45,7 @@ ffi.cdef [[
 ]]
 
 local double_t = ffi.typeof("double")
-local float_t  = ffi.typeof("float")
+local float_t  = ffi.typeof("float" --[[: any]])
 local function is_float_cdata(a)
 	local t = ffi.typeof(a)
 	return t == double_t or t == float_t

@@ -45,11 +45,20 @@ end
 
 -- ── Public module ──────────────────────────────────────────────────────────────
 
-local M = {}
-
-M.encode = impl.encode
-M.decode = impl.decode
-M._tier  = tier
-M._impl  = impl
+--:: Base64Encode = (str: string, opts: { url: boolean | nil, pad: boolean | nil } | nil) -> string
+--:: Base64Decode = (b64: string, opts: { url: boolean | nil } | nil) -> (string | nil, string | nil)
+--:: Base64Module = {
+--::     encode: Base64Encode,
+--::     decode: Base64Decode,
+--::     _tier:  string,
+--::     _impl:  unknown,
+--:: }
+--: Base64Module
+local M = {
+    encode = impl.encode --[[:! Base64Encode]],
+    decode = impl.decode --[[:! Base64Decode]],
+    _tier  = tier        --[[:! string]],
+    _impl  = impl,
+}
 
 return M

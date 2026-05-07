@@ -25,11 +25,17 @@ pcall(ffi.cdef, [[
 ]])
 
 -- The caller passes the loaded library object; we return a bound API table.
---: (lib: unknown) -> { decode: (data: string, channels: integer) -> (string, integer, integer, integer) | (nil, string), resize: (pixels: string, src_w: integer, src_h: integer, dst_w: integer, dst_h: integer, channels: integer) -> string | (nil, string) }
+-- `lib` is the result of `ffi.load(path)`; typed as `any` because
+-- per-file `$FfiC` does not narrow to fields cdef'd from this same file
+-- when passed in as a parameter (the cdef view is per-compilation-unit).
+-- Returns are typed permissively because the typechecker does not currently
+-- validate function bodies against multi-return tuple-union annotations
+-- (`-> ...((A,B) | (nil,string))` works for callers but not for body checking).
+--: (lib: any) -> { decode: (data: string, channels: integer) -> (string | nil, integer | string, integer | nil, integer | nil), resize: (pixels: string, src_w: integer, src_h: integer, dst_w: integer, dst_h: integer, channels: integer) -> (string | nil, string | nil) }
 local function bind(lib)
   local M = {}
 
-  --: (data: string, channels: (integer | nil)) -> (string, integer, integer, integer) | (nil, string)
+  --: (data: string, channels: (integer | nil)) -> (string | nil, integer | string, integer | nil, integer | nil)
   function M.decode(data, channels)
     channels = channels or 0
     local x = ffi.new("int[1]")
@@ -49,7 +55,7 @@ local function bind(lib)
     return result, x[0], y[0], out_ch
   end
 
-  --: (pixels: string, src_w: integer, src_h: integer, dst_w: integer, dst_h: integer, channels: integer) -> string | (nil, string)
+  --: (pixels: string, src_w: integer, src_h: integer, dst_w: integer, dst_h: integer, channels: integer) -> (string | nil, string | nil)
   function M.resize(pixels, src_w, src_h, dst_w, dst_h, channels)
     local dst_bytes = dst_w * dst_h * channels
     local dst_buf = ffi.new("unsigned char[?]", dst_bytes)

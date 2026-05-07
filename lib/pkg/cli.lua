@@ -179,8 +179,8 @@ local function cmd_install(project_dir, parsed)
 	-- any ancestor, use the workspace root as project_dir.
 	local effective_dir = project_dir
 	if parsed.workspace then
-		local ws_root = workspace.find_root(project_dir)
-		if ws_root then
+		local ws_root = workspace.find_root(project_dir) --[[: string | nil]]
+		if ws_root ~= nil then
 			effective_dir = ws_root
 		else
 			stderr("install: --workspace specified but no workspace.lua found in %s or any parent", project_dir)
@@ -188,8 +188,8 @@ local function cmd_install(project_dir, parsed)
 		end
 	else
 		-- Auto-detect: walk up looking for workspace.lua
-		local ws_root = workspace.find_root(project_dir)
-		if ws_root then
+		local ws_root = workspace.find_root(project_dir) --[[: string | nil]]
+		if ws_root ~= nil then
 			effective_dir = ws_root
 		end
 	end
@@ -399,8 +399,9 @@ local function cmd_update(project_dir, parsed)
 			end
 		end
 
-		local modified = {}  -- name → old lock entry
-		for name, entry in pairs(target_names) do
+		local modified = {} --: { [string]: { tree_hash?: string, ... } }
+		for name, entry_raw in pairs(target_names) do
+			local entry = entry_raw --[[:! { tree_hash?: string, ... } | nil]]
 			if entry and entry.tree_hash then
 				local lib_dir = project_dir .. "/lib/" .. name
 				local actual_hash, _ = install.tree_hash(lib_dir)
@@ -411,7 +412,7 @@ local function cmd_update(project_dir, parsed)
 		end
 
 		-- ── Phase 2: stash modified packages, drop their lock entries ─────────
-		local stashed = {}   -- name → stash_path
+		local stashed = {} --: { [string]: string | nil }
 		local stash_ok = true
 
 		for name, old_entry in pairs(modified) do
@@ -472,10 +473,10 @@ local function cmd_update(project_dir, parsed)
 		local inst_result = install.run(project_dir, inst_opts)
 
 		-- Re-read the lockfile to get the new resolved version for each modified pkg.
-		local new_lock = {}
+		local new_lock = {} --: { [string]: unknown }
 		if path_exists(lock_path) then
 			local l2, _ = lock.load(lock_path)
-			if l2 then new_lock = l2 end
+			if l2 then new_lock = l2 --[[:! { [string]: unknown }]] end
 		end
 
 		-- ── Phase 4: merge each stashed package ──────────────────────────────
@@ -485,10 +486,11 @@ local function cmd_update(project_dir, parsed)
 		for name, old_entry in pairs(modified) do
 			local stash_dir  = stashed[name]
 			local lib_dir    = project_dir .. "/lib/" .. name
-			local new_entry  = new_lock[name]
+			local new_entry = new_lock[name] --[[:! { version: string, url: string, tarball_hash: string, ... } | nil]]
 			local new_version = new_entry and new_entry.version
-			local old_version = old_entry.version
-			local include     = (old_entry.include or "**")
+			local old_entry_ = old_entry --[[:! { version: string, include?: string, ... }]]
+			local old_version = old_entry_.version
+			local include     = (old_entry_.include or "**")
 
 			if not new_version then
 				-- Install couldn't resolve this package (e.g., removed from pkg.lua).
@@ -757,11 +759,12 @@ local function cmd_diff(project_dir, parsed)
 		stderr("diff: failed to enumerate lib/%s/", name)
 		return false
 	end
-	local lib_files = find_fh:read("*a")
+	local lib_files = find_fh:read("*a") or ""
 	find_fh:close()
 
 	-- Normalise lib_dir for stripping prefix
-	local lib_prefix = lib_dir:gsub("/$", "") .. "/"
+	local lib_dir_trim = lib_dir:gsub("/$", "")
+	local lib_prefix = lib_dir_trim .. "/"
 	local any_diff = false
 
 	for abs_path in lib_files:gmatch("[^\n]+") do
@@ -774,7 +777,7 @@ local function cmd_diff(project_dir, parsed)
 			-- diff the two files; exit code 0 = same, 1 = differ
 			local fh = io.popen(("diff --unified %q %q 2>&1"):format(cache_path, abs_path), "r")
 			if fh then
-				local output = fh:read("*a")
+				local output = fh:read("*a") or ""
 				fh:close()
 				if output ~= "" then
 					io.stdout:write(output)
@@ -792,6 +795,7 @@ local function cmd_diff(project_dir, parsed)
 end
 
 --- cr publish [--dry-run] [--skip-check]
+--: (string, ParsedArgs) -> boolean
 local function cmd_publish(project_dir, parsed)
 	-- ── phantom dep lint (skipped when --skip-check is passed) ────────────────
 	if not parsed.skip_check then
@@ -814,7 +818,7 @@ local function cmd_publish(project_dir, parsed)
 		registry = parsed.registry,
 		dry_run  = parsed.dry_run,
 		verbose  = parsed.verbose,
-	}
+	} --[[: { registry?: string, dry_run?: boolean, verbose?: boolean, auth_token?: string }]]
 
 	local result = publish.run(project_dir, opts)
 
@@ -865,6 +869,7 @@ local function cmd_check(project_dir, parsed)
 end
 
 --- cr info <name>
+--: (string, ParsedArgs) -> boolean
 local function cmd_info(project_dir, parsed)
 	local name = parsed.args[1]
 	if not name then

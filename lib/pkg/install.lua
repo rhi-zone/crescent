@@ -52,7 +52,7 @@ end)
 local function cpu_count()
 	if not fork_available then return 1 end
 	local ok, n = pcall(function() return ffi.C.sysconf(84) end)
-	if ok and n and n > 0 then return tonumber(n) end
+	if ok and type(n) == "number" and (n --[[:! number]]) > 0 then return tonumber(n) end
 	return 1
 end
 
@@ -60,6 +60,7 @@ local M = {}
 
 -- ── helpers ───────────────────────────────────────────────────────────────────
 
+--: ({ verbose?: boolean, ... } | nil, string, ...unknown) -> nil
 local function log(opts, fmt, ...)
 	if opts and opts.verbose then
 		io.stderr:write(("[crescent] " .. fmt .. "\n"):format(...))
@@ -78,6 +79,7 @@ local function popen_read(cmd)
 end
 
 -- Run a shell command for side effects. Returns true or nil, err.
+--: (string) -> (boolean | nil, string | nil)
 local function run_cmd(cmd)
 	local ok = os.execute(cmd)
 	if ok ~= 0 and ok ~= true then
@@ -171,6 +173,7 @@ end
 
 -- Verify a file against an expected checksum string.
 -- checksum may be "sha256:<hex>" or plain "<hex>".
+--: (string, string) -> (boolean | nil, string | nil)
 local function verify_checksum(path, expected)
 	local hex_expected = expected:match("^sha256:(%x+)$") or expected:match("^(%x+)$")
 	if not hex_expected then
@@ -199,13 +202,15 @@ end
 -- Adding, removing, or modifying any file changes the hash.
 --
 -- Returns "sha256:<hex>" or nil, err.
+--: (string) -> (string | nil, string | nil)
 function M.tree_hash(dir)
 	-- Enumerate files sorted by relative path for determinism.
 	local out, err = popen_read(("find %q -type f | sort"):format(dir))
 	if not out then return nil, err end
 
-	local prefix = dir:gsub("/$", "") .. "/"
-	local entries = {}
+	local trimmed_dir = dir:gsub("/$", "")
+	local prefix = trimmed_dir .. "/"
+	local entries = {} --: { rel: string, path: string }[]
 	for path in out:gmatch("[^\n]+") do
 		if path ~= "" then
 			local rel = path
@@ -251,7 +256,7 @@ function M.tree_hash(dir)
 	local hex, h_err = sha256_file(tmp)
 	os.remove(tmp)
 	if not hex then return nil, h_err end
-	return "sha256:" .. hex
+	return "sha256:" .. (hex --[[:! string]])
 end
 
 -- ── Glob matching ─────────────────────────────────────────────────────────────
@@ -276,7 +281,7 @@ local function glob_match_single(pattern, path)
 	-- Convert a single non-** glob segment to a Lua pattern fragment.
 	-- * → [^/]* , ? → [^/]
 	local function seg_to_pattern(seg)
-		local parts = {}
+		local parts = {} --: { [integer]: string }
 		local i = 1
 		while i <= #seg do
 			local c = seg:sub(i, i)
@@ -389,11 +394,13 @@ end
 -- ── Hardlink / copy ───────────────────────────────────────────────────────────
 
 -- Copy src to dst using cp. Returns true or nil, err.
+--: (string, string) -> (boolean | nil, string | nil)
 local function copy_file(src, dst)
 	return run_cmd(("cp %q %q"):format(src, dst))
 end
 
 -- Hardlink src → dst. Falls back to copy if link() fails (e.g. cross-device).
+--: (string, string) -> (boolean | nil, string | nil)
 local function hardlink_file(src, dst)
 	local rc = ffi.C.link(src, dst)
 	if rc == 0 then return true end
@@ -405,6 +412,7 @@ end
 -- include: optional glob string (default "**" = all files). Files whose
 -- relative path does not match the glob are skipped.
 -- Directories are created as needed.
+--: (string, string, string | nil) -> (boolean | nil, string | nil)
 local function hardlink_tree(src_dir, dst_dir, include)
 	include = include or "**"
 
@@ -449,6 +457,7 @@ end
 
 -- Parse /index.json response.
 -- Returns table { [name] = { versions = [...], latest = "x.y.z" } } or nil, err.
+--: (string) -> ({ [string]: { versions: string[], latest: string } } | nil, string | nil)
 local function parse_index(json_str)
 	-- Minimal JSON object parser: we only need top-level structure.
 	-- Each package entry looks like: "sha1": {"versions": ["1.0.0"], "latest": "1.0.0"}
@@ -625,8 +634,9 @@ function M.resolve(deps, locked, registry_index, opts)
 			local pkg_info = idx_entry.index[name]
 			if pkg_info then
 				for _, ver_str in ipairs(pkg_info.versions or {}) do
-					local ver, _ = semver.parse(ver_str)
-					if ver then
+					local ver_ = semver.parse(ver_str) --[[: { major: integer, minor: integer, patch: integer, pre: ({ [number]: integer | string }) | nil } | nil]]
+					if ver_ ~= nil then
+						local ver = ver_
 						-- Check ALL constraints.
 						local ok = true
 						for _, c in ipairs(constraints) do
@@ -636,7 +646,7 @@ function M.resolve(deps, locked, registry_index, opts)
 							end
 						end
 						if ok then
-							if best_parsed == nil or semver.cmp(ver, best_parsed) > 0 then
+							if best_parsed == nil or semver.cmp(ver, best_parsed --[[:! { major: integer, minor: integer, patch: integer, pre: ({ [number]: integer | string }) | nil }]]) > 0 then
 								best = ver_str
 								best_parsed = ver
 								winning_registry_url = idx_entry.url
@@ -691,10 +701,11 @@ function M.resolve(deps, locked, registry_index, opts)
 
 		if locked_entry then
 			-- Fast path: check if the locked version satisfies ALL constraints.
-			local locked_ver, parse_err = semver.parse(locked_entry.version)
-			if not locked_ver then
-				return nil, ("locked version for %q is invalid: %s"):format(name, tostring(parse_err))
+			local locked_ver_ = semver.parse(locked_entry.version) --[[: { major: integer, minor: integer, patch: integer, pre: ({ [number]: integer | string }) | nil } | nil]]
+			if locked_ver_ == nil then
+				return nil, ("locked version for %q is invalid"):format(name)
 			end
+			local locked_ver = locked_ver_
 
 			local all_ok = true
 			local failing_constraint = nil
@@ -828,7 +839,7 @@ function M.collect_constraints(direct_deps, locked, project_dir, from_label)
 			local requirer = entry and (name .. "@" .. entry.version) or name
 
 			for dep_name, dep_value in pairs(dep_manifest.deps) do
-				local c = manifest.dep_constraint(dep_value)
+				local c = manifest.dep_constraint(dep_value --[[:! string | { constraint: string, include?: string }]])
 				add_constraint(--[[:! string]] dep_name, c, requirer)
 				if not visited[dep_name] then
 					queue[#queue + 1] = dep_name
@@ -857,8 +868,10 @@ end
 
 -- Fetch a single package: download tarball, verify checksum, extract to cache.
 -- Returns { version, url, tarball_hash } or nil, err.
+--: (string, string, string, { verbose?: boolean, ... } | nil) -> ({ version: string, url: string, tarball_hash: string } | nil, string | nil)
 local function fetch_package(name, version, registry, opts)
-	local base = registry:gsub("/$", "")
+	local trimmed_reg = registry:gsub("/$", "")
+	local base = trimmed_reg
 	local tarball_url  = ("%s/%s/%s.tar.gz"):format(base, name, version)
 	local checksum_url = ("%s/%s/%s.sha256"):format(base, name, version)
 
@@ -968,8 +981,10 @@ end
 --
 -- Returns: { [name] = fetch_info } on success, { [name] = {err=str} } on failure.
 -- Falls back to sequential execution silently if fork is unavailable.
+--:: FetchResult = { version: string, url: string, tarball_hash: string } | { err: string }
+--: ({ name: string, version: string, registry: string }[], integer, { verbose?: boolean, ... } | nil) -> { [string]: FetchResult }
 local function parallel_fetch(work, jobs, opts)
-	local results = {}
+	local results = {} --: { [string]: FetchResult }
 
 	if #work == 0 then return results end
 
@@ -990,7 +1005,7 @@ local function parallel_fetch(work, jobs, opts)
 	-- For each package: fork a child, child fetches and writes one line to a pipe,
 	-- parent collects up to `jobs` children before waiting for one to finish.
 
-	local pending = {}  -- { pid=int, name=str, read_fd=int }
+	local pending = {} --: Arr<{ pid: integer, name: string, read_fd: integer }>
 	local wi = 1        -- index into work
 
 	local status_buf = ffi.new("int[1]")
@@ -1027,6 +1042,10 @@ local function parallel_fetch(work, jobs, opts)
 		end
 
 		local line = ffi.string(buf, n):match("^([^\n]*)")
+		if line == nil then
+			results[entry.name] = { err = "child produced empty line" }
+			return
+		end
 
 		if line:sub(1, 3) == "ok " then
 			-- "ok <name> <version> <url> <tarball_hash>"

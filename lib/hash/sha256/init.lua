@@ -10,8 +10,6 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local M = {}
-
 -- ── SHA-256 constants (shared across tiers) ───────────────────────────────────
 
 -- First 32 bits of fractional parts of cube roots of first 64 primes.
@@ -374,31 +372,55 @@ end
 -- ── Tier selection ────────────────────────────────────────────────────────────
 
 -- Always build the Lua tier (used as fallback and for parity testing).
-M._lua_sha256 = make_lua()
+local lua_sha256 = make_lua()
+
+local sha256_fn   --: unknown
+local tier_str = "" --: string
+local system_fn   --: unknown
+local ffi_fn      --: unknown
 
 local ok1, result1 = pcall(try_system)
 if ok1 then
-	M.sha256       = result1
-	M.tier         = "system"
-	M._system_sha256 = result1
+	sha256_fn = result1
+	tier_str  = "system"
+	system_fn = result1
 	local ok2, result2 = pcall(try_ffi)
-	if ok2 then M._ffi_sha256 = result2 end
+	if ok2 then ffi_fn = result2 end
 else
 	local ok2, result2 = pcall(try_ffi)
 	if ok2 then
-		M.sha256     = result2
-		M.tier       = "ffi"
-		M._ffi_sha256 = result2
+		sha256_fn = result2
+		tier_str  = "ffi"
+		ffi_fn    = result2
 	else
-		M.sha256 = M._lua_sha256
-		M.tier   = "lua"
+		sha256_fn = lua_sha256
+		tier_str  = "lua"
 	end
 end
 
--- M._tiers: ordered list of {name, fn} for all successfully loaded tiers.
-M._tiers = {}
-if M._system_sha256 then M._tiers[#M._tiers + 1] = { name = "system", fn = M._system_sha256 } end
-if M._ffi_sha256    then M._tiers[#M._tiers + 1] = { name = "ffi",    fn = M._ffi_sha256    } end
-M._tiers[#M._tiers + 1] = { name = "lua", fn = M._lua_sha256 }
+-- _tiers: ordered list of {name, fn} for all successfully loaded tiers.
+local tiers = {} --: { [integer]: { name: string, fn: unknown } }
+if system_fn then tiers[#tiers + 1] = { name = "system", fn = system_fn } end
+if ffi_fn    then tiers[#tiers + 1] = { name = "ffi",    fn = ffi_fn    } end
+tiers[#tiers + 1] = { name = "lua", fn = lua_sha256 }
+
+--:: Sha256Fn = (s: string) -> string
+--:: Sha256Module = {
+--::     sha256:         Sha256Fn,
+--::     tier:           string,
+--::     _lua_sha256:    Sha256Fn,
+--::     _system_sha256: Sha256Fn | nil,
+--::     _ffi_sha256:    Sha256Fn | nil,
+--::     _tiers:         { [integer]: { name: string, fn: unknown } },
+--:: }
+--: Sha256Module
+local M = {
+	sha256         = sha256_fn  --[[:! Sha256Fn]],
+	tier           = tier_str,
+	_lua_sha256    = lua_sha256 --[[:! Sha256Fn]],
+	_system_sha256 = system_fn  --[[:! (Sha256Fn | nil)]],
+	_ffi_sha256    = ffi_fn     --[[:! (Sha256Fn | nil)]],
+	_tiers         = tiers,
+}
 
 return M

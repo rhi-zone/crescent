@@ -7,8 +7,13 @@ end
 
 local M = {}
 
+--:: PreId = integer | string
+--:: Version = { major: integer, minor: integer, patch: integer, pre: (PreId[]) | nil }
+--:: Constraint = { op: string, version: Version | nil }
+
 -- Parse a pre-release identifier list from a string like "alpha.1".
 -- Each identifier is either an integer or a string.
+--: (string | nil) -> (PreId[]) | nil
 local function parse_pre(s)
 	if not s or s == "" then return nil end
 	local ids = {}
@@ -27,6 +32,7 @@ end
 --- Parse a version string into {major, minor, patch, pre}.
 -- pre is nil or a list of identifiers (string or integer).
 -- Returns nil, err on failure.
+--: (string) -> ({ major: integer, minor: integer, patch: integer, pre: ({ [number]: integer | string }) | nil } | nil, string | nil)
 function M.parse(str)
 	if type(str) ~= "string" then
 		return nil, "expected string, got " .. type(str)
@@ -45,15 +51,16 @@ function M.parse(str)
 		-- Allow "1.2" or "1" as shorthand? Only for internal use; for strict semver require all three.
 		return nil, "invalid version (expected MAJOR.MINOR.PATCH): " .. str
 	end
-	major = tonumber(major)
-	minor = tonumber(minor)
-	patch = tonumber(patch)
+	local major_n = tonumber(major) --[[:! integer]]
+	local minor_n = tonumber(minor) --[[:! integer]]
+	local patch_n = tonumber(patch) --[[:! integer]]
 	local pre = (pre_str ~= "") and parse_pre(pre_str) or nil
-	return { major = major, minor = minor, patch = patch, pre = pre }
+	return { major = major_n, minor = minor_n, patch = patch_n, pre = pre }
 end
 
 -- Compare two pre-release identifier lists.
 -- nil (release) > any pre-release list (semver §11.4)
+--: ((PreId[]) | nil, (PreId[]) | nil) -> integer
 local function cmp_pre(a, b)
 	if a == nil and b == nil then return 0 end
 	if a == nil then return 1 end   -- release > pre-release
@@ -63,16 +70,14 @@ local function cmp_pre(a, b)
 		local ai, bi = a[i], b[i]
 		if ai == nil then return -1 end  -- shorter < longer
 		if bi == nil then return 1 end
-		local ai_num = type(ai) == "number"
-		local bi_num = type(bi) == "number"
-		if ai_num and bi_num then
+		if type(ai) == "number" and type(bi) == "number" then
 			if ai < bi then return -1 end
 			if ai > bi then return 1 end
-		elseif ai_num then
+		elseif type(ai) == "number" then
 			return -1  -- numeric < string identifiers
-		elseif bi_num then
+		elseif type(bi) == "number" then
 			return 1
-		else
+		elseif type(ai) == "string" and type(bi) == "string" then
 			if ai < bi then return -1 end
 			if ai > bi then return 1 end
 		end
@@ -81,6 +86,7 @@ local function cmp_pre(a, b)
 end
 
 --- Compare two parsed versions. Returns -1, 0, or 1.
+--: (Version, Version) -> integer
 function M.cmp(a, b)
 	if a.major ~= b.major then
 		return a.major < b.major and -1 or 1
@@ -145,7 +151,8 @@ function M.parse_constraint(str)
 	end
 	-- >=, <=, >, <
 	for _, op in ipairs({ ">=", "<=", ">", "<" }) do
-		rest = s:match("^" .. op:gsub("[<>]", function(c) return "%" .. c end) .. "(.+)$")
+		local op_pat = op:gsub("[<>]", function(c) return "%" .. c end)
+		rest = s:match("^" .. op_pat .. "(.+)$")
 		if rest then
 			local ver, err = M.parse(rest)
 			if not ver then return nil, err end
@@ -161,15 +168,17 @@ end
 
 --- Check if a parsed version satisfies a constraint string.
 -- Returns bool. Errors in constraint parsing return false.
+--: (Version, string) -> boolean
 function M.satisfies(version, constraint_str)
 	local c, err = M.parse_constraint(constraint_str)
 	if not c then return false end
 	local op = c.op
-	local cv = c.version
 
 	if op == "*" then
 		return true
 	end
+	local cv = c.version
+	if cv == nil then return false end
 
 	if op == "=" then
 		return M.cmp(version, cv) == 0
@@ -228,7 +237,9 @@ function M.satisfies(version, constraint_str)
 			lower = v(maj, 0, 0)
 			upper = v(maj + 1, 0, 0)
 		end
-		return M.cmp(version, lower) >= 0 and M.cmp(version, upper) < 0
+		if M.cmp(version, lower --[[:! Version]]) < 0 then return false end
+		if M.cmp(version, upper --[[:! Version]]) >= 0 then return false end
+		return true
 	end
 
 	return false

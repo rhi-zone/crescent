@@ -2,10 +2,10 @@ if not package.path:find("./?/init.lua", 1, true) then package.path = "./?/init.
 
 --:: mustache_ctx = { [string]: unknown }
 --:: mustache_partials = { [string]: string }
---:: mustache_token = { type: string, value: string, key: string, escape: boolean, inverted: boolean, tokens: mustache_template, raw_text: string, indent: string, [string]: unknown }
---:: mustache_template = { [integer]: mustache_token }
+--:: mustache_token = { type: string, value?: string, key?: string, escape?: boolean, inverted?: boolean, tokens?: mustache_template, raw_text?: string, indent?: string, ... }
+--:: mustache_template = { [integer]: mustache_token, ... }
 --:: mustache_compiled = { _tokens: mustache_template, render: (mustache_compiled, mustache_ctx, (mustache_partials | nil)) -> ((string | nil), (string | nil)) }
-local M = {} --[[: { render: (string, mustache_ctx, (mustache_partials | nil)) -> ((string | nil), (string | nil)), compile: (string) -> ((mustache_compiled | nil), (string | nil)), [string]: unknown }]]
+local M = {} --: { render?: (string, mustache_ctx, (mustache_partials | nil)) -> ((string | nil), (string | nil)), compile?: (string) -> ((mustache_compiled | nil), (string | nil)), [string]: unknown }
 
 -- HTML escape map
 local escape_map = {
@@ -18,7 +18,8 @@ local escape_map = {
 
 --: (string) -> string
 local function html_escape(s)
-  return (s:gsub('[&<>"\']', escape_map))
+  local r = s:gsub('[&<>"\']', escape_map)
+  return r
 end
 
 --: (mustache_ctx, string) -> unknown
@@ -33,7 +34,7 @@ local function lookup_dotted(ctx, key)
   return val
 end
 
---: (mustache_ctx[], string) -> unknown
+--: (Arr<mustache_ctx>, string) -> unknown
 local function resolve(stack, key)
   if key == "." then
     return stack[#stack]
@@ -87,10 +88,10 @@ end
 -- non-text tokens between that text and the current tag on the same line.
 -- Returns: is_standalone, pre_text_idx (index of preceding text token to trim, or 0 for start),
 -- and the newline string to skip after the tag (or "" at end of template).
---: (string, number, number, mustache_token[], number) -> (boolean, (number | nil), (string | nil))
+--: (string, integer, integer, mustache_template, integer) -> (boolean, integer | nil, string | nil)
 local function check_standalone(template, tag_start, tag_end, tokens, len)
   -- Check preceding: either start of template or only whitespace since last newline
-  local pre_text_idx = nil
+  local pre_text_idx = nil --: integer | nil
   local n = #tokens
   if n > 0 then
     -- The last token must be text (if there are non-text tokens after the last newline,
@@ -98,7 +99,7 @@ local function check_standalone(template, tag_start, tag_end, tokens, len)
     if tokens[n].type ~= "text" then
       return false
     end
-    local txt = tokens[n].value
+    local txt = tokens[n].value or ""
     local nl_pos = txt:find("\n[^\n]*$")
     if nl_pos then
       local after_nl = txt:sub(nl_pos + 1)
@@ -111,9 +112,10 @@ local function check_standalone(template, tag_start, tag_end, tokens, len)
       local only_ws = true
       for j = n - 1, 1, -1 do
         if tokens[j].type == "text" then
-          if tokens[j].value:find("\n") then
+          local jv = tokens[j].value or ""
+          if jv:find("\n") then
             break -- found a newline boundary, we're good
-          elseif not tokens[j].value:match("^%s*$") then
+          elseif not jv:match("^%s*$") then
             only_ws = false
             break
           end
@@ -148,17 +150,18 @@ local function check_standalone(template, tag_start, tag_end, tokens, len)
 end
 
 -- Trim the preceding whitespace text for a standalone tag, and advance past the trailing newline.
---: (mustache_token[], number) -> mustache_template
+--: (mustache_template, integer) -> mustache_template
 local function trim_standalone_pre(tokens, pre_text_idx)
   if pre_text_idx > 0 then
-    local txt = tokens[pre_text_idx].value
+    local txt = tokens[pre_text_idx].value or ""
     local nl_pos = txt:find("\n[^\n]*$")
     if nl_pos then
       tokens[pre_text_idx].value = txt:sub(1, nl_pos)
     elseif txt:match("^%s*$") then
-      tokens[pre_text_idx] = nil
-      local new = {}
-      for _, t in ipairs(tokens) do new[#new + 1] = t end
+      local new = {} --: mustache_template
+      for j, t in ipairs(tokens) do
+        if j ~= pre_text_idx then new[#new + 1] = t end
+      end
       tokens = new
     end
   end
@@ -170,10 +173,10 @@ local render_tokens
 
 --: (string, string, string) -> (mustache_template | nil, string | nil)
 local function compile_tokens(template, otag, ctag)
-  local tokens = {}
+  local tokens = {} --: mustache_template
   local i = 1
   local len = #template
-  local section_stack = {}
+  local section_stack = {} --: Arr<{ otag: string, ctag: string, key: string, inverted: boolean, start_pos: integer, raw_start: integer, tokens: mustache_template }>
 
   while i <= len do
     -- Find next open tag
@@ -218,7 +221,7 @@ local function compile_tokens(template, otag, ctag)
         -- Comment: standalone handling
         local is_standalone, pre_idx, post_nl = check_standalone(template, tag_start, i, tokens, len)
         if is_standalone then
-          tokens = trim_standalone_pre(tokens, pre_idx)
+          tokens = trim_standalone_pre(tokens, pre_idx or 0)
           if post_nl and #post_nl > 0 then
             i = i + #post_nl
           end
@@ -229,7 +232,7 @@ local function compile_tokens(template, otag, ctag)
         local key = content:sub(2):match("^%s*(.-)%s*$")
         local is_standalone, pre_idx, post_nl = check_standalone(template, tag_start, i, tokens, len)
         if is_standalone then
-          tokens = trim_standalone_pre(tokens, pre_idx)
+          tokens = trim_standalone_pre(tokens, pre_idx or 0)
           if post_nl and #post_nl > 0 then
             i = i + #post_nl
           end
@@ -252,7 +255,7 @@ local function compile_tokens(template, otag, ctag)
           return nil, "unexpected closing tag {{/" .. key .. "}}"
         end
         local section = section_stack[#section_stack]
-        section_stack[#section_stack] = nil
+        table.remove(section_stack)
         if section.key ~= key then
           return nil, "mismatched section close: expected {{/" .. section.key .. "}} but got {{/" .. key .. "}}"
         end
@@ -261,7 +264,7 @@ local function compile_tokens(template, otag, ctag)
         local inner_tokens = tokens
         local is_standalone, pre_idx, post_nl = check_standalone(template, tag_start, i, inner_tokens, len)
         if is_standalone then
-          inner_tokens = trim_standalone_pre(inner_tokens, pre_idx)
+          inner_tokens = trim_standalone_pre(inner_tokens, pre_idx or 0)
           if post_nl and #post_nl > 0 then
             i = i + #post_nl
           end
@@ -289,16 +292,19 @@ local function compile_tokens(template, otag, ctag)
         -- Determine indentation for partial
         local indent = ""
         if #tokens > 0 and tokens[#tokens].type == "text" then
-          local txt = tokens[#tokens].value
+          local txt = tokens[#tokens].value or ""
           local last_nl = txt:find("\n[^\n]*$")
-          local line_start
+          local line_start = nil --: string | nil
           if last_nl then
             line_start = txt:sub(last_nl + 1)
           elseif not txt:find("\n") then
             line_start = txt
           end
-          if line_start and line_start:match("^%s+$") then
-            indent = line_start
+          if line_start ~= nil then
+            local ls = line_start --[[:! string]]
+            if ls:match("^%s+$") then
+              indent = ls
+            end
           end
         elseif #tokens == 0 then
           local pre = template:sub(1, tag_start - 1)
@@ -310,7 +316,7 @@ local function compile_tokens(template, otag, ctag)
         -- Standalone check for partials
         local is_standalone, pre_idx, post_nl = check_standalone(template, tag_start, i, tokens, len)
         if is_standalone then
-          tokens = trim_standalone_pre(tokens, pre_idx)
+          tokens = trim_standalone_pre(tokens, pre_idx or 0)
           if post_nl and #post_nl > 0 then
             i = i + #post_nl
           end
@@ -326,7 +332,7 @@ local function compile_tokens(template, otag, ctag)
         -- Set delimiter: {{=<% %>=}}
         local inner = content:sub(2) -- remove leading =
         if inner:sub(-1) == "=" then
-          inner = inner:sub(1, -2)
+          inner = (inner:sub(1, -2)) --[[: string]]
         end
         local new_otag, new_ctag = inner:match("^%s*(%S+)%s+(%S+)%s*$")
         if not new_otag then
@@ -335,7 +341,7 @@ local function compile_tokens(template, otag, ctag)
 
         local is_standalone, pre_idx, post_nl = check_standalone(template, tag_start, i, tokens, len)
         if is_standalone then
-          tokens = trim_standalone_pre(tokens, pre_idx)
+          tokens = trim_standalone_pre(tokens, pre_idx or 0)
           if post_nl and #post_nl > 0 then
             i = i + #post_nl
           end
@@ -359,15 +365,15 @@ local function compile_tokens(template, otag, ctag)
   return tokens, nil
 end
 
---: (mustache_template, mustache_ctx[], (mustache_partials | nil), string, string) -> string
+--: (mustache_template, Arr<mustache_ctx>, (mustache_partials | nil), string, string) -> string
 render_tokens = function(tokens, stack, partials, otag, ctag)
-  local buf = {}
+  local buf = {} --: { [integer]: string }
   for _, tok in ipairs(tokens) do
     if tok.type == "text" then
-      buf[#buf + 1] = tok.value
+      buf[#buf + 1] = tok.value or ""
 
     elseif tok.type == "var" then
-      local val = resolve(stack, tok.key)
+      local val = resolve(stack, tok.key or "")
       if val ~= nil and val ~= false then
         local s = tostring(val)
         if tok.escape then
@@ -377,10 +383,10 @@ render_tokens = function(tokens, stack, partials, otag, ctag)
       end
 
     elseif tok.type == "section" then
-      local val = resolve(stack, tok.key)
+      local val = resolve(stack, tok.key or "")
       if tok.inverted then
         if is_falsy(val) then
-          buf[#buf + 1] = render_tokens(tok.tokens, stack, partials, otag, ctag)
+          buf[#buf + 1] = render_tokens(tok.tokens or {}, stack, partials, otag, ctag)
         end
       else
         if type(val) == "function" then
@@ -393,35 +399,38 @@ render_tokens = function(tokens, stack, partials, otag, ctag)
             end
           end
         elseif is_list(--[[:! mustache_ctx]] val) then
-          for _, item in ipairs(val) do
-            stack[#stack + 1] = item
-            buf[#buf + 1] = render_tokens(tok.tokens, stack, partials, otag, ctag)
-            stack[#stack] = nil
+          local val_arr = val --[[:! Arr<mustache_ctx>]]
+          for _, item in ipairs(val_arr) do
+            stack[#stack + 1] = item --[[:! mustache_ctx]]
+            buf[#buf + 1] = render_tokens(tok.tokens or {}, stack, partials, otag, ctag)
+            table.remove(stack)
           end
         elseif val and val ~= false then
           if type(val) == "table" then
-            stack[#stack + 1] = val
+            stack[#stack + 1] = val --[[:! mustache_ctx]]
           else
             stack[#stack + 1] = --[[:! mustache_ctx]] val
           end
-          buf[#buf + 1] = render_tokens(tok.tokens, stack, partials, otag, ctag)
-          stack[#stack] = nil
+          buf[#buf + 1] = render_tokens(tok.tokens or {}, stack, partials, otag, ctag)
+          table.remove(stack)
         end
         -- falsy: skip
       end
 
     elseif tok.type == "partial" then
       if partials then
-        local partial_template = partials[tok.key]
+        local partial_template = partials[tok.key or ""]
         if partial_template then
           -- Apply indentation to partial
           local indented = partial_template
-          if tok.indent and #tok.indent > 0 then
+          local tok_indent = tok.indent or ""
+          if #tok_indent > 0 then
             -- Indent every line of the partial (including the first)
-            indented = tok.indent .. partial_template:gsub("\n", "\n" .. tok.indent)
+            local replaced = partial_template:gsub("\n", "\n" .. tok_indent)
+            indented = tok_indent .. replaced
             -- Remove trailing indent if partial ends with newline
             if partial_template:sub(-1) == "\n" then
-              indented = indented:sub(1, -(#tok.indent + 1))
+              indented = indented:sub(1, -(#tok_indent + 1))
             end
           end
           local partial_tokens = compile_tokens(indented, "{{", "}}")
@@ -446,7 +455,7 @@ function M.compile(template)
   }
   --: ({ _tokens: mustache_template, ... }, mustache_ctx, (mustache_partials | nil)) -> ((string | nil), (string | nil))
   function compiled:render(data, partials)
-    local stack = { data }
+    local stack = { data } --: Arr<mustache_ctx>
     local ok2, result = pcall(render_tokens, self._tokens, stack, partials, "{{", "}}")
     if not ok2 then return nil, result end
     return result, nil

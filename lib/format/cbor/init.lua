@@ -41,30 +41,28 @@ end
 
 -- not sure why this is needed
 local dostring = function (s)
-	local ok, f = load(function()
+	local f, err = load(function()
 		local ret = s
 		s = nil
 		return ret
 	end)
-	if ok and f then
+	if f then
 		return f()
 	end
 end
 
---[[@diagnostic disable-next-line: undefined-field]]
-local maxint = math.maxinteger or 9007199254740992
---[[@diagnostic disable-next-line: undefined-field]]
-local minint = math.mininteger or -9007199254740992
+local math_ = math --[[: any]]
+local string_ = string --[[: any]]
+local maxint = math_.maxinteger or 9007199254740992
+local minint = math_.mininteger or -9007199254740992
 local nan = 0/0
-local ldexp = math.ldexp or function (x, exp) return x * 2.0 ^ exp end
+local ldexp = math_.ldexp or function (x, exp) return x * 2.0 ^ exp end
 local inf = math.huge
-local m_type = math.type or function (n) return n % 1 == 0 and n <= maxint and n >= minint and "integer" or "float" end
---[[@type nil|(fun(fmt: string, v1: string|number, v2: any, ...: string|number): string)]]
---[[@diagnostic disable-next-line: deprecated]]
-local pack = string.pack or softreq("struct", "pack")
---[[@type nil|(fun(fmt: string, s: string, pos?: integer): ..., integer)]]
---[[@diagnostic disable-next-line: deprecated]]
-local unpack = string.unpack or softreq("struct", "unpack")
+local m_type = math_.type or function (n) return n % 1 == 0 and n <= maxint and n >= minint and "integer" or "float" end
+local pack --: any
+local unpack --: any
+pack = string_.pack or softreq("struct", "pack")
+unpack = string_.unpack or softreq("struct", "unpack")
 local rshift = softreq("bit32", "rshift") or softreq("bit", "rshift") or
 	dostring("return function(a, b) return a >> b end") or
 	function (a, b) return math.max(0, math.floor(a / (2 ^ b))) end
@@ -74,7 +72,7 @@ if pack and pack(">I2", 0) ~= "\0\0" then pack = nil end
 if unpack and unpack(">I2", "\1\2\3\4") ~= 0x102 then unpack = nil end
 local _ENV = nil
 
-local encoder = {}
+local encoder = {} --: any
 
 local encode = function (obj, opts) return encoder[type(obj)](obj, opts) end
 mod._encode_raw = encode
@@ -87,7 +85,7 @@ mod.encode = function (obj, opts)
 end
 
 --[[Major types 0, 1 and length encoding for others]]
---[[@param num integer]]
+--: (integer, integer) -> string
 local integer = function (num, m)
 	if m == 0 and num < 0 then
 		-- negative integer, major type 1
@@ -108,7 +106,7 @@ local integer = function (num, m)
 	elseif num < 2 ^ 64 then
 		local high = math.floor(num / 2 ^ 32)
 		--[[@diagnostic disable-next-line: cast-local-type]]
-		num = num % 2 ^ 32
+		num = math.floor(num % 2 ^ 32)
 		return string.char(m + 27,
 			rshift(high, 24) % 0x100,
 			rshift(high, 16) % 0x100,
@@ -137,8 +135,9 @@ end
 
 local simple_mt = {}
 simple_mt.__tostring = function (self) return self.name or ("simple(%d)"):format(self.value) end
-simple_mt.__tocbor = function (self) return self.cbor or integer(self.value, 224) end
+simple_mt.__tocbor = function (self) return self.cbor or integer(self.value --[[:! integer]], 224) end
 
+--: (integer, string | nil, string | nil) -> { value: integer, name: string | nil, cbor: string | nil }
 local simple = function (value, name, cbor)
 	assert(value >= 0 and value <= 255, "bad argument #1 to 'simple' (integer in range 0..255 expected)")
 	return setmetatable({ value = value, name = name, cbor = cbor }, simple_mt)
@@ -147,7 +146,7 @@ mod.simple = simple
 
 local tagged_mt = {}
 tagged_mt.__tostring = function (self) return ("%d(%s)"):format(self.tag, tostring(self.value)) end
-tagged_mt.__tocbor = function (self) return integer(self.tag, 192) .. encode(self.value) end
+tagged_mt.__tocbor = function (self) return integer(self.tag --[[:! integer]], 192) .. encode(self.value) end
 
 local tagged = function (tag, value)
 	assert(tag >= 0, "bad argument #1 to 'tagged' (positive integer expected)")
@@ -161,12 +160,12 @@ local undefined = simple(23, "undefined") -- undefined or nil
 mod.undefined = undefined
 local BREAK = simple(31, "break", "\255")
 
---[[Number types dispatch]] --[[@param num number]]
+--: (number) -> string
 encoder.number = function (num)
 	return encoder[m_type(num)](num)
 end
 
---[[Major types 0, 1]] --[[@param num integer]]
+--: (integer) -> string
 encoder.integer = function (num)
 	if num < 0 then
 		return integer(-1 - num, 32)
@@ -213,8 +212,10 @@ end
 
 
 --[[Major type 2 - byte strings]] --[[@param s string]]
+--: (string) -> string
 encoder.bytestring = function (s) return integer(#s, 64) .. s end
 --[[Major type 3 - UTF-8 strings]] --[[@param s string]]
+--: (string) -> string
 encoder.utf8string = function (s) return integer(#s, 96) .. s end
 --[[Lua strings are byte strings]]
 encoder.string = encoder.bytestring
@@ -225,7 +226,7 @@ encoder["nil"] = function (_) return "\246" end
 
 --[[@param ud userdata]]
 encoder.userdata = function (ud, opts)
-	local mt = debug.getmetatable(ud)
+	local mt = debug.getmetatable(ud) --[[: any]]
 	if mt then
 		local encode_ud = opts and opts[mt] or mt.__tocbor
 		if encode_ud then
@@ -252,13 +253,13 @@ encoder.table = function (t, opts)
 	-- usually observe.  See the Lua manual regarding the # (length)
 	-- operator.  In the case that this does not happen, we will fall
 	-- back to a map with integer keys, which becomes a bit larger.
-	local array = { integer(#t, 128) }
-	local map = { "\191" }
+	local array = { integer(#t, 128) } --: { [integer]: string }
+	local map = { "\191" } --: { [integer]: string }
 	local i = 1
 	local p = 2
 	local is_array = true
 	for k, v in pairs(t) do
-		is_array = is_array and i == k
+		is_array = is_array and (i == k)
 		i = i + 1
 		local encoded_v = encode(v, opts)
 		array[i] = encoded_v

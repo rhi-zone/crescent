@@ -103,8 +103,11 @@ function manifest.validate(tbl)
 	return true
 end
 
+--:: DepValue = string | { constraint: string, include?: string }
+
 --- Return the constraint string for a dep entry.
 -- dep_value may be a plain string or { constraint=str, include=str }.
+--: (DepValue) -> string
 function manifest.dep_constraint(dep_value)
 	if type(dep_value) == "string" then
 		return dep_value
@@ -113,6 +116,7 @@ function manifest.dep_constraint(dep_value)
 end
 
 --- Return the include glob for a dep entry. Defaults to "**" when not specified.
+--: (DepValue) -> string
 function manifest.dep_include(dep_value)
 	if type(dep_value) == "string" then
 		return "**"

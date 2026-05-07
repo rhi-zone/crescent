@@ -4,15 +4,54 @@ end
 
 local M = {}
 
---:: Stream = { next: () -> unknown | nil }
+--:: Stream = {
+--::   next: () -> unknown,
+--::   map: (self: Stream, fn: (unknown) -> unknown) -> Stream,
+--::   filter: (self: Stream, fn: (unknown) -> boolean) -> Stream,
+--::   take: (self: Stream, n: integer) -> Stream,
+--::   drop: (self: Stream, n: integer) -> Stream,
+--::   take_while: (self: Stream, fn: (unknown) -> boolean) -> Stream,
+--::   drop_while: (self: Stream, fn: (unknown) -> boolean) -> Stream,
+--::   flat_map: (self: Stream, fn: (unknown) -> Stream) -> Stream,
+--::   flatten: (self: Stream) -> Stream,
+--::   zip: (self: Stream, other: Stream) -> Stream,
+--::   chain: (self: Stream, other: Stream) -> Stream,
+--::   enumerate: (self: Stream) -> Stream,
+--::   unique: (self: Stream) -> Stream,
+--::   dedup: (self: Stream) -> Stream,
+--::   scan: (self: Stream, init: unknown, fn: (unknown, unknown) -> unknown) -> Stream,
+--::   chunks: (self: Stream, n: integer) -> Stream,
+--::   intersperse: (self: Stream, sep: unknown) -> Stream,
+--::   tap: (self: Stream, fn: (unknown) -> nil) -> Stream,
+--::   to_array: (self: Stream) -> unknown[],
+--::   reduce: (self: Stream, init: unknown, fn: (unknown, unknown) -> unknown) -> unknown,
+--::   for_each: (self: Stream, fn: (unknown) -> nil) -> nil,
+--::   count: (self: Stream) -> integer,
+--::   sum: (self: Stream) -> number,
+--::   min: (self: Stream) -> (unknown | nil),
+--::   max: (self: Stream) -> (unknown | nil),
+--::   find: (self: Stream, fn: (unknown) -> boolean) -> (unknown | nil),
+--::   any: (self: Stream, fn: (unknown) -> boolean) -> boolean,
+--::   all: (self: Stream, fn: (unknown) -> boolean) -> boolean,
+--::   none: (self: Stream, fn: (unknown) -> boolean) -> boolean,
+--::   first: (self: Stream) -> (unknown | nil),
+--::   last: (self: Stream) -> (unknown | nil),
+--::   nth: (self: Stream, n: integer) -> (unknown | nil),
+--::   join: (self: Stream, sep: string | nil) -> string,
+--::   to_map: (self: Stream, key_fn: (unknown) -> unknown) -> { [unknown]: unknown },
+--::   partition: (self: Stream, fn: (unknown) -> boolean) -> (unknown[], unknown[]),
+--::   group_by: (self: Stream, fn: (unknown) -> unknown) -> { [unknown]: unknown[] },
+--::   ...
+--:: }
 
 -- Stream metatable: all combinators are methods
 local Stream = {}
 Stream.__index = Stream
 
---: ((() -> unknown | nil) ) -> Stream
+--: (next_fn: () -> (unknown | nil)) -> Stream
 local function wrap(next_fn)
-  return setmetatable({ next = next_fn }, Stream)
+  local s = setmetatable({ next = next_fn }, Stream) --[[: any]]
+  return s --[[:! Stream]]
 end
 
 -- ============================================================
