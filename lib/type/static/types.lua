@@ -1213,6 +1213,7 @@ function M.display_short(ctx, tid, max_len)
 end
 
 -- Map from Lua type() string to type_id singleton
+--: (Ctx, string) -> integer
 function M.typeof_to_id(ctx, s)
     if s == "nil"      then return ctx.T_NIL end
     if s == "boolean"  then return ctx.T_BOOLEAN end
