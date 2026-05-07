@@ -50,19 +50,34 @@ end
 
 -- ── Public module ─────────────────────────────────────────────────────────────
 
-local M = {}
-
-M.null         = impl.null
-M.encode       = impl.encode
-M.decode       = impl.decode
-M._encode_raw  = impl._encode_raw
-M._decode_raw  = impl._decode_raw
-M.value_to_json = impl._encode_raw
-M.json_to_value = impl._decode_raw
-M._tier        = tier
-M._impl        = impl
-M.schema       = require("lib.format.json.schema")
-
---:: module "lib.format.json": { encode: (unknown) -> (string | nil, string | nil), decode: (string) -> (unknown, string | nil), null: {}, _tier: string, _encode_raw: (unknown) -> string, _decode_raw: (string) -> unknown, value_to_json: (unknown) -> string, json_to_value: (string) -> unknown, schema: unknown }
+--:: JsonEncode = (val: unknown) -> (string | nil, string | nil)
+--:: JsonDecode = (s: string) -> (unknown, string | nil)
+--:: JsonEncodeRaw = (val: unknown) -> string
+--:: JsonDecodeRaw = (s: string) -> unknown
+--:: JsonModule = {
+--::     null:          {},
+--::     encode:        JsonEncode,
+--::     decode:        JsonDecode,
+--::     _encode_raw:   JsonEncodeRaw,
+--::     _decode_raw:   JsonDecodeRaw,
+--::     value_to_json: JsonEncodeRaw,
+--::     json_to_value: JsonDecodeRaw,
+--::     _tier:         string,
+--::     _impl:         unknown,
+--::     schema:        unknown
+--:: }
+--: JsonModule
+local M = {
+    null          = impl.null,
+    encode        = impl.encode       --[[:! JsonEncode]],
+    decode        = impl.decode       --[[:! JsonDecode]],
+    _encode_raw   = impl._encode_raw  --[[:! JsonEncodeRaw]],
+    _decode_raw   = impl._decode_raw  --[[:! JsonDecodeRaw]],
+    value_to_json = impl._encode_raw  --[[:! JsonEncodeRaw]],
+    json_to_value = impl._decode_raw  --[[:! JsonDecodeRaw]],
+    _tier         = tier              --[[:! string]],
+    _impl         = impl,
+    schema        = require("lib.format.json.schema"),
+}
 
 return M
