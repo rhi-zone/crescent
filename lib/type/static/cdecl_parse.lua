@@ -45,6 +45,17 @@ local C_KEYWORDS = {
 -- Parser construction
 ---------------------------------------------------------------------------
 
+--[[::
+CdeclParser = {
+  lex: { tk: integer, val: integer, next: (unknown) -> integer, ... },
+  pool: { ht_cap: integer, ht_mask: integer, ht_count: integer, next_id: integer, buf_count: integer, entries: { [integer]: unknown, ... }, bufs: { [integer]: unknown, ... }, rev: { [integer]: unknown, ... }, map: { [string]: integer, ... }, _anchors: { [integer]: string, ... }, ... },
+  kw: { [string]: integer, ... },
+  typedefs: { [integer]: boolean, ... },
+  decls: { [integer]: unknown, ... },
+  ...
+}
+]]
+
 local function new_parser(source, pool)
     pool = pool or intern_mod.new()
     local lex = cdecl_lex.new(source, pool)
@@ -69,17 +80,20 @@ end
 ---------------------------------------------------------------------------
 
 -- Advance and return current token type.
+--: (CdeclParser) -> integer
 local function advance(p)
     p.lex:next()
     return p.lex.tk
 end
 
 -- Check current token is TK_IDENT with a specific intern_id.
+--: (CdeclParser, integer) -> boolean
 local function check_kw(p, kw_id)
     return p.lex.tk == TK_IDENT and p.lex.val == kw_id
 end
 
 -- Consume current token if it matches tk; return true on success.
+--: (CdeclParser, integer) -> boolean
 local function eat(p, tk)
     if p.lex.tk == tk then
         advance(p)
@@ -89,6 +103,7 @@ local function eat(p, tk)
 end
 
 -- Consume keyword by name; return true on success.
+--: (CdeclParser, string) -> boolean
 local function eat_kw(p, name)
     local id = p.kw[name]
     if id and p.lex.tk == TK_IDENT and p.lex.val == id then
@@ -99,6 +114,7 @@ local function eat_kw(p, name)
 end
 
 -- Expect a specific token; error if not present.
+--: (CdeclParser, integer) -> ()
 local function expect(p, tk)
     if p.lex.tk ~= tk then
         error("cdecl_parse: expected token " .. tk .. " got " .. p.lex.tk)
@@ -107,6 +123,7 @@ local function expect(p, tk)
 end
 
 -- Expect TK_IDENT; return its intern_id.
+--: (CdeclParser) -> integer
 local function expect_ident(p)
     if p.lex.tk ~= TK_IDENT then
         error("cdecl_parse: expected identifier, got token " .. p.lex.tk)
@@ -128,6 +145,7 @@ local SKIP_KW = {
 }
 
 -- Skip __declspec(...)
+--: (CdeclParser) -> ()
 local function skip_declspec(p)
     -- consume '('
     if not eat(p, TK_LPAREN) then return end
@@ -143,6 +161,7 @@ local function skip_declspec(p)
 end
 
 -- Skip __attribute__((...))  — double paren expression.
+--: (CdeclParser) -> ()
 local function skip_attribute(p)
     -- expect first '('
     if not eat(p, TK_LPAREN) then return end
@@ -171,6 +190,7 @@ end
 
 -- Skip all leading qualifiers/storage classes/attributes.
 -- Returns true if anything was consumed (so caller can loop).
+--: (CdeclParser) -> ()
 local function skip_qualifiers(p)
     local consumed = false
     while true do
@@ -200,6 +220,7 @@ end
 ---------------------------------------------------------------------------
 
 -- Returns true if the current TK_IDENT is an integer modifier keyword.
+--: (CdeclParser) -> boolean
 local function is_int_modifier(p)
     if p.lex.tk ~= TK_IDENT then return false end
     local v = p.lex.val
@@ -209,6 +230,7 @@ local function is_int_modifier(p)
 end
 
 -- Returns true if the current TK_IDENT is a float keyword.
+--: (CdeclParser) -> boolean
 local function is_float_kw(p)
     if p.lex.tk ~= TK_IDENT then return false end
     local v = p.lex.val
@@ -225,6 +247,7 @@ local INT_TYPEDEFS = {
     "wchar_t",
 }
 
+--: (CdeclParser) -> boolean
 local function is_int_typedef(p)
     if p.lex.tk ~= TK_IDENT then return false end
     local v = p.lex.val
@@ -637,6 +660,7 @@ end
 -- Skip to next semicolon for error recovery
 ---------------------------------------------------------------------------
 
+--: (CdeclParser) -> ()
 local function skip_to_semi(p)
     while p.lex.tk ~= TK_SEMI and p.lex.tk ~= TK_EOF do
         advance(p)

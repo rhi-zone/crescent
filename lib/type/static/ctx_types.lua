@@ -35,7 +35,7 @@
 
 -- Intern pool: string interning table with hash map.
 -- Mirrors StringPool in intern.lua so values flow without casts.
---:: InternPool = { ht_cap: integer, ht_mask: integer, ht_count: integer, next_id: integer, buf_count: integer, entries: { [integer]: unknown, ... }, bufs: { [integer]: unknown, ... }, rev: { [integer]: unknown, ... }, map: { [string]: integer, ... }, _anchors: { [integer]: string, ... }, _type_predicates: { [integer]: { param_idx: integer, type_id: integer }, ... } | nil, _assert_predicates: { [integer]: { param_idx: integer, type_id: integer }, ... } | nil, ... }
+--:: InternPool = { ht_cap: integer, ht_mask: integer, ht_count: integer, next_id: integer, buf_count: integer, entries: { [integer]: unknown, ... }, bufs: { [integer]: unknown, ... }, rev: { [integer]: unknown, ... }, map: { [string]: integer, ... }, _anchors: { [integer]: string, ... }, _type_predicates: { [integer]: { param_idx: integer, type_id: integer }, ... } | nil, _assert_predicates: { [integer]: { param_idx: integer, type_id: integer }, ... } | nil, _pending_predicate: { param_idx: integer, type_id: integer, ... } | nil, _pending_assert_predicate: { param_idx: integer, type_id: integer, ... } | nil, ... }
 
 -- Annotation arena result returned by ann.parse_annotations().
 -- Types/fields/lists use the same arena shapes as the main checker.

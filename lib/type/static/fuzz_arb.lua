@@ -45,6 +45,9 @@ local PREC_FUNC  = 10
 local PREC_UNION = 20
 local PREC_INTER = 30
 
+--:: TypeNode = { tag: string, name: string, value: unknown, a: TypeNode, b: TypeNode, params: { [integer]: TypeNode, ... }, ret: TypeNode, types: { [integer]: TypeNode, ... }, fields: { [integer]: { name: string, type: TypeNode, ... }, ... }, key: string, val: TypeNode, ... }
+
+--: (TypeNode, integer | nil) -> string
 local function to_str(node, outer)
 	outer = outer or 0
 	local s, p

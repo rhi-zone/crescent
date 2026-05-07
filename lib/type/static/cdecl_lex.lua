@@ -103,14 +103,28 @@ end
 -- Lexer state
 ---------------------------------------------------------------------------
 
+--[[::
+CdeclLexState = {
+  src: any, srclen: integer, pos: integer, b: integer,
+  tk: integer, val: integer, pool: { ht_cap: integer, ht_mask: integer, ht_count: integer, next_id: integer, buf_count: integer, entries: { [integer]: unknown, ... }, bufs: { [integer]: unknown, ... }, rev: { [integer]: unknown, ... }, map: { [string]: integer, ... }, _anchors: { [integer]: string, ... }, ... }, _buf_id: integer,
+  _nextbyte: (CdeclLexState) -> integer,
+  _peekbyte: (CdeclLexState) -> integer,
+  _lex: (CdeclLexState) -> (integer, integer),
+  next: (CdeclLexState) -> integer,
+  ...
+}
+]]
+
 local Lexer = {}
 Lexer.__index = Lexer
 
+--: (source: string, pool: { ht_cap: integer, ht_mask: integer, ht_count: integer, next_id: integer, buf_count: integer, entries: { [integer]: unknown, ... }, bufs: { [integer]: unknown, ... }, rev: { [integer]: unknown, ... }, map: { [string]: integer, ... }, _anchors: { [integer]: string, ... }, ... } | nil) -> CdeclLexState
 function M.new(source, pool)
     pool = pool or intern_mod.new()
     local src = ffi.cast(uint8_ptr, source)
     local len = #source
     local buf_id = intern_mod.register_buf(pool, src, source)
+    --: CdeclLexState
     local ls = setmetatable({
         src    = src,
         srclen = len,
@@ -130,6 +144,7 @@ end
 -- Byte-level helpers
 ---------------------------------------------------------------------------
 
+--: (CdeclLexState) -> integer
 function Lexer:_nextbyte()
     if self.pos >= self.srclen then
         self.b = EOF
@@ -141,6 +156,7 @@ function Lexer:_nextbyte()
     return b
 end
 
+--: (CdeclLexState) -> integer
 function Lexer:_peekbyte()
     if self.pos >= self.srclen then return EOF end
     return self.src[self.pos]
@@ -150,6 +166,7 @@ end
 -- Internal lex implementation
 ---------------------------------------------------------------------------
 
+--: (CdeclLexState) -> (integer, integer)
 function Lexer:_lex()
     while true do
         local b = self.b
@@ -302,12 +319,14 @@ function Lexer:_lex()
             self:_nextbyte()
         end
     end
+    return M.TK_EOF, 0 --[[ unreachable ]]
 end
 
 ---------------------------------------------------------------------------
 -- Public API
 ---------------------------------------------------------------------------
 
+--: (CdeclLexState) -> integer
 function Lexer:next()
     self.tk, self.val = self:_lex()
     return self.tk

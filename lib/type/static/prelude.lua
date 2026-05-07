@@ -36,6 +36,7 @@ local M = {}
 --
 -- Call M.clear_cache() to force re-parsing (e.g. if stdlib _types.lua files
 -- change at runtime, which should not happen in normal usage).
+--: { [string]: { ar: AnnResult, strings: { [integer]: { [integer]: unknown, ... }, ... }, first_id: integer }, ... }
 local _cache = {}   -- path → { ar, strings, first_id }
 
 function M.clear_cache()
@@ -47,6 +48,7 @@ end
 -- Variable declarations (--:: declare name = type) are bound in ctx.scope.
 -- Type aliases (--:: Name = type) are registered in ctx.scope.type_bindings.
 -- After loading, primitive meta type ctx fields are derived from aliases.
+--: (Ctx, string) -> ()
 local function load_decls(ctx, path)
     local parse_mod  = require("lib.type.static.parse")
     local ann_mod    = require("lib.type.static.ann")

@@ -33,6 +33,7 @@ local EMPTY_ARRAY = {[0] = 0}
 --: (any) -> ()
 local function send(msg)
     local body = json.encode(msg, NULL)
+    if type(body) ~= "string" then return end
     io.stdout:write("Content-Length: " .. #body .. "\r\n\r\n" .. body)
     io.stdout:flush()
 end
@@ -51,7 +52,7 @@ local function recv()
     end
     if not content_length or content_length <= 0 then return nil end
     local body = io.stdin:read(content_length)
-    if not body then return nil end
+    if not body or type(body) ~= "string" then return nil end
     local ok, msg = pcall(json.decode, body)
     if not ok then
         io.stderr:write("crescent-lsp: JSON decode error: " .. tostring(msg) .. "\n")
@@ -167,6 +168,7 @@ end
 -- Scan ctx_scan.nodes for the definition of a field with intern id `field_id`.
 -- obj_name_id_opt: if non-nil, only match that object variable; nil matches any.
 -- Returns {line, col} (1-indexed typechecker coords) or nil.
+--: (Ctx, integer | nil, integer) -> ({ line: integer, col: integer, ... } | nil)
 local function find_field_in_ctx(ctx_scan, obj_name_id_opt, field_id)
     local NODE_ASSIGN_STMT = defs.NODE_ASSIGN_STMT
     local NODE_FUNC_DECL   = defs.NODE_FUNC_DECL

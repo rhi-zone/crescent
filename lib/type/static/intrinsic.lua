@@ -39,6 +39,7 @@ local M = {}
 -- ---------------------------------------------------------------------------
 -- Produce a string literal union of the named field names of T.
 -- If T is not a table, returns T_NEVER.
+--: (Ctx, { [integer]: integer, ... }) -> integer
 local function expand_keys(ctx, arg_ids)
     if #arg_ids ~= 1 then
         return ctx.T_NEVER
@@ -68,6 +69,7 @@ end
 -- F must be a TAG_MATCH_TYPE or a TAG_NAMED alias.
 -- For TAG_MATCH_TYPE: wrap each arm as a new match with just that member as param.
 -- For TAG_NAMED: apply with one arg (the member).
+--: (Ctx, integer, integer) -> integer
 local function apply_type_fn(ctx, fn_tid, member_tid)
     fn_tid = types_mod.find(ctx, fn_tid)
     local ft = ctx.types:get(fn_tid)
@@ -107,6 +109,7 @@ local function apply_type_fn(ctx, fn_tid, member_tid)
     return ctx.T_NEVER
 end
 
+--: (Ctx, { [integer]: integer, ... }) -> integer
 local function expand_each_union(ctx, arg_ids)
     if #arg_ids ~= 2 then
         return ctx.T_NEVER
@@ -140,6 +143,7 @@ end
 --
 -- Field descriptor table type (synthesised per field):
 --   { key: LIT_STRING(name), value: field_type, optional: LIT_BOOLEAN, readonly: LIT_BOOLEAN }
+--: (Ctx, FieldEntry) -> integer
 local function make_field_descriptor(ctx, fe)
     -- key: string literal of field name
     local key_id = types_mod.make_literal(ctx, LIT_STRING, fe.name_id)
@@ -171,6 +175,7 @@ end
 
 -- Extract a field from a descriptor table result.
 -- Returns the type_id for the named slot, or nil.
+--: (Ctx, integer, string) -> integer
 local function descriptor_field(ctx, tbl_tid, slot_name)
     tbl_tid = types_mod.find(ctx, tbl_tid)
     local t = ctx.types:get(tbl_tid)
@@ -184,6 +189,7 @@ end
 -- Extract a single descriptor table (tag TAG_TABLE) and push the resulting
 -- output field onto out_fields.  fe is the original FieldEntry (used for
 -- fallback name/type when the descriptor doesn't supply them).
+--: (Ctx, { [integer]: integer, ... }, integer, FieldEntry) -> ()
 local function push_descriptor_field(ctx, out_fields, desc_tid, fe)
     desc_tid = types_mod.find(ctx, desc_tid)
     local key_tid   = descriptor_field(ctx, desc_tid, "key")
@@ -230,6 +236,7 @@ end
 --   TAG_TABLE empty closed:   {} from annotation → brace-empty-tuple → drop
 --   TAG_TABLE positional:     { D } or { D1, D2 } from annotation → brace-positional-tuple
 --   anything else:            backward-compat single descriptor
+--: (Ctx, integer, { [integer]: integer, ... }) -> ()
 local function collect_result_descriptors(ctx, result_tid, out)
     result_tid = types_mod.find(ctx, result_tid)
     local rt = ctx.types:get(result_tid)
@@ -269,6 +276,7 @@ local function collect_result_descriptors(ctx, result_tid, out)
     out[#out + 1] = result_tid
 end
 
+--: (Ctx, integer, integer) -> integer
 local function expand_each_field_table(ctx, tbl_tid, fn_tid)
     local tt = ctx.types:get(tbl_tid)
     if tt.tag ~= TAG_TABLE then
@@ -297,6 +305,7 @@ local function expand_each_field_table(ctx, tbl_tid, fn_tid)
     return types_mod.make_table(ctx, out_fields, {}, -1, {})
 end
 
+--: (Ctx, { [integer]: integer, ... }) -> integer
 local function expand_each_field(ctx, arg_ids)
     if #arg_ids ~= 2 then
         return ctx.T_NEVER
@@ -341,6 +350,7 @@ end
 --   - TAG_TABLE with integer indexer: return indexer value type
 --   - TAG_TABLE with positional fields: return union of their value types (widened)
 --   - Otherwise: return T_UNKNOWN
+--: (Ctx, integer, boolean) -> integer
 local function extract_values(ctx, T_tid, ipairs_mode)
     T_tid = types_mod.find(ctx, T_tid)
     local T_t = ctx.types:get(T_tid)
@@ -442,6 +452,7 @@ end
 --   - If neither found: V = unknown
 
 -- Extract K and V types from a table type for pairs().
+--: (Ctx, integer) -> integer
 local function extract_pairs_kv(ctx, T_tid)
     T_tid = types_mod.find(ctx, T_tid)
     local T_t = ctx.types:get(T_tid)
@@ -482,6 +493,7 @@ local function extract_pairs_kv(ctx, T_tid)
 end
 
 -- Extract V type from a table type for ipairs() (K is always integer).
+--: (Ctx, integer) -> integer
 local function extract_ipairs_v(ctx, T_tid)
     T_tid = types_mod.find(ctx, T_tid)
     local T_t = ctx.types:get(T_tid)
@@ -523,6 +535,7 @@ end
 -- iterator returns a non-nil first value.  Using K? in return position causes
 -- false-positive arithmetic errors on loop index variables in the body.
 -- The initial key in the triple is K? (nil on the very first call).
+--: (Ctx, integer, integer, integer) -> integer
 local function build_iter_triple(ctx, T_tid, K_tid, V_tid)
     -- K? = K | nil  (initial key is nil on the first call)
     local K_opt_tid = types_mod.make_union(ctx, { K_tid, ctx.T_NIL })
@@ -532,6 +545,7 @@ local function build_iter_triple(ctx, T_tid, K_tid, V_tid)
     return types_mod.make_tuple(ctx, { iter_fn_tid, T_tid, K_opt_tid })
 end
 
+--: (Ctx, { [integer]: integer, ... }) -> integer
 local function expand_pairs_return(ctx, arg_ids)
     if #arg_ids ~= 1 then return ctx.T_NEVER end
     local T_tid = types_mod.find(ctx, arg_ids[1])
@@ -539,6 +553,7 @@ local function expand_pairs_return(ctx, arg_ids)
     return build_iter_triple(ctx, T_tid, K_tid, V_tid)
 end
 
+--: (Ctx, { [integer]: integer, ... }) -> integer
 local function expand_ipairs_return(ctx, arg_ids)
     if #arg_ids ~= 1 then return ctx.T_NEVER end
     local T_tid = types_mod.find(ctx, arg_ids[1])
@@ -557,6 +572,7 @@ end
 --   declare require: <T: string>(module: T) -> $Require<T>
 -- When T is bound to LIT_STRING("mod.name"), $Require<T> evaluates to the
 -- type declared via --:: module "mod.name": { ... }.
+--: (Ctx, { [integer]: integer, ... }) -> integer
 local function expand_require(ctx, arg_ids)
     if #arg_ids ~= 1 then return ctx.T_UNKNOWN end
     local T_tid = types_mod.find(ctx, arg_ids[1])
@@ -612,6 +628,7 @@ end
 local fnv31   = defs.fnv31
 local TAG_NOMINAL_I = defs.TAG_NOMINAL
 
+--: (Ctx, integer) -> string
 local function T_fingerprint(ctx, T)
     local t = ctx.types:get(T)
     local tag = t.tag
@@ -626,6 +643,7 @@ local function T_fingerprint(ctx, T)
     return tag * 0x1000 + T  -- structural types: per-run unique, not cross-run stable
 end
 
+--: (Ctx, { [integer]: integer, ... }, integer | nil) -> integer
 local function expand_opaque(ctx, arg_ids, stable_id)
     if #arg_ids < 1 or #arg_ids > 2 then return ctx.T_NEVER end
     local T = types_mod.find(ctx, arg_ids[1])
@@ -698,6 +716,7 @@ end
 -- message. Emits a diagnostic at the current use-site location and returns
 -- T_NEVER. If ctx.catch_mode is true, does not emit — instead sets
 -- ctx.catch_threw = true and returns T_NEVER silently.
+--: (Ctx, { [integer]: integer, ... }) -> integer
 local function expand_throw(ctx, arg_ids)
     -- Build the message by concatenating each arg.
     local parts = {}
@@ -730,6 +749,7 @@ end
 -- constrain.lua before arg resolution). If any $Throw fired during T's
 -- resolution, ctx.catch_threw is true. Return Default (arg 2) when caught,
 -- or T_NEVER if Default is omitted. If no throw occurred, return T as-is.
+--: (Ctx, { [integer]: integer, ... }) -> integer
 local function expand_catch(ctx, arg_ids)
     if #arg_ids < 1 then
         return ctx.T_NEVER
@@ -787,13 +807,12 @@ local function count_pattern_captures(pat)
     return n
 end
 
+--: (Ctx, { [integer]: integer, ... }) -> integer
 local function expand_pattern_return(ctx, arg_ids)
     -- Extract singleton type IDs from ctx with explicit integer annotations so
     -- the typechecker doesn't widen them to unknown (ctx fields are not yet typed).
-    local t_string --: integer
-    t_string = ctx.T_STRING
-    local t_nil --: integer
-    t_nil = ctx.T_NIL
+    local t_string = ctx.T_STRING --: integer
+    local t_nil = ctx.T_NIL --: integer
     local str_nil = types_mod.make_union(ctx, { t_string, t_nil })
     if #arg_ids ~= 1 then
         return str_nil
@@ -832,13 +851,11 @@ end
 -- gets nil for every slot.  We model this as a union of the success tuple and
 -- T_NIL, which the multi-return narrowing machinery already handles via the
 -- correlated-multi-return path (same as the old find annotation).
+--: (Ctx, { [integer]: integer, ... }) -> integer
 local function expand_find_return(ctx, arg_ids)
-    local t_integer --: integer
-    t_integer = ctx.T_INTEGER
-    local t_nil --: integer
-    t_nil = ctx.T_NIL
-    local t_string --: integer
-    t_string = ctx.T_STRING
+    local t_integer = ctx.T_INTEGER --: integer
+    local t_nil = ctx.T_NIL --: integer
+    local t_string = ctx.T_STRING --: integer
     local str_nil = types_mod.make_union(ctx, { t_string, t_nil })
 
     local n = 0  -- default: 0 captures
