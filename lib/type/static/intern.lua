@@ -40,7 +40,7 @@ local E_OFFSET = 3
 local E_LEN    = 4
 local E_ID     = 5
 
---:: StringPool = { ht_cap: integer, ht_mask: integer, ht_count: integer, next_id: integer, buf_count: integer, entries: { [integer]: unknown, ... }, bufs: { [integer]: unknown, ... }, rev: { [integer]: unknown, ... }, map: { [string]: integer, ... }, _anchors: { [integer]: string, ... } }
+--:: StringPool = { ht_cap: integer, ht_mask: integer, ht_count: integer, next_id: integer, buf_count: integer, entries: { [integer]: unknown, ... }, bufs: { [integer]: unknown, ... }, rev: { [integer]: unknown, ... }, map: { [string]: integer, ... }, _anchors: { [integer]: string, ... }, ... }
 
 --: (StringPool) -> ()
 local function ht_grow(pool)
@@ -62,6 +62,7 @@ local function ht_grow(pool)
     pool.ht_mask = new_mask
 end
 
+--: () -> InternPool
 function M.new()
     local cap = 256
     local pool = {
@@ -106,7 +107,7 @@ function M.new()
         pos = pos + len
     end
 
-    return pool
+    return pool --[[: any]]
 end
 
 -- Register a source buffer pointer. Returns buf_id.

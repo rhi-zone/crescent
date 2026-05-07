@@ -12,7 +12,7 @@ local M = {}
 -- ── FFI for fork/pipe/waitpid ─────────────────────────────────────────────────
 
 local fork_available = false
-local ffi
+local ffi = require("ffi")
 do
     local ffi_ok, ffi_mod = pcall(require, "ffi")
     if ffi_ok then
@@ -44,16 +44,24 @@ end
 
 -- ── URL encoding (for pipe protocol) ─────────────────────────────────────────
 
+--: (string) -> string
 local function urlencode(s)
-    return (s:gsub("([%c%s%%|])", function(c)
-        return ("%%%02X"):format(c:byte())
-    end))
+    --: (string) -> string
+    local function repl(c)
+        return ("%%%02X"):format(c:byte() or 0)
+    end
+    local out = s:gsub("([%c%s%%|])", repl)
+    return out
 end
 
+--: (string) -> string
 local function urldecode(s)
-    return (s:gsub("%%(%x%x)", function(h)
-        return string.char(tonumber(h, 16))
-    end))
+    --: (string) -> string
+    local function repl(h)
+        return string.char(tonumber(h, 16) or 0)
+    end
+    local out = s:gsub("%%(%x%x)", repl)
+    return out
 end
 
 -- ── Pipe protocol ────────────────────────────────────────────────────────────

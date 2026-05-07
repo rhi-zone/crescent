@@ -3897,7 +3897,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
     local intern_new = require("lib.type.static.intern").new
     pool = pool or intern_new()
 
-    local scope = parent_scope or env_mod.new(0)
+    local scope = parent_scope or env_mod.new(0) --[[: Scope]]
     local ctx = types_mod.new_ctx(pool)
     ctx.scope              = scope
     ctx.ann                = nil

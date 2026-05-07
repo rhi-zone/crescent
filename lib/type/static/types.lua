@@ -146,6 +146,8 @@ end
 
 -- Create a new checker context.
 -- pool: shared intern pool (from parse result)
+-- Returns a partially-initialized Ctx; remaining fields populated by constrain.M.generate.
+--: (InternPool) -> Ctx
 function M.new_ctx(pool)
     local types  = arena_mod.new_type_arena(512)
     local fields = arena_mod.new_field_arena(256)
@@ -193,7 +195,7 @@ function M.new_ctx(pool)
         _ann_warn_line = 0,
         _ann_consumed  = {},
     }
-    return ctx
+    return ctx --[[: any]]
 end
 
 -- Allocate and zero-initialize a TypeSlot. Returns type_id.
@@ -258,7 +260,7 @@ end
 -- Make a literal type.
 -- kind: LIT_STRING/LIT_NUMBER/LIT_BOOLEAN/LIT_NIL
 -- val: intern_id (for string) or 1/0 (for boolean) or double (for number)
---: (Ctx, integer, integer | nil) -> integer
+--: (Ctx, integer, number | nil) -> integer
 function M.make_literal(ctx, kind, val)
     -- Intern literals so the same value always maps to the same type_id.
     -- This prevents union dedup from missing duplicate literal members.

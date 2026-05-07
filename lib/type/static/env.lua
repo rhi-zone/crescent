@@ -21,6 +21,7 @@ local band             = bit.band
 local M = {}
 
 -- Create a root scope at the given level.
+--: (integer | nil) -> Scope
 function M.new(level)
     return {
         bindings         = {},  -- [name_id] -> type_id
@@ -28,10 +29,12 @@ function M.new(level)
         annotation_types = {},  -- [name_id] -> type_id (declared annotation, permanent type for variable)
         parent           = nil,
         level            = level or 0,
+        narrowed_names   = nil,
     }
 end
 
 -- Create a child scope inheriting from parent.
+--: (Scope) -> Scope
 function M.child(parent)
     return {
         bindings         = {},
@@ -39,6 +42,7 @@ function M.child(parent)
         annotation_types = {},
         parent           = parent,
         level            = parent.level + 1,
+        narrowed_names   = nil,
     }
 end
 
