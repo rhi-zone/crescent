@@ -477,7 +477,10 @@ function M.make(opts)
 					local stored = index_obj:get_grants(iapp_id)
 					local undecided = {}
 					for cname, decl in pairs(cap_decls) do
-						local required = type(decl) ~= "table" or decl.required ~= false
+						local required = true
+						if type(decl) == "table" then
+							required = (decl --[[:! { required: boolean | nil, ... }]]).required ~= false
+						end
 						if required and stored[cname] == nil then
 							undecided[#undecided + 1] = cname
 						end
@@ -834,8 +837,13 @@ function M.make(opts)
 		local rows_html = {}
 		for _, cname in ipairs(cap_names) do
 			local decl = cap_decls[cname]
-			local cap_type = type(decl) == "table" and (decl.type or cname) or cname
-			local required = type(decl) ~= "table" or decl.required ~= false
+			local cap_type = cname --: string
+			local required = true
+			if type(decl) == "table" then
+				local d = decl --[[:! { type: string | nil, required: boolean | nil, ... }]]
+				cap_type = d.type or cname
+				required = d.required ~= false
+			end
 			local req_label = required and "<span class=req>required</span>" or "<span class=opt>optional</span>"
 			-- Check admin policy: blocked caps show a "Blocked by admin policy" label
 			-- instead of grant radio buttons. The user is informed of the restriction
@@ -1416,7 +1424,7 @@ end
 			sid = presented
 			session_touch(presented, sess_rec)
 		elseif not is_launch_path then
-			sid = mint_session()
+			sid = mint_session() --[[:! string]]
 			minted = true
 		end
 

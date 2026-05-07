@@ -53,7 +53,7 @@ local function extract_card_meta(png_bytes)
 	local raw = png.get_text(chunks, "chara")
 	if not raw then return nil, "import: PNG has no 'chara' tEXt chunk" end
 
-	local decoded, b64err = base64.decode(raw)
+	local decoded, b64err = base64.decode(raw or "")
 	if not decoded then return nil, "import: chara base64 decode failed: " .. tostring(b64err) end
 
 	local decoded_s = decoded --[[: any]]
@@ -100,7 +100,7 @@ local function bundle_runtime(runtime_files, manifest)
 	local tardata, terr = tar.write(entries)
 	if not tardata then return nil, "import: tar write failed: " .. tostring(terr) end
 
-	local gz, cerr = compress.deflate(tardata --[[:! string]], { format = "gzip" --[[:! string]] })
+	local gz, cerr = compress.deflate(tardata --[[:! string]], { format = "gzip", level = nil })
 	if not gz then return nil, "import: gzip compress failed: " .. tostring(cerr) end
 
 	return base64.encode(gz --[[:! string]])
@@ -180,14 +180,16 @@ function M.import_card(opts)
 			-- resolve_fn: convert dot-separated module name to filename and look up.
 			-- e.g. "lib.reactive" → "lib/reactive.lua" (not in runtime_files, returns nil).
 			-- Files in runtime_files are stored by bare name (e.g. "dom.lua").
+			--: (mod_name: string) -> string | nil
 			local function resolve_fn(mod_name)
 				-- Try bare filename match: "lib.foo.bar" → "foo/bar.lua" (last segment path).
-				local as_file = mod_name:gsub("%.", "/") .. ".lua"
+				local as_file_g = mod_name:gsub("%.", "/")
+				local as_file = as_file_g .. ".lua"
 				-- Check if any runtime file matches the full slash path or just the name.
-				if rf_by_name[as_file] then return rf_by_name[as_file] end
+				if rf_by_name[as_file] then return rf_by_name[as_file] --[[:! string | nil]] end
 				-- Try just the basename: "lib.formats.ccv2.card" → "card.lua"
-				local basename = mod_name:match("([^.]+)$") .. ".lua"
-				if rf_by_name[basename] then return rf_by_name[basename] end
+				local basename = (mod_name:match("([^.]+)$") or "") .. ".lua"
+				if rf_by_name[basename] then return rf_by_name[basename] --[[:! string | nil]] end
 				-- Not in runtime_files — external dep, skip inlining.
 				return nil
 			end

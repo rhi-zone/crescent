@@ -254,7 +254,7 @@ end
 -- Keyed rate limiter: per-key instances of any algorithm.
 -- factory: one of M.token_bucket, M.sliding_window, etc.
 -- opts: shared options (clock, rate, etc.) passed to each new instance.
---: (factory: (opts: unknown) -> unknown, opts: unknown) -> KeyedLimiter
+--: <O>(factory: (opts: O) -> unknown, opts: O) -> KeyedLimiter
 function M.keyed(factory, opts)
   if not factory then return nil, "factory is required" end
   if not opts then return nil, "opts is required" end

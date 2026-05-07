@@ -11,7 +11,7 @@ ffi.cdef [[
   typedef unsigned long uLong;
   typedef unsigned int uInt;
   typedef unsigned char Byte;
-  typedef Byte *Bytef;
+  typedef Byte Bytef;
   typedef void *voidpf;
   typedef uLong uLongf;
 
@@ -84,7 +84,7 @@ local function load_zlib()
   for _, name in ipairs(names) do
     local ok, lib = pcall(ffi.load, name)
     if ok then
-      local typed = lib --[[: any]] --[[:! ZlibLib]]
+      local typed = lib --[[: any]]
       return typed, name
     end
   end
@@ -100,6 +100,8 @@ local Z_DEFLATED      = 8
 local Z_DEFAULT_STRATEGY = 0
 
 local CHUNK = 65536
+
+local u8_ptr = ffi.typeof("uint8_t *")
 
 local z_version = zlib.zlibVersion()
 local z_stream_size = ffi.sizeof("z_stream")
@@ -135,7 +137,7 @@ local function deflate(input, opts)
     format = "zlib"
   end
 
-  local src = ffi.cast("const Bytef *", input)
+  local src = ffi.cast(u8_ptr, input)
   local src_len = #input
 
   -- Use streaming API for format support (compress2 only does zlib)
@@ -154,7 +156,7 @@ local function deflate(input, opts)
   local buf = ffi.new("Byte[?]", CHUNK)
 
   repeat
-    strm.next_out = ffi.cast("Bytef *", buf)
+    strm.next_out = ffi.cast(u8_ptr, buf)
     strm.avail_out = CHUNK
     ret = zlib.deflate(strm, Z_FINISH)
     if ret ~= Z_OK and ret ~= Z_STREAM_END then
@@ -178,7 +180,7 @@ local function inflate(input, opts)
   local format --: string | nil
   if opts then format = opts.format or "zlib" else format = "zlib" end
 
-  local src = ffi.cast("const Bytef *", input)
+  local src = ffi.cast(u8_ptr, input)
   local src_len = #input
 
   local strm = ffi.new("z_stream")
@@ -195,7 +197,7 @@ local function inflate(input, opts)
   local buf = ffi.new("Byte[?]", CHUNK)
 
   repeat
-    strm.next_out = ffi.cast("Bytef *", buf)
+    strm.next_out = ffi.cast(u8_ptr, buf)
     strm.avail_out = CHUNK
     ret = zlib.inflate(strm, Z_NO_FLUSH)
     if ret ~= Z_OK and ret ~= Z_STREAM_END then
@@ -243,11 +245,11 @@ local function deflater(opts)
     --: (string) -> (boolean | nil, string | nil)
     push = function(chunk)
       if finished then return nil, "deflater already finished" end
-      local src = ffi.cast("const Bytef *", chunk)
+      local src = ffi.cast(u8_ptr, chunk)
       strm.next_in = src
       strm.avail_in = #chunk
       repeat
-        strm.next_out = ffi.cast("Bytef *", buf)
+        strm.next_out = ffi.cast(u8_ptr, buf)
         strm.avail_out = CHUNK
         ret = zlib.deflate(strm, Z_NO_FLUSH)
         if ret ~= Z_OK then
@@ -268,7 +270,7 @@ local function deflater(opts)
       strm.next_in = nil
       strm.avail_in = 0
       repeat
-        strm.next_out = ffi.cast("Bytef *", buf)
+        strm.next_out = ffi.cast(u8_ptr, buf)
         strm.avail_out = CHUNK
         ret = zlib.deflate(strm, Z_FINISH)
         if ret ~= Z_OK and ret ~= Z_STREAM_END then
@@ -308,11 +310,11 @@ local function inflater(opts)
     --: (string) -> (boolean | nil, string | nil)
     push = function(chunk)
       if finished then return nil, "inflater already finished" end
-      local src = ffi.cast("const Bytef *", chunk)
+      local src = ffi.cast(u8_ptr, chunk)
       strm.next_in = src
       strm.avail_in = #chunk
       repeat
-        strm.next_out = ffi.cast("Bytef *", buf)
+        strm.next_out = ffi.cast(u8_ptr, buf)
         strm.avail_out = CHUNK
         ret = zlib.inflate(strm, Z_NO_FLUSH)
         if ret == Z_STREAM_END then

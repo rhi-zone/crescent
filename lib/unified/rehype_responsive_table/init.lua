@@ -72,6 +72,7 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
+--: ({ use_transformer: (unknown) -> unknown, ... }, { class: string | nil, style: string | nil, tag: string | nil } | nil) -> nil
 local function rehype_responsive_table(processor, opts)
   local cls         = (opts and opts.class) or DEFAULT_CLASS
   local style       = (opts and opts.style) or DEFAULT_STYLE

@@ -41,12 +41,16 @@ local function sink(v) _sink = _sink + (v or 0) end
 -- identity; if a second distinct closure object runs the same fold loop, the
 -- guard fails and JIT falls back to interpreter. Sharing one object across all
 -- cases that perform the same operation avoids this.
-local fn_double   = function(v) return v * 2 end
-local fn_odd      = function(v) return v % 2 == 1 end
-local fn_gt_N     = function(v) return v > N end
-local fn_add      = function(a, v) return a + v end
+--: (unknown) -> number
+local fn_double   = function(v) return (v --[[:! number]]) * 2 end
+--: (unknown) -> boolean
+local fn_odd      = function(v) return (v --[[:! number]]) % 2 == 1 end
+--: (unknown) -> boolean
+local fn_gt_N     = function(v) return (v --[[:! number]]) > N end
+--: (unknown, unknown) -> number
+local fn_add      = function(a, v) return (a --[[:! number]]) + (v --[[:! number]]) end
 
-local cases = {}
+local cases = {} --: { [integer]: { name: string, fn: () -> nil } }
 
 -- map: multiply each element by 2, sum result
 cases[#cases+1] = {

@@ -172,7 +172,7 @@ function M.load_all(kv)
 end
 
 --- Save or update a preset. If a preset with the same name exists, it is replaced.
---: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string, string, { name: string, ... }) -> (true | nil, string | nil)
+--: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string, string, { name: string, ... }) -> (boolean | nil, string | nil)
 function M.save(kv, ptype, name, preset)
 	local ok, err = validate_type(ptype)
 	if not ok then return nil, err end
@@ -204,7 +204,7 @@ function M.save(kv, ptype, name, preset)
 end
 
 --- Delete a preset by name.
---: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string, string) -> (true | nil, string | nil)
+--: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string, string) -> (boolean | nil, string | nil)
 function M.delete(kv, ptype, name)
 	local ok, err = validate_type(ptype)
 	if not ok then return nil, err end
@@ -252,7 +252,7 @@ function M.get_active(kv, ptype)
 
 	-- Active name set but preset not found — check defaults.
 	local defaults = M.get_defaults()
-	local default_list = defaults[ptype .. "s"]
+	local default_list = defaults[ptype .. "s"] --[[:! { [integer]: { name: string, ... } }]]
 	for i = 1, #default_list do
 		if default_list[i].name == name then return default_list[i] end
 	end
@@ -261,7 +261,7 @@ function M.get_active(kv, ptype)
 end
 
 --- Set the active preset by name.
---: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string, string) -> (true | nil, string | nil)
+--: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string, string) -> (boolean | nil, string | nil)
 function M.set_active(kv, ptype, name)
 	local ok, err = validate_type(ptype)
 	if not ok then return nil, err end
@@ -278,7 +278,7 @@ function M.set_active(kv, ptype, name)
 	if not found then
 		-- Check defaults.
 		local defaults = M.get_defaults()
-		local default_list = defaults[ptype .. "s"]
+		local default_list = defaults[ptype .. "s"] --[[:! { [integer]: { name: string, ... } }]]
 		for i = 1, #default_list do
 			if default_list[i].name == name then found = true; break end
 		end
@@ -294,7 +294,8 @@ end
 --- Export a preset to a JSON string.
 --: ({ name: string, ... }) -> string
 function M.export_preset(preset)
-	return json.encode(preset)
+	local s = json.encode(preset)
+	return s --[[:! string]]
 end
 
 --- Import a preset from a JSON string.

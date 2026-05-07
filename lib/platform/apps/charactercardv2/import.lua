@@ -30,9 +30,11 @@ local function json_err(res, status, msg)
 	return true
 end
 
+--: (result: { lorebook: unknown, ... }) -> integer
 local function lorebook_count(result)
-	if not result.lorebook then return 0 end
-	return #result.lorebook
+	local lb = result.lorebook
+	if not lb then return 0 end
+	return #(lb --[[:! { [integer]: unknown }]])
 end
 
 -- ── Endpoints ───────────────────────────────────────────────────────────────
@@ -43,9 +45,10 @@ local function api_import_png(_caps, req, res)
 	end
 	local result, err = import.from_png(req.body)
 	if not result then
-		return json_err(res, 422, err)
+		return json_err(res, 422, err or "import failed")
 	end
-	return json_ok(res, { card = result.card, lorebook_count = lorebook_count(result) })
+	local result_t = result --[[:! { card: unknown, lorebook: unknown }]]
+	return json_ok(res, { card = result_t.card, lorebook_count = lorebook_count(result_t) })
 end
 
 local function api_import_json(_caps, req, res)
@@ -54,9 +57,10 @@ local function api_import_json(_caps, req, res)
 	end
 	local result, err = import.from_json(req.body)
 	if not result then
-		return json_err(res, 422, err)
+		return json_err(res, 422, err or "import failed")
 	end
-	return json_ok(res, { card = result.card, lorebook_count = lorebook_count(result) })
+	local result_t = result --[[:! { card: unknown, lorebook: unknown }]]
+	return json_ok(res, { card = result_t.card, lorebook_count = lorebook_count(result_t) })
 end
 
 -- ── Router ──────────────────────────────────────────────────────────────────

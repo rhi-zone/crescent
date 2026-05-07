@@ -703,7 +703,7 @@ local function handle_api(state, req, res)
 	-- GET /api/cap_info?alias=<alias_id>&action=<action_index>
 	if path == "/api/cap_info" or path:sub(1, 14) == "/api/cap_info?" then
 		local raw_qs = req.query
-		local qs --: { [string]: string }
+		local qs --: { [string]: string } | nil
 		if type(raw_qs) == "table" then
 			qs = raw_qs
 		else
@@ -776,7 +776,7 @@ local function handle_api(state, req, res)
 
 	if path == "/api/search" or path:sub(1, 12) == "/api/search?" then
 		local raw_qs = req.query
-		local qs --: { [string]: string }
+		local qs --: { [string]: string } | nil
 		if type(raw_qs) == "table" then
 			qs = raw_qs
 		else

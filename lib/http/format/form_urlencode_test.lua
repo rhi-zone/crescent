@@ -1,5 +1,6 @@
 local form = require("lib.http.format.form_urlencode")
 
+--: (unknown, unknown, string) -> nil
 local function assert_eq(a, b, msg)
 	if a ~= b then error(msg .. ": expected " .. tostring(b) .. ", got " .. tostring(a), 2) end
 end

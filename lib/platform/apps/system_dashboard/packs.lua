@@ -19,7 +19,7 @@ local M = {}
 
 -- Validate a single cap decl table.
 -- Returns true on success, or nil, errmsg on failure.
---: (unknown, string) -> (true | nil, string | nil)
+--: (unknown, string) -> (boolean | nil, string | nil)
 local function validate_cap_decl(decl, ctx)
 	if type(decl) ~= "table" then
 		return nil, ctx .. ": decl must be a table"
@@ -33,7 +33,7 @@ end
 
 -- Validate pack-level caps table.
 -- Returns true on success, or nil, errmsg on failure.
---: (unknown, string) -> (true | nil, string | nil)
+--: (unknown, string) -> (boolean | nil, string | nil)
 local function validate_pack_caps(pack_caps, pack_name)
 	if pack_caps == nil then return true end
 	if type(pack_caps) ~= "table" then
@@ -64,7 +64,7 @@ end
 
 -- Validate cap declarations and exec field on an action, after pack-level
 -- caps have been merged in. Returns true on success, or nil, errmsg.
---: (unknown, { [string]: any }, string, integer) -> (true | nil, string | nil)
+--: (unknown, { [string]: any }, string, integer) -> (boolean | nil, string | nil)
 local function validate_action(action, effective_caps, alias_id, action_idx)
 	local action_t = --[[:! { exec: any, ... }]] action
 	-- An action may declare no caps inline; effective_caps may still be empty
@@ -115,6 +115,7 @@ end
 -- Flatten a pack table into (aliases[], pack_meta).
 -- Each alias gets .pack_name set to the pack's name field.
 -- warn_fn(msg), if provided, is called for each skipped invalid action.
+--: (pack: unknown, pack_name: string, warn_fn: ((msg: string) -> nil) | nil) -> ({ [integer]: unknown }, { name: string, description: string, author: string })
 local function flatten_pack(pack, pack_name, warn_fn)
 	local pack_t = pack --: any
 	local name = tostring(pack_t.name or pack_name)

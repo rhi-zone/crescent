@@ -226,7 +226,7 @@ encoder["nil"] = function (_) return "\246" end
 
 --[[@param ud userdata]]
 encoder.userdata = function (ud, opts)
-	local mt = debug.getmetatable(ud) --[[: any]]
+	local mt = debug.getmetatable(ud)
 	if mt then
 		local encode_ud = opts and opts[mt] or mt.__tocbor
 		if encode_ud then

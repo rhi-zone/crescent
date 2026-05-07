@@ -61,14 +61,17 @@ end
 
 -- to_text: recursively extract plain text from any nlcst node.
 -- Concatenates all TextNode values in tree order.
+--: ({ type: string, value?: string, children?: { [integer]: unknown }, ... }) -> string
 function M.to_text(node)
   if node.type == M.TEXT or node.type == M.SOURCE then
-    return node.value
+    return node.value or ""
   end
-  if node.children then
-    local parts = {}
-    for i = 1, #node.children do
-      parts[i] = M.to_text(node.children[i])
+  local children0 = node.children
+  if children0 ~= nil then
+    local children = children0 --[[:! { [integer]: unknown }]]
+    local parts = {} --: { [integer]: string }
+    for i = 1, #children do
+      parts[i] = M.to_text(children[i] --[[:! { type: string, value?: string, children?: { [integer]: unknown }, ... }]])
     end
     return table.concat(parts)
   end

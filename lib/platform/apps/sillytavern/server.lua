@@ -91,7 +91,7 @@ local function plain(res, status, body)
 	res.body = body
 end
 
---: (http_res, unknown) -> true
+--: (http_res, unknown) -> boolean
 local function json_ok(res, data)
 	res.status = 200
 	res.headers["Content-Type"] = { "application/json" }

@@ -38,6 +38,7 @@ local path_util = require("lib.platform.path_util")
 local M = {}
 
 -- iTXt helpers now live in lib/png. Alias for local use.
+--: (chunks: { [integer]: { type: string, data: string, ... } }, keyword: string) -> string | nil
 local get_itxt = png.get_itxt
 
 -- unpack_tarball(tardata) -> entries | nil, err
@@ -56,16 +57,16 @@ local function load_tarball_from_png(path, bytes)
 	local chunks, perr = png.read(bytes)
 	if not chunks then return nil, "platform: PNG parse failed: " .. tostring(perr) end
 
-	local raw = get_itxt(chunks, "lua")
-	if not raw then return nil, "platform: PNG has no 'lua' iTXt chunk" end
+	local raw = get_itxt(chunks --[[:! { [integer]: { type: string, data: string, ... } }]], "lua")
+	if raw == nil then return nil, "platform: PNG has no 'lua' iTXt chunk" end
 
 	local gz, berr = base64.decode(raw)
-	if not gz then return nil, "platform: base64 decode failed: " .. tostring(berr) end
+	if gz == nil then return nil, "platform: base64 decode failed: " .. tostring(berr) end
 
-	local tardata, cerr = compress.inflate(gz, { format = "gzip" })
+	local tardata, cerr = compress.inflate(gz or "", { format = "gzip" })
 	if not tardata then return nil, "platform: gzip decompress failed: " .. tostring(cerr) end
 
-	local entries, terr = unpack_tarball(tardata)
+	local entries, terr = unpack_tarball(tardata --[[:! string]])
 	if not entries then return nil, "platform: tar unpack failed: " .. tostring(terr) end
 
 	return entries, chunks
@@ -76,7 +77,7 @@ end
 local function load_tarball_from_targz(bytes)
 	local tardata, cerr = compress.inflate(bytes, { format = "gzip" })
 	if not tardata then return nil, "platform: gzip decompress failed: " .. tostring(cerr) end
-	return unpack_tarball(tardata)
+	return unpack_tarball(tardata --[[:! string]])
 end
 
 -- load_app(path) -> app | nil, err

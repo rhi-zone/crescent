@@ -332,7 +332,7 @@ local function compile_tokens(template, otag, ctag)
         -- Set delimiter: {{=<% %>=}}
         local inner = content:sub(2) -- remove leading =
         if inner:sub(-1) == "=" then
-          inner = (inner:sub(1, -2)) --[[: string]]
+          inner = inner:sub(1, -2)
         end
         local new_otag, new_ctag = inner:match("^%s*(%S+)%s+(%S+)%s*$")
         if not new_otag then

@@ -4,8 +4,8 @@ local vec = require("lib.vec")
 
 local M = {}
 
---:: Vec = { data: unknown, n: integer }
---:: KnnIndex = { _k: integer, _dist: (Vec, Vec) -> number, _points: { [integer]: unknown }, _n: integer, _dims: integer | nil }
+--:: Vec = { data?: unknown, n: integer, [integer]: number, ... }
+--:: KnnIndex = { _k: integer, _dist: (Vec, Vec) -> number, _points: { [integer]: unknown }, _n: integer, _dims: number | nil, ... }
 
 local index_mt = {}
 index_mt.__index = index_mt
@@ -31,7 +31,7 @@ local builtin_distances = {
   manhattan = dist_manhattan,
 }
 
---: (opts: ({ k: (number | nil), distance: string | (Vec, Vec) -> (number | nil) } | nil)) -> KnnIndex
+--: (opts: ({ k: (number | nil), distance: string | (Vec, Vec) -> (number | nil) } | nil)) -> (KnnIndex | nil, string | nil)
 function M.new(opts)
   opts = opts or {}
   local k = opts.k or 5

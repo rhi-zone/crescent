@@ -256,6 +256,7 @@ end
 
 -- get_itxt(chunks, keyword) -> string | nil
 -- Returns the text value of the first uncompressed iTXt chunk with the given keyword.
+--: (chunks: { [integer]: { type: string, data: string, ... } }, keyword: string) -> string | nil
 function M.get_itxt(chunks, keyword)
 	for _, chunk in ipairs(chunks) do
 		if chunk.type == "iTXt" then

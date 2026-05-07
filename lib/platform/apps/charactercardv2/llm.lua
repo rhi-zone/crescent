@@ -25,10 +25,10 @@ local M = {}
 -- opts.path: completions path (default "/v1/chat/completions")
 --: (http_client: any, opts: ({ model: (string | nil), path: (string | nil), api_key: (string | nil) } | nil)) -> any
 function M.create(http_client, opts)
-	opts = opts or {}
-	local model = opts.model or "default"
-	local path = opts.path or "/v1/chat/completions"
-	local api_key = opts.api_key
+	local opts_t = opts or { model = nil, path = nil, api_key = nil }
+	local model = opts_t.model or "default"
+	local path = opts_t.path or "/v1/chat/completions"
+	local api_key = opts_t.api_key
 
 	local llm = {}
 
@@ -51,7 +51,7 @@ function M.create(http_client, opts)
 			path = path,
 			headers = {
 				["Content-Type"] = "application/json",
-				["Authorization"] = api_key and ("Bearer " .. api_key) or nil,
+				["Authorization"] = (api_key ~= nil and api_key ~= "") and ("Bearer " .. (api_key --[[:! string]])) or nil,
 			},
 			body = body,
 		})
@@ -65,8 +65,9 @@ function M.create(http_client, opts)
 		if not ok or not data then
 			return nil, "llm: JSON decode failed"
 		end
+		local data_t = data --[[:! { choices: { [integer]: { message: { content: string | nil } | nil, delta: { content: string | nil } | nil } } | nil }]]
 
-		local choices = data.choices
+		local choices = data_t.choices
 		if not choices or not choices[1] then
 			return nil, "llm: no choices in response"
 		end
@@ -100,7 +101,8 @@ function M.create(http_client, opts)
 				if data == "[DONE]" then return end
 				local ok, event = pcall(json.decode, data)
 				if not ok or not event then return end
-				local choices = event.choices
+				local event_t = event --[[:! { choices: { [integer]: { delta: { content: string | nil } | nil } } | nil }]]
+				local choices = event_t.choices
 				if not choices or not choices[1] then return end
 				local delta = choices[1].delta
 				if delta and delta.content then
@@ -128,7 +130,7 @@ function M.create(http_client, opts)
 				path = path,
 				headers = {
 					["Content-Type"] = "application/json",
-					["Authorization"] = api_key and ("Bearer " .. api_key) or nil,
+					["Authorization"] = (api_key ~= nil and api_key ~= "") and ("Bearer " .. (api_key --[[:! string]])) or nil,
 				},
 				body = body,
 			}, on_chunk)
