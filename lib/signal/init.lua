@@ -18,8 +18,24 @@ pcall(ffi.cdef, [[
   int sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
 ]])
 
-local SIG_DFL = ffi.cast("sighandler_t", 0)
-local SIG_IGN = ffi.cast("sighandler_t", 1)
+-- Typechecker: declare C symbols via direct ffi.cdef call (only direct calls
+-- populate $FfiC). The pcall above guards against re-declaration at runtime
+-- when this module is loaded multiple times in the same process; the block
+-- below mirrors the same declarations in a form the typechecker recognizes.
+if false then
+  ffi.cdef([[
+    typedef void (*sighandler_t)(int);
+    sighandler_t signal(int signum, sighandler_t handler);
+    int kill(int pid, int sig);
+    int getpid(void);
+    int sigemptyset(sigset_t *set);
+    int sigaddset(sigset_t *set, int signum);
+    int sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
+  ]])
+end
+
+local SIG_DFL = ffi.cast("sighandler_t" --[[: any]], 0)
+local SIG_IGN = ffi.cast("sighandler_t" --[[: any]], 1)
 
 -- sigprocmask how constants
 local SIG_BLOCK   = 0
@@ -28,7 +44,7 @@ local SIG_UNBLOCK = 1
 local mod = {}
 
 -- Signal constants (Linux x86_64)
---: number
+--: integer
 mod.SIGHUP  = 1
 mod.SIGINT  = 2
 mod.SIGQUIT = 3
@@ -47,17 +63,17 @@ mod.SIGSTOP = 19
 mod.SIGTSTP = 20
 
 -- Store active callbacks to prevent GC
-local callbacks = {} --[[@type table<integer, ffi.cdata*>]]
+local callbacks = {} --: { [integer]: any }
 
 --- Install a Lua function as a signal handler.
---: (number, (number) -> nil) -> (boolean | nil, string | nil)
+--: (integer, (integer) -> nil) -> (boolean | nil, string | nil)
 function mod.handle(signum, fn)
   -- Free previous callback for this signal if any
   local prev = callbacks[signum]
-  local cb = ffi.cast("sighandler_t", fn)
+  local cb = ffi.cast("sighandler_t" --[[: any]], fn --[[: any]])
   callbacks[signum] = cb
   local ret = ffi.C.signal(signum, cb)
-  if ret == ffi.cast("sighandler_t", -1) then
+  if ret == ffi.cast("sighandler_t" --[[: any]], -1 --[[: any]]) then
     callbacks[signum] = prev
     return nil, "signal() failed"
   end
@@ -66,11 +82,11 @@ function mod.handle(signum, fn)
 end
 
 --- Ignore a signal.
---: (number) -> (boolean | nil, string | nil)
+--: (integer) -> (boolean | nil, string | nil)
 function mod.ignore(signum)
   local prev = callbacks[signum]
-  local ret = ffi.C.signal(signum, SIG_IGN)
-  if ret == ffi.cast("sighandler_t", -1) then
+  local ret = ffi.C.signal(signum, SIG_IGN --[[: any]])
+  if ret == ffi.cast("sighandler_t" --[[: any]], -1 --[[: any]]) then
     return nil, "signal() failed"
   end
   if prev then prev:free() end
@@ -79,11 +95,11 @@ function mod.ignore(signum)
 end
 
 --- Reset a signal to its default handler.
---: (number) -> (boolean | nil, string | nil)
+--: (integer) -> (boolean | nil, string | nil)
 function mod.default(signum)
   local prev = callbacks[signum]
-  local ret = ffi.C.signal(signum, SIG_DFL)
-  if ret == ffi.cast("sighandler_t", -1) then
+  local ret = ffi.C.signal(signum, SIG_DFL --[[: any]])
+  if ret == ffi.cast("sighandler_t" --[[: any]], -1 --[[: any]]) then
     return nil, "signal() failed"
   end
   if prev then prev:free() end
@@ -92,7 +108,7 @@ function mod.default(signum)
 end
 
 --- Send a signal to a process.
---: (number, number) -> (boolean | nil, string | nil)
+--: (integer, integer) -> (boolean | nil, string | nil)
 function mod.kill(pid, signum)
   local ret = ffi.C.kill(pid, signum)
   if ret ~= 0 then return nil, "kill() failed" end
@@ -100,13 +116,13 @@ function mod.kill(pid, signum)
 end
 
 --- Get the current process ID.
---: () -> number
+--: () -> integer
 function mod.getpid()
   return ffi.C.getpid()
 end
 
 --- Block a signal.
---: (number) -> (boolean | nil, string | nil)
+--: (integer) -> (boolean | nil, string | nil)
 function mod.block(signum)
   local set = ffi.new("sigset_t")
   ffi.C.sigemptyset(set)
@@ -117,7 +133,7 @@ function mod.block(signum)
 end
 
 --- Unblock a signal.
---: (number) -> (boolean | nil, string | nil)
+--: (integer) -> (boolean | nil, string | nil)
 function mod.unblock(signum)
   local set = ffi.new("sigset_t")
   ffi.C.sigemptyset(set)

@@ -3,7 +3,7 @@ local socket = require("lib.ljsocket")
 local tls = require("lib.tls")
 local format = require("lib.http.format")
 
---:: http_request = { method: string, host: string, port?: number, path: string, headers?: { [string]: { string } }, body?: string }
+--:: http_request = { method: string, host: string, port?: number, path: string, version?: string, headers?: { [string]: { string } }, body?: string }
 --:: http_response = { version: number, status: number, status_text: string, headers: { [string]: { string } }, body: string }
 
 local M = {}
@@ -13,23 +13,23 @@ local M = {}
 local function make_tls_hooks(client_tls, client)
 	client.on_connect = function(self, host, service)
 		if tls.connect_socket(client_tls, self.fd, host) < 0 then
-			return nil, ffi.string(tls.error(client_tls))
+			return nil, ffi.string(tls.error(client_tls) --[[: any]])
 		end
 		if tls.handshake(client_tls) < 0 then
-			return nil, ffi.string(tls.error(client_tls))
+			return nil, ffi.string(tls.error(client_tls) --[[: any]])
 		end
 		return true
 	end
 
 	client.on_send = function(self, data, flags)
 		local len = tls.write(client_tls, data, #data)
-		if len < 0 then return nil, ffi.string(tls.error(client_tls)) end
+		if len < 0 then return nil, ffi.string(tls.error(client_tls) --[[: any]]) end
 		return len
 	end
 
 	client.on_receive = function(self, buffer, max_size, flags)
 		local len = tls.read(client_tls, buffer, max_size)
-		if len < 0 then return nil, ffi.string(tls.error(client_tls)) end
+		if len < 0 then return nil, ffi.string(tls.error(client_tls) --[[: any]]) end
 		return ffi.string(buffer, len)
 	end
 end
@@ -46,14 +46,20 @@ local function tls_teardown(client_tls, tls_config)
 	tls.config_free(tls_config)
 end
 
+--: (req: http_request) -> nil
 local function add_default_headers(req)
-	req.headers = req.headers or {}
-	if not req.headers["Host"] then req.headers["Host"] = { req.host } end
-	if not req.headers["User-Agent"] then
-		req.headers["User-Agent"] = { "crescent/0.1" }
+	local headers = req.headers or {}
+	req.headers = headers
+	if not headers["Host"] then headers["Host"] = { req.host } end
+	if not headers["User-Agent"] then
+		headers["User-Agent"] = { "crescent/0.1" }
 	end
-	if req.body and #req.body > 0 and not req.headers["Content-Length"] then
-		req.headers["Content-Length"] = { tostring(#req.body) }
+	local body = req.body
+	if type(body) == "string" then
+		local body_str = body --: string
+		if #body_str > 0 and not headers["Content-Length"] then
+			headers["Content-Length"] = { tostring(#body_str) }
+		end
 	end
 end
 
@@ -62,8 +68,9 @@ end
 --: (http_request) -> (http_response | nil, string | nil)
 M.request = function(req)
 	req.body = req.body or ""
-	local client, err = socket.create("inet", "stream", "tcp")
-	if not client then return nil, err end
+	local client_, err = socket.create("inet", "stream", "tcp")
+	if not client_ then return nil, err end
+	local client = client_ --[[: any]]
 
 	local client_tls, tls_config = tls_setup()
 	make_tls_hooks(client_tls, client)
@@ -85,8 +92,7 @@ M.request = function(req)
 	end
 
 	-- read response headers
-	--: string[]
-	local parts = {}
+	local parts = {} --: { [integer]: string }
 	local header_end
 	while not header_end do
 		local s
@@ -102,8 +108,8 @@ M.request = function(req)
 		if header_end then parts = { combined } end
 	end
 
-	local data = parts[1]
-	local res, _, parse_err = format.parse_response(data)
+	local data = parts[1] --[[:! string]]
+	local res, _, parse_err = (format.parse_response --[[:! (s: string, i: integer | nil) -> (any, integer | nil, string | nil)]])(data)
 	if not res then
 		tls_teardown(client_tls, tls_config)
 		client:close()
@@ -126,7 +132,7 @@ M.request = function(req)
 			end
 			if #parts > 1 then
 				data = table.concat(parts)
-				res = format.parse_response(data)
+				res = (format.parse_response --[[:! (s: string, i: integer | nil) -> (any, integer | nil, string | nil)]])(data)
 			end
 		end
 	end
@@ -143,11 +149,12 @@ end
 --   recv_fn() -> string?, string? — yields chunks; nil signals end or error.
 --   close_fn() -> nil             — releases TLS and socket resources.
 -- On failure: returns (nil, errmsg).
---: (http_request) -> ((() -> string | nil, string | nil) | nil, (() -> nil) | nil) | (nil, string | nil)
+--: (req: http_request) -> ((() -> (string | nil, string | nil)) | nil, (() -> nil) | string | nil)
 M.stream = function(req)
 	req.body = req.body or ""
-	local client, err = socket.create("inet", "stream", "tcp")
-	if not client then return nil, err end
+	local client_, err = socket.create("inet", "stream", "tcp")
+	if not client_ then return nil, err end
+	local client = client_ --[[: any]]
 
 	local client_tls, tls_config = tls_setup()
 	make_tls_hooks(client_tls, client)

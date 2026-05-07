@@ -11,6 +11,7 @@ local Monoid    = require("lib.fp.monoid")
 local Max  -- forward declaration
 
 local sg_impl = {
+	--: (a: { value: number, ... }, b: { value: number, ... }) -> { value: number, ... }
 	append = function(a, b)
 		return Max(a.value >= b.value and a.value or b.value)
 	end,

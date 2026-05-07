@@ -17,7 +17,7 @@ end
 local Bifunctor = {}
 
 -- A fresh table used purely as an identity token for dispatch.
-Bifunctor.key = {} --: BifunctorKey
+Bifunctor.key = ({} --[[: any]]) --[[:! BifunctorKey]]
 
 local function id(x) return x end
 

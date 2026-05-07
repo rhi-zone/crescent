@@ -26,7 +26,8 @@ end
 
 local M = {}
 
---:: Promise = { _state: integer, _value: unknown, _reason: unknown, _handlers: { [integer]: unknown } }
+--:: PromiseHandler = { [integer]: any }
+--:: Promise = { _state: string, _value: unknown, _reason: unknown, _handlers: { [integer]: PromiseHandler }, and_then: (self: Promise, on_fulfilled: ((value: unknown) -> unknown) | nil) -> Promise, catch: (self: Promise, on_rejected: ((reason: unknown) -> unknown) | nil) -> Promise, finally: (self: Promise, on_settled: () -> ()) -> Promise, await: (self: Promise) -> (unknown, string | nil), state: (self: Promise) -> string, value: (self: Promise) -> unknown, reason: (self: Promise) -> unknown }
 
 local STATE_PENDING   = "pending"
 local STATE_FULFILLED = "fulfilled"
@@ -36,12 +37,12 @@ local STATE_REJECTED  = "rejected"
 local Promise = {}
 Promise.__index = Promise
 
---: (self: Promise) -> "pending" | "fulfilled" | "rejected"
+--: (self: Promise) -> string
 function Promise:state()
 	return self._state
 end
 
---: (self: Promise) -> unknown | nil
+--: (self: Promise) -> unknown
 function Promise:value()
 	if self._state == STATE_FULFILLED then
 		return self._value
@@ -49,7 +50,7 @@ function Promise:value()
 	return nil
 end
 
---: (self: Promise) -> unknown | nil
+--: (self: Promise) -> unknown
 function Promise:reason()
 	if self._state == STATE_REJECTED then
 		return self._reason
@@ -58,6 +59,7 @@ function Promise:reason()
 end
 
 -- Internal: create a raw promise object (no executor).
+--: () -> Promise
 local function make_promise()
 	local p = setmetatable({
 		_state = STATE_PENDING,
@@ -65,10 +67,11 @@ local function make_promise()
 		_reason = nil,
 		_handlers = {},  -- list of {on_fulfilled, on_rejected, child_resolve, child_reject}
 	}, Promise)
-	return p
+	return p --[[:! Promise]]
 end
 
 -- Internal: resolve a promise. If value is itself a promise, adopt its state.
+--: (p: Promise, value: unknown) -> nil
 local function resolve_promise(p, value)
 	if p._state ~= STATE_PENDING then return end
 	-- If value is a promise, adopt its state
@@ -106,11 +109,12 @@ local function resolve_promise(p, value)
 			child_resolve(value)
 		end
 	end
-	p._handlers = nil
+	p._handlers = {}
 end
 
 -- Internal: reject a promise.
 -- Forward declaration used by resolve_promise.
+--: (p: Promise, reason: unknown) -> nil
 function reject_promise(p, reason) -- luacheck: ignore 111
 	if p._state ~= STATE_PENDING then return end
 	p._state = STATE_REJECTED
@@ -132,11 +136,11 @@ function reject_promise(p, reason) -- luacheck: ignore 111
 			child_reject(reason)
 		end
 	end
-	p._handlers = nil
+	p._handlers = {}
 end
 
 --- Chain a fulfillment handler. Returns a new promise.
---: (self: Promise, on_fulfilled: (value: unknown) -> unknown) -> Promise
+--: (self: Promise, on_fulfilled: ((value: unknown) -> unknown) | nil) -> Promise
 function Promise:and_then(on_fulfilled)
 	local child = make_promise()
 	local function child_resolve(v) resolve_promise(child, v) end
@@ -146,7 +150,7 @@ function Promise:and_then(on_fulfilled)
 		if on_fulfilled then
 			local ok, result = pcall(on_fulfilled, self._value)
 			if ok then
-				resolve_promise(child, --[[: any]] result)
+				resolve_promise(child, result)
 			else
 				reject_promise(child, result)
 			end
@@ -162,7 +166,7 @@ function Promise:and_then(on_fulfilled)
 end
 
 --- Chain a rejection handler. Returns a new promise.
---: (self: Promise, on_rejected: (reason: unknown) -> unknown) -> Promise
+--: (self: Promise, on_rejected: ((reason: unknown) -> unknown) | nil) -> Promise
 function Promise:catch(on_rejected)
 	local child = make_promise()
 	local function child_resolve(v) resolve_promise(child, v) end
@@ -172,7 +176,7 @@ function Promise:catch(on_rejected)
 		if on_rejected then
 			local ok, result = pcall(on_rejected, self._reason)
 			if ok then
-				resolve_promise(child, --[[: any]] result)
+				resolve_promise(child, result)
 			else
 				reject_promise(child, result)
 			end
@@ -220,8 +224,8 @@ end
 --: (executor: (resolve: (value: unknown) -> (), reject: (reason: unknown) -> ()) -> ()) -> Promise
 function M.new(executor)
 	local p = make_promise()
-	local function res(v) resolve_promise(p, --[[: any]] v) end
-	local function rej(r) reject_promise(p, --[[: any]] r) end
+	local function res(v) resolve_promise(p, v) end
+	local function rej(r) reject_promise(p, r) end
 	local ok, err = pcall(executor, res, rej)
 	if not ok then
 		reject_promise(p, err)
@@ -233,7 +237,7 @@ end
 --: (value: unknown) -> Promise
 function M.resolve(value)
 	local p = make_promise()
-	resolve_promise(p, --[[: any]] value)
+	resolve_promise(p, value)
 	return p
 end
 
@@ -241,7 +245,7 @@ end
 --: (reason: unknown) -> Promise
 function M.reject(reason)
 	local p = make_promise()
-	reject_promise(p, --[[: any]] reason)
+	reject_promise(p, reason)
 	return p
 end
 
@@ -277,7 +281,7 @@ end
 --- Resolves or rejects with the first settled promise.
 --: (promises: {Promise}) -> Promise
 function M.race(promises)
-	if #promises == 0 then return M.new(function() end) end
+	if #promises == 0 then return M.new(function(_resolve, _reject) end) end
 	return M.new(function(resolve, reject)
 		local settled = false
 		for i = 1, #promises do
@@ -298,16 +302,16 @@ end
 --: (promises: {Promise}) -> Promise
 function M.all_settled(promises)
 	if #promises == 0 then return M.resolve({}) end
-	return M.new(function(resolve)
-		local results = {}
+	return M.new(function(resolve, _reject)
+		local results = {} --: { [integer]: { status: string, value: unknown, reason: unknown } }
 		local remaining = #promises
 		for i = 1, #promises do
 			promises[i]:and_then(function(value)
-				results[i] = { status = STATE_FULFILLED, value = value }
+				results[i] = { status = STATE_FULFILLED, value = value, reason = nil }
 				remaining = remaining - 1
 				if remaining == 0 then resolve(results) end
 			end):catch(function(reason)
-				results[i] = { status = STATE_REJECTED, reason = reason }
+				results[i] = { status = STATE_REJECTED, value = nil, reason = reason }
 				remaining = remaining - 1
 				if remaining == 0 then resolve(results) end
 			end)

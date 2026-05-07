@@ -10,7 +10,7 @@ end
 local Semigroup = {}
 
 -- A fresh table used purely as an identity token for dispatch.
-Semigroup.key = {} --: SemigroupKey
+Semigroup.key = ({} --[[: any]]) --[[:! SemigroupKey]]
 
 -- append: combine two semigroup values
 function Semigroup.append(a, b)

@@ -13,7 +13,7 @@ end
 local Applicable = {}
 
 -- A fresh table used purely as an identity token for dispatch.
-Applicable.key = {} --: ApplicableKey
+Applicable.key = ({} --[[: any]]) --[[:! ApplicableKey]]
 
 -- ap: apply a wrapped function to a wrapped value
 function Applicable.ap(ff, fa)

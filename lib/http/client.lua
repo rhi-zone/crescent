@@ -35,8 +35,9 @@ mod.send_async = function (req, cb, ep)
 	local is_owner = not ep
 	ep = ep or epoll_mod.new()
 
-	local client, err = socket.create("inet", "stream", "tcp")
-	if not client then cb(nil, err); return end
+	local client_, err = socket.create("inet", "stream", "tcp")
+	if not client_ then cb(nil, err); return end
+	local client = client_ --[[: any]]
 
 	local ok
 	ok, err = client:set_blocking(false)

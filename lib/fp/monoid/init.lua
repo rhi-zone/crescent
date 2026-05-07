@@ -12,7 +12,7 @@ local Semigroup = require("lib.fp.semigroup")
 local Monoid = {}
 
 -- A fresh table used purely as an identity token for dispatch.
-Monoid.key = {} --: MonoidKey
+Monoid.key = ({} --[[: any]]) --[[:! MonoidKey]]
 
 -- empty: return the identity element for the monoid instance of `a`
 function Monoid.empty(a)

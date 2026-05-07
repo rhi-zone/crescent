@@ -15,10 +15,23 @@ local mod = {}
 --:: ai_message = { role: "system" | "user" | "assistant" | "tool", content: string, tool_call_id?: string, name?: string }
 --:: ai_tool = { name: string, description: string, parameters: { [string]: unknown } }
 --:: ai_tool_call = { id: string, name: string, arguments: { [string]: unknown } }
---:: ai_http_client = { request: (req: unknown) -> (unknown, string | nil), stream: (req: unknown) -> ((() -> string | nil, string | nil) | nil, (() -> nil) | string | nil) }
+--:: ai_http_response = { status: integer | nil, body: string | nil, headers?: { [string]: { string } } }
+--:: ai_http_client = { request: (req: unknown) -> (ai_http_response | nil, string | nil), stream: (req: unknown) -> ((() -> string | nil, string | nil) | nil, (() -> nil) | string | nil) }
 --:: ai_request = { model: string, messages: ai_message[], max_tokens?: integer, temperature?: number, tools?: ai_tool[], stream?: boolean, provider?: ai_provider, http_client?: ai_http_client, api_key?: string }
 --:: ai_response = { text: string | nil, tool_calls: ai_tool_call[] | nil, finish_reason: string, usage: { input_tokens: integer, output_tokens: integer } | nil }
---:: ai_delta = { text: string | nil, tool_call: ai_tool_call | nil, finish_reason: string | nil, usage: { input_tokens: integer, output_tokens: integer } | nil }
+--:: ai_delta = { text?: string | nil, tool_call?: ai_tool_call | nil, finish_reason?: string | nil, usage?: { input_tokens: integer, output_tokens: integer } | nil }
+--:: openai_tool_call_in = { id?: string, function?: { name?: string, arguments?: string } }
+--:: openai_message_in = { content?: string, tool_calls?: Arr<openai_tool_call_in> }
+--:: openai_choice_in = { message?: openai_message_in, finish_reason?: string }
+--:: openai_chat_response = { error?: { message?: string }, choices?: Arr<openai_choice_in>, usage?: { prompt_tokens: integer, completion_tokens: integer } }
+--:: openai_stream_tc = { index?: integer, id?: string, function?: { name?: string, arguments?: string } }
+--:: openai_stream_choice = { delta?: { content?: string, tool_calls?: Arr<openai_stream_tc> }, finish_reason?: string }
+--:: openai_stream_chunk = { choices?: Arr<openai_stream_choice> }
+--:: openai_embed_item = { embedding: Arr<number>, index?: integer }
+--:: openai_embed_response = { error?: { message?: string }, data?: Arr<openai_embed_item>, usage?: { prompt_tokens?: integer, total_tokens?: integer } }
+--:: openai_image_item = { url?: string, b64_json?: string }
+--:: openai_image_response = { error?: { message?: string }, data?: Arr<openai_image_item> }
+--:: http_stream_t = { read_headers: (self: unknown) -> (unknown, string | nil), status: (self: unknown) -> integer | nil, read_body: (self: unknown) -> (string | nil, string | nil), events: (self: unknown) -> () -> { event: string | nil, data: string, id: string | nil } | nil }
 --:: ai_embed_request = { model: string, value: string, provider?: ai_provider, http_client?: ai_http_client, api_key?: string }
 --:: ai_embed_many_request = { model: string, values: string[], provider?: ai_provider, http_client?: ai_http_client, api_key?: string }
 --:: ai_embed_response = { embedding: number[], usage: { input_tokens: integer } | nil }
@@ -51,7 +64,8 @@ end
 --: (ai_tool[] | nil) -> unknown
 local function convert_tools(tools)
 	if not tools then return nil end
-	if #tools == 0 then return nil end
+	local n = #tools
+	if n == 0 then return nil end
 	local result = {}
 	for i = 1, #tools do
 		local t = tools[i]
@@ -70,28 +84,37 @@ end
 --- Parse OpenAI chat response into neutral ai_response.
 --: (string) -> (ai_response | nil, string | nil)
 local function parse_chat_response(body)
-	local data, err = json.decode(body)
-	if not data then return nil, "json decode: " .. (err or "unknown") end
+	local raw, err = json.decode(body)
+	if not raw then return nil, "json decode: " .. (err or "unknown") end
+	local data = raw --[[:! openai_chat_response]]
 
 	if data.error then
-		return nil, data.error.message or json.encode(data.error)
+		return nil, data.error.message or json.encode(data.error) or "openai error"
 	end
 
-	local choices = data.choices
-	if not choices or #choices == 0 then return nil, "no choices in response" end
+	local choices_opt = data.choices
+	if not choices_opt then return nil, "no choices in response" end
+	local choices = choices_opt --[[:! Arr<openai_choice_in>]]
+	if #choices == 0 then return nil, "no choices in response" end
 	local choice = choices[1]
 	local msg = choice.message or {}
 
-	local tool_calls
-	if msg.tool_calls then
+	local tool_calls --: ai_tool_call[] | nil
+	local mtc_opt = msg.tool_calls
+	if mtc_opt then
+		local mtc = mtc_opt --[[:! Arr<openai_tool_call_in>]]
 		tool_calls = {}
-		for i = 1, #msg.tool_calls do
-			local tc = msg.tool_calls[i]
-			local args = tc["function"] and tc["function"].arguments
-			if type(args) == "string" then args = json.decode(args) or {} end
+		for i = 1, #mtc do
+			local tc = mtc[i]
+			local args_raw = tc["function"] and tc["function"].arguments
+			local args = {} --: { [string]: unknown }
+			if type(args_raw) == "string" then
+				local decoded = json.decode(args_raw)
+				args = (decoded --[[:! { [string]: unknown } | nil]]) or {}
+			end
 			tool_calls[i] = {
-				id = tc.id,
-				name = tc["function"] and tc["function"].name,
+				id = tc.id or "",
+				name = (tc["function"] and tc["function"].name) or "",
 				arguments = args,
 			}
 		end
@@ -126,6 +149,7 @@ mod.create = function(config)
 	local images_path = config.images_path or "/v1/images/generations"
 	local make_headers = config.make_headers or make_bearer_headers
 
+	--: (req: { api_key?: string, ... }) -> (string | nil, string | nil)
 	local function get_api_key(req)
 		local key = req and req.api_key
 		if not key then return nil, "api_key is required" end
@@ -149,25 +173,30 @@ mod.create = function(config)
 		local tools = convert_tools(req.tools)
 		if tools then body.tools = tools end
 
-		local body_str = json.encode(body)
+		local body_str_raw, body_err = json.encode(body)
+		if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
+		local body_str = body_str_raw --[[:! string]]
 
-		local http_client = req.http_client
-		if not http_client then return nil, "http_client is required" end
+		local http_client_opt = req.http_client
+		if not http_client_opt then return nil, "http_client is required" end
+		local http_client = http_client_opt --[[:! ai_http_client]]
 
-		local res
-		res, err = http_client.request({
+		local req_obj = {
 			host = host,
 			method = "POST",
 			path = chat_path,
 			headers = make_headers(api_key, body_str),
 			body = body_str,
-		})
-		if not res then return nil, err end
+		}
+		local res_raw
+		res_raw, err = http_client.request(req_obj)
+		if not res_raw then return nil, err end
+		local res = res_raw --[[:! ai_http_response]]
 		if res.status ~= 200 then
-			return nil, "HTTP " .. (res.status or "?") .. ": " .. (res.body or "")
+			return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
 		end
 
-		return parse_chat_response(res.body)
+		return parse_chat_response(res.body or "")
 	end
 
 	--: (ai_request) -> ((() -> ai_delta | nil) | nil, string | nil)
@@ -186,38 +215,47 @@ mod.create = function(config)
 		local tools = convert_tools(req.tools)
 		if tools then body.tools = tools end
 
-		local body_str = json.encode(body)
+		local body_str_raw, body_err = json.encode(body)
+		if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
+		local body_str = body_str_raw --[[:! string]]
 
-		local http_client = req.http_client
-		if not http_client then return nil, "http_client is required" end
+		local http_client_opt = req.http_client
+		if not http_client_opt then return nil, "http_client is required" end
+		local http_client = http_client_opt --[[:! ai_http_client]]
 
-		local recv_fn, close_fn = http_client.stream({
+		local stream_req = {
 			host = host,
 			method = "POST",
 			path = chat_path,
 			headers = make_headers(api_key, body_str),
 			body = body_str,
-		})
-		if not recv_fn then return nil, close_fn end
+		}
+		local recv_fn, close_fn = http_client.stream(stream_req)
+		if not recv_fn then
+			local err_msg = close_fn --[[:! string | nil]]
+			return nil, err_msg
+		end
+		local close_cb = close_fn --[[:! () -> nil]]
 
-		local s = stream_mod.new(recv_fn)
+		local s = stream_mod.new(recv_fn) --[[:! http_stream_t]]
 		local headers
 		headers, err = s:read_headers()
 		if not headers then
-			close_fn()
+			close_cb()
 			return nil, err
 		end
 
 		local status = s:status()
 		if status ~= 200 then
-			local body_text = s:read_body() or ""
-			close_fn()
-			return nil, "HTTP " .. (status or "?") .. ": " .. body_text
+			local body_text_raw = s:read_body()
+			local body_text = body_text_raw or ""
+			close_cb()
+			return nil, "HTTP " .. tostring(status or "?") .. ": " .. body_text
 		end
 
 		local events_iter = s:events()
 		local done = false
-		local tool_calls_acc = {}
+		local tool_calls_acc = {} --: Arr<{ id: string, name: string, arguments_parts: Arr<string> }>
 
 		return function()
 			if done then return nil end
@@ -225,22 +263,25 @@ mod.create = function(config)
 				local event = events_iter()
 				if not event then
 					done = true
-					close_fn()
+					close_cb()
 					return nil
 				end
 
 				local data = event.data
 				if data == "[DONE]" then
 					done = true
-					close_fn()
+					close_cb()
 					return nil
 				end
 
-				local chunk = json.decode(data)
-				if not chunk then goto continue end
+				local chunk_raw = json.decode(data)
+				if not chunk_raw then goto continue end
+				local chunk = chunk_raw --[[:! openai_stream_chunk]]
 
-				local choices = chunk.choices
-				if not choices or #choices == 0 then goto continue end
+				local choices_opt = chunk.choices
+				if not choices_opt then goto continue end
+				local choices = choices_opt --[[:! Arr<openai_stream_choice>]]
+				if #choices == 0 then goto continue end
 				local delta = choices[1].delta or {}
 				local finish = choices[1].finish_reason
 
@@ -248,19 +289,29 @@ mod.create = function(config)
 					return { text = delta.content }
 				end
 
-				if delta.tool_calls then
-					for i = 1, #delta.tool_calls do
-						local tc = delta.tool_calls[i]
+				local dtc_opt = delta.tool_calls
+				if dtc_opt then
+					local dtc = dtc_opt --[[:! Arr<openai_stream_tc>]]
+					for i = 1, #dtc do
+						local tc = dtc[i]
 						local idx = (tc.index or 0) + 1
 						if not tool_calls_acc[idx] then
 							tool_calls_acc[idx] = { id = "", name = "", arguments_parts = {} }
 						end
-						local acc = tool_calls_acc[idx]
+						local acc_opt = tool_calls_acc[idx]
+						local acc = acc_opt --[[:! { id: string, name: string, arguments_parts: Arr<string> }]]
 						if tc.id then acc.id = tc.id end
-						if tc["function"] then
-							if tc["function"].name then acc.name = tc["function"].name end
-							if tc["function"].arguments then
-								acc.arguments_parts[#acc.arguments_parts + 1] = tc["function"].arguments
+						local fn = tc["function"]
+						if fn then
+							local fn_name = fn.name
+							if fn_name ~= nil then
+								local nm = fn_name --[[:! string]]
+								acc.name = nm
+							end
+							local fn_args = fn.arguments
+							if fn_args ~= nil then
+								local fa = fn_args --[[:! string]]
+								acc.arguments_parts[#acc.arguments_parts + 1] = fa
 							end
 						end
 					end
@@ -272,11 +323,13 @@ mod.create = function(config)
 							local acc = tool_calls_acc[idx]
 							if acc then
 								local args_str = table.concat(acc.arguments_parts)
+								local args_decoded = json.decode(args_str)
+								local args = (args_decoded --[[:! { [string]: unknown } | nil]]) or {}
 								return {
 									tool_call = {
 										id = acc.id,
 										name = acc.name,
-										arguments = json.decode(args_str) or {},
+										arguments = args,
 									},
 								}
 							end
@@ -296,39 +349,47 @@ mod.create = function(config)
 		local api_key, err = get_api_key(req)
 		if not api_key then return nil, err end
 
-		local body_str = json.encode({
+		local body_str_raw, body_err = json.encode({
 			model = req.model,
 			input = req.value,
 		})
+		if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
+		local body_str = body_str_raw --[[:! string]]
 
-		local http_client = req.http_client
-		if not http_client then return nil, "http_client is required" end
+		local http_client_opt = req.http_client
+		if not http_client_opt then return nil, "http_client is required" end
+		local http_client = http_client_opt --[[:! ai_http_client]]
 
-		local res
-		res, err = http_client.request({
+		local req_obj = {
 			host = host,
 			method = "POST",
 			path = embeddings_path,
 			headers = make_headers(api_key, body_str),
 			body = body_str,
-		})
-		if not res then return nil, err end
+		}
+		local res_raw
+		res_raw, err = http_client.request(req_obj)
+		if not res_raw then return nil, err end
+		local res = res_raw --[[:! ai_http_response]]
 		if res.status ~= 200 then
-			return nil, "HTTP " .. (res.status or "?") .. ": " .. (res.body or "")
+			return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
 		end
 
-		local data
-		data, err = json.decode(res.body)
-		if not data then return nil, "json decode: " .. (err or "unknown") end
-		if data.error then return nil, data.error.message or json.encode(data.error) end
+		local data_raw
+		data_raw, err = json.decode(res.body or "")
+		if not data_raw then return nil, "json decode: " .. (err or "unknown") end
+		local data = data_raw --[[:! openai_embed_response]]
+		if data.error then return nil, data.error.message or json.encode(data.error) or "openai error" end
 
-		local items = data.data
-		if not items or #items == 0 then return nil, "no embeddings in response" end
+		local items_opt = data.data
+		if not items_opt then return nil, "no embeddings in response" end
+		local items = items_opt --[[:! Arr<openai_embed_item>]]
+		if #items == 0 then return nil, "no embeddings in response" end
 
 		return {
 			embedding = items[1].embedding,
 			usage = data.usage and {
-				input_tokens = data.usage.prompt_tokens or data.usage.total_tokens,
+				input_tokens = data.usage.prompt_tokens or data.usage.total_tokens or 0,
 			} or nil,
 		}
 	end
@@ -339,34 +400,41 @@ mod.create = function(config)
 		local api_key, err = get_api_key(req)
 		if not api_key then return nil, err end
 
-		local body_str = json.encode({
+		local body_str_raw, body_err = json.encode({
 			model = req.model,
 			input = req.values,
 		})
+		if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
+		local body_str = body_str_raw --[[:! string]]
 
-		local http_client = req.http_client
-		if not http_client then return nil, "http_client is required" end
+		local http_client_opt = req.http_client
+		if not http_client_opt then return nil, "http_client is required" end
+		local http_client = http_client_opt --[[:! ai_http_client]]
 
-		local res
-		res, err = http_client.request({
+		local req_obj = {
 			host = host,
 			method = "POST",
 			path = embeddings_path,
 			headers = make_headers(api_key, body_str),
 			body = body_str,
-		})
-		if not res then return nil, err end
+		}
+		local res_raw
+		res_raw, err = http_client.request(req_obj)
+		if not res_raw then return nil, err end
+		local res = res_raw --[[:! ai_http_response]]
 		if res.status ~= 200 then
-			return nil, "HTTP " .. (res.status or "?") .. ": " .. (res.body or "")
+			return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
 		end
 
-		local data
-		data, err = json.decode(res.body)
-		if not data then return nil, "json decode: " .. (err or "unknown") end
-		if data.error then return nil, data.error.message or json.encode(data.error) end
+		local data_raw
+		data_raw, err = json.decode(res.body or "")
+		if not data_raw then return nil, "json decode: " .. (err or "unknown") end
+		local data = data_raw --[[:! openai_embed_response]]
+		if data.error then return nil, data.error.message or json.encode(data.error) or "openai error" end
 
-		local items = data.data
-		if not items then return nil, "no embeddings in response" end
+		local items_opt = data.data
+		if not items_opt then return nil, "no embeddings in response" end
+		local items = items_opt --[[:! Arr<openai_embed_item>]]
 
 		-- sort by index to ensure correct order
 		local embeddings = {}
@@ -378,7 +446,7 @@ mod.create = function(config)
 		return {
 			embeddings = embeddings,
 			usage = data.usage and {
-				input_tokens = data.usage.prompt_tokens or data.usage.total_tokens,
+				input_tokens = data.usage.prompt_tokens or data.usage.total_tokens or 0,
 			} or nil,
 		}
 	end
@@ -397,28 +465,34 @@ mod.create = function(config)
 		}
 		if req.size then body.size = req.size end
 
-		local body_str = json.encode(body)
+		local body_str_raw, body_err = json.encode(body)
+		if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
+		local body_str = body_str_raw --[[:! string]]
 
-		local http_client = req.http_client
-		if not http_client then return nil, "http_client is required" end
+		local http_client_opt = req.http_client
+		if not http_client_opt then return nil, "http_client is required" end
+		local http_client = http_client_opt --[[:! ai_http_client]]
 
-		local res
-		res, err = http_client.request({
+		local req_obj = {
 			host = host,
 			method = "POST",
 			path = images_path,
 			headers = make_headers(api_key, body_str),
 			body = body_str,
-		})
-		if not res then return nil, err end
+		}
+		local res_raw
+		res_raw, err = http_client.request(req_obj)
+		if not res_raw then return nil, err end
+		local res = res_raw --[[:! ai_http_response]]
 		if res.status ~= 200 then
-			return nil, "HTTP " .. (res.status or "?") .. ": " .. (res.body or "")
+			return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
 		end
 
-		local data
-		data, err = json.decode(res.body)
-		if not data then return nil, "json decode: " .. (err or "unknown") end
-		if data.error then return nil, data.error.message or json.encode(data.error) end
+		local data_raw
+		data_raw, err = json.decode(res.body or "")
+		if not data_raw then return nil, "json decode: " .. (err or "unknown") end
+		local data = data_raw --[[:! openai_image_response]]
+		if data.error then return nil, data.error.message or json.encode(data.error) or "openai error" end
 
 		local images = {}
 		local items = data.data or {}

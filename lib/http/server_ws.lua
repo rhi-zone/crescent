@@ -51,7 +51,7 @@ mod.make_connection_handler = function (handler, epoll)
 		if (req.headers["upgrade"] or {})[1] == "websocket" then
 			--[[FIXME: api. the handler needs a persistent handle to the connection]]
 			local handler_any = handler_ --[[: any]]
-			local send, close = ws.websocket(client_, req, handler_any.ws, handler_any.ws_close, epoll)
+			local send, close = ws.websocket(client_ --[[: any]], req, handler_any.ws, handler_any.ws_close, epoll)
 			local ws_open_ = handler_.ws_open
 			if send and close and ws_open_ then
 				local ws_open_fn_ = ws_open_ --[[:! (WsSockClient, unknown, unknown) -> nil]]
@@ -78,7 +78,7 @@ mod.server = function (handler, port, epoll)
 	epoll = epoll or epoll_:new()
 	if type(handler) == "function" then handler = { http = handler } end
 	socket.server(mod.make_connection_handler(handler, epoll), port or 80, epoll)
-	if is_running then epoll:loop() end
+	if is_running then (epoll --[[: any]]):loop() end
 end
 
 return mod
