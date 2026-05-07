@@ -53,16 +53,19 @@ local function new_arena(ct, initial_cap)
     return arena
 end
 
+--: (integer | nil) -> ASTNodeArena
 function M.new_node_arena(initial_cap)
-    return new_arena(ffi.typeof("ASTNode"), initial_cap)
+    return new_arena(ffi.typeof("ASTNode"), initial_cap) --[[: ASTNodeArena]]
 end
 
+--: (integer | nil) -> TypeSlotArena
 function M.new_type_arena(initial_cap)
-    return new_arena(ffi.typeof("TypeSlot"), initial_cap)
+    return new_arena(ffi.typeof("TypeSlot"), initial_cap) --[[: TypeSlotArena]]
 end
 
+--: (integer | nil) -> FieldEntryArena
 function M.new_field_arena(initial_cap)
-    return new_arena(ffi.typeof("FieldEntry"), initial_cap)
+    return new_arena(ffi.typeof("FieldEntry"), initial_cap) --[[: FieldEntryArena]]
 end
 
 -- List pool: flat int32_t array for variable-length sequences.

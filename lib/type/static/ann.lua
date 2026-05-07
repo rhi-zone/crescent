@@ -34,16 +34,25 @@ local B_DOT   = 46
 local B_DOLLAR = 36
 local B_PERCENT = 37
 
+--: (integer | nil) -> boolean
 local function is_ident_start(b)
+    if b == nil then return false end
     return (b >= B_a and b <= B_z) or (b >= B_A and b <= B_Z) or b == B_UNDER
 end
 
+--: (integer | nil) -> boolean
 local function is_ident(b)
-    return is_ident_start(b) or (b >= B_0 and b <= B_9)
+    if b == nil then return false end
+    if is_ident_start(b) then return true end
+    if b >= B_0 and b <= B_9 then return true end
+    return false
 end
 
+--: (integer | nil) -> boolean
 local function is_digit(b)
-    return b >= B_0 and b <= B_9
+    if b == nil then return false end
+    if b >= B_0 and b <= B_9 then return true end
+    return false
 end
 
 -- Primitive name → type tag
@@ -63,7 +72,7 @@ local prim_tags = {
 -- Scanner: minimal lexer for type expression strings
 ---------------------------------------------------------------------------
 
---:: Scanner = { src: string, pos: integer, len: integer, filename: string, line: integer }
+--:: Scanner = { src: string, pos: integer, len: integer, filename: string, line: integer, col_offset: integer, depth: integer, parse_errors: { [integer]: { line: integer, col: integer, msg: string }, ... } }
 
 --: (string, string | nil, integer | nil, integer | nil) -> Scanner
 local function new_scanner(content, filename, line, col_offset)
@@ -230,6 +239,7 @@ function M.parse_annotations(annotations, pool, filename)
     local fields = arena_mod.new_field_arena(32)
     local type_lists = arena_mod.new_list_pool(128)
 
+    --: (integer) -> integer
     local function alloc_type(tag)
         local i = types:alloc()
         local t = types:get(i)

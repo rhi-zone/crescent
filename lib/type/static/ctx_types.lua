@@ -35,20 +35,21 @@
 
 -- Intern pool: string interning table with hash map.
 -- Mirrors StringPool in intern.lua so values flow without casts.
---:: InternPool = { ht_cap: integer, ht_mask: integer, ht_count: integer, next_id: integer, buf_count: integer, entries: { [integer]: unknown, ... }, bufs: { [integer]: unknown, ... }, rev: { [integer]: unknown, ... }, map: { [string]: integer, ... }, _anchors: { [integer]: string, ... } }
+--:: InternPool = { ht_cap: integer, ht_mask: integer, ht_count: integer, next_id: integer, buf_count: integer, entries: { [integer]: unknown, ... }, bufs: { [integer]: unknown, ... }, rev: { [integer]: unknown, ... }, map: { [string]: integer, ... }, _anchors: { [integer]: string, ... }, _type_predicates: { [integer]: { param_idx: integer, type_id: integer }, ... } | nil, _assert_predicates: { [integer]: { param_idx: integer, type_id: integer }, ... } | nil, ... }
 
 -- Annotation arena result returned by ann.parse_annotations().
 -- Types/fields/lists use the same arena shapes as the main checker.
 --:: AnnResult = { types: TypeSlotArena, fields: FieldEntryArena, lists: ListPool, results: { [integer]: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, ... }, ... }, warnings: { [integer]: { line: integer, col: integer, msg: string, ... }, ... }, parse_errors: { [integer]: { line: integer, col: integer, msg: string, ... }, ... }, pool: InternPool, make_intersection: ({ [integer]: integer, ... }) -> integer }
 
 -- Error context from errors.lua.
---:: ErrCtx = { errors: { [integer]: { file: string, line: integer, col: integer, msg: string, ... }, ... }, warnings: { [integer]: { file: string, line: integer, col: integer, msg: string, ... }, ... }, source_lines: { [string]: { [integer]: string, ... }, ... } }
+--:: DiagEntry = { kind: string, filename: string, line: integer, col: integer, msg: string, notes: { [integer]: { filename: string, line: integer, col: integer, msg: string }, ... } }
+--:: ErrCtx = { errors: { [integer]: DiagEntry, ... }, warnings: { [integer]: DiagEntry, ... }, source_lines: { [string]: { [integer]: string, ... }, ... } }
 
 -- Type alias table stored in scope.type_bindings.
 --:: TypeAlias = { body: integer, params: { [integer]: integer, ... } | nil, raw_bounds: { [integer]: integer, ... } | nil, resolved_bounds: { [integer]: integer | nil, ... } | nil, raw_defaults: { [integer]: integer, ... } | nil, resolved_defaults: { [integer]: integer | nil, ... } | nil, nominal: boolean, ... }
 
 -- Scope frame: linked list of binding tables.
---:: Scope = { bindings: { [integer]: integer, ... }, type_bindings: { [integer]: TypeAlias, ... }, annotation_types: { [integer]: integer, ... }, parent: Scope | nil, level: integer }
+--:: Scope = { bindings: { [integer]: integer, ... }, type_bindings: { [integer]: TypeAlias, ... }, annotation_types: { [integer]: integer, ... }, parent: Scope | nil, level: integer, narrowed_names: { [integer]: boolean, ... } | nil, ... }
 
 -- Entry in ctx._multi_ret: tracks which source tuple a binding came from.
 -- call_uid is the AST node ID of the call expression; used to correlate all bindings
@@ -87,6 +88,9 @@ DefsModule = {
   TAG_INTRINSIC: integer, TAG_TYPE_CALL: integer, TAG_FORALL: integer,
   TAG_SPREAD: integer, TAG_NAMED: integer, TAG_CDATA: integer,
   TAG_ENUM_MEMBER: integer, TAG_TYPEOF: integer,
+  TAG_FFIC: integer, TAG_PAT_ALL_FIELDS: integer,
+  TAG_PAT_REST_FIELDS: integer, TAG_PAT_META_SPREAD: integer,
+  TAG_CAPTURE: integer,
   NODE_LITERAL: integer, NODE_IDENTIFIER: integer, NODE_UNARY_EXPR: integer,
   NODE_BINARY_EXPR: integer, NODE_INDEX_EXPR: integer, NODE_FIELD_EXPR: integer,
   NODE_METHOD_CALL: integer, NODE_CALL_EXPR: integer, NODE_FUNC_EXPR: integer,
@@ -145,8 +149,8 @@ DefsModule = {
 -- ignore the return value so -> () is the correct external signature.
 ---------------------------------------------------------------------------
 
---:: declare report = (ctx: Ctx, line: integer | nil, col: integer | nil, code: integer, args: { [string]: unknown, ... }) -> ()
---:: declare warn = (ctx: Ctx, line: integer | nil, col: integer | nil, code: integer, args: { [string]: unknown, ... }) -> ()
+--:: declare report = (ctx: Ctx, line: integer | nil, col: integer | nil, code: integer, args: { [string]: any, ... }) -> ()
+--:: declare warn = (ctx: Ctx, line: integer | nil, col: integer | nil, code: integer, args: { [string]: any, ... }) -> ()
 --:: declare warn_raw = (ctx: Ctx, line: integer | nil, col: integer | nil, msg: string) -> ()
 -- snapshot_table: (ctx, TAG_TABLE type_id) -> (field_ids, indexer_pairs, row_var_id, meta_field_ids)
 --:: declare snapshot_table = (ctx: Ctx, type_id: integer) -> ({ [integer]: integer, ... }, { [integer]: integer, ... }, integer, { [integer]: integer, ... })

@@ -167,13 +167,13 @@ M.C_OVERLAP       = C_OVERLAP
 -- Helpers
 -- ---------------------------------------------------------------------------
 
---: (Ctx, integer | nil, integer | nil, integer, { [string]: unknown, ... }) -> ()
+--: (Ctx, integer | nil, integer | nil, integer, { [string]: any, ... }) -> ()
 local function report(ctx, line, col, code, args)
     local msg = errors_mod.format_diag(code, args)
     return errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
---: (Ctx, integer | nil, integer | nil, integer, { [string]: unknown, ... }) -> ()
+--: (Ctx, integer | nil, integer | nil, integer, { [string]: any, ... }) -> ()
 local function warn(ctx, line, col, code, args)
     local msg = errors_mod.format_diag(code, args)
     errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
