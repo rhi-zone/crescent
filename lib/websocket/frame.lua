@@ -83,8 +83,9 @@ local unmask = function(packet, i, payload_len, mask, mi)
 	if mask then
 		local bytes = {}
 		for j = 1, min(payload_len, #packet - i + 1) do
-			bytes[j] = bxor(byte(packet, i + j - 1), mask[mi])
-			mi = mi_next[mi]
+			local b = byte(packet, i + j - 1)
+			bytes[j] = bxor(b or 0, mask[mi])
+			mi = (mi_next[mi] --[[:! integer]])
 		end
 		return bytes_to_string(bytes), mi
 	else
@@ -96,12 +97,13 @@ end
 mod._unmask = unmask
 
 -- RFC 6455 §5.2 — Encode server-to-client frame (unmasked)
---:: ws_frame = { type: string, payload: string | nil, status: integer | nil }
+--:: ws_frame = { type: string, payload?: string, status?: integer }
 --: (ws_frame) -> string | nil
 mod.encode = function(msg)
 	local opcode = mod.opcode[msg.type]
 	if not opcode then return nil end
 	-- RFC 6455 §5.2 — FIN bit (0x80) always set (no fragmentation in encode)
+	--: string
 	local s = char(bor(0x80, opcode))
 	local payload = msg.payload or ""
 	local len = #payload
@@ -155,8 +157,9 @@ mod.encode_masked = function(msg, m1, m2, m3, m4)
 	local mi = 1
 	local masked = {}
 	for i = 1, len do
-		masked[i] = bxor(byte(payload, i), mask[mi])
-		mi = mi_next[mi]
+		local b = byte(payload, i)
+		masked[i] = bxor(b or 0, mask[mi])
+		mi = (mi_next[mi] --[[:! integer]])
 	end
 	if len > 0 then
 		parts[#parts + 1] = bytes_to_string(masked)
@@ -168,27 +171,30 @@ end
 -- Returns: msg, fin_or_error, mask, mask_index, consumed_length
 --: (string, ws_message | nil) -> (ws_message | nil, boolean|integer, ws_mask | nil, integer | nil, integer)
 local decode_impl = function(packet, acc)
-	local h0 = byte(packet, 1)
+	local h0 = byte(packet, 1) or 0
+	if h0 == 0 and #packet == 0 then return nil, mod.error.invalid_format, nil, nil, 0 end
 	local fin = band(h0, 0x80) ~= 0
 	-- RFC 6455 §5.2 — RSV bits must be 0 (no extensions)
 	if band(h0, 0x70) ~= 0 then return nil, mod.error.invalid_format, nil, nil, 0 end
 	local opcode = band(h0, 0x0f)
 	if not is_valid_opcode[opcode + 1] then return nil, mod.error.invalid_opcode, nil, nil, 0 end
-	local h1 = byte(packet, 2)
+	local h1 = byte(packet, 2) or 0
+	--: integer
 	local payload_len = band(h1, 0x7f)
 	local mask
 	local pi = 3
 	if payload_len == 126 then
 		-- RFC 6455 §5.2 — 16-bit extended length
 		local b1, b2 = byte(packet, 3, 4)
-		payload_len = bor(lshift(b1, 8), b2)
+		payload_len = bor(lshift(b1 or 0, 8), b2 or 0)
 		pi = 5
 	elseif payload_len == 127 then
 		-- RFC 6455 §5.2 — 64-bit extended length
 		local b1, b2, b3, b4, b5, b6, b7, b8 = byte(packet, 3, 10)
-		local hi = bor(lshift(b1, 24), lshift(b2, 16), lshift(b3, 8), b4)
-		local lo = bor(lshift(b5, 24), lshift(b6, 16), lshift(b7, 8), b8)
-		payload_len = hi * 0x100000000 + lo
+		local hi = bor(lshift(b1 or 0, 24), lshift(b2 or 0, 16), lshift(b3 or 0, 8), b4 or 0)
+		local lo = bor(lshift(b5 or 0, 24), lshift(b6 or 0, 16), lshift(b7 or 0, 8), b8 or 0)
+		local pl64 = hi * 0x100000000 + lo
+		payload_len = (pl64 --[[:! integer]])
 		pi = 11
 	end
 	if band(h1, 0x80) ~= 0 then
@@ -198,7 +204,9 @@ local decode_impl = function(packet, acc)
 	else
 		return nil, mod.error.frame_is_not_masked, nil, nil, 0
 	end
-	local payload, mi = unmask(packet, pi, payload_len, mask, 1)
+	--: integer
+	local payload_len_int = payload_len --[[:! integer]]
+	local payload, mi = unmask(packet, pi, payload_len_int, mask, 1)
 	-- RFC 6455 §5.5 — control frames must not be fragmented
 	if not fin and opcode >= 0x8 then return nil, mod.error.control_frame_is_fragmented, nil, nil, 0 end
 	-- RFC 6455 §5.6 — Data frames
@@ -224,31 +232,34 @@ local decode_impl = function(packet, acc)
 		local status = 0
 		if #payload > 0 then
 			local a, b = byte(payload, 1, 2)
-			status = bor(lshift(a, 8), b)
+			status = bor(lshift(a or 0, 8), b or 0)
 		end
 		acc = { type = "close", status = status, payload = sub(payload, 3) }
 	end
-	return acc, fin, mask, mi, (payload_len + pi - 1)
+	return acc, fin, mask, mi, (payload_len_int + pi - 1)
 end
 
 -- Public decode: (s, i?, acc?) -> msg?, fin_or_error, consumed_length
 -- When called with (s, acc) where acc is a table, treats it as (s, nil, acc)
 -- for backward compatibility.
---: (string, integer | nil, ws_message | nil) -> (ws_message | nil, boolean|integer, integer)
+--: (string, integer | ws_message | nil, ws_message | nil) -> (ws_message | nil, boolean|integer, integer)
 mod.decode = function(s, i, acc)
 	local packet
 	if type(i) == "table" then
 		-- called as decode(s, acc) — backward-compat two-arg form
-		acc = i
-		i = 1
+		acc = i --[[:! ws_message]]
+		local i_int = 1
 		packet = s
-	elseif i == nil or i == 1 then
-		i = 1
+		local msg, fin_or_err, _mask, _mi, consumed = decode_impl(packet, acc)
+		return msg, fin_or_err, consumed
+	end
+	local i_int = (i --[[:! integer | nil]])
+	if i_int == nil or i_int == 1 then
 		packet = s
 	else
-		packet = sub(s, i)
+		packet = sub(s, i_int)
 	end
-	local msg, fin_or_err, mask, mi, consumed = decode_impl(packet, acc)
+	local msg, fin_or_err, _mask, _mi, consumed = decode_impl(packet, acc)
 	return msg, fin_or_err, consumed
 end
 

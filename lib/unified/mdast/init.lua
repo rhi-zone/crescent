@@ -84,6 +84,13 @@ local function count_indent(line)
   return n, i
 end
 
+-- Return only the indent count (first return of count_indent).
+--: (line: string) -> integer
+local function indent_of(line)
+  local n, _ = count_indent(line)
+  return n
+end
+
 -- Strip up to `n` leading spaces (or tab-equivalent), return rest.
 --: (line: string, n: integer) -> string
 local function strip_indent(line, n)
@@ -146,7 +153,7 @@ local function match_atx_heading(line)
   local stripped = str_sub(line, col)
   local hashes = stripped:match("^(#+)")
   if not hashes or #hashes > 6 then return nil end
-  local depth = #hashes
+  local depth = #(hashes --[[:! string]])
   -- Must be followed by space/tab or end of line.
   local after_hashes = str_sub(stripped, depth + 1)
   if after_hashes == "" or after_hashes:match("^%s*$") then
@@ -173,6 +180,7 @@ end
 
 -- Check for fenced code block opening. Returns fence char, fence length, info string or nil.
 -- Lua patterns don't support {n,m}, so we use + and check length manually.
+--: (line: string) -> (string | nil, integer | nil, string | nil, integer | nil)
 local function match_fence_open(line)
   -- Allow up to 3 spaces of indentation.
   local indent, col = count_indent(line)
@@ -196,6 +204,7 @@ local function match_fence_open(line)
 end
 
 -- Check for blockquote line. Returns content after "> " or nil.
+--: (line: string) -> string | nil
 local function match_blockquote(line)
   -- Up to 3 spaces of indent, then >.
   local _, col = count_indent(line)
@@ -260,6 +269,7 @@ end
 
 -- Check for list item. Returns: marker_type ("bullet"|"ordered"), bullet_char or nil,
 -- start_num or nil, content_after_marker, marker_width (spaces before content).
+--: (line: string) -> (string | nil, string | nil, integer | nil, string | nil, integer | nil)
 local function match_list_item(line)
   -- Up to 3 spaces of leading indent.
   local indent, col = count_indent(line)
@@ -293,7 +303,7 @@ local function match_list_item(line)
     if i > #rest then
       return "ordered", delim, tonumber(num_str), "", indent + #num_str + 2
     end
-    local spaces_after = 0
+    local spaces_after = 0 --: integer
     while str_byte(rest, i) == 32 or str_byte(rest, i) == 9 do
       spaces_after = spaces_after + 1
       i = i + 1
@@ -373,6 +383,7 @@ local parse_blocks
 -- `lazy_set` is an optional table of line indices (1-based) that were added via lazy
 -- continuation and should NOT be treated as setext underlines.
 -- Returns: array of block nodes, defs table, had_top_blank (blank between top-level blocks).
+--: (lines: string[], i: integer, j: integer, lazy_set: { [integer]: boolean } | nil) -> ({ type: string, ... }[], { [string]: { url: unknown, title: unknown } }, boolean)
 parse_blocks = function(lines, i, j, lazy_set)
   local nodes = {}
   -- Collect link definitions into a table passed through inline parsing.
@@ -381,6 +392,7 @@ parse_blocks = function(lines, i, j, lazy_set)
   local had_top_blank = false
   local last_was_blank = false
 
+  --: (node: { type: string, ... }) -> nil
   local function add(node)
     if last_was_blank and #nodes > 0 then had_top_blank = true end
     nodes[#nodes + 1] = node
@@ -408,7 +420,10 @@ parse_blocks = function(lines, i, j, lazy_set)
 
     -- 4. Fenced code block.
     elseif match_fence_open(line) then
-      local fence_ch, fence_len, info_str, fence_indent = match_fence_open(line)
+      local _fc, _fl, info_str, _fi = match_fence_open(line)
+      local fence_ch     = _fc  or "`"   --: string
+      local fence_len    = _fl  or 3     --: integer
+      local fence_indent = _fi  or 0     --: integer
       local code_lines = {}
       i = i + 1
       while i <= j do
@@ -425,17 +440,18 @@ parse_blocks = function(lines, i, j, lazy_set)
         code_lines[#code_lines + 1] = strip_indent(l, fence_indent)
         i = i + 1
       end
-      local lang = (info_str ~= "") and info_str or nil
-      -- lang is first word of info string.
-      if lang then lang = lang:match("^(%S+)") end
+      local lang --: string | nil
+      if info_str and info_str ~= "" then
+        lang = info_str:match("^(%S+)")
+      end
       add({ type = "code", lang = lang, value = tbl_concat(code_lines, "\n") })
 
     -- 5. Indented code block (4 spaces or 1 tab).
-    elseif count_indent(line) >= 4 then
+    elseif indent_of(line) >= 4 then
       local code_lines = {}
       while i <= j do
         local l = lines[i]
-        local ind = count_indent(l)
+        local ind = indent_of(l)
         if ind >= 4 then
           code_lines[#code_lines + 1] = strip_indent(l, 4)
           i = i + 1
@@ -468,7 +484,7 @@ parse_blocks = function(lines, i, j, lazy_set)
           bq_lines[#bq_lines + 1] = bq_content
           -- Is this line paragraph-continuation content (not a block-level interrupt)?
           last_was_para = not (match_atx_heading(bq_content) or is_thematic_break(bq_content)
-            or match_fence_open(bq_content) or count_indent(bq_content) >= 4
+            or match_fence_open(bq_content) or indent_of(bq_content) >= 4
             or is_blank(bq_content))
           i = i + 1
         elseif is_blank(l) then
@@ -564,10 +580,11 @@ parse_blocks = function(lines, i, j, lazy_set)
         -- Thematic breaks and ATX headings always interrupt a list.
         if is_thematic_break(lines[i]) or match_atx_heading(lines[i]) then break end
 
-        local it, im, inum, icont, iwidth = match_list_item(lines[i])
+        local it, im, inum, icont, iwidth_raw = match_list_item(lines[i])
         if not it or it ~= list_type then break end
         if ordered and im ~= marker_char then break end
         if not ordered and im ~= marker_char then break end
+        local iwidth = iwidth_raw or 2  --: integer
 
         if prev_blank then list_node._loose = true end
         prev_blank = false
@@ -584,7 +601,7 @@ parse_blocks = function(lines, i, j, lazy_set)
             local ni = i + 1
             while ni <= j and is_blank(lines[ni]) do ni = ni + 1 end
             if ni > j then break end
-            local nind = count_indent(lines[ni])
+            local nind = indent_of(lines[ni])
             local nt2, nm2 = match_list_item(lines[ni])
             local next_same = (nt2 == list_type) and
               ((ordered and nm2 == marker_char) or (not ordered and nm2 == marker_char))
@@ -603,7 +620,7 @@ parse_blocks = function(lines, i, j, lazy_set)
               break
             end
           else
-            local cind = count_indent(cl)
+            local cind = indent_of(cl)
             if cind >= iwidth then
               item_lines[#item_lines + 1] = strip_indent(cl, iwidth)
               i = i + 1
@@ -691,7 +708,7 @@ parse_blocks = function(lines, i, j, lazy_set)
           end
         end
         -- Strip up to 3 leading spaces from paragraph lines.
-        local sl = strip_indent(l, math.min(count_indent(l), 3))
+        local sl = strip_indent(l, math.min(indent_of(l), 3))
         para_lines[#para_lines + 1] = sl
         i = i + 1
       end
@@ -809,6 +826,7 @@ end
 
 -- Decode a small set of named and numeric HTML character references.
 -- Returns the decoded string, or the original reference if unknown.
+--: { [string]: string }
 local html_named_entities = {
   amp="&", lt="<", gt=">", quot='"', apos="'",
   nbsp="\xC2\xA0",
@@ -835,6 +853,7 @@ local html_named_entities = {
 }
 
 -- Encode a Unicode codepoint as UTF-8.
+--: (cp: number) -> string
 local function cp_to_utf8(cp)
   if cp < 0 or cp > 0x10FFFF then return "\xEF\xBF\xBD" end  -- U+FFFD
   if cp < 0x80 then return str_char(cp) end
@@ -854,8 +873,10 @@ end
 
 -- Decode HTML character references in a string (for link URLs and titles).
 -- Handles &name;, &#NNN;, &#xHH;
+--: (s: string) -> string
 local function decode_entities(s)
-  return (s:gsub("&([^;]+);", function(ref)
+  --: (ref: string) -> string | nil
+  local function decode_ref(ref)
     -- Named reference.
     if html_named_entities[ref] then
       return html_named_entities[ref]
@@ -864,8 +885,10 @@ local function decode_entities(s)
     local n = ref:match("^#(%d+)$")
     if n then
       local cp = tonumber(n)
-      if cp and cp > 0 and cp <= 0x10FFFF then
-        return cp_to_utf8(cp)
+      if cp then
+        if cp > 0 and cp <= 0x10FFFF then
+          return cp_to_utf8(cp)
+        end
       end
       return nil  -- leave as-is
     end
@@ -873,18 +896,23 @@ local function decode_entities(s)
     local h = ref:match("^#[xX]([0-9a-fA-F]+)$")
     if h then
       local cp = tonumber(h, 16)
-      if cp and cp > 0 and cp <= 0x10FFFF then
-        return cp_to_utf8(cp)
+      if cp then
+        if cp > 0 and cp <= 0x10FFFF then
+          return cp_to_utf8(cp)
+        end
       end
       return nil
     end
     return nil  -- unknown: leave as-is
-  end))
+  end
+  local result, _ = s:gsub("&([^;]+);", decode_ref)
+  return result
 end
 
 -- Unicode case-fold substitutions not handled by Lua's :lower() (per C locale).
 -- CommonMark §6.6 requires Unicode case folding for label matching.
 -- We handle the specific cases that appear in CommonMark spec tests.
+--: { [string]: string }
 local unicode_fold_map = {
   -- U+1E9E LATIN CAPITAL LETTER SHARP S (ẞ) → "ss"
   ["\xE1\xBA\x9E"] = "ss",
@@ -896,17 +924,20 @@ local unicode_fold_map = {
 -- Note: backslash escapes are NOT processed — `\!` ≠ `!` in labels.
 -- Backslash-escaped brackets (\[ \]) just happen to be the same raw string in both
 -- definition and reference, so they match correctly without special handling.
+--: (s: string) -> string
 local function normalize_label(s)
-  s = s:gsub("%s+", " ")
-  s = s:match("^%s*(.-)%s*$") or s  -- trim
+  local r1, _ = s:gsub("%s+", " ")
+  local r2 = r1:match("^%s*(.-)%s*$") or r1  -- trim
   -- Apply Unicode case fold substitutions before :lower().
+  local r3 = r2  --: string
   for seq, repl in pairs(unicode_fold_map) do
-    s = s:gsub(seq, repl)
+    r3, _ = r3:gsub(seq, repl)
   end
-  return s:lower()
+  return r3:lower()
 end
 
 -- Scan a reference label starting at pos: expects '[', returns label text and end pos, or nil.
+--: (src: string, pos: integer) -> (string | nil, integer | nil)
 local function scan_ref_label(src, pos)
   if str_byte(src, pos) ~= 91 then return nil end  -- '['
   local len = #src
@@ -932,13 +963,16 @@ end
 
 -- Scan for a backtick run starting at `pos` in `src`.
 -- Returns the closing position (after the closing backticks) and the content, or nil.
+--: (src: string, pos: integer, tick_len: integer) -> (integer | nil, string | nil)
 local function scan_code_span(src, pos, tick_len)
   local len = #src
   local pattern = str_rep("`", tick_len)
   local i = pos
   while i <= len do
-    local s, e = str_find(src, pattern, i, true)
-    if not s then break end
+    local sf, ef = str_find(src, pattern, i, true)
+    if not sf then break end
+    local s = sf --[[:! integer]]
+    local e = ef --[[:! integer]]
     -- Make sure we don't match a longer run.
     local before_ok = (s == 1) or (str_byte(src, s - 1) ~= 96)
     local after_ok  = (e == len) or (str_byte(src, e + 1) ~= 96)
@@ -958,6 +992,7 @@ end
 
 -- Try to parse a link/image destination and title starting at pos (after '[...](').
 -- src[pos] should be '('. Returns url, title, end_pos or nil.
+--: (src: string, pos: integer) -> (string | nil, string | nil, integer | nil)
 local function parse_link_dest(src, pos)
   if str_byte(src, pos) ~= 40 then return nil end  -- '('
   pos = pos + 1
@@ -1005,7 +1040,7 @@ local function parse_link_dest(src, pos)
     pos = pos + 1  -- skip '>'
   else
     -- Bare URL: stop at space, ), EOF. Allow balanced parens and backslash escapes.
-    local depth = 0
+    local depth = 0 --: integer
     local parts = {}
     while pos <= len do
       local b = str_byte(src, pos)
@@ -1019,12 +1054,17 @@ local function parse_link_dest(src, pos)
         parts[#parts + 1] = ")"
         pos = pos + 1
       elseif b == 92 then   -- backslash
-        local nb = str_byte(src, pos + 1)
+        local nb_raw = str_byte(src, pos + 1)
         -- Only ASCII punctuation is escapable (§2.4).
-        local is_punct = nb and (
-          (nb >= 33 and nb <= 47) or (nb >= 58 and nb <= 64) or
-          (nb >= 91 and nb <= 96) or (nb >= 123 and nb <= 126))
-        if is_punct then
+        local is_punct = false  --: boolean
+        if nb_raw then
+          local nb = nb_raw or 0  --: integer
+          local p = (nb >= 33 and nb <= 47) or (nb >= 58 and nb <= 64) or
+            (nb >= 91 and nb <= 96) or (nb >= 123 and nb <= 126)
+          is_punct = p == true
+        end
+        local nb = nb_raw  --: integer | nil
+        if is_punct and nb then
           -- Backslash-escaped ASCII punctuation: include the literal char.
           parts[#parts + 1] = str_char(nb)
           pos = pos + 2
@@ -1121,8 +1161,9 @@ end
 --              "link_ref_close", "image_open"
 -- link_ref_close has: ref (string, normalized label for full-ref) or collapsed (bool) or shortcut (bool)
 
+--: (src: string, defs: { [string]: { url: unknown, title: unknown } } | nil) -> { [integer]: { type: string, ... } }
 local function tokenize_inlines(src, defs)
-  local tokens = {}
+  local tokens = {} --[[: any]]
   local len = #src
   local pos = 1
   local text_start = 1
@@ -1205,7 +1246,7 @@ local function tokenize_inlines(src, defs)
       local is_html = false
 
       if p2 <= len then
-        local c2 = str_byte(src, p2)
+        local c2 = str_byte(src, p2) or 0  --: integer
 
         -- Autolink: <scheme:path> or <email>. Scheme starts with letter.
         -- For simplicity: if first char is letter and content has no spaces/newlines
@@ -1219,7 +1260,7 @@ local function tokenize_inlines(src, defs)
           local is_autolink = false
           -- Scan name chars [a-zA-Z0-9-] until non-name char.
           while after_name <= len do
-            local tc = str_byte(src, after_name)
+            local tc = str_byte(src, after_name) or 0  --: integer
             if (tc >= 65 and tc <= 90) or (tc >= 97 and tc <= 122) or
                (tc >= 48 and tc <= 57) or tc == 45 then
               after_name = after_name + 1
@@ -1275,11 +1316,11 @@ local function tokenize_inlines(src, defs)
           local p3 = p2 + 1
           -- Tag name: [a-zA-Z][a-zA-Z0-9-]*
           if p3 <= len then
-            local fc = str_byte(src, p3)
+            local fc = str_byte(src, p3) or 0  --: integer
             if (fc >= 65 and fc <= 90) or (fc >= 97 and fc <= 122) then
               p3 = p3 + 1
               while p3 <= len do
-                local tc = str_byte(src, p3)
+                local tc = str_byte(src, p3) or 0  --: integer
                 if tc == 62 then  -- '>'
                   is_html = true
                   p2 = p3 + 1
@@ -1316,10 +1357,10 @@ local function tokenize_inlines(src, defs)
               elseif str_byte(src, p3) == 10 then break end
               p3 = p3 + 1
             end
-          elseif p3 <= len and (str_byte(src, p3) >= 65 and str_byte(src, p3) <= 90) then
+          elseif p3 <= len and ((str_byte(src, p3) or 0) >= 65 and (str_byte(src, p3) or 0) <= 90) then
             -- Declaration: <!LETTER...>
             while p3 <= len do
-              local tc = str_byte(src, p3)
+              local tc = str_byte(src, p3) or 0  --: integer
               if tc == 62 then is_html = true; p2 = p3 + 1; break
               elseif tc == 10 then break end
               p3 = p3 + 1
@@ -1422,7 +1463,7 @@ local function tokenize_inlines(src, defs)
       local url, title, end_pos = parse_link_dest(src, pos)
       if url ~= nil then
         tokens[#tokens + 1] = { type = "link_close", url = url, title = title }
-        pos = end_pos
+        pos = end_pos or pos
       elseif defs then
         -- Try reference forms (only when defs table is available).
         -- Full reference: [text][ref]
@@ -1432,7 +1473,7 @@ local function tokenize_inlines(src, defs)
           local norm = normalize_label(ref_label)
           if defs[norm] then
             tokens[#tokens + 1] = { type = "link_ref_close", ref = norm }
-            pos = ref_end
+            pos = ref_end or pos
           else
             -- Ref not in defs: fall back — emit ] as text, don't consume the [ref].
             tokens[#tokens + 1] = { type = "text", value = "]" }
@@ -1477,17 +1518,19 @@ local function tokens_to_label(inner_tokens)
       parts[#parts + 1] = " "
     elseif t.type == "node" then
       -- Resolved node inside label: extract text recursively.
-      local function extract(node)
+      local extract
+      --: (node: { type: string, ... }) -> string
+      extract = function(node)
         if node.type == "text" then return node.value or ""
         elseif node.type == "inlineCode" then return node.value or ""
         elseif node.children then
           local ps = {}
-          for _, c in ipairs(node.children) do ps[#ps+1] = extract(c) end
+          for _, c in ipairs(node.children --[[:! { [integer]: { type: string, ... } }]]) do ps[#ps+1] = extract(c) end
           return tbl_concat(ps)
         end
         return ""
       end
-      parts[#parts + 1] = extract(t.node)
+      parts[#parts + 1] = extract(t.node --[[:! { type: string, ... }]])
     end
   end
   return normalize_label(tbl_concat(parts))
@@ -1497,18 +1540,18 @@ end
 -- Also resolves link/image open-close pairs.
 -- Returns array of inline nodes.
 local function resolve_inlines(tokens, defs, src)
-  local result = {}
+  local result = {} --[[: any]]
 
   -- First pass: resolve links/images.
   -- Find matching link_open for each link_close.
   local n = #tokens
   local i = 1
-  local resolved = {}  -- new token list after link resolution
+  local resolved = {} --[[: any]] -- new token list after link resolution
 
   -- We need to track bracket stack.
   -- Each frame: { idx, is_image, inactive }
   -- inactive=true: deactivated link_open (can't form a link, becomes '[' text)
-  local bracket_stack = {}
+  local bracket_stack = {} --[[: any]]
 
   while i <= n do
     local tok = tokens[i]
@@ -1648,9 +1691,10 @@ local function resolve_inlines(tokens, defs, src)
   --   count       — remaining chars in the run (decremented as chars are consumed)
   --   orig_count  — original run length (for the odd-sum rule)
   --   can_open / can_close
-  local out = {}
-  local delim_stack = {}
+  local out = {} --[[: any]]
+  local delim_stack = {} --[[: any]]
 
+  --: (node: { type: string, ... }) -> nil
   local function emit(node)
     out[#out + 1] = node
   end
@@ -1665,6 +1709,7 @@ local function resolve_inlines(tokens, defs, src)
 
   -- Process one delimiter token (possibly recursing for remaining counts).
   -- This is called both for tokens from `resolved` and for synthetic remainder tokens.
+  --: (tok: { type: string, char: integer, count: integer, can_open: boolean | nil, can_close: boolean | nil, orig_count: integer | nil, ... }) -> nil
   local function process_delim(tok)
     if tok.can_close then
       -- Search delimiter stack from top for a matching opener.
@@ -1803,12 +1848,14 @@ local function resolve_inlines(tokens, defs, src)
   end
 
   -- Final merge pass: remove empty text nodes, merge adjacent text.
-  result = {}
+  result = {} --[[: any]]
   for _, node in ipairs(out) do
     if node.type == "text" and (not node.value or node.value == "") then
       -- skip
     elseif node.type == "text" and #result > 0 and result[#result].type == "text" then
-      result[#result].value = result[#result].value .. node.value
+      local prev = result[#result] --[[: any]]
+      local cur_val = prev.value --[[: any]]
+      prev.value = cur_val .. (node.value or "")
     else
       result[#result + 1] = node
     end
@@ -1843,6 +1890,7 @@ end
 -- ── Public API ─────────────────────────────────────────────────────────────────
 
 -- Parse a Markdown string and return an mdast Root node.
+--: (src: string) -> { type: string, children: { [integer]: { type: string, ... } }, ... } | nil
 M.parse = function(src)
   if type(src) ~= "string" then
     return nil, "mdast.parse: expected string, got " .. type(src)
@@ -1861,6 +1909,7 @@ end
 
 local stringify_node  -- forward declaration
 
+--: (children: { [integer]: { type: string, ... } } | nil, sep: string | nil) -> string
 local function stringify_children(children, sep)
   if not children then return "" end
   local parts = {}
@@ -1870,7 +1919,9 @@ local function stringify_children(children, sep)
   return tbl_concat(parts, sep or "")
 end
 
+--: (node: { type: string, ... }) -> string
 stringify_node = function(node)
+  node = node --[[: any]]
   local t = node.type
   if t == "root" then
     return stringify_children(node.children, "\n\n")
@@ -1907,9 +1958,11 @@ stringify_node = function(node)
     return tbl_concat(lines, "\n")
   elseif t == "list" then
     local parts = {}
-    for idx, item in ipairs(node.children) do
-      local prefix = node.ordered and (tostring((node.start or 1) + idx - 1) .. ". ") or "- "
-      local content = stringify_children(item.children, "\n\n")
+    for idx, item in ipairs(node.children --[[:! { [integer]: { type: string, ... } }]]) do
+      local node_start = (node.start or 1) --[[:! integer]]
+      local prefix = node.ordered and (tostring(node_start + idx - 1) .. ". ") or "- "  --: string
+      local item_any = item --[[: any]]
+      local content = stringify_children(item_any.children, "\n\n")
       -- Indent continuation lines.
       local indent = str_rep(" ", #prefix)
       local item_lines = split_lines(content)

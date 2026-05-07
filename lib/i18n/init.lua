@@ -5,7 +5,7 @@ end
 local M = {}
 
 --:: PluralRule = (count: number) -> string
---:: I = { _translations: { [string]: { [string]: unknown } }, _locale: string | nil, _fallback: string | nil, _plural_rules: { [string]: PluralRule } }
+--:: I = { _translations: { [string]: { [string]: unknown } }, _locale: string | nil, _fallback: string | nil, _plural_rules: { [string]: PluralRule }, load: (self: I, string, { [string]: unknown }) -> nil, set_locale: (self: I, string) -> nil, set_fallback: (self: I, string) -> nil, set_plural_rule: (self: I, string, PluralRule) -> nil, _get_plural_rule: (self: I, string) -> PluralRule, t: (self: I, string, { [string]: unknown } | nil, string | nil) -> string, has: (self: I, string) -> boolean, locales: (self: I) -> string[] }
 
 -- Default plural rules for common locales
 --: { [string]: PluralRule }
@@ -28,9 +28,11 @@ local default_plural_rules = {
 
 -- Resolve a dotted key path in a table.
 -- Returns the value or nil if any segment is missing.
+--: ({ [string]: unknown }, string) -> unknown
 local function resolve_key(tbl, key)
 	if tbl[key] ~= nil then return tbl[key] end
 	local pos = 1
+	--: { [string]: unknown }
 	local current = tbl
 	while true do
 		local dot = key:find(".", pos, true)
@@ -38,20 +40,23 @@ local function resolve_key(tbl, key)
 			return current[key:sub(pos)]
 		end
 		local segment = key:sub(pos, dot - 1)
-		current = current[segment]
-		if type(current) ~= "table" then return nil end
+		local next_val = current[segment]
+		if type(next_val) ~= "table" then return nil end
+		current = next_val --[[:! { [string]: unknown }]]
 		pos = dot + 1
 	end
 end
 
 -- Replace {{var}} placeholders with values from the data table.
+--: (string, { [string]: unknown } | nil) -> string
 local function interpolate(str, data)
 	if not data then return str end
-	return (str:gsub("{{(.-)}}", function(var)
+	local result, _ = str:gsub("{{(.-)}}", function(var)
 		local v = data[var]
 		if v == nil then return "{{" .. var .. "}}" end
 		return tostring(v)
-	end))
+	end)
+	return result
 end
 
 local I = {}
@@ -59,17 +64,17 @@ I.__index = I
 
 --: () -> I
 function M.new()
-	--: I
-	local self = setmetatable({}, I)
-	self._translations = {} --: { [string]: { [string]: unknown } }
-	self._locale = nil --: string | nil
-	self._fallback = nil --: string | nil
-	self._plural_rules = {} --: { [string]: PluralRule }
+	local self = setmetatable({
+		_translations = {},
+		_locale = nil,
+		_fallback = nil,
+		_plural_rules = {},
+	}, I) --[[:! I]]
 	return self
 end
 
 -- Load translations for a locale. Merges with any existing translations.
---: (locale: string, translations: { [string]: unknown }) -> nil
+--: (self: I, locale: string, translations: { [string]: unknown }) -> nil
 function I:load(locale, translations)
 	if not self._translations[locale] then
 		self._translations[locale] = {}
@@ -81,25 +86,25 @@ function I:load(locale, translations)
 end
 
 -- Set the current locale.
---: (locale: string) -> nil
+--: (self: I, locale: string) -> nil
 function I:set_locale(locale)
 	self._locale = locale
 end
 
 -- Set the fallback locale used when a key is missing in the current locale.
---: (locale: string) -> nil
+--: (self: I, locale: string) -> nil
 function I:set_fallback(locale)
 	self._fallback = locale
 end
 
 -- Set a custom plural rule for a locale.
---: (locale: string, rule: PluralRule) -> nil
+--: (self: I, locale: string, rule: PluralRule) -> nil
 function I:set_plural_rule(locale, rule)
 	self._plural_rules[locale] = rule
 end
 
 -- Get the plural rule for a locale: custom > default > English fallback.
---: (locale: string) -> PluralRule
+--: (self: I, locale: string) -> PluralRule
 function I:_get_plural_rule(locale)
 	return self._plural_rules[locale]
 		or default_plural_rules[locale]
@@ -108,7 +113,7 @@ end
 
 -- Translate a key with optional interpolation data and locale override.
 -- Returns the key itself if no translation is found.
---: (key: string, data: { [string]: unknown } | nil, locale: string | nil) -> string
+--: (self: I, key: string, data: { [string]: unknown } | nil, locale: string | nil) -> string
 function I:t(key, data, locale)
 	local loc = locale or self._locale
 	local value = nil
@@ -125,23 +130,28 @@ function I:t(key, data, locale)
 	if value == nil then return key end
 	-- Handle plural tables
 	if type(value) == "table" then
-		local count = data and data.count
-		if count ~= nil then
-			local rule = self:_get_plural_rule(loc or "en")
+		local value_tbl = value --[[:! { [string]: unknown }]]
+		local count_raw = data and data.count
+		if count_raw ~= nil then
+			local count = (count_raw --[[:! number]])
+			--: string
+			local loc_eff = (loc or "en") --[[:! string]]
+			local rule = self:_get_plural_rule(loc_eff)
 			local form = rule(count)
-			value = value[form] or value.other
-			if value == nil then return key end
+			local plural_val = value_tbl[form] or value_tbl["other"]
+			if plural_val == nil then return key end
+			value = plural_val
 		else
 			-- Table but no count - can't resolve, return key
 			return key
 		end
 	end
 	if type(value) ~= "string" then return key end
-	return interpolate(value, data)
+	return interpolate(value --[[:! string]], data)
 end
 
 -- Check whether a key exists in the current locale or fallback.
---: (key: string) -> boolean
+--: (self: I, key: string) -> boolean
 function I:has(key)
 	if self._locale and self._translations[self._locale] then
 		if resolve_key(self._translations[self._locale], key) ~= nil then
@@ -157,7 +167,7 @@ function I:has(key)
 end
 
 -- Return a sorted list of loaded locale names.
---: () -> { string }
+--: (self: I) -> string[]
 function I:locales()
 	local result = {}
 	for k in pairs(self._translations) do

@@ -4,6 +4,12 @@ end
 
 local M = {}
 
+--:: FsmStateConfig = { on_enter?: (ctx: { [string]: unknown }) -> nil, on_exit?: (ctx: { [string]: unknown }) -> nil }
+--:: FsmTransition = { from: string | { [integer]: string }, to: string, event: string }
+--:: FsmConfig = { initial: string, states: { [string]: FsmStateConfig }, transitions: FsmTransition[], guards?: { [string]: (ctx: { [string]: unknown }, event_data: unknown) -> boolean }, actions?: { [string]: (ctx: { [string]: unknown }, event_data: unknown) -> nil } }
+--:: Machine = { _config: FsmConfig, _lookup: { [string]: { [string]: { to: string } } }, _guards: { [string]: (ctx: { [string]: unknown }, event_data: unknown) -> boolean }, _actions: { [string]: (ctx: { [string]: unknown }, event_data: unknown) -> nil }, _listeners: { [integer]: (from: string, to: string, event: string, ctx: { [string]: unknown }) -> nil }, states: (self: Machine) -> { [integer]: string }, events: (self: Machine) -> { [integer]: string }, transitions_from: (self: Machine, state: string) -> { [integer]: { event: string, to: string } }, on_transition: (self: Machine, fn: (from: string, to: string, event: string, ctx: { [string]: unknown }) -> nil) -> nil, start: (self: Machine, ctx: ({ [string]: unknown } | nil)) -> Instance }
+--:: Instance = { _machine: Machine, _state: string, _ctx: { [string]: unknown }, _history: { [integer]: string }, state: (self: Instance) -> string, context: (self: Instance) -> { [string]: unknown }, set_context: (self: Instance, ctx: { [string]: unknown }) -> nil, history: (self: Instance) -> { [integer]: string }, can: (self: Instance, event: string) -> boolean, send: (self: Instance, event: string, data: unknown) -> (boolean | nil, string | nil) }
+
 -- Machine prototype (definition)
 local Machine = {}
 Machine.__index = Machine
@@ -12,7 +18,7 @@ Machine.__index = Machine
 local Instance = {}
 Instance.__index = Instance
 
---: (config: { initial: string, states: { [string]: { on_enter: (((ctx: { [string]: unknown }) -> nil) | nil), on_exit: (((ctx: { [string]: unknown }) -> nil) | nil) } }, transitions: { from: string | { [number]: string }, to: string, event: string }[], guards: ({ [string]: (ctx: { [string]: unknown }, event_data: unknown) -> boolean } | nil), actions: ({ [string]: (ctx: { [string]: unknown }, event_data: unknown) -> nil } | nil) }) -> Machine | (nil, string)
+--: (config: FsmConfig | nil) -> (Machine | nil, string | nil)
 function M.new(config)
   if not config then return nil, "config is required" end
   if not config.initial then return nil, "initial state is required" end
@@ -35,9 +41,10 @@ function M.new(config)
       return nil, "transition #" .. i .. " references unknown state '" .. t.from .. "'"
     end
     if type(t.from) == "table" then
-      for j = 1, #t.from do
-        if not config.states[t.from[j]] then
-          return nil, "transition #" .. i .. " references unknown state '" .. t.from[j] .. "'"
+      local from_list = t.from --[[: { [integer]: string }]]
+      for j = 1, #from_list do
+        if not config.states[from_list[j]] then
+          return nil, "transition #" .. i .. " references unknown state '" .. from_list[j] .. "'"
         end
       end
     end
@@ -45,14 +52,14 @@ function M.new(config)
 
   -- Build transition lookup: [state][event] = { to = ... }
   -- Also build wildcard lookup: ["*"][event] = { to = ... }
-  local lookup = {}
+  local lookup = {} --: { [string]: { [string]: { to: string } } }
   for i = 1, #config.transitions do
     local t = config.transitions[i]
     local sources
     if type(t.from) == "table" then
-      sources = t.from
+      sources = t.from --[[: { [integer]: string }]]
     else
-      sources = { t.from }
+      sources = { t.from --[[: string]] } --[[: { [integer]: string }]]
     end
     for j = 1, #sources do
       local s = sources[j]
@@ -67,13 +74,13 @@ function M.new(config)
     _guards = config.guards or {},
     _actions = config.actions or {},
     _listeners = {},
-  }, Machine)
+  }, Machine) --[[: Machine]]
   return machine
 end
 
---: () -> { [number]: string }
+--: (self: Machine) -> { [integer]: string }
 function Machine:states()
-  local result = {}
+  local result = {} --: { [integer]: string }
   for name in pairs(self._config.states) do
     result[#result + 1] = name
   end
@@ -81,10 +88,10 @@ function Machine:states()
   return result
 end
 
---: () -> { [number]: string }
+--: (self: Machine) -> { [integer]: string }
 function Machine:events()
-  local seen = {}
-  local result = {}
+  local seen = {} --: { [string]: boolean }
+  local result = {} --: { [integer]: string }
   for i = 1, #self._config.transitions do
     local ev = self._config.transitions[i].event
     if not seen[ev] then
@@ -95,15 +102,16 @@ function Machine:events()
   return result
 end
 
---: (state: string) -> { [number]: { event: string, to: string } }
+--: (self: Machine, state: string) -> { [integer]: { event: string, to: string } }
 function Machine:transitions_from(state)
-  local result = {}
+  local result = {} --: { [integer]: { event: string, to: string } }
   for i = 1, #self._config.transitions do
     local t = self._config.transitions[i]
     local matches = false
     if type(t.from) == "table" then
-      for j = 1, #t.from do
-        if t.from[j] == state then matches = true; break end
+      local from_list = t.from --[[: { [integer]: string }]]
+      for j = 1, #from_list do
+        if from_list[j] == state then matches = true; break end
       end
     elseif t.from == state or t.from == "*" then
       matches = true
@@ -115,19 +123,19 @@ function Machine:transitions_from(state)
   return result
 end
 
---: (fn: (from: string, to: string, event: string, ctx: { [string]: unknown }) -> nil) -> nil
+--: (self: Machine, fn: (from: string, to: string, event: string, ctx: { [string]: unknown }) -> nil) -> nil
 function Machine:on_transition(fn)
   self._listeners[#self._listeners + 1] = fn
 end
 
---: (ctx: ({ [string]: unknown } | nil)) -> Instance
+--: (self: Machine, ctx: ({ [string]: unknown } | nil)) -> Instance
 function Machine:start(ctx)
   local instance = setmetatable({
     _machine = self,
     _state = self._config.initial,
     _ctx = ctx or {},
     _history = { self._config.initial },
-  }, Instance)
+  }, Instance) --[[: Instance]]
   -- Fire on_enter for initial state
   local state_def = self._config.states[self._config.initial]
   if state_def and state_def.on_enter then
@@ -136,24 +144,24 @@ function Machine:start(ctx)
   return instance
 end
 
---: () -> string
+--: (self: Instance) -> string
 function Instance:state()
   return self._state
 end
 
---: () -> { [string]: unknown }
+--: (self: Instance) -> { [string]: unknown }
 function Instance:context()
   return self._ctx
 end
 
---: (ctx: { [string]: unknown }) -> nil
+--: (self: Instance, ctx: { [string]: unknown }) -> nil
 function Instance:set_context(ctx)
   self._ctx = ctx
 end
 
---: () -> { [number]: string }
+--: (self: Instance) -> { [integer]: string }
 function Instance:history()
-  local result = {}
+  local result = {} --: { [integer]: string }
   for i = 1, #self._history do
     result[i] = self._history[i]
   end
@@ -161,6 +169,7 @@ function Instance:history()
 end
 
 -- Find the transition definition for current state + event
+--: (machine: Machine, current_state: string, event: string) -> { to: string } | nil
 local function find_transition(machine, current_state, event)
   local lookup = machine._lookup
   -- Check specific state first
@@ -176,7 +185,7 @@ local function find_transition(machine, current_state, event)
   return nil
 end
 
---: (event: string) -> boolean
+--: (self: Instance, event: string) -> boolean
 function Instance:can(event)
   local t = find_transition(self._machine, self._state, event)
   if not t then return false end
@@ -188,7 +197,7 @@ function Instance:can(event)
   return true
 end
 
---: (event: string, data: (unknown | nil)) -> true | (nil, string)
+--: (self: Instance, event: string, data: unknown) -> (boolean | nil, string | nil)
 function Instance:send(event, data)
   local t = find_transition(self._machine, self._state, event)
   if not t then

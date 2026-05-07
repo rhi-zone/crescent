@@ -100,7 +100,7 @@ local function load_sqlite() --: () -> $FfiC
 	end
 	for _, name in ipairs(names) do
 		local ok, lib = pcall(ffi.load, name)
-		if ok then return lib --[[as $FfiC]] end
+		if ok then return lib end
 	end
 	error("shared_db_cap: sqlite3 shared library not found")
 end
@@ -308,7 +308,7 @@ function M.shared_db_cap(path, app_id, tables, opts)
 
 	local db_ptr = ffi.new("sqlite3 *[1]")
 	local flags = allow_write and SQLITE_OPEN_READWRITE or SQLITE_OPEN_READONLY
-	local null_str --: string
+	local null_str --: string | nil
 	local rc = sqlite_ffi.sqlite3_open_v2(path, db_ptr, flags, null_str)
 	if rc ~= SQLITE_OK then
 		local err_cdata = sqlite_ffi.sqlite3_errmsg(db_ptr[0]) --: any
@@ -335,9 +335,9 @@ function M.shared_db_cap(path, app_id, tables, opts)
 		end
 	)
 
-	local null_step --: (cdata, integer, cdata) -> ()
-	local null_final --: (cdata) -> ()
-	local null_destroy --: (any) -> ()
+	local null_step --: ((cdata, integer, cdata) -> ()) | nil
+	local null_final --: ((cdata) -> ()) | nil
+	local null_destroy --: ((any) -> ()) | nil
 	rc = sqlite_ffi.sqlite3_create_function_v2(
 		db, "_app_id", 0, SQLITE_UTF8, nil,
 		app_id_func,
@@ -499,7 +499,7 @@ function M.shared_db_cap(path, app_id, tables, opts)
 	end
 
 	local function close()
-		local null_authcb --: (any, integer, string, string, string, string) -> integer
+		local null_authcb --: ((any, integer, string, string, string, string) -> integer) | nil
 		sqlite_ffi.sqlite3_set_authorizer(db, null_authcb, nil)
 		auth_cb:free()
 		app_id_func:free()

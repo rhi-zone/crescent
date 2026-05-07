@@ -51,7 +51,7 @@ local VOID = {
 --              { type="text", value= }
 --: (string) -> any
 local function tokenize(html)
-  local tokens = {}
+  local tokens = {} --[[: any]]
   local i = 1
   local len = #html
 
@@ -98,59 +98,61 @@ local function tokenize(html)
           i = len + 1
         else
           -- Find the inner of <...>
-          local inner = html:sub(i+1, close-1)
+          local close_i = close --[[:! integer]]
+          local inner = html:sub(i+1, close_i-1) --[[: string]]
           -- Self-closing? (e.g. <br/>)
           local self_close = inner:sub(-1) == "/"
           if self_close then inner = inner:sub(1, -2) end
 
           -- Parse tag name and attributes.
-          local j = 1
-          local ilen = #inner
+          local inner_s = inner  --: string
+          local j = 1  --: integer
+          local ilen = #inner_s
           -- Skip whitespace
-          while j <= ilen and inner:sub(j,j):match("%s") do j = j + 1 end
+          while j <= ilen and inner_s:sub(j,j):match("%s") do j = j + 1 end
           -- Read tag name
           local tag_start = j
-          while j <= ilen and inner:sub(j,j):match("[%a%d%-%.%:]") do j = j + 1 end
-          local tag = inner:sub(tag_start, j-1):lower()
+          while j <= ilen and inner_s:sub(j,j):match("[%a%d%-%.%:]") do j = j + 1 end
+          local tag = inner_s:sub(tag_start, j-1):lower()
           if tag == "" then
             -- Not a valid tag — treat as text.
-            tokens[#tokens + 1] = { type = "text", value = html:sub(i, close) }
-            i = close + 1
+            tokens[#tokens + 1] = { type = "text", value = html:sub(i, close_i) }
+            i = close_i + 1
           else
             -- Parse attributes.
             local attrs = {}
             while j <= ilen do
               -- Skip whitespace
-              while j <= ilen and inner:sub(j,j):match("%s") do j = j + 1 end
+              while j <= ilen and inner_s:sub(j,j):match("%s") do j = j + 1 end
               if j > ilen then break end
 
               -- Read attribute name
               local name_start = j
-              while j <= ilen and inner:sub(j,j):match("[^%s=/>]") do j = j + 1 end
-              local attr_name = inner:sub(name_start, j-1)
+              while j <= ilen and inner_s:sub(j,j):match("[^%s=/>]") do j = j + 1 end
+              local attr_name = inner_s:sub(name_start, j-1)
               if attr_name == "" then j = j + 1; break end
 
               -- Skip whitespace
-              while j <= ilen and inner:sub(j,j):match("%s") do j = j + 1 end
+              while j <= ilen and inner_s:sub(j,j):match("%s") do j = j + 1 end
 
-              if j <= ilen and inner:sub(j,j) == "=" then
+              if j <= ilen and inner_s:sub(j,j) == "=" then
                 j = j + 1  -- skip =
                 -- Skip whitespace
-                while j <= ilen and inner:sub(j,j):match("%s") do j = j + 1 end
+                while j <= ilen and inner_s:sub(j,j):match("%s") do j = j + 1 end
                 -- Read value
                 local val
-                if j <= ilen and (inner:sub(j,j) == '"' or inner:sub(j,j) == "'") then
-                  local quote = inner:sub(j,j)
+                if j <= ilen and (inner_s:sub(j,j) == '"' or inner_s:sub(j,j) == "'") then
+                  local quote = inner_s:sub(j,j)
                   j = j + 1
                   local val_start = j
-                  while j <= ilen and inner:sub(j,j) ~= quote do j = j + 1 end
-                  val = inner:sub(val_start, j-1)
+                  while j <= ilen and inner_s:sub(j,j) ~= quote do j = j + 1 end
+                  val = inner_s:sub(val_start, j-1)
                   j = j + 1  -- skip closing quote
                 else
                   -- Unquoted value
                   local val_start = j
-                  while j <= ilen and inner:sub(j,j):match("[^%s>]") do j = j + 1 end
-                  val = inner:sub(val_start, j-1)
+                  while j <= ilen and inner_s:sub(j,j):match("[^%s>]") do j = j + 1 end
+                  val = inner_s:sub(val_start, j-1)
                 end
                 attrs[attr_name] = val
               else
@@ -169,7 +171,7 @@ local function tokenize(html)
             if is_void then
               tokens[#tokens + 1] = { type = "close", tag = tag }
             end
-            i = close + 1
+            i = close_i + 1
           end
         end
       end
@@ -198,8 +200,8 @@ end
 --: (any) -> any
 local function tokens_to_hast(tokens)
   -- Stack of open elements. Each entry: { node = hast_element }.
-  local stack = {}
-  local root_children = {}
+  local stack = {} --[[: any]]
+  local root_children = {} --[[: any]]
 
   local function current_children()
     if #stack == 0 then
@@ -208,7 +210,8 @@ local function tokens_to_hast(tokens)
     return stack[#stack].node.children
   end
 
-  for _, tok in ipairs(tokens) do
+  for _, tok_raw in ipairs(tokens) do
+    local tok = tok_raw --[[: any]]
     if tok.type == "text" then
       local children = current_children()
       children[#children + 1] = { type = "text", value = tok.value }

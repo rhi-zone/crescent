@@ -24,6 +24,7 @@ local M = {}
 local str_rep    = string.rep
 local tbl_concat = table.concat
 
+--: (s: string) -> string[]
 local function split_lines(s)
   local lines = {}
   local pos = 1
@@ -43,8 +44,10 @@ end
 
 local serialize  -- forward declaration
 
+--: (children: { [integer]: { type: string, ... } } | nil, sep: string | nil) -> string
 local function serialize_children(children, sep)
-  if not children or #children == 0 then return "" end
+  if not children then return "" end
+  if #children == 0 then return "" end
   local parts = {}
   for i = 1, #children do
     parts[i] = serialize(children[i])
@@ -53,6 +56,7 @@ local function serialize_children(children, sep)
 end
 
 serialize = function(node)
+  node = node --[[: any]]
   local t = node.type
   if t == "root" then
     return serialize_children(node.children, "\n\n")

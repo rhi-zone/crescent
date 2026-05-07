@@ -1,10 +1,8 @@
 if not package.path:find("./?/init.lua", 1, true) then
   package.path = package.path .. ";./?/init.lua"
 end
-
 local T = require("lib.test.assert")
 local codec = require("lib.codec")
-
 T.describe("codec.hex", function()
   T.it("encodes bytes to hex", function()
     T.eq(codec.hex.encode("ABC"), "414243")
@@ -44,7 +42,6 @@ T.describe("codec.hex", function()
     T.ok(err:find("invalid"))
   end)
 end)
-
 T.describe("codec.rot13", function()
   T.it("encodes letters", function()
     T.eq(codec.rot13.encode("Hello"), "Uryyb")
@@ -67,7 +64,6 @@ T.describe("codec.rot13", function()
     T.ok(err)
   end)
 end)
-
 T.describe("codec.reverse", function()
   T.it("reverses a string", function()
     T.eq(codec.reverse.encode("abc"), "cba")
@@ -90,103 +86,110 @@ T.describe("codec.reverse", function()
     T.ok(err)
   end)
 end)
-
 T.describe("codec.xor", function()
   T.it("xors bytes with key", function()
-    local c = codec.xor(0x42)
+    local c_raw = (codec.xor(0x42))
+    local c = c_raw --[[:! Codec]]
     local enc = c.encode("A")
     -- A=0x41, 0x41 XOR 0x42 = 0x03
     T.eq(enc, "\x03")
   end)
   T.it("is self-inverse", function()
-    local c = codec.xor(0xAA)
+    local c_raw = (codec.xor(0xAA))
+    local c = c_raw --[[:! Codec]]
     local data = "hello world"
     T.eq(c.decode(c.encode(data)), data)
   end)
   T.it("roundtrips", function()
-    local c = codec.xor(0xFF)
+    local c_raw = (codec.xor(0xFF))
+    local c = c_raw --[[:! Codec]]
     T.ok(codec.roundtrip(c, "test data"))
   end)
   T.it("handles empty string", function()
-    local c = codec.xor(42)
+    local c_raw = (codec.xor(42))
+    local c = c_raw --[[:! Codec]]
     T.eq(c.encode(""), "")
   end)
   T.it("xor with 0 is identity", function()
-    local c = codec.xor(0)
+    local c_raw = (codec.xor(0))
+    local c = c_raw --[[:! Codec]]
     T.eq(c.encode("abc"), "abc")
   end)
   T.it("wraps key mod 256", function()
-    local c1 = codec.xor(256 + 42)
-    local c2 = codec.xor(42)
+    local c1_raw = (codec.xor(256 + 42))
+    local c1 = c1_raw --[[:! Codec]]
+    local c2_raw = (codec.xor(42))
+    local c2 = c2_raw --[[:! Codec]]
     T.eq(c1.encode("test"), c2.encode("test"))
   end)
   T.it("returns error on non-number key", function()
-    local v, err = codec.xor("bad")
+    local v, err = codec.xor("bad" --[[: any]])
     T.eq(v, nil)
     T.ok(err)
   end)
   T.it("returns error on non-string input", function()
-    local c = codec.xor(1)
+    local c_raw = (codec.xor(1))
+    local c = c_raw --[[:! Codec]]
     local v, err = c.encode(42)
     T.eq(v, nil)
     T.ok(err)
   end)
 end)
-
 T.describe("codec.new", function()
   T.it("creates a codec from table", function()
-    local c = codec.new({
+    local c_raw = codec.new({
       encode = function(s) return s .. "!" end,
       decode = function(s) return s:sub(1, -2) end,
     })
+    local c = c_raw --[[:! Codec]]
     T.eq(c.encode("hi"), "hi!")
     T.eq(c.decode("hi!"), "hi")
   end)
   T.it("returns error when nil", function()
-    local v, err = codec.new(nil)
+    local v, err = codec.new(nil --[[: any]])
     T.eq(v, nil)
     T.ok(err)
   end)
   T.it("returns error when missing encode", function()
-    local v, err = codec.new({ decode = function() end })
+    local v, err = codec.new({ decode = function(_data) end } --[[:! Codec]])
     T.eq(v, nil)
-    T.ok(err:find("encode"))
+    T.ok((err or ""):find("encode"))
   end)
   T.it("returns error when missing decode", function()
-    local v, err = codec.new({ encode = function() end })
+    local v, err = codec.new({ encode = function(_data) end } --[[:! Codec]])
     T.eq(v, nil)
-    T.ok(err:find("decode"))
+    T.ok((err or ""):find("decode"))
   end)
 end)
-
 T.describe("codec.from", function()
   T.it("creates a codec from two functions", function()
-    local c = codec.from(
+    local c_raw = codec.from(
       function(s) return s:upper() end,
       function(s) return s:lower() end
     )
+    local c = c_raw --[[:! Codec]]
     T.eq(c.encode("hello"), "HELLO")
     T.eq(c.decode("HELLO"), "hello")
   end)
   T.it("returns error when missing encode", function()
-    local v, err = codec.from(nil, function() end)
+    local v, err = codec.from(nil --[[: any]], function(_data) end)
     T.eq(v, nil)
     T.ok(err)
   end)
   T.it("returns error when missing decode", function()
-    local v, err = codec.from(function() end, nil)
+    local v, err = codec.from(function(_data) end, nil --[[: any]])
     T.eq(v, nil)
     T.ok(err)
   end)
 end)
-
 T.describe("codec.chain", function()
   T.it("chains two codecs encode left-to-right", function()
     local upper = codec.from(
       function(s) return s:upper() end,
       function(s) return s:lower() end
     )
-    local pipeline = codec.chain(upper, codec.hex)
+    local pipeline_raw = (codec.chain(upper, codec.hex))
+    local pipeline = pipeline_raw --[[:! Codec]]
     T.eq(pipeline.encode("hi"), "4849") -- "HI" -> hex
   end)
   T.it("chains two codecs decode right-to-left", function()
@@ -194,7 +197,8 @@ T.describe("codec.chain", function()
       function(s) return s:upper() end,
       function(s) return s:lower() end
     )
-    local pipeline = codec.chain(upper, codec.hex)
+    local pipeline_raw = (codec.chain(upper, codec.hex))
+    local pipeline = pipeline_raw --[[:! Codec]]
     T.eq(pipeline.decode("4849"), "hi") -- hex -> "HI" -> lower
   end)
   T.it("chains three codecs", function()
@@ -202,32 +206,37 @@ T.describe("codec.chain", function()
       function(s) return s .. "!" end,
       function(s) return s:sub(1, -2) end
     )
-    local pipeline = codec.chain(codec.reverse, bang, codec.hex)
+    local pipeline_raw = (codec.chain(codec.reverse, bang, codec.hex))
+    local pipeline = pipeline_raw --[[:! Codec]]
     local enc = pipeline.encode("ab")
     -- "ab" -> reverse -> "ba" -> bang -> "ba!" -> hex -> "626121"
     T.eq(enc, "626121")
   end)
   T.it("chain of 1 returns the codec itself", function()
-    local c = codec.chain(codec.hex)
+    local c_raw = (codec.chain(codec.hex))
+    local c = c_raw --[[:! Codec]]
     T.eq(c.encode("A"), "41")
     T.eq(c.decode("41"), "A")
   end)
   T.it("chain of 5 works", function()
     local id = codec.identity
-    local pipeline = codec.chain(id, id, codec.hex, id, id)
+    local pipeline_raw = (codec.chain(id, id, codec.hex, id, id))
+    local pipeline = pipeline_raw --[[:! Codec]]
     T.eq(pipeline.encode("Z"), "5a")
     T.eq(pipeline.decode("5a"), "Z")
   end)
   T.it("roundtrips through chain", function()
-    local pipeline = codec.chain(codec.rot13, codec.hex, codec.reverse)
+    local pipeline_raw = (codec.chain(codec.rot13, codec.hex, codec.reverse))
+    local pipeline = pipeline_raw --[[:! Codec]]
     T.ok(codec.roundtrip(pipeline, "hello world"))
   end)
   T.it("propagates encode errors", function()
     local bad = codec.from(
-      function() return nil, "encode failed" end,
+      function(_data) return nil, "encode failed" end,
       function(s) return s end
     )
-    local pipeline = codec.chain(codec.hex, bad)
+    local pipeline_raw = (codec.chain(codec.hex, bad))
+    local pipeline = pipeline_raw --[[:! Codec]]
     local v, err = pipeline.encode("test")
     T.eq(v, nil)
     T.eq(err, "encode failed")
@@ -235,9 +244,10 @@ T.describe("codec.chain", function()
   T.it("propagates decode errors", function()
     local bad = codec.from(
       function(s) return s end,
-      function() return nil, "decode failed" end
+      function(_data) return nil, "decode failed" end
     )
-    local pipeline = codec.chain(bad, codec.hex)
+    local pipeline_raw = (codec.chain(bad, codec.hex))
+    local pipeline = pipeline_raw --[[:! Codec]]
     local v, err = pipeline.decode("74657374")
     T.eq(v, nil)
     T.eq(err, "decode failed")
@@ -245,14 +255,15 @@ T.describe("codec.chain", function()
   T.it("stops on first encode error in chain", function()
     local calls = 0
     local bad = codec.from(
-      function() return nil, "fail" end,
+      function(_data) return nil, "fail" end,
       function(s) return s end
     )
     local counter = codec.from(
       function(s) calls = calls + 1; return s end,
       function(s) return s end
     )
-    local pipeline = codec.chain(bad, counter)
+    local pipeline_raw = (codec.chain(bad, counter))
+    local pipeline = pipeline_raw --[[:! Codec]]
     pipeline.encode("test")
     T.eq(calls, 0) -- counter should not be reached
   end)
@@ -262,71 +273,76 @@ T.describe("codec.chain", function()
     T.ok(err)
   end)
 end)
-
 T.describe("codec.when", function()
   T.it("applies codec when predicate is true", function()
-    local c = codec.when(function() return true end, codec.hex)
+    local c_raw = (codec.when(function(_data) return true end, codec.hex))
+    local c = c_raw --[[:! Codec]]
     T.eq(c.encode("A"), "41")
   end)
   T.it("passes through when predicate is false", function()
-    local c = codec.when(function() return false end, codec.hex)
+    local c_raw = (codec.when(function(_data) return false end, codec.hex))
+    local c = c_raw --[[:! Codec]]
     T.eq(c.encode("A"), "A")
   end)
   T.it("decode applies when predicate is true", function()
-    local c = codec.when(function() return true end, codec.hex)
+    local c_raw = (codec.when(function(_data) return true end, codec.hex))
+    local c = c_raw --[[:! Codec]]
     T.eq(c.decode("41"), "A")
   end)
   T.it("decode passes through when predicate is false", function()
-    local c = codec.when(function() return false end, codec.hex)
+    local c_raw = (codec.when(function(_data) return false end, codec.hex))
+    local c = c_raw --[[:! Codec]]
     T.eq(c.decode("41"), "41")
   end)
   T.it("predicate receives the data", function()
     local seen = nil
-    local c = codec.when(function(d) seen = d; return false end, codec.hex)
+    local c_raw = (codec.when(function(d) seen = d; return false end, codec.hex))
+    local c = c_raw --[[:! Codec]]
     c.encode("test")
     T.eq(seen, "test")
   end)
   T.it("conditional on string length", function()
-    local c = codec.when(
+    local c_raw = codec.when(
       function(s) return type(s) == "string" and #s > 3 end,
       codec.hex
     )
+    local c = c_raw --[[:! Codec]]
     T.eq(c.encode("hi"), "hi") -- too short, passthrough
     T.eq(c.encode("hello"), "68656c6c6f") -- long enough, hex
   end)
   T.it("returns error when missing predicate", function()
-    local v, err = codec.when(nil, codec.hex)
+    local v, err = codec.when(nil --[[: any]], codec.hex)
     T.eq(v, nil)
     T.ok(err)
   end)
   T.it("returns error when missing codec", function()
-    local v, err = codec.when(function() return true end, nil)
+    local v, err = codec.when(function(_data) return true end, nil --[[: any]])
     T.eq(v, nil)
     T.ok(err)
   end)
 end)
-
 T.describe("codec.map", function()
   T.it("maps encode and decode", function()
-    local c = codec.map(string.upper, string.lower)
+    local c_raw = (codec.map(string.upper, string.lower))
+    local c = c_raw --[[:! Codec]]
     T.eq(c.encode("hello"), "HELLO")
     T.eq(c.decode("HELLO"), "hello")
   end)
   T.it("roundtrips for case conversion", function()
-    T.ok(codec.roundtrip(codec.map(string.upper, string.lower), "hello"))
+    local map_raw = (codec.map(string.upper, string.lower))
+    T.ok(codec.roundtrip(map_raw --[[:! Codec]], "hello"))
   end)
   T.it("returns error when missing encode", function()
-    local v, err = codec.map(nil, string.lower)
+    local v, err = codec.map(nil --[[: any]], string.lower)
     T.eq(v, nil)
     T.ok(err)
   end)
   T.it("returns error when missing decode", function()
-    local v, err = codec.map(string.upper, nil)
+    local v, err = codec.map(string.upper, nil --[[: any]])
     T.eq(v, nil)
     T.ok(err)
   end)
 end)
-
 T.describe("codec.identity", function()
   T.it("encode returns data unchanged", function()
     T.eq(codec.identity.encode("hello"), "hello")
@@ -342,38 +358,39 @@ T.describe("codec.identity", function()
     T.eq(codec.identity.decode(true), true)
   end)
 end)
-
 T.describe("codec.roundtrip", function()
   T.it("returns true for valid roundtrip", function()
     T.ok(codec.roundtrip(codec.hex, "hello"))
   end)
   T.it("returns false for broken codec", function()
-    local bad = codec.from(
+    local bad_raw = codec.from(
       function(s) return s .. "extra" end,
       function(s) return s end
     )
+    local bad = bad_raw --[[:! Codec]]
     T.eq(codec.roundtrip(bad, "test"), false)
   end)
   T.it("returns false when encode fails", function()
-    local bad = codec.from(
-      function() return nil, "fail" end,
+    local bad_raw2 = codec.from(
+      function(_data) return nil, "fail" end,
       function(s) return s end
     )
-    local ok, err = codec.roundtrip(bad, "test")
+    local bad2 = bad_raw2 --[[:! Codec]]
+    local ok, err = codec.roundtrip(bad2, "test")
     T.eq(ok, false)
     T.eq(err, "fail")
   end)
   T.it("returns false when decode fails", function()
-    local bad = codec.from(
+    local bad_raw3 = codec.from(
       function(s) return s end,
-      function() return nil, "fail" end
+      function(_data) return nil, "fail" end
     )
-    local ok, err = codec.roundtrip(bad, "test")
+    local bad3 = bad_raw3 --[[:! Codec]]
+    local ok, err = codec.roundtrip(bad3, "test")
     T.eq(ok, false)
     T.eq(err, "fail")
   end)
 end)
-
 T.describe("codec edge cases", function()
   T.it("hex roundtrips all byte values", function()
     local bytes = {}
@@ -391,7 +408,8 @@ T.describe("codec edge cases", function()
     local bytes = {}
     for i = 0, 255 do bytes[i + 1] = string.char(i) end
     local all = table.concat(bytes)
-    local c = codec.xor(0x5A)
+    local c_raw = (codec.xor(0x5A))
+    local c = c_raw --[[:! Codec]]
     T.ok(codec.roundtrip(c, all))
   end)
   T.it("chain with when conditional", function()
@@ -399,14 +417,17 @@ T.describe("codec edge cases", function()
       function(s) return type(s) == "string" and #s > 0 end,
       codec.rot13
     )
-    local pipeline = codec.chain(cond, codec.hex)
+    local pipeline_raw = (codec.chain(cond, codec.hex))
+    local pipeline = pipeline_raw --[[:! Codec]]
     T.ok(codec.roundtrip(pipeline, "hello"))
     -- Empty string: rot13 passthrough, hex still works
     T.ok(codec.roundtrip(pipeline, ""))
   end)
   T.it("nested chain", function()
-    local inner = codec.chain(codec.rot13, codec.reverse)
-    local outer = codec.chain(inner, codec.hex)
+    local inner_raw = (codec.chain(codec.rot13, codec.reverse))
+    local inner = inner_raw --[[:! Codec]]
+    local outer_raw = (codec.chain(inner, codec.hex))
+    local outer = outer_raw --[[:! Codec]]
     T.ok(codec.roundtrip(outer, "nested"))
   end)
 end)

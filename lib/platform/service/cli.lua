@@ -22,7 +22,7 @@ if package and not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local json = require("lib.format.json")
+local json = (require("lib.format.json") --[[: any]])
 
 local M = {}
 
@@ -32,7 +32,8 @@ local M = {}
 -- Converts method_name to a CLI subcommand: underscores → hyphens.
 --: (string) -> string
 local function subcommand_name(method_name)
-	return method_name:gsub("_", "-")
+	local s = method_name:gsub("_", "-")
+	return s
 end
 
 -- param_names_of(fn) -> { string, ... }
@@ -40,13 +41,14 @@ end
 -- Returns an empty table when not available. Skips first param (caps).
 --: (unknown) -> { [integer]: string }
 local function param_names_of(fn)
+	if type(fn) ~= "function" then return {} end
 	local info = debug.getinfo(fn, "u")
 	if not info then return {} end
 	local nparams = info.nparams or 0
 	local params = {}
 	for i = 2, nparams do
 		local name = debug.getlocal(fn, i)
-		if name then
+		if type(name) == "string" then
 			params[#params + 1] = name
 		end
 	end
@@ -108,7 +110,7 @@ end
 
 -- ── Dispatcher builder ─────────────────────────────────────────────────────
 
---: (unknown, { [string]: unknown }, { [string]: unknown } | nil) -> { cli: unknown }
+--: (unknown, { [string]: unknown }, { [string]: unknown } | nil) -> { cli: unknown, _dispatch: unknown }
 function M.create(caps, methods, descriptors)
 	descriptors = descriptors or {}
 
@@ -159,7 +161,7 @@ function M.create(caps, methods, descriptors)
 		end
 		io_out:write("usage: " .. sig .. "\n")
 		if entry.help then
-			io_out:write(entry.help .. "\n")
+			io_out:write(tostring(entry.help) .. "\n")
 		end
 		if #params > 0 then
 			io_out:write("arguments:\n")
@@ -223,8 +225,11 @@ function M.create(caps, methods, descriptors)
 			call_args[#call_args + 1] = positional[i]
 		end
 
+		local entry_fn = entry.fn
 		local ok, result, err = pcall(function()
-			return entry.fn(unpack(call_args))
+			if type(entry_fn) == "function" then
+				return entry_fn(unpack(call_args))
+			end
 		end)
 
 		if not ok then

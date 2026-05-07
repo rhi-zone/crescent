@@ -94,10 +94,11 @@ table.sort(EMOJI_SORTED, function(a, b) return #a > #b end)
 local function utf8_char_len(s, i)
   local b = s:byte(i)
   if not b then return 0 end
-  if b < 0x80 then return 1 end
-  if b < 0xC0 then return 0 end  -- continuation byte, shouldn't be lead
-  if b < 0xE0 then return 2 end
-  if b < 0xF0 then return 3 end
+  local bv = b or 0  --: integer
+  if bv < 0x80 then return 1 end
+  if bv < 0xC0 then return 0 end  -- continuation byte, shouldn't be lead
+  if bv < 0xE0 then return 2 end
+  if bv < 0xF0 then return 3 end
   return 4
 end
 

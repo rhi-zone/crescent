@@ -8,10 +8,13 @@ local M = {}
 
 --:: Subscription = { unsubscribe: () -> () }
 
+--:: SubImpl = { _hub: HubImpl, _topic: string, _callback: (string, any, any) -> (), _is_pattern: boolean, _lua_pattern: string | nil, _removed: boolean, id: integer, unsubscribe: (self: SubImpl) -> () }
+--:: HubImpl = { _subs: SubImpl[], _exact: { [string]: SubImpl[] }, _next_id: integer, subscribe: (self: HubImpl, string, (string, any, any) -> ()) -> SubImpl, publish: (self: HubImpl, string, any, any) -> (), subscribers: (self: HubImpl, string) -> number, topics: (self: HubImpl) -> string[], has_subscribers: (self: HubImpl, string) -> boolean }
+
 local Sub = {}
 Sub.__index = Sub
 
---: () -> ()
+--: (self: SubImpl) -> ()
 function Sub:unsubscribe()
 	if self._removed then return end
 	self._removed = true
@@ -41,18 +44,18 @@ end
 
 -- ── Hub (pub/sub) ───────────────────────────────────────────────────────
 
---:: Hub = { subscribe: (string, (string, any, any) -> ()) -> Subscription, publish: (string, any, any) -> (), subscribers: (string) -> number, topics: () -> {string}, has_subscribers: (string) -> boolean }
+--:: Hub = { subscribe: (string, (string, any, any) -> ()) -> Subscription, publish: (string, any, any) -> (), subscribers: (string) -> number, topics: () -> string[], has_subscribers: (string) -> boolean }
 
 local Hub = {}
 Hub.__index = Hub
 
---: () -> Hub
+--: () -> HubImpl
 function M.hub()
 	return setmetatable({
 		_subs = {},          -- all subscriptions (for pattern scan)
 		_exact = {},         -- topic -> {sub, ...} for exact-match fast path
 		_next_id = 1,
-	}, Hub)
+	}, Hub) --[[:! HubImpl]]
 end
 
 -- Convert a pattern with `*` wildcards into a Lua pattern.
@@ -71,7 +74,7 @@ local function has_wildcard(topic)
 	return topic:find("*", 1, true) ~= nil
 end
 
---: (string, (string, any, any) -> ()) -> Subscription
+--: (self: HubImpl, string, (string, any, any) -> ()) -> SubImpl
 function Hub:subscribe(topic, callback)
 	local sub = setmetatable({
 		_hub = self,
@@ -81,7 +84,7 @@ function Hub:subscribe(topic, callback)
 		_lua_pattern = has_wildcard(topic) and topic_to_pattern(topic) or nil,
 		_removed = false,
 		id = self._next_id,
-	}, Sub)
+	}, Sub) --[[:! SubImpl]]
 	self._next_id = self._next_id + 1
 	self._subs[#self._subs + 1] = sub
 	-- Index exact-match subscriptions for fast publish
@@ -96,7 +99,7 @@ function Hub:subscribe(topic, callback)
 	return sub
 end
 
---: (string, any, any) -> ()
+--: (self: HubImpl, string, any, any) -> ()
 function Hub:publish(topic, message, sender)
 	-- Exact-match subscribers
 	local exact = self._exact[topic]
@@ -114,7 +117,7 @@ function Hub:publish(topic, message, sender)
 	end
 end
 
---: (string) -> number
+--: (self: HubImpl, string) -> number
 function Hub:subscribers(topic)
 	local count = 0
 	for i = 1, #self._subs do
@@ -126,7 +129,7 @@ function Hub:subscribers(topic)
 	return count
 end
 
---: () -> {string}
+--: (self: HubImpl) -> string[]
 function Hub:topics()
 	local seen = {}
 	local result = {}
@@ -141,7 +144,7 @@ function Hub:topics()
 	return result
 end
 
---: (string) -> boolean
+--: (self: HubImpl, string) -> boolean
 function Hub:has_subscribers(topic)
 	return self:subscribers(topic) > 0
 end
@@ -149,22 +152,23 @@ end
 -- ── Presence ────────────────────────────────────────────────────────────
 
 --:: presence_meta = { [string]: unknown }
---:: Presence = { join: (string, string, presence_meta) -> (), leave: (string, string) -> (), update: (string, string, presence_meta) -> (), list: (string) -> {{id: string, meta: presence_meta}}, get: (string, string) -> presence_meta | nil, count: (string) -> number, on_join: ((string, string, presence_meta) -> ()) -> (), on_leave: ((string, string, presence_meta) -> ()) -> (), on_update: ((string, string, presence_meta) -> ()) -> () }
+--:: Presence = { join: (string, string, presence_meta) -> (), leave: (string, string) -> (), update: (string, string, presence_meta) -> (), list: (string) -> { { id: string, meta: presence_meta } }, get: (string, string) -> presence_meta | nil, count: (string) -> number, on_join: ((string, string, presence_meta) -> ()) -> (), on_leave: ((string, string, presence_meta) -> ()) -> (), on_update: ((string, string, presence_meta) -> ()) -> () }
+--:: PresenceImpl = { _rooms: { [string]: { [string]: presence_meta } }, _on_join: ((string, string, presence_meta) -> ())[], _on_leave: ((string, string, presence_meta) -> ())[], _on_update: ((string, string, presence_meta) -> ())[], join: (self: PresenceImpl, string, string, presence_meta) -> (), leave: (self: PresenceImpl, string, string) -> (), update: (self: PresenceImpl, string, string, presence_meta) -> (), list: (self: PresenceImpl, string) -> { { id: string, meta: presence_meta } }, get: (self: PresenceImpl, string, string) -> presence_meta | nil, count: (self: PresenceImpl, string) -> number, on_join: (self: PresenceImpl, (string, string, presence_meta) -> ()) -> (), on_leave: (self: PresenceImpl, (string, string, presence_meta) -> ()) -> (), on_update: (self: PresenceImpl, (string, string, presence_meta) -> ()) -> () }
 
 local Presence = {}
 Presence.__index = Presence
 
---: () -> Presence
+--: () -> PresenceImpl
 function M.presence()
 	return setmetatable({
 		_rooms = {},         -- room -> {user_id -> meta}
 		_on_join = {},
 		_on_leave = {},
 		_on_update = {},
-	}, Presence)
+	}, Presence) --[[:! PresenceImpl]]
 end
 
---: (string, string, presence_meta) -> ()
+--: (self: PresenceImpl, string, string, presence_meta) -> ()
 function Presence:join(room, user_id, meta)
 	local r = self._rooms[room]
 	if not r then
@@ -178,7 +182,7 @@ function Presence:join(room, user_id, meta)
 	end
 end
 
---: (string, string) -> ()
+--: (self: PresenceImpl, string, string) -> ()
 function Presence:leave(room, user_id)
 	local r = self._rooms[room]
 	if not r then return end
@@ -195,7 +199,7 @@ function Presence:leave(room, user_id)
 	end
 end
 
---: (string, string, presence_meta) -> ()
+--: (self: PresenceImpl, string, string, presence_meta) -> ()
 function Presence:update(room, user_id, meta)
 	local r = self._rooms[room]
 	if not r or not r[user_id] then return end
@@ -210,7 +214,7 @@ function Presence:update(room, user_id, meta)
 	end
 end
 
---: (string) -> {{id: string, meta: presence_meta}}
+--: (self: PresenceImpl, string) -> { { id: string, meta: presence_meta } }
 function Presence:list(room)
 	local r = self._rooms[room]
 	if not r then return {} end
@@ -222,14 +226,14 @@ function Presence:list(room)
 	return result
 end
 
---: (string, string) -> presence_meta | nil
+--: (self: PresenceImpl, string, string) -> presence_meta | nil
 function Presence:get(room, user_id)
 	local r = self._rooms[room]
 	if not r then return nil end
 	return r[user_id]
 end
 
---: (string) -> number
+--: (self: PresenceImpl, string) -> number
 function Presence:count(room)
 	local r = self._rooms[room]
 	if not r then return 0 end
@@ -240,17 +244,17 @@ function Presence:count(room)
 	return n
 end
 
---: ((string, string, presence_meta) -> ()) -> ()
+--: (self: PresenceImpl, (string, string, presence_meta) -> ()) -> ()
 function Presence:on_join(fn)
 	self._on_join[#self._on_join + 1] = fn
 end
 
---: ((string, string, presence_meta) -> ()) -> ()
+--: (self: PresenceImpl, (string, string, presence_meta) -> ()) -> ()
 function Presence:on_leave(fn)
 	self._on_leave[#self._on_leave + 1] = fn
 end
 
---: ((string, string, presence_meta) -> ()) -> ()
+--: (self: PresenceImpl, (string, string, presence_meta) -> ()) -> ()
 function Presence:on_update(fn)
 	self._on_update[#self._on_update + 1] = fn
 end
@@ -261,12 +265,13 @@ end
 --:: event_input = { type: string, data: event_data }
 --:: read_opts = { after?: number, limit?: integer }
 --:: Event = { seq: number, global_seq: number, type: string, data: event_data, timestamp: number }
---:: EventStore = { append: (string, event_input) -> (), read: (string, (read_opts | nil)) -> {Event}, read_all: ((read_opts | nil)) -> {Event}, on_append: ((string, Event) -> ()) -> (), aggregate: (string, (any, Event) -> any) -> any, streams: () -> {string}, stream_length: (string) -> number }
+--:: EventStore = { append: (string, event_input) -> (), read: (string, (read_opts | nil)) -> Event[], read_all: ((read_opts | nil)) -> Event[], on_append: ((string, Event) -> ()) -> (), aggregate: (string, (any, Event) -> any) -> any, streams: () -> string[], stream_length: (string) -> number }
+--:: EventStoreImpl = { _streams: { [string]: Event[] }, _global_seq: number, _on_append: ((string, Event) -> ())[], _time_fn: () -> number, append: (self: EventStoreImpl, string, event_input) -> (), read: (self: EventStoreImpl, string, (read_opts | nil)) -> Event[], read_all: (self: EventStoreImpl, (read_opts | nil)) -> Event[], on_append: (self: EventStoreImpl, (string, Event) -> ()) -> (), aggregate: (self: EventStoreImpl, string, (any, Event) -> any) -> any, streams: (self: EventStoreImpl) -> string[], stream_length: (self: EventStoreImpl, string) -> number }
 
 local EventStore = {}
 EventStore.__index = EventStore
 
---: ({ time_fn: () -> number }) -> EventStore
+--: ({ time_fn: () -> number }) -> EventStoreImpl
 function M.event_store(opts)
 	assert(opts and opts.time_fn, "event_store requires opts.time_fn")
 	return setmetatable({
@@ -274,10 +279,10 @@ function M.event_store(opts)
 		_global_seq = 0,
 		_on_append = {},
 		_time_fn = opts.time_fn,
-	}, EventStore)
+	}, EventStore) --[[:! EventStoreImpl]]
 end
 
---: (string, event_input) -> ()
+--: (self: EventStoreImpl, string, event_input) -> ()
 function EventStore:append(stream, event)
 	local s = self._streams[stream]
 	if not s then
@@ -300,7 +305,7 @@ function EventStore:append(stream, event)
 	end
 end
 
---: (string, (read_opts | nil)) -> {Event}
+--: (self: EventStoreImpl, string, (read_opts | nil)) -> Event[]
 function EventStore:read(stream, opts)
 	local s = self._streams[stream]
 	if not s then return {} end
@@ -312,13 +317,16 @@ function EventStore:read(stream, opts)
 		local ev = s[i]
 		if ev.seq > after then
 			result[#result + 1] = ev
-			if limit and #result >= limit then break end
+			if limit ~= nil then
+				local lim = limit --[[:! integer]]
+				if #result >= lim then break end
+			end
 		end
 	end
 	return result
 end
 
---: ((read_opts | nil)) -> {Event}
+--: (self: EventStoreImpl, (read_opts | nil)) -> Event[]
 function EventStore:read_all(opts)
 	opts = opts or {}
 	local after = opts.after or 0
@@ -336,22 +344,25 @@ function EventStore:read_all(opts)
 	-- Sort by global sequence
 	table.sort(all, function(a, b) return a.global_seq < b.global_seq end)
 	-- Apply limit
-	if limit and #all > limit then
-		local trimmed = {}
-		for i = 1, limit do
-			trimmed[i] = all[i]
+	if limit ~= nil then
+		local lim = limit --[[:! integer]]
+		if #all > lim then
+			local trimmed = {}
+			for i = 1, lim do
+				trimmed[i] = all[i]
+			end
+			return trimmed
 		end
-		return trimmed
 	end
 	return all
 end
 
---: ((string, Event) -> ()) -> ()
+--: (self: EventStoreImpl, (string, Event) -> ()) -> ()
 function EventStore:on_append(fn)
 	self._on_append[#self._on_append + 1] = fn
 end
 
---: (string, (any, Event) -> any) -> any
+--: (self: EventStoreImpl, string, (any, Event) -> any) -> any
 function EventStore:aggregate(stream, reducer)
 	local s = self._streams[stream]
 	if not s then return nil end
@@ -362,7 +373,7 @@ function EventStore:aggregate(stream, reducer)
 	return state
 end
 
---: () -> {string}
+--: (self: EventStoreImpl) -> string[]
 function EventStore:streams()
 	local result = {}
 	for name in pairs(self._streams) do
@@ -372,7 +383,7 @@ function EventStore:streams()
 	return result
 end
 
---: (string) -> number
+--: (self: EventStoreImpl, string) -> number
 function EventStore:stream_length(stream)
 	local s = self._streams[stream]
 	if not s then return 0 end

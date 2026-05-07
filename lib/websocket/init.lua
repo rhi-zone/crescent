@@ -8,8 +8,10 @@ local frame = require("lib.websocket.frame")
 
 local mod = {}
 
---:: websocket_message = { type: string, payload: string, status?: integer }
+--:: websocket_message = { type: string, payload?: string, status?: integer }
 --:: websocket_decode_acc = { [string]: unknown, ... }
+--:: ws_sock = { fd: integer, send: (self: ws_sock, string) -> unknown, receive: (self: ws_sock) -> string | nil, close: (self: ws_sock) -> unknown }
+--:: ws_epoll = { modify: (self: ws_epoll, fd: integer, read_fn: () -> (), close_fn: () -> ()) -> (((string) -> ()) | nil, (() -> ()) | nil) }
 
 -- Re-export frame codec tables for backward compatibility
 -- status_ids keeps the original verbose key names from RFC 6455 §7.4.1
@@ -43,7 +45,6 @@ mod.error = frame.error
 mod.frame = frame
 
 -- Expose frame codec for testing and advanced use (backward compat).
---: (websocket_message) -> string | nil
 mod._encode = frame.encode
 -- Backward-compat: decode(packet, acc?) returning msg, fin_or_err, mask, mi, remaining_len
 --: (string, websocket_decode_acc | nil) -> (websocket_message | nil, boolean|integer, { [integer]: integer } | nil, integer | nil, integer)
@@ -51,8 +52,7 @@ mod._decode = function(packet, acc)
 	return frame._decode_full(packet, acc)
 end
 
---[[@param sock luajitsocket]]
---[[@param body string]]
+--: (ws_sock, string) -> nil
 local err = function(sock, body)
 	sock:send("HTTP/1.1 400 Bad Request\r\nContent-Length: " .. #body .. "\r\n\r\n" .. body)
 	sock:close()
@@ -100,7 +100,7 @@ end
 --[[@param read fun(sock: luajitsocket, msg: websocket_message)]]
 --[[@param close fun(sock: luajitsocket)|nil]]
 --[[@param epoll epoll]]
---: (sock: unknown, req: { headers: { [string]: string[] }, ... }, read: (sock: unknown, msg: websocket_message) -> nil, close: ((sock: unknown) -> nil) | nil, epoll: unknown) -> ((msg: websocket_message) -> nil) | nil
+--: (sock: ws_sock, req: { headers: { [string]: string[] }, ... }, read: (sock: ws_sock, msg: websocket_message) -> nil, close: ((sock: ws_sock) -> nil) | nil, epoll: ws_epoll) -> ((msg: websocket_message) -> nil) | nil
 mod.websocket = function(sock, req, read, close, epoll)
 	if (req.headers["upgrade"] or {})[1] ~= "websocket" or (req.headers["connection"] or {})[1] ~= "Upgrade" then return nil end
 	-- TODO(api): return a numeric error code here instead of sending the HTTP
@@ -131,28 +131,31 @@ mod.websocket = function(sock, req, read, close, epoll)
 			if remaining_len > 0 then
 				local part
 				part, mi = unmask(packet, 1, remaining_len, mask, mi)
-				msg.payload = msg.payload .. part
+				if msg then msg.payload = msg.payload .. part end
 			else
-				--[[@diagnostic disable-next-line: cast-local-type]]
 				msg, ready, mask, mi, remaining_len = frame._decode_full(packet, msg)
 				if not msg then ready = nil; remaining_len = 0; return end --[[errored]]
 			end
 			local old_packet_len = #packet
 			packet = packet:sub(remaining_len + 1)
 			remaining_len = remaining_len - old_packet_len
-			if ready and remaining_len == 0 then read(sock, msg); msg = nil end
+			if ready and remaining_len == 0 then
+				if msg then read(sock, msg --[[:! websocket_message]]) end
+				msg = nil
+			end
 		end
 	end, function() if close then close(sock) end end)
-	assert(write)
+	if not write then return nil end
+	local sha1_fn = sha1 --[[:! (string) -> string]]
+	local b64_fn = to_base64 --[[:! (string) -> string]]
 	write((([[
 HTTP/1.1 101 Switching Protocols
 Upgrade: websocket
 Connection: Upgrade
-Sec-WebSocket-Accept: ]] .. to_base64(sha1(key .. "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")) .. [[
+Sec-WebSocket-Accept: ]] .. b64_fn(sha1_fn(key .. "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")) .. [[
 
 
 ]]):gsub("\n", "\r\n")))
-	--[[@param msg2 websocket_message]]
 	local send = function(msg2)
 		local buf = frame.encode(msg2)
 		if buf then write(buf) end

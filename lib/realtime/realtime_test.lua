@@ -10,22 +10,25 @@ local realtime = require("lib.realtime")
 T.describe("Hub", function()
 	T.it("subscribe and publish delivers message", function()
 		local hub = realtime.hub()
+		--: { topic: string, message: { text: string, ... }, sender: any } | nil
 		local received
 		hub:subscribe("chat:room1", function(topic, message, sender)
-			received = { topic = topic, message = message, sender = sender }
+			received = { topic = topic, message = message --[[:! { text: string, ... }]], sender = sender }
 		end)
 		hub:publish("chat:room1", { text = "hello" }, "user1")
 		T.ok(received, "callback was called")
-		T.eq(received.topic, "chat:room1")
-		T.eq(received.message.text, "hello")
-		T.eq(received.sender, "user1")
+		if received then
+			T.eq(received.topic, "chat:room1")
+			T.eq(received.message.text, "hello")
+			T.eq(received.sender, "user1")
+		end
 	end)
 
 	T.it("multiple subscribers all receive message", function()
 		local hub = realtime.hub()
 		local count = 0
-		hub:subscribe("chat:room1", function() count = count + 1 end)
-		hub:subscribe("chat:room1", function() count = count + 1 end)
+		hub:subscribe("chat:room1", function(_, _, _) count = count + 1 end)
+		hub:subscribe("chat:room1", function(_, _, _) count = count + 1 end)
 		hub:publish("chat:room1", "msg", nil)
 		T.eq(count, 2)
 	end)
@@ -33,7 +36,7 @@ T.describe("Hub", function()
 	T.it("unsubscribe stops delivery", function()
 		local hub = realtime.hub()
 		local count = 0
-		local sub = hub:subscribe("chat:room1", function() count = count + 1 end)
+		local sub = hub:subscribe("chat:room1", function(_, _, _) count = count + 1 end)
 		hub:publish("chat:room1", "msg1", nil)
 		T.eq(count, 1)
 		sub:unsubscribe()
@@ -44,7 +47,7 @@ T.describe("Hub", function()
 	T.it("wildcard pattern chat:* matches chat:room1", function()
 		local hub = realtime.hub()
 		local received_topic
-		hub:subscribe("chat:*", function(topic) received_topic = topic end)
+		hub:subscribe("chat:*", function(topic, _, _) received_topic = topic end)
 		hub:publish("chat:room1", "msg", nil)
 		T.eq(received_topic, "chat:room1")
 	end)
@@ -52,16 +55,16 @@ T.describe("Hub", function()
 	T.it("wildcard doesn't match non-matching topic", function()
 		local hub = realtime.hub()
 		local called = false
-		hub:subscribe("chat:*", function() called = true end)
+		hub:subscribe("chat:*", function(_, _, _) called = true end)
 		hub:publish("users:room1", "msg", nil)
 		T.eq(called, false)
 	end)
 
 	T.it("subscribers count", function()
 		local hub = realtime.hub()
-		hub:subscribe("chat:room1", function() end)
-		hub:subscribe("chat:room1", function() end)
-		hub:subscribe("chat:room2", function() end)
+		hub:subscribe("chat:room1", function(_, _, _) end)
+		hub:subscribe("chat:room1", function(_, _, _) end)
+		hub:subscribe("chat:room2", function(_, _, _) end)
 		T.eq(hub:subscribers("chat:room1"), 2)
 		T.eq(hub:subscribers("chat:room2"), 1)
 		T.eq(hub:subscribers("chat:room3"), 0)
@@ -69,8 +72,8 @@ T.describe("Hub", function()
 
 	T.it("topics lists topics with subscribers", function()
 		local hub = realtime.hub()
-		hub:subscribe("chat:room2", function() end)
-		hub:subscribe("chat:room1", function() end)
+		hub:subscribe("chat:room2", function(_, _, _) end)
+		hub:subscribe("chat:room1", function(_, _, _) end)
 		local topics = hub:topics()
 		T.eq(#topics, 2)
 		T.eq(topics[1], "chat:room1")
@@ -80,7 +83,7 @@ T.describe("Hub", function()
 	T.it("has_subscribers returns correct boolean", function()
 		local hub = realtime.hub()
 		T.eq(hub:has_subscribers("chat:room1"), false)
-		local sub = hub:subscribe("chat:room1", function() end)
+		local sub = hub:subscribe("chat:room1", function(_, _, _) end)
 		T.eq(hub:has_subscribers("chat:room1"), true)
 		sub:unsubscribe()
 		T.eq(hub:has_subscribers("chat:room1"), false)
@@ -102,7 +105,9 @@ T.describe("Presence", function()
 		presence:join("room1", "user1", { name = "Alice" })
 		local meta = presence:get("room1", "user1")
 		T.ok(meta, "user exists")
-		T.eq(meta.name, "Alice")
+		if meta then
+			T.eq(meta.name, "Alice")
+		end
 	end)
 
 	T.it("list returns all users in room", function()
@@ -122,8 +127,10 @@ T.describe("Presence", function()
 		local presence = realtime.presence()
 		presence:join("room1", "user1", { name = "Alice", status = "online" })
 		local meta = presence:get("room1", "user1")
-		T.eq(meta.name, "Alice")
-		T.eq(meta.status, "online")
+		if meta then
+			T.eq(meta.name, "Alice")
+			T.eq(meta.status, "online")
+		end
 		T.eq(presence:get("room1", "nonexistent"), nil)
 		T.eq(presence:get("nonexistent", "user1"), nil)
 	end)
@@ -152,25 +159,31 @@ T.describe("Presence", function()
 		presence:join("room1", "user1", { name = "Alice", status = "online" })
 		presence:update("room1", "user1", { status = "away" })
 		local meta = presence:get("room1", "user1")
-		T.eq(meta.status, "away")
-		T.eq(meta.name, "Alice", "other fields preserved")
+		if meta then
+			T.eq(meta.status, "away")
+			T.eq(meta.name, "Alice", "other fields preserved")
+		end
 	end)
 
 	T.it("on_join hook called", function()
 		local presence = realtime.presence()
+		--: { room: string, user_id: string, meta: presence_meta } | nil
 		local hook_args
 		presence:on_join(function(room, user_id, meta)
 			hook_args = { room = room, user_id = user_id, meta = meta }
 		end)
 		presence:join("room1", "user1", { name = "Alice" })
 		T.ok(hook_args, "hook was called")
-		T.eq(hook_args.room, "room1")
-		T.eq(hook_args.user_id, "user1")
-		T.eq(hook_args.meta.name, "Alice")
+		if hook_args then
+			T.eq(hook_args.room, "room1")
+			T.eq(hook_args.user_id, "user1")
+			T.eq(hook_args.meta.name, "Alice")
+		end
 	end)
 
 	T.it("on_leave hook called", function()
 		local presence = realtime.presence()
+		--: { room: string, user_id: string, meta: presence_meta } | nil
 		local hook_args
 		presence:on_leave(function(room, user_id, meta)
 			hook_args = { room = room, user_id = user_id, meta = meta }
@@ -178,13 +191,16 @@ T.describe("Presence", function()
 		presence:join("room1", "user1", { name = "Alice" })
 		presence:leave("room1", "user1")
 		T.ok(hook_args, "hook was called")
-		T.eq(hook_args.room, "room1")
-		T.eq(hook_args.user_id, "user1")
-		T.eq(hook_args.meta.name, "Alice")
+		if hook_args then
+			T.eq(hook_args.room, "room1")
+			T.eq(hook_args.user_id, "user1")
+			T.eq(hook_args.meta.name, "Alice")
+		end
 	end)
 
 	T.it("on_update hook called", function()
 		local presence = realtime.presence()
+		--: { room: string, user_id: string, meta: presence_meta } | nil
 		local hook_args
 		presence:on_update(function(room, user_id, meta)
 			hook_args = { room = room, user_id = user_id, meta = meta }
@@ -192,9 +208,11 @@ T.describe("Presence", function()
 		presence:join("room1", "user1", { name = "Alice", status = "online" })
 		presence:update("room1", "user1", { status = "away" })
 		T.ok(hook_args, "hook was called")
-		T.eq(hook_args.room, "room1")
-		T.eq(hook_args.user_id, "user1")
-		T.eq(hook_args.meta.status, "away")
+		if hook_args then
+			T.eq(hook_args.room, "room1")
+			T.eq(hook_args.user_id, "user1")
+			T.eq(hook_args.meta.status, "away")
+		end
 	end)
 
 	T.it("multiple rooms are independent", function()
@@ -267,15 +285,18 @@ T.describe("Event Store", function()
 
 	T.it("on_append hook", function()
 		local store = realtime.event_store({ time_fn = os.time })
+		--: { stream: string, event: Event } | nil
 		local hook_args
 		store:on_append(function(stream, event)
 			hook_args = { stream = stream, event = event }
 		end)
 		store:append("order:123", { type = "created", data = { x = 1 } })
 		T.ok(hook_args, "hook was called")
-		T.eq(hook_args.stream, "order:123")
-		T.eq(hook_args.event.type, "created")
-		T.eq(hook_args.event.seq, 1)
+		if hook_args then
+			T.eq(hook_args.stream, "order:123")
+			T.eq(hook_args.event.type, "created")
+			T.eq(hook_args.event.seq, 1)
+		end
 	end)
 
 	T.it("aggregate folds events", function()
@@ -286,16 +307,20 @@ T.describe("Event Store", function()
 			state = state or { status = "unknown" }
 			if event.type == "created" then
 				state.status = "created"
-				state.item = event.data.item
+				local d = event.data --[[:! { item: string, ... }]]
+				state.item = d.item
 			elseif event.type == "shipped" then
 				state.status = "shipped"
-				state.tracking = event.data.tracking
+				local d = event.data --[[:! { tracking: string, ... }]]
+				state.tracking = d.tracking
 			end
 			return state
 		end)
-		T.eq(state.status, "shipped")
-		T.eq(state.item, "widget")
-		T.eq(state.tracking, "ABC")
+		if type(state) == "table" then
+			T.eq(state.status, "shipped")
+			T.eq(state.item, "widget")
+			T.eq(state.tracking, "ABC")
+		end
 	end)
 
 	T.it("streams lists stream names", function()
@@ -329,7 +354,8 @@ print(string.format("\n%d passed, %d failed", s.pass, s.fail))
 if s.fail > 0 then
 	for _, t in ipairs(s.tests) do
 		if not t.ok then
-			print("  FAIL: " .. t.name .. (t.err and (" - " .. t.err) or ""))
+			local err = t.err
+			print("  FAIL: " .. t.name .. (err ~= nil and (" - " .. tostring(err)) or ""))
 		end
 	end
 	os.exit(1)

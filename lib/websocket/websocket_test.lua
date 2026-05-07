@@ -18,34 +18,37 @@ local T  = require("lib.test.assert")
 -- opcode: integer (0–15)
 -- fin: boolean
 -- payload: string (unmasked)
--- mask_bytes: {integer,integer,integer,integer} (4-byte mask key)
+--: (integer, boolean, string, { [integer]: integer }) -> string
 local function make_client_frame(opcode, fin, payload, mask_bytes)
 	local b0 = bit.bor(fin and 0x80 or 0, opcode)
 	local len = #payload
-	local header
+	local header_parts = {}
 	if len <= 125 then
-		header = string.char(b0, bit.bor(0x80, len))
+		header_parts[1] = string.char(b0, bit.bor(0x80, len))
 	elseif len <= 0xffff then
-		header = string.char(
+		header_parts[1] = string.char(
 			b0, bit.bor(0x80, 126),
 			bit.rshift(len, 8), bit.band(len, 0xff)
 		)
 	else
 		error("test helper: payload too large")
 	end
+	local header = header_parts[1] or ""
 	local mask_str = string.char(
 		mask_bytes[1], mask_bytes[2], mask_bytes[3], mask_bytes[4]
 	)
 	-- mask the payload
 	local mi = 1
 	local masked = {}
+	--: { [integer]: integer }
 	local mi_next = { 2, 3, 4, 1 }
 	for i = 1, #payload do
-		masked[i] = bit.bxor(payload:byte(i), mask_bytes[mi])
-		mi = mi_next[mi]
+		local b = payload:byte(i) or 0
+		masked[i] = bit.bxor(b, mask_bytes[mi])
+		mi = (mi_next[mi] --[[:! integer]])
 	end
 	local masked_str = ""
-	for i = 1, #masked do masked_str = masked_str .. string.char(masked[i]) end
+	for i = 1, #masked do masked_str = masked_str .. string.char(masked[i] or 0) end
 	return header .. mask_str .. masked_str
 end
 
@@ -93,8 +96,10 @@ T.describe("encode", function()
 	end)
 
 	T.it("empty payload: length byte 0", function()
+		--: string | nil
 		local frame = ws._encode({ type = "text", payload = "" })
 		T.ok(frame ~= nil)
+		if not frame then return end
 		T.eq(frame:byte(2), 0, "length 0")
 		T.eq(#frame, 2, "header only, no payload bytes")
 	end)
@@ -102,6 +107,7 @@ T.describe("encode", function()
 	T.it("nil payload treated as empty string", function()
 		local frame = ws._encode({ type = "text" })
 		T.ok(frame ~= nil)
+		if not frame then return end
 		T.eq(frame:byte(2), 0, "length 0")
 	end)
 
@@ -186,8 +192,10 @@ T.describe("decode", function()
 		local frame = make_client_frame(0x2, true, "\xde\xad\xbe\xef", { 0xca, 0xfe, 0xba, 0xbe })
 		local msg = ws._decode(frame)
 		T.ok(msg ~= nil)
+		if not msg then return end
 		T.eq(msg.type, "binary", "type is binary")
-		T.eq(#msg.payload, 4, "payload length")
+		local payload = msg.payload or ""
+		T.eq(#payload, 4, "payload length")
 	end)
 
 	T.it("ping frame", function()
@@ -286,8 +294,10 @@ end)
 
 T.describe("close frame structure", function()
 	T.it("encode close frame with no payload", function()
+		--: string | nil
 		local frame = ws._encode({ type = "close", payload = "" })
 		T.ok(frame ~= nil)
+		if not frame then return end
 		T.eq(frame:byte(1), 0x88, "FIN + close opcode")
 		T.eq(frame:byte(2), 0,    "length = 0")
 		T.eq(#frame, 2, "frame is header only")
@@ -299,6 +309,7 @@ T.describe("close frame structure", function()
 		local reason       = "bye"
 		local frame = ws._encode({ type = "close", payload = status_bytes .. reason })
 		T.ok(frame ~= nil)
+		if not frame then return end
 		T.eq(frame:byte(1), 0x88, "close opcode")
 		T.eq(frame:byte(2), 5,    "2-byte status + 3-byte reason = 5")
 		T.eq(frame:sub(3, 4), status_bytes, "status bytes in payload")
@@ -413,13 +424,17 @@ end)
 T.describe("encode_masked", function()
 	T.it("produces masked frame decodable by decode", function()
 		local msg = { type = "text", payload = "hello" }
+		--: string | nil
 		local masked = frame.encode_masked(msg, 0x37, 0xfa, 0x21, 0x3d)
 		T.ok(masked ~= nil)
+		if not masked then return end
 		-- mask bit should be set
-		T.ok(bit.band(masked:byte(2), 0x80) ~= 0, "mask bit set")
+		T.ok(bit.band(masked:byte(2) or 0, 0x80) ~= 0, "mask bit set")
 		-- decode should recover original
+		--: { type: string, payload?: string, status?: integer } | nil
 		local decoded, fin = frame.decode(masked)
 		T.ok(decoded ~= nil)
+		if not decoded then return end
 		T.eq(decoded.payload, "hello")
 		T.eq(fin, true)
 	end)
@@ -427,30 +442,42 @@ T.describe("encode_masked", function()
 	T.it("binary frame masked round-trip", function()
 		local payload = "\x00\x01\x02\xff\xfe\xfd"
 		local msg = { type = "binary", payload = payload }
+		--: string | nil
 		local masked = frame.encode_masked(msg, 0xab, 0xcd, 0xef, 0x01)
 		T.ok(masked ~= nil)
+		if not masked then return end
+		--: { type: string, payload?: string, status?: integer } | nil
 		local decoded = frame.decode(masked)
 		T.ok(decoded ~= nil)
+		if not decoded then return end
 		T.eq(decoded.payload, payload)
 		T.eq(decoded.type, "binary")
 	end)
 
 	T.it("ping frame masked round-trip", function()
 		local msg = { type = "ping", payload = "keepalive" }
+		--: string | nil
 		local masked = frame.encode_masked(msg, 0x11, 0x22, 0x33, 0x44)
 		T.ok(masked ~= nil)
+		if not masked then return end
+		--: { type: string, payload?: string, status?: integer } | nil
 		local decoded = frame.decode(masked)
 		T.ok(decoded ~= nil)
+		if not decoded then return end
 		T.eq(decoded.type, "ping")
 		T.eq(decoded.payload, "keepalive")
 	end)
 
 	T.it("empty payload", function()
 		local msg = { type = "text", payload = "" }
+		--: string | nil
 		local masked = frame.encode_masked(msg, 0x01, 0x02, 0x03, 0x04)
 		T.ok(masked ~= nil)
+		if not masked then return end
+		--: { type: string, payload?: string, status?: integer } | nil
 		local decoded = frame.decode(masked)
 		T.ok(decoded ~= nil)
+		if not decoded then return end
 		T.eq(decoded.payload, "")
 	end)
 
@@ -465,8 +492,10 @@ end)
 T.describe("large payload", function()
 	T.it("encode uses 64-bit length for >65535 bytes", function()
 		local payload = string.rep("x", 65536)
+		--: string | nil
 		local encoded = frame.encode({ type = "binary", payload = payload })
 		T.ok(encoded ~= nil)
+		if not encoded then return end
 		-- byte 2 should be 127 (64-bit length indicator), no mask bit on server frame
 		T.eq(encoded:byte(2), 127)
 		-- verify total length: 2 (header) + 8 (length) + 65536 (payload) = 65546

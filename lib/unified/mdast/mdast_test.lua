@@ -9,10 +9,16 @@ local T    = require("lib.test.assert")
 local mdast = require("lib.unified.mdast")
 
 -- Helper: extract the first block child of the root.
-local function first(tree) return tree.children[1] end
+--: (tree: { type: string, children: { [integer]: { type: string, ... } }, ... } | nil) -> { type: string, ... }
+local function first(tree)
+  local t = tree --[[:! { type: string, children: { [integer]: { type: string, ... } }, ... }]]
+  return t.children[1]
+end
 local function child(node, ...)
-  local n = node
-  for _, k in ipairs({...}) do n = n.children[k] end
+  local n = node --[[:! { type: string, children: { [integer]: { type: string, ... } }, ... }]]
+  for _, k in ipairs({...}) do
+    n = n.children[k] --[[:! { type: string, children: { [integer]: { type: string, ... } }, ... }]]
+  end
   return n
 end
 

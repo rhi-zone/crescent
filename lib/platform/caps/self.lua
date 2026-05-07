@@ -34,10 +34,10 @@ local M = {}
 
 -- read_app_file(app, check_revoked) -> string | nil, err
 -- Opens app.path, reads all bytes, closes, returns bytes or nil+err.
---: ({ path: string, ... }, () -> (nil, string) | nil) -> (string | nil, string | nil)
+--: ({ path: string, ... }, () -> (unknown, string | nil)) -> (string | nil, string | nil)
 local function read_app_file(app, check_revoked)
-	local err_nil, err_msg = check_revoked()
-	if err_msg then return err_nil, err_msg end
+	local _, err_msg = check_revoked()
+	if err_msg then return nil, err_msg end
 	if not app.path then return nil, "app has no file path" end
 	local f0, ferr = io.open(app.path, "rb")
 	if not f0 then return nil, "self.read: " .. tostring(ferr) end
@@ -86,7 +86,7 @@ local function atomic_write(path, bytes)
 end
 
 -- self_cap(app, opts?) -> cap_table, revoke_fn
---: ({ path: string, chunks: { type: string, data: string }[] | nil, entries: { name: string, data: string }[], manifest: { name: string, ... } }, { app_id: string | nil } | nil) -> ({ _type: string, app_id: string | nil, ... }, () -> nil)
+--: ({ path: string, chunks: unknown, entries: { [number]: { name: string, data: string, mode: number, mtime: number, size: number, typeflag: string, ... } } | nil, manifest: unknown, ... }, { app_id: string | nil } | nil) -> ({ _type: string, app_id: string | nil, ... }, () -> nil)
 function M.self_cap(app, opts)
 	local revoked = false
 	local app_id = opts and opts.app_id
@@ -115,8 +115,11 @@ function M.self_cap(app, opts)
 			local err_nil, err_msg = check_revoked()
 			if err_msg then return err_nil, err_msg end
 			local paths = {}
-			for i = 1, #app.entries do
-				paths[i] = app.entries[i].name
+			local ents = app.entries
+			if type(ents) == "table" then
+				for i = 1, #ents do
+					paths[i] = ents[i].name
+				end
 			end
 			return paths
 		end,
@@ -124,6 +127,7 @@ function M.self_cap(app, opts)
 		entry = function(path)
 			local err_nil, err_msg = check_revoked()
 			if err_msg then return err_nil, err_msg end
+			if not app.entries then return nil end
 			return tar.get(app.entries, path)
 		end,
 
@@ -142,7 +146,7 @@ end
 
 -- self_write_cap(app, opts?) -> cap_table, revoke_fn
 -- Superset of self_cap that also exposes write_metadata(keyword, bytes).
---: ({ path: string, chunks: { type: string, data: string }[] | nil, entries: { name: string, data: string }[], manifest: { name: string, ... } }, { app_id: string | nil } | nil) -> ({ _type: string, app_id: string | nil, ... }, () -> nil)
+--: ({ path: string, chunks: unknown, entries: { [number]: { name: string, data: string, mode: number, mtime: number, size: number, typeflag: string, ... } } | nil, manifest: unknown, ... }, { app_id: string | nil } | nil) -> ({ _type: string, app_id: string | nil, ... }, () -> nil)
 function M.self_write_cap(app, opts)
 	local revoked = false
 	local app_id = opts and opts.app_id
@@ -168,8 +172,11 @@ function M.self_write_cap(app, opts)
 			local err_nil, err_msg = check_revoked()
 			if err_msg then return err_nil, err_msg end
 			local paths = {}
-			for i = 1, #app.entries do
-				paths[i] = app.entries[i].name
+			local ents = app.entries
+			if type(ents) == "table" then
+				for i = 1, #ents do
+					paths[i] = ents[i].name
+				end
 			end
 			return paths
 		end,
@@ -177,6 +184,7 @@ function M.self_write_cap(app, opts)
 		entry = function(path)
 			local err_nil, err_msg = check_revoked()
 			if err_msg then return err_nil, err_msg end
+			if not app.entries then return nil end
 			return tar.get(app.entries, path)
 		end,
 

@@ -7,7 +7,7 @@ local M = {}
 --:: Var = { __var: true, id: integer, name: string | nil }
 --:: Pair = { __pair: true, car: unknown, cdr: unknown }
 --:: Sub = { [integer]: unknown }
---:: Goal = (Sub) -> unknown
+--:: Goal = (Sub) -> any
 
 -- Variable counter for unique ids
 local _next_id = 0
@@ -19,9 +19,10 @@ function M.var(name)
   return { __var = true, id = _next_id, name = name }
 end
 
---: (v: unknown) -> boolean
+--: (v: unknown) -> v is Var
 function M.is_var(v)
-  return type(v) == "table" and v.__var == true
+  if type(v) ~= "table" then return false end
+  return (v --[[:! { __var: unknown, ... }]]).__var == true
 end
 
 -- Cons pairs: {__pair=true, car=a, cdr=b}
@@ -30,9 +31,10 @@ function M.cons(a, b)
   return { __pair = true, car = a, cdr = b }
 end
 
---: (v: unknown) -> boolean
+--: (v: unknown) -> v is Pair
 function M.is_pair(v)
-  return type(v) == "table" and v.__pair == true
+  if type(v) ~= "table" then return false end
+  return (v --[[:! { __pair: unknown, ... }]]).__pair == true
 end
 
 --: (p: Pair) -> unknown
@@ -53,10 +55,15 @@ function M.list(...)
   return l
 end
 
+--: (v: unknown) -> v is Var
+local is_var = M.is_var
+--: (v: unknown) -> v is Pair
+local is_pair = M.is_pair
+
 -- Walk: resolve a variable through substitution chain
 --: (v: unknown, sub: Sub) -> unknown
 local function walk(v, sub)
-  while M.is_var(v) and sub[v.id] ~= nil do
+  while is_var(v) and sub[v.id] ~= nil do
     v = sub[v.id]
   end
   return v
@@ -66,7 +73,7 @@ M.walk = walk
 -- Deep walk: recursively resolve all variables in a value
 local function walk_deep(v, sub)
   v = walk(v, sub)
-  if M.is_pair(v) then
+  if is_pair(v) then
     return M.cons(walk_deep(v.car, sub), walk_deep(v.cdr, sub))
   end
   return v
@@ -78,21 +85,24 @@ M.walk_deep = walk_deep
 local function unify(u, v, sub)
   u = walk(u, sub)
   v = walk(v, sub)
-  if M.is_var(u) and M.is_var(v) and u.id == v.id then
+  if is_var(u) and is_var(v) and u.id == v.id then
     return sub
-  elseif M.is_var(u) then
+  elseif is_var(u) then
     local s = {}
     for k, val in pairs(sub) do s[k] = val end
     s[u.id] = v
     return s
-  elseif M.is_var(v) then
+  elseif is_var(v) then
     local s = {}
     for k, val in pairs(sub) do s[k] = val end
     s[v.id] = u
     return s
-  elseif M.is_pair(u) and M.is_pair(v) then
-    local s = unify(u.car, v.car, sub)
-    if s then return unify(u.cdr, v.cdr, s) end
+  elseif is_pair(u) and is_pair(v) then
+    --: Sub | nil
+    local s_inner = unify(u.car, v.car, sub)
+    if s_inner then
+      return unify(u.cdr, v.cdr, s_inner --[[:! Sub]])
+    end
     return nil
   elseif u == v then
     return sub
@@ -106,6 +116,7 @@ M.unify = unify
 -- Streams are: nil (empty), {head, tail} (mature), function (thunk/immature)
 
 -- mplus: interleaving merge of two streams
+--: (any, any) -> any
 local function mplus(s1, s2)
   if s1 == nil then return s2 end
   if type(s1) == "function" then
@@ -116,6 +127,7 @@ end
 M.mplus = mplus
 
 -- bind: flatmap a goal over a stream
+--: (any, any) -> any
 local function bind(s, g)
   if s == nil then return nil end
   if type(s) == "function" then
@@ -131,7 +143,11 @@ local function take(n, s)
   local count = 0
   local max_steps = 100000
   local steps = 0
-  while s ~= nil and (n == nil or count < n) do
+  while s ~= nil do
+    if n ~= nil then
+      local n_int = n --[[:! number]]
+      if count >= n_int then break end
+    end
     steps = steps + 1
     if steps > max_steps then break end
     if type(s) == "function" then
@@ -186,9 +202,10 @@ function M.conj_all(...)
   if n == 0 then
     return function(sub) return { sub, nil } end
   end
-  local g = goals[1]
+  --: Goal
+  local g = goals[1] --[[:! Goal]]
   for i = 2, n do
-    g = M.conj(--[[: any]] g, --[[: any]] goals[i])
+    g = M.conj(g, goals[i] --[[:! Goal]])
   end
   return g
 end
@@ -199,11 +216,12 @@ function M.disj_all(...)
   local goals = { ... }
   local n = select("#", ...)
   if n == 0 then
-    return function() return nil end
+    return function(_sub) return nil end
   end
-  local g = goals[1]
+  --: Goal
+  local g = goals[1] --[[:! Goal]]
   for i = 2, n do
-    g = M.disj(--[[: any]] g, --[[: any]] goals[i])
+    g = M.disj(g, goals[i] --[[:! Goal]])
   end
   return g
 end
@@ -212,13 +230,14 @@ end
 --: (fn: (...Var) -> Goal) -> Goal
 function M.fresh(fn)
   local info = debug.getinfo(fn, "u")
-  local nparams = info.nparams
+  local nparams = (info and info.nparams --[[:! integer]]) or 0
   return function(sub)
+    --: { [integer]: Var }
     local vars = {}
     for i = 1, nparams do
       vars[i] = M.var()
     end
-    local goal = fn(unpack(vars))
+    local goal = fn(unpack(vars, 1, nparams)) --[[:! Goal]]
     return goal(sub)
   end
 end
@@ -226,18 +245,31 @@ end
 -- conde: each clause is a list of goals (conjunction), clauses are disjoined
 --: (...{Goal}) -> Goal
 function M.conde(...)
+  --: { [integer]: Goal[] }
   local clauses = { ... }
   local n = select("#", ...)
+  --: { [integer]: Goal }
   local goals = {}
   for i = 1, n do
-    local clause = clauses[i]
-    if #clause == 0 then
+    local clause = clauses[i] --[[:! { [integer]: Goal } ]]
+    local clause_n = #clause
+    if clause_n == 0 then
       goals[i] = function(sub) return { sub, nil } end
     else
-      goals[i] = M.conj_all(unpack(clause))
+      --: Goal
+      local g2 = clause[1] --[[:! Goal]]
+      for j = 2, clause_n do
+        g2 = M.conj(g2, clause[j] --[[:! Goal]])
+      end
+      goals[i] = g2
     end
   end
-  return M.disj_all(unpack(goals))
+  --: Goal
+  local result_goal = goals[1] --[[:! Goal]]
+  for i = 2, n do
+    result_goal = M.disj(result_goal, goals[i] --[[:! Goal]])
+  end
+  return result_goal
 end
 
 -- run: execute a goal, collect up to n results
@@ -251,12 +283,13 @@ end
 --: (n: (number | nil), fn: (...Var) -> Goal) -> { { [string]: unknown } }
 function M.run_fresh(n, fn)
   local info = debug.getinfo(fn, "u")
-  local nparams = info.nparams
+  local nparams = (info and info.nparams --[[:! integer]]) or 0
+  --: { [integer]: Var }
   local vars = {}
   for i = 1, nparams do
     vars[i] = M.var("_q" .. i)
   end
-  local goal = fn(unpack(vars))
+  local goal = fn(unpack(vars, 1, nparams)) --[[:! Goal]]
   local subs = M.run(goal, n)
   local results = {}
   for i, sub in ipairs(subs) do
@@ -277,7 +310,7 @@ end
 
 -- fail_goal: goal that always fails
 --: Goal
-function M.fail_goal()
+function M.fail_goal(_sub)
   return nil
 end
 
@@ -316,16 +349,20 @@ end
 function M.membero(x, lst)
   if type(lst) == "table" and not lst.__pair and not lst.__var then
     -- Lua array: convert to disjunction
-    local goals = {}
-    for i = 1, #lst do
-      goals[i] = M.eq(x, lst[i])
+    local lst_arr = lst --[[:! { [integer]: unknown }]]
+    local lst_n = #lst_arr
+    --: Goal
+    local g = M.eq(x, lst_arr[1])
+    for i = 2, lst_n do
+      g = M.disj(g, M.eq(x, lst_arr[i]))
     end
-    return M.disj_all(unpack(goals))
+    return g
   end
   -- Pair list
+  local pair_lst = lst --[[:! Pair]]
   return M.conde(
-    { M.eq(x, M.car(lst)) },
-    { M.membero(x, M.cdr(lst)) }
+    { M.eq(x, M.car(pair_lst)) },
+    { M.membero(x, (M.cdr(pair_lst) --[[:! { [number]: unknown }]])) }
   )
 end
 

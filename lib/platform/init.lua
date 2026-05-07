@@ -46,7 +46,10 @@ local function unpack_tarball(tardata)
 end
 
 --:: TarEntry = { name: string, mode: number, size: number, mtime: number, data: string, typeflag: string }
---:: AppRecord = { path: string, chunks: unknown, entries: { [number]: TarEntry }, manifest: unknown }
+--:: CapDecl = { type: string | nil, required: boolean | nil, host: string | nil, model: string | nil, path: string | nil, paths: unknown, allow_write: boolean | nil, scope: unknown, tables: unknown, provider: string | nil, key_name: string | nil, base_url: string | nil, provider_default: string | nil, root: string | nil, binaries: unknown, stderr: string | nil, methods: unknown, port: integer | nil, ... }
+--:: EntryDef = { main: string | nil, caps: { [string]: CapDecl | string } | nil }
+--:: Manifest = { name: string | nil, version: string | nil, entry: { [string]: EntryDef | string } | nil, caps: { [string]: CapDecl | string } | nil, default_entry: string | nil, meta: { tags: { [integer]: string } | nil, description: string | nil, ... } | nil, ... }
+--:: AppRecord = { path: string, chunks: unknown, entries: { [number]: TarEntry }, manifest: Manifest | nil, _dir_mode: boolean | nil }
 -- load_tarball_from_png(path, bytes) -> entries, chunks | nil, err
 --: (string, string) -> ({ [number]: TarEntry } | nil, unknown | nil)
 local function load_tarball_from_png(path, bytes)
@@ -106,22 +109,27 @@ function M.load_app(path)
 	if not manifest_src_m then return nil, "platform: tarball has no manifest.json" end
 	local manifest_src = manifest_src_m or error("unreachable")
 
-	local manifest, jerr = json.decode(manifest_src)
-	if not manifest then return nil, "platform: manifest.json parse failed: " .. tostring(jerr) end
+	local manifest_raw, jerr = json.decode(manifest_src)
+	if not manifest_raw then return nil, "platform: manifest.json parse failed: " .. tostring(jerr) end
+	local manifest = manifest_raw --[[:! Manifest]]
 
 	return {
-		path     = path,
-		chunks   = chunks,  -- nil for raw .tar.gz
-		entries  = entries_nn,
-		manifest = manifest,
+		path      = path,
+		chunks    = chunks,  -- nil for raw .tar.gz
+		entries   = entries_nn,
+		manifest  = manifest,
+		_dir_mode = nil,
 	}
 end
 
+--:: TarLoader = (string) -> (string | nil, string | nil)
 -- make_tar_loader(entries) -> function
 -- Returns a function that resolves a module name to { source, chunkname } when
 -- the module exists in the tarball entries, or nil + error string on miss.
 -- Callers are responsible for compiling the source with the correct env via load().
+--: ({ [number]: TarEntry }) -> TarLoader
 local function make_tar_loader(entries)
+	--: TarLoader
 	return function(modname)
 		local relpath = modname:gsub("%.", "/")
 		local candidates = { --: { [number]: string }
@@ -144,6 +152,7 @@ end
 -- Top-level caps use the shorthand { cap_name = "required" | "optional" }.
 -- Per-entrypoint caps use { cap_name = { type = string, required = bool } }.
 -- Returns nil, errmsg if any required cap is absent from env.
+--: (Manifest | nil, string, { [string]: unknown, ... }) -> (boolean | nil, string | nil)
 local function validate_caps(manifest, entry_key, env)
 	local globals = env or {}
 	-- Caps may be nested under a "caps" table (new style) or top-level (old style)
@@ -180,7 +189,7 @@ end
 -- run_entry(app, entry_key, env, opts?) -> ok, result | err
 -- Looks up entry_key in app.manifest.entry, finds the file in app.entries,
 -- injects a tar-backed require loader into env, and runs the entrypoint.
---: (AppRecord, string, { [string]: unknown, ... }, unknown) -> unknown
+--: (AppRecord, string, { [string]: unknown, ... }, { name: string | nil, ... } | nil) -> unknown
 function M.run_entry(app, entry_key, env, opts)
 	local entry_map = app.manifest and app.manifest.entry
 	if not entry_map then
@@ -207,11 +216,11 @@ function M.run_entry(app, entry_key, env, opts)
 	end
 	local src = src_m or error("unreachable")
 
-	opts = opts or {}
-	opts.name = opts.name or ("@" .. tostring(entry_path))
+	local run_opts = opts or {} --[[:! { name: string | nil, ... }]]
+	run_opts.name = run_opts.name or ("@" .. tostring(entry_path))
 
 	local tar_loader = make_tar_loader(app.entries)
-	local base_require = env.require
+	local base_require = env.require --[[:! ((string) -> unknown) | nil]]
 
 	-- module_env: sandbox env without caps — modules loaded via require must not
 	-- see caps; only the entrypoint receives them (passed explicitly as args).
@@ -231,13 +240,13 @@ function M.run_entry(app, entry_key, env, opts)
 		if src_m then
 			-- Compile in module_env (sandbox without caps).
 			local chunk, lerr = load(src_m, chunkname_or_err, "t", module_env)
-			if not chunk then
-				error("platform: error loading '" .. tostring(modname) .. "': " .. tostring(lerr), 2)
+			if chunk then
+				local result = chunk()
+				-- Cache true (not nil/false) so absent-return modules don't re-run.
+				package_loaded[modname] = (result ~= nil) and result or true
+				return result
 			end
-			local result = chunk()
-			-- Cache true (not nil/false) so absent-return modules don't re-run.
-			package_loaded[modname] = (result ~= nil) and result or true
-			return result
+			error("platform: error loading '" .. tostring(modname) .. "': " .. tostring(lerr), 2)
 		end
 		if base_require then
 			return base_require(modname)
@@ -253,7 +262,7 @@ function M.run_entry(app, entry_key, env, opts)
 	-- same app_require (allowing transitive tarball-internal requires).
 	module_env.require = app_require
 
-	return sandbox.run(src, app_env, opts)
+	return sandbox.run(src, app_env, run_opts)
 end
 
 -- load_and_run_entry(path, entry_key, env, opts?) -> ok, result | err
@@ -296,6 +305,7 @@ local CAP_FACTORIES = {
 		build = function(decl)
 			return require("lib.platform.caps.http_server").http_server_cap({
 					port = decl.port or 0, host = nil, daemon = nil, url = nil, on_serve = nil,
+					tcp_nodelay = nil,
 				})
 		end,
 	},
@@ -342,7 +352,9 @@ local CAP_FACTORIES = {
 			local api_key
 			local key_name = decl.key_name
 			if key_name then
-				local ok_kr, keyring = pcall(require, "lib.keyring")
+				local ok_kr, keyring_raw = pcall(require, "lib.keyring")
+				local keyring_any = keyring_raw --[[: any]]
+				local keyring = keyring_any --[[:! { get: (string) -> (string | nil), set: (string, string) -> string | nil } | nil]]
 				if ok_kr and keyring then
 					local kr_key = keyring.get("crescent/" .. key_name)
 					if kr_key then
@@ -352,7 +364,7 @@ local CAP_FACTORIES = {
 						local env_key = os.getenv("LLM_API_KEY")
 							or os.getenv("ANTHROPIC_API_KEY")
 							or os.getenv("OPENAI_API_KEY")
-						if env_key then
+						if type(env_key) == "string" then
 							keyring.set("crescent/" .. key_name, env_key)
 							api_key = env_key
 						end
@@ -433,9 +445,11 @@ local CAP_FACTORIES = {
 	exec = {
 		mod = "lib.platform.caps.exec",
 		build = function(decl)
+			local d = decl --[[:! CapDecl]]
 			return require("lib.platform.caps.exec").new({
-				binaries = decl.binaries or {},
-				stderr   = decl.stderr,
+				binaries = d.binaries --[[:! { [string]: { schema: unknown, allow: string[] | nil } }]] or {},
+				stderr   = d.stderr,
+				popen    = nil,
 			})
 		end,
 	},
@@ -613,7 +627,8 @@ function M.run_app(path, entry_key, opts)
 	local env = sandbox.env(sandbox.stdlib, cap_bundle)
 
 	-- Run
-	local ok, result = M.run_entry(app, entry_key, env, opts.sandbox_opts)
+	local sandbox_opts = opts.sandbox_opts --[[:! { name: string | nil, ... } | nil]]
+	local ok, result = M.run_entry(app, entry_key, env, sandbox_opts)
 	return ok, result, revoke_fns
 end
 

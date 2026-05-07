@@ -170,7 +170,7 @@ local function try_parse_table(para)
   local rows = {}
   rows[1] = make_row(header_cells, true)
   for i = 1, #data_rows do
-    rows[#rows + 1] = make_row(data_rows[i])
+    rows[#rows + 1] = make_row(data_rows[i], false)
   end
 
   return {
@@ -188,9 +188,10 @@ local URL_PATTERN = "https?://[^%s<>]+"
 -- Process a single text node value, splitting it into a sequence of inline
 -- nodes after applying strikethrough (~~...~~) and autolink transforms.
 -- Returns an array of inline nodes (may be a single text node if no matches).
+--: (value: string) -> any
 local function transform_text_value(value)
-  local result = {}
-  local pos = 1
+  local result = {} --[[: any]]
+  local pos = 1  --: integer
   local len = #value
 
   while pos <= len do
@@ -201,15 +202,15 @@ local function transform_text_value(value)
     -- If there's a strike opener, check for a closer.
     local strike_close_s, strike_close_e
     if strike_s then
-      strike_close_s, strike_close_e = str_find(value, "~~", strike_e + 1, true)
+      strike_close_s, strike_close_e = str_find(value, "~~", (strike_e --[[:! integer]]) + 1, true)
     end
 
     -- Decide which match comes first.
     local has_strike = strike_s and strike_close_s
     local has_url    = url_s ~= nil
 
-    local next_strike = has_strike and strike_s or math.huge
-    local next_url    = has_url    and url_s    or math.huge
+    local next_strike = has_strike and (strike_s or len + 1) or len + 1  --: integer
+    local next_url    = has_url    and (url_s    or len + 1) or len + 1  --: integer
 
     if not has_strike and not has_url then
       -- No more special syntax: flush remaining text.
@@ -219,30 +220,36 @@ local function transform_text_value(value)
       break
     elseif next_strike <= next_url then
       -- Emit text before the ~~.
-      if strike_s > pos then
-        result[#result + 1] = { type = "text", value = str_sub(value, pos, strike_s - 1) }
+      local ss = strike_s --[[:! integer]]
+      local se = strike_e --[[:! integer]]
+      local scs = strike_close_s --[[:! integer]]
+      local sce = strike_close_e --[[:! integer]]
+      if ss > pos then
+        result[#result + 1] = { type = "text", value = str_sub(value, pos, ss - 1) }
       end
       -- Emit delete node.
-      local inner = str_sub(value, strike_e + 1, strike_close_s - 1)
+      local inner = str_sub(value, se + 1, scs - 1)
       result[#result + 1] = {
         type     = "delete",
         children = { { type = "text", value = inner } },
       }
-      pos = strike_close_e + 1
+      pos = sce + 1
     else
       -- Emit text before the URL.
-      if url_s > pos then
-        result[#result + 1] = { type = "text", value = str_sub(value, pos, url_s - 1) }
+      local us = url_s --[[:! integer]]
+      local ue = url_e --[[:! integer]]
+      if us > pos then
+        result[#result + 1] = { type = "text", value = str_sub(value, pos, us - 1) }
       end
       -- Emit link node for the bare URL.
-      local url = str_sub(value, url_s, url_e)
+      local url = str_sub(value, us, ue)
       result[#result + 1] = {
         type     = "link",
         url      = url,
         title    = nil,
         children = { { type = "text", value = url } },
       }
-      pos = url_e + 1
+      pos = ue + 1
     end
   end
 
@@ -275,9 +282,11 @@ end
 
 -- Returns true/false if the listItem starts with [ ]/[x], nil otherwise.
 -- Mutates the listItem to strip the checkbox prefix and set .checked.
+--: (item: { type: string, ... }) -> nil
 local function try_task_list_item(item)
-  if not item.children or #item.children == 0 then return end
-  local first_child = item.children[1]
+  local item_any = item --[[: any]]
+  if not item_any.children or #item_any.children == 0 then return end
+  local first_child = item_any.children[1]
   -- The first child should be a paragraph (tight list) or directly inline nodes.
   local inlines
   if first_child.type == "paragraph" then
@@ -285,8 +294,9 @@ local function try_task_list_item(item)
   elseif first_child.type == "text" then
     inlines = item.children
   end
-  if not inlines or #inlines == 0 then return end
-  local first_inline = inlines[1]
+  local inlines_any = inlines --[[: any]]
+  if not inlines_any or #inlines_any == 0 then return end
+  local first_inline = inlines_any[1] --[[: any]]
   if first_inline.type ~= "text" then return end
   local v = first_inline.value or ""
   local checked, rest

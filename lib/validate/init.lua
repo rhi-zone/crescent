@@ -4,6 +4,8 @@ end
 
 local M = {}
 
+--:: Validator = (value: unknown) -> (boolean | nil, string | nil)
+
 -- Helper: type name for error messages
 local function typename(v)
   if v == nil then return "nil" end
@@ -12,7 +14,7 @@ end
 
 -- Primitive validators
 
---: () -> (value: unknown) -> true | (nil, string)
+--: ({ min?: integer, max?: integer, pattern?: string, enum?: string[] } | nil) -> Validator
 function M.string(opts)
   return function(value)
     if type(value) ~= "string" then
@@ -34,7 +36,7 @@ function M.string(opts)
           if value == opts.enum[i] then found = true; break end
         end
         if not found then
-          local allowed = {}
+          local allowed = {} --: Arr<string>
           for i = 1, #opts.enum do allowed[i] = "'" .. opts.enum[i] .. "'" end
           return nil, "string '" .. value .. "' is not one of " .. table.concat(allowed, ", ")
         end
@@ -44,7 +46,7 @@ function M.string(opts)
   end
 end
 
---: () -> (value: unknown) -> true | (nil, string)
+--: ({ integer?: boolean, min?: number, max?: number } | nil) -> Validator
 function M.number(opts)
   return function(value)
     if type(value) ~= "number" then
@@ -65,7 +67,7 @@ function M.number(opts)
   end
 end
 
---: () -> (value: unknown) -> true | (nil, string)
+--: ({ min?: integer, max?: integer } | nil) -> Validator
 function M.integer(opts)
   return function(value)
     if type(value) ~= "number" then
@@ -86,7 +88,7 @@ function M.integer(opts)
   end
 end
 
---: () -> (value: unknown) -> true | (nil, string)
+--: () -> Validator
 function M.boolean()
   return function(value)
     if type(value) ~= "boolean" then
@@ -96,7 +98,7 @@ function M.boolean()
   end
 end
 
---: () -> (value: unknown) -> true | (nil, string)
+--: () -> Validator
 function M.table()
   return function(value)
     if type(value) ~= "table" then
@@ -106,7 +108,7 @@ function M.table()
   end
 end
 
---: () -> (value: unknown) -> true | (nil, string)
+--: () -> Validator
 function M.func()
   return function(value)
     if type(value) ~= "function" then
@@ -116,14 +118,14 @@ function M.func()
   end
 end
 
---: () -> (value: unknown) -> true | (nil, string)
+--: () -> Validator
 function M.any()
-  return function()
+  return function(_value)
     return true
   end
 end
 
---: () -> (value: unknown) -> true | (nil, string)
+--: () -> Validator
 function M.nil_()
   return function(value)
     if value ~= nil then
@@ -133,7 +135,7 @@ function M.nil_()
   end
 end
 
---: (x: unknown) -> (value: unknown) -> true | (nil, string)
+--: (x: unknown) -> Validator
 function M.literal(x)
   return function(value)
     if value ~= x then
@@ -147,31 +149,32 @@ end
 
 -- Combinators
 
---: (validator: (value: unknown) -> true | (nil, string)) -> (value: unknown) -> true | (nil, string)
+--: (validator: Validator) -> Validator
 function M.optional(validator)
   return function(value)
     if value == nil then return true end
-    return validator(value)
+    local ok, err = validator(value)
+    return ok, err
   end
 end
 
---: (...((value: unknown) -> true | (nil, string))) -> ((value: unknown) -> true | (nil, string))
+--: (...Validator) -> Validator
 function M.one_of(...)
-  local validators = { ... }
+  local validators = { ... } --: Validator[]
   return function(value)
-    local errs = {}
+    local errs = {} --: Arr<string>
     for i = 1, #validators do
       local ok, err = validators[i](value)
       if ok then return true end
-      errs[#errs + 1] = err
+      errs[#errs + 1] = err or ""
     end
     return nil, "none of the validators matched: " .. table.concat(errs, "; ")
   end
 end
 
---: (...((value: unknown) -> true | (nil, string))) -> ((value: unknown) -> true | (nil, string))
+--: (...Validator) -> Validator
 function M.all_of(...)
-  local validators = { ... }
+  local validators = { ... } --: Validator[]
   return function(value)
     for i = 1, #validators do
       local ok, err = validators[i](value)
@@ -181,7 +184,7 @@ function M.all_of(...)
   end
 end
 
---: (elem_validator: (value: unknown) -> true | (nil, string), opts: { min: number, max: number } | nil) -> (value: unknown) -> true | (nil, string)
+--: (elem_validator: Validator, opts: { min?: number, max?: number } | nil) -> Validator
 function M.array(elem_validator, opts)
   return function(value)
     if type(value) ~= "table" then
@@ -196,11 +199,11 @@ function M.array(elem_validator, opts)
         return nil, "array length " .. n .. " is greater than maximum " .. opts.max
       end
     end
-    local errs = {}
+    local errs = {} --: Arr<string>
     for i = 1, n do
       local ok, err = elem_validator(value[i])
       if not ok then
-        errs[#errs + 1] = "[" .. i .. "]: " .. err
+        errs[#errs + 1] = "[" .. i .. "]: " .. (err or "")
       end
     end
     if #errs > 0 then
@@ -210,21 +213,21 @@ function M.array(elem_validator, opts)
   end
 end
 
---: (key_validator: (value: unknown) -> true | (nil, string), val_validator: (value: unknown) -> true | (nil, string)) -> (value: unknown) -> true | (nil, string)
+--: (key_validator: Validator, val_validator: Validator) -> Validator
 function M.map(key_validator, val_validator)
   return function(value)
     if type(value) ~= "table" then
       return nil, "expected map, got " .. typename(value)
     end
-    local errs = {}
+    local errs = {} --: Arr<string>
     for k, v in pairs(value) do
       local ok, err = key_validator(k)
       if not ok then
-        errs[#errs + 1] = "key " .. tostring(k) .. ": " .. err
+        errs[#errs + 1] = "key " .. tostring(k) .. ": " .. (err or "")
       end
-      ok, err = val_validator(v)
-      if not ok then
-        errs[#errs + 1] = "[" .. tostring(k) .. "]: " .. err
+      local ok2, err2 = val_validator(v)
+      if not ok2 then
+        errs[#errs + 1] = "[" .. tostring(k) .. "]: " .. (err2 or "")
       end
     end
     if #errs > 0 then
@@ -234,17 +237,17 @@ function M.map(key_validator, val_validator)
   end
 end
 
---: (schema: { [string]: (value: unknown) -> true | (nil, string) }) -> (value: unknown) -> true | (nil, string)
+--: (schema: { [string]: Validator }) -> Validator
 function M.record(schema)
   return function(value)
     if type(value) ~= "table" then
       return nil, "expected record, got " .. typename(value)
     end
-    local errs = {}
+    local errs = {} --: Arr<string>
     for field, validator in pairs(schema) do
       local ok, err = validator(value[field])
       if not ok then
-        errs[#errs + 1] = field .. ": " .. err
+        errs[#errs + 1] = field .. ": " .. (err or "")
       end
     end
     if #errs > 0 then
@@ -256,7 +259,7 @@ function M.record(schema)
   end
 end
 
---: (fn: (value: unknown) -> true | (nil, string)) -> (value: unknown) -> true | (nil, string)
+--: (fn: Validator) -> Validator
 function M.custom(fn)
   return fn
 end

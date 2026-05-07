@@ -11,7 +11,9 @@ local table_sort = table.sort
 
 local M = {}
 
---:: Corpus = { docs: { [string]: unknown }, df: { [string]: integer }, doc_n: integer, idf_cache: unknown, opts: unknown }
+--:: CorpusOpts = { tokenize?: (text: string, opts: unknown) -> { [integer]: string }, stopwords?: { [string]: boolean } }
+--:: CorpusDoc = { text: string, tf: { [string]: number } }
+--:: Corpus = { docs: { [string]: CorpusDoc }, df: { [string]: number }, doc_n: number, idf_cache: { [string]: number } | nil, opts: CorpusOpts | nil, add: (self: Corpus, id: string, text: string) -> nil, remove: (self: Corpus, id: string) -> nil, doc_count: (self: Corpus) -> number, idf: (self: Corpus, term: string) -> number, tfidf: (self: Corpus, id: string) -> ({ [string]: number } | nil, string | nil), tfidf_query: (self: Corpus, query: string) -> { [string]: number }, similarity: (self: Corpus, id_a: string, id_b: string) -> (number | nil, string | nil), search: (self: Corpus, query: string, opts: { limit?: number } | nil) -> { id: string, score: number }[], vocab: (self: Corpus) -> string[], vocab_size: (self: Corpus) -> number, keywords: (self: Corpus, id: string, opts: { limit?: number } | nil) -> ({ term: string, score: number }[] | nil, string | nil) }
 
 -- ── Default stopwords (English, ~80 common words) ───────────────────────
 --: { [string]: boolean }
@@ -37,7 +39,7 @@ M.DEFAULT_STOPWORDS = DEFAULT_STOPWORDS
 
 -- ── Tokenizer ───────────────────────────────────────────────────────────
 
---: (text: string, opts: ({ stopwords: ({ [string]: boolean }  | nil)} | nil)) -> string[]
+--: (text: string, opts: CorpusOpts | nil) -> { [integer]: string }
 function M.tokenize(text, opts)
   local lower = string_lower(text)
   local cleaned = string_gsub(lower, "[^%w%s]", " ")
@@ -55,9 +57,12 @@ end
 
 -- ── Term Frequency ──────────────────────────────────────────────────────
 
---: (text: string, opts: ({ tokenize: ((string) -> string[]) | nil, stopwords: { [string]: boolean } } | nil)) -> { [string]: number }
+--: (text: string, opts: CorpusOpts | nil) -> { [string]: number }
 function M.tf(text, opts)
-  local tokenize_fn = opts and opts.tokenize or M.tokenize
+  local tokenize_fn = M.tokenize --: (string, CorpusOpts | nil) -> { [integer]: string }
+  if opts and opts.tokenize then
+    tokenize_fn = opts.tokenize --[[:! (string, CorpusOpts | nil) -> { [integer]: string } ]]
+  end
   local tokens = tokenize_fn(text, opts)
   local counts = {}
   for j = 1, #tokens do
@@ -67,13 +72,16 @@ function M.tf(text, opts)
   return counts
 end
 
---: (text: string, opts: ({ tokenize: ((string) -> string[]) | nil, stopwords: { [string]: boolean } } | nil)) -> { [string]: number }
+--: (text: string, opts: CorpusOpts | nil) -> { [string]: number }
 function M.tf_normalized(text, opts)
-  local tokenize_fn = opts and opts.tokenize or M.tokenize
+  local tokenize_fn = M.tokenize --: (string, CorpusOpts | nil) -> { [integer]: string }
+  if opts and opts.tokenize then
+    tokenize_fn = opts.tokenize --[[:! (string, CorpusOpts | nil) -> { [integer]: string } ]]
+  end
   local tokens = tokenize_fn(text, opts)
   local total = #tokens
   if total == 0 then return {} end
-  local counts = {}
+  local counts = {} --: { [string]: number }
   for j = 1, #tokens do
     local t = tokens[j]
     counts[t] = (counts[t] or 0) + 1
@@ -89,9 +97,9 @@ end
 
 --: (a: { [string]: number }, b: { [string]: number }) -> number
 function M.cosine_similarity(a, b)
-  local dot = 0
-  local norm_a = 0
-  local norm_b = 0
+  local dot = 0 --: number
+  local norm_a = 0 --: number
+  local norm_b = 0 --: number
   for term, va in pairs(a) do
     norm_a = norm_a + va * va
     local vb = b[term]
@@ -108,20 +116,19 @@ end
 
 -- ── Corpus ──────────────────────────────────────────────────────────────
 
---: { docs: { [string]: { text: string, tf: { [string]: number } } }, df: { [string]: number }, doc_n: number, idf_cache: ({ [string]: number } | nil), opts: ({ tokenize: ((string) -> string[]) | nil, stopwords: { [string]: boolean } } | nil) }
 local Corpus = {}
 Corpus.__index = Corpus
 
---: (opts: ({ tokenize: ((string) -> string[]) | nil, stopwords: { [string]: boolean } } | nil)) -> Corpus
+--: (opts: CorpusOpts | nil) -> Corpus
 function M.corpus(opts)
   local self = {
-    docs = {},
-    df = {},
-    doc_n = 0,
-    idf_cache = nil,
+    docs = {} --[[:! { [string]: CorpusDoc }]],
+    df = {} --[[:! { [string]: number }]],
+    doc_n = 0 --[[: number]],
+    idf_cache = nil --[[: { [string]: number } | nil]],
     opts = opts,
-  }
-  return setmetatable(self, Corpus)
+  } --[[:! Corpus]]
+  return setmetatable(self, Corpus) --[[:! Corpus]]
 end
 
 --: (self: Corpus, id: string, text: string) -> nil
@@ -129,9 +136,12 @@ function Corpus:add(id, text)
   if self.docs[id] then
     self:remove(id)
   end
-  local tokenize_fn = self.opts and self.opts.tokenize or M.tokenize
+  local tokenize_fn = M.tokenize --: (string, CorpusOpts | nil) -> { [integer]: string }
+  if self.opts and self.opts.tokenize then
+    tokenize_fn = self.opts.tokenize --[[:! (string, CorpusOpts | nil) -> { [integer]: string } ]]
+  end
   local tokens = tokenize_fn(text, self.opts)
-  local tf_counts = {}
+  local tf_counts = {} --: { [string]: number }
   for j = 1, #tokens do
     local t = tokens[j]
     tf_counts[t] = (tf_counts[t] or 0) + 1
@@ -193,15 +203,15 @@ end
 function Corpus:tfidf(id)
   local doc = self.docs[id]
   if not doc then return nil, "document not found: " .. tostring(id) end
-  local tf_counts = doc.tf
+  local tf_counts = doc.tf --: { [string]: number }
   -- Count total terms for normalization
-  local total = 0
+  local total = 0 --: number
   for _, count in pairs(tf_counts) do
     total = total + count
   end
   if total == 0 then return {} end
   local inv = 1 / total
-  local vec = {}
+  local vec = {} --: { [string]: number }
   for term, count in pairs(tf_counts) do
     vec[term] = (count * inv) * self:idf(term)
   end
@@ -211,17 +221,20 @@ end
 -- Compute TF-IDF vector for an arbitrary query string against corpus IDF
 --: (self: Corpus, query: string) -> { [string]: number }
 function Corpus:tfidf_query(query)
-  local tokenize_fn = self.opts and self.opts.tokenize or M.tokenize
+  local tokenize_fn = M.tokenize --: (string, CorpusOpts | nil) -> { [integer]: string }
+  if self.opts and self.opts.tokenize then
+    tokenize_fn = self.opts.tokenize --[[:! (string, CorpusOpts | nil) -> { [integer]: string } ]]
+  end
   local tokens = tokenize_fn(query, self.opts)
   local total = #tokens
   if total == 0 then return {} end
-  local tf_counts = {}
+  local tf_counts = {} --: { [string]: number }
   for j = 1, #tokens do
     local t = tokens[j]
     tf_counts[t] = (tf_counts[t] or 0) + 1
   end
   local inv = 1 / total
-  local vec = {}
+  local vec = {} --: { [string]: number }
   for term, count in pairs(tf_counts) do
     vec[term] = (count * inv) * self:idf(term)
   end
@@ -235,7 +248,7 @@ function Corpus:similarity(id_a, id_b)
   if not vec_a then return nil, err_a end
   local vec_b, err_b = self:tfidf(id_b)
   if not vec_b then return nil, err_b end
-  return M.cosine_similarity(vec_a, vec_b)
+  return M.cosine_similarity(vec_a --[[:! { [string]: number }]], vec_b --[[:! { [string]: number }]])
 end
 
 -- Search: rank documents by cosine similarity to query
@@ -249,21 +262,24 @@ function Corpus:search(query, opts)
     break
   end
   if not has_terms then return {} end
-  local results = {}
+  local results = {} --: { [integer]: { id: string, score: number } }
   local n = 0
   for id in pairs(self.docs) do
     local d_vec = self:tfidf(id)
-    local score = M.cosine_similarity(q_vec, d_vec)
-    if score > 0 then
-      n = n + 1
-      results[n] = { id = id, score = score }
+    if d_vec then
+      local score = M.cosine_similarity(q_vec, d_vec --[[:! { [string]: number }]])
+      if score > 0 then
+        n = n + 1
+        results[n] = { id = id, score = score }
+      end
     end
   end
-  table_sort(results, function(a, b) return a.score > b.score end)
-  local limit = opts and opts.limit
-  if limit and limit < n then
+  table.sort(results, function(a, b) return a.score > b.score end)
+  local limit = opts and opts.limit --: number | nil
+  if limit ~= nil and limit < n then
+    local results_any = results --[[: { [integer]: { id: string, score: number } | nil }]]
     for j = limit + 1, n do
-      results[j] = nil
+      results_any[j] = nil
     end
   end
   return results
@@ -278,7 +294,7 @@ function Corpus:vocab()
     n = n + 1
     terms[n] = term
   end
-  table_sort(terms)
+  table.sort(terms --[[: any]])
   return terms
 end
 
@@ -294,19 +310,21 @@ end
 -- Top-k terms by TF-IDF score for a document
 --: (self: Corpus, id: string, opts: ({ limit: (number | nil) } | nil)) -> ({ term: string, score: number }[] | nil, string | nil)
 function Corpus:keywords(id, opts)
-  local vec, err = self:tfidf(id)
-  if not vec then return nil, err end
-  local kw = {}
+  local vec_raw, err = self:tfidf(id)
+  if not vec_raw then return nil, err end
+  local vec = vec_raw --[[:! { [string]: number }]]
+  local kw = {} --: { [integer]: { term: string, score: number } }
   local n = 0
   for term, score in pairs(vec) do
     n = n + 1
     kw[n] = { term = term, score = score }
   end
-  table_sort(kw, function(a, b) return a.score > b.score end)
-  local limit = opts and opts.limit
-  if limit and limit < n then
+  table.sort(kw --[[: any]], function(a, b) return a.score > b.score end)
+  local limit = opts and opts.limit --: number | nil
+  if limit ~= nil and limit < n then
+    local kw_any = kw --[[: { [integer]: { term: string, score: number } | nil }]]
     for j = limit + 1, n do
-      kw[j] = nil
+      kw_any[j] = nil
     end
   end
   return kw

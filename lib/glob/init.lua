@@ -30,7 +30,7 @@ end
 
 -- Parse a character class [abc], [a-z], [!abc], [^abc].
 -- Returns the index after the closing ] and a match function.
---: (pat: string, start: integer) -> (integer, (c: string) -> boolean) | (nil, string)
+--: (pat: string, start: integer) -> any
 local function _parse_char_class(pat, start)
   local i = start
   local len = #pat
@@ -75,7 +75,7 @@ end
 -- Expand brace alternation {a,b,c} into a list of alternatives.
 -- Supports nested braces.
 -- Returns the index after the closing } and a list of strings.
---: (pat: string, start: integer) -> (integer, string[]) | (nil, string)
+--: (pat: string, start: integer) -> any
 local function _parse_braces(pat, start)
   local depth = 1
   local i = start
@@ -121,7 +121,7 @@ local TOK_ALT = 6       -- {a,b} alternation (each alt is a compiled pattern)
 
 -- Compile a glob pattern into a token list.
 -- Returns a list of tokens or (nil, errmsg).
---: (pat: string) -> { type: integer, ... }[] | (nil, string)
+--: (pat: string) -> any
 local function _compile(pat)
   local tokens = --[[:! { type: integer, ... }[] ]] {}
   local i = 1
@@ -196,6 +196,7 @@ end
 
 -- Match a token list against a string starting at position si.
 -- Returns true if the entire remaining string matches.
+--: ({ type: integer, ... }[], integer, string, integer) -> boolean
 local function _match_tokens(tokens, ti, str, si)
   local tlen = #tokens
   local slen = #str
@@ -204,7 +205,7 @@ local function _match_tokens(tokens, ti, str, si)
     local tok = tokens[ti]
 
     if tok.type == TOK_LITERAL then
-      local val = tok.value
+      local val = tok.value --[[:! string]]
       local vlen = #val
       if si + vlen - 1 > slen then return false end
       if str:sub(si, si + vlen - 1) ~= val then return false end
@@ -221,7 +222,8 @@ local function _match_tokens(tokens, ti, str, si)
       if si > slen then return false end
       local c = str:sub(si, si)
       if c == "/" then return false end
-      if not tok.matcher(c) then return false end
+      local matcher = tok.matcher --[[:! (string) -> boolean]]
+      if not matcher(c) then return false end
       si = si + 1
       ti = ti + 1
 
@@ -256,13 +258,13 @@ local function _match_tokens(tokens, ti, str, si)
     elseif tok.type == TOK_ALT then
       -- Try each alternative; each alt's tokens are spliced in place
       ti = ti + 1
-      for _, alt_tokens in ipairs(tok.alts) do
+      for _, alt_tokens in ipairs(tok.alts --[[:! { [integer]: { type: integer, ... }[] }]]) do
         -- Build a combined token list: alt_tokens + remaining tokens
         -- For efficiency, do a two-phase match
         local alt_len = #alt_tokens
         -- Try to match alt_tokens starting at si
         -- Use a recursive approach: match alt, then match rest
-        local try_alt --: (integer, integer) -> boolean
+        local try_alt = nil --: ((integer, integer) -> boolean) | nil
         function try_alt(ai, sj)
           if ai > alt_len then
             -- Alt fully matched, now match the rest of the main tokens
@@ -271,36 +273,39 @@ local function _match_tokens(tokens, ti, str, si)
           -- Match one alt token
           local at = alt_tokens[ai]
           if at.type == TOK_LITERAL then
-            local val = at.value
+            local val = at.value --[[:! string]]
             local vlen = #val
             if sj + vlen - 1 > slen then return false end
             if str:sub(sj, sj + vlen - 1) ~= val then return false end
-            return try_alt(ai + 1, sj + vlen)
+            return (try_alt --[[:! (integer, integer) -> boolean]])(ai + 1, sj + vlen)
           elseif at.type == TOK_STAR then
+            local try_alt_fn = try_alt --[[:! (integer, integer) -> boolean]]
             local nai = ai + 1
             for j = sj, slen + 1 do
               if j > sj and str:sub(j - 1, j - 1) == "/" then return false end
-              if try_alt(nai, j) then return true end
+              if try_alt_fn(nai, j) then return true end
             end
             return false
           elseif at.type == TOK_GLOBSTAR then
+            local try_alt_fn = try_alt --[[:! (integer, integer) -> boolean]]
             local nai = ai + 1
             for j = sj, slen + 1 do
-              if try_alt(nai, j) then return true end
+              if try_alt_fn(nai, j) then return true end
             end
             return false
           elseif at.type == TOK_QUESTION then
             if sj > slen then return false end
             if str:sub(sj, sj) == "/" then return false end
-            return try_alt(ai + 1, sj + 1)
+            return (try_alt --[[:! (integer, integer) -> boolean]])(ai + 1, sj + 1)
           elseif at.type == TOK_CLASS then
             if sj > slen then return false end
             local c = str:sub(sj, sj)
             if c == "/" then return false end
-            if not at.matcher(c) then return false end
-            return try_alt(ai + 1, sj + 1)
+            local at_matcher = at.matcher --[[:! (string) -> boolean]]
+            if not at_matcher(c) then return false end
+            return (try_alt --[[:! (integer, integer) -> boolean]])(ai + 1, sj + 1)
           elseif at.type == TOK_ALT then
-            for _, sub_alts in ipairs(at.alts) do
+            for _, sub_alts in ipairs(at.alts --[[:! { [integer]: { type: integer, ... }[] }]]) do
               -- Recursively build combined list
               local combined = {}
               for _, t in ipairs(sub_alts) do combined[#combined + 1] = t end
@@ -336,27 +341,29 @@ function Matcher:match(str)
 end
 
 -- Compile a glob pattern into a matcher object.
---: (pattern: string) -> Matcher | (nil, string)
+--: (pattern: string) -> Matcher | nil
 function M.compile(pattern)
   local tokens, err = _compile(pattern)
-  if not tokens then return nil, err end
-  local m = setmetatable({ _tokens = tokens, _pattern = pattern }, Matcher)
+  if not tokens then return nil end
+  local m = setmetatable({ _tokens = tokens --[[:! { type: integer, ... }[] ]], _pattern = pattern }, Matcher) --[[:! Matcher]]
   return m
 end
 
 -- One-shot match: compile + match.
---: (pattern: string, str: string) -> boolean | (nil, string)
+--: (pattern: string, str: string) -> boolean | nil
 function M.match(pattern, str)
-  local m, err = M.compile(pattern)
-  if not m then return nil, err end
+  --: Matcher | nil
+  local m = M.compile(pattern)
+  if not m then return nil end
   return m:match(str)
 end
 
 -- Filter an array of strings, returning those that match the pattern.
---: (list: string[], pattern: string) -> string[] | (nil, string)
+--: (list: string[], pattern: string) -> string[] | nil
 function M.filter(list, pattern)
-  local m, err = M.compile(pattern)
-  if not m then return nil, err end
+  --: Matcher | nil
+  local m = M.compile(pattern)
+  if not m then return nil end
   local result = {}
   for _, s in ipairs(list) do
     if m:match(s) then
@@ -367,6 +374,7 @@ function M.filter(list, pattern)
 end
 
 -- Escape special characters in a Lua pattern.
+--: (string) -> string
 local function _lua_pattern_escape(c)
   -- Characters that are special in Lua patterns
   if c:find("[%(%)%.%%%+%-%*%?%[%]%^%$]") then
@@ -378,7 +386,7 @@ end
 -- Convert a glob pattern to a Lua pattern string.
 -- Note: ** and {a,b} are complex; this handles common cases.
 -- Returns a Lua pattern anchored with ^ and $.
---: (pattern: string) -> string | (nil, string)
+--: (pattern: string) -> string | nil
 function M.to_pattern(pattern)
   local parts = --[[:! string[] ]] {}
   local i = 1

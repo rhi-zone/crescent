@@ -12,7 +12,7 @@ end
 local M = {}
 
 -- cli_cap(args) -> cap_table, revoke_fn
---: (args: {string}) -> ({ args: () -> {string} | (nil, string) }, () -> ())
+--: (args: {string}) -> ({ _type: string, args: () -> ({ [number]: string } | nil, string | nil) }, () -> ())
 function M.cli_cap(args)
 	local revoked = false
 
@@ -20,7 +20,7 @@ function M.cli_cap(args)
 		_type = "cli",
 		args = function()
 			if revoked then return nil, "capability revoked" end
-			local copy = {}
+			local copy = {} --: { [integer]: string }
 			for i = 1, #args do
 				copy[i] = args[i]
 			end

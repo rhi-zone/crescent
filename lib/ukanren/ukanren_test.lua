@@ -167,12 +167,17 @@ T.describe("ukanren", function()
 
   T.describe("list helpers", function()
     T.it("list/cons/car/cdr", function()
+      --: Pair | nil
       local l = uk.list(1, 2, 3)
       T.ok(uk.is_pair(l))
-      T.eq(uk.car(l), 1)
-      T.eq(uk.car(uk.cdr(l)), 2)
-      T.eq(uk.car(uk.cdr(uk.cdr(l))), 3)
-      T.eq(uk.cdr(uk.cdr(uk.cdr(l))), nil)
+      if not l then return end
+      local l1 = l --[[:! Pair]]
+      T.eq(uk.car(l1), 1)
+      local cdr1 = uk.cdr(l1) --[[:! Pair]]
+      T.eq(uk.car(cdr1), 2)
+      local cdr2 = uk.cdr(cdr1) --[[:! Pair]]
+      T.eq(uk.car(cdr2), 3)
+      T.eq(uk.cdr(cdr2), nil)
     end)
 
     T.it("empty list is nil", function()
@@ -184,6 +189,7 @@ T.describe("ukanren", function()
   T.describe("recursive relation", function()
     T.it("ancestor via fresh+conde", function()
       -- parent(tom, bob), parent(bob, ann), parent(bob, pat)
+      --: (unknown, unknown) -> Goal
       local function parent(p, c)
         return uk.conde(
           { uk.eq(p, "tom"), uk.eq(c, "bob") },
@@ -192,6 +198,7 @@ T.describe("ukanren", function()
         )
       end
       -- ancestor(x, y) = parent(x, y) OR (parent(x, z) AND ancestor(z, y))
+      --: (unknown, unknown) -> Goal
       local function ancestor(x, y)
         return uk.disj(
           parent(x, y),
@@ -202,6 +209,7 @@ T.describe("ukanren", function()
       end
       local q = uk.var("q")
       -- Who are tom's descendants?
+      --: { [number]: { [integer]: unknown } }
       local results = uk.run(ancestor("tom", q), 10)
       local vals = {}
       for _, sub in ipairs(results) do vals[uk.walk(q, sub)] = true end

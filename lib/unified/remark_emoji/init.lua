@@ -104,11 +104,13 @@ local EMOTICONS = {
 
 -- Replace all :shortcode: patterns in a string using the lookup table.
 -- Unknown shortcodes are left as-is.
+--: (s: string, lookup: { [string]: string }) -> string
 local function replace_shortcodes(s, lookup)
-  return (s:gsub(":([%w%+%-]+):", function(name)
+  local result, _ = s:gsub(":([%w%+%-]+):", function(name)
     local em = lookup[name]
     return em  -- nil leaves the match unchanged (gsub semantics)
-  end))
+  end)
+  return result
 end
 
 -- Replace all emoticon strings in a string.
@@ -122,6 +124,7 @@ local EMOTICON_KEYS = (function()
   return keys
 end)()
 
+--: (s: string) -> string
 local function replace_emoticons(s)
   for i = 1, #EMOTICON_KEYS do
     local pat = EMOTICON_KEYS[i]
@@ -163,6 +166,7 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
+--: (processor: any, opts: { emoticon: boolean | nil, alias: { [string]: string } | nil } | nil) -> nil
 local function remark_emoji(processor, opts)
   local use_emoticon = opts and opts.emoticon
   local extra_alias  = opts and opts.alias
@@ -180,7 +184,7 @@ local function remark_emoji(processor, opts)
   processor:use_transformer(function(ast)
     walk(ast, function(node)
       if node.type == "text" and node.value then
-        local v = replace_shortcodes(node.value, lookup)
+        local v = replace_shortcodes(node.value --[[:! string]], lookup)
         if use_emoticon then
           v = replace_emoticons(v)
         end

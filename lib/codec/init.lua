@@ -4,7 +4,7 @@ end
 
 local M = {}
 
---:: Codec = { encode: (unknown) -> unknown, decode: (unknown) -> unknown }
+--:: Codec = { encode: (any) -> any, decode: (any) -> any }
 
 --- Create a codec from an encode/decode table.
 --: (t: Codec) -> (Codec | nil, string | nil)
@@ -12,16 +12,18 @@ local function new(t)
   if not t then return nil, "codec: expected table" end
   if not t.encode then return nil, "codec: missing encode function" end
   if not t.decode then return nil, "codec: missing decode function" end
-  return { encode = t.encode, decode = t.decode }
+  local c = { encode = t.encode, decode = t.decode } --: Codec
+  return c
 end
 M.new = new
 
 --- Create a codec from two functions.
---: (encode_fn: (unknown) -> unknown, decode_fn: (unknown) -> unknown) -> (Codec | nil, string | nil)
+--: (encode_fn: (any) -> any, decode_fn: (any) -> any) -> (Codec | nil, string | nil)
 local function from(encode_fn, decode_fn)
   if not encode_fn then return nil, "codec: missing encode function" end
   if not decode_fn then return nil, "codec: missing decode function" end
-  return { encode = encode_fn, decode = decode_fn }
+  local c = { encode = encode_fn, decode = decode_fn } --: Codec
+  return c
 end
 M.from = from
 
@@ -74,16 +76,17 @@ end
 M.when = when
 
 --- Map codec: transform with arbitrary functions.
---: (encode_fn: (unknown) -> unknown, decode_fn: (unknown) -> unknown) -> (Codec | nil, string | nil)
+--: (encode_fn: (any) -> any, decode_fn: (any) -> any) -> (Codec | nil, string | nil)
 local function map(encode_fn, decode_fn)
   if not encode_fn then return nil, "codec.map: missing encode function" end
   if not decode_fn then return nil, "codec.map: missing decode function" end
-  return { encode = encode_fn, decode = decode_fn }
+  local c = { encode = encode_fn, decode = decode_fn } --: Codec
+  return c
 end
 M.map = map
 
 --- Test whether decode(encode(data)) == data.
---: (codec: { encode: (unknown) -> unknown, decode: (unknown) -> unknown }, data: unknown) -> boolean
+--: (codec: Codec, data: any) -> boolean
 local function roundtrip(codec, data)
   local encoded, err = codec.encode(data)
   if encoded == nil then return false, err end
@@ -95,12 +98,14 @@ end
 M.roundtrip = roundtrip
 
 --- Identity codec: passthrough.
+--: Codec
 M.identity = {
   encode = function(data) return data end,
   decode = function(data) return data end,
 }
 
 --- Hex codec: encode bytes to hex string, decode hex string to bytes.
+--: Codec
 M.hex = {
   encode = function(s)
     if type(s) ~= "string" then return nil, "codec.hex.encode: expected string" end
@@ -129,12 +134,14 @@ local function rot13_fn(s)
   return (s:gsub(".", rot13_char_))
 end
 
+--: Codec
 M.rot13 = {
   encode = rot13_fn,
   decode = rot13_fn,
 }
 
 --- Reverse codec: reverse the string.
+--: Codec
 M.reverse = {
   encode = function(s)
     if type(s) ~= "string" then return nil, "codec.reverse.encode: expected string" end
@@ -147,7 +154,7 @@ M.reverse = {
 }
 
 --- XOR codec: XOR each byte with a key byte. Self-inverse.
---: (key: number) -> ({ encode: (string) -> string, decode: (string) -> string } | nil, string | nil)
+--: (key: number) -> (Codec | nil, string | nil)
 local function xor(key)
   if type(key) ~= "number" then return nil, "codec.xor: expected number key" end
   local key_ = (key % 256) --[[:! integer]]
@@ -174,7 +181,8 @@ local function xor(key)
       end
       return table.concat(t)
     end
-    return { encode = xor_fn_fast --[[:! (string) -> string]], decode = xor_fn_fast --[[:! (string) -> string]] }
+    local c = { encode = xor_fn_fast --[[:! (string) -> string]], decode = xor_fn_fast --[[:! (string) -> string]] } --: Codec
+    return c
   end
   -- Pure fallback: use lookup table
   local lookup = {} --: { [integer]: string }
@@ -202,7 +210,8 @@ local function xor(key)
     end
     return table.concat(t)
   end
-  return { encode = xor_fn_pure --[[:! (string) -> string]], decode = xor_fn_pure --[[:! (string) -> string]] }
+  local c = { encode = xor_fn_pure --[[:! (string) -> string]], decode = xor_fn_pure --[[:! (string) -> string]] } --: Codec
+  return c
 end
 M.xor = xor
 

@@ -40,20 +40,21 @@ local str_match = string.match
 
 -- Parse an attribute string: key=val key2="val2" bool_key ...
 -- Returns a table of key → value (string or true for booleans).
+--: (s: string | nil) -> any
 local function parse_attrs(s)
-  local attrs = {}
+  local attrs = {} --[[: any]]
   if not s or s == "" then return attrs end
-  local pos = 1
+  local pos = 1  --: integer
   local len = #s
   while pos <= len do
     local _, nws = str_find(s, "^%s*", pos)
-    pos = (nws or pos - 1) + 1
+    pos = (nws or (pos - 1)) + 1
     if pos > len then break end
 
     local key_s, key_e = str_find(s, "^[%w%-_]+", pos)
     if not key_s then break end
-    local key = str_sub(s, key_s, key_e)
-    pos = key_e + 1
+    local key = str_sub(s, key_s, key_e --[[:! integer]])
+    pos = (key_e --[[:! integer]]) + 1
 
     if pos <= len and str_sub(s, pos, pos) == "=" then
       pos = pos + 1
@@ -63,8 +64,8 @@ local function parse_attrs(s)
         pos = pos + 1
         local close = str_find(s, qchar, pos, true)
         if close then
-          val = str_sub(s, pos, close - 1)
-          pos = close + 1
+          val = str_sub(s, pos, (close --[[:! integer]]) - 1)
+          pos = (close --[[:! integer]]) + 1
         else
           val = str_sub(s, pos)
           pos = len + 1
@@ -73,7 +74,7 @@ local function parse_attrs(s)
         local v_s, v_e = str_find(s, "^[^%s]+", pos)
         if v_s then
           val = str_sub(s, v_s, v_e)
-          pos = v_e + 1
+          pos = (v_e --[[:! integer]]) + 1
         else
           val = ""
         end
@@ -96,24 +97,24 @@ local function parse_directive_head(text)
 
   local name_s, name_e = str_find(text, "^[%w%-_]+", pos)
   if not name_s then return nil end
-  local name = str_sub(text, name_s, name_e)
-  pos = name_e + 1
+  local name = str_sub(text, name_s, (name_e --[[:! integer]]))
+  pos = (name_e --[[:! integer]]) + 1
 
   local label = ""
   if pos <= len and str_sub(text, pos, pos) == "[" then
     local close = str_find(text, "]", pos + 1, true)
     if close then
-      label = str_sub(text, pos + 1, close - 1)
-      pos = close + 1
+      label = str_sub(text, pos + 1, (close --[[:! integer]]) - 1)
+      pos = (close --[[:! integer]]) + 1
     end
   end
 
-  local attrs = {}
+  local attrs = {} --[[: any]]
   if pos <= len and str_sub(text, pos, pos) == "{" then
     local close = str_find(text, "}", pos + 1, true)
     if close then
-      attrs = parse_attrs(str_sub(text, pos + 1, close - 1))
-      pos = close + 1
+      attrs = parse_attrs(str_sub(text, pos + 1, (close --[[:! integer]]) - 1))
+      pos = (close --[[:! integer]]) + 1
     end
   end
 
@@ -144,18 +145,19 @@ end
 -- Scan a text value for :name[...]{...} patterns (single colon only).
 -- Returns an array of replacement nodes.
 local function scan_text_directives(value)
-  local result = {}
-  local pos = 1
+  local result = {} --[[: any]]
+  local pos = 1  --: integer
   local len = #value
 
   while pos <= len do
-    local colon = str_find(value, ":", pos, true)
-    if not colon then
+    local colon_raw = str_find(value, ":", pos, true)
+    if not colon_raw then
       if pos <= len then
         result[#result + 1] = { type = "text", value = str_sub(value, pos) }
       end
       break
     end
+    local colon = colon_raw  --: integer
 
     -- Skip :: (leaf/container markers used at block level).
     if str_sub(value, colon + 1, colon + 1) == ":" then
@@ -176,7 +178,7 @@ local function scan_text_directives(value)
           attributes = attrs,
           children   = children,
         }
-        pos = colon + 1 + consumed
+        pos = colon + 1 + (consumed or 0)
       else
         result[#result + 1] = { type = "text", value = str_sub(value, pos, colon) }
         pos = colon + 1
@@ -189,7 +191,7 @@ end
 
 -- Expand inline children, scanning text nodes for text directives.
 local function expand_inline(children)
-  local result = {}
+  local result = {} --[[: any]]
   for i = 1, #children do
     local node = children[i]
     if node.type == "text" then
@@ -296,7 +298,7 @@ local transform_children
 
 -- Transform a list of block children, detecting directives.
 transform_children = function(children)
-  local result = {}
+  local result = {} --[[: any]]
   local i = 1
   local n = #children
 

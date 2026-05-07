@@ -25,16 +25,17 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local json = require("lib.format.json")
+local json_raw = require("lib.format.json")
+local json = json_raw --[[: any]]
 
 local M = {}
 
 --:: policy_cap_entry = { state: string, hosts: { [integer]: string } | nil, max_size_mb: number | nil }
 --:: policy_data = { cap_policy: { [string]: policy_cap_entry } | nil }
 --:: policy = {
---::   check_cap: (policy, string) -> "allowed" | "denied" | "restricted",
---::   check_cap_decl: (policy, string, unknown) -> true | (nil, string),
---::   reload: (policy) -> true | (nil, string),
+--::   check_cap: (policy, string) -> string,
+--::   check_cap_decl: (policy, string, unknown) -> (boolean | nil, string | nil),
+--::   reload: (policy) -> (boolean | nil, string | nil),
 --::   _path: string | nil,
 --::   _data: policy_data,
 --::   _read_fn: (string) -> (string | nil),
@@ -70,7 +71,7 @@ policy_mt.__index = policy_mt
 -- check_cap(cap_name) -> "allowed" | "denied" | "restricted"
 -- Returns the state of a cap type according to admin policy.
 -- If no cap_policy entry exists for the cap, it is "allowed".
---: (string) -> "allowed" | "denied" | "restricted"
+--: (policy, string) -> string
 function policy_mt:check_cap(cap_name)
 	local cp = self._data.cap_policy
 	if not cp then return "allowed" end
@@ -92,7 +93,7 @@ end
 -- check_cap_decl(cap_name, decl) -> true | (nil, string)
 -- Checks a specific cap declaration against policy constraints.
 -- decl is the manifest cap declaration table (or a non-table scalar).
---: (string, unknown) -> true | (nil, string)
+--: (policy, string, unknown) -> (boolean | nil, string | nil)
 function policy_mt:check_cap_decl(cap_name, decl)
 	local cp = self._data.cap_policy
 	if not cp then return true end
@@ -145,23 +146,24 @@ end
 -- reload() -> true | (nil, string)
 -- Re-reads the policy file from _path. If path is nil or file is missing,
 -- resets to allow-all (same as initial load with no file).
---: () -> true | (nil, string)
+--: (policy) -> (boolean | nil, string | nil)
 function policy_mt:reload()
 	if not self._path then
-		self._data = allow_all_data()
+		self._data = allow_all_data() --[[:! policy_data]]
 		return true
 	end
-	local content = self._read_fn(self._path)
+	local path = self._path --[[:! string]]
+	local content = self._read_fn(path)
 	if not content then
 		-- Missing file → allow-all (not an error).
-		self._data = allow_all_data()
+		self._data = allow_all_data() --[[:! policy_data]]
 		return true
 	end
 	local data = parse_policy(content)
 	if not data then
-		return nil, "policy: failed to parse JSON from " .. self._path
+		return nil, "policy: failed to parse JSON from " .. path
 	end
-	self._data = data
+	self._data = data --[[:! policy_data]]
 	return true
 end
 
@@ -169,10 +171,11 @@ end
 -- Load admin policy from a JSON file. Returns an allow-all policy if path is
 -- nil or the file does not exist. Returns (nil, err) only on a parse failure
 -- of an existing file.
---: (string | nil, { read_fn: ((string) -> (string | nil)) | nil } | nil) -> policy | (nil, string)
+--: (string | nil, { read_fn: ((string) -> (string | nil)) | nil } | nil) -> (policy | nil, string | nil)
 function M.load(path, opts)
-	local read_fn = (opts and opts.read_fn) or default_read_fn
-	local data --: policy_data
+	local read_fn_raw = (opts and opts.read_fn) or default_read_fn
+	local read_fn = read_fn_raw --[[:! (string) -> (string | nil)]]
+	local data --: policy_data | nil
 
 	if not path then
 		data = allow_all_data()

@@ -100,7 +100,8 @@ T.describe("tfidf", function()
       c:add("d1", "cat fish bird")
       c:add("d2", "cat dog wolf")
       c:add("d3", "cat horse cow")
-      local vec = c:tfidf("d1")
+      local vec_raw = c:tfidf("d1")
+      local vec = vec_raw --[[:! { [string]: number }]]
       -- "cat" in all 3 docs, "fish" only in d1 → fish should score higher
       T.ok(vec["fish"] > vec["cat"], "rare 'fish' should score higher than common 'cat'")
     end)
@@ -109,7 +110,8 @@ T.describe("tfidf", function()
       local c = tfidf.corpus()
       c:add("d1", "the cat sat on the mat")
       c:add("d2", "the cat sat on the mat")
-      local sim = c:similarity("d1", "d2")
+      local sim_raw = c:similarity("d1", "d2")
+      local sim = sim_raw --[[:! number]]
       T.ok(math.abs(sim - 1.0) < 0.001, "identical docs should have similarity ~1.0, got " .. sim)
     end)
 
@@ -117,7 +119,8 @@ T.describe("tfidf", function()
       local c = tfidf.corpus()
       c:add("d1", "alpha beta gamma")
       c:add("d2", "delta epsilon zeta")
-      local sim = c:similarity("d1", "d2")
+      local sim_raw = c:similarity("d1", "d2")
+      local sim = sim_raw --[[:! number]]
       T.ok(sim < 0.01, "completely different docs should have similarity near 0, got " .. sim)
     end)
 
@@ -126,7 +129,8 @@ T.describe("tfidf", function()
       c:add("d1", "the cat sat on the mat")
       c:add("d2", "the dog sat on the log")
       c:add("d3", "cats and dogs are friends")
-      local sim = c:similarity("d1", "d2")
+      local sim_raw = c:similarity("d1", "d2")
+      local sim = sim_raw --[[:! number]]
       T.ok(sim > 0.0, "overlapping docs should have sim > 0, got " .. sim)
       T.ok(sim < 1.0, "overlapping docs should have sim < 1, got " .. sim)
     end)
@@ -175,7 +179,8 @@ T.describe("tfidf", function()
       c:add("d1", "cat fish bird")
       c:add("d2", "cat dog wolf")
       c:add("d3", "cat horse cow")
-      local kw = c:keywords("d1")
+      local kw_raw = c:keywords("d1")
+      local kw = kw_raw --[[:! { [number]: { term: string, score: number } }]]
       T.ok(#kw > 0, "should return keywords")
       -- Should be sorted by score descending
       for j = 2, #kw do
@@ -189,7 +194,8 @@ T.describe("tfidf", function()
       local c = tfidf.corpus()
       c:add("d1", "alpha beta gamma delta epsilon")
       c:add("d2", "alpha beta")
-      local kw = c:keywords("d1", { limit = 2 })
+      local kw_raw = c:keywords("d1", { limit = 2 })
+      local kw = kw_raw --[[:! { [number]: { term: string, score: number } }]]
       T.eq(#kw, 2)
     end)
 
@@ -241,11 +247,12 @@ T.describe("tfidf", function()
 
     T.it("custom tokenizer via opts", function()
       -- Custom tokenizer that splits on commas
-      local function comma_tokenizer(text)
-        local tokens = {}
+      --: (text: string, _opts: unknown) -> { [integer]: string }
+      local function comma_tokenizer(text, _opts)
+        local tokens = {} --: { [integer]: string }
         local n = 0
-        for word in text:gmatch("[^,]+") do
-          local trimmed = word:match("^%s*(.-)%s*$")
+        for word in text --[[: string]]:gmatch("[^,]+") do
+          local trimmed = word:match("^%s*(.-)%s*$") or ""
           if #trimmed > 0 then
             n = n + 1
             tokens[n] = trimmed:lower()
@@ -257,7 +264,8 @@ T.describe("tfidf", function()
       c:add("d1", "hello world,goodbye world")
       c:add("d2", "hello world,foo bar")
       T.eq(c:doc_count(), 2)
-      local vec = c:tfidf("d1")
+      local vec_raw2 = c:tfidf("d1")
+      local vec = vec_raw2 --[[:! { [string]: number }]]
       T.ok(vec["goodbye world"], "should tokenize on commas")
       T.ok(vec["hello world"], "should have hello world as single token")
     end)
@@ -266,7 +274,8 @@ T.describe("tfidf", function()
       local c = tfidf.corpus()
       c:add("d1", "hello world hello")
       T.eq(c:doc_count(), 1)
-      local vec = c:tfidf("d1")
+      local vec_raw3 = c:tfidf("d1")
+      local vec = vec_raw3 --[[:! { [string]: number }]]
       T.ok(vec["hello"], "should have hello")
       T.ok(vec["world"], "should have world")
       -- With only one document, all terms appear in all docs
@@ -282,7 +291,8 @@ print(string.format("\n%d passed, %d failed", s.pass, s.fail))
 if s.fail > 0 then
   for _, t in ipairs(s.tests) do
     if not t.ok then
-      print("  FAIL: " .. t.name .. (t.err and (" — " .. t.err) or ""))
+      local terr = t.err --[[:! string | nil]]
+      print("  FAIL: " .. t.name --[[:! string]] .. (terr and (" — " .. terr) or ""))
     end
   end
   os.exit(1)

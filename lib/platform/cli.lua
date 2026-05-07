@@ -22,9 +22,18 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local json = require("lib.json")
-local platform = require("lib.platform")
-local cap_dispatch = require("lib.platform.cap_dispatch")
+local json_raw = require("lib.json")
+local json = json_raw --[[: any]]
+local platform_raw = require("lib.platform")
+local platform = platform_raw --[[: any]]
+local cap_dispatch_raw = require("lib.platform.cap_dispatch")
+local cap_dispatch = cap_dispatch_raw --[[: any]]
+
+--:: CapDecl = { type: string | nil, required: boolean | nil, host: string | nil, model: string | nil, path: string | nil, paths: unknown, allow_write: boolean | nil, scope: unknown, tables: unknown, provider: string | nil, key_name: string | nil, base_url: string | nil, provider_default: string | nil, root: string | nil, binaries: unknown, stderr: string | nil, methods: unknown, port: integer | nil, ... }
+--:: EntryDef = { main: string | nil, caps: { [string]: CapDecl | string } | nil }
+--:: Manifest = { name: string | nil, version: string | nil, entry: { [string]: EntryDef | string } | nil, caps: { [string]: CapDecl | string } | nil, default_entry: string | nil, meta: { tags: { [integer]: string } | nil, description: string | nil, ... } | nil, ... }
+--:: TarEntry = { name: string, mode: number, size: number, mtime: number, data: string, typeflag: string }
+--:: AppRecord = { path: string, chunks: unknown, entries: { [number]: TarEntry } | nil, manifest: Manifest | nil, _dir_mode: boolean | nil }
 
 -- ── LLM env-var key resolution ────────────────────────────────────────────────
 -- At cap construction time, check well-known env vars in priority order and
@@ -62,7 +71,7 @@ local function parse_args(args)
 			local key, val = a:match("^%-%-([^=]+)=(.*)")
 			if key then
 				if key == "port" then
-					opts.port = tonumber(val) or opts.port
+					opts.port = tonumber(val) --[[:! integer]] or opts.port
 				elseif key == "data-dir" then
 					opts.data_dir = val
 				elseif key == "grant" then
@@ -151,15 +160,17 @@ local function list_files(dir, prefix)
 	local p = io.popen('ls -1 "' .. dir .. '" 2>/dev/null')
 	if not p then return results end
 	for name in p:lines() do
-		local full = dir .. "/" .. name
-		local rel = prefix == "" and name or (prefix .. "/" .. name)
-		if is_dir(full) then
-			local sub = list_files(full, rel)
-			for i = 1, #sub do
-				results[#results + 1] = sub[i]
+		if type(name) == "string" then
+			local full = dir .. "/" .. name
+			local rel = prefix == "" and name or (prefix .. "/" .. name)
+			if is_dir(full) then
+				local sub = list_files(full, rel)
+				for i = 1, #sub do
+					results[#results + 1] = sub[i]
+				end
+			else
+				results[#results + 1] = rel
 			end
-		else
-			results[#results + 1] = rel
 		end
 	end
 	p:close()
@@ -176,10 +187,11 @@ local function load_dir_app(dir)
 	if not manifest_src then
 		return nil, "cannot read manifest: " .. tostring(err)
 	end
-	local manifest, jerr = json.decode(manifest_src)
-	if not manifest then
+	local manifest_raw, jerr = json.decode(manifest_src)
+	if not manifest_raw then
 		return nil, "manifest.json parse failed: " .. tostring(jerr)
 	end
+	local manifest = manifest_raw --[[:! Manifest]]
 	return {
 		path = dir,
 		chunks = nil,
@@ -205,7 +217,7 @@ local function make_dir_self_cap(app_dir)
 			local p = io.popen('ls -1 "' .. app_dir .. '" 2>/dev/null')
 			if p then
 				for name in p:lines() do
-					if name:match("%.png$") then
+					if type(name) == "string" and name:match("%.png$") then
 						card_path = app_dir .. "/" .. name
 						break
 					end
@@ -215,11 +227,14 @@ local function make_dir_self_cap(app_dir)
 		end
 		if not card_path or not file_exists(card_path) then return nil end
 		local bytes, err = read_file(card_path)
-		if not bytes then return nil end
-		local chunks, perr = png_mod.read(bytes)
-		if not chunks then return nil end
-		chunks_cache = chunks
-		return chunks
+		if bytes then
+			local chunks, perr = png_mod.read(bytes)
+			if chunks then
+				chunks_cache = chunks
+				return chunks
+			end
+		end
+		return nil
 	end
 
 	local revoked = false
@@ -276,6 +291,7 @@ end
 -- ── Entrypoint resolution ─────────────────────────────────────────────────
 
 -- Merge top-level and per-entrypoint cap declarations.
+--: (Manifest | nil, string) -> { [string]: CapDecl }
 local function merge_cap_declarations(manifest, entry_key)
 	local cap_declarations = {}
 
@@ -328,6 +344,7 @@ local CAP_TYPE_MODULES = {
 	llm = "lib.platform.caps.llm",
 }
 
+--: (string, CapDecl, AppRecord, { app_id: string, user_id: string | nil, data_dir: string | nil, ... }, { port: integer, app_args: { [integer]: string } | nil, ... }) -> (unknown, unknown)
 local function build_cap(cap_name, decl, app, context, platform_opts)
 	local cap_type = decl.type or cap_name
 
@@ -336,7 +353,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		if app._dir_mode then
 			return make_dir_self_cap(app.path)
 		else
-			local mod = require(CAP_TYPE_MODULES.self)
+			local mod = (require(CAP_TYPE_MODULES.self) --[[: any]])
 			return mod.self_cap(app)
 		end
 	end
@@ -348,19 +365,19 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		if app._dir_mode then
 			return nil, "self_write not supported in directory mode"
 		end
-		local mod = require(CAP_TYPE_MODULES.self_write)
+		local mod = (require(CAP_TYPE_MODULES.self_write) --[[: any]])
 		return mod.self_write_cap(app)
 	end
 
 	-- http_server: inject port from platform flags.
 	if cap_type == "http_server" then
-		local mod = require(CAP_TYPE_MODULES.http_server)
+		local mod = (require(CAP_TYPE_MODULES.http_server) --[[: any]])
 		return mod.http_server_cap({ port = platform_opts.port or 0 })
 	end
 
 	-- http_client: pass through host and any extra fields from declaration.
 	if cap_type == "http_client" then
-		local mod = require(CAP_TYPE_MODULES.http_client)
+		local mod = (require(CAP_TYPE_MODULES.http_client) --[[: any]])
 		return mod.http_client_cap({
 			host  = decl.host,
 			model = decl.model,
@@ -377,13 +394,13 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		local parent_dir = data_path:match("^(.*)/[^/]+$")
 		if parent_dir then mkdir_p(parent_dir) end
 		if cap_type == "kv" then
-			local mod = require(CAP_TYPE_MODULES.kv)
+			local mod = (require(CAP_TYPE_MODULES.kv) --[[: any]])
 			return mod.kv_cap(data_path)
 		elseif cap_type == "db" then
-			local mod = require(CAP_TYPE_MODULES.db)
+			local mod = (require(CAP_TYPE_MODULES.db) --[[: any]])
 			return mod.db_cap(data_path, { allow_write = decl.allow_write })
 		elseif cap_type == "shared_db" then
-			local mod = require(CAP_TYPE_MODULES.shared_db)
+			local mod = (require(CAP_TYPE_MODULES.shared_db) --[[: any]])
 			return mod.shared_db_cap(data_path, context.app_id, decl.tables or {}, {
 				allow_write = decl.allow_write,
 			})
@@ -392,7 +409,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 
 	-- time: no args.
 	if cap_type == "time" then
-		local mod = require(CAP_TYPE_MODULES.time)
+		local mod = (require(CAP_TYPE_MODULES.time) --[[: any]])
 		return mod.time_cap()
 	end
 
@@ -435,7 +452,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		end
 		root = expand_home(root)
 		mkdir_p(root)
-		local mod = require(CAP_TYPE_MODULES.fs)
+		local mod = (require(CAP_TYPE_MODULES.fs) --[[: any]])
 		return mod.fs_cap({ root = root, allow_write = decl.allow_write })
 	end
 
@@ -473,7 +490,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		-- operator; default to "openai" as the most common case.
 		provider = provider or decl.provider_default or "openai"
 
-		local mod = require(CAP_TYPE_MODULES.llm)
+		local mod = (require(CAP_TYPE_MODULES.llm) --[[: any]])
 		return mod.llm_cap({
 			provider    = provider,
 			key         = api_key,
