@@ -259,7 +259,7 @@ encoder.table = function (t, opts)
 	local p = 2
 	local is_array = true
 	for k, v in pairs(t) do
-		is_array = is_array and (i == k)
+		is_array = is_array and (i == k) or false
 		i = i + 1
 		local encoded_v = encode(v, opts)
 		array[i] = encoded_v

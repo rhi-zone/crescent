@@ -8,7 +8,7 @@ end
 
 --:: DocExport = { name: string, type: string, doc: string | nil, line: integer | nil, params: { [integer]: { name: string, type: string } } | nil }
 --:: DocResult = { file: string, exports: { [integer]: DocExport } }
---:: DocCtxPool = { rev: { [integer]: string } }
+--:: DocCtxPool = { rev: { [integer]: string }, ht_cap: integer, ht_mask: integer, ht_count: integer, next_id: integer, buf_count: integer, entries: { [integer]: unknown, ... }, bufs: { [integer]: unknown, ... }, map: { [string]: integer, ... }, _anchors: { [integer]: string, ... }, ... }
 --:: DocCtxNode = { kind: integer, data: { [integer]: integer }, line: integer }
 --:: DocCtxNodeArena = { len: integer, get: (DocCtxNodeArena, integer) -> DocCtxNode }
 --:: DocCtxListArena = { get: (DocCtxListArena, integer) -> integer }

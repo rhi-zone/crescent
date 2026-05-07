@@ -132,6 +132,7 @@ M.bool = {
 	end,
 }
 
+--: <T>(v: T) -> Arb
 function M.constant(v)
 	return {
 		generate = function(_, _) return v, nil end,
