@@ -596,17 +596,20 @@ end
 
 -- Normalize arb_arg: single arb, or array of arbs → tuple.
 -- Returns arb, is_tuple (bool).
+--: (arb_arg: Arb | { [integer]: Arb, ... }) -> (Arb, boolean)
 local function normalize(arb_arg)
 	if type(arb_arg) == "table" and arb_arg.generate then
 		return arb_arg, false
 	elseif type(arb_arg) == "table"
 		and arb_arg[1] and type(arb_arg[1]) == "table" and arb_arg[1].generate
 	then
-		return M.tuple(arb_arg), true
+		-- The runtime checks above guarantee arb_arg is an Arb[]; narrow for the type system.
+		return M.tuple(arb_arg --[[: { [integer]: Arb, ... }]]), true
 	end
 	error("arb.check: expected an arbitrary or array of arbitraries", 3)
 end
 
+--: (fn: (...any) -> any, is_tuple: boolean) -> (any) -> any
 local function make_runner(fn, is_tuple)
 	if is_tuple then
 		return function(v) return fn(unpack(v)) end
@@ -649,6 +652,7 @@ end
 -- arb.check: run N trials; shrink on failure.
 -- Returns ok, info (nil on success).
 -- info = { desc, trial, seed, original, shrunk, shrink_steps, err }
+--: (desc: string, arb_arg: Arb | { [integer]: Arb, ... }, fn: (...any) -> any, opts: { trials?: integer, max_size?: integer, seed?: number, max_shrink?: integer, ... } | nil) -> (boolean, CheckInfo | nil)
 function M.check(desc, arb_arg, fn, opts)
 	opts = opts or {}
 	local trials    = opts.trials    or DEFAULT_TRIALS
@@ -681,6 +685,11 @@ function M.check(desc, arb_arg, fn, opts)
 end
 
 -- arb.it: register as a named test (integrates with lib/test/assert.lua).
+-- arb_arg may be a single Arb or an array of Arbs (forms a tuple internally).
+-- fn is invoked with the generated value (or unpacked tuple); typed loosely as
+-- (...any) -> any so callers can use any callback shape without annotation churn.
+-- opts allows trial-count and seed customization; open record for forward compat.
+--: (desc: string, arb_arg: Arb | { [integer]: Arb, ... }, fn: (...any) -> any, opts: { trials?: integer, max_size?: integer, seed?: number, ... } | nil) -> ()
 function M.it(desc, arb_arg, fn, opts)
 	local T = require("lib.test.assert")
 	T.it(desc, function()
@@ -704,6 +713,7 @@ function M.it(desc, arb_arg, fn, opts)
 end
 
 -- arb.assert: inline property assertion (for use inside existing it() blocks).
+--: (desc: string, arb_arg: Arb | { [integer]: Arb, ... }, fn: (...any) -> any, opts: { trials?: integer, max_size?: integer, seed?: number, max_shrink?: integer, ... } | nil) -> ()
 function M.assert(desc, arb_arg, fn, opts)
 	local ok, info = M.check(desc, arb_arg, fn, opts)
 	info = info --[[:! CheckInfo]]

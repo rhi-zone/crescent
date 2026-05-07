@@ -163,6 +163,7 @@ end
 -- Optional opts table:
 --   opts.globals_files: list of file paths loaded as global declarations instead
 --     of the default stdlib_types.lua. Only used when parent_scope is nil.
+--: (source: string, filename: string, parent_scope: Scope | nil, pool: InternPool | nil, cri_loader: ((Ctx, string) -> integer) | nil, opts: { globals_files?: { [integer]: string, ... }, ... } | nil) -> (ErrCtx, Ctx | nil)
 function M.check_string(source, filename, parent_scope, pool, cri_loader, opts)
     return run_v3(source, filename, parent_scope, pool, cri_loader, opts)
 end

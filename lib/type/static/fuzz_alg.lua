@@ -23,10 +23,37 @@ local LIT_BOOLEAN   = defs.LIT_BOOLEAN
 local FLAG_OPTIONAL = defs.FLAG_OPTIONAL
 local FLAG_READONLY = defs.FLAG_READONLY
 
+-- TypeNode mirrors the AST shape produced by fuzz_arb.lua.
+-- Discriminated by the `tag` field (literal type) so narrowing flows correctly.
+--[[::
+TypeNode =
+    { tag: "nil" }
+  | { tag: "never" }
+  | { tag: "unknown" }
+  | { tag: "any" }
+  | { tag: "base", name: string }
+  | { tag: "lit_int", value: integer }
+  | { tag: "lit_str", value: string }
+  | { tag: "lit_bool", value: boolean }
+  | { tag: "union", a: TypeNode, b: TypeNode }
+  | { tag: "inter", a: TypeNode, b: TypeNode }
+  | { tag: "func", params: { [integer]: TypeNode, ... }, ret: TypeNode }
+  | { tag: "tuple", types: { [integer]: TypeNode, ... } }
+  | { tag: "record", fields: { [integer]: { name: string, type: TypeNode, flags: integer | nil }, ... } }
+  | { tag: "indexer", key: string, val: TypeNode }
+]]
+
 -- ── Bare typing context ───────────────────────────────────────────────────────
 -- Creates a minimal ctx sufficient for type construction and unification.
 -- No scope, no annotations, no error reporting chain.
 
+-- Note: returns a deliberately-partial Ctx — the algebra-level fuzz suite only
+-- exercises types/unify code paths that touch ctx.types/fields/lists/pool/err/
+-- lit_cache. Full Ctx requires scope/ast_lists/etc that the test harness has no
+-- meaningful values for. We opt out of strict typing here with `any` so callers
+-- (types_mod.make_*, unify_mod.try_unify) accept the partial ctx without
+-- forcing us to fabricate every required Ctx field.
+--: () -> any
 local function make_ctx()
 	local pool = intern_mod.new()
 	local ctx  = types_mod.new_ctx(pool)
@@ -38,15 +65,15 @@ end
 -- ── AST → type ID ────────────────────────────────────────────────────────────
 -- Converts a fuzz_arb.lua type AST node into a live type ID in a ctx.
 
-local ast_to_tid   -- forward declaration for self-recursion
-
-ast_to_tid = function(ctx, node)
-	local tag = node.tag
-
-	if     tag == "nil"      then return ctx.T_NIL
-	elseif tag == "never"    then return ctx.T_NEVER
-	elseif tag == "unknown"  then return ctx.T_UNKNOWN
-	elseif tag == "base"     then
+-- Self-recursion via local function declaration.
+-- NOTE: discriminant tests use `node.tag == "..."` directly (not aliased to a local)
+-- so field_disc narrowing flows. CLAUDE.md gotcha: aliasing to a local does NOT narrow.
+--: (ctx: any, node: TypeNode) -> integer
+local function ast_to_tid(ctx, node)
+	if     node.tag == "nil"      then return ctx.T_NIL
+	elseif node.tag == "never"    then return ctx.T_NEVER
+	elseif node.tag == "unknown"  then return ctx.T_UNKNOWN
+	elseif node.tag == "base"     then
 		local n = node.name
 		if     n == "integer" then return ctx.T_INTEGER
 		elseif n == "number"  then return ctx.T_NUMBER
@@ -54,40 +81,41 @@ ast_to_tid = function(ctx, node)
 		elseif n == "boolean" then return ctx.T_BOOLEAN
 		end
 
-	elseif tag == "lit_int"  then
+	elseif node.tag == "lit_int"  then
 		return types_mod.make_literal(ctx, LIT_INTEGER, node.value)
 
-	elseif tag == "lit_str"  then
+	elseif node.tag == "lit_str"  then
 		-- Strip surrounding quotes to get the raw string, then intern it.
 		local s  = node.value:sub(2, -2)
 		local id = intern_mod.intern(ctx.pool, s)
 		return types_mod.make_literal(ctx, LIT_STRING, id)
 
-	elseif tag == "lit_bool" then
+	elseif node.tag == "lit_bool" then
 		return types_mod.make_literal(ctx, LIT_BOOLEAN, node.value and 1 or 0)
 
-	elseif tag == "union" then
+	elseif node.tag == "union" then
 		local a = ast_to_tid(ctx, node.a)
 		local b = ast_to_tid(ctx, node.b)
 		return types_mod.make_union(ctx, { a, b })
 
-	elseif tag == "inter" then
+	elseif node.tag == "inter" then
 		local a = ast_to_tid(ctx, node.a)
 		local b = ast_to_tid(ctx, node.b)
 		return types_mod.make_intersection(ctx, { a, b })
 
-	elseif tag == "func" then
+	elseif node.tag == "func" then
 		local params = {}
 		for _, p in ipairs(node.params) do params[#params + 1] = ast_to_tid(ctx, p) end
 		local rets = {}
-		if node.ret.tag == "tuple" then
-			for _, r in ipairs(node.ret.types) do rets[#rets + 1] = ast_to_tid(ctx, r) end
+		local ret = node.ret
+		if ret.tag == "tuple" then
+			for _, r in ipairs(ret.types) do rets[#rets + 1] = ast_to_tid(ctx, r) end
 		else
-			rets[1] = ast_to_tid(ctx, node.ret)
+			rets[1] = ast_to_tid(ctx, ret)
 		end
 		return types_mod.make_func(ctx, params, rets, -1)
 
-	elseif tag == "record" then
+	elseif node.tag == "record" then
 		local fids = {}
 		for _, f in ipairs(node.fields) do
 			local nid = intern_mod.intern(ctx.pool, f.name)
@@ -96,10 +124,12 @@ ast_to_tid = function(ctx, node)
 		end
 		return types_mod.make_table(ctx, fids, nil, -1)
 
-	elseif tag == "indexer" then
+	elseif node.tag == "indexer" then
 		local key_tid = node.key == "string" and ctx.T_STRING or ctx.T_INTEGER
 		local val_tid = ast_to_tid(ctx, node.val)
-		return types_mod.make_table(ctx, {}, { key_tid, val_tid }, -1)
+		local pair = { key_tid, val_tid } --[[: { [integer]: integer }]]
+		local empty = {} --[[: { [integer]: integer }]]
+		return types_mod.make_table(ctx, empty, pair, -1)
 	end
 
 	return ctx.T_UNKNOWN
@@ -107,12 +137,18 @@ end
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
+--: (ctx: any, a: integer, b: integer) -> boolean
 local function subtype(ctx, a, b)
 	return unify_mod.try_unify(ctx, a, b)
 end
 
+--: (node: TypeNode) -> string
 local function type_str(node)
-	return farb.type_to_string(node)
+	-- farb.type_to_string takes (node, outer); outer defaults to 0 at runtime,
+	-- but the inferred annotation requires it explicitly. Pass 0.
+	-- tostring narrows the unknown return value of an externally-inferred
+	-- function back to string, avoiding a force cast.
+	return tostring(farb.type_to_string(node --[[: any]], 0))
 end
 
 -- ── Invariants ────────────────────────────────────────────────────────────────
@@ -269,7 +305,7 @@ arb.it("[alg] literal subtyping: lit <: base type",
 				"lit_int should be <: number for value " .. tostring(leaf.value))
 		elseif tag == "lit_str" then
 			assert(subtype(ctx, tid, ctx.T_STRING),
-				"lit_str should be <: string for value " .. leaf.value)
+				"lit_str should be <: string for value " .. tostring(leaf.value))
 		elseif tag == "lit_bool" then
 			assert(subtype(ctx, tid, ctx.T_BOOLEAN),
 				"lit_bool should be <: boolean for value " .. tostring(leaf.value))
@@ -285,10 +321,10 @@ arb.it("[alg] literal asymmetry: integer is not <: lit_int(n)",
 		local lit_tid = types_mod.make_literal(ctx, LIT_INTEGER, n)
 		-- lit_int(n) <: integer (should hold)
 		assert(subtype(ctx, lit_tid, ctx.T_INTEGER),
-			"lit_int(" .. n .. ") should be <: integer")
+			"lit_int(" .. tostring(n) .. ") should be <: integer")
 		-- integer </: lit_int(n) (should NOT hold)
 		assert(not subtype(ctx, ctx.T_INTEGER, lit_tid),
-			"integer should NOT be <: lit_int(" .. n .. ")")
+			"integer should NOT be <: lit_int(" .. tostring(n) .. ")")
 	end, { trials = 200 })
 
 -- 13. Function subtyping: covariant return

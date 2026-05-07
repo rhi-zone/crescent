@@ -48,12 +48,14 @@ local FIXED_SCOPE = [[
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 -- typechecks: returns true iff the program produces no errors.
+--: (src: string) -> boolean
 local function typechecks(src)
 	local ec = check_mod.check_string(src, "fuzz_eval")
 	return #ec.errors == 0
 end
 
 -- check_sub: build a program asserting A <: B via assignment; returns true iff 0 errors.
+--: (a_str: string, b_str: string) -> boolean
 local function check_sub(a_str, b_str)
 	local src = FIXED_SCOPE
 		.. "local _fuzz_a --: " .. a_str .. "\n"
@@ -62,12 +64,15 @@ local function check_sub(a_str, b_str)
 end
 
 -- check_eq: assert A == B (bidirectional subtype check).
+--: (a_str: string, b_str: string) -> boolean
 local function check_eq(a_str, b_str)
-	return check_sub(a_str, b_str) and check_sub(b_str, a_str)
+	if not check_sub(a_str, b_str) then return false end
+	return check_sub(b_str, a_str)
 end
 
 -- check_sub_ext: like check_sub but prepends extra_scope before FIXED_SCOPE.
 -- Used when the test needs inline alias declarations not in FIXED_SCOPE.
+--: (a_str: string, b_str: string, extra_scope: string) -> boolean
 local function check_sub_ext(a_str, b_str, extra_scope)
 	local src = extra_scope .. FIXED_SCOPE
 		.. "local _fuzz_a --: " .. a_str .. "\n"
@@ -259,6 +264,9 @@ arb.it("[eval] match CaptureId<T1 | T2> == T1 | T2 for table union",
 -- ── Oracle invariants (2000 trials each, algebra-level type construction) ─────
 
 -- Bare typing context for oracle tests (no prelude, no parsing).
+-- See fuzz_alg.lua make_ctx for rationale on the `any` return: this is a
+-- deliberately partial Ctx for algebra-level tests that only touch types/unify.
+--: () -> any
 local function make_ctx()
 	local pool = intern_mod.new()
 	local ctx  = types_mod.new_ctx(pool)
@@ -268,8 +276,12 @@ local function make_ctx()
 	return ctx
 end
 
+-- Returns (tid, nid). Annotated as a tuple-returning function. The `ctx`
+-- parameter is `any` because make_ctx returns a deliberately partial Ctx
+-- (see make_ctx above for rationale).
+--: (ctx: any, name_str: string) -> (integer, integer)
 local function make_named_tid(ctx, name_str)
-	local nid = intern_mod.intern(ctx.pool, name_str)
+	local nid = intern_mod.intern(ctx.pool, name_str) --[[: integer]]
 	local tid = types_mod.alloc_type(ctx, TAG_NAMED)
 	local t   = ctx.types:get(tid)
 	t.data[0] = nid
@@ -284,8 +296,8 @@ T.it("[eval] oracle soundness: declared subtype oracle hit returns true", functi
 	local ok_count = 0
 	for i = 1, 2000 do
 		local ctx = make_ctx()
-		local a_tid, a_nid = make_named_tid(ctx, "OracleA" .. tostring(i % 20))
-		local b_tid, b_nid = make_named_tid(ctx, "OracleB" .. tostring(i % 20))
+		local a_tid, a_nid = make_named_tid(ctx, "OracleA" .. (i % 20))
+		local b_tid, b_nid = make_named_tid(ctx, "OracleB" .. (i % 20))
 		-- Inject oracle: OracleA <: OracleB
 		ctx.declared_subtypes[a_nid] = b_nid
 		if unify_mod.try_unify(ctx, a_tid, b_tid) then
@@ -298,7 +310,7 @@ end)
 -- 10. Oracle same-name reflexivity: try_unify(A_named, A_named) always true.
 T.it("[eval] oracle same-name reflexivity: try_unify(A, A) == true", function()
 	local ok_count = 0
-	local NAMES = { "TypeA", "TypeB", "TypeC", "TypeD", "TypeE" }
+	local NAMES --[[: { [integer]: string }]] = { "TypeA", "TypeB", "TypeC", "TypeD", "TypeE" }
 	for i = 1, 2000 do
 		local ctx   = make_ctx()
 		local name  = NAMES[(i % #NAMES) + 1]
@@ -316,8 +328,8 @@ T.it("[eval] oracle placeholder: unresolved named aliases pass try_unify", funct
 	local ok_count = 0
 	for i = 1, 2000 do
 		local ctx = make_ctx()
-		local a_tid = make_named_tid(ctx, "PlaceholderA" .. tostring(i % 30))
-		local b_tid = make_named_tid(ctx, "PlaceholderB" .. tostring(i % 30))
+		local a_tid = make_named_tid(ctx, "PlaceholderA" .. (i % 30))
+		local b_tid = make_named_tid(ctx, "PlaceholderB" .. (i % 30))
 		-- No oracle entry; these are unresolved placeholders
 		if unify_mod.try_unify(ctx, a_tid, b_tid) then
 			ok_count = ok_count + 1
@@ -716,7 +728,8 @@ end)
 -- Parameters<(A, B, ...) -> C> should be bidirectionally assignable to (A, B, ...).
 arb.it("[eval] E5c: Parameters<F> == param tuple for random function types",
 	arb_function_parts,
-	function(parts)
+	function(parts_arg)
+		local parts = parts_arg --[[: { type_str: string, params: { [integer]: string }, ret: string }]]
 		local fn_str = parts.type_str
 		local params = parts.params
 		-- If no params, Parameters gives an empty tuple — skip (nothing interesting to assert)
@@ -769,7 +782,8 @@ end)
 -- ReturnType<() -> C> == C.
 arb.it("[eval] E10d: ReturnType<() -> C> == C for random 0-param function types",
 	arb_function_parts,
-	function(parts)
+	function(parts_arg)
+		local parts = parts_arg --[[: { type_str: string, params: { [integer]: string }, ret: string }]]
 		-- Only test zero-param functions for this invariant (ReturnType uses () -> %R pattern)
 		if #parts.params ~= 0 then return end
 		local fn_str  = parts.type_str  -- "() -> C"
@@ -885,12 +899,15 @@ local arb_base_type_quad = {
 	shrink   = function(_, _) return function() return nil end end,
 }
 
+--:: BaseQuad = { a: string, b: string, c: string, d: string }
+
 -- MA1: arm selectivity — correct arm fires (500 trials)
 -- Declare match T { q.a => q.c, q.b => q.d }.
 -- Assert MatchTwo<q.a> == q.c and MatchTwo<q.b> == q.d (bidirectional each).
 arb.it("[eval] MA1: match arm selectivity — correct arm fires",
 	arb_base_type_quad,
-	function(q)
+	function(q_arg)
+		local q = q_arg --[[: BaseQuad]]
 		local decl = ("--:: MatchTwo<T> = match T { %s => %s, %s => %s }\n"):format(
 			q.a, q.c, q.b, q.d)
 		-- MatchTwo<q.a> == q.c
@@ -909,7 +926,8 @@ arb.it("[eval] MA1: match arm selectivity — correct arm fires",
 -- match (A | B) { A => C, B => D } == C | D
 arb.it("[eval] MA2: match distributivity — match (A|B) { A => C, B => D } == C | D",
 	arb_base_type_quad,
-	function(q)
+	function(q_arg)
+		local q = q_arg --[[: BaseQuad]]
 		local decl     = ("--:: MatchTwo<T> = match T { %s => %s, %s => %s }\n"):format(
 			q.a, q.c, q.b, q.d)
 		local result   = "MatchTwo<" .. q.a .. " | " .. q.b .. ">"
@@ -924,7 +942,8 @@ arb.it("[eval] MA2: match distributivity — match (A|B) { A => C, B => D } == C
 -- match D { A => C, B => C } applied to D (not A, not B) == never
 arb.it("[eval] MA3: match non-matching input == never",
 	arb_base_type_quad,
-	function(q)
+	function(q_arg)
+		local q = q_arg --[[: BaseQuad]]
 		-- Arms cover q.a and q.b; input is q.d (guaranteed ≠ q.a and ≠ q.b since all 4 distinct)
 		local decl = ("--:: MatchNone<T> = match T { %s => %s, %s => %s }\n"):format(
 			q.a, q.c, q.b, q.c)
@@ -1221,11 +1240,12 @@ end)
 -- the pattern "%f[%a]x: (%a+)" which matches "x" at a word boundary followed by ": <type>".
 arb.it("[eval] MA4r: FieldX<T> == x-field-type (has x) or never (no x) for random tables",
 	arb_table_type,
-	function(t_str)
+	function(t_str_arg)
+		local t_str = t_str_arg --[[: string]]
 		-- Extract x-field base type from the string, if present.
 		-- arb_table_type format: '{ [readonly ]<name>[?]: <base>, ... }'
 		-- We look for "x[?]: <base>" — optional "?" before the colon.
-		local x_type = t_str:match("%f[%a]x%??:%s*(%a+)")
+		local x_type = string.match(t_str, "%f[%a]x%??:%s*(%a+)")
 		local fieldx_str = "FieldX<" .. t_str .. ">"
 		if x_type then
 			-- T has field x: FieldX<T> must equal the x-field base type (bidirectional)
