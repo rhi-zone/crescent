@@ -65,6 +65,7 @@ end
 -- Response helpers
 -- ---------------------------------------------------------------------------
 
+--: <I, R>(id: I, result: R) -> { jsonrpc: "2.0", id: I, result: R }
 local function ok_resp(id, result)
     return { jsonrpc = "2.0", id = id, result = result }
 end
@@ -81,12 +82,14 @@ end
 -- File URI conversion
 -- ---------------------------------------------------------------------------
 
+--: (uri: string) -> string
 local function uri_to_path(uri)
     -- file:///path or file://host/path  →  /path
     local path = uri:match("^file://[^/]*(/.+)$")
     if not path then return uri end
-    path = path:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
-    return path
+    return (path:gsub("%%(%x%x)", function(h)
+        return string.char(tonumber(h, 16) or 0)
+    end))
 end
 
 -- ---------------------------------------------------------------------------
@@ -115,6 +118,7 @@ end
 -- ---------------------------------------------------------------------------
 -- name_at is a flat array: {line1, col1, name_id1, ...}; same coord system as type_at.
 -- Returns name_id, matched_col (both nil if no match).
+--: (ctx: Ctx, hover_line: integer, hover_col: integer) -> (integer | nil, integer | nil)
 local function name_at_lookup(ctx, hover_line, hover_col)
     local na = ctx.name_at
     if not na then return nil end
@@ -140,6 +144,7 @@ end
 
 -- field_at is a flat array: {line, col, field_name_id, obj_name_id, ...} stride=4.
 -- Returns field_id, obj_name_id, matched_col (all nil if no match).
+--: (ctx: Ctx, hover_line: integer, hover_col: integer) -> (integer | nil, integer | nil, integer | nil)
 local function field_at_lookup(ctx, hover_line, hover_col)
     local fa = ctx.field_at
     if not fa then return nil end
@@ -205,6 +210,7 @@ end
 -- type_at is a flat array: {line1, col1, tid1, line2, col2, tid2, ...}
 -- typechecker line is 1-indexed; col is 0-indexed.
 -- LSP position: both 0-indexed.
+--: (ctx: Ctx, hover_line: integer, hover_col: integer) -> integer | nil
 local function type_at_lookup(ctx, hover_line, hover_col)
     local ta = ctx.type_at
     if not ta then return nil end
@@ -236,6 +242,7 @@ end
 -- Check + publish
 -- ---------------------------------------------------------------------------
 
+--: (state: { text_cache: { [string]: string | nil, ... }, diag_cache: { [string]: any, ... }, ctx_cache: { [string]: Ctx | nil, ... }, ... }, uri: string, text: string) -> ()
 local function run_check(state, uri, text)
     -- Skip if text is unchanged and diagnostics are cached.
     if state.text_cache[uri] == text and state.diag_cache[uri] then
@@ -296,6 +303,7 @@ end
 -- Build completion items for all regular fields of a table type.
 -- Handles TAG_TABLE directly; for TAG_UNION, merges fields from all members.
 -- Returns an array (possibly empty) or nil if tid has no table fields.
+--: (ctx: Ctx, tid: integer) -> { [integer]: { label: string, kind: integer, detail: string }, ... } | nil
 local function table_field_items(ctx, tid)
     local TAG_FUNCTION    = defs.TAG_FUNCTION
     local TAG_TABLE       = defs.TAG_TABLE
@@ -344,6 +352,7 @@ end
 
 -- Build a SignatureInformation from a TAG_FUNCTION type.
 -- Returns {label, parameters=[{label},...]} or nil.
+--: (ctx: Ctx, fn_tid: integer) -> { label: string, parameters: { [integer]: { label: string }, ... } } | nil
 local function fn_signature(ctx, fn_tid)
     local TAG_FUNCTION = defs.TAG_FUNCTION
     local resolved = types.find(ctx, fn_tid)
@@ -367,6 +376,7 @@ end
 -- Resolve the function type at a call site by scanning the line prefix
 -- for a function name before the opening paren or last comma.
 -- Returns a SignatureInformation table or nil.
+--: (ctx: Ctx, text: string, lsp_line: integer, lsp_char: integer) -> ({ label: string, parameters: { [integer]: { label: string }, ... } } | nil, integer | nil)
 local function signature_at(ctx, text, lsp_line, lsp_char)
     local line = get_line(text, lsp_line)
     if not line then return nil end
@@ -376,8 +386,8 @@ local function signature_at(ctx, text, lsp_line, lsp_char)
 
     -- Count open parens to find active arg index and the call start.
     -- Strategy: find the innermost unclosed '('.
-    local depth = 0
-    local call_start = nil
+    local depth = 0 --: integer
+    local call_start = nil --: integer | nil
     for i = #prefix, 1, -1 do
         local ch = prefix:sub(i, i)
         if ch == ")" then
@@ -459,6 +469,7 @@ end
 -- Given a trigger character ("." or ":") and cursor position, try to
 -- extract the identifier before the trigger and look up its fields.
 -- Returns an items array on success, nil on failure.
+--: (ctx: Ctx, text: string, lsp_line: integer, lsp_char: integer, trigger: string) -> { [integer]: { label: string, kind: integer, detail: string }, ... } | nil
 local function field_completions(ctx, text, lsp_line, lsp_char, trigger)
     local line = get_line(text, lsp_line)
     if not line then return nil end
@@ -519,7 +530,7 @@ local HANDLERS = {}
 HANDLERS["initialize"] = function(state, msg)
     state.initialized = true
     -- Capture workspace root for cross-file navigation.
-    local p = msg.params or {}
+    local p = msg.params --[[: any]] or {}
     if p.rootUri then
         state.root_path = uri_to_path(p.rootUri)
     elseif p.rootPath then
@@ -572,7 +583,7 @@ HANDLERS["exit"] = function(state, _msg)
 end
 
 HANDLERS["textDocument/didOpen"] = function(state, msg)
-    local p = msg.params
+    local p = msg.params --[[: any]]
     if not p or not p.textDocument then return end
     local uri  = p.textDocument.uri
     local text = p.textDocument.text
@@ -582,7 +593,7 @@ HANDLERS["textDocument/didOpen"] = function(state, msg)
 end
 
 HANDLERS["textDocument/didChange"] = function(state, msg)
-    local p = msg.params
+    local p = msg.params --[[: any]]
     if not p or not p.textDocument then return end
     local uri = p.textDocument.uri
     -- Full sync: last content change holds the full document text.
@@ -596,7 +607,7 @@ HANDLERS["textDocument/didChange"] = function(state, msg)
 end
 
 HANDLERS["textDocument/didSave"] = function(state, msg)
-    local p = msg.params
+    local p = msg.params --[[: any]]
     if not p or not p.textDocument then return end
     local uri  = p.textDocument.uri
     -- If the client sends the text in didSave, use it; otherwise re-check
@@ -609,7 +620,7 @@ HANDLERS["textDocument/didSave"] = function(state, msg)
 end
 
 HANDLERS["textDocument/didClose"] = function(state, msg)
-    local p = msg.params
+    local p = msg.params --[[: any]]
     if not p or not p.textDocument then return end
     local uri = p.textDocument.uri
     state.open_files[uri] = nil
@@ -621,7 +632,7 @@ HANDLERS["textDocument/didClose"] = function(state, msg)
 end
 
 HANDLERS["textDocument/hover"] = function(state, msg)
-    local p = msg.params
+    local p = msg.params --[[: any]]
     if not p or not p.textDocument or not p.position then
         send(ok_resp(msg.id, NULL))
         return
@@ -647,7 +658,7 @@ HANDLERS["textDocument/hover"] = function(state, msg)
 end
 
 HANDLERS["textDocument/completion"] = function(state, msg)
-    local p = msg.params
+    local p = msg.params --[[: any]]
     if not p or not p.textDocument then
         send(ok_resp(msg.id, EMPTY_ARRAY))
         return
@@ -707,7 +718,7 @@ HANDLERS["textDocument/completion"] = function(state, msg)
 end
 
 HANDLERS["textDocument/signatureHelp"] = function(state, msg)
-    local p = msg.params
+    local p = msg.params --[[: any]]
     if not p or not p.textDocument or not p.position then
         send(ok_resp(msg.id, NULL))
         return
@@ -738,7 +749,7 @@ HANDLERS["textDocument/signatureHelp"] = function(state, msg)
 end
 
 HANDLERS["textDocument/definition"] = function(state, msg)
-    local p = msg.params
+    local p = msg.params --[[: any]]
     if not p or not p.textDocument or not p.position then
         send(ok_resp(msg.id, NULL))
         return
@@ -878,7 +889,7 @@ local function main()
     }
 
     while true do
-        local msg = recv()
+        local msg = recv() --[[: { method?: string, id?: any, params?: any } | nil]]
         if msg == nil then break end
 
         local method = msg.method

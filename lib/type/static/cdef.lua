@@ -43,6 +43,9 @@ end
 -- c_type_to_tid: map a C type descriptor to a TypeSlot ID in ctx
 ---------------------------------------------------------------------------
 
+--:: CTypeDesc = { k: string, to?: any, of?: any, fields?: { [integer]: any, ... }, members?: { [integer]: any, ... }, name?: string, name_id?: integer, params?: { [integer]: any, ... }, ret?: any, vararg?: boolean, ... }
+
+--: (ctx: Ctx, ctype: CTypeDesc) -> integer
 local function c_type_to_tid(ctx, ctype)
     local k = ctype.k
 
@@ -98,7 +101,8 @@ local function c_type_to_tid(ctx, ctype)
     end
 
     if k == "struct" then
-        if not ctype.fields or #ctype.fields == 0 then
+        local fields = ctype.fields
+        if not fields or #fields == 0 then
             -- Opaque struct (forward declaration or no body).
             return types_mod.alloc_type(ctx, defs.TAG_CDATA)
         end
@@ -161,6 +165,7 @@ function M.init(ctx)
 end
 
 -- Parse a C declaration string and register its symbols into ctx.T_FFI_C.
+--: (ctx: Ctx, c_string: string) -> ()
 function M.process(ctx, c_string)
     if not ctx.T_FFI_C then return end
 

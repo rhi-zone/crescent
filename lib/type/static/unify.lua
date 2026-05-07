@@ -185,8 +185,7 @@ local function bind_var(ctx, var_tid, target_tid)
                 end
             end
             if #filtered < tt.data[1] then
-                --: integer
-                local new_ty
+                local new_ty = 0 --: integer
                 if #filtered == 0 then
                     new_ty = ctx.T_NEVER
                 elseif #filtered == 1 then
