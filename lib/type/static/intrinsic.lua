@@ -88,7 +88,7 @@ local function apply_type_fn(ctx, fn_tid, member_tid)
     if ft.tag == TAG_NAMED then
         local env_mod = require("lib.type.static.env")
         local resolved = env_mod.resolve_named_type(ctx, ctx.scope, ft.data[0], { member_tid })
-        if resolved then return resolved end
+        if resolved then return resolved or 0 end
     end
 
     if ft.tag == defs.TAG_PARTIAL_APP then
@@ -101,7 +101,7 @@ local function apply_type_fn(ctx, fn_tid, member_tid)
         end
         partial_args[#partial_args + 1] = member_tid
         local resolved = env_mod.resolve_named_type(ctx, ctx.scope, name_id, partial_args)
-        if resolved then return resolved end
+        if resolved then return resolved or 0 end
         return ctx.T_NEVER
     end
 
@@ -175,14 +175,14 @@ end
 
 -- Extract a field from a descriptor table result.
 -- Returns the type_id for the named slot, or nil.
---: (Ctx, integer, string) -> integer
+--: (Ctx, integer, string) -> integer | nil
 local function descriptor_field(ctx, tbl_tid, slot_name)
     tbl_tid = types_mod.find(ctx, tbl_tid)
     local t = ctx.types:get(tbl_tid)
     if t.tag ~= TAG_TABLE then return nil end
     local name_id = intern_mod.intern(ctx.pool, slot_name)
     local fe = types_mod.table_field(ctx, tbl_tid, name_id)
-    if fe then return types_mod.find(ctx, fe.type_id) end
+    if fe then return types_mod.find(ctx, fe.type_id or 0) end
     return nil
 end
 
@@ -402,7 +402,7 @@ local function extract_values(ctx, T_tid, ipairs_mode)
         end
         -- Positional fields: widen value types
         if T_t.data[1] > 0 then
-            local val_members = {}
+            local val_members = {} --: { [integer]: integer }
             for i = T_t.data[0], T_t.data[0] + T_t.data[1] - 1 do
                 local fid = ctx.lists:get(i)
                 local fe  = ctx.fields:get(fid)
@@ -421,7 +421,7 @@ local function extract_values(ctx, T_tid, ipairs_mode)
         end
         -- Named fields: widen value types
         if T_t.data[1] > 0 then
-            local val_members = {}
+            local val_members = {} --: { [integer]: integer }
             for i = T_t.data[0], T_t.data[0] + T_t.data[1] - 1 do
                 local fid = ctx.lists:get(i)
                 local fe  = ctx.fields:get(fid)
@@ -452,7 +452,7 @@ end
 --   - If neither found: V = unknown
 
 -- Extract K and V types from a table type for pairs().
---: (Ctx, integer) -> integer
+--: (Ctx, integer) -> (integer, integer)
 local function extract_pairs_kv(ctx, T_tid)
     T_tid = types_mod.find(ctx, T_tid)
     local T_t = ctx.types:get(T_tid)
@@ -515,7 +515,7 @@ local function extract_ipairs_v(ctx, T_tid)
     -- Collect value types from all named fields (positional array entries).
     -- Widen literals so `ipairs({1,2,3})` yields v: integer, not v: 1|2|3.
     if T_t.data[1] > 0 then
-        local val_members = {}
+        local val_members = {} --: { [integer]: integer }
         for i = T_t.data[0], T_t.data[0] + T_t.data[1] - 1 do
             local fid = ctx.lists:get(i)
             local fe  = ctx.fields:get(fid)
@@ -591,7 +591,7 @@ local function expand_require(ctx, arg_ids)
             end
             -- cri_loader: resolve cross-file types from .cri cache.
             if ctx.cri_loader then
-                local exports, aliases = ctx.cri_loader(ctx, module_name)
+                local exports, aliases = ctx.cri_loader(ctx, module_name or "")
                 if exports then
                     ctx._last_require_aliases = aliases
                     return exports
@@ -628,7 +628,7 @@ end
 local fnv31   = defs.fnv31
 local TAG_NOMINAL_I = defs.TAG_NOMINAL
 
---: (Ctx, integer) -> string
+--: (Ctx, integer) -> integer
 local function T_fingerprint(ctx, T)
     local t = ctx.types:get(T)
     local tag = t.tag
@@ -692,7 +692,7 @@ local function expand_opaque(ctx, arg_ids, stable_id)
                     else
                         -- U's field type must be compatible with T's field type.
                         if not unify_mod.try_unify(ctx, types_mod.find(ctx, ufe.type_id),
-                                                        types_mod.find(ctx, tfe.type_id), {}) then
+                                                        types_mod.find(ctx, tfe.type_id or 0), {}) then
                             errors_mod.error(ctx.err, ctx.filename, 0, 0,
                                 "$Opaque<T, U>: exposed field `" .. fname
                                 .. "` has incompatible type in inner type T")

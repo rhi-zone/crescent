@@ -273,7 +273,7 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
             local dep = _session[dep_path]
             local cri = dep.cri_bytes
             if cri then
-                local ret, aliases = load_and_tag(cri, dep_path)
+                local ret, aliases = load_and_tag(cri or "", dep_path)
                 if ret then return ret, aliases end
             end
             -- Dep was checked but has no serializable export (e.g. T_ANY): return nil.
@@ -295,7 +295,7 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
             if dep2 then
                 local cri2 = dep2.cri_bytes
                 if cri2 then
-                    local ret, aliases = load_and_tag(cri2, dep_path)
+                    local ret, aliases = load_and_tag(cri2 or "", dep_path)
                     if ret then return ret, aliases end
                 end
             end
@@ -320,7 +320,7 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
             err_ctx = errors_mod.new_ctx()
             err_ctx, ctx = run_v3("", filename, parent_scope, _pool, cri_loader, opts)
             local ok, exports, _aliases, cached_errors, cached_warnings =
-                cri_read.load(cached_bytes, ctx)
+                cri_read.load(cached_bytes or "", ctx)
             if ok and exports["__ret"] then
                 local export_tid = exports["__ret"]
                 -- Restore diagnostics from cache so callers see errors/warnings
@@ -440,7 +440,7 @@ function M.check_string_with_deps(source, filename, parent_scope, opts)
         M.check_file(dep_path, parent_scope, _pool, opts)
         checking_deps[dep_path] = nil
         if _session[dep_path] and _session[dep_path].cri_bytes then
-            local ok, exports, aliases = cri_read.load(_session[dep_path].cri_bytes, ctx)
+            local ok, exports, aliases = cri_read.load(_session[dep_path].cri_bytes or "", ctx)
             if ok and exports["__ret"] then return exports["__ret"], aliases end
         end
         return nil

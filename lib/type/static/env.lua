@@ -904,7 +904,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         end
         local match_mod = require("lib.type.static.match")
         local result = match_mod.lookup_index(ctx, new_subj, new_key)
-        if result then return result end
+        if result then return result or 0 end
         -- Miss after substitution: report and return never. Suppress when the
         -- subject is still a free var to avoid spurious errors during inference.
         local errors_mod = require("lib.type.static.errors")
@@ -1001,7 +1001,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
             end
             if not has_unresolved then
                 local resolved = M.resolve_named_type(ctx, ctx.scope, ct.data[0], new_args)
-                if resolved then return resolved end
+                if resolved then return resolved or 0 end
             end
         end
         local mk = ctx.lists:mark()
@@ -1040,7 +1040,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         if not has_unresolved then
             -- Try to re-evaluate with the now-concrete args
             local resolved = M.resolve_named_type(ctx, ctx.scope, t.data[0], new_partial_args)
-            if resolved then return resolved end
+            if resolved then return resolved or 0 end
         end
         -- Still unresolved: rebuild the TAG_PARTIAL_APP with substituted args
         local mk = ctx.lists:mark()

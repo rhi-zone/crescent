@@ -74,7 +74,7 @@ local function load_decls(ctx, path)
 
         local first_id = ctx.pool.next_id
 
-        local ok_p, pr = pcall(parse_mod.parse, source, path, ctx.pool)
+        local ok_p, pr = pcall(parse_mod.parse, source or "", path, ctx.pool)
         if not ok_p then return end
 
         local ok_a, ar_ = pcall(ann_mod.parse_annotations, pr.lexer.annotations, ctx.pool, path)
@@ -271,7 +271,7 @@ local function load_decls(ctx, path)
             local existing_alias     = env_mod.lookup_type(ctx.scope, r.name_id)
 
             if existing_value_tid then
-                local merged_tid = merge_into_table(existing_value_tid)
+                local merged_tid = merge_into_table(existing_value_tid or 0)
                 env_mod.bind(ctx.scope, r.name_id, merged_tid)
                 if prim_tag then ctx.prim_index[prim_tag] = merged_tid end
             elseif existing_alias then
@@ -385,7 +385,7 @@ end
 -- ctx_types.lua declares typechecker-internal functions and must not appear in
 -- user-file scope; use populate_checker() for self-checking typechecker sources.
 function M.populate(ctx)
-    local src_path = debug.getinfo(1, "S").source:gsub("^@", "")
+    local src_path = (debug.getinfo(1, "S").source or ""):gsub("^@", "")
     local dir = src_path:match("^(.+/)[^/]+$") or "./"
     prereq_G(ctx)
     load_decls(ctx, dir .. "stdlib_types.lua")
@@ -398,7 +398,7 @@ end
 -- Re-synthesizes _G after loading ctx_types.lua so that checker-internal names are
 -- also reachable via _G when self-checking.
 function M.populate_checker(ctx)
-    local src_path = debug.getinfo(1, "S").source:gsub("^@", "")
+    local src_path = (debug.getinfo(1, "S").source or ""):gsub("^@", "")
     local dir = src_path:match("^(.+/)[^/]+$") or "./"
     prereq_G(ctx)
     load_decls(ctx, dir .. "stdlib_types.lua")

@@ -90,7 +90,7 @@ DefsModule = {
   TAG_ENUM_MEMBER: integer, TAG_TYPEOF: integer,
   TAG_FFIC: integer, TAG_PAT_ALL_FIELDS: integer,
   TAG_PAT_REST_FIELDS: integer, TAG_PAT_META_SPREAD: integer,
-  TAG_CAPTURE: integer,
+  TAG_CAPTURE: integer, TAG_INDEX_TYPE: integer, TAG_PARTIAL_APP: integer,
   NODE_LITERAL: integer, NODE_IDENTIFIER: integer, NODE_UNARY_EXPR: integer,
   NODE_BINARY_EXPR: integer, NODE_INDEX_EXPR: integer, NODE_FIELD_EXPR: integer,
   NODE_METHOD_CALL: integer, NODE_CALL_EXPR: integer, NODE_FUNC_EXPR: integer,
