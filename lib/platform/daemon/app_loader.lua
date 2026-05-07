@@ -123,24 +123,26 @@ function M.make(opts)
 		if not index_db then
 			return nil, "daemon/app_loader: no index_db"
 		end
-		local row = index_db:get(app_id)
+		local idx = index_db --[[:! { get: (unknown, string) -> { path: string, ... } | nil, get_cap_config: ((unknown, string, string) -> { [string]: unknown }) | nil, get_grants: ((unknown, integer) -> { [string]: boolean | nil }) | nil, ... }]]
+		local row = idx:get(app_id)
 		if not row then
 			return nil, "app not found: " .. tostring(app_id)
 		end
-		local app, err = platform.load_app(row.path)
-		if not app then
+		local app_opt, err = platform.load_app(row.path)
+		if not app_opt then
 			return nil, "load_app failed: " .. tostring(err)
 		end
+		local app = app_opt --[[: any]]
 
 		local cap_decls = collect_entry_caps(app.manifest, entry_key)
 		-- Merge operator-supplied overrides into each cap declaration.
-		if index_db.get_cap_config then
+		if idx.get_cap_config then
 			for name, decl in pairs(cap_decls) do
-				local overrides = index_db:get_cap_config(app_id, name)
-				for k, v in pairs(overrides) do decl[k] = v end
+				local overrides = (idx.get_cap_config --[[:! (unknown, string, string) -> { [string]: unknown }]])(idx, app_id, name)
+				for k, v in pairs(overrides) do (decl --[[:! { [string]: unknown }]])[k] = v end
 			end
 		end
-		local grants = resolve_grants(index_db, app_id, cap_decls)
+		local grants = resolve_grants(idx, app_id, cap_decls)
 		local context   = {
 			user_id  = ctx_base.user_id,
 			app_id   = app_id,

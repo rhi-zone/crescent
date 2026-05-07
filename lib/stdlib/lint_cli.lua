@@ -20,7 +20,7 @@ end
 
 -- ── run ───────────────────────────────────────────────────────────────────────
 
-local all_diags, files = lint.check_dir(target)
+local all_diags, files = lint.check_dir(target --[[:! string]])
 
 -- Print diagnostics.
 for _, d in ipairs(all_diags) do
@@ -29,12 +29,13 @@ end
 
 -- ── summary ───────────────────────────────────────────────────────────────────
 
-local total_files = files and #files or 0
+local total_files = 0
+if files ~= nil then total_files = #(files --[[:! { [integer]: string }]]) end
 local total_violations = #all_diags
 
 -- Count violations by rule.
-local by_rule = {}
-local rule_order = {}
+local by_rule = {} --: { [string]: integer }
+local rule_order = {} --: { [integer]: string }
 for _, d in ipairs(all_diags) do
   if not by_rule[d.rule] then
     by_rule[d.rule] = 0

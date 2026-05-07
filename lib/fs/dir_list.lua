@@ -1,5 +1,6 @@
 local ffi = require("ffi")
 
+--:: declare register_ffi_module = ((string) -> nil) | nil
 --[[@diagnostic disable-next-line: undefined-global]]
 if register_ffi_module then register_ffi_module("lib.fs.dir_list") end
 
@@ -173,7 +174,7 @@ if ffi.os == "Linux" then
 		local stat = ffi.new("struct statx[1]") --[[@type { [0]: statx_c }]]
 
 		--[[@return file_info? entry, string? error]]
-		--[[@param self { dir: dir_c, path: string }]]
+		--: (self: { dir: cdata, path: string }) -> ({ name: string, path: string, is_dir: boolean, size: number | nil, created: number, modified: number } | nil, string | nil)
 		local dir_list_iter = function(self)
 			local entry = dir_list_ffi.readdir(self.dir)
 			if entry == nil then
@@ -192,8 +193,8 @@ if ffi.os == "Linux" then
 				--[[https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/stat.h#L23]]
 				is_dir = bit.band(stat[0].stx_mode, 0xf000) == 0x4000,
 				size = err == 0 and tonumber(stat[0].stx_size) or 0,
-				created = tonumber(stat[0].stx_btime_sec) + tonumber(stat[0].stx_btime_nsec) / 1000000000,
-				modified = tonumber(stat[0].stx_mtime_sec) + tonumber(stat[0].stx_mtime_nsec) / 1000000000,
+				created = (tonumber(stat[0].stx_btime_sec) or 0) + (tonumber(stat[0].stx_btime_nsec) or 0) / 1000000000,
+				modified = (tonumber(stat[0].stx_mtime_sec) or 0) + (tonumber(stat[0].stx_mtime_nsec) or 0) / 1000000000,
 			}
 		end
 
@@ -294,7 +295,7 @@ elseif ffi.os == "Windows" then
 	local entry = ffi.new("WIN32_FIND_DATA[1]") --[[@type ptr_c<win32_find_data_c>]]
 
 	--[[@return file_info? entry, string? error]]
-	--[[@param self { dir: win32_find_file_handle_c, path: string }]]
+	--: (self: { dir: cdata, path: string }) -> ({ name: string, path: string, is_dir: boolean, size: number | nil, created: number | nil, modified: number | nil } | nil, string | nil)
 	local dir_list_iter = function(self)
 		local success = dir_list_ffi.FindNextFileA(self.dir, entry)
 		if not success then

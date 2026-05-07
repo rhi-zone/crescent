@@ -40,30 +40,30 @@ local M = {}
 --:: app_loader_fn = (string) -> (maybe_app_handler, string | nil)
 --:: source_entry = { id: string, name: string, discover: (({ [string]: string }) -> unknown) }
 --:: daemon_opts = {
---::   host: string | nil,
---::   time_fn: (() -> integer) | nil,
---::   random_bytes_fn: ((n: integer) -> { [integer]: number }) | nil,
---::   index_db: unknown,
---::   index_obj: unknown,
---::   remove_fn: ((path: string) -> (true | nil, string | nil)) | nil,
---::   write_fn: ((path: string, data: string) -> (true | nil, string | nil)) | nil,
---::   read_fn: ((path: string) -> (string | nil, string | nil)) | nil,
---::   apps_dir: string | nil,
---::   runtime_files: { [integer]: { name: string, data: string } } | nil,
---::   runtime_manifest: unknown,
---::   sources: { [integer]: source_entry } | nil,
---::   app_handler: ((http_req, http_res, string) -> nil) | nil,
---::   app_loader: app_loader_fn | nil,
---::   handler_cache_size: integer | nil,
---::   handler_ttl: number | nil,
---::   secure_cookie: boolean | nil,
---::   prefer_loopback: boolean | nil,
---::   on_handler_error: ((app_id: string, err: string, traceback: string) -> nil) | nil,
---::   audit_log: unknown,
---::   session_db_path: string | nil,
---::   policy_path: string | nil,
---::   tls_cert: string | nil,
---::   tls_key: string | nil,
+--::   host?: string,
+--::   time_fn?: () -> integer,
+--::   random_bytes_fn?: (n: integer) -> { [integer]: number },
+--::   index_db?: unknown,
+--::   index_obj?: unknown,
+--::   remove_fn?: (path: string) -> (true | nil, string | nil),
+--::   write_fn?: (path: string, data: string) -> (true | nil, string | nil),
+--::   read_fn?: (path: string) -> (string | nil, string | nil),
+--::   apps_dir?: string,
+--::   runtime_files?: { [integer]: { name: string, data: string } },
+--::   runtime_manifest?: unknown,
+--::   sources?: { [integer]: source_entry },
+--::   app_handler?: (http_req, http_res, string) -> nil,
+--::   app_loader?: app_loader_fn,
+--::   handler_cache_size?: integer,
+--::   handler_ttl?: number,
+--::   secure_cookie?: boolean,
+--::   prefer_loopback?: boolean,
+--::   on_handler_error?: (app_id: string, err: string, traceback: string) -> nil,
+--::   audit_log?: unknown,
+--::   session_db_path?: string,
+--::   policy_path?: string,
+--::   tls_cert?: string,
+--::   tls_key?: string,
 --:: }
 --:: session_record = { created_at: integer, last_seen: integer, csrf_token: string | nil }
 --:: launch_token_record = { app_id: string, session_id: string | nil, expires_at: integer }
@@ -284,7 +284,7 @@ function M.make(opts)
 	-- library.create expects `caps.index_db` to be a SQLite-like handle (with a
 	-- :query method) or nil. We propagate whatever the caller passed — library
 	-- tolerates nil and falls back to an empty list.
-	local library_app = library.create({ index_db = index_db, sources = opts.sources }) --: { handler: (http_req, http_res) -> (boolean | nil) }
+	local library_app = library.create({ index_db = index_db, sources = opts.sources }) --[[:! { handler: (http_req, http_res) -> (boolean | nil), ... }]]
 
 	-- App-origin handler. Three modes, in priority order:
 	--   1. opts.app_handler — direct override (tests use this to bypass loading).
@@ -468,9 +468,10 @@ function M.make(opts)
 			-- Grant gate: if index_obj is available and the app has required caps
 			-- without a stored grant decision, redirect to the grant page rather
 			-- than loading with auto_grants. Only runs on first load (cache miss).
+			local irow --: unknown
 			if index_obj and index_obj.get_grants and index_obj.get then
 				local iapp_id = tonumber(app_id)
-				local irow = iapp_id and index_obj:get(iapp_id)
+				irow = iapp_id and index_obj:get(iapp_id)
 				if irow then
 					local cap_decls = all_cap_decls_from_manifest(irow.manifest or {})
 					local stored = index_obj:get_grants(iapp_id)
@@ -798,8 +799,8 @@ function M.make(opts)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
 		local sess_rec = presented and session_get(presented) or nil
-		local now_grant = time_fn() --: integer
-		if not sess_rec or (now_grant - sess_rec.last_seen) >= SESSION_IDLE_TTL then
+		local now_grant = (time_fn() or 0) --[[:! integer]]
+		if not sess_rec or (now_grant - (sess_rec.last_seen or 0)) >= SESSION_IDLE_TTL then
 			if sess_rec and presented then session_delete(presented) end
 			plain(res, 401, "unauthorized")
 			return
@@ -897,8 +898,8 @@ function M.make(opts)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
 		local sess_rec = presented and session_get(presented) or nil
-		local now_post_grant = time_fn() --: integer
-		if not sess_rec or (now_post_grant - sess_rec.last_seen) >= SESSION_IDLE_TTL then
+		local now_post_grant = (time_fn() or 0) --[[:! integer]]
+		if not sess_rec or (now_post_grant - (sess_rec.last_seen or 0)) >= SESSION_IDLE_TTL then
 			if sess_rec and presented then session_delete(presented) end
 			plain(res, 401, "unauthorized")
 			return
@@ -1109,12 +1110,12 @@ function M.make(opts)
 		-- Run the import pipeline.
 		local app_path, manifest_or_err = import_mod.import_card({
 			png_bytes        = png_bytes,
-			runtime_files    = runtime_files,
-			runtime_manifest = runtime_manifest,
-			apps_dir         = apps_dir,
+			runtime_files    = runtime_files or {},
+			runtime_manifest = (runtime_manifest or {}) --[[:! { name: string | nil, dom_entry: string | nil, ... }]],
+			apps_dir         = apps_dir or "",
 			index            = index_obj,
-			timestamp        = time_fn(),
-			write_fn         = write_fn,
+			timestamp        = time_fn() or 0,
+			write_fn         = write_fn --[[:! (string, string) -> (true | nil, string)]],
 		})
 		if not app_path then
 			plain(res, 500, "import failed: " .. tostring(manifest_or_err))
@@ -1153,8 +1154,8 @@ function M.make(opts)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
 		local sess_rec = presented and session_get(presented) or nil
-		local now_launch = time_fn() --: integer
-		if not sess_rec or (now_launch - sess_rec.last_seen) >= SESSION_IDLE_TTL then
+		local now_launch = (time_fn() or 0) --[[:! integer]]
+		if not sess_rec or (now_launch - (sess_rec.last_seen or 0)) >= SESSION_IDLE_TTL then
 			if sess_rec and presented then session_delete(presented) end
 			plain(res, 401, "unauthorized")
 			return
@@ -1251,8 +1252,8 @@ end
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
 		local sess_rec = presented and session_get(presented) or nil
-		local now_delete = time_fn() --: integer
-		if not sess_rec or (now_delete - sess_rec.last_seen) >= SESSION_IDLE_TTL then
+		local now_delete = (time_fn() or 0) --[[:! integer]]
+		if not sess_rec or (now_delete - (sess_rec.last_seen or 0)) >= SESSION_IDLE_TTL then
 			if sess_rec and presented then session_delete(presented) end
 			plain(res, 401, "unauthorized")
 			return
@@ -1403,9 +1404,9 @@ end
 		local is_launch_path = path:sub(1, 8) == "/launch/"
 		local sid --: string | nil
 		local minted = false
-		local now = time_fn() --: integer
+		local now = (time_fn() or 0) --[[:! integer]]
 		local sess_rec = presented and session_get(presented) or nil
-		if sess_rec and (now - sess_rec.last_seen) >= SESSION_IDLE_TTL then
+		if sess_rec and (now - (sess_rec.last_seen or 0)) >= SESSION_IDLE_TTL then
 			-- Stale cookie: drop it and treat as unauthenticated. On non-launch
 			-- paths this falls through to mint_session (which also sweeps).
 			if presented then session_delete(presented) end

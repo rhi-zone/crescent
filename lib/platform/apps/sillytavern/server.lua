@@ -36,7 +36,7 @@ local card_mod = require("lib.formats.ccv2.card")
 
 local M = {}
 
---:: http_req = { method: string, path: string, headers: { [string]: string }, body: string | nil }
+--:: http_req = { method: string, path: string, query?: string, headers: { [string]: string }, body: string | nil }
 --:: http_res = { status: integer, headers: { [string]: string }, body: string }
 
 local SCHEMA = [[
@@ -56,11 +56,16 @@ local function parse_query(qs)
 	local params = {} --: { [string]: string }
 	if not qs or qs == "" then return params end
 	for kv in qs:gmatch("[^&]+") do
-		local k, v = kv:match("^([^=]+)=?(.*)")
+		local kv_s = kv --[[:! string]]
+		local k, v = kv_s:match("^([^=]+)=?(.*)")
 		if k then
-			v = v:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
-			v = v:gsub("+", " ")
-			params[k] = v
+			local v_str = v --[[:! string]]
+			--: (string) -> string
+			local hex_repl = function(h) return string.char(tonumber(h, 16) or 0) end
+			local v1_a = v_str:gsub("%%(%x%x)", hex_repl)
+			local v1_str = v1_a --[[:! string]]
+			local v2_a = v1_str:gsub("+", " ")
+			params[k --[[:! string]]] = v2_a --[[:! string]]
 		end
 	end
 	return params
@@ -79,7 +84,7 @@ local function matches(name, q)
 	return name:lower():find(q:lower(), 1, true) ~= nil
 end
 
---: (http_res, number, string) -> nil
+--: (http_res, integer, string) -> nil
 local function plain(res, status, body)
 	res.status = status
 	res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
@@ -90,7 +95,9 @@ end
 local function json_ok(res, data)
 	res.status = 200
 	res.headers["Content-Type"] = { "application/json" }
-	res.body = json.encode(data)
+	local enc_a, enc_b = json.encode(data)
+	local _ = enc_b
+	res.body = enc_a --[[:! string]]
 	return true
 end
 
@@ -170,6 +177,7 @@ function M.create(caps)
 
 	-- ── GET / ?entry=<filename> — card detail page ───────────────────────────
 
+	--: (http_req, http_res) -> nil
 	local function handle_card_page(req, res)
 		local qs = req.query or ""
 		local params = parse_query(qs)
@@ -232,6 +240,7 @@ a.btn:hover{background:#5a5a9a}
 
 	-- ── GET /card/:id — raw PNG bytes ─────────────────────────────────────────
 
+	--: (http_req, http_res) -> nil
 	local function handle_card_raw(req, res)
 		local filename = (req.path or ""):match("^/card/(.+)$")
 		if not filename or filename == "" then

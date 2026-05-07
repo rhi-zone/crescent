@@ -68,8 +68,8 @@ local function find_or_create_child(node, seg_text, kind, param_name, prefix)
 	return child
 end
 
---:: RouterInstance = { root: Node, ... }
 --:: MethodFn = (self: RouterInstance, path: string, handler: unknown) -> (boolean | nil, string | nil)
+--:: RouterInstance = { root: Node, add: (self: RouterInstance, method: string, path: string, handler: unknown) -> (boolean | nil, string | nil), find: (self: RouterInstance, method: string, path: string) -> { handler: unknown, params: { [string]: string } } | nil, get: MethodFn, post: MethodFn, put: MethodFn, delete: MethodFn, patch: MethodFn, head: MethodFn, options: MethodFn, group: (self: RouterInstance, prefix: string, fn: (g: Group) -> nil) -> nil, ... }
 --:: Group = { add: (self: Group, method: string, path: string, handler: unknown) -> (boolean | nil, string | nil), get: MethodFn, post: MethodFn, put: MethodFn, delete: MethodFn, patch: MethodFn, head: MethodFn, options: MethodFn, group: (self: Group, prefix: string, fn: (g: Group) -> nil) -> nil }
 --:: Router = RouterInstance
 
@@ -138,7 +138,7 @@ function Router:find(method, path)
 	local node = self.root
 
 	for i = 1, np do
-		local part = parts[i]
+		local part = parts[i] --[[:! string]]
 		local matched = false
 
 		-- Try static children first (highest priority)

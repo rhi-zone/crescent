@@ -9,15 +9,17 @@ local M = {}
 
 -- ── helpers ───────────────────────────────────────────────────────────────────
 
+--: (string) -> (string | nil, string | nil)
 local function read_file(path)
   local f, err = io.open(path, "r")
   if not f then return nil, err end
-  local src = f:read("*a")
+  local src = f:read("*a") --[[:! string]]
   f:close()
   return src
 end
 
 -- Split source into lines, return table of strings (1-indexed).
+--: (string) -> { [integer]: string }
 local function split_lines(src)
   local lines = {}
   local i = 1
@@ -234,7 +236,7 @@ local function check_missing_tests(file, diags)
   if handle then
     local result = handle:read("*a")
     handle:close()
-    found = result and result ~= ""
+    if result ~= nil and result ~= "" then found = true end
   end
   if not found then
     diags[#diags + 1] = {
@@ -273,7 +275,7 @@ end
 
 --- Find all init.lua files under dir (excluding *_test.lua and archive/) and
 -- run check_file on each. Returns array of diagnostics.
---: (string) -> { file: string, line: integer, rule: string, message: string }[]
+--: (string) -> ({ file: string, line: integer, rule: string, message: string }[], { [integer]: string } | nil)
 M.check_dir = function(dir)
   local handle = io.popen(
     'find ' .. dir ..

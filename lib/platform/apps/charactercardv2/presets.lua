@@ -51,7 +51,8 @@ local function load_list(kv, ptype)
 end
 
 local function save_list(kv, ptype, list)
-	kv.set(list_key(ptype), json.encode(list))
+	local encoded = json.encode(list)
+	kv.set(list_key(ptype), encoded)
 end
 
 -- ── Default presets ────────────────────────────────────────────────────────
@@ -171,7 +172,7 @@ function M.load_all(kv)
 end
 
 --- Save or update a preset. If a preset with the same name exists, it is replaced.
---: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string, string, { name: string, ... }) -> (true | nil, string)
+--: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string, string, { name: string, ... }) -> (true | nil, string | nil)
 function M.save(kv, ptype, name, preset)
 	local ok, err = validate_type(ptype)
 	if not ok then return nil, err end
@@ -203,7 +204,7 @@ function M.save(kv, ptype, name, preset)
 end
 
 --- Delete a preset by name.
---: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string, string) -> (true | nil, string)
+--: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string, string) -> (true | nil, string | nil)
 function M.delete(kv, ptype, name)
 	local ok, err = validate_type(ptype)
 	if not ok then return nil, err end
@@ -260,7 +261,7 @@ function M.get_active(kv, ptype)
 end
 
 --- Set the active preset by name.
---: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string, string) -> (true | nil, string)
+--: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string, string) -> (true | nil, string | nil)
 function M.set_active(kv, ptype, name)
 	local ok, err = validate_type(ptype)
 	if not ok then return nil, err end

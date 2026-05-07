@@ -304,8 +304,7 @@ local CAP_FACTORIES = {
 		mod = "lib.platform.caps.http_server",
 		build = function(decl)
 			return require("lib.platform.caps.http_server").http_server_cap({
-					port = decl.port or 0, host = nil, daemon = nil, url = nil, on_serve = nil,
-					tcp_nodelay = nil,
+					port = decl.port or 0,
 				})
 		end,
 	},

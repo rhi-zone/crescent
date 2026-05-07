@@ -9,18 +9,18 @@ local M = {}
 -- Read a little-endian uint16 from string s at 1-based byte offset i.
 --: (string, integer) -> integer
 local function read_u16(s, i)
-	local b1 = string.byte(s, i)
-	local b2 = string.byte(s, i + 1)
+	local b1 = string.byte(s, i) or 0
+	local b2 = string.byte(s, i + 1) or 0
 	return bit.bor(bit.lshift(b2, 8), b1)
 end
 
 -- Read a little-endian uint32 from string s at 1-based byte offset i.
 --: (string, integer) -> integer
 local function read_u32(s, i)
-	local b1 = string.byte(s, i)
-	local b2 = string.byte(s, i + 1)
-	local b3 = string.byte(s, i + 2)
-	local b4 = string.byte(s, i + 3)
+	local b1 = string.byte(s, i) or 0
+	local b2 = string.byte(s, i + 1) or 0
+	local b3 = string.byte(s, i + 2) or 0
+	local b4 = string.byte(s, i + 3) or 0
 	return bit.bor(bit.lshift(b4, 24), bit.lshift(b3, 16), bit.lshift(b2, 8), b1)
 end
 

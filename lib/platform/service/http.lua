@@ -87,15 +87,16 @@ end
 -- Returns an empty table when not available (non-LuaJIT / no debug info).
 -- NOTE: this only works when the function was compiled with debug info.
 -- The first parameter is always "caps" by convention and is skipped.
---: (any) -> { [integer]: string }
+--: (fn: unknown) -> { [integer]: string }
 local function param_names_of(fn)
-	local info = debug.getinfo(fn, "u")
+	local fn_a = fn --[[: any]]
+	local info = debug.getinfo(fn_a, "u")
 	if not info then return {} end
 	local nparams = info.nparams or 0
 	local params = {}
 	-- parameters are locals 1..nparams; local 1 is "caps", skip it
 	for i = 2, nparams do
-		local name = debug.getlocal(fn, i)
+		local name = debug.getlocal(fn_a, i)
 		if name then
 			params[#params + 1] = name
 		end
@@ -137,9 +138,9 @@ local function parse_query(qs)
 	for kv in qs:gmatch("[^&]+") do
 		local k, v = kv:match("^([^=]+)=?(.*)")
 		if k then
-			v = v:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
-			v = v:gsub("+", " ")
-			params[k] = v
+			local v1 = (v:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end))
+			local v2 = ((v1 --[[:! string]]):gsub("+", " "))
+			params[k] = v2 --[[:! string]]
 		end
 	end
 	return params
@@ -191,9 +192,9 @@ local function match_path(pattern, path)
 		return {}
 	end
 	if not captures[1] then return nil end
-	local result = {}
+	local result = {} --: { [string]: string }
 	for i, name in ipairs(param_names) do
-		result[name] = captures[i]
+		result[name] = captures[i] --[[:! string]]
 	end
 	return result
 end
@@ -219,7 +220,8 @@ end
 -- Each route entry:
 -- { method, pattern, param_names, id_in_path, fn_name, fn }
 
---: (unknown, { [string]: unknown }, { [string]: unknown } | nil) -> { [integer]: unknown }
+--:: HttpRoute = { method: string, pattern: string, param_names: { [integer]: string }, id_in_path: { [integer]: string }, fn_name: string, fn: unknown, help: unknown }
+--: (unknown, { [string]: unknown }, { [string]: { method: string | nil, path: string | nil, help: unknown } } | nil) -> { [integer]: HttpRoute }
 local function build_routes(caps, methods, descriptors)
 	descriptors = descriptors or {}
 	local routes = {}
@@ -271,7 +273,7 @@ end
 
 -- ── Handler ────────────────────────────────────────────────────────────────
 
---: (unknown, { [string]: unknown }, { [string]: unknown } | nil) -> { handler: unknown }
+--: (unknown, { [string]: unknown }, { [string]: { method: string | nil, path: string | nil, help: unknown } } | nil) -> { handler: unknown, _routes: { [integer]: HttpRoute } }
 function M.create(caps, methods, descriptors)
 	local routes = build_routes(caps, methods, descriptors)
 
@@ -292,7 +294,7 @@ function M.create(caps, methods, descriptors)
 						local qs = req.query or req_path:match("%?(.+)$")
 						body_params = parse_query(qs)
 					elseif req.body and req.body ~= "" then
-						local decoded, err = json.decode(req.body)
+						local decoded, err = json.decode(req.body --[[:! string]])
 						if not decoded then
 							json_err(res, 400, "invalid JSON body: " .. tostring(err))
 							return true
@@ -320,7 +322,7 @@ function M.create(caps, methods, descriptors)
 						-- Use explicit end index: call_args may have nil holes
 						-- (params absent from query/path) and #call_args would
 						-- stop at the first nil, dropping later args entirely.
-						return route.fn(unpack(call_args, 1, #route.param_names + 1))
+						return (route.fn --[[:! (...unknown) -> unknown]])(unpack(call_args, 1, #route.param_names + 1))
 					end)
 
 					if not ok then

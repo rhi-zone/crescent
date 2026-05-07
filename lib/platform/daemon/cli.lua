@@ -113,7 +113,7 @@ local loader_fn
 if idx then
 	loader_fn = app_loader.make({
 		index_db = idx,
-		context = { data_dir = apps_dir },
+		context = { data_dir = apps_dir, user_id = nil },
 		entry_key = "server",
 		app_url = app_url,
 	})
@@ -133,7 +133,8 @@ local function make_discover_fn(handler)
 			method = "GET",
 			path   = "/discover",
 			query  = table.concat(qs_parts, "&"),
-			headers = {},
+			headers = {} --[[: { [string]: { [number]: string } } | nil]],
+			body   = nil --[[: string | nil]],
 		}
 		local res = { status = nil, headers = {}, body = nil }
 		local ok, err = pcall(handler, req, res)
@@ -162,7 +163,7 @@ if idx and loader_fn and raw_index_db then
 			local src_id, src_name = src_iter()
 			if not src_id then break end
 			local id_str = tostring(src_id)
-			local handler, lerr = loader_fn(id_str)
+			local handler, lerr = (loader_fn --[[:! (string) -> ((http_req, http_res) -> nil, string | nil)]])(id_str)
 			if handler then
 				sources[#sources + 1] = {
 					id       = id_str,
@@ -186,12 +187,13 @@ local runtime_files, runtime_manifest
 do
 	local mf = io.open(runtime_dir .. "/manifest.json", "rb")
 	if mf then
-		local raw = mf:read("*a")
+		local raw = mf:read("*a") --[[:! string]]
 		mf:close()
-		local decoded = json.decode(raw)
+		local decoded_raw = json.decode(raw)
+		local decoded = decoded_raw --[[:! { entry: { [string]: unknown } | nil, ... } | nil]]
 		if decoded then
 			runtime_manifest = decoded
-			runtime_files = {}
+			runtime_files = {} --: { [integer]: { name: string, data: string } }
 			local entries = decoded.entry or {}
 			local seen = {}
 			for _, entry_def in pairs(entries) do
@@ -214,12 +216,13 @@ do
 	end
 end
 
+--: (path: string, data: string) -> (true | nil, string | nil)
 local function write_file(path, data)
 	local f, err = io.open(path, "wb")
 	if not f then return nil, err end
 	f:write(data)
 	f:close()
-	return true
+	return true, nil
 end
 
 local d = daemon.make({
@@ -266,7 +269,7 @@ local server_opts = {
 }
 
 http_server.server(function(raw_req, res)
-	local target = raw_req.target or "/"
+	local target = (raw_req.target or "/") --[[:! string]]
 	local q = target:find("?", 1, true)
 	local path, query
 	if q then
@@ -276,11 +279,11 @@ http_server.server(function(raw_req, res)
 		path = target
 	end
 	local req = {
-		method = raw_req.method,
+		method = raw_req.method --[[:! string | nil]],
 		path = path,
-		query = query,
-		headers = raw_req.headers,
-		body = raw_req.body,
+		query = query --[[:! string | nil]],
+		headers = raw_req.headers --[[:! { [string]: { [number]: string } } | nil]],
+		body = raw_req.body --[[:! string | nil]],
 	}
 	res.status = 200 -- http.server initialises headers={} but not status
 	d.handle(req, res)

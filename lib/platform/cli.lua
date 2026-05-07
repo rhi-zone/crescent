@@ -132,10 +132,11 @@ local function file_exists(path)
 	return false
 end
 
+--: (path: string) -> (string | nil, string | nil)
 local function read_file(path)
 	local f, err = io.open(path, "rb")
 	if not f then return nil, err end
-	local content = f:read("*a")
+	local content = f:read("*a") --[[:! string]]
 	f:close()
 	return content
 end
@@ -567,11 +568,13 @@ end
 -- the app directory on disk. Loads files in the sandbox env (text mode only).
 -- Module cache is local to this loader — no host pollution.
 local function make_dir_loader(app_dir, env)
+	local app_dir_s = app_dir --[[:! string]]
+	local env_a = env --[[: any]]
 	local loaded = {}
 	-- Build the module prefix that corresponds to app_dir so that fully-qualified
 	-- sibling requires like require("lib.platform.apps.charactercardv2.presets")
 	-- resolve to "presets.lua" inside the app dir instead of a double path.
-	local dir_prefix = (((app_dir:gsub("^%./", "")) --[[: any]]):gsub("/", ".")) --[[: any]]
+	local dir_prefix = ((app_dir_s:gsub("^%./", "")):gsub("/", ".")) --[[:! string]]
 	dir_prefix = dir_prefix .. "."
 	return function(modname)
 		if loaded[modname] then return function() return loaded[modname] end end
@@ -585,19 +588,19 @@ local function make_dir_loader(app_dir, env)
 			relpath .. "/init.lua",
 		} --: { [integer]: string }
 		for _, candidate in ipairs(candidates) do
-			local full = app_dir .. "/" .. candidate
+			local full = app_dir_s .. "/" .. candidate
 			local src = read_file(full)
 			if src then
 				return function()
-					local fn, lerr = load(src, "@" .. candidate, "t", env)
+					local fn, lerr = load(src, "@" .. candidate, "t", env_a)
 					if not fn then error("platform: error loading '" .. candidate .. "': " .. tostring(lerr), 2) end
-					local result = fn()
+					local result = (fn --[[:! () -> unknown]])()
 					loaded[modname] = result or true
 					return result
 				end
 			end
 		end
-		return "\n\tno file '" .. candidates[1] .. "' or '" .. candidates[2] .. "' in app directory"
+		return "\n\tno file '" .. (candidates[1] --[[:! string]]) .. "' or '" .. (candidates[2] --[[:! string]]) .. "' in app directory"
 	end
 end
 
@@ -864,11 +867,12 @@ end
 local function cmd_set_key(args)
 	local key_name  = args[2]
 	local key_value = args[3]
-	local ok_kr, keyring = pcall(require, "lib.keyring")
+	local ok_kr, keyring_raw = pcall(require, "lib.keyring")
 	if not ok_kr then
-		io.stderr:write("error: keyring unavailable: " .. tostring(keyring) .. "\n")
+		io.stderr:write("error: keyring unavailable: " .. tostring(keyring_raw) .. "\n")
 		os.exit(1)
 	end
+	local keyring = keyring_raw --[[: any]]
 	-- No args: list all crescent/* keys.
 	if not key_name then
 		local keys, err = keyring.list("crescent/")
@@ -885,7 +889,7 @@ local function cmd_set_key(args)
 			io.write("(no keys stored)\n")
 		else
 			for _, k in ipairs(keys) do
-				io.write(k:gsub("^crescent/", "") .. "\n")
+				io.write((k:gsub("^crescent/", "")) .. "\n")
 			end
 		end
 		return
@@ -980,26 +984,26 @@ local function cmd_import(args)
 	-- Run import.
 	local import_mod = require("lib.platform.import")
 	local app_path, result_or_err = import_mod.import_card({
-		png_bytes = png_bytes,
+		png_bytes = png_bytes --[[:! string]],
 		runtime_files = runtime_files,
 		runtime_manifest = runtime_manifest,
-		apps_dir = apps_dir,
+		apps_dir = apps_dir --[[:! string]],
 		index = idx,
-		timestamp = os.time(),
+		timestamp = os.time() --[[:! number]],
 		write_fn = function(path, data) return write_file(path, data) end,
 	})
 
-	idx:close()
+	(idx --[[:! { close: (unknown) -> unknown, ... }]]):close()
 
 	if not app_path then
 		io.stderr:write("error: " .. tostring(result_or_err) .. "\n")
 		os.exit(1)
 	end
 
-	local installed = result_or_err --[[:! { name: string | nil, meta: { tags: { [integer]: string } | nil, ... } | nil, ... }]]
-	io.stdout:write("installed: " .. app_path .. "\n")
+	local installed = (result_or_err or {}) --[[:! { name: string | nil, meta: { tags: { [integer]: string } | nil, ... } | nil, ... }]]
+	io.stdout:write("installed: " .. tostring(app_path) .. "\n")
 	io.stdout:write("name: " .. (installed.name or "?") .. "\n")
-	local tags = installed.meta and installed.meta.tags or {}
+	local tags = (installed.meta and installed.meta.tags or {}) --[[:! { [integer]: string }]]
 	if #tags > 0 then
 		io.stdout:write("tags: " .. table.concat(tags, ", ") .. "\n")
 	end

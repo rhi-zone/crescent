@@ -330,7 +330,8 @@ if pure_ok then
         local result, err = pure.inflate(corrupted, { format = "zlib" })
         T.eq(result, nil)
         T.ok(type(err) == "string")
-        T.ok(err:find("checksum") or err:find("adler") or err:find("mismatch"),
+        local errs = err --[[:! string]]
+        T.ok(errs:find("checksum") or errs:find("adler") or errs:find("mismatch"),
           "error mentions checksum: " .. tostring(err))
       end)
 
@@ -344,7 +345,8 @@ if pure_ok then
         local result, err = pure.inflate(corrupted, { format = "gzip" })
         T.eq(result, nil)
         T.ok(type(err) == "string")
-        T.ok(err:find("checksum") or err:find("crc") or err:find("mismatch"),
+        local errs = err --[[:! string]]
+        T.ok(errs:find("checksum") or errs:find("crc") or errs:find("mismatch"),
           "error mentions checksum: " .. tostring(err))
       end)
     end)

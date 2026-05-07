@@ -210,7 +210,7 @@ local function wrap_handler(app_handler, revoked_ref, tcp_nodelay)
 	end
 end
 
---:: http_server_opts = { port: integer | nil, host: string | nil, daemon: boolean | nil, url: string | nil, on_serve: ((unknown) -> nil) | nil, tcp_nodelay: boolean | nil }
+--:: http_server_opts = { port?: integer, host?: string, daemon?: boolean, url?: string, on_serve?: (unknown) -> nil, tcp_nodelay?: boolean }
 -- http_server_cap(opts) -> cap_table, revoke_fn
 --: (http_server_opts) -> (unknown, string | nil)
 function M.http_server_cap(opts)
@@ -236,7 +236,7 @@ function M.http_server_cap(opts)
 			if type(handler) ~= "function" then
 				return nil, "http_server: handler must be a function"
 			end
-			opts.on_serve(handler)
+			(opts.on_serve --[[:! (unknown) -> nil]])(handler)
 			return true
 		end
 		return cap, function() revoked_ref[1] = true end
@@ -278,6 +278,7 @@ function M.http_server_cap(opts)
 		local wrapped = wrap_handler(handler, revoked_ref, tcp_nodelay)
 
 		local socket_server = require("lib.socket.server")
+		--: (client: { receive: (unknown, unknown) -> string | nil, send: (unknown, string) -> unknown, close: (unknown) -> unknown, ... }) -> nil
 		socket_server.server(function(client)
 			if revoked_ref[1] then client:close(); return end
 
@@ -296,7 +297,7 @@ function M.http_server_cap(opts)
 				if header_end then parts = { combined } end
 			end
 			local data = parts[1]
-			local req, i = http_format.parse_request(data)
+			local req, i = (http_format.parse_request --[[:! (string) -> ({ headers: { [string]: { [integer]: string } | nil }, ... } | nil, integer | nil)]])(data)
 			if not req or not i then client:send(err_res); return end
 
 			-- Read remaining body if Content-Length specified
@@ -314,7 +315,7 @@ function M.http_server_cap(opts)
 					end
 					if #parts > 1 then
 						data = table.concat(parts)
-						req = http_format.parse_request(data)
+						req = (http_format.parse_request --[[:! (string) -> { headers: { [string]: { [integer]: string } | nil }, ... } | nil]])(data)
 						if not req then client:send(err_res); return end
 					end
 				end

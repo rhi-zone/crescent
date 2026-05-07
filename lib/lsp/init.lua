@@ -24,7 +24,6 @@ Server.__index = Server
 
 -- Map from on_* registration method name to {method_name, capability_key, capability_value, is_notification}.
 -- Used for auto-detection of capabilities and DRY registration.
---: { [string]: { [1]: string, [2]: string | nil, [3]: unknown, [4]: boolean } }
 local HANDLERS = {
     on_hover           = { methods.HOVER,           "hoverProvider",              true,  false },
     on_completion      = { methods.COMPLETION,       "completionProvider",         {},    false },
@@ -146,11 +145,11 @@ local M = {}
 
 -- Create a new LSP server.
 -- opts.transport: a transport object (default: jsonrpc.stdio_transport()).
---: (unknown) -> unknown
+--: ({ transport?: unknown } | nil) -> unknown
 function M.server(opts)
     opts = opts or {}
     local transport = opts.transport or jsonrpc.stdio_transport()
-    local d = jsonrpc.new(transport)
+    local d = jsonrpc.new(transport) --[[:! { method: (unknown, string, unknown) -> nil, notify: (unknown, string, unknown) -> nil, send_notify: (unknown, string, unknown) -> nil, loop: (unknown) -> nil, _methods: { [string]: unknown }, _notifs: { [string]: unknown } }]]
 
     local self = setmetatable({}, Server)
     self._dispatcher = d
@@ -161,12 +160,13 @@ function M.server(opts)
     d:method(methods.INITIALIZE, function(params)
         self._client_capabilities = params and params.capabilities or {}
         local user_result
-        if self._user_init_handler then
-            user_result = self._user_init_handler(params)
+        local h = self._user_init_handler --[[:! ((unknown) -> unknown) | nil]]
+        if h then
+            user_result = h(params)
         end
         -- Merge auto-detected capabilities with any user-provided ones.
         local auto_caps = build_capabilities(self)
-        local result = user_result or {}
+        local result = user_result or {} --[[:! { capabilities?: { [string]: unknown } }]]
         if not result.capabilities then
             result.capabilities = auto_caps
         else
