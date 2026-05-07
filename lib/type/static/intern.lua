@@ -23,6 +23,7 @@ local M = {}
 -- within double precision: h*2^24 + h*403, then tobit wraps to int32.
 local FNV_OFFSET = tobit(0x811c9dc5)
 
+--: (ptr: cdata, len: integer) -> integer
 local function fnv1a(ptr, len)
     local h = FNV_OFFSET
     for i = 0, len - 1 do
@@ -112,6 +113,7 @@ end
 
 -- Register a source buffer pointer. Returns buf_id.
 -- anchor: optional Lua string to keep alive (prevents GC of the buffer).
+--: (pool: InternPool, ptr: cdata, anchor: string | nil) -> integer
 function M.register_buf(pool, ptr, anchor)
     local buf_id = pool.buf_count
     pool.bufs[buf_id] = ptr
@@ -193,6 +195,7 @@ function M.intern(pool, s)
 end
 
 -- Get string by ID (cold path — for diagnostics, error messages, tests).
+--: (pool: InternPool, id: integer) -> string | nil
 function M.get(pool, id)
     local e = pool.rev[id]
     if not e then return nil end

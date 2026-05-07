@@ -32,6 +32,7 @@ M.description = "flag assert() calls in non-test library code"
 -- Forward declarations for mutual recursion.
 local walk_block, walk_stmt, walk_expr
 
+--: (ctx: Ctx, nid: integer, err_ctx: ErrCtx, filepath: string, severity: string, errors_mod: { error: (ErrCtx, string, integer, integer, string) -> (), warning: (ErrCtx, string, integer, integer, string) -> (), ... }, assert_id: integer) -> ()
 walk_expr = function(ctx, nid, err_ctx, filepath, severity, errors_mod, assert_id)
     local nodes     = ctx.nodes
     local ast_lists = ctx.ast_lists
@@ -73,6 +74,7 @@ walk_expr = function(ctx, nid, err_ctx, filepath, severity, errors_mod, assert_i
     -- Leaf nodes (LITERAL, IDENTIFIER, etc.) have no children to recurse into.
 end
 
+--: (ctx: Ctx, sid: integer, err_ctx: ErrCtx, filepath: string, severity: string, errors_mod: { error: (ErrCtx, string, integer, integer, string) -> (), warning: (ErrCtx, string, integer, integer, string) -> (), ... }, assert_id: integer) -> ()
 walk_stmt = function(ctx, sid, err_ctx, filepath, severity, errors_mod, assert_id)
     local nodes     = ctx.nodes
     local ast_lists = ctx.ast_lists
@@ -143,6 +145,7 @@ walk_stmt = function(ctx, sid, err_ctx, filepath, severity, errors_mod, assert_i
     end
 end
 
+--: (ctx: Ctx, bs: integer, bl: integer, err_ctx: ErrCtx, filepath: string, severity: string, errors_mod: { error: (ErrCtx, string, integer, integer, string) -> (), warning: (ErrCtx, string, integer, integer, string) -> (), ... }, assert_id: integer) -> ()
 walk_block = function(ctx, bs, bl, err_ctx, filepath, severity, errors_mod, assert_id)
     local ast_lists = ctx.ast_lists
     for i = bs, bs + bl - 1 do
@@ -151,6 +154,7 @@ walk_block = function(ctx, bs, bl, err_ctx, filepath, severity, errors_mod, asse
     end
 end
 
+--: (ctx: Ctx, err_ctx: ErrCtx, filepath: string, severity: string, errors_mod: { error: (ErrCtx, string, integer, integer, string) -> (), warning: (ErrCtx, string, integer, integer, string) -> (), ... }) -> ()
 function M.check(ctx, err_ctx, filepath, severity, errors_mod)
     -- Skip test files.
     if filepath:match("_test%.lua$") then return end

@@ -12,13 +12,13 @@ end
 
 local search = require("lib.type.search")
 
-local args = {...}
+local args = arg or {} --: { [integer]: string }
 
 -- Parse flags
 local save_index_path = nil
 local load_index_path = nil
 local query_str = nil
-local files = {}
+local files = {} --: { [integer]: string }
 local i = 1
 while i <= #args do
     if args[i] == "--save-index" then
@@ -39,7 +39,7 @@ while i <= #args do
             local h = io.popen('find "' .. dir .. '" -name init.lua -not -path "*_test*" 2>/dev/null')
             if h then
                 for line in h:lines() do
-                    files[#files + 1] = line
+                    if line ~= nil then files[#files + 1] = line end
                 end
                 h:close()
             end
@@ -107,6 +107,10 @@ end
 
 -- Query if a query string was provided
 if query_str then
+    if type(index) ~= "table" then
+        io.stderr:write("Error: invalid index\n")
+        os.exit(1)
+    end
     local matches = search.query(query_str, index)
 
     if #matches == 0 then

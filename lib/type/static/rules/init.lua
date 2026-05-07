@@ -15,7 +15,7 @@ local _passes = {}
 local DEFAULT_SEVERITY = "warning"
 
 -- Register a named rule pass. Called by each pass module's own require().
---: (string, { name: string, description: string, check: (unknown, unknown, string, string, unknown) -> nil }) -> ()
+--: (string, { name: string, description: string, check: (Ctx, ErrCtx, string, string, { error: (ErrCtx, string, integer, integer, string) -> (), warning: (ErrCtx, string, integer, integer, string) -> (), ... }) -> nil }) -> ()
 function M.register(name, pass)
     _passes[#_passes + 1] = { name = name, pass = pass }
 end

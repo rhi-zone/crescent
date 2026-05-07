@@ -16,6 +16,7 @@ local M = {}
 
 -- SHA-256 round constants (first 32 bits of the fractional parts of the
 -- cube roots of the first 64 primes).
+--: { [integer]: integer }
 local K = {
     tobit(0x428a2f98), tobit(0x71374491), tobit(0xb5c0fbcf), tobit(0xe9b5dba5),
     tobit(0x3956c25b), tobit(0x59f111f1), tobit(0x923f82a4), tobit(0xab1c5ed5),
@@ -41,6 +42,7 @@ end
 
 -- Process one 64-byte block. W is a scratch array[0..63], h[0..7] are the
 -- running state. Returns updated h values.
+--: (W: { [integer]: integer }, h0: integer, h1: integer, h2: integer, h3: integer, h4: integer, h5: integer, h6: integer, h7: integer) -> (integer, integer, integer, integer, integer, integer, integer, integer)
 local function process_block(W, h0, h1, h2, h3, h4, h5, h6, h7)
     -- Extend the first 16 words into 64
     for i = 16, 63 do

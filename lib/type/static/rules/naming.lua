@@ -30,6 +30,7 @@ local M = {}
 M.name        = "naming"
 M.description = "naming convention violations: module must be M; M.create/destroy/free/release/delete banned"
 
+--: (ctx: Ctx, err_ctx: ErrCtx, filepath: string, severity: string, errors_mod: { error: (ErrCtx, string, integer, integer, string) -> (), warning: (ErrCtx, string, integer, integer, string) -> (), ... }) -> ()
 function M.check(ctx, err_ctx, filepath, severity, errors_mod)
     -- Skip test files.
     if filepath:match("_test%.lua$") then return end

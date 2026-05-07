@@ -241,6 +241,7 @@ end
 
 -- Collect the name_ids of all local variables declared at the top level of the chunk.
 -- Returns a table: { name_id → { line, col, name_str } }
+--: (ctx: Ctx, chunk: ASTNode) -> { [integer]: { line: integer, col: integer, name_str: string }, ... }
 local function collect_locals(ctx, chunk)
     local nodes     = ctx.nodes
     local ast_lists = ctx.ast_lists
@@ -271,6 +272,7 @@ local function collect_locals(ctx, chunk)
     return result
 end
 
+--: (ctx: Ctx, err_ctx: ErrCtx, filepath: string, severity: string, errors_mod: { error: (ErrCtx, string, integer, integer, string) -> (), warning: (ErrCtx, string, integer, integer, string) -> (), ... }) -> ()
 function M.check(ctx, err_ctx, filepath, severity, errors_mod)
     -- Skip test files.
     if filepath:match("_test%.lua$") then return end

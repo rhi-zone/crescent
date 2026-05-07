@@ -572,7 +572,8 @@ end
 -- Returns array of surviving arm type_ids, or nil if source is not TAG_UNION.
 --: (Ctx, integer, integer, (integer) -> boolean) -> ({ [integer]: integer, ... } | nil)
 function M.filter_tuple_union_arms(ctx, union_tid, slot_index, predicate_fn)
-    local u = ctx.types:get(M.find(ctx, union_tid))
+    local root = M.find(ctx, union_tid)
+    local u = ctx.types:get(root)
     if u.tag ~= TAG_UNION then return nil end
     local surviving = {}
     for i = u.data[0], u.data[0] + u.data[1] - 1 do
@@ -1042,7 +1043,8 @@ function M.display(ctx, tid, seen)
         if kind == LIT_BOOLEAN then return t.data[1] == 1 and "true" or "false" end
         if kind == LIT_STRING  then
             local s = intern_mod.get(ctx.pool, t.data[1])
-            return s and ('"' .. s .. '"') or '"?"'
+            if type(s) == "string" then return '"' .. s .. '"' end
+            return '"?"'
         end
         if kind == LIT_NUMBER  then
             return tostring(i32x2_to_double(t.data[1], t.data[2]))
@@ -1078,9 +1080,9 @@ function M.display(ctx, tid, seen)
         seen = seen or {}
         if seen[tid] then return "{...}" end
         seen[tid] = true
-        local parts = {}
+        local parts = {} --: { [integer]: string, ... }
         -- fields
-        local field_names = {}
+        local field_names = {} --: { [integer]: { name: string, fe: FieldEntry }, ... }
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
             local fid = ctx.lists:get(i)
             local fe = ctx.fields:get(fid)
@@ -1108,7 +1110,7 @@ function M.display(ctx, tid, seen)
             i = i + 2
         end
         -- meta
-        local meta_names = {}
+        local meta_names = {} --: { [integer]: { name: string, fe: FieldEntry }, ... }
         for j = t.data[5], t.data[5] + t.data[6] - 1 do
             local fid = ctx.lists:get(j)
             local fe = ctx.fields:get(fid)

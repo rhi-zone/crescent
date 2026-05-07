@@ -25,6 +25,7 @@ M.description = "functions named is_*/has_* on M should return boolean"
 
 -- Look up the type_id for a node by its line/col in ctx.type_at.
 -- Returns tid or nil if not found.
+--: (ctx: Ctx, node_line: integer, node_col: integer) -> integer | nil
 local function type_for_node(ctx, node_line, node_col)
     local ta = ctx.type_at
     if not ta then return nil end
@@ -50,6 +51,7 @@ local function type_for_node(ctx, node_line, node_col)
 end
 
 -- Return true if tid represents boolean (TAG_BOOLEAN or a boolean literal).
+--: (ctx: Ctx, tid: integer) -> boolean
 local function is_boolean_type(ctx, tid)
     tid = types_mod.find(ctx, tid)
     local t = ctx.types:get(tid)
@@ -58,6 +60,7 @@ local function is_boolean_type(ctx, tid)
     return false
 end
 
+--: (ctx: Ctx, err_ctx: ErrCtx, filepath: string, severity: string, errors_mod: { error: (ErrCtx, string, integer, integer, string) -> (), warning: (ErrCtx, string, integer, integer, string) -> (), ... }) -> ()
 function M.check(ctx, err_ctx, filepath, severity, errors_mod)
     -- Skip test files.
     if filepath:match("_test%.lua$") then return end

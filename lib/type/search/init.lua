@@ -37,12 +37,17 @@ local M = {}
 -- ---------------------------------------------------------------------------
 -- Extract public exports from a typechecker context.
 -- Returns array of { name, type_str, type_id, ctx }.
+--: (ctx: any) -> { [integer]: { name: string, type_str: string } }
 local function extract_exports(ctx)
+    --: { [integer]: { name: string, type_str: string } }
     local exports = {}
     local rets = ctx.module_return_tids
     local export_tid
-    if rets and #rets > 0 and rets[1] and #rets[1] > 0 then
-        export_tid = types_mod.find(ctx, rets[1][1])
+    if rets ~= nil then
+        local ret1 = rets[1]
+        if ret1 ~= nil and #ret1 > 0 then
+            export_tid = types_mod.find(ctx, ret1[1])
+        end
     end
     if not export_tid then return exports end
 
@@ -62,10 +67,11 @@ local function extract_exports(ctx)
         local fid = ctx.lists:get(i)
         local fe  = ctx.fields:get(fid)
         local name = intern_mod.get(ctx.pool, fe.name_id)
-        if name and name:sub(1, 1) ~= "_" then
+        if name ~= nil and name:sub(1, 1) ~= "_" then
             local type_str = types_mod.display(ctx, fe.type_id)
+            local name_s = tostring(name)
             exports[#exports + 1] = {
-                name     = name,
+                name     = name_s,
                 type_str = type_str,
             }
         end
@@ -78,11 +84,12 @@ end
 
 --- Build a search index from an array of source file paths.
 --- Returns an array of { name, file, type } entries.
+--: (files: { [integer]: string }) -> { [integer]: { name: string, file: string, type: string } }
 M.build_index = function(files)
     local index = {}
     for _, filepath in ipairs(files) do
         check_mod.clear_cache()
-        local err_ctx, ctx = check_mod.check_file(filepath)
+        local err_ctx, ctx = check_mod.check_file(filepath, nil, nil, { no_disk_cache = nil })
         if ctx then
             local exports = extract_exports(ctx)
             for _, exp in ipairs(exports) do
@@ -140,6 +147,7 @@ end
 -- ---------------------------------------------------------------------------
 -- Scope lookup helper
 -- ---------------------------------------------------------------------------
+--: (ctx: any, name_id: integer) -> integer | nil
 local function lookup_binding(ctx, name_id)
     local s = ctx.scope
     while s do
@@ -162,9 +170,9 @@ local BATCH_SIZE = 50
 --- Returns array of { name, file, type, score } sorted by relevance.
 --- Score: 3 = exact (both directions), 2 = candidate assignable to query,
 ---        1 = query assignable to candidate (supertype match).
+--: (query_type_str: string, index: { [integer]: { name: string, file: string, type: string } }, opts: { limit: integer | nil } | nil) -> { [integer]: { name: string, file: string, type: string, score: integer, exact: boolean } }
 M.query = function(query_type_str, index, opts)
-    opts = opts or {}
-    local limit = opts.limit
+    local limit = opts and opts.limit or nil
 
     -- Pre-filter by arity if query is a function type
     local query_arity = extract_arity(query_type_str)
@@ -182,6 +190,7 @@ M.query = function(query_type_str, index, opts)
     end
 
     -- Process in batches to reduce check_string overhead
+    --: { [integer]: { name: string, file: string, type: string, score: integer, exact: boolean } }
     local matches = {}
     for batch_start = 1, #candidates, BATCH_SIZE do
         local batch_end = math.min(batch_start + BATCH_SIZE - 1, #candidates)
@@ -197,8 +206,9 @@ M.query = function(query_type_str, index, opts)
         local src = table.concat(lines, "\n") .. "\n"
 
         check_mod.clear_cache()
-        local _, ctx = check_mod.check_string(src, "_search.lua")
-        if ctx then
+        local _, ctx_raw = check_mod.check_string(src, "_search.lua")
+        if ctx_raw ~= nil then
+            local ctx = ctx_raw --[[: any]]
             local q_nid = intern_mod.intern(ctx.pool, "_q")
             local q_tid = lookup_binding(ctx, q_nid)
             if q_tid then
@@ -236,10 +246,13 @@ M.query = function(query_type_str, index, opts)
     end)
 
     -- Apply limit
-    if limit and #matches > limit then
-        local trimmed = {}
-        for i = 1, limit do trimmed[i] = matches[i] end
-        matches = trimmed
+    if limit ~= nil then
+        local lim = limit --[[: integer]]
+        if #matches > lim then
+            local trimmed = {}
+            for i = 1, lim do trimmed[i] = matches[i] end
+            matches = trimmed
+        end
     end
 
     return matches

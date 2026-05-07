@@ -59,10 +59,11 @@ local function expand_named(ctx, ty_id, seen_named)
     local scope = ctx.scope
     if not scope then return nil end
     seen_named[ty_id] = true
+    --: integer | nil
     local resolved = env_mod.resolve_named_type(ctx, scope, name_id, arg_ids)
     -- Note: we do NOT clear seen_named[ty_id] after returning — once expanded,
     -- we assume the result terminates; the coinductive hypothesis prevents re-entry.
-    if not resolved then
+    if resolved == nil then
         return nil
     end
     return types_mod.find(ctx, resolved)

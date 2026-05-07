@@ -88,6 +88,7 @@ end
 --   type_list_ranges     -> collected (start,len) pairs from ctx.lists (type IDs only)
 --   list_range_seen["s,l"]-> index in type_list_ranges (0-based new start, deferred)
 
+--: (ctx: any, root_tids: any) -> (any, any, any, any, any, any, any)
 local function collect(ctx, root_tids)
     local seen_types   = {}  -- old resolved tid -> new 0-based index
     local type_order   = {}  -- [1..n] = old resolved tid
@@ -284,8 +285,9 @@ local function u8(v)
     return string.char(band(v, 0xff))
 end
 
+--: (v: integer) -> string
 local function u16be(v)
-    return string.char(band(rshift(tobit(v), 8), 0xff), band(v, 0xff))
+    return string.char(band(rshift(tobit(v), 8), 0xff), band(tobit(v), 0xff))
 end
 
 local function u32be(v)
@@ -420,6 +422,7 @@ end
 -- exports: { [name_string] = type_id }
 -- diagnostics: { errors = {DiagEntry, ...}, warnings = {DiagEntry, ...} } | nil
 -- Returns the raw .cri bytes as a Lua string, with SHA-256 filled in.
+--: (ctx: any, exports: { [string]: integer }, type_aliases: any, diagnostics: any) -> string
 function M.serialize(ctx, exports, type_aliases, diagnostics)
     -- Clean up any leftover side table from a previous call.
     ctx._cri_table_fields = {}
@@ -551,7 +554,7 @@ function M.serialize(ctx, exports, type_aliases, diagnostics)
         local slot = ctx.types:get(old_tid)
         local tag  = slot.tag
         local flags = slot.flags
-        local d = {-1, -1, -1, -1, -1, -1, -1}  -- default: all -1
+        local d = {-1, -1, -1, -1, -1, -1, -1} --: { [integer]: integer }
 
         if tag == TAG_LITERAL then
             d[1] = slot.data[0]  -- lit_kind (unchanged)
@@ -810,11 +813,11 @@ function M.serialize(ctx, exports, type_aliases, diagnostics)
     for i = 1, 64, 2 do
         raw_hash[#raw_hash + 1] = string.char(tonumber(hex:sub(i, i+1), 16))
     end
-    raw_hash = table.concat(raw_hash)  -- 32 bytes
+    local raw_hash_s = table.concat(raw_hash)  -- 32 bytes
 
     -- Patch: bytes 1-16 | 32-byte hash | remaining
     -- Header: "CRIF"(4) + version(4) + alias_off(4) + diag_off(4) = 16 bytes before hash
-    return body:sub(1, 16) .. raw_hash .. body:sub(49)
+    return body:sub(1, 16) .. raw_hash_s .. body:sub(49)
 end
 
 return M

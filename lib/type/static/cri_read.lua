@@ -52,15 +52,18 @@ local M = {}
 -- ---------------------------------------------------------------------------
 -- Binary reading helpers
 -- ---------------------------------------------------------------------------
+--: (s: string, pos: integer) -> integer
 local function r_u8(s, pos)   -- pos is 0-based byte offset
-    return s:byte(pos + 1)
+    return s:byte(pos + 1) or 0
 end
 
+--: (s: string, pos: integer) -> integer
 local function r_u32be(s, pos)
     local a, b, c, d = s:byte(pos+1, pos+4)
-    return lshift(a, 24) + lshift(b, 16) + lshift(c, 8) + d
+    return lshift(a or 0, 24) + lshift(b or 0, 16) + lshift(c or 0, 8) + (d or 0)
 end
 
+--: (s: string, pos: integer) -> integer
 local function r_i32be(s, pos)
     local v = r_u32be(s, pos)
     if v >= 0x80000000 then return tobit(v) end
@@ -70,6 +73,7 @@ end
 -- ---------------------------------------------------------------------------
 -- SHA-256 verification
 -- ---------------------------------------------------------------------------
+--: (bytes: string) -> boolean
 local function verify_hash(bytes)
     -- v2: hash is at bytes 17-48 (after magic + version + alias_off + diag_off).
     local zeroed = bytes:sub(1, 16) .. string.rep("\0", 32) .. bytes:sub(49)
@@ -85,6 +89,7 @@ end
 -- Diagnostics deserialization (Section 7, v2+)
 -- ---------------------------------------------------------------------------
 -- Returns errors[], warnings[], end_pos.
+--: (bytes: string, pos: integer) -> ({ [integer]: any }, { [integer]: any }, integer)
 local function read_diagnostics(bytes, pos)
     local errors, warnings = {}, {}
     local total = r_u32be(bytes, pos)
@@ -132,6 +137,7 @@ end
 -- ---------------------------------------------------------------------------
 -- load(bytes, ctx) → ok, exports_or_error
 -- ---------------------------------------------------------------------------
+--: (bytes: string, ctx: any) -> (boolean, any)
 function M.load(bytes, ctx)
     if #bytes < 68 then
         return false, "truncated .cri file"
@@ -201,18 +207,18 @@ function M.load(bytes, ctx)
     local type_count      = r_u32be(bytes, type_offset)
     local type_table_base = type_offset + 32  -- count(4) + pad(28)
 
-    local type_remap = {}  -- [i 0-based] = session type_id
-    local raw_types  = {}  -- [i 0-based] = {tag, flags, d[1..7]}
+    local type_remap = {} --: { [integer]: integer }
+    local raw_types  = {} --: { [integer]: { tag: integer, flg: integer, d: { [integer]: integer } } }
 
     for i = 0, type_count - 1 do
         local base = type_table_base + i * 32
         local tag  = r_u8(bytes, base)
         local flg  = r_u8(bytes, base + 1)
-        local d    = {}
+        local d    = {} --: { [integer]: integer }
         for j = 1, 7 do
             d[j] = r_i32be(bytes, base + 4 + (j-1)*4)
         end
-        raw_types[i]  = {tag, flg, d}
+        raw_types[i]  = { tag = tag, flg = flg, d = d }
         type_remap[i] = ctx.types:alloc()
     end
 
@@ -228,7 +234,7 @@ function M.load(bytes, ctx)
         [defs.TAG_UNKNOWN] = ctx.T_UNKNOWN,
     }
     for i = 0, type_count - 1 do
-        local s = singleton[raw_types[i][1]]
+        local s = singleton[raw_types[i].tag]
         if s ~= nil then type_remap[i] = s end
         -- (The allocated slot is wasted but harmless.)
     end
@@ -247,6 +253,7 @@ function M.load(bytes, ctx)
 
     -- Build a ctx list range from a slice of the cri list pool, remapping values with fn.
     -- fn defaults to rt (type ID remap); use rs for FORALL name_id lists.
+    --: (cri_s: integer, cri_l: integer, fn: ((unknown) -> integer) | nil) -> (integer, integer)
     local function push_list(cri_s, cri_l, fn)
         fn = fn or rt
         if cri_l == 0 then return 0, 0 end
@@ -279,9 +286,9 @@ function M.load(bytes, ctx)
     -- Second pass: fill in TypeSlot data
     -- -----------------------------------------------------------------------
     for i = 0, type_count - 1 do
-        local tag  = raw_types[i][1]
-        local flg  = raw_types[i][2]
-        local d    = raw_types[i][3]
+        local tag  = raw_types[i].tag
+        local flg  = raw_types[i].flg
+        local d    = raw_types[i].d
 
         -- Skip primitives (already remapped to singletons)
         if singleton[tag] ~= nil then

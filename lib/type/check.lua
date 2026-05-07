@@ -1,10 +1,12 @@
 local mod = {}
 
---:: Schema<T> = { type: string, value: unknown, fields: { [string]: unknown } | nil, items: unknown, of: unknown, ... }
+--:: Schema<T> = { type: string, value: unknown, fields: { [string]: unknown } | nil, items: unknown, of: unknown, shape: { [unknown]: Schema<unknown> }, item: Schema<unknown>, key: Schema<unknown>, inner: Schema<unknown>, types: { [integer]: Schema<unknown> }, ... }
+--:: Checker = (s: Schema<unknown>, x: unknown) -> boolean
+--:: Validator = (s: Schema<unknown>, x: unknown, path: string | nil) -> (unknown, string | nil)
 
 -- ── fast boolean check (hot path, no allocation on failure) ──────────────────
 
-mod.checkers = {}
+mod.checkers = {} --: { [string]: Checker }
 
 --: <T>(Schema<T>, unknown) -> boolean
 mod.check = function(schema, x)
@@ -75,14 +77,16 @@ end
 -- ── shared helpers ────────────────────────────────────────────────────────────
 
 -- Build a path-prefixed error string.
+--: (string | nil, string) -> string
 local function errat(path, msg)
-	if path and path ~= "" then return path .. ": " .. msg end
+	if path ~= nil and path ~= "" then return path .. ": " .. msg end
 	return msg
 end
 
 -- Extend a path with a field name or index.
+--: (string | nil, unknown) -> string
 local function field_path(path, k)
-	if path and path ~= "" then return path .. "." .. k end
+	if path ~= nil and path ~= "" then return path .. "." .. tostring(k) end
 	return tostring(k)
 end
 local function index_path(path, i)
@@ -159,7 +163,7 @@ validators.struct_exact = function(s, x, path)
 	end
 	for k in pairs(x) do
 		if not s.shape[k] then
-			return nil, errat(path, "unexpected field '" .. k .. "'")
+			return nil, errat(path, "unexpected field '" .. tostring(k) .. "'")
 		end
 	end
 	for k, s2 in pairs(s.shape) do
@@ -302,7 +306,7 @@ coercers.struct_exact = function(s, x, path)
 	end
 	for k in pairs(x) do
 		if not s.shape[k] then
-			return nil, errat(path, "unexpected field '" .. k .. "'")
+			return nil, errat(path, "unexpected field '" .. tostring(k) .. "'")
 		end
 	end
 	local out = {}
