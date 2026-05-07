@@ -31,11 +31,11 @@
 --:: FieldEntryArena = { get: (FieldEntryArena, integer) -> FieldEntry, alloc: (FieldEntryArena) -> integer, len: integer, ... }
 
 -- List pool: flat int32_t array. :get(i) returns integer.
---:: ListPool = { get: (ListPool, integer) -> integer, len: integer, mark: (ListPool) -> integer, push: (ListPool, integer) -> (), since: (ListPool, integer) -> (integer, integer), ... }
+--:: ListPool = { get: (ListPool, integer) -> integer, len: integer, cap: integer, items: Ptr<integer>, mark: (ListPool) -> integer, push: (ListPool, integer) -> (), since: (ListPool, integer) -> (integer, integer), grow: (ListPool) -> (), reset: (ListPool) -> (), ... }
 
 -- Intern pool: string interning table with hash map.
--- next_id is the only field accessed directly in checker code.
---:: InternPool = { next_id: integer, ... }
+-- Mirrors StringPool in intern.lua so values flow without casts.
+--:: InternPool = { ht_cap: integer, ht_mask: integer, ht_count: integer, next_id: integer, buf_count: integer, entries: { [integer]: unknown, ... }, bufs: { [integer]: unknown, ... }, rev: { [integer]: unknown, ... }, map: { [string]: integer, ... }, _anchors: { [integer]: string, ... } }
 
 -- Annotation arena result returned by ann.parse_annotations().
 -- Types/fields/lists use the same arena shapes as the main checker.

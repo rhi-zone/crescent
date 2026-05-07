@@ -114,7 +114,7 @@ end
 LexState = {
   src: any, srclen: integer, pos: integer, b: integer,
   line: integer, col: integer, tk: integer, val: integer,
-  pool: unknown, _buf_id: integer, filename: string,
+  pool: InternPool, _buf_id: integer, filename: string,
   _la_tk: integer, _la_val: integer, _la_line: integer, _la_col: integer,
   _la_valid: boolean, _pending_cast_id: integer | nil, _cast_id_seq: integer,
   _buf: { [integer]: integer, ... }, _bufn: integer,
@@ -149,6 +149,7 @@ LexState = {
 local Lexer = {}
 Lexer.__index = Lexer
 
+--: (source: string, filename: string | nil, pool: InternPool | nil) -> LexState
 function M.new(source, filename, pool)
     pool = pool or intern_mod.new()
     local src = ffi.cast(uint8_ptr, source)

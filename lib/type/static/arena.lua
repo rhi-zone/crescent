@@ -6,8 +6,8 @@ local ffi = require("ffi")
 
 local M = {}
 
---:: ArenaBase = { cap: integer, len: integer, items: unknown, grow: (ArenaBase) -> () }
---:: PoolBase = { cap: integer, len: integer, items: unknown, grow: (PoolBase) -> () }
+--:: ArenaBase = { cap: integer, len: integer, items: unknown, grow: (ArenaBase) -> (), ... }
+--:: PoolBase = { cap: integer, len: integer, items: Ptr<integer>, grow: (PoolBase) -> (), ... }
 
 -- Generic arena factory for a given FFI ctype.
 -- Returns an arena with alloc/reset/grow/get and raw .items access.
@@ -67,6 +67,7 @@ end
 
 -- List pool: flat int32_t array for variable-length sequences.
 -- Used for storing lists of child node IDs, parameter IDs, etc.
+--: (integer | nil) -> ListPool
 function M.new_list_pool(initial_cap)
     initial_cap = initial_cap or 4096
     local int32_arr = ffi.typeof("int32_t[?]")
@@ -76,12 +77,12 @@ function M.new_list_pool(initial_cap)
         len = 0,
     }
 
-    --: (PoolBase) -> integer
+    --: (ListPool) -> integer
     function pool:mark()
         return self.len
     end
 
-    --: (PoolBase) -> ()
+    --: (ListPool, integer) -> ()
     function pool:push(value)
         local i = self.len
         local cap = self.cap
@@ -90,12 +91,12 @@ function M.new_list_pool(initial_cap)
         self.len = i + 1
     end
 
-    --: (PoolBase) -> (integer, integer)
+    --: (ListPool, integer) -> (integer, integer)
     function pool:since(start)
         return start, self.len - start
     end
 
-    --: (PoolBase) -> unknown
+    --: (ListPool, integer) -> integer
     function pool:get(i)
         return self.items[i]
     end
@@ -104,7 +105,7 @@ function M.new_list_pool(initial_cap)
         self.len = 0
     end
 
-    --: (PoolBase) -> ()
+    --: (ListPool) -> ()
     function pool:grow()
         local old_cap = self.cap
         local new_cap = old_cap * 2
