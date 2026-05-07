@@ -15,7 +15,7 @@ end
 
 -- ── Locate script directory ───────────────────────────────────────────────────
 
-local src = debug.getinfo(1, "S").source
+local src = debug.getinfo(1, "S").source --[[:! string]]
 local path = src:gsub("^@", ""):gsub("^%./", "")
 local script_dir = path:match("^(.*)/[^/]*$") or "."
 
@@ -50,7 +50,8 @@ end
 
 -- ── Platform detection ────────────────────────────────────────────────────────
 
-local function detect_platform()
+--: () -> (string, string, string)
+local function detect_platform() --[[FALLTHROUGH unreachable]]
   if not jit then
     io.stderr:write("build.lua requires LuaJIT (jit global not available)\n")
     os.exit(1)
@@ -71,12 +72,14 @@ local function detect_platform()
   end
   io.stderr:write("Unsupported platform: " .. tostring(os_name) .. " / " .. tostring(arch) .. "\n")
   os.exit(1)
+  error("unreachable")
 end
 
 local plat, ext, plat_name = detect_platform()
 
 -- ── Detect C compiler ─────────────────────────────────────────────────────────
 
+--: () -> string | nil
 local function find_cc()
   local candidates = { "cc", "gcc", "clang" }
   for _, cc in ipairs(candidates) do
@@ -94,6 +97,8 @@ if not cc then
   io.stderr:write("No C compiler found. Install cc, gcc, or clang.\n")
   os.exit(1)
 end
+local _ = cc --[[:! string]]
+cc = _
 
 io.write("Compiler: " .. cc .. "\n")
 io.write("Platform: " .. plat .. " (" .. plat_name .. ")\n")
@@ -111,7 +116,9 @@ os.execute("mkdir -p " .. out_dir)
 
 local tmp_c = os.tmpname() .. ".c"
 do
-  local f = assert(io.open(tmp_c, "w"))
+  local f0 = io.open(tmp_c, "w")
+  if not f0 then error("failed to open " .. tmp_c) end
+  local f = f0 --[[:! { close: (any) -> (boolean | nil, string | nil), flush: (any) -> (boolean | nil, string | nil), lines: (any) -> () -> string | nil, read: (any, ...string | number) -> string | nil, seek: (any, string | nil, integer | nil) -> (integer | nil, string | nil), setvbuf: (any, string, integer | nil) -> (boolean | nil, string | nil), write: (any, ...string | number) -> (any, string | nil) }]]
   f:write('#define STB_IMAGE_IMPLEMENTATION\n')
   f:write('#define STB_IMAGE_RESIZE2_IMPLEMENTATION\n')
   f:write('#define STB_TRUETYPE_IMPLEMENTATION\n')

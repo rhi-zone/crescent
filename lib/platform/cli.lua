@@ -317,7 +317,7 @@ local function merge_cap_declarations(manifest, entry_key)
 		local entry_def = entry_map[entry_key]
 		if type(entry_def) == "table" and entry_def.caps then
 			for name, decl in pairs(entry_def.caps) do
-				cap_declarations[name] = decl
+				cap_declarations[name] = decl --[[:! { required: boolean, type: unknown }]]
 			end
 		end
 	end
@@ -353,7 +353,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		if app._dir_mode then
 			return make_dir_self_cap(app.path)
 		else
-			local mod = (require(CAP_TYPE_MODULES.self) --[[: any]])
+			local mod = (require(CAP_TYPE_MODULES.self) --[[:! { [string]: any, ... }]])
 			return mod.self_cap(app)
 		end
 	end
@@ -365,19 +365,19 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		if app._dir_mode then
 			return nil, "self_write not supported in directory mode"
 		end
-		local mod = (require(CAP_TYPE_MODULES.self_write) --[[: any]])
+		local mod = (require(CAP_TYPE_MODULES.self_write) --[[:! { [string]: any, ... }]])
 		return mod.self_write_cap(app)
 	end
 
 	-- http_server: inject port from platform flags.
 	if cap_type == "http_server" then
-		local mod = (require(CAP_TYPE_MODULES.http_server) --[[: any]])
+		local mod = (require(CAP_TYPE_MODULES.http_server) --[[:! { [string]: any, ... }]])
 		return mod.http_server_cap({ port = platform_opts.port or 0 })
 	end
 
 	-- http_client: pass through host and any extra fields from declaration.
 	if cap_type == "http_client" then
-		local mod = (require(CAP_TYPE_MODULES.http_client) --[[: any]])
+		local mod = (require(CAP_TYPE_MODULES.http_client) --[[:! { [string]: any, ... }]])
 		return mod.http_client_cap({
 			host  = decl.host,
 			model = decl.model,
@@ -394,13 +394,13 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		local parent_dir = data_path:match("^(.*)/[^/]+$")
 		if parent_dir then mkdir_p(parent_dir) end
 		if cap_type == "kv" then
-			local mod = (require(CAP_TYPE_MODULES.kv) --[[: any]])
+			local mod = (require(CAP_TYPE_MODULES.kv) --[[:! { [string]: any, ... }]])
 			return mod.kv_cap(data_path)
 		elseif cap_type == "db" then
-			local mod = (require(CAP_TYPE_MODULES.db) --[[: any]])
+			local mod = (require(CAP_TYPE_MODULES.db) --[[:! { [string]: any, ... }]])
 			return mod.db_cap(data_path, { allow_write = decl.allow_write })
 		elseif cap_type == "shared_db" then
-			local mod = (require(CAP_TYPE_MODULES.shared_db) --[[: any]])
+			local mod = (require(CAP_TYPE_MODULES.shared_db) --[[:! { [string]: any, ... }]])
 			return mod.shared_db_cap(data_path, context.app_id, decl.tables or {}, {
 				allow_write = decl.allow_write,
 			})
@@ -409,14 +409,15 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 
 	-- time: no args.
 	if cap_type == "time" then
-		local mod = (require(CAP_TYPE_MODULES.time) --[[: any]])
+		local mod = (require(CAP_TYPE_MODULES.time) --[[:! { [string]: any, ... }]])
 		return mod.time_cap()
 	end
 
 	-- cli: pass app args.
 	if cap_type == "cli" then
 		local mod_path = CAP_TYPE_MODULES.cli
-		local ok, mod = pcall(require, mod_path)
+		local ok, mod_raw = pcall(require, mod_path)
+		local mod = mod_raw --[[: any]]
 		if ok and mod.cli_cap then
 			return mod.cli_cap(platform_opts.app_args or {})
 		end
@@ -427,7 +428,8 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 	-- stdin: grant access to process stdin.
 	if cap_type == "stdin" then
 		local mod_path = CAP_TYPE_MODULES.stdin
-		local ok, mod = pcall(require, mod_path)
+		local ok, mod_raw = pcall(require, mod_path)
+		local mod = mod_raw --[[: any]]
 		if ok and mod.stdin_cap then
 			return mod.stdin_cap()
 		end
@@ -437,7 +439,8 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 	-- stdout: grant access to process stdout.
 	if cap_type == "stdout" then
 		local mod_path = CAP_TYPE_MODULES.stdout
-		local ok, mod = pcall(require, mod_path)
+		local ok, mod_raw = pcall(require, mod_path)
+		local mod = mod_raw --[[: any]]
 		if ok and mod.stdout_cap then
 			return mod.stdout_cap()
 		end
@@ -450,9 +453,9 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		if not root then
 			return nil, "fs cap '" .. cap_name .. "' has no root — use --cap." .. cap_name .. ".root=PATH"
 		end
-		root = expand_home(root)
+		root = expand_home(root --[[:! string]])
 		mkdir_p(root)
-		local mod = (require(CAP_TYPE_MODULES.fs) --[[: any]])
+		local mod = (require(CAP_TYPE_MODULES.fs) --[[:! { [string]: any, ... }]])
 		return mod.fs_cap({ root = root, allow_write = decl.allow_write })
 	end
 
@@ -465,16 +468,18 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		local api_key
 
 		if key_name then
-			local ok_kr, keyring = pcall(require, "lib.keyring")
+			local key_name_s = key_name --[[:! string]]
+			local ok_kr, keyring_raw = pcall(require, "lib.keyring")
+			local keyring = keyring_raw --[[: any]]
 			if ok_kr and keyring then
-				local kr_key = keyring.get("crescent/" .. key_name)
+				local kr_key = keyring.get("crescent/" .. key_name_s)
 				if kr_key then
 					api_key = kr_key
 				else
 					-- Key not in keyring yet; try env var and auto-enroll it.
 					local env_key = resolve_llm_api_key_from_env()
 					if env_key then
-						keyring.set("crescent/" .. key_name, env_key)
+						keyring.set("crescent/" .. key_name_s, env_key)
 						api_key = env_key
 					end
 				end
@@ -490,7 +495,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		-- operator; default to "openai" as the most common case.
 		provider = provider or decl.provider_default or "openai"
 
-		local mod = (require(CAP_TYPE_MODULES.llm) --[[: any]])
+		local mod = (require(CAP_TYPE_MODULES.llm) --[[:! { [string]: any, ... }]])
 		return mod.llm_cap({
 			provider    = provider,
 			key         = api_key,
@@ -566,18 +571,19 @@ local function make_dir_loader(app_dir, env)
 	-- Build the module prefix that corresponds to app_dir so that fully-qualified
 	-- sibling requires like require("lib.platform.apps.charactercardv2.presets")
 	-- resolve to "presets.lua" inside the app dir instead of a double path.
-	local dir_prefix = app_dir:gsub("^%./", ""):gsub("/", ".") .. "."
+	local dir_prefix = (((app_dir:gsub("^%./", "")) --[[: any]]):gsub("/", ".")) --[[: any]]
+	dir_prefix = dir_prefix .. "."
 	return function(modname)
 		if loaded[modname] then return function() return loaded[modname] end end
 		local relname = modname
 		if relname:sub(1, #dir_prefix) == dir_prefix then
 			relname = relname:sub(#dir_prefix + 1)
 		end
-		local relpath = relname:gsub("%.", "/")
+		local relpath = (relname:gsub("%.", "/")) --[[: any]]
 		local candidates = {
 			relpath .. ".lua",
 			relpath .. "/init.lua",
-		}
+		} --: { [integer]: string }
 		for _, candidate in ipairs(candidates) do
 			local full = app_dir .. "/" .. candidate
 			local src = read_file(full)
@@ -595,8 +601,9 @@ local function make_dir_loader(app_dir, env)
 	end
 end
 
+--: (app: { path: string, ... }, entry_path: string, caps: unknown) -> (unknown, string | nil)
 local function run_dir_entrypoint(app, entry_path, caps)
-	local sandbox = require("lib.sandbox")
+	local sandbox = require("lib.sandbox") --[[: any]]
 	local cap_bundle = { globals = { caps = caps }, modules = {} }
 	local env = sandbox.env(sandbox.stdlib, cap_bundle)
 
@@ -632,16 +639,17 @@ end
 -- ── Shared index helpers ──────────────────────────────────────────────────
 
 -- Open the app index DB; writes error + exits on failure.
+--: (apps_dir_arg: string | nil) -> any
 local function open_index(apps_dir_arg)
 	local apps_dir = expand_home(apps_dir_arg or "~/.crescent/apps")
 	mkdir_p(apps_dir)
-	local app_index_mod = require("lib.platform.index")
+	local app_index_mod = require("lib.platform.index") --[[: any]]
 	local idx, ierr = app_index_mod.open(apps_dir .. "/index.db")
 	if not idx then
 		io.stderr:write("error: cannot open index: " .. tostring(ierr) .. "\n")
 		os.exit(1)
 	end
-	return idx
+	return idx --[[: any]]
 end
 
 -- Collect all cap declarations across top-level and all entry sections.
@@ -988,9 +996,10 @@ local function cmd_import(args)
 		os.exit(1)
 	end
 
+	local installed = result_or_err --[[:! { name: string | nil, meta: { tags: { [integer]: string } | nil, ... } | nil, ... }]]
 	io.stdout:write("installed: " .. app_path .. "\n")
-	io.stdout:write("name: " .. (result_or_err.name or "?") .. "\n")
-	local tags = result_or_err.meta and result_or_err.meta.tags or {}
+	io.stdout:write("name: " .. (installed.name or "?") .. "\n")
+	local tags = installed.meta and installed.meta.tags or {}
 	if #tags > 0 then
 		io.stdout:write("tags: " .. table.concat(tags, ", ") .. "\n")
 	end
@@ -1167,8 +1176,8 @@ end
 
 -- Construct capabilities.
 local platform_opts = {
-	port = opts.port,
-	app_args = opts.app_args,
+	port = opts.port --[[:! integer]],
+	app_args = opts.app_args --[[:! { [integer]: string } | nil]],
 }
 
 local caps, revoke_fns_or_err = construct_caps(

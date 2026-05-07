@@ -2,7 +2,7 @@ local mod = {}
 
 --[[@param ... fun(req: http_request, res: http_response): boolean ]]
 mod.router = function (...)
-	local routers = { ... }
+	local routers = { ... } --: ((unknown, unknown) -> boolean)[]
 	return function (req, res)
 		for i = 1, #routers do
 			local ret = routers[i](req, res)

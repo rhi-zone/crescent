@@ -19,7 +19,7 @@ end
 
 -- Mixed: 80% ASCII (1 byte), 20% 2-byte UTF-8 (U+00A1–U+07FF range)
 local function make_mixed(n)
-	local t = {}
+	local t = {} --: { [integer]: string }
 	local i = 1
 	while i <= n do
 		if i % 5 == 0 then
@@ -97,7 +97,7 @@ local ops = {
 io.write("utf8 benchmark\n")
 io.write(string.format("warmup: %d  reps: %d\n\n", WARMUP, REPS))
 
-local col_w = { 16, 8, 12, 10, 12 }
+local col_w = { 16, 8, 12, 10, 12 } --: integer[]
 
 local function hdr()
 	io.write(string.format("%-"..col_w[1].."s  %-"..col_w[2].."s  %"..col_w[3].."s  %"..col_w[4].."s  %"..col_w[5].."s\n",

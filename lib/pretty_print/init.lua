@@ -24,6 +24,7 @@ local pretty_print_
 local pretty_printers = {}
 pretty_printers["nil"] = function(n, write) write(tostring(n)) end
 pretty_printers.boolean = function(b, write) write(tostring(b)) end
+--: (n: number, write: (...any) -> nil) -> nil
 pretty_printers.number = function(n, write)
 	write((n % 1 == 0 and n >= minint and n <= maxint) and string.format("%d", n) or
 		n)
@@ -39,6 +40,7 @@ pretty_printers.lightuserdata = function(_, write) write("<lightuserdata>") end
 pretty_printers.thread = function(_, write) write("<thread>") end
 pretty_printers.cdata = function(_, write) write("<cdata>") end
 pretty_printers.userdata = function(_, write) write("<userdata>") end
+--: (t: { [unknown]: unknown, __keyorder?: { [integer]: unknown } }, write: (...any) -> nil, seen: { [unknown]: boolean }) -> nil
 pretty_printers.table = function(t, write, seen)
 	seen[t] = true
 	-- do
@@ -67,7 +69,9 @@ pretty_printers.table = function(t, write, seen)
 	local is_hash = false
 	local max = #t
 	for k in pairs(t) do
-		if type(k) ~= "number" or k < 1 or k > max or k % 1 ~= 0 then
+		if type(k) ~= "number" then is_hash = true; break end
+		local kn = k --[[:! number]]
+		if kn < 1 or kn > max or kn % 1 ~= 0 then
 			is_hash = true; break
 		end
 	end
@@ -101,6 +105,7 @@ end
 
 --[[@param opts? { no_trailing_newline: boolean; no_print_nil: boolean; }]]
 --[[@param seen? table<unknown,true>]]
+--: (value: any, write: (...any) -> nil, not_top_level: boolean | nil, opts: { no_trailing_newline: boolean | nil, no_print_nil: boolean | nil } | nil, seen: { [any]: boolean } | nil) -> nil
 pretty_print_ = function(value, write, not_top_level, opts, seen)
 	if type(write) ~= "function" then
 		error("pretty_print: write function is required")
@@ -109,18 +114,19 @@ pretty_print_ = function(value, write, not_top_level, opts, seen)
 	if seen[value] then
 		write("<circular>"); return
 	end
-	opts = opts or {}
+	local opts_ = opts or {}
 	if not not_top_level then
 		if type(value) == "string" then
 			write(value, "\n"); return
-		elseif value == nil and opts.no_print_nil then
+		elseif value == nil and opts_.no_print_nil then
 			return
 		end
 	end
-	pretty_printers[type(value)](value, write, seen)
-	if not not_top_level and not opts.no_trailing_newline then write("\n") end
+	local printer = pretty_printers[type(value)]
+	if type(printer) == "function" then printer(value, write, seen) end
+	if not not_top_level and not opts_.no_trailing_newline then write("\n") end
 end
---: (any, ((string) -> nil) | nil, boolean | nil, { no_trailing_newline: boolean | nil, no_print_nil: boolean | nil } | nil, { [any]: boolean } | nil) -> nil
+--: (any, (...any) -> nil, boolean | nil, { no_trailing_newline: boolean | nil, no_print_nil: boolean | nil } | nil, { [any]: boolean } | nil) -> nil
 mod.pretty_print_ = pretty_print_
 --: (any) -> string
 mod.uneval = function(value)

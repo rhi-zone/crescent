@@ -202,19 +202,19 @@ end
 -- Sink writing to stderr.
 --: (({ format: (string  | nil)} | nil)) -> (Entry) -> nil
 M.stderr_sink = function(opts)
-  opts = opts or {}
+  opts = opts or { format = nil } --[[: { format: string | nil } ]]
   local fmt = opts.format or default_format(stderr_is_tty())
-  return handle_sink(io.stderr, fmt)
+  return handle_sink(io.stderr --[[:! { close: (FileHandle) -> (), write: (FileHandle, string) -> () }]], fmt)
 end
 
 -- Sink writing to stdout.
 --: (({ format: (string  | nil)} | nil)) -> (Entry) -> nil
 M.stdout_sink = function(opts)
-  opts = opts or {}
+  opts = opts or { format = nil } --[[: { format: string | nil } ]]
   local ansi = get_ansi()
   local is_tty = ansi and ansi.enabled or false
   local fmt = opts.format or default_format(is_tty)
-  return handle_sink(io.stdout, fmt)
+  return handle_sink(io.stdout --[[:! { close: (FileHandle) -> (), write: (FileHandle, string) -> () }]], fmt)
 end
 
 -- Sink appending to a file on disk.
@@ -225,7 +225,7 @@ M.file_sink = function(write_fn, path, opts)
   if type(write_fn) ~= "function" then
     error("log.file_sink: write_fn function is required")
   end
-  opts = opts or {}
+  opts = opts or { format = nil } --[[: { format: string | nil } ]]
   local fmt = opts.format or "text"
   local formatter = get_formatter(fmt)
   return function(entry)
@@ -259,7 +259,7 @@ local Logger = {}
 Logger.__index = Logger
 
 -- Emit an entry at the given level (internal).
---: (LoggerObj, integer, string, { [string]: unknown }) -> nil
+--: (LoggerObj, integer, string, ({ [string]: unknown }) | nil) -> nil
 local function emit(self, level, msg, fields)
   if level < self._level then return end
   local entry = {
@@ -340,7 +340,7 @@ end
 -- opts.time_fn : function returning timestamp string (required)
 --: (string, { level: (string | integer) | nil, sinks: ({ [integer]: (Entry) -> nil }) | nil, time_fn: () -> string } | nil) -> LoggerObj
 M.new = function(name, opts)
-  opts = opts or {}
+  opts = opts or {} --[[:! { level: (string | integer) | nil, sinks: ({ [integer]: (Entry) -> nil }) | nil, time_fn: () -> string }]]
   local level = opts.level or "info"
   if type(level) == "string" then
     level = LEVEL_BY_NAME[level] or M.INFO

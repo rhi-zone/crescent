@@ -84,7 +84,7 @@ local function load_zlib()
   for _, name in ipairs(names) do
     local ok, lib = pcall(ffi.load, name)
     if ok then
-      local typed = lib --[[:! ZlibLib]]
+      local typed = lib --[[: any]] --[[:! ZlibLib]]
       return typed, name
     end
   end
@@ -125,8 +125,8 @@ local dest_len_buf = ffi.new("uLongf[1]")
 
 --: (string, { level: number | nil, format: string | nil } | nil) -> (string | nil, string | nil)
 local function deflate(input, opts)
-  local level --: number
-  local format --: string
+  local level --: number | nil
+  local format --: string | nil
   if opts then
     level = opts.level or 6
     format = opts.format or "zlib"
@@ -175,7 +175,7 @@ end
 
 --: (string, { format: string | nil } | nil) -> (string | nil, string | nil)
 local function inflate(input, opts)
-  local format --: string
+  local format --: string | nil
   if opts then format = opts.format or "zlib" else format = "zlib" end
 
   local src = ffi.cast("const Bytef *", input)
@@ -217,8 +217,8 @@ end
 
 --: ({ level: number | nil, format: string | nil } | nil) -> unknown
 local function deflater(opts)
-  local level --: number
-  local format --: string
+  local level --: number | nil
+  local format --: string | nil
   if opts then
     level = opts.level or 6
     format = opts.format or "zlib"
@@ -290,7 +290,7 @@ end
 
 --: ({ format: string | nil } | nil) -> unknown
 local function inflater(opts)
-  local format --: string
+  local format --: string | nil
   if opts then format = opts.format or "zlib" else format = "zlib" end
 
   local strm = ffi.new("z_stream")

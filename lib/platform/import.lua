@@ -45,7 +45,7 @@ local M = {}
 -- ── Card metadata extraction ────────────────────────────────────────────────
 
 -- Extract metadata from a CCv2 chara tEXt chunk.
---: (string) -> ({ name: string | nil, description: string, tags: string[], ... } | nil, string)
+--: (string) -> ({ name: string | nil, description: string, tags: string[], ... } | nil, unknown)
 local function extract_card_meta(png_bytes)
 	local chunks, err = png.read(png_bytes)
 	if not chunks then return nil, "import: PNG parse failed: " .. tostring(err) end
@@ -56,7 +56,8 @@ local function extract_card_meta(png_bytes)
 	local decoded, b64err = base64.decode(raw)
 	if not decoded then return nil, "import: chara base64 decode failed: " .. tostring(b64err) end
 
-	local ok, card = pcall(json_mod.decode, decoded)
+	local decoded_s = decoded --[[: any]]
+	local ok, card = pcall(json_mod.decode, decoded_s)
 	if not ok or type(card) ~= "table" then return nil, "import: chara JSON parse failed" end
 
 	-- CCv2 wraps data under .data; some formats use top-level.
@@ -89,7 +90,7 @@ local function bundle_runtime(runtime_files, manifest)
 	if not manifest_data then return nil, "import: manifest encode failed: " .. tostring(manifest_err) end
 	entries[#entries + 1] = {
 		name = "manifest.json",
-		data = manifest_data,
+		data = manifest_data --[[:! string]],
 		mode = nil, mtime = nil, typeflag = nil,
 	}
 	for _, f in ipairs(runtime_files) do
@@ -99,10 +100,10 @@ local function bundle_runtime(runtime_files, manifest)
 	local tardata, terr = tar.write(entries)
 	if not tardata then return nil, "import: tar write failed: " .. tostring(terr) end
 
-	local gz, cerr = compress.deflate(tardata, { format = "gzip" })
+	local gz, cerr = compress.deflate(tardata --[[:! string]], { format = "gzip" --[[:! string]] })
 	if not gz then return nil, "import: gzip compress failed: " .. tostring(cerr) end
 
-	return base64.encode(gz)
+	return base64.encode(gz --[[:! string]])
 end
 
 -- ── Import ──────────────────────────────────────────────────────────────────
@@ -120,7 +121,7 @@ function M.import_card(opts)
 	-- 1. Extract card metadata from chara chunk.
 	local card_meta, chunks_or_err = extract_card_meta(opts.png_bytes)
 	if not card_meta then return nil, chunks_or_err end
-	local chunks = chunks_or_err
+	local chunks = chunks_or_err --[[:! { [integer]: { type: string, data: string, ... } }]]
 
 	-- 2. Build manifest: merge runtime manifest + card metadata.
 	local manifest = {}
@@ -206,10 +207,10 @@ function M.import_card(opts)
 
 	-- 4. Add iTXt chunks to the PNG.
 	local manifest_json = json_mod.encode(manifest)
-	chunks = png.set_itxt(chunks, "lua", lua_data)
-	chunks = png.set_itxt(chunks, "lua-manifest", manifest_json)
+	chunks = png.set_itxt(chunks, "lua", lua_data, { language_tag = "" })
+	chunks = png.set_itxt(chunks, "lua-manifest", manifest_json --[[:! string]], { language_tag = "" })
 	if js_bundle then
-		chunks = png.set_itxt(chunks, "js", js_bundle)
+		chunks = png.set_itxt(chunks, "js", js_bundle, { language_tag = "" })
 	end
 
 	-- 5. Write the app PNG.

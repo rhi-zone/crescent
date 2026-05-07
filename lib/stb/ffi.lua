@@ -62,7 +62,7 @@ local function bind(lib)
     local src_stride = src_w * channels
     local dst_stride = dst_w * channels
     local result = lib.stbir_resize_uint8_srgb(
-      ffi.cast("const unsigned char *", pixels),
+      ffi.cast("unsigned char const *", pixels),
       src_w, src_h, src_stride,
       dst_buf, dst_w, dst_h, dst_stride,
       channels)

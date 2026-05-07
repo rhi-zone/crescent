@@ -3,7 +3,8 @@ local mod = {}
 --[[@param routes http_table_handler]]
 mod.router = function (routes)
 	--[[@type http_callback]]
-	return function (req, res, sock)
+	return function (req0, res, sock)
+		local req = req0 --[[:! { path: string, globs: { rest: string, [integer]: unknown } }]]
 		local route = routes
 		if type(route) == "function" then
 			local success = route(req, res, sock)
@@ -18,7 +19,7 @@ mod.router = function (routes)
 			local new_route = route[part]
 			if not new_route then
 				new_route = route[1]
-				local globs = req.globs or {}
+				local globs = req.globs or {} --[[:! { rest: string, [integer]: unknown }]]
 				globs[#globs+1] = part
 				req.globs = globs
 			end

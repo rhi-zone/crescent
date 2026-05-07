@@ -477,21 +477,23 @@ local function build_from(q, tag)
 	local has_q   = q   and q   ~= ""
 	local has_tag = tag and tag ~= ""
 	local args = {} --: { [integer]: unknown }
-	if has_q and has_tag then args[1] = tag;          args[2] = fts_phrase(q); return FROM_Q_TAG, args end
-	if has_q            then args[1] = fts_phrase(q);                         return FROM_Q,     args end
+	if has_q and has_tag then args[1] = tag;          args[2] = fts_phrase(q --[[:! string]]); return FROM_Q_TAG, args end
+	if has_q            then args[1] = fts_phrase(q --[[:! string]]);                         return FROM_Q,     args end
 	if has_tag          then args[1] = tag;                                   return FROM_TAG,   args end
 	return FROM_NONE, args
 end
 
+--: (iter: unknown) -> { [integer]: unknown }
 local function collect_rows(iter)
-	if not iter then return {} end
+	local iter_fn = iter --[[:! (() -> (string | nil, string | nil, string | nil, string | nil, string | nil, integer | nil)) | nil]]
+	if not iter_fn then return {} end
 	local results = {}
 	while true do
-		local id, name, path, manifest_json, tags_json, installed_at = iter()
+		local id, name, path, manifest_json, tags_json, installed_at = iter_fn()
 		if not id then break end
-		local tags = json.decode(tags_json) or {}
-		local manifest = json.decode(manifest_json) or {}
-		local meta = manifest.meta or {}
+		local tags = json.decode(tags_json --[[:! string]]) or {}
+		local manifest = json.decode(manifest_json --[[:! string]]) or {}
+		local meta = (manifest --[[:! { meta: { description: string | nil, ... } | nil, ... }]]).meta or {}
 		results[#results + 1] = {
 			id = id,
 			name = name,
@@ -518,7 +520,7 @@ local function query_apps(db, tag, q, limit, offset)
 	local citer = db:query(count_sql, unpack(args))
 	local total = 0
 	if citer then
-		local c = citer()
+		local c = (citer --[[:! () -> integer]])()
 		if c then total = c end
 	end
 
@@ -540,11 +542,11 @@ local function parse_query(qs)
 	if not qs or qs == "" then return params end
 	for kv in qs:gmatch("[^&]+") do
 		local k, v = kv:match("^([^=]+)=?(.*)")
-		if k then
+		if k and v then
 			-- Minimal percent-decode for common characters.
-			v = v:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
-			v = v:gsub("+", " ")
-			params[k] = v
+			local v1 = (v:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: any]]
+			local v2 = (v1:gsub("+", " ")) --[[: any]]
+			params[k] = v2
 		end
 	end
 	return params
@@ -601,24 +603,25 @@ end
 -- get_source_discover: GET /api/sources/:source_id/discover?q=X&limit=N&offset=N
 -- Proxies to a source adapter's discover function, then rewrites thumb_url
 -- entries to route through this server's thumb proxy (same-origin, CSP-safe).
+--: (caps: { _source_map: { [string]: { discover: (unknown) -> unknown, handler: unknown, ... }, ... }, ... }, source_id: string, q: unknown, limit: unknown, offset: unknown) -> (unknown, { status: integer, message: string } | nil)
 local function get_source_discover(caps, source_id, q, limit, offset)
 	local source_map = caps._source_map
 	-- Percent-decode the source id from the path segment.
-	local decoded_id = source_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
+	local decoded_id = (source_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: any]]
 	local src = source_map[decoded_id]
 	if not src then
 		return nil, { status = 404, message = "source not found: " .. decoded_id }
 	end
 	local params = { q = q, limit = limit, offset = offset }
-	local resp = src.discover(params)
+	local resp = src.discover(params) --[[:! { entries: { [integer]: { id: unknown, thumb_url: string | nil, ... } } | nil, ... }]]
 	-- Rewrite thumb_url entries to route through this server's thumb proxy.
 	if src.handler and resp and resp.entries then
-		local encoded_src_id = decoded_id:gsub("[^%w%-_%.~]",
-			function(c) return ("%%%02X"):format(c:byte()) end)
+		local encoded_src_id = (decoded_id:gsub("[^%w%-_%.~]",
+			function(c) return ("%%%02X"):format((c --[[:! string]]):byte()) end)) --[[: any]]
 		for _, entry in ipairs(resp.entries) do
 			if entry.id then
-				local encoded_entry_id = tostring(entry.id):gsub("[^%w%-_%.~]",
-					function(c) return ("%%%02X"):format(c:byte()) end)
+				local encoded_entry_id = (tostring(entry.id):gsub("[^%w%-_%.~]",
+					function(c) return ("%%%02X"):format((c --[[:! string]]):byte()) end)) --[[: any]]
 				entry.thumb_url = "/api/sources/" .. encoded_src_id
 					.. "/thumb/" .. encoded_entry_id
 			end
@@ -634,8 +637,8 @@ function M.create(caps)
 
 	-- Injected I/O for the CLI handler — use caps when present, fall back to
 	-- globals only when the caller has not provided them (e.g. in tests).
-	local stdout_cap = caps.stdout
-	local stderr_cap = caps.stderr
+	local stdout_cap = caps.stdout --[[:! { write: (string) -> any, ... } | nil]]
+	local stderr_cap = caps.stderr --[[:! { write: (string) -> any, ... } | nil]]
 	local stdout_write = stdout_cap and stdout_cap.write or function(s) io.write(s) end
 	local stderr_write = stderr_cap and stderr_cap.write or function(s) io.stderr:write(s) end
 
@@ -669,7 +672,7 @@ function M.create(caps)
 		},
 	}
 
-	local svc = service.create(caps_ext, methods, descriptors)
+	local svc = service.create(caps_ext, methods, descriptors) --[[:! { handler: (unknown, unknown) -> any, cli: (unknown) -> any, ... }]]
 
 	-- ── Thumb proxy ────────────────────────────────────────────────────────
 	-- Binary passthrough — cannot use the service JSON layer.
@@ -678,9 +681,9 @@ function M.create(caps)
 		local path = req.path or ""
 		local thumb_src_id, thumb_entry_id = path:match("^/api/sources/([^/]+)/thumb/(.+)$")
 		if not thumb_src_id then return nil end
-		thumb_src_id   = thumb_src_id:gsub("%%(%x%x)",   function(h) return string.char(tonumber(h, 16)) end)
-		thumb_entry_id = thumb_entry_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
-		local src = source_map[thumb_src_id]
+		thumb_src_id   = (thumb_src_id:gsub("%%(%x%x)",   function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: any]]
+		thumb_entry_id = (thumb_entry_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: any]]
+		local src = source_map[thumb_src_id] --[[:! { handler: ((unknown, unknown) -> any) | nil, ... } | nil]]
 		if not src or not src.handler then
 			res.status = 404
 			res.headers["Content-Type"] = { "text/plain; charset=utf-8" }

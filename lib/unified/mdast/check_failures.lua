@@ -6,26 +6,29 @@ end
 local mdast = require("lib.unified.mdast")
 local json  = require("lib.format.json")
 
+--: (string) -> string
 local function esc_html(s)
-  s = s:gsub("&",  "&amp;")
-  s = s:gsub("<",  "&lt;")
-  s = s:gsub(">",  "&gt;")
-  s = s:gsub('"',  "&quot;")
+  s = (s:gsub("&",  "&amp;"))
+  s = (s:gsub("<",  "&lt;"))
+  s = (s:gsub(">",  "&gt;"))
+  s = (s:gsub('"',  "&quot;"))
   return s
 end
 
+--: (string) -> string
 local function esc_attr(s)
-  s = s:gsub("&", "&amp;")
-  s = s:gsub('"', "&quot;")
+  s = (s:gsub("&", "&amp;"))
+  s = (s:gsub('"', "&quot;"))
   return s
 end
 
+--: (string) -> string
 local function encode_url(s)
   local result = {}
   local i = 1
   local len = #s
   while i <= len do
-    local b = s:byte(i)
+    local b = s:byte(i) --[[:! integer]]
     if b == 37 then
       local h1, h2 = s:byte(i+1), s:byte(i+2)
       local hex = "0123456789ABCDEFabcdef"
@@ -78,12 +81,13 @@ render_inline = function(node)
     return "<strong>" .. inner .. "</strong>"
   elseif t == "link" then
     local href = esc_attr(encode_url(node.url or ""))
-    local title_attr = node.title and (' title="' .. esc_attr(node.title) .. '"') or ""
+    local title_attr = node.title and (' title="' .. esc_attr(node.title --[[:! string]]) .. '"') or ""
     local inner = ""
     for _, c in ipairs(node.children or {}) do inner = inner .. render_inline(c) end
     return '<a href="' .. href .. '"' .. title_attr .. ">" .. inner .. "</a>"
   elseif t == "image" then
-    local function extract_text(nodes)
+    local extract_text
+    extract_text = function(nodes)
       local parts = {}
       for _, c in ipairs(nodes or {}) do
         if c.type == "text" or c.type == "inlineCode" then
@@ -94,7 +98,7 @@ render_inline = function(node)
     end
     local alt = extract_text(node.children)
     local src = esc_attr(encode_url(node.url or ""))
-    local title_attr = node.title and (' title="' .. esc_attr(node.title) .. '"') or ""
+    local title_attr = node.title and (' title="' .. esc_attr(node.title --[[:! string]]) .. '"') or ""
     return '<img src="' .. src .. '" alt="' .. alt .. '"' .. title_attr .. " />"
   elseif t == "break" then return "<br />\n"
   elseif t == "softBreak" then return "\n"
@@ -140,7 +144,7 @@ render_node = function(node)
   elseif t == "code" then
     local lang_attr = ""
     if node.lang and node.lang ~= "" then
-      lang_attr = ' class="language-' .. esc_attr(node.lang) .. '"'
+      lang_attr = ' class="language-' .. esc_attr(node.lang --[[:! string]]) .. '"'
     end
     local value = esc_html(node.value or "")
     if value ~= "" then value = value .. "\n" end
@@ -178,9 +182,9 @@ render_node = function(node)
           parts[#parts + 1] = "<li>" .. inner .. "</li>\n"
         else
           local inner = ""
-          for ci, c in ipairs(ch) do
+          for ci, c in ipairs(ch --[[:! { [integer]: { type: string, children: unknown } }]]) do
             if c.type == "paragraph" then
-              local nl = (ci < #ch) and "\n" or ""
+              local nl = (ci < #(ch --[[:! { [integer]: unknown }]])) and "\n" or ""
               inner = inner .. render_inlines(c.children) .. nl
             else inner = inner .. render_node(c) end
           end
@@ -197,8 +201,11 @@ render_node = function(node)
   else return "" end
 end
 
-local f = io.open("/tmp/commonmark_spec.json", "r")
-local src = f:read("*a"); f:close()
+local f0 = io.open("/tmp/commonmark_spec.json", "r")
+if not f0 then error("could not open commonmark spec") end
+local f = f0 --[[:! { close: (any) -> (boolean | nil, string | nil), flush: (any) -> (boolean | nil, string | nil), lines: (any) -> () -> string | nil, read: (any, ...string | number) -> string | nil, seek: (any, string | nil, integer | nil) -> (integer | nil, string | nil), setvbuf: (any, string, integer | nil) -> (boolean | nil, string | nil), write: (any, ...string | number) -> (any, string | nil) }]]
+local src = f:read("*a") --[[:! string]]
+f:close()
 local data = json.decode(src)
 
 local target_sections = {
@@ -209,13 +216,18 @@ local target_sections = {
 
 for _, e in ipairs(data) do
   if target_sections[e.section] then
-    local tree = mdast.parse(e.markdown)
+    local tree = mdast.parse(e.markdown) --[[:! { type: string }]]
     local got = render_node(tree)
-    if got ~= e.html then
+    local html = e.html --[[:! string]]
+    local markdown = e.markdown --[[:! string]]
+    if got ~= html then
       print(string.format("=== FAIL ex%d [%s] ===", e.example, e.section))
-      print("MARKDOWN: " .. e.markdown:gsub("\n", "\\n"))
-      print("WANT:     " .. e.html:gsub("\n", "\\n"))
-      print("GOT:      " .. got:gsub("\n", "\\n"))
+      local md_str = (markdown:gsub("\n", "\\n"))
+      local want_str = (html:gsub("\n", "\\n"))
+      local got_str = ((got --[[:! string]]):gsub("\n", "\\n"))
+      print("MARKDOWN: " .. md_str)
+      print("WANT:     " .. want_str)
+      print("GOT:      " .. got_str)
       print()
     end
   end
