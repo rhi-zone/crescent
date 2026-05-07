@@ -84,13 +84,16 @@ end
 --: ({ name: string, data: string }[], { name: string, ... }) -> (string | nil, string)
 local function bundle_runtime(runtime_files, manifest)
 	-- Add manifest.json to the tarball entries.
-	local entries = {}
+	local entries = {} --: { [number]: { data: string, mode: number | nil, mtime: number | nil, name: string, typeflag: string | nil } }
+	local manifest_data, manifest_err = json_mod.encode(manifest)
+	if not manifest_data then return nil, "import: manifest encode failed: " .. tostring(manifest_err) end
 	entries[#entries + 1] = {
 		name = "manifest.json",
-		data = json_mod.encode(manifest),
+		data = manifest_data,
+		mode = nil, mtime = nil, typeflag = nil,
 	}
 	for _, f in ipairs(runtime_files) do
-		entries[#entries + 1] = { name = f.name, data = f.data }
+		entries[#entries + 1] = { name = f.name, data = f.data, mode = nil, mtime = nil, typeflag = nil }
 	end
 
 	local tardata, terr = tar.write(entries)

@@ -455,7 +455,8 @@ local SELECT_COLS = "a.id, a.name, a.path, a.manifest_json, a.tags_json, a.insta
 -- Double-quote an FTS5 MATCH phrase so special chars are literal trigrams.
 --: (string) -> string
 local function fts_phrase(q)
-	return '"' .. q:gsub('"', '""') .. '"'
+	local s = q:gsub('"', '""')
+	return '"' .. s .. '"'
 end
 
 -- FROM + JOIN + WHERE fragments keyed by (has_q, has_tag). Each variant

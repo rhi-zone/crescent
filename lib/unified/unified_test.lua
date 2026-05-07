@@ -3,12 +3,14 @@ local T = require("lib.test.assert")
 local unified = require("lib.unified")
 
 -- Minimal helpers used across tests.
+--: (source: string) -> { type: string, children: string[] }
 local function words_parser(source)
   local words = {}
   for w in source:gmatch("%S+") do words[#words + 1] = w end
   return { type = "words", children = words }
 end
 
+--: (ast: { children: Arr<string> }) -> string
 local function words_compiler(ast)
   return table.concat(ast.children, " ")
 end
@@ -55,7 +57,7 @@ T.describe("unified: transformers", function()
   end)
 
   T.it("multiple transformers run in registration order", function()
-    local order = {}
+    local order = {} --[[: integer[] ]]
     local p = unified.new()
     p:parser(words_parser)
     p:compiler(words_compiler)
@@ -89,7 +91,8 @@ T.describe("unified: :use with opts", function()
   end)
 
   T.it("plugin can register parser and compiler", function()
-    local function full_plugin(proc, opts)
+    local function full_plugin(proc_, opts)
+      local proc = proc_ --[[: any]]
       proc:parser(function(src) return { type = "raw", value = src .. (opts.suffix or "") } end)
       proc:compiler(function(ast) return ast.value end)
     end
@@ -121,7 +124,7 @@ T.describe("unified: :freeze and :clone", function()
     p:freeze()
 
     local tag = {}
-    local p2 = p:clone()
+    local p2 = p:clone() --[[: any]]
     p2:use_transformer(function(ast)
       tag[#tag + 1] = "p2"
       return ast

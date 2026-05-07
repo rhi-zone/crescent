@@ -23,7 +23,7 @@ local M = {}
 -- http_client: a table with request() and request_stream()
 -- opts.model: model name (default "default")
 -- opts.path: completions path (default "/v1/chat/completions")
---: (http_client: { request: (req: unknown) -> unknown, request_stream: (((req: unknown, on_chunk: (data: string) -> ()) -> unknown) | nil) }, opts: ({ model: (string | nil), path: (string | nil) } | nil)) -> { call: (messages: unknown, gen_opts: (unknown | nil)) -> (string | nil), (string | nil), call_stream: (((messages: unknown, on_token: (delta: string) -> (), gen_opts: (unknown | nil)) -> (string | nil), (string | nil)) | nil), count_tokens: (text: string) -> number }
+--: (http_client: any, opts: ({ model: (string | nil), path: (string | nil), api_key: (string | nil) } | nil)) -> any
 function M.create(http_client, opts)
 	opts = opts or {}
 	local model = opts.model or "default"

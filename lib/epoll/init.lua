@@ -11,7 +11,7 @@ local ffi = require("ffi")
 
 local mod = {}
 
---:: epoll = { fd: unknown, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: unknown }, weak: { [integer]: boolean }, count: integer }
+--:: epoll = { fd: integer, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: { write: (string) -> nil, remove: () -> nil } }, weak: { [integer]: boolean }, count: integer }
 
 local epoll_ffi
 local read_c
@@ -95,7 +95,7 @@ mod.epoll = epoll
 epoll.new = function (self)
 	--[[@class epoll]]
 	local obj = {
-	fd = epoll_ffi.epoll_create(1),
+	fd = epoll_ffi.epoll_create(1) --[[:! integer]],
 	read_cbs = {}, --[[@type (fun()?)[] ]]
 	write_cbs = {}, --[[@type (fun()?)[] ]]
 	close_cbs = {}, --[[@type (fun()?)[] ]]
@@ -103,7 +103,7 @@ epoll.new = function (self)
 	weak = {}, --[[@type boolean[] ]]
 	count = 0,
 }
-	return setmetatable(obj, self)
+	return setmetatable(obj, self) --[[:! epoll]]
 end
 --: () -> epoll
 mod.new = function () return epoll:new() end
@@ -123,6 +123,7 @@ local read_cb = function (fd, read)
 end
 
 --[[@param self epoll]] --[[@param fd fd_c]]
+--: (self: epoll, fd: integer) -> nil
 local remove_fd = function (self, fd)
 	if self.rets[fd] then
 		self.read_cbs[fd] = nil
@@ -135,12 +136,13 @@ local remove_fd = function (self, fd)
 	end
 end
 
---: (epoll, number, (string) -> nil, (() -> nil) | nil, boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil)
+--: (self: epoll, fd: integer, read: (string) -> nil, close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil)
 --[[@return epoll_write? write, epoll_remove? remove, string? err]]
 --[[@param fd fd_c]] --[[@param read epoll_read]] --[[@param close epoll_close?]] --[[@param weak boolean? if false, self.count is not incremented]]
 epoll.add = function (self, fd, read, close, weak)
+	local self = self --[[:! epoll]]
 	--[[@diagnostic disable-next-line: assign-type-mismatch]]
-	fd = tonumber(fd) --[[@type fd_c]]
+	fd = tonumber(fd) --[[:! integer]]
 	if self.read_cbs[fd] then return nil, nil, "epoll: already polling fd: " .. fd end
 	local events = epoll_event({ { events = 1, fd = fd } }) --- @type {[0]:epoll_event}
 	local fninfo = debug.getinfo(read)
@@ -196,7 +198,7 @@ epoll.wait = function (self)
 	epoll_ffi.epoll_wait(self.fd, events, 1, -1)
 	local event = events[0] --[[@type epoll_event]]
 	--[[@diagnostic disable-next-line: assign-type-mismatch]]
-	local fd = tonumber(event.fd) --[[@type fd_c]]
+	local fd = tonumber(event.fd) --[[:! integer]]
 	if bit.band(event.events, --[[EPOLLIN]] 0x1) ~= 0 then
 		local cb = self.read_cbs[fd]
 		if cb then cb()

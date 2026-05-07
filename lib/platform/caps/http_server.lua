@@ -94,7 +94,7 @@ end
 -- Set TCP-level socket options for an SSE stream.
 -- We do this on the first send_event call so that buffered short-lived
 -- responses don't pay the syscall cost.
---: (unknown, boolean) -> nil
+--: (any, boolean) -> nil
 local function set_sse_socket_options(sock, want_nodelay)
 	if not sock then return end
 	local set = sock.set_option
@@ -124,9 +124,9 @@ end
 
 -- Wrap the raw HTTP handler to hide the socket from the app.
 -- Returns a handler compatible with lib/http/server.make_connection_handler.
---: (((req: unknown, res: unknown) -> nil), unknown, boolean) -> (req: unknown, res: unknown, sock: unknown) -> boolean | nil
+--: (((req: any, res: any) -> nil), any, boolean) -> ((req: any, res: any, sock: any) -> boolean | nil)
 local function wrap_handler(app_handler, revoked_ref, tcp_nodelay)
-	--: (unknown, unknown, unknown) -> boolean | nil
+	--: (any, any, any) -> boolean | nil
 	return function(raw_req, raw_res, sock)
 		if revoked_ref[1] then return end
 

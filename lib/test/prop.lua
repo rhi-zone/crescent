@@ -25,6 +25,8 @@ local gen_mod = require("lib.test.gen")
 local M  = {}
 M.gen    = gen_mod   -- re-export for convenience
 
+--:: PropInfo = { desc: string, trial: integer, seed: number, original: any, shrunk: any, shrink_steps: integer, err: string }
+
 local DEFAULT_TRIALS    = 100
 local DEFAULT_MAX_SHRINK = 200
 
@@ -40,19 +42,19 @@ local function get_default_seed()
 end
 
 -- Human-readable representation of a value (for error messages).
+--: (v: unknown, depth: integer | nil) -> string
 local function display(v, depth)
 	depth = depth or 0
-	local t = type(v)
-	if t == "string"  then return string.format("%q", v) end
-	if t == "number"  then
+	if type(v) == "string"  then return string.format("%q", v) end
+	if type(v) == "number"  then
 		if v == math.floor(v) and math.abs(v) < 1e15 then
 			return string.format("%d", v)
 		end
 		return tostring(v)
 	end
-	if t == "boolean" then return tostring(v) end
-	if t == "nil"     then return "nil" end
-	if t ~= "table"   then return tostring(v) end
+	if type(v) == "boolean" then return tostring(v) end
+	if type(v) == "nil"     then return "nil" end
+	if type(v) ~= "table"   then return tostring(v) end
 	if depth > 2      then return "{...}" end
 
 	local parts  = {}
@@ -75,6 +77,7 @@ local function display(v, depth)
 end
 
 -- Display a tuple (array of args) as "v1, v2, ..."
+--: (args: any[]) -> string
 local function display_tuple(args)
 	if #args == 1 then return display(args[1]) end
 	local parts = {}
@@ -86,6 +89,7 @@ end
 
 -- Given a generator and a failing value, find the minimal failing example.
 -- check_fn(value) should throw on failure and return normally on pass.
+--: (shrink_fn: (any) -> any[], failing: any, check_fn: (any) -> any, max_steps: integer) -> (any, integer)
 local function do_shrink(shrink_fn, failing, check_fn, max_steps)
 	local current = failing
 	local steps   = 0
@@ -127,13 +131,13 @@ function M.check(desc, gen_arg, fn, opts)
 
 	-- Normalise: single generator vs array of generators.
 	-- We always work internally with a "tuple" generator that returns an array.
-	local tup_gen
+	local tup_gen --: { generate: (any, integer) -> any[], shrink: (any) -> any[] } | nil
 	if type(gen_arg) == "table" and gen_arg.generate then
 		-- Single generator → wrap in a 1-tuple
-		tup_gen = gen_mod.tuple({gen_arg})
+		tup_gen = gen_mod.tuple({gen_arg}) --[[:! { generate: (any, integer) -> any[], shrink: (any) -> any[] }]]
 	elseif type(gen_arg) == "table" and gen_arg[1] and gen_arg[1].generate then
 		-- Array of generators
-		tup_gen = gen_mod.tuple(gen_arg)
+		tup_gen = gen_mod.tuple(gen_arg) --[[:! { generate: (any, integer) -> any[], shrink: (any) -> any[] }]]
 	else
 		error("prop.check: expected a generator or array of generators, got " .. type(gen_arg))
 	end
@@ -141,14 +145,15 @@ function M.check(desc, gen_arg, fn, opts)
 	-- Size increases with trial number (capped at 100).
 	local function run(args) fn(unpack(args)) end
 
+	local tg = tup_gen --[[:! { generate: (any, integer) -> any[], shrink: (any) -> any[] }]]
 	for trial = 1, trials do
 		local size = math.min(trial, 100)
-		local args = tup_gen.generate(rng, size)
+		local args = tg.generate(rng, size) --[[:! Arr<any>]]
 		local ok, err = pcall(run, args)
 		if not ok then
 			-- Shrink
 			local shrunk, shrink_steps = do_shrink(
-				tup_gen.shrink, args, run, max_shrink
+				tg.shrink, args, run, max_shrink
 			)
 			return false, {
 				desc         = desc,
@@ -172,7 +177,8 @@ end
 function M.it(desc, gen_arg, fn, opts)
 	local assert_mod = require("lib.test.assert")
 	assert_mod.it(desc, function()
-		local ok, info = M.check(desc, gen_arg, fn, opts)
+		local ok, info_ = M.check(desc, gen_arg, fn, opts)
+		local info = info_ --[[:! PropInfo]]
 		if not ok then
 			local lines = {
 				"property falsified after " .. info.trial
@@ -199,7 +205,8 @@ end
 --     end)
 --   end)
 function M.assert(desc, gen_arg, fn, opts)
-	local ok, info = M.check(desc, gen_arg, fn, opts)
+	local ok, info_ = M.check(desc, gen_arg, fn, opts)
+	local info = info_ --[[:! PropInfo]]
 	if not ok then
 		local msg = "property falsified after " .. info.trial .. " test(s)"
 			.. "  (seed=" .. info.seed .. ")\n"

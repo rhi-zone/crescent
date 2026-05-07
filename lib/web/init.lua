@@ -143,7 +143,7 @@ function res_mt:json(data)
 	self.headers["Content-Type"] = { "application/json" }
 	local ok, encoded = pcall(json.encode, data)
 	if ok then
-		self.body = encoded
+		self.body = encoded --[[:! string]]
 	else
 		self.body = "{}"
 	end
@@ -307,7 +307,7 @@ end
 
 --: ((web_logger_opts | nil)) -> web_middleware
 function M.logger(opts)
-	local log_fn = (opts and opts.log) or print
+	local log_fn = ((opts and opts.log) or print) --[[:! (string) -> nil]]
 	local clock = (opts and opts.clock) or clock_default
 	if not clock then error("web.logger: requires opts.clock (function returning seconds)", 2) end
 	local clock_nn = clock --[[:! () -> number]]
@@ -357,17 +357,17 @@ end
 -- static(url_prefix, dir, read_fn) -> middleware
 -- read_fn: (path: string) -> string | nil — reads a file by path.
 -- In sandbox: use caps.fs.read. Outside: wrap io.open.
---: (string, string, (string) -> string | nil) -> function
+--: (string, string, (string) -> string | nil) -> web_middleware
 function M.static(url_prefix, dir, read_fn)
 	if not read_fn then error("web.static: requires read_fn (function reading file by path)", 2) end
 	-- Normalize: ensure url_prefix starts with / and has no trailing /
 	if sub(url_prefix, 1, 1) ~= "/" then url_prefix = "/" .. url_prefix end
 	if sub(url_prefix, -1) == "/" and #url_prefix > 1 then
-		url_prefix = sub(url_prefix, 1, -2)
+		url_prefix = sub(url_prefix, 1, -2) --[[:! string]]
 	end
 	-- Normalize dir: remove trailing /
 	if sub(dir, -1) == "/" and #dir > 1 then
-		dir = sub(dir, 1, -2)
+		dir = sub(dir, 1, -2) --[[:! string]]
 	end
 
 	local prefix_len = #url_prefix
@@ -414,27 +414,33 @@ end
 
 -- ── Built-in middleware: JSON body parser ────────────────────────────────────
 
---: () -> function
+--: () -> web_middleware
 function M.json_body()
-	return function(req, res, next)
-		local ct = req.headers["content-type"] or req.headers["Content-Type"] or ""
-		if find(ct, "application/json", 1, true) and type(req.body) == "string" and #req.body > 0 then
-			local ok, decoded = pcall(json.decode, req.body)
+	--: (req: web_request, res: web_response, next: () -> nil) -> nil
+	local mw = function(req, res, next)
+		local headers = req.headers or ({} --[[:! { [string]: unknown }]])
+		local ct = headers["content-type"] or headers["Content-Type"] or ""
+		local body = req.body
+		if find(ct --[[:! string]], "application/json", 1, true) and type(body) == "string" and #(body --[[:! string]]) > 0 then
+			local ok, decoded = pcall(json.decode, body --[[:! string]])
 			if ok and decoded ~= nil then
 				req.body = decoded
 			end
 		end
 		next()
 	end
+	return mw
 end
 
 -- ── Built-in middleware: cookies ──────────────────────────────────────────────
 
---: () -> function
+--: () -> web_middleware
 function M.cookies()
-	return function(req, res, next)
+	--: (req: web_request, res: web_response, next: () -> nil) -> nil
+	local mw = function(req, res, next)
 		-- Parse Cookie header
-		local cookie_header = req.headers["cookie"] or req.headers["Cookie"] or ""
+		local headers = req.headers or ({} --[[:! { [string]: unknown }]])
+		local cookie_header = (headers["cookie"] or headers["Cookie"] or "") --[[:! string]]
 		local cookies = {}
 		for pair in cookie_header:gmatch("[^;]+") do
 			pair = pair:match("^%s*(.-)%s*$") -- trim
@@ -452,12 +458,12 @@ function M.cookies()
 		function res:set_cookie(name, value, opts)
 			opts = opts or {}
 			local parts = { name .. "=" .. value }
-			if opts.path then parts[#parts + 1] = "Path=" .. opts.path end
-			if opts.domain then parts[#parts + 1] = "Domain=" .. opts.domain end
+			if opts.path then parts[#parts + 1] = "Path=" .. (opts.path --[[:! string]]) end
+			if opts.domain then parts[#parts + 1] = "Domain=" .. (opts.domain --[[:! string]]) end
 			if opts.maxAge then parts[#parts + 1] = "Max-Age=" .. tostring(opts.maxAge) end
 			if opts.httpOnly then parts[#parts + 1] = "HttpOnly" end
 			if opts.secure then parts[#parts + 1] = "Secure" end
-			if opts.sameSite then parts[#parts + 1] = "SameSite=" .. opts.sameSite end
+			if opts.sameSite then parts[#parts + 1] = "SameSite=" .. (opts.sameSite --[[:! string]]) end
 			local cookie_str = concat(parts, "; ")
 
 			-- Append to Set-Cookie (can have multiple)
@@ -471,6 +477,7 @@ function M.cookies()
 
 		next()
 	end
+	return mw
 end
 
 -- ── Built-in middleware: CSRF ────────────────────────────────────────────────
@@ -496,9 +503,11 @@ function M.csrf(opts)
 		return diff == 0
 	end
 
-	return function(req, res, next)
+	return (function(req, res, next)
 		local method = req.method
-		local session_key = req.cookies and req.cookies["session"] or "default"
+		local cookies = req.cookies or ({} --[[:! { [string]: string }]])
+		local headers = req.headers or ({} --[[:! { [string]: unknown }]])
+		local session_key = cookies["session"] or "default"
 		local token = make_token(session_key)
 
 		-- For safe methods, provide the token
@@ -509,12 +518,12 @@ function M.csrf(opts)
 		end
 
 		-- For unsafe methods, validate the token
-		local req_token = req.headers["x-csrf-token"] or req.headers["X-CSRF-Token"]
+		local req_token = headers["x-csrf-token"] or headers["X-CSRF-Token"]
 		if not req_token and type(req.body) == "table" then
-			req_token = req.body._csrf
+			req_token = (req.body --[[:! { _csrf: string } ]])._csrf
 		end
 
-		if not req_token or not verify_token(req_token, session_key) then
+		if not req_token or not verify_token(req_token --[[:! string]], session_key) then
 			res.status = 403
 			res.body = "Forbidden: invalid CSRF token"
 			return
@@ -522,7 +531,7 @@ function M.csrf(opts)
 
 		res.csrf_token = token
 		next()
-	end
+	end) --[[:! web_middleware]]
 end
 
 -- ── Exports ──────────────────────────────────────────────────────────────────

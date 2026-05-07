@@ -3,10 +3,12 @@ local mod = {}
 -- TODO: need separate escape for element content and attributes
 
 --[[@param s string]]
+--: (s: string) -> string
 local html_escape = function(s)
-	return s:gsub("[&<>\"']", {
+	local r = s:gsub("[&<>\"']", {
 		["&"] = "&amp;",["<"] = "&lt;",[">"] = "&gt",["\""] = "&quot",["'"] = "&#039;",
 	})
+	return r
 end
 
 --[[@param tag string]]
@@ -64,43 +66,45 @@ mod.br_ = mod.element("br")
 --[[`table<selector>]]
 --[[@param styles table<css_selector, css_style>]]
 mod.style = function(styles)
-	local parts = {} --[[@type string[] ]]
+	local parts = {} --[[:! string[] ]]
 	parts[#parts + 1] = "<style>"
 	for selector, style in pairs(styles) do
 		parts[#parts + 1] = "\t" .. selector .. " {"
-		for prop, v in pairs(style) do
+		for prop, v in pairs(style --[[:! { [string]: string } ]]) do
 			parts[#parts + 1] = "\t\t" .. prop .. ": " .. v .. ";"
 		end
 		parts[#parts + 1] = "\t}"
 	end
 	parts[#parts + 1] = "</style>"
-	return table.concat(parts, "\n")
+	return table.concat(parts --[[:! { [integer]: string }]], "\n")
 end
 
 mod.script = function(fn) --[[@param fn fun(x: js_window)]]
-	local info = debug.getinfo(fn)
+	local info = debug.getinfo(fn) --[[:! { source: string, currentline: integer, ... }]]
 	local filename = "[string]"
 	local reader
 	if info.source:byte(1) == 0x40 --[[@]] then
 		filename = info.source:sub(2)
-		reader = require("dep.ljltk.reader").file(filename)
+		reader = (require("dep.ljltk.reader") --[[:! { file: (string) -> unknown, string: (string) -> unknown } ]]).file(filename)
 	else
-		reader = require("dep.ljltk.reader").string(info.source)
+		reader = (require("dep.ljltk.reader") --[[:! { file: (string) -> unknown, string: (string) -> unknown } ]]).string(info.source)
 	end
-	local ls = require("dep.ljltk.lexer")(reader, filename)
-	local ast_builder = require("dep.ljltk.lua_ast").New()
-	local ast_tree = require("dep.ljltk.parser")(ast_builder, ls)
+	local ls = (require("dep.ljltk.lexer") --[[:! (unknown, string) -> unknown ]])(reader, filename)
+	local ast_builder = (require("dep.ljltk.lua_ast") --[[:! { New: () -> unknown } ]]).New() --[[:! { chunk: (unknown, unknown) -> unknown }]]
+	local ast_tree = (require("dep.ljltk.parser") --[[:! (unknown, unknown) -> unknown ]])(ast_builder, ls)
 	local func_node
-	require("dep.ljltk.visitor")(ast_tree, function(node)
+	(require("dep.ljltk.visitor") --[[:! (unknown, (unknown) -> unknown) -> nil ]])(ast_tree, (function(node)
+		local node = node --[[:! { kind: string, firstline: integer, lastline: integer, body: unknown }]]
 		if node.kind == "FunctionExpression" and node.firstline == info.linedefined and node.lastline == info.lastlinedefined then
 			func_node = node
 			return false
 		end
-	end)
-	local code = require("dep.lua2js").lua2js(ast_builder:chunk(func_node.body), filename)
+	end) --[[:! (unknown) -> unknown]])
+	local func_node = func_node --[[:! { body: unknown } ]]
+	local code = (require("dep.lua2js") --[[:! { lua2js: (unknown, string) -> string } ]]).lua2js(ast_builder:chunk(func_node.body), filename)
 	--[[IMPL: magic (get function ast from file)]]
 	--[[FIXME: prevent injection]]
-	return "<script>\nconst x = window;\n" .. code .. "\n</script>"
+	return "<script>\nconst x = window;\n" .. (code --[[:! string]]) .. "\n</script>"
 end
 
 mod.meta = mod.element("meta")

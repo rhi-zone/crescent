@@ -47,6 +47,7 @@ local M = {}
 --::   index_obj: unknown,
 --::   remove_fn: ((path: string) -> (true | nil, string | nil)) | nil,
 --::   write_fn: ((path: string, data: string) -> (true | nil, string | nil)) | nil,
+--::   read_fn: ((path: string) -> (string | nil, string | nil)) | nil,
 --::   apps_dir: string | nil,
 --::   runtime_files: { [integer]: { name: string, data: string } } | nil,
 --::   runtime_manifest: unknown,
@@ -203,7 +204,7 @@ function M.make(opts)
 	local host = opts.host or "localhost:7777"
 	local time_fn = opts.time_fn or os.time --: () -> integer
 	--:: bytes_fn = (n: integer) -> { [integer]: number }
-	local random_bytes_fn --: bytes_fn
+	local random_bytes_fn --: bytes_fn | nil
 	if opts.random_bytes_fn then
 		random_bytes_fn = opts.random_bytes_fn
 	else
@@ -350,7 +351,7 @@ function M.make(opts)
 	-- Content-Security-Policy if one is stored in app_csp.
 	--: (string, (http_req, http_res) -> nil, http_req, http_res) -> nil
 	local function invoke_app_handler(app_id, fn, req, res)
-		local tb --: string
+		local tb --: string | nil
 		local function tb_handler(err)
 			tb = debug.traceback(tostring(err), 2)
 			return err
@@ -438,7 +439,7 @@ function M.make(opts)
 			.. "; frame-ancestors 'none'; form-action 'self'"
 	end
 
-	local app_handler --: (http_req, http_res, string) -> nil
+	local app_handler --: ((http_req, http_res, string) -> nil) | nil
 	if opts.app_handler then
 		local override = opts.app_handler --: (http_req, http_res, string) -> nil
 		--: (http_req, http_res, string) -> nil
@@ -1200,7 +1201,7 @@ end
 		-- Mint: 16 random bytes → 32 hex chars. Collisions are vanishingly
 		-- unlikely at the 5-minute expiry window, but we still guard with a
 		-- bounded retry loop in case a mock RNG (tests) produces duplicates.
-		local token --: string
+		local token --: string | nil
 		for _ = 1, 8 do
 			local candidate = bytes_to_hex(random_bytes_fn(16))
 			if not launch_tokens[candidate] then

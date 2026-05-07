@@ -51,6 +51,11 @@ end
 
 local gen_mod = require("lib.test.gen")  -- for make_rng only
 
+--:: Rng = { seed: number, next: (self: Rng) -> number, float: (self: Rng) -> number, int: (self: Rng, lo: number, hi: number) -> number, bool: (self: Rng) -> boolean, pick: <T>(self: Rng, t: T[]) -> T }
+--:: ShrinkIter = () -> (any, any)
+--:: Arb = { generate: (rng: Rng, sz: integer) -> (any, any), shrink: (v: any, ctx: any | nil) -> ShrinkIter }
+--:: CheckInfo = { desc: string, trial: integer, seed: number, original: any, shrunk: any, shrink_steps: integer, err: string, is_tuple: boolean }
+
 local M = {}
 
 -- ── Shared sentinel ──────────────────────────────────────────────────────────
@@ -84,6 +89,7 @@ end
 -- ── Primitives ────────────────────────────────────────────────────────────────
 -- All primitives produce ctx = nil.  generate() allocates nothing.
 
+--: (lo: integer, hi: integer) -> Arb
 function M.int(lo, hi)
 	assert(lo <= hi, "arb.int: lo > hi")
 	local target = math.max(lo, math.min(hi, 0))
@@ -93,9 +99,10 @@ function M.int(lo, hi)
 	}
 end
 
-M.uint = M.int(0, 2^31 - 1)
+M.uint = M.int(0, (2^31 - 1) --[[:! integer]])
 M.byte = M.int(0, 255)
 
+--: (lo: number | nil, hi: number | nil) -> Arb
 function M.float(lo, hi)
 	lo = lo or 0.0; hi = hi or 1.0
 	local target = math.max(lo, math.min(hi, 0.0))
@@ -136,6 +143,7 @@ end
 -- ctx = nil.  Shrinks: binary-search length reduction, then per-char
 -- simplification (toward lower byte values: 0, space, original-1).
 
+--: (opts: { charset?: string, min?: integer, max?: integer } | nil) -> Arb
 function M.string(opts)
 	opts = opts or {}
 	local charset = opts.charset   -- nil = all bytes 1-127
@@ -143,14 +151,18 @@ function M.string(opts)
 	local max_len = opts.max       -- nil = size-derived
 
 	return {
+		--: (rng: Rng, sz: integer) -> (string, nil)
 		generate = function(rng, sz)
 			local top = max_len or math.min(sz, 20)
 			local len = rng:int(min_len, math.max(min_len, top))
 			local buf = {}
 			if charset then
-				local nc = #charset
+				local cs = charset --[[:! string]]
+				local nc = #cs
 				for i = 1, len do
-					buf[i] = charset:sub(1 + (rng:next() % nc), 1 + (rng:next() % nc))
+					local a = (1 + (rng:next() % nc)) --[[:! integer]]
+				local b = (1 + (rng:next() % nc)) --[[:! integer]]
+				buf[i] = cs:sub(a, b)
 				end
 			else
 				for i = 1, len do buf[i] = string.char(rng:int(1, 127)) end
@@ -158,7 +170,8 @@ function M.string(opts)
 			return table.concat(buf), nil
 		end,
 
-		shrink = function(v, _)
+		shrink = function(v_, _)
+			local v = v_ --[[:! string]]
 			if #v <= min_len then return EMPTY_ITER end
 			-- Phase 1: binary-search length reduction.
 			-- Phase 2: per-character simplification.
@@ -181,7 +194,7 @@ function M.string(opts)
 				end
 				-- Phase 2: character simplification
 				while char_idx <= #v do
-					local b = string.byte(v, char_idx)
+					local b = string.byte(v, char_idx) or 0
 					-- Candidates: 0, 32 (space), b-1 — tried in char_sub order
 					local candidates = {}
 					if b > 0   then candidates[#candidates+1] = 0   end
@@ -209,6 +222,7 @@ end
 -- Phase 1: binary-search length reduction (empty → half → three-quarters → ...).
 -- Phase 2: per-element shrink using stored element contexts.
 
+	--: (vals: any[], ctxs: any[] | nil, elem_arb: Arb, min_len: integer) -> ShrinkIter
 local function array_shrink_iter(vals, ctxs, elem_arb, min_len)
 	local n = #vals
 	if n <= min_len and n == 0 then return EMPTY_ITER end
@@ -237,7 +251,7 @@ local function array_shrink_iter(vals, ctxs, elem_arb, min_len)
 			if not eiter then
 				eiter = elem_arb.shrink(vals[eidx], ctxs and ctxs[eidx])
 			end
-			local sv, sc = eiter()
+			local sv, sc = (eiter --[[:! ShrinkIter]])()
 			if sv ~= nil then
 				local c = {}; for i = 1, n do c[i] = vals[i] end; c[eidx] = sv
 				local nc
@@ -256,6 +270,7 @@ end
 
 -- ── Collections ───────────────────────────────────────────────────────────────
 
+--: (elem_arb: Arb, opts: { min?: integer, max?: integer } | nil) -> Arb
 function M.array(elem_arb, opts)
 	opts = opts or {}
 	local min_len = opts.min or 0
@@ -283,6 +298,7 @@ end
 
 -- Record: { field = arb, ... }  →  generates { field = val, ... }
 -- ctx = nil when all field ctxs are nil, else { field = ctx, ... }
+--: (spec: { [string]: Arb }) -> Arb
 function M.record(spec)
 	return {
 		generate = function(rng, sz)
@@ -309,7 +325,7 @@ function M.record(spec)
 					if not kiter then
 						kiter = spec[k].shrink(vals[k], ctxs and ctxs[k])
 					end
-					local sv, sc = kiter()
+					local sv, sc = (kiter --[[:! ShrinkIter]])()
 					if sv ~= nil then
 						local c = {}; for f, v in pairs(vals) do c[f] = v end; c[k] = sv
 						local nc
@@ -332,6 +348,7 @@ end
 
 -- map: ctx = {pre_val, pre_ctx}.  Shrink delegates to inner arb, re-applies fn.
 -- Allocates one {pre_val, pre_ctx} table per generated value (unavoidable).
+--: (a: Arb, fn: (any) -> any) -> Arb
 function M.map(a, fn)
 	return {
 		generate = function(rng, sz)
@@ -352,8 +369,9 @@ function M.map(a, fn)
 end
 
 -- filter: ctx passes through unchanged.  Shrink skips invalid candidates.
+--: (a: Arb, pred: (any) -> boolean, opts: { max_tries?: integer } | nil) -> Arb
 function M.filter(a, pred, opts)
-	local max_tries = opts and opts.max_tries or 100
+	local max_tries = ((opts and opts.max_tries) or 100) --[[:! integer]]
 	return {
 		generate = function(rng, sz)
 			for _ = 1, max_tries do
@@ -405,6 +423,7 @@ end
 
 -- tuple: ctx = ctxs table | nil (nil when all element ctxs are nil).
 -- vals table is required anyway; ctxs allocated only when needed.
+--: (arbs_list: Arb[]) -> Arb
 function M.tuple(arbs_list)
 	assert(#arbs_list > 0, "arb.tuple: empty list")
 	return {
@@ -430,7 +449,7 @@ function M.tuple(arbs_list)
 					if not eiter then
 						eiter = arbs_list[eidx].shrink(vals[eidx], ctxs and ctxs[eidx])
 					end
-					local sv, sc = eiter()
+					local sv, sc = (eiter --[[:! ShrinkIter]])()
 					if sv ~= nil then
 						local c = {}; for i = 1, n do c[i] = vals[i] end; c[eidx] = sv
 						local nc
@@ -538,17 +557,17 @@ end
 
 -- ── Runner ────────────────────────────────────────────────────────────────────
 
+	--: (v: unknown, depth: integer | nil) -> string
 local function display(v, depth)
 	depth = depth or 0
-	local t = type(v)
-	if t == "string"  then return string.format("%q", v) end
-	if t == "number"  then
+	if type(v) == "string"  then return string.format("%q", v) end
+	if type(v) == "number"  then
 		return v == math.floor(v) and math.abs(v) < 1e15
 			and string.format("%d", v) or tostring(v)
 	end
-	if t == "boolean" then return tostring(v) end
-	if t == "nil"     then return "nil" end
-	if t ~= "table"   then return tostring(v) end
+	if type(v) == "boolean" then return tostring(v) end
+	if type(v) == "nil"     then return "nil" end
+	if type(v) ~= "table"   then return tostring(v) end
 	if depth > 2      then return "{...}" end
 	local parts, is_arr = {}, #v > 0
 	if is_arr then
@@ -564,10 +583,12 @@ local function display(v, depth)
 	return "{" .. table.concat(parts, ", ") .. "}"
 end
 
+	--: (v: unknown, is_tuple: boolean) -> string
 local function display_arg(v, is_tuple)
 	if is_tuple then
 		local parts = {}
-		for i = 1, #v do parts[i] = display(v[i]) end
+		local arr = v --[[:! any[] ]]
+		for i = 1, #arr do parts[i] = display(arr[i]) end
 		return "(" .. table.concat(parts, ", ") .. ")"
 	end
 	return display(v)
@@ -664,6 +685,7 @@ function M.it(desc, arb_arg, fn, opts)
 	local T = require("lib.test.assert")
 	T.it(desc, function()
 		local ok, info = M.check(desc, arb_arg, fn, opts)
+		info = info --[[:! CheckInfo]]
 		if not ok then
 			local lines = {
 				"property falsified after " .. info.trial
@@ -684,6 +706,7 @@ end
 -- arb.assert: inline property assertion (for use inside existing it() blocks).
 function M.assert(desc, arb_arg, fn, opts)
 	local ok, info = M.check(desc, arb_arg, fn, opts)
+	info = info --[[:! CheckInfo]]
 	if not ok then
 		error(
 			"property falsified after " .. info.trial .. " test(s)"

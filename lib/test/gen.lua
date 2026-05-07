@@ -109,14 +109,16 @@ function G.string(opts)
 	local min_len = o.min or 0
 	local max_fn  = o.max  -- nil → use size
 	return {
+		--: (rng: Rng, sz: integer) -> string
 		generate = function(rng, sz)
+			local cs   = charset --[[:! string]]
 			local top  = max_fn or math.min(sz, 20)
 			local len  = rng:int(min_len, math.max(min_len, top))
 			local buf  = {}
-			local nc   = #charset
+			local nc   = #cs
 			for i = 1, len do
-				local ci = 1 + (rng:next() % nc)
-				buf[i] = charset:sub(ci, ci)
+				local ci = (1 + (rng:next() % nc)) --[[:! integer]]
+				buf[i] = cs:sub(ci, ci)
 			end
 			return table.concat(buf)
 		end,
@@ -194,11 +196,12 @@ function G.table(k_gen, v_gen, opts)
 			end
 			return out
 		end,
-		shrink = function(v)
+		shrink = function(v_)
+			local v = v_ --[[:! { [any]: any }]]
 			local keys = {}
 			for k in pairs(v) do keys[#keys+1] = k end
-			if #keys == 0 then return {} end
-			local candidates = {}
+			if #keys == 0 then return {} --[[:! any[] ]] end
+			local candidates = {} --[[: any[] ]]
 			for _, k in ipairs(keys) do
 				local s = {}
 				for ek, ev in pairs(v) do if ek ~= k then s[ek] = ev end end
@@ -276,6 +279,7 @@ function G.map(g, fn)
 end
 
 -- Filter generated values to satisfy a predicate.
+--: (g: { generate: (Rng, integer) -> any, shrink: (any) -> any[] }, pred: (any) -> boolean) -> { generate: (Rng, integer) -> any, shrink: (any) -> any[] }
 function G.filter(g, pred)
 	return {
 		generate = function(rng, sz)

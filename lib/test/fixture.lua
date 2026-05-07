@@ -33,17 +33,20 @@ local M = {}
 
 -- ── File I/O ──────────────────────────────────────────────────────────────────
 
+--: (path: string) -> string | nil
 local function read_file(path)
 	local f = io.open(path, "rb")
 	if not f then return nil end
 	local content = f:read("*all")
 	f:close()
-	return content
+	return content --[[:! string | nil]]
 end
 
+--: (path: string, content: string) -> nil
 local function write_file(path, content)
-	local f, err = io.open(path, "wb")
-	if not f then error("fixture: cannot write " .. path .. ": " .. tostring(err)) end
+	local f_, err = io.open(path, "wb")
+	if not f_ then error("fixture: cannot write " .. path .. ": " .. tostring(err)) end
+	local f = f_ --[[:! { write: (any, string) -> any, close: (any) -> any }]]
 	f:write(content)
 	f:close()
 end
@@ -51,9 +54,10 @@ end
 -- ── Binary detection ──────────────────────────────────────────────────────────
 
 -- Returns true if the string looks like binary (has non-printable, non-whitespace bytes).
+--: (s: string) -> boolean
 local function is_binary(s)
 	for i = 1, math.min(#s, 8192) do
-		local b = s:byte(i)
+		local b = s:byte(i) or 0
 		if b < 9 or (b >= 14 and b <= 31) or b == 127 then
 			return true
 		end
@@ -63,13 +67,14 @@ end
 
 -- ── Hex dump ──────────────────────────────────────────────────────────────────
 
+--: (s: string, max_bytes: integer | nil) -> string
 local function hex_dump(s, max_bytes)
 	max_bytes = max_bytes or 256
 	local out = {}
 	for i = 1, math.min(#s, max_bytes), 16 do
 		local hex, asc = {}, {}
 		for j = i, math.min(i + 15, #s) do
-			local b = s:byte(j)
+			local b = s:byte(j) or 0
 			hex[#hex + 1] = string.format("%02x", b)
 			asc[#asc + 1] = (b >= 32 and b < 127) and string.char(b) or "."
 		end
@@ -84,6 +89,7 @@ end
 
 -- ── Line splitting ────────────────────────────────────────────────────────────
 
+--: (s: string) -> string[]
 local function split_lines(s)
 	local lines = {}
 	local i = 1
@@ -107,6 +113,7 @@ local MAX_DIFF_LINES = 600
 local CONTEXT = 3
 
 -- Returns a list of display lines representing a unified-style diff.
+--: (expected: string, actual: string) -> string[]
 function M.diff(expected, actual)
 	local exp_lines = split_lines(expected)
 	local act_lines = split_lines(actual)
@@ -119,7 +126,7 @@ function M.diff(expected, actual)
 	end
 
 	-- Build LCS table.
-	local lcs = {}
+	local lcs = {} --[[: { [integer]: { [integer]: integer } }]]
 	for i = 0, ne do
 		lcs[i] = {}
 		for j = 0, na do lcs[i][j] = 0 end
@@ -135,7 +142,7 @@ function M.diff(expected, actual)
 	end
 
 	-- Backtrack to build edit list.
-	local edits = {}
+	local edits = {} --[[: { op: string, line: string }[] ]]
 	local i, j = ne, na
 	while i > 0 or j > 0 do
 		if i > 0 and j > 0 and exp_lines[i] == act_lines[j] then
@@ -162,7 +169,7 @@ function M.diff(expected, actual)
 	end
 
 	-- Render with "..." separators between hunks.
-	local out = {}
+	local out = {} --[[: string[] ]]
 	local prev_shown = false
 	for k = 1, n do
 		if show[k] then
@@ -199,8 +206,9 @@ M.normalize.crlf = function(s)
 end
 
 -- Sort lines alphabetically.
+--: (s: string) -> string
 M.normalize.sort_lines = function(s)
-	local lines = split_lines(s)
+	local lines = split_lines(s) --[[:! Arr<string>]]
 	table.sort(lines)
 	return table.concat(lines, "\n")
 end
@@ -219,6 +227,7 @@ end
 -- Returns: ok (bool), status ("pass"|"updated"|"created"|"fail"), message
 --
 -- Public so callers can test or drive individual fixtures without it() integration.
+--: (input_path: string, expected_path: string, runner: (string) -> string, opts: { update?: boolean, normalize?: (string) -> string }) -> (boolean, string, string | nil)
 function M.check(input_path, expected_path, runner, opts)
 	local update = opts.update or (os.getenv("UPDATE_SNAPSHOTS") == "1")
 	local normalize = opts.normalize
@@ -232,19 +241,20 @@ function M.check(input_path, expected_path, runner, opts)
 	if not ok then
 		return false, "fail", "runner raised error:\n  " .. tostring(actual)
 	end
+	local actual_s = actual --[[:! string]]
 
-	if type(actual) ~= "string" then
-		return false, "fail", "runner must return a string, got " .. type(actual)
+	if type(actual_s) ~= "string" then
+		return false, "fail", "runner must return a string, got " .. type(actual_s)
 	end
 
 	if normalize then
-		actual = normalize(actual)
+		actual_s = (normalize --[[:! (string) -> string]])(actual_s)
 	end
 
 	local expected = read_file(expected_path)
 
 	if update then
-		write_file(expected_path, actual)
+		write_file(expected_path, actual_s)
 		local status = (expected == nil) and "created" or "updated"
 		return true, status, nil
 	end
@@ -254,25 +264,26 @@ function M.check(input_path, expected_path, runner, opts)
 			"no expected file: " .. expected_path
 				.. "\n  run with UPDATE_SNAPSHOTS=1 to create it"
 	end
+	local expected_s = expected --[[:! string]]
 
 	if normalize then
-		expected = normalize(expected)
+		expected_s = (normalize --[[:! (string) -> string]])(expected_s)
 	end
 
-	if actual == expected then
+	if actual_s == expected_s then
 		return true, "pass", nil
 	end
 
 	-- Build failure message with diff.
 	local lines = { "snapshot mismatch: " .. input_path }
 
-	if is_binary(actual) or is_binary(expected) then
-		lines[#lines + 1] = "expected (" .. #expected .. " bytes):"
-		lines[#lines + 1] = hex_dump(expected, 128)
-		lines[#lines + 1] = "actual (" .. #actual .. " bytes):"
-		lines[#lines + 1] = hex_dump(actual, 128)
+	if is_binary(actual_s) or is_binary(expected_s) then
+		lines[#lines + 1] = "expected (" .. #expected_s .. " bytes):"
+		lines[#lines + 1] = hex_dump(expected_s, 128)
+		lines[#lines + 1] = "actual (" .. #actual_s .. " bytes):"
+		lines[#lines + 1] = hex_dump(actual_s, 128)
 	else
-		local diff = M.diff(expected, actual)
+		local diff = M.diff(expected_s, actual_s)
 		if #diff > 0 then
 			for _, dl in ipairs(diff) do lines[#lines + 1] = dl end
 		else
@@ -312,8 +323,10 @@ function M.run_dir(dir, runner, opts)
 		return
 	end
 
-	local inputs = {}
-	for line in h:lines() do inputs[#inputs + 1] = line end
+	local inputs = {} --[[: string[] ]]
+	for line in h:lines() do
+		inputs[#inputs + 1] = (line --[[: any]]) --[[:! string]]
+	end
 	h:close()
 
 	if #inputs == 0 then

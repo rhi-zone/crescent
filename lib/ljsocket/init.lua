@@ -298,7 +298,8 @@ do
 		end
 
 		do
-			ffi.cdef [[int GetLastError();]]
+			ffi.cdef [[int GetLastError();
+			int FormatMessageA(uint32_t dwFlags, void *lpSource, uint32_t dwMessageId, uint32_t dwLanguageId, char *lpBuffer, uint32_t nSize, void *Arguments);]]
 
 			local cache = {}
 
@@ -321,7 +322,7 @@ do
 			--[[@class ljsocket_ffi]]
 			--[[@field WSAStartup fun(version: integer, wsa_data: ffi.cdata*): integer]]
 
-			local wsa_data
+			local wsa_data --: any
 
 			if jit.arch == "x64" then
 				wsa_data = ffi.typeof([[struct {
@@ -399,10 +400,8 @@ do
 				return bit.bor(IOC_IN, bit.lshift(bit.band(ffi.sizeof(t), IOCPARM_MASK), 16), bit.lshift(x, 8), y)
 			end
 
-			local b_byte = string.byte("f")
-			--: integer
-			local b_byte_ = b_byte --[[:! integer]]
-			local FIONBIO = _IOW(b_byte_, 126, "uint32_t") --[[-2147195266 -- 2147772030ULL]]
+			local b_byte = string.byte("f") or 0
+			local FIONBIO = _IOW(b_byte, 126, "uint32_t") --[[-2147195266 -- 2147772030ULL]]
 
 			socket.blocking = socket.blocking or function(fd, b)
 				local ret = ljsocket_ffi.ioctlsocket(fd, FIONBIO, ffi.new("int[1]", b and 0 or 1))
@@ -495,15 +494,15 @@ do
 	socket.getaddrinfo = function(node_name, service_name, hints, result)
 		local ret = ljsocket_ffi.getaddrinfo(node_name, service_name, hints, result)
 		if ret == 0 then return true end
-		local err = ljsocket_ffi.gai_strerror(ret)
+		local err = ljsocket_ffi.gai_strerror(ret) --[[: any]]
 		return nil, ffi.string(err)
 	end
 
 	socket.getnameinfo = function(address, length, host, hostlen, serv, servlen, flags)
 		local ret = ljsocket_ffi.getnameinfo(address, length, host, hostlen, serv, servlen, flags)
 		if ret == 0 then return true end
-		local err = socket.lasterror(ret)
-		return nil, ffi.string(err, #err)
+		local err = socket.lasterror(ret) --[[: any]]
+		return nil, ffi.string(err)
 	end
 
 	do
@@ -873,7 +872,7 @@ local table_to_flags = function(flags, valid_flags, operation)
 			error("invalid flag " .. tostring(v), 2)
 		end
 
-		out = operation(out, tonumber(flag))
+		out = (operation(out, tonumber(flag)) --[[: any]]) --[[:! integer]]
 	end
 
 	return out

@@ -10,7 +10,8 @@ local M = {}
 -- ── FFI for fork/pipe/waitpid ─────────────────────────────────────────────────
 
 local fork_available = false
-local ffi_ok, ffi = pcall(require, "ffi")
+local ffi_ok, ffi_raw = pcall(require, "ffi")
+local ffi = (ffi_raw --[[: any]]) --[[:! { cdef: (string) -> any, C: { sysconf: (integer) -> integer, fork: () -> integer, waitpid: (integer, any, integer) -> integer, pipe: (any) -> integer, read: (integer, any, integer) -> integer, write: (integer, any, integer) -> integer, close: (integer) -> integer }, new: (string, ...any) -> any, cast: (string, any) -> any, string: (any, integer) -> string, errno: () -> integer }]]
 if ffi_ok then
 	local cdef_ok = pcall(function()
 		ffi.cdef[[
@@ -24,31 +25,33 @@ if ffi_ok then
 		]]
 	end)
 	local sym_ok = pcall(function() return ffi.C.fork ~= nil end)
-	fork_available = ffi_ok and sym_ok
+	fork_available = (ffi_ok and sym_ok) == true
 end
 
+--: () -> integer
 local function get_cpu_count()
 	if not fork_available then return 1 end
 	local n = ffi.C.sysconf(84)  -- _SC_NPROCESSORS_ONLN = 84 on Linux
 	if n <= 0 then return 1 end
-	return tonumber(n)
+	return tonumber(n) --[[:! integer]]
 end
 
 -- ── argument parsing ──────────────────────────────────────────────────────────
 
 --- Parse args table into { coverage, jobs }.
 -- Accepts either the global arg table or a 1-indexed list passed from M.main.
+--: (argv: string[]) -> (boolean, integer | nil, string[])
 local function parse_args(argv)
 	local coverage = false
-	local jobs_arg = nil  -- nil = auto-detect
-	local files = {}
+	local jobs_arg = nil --: integer | nil
+	local files = {} --[[: string[] ]]
 
 	for i = 1, #argv do
 		local v = argv[i]
 		if v == "--coverage" or v == "-c" then
 			coverage = true
 		elseif v:match("^%-%-jobs=(%d+)$") then
-			jobs_arg = tonumber(v:match("^%-%-jobs=(%d+)$"))
+			jobs_arg = tonumber(v:match("^%-%-jobs=(%d+)$")) --[[:! integer | nil]]
 		elseif not v:match("^%-") then
 			files[#files + 1] = v
 		end
@@ -121,10 +124,11 @@ end
 
 -- ── sequential runner (used for coverage and --jobs=1) ───────────────────────
 
+--:: Coverage = { start: () -> any, stop: () -> any, report: (any) -> any }
 local function run_sequential(file_list, coverage)
-	local cov
+	local cov --: Coverage | nil
 	if coverage then
-		cov = require("lib.test.coverage")
+		cov = require("lib.test.coverage") --[[:! Coverage]]
 		cov.start()
 	end
 
@@ -147,19 +151,19 @@ local function run_sequential(file_list, coverage)
 		if ok and summary.fail == 0 then
 			total_pass_files = total_pass_files + 1
 			io.write("  pass  " .. file)
-			if counts then io.write("  (" .. counts .. ")") end
+			if counts ~= nil then io.write("  (" .. tostring(counts) .. ")") end
 			io.write("\n")
 		else
 			total_fail_files = total_fail_files + 1
 			io.write("  FAIL  " .. file)
-			if counts then io.write("  (" .. counts .. ")") end
+			if counts ~= nil then io.write("  (" .. tostring(counts) .. ")") end
 			io.write("\n")
 
 			-- Show named test failures first.
 			if #summary.tests > 0 then
 				for _, t in ipairs(summary.tests) do
 					if not t.ok then
-						local detail = t.err and (": " .. t.err) or ""
+						local detail = (t.err and (": " .. tostring(t.err))) or ""
 						print("        \xE2\x9C\x97 " .. t.name .. detail)
 					end
 				end
@@ -170,7 +174,7 @@ local function run_sequential(file_list, coverage)
 		end
 	end
 
-	if cov then cov.stop() end
+	if cov then (cov --[[:! Coverage]]).stop() end
 
 	print("")
 	local total_assertions = grand_pass + grand_fail
@@ -178,7 +182,7 @@ local function run_sequential(file_list, coverage)
 	io.write("\n")
 
 	if cov then
-		cov.report({ uncovered = true })
+		(cov --[[:! Coverage]]).report({ uncovered = true })
 	end
 
 	if total_fail_files > 0 then os.exit(1) end
@@ -191,10 +195,12 @@ end
 --
 -- URL-encoding: only encodes chars that break line parsing (space, newline, %).
 
+--: (s: string) -> string
 local function urlencode(s)
-	return (s:gsub("([%c%s%%])", function(c)
-		return ("%%%02X"):format(c:byte())
-	end))
+	local result = s:gsub("([%c%s%%])", function(c)
+		return ("%%%02X"):format(string.byte(c --[[:! string]]) or 0)
+	end)
+	return result
 end
 
 local function urldecode(s)
@@ -400,18 +406,19 @@ local function run_parallel(file_list, n)
 			if r.status == "PASS" then
 				total_pass_files = total_pass_files + 1
 				io.write("  pass  " .. file)
-				if counts then io.write("  (" .. counts .. ")") end
+				if counts ~= nil then io.write("  (" .. tostring(counts) .. ")") end
 				io.write("\n")
 			else
 				total_fail_files = total_fail_files + 1
 				io.write("  FAIL  " .. file)
-				if counts then io.write("  (" .. counts .. ")") end
+				if counts ~= nil then io.write("  (" .. tostring(counts) .. ")") end
 				io.write("\n")
 
 				if #r.tests > 0 then
-					for _, t in ipairs(r.tests) do
+					for _, t_ in ipairs(r.tests --[[:! any[] ]]) do
+						local t = t_ --[[:! { ok: boolean, name: string, err: string | nil }]]
 						if not t.ok then
-							local detail = t.err and (": " .. t.err) or ""
+							local detail = (t.err and (": " .. tostring(t.err))) or ""
 							print("        \xE2\x9C\x97 " .. t.name .. detail)
 						end
 					end

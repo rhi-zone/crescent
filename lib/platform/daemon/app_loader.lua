@@ -59,7 +59,7 @@ end
 
 -- Extract the cap declarations for a specific entry from a manifest.
 -- Merges top-level manifest.caps with per-entry entry.caps (entry wins).
---: (unknown, string) -> { [string]: unknown }
+--: (any, string) -> { [string]: unknown }
 local function collect_entry_caps(manifest, entry_key)
 	local caps = {}
 	if type(manifest.caps) == "table" then
@@ -97,7 +97,7 @@ end
 -- decision (undecided) — the daemon dispatch gate must block undecided
 -- required caps before app_loader is called. Falls back to auto_grants only
 -- when index_db lacks get_grants (test stubs with a raw db handle).
---: (unknown, string, { [string]: unknown }) -> { [string]: boolean | nil }
+--: (any, string, { [string]: unknown }) -> { [string]: boolean | nil }
 local function resolve_grants(index_db, app_id, cap_decls)
 	if not index_db or not index_db.get_grants then
 		-- Raw db handle (no grant API) — auto-grant for test-stub compat.

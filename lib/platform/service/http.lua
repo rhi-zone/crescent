@@ -87,7 +87,7 @@ end
 -- Returns an empty table when not available (non-LuaJIT / no debug info).
 -- NOTE: this only works when the function was compiled with debug info.
 -- The first parameter is always "caps" by convention and is skipped.
---: (unknown) -> { [integer]: string }
+--: (any) -> { [integer]: string }
 local function param_names_of(fn)
 	local info = debug.getinfo(fn, "u")
 	if not info then return {} end

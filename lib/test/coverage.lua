@@ -21,12 +21,15 @@ local exclude_patterns = {
 }
 
 --[[normalize source path: strip @ prefix and leading ./]]
-local function normalize(source)
-	if source:sub(1, 1) == "@" then source = source:sub(2) end
-	if source:sub(1, 2) == "./" then source = source:sub(3) end
+--: (source0: string) -> string
+local function normalize(source0)
+	local source = source0
+	if source:sub(1, 1) == "@" then source = source:sub(2) --[[:! string]] end
+	if source:sub(1, 2) == "./" then source = source:sub(3) --[[:! string]] end
 	return source
 end
 
+--: (source: string) -> boolean
 local function should_track(source)
 	if source:sub(1, #include_prefix) ~= include_prefix then return false end
 	for _, pat in ipairs(exclude_patterns) do
@@ -38,16 +41,18 @@ end
 --[[cache of source path -> normalized path or false]]
 local path_cache = {}
 
+--: (event: string, line: integer | nil) -> nil
 local function hook(_, line)
-	local info = debug.getinfo(2, "S")
+	local info = debug.getinfo(2, "S") --[[:! { source: string, [string]: any }]]
 	local raw = info.source
-	local source = path_cache[raw]
+	local source = path_cache[raw] --[[:! string | false | nil]]
 	if source == nil then
-		source = normalize(raw)
-		source = should_track(source) and source or false
+		local norm = normalize(raw)
+		source = (should_track(norm) and norm) or false
 		path_cache[raw] = source
 	end
 	if not source then return end
+	source = source --[[:! string]]
 	local file_hits = hits[source]
 	if not file_hits then file_hits = {}; hits[source] = file_hits end
 	file_hits[line] = (file_hits[line] or 0) + 1
@@ -59,10 +64,11 @@ mod.start = function ()
 end
 
 mod.stop = function ()
-	debug.sethook()
+	(debug.sethook --[[: any]])()
 end
 
 --[[read a file and return its lines]]
+--: (path: string) -> Arr<string> | nil
 local function read_lines(path)
 	local f = io.open(path, "r")
 	if not f then return nil end
@@ -73,6 +79,7 @@ local function read_lines(path)
 end
 
 --[[check if a line is executable (not blank, not comment-only, not block-comment-only)]]
+--: (line: string) -> boolean
 local function is_executable(line)
 	local trimmed = line:match("^%s*(.-)%s*$")
 	if trimmed == "" then return false end
@@ -82,6 +89,7 @@ local function is_executable(line)
 end
 
 --[[get sorted list of tracked files]]
+--: () -> Arr<string>
 mod.files = function ()
 	local out = {}
 	for source in pairs(hits) do out[#out + 1] = source end
@@ -90,6 +98,7 @@ mod.files = function ()
 end
 
 --[[get per-file stats: {hit, executable, pct}]]
+--: (source: string) -> { hit: integer, executable: integer, pct: number } | nil
 mod.stats = function (source)
 	local lines = read_lines(source)
 	if not lines then return nil end
@@ -107,6 +116,7 @@ mod.stats = function (source)
 end
 
 --[[print coverage report to stdout]]
+--: (opts: { uncovered?: boolean } | nil) -> nil
 mod.report = function (opts)
 	opts = opts or {}
 	local sources = mod.files()
@@ -115,7 +125,7 @@ mod.report = function (opts)
 		return
 	end
 	local total_hit, total_exec = 0, 0
-	local file_stats = {}
+	local file_stats = {} --[[: Arr<{ source: string, stats: { hit: integer, executable: integer, pct: number } }>]]
 	for _, source in ipairs(sources) do
 		local s = mod.stats(source)
 		if s and s.executable > 0 then
@@ -150,8 +160,8 @@ mod.report = function (opts)
 			if fs.stats.pct < 100 then
 				local lines = read_lines(fs.source)
 				local file_hits = hits[fs.source] or {}
-				local uncovered = {}
-				for i, line in ipairs(lines) do
+				local uncovered = {} --[[: Arr<integer>]]
+				for i, line in ipairs(lines --[[:! Arr<string>]]) do
 					if is_executable(line) and not file_hits[i] then
 						uncovered[#uncovered + 1] = i
 					end

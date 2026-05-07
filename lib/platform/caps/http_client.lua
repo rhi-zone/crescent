@@ -29,7 +29,7 @@ local M = {}
 
 -- ── TLS support via libtls (LibreSSL / OpenBSD) ──────────────────────────────
 
-local tls_lib
+local tls_lib --: any
 do
 	-- Try to load libtls: short name first (works when on LD_LIBRARY_PATH),
 	-- then fall back to searching known Nix store paths for LibreSSL.

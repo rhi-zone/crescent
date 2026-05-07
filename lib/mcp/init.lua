@@ -41,7 +41,7 @@ function Server:tool(name, opts)
 end
 
 -- Register a static resource (exact URI match).
---: (any, string, { description: string, handler: (string, unknown) -> unknown }) -> nil
+--: (any, string, { name?: string, description: string, handler: (string, unknown) -> unknown }) -> nil
 function Server:resource(uri, opts)
     self._resources[uri] = {
         uri = uri,
@@ -52,7 +52,7 @@ function Server:resource(uri, opts)
 end
 
 -- Register a resource template (URI template pattern).
---: (any, string, { description: string, handler: (string, unknown) -> unknown }) -> nil
+--: (any, string, { name?: string, description: string, handler: (string, unknown) -> unknown }) -> nil
 function Server:resource_template(uri_template, opts)
     self._resource_templates[uri_template] = {
         uriTemplate = uri_template,
@@ -87,7 +87,7 @@ function Server:log(level, message, data)
     local min_n = LOG_LEVELS[self._log_level] or 7
     if level_n > min_n then return end
     local params = { level = level, logger = self._name, data = message }
-    if data ~= nil then params.data = data end
+    if data ~= nil then params.data = data --[[:! string ]] end
     self._dispatcher:send_notify("notifications/message", params)
 end
 
@@ -134,7 +134,7 @@ local M = {}
 --: ({ name: string, version: string, transport: unknown }) -> any
 function M.server(opts)
     local transport = opts.transport or jsonrpc.stdio_transport()
-    local d = jsonrpc.new(transport)
+    local d = jsonrpc.new(transport) --[[:! { method: (any, string, (unknown) -> unknown) -> nil, notify: (any, string, (unknown) -> nil) -> nil, send_notify: (any, string, unknown) -> nil, loop: (any) -> nil } ]]
 
     local s = setmetatable({}, Server)
     s._dispatcher = d
@@ -174,13 +174,14 @@ function M.server(opts)
         return { tools = #list > 0 and list or {} }
     end)
 
-    d:method("tools/call", function(params)
+    d:method("tools/call", (function(params)
+        local params = params --[[:! { name: string, arguments: unknown } ]]
         local tool = s._tools[params.name]
         if not tool then
             return nil, { code = -32602, message = "Tool not found: " .. tostring(params.name) }
         end
         return tool.handler(params.arguments)
-    end)
+    end) --[[:! (unknown) -> unknown]])
 
     -- ── resources ───────────────────────────────────────────────────────
     d:method("resources/list", function(_params)
@@ -191,18 +192,20 @@ function M.server(opts)
         return { resources = #list > 0 and list or {} }
     end)
 
-    d:method("resources/read", function(params)
+    d:method("resources/read", (function(params)
+        local params = params --[[:! { uri: string } ]]
         local uri = params.uri
         -- Try exact match first.
         local res = s._resources[uri]
         if res then return res.handler(uri, params) end
         -- Try templates (simple prefix/pattern matching left to handler).
         for _, tmpl in pairs(s._resource_templates) do
-            local result = tmpl.handler(uri, params)
+            local handler = (tmpl --[[:! { handler: (string, unknown) -> unknown } ]]).handler
+            local result = handler(uri, params)
             if result then return result end
         end
         return nil, { code = -32602, message = "Resource not found: " .. tostring(uri) }
-    end)
+    end) --[[:! (unknown) -> unknown]])
 
     d:method("resources/templates/list", function(_params)
         local list = {}
@@ -221,30 +224,33 @@ function M.server(opts)
         return { prompts = #list > 0 and list or {} }
     end)
 
-    d:method("prompts/get", function(params)
+    d:method("prompts/get", (function(params)
+        local params = params --[[:! { name: string, arguments: unknown } ]]
         local p = s._prompts[params.name]
         if not p then
             return nil, { code = -32602, message = "Prompt not found: " .. tostring(params.name) }
         end
         return p.handler(params.arguments or {})
-    end)
+    end) --[[:! (unknown) -> unknown]])
 
     -- ── logging ─────────────────────────────────────────────────────────
-    d:notify("logging/setLevel", function(params)
+    d:notify("logging/setLevel", (function(params)
+        local params = params --[[:! { level: string } | nil ]]
         if params and params.level then
             s._log_level = params.level
         end
-    end)
+    end) --[[:! (unknown) -> nil]])
 
     -- ── completions ─────────────────────────────────────────────────────
-    d:method("completion/complete", function(params)
+    d:method("completion/complete", (function(params)
+        local params = params --[[:! { argument: { name: string, value: string }, ref: unknown } | nil ]]
         local arg_name = params and params.argument and params.argument.name
         local handler = s._completions[arg_name]
         if not handler then
             return { completion = { values = {} } }
         end
         return handler(params)
-    end)
+    end) --[[:! (unknown) -> unknown]])
 
     return s
 end

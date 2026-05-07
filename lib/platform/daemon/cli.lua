@@ -31,11 +31,11 @@ local function parse_args(args)
 	local opts = {
 		host = "127.0.0.1",
 		port = 7777,
-		apps_dir = nil, --: string | nil
-		daemon_host = nil, --: string | nil
-		runtime_dir = nil, --: string | nil
-		tls_cert = nil, --: string | nil
-		tls_key = nil, --: string | nil
+		apps_dir = nil --[[: string | nil]],
+		daemon_host = nil --[[: string | nil]],
+		runtime_dir = nil --[[: string | nil]],
+		tls_cert = nil --[[: string | nil]],
+		tls_key = nil --[[: string | nil]],
 	}
 	for i = 1, #args do
 		local a = args[i]

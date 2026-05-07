@@ -59,9 +59,13 @@ end
 
 -- ── Byte I/O ──────────────────────────────────────────────────────────────────
 
+--: (s: string, i: integer) -> integer
 local function read_u32(s, i)
-	local a, b, c, d = string.byte(s, i, i + 3)
-	return a * 0x1000000 + b * 0x10000 + c * 0x100 + d
+	local a = string.byte(s, i) --[[:! integer]]
+	local b = string.byte(s, i + 1) --[[:! integer]]
+	local c = string.byte(s, i + 2) --[[:! integer]]
+	local d = string.byte(s, i + 3) --[[:! integer]]
+	return (a * 0x1000000 + b * 0x10000 + c * 0x100 + d) --[[:! integer]]
 end
 
 local function write_u32(n)
@@ -78,6 +82,7 @@ end
 -- read(bytes) -> chunks | nil, err
 -- Returns an array of {type=string, data=string} in file order.
 -- Stops at IEND (inclusive). IDAT bytes are passed through untouched.
+--: (bytes: string) -> (unknown | nil, string | nil)
 function M.read(bytes)
 	if bytes:sub(1, 8) ~= PNG_SIG then
 		return nil, "not a PNG file"
@@ -125,6 +130,7 @@ end
 -- text:    latin-1, no NUL, any length.
 
 -- parse_text(data) -> {keyword, text} | nil, err
+--: (data: string) -> ({ keyword: string, text: string } | nil, string | nil)
 function M.parse_text(data)
 	local sep = data:find("\0", 1, true)
 	if not sep then
@@ -208,6 +214,7 @@ end
 -- Only uncompressed (flag=0, method=0) is supported for build.
 
 -- parse_itxt(data) -> {keyword, text, language_tag, translated_keyword, compressed} | nil, err
+--: (data: string) -> (unknown | nil, string | nil)
 function M.parse_itxt(data)
 	local sep = data:find("\0", 1, true)
 	if not sep then
@@ -216,8 +223,9 @@ function M.parse_itxt(data)
 	if sep + 2 > #data then
 		return nil, "malformed iTXt: truncated after keyword"
 	end
+	local sep = sep --[[:! integer]]
 	local keyword = data:sub(1, sep - 1)
-	local compression_flag = data:byte(sep + 1)
+	local compression_flag = data:byte((sep + 1) --[[:! integer]])
 	-- sep+2 is compression_method, sep+3 is start of language_tag
 	local lang_start = sep + 3
 	local lang_end = data:find("\0", lang_start, true)
@@ -251,7 +259,8 @@ end
 function M.get_itxt(chunks, keyword)
 	for _, chunk in ipairs(chunks) do
 		if chunk.type == "iTXt" then
-			local entry = M.parse_itxt(chunk.data)
+			local entry_raw = M.parse_itxt(chunk.data)
+			local entry = entry_raw --[[:! { keyword: string, text: string, compressed: boolean } | nil]]
 			if entry and entry.keyword == keyword and not entry.compressed then
 				return entry.text
 			end
@@ -270,7 +279,8 @@ function M.set_itxt(chunks, keyword, value, opts)
 
 	for _, chunk in ipairs(chunks) do
 		if chunk.type == "iTXt" then
-			local entry = M.parse_itxt(chunk.data)
+			local entry_raw = M.parse_itxt(chunk.data)
+			local entry = entry_raw --[[:! { keyword: string } | nil]]
 			if entry and entry.keyword == keyword and not done then
 				result[#result + 1] = new_chunk  -- replace
 				done = true
@@ -299,7 +309,8 @@ function M.remove_itxt(chunks, keyword)
 	local result = {}
 	for _, chunk in ipairs(chunks) do
 		if chunk.type == "iTXt" then
-			local entry = M.parse_itxt(chunk.data)
+			local entry_raw = M.parse_itxt(chunk.data)
+			local entry = entry_raw --[[:! { keyword: string } | nil]]
 			if not (entry and entry.keyword == keyword) then
 				result[#result + 1] = chunk
 			end

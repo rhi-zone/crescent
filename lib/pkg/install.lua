@@ -1017,16 +1017,17 @@ local function parallel_fetch(work, jobs, opts)
 		if pid <= 0 then return end
 
 		-- Find the pending entry for this pid.
-		local entry = nil
+		local entry_ = nil
 		local entry_idx = nil
 		for i, p in ipairs(pending) do
 			if p.pid == pid then
-				entry = p
+				entry_ = p
 				entry_idx = i
 				break
 			end
 		end
-		if not entry then return end
+		if not entry_ then return end
+		local entry = entry_ --[[:! { name: string, read_fd: integer, pid: integer }]]
 
 		-- Remove from pending list.
 		table.remove(pending, entry_idx)
@@ -1041,11 +1042,12 @@ local function parallel_fetch(work, jobs, opts)
 			return
 		end
 
-		local line = ffi.string(buf, n):match("^([^\n]*)")
-		if line == nil then
+		local line_ = ffi.string(buf, n):match("^([^\n]*)")
+		if line_ == nil then
 			results[entry.name] = { err = "child produced empty line" }
 			return
 		end
+		local line = line_ --[[:! string]]
 
 		if line:sub(1, 3) == "ok " then
 			-- "ok <name> <version> <url> <tarball_hash>"
@@ -1162,8 +1164,8 @@ end
 function M.run(project_dir, opts)
 	opts = opts or {}
 	-- Resolve jobs=0 (auto) to cpu_count() here so all downstream code sees a real number.
-	local jobs = opts.jobs or 1
-	if jobs == 0 then jobs = cpu_count() end
+	local jobs = ((opts.jobs or 1) --[[:! integer]]) --: integer
+	if jobs == 0 then jobs = cpu_count() --[[:! integer]] end
 
 	local result = { ok = true, errors = {}, installed = {}, skipped = {} }
 
@@ -1221,7 +1223,7 @@ function M.run(project_dir, opts)
 			fail("failed to parse crescent.lock: " .. tostring(l_err))
 			return result
 		end
-		locked = l
+		locked = l --[[:! { [string]: any }]]
 	end
 
 	-- 3. Two-pass MVS resolution.
@@ -1254,8 +1256,9 @@ function M.run(project_dir, opts)
 				needs_registry = true
 				break
 			end
+			local ver_ = ver --[[:! { major: integer, minor: integer, patch: integer, pre: { [number]: integer | string } | nil }]]
 			for _, c in ipairs(constraints) do
-				if not semver.satisfies(ver, c.constraint) then
+				if not semver.satisfies(ver_, c.constraint) then
 					needs_registry = true
 					break
 				end
@@ -1275,7 +1278,7 @@ function M.run(project_dir, opts)
 				fail("failed to fetch registry index from " .. reg_url .. ": " .. tostring(idx_err))
 				return result
 			end
-			local idx, parse_err = parse_index(idx_str)
+			local idx, parse_err = parse_index((idx_str --[[: any]]) --[[:! string]])
 			if not idx then
 				fail("failed to parse registry index from " .. reg_url .. ": " .. tostring(parse_err))
 				return result
@@ -1300,7 +1303,7 @@ function M.run(project_dir, opts)
 	-- Seeded from direct deps; extended during BFS as transitive deps declare their own requests.
 	local glob_requests = {}
 	for name, dep_value in pairs(deps) do
-		local inc = manifest.dep_include(dep_value)
+		local inc = manifest.dep_include(dep_value --[[:! string | { constraint: string, include?: string }]])
 		glob_requests[name] = inc
 	end
 
@@ -1364,7 +1367,7 @@ function M.run(project_dir, opts)
 
 	local qi = 1  -- queue read index (breadth-first)
 	while qi <= #queue do
-		local item = queue[qi]
+		local item = queue[qi] --[[:! { name: string, info: { version: string, url?: string, tarball_hash?: string, _needs_fetch?: boolean, [string]: any } }]]
 		qi = qi + 1
 		local name = item.name
 		local info = item.info
@@ -1383,7 +1386,7 @@ function M.run(project_dir, opts)
 		if M.dep_ok(project_dir, name, version) and not info._needs_fetch then
 			-- Check whether the include glob has widened since last install.
 			-- If so, re-link from cache with the wider glob (no re-download needed).
-			local locked_entry = new_lock[name]
+			local locked_entry = new_lock[name] --[[:! { include?: string, url?: string, tarball_hash?: string, tree_hash?: string, version?: string, [string]: any } | nil]]
 			local locked_include = (locked_entry and locked_entry.include) or "**"
 			local glob_widened = (effective_include ~= locked_include)
 
@@ -1496,7 +1499,7 @@ function M.run(project_dir, opts)
 			-- Accumulate include globs from transitive deps (union merge).
 			local trans_names = {}
 			for dep_name, dep_value in pairs(dep_m.deps) do
-				local dep_inc = manifest.dep_include(dep_value)
+				local dep_inc = manifest.dep_include(dep_value --[[:! string | { constraint: string, include?: string }]])
 				glob_requests[dep_name] = glob_union(glob_requests[dep_name] or "**", dep_inc)
 				if not visited[dep_name] then
 					trans_names[#trans_names + 1] = dep_name
@@ -1549,10 +1552,12 @@ end
 --- Enumerate files in a directory recursively.
 -- Returns a table { [rel_path] = true } with paths relative to dir.
 -- Returns nil, err on failure.
+--: (dir: string) -> ({ [string]: true } | nil, string | nil)
 local function enum_files(dir)
 	local out, err = popen_read(("find %q -type f | sort"):format(dir))
 	if not out then return nil, err end
-	local prefix = dir:gsub("/$", "") .. "/"
+	local cleaned = dir:gsub("/$", "")
+	local prefix = cleaned .. "/"
 	local files = {}
 	for abs_path in out:gmatch("[^\n]+") do
 		if abs_path ~= "" then
@@ -1581,13 +1586,14 @@ end
 --   - unchanged base→ours → take theirs (no conflict possible)
 --
 -- Returns { ok=bool, conflicts=N, files_merged=N } or nil, err.
+--: (project_dir: string, name: string, old_version: string, new_version: string, include_glob: string | nil, opts: any) -> ({ ok: boolean, conflicts: integer, files_merged: integer } | nil, string | nil)
 function M.merge_package(project_dir, name, old_version, new_version, include_glob, opts)
 	opts = opts or {}
 	include_glob = include_glob or "**"
 
-	local base_dir   = cache_dir(name, old_version)
+	local base_dir   = cache_dir(name, old_version) --[[:! string]]
 	local ours_dir   = project_dir .. "/lib/" .. name
-	local theirs_dir = cache_dir(name, new_version)
+	local theirs_dir = cache_dir(name, new_version) --[[:! string]]
 
 	-- Base cache must exist (needed for three-way merge base).
 	if not path_exists(base_dir) then
@@ -1608,7 +1614,7 @@ function M.merge_package(project_dir, name, old_version, new_version, include_gl
 	if not theirs_files then return nil, "merge_package: enum theirs: " .. tostring(t_err) end
 
 	-- Build the union of all file paths, filtered by the include glob.
-	local all_files = {}
+	local all_files = {} --[[: { [string]: true }]]
 	local function add_files(tbl)
 		for rel in pairs(tbl) do
 			if M.glob_match(include_glob, rel) then
@@ -1621,7 +1627,7 @@ function M.merge_package(project_dir, name, old_version, new_version, include_gl
 	add_files(theirs_files)
 
 	-- Collect sorted file list for determinism.
-	local sorted = {}
+	local sorted = {} --[[: Arr<string>]]
 	for rel in pairs(all_files) do sorted[#sorted + 1] = rel end
 	table.sort(sorted)
 
@@ -1687,7 +1693,10 @@ function M.merge_package(project_dir, name, old_version, new_version, include_gl
 							error(("merge_package: cannot read theirs %s"):format(rel))
 						end
 
-						local merged_content, file_conflicts = merge3.merge3(base_c, ours_c, theirs_c)
+						local bc = (base_c --[[: any]]) --[[:! string]]
+						local oc = (ours_c --[[: any]]) --[[:! string]]
+						local tc = (theirs_c --[[: any]]) --[[:! string]]
+						local merged_content, file_conflicts = merge3.merge3(bc, oc, tc)
 
 						-- Write merged result back.
 						local wf_ok, wf_err = write_file(ours_path, merged_content)
@@ -1695,7 +1704,7 @@ function M.merge_package(project_dir, name, old_version, new_version, include_gl
 							error(("merge_package: failed to write merged %s: %s"):format(rel, tostring(wf_err)))
 						end
 
-						conflicts = conflicts + file_conflicts
+						conflicts = conflicts + ((file_conflicts --[[: any]]) --[[:! integer]])
 						files_merged = files_merged + 1
 					end
 				end
@@ -1713,9 +1722,11 @@ function M.merge_package(project_dir, name, old_version, new_version, include_gl
 					local ours_c   = read_file(ours_path)
 					local theirs_c = read_file(theirs_path)
 					if ours_c and theirs_c then
-						local merged_content, file_conflicts = merge3.merge3("", ours_c, theirs_c)
+						local oc2 = (ours_c --[[: any]]) --[[:! string]]
+						local tc2 = (theirs_c --[[: any]]) --[[:! string]]
+						local merged_content, file_conflicts = merge3.merge3("", oc2, tc2)
 						write_file(ours_path, merged_content)
-						conflicts    = conflicts    + file_conflicts
+						conflicts    = conflicts    + ((file_conflicts --[[: any]]) --[[:! integer]])
 						files_merged = files_merged + 1
 					end
 				end
