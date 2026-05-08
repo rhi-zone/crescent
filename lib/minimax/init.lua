@@ -17,12 +17,20 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: minimax_game = { moves: (unknown) -> unknown[], apply: (unknown, unknown) -> unknown, terminal: (unknown) -> boolean, evaluate: (unknown) -> number, hash?: (unknown) -> unknown, ... }
+--:: minimax_ttable = { [unknown]: { depth: integer, move: unknown, score: number } } | nil
+--:: minimax_order_fn = (unknown, { [number]: unknown }) -> { [number]: unknown }
+--:: minimax_order = (minimax_order_fn) | nil
+--:: mcts_node = { state: unknown, parent: mcts_node | nil, move: unknown, visits: number, wins: number, children: { [number]: mcts_node }, expanded: boolean }
+--:: minimax_rng = { next: (minimax_rng) -> integer, float: (minimax_rng) -> number, int: (minimax_rng, integer) -> integer }
+
 local INF = math.huge
 
 -- ── Minimax with alpha-beta pruning ─────────────────────────────────────────
 
 -- Internal recursive alpha-beta search.
 -- Returns (best_move, best_score, nodes_visited).
+--: (minimax_game, unknown, integer, number, number, boolean, minimax_ttable, minimax_order) -> (unknown, number, integer)
 local function ab_search(game, state, depth, alpha, beta, maximize, ttable, order)
   -- Transposition table lookup
   local hash_key
@@ -44,7 +52,8 @@ local function ab_search(game, state, depth, alpha, beta, maximize, ttable, orde
   end
 
   if order then
-    moves = order(state, moves)
+    local order_fn = order --[[: minimax_order_fn]]
+    moves = order_fn(state, moves)
   end
 
   local best_move = moves[1]
@@ -84,6 +93,7 @@ end
 -- Minimax with alpha-beta pruning.
 -- opts: { depth, maximize, order, transposition_table }
 -- Returns best_move, score.
+--: (minimax_game, unknown, { depth?: integer, maximize?: boolean, order?: minimax_order_fn, transposition_table?: { [unknown]: { depth: integer, move: unknown, score: number } } } | nil) -> (unknown, number)
 function M.search(game, state, opts)
   opts = opts or {}
   local depth    = opts.depth or 4
@@ -102,6 +112,7 @@ end
 -- the current player (positive = good for current mover).
 -- The game's evaluate() must return from the perspective of the player to move.
 
+--: (minimax_game, unknown, integer, number, number, minimax_ttable, minimax_order) -> (unknown, number, integer)
 local function negamax_ab(game, state, depth, alpha, beta, ttable, order)
   local hash_key
   if ttable and game.hash then
@@ -122,7 +133,8 @@ local function negamax_ab(game, state, depth, alpha, beta, ttable, order)
   end
 
   if order then
-    moves = order(state, moves)
+    local order_fn = order --[[: minimax_order_fn]]
+    moves = order_fn(state, moves)
   end
 
   local best_move = moves[1]
@@ -154,6 +166,7 @@ end
 -- Negamax variant. game.evaluate(state) must score for the current mover.
 -- opts: { depth, order, transposition_table }
 -- Returns best_move, score.
+--: (minimax_game, unknown, { depth?: integer, order?: minimax_order_fn, transposition_table?: { [unknown]: { depth: integer, move: unknown, score: number } } } | nil) -> (unknown, number)
 function M.negamax(game, state, opts)
   opts = opts or {}
   local depth  = opts.depth or 4
@@ -169,6 +182,7 @@ end
 -- Searches depth 1, 2, ..., max_depth; stops early on time_limit.
 -- opts: { max_depth, time_limit, maximize, order, transposition_table }
 -- Returns best_move, score.
+--: (minimax_game, unknown, { max_depth?: integer, time_limit?: number, maximize?: boolean, order?: minimax_order_fn, transposition_table?: { [unknown]: { depth: integer, move: unknown, score: number } }, clock_fn?: () -> number } | nil) -> (unknown, number)
 function M.iterative_deepening(game, state, opts)
   opts = opts or {}
   local max_depth  = opts.max_depth or 6
@@ -187,7 +201,7 @@ function M.iterative_deepening(game, state, opts)
     best_move = move
     best_score = score
 
-    if time_limit and (clock_fn() - start) >= time_limit then
+    if time_limit and start and (clock_fn() - start) >= time_limit then
       break
     end
   end
@@ -217,6 +231,7 @@ end
 
 -- MCTS node structure (stored in flat tables for LuaJIT friendliness).
 -- nodes[i] = { state, parent, move, visits, wins, children={} }
+--: (unknown, mcts_node | nil, unknown) -> mcts_node
 local function mcts_new_node(state, parent, move)
   return {
     state    = state,
@@ -230,12 +245,14 @@ local function mcts_new_node(state, parent, move)
 end
 
 -- UCB1 score: wins/visits + c * sqrt(ln(parent_visits) / visits)
+--: (mcts_node, number, number) -> number
 local function ucb1(node, parent_visits, c)
   if node.visits == 0 then return INF end
   return node.wins / node.visits + c * math.sqrt(math.log(parent_visits) / node.visits)
 end
 
 -- Select best child by UCB1.
+--: (mcts_node, number) -> mcts_node | nil
 local function mcts_select(node, c)
   local best, best_score = nil, -INF
   local children = node.children
@@ -251,6 +268,7 @@ local function mcts_select(node, c)
 end
 
 -- Tree policy: descend using UCB1 until unexpanded or terminal.
+--: (mcts_node, minimax_game, number) -> mcts_node
 local function mcts_tree_policy(node, game, c)
   while not game.terminal(node.state) do
     if not node.expanded then
@@ -273,6 +291,7 @@ local function mcts_tree_policy(node, game, c)
 end
 
 -- Default rollout policy: random play to terminal, return evaluate().
+--: (minimax_game, unknown, minimax_rng) -> number
 local function mcts_rollout(game, state, rng)
   local depth = 0
   local max_rollout = 200 -- prevent infinite loops on non-terminal games
@@ -289,6 +308,7 @@ end
 -- Backpropagate result up to root. result > 0 counts as a win for even depths
 -- (root player), loss for odd depths (opponent). We use the raw score as the
 -- win value so the tree can be used with continuous evaluations.
+--: (mcts_node | nil, number) -> nil
 local function mcts_backprop(node, result)
   local sign = 1
   while node do
@@ -305,6 +325,7 @@ end
 --   seed       — RNG seed (required)
 --   rollout    — custom rollout fn(game, state, rng) -> score (optional)
 -- Returns best_move.
+--: (minimax_game, unknown, { iterations?: integer, c?: number, seed: integer, rollout?: (minimax_game, unknown, unknown) -> number }) -> unknown
 function M.mcts(game, state, opts)
   if not opts or not opts.seed then error("minimax.mcts: opts.seed is required") end
   local iterations = opts.iterations or 1000
@@ -343,6 +364,7 @@ end
 
 -- search_with_stats: like search but also returns node count.
 -- Useful for verifying transposition table effectiveness.
+--: (minimax_game, unknown, { depth?: integer, maximize?: boolean, order?: minimax_order_fn, transposition_table?: { [unknown]: { depth: integer, move: unknown, score: number } } } | nil) -> (unknown, number, integer)
 function M.search_with_stats(game, state, opts)
   opts = opts or {}
   local depth    = opts.depth or 4

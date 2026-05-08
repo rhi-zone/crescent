@@ -5,10 +5,23 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: CombineFn = (any, any) -> any
+--:: UpdateFn = (any, any, integer) -> any
+--:: ComposeFn = (any, any) -> any
+--:: TreeT = { _data: { [integer]: any }, _n: integer, _size: integer, _combine: CombineFn, ... }
+--:: LazyTreeT = { _data: { [integer]: any }, _lazy: { [integer]: any }, _n: integer, _size: integer, _combine: CombineFn, _update: UpdateFn, _compose: ComposeFn, _identity: any, _push_down: (self: LazyTreeT, i: integer, node_l: integer, node_r: integer, n: integer) -> nil, _range_update: (self: LazyTreeT, node: integer, node_l: integer, node_r: integer, l: integer, r: integer, val: any) -> nil, _query: (self: LazyTreeT, node: integer, node_l: integer, node_r: integer, l: integer, r: integer) -> any, ... }
+--:: PNode = { val: any, left: any, right: any }
+--:: PTreeT = { _root: PNode, _n: integer, _combine: CombineFn, ... }
+--:: SparseTreeT = { _root: any, _min: integer, _max: integer, _combine: CombineFn, ... }
+
 -- Common combine functions
+--: (number, number) -> number
 M.sum = function(a, b) return a + b end
+--: (number, number) -> number
 M.min = function(a, b) return a < b and a or b end
+--: (number, number) -> number
 M.max = function(a, b) return a > b and a or b end
+--: (integer, integer) -> integer
 M.gcd = function(a, b)
   while b ~= 0 do a, b = b, a % b end
   return a
@@ -61,15 +74,17 @@ function M.new(arr, combine_fn)
   return t
 end
 
+--: (self: TreeT) -> integer
 function Tree:len()
   return self._n
 end
 
+--: (self: TreeT, i: integer) -> any
 function Tree:get(i)
   return self._data[self._size + i - 1]
 end
 
--- Point update: set index i (1-indexed) to val
+--: (self: TreeT, i: integer, val: any) -> nil
 function Tree:update(i, val)
   local data = self._data
   local combine = self._combine
@@ -90,7 +105,7 @@ function Tree:update(i, val)
   end
 end
 
--- Range query [l, r] inclusive, 1-indexed
+--: (self: TreeT, l: integer, r: integer) -> any
 function Tree:query(l, r)
   local data = self._data
   local combine = self._combine
@@ -131,6 +146,7 @@ end
 local LazyTree = {}
 LazyTree.__index = LazyTree
 
+--: (arr: { [integer]: any }, opts: { combine: CombineFn, update: UpdateFn, compose: ComposeFn, identity: any }) -> LazyTreeT
 function M.new_lazy(arr, opts)
   local n = #arr
   local size = next_pow2(n)
@@ -171,11 +187,12 @@ function M.new_lazy(arr, opts)
   return t
 end
 
+--: (self: LazyTreeT) -> integer
 function LazyTree:len()
   return self._n
 end
 
--- Count of real elements covered by a node's range [node_l, node_r] given n total elements
+--: (node_l: integer, node_r: integer, n: integer) -> integer
 local function real_count(node_l, node_r, n)
   if node_l > n then return 0 end
   return (node_r < n and node_r or n) - node_l + 1
@@ -183,6 +200,7 @@ end
 
 -- Push lazy tag down from node i to its children
 -- node_l, node_r: the range this node covers; n: total element count
+--: (self: LazyTreeT, i: integer, node_l: integer, node_r: integer, n: integer) -> nil
 function LazyTree:_push_down(i, node_l, node_r, n)
   local tag = self._lazy[i]
   if tag == nil then return end
@@ -206,6 +224,7 @@ function LazyTree:_push_down(i, node_l, node_r, n)
 end
 
 -- Internal recursive range update
+--: (self: LazyTreeT, node: integer, node_l: integer, node_r: integer, l: integer, r: integer, val: any) -> nil
 function LazyTree:_range_update(node, node_l, node_r, l, r, val)
   if l > node_r or r < node_l then return end
   local data = self._data
@@ -237,11 +256,12 @@ function LazyTree:_range_update(node, node_l, node_r, l, r, val)
   end
 end
 
+--: (self: LazyTreeT, l: integer, r: integer, val: any) -> nil
 function LazyTree:range_update(l, r, val)
   self:_range_update(1, 1, self._size, l, r, val)
 end
 
--- Internal recursive range query
+--: (self: LazyTreeT, node: integer, node_l: integer, node_r: integer, l: integer, r: integer) -> any
 function LazyTree:_query(node, node_l, node_r, l, r)
   if l > node_r or r < node_l then return nil end
   if l <= node_l and node_r <= r then return self._data[node] end
@@ -255,6 +275,7 @@ function LazyTree:_query(node, node_l, node_r, l, r)
   return self._combine(lv, rv)
 end
 
+--: (self: LazyTreeT, l: integer, r: integer) -> any
 function LazyTree:query(l, r)
   return self:_query(1, 1, self._size, l, r)
 end
@@ -268,6 +289,7 @@ end
 local PTree = {}
 PTree.__index = PTree
 
+--: (arr: { [integer]: any }, l: integer, r: integer, combine_fn: CombineFn) -> PNode
 local function pt_build(arr, l, r, combine_fn)
   if l == r then
     return { val = arr[l] or nil, left = nil, right = nil }
@@ -286,6 +308,7 @@ local function pt_build(arr, l, r, combine_fn)
   return { val = val, left = left, right = right }
 end
 
+--: (node: PNode, node_l: integer, node_r: integer, i: integer, val: any, combine_fn: CombineFn) -> PNode
 local function pt_update(node, node_l, node_r, i, val, combine_fn)
   if node_l == node_r then
     return { val = val, left = nil, right = nil }
@@ -311,6 +334,7 @@ local function pt_update(node, node_l, node_r, i, val, combine_fn)
   return new_node
 end
 
+--: (node: PNode | nil, node_l: integer, node_r: integer, l: integer, r: integer, combine_fn: CombineFn) -> any
 local function pt_query(node, node_l, node_r, l, r, combine_fn)
   if node == nil then return nil end
   if l > node_r or r < node_l then return nil end
@@ -333,6 +357,7 @@ function M.persistent(arr, combine_fn)
   }, PTree)
 end
 
+--: (self: PTreeT, i: integer, val: any) -> PTreeT
 function PTree:update(i, val)
   local new_root = pt_update(self._root, 1, self._n, i, val, self._combine)
   return setmetatable({
@@ -342,10 +367,12 @@ function PTree:update(i, val)
   }, PTree)
 end
 
+--: (self: PTreeT, l: integer, r: integer) -> any
 function PTree:query(l, r)
   return pt_query(self._root, 1, self._n, l, r, self._combine)
 end
 
+--: (self: PTreeT) -> integer
 function PTree:len()
   return self._n
 end
@@ -358,6 +385,7 @@ end
 local SparseTree = {}
 SparseTree.__index = SparseTree
 
+--: (node: PNode | nil, node_l: integer, node_r: integer, i: integer, val: any, combine_fn: CombineFn) -> PNode
 local function sparse_update(node, node_l, node_r, i, val, combine_fn)
   if node_l == node_r then
     if node == nil then
@@ -387,6 +415,7 @@ local function sparse_update(node, node_l, node_r, i, val, combine_fn)
   return node
 end
 
+--: (node: PNode | nil, node_l: integer, node_r: integer, l: integer, r: integer, combine_fn: CombineFn) -> any
 local function sparse_query(node, node_l, node_r, l, r, combine_fn)
   if node == nil then return nil end
   if l > node_r or r < node_l then return nil end
@@ -408,10 +437,12 @@ function M.sparse(min_idx, max_idx, combine_fn)
   }, SparseTree)
 end
 
+--: (self: SparseTreeT, i: integer, val: any) -> nil
 function SparseTree:update(i, val)
   self._root = sparse_update(self._root, self._min, self._max, i, val, self._combine)
 end
 
+--: (self: SparseTreeT, l: integer, r: integer) -> any
 function SparseTree:query(l, r)
   return sparse_query(self._root, self._min, self._max, l, r, self._combine)
 end

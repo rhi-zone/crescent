@@ -5,7 +5,7 @@ end
 local M = {}
 M._tier = "pure"
 
---:: multimap = { _data: { [unknown]: { [integer]: unknown } }, _mode: string, _total: integer }
+--:: multimap = { _data: { [unknown]: { [integer]: unknown } }, _mode: string, _total: integer, put: (multimap, unknown, unknown) -> nil, get: (multimap, unknown) -> unknown[], keys: (multimap) -> unknown[], copy: (multimap) -> multimap, ... }
 
 local MM = {}
 MM.__index = MM
@@ -59,7 +59,7 @@ function M.new(mode)
   }, MM)
 end
 
---: (unknown, unknown) -> nil
+--: (multimap, unknown, unknown) -> nil
 function MM:put(k, v)
   local bucket = self._data[k]
   if not bucket then
@@ -79,14 +79,14 @@ function MM:put(k, v)
   end
 end
 
---: (unknown, unknown[]) -> nil
+--: (multimap, unknown, unknown[]) -> nil
 function MM:put_all(k, vals)
   for i = 1, #vals do
     self:put(k, vals[i])
   end
 end
 
---: (unknown) -> unknown[]
+--: (multimap, unknown) -> unknown[]
 function MM:get(k)
   local bucket = self._data[k]
   if not bucket then return {} end
@@ -95,7 +95,7 @@ function MM:get(k)
   return copy
 end
 
---: (unknown, unknown) -> boolean
+--: (multimap, unknown, unknown) -> boolean
 function MM:has(k, v)
   local bucket = self._data[k]
   if not bucket then return false end
@@ -105,12 +105,12 @@ function MM:has(k, v)
   return false
 end
 
---: (unknown) -> boolean
+--: (multimap, unknown) -> boolean
 function MM:has_key(k)
   return self._data[k] ~= nil
 end
 
---: (unknown, unknown) -> boolean
+--: (multimap, unknown, unknown) -> boolean
 function MM:remove(k, v)
   local bucket = self._data[k]
   if not bucket then return false end
@@ -124,7 +124,7 @@ function MM:remove(k, v)
   return removed
 end
 
---: (unknown) -> nil
+--: (multimap, unknown) -> nil
 function MM:remove_all(k)
   local bucket = self._data[k]
   if bucket then
@@ -136,7 +136,7 @@ end
 -- Alias for remove_all
 MM.delete_key = MM.remove_all
 
---: () -> unknown[]
+--: (multimap) -> unknown[]
 function MM:keys()
   local ks = {}
   for k in pairs(self._data) do
@@ -145,26 +145,26 @@ function MM:keys()
   return ks
 end
 
---: () -> number
+--: (multimap) -> number
 function MM:key_count()
   local n = 0
   for _ in pairs(self._data) do n = n + 1 end
   return n
 end
 
---: () -> number
+--: (multimap) -> number
 function MM:value_count()
   return self._total
 end
 
---: (unknown) -> number
+--: (multimap, unknown) -> number
 function MM:size(k)
   local bucket = self._data[k]
   if not bucket then return 0 end
   return #bucket
 end
 
---: () -> () -> (unknown, unknown | nil)
+--: (multimap) -> () -> (unknown, unknown | nil)
 function MM:each()
   local keys = self:keys()
   local ki = 1
@@ -184,7 +184,7 @@ function MM:each()
   end
 end
 
---: () -> () -> (unknown, unknown[] | nil)
+--: (multimap) -> () -> (unknown, unknown[] | nil)
 function MM:each_key()
   local keys = self:keys()
   local ki = 0
@@ -196,7 +196,7 @@ function MM:each_key()
   end
 end
 
---: () -> { [unknown]: unknown[] }
+--: (multimap) -> { [unknown]: unknown[] }
 function MM:to_table()
   local t = {}
   for k, bucket in pairs(self._data) do
@@ -207,7 +207,7 @@ function MM:to_table()
   return t
 end
 
---: () -> { unknown, unknown }[]
+--: (multimap) -> { unknown, unknown }[]
 function MM:flatten()
   local pairs_list = {}
   for k, bucket in pairs(self._data) do
@@ -218,7 +218,7 @@ function MM:flatten()
   return pairs_list
 end
 
---: () -> multimap
+--: (multimap) -> multimap
 function MM:invert()
   local inv = M.new(self._mode)
   for k, bucket in pairs(self._data) do
@@ -229,7 +229,7 @@ function MM:invert()
   return inv
 end
 
---: () -> multimap
+--: (multimap) -> multimap
 function MM:copy()
   local c = M.new(self._mode)
   for k, bucket in pairs(self._data) do
@@ -241,7 +241,7 @@ function MM:copy()
   return c
 end
 
---: ((unknown, unknown) -> unknown) -> multimap
+--: (multimap, (unknown, unknown) -> unknown) -> multimap
 function MM:map_values(fn)
   local result = M.new(self._mode)
   for k, bucket in pairs(self._data) do
@@ -252,7 +252,7 @@ function MM:map_values(fn)
   return result
 end
 
---: ((unknown, unknown) -> boolean) -> multimap
+--: (multimap, (unknown, unknown) -> boolean) -> multimap
 function MM:filter_values(pred)
   local result = M.new(self._mode)
   for k, bucket in pairs(self._data) do

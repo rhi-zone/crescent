@@ -113,23 +113,31 @@ end
 --   { kind="literal", value=string|number }
 --   { kind="number", value=number }
 
+--:: Token = { type: string, value: any }
+--:: AstNode = { kind: string, ... }
+--:: Parser = { tokens: { [integer]: Token }, pos: integer, peek: (self: Parser) -> Token, consume: (self: Parser) -> Token, expect: (self: Parser, type_: string, value: any) -> any, match: (self: Parser, type_: string, value: any) -> Token | nil, parse_expr: (self: Parser) -> any, parse_or_expr: (self: Parser) -> any, parse_and_expr: (self: Parser) -> any, parse_equality_expr: (self: Parser) -> any, parse_relational_expr: (self: Parser) -> any, parse_additive_expr: (self: Parser) -> any, parse_multiplicative_expr: (self: Parser) -> any, parse_unary_expr: (self: Parser) -> any, parse_path_expr: (self: Parser) -> any, parse_primary_then_filter: (self: Parser) -> any, parse_primary_expr: (self: Parser) -> any, parse_function_call: (self: Parser) -> any, parse_location_path: (self: Parser) -> any, parse_relative_path_steps: (self: Parser, steps: any) -> any, parse_step: (self: Parser, steps: any) -> any, parse_node_test: (self: Parser) -> any, parse_predicates: (self: Parser, predicates: any) -> any, ... }
+
 local Parser = {}
 Parser.__index = Parser
 
+--: (tokens: { [integer]: Token }) -> Parser
 local function new_parser(tokens)
   return setmetatable({ tokens = tokens, pos = 1 }, Parser)
 end
 
+--: (self: Parser) -> Token
 function Parser:peek()
   return self.tokens[self.pos]
 end
 
+--: (self: Parser) -> Token
 function Parser:consume()
   local t = self.tokens[self.pos]
   self.pos = self.pos + 1
   return t
 end
 
+--: (self: Parser, type_: string, value: any) -> any
 function Parser:expect(type_, value)
   local t = self:consume()
   if t.type ~= type_ or (value and t.value ~= value) then
@@ -138,6 +146,7 @@ function Parser:expect(type_, value)
   return t
 end
 
+--: (self: Parser, type_: string, value: any) -> Token | nil
 function Parser:match(type_, value)
   local t = self:peek()
   if t.type == type_ and (value == nil or t.value == value) then
@@ -148,6 +157,7 @@ function Parser:match(type_, value)
 end
 
 -- expr = or_expr ('|' or_expr)*
+--: (self: Parser) -> any
 function Parser:parse_expr()
   local left, err = self:parse_or_expr()
   if not left then return nil, err end
@@ -162,6 +172,7 @@ function Parser:parse_expr()
 end
 
 -- or_expr = and_expr ('or' and_expr)*
+--: (self: Parser) -> any
 function Parser:parse_or_expr()
   local left, err = self:parse_and_expr()
   if not left then return nil, err end
@@ -176,6 +187,7 @@ function Parser:parse_or_expr()
 end
 
 -- and_expr = equality_expr ('and' equality_expr)*
+--: (self: Parser) -> any
 function Parser:parse_and_expr()
   local left, err = self:parse_equality_expr()
   if not left then return nil, err end
@@ -190,6 +202,7 @@ function Parser:parse_and_expr()
 end
 
 -- equality_expr = relational_expr (('='|'!=') relational_expr)*
+--: (self: Parser) -> any
 function Parser:parse_equality_expr()
   local left, err = self:parse_relational_expr()
   if not left then return nil, err end
@@ -209,6 +222,7 @@ function Parser:parse_equality_expr()
 end
 
 -- relational_expr = additive_expr (('<'|'>'|'<='|'>=') additive_expr)*
+--: (self: Parser) -> any
 function Parser:parse_relational_expr()
   local left, err = self:parse_additive_expr()
   if not left then return nil, err end
@@ -228,6 +242,7 @@ function Parser:parse_relational_expr()
 end
 
 -- additive_expr = multiplicative_expr (('+' | '-') multiplicative_expr)*
+--: (self: Parser) -> any
 function Parser:parse_additive_expr()
   local left, err = self:parse_multiplicative_expr()
   if not left then return nil, err end
@@ -247,6 +262,7 @@ function Parser:parse_additive_expr()
 end
 
 -- multiplicative_expr = unary_expr (('*' | 'div' | 'mod') unary_expr)*
+--: (self: Parser) -> any
 function Parser:parse_multiplicative_expr()
   local left, err = self:parse_unary_expr()
   if not left then return nil, err end
@@ -273,6 +289,7 @@ function Parser:parse_multiplicative_expr()
 end
 
 -- unary_expr = '-' unary_expr | union_expr
+--: (self: Parser) -> any
 function Parser:parse_unary_expr()
   if self:peek().value == "-" then
     self:consume()
@@ -284,6 +301,7 @@ function Parser:parse_unary_expr()
 end
 
 -- path_expr = location_path | primary_expr ('/' relative_path | '//' relative_path)?
+--: (self: Parser) -> any
 function Parser:parse_path_expr()
   local t = self:peek()
   -- Absolute path starts with / or //
@@ -328,6 +346,7 @@ function Parser:parse_path_expr()
   return self:parse_primary_then_filter()
 end
 
+--: (self: Parser) -> any
 function Parser:parse_primary_then_filter()
   local primary, err = self:parse_primary_expr()
   if not primary then return nil, err end
@@ -352,6 +371,7 @@ function Parser:parse_primary_then_filter()
 end
 
 -- parse_primary_expr: number, string, (expr), or function call
+--: (self: Parser) -> any
 function Parser:parse_primary_expr()
   local t = self:peek()
   if t.type == T_NUMBER then
@@ -379,6 +399,7 @@ function Parser:parse_primary_expr()
   return nil, "unexpected token '" .. tostring(t.value) .. "' in expression"
 end
 
+--: (self: Parser) -> any
 function Parser:parse_function_call()
   local name_tok = self:consume() -- function name
   self:consume() -- '('
@@ -398,6 +419,7 @@ function Parser:parse_function_call()
 end
 
 -- parse_location_path: absolute or relative
+--: (self: Parser) -> any
 function Parser:parse_location_path()
   local steps = {}
   local absolute = false
@@ -436,6 +458,7 @@ function Parser:parse_location_path()
   return { kind = "path", steps = steps, absolute = absolute }
 end
 
+--: (self: Parser, steps: any) -> any
 function Parser:parse_relative_path_steps(steps)
   while self:peek().value == "/" or self:peek().value == "//" do
     local sep = self:consume().value
@@ -452,6 +475,7 @@ function Parser:parse_relative_path_steps(steps)
 end
 
 -- parse a single step and append to steps
+--: (self: Parser, steps: any) -> any
 function Parser:parse_step(steps)
   local t = self:peek()
 
@@ -522,6 +546,7 @@ function Parser:parse_step(steps)
   return true
 end
 
+--: (self: Parser) -> any
 function Parser:parse_node_test()
   local t = self:peek()
 
@@ -557,6 +582,7 @@ function Parser:parse_node_test()
   return nil, "expected node test, got '" .. tostring(t.value) .. "'"
 end
 
+--: (self: Parser, predicates: any) -> any
 function Parser:parse_predicates(predicates)
   while self:peek().value == "[" do
     self:consume()

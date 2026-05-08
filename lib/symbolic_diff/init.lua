@@ -9,6 +9,8 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Expr = { tag: string, value: any, name: any, left: any, right: any, base: any, exp: any, arg: any, ... }
+
 -- ---------------------------------------------------------------------------
 -- Expression metatable — enables operator overloading
 -- ---------------------------------------------------------------------------
@@ -16,6 +18,7 @@ M._tier = "pure"
 local Expr = {}
 Expr.__index = Expr
 
+--: (v: any) -> Expr
 local function wrap(v)
   if type(v) == "number" then return M.num(v) end
   return v
@@ -29,6 +32,7 @@ Expr.__pow = function(a, b) return M.pow(wrap(a), wrap(b)) end
 Expr.__unm = function(a)    return M.neg(a) end
 Expr.__tostring = function(a) return M.tostring(a) end
 
+--: (t: any) -> Expr
 local function node(t)
   return setmetatable(t, Expr)
 end
@@ -37,50 +41,62 @@ end
 -- Constructors
 -- ---------------------------------------------------------------------------
 
+--: (v: number) -> Expr
 function M.num(v)
   return node({ tag = "num", value = v })
 end
 
+--: (name: string) -> Expr
 function M.var(name)
   return node({ tag = "var", name = name })
 end
 
+--: (left: Expr, right: Expr) -> Expr
 function M.add(left, right)
   return node({ tag = "add", left = left, right = right })
 end
 
+--: (left: Expr, right: Expr) -> Expr
 function M.sub(left, right)
   return node({ tag = "sub", left = left, right = right })
 end
 
+--: (left: Expr, right: Expr) -> Expr
 function M.mul(left, right)
   return node({ tag = "mul", left = left, right = right })
 end
 
+--: (left: Expr, right: Expr) -> Expr
 function M.div(left, right)
   return node({ tag = "div", left = left, right = right })
 end
 
+--: (base: Expr, exp: Expr) -> Expr
 function M.pow(base, exp)
   return node({ tag = "pow", base = base, exp = exp })
 end
 
+--: (arg: Expr) -> Expr
 function M.neg(arg)
   return node({ tag = "neg", arg = arg })
 end
 
+--: (arg: Expr) -> Expr
 function M.sin(arg)
   return node({ tag = "sin", arg = arg })
 end
 
+--: (arg: Expr) -> Expr
 function M.cos(arg)
   return node({ tag = "cos", arg = arg })
 end
 
+--: (arg: Expr) -> Expr
 function M.ln(arg)
   return node({ tag = "ln", arg = arg })
 end
 
+--: (arg: Expr) -> Expr
 function M.exp(arg)
   return node({ tag = "exp", arg = arg })
 end
@@ -91,6 +107,7 @@ end
 
 local TOSTR  -- forward ref
 
+--: (e: Expr) -> string
 TOSTR = function(e)
   local t = e.tag
   if t == "num" then
@@ -127,6 +144,7 @@ TOSTR = function(e)
   end
 end
 
+--: (e: Expr) -> string
 function M.tostring(e)
   return TOSTR(e)
 end
@@ -137,6 +155,7 @@ end
 
 local EVAL  -- forward ref
 
+--: (e: Expr, env: { [string]: number }) -> number
 EVAL = function(e, env)
   local t = e.tag
   if t == "num" then
@@ -172,6 +191,7 @@ EVAL = function(e, env)
   end
 end
 
+--: (e: Expr, env: { [string]: number } | nil) -> number
 function M.eval(e, env)
   return EVAL(e, env or {})
 end
@@ -182,11 +202,16 @@ end
 
 local SIMP  -- forward ref
 
+--: (e: Expr) -> boolean
 local function is_num(e)       return e.tag == "num" end
-local function is_zero(e)      return e.tag == "num" and e.value == 0 end
-local function is_one(e)       return e.tag == "num" and e.value == 1 end
+--: (e: Expr) -> boolean
+local function is_zero(e)      return e.tag == "num" and e.value == 0 or false end
+--: (e: Expr) -> boolean
+local function is_one(e)       return e.tag == "num" and e.value == 1 or false end
+--: (e: Expr) -> any
 local function num_val(e)      return e.value end
 
+--: (e: Expr) -> Expr
 SIMP = function(e)
   local t = e.tag
 
@@ -268,6 +293,7 @@ SIMP = function(e)
   end
 end
 
+--: (e: Expr) -> Expr
 function M.simplify(e)
   -- iterate simplification to fixpoint (max 20 passes)
   local prev = nil
@@ -290,6 +316,7 @@ local DIFF  -- forward ref
 local ZERO = M.num(0)
 local ONE  = M.num(1)
 
+--: (e: Expr, v: string) -> Expr
 DIFF = function(e, v)
   local t = e.tag
 
@@ -374,6 +401,7 @@ DIFF = function(e, v)
   end
 end
 
+--: (e: Expr, v: string) -> Expr
 function M.diff(e, v)
   return DIFF(e, v)
 end

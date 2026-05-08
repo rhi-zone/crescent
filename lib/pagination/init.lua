@@ -9,6 +9,9 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Paginator = { _items: { [integer]: any }, _per_page: integer, total_items: integer, total_pages: integer, current_page: integer, page: (self: Paginator, n: integer) -> any, ... }
+--:: LazyPaginator = { _fetch_fn: (integer, integer) -> { [integer]: any }, _per_page: integer, total_items: integer, total_pages: integer, current_page: integer, page: (self: LazyPaginator, n: integer) -> any, ... }
+
 local floor = math.floor
 local byte, char, sub, rep = string.byte, string.char, string.sub, string.rep
 local concat = table.concat
@@ -18,6 +21,7 @@ local concat = table.concat
 -- ---------------------------------------------------------------------------
 
 -- Clamp n to [lo, hi].
+--: (n: integer, lo: integer, hi: integer) -> integer
 local function clamp(n, lo, hi)
   if n < lo then return lo end
   if n > hi then return hi end
@@ -37,7 +41,7 @@ for i = 1, 64 do
 end
 
 --- Encode a raw byte string to a URL-safe base64 string (no padding).
---: string -> string
+--: (data: string) -> string | (nil, string)
 function M.encode_cursor(data)
   if type(data) ~= "string" then
     return nil, "encode_cursor: data must be a string"
@@ -65,7 +69,7 @@ end
 
 --- Decode a URL-safe base64 string (no padding) to a raw byte string.
 --- Returns nil if the input is not valid base64.
---: string -> string | nil
+--: (str: string) -> string | nil | (nil, string)
 function M.decode_cursor(str)
   if type(str) ~= "string" then
     return nil, "decode_cursor: str must be a string"
@@ -101,7 +105,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Extract a slice from items using 0-based offset and limit.
---: ({unknown}, { offset: (integer | nil), limit: (integer | nil) }) -> {unknown}
+--: (items: { [integer]: any }, offset: integer | nil, limit: integer | nil) -> { [integer]: any }
 function M.window(items, offset, limit)
   offset = offset or 0
   limit = limit or #items
@@ -121,7 +125,7 @@ end
 --- Paginate items using offset/limit.
 --- opts: { offset=0, limit=10 }
 --- Returns { items, total, page, pages, has_prev, has_next, prev_offset, next_offset }
---: ({unknown}, { offset: (integer | nil), limit: (integer | nil) }) -> { items: {unknown}, total: integer, page: integer, pages: integer, has_prev: boolean, has_next: boolean, prev_offset: integer, next_offset: integer } | (nil, string)
+--: (items: { [integer]: any }, opts: { offset?: integer, limit?: integer } | nil) -> { items: { [integer]: any }, total: integer, page: integer, pages: integer, has_prev: boolean, has_next: boolean, prev_offset: integer, next_offset: integer } | (nil, string)
 function M.offset(items, opts)
   opts = opts or {}
   local offset = opts.offset or 0
@@ -156,7 +160,7 @@ end
 --- Paginate items using 1-based page number.
 --- opts: { page=1, per_page=10 }
 --- Returns { items, total, page, pages, per_page, has_prev, has_next }
---: ({unknown}, { page: (integer | nil), per_page: (integer | nil) }) -> { items: {unknown}, total: integer, page: integer, pages: integer, per_page: integer, has_prev: boolean, has_next: boolean } | (nil, string)
+--: (items: { [integer]: any }, opts: { page?: integer, per_page?: integer } | nil) -> { items: { [integer]: any }, total: integer, page: integer, pages: integer, per_page: integer, has_prev: boolean, has_next: boolean } | (nil, string)
 function M.pages(items, opts)
   opts = opts or {}
   local page = opts.page or 1
@@ -190,7 +194,7 @@ end
 --- opts: { cursor=nil, limit=10, key=function(item) return item.id end }
 --- Returns { items, cursor, has_more }
 --- cursor is nil on the last page.
---: ({unknown}, { cursor: (string | nil), limit: (integer | nil), key: (((unknown) -> unknown) | nil) }) -> { items: {unknown}, cursor: (string | nil), has_more: boolean } | (nil, string)
+--: (items: { [integer]: any }, opts: { cursor?: string, limit?: integer, key?: (any) -> any } | nil) -> { items: { [integer]: any }, cursor: string | nil, has_more: boolean } | (nil, string)
 function M.cursor(items, opts)
   opts = opts or {}
   local limit = opts.limit or 10
@@ -219,7 +223,7 @@ function M.cursor(items, opts)
       -- Cursor encodes the 1-based index of the last-seen item.
       local pos = tonumber(decoded)
       if pos == nil then return nil, "invalid cursor" end
-      start_idx = pos + 1
+      start_idx = floor(pos) + 1
     end
     if start_idx > total then
       return { items = {}, cursor = nil, has_more = false }
@@ -254,7 +258,7 @@ end
 local Paginator = {}
 Paginator.__index = Paginator
 
---- Return the page result for page n (1-based). Clamps to [1, total_pages].
+--: (self: Paginator, n: integer) -> any
 function Paginator:page(n)
   n = clamp(n, 1, self.total_pages)
   self.current_page = n
@@ -271,31 +275,31 @@ function Paginator:page(n)
   }
 end
 
---- Advance to the next page and return it, or nil if already on the last page.
+--: (self: Paginator) -> any
 function Paginator:next()
   if self.current_page >= self.total_pages then return nil end
   return self:page(self.current_page + 1)
 end
 
---- Go to the previous page and return it, or nil if already on the first page.
+--: (self: Paginator) -> any
 function Paginator:prev()
   if self.current_page <= 1 then return nil end
   return self:page(self.current_page - 1)
 end
 
---- Go to the first page.
+--: (self: Paginator) -> any
 function Paginator:first()
   return self:page(1)
 end
 
---- Go to the last page.
+--: (self: Paginator) -> any
 function Paginator:last()
   return self:page(self.total_pages)
 end
 
 --- Create a stateful paginator over items.
 --- opts: { page=1, per_page=10 }
---: ({unknown}, ({ page: (integer | nil), per_page: (integer | nil) } | nil)) -> Paginator | (nil, string)
+--: (items: { [integer]: any }, opts: { page?: integer, per_page?: integer } | nil) -> Paginator | (nil, string)
 function M.paginator(items, opts)
   opts = opts or {}
   local per_page = opts.per_page or 10
@@ -321,7 +325,7 @@ end
 local LazyPaginator = {}
 LazyPaginator.__index = LazyPaginator
 
---- Return page n for a lazy paginator.
+--: (self: LazyPaginator, n: integer) -> any
 function LazyPaginator:page(n)
   n = clamp(n, 1, self.total_pages)
   self.current_page = n
@@ -338,20 +342,24 @@ function LazyPaginator:page(n)
   }
 end
 
+--: (self: LazyPaginator) -> any
 function LazyPaginator:next()
   if self.current_page >= self.total_pages then return nil end
   return self:page(self.current_page + 1)
 end
 
+--: (self: LazyPaginator) -> any
 function LazyPaginator:prev()
   if self.current_page <= 1 then return nil end
   return self:page(self.current_page - 1)
 end
 
+--: (self: LazyPaginator) -> any
 function LazyPaginator:first()
   return self:page(1)
 end
 
+--: (self: LazyPaginator) -> any
 function LazyPaginator:last()
   return self:page(self.total_pages)
 end
@@ -360,7 +368,7 @@ end
 --- fetch_fn(offset, limit) -> items
 --- count_fn() -> total
 --- opts: { page=1, per_page=10 }
---: (((integer, integer) -> {unknown}), (() -> integer), ({ page: (integer | nil), per_page: (integer | nil) } | nil)) -> LazyPaginator | (nil, string)
+--: (fetch_fn: (integer, integer) -> { [integer]: any }, count_fn: () -> integer, opts: { page?: integer, per_page?: integer } | nil) -> LazyPaginator | (nil, string)
 function M.lazy_paginator(fetch_fn, count_fn, opts)
   if type(fetch_fn) ~= "function" then
     return nil, "lazy_paginator: fetch_fn must be a function"

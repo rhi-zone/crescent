@@ -102,7 +102,7 @@ end
 local function parse_name(name_value)
   -- name_value is the raw bytes of the outer SEQUENCE
   local rdns, err = asn1.decode_sequence(name_value)
-  if not rdns then return nil, "name: " .. err end
+  if not rdns then return nil, "name: " .. (err or "") end
 
   local result = {}
   for _, rdn_node in ipairs(rdns) do
@@ -111,7 +111,7 @@ local function parse_name(name_value)
       return nil, "name: RDN is not constructed"
     end
     local atvs, err2 = children(rdn_node)
-    if not atvs then return nil, "name RDN: " .. err2 end
+    if not atvs then return nil, "name RDN: " .. (err2 or "") end
 
     for _, atv_node in ipairs(atvs) do
       -- ATV is a SEQUENCE
@@ -119,7 +119,7 @@ local function parse_name(name_value)
         return nil, "name: ATV is not constructed"
       end
       local fields, err3 = children(atv_node)
-      if not fields then return nil, "name ATV: " .. err3 end
+      if not fields then return nil, "name ATV: " .. (err3 or "") end
       if #fields < 2 then
         return nil, "name ATV: expected at least 2 fields, got " .. #fields
       end
@@ -152,7 +152,7 @@ local function parse_alg_id(node)
     return nil, "AlgorithmIdentifier is not a SEQUENCE"
   end
   local fields, err = children(node)
-  if not fields then return nil, "AlgorithmIdentifier: " .. err end
+  if not fields then return nil, "AlgorithmIdentifier: " .. (err or "") end
   if #fields < 1 then
     return nil, "AlgorithmIdentifier: missing OID"
   end
@@ -178,7 +178,7 @@ local function parse_validity(node)
     return nil, "Validity is not a SEQUENCE"
   end
   local fields, err = children(node)
-  if not fields then return nil, "Validity: " .. err end
+  if not fields then return nil, "Validity: " .. (err or "") end
   if #fields < 2 then
     return nil, "Validity: expected 2 fields, got " .. #fields
   end
@@ -211,20 +211,20 @@ local function parse_spki(node)
     return nil, "SubjectPublicKeyInfo is not a SEQUENCE"
   end
   local fields, err = children(node)
-  if not fields then return nil, "SubjectPublicKeyInfo: " .. err end
+  if not fields then return nil, "SubjectPublicKeyInfo: " .. (err or "") end
   if #fields < 2 then
     return nil, "SubjectPublicKeyInfo: expected 2 fields, got " .. #fields
   end
 
   local alg, err_alg = parse_alg_id(fields[1])
-  if not alg then return nil, "SubjectPublicKeyInfo algorithm: " .. err_alg end
+  if not alg then return nil, "SubjectPublicKeyInfo algorithm: " .. (err_alg or "") end
 
   if fields[2].tag ~= asn1.TAG_BIT_STRING then
     return nil, "SubjectPublicKeyInfo: key is not a BIT STRING"
   end
 
   local bs, err_bs = asn1.decode_bit_string(fields[2].value)
-  if not bs then return nil, "SubjectPublicKeyInfo BIT STRING: " .. err_bs end
+  if not bs then return nil, "SubjectPublicKeyInfo BIT STRING: " .. (err_bs or "") end
 
   return {
     algorithm      = alg.oid,
@@ -246,10 +246,10 @@ local function parse_extensions(node)
   -- node is the [3] EXPLICIT wrapper (context, constructed, tag 3)
   -- its value contains the SEQUENCE OF Extension
   local outer, err = asn1.decode_tlv(node.value, 1)
-  if not outer then return nil, "extensions outer: " .. err end
+  if not outer then return nil, "extensions outer: " .. (err or "") end
 
   local ext_list, err2 = children(outer)
-  if not ext_list then return nil, "extensions: " .. err2 end
+  if not ext_list then return nil, "extensions: " .. (err2 or "") end
 
   local result = {}
   for _, ext_node in ipairs(ext_list) do
@@ -257,7 +257,7 @@ local function parse_extensions(node)
       return nil, "extension entry is not a SEQUENCE"
     end
     local fields, err3 = children(ext_node)
-    if not fields then return nil, "extension fields: " .. err3 end
+    if not fields then return nil, "extension fields: " .. (err3 or "") end
     if #fields < 2 then
       return nil, "extension: expected at least 2 fields"
     end
@@ -307,7 +307,7 @@ local function parse_tbs(tbs_node)
     return nil, "TBSCertificate is not a SEQUENCE"
   end
   local fields, err = children(tbs_node)
-  if not fields then return nil, "TBSCertificate: " .. err end
+  if not fields then return nil, "TBSCertificate: " .. (err or "") end
 
   local idx = 1
   local version = 1  -- default v1
@@ -317,9 +317,9 @@ local function parse_tbs(tbs_node)
   if first and first.class_num == asn1.CLASS_CONTEXT and first.tag == 0 then
     -- Unwrap the explicit wrapper: decode the INTEGER inside
     local ver_node, err_v = asn1.decode_tlv(first.value, 1)
-    if not ver_node then return nil, "version: " .. err_v end
+    if not ver_node then return nil, "version: " .. (err_v or "") end
     local ver_val, err_vi = asn1.decode_integer(ver_node.value)
-    if ver_val == nil then return nil, "version integer: " .. err_vi end
+    if ver_val == nil then return nil, "version integer: " .. (err_vi or "") end
     version = ver_val + 1  -- DER: 0=v1, 1=v2, 2=v3
     idx = idx + 1
   end
@@ -336,31 +336,31 @@ local function parse_tbs(tbs_node)
   local sig_alg_node = fields[idx]; idx = idx + 1
   if not sig_alg_node then return nil, "TBSCertificate: missing signature algorithm" end
   local tbs_sig_alg, err_sa = parse_alg_id(sig_alg_node)
-  if not tbs_sig_alg then return nil, "TBSCertificate signature alg: " .. err_sa end
+  if not tbs_sig_alg then return nil, "TBSCertificate signature alg: " .. (err_sa or "") end
 
   -- issuer Name
   local issuer_node = fields[idx]; idx = idx + 1
   if not issuer_node then return nil, "TBSCertificate: missing issuer" end
   local issuer, err_iss = parse_name(issuer_node.value)
-  if not issuer then return nil, "issuer: " .. err_iss end
+  if not issuer then return nil, "issuer: " .. (err_iss or "") end
 
   -- validity Validity
   local validity_node = fields[idx]; idx = idx + 1
   if not validity_node then return nil, "TBSCertificate: missing validity" end
   local validity, err_val = parse_validity(validity_node)
-  if not validity then return nil, "validity: " .. err_val end
+  if not validity then return nil, "validity: " .. (err_val or "") end
 
   -- subject Name
   local subject_node = fields[idx]; idx = idx + 1
   if not subject_node then return nil, "TBSCertificate: missing subject" end
   local subject, err_subj = parse_name(subject_node.value)
-  if not subject then return nil, "subject: " .. err_subj end
+  if not subject then return nil, "subject: " .. (err_subj or "") end
 
   -- subjectPublicKeyInfo
   local spki_node = fields[idx]; idx = idx + 1
   if not spki_node then return nil, "TBSCertificate: missing subjectPublicKeyInfo" end
   local public_key, err_pk = parse_spki(spki_node)
-  if not public_key then return nil, "subjectPublicKeyInfo: " .. err_pk end
+  if not public_key then return nil, "subjectPublicKeyInfo: " .. (err_pk or "") end
 
   -- Optional extensions [3]
   local extensions = nil
@@ -368,7 +368,7 @@ local function parse_tbs(tbs_node)
     local f = fields[idx]; idx = idx + 1
     if f.class_num == asn1.CLASS_CONTEXT and f.tag == 3 and f.constructed then
       local exts, err_exts = parse_extensions(f)
-      if not exts then return nil, "extensions: " .. err_exts end
+      if not exts then return nil, "extensions: " .. (err_exts or "") end
       extensions = exts
     end
     -- skip [1] (issuerUniqueID) and [2] (subjectUniqueID) silently
@@ -404,24 +404,24 @@ function M.parse_der(der)
 
   -- Outer SEQUENCE
   local outer, err = asn1.decode_tlv(der, 1)
-  if not outer then return nil, "x509: outer TLV: " .. err end
+  if not outer then return nil, "x509: outer TLV: " .. (err or "") end
   if outer.tag ~= asn1.TAG_SEQUENCE or not outer.constructed then
     return nil, "x509: not a SEQUENCE (tag=" .. outer.tag .. ")"
   end
 
   local top_fields, err2 = children(outer)
-  if not top_fields then return nil, "x509: top-level fields: " .. err2 end
+  if not top_fields then return nil, "x509: top-level fields: " .. (err2 or "") end
   if #top_fields < 3 then
     return nil, "x509: Certificate must have 3 fields, got " .. #top_fields
   end
 
   -- TBSCertificate
   local tbs, err_tbs = parse_tbs(top_fields[1])
-  if not tbs then return nil, "x509: TBSCertificate: " .. err_tbs end
+  if not tbs then return nil, "x509: TBSCertificate: " .. (err_tbs or "") end
 
   -- signatureAlgorithm
   local sig_alg, err_alg = parse_alg_id(top_fields[2])
-  if not sig_alg then return nil, "x509: signatureAlgorithm: " .. err_alg end
+  if not sig_alg then return nil, "x509: signatureAlgorithm: " .. (err_alg or "") end
 
   -- signature BIT STRING (we store raw bytes but don't verify here)
   -- (top_fields[3] is the signature)
@@ -465,7 +465,7 @@ function M.parse_pem(pem_str)
   end
 
   local block, err = pem.decode(pem_str)
-  if not block then return nil, "x509: PEM decode: " .. err end
+  if not block then return nil, "x509: PEM decode: " .. (err or "") end
 
   if block.label ~= "CERTIFICATE" then
     return nil, "x509: expected PEM label 'CERTIFICATE', got '" .. block.label .. "'"

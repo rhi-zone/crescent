@@ -9,14 +9,22 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Row = { [string]: any }
+--:: Pred = (Row) -> boolean
+--:: Tbl = { _db: any, _name: string, _schema: any, _pk: string | nil, _rows: { [any]: Row }, _order: { [integer]: any }, _subs: { [integer]: any }, _live: { [integer]: any }, _indexes: { [string]: { [any]: { [integer]: any } } }, _fire: (self: Tbl, event: string, row: Row | nil, old_row: Row | nil) -> nil, _index_add: (self: Tbl, pk: any, row: Row) -> nil, _index_remove: (self: Tbl, pk: any, row: Row) -> nil, insert: (self: Tbl, row: Row) -> any, update: (self: Tbl, pk: any, patch: Row) -> any, ... }
+--:: QB = { _tbl: Tbl, _where: Pred | nil, _order: string | nil, _dir: string, _limit: integer | nil, _offset: integer, _join: { other: Tbl, local_field: string, other_field: string } | nil, _base_rows: (self: QB) -> { [integer]: Row }, select: (self: QB) -> { [integer]: Row }, where: (self: QB, pred: any) -> QB, order_by: (self: QB, field: string, dir: string | nil) -> QB, limit: (self: QB, n: integer) -> QB, offset: (self: QB, n: integer) -> QB, join: (self: QB, other: Tbl, local_field: string, other_field: string) -> QB, count: (self: QB) -> integer, first: (self: QB) -> Row | nil, ... }
+--:: DB = { _tables: { [string]: Tbl }, ... }
+
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
+--: (t: { [any]: any }) -> { [any]: any }
 local function shallow_copy(t)
   local c = {}
   for k, v in pairs(t) do c[k] = v end
   return c
 end
 
+--: (t: { [any]: any }) -> integer
 local function table_len(t)
   local n = 0
   for _ in pairs(t) do n = n + 1 end
@@ -30,6 +38,7 @@ end
 local QB = {}
 QB.__index = QB
 
+--: (tbl: Tbl, opts: QB | nil) -> QB
 local function new_qb(tbl, opts)
   return setmetatable({
     _tbl     = tbl,
@@ -42,10 +51,12 @@ local function new_qb(tbl, opts)
   }, QB)
 end
 
+--: (qb: QB) -> QB
 local function qb_clone(qb)
   return new_qb(qb._tbl, qb)
 end
 
+--: (self: QB, pred: any) -> QB
 function QB:where(pred)
   local q = qb_clone(self)
   if type(pred) == "function" then
@@ -63,6 +74,7 @@ function QB:where(pred)
   return q
 end
 
+--: (self: QB, field: string, dir: string | nil) -> QB
 function QB:order_by(field, dir)
   local q = qb_clone(self)
   q._order = field
@@ -70,25 +82,28 @@ function QB:order_by(field, dir)
   return q
 end
 
+--: (self: QB, n: integer) -> QB
 function QB:limit(n)
   local q = qb_clone(self)
   q._limit = n
   return q
 end
 
+--: (self: QB, n: integer) -> QB
 function QB:offset(n)
   local q = qb_clone(self)
   q._offset = n
   return q
 end
 
+--: (self: QB, other: Tbl, local_field: string, other_field: string) -> QB
 function QB:join(other, local_field, other_field)
   local q = qb_clone(self)
   q._join = { other = other, local_field = local_field, other_field = other_field }
   return q
 end
 
--- Internal: collect rows matching this query (no join).
+--: (self: QB) -> { [integer]: Row }
 function QB:_base_rows()
   local tbl   = self._tbl
   local pred  = self._where
@@ -98,7 +113,9 @@ function QB:_base_rows()
   -- try to use it. We detect this by checking for the internal _eq_fields table.
   -- We always fall back to full scan when no index matches.
   for _, row in pairs(tbl._rows) do
-    if pred == nil or pred(row) then
+    if pred ~= nil then
+      if pred(row) then rows[#rows + 1] = shallow_copy(row) end
+    else
       rows[#rows + 1] = shallow_copy(row)
     end
   end
@@ -129,6 +146,7 @@ function QB:_base_rows()
   return rows
 end
 
+--: (self: QB) -> { [integer]: Row }
 function QB:select()
   if not self._join then
     return self:_base_rows()
@@ -140,12 +158,13 @@ function QB:select()
   local other_field = j.other_field
 
   -- Build lookup index on other table keyed by other_field value.
-  local other_index = {}
+  local other_index = {} --[[: { [any]: { [integer]: Row } } ]]
   for _, row in pairs(other._rows) do
     local key = row[other_field]
     if key ~= nil then
-      if not other_index[key] then other_index[key] = {} end
-      other_index[key][#other_index[key] + 1] = row
+      local bucket = other_index[key]
+      if not bucket then bucket = {}; other_index[key] = bucket end
+      bucket[#bucket + 1] = row
     end
   end
 
@@ -172,10 +191,12 @@ function QB:select()
   return out
 end
 
+--: (self: QB) -> integer
 function QB:count()
   return #self:_base_rows()
 end
 
+--: (self: QB) -> Row | nil
 function QB:first()
   local rows = self:_base_rows()
   return rows[1]
@@ -186,6 +207,7 @@ end
 local Tbl = {}
 Tbl.__index = Tbl
 
+--: (db: DB, name: string, opts: any) -> Tbl
 local function new_table(db, name, opts)
   return setmetatable({
     _db         = db,
@@ -201,6 +223,7 @@ local function new_table(db, name, opts)
 end
 
 -- Fire all subscribers. old_row is nil for insert, row is nil for delete.
+--: (self: Tbl, event: string, row: Row | nil, old_row: Row | nil) -> nil
 function Tbl:_fire(event, row, old_row)
   for _, fn in ipairs(self._subs) do
     fn(event, row, old_row)
@@ -212,6 +235,7 @@ function Tbl:_fire(event, row, old_row)
 end
 
 -- Update hash indexes for a row being added/removed.
+--: (self: Tbl, pk: any, row: Row) -> nil
 function Tbl:_index_add(pk, row)
   for field, idx in pairs(self._indexes) do
     local val = row[field]
@@ -222,6 +246,7 @@ function Tbl:_index_add(pk, row)
   end
 end
 
+--: (self: Tbl, pk: any, row: Row) -> nil
 function Tbl:_index_remove(pk, row)
   for field, idx in pairs(self._indexes) do
     local val = row[field]
@@ -234,6 +259,7 @@ function Tbl:_index_remove(pk, row)
   end
 end
 
+--: (self: Tbl, row: Row) -> boolean | (nil, string)
 function Tbl:insert(row)
   if self._pk then
     local pk = row[self._pk]
@@ -255,12 +281,14 @@ function Tbl:insert(row)
   return true
 end
 
+--: (self: Tbl, pk: any) -> Row | nil
 function Tbl:get(pk)
   local row = self._rows[pk]
   if not row then return nil end
   return shallow_copy(row)
 end
 
+--: (self: Tbl, pk: any, patch: Row) -> boolean | (nil, string)
 function Tbl:update(pk, patch)
   local row = self._rows[pk]
   if not row then return nil, "not found: " .. tostring(pk) end
@@ -272,6 +300,7 @@ function Tbl:update(pk, patch)
   return true
 end
 
+--: (self: Tbl, row: Row) -> boolean | (nil, string)
 function Tbl:upsert(row)
   if not self._pk then return nil, "upsert requires primary_key" end
   local pk = row[self._pk]
@@ -286,6 +315,7 @@ function Tbl:upsert(row)
   end
 end
 
+--: (self: Tbl, pk: any) -> boolean | (nil, string)
 function Tbl:delete(pk)
   local row = self._rows[pk]
   if not row then return nil, "not found: " .. tostring(pk) end
@@ -300,6 +330,7 @@ function Tbl:delete(pk)
   return true
 end
 
+--: (self: Tbl, fn: any) -> () -> nil
 function Tbl:subscribe(fn)
   self._subs[#self._subs + 1] = fn
   local subs = self._subs
@@ -310,18 +341,21 @@ function Tbl:subscribe(fn)
   end
 end
 
+--: (self: Tbl, filter: any, fn: any) -> any
 function Tbl:live_query(filter, fn)
-  local lq = {
+  local lq --[[: any]] = {
     _tbl    = self,
     _filter = filter,
     _fn     = fn,
     _rows   = {},
   }
+  --: (s: any) -> nil
   function lq:_refresh()
-    local rows = new_qb(self._tbl):where(self._filter):select()
+    local rows = new_qb(self._tbl, nil):where(self._filter):select()
     self._rows = rows
     self._fn(rows)
   end
+  --: (s: any) -> nil
   function lq:destroy()
     local live = self._tbl._live
     for i = #live, 1, -1 do
@@ -334,6 +368,7 @@ function Tbl:live_query(filter, fn)
   return lq
 end
 
+--: (self: Tbl, field: string) -> nil
 function Tbl:index(field)
   if self._indexes[field] then return end -- already exists
   local idx = {}
@@ -349,20 +384,29 @@ function Tbl:index(field)
 end
 
 -- Query builder entry points on table object
-function Tbl:where(pred)   return new_qb(self):where(pred) end
-function Tbl:order_by(...) return new_qb(self):order_by(...) end
-function Tbl:limit(n)      return new_qb(self):limit(n) end
-function Tbl:offset(n)     return new_qb(self):offset(n) end
-function Tbl:join(...)     return new_qb(self):join(...) end
-function Tbl:select()      return new_qb(self):select() end
-function Tbl:count()       return new_qb(self):count() end
-function Tbl:first()       return new_qb(self):first() end
+--: (self: Tbl, pred: any) -> QB
+function Tbl:where(pred)   return new_qb(self, nil):where(pred) end
+--: (self: Tbl, field: string, dir: string | nil) -> QB
+function Tbl:order_by(field, dir) return new_qb(self, nil):order_by(field, dir) end
+--: (self: Tbl, n: integer) -> QB
+function Tbl:limit(n)      return new_qb(self, nil):limit(n) end
+--: (self: Tbl, n: integer) -> QB
+function Tbl:offset(n)     return new_qb(self, nil):offset(n) end
+--: (self: Tbl, other: Tbl, local_field: string, other_field: string) -> QB
+function Tbl:join(other, local_field, other_field) return new_qb(self, nil):join(other, local_field, other_field) end
+--: (self: Tbl) -> { [integer]: Row }
+function Tbl:select()      return new_qb(self, nil):select() end
+--: (self: Tbl) -> integer
+function Tbl:count()       return new_qb(self, nil):count() end
+--: (self: Tbl) -> Row | nil
+function Tbl:first()       return new_qb(self, nil):first() end
 
 -- ── Database ──────────────────────────────────────────────────────────────────
 
 local DB = {}
 DB.__index = DB
 
+--: (self: DB, name: string, opts: any) -> Tbl
 function DB:table(name, opts)
   if self._tables[name] then return self._tables[name] end
   local t = new_table(self, name, opts)
@@ -371,6 +415,7 @@ function DB:table(name, opts)
 end
 
 -- ACID-ish transaction: snapshot all table rows; on error, restore snapshot.
+--: (self: DB, fn: any) -> boolean | (nil, any)
 function DB:transaction(fn)
   -- Snapshot: deep copy all rows
   local snapshots = {}
@@ -391,12 +436,13 @@ function DB:transaction(fn)
       tbl._order = snap.order
       -- Rebuild indexes
       for field in pairs(tbl._indexes) do
-        local idx = {}
+        local idx = {} --[[: { [any]: { [integer]: any } } ]]
         for pk, row in pairs(tbl._rows) do
           local val = row[field]
           if val ~= nil then
-            if not idx[val] then idx[val] = {} end
-            idx[val][#idx[val] + 1] = pk
+            local bucket = idx[val]
+            if not bucket then bucket = {}; idx[val] = bucket end
+            bucket[#bucket + 1] = pk
           end
         end
         tbl._indexes[field] = idx
@@ -410,6 +456,7 @@ end
 
 -- ── Module entry point ────────────────────────────────────────────────────────
 
+--: () -> DB
 function M.database()
   return setmetatable({ _tables = {} }, DB)
 end
