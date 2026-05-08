@@ -143,6 +143,8 @@ end
 -- ── Tree object methods ─────────────────────────────────────────────────────
 
 --:: MerkleTree = { root: string, leaves: string[], depth: integer, _nodes: string[], _n_padded: integer, _n_real: integer, _hash_fn: (string) -> string, ... }
+--:: SparseNode = { left: SparseNode | nil, right: SparseNode | nil, value: string | nil, ... }
+--:: SparseTree = { root: string, _depth: integer, _hash_fn: (string) -> string, _zh: { [integer]: string }, _trie: SparseNode | nil, ... }
 local Tree = {}
 Tree.__index = Tree
 
@@ -264,14 +266,17 @@ function M.verify(proof, leaf_hash, hash_fn)
 end
 
 -- Return list of leaf indices that differ between two trees.
+--: (tree_a: MerkleTree, tree_b: MerkleTree) -> integer[]
 function M.diff(tree_a, tree_b)
   -- Walk the trees together, pruning subtrees that match.
-  local changed = {}
+  local changed = {} --: integer[]
   local n = math.max(tree_a._n_padded, tree_b._n_padded)
   -- Normalize both trees to same padded size for comparison
+  --: (tree: MerkleTree, pos: integer) -> string | nil
   local function get(tree, pos)
     return tree._nodes[pos]
   end
+  --: (a: MerkleTree, b: MerkleTree, pos: integer, leaf_start: integer, leaf_end: integer) -> nil
   local function walk(a, b, pos, leaf_start, leaf_end)
     local ha = get(a, pos)
     local hb = get(b, pos)
@@ -300,11 +305,12 @@ function M.diff(tree_a, tree_b)
     -- We need to handle mismatched tree sizes: recurse differently
     -- Simplest approach for equal-sized trees
     if a._n_padded == b._n_padded then
-      walk(a, b, 2 * pos,     leaf_start, leaf_start + (leaf_end - leaf_start) / 2 - 1)
-      walk(a, b, 2 * pos + 1, leaf_start + (leaf_end - leaf_start) / 2, leaf_end)
+      local half = rshift(leaf_end - leaf_start, 1)
+      walk(a, b, 2 * pos,     leaf_start, leaf_start + half - 1)
+      walk(a, b, 2 * pos + 1, leaf_start + half, leaf_end)
     else
       -- Different sizes: fall back to leaf-by-leaf comparison
-      return nil, "different_sizes"
+      return
     end
   end
   if tree_a._n_padded == tree_b._n_padded then
@@ -324,6 +330,7 @@ function M.diff(tree_a, tree_b)
 end
 
 -- Concatenate two trees into a new tree with combined leaf set.
+--: (tree_a: MerkleTree, tree_b: MerkleTree) -> (MerkleTree | nil, string | nil)
 function M.concat(tree_a, tree_b)
   local hash_fn = tree_a._hash_fn
   local leaves = {}
@@ -360,6 +367,7 @@ end
 -- Compute root from trie nodes + zero hashes.
 -- node is a Lua table {left=node|nil, right=node|nil} or nil.
 -- level: current level (depth at root, 0 at leaf).
+--: (node: SparseNode | nil, level: integer, zh: { [integer]: string }, hash_fn: (string) -> string) -> string
 local function sparse_root(node, level, zh, hash_fn)
   if node == nil then
     return zh[level]
@@ -375,6 +383,7 @@ end
 
 -- Extract the i-th bit (MSB first) of a hex string key (bit 0 = most significant).
 -- hex key must be at least ceil(depth/4) chars.
+--: (key_hex: string, i: integer) -> integer
 local function hex_bit(key_hex, i)
   -- i is 0-based bit index
   local char_idx = rshift(i, 2) + 1  -- which hex character (1-based)
@@ -400,39 +409,42 @@ local function sparse_set_node(node, key_hex, value_hash, level)
 end
 
 -- Proper recursive set with explicit bit position.
+--: (node: SparseNode | nil, key_hex: string, value_hash: string, bit_pos: integer, max_bit: integer) -> SparseNode
 local function trie_set(node, key_hex, value_hash, bit_pos, max_bit)
-  node = node and { left = node.left, right = node.right, value = node.value } or {}
+  local n = node and { left = node.left, right = node.right, value = node.value } or {} --[[:! SparseNode]]
   if bit_pos > max_bit then
     -- Leaf
-    node.value = value_hash
-    return node
+    n.value = value_hash
+    return n
   end
   local b = hex_bit(key_hex, bit_pos)
   if b == 0 then
-    node.left  = trie_set(node.left,  key_hex, value_hash, bit_pos + 1, max_bit)
+    n.left  = trie_set(n.left,  key_hex, value_hash, bit_pos + 1, max_bit)
   else
-    node.right = trie_set(node.right, key_hex, value_hash, bit_pos + 1, max_bit)
+    n.right = trie_set(n.right, key_hex, value_hash, bit_pos + 1, max_bit)
   end
-  return node
+  return n
 end
 
 -- Build proof path for a key.
 -- Returns path array: [{hash=sibling_hash, direction="left"|"right"}, ...]
 -- from leaf to root.
+--: (node: SparseNode | nil, key_hex: string, bit_pos: integer, max_bit: integer, zh: { [integer]: string }, hash_fn: (string) -> string) -> { hash: string, direction: string }[]
 local function trie_proof_path(node, key_hex, bit_pos, max_bit, zh, hash_fn)
   if bit_pos > max_bit then
-    return {}
+    return {} --[[:! { hash: string, direction: string }[] ]]
   end
   local level = max_bit - bit_pos  -- zero-hash level for sibling
   local b = hex_bit(key_hex, bit_pos)
-  local sibling_node
+  local sibling_node --: SparseNode | nil
   if b == 0 then
     sibling_node = node and node.right or nil
   else
     sibling_node = node and node.left or nil
   end
   local sibling_hash = sparse_root(sibling_node, level, zh, hash_fn)
-  local child_node   = node and (b == 0 and node.left or node.right) or nil
+  local child_node --: SparseNode | nil
+  child_node = node and (b == 0 and node.left or node.right) or nil
   local path = trie_proof_path(child_node, key_hex, bit_pos + 1, max_bit, zh, hash_fn)
   -- Insert at beginning: path goes from leaf→root, so append in reverse
   -- We build bottom-up: deepest first, so append here.
@@ -463,6 +475,7 @@ function M.sparse(depth, opts)
 end
 
 -- Return a new sparse tree with key_hash -> value_hash set.
+--: (self: SparseTree, key_hash: string, value_hash: string) -> SparseTree
 function Sparse:set(key_hash, value_hash)
   local new_trie = trie_set(self._trie, key_hash, value_hash, 0, self._depth - 1)
   local st = setmetatable({}, Sparse)
@@ -477,6 +490,7 @@ end
 -- Return a proof for key_hash.
 -- proof: { root, key_hash, path = [{hash, direction}] }
 -- path[1] is the sibling closest to the leaf; path[depth] is the sibling at root level.
+--: (self: SparseTree, key_hash: string) -> { root: string, key_hash: string, path: { hash: string, direction: string }[] }
 function Sparse:get_proof(key_hash)
   local path = trie_proof_path(
     self._trie, key_hash, 0, self._depth - 1, self._zh, self._hash_fn

@@ -507,6 +507,8 @@ end
 
 -- ── OAuth2 Client ─────────────────────────────────────────────────────────────
 
+--:: HttpTransport = { post: (string, { [string]: string }, string) -> ({ status: integer, body: string | nil } | nil, string | nil) }
+--:: OAuthClient = { _client_id: string, _client_secret: string | nil, _token_url: string | nil, _http: HttpTransport | nil, ... }
 local client_mt = {}
 client_mt.__index = client_mt
 
@@ -550,9 +552,9 @@ end
 -- Build the Authorization Code redirect URL.
 -- opts: { auth_url, redirect_uri, scope, state, code_challenge, code_challenge_method, ... }
 -- Returns: URL string.
---: (self: { _client_id: string, ... }, opts: { auth_url: string, redirect_uri: string | nil, scope: string | nil, state: string | nil, code_challenge: string | nil, code_challenge_method: string | nil, ... }) -> string
+--: (self: OAuthClient, opts: { auth_url: string, redirect_uri: string | nil, scope: string | nil, state: string | nil, code_challenge: string | nil, code_challenge_method: string | nil, ... }) -> string
 function client_mt:authorization_url(opts)
-  local params = {} --: { [string]: string }
+  local params = ({} --[[:! { [string]: string }]])
   params["response_type"] = "code"
   params["client_id"]     = tostring(self._client_id)
   if opts.redirect_uri then params["redirect_uri"] = opts.redirect_uri end
@@ -579,7 +581,9 @@ end
 -- Client Credentials flow (RFC 6749 §4.4).
 -- opts: { scope? }
 -- Returns: token_table or (nil, err).
+--: (self: OAuthClient, opts: { scope: string | nil, ... } | nil) -> (unknown, unknown)
 function client_mt:client_credentials(opts)
+  if not self._token_url then return nil, "token_url not configured" end
   local params = {
     grant_type    = "client_credentials",
     client_id     = self._client_id,
@@ -595,10 +599,12 @@ end
 -- Authorization Code exchange (RFC 6749 §4.1.3).
 -- opts: { code, redirect_uri, code_verifier? }
 -- Returns: token_table or (nil, err).
+--: (self: OAuthClient, opts: { code: string | nil, redirect_uri: string | nil, code_verifier: string | nil, ... } | nil) -> (unknown, unknown)
 function client_mt:exchange_code(opts)
   if not opts or not opts.code then
     return nil, "missing code"
   end
+  if not self._token_url then return nil, "token_url not configured" end
   local params = {
     grant_type    = "authorization_code",
     code          = opts.code,
@@ -614,10 +620,12 @@ end
 -- Refresh Token flow (RFC 6749 §6).
 -- opts: { refresh_token, scope? }
 -- Returns: token_table or (nil, err).
+--: (self: OAuthClient, opts: { refresh_token: string | nil, scope: string | nil, ... } | nil) -> (unknown, unknown)
 function client_mt:refresh(opts)
   if not opts or not opts.refresh_token then
     return nil, "missing refresh_token"
   end
+  if not self._token_url then return nil, "token_url not configured" end
   local params = {
     grant_type     = "refresh_token",
     refresh_token  = opts.refresh_token,
@@ -632,9 +640,11 @@ end
 -- Token Introspection (RFC 7662).
 -- opts: { introspect_url }
 -- Returns: introspection response table or (nil, err).
+--: (self: OAuthClient, access_token: string | nil, opts: { introspect_url: string | nil, ... } | nil) -> (unknown, unknown)
 function client_mt:introspect(access_token, opts)
   if not access_token then return nil, "missing access_token" end
   if not opts or not opts.introspect_url then return nil, "missing introspect_url" end
+  local introspect_url = opts.introspect_url --[[:! string]]
   local params = {
     token     = access_token,
     client_id = self._client_id,
@@ -644,8 +654,9 @@ function client_mt:introspect(access_token, opts)
   if not self._http or not self._http.post then
     return nil, "http transport not configured"
   end
-  local resp, err = self._http.post(opts.introspect_url, headers, form_encode(params))
+  local resp, err = self._http.post(introspect_url, headers, form_encode(params))
   if not resp then return nil, err or "http request failed" end
+  if type(resp) ~= "table" then return nil, "unexpected response type" end
   if resp.status ~= 200 then return nil, "http " .. tostring(resp.status) end
   if not resp.body then return nil, "empty response body" end
   local obj, jerr = json_parse(resp.body)
