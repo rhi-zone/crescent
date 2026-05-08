@@ -93,12 +93,14 @@ end
 
 local function unpack_float(s, i)
 	-- i is 1-based Lua string index
-	ffi.copy(_fu.b, s:sub(i, i + 3), 4)
+	local ss = s --[[: string]]
+	ffi.copy(_fu.b, ss:sub(i, i + 3) --[[: any]], 4)
 	return _fu.f, i + 4
 end
 
 local function unpack_double(s, i)
-	ffi.copy(_du.b, s:sub(i, i + 7), 8)
+	local ss = s --[[: string]]
+	ffi.copy(_du.b, ss:sub(i, i + 7) --[[: any]], 8)
 	return _du.d, i + 8
 end
 
@@ -222,7 +224,8 @@ local function encode_value(ftype, value)
 	elseif k == "message" then
 		local inner, err = M.encode(ftype, value)
 		if not inner then return nil, err end
-		return encode_varint_u64(#inner, 0) .. inner
+		local inner_s = inner --[[: string]]
+		return encode_varint_u64(#inner_s, 0) .. inner_s
 
 	else
 		return nil, "unknown field kind: " .. tostring(k)
@@ -250,7 +253,7 @@ function M.encode(schema, msg)
 			if ftype.kind == "repeated" then
 				-- Repeated field
 				if type(value) ~= "table" then
-					return nil, "field '" .. field.name .. "': expected table for repeated"
+					return nil, "field '" .. tostring(field.name) .. "': expected table for repeated"
 				end
 				local inner_ftype = ftype.ftype
 				-- Empty repeated: emit nothing (proto3 default values are omitted)
@@ -319,9 +322,10 @@ local function decode_varint(data, pos)
 	local hi = 0 --: number
 	local shift = 0 --: integer
 	local i = pos
-	local len = #data
+	local sdata = data --[[:! string]]
+	local len = #sdata
 	while i <= len do
-		local b = data:byte(i)
+		local b = sdata:byte(i)
 		i = i + 1
 		if shift < 28 then
 			lo = lo + (b % 128) * (2 ^ shift)
@@ -455,14 +459,16 @@ local function decode_value(ftype, data, pos)
 	elseif k == "string" or k == "bytes" then
 		local lo, _, npos, err = decode_varint(data, pos)
 		if not npos or not lo then return nil, nil, err end
-		if npos + lo - 1 > #data then return nil, nil, "truncated string/bytes" end
-		return data:sub(npos, npos + lo - 1), npos + lo
+		local sdata = data --[[:! string]]
+		if npos + lo - 1 > #sdata then return nil, nil, "truncated string/bytes" end
+		return sdata:sub(npos, npos + lo - 1), npos + lo
 
 	elseif k == "message" then
 		local lo, _, npos, err = decode_varint(data, pos)
 		if not npos or not lo then return nil, nil, err end
-		if npos + lo - 1 > #data then return nil, nil, "truncated message" end
-		local sub = data:sub(npos, npos + lo - 1)
+		local sdata = data --[[:! string]]
+		if npos + lo - 1 > #sdata then return nil, nil, "truncated message" end
+		local sub = sdata:sub(npos, npos + lo - 1)
 		local result, derr = M.decode(ftype, sub)
 		if not result then return nil, nil, derr end
 		return result, npos + lo
@@ -491,7 +497,7 @@ function M.decode(schema, data)
 		if not field then
 			-- Unknown field: skip
 			local skip_pos, skip_err = skip_field(data, pos, wire_type)
-			if not skip_pos then return nil, "skip unknown field: " .. (skip_err or "?") end
+			if not skip_pos then return nil, "skip unknown field: " .. tostring(skip_err or "?") end
 			pos = skip_pos
 		else
 			local ftype = field.ftype
@@ -500,7 +506,7 @@ function M.decode(schema, data)
 			if ftype.kind == "repeated" then
 				local inner_ftype = ftype.ftype
 				if not result[fname] then result[fname] = {} end
-				local arr = result[fname]
+				local arr = result[fname] --[[:! { [integer]: unknown, ... }]]
 
 				if inner_ftype.kind == "message" or inner_ftype.kind == "string" or inner_ftype.kind == "bytes" then
 					-- Each occurrence is a separate LEN record; decode_value handles the length prefix.
@@ -518,7 +524,7 @@ function M.decode(schema, data)
 						local end_pos = pos + lo
 						while pos < end_pos do
 							local v, npos3, verr = decode_value(inner_ftype, data, pos)
-							if verr then return nil, "field '" .. fname .. "' packed: " .. verr end
+							if verr then return nil, "field '" .. fname .. "' packed: " .. tostring(verr) end
 							arr[#arr + 1] = v
 							pos = npos3
 						end

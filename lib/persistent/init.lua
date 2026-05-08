@@ -21,11 +21,15 @@ M._tier = "pure"
 local List = {}
 List.__index = List
 
-local LIST_EMPTY = setmetatable({ _node = nil, _len = 0 }, List)
+--:: ListNode = { [integer]: unknown, ... }
+--:: ListObj = { _node: ListNode | nil, _len: integer, cons: (self: ListObj, val: unknown) -> ListObj, ... }
 
+--: (node: ListNode | nil, len: integer) -> ListObj
 local function make_list(node, len)
-  return setmetatable({ _node = node, _len = len }, List)
+  return setmetatable({ _node = node, _len = len }, List) --[[:! ListObj]]
 end
+
+local LIST_EMPTY = make_list(nil, 0)
 
 function List:head()
   if not self._node then return nil end
@@ -34,11 +38,13 @@ end
 
 function List:tail()
   if not self._node then return LIST_EMPTY end
-  return make_list(self._node[2], self._len - 1)
+  local len = self._len --[[:! integer]]
+  return make_list(self._node[2] --[[:! ListNode | nil]], len - 1)
 end
 
 function List:cons(val)
-  return make_list({ val, self._node }, self._len + 1)
+  local len = self._len --[[:! integer]]
+  return make_list({ val, self._node } --[[:! ListNode]], len + 1)
 end
 
 function List:length()
@@ -121,7 +127,7 @@ end
 
 -- Construct a list from varargs
 function M.list(...)
-  local args = { ... }
+  local args = { ... } --[[:! { [integer]: unknown, ... }]]
   local result = LIST_EMPTY
   for i = #args, 1, -1 do
     result = result:cons(args[i])
@@ -157,8 +163,12 @@ end
 local Vector = {}
 Vector.__index = Vector
 
+--:: VArr = { [integer]: unknown, ... }
+--:: VectorObj = { _arr: VArr, _n: integer, ... }
+
+--: (arr: VArr, n: integer) -> VectorObj
 local function make_vector(arr, n)
-  return setmetatable({ _arr = arr, _n = n }, Vector)
+  return setmetatable({ _arr = arr, _n = n }, Vector) --[[:! VectorObj]]
 end
 
 local VECTOR_EMPTY = make_vector({}, 0)
@@ -199,11 +209,13 @@ function Vector:map(fn)
   return make_vector(new_arr, self._n)
 end
 
+--: (self: VectorObj, from: integer, to: integer) -> VectorObj
 function Vector:slice(from, to)
   if from < 1 then from = 1 end
-  if to > self._n then to = self._n end
+  local n = self._n --[[:! integer]]
+  if to > n then to = n end
   if from > to then return VECTOR_EMPTY end
-  local new_arr = {}
+  local new_arr = {} --[[:! VArr]]
   local j = 1
   for i = from, to do
     new_arr[j] = self._arr[i]
@@ -213,7 +225,7 @@ function Vector:slice(from, to)
 end
 
 function M.vector(...)
-  local args = { ... }
+  local args = { ... } --[[:! VArr]]
   if #args == 0 then return VECTOR_EMPTY end
   return make_vector(args, #args)
 end
@@ -371,8 +383,11 @@ local function bst_each(node, fn)
   bst_each(node[4], fn)
 end
 
+--:: MapObj = { _root: unknown, _sz: integer, set: (self: MapObj, k: unknown, v: unknown) -> MapObj, ... }
+
+--: (root: unknown, sz: integer) -> MapObj
 local function make_map(root, sz)
-  return setmetatable({ _root = root, _sz = sz }, Map)
+  return setmetatable({ _root = root, _sz = sz }, Map) --[[:! MapObj]]
 end
 
 local MAP_EMPTY = make_map(nil, 0)
@@ -388,13 +403,15 @@ end
 function Map:set(k, v)
   local had = bst_has(self._root, k)
   local new_root = bst_set(self._root, k, v)
-  return make_map(new_root, had and self._sz or self._sz + 1)
+  local sz = self._sz --[[:! integer]]
+  return make_map(new_root, had and sz or sz + 1)
 end
 
 function Map:delete(k)
   if not bst_has(self._root, k) then return self end
   local new_root = bst_delete(self._root, k)
-  return make_map(new_root, self._sz - 1)
+  local sz = self._sz --[[:! integer]]
+  return make_map(new_root, sz - 1)
 end
 
 function Map:size()
