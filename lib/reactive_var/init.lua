@@ -29,16 +29,29 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: SubsMap = { [unknown]: boolean | nil }
+--:: EffectObj = { _kind: string, _fn: () -> nil, _deps: SubsMap, _disposed: boolean }
+--:: EffectSnap = { [integer]: EffectObj }
+--:: WatchFn = (new_val: unknown, old_val: unknown) -> nil
+--:: ReactNode = { _subs: SubsMap, _value: unknown, ... }
+--:: ComputedNode = { _kind: string, _fn: () -> unknown, _deps: SubsMap, _subs: SubsMap, _value: unknown, _dirty: boolean, _computing: boolean }
+--:: VarNode = { _value: unknown, _subs: SubsMap, _watches: { [integer]: WatchFn }, _watch_id: integer }
+--:: VarObj = { _node: VarNode, _kind: string, get: (self: unknown) -> unknown, set: (self: unknown, v: unknown) -> nil, ... }
+--:: ComputedObj = { _node: ComputedNode, _kind: string, ... }
+--:: ListObj = { _node: ReactNode, _data: { [integer]: unknown }, ... }
+--:: MapObj  = { _node: ReactNode, _data: { [unknown]: unknown }, ... }
+
 -- ---------------------------------------------------------------------------
 -- Global scheduler state
 -- ---------------------------------------------------------------------------
 
-local _stack         = {}   -- stack[i] = active subscriber (effect/computed)
+local _stack         = {} --: { [integer]: unknown }
 local _batch_depth   = 0
-local _pending       = {}   -- { [eff] = true } effects queued during batch
+local _pending       = {} --: { [unknown]: boolean | nil }
 local _flushing      = false
-local _queued        = {}   -- effects queued during a single non-batch write
+local _queued        = {} --: { [unknown]: boolean | nil }
 
+--: (sub: unknown) -> nil
 local function _push(sub) _stack[#_stack + 1] = sub end
 local function _pop()     _stack[#_stack] = nil      end
 local function _current() return _stack[#_stack]     end
@@ -49,9 +62,12 @@ local function _current() return _stack[#_stack]     end
 
 local function _track(node)
   local sub = _current()
-  if sub and sub._kind ~= "untrack" then
-    node._subs[sub] = true
-    sub._deps[node] = true
+  if sub then
+    local esub = sub --[[:! EffectObj]]
+    if esub._kind ~= "untrack" then
+      node._subs[sub] = true
+      esub._deps[node] = true
+    end
   end
 end
 
@@ -91,9 +107,9 @@ local function _notify(node)
   if _flushing then return end
   _flushing = true
   while next(_queued) do
-    local snap = {}
-    for eff in pairs(_queued) do snap[#snap + 1] = eff end
-    _queued = {}
+    local snap = {} --: EffectSnap
+    for eff in pairs(_queued) do snap[#snap + 1] = eff --[[:! EffectObj]] end
+    _queued = {} --[[:! { [unknown]: boolean | nil }]]
     for i = 1, #snap do
       if not snap[i]._disposed then run_effect(snap[i]) end
     end
@@ -104,9 +120,9 @@ end
 -- Flush pending effects at end of batch
 local function _flush_pending()
   while next(_pending) do
-    local snap = {}
-    for eff in pairs(_pending) do snap[#snap + 1] = eff end
-    _pending = {}
+    local snap = {} --: EffectSnap
+    for eff in pairs(_pending) do snap[#snap + 1] = eff --[[:! EffectObj]] end
+    _pending = {} --[[:! { [unknown]: boolean | nil }]]
     for i = 1, #snap do
       if not snap[i]._disposed then run_effect(snap[i]) end
     end
@@ -117,10 +133,14 @@ end
 -- Effect runner: rebuild dependency links on each run
 -- ---------------------------------------------------------------------------
 
+--: (eff: EffectObj) -> nil
 run_effect = function(eff)
   if eff._disposed then return end
-  for dep in pairs(eff._deps) do dep._subs[eff] = nil end
-  eff._deps = {}
+  for dep in pairs(eff._deps) do
+    local node = dep --[[:! ReactNode]]
+    node._subs[eff] = nil
+  end
+  eff._deps = ({} --[[:! SubsMap]])
   _push(eff)
   local ok, err = pcall(eff._fn)
   _pop()
@@ -134,11 +154,13 @@ end
 local VarMT = {}
 VarMT.__index = VarMT
 
+--: (self: VarObj) -> unknown
 function VarMT:get()
   _track(self._node)
   return self._node._value
 end
 
+--: (self: VarObj, new_val: unknown) -> nil
 function VarMT:set(new_val)
   local node = self._node
   local old = node._value
@@ -151,6 +173,7 @@ function VarMT:set(new_val)
   _notify(node)
 end
 
+--: (self: VarObj, new_val: unknown) -> unknown
 function VarMT:__call(new_val)
   if new_val == nil then
     return self:get()
@@ -180,6 +203,7 @@ end
 local ComputedMT = {}
 ComputedMT.__index = ComputedMT
 
+--: (self: ComputedObj) -> unknown
 function ComputedMT:get()
   local node = self._node
   _track(node)
@@ -189,7 +213,10 @@ function ComputedMT:get()
       return node._value
     end
     -- Rebuild deps
-    for dep in pairs(node._deps) do dep._subs[node] = nil end
+    for dep in pairs(node._deps) do
+      local rnode = dep --[[:! ReactNode]]
+      rnode._subs[node] = nil
+    end
     node._deps      = {}
     node._dirty     = false
     node._computing = true
@@ -236,18 +263,22 @@ M.memo = M.computed
 -- ---------------------------------------------------------------------------
 
 function M.effect(fn)
+  local _eff_deps = {} --: SubsMap
   local eff = {
     _kind     = "effect",
     _fn       = fn,
-    _deps     = {},
+    _deps     = _eff_deps,
     _disposed = false,
   }
   run_effect(eff)
   return function()
     if eff._disposed then return end
     eff._disposed = true
-    for dep in pairs(eff._deps) do dep._subs[eff] = nil end
-    eff._deps = {}
+    for dep in pairs(eff._deps) do
+      local rnode = dep --[[:! ReactNode]]
+      rnode._subs[eff] = nil
+    end
+    eff._deps = ({} --[[:! SubsMap]])
     _pending[eff] = nil
     _queued[eff]  = nil
   end
@@ -289,7 +320,7 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.untracked(fn)
-  local sentinel = { _kind = "untrack", _deps = {} }
+  local sentinel = { _kind = "untrack", _deps = {}, _disposed = false, _fn = function() end }
   _push(sentinel)
   local ok, result = pcall(fn)
   _pop()
@@ -336,11 +367,13 @@ function ListMT:pop()
   return v
 end
 
+--: (self: ListObj) -> integer
 function ListMT:length()
   _track(self._node)
   return #self._data
 end
 
+--: (self: ListObj) -> { [integer]: unknown }
 function ListMT:to_array()
   _track(self._node)
   local copy = {}

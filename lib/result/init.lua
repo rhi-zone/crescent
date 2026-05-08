@@ -4,7 +4,7 @@ end
 
 local M = {}
 
---:: Result = { _tag: string, _val: unknown }
+--:: Result = { _tag: string, _val: unknown, ... }
 
 -- Sentinel to distinguish nil-as-value from absence.
 -- Ok(nil) is valid and distinct from Err.
@@ -77,7 +77,7 @@ function Result:unwrap()
   error("called unwrap on Err: " .. tostring(self._val), 2)
 end
 
---: (default: unknown) -> unknown
+--: (self: Result, default: unknown) -> unknown
 function Result:unwrap_or(default)
   if self._tag == OK then
     return self._val
@@ -93,7 +93,7 @@ function Result:unwrap_err()
   error("called unwrap_err on Ok: " .. tostring(self._val), 2)
 end
 
---: (msg: string) -> unknown
+--: (self: Result, msg: string) -> unknown
 function Result:expect(msg)
   if self._tag == OK then
     return self._val
@@ -104,7 +104,7 @@ end
 -- ── Transform ───────────────────────────────────────────────────────────────
 
 --- Map the Ok value. Err passes through unchanged.
---: (fn: (unknown) -> unknown) -> Result
+--: (self: Result, fn: (unknown) -> unknown) -> Result
 function Result:map(fn)
   if self._tag == OK then
     return M.ok(fn(self._val))
@@ -113,7 +113,7 @@ function Result:map(fn)
 end
 
 --- Map the Err value. Ok passes through unchanged.
---: (fn: (unknown) -> unknown) -> Result
+--: (self: Result, fn: (unknown) -> unknown) -> Result
 function Result:map_err(fn)
   if self._tag == ERR then
     return M.err(fn(self._val))
@@ -122,7 +122,7 @@ function Result:map_err(fn)
 end
 
 --- Flatmap: fn must return a Result. Short-circuits on Err.
---: (fn: (unknown) -> Result) -> Result
+--: (self: Result, fn: (unknown) -> Result) -> Result
 function Result:and_then(fn)
   if self._tag == OK then
     return fn(self._val)
@@ -131,7 +131,7 @@ function Result:and_then(fn)
 end
 
 --- Called on Err; fn must return a Result. Ok passes through.
---: (fn: (unknown) -> Result) -> Result
+--: (self: Result, fn: (unknown) -> Result) -> Result
 function Result:or_else(fn)
   if self._tag == ERR then
     return fn(self._val)
@@ -140,7 +140,7 @@ function Result:or_else(fn)
 end
 
 --- Call fn(val) for side effects on Ok, pass through the Result unchanged.
---: (fn: (unknown) -> nil) -> Result
+--: (self: Result, fn: (unknown) -> nil) -> Result
 function Result:inspect(fn)
   if self._tag == OK then
     fn(self._val)
@@ -149,7 +149,7 @@ function Result:inspect(fn)
 end
 
 --- Call fn(err) for side effects on Err, pass through the Result unchanged.
---: (fn: (unknown) -> nil) -> Result
+--: (self: Result, fn: (unknown) -> nil) -> Result
 function Result:inspect_err(fn)
   if self._tag == ERR then
     fn(self._val)
