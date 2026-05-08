@@ -320,7 +320,7 @@ end
 -- Walk the block tree depth-first, applying all GFM transforms.
 local function transform(node)
   if node.type == "root" or node.type == "blockquote" then
-    local children = node.children
+    local children = node.children --[[:! { [integer]: any, ... }]]
     local new_children = {}
     for i = 1, #children do
       local child = children[i]

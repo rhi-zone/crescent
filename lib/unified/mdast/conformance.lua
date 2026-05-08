@@ -146,8 +146,10 @@ if not f2 then error("could not open commonmark spec") end
 local f = f2 --[[:! { close: (any) -> (boolean | nil, string | nil), flush: (any) -> (boolean | nil, string | nil), lines: (any) -> () -> string | nil, read: (any, ...string | number) -> string | nil, seek: (any, string | nil, integer | nil) -> (integer | nil, string | nil), setvbuf: (any, string, integer | nil) -> (boolean | nil, string | nil), write: (any, ...string | number) -> (any, string | nil) }]]
 local src = f:read("*a") --[[:! string]]
 f:close()
-local data = json.decode(src)
+local data_raw = json.decode(src)
+local data = data_raw --[[:! { [integer]: { section: string, markdown: string, html: string, example: integer } }]]
 
+--: { [string]: { [integer]: { section: string, markdown: string, html: string, example: integer } } }
 local sections = {}
 local section_order = {}
 for _, e in ipairs(data) do
@@ -163,7 +165,8 @@ for _, sec in ipairs(section_order) do
   if skip[sec] then goto cont end
   local pass, fail = 0, 0
   for _, e in ipairs(sections[sec]) do
-    local got = render_node(mdast.parse(e.markdown) --[[:! { type: string }]])
+    local parsed_tree = mdast.parse(e.markdown)
+    local got = render_node(parsed_tree --[[:! { type: string }]])
     if got == e.html then pass = pass + 1 else fail = fail + 1 end
   end
   local total = pass + fail

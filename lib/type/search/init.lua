@@ -240,7 +240,8 @@ M.query = function(query_type_str, index, opts)
     end
 
     -- Sort: highest score first, then by name
-    table.sort(matches, function(a, b)
+    local sort_fn = table.sort --[[: any]]
+    sort_fn(matches, function(a, b)
         if a.score ~= b.score then return a.score > b.score end
         return a.name < b.name
     end)

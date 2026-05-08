@@ -94,8 +94,8 @@ local serialize_node  -- forward declaration
 --: (any, string) -> string
 local function serialize_attrs(attributes, quote)
   if not attributes then return "" end
-  local keys = {}
-  for k in pairs(attributes) do keys[#keys + 1] = k end
+  local keys = {} --: { [integer]: string }
+  for k in pairs(attributes) do keys[#keys + 1] = k --[[:! string]] end
   table.sort(keys)
   local parts = {}
   local q = quote or '"'

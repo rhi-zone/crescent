@@ -258,9 +258,9 @@ local function decode_result(line)
 	return {
 		status    = status,
 		file      = urldecode(file_enc),
-		pass      = tonumber(pass_s),
-		fail      = tonumber(fail_s),
-		skip      = tonumber(skip_s) or 0,
+		pass      = tonumber(pass_s) --[[:! integer]],
+		fail      = tonumber(fail_s) --[[:! integer]],
+		skip      = (tonumber(skip_s) or 0) --[[:! integer]],
 		pcall_err = urldecode(pcall_enc),
 		tests     = tests,
 	}
@@ -379,6 +379,7 @@ local function run_parallel(file_list, n)
 	end
 
 	-- Decode results.
+	--: { [string]: { status: string, file: string, pass: integer, fail: integer, skip: integer, pcall_err: string, tests: { [integer]: { ok: boolean, name: string, err: string | nil } } } }
 	local results_by_file = {}
 	for _, line in ipairs(all_lines) do
 		local r = decode_result(line)

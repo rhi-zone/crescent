@@ -206,7 +206,8 @@ if not f0 then error("could not open commonmark spec") end
 local f = f0 --[[:! { close: (any) -> (boolean | nil, string | nil), flush: (any) -> (boolean | nil, string | nil), lines: (any) -> () -> string | nil, read: (any, ...string | number) -> string | nil, seek: (any, string | nil, integer | nil) -> (integer | nil, string | nil), setvbuf: (any, string, integer | nil) -> (boolean | nil, string | nil), write: (any, ...string | number) -> (any, string | nil) }]]
 local src = f:read("*a") --[[:! string]]
 f:close()
-local data = json.decode(src)
+local data_raw = json.decode(src)
+local data = data_raw --[[:! { [integer]: { section: string, markdown: string, html: string, example: integer } }]]
 
 local target_sections = {
   ["Emphasis and strong emphasis"] = true,
@@ -216,10 +217,11 @@ local target_sections = {
 
 for _, e in ipairs(data) do
   if target_sections[e.section] then
-    local tree = mdast.parse(e.markdown) --[[:! { type: string }]]
+    local parsed_tree = mdast.parse(e.markdown)
+    local tree = parsed_tree --[[:! { type: string }]]
     local got = render_node(tree)
-    local html = e.html --[[:! string]]
-    local markdown = e.markdown --[[:! string]]
+    local html = e.html
+    local markdown = e.markdown
     if got ~= html then
       print(string.format("=== FAIL ex%d [%s] ===", e.example, e.section))
       local md_str = (markdown:gsub("\n", "\\n"))

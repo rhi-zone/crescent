@@ -14,7 +14,7 @@ if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
 end
 
-local visit = require("lib.unified.unist_util_visit")
+local visit = require("lib.unified.unist_util_visit") --[[: any]]
 
 local M = {}
 

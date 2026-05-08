@@ -45,6 +45,7 @@ end
 
 -- ── State construction ───────────────────────────────────────────────────────
 
+--: (opts: { seed: integer, draw_count: integer | nil }) -> SolitaireState
 function M.new(opts)
   if not opts or opts.seed == nil then
     error("seed required")

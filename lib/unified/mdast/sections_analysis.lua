@@ -163,8 +163,10 @@ if not f2 then error("could not open commonmark spec") end
 local f = f2 --[[:! { close: (any) -> (boolean | nil, string | nil), flush: (any) -> (boolean | nil, string | nil), lines: (any) -> () -> string | nil, read: (any, ...string | number) -> string | nil, seek: (any, string | nil, integer | nil) -> (integer | nil, string | nil), setvbuf: (any, string, integer | nil) -> (boolean | nil, string | nil), write: (any, ...string | number) -> (any, string | nil) }]]
 local src = f:read("*a") --[[:! string]]
 f:close()
-local data = json.decode(src)
+local data_raw = json.decode(src)
+local data = data_raw --[[:! { [integer]: { section: string, markdown: string, html: string, example: integer } }]]
 
+--: { [string]: { [integer]: { section: string, markdown: string, html: string, example: integer } } }
 local sections = {}
 local section_order = {}
 for _, e in ipairs(data) do
@@ -183,7 +185,8 @@ for _, sec in ipairs(section_order) do
   local pass, fail = 0, 0
   local fails = {}
   for _, e in ipairs(sections[sec]) do
-    local got = render_node(mdast.parse(e.markdown) --[[:! { type: string }]])
+    local parsed_tree = mdast.parse(e.markdown)
+    local got = render_node(parsed_tree --[[:! { type: string }]])
     if got == e.html then pass = pass + 1
     else
       fail = fail + 1
@@ -194,8 +197,9 @@ for _, sec in ipairs(section_order) do
   print(string.format("%-45s %3d/%3d  (%.0f%%)", sec, pass, total, pass/total*100))
   if show_fails and fail > 0 then
     for _, e in ipairs(fails) do
+      local parsed_tree2 = mdast.parse(e.markdown)
       print(string.format("  ex%d: want=%s got=%s", e.example,
-        e.html:gsub("\n","\\n"), render_node(mdast.parse(e.markdown) --[[:! { type: string }]]):gsub("\n","\\n")))
+        e.html:gsub("\n","\\n"), render_node(parsed_tree2 --[[:! { type: string }]]):gsub("\n","\\n")))
     end
   end
   ::cont::

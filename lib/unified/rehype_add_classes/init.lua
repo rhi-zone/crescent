@@ -57,7 +57,8 @@ end
 --: (any) -> { [string]: string[] }
 local function compile_selectors(opts)
   local map = {}
-  for selector, classes in pairs(opts) do
+  for selector_raw, classes in pairs(opts) do
+    local selector = selector_raw --[[:! string]]
     -- Split comma-separated selectors.
     for tag in selector:gmatch("[^,]+") do
       tag = tag:match("^%s*(.-)%s*$")  -- trim

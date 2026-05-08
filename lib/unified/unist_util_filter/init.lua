@@ -29,13 +29,15 @@ end
 --: (any, any[] | nil) -> any
 local function copy_node(node, new_children)
   local copy = {}
-  for k, v in pairs(node) do
+  local node_map = node --[[:! { [string]: any }]]
+  for k, v in pairs(node_map) do
     copy[k] = v
   end
   if new_children ~= nil then
     copy.children = new_children
   else
-    copy.children = nil
+    local copy_any = copy --[[: any]]
+    copy_any.children = nil
   end
   return copy
 end
