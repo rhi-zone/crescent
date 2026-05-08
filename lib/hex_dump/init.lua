@@ -22,10 +22,13 @@ local function byte_to_hex(b, upper)
   return upper and HEX_HI[b] or HEX_LO[b]
 end
 
+--:: DumpOpts = { width?: integer, group?: integer, offset?: integer, uppercase?: boolean, show_ascii?: boolean, show_addr?: boolean, ascii_char?: string }
+
 --- Classic xxd-style hex dump.
 -- @param data  binary string
 -- @param opts  table of options (optional)
 -- @return      formatted hex dump string
+--: (string, DumpOpts | nil) -> string
 function M.dump(data, opts)
   opts = opts or {}
   local width      = opts.width      or 16
@@ -55,7 +58,7 @@ function M.dump(data, opts)
     for col = 0, width - 1 do
       local idx = row * width + col
       if idx < n then
-        local b = string.byte(data, idx + 1)
+        local b = string.byte(data, idx + 1) --[[:! integer]]
         line_parts[#line_parts + 1] = hex_tab[b]
         if show_ascii then
           if b >= 32 and b <= 126 then
@@ -99,10 +102,11 @@ end
 --- Convert binary string to hex string.
 -- @param data  binary string
 -- @return      hex string (lowercase)
+--: (string) -> string
 function M.to_hex(data)
   local t = {}
   for i = 1, #data do
-    t[i] = HEX_LO[string.byte(data, i)]
+    t[i] = HEX_LO[string.byte(data, i) --[[:! integer]]]
   end
   return table.concat(t)
 end
@@ -155,6 +159,7 @@ end
 -- @param b     second binary string
 -- @param opts  dump options (optional)
 -- @return      annotated diff string
+--: (string, string, DumpOpts | nil) -> string
 function M.diff(a, b, opts)
   opts = opts or {}
   local width = opts.width or 16
@@ -257,6 +262,7 @@ local ESCAPE = {
   ["\v"] = "\\v", ["\\"] = "\\\\", ["\""] = "\\\"",
 }
 
+--: (string) -> string
 local function escape_string(s)
   local result = s:gsub('[%c\\"]', function(c)
     return ESCAPE[c] or string.format("\\%d", string.byte(c))
@@ -264,6 +270,8 @@ local function escape_string(s)
   return '"' .. result .. '"'
 end
 
+--:: InspectOpts = { indent?: integer, max_depth?: integer, compact?: boolean }
+--: (unknown, InspectOpts, integer, { [unknown]: boolean | nil }) -> string
 local function inspect_value(val, opts, depth, seen)
   local t = type(val)
   if t == "nil" then
@@ -277,7 +285,7 @@ local function inspect_value(val, opts, depth, seen)
     else return tostring(val)
     end
   elseif t == "string" then
-    return escape_string(val)
+    return escape_string(val --[[:! string]])
   elseif t == "function" then
     return tostring(val)  -- e.g. "function: 0x..."
   elseif t == "table" then
@@ -350,10 +358,11 @@ end
 --- Return an array of byte values from a binary string.
 -- @param data  binary string
 -- @return      array of integers {72, 101, 108, ...}
+--: (string) -> { [integer]: integer, ... }
 function M.bytes(data)
   local t = {}
   for i = 1, #data do
-    t[i] = string.byte(data, i)
+    t[i] = string.byte(data, i) --[[:! integer]]
   end
   return t
 end

@@ -30,7 +30,11 @@ end
 -- EXPAND
 -- ========================
 
+--:: Rng = { next: (self: Rng) -> integer, float: (self: Rng) -> number }
+--:: Rules = { [string]: unknown }
+
 -- Apply rules once to a string, return new string.
+--: (string, Rules, Rng) -> string
 local function apply_rules(s, rules, rng)
   local parts = {}
   local i = 1
@@ -85,8 +89,10 @@ local TURTLE_OPS = {
   ["#"] = function(_) return { op = "color", delta = 1 } end,
 }
 
+--:: TurtleCmd = { op: string, ... }
+--: (string, number) -> { [integer]: TurtleCmd, ... }
 local function parse_turtle(s, angle)
-  local cmds = {}
+  local cmds = {} --: { [integer]: TurtleCmd, ... }
   local i = 1
   local n = #s
   while i <= n do
@@ -112,9 +118,13 @@ end
 -- LSYSTEM OBJECT
 -- ========================
 
+--:: LsSpec = { axiom: string, rules: { [string]: unknown }, angle?: number, step?: number, seed?: integer }
+--:: LsObj = { _axiom: string, _rules: { [string]: unknown }, _angle: number, _step: number, _rng: Rng, ... }
+
 local Ls = {}
 Ls.__index = Ls
 
+--: (self: LsObj, integer) -> (string | nil, string | nil)
 function Ls:expand(n)
   if type(n) ~= "number" or n < 0 or n ~= math.floor(n) then
     return nil, "expand: n must be a non-negative integer"
@@ -126,28 +136,32 @@ function Ls:expand(n)
   return s
 end
 
+--: (self: LsObj, integer) -> (() -> (integer | nil, string | nil))
 function Ls:expand_iter(n)
   if type(n) ~= "number" or n < 0 or n ~= math.floor(n) then
     -- return an iterator that immediately errors
     local done = false
+    --: () -> (integer | nil, string | nil)
     return function()
       if not done then
         done = true
         error("expand_iter: n must be a non-negative integer")
       end
+      return nil, nil
     end
   end
   local s = self._axiom
   local step = 0
+  --: () -> (integer | nil, string | nil)
   return function()
-    if step > n then return nil end
+    if step > n then return nil, nil end
     local current = s
     local i = step
     step = step + 1
     if step <= n then
       s = apply_rules(s, self._rules, self._rng)
     end
-    return i, current
+    return i --[[:! integer]], current
   end
 end
 
@@ -162,6 +176,7 @@ end
 -- CONSTRUCTOR
 -- ========================
 
+--: (LsSpec) -> (LsObj | nil, string | nil)
 function M.new(spec)
   if type(spec) ~= "table" then
     return nil, "new: spec must be a table"
@@ -181,7 +196,8 @@ function M.new(spec)
 
   -- Validate rules
   for sym, rule in pairs(spec.rules) do
-    if type(sym) ~= "string" or #sym ~= 1 then
+    local sym_s = sym --[[:! string]]
+    if type(sym) ~= "string" or #sym_s ~= 1 then
       return nil, "new: rule keys must be single characters, got: " .. tostring(sym)
     end
     if type(rule) == "table" then
