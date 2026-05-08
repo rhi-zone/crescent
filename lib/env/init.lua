@@ -19,7 +19,7 @@ local env_iter = function (_, i)
 end
 
 --[[thinnest possible wrapper over `env`]]
---: () -> (((unknown, integer) -> (integer | nil, string | nil)), nil, integer)
+--: () -> (((unknown, integer) -> (integer, string) | nil), nil, integer)
 mod.env_stateless = function ()	return env_iter, nil, -1 end
 
 --: () -> { [string]: string }

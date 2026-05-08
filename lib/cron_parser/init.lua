@@ -573,13 +573,13 @@ function M.parse(expr, opts)
   if type(expr) ~= "string" then
     return nil, "expression must be a string"
   end
-  expr = expr:match("^%s*(.-)%s*$")  -- trim
+  expr = expr:match("^%s*(.-)%s*$") or expr  -- trim (pattern always matches)
 
   -- Resolve aliases
   local alias = ALIASES[expr:lower()]
   if alias then expr = alias end
 
-  local fields, err = parse_fields(expr)
+  local fields, err = parse_fields(expr --[[:! string]])
   if not fields then
     return nil, "invalid cron expression: " .. (err or "?")
   end

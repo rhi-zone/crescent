@@ -121,7 +121,7 @@ local function chacha20_crypt(key, nonce, counter, data)
 		local chunk_len = math.min(64, #data - pos + 1)
 		local out = {} --[[:! { [integer]: string }]]
 		for i = 1, chunk_len do
-			out[i] = string.char(bxor(string.byte(data, pos + i - 1) or 0, string.byte(ks, i) or 0))
+			out[i] = string.char(bxor(string.byte(data, pos + i - 1) or 0, string.byte(ks, i) or 0)) --[[:! string]]
 		end
 		blocks[#blocks + 1] = table.concat(out)
 		pos = pos + 64

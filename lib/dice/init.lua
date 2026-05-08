@@ -508,8 +508,10 @@ local function stats_node(node)
     local smax = s.max --: number
     local smean = s.mean
     local svar = s.variance
+    local neg_mean --: number | nil
+    if type(smean) == "number" then neg_mean = -smean end
     return { min = -smax, max = -smin,
-             mean = smean and -smean or nil, variance = svar }
+             mean = neg_mean, variance = svar }
 
   elseif t == "binop" then
     local bn = node --[[:! BinopNode]]

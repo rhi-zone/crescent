@@ -216,10 +216,11 @@ end
 -- ---------------------------------------------------------------------------
 
 function DataFrame:limit(n)
+  local n_ = n --[[:! integer]]
   local self_ = self --[[:! DataFrame]]
   local rows = {} --: { [integer]: { [string]: any } }
   local src = self_._rows
-  for i = 1, math.min(n, #src) do
+  for i = 1, math.min(n_, #src) do
     local r = copy_row(src[i])
     rows[i] = r
   end

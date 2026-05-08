@@ -21,7 +21,7 @@ local function hash_to_float(s)
     h = bit.bxor(h, string.byte(s, i))
     -- FNV prime multiply, keep in 32-bit range via modulo
     -- LuaJIT numbers are doubles; we stay in integer range with modulo
-    h = (h * 16777619) % 4294967296
+    h = math.floor((h * 16777619) % 4294967296)
   end
   return h / 4294967296
 end

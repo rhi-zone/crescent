@@ -482,11 +482,12 @@ local function parse_selection_set(lex)
       local dirs
       dirs, err = parse_directives(lex)
       if not dirs then return nil, err end
-      local ss = nil
+      local ss --: unknown
+      local ss_err --: unknown
       skip_ignored(lex)
       if peek(lex) == byte("{") then
-        ss, err = parse_selection_set(lex)
-        if not ss then return nil, err end
+        ss, ss_err = parse_selection_set(lex)
+        if not ss then return nil, ss_err --[[:! string | nil]] end
       end
       selections[#selections + 1] = { --[[: any]]
         kind = "Field",
