@@ -22,15 +22,20 @@ local INF = math.huge
 -- rev_idx: index of the reverse edge in adj[to]
 -- For residual graph: reverse edge has cap=0 (or lower bound), cost=-cost
 
+--:: Edge = { from: unknown, to: unknown, cap: number, flow: number, cost: number, rev_idx: integer }
+--:: Adj  = { [unknown]: { [integer]: Edge, ... } }
+
 local function new_graph()
-  return {}  -- adj[node] = { edge, ... }
+  return {} --[[:! Adj]]  -- adj[node] = { edge, ... }
 end
 
+--: (Adj, unknown, unknown, number, number | nil) -> Edge
 local function graph_add_edge(adj, u, v, cap, cost)
   if not adj[u] then adj[u] = {} end
   if not adj[v] then adj[v] = {} end
-  local fwd = { from = u, to = v, cap = cap, flow = 0, cost = cost or 0, rev_idx = #adj[v] + 1 }
-  local rev = { from = v, to = u, cap = 0,   flow = 0, cost = -(cost or 0), rev_idx = #adj[u] + 1 }
+  local c = cost or 0
+  local fwd = { from = u, to = v, cap = cap, flow = 0, cost = c, rev_idx = #adj[v] + 1 } --[[:! Edge]]
+  local rev = { from = v, to = u, cap = 0,   flow = 0, cost = -c, rev_idx = #adj[u] + 1 } --[[:! Edge]]
   adj[u][#adj[u] + 1] = fwd
   adj[v][#adj[v] + 1] = rev
   return fwd
@@ -41,6 +46,7 @@ end
 -- ========================
 
 -- BFS to find augmenting path; returns parent table or nil
+--: (Adj, unknown, unknown) -> { [unknown]: { node: unknown, edge: Edge } } | nil
 local function bfs_path(adj, source, sink)
   local visited = { [source] = true }
   local parent = {}   -- parent[v] = { node = u, edge = e }
@@ -64,6 +70,7 @@ local function bfs_path(adj, source, sink)
 end
 
 -- Augment along the path found by BFS; returns flow pushed
+--: (Adj, { [unknown]: { node: unknown, edge: Edge } }, unknown, unknown) -> number
 local function augment(adj, parent, source, sink)
   -- Find bottleneck
   local bottle = INF
@@ -90,8 +97,9 @@ local function augment(adj, parent, source, sink)
 end
 
 -- Run Edmonds-Karp; returns total flow
+--: (Adj, unknown, unknown) -> number
 local function edmonds_karp(adj, source, sink)
-  local total = 0
+  local total = 0 --: number
   while true do
     local parent = bfs_path(adj, source, sink)
     if not parent then break end
@@ -105,9 +113,10 @@ end
 -- ========================
 
 -- SPFA (Bellman-Ford queue variant) on residual graph; returns dist, prev
+--: (Adj, { [integer]: unknown }, unknown) -> ({ [unknown]: number }, { [unknown]: { node: unknown, edge: Edge } })
 local function spfa(adj, nodes, source)
-  local dist = {}
-  local in_queue = {}
+  local dist = {} --: { [unknown]: number }
+  local in_queue = {} --: { [unknown]: boolean }
   local prev = {}  -- prev[v] = { node=u, edge=e }
 
   for _, n in ipairs(nodes) do dist[n] = INF end
@@ -138,6 +147,7 @@ local function spfa(adj, nodes, source)
 end
 
 -- Augment along cheapest path; returns flow pushed, cost
+--: (Adj, { [unknown]: { node: unknown, edge: Edge } }, unknown, unknown) -> (number, number)
 local function augment_cost(adj, prev, source, sink)
   -- Find bottleneck
   local bottle = INF
@@ -150,7 +160,7 @@ local function augment_cost(adj, prev, source, sink)
   end
 
   -- Update flows
-  local cost = 0
+  local cost = 0 --: number
   v = sink
   while v ~= source do
     local p = prev[v]
@@ -178,7 +188,7 @@ net_mt.__index = net_mt
 local function build_adj(edge_specs)
   local adj = new_graph()
   local nodes_set = {}
-  local edge_refs = {}
+  local edge_refs = {} --: { [integer]: { spec: unknown, fwd: Edge, reversed?: boolean } }
 
   for _, spec in ipairs(edge_specs) do
     local u, v, cap, cost = spec.u, spec.v, spec.cap, spec.cost
@@ -232,8 +242,8 @@ end
 -- edge_flows_array: { {from, to, flow, capacity}, ... }
 function net_mt:max_flow(source, sink)
   self:_ensure_adj()
-  local adj = self._adj
-  local edge_refs = self._edge_refs
+  local adj = self._adj --[[:! Adj]]
+  local edge_refs = self._edge_refs --[[:! { [integer]: { spec: unknown, fwd: Edge, reversed?: boolean } }]]
 
   -- Reset flows first
   for _, er in ipairs(edge_refs) do
@@ -270,7 +280,7 @@ end
 function net_mt:min_cut(source, sink)
   -- Run max flow first (uses residual graph state)
   local cut_value = self:max_flow(source, sink)
-  local adj = self._adj
+  local adj = self._adj --[[:! Adj]]
 
   -- BFS on residual graph from source to find S-reachable nodes
   local visited = { [source] = true }
@@ -310,8 +320,8 @@ function net_mt:min_cost_flow(source, sink, opts)
   local max_f = opts.max_flow or INF
 
   self:_ensure_adj()
-  local adj = self._adj
-  local nodes = self._nodes
+  local adj = self._adj --[[:! Adj]]
+  local nodes = self._nodes --[[:! { [integer]: unknown }]]
 
   -- Reset all flows
   for _, edges in pairs(adj) do
@@ -320,8 +330,8 @@ function net_mt:min_cost_flow(source, sink, opts)
     end
   end
 
-  local total_flow = 0
-  local total_cost = 0
+  local total_flow = 0 --: number
+  local total_cost = 0 --: number
 
   while total_flow < max_f do
     local dist, prev = spfa(adj, nodes, source)
@@ -407,8 +417,8 @@ function M.bipartite_matching(opts)
   for _, ledges in pairs(adj) do
     for _, e in ipairs(ledges) do
       if e.flow == 1 and e.cap == 1 then
-        local f = e.from
-        local t = e.to
+        local f = e.from --[[:! string]]
+        local t = e.to --[[:! string]]
         -- Only L:... -> R:... edges
         if f:sub(1, 2) == "L:" and t:sub(1, 2) == "R:" then
           matching[#matching + 1] = {

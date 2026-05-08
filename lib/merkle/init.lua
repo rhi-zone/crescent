@@ -41,8 +41,13 @@ M._tier = "pure"
 -- ── Internal helpers ──────────────────────────────────────────────────────────
 
 -- Convert a 64-char hex string to a 32-byte binary string.
+--: (string) -> string
 local function hex_to_bytes(hex)
-	return (hex:gsub("%x%x", function(h) return string.char(tonumber(h, 16)) end))
+	local function repl(h) --: (string) -> string
+		return string.char(tonumber(h, 16) --[[:! integer]])
+	end
+	local result, _ = hex:gsub("%x%x", repl)
+	return result
 end
 
 -- Hash a leaf block (domain separation byte \x00).
@@ -56,6 +61,7 @@ local function hash_pair(left_hex, right_hex)
 end
 
 -- Next power of 2 >= n (n >= 1).
+--: (integer) -> integer
 local function next_pow2(n)
 	local p = 1
 	while p < n do p = p * 2 end
@@ -66,6 +72,7 @@ end
 
 -- Build a perfect binary tree from an array of leaf hex hashes.
 -- Returns nodes[] (flat 1-indexed array) and padded (number of leaves in last layer).
+--: ({ [integer]: string }, integer) -> ({ [integer]: string }, integer)
 local function build_tree(leaf_hashes, padded)
 	-- Total nodes in a perfect binary tree of depth h where padded = 2^h.
 	local total = 2 * padded - 1
@@ -86,6 +93,8 @@ end
 
 -- ── Tree object ───────────────────────────────────────────────────────────────
 
+--:: TreeObj = { _nodes: { [integer]: string }, _size: integer, _padded: integer, _height: integer, _leaf_idx: (self: TreeObj, integer) -> integer, ... }
+
 local Tree = {}
 Tree.__index = Tree
 
@@ -94,10 +103,11 @@ Tree.__index = Tree
 -- tree._padded  padded leaf count (power of 2)
 -- tree._height  log2(padded)
 
+--: ({ [integer]: string }, integer, integer) -> TreeObj
 local function make_tree(nodes, size, padded)
 	local height = 0
 	local p = padded
-	while p > 1 do height = height + 1; p = p / 2 end
+	while p > 1 do height = height + 1; p = math.floor(p / 2) end
 	return setmetatable({
 		_nodes  = nodes,
 		_size   = size,
@@ -123,10 +133,12 @@ function Tree:node_count()
 end
 
 -- Leaf index in flat nodes array (1-indexed leaf i).
+--: (self: { _padded: integer, ... }, integer) -> integer
 function Tree:_leaf_idx(i)
 	return self._padded + i - 1
 end
 
+--: (self: TreeObj, integer) -> (string | nil, string | nil)
 function Tree:leaf_hash(i)
 	if i < 1 or i > self._size then
 		return nil, "index out of range"
@@ -139,6 +151,7 @@ end
 -- "side" is the side of the SIBLING, so to recompute the parent:
 --   if side == "left":  parent = H(sibling || current)
 --   if side == "right": parent = H(current || sibling)
+--: (self: TreeObj, integer) -> ({ [integer]: { hash: string | nil, side: string }, ... } | nil, string | nil)
 function Tree:proof(i)
 	if i < 1 or i > self._size then
 		return nil, "index out of range"
@@ -269,6 +282,7 @@ function M.build_from_hashes(hashes)
 end
 
 -- Restore a tree from a serialized table.
+--: ({ nodes: { [integer]: string }, size: integer, padded: integer, ... }) -> TreeObj
 function M.deserialize(t)
 	return make_tree(t.nodes, t.size, t.padded)
 end
