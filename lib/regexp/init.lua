@@ -80,6 +80,7 @@ local OP_ANCHOR_END   = 9
 --
 -- Returns a list of NFA instructions plus ngroups count.
 
+--: (string) -> (nil, string)
 local function parse_error(msg) return nil, "regexp: " .. msg end
 
 -- Returns a "class predicate" table: {ranges={{lo,hi},...}, shortcuts={fn,neg,...}, neg=bool}

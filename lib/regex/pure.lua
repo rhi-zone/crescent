@@ -227,7 +227,7 @@ parse_alt = function(pat, pos, group_counter, dotall)
 	return first, npos_i
 end
 
---: (string, string | nil) -> (any | nil, string | nil)
+--: (string, string | nil) -> (any | nil, integer | string | nil)
 local function compile_pattern(pat, flags)
 	local pat = (pat --[[:! string]])
 	local flags_s = (flags or "") --[[:! string]]

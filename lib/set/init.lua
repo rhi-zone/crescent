@@ -34,7 +34,7 @@ function M.from_array(arr)
   return s
 end
 
---: (unknown) -> nil
+--: (unknown) -> (nil, string | nil)
 function Set:add(v)
   local self_ = self --[[:! Set]]
   if v == nil then return nil, "cannot add nil to set" end
@@ -78,7 +78,7 @@ function Set:to_array()
   return arr
 end
 
---: () -> () -> unknown | nil
+--: () -> (unknown, { [unknown]: boolean }, nil)
 function Set:values()
   return next, self._data, nil
 end

@@ -63,15 +63,15 @@ local function resolve(req)
 		if type(prov) == "string" then
 			local p = get_provider(prov)
 			if not p then return nil, nil, "unknown provider: " .. prov end
-			return p, req.model
+			return p, req.model, nil
 		end
 		-- provider is a table (custom provider)
-		return prov --[[:! ai_provider]], req.model
+		return prov --[[:! ai_provider]], req.model, nil
 	end
 	-- no provider specified: default to openai
 	local p = get_provider("openai")
 	if not p then return nil, nil, "openai provider not available" end
-	return p, req.model
+	return p, req.model, nil
 end
 
 --- Copy request table, clearing provider field.

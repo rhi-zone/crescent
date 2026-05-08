@@ -85,7 +85,7 @@ function ActorCtx:name()
   return self_._actor._name
 end
 
---: (ActorCtxShape, integer) -> boolean|nil
+--: (ActorCtxShape, integer) -> (boolean | nil, string | nil)
 function ActorCtx:link(pid)
   local self_ = self --[[: ActorCtxShape]]
   local sys_ = self_._system --[[: SystemShape]]
@@ -200,7 +200,7 @@ function System:spawn(fn, opts)
   return pid
 end
 
---: (SystemShape, integer, any) -> boolean|nil
+--: (SystemShape, integer, any) -> (boolean | nil, string | nil)
 function System:send(pid, msg)
   local self_ = self --[[: SystemShape]]
   local actor = self_._actors[pid]
