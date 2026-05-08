@@ -9,6 +9,7 @@ local function make_counter()
 	return { n = 0 }
 end
 
+--: ({ n: number }) -> string
 local function next_id(counter)
 	counter.n = counter.n + 1
 	return "%" .. counter.n
@@ -18,28 +19,31 @@ end
 -- Instruction
 ---------------------------------------------------------------------------
 
---:: Instruction = { id: string, op: string, args: { [number]: unknown }, block_name: string }
+--:: Instruction = { id: string | nil, op: string, args: { [integer]: unknown }, block_name: string }
 
 local Instruction = {}
 Instruction.__index = Instruction
 
+--: (string | nil, string, { [integer]: unknown }, string) -> Instruction
 local function new_instruction(id, op, args, block_name)
-	return setmetatable({ id = id, op = op, args = args, block_name = block_name }, Instruction)
+	return setmetatable({ id = id, op = op, args = args, block_name = block_name }, Instruction) --[[: Instruction]]
 end
 
 ---------------------------------------------------------------------------
 -- Block
 ---------------------------------------------------------------------------
 
---:: Block = { name: string, _instrs: { [number]: Instruction }, _func: Func }
+--:: Block = { name: string, _instrs: { [integer]: Instruction }, _func: Func, successors: (self: Block) -> { [integer]: Block }, predecessors: (self: Block) -> { [integer]: Block } }
 
 local Block = {}
 Block.__index = Block
 
+--: (string, Func) -> Block
 local function new_block(name, func)
-	return setmetatable({ name = name, _instrs = {}, _func = func }, Block)
+	return setmetatable({ name = name, _instrs = {}, _func = func }, Block) --[[: Block]]
 end
 
+--: (self: Block, string, { [integer]: unknown }) -> string
 function Block:_add(op, args)
 	local id = next_id(self._func._counter)
 	local instr = new_instruction(id, op, args, self.name)
@@ -79,16 +83,19 @@ function Block:copy(val)
 	return self:_add("copy", { val })
 end
 
+--: (self: Block, unknown, Block, Block) -> nil
 function Block:br(cond, true_block, false_block)
 	local instr = new_instruction(nil, "br", { cond, true_block.name, false_block.name }, self.name)
 	self._instrs[#self._instrs + 1] = instr
 end
 
+--: (self: Block, Block) -> nil
 function Block:jmp(target_block)
 	local instr = new_instruction(nil, "jmp", { target_block.name }, self.name)
 	self._instrs[#self._instrs + 1] = instr
 end
 
+--: (self: Block, unknown) -> nil
 function Block:ret(val)
 	local instr = new_instruction(nil, "ret", { val }, self.name)
 	self._instrs[#self._instrs + 1] = instr
@@ -102,6 +109,7 @@ function Block:instructions()
 	return out
 end
 
+--: (self: Block) -> { [integer]: Block }
 function Block:successors()
 	local out = {}
 	if #self._instrs == 0 then return out end
@@ -109,15 +117,16 @@ function Block:successors()
 	if last.op == "br" then
 		-- args: {cond, true_name, false_name}
 		local func = self._func
-		out[#out + 1] = func._block_map[last.args[2]]
-		out[#out + 1] = func._block_map[last.args[3]]
+		out[#out + 1] = func._block_map[last.args[2] --[[:! string]]]
+		out[#out + 1] = func._block_map[last.args[3] --[[:! string]]]
 	elseif last.op == "jmp" then
 		local func = self._func
-		out[#out + 1] = func._block_map[last.args[1]]
+		out[#out + 1] = func._block_map[last.args[1] --[[:! string]]]
 	end
 	return out
 end
 
+--: (self: Block) -> { [integer]: Block }
 function Block:predecessors()
 	local out = {}
 	local func = self._func
@@ -138,16 +147,18 @@ end
 -- CFG
 ---------------------------------------------------------------------------
 
---:: CFG = { _func: Func }
+--:: CFG = { _func: Func, postorder: (self: CFG) -> { [integer]: string }, dominators: (self: CFG) -> { [string]: string | nil } }
 
 local CFG = {}
 CFG.__index = CFG
 
+--: (self: CFG) -> { [integer]: string }
 function CFG:postorder()
 	local visited = {}
 	local order = {}
 	local func = self._func
 
+	--: (Block) -> nil
 	local function dfs(block)
 		if visited[block.name] then return end
 		visited[block.name] = true
@@ -169,6 +180,7 @@ function CFG:postorder()
 	return rpo
 end
 
+--: (self: CFG) -> { [string]: string | nil }
 function CFG:dominators()
 	local func = self._func
 	if #func._blocks == 0 then return {} end
@@ -180,7 +192,7 @@ function CFG:dominators()
 		rpo_idx[rpo[i]] = i
 	end
 
-	local doms = {}
+	local doms = {} --[[:! { [string]: string | nil }]]
 	local entry_name = rpo[1]
 	doms[entry_name] = entry_name
 
@@ -237,11 +249,12 @@ end
 -- Func
 ---------------------------------------------------------------------------
 
---:: Func = { name: string, params: { [number]: string }, _blocks: { [number]: Block }, _block_map: { [string]: Block }, _counter: { n: number } }
+--:: Func = { name: string, params: { [integer]: string }, _blocks: { [integer]: Block }, _block_map: { [string]: Block }, _counter: { n: number } }
 
 local Func = {}
 Func.__index = Func
 
+--: (string, { [integer]: string } | nil) -> Func
 local function new_func(name, params)
 	return setmetatable({
 		name = name,
@@ -249,7 +262,7 @@ local function new_func(name, params)
 		_blocks = {},
 		_block_map = {},
 		_counter = make_counter(),
-	}, Func)
+	}, Func) --[[: Func]]
 end
 
 function Func:block(name)
@@ -268,9 +281,10 @@ function Func:blocks()
 end
 
 function Func:cfg()
-	return setmetatable({ _func = self }, CFG)
+	return setmetatable({ _func = self }, CFG) --[[: CFG]]
 end
 
+--: (self: Func) -> string
 function Func:dump()
 	local lines = {}
 	lines[#lines + 1] = "func " .. self.name .. "(" .. table.concat(self.params, ", ") .. "):"
@@ -323,13 +337,13 @@ end
 -- Module
 ---------------------------------------------------------------------------
 
---:: Module = { name: string, _funcs: { [number]: Func } }
+--:: Module = { name: string, _funcs: { [integer]: Func } }
 
 local Module = {}
 Module.__index = Module
 
 function M.module(name)
-	return setmetatable({ name = name, _funcs = {} }, Module)
+	return setmetatable({ name = name, _funcs = {} }, Module) --[[: Module]]
 end
 
 function Module:func(name, params)

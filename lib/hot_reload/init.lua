@@ -10,7 +10,9 @@ local M = {}
 
 M._tier = "pure"
 
---:: watcher = { check: () -> { [integer]: string }, stop: () -> nil }
+--:: watch_entry = { filepath: string, last_mtime: number | nil, on_change: ((string) -> nil) | nil, dir_watched: boolean | nil }
+--:: watcher_stats = { watched: integer, reloaded_total: integer, errors: integer }
+--:: watcher = { _time_fn: () -> number, _poll_interval: number, _watched: { [string]: watch_entry }, _watch_order: { [integer]: string }, _reload_cbs: { [integer]: (string, boolean, string | nil) -> nil }, _error_cbs: { [integer]: (string, string) -> nil }, _preserve_keys: { [string]: string }, _dependents: { [string]: { [integer]: string } }, _stats: watcher_stats, _last_check: number, watch: (self: watcher, string, string) -> nil, watch_dir: (self: watcher, string, { pattern: string | nil, on_change: ((string) -> nil) | nil } | nil) -> nil, check: (self: watcher) -> { [integer]: { module_name: string, filepath: string } }, reload: (self: watcher, string) -> (boolean) | (nil, string), auto_reload: (self: watcher) -> nil, on_reload: (self: watcher, (string, boolean, string | nil) -> nil) -> nil, on_error: (self: watcher, (string, string) -> nil) -> nil, preserve_state: (self: watcher, string, string) -> nil, register_dependency: (self: watcher, string, string) -> nil, dependents: (self: watcher, string) -> { [integer]: string }, stats: (self: watcher) -> watcher_stats }
 
 -- ---------------------------------------------------------------------------
 -- File modification time
@@ -45,7 +47,8 @@ end
 
 -- Creates a new hot-reload watcher.
 -- opts.poll_interval: seconds between checks (default 1.0)
---: ({ poll_interval: number | nil } | nil) -> watcher
+-- opts.time_fn: function returning current time as a number (required)
+--: ({ time_fn: () -> number, poll_interval: number | nil }) -> watcher
 function M.watcher(opts)
   assert(opts and opts.time_fn, "watcher requires opts.time_fn")
   local w = {}
@@ -84,6 +87,7 @@ function M.watcher(opts)
   -- Register a module to watch.
   -- module_name: e.g. "lib.mymodule"
   -- filepath: absolute or relative path to the Lua file
+  --: (self: watcher, string, string) -> nil
   function w:watch(module_name, filepath)
     if not self._watched[module_name] then
       self._watch_order[#self._watch_order + 1] = module_name
@@ -102,8 +106,9 @@ function M.watcher(opts)
   -- Watch all matching files in a directory recursively.
   -- opts.pattern: Lua pattern to filter filenames (default "%.lua$")
   -- opts.on_change: callback(filepath) when a file changes (optional)
+  --: (self: watcher, string, { pattern: string | nil, on_change: ((string) -> nil) | nil } | nil) -> nil
   function w:watch_dir(dir, dir_opts)
-    dir_opts = dir_opts or {}
+    dir_opts = dir_opts or {} --[[:! { pattern: string | nil, on_change: ((string) -> nil) | nil }]]
     local pattern    = dir_opts.pattern or "%.lua$"
     local on_change  = dir_opts.on_change
 
@@ -158,6 +163,7 @@ function M.watcher(opts)
   -- Check all watched modules for file changes.
   -- Returns an array of { module_name, filepath } for changed modules.
   -- Respects poll_interval: if called more frequently, may return empty table.
+  --: (self: watcher) -> { [integer]: { module_name: string, filepath: string } }
   function w:check()
     local now = self._time_fn()
     -- Allow check() to be called freely; rate-limit only auto_reload via _last_check
@@ -185,6 +191,7 @@ function M.watcher(opts)
 
   -- Reload a specific module.
   -- Returns true on success, or nil + error message on failure.
+  --: (self: watcher, string) -> (boolean) | (nil, string)
   function w:reload(module_name)
     -- Grab old module for state preservation and fallback
     local old_module = package.loaded[module_name]
@@ -244,6 +251,7 @@ function M.watcher(opts)
   -- Check for changed modules and reload them all.
   -- Intended to be called from a main loop.
   -- Respects poll_interval to avoid excessive stat() calls.
+  --: (self: watcher) -> nil
   function w:auto_reload()
     local now = self._time_fn()
     if now - self._last_check < self._poll_interval then
@@ -317,7 +325,7 @@ function M.watcher(opts)
     }
   end
 
-  return w
+  return w --[[:! watcher]]
 end
 
 return M
