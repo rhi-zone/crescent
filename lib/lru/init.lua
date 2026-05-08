@@ -5,7 +5,7 @@ end
 local M = {}
 
 --:: LruNode = { key: unknown, value: unknown, prev: LruNode | nil, next: LruNode | nil, expires_at: number | nil }
---:: Cache = { _cap: number, _size: number, _map: { [unknown]: LruNode }, _head: LruNode | nil, _tail: LruNode | nil, _ttl: number | nil, _on_evict: ((unknown, unknown) -> nil) | nil, _clock: (() -> number) | nil, _hits: number, _misses: number, _evictions: number, ... }
+--:: Cache = { _cap: number, _size: number, _map: { [unknown]: LruNode }, _head: LruNode | nil, _tail: LruNode | nil, _ttl: number | nil, _on_evict: ((unknown, unknown) -> nil) | nil, _clock: (() -> number) | nil, _hits: number, _misses: number, _evictions: number, get: (self: Cache, unknown) -> unknown | nil, set: (self: Cache, unknown, unknown, number | nil) -> unknown | nil, ... }
 --:: LfuNode = { key: unknown, value: unknown, freq: number, b_prev: LfuNode | nil, b_next: LfuNode | nil }
 --:: LfuBucket = { head: LfuNode | nil, tail: LfuNode | nil, count: number }
 --:: Lfu = { _cap: number, _size: number, _min_freq: number, _map: { [unknown]: LfuNode }, _freq: { [number]: LfuBucket }, _on_evict: ((unknown, unknown) -> nil) | nil, _hits: number, _misses: number, _evictions: number, ... }

@@ -228,7 +228,8 @@ encoder["nil"] = function (_) return "\246" end
 encoder.userdata = function (ud, opts)
 	local mt = debug.getmetatable(ud)
 	if mt then
-		local encode_ud = opts and opts[mt] or mt.__tocbor
+		local mt_ = mt --[[:! { __tocbor: (unknown) -> string | nil, ... }]]
+		local encode_ud = opts and opts[mt] or mt_.__tocbor
 		if encode_ud then
 			return encode_ud(ud, opts)
 		end
@@ -236,7 +237,7 @@ encoder.userdata = function (ud, opts)
 	error("can't encode userdata")
 end
 
---[[@param t {}]]
+--: ({ [unknown]: unknown, ... }, unknown) -> string
 encoder.table = function (t, opts)
 	local mt = getmetatable(t)
 	if mt then
@@ -342,7 +343,7 @@ end
 
 local read_object = function (fh, opts)
 	local typ, mintyp = read_type(fh)
-	return decoder[typ](fh, mintyp, opts)
+	return (decoder[typ] --[[:! (unknown, integer, unknown) -> unknown]])(fh, mintyp, opts)
 end
 mod.decode_file = read_object
 
@@ -500,13 +501,13 @@ local decode_raw = function (s, opts)
 	end
 	if type(more) ~= "function" then more = function () error("input too short") end end
 
-	--[[@param bytes integer]]
 	fh.read = function (self, bytes)
 		local ret = s:sub(pos, pos + bytes - 1)
 		if #ret < bytes then
 			ret = more(bytes - #ret, fh, opts)
-			if ret then self:write(ret) end
-			return self:read(bytes)
+			if ret then self:write(ret) end --[[ self has write from fh ]]
+			local self_ = self --[[:! { read: (self: unknown, integer) -> string, ... }]]
+			return self_:read(bytes)
 		end
 		pos = pos + bytes
 		return ret
