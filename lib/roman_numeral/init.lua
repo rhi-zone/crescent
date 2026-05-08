@@ -49,7 +49,7 @@ local ADDITIVE = {
 -- Symbol values for decoding (uppercase)
 local SYMBOL_VALUE = {
   I = 1, V = 5, X = 10, L = 50, C = 100, D = 500, M = 1000,
-} --[[: { [string]: integer | nil } ]]
+} --[[: { [string]: integer } ]]
 
 -- ---------------------------------------------------------------------------
 -- to_roman / from_roman (standard, 1-3999)
@@ -57,6 +57,7 @@ local SYMBOL_VALUE = {
 
 --- Encode an integer (1-3999) to a standard Roman numeral string.
 -- Returns string, or (nil, errmsg) on error.
+--: (number) -> (string | nil, string | nil)
 M.to_roman = function(n)
   if type(n) ~= "number" or n ~= math.floor(n) then
     return nil, "roman_numeral.to_roman: expected integer, got " .. tostring(n)
@@ -82,6 +83,7 @@ end
 --- Decode a Roman numeral string to an integer.
 -- Accepts both subtractive and additive notation, case-insensitive.
 -- Returns integer, or (nil, errmsg) on error.
+--: (string) -> (number | nil, string | nil)
 M.from_roman = function(s)
   if type(s) ~= "string" or #s == 0 then
     return nil, "roman_numeral.from_roman: expected non-empty string"
@@ -93,7 +95,7 @@ M.from_roman = function(s)
       return nil, "roman_numeral.from_roman: invalid character '" .. ch .. "'"
     end
   end
-  local total = 0
+  local total = 0 --: number
   local len = #upper
   for i = 1, len do
     local cur = SYMBOL_VALUE[upper:sub(i, i)] or 0
@@ -235,7 +237,7 @@ end
 -- Vinculum symbol values (uppercase, inside parens)
 local VINCULUM_SYMBOL_VALUE = {
   I = 1000, V = 5000, X = 10000, L = 50000, C = 100000, D = 500000, M = 1000000,
-} --[[: { [string]: integer | nil } ]]
+} --[[: { [string]: integer } ]]
 
 --- Decode a Roman numeral string with vinculum (parenthesis) notation.
 -- Parenthesized portions are decoded with each symbol multiplied by 1000.
@@ -245,7 +247,7 @@ M.from_roman_large = function(s)
     return nil, "roman_numeral.from_roman_large: expected non-empty string"
   end
 
-  local total = 0
+  local total = 0 --: number
   local i = 1
   local len = #s
 
@@ -311,7 +313,7 @@ M.to_ordinal = function(n)
   if not roman then return nil, err end
   local mod100 = n % 100
   local mod10  = n % 10
-  local suffix
+  local suffix = "th"
   if mod100 >= 11 and mod100 <= 13 then
     suffix = "th"
   elseif mod10 == 1 then
@@ -320,8 +322,6 @@ M.to_ordinal = function(n)
     suffix = "nd"
   elseif mod10 == 3 then
     suffix = "rd"
-  else
-    suffix = "th"
   end
   return roman .. suffix
 end
@@ -384,13 +384,13 @@ local UNICODE_FROM_INT = {
   [100]  = utf8_char(0x216D),  -- Ⅽ
   [500]  = utf8_char(0x216E),  -- Ⅾ
   [1000] = utf8_char(0x216F),  -- Ⅿ
-}
+} --[[: { [integer]: string | nil } ]]
 
 -- Reverse map: UTF-8 string -> integer value
 -- Covers both uppercase (U+2160-U+216F) and lowercase (U+2170-U+217F)
-local UNICODE_TO_INT = {}
+local UNICODE_TO_INT = {} --[[: { [string]: integer | nil } ]]
 for v, u in pairs(UNICODE_FROM_INT) do
-  UNICODE_TO_INT[u] = v
+  if u then UNICODE_TO_INT[u] = v end
 end
 -- Lowercase forms (U+2170..U+217B = 1..12, U+217C=50, U+217D=100, U+217E=500, U+217F=1000)
 local LOWERCASE_CODEPOINTS = {
@@ -406,6 +406,7 @@ end
 -- Only values with a precomposed Unicode form are supported:
 -- 1-12, 50, 100, 500, 1000.
 -- Returns UTF-8 string, or nil if no precomposed form exists.
+--: (number) -> string | nil
 M.to_unicode = function(n)
   if type(n) ~= "number" then return nil end
   return UNICODE_FROM_INT[n]
@@ -434,7 +435,8 @@ M.format = function(n, opts)
   local case    = opts.case    or "upper"
   local ordinal = opts.ordinal or false
 
-  local result, err
+  local result --: string | nil
+  local err --: string | nil
 
   if style == "standard" then
     result, err = M.to_roman(n)
@@ -450,7 +452,7 @@ M.format = function(n, opts)
       -- Append ordinal suffix based on numeric value
       local suffix_n = n % 100
       local suffix_mod10 = n % 10
-      local suffix
+      local suffix = "th"
       if suffix_n >= 11 and suffix_n <= 13 then
         suffix = "th"
       elseif suffix_mod10 == 1 then
@@ -459,8 +461,6 @@ M.format = function(n, opts)
         suffix = "nd"
       elseif suffix_mod10 == 3 then
         suffix = "rd"
-      else
-        suffix = "th"
       end
       result = result .. suffix
     end
@@ -472,12 +472,13 @@ M.format = function(n, opts)
   end
 
   if not result then return nil, err end
+  local out = result --[[:! string]]
 
   if ordinal and style ~= "unicode" then
     -- Append ordinal suffix
     local mod100 = n % 100
     local mod10  = n % 10
-    local suffix
+    local suffix = "th"
     if mod100 >= 11 and mod100 <= 13 then
       suffix = "th"
     elseif mod10 == 1 then
@@ -486,17 +487,16 @@ M.format = function(n, opts)
       suffix = "nd"
     elseif mod10 == 3 then
       suffix = "rd"
-    else
-      suffix = "th"
     end
-    result = result .. suffix
+    out = out .. suffix
   end
 
   if case == "lower" then
-    result = result:lower()
+    local out_ = out --[[:! string]]
+    out = out_:lower()
   end
 
-  return result
+  return out
 end
 
 return M

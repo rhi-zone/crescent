@@ -100,6 +100,9 @@ end
 
 -- ── Table builder (used inside create_table callback) ────────────────────────
 
+--:: ForeignKeyDef = { column: string, ref_table: string, ref_column: string }
+--:: IndexDef = { name: string, columns: { [integer]: string }, unique: boolean }
+--:: TableBuilder = { _name: string, _columns: { [integer]: Col }, _foreign_keys: { [integer]: ForeignKeyDef }, _indexes: { [integer]: IndexDef } }
 local TableBuilder = {}
 TableBuilder.__index = TableBuilder
 
@@ -109,7 +112,7 @@ local function new_table_builder(name)
 		_columns = {},
 		_foreign_keys = {},
 		_indexes = {},
-	}, TableBuilder)
+	}, TableBuilder) --[[:! TableBuilder]]
 end
 
 local function add_typed_column(self, name, sql_type)
@@ -173,7 +176,7 @@ local function new_alter_builder(name)
 	return setmetatable({
 		_name = name,
 		_operations = {},
-	}, AlterBuilder)
+	}, AlterBuilder) --[[:! AlterBuilder]]
 end
 
 --: (self: AlterBuilder, string, string, string | nil) -> nil
