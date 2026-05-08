@@ -67,9 +67,12 @@ end
 -- ── Encode / Decode ──────────────────────────────────────────────────────────
 
 -- Returns hash, min_lat, max_lat, min_lng, max_lng.
+--: (number, number, integer) -> (string, number, number, number, number)
 local function encode_full(lat, lng, precision)
-  local min_lat, max_lat = -90.0,  90.0
-  local min_lng, max_lng = -180.0, 180.0
+  local min_lat = -90.0  --: number
+  local max_lat =  90.0  --: number
+  local min_lng = -180.0 --: number
+  local max_lng =  180.0 --: number
   local result   = {}
   local hash_val = 0
   local bits     = 0
@@ -108,15 +111,19 @@ local function encode_full(lat, lng, precision)
 end
 
 -- Returns min_lat, max_lat, min_lng, max_lng for a given hash.
+--: (string) -> (number | nil, number | nil, number | nil, number | nil, string | nil)
 local function decode_bounds(hash)
-  local min_lat, max_lat = -90.0,  90.0
-  local min_lng, max_lng = -180.0, 180.0
+  local min_lat = -90.0  --: number
+  local max_lat =  90.0  --: number
+  local min_lng = -180.0 --: number
+  local max_lng =  180.0 --: number
   local is_lng = true
 
   for i = 1, #hash do
-    local val = DECODE[hash:sub(i, i)]
+    local ch = hash:sub(i, i)
+    local val = DECODE[ch]
     if not val then
-      return nil, nil, nil, nil, "invalid geohash character: " .. hash:sub(i, i)
+      return nil, nil, nil, nil, "invalid geohash character: " .. ch
     end
     for bit = 4, 0, -1 do
       local b = math.floor(val / (2 ^ bit)) % 2
@@ -131,7 +138,7 @@ local function decode_bounds(hash)
     end
   end
 
-  return min_lat, max_lat, min_lng, max_lng
+  return min_lat, max_lat, min_lng, max_lng, nil
 end
 
 M.encode = function(lat, lng, precision)
@@ -152,16 +159,20 @@ M.decode = function(hash)
   end
   local min_lat, max_lat, min_lng, max_lng, err = decode_bounds(hash)
   if err then return nil, err end
+  local nlat_min = min_lat --[[:! number]]
+  local nlat_max = max_lat --[[:! number]]
+  local nlng_min = min_lng --[[:! number]]
+  local nlng_max = max_lng --[[:! number]]
   return {
     lat = {
-      min    = min_lat,
-      max    = max_lat,
-      center = (min_lat + max_lat) * 0.5,
+      min    = nlat_min,
+      max    = nlat_max,
+      center = (nlat_min + nlat_max) * 0.5,
     },
     lng = {
-      min    = min_lng,
-      max    = max_lng,
-      center = (min_lng + max_lng) * 0.5,
+      min    = nlng_min,
+      max    = nlng_max,
+      center = (nlng_min + nlng_max) * 0.5,
     },
   }
 end
@@ -169,7 +180,8 @@ end
 M.decode_center = function(hash)
   local bounds, err = M.decode(hash)
   if not bounds then return nil, err end
-  return bounds.lat.center, bounds.lng.center
+  local b = bounds --[[:! { lat: { center: number, ... }, lng: { center: number, ... } }]]
+  return b.lat.center, b.lng.center
 end
 
 -- ── Neighbors ────────────────────────────────────────────────────────────────
@@ -189,15 +201,21 @@ M.neighbor = function(hash, dir)
 
   local min_lat, max_lat, min_lng, max_lng, err = decode_bounds(hash)
   if err then return nil, err end
+  local nmin_lat = min_lat --[[:! number]]
+  local nmax_lat = max_lat --[[:! number]]
+  local nmin_lng = min_lng --[[:! number]]
+  local nmax_lng = max_lng --[[:! number]]
+  local ndlat_dir = dlat_dir --[[:! number]]
+  local ndlng_dir = dlng_dir --[[:! number]]
 
   local prec    = #hash
-  local lat_err = (max_lat - min_lat) * 0.5
-  local lng_err = (max_lng - min_lng) * 0.5
-  local clat    = (min_lat + max_lat) * 0.5
-  local clng    = (min_lng + max_lng) * 0.5
+  local lat_err = (nmax_lat - nmin_lat) * 0.5
+  local lng_err = (nmax_lng - nmin_lng) * 0.5
+  local clat    = (nmin_lat + nmax_lat) * 0.5
+  local clng    = (nmin_lng + nmax_lng) * 0.5
 
-  local nlat = clat + dlat_dir * lat_err * 2
-  local nlng = clng + dlng_dir * lng_err * 2
+  local nlat = clat + ndlat_dir * lat_err * 2
+  local nlng = clng + ndlng_dir * lng_err * 2
 
   -- Clamp latitude; wrap longitude.
   if nlat >  90 then nlat =  90 end
@@ -222,11 +240,12 @@ end
 
 -- ── Bounding-box coverage ────────────────────────────────────────────────────
 
+--: (number, number, number, number, integer | nil) -> string[]
 M.bboxes = function(min_lat, min_lng, max_lat, max_lng, precision)
   precision = precision or 6
   local info    = PRECISION_INFO[precision]
-  local lat_err = info.lat_err
-  local lng_err = info.lon_err
+  local lat_err = info.lat_err --[[:! number]]
+  local lng_err = info.lon_err --[[:! number]]
 
   -- Find SW corner hash and step through the grid.
   local result = {}
