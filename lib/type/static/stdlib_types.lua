@@ -107,6 +107,7 @@
 --:: declare package = { path: string, cpath: string, loaded: { [string]: unknown, ... }, preload: { [string]: unknown, ... }, ... }
 --:: declare arg = { [integer]: string, ... }
 --:: declare jit = { version: string, version_num: integer, os: string, arch: string, ... }
+--:: declare register_ffi_module = ((string) -> nil) | nil
 
 ---------------------------------------------------------------------------
 -- string table
