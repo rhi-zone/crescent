@@ -15,8 +15,9 @@ local sqrt, huge, max = math.sqrt, math.huge, math.max
 
 --:: QTBounds = { x: number, y: number, w: number, h: number }
 --:: QTPoint = { [integer]: any }
+--:: QTHeapItem = { [integer]: any }
 --:: QTNode = { bounds: QTBounds, points: { [integer]: QTPoint }, children: { [integer]: QTNode } | nil, capacity: integer, ... }
---:: Quadtree = { _root: QTNode, ... }
+--:: Quadtree = { _root: QTNode, query_rect: (self: unknown, number, number, number, number) -> { [integer]: unknown }, remove: (self: unknown, number, number) -> boolean, insert: (self: unknown, number, number, unknown) -> boolean, ... }
 
 -- ---------------------------------------------------------------------------
 -- Internal helpers
@@ -34,8 +35,11 @@ end
 -- Check whether two rects overlap.
 --: ({x:number,y:number,w:number,h:number}, {x:number,y:number,w:number,h:number}) -> boolean
 local function rects_overlap(a, b)
-  return a.x < b.x + b.w and a.x + a.w > b.x
-     and a.y < b.y + b.h and a.y + a.h > b.y
+  if a.x < b.x + b.w and a.x + a.w > b.x
+     and a.y < b.y + b.h and a.y + a.h > b.y then
+    return true
+  end
+  return false
 end
 
 -- Check whether a rect overlaps a circle.
@@ -48,8 +52,11 @@ end
 -- We use half-open intervals [x, x+w) x [y, y+h) so each point belongs to exactly one node.
 --: (number, number, {x:number,y:number,w:number,h:number}) -> boolean
 local function point_in_bounds(px, py, b)
-  return px >= b.x and px < b.x + b.w
-     and py >= b.y and py < b.y + b.h
+  if px >= b.x and px < b.x + b.w
+     and py >= b.y and py < b.y + b.h then
+    return true
+  end
+  return false
 end
 
 -- Split a node into four children and redistribute its points.
@@ -81,7 +88,8 @@ local function subdivide(node)
     local cp = child.points
     cp[#cp + 1] = p
   end
-  node.points = nil  -- leaf storage moved to children
+  local node_open = node --[[:! { points: { [integer]: QTPoint } | nil, ... }]]
+  node_open.points = nil  -- leaf storage moved to children
 end
 
 -- Insert a point into a node (recursive).
@@ -206,8 +214,8 @@ local function node_nearest(node, cx, cy, best)
   end
 end
 
--- KNN search (recursive). heap = max-heap of {dist, x, y, data}, capped at k.
---: (QTNode, number, number, integer, { [integer]: any }) -> nil
+-- Push an item into a max-heap capped at k elements.
+--: ({ [integer]: QTHeapItem }, integer, QTHeapItem) -> nil
 local function heap_push_knn(heap, k, item)
   -- max-heap: largest dist at top
   local n = #heap + 1
@@ -215,7 +223,7 @@ local function heap_push_knn(heap, k, item)
   local i = n
   while i > 1 do
     local parent = math.floor(i / 2)
-    if heap[parent][1] < heap[i][1] then
+    if (heap[parent][1] --[[:! number]]) < (heap[i][1] --[[:! number]]) then
       heap[parent], heap[i] = heap[i], heap[parent]
       i = parent
     else break end
@@ -223,13 +231,14 @@ local function heap_push_knn(heap, k, item)
   if #heap > k then
     -- pop max
     heap[1] = heap[#heap]
-    heap[#heap] = nil
+    local heap_open = heap --[[:! { [integer]: QTHeapItem | nil }]]
+    heap_open[#heap_open] = nil
     local sz = #heap
     local j = 1
     while true do
       local l, r, lg = 2*j, 2*j+1, j
-      if l <= sz and heap[l][1] > heap[lg][1] then lg = l end
-      if r <= sz and heap[r][1] > heap[lg][1] then lg = r end
+      if l <= sz and (heap[l][1] --[[:! number]]) > (heap[lg][1] --[[:! number]]) then lg = l end
+      if r <= sz and (heap[r][1] --[[:! number]]) > (heap[lg][1] --[[:! number]]) then lg = r end
       if lg == j then break end
       heap[j], heap[lg] = heap[lg], heap[j]
       j = lg
@@ -237,9 +246,9 @@ local function heap_push_knn(heap, k, item)
   end
 end
 
---: (QTNode, number, number, integer, { [integer]: any }) -> nil
+--: (QTNode, number, number, integer, { [integer]: QTHeapItem }) -> nil
 local function node_knn(node, cx, cy, k, heap)
-  local worst = #heap < k and huge or heap[1][1]
+  local worst = #heap < k and huge or (heap[1][1] --[[:! number]])
   if rect_min_dist(cx, cy, node.bounds) >= worst then return end
   if node.children then
     local dists = {}
@@ -254,10 +263,12 @@ local function node_knn(node, cx, cy, k, heap)
     local pts = node.points
     for i = 1, #pts do
       local p = pts[i]
-      local dx = p[1] - cx
-      local dy = p[2] - cy
+      local px = p[1] --[[:! number]]
+      local py = p[2] --[[:! number]]
+      local dx = px - cx
+      local dy = py - cy
       local d = sqrt(dx * dx + dy * dy)
-      heap_push_knn(heap, k, { d, p[1], p[2], p[3] })
+      heap_push_knn(heap, k, { d, px, py, p[3] })
     end
   end
 end
@@ -345,10 +356,10 @@ end
 --: (self: Quadtree, number, number) -> (number | nil, number | nil, any, number | nil)
 function QT:nearest(cx, cy)
   if node_count(self._root) == 0 then return nil end
-  local best = { huge, nil, nil, nil }
+  local best = { huge, nil, nil, nil } --: { [integer]: any }
   node_nearest(self._root, cx, cy, best)
   if best[2] == nil then return nil end
-  return best[2], best[3], best[4], best[1]
+  return best[2] --[[:! number | nil]], best[3] --[[:! number | nil]], best[4], best[1] --[[:! number | nil]]
 end
 
 -- K nearest neighbors sorted by distance ascending.
@@ -356,7 +367,7 @@ end
 --: (self: Quadtree, number, number, integer) -> { [integer]: any }
 function QT:knn(cx, cy, k)
   if k <= 0 then return {} end
-  local heap = {}
+  local heap = {} --: { [integer]: QTHeapItem }
   node_knn(self._root, cx, cy, k, heap)
   -- heap is a max-heap; sort ascending
   table.sort(heap, function(a, b) return a[1] < b[1] end)
@@ -384,7 +395,7 @@ end
 -- Call fn(x, y, data) for every point.
 --: (self: Quadtree, fn: (any, any, any) -> nil) -> nil
 function QT:each(fn)
-  local all = {}
+  local all = {} --: { [integer]: QTPoint }
   node_each(self._root, all)
   for i = 1, #all do
     local p = all[i]
@@ -396,7 +407,7 @@ end
 -- Returns x_min, y_min, x_max, y_max, | nil if empty.
 --: (self: Quadtree) -> (number | nil, number | nil, number | nil, number | nil)
 function QT:bbox()
-  local all = {}
+  local all = {} --: { [integer]: QTPoint }
   node_each(self._root, all)
   if #all == 0 then return nil end
   local x_min, y_min, x_max, y_max = huge, huge, -huge, -huge
@@ -412,7 +423,7 @@ end
 
 -- Move a point from (old_x, old_y) to (new_x, new_y).
 -- Returns false if old point not found or new position is out of bounds.
---: (number, number, number, number) -> boolean
+--: (self: Quadtree, number, number, number, number) -> boolean
 function QT:move(old_x, old_y, new_x, new_y)
   -- Find the data before removing
   local found_data = nil
@@ -435,14 +446,14 @@ end
 -- Reinsert all points into a fresh tree (useful after many removes to compact nodes).
 --: (self: Quadtree) -> nil
 function QT:rebuild()
-  local all = {}
+  local all = {} --: { [integer]: QTPoint }
   node_each(self._root, all)
   local b = self._root.bounds
   local cap = self._root.capacity
   self._root = { bounds = b, points = {}, children = nil, capacity = cap }
   for i = 1, #all do
     local p = all[i]
-    node_insert(self._root, p[1], p[2], --[[: any]] p[3])
+    node_insert(self._root, p[1] --[[:! number]], p[2] --[[:! number]], p[3])
   end
 end
 
@@ -468,7 +479,7 @@ function M.new(bounds, capacity)
     children = nil,
     capacity = capacity,
   }
-  return setmetatable({ _root = root }, QT)
+  return setmetatable({ _root = root }, QT) --[[:! Quadtree]]
 end
 
 return M

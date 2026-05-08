@@ -92,7 +92,8 @@ local function lru_put(lru, key, value, expires)
     lru_push_front(lru, existing)
     return nil
   end
-  local node = { key = key, value = value, expires = expires }
+  local node_raw = { key = key, value = value, expires = expires }
+  local node = node_raw --[[:! LruNode]] -- prev/next set by lru_push_front below
   lru.map[key] = node
   lru_push_front(lru, node)
   lru.size = lru.size + 1
@@ -140,11 +141,16 @@ local PRESENT = {}  -- sentinel: cached nil return values
 
 local function wrap(fn, opts)
   opts = opts or {}
-  local max_size = opts.max_size
-  local ttl      = opts.ttl
+  local max_size = opts.max_size --[[:! number | nil]]
+  local ttl      = opts.ttl --[[:! number | nil]]
   local key_fn   = opts.key or make_key
-  local clock    = opts.clock_fn or (ttl and error("memoize: opts.clock_fn is required when using TTL"))
-  local use_weak = opts.weak
+  local clock --: (() -> number) | nil
+  if opts.clock_fn then
+    clock = opts.clock_fn --[[:! () -> number]]
+  elseif ttl then
+    error("memoize: opts.clock_fn is required when using TTL")
+  end
+  local use_weak = opts.weak --[[:! boolean | nil]]
 
   local hits   = 0
   local misses = 0
@@ -153,7 +159,7 @@ local function wrap(fn, opts)
   local cache
   local weak_cache  -- separate weak-value table for weak mode
   if max_size then
-    cache = lru_new(max_size)
+    cache = lru_new(max_size --[[:! integer]])
   elseif use_weak then
     weak_cache = setmetatable({}, { __mode = "v" })
   else
@@ -163,10 +169,11 @@ local function wrap(fn, opts)
   -- Unified accessors so the hot path stays readable.
   local function cache_get(k)
     if max_size then
-      local node = lru_get_node(cache, k)
+      local lru_cache = cache --[[:! Lru]]
+      local node = lru_get_node(lru_cache, k)
       if not node then return nil, false end
-      if ttl and node.expires and clock() > node.expires then
-        lru_delete(cache, k)
+      if ttl and node.expires and (clock --[[:! () -> number]])() > node.expires then
+        lru_delete(lru_cache, k)
         return nil, false
       end
       return node.value, true
@@ -176,7 +183,7 @@ local function wrap(fn, opts)
       -- TTL check
       if ttl then
         local exp = weak_cache[k .. "\0__exp"]
-        if exp and clock() > exp then
+        if exp and (clock --[[:! () -> number]])() > exp then
           weak_cache[k] = nil
           weak_cache[k .. "\0__exp"] = nil
           return nil, false
@@ -189,7 +196,7 @@ local function wrap(fn, opts)
       -- TTL check on plain table: store expires in parallel slot
       if ttl then
         local exp = cache[k .. "\0__exp"]
-        if exp and clock() > exp then
+        if exp and (clock --[[:! () -> number]])() > exp then
           cache[k] = nil
           cache[k .. "\0__exp"] = nil
           return nil, false
@@ -201,7 +208,7 @@ local function wrap(fn, opts)
 
   local function cache_put(k, v, expires)
     if max_size then
-      lru_put(cache, k, v, expires)
+      lru_put(cache --[[:! Lru]], k, v, expires)
     elseif use_weak then
       weak_cache[k] = v
       if ttl then weak_cache[k .. "\0__exp"] = expires end
@@ -213,7 +220,7 @@ local function wrap(fn, opts)
 
   local function cache_delete(k)
     if max_size then
-      lru_delete(cache, k)
+      lru_delete(cache --[[:! Lru]], k)
     elseif use_weak then
       weak_cache[k] = nil
       if ttl then weak_cache[k .. "\0__exp"] = nil end
@@ -225,7 +232,7 @@ local function wrap(fn, opts)
 
   local function cache_clear()
     if max_size then
-      lru_clear(cache)
+      lru_clear(cache --[[:! Lru]])
     elseif use_weak then
       weak_cache = setmetatable({}, { __mode = "v" })
     else
@@ -249,7 +256,8 @@ local function wrap(fn, opts)
     end
     misses = misses + 1
     local result = fn(...)
-    local expires = ttl and (clock() + ttl) or nil
+    local ttl_num = ttl --[[:! number | nil]]
+    local expires = ttl_num and ((clock --[[:! () -> number]])() + ttl_num) or nil
     -- wrap nil result so we can tell "cached nil" from "not cached"
     cache_put(k, result == nil and PRESENT or result, expires)
     return result
@@ -282,7 +290,7 @@ function M.memoize(fn, opts)
 end
 
 --- Memoize a zero-argument function (lazy singleton).
---: ((() -> (...unknown))) -> (() -> (...unknown))
+--: ((() -> unknown)) -> (() -> unknown)
 function M.thunk(fn)
   local computed = false
   local cached
@@ -304,7 +312,7 @@ function M.weak(fn, opts)
 end
 
 --- Run fn exactly once; subsequent calls return the same value without calling fn.
---: ((() -> (...unknown))) -> (() -> (...unknown))
+--: ((() -> unknown)) -> (() -> unknown)
 function M.once(fn)
   local ran = false
   local cached
@@ -322,7 +330,7 @@ end
 -- the returned function records the most recent call and returns the last result.
 -- The actual fn is called on the FIRST call after the delay window expires
 -- (delay is in seconds, checked via os.clock).
---: ((...unknown) -> (...unknown), number) -> ((...unknown) -> (...unknown))
+--: ((...unknown) -> unknown, number, () -> number) -> ((...unknown) -> unknown)
 function M.debounce(fn, delay, clock_fn)
   if not clock_fn then error("memoize.debounce: clock_fn is required") end
   local last_call = nil
@@ -341,10 +349,11 @@ end
 -- The top-level function is memoized; its returned function is also memoized.
 --: (any) -> any
 function M.multi(fn)
-  local outer = wrap(fn, {})
+  local outer = wrap(fn, nil)
+  local outer_fn = outer --[[:! (...unknown) -> unknown]]
   return setmetatable({}, {
     __call = function(_, ...)
-      local inner_fn = outer(...)
+      local inner_fn = outer_fn(...)
       if type(inner_fn) ~= "function" then return inner_fn end
       -- wrap inner result too (memoize per outer-key-derived closure)
       -- We memo the inner by wrapping it on first access.
