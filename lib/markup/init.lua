@@ -328,7 +328,7 @@ local function split_lines(text)
     local nl = text:find("\n", start, true)
     if nl then
       lines[#lines + 1] = text:sub(start, nl)
-      start = nl + 1
+      start = nl --[[:! integer ]] + 1
     else
       local rest = text:sub(start)
       if rest ~= "" then lines[#lines + 1] = rest end
@@ -446,8 +446,9 @@ function M.parse_markdown(text)
     elseif stripped:match("^(#+)%s+(.*)") then
       local hashes, content = stripped:match("^(#+)%s+(.*)")
       -- Remove trailing hashes
-      content = content:gsub("%s+#+%s*$", "")
-      local level = math.min(#hashes, 6)
+      content = (content or ""):gsub("%s+#+%s*$", "")
+      local hashes_str = hashes or "" --: string
+      local level = math.min(#hashes_str, 6)
       local children = parse_inline_markdown(content)
       ast.children[#ast.children + 1] = node("Heading", { level = level, children = children })
       i = i + 1
@@ -551,10 +552,17 @@ end
 -- ============================================================
 
 -- Detect RST section heading underline style: 3+ punctuation chars (all same type)
+--: (s: string) -> boolean
 local function is_rst_underline(s)
   if #s < 3 then return false end
   -- Must be all punctuation chars, at least 3, optionally trailing spaces
   return s:match("^%p%p%p+%s*$") ~= nil
+end
+
+--: (s: string) -> string
+local function strip_newline(s)
+  local r = s:gsub("\n$", "")
+  return r
 end
 
 --: (text: string) -> { tag: string, children: unknown[] }
@@ -585,7 +593,7 @@ function M.parse_rst(text)
       i = i + 1
 
     -- Section heading: line followed by underline (and optionally preceded by overline)
-    elseif i + 1 <= #lines and is_rst_underline(lines[i+1]:gsub("\n$", "")) then
+    elseif i + 1 <= #lines and is_rst_underline(strip_newline(lines[i+1])) then
       local underline = lines[i+1]:gsub("\n$", "")
       local ch = underline:sub(1, 1)
       local level = math.min(get_heading_level(ch), 6)
@@ -621,7 +629,7 @@ function M.parse_rst(text)
         if i <= #lines and lines[i]:match("^%s*$") then i = i + 1 end
         -- Collect indented content
         local code_lines = {}
-        local base_indent = nil
+        local base_indent = -1 --: integer
         while i <= #lines do
           local cl = lines[i]:gsub("\n$", "")
           if cl:match("^%s*$") then
@@ -630,7 +638,7 @@ function M.parse_rst(text)
           else
             local sp = cl:match("^( +)")
             local ind = sp and #sp or 0
-            if not base_indent then base_indent = ind end
+            if base_indent < 0 then base_indent = ind end
             if ind >= base_indent then
               code_lines[#code_lines + 1] = cl:sub(base_indent + 1)
               i = i + 1
@@ -679,7 +687,7 @@ function M.parse_rst(text)
       while i <= #lines do
         local pl = lines[i]:gsub("\n$", "")
         if pl:match("^%s*$") then break end
-        if i + 1 <= #lines and is_rst_underline(lines[i+1]:gsub("\n$", "")) then break end
+        if i + 1 <= #lines and is_rst_underline(strip_newline(lines[i+1])) then break end
         if is_rst_underline(pl) then break end
         if pl:match("^%.%.") then break end
         if pl:match("^%s*[-*]%s+") then break end
@@ -722,7 +730,8 @@ function M.parse_asciidoc(text)
     -- Heading: = Title, == Section, etc.
     elseif stripped:match("^(=+)%s+(.+)") then
       local signs, content = stripped:match("^(=+)%s+(.*)")
-      local level = math.min(#signs, 6)
+      local signs_str = signs or "" --: string
+      local level = math.min(#signs_str, 6)
       local children = parse_inline_asciidoc(content)
       ast.children[#ast.children + 1] = node("Heading", { level = level, children = children })
       i = i + 1
@@ -832,7 +841,7 @@ local function serialize_html(n, buf)
     end
 
   elseif tag == "Heading" then
-    local ht = "h" .. n.level
+    local ht = "h" .. (n.level --[[:! integer ]])
     buf[#buf + 1] = "<" .. ht .. ">"
     for _, child in ipairs(n.children) do
       serialize_html(child, buf)
@@ -861,13 +870,15 @@ local function serialize_html(n, buf)
     buf[#buf + 1] = "</em>"
 
   elseif tag == "Code" then
-    buf[#buf + 1] = "<code>" .. esc(n.value) .. "</code>"
+    buf[#buf + 1] = "<code>" .. esc(n.value --[[:! string ]]) .. "</code>"
 
   elseif tag == "CodeBlock" then
-    if n.lang and n.lang ~= "" then
-      buf[#buf + 1] = '<pre><code class="language-' .. esc(n.lang) .. '">' .. esc(n.value) .. "</code></pre>\n"
+    local cb_lang = n.lang --[[:! string | nil ]]
+    local cb_val = n.value --[[:! string ]]
+    if cb_lang and cb_lang ~= "" then
+      buf[#buf + 1] = '<pre><code class="language-' .. esc(cb_lang) .. '">' .. esc(cb_val) .. "</code></pre>\n"
     else
-      buf[#buf + 1] = "<pre><code>" .. esc(n.value) .. "</code></pre>\n"
+      buf[#buf + 1] = "<pre><code>" .. esc(cb_val) .. "</code></pre>\n"
     end
 
   elseif tag == "UnorderedList" then
@@ -892,14 +903,14 @@ local function serialize_html(n, buf)
     buf[#buf + 1] = "</li>\n"
 
   elseif tag == "Link" then
-    buf[#buf + 1] = '<a href="' .. esc(n.url) .. '">'
+    buf[#buf + 1] = '<a href="' .. esc(n.url --[[:! string ]]) .. '">'
     for _, child in ipairs(n.children) do
       serialize_html(child, buf)
     end
     buf[#buf + 1] = "</a>"
 
   elseif tag == "Image" then
-    buf[#buf + 1] = '<img src="' .. esc(n.src) .. '" alt="' .. esc(n.alt) .. '">'
+    buf[#buf + 1] = '<img src="' .. esc(n.src --[[:! string ]]) .. '" alt="' .. esc(n.alt --[[:! string ]]) .. '">'
 
   elseif tag == "BlockQuote" then
     buf[#buf + 1] = "<blockquote>\n"
@@ -915,7 +926,7 @@ local function serialize_html(n, buf)
     buf[#buf + 1] = "<br>\n"
 
   elseif tag == "Text" then
-    buf[#buf + 1] = esc(n.value)
+    buf[#buf + 1] = esc(n.value --[[:! string ]])
 
   elseif tag == "Table" then
     buf[#buf + 1] = "<table>\n"

@@ -15,6 +15,8 @@ local band, bor, bxor, bnot = bit.band, bit.bor, bit.bxor, bit.bnot
 
 -- ── Gate evaluation ───────────────────────────────────────────────────────────
 
+--:: GateFn = ({ [integer]: integer, ... }) -> integer
+--: { [string]: GateFn }
 local GATE_FNS = {
   AND    = function(inputs) local r=1 for _,v in ipairs(inputs) do if v==0 then return 0 end end return r end,
   OR     = function(inputs) for _,v in ipairs(inputs) do if v~=0 then return 1 end end return 0 end,
@@ -105,7 +107,7 @@ end
 -- Topological evaluation
 function Circuit:eval(input_values)
   -- memo: node_name → computed value
-  local memo = {}
+  local memo = {} --: { [string]: integer }
   for k,v in pairs(input_values) do
     memo[k] = v
   end
@@ -162,7 +164,8 @@ function Circuit:truth_table()
       local bit_val = math.floor(i / 2^(n-1-b)) % 2
       iv[self._inputs[b+1]] = bit_val
     end
-    local ov, err = self:eval(iv)
+    local eval_fn = self.eval --[[:! ({ [string]: unknown, ... }, { [string]: integer, ... }) -> ({ [string]: integer | nil, ... } | nil, string | nil) ]]
+    local ov, err = eval_fn(self, iv)
     if ov == nil then return nil, err end
     rows[#rows+1] = { inputs=iv, outputs=ov }
   end
@@ -175,7 +178,7 @@ end
 
 function Circuit:critical_path()
   -- Longest path from any input to any gate output, in gate hops
-  local memo = {}
+  local memo = {} --: { [string]: integer }
 
   local function depth(name)
     if memo[name] ~= nil then return memo[name] end
@@ -264,9 +267,10 @@ end
 
 -- ── Boolean expression parser → circuit ───────────────────────────────────────
 
+--:: Token = { kind: "lparen" } | { kind: "rparen" } | { kind: "op", val: string } | { kind: "var", val: string }
 -- Tokenizer
 local function tokenize(expr)
-  local tokens = {}
+  local tokens = {} --: { [integer]: Token, ... }
   local i = 1
   while i <= #expr do
     local c = expr:sub(i,i)
@@ -324,6 +328,7 @@ function M.from_bool(expr)
     return false
   end
 
+  --: (string, string[]) -> string
   local function new_gate(gtype, inputs)
     gate_seq = gate_seq + 1
     local name = "g" .. gate_seq
@@ -424,20 +429,24 @@ local function popcount(x)
   return c
 end
 
+--:: Implicant = { val: integer, mask: integer, minterms: integer[], used: boolean }
 -- Check if two implicants can be merged (differ by exactly one bit, no dash conflicts)
 -- Implicants are represented as {val=int, mask=int} where mask bit=1 means "don't care"
+--: (Implicant, Implicant) -> boolean
 local function can_merge(a, b)
   -- bits that differ (ignoring dashes)
   local conflict = bxor(a.mask, b.mask)  -- bits where one has dash and other doesn't
   if conflict ~= 0 then return false end
   local diff = bxor(a.val, b.val)  -- XOR on non-dash bits
   -- diff must be exactly one bit
-  return diff ~= 0 and band(diff, diff-1) == 0
+  if diff == 0 then return false end
+  return band(diff, diff-1) == 0
 end
 
+--: (Implicant, Implicant) -> Implicant
 local function merge(a, b)
   local diff = bxor(a.val, b.val)
-  return { val = band(a.val, bnot(diff)), mask = bor(a.mask, diff), minterms = {} }
+  return { val = band(a.val, bnot(diff)), mask = bor(a.mask, diff), minterms = {}, used = false }
 end
 
 -- Merge minterm sets
@@ -450,8 +459,9 @@ local function merge_minterms(a, b)
 end
 
 -- Convert implicant to boolean expression string
+--: (Implicant, { [number]: string, ... }) -> string
 local function implicant_to_expr(imp, vars)
-  local terms = {}
+  local terms = {} --: Arr<string>
   local n = #vars
   for i = 1, n do
     local bit_pos = n - i  -- MSB first
@@ -518,9 +528,10 @@ local function find_cover(essential, remaining_minterms, prime_imps)
   return selected
 end
 
+--: ({ vars: string[], minterms: integer[], ... }) -> string
 function M.simplify_bool(opts)
-  local vars     = opts.vars
-  local minterms = opts.minterms
+  local vars     = opts.vars --[[:! string[] ]]
+  local minterms = opts.minterms --[[:! integer[] ]]
 
   if #minterms == 0 then return "0" end
 
@@ -535,8 +546,8 @@ function M.simplify_bool(opts)
     implicants[#implicants+1] = { val=m, mask=0, minterms={m}, used=false }
   end
 
-  local prime_implicants = {}
-  local all_implicants = { implicants }
+  local prime_implicants = {} --: Implicant[]
+  local all_implicants = { implicants } --: { [integer]: Implicant[], ... }
 
   -- Iteratively merge
   while true do
@@ -544,7 +555,7 @@ function M.simplify_bool(opts)
     if #current == 0 then break end
 
     -- Group by popcount
-    local groups = {}
+    local groups = {} --: { [integer]: Implicant[], ... }
     for _, imp in ipairs(current) do
       local pc = popcount(band(imp.val, bnot(imp.mask)))
       groups[pc] = groups[pc] or {}
@@ -667,7 +678,7 @@ function M.simplify_bool(opts)
   end
 
   -- Build final expression
-  local terms = {}
+  local terms = {} --: string[]
   for _, i in ipairs(essential_pi) do
     terms[#terms+1] = implicant_to_expr(prime_implicants[i], vars)
   end
