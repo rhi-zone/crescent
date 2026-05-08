@@ -200,7 +200,7 @@ end
 --::   start: integer | nil,
 --::   trans: { [integer]: { [string]: integer } },
 --::   _next_id: integer,
---::   add_state: (DFA, { accept: boolean, start: boolean | nil } | nil) -> integer,
+--::   add_state: (DFA, { accept: boolean, start?: boolean } | nil) -> integer,
 --::   add_transition: (DFA, integer, string, integer) -> nil,
 --::   run: (DFA, integer | nil, string) -> integer | nil,
 --::   accepts: (DFA, string) -> boolean,

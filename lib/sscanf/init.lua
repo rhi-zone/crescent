@@ -187,6 +187,13 @@ local function match_directive(dir, input, pos_in)
 	local dir_ = dir --[[: any]]
 	local pos = pos_in --[[: integer]] --: integer
 	local ilen = #input
+	--: (e_in: integer, p: integer, w: integer | nil) -> integer
+	local function clamp_width(e_in, p, w)
+		if w == nil then return e_in end
+		local lim = p + w - 1
+		if e_in < lim then return e_in end
+		return lim
+	end
 	if dir_.kind == "lit" then
 		local text = dir_.text --[[: string]]
 		local tlen = #text
@@ -249,16 +256,16 @@ local function match_directive(dir, input, pos_in)
 		-- signed decimal integer
 		local s, e = find(input, "^%-?%d+", pos)
 		if not s or not e then return nil, pos, "%d: no integer" end
-		local e_ = e
-		if width then e_ = math.min(e_, pos + width - 1) end
+		local e_ = clamp_width(e, pos, width)
 		-- re-verify after width clamp
 		local text = sub(input, pos, e_)
 		if not match(text, "^%-?%d+$") then
 			-- width may have cut mid-number; just parse what we have
 			local s2, e2 = find(text, "^%-?%d+")
 			if not s2 or not e2 then return nil, pos, "%d: no integer after width clamp" end
-			text = sub(text, s2, e2)
-			e_ = pos + e2 - 1
+			local e2_ = e2 --[[: integer]]
+			text = sub(text, s2, e2_)
+			e_ = pos + e2_ - 1
 		end
 		return text, e_ + 1, nil
 
@@ -269,16 +276,14 @@ local function match_directive(dir, input, pos_in)
 		if sub(input, pos, pos + 1) == "0x" or sub(input, pos, pos + 1) == "0X" then
 			local s, e = find(input, "^0[xX]%x+", pos)
 			if s and e then
-				local e_ = e
-				if width then e_ = math.min(e_, pos + width - 1) end
+				local e_ = clamp_width(e, pos, width)
 				text = sub(input, pos, e_)
 				new_pos = e_ + 1
 			end
 		elseif sub(input, pos, pos) == "0" and find(input, "^0[0-7]", pos) then
 			local s, e = find(input, "^0[0-7]+", pos)
 			if s and e then
-				local e_ = e
-				if width then e_ = math.min(e_, pos + width - 1) end
+				local e_ = clamp_width(e, pos, width)
 				text = sub(input, pos, e_)
 				new_pos = e_ + 1
 			end
@@ -286,8 +291,7 @@ local function match_directive(dir, input, pos_in)
 		if not text then
 			local s, e = find(input, "^%-?%d+", pos)
 			if not s or not e then return nil, pos, "%i: no integer" end
-			local e_ = e
-			if width then e_ = math.min(e_, pos + width - 1) end
+			local e_ = clamp_width(e, pos, width)
 			text = sub(input, pos, e_)
 			new_pos = e_ + 1
 		end
@@ -297,8 +301,7 @@ local function match_directive(dir, input, pos_in)
 		-- unsigned decimal
 		local s, e = find(input, "^%d+", pos)
 		if not s or not e then return nil, pos, "%u: no unsigned integer" end
-		local e_ = e
-		if width then e_ = math.min(e_, pos + width - 1) end
+		local e_ = clamp_width(e, pos, width)
 		local text = sub(input, pos, e_)
 		return text, e_ + 1, nil
 
@@ -314,13 +317,13 @@ local function match_directive(dir, input, pos_in)
 		-- check for exponent
 		local exp_s, exp_e = find(input, "^[eE][%+%-]?%d+", e_ + 1)
 		if exp_s and exp_e then e_ = exp_e end
-		if width then e_ = math.min(e_, pos + width - 1) end
+		e_ = clamp_width(e_, pos, width)
 		local text = sub(input, pos, e_)
 		return text, e_ + 1, nil
 
 	elseif conv == "[" then
 		-- character class
-		local pat = build_class_pattern(dir)
+		local pat = build_class_pattern(dir_)
 		local e = pos
 		local count = 0
 		local limit = width or huge
@@ -382,6 +385,7 @@ end
 --- @param input string
 --- @param names table|nil  — list of names in capture order (from named format)
 --- @return values table|nil, named table|nil, err string|nil
+--: (directives: { [integer]: Directive }, input: string, names: { [integer]: string | false } | nil) -> ({ [integer]: unknown } | nil, { [string]: unknown } | nil, string | nil)
 local function run_directives(directives, input, names)
 	local pos = 1
 	local values = {}
@@ -399,8 +403,10 @@ local function run_directives(directives, input, names)
 			if err then return nil, nil, err end
 			pos = new_pos
 
-			if not dir.suppress then
-				local val, verr = convert_value(dir.conv, text)
+			if dir.kind == "spec" and not dir.suppress then
+				if text == nil then return nil, nil, "no text matched" end
+				local conv_str = dir.conv or ""
+				local val, verr = convert_value(conv_str, text)
 				if verr then return nil, nil, verr end
 				values[#values + 1] = val
 				if names then
@@ -441,7 +447,7 @@ M.sscanf = function(input, fmt)
 	local directives, err = parse_format(fmt)
 	if not directives then return nil end
 	local values, _, verr = run_directives(directives, input, nil)
-	if verr then return nil end
+	if verr or values == nil then return nil end
 	if #values == 0 then return nil end
 	return unpack(values)
 end

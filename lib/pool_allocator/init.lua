@@ -24,7 +24,7 @@ function M.pool(opts)
   local free   = {}  -- stack of available objects
   local nfree  = 0
   local n_in_use = 0
-  local stats  = { acquired = 0, released = 0, created = 0, pool_hits = 0, pool_misses = 0 }
+  local stats = { acquired = 0, released = 0, created = 0, pool_hits = 0, pool_misses = 0 } --: { acquired: integer, released: integer, created: integer, pool_hits: integer, pool_misses: integer }
 
   -- Pre-allocate if size given
   local presize = opts.size or 0
@@ -122,9 +122,9 @@ function M.fixed_pool(opts)
   local reset  = opts.reset  or function() end
 
   local free     = {}
-  local nfree    = 0
-  local n_in_use = 0
-  local stats    = { acquired = 0, released = 0, created = 0, pool_hits = 0, pool_misses = 0 }
+  local nfree    = 0 --: integer
+  local n_in_use = 0 --: integer
+  local stats    = { acquired = 0, released = 0, created = 0, pool_hits = 0, pool_misses = 0 } --: { acquired: integer, released: integer, created: integer, pool_hits: integer, pool_misses: integer }
 
   -- Pre-allocate all objects
   for _ = 1, cap do
@@ -307,9 +307,10 @@ end
 -- ---------------------------------------------------------------------------
 function M.ring(n)
   local buf   = {}
-  local rhead = 0   -- index of next pop (0-based mod n)
-  local rtail = 0   -- index of next push (0-based mod n)
-  local count = 0
+  -- rhead: index of next pop (0-based mod n); rtail: index of next push
+  local rhead = 0 --: integer
+  local rtail = 0 --: integer
+  local count = 0 --: integer
 
   local self = {}
 

@@ -16,6 +16,7 @@ M._tier = "pure"
 -- ---------------------------------------------------------------------------
 
 -- Number format descriptors: { decimal, group, group_size }
+--:: NumFmt = { decimal: string, group: string, group_size: integer }
 local NUMBER_FORMATS = {
   ["en"] = { decimal = ".", group = ",", group_size = 3 },
   ["en-US"] = { decimal = ".", group = ",", group_size = 3 },
@@ -196,16 +197,21 @@ local function parse_locale_string(s)
   local lang, script, region
   -- Patterns: ll, ll-RR, ll-Ssss, ll-Ssss-RR
   local a, b, c = s:match("^([a-zA-Z]+)%-([a-zA-Z]+)%-([a-zA-Z]+)$")
-  if a then
-    lang = a:lower()
-    if #b == 4 then script = b:sub(1,1):upper()..b:sub(2):lower(); region = c:upper()
-    else region = b:upper(); script = nil end -- unusual, treat b as region
+  if a and b and c then
+    local sa = a --[[: string]]
+    local sb = b --[[: string]]
+    local sc = c --[[: string]]
+    lang = sa:lower()
+    if #sb == 4 then script = sb:sub(1,1):upper()..sb:sub(2):lower(); region = sc:upper()
+    else region = sb:upper(); script = nil end -- unusual, treat b as region
   else
     local p, q = s:match("^([a-zA-Z]+)%-([a-zA-Z]+)$")
-    if p then
-      lang = p:lower()
-      if #q == 4 then script = q:sub(1,1):upper()..q:sub(2):lower()
-      else region = q:upper() end
+    if p and q then
+      local sp = p --[[: string]]
+      local sq = q --[[: string]]
+      lang = sp:lower()
+      if #sq == 4 then script = sq:sub(1,1):upper()..sq:sub(2):lower()
+      else region = sq:upper() end
     else
       lang = s:lower()
     end
@@ -215,13 +221,16 @@ local function parse_locale_string(s)
 end
 
 -- Return the number format descriptor for a locale, falling back to "en".
+--: (locale_str: string) -> NumFmt
 local function get_number_format(locale_str)
-  return NUMBER_FORMATS[locale_str]
-    or NUMBER_FORMATS[locale_str:match("^([^%-]+)")] -- language part
-    or NUMBER_FORMATS["en"]
+  local nf = NUMBER_FORMATS --[[: { [string]: NumFmt }]]
+  return nf[locale_str]
+    or nf[locale_str:match("^([^%-]+)") or ""]
+    or nf["en"]
 end
 
 -- Insert group separators into an integer string (left of decimal).
+--: (int_str: string, sep: string, group_size: integer) -> string
 local function insert_groups(int_str, sep, group_size)
   local result = {}
   local len = #int_str
@@ -355,11 +364,12 @@ end
 -- Message catalog
 -- ---------------------------------------------------------------------------
 
+--:: CatalogObj = { _messages: { [string]: string }, _plurals: { [string]: { [string]: string } }, _locale: unknown, _plural_fn: (n: number) -> string }
 local catalog_mt = {}
 catalog_mt.__index = catalog_mt
 
 -- catalog:add(key, template) -> catalog
---: (string, string) -> unknown
+--: (self: CatalogObj, key: string, template: string) -> CatalogObj
 function catalog_mt:add(key, template)
   self._messages[key] = template
   return self
@@ -367,14 +377,14 @@ end
 
 -- catalog:add_plural(key, forms) -> catalog
 -- forms: { one="...", other="...", few="...", ... }
---: (string, { [string]: string }) -> unknown
+--: (self: CatalogObj, key: string, forms: { [string]: string }) -> CatalogObj
 function catalog_mt:add_plural(key, forms)
   self._plurals[key] = forms
   return self
 end
 
 -- catalog:add_all(messages) -> catalog
---: ({ [string]: string }) -> unknown
+--: (self: CatalogObj, messages: { [string]: string }) -> CatalogObj
 function catalog_mt:add_all(messages)
   for k, v in pairs(messages) do
     self._messages[k] = v
@@ -383,7 +393,7 @@ function catalog_mt:add_all(messages)
 end
 
 -- catalog:t(key, params?) -> string
---: (string, { [string]: unknown } | nil) -> string
+--: (self: CatalogObj, key: string, params: { [string]: unknown } | nil) -> string
 function catalog_mt:t(key, params)
   local template = self._messages[key]
   if not template then return key end
@@ -391,7 +401,7 @@ function catalog_mt:t(key, params)
 end
 
 -- catalog:tn(key, n, params?) -> string
---: (string, number, { [string]: unknown } | nil) -> string
+--: (self: CatalogObj, key: string, n: number, params: { [string]: unknown } | nil) -> string
 function catalog_mt:tn(key, n, params)
   local forms = self._plurals[key]
   if not forms then return key end
@@ -421,6 +431,7 @@ end
 
 -- Format an integer-part string with group separators.
 -- Returns formatted string.
+--: (int_str: string, fmt: NumFmt, use_group: boolean) -> string
 local function format_integer_part(int_str, fmt, use_group)
   if use_group and #int_str > fmt.group_size then
     return insert_groups(int_str, fmt.group, fmt.group_size)
@@ -433,29 +444,32 @@ end
 --: (number, string | { language: string, region: string | nil, script: string | nil }, { decimals: number | nil, min_decimals: number | nil, max_decimals: number | nil, group_sep: boolean | nil } | nil) -> (string | nil, string)
 function M.format_number(n, locale, opts)
   if type(n) ~= "number" then return nil, "n must be a number" end
-  opts = opts or {}
+  local o = opts or { decimals = nil, min_decimals = nil, max_decimals = nil, group_sep = nil }
   local loc_tag = locale_tag(locale)
   local fmt = get_number_format(loc_tag)
-  local use_group = opts.group_sep ~= false -- default true
+  local use_group = o.group_sep ~= false -- default true
 
   local neg = n < 0
   local abs_n = neg and -n or n
 
   -- Determine decimal places
-  local decimals = opts.decimals
-  local min_dec  = opts.min_decimals or decimals or 0
-  local max_dec  = opts.max_decimals or decimals
+  local decimals = o.decimals
+  local min_dec  = o.min_decimals or decimals or 0
+  local max_dec  = o.max_decimals or decimals
 
-  local int_part, frac_part
+  local int_part = "" --: string
+  local frac_part = "" --: string
   if max_dec ~= nil then
     local formatted = string.format("%."..max_dec.."f", abs_n)
-    int_part, frac_part = formatted:match("^(%d+)%.?(%d*)$")
+    local ip, fp = formatted:match("^(%d+)%.?(%d*)$")
+    int_part = ip or ""
+    frac_part = fp or ""
   else
     -- auto: show fractional digits if present
     local s = string.format("%.10g", abs_n)
     local ip, fp = s:match("^(%d+)%.(%d+)$")
-    if ip then
-      int_part, frac_part = ip, fp
+    if ip and fp then
+      int_part, frac_part = ip --[[: string]], fp --[[: string]]
     else
       int_part = s:match("^(%d+)$") or "0"
       frac_part = ""
@@ -464,7 +478,7 @@ function M.format_number(n, locale, opts)
 
   -- Enforce min_decimals
   if #frac_part < min_dec then
-    frac_part = frac_part .. string.rep("0", min_dec - #frac_part)
+    frac_part = frac_part .. string.rep("0", math.floor(min_dec - #frac_part))
   end
 
   local result = format_integer_part(int_part, fmt, use_group)
@@ -482,7 +496,11 @@ function M.parse_number(str, locale)
   local loc_tag = locale_tag(locale)
   local fmt = get_number_format(loc_tag)
   -- Escape a string for use as a Lua pattern literal
-  local function esc(s) return s:gsub("([%.%+%-%*%?%[%^%$%(%)%%])", "%%%1") end
+  --: (s: string) -> string
+  local function esc(s)
+    local r, _ = s:gsub("([%.%+%-%*%?%[%^%$%(%)%%])", "%%%1")
+    return r
+  end
   -- Remove group separators, replace decimal with "."
   local s = str:gsub(esc(fmt.group), "")
   if fmt.decimal ~= "." then
@@ -496,22 +514,25 @@ end
 --: (number, string, string | { language: string, region: string | nil, script: string | nil }, { decimals: number | nil, group_sep: boolean | nil } | nil) -> (string | nil, string)
 function M.format_currency(n, currency, locale, opts)
   currency = currency:upper()
-  local cd = CURRENCY_DATA[currency]
+  local cd_table = CURRENCY_DATA --[[: { [string]: { symbol: string, position: string } }]]
+  local cd = cd_table[currency]
   if not cd then return nil, "unknown currency: "..currency end
 
   local loc_tag = locale_tag(locale)
-  local num_opts = opts and {
-    decimals = opts.decimals or 2,
-    group_sep = opts.group_sep,
-  } or { decimals = 2 }
+  local num_opts --: { decimals: number | nil, min_decimals: number | nil, max_decimals: number | nil, group_sep: boolean | nil } | nil
+  if opts then
+    num_opts = { decimals = opts.decimals or 2, group_sep = opts.group_sep, min_decimals = nil, max_decimals = nil }
+  else
+    num_opts = { decimals = 2, group_sep = nil, min_decimals = nil, max_decimals = nil }
+  end
 
   local num_str, err = M.format_number(n, locale, num_opts)
   if not num_str then return nil, err end
 
   -- Determine position: check locale override first, then default
   local position = cd.position
-  local overrides = CURRENCY_POSITION_OVERRIDES[loc_tag]
-    or CURRENCY_POSITION_OVERRIDES[locale_lang(locale)]
+  local ov_table = CURRENCY_POSITION_OVERRIDES --[[: { [string]: { [string]: string } }]]
+  local overrides = ov_table[loc_tag] or ov_table[locale_lang(locale)]
   if overrides and overrides[currency] then
     position = overrides[currency]
   end
@@ -535,11 +556,12 @@ end
 -- opts.date_fn: function compatible with os.date (required)
 --: (number | nil, string | { language: string, region: string | nil, script: string | nil }, { style: string | nil, date: boolean | nil, time: boolean | nil, date_fn: (string, (number | nil)) -> unknown }) -> string
 function M.format_date(timestamp, locale, opts)
-  opts = opts or {}
   local style = opts.style or "medium"
   local show_date = opts.date ~= false  -- default true
   local show_time = opts.time == true   -- default false
-  local t = opts.date_fn("*t", timestamp)
+  local t_raw = opts.date_fn("*t", timestamp)
+  if type(t_raw) ~= "table" then return "" end
+  local t = t_raw --[[: { [string]: integer }]]
   local lang = locale_lang(locale)
   local months = (MONTH_NAMES[lang] or MONTH_NAMES["en"])
   local wdays  = (WEEKDAY_NAMES[lang] or WEEKDAY_NAMES["en"])
@@ -599,7 +621,8 @@ end
 --: (number, string | { language: string, region: string | nil, script: string | nil }) -> string
 function M.format_relative(seconds_diff, locale)
   local lang = locale_lang(locale)
-  local tmpl = REL_TEMPLATES[lang] or REL_TEMPLATES["en"]
+  local rt = REL_TEMPLATES --[[: { [string]: { just_now: string, past: (integer, string) -> string, future: (integer, string) -> string } }]]
+  local tmpl = rt[lang] or rt["en"]
   local abs_diff = seconds_diff < 0 and -seconds_diff or seconds_diff
   local is_past  = seconds_diff <= 0
 

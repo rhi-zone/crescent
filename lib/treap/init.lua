@@ -10,6 +10,9 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Node = { key: unknown, value: unknown, priority: number, left: Node | nil, right: Node | nil }
+--:: Cmp = (a: unknown, b: unknown) -> integer
+
 local bit = bit
 local bxor, lshift, rshift = bit.bxor, bit.lshift, bit.rshift
 
@@ -47,6 +50,7 @@ end
 -- Split node t into (l, r):
 --   l has all keys where cmp(key, k) < 0  (keys strictly less than k)
 --   r has all keys where cmp(key, k) >= 0 (keys >= k)
+--: (t: Node | nil, k: unknown, cmp: Cmp) -> (Node | nil, Node | nil)
 local function split(t, k, cmp)
   if t == nil then return nil, nil end
   if cmp(t.key, k) < 0 then
@@ -61,6 +65,7 @@ local function split(t, k, cmp)
 end
 
 -- Merge l and r into one node: assumes all keys in l < all keys in r.
+--: (l: Node | nil, r: Node | nil) -> Node | nil
 local function merge(l, r)
   if l == nil then return r end
   if r == nil then return l end
@@ -77,18 +82,21 @@ end
 -- Internal traversal helpers
 -- ---------------------------------------------------------------------------
 
+--: (t: Node | nil) -> Node | nil
 local function node_min(t)
   if t == nil then return nil end
   while t.left ~= nil do t = t.left end
   return t
 end
 
+--: (t: Node | nil) -> Node | nil
 local function node_max(t)
   if t == nil then return nil end
   while t.right ~= nil do t = t.right end
   return t
 end
 
+--: (t: Node | nil, k: unknown, cmp: Cmp, best: Node | nil) -> Node | nil
 local function node_floor(t, k, cmp, best)
   -- largest key <= k
   if t == nil then return best end
@@ -104,6 +112,7 @@ local function node_floor(t, k, cmp, best)
   end
 end
 
+--: (t: Node | nil, k: unknown, cmp: Cmp, best: Node | nil) -> Node | nil
 local function node_ceil(t, k, cmp, best)
   -- smallest key >= k
   if t == nil then return best end
@@ -120,6 +129,7 @@ local function node_ceil(t, k, cmp, best)
 end
 
 -- In-order traversal: calls fn(key, value) for each node
+--: (t: Node | nil, fn: (unknown, unknown) -> nil) -> nil
 local function each_node(t, fn)
   if t == nil then return end
   each_node(t.left, fn)
@@ -128,6 +138,7 @@ local function each_node(t, fn)
 end
 
 -- Range traversal: calls fn(key, value) for all keys in [lo, hi]
+--: (t: Node | nil, lo: unknown, hi: unknown, cmp: Cmp, fn: (unknown, unknown) -> nil) -> nil
 local function range_node(t, lo, hi, cmp, fn)
   if t == nil then return end
   local clo = cmp(t.key, lo)
@@ -150,10 +161,12 @@ end
 -- Treap object methods
 -- ---------------------------------------------------------------------------
 
+--:: TreapObj = { _root: Node | nil, _size: integer, _cmp: Cmp }
 local Treap = {}
 Treap.__index = Treap
 
 -- Insert key-value pair; update value if key exists.
+--: (self: TreapObj, key: unknown, value: unknown) -> nil
 function Treap:insert(key, value)
   local cmp = self._cmp
   -- Split at key and at key+epsilon to isolate any existing node for that key.
@@ -174,6 +187,7 @@ function Treap:insert(key, value)
 end
 
 -- Remove key. Returns true if removed, false if not found.
+--: (self: TreapObj, key: unknown) -> boolean
 function Treap:remove(key)
   local cmp = self._cmp
   -- Split into keys<key and keys>=key
@@ -244,6 +258,7 @@ function Treap:remove(key)
 end
 
 -- Get value for key; returns nil if not found.
+--: (self: TreapObj, key: unknown) -> unknown
 function Treap:get(key)
   local cmp = self._cmp
   local t = self._root
@@ -258,11 +273,22 @@ function Treap:get(key)
 end
 
 -- Check existence.
+--: (self: TreapObj, key: unknown) -> boolean
 function Treap:contains(key)
-  return self:get(key) ~= nil
+  local cmp = self._cmp
+  local t = self._root
+  while t ~= nil do
+    local c = cmp(key, t.key)
+    if c == 0 then return true
+    elseif c < 0 then t = t.left
+    else t = t.right
+    end
+  end
+  return false
 end
 
 -- Minimum key/value pair; nil if empty.
+--: (self: TreapObj) -> (unknown, unknown)
 function Treap:min()
   local n = node_min(self._root)
   if n == nil then return nil, nil end
@@ -270,6 +296,7 @@ function Treap:min()
 end
 
 -- Maximum key/value pair; nil if empty.
+--: (self: TreapObj) -> (unknown, unknown)
 function Treap:max()
   local n = node_max(self._root)
   if n == nil then return nil, nil end
@@ -277,6 +304,7 @@ function Treap:max()
 end
 
 -- Floor: largest key <= k. Returns key, value or nil, nil.
+--: (self: TreapObj, k: unknown) -> (unknown, unknown)
 function Treap:floor(k)
   local n = node_floor(self._root, k, self._cmp, nil)
   if n == nil then return nil, nil end
@@ -284,6 +312,7 @@ function Treap:floor(k)
 end
 
 -- Ceil: smallest key >= k. Returns key, value or nil, nil.
+--: (self: TreapObj, k: unknown) -> (unknown, unknown)
 function Treap:ceil(k)
   local n = node_ceil(self._root, k, self._cmp, nil)
   if n == nil then return nil, nil end
@@ -291,6 +320,7 @@ function Treap:ceil(k)
 end
 
 -- Predecessor: largest key strictly < k.
+--: (self: TreapObj, k: unknown) -> (unknown, unknown)
 function Treap:pred(k)
   local cmp = self._cmp
   -- floor of (k-epsilon): find largest key where cmp(key, k) < 0
@@ -313,6 +343,7 @@ function Treap:pred(k)
 end
 
 -- Successor: smallest key strictly > k.
+--: (self: TreapObj, k: unknown) -> (unknown, unknown)
 function Treap:succ(k)
   local cmp = self._cmp
   local best = nil
@@ -334,21 +365,25 @@ function Treap:succ(k)
 end
 
 -- Size.
+--: (self: TreapObj) -> integer
 function Treap:size()
   return self._size
 end
 
 -- In-order traversal.
+--: (self: TreapObj, fn: (unknown, unknown) -> nil) -> nil
 function Treap:each(fn)
   each_node(self._root, fn)
 end
 
 -- Range query: fn(key, value) for all keys in [lo, hi].
+--: (self: TreapObj, lo: unknown, hi: unknown, fn: (unknown, unknown) -> nil) -> nil
 function Treap:range(lo, hi, fn)
   range_node(self._root, lo, hi, self._cmp, fn)
 end
 
 -- Convert to sorted array of {key, value} pairs.
+--: (self: TreapObj) -> { [integer]: { [integer]: unknown } }
 function Treap:to_array()
   local arr = {}
   each_node(self._root, function(k, v)
@@ -358,12 +393,13 @@ function Treap:to_array()
 end
 
 -- Split at k: returns two new treap objects (keys < k, keys >= k).
+--: (self: TreapObj, k: unknown) -> (TreapObj, TreapObj)
 function Treap:split(k)
   local l_root, r_root = split(self._root, k, self._cmp)
   -- Count sizes by traversal (split doesn't maintain counts)
   local lsize, rsize = 0, 0
-  each_node(l_root, function() lsize = lsize + 1 end)
-  each_node(r_root, function() rsize = rsize + 1 end)
+  each_node(l_root, function(_k, _v) lsize = lsize + 1 end)
+  each_node(r_root, function(_k, _v) rsize = rsize + 1 end)
   local lt = setmetatable({ _root = l_root, _size = lsize, _cmp = self._cmp }, Treap)
   local rt = setmetatable({ _root = r_root, _size = rsize, _cmp = self._cmp }, Treap)
   -- Invalidate self (consumed by split)
@@ -376,6 +412,7 @@ end
 -- Module-level merge: all keys in left < all keys in right
 -- ---------------------------------------------------------------------------
 
+--: (left: TreapObj, right: TreapObj) -> TreapObj
 function M.merge(left, right)
   assert(left._cmp == right._cmp, "merge: treaps must use the same comparator")
   local root = merge(left._root, right._root)

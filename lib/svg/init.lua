@@ -30,8 +30,10 @@ local function escape_text(s)
 end
 
 -- Convert underscore keys to hyphenated attribute names.
+--: (k: string) -> string
 local function attr_name(k)
-  return k:gsub("_", "-")
+  local r = k:gsub("_", "-")
+  return r
 end
 
 -- Serialize a points array {{x,y},...} to "x,y x,y ..." string.
@@ -92,6 +94,8 @@ end
 -- Element node helpers
 -- ---------------------------------------------------------------------------
 
+--:: SvgEl = { [integer]: unknown }
+--: (tag: string, attrs: { [string]: unknown } | nil, children: { [integer]: unknown } | nil) -> SvgEl
 local function make_element(tag, attrs, children)
   return {tag, attrs, children or {}}
 end
@@ -107,6 +111,8 @@ end
 
 local Container = {}
 Container.__index = Container
+
+local Group --: { new: (doc: unknown, attrs: unknown) -> { _el: unknown, ... }, ... } | nil
 
 function Container:_add(el)
   self._children[#self._children + 1] = el
@@ -185,7 +191,9 @@ end
 
 -- group(attrs) → Group object (manual end_group required)
 -- group(attrs, fn) → calls fn(g), auto-closed
+--: (self: { _add: (unknown, unknown) -> unknown, _doc: unknown, _children: unknown, ... }, attrs: unknown, fn: ((unknown) -> nil) | nil) -> unknown
 function Container:group(attrs, fn)
+  if Group == nil then return nil end
   local g = Group.new(self._doc or self, attrs)
   self:_add(g._el)
   if fn then
@@ -202,12 +210,10 @@ Group = {}
 Group.__index = setmetatable(Group, {__index = Container})
 
 function Group.new(doc, attrs)
-  local self = setmetatable({}, Group)
-  self._doc = doc
-  local a = {}
+  local a = {} --: { [string]: unknown }
   if attrs then for k, v in pairs(attrs) do a[k] = v end end
-  self._el = make_element("g", a, {})
-  self._children = self._el[3]
+  local el = make_element("g", a, {})
+  local self = setmetatable({ _doc = doc, _el = el, _children = el[3] }, Group)
   return self
 end
 
@@ -269,6 +275,7 @@ function Defs:radial_gradient(id, opts)
   return self:_add(el)
 end
 
+--: (self: { _add: (unknown, unknown) -> unknown, _doc: unknown, ... }, id: unknown, opts: { width?: unknown, height?: unknown, patternUnits?: unknown, ... }, fn: ((unknown) -> nil) | nil) -> unknown
 function Defs:pattern(id, opts, fn)
   local a = {id = id}
   if opts.width  ~= nil then a.width  = opts.width  end
@@ -281,6 +288,7 @@ function Defs:pattern(id, opts, fn)
   return el
 end
 
+--: (self: { _add: (unknown, unknown) -> unknown, _doc: unknown, ... }, id: unknown, opts: { refX?: unknown, refY?: unknown, markerWidth?: unknown, markerHeight?: unknown, orient?: unknown, ... }, fn: ((unknown) -> nil) | nil) -> unknown
 function Defs:marker(id, opts, fn)
   local a = {id = id}
   if opts.refX        ~= nil then a.refX        = opts.refX        end

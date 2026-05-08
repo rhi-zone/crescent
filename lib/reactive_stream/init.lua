@@ -145,7 +145,7 @@ end
 
 -- ── Transformers ──────────────────────────────────────────────────────────────
 
---: (((unknown) -> unknown)) -> Stream
+--: (self: Stream, fn: (unknown) -> unknown) -> Stream
 function Stream:map(fn)
   local src = self
   return make_stream(function()
@@ -155,7 +155,7 @@ function Stream:map(fn)
   end)
 end
 
---: (((unknown) -> boolean)) -> Stream
+--: (self: Stream, fn: (unknown) -> boolean) -> Stream
 function Stream:filter(fn)
   local src = self
   return make_stream(function()
@@ -168,7 +168,7 @@ function Stream:filter(fn)
 end
 
 -- fn(val) -> Stream; flatten the resulting streams.
---: (((unknown) -> Stream)) -> Stream
+--: (self: Stream, fn: (unknown) -> Stream) -> Stream
 function Stream:flat_map(fn)
   local src = self
   local inner = nil
@@ -186,7 +186,7 @@ function Stream:flat_map(fn)
   end)
 end
 
---: (number) -> Stream
+--: (self: Stream, n: number) -> Stream
 function Stream:take(n)
   local src = self
   local count = 0
@@ -199,7 +199,7 @@ function Stream:take(n)
   end)
 end
 
---: (number) -> Stream
+--: (self: Stream, n: number) -> Stream
 function Stream:drop(n)
   local src = self
   local dropped = false
@@ -217,7 +217,7 @@ function Stream:drop(n)
   end)
 end
 
---: (((unknown) -> boolean)) -> Stream
+--: (self: Stream, pred: (unknown) -> boolean) -> Stream
 function Stream:take_while(pred)
   local src = self
   local done = false
@@ -232,7 +232,7 @@ function Stream:take_while(pred)
   end)
 end
 
---: (((unknown) -> boolean)) -> Stream
+--: (self: Stream, pred: (unknown) -> boolean) -> Stream
 function Stream:drop_while(pred)
   local src = self
   local dropping = true
@@ -250,7 +250,7 @@ function Stream:drop_while(pred)
 end
 
 -- Returns stream of {a, b} pairs.
---: (Stream) -> Stream
+--: (self: Stream, other: Stream) -> Stream
 function Stream:zip(other)
   local src = self
   return make_stream(function()
@@ -262,7 +262,7 @@ function Stream:zip(other)
 end
 
 -- Returns stream of fn(a, b).
---: (Stream, ((unknown, unknown) -> unknown)) -> Stream
+--: (self: Stream, other: Stream, fn: (unknown, unknown) -> unknown) -> Stream
 function Stream:zip_with(other, fn)
   local src = self
   return make_stream(function()
@@ -274,7 +274,7 @@ function Stream:zip_with(other, fn)
 end
 
 -- Returns stream of {i, val} pairs (1-indexed).
---: () -> Stream
+--: (self: Stream) -> Stream
 function Stream:enumerate()
   local src = self
   local i = 0
@@ -287,13 +287,29 @@ function Stream:enumerate()
 end
 
 -- Stream of streams → flat stream (one level deep).
---: () -> Stream
+--: (self: Stream) -> Stream
 function Stream:flatten()
-  return self:flat_map(function(x) return x end)
+  local src = self
+  local inner_next_fn --: (() -> unknown) | nil
+  return make_stream(function()
+    while true do
+      if inner_next_fn ~= nil then
+        local v = inner_next_fn()
+        if v ~= nil then return v end
+        inner_next_fn = nil
+      end
+      local s = src:next()
+      if s == nil then return nil end
+      if type(s) ~= "table" then return nil end
+      local f = s._next
+      if type(f) ~= "function" then return nil end
+      inner_next_fn = f --[[: () -> unknown]]
+    end
+  end)
 end
 
 -- Groups values into arrays of size n. Last group may be smaller.
---: (number) -> Stream
+--: (self: Stream, n: number) -> Stream
 function Stream:chunk(n)
   local src = self
   local done = false
@@ -314,7 +330,7 @@ function Stream:chunk(n)
 end
 
 -- Sliding window of size n. Returns arrays.
---: (number) -> Stream
+--: (self: Stream, n: number) -> Stream
 function Stream:window(n)
   local src = self
   local buf = {}
@@ -351,11 +367,11 @@ function Stream:window(n)
 end
 
 -- Remove consecutive duplicate values.
---: () -> Stream
+--: (self: Stream) -> Stream
 function Stream:distinct()
   local src = self
   local sentinel = {}  -- unique object to represent "no previous value"
-  local prev = sentinel
+  local prev = sentinel --[[: unknown]]
   return make_stream(function()
     while true do
       local v = src:next()
@@ -369,7 +385,7 @@ function Stream:distinct()
 end
 
 -- Remove ALL duplicate values (tracks seen values in a table).
---: () -> Stream
+--: (self: Stream) -> Stream
 function Stream:unique()
   local src = self
   local seen = {}
@@ -386,17 +402,17 @@ function Stream:unique()
 end
 
 -- Collect, sort, re-stream. cmp is optional comparator.
---: ((((unknown, unknown) -> boolean) | nil)) -> Stream
+--: (self: Stream, cmp: ((unknown, unknown) -> boolean) | nil) -> Stream
 function Stream:sort(cmp)
-  local arr = self:to_array()
+  local arr = Stream.to_array(self)
   table.sort(arr, cmp)
   return M.from_array(arr)
 end
 
 -- Collect, reverse, re-stream.
---: () -> Stream
+--: (self: Stream) -> Stream
 function Stream:reverse()
-  local arr = self:to_array()
+  local arr = Stream.to_array(self)
   local n = #arr
   local rev = {}
   for i = 1, n do rev[i] = arr[n - i + 1] end
@@ -404,7 +420,7 @@ function Stream:reverse()
 end
 
 -- self then other.
---: (Stream) -> Stream
+--: (self: Stream, other: Stream) -> Stream
 function Stream:concat(other)
   local src = self
   local first_done = false
@@ -420,9 +436,9 @@ end
 
 -- ── Terminators ───────────────────────────────────────────────────────────────
 
---: () -> unknown[]
+--: (self: Stream) -> Arr<unknown>
 function Stream:to_array()
-  local result = {}
+  local result = {} --: Arr<unknown>
   local n = 0
   while true do
     local v = self:next()
@@ -430,31 +446,34 @@ function Stream:to_array()
     n = n + 1
     result[n] = v
   end
+  return result
 end
 
---: () -> { [unknown]: boolean }
+--: (self: Stream) -> { [unknown]: boolean }
 function Stream:to_set()
-  local result = {}
+  local result = {} --: { [unknown]: boolean }
   while true do
     local v = self:next()
     if v == nil then return result end
     result[v] = true
   end
+  return result
 end
 
 -- key_fn(val) -> key, val_fn(val) -> mapped_value (defaults to identity).
---: (((unknown) -> unknown), (((unknown) -> unknown) | nil)) -> { [unknown]: unknown }
+--: (self: Stream, key_fn: (unknown) -> unknown, val_fn: ((unknown) -> unknown) | nil) -> { [unknown]: unknown }
 function Stream:to_map(key_fn, val_fn)
-  local result = {}
+  local result = {} --: { [unknown]: unknown }
   while true do
     local v = self:next()
     if v == nil then return result end
     local k = key_fn(v)
     result[k] = val_fn and val_fn(v) or v
   end
+  return result
 end
 
---: (((unknown) -> nil)) -> nil
+--: (self: Stream, fn: (unknown) -> nil) -> nil
 function Stream:each(fn)
   while true do
     local v = self:next()
@@ -463,7 +482,7 @@ function Stream:each(fn)
   end
 end
 
---: (((unknown, unknown) -> unknown), unknown) -> unknown
+--: (self: Stream, fn: (unknown, unknown) -> unknown, init: unknown) -> unknown
 function Stream:fold(fn, init)
   local acc = init
   while true do
@@ -474,7 +493,7 @@ function Stream:fold(fn, init)
 end
 
 -- Like fold but uses first element as initial accumulator.
---: (((unknown, unknown) -> unknown)) -> unknown | nil
+--: (self: Stream, fn: (unknown, unknown) -> unknown) -> unknown | nil
 function Stream:reduce(fn)
   local acc = self:next()
   if acc == nil then return nil end
@@ -485,32 +504,34 @@ function Stream:reduce(fn)
   end
 end
 
---: () -> number
+--: (self: Stream) -> number
 function Stream:sum()
-  local s = 0
+  local s = 0 --: number
   while true do
     local v = self:next()
     if v == nil then return s end
-    s = s + v
+    if type(v) == "number" then s = s + v end
   end
+  return s
 end
 
---: () -> number
+--: (self: Stream) -> number
 function Stream:count()
-  local n = 0
+  local n = 0 --: integer
   while true do
     local v = self:next()
     if v == nil then return n end
     n = n + 1
   end
+  return n
 end
 
---: () -> unknown | nil
+--: (self: Stream) -> unknown | nil
 function Stream:first()
   return self:next()
 end
 
---: () -> unknown | nil
+--: (self: Stream) -> unknown | nil
 function Stream:last()
   local last = nil
   while true do
@@ -520,7 +541,7 @@ function Stream:last()
   end
 end
 
---: ((((unknown, unknown) -> boolean) | nil)) -> unknown | nil
+--: (self: Stream, cmp: ((unknown, unknown) -> boolean) | nil) -> unknown | nil
 function Stream:min(cmp)
   local m = nil
   while true do
@@ -536,7 +557,7 @@ function Stream:min(cmp)
   end
 end
 
---: ((((unknown, unknown) -> boolean) | nil)) -> unknown | nil
+--: (self: Stream, cmp: ((unknown, unknown) -> boolean) | nil) -> unknown | nil
 function Stream:max(cmp)
   local m = nil
   while true do
@@ -552,25 +573,27 @@ function Stream:max(cmp)
   end
 end
 
---: (((unknown) -> boolean)) -> boolean
+--: (self: Stream, pred: (unknown) -> boolean) -> boolean
 function Stream:any(pred)
   while true do
     local v = self:next()
     if v == nil then return false end
     if pred(v) then return true end
   end
+  return false
 end
 
---: (((unknown) -> boolean)) -> boolean
+--: (self: Stream, pred: (unknown) -> boolean) -> boolean
 function Stream:all(pred)
   while true do
     local v = self:next()
     if v == nil then return true end
     if not pred(v) then return false end
   end
+  return true
 end
 
---: (((unknown) -> boolean)) -> unknown | nil
+--: (self: Stream, pred: (unknown) -> boolean) -> unknown | nil
 function Stream:find(pred)
   while true do
     local v = self:next()
@@ -579,17 +602,20 @@ function Stream:find(pred)
   end
 end
 
---: ((string | nil)) -> string
+--: (self: Stream, sep: string | nil) -> string
 function Stream:join(sep)
   sep = sep or ""
-  local parts = self:to_array()
-  return table.concat(parts, sep)
+  local parts = Stream.to_array(self)
+  local strs = {} --: { [integer]: string }
+  for i = 1, #parts do strs[i] = tostring(parts[i]) end
+  return table.concat(strs, sep)
 end
 
 -- Eager: returns two arrays (truthy, falsy).
---: (((unknown) -> boolean)) -> (unknown[], unknown[])
+--: (self: Stream, pred: (unknown) -> boolean) -> (unknown[], unknown[])
 function Stream:partition(pred)
-  local t, f = {}, {}
+  local t = {} --: unknown[]
+  local f = {} --: unknown[]
   local nt, nf = 0, 0
   while true do
     local v = self:next()
@@ -602,22 +628,25 @@ function Stream:partition(pred)
       f[nf] = v
     end
   end
+  return t, f
 end
 
---: (((unknown) -> unknown)) -> { [unknown]: unknown[] }
+--: (self: Stream, key_fn: (unknown) -> unknown) -> { [unknown]: unknown[] }
 function Stream:group_by(key_fn)
-  local result = {}
+  local result = {} --: { [unknown]: unknown[] }
   while true do
     local v = self:next()
     if v == nil then return result end
     local k = key_fn(v)
     local group = result[k]
-    if not group then
-      group = {}
-      result[k] = group
+    if group == nil then
+      local g = {} --: unknown[]
+      result[k] = g
+      group = g
     end
     group[#group + 1] = v
   end
+  return result
 end
 
 -- ── Combiners (module-level) ──────────────────────────────────────────────────
@@ -625,7 +654,7 @@ end
 -- Round-robin interleave of N streams.
 --: (...Stream) -> Stream
 function M.merge(...)
-  local streams = { ... }
+  local streams = { ... } --: { [integer]: Stream }
   local n = #streams
   local active = n
   local idx = 0
@@ -653,7 +682,7 @@ end
 -- One stream after another (varargs).
 --: (...Stream) -> Stream
 function M.concat(...)
-  local streams = { ... }
+  local streams = { ... } --: { [integer]: Stream }
   local n = #streams
   local idx = 1
   return make_stream(function()
@@ -669,7 +698,7 @@ end
 -- Parallel zip of N streams → array of one value from each.
 --: (...Stream) -> Stream
 function M.zip(...)
-  local streams = { ... }
+  local streams = { ... } --: { [integer]: Stream }
   local n = #streams
   return make_stream(function()
     local row = {}

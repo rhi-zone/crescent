@@ -106,26 +106,27 @@ end
 
 -- encode_varint_u64: encode an unsigned 64-bit value split into hi/lo 32-bit halves.
 -- For values that fit in 32 bits, hi=0.
+--: (lo: number, hi: number) -> string
 local function encode_varint_u64(lo, hi)
 	-- lo and hi are treated as unsigned 32-bit integers.
 	-- We emit 7 bits at a time, little-endian.
 	local bytes = {}
 	local n = 0
-	lo = lo % 0x100000000   -- ensure unsigned
-	hi = (hi or 0) % 0x100000000
-	while lo > 127 or hi > 0 do
+	local lo_n = lo % 0x100000000   -- ensure unsigned
+	local hi_n = (hi or 0) % 0x100000000
+	while lo_n > 127 or hi_n > 0 do
 		n = n + 1
-		bytes[n] = string.char((lo % 128) + 128)
+		bytes[n] = string.char((lo_n % 128) + 128)
 		-- shift right by 7: take top 25 bits of lo, and bottom 7 bits of hi become top 7 of lo
-		lo = math.floor(lo / 128)
-		if hi > 0 then
+		lo_n = math.floor(lo_n / 128) --[[: number]]
+		if hi_n > 0 then
 			-- hi's low 7 bits go into the top of lo (at bit 25 = 2^25)
-			lo = lo + (hi % 128) * (0x100000000 / 128)
-			hi = math.floor(hi / 128)
+			lo_n = lo_n + (hi_n % 128) * (0x100000000 / 128)
+			hi_n = math.floor(hi_n / 128) --[[: number]]
 		end
 	end
 	n = n + 1
-	bytes[n] = string.char(lo)
+	bytes[n] = string.char(lo_n)
 	return table.concat(bytes)
 end
 
@@ -171,6 +172,7 @@ local function zigzag32(v)
 end
 
 -- Zigzag encode sint64 (returns single value, fits in Lua double for |v| < 2^52)
+--: (v: number) -> number
 local function zigzag64(v)
 	if v >= 0 then
 		return v * 2
@@ -391,7 +393,7 @@ local function skip_field(data, pos, wire)
 		return pos + 8
 	elseif wire == WIRE_LEN then
 		local lo, _, npos, err = decode_varint(data, pos)
-		if err then return nil, err end
+		if not npos or not lo then return nil, err end
 		return npos + lo
 	elseif wire == WIRE_32BIT then
 		return pos + 4
@@ -452,13 +454,13 @@ local function decode_value(ftype, data, pos)
 
 	elseif k == "string" or k == "bytes" then
 		local lo, _, npos, err = decode_varint(data, pos)
-		if err then return nil, nil, err end
+		if not npos or not lo then return nil, nil, err end
 		if npos + lo - 1 > #data then return nil, nil, "truncated string/bytes" end
 		return data:sub(npos, npos + lo - 1), npos + lo
 
 	elseif k == "message" then
 		local lo, _, npos, err = decode_varint(data, pos)
-		if err then return nil, nil, err end
+		if not npos or not lo then return nil, nil, err end
 		if npos + lo - 1 > #data then return nil, nil, "truncated message" end
 		local sub = data:sub(npos, npos + lo - 1)
 		local result, derr = M.decode(ftype, sub)
@@ -480,7 +482,7 @@ function M.decode(schema, data)
 	local len = #data
 	while pos <= len do
 		local tag_lo, _, npos, err = decode_varint(data, pos)
-		if err then return nil, "tag: " .. err end
+		if not npos or not tag_lo then return nil, "tag: " .. (err or "?") end
 		pos = npos
 		local field_number = math.floor(tag_lo / 8)
 		local wire_type = tag_lo % 8
@@ -503,7 +505,7 @@ function M.decode(schema, data)
 				if inner_ftype.kind == "message" or inner_ftype.kind == "string" or inner_ftype.kind == "bytes" then
 					-- Each occurrence is a separate LEN record; decode_value handles the length prefix.
 					local v, npos2, verr = decode_value(inner_ftype, data, pos)
-					if verr then return nil, "field '" .. fname .. "': " .. verr end
+					if verr then return nil, "field '" .. tostring(fname) .. "': " .. tostring(verr) end
 					arr[#arr + 1] = v
 					pos = npos2
 				else
@@ -511,7 +513,7 @@ function M.decode(schema, data)
 					if wire_type == WIRE_LEN then
 						-- Packed: read length-delimited block, then decode each scalar inside
 						local lo, _, npos2, lerr = decode_varint(data, pos)
-						if lerr then return nil, lerr end
+						if not npos2 or not lo then return nil, lerr end
 						pos = npos2
 						local end_pos = pos + lo
 						while pos < end_pos do
@@ -523,7 +525,7 @@ function M.decode(schema, data)
 					else
 						-- Unpacked: single element with scalar wire type
 						local v, npos2, verr = decode_value(inner_ftype, data, pos)
-						if verr then return nil, "field '" .. fname .. "': " .. verr end
+						if verr then return nil, "field '" .. tostring(fname) .. "': " .. tostring(verr) end
 						arr[#arr + 1] = v
 						pos = npos2
 					end
@@ -531,7 +533,7 @@ function M.decode(schema, data)
 			else
 				-- Singular
 				local v, npos2, verr = decode_value(ftype, data, pos)
-				if verr then return nil, "field '" .. fname .. "': " .. verr end
+				if verr then return nil, "field '" .. tostring(fname) .. "': " .. tostring(verr) end
 				result[fname] = v
 				pos = npos2
 			end

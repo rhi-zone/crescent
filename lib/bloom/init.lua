@@ -93,6 +93,7 @@ end
 -- Standard Bloom filter
 -- ---------------------------------------------------------------------------
 
+--:: BloomObj = { _m: integer, _k: integer, _nwords: integer, _bits: { [integer]: integer } }
 local Bloom = {}
 Bloom.__index = Bloom
 
@@ -103,6 +104,7 @@ local function to_key(v)
 end
 
 -- Internal: probe k bit positions for key s, calling fn(pos) for each
+--: (b: BloomObj, s: string, fn: (integer) -> nil) -> nil
 local function probe(b, s, fn)
   local m, k = b._m, b._k
   local h1, h2 = hash_pair(s)
@@ -113,11 +115,13 @@ local function probe(b, s, fn)
   end
 end
 
+--: (self: BloomObj, v: unknown) -> nil
 function Bloom:add(v)
   local s = to_key(v)
   probe(self, s, function(pos) bit_set(self._bits, pos) end)
 end
 
+--: (self: BloomObj, v: unknown) -> boolean
 function Bloom:has(v)
   local s = to_key(v)
   local all = true
@@ -127,20 +131,24 @@ function Bloom:has(v)
   return all
 end
 
+--: (self: BloomObj) -> nil
 function Bloom:clear()
   local nwords = self._nwords
   for i = 1, nwords do self._bits[i] = 0 end
 end
 
+--: (self: BloomObj) -> integer
 function Bloom:capacity()
   return self._m
 end
 
+--: (self: BloomObj) -> integer
 function Bloom:num_hashes()
   return self._k
 end
 
 -- Estimated number of items added: n* = -m/k * ln(1 - X/m)  where X = set bits
+--: (self: BloomObj) -> number
 function Bloom:count()
   local x = popcount_all(self._bits, self._nwords)
   local m, k = self._m, self._k
@@ -150,8 +158,9 @@ function Bloom:count()
 end
 
 -- Estimated FP rate: (1 - e^(-k*n/m))^k  using estimated n
+--: (self: BloomObj) -> number
 function Bloom:false_positive_rate()
-  local n = self:count()
+  local n = Bloom.count(self)
   local m, k = self._m, self._k
   if n == math.huge then return 1 end
   return (1 - exp(-k * n / m)) ^ k
@@ -159,6 +168,7 @@ end
 
 -- Serialize as: 4-byte big-endian m, 4-byte big-endian k, then nwords * 4 bytes.
 -- k is embedded so bloom.deserialize() needs no extra parameter.
+--: (self: BloomObj) -> string
 function Bloom:to_string()
   local nwords = self._nwords
   local m = self._m
@@ -286,9 +296,9 @@ function M.from_string(s, _k_ignored)
     return nil, "bloom.from_string: invalid serialized string (bad length)"
   end
   local mh1, mh2, mh3, mh4 = string.byte(str, 1, 4)
-  local m = bor(lshift(mh1, 24), lshift(mh2, 16), lshift(mh3, 8), mh4)
+  local m = bor(lshift(mh1 or 0, 24), lshift(mh2 or 0, 16), lshift(mh3 or 0, 8), mh4 or 0)
   local kh1, kh2, kh3, kh4 = string.byte(str, 5, 8)
-  local k = bor(lshift(kh1, 24), lshift(kh2, 16), lshift(kh3, 8), kh4)
+  local k = bor(lshift(kh1 or 0, 24), lshift(kh2 or 0, 16), lshift(kh3 or 0, 8), kh4 or 0)
   if k == 0 then
     return nil, "bloom.from_string: invalid serialized string (k=0)"
   end
@@ -298,10 +308,10 @@ function M.from_string(s, _k_ignored)
     local off = 8 + (i - 1) * 4 + 1
     local b1, b2, b3, b4 = string.byte(str, off, off + 3)
     bits[i] = bor(
-      lshift(b1, 24),
-      lshift(b2, 16),
-      lshift(b3,  8),
-      b4
+      lshift(b1 or 0, 24),
+      lshift(b2 or 0, 16),
+      lshift(b3 or 0,  8),
+      b4 or 0
     )
   end
   return setmetatable({
@@ -325,9 +335,11 @@ end
 -- convention but we store plain ints for simplicity and correctness).
 -- A bit-packed 4-bit-counter version is a future performance optimisation.
 
+--:: CountingBloomObj = { _m: integer, _k: integer, _counters: { [integer]: integer } }
 local CountingBloom = {}
 CountingBloom.__index = CountingBloom
 
+--: (cb: CountingBloomObj, s: string, fn: (integer) -> nil) -> nil
 local function cprobe(cb, s, fn)
   local m, k = cb._m, cb._k
   local h1, h2 = hash_pair(s)
@@ -392,19 +404,24 @@ function CountingBloom:num_hashes()
 end
 
 -- Estimated count uses number of non-zero slots as a proxy for set bits
+--: (self: CountingBloomObj) -> number
 function CountingBloom:count()
   local m, k = self._m, self._k
-  local x = 0
+  local x = 0 --: integer
   for i = 0, m - 1 do
     if (self._counters[i] or 0) > 0 then x = x + 1 end
   end
   if x >= m then return math.huge end
   if x == 0 then return 0 end
-  return floor(-m / k * log(1 - x / m) + 0.5)
+  local mn = m + 0.0
+  local kn = k + 0.0
+  local xn = x + 0.0
+  return floor(-mn / kn * log(1 - xn / mn) + 0.5)
 end
 
+--: (self: CountingBloomObj) -> number
 function CountingBloom:false_positive_rate()
-  local n = self:count()
+  local n = CountingBloom.count(self)
   local m, k = self._m, self._k
   if n == math.huge then return 1 end
   return (1 - exp(-k * n / m)) ^ k
