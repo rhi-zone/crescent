@@ -183,8 +183,9 @@ function M.assemble(opts)
 
 	local entries = opts.lorebook_entries
 	if not entries and card.character_book then
-		entries = lorebook.from_ccv2(--[[:! { entries: any, ... }]] card.character_book) --[[: { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... }, ... } ]]
+		entries = lorebook.from_ccv2(--[[:! { entries: any, ... }]] card.character_book) --[[:! { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... }, ... } ]]
 	end
+	entries = entries --[[:! { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... }, ... } | nil]]
 
 	local triggered_before = {}
 	local triggered_after = {}
@@ -200,7 +201,7 @@ function M.assemble(opts)
 		local scan_text = table.concat(scan_parts, "\n")
 
 		-- Also add constant entries (always triggered)
-		local triggered_indices = lorebook.scan(entries --[[: { ... }[] ]], scan_text)
+		local triggered_indices = lorebook.scan(entries --[[:! { ... }[] ]], scan_text)
 
 		-- Collect constant entries
 		local triggered_set = {}

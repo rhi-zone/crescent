@@ -21,11 +21,12 @@ io.write(string.rep("-", 54) .. "\n")
 
 for _, tier in ipairs(sha._tiers) do
 	-- Warm-up (1 call, not timed).
-	tier.fn(data)
+	local fn = tier.fn --[[:! (string) -> string]]
+	fn(data)
 
 	local t0 = os.clock()
 	for _ = 1, REPS do
-		tier.fn(data)
+		fn(data)
 	end
 	local t1 = os.clock()
 

@@ -325,8 +325,9 @@ local fuse_ffi = require("fuse")
 local mod = {}
 
 --[[temporary]]
-mod.new = fuse_ffi.fuse_fs_new
-mod.mount = fuse_ffi.fuse_mount
+local fuse_ffi_t = fuse_ffi --[[:! { fuse_fs_new: unknown, fuse_mount: unknown, ... }]]
+mod.new = fuse_ffi_t.fuse_fs_new
+mod.mount = fuse_ffi_t.fuse_mount
 
 --[[@enum fuse_error]]
 mod.error = {
