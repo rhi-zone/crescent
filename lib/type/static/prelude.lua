@@ -64,7 +64,7 @@ local function load_decls(ctx, path)
         for _, entry in ipairs(cached.strings) do
             intern_mod.intern(ctx.pool, entry[2])
         end
-        ar = cached.ar
+        ar = cached.ar --[[:! AnnResult]]
     else
         -- Cache miss: full parse + annotate.
         local f = io.open(path, "r")
@@ -79,7 +79,7 @@ local function load_decls(ctx, path)
 
         local ok_a, ar_ = pcall(ann_mod.parse_annotations, pr.lexer.annotations, ctx.pool, path)
         if not ok_a then return end
-        ar = ar_
+        ar = ar_ --[[:! AnnResult]]
 
         -- Collect all strings that were freshly interned during this parse so
         -- that we can re-register them in subsequent pools on a cache hit.
@@ -98,6 +98,7 @@ local function load_decls(ctx, path)
     local resolve = constrain_mod.resolve_annotation_type
 
     -- Collect all ANN_DECL, ANN_MODULE, and ANN_AUGMENT results.
+    --: { [integer]: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, type_params_len: integer | nil, type_params_start: integer | nil, ... }, ... }
     local decls = {}
     local module_decls = {}
     local augment_decls = {}
@@ -118,13 +119,15 @@ local function load_decls(ctx, path)
     for _, r in ipairs(decls) do
         if not r.decl_var then
             local params = nil
-            if r.type_params_len and r.type_params_len > 0 then
+            local tpl = r.type_params_len
+            if tpl and tpl > 0 then
+                local tps = r.type_params_start --[[:! integer]]
                 params = {}
-                for i = r.type_params_start, r.type_params_start + r.type_params_len - 1 do
+                for i = tps, tps + tpl - 1 do
                     params[#params + 1] = ar.lists:get(i)
                 end
             end
-            env_mod.bind_type(ctx.scope, r.name_id, { body = ctx.T_ANY, params = params })
+            env_mod.bind_type(ctx.scope, r.name_id, { body = ctx.T_ANY, params = params } --[[:! TypeAlias]])
         end
     end
 
@@ -148,7 +151,7 @@ local function load_decls(ctx, path)
                 for _, param_name_id in ipairs(alias.params) do
                     local ph = types_mod.alloc_type(ctx, defs_mod.TAG_NAMED)
                     ctx.types:get(ph).data[0] = param_name_id
-                    env_mod.bind_type(temp, param_name_id, { body = ph, params = nil, nominal = false })
+                    env_mod.bind_type(temp, param_name_id, { body = ph, params = nil, nominal = false } --[[:! TypeAlias]])
                 end
                 ctx.scope = temp
             end
@@ -167,7 +170,7 @@ local function load_decls(ctx, path)
             -- Newtype: resolve underlying type, assign a stable nominal identity.
             -- Use path (the .d.lua file) + name as the hash key so stdlib newtypes
             -- are consistent across all files that load this prelude.
-            local ann_nom = ctx.ann.types:get(r.type_id)
+            local ann_nom = (ctx.ann --[[:! AnnResult]]).types:get(r.type_id)
             local underlying = resolve(ctx, ann_nom.data[2])
             local name_str = intern_mod.get(ctx.pool, r.name_id) or ""
             local nominal_id = defs_mod.fnv31(path .. ":newtype:" .. name_str)
@@ -328,6 +331,7 @@ end
 -- bindings are already in scope.  Pre-register the $GlobalScope alias before
 -- load_decls and call this function after; it patches the alias body and
 -- re-binds _G so the declaration in stdlib_types.lua resolves correctly.
+--: (Ctx) -> ()
 local function synthesize_G(ctx)
     local types_mod = require("lib.type.static.types")
 
@@ -360,9 +364,10 @@ end
 -- Pre-register the $GlobalScope type alias with a T_ANY placeholder so that
 -- --:: declare _G = $GlobalScope in stdlib_types.lua can resolve without error.
 -- synthesize_G() patches this alias body with the real type after load_decls.
+--: (Ctx) -> ()
 local function prereq_G(ctx)
     local gs_name_id = intern_mod.intern(ctx.pool, "GlobalScope")
-    env_mod.bind_type(ctx.scope, gs_name_id, { body = ctx.T_ANY, params = nil })
+    env_mod.bind_type(ctx.scope, gs_name_id, { body = ctx.T_ANY, params = nil } --[[:! TypeAlias]])
 end
 
 -- Expose load_decls for external callers (e.g. populate_from_files).
@@ -372,6 +377,7 @@ M.load_decls = load_decls
 -- Populate ctx.scope from a list of file paths (absolute or relative).
 -- Each file is loaded via load_decls. prereq_G and synthesize_G are handled
 -- by the caller (populate or populate_checker) if _G synthesis is needed.
+--: (Ctx, { [integer]: string, ... }, boolean | nil) -> ()
 function M.populate_from_files(ctx, paths, with_G)
     if with_G then prereq_G(ctx) end
     for _, path in ipairs(paths) do
@@ -384,8 +390,10 @@ end
 -- Only loads stdlib_types.lua — does NOT load ctx_types.lua.
 -- ctx_types.lua declares typechecker-internal functions and must not appear in
 -- user-file scope; use populate_checker() for self-checking typechecker sources.
+--: (Ctx) -> ()
 function M.populate(ctx)
-    local src_path = (debug.getinfo(1, "S").source or ""):gsub("^@", "")
+    local _debug_info = debug.getinfo(1, "S")
+    local src_path = (_debug_info.source or ""):gsub("^@", "")
     local dir = src_path:match("^(.+/)[^/]+$") or "./"
     prereq_G(ctx)
     load_decls(ctx, dir .. "stdlib_types.lua")
@@ -397,8 +405,10 @@ end
 -- internal functions like `report`, `infer_expr_multi`, etc. are in scope.
 -- Re-synthesizes _G after loading ctx_types.lua so that checker-internal names are
 -- also reachable via _G when self-checking.
+--: (Ctx) -> ()
 function M.populate_checker(ctx)
-    local src_path = (debug.getinfo(1, "S").source or ""):gsub("^@", "")
+    local _debug_info = debug.getinfo(1, "S")
+    local src_path = (_debug_info.source or ""):gsub("^@", "")
     local dir = src_path:match("^(.+/)[^/]+$") or "./"
     prereq_G(ctx)
     load_decls(ctx, dir .. "stdlib_types.lua")

@@ -422,7 +422,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             ctx.scope = ann_scope
             ctx._resolving_func_ann_scope = true
         end
-        local params = {}
+        local params = {} --: { [integer]: integer }
         for i = at.data[0], at.data[0] + at.data[1] - 1 do
             params[#params + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
         end
@@ -583,7 +583,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
 
     if tag == TAG_UNION then
         seen[ann_tid] = true
-        local members = {}
+        local members = {} --: { [integer]: integer }
         for i = at.data[0], at.data[0] + at.data[1] - 1 do
             members[#members + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
         end
@@ -593,7 +593,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
 
     if tag == defs.TAG_INTERSECTION then
         seen[ann_tid] = true
-        local members = {}
+        local members = {} --: { [integer]: integer }
         for i = at.data[0], at.data[0] + at.data[1] - 1 do
             members[#members + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
         end
@@ -935,8 +935,8 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             end
             if not has_unresolved then
                 local intrinsic_mod = require("lib.type.static.intrinsic")
-                local stable = fnv31(ctx.filename .. ":" .. tostring(ann_tid))
-                return intrinsic_mod.expand(ctx, ct.data[0], arg_ids, stable)
+                local stable = fnv31(ctx.filename .. ":" .. tostring(ann_tid)) --[[:! integer]]
+                return intrinsic_mod.expand(ctx --[[:! Ctx]], ct.data[0], arg_ids, stable) --[[:! integer]]
             end
             -- Fall through to store a deferred TAG_TYPE_CALL.
         end
@@ -1903,7 +1903,7 @@ local function peek_callee_ret_union(ctx, callee_n)
                 recv_tid = env_mod.lookup(ctx.scope, recv_n.data[0])
             end
             if recv_tid then
-                local rtid = types_mod.find(ctx, recv_tid)
+                local rtid = types_mod.find(ctx, recv_tid or 0)
                 local method_id = callee_n.data[1]
                 local fe = types_mod.table_field(ctx, rtid, method_id)
                 if fe then fn_tid = types_mod.find(ctx, fe.type_id) end
@@ -2500,7 +2500,7 @@ local function inject_imported_aliases(ctx, aliases)
                 params          = params,
                 nominal         = alias.nominal or false,
                 resolved_bounds = alias.resolved_bounds,
-            })
+            } --[[:! TypeAlias]])
         end
     end
 end
@@ -3560,15 +3560,16 @@ local process_type_decls
 local function load_decl_file(ctx, mod_name)
     local parse_mod = require("lib.type.static.parse")
     -- Resolve module name to file path: "lib.web.js_types" → "lib/web/js_types.lua"
-    local rel_path = (mod_name:gsub("%.", "/")) .. ".lua"
+    local dot_slash = mod_name:gsub("%.", "/")
+    local rel_path = dot_slash .. ".lua"
     local f = io.open(rel_path, "r")
     if not f then
         -- Fallback: directory package — try "lib/web/js_types/init.lua"
-        rel_path = (mod_name:gsub("%.", "/")) .. "/init.lua"
+        rel_path = dot_slash .. "/init.lua"
         f = io.open(rel_path, "r")
     end
     if not f then return end
-    local source = f:read("*a")
+    local source = f:read("*a") --[[:! string]]
     f:close()
 
     local ok_p, pr = pcall(parse_mod.parse, source, rel_path, ctx.pool)
@@ -3586,7 +3587,7 @@ local function load_decl_file(ctx, mod_name)
     -- process_type_decls will report ar.warnings and ar.parse_errors under rel_path.
     local saved_ann      = ctx.ann
     local saved_filename = ctx.filename
-    ctx.ann      = ar
+    ctx.ann      = ar --[[:! AnnResult]]
     ctx.filename = rel_path
     process_type_decls(ctx)
     ctx.ann      = saved_ann
@@ -3711,13 +3712,14 @@ process_type_decls = function(ctx)
                     raw_defaults[#raw_defaults + 1] = ann.lists:get(i)
                 end
             end
-            env_mod.bind_type(ctx.scope, r.name_id, {
+            local pending_alias --[[: unknown]] = {
                 body         = nil,
                 params       = params,
                 nominal      = r.newtype or false,
                 raw_bounds   = raw_bounds,    -- annotation-arena IDs; resolved in Pass 2a
                 raw_defaults = raw_defaults,  -- annotation-arena IDs; resolved in Pass 2a
-            })
+            }
+            env_mod.bind_type(ctx.scope, r.name_id, pending_alias --[[:! TypeAlias]])
         end
     end
 
@@ -3765,7 +3767,7 @@ process_type_decls = function(ctx)
                             --: TypeSlotArena
                             local types = ctx.types
                             types:get(ph).data[0] = param_name_id
-                            env_mod.bind_type(temp, param_name_id, { body = ph, params = nil, nominal = false })
+                            env_mod.bind_type(temp, param_name_id, { body = ph, params = nil, nominal = false } --[[:! TypeAlias]])
                         end
                         ctx.scope = temp
                     end
@@ -4146,7 +4148,8 @@ function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
     if cri_loader then ctx.cri_loader = cri_loader end
 
     if ctx.ffi_hooks then
-        ctx.ffi_hooks.init(ctx)
+        local fh = ctx.ffi_hooks --[[:! { process: (unknown, string) -> (), init: (unknown) -> (), ... }]]
+        fh.init(ctx)
     end
 
     local typeof_decls = process_type_decls(ctx)
