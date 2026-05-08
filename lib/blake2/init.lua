@@ -50,7 +50,7 @@ local SIGMA = {
 -- ---------------------------------------------------------------------------
 
 -- BLAKE2b initialization vectors (square roots of first 8 primes, fractional parts)
-local B_IV = {
+local B_IV = --[[:! { [integer]: integer } ]] {
   U64(0x6a09e667) * U64(0x100000000) + U64(0xf3bcc908),  -- 0x6a09e667f3bcc908
   U64(0xbb67ae85) * U64(0x100000000) + U64(0x84caa73b),  -- 0xbb67ae8584caa73b
   U64(0x3c6ef372) * U64(0x100000000) + U64(0xfe94f82b),  -- 0x3c6ef372fe94f82b
@@ -217,7 +217,7 @@ local function blake2b_raw(input, hash_len, key)
   local key_len = #key
 
   -- Initialize state h[1..8] = IV
-  local h = {}
+  local h = {} --: { [integer]: integer }
   for i = 1, 8 do h[i] = B_IV[i] end
 
   -- Parameter block: h[1] ^= 0x01010000 ^ (key_len << 8) ^ hash_len

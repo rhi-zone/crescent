@@ -551,7 +551,7 @@ end
 --- Decode a BSON document from bytes.
 -- pos defaults to 1.
 -- Returns: table, pos_after, nil on success; nil, nil, errmsg on error.
---: (bytes: string, pos: number) -> (unknown, number, nil | (nil, nil, string))
+--: (bytes: string, pos: number) -> (unknown | nil, number | nil, string | nil)
 function M.decode(bytes, pos)
 	if type(bytes) ~= "string" then
 		return nil, nil, "expected string"
@@ -563,11 +563,11 @@ function M.decode(bytes, pos)
 	end
 	local t, npos = decode_document(bytes, pos_)
 	if not t then
-		return nil, nil, npos  -- npos holds errmsg when t is nil
+		return nil, nil, npos --[[:! string]]  -- npos holds errmsg when t is nil
 	end
 	-- Auto-convert array-documents (keys "0","1",...) to Lua arrays.
 	if is_array_doc(t) then t = array_doc_to_array(t) end
-	return t, npos, nil
+	return t, npos --[[:! integer]], nil
 end
 
 --- Decode all concatenated BSON documents from bytes.

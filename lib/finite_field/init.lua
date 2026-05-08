@@ -44,10 +44,11 @@ local function modpow(base, exp, m)
   end
   base = mod_pos(base, m)
   local result = 1
-  while exp > 0 do
-    if exp % 2 == 1 then result = (result * base) % m end
+  local exp_ = exp --[[:! integer]]
+  while exp_ > 0 do
+    if exp_ % 2 == 1 then result = (result * base) % m end
     base = (base * base) % m
-    exp = math.floor(exp / 2)
+    exp_ = math.floor(exp_ / 2) --[[:! integer]]
   end
   return result
 end
@@ -236,13 +237,14 @@ function M.gf2n(n, poly, g)
       return new_elem(0)
     end
     if k == 0 then return new_elem(1) end
-    local lv = log[self._v]
+    local lv = log[self._v] --[[:! integer]]
+    local k_ = k --[[:! integer]]
     if k < 0 then
       -- a^k = (a^{-1})^{-k}
       lv = (size - 1 - lv) % (size - 1)
-      k = -k
+      k_ = -k_
     end
-    return new_elem(exp[(lv * k) % (size - 1)])
+    return new_elem(exp[(lv * k_) % (size - 1)])
   end
 
   function elem_mt:eq(b)
@@ -326,7 +328,7 @@ function M.poly(field, coeffs)
   end
 
   function poly_mt:add(other)
-    local as, bs = self._coeffs, other._coeffs
+    local as, bs = self._coeffs --[[:! { [integer]: unknown, ... }]], other._coeffs --[[:! { [integer]: unknown, ... }]]
     local len = math.max(#as, #bs)
     local out = {}
     for i = 1, len do
