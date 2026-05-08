@@ -280,7 +280,7 @@ function M.parse_annotations(annotations, pool, filename)
     local function parse_primary(s)
         local b0 = peek(s)
         if not b0 then scan_error(s, "unexpected end of type") end
-        local b = b0 or 0  -- non-nil guaranteed by scan_error above
+        local b = b0
 
         -- String literal type: "foo"
         if b == B_DQUOT or b == B_SQUOT then
