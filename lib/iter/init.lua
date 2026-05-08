@@ -4,7 +4,7 @@ end
 
 local iter = {}
 
---: (number, number, number | nil) -> () -> number | nil
+--: (number, number, number | nil) -> (() -> number | nil, nil, nil)
 function iter.range(start, stop, step)
   if step == 0 then error("iter.range: step cannot be 0") end
   step = step or (start <= stop and 1 or -1)
@@ -20,7 +20,7 @@ function iter.range(start, stop, step)
 end
 
 --- Iterate array values (like ipairs but yields only the value).
---: <T>(T[]) -> () -> T
+--: <T>(T[]) -> (() -> T | nil, nil, nil)
 function iter.values(t)
   local i = 0
   local n = #t
@@ -34,7 +34,7 @@ end
 iter.from = iter.values
 
 --- Iterate table keys (unordered, like pairs but yields only keys).
---: ({ [unknown]: unknown }) -> () -> unknown
+--: ({ [unknown]: unknown }) -> (() -> unknown, nil, nil)
 function iter.keys(t)
   local k
   return function()
@@ -62,7 +62,7 @@ end
 ----------------------------------------------------------------
 
 --- Apply fn to each value.
---: ((unknown) -> unknown, (...unknown) -> unknown, unknown, unknown) -> () -> unknown
+--: ((unknown) -> unknown, (...unknown) -> unknown, unknown, unknown) -> (() -> unknown, nil, nil)
 function iter.map(fn, f, s, c)
   return function()
     local v = f(s, c)
@@ -73,7 +73,7 @@ function iter.map(fn, f, s, c)
 end
 
 --- Keep values where pred returns true.
---: ((unknown) -> boolean, (...unknown) -> unknown, unknown, unknown) -> () -> unknown
+--: ((unknown) -> boolean, (...unknown) -> unknown, unknown, unknown) -> (() -> unknown, nil, nil)
 function iter.filter(pred, f, s, c)
   return function()
     while true do
@@ -86,7 +86,7 @@ function iter.filter(pred, f, s, c)
 end
 
 --- First n values.
---: (number, (...unknown) -> unknown, unknown, unknown) -> () -> unknown
+--: (number, (...unknown) -> unknown, unknown, unknown) -> (() -> unknown, nil, nil)
 function iter.take(n, f, s, c)
   local remaining = n
   return function()
@@ -100,7 +100,7 @@ function iter.take(n, f, s, c)
 end
 
 --- Skip first n values, then yield the rest.
---: (number, (...unknown) -> unknown, unknown, unknown) -> () -> unknown
+--: (number, (...unknown) -> unknown, unknown, unknown) -> (() -> unknown, nil, nil)
 function iter.skip(n, f, s, c)
   local skipped = false
   return function()
@@ -121,7 +121,7 @@ end
 
 --- Pair up values from two iterators. Stops at the shorter one.
 --- Accepts two closures (not triples). Use iter.wrap() for raw triples.
---: <V1, V2>((() -> V1), (() -> V2)) -> () -> (V1, V2)
+--: <V1, V2>((() -> V1 | nil), (() -> V2 | nil)) -> (() -> (V1, V2) | nil, nil, nil)
 function iter.zip(it1, it2)
   return function()
     local v1 = it1()
@@ -134,7 +134,7 @@ end
 
 --- Concatenate two iterators.
 --- Accepts two closures (not triples). Use iter.wrap() for raw triples.
---: <V>((() -> V), (() -> V)) -> () -> V
+--: <V>((() -> V | nil), (() -> V | nil)) -> (() -> V | nil, nil, nil)
 function iter.chain(it1, it2)
   local first = true
   return function()
@@ -148,7 +148,7 @@ function iter.chain(it1, it2)
 end
 
 --- Map then flatten. fn must return an iterator triple (f, s, c).
---: <S, V, W>((V) -> ((S, W) -> W, S, W), (S, V) -> V, S, V) -> () -> W
+--: <S, V, W>((V) -> ((S, W) -> W, S, W), (S, V) -> V, S, V) -> (() -> W | nil, nil, nil)
 function iter.flat_map(fn, f, s, c)
   local inner_f, inner_s, inner_c
   local outer_done = false
@@ -177,7 +177,7 @@ function iter.flat_map(fn, f, s, c)
 end
 
 --- Add index: returns i, value.
---: <S, V>((S, V) -> V, S, V) -> () -> (number | nil, V | nil)
+--: <S, V>((S, V) -> V, S, V) -> (() -> (integer, V) | nil, nil, nil)
 function iter.enumerate(f, s, c)
   local i = 0
   return function()

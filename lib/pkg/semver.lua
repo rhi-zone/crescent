@@ -9,6 +9,7 @@ local M = {}
 
 --:: PreId = integer | string
 --:: Version = { major: integer, minor: integer, patch: integer, pre: (PreId[]) | nil }
+--:: PartialVersion = { major: integer, minor: integer | nil, patch: integer | nil }
 --:: Constraint = { op: string, version: Version | nil }
 
 -- Parse a pre-release identifier list from a string like "alpha.1".
@@ -102,31 +103,34 @@ end
 
 -- Parse a bare version string used inside a constraint (may be partial for ~ operator).
 -- Returns major, minor, patch (any may be nil for wildcards).
+--: (string) -> (integer | nil, integer | nil, integer | nil)
 local function parse_partial(s)
 	local maj, min, pat = s:match("^(%d+)%.(%d+)%.(%d+)$")
 	if maj then
-		return tonumber(maj), tonumber(min), tonumber(pat)
+		return tonumber(maj) --[[:! integer]], tonumber(min) --[[:! integer]], tonumber(pat) --[[:! integer]]
 	end
 	maj, min = s:match("^(%d+)%.(%d+)$")
 	if maj then
-		return tonumber(maj), tonumber(min), nil
+		return tonumber(maj) --[[:! integer]], tonumber(min) --[[:! integer]], nil
 	end
 	maj = s:match("^(%d+)$")
 	if maj then
-		return tonumber(maj), nil, nil
+		return tonumber(maj) --[[:! integer]], nil, nil
 	end
 	return nil, nil, nil
 end
 
 -- Build a version with pre=nil (release) for boundary comparisons.
+--: (number, number, number) -> Version
 local function v(maj, min, pat)
-	return { major = maj, minor = min, patch = pat, pre = nil }
+	return { major = maj --[[:! integer]], minor = min --[[:! integer]], patch = pat --[[:! integer]], pre = nil }
 end
 
 --- Parse a constraint string into a structured form.
 -- Returns a constraint table or nil, err.
 -- Constraint table: { op = "^"|"~"|">="|">"|"<="|"<"|"="|"*", version = parsed }
 -- For "^" and "~" the version field contains the anchor, and op encodes the rule.
+--: (string) -> (Constraint | nil, string | nil)
 function M.parse_constraint(str)
 	if type(str) ~= "string" then
 		return nil, "expected string"
@@ -147,7 +151,11 @@ function M.parse_constraint(str)
 	if rest then
 		local maj, min, pat = parse_partial(rest)
 		if maj == nil then return nil, "invalid constraint version: " .. rest end
-		return { op = "~", version = { major = maj, minor = min, patch = pat } }
+		-- Store partial version; minor/patch may be nil for "~1" or "~1.2" forms.
+		-- Stored as Version with zeros for unspecified fields; the satisfies() logic
+		-- re-reads via PartialVersion cast to check which were originally nil.
+		local pv = { major = maj, minor = min, patch = pat } --[[:! Version]]
+		return { op = "~", version = pv }
 	end
 	-- >=, <=, >, <
 	for _, op in ipairs({ ">=", "<=", ">", "<" }) do
@@ -202,6 +210,7 @@ function M.satisfies(version, constraint_str)
 
 	if op == "^" then
 		-- >= cv and < upper bound based on first nonzero component
+		-- cv is always a full Version here (produced by M.parse in parse_constraint)
 		if M.cmp(version, cv) < 0 then return false end
 		local upper
 		if cv.major ~= 0 then
@@ -220,14 +229,16 @@ function M.satisfies(version, constraint_str)
 		-- ~1.2.3 → >=1.2.3 <1.3.0
 		-- ~1.2   → >=1.2.0 <1.3.0
 		-- ~1     → >=1.0.0 <2.0.0
-		local maj = cv.major
-		local min = cv.minor
-		local pat = cv.patch
+		-- cv was stored as PartialVersion (minor/patch may be nil)
+		local pcv = cv --[[:! PartialVersion]]
+		local maj = pcv.major
+		local min = pcv.minor
+		local pat = pcv.patch
 		local lower, upper
 		if pat ~= nil then
 			-- ~1.2.3
-			lower = v(maj, min, pat)
-			upper = v(maj, min + 1, 0)
+			lower = v(maj, min ~= nil and min or 0, pat)
+			upper = v(maj, (min ~= nil and min or 0) + 1, 0)
 		elseif min ~= nil then
 			-- ~1.2
 			lower = v(maj, min, 0)
@@ -237,8 +248,8 @@ function M.satisfies(version, constraint_str)
 			lower = v(maj, 0, 0)
 			upper = v(maj + 1, 0, 0)
 		end
-		if M.cmp(version, lower --[[:! Version]]) < 0 then return false end
-		if M.cmp(version, upper --[[:! Version]]) >= 0 then return false end
+		if M.cmp(version, lower) < 0 then return false end
+		if M.cmp(version, upper) >= 0 then return false end
 		return true
 	end
 
