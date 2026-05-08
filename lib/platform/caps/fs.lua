@@ -128,22 +128,22 @@ local function build_sensitive(env)
 	local LOCALAPPDATA = env("LOCALAPPDATA") or ""
 	local APPDATA     = env("APPDATA")     or ""
 
+	--: (string) -> string
 	local function norm(p)
 		if p == "" then return "" end
-		return p:gsub("\\", "/")
+		local s, _ = p:gsub("\\", "/")
+		return s
 	end
 
-	local entries = {
-		{ norm("/"),              "root_fs",        "the entire filesystem" },
-		{ norm("/etc"),           "etc",            "system configuration (/etc)" },
-		{ norm("/home"),          "all_user_homes", "all users' home directories (/home)" },
-		{ norm("/tmp"),           "tmp_dir",        "temporary directory (/tmp)" },
-		{ norm("/var/tmp"),       "tmp_dir",        "temporary directory (/var/tmp)" },
-		{ norm("C:/Users"),       "all_user_homes", "all users' home directories (C:/Users)" },
-		{ norm("C:/Windows"),     "windows_dir",    "Windows system directory" },
-		{ norm("C:/Program Files"), "program_files","installed programs (Program Files)" },
-	}
-
+	local entries = {} --: { [integer]: { [integer]: string }, ... }
+	entries[#entries+1] = { norm("/"),              "root_fs",        "the entire filesystem" }
+	entries[#entries+1] = { norm("/etc"),           "etc",            "system configuration (/etc)" }
+	entries[#entries+1] = { norm("/home"),          "all_user_homes", "all users' home directories (/home)" }
+	entries[#entries+1] = { norm("/tmp"),           "tmp_dir",        "temporary directory (/tmp)" }
+	entries[#entries+1] = { norm("/var/tmp"),       "tmp_dir",        "temporary directory (/var/tmp)" }
+	entries[#entries+1] = { norm("C:/Users"),       "all_user_homes", "all users' home directories (C:/Users)" }
+	entries[#entries+1] = { norm("C:/Windows"),     "windows_dir",    "Windows system directory" }
+	entries[#entries+1] = { norm("C:/Program Files"), "program_files","installed programs (Program Files)" }
 	if HOME ~= "" then
 		entries[#entries+1] = { norm(HOME .. "/.ssh"),   "ssh_keys",         "SSH private keys (~/.ssh)" }
 		entries[#entries+1] = { norm(HOME .. "/.gnupg"), "gpg_keys",         "GPG private keys (~/.gnupg)" }
@@ -200,10 +200,12 @@ local SEVERITY_TABLE = {
 --   class           — one of the keys in SEVERITY_TABLE, or "specific"
 --   matched_label   — human label for the matched sensitive dir (nil if class=="specific")
 --   ancestor_labels — list of label strings for sensitive dirs UNDER path (nil if none)
+--: (string, (string) -> string | nil) -> (string, string | nil, { [integer]: string, ... } | nil)
 function M._classify_root(path, env_fn)
 	local sensitive = env_fn == os.getenv and SENSITIVE or build_sensitive(env_fn)
 
 	-- Expand tilde using env_fn so tests can stub HOME
+	--: (string) -> string
 	local function expand(p)
 		if p:sub(1, 1) == "~" then
 			local home = env_fn("HOME") or ""
@@ -269,6 +271,7 @@ function M._classify_root(path, env_fn)
 	return class, matched_label, ancestor_labels
 end
 
+--: ({ root: string | nil, allow_write: boolean | nil, ... }) -> { severity: string, text: string }
 function M.risk(decl)
 	local raw_root = decl.root or ""
 	local allow_write = decl.allow_write and true or false

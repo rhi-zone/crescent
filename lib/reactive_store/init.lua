@@ -127,9 +127,9 @@ end
 -- opts: { name, initial_state, reducers = { action_name = fn(state, action) } }
 -- Generates action creators at actions.ACTION_NAME (upper-cased action_name).
 M.slice = function(opts)
-  local name = opts.name
+  local name = opts.name --[[:! string]]
   local initial = opts.initial_state
-  local case_reducers = opts.reducers or {}
+  local case_reducers = (opts.reducers or {}) --[[:! { [string]: function, ... }]]
 
   -- Build action creators and type->handler map
   local type_map = {}   -- "name/action_name" -> handler_fn
@@ -159,6 +159,7 @@ end
 
 -- Build the dispatch chain from middleware list.
 -- Each middleware: fn(store_api) -> fn(next) -> fn(action)
+--: ({ get_state: (self: unknown) -> unknown, dispatch: (self: unknown, action: unknown) -> unknown, ... }, { [integer]: (unknown) -> (unknown) -> (unknown) -> unknown, ... }, (unknown) -> unknown) -> (unknown) -> unknown
 local function apply_middleware(store, middlewares, base_dispatch)
   if #middlewares == 0 then return base_dispatch end
   local store_api = {
@@ -179,7 +180,7 @@ M.store = function(reducer, initial_state, opts)
   opts = opts or {}
   local middlewares = opts.middleware or {}
 
-  local _subscribers = {}    -- array of fn(state, action)
+  local _subscribers = {} --: { [integer]: (unknown, unknown) -> unknown, ... }
   local _history = {}        -- array of { action, state }
   local _batching = false    -- when true, subscriber calls are buffered
   local _batch_pending       -- last {state, action} during batch (or nil)
@@ -303,9 +304,10 @@ end
 
 -- Derived state: subscribes to a store and tracks a selector's result.
 -- M.derived(store, selector_fn) -> { get(), subscribe(fn) -> unsub }
+--: ({ get_state: (self: unknown) -> unknown, subscribe: (self: unknown, fn: (unknown, unknown) -> unknown) -> function, ... }, function) -> unknown
 M.derived = function(store, selector_fn)
   local memo  = M.selector(selector_fn)
-  local _subs = {}
+  local _subs = {} --: { [integer]: function, ... }
 
   local function current()
     return memo(store:get_state())
@@ -401,6 +403,7 @@ M.batch = {
   end,
 
   -- Run fn; hold subscriber notifications until fn returns, then fire once.
+  --: ({ _begin_batch: () -> nil, _end_batch: () -> nil, ... }, () -> nil) -> (boolean | nil, string | nil)
   actions = function(store, fn)
     store._begin_batch()
     local ok, err = pcall(fn)
