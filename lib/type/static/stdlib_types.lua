@@ -81,19 +81,25 @@
 --::   C:        $FfiC,
 --::   ...
 --:: }
+-- LuaJIT's bit module accepts any number in the int32/uint32 range and
+-- converts inputs via tobit() semantics (masking to 32 bits). Constants like
+-- 0xFFFFFFFF and the FNV offset basis 2166136261 parse as `number` (above
+-- signed int32 range) and are accepted at runtime, so the type signatures
+-- accept `number` rather than `integer`. The return type is documented as a
+-- signed 32-bit integer per https://bitop.luajit.org/api.html.
 --:: BitLib = {
 --::   tobit:   (x: number) -> integer,
---::   tohex:   (x: integer, n: integer | nil) -> string,
---::   bnot:    (x: integer) -> integer,
---::   band:    (x: integer, ...integer) -> integer,
---::   bor:     (x: integer, ...integer) -> integer,
---::   bxor:    (x: integer, ...integer) -> integer,
---::   lshift:  (x: integer, n: integer) -> integer,
---::   rshift:  (x: integer, n: integer) -> integer,
---::   arshift: (x: integer, n: integer) -> integer,
---::   bswap:   (x: integer) -> integer,
---::   rol:     (x: integer, n: integer) -> integer,
---::   ror:     (x: integer, n: integer) -> integer
+--::   tohex:   (x: number, n: integer | nil) -> string,
+--::   bnot:    (x: number) -> integer,
+--::   band:    (x: number, ...number) -> integer,
+--::   bor:     (x: number, ...number) -> integer,
+--::   bxor:    (x: number, ...number) -> integer,
+--::   lshift:  (x: number, n: number) -> integer,
+--::   rshift:  (x: number, n: number) -> integer,
+--::   arshift: (x: number, n: number) -> integer,
+--::   bswap:   (x: number) -> integer,
+--::   rol:     (x: number, n: number) -> integer,
+--::   ror:     (x: number, n: number) -> integer
 --:: }
 --:: module "bit": BitLib
 --:: declare bit = BitLib

@@ -658,24 +658,56 @@ function M.narrow_scope(ctx, test_nid, is_truthy)
 
     -- `a and b`: in truthy branch, both a and b are true — apply both narrowings.
     -- In falsy branch, De Morgan complexity: skip (conservative).
+    -- Recurse on either side that is itself an OP_AND so that chains of three
+    -- or more conjuncts (`a and b and c`, parsed as `(a and b) and c`) compose
+    -- their narrowings rather than dropping the inner ones.
     if n and n.kind == NODE_BINARY_EXPR and n.data[0] == OP_AND then
         if is_truthy then
-            local left_info  = extract_narrowing(ctx, n.data[1])
-            local right_info = extract_narrowing(ctx, n.data[2])
-            record_narrowing(ctx, left_info,  narrowed, true)
-            record_narrowing(ctx, right_info, narrowed, true)
+            local left_nid  = n.data[1]
+            local right_nid = n.data[2]
+            local left_n  = ctx.nodes:get(left_nid)
+            local right_n = ctx.nodes:get(right_nid)
+            if left_n and left_n.kind == NODE_BINARY_EXPR and left_n.data[0] == OP_AND then
+                local sub = M.narrow_scope(ctx, left_nid, true)
+                for nid_, tid_ in pairs(sub) do narrowed[nid_] = tid_ end
+            else
+                local left_info = extract_narrowing(ctx, left_nid)
+                record_narrowing(ctx, left_info, narrowed, true)
+            end
+            if right_n and right_n.kind == NODE_BINARY_EXPR and right_n.data[0] == OP_AND then
+                local sub = M.narrow_scope(ctx, right_nid, true)
+                for nid_, tid_ in pairs(sub) do narrowed[nid_] = tid_ end
+            else
+                local right_info = extract_narrowing(ctx, right_nid)
+                record_narrowing(ctx, right_info, narrowed, true)
+            end
         end
         return narrowed
     end
 
     -- `a or b`: in falsy branch, not (A or B) ≡ not A and not B — apply both negated narrowings.
     -- In truthy branch, either arm may be true: skip (conservative).
+    -- Recurse on either side that is itself OP_OR for the same chain reason.
     if n and n.kind == NODE_BINARY_EXPR and n.data[0] == OP_OR then
         if not is_truthy then
-            local left_info  = extract_narrowing(ctx, n.data[1])
-            local right_info = extract_narrowing(ctx, n.data[2])
-            record_narrowing(ctx, left_info,  narrowed, false)
-            record_narrowing(ctx, right_info, narrowed, false)
+            local left_nid  = n.data[1]
+            local right_nid = n.data[2]
+            local left_n  = ctx.nodes:get(left_nid)
+            local right_n = ctx.nodes:get(right_nid)
+            if left_n and left_n.kind == NODE_BINARY_EXPR and left_n.data[0] == OP_OR then
+                local sub = M.narrow_scope(ctx, left_nid, false)
+                for nid_, tid_ in pairs(sub) do narrowed[nid_] = tid_ end
+            else
+                local left_info = extract_narrowing(ctx, left_nid)
+                record_narrowing(ctx, left_info, narrowed, false)
+            end
+            if right_n and right_n.kind == NODE_BINARY_EXPR and right_n.data[0] == OP_OR then
+                local sub = M.narrow_scope(ctx, right_nid, false)
+                for nid_, tid_ in pairs(sub) do narrowed[nid_] = tid_ end
+            else
+                local right_info = extract_narrowing(ctx, right_nid)
+                record_narrowing(ctx, right_info, narrowed, false)
+            end
         end
         return narrowed
     end
