@@ -1903,9 +1903,9 @@ local function peek_callee_ret_union(ctx, callee_n)
                 recv_tid = env_mod.lookup(ctx.scope, recv_n.data[0])
             end
             if recv_tid then
-                recv_tid = types_mod.find(ctx, recv_tid)
+                local rtid = types_mod.find(ctx, recv_tid)
                 local method_id = callee_n.data[1]
-                local fe = types_mod.table_field(ctx, recv_tid, method_id)
+                local fe = types_mod.table_field(ctx, rtid, method_id)
                 if fe then fn_tid = types_mod.find(ctx, fe.type_id) end
             end
         end
@@ -2289,7 +2289,9 @@ local function is_never_call_stmt(ctx, nid)
     local callee_nid = en.data[0]
     local cn = ctx.nodes:get(callee_nid)
     if cn.kind == NODE_IDENTIFIER then
-        return fn_returns_never(ctx, env_mod.lookup(ctx.scope, cn.data[0]))
+        local fn_tid = env_mod.lookup(ctx.scope, cn.data[0])
+        if fn_tid == nil then return false end
+        return fn_returns_never(ctx, fn_tid)
     end
     -- Field-access call: mod.fail(...) — look up field on obj type.
     if cn.kind == NODE_FIELD_EXPR then
@@ -3159,16 +3161,15 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
             for i = 1, #branch_ends do
                 local et = branch_ends[i]
                 local end_scope = branch_end_scopes[i]
-                local t = et[name_id]
                 -- Fall back to the type as known at branch end (which includes entry
                 -- narrowings) so that purely-narrowed (unreassigned) bindings still
                 -- contribute their narrowed type to the join, not the pre-if union.
-                if t == nil then t = env_mod.lookup(end_scope, name_id) end
-                if t == nil then t = post_guard end
-                add_member(t)
+                local t = et[name_id] or env_mod.lookup(end_scope, name_id) or post_guard
+                if t ~= nil then add_member(t) end
             end
             if not has_else then
-                add_member(pass_through_neg[name_id] or post_guard)
+                local pt = pass_through_neg[name_id] or post_guard
+                if pt ~= nil then add_member(pt) end
             end
             if #members == 1 then
                 join[name_id] = members[1]
@@ -3516,11 +3517,11 @@ local process_type_decls
 local function load_decl_file(ctx, mod_name)
     local parse_mod = require("lib.type.static.parse")
     -- Resolve module name to file path: "lib.web.js_types" → "lib/web/js_types.lua"
-    local rel_path = mod_name:gsub("%.", "/") .. ".lua"
+    local rel_path = (mod_name:gsub("%.", "/")) .. ".lua"
     local f = io.open(rel_path, "r")
     if not f then
         -- Fallback: directory package — try "lib/web/js_types/init.lua"
-        rel_path = mod_name:gsub("%.", "/") .. "/init.lua"
+        rel_path = (mod_name:gsub("%.", "/")) .. "/init.lua"
         f = io.open(rel_path, "r")
     end
     if not f then return end
@@ -4002,6 +4003,7 @@ end
 -- Run constraint generation on a parsed source.
 -- Returns {ctx, constraints} where ctx is the fully-initialized checker context
 -- and constraints is the flat constraint array.
+--: (string, string, any, any, any, any) -> (Ctx, { [integer]: any, ... })
 function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
     local parse_mod  = require("lib.type.static.parse")
     local intern_new = require("lib.type.static.intern").new

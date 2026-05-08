@@ -203,7 +203,7 @@ local function scan_number(s)
             s.pos = s.pos + 1
         end
     end
-    return tonumber(sub(s.src, start, s.pos - 1))
+    return tonumber(sub(s.src, start, s.pos - 1)) or 0
 end
 
 --: (Scanner) -> boolean
@@ -672,7 +672,7 @@ function M.parse_annotations(annotations, pool, filename)
                         skip_ws(s)
                         local is_opaque = bracket_word and not prim_tags[bracket_word]
                             and s.pos <= s.len and byte(s.src, s.pos) == byte("]")
-                        if is_opaque then
+                        if is_opaque and bracket_word then
                             -- Opaque key field: name_id = intern(IDENT), FLAG_OPAQUE_KEY
                             advance(s)  -- consume ']'
                             expect_char(s, ":")
@@ -905,7 +905,7 @@ function M.parse_annotations(annotations, pool, filename)
             -- Intern type param names
             local param_ids = {}
             for i = 1, #params do
-                param_ids[i] = intern_mod.intern(pool, params[i])
+                param_ids[i] = intern_mod.intern(pool, params[i] or "")
             end
             local tps, tpl = flush_type_list(param_ids)
             -- Store bounds in data[3]/data[4] if any bound was specified.
@@ -945,7 +945,7 @@ function M.parse_annotations(annotations, pool, filename)
 
         -- Word: could be primitive, keyword (typeof/match/newtype/function), or named type
         if is_ident_start(b) then
-            local word = scan_word(s)
+            local word = scan_word(s) or ""
 
             -- typeof <ident>: capture the inferred type of a value binding
             if word == "typeof" then

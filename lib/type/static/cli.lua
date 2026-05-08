@@ -488,12 +488,19 @@ end
 -- ── dump helpers ──────────────────────────────────────────────────────────────
 
 -- Escape a string for JSON output.
+--: (string) -> string
 local function json_str(s)
-    return '"' .. s:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\r', '\\r'):gsub('\t', '\\t') .. '"'
+    local r = (s:gsub('\\', '\\\\'))
+    r = (r:gsub('"', '\\"'))
+    r = (r:gsub('\n', '\\n'))
+    r = (r:gsub('\r', '\\r'))
+    r = (r:gsub('\t', '\\t'))
+    return '"' .. r .. '"'
 end
 
 --- Return { file, bindings, ["return"] } for filename, or nil if check fails.
 -- bindings is an array of { name, type } sorted by name.
+--: (string, any, any) -> { file: string, bindings: { [integer]: { name: string, type: string }, ... }, ["return"]: string | nil } | nil
 function M.dump_one(filename, parent_scope, opts)
     local check_mod  = require("lib.type.static.check")
     local intern_mod = require("lib.type.static.intern")
@@ -890,17 +897,17 @@ function M.main(argv)
 
         if pkg_path then
             local ok_load, pkg_fn = pcall(loadfile, pkg_path)
-            if ok_load and pkg_fn then
-                local ok_run, manifest = pcall(pkg_fn)
+            if ok_load and type(pkg_fn) == "function" then
+                local ok_run, manifest = pcall(pkg_fn --[[: any]])
                 if ok_run and type(manifest) == "table" then
-                    local tc = manifest.typecheck
+                    local tc = (manifest --[[: any]]).typecheck
                     if tc and type(tc) == "table" and type(tc.globals) == "table" then
                         -- Resolve module names to file paths.
                         -- "lib/type/static/stdlib_types" → "lib/type/static/stdlib_types.lua"
                         local globals_files = {}
                         for _, mod_name in ipairs(tc.globals) do
                             -- Accept both slash-path and dot-path conventions.
-                            local rel = mod_name:gsub("%.", "/")
+                            local rel = (mod_name:gsub("%.", "/"))
                             globals_files[#globals_files + 1] = rel .. ".lua"
                         end
                         if #globals_files > 0 then
@@ -920,7 +927,7 @@ function M.main(argv)
                 io.stderr:write(filename .. ": failed to check\n")
             else
                 -- Read source lines.
-                local src_lines = {}
+                local src_lines = {} --: { [integer]: string, ... }
                 local f = io.open(filename, "r")
                 if f then
                     for line in f:lines() do src_lines[#src_lines + 1] = line end
@@ -931,7 +938,7 @@ function M.main(argv)
                 -- type_at is a flat array {line, col, tid, ...} stride 3.
                 -- Emit at most one annotation per source line: pick the first
                 -- non-trivial type seen on that line (constraint-generation order).
-                local insertions = {}  -- line → ann_text string (one per line)
+                local insertions = {} --: { [integer]: string }
                 local ta = ctx.type_at
                 local i = 1
                 while i <= #ta do
