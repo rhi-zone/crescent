@@ -212,6 +212,7 @@ Ctx = {
   _allow_unapplied_constructors: boolean | nil,
   _forall_bounds:  { [integer]: integer, ... },
   lit_cache:       { [integer]: integer, ... },
+  _constraints?:   { [integer]: { [integer]: any, ... }, ... },
   ...
 }
 ]]

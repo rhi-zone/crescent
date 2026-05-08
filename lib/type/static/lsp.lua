@@ -132,7 +132,7 @@ local function name_at_lookup(ctx, hover_line, hover_col)
         local ecol  = na[i + 1]
         local eid   = na[i + 2]
         if eline == tc_line and ecol <= tc_col then
-            if best_col == nil or ecol >= best_col then
+            if best_col == nil or ecol >= (best_col --[[:! integer]]) then
                 best_col = ecol
                 best_name_id = eid
             end
@@ -159,7 +159,7 @@ local function field_at_lookup(ctx, hover_line, hover_col)
         local efid  = fa[i + 2]
         local eoid  = fa[i + 3]
         if eline == tc_line and ecol <= tc_col then
-            if best_col == nil or ecol >= best_col then
+            if best_col == nil or ecol >= (best_col --[[:! integer]]) then
                 best_col = ecol
                 best_fid = efid
                 best_oid = eoid
@@ -258,7 +258,7 @@ local function run_check(state, uri, text)
     -- Invalidate only this file's session entry; dependencies on disk remain cached.
     check.invalidate_file(path)
 
-    local err_ctx, ctx = check.check_string_with_deps(text, path)
+    local err_ctx, ctx = check.check_string_with_deps(text, path, nil, nil)
 
     -- Store ctx for hover queries (ctx.type_at is always populated by infer_expr).
     state.ctx_cache[uri] = ctx
@@ -286,6 +286,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Return the text of line lsp_line (0-indexed) from a full document string.
+--: (string, integer) -> string | nil
 local function get_line(text, lsp_line)
     local n = 0
     local pos = 1
@@ -479,7 +480,7 @@ local function field_completions(ctx, text, lsp_line, lsp_char, trigger)
     -- Strip trailing trigger character if present.
     if prefix:sub(-1) == trigger then prefix = prefix:sub(1, -2) end
     -- Match trailing simple identifier.
-    local name_str = prefix:match("([%a_][%w_]*)$")
+    local name_str = (prefix --[[: string]]):match("([%a_][%w_]*)$")
     if not name_str then return nil end
     -- Look up name in intern pool (read-only via pool.map).
     local name_id = ctx.pool.map[name_str]
@@ -688,6 +689,7 @@ HANDLERS["textDocument/completion"] = function(state, msg)
     -- This is a best-effort approximation; cursor-local scopes are not tracked.
     local TAG_FUNCTION = defs.TAG_FUNCTION
     local TAG_TABLE    = defs.TAG_TABLE
+    --: { [integer]: { label: string, kind: integer, detail: string }, ... }
     local items = {}
     local seen = {}
     local scope = ctx.scope
@@ -697,7 +699,7 @@ HANDLERS["textDocument/completion"] = function(state, msg)
                 seen[name_id] = true
                 local name = intern.get(ctx.pool, --[[:! integer]] name_id)
                 if name and name:sub(1, 2) ~= "__" then  -- skip metamethod names
-                    local resolved = types.find(ctx, type_id)
+                    local resolved = types.find(ctx, (type_id --[[:! integer]]))
                     local rt = ctx.types:get(resolved)
                     -- LSP CompletionItemKind: 3=Function, 6=Variable, 7=Class(table), 9=Module
                     local kind = 6
@@ -768,8 +770,8 @@ HANDLERS["textDocument/definition"] = function(state, msg)
 
     -- Prefer field go-to-def when the field_at match has a higher (or equal) col than name_at.
     -- This handles `x.bar`: cursor on `bar` → field wins; cursor on `x` → name wins.
-    if field_id and (not name_col or field_col >= name_col) then
-        local field_str = intern.get(ctx.pool, field_id)
+    if field_id and field_col and (not name_col or field_col >= (name_col --[[:! integer]])) then
+        local field_str = (intern.get(ctx.pool, field_id) --[[: string | nil]])
         local field_len = field_str and #field_str or 1
 
         -- Cross-file: obj is a required module — navigate into that module.
@@ -782,9 +784,9 @@ HANDLERS["textDocument/definition"] = function(state, msg)
                 local f = io.open(abs_path, "r")
                 if f then
                     f:close()
-                    local _ec, mod_ctx = check.check_file(abs_path)
+                    local _ec, mod_ctx = check.check_file(abs_path, nil, nil)
                     if mod_ctx then
-                        local mod_fid = intern.intern(mod_ctx.pool, field_str)
+                        local mod_fid = intern.intern(mod_ctx.pool, (field_str --[[:! string]]))
                         local def = find_field_in_ctx(mod_ctx, nil, mod_fid)
                         if def then
                             local dl = math.max(0, def.line - 1)
@@ -889,7 +891,7 @@ local function main()
     }
 
     while true do
-        local msg = recv() --[[: { method?: string, id?: any, params?: any } | nil]]
+        local msg = recv() --[[:! { method?: string, id?: any, params?: any } | nil]]
         if msg == nil then break end
 
         local method = msg.method

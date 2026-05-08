@@ -372,7 +372,7 @@ local function field_via_index_chain(ctx, tbl_tid, name_id, depth)
     -- Check #__index meta-slot first (explicit annotation), then __index named field
     -- (common runtime pattern: Proto.__index = Proto).
     local idx_fe = types_mod.table_meta_field(ctx, tbl_tid, idx_name_id)
-                or types_mod.table_field(ctx, tbl_tid, idx_name_id)
+    if not idx_fe then idx_fe = types_mod.table_field(ctx, tbl_tid, idx_name_id) end
     if not idx_fe then return nil, nil end
     local idx_tid = find(ctx, (idx_fe.type_id --[[:! integer]]))
     local idx_t = ctx.types:get(idx_tid)
@@ -1589,12 +1589,13 @@ local function solve_callable(ctx, c)
                     local act_tid = arg_tids[ei + 1]
                     local ok, err = unify_mod.unify(ctx, widen_literal(ctx, act_tid), exp_slot)
                     if not ok then
+                        local err_s = err --[[:! string | nil]]
                         add_error(ctx, line, col,
                             "argument " .. (ei + 1) .. ": cannot pass `"
                             .. types_mod.display_short(ctx, act_tid)
                             .. "` where `"
                             .. types_mod.display_short(ctx, exp_slot) .. "` expected"
-                            .. (err and (": " .. err) or ""))
+                            .. (err_s ~= nil and (": " .. err_s) or ""))
                     end
                 end
             end
@@ -1665,6 +1666,7 @@ local function solve_callable(ctx, c)
         local cands = {}
         for ci, m in ipairs(members) do
             local ft = m.t
+            --: { [integer]: string, ... }
             local reasons = {}
             for j = 0, ft.data[1] - 1 do
                 local exp_tid = find(ctx, ctx.lists:get(ft.data[0] + j))
@@ -1694,6 +1696,7 @@ local function solve_callable(ctx, c)
     -- Union: ALL members must accept the argument (sound — we don't know which branch is live).
     if callee_t.tag == TAG_UNION then
         local ret_types = {}
+        --: { [integer]: string, ... }
         local fail_msgs = {}
         for i = callee_t.data[0], callee_t.data[0] + callee_t.data[1] - 1 do
             local mid = find(ctx, ctx.lists:get(i))
@@ -2206,12 +2209,13 @@ local function solve_check_args(ctx, c)
                     local act_tid = arg_tids[ei + 1]
                     local ok, err = unify_mod.unify(ctx, widen_literal(ctx, act_tid), exp_slot)
                     if not ok then
+                        local err_s = err --[[:! string | nil]]
                         add_error(ctx, line, col,
                             "argument " .. (ei + 1) .. ": cannot pass `"
                             .. types_mod.display_short(ctx, act_tid)
                             .. "` where `"
                             .. types_mod.display_short(ctx, exp_slot) .. "` expected"
-                            .. (err and (": " .. err) or ""))
+                            .. (err_s ~= nil and (": " .. err_s) or ""))
                     end
                 end
             end
@@ -2289,6 +2293,7 @@ local function solve_check_args(ctx, c)
         local cands = {}
         for ci, m in ipairs(members) do
             local ft = m.t
+            --: { [integer]: string, ... }
             local reasons = {}
             for j = 0, ft.data[1] - 1 do
                 local exp_tid = find(ctx, ctx.lists:get(ft.data[0] + j))
@@ -2318,6 +2323,7 @@ local function solve_check_args(ctx, c)
     -- Union: ALL members must accept the argument.
     if callee_t.tag == TAG_UNION then
         local ret_types = {}
+        --: { [integer]: string, ... }
         local fail_msgs = {}
         for i = callee_t.data[0], callee_t.data[0] + callee_t.data[1] - 1 do
             local mid = find(ctx, ctx.lists:get(i))
@@ -2393,6 +2399,8 @@ end
 -- Solver
 -- ---------------------------------------------------------------------------
 
+-- _constraints is a scratch field set/cleared during solve; augment Ctx to allow nil assignment.
+--:: augment Ctx { _constraints?: { [integer]: { [integer]: any } } }
 -- any: constraints is a list of heterogeneous arrays — see solve_unify comment.
 --: (Ctx, { [integer]: { [integer]: any, ... }, ... }) -> ()
 function M.solve(ctx, constraints)
@@ -2490,7 +2498,7 @@ function M.solve(ctx, constraints)
         end
     end
     ctx.err = real_err
-    ctx._constraints = nil
+    rawset(ctx, "_constraints", nil)  -- rawset: field type doesn't accept nil directly
 end
 
 return M

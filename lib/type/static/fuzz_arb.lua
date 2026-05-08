@@ -58,7 +58,7 @@ local function to_str(node, outer)
 	elseif node.tag == "unknown"  then return "unknown"
 	elseif node.tag == "any"      then return "any"
 	elseif node.tag == "lit_int"  then return tostring(node.value)
-	elseif node.tag == "lit_str"  then return node.value   -- includes surrounding quotes
+	elseif node.tag == "lit_str"  then return --[[:! string]] node.value   -- includes surrounding quotes
 	elseif node.tag == "lit_bool" then return node.value and "true" or "false"
 	elseif node.tag == "union" then
 		p = PREC_UNION
@@ -128,12 +128,14 @@ local FIELD_NAMES = { "x", "y", "z", "n", "s", "flag", "value", "name", "key", "
 -- ── arb_base_type ─────────────────────────────────────────────────────────────
 -- Uniform over the four base types (integer, number, string, boolean).
 
-M.arb_base_type = arb.one_of({
-	arb.constant(M.T_INTEGER),
-	arb.constant(M.T_NUMBER),
-	arb.constant(M.T_STRING),
-	arb.constant(M.T_BOOLEAN),
-})
+M.arb_base_type = arb.one_of(
+	--[[:! Arr<{ generate: function, shrink: function, ... }>]]
+	{
+		arb.constant(M.T_INTEGER),
+		arb.constant(M.T_NUMBER),
+		arb.constant(M.T_STRING),
+		arb.constant(M.T_BOOLEAN),
+	})
 
 -- ── arb_type_leaf ─────────────────────────────────────────────────────────────
 -- Atoms only: base types, literal types, nil. No recursion.
@@ -165,7 +167,7 @@ M.arb_type_leaf = arb.frequency({
 local arb_type       -- assigned below
 local arb_type_lazy = {   -- thin proxy, resolved after assignment
 	generate = function(rng, sz) return arb_type.generate(rng, sz) end,
-	shrink   = function(v, c)   return arb_type.shrink(v, c) end,
+	shrink   = function(v, c)   return (arb_type --[[:! { generate: function, shrink: (unknown, unknown) -> function, ... }]]).shrink(v, c) end,
 }
 
 -- arb_field_name: uniform over field name pool (shrinks toward index 1 = "x")
@@ -249,7 +251,9 @@ arb_type = arb.sized(function(size)
 		end
 	)
 
-	return arb.frequency({
+	return arb.frequency(
+		--[[:! Arr<{ [integer]: unknown }>]]
+		{
 		{ 10, M.arb_type_leaf },
 		{  4, arb.map(arb.tuple({ sub, sub }),
 				function(p) return { tag = "union", a = p[1], b = p[2] } end) },
@@ -276,18 +280,20 @@ M.arb_type = arb_type
 local arb_type_deep       -- assigned below
 local arb_type_deep_lazy = {
 	generate = function(rng, sz) return arb_type_deep.generate(rng, sz) end,
-	shrink   = function(v, c)   return arb_type_deep.shrink(v, c) end,
+	shrink   = function(v, c)   return (arb_type_deep --[[:! { generate: function, shrink: (unknown, unknown) -> function, ... }]]).shrink(v, c) end,
 }
 
 arb_type_deep = arb.sized(function(size)
 	if size <= 0 then return M.arb_type_leaf end
 	-- Use size-1 for deeper trees, but cap at 8 to prevent 2^N node blowup.
-	local sub_size = math.max(0, math.min(size - 1, 8))
+	local sub_size = math.max(0, math.min((--[[:! integer]] size) - 1, 8))
 	local sub = {
 		generate = function(rng, _) return arb_type_deep_lazy.generate(rng, sub_size) end,
 		shrink   = arb_type_deep_lazy.shrink,
 	}
-	return arb.frequency({
+	return arb.frequency(
+		--[[:! Arr<{ [integer]: unknown }>]]
+		{
 		{  8, M.arb_type_leaf },
 		{  5, arb.map(arb.tuple({ sub, sub }),
 				function(p) return { tag = "union", a = p[1], b = p[2] } end) },
@@ -427,7 +433,7 @@ M.arb_enum_table = arb.map(
 		local count    = p[2]
 		local entries  = {}
 		for i = 1, count do
-			local name = ENUM_MEMBER_NAMES[i]
+			local name = --[[:! string]] ENUM_MEMBER_NAMES[i]
 			local val
 			if int_kind then
 				val = tostring(i)
