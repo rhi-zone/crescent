@@ -52,80 +52,96 @@ function M.pack_i32(n)
   )
 end
 
+--: (s: string, pos: integer | nil) -> (integer, integer)
 function M.unpack_u8(s, pos)
-  pos = pos or 1
-  return string.byte(s, pos), pos + 1
+  local p = (pos or 1) --[[:! integer]]
+  local byte = string.byte(s, p) --[[:! integer]]
+  return byte, p + 1
 end
 
+--: (s: string, pos: integer | nil) -> (integer, integer)
 function M.unpack_u16(s, pos)
-  pos = pos or 1
-  local b1, b2 = string.byte(s, pos, pos + 1)
-  return bit.bor(bit.lshift(b1, 8), b2), pos + 2
+  local p = (pos or 1) --[[:! integer]]
+  local b1 = string.byte(s, p) --[[:! integer]]
+  local b2 = string.byte(s, p + 1) --[[:! integer]]
+  return bit.bor(bit.lshift(b1, 8), b2), p + 2
 end
 
+--: (s: string, pos: integer | nil) -> (integer, integer)
 function M.unpack_u32(s, pos)
-  pos = pos or 1
-  local b1, b2, b3, b4 = string.byte(s, pos, pos + 3)
+  local p = (pos or 1) --[[:! integer]]
+  local b1 = string.byte(s, p) --[[:! integer]]
+  local b2 = string.byte(s, p + 1) --[[:! integer]]
+  local b3 = string.byte(s, p + 2) --[[:! integer]]
+  local b4 = string.byte(s, p + 3) --[[:! integer]]
   -- use unsigned arithmetic to avoid sign issues on 32-bit values >= 2^31
   local hi = bit.bor(bit.lshift(b1, 8), b2)
   local lo = bit.bor(bit.lshift(b3, 8), b4)
-  return hi * 65536 + lo, pos + 4
+  return hi * 65536 + lo, p + 4
 end
 
+--: (s: string, pos: integer | nil) -> (integer, integer)
 function M.unpack_i8(s, pos)
-  pos = pos or 1
-  local v = string.byte(s, pos)
+  local p = (pos or 1) --[[:! integer]]
+  local v = string.byte(s, p) --[[:! integer]]
   if v >= 128 then v = v - 256 end
-  return v, pos + 1
+  return v, p + 1
 end
 
+--: (s: string, pos: integer | nil) -> (integer, integer)
 function M.unpack_i16(s, pos)
-  pos = pos or 1
-  local v, next_pos = M.unpack_u16(s, pos)
+  local p = (pos or 1) --[[:! integer]]
+  local v, next_pos = M.unpack_u16(s, p)
   -- sign-extend 16-bit
   v = bit.arshift(bit.lshift(v, 16), 16)
   return v, next_pos
 end
 
+--: (s: string, pos: integer | nil) -> (integer, integer)
 function M.unpack_i32(s, pos)
-  pos = pos or 1
-  local b1, b2, b3, b4 = string.byte(s, pos, pos + 3)
+  local p = (pos or 1) --[[:! integer]]
+  local b1 = string.byte(s, p) --[[:! integer]]
+  local b2 = string.byte(s, p + 1) --[[:! integer]]
+  local b3 = string.byte(s, p + 2) --[[:! integer]]
+  local b4 = string.byte(s, p + 3) --[[:! integer]]
   local v = bit.bor(
     bit.lshift(b1, 24),
     bit.lshift(b2, 16),
     bit.lshift(b3, 8),
     b4
   )
-  return v, pos + 4
+  return v, p + 4
 end
 
 -- ========================
 -- VARINT (unsigned LEB128)
 -- ========================
 
+--: (n: integer) -> string
 function M.encode_varint(n)
-  local bytes = {}
+  local result = ""
   while n >= 128 do
-    bytes[#bytes + 1] = string.char(bit.bor(bit.band(n, 0x7f), 0x80))
+    result = result .. string.char(bit.bor(bit.band(n, 0x7f), 0x80))
     n = bit.rshift(n, 7)
   end
-  bytes[#bytes + 1] = string.char(n)
-  return table.concat(bytes)
+  result = result .. string.char(n)
+  return result
 end
 
 -- Decode varint from buf starting at pos (1-indexed).
 -- Returns: value, pos_after
+--: (buf: string, pos: integer | nil) -> (integer, integer) | (nil, string)
 function M.decode_varint(buf, pos)
-  pos = pos or 1
+  local p = (pos or 1) --[[:! integer]]
   local result = 0
   local shift = 0
   local len = #buf
-  while pos <= len do
-    local b = string.byte(buf, pos)
-    pos = pos + 1
+  while p <= len do
+    local b = string.byte(buf, p) --[[:! integer]]
+    p = p + 1
     result = bit.bor(result, bit.lshift(bit.band(b, 0x7f), shift))
     if bit.band(b, 0x80) == 0 then
-      return result, pos
+      return result, p
     end
     shift = shift + 7
     if shift >= 35 then
@@ -146,17 +162,20 @@ end
 -- Decode length-delimited record from buf at pos.
 -- Returns: data, pos_after
 -- Or: nil, errmsg
+--: (buf: string, pos: integer | nil) -> (string, integer) | (nil, string)
 function M.ld_decode(buf, pos)
-  pos = pos or 1
-  local len, next_pos = M.decode_varint(buf, pos)
-  if len == nil then
-    return nil, next_pos  -- next_pos is errmsg here
+  local p = (pos or 1) --[[:! integer]]
+  local len_val, npos_val = M.decode_varint(buf, p)
+  if type(len_val) ~= "number" then
+    return nil, tostring(npos_val)  -- npos_val is errmsg here
   end
-  local data_end = next_pos + len - 1
+  local len = len_val --[[:! integer]]
+  local npos = (npos_val or p) --[[:! integer]]
+  local data_end = npos + len - 1
   if data_end > #buf then
     return nil, "buffer too short for length-delimited data"
   end
-  return string.sub(buf, next_pos, data_end), data_end + 1
+  return string.sub(buf, npos, data_end), data_end + 1
 end
 
 -- ========================
@@ -171,18 +190,20 @@ end
 -- Returns: data, rest
 -- Or: nil, errmsg
 function M.decode(buf)
-  local colon_pos = string.find(buf, ":", 1, true)
-  if not colon_pos then
+  local colon_pos_raw = string.find(buf, ":", 1, true)
+  if not colon_pos_raw then
     return nil, "no colon found in netstring"
   end
+  local colon_pos = colon_pos_raw --[[:! integer]]
   local len_str = string.sub(buf, 1, colon_pos - 1)
   if not len_str:match("^%d+$") then
     return nil, "invalid length in netstring"
   end
-  local len = tonumber(len_str)
-  if len == nil then
+  local len_num = tonumber(len_str)
+  if len_num == nil then
     return nil, "invalid length in netstring"
   end
+  local len = math.floor(len_num) --: integer
   local data_start = colon_pos + 1
   local data_end = data_start + len - 1
   local comma_pos = data_end + 1
@@ -288,35 +309,35 @@ function M.tlv_decode(buf, pos, opts)
   opts = opts or {}
   local type_bytes = opts.type_bytes or 1
   local length_bytes = opts.length_bytes or 1
-  pos = pos or 1
+  local p = pos or 1
 
   local buflen = #buf
-  if pos + type_bytes + length_bytes - 1 > buflen then
+  if p + type_bytes + length_bytes - 1 > buflen then
     return nil, nil, nil, "buffer too short for TLV header"
   end
 
-  local type_tag
+  local type_tag = 0
   if type_bytes == 1 then
-    type_tag, pos = M.unpack_u8(buf, pos)
+    type_tag, p = M.unpack_u8(buf, p)
   else
-    type_tag, pos = M.unpack_u16(buf, pos)
+    type_tag, p = M.unpack_u16(buf, p)
   end
 
-  local vlen
+  local vlen = 0
   if length_bytes == 1 then
-    vlen, pos = M.unpack_u8(buf, pos)
+    vlen, p = M.unpack_u8(buf, p)
   elseif length_bytes == 2 then
-    vlen, pos = M.unpack_u16(buf, pos)
+    vlen, p = M.unpack_u16(buf, p)
   else
-    vlen, pos = M.unpack_u32(buf, pos)
+    vlen, p = M.unpack_u32(buf, p)
   end
 
-  local data_end = pos + vlen - 1
+  local data_end = p + vlen - 1
   if data_end > buflen then
     return nil, nil, nil, "buffer too short for TLV value"
   end
 
-  return type_tag, string.sub(buf, pos, data_end), data_end + 1, nil
+  return type_tag, string.sub(buf, p, data_end), data_end + 1, nil
 end
 
 -- Decode all TLV records from buf.

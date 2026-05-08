@@ -67,9 +67,11 @@ local function add_error(errors, path, message)
   errors[#errors + 1] = { path = path, message = message }
 end
 
+--: (path: string, key: unknown) -> string
 local function child_path(path, key)
   if type(key) == "number" then
-    return path .. "/" .. (key - 1)  -- 0-indexed in JSON pointer style
+    local n = key --[[:! number]]
+    return path .. "/" .. (n - 1)  -- 0-indexed in JSON pointer style
   end
   return path .. "/" .. tostring(key)
 end
@@ -103,9 +105,18 @@ validate_schema = function(schema, value, path, errors, root_schema)
   if schema["$ref"] then
     local ref = schema["$ref"]
     local def_name = ref:match("^#/definitions/(.+)$")
-    if def_name and root_schema.definitions and root_schema.definitions[def_name] then
-      local sub_ok = validate_schema(root_schema.definitions[def_name], value, path, errors, root_schema)
-      if not sub_ok then ok = false end
+    local root = root_schema --[[:! { [string]: unknown, ... }]]
+    local root_defs = root["definitions"]
+    if def_name and root_defs and type(root_defs) == "table" then
+      local defs = root_defs --[[:! { [string]: unknown, ... }]]
+      local def = defs[def_name]
+      if def then
+        local sub_ok = validate_schema(def, value, path, errors, root_schema)
+        if not sub_ok then ok = false end
+      else
+        add_error(errors, path, "unresolved $ref: " .. ref)
+        ok = false
+      end
     else
       add_error(errors, path, "unresolved $ref: " .. ref)
       ok = false
@@ -363,12 +374,14 @@ validate_schema = function(schema, value, path, errors, root_schema)
 
     if schema.dependencies ~= nil then
       for key, dep in pairs(schema.dependencies) do
+        local key_str = tostring(key)
         if value[key] ~= nil then
           if type(dep) == "table" and is_array(dep) then
             -- Array of required keys
             for i = 1, #dep do
-              if value[dep[i]] == nil then
-                add_error(errors, path, "property '" .. dep[i] .. "' is required when '" .. key .. "' is present")
+              local dep_key = dep[i]
+              if value[dep_key] == nil then
+                add_error(errors, path, "property '" .. tostring(dep_key) .. "' is required when '" .. key_str .. "' is present")
                 ok = false
               end
             end
@@ -413,7 +426,7 @@ validate_schema = function(schema, value, path, errors, root_schema)
   end
 
   if schema.oneOf ~= nil then
-    local match_count = 0
+    local match_count = 0 --: integer
     local one_errors = {}
     for i = 1, #schema.oneOf do
       local sub_errs = {}
@@ -469,8 +482,8 @@ end
 -- ── Public API ────────────────────────────────────────────────────────────────
 
 --- Validate a Lua value against a JSON Schema.
---- Returns: true, nil on success; nil, errors on failure.
---: (schema: unknown, value: unknown) -> true | (nil, unknown)
+--- Returns: true on success; nil, errors on failure.
+--: (schema: unknown, value: unknown) -> boolean | (nil, unknown)
 function M.validate(schema, value)
   local errors = {}
   local ok = validate_schema(schema, value, "", errors, schema)
@@ -481,8 +494,8 @@ function M.validate(schema, value)
 end
 
 --- Compile a schema for repeated use.
---- Returns a validator function: fn(value) -> true OR (nil, errors)
---: (schema: unknown) -> (value: unknown) -> true | (nil, unknown)
+--- Returns a validator function: fn(value) -> boolean OR (nil, errors)
+--: (schema: unknown) -> (value: unknown) -> boolean | (nil, unknown)
 function M.compile(schema)
   return function(value)
     return M.validate(schema, value)
