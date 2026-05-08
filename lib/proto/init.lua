@@ -313,9 +313,9 @@ M.msg_to_string = M.encode
 -- decode_varint(data, pos) -> lo, hi, next_pos  |  nil, nil, nil, err
 -- lo and hi are unsigned 32-bit halves; next_pos is the byte after the varint.
 local function decode_varint(data, pos)
-	local lo = 0
-	local hi = 0
-	local shift = 0
+	local lo = 0 --: number
+	local hi = 0 --: number
+	local shift = 0 --: integer
 	local i = pos
 	local len = #data
 	while i <= len do
