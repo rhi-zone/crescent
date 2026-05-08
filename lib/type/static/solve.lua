@@ -1746,8 +1746,8 @@ local function solve_arith(ctx, c)
     -- Defer if either operand is not yet resolved (callsite hasn't bound params yet).
     local lhs_t = ctx.types:get(lhs_tid)
     local rhs_t = ctx.types:get(rhs_tid)
-    if lhs_t.tag == TAG_VAR or lhs_t.tag == TAG_ROWVAR then return end
-    if rhs_t.tag == TAG_VAR or rhs_t.tag == TAG_ROWVAR then return end
+    if lhs_t.tag == TAG_VAR or lhs_t.tag == TAG_ROWVAR then return false end
+    if rhs_t.tag == TAG_VAR or rhs_t.tag == TAG_ROWVAR then return false end
 
     -- Auto-unwrap TAG_NOMINAL (newtype) for metamethod dispatch — mirrors the
     -- field-access unwrap. Newtypes inherit their underlying type's operators;

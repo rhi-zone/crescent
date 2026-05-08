@@ -3267,7 +3267,16 @@ StmtRule[NODE_RETURN_STMT] = function(ctx, nid)
     local ret_tids = gen_expr_list(ctx, n.data[0], n.data[1])
     local ret_var = ctx.return_vars[#ctx.return_vars]
     if ret_var then
-        local ret_tid = ret_tids[1] or ctx.T_NIL
+        local ret_tid
+        if #ret_tids > 1 then
+            -- Pack multiple return values into a TAG_TUPLE so per-slot
+            -- inference works at call sites (`local a, b = f()` projects via
+            -- C_INDEX). Single returns stay scalar so existing code paths
+            -- (annotated returns, single-value flows) are unchanged.
+            ret_tid = types_mod.make_tuple(ctx, ret_tids)
+        else
+            ret_tid = ret_tids[1] or ctx.T_NIL
+        end
         emit(ctx, { C_RETURN, ret_tid, ret_var, n.line, n.col })
     end
 end
