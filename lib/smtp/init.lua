@@ -146,7 +146,8 @@ local function format_addr_list(list)
 		if type(a) == "string" then
 			parts[#parts + 1] = a
 		else
-			parts[#parts + 1] = M.format_address(a)
+			local formatted = M.format_address(a)
+			if formatted then parts[#parts + 1] = formatted end
 		end
 	end
 	return table.concat(parts, ", ")
@@ -552,7 +553,7 @@ end
 local b64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 M.base64_encode = function(s)
-	local out = {}
+	local out = {} --: { [integer]: string }
 	local len = #s
 	local i = 1
 	while i <= len do
@@ -560,15 +561,19 @@ M.base64_encode = function(s)
 		local b1 = s:byte(i + 1) or 0
 		local b2 = s:byte(i + 2) or 0
 		local n = b0 * 65536 + b1 * 256 + b2
-		out[#out + 1] = b64_chars:sub(math.floor(n / 262144) % 64 + 1, math.floor(n / 262144) % 64 + 1)
-		out[#out + 1] = b64_chars:sub(math.floor(n / 4096) % 64 + 1, math.floor(n / 4096) % 64 + 1)
+		local i0 = math.floor(n / 262144) % 64 + 1 --[[:! integer]]
+		local i1 = math.floor(n / 4096) % 64 + 1 --[[:! integer]]
+		out[#out + 1] = b64_chars:sub(i0, i0)
+		out[#out + 1] = b64_chars:sub(i1, i1)
 		if i + 1 <= len then
-			out[#out + 1] = b64_chars:sub(math.floor(n / 64) % 64 + 1, math.floor(n / 64) % 64 + 1)
+			local i2 = math.floor(n / 64) % 64 + 1 --[[:! integer]]
+			out[#out + 1] = b64_chars:sub(i2, i2)
 		else
 			out[#out + 1] = "="
 		end
 		if i + 2 <= len then
-			out[#out + 1] = b64_chars:sub(n % 64 + 1, n % 64 + 1)
+			local i3 = n % 64 + 1 --[[:! integer]]
+			out[#out + 1] = b64_chars:sub(i3, i3)
 		else
 			out[#out + 1] = "="
 		end

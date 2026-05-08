@@ -76,6 +76,7 @@ local function parse_ref(s)
 end
 
 -- Parse a range like "A1:B3" → {r1, c1, r2, c2} (1-based)
+--: (string) -> { r1: integer, c1: integer, r2: integer, c2: integer } | nil
 local function parse_range(s)
   local a, b = s:match("^([^:]+):([^:]+)$")
   if not a then return nil end

@@ -21,6 +21,7 @@ function M.spy(fn)
     call_count = 0,
   }
   local mt = {}
+  --: ({ calls: { [integer]: unknown }, call_count: integer, ... }, ...unknown) -> unknown
   mt.__call = function(self, ...)
     self.call_count = self.call_count + 1
     local args = { ... }
@@ -74,12 +75,15 @@ end
 -- Run fn repeatedly and return timing statistics.
 -- opts: { iterations=1000, warmup=100, min_ms=100 }
 -- Returns: { iterations, total_ms, per_iter_ms, ops_per_sec }
+--:: BenchResult = { iterations: integer, total_ms: number, per_iter_ms: number, ops_per_sec: number }
 function M.bench(fn, opts)
   opts = opts or {}
   local warmup     = opts.warmup     or 100
   local iterations = opts.iterations or 1000
   local min_ms     = opts.min_ms     or 100
-  local clock      = opts.clock_fn or error("testing_utils.bench: opts.clock_fn is required")
+  local clock_fn = opts.clock_fn --[[:! (() -> number) | nil]]
+  if not clock_fn then error("testing_utils.bench: opts.clock_fn is required") end
+  local clock = clock_fn --[[:! () -> number]]
 
   for _ = 1, warmup do fn() end
 
@@ -100,7 +104,7 @@ function M.bench(fn, opts)
     total_ms     = total_ms,
     per_iter_ms  = per_iter,
     ops_per_sec  = ops,
-  }
+  } --[[: BenchResult]]
 end
 
 -- Run multiple named functions and compare them.
@@ -110,25 +114,27 @@ end
 function M.bench_compare(fns, opts)
   local results = {}
   for name, fn in pairs(fns) do
-    results[name] = M.bench(fn, opts)
+    results[name] = M.bench(fn, opts) --[[: BenchResult]]
   end
 
   local fastest_name, fastest_ops = nil, -1
   local slowest_name, slowest_ops = nil, math.huge
   for name, r in pairs(results) do
-    if r.ops_per_sec > fastest_ops then
-      fastest_ops  = r.ops_per_sec
+    local br = r --[[:! BenchResult]]
+    if br.ops_per_sec > fastest_ops then
+      fastest_ops  = br.ops_per_sec
       fastest_name = name
     end
-    if r.ops_per_sec < slowest_ops then
-      slowest_ops  = r.ops_per_sec
+    if br.ops_per_sec < slowest_ops then
+      slowest_ops  = br.ops_per_sec
       slowest_name = name
     end
   end
 
   local relative = {}
   for name, r in pairs(results) do
-    relative[name] = r.ops_per_sec / fastest_ops
+    local br = r --[[:! BenchResult]]
+    relative[name] = br.ops_per_sec / fastest_ops
   end
 
   results.fastest  = fastest_name

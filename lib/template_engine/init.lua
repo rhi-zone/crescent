@@ -274,7 +274,7 @@ local function parse_tokens(tokens, start, stop_tags)
       -- {% for var in expr %}
       elseif tag:match("^for%s+") then
         local var_part, iter = tag:match("^for%s+(.-)%s+in%s+(.+)$")
-        if not var_part then return nil, "malformed for tag: " .. tag end
+        if not var_part then return nil, nil, "malformed for tag: " .. tag end
         -- var_part may be "k, v" for pairs iteration
         i = i + 1
         local body, next_i, end_tag = parse_tokens(tokens, i, { "else", "endfor" })
@@ -297,7 +297,7 @@ local function parse_tokens(tokens, start, stop_tags)
       -- {% set var = expr %}
       elseif tag:match("^set%s+") then
         local var, expr = tag:match("^set%s+(%w+)%s*=%s*(.+)$")
-        if not var then return nil, "malformed set tag: " .. tag end
+        if not var then return nil, nil, "malformed set tag: " .. tag end
         nodes[#nodes + 1] = { type = "set", var = var, expr = expr }
         i = i + 1
 
@@ -316,7 +316,7 @@ local function parse_tokens(tokens, start, stop_tags)
       -- {% block name %}
       elseif tag:match("^block%s+") then
         local name = tag:match("^block%s+(%S+)$")
-        if not name then return nil, "malformed block tag: " .. tag end
+        if not name then return nil, nil, "malformed block tag: " .. tag end
         i = i + 1
         local body, next_i = parse_tokens(tokens, i, { "endblock", "endblock " .. name })
         i = (next_i or i) + 1
@@ -329,7 +329,7 @@ local function parse_tokens(tokens, start, stop_tags)
           mname = tag:match("^macro%s+(%w+)%s*$")
           params_str = ""
         end
-        if not mname then return nil, "malformed macro tag: " .. tag end
+        if not mname then return nil, nil, "malformed macro tag: " .. tag end
         -- Parse params: comma separated names, optional defaults
         local params = {}
         if params_str and params_str ~= "" then

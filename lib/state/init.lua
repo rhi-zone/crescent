@@ -21,7 +21,7 @@ M._tier = "pure"
 --: (string | { target: string, guard: unknown, action: unknown }) -> { target: string, guard: unknown, action: unknown }
 local function resolve_transition(spec)
   if type(spec) == "string" then
-    return { target = spec }
+    return { target = spec, guard = nil, action = nil }
   end
   return spec
 end
@@ -55,7 +55,7 @@ function Machine:can(event)
   local spec = on[event]
   if not spec then return false end
   local tr = resolve_transition(spec)
-  if tr.guard and not tr.guard(self._ctx, nil) then return false end
+  if tr.guard and not (tr.guard --[[:! (unknown, unknown) -> boolean]])(self._ctx, nil) then return false end
   return true
 end
 
@@ -107,7 +107,7 @@ end
 
 -- Send an event to the machine, optionally with data.
 -- Returns true on success, or (nil, errmsg) on failure.
---: (Machine, string, unknown) -> true | (nil, string)
+--: (Machine, string, unknown) -> (boolean | nil, string | nil)
 function Machine:send(event, data)
   local current = self._current
   local state_def = self._states[current]
@@ -128,7 +128,7 @@ function Machine:send(event, data)
   local tr = resolve_transition(spec)
 
   -- Check guard
-  if tr.guard and not tr.guard(self._ctx, data) then
+  if tr.guard and not (tr.guard --[[:! (unknown, unknown) -> boolean]])(self._ctx, data) then
     return nil, "guard rejected event '" .. event .. "' in state '" .. current .. "'"
   end
 
@@ -156,7 +156,7 @@ function Machine:send(event, data)
 
   -- Run action if present
   if tr.action then
-    tr.action(self._ctx, data)
+    (tr.action --[[:! (unknown, unknown) -> nil]])(self._ctx, data)
   end
 
   -- Notify listeners
