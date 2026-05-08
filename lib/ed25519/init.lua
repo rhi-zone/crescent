@@ -245,25 +245,28 @@ local function make_pure()
 	-- Integers are Lua arrays of 32 bytes, index 1 = least significant byte.
 
 	-- Parse a 64-char big-endian hex string into a 32-byte LE array.
+	--: (string) -> { [integer]: number }
 	local function hex32(h)
-		local r = {}
+		local r = {} --: { [integer]: number }
 		for i = 1, 32 do
-			r[i] = tonumber(h:sub(65 - i * 2, 66 - i * 2), 16)
+			r[i] = tonumber(h:sub(65 - i * 2, 66 - i * 2), 16) or 0
 		end
 		return r
 	end
 
 	-- Parse a 32-byte little-endian binary string into a 32-byte LE array.
+	--: (string) -> { [integer]: number }
 	local function bin32(s)
-		local r = {}
+		local r = {} --: { [integer]: number }
 		for i = 1, 32 do r[i] = string.byte(s, i) or 0 end
 		return r
 	end
 
 	-- Serialize a 32-byte LE array to a binary string.
+	--: ({ [integer]: number }) -> string
 	local function to_bin32(a)
-		local t = {}
-		for i = 1, 32 do t[i] = string.char(a[i]) end
+		local t = {} --: { [integer]: string }
+		for i = 1, 32 do t[i] = string.char(a[i] or 0) end
 		return table.concat(t)
 	end
 
@@ -279,9 +282,10 @@ local function make_pure()
 	end
 
 	-- Shallow copy of a 32-byte array.
+	--: ({ [integer]: number }) -> { [integer]: number }
 	local function copy32(a)
-		local r = {}
-		for i = 1, 32 do r[i] = a[i] end
+		local r = {} --: { [integer]: number }
+		for i = 1, 32 do r[i] = a[i] or 0 end
 		return r
 	end
 
@@ -303,18 +307,19 @@ local function make_pure()
 	-- ── Field arithmetic in GF(p) ─────────────────────────────────────────────
 
 	-- Multiply two 32-byte LE integers; result is 64 bytes (no reduction).
+	--: ({ [integer]: number }, { [integer]: number }) -> { [integer]: number }
 	local function mul_raw(a, b)
 		local r = {} --: { [integer]: number }
 		for i = 1, 64 do r[i] = 0 end
 		for i = 1, 32 do
-			if a[i] ~= 0 then
+			if (a[i] or 0) ~= 0 then
 				local carry = 0
 				for j = 1, 32 do
-					local s = r[i + j - 1] + a[i] * b[j] + carry
+					local s = (r[i + j - 1] or 0) + (a[i] or 0) * (b[j] or 0) + carry
 					r[i + j - 1] = s % 256
 					carry = math.floor(s / 256)
 				end
-				r[i + 32] = r[i + 32] + carry
+				r[i + 32] = (r[i + 32] or 0) + carry
 			end
 		end
 		return r
@@ -322,6 +327,7 @@ local function make_pure()
 
 	-- Reduce a 64-byte LE integer modulo p = 2^255 - 19.
 	-- Uses identity 2^256 ≡ 38 (mod p).
+	--: ({ [integer]: number }) -> { [integer]: number }
 	local function reduce_p(r)
 		local acc = {} --: { [integer]: number }
 		for i = 1, 32 do acc[i] = r[i] end
@@ -357,47 +363,53 @@ local function make_pure()
 		return acc
 	end
 
+	--: ({ [integer]: number }, { [integer]: number }) -> { [integer]: number }
 	local function fmul(a, b) return reduce_p(mul_raw(a, b)) end
 
+	--: ({ [integer]: number }, { [integer]: number }) -> { [integer]: number }
 	local function fadd(a, b)
 		local r = {} --: { [integer]: number }
 		local carry = 0
 		for i = 1, 32 do
-			local s = a[i] + b[i] + carry
+			local s = (a[i] or 0) + (b[i] or 0) + carry
 			r[i] = s % 256; carry = math.floor(s / 256)
 		end
 		if carry > 0 or le_cmp(r, P) >= 0 then
 			local borrow = 0
 			for i = 1, 32 do
-				local d = r[i] - P[i] - borrow
+				local d = (r[i] or 0) - (P[i] or 0) - borrow
 				if d < 0 then r[i] = d + 256; borrow = 1 else r[i] = d; borrow = 0 end
 			end
 		end
 		return r
 	end
 
+	--: ({ [integer]: number }, { [integer]: number }) -> { [integer]: number }
 	local function fsub(a, b)
 		local r = {} --: { [integer]: number }
 		local borrow = 0
 		for i = 1, 32 do
-			local d = a[i] - b[i] - borrow
+			local d = (a[i] or 0) - (b[i] or 0) - borrow
 			if d < 0 then r[i] = d + 256; borrow = 1 else r[i] = d; borrow = 0 end
 		end
 		if borrow > 0 then
 			local carry = 0
 			for i = 1, 32 do
-				local s = r[i] + P[i] + carry
+				local s = (r[i] or 0) + (P[i] or 0) + carry
 				r[i] = s % 256; carry = math.floor(s / 256)
 			end
 		end
 		return r
 	end
 
+	--: ({ [integer]: number }) -> { [integer]: number }
 	local function fneg(a) return fsub(P, a) end
 
+	--: ({ [integer]: number }, { [integer]: number }) -> boolean
 	local function feq(a, b) return le_cmp(a, b) == 0 end
 
 	-- Field exponentiation: a^e mod p (e is a 32-byte LE integer).
+	--: ({ [integer]: number }, { [integer]: number }) -> { [integer]: number }
 	local function fpow(a, e)
 		local r    = copy32(ONE32)
 		local base = copy32(a)

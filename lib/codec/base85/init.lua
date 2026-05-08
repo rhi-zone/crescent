@@ -21,12 +21,13 @@ if bit then
   rshift = bit.rshift
   lshift = bit.lshift
   tobit  = bit.tobit
-elseif bit32 then
+elseif rawget(_G, "bit32") then
+  local bit32 = rawget(_G, "bit32") --[[: any]]
   band   = bit32.band
   bor    = bit32.bor
   rshift = bit32.rshift
   lshift = bit32.lshift
-  tobit  = function(n) return band(n, 0xffffffff) end
+  tobit  = function(n) return n % 0x100000000 end
 else
   -- Pure math fallbacks (slow, avoids overflow with doubles)
   band = function(a, b)
@@ -101,6 +102,7 @@ end
 
 -- Decode 5 chars at positions p..p+4 of string s using dec_table.
 -- Returns uint32 as number, or nil + errmsg on invalid char.
+--: (s: string, p: integer, dec: { [integer]: integer | nil }, variant: string) -> (integer | nil, string | nil)
 local function decode_group(s, p, dec, variant)
   local v = 0
   for i = p, p + 4 do
@@ -156,7 +158,7 @@ local function rfc1924_decode(s)
   local k = 1
   for i = 1, n, 5 do
     local v, err = decode_group(s, i, rfc1924_dec, "base85")
-    if v == nil then return nil, err end
+    if v == nil then return nil, err or "decode error" end
     if v > 0xffffffff then
       return nil, "base85.decode: group value out of range at position " .. i
     end
@@ -210,7 +212,7 @@ local function z85_decode(s)
   local k = 1
   for i = 1, n, 5 do
     local v, err = decode_group(s, i, z85_dec, "base85.z85")
-    if v == nil then return nil, err end
+    if v == nil then return nil, err or "decode error" end
     if v > 0xffffffff then
       return nil, "base85.z85_decode: group value out of range at position " .. i
     end
@@ -229,7 +231,7 @@ end
 
 --- Encode binary string to Ascii85 (Adobe/PDF) with <~ ... ~> delimiters.
 --- Handles partial final group; encodes four zero bytes as "z".
---: (s: string) -> string
+--: (s: string) -> string | (nil, string)
 local function ascii85_encode(s)
   if type(s) ~= "string" then
     return nil, "base85.ascii85_encode: expected string"
@@ -393,16 +395,18 @@ end
 
 --- Create a streaming RFC 1924 Base85 encoder.
 --- Buffers partial groups; call finish() to flush and get the full result.
---: () -> { write: (string) -> nil, finish: () -> string }
+--: () -> { write: (self: any, s: string) -> nil, finish: (self: any) -> string }
 local function encoder()
+  --: Arr<string>
   local buf = {}
   local buf_len = 0
+  --: Arr<string>
   local out = {}
   local out_k = 1
 
   local enc = {
     --- Feed bytes to the encoder.
-    --: (s: string) -> nil
+    --: (self: any, s: string) -> nil
     write = function(self, s)
       -- Append to buffer
       buf[#buf + 1] = s
@@ -436,7 +440,7 @@ local function encoder()
     end,
 
     --- Flush any remaining bytes and return the full encoded string.
-    --: () -> string
+    --: (self: any) -> string
     finish = function(self)
       -- Flush remaining buffer bytes (should be 0–3 bytes, but RFC 1924 requires
       -- input divisible by 4, so remaining bytes are silently dropped here).

@@ -424,6 +424,7 @@ local function parse_md_list(lines, i, indent, ordered)
   return list_node, i
 end
 
+--: (text: string) -> { tag: string, children: unknown[] }
 function M.parse_markdown(text)
   -- Normalize line endings
   text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
@@ -556,6 +557,7 @@ local function is_rst_underline(s)
   return s:match("^%p%p%p+%s*$") ~= nil
 end
 
+--: (text: string) -> { tag: string, children: unknown[] }
 function M.parse_rst(text)
   text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
   if text:sub(-1) ~= "\n" then text = text .. "\n" end
@@ -700,6 +702,7 @@ end
 -- AsciiDoc parser
 -- ============================================================
 
+--: (text: string) -> { tag: string, children: unknown[] }
 function M.parse_asciidoc(text)
   text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
   if text:sub(-1) ~= "\n" then text = text .. "\n" end

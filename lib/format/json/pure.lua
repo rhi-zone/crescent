@@ -287,6 +287,7 @@ end
 -- then handle byte-by-byte only at the escape.
 local function decode_string()
     local start = _pos
+    --: Arr<string> | nil
     local buf = nil   -- lazy: only allocated when escapes present
 
     while _pos <= _len do

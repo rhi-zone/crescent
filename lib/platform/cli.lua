@@ -48,7 +48,9 @@ end
 
 -- ── Arg parsing ────────────────────────────────────────────────────────────
 
+--: (args: { [integer]: string }) -> { port: integer, data_dir: string | nil, reset_grants: boolean, grant_caps: Arr<string>, deny_caps: Arr<string>, cap_overrides: { [string]: { [string]: string } }, app: string, entrypoint: string | nil, app_args: Arr<string> }
 local function parse_args(args)
+	--: { port: integer, data_dir: string | nil, reset_grants: boolean, grant_caps: Arr<string>, deny_caps: Arr<string>, cap_overrides: { [string]: { [string]: string } }, app: string, entrypoint: string | nil, app_args: Arr<string> }
 	local opts = {
 		port = 7860,
 		data_dir = nil,
@@ -56,6 +58,9 @@ local function parse_args(args)
 		grant_caps = {},
 		deny_caps = {},
 		cap_overrides = {},  -- cap_overrides["fs"]["root"] = "/some/path"
+		app = "",
+		entrypoint = nil,
+		app_args = {},
 	}
 	local positional = {}
 	local app_args = {}
@@ -87,7 +92,7 @@ local function parse_args(args)
 						end
 						opts.cap_overrides[cap_name][cap_key] = val
 					else
-						io.stderr:write("unknown option: --" .. key .. "\n")
+						io.stderr:write("unknown option: --" .. tostring(key) .. "\n")
 						os.exit(1)
 					end
 				end
@@ -294,6 +299,7 @@ end
 -- Merge top-level and per-entrypoint cap declarations.
 --: (Manifest | nil, string) -> { [string]: CapDecl }
 local function merge_cap_declarations(manifest, entry_key)
+	--: { [string]: CapDecl }
 	local cap_declarations = {}
 
 	-- Top-level caps: may be shorthand ("required"/"optional") or full tables.
@@ -302,12 +308,12 @@ local function merge_cap_declarations(manifest, entry_key)
 		for name, decl in pairs(top_caps) do
 			if type(decl) == "string" then
 				-- Shorthand: "required" or "optional"
-				cap_declarations[name] = {
+				cap_declarations[name] = ({
 					type = name,
 					required = decl ~= "optional",
-				}
+				}) --[[: any]]
 			elseif type(decl) == "table" then
-				cap_declarations[name] = decl
+				cap_declarations[name] = decl --[[: any]]
 			end
 		end
 	end
@@ -318,7 +324,9 @@ local function merge_cap_declarations(manifest, entry_key)
 		local entry_def = entry_map[entry_key]
 		if type(entry_def) == "table" and entry_def.caps then
 			for name, decl in pairs(entry_def.caps) do
-				cap_declarations[name] = decl --[[:! { required: boolean, type: unknown }]]
+				if type(decl) == "table" then
+					cap_declarations[name] = decl --[[: CapDecl]]
+				end
 			end
 		end
 	end
@@ -704,7 +712,8 @@ local function cmd_list(args)
 		return
 	end
 	for _, row in ipairs(rows) do
-		local tags = row.tags and #row.tags > 0 and ("  [" .. table.concat(row.tags, ", ") .. "]") or ""
+		local row_tags = row.tags --[[: any]]
+		local tags = row_tags and #row_tags > 0 and ("  [" .. table.concat(row_tags, ", ") .. "]") or ""
 		io.write(string.format("%4d  %s%s\n", row.id, row.name, tags))
 	end
 end
@@ -769,15 +778,17 @@ local function cmd_caps(args)
 		io.write("  " .. cname .. "  (" .. cap_type .. ")\n")
 		-- Collect fields: manifest fields (minus meta-keys) + any extra override keys.
 		local skip = { type=true, required=true, configurable_fields=true, sensitive_fields=true }
+		--: Arr<string>
 		local fields = {}
+		--: { [unknown]: boolean }
 		local seen = {}
 		if type(decl) == "table" then
 			for k in pairs(decl) do
-				if not skip[k] then fields[#fields + 1] = k; seen[k] = true end
+				if not skip[tostring(k)] then fields[#fields + 1] = tostring(k); seen[k] = true end
 			end
 		end
 		for k in pairs(overrides) do
-			if not seen[k] then fields[#fields + 1] = k end
+			if not seen[k] then fields[#fields + 1] = tostring(k) end
 		end
 		table.sort(fields)
 		if #fields == 0 then
@@ -889,7 +900,9 @@ local function cmd_set_key(args)
 			io.write("(no keys stored)\n")
 		else
 			for _, k in ipairs(keys) do
-				io.write((k:gsub("^crescent/", "")) .. "\n")
+				local ks = tostring(k)
+				local stripped = ks:gsub("^crescent/", "")
+				io.write(stripped .. "\n")
 			end
 		end
 		return
@@ -988,10 +1001,10 @@ local function cmd_import(args)
 		runtime_files = runtime_files,
 		runtime_manifest = runtime_manifest,
 		apps_dir = apps_dir --[[:! string]],
-		index = idx,
+		index = idx --[[: any]],
 		timestamp = os.time() --[[:! number]],
-		write_fn = function(path, data) return write_file(path, data) end,
-	})
+		write_fn = (function(path, data) local ok, err = write_file(path, data); if ok then return true, "" end; return nil, err or "" end) --[[: (string, string) -> (true | nil, string)]],
+	});
 
 	(idx --[[:! { close: (unknown) -> unknown, ... }]]):close()
 
@@ -1066,34 +1079,36 @@ if not opts.entrypoint then
 		io.stderr:write("available entrypoints:\n")
 		for key, def in pairs(entry_map) do
 			local main = type(def) == "table" and def.main or tostring(def)
-			io.stderr:write("  " .. key .. "  (" .. main .. ")\n")
+			io.stderr:write("  " .. tostring(key) .. "  (" .. tostring(main) .. ")\n")
 		end
 		io.stderr:write("\nusage: luajit lib/platform/cli.lua " .. opts.app .. " <entrypoint> [-- args...]\n")
 		os.exit(1)
 	end
 end
 
-local entry_def = entry_map[opts.entrypoint]
+local entrypoint_name = opts.entrypoint or ""
+local entry_def = entry_map[entrypoint_name]
 if not entry_def then
-	io.stderr:write("error: unknown entrypoint '" .. opts.entrypoint .. "'\n")
+	io.stderr:write("error: unknown entrypoint '" .. entrypoint_name .. "'\n")
 	io.stderr:write("available entrypoints:\n")
 	for key, def in pairs(entry_map) do
 		local main = type(def) == "table" and def.main or tostring(def)
-		io.stderr:write("  " .. key .. "  (" .. main .. ")\n")
+		io.stderr:write("  " .. tostring(key) .. "  (" .. tostring(main) .. ")\n")
 	end
 	os.exit(1)
 end
 
 local entry_path = type(entry_def) == "table" and entry_def.main or entry_def
 if not entry_path then
-	io.stderr:write("error: entrypoint '" .. opts.entrypoint .. "' has no 'main' field\n")
+	io.stderr:write("error: entrypoint '" .. entrypoint_name .. "' has no 'main' field\n")
 	os.exit(1)
 end
 
 -- Resolve app identity and data directory.
+--: string
 local app_id = manifest.name or opts.app:gsub("/$", ""):match("[^/]+$") or "app"
 -- Sanitize app_id for filesystem use.
-app_id = app_id:gsub("[^%w._-]", "_")
+app_id = (app_id:gsub("[^%w._-]", "_"))
 local data_dir = expand_home(opts.data_dir or "~/.crescent/data")
 mkdir_p(data_dir)
 
@@ -1105,7 +1120,7 @@ local context = {
 }
 
 -- Merge cap declarations from manifest (top-level + per-entrypoint).
-local cap_declarations = merge_cap_declarations(manifest, opts.entrypoint)
+local cap_declarations = merge_cap_declarations(manifest, entrypoint_name)
 
 -- Apply --cap.NAME.KEY=VALUE overrides from CLI.
 for cap_name, overrides in pairs(opts.cap_overrides) do
@@ -1145,6 +1160,7 @@ for _, name in ipairs(opts.deny_caps) do
 end
 
 -- Check for caps with no grant decision yet.
+--: Arr<string>
 local missing = {}
 for name in pairs(cap_declarations) do
 	if grants[name] == nil then
@@ -1199,11 +1215,13 @@ save_grants(data_dir, app_id, grants)
 -- Run the entrypoint.
 if app._dir_mode then
 	-- Directory mode: require the module directly.
-	local entry_mod, load_err = run_dir_entrypoint(app, entry_path, caps)
-	if not entry_mod then
+	local entry_mod_, load_err = run_dir_entrypoint(app, entry_path, caps)
+	if not entry_mod_ then
 		io.stderr:write("error: " .. tostring(load_err) .. "\n")
 		os.exit(1)
 	end
+	local entry_mod = entry_mod_ or {}
+	if type(entry_mod) ~= "table" then entry_mod = {} end
 
 	if entry_mod.create then
 		-- Module exports create(caps, opts) -> app instance.
@@ -1212,11 +1230,12 @@ if app._dir_mode then
 		local app_opts = {}
 		local env_api_key = resolve_llm_api_key_from_env()
 		if env_api_key then app_opts.api_key = env_api_key end
-		local result = entry_mod.create(caps, app_opts)
-		if not result then
+		local result_ = entry_mod.create(caps, app_opts)
+		if not result_ then
 			io.stderr:write("error: create() returned nil\n")
 			os.exit(1)
 		end
+		local result = result_ --[[: any]]
 		-- CLI mode: app_args after '--' → invoke CLI handler instead of HTTP server.
 		if result.cli and opts.app_args and #opts.app_args > 0 then
 			result.cli(opts.app_args)
@@ -1230,7 +1249,7 @@ if app._dir_mode then
 			local serve_cap
 			for name in pairs(cap_declarations) do
 				local cap = caps[name]
-				if type(cap) == "table" and cap.serve then
+				if type(cap) == "table" and rawget(cap, "serve") then
 					serve_cap = cap
 					break
 				end

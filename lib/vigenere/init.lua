@@ -186,11 +186,13 @@ local function playfair_square(key)
   -- Add key letters first, then remaining alphabet
   local combined = upper(key) .. "ABCDEFGHIKLMNOPQRSTUVWXYZ"  -- no J
   for i = 1, #combined do
-    local b = byte(combined, i)
-    if b == 74 then b = 73 end  -- J → I
-    if b >= 65 and b <= 90 and not seen[b] then
-      seen[b] = true
-      sq[#sq + 1] = b - 65  -- store as 0-based index
+    local b0 = byte(combined, i)
+    if b0 ~= nil then
+      local b = b0 == 74 and 73 or b0
+      if b >= 65 and b <= 90 and not seen[b] then
+        seen[b] = true
+        sq[#sq + 1] = b - 65  -- store as 0-based index
+      end
     end
   end
   -- Build lookup: letter → {row, col}
@@ -204,20 +206,22 @@ local function playfair_square(key)
 end
 
 -- Prepare plaintext: uppercase, no J, digraphs with X padding
+--: (text: string) -> unknown
 local function playfair_prepare(text)
   local letters = {}
   for i = 1, #text do
-    local b = byte(text, i)
-    if b >= 65 and b <= 90 then
-      if b == 74 then b = 73 end  -- J → I
+    local b0 = byte(text, i) or 0
+    if b0 >= 65 and b0 <= 90 then
+      local b = b0 == 74 and 73 or b0
       letters[#letters + 1] = b - 65
-    elseif b >= 97 and b <= 122 then
-      b = b - 32
-      if b == 74 then b = 73 end
+    elseif b0 >= 97 and b0 <= 122 then
+      local b1 = b0 - 32
+      local b = b1 == 74 and 73 or b1
       letters[#letters + 1] = b - 65
     end
   end
   -- Insert X between repeated letters in a pair
+  --: Arr<{ [integer]: integer }>
   local digraphs = {}
   local i = 1
   while i <= #letters do
@@ -268,12 +272,13 @@ function M.playfair_encrypt(text, key)
   return concat(result)
 end
 
+--: (text: string, key: string) -> string
 function M.playfair_decrypt(text, key)
   local sq, pos = playfair_square(key)
   -- Build digraphs from ciphertext directly (no X insertion needed for decrypt)
   local ci = {}
   for i = 1, #text do
-    local b = byte(text, i)
+    local b = byte(text, i) or 0
     if b >= 65 and b <= 90 then
       ci[#ci + 1] = b - 65
     elseif b >= 97 and b <= 122 then
@@ -321,11 +326,13 @@ local ENGLISH_FREQ = {
 }
 
 -- Returns {a=count, b=count, ...} for all 26 letters (lowercase keys).
+--: (text: string) -> { [string]: integer }
 function M.letter_frequencies(text)
+  --: { [string]: integer }
   local counts = {}
   for i = 0, 25 do counts[char(i + 97)] = 0 end
   for i = 1, #text do
-    local b = byte(text, i)
+    local b = byte(text, i) or 0
     if b >= 65 and b <= 90 then
       local k = char(b + 32)
       counts[k] = counts[k] + 1
@@ -340,19 +347,23 @@ end
 -- Chi-squared statistic: lower = better fit to expected distribution.
 -- expected: optional table {a=freq, b=freq, ...} (relative frequencies summing to 1).
 -- Defaults to English letter frequencies.
+--: (text: string, expected: { [string]: number } | nil) -> number
 function M.chi_squared(text, expected)
   local counts = M.letter_frequencies(text)
+  --: integer
   local total = 0
-  for i = 0, 25 do total = total + counts[char(i + 97)] end
+  for i = 0, 25 do total = total + (counts[char(i + 97)] or 0) end
   if total == 0 then return 0 end
+  --: number
   local chi = 0
   for i = 0, 25 do
     local lc = char(i + 97)
     local observed = counts[lc]
-    local exp_freq = (expected and expected[lc]) or ENGLISH_FREQ[i + 1]
-    local expected_count = exp_freq * total
+    local from_user = expected and expected[lc] or nil
+    local exp_freq = from_user or ENGLISH_FREQ[i + 1] or 0
+    local expected_count = (exp_freq or 0) * total
     if expected_count > 0 then
-      chi = chi + (observed - expected_count) ^ 2 / expected_count
+      chi = chi + ((observed or 0) - expected_count) ^ 2 / expected_count
     end
   end
   return chi
@@ -406,6 +417,7 @@ function M.kasiski_test(ciphertext, opts)
   -- Find all repeated n-grams of length 3 and 4, record distances
   local distances = {}
   for nglen = 3, 4 do
+    --: { [string]: Arr<integer> }
     local positions = {}
     for i = 1, n - nglen + 1 do
       local s = sub(text_upper, i, i + nglen - 1)
@@ -426,6 +438,7 @@ function M.kasiski_test(ciphertext, opts)
   end
 
   -- Count factor occurrences for each candidate key length 2..max_keylen
+  --: { [integer]: integer }
   local factor_count = {}
   for k = 2, max_keylen do factor_count[k] = 0 end
   for _, d in ipairs(distances) do
@@ -474,9 +487,11 @@ function M.crack_vigenere_keylen(ciphertext, max_len)
   max_len = max_len or 20
   local indices = to_alpha_indices(ciphertext)
   local n = #indices
+  --: Arr<{ len: integer, score: number }>
   local results = {}
   for k = 1, max_len do
     -- Split into k cosets
+    --: { [integer]: Arr<integer> }
     local cosets = {}
     for j = 1, k do cosets[j] = {} end
     for i = 1, n do
@@ -484,6 +499,7 @@ function M.crack_vigenere_keylen(ciphertext, max_len)
       insert(cosets[j], indices[i])
     end
     -- Average IC across cosets
+    --: number
     local total_ic = 0
     for j = 1, k do
       local coset = cosets[j]
@@ -491,17 +507,18 @@ function M.crack_vigenere_keylen(ciphertext, max_len)
       if m <= 1 then
         total_ic = total_ic + 0
       else
+        --: { [integer]: integer }
         local freq = {}
         for fi = 0, 25 do freq[fi] = 0 end
         for _, v in ipairs(coset) do freq[v] = freq[v] + 1 end
-        local ic_sum = 0
+        local ic_sum = 0.0
         for fi = 0, 25 do ic_sum = ic_sum + freq[fi] * (freq[fi] - 1) end
         total_ic = total_ic + ic_sum / (m * (m - 1))
       end
     end
     results[#results + 1] = { len = k, score = total_ic / k }
   end
-  sort(results, function(a, b) return a.score > b.score end)
+  sort(results --[[: any]], function(a, b) return a.score > b.score end)
   -- Return top 5
   local top = {}
   for i = 1, math.min(5, #results) do top[i] = results[i] end

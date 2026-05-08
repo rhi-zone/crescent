@@ -16,42 +16,36 @@ local mod = {}
 --::   { key: K, value: { __schema: V }, optional: O, readonly: R } => { key: K, value: V, optional: O, readonly: R },
 --:: }
 
-mod.integer = { type = "integer" } --: Schema<integer>
-mod.number  = { type = "number"  } --: Schema<number>
-mod.string  = { type = "string"  } --: Schema<string>
-mod.boolean = { type = "boolean" } --: Schema<boolean>
-mod["nil"]  = { type = "nil"     } --: Schema<nil>
+mod.integer = ({ type = "integer" } --[[: any]]) --[[: Schema<integer>]]
+mod.number  = ({ type = "number"  } --[[: any]]) --[[: Schema<number>]]
+mod.string  = ({ type = "string"  } --[[: any]]) --[[: Schema<string>]]
+mod.boolean = ({ type = "boolean" } --[[: any]]) --[[: Schema<boolean>]]
+mod["nil"]  = ({ type = "nil"     } --[[: any]]) --[[: Schema<nil>]]
 
 --: <T>(T) -> Schema<T>
-mod.literal = function(value) return { type = "literal", value = value } end
+mod.literal = function(value) return { type = "literal", value = value } --[[: any]] end
 
 --: <T: {}>(T) -> Schema<$EachField<T, UnwrapField>>
-mod.tuple = function(shape) return { type = "tuple", shape = shape } end
+mod.tuple = function(shape) return { type = "tuple", shape = shape } --[[: any]] end
 
 --: <T: {}>(T) -> Schema<$EachField<T, UnwrapField>>
-mod.struct = function(shape) return { type = "struct", shape = shape } end
+mod.struct = function(shape) return { type = "struct", shape = shape } --[[: any]] end
 
 --: <T: {}>(T) -> Schema<$EachField<T, UnwrapField>>
-mod.struct_exact = function(shape) return { type = "struct_exact", shape = shape } end
+mod.struct_exact = function(shape) return { type = "struct_exact", shape = shape } --[[: any]] end
 
---: <T>(Schema<T>) -> Schema<T[]>
-mod.array = function(item) return { type = "array", item = item } end
+mod.array = (function(item) return { type = "array", item = item } end) --[[: <T>(Schema<T>) -> Schema<T[]>]]
 
---: <K, V>(Schema<K>, Schema<V>) -> Schema<{ [K]: V }>
-mod.dictionary = function(key, value) return { type = "dictionary", key = key, value = value } end
+mod.dictionary = (function(key, value) return { type = "dictionary", key = key, value = value } end) --[[: <K, V>(Schema<K>, Schema<V>) -> Schema<{ [K]: V }>]]
 
---: <T>(Schema<T>) -> Schema<T | nil>
-mod.optional = function(t) return { type = "optional", inner = t } end
+mod.optional = (function(t) return { type = "optional", inner = t } end) --[[: <T>(Schema<T>) -> Schema<T | nil>]]
 
---: <T, U, V, W, X, Y, Z, A, B>(Schema<T>, Schema<U> | nil, Schema<V> | nil, Schema<W> | nil, Schema<X> | nil, Schema<Y> | nil, Schema<Z> | nil, Schema<A> | nil, ...Schema<B>) -> Schema<T | U | V | W | X | Y | Z | A | B>
-mod.any_of = function(t, u, v, w, x, y, z, a, ...) return { type = "any_of", types = { t, u, v, w, x, y, z, a, ... } } end
+mod.any_of = (function(t, u, v, w, x, y, z, a, ...) return { type = "any_of", types = { t, u, v, w, x, y, z, a, ... } } end) --[[: <T, U, V, W, X, Y, Z, A, B>(Schema<T>, Schema<U> | nil, Schema<V> | nil, Schema<W> | nil, Schema<X> | nil, Schema<Y> | nil, Schema<Z> | nil, Schema<A> | nil, ...Schema<B>) -> Schema<T | U | V | W | X | Y | Z | A | B>]]
 
 -- NOTE: all_of should return an intersection type; not yet expressible.
---: <T>(Schema<T>, ...unknown) -> Schema<T>
-mod.all_of = function(t, ...) return { type = "all_of", types = { t, ... } } end
+mod.all_of = (function(t, ...) return { type = "all_of", types = { t, ... } } end) --[[: <T>(Schema<T>, ...unknown) -> Schema<T>]]
 
---: <T>(Schema<T>) -> T
-local unwrap = function(t) return t.shape end --[[@diagnostic disable-next-line: undefined-field]]
+local unwrap = (function(t) return (t --[[: any]]).shape end) --[[: <T>(Schema<T>) -> T]]
 mod._unwrap_struct       = unwrap
 mod._unwrap_tuple        = unwrap
 mod._unwrap_struct_exact = unwrap

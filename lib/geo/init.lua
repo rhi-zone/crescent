@@ -31,6 +31,8 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Point = { lat: number, lon: number }
+
 -- ── Constants ─────────────────────────────────────────────────────────────────
 
 local EARTH_R     = 6371000       -- mean radius in meters
@@ -67,6 +69,7 @@ end
 -- ── Distance ─────────────────────────────────────────────────────────────────
 
 -- Haversine formula — great-circle distance.
+--: (Point, Point) -> number
 M.distance = function(a, b)
   local lat1 = a.lat * DEG_TO_RAD
   local lat2 = b.lat * DEG_TO_RAD
@@ -92,6 +95,7 @@ local VINCENTY_A = 6378137.0          -- semi-major axis (m)
 local VINCENTY_B = 6356752.314245     -- semi-minor axis (m)
 local VINCENTY_F = 1 / 298.257223563 -- flattening
 
+--: (Point, Point) -> number
 M.vincenty_distance = function(a, b)
   local lat1 = a.lat * DEG_TO_RAD
   local lat2 = b.lat * DEG_TO_RAD
@@ -150,6 +154,7 @@ local function normalize_bearing(b)
   return (b * RAD_TO_DEG + 360) % 360
 end
 
+--: (Point, Point) -> number
 M.bearing = function(a, b)
   local lat1 = a.lat * DEG_TO_RAD
   local lat2 = b.lat * DEG_TO_RAD
@@ -166,6 +171,7 @@ end
 
 -- ── Destination ──────────────────────────────────────────────────────────────
 
+--: (Point, number, number) -> Point
 M.destination = function(origin, dist_m, bearing_deg)
   local lat1  = origin.lat * DEG_TO_RAD
   local lon1  = origin.lon * DEG_TO_RAD
@@ -198,8 +204,10 @@ local GEOHASH_ALPHA = "0123456789bcdefghjkmnpqrstuvwxyz"
 
 -- Encode: table for fast char lookup by index (1-based for Lua).
 local function geohash_encode_inner(lat, lon, precision)
-  local min_lat, max_lat = -90, 90
-  local min_lon, max_lon = -180, 180
+  local min_lat = -90.0 --: number
+  local max_lat = 90.0 --: number
+  local min_lon = -180.0 --: number
+  local max_lon = 180.0 --: number
   local result = {}
   local bits   = 0
   local bits_total = 0
@@ -251,9 +259,12 @@ for i = 1, #GEOHASH_ALPHA do
   GEOHASH_DECODE[GEOHASH_ALPHA:sub(i, i)] = i - 1
 end
 
+--: (string) -> ({ lat: number, lon: number, lat_err: number, lon_err: number } | nil, string | nil)
 M.geohash_decode = function(hash)
-  local min_lat, max_lat = -90, 90
-  local min_lon, max_lon = -180, 180
+  local min_lat = -90.0 --: number
+  local max_lat = 90.0 --: number
+  local min_lon = -180.0 --: number
+  local max_lon = 180.0 --: number
   local is_lon = true
 
   for i = 1, #hash do
@@ -289,9 +300,12 @@ end
 -- shift the center by one cell in the given direction, then re-encode at the same precision.
 -- Handles wraparound (antimeridian, poles) naturally.
 
+--: { [string]: integer }
 local DIR_LAT = { n = 1, s = -1, e = 0, w = 0,  ne = 1, nw = 1,  se = -1, sw = -1 }
+--: { [string]: integer }
 local DIR_LON = { n = 0, s = 0,  e = 1, w = -1, ne = 1, nw = -1, se = 1,  sw = -1 }
 
+--: (string, string) -> string | nil
 local function geohash_adjacent(hash, dir)
   local d = M.geohash_decode(hash)
   if not d then return nil end
@@ -312,10 +326,10 @@ M.geohash_neighbors = function(hash)
   local s  = geohash_adjacent(hash, "s")
   local e  = geohash_adjacent(hash, "e")
   local w  = geohash_adjacent(hash, "w")
-  local ne = geohash_adjacent(n, "e")
-  local nw = geohash_adjacent(n, "w")
-  local se = geohash_adjacent(s, "e")
-  local sw = geohash_adjacent(s, "w")
+  local ne = n and geohash_adjacent(n, "e") or nil
+  local nw = n and geohash_adjacent(n, "w") or nil
+  local se = s and geohash_adjacent(s, "e") or nil
+  local sw = s and geohash_adjacent(s, "w") or nil
   return { n = n, ne = ne, e = e, se = se, s = s, sw = sw, w = w, nw = nw }
 end
 
@@ -346,6 +360,7 @@ M.to_geojson_point = function(pt)
   return { type = "Point", coordinates = { pt.lon, pt.lat } }
 end
 
+--: (obj: { type: string, coordinates: number[] }) -> (Point | nil, string | nil)
 M.from_geojson_point = function(obj)
   if obj.type ~= "Point" then
     return nil, "expected type 'Point', got '" .. tostring(obj.type) .. "'"
@@ -362,6 +377,7 @@ end
 
 -- Ray-casting point-in-polygon test.
 -- poly is an array of {lat, lon} points (no need to close the polygon).
+--: (Point, Point[]) -> boolean
 M.point_in_polygon = function(pt, poly)
   local n = #poly
   local inside = false

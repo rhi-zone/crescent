@@ -52,11 +52,11 @@ local function hash_number(n)
   end
 end
 
+--: (k: unknown) -> number
 local function hash_key(k)
-  local t = type(k)
-  if t == "string" then
+  if type(k) == "string" then
     return hash_string(k)
-  elseif t == "number" then
+  elseif type(k) == "number" then
     return hash_number(k)
   else
     -- fallback: tostring

@@ -56,11 +56,12 @@ local SHA_MAX = 40
 
 -- Try to match a hex SHA starting at position `i` in `s`.
 -- Returns end position (inclusive) if match of length SHA_MIN..SHA_MAX, else nil.
+--: (string, integer) -> integer | nil
 local function match_sha(s, i)
   local j = i
   local len = #s
   while j <= len and j - i < SHA_MAX do
-    local b = s:byte(j)
+    local b = s:byte(j) or 0
     if (b >= 48 and b <= 57) or (b >= 97 and b <= 102) or (b >= 65 and b <= 70) then
       j = j + 1
     else
@@ -71,7 +72,7 @@ local function match_sha(s, i)
   if sha_len < SHA_MIN then return nil end
   -- Must not be followed by another hex char (word boundary).
   if j <= len then
-    local b = s:byte(j)
+    local b = s:byte(j) or 0
     if (b >= 48 and b <= 57) or (b >= 97 and b <= 102) or (b >= 65 and b <= 70) then
       return nil
     end
@@ -80,19 +81,21 @@ local function match_sha(s, i)
 end
 
 -- Returns true if character at position i-1 (before i) is a word char.
+--: (string, integer) -> boolean
 local function preceded_by_word(s, i)
   if i <= 1 then return false end
-  local b = s:byte(i - 1)
+  local b = s:byte(i - 1) or 0
   return (b >= 48 and b <= 57) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or b == 95
 end
 
 -- Match a GitHub username/repo name segment starting at i (alphanumeric + - + _).
 -- Returns end pos (inclusive) or nil.
+--: (string, integer) -> integer | nil
 local function match_name_seg(s, i)
   local j = i
   local len = #s
   while j <= len do
-    local b = s:byte(j)
+    local b = s:byte(j) or 0
     if (b >= 48 and b <= 57) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or b == 45 or b == 95 then
       j = j + 1
     else
@@ -107,6 +110,7 @@ end
 -- Returns: start_pos, end_pos, kind, data  OR nil
 -- kind: "issue", "commit", "mention", "cross_issue", "cross_commit"
 -- data: table with relevant fields
+--: (string, integer, string | nil, boolean) -> (integer | nil, integer, string, { num: string, user: string, owner: string, repo: string, sha: string, ... })
 local function find_next(s, start, repo, allow_bare)
   local len = #s
   local best_start = len + 1
@@ -114,14 +118,14 @@ local function find_next(s, start, repo, allow_bare)
 
   local i = start
   while i <= len do
-    local b = s:byte(i)
+    local b = s:byte(i) or 0
 
     -- '#' → bare issue #123 or start of cross-repo (handled below)
     if b == 35 and allow_bare and repo then  -- '#'
       if not preceded_by_word(s, i) then
         -- match digits
         local j = i + 1
-        while j <= len and s:byte(j) >= 48 and s:byte(j) <= 57 do j = j + 1 end
+        while j <= len and (s:byte(j) or 0) >= 48 and (s:byte(j) or 0) <= 57 do j = j + 1 end
         local num_len = j - i - 1
         if num_len > 0 then
           local num = s:sub(i + 1, j - 1)
@@ -153,16 +157,16 @@ local function find_next(s, start, repo, allow_bare)
       if not preceded_by_word(s, i) then
         -- try cross-repo: owner/repo#N or owner/repo@SHA
         local owner_end = match_name_seg(s, i)
-        if owner_end and owner_end + 1 <= len and s:byte(owner_end + 1) == 47 then  -- '/'
+        if owner_end and owner_end + 1 <= len and (s:byte(owner_end + 1) or 0) == 47 then  -- '/'
           local repo_start = owner_end + 2
           local repo_end   = match_name_seg(s, repo_start)
           if repo_end then
             local next_pos = repo_end + 1
             if next_pos <= len then
-              local nc = s:byte(next_pos)
+              local nc = s:byte(next_pos) or 0
               if nc == 35 then  -- '#' → cross issue
                 local j = next_pos + 1
-                while j <= len and s:byte(j) >= 48 and s:byte(j) <= 57 do j = j + 1 end
+                while j <= len and (s:byte(j) or 0) >= 48 and (s:byte(j) or 0) <= 57 do j = j + 1 end
                 local num_len = j - next_pos - 1
                 if num_len > 0 then
                   local num = s:sub(next_pos + 1, j - 1)
