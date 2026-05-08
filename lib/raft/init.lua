@@ -45,7 +45,7 @@ function M.node(opts)
   if election_jitter == nil then
     election_jitter = math.floor(election_timeout / 2)
   end
-  election_jitter = election_jitter --[[: integer]]
+  election_jitter = election_jitter --[[:! integer]]
 
   local function rand_election_timer()
     if election_jitter > 0 then
@@ -56,13 +56,13 @@ function M.node(opts)
 
   local self = {
     id                  = opts.id,
-    peers               = opts.peers,
+    peers               = opts.peers --[[:! { [integer]: string }]],
     election_timeout    = election_timeout,
     heartbeat_interval  = heartbeat_interval,
     election_jitter     = election_jitter,
 
     -- persistent state
-    _state              = "follower" --[[: string]],
+    _state              = "follower" --[[: "follower" | "candidate" | "leader"]],
     _current_term       = 0,
     _voted_for          = nil --[[: string | nil]],
     _log                = {} --[[: { [integer]: { term: integer, data: unknown } }]],         -- 1-indexed: {term, data}
@@ -377,16 +377,20 @@ function M.node(opts)
 
   function self:tick()
     if self._state == "leader" then
-      self._heartbeat_timer = self._heartbeat_timer - 1
-      if self._heartbeat_timer <= 0 then
+      local ht = self._heartbeat_timer --[[:! number]]
+      ht = ht - 1
+      self._heartbeat_timer = ht
+      if ht <= 0 then
         self._heartbeat_timer = self.heartbeat_interval
         for _, peer in ipairs(self.peers) do
           send_append_entries(peer)
         end
       end
     else
-      self._election_timer = self._election_timer - 1
-      if self._election_timer <= 0 then
+      local et = self._election_timer --[[:! number]]
+      et = et - 1
+      self._election_timer = et
+      if et <= 0 then
         start_election()
       end
     end
@@ -414,7 +418,10 @@ function M.node(opts)
     if self._state ~= "leader" then
       return nil, "not leader"
     end
-    self._log[#self._log + 1] = { term = self._current_term, data = data }
+    local log = self._log --[[:! { [integer]: { term: integer, data: unknown } }]]
+    local term = self._current_term --[[:! integer]]
+    log[#log + 1] = { term = term, data = data }
+    self._log = log
     -- Replicate immediately to peers
     for _, peer in ipairs(self.peers) do
       send_append_entries(peer)
@@ -431,7 +438,10 @@ function M.node(opts)
     if self._state ~= "leader" then
       return nil, "not leader"
     end
-    self._log[#self._log + 1] = { term = self._current_term, data = data }
+    local log = self._log --[[:! { [integer]: { term: integer, data: unknown } }]]
+    local term = self._current_term --[[:! integer]]
+    log[#log + 1] = { term = term, data = data }
+    self._log = log
     for _, peer in ipairs(self.peers) do
       send_append_entries(peer)
     end

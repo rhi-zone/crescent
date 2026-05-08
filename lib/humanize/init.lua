@@ -38,6 +38,7 @@ function M.parse_bytes(s)
   end
   -- binary IEC (KiB, MiB, GiB, TiB) and traditional (KB, MB, GB, TB)
   local prefix = unit:sub(1, 1)
+  --: { [string]: integer }
   local exp_map = { K = 1, M = 2, G = 3, T = 4, P = 5 }
   local exp = exp_map[prefix]
   if not exp then return nil, "unknown unit: " .. unit end
@@ -121,7 +122,7 @@ end
 -- Accepts: "1h 30m", "2d 4h", "500ms", "1.5s", "1w 2d"
 function M.parse_duration(s)
   if type(s) ~= "string" then return nil, "expected string" end
-  local total = 0
+  local total = 0.0 --: number
   local found = false
   -- match optional milliseconds suffix first (500ms)
   for num, unit in s:gmatch("([%d%.]+)%s*([a-zA-Z]+)") do
@@ -192,7 +193,7 @@ function M.number(n, opts)
     sign = "-"
     fmt_str = fmt_str:sub(2)
   end
-  local int_part, frac_part = fmt_str:match("^(%d+)(%.?.*)$")
+  local int_part, frac_part = (fmt_str --[[:! string]]):match("^(%d+)(%.?.*)$")
   if not int_part then return tostring(n) end
   -- Insert thousands separators
   local result = int_part:reverse():gsub("(%d%d%d)", "%1" .. sep):reverse()
@@ -201,13 +202,14 @@ function M.number(n, opts)
   return sign .. result .. (frac_part or "")
 end
 
+--: (ratio: number, decimals: integer | nil) -> string
 function M.percentage(ratio, decimals)
-  if decimals == nil then decimals = 1 end
+  local d = decimals or 1 --: integer
   local pct = ratio * 100
-  if decimals == 0 then
+  if d == 0 then
     return string.format("%d%%", math.floor(pct + 0.5))
   end
-  return string.format("%." .. decimals .. "f%%", pct)
+  return string.format("%." .. d .. "f%%", pct)
 end
 
 -- ── relative time ──────────────────────────────────────────────────────────
