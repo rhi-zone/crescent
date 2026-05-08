@@ -68,7 +68,7 @@ end
 -- zip(...) -> array of arrays, truncated to shortest input.
 -- zip({1,2},{a,b}) = {{1,a},{2,b}}
 function M.zip(...)
-  local arrays = { ... }
+  local arrays = { ... } --: { [integer]: { [integer]: unknown } }
   local n = #arrays
   if n == 0 then return {} end
   local len = #arrays[1]
@@ -87,7 +87,7 @@ end
 
 -- zip_with(fn, ...) -> zip then apply fn to each tuple (as varargs).
 function M.zip_with(fn, ...)
-  local arrays = { ... }
+  local arrays = { ... } --: { [integer]: { [integer]: unknown } }
   local n = #arrays
   if n == 0 then return {} end
   local len = #arrays[1]
@@ -379,7 +379,7 @@ end
 
 -- compose(f, g, ...) -> right-to-left composition. compose(f,g)(x) = f(g(x))
 function M.compose(...)
-  local fns = { ... }
+  local fns = { ... } --: { [integer]: function }
   local n = #fns
   if n == 0 then return M.identity end
   if n == 1 then return fns[1] end
@@ -394,7 +394,7 @@ end
 
 -- pipe(f, g, ...) -> left-to-right composition. pipe(f,g)(x) = g(f(x))
 function M.pipe(...)
-  local fns = { ... }
+  local fns = { ... } --: { [integer]: function }
   local n = #fns
   if n == 0 then return M.identity end
   if n == 1 then return fns[1] end
@@ -445,26 +445,28 @@ function M.partial(fn, ...)
     for i = 1, nbound do args[i] = bound[i] end
     local extra = select("#", ...)
     for i = 1, extra do args[nbound + i] = select(i, ...) end
-    return fn(unpack(args, 1, nbound + extra))
+    return fn(unpack(args --[[:! { [integer]: any }]], 1, nbound + extra))
   end
 end
 
 -- curry(fn, n) -> curried fn accepting n arguments one at a time.
+--: (function, integer | nil) -> function
 function M.curry(fn, n)
   if n == nil then
     local info = debug.getinfo(fn, "u")
-    n = info and info.nparams or 0
+    n = (info and info.nparams or 0) --[[:! integer]]
   end
   if n <= 1 then return fn end
+  --: ({ [integer]: unknown }, integer) -> function
   local function step(collected, remaining)
     return function(...)
-      local args = {}
+      local args = {} --: { [integer]: unknown }
       for i = 1, #collected do args[i] = collected[i] end
       local added = select("#", ...)
       for i = 1, added do args[#collected + i] = select(i, ...) end
       local new_remaining = remaining - added
       if new_remaining <= 0 then
-        return fn(unpack(args))
+        return fn(unpack(args --[[:! { [integer]: any }]]))
       else
         return step(args, new_remaining)
       end
@@ -490,7 +492,7 @@ end
 -- juxt(f, g, ...) -> fn that applies each function to the same args.
 -- Returns a table of results: {f(x), g(x), h(x)}.
 function M.juxt(...)
-  local fns = { ... }
+  local fns = { ... } --: { [integer]: function }
   local n = #fns
   return function(...)
     local results = {}
@@ -561,12 +563,12 @@ end
 -- comp_xf(...) -> compose transducers left-to-right.
 -- comp_xf(map_xf(f), filter_xf(g)) applies map then filter.
 function M.comp_xf(...)
-  local xfs = { ... }
+  local xfs = { ... } --: { [integer]: function }
   local n = #xfs
   if n == 0 then return M.identity end
   if n == 1 then return xfs[1] end
   return function(reducer)
-    local r = reducer
+    local r = reducer --: unknown
     for i = n, 1, -1 do r = xfs[i](r) end
     return r
   end

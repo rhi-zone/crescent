@@ -35,7 +35,9 @@ local function try_system()
 		                                         const unsigned char *pk);
 	]]
 
-	local lib
+	-- lib is typed as any: ffi.load result passes through pcall so its type
+	-- is unknown; the cdef block above fully specifies the ABI.
+	local lib = nil --[[: any]]
 	local names = { "sodium", "libsodium.so.26", "libsodium.so.23", "libsodium.so" }
 	for _, name in ipairs(names) do
 		local ok, l = pcall(ffi.load, name)
@@ -49,6 +51,7 @@ local function try_system()
 	local ok2, err2 = pcall(lib.crypto_sign_ed25519_keypair, pk, sk)
 	if not ok2 then error("libsodium smoke test failed: " .. tostring(err2)) end
 
+	--: (string | nil) -> (string, string) | (nil, string)
 	local function keypair(seed)
 		local _pk = ffi.new("unsigned char[32]")
 		local _sk = ffi.new("unsigned char[64]")
@@ -61,9 +64,10 @@ local function try_system()
 			local ret = lib.crypto_sign_ed25519_keypair(_pk, _sk)
 			if ret ~= 0 then return nil, "crypto_sign_ed25519_keypair failed" end
 		end
-		return ffi.string(_sk, 64), ffi.string(_pk, 32)
+		return ffi.string(_sk --[[:! Ptr<integer>]], 64), ffi.string(_pk --[[:! Ptr<integer>]], 32)
 	end
 
+	--: (string, string) -> (string | nil, string | nil)
 	local function sign(privkey, message)
 		if type(privkey) ~= "string" or #privkey ~= 64 then
 			return nil, "private key must be 64 bytes"
@@ -78,6 +82,7 @@ local function try_system()
 		return ffi.string(sig, 64)
 	end
 
+	--: (string, string, string) -> (boolean, string | nil)
 	local function verify(pubkey, message, signature)
 		if type(pubkey) ~= "string" or #pubkey ~= 32 then
 			return false, "public key must be 32 bytes"
@@ -107,14 +112,16 @@ local function make_pure()
 
 	local u64 = ffi.typeof("uint64_t")
 
-	local SHA512_H0 = {
+	-- SHA512_H0 and SHA512_K hold FFI uint64_t cdata; annotated as any to permit
+	-- cdata arithmetic (operator overloading not tracked by the typechecker).
+	local SHA512_H0 = { --: { [integer]: any }
 		u64(0x6a09e667f3bcc908ULL), u64(0xbb67ae8584caa73bULL),
 		u64(0x3c6ef372fe94f82bULL), u64(0xa54ff53a5f1d36f1ULL),
 		u64(0x510e527fade682d1ULL), u64(0x9b05688c2b3e6c1fULL),
 		u64(0x1f83d9abfb41bd6bULL), u64(0x5be0cd19137e2179ULL),
 	}
 
-	local SHA512_K = {
+	local SHA512_K = { --: { [integer]: any }
 		u64(0x428a2f98d728ae22ULL), u64(0x7137449123ef65cdULL),
 		u64(0xb5c0fbcfec4d3b2fULL), u64(0xe9b5dba58189dbbcULL),
 		u64(0x3956c25bf348b538ULL), u64(0x59f111f1b605d019ULL),
@@ -212,7 +219,7 @@ local function make_pure()
 
 		-- Padding
 		local rem  = len - nfull * 128
-		local tail = {}
+		local tail = {} --: { [integer]: string }
 		for i = nfull * 128 + 1, len do
 			tail[#tail + 1] = string.char(string.byte(s, i))
 		end
@@ -224,18 +231,20 @@ local function make_pure()
 		for _ = 1, 8 do tail[#tail + 1] = "\x00" end
 		local bits = len * 8
 		for sh = 56, 0, -8 do
-			tail[#tail + 1] = string.char(math.floor(bits / 2 ^ sh) % 256)
+			local byte_val = math.floor(bits / 2 ^ sh) % 256
+			tail[#tail + 1] = string.char(byte_val)
 		end
 		local padded = table.concat(tail)
 		for blk = 0, (#padded / 128) - 1 do
 			sha512_compress(h, padded, blk * 128)
 		end
 
-		local out = {}
+		local out = {} --: { [integer]: string }
 		for i = 0, 7 do
 			local v = h[i]
 			for sh = 56, 0, -8 do
-				out[#out + 1] = string.char(tonumber(bit.band(bit.rshift(v, sh), u64(0xff))))
+				local byte_val = tonumber(bit.band(bit.rshift(v, sh), u64(0xff))) or 0
+				out[#out + 1] = string.char(byte_val)
 			end
 		end
 		return table.concat(out)
@@ -639,8 +648,10 @@ local function make_pure()
 		end
 
 		-- Subtract big-endian arrays (x -= y, assuming x >= y)
+		--: ({ [integer]: number }, { [integer]: number }) -> { [integer]: number }
 		local function be_sub(x, y)
-			local r = {}; for i = 1, 64 do r[i] = x[i] end
+			local r = {} --: { [integer]: number }
+			for i = 1, 64 do r[i] = x[i] end
 			local borrow = 0
 			for i = 64, 1, -1 do
 				local d = r[i] - y[i] - borrow
@@ -745,22 +756,23 @@ local function make_pure()
 		if seed_input and #seed_input ~= 32 then
 			return nil, "seed must be 32 bytes"
 		end
-		local seed
+		local seed --: string | nil
 		if seed_input then
 			seed = seed_input
 		else
 			if type(random_bytes_fn) ~= "function" then
 				return nil, "random_bytes_fn is required when seed is nil"
 			end
-			seed = random_bytes_fn(32)
-			if not seed or #seed ~= 32 then
-				return nil, "failed to read 32 random bytes"
-			end
+			seed = random_bytes_fn(32) --[[:! string | nil]]
+			if not seed then return nil, "failed to read 32 random bytes" end
+			if #seed ~= 32 then return nil, "failed to read 32 random bytes" end
 		end
-		local pub_bytes = pubkey_from_seed(seed)
+		if not seed then return nil, "seed unavailable" end
+		local seed_str = seed --[[:! string]]
+		local pub_bytes = pubkey_from_seed(seed_str)
 		local pub_str   = to_bin32(pub_bytes)
 		-- Private key = seed (32) || public key (32)
-		return seed .. pub_str, pub_str
+		return seed_str .. pub_str, pub_str
 	end
 
 	local function sign(privkey, message)
@@ -850,7 +862,13 @@ end
 
 -- ── Tier selection ────────────────────────────────────────────────────────────
 
-local keypair_fn, sign_fn, verify_fn
+-- keypair_fn/sign_fn/verify_fn are typed as any: they are assigned from either
+-- the system (libsodium) or pure-Lua tier, each with different signatures;
+-- using any avoids a union that would block all calls.
+local _init_errmsg = "Ed25519 not yet initialized"
+local keypair_fn = function() return nil, _init_errmsg end --[[: any]]
+local sign_fn    = function() return nil, _init_errmsg end --[[: any]]
+local verify_fn  = function() return false, _init_errmsg end --[[: any]]
 
 local ok_sys = pcall(function()
 	keypair_fn, sign_fn, verify_fn = try_system()
