@@ -5,6 +5,8 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: CsvAgg = { init: () -> unknown, step: (unknown, { [string]: unknown, ... }) -> nil, final: (unknown) -> unknown, ... }
+
 -- ── CSV Parsing ────────────────────────────────────────────────────────────────
 
 --- Parse a CSV string into an array of row tables keyed by header.
@@ -17,8 +19,8 @@ function M.parse(str)
 	end
 
 	-- Tokenise into rows of fields
-	local rows = {}
-	local cur_row = {}
+	local rows = {} --: { [integer]: { [integer]: string } }
+	local cur_row = {} --: { [integer]: string }
 	local field_buf = {}
 	local i = 1
 	local n = #str
@@ -32,7 +34,7 @@ function M.parse(str)
 	local function flush_row()
 		flush_field()
 		rows[#rows + 1] = cur_row
-		cur_row = {}
+		cur_row = {} --: { [integer]: string }
 	end
 
 	while i <= n do
@@ -111,7 +113,8 @@ end
 local function escape_field(v)
 	v = tostring(v)
 	if v:find('[",\r\n]') then
-		return '"' .. v:gsub('"', '""') .. '"'
+		local escaped = v:gsub('"', '""') --: string
+		return '"' .. escaped .. '"'
 	end
 	return v
 end
@@ -172,10 +175,12 @@ function M.avg(col)
 	return {
 		_type = "agg",
 		init = function() return { s = 0, n = 0 } end,
+		--: ({ s: number, n: number, ... }, { [string]: unknown, ... }) -> nil
 		step = function(acc, row)
 			acc.s = acc.s + (tonumber(row[col]) or 0)
 			acc.n = acc.n + 1
 		end,
+		--: ({ s: number, n: number, ... }) -> number | nil
 		final = function(acc)
 			if acc.n == 0 then return nil end
 			return acc.s / acc.n
@@ -391,17 +396,18 @@ end
 
 --- Expand rows where a column contains sep-separated multi-values into multiple rows.
 function Pipeline:explode(col, sep)
-	sep = sep or ","
+	local sep = (sep or ",") --: string
 	local out = {}
 	local data = self._data
 	for i = 1, #data do
 		local row = data[i]
-		local val = row[col]
+		local val = row[col] --[[:! string | nil]]
 		if val ~= nil and val ~= "" then
 			-- split by sep
 			local parts = {}
-			local pat = "([^" .. sep:gsub("[%(%)%.%%%+%-%*%?%[%^%$]", "%%%1") .. "]*)"
-			for part in (val .. sep):gmatch(pat .. sep) do
+			local sep_esc = sep:gsub("[%(%)%.%%%+%-%*%?%[%^%$]", "%%%1") --: string
+			local pat = "([^" .. sep_esc .. "]*)"
+			for part in (val .. sep):gmatch(pat .. sep_esc) do
 				parts[#parts + 1] = part
 			end
 			if #parts == 0 then
@@ -517,6 +523,7 @@ end
 -- @param agg        aggregator  how to aggregate value_col per cell
 -- Other non-pivot, non-value columns are used as the row identity.
 function Pipeline:pivot(pivot_col, value_col, agg)
+	local agg = agg --[[: CsvAgg]]
 	-- collect distinct pivot values and row keys
 	local pivot_vals = {}
 	local pivot_seen = {}
@@ -531,11 +538,12 @@ function Pipeline:pivot(pivot_col, value_col, agg)
 	table.sort(pivot_vals, function(a, b) return tostring(a) < tostring(b) end)
 
 	-- determine identity columns (everything except pivot_col and value_col)
-	local id_cols = {}
+	local id_cols = {} --: { [integer]: string }
 	if #data > 0 then
 		for k in pairs(data[1]) do
-			if k ~= pivot_col and k ~= value_col then
-				id_cols[#id_cols + 1] = k
+			local col_name = k --[[:! string]]
+			if col_name ~= pivot_col and col_name ~= value_col then
+				id_cols[#id_cols + 1] = col_name
 			end
 		end
 		table.sort(id_cols)
@@ -600,10 +608,10 @@ function Pipeline:describe(col)
 		return { count = 0, mean = nil, std = nil, min = nil, p25 = nil, p50 = nil, p75 = nil, max = nil }
 	end
 	table.sort(vals)
-	local sum = 0
+	local sum = 0 --: number
 	for _, v in ipairs(vals) do sum = sum + v end
 	local mean = sum / n
-	local sq_sum = 0
+	local sq_sum = 0 --: number
 	for _, v in ipairs(vals) do sq_sum = sq_sum + (v - mean) ^ 2 end
 	local std = n > 1 and math.sqrt(sq_sum / (n - 1)) or 0
 

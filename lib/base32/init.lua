@@ -26,15 +26,16 @@ local ALPHA_HEX = "0123456789ABCDEFGHIJKLMNOPQRSTUV"
 local ALPHA_CRO = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 -- Build decode lookup tables (char → 0-based value, or false for invalid).
+--: (string) -> { [integer]: integer }
 local function make_decode_table(alpha)
-    local t = {}
+    local t = {} --: { [integer]: integer }
     for i = 1, 32 do
-        local c = alpha:sub(i, i)
-        t[c:byte()] = i - 1
+        local c = alpha:sub(i, i) --: string
+        t[c:byte() --[[:! integer]]] = i - 1
         -- also accept lowercase
-        local lc = c:lower()
+        local lc = c:lower() --: string
         if lc ~= c then
-            t[lc:byte()] = i - 1
+            t[lc:byte() --[[:! integer]]] = i - 1
         end
     end
     return t
@@ -46,9 +47,10 @@ local DEC_CRO = make_decode_table(ALPHA_CRO)
 
 -- Crockford extras: i/I/l/L → 1, o/O → 0
 do
+    --: ({ [integer]: integer }, string, integer) -> nil
     local function set(t, ch, val)
-        t[ch:byte()] = val
-        t[ch:upper():byte()] = val
+        t[ch:byte() --[[:! integer]]] = val
+        t[ch:upper():byte() --[[:! integer]]] = val
     end
     set(DEC_CRO, "i", 1)
     set(DEC_CRO, "l", 1)
@@ -57,6 +59,7 @@ end
 
 -- ── Generic encode ────────────────────────────────────────────────────────────
 
+--: (string, string, boolean) -> string
 local function encode_generic(data, alpha, pad)
     local out = {}
     local n = #data
@@ -119,6 +122,7 @@ end
 
 -- ── Generic decode ────────────────────────────────────────────────────────────
 
+--: (string, { [integer]: integer }, string) -> (string | nil, string | nil)
 local function decode_generic(data, dec_table, name)
     -- Strip padding and whitespace
     local stripped = {}
