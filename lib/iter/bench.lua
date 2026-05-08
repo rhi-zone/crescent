@@ -13,7 +13,7 @@ local WARMUP  = 3
 local REPS    = 10
 
 -- Pre-build the source array once (array allocation is not what we measure).
-local src = {}
+local src = {} --: Arr<integer>
 for i = 1, N do src[i] = i end
 
 ----------------------------------------------------------------
@@ -29,7 +29,8 @@ local function bench(fn)
 end
 
 -- Prevent the compiler from eliminating results entirely.
-local _sink = 0
+local _sink = 0 --: number
+--: (number | nil) -> nil
 local function sink(v) _sink = _sink + (v or 0) end
 
 ----------------------------------------------------------------
@@ -64,7 +65,9 @@ cases[#cases+1] = {
 cases[#cases+1] = {
   name = "map (iter)",
   fn = function()
-    sink(iter.sum(iter.map(fn_double, iter.values(src))))
+    local vf, vs, vc = iter.values(src)
+    local mf, ms, mc = iter.map(fn_double, vf, vs, vc)
+    sink(iter.sum(mf, ms, mc))
   end,
 }
 
@@ -83,7 +86,9 @@ cases[#cases+1] = {
 cases[#cases+1] = {
   name = "filter (iter)",
   fn = function()
-    sink(iter.sum(iter.filter(fn_odd, iter.values(src))))
+    local vf, vs, vc = iter.values(src)
+    local ff, fs, fc = iter.filter(fn_odd, vf, vs, vc)
+    sink(iter.sum(ff, fs, fc))
   end,
 }
 
@@ -99,7 +104,8 @@ cases[#cases+1] = {
 cases[#cases+1] = {
   name = "fold (iter)",
   fn = function()
-    sink(iter.fold(fn_add, 0, iter.values(src)))
+    local vf, vs, vc = iter.values(src)
+    sink(iter.fold(fn_add, 0, vf, vs, vc))
   end,
 }
 
@@ -118,7 +124,10 @@ cases[#cases+1] = {
 cases[#cases+1] = {
   name = "map+filter (iter)",
   fn = function()
-    sink(iter.sum(iter.filter(fn_gt_N, iter.map(fn_double, iter.values(src)))))
+    local vf, vs, vc = iter.values(src)
+    local mf, ms, mc = iter.map(fn_double, vf, vs, vc)
+    local ff, fs, fc = iter.filter(fn_gt_N, mf, ms, mc)
+    sink(iter.sum(ff, fs, fc))
   end,
 }
 
@@ -137,7 +146,10 @@ cases[#cases+1] = {
 cases[#cases+1] = {
   name = "map+filt+fold (iter)",
   fn = function()
-    sink(iter.fold(fn_add, 0, iter.filter(fn_gt_N, iter.map(fn_double, iter.values(src)))))
+    local vf, vs, vc = iter.values(src)
+    local mf, ms, mc = iter.map(fn_double, vf, vs, vc)
+    local ff, fs, fc = iter.filter(fn_gt_N, mf, ms, mc)
+    sink(iter.fold(fn_add, 0, ff, fs, fc))
   end,
 }
 

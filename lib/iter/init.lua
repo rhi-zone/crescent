@@ -4,7 +4,7 @@ end
 
 local iter = {}
 
---: (number, number, number | nil) -> (() -> number | nil, nil, nil)
+--: (number, number, number | nil) -> ((...unknown) -> number | nil, nil, nil)
 function iter.range(start, stop, step)
   if step == 0 then error("iter.range: step cannot be 0") end
   step = step or (start <= stop and 1 or -1)
@@ -20,7 +20,7 @@ function iter.range(start, stop, step)
 end
 
 --- Iterate array values (like ipairs but yields only the value).
---: <T>(T[]) -> (() -> T | nil, nil, nil)
+--: ({ [number]: unknown, ... }) -> ((...unknown) -> unknown, nil, nil)
 function iter.values(t)
   local i = 0
   local n = #t
@@ -34,7 +34,7 @@ end
 iter.from = iter.values
 
 --- Iterate table keys (unordered, like pairs but yields only keys).
---: ({ [unknown]: unknown }) -> (() -> unknown, nil, nil)
+--: ({ [unknown]: unknown }) -> ((...unknown) -> unknown, nil, nil)
 function iter.keys(t)
   local k
   return function()
@@ -47,7 +47,7 @@ end
 --- Useful for passing standard Lua iterators to zip/chain which accept
 --- two closures. Our constructors already return closures, so wrap is
 --- only needed for raw triples like pairs(t) or next, t.
---: ((...unknown) -> unknown, unknown, unknown) -> () -> unknown
+--: ((...unknown) -> unknown, unknown, unknown) -> (...unknown) -> unknown
 function iter.wrap(f, s, c)
   return function()
     local v = f(s, c)
@@ -62,7 +62,7 @@ end
 ----------------------------------------------------------------
 
 --- Apply fn to each value.
---: ((unknown) -> unknown, (...unknown) -> unknown, unknown, unknown) -> (() -> unknown, nil, nil)
+--: ((unknown) -> unknown, (...unknown) -> unknown, unknown, unknown) -> ((...unknown) -> unknown, nil, nil)
 function iter.map(fn, f, s, c)
   return function()
     local v = f(s, c)
@@ -73,7 +73,7 @@ function iter.map(fn, f, s, c)
 end
 
 --- Keep values where pred returns true.
---: ((unknown) -> boolean, (...unknown) -> unknown, unknown, unknown) -> (() -> unknown, nil, nil)
+--: ((unknown) -> boolean, (...unknown) -> unknown, unknown, unknown) -> ((...unknown) -> unknown, nil, nil)
 function iter.filter(pred, f, s, c)
   return function()
     while true do
@@ -86,7 +86,7 @@ function iter.filter(pred, f, s, c)
 end
 
 --- First n values.
---: (number, (...unknown) -> unknown, unknown, unknown) -> (() -> unknown, nil, nil)
+--: (number, (...unknown) -> unknown, unknown, unknown) -> ((...unknown) -> unknown, nil, nil)
 function iter.take(n, f, s, c)
   local remaining = n
   return function()
@@ -100,7 +100,7 @@ function iter.take(n, f, s, c)
 end
 
 --- Skip first n values, then yield the rest.
---: (number, (...unknown) -> unknown, unknown, unknown) -> (() -> unknown, nil, nil)
+--: (number, (...unknown) -> unknown, unknown, unknown) -> ((...unknown) -> unknown, nil, nil)
 function iter.skip(n, f, s, c)
   local skipped = false
   return function()
@@ -121,7 +121,7 @@ end
 
 --- Pair up values from two iterators. Stops at the shorter one.
 --- Accepts two closures (not triples). Use iter.wrap() for raw triples.
---: <V1, V2>((() -> V1 | nil), (() -> V2 | nil)) -> (() -> (V1, V2) | nil, nil, nil)
+--: <V1, V2>((...unknown) -> V1 | nil, (...unknown) -> V2 | nil) -> ((...unknown) -> (V1, V2) | nil, nil, nil)
 function iter.zip(it1, it2)
   return function()
     local v1 = it1()
@@ -134,7 +134,7 @@ end
 
 --- Concatenate two iterators.
 --- Accepts two closures (not triples). Use iter.wrap() for raw triples.
---: <V>((() -> V | nil), (() -> V | nil)) -> (() -> V | nil, nil, nil)
+--: <V>((...unknown) -> V | nil, (...unknown) -> V | nil) -> ((...unknown) -> V | nil, nil, nil)
 function iter.chain(it1, it2)
   local first = true
   return function()
@@ -148,7 +148,7 @@ function iter.chain(it1, it2)
 end
 
 --- Map then flatten. fn must return an iterator triple (f, s, c).
---: <S, V, W>((V) -> ((S, W) -> W, S, W), (S, V) -> V, S, V) -> (() -> W | nil, nil, nil)
+--: <V, W>((V) -> ((...unknown) -> W, unknown, unknown), (...unknown) -> V, unknown, unknown) -> ((...unknown) -> W | nil, nil, nil)
 function iter.flat_map(fn, f, s, c)
   local inner_f, inner_s, inner_c
   local outer_done = false
@@ -177,7 +177,7 @@ function iter.flat_map(fn, f, s, c)
 end
 
 --- Add index: returns i, value.
---: <S, V>((S, V) -> V, S, V) -> (() -> (integer, V) | nil, nil, nil)
+--: <V>((...unknown) -> V, unknown, unknown) -> ((...unknown) -> (integer, V) | nil, nil, nil)
 function iter.enumerate(f, s, c)
   local i = 0
   return function()
@@ -194,7 +194,7 @@ end
 ----------------------------------------------------------------
 
 --- Reduce with accumulator.
---: <S, V, A>((A, V) -> A, A, (S, V) -> V, S, V) -> A
+--: <V, A>((A, V) -> A, A, (...unknown) -> V, unknown, unknown) -> A
 function iter.fold(fn, acc, f, s, c)
   while true do
     local v = f(s, c)
@@ -206,7 +206,7 @@ function iter.fold(fn, acc, f, s, c)
 end
 
 --- Sum of numbers.
---: <S>((S, number) -> number, S, number) -> number
+--: ((...unknown) -> number | nil, unknown, unknown) -> number
 function iter.sum(f, s, c)
   local result = 0 --: number
   while true do
@@ -219,7 +219,7 @@ function iter.sum(f, s, c)
 end
 
 --- Count elements.
---: <S, V>((S, V) -> V, S, V) -> number
+--: ((...unknown) -> unknown, unknown, unknown) -> number
 function iter.count(f, s, c)
   local n = 0
   while true do
@@ -232,7 +232,7 @@ function iter.count(f, s, c)
 end
 
 --- Collect into array table.
---: <S, V>((S, V) -> V, S, V) -> V[]
+--: <V>((...unknown) -> V | nil, unknown, unknown) -> Arr<V>
 function iter.to_array(f, s, c)
   local arr = {}
   local n = 0 --: number
@@ -247,7 +247,7 @@ function iter.to_array(f, s, c)
 end
 
 --- Call fn on each value (for side effects).
---: <S, V>((V) -> (), (S, V) -> V, S, V) -> ()
+--: <V>((V) -> (), (...unknown) -> V, unknown, unknown) -> ()
 function iter.each(fn, f, s, c)
   while true do
     local v = f(s, c)
@@ -258,7 +258,7 @@ function iter.each(fn, f, s, c)
 end
 
 --- True if any value matches predicate. Short-circuits.
---: <S, V>((V) -> boolean, (S, V) -> V, S, V) -> boolean
+--: <V>((V) -> boolean, (...unknown) -> V, unknown, unknown) -> boolean
 function iter.any(pred, f, s, c)
   while true do
     local v = f(s, c)
@@ -270,7 +270,7 @@ function iter.any(pred, f, s, c)
 end
 
 --- True if all values match predicate. Short-circuits.
---: <S, V>((V) -> boolean, (S, V) -> V, S, V) -> boolean
+--: <V>((V) -> boolean, (...unknown) -> V, unknown, unknown) -> boolean
 function iter.all(pred, f, s, c)
   while true do
     local v = f(s, c)
