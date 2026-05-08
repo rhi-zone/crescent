@@ -37,9 +37,11 @@ local TK_RPAREN  = ")"
 local TK_COMMA   = ","
 local TK_EOF     = "eof"
 
+--:: Token = { kind: string, val: unknown, pos: integer }
+
 -- Tokenize the expression string into a list of tokens
 local function lex(src)
-  local tokens = {}
+  local tokens = {} --: { [integer]: Token }
   local i = 1
   local n = #src
 
@@ -352,7 +354,7 @@ local function eval_ast(node, env)
     return nil
 
   elseif nt == "var" then
-    local name = node.name
+    local name = node.name --[[:! string]]
     -- Check user env first, then builtins
     if env and env[name] ~= nil then
       return env[name]
@@ -363,7 +365,7 @@ local function eval_ast(node, env)
     return nil, "undefined variable: " .. name
 
   elseif nt == "call" then
-    local name = node.name
+    local name = node.name --[[:! string]]
     local fn
     if env and type(env[name]) == "function" then
       fn = env[name]
@@ -374,8 +376,9 @@ local function eval_ast(node, env)
     end
     -- Evaluate arguments
     local args = {}
-    for i = 1, #node.args do
-      local v, err = eval_ast(node.args[i], env)
+    local node_args = node.args --[[:! { [integer]: unknown }]]
+    for i = 1, #node_args do
+      local v, err = eval_ast(node_args[i] --[[:! { type: string, ... }]], env)
       if v == nil and err then return nil, err end
       args[i] = v
     end

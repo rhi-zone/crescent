@@ -55,6 +55,7 @@ end
 -- ── Query string helpers ──────────────────────────────────────────────────────
 
 -- Returns a sorted, URL-encoded query string.
+--: (params: { [string]: unknown }) -> string
 function M.build_query(params)
   local keys = {}
   for k in pairs(params) do
@@ -266,6 +267,7 @@ local function parse_value(s, pos)
 end
 
 -- json_parse: parse a JSON object starting at pos (on the "{")
+--: (s: string, pos: integer) -> (unknown, integer | nil)
 json_parse = function(s, pos)
   assert(s:sub(pos, pos) == "{")
   pos = pos + 1
@@ -320,7 +322,7 @@ function M.random_state(length)
   length = length or 32
   local out = {}
   for i = 1, length do
-    local idx = math.random(1, #URL_SAFE_CHARS)
+    local idx = math.random(1, #URL_SAFE_CHARS) --[[:! integer]]
     out[i] = URL_SAFE_CHARS:sub(idx, idx)
   end
   return table.concat(out)
@@ -334,7 +336,7 @@ function M.pkce_verifier(length)
   if length > 128 then length = 128 end
   local out = {}
   for i = 1, length do
-    local idx = math.random(1, #URL_SAFE_CHARS)
+    local idx = math.random(1, #URL_SAFE_CHARS) --[[:! integer]]
     out[i] = URL_SAFE_CHARS:sub(idx, idx)
   end
   return table.concat(out)
@@ -426,7 +428,7 @@ function M.token_request(grant_type, opts)
     return nil, "unknown grant_type: " .. tostring(grant_type)
   end
 
-  local body = M.build_query(params)
+  local body = M.build_query(params --[[:! { [string]: unknown }]])
   local headers = {
     ["Content-Type"]   = "application/x-www-form-urlencoded",
     ["Content-Length"] = tostring(#body),
@@ -442,7 +444,9 @@ function M.parse_token_response(json_str)
     return nil, "JSON parse error: " .. tostring(err)
   end
   if obj.error then
-    return nil, obj.error .. (obj.error_description and (": " .. obj.error_description) or "")
+    local errf = obj.error --[[:! string]]
+    local desc = obj.error_description --[[:! string | nil]]
+    return nil, errf .. (desc and (": " .. desc) or "")
   end
   if not obj.access_token then
     return nil, "missing access_token"
