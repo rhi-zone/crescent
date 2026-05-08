@@ -148,6 +148,13 @@ local C_OVERLAP       = 13  -- {C_OVERLAP,       actual, expected, line, col}
 -- of `actual` and `expected` overlap (intersection ≠ never). Used to assert a
 -- specific shape from `unknown` or to project a union member, without the full
 -- subtyping check that a regular cast (C_SUB with is_cast) requires.
+local C_NARROW_NIL    = 14  -- {C_NARROW_NIL,    input_tid, result_tid, keep_nil, line, col}
+-- Deferred narrowing for nil_check.  Defers while input_tid is a free TAG_VAR;
+-- once concrete, computes either subtract(input, nil|false) (keep_nil=false) or
+-- the nil-only subset (keep_nil=true) and unifies with result_tid.  Emitted by
+-- narrow.apply_narrowing when the input type isn't yet resolved (e.g. for-in
+-- loop variables that depend on deferred C_BIND_GENERICS / C_INDEX).  Without
+-- this, narrowing on an unresolved TAG_VAR is a silent no-op.
 
 local M = {}
 
@@ -163,6 +170,7 @@ M.C_OR            = C_OR
 M.C_BIND_GENERICS = C_BIND_GENERICS
 M.C_CHECK_ARGS    = C_CHECK_ARGS
 M.C_OVERLAP       = C_OVERLAP
+M.C_NARROW_NIL    = C_NARROW_NIL
 
 -- ---------------------------------------------------------------------------
 -- Helpers

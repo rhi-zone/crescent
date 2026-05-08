@@ -57,6 +57,7 @@ local C_OR            = constrain.C_OR
 local C_BIND_GENERICS = constrain.C_BIND_GENERICS
 local C_CHECK_ARGS    = constrain.C_CHECK_ARGS
 local C_OVERLAP       = constrain.C_OVERLAP
+local C_NARROW_NIL    = constrain.C_NARROW_NIL
 
 local find = types_mod.find
 
@@ -560,6 +561,57 @@ end
 -- is falsy (nil, false literal) because those don't carry type information.
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: any, ... }) -> boolean
+-- Solve a deferred nil-narrowing: C_NARROW_NIL = { _, input_tid, result_tid, keep_nil, line, col }
+-- Defers while input is a free TAG_VAR. Once input is concrete, computes either the
+-- non-nil/non-false subset (keep_nil=false) or the nil-only subset (keep_nil=true)
+-- and unifies with result_tid. Used by narrow.lua when narrowing operates on a TAG_VAR
+-- that hasn't been resolved yet (e.g. for-in loop variables).
+-- any: constraint arrays are heterogeneous — see solve_unify comment.
+--: (Ctx, { [integer]: any, ... }) -> boolean
+local function solve_narrow_nil(ctx, c)
+    local input_tid  = c[2]
+    local result_tid = c[3]
+    local keep_nil   = c[4]
+
+    local input = find(ctx, input_tid)
+    local it = ctx.types:get(input)
+    if it.tag == TAG_VAR or it.tag == TAG_ROWVAR then
+        return false  -- defer
+    end
+
+    local resolved = ctx.T_NEVER
+    if keep_nil then
+        -- Keep only nil members.
+        if it.tag == TAG_ANY then
+            resolved = input
+        elseif it.tag == TAG_UNION then
+            --: { [integer]: integer, ... }
+            local nil_members = {}
+            for i = it.data[0], it.data[0] + it.data[1] - 1 do
+                local mid = find(ctx, ctx.lists:get(i))
+                local mt = ctx.types:get(mid)
+                if mt.tag == TAG_NIL or (mt.tag == TAG_LITERAL and mt.data[0] == defs.LIT_NIL) then
+                    nil_members[#nil_members + 1] = mid
+                end
+            end
+            if #nil_members == 1 then
+                resolved = nil_members[1]
+            elseif #nil_members > 1 then
+                resolved = types_mod.make_union(ctx, nil_members)
+            end
+        elseif it.tag == TAG_NIL or (it.tag == TAG_LITERAL and it.data[0] == defs.LIT_NIL) then
+            resolved = input
+        end
+    else
+        -- Remove nil and literal false.
+        local r = types_mod.subtract(ctx, input, ctx.T_NIL)
+        local false_lit = types_mod.make_literal(ctx, defs.LIT_BOOLEAN, 0)
+        resolved = types_mod.subtract(ctx, r, false_lit)
+    end
+    unify_mod.unify(ctx, result_tid, resolved)
+    return true
+end
+
 local function solve_or(ctx, c)
     local left_tid   = c[2]
     local right_tid  = c[3]
@@ -2351,6 +2403,7 @@ function M.solve(ctx, constraints)
         [C_BIND_GENERICS] = solve_bind_generics,
         [C_CHECK_ARGS]    = solve_check_args,
         [C_OVERLAP]       = solve_overlap,
+        [C_NARROW_NIL]    = solve_narrow_nil,
     }
 
     -- Dependency-aware fixpoint solver.

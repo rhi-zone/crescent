@@ -24,8 +24,9 @@ local OP_OR  = defs.OP_OR
 local TAG_ANY   = defs.TAG_ANY
 local TAG_NIL   = defs.TAG_NIL
 local TAG_NEVER = defs.TAG_NEVER
-local TAG_VAR   = defs.TAG_VAR
-local TAG_TABLE = defs.TAG_TABLE
+local TAG_VAR    = defs.TAG_VAR
+local TAG_ROWVAR = defs.TAG_ROWVAR
+local TAG_TABLE  = defs.TAG_TABLE
 local TAG_UNION = defs.TAG_UNION
 local TAG_LITERAL     = defs.TAG_LITERAL
 local TAG_ENUM_MEMBER = defs.TAG_ENUM_MEMBER
@@ -351,6 +352,20 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
         -- in truthy branch with ~=nil: remove nil (and literal false for boolean truthiness)
         -- in falsy branch with ~=nil: keep only nil
         local should_remove_nil = (info.positive == in_truthy)
+        -- If the input type is still a free TAG_VAR (e.g. for-in loop variable
+        -- waiting on deferred C_BIND_GENERICS / C_INDEX), emit a deferred
+        -- C_NARROW_NIL constraint so the narrowed type is computed once the
+        -- input resolves.  Without this, narrowing would silently no-op.
+        local tt_pre = ctx.types:get(t)
+        if tt_pre.tag == TAG_VAR or tt_pre.tag == TAG_ROWVAR then
+            local constrain_mod = require("lib.type.static.constrain")
+            local result_tid = types_mod.make_var(ctx, ctx.scope.level)
+            ctx.constraints[#ctx.constraints + 1] = {
+                constrain_mod.C_NARROW_NIL, t, result_tid, not should_remove_nil,
+                0, 0,
+            }
+            return result_tid
+        end
         if should_remove_nil then
             local result = types_mod.subtract(ctx, t, ctx.T_NIL)
             -- Also subtract literal false: `if x then` means x is not nil AND not false.
@@ -359,9 +374,9 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
             return types_mod.subtract(ctx, result, false_lit)
         else
             -- Keep only nil members.
-            -- For unresolved type variables or any, we can't know — leave unchanged.
+            -- For TAG_ANY, leave unchanged.
             local tt = ctx.types:get(t)
-            if tt.tag == TAG_VAR or tt.tag == TAG_ANY then return ty_id end
+            if tt.tag == TAG_ANY then return ty_id end
             if tt.tag == TAG_UNION then
                 --: { [integer]: integer, ... }
                 local nil_members = {}
