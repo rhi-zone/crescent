@@ -38,11 +38,12 @@ end
 
 -- Encode k data bits with Hamming error correction.
 -- Returns codeword as array of 0/1 integers (length n = k + r).
+--: (integer[]) -> integer[]
 function M.encode(data)
   local k = #data
   local r = required_parity_bits(k)
   local n = k + r
-  local cw = {}
+  local cw = {} --[[: integer[] ]]
 
   -- Place data bits in non-power-of-2 positions (1-indexed)
   local di = 1
@@ -72,6 +73,7 @@ end
 
 -- Compute the error syndrome of a codeword.
 -- Returns error_position (1-indexed), or 0 if no error.
+--: (integer[]) -> integer
 function M.syndrome(codeword)
   local n = #codeword
   local r = 0
@@ -95,6 +97,7 @@ end
 
 -- Decode and correct a received codeword.
 -- Returns: data (array of data bits), errors_corrected (0 or 1), err
+--: (integer[]) -> (integer[], integer)
 function M.decode(codeword)
   local n = #codeword
   -- Make a mutable copy
@@ -127,6 +130,7 @@ end
 
 -- Encode with SECDED: adds one extra overall parity bit at position 0
 -- (stored as the last element beyond the Hamming codeword, index n+1).
+--: (integer[]) -> integer[]
 function M.encode_secded(data)
   local cw = M.encode(data)
   -- Compute overall parity of all bits in cw
@@ -138,6 +142,7 @@ end
 
 -- Decode SECDED codeword.
 -- Returns: data, single_corrected (bool), double_detected (bool)
+--: (integer[]) -> (integer[], boolean, boolean)
 function M.decode_secded(codeword)
   local n = #codeword
   -- Overall parity bit is the last element
@@ -159,7 +164,7 @@ function M.decode_secded(codeword)
     return data, false, false
   elseif s ~= 0 and p ~= 0 then
     -- Single-bit error: syndrome points to error position, overall parity odd
-    local cw = {}
+    local cw = {} --[[: integer[] ]]
     for i = 1, n - 1 do cw[i] = hamming_cw[i] end
     if s <= n - 1 then
       cw[s] = bxor(cw[s], 1)
@@ -205,6 +210,7 @@ end
 
 -- Add a parity byte after each group of 7 data bytes (simple scheme).
 -- The parity byte holds XOR of the preceding 7 bytes.
+--: (string) -> string
 function M.add_parity_bytes(s)
   local out = {}
   local len = #s
@@ -225,6 +231,7 @@ end
 
 -- Check parity of a string produced by add_parity_bytes.
 -- Returns true if all parity bytes are correct.
+--: (string) -> boolean
 function M.check_parity_bytes(s)
   local len = #s
   -- Each group is up to 7 data bytes + 1 parity byte = up to 8 bytes
@@ -261,6 +268,7 @@ function M.repeat_encode(data, n)
 end
 
 -- Decode: majority vote over each group of n bits.
+--: (integer[], integer) -> integer[]
 function M.repeat_decode(encoded, n)
   local out = {}
   local len = #encoded
@@ -283,19 +291,20 @@ end
 -- Internet checksum (RFC 1071): one's complement sum of 16-bit words.
 -- data: string of bytes (even length; odd length padded with 0).
 -- Returns 16-bit checksum as integer (ones' complement of the sum).
+--: (string) -> integer
 function M.inet_checksum(data)
   local sum = 0
   local len = #data
   local i = 1
   while i < len do
-    local hi = string.byte(data, i)
-    local lo = string.byte(data, i + 1)
+    local hi = string.byte(data, i) or 0
+    local lo = string.byte(data, i + 1) or 0
     sum = sum + hi * 256 + lo
     i = i + 2
   end
   -- Pad if odd length
   if band(len, 1) == 1 then
-    sum = sum + string.byte(data, len) * 256
+    sum = sum + (string.byte(data, len) or 0) * 256
   end
   -- Fold 32-bit sum to 16 bits
   while sum > 0xffff do
@@ -306,18 +315,19 @@ end
 
 -- Verify internet checksum: returns true if checksum over data (including
 -- the checksum field) yields all-1s (0xffff after folding).
+--: (string) -> boolean
 function M.inet_verify(data)
   local sum = 0
   local len = #data
   local i = 1
   while i < len do
-    local hi = string.byte(data, i)
-    local lo = string.byte(data, i + 1)
+    local hi = string.byte(data, i) or 0
+    local lo = string.byte(data, i + 1) or 0
     sum = sum + hi * 256 + lo
     i = i + 2
   end
   if band(len, 1) == 1 then
-    sum = sum + string.byte(data, len) * 256
+    sum = sum + (string.byte(data, len) or 0) * 256
   end
   while sum > 0xffff do
     sum = band(sum, 0xffff) + rshift(sum, 16)
@@ -329,6 +339,7 @@ end
 -- data: string; init: optional 32-bit initial value.
 -- Returns 32-bit integer.
 local MOD_ADLER = 65521
+--: (string, integer | nil) -> integer
 function M.adler32(data, init)
   local a = 1
   local b = 0
@@ -337,7 +348,7 @@ function M.adler32(data, init)
     b = band(rshift(init, 16), 0xffff)
   end
   for i = 1, #data do
-    a = (a + string.byte(data, i)) % MOD_ADLER
+    a = (a + (string.byte(data, i) or 0)) % MOD_ADLER
     b = (b + a) % MOD_ADLER
   end
   return b * 65536 + a
@@ -345,11 +356,12 @@ end
 
 -- Fletcher-16 checksum.
 -- data: string. Returns 16-bit integer.
+--: (string) -> integer
 function M.fletcher16(data)
   local sum1 = 0
   local sum2 = 0
   for i = 1, #data do
-    sum1 = (sum1 + string.byte(data, i)) % 255
+    sum1 = (sum1 + (string.byte(data, i) or 0)) % 255
     sum2 = (sum2 + sum1) % 255
   end
   return sum2 * 256 + sum1
@@ -358,14 +370,15 @@ end
 -- Fletcher-32 checksum.
 -- data: string (treated as sequence of 16-bit words, little-endian;
 -- odd trailing byte padded with 0). Returns 32-bit integer.
+--: (string) -> integer
 function M.fletcher32(data)
   local sum1 = 0
   local sum2 = 0
   local len = #data
   local i = 1
   while i <= len do
-    local lo = string.byte(data, i)
-    local hi = (i < len) and string.byte(data, i + 1) or 0
+    local lo = string.byte(data, i) or 0
+    local hi = (i < len) and (string.byte(data, i + 1) or 0) or 0
     local word = hi * 256 + lo
     sum1 = (sum1 + word) % 65535
     sum2 = (sum2 + sum1) % 65535
@@ -381,8 +394,9 @@ end
 -- Verify a Luhn check digit (credit card numbers, IMEI, etc.).
 -- number_string: string of digits (including check digit).
 -- Returns true if valid.
+--: (string) -> boolean
 function M.luhn_check(s)
-  local sum = 0
+  local sum = 0 --: number
   local alt = false
   for i = #s, 1, -1 do
     local d = tonumber(s:sub(i, i))
@@ -400,13 +414,15 @@ end
 -- Compute the Luhn check digit to append to a partial number string.
 -- number_string: string of digits WITHOUT the check digit.
 -- Returns the check digit (0–9) as an integer.
+--: (string) -> integer
 function M.luhn_digit(s)
   -- Append a dummy '0', compute what makes the sum divisible by 10
-  local sum = 0
+  local sum = 0 --: number
   local alt = true  -- position 1 from right (check digit position) is not doubled
   -- we iterate the partial number right-to-left (the check digit will be rightmost)
   for i = #s, 1, -1 do
     local d = tonumber(s:sub(i, i))
+    if d == nil then d = 0 end
     if alt then
       d = d * 2
       if d > 9 then d = d - 9 end
@@ -415,7 +431,7 @@ function M.luhn_digit(s)
     alt = not alt
   end
   local check = (10 - (sum % 10)) % 10
-  return check
+  return floor(check)
 end
 
 -- ========================

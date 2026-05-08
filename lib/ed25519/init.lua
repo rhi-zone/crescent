@@ -484,17 +484,20 @@ local function make_pure()
 	-- Point: {X, Y, Z, T} where x = X/Z, y = Y/Z, T = X*Y/Z
 
 	-- Neutral element: (0 : 1 : 1 : 0)
+	--: { [integer]: { [integer]: number } }
 	local NEUTRAL = {
 		copy32(ZERO32), copy32(ONE32), copy32(ONE32), copy32(ZERO32)
 	}
 
 	-- Base point in extended coordinates, Z = 1
+	--: { [integer]: { [integer]: number } }
 	local BASE_PT = {
 		copy32(BASE_X), copy32(BASE_Y), copy32(ONE32), fmul(BASE_X, BASE_Y)
 	}
 
 	-- Unified point addition (add-2008-hwcd, extended twisted Edwards)
 	-- https://hyperelliptic.org/EFD/g1p/auto-twisted-extended.html#addition-add-2008-hwcd
+	--: ({ [integer]: { [integer]: number } }, { [integer]: { [integer]: number } }) -> { [integer]: { [integer]: number } }
 	local function point_add(p1, p2)
 		local X1, Y1, Z1, T1 = p1[1], p1[2], p1[3], p1[4]
 		local X2, Y2, Z2, T2 = p2[1], p2[2], p2[3], p2[4]
@@ -510,11 +513,14 @@ local function make_pure()
 	end
 
 	-- Scalar multiplication: n * P (n is a 32-byte LE integer)
+	--: ({ [integer]: number }, { [integer]: { [integer]: number } }) -> { [integer]: { [integer]: number } }
 	local function scalar_mult(n, pt)
+		--: { [integer]: { [integer]: number } }
 		local result = {
 			copy32(NEUTRAL[1]), copy32(NEUTRAL[2]),
 			copy32(NEUTRAL[3]), copy32(NEUTRAL[4])
 		}
+		--: { [integer]: { [integer]: number } }
 		local addend = {
 			copy32(pt[1]), copy32(pt[2]),
 			copy32(pt[3]), copy32(pt[4])
@@ -532,6 +538,7 @@ local function make_pure()
 	end
 
 	-- Encode a point to 32 bytes (RFC 8032 §5.1.2)
+	--: ({ [integer]: { [integer]: number } }) -> { [integer]: number }
 	local function encode_point(pt)
 		local Zinv = finv(pt[3])
 		local x    = fmul(pt[1], Zinv)
@@ -544,6 +551,7 @@ local function make_pure()
 
 	-- Decode a 32-byte point (RFC 8032 §5.1.3)
 	-- Returns a point table on success, or nil, errmsg on failure.
+	--: ({ [integer]: number }) -> ({ [integer]: { [integer]: number } } | nil, string | nil)
 	local function decode_point(bytes)
 		local sign = bit.band(bit.rshift(bytes[32], 7), 1)
 		local y    = copy32(bytes)
@@ -600,22 +608,23 @@ local function make_pure()
 
 	-- Reduce a (up to 64-byte) LE integer mod l.
 	-- Uses binary long division for correctness (not speed).
+	--: ({ [integer]: number }, integer | nil) -> { [integer]: number }
 	local function reduce_l(bytes, n)
 		n = n or 64
 		-- Extend to 64 bytes
-		local a = {}
-		for i = 1,  n do a[i] = bytes[i] end
+		local a = {} --: { [integer]: number }
+		for i = 1,  n do a[i] = bytes[i] or 0 end
 		for i = n + 1, 64 do a[i] = 0 end
 
 		-- Convert to big-endian for easier bit manipulation
-		local a_be = {}
-		for i = 1, 64 do a_be[i] = a[65 - i] end
-		local l_be = {}
-		for i = 1, 32 do l_be[i] = L[33 - i] end
+		local a_be = {} --: { [integer]: number }
+		for i = 1, 64 do a_be[i] = a[65 - i] or 0 end
+		local l_be = {} --: { [integer]: number }
+		for i = 1, 32 do l_be[i] = L[33 - i] or 0 end
 		-- Extend L to 64 bytes BE (pad high bytes with 0)
-		local l64 = {}
+		local l64 = {} --: { [integer]: number }
 		for i = 1, 32 do l64[i] = 0 end
-		for i = 1, 32 do l64[32 + i] = l_be[i] end
+		for i = 1, 32 do l64[32 + i] = l_be[i] or 0 end
 
 		-- Find position of highest set bit in big-endian 64-byte array
 		local function msb(x)
@@ -712,14 +721,14 @@ local function make_pure()
 	local function clamp_and_hash(seed)
 		local h = sha512(seed)
 		-- a_bytes: first 32 bytes of hash, clamped (RFC 8032 §5.1.5)
-		local a = {}
-		for i = 1, 32 do a[i] = string.byte(h, i) end
+		local a = {} --: { [integer]: number }
+		for i = 1, 32 do a[i] = string.byte(h, i) or 0 end
 		a[1]  = bit.band(a[1],  248)  -- clear low 3 bits
 		a[32] = bit.band(a[32], 127)  -- clear high bit
 		a[32] = bit.bor(a[32],   64)  -- set second-highest bit
 		-- nonce_prefix: bytes 33..64 of hash
-		local prefix = {}
-		for i = 1, 32 do prefix[i] = string.byte(h, i + 32) end
+		local prefix = {} --: { [integer]: number }
+		for i = 1, 32 do prefix[i] = string.byte(h, i + 32) or 0 end
 		return a, prefix
 	end
 
@@ -766,8 +775,8 @@ local function make_pure()
 		-- r = SHA-512(nonce_prefix || message) mod l
 		local prefix_str = to_bin32(nonce_prefix)
 		local r_hash     = sha512(prefix_str .. message)
-		local r_bytes    = {}
-		for i = 1, 64 do r_bytes[i] = string.byte(r_hash, i) end
+		local r_bytes    = {} --: { [integer]: number }
+		for i = 1, 64 do r_bytes[i] = string.byte(r_hash, i) or 0 end
 		local r_scalar   = reduce_l(r_bytes, 64)
 
 		-- R = r * B
@@ -777,8 +786,8 @@ local function make_pure()
 
 		-- k = SHA-512(R || A || message) mod l
 		local k_hash   = sha512(R_str .. pub_str .. message)
-		local k_bytes  = {}
-		for i = 1, 64 do k_bytes[i] = string.byte(k_hash, i) end
+		local k_bytes  = {} --: { [integer]: number }
+		for i = 1, 64 do k_bytes[i] = string.byte(k_hash, i) or 0 end
 		local k_scalar = reduce_l(k_bytes, 64)
 
 		-- S = (r + k * a) mod l
@@ -797,20 +806,20 @@ local function make_pure()
 		end
 
 		-- Decode A (public key)
-		local A_bytes = {}
-		for i = 1, 32 do A_bytes[i] = string.byte(pubkey, i) end
+		local A_bytes = {} --: { [integer]: number }
+		for i = 1, 32 do A_bytes[i] = string.byte(pubkey, i) or 0 end
 		local A_pt, err = decode_point(A_bytes)
 		if not A_pt then return false, "invalid public key: " .. (err or "?") end
 
 		-- Decode R
-		local R_bytes = {}
-		for i = 1, 32 do R_bytes[i] = string.byte(signature, i) end
+		local R_bytes = {} --: { [integer]: number }
+		for i = 1, 32 do R_bytes[i] = string.byte(signature, i) or 0 end
 		local R_pt, err2 = decode_point(R_bytes)
 		if not R_pt then return false, "invalid R in signature: " .. (err2 or "?") end
 
 		-- Decode S (scalar, 32 bytes LE)
-		local S_bytes = {}
-		for i = 1, 32 do S_bytes[i] = string.byte(signature, i + 32) end
+		local S_bytes = {} --: { [integer]: number }
+		for i = 1, 32 do S_bytes[i] = string.byte(signature, i + 32) or 0 end
 		if le_cmp(S_bytes, L) >= 0 then
 			return false, "S is out of range"
 		end
@@ -818,8 +827,8 @@ local function make_pure()
 		-- k = SHA-512(R || A || message) mod l
 		local R_str  = signature:sub(1, 32)
 		local k_hash = sha512(R_str .. pubkey .. message)
-		local k_bytes = {}
-		for i = 1, 64 do k_bytes[i] = string.byte(k_hash, i) end
+		local k_bytes = {} --: { [integer]: number }
+		for i = 1, 64 do k_bytes[i] = string.byte(k_hash, i) or 0 end
 		local k_scalar = reduce_l(k_bytes, 64)
 
 		-- Check: S*B == R + k*A

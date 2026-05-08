@@ -38,17 +38,20 @@ local function vec_scale(a, s)
   return c
 end
 
+--: (number[], number[]) -> number
 local function vec_dot(a, b)
   local n = #a
-  local s = 0
+  local s = 0 --: number
   for i = 1, n do s = s + a[i] * b[i] end
   return s
 end
 
+--: (number[]) -> number
 local function vec_norm(a)
   return sqrt(vec_dot(a, a))
 end
 
+--: (number[]) -> number[]
 local function vec_copy(a)
   local n = #a
   local c = {}
@@ -60,6 +63,9 @@ end
 -- Shared result builder
 -- ---------------------------------------------------------------------------
 
+--:: GdHistEntry = { iter: integer, loss: number, grad_norm: number }
+--:: GdResult = { params: number[], loss: number, iters: integer, converged: boolean, history?: GdHistEntry[] }
+--: (number[], number, integer, boolean) -> GdResult
 local function make_result(params, loss, iters, converged)
   return { params = params, loss = loss, iters = iters, converged = converged }
 end
@@ -74,6 +80,14 @@ end
 -- params0: initial parameters
 -- opts: { lr=0.01, max_iter=1000, tol=1e-6, momentum=0,
 --         callback=nil, record_history=false }
+--:: GdInfo = { iter: integer, params: number[], loss: number, grad_norm: number }
+--:: GdCallback = (GdInfo) -> (boolean | nil)
+--:: GdOpts = { lr?: number, max_iter?: integer, tol?: number, momentum?: number, callback?: GdCallback, record_history?: boolean }
+--:: SgdOpts = { lr?: number, epochs?: integer, tol?: number, lr_decay?: number, momentum?: number, callback?: GdCallback, record_history?: boolean }
+--:: AdamOpts = { lr?: number, max_iter?: integer, tol?: number, beta1?: number, beta2?: number, epsilon?: number, callback?: GdCallback, record_history?: boolean }
+--:: RmsOpts = { lr?: number, max_iter?: integer, tol?: number, decay?: number, epsilon?: number, callback?: GdCallback, record_history?: boolean }
+--:: LbfgsOpts = { m?: integer, max_iter?: integer, tol?: number, lr?: number, callback?: GdCallback, record_history?: boolean }
+--: ((number[]) -> number, (number[]) -> number[], number[], GdOpts | nil) -> GdResult
 function M.gradient_descent(f, grad, params0, opts)
   opts = opts or {}
   local lr        = opts.lr or 0.01
@@ -85,10 +99,10 @@ function M.gradient_descent(f, grad, params0, opts)
 
   local params    = vec_copy(params0)
   local n         = #params
-  local velocity  = {}
+  local velocity = {} --[[: number[] ]]
   for i = 1, n do velocity[i] = 0 end
 
-  local history   = record and {} or nil
+  local history = record and {} or nil --: { iter: integer, loss: number, grad_norm: number }[] | nil
   local converged = false
 
   for iter = 1, max_iter do
@@ -96,7 +110,7 @@ function M.gradient_descent(f, grad, params0, opts)
     local gnorm = vec_norm(g)
     local loss = f(params)
 
-    if record then
+    if history then
       history[#history + 1] = { iter = iter, loss = loss, grad_norm = gnorm }
     end
 
@@ -117,14 +131,16 @@ function M.gradient_descent(f, grad, params0, opts)
     end
   end
 
-  local res = make_result(params, f(params), max_iter, converged)
-  if record then res.history = history end
+  local final_loss = f(params)
+  local res = make_result(params, final_loss, max_iter, converged)
+  if history then res.history = history end
   -- fix iters: we need actual count
   -- recompute iters by re-running — instead track inline
   return res
 end
 
 -- Internal version that tracks iters properly
+--: ((number[]) -> number, (number[]) -> number[], number[], GdOpts | nil) -> GdResult
 local function _gradient_descent(f, grad, params0, opts)
   opts = opts or {}
   local lr        = opts.lr or 0.01
@@ -136,12 +152,12 @@ local function _gradient_descent(f, grad, params0, opts)
 
   local params    = vec_copy(params0)
   local n         = #params
-  local velocity  = {}
+  local velocity = {} --[[: number[] ]]
   for i = 1, n do velocity[i] = 0 end
 
-  local history   = record and {} or nil
+  local history = record and {} or nil --: { iter: integer, loss: number, grad_norm: number }[] | nil
   local converged = false
-  local iters     = 0
+  local iters = 0 --: integer
 
   for iter = 1, max_iter do
     iters = iter
@@ -149,7 +165,7 @@ local function _gradient_descent(f, grad, params0, opts)
     local gnorm = vec_norm(g)
     local loss  = f(params)
 
-    if record then
+    if history then
       history[#history + 1] = { iter = iter, loss = loss, grad_norm = gnorm }
     end
 
@@ -170,7 +186,7 @@ local function _gradient_descent(f, grad, params0, opts)
   end
 
   local res = { params = params, loss = f(params), iters = iters, converged = converged }
-  if record then res.history = history end
+  if history then res.history = history end
   return res
 end
 
@@ -187,6 +203,7 @@ M.gradient_descent = _gradient_descent
 -- n_batches: number of batches per epoch
 -- opts: { lr=0.01, epochs=100, tol=1e-6, lr_decay=0, momentum=0,
 --         callback=nil, record_history=false }
+--: ((number[]) -> number, (number[], integer) -> number[], number[], integer, SgdOpts | nil) -> GdResult
 function M.sgd(f, grad_batch, params0, n_batches, opts)
   opts = opts or {}
   local lr        = opts.lr or 0.01
@@ -199,12 +216,12 @@ function M.sgd(f, grad_batch, params0, n_batches, opts)
 
   local params    = vec_copy(params0)
   local n         = #params
-  local velocity  = {}
+  local velocity = {} --[[: number[] ]]
   for i = 1, n do velocity[i] = 0 end
 
-  local history   = record and {} or nil
+  local history = record and {} or nil --: { iter: integer, loss: number, grad_norm: number }[] | nil
   local converged = false
-  local iters     = 0
+  local iters = 0 --: integer
 
   for epoch = 1, epochs do
     local current_lr = lr / (1 + lr_decay * (epoch - 1))
@@ -222,7 +239,7 @@ function M.sgd(f, grad_batch, params0, n_batches, opts)
     local g_full = grad_batch(params, 1)  -- approximate grad norm from batch 1
     local gnorm = vec_norm(g_full)
 
-    if record then
+    if history then
       history[#history + 1] = { iter = epoch, loss = loss, grad_norm = gnorm }
     end
 
@@ -238,7 +255,7 @@ function M.sgd(f, grad_batch, params0, n_batches, opts)
   end
 
   local res = { params = params, loss = f(params), iters = iters, converged = converged }
-  if record then res.history = history end
+  if history then res.history = history end
   return res
 end
 
@@ -249,6 +266,7 @@ end
 --- Adam optimizer.
 -- opts: { lr=0.001, beta1=0.9, beta2=0.999, eps=1e-8, max_iter=1000, tol=1e-6,
 --         callback=nil, record_history=false }
+--: ((number[]) -> number, (number[]) -> number[], number[], AdamOpts | nil) -> GdResult
 function M.adam(f, grad, params0, opts)
   opts = opts or {}
   local lr       = opts.lr or 0.001
@@ -266,7 +284,7 @@ function M.adam(f, grad, params0, opts)
   local v        = {}   -- second moment
   for i = 1, n do m[i] = 0; v[i] = 0 end
 
-  local history  = record and {} or nil
+  local history = record and {} or nil --: { iter: integer, loss: number, grad_norm: number }[] | nil
   local converged = false
   local iters    = 0
 
@@ -276,7 +294,7 @@ function M.adam(f, grad, params0, opts)
     local gnorm = vec_norm(g)
     local loss  = f(params)
 
-    if record then
+    if history then
       history[#history + 1] = { iter = iter, loss = loss, grad_norm = gnorm }
     end
 
@@ -303,7 +321,7 @@ function M.adam(f, grad, params0, opts)
   end
 
   local res = { params = params, loss = f(params), iters = iters, converged = converged }
-  if record then res.history = history end
+  if history then res.history = history end
   return res
 end
 
@@ -314,6 +332,7 @@ end
 --- RMSProp optimizer.
 -- opts: { lr=0.01, rho=0.9, eps=1e-8, max_iter=1000, tol=1e-6,
 --         callback=nil, record_history=false }
+--: ((number[]) -> number, (number[]) -> number[], number[], RmsOpts | nil) -> GdResult
 function M.rmsprop(f, grad, params0, opts)
   opts = opts or {}
   local lr       = opts.lr or 0.01
@@ -329,7 +348,7 @@ function M.rmsprop(f, grad, params0, opts)
   local eg2      = {}   -- running average of squared gradients
   for i = 1, n do eg2[i] = 0 end
 
-  local history  = record and {} or nil
+  local history = record and {} or nil --: { iter: integer, loss: number, grad_norm: number }[] | nil
   local converged = false
   local iters    = 0
 
@@ -339,7 +358,7 @@ function M.rmsprop(f, grad, params0, opts)
     local gnorm = vec_norm(g)
     local loss  = f(params)
 
-    if record then
+    if history then
       history[#history + 1] = { iter = iter, loss = loss, grad_norm = gnorm }
     end
 
@@ -360,7 +379,7 @@ function M.rmsprop(f, grad, params0, opts)
   end
 
   local res = { params = params, loss = f(params), iters = iters, converged = converged }
-  if record then res.history = history end
+  if history then res.history = history end
   return res
 end
 
@@ -443,7 +462,7 @@ function M.conjugate_gradient(A, b, opts)
   local rr  = vec_dot(r, r)
 
   local converged = false
-  local iters     = 0
+  local iters = 0 --: integer
 
   if sqrt(rr) < tol then
     return { x = x, residual = sqrt(rr), iters = 0, converged = true }
@@ -487,6 +506,7 @@ end
 --- L-BFGS optimizer.
 -- opts: { m=10, max_iter=1000, tol=1e-6, lr=1,
 --         callback=nil, record_history=false }
+--: ((number[]) -> number, (number[]) -> number[], number[], LbfgsOpts | nil) -> GdResult
 function M.lbfgs(f, grad, params0, opts)
   opts = opts or {}
   local m_mem    = opts.m or 10
@@ -506,7 +526,7 @@ function M.lbfgs(f, grad, params0, opts)
   local buf_size = 0
   local buf_ptr  = 0    -- points to oldest entry (1-indexed circular)
 
-  local history  = record and {} or nil
+  local history = record and {} or nil --: { iter: integer, loss: number, grad_norm: number }[] | nil
   local converged = false
   local iters    = 0
 
@@ -517,7 +537,7 @@ function M.lbfgs(f, grad, params0, opts)
     local gnorm = vec_norm(g)
     local loss  = f(params)
 
-    if record then
+    if history then
       history[#history + 1] = { iter = iter, loss = loss, grad_norm = gnorm }
     end
 
@@ -615,7 +635,7 @@ function M.lbfgs(f, grad, params0, opts)
   end
 
   local res = { params = params, loss = f(params), iters = iters, converged = converged }
-  if record then res.history = history end
+  if history then res.history = history end
   return res
 end
 

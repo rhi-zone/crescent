@@ -15,6 +15,7 @@ M._tier = "pure"
 -- Internal: build suffix array via O(n log n) prefix doubling
 -- ---------------------------------------------------------------------------
 
+--: (string) -> integer[]
 local function build_sa(s)
   local n = #s
   if n == 0 then return {} end
@@ -64,6 +65,7 @@ end
 -- Internal: build LCP array via Kasai's O(n) algorithm
 -- ---------------------------------------------------------------------------
 
+--: (string, integer[]) -> integer[]
 local function build_lcp(s, sa)
   local n = #s
   if n == 0 then return {} end
@@ -97,6 +99,7 @@ end
 
 -- Compare s[sa_i .. sa_i+#p-1] with pattern p.
 -- Returns -1 if suffix-prefix < p, 1 if > p, 0 if equal.
+--: (string, integer, string, integer) -> integer
 local function cmp_suffix_prefix(s, sa_i, p, plen)
   local slen = #s
   for k = 0, plen - 1 do
@@ -115,6 +118,7 @@ local function cmp_suffix_prefix(s, sa_i, p, plen)
 end
 
 -- Lower bound: smallest index in [1,n] where cmp >= 0 (suffix >= p as prefix)
+--: (string, integer[], integer, string, integer) -> integer
 local function lower_bound(s, sa, n, p, plen)
   local lo, hi = 1, n + 1
   while lo < hi do
@@ -129,6 +133,7 @@ local function lower_bound(s, sa, n, p, plen)
 end
 
 -- Upper bound: smallest index in [1,n] where cmp > 0 (suffix > p as prefix)
+--: (string, integer[], integer, string, integer) -> integer
 local function upper_bound(s, sa, n, p, plen)
   local lo, hi = 1, n + 1
   while lo < hi do
@@ -146,15 +151,29 @@ end
 -- Suffix array object
 -- ---------------------------------------------------------------------------
 
+--:: SuffixArray = {
+--::   _s: string, _n: integer, _sa: integer[], _lcp: integer[] | nil,
+--::   array: (self: SuffixArray) -> integer[],
+--::   lcp: (self: SuffixArray) -> integer[],
+--::   str: (self: SuffixArray) -> string,
+--::   len: (self: SuffixArray) -> integer,
+--::   search: (self: SuffixArray, p: string) -> integer[],
+--::   count: (self: SuffixArray, p: string) -> integer,
+--::   find: (self: SuffixArray, p: string) -> integer | nil,
+--::   contains: (self: SuffixArray, p: string) -> boolean,
+--::   longest_repeated: (self: SuffixArray) -> string,
+--:: }
 local SA = {}
 SA.__index = SA
 
 --- Return the raw suffix array (1-indexed positions).
+--: (self: SuffixArray) -> integer[]
 function SA:array()
   return self._sa
 end
 
 --- Return the LCP array (1-indexed, lcp[1] = 0 by convention).
+--: (self: SuffixArray) -> integer[]
 function SA:lcp()
   if not self._lcp then
     self._lcp = build_lcp(self._s, self._sa)
@@ -163,16 +182,19 @@ function SA:lcp()
 end
 
 --- Return the original string.
+--: (self: SuffixArray) -> string
 function SA:str()
   return self._s
 end
 
 --- Return the number of suffixes (= #s).
+--: (self: SuffixArray) -> integer
 function SA:len()
   return self._n
 end
 
 --- Search for all occurrences of pattern p. Returns sorted 1-indexed positions.
+--: (self: SuffixArray, p: string) -> integer[]
 function SA:search(p)
   local plen = #p
   local s, sa, n = self._s, self._sa, self._n
@@ -197,6 +219,7 @@ function SA:search(p)
 end
 
 --- Count occurrences of pattern p.
+--: (self: SuffixArray, p: string) -> integer
 function SA:count(p)
   local plen = #p
   local s, sa, n = self._s, self._sa, self._n
@@ -209,12 +232,14 @@ function SA:count(p)
 end
 
 --- Find the first occurrence of pattern p (leftmost in string), or nil.
+--: (self: SuffixArray, p: string) -> integer | nil
 function SA:find(p)
   local matches = self:search(p)
   return matches[1]
 end
 
 --- Check if pattern p occurs at least once.
+--: (self: SuffixArray, p: string) -> boolean
 function SA:contains(p)
   local plen = #p
   local s, sa, n = self._s, self._sa, self._n
@@ -227,6 +252,7 @@ function SA:contains(p)
 end
 
 --- Return the longest repeated substring.
+--: (self: SuffixArray) -> string
 function SA:longest_repeated()
   local lcp = self:lcp()
   local s = self._s
@@ -246,6 +272,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Build a suffix array for string s.
+--: (string) -> SuffixArray
 function M.new(s)
   local sa = build_sa(s)
   local obj = setmetatable({
@@ -263,6 +290,7 @@ end
 
 --- Return the longest common substring of s1 and s2.
 --- Uses the concatenation trick: build SA on s1 + '\0' + s2.
+--: (string, string) -> string
 function M.lcs_str(s1, s2)
   if #s1 == 0 or #s2 == 0 then return "" end
   local sep = "\0"

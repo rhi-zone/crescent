@@ -297,12 +297,13 @@ local irregulars = {
   children = "child", teeth = "tooth", feet = "foot", oxen = "ox",
   -- adjectives
   better = "good", best = "good", worse = "bad", worst = "bad",
-}
+} --[[: { [string]: string | nil } ]]
 
 --: (string) -> string
 M.lemmatize = function(word)
   local lower = word:lower()
-  if irregulars[lower] then return irregulars[lower] end
+  local hit = irregulars[lower]
+  if hit then return hit end
   -- -ing → base (running → run)
   if lower:sub(-3) == "ing" then
     local stem = lower:sub(1, -4)
@@ -599,7 +600,7 @@ local person_names = {
 --: (string) -> { { string } }
 M.extract_entities = function(text)
   local tokens = M.tokenize(text)
-  local entities = {}
+  local entities = {} --[[: any[] ]]
   local i = 1
   while i <= #tokens do
     local tok = tokens[i]
@@ -747,7 +748,7 @@ local positive_words = {
   recommend=1, innovative=1, creative=1, inspiring=1, fun=1, exciting=1,
   delight=1, delightful=1, pleased=1, thank=1, thanks=1, appreciate=1,
   quality=1, reliable=1, trustworthy=1, honest=1, fair=1, generous=1,
-}
+} --[[: { [string]: integer | nil } ]]
 
 local negative_words = {
   hate=2, dislike=1, bad=1, terrible=2, horrible=2, awful=2, worst=2,
@@ -759,7 +760,7 @@ local negative_words = {
   misleading=1, fake=1, corrupt=1, unfair=1, rude=1, mean=1, cruel=1,
   damage=1, dangerous=1, harmful=1, toxic=1, painful=1, suffering=1,
   complaint=1, complain=1, refund=1, broken=1, crash=1, bug=1,
-}
+} --[[: { [string]: integer | nil } ]]
 
 local negators = { ["not"]=true, ["no"]=true, never=true, neither=true,
   nobody=true, nothing=true, nowhere=true, nor=true, }

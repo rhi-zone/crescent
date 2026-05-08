@@ -45,6 +45,9 @@ end
 
 -- Node layout: node.key, node.value, node.prev, node.next, node.expires
 
+--:: LruNode = { key: any, value: any, prev: LruNode, next: LruNode, expires: number | nil, ... }
+--:: Lru = { map: { [any]: LruNode }, head: LruNode, tail: LruNode, size: integer, max_size: integer }
+--: (integer) -> Lru
 local function lru_new(max_size)
   -- sentinel head (MRU side) and tail (LRU side)
   local head = {}
@@ -54,11 +57,13 @@ local function lru_new(max_size)
   return { map = {}, head = head, tail = tail, size = 0, max_size = max_size }
 end
 
+--: (LruNode) -> nil
 local function lru_remove(node)
   node.prev.next = node.next
   node.next.prev = node.prev
 end
 
+--: (Lru, LruNode) -> nil
 local function lru_push_front(lru, node)
   node.next = lru.head.next
   node.prev = lru.head
@@ -67,6 +72,7 @@ local function lru_push_front(lru, node)
 end
 
 -- Returns node or nil. Moves to front on hit (no TTL check here).
+--: (Lru, any) -> LruNode | nil
 local function lru_get_node(lru, key)
   local node = lru.map[key]
   if not node then return nil end
@@ -76,6 +82,7 @@ local function lru_get_node(lru, key)
 end
 
 -- Insert or update. Returns evicted key (or nil).
+--: (Lru, any, any, number | nil) -> any
 local function lru_put(lru, key, value, expires)
   local existing = lru.map[key]
   if existing then
@@ -101,6 +108,7 @@ local function lru_put(lru, key, value, expires)
   return evicted
 end
 
+--: (Lru, any) -> nil
 local function lru_delete(lru, key)
   local node = lru.map[key]
   if not node then return end
@@ -109,6 +117,7 @@ local function lru_delete(lru, key)
   lru.size = lru.size - 1
 end
 
+--: (Lru) -> nil
 local function lru_clear(lru)
   lru.map = {}
   lru.head.next = lru.tail

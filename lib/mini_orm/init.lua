@@ -48,7 +48,7 @@ end
 -- `existing_records` is the table of all records (for unique checks).
 -- `is_update` skips required check for fields not present in data.
 local function validate(data, fields, existing_records, is_update, record_id)
-	local errs = {}
+	local errs = {} --[[: { [string]: string } ]]
 	local has_err = false
 
 	for field_name, def in pairs(fields) do

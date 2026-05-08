@@ -49,7 +49,7 @@ local ADDITIVE = {
 -- Symbol values for decoding (uppercase)
 local SYMBOL_VALUE = {
   I = 1, V = 5, X = 10, L = 50, C = 100, D = 500, M = 1000,
-}
+} --[[: { [string]: integer | nil } ]]
 
 -- ---------------------------------------------------------------------------
 -- to_roman / from_roman (standard, 1-3999)
@@ -64,10 +64,11 @@ M.to_roman = function(n)
   if n < 1 or n > 3999 then
     return nil, "roman_numeral.to_roman: value out of range [1, 3999], got " .. tostring(n)
   end
-  local parts = {}
+  local parts = {} --[[: string[] ]]
   local remaining = n
   for _, pair in ipairs(SUBTRACTIVE) do
-    local val, sym = pair[1], pair[2]
+    local val = pair[1] --[[: integer]]
+    local sym = pair[2] --[[: string]]
     while remaining >= val do
       parts[#parts + 1] = sym
       remaining = remaining - val
@@ -95,7 +96,7 @@ M.from_roman = function(s)
   local total = 0
   local len = #upper
   for i = 1, len do
-    local cur = SYMBOL_VALUE[upper:sub(i, i)]
+    local cur = SYMBOL_VALUE[upper:sub(i, i)] or 0
     local nxt = i < len and SYMBOL_VALUE[upper:sub(i + 1, i + 1)] or 0
     if cur < nxt then
       total = total - cur
@@ -138,10 +139,11 @@ M.to_roman_additive = function(n)
   if n < 1 or n > 3999 then
     return nil, "roman_numeral.to_roman_additive: value out of range [1, 3999], got " .. tostring(n)
   end
-  local parts = {}
+  local parts = {} --[[: string[] ]]
   local remaining = n
   for _, pair in ipairs(ADDITIVE) do
-    local val, sym = pair[1], pair[2]
+    local val = pair[1] --[[: integer]]
+    local sym = pair[2] --[[: string]]
     while remaining >= val do
       parts[#parts + 1] = sym
       remaining = remaining - val
@@ -199,13 +201,14 @@ M.to_roman_large = function(n)
   end
 
   -- Extract the thousands part (vinculum) and the remainder
-  local parts = {}
+  local parts = {} --[[: string[] ]]
   local remaining = n
 
   -- Encode the vinculum portion
-  local vinculum_parts = {}
+  local vinculum_parts = {} --[[: string[] ]]
   for _, pair in ipairs(VINCULUM_SUBTRACTIVE) do
-    local val, sym = pair[1], pair[2]
+    local val = pair[1] --[[: integer]]
+    local sym = pair[2] --[[: string]]
     while remaining >= val do
       vinculum_parts[#vinculum_parts + 1] = sym
       remaining = remaining - val
@@ -232,7 +235,7 @@ end
 -- Vinculum symbol values (uppercase, inside parens)
 local VINCULUM_SYMBOL_VALUE = {
   I = 1000, V = 5000, X = 10000, L = 50000, C = 100000, D = 500000, M = 1000000,
-}
+} --[[: { [string]: integer | nil } ]]
 
 --- Decode a Roman numeral string with vinculum (parenthesis) notation.
 -- Parenthesized portions are decoded with each symbol multiplied by 1000.
@@ -265,7 +268,7 @@ M.from_roman_large = function(s)
     end
     local ilen = #inner
     for j = 1, ilen do
-      local cur = VINCULUM_SYMBOL_VALUE[inner:sub(j, j)]
+      local cur = VINCULUM_SYMBOL_VALUE[inner:sub(j, j)] or 0
       local nxt = j < ilen and VINCULUM_SYMBOL_VALUE[inner:sub(j + 1, j + 1)] or 0
       if cur < nxt then
         total = total - cur

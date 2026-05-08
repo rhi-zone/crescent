@@ -11,6 +11,7 @@ end
 -- M.validate(schema, data)   -> true | (false, errmsg)
 -- DSL: M.string/number/integer/boolean/null/array/object/enum/one_of/any_of/all_of/nullable/ref
 
+--:: Schema = { type?: string, properties?: { [string]: Schema }, required?: string[], items?: Schema, oneOf?: Schema[], anyOf?: Schema[], allOf?: Schema[], enum?: unknown[], minimum?: number, maximum?: number, minLength?: integer, maxLength?: integer, minItems?: integer, maxItems?: integer, ... }
 local M = {}
 M._tier = "pure"
 
@@ -207,6 +208,7 @@ local DEFAULTS = {
 }
 
 --- Generate a deterministic example value from a schema.
+--: (Schema | nil) -> any
 function M.generate(schema)
   if not schema then return nil end
 
@@ -285,6 +287,7 @@ function M.generate_many(schema, n)
 end
 
 --- Generate a randomized example value from a schema.
+--: (Schema | nil) -> any
 function M.generate_random(schema)
   if not schema then return nil end
   if schema["enum"] then
@@ -346,6 +349,7 @@ end
 
 --- Validate data against a JSON Schema.
 -- Returns true on success, or (false, errmsg) on failure.
+--: (Schema | nil, any) -> (boolean, string | nil)
 function M.validate(schema, data)
   if not schema then return true end
 

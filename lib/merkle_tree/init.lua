@@ -101,6 +101,7 @@ local function next_pow2(n)
 end
 
 -- Combine two hashes into a parent hash.
+--: (string, string, (string) -> string) -> string
 local function combine(h1, h2, hash_fn)
   return hash_fn(h1 .. h2)
 end
@@ -141,10 +142,12 @@ end
 
 -- ── Tree object methods ─────────────────────────────────────────────────────
 
+--:: MerkleTree = { root: string, leaves: string[], depth: integer, _nodes: string[], _n_padded: integer, _n_real: integer, _hash_fn: (string) -> string, ... }
 local Tree = {}
 Tree.__index = Tree
 
 -- Return a proof that the leaf at `index` (1-based) is in the tree.
+--: (self: MerkleTree, integer) -> ({ root: string, index: integer, path: { hash: string, direction: string }[] } | nil, string | nil)
 function Tree:proof(index)
   if index < 1 or index > self._n_real then
     return nil, "merkle_tree: index out of range"
@@ -177,6 +180,7 @@ function Tree:proof(index)
 end
 
 -- Return new root hash after updating leaf at index with new_data (non-mutating).
+--: (self: MerkleTree, integer, string) -> (string | nil, string | nil)
 function Tree:update_root(index, new_data)
   if index < 1 or index > self._n_real then
     return nil, "merkle_tree: index out of range"
@@ -200,6 +204,7 @@ function Tree:update_root(index, new_data)
 end
 
 -- Return a new tree with the leaf at index replaced by hash_fn(new_data).
+--: (self: MerkleTree, integer, string) -> (MerkleTree | nil, string | nil)
 function Tree:update(index, new_data)
   if index < 1 or index > self._n_real then
     return nil, "merkle_tree: index out of range"

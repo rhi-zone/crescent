@@ -966,7 +966,7 @@ mod.get_address_info = function(data)
 		hints,
 		out
 	)
-	if not ok then return ok, "ljsocket.get_address_info: " .. err end
+	if not ok then return ok, "ljsocket.get_address_info: " .. (err or "?") end
 	local tbl = {}
 	local res = out[0]
 	while res ~= nil do
