@@ -21,7 +21,8 @@ M._tier = "pure"
 -- Each syntax maps to the literal prefix and suffix strings used for matching.
 -- The capture pattern is built in parse_template below.
 
-local SYNTAX = {
+--:: Syntax = { open: string, close: string }
+local SYNTAX = { --: { [string]: Syntax }
   dollar  = { open = "${",  close = "}" },  -- default
   curly   = { open = "{",   close = "}" },
   percent = { open = "%{",  close = "}" },
@@ -44,6 +45,7 @@ end
 -- Applies a format specifier to a value.
 -- Returns the formatted string, or (nil, errmsg) on failure.
 
+--: (unknown, string) -> string | (nil, string)
 local function apply_format(val, fmt)
   if fmt == "upper" then
     return string.upper(tostring(val))
@@ -62,11 +64,12 @@ local function apply_format(val, fmt)
   else
     -- printf-style specifier: must start with %
     local spec = fmt:sub(1, 1) == "%" and fmt or ("%" .. fmt)
-    local ok, result = pcall(string.format, spec, val)
+    local sval = tostring(val)
+    local ok, result = pcall(function() return string.format(spec, sval) end)
     if not ok then
       return nil, "format error: " .. tostring(result)
     end
-    return result
+    return result --[[:! string]]
   end
 end
 
@@ -77,6 +80,9 @@ end
 --
 -- Returns segments list, or (nil, errmsg) on parse error.
 
+--:: Segment = { type: string, value?: string, path?: string, default?: string, fmt?: string }
+
+--: (string, string | nil) -> Arr<Segment> | (nil, string)
 local function parse_template(template, syntax_name)
   local syn = SYNTAX[syntax_name or "dollar"]
   if not syn then
@@ -120,21 +126,22 @@ local function parse_template(template, syntax_name)
       local inner = template:sub(tok_start + olen, tok_end - 1)
       -- parse inner: path[:fmt] or path[|default]
       -- precedence: | before : (default has no colons, fmt has no pipes)
-      local path, default_val, fmt_spec
+      local default_val, fmt_spec
       local pipe = inner:find("|", 1, true)
       local colon = inner:find(":", 1, true)
+      local path_raw
       if pipe and (not colon or pipe < colon) then
-        path        = inner:sub(1, pipe - 1)
+        path_raw    = inner:sub(1, pipe - 1)
         default_val = inner:sub(pipe + 1)
         -- still allow :fmt after default? Not specified; skip.
       elseif colon then
-        path     = inner:sub(1, colon - 1)
+        path_raw = inner:sub(1, colon - 1)
         fmt_spec = inner:sub(colon + 1)
       else
-        path = inner
+        path_raw = inner
       end
-      -- trim path whitespace
-      path = path:match("^%s*(.-)%s*$")
+      -- trim path whitespace (path_raw is always set by if/elseif/else above)
+      local path = (path_raw --[[:! string]]):match("^%s*(.-)%s*$") or (path_raw --[[:! string]])
       segments[#segments + 1] = {
         type    = "var",
         path    = path,
@@ -157,25 +164,27 @@ end
 -- opts.on_missing: "empty" (default) | "keep" | "error"
 -- Returns string, or (nil, errmsg).
 
+--: (Arr<Segment>, unknown, { on_missing?: string, syntax?: string } | nil, string, string | nil) -> string | (nil, string)
 local function eval_segments(segments, vars, opts, raw_template, syntax_name)
   local on_missing = (opts and opts.on_missing) or "empty"
   local syn = SYNTAX[syntax_name or "dollar"]
-  local parts = {}
+  local parts = {} --: Arr<string>
   for i = 1, #segments do
     local seg = segments[i]
     if seg.type == "literal" then
-      parts[#parts + 1] = seg.value
+      parts[#parts + 1] = seg.value or ""
     else
-      -- resolve value
-      local val = resolve_path(vars, seg.path)
+      -- resolve value (var segment always has path set)
+      local vpath = seg.path or ""
+      local val = resolve_path(vars, vpath)
       if val == nil then
         val = seg.default
       end
       if val == nil then
         if on_missing == "error" then
-          return nil, "missing var: " .. seg.path
+          return nil, "missing var: " .. vpath
         elseif on_missing == "keep" then
-          parts[#parts + 1] = syn.open .. seg.path .. syn.close
+          parts[#parts + 1] = syn.open .. vpath .. syn.close
         else
           -- "empty": emit nothing
         end
@@ -184,9 +193,9 @@ local function eval_segments(segments, vars, opts, raw_template, syntax_name)
         if seg.fmt then
           local formatted, err = apply_format(val, seg.fmt)
           if formatted == nil then
-            return nil, err
+            return nil, err or "format error"
           end
-          parts[#parts + 1] = formatted
+          parts[#parts + 1] = formatted --[[:! string]]
         else
           parts[#parts + 1] = tostring(val)
         end
@@ -207,7 +216,7 @@ function M.interpolate(template, vars, opts)
   local syntax = opts and opts.syntax or "dollar"
   local segments, err = parse_template(template, syntax)
   if segments == nil then return nil, err end
-  return eval_segments(segments, vars, opts, template, syntax)
+  return eval_segments(segments --[[:! Arr<Segment>]], vars, opts, template, syntax)
 end
 
 --- Alias for interpolate (positional args feel more natural as "format").
@@ -222,9 +231,10 @@ function M.compile(template, opts)
   local syntax = opts and opts.syntax or "dollar"
   local segments, err = parse_template(template, syntax)
   if segments == nil then return nil, err end
+  local segs = segments --[[:! Arr<Segment>]]
   return function(vars, call_opts)
     local merged_opts = call_opts or opts
-    return eval_segments(segments, vars, merged_opts, template, syntax)
+    return eval_segments(segs, vars, merged_opts, template, syntax)
   end
 end
 
@@ -256,7 +266,7 @@ function M.dedent(s)
   if min_indent == math.huge or min_indent == 0 then
     return s
   end
-  local pattern = "^" .. string.rep(" ", min_indent)
+  local pattern = "^" .. string.rep(" ", min_indent --[[:! integer]])
   local result = {}
   for line in (s .. "\n"):gmatch("([^\n]*)\n") do
     result[#result + 1] = line:gsub(pattern, "", 1)

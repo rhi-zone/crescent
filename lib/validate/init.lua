@@ -4,7 +4,7 @@ end
 
 local M = {}
 
---:: Validator = (value: unknown) -> (boolean | nil, string | nil)
+--:: Validator = (value: unknown) -> boolean | (nil, string)
 
 -- Helper: type name for error messages
 local function typename(v)
@@ -151,10 +151,12 @@ end
 
 --: (validator: Validator) -> Validator
 function M.optional(validator)
+  --: (unknown) -> boolean | (nil, string)
   return function(value)
     if value == nil then return true end
     local ok, err = validator(value)
-    return ok, err
+    if not ok then return nil, err or "" end
+    return true
   end
 end
 
@@ -175,10 +177,11 @@ end
 --: (...Validator) -> Validator
 function M.all_of(...)
   local validators = { ... } --: Validator[]
+  --: (unknown) -> boolean | (nil, string)
   return function(value)
     for i = 1, #validators do
       local ok, err = validators[i](value)
-      if not ok then return nil, err end
+      if not ok then return nil, err or "" end
     end
     return true
   end

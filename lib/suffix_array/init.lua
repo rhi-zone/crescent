@@ -20,13 +20,13 @@ local function build_sa(s)
   local n = #s
   if n == 0 then return {} end
 
-  local sa = {}
-  local rank = {}
-  local tmp = {}
+  local sa = {} --: Arr<integer>
+  local rank = {} --: Arr<integer>
+  local tmp = {} --: Arr<integer>
 
   for i = 1, n do
     sa[i] = i
-    rank[i] = string.byte(s, i)
+    rank[i] = string.byte(s, i) --[[:! integer]]
   end
 
   local k = 1
@@ -71,10 +71,10 @@ local function build_lcp(s, sa)
   if n == 0 then return {} end
 
   -- Inverse SA: rank[pos] = index in sa
-  local rank = {}
+  local rank = {} --: Arr<integer>
   for i = 1, n do rank[sa[i]] = i end
 
-  local lcp = {}
+  local lcp = {} --: Arr<integer>
   local h = 0
   for i = 1, n do
     if rank[i] > 1 then
@@ -108,8 +108,8 @@ local function cmp_suffix_prefix(s, sa_i, p, plen)
       -- Suffix is shorter than pattern: suffix < pattern
       return -1
     end
-    local sc = string.byte(s, pos)
-    local pc = string.byte(p, k + 1)
+    local sc = string.byte(s, pos) --[[:! integer]]
+    local pc = string.byte(p, k + 1) --[[:! integer]]
     if sc ~= pc then
       return sc < pc and -1 or 1
     end
@@ -178,7 +178,7 @@ function SA:lcp()
   if not self._lcp then
     self._lcp = build_lcp(self._s, self._sa)
   end
-  return self._lcp
+  return self._lcp --[[:! Arr<integer>]]
 end
 
 --- Return the original string.
@@ -256,7 +256,8 @@ end
 function SA:longest_repeated()
   local lcp = self:lcp()
   local s = self._s
-  local best_len, best_pos = 0, 1
+  local best_len = 0 --: integer
+  local best_pos = 1 --: integer
   for i = 2, self._n do
     if lcp[i] > best_len then
       best_len = lcp[i]
@@ -264,7 +265,8 @@ function SA:longest_repeated()
     end
   end
   if best_len == 0 then return "" end
-  return s:sub(best_pos, best_pos + best_len - 1)
+  local best_end = (best_pos + best_len - 1) --[[:! integer]]
+  return s:sub(best_pos, best_end)
 end
 
 -- ---------------------------------------------------------------------------
@@ -309,7 +311,8 @@ function M.lcs_str(s1, s2)
   -- The LCP from Kasai naturally handles this because '\0' < any real char,
   -- so two suffixes from different parts will stop at the separator.
 
-  local best_len, best_pos = 0, 1
+  local best_len = 0 --: integer
+  local best_pos = 1 --: integer
   for i = 2, n do
     local l = lcp[i]
     if l > 0 then
@@ -322,17 +325,18 @@ function M.lcs_str(s1, s2)
         -- The LCP cannot exceed the distance from either start to the separator
         local max_a = a_in_s1 and (n1 - a + 1) or (#s2 - (a - n1 - 2))
         local max_b = b_in_s1 and (n1 - b + 1) or (#s2 - (b - n1 - 2))
-        local valid_len = math.min(l, max_a, max_b)
+        local valid_len = math.min(l, max_a, max_b) --[[:! integer]]
         if valid_len > best_len then
           best_len = valid_len
-          best_pos = a_in_s1 and a or b
+          best_pos = (a_in_s1 and a or b) --[[:! integer]]
         end
       end
     end
   end
 
   if best_len == 0 then return "" end
-  return s1:sub(best_pos, best_pos + best_len - 1)
+  local best_end = (best_pos + best_len - 1) --[[:! integer]]
+  return s1:sub(best_pos, best_end)
 end
 
 return M
