@@ -2240,16 +2240,7 @@ end
 -- function (i.e. a function whose return type is T_NEVER, such as error()).
 -- Uses the current ctx.scope to look up the callee's type.
 --: (Ctx, integer) -> boolean
-local function is_never_call_stmt(ctx, nid)
-    local sn = ctx.nodes:get(nid)
-    if sn.kind ~= NODE_EXPR_STMT then return false end
-    local expr_nid = sn.data[0]
-    local en = ctx.nodes:get(expr_nid)
-    if en.kind ~= NODE_CALL_EXPR then return false end
-    local callee_nid = en.data[0]
-    local cn = ctx.nodes:get(callee_nid)
-    if cn.kind ~= NODE_IDENTIFIER then return false end
-    local fn_tid = env_mod.lookup(ctx.scope, cn.data[0])
+local function fn_returns_never(ctx, fn_tid)
     if not fn_tid then return false end
     fn_tid = types_mod.find(ctx, fn_tid)
     local ft = ctx.types:get(fn_tid)
@@ -2258,6 +2249,45 @@ local function is_never_call_stmt(ctx, nid)
     if ft.data[3] < 1 then return false end
     local ret0 = types_mod.find(ctx, ctx.lists:get(ft.data[2]))
     return ret0 == ctx.T_NEVER
+end
+
+--: (Ctx, integer) -> boolean
+local function is_never_call_stmt(ctx, nid)
+    local sn = ctx.nodes:get(nid)
+    if sn.kind ~= NODE_EXPR_STMT then return false end
+    local expr_nid = sn.data[0]
+    local en = ctx.nodes:get(expr_nid)
+    -- Method call: obj:method(...) — look up method on receiver type.
+    if en.kind == NODE_METHOD_CALL then
+        local recv_nid = en.data[0]
+        local rn = ctx.nodes:get(recv_nid)
+        if rn.kind ~= NODE_IDENTIFIER then return false end
+        local recv_tid = env_mod.lookup(ctx.scope, rn.data[0])
+        if not recv_tid then return false end
+        local recv_resolved = types_mod.find(ctx, recv_tid)
+        local fe = types_mod.table_field(ctx, recv_resolved, en.data[1])
+        if not fe then return false end
+        return fn_returns_never(ctx, fe.type_id)
+    end
+    if en.kind ~= NODE_CALL_EXPR then return false end
+    local callee_nid = en.data[0]
+    local cn = ctx.nodes:get(callee_nid)
+    if cn.kind == NODE_IDENTIFIER then
+        return fn_returns_never(ctx, env_mod.lookup(ctx.scope, cn.data[0]))
+    end
+    -- Field-access call: mod.fail(...) — look up field on obj type.
+    if cn.kind == NODE_FIELD_EXPR then
+        local obj_nid = cn.data[0]
+        local on = ctx.nodes:get(obj_nid)
+        if on.kind ~= NODE_IDENTIFIER then return false end
+        local obj_tid = env_mod.lookup(ctx.scope, on.data[0])
+        if not obj_tid then return false end
+        local obj_resolved = types_mod.find(ctx, obj_tid)
+        local fe = types_mod.table_field(ctx, obj_resolved, cn.data[1])
+        if not fe then return false end
+        return fn_returns_never(ctx, fe.type_id)
+    end
+    return false
 end
 
 -- Returns true if the block is definitely returning (every path exits via return or
