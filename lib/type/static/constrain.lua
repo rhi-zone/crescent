@@ -32,6 +32,7 @@ local NODE_FOR_NUM     = defs.NODE_FOR_NUM
 local NODE_FOR_IN      = defs.NODE_FOR_IN
 local NODE_RETURN_STMT = defs.NODE_RETURN_STMT
 local NODE_BREAK_STMT  = defs.NODE_BREAK_STMT
+local NODE_GOTO_STMT   = defs.NODE_GOTO_STMT
 local NODE_EXPR_STMT   = defs.NODE_EXPR_STMT
 local NODE_FUNC_DECL   = defs.NODE_FUNC_DECL
 local NODE_CHUNK       = defs.NODE_CHUNK
@@ -3032,7 +3033,7 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
         local exits = is_definitely_returning(ctx, block_start, block_len)
         if not exits and block_len > 0 then
             local last_n = ctx.nodes:get(ctx.ast_lists:get(block_start + block_len - 1))
-            exits = (last_n.kind == NODE_BREAK_STMT)
+            exits = (last_n.kind == NODE_BREAK_STMT or last_n.kind == NODE_GOTO_STMT)
         end
 
         if not exits then
