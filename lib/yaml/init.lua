@@ -931,7 +931,7 @@ local function needs_quoting(s)
   if s:find("\n", 1, true) or s:find("\r", 1, true) then return true end
   -- control characters
   for i = 1, #s do
-    local b = byte(s, i)
+    local b = byte(s, i) or 0
     if b < 32 or b == 127 then return true end
   end
   return false
@@ -947,7 +947,7 @@ local function quote_string(s)
     :gsub("\t", "\\t")
   -- replace remaining control chars
   escaped = escaped:gsub(".", function(ch)
-    local b = byte(ch, 1)
+    local b = byte(ch --[[:! string]], 1) or 0
     if b < 32 or b == 127 then
       return format("\\x%02x", b)
     end

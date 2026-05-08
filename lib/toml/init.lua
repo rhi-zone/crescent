@@ -487,7 +487,7 @@ local function parse_string(st)
 end
 
 -- Strip underscores from a numeric string (validates no leading/trailing/double underscores)
---: (string, number) -> (string | nil, string)
+--: (string, number) -> (string | nil, string | nil)
 local function strip_underscores(raw, line)
   if byte(raw, 1) == BYTE_UNDER or byte(raw, #raw) == BYTE_UNDER then
     return nil, "line " .. line .. ": underscore at boundary in number"
@@ -539,7 +539,7 @@ local function parse_number_or_date(st)
       if pos == nstart then return nil, "line " .. st.line .. ": expected hex digits" end
       st.pos = pos
       local raw, err = strip_underscores(sub(s, nstart, pos - 1), st.line)
-      if not raw then return nil, err end
+      if not raw then return nil, err or "invalid hex number" end
       local n16 = tonumber(raw, 16)
       if not n16 then return nil, "line " .. st.line .. ": invalid hex number" end
       return sign * n16
@@ -554,7 +554,7 @@ local function parse_number_or_date(st)
       if pos == nstart then return nil, "line " .. st.line .. ": expected octal digits" end
       st.pos = pos
       local raw, err = strip_underscores(sub(s, nstart, pos - 1), st.line)
-      if not raw then return nil, err end
+      if not raw then return nil, err or "invalid octal number" end
       local n8 = tonumber(raw, 8)
       if not n8 then return nil, "line " .. st.line .. ": invalid octal number" end
       return sign * n8
@@ -567,7 +567,7 @@ local function parse_number_or_date(st)
       if pos == nstart then return nil, "line " .. st.line .. ": expected binary digits" end
       st.pos = pos
       local raw, err = strip_underscores(sub(s, nstart, pos - 1), st.line)
-      if not raw then return nil, err end
+      if not raw then return nil, err or "invalid binary number" end
       local n2 = tonumber(raw, 2)
       if not n2 then return nil, "line " .. st.line .. ": invalid binary number" end
       return sign * n2
@@ -624,7 +624,7 @@ local function parse_number_or_date(st)
   st.pos = pos
   local raw = sub(s, start, pos - 1)
   local cleaned, err = strip_underscores(raw, st.line)
-  if not cleaned then return nil, err end
+  if not cleaned then return nil, err or "invalid number" end
 
   local num = tonumber(cleaned)
   if not num then return nil, "line " .. st.line .. ": invalid number '" .. raw .. "'" end

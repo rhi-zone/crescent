@@ -59,11 +59,12 @@ local LEN_PADDING  = 12
 -- Parse a null-terminated or space-terminated octal string field into a number.
 --: (string) -> number
 local function parse_octal(s)
-    local raw = s:match("^%s*([0-7]*)")
+    local raw = s:match("^%s*([0-7]*)") --[[:! string | nil]]
     if not raw or raw == "" then return 0 end
+    local raw_s = raw --[[:! string]]
     local n = 0
-    for i = 1, #raw do
-        local b = byte(raw, i)
+    for i = 1, #raw_s do
+        local b = byte(raw_s, i) or 0
         n = n * 8 + (b - 0x30)
     end
     return n
@@ -103,7 +104,7 @@ local function compute_checksum(header)
         if i >= OFF_CHKSUM and i <= chk_end then
             sum = sum + 0x20
         else
-            local b = byte(header, i)
+            local b = byte(header, i) or 0
             sum = sum + b
         end
     end

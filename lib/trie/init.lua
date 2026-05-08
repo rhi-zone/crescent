@@ -195,7 +195,7 @@ function M:find_prefix(prefix)
   local node = walk(self._root, prefix)
   if not node then return {} end
   local buf = {} --: { [integer]: integer }
-  for i = 1, #prefix do buf[i] = prefix:byte(i) end
+  for i = 1, #prefix do buf[i] = prefix:byte(i) or 0 end
   local results = {} --: { [integer]: { [integer]: unknown } }
   collect(node, buf, results)
   return results
@@ -244,7 +244,7 @@ function M:autocomplete(prefix, limit)
   local node = walk(self._root, prefix)
   if not node then return {} end
   local buf = {} --: { [integer]: integer }
-  for i = 1, #prefix do buf[i] = prefix:byte(i) end
+  for i = 1, #prefix do buf[i] = prefix:byte(i) or 0 end
   local results = {} --: { [integer]: string }
   if limit then
     collect_keys_limited(node, buf, results, limit)
@@ -280,6 +280,7 @@ function M:pairs()
   local results = {} --: { [integer]: { [integer]: unknown } }
   collect(self._root, {}, results)
   local i = 0
+  --: () -> ((string | nil), (unknown | nil))
   return function()
     i = i + 1
     local r = results[i]

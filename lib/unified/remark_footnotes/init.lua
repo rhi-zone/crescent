@@ -148,6 +148,7 @@ end
 
 -- ── Tree transformer ──────────────────────────────────────────────────────────
 
+--: (node: { type: string, children: { [integer]: unknown, ... }, ... }) -> { type: string, children: { [integer]: unknown, ... }, ... }
 local function transform(node)
   if node.type == "root" or node.type == "blockquote" then
     local children = node.children
@@ -174,6 +175,7 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
+--: (processor: { _parser: ((string) -> ({ children: { [integer]: unknown, ... }, ... } | nil, string | nil)) | nil, parser: (self: unknown, fn: unknown) -> unknown, use_transformer: (self: unknown, fn: unknown) -> unknown, ... }, _opts: unknown) -> nil
 local function remark_footnotes(processor, _opts)
   -- Capture the existing parser.
   local inner_parser = processor._parser

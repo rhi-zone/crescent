@@ -207,7 +207,7 @@ local function find_next(s, start, repo, allow_bare)
             best_start = i
             best_end   = sha_end
             best_kind  = "commit"
-            best_data  = { sha = s:sub(i, sha_end) }
+            best_data  = { sha = s:sub(i, sha_end) } --[[:! { num: string, user: string, owner: string, repo: string, sha: string, ... }]]
           end
         end
       end
@@ -249,11 +249,11 @@ local function split_text(value, repo, mention_strong)
     local url
 
     if kind == "issue" then
-      url = "https://github.com/" .. repo .. "/issues/" .. data.num
+      url = "https://github.com/" .. (repo --[[:! string]]) .. "/issues/" .. data.num
       nodes[#nodes + 1] = link_node(url, label)
 
     elseif kind == "commit" then
-      url = "https://github.com/" .. repo .. "/commit/" .. data.sha
+      url = "https://github.com/" .. (repo --[[:! string]]) .. "/commit/" .. data.sha
       nodes[#nodes + 1] = link_node(url, label)
 
     elseif kind == "mention" then
@@ -338,6 +338,6 @@ end
 
 M.plugin = remark_github
 
-setmetatable(M, { __call = function(_, ...) return remark_github(...) end })
+setmetatable(M, { __call = function(_, processor, opts) return remark_github(processor, opts) end })
 
 return M
