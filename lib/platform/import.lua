@@ -108,7 +108,7 @@ end
 
 -- ── Import ──────────────────────────────────────────────────────────────────
 
---: ({ png_bytes: string, runtime_files: { name: string, data: string }[], runtime_manifest: { name: string | nil, dom_entry: string | nil, ... }, apps_dir: string, write_fn: (string, string) -> (true | nil, string), timestamp: number, index: { install: (unknown, string, { ... }, number) -> (number | nil, string), ... } | nil }) -> (string | nil, { name: string, ... } | nil, string)
+--: ({ png_bytes: string, runtime_files: { name: string, data: string }[], runtime_manifest: { name: string | nil, dom_entry: string | nil, ... }, apps_dir: string, write_fn: (string, string) -> (true | nil, string), timestamp: number, index: { install: (unknown, string, { ... }, number) -> (number | nil, string), ... } | nil }) -> (string | nil, unknown)
 function M.import_card(opts)
 	if not opts then return nil, "import: opts required" end
 	if not opts.png_bytes then return nil, "import: png_bytes required" end

@@ -68,6 +68,7 @@ local function log(opts, fmt, ...)
 end
 
 -- Run a shell command, return stdout as string or nil, err.
+--: (string) -> (string | nil, string | nil)
 local function popen_read(cmd)
 	local fh, err = io.popen(cmd, "r")
 	if not fh then
@@ -99,6 +100,7 @@ local function path_exists(path)
 end
 
 -- Read entire file contents. Returns string or nil, err.
+--: (string) -> (string | nil, string | nil)
 local function read_file(path)
 	local f, err = io.open(path, "r")
 	if not f then return nil, err end
@@ -135,6 +137,7 @@ end
 -- ── HTTP fetch (curl-based v1) ────────────────────────────────────────────────
 
 -- Fetch URL and return body string, or nil, err.
+--: (string) -> (string | nil, string | nil)
 local function http_get(url)
 	local out, err = popen_read(("curl -fsSL %q"):format(url))
 	if out == nil then
@@ -156,6 +159,7 @@ end
 -- ── Checksum verification ─────────────────────────────────────────────────────
 
 -- Compute sha256 of a file. Returns hex string or nil, err.
+--: (string) -> (string | nil, string | nil)
 local function sha256_file(path)
 	-- Try sha256sum first (Linux), fall back to openssl (macOS/BSD)
 	local out, err = popen_read(("sha256sum %q 2>/dev/null"):format(path))
@@ -457,12 +461,12 @@ end
 
 -- Parse /index.json response.
 -- Returns table { [name] = { versions = [...], latest = "x.y.z" } } or nil, err.
---: (string) -> ({ [string]: { versions: string[], latest: string } } | nil, string | nil)
+--: (string) -> ({ [string]: { versions: string[], latest: string | nil } } | nil, string | nil)
 local function parse_index(json_str)
 	-- Minimal JSON object parser: we only need top-level structure.
 	-- Each package entry looks like: "sha1": {"versions": ["1.0.0"], "latest": "1.0.0"}
 	-- We use a simple hand-rolled parser since we can't depend on lunajson here.
-	local result = {}
+	local result = {} --: { [string]: { versions: string[], latest: string | nil } }
 
 	-- Strip outer braces
 	local body = json_str:match("^%s*%{(.*)%}%s*$")
@@ -521,7 +525,7 @@ local function parse_index(json_str)
 
 	local function read_pkg_object()
 		-- Expects "{" already consumed.
-		local pkg = { versions = {}, latest = nil }
+		local pkg = { versions = {}, latest = nil } --: { versions: string[], latest: string | nil }
 		skip_ws()
 		if body:sub(pos, pos) == '}' then pos = pos + 1; return pkg end
 		while pos <= len do
