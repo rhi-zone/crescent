@@ -39,7 +39,7 @@ local function get_cpu_count()
     if not fork_available then return 1 end
     local n = ffi.C.sysconf(84)  -- _SC_NPROCESSORS_ONLN = 84 on Linux
     if n <= 0 then return 1 end
-    return tonumber(n)
+    return tonumber(n) or 1
 end
 
 -- ── URL encoding (for pipe protocol) ─────────────────────────────────────────
@@ -116,7 +116,7 @@ local function decode_diag(s)
 
     -- rest = url-encoded msg, then zero or more " NOTE ..." groups.
     -- Split on " NOTE " delimiter.
-    local parts = {}
+    local parts = {} --: { [integer]: string, ... }
     local pos = 1
     while pos <= #rest do
         local nxt = rest:find(" NOTE ", pos, true)
@@ -149,11 +149,11 @@ end
 -- ── Pipe I/O helpers ──────────────────────────────────────────────────────────
 
 local function pipe_write_all(fd, s)
-    local buf   = ffi.cast("const char *", s)
+    local buf   = ffi.cast("const char *", s) --[[: any]]
     local total = #s
     local done  = 0
     while done < total do
-        local n = ffi.C.write(fd, buf + done, total - done)
+        local n = ffi.C.write(fd, buf + done, total - done) --[[:! integer]]
         if n < 0 then
             if ffi.errno() == 4 then  -- EINTR: retry
                 -- continue
@@ -175,10 +175,10 @@ local EINTR = 4
 
 local function pipe_read_all(fd)
     local chunk_size = 4096
-    local buf    = ffi.new("uint8_t[4096]")
+    local buf    = ffi.new("uint8_t[4096]") --[[: any]]
     local chunks = {}
     while true do
-        local n = ffi.C.read(fd, buf, chunk_size)
+        local n = ffi.C.read(fd, buf, chunk_size) --[[:! integer]]
         if n < 0 then
             if ffi.errno() == EINTR then
                 -- retry
@@ -459,7 +459,7 @@ local function check_parallel(files, n, project_opts, cache_dir, format, errors_
         io.write("]\n")
     elseif format == "sarif" then
         local combined = errors_mod.new_ctx()
-        for _, ec in ipairs(structured_parts) do
+        for _, ec in ipairs(structured_parts --[[:! { [integer]: ErrCtx, ... }]]) do
             for _, e in ipairs(ec.errors)   do combined.errors[#combined.errors+1]     = e end
             for _, w in ipairs(ec.warnings) do combined.warnings[#combined.warnings+1] = w end
         end
@@ -512,7 +512,7 @@ function M.dump_one(filename, parent_scope, opts)
         local name = intern_mod.get(ctx.pool, name_id) or tostring(name_id)
         list[#list + 1] = { name = name, type = types_mod.display(ctx, types_mod.find(ctx, type_id)) }
     end
-    table.sort(list, function(a, b) return a.name < b.name end)
+    table.sort(list --[[: any]], (function(a, b) return a.name < b.name end) --[[: any]])
     local result = { file = filename, bindings = list }
     local rets = ctx.module_return_tids
     if rets and #rets > 0 and rets[1] and #rets[1] > 0 then
@@ -538,7 +538,7 @@ function M.dump_json(filenames)
             end
             parts[#parts + 1] = ']'
             if r["return"] then
-                parts[#parts + 1] = ',"return":' .. json_str(r["return"])
+                parts[#parts + 1] = ',"return":' .. json_str(r["return"] --[[:! string]])
             end
             parts[#parts + 1] = '}'
         end
@@ -905,9 +905,9 @@ function M.main(argv)
                         -- Resolve module names to file paths.
                         -- "lib/type/static/stdlib_types" → "lib/type/static/stdlib_types.lua"
                         local globals_files = {}
-                        for _, mod_name in ipairs(tc.globals) do
+                        for _, mod_name in ipairs(tc.globals --[[:! { [integer]: string, ... }]]) do
                             -- Accept both slash-path and dot-path conventions.
-                            local rel = (mod_name:gsub("%.", "/"))
+                            local rel, _ = mod_name:gsub("%.", "/")
                             globals_files[#globals_files + 1] = rel .. ".lua"
                         end
                         if #globals_files > 0 then
@@ -927,7 +927,7 @@ function M.main(argv)
                 io.stderr:write(filename .. ": failed to check\n")
             else
                 -- Read source lines.
-                local src_lines = {} --: { [integer]: string, ... }
+                local src_lines = {} --: { [integer]: string | nil, ... }
                 local f = io.open(filename, "r")
                 if f then
                     for line in f:lines() do src_lines[#src_lines + 1] = line end
@@ -958,11 +958,12 @@ function M.main(argv)
 
                 -- Emit source with annotations inserted before each annotated line.
                 for ln, src_line in ipairs(src_lines) do
+                    local sl = src_line --[[:! string]]
                     if insertions[ln] then
-                        local indent = src_line:match("^(%s*)") or ""
+                        local indent = sl:match("^(%s*)") or ""
                         io.write(indent .. insertions[ln] .. "\n")
                     end
-                    io.write(src_line .. "\n")
+                    io.write(sl .. "\n")
                 end
             end
         end
@@ -983,7 +984,7 @@ function M.main(argv)
                         io.write(b.name .. ": " .. b.type .. "\n")
                     end
                     if r["return"] then
-                        io.write("(return): " .. r["return"] .. "\n")
+                        io.write("(return): " .. (r["return"] --[[:! string]]) .. "\n")
                     end
                 end
             end
@@ -996,7 +997,7 @@ function M.main(argv)
     -- and skips the solver entirely. Diagnostics are stored in the .cri file
     -- (Section 7, v2). To force a re-check, delete .crescentcache or bump the
     -- .cri schema version.
-    local input_opts = project_opts or {}
+    local input_opts = (project_opts or {}) --[[:! { no_disk_cache: boolean | nil, globals_files: { [integer]: string, ... } | nil, ... }]]
 
     -- Determine parallelism level.
     -- Don't parallelize when --rules or --summary is active (state lives in-process).
@@ -1027,7 +1028,7 @@ function M.main(argv)
 
         -- Run lint rule passes when --rules is active and the check succeeded.
         if run_rules and ctx then
-            rules_mod.run(ctx, err_ctx, filename, nil)
+            (rules_mod --[[:! { run: (Ctx, ErrCtx, string, nil) -> (), ... }]]).run(ctx, err_ctx, filename, nil)
         end
 
         local ne = #err_ctx.errors

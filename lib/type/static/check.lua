@@ -264,7 +264,7 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
         local function load_and_tag(cri_bytes, source_file)
             local before = ctx.types.len
             local ok, exports, aliases = cri_read.load(cri_bytes, ctx)
-            -- cri_read.load returns (false,string)|(true,unknown,unknown,...);
+            -- cri_read.load returns (false,string)|(true,unknown,...);
             -- force-cast exports/aliases to usable types for indexing and forwarding.
             local exp = exports --[[:! { ["__ret"]: integer | nil, ... }]]
             local ali = aliases --[[:! { [integer]: unknown, ... } | nil]]
@@ -275,7 +275,7 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
                         ctx.type_origins[i] = source_file
                     end
                 end
-                return exports["__ret"], aliases
+                return exp["__ret"], ali
             end
             return nil, nil
         end
@@ -331,12 +331,12 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
         if cached_bytes then
             err_ctx = errors_mod.new_ctx()
             err_ctx, ctx = run_v3("", filename, parent_scope, _pool, cri_loader, opts)
-            local ok, exports, _aliases, cached_errors, cached_warnings =
+            local ok, exports_raw, _aliases, cached_errors_raw, cached_warnings_raw =
                 cri_read.load(cached_bytes or "", ctx)
-            -- cri_read.load returns (false,string)|(true,unknown*4); cast to usable types.
-            exports         = exports         --[[: any]]
-            cached_errors   = cached_errors   --[[:! { [integer]: DiagEntry, ... } | nil]]
-            cached_warnings = cached_warnings --[[:! { [integer]: DiagEntry, ... } | nil]]
+            -- cri_read.load returns (false,string)|(true,unknown,...); force-cast positions 2-5.
+            local exports         = exports_raw         --[[:! { ["__ret"]: integer | nil, ... }]]
+            local cached_errors   = cached_errors_raw   --[[:! { [integer]: DiagEntry, ... } | nil]]
+            local cached_warnings = cached_warnings_raw --[[:! { [integer]: DiagEntry, ... } | nil]]
             if ok and exports["__ret"] then
                 local export_tid = exports["__ret"]
                 -- Restore diagnostics from cache so callers see errors/warnings
@@ -457,9 +457,9 @@ function M.check_string_with_deps(source, filename, parent_scope, opts)
         M.check_file(dep_path, parent_scope, _pool, opts)
         checking_deps[dep_path] = nil
         if _session[dep_path] and _session[dep_path].cri_bytes then
-            local ok, exports, aliases = cri_read.load(_session[dep_path].cri_bytes or "", ctx)
-            exports = exports --[[: any]]
-            aliases = aliases --[[: any]]
+            local ok, exports_raw, aliases_raw = cri_read.load(_session[dep_path].cri_bytes or "", ctx)
+            local exports = exports_raw --[[:! { ["__ret"]: integer | nil, ... }]]
+            local aliases = aliases_raw --[[:! { [integer]: unknown, ... } | nil]]
             if ok and exports["__ret"] then return exports["__ret"], aliases end
         end
         return nil
