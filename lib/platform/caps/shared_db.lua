@@ -78,7 +78,7 @@ ffi.cdef[[
 
 -- ── load shared library ───────────────────────────────────────────────────────
 
-local function load_sqlite() --: () -> $FfiC
+local function load_sqlite()
 	local names = {} --: { [integer]: string }
 	if ffi.os == "Windows" then
 		if ffi.arch == "x64" then names[#names + 1] = "dep/sqlite.dll"
@@ -100,7 +100,7 @@ local function load_sqlite() --: () -> $FfiC
 	end
 	for _, name in ipairs(names) do
 		local ok, lib = pcall(ffi.load, name)
-		if ok then return lib end
+		if ok then return lib --[[: any]] end
 	end
 	error("shared_db_cap: sqlite3 shared library not found")
 end
@@ -308,7 +308,8 @@ function M.shared_db_cap(path, app_id, tables, opts)
 
 	local db_ptr = ffi.new("sqlite3 *[1]")
 	local flags = allow_write and SQLITE_OPEN_READWRITE or SQLITE_OPEN_READONLY
-	local null_str --: string | nil
+	-- Passing nil as const char* VFS arg; LuaJIT FFI converts nil to NULL for pointer params.
+	local null_str = (nil --[[: any]]) --[[: string]]
 	local rc = sqlite_ffi.sqlite3_open_v2(path, db_ptr, flags, null_str)
 	if rc ~= SQLITE_OK then
 		local err_cdata = sqlite_ffi.sqlite3_errmsg(db_ptr[0]) --: any
@@ -328,16 +329,17 @@ function M.shared_db_cap(path, app_id, tables, opts)
 	local app_id_c = ffi_new("const char[?]", #app_id + 1, app_id)
 	local app_id_len = #app_id
 
-	local app_id_func = --[[: any]] ffi.cast(
+	local ffi_cast = ffi.cast --[[: any]]
+	local app_id_func = ffi_cast(
 		"void (*)(sqlite3_context *, int, sqlite3_value **)",
 		function(ctx, _nargs, _args)
 			sqlite_ffi.sqlite3_result_text(ctx, app_id_c, app_id_len, SQLITE_TRANSIENT)
 		end
-	)
+	) --[[: any]]
 
-	local null_step --: ((cdata, integer, cdata) -> ()) | nil
-	local null_final --: ((cdata) -> ()) | nil
-	local null_destroy --: ((any) -> ()) | nil
+	local null_step = ffi_cast("void (*)(sqlite3_context *, int, sqlite3_value **)", 0) --[[: any]]
+	local null_final = ffi_cast("void (*)(sqlite3_context *)", 0) --[[: any]]
+	local null_destroy = ffi_cast("void (*)(void *)", 0) --[[: any]]
 	rc = sqlite_ffi.sqlite3_create_function_v2(
 		db, "_app_id", 0, SQLITE_UTF8, nil,
 		app_id_func,
@@ -360,7 +362,7 @@ function M.shared_db_cap(path, app_id, tables, opts)
 	-- The 5th callback arg (arg4) is the innermost trigger or view name that
 	-- caused the access, or NULL for direct top-level statements. We allow
 	-- base table access from views/triggers (non-NULL) but block direct access.
-	local auth_cb = --[[: any]] ffi.cast(
+	local auth_cb = ffi_cast(
 		"int (*)(void *, int, const char *, const char *, const char *, const char *)",
 		function(_, action, arg1, _arg2, _arg3, arg4)
 			-- Always allow: SELECT, TRANSACTION, FUNCTION, PRAGMA.
@@ -420,7 +422,7 @@ function M.shared_db_cap(path, app_id, tables, opts)
 
 			return SQLITE_DENY
 		end
-	)
+	) --[[: any]]
 
 	sqlite_ffi.sqlite3_set_authorizer(db, auth_cb, nil)
 
@@ -499,7 +501,7 @@ function M.shared_db_cap(path, app_id, tables, opts)
 	end
 
 	local function close()
-		local null_authcb --: ((any, integer, string, string, string, string) -> integer) | nil
+		local null_authcb = ffi_cast("int (*)(void *, int, const char *, const char *, const char *, const char *)", 0) --[[: any]]
 		sqlite_ffi.sqlite3_set_authorizer(db, null_authcb, nil)
 		auth_cb:free()
 		app_id_func:free()
