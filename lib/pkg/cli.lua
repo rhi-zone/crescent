@@ -33,6 +33,8 @@ local workspace = require("lib.pkg.workspace")
 
 local M = {}
 
+--:: LockEntry = { version: string | nil, url: string | nil, tarball_hash: string | nil, tree_hash: string | nil, include: string | nil, [string]: string | nil }
+
 -- ── constants ────────────────────────────────────────────────────────────────
 
 local DEFAULT_REGISTRY = "https://pkg.crescent.run"
@@ -378,14 +380,14 @@ local function cmd_update(project_dir, parsed)
 
 	-- Load lockfile
 	local lock_path = project_dir .. "/crescent.lock"
-	local entries = {} --: { [string]: unknown }
+	local entries = {} --: { [string]: LockEntry | nil }
 	if path_exists(lock_path) then
 		local l, l_err = lock.load(lock_path)
 		if not l then
 			stderr("update: failed to parse crescent.lock: %s", tostring(l_err))
 			return false
 		end
-		entries = l --[[:! { [string]: unknown }]]
+		entries = l --[[:! { [string]: LockEntry | nil }]]
 	end
 
 	if do_merge then
@@ -399,9 +401,9 @@ local function cmd_update(project_dir, parsed)
 			end
 		end
 
-		local modified = {} --: { [string]: { tree_hash?: string, ... } }
+		local modified = {} --: { [string]: LockEntry }
 		for name, entry_raw in pairs(target_names) do
-			local entry = entry_raw --[[:! { tree_hash?: string, ... } | nil]]
+			local entry = entry_raw --[[:! LockEntry | nil]]
 			if entry and entry.tree_hash then
 				local lib_dir = project_dir .. "/lib/" .. name
 				local actual_hash, _ = install.tree_hash(lib_dir)
@@ -448,7 +450,7 @@ local function cmd_update(project_dir, parsed)
 		end
 
 		-- Write the updated lockfile (modified + other target packages dropped).
-		local w_ok, w_err = lock.write(lock_path, entries)
+		local w_ok, w_err = lock.write(lock_path, entries --[[:! { [string]: LockEntry }]])
 		if not w_ok then
 			stderr("update: failed to write crescent.lock: %s", tostring(w_err))
 			-- Restore stashes before aborting.
@@ -473,10 +475,10 @@ local function cmd_update(project_dir, parsed)
 		local inst_result = install.run(project_dir, inst_opts)
 
 		-- Re-read the lockfile to get the new resolved version for each modified pkg.
-		local new_lock = {} --: { [string]: unknown }
+		local new_lock = {} --: { [string]: LockEntry | nil }
 		if path_exists(lock_path) then
 			local l2, _ = lock.load(lock_path)
-			if l2 then new_lock = l2 --[[:! { [string]: unknown }]] end
+			if l2 then new_lock = l2 --[[:! { [string]: LockEntry | nil }]] end
 		end
 
 		-- ── Phase 4: merge each stashed package ──────────────────────────────
@@ -575,7 +577,7 @@ local function cmd_update(project_dir, parsed)
 		end
 
 		-- Write the final lockfile with merged entries.
-		local wf_ok, wf_err = lock.write(lock_path, new_lock)
+		local wf_ok, wf_err = lock.write(lock_path, new_lock --[[:! { [string]: LockEntry }]])
 		if not wf_ok then
 			stderr("update: failed to write crescent.lock: %s", tostring(wf_err))
 			return false
@@ -596,7 +598,7 @@ local function cmd_update(project_dir, parsed)
 	if target then
 		if entries[target] then
 			entries[target] = nil
-			local w_ok, w_err = lock.write(lock_path, entries)
+			local w_ok, w_err = lock.write(lock_path, entries --[[:! { [string]: LockEntry }]])
 			if not w_ok then
 				stderr("update: failed to write crescent.lock: %s", tostring(w_err))
 				return false

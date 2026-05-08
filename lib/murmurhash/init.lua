@@ -142,7 +142,7 @@ local C8_128x86 = math.floor(0x32ac3b17) --: integer
 --: (string, integer | nil) -> (integer | nil, integer | string | nil, integer | nil, integer | nil)
 function M.x86_128(key, seed)
   if type(key) ~= "string" then
-    return nil, "key must be a string"
+    return nil, "key must be a string", nil, nil
   end
   seed = seed or 0
 
@@ -265,11 +265,11 @@ local FMIX64_C1 = 0xff51afd7ed558ccdULL
 local FMIX64_C2 = 0xc4ceb9fe1a85ec53ULL
 --: (any) -> any
 local function fmix64(k)
-  k = bxor(k --[[:! integer]], rshift(k --[[:! integer]], 33))
-  k = k * FMIX64_C1
-  k = bxor(k --[[:! integer]], rshift(k --[[:! integer]], 33))
-  k = k * FMIX64_C2
-  k = bxor(k --[[:! integer]], rshift(k --[[:! integer]], 33))
+  k = bxor(k --[[:! integer]], rshift(k --[[:! integer]], 33)) --[[: any]]
+  k = k * FMIX64_C1 --[[: any]]
+  k = bxor(k --[[:! integer]], rshift(k --[[:! integer]], 33)) --[[: any]]
+  k = k * FMIX64_C2 --[[: any]]
+  k = bxor(k --[[:! integer]], rshift(k --[[:! integer]], 33)) --[[: any]]
   return k
 end
 

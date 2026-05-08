@@ -596,7 +596,7 @@ local function load_card(state, caps)
 	if not card_data then return nil, err end
 	state.card = card_data
 	if card_data.character_book then
-		state.lorebook = lorebook_mod.from_ccv2(card_data.character_book)
+		state.lorebook = lorebook_mod.from_ccv2(card_data.character_book --[[:! { ... }]])
 	end
 	-- Pull author's note and regex scripts from extensions when present so
 	-- the card is self-contained (they round-trip through flush_card_state).
@@ -727,7 +727,21 @@ local function build_context(state, caps, path)
 	local max_response = state.settings and state.settings.max_tokens or 512
 
 	local active_p = get_active_persona(state)
-	local result, err = context_mod.assemble({
+	local lorebook_all = {} --[[: any]]
+	if state.lorebook then
+		for _, e in ipairs(state.lorebook) do lorebook_all[#lorebook_all + 1] = e end
+	end
+	for _, book in ipairs(state.linked_lorebooks or {}) do
+		if type(book.entries) == "table" then
+			for _, e in ipairs(book.entries) do lorebook_all[#lorebook_all + 1] = e end
+		end
+	end
+	for _, book in ipairs(state.user_lorebooks or {}) do
+		if book.active and book.entries then
+			for _, e in ipairs(book.entries) do lorebook_all[#lorebook_all + 1] = e end
+		end
+	end
+	local assemble_opts = {
 		card = card,
 		history = path,
 		count_tokens = count_tokens,
@@ -736,24 +750,11 @@ local function build_context(state, caps, path)
 		char_name = card.name,
 		user_name = state.user_name,
 		persona = active_p and active_p.description or nil,
-		lorebook_entries = (function()
-			local all = {}
-			if state.lorebook then
-				for _, e in ipairs(state.lorebook) do all[#all + 1] = e end
-			end
-			for _, book in ipairs(state.linked_lorebooks or {}) do
-				if type(book.entries) == "table" then
-					for _, e in ipairs(book.entries) do all[#all + 1] = e end
-				end
-			end
-			for _, book in ipairs(state.user_lorebooks or {}) do
-				if book.active and book.entries then
-					for _, e in ipairs(book.entries) do all[#all + 1] = e end
-				end
-			end
-			return #all > 0 and all or nil
-		end)(),
-	})
+	} --[[: any]]
+	if #lorebook_all > 0 then
+		(assemble_opts --[[:! { lorebook_entries: { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... } }, ... }]]).lorebook_entries = lorebook_all --[[:! { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... } }]]
+	end
+	local result, err = context_mod.assemble(assemble_opts)
 	if not result then
 		local fallback = {} --[[: any]]
 		for i = 1, #path do
@@ -1116,7 +1117,7 @@ local function create_new_session(state, caps)
 	switch_to_session(state, caps, session.id)
 	local path = get_canonical_path(state)
 	local messages = format_messages(state, path or {})
-	return session, messages
+	return session, messages, nil
 end
 
 -- ── Group chat helpers ────────────────────────────────────────────────────
