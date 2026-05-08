@@ -2995,10 +2995,18 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
     local narrow_mod = require("lib.type.static.narrow")
     local saved = ctx.scope
 
+    --: { [integer]: integer }
     local guard_narrowings = {}  -- Cat E: negated narrowings from exiting clauses
+    --: { [integer]: { [integer]: integer } }
     local branch_ends      = {}  -- { name_id -> type_id } per non-exiting clause
-    local branch_end_scopes = {} -- end-of-branch scope per non-exiting clause (parallel array)
+    -- Per non-exiting branch, the narrowing types applied at branch ENTRY (parallel
+    -- to branch_ends). Captured at branch entry so the join needn't hold scope
+    -- references and walk parent chains later. { name_id -> type_id } per branch.
+    --: { [integer]: { [integer]: integer } }
+    local branch_entry_narrowings = {}
+    --: { [integer]: boolean }
     local branch_narrowed  = {}  -- { name_id -> true } names narrowed at non-exiting branch entry
+    --: { [integer]: integer }
     local pass_through_neg = {}  -- negated narrowings for the implicit pass-through path
     local has_else         = false
     local disc_names       = {}  -- name_ids narrowed via field_disc in an exiting arm
@@ -3009,13 +3017,12 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
         local block_start = cn.data[1]
         local block_len   = cn.data[2]
 
-        local entry_narrowed_names  --: { [integer]: true, ... } | nil
+        local entry_narrowings  --: { [integer]: integer, ... } | nil
         if test_nid >= 0 then
             gen_expr(ctx, test_nid)
             local narrowed = narrow_mod.narrow_scope(ctx, test_nid, true)
             ctx.scope = narrow_mod.apply_narrowed(ctx, narrowed)
-            entry_narrowed_names = {}
-            for name_id in pairs(narrowed) do entry_narrowed_names[name_id] = true end
+            entry_narrowings = narrowed
         else
             has_else = true
             -- Apply all accumulated negated narrowings from preceding if/elseif
@@ -3036,8 +3043,7 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
                 -- Intermediate variable breaks the constraint chain.
                 local else_scope = narrow_mod.apply_narrowed(ctx, else_neg)
                 ctx.scope = else_scope
-                entry_narrowed_names = {}
-                for name_id in pairs(else_neg) do entry_narrowed_names[name_id] = true end
+                entry_narrowings = else_neg
             else
                 ctx.scope = env_mod.child(saved)
             end
@@ -3057,14 +3063,19 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
         if not exits then
             local diff = branch_scope_diff(ctx, end_scope, saved)
             branch_ends[#branch_ends + 1] = diff
-            branch_end_scopes[#branch_end_scopes + 1] = end_scope
-            if entry_narrowed_names then
-                for name_id in pairs(entry_narrowed_names) do
+            -- Capture entry narrowings for names not reassigned in this branch.
+            -- These contribute their narrowed type to the post-if join even though
+            -- they don't appear in the diff (no reassignment happened).
+            local en = {}
+            if entry_narrowings then
+                for name_id, type_id in pairs(entry_narrowings) do
                     if diff[name_id] == nil then
+                        en[name_id] = type_id
                         branch_narrowed[name_id] = true
                     end
                 end
             end
+            branch_entry_narrowings[#branch_entry_narrowings + 1] = en
         end
 
         -- Restore scope to saved BEFORE computing negated narrowing so that the
@@ -3145,26 +3156,48 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
     for _, et in ipairs(branch_ends) do
         for name_id in pairs(et) do changed[name_id] = true end
     end
-    -- Also consider names that were narrowed at entry of every non-exiting branch
-    -- (without reassignment): the post-if type should reflect that narrowing.
-    for name_id in pairs(branch_narrowed) do changed[name_id] = true end
+    -- Also consider names narrowed at entry of a non-exiting branch (without
+    -- reassignment) — but only when the same name was reassigned in some OTHER
+    -- branch. Without a reassignment somewhere, the post-if type is just the
+    -- pre-if union and rebinding it would (a) be redundant and (b) accumulate
+    -- redundant TAG_UNION nodes across many sequential if-stmts on the same
+    -- variable, blowing up downstream constraint solving.
+    for name_id in pairs(branch_narrowed) do
+        if changed[name_id] then  -- already marked by some branch's reassignment
+            -- no-op; it's already in changed
+        else
+            -- Check if any branch_ends has this name (some other branch reassigned)
+            local reassigned_elsewhere = false
+            for i = 1, #branch_ends do
+                if branch_ends[i][name_id] ~= nil then
+                    reassigned_elsewhere = true
+                    break
+                end
+            end
+            if reassigned_elsewhere then changed[name_id] = true end
+        end
+    end
 
     if next(changed) then
         local join = {}
         for name_id in pairs(changed) do
             local post_guard = env_mod.lookup(ctx.scope, name_id)
-            local members, seen_m = {}, {}
+            --: { [integer]: integer }
+            local members = {}
+            --: { [integer]: boolean }
+            local seen_m = {}
+            --: (integer) -> ()
             local function add_member(t)
                 t = types_mod.find(ctx, t)
                 if t and not seen_m[t] then seen_m[t] = true; members[#members + 1] = t end
             end
             for i = 1, #branch_ends do
                 local et = branch_ends[i]
-                local end_scope = branch_end_scopes[i]
-                -- Fall back to the type as known at branch end (which includes entry
-                -- narrowings) so that purely-narrowed (unreassigned) bindings still
-                -- contribute their narrowed type to the join, not the pre-if union.
-                local t = et[name_id] or env_mod.lookup(end_scope, name_id) or post_guard
+                local en = branch_entry_narrowings[i]
+                -- Order: reassigned (et) > entry-narrowed (en) > post_guard.
+                -- Pre-computing entry narrowings into `en` avoids holding scope
+                -- references for later lookup (which can recurse pathologically).
+                local t = et[name_id] or en[name_id] or post_guard
                 if t ~= nil then add_member(t) end
             end
             if not has_else then
