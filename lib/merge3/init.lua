@@ -232,6 +232,7 @@ local function to_hunks(script)
 	return hunks
 end
 
+--: ({ [integer]: string }, { [integer]: string }) -> boolean
 local function lines_eq(a, b)
 	if #a ~= #b then return false end
 	for i = 1, #a do if a[i] ~= b[i] then return false end end
@@ -258,6 +259,7 @@ function M.merge3(base_str, ours_str, theirs_str)
 
 	-- Get the current hunk for each side (adjusted for offset).
 	-- Returns nil when exhausted.
+	--: () -> Hunk | nil
 	local function cur_o()
 		if oi > #ho then return nil end
 		local h = ho[oi] --[[:! Hunk]]
@@ -271,6 +273,7 @@ function M.merge3(base_str, ours_str, theirs_str)
 		return { kind = h.kind, base_lines = bl, other_lines = ol }
 	end
 
+	--: () -> Hunk | nil
 	local function cur_t()
 		if ti > #ht then return nil end
 		local h = ht[ti] --[[:! Hunk]]
@@ -328,10 +331,12 @@ function M.merge3(base_str, ours_str, theirs_str)
 		ti_off = 0
 	end
 
+	--: ({ [integer]: string }) -> nil
 	local function emit(lines)
 		for _, l in ipairs(lines) do out[#out + 1] = l end
 	end
 
+	--: ({ [integer]: string }, { [integer]: string }, { [integer]: string }) -> nil
 	local function conflict(ol, bl, tl)
 		conflicts = conflicts + 1
 		out[#out + 1] = "<<<<<<< ours"
@@ -360,20 +365,22 @@ function M.merge3(base_str, ours_str, theirs_str)
 		local ti_pure = th and th.kind == "change" and #th.base_lines == 0
 
 		if oi_pure and ti_pure then
-			if lines_eq(oh.other_lines, th.other_lines) then
-				emit(oh.other_lines)
+			local oh_ = oh --[[:! Hunk]]
+			local th_ = th --[[:! Hunk]]
+			if lines_eq(oh_.other_lines, th_.other_lines) then
+				emit(oh_.other_lines)
 			else
-				conflict(oh.other_lines, {}, th.other_lines)
+				conflict(oh_.other_lines, {}, th_.other_lines)
 			end
 			adv_o(); adv_t()
 		elseif oi_pure then
-			emit(oh.other_lines); adv_o()
+			emit((oh --[[:! Hunk]]).other_lines); adv_o()
 		elseif ti_pure then
-			emit(th.other_lines); adv_t()
+			emit((th --[[:! Hunk]]).other_lines); adv_t()
 		elseif not oh then
-			emit(th.other_lines); adv_t()
+			emit((th --[[:! Hunk]]).other_lines); adv_t()
 		elseif not th then
-			emit(oh.other_lines); adv_o()
+			emit((oh --[[:! Hunk]]).other_lines); adv_o()
 		elseif oh.kind == "keep" and th.kind == "keep" then
 			-- Both keeping. Take the shorter span, then advance both.
 			local on, tn = #oh.base_lines, #th.base_lines

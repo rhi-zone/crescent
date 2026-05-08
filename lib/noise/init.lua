@@ -318,7 +318,7 @@ local function make_fbm2(s2)
     local lacunarity  = opts.lacunarity  or 2.0
     local scale       = opts.scale       or 1.0
     local value     = 0
-    local amplitude = 1.0
+    local amplitude = 1.0 --: number
     local frequency = scale
     for _ = 1, octaves do
       value     = value + s2(x * frequency, y * frequency) * amplitude
@@ -337,7 +337,7 @@ local function make_fbm3(s3)
     local lacunarity  = opts.lacunarity  or 2.0
     local scale       = opts.scale       or 1.0
     local value     = 0
-    local amplitude = 1.0
+    local amplitude = 1.0 --: number
     local frequency = scale
     for _ = 1, octaves do
       value     = value + s3(x * frequency, y * frequency, z * frequency) * amplitude
@@ -362,6 +362,8 @@ local function make_module(perm)
     simplex3  = s3,
     fbm2      = make_fbm2(s2),
     fbm3      = make_fbm3(s3),
+    normalize = nil, --: (number) -> number | nil
+    seeded    = nil, --: (integer) -> { [string]: unknown } | nil
   }
 end
 
