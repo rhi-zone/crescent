@@ -265,7 +265,7 @@ function M.unify(ctx, a, b, seen)
     -- (force cast) to escape `unknown` without narrowing. Must precede the bilateral TAG_ANY
     -- rules below, which would otherwise accept this case.
     if ta.tag == TAG_UNKNOWN and tb.tag == TAG_ANY then
-        return false, "value of type `unknown` must be narrowed before use (got unknown, expected `any`); use `--[[:! T]]` to force-cast without narrowing"
+        return false, "value of type `unknown` must be narrowed before use (got unknown, expected `any`); use `--[[:! T]]` to force-cast without narrowing", nil
     end
 
     -- any is bilateral.
@@ -297,7 +297,7 @@ function M.unify(ctx, a, b, seen)
         -- arises in contravariant param checks: unify(actual_param=unknown, expected_param=VAR).
         -- The free param should accept unknown values — bind it so future uses see unknown.
         if tb.tag == TAG_VAR or tb.tag == TAG_ROWVAR then bind_var(ctx, b, a) return true end
-        return false, "value of type `unknown` must be narrowed before use (got unknown, expected `" .. types_mod.display(ctx, b) .. "`)"
+        return false, "value of type `unknown` must be narrowed before use (got unknown, expected `" .. types_mod.display(ctx, b) .. "`)", nil
     end
 
     -- never is bottom
@@ -306,11 +306,11 @@ function M.unify(ctx, a, b, seen)
     -- Type variable binding (TAG_ROWVAR is treated the same as TAG_VAR for binding)
     if ta.tag == TAG_VAR or ta.tag == TAG_ROWVAR then
         local ok, msg = bind_var(ctx, a, b)
-        return ok, msg
+        return ok, msg, nil
     end
     if tb.tag == TAG_VAR or tb.tag == TAG_ROWVAR then
         local ok, msg = bind_var(ctx, b, a)
-        return ok, msg
+        return ok, msg, nil
     end
 
     -- Nominal types: identity-based
@@ -318,15 +318,15 @@ function M.unify(ctx, a, b, seen)
         if ta.data[1] == tb.data[1] then return true end
         local na = intern_mod.get(ctx.pool, ta.data[0]) or "?"
         local nb = intern_mod.get(ctx.pool, tb.data[0]) or "?"
-        return false, "nominal type `" .. na .. "` is not `" .. nb .. "`"
+        return false, "nominal type `" .. na .. "` is not `" .. nb .. "`", nil
     end
     if ta.tag == TAG_NOMINAL then
         local na = intern_mod.get(ctx.pool, ta.data[0]) or "?"
-        return false, "nominal type `" .. na .. "` is not assignable to `" .. types_mod.display(ctx, b) .. "`"
+        return false, "nominal type `" .. na .. "` is not assignable to `" .. types_mod.display(ctx, b) .. "`", nil
     end
     if tb.tag == TAG_NOMINAL then
         local nb = intern_mod.get(ctx.pool, tb.data[0]) or "?"
-        return false, "`" .. types_mod.display(ctx, a) .. "` is not assignable to nominal type `" .. nb .. "`"
+        return false, "`" .. types_mod.display(ctx, a) .. "` is not assignable to nominal type `" .. nb .. "`", nil
     end
 
     -- integer <: number (every integer is a number; not the reverse)
@@ -337,7 +337,7 @@ function M.unify(ctx, a, b, seen)
         -- same enum + same member = equal
         if tb.tag == TAG_ENUM_MEMBER then
             if ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1] then return true end
-            return false, types_mod.display(ctx, a) .. " is not " .. types_mod.display(ctx, b)
+            return false, types_mod.display(ctx, a) .. " is not " .. types_mod.display(ctx, b), nil
         end
         -- enum member <: its base primitive type
         local kind = ta.data[2]
@@ -357,7 +357,7 @@ function M.unify(ctx, a, b, seen)
         if tb.tag == TAG_LITERAL then
             if ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1]
               and (ta.data[0] ~= LIT_NUMBER or ta.data[2] == tb.data[2]) then return true end
-            return false, "`" .. types_mod.display(ctx, a) .. "` is not `" .. types_mod.display(ctx, b) .. "`"
+            return false, "`" .. types_mod.display(ctx, a) .. "` is not `" .. types_mod.display(ctx, b) .. "`", nil
         end
         local kind = ta.data[0]
         if (kind == LIT_STRING  and tb.tag == TAG_STRING)  then return true end
@@ -378,7 +378,7 @@ function M.unify(ctx, a, b, seen)
             local mid = find(ctx, ctx.lists:get(i))
             local ok, err = M.unify(ctx, mid, b, seen)
             if not ok then
-                return false, "`" .. types_mod.display(ctx, mid) .. "` in union is not assignable to `" .. types_mod.display(ctx, b) .. "`"
+                return false, "`" .. types_mod.display(ctx, mid) .. "` in union is not assignable to `" .. types_mod.display(ctx, b) .. "`", nil
             end
         end
         return true
@@ -420,7 +420,7 @@ function M.unify(ctx, a, b, seen)
             -- LHS must satisfy ALL RHS members (conjunction).
             for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
                 local ok2, err = M.unify(ctx, a, ctx.lists:get(i), seen)
-                if not ok2 then return false, err end
+                if not ok2 then return false, err, nil end
             end
             return true
         end
@@ -445,7 +445,7 @@ function M.unify(ctx, a, b, seen)
             end
             if all_covered then return true end
         end
-        return false, "`" .. types_mod.display(ctx, a) .. "` is not assignable to `" .. types_mod.display(ctx, b) .. "`"
+        return false, "`" .. types_mod.display(ctx, a) .. "` is not assignable to `" .. types_mod.display(ctx, b) .. "`", nil
     end
 
     -- Union on RHS: LHS must be assignable to at least one member.
@@ -476,7 +476,7 @@ function M.unify(ctx, a, b, seen)
     if tb.tag == TAG_INTERSECTION then
         for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
             local ok, err = M.unify(ctx, a, ctx.lists:get(i), seen)
-            if not ok then return false, err end
+            if not ok then return false, err, nil end
         end
         return true
     end
@@ -496,7 +496,7 @@ function M.unify(ctx, a, b, seen)
             -- Contravariant: b's param assignable to a's param
             local ok, err = M.unify(ctx, bp_id, ap_id, seen)
             if not ok then
-                return false, "parameter " .. (i + 1) .. ": " .. (err or "type mismatch")
+                return false, "parameter " .. (i + 1) .. ": " .. (err or "type mismatch"), nil
             end
         end
         local arl, brl = ta.data[3], tb.data[3]
@@ -508,7 +508,7 @@ function M.unify(ctx, a, b, seen)
             local br_id = find(ctx, ctx.lists:get(tb.data[2] + i))
             local ok, err = M.unify(ctx, ar_id, br_id, seen)
             if not ok then
-                return false, "return " .. (i + 1) .. ": " .. (err or "type mismatch")
+                return false, "return " .. (i + 1) .. ": " .. (err or "type mismatch"), nil
             end
         end
         return true
@@ -534,7 +534,7 @@ function M.unify(ctx, a, b, seen)
                 local amf = types_mod.table_meta_field(ctx, prim_meta_tid, fe.name_id)
                 if not amf then
                     local mname = intern_mod.get(ctx.pool, fe.name_id) or "?"
-                    return false, types_mod.display(ctx, a) .. " does not support #" .. mname
+                    return false, types_mod.display(ctx, a) .. " does not support #" .. mname, nil
                 end
             end
             return true
@@ -565,12 +565,12 @@ function M.unify(ctx, a, b, seen)
                 local afe = types_mod.table_field(ctx, idx_tid, bfe.name_id)
                 if not afe then
                     local fname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
-                    return false, types_mod.display(ctx, a) .. " has no field `" .. fname .. "`"
+                    return false, types_mod.display(ctx, a) .. " has no field `" .. fname .. "`", nil
                 end
                 local ok, err = M.unify(ctx, find(ctx, afe.type_id), find(ctx, bfe.type_id))
                 if not ok then
                     local fname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
-                    return false, "field `" .. fname .. "`: " .. (err or "type mismatch")
+                    return false, "field `" .. fname .. "`: " .. (err or "type mismatch"), nil
                 end
                 ::prim_named_next::
             end
@@ -619,7 +619,7 @@ function M.unify(ctx, a, b, seen)
                                         local fname = intern_mod.get(ctx.pool, jfe.name_id) or "?"
                                         return false,
                                             "missing field `" .. fname .. "` (from spread)",
-                                            { kind = "missing_field", field = fname }
+                                            { kind = "missing_field", field = fname, path = nil }
                                     end
                                 end
                             else
@@ -628,7 +628,7 @@ function M.unify(ctx, a, b, seen)
                                 if not ok2 then
                                     local fname = intern_mod.get(ctx.pool, jfe.name_id) or "?"
                                     return false,
-                                        "field `" .. fname .. "` (from spread): " .. (err2 or "type mismatch")
+                                        "field `" .. fname .. "` (from spread): " .. (err2 or "type mismatch"), nil
                                 end
                             end
                             ::spread_next::
@@ -659,7 +659,7 @@ function M.unify(ctx, a, b, seen)
                     if not found then
                         local fname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
                         return false, "missing field '" .. fname .. "'",
-                            { kind = "missing_field", field = fname }
+                            { kind = "missing_field", field = fname, path = nil }
                     end
                 end
             else
@@ -703,7 +703,7 @@ function M.unify(ctx, a, b, seen)
                     local av = find(ctx, ctx.lists:get(j + 1))
                     local ok, err = M.unify(ctx, av, bv, seen)
                     if not ok then
-                        return false, "indexer value: " .. (err or "type mismatch")
+                        return false, "indexer value: " .. (err or "type mismatch"), nil
                     end
                     matched = true
                     break
@@ -729,7 +729,7 @@ function M.unify(ctx, a, b, seen)
                                 local av = find(ctx, afe.type_id)
                                 local ok, err = M.unify(ctx, av, bv, seen)
                                 if not ok then
-                                    return false, "positional element " .. fname .. ": " .. (err or "type mismatch")
+                                    return false, "positional element " .. tostring(fname) .. ": " .. (err or "type mismatch"), nil
                                 end
                                 matched = true
                             end
@@ -737,7 +737,7 @@ function M.unify(ctx, a, b, seen)
                     end
                     if not matched and bkt.tag ~= TAG_STRING then
                         if ta.data[4] < 0 then  -- no row var
-                            return false, "missing indexer for " .. types_mod.display(ctx, bk)
+                            return false, "missing indexer for " .. types_mod.display(ctx, bk), nil
                         end
                     end
                 end
@@ -752,13 +752,13 @@ function M.unify(ctx, a, b, seen)
             if not amf then
                 if band(bfe.flags, FLAG_OPTIONAL) == 0 then
                     local mname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
-                    return false, "missing metatable slot '#" .. mname .. "'"
+                    return false, "missing metatable slot '#" .. mname .. "'", nil
                 end
             else
                 local ok, err = M.unify(ctx, find(ctx, amf.type_id), find(ctx, bfe.type_id), seen)
                 if not ok then
                     local mname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
-                    return false, "#" .. mname .. ": " .. (err or "type mismatch")
+                    return false, "#" .. mname .. ": " .. (err or "type mismatch"), nil
                 end
             end
         end
@@ -797,13 +797,13 @@ function M.unify(ctx, a, b, seen)
                                 if ok2 then
                                     covered = true; break
                                 else
-                                    return false, "field '" .. fname .. "': " .. (err2 or "type mismatch")
+                                    return false, "field '" .. fname .. "': " .. (err2 or "type mismatch"), nil
                                 end
                             end
                             j = j + 2
                         end
                         if not covered then
-                            return false, "excess field '" .. fname .. "' not in target type"
+                            return false, "excess field '" .. fname .. "' not in target type", nil
                         end
                     end
                 end
@@ -816,24 +816,24 @@ function M.unify(ctx, a, b, seen)
     -- Tuple types
     if ta.tag == TAG_TUPLE and tb.tag == TAG_TUPLE then
         if ta.data[1] ~= tb.data[1] then
-            return false, "tuple length mismatch: " .. ta.data[1] .. " vs " .. tb.data[1]
+            return false, "tuple length mismatch: " .. ta.data[1] .. " vs " .. tb.data[1], nil
         end
         for i = 0, ta.data[1] - 1 do
             local ae = find(ctx, ctx.lists:get(ta.data[0] + i))
             local be = find(ctx, ctx.lists:get(tb.data[0] + i))
             local ok, err = M.unify(ctx, ae, be, seen)
             if not ok then
-                return false, "tuple element " .. (i + 1) .. ": " .. (err or "type mismatch")
+                return false, "tuple element " .. (i + 1) .. ": " .. (err or "type mismatch"), nil
             end
         end
         return true
     end
 
     if ta.tag == TAG_TUPLE and tb.tag == TAG_TABLE then
-        return false, "tuple is not assignable to table/array"
+        return false, "tuple is not assignable to table/array", nil
     end
     if ta.tag == TAG_TABLE and tb.tag == TAG_TUPLE then
-        return false, "table/array is not assignable to tuple"
+        return false, "table/array is not assignable to tuple", nil
     end
 
     -- cdata

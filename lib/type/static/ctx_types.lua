@@ -57,7 +57,7 @@
 --:: MultiRetEntry = { source_tid: integer, slot: integer, call_uid: integer | nil }
 
 -- Detail table returned by M.unify on error (for nested error paths).
---:: UnifyDetail = { kind: string, path: { [integer]: unknown, ... } | nil, got: integer, expected: integer, ... }
+--:: UnifyDetail = { kind: string, path: { [integer]: unknown, ... } | nil, got?: unknown, expected?: unknown, field?: string, ... }
 
 ---------------------------------------------------------------------------
 -- Diagnostic error codes (defs.E)
