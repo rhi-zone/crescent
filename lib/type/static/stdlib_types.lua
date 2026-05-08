@@ -64,7 +64,7 @@
 --:: module "ffi": {
 --::   cdef:     (string) -> nil,
 --::   new:      (<T>(ct: Ctype<T>, init: T | nil) -> T) & (<S: Keys<CTypeMap>>(ct: S, init: CTypeMap[S] | nil) -> CTypeMap[S]) & ((ct: string, count: integer, init: unknown | nil) -> any) & ((ct: string, init: unknown | nil) -> any),
---::   cast:     (<T, U>(ct: Ctype<T>, obj: U) -> T) & (<S: Keys<CTypeMap>, U>(ct: S, obj: U) -> CTypeMap[S]),
+--::   cast:     (<T, U>(ct: Ctype<T>, obj: U) -> T) & (<S: Keys<CTypeMap>, U>(ct: S, obj: U) -> CTypeMap[S]) & ((ct: string, obj: unknown) -> cdata),
 --::   sizeof:   (ct: string | Ctype<unknown>) -> integer,
 --::   typeof:   (<T>(ct: Ctype<T>) -> Ctype<T>) & (<S: Keys<CTypeMap>>(ct: S) -> Ctype<CTypeMap[S]>),
 --::   copy:     <T, U>(dst: Ptr<T>, src: Ptr<U>, n: integer) -> nil,

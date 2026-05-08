@@ -721,7 +721,7 @@ M.compile = function(desc, alloc, abi, ctype)
   local code_str_any = code_str --[[: any]]
   local exec_ptr, err = alloc_exec_mem(code_str_any)
   if exec_ptr == nil then
-    return nil, err
+    return nil, err --[[:! string | nil]]
   end
 
   -- Cast to the requested function type.

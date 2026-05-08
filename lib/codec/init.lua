@@ -86,7 +86,7 @@ end
 M.map = map
 
 --- Test whether decode(encode(data)) == data.
---: (codec: Codec, data: any) -> boolean
+--: (codec: Codec, data: any) -> (boolean, string | nil)
 local function roundtrip(codec, data)
   local encoded, err = codec.encode(data)
   if encoded == nil then return false, err end
