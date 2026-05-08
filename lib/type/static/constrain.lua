@@ -2707,6 +2707,7 @@ end
 StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local rhs_count = n.data[3]
+    ctx._last_multi_return_override = nil  -- clear before gen so stale values don't persist
     local rhs_types = gen_expr_list(ctx, n.data[2], rhs_count)
     -- Consume any preceding --: annotation so it doesn't spill to the next statement.
     -- We read it first so we can use it for NODE_FIELD_EXPR targets below.
