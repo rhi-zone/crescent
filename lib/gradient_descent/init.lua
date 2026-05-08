@@ -17,6 +17,7 @@ local huge = math.huge
 -- Internal vector utilities
 -- ---------------------------------------------------------------------------
 
+--: (number[], number[]) -> number[]
 local function vec_add(a, b)
   local n = #a
   local c = {}
@@ -24,6 +25,7 @@ local function vec_add(a, b)
   return c
 end
 
+--: (number[], number[]) -> number[]
 local function vec_sub(a, b)
   local n = #a
   local c = {}
@@ -31,6 +33,7 @@ local function vec_sub(a, b)
   return c
 end
 
+--: (number[], number) -> number[]
 local function vec_scale(a, s)
   local n = #a
   local c = {}
@@ -280,9 +283,11 @@ function M.adam(f, grad, params0, opts)
 
   local params   = vec_copy(params0)
   local n        = #params
+  --: number[]
   local m        = {}   -- first moment
+  --: number[]
   local v        = {}   -- second moment
-  for i = 1, n do m[i] = 0; v[i] = 0 end
+  for i = 1, n do m[i] = 0.0; v[i] = 0.0 end
 
   local history = record and {} or nil --: { iter: integer, loss: number, grad_norm: number }[] | nil
   local converged = false
@@ -345,8 +350,9 @@ function M.rmsprop(f, grad, params0, opts)
 
   local params   = vec_copy(params0)
   local n        = #params
+  --: number[]
   local eg2      = {}   -- running average of squared gradients
-  for i = 1, n do eg2[i] = 0 end
+  for i = 1, n do eg2[i] = 0.0 end
 
   local history = record and {} or nil --: { iter: integer, loss: number, grad_norm: number }[] | nil
   local converged = false
@@ -454,7 +460,7 @@ function M.conjugate_gradient(A, b, opts)
   local tol      = opts.tol or 1e-6
   local max_iter = opts.max_iter or n
 
-  local x = opts.x0 and vec_copy(opts.x0) or {}
+  local x = opts.x0 and vec_copy(--[[:! number[] ]] opts.x0) or {}
   for i = 1, n do x[i] = x[i] or 0 end
 
   local r   = vec_sub(b, A(x))   -- r = b - Ax
@@ -520,8 +526,11 @@ function M.lbfgs(f, grad, params0, opts)
   local n        = #params
 
   -- Circular buffer for s and y vectors
+  --: { [integer]: number[] }
   local s_hist   = {}   -- s[k] = params[k+1] - params[k]
+  --: { [integer]: number[] }
   local y_hist   = {}   -- y[k] = grad[k+1] - grad[k]
+  --: number[]
   local rho_hist = {}   -- rho[k] = 1 / dot(y[k], s[k])
   local buf_size = 0
   local buf_ptr  = 0    -- points to oldest entry (1-indexed circular)
@@ -563,12 +572,12 @@ function M.lbfgs(f, grad, params0, opts)
 
     local k = buf_size   -- number of stored pairs (0 on first iter)
     local q = vec_copy(g)
-    local alphas = {}
+    local alphas = {} --: number[]
 
     -- First loop: newest → oldest
     for j = 1, k do
       local idx = buf_idx(j)
-      alphas[j] = rho_hist[idx] * vec_dot(--[[:! { number }]] s_hist[idx], q)
+      alphas[j] = rho_hist[idx] * vec_dot(s_hist[idx], q)
       for i = 1, n do q[i] = q[i] - alphas[j] * y_hist[idx][i] end
     end
 
@@ -576,8 +585,8 @@ function M.lbfgs(f, grad, params0, opts)
     local r
     if k > 0 then
       local newest = buf_idx(1)
-      local sy = vec_dot(--[[:! { number }]] s_hist[newest], --[[:! { number }]] y_hist[newest])
-      local yy = vec_dot(--[[:! { number }]] y_hist[newest], --[[:! { number }]] y_hist[newest])
+      local sy = vec_dot(s_hist[newest], y_hist[newest])
+      local yy = vec_dot(y_hist[newest], y_hist[newest])
       if yy > 1e-15 then
         r = vec_scale(q, sy / yy)
       else
@@ -590,7 +599,7 @@ function M.lbfgs(f, grad, params0, opts)
     -- Second loop: oldest → newest
     for j = k, 1, -1 do
       local idx  = buf_idx(j)
-      local beta = rho_hist[idx] * vec_dot(--[[:! { number }]] y_hist[idx], r)
+      local beta = rho_hist[idx] * vec_dot(y_hist[idx], r)
       local diff = alphas[j] - beta
       for i = 1, n do r[i] = r[i] + s_hist[idx][i] * diff end
     end

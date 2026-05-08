@@ -283,14 +283,16 @@ local function decode_string()
             if _pos >= _len then decode_error("truncated escape sequence") end
             local esc = _ptr8[_pos]
             _pos = _pos + 1
-            if esc == 0x22 then buf[#buf + 1] = '"'
-            elseif esc == 0x5C then buf[#buf + 1] = '\\'
-            elseif esc == 0x2F then buf[#buf + 1] = '/'
-            elseif esc == 0x62 then buf[#buf + 1] = '\b'
-            elseif esc == 0x66 then buf[#buf + 1] = '\f'
-            elseif esc == 0x6E then buf[#buf + 1] = '\n'
-            elseif esc == 0x72 then buf[#buf + 1] = '\r'
-            elseif esc == 0x74 then buf[#buf + 1] = '\t'
+            -- buf is guaranteed non-nil here (set above in this branch)
+            local sbuf = buf --[[:! string[] ]]
+            if esc == 0x22 then sbuf[#sbuf + 1] = '"'
+            elseif esc == 0x5C then sbuf[#sbuf + 1] = '\\'
+            elseif esc == 0x2F then sbuf[#sbuf + 1] = '/'
+            elseif esc == 0x62 then sbuf[#sbuf + 1] = '\b'
+            elseif esc == 0x66 then sbuf[#sbuf + 1] = '\f'
+            elseif esc == 0x6E then sbuf[#sbuf + 1] = '\n'
+            elseif esc == 0x72 then sbuf[#sbuf + 1] = '\r'
+            elseif esc == 0x74 then sbuf[#sbuf + 1] = '\t'
             elseif esc == 0x75 then
                 if _pos + 3 >= _len then decode_error("truncated \\u escape") end
                 local va = HEX_VAL[_ptr8[_pos]]
@@ -313,7 +315,7 @@ local function decode_string()
                             if cp2 >= 0xDC00 and cp2 <= 0xDFFF then
                                 _pos = _pos + 6
                                 cp = 0x10000 + (cp - 0xD800) * 0x400 + (cp2 - 0xDC00)
-                                buf[#buf + 1] = codepoint_to_utf8(cp)
+                                sbuf[#sbuf + 1] = codepoint_to_utf8(cp)
                             else
                                 decode_error("unpaired high surrogate")
                             end
@@ -326,7 +328,7 @@ local function decode_string()
                 elseif cp >= 0xDC00 and cp <= 0xDFFF then
                     decode_error("unpaired low surrogate")
                 else
-                    buf[#buf + 1] = codepoint_to_utf8(cp)
+                    sbuf[#sbuf + 1] = codepoint_to_utf8(cp)
                 end
             else
                 decode_error("invalid escape sequence: \\" .. str_char(esc))
