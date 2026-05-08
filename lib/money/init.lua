@@ -9,6 +9,9 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: currency_meta = { name: string, symbol: string, decimals: integer, symbol_before: boolean }
+--:: money = { amount_minor: number, currency: string }
+
 -- ---------------------------------------------------------------------------
 -- Currency metadata (ISO 4217 subset)
 -- ---------------------------------------------------------------------------
@@ -66,8 +69,9 @@ end
 local money_mt = {}
 money_mt.__index = money_mt
 
+--: (number, string) -> money
 local function make_money(amount_minor, currency)
-  return setmetatable({ amount_minor = amount_minor, currency = currency }, money_mt)
+  return setmetatable({ amount_minor = amount_minor, currency = currency }, money_mt) --[[:! money]]
 end
 
 -- ---------------------------------------------------------------------------
@@ -92,6 +96,7 @@ M.new = function(amount, currency)
 end
 
 -- M.of(major, minor_part, currency) -> money  e.g. M.of(12, 34, "USD") -> $12.34
+--: (number, number, string) -> (money | nil, string | nil)
 M.of = function(major, minor_part, currency)
   if not M.is_valid_currency(currency) then
     return nil, "money: unknown currency: " .. tostring(currency)
@@ -163,6 +168,7 @@ end
 -- the M.add/sub/mul/div safe wrappers for (nil, err) style)
 -- ---------------------------------------------------------------------------
 
+--: (money, money) -> money
 money_mt.__add = function(a, b)
   if a.currency ~= b.currency then
     error("money: currency mismatch: " .. a.currency .. " vs " .. b.currency, 2)
@@ -170,6 +176,7 @@ money_mt.__add = function(a, b)
   return make_money(a.amount_minor + b.amount_minor, a.currency)
 end
 
+--: (money, money) -> money
 money_mt.__sub = function(a, b)
   if a.currency ~= b.currency then
     error("money: currency mismatch: " .. a.currency .. " vs " .. b.currency, 2)
@@ -177,21 +184,32 @@ money_mt.__sub = function(a, b)
   return make_money(a.amount_minor - b.amount_minor, a.currency)
 end
 
--- money * number  (commutative)
+-- money * number  (commutative): Lua may call __mul as (number, money) or (money, number).
+--: (unknown, unknown) -> money
 money_mt.__mul = function(a, b)
-  if type(a) == "number" then a, b = b, a end
-  return make_money(round(a.amount_minor * b), a.currency)
+  local m, n
+  if type(a) == "number" then
+    m = b --[[:! money]]
+    n = a --[[:! number]]
+  else
+    m = a --[[:! money]]
+    n = b --[[:! number]]
+  end
+  return make_money(round(m.amount_minor * n), m.currency)
 end
 
+--: (money, number) -> money
 money_mt.__div = function(a, b)
   return make_money(round(a.amount_minor / b), a.currency)
 end
 
+--: money -> money
 money_mt.__unm = function(a)
   return make_money(-a.amount_minor, a.currency)
 end
 
 -- Safe wrappers returning (nil, err) on currency mismatch.
+--: (money, money) -> (money | nil, string | nil)
 M.add = function(a, b)
   if a.currency ~= b.currency then
     return nil, "money: currency mismatch: " .. a.currency .. " vs " .. b.currency
@@ -199,6 +217,7 @@ M.add = function(a, b)
   return make_money(a.amount_minor + b.amount_minor, a.currency)
 end
 
+--: (money, money) -> (money | nil, string | nil)
 M.sub = function(a, b)
   if a.currency ~= b.currency then
     return nil, "money: currency mismatch: " .. a.currency .. " vs " .. b.currency
@@ -206,10 +225,12 @@ M.sub = function(a, b)
   return make_money(a.amount_minor - b.amount_minor, a.currency)
 end
 
+--: (money, number) -> money
 M.mul = function(a, n)
   return make_money(round(a.amount_minor * n), a.currency)
 end
 
+--: (money, number) -> money
 M.div = function(a, n)
   return make_money(round(a.amount_minor / n), a.currency)
 end
@@ -218,10 +239,12 @@ end
 -- Instance arithmetic methods
 -- ---------------------------------------------------------------------------
 
+--: money -> money
 money_mt.negate = function(self)
   return make_money(-self.amount_minor, self.currency)
 end
 
+--: money -> money
 money_mt.abs = function(self)
   local v = self.amount_minor
   return make_money(v < 0 and -v or v, self.currency)
@@ -273,11 +296,12 @@ money_mt.is_negative = function(self) return self.amount_minor < 0 end
 
 -- money:allocate(ratios) -> { money }
 -- Largest-remainder method so that sum(result) == self exactly.
+--: (money, number[]) -> { [integer]: money }
 money_mt.allocate = function(self, ratios)
   local total = self.amount_minor
   local n = #ratios
-  local ratio_sum = 0
-  for i = 1, n do ratio_sum = ratio_sum + ratios[i] end
+  local ratio_sum = 0.0 --: number
+  for i = 1, n do ratio_sum = ratio_sum + (ratios[i] or 0) end
 
   local floored = {}
   local remainders = {}
@@ -320,6 +344,7 @@ end
 -- Formatting
 -- ---------------------------------------------------------------------------
 
+--: (string, string | nil) -> string
 local function add_thousands(s, sep)
   sep = sep or ","
   local result = ""
@@ -335,6 +360,7 @@ end
 
 -- money:format(opts) -> string
 -- opts: { symbol=true, thousands=true, locale="en_US" }
+--: (money, { symbol?: boolean, thousands?: boolean } | nil) -> string
 money_mt.format = function(self, opts)
   opts = opts or {}
   local meta = M.CURRENCIES[self.currency]
@@ -374,6 +400,7 @@ money_mt.format = function(self, opts)
 end
 
 -- money:to_string() -> "12.34 USD"
+--: money -> string
 money_mt.to_string = function(self)
   local meta = M.CURRENCIES[self.currency]
   local decimals = meta.decimals
@@ -400,6 +427,7 @@ end
 money_mt.__tostring = money_mt.to_string
 
 -- money:to_float() -> number (lossy)
+--: money -> number
 money_mt.to_float = function(self)
   local meta = M.CURRENCIES[self.currency]
   local scale = pow10(meta.decimals)

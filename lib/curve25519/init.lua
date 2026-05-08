@@ -16,6 +16,8 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: GF = { [integer]: number }
+
 local sbyte  = string.byte
 local schar  = string.char
 local floor  = math.floor
@@ -32,17 +34,20 @@ local floor  = math.floor
 -- In 16-limb radix-2^16 representation, p = [0xffed, 0xffff, ..., 0xffff, 0x7fff]
 -- But we work modulo p implicitly via the reduction constant 38 = 2*19.
 
+--: () -> GF
 local function gf_new()
-  return {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+  return {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0} --[[:! GF]]
 end
 
+--: GF -> GF
 local function gf_copy(a)
   return {a[1],a[2],a[3],a[4],a[5],a[6],a[7],a[8],
-          a[9],a[10],a[11],a[12],a[13],a[14],a[15],a[16]}
+          a[9],a[10],a[11],a[12],a[13],a[14],a[15],a[16]} --[[:! GF]]
 end
 
 -- Carry reduction: bring all limbs into a consistent range.
 -- After carry, limb i is in roughly [0, 2^16).
+--: GF -> nil
 local function car(o)
   local c
   for i = 1, 16 do
@@ -66,6 +71,7 @@ local function reduce(o)
 end
 
 -- Field addition: a + b mod p
+--: (GF, GF) -> GF
 local function gf_add(a, b)
   local o = gf_new()
   for i = 1, 16 do o[i] = a[i] + b[i] end
@@ -73,6 +79,7 @@ local function gf_add(a, b)
 end
 
 -- Field subtraction: a - b mod p
+--: (GF, GF) -> GF
 local function gf_sub(a, b)
   local o = gf_new()
   for i = 1, 16 do o[i] = a[i] - b[i] end
@@ -81,8 +88,9 @@ end
 
 -- Field multiplication: a * b mod p
 -- Uses schoolbook O(n^2) with fold via 38 for limbs >= 16.
+--: (GF, GF) -> GF
 local function gf_mul(a, b)
-  local t = {}
+  local t = {} --: { [integer]: number }
   for i = 1, 31 do t[i] = 0 end
   for i = 1, 16 do
     for j = 1, 16 do
@@ -95,7 +103,7 @@ local function gf_mul(a, b)
   for i = 1, 15 do
     t[i] = t[i] + 38 * t[i + 16]
   end
-  local o = {}
+  local o = {} --[[:! GF]]
   for i = 1, 16 do o[i] = t[i] end
   -- t now has 16 entries but may overflow; run two carries
   car(o)
@@ -104,12 +112,14 @@ local function gf_mul(a, b)
 end
 
 -- Field squaring: a^2 mod p (same as multiply but can be slightly optimised)
+--: GF -> GF
 local function gf_sq(a)
   return gf_mul(a, a)
 end
 
 -- Conditional swap: if swap==1, exchange (a,b); if swap==0, leave unchanged.
 -- swap must be 0 or 1 only (a single scalar bit).
+--: (number, GF, GF) -> nil
 local function cswap(swap, a, b)
   -- Arithmetic trick: d = swap * (b[i] - a[i])
   -- if swap=1: a[i] += d = b[i], b[i] -= d = a[i]  (swapped)
@@ -126,6 +136,7 @@ end
 -- Uses TweetNaCl's inv25519 square-and-multiply approach:
 --   start with c=z, iterate bits 253 down to 0:
 --   always square, multiply by z unless bit position is 2 or 4.
+--: GF -> GF
 local function gf_inv(z)
   local c = gf_copy(z)
   for a = 253, 0, -1 do
@@ -142,12 +153,13 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Decode 32-byte little-endian string into a gf element.
+--: string -> GF
 local function gf_decode(s)
   local o = gf_new()
   -- Each pair of bytes forms one 16-bit limb.
   for i = 1, 16 do
-    local lo = sbyte(s, 2*i - 1)
-    local hi = sbyte(s, 2*i)
+    local lo = sbyte(s, 2*i - 1) --[[:! integer]]
+    local hi = sbyte(s, 2*i) --[[:! integer]]
     o[i] = lo + hi * 256
   end
   -- Clear the high bit of byte 31 (index 31 in 1-based = o[16] bit 15).
@@ -158,6 +170,7 @@ end
 
 -- Encode a gf element into a 32-byte little-endian string.
 -- Mirrors TweetNaCl's pack25519: reduce, conditionally subtract p, then serialize.
+--: GF -> string
 local function gf_encode(h)
   -- Work on a copy so we don't mutate the caller's value.
   local t = gf_copy(h)
@@ -171,7 +184,7 @@ local function gf_encode(h)
   -- Conditionally subtract p (do it twice to handle the edge case at 2p-1).
   for _ = 1, 2 do
     local m = {0xffed,0xffff,0xffff,0xffff,0xffff,0xffff,0xffff,0xffff,
-               0xffff,0xffff,0xffff,0xffff,0xffff,0xffff,0xffff,0x7fff}
+               0xffff,0xffff,0xffff,0xffff,0xffff,0xffff,0xffff,0x7fff} --[[:! GF]]
     -- m = t - p, propagating borrow
     for i = 1, 16 do m[i] = t[i] - m[i] end
     for i = 1, 15 do
@@ -209,7 +222,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- a24 = (486662 - 2) / 4 = 121665
-local A24 = {121665,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+local A24 = {121665,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0} --[[:! GF]]
 
 -- scalarmult: compute X25519(k_bytes, u_bytes) where both are 32-byte strings.
 -- k_bytes: scalar (will be clamped by caller)
@@ -223,10 +236,10 @@ local function scalarmult(k_bytes, u_bytes)
   local x1 = gf_decode(u_bytes)
 
   -- Initialize ladder state
-  local x2 = {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}  -- x_2 = 1
+  local x2 = {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0} --[[:! GF]]  -- x_2 = 1
   local z2 = gf_new()                              -- z_2 = 0
   local x3 = gf_copy(x1)                          -- x_3 = u
-  local z3 = {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}   -- z_3 = 1
+  local z3 = {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0} --[[:! GF]]   -- z_3 = 1
 
   local swap = 0
 
