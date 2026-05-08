@@ -10,6 +10,7 @@ local M = {}
 M._tier = "pure"
 
 -- Euclidean GCD (always returns non-negative integer)
+--: (a: number, b: number) -> number
 local function gcd(a, b)
   a = a < 0 and -a or a
   b = b < 0 and -b or b
@@ -25,6 +26,7 @@ end
 -- p, q must already be integers; q must be > 0; both divided by gcd.
 local rat_mt  -- forward declaration
 
+--: (p: number, q: number) -> { p: number, q: number }
 local function make(p, q)
   local g = gcd(p, q)
   if g ~= 0 then
@@ -37,8 +39,10 @@ local function make(p, q)
 end
 
 -- Check that a value is an exact integer (fits in double integer range).
+--: (x: unknown) -> x is number
 local function is_int(x)
-  return type(x) == "number" and math.floor(x) == x
+  if type(x) ~= "number" then return false end
+  return math.floor(x) == x
 end
 
 -- Public constructor.
@@ -48,11 +52,15 @@ end
 -- Returns rational, or (nil, errmsg).
 function M.new(p, q)
   -- copy / passthrough
-  if type(p) == "table" and p.p ~= nil and p.q ~= nil then
-    if q ~= nil then
-      return nil, "rational.new: unexpected second argument when first is rational"
+  if type(p) == "table" then
+    local pt = p --[[: { p: number | nil, q: number | nil, ... }]]
+    local pp, pq = pt.p, pt.q
+    if pp ~= nil and pq ~= nil then
+      if q ~= nil then
+        return nil, "rational.new: unexpected second argument when first is rational"
+      end
+      return make(pp, pq)
     end
-    return make(p.p, p.q)
   end
   if q == nil then q = 1 end
   if not is_int(p) then
@@ -70,11 +78,15 @@ end
 -- Coerce a value to rational internals {p,q}; returns p, q or errors via
 -- returning nil + message. Used internally so methods accept both rationals
 -- and plain integers.
+--: (x: unknown) -> (number | nil, number | string)
 local function coerce(x)
-  if type(x) == "table" and x.p ~= nil and x.q ~= nil then
-    return x.p, x.q
+  if type(x) == "table" then
+    local xt = x --[[: { p: number, q: number, ... }]]
+    if xt.p ~= nil and xt.q ~= nil then
+      return xt.p, xt.q
+    end
   end
-  if is_int(x) then
+  if type(x) == "number" and is_int(x) then
     return x, 1
   end
   return nil, "rational: expected rational or integer, got " .. tostring(x)
@@ -84,34 +96,34 @@ end
 
 function M.add(a, b)
   local ap, aq = coerce(a)
-  if ap == nil then return nil, aq end
+  if ap == nil or type(aq) ~= "number" then return nil, aq end
   local bp, bq = coerce(b)
-  if bp == nil then return nil, bq end
+  if bp == nil or type(bq) ~= "number" then return nil, bq end
   -- a/aq + b/bq = (ap*bq + bp*aq) / (aq*bq)
   return make(ap * bq + bp * aq, aq * bq)
 end
 
 function M.sub(a, b)
   local ap, aq = coerce(a)
-  if ap == nil then return nil, aq end
+  if ap == nil or type(aq) ~= "number" then return nil, aq end
   local bp, bq = coerce(b)
-  if bp == nil then return nil, bq end
+  if bp == nil or type(bq) ~= "number" then return nil, bq end
   return make(ap * bq - bp * aq, aq * bq)
 end
 
 function M.mul(a, b)
   local ap, aq = coerce(a)
-  if ap == nil then return nil, aq end
+  if ap == nil or type(aq) ~= "number" then return nil, aq end
   local bp, bq = coerce(b)
-  if bp == nil then return nil, bq end
+  if bp == nil or type(bq) ~= "number" then return nil, bq end
   return make(ap * bp, aq * bq)
 end
 
 function M.div(a, b)
   local ap, aq = coerce(a)
-  if ap == nil then return nil, aq end
+  if ap == nil or type(aq) ~= "number" then return nil, aq end
   local bp, bq = coerce(b)
-  if bp == nil then return nil, bq end
+  if bp == nil or type(bq) ~= "number" then return nil, bq end
   if bp == 0 then
     return nil, "rational.div: division by zero"
   end
@@ -121,19 +133,19 @@ end
 
 function M.neg(a)
   local ap, aq = coerce(a)
-  if ap == nil then return nil, aq end
+  if ap == nil or type(aq) ~= "number" then return nil, aq end
   return make(-ap, aq)
 end
 
 function M.abs(a)
   local ap, aq = coerce(a)
-  if ap == nil then return nil, aq end
+  if ap == nil or type(aq) ~= "number" then return nil, aq end
   return make(ap < 0 and -ap or ap, aq)
 end
 
 function M.inv(a)
   local ap, aq = coerce(a)
-  if ap == nil then return nil, aq end
+  if ap == nil or type(aq) ~= "number" then return nil, aq end
   if ap == 0 then
     return nil, "rational.inv: inversion of zero"
   end
@@ -142,7 +154,7 @@ end
 
 function M.pow(a, n)
   local ap, aq = coerce(a)
-  if ap == nil then return nil, aq end
+  if ap == nil or type(aq) ~= "number" then return nil, aq end
   if not is_int(n) then
     return nil, "rational.pow: exponent must be an integer, got " .. tostring(n)
   end
@@ -158,7 +170,8 @@ function M.pow(a, n)
     n = -n
   end
   -- integer exponentiation by squaring
-  local rp, rq = 1, 1
+  local rp = 1 --: number
+  local rq = 1 --: number
   local bp2, bq2 = ap, aq
   while n > 0 do
     if n % 2 == 1 then
@@ -176,27 +189,27 @@ end
 
 function M.eq(a, b)
   local ap, aq = coerce(a)
-  if ap == nil then return false end
+  if ap == nil or type(aq) ~= "number" then return false end
   local bp, bq = coerce(b)
-  if bp == nil then return false end
+  if bp == nil or type(bq) ~= "number" then return false end
   -- already normalized, so p/q == r/s iff p==r and q==s
   return ap == bp and aq == bq
 end
 
 function M.lt(a, b)
   local ap, aq = coerce(a)
-  if ap == nil then return false end
+  if ap == nil or type(aq) ~= "number" then return false end
   local bp, bq = coerce(b)
-  if bp == nil then return false end
+  if bp == nil or type(bq) ~= "number" then return false end
   -- a/aq < b/bq  iff  ap*bq < bp*aq  (both denoms positive)
   return ap * bq < bp * aq
 end
 
 function M.le(a, b)
   local ap, aq = coerce(a)
-  if ap == nil then return false end
+  if ap == nil or type(aq) ~= "number" then return false end
   local bp, bq = coerce(b)
-  if bp == nil then return false end
+  if bp == nil or type(bq) ~= "number" then return false end
   return ap * bq <= bp * aq
 end
 

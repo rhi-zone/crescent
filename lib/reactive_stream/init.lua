@@ -10,14 +10,14 @@ end
 local M = {}
 M._tier = "pure"
 
---:: Stream = { _next: () -> unknown | nil }
+--:: Stream = { _next: () -> unknown | nil, next: (self: Stream) -> unknown | nil, ... }
 
 -- ── Core ──────────────────────────────────────────────────────────────────────
 
 local Stream = {}
 Stream.__index = Stream
 
---: ((() -> unknown | nil)) -> Stream
+--: (() -> unknown | nil) -> Stream
 local function make_stream(next_fn)
   return setmetatable({ _next = next_fn }, Stream)
 end
@@ -41,7 +41,7 @@ function M.from_array(arr)
 end
 
 -- Wrap a Lua stateful iterator (ipairs/pairs style: iter_fn(state, ctrl) -> ctrl, v).
---: ((() -> unknown, unknown, unknown)) -> Stream
+--: ((unknown, unknown) -> (unknown, unknown), unknown, unknown) -> Stream
 function M.from_iter(iter_fn, state, init)
   local ctrl = init
   return make_stream(function()
@@ -99,7 +99,7 @@ function M.repeat_(val, n)
 end
 
 -- Unfold: fn(state) -> value, new_state. Stops when fn returns nil.
---: (((unknown) -> unknown, unknown), unknown) -> Stream
+--: ((unknown) -> (unknown, unknown), unknown) -> Stream
 function M.generate(fn, seed)
   local state = seed
   return make_stream(function()

@@ -9,9 +9,11 @@ end
 local M = {}
 M._tier = "pure"
 
---:: PatriciaTrie = { _root: unknown, _size: integer }
+--:: PTNode = { prefix: string, value: any, has_value: boolean, children: { [string]: PTNode } }
+--:: PatriciaTrie = { _root: PTNode, _size: integer, ... }
 
 -- Returns the length of the longest common prefix of strings a and b.
+--: (string, string) -> integer
 local function common_prefix_len(a, b)
   local n = math.min(#a, #b)
   for i = 1, n do
@@ -21,12 +23,14 @@ local function common_prefix_len(a, b)
 end
 
 -- Create a new node.
+--: (string, any, boolean | nil) -> PTNode
 local function make_node(prefix, value, has_value)
   return { prefix = prefix, value = value, has_value = has_value or false, children = {} }
 end
 
 -- Internal insert into node, where key is the remaining (unconsumed) portion.
 -- Returns true if a new key was added, false if an existing key was updated.
+--: (PTNode, string, any) -> boolean
 local function node_insert(node, key, value)
   local first = key:sub(1, 1)
   local child = node.children[first]
@@ -76,6 +80,7 @@ local function node_insert(node, key, value)
 end
 
 -- Internal get: returns value, found_bool.
+--: (PTNode, string) -> (any, boolean)
 local function node_get(node, key)
   if key == "" then
     if node.has_value then return node.value, true end
@@ -95,6 +100,7 @@ local function node_get(node, key)
 end
 
 -- Internal remove. Returns removed_bool, subtree_is_empty_bool.
+--: (PTNode, string) -> (boolean, boolean)
 local function node_remove(node, key)
   if key == "" then
     if not node.has_value then return false, false end
@@ -139,6 +145,7 @@ local function node_remove(node, key)
 end
 
 -- Collect all {key, value} pairs under node, prepending accumulated prefix.
+--: (PTNode, string, { [integer]: { [integer]: any } }) -> nil
 local function collect(node, acc, results)
   if node.has_value then
     results[#results + 1] = { acc .. node.prefix, node.value }
@@ -153,6 +160,7 @@ local function collect(node, acc, results)
 end
 
 -- Collect only keys under node.
+--: (PTNode, string, { [integer]: string }) -> nil
 local function collect_keys(node, acc, results)
   if node.has_value then
     results[#results + 1] = acc .. node.prefix
@@ -166,6 +174,7 @@ local function collect_keys(node, acc, results)
 end
 
 -- Height of the subtree rooted at node (1-based: a leaf is height 1).
+--: (PTNode) -> integer
 local function subtree_height(node)
   local max = 0
   for _, child in pairs(node.children) do
@@ -190,7 +199,7 @@ function M.new()
 end
 
 -- Insert a key with an associated value (default true).
---: (key: string, value: (unknown | nil)) -> ()
+--: (self: PatriciaTrie, key: string, value: (unknown | nil)) -> nil
 function M:insert(key, value)
   if type(key) ~= "string" then return nil, "key must be a string" end
   if value == nil then value = true end
@@ -210,7 +219,7 @@ function M:insert(key, value)
 end
 
 -- Exact match lookup. Returns value or nil.
---: (key: string) -> (unknown | nil)
+--: (self: PatriciaTrie, key: string) -> (unknown | nil)
 function M:get(key)
   if type(key) ~= "string" then return nil end
   if key == "" then
@@ -223,7 +232,7 @@ function M:get(key)
 end
 
 -- Returns true if the exact key exists.
---: (key: string) -> boolean
+--: (self: PatriciaTrie, key: string) -> boolean
 function M:contains(key)
   if type(key) ~= "string" then return false end
   if key == "" then return self._root.has_value end
@@ -232,7 +241,7 @@ function M:contains(key)
 end
 
 -- Remove a key. Returns true if removed, false if not found.
---: (key: string) -> boolean
+--: (self: PatriciaTrie, key: string) -> boolean
 function M:remove(key)
   if type(key) ~= "string" then return false end
   if key == "" then
@@ -248,7 +257,7 @@ function M:remove(key)
 end
 
 -- All keys that start with prefix, returned as {{key, value},...} sorted.
---: (prefix: string) -> { {string, unknown} }
+--: (self: PatriciaTrie, prefix: string) -> { [integer]: { [integer]: any } }
 function M:prefix_search(prefix)
   if type(prefix) ~= "string" then return {} end
 
@@ -330,7 +339,7 @@ end
 
 -- Longest prefix match: the longest key that is a prefix of query.
 -- Returns key, value (or nil if none).
---: (query: string) -> ((string | nil), (unknown | nil))
+--: (self: PatriciaTrie, query: string) -> ((string | nil), (unknown | nil))
 function M:longest_prefix(query)
   if type(query) ~= "string" then return nil end
 
@@ -365,7 +374,7 @@ function M:longest_prefix(query)
 end
 
 -- Autocomplete: all keys starting with prefix (just keys, sorted).
---: (prefix: string) -> {string}
+--: (self: PatriciaTrie, prefix: string) -> { [integer]: string }
 function M:autocomplete(prefix)
   local pairs_list = self:prefix_search(prefix)
   local keys = {}
@@ -376,13 +385,13 @@ function M:autocomplete(prefix)
 end
 
 -- Number of keys stored.
---: () -> number
+--: (self: PatriciaTrie) -> integer
 function M:size()
   return self._size
 end
 
 -- Call fn(key, value) for every key in lexicographic order.
---: (fn: (key: string, value: unknown) -> ()) -> ()
+--: (self: PatriciaTrie, fn: (key: string, value: unknown) -> nil) -> nil
 function M:each(fn)
   local arr = self:to_array()
   for i = 1, #arr do
@@ -391,7 +400,7 @@ function M:each(fn)
 end
 
 -- Sorted array of {key, value} pairs.
---: () -> { {string, unknown} }
+--: (self: PatriciaTrie) -> { [integer]: { [integer]: any } }
 function M:to_array()
   local results = {}
   if self._root.has_value then
@@ -407,7 +416,7 @@ function M:to_array()
 end
 
 -- Maximum depth of the trie.
---: () -> number
+--: (self: PatriciaTrie) -> integer
 function M:height()
   local max = 0
   for _, child in pairs(self._root.children) do
@@ -418,7 +427,7 @@ function M:height()
 end
 
 -- True if no keys are stored.
---: () -> boolean
+--: (self: PatriciaTrie) -> boolean
 function M:is_empty()
   return self._size == 0
 end

@@ -34,15 +34,18 @@ function M.node(opts)
   if not opts then return nil, "opts required" end
   if not opts.id then return nil, "opts.id required" end
   if not opts.peers then return nil, "opts.peers required" end
+  local peers_arr = opts.peers
+  local id_str = opts.id
 
-  local election_timeout   = opts.election_timeout   or 10
-  local heartbeat_interval = opts.heartbeat_interval or 3
+  local election_timeout   = (opts.election_timeout   or 10) --[[: number]]
+  local heartbeat_interval = (opts.heartbeat_interval or 3) --[[: number]]
   -- jitter: random extra ticks added to election timer to avoid split votes.
   -- Default: election_timeout/2 so timers spread over [timeout, 1.5*timeout].
-  local election_jitter    = opts.election_jitter
+  local election_jitter = opts.election_jitter
   if election_jitter == nil then
     election_jitter = math.floor(election_timeout / 2)
   end
+  election_jitter = election_jitter --[[: integer]]
 
   local function rand_election_timer()
     if election_jitter > 0 then
@@ -59,15 +62,15 @@ function M.node(opts)
     election_jitter     = election_jitter,
 
     -- persistent state
-    _state              = "follower",
+    _state              = "follower" --[[: string]],
     _current_term       = 0,
-    _voted_for          = nil,
-    _log                = {},         -- 1-indexed: {term, data}
+    _voted_for          = nil --[[: string | nil]],
+    _log                = {} --[[: { [integer]: { term: integer, data: unknown } }]],         -- 1-indexed: {term, data}
 
     -- volatile state
     _commit_index       = 0,
     _last_applied       = 0,
-    _leader_id          = nil,
+    _leader_id          = nil --[[: string | nil]],
 
     -- candidate state
     _votes_granted      = 0,
@@ -77,18 +80,19 @@ function M.node(opts)
     _heartbeat_timer    = heartbeat_interval,
 
     -- leader state
-    _next_index         = {},   -- peer → next log index to send
-    _match_index        = {},   -- peer → highest replicated index
+    _next_index         = {} --[[: { [string]: integer }]],   -- peer → next log index to send
+    _match_index        = {} --[[: { [string]: integer }]],   -- peer → highest replicated index
 
     -- output queues
-    _outbox             = {},
-    _committed_queue    = {},
+    _outbox             = {} --[[: { [integer]: unknown }]],
+    _committed_queue    = {} --[[: { [integer]: unknown }]],
   }
 
   -- -------------------------------------------------------------------------
   -- Private helpers
   -- -------------------------------------------------------------------------
 
+  --: (msg: unknown) -> nil
   local function emit(msg)
     self._outbox[#self._outbox + 1] = msg
   end
@@ -204,6 +208,7 @@ function M.node(opts)
   -- Message handlers
   -- -------------------------------------------------------------------------
 
+  --: (msg: { type: string, term: integer, from: string, last_log_index: integer, last_log_term: integer, ... }) -> nil
   local function handle_vote_request(msg)
     -- Reject if lower term
     if msg.term < self._current_term then
@@ -246,6 +251,7 @@ function M.node(opts)
     })
   end
 
+  --: (msg: { type: string, term: integer, from: string, granted: boolean, ... }) -> nil
   local function handle_vote_response(msg)
     if self._state ~= "candidate" then return end
     if msg.term > self._current_term then
@@ -263,6 +269,7 @@ function M.node(opts)
     end
   end
 
+  --: (msg: { type: string, term: integer, from: string, prev_log_index: integer, prev_log_term: integer, entries: { [integer]: { term: integer, data: unknown } }, commit_index: integer, ... }) -> nil
   local function handle_append_entries(msg)
     -- Reject stale terms
     if msg.term < self._current_term then
@@ -343,6 +350,7 @@ function M.node(opts)
     })
   end
 
+  --: (msg: { type: string, term: integer, from: string, success: boolean, match_index: integer, ... }) -> nil
   local function handle_append_entries_response(msg)
     if self._state ~= "leader" then return end
     if msg.term > self._current_term then

@@ -10,6 +10,11 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: SemaphoreT = { _count: integer, _waiters: { [integer]: thread }, ... }
+--:: EventT = { _fired: boolean, _waiters: { [integer]: thread }, ... }
+--:: CondT = { _waiters: { [integer]: thread }, ... }
+--:: ChannelT = { _cap: integer, _buf: { [integer]: any }, _head: integer, _tail: integer, _len: integer, _closed: boolean, _senders: { [integer]: { [integer]: any } }, _recvers: { [integer]: thread }, ... }
+
 -- ---------------------------------------------------------------------------
 -- Internal: resume queue helpers
 -- ---------------------------------------------------------------------------
@@ -37,6 +42,7 @@ function M.new(initial)
 end
 
 --- Decrement count. If count <= 0, suspends the current coroutine until released.
+--: (self: SemaphoreT) -> nil
 function Sem:acquire()
   if self._count > 0 then
     self._count = self._count - 1
@@ -51,6 +57,7 @@ function Sem:acquire()
 end
 
 --- Increment count. If there are suspended acquirers, resume the first one.
+--: (self: SemaphoreT) -> nil
 function Sem:release()
   if #self._waiters > 0 then
     -- Transfer the slot directly: don't increment, just wake the waiter.
@@ -62,6 +69,7 @@ function Sem:release()
 end
 
 --- Try to acquire without blocking. Returns true on success, false if count is 0.
+--: (self: SemaphoreT) -> boolean
 function Sem:try_acquire()
   if self._count > 0 then
     self._count = self._count - 1
@@ -71,16 +79,19 @@ function Sem:try_acquire()
 end
 
 --- Return the current count.
+--: (self: SemaphoreT) -> integer
 function Sem:count()
   return self._count
 end
 
 --- Return the number of coroutines currently waiting to acquire.
+--: (self: SemaphoreT) -> integer
 function Sem:waiting()
   return #self._waiters
 end
 
 --- Acquire, call fn(), then release. Releases even if fn errors.
+--: (self: SemaphoreT, fn: () -> nil) -> nil
 function Sem:with(fn)
   self:acquire()
   local ok, err = pcall(fn)
@@ -107,6 +118,7 @@ end
 
 --- Suspend the current coroutine until fire() is called.
 -- If already fired, returns immediately.
+--: (self: EventT) -> nil
 function Ev:wait()
   if self._fired then return end
   local co = coroutine.running()
@@ -116,6 +128,7 @@ end
 
 --- Fire the event, waking all waiting coroutines.
 -- Future calls to wait() will return immediately.
+--: (self: EventT) -> nil
 function Ev:fire()
   if self._fired then return end
   self._fired = true
@@ -127,11 +140,13 @@ function Ev:fire()
 end
 
 --- Reset the event so that future wait() calls block again.
+--: (self: EventT) -> nil
 function Ev:reset()
   self._fired = false
 end
 
 --- Return true if the event has been fired.
+--: (self: EventT) -> boolean
 function Ev:is_fired()
   return self._fired
 end
@@ -150,6 +165,7 @@ end
 
 --- Atomically release mutex and suspend. Re-acquires mutex before returning.
 -- mutex must be a semaphore/mutex object with acquire()/release() methods.
+--: (self: CondT, mutex: SemaphoreT) -> nil
 function CV:wait(mutex)
   local co = coroutine.running()
   self._waiters[#self._waiters + 1] = co
@@ -160,6 +176,7 @@ function CV:wait(mutex)
 end
 
 --- Wake one waiting coroutine.
+--: (self: CondT) -> nil
 function CV:signal()
   if #self._waiters > 0 then
     local co = table.remove(self._waiters, 1)
@@ -168,6 +185,7 @@ function CV:signal()
 end
 
 --- Wake all waiting coroutines.
+--: (self: CondT) -> nil
 function CV:broadcast()
   local waiters = self._waiters
   self._waiters = {}
@@ -200,6 +218,7 @@ end
 
 --- Send a value. Blocks if the buffer is full (or unbuffered and no receiver ready).
 -- Returns nil, "closed" if the channel is closed.
+--: (self: ChannelT, value: any) -> (boolean | nil, string | nil)
 function Ch:send(value)
   if self._closed then
     return nil, "closed"
@@ -227,6 +246,7 @@ end
 
 --- Receive a value. Blocks if the buffer is empty and no sender is ready.
 -- Returns value, true on success; nil, "closed" on closed+empty channel.
+--: (self: ChannelT) -> (any, boolean | nil, string | nil)
 function Ch:recv()
   -- If there are buffered items, return the oldest.
   if self._len > 0 then
@@ -265,6 +285,7 @@ function Ch:recv()
 end
 
 --- Non-blocking send. Returns true if sent, false if full or closed.
+--: (self: ChannelT, value: any) -> (boolean, string | nil)
 function Ch:try_send(value)
   if self._closed then return false end
   if #self._recvers > 0 then
@@ -283,6 +304,7 @@ end
 
 --- Non-blocking receive. Returns value, true on success; nil, false if empty.
 -- Returns nil, "closed" if closed and empty.
+--: (self: ChannelT) -> (any, boolean, string | nil)
 function Ch:try_recv()
   if self._len > 0 then
     local value = self._buf[self._head]
@@ -313,6 +335,7 @@ end
 
 --- Close the channel. Pending receivers are woken with nil, "closed".
 -- Further sends return nil, "closed". Pending items can still be drained.
+--: (self: ChannelT) -> nil
 function Ch:close()
   if self._closed then return end
   self._closed = true
@@ -325,16 +348,19 @@ function Ch:close()
 end
 
 --- Return true if the channel is closed.
+--: (self: ChannelT) -> boolean
 function Ch:is_closed()
   return self._closed
 end
 
 --- Return the number of items currently in the buffer.
+--: (self: ChannelT) -> integer
 function Ch:len()
   return self._len
 end
 
 --- Return the channel capacity.
+--: (self: ChannelT) -> integer
 function Ch:cap()
   return self._cap
 end

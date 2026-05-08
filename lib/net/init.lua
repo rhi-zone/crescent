@@ -66,6 +66,8 @@ end
 
 -- ── IPv4 ─────────────────────────────────────────────────────────────────────
 
+--:: IPv4 = { _n: integer, ... }
+
 local IPv4 = {}
 IPv4.__index = IPv4
 
@@ -104,7 +106,7 @@ function IPv4:to_number()
 end
 
 function IPv4:octets()
-  local n = self._n
+  local n = self._n --[[: integer]]
   return {
     rshift(n, 24) % 256,
     rshift(n, 16) % 256,
@@ -120,13 +122,15 @@ end
 
 function IPv4:is_loopback()
   -- 127.0.0.0/8
-  return rshift(self._n, 24) % 256 == 127
+  local n = self._n --[[: integer]]
+  return rshift(n, 24) % 256 == 127
 end
 
 function IPv4:is_private()
   -- RFC 1918: 10/8, 172.16/12, 192.168/16
-  local a = rshift(self._n, 24) % 256
-  local b = rshift(self._n, 16) % 256
+  local n = self._n --[[: integer]]
+  local a = rshift(n, 24) % 256
+  local b = rshift(n, 16) % 256
   if a == 10 then return true end
   if a == 172 and b >= 16 and b <= 31 then return true end
   if a == 192 and b == 168 then return true end
@@ -135,7 +139,8 @@ end
 
 function IPv4:is_multicast()
   -- 224.0.0.0/4
-  return rshift(self._n, 24) % 256 >= 224 and rshift(self._n, 24) % 256 <= 239
+  local n = self._n --[[: integer]]
+  return rshift(n, 24) % 256 >= 224 and rshift(n, 24) % 256 <= 239
 end
 
 function IPv4:is_broadcast()
@@ -144,8 +149,9 @@ end
 
 function IPv4:is_link_local()
   -- 169.254.0.0/16
-  local a = rshift(self._n, 24) % 256
-  local b = rshift(self._n, 16) % 256
+  local n = self._n --[[: integer]]
+  local a = rshift(n, 24) % 256
+  local b = rshift(n, 16) % 256
   return a == 169 and b == 254
 end
 
@@ -188,16 +194,20 @@ local function parse_ipv6_groups(s)
     right_str = nil
   end
 
+  --: (string) -> ({ [integer]: integer } | nil, string | nil)
   local function split_groups(str)
     if str == "" then return {} end
-    local gs = {}
+    local gs = {} --: { [integer]: integer }
     for part in (str .. ":"):gmatch("([^:]*):") do
       if part == "" then return nil, "ipv6: empty group (use :: for zero-run)" end
       local v = tonumber(part, 16)
-      if not v or v > 0xFFFF then
+      if v == nil then
         return nil, "ipv6: invalid group: " .. part
       end
-      gs[#gs + 1] = v
+      if v > 0xFFFF then
+        return nil, "ipv6: invalid group: " .. part
+      end
+      gs[#gs + 1] = math.floor(v)
     end
     return gs
   end
@@ -343,6 +353,8 @@ end
 
 -- ── CIDR ─────────────────────────────────────────────────────────────────────
 
+--:: CIDR = { _net: integer, _prefix: integer, _mask: integer, ... }
+
 local CIDR = {}
 CIDR.__index = CIDR
 
@@ -354,13 +366,17 @@ function M.cidr(s)
   if not addr_str then
     return nil, "cidr: invalid CIDR notation: " .. s
   end
-  local prefix = tonumber(prefix_str)
-  if prefix > 32 then
-    return nil, "cidr: prefix length out of range: " .. prefix_str
+  local prefix_raw = tonumber(prefix_str)
+  if prefix_raw == nil then
+    return nil, "cidr: prefix length out of range: " .. tostring(prefix_str)
   end
+  if prefix_raw > 32 then
+    return nil, "cidr: prefix length out of range: " .. tostring(prefix_str)
+  end
+  local prefix = math.floor(prefix_raw)
   local ip, err = M.ipv4(addr_str)
   if not ip then
-    return nil, "cidr: " .. err
+    return nil, "cidr: " .. tostring(err)
   end
   -- Mask the address to get the network address
   local mask
@@ -379,46 +395,62 @@ function CIDR:prefix_len()
   return self._prefix
 end
 
+--: (unknown) -> integer
+local function as_int(v)
+  if type(v) == "number" then return math.floor(v) end
+  return 0
+end
+
 function CIDR:network()
-  return M.ipv4_from_number(self._net)
+  return M.ipv4_from_number(as_int(self._net))
 end
 
 function CIDR:netmask()
-  return M.ipv4_from_number(self._mask)
+  return M.ipv4_from_number(as_int(self._mask))
 end
 
 function CIDR:broadcast()
-  local inv_mask = bnot32(self._mask) % 0x100000000
-  return M.ipv4_from_number(bor(self._net, inv_mask))
+  local mask = as_int(self._mask)
+  local net  = as_int(self._net)
+  local inv_mask = bnot32(mask) % 0x100000000
+  return M.ipv4_from_number(bor(net, inv_mask))
 end
 
 function CIDR:contains(ip)
   local n = ip:to_number()
-  return band(n, self._mask) == self._net
+  return band(n, as_int(self._mask)) == self._net
 end
 
 function CIDR:host_count()
-  if self._prefix >= 31 then return 0 end
-  return rshift(0xFFFFFFFF, self._prefix) % 0x100000000 - 1
+  local prefix = as_int(self._prefix)
+  if prefix >= 31 then return 0 end
+  return rshift(0xFFFFFFFF, prefix) % 0x100000000 - 1
 end
 
 function CIDR:first_host()
-  if self._prefix >= 31 then return self:network() end
-  return M.ipv4_from_number(self._net + 1)
+  local prefix = as_int(self._prefix)
+  if prefix >= 31 then return self:network() end
+  return M.ipv4_from_number(as_int(self._net) + 1)
 end
 
 function CIDR:last_host()
-  if self._prefix >= 31 then return self:broadcast() end
-  local bcast = bor(self._net, bnot32(self._mask) % 0x100000000)
+  local prefix = as_int(self._prefix)
+  if prefix >= 31 then return self:broadcast() end
+  local net  = as_int(self._net)
+  local mask = as_int(self._mask)
+  local bcast = bor(net, bnot32(mask) % 0x100000000)
   return M.ipv4_from_number(bcast - 1)
 end
 
 function CIDR:iter_hosts()
-  if self._prefix >= 31 then
+  local prefix = as_int(self._prefix)
+  if prefix >= 31 then
     return function() return nil end
   end
-  local first = self._net + 1
-  local last_n = bor(self._net, bnot32(self._mask) % 0x100000000) - 1
+  local net  = as_int(self._net)
+  local mask = as_int(self._mask)
+  local first = net + 1
+  local last_n = bor(net, bnot32(mask) % 0x100000000) - 1
   local cur = first - 1
   return function()
     cur = cur + 1
@@ -428,7 +460,7 @@ function CIDR:iter_hosts()
 end
 
 function CIDR:to_string()
-  return self:network():to_string() .. "/" .. self._prefix
+  return self:network():to_string() .. "/" .. tostring(self._prefix)
 end
 
 -- Find the smallest CIDR containing two IP addresses
@@ -469,14 +501,24 @@ end
 
 -- ── URL ──────────────────────────────────────────────────────────────────────
 
+--: (string) -> string
 local function decode_percent(s)
-  return (s:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end))
+  local out = s:gsub("%%(%x%x)", function(h)
+    if type(h) ~= "string" then return "" end
+    local n = tonumber(h, 16)
+    if n == nil then return "" end
+    return string.char(math.floor(n))
+  end)
+  return tostring(out)
 end
 
+--: (string, string) -> string
 local function encode_percent(s, safe_pattern)
-  return (s:gsub("[^" .. safe_pattern .. "]", function(c)
+  local out = s:gsub("[^" .. safe_pattern .. "]", function(c)
+    if type(c) ~= "string" then return "" end
     return string.format("%%%02X", c:byte())
-  end))
+  end)
+  return tostring(out)
 end
 
 -- RFC 3986 unreserved chars

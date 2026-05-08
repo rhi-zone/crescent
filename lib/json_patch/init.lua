@@ -19,13 +19,14 @@ local floor = math.floor
 
 -- Returns true if t is a Lua table that represents a JSON array.
 -- An array has only consecutive integer keys starting at 1 (or is empty {}).
+--: (any) -> boolean
 local function is_array(t)
   if type(t) ~= "table" then return false end
-  local n = #t
+  local n = #(t --[[: { [integer]: any }]])
   -- Check no non-integer or out-of-range keys exist
   local count = 0
-  for k in pairs(t) do
-    if type(k) ~= "number" or k ~= floor(k) or k < 1 or k > n then
+  for k in pairs(t --[[: { [any]: any }]]) do
+    if type(k) ~= "number" or k ~= floor(k --[[: number]]) or (k --[[: number]]) < 1 or (k --[[: number]]) > n then
       return false
     end
     count = count + 1
@@ -74,6 +75,7 @@ M.deep_equal = deep_equal
 
 -- Unescape a single pointer token: ~1 → /, ~0 → ~
 -- Order matters: ~1 first, then ~0 (per spec).
+--: (string) -> string
 function M.unescape(token)
   -- Replace ~1 first (must not re-process the ~)
   token = token:gsub("~1", "/")
@@ -82,6 +84,7 @@ function M.unescape(token)
 end
 
 -- Escape a single token: ~ → ~0, / → ~1
+--: (string) -> string
 function M.escape(token)
   token = token:gsub("~", "~0")
   token = token:gsub("/", "~1")
@@ -91,6 +94,7 @@ end
 -- Parse a JSON Pointer string into an array of (unescaped) tokens.
 -- "" → {} (root)
 -- "/foo/bar" → {"foo", "bar"}
+--: (string) -> ({ [integer]: string } | nil, string | nil)
 function M.parse(ptr)
   if ptr == "" then return {} end
   if ptr:sub(1, 1) ~= "/" then

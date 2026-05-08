@@ -13,6 +13,11 @@ M._tier = "pure"
 
 local floor, sqrt, huge = math.floor, math.sqrt, math.huge
 
+--:: KdEntry = { point: { [integer]: number }, data: unknown }
+--:: KdNode = { split_dim: integer, split_val: number, point: { [integer]: number }, data: unknown, left: KdNode | nil, right: KdNode | nil }
+--:: KdBest = { [integer]: unknown }
+--:: KdHeap = { [integer]: { [integer]: unknown } }
+
 -- ---------------------------------------------------------------------------
 -- Internal helpers
 -- ---------------------------------------------------------------------------
@@ -20,7 +25,7 @@ local floor, sqrt, huge = math.floor, math.sqrt, math.huge
 -- Squared Euclidean distance between two k-dimensional points.
 --: ({number}, {number}) -> number
 local function dist_sq(a, b)
-  local s = 0
+  local s = 0 --: number
   for i = 1, #a do
     local d = a[i] - b[i]
     s = s + d * d
@@ -62,7 +67,7 @@ end
 -- entries: array of {point={...}, data=...}
 -- dim: current split dimension (0-based cycling)
 -- k: number of dimensions
---: ({any}, integer, integer, integer, integer) -> table | nil
+--: ({ [integer]: KdEntry }, integer, integer, integer, integer) -> KdNode | nil
 local function build_node(entries, lo, hi, dim, k)
   if lo > hi then return nil end
   if lo == hi then
@@ -135,7 +140,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Recursive NN search. Updates best = {dist_sq, point, data} in place.
---: (table | nil, {number}, {number}) -> nil
+--: (KdNode | nil, { [integer]: number }, { [integer]: unknown }) -> nil
 local function nn_search(node, query, best)
   if node == nil then return end
 
@@ -169,7 +174,7 @@ end
 -- KNN search (k nearest neighbors via max-heap)
 -- ---------------------------------------------------------------------------
 
---: (table | nil, {number}, integer, {any}) -> nil
+--: (KdNode | nil, { [integer]: number }, integer, { [integer]: { [integer]: unknown } }) -> nil
 local function knn_search(node, query, k, heap)
   if node == nil then return end
 
@@ -204,7 +209,7 @@ end
 -- Range search (all points within Euclidean radius r)
 -- ---------------------------------------------------------------------------
 
---: (table | nil, {number}, number, {any}) -> nil
+--: (KdNode | nil, { [integer]: number }, number, { [integer]: unknown }) -> nil
 local function range_search(node, query, r_sq, results)
   if node == nil then return end
 
@@ -248,7 +253,7 @@ end
 -- Check whether the subtree rooted at node can possibly overlap the box.
 -- We track the bounding region implicitly via the split planes on the path —
 -- simpler approach: just check overlap at each node using the split dimension.
---: (table | nil, table, {any}) -> nil
+--: (KdNode | nil, { min: { [integer]: number }, max: { [integer]: number } }, { [integer]: unknown }) -> nil
 local function box_search(node, box, results)
   if node == nil then return end
 
@@ -275,7 +280,7 @@ end
 -- Dynamic insert (unbalanced; call rebuild() to rebalance)
 -- ---------------------------------------------------------------------------
 
---: (table | nil, {number}, any, integer, integer) -> table
+--: (KdNode | nil, { [integer]: number }, unknown, integer, integer) -> KdNode
 local function insert_node(node, point, data, dim, k)
   if node == nil then
     return {
@@ -297,7 +302,7 @@ local function insert_node(node, point, data, dim, k)
 end
 
 -- Collect all entries from a subtree into a flat array.
---: (table | nil, {any}) -> nil
+--: (KdNode | nil, { [integer]: unknown }) -> nil
 local function collect(node, out)
   if node == nil then return end
   out[#out + 1] = { point = node.point, data = node.data }
@@ -309,7 +314,7 @@ end
 -- Size counting
 -- ---------------------------------------------------------------------------
 
---: (table | nil) -> integer
+--: (KdNode | nil) -> integer
 local function count_nodes(node)
   if node == nil then return 0 end
   return 1 + count_nodes(node.left) + count_nodes(node.right)
@@ -319,12 +324,13 @@ end
 -- Tree object (methods)
 -- ---------------------------------------------------------------------------
 
+--:: KdTree = { _root: KdNode | nil, _k: integer, _entries: { [integer]: KdEntry }, nearest: (self: KdTree, query: { [integer]: number }) -> { point: { [integer]: number }, data: unknown, dist: number } | nil, knn: (self: KdTree, query: { [integer]: number }, k: integer) -> { [integer]: { point: { [integer]: number }, data: unknown, dist: number } }, range: (self: KdTree, query: { [integer]: number }, r: number) -> { [integer]: { point: { [integer]: number }, data: unknown, dist: number } }, box: (self: KdTree, box: { min: { [integer]: number }, max: { [integer]: number } }) -> { [integer]: { point: { [integer]: number }, data: unknown } }, size: (self: KdTree) -> integer, insert: (self: KdTree, point: { [integer]: number }, data: unknown) -> nil, rebuild: (self: KdTree) -> nil }
 local Tree = {}
 Tree.__index = Tree
 
 -- Return the nearest point to `query`.
 -- Returns {point, data, dist} or nil if tree is empty.
---: ({number}) -> {point: {number}, data: any, dist: number} | nil
+--: (self: KdTree, query: { [integer]: number }) -> { point: { [integer]: number }, data: unknown, dist: number } | nil
 function Tree:nearest(query)
   if self._root == nil then return nil end
   local best = { huge, nil, nil }
@@ -335,7 +341,7 @@ end
 
 -- Return the k nearest neighbors to `query` sorted by distance (closest first).
 -- Returns array of {point, data, dist}.
---: ({number}, integer) -> {{point: {number}, data: any, dist: number}}
+--: (self: KdTree, query: { [integer]: number }, k: integer) -> { [integer]: { point: { [integer]: number }, data: unknown, dist: number } }
 function Tree:knn(query, k)
   if self._root == nil then return {} end
   local heap = {}
@@ -355,7 +361,7 @@ end
 
 -- Return all points within Euclidean radius `r` of `query`.
 -- Returns array of {point, data, dist}.
---: ({number}, number) -> {{point: {number}, data: any, dist: number}}
+--: (self: KdTree, query: { [integer]: number }, r: number) -> { [integer]: { point: { [integer]: number }, data: unknown, dist: number } }
 function Tree:range(query, r)
   if self._root == nil then return {} end
   local results = {}
@@ -366,7 +372,7 @@ end
 -- Return all points inside the axis-aligned bounding box.
 -- box = {min={...}, max={...}}
 -- Returns array of {point, data}.
---: ({min: {number}, max: {number}}) -> {{point: {number}, data: any}}
+--: (self: KdTree, box: { min: { [integer]: number }, max: { [integer]: number } }) -> { [integer]: { point: { [integer]: number }, data: unknown } }
 function Tree:box(box)
   if self._root == nil then return {} end
   local results = {}
@@ -375,21 +381,21 @@ function Tree:box(box)
 end
 
 -- Return the total number of points in the tree.
---: () -> integer
+--: (self: KdTree) -> integer
 function Tree:size()
   return count_nodes(self._root)
 end
 
 -- Insert a single point (with optional data) into the tree.
 -- Does not rebalance. Call rebuild() after many inserts.
---: ({number}, any) -> nil
+--: (self: KdTree, point: { [integer]: number }, data: unknown) -> nil
 function Tree:insert(point, data)
   self._root = insert_node(self._root, point, data, 1, self._k)
   self._entries[#self._entries + 1] = { point = point, data = data }
 end
 
 -- Rebuild the tree from scratch (rebalances after many inserts).
---: () -> nil
+--: (self: KdTree) -> nil
 function Tree:rebuild()
   -- Collect all current entries from the root (handles entries added via insert)
   local entries = {}
@@ -414,7 +420,7 @@ end
 --   kdtree.build({{point={1,2}, data="A"}, ...})
 --
 -- Returns a Tree object, or (nil, errmsg) on invalid input.
---: ({any}) -> table | (nil, string)
+--: ({ [integer]: KdEntry }) -> KdTree | (nil, string)
 function M.build(input)
   if type(input) ~= "table" then
     return nil, "build: expected table, got " .. type(input)

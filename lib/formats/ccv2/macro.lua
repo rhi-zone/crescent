@@ -5,6 +5,8 @@ end
 
 local M = {}
 
+--:: Env = { ... }
+
 -- weekday names (1=Sunday in os.date("*t"))
 local WEEKDAYS = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" }
 local MONTHS = { "January", "February", "March", "April", "May", "June",
@@ -38,45 +40,49 @@ local function split_args(inner, sep)
 	return parts
 end
 
---: (string) -> (number, number) | nil
+--: (string) -> (number | nil, number | nil)
 local function parse_dice(s)
 	local n, m = s:match("^(%d+)[dD](%d+)$")
-	if not n then return nil end
+	if not n then return nil, nil end
 	return tonumber(n), tonumber(m)
 end
 
 -- Variable helpers
---: (table, string) -> string
+--: (Env, string) -> string
 local function do_getvar(env, name)
-	if env.getvar then
-		return env.getvar(name) or ""
+	local fn = env.getvar
+	if type(fn) == "function" then
+		return fn(name) or ""
 	end
 	return ""
 end
 
---: (table, string, string) -> string
+--: (Env, string, string) -> string
 local function do_setvar(env, name, value)
-	if env.setvar then env.setvar(name, value) end
+	local fn = env.setvar
+	if type(fn) == "function" then fn(name, value) end
 	return ""
 end
 
---: (table, string) -> string
+--: (Env, string) -> string
 local function do_getglobalvar(env, name)
-	if env.getglobalvar then
-		return env.getglobalvar(name) or ""
+	local fn = env.getglobalvar
+	if type(fn) == "function" then
+		return fn(name) or ""
 	end
 	return ""
 end
 
---: (table, string, string) -> string
+--: (Env, string, string) -> string
 local function do_setglobalvar(env, name, value)
-	if env.setglobalvar then env.setglobalvar(name, value) end
+	local fn = env.setglobalvar
+	if type(fn) == "function" then fn(name, value) end
 	return ""
 end
 
 -- Dispatch table: macro_name -> function(env, args) -> string
 -- All keys are lowercase.
---: { [string]: (table, { string }) -> string }
+--: { [string]: (Env, { string }) -> string }
 local handlers = {}
 
 -- Core identity
@@ -98,11 +104,13 @@ handlers["charversion"] = function(env) return env.char_version or "" end
 
 -- Whitespace
 handlers["newline"] = function(_, args)
-	local n = tonumber(args[2]) or 1
+	local raw = tonumber(args[2])
+	local n = math.floor(raw or 1)
 	return ("\n"):rep(n)
 end
 handlers["space"] = function(_, args)
-	local n = tonumber(args[2]) or 1
+	local raw = tonumber(args[2])
+	local n = math.floor(raw or 1)
 	return (" "):rep(n)
 end
 handlers["noop"] = function() return "" end
@@ -234,7 +242,9 @@ end
 handlers["roll"] = function(env, args)
 	local spec = args[2] or "1d6"
 	local n, m = parse_dice(spec)
-	if not n or n < 1 or m < 1 then return "0" end
+	if not n then return "0" end
+	if not m then return "0" end
+	if n < 1 or m < 1 then return "0" end
 	local rng = env.rng or math.random
 	local total = 0
 	for _ = 1, n do
@@ -260,16 +270,18 @@ handlers["model"] = function(env) return env.model or "" end
 
 --- Substitute macros in text using the given environment table.
 --- Single-pass: does not recurse into replacement results.
---: (string, table) -> string
+--: (string, Env) -> string
 function M.substitute(text, env)
 	env = env or {}
 	-- Legacy angle-bracket aliases (case-insensitive)
-	text = text:gsub("<([Uu][Ss][Ee][Rr])>", "{{user}}")
-	text = text:gsub("<([Bb][Oo][Tt])>", "{{char}}")
-	text = text:gsub("<([Cc][Hh][Aa][Rr])>", "{{char}}")
+	local s = text --: string
+	s = s:gsub("<([Uu][Ss][Ee][Rr])>", "{{user}}")
+	s = s:gsub("<([Bb][Oo][Tt])>", "{{char}}")
+	s = s:gsub("<([Cc][Hh][Aa][Rr])>", "{{char}}")
 	-- Macro substitution: single pass
-	text = text:gsub("{{(.-)}}", function(inner)
-		local parts = split_args(inner)
+	s = s:gsub("{{(.-)}}", function(inner)
+		if type(inner) ~= "string" then return "" end
+		local parts = split_args(inner, "::")
 		local name = parts[1]:lower()
 		local handler = handlers[name]
 		if handler then
@@ -278,7 +290,7 @@ function M.substitute(text, env)
 		-- Unknown macro: leave as-is
 		return "{{" .. inner .. "}}"
 	end)
-	return text
+	return s
 end
 
 return M

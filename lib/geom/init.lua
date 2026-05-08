@@ -177,15 +177,15 @@ end
 --: (Segment, Segment) -> boolean
 M.segment_intersects = function(seg1, seg2)
   local t, u = _seg_intersect_params(seg1.p1, seg1.p2, seg2.p1, seg2.p2)
-  if t == nil then return false end
-  return t >= 0 and t <= 1 and u >= 0 and u <= 1
+  if t == nil or u == nil then return false end
+  return not not (t >= 0 and t <= 1 and u >= 0 and u <= 1)
 end
 
 -- Returns intersection point or nil (parallel or non-intersecting)
 --: (Segment, Segment) -> Point2 | nil
 M.segment_intersection = function(seg1, seg2)
   local t, u = _seg_intersect_params(seg1.p1, seg1.p2, seg2.p1, seg2.p2)
-  if t == nil then return nil end
+  if t == nil or u == nil then return nil end
   if t < 0 or t > 1 or u < 0 or u > 1 then return nil end
   return {
     x = seg1.p1.x + t * (seg1.p2.x - seg1.p1.x),
@@ -256,7 +256,7 @@ M.circles_intersect = function(c1, c2)
   local d_sq = M.distance_sq(c1, c2)
   local r_sum = c1.r + c2.r
   local r_diff = abs(c1.r - c2.r)
-  return d_sq <= r_sum * r_sum and d_sq >= r_diff * r_diff
+  return not not (d_sq <= r_sum * r_sum and d_sq >= r_diff * r_diff)
 end
 
 -- Does segment intersect (or lie inside) circle?
@@ -290,14 +290,14 @@ end
 
 --: (Aabb, Point2) -> boolean
 M.aabb_contains_point = function(aabb, p)
-  return p.x >= aabb.x and p.x <= aabb.x + aabb.w
-     and p.y >= aabb.y and p.y <= aabb.y + aabb.h
+  return not not (p.x >= aabb.x and p.x <= aabb.x + aabb.w
+     and p.y >= aabb.y and p.y <= aabb.y + aabb.h)
 end
 
 --: (Aabb, Aabb) -> boolean
 M.aabb_intersects = function(a1, a2)
-  return a1.x <= a2.x + a2.w and a1.x + a1.w >= a2.x
-     and a1.y <= a2.y + a2.h and a1.y + a1.h >= a2.y
+  return not not (a1.x <= a2.x + a2.w and a1.x + a1.w >= a2.x
+     and a1.y <= a2.y + a2.h and a1.y + a1.h >= a2.y)
 end
 
 --: (Aabb, Aabb) -> Aabb
@@ -373,7 +373,7 @@ end
 --: (Point2[]) -> number
 M.polygon_area = function(points)
   local n = #points
-  local area = 0
+  local area = 0 --: number
   for i = 1, n do
     local j = (i % n) + 1
     area = area + points[i].x * points[j].y
@@ -385,9 +385,9 @@ end
 --: (Point2[]) -> Point2
 M.polygon_centroid = function(points)
   local n = #points
-  local area = 0
-  local cx = 0
-  local cy = 0
+  local area = 0 --: number
+  local cx = 0 --: number
+  local cy = 0 --: number
   for i = 1, n do
     local j = (i % n) + 1
     local cross = points[i].x * points[j].y - points[j].x * points[i].y

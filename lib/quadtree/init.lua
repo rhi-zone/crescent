@@ -13,6 +13,11 @@ M._tier = "pure"
 
 local sqrt, huge, max = math.sqrt, math.huge, math.max
 
+--:: QTBounds = { x: number, y: number, w: number, h: number }
+--:: QTPoint = { [integer]: any }
+--:: QTNode = { bounds: QTBounds, points: { [integer]: QTPoint }, children: { [integer]: QTNode } | nil, capacity: integer, ... }
+--:: Quadtree = { _root: QTNode, ... }
+
 -- ---------------------------------------------------------------------------
 -- Internal helpers
 -- ---------------------------------------------------------------------------
@@ -48,7 +53,7 @@ local function point_in_bounds(px, py, b)
 end
 
 -- Split a node into four children and redistribute its points.
---: (table) -> nil
+--: (QTNode) -> nil
 local function subdivide(node)
   local b = node.bounds
   local hw = b.w / 2
@@ -80,7 +85,7 @@ local function subdivide(node)
 end
 
 -- Insert a point into a node (recursive).
---: (table, number, number, any) -> nil
+--: (QTNode, number, number, any) -> nil
 local function node_insert(node, px, py, data)
   if node.children then
     local b = node.bounds
@@ -103,7 +108,7 @@ local function node_insert(node, px, py, data)
 end
 
 -- Remove a point from a node (recursive). Returns true if removed.
---: (table, number, number) -> boolean
+--: (QTNode, number, number) -> boolean
 local function node_remove(node, px, py)
   if node.children then
     local b = node.bounds
@@ -129,7 +134,7 @@ local function node_remove(node, px, py)
 end
 
 -- Query all points in a rect (recursive).
---: (table, {x:number,y:number,w:number,h:number}, {any}) -> nil
+--: (QTNode, QTBounds, { [integer]: any }) -> nil
 local function node_query_rect(node, rect, out)
   if not rects_overlap(node.bounds, rect) then return end
   if node.children then
@@ -149,7 +154,7 @@ local function node_query_rect(node, rect, out)
 end
 
 -- Query all points in a circle (recursive).
---: (table, number, number, number, number, {any}) -> nil
+--: (QTNode, number, number, number, number, { [integer]: any }) -> nil
 local function node_query_circle(node, cx, cy, r, r_sq, out)
   if not rect_overlaps_circle(node.bounds, cx, cy, r) then return end
   if node.children then
@@ -171,7 +176,7 @@ local function node_query_circle(node, cx, cy, r, r_sq, out)
 end
 
 -- Nearest neighbor search (recursive). best = {dist, x, y, data}.
---: (table, number, number, {any}) -> nil
+--: (QTNode, number, number, { [integer]: any }) -> nil
 local function node_nearest(node, cx, cy, best)
   if rect_min_dist(cx, cy, node.bounds) >= best[1] then return end
   if node.children then
@@ -202,7 +207,7 @@ local function node_nearest(node, cx, cy, best)
 end
 
 -- KNN search (recursive). heap = max-heap of {dist, x, y, data}, capped at k.
---: (table, number, number, integer, {any}) -> nil
+--: (QTNode, number, number, integer, { [integer]: any }) -> nil
 local function heap_push_knn(heap, k, item)
   -- max-heap: largest dist at top
   local n = #heap + 1
@@ -232,7 +237,7 @@ local function heap_push_knn(heap, k, item)
   end
 end
 
---: (table, number, number, integer, {any}) -> nil
+--: (QTNode, number, number, integer, { [integer]: any }) -> nil
 local function node_knn(node, cx, cy, k, heap)
   local worst = #heap < k and huge or heap[1][1]
   if rect_min_dist(cx, cy, node.bounds) >= worst then return end
@@ -258,7 +263,7 @@ local function node_knn(node, cx, cy, k, heap)
 end
 
 -- Count points (recursive).
---: (table) -> integer
+--: (QTNode) -> integer
 local function node_count(node)
   if node.children then
     return node_count(node.children[1]) + node_count(node.children[2])
@@ -269,7 +274,7 @@ local function node_count(node)
 end
 
 -- Collect all points into out (recursive).
---: (table, {any}) -> nil
+--: (QTNode, { [integer]: any }) -> nil
 local function node_each(node, out)
   if node.children then
     for i = 1, 4 do node_each(node.children[i], out) end
@@ -280,7 +285,7 @@ local function node_each(node, out)
 end
 
 -- Tree depth (recursive).
---: (table) -> integer
+--: (QTNode) -> integer
 local function node_depth(node)
   if not node.children then return 1 end
   local d = 0
@@ -300,7 +305,7 @@ QT.__index = QT
 
 -- Insert a point into the quadtree.
 -- Returns false (without error) if the point is outside the bounds.
---: (number, number, any) -> boolean
+--: (self: Quadtree, number, number, any) -> boolean
 function QT:insert(px, py, data)
   if not point_in_bounds(px, py, self._root.bounds) then
     return false
@@ -311,14 +316,14 @@ end
 
 -- Remove the first point with exact (px, py) coordinates.
 -- Returns true if found and removed, false otherwise.
---: (number, number) -> boolean
+--: (self: Quadtree, number, number) -> boolean
 function QT:remove(px, py)
   return node_remove(self._root, px, py)
 end
 
 -- Query all points inside rect {x, y, w, h} (inclusive boundary).
 -- Returns array of {x, y, data}.
---: (number, number, number, number) -> {any}
+--: (self: Quadtree, number, number, number, number) -> { [integer]: any }
 function QT:query_rect(x, y, w, h)
   local out = {}
   node_query_rect(self._root, { x = x, y = y, w = w, h = h }, out)
@@ -327,7 +332,7 @@ end
 
 -- Query all points within radius r of (cx, cy).
 -- Returns array of {x, y, data, dist} sorted by distance ascending.
---: (number, number, number) -> {any}
+--: (self: Quadtree, number, number, number) -> { [integer]: any }
 function QT:query_circle(cx, cy, r)
   local out = {}
   node_query_circle(self._root, cx, cy, r, r * r, out)
@@ -336,8 +341,8 @@ function QT:query_circle(cx, cy, r)
 end
 
 -- Nearest neighbor.
--- Returns x, y, data, dist  or nil if the tree is empty.
---: (number, number) -> (number, number, any, number)
+-- Returns x, y, data, dist  | nil if the tree is empty.
+--: (self: Quadtree, number, number) -> (number | nil, number | nil, any, number | nil)
 function QT:nearest(cx, cy)
   if node_count(self._root) == 0 then return nil end
   local best = { huge, nil, nil, nil }
@@ -348,7 +353,7 @@ end
 
 -- K nearest neighbors sorted by distance ascending.
 -- Returns array of {x, y, data, dist}.
---: (number, number, integer) -> {any}
+--: (self: Quadtree, number, number, integer) -> { [integer]: any }
 function QT:knn(cx, cy, k)
   if k <= 0 then return {} end
   local heap = {}
@@ -364,20 +369,20 @@ function QT:knn(cx, cy, k)
 end
 
 -- Total number of points in the tree.
---: () -> integer
+--: (self: Quadtree) -> integer
 function QT:count()
   return node_count(self._root)
 end
 
 -- Remove all points.
---: () -> nil
+--: (self: Quadtree) -> nil
 function QT:clear()
   self._root.points = {}
   self._root.children = nil
 end
 
 -- Call fn(x, y, data) for every point.
---: (function) -> nil
+--: (self: Quadtree, fn: (any, any, any) -> nil) -> nil
 function QT:each(fn)
   local all = {}
   node_each(self._root, all)
@@ -388,8 +393,8 @@ function QT:each(fn)
 end
 
 -- Axis-aligned bounding box of all inserted points.
--- Returns x_min, y_min, x_max, y_max, or nil if empty.
---: () -> (number, number, number, number)
+-- Returns x_min, y_min, x_max, y_max, | nil if empty.
+--: (self: Quadtree) -> (number | nil, number | nil, number | nil, number | nil)
 function QT:bbox()
   local all = {}
   node_each(self._root, all)
@@ -428,7 +433,7 @@ function QT:move(old_x, old_y, new_x, new_y)
 end
 
 -- Reinsert all points into a fresh tree (useful after many removes to compact nodes).
---: () -> nil
+--: (self: Quadtree) -> nil
 function QT:rebuild()
   local all = {}
   node_each(self._root, all)
@@ -442,7 +447,7 @@ function QT:rebuild()
 end
 
 -- Tree depth (1 = single leaf node).
---: () -> integer
+--: (self: Quadtree) -> integer
 function QT:depth()
   return node_depth(self._root)
 end
@@ -454,7 +459,7 @@ end
 -- Create a new quadtree.
 -- bounds: {x, y, w, h}  — top-left corner + dimensions
 -- capacity: max points per leaf node before subdivision (default 4)
---: ({x:number,y:number,w:number,h:number}, (integer | nil)) -> table
+--: ({x:number,y:number,w:number,h:number}, (integer | nil)) -> Quadtree
 function M.new(bounds, capacity)
   capacity = capacity or 4
   local root = {

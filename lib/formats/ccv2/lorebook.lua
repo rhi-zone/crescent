@@ -8,6 +8,8 @@ end
 
 local aho_corasick = require("lib.aho_corasick")
 
+--:: AhoAutomaton = { search: (self: AhoAutomaton, text: string) -> { [integer]: { [integer]: unknown } }, ... }
+
 local M = {}
 M._tier = "pure"
 
@@ -76,7 +78,7 @@ end
 -- Entry normalization
 -- ---------------------------------------------------------------------------
 
---: (table) -> table
+--: ({ ... }) -> { ... }
 function M.normalize(entry)
   local e = {}
   e.uid              = entry.uid or gen_uid()
@@ -85,21 +87,21 @@ function M.normalize(entry)
   e.keysecondary     = entry.keysecondary or {}
   e.selectiveLogic   = entry.selectiveLogic or 0
   e.content          = entry.content or ""
-  if entry.enabled == nil then e.enabled = true else e.enabled = entry.enabled end
-  if entry.constant == nil then e.constant = false else e.constant = entry.constant end
+  if entry.enabled == nil then e.enabled = true else e.enabled = not not entry.enabled end
+  if entry.constant == nil then e.constant = false else e.constant = not not entry.constant end
   e.order            = entry.order or 0
   e.position         = entry.position or 0
   e.depth            = entry.depth or 0
   e.role             = entry.role or 0
-  if entry.caseSensitive == nil then e.caseSensitive = false else e.caseSensitive = entry.caseSensitive end
-  if entry.matchWholeWords == nil then e.matchWholeWords = false else e.matchWholeWords = entry.matchWholeWords end
+  if entry.caseSensitive == nil then e.caseSensitive = false else e.caseSensitive = not not entry.caseSensitive end
+  if entry.matchWholeWords == nil then e.matchWholeWords = false else e.matchWholeWords = not not entry.matchWholeWords end
   e.probability      = entry.probability or 1.0
-  if entry.sticky == nil then e.sticky = false else e.sticky = entry.sticky end
+  if entry.sticky == nil then e.sticky = false else e.sticky = not not entry.sticky end
   e.cooldown         = entry.cooldown or 0
   e.delay            = entry.delay or 0
-  if entry.ignoreBudget == nil then e.ignoreBudget = false else e.ignoreBudget = entry.ignoreBudget end
-  if entry.excludeRecursion == nil then e.excludeRecursion = false else e.excludeRecursion = entry.excludeRecursion end
-  if entry.preventRecursion == nil then e.preventRecursion = false else e.preventRecursion = entry.preventRecursion end
+  if entry.ignoreBudget == nil then e.ignoreBudget = false else e.ignoreBudget = not not entry.ignoreBudget end
+  if entry.excludeRecursion == nil then e.excludeRecursion = false else e.excludeRecursion = not not entry.excludeRecursion end
+  if entry.preventRecursion == nil then e.preventRecursion = false else e.preventRecursion = not not entry.preventRecursion end
   e.group            = entry.group or ""
   e.groupWeight      = entry.groupWeight or 1
   e.displayIndex     = entry.displayIndex or 0
@@ -110,7 +112,7 @@ end
 -- CCv2 <-> ST conversion
 -- ---------------------------------------------------------------------------
 
---: (table) -> table
+--: ({ ... }) -> { ... }[]
 function M.from_ccv2(book)
   local out = {}
   local entries = book and book.entries or {}
@@ -140,17 +142,18 @@ function M.from_ccv2(book)
   return out
 end
 
---: (table) -> table
+--: ({ ... }[]) -> { ... }
 function M.to_ccv2(entries)
   local book = { entries = {} }
   for _, e in ipairs(entries) do
+    local ks = e.keysecondary
     local ce = {
       keys            = e.key or {},
       content         = e.content or "",
       enabled         = e.enabled ~= false,
       insertion_order = e.order or 0,
-      selective       = e.keysecondary and #e.keysecondary > 0,
-      secondary_keys  = e.keysecondary or {},
+      selective       = type(ks) == "table" and #ks > 0,
+      secondary_keys  = ks or {},
       constant        = e.constant == true,
       position        = st_position_to_ccv2[e.position] or "before_char",
       case_sensitive  = e.caseSensitive == true,
@@ -249,7 +252,7 @@ end
 -- Public scan API
 -- ---------------------------------------------------------------------------
 
---: (table, string, (table | nil)) -> table
+--: ({ ... }[], string, ({ ... } | nil)) -> integer[]
 function M.scan(entries, text, opts)
   opts = opts or {}
   local rng = opts.rng or math.random
@@ -315,7 +318,7 @@ function M.scan(entries, text, opts)
 
   -- Run AC for case-insensitive patterns
   if #ci_patterns > 0 then
-    local auto, err = aho_corasick.new(ci_patterns)
+    local auto = aho_corasick.new(ci_patterns) --[[: AhoAutomaton | nil ]]
     if auto then
       local results = auto:search(text_lower)
       for _, m in ipairs(results) do
@@ -332,7 +335,7 @@ function M.scan(entries, text, opts)
 
   -- Run AC for case-sensitive patterns
   if #cs_patterns > 0 then
-    local auto, err = aho_corasick.new(cs_patterns)
+    local auto = aho_corasick.new(cs_patterns) --[[: AhoAutomaton | nil ]]
     if auto then
       local results = auto:search(text)
       for _, m in ipairs(results) do
@@ -368,7 +371,7 @@ function M.scan(entries, text, opts)
   return triggered
 end
 
---: (table, string, (table | nil)) -> table
+--: ({ ... }[], string, ({ ... } | nil)) -> { ... }[]
 function M.get_triggered(entries, text, opts)
   local indices = M.scan(entries, text, opts)
   local out = {}
