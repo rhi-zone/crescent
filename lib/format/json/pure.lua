@@ -436,7 +436,8 @@ local function decode_raw(s, null_sentinel)
     _pos  = 1
     _null = null_sentinel or M.null
 
-    local sp    = 0      -- stack pointer; 0 = top level (no active container)
+    local sp    = 0 --: integer
+    -- stack pointer; 0 = top level (no active container)
     local value          -- the last completed value
 
     ::PARSE_VALUE::
