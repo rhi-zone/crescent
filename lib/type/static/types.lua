@@ -824,6 +824,7 @@ end
 --: (Ctx, integer, integer) -> (FieldEntry | nil, integer | nil)
 function M.table_field(ctx, tbl_tid, name_id)
     local t = ctx.types:get(tbl_tid)  -- caller must have called find()
+    if t.tag ~= TAG_TABLE then return nil end
     for i = t.data[0], t.data[0] + t.data[1] - 1 do
         local fid = ctx.lists:get(i)
         local fe = ctx.fields:get(fid)
@@ -840,6 +841,7 @@ end
 --: (Ctx, integer, integer) -> (FieldEntry | nil, integer | nil)
 function M.table_opaque_field(ctx, tbl_tid, key_name_id)
     local t = ctx.types:get(tbl_tid)
+    if t.tag ~= TAG_TABLE then return nil end
     for i = t.data[0], t.data[0] + t.data[1] - 1 do
         local fid = ctx.lists:get(i)
         local fe = ctx.fields:get(fid)
@@ -855,6 +857,7 @@ end
 --: (Ctx, integer, integer) -> (FieldEntry | nil, integer | nil)
 function M.table_meta_field(ctx, tbl_tid, name_id)
     local t = ctx.types:get(tbl_tid)
+    if t.tag ~= TAG_TABLE then return nil end
     for i = t.data[5], t.data[5] + t.data[6] - 1 do
         local fid = ctx.lists:get(i)
         --: FieldEntry
