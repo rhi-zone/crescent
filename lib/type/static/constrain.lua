@@ -1029,6 +1029,7 @@ end
 -- ---------------------------------------------------------------------------
 
 local gen_expr, gen_stmt, gen_block, gen_function, gen_prescan_block, gen_function_for_template
+local block_has_return_stmt
 
 -- ---------------------------------------------------------------------------
 -- Expression constraint generation
@@ -1582,7 +1583,12 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
         end
     end
     if not returns then
-        returns = { ret_var }
+        if not has_ann_fn and definitely_returning
+            and not block_has_return_stmt(ctx, bs, bl) then
+            returns = { ctx.T_NEVER }
+        else
+            returns = { ret_var }
+        end
     end
 
     local vararg_id = has_vararg and ctx.T_ANY or -1
@@ -2286,6 +2292,42 @@ local function is_never_call_stmt(ctx, nid)
         local fe = types_mod.table_field(ctx, obj_resolved, cn.data[1])
         if not fe then return false end
         return fn_returns_never(ctx, fe.type_id)
+    end
+    return false
+end
+
+-- Returns true if the block (or a nested non-function-defining sub-block) contains
+-- a NODE_RETURN_STMT. Used in conjunction with is_definitely_returning to detect
+-- functions whose body unconditionally diverges (every exit is via a never-returning
+-- call) — those can be inferred as returning T_NEVER.
+-- Does NOT descend into nested function definitions (an inner function's `return`
+-- belongs to the inner function, not the outer).
+--: (Ctx, integer, integer) -> boolean
+function block_has_return_stmt(ctx, bs, bl)
+    if bl == 0 then return false end
+    for i = bs, bs + bl - 1 do
+        local nid = ctx.ast_lists:get(i)
+        local sn  = ctx.nodes:get(nid)
+        if sn.kind == NODE_RETURN_STMT then
+            return true
+        elseif sn.kind == NODE_IF_STMT then
+            local clause_start = sn.data[0]
+            local clause_count = sn.data[1]
+            for j = clause_start, clause_start + clause_count - 1 do
+                local cn          = ctx.nodes:get(ctx.ast_lists:get(j))
+                local block_start = cn.data[1]
+                local block_len   = cn.data[2]
+                if block_has_return_stmt(ctx, block_start, block_len) then
+                    return true
+                end
+            end
+        elseif sn.kind == NODE_WHILE_STMT or sn.kind == NODE_REPEAT_STMT then
+            if block_has_return_stmt(ctx, sn.data[1], sn.data[2]) then return true end
+        elseif sn.kind == NODE_FOR_NUM or sn.kind == NODE_FOR_IN then
+            if block_has_return_stmt(ctx, sn.data[4], sn.data[5]) then return true end
+        elseif sn.kind == NODE_DO_STMT then
+            if block_has_return_stmt(ctx, sn.data[0], sn.data[1]) then return true end
+        end
     end
     return false
 end
