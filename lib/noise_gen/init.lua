@@ -389,25 +389,24 @@ local WORLEY_NORM = {
   chebyshev = 1.0,
 }
 
+--: (number, number, integer, { k?: integer, metric?: string, ... } | nil) -> number
 local function worley2d(x, y, seed, opts)
   opts = opts or {}
   local k      = opts.k      or 1
   local metric = opts.metric or "euclidean"
 
-  local dist_fn
+  local dist_fn = dist_euclidean --: (number, number) -> number
   if metric == "manhattan" then
     dist_fn = dist_manhattan
   elseif metric == "chebyshev" then
     dist_fn = dist_chebyshev
-  else
-    dist_fn = dist_euclidean
   end
 
   local cx0 = floor(x)
   local cy0 = floor(y)
 
   -- Collect distances from all 9 surrounding cells.
-  local dists = {}
+  local dists = {} --: { [integer]: number }
   for dcx = -1, 1 do
     for dcy = -1, 1 do
       local cx = cx0 + dcx
@@ -432,7 +431,7 @@ local function worley2d(x, y, seed, opts)
     dists[j + 1] = v
   end
 
-  local fk = dists[k] or dists[#dists]
+  local fk = dists[k] or dists[#dists] --: number
   -- Max theoretical F1 for Euclidean in unit grid ≈ sqrt(2)/2 ≈ 0.707.
   -- We normalize so that value is clamped to [0, 1].
   if metric == "euclidean" then
@@ -453,12 +452,12 @@ end
 local function fbm2d(x, y, seed, opts)
   opts = opts or {}
   local octaves     = opts.octaves     or 6
-  local lacunarity  = opts.lacunarity  or 2.0
+  local lacunarity  = (opts.lacunarity  or 2.0) --[[: number]]
   local persistence = opts.persistence or 0.5
   local noise_fn    = opts.noise_fn    or perlin2d
-  local value     = 0
-  local amplitude = 1.0
-  local frequency = 1.0
+  local value     = 0.0 --: number
+  local amplitude = 1.0 --: number
+  local frequency = 1.0 --: number
   for _ = 1, octaves do
     value     = value + noise_fn(x * frequency, y * frequency, seed) * amplitude
     amplitude = amplitude * persistence
@@ -474,12 +473,12 @@ end
 local function turbulence2d(x, y, seed, opts)
   opts = opts or {}
   local octaves     = opts.octaves     or 6
-  local lacunarity  = opts.lacunarity  or 2.0
+  local lacunarity  = (opts.lacunarity  or 2.0) --[[: number]]
   local persistence = opts.persistence or 0.5
   local noise_fn    = opts.noise_fn    or perlin2d
-  local value     = 0
-  local amplitude = 1.0
-  local frequency = 1.0
+  local value     = 0.0 --: number
+  local amplitude = 1.0 --: number
+  local frequency = 1.0 --: number
   for _ = 1, octaves do
     value     = value + abs(noise_fn(x * frequency, y * frequency, seed)) * amplitude
     amplitude = amplitude * persistence
@@ -495,26 +494,26 @@ end
 local function ridged2d(x, y, seed, opts)
   opts = opts or {}
   local octaves     = opts.octaves     or 6
-  local lacunarity  = opts.lacunarity  or 2.0
+  local lacunarity  = (opts.lacunarity  or 2.0) --[[: number]]
   local persistence = opts.persistence or 0.5
   local noise_fn    = opts.noise_fn    or perlin2d
-  local value     = 0
-  local amplitude = 1.0
-  local frequency = 1.0
-  local weight    = 1.0
+  local value     = 0.0 --: number
+  local amplitude = 1.0 --: number
+  local frequency = 1.0 --: number
+  local weight    = 1.0 --: number
   for _ = 1, octaves do
     local signal = noise_fn(x * frequency, y * frequency, seed)
     -- Invert and square to create ridges
     signal = (1 - abs(signal)) * weight
     value  = value + signal * amplitude
     weight = signal
-    if weight < 0 then weight = 0 end
+    if weight < 0 then weight = 0.0 end
     amplitude = amplitude * persistence
     frequency = frequency * lacunarity
   end
   -- Normalize: with default settings output is roughly in [0, ~2]; map to [0, 1]
-  local max_val = 0
-  local a2 = 1.0
+  local max_val = 0.0 --: number
+  local a2 = 1.0 --: number
   for _ = 1, octaves do
     max_val = max_val + a2
     a2 = a2 * persistence
@@ -581,6 +580,7 @@ end
 -- Normalize a map in-place to [0, 1]
 -- ---------------------------------------------------------------------------
 
+--: ({ [integer]: { [integer]: number } }) -> { [integer]: { [integer]: number } }
 local function normalize(map)
   local lo =  math.huge
   local hi = -math.huge

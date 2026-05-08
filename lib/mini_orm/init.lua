@@ -118,6 +118,15 @@ local function apply_defaults(data, fields)
 	return out
 end
 
+-- ── Type declarations ─────────────────────────────────────────────────────────
+
+--:: FieldDef = { type?: string, required?: boolean, primary_key?: boolean, auto_increment?: boolean, unique?: boolean, default?: unknown, max_length?: integer, foreign_key?: string, ... }
+--:: RecordStorage = { [unknown]: { [string]: unknown } }
+--:: DbStorage = { [string]: RecordStorage }
+--:: NextIds = { [string]: integer }
+--:: DbRef = { _storage: DbStorage, _next_id: NextIds, _models: { [string]: ModelRef }, _migration_version: integer, ... }
+--:: ModelRef = { _db: DbRef, _name: string, _pk: string, _fields: { [string]: FieldDef }, _relationships: { [string]: unknown }, _wrap: (self: ModelRef, rec: { [string]: unknown }) -> { [string]: unknown }, ... }
+
 -- ── Query Builder ─────────────────────────────────────────────────────────────
 
 local QB = {}
@@ -210,7 +219,7 @@ function QB:offset(n)
 end
 
 function QB:execute()
-	local model = self._model
+	local model = self._model --[[:! ModelRef]]
 	local storage = model._db._storage[model._name] or {}
 
 	-- Collect matching records
@@ -259,7 +268,7 @@ local Record = {}
 Record.__index = Record
 
 function Record:update(changes)
-	local model = self._model
+	local model = self._model --[[:! ModelRef]]
 	local pk = model._pk
 	local id = self[pk]
 
@@ -281,7 +290,7 @@ function Record:update(changes)
 end
 
 function Record:delete()
-	local model = self._model
+	local model = self._model --[[:! ModelRef]]
 	local pk = model._pk
 	local id = self[pk]
 
@@ -324,6 +333,7 @@ function Model:_add_relationship(name, fn)
 	self._relationships[name] = fn
 end
 
+--: (self: ModelRef, data: { [string]: unknown }) -> ({ [string]: unknown } | nil, { [string]: string } | nil)
 function Model:create(data)
 	local pk = self._pk
 	local storage = self._db._storage[self._name]
@@ -344,6 +354,7 @@ function Model:create(data)
 	return self:_wrap(shallow_copy(merged))
 end
 
+--: (self: ModelRef, pk_val: unknown) -> { [string]: unknown } | nil
 function Model:find(pk_val)
 	local storage = self._db._storage[self._name]
 	local rec = storage[pk_val]
@@ -351,6 +362,7 @@ function Model:find(pk_val)
 	return self:_wrap(shallow_copy(rec))
 end
 
+--: (self: ModelRef, conditions: { [string]: unknown }) -> { [string]: unknown } | nil
 function Model:find_by(conditions)
 	local storage = self._db._storage[self._name]
 	for _, rec in pairs(storage) do
@@ -363,6 +375,7 @@ function Model:find_by(conditions)
 	return nil
 end
 
+--: (self: ModelRef, conditions: { [string]: unknown }) -> { [integer]: { [string]: unknown } }
 function Model:where(conditions)
 	local storage = self._db._storage[self._name]
 	local results = {}
@@ -376,6 +389,7 @@ function Model:where(conditions)
 	return results
 end
 
+--: (self: ModelRef) -> { [integer]: { [string]: unknown } }
 function Model:all()
 	local storage = self._db._storage[self._name]
 	local results = {}
@@ -406,6 +420,7 @@ function Model:query()
 	return new_query_builder(self)
 end
 
+--: (self: ModelRef, conditions: { [string]: unknown }, changes: { [string]: unknown }) -> (integer | nil, { [string]: string } | nil)
 function Model:update_where(conditions, changes)
 	local storage = self._db._storage[self._name]
 	local count = 0
@@ -416,7 +431,7 @@ function Model:update_where(conditions, changes)
 		end
 		if match then
 			-- Validate changes against this record
-			local errs = validate(changes, self._fields, storage, true, id)
+			local errs = validate(changes --[[: any]], self._fields, storage, true, id --[[:! integer]])
 			if errs then return nil, errs end
 			for k, v in pairs(changes) do
 				rec[k] = v
@@ -509,6 +524,7 @@ end
 
 -- Wire up has_many after models are defined (called lazily at first access).
 -- For each model with a foreign_key pointing to this model, register accessor.
+--: (self: DbRef) -> nil
 function DB:_build_has_many()
 	for source_name, source_model in pairs(self._models) do
 		for fname, def in pairs(source_model._fields) do
@@ -528,7 +544,7 @@ function DB:_build_has_many()
 							local results = {}
 							for _, srec in pairs(src_storage) do
 								if srec[fk_field] == pk_val then
-									results[#results + 1] = src_model_ref:_wrap(shallow_copy(srec))
+									results[#results + 1] = (src_model_ref --[[:! ModelRef]]):_wrap(shallow_copy(srec))
 								end
 							end
 							return results
