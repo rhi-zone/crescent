@@ -6,6 +6,7 @@ local M = {}
 M._tier = "pure"
 
 -- Min-heap helpers (min by key)
+--: (heap: any, item: any) -> nil
 local function heap_push(heap, item)
   heap[#heap + 1] = item
   local i = #heap
@@ -21,6 +22,7 @@ local function heap_push(heap, item)
   end
 end
 
+--: (heap: any) -> any
 local function heap_pop(heap)
   if #heap == 0 then return nil end
   local top = heap[1]
@@ -52,11 +54,13 @@ local function heap_pop(heap)
   return top
 end
 
+--: (heap: any) -> any
 local function heap_peek(heap)
   return heap[1]
 end
 
 -- Find and remove an item by id from the heap. O(n).
+--: (heap: any, id: any) -> boolean
 local function heap_remove_id(heap, id)
   local found = nil
   for i = 1, #heap do
@@ -80,6 +84,7 @@ local function heap_remove_id(heap, id)
 end
 
 -- Queue constructor
+--: (opts: any) -> any
 function M.new(opts)
   opts = opts or {}
   local q = {
@@ -105,6 +110,7 @@ local function gen_id(q)
 end
 
 -- Push a task onto the queue. Returns the task id.
+--: (self: any, task: any) -> (any, string | nil)
 function M:push(task)
   if type(task) ~= "table" then
     return nil, "task must be a table"
@@ -143,9 +149,10 @@ local function emit(q, event, ...)
 end
 
 -- Process up to n eligible tasks. Returns array of result records.
+--: (self: any, n: integer | nil) -> any
 function M:process(n)
   n = n or 1
-  local results = {}
+  local results = {} --[[: { id: any, status: string, error?: any, result?: any }[] ]]
   local processed = 0
 
   -- Collect eligible entries from the heap. Since the heap may contain
@@ -288,6 +295,7 @@ function M:peek()
 end
 
 -- Cancel a task by id. Returns true if found and cancelled, false otherwise.
+--: (self: any, id: any) -> boolean
 function M:cancel(id)
   -- Check if id exists in heap (non-cancelled)
   local found = false

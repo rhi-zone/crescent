@@ -153,7 +153,9 @@ local function resolve(doc, ptr)
   end
 
   local last = parts[#parts]
-  return node, last, node[is_array(node) and (tonumber(last) ~= nil and tonumber(last) + 1 or last) or last]
+  local last_idx = tonumber(last)
+  local key = (is_array(node) and last_idx ~= nil) and (last_idx + 1) or last
+  return node, last, node[key]
 end
 
 -- pointer_get: get value at JSON Pointer path in doc.
@@ -266,11 +268,12 @@ end
 
 -- validate_patch: check all ops have required fields.
 -- Returns (true, nil) or (nil, errmsg).
+--: (unknown) -> (boolean | nil, string | nil)
 function M.validate_patch(patch)
   if type(patch) ~= "table" then
     return nil, "patch must be an array"
   end
-  for i, op in ipairs(patch) do
+  for i, op in ipairs(patch --[[: { [integer]: { op?: unknown, path?: unknown, value?: unknown, from?: unknown } } ]]) do
     if type(op) ~= "table" then
       return nil, "operation " .. i .. " must be a table"
     end
@@ -295,6 +298,7 @@ end
 
 -- Internal: apply a single operation to doc (modified in place).
 -- Returns (true, nil) or (nil, errmsg).
+--: (unknown, { op: string, path: string, from?: string, value?: unknown }) -> (any, string | nil)
 local function apply_one(doc, op)
   local o = op.op
   if o == "add" then
@@ -340,6 +344,7 @@ local function apply_one(doc, op)
         node[#node + 1] = op.value
       else
         local idx = tonumber(last)
+        if idx == nil then return nil, "add: invalid array index: " .. last end
         local lua_idx = idx + 1
         if lua_idx < 1 or lua_idx > #node + 1 then
           return nil, "add: array index out of range: " .. last
@@ -367,21 +372,25 @@ local function apply_one(doc, op)
     return M.pointer_set(doc, op.path, op.value)
 
   elseif o == "move" then
-    if op.from == op.path then return true, nil end
+    local from = op.from
+    if from == nil then return nil, "move: missing 'from'" end
+    if from == op.path then return true, nil end
     -- Check from doesn't start with path (can't move into child)
-    if op.path:sub(1, #op.from) == op.from and
-       (op.path:sub(#op.from + 1, #op.from + 1) == "/" or op.path == op.from) then
+    if op.path:sub(1, #from) == from and
+       (op.path:sub(#from + 1, #from + 1) == "/" or op.path == from) then
       return nil, "move: cannot move to child of from"
     end
-    local val, err = M.pointer_get(doc, op.from)
-    if err then return nil, "move: " .. err end
-    local ok, e2 = M.pointer_del(doc, op.from)
-    if not ok then return nil, "move del: " .. e2 end
+    local val, err = M.pointer_get(doc, from)
+    if err then return nil, "move: " .. tostring(err) end
+    local ok, e2 = M.pointer_del(doc, from)
+    if not ok then return nil, "move del: " .. tostring(e2) end
     return apply_one(doc, { op = "add", path = op.path, value = val })
 
   elseif o == "copy" then
-    local val, err = M.pointer_get(doc, op.from)
-    if err then return nil, "copy: " .. err end
+    local from = op.from
+    if from == nil then return nil, "copy: missing 'from'" end
+    local val, err = M.pointer_get(doc, from)
+    if err then return nil, "copy: " .. tostring(err) end
     return apply_one(doc, { op = "add", path = op.path, value = deep_copy(val) })
 
   elseif o == "test" then
@@ -515,7 +524,7 @@ end
 -- Returns an array of patch operations.
 function M.diff(doc_a, doc_b)
   if deep_equal(doc_a, doc_b) then return {} end
-  local ops = {}
+  local ops = {} --[[: { op: string, path: string, value?: unknown, from?: string }[] ]]
   if type(doc_a) == "table" and type(doc_b) == "table" then
     local a_arr = is_array(doc_a)
     local b_arr = is_array(doc_b)
@@ -538,7 +547,7 @@ function M.diff(doc_a, doc_b)
         for k in pairs(doc_a) do
           ops[#ops+1] = { op = "remove", path = "/" .. M.escape(tostring(k)) }
         end
-        for i, v in ipairs(doc_b) do
+        for i, v in ipairs(doc_b --[[: { [integer]: unknown } ]]) do
           ops[#ops+1] = { op = "add", path = "/" .. (i-1), value = deep_copy(v) }
         end
       end

@@ -94,17 +94,20 @@ function M.signal(init)
 		return value
 	end
 
+	--: (a: unknown) -> ()
 	function s.set(a)
 		if is_same(value, a) then return end
 		value = a
 		fire(subscribers, value)
 	end
 
+	--: (f: (unknown) -> unknown) -> ()
 	function s.update(f)
 		s.set(f(value))
 	end
 
 	-- subscribe(fn) -> unsubscribe: register fn(new_value) on change.
+	--: (fn: (unknown) -> ()) -> (() -> ())
 	function s.subscribe(fn)
 		subscribers[fn] = true
 		return function() rawset(subscribers, fn, nil) end
@@ -241,15 +244,18 @@ function M.focused(source, lens)
 		return lens.get(source.get())
 	end
 
+	--: (b: unknown) -> ()
 	function f.set(b)
 		source.set(lens.set(source.get(), b))
 	end
 
+	--: (fn: (unknown) -> unknown) -> ()
 	function f.update(fn)
 		f.set(fn(f.get()))
 	end
 
 	-- subscribe(handler) -> unsubscribe
+	--: (handler: (unknown) -> ()) -> (() -> ())
 	function f.subscribe(handler)
 		local prev = f.get()
 		--: (unknown) -> ()
@@ -295,18 +301,21 @@ function M.narrowed(source, prism)
 		return extract()
 	end
 
+	--: (b: unknown) -> ()
 	function n.set(b)
 		if b ~= nil then
 			source.set(prism.review(b))
 		end
 	end
 
+	--: (fn: (unknown) -> unknown) -> ()
 	function n.update(fn)
 		local cur = n.get()
 		if cur ~= nil then n.set(fn(cur)) end
 	end
 
 	-- subscribe(handler) -> unsubscribe
+	--: (handler: (unknown) -> ()) -> (() -> ())
 	function n.subscribe(handler)
 		local prev = n.get()
 		--: (unknown) -> ()

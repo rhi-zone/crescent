@@ -11,18 +11,23 @@ M._tier = "pure"
 -- Depth threshold for auto-rebalance in concat
 local REBALANCE_DEPTH = 30
 
+--:: Node = { type: string, str: string, len: integer, depth: integer, left: any, right: any }
+
 -- node constructors
+--: (s: string) -> Node
 local function leaf(s)
-  return { type = "leaf", str = s, len = #s, depth = 1 }
+  return { type = "leaf", str = s, len = #s, depth = 1, left = nil, right = nil } --[[: Node ]]
 end
 
+--: (l: Node, r: Node) -> Node
 local function concat_node(l, r)
   local d = l.depth
   if r.depth > d then d = r.depth end
-  return { type = "concat", left = l, right = r, len = l.len + r.len, depth = d + 1 }
+  return { type = "concat", left = l, right = r, len = l.len + r.len, depth = d + 1, str = "" } --[[: Node ]]
 end
 
 -- collect all leaf strings in order into array t
+--: (node: Node, t: string[]) -> nil
 local function collect_leaves(node, t)
   if node.type == "leaf" then
     if node.len > 0 then
@@ -35,6 +40,7 @@ local function collect_leaves(node, t)
 end
 
 -- build a balanced tree from an array of leaf nodes
+--: (leaves: Node[], lo: integer, hi: integer) -> Node
 local function build_balanced(leaves, lo, hi)
   if lo > hi then
     return leaf("")
@@ -49,8 +55,9 @@ local function build_balanced(leaves, lo, hi)
 end
 
 -- rebalance a node: collect leaves, rebuild balanced
+--: (node: Node) -> Node
 local function rebalance_node(node)
-  local strs = {}
+  local strs = {} --[[: string[] ]]
   collect_leaves(node, strs)
   if #strs == 0 then
     return leaf("")
@@ -63,6 +70,7 @@ local function rebalance_node(node)
 end
 
 -- smart concat: auto-rebalance if depth imbalance exceeds threshold
+--: (l: Node, r: Node) -> Node
 local function smart_concat(l, r)
   if l.len == 0 then return r end
   if r.len == 0 then return l end
@@ -76,6 +84,7 @@ local function smart_concat(l, r)
 end
 
 -- walk tree to find char at 1-based position i; returns byte value
+--: (node: Node, i: integer) -> string
 local function node_char_at(node, i)
   if node.type == "leaf" then
     return node.str:sub(i, i)
@@ -89,6 +98,7 @@ end
 
 -- split node after position pos (1-based)
 -- returns left (chars 1..pos), right (chars pos+1..end)
+--: (node: Node, pos: integer) -> (Node, Node)
 local function split_node(node, pos)
   if pos <= 0 then
     return leaf(""), node
@@ -112,6 +122,7 @@ local function split_node(node, pos)
 end
 
 -- to_string: concatenate all leaves
+--: (node: Node) -> string
 local function node_to_string(node)
   if node.type == "leaf" then
     return node.str
@@ -129,12 +140,14 @@ local function wrap(node)
   return setmetatable({ _node = node }, Rope)
 end
 
+--: (s: string | nil) -> any
 function M.new(s)
   if s == nil then s = "" end
   return wrap(leaf(s))
 end
 
 -- M.concat(a, b): concat two ropes (or strings) as a module-level function
+--: (a: any, b: any) -> any
 function M.concat(a, b)
   if type(a) == "string" then a = M.new(a) end
   if type(b) == "string" then b = M.new(b) end
@@ -169,6 +182,7 @@ function Rope:char_at(i)
   return node_char_at(self._node, i)
 end
 
+--: (self: any, i: integer, j: integer) -> any
 function Rope:sub(i, j)
   local len = self._node.len
   -- normalize like string.sub

@@ -287,9 +287,12 @@ local function make_pure()
 
 	-- ── Constants ─────────────────────────────────────────────────────────────
 
-	local ZERO32 = {}; for i = 1, 32 do ZERO32[i] = 0 end
-	local ONE32  = {}; for i = 1, 32 do ONE32[i]  = 0 end; ONE32[1] = 1
-	local TWO32  = {}; for i = 1, 32 do TWO32[i]  = 0 end; TWO32[1] = 2
+	local ZERO32 = {} --: { [integer]: number }
+	for i = 1, 32 do ZERO32[i] = 0 end
+	local ONE32 = {} --: { [integer]: number }
+	for i = 1, 32 do ONE32[i] = 0 end; ONE32[1] = 1
+	local TWO32 = {} --: { [integer]: number }
+	for i = 1, 32 do TWO32[i] = 0 end; TWO32[1] = 2
 
 	-- Field prime p = 2^255 - 19
 	local P = hex32("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed")
@@ -301,7 +304,7 @@ local function make_pure()
 
 	-- Multiply two 32-byte LE integers; result is 64 bytes (no reduction).
 	local function mul_raw(a, b)
-		local r = {}
+		local r = {} --: { [integer]: number }
 		for i = 1, 64 do r[i] = 0 end
 		for i = 1, 32 do
 			if a[i] ~= 0 then
@@ -320,7 +323,7 @@ local function make_pure()
 	-- Reduce a 64-byte LE integer modulo p = 2^255 - 19.
 	-- Uses identity 2^256 ≡ 38 (mod p).
 	local function reduce_p(r)
-		local acc = {}
+		local acc = {} --: { [integer]: number }
 		for i = 1, 32 do acc[i] = r[i] end
 		local carry = 0
 		for i = 1, 32 do
@@ -357,7 +360,8 @@ local function make_pure()
 	local function fmul(a, b) return reduce_p(mul_raw(a, b)) end
 
 	local function fadd(a, b)
-		local r = {}; local carry = 0
+		local r = {} --: { [integer]: number }
+		local carry = 0
 		for i = 1, 32 do
 			local s = a[i] + b[i] + carry
 			r[i] = s % 256; carry = math.floor(s / 256)
@@ -373,7 +377,8 @@ local function make_pure()
 	end
 
 	local function fsub(a, b)
-		local r = {}; local borrow = 0
+		local r = {} --: { [integer]: number }
+		local borrow = 0
 		for i = 1, 32 do
 			local d = a[i] - b[i] - borrow
 			if d < 0 then r[i] = d + 256; borrow = 1 else r[i] = d; borrow = 0 end
@@ -427,7 +432,7 @@ local function make_pure()
 	-- sqrt(-1) mod p = 2^((p-1)/4) mod p
 	-- (p-1)/4 = 2^253 - 5 in LE: [0xfb, 0xff, ..., 0xff, 0x1f]
 	local PM1_DIV4 = (function()
-		local r = {}
+		local r = {} --: { [integer]: number }
 		for i = 1, 31 do r[i] = 0xff end
 		r[1] = 0xfb; r[32] = 0x1f
 		return r

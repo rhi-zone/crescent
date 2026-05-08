@@ -9,6 +9,7 @@ M._tier = "pure"
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
 --- Split a string into lines on \n boundaries.
+--: (s: string) -> { [integer]: string }
 local function split_lines(s)
   local lines = {}
   local i = 1
@@ -28,11 +29,13 @@ local function split_lines(s)
 end
 
 --- Collapse runs of whitespace (space/tab) into single spaces and trim.
+--: (s: string) -> string
 local function collapse_ws(s)
   return (s:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
 --- Measure display width (plain ASCII: byte length).
+--: (s: string) -> integer
 local function display_width(s)
   return #s
 end
@@ -43,6 +46,7 @@ end
 -- Returns an array of strings.
 -- opts.break_long (bool, default true): break words longer than width
 -- opts.preserve_spaces (bool, default false): keep original whitespace
+--: (text: string, width: integer, opts: any) -> string[]
 function M.wrap(text, width, opts)
   if not text or text == "" then return {""} end
   opts = opts or {}
@@ -50,7 +54,7 @@ function M.wrap(text, width, opts)
   local preserve_spaces = opts.preserve_spaces or false
 
   -- Tokenize into words
-  local words = {}
+  local words = {} --[[: string[] ]]
   if preserve_spaces then
     -- Split on whitespace runs but keep track of original
     for tok in text:gmatch("%S+") do
@@ -120,6 +124,7 @@ end
 
 --- Left-align `text` in a field of `width` chars (pad right with spaces).
 -- Truncates if text is longer than width.
+--: (text: string, width: integer) -> string
 function M.left(text, width)
   local len = display_width(text)
   if len >= width then return text:sub(1, width) end
@@ -128,6 +133,7 @@ end
 
 --- Right-align `text` in a field of `width` chars (pad left with spaces).
 -- Truncates if text is longer than width.
+--: (text: string, width: integer) -> string
 function M.right(text, width)
   local len = display_width(text)
   if len >= width then return text:sub(1, width) end
@@ -136,6 +142,7 @@ end
 
 --- Center `text` in a field of `width` chars.
 -- Extra space goes to the right. Truncates if text is longer than width.
+--: (text: string, width: integer) -> string
 function M.center(text, width)
   local len = display_width(text)
   if len >= width then return text:sub(1, width) end
@@ -148,6 +155,7 @@ end
 --- Full-justify `text` in a field of `width` chars.
 -- Spreads spaces between words to fill exactly `width`.
 -- If there is only one word (or text > width), falls back to left-align.
+--: (text: string, width: integer) -> string
 function M.justify(text, width)
   local len = display_width(text)
   if len >= width then return text:sub(1, width) end
@@ -189,6 +197,7 @@ end
 -- mode: "left" | "right" | "center" | "justify" (default "left")
 -- In justify mode the last line is left-aligned.
 -- Returns an array of lines, each exactly `width` chars.
+--: (text: string, width: integer, mode: string | nil) -> string[]
 function M.paragraph(text, width, mode)
   mode = mode or "left"
   local lines = M.wrap(text, width)
@@ -213,6 +222,7 @@ end
 -- opts.sep (string, default " "): column separator
 -- opts.align (array of "left"|"right"|"center"): alignment per column
 -- Returns array of formatted lines.
+--: (rows: any, widths: integer[], opts: any) -> string[]
 function M.columns(rows, widths, opts)
   opts = opts or {}
   local sep = opts.sep or " "
@@ -239,6 +249,7 @@ end
 -- opts.align (array): alignment per column ("left","right","center")
 -- opts.padding (int, default 1): spaces inside each cell
 -- Returns a multi-line string.
+--: (data: { headers?: string[], rows?: any[][] }, opts: any) -> string
 function M.table(data, opts)
   opts = opts or {}
   local border = opts.border ~= false  -- default true
@@ -254,13 +265,14 @@ function M.table(data, opts)
   end
 
   -- Compute column widths (content width, without padding)
-  local col_widths = {}
+  local col_widths = {} --[[: integer[] ]]
   for c = 1, ncols do
     col_widths[c] = display_width(headers[c] or "")
   end
   for _, row in ipairs(rows) do
     for c = 1, ncols do
-      local w = display_width(tostring(row[c] or ""))
+      local cell_str = tostring(row[c] or "") --[[: string ]]
+      local w = display_width(cell_str)
       if w > col_widths[c] then col_widths[c] = w end
     end
   end
@@ -317,6 +329,7 @@ end
 
 --- Truncate `text` to at most `max_len` characters, appending `ellipsis` if cut.
 -- Default ellipsis is "...".
+--: (text: string, max_len: integer, ellipsis: string | nil) -> string
 function M.truncate(text, max_len, ellipsis)
   if ellipsis == nil then ellipsis = "..." end
   local len = display_width(text)
@@ -331,6 +344,7 @@ end
 -- ── pad helpers ──────────────────────────────────────────────────────────────
 
 --- Pad string on the left to `width` using `char` (default " ").
+--: (s: string, width: integer, char: string | nil) -> string
 function M.pad_left(s, width, char)
   char = char or " "
   local len = display_width(s)
@@ -339,6 +353,7 @@ function M.pad_left(s, width, char)
 end
 
 --- Pad string on the right to `width` using `char` (default " ").
+--: (s: string, width: integer, char: string | nil) -> string
 function M.pad_right(s, width, char)
   char = char or " "
   local len = display_width(s)
@@ -348,6 +363,7 @@ end
 
 --- Pad string on both sides to `width` using `char` (default " ").
 -- Extra padding goes to the right.
+--: (s: string, width: integer, char: string | nil) -> string
 function M.pad_center(s, width, char)
   char = char or " "
   local len = display_width(s)
@@ -361,6 +377,7 @@ end
 -- ── indent / dedent ──────────────────────────────────────────────────────────
 
 --- Add `n` copies of `char` (default " ") to the start of each line in `text`.
+--: (text: string, n: integer, char: string | nil) -> string
 function M.indent(text, n, char)
   char = char or " "
   local prefix = string.rep(char, n)

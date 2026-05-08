@@ -4,6 +4,9 @@ end
 
 local M = {}
 M._tier = "pure"
+M.affectors --[[: { gravity?: (number | nil, number | nil) -> (unknown, number) -> (), drag?: (number | nil) -> (unknown, number) -> (), attractor?: (number, number, number | nil) -> (unknown, number) -> (), turbulence?: (number | nil, integer | nil) -> (unknown, number) -> () } ]] = {}
+
+--:: Particle = { alive: boolean, x: number, y: number, vx: number, vy: number, age: number, lifetime: number, size: number, rotation: number, rot_speed: number, r: number, g: number, b: number, a: number, _size_start: number, _size_end: number, _cr_start: number, _cg_start: number, _cb_start: number, _ca_start: number, _cr_end: number, _cg_end: number, _cb_end: number, _ca_end: number }
 
 -- ========================
 -- LCG RNG
@@ -34,28 +37,36 @@ end
 -- HELPERS
 -- ========================
 
+--: (unknown, { range: (unknown, number, number) -> number, ... }) -> number
 local function resolve_range(v, rng)
   if type(v) == "table" then
-    if v.min ~= nil then
-      return rng:range(v.min, v.max)
+    local vt = v --[[: { min?: number, max?: number, ... } ]]
+    local vmin, vmax = vt.min, vt.max
+    if vmin ~= nil and vmax ~= nil then
+      return rng:range(vmin, vmax)
     end
-    return v
+    return 0
   end
-  return v
+  if type(v) == "number" then return v end
+  return 0
 end
 
+--: (number, number, number) -> number
 local function lerp(a, b, t)
   return a + (b - a) * t
 end
 
 local DEG_TO_RAD = math.pi / 180
 
+--:: ParticleOpts = { shape?: string, position?: { x: number, y: number }, radius?: number, width?: number, height?: number, lifetime?: unknown, speed?: unknown, angle?: unknown, size?: unknown, color?: { start?: unknown, ... }, rotation_speed?: unknown, seed?: integer, max_particles?: integer, rate?: number, burst?: integer, gravity?: { x: number, y: number }, drag?: number, ... }
 -- Emit a particle from the given emitter opts, writing into slot `p`.
+--: (Particle, ParticleOpts, { range: (unknown, number, number) -> number, float: (unknown) -> number, next: (unknown) -> integer }) -> ()
 local function init_particle(p, opts, rng)
   -- Position based on shape
   local shape = opts.shape or "point"
-  local px, py = opts.position and opts.position.x or 0,
-                 opts.position and opts.position.y or 0
+  local pos = opts.position
+  local px = pos and pos.x or 0
+  local py = pos and pos.y or 0
 
   if shape == "point" then
     p.x = px
@@ -107,8 +118,9 @@ local function init_particle(p, opts, rng)
     p._size_start = size_opts
     p._size_end = size_opts
   else
-    p._size_start = size_opts.start or 10
-    p._size_end = size_opts["end"] or size_opts.end_ or 2
+    local so = size_opts --[[: { start?: number, end_?: number, ... } ]]
+    p._size_start = so.start or 10
+    p._size_end = so.end_ or 2
     p.size = p._size_start
   end
 
@@ -141,8 +153,9 @@ end
 -- EMITTER
 -- ========================
 
+--: (ParticleOpts | nil) -> unknown
 function M.emitter(opts)
-  opts = opts or {}
+  opts = opts or {} --[[: ParticleOpts]]
   local seed = opts.seed or 0
   local rng = lcg_new(seed)
   local max_particles = opts.max_particles or 500
@@ -150,9 +163,9 @@ function M.emitter(opts)
   local burst_count = opts.burst or 50
 
   -- Particle pool: pre-allocate all slots
-  local pool = {}
+  local pool --[[: Particle[] ]] = {}
   for i = 1, max_particles do
-    pool[i] = { alive = false }
+    pool[i] = --[[: Particle]] { alive = false, x = 0, y = 0, vx = 0, vy = 0, age = 0, lifetime = 0, size = 0, rotation = 0, rot_speed = 0, r = 0, g = 0, b = 0, a = 0, _size_start = 0, _size_end = 0, _cr_start = 0, _cg_start = 0, _cb_start = 0, _ca_start = 0, _cr_end = 0, _cg_end = 0, _cb_end = 0, _ca_end = 0 }
   end
 
   -- _emit_acc: fractional accumulator for rate-based emission
@@ -170,13 +183,15 @@ function M.emitter(opts)
   }
 
   -- Built-in affectors from opts
-  if opts.gravity then
+  local af_gravity = M.affectors.gravity
+  local af_drag = M.affectors.drag
+  if opts.gravity and af_gravity then
     local gx = opts.gravity.x or 0
     local gy = opts.gravity.y or -9.8
-    e._affectors[#e._affectors + 1] = M.affectors.gravity(gx, gy)
+    e._affectors[#e._affectors + 1] = af_gravity(gx, gy)
   end
-  if opts.drag and opts.drag ~= 0 then
-    e._affectors[#e._affectors + 1] = M.affectors.drag(opts.drag)
+  if opts.drag and opts.drag ~= 0 and af_drag then
+    e._affectors[#e._affectors + 1] = af_drag(opts.drag)
   end
 
   -- Find a free slot in the pool, or nil if full.
@@ -196,6 +211,7 @@ function M.emitter(opts)
     return true
   end
 
+  --: (self: { _running: boolean, _emit_acc: number, _rate: number, _affectors: ((Particle, number) -> ())[], ... }, dt: number) -> ()
   function e:update(dt)
     -- Emit new particles based on rate
     if self._running then
@@ -286,8 +302,6 @@ end
 -- BUILT-IN AFFECTORS
 -- ========================
 
-M.affectors = {}
-
 function M.affectors.gravity(gx, gy)
   gx = gx or 0
   gy = gy or -9.8
@@ -297,8 +311,10 @@ function M.affectors.gravity(gx, gy)
   end
 end
 
+--: (number | nil) -> (Particle, number) -> ()
 function M.affectors.drag(coeff)
   coeff = coeff or 0.1
+  --: (Particle, number) -> ()
   return function(p, dt)
     local factor = 1 - coeff * dt
     if factor < 0 then factor = 0 end
@@ -325,6 +341,7 @@ function M.affectors.turbulence(strength, seed)
   strength = strength or 10
   local s = seed or 1
   -- Seeded LCG noise: advance state per call using particle address trick (use p.x/p.y)
+  --: (Particle, number) -> ()
   return function(p, dt)
     -- Simple hash of position + seed for pseudo-random per-particle noise
     local hx = math.floor(p.x * 0.1 + s * 17) % 65536

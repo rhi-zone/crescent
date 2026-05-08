@@ -20,7 +20,7 @@ M.END   = END
 -- ---------------------------------------------------------------------------
 
 -- Tokenize a string on whitespace, returning an array of tokens.
---: (string) -> { [integer]: string }
+--: (text: string) -> { [integer]: string }
 local function tokenize(text)
   local tokens = {}
   for tok in text:gmatch("%S+") do
@@ -30,7 +30,7 @@ local function tokenize(text)
 end
 
 -- Build an n-gram key string from a table slice tokens[i..i+order-1].
---: ({ [integer]: string }, integer, integer) -> string
+--: (tokens: { [integer]: string }, i: integer, order: integer) -> string
 local function key_from(tokens, i, order)
   local parts = {}
   for j = 0, order - 1 do
@@ -41,9 +41,9 @@ end
 
 -- Weighted random pick from a transitions map { token -> count }.
 -- Returns chosen token and its probability.
---: ({ [string]: integer }, () -> number) -> (string, number)
+--: (trans: { [string]: integer }, rand: () -> number) -> (string | nil, number)
 local function weighted_pick(trans, rand)
-  local total = 0
+  local total = 0 --[[: number ]]
   for _, count in pairs(trans) do
     total = total + count
   end
@@ -51,7 +51,7 @@ local function weighted_pick(trans, rand)
   local r = rand() * total
   local cum = 0
   -- deterministic iteration order: sort keys
-  local keys = {}
+  local keys = {} --[[: { [integer]: string } ]]
   for k in pairs(trans) do keys[#keys + 1] = k end
   table.sort(keys)
   for _, k in ipairs(keys) do
@@ -73,11 +73,11 @@ local Chain = {}
 Chain.__index = Chain
 
 -- Train the chain from a sequence of tokens (already split).
---: ({ [integer]: string }) -> nil
+--: (self: any, tokens: { [integer]: string }) -> nil
 function Chain:_train_tokens(tokens)
   local order = self._order
   -- Prepend `order` START sentinels and one END sentinel.
-  local seq = {}
+  local seq = {} --[[: { [integer]: string } ]]
   for _ = 1, order do seq[#seq + 1] = START end
   for _, t in ipairs(tokens) do seq[#seq + 1] = t end
   seq[#seq + 1] = END
@@ -96,7 +96,7 @@ function Chain:_train_tokens(tokens)
 end
 
 -- Train from a string (splits on whitespace) or an array of tokens.
---: (string | { [integer]: string }) -> nil
+--: (self: any, input: string | { [integer]: string }) -> nil
 function Chain:train(input)
   local tokens
   if type(input) == "string" then
@@ -109,7 +109,7 @@ end
 
 -- Return the raw transitions map { token -> count } for a context.
 -- context may be a string key (pre-joined) or an array of tokens.
---: (string | { [integer]: string }) -> { [string]: integer }
+--: (self: any, context: string | { [integer]: string }) -> { [string]: integer }
 function Chain:transitions(context)
   local key
   if type(context) == "string" then
@@ -128,7 +128,7 @@ end
 
 -- Predict the next token given a context array (length == order).
 -- Returns next_token, probability, or nil, 0 if unknown context.
---: ({ [integer]: string }) -> (string | nil, number)
+--: (self: any, context: { [integer]: string }) -> (string | nil, number)
 function Chain:next(context)
   local key
   if type(context) == "string" then
@@ -146,7 +146,7 @@ end
 --   max_tokens  (default 100)  — hard cap on output tokens (not counting sentinels)
 --   seed_token  (optional)     — force the first real token (must exist in chain)
 --   separator   (default " ")  — join separator
---: ({ max_tokens: integer | nil, seed_token: string | nil, separator: string | nil } | nil) -> string
+--: (self: any, opts: { max_tokens?: integer, seed_token?: string, separator?: string } | nil) -> string
 function Chain:generate(opts)
   opts = opts or {}
   local max_tokens = opts.max_tokens or 100
@@ -155,7 +155,7 @@ function Chain:generate(opts)
 
   local order = self._order
   -- Start with `order` START sentinels as context.
-  local ctx = {}
+  local ctx = {} --[[: { [integer]: string } ]]
   for _ = 1, order do ctx[#ctx + 1] = START end
 
   local result = {}
@@ -187,7 +187,7 @@ function Chain:generate(opts)
 end
 
 -- Serialize the chain to a plain Lua table (snapshot).
---: () -> table
+--: (self: any) -> any
 function Chain:save()
   local snapshot = {
     order = self._order,
@@ -210,7 +210,7 @@ end
 
 -- Create a new empty chain of the given order (default 1).
 -- seed is required for deterministic random generation.
---: (integer, integer) -> table
+--: (order: integer | nil, seed: integer) -> any
 function M.chain(order, seed)
   if not seed then error("markov.chain: seed is required") end
   order = order or 1
@@ -226,7 +226,7 @@ end
 
 -- Restore a chain from a snapshot produced by chain:save().
 -- seed is required for deterministic random generation.
---: (table, integer) -> table
+--: (snapshot: any, seed: integer) -> any
 function M.load(snapshot, seed)
   if not seed then error("markov.load: seed is required") end
   local order = snapshot.order or 1
@@ -249,7 +249,7 @@ end
 
 -- Convenience: build a chain from text, train it, and return it.
 -- order defaults to 1. seed is required.
---: (string, integer, integer | nil) -> table
+--: (text: string, seed: integer, order: integer | nil) -> any
 function M.from_text(text, seed, order)
   local c = M.chain(order or 1, seed)
   c:train(text)

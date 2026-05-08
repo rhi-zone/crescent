@@ -11,9 +11,13 @@ M._tier = "pure"
 -- All matrices represented as arrays of row-arrays.
 -- ---------------------------------------------------------------------------
 
+--:: Matrix = number[][]
+--:: Vector = number[]
+
 local mat = {}
 
 -- Create n×m zero matrix
+--: (integer, integer) -> Matrix
 function mat.zeros(n, m)
   local r = {}
   for i = 1, n do
@@ -24,6 +28,7 @@ function mat.zeros(n, m)
 end
 
 -- Identity matrix n×n
+--: (integer) -> Matrix
 function mat.eye(n)
   local r = mat.zeros(n, n)
   for i = 1, n do r[i][i] = 1 end
@@ -31,6 +36,7 @@ function mat.eye(n)
 end
 
 -- Deep copy a matrix
+--: (Matrix) -> Matrix
 function mat.copy(A)
   local r = {}
   for i = 1, #A do
@@ -41,6 +47,7 @@ function mat.copy(A)
 end
 
 -- Matrix multiply: A (n×k) * B (k×m) -> n×m
+--: (Matrix, Matrix) -> Matrix
 function mat.mul(A, B)
   local n, k, m = #A, #B, #B[1]
   local r = mat.zeros(n, m)
@@ -58,6 +65,7 @@ function mat.mul(A, B)
 end
 
 -- Matrix add: A + B (same dims)
+--: (Matrix, Matrix) -> Matrix
 function mat.add(A, B)
   local n, m = #A, #A[1]
   local r = mat.zeros(n, m)
@@ -68,6 +76,7 @@ function mat.add(A, B)
 end
 
 -- Matrix subtract: A - B (same dims)
+--: (Matrix, Matrix) -> Matrix
 function mat.sub(A, B)
   local n, m = #A, #A[1]
   local r = mat.zeros(n, m)
@@ -78,6 +87,7 @@ function mat.sub(A, B)
 end
 
 -- Transpose: A (n×m) -> m×n
+--: (Matrix) -> Matrix
 function mat.T(A)
   local n, m = #A, #A[1]
   local r = mat.zeros(m, n)
@@ -88,6 +98,7 @@ function mat.T(A)
 end
 
 -- Scalar multiply
+--: (Matrix, number) -> Matrix
 function mat.scale(A, s)
   local n, m = #A, #A[1]
   local r = mat.zeros(n, m)
@@ -99,10 +110,11 @@ end
 
 -- Invert square matrix using Gaussian elimination with partial pivoting.
 -- Returns inverted matrix, or (nil, errmsg) if singular.
+--: (Matrix) -> (Matrix | nil, string | nil)
 function mat.inv(A)
   local n = #A
   -- Augment [A | I]
-  local aug = {}
+  local aug --[[: Matrix]] = {}
   for i = 1, n do
     aug[i] = {}
     for j = 1, n do aug[i][j] = A[i][j] end
@@ -110,8 +122,8 @@ function mat.inv(A)
   end
   for col = 1, n do
     -- Find pivot
-    local pivot_row = nil
-    local pivot_val = 0
+    local pivot_row --: integer | nil
+    local pivot_val = 0.0 --: number
     for row = col, n do
       local v = aug[row][col]
       if v < 0 then v = -v end
@@ -151,11 +163,12 @@ function mat.inv(A)
 end
 
 -- Matrix-vector multiply: A (n×m) * v (m-element array) -> n-element array
+--: (Matrix, Vector) -> Vector
 function mat.mulv(A, v)
   local n, m = #A, #v
   local r = {}
   for i = 1, n do
-    local s = 0
+    local s = 0.0 --: number
     for j = 1, m do s = s + A[i][j] * v[j] end
     r[i] = s
   end
@@ -163,6 +176,7 @@ function mat.mulv(A, v)
 end
 
 -- Outer product: u (n) * vT (m) -> n×m
+--: (Vector, Vector) -> Matrix
 function mat.outer(u, v)
   local n, m = #u, #v
   local r = mat.zeros(n, m)
@@ -173,6 +187,7 @@ function mat.outer(u, v)
 end
 
 -- Vector subtract: a - b
+--: (Vector, Vector) -> Vector
 local function vec_sub(a, b)
   local r = {}
   for i = 1, #a do r[i] = a[i] - b[i] end
@@ -180,6 +195,7 @@ local function vec_sub(a, b)
 end
 
 -- Vector add: a + b
+--: (Vector, Vector) -> Vector
 local function vec_add(a, b)
   local r = {}
   for i = 1, #a do r[i] = a[i] + b[i] end
@@ -245,9 +261,11 @@ function Scalar:variance() return self._P end
 --   x̂  = x̂⁻ + K * (z - H * x̂⁻)
 --   P  = (I - K * H) * P⁻
 
+--:: MultiSelf = { _F: Matrix, _H: Matrix, _Q: Matrix, _R: Matrix, _x: Vector, _P: Matrix, _n: integer, _I: Matrix, ... }
 local Multi = {}
 Multi.__index = Multi
 
+--: ({ F: Matrix, H: Matrix, Q: Matrix, R: Matrix, x0: Vector, P0: Matrix } | nil) -> (MultiSelf | nil, string | nil)
 function M.multivariate(opts)
   if not opts or not opts.F then
     return nil, "opts.F (state transition matrix) required"
@@ -258,20 +276,24 @@ function M.multivariate(opts)
   if not opts.x0 then return nil, "opts.x0 (initial state vector) required" end
   if not opts.P0 then return nil, "opts.P0 (initial covariance) required" end
 
-  local self = setmetatable({}, Multi)
-  self._F  = opts.F
-  self._H  = opts.H
-  self._Q  = opts.Q
-  self._R  = opts.R
-  self._x  = {}
-  for i = 1, #opts.x0 do self._x[i] = opts.x0[i] end
-  self._P  = mat.copy(opts.P0)
-  self._n  = #opts.x0
-  self._I  = mat.eye(self._n)
+  local n = #opts.x0
+  local x = {}
+  for i = 1, n do x[i] = opts.x0[i] end
+  local self --[[: MultiSelf]] = setmetatable({
+    _F = opts.F,
+    _H = opts.H,
+    _Q = opts.Q,
+    _R = opts.R,
+    _x = x,
+    _P = mat.copy(opts.P0),
+    _n = n,
+    _I = mat.eye(n),
+  }, Multi)
   return self
 end
 
 -- Predict step. Returns predicted state array (copy).
+--: (self: MultiSelf) -> Vector
 function Multi:predict()
   self._x = mat.mulv(self._F, self._x)
   -- P⁻ = F P Fᵀ + Q
@@ -283,6 +305,7 @@ end
 
 -- Predict + update with measurement vector z (m-element array).
 -- Returns current state array (copy).
+--: (self: MultiSelf, z: Vector) -> (Vector | nil, string | nil)
 function Multi:update(z)
   -- Predict
   self._x = mat.mulv(self._F, self._x)
@@ -296,7 +319,7 @@ function Multi:update(z)
   local S = mat.add(mat.mul(mat.mul(self._H, self._P), HT), self._R)
   -- Kalman gain: K = P⁻ * Hᵀ * S⁻¹
   local S_inv, err = mat.inv(S)
-  if not S_inv then return nil, "singular innovation covariance: " .. err end
+  if not S_inv then return nil, "singular innovation covariance: " .. tostring(err) end
   local K = mat.mul(mat.mul(self._P, HT), S_inv)
   -- State update: x̂ = x̂⁻ + K * y
   local Ky = mat.mulv(K, y)
@@ -308,12 +331,14 @@ function Multi:update(z)
   return r
 end
 
+--: (self: MultiSelf) -> Vector
 function Multi:state()
   local r = {}
   for i = 1, self._n do r[i] = self._x[i] end
   return r
 end
 
+--: (self: MultiSelf) -> Matrix
 function Multi:covariance()
   return mat.copy(self._P)
 end
@@ -335,9 +360,11 @@ end
 --   x̂  = x̂⁻ + K * (z - h(x̂⁻))
 --   P  = (I - K * Jh(x̂⁻)) * P⁻
 
+--:: ExtendedSelf = { _f: (Vector) -> Vector, _Jf: (Vector) -> Matrix, _h: (Vector) -> Vector, _Jh: (Vector) -> Matrix, _Q: Matrix, _R: Matrix, _x: Vector, _P: Matrix, _n: integer, _I: Matrix, ... }
 local Extended = {}
 Extended.__index = Extended
 
+--: ({ f: (Vector) -> Vector, Jf: (Vector) -> Matrix, h: (Vector) -> Vector, Jh: (Vector) -> Matrix, Q: Matrix, R: Matrix, x0: Vector, P0: Matrix } | nil) -> (ExtendedSelf | nil, string | nil)
 function M.extended(opts)
   if not opts or not opts.f  then return nil, "opts.f required" end
   if not opts.Jf then return nil, "opts.Jf required" end
@@ -348,22 +375,26 @@ function M.extended(opts)
   if not opts.x0 then return nil, "opts.x0 required" end
   if not opts.P0 then return nil, "opts.P0 required" end
 
-  local self = setmetatable({}, Extended)
-  self._f  = opts.f
-  self._Jf = opts.Jf
-  self._h  = opts.h
-  self._Jh = opts.Jh
-  self._Q  = opts.Q
-  self._R  = opts.R
-  self._x  = {}
-  for i = 1, #opts.x0 do self._x[i] = opts.x0[i] end
-  self._P  = mat.copy(opts.P0)
-  self._n  = #opts.x0
-  self._I  = mat.eye(self._n)
+  local n = #opts.x0
+  local x = {}
+  for i = 1, n do x[i] = opts.x0[i] end
+  local self --[[: ExtendedSelf]] = setmetatable({
+    _f = opts.f,
+    _Jf = opts.Jf,
+    _h = opts.h,
+    _Jh = opts.Jh,
+    _Q = opts.Q,
+    _R = opts.R,
+    _x = x,
+    _P = mat.copy(opts.P0),
+    _n = n,
+    _I = mat.eye(n),
+  }, Extended)
   return self
 end
 
 -- Predict step. Returns predicted state array.
+--: (self: ExtendedSelf) -> Vector
 function Extended:predict()
   local Jf = self._Jf(self._x)
   self._x = self._f(self._x)
@@ -374,6 +405,7 @@ function Extended:predict()
 end
 
 -- Predict + update. Returns state array.
+--: (self: ExtendedSelf, z: Vector) -> (Vector | nil, string | nil)
 function Extended:update(z)
   -- Predict
   local Jf = self._Jf(self._x)
@@ -384,7 +416,7 @@ function Extended:update(z)
   local JhT = mat.T(Jh)
   local S = mat.add(mat.mul(mat.mul(Jh, self._P), JhT), self._R)
   local S_inv, err = mat.inv(S)
-  if not S_inv then return nil, "singular S: " .. err end
+  if not S_inv then return nil, "singular S: " .. tostring(err) end
   local K = mat.mul(mat.mul(self._P, JhT), S_inv)
   -- Innovation: z - h(x̂⁻)
   local hx = self._h(self._x)
@@ -398,6 +430,7 @@ function Extended:update(z)
   return r
 end
 
+--: (self: ExtendedSelf) -> Vector
 function Extended:state()
   local r = {}
   for i = 1, self._n do r[i] = self._x[i] end

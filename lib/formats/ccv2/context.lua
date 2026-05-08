@@ -93,6 +93,7 @@ end
 
 -- ── macro environment builder ─────────────────────────────────────────────────
 
+--: ({ card: { name?: string, description?: string, personality?: string, scenario?: string, system_prompt?: string, post_history_instructions?: string, creator_notes?: string, character_version?: string, mes_example?: string, first_mes?: string, ... }, char_name?: string, user_name?: string, persona?: string, max_context?: integer, max_response?: integer, ... }, { role: string, content: string }[] | nil) -> { [string]: string }
 local function make_macro_env(opts, history)
 	local card = opts.card
 	local env = {
@@ -156,6 +157,7 @@ local FIXED_BLOCKS = {
 }
 
 -- assemble(opts) -> messages[] | nil, err
+--: ({ card?: { name?: string, description?: string, personality?: string, scenario?: string, system_prompt?: string, post_history_instructions?: string, creator_notes?: string, character_version?: string, mes_example?: string, first_mes?: string, character_book?: unknown, ... }, history?: { role: string, content: string }[], count_tokens?: (string) -> integer, max_context?: integer, max_response?: integer, char_name?: string, user_name?: string, persona?: string, lorebook_entries?: { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... }, ... }, lorebook_budget_pct?: integer, lorebook_scan_depth?: integer, pin_examples?: boolean, context_order?: string[], ... }) -> ({ role: string, content: string }[] | nil, string | nil)
 function M.assemble(opts)
 	if not opts.card then return nil, "context: card is required" end
 	if not opts.count_tokens then return nil, "context: count_tokens is required" end
@@ -181,7 +183,7 @@ function M.assemble(opts)
 
 	local entries = opts.lorebook_entries
 	if not entries and card.character_book then
-		entries = lorebook.from_ccv2(--[[:! { entries: any, ... }]] card.character_book)
+		entries = lorebook.from_ccv2(--[[:! { entries: any, ... }]] card.character_book) --[[: { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... }, ... } ]]
 	end
 
 	local triggered_before = {}
@@ -198,7 +200,7 @@ function M.assemble(opts)
 		local scan_text = table.concat(scan_parts, "\n")
 
 		-- Also add constant entries (always triggered)
-		local triggered_indices = lorebook.scan(entries, scan_text)
+		local triggered_indices = lorebook.scan(entries --[[: { ... }[] ]], scan_text)
 
 		-- Collect constant entries
 		local triggered_set = {}
@@ -269,7 +271,7 @@ function M.assemble(opts)
 	end
 
 	-- Expand history messages
-	local expanded_history = {}
+	local expanded_history --[[: { role: string, content: string }[] ]] = {}
 	for _, msg in ipairs(history) do
 		expanded_history[#expanded_history + 1] = {
 			role = msg.role,
@@ -278,7 +280,7 @@ function M.assemble(opts)
 	end
 
 	-- Block generators: each returns {role, content}[]
-	local block_gen = {
+	local block_gen --[[: { [string]: () -> { role: string, content: string }[] } ]] = {
 		system_prompt = function()
 			local text = expand(card.system_prompt or "")
 			if text == "" then return {} end

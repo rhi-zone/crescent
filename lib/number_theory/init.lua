@@ -13,14 +13,16 @@ M._tier = "pure"
 -- Modular multiplication that avoids double-precision overflow for n < 2^26.
 -- For larger values we rely on the fact that LuaJIT doubles have 53-bit mantissa
 -- and use a double-precision multiply directly (exact up to 2^53).
+--: (a: number, b: number, m: number) -> number
 local function mulmod(a, b, m)
   return (a * b) % m
 end
 
 -- Fast modular exponentiation: base^exp mod m
+--: (base: number, exp: number, mod: number) -> number
 function M.mod_pow(base, exp, mod)
   if mod == 1 then return 0 end
-  local result = 1
+  local result = 1 --[[: number ]]
   base = base % mod
   while exp > 0 do
     if exp % 2 == 1 then
@@ -37,6 +39,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Write n-1 as 2^r * d, return r, d
+--: (n: number) -> (number, number)
 local function factor_out_twos(n)
   local r, d = 0, n
   while d % 2 == 0 do
@@ -47,6 +50,7 @@ local function factor_out_twos(n)
 end
 
 -- Single Miller-Rabin round with witness a for n
+--: (n: number, a: number, r: number, d: number) -> boolean
 local function miller_rabin_witness(n, a, r, d)
   local x = M.mod_pow(a, d, n)
   if x == 1 or x == n - 1 then return true end
@@ -60,6 +64,7 @@ end
 --- Probabilistic primality test with given witnesses.
 -- Deterministic for n < 3,215,031,751 with witnesses {2,3,5,7}.
 -- Deterministic for n < ~3.3e24 with the full 12-witness set.
+--: (n: number, witnesses: number[]) -> boolean
 function M.miller_rabin(n, witnesses)
   if n < 2 then return false end
   if n == 2 or n == 3 then return true end
@@ -79,6 +84,7 @@ local SMALL_WITNESSES = {2, 3, 5, 7}
 local LARGE_WITNESSES = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37}
 
 --- Primality test using trial division for small n, Miller-Rabin otherwise.
+--: (n: number) -> boolean
 function M.is_prime(n)
   n = math.floor(n)
   if n < 2 then return false end
@@ -93,6 +99,7 @@ function M.is_prime(n)
 end
 
 --- Deterministic trial division primality test.
+--: (n: number) -> boolean
 function M.is_prime_trial(n)
   n = math.floor(n)
   if n < 2 then return false end
@@ -107,6 +114,7 @@ function M.is_prime_trial(n)
 end
 
 --- Smallest prime strictly greater than n.
+--: (n: number) -> number
 function M.next_prime(n)
   n = math.floor(n)
   if n < 2 then return 2 end
@@ -119,6 +127,7 @@ function M.next_prime(n)
 end
 
 --- Largest prime strictly less than n. Returns nil if n <= 2.
+--: (n: number) -> (number | nil)
 function M.prev_prime(n)
   n = math.floor(n)
   if n <= 2 then return nil end
@@ -137,15 +146,20 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Greatest common divisor (Euclidean algorithm).
+--: (a: number, b: number) -> number
 function M.gcd(a, b)
-  a, b = math.abs(math.floor(a)), math.abs(math.floor(b))
+  a = math.abs(math.floor(a))
+  b = math.abs(math.floor(b))
   while b ~= 0 do
-    a, b = b, a % b
+    local prev_b = b
+    b = a % b
+    a = prev_b
   end
   return a
 end
 
 --- Least common multiple.
+--: (a: number, b: number) -> number
 function M.lcm(a, b)
   local g = M.gcd(a, b)
   if g == 0 then return 0 end
@@ -153,6 +167,7 @@ function M.lcm(a, b)
 end
 
 --- Extended GCD. Returns g, x, y such that a*x + b*y = g.
+--: (a: number, b: number) -> (number, number, number)
 function M.gcd_ext(a, b)
   if b == 0 then return a, 1, 0 end
   local g, x1, y1 = M.gcd_ext(b, a % b)
@@ -160,6 +175,7 @@ function M.gcd_ext(a, b)
 end
 
 --- True if gcd(a, b) == 1.
+--: (a: number, b: number) -> boolean
 function M.coprime(a, b)
   return M.gcd(a, b) == 1
 end
@@ -169,6 +185,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Modular inverse of a mod m. Returns nil if gcd(a,m) != 1.
+--: (a: number, m: number) -> (number | nil)
 function M.mod_inv(a, m)
   local g, x = M.gcd_ext(a % m, m)
   if g ~= 1 then return nil end
@@ -178,8 +195,9 @@ end
 --- Chinese Remainder Theorem. Takes varargs of {n, r} pairs.
 -- Returns x, N where x ≡ r_i (mod n_i) for all i and 0 <= x < N.
 -- Moduli must be pairwise coprime.
+--: (...any) -> (number | nil, number | string)
 function M.chinese_remainder(...)
-  local pairs_list = {...}
+  local pairs_list = {...} --[[: { [number]: number[] } ]]
   if #pairs_list == 0 then return nil, "no congruences given" end
   local x = pairs_list[1][2]
   local N = pairs_list[1][1]
@@ -197,6 +215,7 @@ function M.chinese_remainder(...)
 end
 
 --- Euler's totient function φ(n).
+--: (n: number) -> number
 function M.euler_phi(n)
   n = math.floor(n)
   if n <= 0 then return 0 end
@@ -220,13 +239,14 @@ function M.euler_phi(n)
 end
 
 --- Carmichael's lambda function λ(n).
+--: (n: number) -> number
 function M.carmichael_lambda(n)
   n = math.floor(n)
   if n <= 0 then return 0 end
   if n == 1 then return 1 end
   -- Factorize n, then compute lambda using lcm
   local factors = M.factorize(n)
-  local result = 1
+  local result = 1 --[[: number ]]
   for p, e in pairs(factors) do
     local pk = p ^ e
     local lam
@@ -246,12 +266,13 @@ end
 
 --- Pollard's rho algorithm (Brent's variant). Returns a non-trivial factor of n,
 -- or n itself if none found quickly. Assumes n is composite and odd.
+--: (n: number) -> number
 local function pollard_rho(n)
   if n % 2 == 0 then return 2 end
-  local x = 2
-  local y = 2
-  local c = 1
-  local d = 1
+  local x = 2 --[[: number ]]
+  local y = 2 --[[: number ]]
+  local c = 1 --[[: number ]]
+  local d = 1 --[[: number ]]
   while d == 1 do
     x = (mulmod(x, x, n) + c) % n
     y = (mulmod(y, y, n) + c) % n
@@ -261,12 +282,12 @@ local function pollard_rho(n)
   if d == n then
     -- restart with different c
     for try_c = 2, 20 do
-      x = 2
-      y = 2
-      c = try_c
-      d = 1
-      local limit = 1000
-      local count = 0
+      x = 2 --[[: number ]]
+      y = 2 --[[: number ]]
+      c = try_c --[[: number ]]
+      d = 1 --[[: number ]]
+      local limit = 1000 --[[: number ]]
+      local count = 0 --[[: number ]]
       while d == 1 and count < limit do
         x = (mulmod(x, x, n) + c) % n
         y = (mulmod(y, y, n) + c) % n
@@ -288,6 +309,7 @@ local function pollard_rho(n)
 end
 
 -- Internal: fully factorize n into {prime=exponent} table (recursive)
+--: (n: number, result: { [number]: number }) -> nil
 local function factorize_into(n, result)
   if n <= 1 then return end
   if M.is_prime(n) then
@@ -300,6 +322,7 @@ local function factorize_into(n, result)
 end
 
 --- Prime factorization. Returns {p1=e1, p2=e2, ...}.
+--: (n: number) -> { [number]: number }
 function M.factorize(n)
   n = math.floor(n)
   if n <= 1 then return {} end
@@ -330,6 +353,7 @@ function M.factorize(n)
 end
 
 --- Sorted array of prime factors with repetition (e.g. 12 → {2,2,3}).
+--: (n: number) -> number[]
 function M.factors(n)
   local f = M.factorize(n)
   local result = {}
@@ -343,10 +367,11 @@ function M.factors(n)
 end
 
 --- Sorted array of all positive divisors of n.
+--: (n: number) -> number[]
 function M.divisors(n)
   n = math.floor(n)
   if n <= 0 then return {} end
-  local result = {}
+  local result = {} --[[: { [integer]: number } ]]
   local i = 1
   while i * i <= n do
     if n % i == 0 then
@@ -362,9 +387,10 @@ function M.divisors(n)
 end
 
 --- Number of divisors of n.
+--: (n: number) -> number
 function M.num_divisors(n)
   local f = M.factorize(n)
-  local count = 1
+  local count = 1 --[[: number ]]
   for _, e in pairs(f) do
     count = count * (e + 1)
   end
@@ -372,13 +398,14 @@ function M.num_divisors(n)
 end
 
 --- Sum of all divisors of n.
+--: (n: number) -> number
 function M.sum_divisors(n)
   local f = M.factorize(n)
-  local total = 1
+  local total = 1 --[[: number ]]
   for p, e in pairs(f) do
     -- sum of p^0 + p^1 + ... + p^e = (p^(e+1) - 1) / (p - 1)
-    local s = 0
-    local pk = 1
+    local s = 0 --[[: number ]]
+    local pk = 1 --[[: number ]]
     for _ = 0, e do
       s = s + pk
       pk = pk * p
@@ -392,30 +419,38 @@ end
 -- Number properties
 -- ---------------------------------------------------------------------------
 
+--: (n: number) -> number
 local function sum_proper_divisors(n)
   if n <= 1 then return 0 end
   return M.sum_divisors(n) - n
 end
 
 --- True if sum of proper divisors == n.
+--: (n: number) -> boolean
 function M.is_perfect(n)
   n = math.floor(n)
-  return n > 1 and sum_proper_divisors(n) == n
+  if n <= 1 then return false end
+  return sum_proper_divisors(n) == n
 end
 
 --- True if sum of proper divisors > n.
+--: (n: number) -> boolean
 function M.is_abundant(n)
   n = math.floor(n)
-  return n > 0 and sum_proper_divisors(n) > n
+  if n <= 0 then return false end
+  return sum_proper_divisors(n) > n
 end
 
 --- True if sum of proper divisors < n.
+--: (n: number) -> boolean
 function M.is_deficient(n)
   n = math.floor(n)
-  return n > 0 and sum_proper_divisors(n) < n
+  if n <= 0 then return false end
+  return sum_proper_divisors(n) < n
 end
 
 --- Integer square root (floor(sqrt(n))).
+--: (n: number) -> (number | nil)
 function M.isqrt(n)
   n = math.floor(n)
   if n < 0 then return nil end
@@ -428,15 +463,18 @@ function M.isqrt(n)
 end
 
 --- True if n is a perfect square.
+--: (n: number) -> boolean
 function M.is_square(n)
   n = math.floor(n)
   if n < 0 then return false end
   local s = M.isqrt(n)
+  if s == nil then return false end
   return s * s == n
 end
 
 --- If n = base^exp for integer base >= 2 and exp >= 2, returns base, exp.
 -- Otherwise returns nil.
+--: (n: number) -> (number | nil, number | nil)
 function M.is_power(n)
   n = math.floor(n)
   if n < 4 then return nil end
@@ -462,10 +500,11 @@ end
 -- ---------------------------------------------------------------------------
 
 --- All primes <= n as a sorted array.
+--: (n: number) -> number[]
 function M.primes_up_to(n)
   n = math.floor(n)
   if n < 2 then return {} end
-  local sieve = {}
+  local sieve = {} --[[: { [integer]: boolean } ]]
   for i = 2, n do sieve[i] = true end
   local i = 2
   while i * i <= n do
@@ -486,6 +525,7 @@ function M.primes_up_to(n)
 end
 
 --- Count of primes <= n (prime counting function π(n)).
+--: (n: number) -> integer
 function M.prime_pi(n)
   return #M.primes_up_to(n)
 end
@@ -495,6 +535,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Jacobi symbol (a/n) where n is a positive odd integer. Returns -1, 0, or 1.
+--: (a: number, n: number) -> integer
 function M.jacobi(a, n)
   n = math.floor(n)
   a = math.floor(a)
@@ -516,6 +557,7 @@ function M.jacobi(a, n)
 end
 
 --- Legendre symbol (a/p) for prime p. Returns -1, 0, or 1.
+--: (a: number, p: number) -> integer
 function M.legendre(a, p)
   p = math.floor(p)
   a = math.floor(a)

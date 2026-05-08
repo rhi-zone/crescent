@@ -18,6 +18,7 @@ local floor, concat = math.floor, table.concat
 
 --- Strip spaces and dashes from a card number string.
 --- Returns nil if any non-digit, non-space, non-dash characters remain.
+--: (s: any) -> (string | nil)
 local function normalize(s)
 	if type(s) ~= "string" then return nil end
 	local r = gsub(s, "[ -]", "")
@@ -32,11 +33,13 @@ end
 ---                (sum must be divisible by 10 for a valid number).
 --- If false (computing check digit), the rightmost digit in `s` is the last
 --- payload digit — we double every second digit from the right.
+--: (s: string) -> number
 local function luhn_sum(s)
 	local n = #s
 	local sum = 0
 	for i = 1, n do
-		local d = byte(s, i) - 48  -- '0' == 48
+		local b = byte(s, i) or 0
+		local d = b - 48  -- '0' == 48
 		-- Position from the right: (n - i + 1). Double when position is even.
 		-- With check digit included: double positions 2, 4, 6, ... from right.
 		local pos = n - i + 1
@@ -51,15 +54,18 @@ end
 
 --- Validate a Luhn number. Accepts spaces and dashes as separators.
 --- Returns false for empty strings or strings with non-digit characters (besides spaces/dashes).
+--: (s: any) -> boolean
 function M.valid(s)
 	local n = normalize(s)
-	if not n or #n == 0 then return false end
+	if not n then return false end
+	if #n == 0 then return false end
 	return luhn_sum(n) % 10 == 0
 end
 
 --- Compute the Luhn check digit for a payload string (without check digit).
 --- Returns the check digit as an integer (0–9).
 --- Returns nil, errmsg on invalid input.
+--: (s: any) -> (number | nil, string | nil)
 function M.check_digit(s)
 	local n = normalize(s)
 	if not n then return nil, "invalid input: non-digit characters" end
@@ -71,14 +77,16 @@ end
 
 --- Generate a valid Luhn number with the given prefix and total length.
 --- Returns nil, errmsg on invalid input.
+--: (prefix: any, length: any) -> (string | nil, string | nil)
 function M.generate(prefix, length)
 	if type(prefix) ~= "string" then return nil, "prefix must be a string" end
 	if type(length) ~= "number" or length < 1 then return nil, "length must be a positive integer" end
 	local p = normalize(prefix)
 	if not p then return nil, "prefix contains non-digit characters" end
-	if #p >= length then return nil, "prefix length must be less than total length" end
+	local len_n = length --[[: any ]]
+	if #p >= len_n then return nil, "prefix length must be less than total length" end
 	-- Fill remaining digits (except check digit) with zeros, then compute check digit.
-	local payload = p .. rep("0", length - #p - 1)
+	local payload = p .. rep("0", len_n - #p - 1)
 	local cd = M.check_digit(payload)
 	return payload .. tostring(cd)
 end
@@ -95,7 +103,9 @@ local CARD_DEFS = {
 		name = "Visa",
 		lengths = { 13, 16 },
 		-- Match function returns true if a prefix of the number matches.
-		match = function(n)
+		match =
+			--: (n: string) -> boolean
+			function(n)
 			return sub(n, 1, 1) == "4"
 		end,
 	},
@@ -103,12 +113,16 @@ local CARD_DEFS = {
 		id = "mastercard",
 		name = "Mastercard",
 		lengths = { 16 },
-		match = function(n)
+		match =
+			--: (n: string) -> boolean
+			function(n)
 			-- 51–55
-			local p2 = tonumber(sub(n, 1, 2))
+			local s2 = sub(n, 1, 2)
+			local p2 = tonumber(s2)
 			if p2 and p2 >= 51 and p2 <= 55 then return true end
 			-- 2221–2720
-			local p4 = tonumber(sub(n, 1, 4))
+			local s4 = sub(n, 1, 4)
+			local p4 = tonumber(s4)
 			if p4 and p4 >= 2221 and p4 <= 2720 then return true end
 			return false
 		end,
@@ -117,7 +131,9 @@ local CARD_DEFS = {
 		id = "amex",
 		name = "American Express",
 		lengths = { 15 },
-		match = function(n)
+		match =
+			--: (n: string) -> boolean
+			function(n)
 			local p2 = sub(n, 1, 2)
 			return p2 == "34" or p2 == "37"
 		end,
@@ -126,14 +142,18 @@ local CARD_DEFS = {
 		id = "discover",
 		name = "Discover",
 		lengths = { 16, 19 },
-		match = function(n)
+		match =
+			--: (n: string) -> boolean
+			function(n)
 			-- 6011
 			if sub(n, 1, 4) == "6011" then return true end
 			-- 622126–622925
-			local p6 = tonumber(sub(n, 1, 6))
+			local s6 = sub(n, 1, 6)
+			local p6 = tonumber(s6)
 			if p6 and p6 >= 622126 and p6 <= 622925 then return true end
 			-- 644–649
-			local p3 = tonumber(sub(n, 1, 3))
+			local s3 = sub(n, 1, 3)
+			local p3 = tonumber(s3)
 			if p3 and p3 >= 644 and p3 <= 649 then return true end
 			-- 65
 			if sub(n, 1, 2) == "65" then return true end
@@ -144,17 +164,25 @@ local CARD_DEFS = {
 		id = "jcb",
 		name = "JCB",
 		lengths = { 16, 17, 18, 19 },
-		match = function(n)
-			local p4 = tonumber(sub(n, 1, 4))
-			return p4 and p4 >= 3528 and p4 <= 3589
+		match =
+			--: (n: string) -> boolean
+			function(n)
+			local s4 = sub(n, 1, 4)
+			local p4 = tonumber(s4)
+			if p4 == nil then return false end
+			if p4 >= 3528 and p4 <= 3589 then return true end
+			return false
 		end,
 	},
 	{
 		id = "diners",
 		name = "Diners Club",
 		lengths = { 14 },
-		match = function(n)
-			local p3 = tonumber(sub(n, 1, 3))
+		match =
+			--: (n: string) -> boolean
+			function(n)
+			local s3 = sub(n, 1, 3)
+			local p3 = tonumber(s3)
 			if p3 and p3 >= 300 and p3 <= 305 then return true end
 			local p2 = sub(n, 1, 2)
 			if p2 == "36" or p2 == "38" then return true end
@@ -165,7 +193,9 @@ local CARD_DEFS = {
 		id = "unionpay",
 		name = "UnionPay",
 		lengths = { 16, 17, 18, 19 },
-		match = function(n)
+		match =
+			--: (n: string) -> boolean
+			function(n)
 			return sub(n, 1, 2) == "62"
 		end,
 	},
@@ -179,9 +209,11 @@ end
 
 --- Detect the card type from a number string.
 --- Returns the card type id (e.g. "visa") or nil if unknown.
+--: (s: any) -> (string | nil)
 function M.card_type(s)
 	local n = normalize(s)
-	if not n or #n == 0 then return nil end
+	if not n then return nil end
+	if #n == 0 then return nil end
 	for _, def in ipairs(CARD_DEFS) do
 		if def.match(n) then
 			-- Also check length is in the allowed set.
@@ -220,6 +252,7 @@ local FORMAT_GROUPS = {
 	diners  = { 14, { 4, 6, 4 } },
 }
 
+--: (s: string, groups: integer[]) -> string
 local function group_string(s, groups)
 	local parts = {}
 	local pos = 1
@@ -239,6 +272,7 @@ end
 
 --- Format a number string for display with standard space groupings.
 --- Uses card-type-specific grouping; unknown or non-standard lengths fall back to groups of 4.
+--: (s: any) -> any
 function M.format(s)
 	local n = normalize(s)
 	if not n then return s end  -- return as-is if we can't normalize

@@ -222,7 +222,6 @@ end
 
 -- ── Text node splitter ────────────────────────────────────────────────────────
 
--- Split a text node value into a list of mdast nodes (text + link + strong).
 local function split_text(value, repo, mention_strong)
   local nodes = {}
   local pos = 1
