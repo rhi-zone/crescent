@@ -12,6 +12,10 @@ local M = {}
 
 M._tier = "pure"
 
+--:: Some = { _val: unknown, is_some: (self: unknown) -> boolean, is_none: (self: unknown) -> boolean, ... }
+--:: None = { _val: nil, is_some: (self: unknown) -> boolean, is_none: (self: unknown) -> boolean, ... }
+--:: Option = Some | None
+
 -- ── Metatables ────────────────────────────────────────────────────────────────
 
 local Some_mt = {}
@@ -22,7 +26,7 @@ None_mt.__index = None_mt
 
 -- ── Construction ──────────────────────────────────────────────────────────────
 
---: (v: unknown) -> table
+--: (v: unknown) -> Some
 function M.some(v)
 	if v == nil then
 		error("Option.some: value must not be nil", 2)
@@ -32,7 +36,7 @@ end
 
 -- None singleton declared below after None_mt methods are defined.
 
---: (v: unknown) -> table
+--: (v: unknown) -> Option
 function M.of(v)
 	if v ~= nil then
 		return M.some(v)
@@ -42,7 +46,7 @@ end
 
 -- from_result(ok, err): Some(ok) when ok ~= nil, else None.
 -- Mirrors Lua's (value, errmsg) convention.
---: (ok: unknown, err: unknown) -> table
+--: (ok: unknown, err: unknown) -> Option
 function M.from_result(ok, _err)
 	if ok ~= nil then
 		return M.some(ok)
@@ -51,10 +55,11 @@ function M.from_result(ok, _err)
 end
 
 -- from_fn(fn): wraps a function that may return nil into one that returns Option.
---: (fn: (unknown) -> unknown) -> (unknown) -> table
+--: (fn: (unknown) -> unknown) -> (unknown) -> Option
 function M.from_fn(fn)
-	return function(...)
-		local v = fn(...)
+	--: (x: unknown) -> Option
+	return function(x)
+		local v = fn(x)
 		if v ~= nil then
 			return M.some(v)
 		end
@@ -176,7 +181,7 @@ function None_mt:to_bool() return false end
 -- ── Combinators ───────────────────────────────────────────────────────────────
 
 -- all(opts): Some({v1,v2,...}) if all are Some, else None.
---: (opts: {table}) -> table
+--: (opts: Arr<Option>) -> Option
 function M.all(opts)
 	local vals = {}
 	for i = 1, #opts do
@@ -190,7 +195,7 @@ function M.all(opts)
 end
 
 -- any(opts): first Some, or None if all are None.
---: (opts: {table}) -> table
+--: (opts: Arr<Option>) -> Option
 function M.any(opts)
 	for i = 1, #opts do
 		local o = opts[i]

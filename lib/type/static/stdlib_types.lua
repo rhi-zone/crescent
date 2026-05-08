@@ -176,7 +176,10 @@
 --::     max_integer: integer,
 --::     min_integer: integer,
 --::     rad:        (x: number) -> number,
---::     deg:        (x: number) -> number
+--::     deg:        (x: number) -> number,
+--::     tanh:       (x: number) -> number,
+--::     sinh:       (x: number) -> number,
+--::     cosh:       (x: number) -> number
 --:: }
 
 ---------------------------------------------------------------------------

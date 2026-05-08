@@ -9,6 +9,13 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Layer = { weights: { [integer]: { [integer]: number } }, biases: { [integer]: number }, activation: (x: number) -> (number, number), activation_name: string, in_size: integer, out_size: integer }
+--:: Activation = { pre: { [integer]: number }, post: { [integer]: number }, deriv: { [integer]: number } }
+--:: InputActivation = { post: { [integer]: number } }
+--:: AnyActivation = Activation | InputActivation
+--:: Gradients = { [integer]: { dw: { [integer]: { [integer]: number } }, db: { [integer]: number } } }
+--:: Network = { layers: { [integer]: Layer }, forward: (self: Network, input: { [integer]: number }) -> ({ [integer]: number }, { [integer]: AnyActivation }), backward: (self: Network, activations: { [integer]: AnyActivation }, target: { [integer]: number }, loss_fn: (predicted: { [integer]: number }, target: { [integer]: number }) -> (number, { [integer]: number })) -> Gradients, predict: (self: Network, input: { [integer]: number }) -> { [integer]: number }, update: (self: Network, gradients: Gradients, lr: number) -> (), serialize: (self: Network) -> { layers: { [integer]: { in_size: integer, out_size: integer, activation_name: string, weights: { [integer]: { [integer]: number } }, biases: { [integer]: number } } } } }
+
 local exp, log, sqrt, tanh = math.exp, math.log, math.sqrt, math.tanh
 local abs, floor = math.abs, math.floor
 
@@ -42,8 +49,8 @@ function M.softmax(xs)
   local n = #xs
   local max = xs[1]
   for i = 2, n do if xs[i] > max then max = xs[i] end end
-  local sum = 0
-  local out = {}
+  local sum = 0.0 --[[: number]]
+  local out = {} --[[: { [integer]: number }]]
   for i = 1, n do
     out[i] = exp(xs[i] - max)
     sum = sum + out[i]
@@ -147,8 +154,8 @@ function M.network(layers)
   -- activations[i] = { pre: pre-activation values, post: post-activation values, deriv: derivatives }
   -- activations[0] = input (as .post for convenience in backprop)
   function net:forward(input)
-    local acts = {}
-    acts[0] = { post = input }
+    local acts = {} --[[: { [integer]: AnyActivation }]]
+    acts[0] = { post = input } --[[: AnyActivation]]
     local current = input
     for li = 1, #self.layers do
       local layer = self.layers[li]
@@ -340,25 +347,27 @@ end
 -- Loss registry
 -- ---------------------------------------------------------------------------
 
+--:: LossFn = (predicted: { [integer]: number }, target: { [integer]: number }) -> (number, { [integer]: number })
 local LOSSES = {
-  mse                 = M.mse,
-  cross_entropy       = M.cross_entropy,
+  mse                  = M.mse,
+  cross_entropy        = M.cross_entropy,
   binary_cross_entropy = M.binary_cross_entropy,
-}
+} --[[:! { [string]: LossFn | nil }]]
 
 -- ---------------------------------------------------------------------------
 -- Trainer
 -- ---------------------------------------------------------------------------
 
 -- M.trainer(net, opts) -> trainer
+--: (net: Network, opts: unknown) -> unknown
 function M.trainer(net, opts)
-  opts = opts or {}
-  local lr         = opts.lr or 0.01
-  local loss_name  = opts.loss or "mse"
-  local epochs     = opts.epochs or 100
-  local batch_size = opts.batch_size or 1
-  local shuffle    = opts.shuffle ~= false  -- default true
-  local seed       = opts.seed or 42
+  local opts_t = (opts or {}) --[[:! { lr: number | nil, loss: string | nil, epochs: integer | nil, batch_size: integer | nil, shuffle: boolean | nil, seed: integer | nil, ... }]]
+  local lr         = opts_t.lr or 0.01
+  local loss_name  = opts_t.loss or "mse"
+  local epochs     = opts_t.epochs or 100
+  local batch_size = opts_t.batch_size or 1
+  local shuffle    = opts_t.shuffle ~= false  -- default true
+  local seed       = opts_t.seed or 42
 
   local loss_fn = LOSSES[loss_name]
   if not loss_fn then
@@ -368,6 +377,7 @@ function M.trainer(net, opts)
   local trainer = {}
 
   -- trainer:fit(X, Y) -> { losses, epochs }
+  --: (self: unknown, X: { [integer]: { [integer]: number } }, Y: { [integer]: { [integer]: number } }) -> { losses: { [integer]: number }, epochs: integer }
   function trainer:fit(X, Y)
     local n = #X
     local rng = make_rng(seed)
@@ -384,7 +394,7 @@ function M.trainer(net, opts)
         end
       end
 
-      local total_loss = 0
+      local total_loss = 0.0 --[[: number]]
       local b = 1
       while b <= n do
         local bend = math.min(b + batch_size - 1, n)
@@ -438,9 +448,10 @@ function M.trainer(net, opts)
   end
 
   -- trainer:evaluate(X, Y) -> { loss, accuracy }
+  --: (self: unknown, X: { [integer]: { [integer]: number } }, Y: { [integer]: { [integer]: number } }) -> { loss: number, accuracy: number }
   function trainer:evaluate(X, Y)
     local n = #X
-    local total_loss = 0
+    local total_loss = 0.0 --[[: number]]
     local correct = 0
     for i = 1, n do
       local output, _ = net:forward(X[i])
