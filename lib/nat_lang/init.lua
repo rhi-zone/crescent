@@ -102,18 +102,23 @@ end
 -- Porter Stemmer (simplified — covers the most common rules)
 -- ---------------------------------------------------------------------------
 
+--: (string) -> boolean
 local function has_vowel(s)
   return s:find("[aeiou]") ~= nil
 end
 
+--: (string) -> boolean
 local function ends_double_consonant(s)
   local n = #s
   if n < 2 then return false end
   local c = s:sub(n, n)
-  return c ~= "a" and c ~= "e" and c ~= "i" and c ~= "o" and c ~= "u"
-    and s:sub(n - 1, n - 1) == c
+  if c == "a" or c == "e" or c == "i" or c == "o" or c == "u" then
+    return false
+  end
+  return s:sub(n - 1, n - 1) == c
 end
 
+--: (string) -> boolean
 local function cvc(s)
   local n = #s
   if n < 3 then return false end
@@ -121,13 +126,15 @@ local function cvc(s)
   local v  = s:sub(n - 1, n - 1)
   local c2 = s:sub(n, n)
   local vowels = "aeiou"
-  return not vowels:find(c1, 1, true)
-    and     vowels:find(v,  1, true)
-    and not vowels:find(c2, 1, true)
-    and c2 ~= "w" and c2 ~= "x" and c2 ~= "y"
+  if vowels:find(c1, 1, true) then return false end
+  if not vowels:find(v, 1, true) then return false end
+  if vowels:find(c2, 1, true) then return false end
+  if c2 == "w" or c2 == "x" or c2 == "y" then return false end
+  return true
 end
 
 -- Count VC sequences (measure m) in a word stem
+--: (string) -> integer
 local function measure(s)
   local m = 0
   local in_vowel = false
@@ -165,6 +172,7 @@ M.stem = function(word)
   end
 
   -- Step 1b
+  word = word --[[:! string]]
   local step1b_extra = false
   if word:sub(-3) == "eed" then
     local stem = word:sub(1, -4)
@@ -183,6 +191,7 @@ M.stem = function(word)
     end
   end
 
+  word = word --[[:! string]]
   if step1b_extra then
     if word:sub(-2) == "at" or word:sub(-2) == "bl" or word:sub(-2) == "iz" then
       word = word .. "e"
@@ -195,11 +204,13 @@ M.stem = function(word)
   end
 
   -- Step 1c
+  word = word --[[:! string]]
   if word:sub(-1) == "y" and has_vowel(word:sub(1, -2)) then
     word = word:sub(1, -2) .. "i"
   end
 
   -- Step 2
+  word = word --[[:! string]]
   local step2 = {
     {"ational", "ate"}, {"tional", "tion"}, {"enci", "ence"}, {"anci", "ance"},
     {"izer", "ize"}, {"abli", "able"}, {"alli", "al"}, {"entli", "ent"},
@@ -219,6 +230,7 @@ M.stem = function(word)
   end
 
   -- Step 3
+  word = word --[[:! string]]
   local step3 = {
     {"icate", "ic"}, {"ative", ""}, {"alize", "al"}, {"iciti", "ic"},
     {"ical", "ic"}, {"ful", ""}, {"ness", ""},
@@ -235,6 +247,7 @@ M.stem = function(word)
   end
 
   -- Step 4
+  word = word --[[:! string]]
   local step4 = {
     "al", "ance", "ence", "er", "ic", "able", "ible", "ant", "ement",
     "ment", "ent", "ion", "ou", "ism", "ate", "iti", "ous", "ive", "ize",
@@ -257,6 +270,7 @@ M.stem = function(word)
   end
 
   -- Step 5a
+  word = word --[[:! string]]
   if word:sub(-1) == "e" then
     local stem = word:sub(1, -2)
     if measure(stem) > 1 then
@@ -267,6 +281,7 @@ M.stem = function(word)
   end
 
   -- Step 5b
+  word = word --[[:! string]]
   if measure(word) > 1 and ends_double_consonant(word) and word:sub(-1) == "l" then
     word = word:sub(1, -2)
   end
@@ -768,19 +783,24 @@ local negators = { ["not"]=true, ["no"]=true, never=true, neither=true,
 --: (string) -> number
 M.sentiment = function(text)
   local words = M.word_tokenize(text:lower())
-  local score = 0
+  --: number
+  local score = 0.0
   local negated = false
   for i, w in ipairs(words) do
     if negators[w] then
       negated = true
-    elseif positive_words[w] then
-      score = score + (negated and -positive_words[w] or positive_words[w])
-      negated = false
-    elseif negative_words[w] then
-      score = score - (negated and -negative_words[w] or negative_words[w])
-      negated = false
     else
-      negated = false
+      local pval = positive_words[w]
+      local nval = negative_words[w]
+      if pval then
+        score = score + (negated and -pval or pval)
+        negated = false
+      elseif nval then
+        score = score - (negated and -nval or nval)
+        negated = false
+      else
+        negated = false
+      end
     end
   end
   -- Normalize to -1..1
@@ -802,10 +822,10 @@ end
 -- ---------------------------------------------------------------------------
 
 -- opts: { n = number (top N keywords) }
---: (string, { n: number } | nil) -> { string }
+--: (string, { n?: number } | nil) -> { string }
 M.keywords = function(text, opts)
-  opts = opts or {}
-  local n = opts.n or 10
+  local n_raw = opts and opts.n
+  local n = (n_raw or 10) --[[:! number]]
   local words = M.word_tokenize(text:lower())
   local stops = M.stopwords("en")
   -- Filter stopwords
@@ -829,7 +849,8 @@ M.keywords = function(text, opts)
   -- Return top n
   local result = {}
   for i = 1, math.min(n, #pairs_list) do
-    result[i] = pairs_list[i][1]
+    local entry = pairs_list[i]
+    result[i] = entry[1] --[[:! string]]
   end
   return result
 end

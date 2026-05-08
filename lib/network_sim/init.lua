@@ -5,6 +5,27 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Rng = { float: (self: Rng) -> number, int: (self: Rng, a: integer, b: integer) -> integer, next: (self: Rng) -> integer }
+--:: NetTickResult = { delivered: { any }, dropped: { any } }
+--:: Net = {
+--::   _nodes: { [string]: function },
+--::   _queue: { any },
+--::   _history: { any },
+--::   _partitions: { [string]: boolean | nil },
+--::   _latency: { [string]: number | nil },
+--::   _loss: { [string]: number | nil },
+--::   _dup: { [string]: number | nil },
+--::   _rng: Rng,
+--::   _next_msg_id: integer,
+--::   _default_latency: number,
+--::   tick_count: integer,
+--::   send: (self: Net, from: unknown, to: unknown, msg: unknown, opts: unknown | nil) -> (integer | nil, string | nil),
+--::   broadcast: (self: Net, from: unknown, msg: unknown, opts: unknown | nil) -> ({ integer } | nil, string | nil),
+--::   pending: (self: Net) -> { any },
+--::   tick: (self: Net, n: integer | nil) -> NetTickResult,
+--::   ...
+--:: }
+
 -- Deterministic LCG RNG (same parameters as lib/test/arb.lua)
 local function make_rng(seed)
   local state = seed or 12345
@@ -19,7 +40,7 @@ local function make_rng(seed)
   function rng:int(a, b)
     return a + self:next() % (b - a + 1)
   end
-  return rng
+  return rng --[[:! Rng]]
 end
 
 -- Partition key: directed edge a -> b
@@ -31,7 +52,8 @@ end
 -- opts: { seed=42, default_latency=1 }
 function M.network(opts)
   opts = opts or {}
-  local net = {}
+  --: Net
+  local net = {} --[[:! Net]]
   net._nodes = {}        -- id -> handler fn
   net._queue = {}        -- array of { from, to, msg, deliver_at, id }
   net._history = {}      -- array of { tick, type, from, to, msg }
@@ -80,18 +102,18 @@ function M.network(opts)
 
     local delay = opts.delay
     if delay == nil then
-      delay = self._latency[pkey(from, to)]
-      if delay == nil then delay = --[[:! number]] self._default_latency end
+      delay = net._latency[pkey(from, to)]
+      if delay == nil then delay = --[[:! number]] net._default_latency end
     end
 
-    local id = self._next_msg_id
-    self._next_msg_id = self._next_msg_id + 1
+    local id = net._next_msg_id
+    net._next_msg_id = net._next_msg_id + 1
 
-    self._queue[#self._queue + 1] = {
+    net._queue[#net._queue + 1] = {
       from = from,
       to = to,
       msg = msg,
-      deliver_at = self.tick_count + delay,
+      deliver_at = net.tick_count + delay,
       id = id,
       reliable = reliable,
     }
@@ -105,7 +127,7 @@ function M.network(opts)
     local ids = {}
     for id in pairs(self._nodes) do
       if id ~= from then
-        local mid, err = self:send(from, id, msg, opts)
+        local mid, err = net:send(from, id, msg, opts)
         if not mid then return nil, err end
         ids[#ids + 1] = mid
       end
@@ -121,32 +143,32 @@ function M.network(opts)
     local all_dropped = {}
 
     for _ = 1, n do
-      self.tick_count = self.tick_count + 1
+      net.tick_count = net.tick_count + 1
       local remaining = {}
       local deliver_now = {}
 
-      for _, entry in ipairs(self._queue) do
-        if entry.deliver_at <= self.tick_count then
+      for _, entry in ipairs(net._queue) do
+        if entry.deliver_at <= net.tick_count then
           deliver_now[#deliver_now + 1] = entry
         else
           remaining[#remaining + 1] = entry
         end
       end
 
-      self._queue = remaining
+      net._queue = remaining
 
       for _, entry in ipairs(deliver_now) do
         local from, to, msg = entry.from, entry.to, entry.msg
 
         -- Check partition
-        local partitioned = self._partitions[pkey(from, to)]
+        local partitioned = net._partitions[pkey(from, to)]
 
         -- Check loss rate (skip if reliable)
         local lost = false
         if not entry.reliable and not partitioned then
-          local loss = self._loss[pkey(from, to)]
+          local loss = net._loss[pkey(from, to)]
           if loss and loss > 0 then
-            if self._rng:float() < loss then
+            if net._rng:float() < loss then
               lost = true
             end
           end
@@ -155,37 +177,37 @@ function M.network(opts)
 
         if lost then
           all_dropped[#all_dropped + 1] = { from = from, to = to, msg = msg }
-          self._history[#self._history + 1] = {
-            tick = self.tick_count, type = "dropped",
+          net._history[#net._history + 1] = {
+            tick = net.tick_count, type = "dropped",
             from = from, to = to, msg = msg,
           }
         else
           -- Check duplicate rate
-          local dup = self._dup[pkey(from, to)]
+          local dup = net._dup[pkey(from, to)]
           local do_dup = false
           if dup and dup > 0 then
-            if self._rng:float() < dup then
+            if net._rng:float() < dup then
               do_dup = true
             end
           end
 
           -- Deliver
-          local handler = self._nodes[to]
+          local handler = net._nodes[to]
           if handler then
-            handler(msg, from, self)
+            handler(msg, from, net)
           end
           all_delivered[#all_delivered + 1] = { from = from, to = to, msg = msg }
-          self._history[#self._history + 1] = {
-            tick = self.tick_count, type = "delivered",
+          net._history[#net._history + 1] = {
+            tick = net.tick_count, type = "delivered",
             from = from, to = to, msg = msg,
           }
 
           -- Deliver duplicate if applicable
           if do_dup and handler then
-            handler(msg, from, self)
+            handler(msg, from, net)
             all_delivered[#all_delivered + 1] = { from = from, to = to, msg = msg }
-            self._history[#self._history + 1] = {
-              tick = self.tick_count, type = "delivered",
+            net._history[#net._history + 1] = {
+              tick = net.tick_count, type = "delivered",
               from = from, to = to, msg = msg,
               duplicate = true,
             }
@@ -278,6 +300,7 @@ end
 -- Sends msg from `nodes[1]` to all others, then ticks until all delivered.
 -- Returns a function that, when called with the network, drives until idle.
 -- Usage: M.reliable_broadcast(net, nodes, msg) => ticks until no pending
+--: (Net, { unknown }, unknown) -> nil
 function M.reliable_broadcast(network, nodes, msg)
   local sender = nodes[1]
   network:broadcast(sender, msg)
@@ -292,6 +315,7 @@ end
 -- Each node proposes `proposal`; after exchange, returns value with majority.
 -- Each node sends its proposal to all others; first tick delivers; result tallied.
 -- Returns winning value, or nil if no majority.
+--: (Net, { unknown }, unknown) -> unknown
 function M.majority_vote(network, nodes, proposal)
   local votes = {}
   -- Each node sends its proposal to all others
