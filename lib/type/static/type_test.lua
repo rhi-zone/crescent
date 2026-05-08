@@ -2424,6 +2424,21 @@ if x == nil then
 end
 ]])
     end)
+    assert.it("if/else: then assigns, else narrows — post-if excludes nil", function()
+        -- if-branch assigns buf = {}; else-branch only narrows buf to non-nil
+        -- (no reassignment). After the if, buf must be non-nil (union of {}
+        -- and the narrowed type), so #buf is allowed.
+        no_errors([[
+--: { [integer]: string } | nil
+local buf = nil
+if not buf then
+    buf = {}
+else
+    local y = buf[1]
+end
+local x = #buf
+]])
+    end)
     assert.it("if/else both-exit: no join (both branches return)", function()
         no_errors([[
 local function f(cond)

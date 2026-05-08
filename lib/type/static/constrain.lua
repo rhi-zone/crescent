@@ -282,6 +282,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
     if tag == TAG_NAMED then
         local name_id = at.data[0]
         local args_len = at.data[2]
+        --: { [integer]: integer } | nil
         local arg_ids = nil
         if args_len > 0 then
             seen[ann_tid] = true
@@ -2994,6 +2995,8 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
 
     local guard_narrowings = {}  -- Cat E: negated narrowings from exiting clauses
     local branch_ends      = {}  -- { name_id -> type_id } per non-exiting clause
+    local branch_end_scopes = {} -- end-of-branch scope per non-exiting clause (parallel array)
+    local branch_narrowed  = {}  -- { name_id -> true } names narrowed at non-exiting branch entry
     local pass_through_neg = {}  -- negated narrowings for the implicit pass-through path
     local has_else         = false
     local disc_names       = {}  -- name_ids narrowed via field_disc in an exiting arm
@@ -3004,10 +3007,13 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
         local block_start = cn.data[1]
         local block_len   = cn.data[2]
 
+        local entry_narrowed_names  --: { [integer]: true, ... } | nil
         if test_nid >= 0 then
             gen_expr(ctx, test_nid)
             local narrowed = narrow_mod.narrow_scope(ctx, test_nid, true)
             ctx.scope = narrow_mod.apply_narrowed(ctx, narrowed)
+            entry_narrowed_names = {}
+            for name_id in pairs(narrowed) do entry_narrowed_names[name_id] = true end
         else
             has_else = true
             -- Apply all accumulated negated narrowings from preceding if/elseif
@@ -3028,6 +3034,8 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
                 -- Intermediate variable breaks the constraint chain.
                 local else_scope = narrow_mod.apply_narrowed(ctx, else_neg)
                 ctx.scope = else_scope
+                entry_narrowed_names = {}
+                for name_id in pairs(else_neg) do entry_narrowed_names[name_id] = true end
             else
                 ctx.scope = env_mod.child(saved)
             end
@@ -3045,7 +3053,16 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
         end
 
         if not exits then
-            branch_ends[#branch_ends + 1] = branch_scope_diff(ctx, end_scope, saved)
+            local diff = branch_scope_diff(ctx, end_scope, saved)
+            branch_ends[#branch_ends + 1] = diff
+            branch_end_scopes[#branch_end_scopes + 1] = end_scope
+            if entry_narrowed_names then
+                for name_id in pairs(entry_narrowed_names) do
+                    if diff[name_id] == nil then
+                        branch_narrowed[name_id] = true
+                    end
+                end
+            end
         end
 
         -- Restore scope to saved BEFORE computing negated narrowing so that the
@@ -3126,6 +3143,9 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
     for _, et in ipairs(branch_ends) do
         for name_id in pairs(et) do changed[name_id] = true end
     end
+    -- Also consider names that were narrowed at entry of every non-exiting branch
+    -- (without reassignment): the post-if type should reflect that narrowing.
+    for name_id in pairs(branch_narrowed) do changed[name_id] = true end
 
     if next(changed) then
         local join = {}
@@ -3136,8 +3156,16 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
                 t = types_mod.find(ctx, t)
                 if t and not seen_m[t] then seen_m[t] = true; members[#members + 1] = t end
             end
-            for _, et in ipairs(branch_ends) do
-                add_member(et[name_id] or post_guard)
+            for i = 1, #branch_ends do
+                local et = branch_ends[i]
+                local end_scope = branch_end_scopes[i]
+                local t = et[name_id]
+                -- Fall back to the type as known at branch end (which includes entry
+                -- narrowings) so that purely-narrowed (unreassigned) bindings still
+                -- contribute their narrowed type to the join, not the pre-if union.
+                if t == nil then t = env_mod.lookup(end_scope, name_id) end
+                if t == nil then t = post_guard end
+                add_member(t)
             end
             if not has_else then
                 add_member(pass_through_neg[name_id] or post_guard)
