@@ -246,7 +246,7 @@ end
 --: (self: RouterInstance, prefix: string, fn: (g: Group) -> nil) -> nil
 function Router:group(prefix, fn)
 	local router_self = self
-	local g = {}
+	local g = {} --[[:! Group]]
 	g.add = function(_, method, gpath, handler)
 		return router_self:add(method, prefix .. gpath, handler)
 	end

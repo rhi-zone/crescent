@@ -181,7 +181,7 @@ local function encode_varint_signed(n)
   _neg_buf.i = n  -- stores two's complement 64-bit representation
   -- Now extract 10 varint groups of 7 bits from the 8 bytes
   local b = _neg_buf.b
-  local bytes = {}
+  local bytes = {"","","","","","","","","",""}
   -- bits: b[0]..b[7] = bytes 0..7, LSB first (little-endian)
   -- Group into 7-bit chunks across 64 bits = 10 groups (last group ≤ 1 bit)
   -- group 0: bits 0-6   = b[0] & 0x7F

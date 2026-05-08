@@ -544,8 +544,8 @@ function M.index(opts)
   --: (query: query, opts: ({ limit: (number | nil), offset: (number | nil), scorer: (string | nil), explain: (boolean | nil) } | nil)) -> { results: { [integer]: unknown }, total: number }
   function idx:search(query, opts)
     opts = opts or {} --[[:! { limit: number | nil, offset: number | nil, scorer: string | nil, explain: boolean | nil }]]
-    local limit  = (opts.limit  or 10)
-    local offset = (opts.offset or 0)
+    local limit  = (opts.limit  or 10) --[[:! number]]
+    local offset = (opts.offset or 0) --[[:! number]]
     local scorer = (opts.scorer or "bm25")
     local explain = opts.explain or false
 
@@ -567,7 +567,7 @@ function M.index(opts)
     -- Sort by score descending
     table.sort(scored, function(a, b) return a.score > b.score end)
 
-    local total = #scored
+    local total = (#scored) --[[:! integer]]
     local results = {}
     for i = offset + 1, math.min(offset + limit, total) do
       local s = scored[i]

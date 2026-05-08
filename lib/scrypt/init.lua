@@ -133,6 +133,7 @@ end
 -- One 64-byte block = 16 words.  A 2r-block sequence = 2r*16 words.
 
 -- Decode a binary string of length 4*n into an array of n uint32 (LE).
+--: (s: string, offset: integer, count: integer) -> { [integer]: integer }
 local function decode_words(s, offset, count)
   -- offset: 1-based byte offset into s
   -- count: number of 32-bit words to decode
@@ -140,7 +141,11 @@ local function decode_words(s, offset, count)
   local p = offset
   for i = 1, count do
     local b0, b1, b2, b3 = string.byte(s, p, p + 3)
-    w[i] = bor(b0, lshift(b1, 8), lshift(b2, 16), lshift(b3, 24))
+    local i0 = b0 or 0 --[[:! integer]]
+    local i1 = b1 or 0 --[[:! integer]]
+    local i2 = b2 or 0 --[[:! integer]]
+    local i3 = b3 or 0 --[[:! integer]]
+    w[i] = bor(i0, lshift(i1, 8), lshift(i2, 16), lshift(i3, 24))
     p = p + 4
   end
   return w

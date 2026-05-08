@@ -211,7 +211,7 @@ function Promise:await()
 	if self._state == STATE_FULFILLED then
 		return self._value, nil
 	elseif self._state == STATE_REJECTED then
-		return nil, self._reason
+		return nil, self._reason --[[:! string | nil]]
 	end
 	return nil, "promise is pending"
 end

@@ -564,7 +564,7 @@ function M:verify()
   end
 
   local ok, result = check(self._root)
-  if not ok then return nil, result end
+  if not ok then return nil, result --[[:! string | nil]] end
 
   return true
 end

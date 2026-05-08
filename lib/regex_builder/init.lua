@@ -210,7 +210,8 @@ function M.sequence(...)
   local b = M.new()
   local args = {...}
   for i = 1, #args do
-    b._parts[#b._parts + 1] = resolve(args[i])
+    local parts = b._parts --[[:! Arr<string>]]
+    parts[#parts + 1] = resolve(args[i])
   end
   return b
 end
