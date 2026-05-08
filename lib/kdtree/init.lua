@@ -16,7 +16,8 @@ local floor, sqrt, huge = math.floor, math.sqrt, math.huge
 --:: KdEntry = { point: { [integer]: number }, data: unknown }
 --:: KdNode = { split_dim: integer, split_val: number, point: { [integer]: number }, data: unknown, left: KdNode | nil, right: KdNode | nil }
 --:: KdBest = { [integer]: unknown }
---:: KdHeap = { [integer]: { [integer]: unknown } }
+--:: KdHeapItem = { [integer]: unknown }
+--:: KdHeap = { [integer]: KdHeapItem }
 
 -- ---------------------------------------------------------------------------
 -- Internal helpers
@@ -43,7 +44,7 @@ end
 -- Rearranges entries[lo..hi] so that entries[mid] holds the median
 -- by coordinate `dim`, and everything left of mid is <= median,
 -- everything right is >= median.
---: ({any}, integer, integer, integer, integer) -> nil
+--: ({ [integer]: KdEntry }, integer, integer, integer, integer) -> nil
 local function quickselect(entries, lo, hi, mid, dim)
   while lo < hi do
     local pivot_val = entries[floor((lo + hi) / 2)].point[dim]
@@ -140,7 +141,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Recursive NN search. Updates best = {dist_sq, point, data} in place.
---: (KdNode | nil, { [integer]: number }, { [integer]: unknown }) -> nil
+--: (KdNode | nil, { [integer]: number }, KdBest) -> nil
 local function nn_search(node, query, best)
   if node == nil then return end
 
@@ -174,7 +175,7 @@ end
 -- KNN search (k nearest neighbors via max-heap)
 -- ---------------------------------------------------------------------------
 
---: (KdNode | nil, { [integer]: number }, integer, { [integer]: { [integer]: unknown } }) -> nil
+--: (KdNode | nil, { [integer]: number }, integer, KdHeap) -> nil
 local function knn_search(node, query, k, heap)
   if node == nil then return end
 
@@ -241,7 +242,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Check whether a point is inside the box {min={...}, max={...}}
---: ({number}, {number, min: {number}, max: {number}}) -> boolean
+--: ({ [integer]: number }, { min: { [integer]: number }, max: { [integer]: number } }) -> boolean
 local function point_in_box(pt, box)
   local mn, mx = box.min, box.max
   for i = 1, #pt do
@@ -336,7 +337,7 @@ function Tree:nearest(query)
   local best = { huge, nil, nil }
   nn_search(self._root, query, best)
   if best[2] == nil then return nil end
-  return { point = best[2], data = best[3], dist = sqrt(best[1]) }
+  return { point = best[2] --[[:! { [integer]: number }]], data = best[3], dist = sqrt(best[1] --[[:! number]]) }
 end
 
 -- Return the k nearest neighbors to `query` sorted by distance (closest first).
@@ -354,7 +355,7 @@ function Tree:knn(query, k)
   table.sort(results, function(a, b) return a[1] < b[1] end)
   local out = {}
   for i = 1, #results do
-    out[i] = { point = results[i][2], data = results[i][3], dist = sqrt(results[i][1]) }
+    out[i] = { point = results[i][2] --[[:! { [integer]: number }]], data = results[i][3], dist = sqrt(results[i][1] --[[:! number]]) }
   end
   return out
 end
@@ -427,7 +428,7 @@ function M.build(input)
   end
 
   -- Normalise entries to {point, data} form
-  local entries = {}
+  local entries = {} --: { [integer]: KdEntry }
   for i = 1, #input do
     local item = input[i]
     if type(item) ~= "table" then

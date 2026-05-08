@@ -205,7 +205,7 @@ function M.lu(A)
 
   local Lm = Matrix.new(n, n, L_data)
   local Um = Matrix.new(n, n, U_data)
-  return Lm, Um, P, sign
+  return Lm, Um, P, sign, nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -396,7 +396,7 @@ function M.qr(A)
 
   local Qm = Matrix.new(m, n, Q_data)
   local Rm = Matrix.new(n, n, R_data)
-  return Qm, Rm
+  return Qm, Rm, nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -550,7 +550,7 @@ function M.eigen_symmetric(A, max_iter)
     end
   end
   local Vm = Matrix.new(n, n, V_data)
-  return sorted_evals, Vm
+  return sorted_evals, Vm, nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -599,7 +599,7 @@ function M.power_iter(A, max_iter, tol)
     eigenvalue = new_eval
   end
 
-  return eigenvalue, v
+  return eigenvalue, v, nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -620,7 +620,7 @@ function M.svd(A, max_iter)
   if m < n then
     local U2, S2, V2, err = M.svd(Matrix.transpose(A), max_iter)
     if err then return nil, nil, nil, err end
-    return V2, S2, U2
+    return V2, S2, U2, nil
   end
 
   max_iter = max_iter or 100
@@ -729,7 +729,7 @@ function M.svd(A, max_iter)
 
   local Um = Matrix.new(m, n, U_data)
   local Vm = Matrix.new(n, n, V_data)
-  return Um, S_sorted, Vm
+  return Um, S_sorted, Vm, nil
 end
 
 -- ---------------------------------------------------------------------------
