@@ -6,6 +6,25 @@ if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
 end
 
+--:: augment math { tanh: (number) -> number }
+
+--:: LossFn = (pred: Arr<number>, target: Arr<number>) -> number
+
+--:: Net = {
+--::   _layers: Arr<integer>,
+--::   _act_name: string,
+--::   _out_act_name: string,
+--::   _weights: { [integer]: { [integer]: Arr<number> } },
+--::   _biases: { [integer]: Arr<number> },
+--::   _n_layers: integer,
+--::   _zs: { [integer]: Arr<number> },
+--::   _as: { [integer]: Arr<number> },
+--::   forward: (self: Net, input: Arr<number>) -> Arr<number>,
+--::   backward: (self: Net, output: Arr<number>, target: Arr<number>, lr: number) -> nil,
+--::   predict: (self: Net, input: Arr<number>) -> Arr<number>,
+--::   save: (self: Net) -> { layers: Arr<integer>, act_name: string, out_act_name: string, weights: unknown, biases: unknown },
+--:: }
+
 local M = {}
 M._tier = "pure"
 
@@ -85,11 +104,12 @@ M.activations = {
 }
 
 -- Vector softmax
+--: (z: Arr<number>) -> Arr<number>
 local function softmax_vec(z)
   local max = z[1]
   for i = 2, #z do if z[i] > max then max = z[i] end end
-  local sum = 0
-  local out = {}
+  local sum = 0.0 --: number
+  local out = {} --[[:! Arr<number>]]
   for i = 1, #z do
     out[i] = math.exp(z[i] - max)
     sum = sum + out[i]
@@ -101,7 +121,14 @@ end
 -- ---------------------------------------------------------------------------
 -- Loss functions
 -- ---------------------------------------------------------------------------
-M.loss = {}
+--:: LossTable = {
+--::   mse: LossFn,
+--::   mse_deriv: (Arr<number>, Arr<number>) -> Arr<number>,
+--::   cross_entropy: LossFn,
+--::   cross_entropy_softmax_deriv: (Arr<number>, Arr<number>) -> Arr<number>,
+--::   cross_entropy_deriv: (Arr<number>, Arr<number>) -> Arr<number>,
+--:: }
+M.loss = {} --[[:! LossTable]]
 
 function M.loss.mse(pred, target)
   local s = 0
@@ -215,12 +242,15 @@ function M.network(opts)
     _weights     = weights,
     _biases      = biases,
     _n_layers    = n_layers,
-  }
+    _zs          = {} --[[:! { [integer]: number[] }]],
+    _as          = {} --[[:! { [integer]: number[] }]],
+  } --[[:! Net]]
 
   -- -------------------------------------------------------------------------
   -- forward(input) → output array
   -- Also stores intermediate values for backward pass.
   -- -------------------------------------------------------------------------
+  --: (self: Net, input: Arr<number>) -> Arr<number>
   function net:forward(input)
     local act_fn  = M.activations[self._act_name]
     local out_act = M.activations[self._out_act_name]
@@ -269,6 +299,7 @@ function M.network(opts)
   -- backward(output, target, lr) — SGD update
   -- Must be called after forward().
   -- -------------------------------------------------------------------------
+  --: (self: Net, output: Arr<number>, target: Arr<number>, lr: number) -> nil
   function net:backward(output, target, lr)
     local act_fn  = M.activations[self._act_name]
     local L       = self._n_layers - 1   -- index of last weight layer
@@ -323,6 +354,7 @@ function M.network(opts)
   -- -------------------------------------------------------------------------
   -- predict(input) — alias for forward (single sample)
   -- -------------------------------------------------------------------------
+  --: (self: Net, input: Arr<number>) -> Arr<number>
   function net:predict(input)
     return self:forward(input)
   end
@@ -330,6 +362,7 @@ function M.network(opts)
   -- -------------------------------------------------------------------------
   -- save() → snapshot table (deep copy of weights/biases + config)
   -- -------------------------------------------------------------------------
+  --: (self: Net) -> { layers: Arr<integer>, act_name: string, out_act_name: string, weights: unknown, biases: unknown }
   function net:save()
     local w_copy = {}
     local b_copy = {}
@@ -345,7 +378,7 @@ function M.network(opts)
       end
     end
     return {
-      layers           = { unpack(self._layers) },
+      layers           = { unpack(self._layers) } --[[:! Arr<integer>]],
       act_name         = self._act_name,
       out_act_name     = self._out_act_name,
       weights          = w_copy,
@@ -385,16 +418,18 @@ end
 -- dataset: array of {input, target}
 -- opts: { epochs, lr, loss, batch_size, shuffle, seed }
 -- ---------------------------------------------------------------------------
+--:: TrainOpts = { epochs: integer | nil, lr: number | nil, loss: string | nil, batch_size: integer | nil, shuffle: boolean | nil, seed: integer | nil }
+--: (net: Net, dataset: Arr<Arr<Arr<number>>>, opts: TrainOpts | nil) -> (Arr<{ epoch: integer, loss: number }> | nil, string | nil)
 function M.train(net, dataset, opts)
-  opts = opts or {}
-  local epochs     = opts.epochs     or 100
-  local lr         = opts.lr         or 0.01
-  local loss_name  = opts.loss       or "mse"
-  local batch_size = opts.batch_size or #dataset
+  if opts == nil then opts = {} --[[:! TrainOpts]] end
+  local epochs     = (opts.epochs     or 100) --[[:! integer]]
+  local lr         = (opts.lr         or 0.01) --[[:! number]]
+  local loss_name  = (opts.loss       or "mse") --[[:! string]]
+  local batch_size = (opts.batch_size or #dataset) --[[:! integer]]
   local shuffle    = opts.shuffle ~= false
-  local seed       = opts.seed       or 0
+  local seed       = (opts.seed       or 0) --[[:! integer]]
 
-  local loss_fn
+  local loss_fn = M.loss.mse --: LossFn
   if loss_name == "mse" then
     loss_fn = M.loss.mse
   elseif loss_name == "cross_entropy" then
@@ -421,7 +456,7 @@ function M.train(net, dataset, opts)
       end
     end
 
-    local total_loss = 0
+    local total_loss = 0.0 --: number
     local batches    = 0
 
     local pos = 1
@@ -429,7 +464,7 @@ function M.train(net, dataset, opts)
       local batch_end = math.min(pos + batch_size - 1, n)
 
       -- Process batch: accumulate gradients (simple SGD per sample for now)
-      local batch_loss = 0
+      local batch_loss = 0.0 --: number
       for k = pos, batch_end do
         local sample = dataset[idx[k]]
         local input, target = sample[1], sample[2]

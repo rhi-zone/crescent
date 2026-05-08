@@ -171,6 +171,7 @@ end
 
 local encode_value  -- forward declaration
 
+--: ({ [integer]: unknown, ... }) -> boolean
 local function is_array(t)
   local n = #t
   local count = 0
@@ -179,32 +180,36 @@ local function is_array(t)
 end
 
 encode_value = function(v)
-  local t = type(v)
   if v == nil then
     return "\xf6"  -- null
-  elseif t == "boolean" then
+  elseif type(v) == "boolean" then
     return v and "\xf5" or "\xf4"
-  elseif t == "number" then
-    if v == v and v == math.floor(v) and v >= -(2^53) and v <= 2^53 then
+  elseif type(v) == "number" then
+    local nv = v --[[:! number]]
+    if nv == nv and nv == math.floor(nv) and nv >= -(2^53) and nv <= 2^53 then
       -- integer
-      if v >= 0 then
-        return encode_head(0, v)
+      if nv >= 0 then
+        return encode_head(0, nv)
       else
-        return encode_head(1, -1 - v)
+        return encode_head(1, -1 - nv)
       end
     else
-      return "\xfb" .. pack_f64(v)
+      return "\xfb" .. pack_f64(nv)
     end
-  elseif t == "string" then
-    return encode_head(3, #v) .. v
-  elseif t == "table" then
-    if M.is_bytes(v) then
-      local s = v.s
+  elseif type(v) == "string" then
+    local sv = v --[[:! string]]
+    return encode_head(3, #sv) .. sv
+  elseif type(v) == "table" then
+    local tv = v --[[:! { [integer]: unknown, [string]: unknown, ... }]]
+    if M.is_bytes(tv) then
+      local bv = tv --[[:! { s: string, ... }]]
+      local s = bv.s
       return encode_head(2, #s) .. s
-    elseif is_array(v) then
-      local parts = { encode_head(4, #v) }
-      for i = 1, #v do
-        local enc, err = encode_value(v[i])
+    elseif is_array(tv) then
+      local av = tv
+      local parts = { encode_head(4, #av) }
+      for i = 1, #av do
+        local enc, err = encode_value(av[i])
         if err then return nil, err end
         parts[#parts+1] = enc
       end
@@ -212,7 +217,7 @@ encode_value = function(v)
     else
       -- map
       local keys = {}
-      for k in pairs(v) do keys[#keys+1] = k end
+      for k in pairs(tv) do keys[#keys+1] = k end
       table.sort(keys, function(a, b)
         local ta, tb = type(a), type(b)
         if ta ~= tb then return ta < tb end
@@ -222,7 +227,7 @@ encode_value = function(v)
       for _, k in ipairs(keys) do
         local ek, err1 = encode_value(k)
         if err1 then return nil, err1 end
-        local ev, err2 = encode_value(v[k])
+        local ev, err2 = encode_value(tv[k])
         if err2 then return nil, err2 end
         parts[#parts+1] = ek
         parts[#parts+1] = ev
@@ -230,7 +235,7 @@ encode_value = function(v)
       return table.concat(parts)
     end
   else
-    return nil, "cbor.encode: unsupported type: " .. t
+    return nil, "cbor.encode: unsupported type: " .. type(v)
   end
 end
 
@@ -313,21 +318,23 @@ decode_value = function(data, pos)
   if major == 0 then
     -- unsigned integer
     local arg, npos = read_arg(data, info, pos)
-    if npos == nil then return nil, arg end
-    arg = arg --[[:! integer]]  -- arg is errmsg
+    if arg == nil then return nil, npos end
+    arg = arg --[[:! integer]]
+    npos = npos --[[:! integer]]
     return arg, npos
 
   elseif major == 1 then
     -- negative integer: value = -1 - arg
     local arg, npos = read_arg(data, info, pos)
-    if npos == nil then return nil, arg end
+    if arg == nil then return nil, npos end
     arg = arg --[[:! integer]]
+    npos = npos --[[:! integer]]
     return -1 - arg, npos
 
   elseif major == 2 then
     -- byte string
     local arg, npos = read_arg(data, info, pos)
-    if npos == nil then return nil, arg end
+    if arg == nil then return nil, npos end
     arg = arg --[[:! integer]]
     pos = npos --[[:! integer]]
     if arg == -1 then
@@ -354,7 +361,7 @@ decode_value = function(data, pos)
   elseif major == 3 then
     -- text string
     local arg, npos = read_arg(data, info, pos)
-    if npos == nil then return nil, arg end
+    if arg == nil then return nil, npos end
     arg = arg --[[:! integer]]
     pos = npos --[[:! integer]]
     if arg == -1 then
@@ -380,7 +387,7 @@ decode_value = function(data, pos)
   elseif major == 4 then
     -- array
     local arg, npos = read_arg(data, info, pos)
-    if npos == nil then return nil, arg end
+    if arg == nil then return nil, npos end
     arg = arg --[[:! integer]]
     pos = npos --[[:! integer]]
     local arr = {}
@@ -408,7 +415,7 @@ decode_value = function(data, pos)
   elseif major == 5 then
     -- map
     local arg, npos = read_arg(data, info, pos)
-    if npos == nil then return nil, arg end
+    if arg == nil then return nil, npos end
     arg = arg --[[:! integer]]
     pos = npos --[[:! integer]]
     local map = {}
@@ -443,9 +450,9 @@ decode_value = function(data, pos)
 
   elseif major == 6 then
     -- tagged value — skip tag, return inner value
-    local _, npos = read_arg(data, info, pos)
-    if npos == nil then return nil, _ end
-    return decode_value(data, npos)
+    local tag_arg, npos = read_arg(data, info, pos)
+    if tag_arg == nil then return nil, npos end
+    return decode_value(data, npos --[[:! integer]])
 
   elseif major == 7 then
     -- float / simple
@@ -456,8 +463,9 @@ decode_value = function(data, pos)
     elseif info == 25 then
       -- float16: 2 bytes already available via read_arg
       local arg, npos = read_arg(data, info, pos)
-      if npos == nil then return nil, arg end
+      if arg == nil then return nil, npos end
       arg = arg --[[:! integer]]
+      npos = npos --[[:! integer]]
       local sign16 = math.floor(arg / (2^15))
       local exp16  = math.floor(arg / (2^10)) % 32
       local mant16 = arg % (2^10)
@@ -474,8 +482,9 @@ decode_value = function(data, pos)
     elseif info == 26 then
       -- float32: reconstruct from 4-byte arg
       local arg, npos = read_arg(data, info, pos)
-      if npos == nil then return nil, arg end
+      if arg == nil then return nil, npos end
       arg = arg --[[:! integer]]
+      npos = npos --[[:! integer]]
       local sign32 = math.floor(arg / (2^31)) % 2
       local exp32  = math.floor(arg / (2^23)) % 256
       local mant32 = arg % (2^23)
@@ -499,7 +508,7 @@ decode_value = function(data, pos)
     else
       -- simple value (0-19 inline or info==24 for extended)
       local arg, npos = read_arg(data, info, pos)
-      if npos == nil then return nil, arg end
+      if arg == nil then return nil, npos end
       arg = arg --[[:! integer]]
       return nil, "cbor.decode: unsupported simple value: " .. arg
     end
