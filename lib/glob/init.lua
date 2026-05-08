@@ -333,7 +333,7 @@ end
 local Matcher = {}
 Matcher.__index = Matcher
 
---:: Matcher = { _tokens: { type: integer, ... }[], _pattern: string, ... }
+--:: Matcher = { _tokens: { type: integer, ... }[], _pattern: string, match: (self: Matcher, str: string) -> boolean, ... }
 
 --: (self: Matcher, str: string) -> boolean
 function Matcher:match(str)
@@ -386,9 +386,9 @@ end
 -- Convert a glob pattern to a Lua pattern string.
 -- Note: ** and {a,b} are complex; this handles common cases.
 -- Returns a Lua pattern anchored with ^ and $.
---: (pattern: string) -> string | nil
+--: (pattern: string) -> (string | nil, string | nil)
 function M.to_pattern(pattern)
-  local parts = --[[:! string[] ]] {}
+  local parts = --[[:! { [integer]: string }]] {}
   local i = 1
   local len = #pattern
 
@@ -455,7 +455,7 @@ function M.to_pattern(pattern)
       -- convert each branch and combine. This is a best-effort conversion.
       -- For simple literal alternatives, we can use a character class or
       -- just pick the first. For full support, use compile() instead.
-      local alt_pats = {}
+      local alt_pats = --[[:! { [integer]: string }]] {}
       for _, alt in ipairs(alts) do
         local sub, err = M.to_pattern(alt)
         if not sub then return nil, err end
