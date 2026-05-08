@@ -162,6 +162,7 @@ local function get_sha256()
 	return (_sha256.sha256 --[[:! (string) -> string]])
 end
 
+--: (hex: string) -> (string, integer)
 local function hex_to_bin(hex)
 	return (hex:gsub("..", function(h)
 		return string.char(tonumber(h, 16))

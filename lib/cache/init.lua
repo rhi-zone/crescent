@@ -17,7 +17,7 @@ Cache.__index = Cache
 -- opts.ttl: default TTL in seconds (optional)
 -- opts.on_evict: callback(key, value) on eviction (optional)
 -- opts.clock: injectable clock function (required for TTL)
---: (number, CacheOpts | nil) -> Cache | nil
+--: (number, CacheOpts | nil) -> Cache | (nil, string)
 function M.new(capacity, opts)
   if type(capacity) ~= "number" or capacity < 1 then
     return nil, "capacity must be a positive number"

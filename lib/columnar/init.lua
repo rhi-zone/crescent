@@ -245,8 +245,8 @@ function Table:aggregate(opts)
       result[group_by] = g.key
     end
 
-    for agg_name, agg_def in pairs(aggregations) do
-      local agg_def_ = agg_def --[[:! { op: string, col: string }]]
+    for agg_name, agg_def in pairs(aggregations --[[:! { [string]: { op: string, col: string } }]]) do
+      local agg_def_ = agg_def
       local op = agg_def_.op
       if op == "count" then
         result[agg_name] = #g.indices

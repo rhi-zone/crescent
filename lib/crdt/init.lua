@@ -190,7 +190,7 @@ function TPSet:add(elem)
   end
 end
 
---: (TPSet, unknown) -> nil | string
+--: (TPSet, unknown) -> (nil, string) | nil
 function TPSet:remove(elem)
   if not self._add[elem] then
     return nil, "element not in add-set"

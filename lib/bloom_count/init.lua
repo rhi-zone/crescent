@@ -198,7 +198,7 @@ local function cf_positions(self, item)
   local nb = self._num_buckets
   local b1 = h2 % nb
   -- b2 = b1 XOR hash(fingerprint) — ensures b1 can be recovered from b2+fp
-  local b2 = bxor(b1, fnv1a(tostring(fp), 0) % nb)
+  local b2 = bxor(b1, fnv1a(tostring(fp), 0) % nb) --[[:! integer]]
   return b1, b2, fp
 end
 
