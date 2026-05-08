@@ -45,6 +45,11 @@ end
 -- DFA
 -- ---------------------------------------------------------------------------
 
+--:: DFATransitions = { [string]: { [string]: string } }
+--:: DFAObj = { states: string[], alphabet: string[], initial: string, transitions: DFATransitions, accepting: string[], accepting_set: { [string]: true } }
+--:: NFATransitions = { [string]: { [string]: string[] } }
+--:: NFAObj = { states: string[], alphabet: string[], initial: string, transitions: NFATransitions, accepting: string[], accepting_set: { [string]: true } }
+
 local DFA = {}
 DFA.__index = DFA
 
@@ -210,12 +215,15 @@ function DFA:minimize()
   end
 
   -- Compute new states, initial, accepting, transitions
-  local new_states_set = {}
-  for _, r in pairs(rep) do new_states_set[r] = true end
-  -- Remove dead state representative if it's the dead state itself
+  local dead_rep_to_skip --: string | nil
   if dead_needed then
-    local dead_rep = rep[state_to_part[DEAD]]
-    new_states_set[dead_rep] = nil
+    dead_rep_to_skip = rep[state_to_part[DEAD]]
+  end
+  local new_states_set = {} --: { [string]: true }
+  for _, r in pairs(rep) do
+    if r ~= dead_rep_to_skip then
+      new_states_set[r] = true
+    end
   end
 
   local new_states = sorted_keys(new_states_set)
@@ -264,7 +272,9 @@ function DFA:enumerate(max_length)
   local acc = self.accepting_set
 
   -- BFS over (state, path)
-  local queue = {{state = self.initial, path = {}}}
+  --:: QueueItem = { state: string, path: string[] }
+  local initial_state = self.initial --[[:! string]]
+  local queue = {{state = initial_state, path = {}}} --: QueueItem[]
   local head = 1
   while head <= #queue do
     local item = queue[head]
@@ -459,6 +469,7 @@ end
 -- FA.equivalent(dfa1, dfa2) → boolean
 -- Uses the table-filling algorithm (Hopcroft-Karp union-find approach).
 -- Both DFAs must share the same alphabet.
+--: (DFAObj, DFAObj) -> boolean
 function M.equivalent(dfa1, dfa2)
   -- We run the "product DFA" approach: states are pairs (s1, s2).
   -- Two DFAs are equivalent iff for every reachable pair, both are accepting
@@ -470,7 +481,7 @@ function M.equivalent(dfa1, dfa2)
   local alphabet = dfa1.alphabet
 
   local visited = {}
-  local queue = {{dfa1.initial, dfa2.initial}}
+  local queue = {{dfa1.initial, dfa2.initial}} --: string[][]
   local qi = 1
 
   while qi <= #queue do

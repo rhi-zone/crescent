@@ -94,7 +94,7 @@ end
 
 --- Decode a base64 string to binary.
 --- Whitespace (space, tab, CR, LF) is skipped. Returns (nil, errmsg) on invalid input.
---: (string, { url: boolean | nil } | nil) -> string | nil
+--: (string, { url: boolean | nil } | nil) -> (string | nil, string | nil)
 function M.decode(s, opts)
     local dec = (opts and opts.url) and url_dec or std_dec
     local n = #s
@@ -173,7 +173,7 @@ function M.encode_url(s)
 end
 
 --- Decode URL-safe base64 (with or without padding).
---: (string) -> string | nil
+--: (string) -> (string | nil, string | nil)
 function M.decode_url(s)
     return M.decode(s, { url = true })
 end
