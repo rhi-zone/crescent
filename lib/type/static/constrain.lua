@@ -2955,11 +2955,12 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
         gen_block(ctx, block_start, block_len)
         local end_scope = ctx.scope
 
-        -- Detect unconditional exit (return/break as last statement).
-        local exits = false
-        if block_len > 0 then
+        -- Detect unconditional exit (return/break/never-call as last statement,
+        -- or nested if where all branches exit).
+        local exits = is_definitely_returning(ctx, block_start, block_len)
+        if not exits and block_len > 0 then
             local last_n = ctx.nodes:get(ctx.ast_lists:get(block_start + block_len - 1))
-            exits = (last_n.kind == NODE_RETURN_STMT or last_n.kind == NODE_BREAK_STMT)
+            exits = (last_n.kind == NODE_BREAK_STMT)
         end
 
         if not exits then
