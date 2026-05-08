@@ -20,37 +20,40 @@ end
 -- opts.b        BM25 field length normalization (default 0.75)
 -- opts.tokenize custom tokenizer: string -> array of tokens
 -- opts.stem     optional stemmer: token -> token
+--:: Index = { k1: number, b: number, tokenize: (string) -> string[], stem: ((string) -> string) | nil, postings: { [string]: { [unknown]: integer } }, doc_lens: { [unknown]: integer }, docs: { [unknown]: boolean }, total_len: number, N: integer, positions: { [string]: { [unknown]: integer[] } }, ... }
 function M.new(opts)
   opts = opts or {}
   local self = {
-    k1       = opts.k1 or 1.5,
-    b        = opts.b or 0.75,
+    k1       = (opts.k1 or 1.5) --[[: number]],
+    b        = (opts.b or 0.75) --[[: number]],
     tokenize = opts.tokenize or default_tokenize,
     stem     = opts.stem,
     -- postings[term] = { [doc_id] = tf }
-    postings = {},
+    postings = {} --[[: { [string]: { [unknown]: integer } }]],
     -- doc_lens[doc_id] = token count
-    doc_lens = {},
+    doc_lens = {} --[[: { [unknown]: integer }]],
     -- docs[doc_id] = true
-    docs     = {},
+    docs     = {} --[[: { [unknown]: boolean }]],
     -- total_len: sum of all doc lengths (for avgdl)
-    total_len = 0,
+    total_len = 0.0 --[[: number]],
     -- N: doc count
-    N        = 0,
+    N        = 0 --[[: integer]],
     -- positions[term][doc_id] = array of positions (1-indexed)
-    positions = {},
+    positions = {} --[[: { [string]: { [unknown]: integer[] } }]],
   }
   return setmetatable(self, { __index = M })
 end
 
 -- Tokenize and optionally stem a text string.
 -- Returns tokens array and positions table: pos_map[term] = {pos, ...}
+--: (Index, string) -> (string[], { [string]: integer[] })
 local function process_text(self, text)
   local raw = self.tokenize(text)
   local tokens = {}
   local pos_map = {}
   for i, tok in ipairs(raw) do
-    local t = self.stem and self.stem(tok) or tok
+    local stem = self.stem
+    local t = stem and stem(tok) or tok
     tokens[i] = t
     if not pos_map[t] then pos_map[t] = {} end
     local p = pos_map[t]
@@ -60,10 +63,11 @@ local function process_text(self, text)
 end
 
 -- Add a single document to the index.
+--: (self: Index, unknown, string) -> nil
 function M:add(doc_id, text)
   -- Remove first if already present
   if self.docs[doc_id] then
-    self:remove(doc_id)
+    M.remove(self, doc_id)
   end
 
   local tokens, pos_map = process_text(self, text)
@@ -98,6 +102,7 @@ function M:add_all(docs)
 end
 
 -- Remove a document from the index.
+--: (self: Index, unknown) -> (boolean | nil, string | nil)
 function M:remove(doc_id)
   if not self.docs[doc_id] then
     return nil, "doc not found"
@@ -126,12 +131,14 @@ function M:remove(doc_id)
 end
 
 -- Compute avgdl
+--: (Index) -> number
 local function avgdl(self)
   if self.N == 0 then return 0 end
   return self.total_len / self.N
 end
 
 -- BM25 score for a single term in a document
+--: (Index, string, unknown, number) -> number
 local function bm25_term(self, term, doc_id, avg_dl)
   local posting = self.postings[term]
   if not posting then return 0 end
@@ -147,16 +154,18 @@ local function bm25_term(self, term, doc_id, avg_dl)
   local k1  = self.k1
   local b   = self.b
 
+  local safe_avg_dl = avg_dl == 0 and 1.0 or avg_dl --[[: number]]
   local num = tf * (k1 + 1)
-  local den = tf + k1 * (1 - b + b * dl / (avg_dl == 0 and 1 or avg_dl))
+  local den = tf + k1 * (1 - b + b * dl / safe_avg_dl)
   return idf * num / den
 end
 
 -- Search the index.
 -- opts.op    = "OR" (default) or "AND"
 -- opts.limit = max results to return
+--: (self: Index, string, ({ op: (string | nil), limit: (integer | nil), ... } | nil)) -> { id: unknown, score: number }[]
 function M:search(query, opts)
-  opts = opts or {}
+  if not opts then opts = {} --[[:! { op: (string | nil), limit: (integer | nil), ... }]] end
   local op    = opts.op or "OR"
   local limit = opts.limit
 
@@ -193,7 +202,7 @@ function M:search(query, opts)
         end
       end
       if ok then
-        local score = 0
+        local score = 0.0 --[[: number]]
         for _, term in ipairs(terms) do
           score = score + bm25_term(self, term, doc_id, avg)
         end
@@ -213,7 +222,7 @@ function M:search(query, opts)
     end
 
     for doc_id in pairs(candidate_set) do
-      local score = 0
+      local score = 0.0 --[[: number]]
       for _, term in ipairs(terms) do
         score = score + bm25_term(self, term, doc_id, avg)
       end
@@ -239,6 +248,7 @@ function M:search(query, opts)
 end
 
 -- Phrase search: terms must appear adjacent and in order.
+--: (self: Index, string) -> { id: unknown, score: number }[]
 function M:phrase_search(query)
   local query_tokens = process_text(self, query)
   local terms = query_tokens
@@ -266,11 +276,12 @@ function M:phrase_search(query)
       local pos1 = self.positions[terms[1]][doc_id]
       local found = false
       for _, start_pos in ipairs(pos1) do
+        local spos = start_pos --[[: integer]]
         local match = true
         for i = 2, #terms do
           local pi = self.positions[terms[i]][doc_id]
           -- binary-search or linear scan for start_pos + i - 1
-          local target = start_pos + i - 1
+          local target = spos + i - 1
           local hit = false
           for _, p in ipairs(pi) do
             if p == target then hit = true; break end
@@ -280,7 +291,7 @@ function M:phrase_search(query)
         if match then found = true; break end
       end
       if found then
-        local score = 0
+        local score = 0.0 --[[: number]]
         for _, term in ipairs(terms) do
           score = score + bm25_term(self, term, doc_id, avg)
         end

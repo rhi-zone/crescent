@@ -86,13 +86,9 @@ function M.positions(str, pattern, opts)
   local slen = #str
   local plen = #pattern
 
-  -- Normalize strings for matching
-  local str_cmp = str
-  local pat_cmp = pattern
-  if not case_sensitive then
-    str_cmp = str:lower()
-    pat_cmp = pattern:lower()
-  end
+  -- Normalize strings for matching (single assignment to avoid conditional-reassign nil issue)
+  local str_cmp = (not case_sensitive and str:lower() or str) --[[:! string]]
+  local pat_cmp = (not case_sensitive and pattern:lower() or pattern) --[[:! string]]
 
   -- Quick match check
   if not M.match(str_cmp, pat_cmp, {case_sensitive = true}) then
@@ -139,8 +135,9 @@ function M.positions(str, pattern, opts)
   -- prev_dp[i] = best score when last pattern char was matched at str[i]
   -- We only need the previous pattern-char layer.
 
-  local dp_prev = {}  -- dp_prev[si] = best score matching pat[1..j-1] ending at str[si]
-  local dp_curr = {}
+  -- dp_prev[si] = best score matching pat[1..j-1] ending at str[si]
+  local dp_prev = {} --: { [integer]: number }
+  local dp_curr = {} --: { [integer]: number }
   local from_prev = {} -- track back for each (si, pi): from_si
 
   -- Initialize: matching pat[1] at each position in str
@@ -157,7 +154,7 @@ function M.positions(str, pattern, opts)
 
   for j = 1, plen do
     local pc = pat_cmp:byte(j)
-    local layer = {}
+    local layer = {} --: { [integer]: number }
     for i = 1, slen do layer[i] = NEG_INF end
 
     for si2 = 1, slen do
@@ -251,7 +248,7 @@ function M.positions(str, pattern, opts)
 
   for j = 1, plen do
     local pc = pat_cmp:byte(j)
-    local layer = {}
+    local layer = {} --: { [integer]: number }
     local from_layer = {}
     for i = 1, slen do layer[i] = NEG_INF end
 
@@ -326,16 +323,16 @@ end
 -- Returns array of {item, score, positions} sorted by score descending.
 -- opts.key: function(item) -> string  (default: item itself)
 -- opts.case_sensitive: boolean (default: false)
---: (string, string[]|table[], ({key: (((unknown) -> string) | nil), case_sensitive: (boolean | nil)} | nil)) -> {item: unknown, score: number, positions: integer[]}[]
+--: (string, unknown[], ({key: (((unknown) -> string) | nil), case_sensitive: (boolean | nil)} | nil)) -> {item: unknown, score: number, positions: integer[]}[]
 function M.search(pattern, candidates, opts)
   local key_fn = opts and opts.key or nil
   local results = {}
 
   for i = 1, #candidates do
     local item = candidates[i]
-    local str = key_fn and key_fn(item) or item
+    local str = (key_fn and key_fn(item) or item) --[[:! string]]
     local pos, sc = M.positions(str, pattern, opts)
-    if pos then
+    if pos and sc then
       results[#results + 1] = { item = item, score = sc, positions = pos }
     end
   end
