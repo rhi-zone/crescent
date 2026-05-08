@@ -46,13 +46,15 @@ end
 
 function M.event(event_type, data, opts)
   assert(opts and opts.time_fn, "event requires opts.time_fn")
+  --: () -> number
+  local time_fn = (opts --[[:! { time_fn: () -> number, ... }]]).time_fn
   return {
     id             = next_id(),
     type           = event_type,
     aggregate_id   = opts.aggregate_id,
     aggregate_type = opts.aggregate_type,
     version        = opts.version or 0,
-    timestamp      = opts.time_fn(),
+    timestamp      = time_fn(),
     data           = data or {},
     metadata       = opts.metadata or {},
   }
@@ -101,12 +103,13 @@ function Store:append(aggregate_id, events, expected_version)
     local stamped = shallow_copy(ev)
     stamped.aggregate_id  = aggregate_id
     stamped.version       = version
-    stamped.position      = self._global_position + 1
-    self._global_position = self._global_position + 1
+    stamped.position      = (self._global_position --[[:! integer]]) + 1
+    self._global_position = (self._global_position --[[:! integer]]) + 1
     stream[version] = stamped
     -- Notify subscribers.
-    for j = 1, #self._subscribers do
-      self._subscribers[j](stamped)
+    local subs = self._subscribers --[[:! { [integer]: (unknown) -> unknown, ... }]]
+    for j = 1, #subs do
+      subs[j](stamped)
     end
   end
 
@@ -145,7 +148,8 @@ function Store:load_all(opts)
   local filter_type = opts.aggregate_type
 
   local all = {}
-  for _, stream in pairs(self._streams) do
+  local streams = self._streams --[[:! { [unknown]: { [integer]: { position: integer, ... }, ... }, ... }]]
+  for _, stream in pairs(streams) do
     for _, ev in ipairs(stream) do
       if ev.position >= from_pos then
         if not filter_type or ev.aggregate_type == filter_type then
@@ -244,7 +248,8 @@ function M.aggregate(agg_type, handlers, opts)
       self.state = handler(self.state, ev) or self.state
     end
     self.version = next_version
-    self.pending_events[#self.pending_events + 1] = ev
+    local pending = self.pending_events --[[:! { [integer]: unknown, ... }]]
+    pending[#pending + 1] = ev
     return self
   end
 
@@ -337,7 +342,8 @@ function M.load_aggregate(store, aggregate_class, id)
     agg.version = snap.version
   end
 
-  local events = store:load(id, { from_version = agg.version + 1 })
+  local typed_store = store --[[:! { load: (unknown, unknown) -> unknown, ... }]]
+  local events = typed_store:load(id, { from_version = agg.version + 1 })
   agg:apply(events)
 
   return agg

@@ -33,11 +33,16 @@ local EMPTY = {}  -- shared empty captures (treat as read-only)
 
 -- Merge a list of captures tables into one result table.
 -- Named fields are merged by key; array entries accumulate.
+--: (unknown) -> {}
 local function merge_all(list)
+  --: { [integer]: unknown, [string]: unknown, ... } | nil
   local r = nil
   for _, c in ipairs(list) do
     if c ~= EMPTY then
-      if not r then r = {} end
+      if not r then
+        --: { [integer]: unknown, [string]: unknown, ... }
+        r = {}
+      end
       for k, v in pairs(c) do
         if type(k) == "number" then
           r[#r + 1] = v
@@ -57,18 +62,22 @@ end
 
 local SHIFT = 2^24  -- pos fits in 24 bits for typical inputs
 
+-- `_parse: any` opts out of checking _parse's function signature here; the actual parse
+-- functions have heterogeneous input types (string methods vs integer bytes) that require
+-- the individual call sites to be typed rather than through a shared parser-function type.
+--: ({ _id: integer, _parse: any, ... }, unknown, integer, { [number]: unknown, ... } | nil) -> ({} | nil, integer)
 local function cached_parse(p, input, pos, cache)
   if not cache then
     return p._parse(input, pos, nil)
   end
-  local key = p._id * SHIFT + pos
+  local key = (p._id --[[:! integer]]) * SHIFT + pos
   local entry = cache[key]
   if entry ~= nil then
     if entry == false then
       -- In-progress (left-recursion guard) — treat as failure.
       return nil, pos
     end
-    return entry[1], entry[2]
+    return entry[1] --[[:! {} | nil]], entry[2] --[[:! integer]]
   end
   -- Mark in-progress.
   cache[key] = false
@@ -179,7 +188,7 @@ function M.seq(...)
     local caps_list = {}
     local cur = pos
     for i = 1, #parsers do
-      local caps, new_pos = cached_parse(parsers[i], input, cur, cache)
+      local caps, new_pos = cached_parse(parsers[i] --[[:! { _parse: any, _id: integer, ... }]], input, cur, cache)
       if not caps then
         return nil, new_pos
       end
@@ -198,7 +207,7 @@ function M.alt(...)
   local p = make_parser(function(input, pos, cache)
     local furthest = pos
     for i = 1, #parsers do
-      local caps, new_pos = cached_parse(parsers[i], input, pos, cache)
+      local caps, new_pos = cached_parse(parsers[i] --[[:! { _parse: any, _id: integer, ... }]], input, pos, cache)
       if caps then
         return caps, new_pos
       end
@@ -260,7 +269,7 @@ function M.plus(inner)
       cur = new_pos
     end
     if #all == 1 then
-      return all[1], cur
+      return all[1] --[[:! {}]], cur
     end
     local r = {}
     for _, c in ipairs(all) do
@@ -451,8 +460,8 @@ function M.grammar(opts)
 
   function g:parse(input, pos)
     pos = pos or 1
-    local cache = {}
-    return cached_parse(start_parser, input, pos, cache)
+    local cache = {} --[[:! { [number]: unknown, ... } | nil]]
+    return cached_parse(start_parser --[[:! { _parse: any, _id: integer, ... }]], input, pos, cache)
   end
 
   function g:parse_at(input, pos)
