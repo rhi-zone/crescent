@@ -13,13 +13,15 @@ M._tier = "pure"
 -- Helpers
 -- ---------------------------------------------------------------------------
 
+--: (v: unknown) -> string
 local function typeof(v)
   local t = type(v)
   if t == "number" then
     -- JSON Schema distinguishes integer from number.
     -- In Lua all numbers are doubles; treat x as integer when x == math.floor(x)
     -- and it fits in a safe integer range.
-    if v == math.floor(v) and v >= -2^53 and v <= 2^53 then
+    local vn = v --[[:! number]]
+    if vn == math.floor(vn) and vn >= -2^53 and vn <= 2^53 then
       return "integer"
     end
     return "number"
@@ -27,7 +29,8 @@ local function typeof(v)
   if t == "table" then
     -- Distinguish array from object: an array has only consecutive integer keys
     -- starting at 1 (or is empty).
-    local n = #v
+    local vt = v --[[:! { [integer]: unknown, ... }]]
+    local n = #vt
     local count = 0
     for _ in pairs(v) do count = count + 1 end
     if count == 0 then
@@ -48,22 +51,27 @@ local function is_integer(v)
   return type(v) == "number" and v == math.floor(v) and v >= -2^53 and v <= 2^53
 end
 
+--: (a: unknown, b: unknown) -> boolean
 local function deep_equal(a, b)
   if a == b then return true end
   if type(a) ~= "table" or type(b) ~= "table" then return false end
-  for k, v in pairs(a) do
-    if not deep_equal(v, b[k]) then return false end
+  local at = a --[[:! { [unknown]: unknown, ... }]]
+  local bt = b --[[:! { [unknown]: unknown, ... }]]
+  for k, v in pairs(at) do
+    if not deep_equal(v, bt[k]) then return false end
   end
-  for k in pairs(b) do
-    if a[k] == nil then return false end
+  for k in pairs(bt) do
+    if at[k] == nil then return false end
   end
   return true
 end
 
+--: (errors: { [integer]: { path: string, message: string }, ... }, path: string, message: string) -> nil
 local function push_error(errors, path, message)
   errors[#errors + 1] = { path = path, message = message }
 end
 
+--: (base: string, key: string | number) -> string
 local function join_path(base, key)
   if type(key) == "number" then
     return base .. "/" .. (key - 1)  -- JSON Pointer uses 0-based array indices
@@ -79,6 +87,7 @@ end
 
 -- Resolve a JSON Pointer fragment like "#/definitions/Foo" against root_schema.
 -- Only supports absolute-from-root pointers (#/...).
+--: (ref: string, root_schema: unknown) -> (unknown | nil, string | nil)
 local function resolve_ref(ref, root_schema)
   if ref == "#" then return root_schema end
   local pointer = ref:match("^#(/.*)$")
@@ -104,15 +113,17 @@ end
 -- Format validators (advisory — skip unknown formats)
 -- ---------------------------------------------------------------------------
 
-local format_validators = {}
+local format_validators = {} --[[:! { [string]: (s: string) -> (boolean, string | nil) }]]
 
 format_validators["date"] = function(s)
   -- YYYY-MM-DD
   local y, mo, d = s:match("^(%d%d%d%d)-(%d%d)-(%d%d)$")
   if not y then return false, "invalid date format" end
   y, mo, d = tonumber(y), tonumber(mo), tonumber(d)
-  if mo < 1 or mo > 12 then return false, "month out of range" end
-  if d < 1 or d > 31 then return false, "day out of range" end
+  local mo_n = mo --[[:! number]]
+  local d_n = d --[[:! number]]
+  if mo_n < 1 or mo_n > 12 then return false, "month out of range" end
+  if d_n < 1 or d_n > 31 then return false, "day out of range" end
   return true
 end
 
@@ -149,7 +160,8 @@ format_validators["ipv4"] = function(s)
   if #parts ~= 4 then return false, "invalid IPv4" end
   for _, p in ipairs(parts) do
     local n = tonumber(p)
-    if not n or n < 0 or n > 255 or tostring(n) ~= p then
+    if not n then return false, "invalid IPv4 octet: " .. p end
+    if n < 0 or n > 255 or tostring(n) ~= p then
       return false, "invalid IPv4 octet: " .. p
     end
   end
@@ -169,6 +181,7 @@ end
 
 -- validate_value(value, schema, path, root_schema, ref_stack) → ok, errors_list
 -- errors_list is an array of {path, message} tables (may be empty on success).
+--: (value: unknown, schema: unknown, path: string, root_schema: unknown, ref_stack: { [string]: boolean | nil, ... }) -> (boolean, { [integer]: { path: string, message: string }, ... })
 local function validate_value(value, schema, path, root_schema, ref_stack)
   local errors = {}
 
@@ -187,7 +200,7 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
   -- $ref — resolve and validate against resolved schema, ignoring sibling keywords
   -- (draft-7 behaviour).
   if schema["$ref"] ~= nil then
-    local ref = schema["$ref"]
+    local ref = schema["$ref"] --[[:! string]]
     -- Guard against infinite recursion
     if ref_stack[ref] then
       -- Treat circular ref as accepted (we've already validated this path).
@@ -292,7 +305,7 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
   -- Number/integer keywords
   -- -------------------------------------------------------------------------
   if vtype == "number" or vtype == "integer" then
-    local n = value
+    local n = value --[[:! number]]
     if schema.minimum ~= nil then
       if schema.exclusiveMinimum == true then
         if n <= schema.minimum then
@@ -340,7 +353,7 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
   -- Array keywords
   -- -------------------------------------------------------------------------
   if vtype == "array" then
-    local arr = value
+    local arr = value --[[:! { [integer]: unknown, ... }]]
     local len = #arr
 
     if schema.minItems ~= nil and len < schema.minItems then
@@ -416,7 +429,7 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
   -- Object keywords
   -- -------------------------------------------------------------------------
   if vtype == "object" then
-    local obj = value
+    local obj = value --[[:! { [string]: unknown, ... }]]
 
     -- Count properties
     local prop_count = 0
@@ -431,7 +444,7 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
 
     -- required
     if schema.required ~= nil then
-      for _, key in ipairs(schema.required) do
+      for _, key in ipairs(schema.required --[[:! { [integer]: string, ... }]]) do
         if obj[key] == nil then
           push_error(errors, join_path(path, key), "required property missing: " .. key)
         end
@@ -443,7 +456,7 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
 
     -- properties
     if schema.properties ~= nil then
-      for key, prop_schema in pairs(schema.properties) do
+      for key, prop_schema in pairs(schema.properties --[[:! { [string]: unknown, ... }]]) do
         if obj[key] ~= nil then
           validated_keys[key] = true
           local ok2, sub_errors = validate_value(obj[key], prop_schema, join_path(path, key), root_schema, ref_stack)
@@ -488,11 +501,11 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
 
     -- dependencies
     if schema.dependencies ~= nil then
-      for dep_key, dep_val in pairs(schema.dependencies) do
+      for dep_key, dep_val in pairs(schema.dependencies --[[:! { [string]: unknown, ... }]]) do
         if obj[dep_key] ~= nil then
-          if type(dep_val) == "table" and #dep_val > 0 then
+          if type(dep_val) == "table" and #(dep_val --[[:! { [integer]: unknown, ... }]]) > 0 then
             -- Array of required keys
-            for _, required_key in ipairs(dep_val) do
+            for _, required_key in ipairs(dep_val --[[:! { [integer]: string, ... }]]) do
               if obj[required_key] == nil then
                 push_error(errors, path, "dependency of '" .. dep_key .. "' requires '" .. required_key .. "'")
               end
@@ -515,7 +528,7 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
 
   -- allOf
   if schema.allOf ~= nil then
-    for i, sub_schema in ipairs(schema.allOf) do
+    for i, sub_schema in ipairs(schema.allOf --[[:! { [integer]: unknown, ... }]]) do
       local ok2, sub_errors = validate_value(value, sub_schema, path, root_schema, ref_stack)
       if not ok2 then
         push_error(errors, path, "allOf[" .. (i-1) .. "] failed")

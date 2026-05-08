@@ -26,7 +26,7 @@ local function make_rng_luajit(seed)
       state = bit.bxor(state, bit.lshift(state, 5))
       state = bit.band(state, 0xFFFFFFFF)
       -- tobit may give negative; convert to unsigned
-      if state < 0 then state = state + 4294967296 end
+      if state < 0 then state = (state + 4294967296) --[[:! integer]] end
       if state == 0 then state = 1 end
       return state
     end,
@@ -44,21 +44,26 @@ end
 local VOWELS = { a=true, e=true, i=true, o=true, u=true,
                  A=true, E=true, I=true, O=true, U=true }
 
-local modifiers = {}
+--: { [string]: (s: string) -> string }
+local modifiers = {} --[[:! { [string]: (s: string) -> string }]]
 
+--: (s: string) -> string
 function modifiers.capitalize(s)
   if #s == 0 then return s end
   return s:sub(1,1):upper() .. s:sub(2)
 end
 
+--: (s: string) -> string
 function modifiers.uppercase(s)
   return s:upper()
 end
 
+--: (s: string) -> string
 function modifiers.lowercase(s)
   return s:lower()
 end
 
+--: (s: string) -> string
 function modifiers.a(s)
   if #s == 0 then return "a" end
   if VOWELS[s:sub(1,1)] then
@@ -68,6 +73,7 @@ function modifiers.a(s)
   end
 end
 
+--: (s: string) -> string
 function modifiers.s(s)
   if #s == 0 then return s end
   local last = s:sub(-1):lower()
@@ -85,6 +91,7 @@ function modifiers.s(s)
   end
 end
 
+--: (s: string) -> string
 function modifiers.ed(s)
   if #s == 0 then return s end
   local last = s:sub(-1):lower()
@@ -105,6 +112,7 @@ function modifiers.ed(s)
   end
 end
 
+--: (s: string) -> string
 function modifiers.ing(s)
   if #s == 0 then return s end
   local last = s:sub(-1):lower()
@@ -123,6 +131,7 @@ Grammar.__index = Grammar
 
 -- Parse inline assignments [var:value] from start of a string.
 -- Returns: assignments table, rest of string after all [var:value] blocks.
+--: (s: string) -> ({ [integer]: { var: string, val: string }, ... }, string)
 local function parse_inline_assignments(s)
   local assignments = {}
   local pos = 1
@@ -148,6 +157,8 @@ end
 
 -- Expand a template string within a grammar (grammar object with :expand_raw).
 -- depth: current recursion depth
+--:: GrammarObj = { _stack: { [integer]: { [string]: string[], ... }, ... }, _rng: { choice: (self: unknown, n: integer) -> integer, ... }, _max_depth: integer, push: (self: unknown, rules: unknown) -> nil, pop: (self: unknown) -> nil, _lookup: (self: unknown, symbol: string) -> string[] | nil, ... }
+--: (grammar: GrammarObj, template: string, depth: integer, max_depth: integer) -> (string | nil, string | nil)
 local function expand_template(grammar, template, depth, max_depth)
   if depth > max_depth then
     return nil, "max expansion depth exceeded"
@@ -180,6 +191,7 @@ local function expand_template(grammar, template, depth, max_depth)
 end
 
 -- expand_raw: expand #...# patterns in a string (no inline assignment processing)
+--: (grammar: GrammarObj, s: string, depth: integer, max_depth: integer) -> (string | nil, string | nil)
 function expand_raw(grammar, s, depth, max_depth)
   -- Find first #
   local result = {}
@@ -208,13 +220,13 @@ function expand_raw(grammar, s, depth, max_depth)
     local inner = s:sub(hash_start + 1, hash_end - 1)
 
     -- Parse symbol and modifiers: symbol.mod1.mod2...
-    local parts = {}
+    local parts = {} --[[:! { [integer]: string, ... }]]
     for part in (inner .. "."):gmatch("([^.]*)[.]") do
       parts[#parts + 1] = part
     end
 
     local symbol = parts[1]
-    local mods = {}
+    local mods = {} --[[:! { [integer]: string, ... }]]
     for i = 2, #parts do
       mods[#mods + 1] = parts[i]
     end
