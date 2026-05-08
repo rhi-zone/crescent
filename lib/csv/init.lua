@@ -78,20 +78,20 @@ local function parse_field(s, pos, len, sep_b, quot_b, do_trim)
 
     -- Consume terminator after closing quote
     if pos > len then
-      return field, pos, "eof"
+      return field, pos, "eof", nil
     end
     c = (byte(s, pos)) or 0
     if c == sep_b then
-      return field, pos + 1, "delim"
+      return field, pos + 1, "delim", nil
     elseif c == BYTE_CR then
       pos = pos + 1
       if pos <= len and ((byte(s, pos)) or 0) == BYTE_LF then pos = pos + 1 end
-      return field, pos, "newline"
+      return field, pos, "newline", nil
     elseif c == BYTE_LF then
-      return field, pos + 1, "newline"
+      return field, pos + 1, "newline", nil
     end
     -- Lenient: non-conforming char after closing quote; treat as eof terminator
-    return field, pos, "eof"
+    return field, pos, "eof", nil
   end
 
   -- Unquoted field — scan to separator or newline
@@ -101,23 +101,23 @@ local function parse_field(s, pos, len, sep_b, quot_b, do_trim)
     if c == sep_b then
       local field = sub(s, start, pos - 1)
       if do_trim then field = (field:match("^%s*(.-)%s*$")) or field --[[:! string]] end
-      return field, pos + 1, "delim"
+      return field, pos + 1, "delim", nil
     elseif c == BYTE_CR then
       local field = sub(s, start, pos - 1)
       if do_trim then field = (field:match("^%s*(.-)%s*$")) or field --[[:! string]] end
       pos = pos + 1
       if pos <= len and ((byte(s, pos)) or 0) == BYTE_LF then pos = pos + 1 end
-      return field, pos, "newline"
+      return field, pos, "newline", nil
     elseif c == BYTE_LF then
       local field = sub(s, start, pos - 1)
       if do_trim then field = (field:match("^%s*(.-)%s*$")) or field --[[:! string]] end
-      return field, pos + 1, "newline"
+      return field, pos + 1, "newline", nil
     end
     pos = pos + 1
   end
   local field = sub(s, start, pos - 1)
   if do_trim then field = (field:match("^%s*(.-)%s*$")) or field --[[:! string]] end
-  return field, pos, "eof"
+  return field, pos, "eof", nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -345,9 +345,10 @@ function M.iter(s, opts)
   local rows, err = M.decode(s, opts)
   if not rows then error(err) end
   local i = 0
+  local rows_t = rows --[[:! { [integer]: unknown }]]
   return function()
     i = i + 1
-    return rows[i]
+    return rows_t[i] --[[:! { [integer]: unknown } | nil]]
   end
 end
 

@@ -25,17 +25,24 @@ end
 
 -- Merge two type strings into a oneOf list (deduplicating).
 -- Returns either a single schema or {oneOf = {...}}.
+--: (Schema | nil, Schema | nil) -> Schema
 local function merge_schemas(a, b)
-  if a == nil then return b end
+  if a == nil then return b or { type = "null" } end
   if b == nil then return a end
   -- Structural equality: same type string schemas
-  if a.type and b.type and a.type == b.type and not next(a, next(a)) and not next(b, next(b)) then
+  local a_key_count = 0
+  for _ in pairs(a) do a_key_count = a_key_count + 1 end
+  local b_key_count = 0
+  for _ in pairs(b) do b_key_count = b_key_count + 1 end
+  if a.type and b.type and a.type == b.type and a_key_count == 1 and b_key_count == 1 then
     -- both are single-key {type=X} schemas — identical
     return a
   end
   -- Collect oneOf members from both sides
   local seen = {}
+  --: { [integer]: Schema }
   local members = {}
+  --: (Schema) -> nil
   local function add_members(s)
     if s.oneOf then
       for _, m in ipairs(s.oneOf) do add_members(m) end
@@ -66,6 +73,7 @@ end
 -- string   -> {type="string"}
 -- table (array) -> {type="array", items=...}
 -- table (object) -> {type="object", properties=..., required=...}
+--: (unknown) -> Schema
 function M.infer(data)
   local t = type(data)
   if data == nil then
@@ -82,12 +90,14 @@ function M.infer(data)
     return { type = "string" }
   elseif t == "table" then
     -- Determine array vs object: array has only consecutive integer keys from 1
-    local n = #data
+    local data_t = data --[[:! { [unknown]: unknown }]]
+    local n = #data_t
     local is_array = true
     local count = 0
-    for k, _ in pairs(data) do
+    for k, _ in pairs(data_t) do
       count = count + 1
-      if type(k) ~= "number" or k ~= math.floor(k) or k < 1 or k > n then
+      local kn = k --[[:! number]]
+      if type(k) ~= "number" or kn ~= math.floor(kn) or kn < 1 or kn > n then
         is_array = false
         break
       end
@@ -100,7 +110,7 @@ function M.infer(data)
       -- infer items schema by merging all element schemas
       local items_schema = nil
       for i = 1, n do
-        local elem_schema = M.infer(data[i])
+        local elem_schema = M.infer(data_t[i])
         items_schema = merge_schemas(items_schema, elem_schema)
       end
       return { type = "array", items = items_schema or { type = "null" } }
@@ -108,10 +118,10 @@ function M.infer(data)
       -- object
       local properties = {}
       local required = {}
-      for k, v in pairs(data) do
+      for k, v in pairs(data_t) do
         if type(k) == "string" then
-          properties[k] = M.infer(--[[: any]] v)
-          required[#required + 1] = k
+          properties[k] = M.infer(v)
+          required[#required + 1] = k --[[:! string]]
         end
       end
       -- sort required for determinism
@@ -132,6 +142,7 @@ function M.infer_many(samples)
   if #samples == 1 then return M.infer(samples[1]) end
 
   -- Collect per-sample schemas
+  --: { [integer]: Schema }
   local schemas = {}
   for i, s in ipairs(samples) do schemas[i] = M.infer(s) end
 
@@ -157,12 +168,14 @@ function M.infer_many(samples)
   -- All same type
   if first_type == "object" then
     -- Merge properties; required = intersection (keys present in ALL samples)
+    --: { [string]: Schema }
     local all_props = {}      -- key -> merged schema
     local key_count = {}      -- key -> how many samples have it
     local total = #schemas
 
     for _, s in ipairs(schemas) do
-      for k, v in pairs(s.properties) do
+      local props = (s.properties or {}) --[[:! { [string]: Schema }]]
+      for k, v in pairs(props) do
         if all_props[k] then
           all_props[k] = merge_schemas(all_props[k], v)
         else
@@ -208,7 +221,7 @@ local DEFAULTS = {
 }
 
 --- Generate a deterministic example value from a schema.
---: (Schema | nil) -> any
+--: (Schema | nil) -> unknown
 function M.generate(schema)
   if not schema then return nil end
 
@@ -287,12 +300,13 @@ function M.generate_many(schema, n)
 end
 
 --- Generate a randomized example value from a schema.
---: (Schema | nil) -> any
+--: (Schema | nil) -> unknown
 function M.generate_random(schema)
   if not schema then return nil end
   if schema["enum"] then
-    local i = math.random(1, #schema["enum"])
-    return schema["enum"][i]
+    local enum = schema["enum"] --[[:! { [integer]: unknown }]]
+    local i = math.random(1, #enum)
+    return enum[i]
   end
   if schema.oneOf then return M.generate_random(schema.oneOf[math.random(1, #schema.oneOf)]) end
   if schema.anyOf then return M.generate_random(schema.anyOf[math.random(1, #schema.anyOf)]) end
@@ -304,8 +318,8 @@ function M.generate_random(schema)
   elseif t == "boolean" then
     return math.random() > 0.5
   elseif t == "integer" then
-    local lo = schema.minimum or 0
-    local hi = schema.maximum or 100
+    local lo = math.floor(schema.minimum or 0)
+    local hi = math.floor(schema.maximum or 100)
     return math.random(lo, hi)
   elseif t == "number" then
     local lo = schema.minimum or 0
@@ -317,7 +331,12 @@ function M.generate_random(schema)
     local max = schema.maxLength or 10
     local len = min + math.random(0, max - min)
     local s = {}
-    for i = 1, len do s[i] = chars:sub(math.random(1, #chars), math.random(1, #chars)) end
+    local nchars = #chars
+    for i = 1, len do
+      local c1 = math.floor(math.random(1, nchars)) --[[:! integer]]
+      local c2 = math.floor(math.random(1, nchars)) --[[:! integer]]
+      s[i] = chars:sub(c1, c2)
+    end
     return table.concat(s)
   elseif t == "array" then
     local min = schema.minItems or 0
