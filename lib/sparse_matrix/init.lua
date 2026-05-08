@@ -20,7 +20,14 @@ local abs   = math.abs
 local SHIFT = 20
 local MASK  = (1 * 2^SHIFT) - 1  -- lower 20 bits
 
+--:: DOKData = { [number]: number }
+--:: DOKMatrix = { rows: integer, cols: integer, data: DOKData, T: (self: unknown) -> DOKMatrix, to_coo: (self: unknown) -> unknown, to_csr: (self: unknown) -> unknown, to_dense: (self: unknown) -> unknown, mul_vec: (self: unknown, vec: unknown) -> unknown, norm: (self: unknown, p: unknown) -> (number | nil, string | nil) }
+--:: CSRMatrix = { rows: integer, cols: integer, rp: { [integer]: integer }, ci: { [integer]: integer }, cv: { [integer]: number }, to_dok: (self: unknown) -> DOKMatrix }
+--:: COOMatrix = { rows: integer, cols: integer, rows_list: { [integer]: integer }, cols_list: { [integer]: integer }, vals: { [integer]: number }, to_dok: (self: unknown) -> DOKMatrix }
+
+--: (number, number) -> number
 local function key(i, j) return i * 2^SHIFT + j end
+--: (number) -> (number, number)
 local function unkey(k)
   local j = k % 2^SHIFT
   local i = (k - j) / 2^SHIFT
@@ -33,6 +40,7 @@ end
 local DOK = {}
 DOK.__index = DOK
 
+--: (DOKMatrix, number, number, number) -> nil
 function DOK:set(i, j, v)
   local k = key(i, j)
   if v == 0 then
@@ -42,37 +50,49 @@ function DOK:set(i, j, v)
   end
 end
 
+--: (DOKMatrix, number, number) -> number
 function DOK:get(i, j)
   return self.data[key(i, j)] or 0
 end
 
+--: (DOKMatrix, number, number) -> nil
 function DOK:del(i, j)
   self.data[key(i, j)] = nil
 end
 
+--: (DOKMatrix) -> integer
 function DOK:nnz()
   local n = 0
   for _ in pairs(self.data) do n = n + 1 end
   return n
 end
 
+--: (DOKMatrix) -> (integer, integer)
 function DOK:shape()
   return self.rows, self.cols
 end
 
 function DOK:each()
   local t = self.data
-  local k, v = next(t, nil)
+  local keys = {} --[[:! { [integer]: number }]]
+  local vals = {} --[[:! { [integer]: number }]]
+  local n = 0
+  for k, v in pairs(t) do
+    n = n + 1
+    keys[n] = k
+    vals[n] = v
+  end
+  local idx = 0
   return function()
-    while k ~= nil do
-      local i, j = unkey(k)
-      local val = v
-      k, v = next(t, k)
-      return i, j, val
+    idx = idx + 1
+    if idx <= n then
+      local i, j = unkey(keys[idx])
+      return i, j, vals[idx]
     end
   end
 end
 
+--: (DOKMatrix) -> { [integer]: { [integer]: number } }
 function DOK:to_dense()
   local rows, cols = self.rows, self.cols
   local out = {}
@@ -85,6 +105,7 @@ function DOK:to_dense()
   return out
 end
 
+--: (DOKMatrix) -> CSRMatrix
 function DOK:to_csr()
   local rows, cols = self.rows, self.cols
   -- collect and sort entries row-major
@@ -98,9 +119,9 @@ function DOK:to_csr()
     return a[2] < b[2]
   end)
 
-  local rp = {}  -- row pointers (length rows+1)
-  local ci = {}  -- column indices
-  local cv = {}  -- values
+  local rp = {} --[[:! { [integer]: integer }]]  -- row pointers (length rows+1)
+  local ci = {} --[[:! { [integer]: integer }]]  -- column indices
+  local cv = {} --[[:! { [integer]: number }]]   -- values
 
   for r = 1, rows + 1 do rp[r] = 1 end
 
@@ -118,57 +139,63 @@ function DOK:to_csr()
   return M._make_csr(rows, cols, rp, ci, cv)
 end
 
+--: (DOKMatrix) -> COOMatrix
 function DOK:to_coo()
-  local rows_list, cols_list, vals = {}, {}, {}
+  local rows_list = {} --[[:! { [integer]: integer }]]
+  local cols_list = {} --[[:! { [integer]: integer }]]
+  local vals = {} --[[:! { [integer]: number }]]
   for k, v in pairs(self.data) do
     local i, j = unkey(k)
-    rows_list[#rows_list + 1] = i
-    cols_list[#cols_list + 1] = j
+    rows_list[#rows_list + 1] = i --[[:! integer]]
+    cols_list[#cols_list + 1] = j --[[:! integer]]
     vals[#vals + 1] = v
   end
   return M._make_coo(self.rows, self.cols, rows_list, cols_list, vals)
 end
 
+--: (DOKMatrix, { [integer]: number }) -> { [integer]: number }
 function DOK:mul_vec(vec)
   local rows, cols = self.rows, self.cols
-  local out = {}
+  local out = {} --[[:! { [integer]: number }]]
   for r = 1, rows do out[r] = 0 end
   for k, v in pairs(self.data) do
     local i, j = unkey(k)
-    out[i] = out[i] + v * (vec[j] or 0)
+    out[i --[[:! integer]]] = out[i --[[:! integer]]] + v * (vec[j --[[:! integer]]] or 0)
   end
   return out
 end
 
+--: (DOKMatrix, integer | "inf" | "fro") -> (number | nil, string | nil)
 function DOK:norm(p)
   if p == 1 then
     -- max column sum of absolute values
-    local col_sum = {}
+    local col_sum = {} --[[:! { [number]: number }]]
     for k, v in pairs(self.data) do
       local _, j = unkey(k)
       col_sum[j] = (col_sum[j] or 0) + abs(v)
     end
-    local mx = 0
+    local mx = 0 --: number
     for _, s in pairs(col_sum) do if s > mx then mx = s end end
     return mx
   elseif p == "inf" then
     -- max row sum of absolute values
-    local row_sum = {}
+    local row_sum = {} --[[:! { [number]: number }]]
     for k, v in pairs(self.data) do
       local i = floor(k / 2^SHIFT)
       row_sum[i] = (row_sum[i] or 0) + abs(v)
     end
-    local mx = 0
+    local mx = 0 --: number
     for _, s in pairs(row_sum) do if s > mx then mx = s end end
     return mx
   elseif p == "fro" then
-    local s = 0
+    local s = 0 --: number
     for _, v in pairs(self.data) do s = s + v * v end
     return sqrt(s)
   end
   return nil, "unsupported norm: " .. tostring(p)
 end
 
+--: (DOKMatrix) -> DOKMatrix
 function DOK:T()
   local out = M.dok(self.cols, self.rows)
   for k, v in pairs(self.data) do
@@ -192,10 +219,12 @@ function CSR:get(i, j)
   return 0
 end
 
+--: (CSRMatrix) -> integer
 function CSR:nnz()
   return #self.cv
 end
 
+--: (CSRMatrix) -> (integer, integer)
 function CSR:shape()
   return self.rows, self.cols
 end
@@ -218,6 +247,7 @@ function CSR:each()
   end
 end
 
+--: (CSRMatrix) -> { [integer]: { [integer]: number } }
 function CSR:to_dense()
   local rows, cols = self.rows, self.cols
   local rp, ci, cv = self.rp, self.ci, self.cv
@@ -232,6 +262,7 @@ function CSR:to_dense()
   return out
 end
 
+--: (CSRMatrix) -> DOKMatrix
 function CSR:to_dok()
   local d = M.dok(self.rows, self.cols)
   local rp, ci, cv = self.rp, self.ci, self.cv
@@ -243,12 +274,15 @@ function CSR:to_dok()
   return d
 end
 
+--: (CSRMatrix) -> CSRMatrix
 function CSR:to_csr() return self end
 
+--: (CSRMatrix) -> COOMatrix
 function CSR:to_coo()
-  return self:to_dok():to_coo()
+  return (self:to_dok():to_coo() --[[:! COOMatrix]])
 end
 
+--: (CSRMatrix, { [integer]: number }) -> { [integer]: number }
 function CSR:mul_vec(vec)
   local rows = self.rows
   local rp, ci, cv = self.rp, self.ci, self.cv
@@ -263,10 +297,12 @@ function CSR:mul_vec(vec)
   return out
 end
 
+--: (CSRMatrix, integer | "inf" | "fro") -> (number | nil, string | nil)
 function CSR:norm(p)
   return self:to_dok():norm(p)
 end
 
+--: (CSRMatrix) -> DOKMatrix
 function CSR:T()
   return self:to_dok():T()
 end
@@ -277,14 +313,17 @@ end
 local COO = {}
 COO.__index = COO
 
+--: (COOMatrix) -> integer
 function COO:nnz()
   return #self.vals
 end
 
+--: (COOMatrix) -> (integer, integer)
 function COO:shape()
   return self.rows, self.cols
 end
 
+--: (COOMatrix) -> () -> unknown
 function COO:each()
   local rs, cs, vs = self.rows_list, self.cols_list, self.vals
   local i = 0
@@ -295,6 +334,7 @@ function COO:each()
   end
 end
 
+--: (COOMatrix) -> DOKMatrix
 function COO:to_dok()
   local d = M.dok(self.rows, self.cols)
   local rs, cs, vs = self.rows_list, self.cols_list, self.vals
@@ -304,24 +344,30 @@ function COO:to_dok()
   return d
 end
 
+--: (COOMatrix) -> CSRMatrix
 function COO:to_csr()
-  return self:to_dok():to_csr()
+  return (self:to_dok():to_csr() --[[:! CSRMatrix]])
 end
 
+--: (COOMatrix) -> COOMatrix
 function COO:to_coo() return self end
 
+--: (COOMatrix) -> { [integer]: { [integer]: number } }
 function COO:to_dense()
-  return self:to_dok():to_dense()
+  return (self:to_dok():to_dense() --[[:! { [integer]: { [integer]: number } }]])
 end
 
+--: (COOMatrix, { [integer]: number }) -> { [integer]: number }
 function COO:mul_vec(vec)
-  return self:to_dok():mul_vec(vec)
+  return (self:to_dok():mul_vec(vec) --[[:! { [integer]: number }]])
 end
 
+--: (COOMatrix, integer | "inf" | "fro") -> (number | nil, string | nil)
 function COO:norm(p)
   return self:to_dok():norm(p)
 end
 
+--: (COOMatrix) -> DOKMatrix
 function COO:T()
   return self:to_dok():T()
 end
@@ -329,8 +375,9 @@ end
 -- ── arithmetic helpers (format-agnostic) ──────────────────────────────────────
 
 -- Convert anything to DOK for element-wise access.
+--: ({ to_dok: () -> DOKMatrix, ... }) -> DOKMatrix
 local function as_dok(A)
-  if getmetatable(A) == DOK then return A end
+  if getmetatable(A) == DOK then return A --[[:! DOKMatrix]] end
   return A:to_dok()
 end
 
@@ -368,17 +415,20 @@ COO.__mul = mt_mul
 
 -- ── public constructors ───────────────────────────────────────────────────────
 
+--: (integer, integer) -> DOKMatrix
 function M.dok(rows, cols)
-  return setmetatable({ rows = rows, cols = cols, data = {} }, DOK)
+  return (setmetatable({ rows = rows, cols = cols, data = {} --[[:! DOKData]] }, DOK) --[[:! DOKMatrix]])
 end
 
+--: (integer, integer, { [integer]: integer }, { [integer]: integer }, { [integer]: number }) -> CSRMatrix
 function M._make_csr(rows, cols, rp, ci, cv)
-  return setmetatable({ rows = rows, cols = cols, rp = rp, ci = ci, cv = cv }, CSR)
+  return (setmetatable({ rows = rows, cols = cols, rp = rp, ci = ci, cv = cv }, CSR) --[[:! CSRMatrix]])
 end
 
+--: (integer, integer, { [integer]: integer }, { [integer]: integer }, { [integer]: number }) -> COOMatrix
 function M._make_coo(rows, cols, rows_list, cols_list, vals)
-  return setmetatable({ rows = rows, cols = cols,
-                        rows_list = rows_list, cols_list = cols_list, vals = vals }, COO)
+  return (setmetatable({ rows = rows, cols = cols, --[[:! COOMatrix]]
+                        rows_list = rows_list, cols_list = cols_list, vals = vals }, COO) --[[:! COOMatrix]])
 end
 
 -- M.coo(rows, cols, triples) where triples = {{i,j,v},...}

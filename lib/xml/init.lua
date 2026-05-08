@@ -77,35 +77,35 @@ local function parse_attrs(xml, pos)
     elseif xml:sub(pos, pos + 1) == "/>" then
       return attrs, true, pos + 2
     elseif c == "" then
-      return nil, "unexpected end of input in tag"
+      return nil, "unexpected end of input in tag", nil
     end
     -- attribute name
     local aname, after_name = xml:match("^([%w_:%.%-]+)()", pos)
     if not aname then
-      return nil, "expected attribute name at position " .. pos
+      return nil, "expected attribute name at position " .. pos, nil
     end
     pos = after_name --[[:! integer]]
     -- optional whitespace + '='
     pos = ((xml:match("^%s*()", pos) --[[:! integer | nil]]) or pos)
     if xml:sub(pos, pos) ~= "=" then
-      return nil, "expected '=' after attribute name '" .. aname .. "'"
+      return nil, "expected '=' after attribute name '" .. aname .. "'", nil
     end
     pos = pos + 1
     pos = ((xml:match("^%s*()", pos) --[[:! integer | nil]]) or pos)
     -- quoted value
     local q = xml:sub(pos, pos)
     if q ~= '"' and q ~= "'" then
-      return nil, "expected quote in attribute value for '" .. aname .. "'"
+      return nil, "expected quote in attribute value for '" .. aname .. "'", nil
     end
     local pattern = "^" .. q .. "([^" .. q .. "]*)" .. q .. "()"
     local aval, after_val = xml:match(pattern, pos)
     if not aval then
-      return nil, "unterminated attribute value for '" .. aname .. "'"
+      return nil, "unterminated attribute value for '" .. aname .. "'", nil
     end
     attrs[aname] = M.unescape(aval)
     pos = after_val --[[:! integer]]
   end
-  return nil, "unexpected end of input while parsing attributes"
+  return nil, "unexpected end of input while parsing attributes", nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -134,7 +134,7 @@ function M.sax(xml, handlers)
 
   local pos = 1 --: integer
   local len = #xml
-  local stack = {} --[[:! { [integer]: string }]] -- open tag names for error reporting
+  local stack = {} --[[:! { [integer]: string | nil }]] -- open tag names for error reporting
 
   fire("start_document")
 
@@ -230,7 +230,7 @@ function M.sax(xml, handlers)
       end
       local attrs, self_closing, new_pos = parse_attrs(xml, after_name)
       if not attrs then
-        return nil, self_closing  -- self_closing is errmsg here
+        return nil, self_closing --[[:! string]]  -- self_closing is errmsg here
       end
       fire("start_element", name, attrs)
       if self_closing then
@@ -247,7 +247,7 @@ function M.sax(xml, handlers)
   end
 
   if #stack > 0 then
-    return nil, "unclosed tag: <" .. stack[#stack] .. ">"
+    return nil, "unclosed tag: <" .. (stack[#stack] or "") .. ">"
   end
 
   fire("end_document")
@@ -268,7 +268,7 @@ function M.parse(xml)
     parent = nil,
   } --[[:! XmlNode]]
   local current = doc --[[:! XmlNode]]
-  local stack = { doc } --[[:! { [integer]: XmlNode }]]
+  local stack = { doc } --[[:! { [integer]: XmlNode | nil }]]
 
   local handlers = {
     start_element = function(name, attrs)

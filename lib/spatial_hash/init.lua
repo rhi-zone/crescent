@@ -40,8 +40,12 @@ local function cell_remove(cells, key, id)
   end
 end
 
+--:: SpatialObj = { x: number, y: number, w: number | nil, h: number | nil, cells: { [integer]: string } }
+--:: SpatialGrid = { _cs: number, _cells: { [string]: { [string]: boolean } }, _objects: { [string]: SpatialObj }, _count: integer }
+
 -- Internal helper: insert an object into all cells it spans.
 -- obj must have: x, y, w (or nil), h (or nil), cells (empty table)
+--: ({ [string]: { [string]: boolean } }, number, SpatialObj, unknown) -> nil
 local function obj_insert_cells(grid_cells, cs, obj, id)
   local x, y, w, h = obj.x, obj.y, obj.w, obj.h
   local cx0 = floor(x / cs)
@@ -70,12 +74,13 @@ function M.new(cell_size)
   local cs = cell_size or 64
   local self = {
     _cs      = cs,
-    _cells   = {},  -- { [key] = { [id]=true } }
-    _objects = {},  -- { [id] = { x, y, w, h, cells={} } }
+    _cells   = {} --[[:! { [string]: { [string]: boolean } }]],
+    _objects = {} --[[:! { [string]: SpatialObj }]],
     _count   = 0,
-  }
+  } --[[:! SpatialGrid]]
 
   -- Insert a point object.
+  --: (SpatialGrid, unknown, number, number) -> nil
   function self:insert(id, x, y)
     if self._objects[id] then self:remove(id) end
     local obj = { x = x, y = y, w = nil, h = nil, cells = {} }
@@ -85,6 +90,7 @@ function M.new(cell_size)
   end
 
   -- Insert a rect object covering the AABB [x, x+w] x [y, y+h].
+  --: (SpatialGrid, unknown, number, number, number, number) -> nil
   function self:insert_rect(id, x, y, w, h)
     if self._objects[id] then self:remove(id) end
     local obj = { x = x, y = y, w = w, h = h, cells = {} }
@@ -94,6 +100,7 @@ function M.new(cell_size)
   end
 
   -- Remove an object by id. Returns true if found, false otherwise.
+  --: (SpatialGrid, unknown) -> boolean
   function self:remove(id)
     local obj = self._objects[id]
     if not obj then return false end
@@ -200,6 +207,7 @@ function M.new(cell_size)
 
   -- Nearest neighbors (point objects only), sorted by distance ascending.
   -- Returns up to n ids.
+  --: (SpatialGrid, number, number, integer) -> { [integer]: unknown }
   function self:nearest(x, y, n)
     -- Expand search rings until we have n candidates or covered all objects.
     local cs = self._cs
@@ -224,6 +232,7 @@ function M.new(cell_size)
   end
 
   -- Move a point object to a new position.
+  --: (SpatialGrid, unknown, number, number) -> nil
   function self:move(id, new_x, new_y)
     local obj = self._objects[id]
     if not obj then return end
@@ -235,6 +244,7 @@ function M.new(cell_size)
   end
 
   -- Move a rect object to a new position/size.
+  --: (SpatialGrid, unknown, number, number, number, number) -> nil
   function self:move_rect(id, new_x, new_y, new_w, new_h)
     local obj = self._objects[id]
     if not obj then return end
