@@ -7,6 +7,7 @@ M._tier = "pure"
 
 -- ── Month name → number ──────────────────────────────────────────────────────
 
+--: { [string]: integer }
 local MONTH = {
   Jan=1, Feb=2, Mar=3, Apr=4, May=5, Jun=6,
   Jul=7, Aug=8, Sep=9, Oct=10, Nov=11, Dec=12,
@@ -15,14 +16,16 @@ local MONTH = {
 -- ── Time helpers ─────────────────────────────────────────────────────────────
 
 -- Days in each month (non-leap year)
-local DAYS_IN_MONTH = {31,28,31,30,31,30,31,31,30,31,30,31}
+local DAYS_IN_MONTH = {31,28,31,30,31,30,31,31,30,31,30,31} --: integer[]
 
+--: (number) -> boolean
 local function is_leap(y)
   return (y % 4 == 0 and y % 100 ~= 0) or (y % 400 == 0)
 end
 
 -- Simple Julian Day Number based unix timestamp (no os.time to stay portable)
 -- Returns seconds since epoch (1970-01-01 00:00:00 UTC)
+--: (year: number, month: number, day: number, hour: number, min: number, sec: number, tz_offset_min: number | nil) -> number
 local function ymd_hms_to_unix(year, month, day, hour, min, sec, tz_offset_min)
   -- Days from epoch to start of year
   local y = year - 1
@@ -51,12 +54,14 @@ function M.parse_clf_time(s)
   local day, mon, year, hour, min, sec, sign, tzh, tzm =
     s:match("^%[(%d+)/(%a+)/(%d+):(%d+):(%d+):(%d+) ([%+%-])(%d%d)(%d%d)%]$")
   if not day then return nil end
-  local month = MONTH[mon]
+  local month = MONTH[mon --[[: string]]]
   if not month then return nil end
-  local tz_offset_min = (tonumber(tzh) * 60 + tonumber(tzm))
+  local n_tzh = tonumber(tzh) or 0
+  local n_tzm = tonumber(tzm) or 0
+  local tz_offset_min = n_tzh * 60 + n_tzm
   if sign == "-" then tz_offset_min = -tz_offset_min end
-  return ymd_hms_to_unix(tonumber(year), month, tonumber(day),
-    tonumber(hour), tonumber(min), tonumber(sec), tz_offset_min)
+  return ymd_hms_to_unix(tonumber(year) or 0, month, tonumber(day) or 0,
+    tonumber(hour) or 0, tonumber(min) or 0, tonumber(sec) or 0, tz_offset_min)
 end
 
 -- Parse ISO 8601: "2024-01-15T10:30:00Z" or "2024-01-15T10:30:00+05:30" → unix | nil
@@ -70,11 +75,11 @@ function M.parse_iso8601(s)
   else
     local sign, tzh, tzm = tz:match("^([%+%-])(%d%d):?(%d%d)$")
     if not sign then return nil end
-    tz_offset_min = tonumber(tzh) * 60 + tonumber(tzm)
+    tz_offset_min = (tonumber(tzh) or 0) * 60 + (tonumber(tzm) or 0)
     if sign == "-" then tz_offset_min = -tz_offset_min end
   end
-  return ymd_hms_to_unix(tonumber(year), tonumber(month), tonumber(day),
-    tonumber(hour), tonumber(min), tonumber(sec), tz_offset_min)
+  return ymd_hms_to_unix(tonumber(year) or 0, tonumber(month) or 0, tonumber(day) or 0,
+    tonumber(hour) or 0, tonumber(min) or 0, tonumber(sec) or 0, tz_offset_min)
 end
 
 -- Format bytes: 1200 → "1.2 KB"

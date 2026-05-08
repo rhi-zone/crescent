@@ -29,12 +29,18 @@ end
 local bit = require("bit")
 local base64 = require("lib.base64")
 
-local band   = bit.band
-local bxor   = bit.bxor
-local bor    = bit.bor
-local lshift = bit.lshift
-local rshift = bit.rshift
-local tobit  = bit.tobit
+--: (...number) -> number
+local function band(...) return bit.band(... --[[: any]]) end
+--: (...number) -> number
+local function bxor(...) return bit.bxor(... --[[: any]]) end
+--: (...number) -> number
+local function bor(...) return bit.bor(... --[[: any]]) end
+--: (number, number) -> number
+local function lshift(a, b) return bit.lshift(a --[[: any]], b --[[: any]]) end
+--: (number, number) -> number
+local function rshift(a, b) return bit.rshift(a --[[: any]], b --[[: any]]) end
+--: (number) -> number
+local function tobit(n) return bit.tobit(n --[[: any]]) end
 local sbyte  = string.byte
 local schar  = string.char
 local sformat = string.format
@@ -55,7 +61,7 @@ local function ct_eq(a, b)
   local sa = a --[[:! string]]
   local sb = b --[[:! string]]
   if #sa ~= #sb then return false end
-  local diff = 0
+  local diff = 0 --: number
   for i = 1, #sa do
     diff = bor(diff, bxor(sbyte(sa, i) or 0, sbyte(sb, i) or 0))
   end
@@ -63,17 +69,19 @@ local function ct_eq(a, b)
 end
 
 -- Base64url (no padding) encode/decode.
+--: (s: string) -> string
 local function b64url_encode(s)
-  return base64.encode(s, { url = true, pad = false })
+  return base64.encode(s, { url = true, pad = false }) --[[: string]]
 end
 
+--: (s: string) -> (string | nil)
 local function b64url_decode(s)
-  return base64.decode(s, { url = true })
+  return base64.decode(s, { url = true }) --[[: string | nil]]
 end
 
 -- Parse a PHC-format Argon2 string:
 -- $argon2id$v=19$m=65536,t=3,p=4$<base64salt>$<base64hash>
---: (string) -> ({ variant: string, v: number, m: number, t: number, p: number, salt: string, hash: string } | nil, string)
+--: (encoded: string) -> ({ variant: string, v: number, m: number, t: number, p: number, salt: string, hash: string | nil } | nil, string | nil)
 local function parse_phc(encoded)
   local s = encoded
   if s:sub(1, 1) ~= "$" then
@@ -102,14 +110,14 @@ local function parse_phc(encoded)
   local m = tonumber(params:match("m=(%d+)"))
   local t = tonumber(params:match("t=(%d+)"))
   local p = tonumber(params:match("p=(%d+)"))
-  if not (m and t and p) then
-    return nil, "invalid PHC string: bad params field"
-  end
+  if not m then return nil, "invalid PHC string: bad params field" end
+  if not t then return nil, "invalid PHC string: bad params field" end
+  if not p then return nil, "invalid PHC string: bad params field" end
 
   local salt = b64url_decode(fields[4])
   if not salt then return nil, "invalid PHC string: bad salt base64" end
 
-  local hash
+  local hash --: string | nil
   if fields[5] and fields[5] ~= "" then
     hash = b64url_decode(fields[5])
     if not hash then return nil, "invalid PHC string: bad hash base64" end
@@ -136,9 +144,11 @@ end
 -- System tier: FFI to libargon2
 -- ---------------------------------------------------------------------------
 
-local system_lib  -- set if libargon2 loads
+-- set if libargon2 loads
+local system_lib --: any
 
-local ok_ffi, ffi = pcall(require, "ffi")
+local ok_ffi, _ffi_raw = pcall(require, "ffi")
+local ffi = _ffi_raw --[[: any]]
 if ok_ffi then
   local function try_load_argon2()
     local names = { "argon2", "libargon2", "argon2-1", "libargon2.so.1", "libargon2.so" }
@@ -147,7 +157,7 @@ if ok_ffi then
       if ok then return l end
     end
     -- Scan LD_LIBRARY_PATH
-    local ldpath = (os and os.getenv and os.getenv("LD_LIBRARY_PATH")) or ""
+    local ldpath = os.getenv("LD_LIBRARY_PATH") or ""
     for dir in (ldpath .. ":"):gmatch("([^:]*):") do
       if dir ~= "" then
         for _, suf in ipairs({ "/libargon2.so.1", "/libargon2.so" }) do
@@ -157,7 +167,7 @@ if ok_ffi then
       end
     end
     -- Scan NIX_LDFLAGS (-L dirs)
-    local ldflags = (os and os.getenv and os.getenv("NIX_LDFLAGS")) or ""
+    local ldflags = os.getenv("NIX_LDFLAGS") or ""
     for dir in ldflags:gmatch("-L(%S+)") do
       for _, suf in ipairs({ "/libargon2.so.1", "/libargon2.so" }) do
         local ok, l = pcall(ffi.load, dir .. suf)
@@ -165,7 +175,7 @@ if ok_ffi then
       end
     end
     -- Common profile paths
-    local home = (os and os.getenv and os.getenv("HOME")) or ""
+    local home = os.getenv("HOME") or ""
     local profiles = {
       "/run/current-system/sw/lib",
       home .. "/.nix-profile/lib",
@@ -257,7 +267,7 @@ local function rotr64(ah, al, n)
 end
 
 -- BLAKE2b initialization vector (IV).
-local B2IV = {
+local B2IV = { --: { [integer]: { [integer]: number } }
   {tobit(0x6a09e667), tobit(0xf3bcc908)},
   {tobit(0xbb67ae85), tobit(0x84caa73b)},
   {tobit(0x3c6ef372), tobit(0xfe94f82b)},
@@ -313,10 +323,11 @@ end
 -- BLAKE2b compression function. h[1..8] are {hi,lo} state words.
 -- m[0..15] are {hi,lo} message words (0-indexed to match sigma).
 -- t_lo, t_hi: byte counter (low 64 bits). f: finalization flag.
+--: (h: { [integer]: { [integer]: number } }, m: { [integer]: { [integer]: number } }, t_lo: number, t_hi: number, f: boolean) -> nil
 local function b2compress(h, m, t_lo, t_hi, f)
-  local v = {}
+  local v = {} --: { [integer]: { [integer]: number } }
   for i = 1, 8 do v[i] = {h[i][1], h[i][2]} end
-  for i = 1, 8 do v[8+i] = --[[: any]] {B2IV[i][1], B2IV[i][2]} end
+  for i = 1, 8 do v[8+i] = {B2IV[i][1], B2IV[i][2]} end
   v[13][1] = bxor(v[13][1], t_hi)
   v[13][2] = bxor(v[13][2], t_lo)
   if f then
@@ -342,12 +353,13 @@ end
 
 -- BLAKE2b(input, key, outlen) -> binary string.
 -- key: optional string (0..64 bytes), outlen: 1..64 bytes.
+--: (input: string, key: string | nil, outlen: number | nil) -> string
 local function blake2b(input, key, outlen)
   outlen = outlen or 64
   key = key or ""
   local kk = #key
 
-  local h = {}
+  local h = {} --: { [integer]: { [integer]: number } }
   for i = 1, 8 do h[i] = {B2IV[i][1], B2IV[i][2]} end
   -- Parameter block word 0: digest_len | key_len<<8 | fan_out<<16 | max_depth<<24
   -- For sequential hashing: fan_out=1, max_depth=1 (both 1 by default in blake2b)
@@ -366,10 +378,11 @@ local function blake2b(input, key, outlen)
       block_str = block_str .. string.rep("\0", 128 - #block_str)
     end
     -- Parse block into m[0..15] {hi, lo} (LE 64-bit words).
-    local m = {}
+    local m = {} --: { [integer]: { [integer]: number } }
     for i = 0, 15 do
       local pos = i * 8 + 1
-      local b0,b1,b2,b3,b4,b5,b6,b7 = sbyte(block_str, pos, pos+7)
+      local _b0,_b1,_b2,_b3,_b4,_b5,_b6,_b7 = sbyte(block_str, pos, pos+7)
+      local b0,b1,b2,b3,b4,b5,b6,b7 = _b0 or 0,_b1 or 0,_b2 or 0,_b3 or 0,_b4 or 0,_b5 or 0,_b6 or 0,_b7 or 0
       m[i] = {tobit(b4 + b5*0x100 + b6*0x10000 + b7*0x1000000),
               tobit(b0 + b1*0x100 + b2*0x10000 + b3*0x1000000)}
     end
@@ -443,8 +456,9 @@ local function le32(n)
 end
 
 -- Allocate a zero-initialized 1024-byte block.
+--: () -> { [integer]: { [integer]: number } }
 local function new_block()
-  local b = {}
+  local b = {} --: { [integer]: { [integer]: number } }
   for i = 1, 128 do b[i] = {0, 0} end
   return b
 end
@@ -745,7 +759,7 @@ local function argon2i_pure(password, salt, t, m, p, hash_len)
   -- B[l][0] = H'(1024, H0 || LE32(0) || LE32(l))
   -- B[l][1] = H'(1024, H0 || LE32(1) || LE32(l))
   -- For p=1, l=0.
-  local B = {}
+  local B = {} --: { [integer]: { [integer]: { [integer]: number } } }
   B[1] = string_to_block(H_prime(1024, H0 .. le32(0) .. le32(0)))
   B[2] = string_to_block(H_prime(1024, H0 .. le32(1) .. le32(0)))
   for i = 3, q do B[i] = new_block() end
@@ -829,13 +843,14 @@ local DEFAULT_OPTS = {
   hash_len = 32,
 }
 
+--: (opts: { variant: string | nil, t: number | nil, m: number | nil, p: number | nil, hash_len: number | nil } | nil) -> ({ variant: string, t: number, m: number, p: number, hash_len: number } | nil, string | nil)
 local function parse_opts(opts)
-  opts = opts or {}
-  local variant  = opts.variant  or DEFAULT_OPTS.variant
-  local t        = opts.t        or DEFAULT_OPTS.t
-  local m        = opts.m        or DEFAULT_OPTS.m
-  local p        = opts.p        or DEFAULT_OPTS.p
-  local hash_len = opts.hash_len or DEFAULT_OPTS.hash_len
+  local o = opts or { variant = nil, t = nil, m = nil, p = nil, hash_len = nil }
+  local variant  = o.variant  or DEFAULT_OPTS.variant
+  local t        = o.t        or DEFAULT_OPTS.t
+  local m        = o.m        or DEFAULT_OPTS.m
+  local p        = o.p        or DEFAULT_OPTS.p
+  local hash_len = o.hash_len or DEFAULT_OPTS.hash_len
 
   if variant ~= "id" and variant ~= "i" and variant ~= "d" then
     return nil, "invalid variant: expected 'id', 'i', or 'd', got '" .. tostring(variant) .. "'"
@@ -859,17 +874,17 @@ if system_lib then
   -- ── System tier ────────────────────────────────────────────────────────────
   M._tier = "system"
 
-  local raw_fns = {
+  local raw_fns = { --: { [string]: any }
     id = system_lib.argon2id_hash_raw,
     i  = system_lib.argon2i_hash_raw,
     d  = system_lib.argon2d_hash_raw,
   }
-  local enc_fns = {
+  local enc_fns = { --: { [string]: any }
     id = system_lib.argon2id_hash_encoded,
     i  = system_lib.argon2i_hash_encoded,
     d  = system_lib.argon2d_hash_encoded,
   }
-  local ver_fns = {
+  local ver_fns = { --: { [string]: any }
     id = system_lib.argon2id_verify,
     i  = system_lib.argon2i_verify,
     d  = system_lib.argon2d_verify,

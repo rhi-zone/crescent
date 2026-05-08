@@ -36,11 +36,12 @@ end
 --: (string) -> string
 function M.url_encode(str)
   if type(str) ~= "string" then str = tostring(str) end
-  local result = str:gsub("([^A-Za-z0-9%-_.~])", function(c)
-    local n --: integer
-    n = c:byte() or 0
+  --: (c: string) -> string
+  local function escape(c)
+    local n = c:byte() or 0
     return string.format("%%%02X", n)
-  end)
+  end
+  local result, _ = str:gsub("([^A-Za-z0-9%-_.~])", escape)
   return result
 end
 
@@ -86,28 +87,27 @@ end
 
 local B64URL_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
+--: (str: string) -> string
 function M.base64url_encode(str)
-  local result = {}
+  local result = {} --: { [integer]: string }
   local len = #str
   local i = 1
   while i <= len do
-    local b1 --: integer
-    b1 = str:sub(i, i):byte() or 0
-    local b2 --: integer
-    b2 = str:sub(i+1, i+1):byte() or 0
-    local b3 --: integer
-    b3 = str:sub(i+2, i+2):byte() or 0
+    local b1 = str:sub(i, i):byte() or 0
+    local b2 = str:sub(i+1, i+1):byte() or 0
+    local b3 = str:sub(i+2, i+2):byte() or 0
     local triple = b1 * 0x10000 + b2 * 0x100 + b3
-    result[#result + 1] = B64URL_CHARS:sub(math.floor(triple / 0x40000) % 64 + 1,
-                                            math.floor(triple / 0x40000) % 64 + 1)
-    result[#result + 1] = B64URL_CHARS:sub(math.floor(triple / 0x1000) % 64 + 1,
-                                            math.floor(triple / 0x1000) % 64 + 1)
+    local i1 = math.floor(math.floor(triple / 0x40000) % 64 + 1)
+    local i2 = math.floor(math.floor(triple / 0x1000) % 64 + 1)
+    result[#result + 1] = B64URL_CHARS:sub(i1, i1)
+    result[#result + 1] = B64URL_CHARS:sub(i2, i2)
     if i + 1 <= len then
-      result[#result + 1] = B64URL_CHARS:sub(math.floor(triple / 0x40) % 64 + 1,
-                                              math.floor(triple / 0x40) % 64 + 1)
+      local i3 = math.floor(math.floor(triple / 0x40) % 64 + 1)
+      result[#result + 1] = B64URL_CHARS:sub(i3, i3)
     end
     if i + 2 <= len then
-      result[#result + 1] = B64URL_CHARS:sub(triple % 64 + 1, triple % 64 + 1)
+      local i4 = math.floor((triple % 64) + 1)
+      result[#result + 1] = B64URL_CHARS:sub(i4, i4)
     end
     i = i + 3
   end
@@ -153,20 +153,21 @@ end
 
 local json_parse  -- forward declaration
 
---: (string, integer) -> integer
+--: (s: string, pos: integer) -> integer
 local function skip_ws(s, pos)
-  while pos <= #s do
-    local c = s:sub(pos, pos)
+  local p = pos
+  while p <= #s do
+    local c = s:sub(p, p)
     if c == " " or c == "\t" or c == "\n" or c == "\r" then
-      pos = pos + 1
+      p = p + 1
     else
       break
     end
   end
-  return pos
+  return p
 end
 
---: (string, integer) -> (string | nil, integer | nil)
+--: (s: string, pos: integer) -> (string | nil, integer | nil)
 local function parse_string(s, pos)
   -- pos is on the opening quote
   assert(s:sub(pos, pos) == '"')
@@ -217,14 +218,14 @@ local function parse_string(s, pos)
   return nil, nil  -- unterminated string
 end
 
---: (string, integer) -> (number | nil, integer)
+--: (s: string, pos: integer) -> (number | nil, integer)
 local function parse_number(s, pos)
   local num_str = s:match("^-?%d+%.?%d*[eE]?[+-]?%d*", pos)
   if not num_str then return nil, pos end
   return tonumber(num_str), pos + #num_str
 end
 
---: (string, integer) -> (unknown, integer | nil)
+--: (s: string, pos: integer) -> (unknown, integer | nil)
 local function parse_value(s, pos)
   pos = skip_ws(s, pos)
   if pos > #s then return nil, pos end

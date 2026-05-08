@@ -769,6 +769,7 @@ end
 -- U+0009 tab, U+000A LF, U+000C FF, U+000D CR, U+0020 space,
 -- and Unicode Zs category: U+00A0 NBSP, U+1680, U+2000-U+200A,
 -- U+202F NARROW NO-BREAK SPACE, U+205F MEDIUM MATH SPACE, U+3000 IDEOGRAPHIC SPACE.
+--: (integer) -> boolean
 local function is_unicode_ws(cp)
   if cp == 0 then return true end  -- treat BOL/EOF as whitespace
   if cp == 9 or cp == 10 or cp == 11 or cp == 12 or cp == 13 or cp == 32 then return true end
@@ -786,6 +787,7 @@ end
 -- Pc, Pd, Pe, Pf, Pi, Po, Ps.
 -- We also include Sc (currency symbols) to match the cmark reference behaviour
 -- (which prevents closing delimiters after unspaced currency symbols).
+--: (integer) -> boolean
 local function is_unicode_punct(cp)
   if cp <= 0 then return false end
   -- ASCII punctuation.
@@ -1411,7 +1413,7 @@ local function tokenize_inlines(src, defs)
       -- Determine can_open / can_close per CommonMark §6.1 rules.
       -- Use full Unicode codepoints (not just leading bytes) for ws/punct checks.
       local before_cp = decode_utf8_before(src, delim_start)
-      local after_cp  = (pos <= len) and (decode_utf8_at(src, pos)) or 0
+      local after_cp = ((pos <= len) and (decode_utf8_at(src, pos)) or 0) --[[: integer]]
 
       local left_flanking = not is_unicode_ws(after_cp) and
         (not is_unicode_punct(after_cp) or is_unicode_ws(before_cp) or is_unicode_punct(before_cp))

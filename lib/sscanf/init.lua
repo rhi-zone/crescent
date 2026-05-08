@@ -22,12 +22,16 @@ local floor, huge = math.floor, math.huge
 --   { kind="spec",  suppress=bool, width=n|nil, conv=char, class=s|nil }
 --                                       — conversion specifier
 
+--:: Directive = { kind: "lit", text: string } | { kind: "ws" } | { kind: "spec", suppress: boolean, width: integer | nil, conv: string, negated?: boolean, class_chars?: { [integer]: string } }
+
 --- Parse a format string into a list of directives.
 ---@param fmt string
 ---@return table
+--: (fmt: string) -> ({ [integer]: Directive } | nil, string | nil)
 local function parse_format(fmt)
-	local directives = {}
-	local i = 1
+	local directives = {} --: { [integer]: Directive }
+	local directives_ = directives --[[: any]]
+	local i = 1 --: integer
 	local n = #fmt
 
 	while i <= n do
@@ -47,11 +51,17 @@ local function parse_format(fmt)
 			end
 
 			-- width
-			local width = nil
-			local ws, we = find(fmt, "^%d+", i)
-			if ws then
-				width = tonumber(sub(fmt, ws, we))
-				i = we + 1
+			local width = nil --: integer | nil
+			local ws --: integer | nil
+			local we --: integer | nil
+			ws, we = find(fmt, "^%d+", i)
+			if ws and we then
+				local ws_ = ws + 0
+				local we_ = we + 0
+				i = we_ + 1
+				local val = (tonumber(sub(fmt, ws_, we_)) or 0) + 0
+				local f = math.floor(val)
+				width = f
 			end
 
 			if i > n then
@@ -61,7 +71,7 @@ local function parse_format(fmt)
 			local conv = sub(fmt, i, i)
 
 			if conv == "%" then
-				directives[#directives + 1] = { kind = "lit", text = "%" }
+				directives_[#directives + 1] = { kind = "lit", text = "%" }
 			elseif conv == "[" then
 				-- character class: %[...] or %[^...]
 				i = i + 1
@@ -85,7 +95,7 @@ local function parse_format(fmt)
 				end
 				if i > n then return nil, "unterminated character class" end
 				-- i now points at ']'; will be incremented below
-				directives[#directives + 1] = {
+				directives_[#directives + 1] = {
 					kind = "spec",
 					suppress = suppress,
 					width = width,
@@ -94,14 +104,14 @@ local function parse_format(fmt)
 					class_chars = class_chars,
 				}
 			elseif conv == "c" then
-				directives[#directives + 1] = {
+				directives_[#directives + 1] = {
 					kind = "spec",
 					suppress = suppress,
 					width = width or 1,
 					conv = "c",
 				}
 			else
-				directives[#directives + 1] = {
+				directives_[#directives + 1] = {
 					kind = "spec",
 					suppress = suppress,
 					width = width,
@@ -112,7 +122,7 @@ local function parse_format(fmt)
 
 		elseif c == " " or c == "\t" or c == "\n" or c == "\r" then
 			-- collapse run of whitespace in format into a single ws directive
-			directives[#directives + 1] = { kind = "ws" }
+			directives_[#directives + 1] = { kind = "ws" }
 			while i <= n do
 				local nc = sub(fmt, i, i)
 				if nc == " " or nc == "\t" or nc == "\n" or nc == "\r" then
@@ -132,7 +142,7 @@ local function parse_format(fmt)
 				end
 				i = i + 1
 			end
-			directives[#directives + 1] = { kind = "lit", text = sub(fmt, start, i - 1) }
+			directives_[#directives + 1] = { kind = "lit", text = sub(fmt, start, i - 1) }
 		end
 	end
 
@@ -172,10 +182,13 @@ end
 -- Returns: matched_text (string|nil), new_pos (number), error_msg (string|nil)
 -- ---------------------------------------------------------------------------
 
-local function match_directive(dir, input, pos)
+--: (dir: Directive, input: string, pos: integer) -> (string | nil, integer, string | nil)
+local function match_directive(dir, input, pos_in)
+	local dir_ = dir --[[: any]]
+	local pos = pos_in --[[: integer]] --: integer
 	local ilen = #input
-	if dir.kind == "lit" then
-		local text = dir.text
+	if dir_.kind == "lit" then
+		local text = dir_.text --[[: string]]
 		local tlen = #text
 		if sub(input, pos, pos + tlen - 1) == text then
 			return text, pos + tlen, nil
@@ -184,15 +197,15 @@ local function match_directive(dir, input, pos)
 		end
 	end
 
-	if dir.kind == "ws" then
+	if dir_.kind == "ws" then
 		-- Match 0 or more whitespace chars (greedy)
 		local _, e = find(input, "^%s*", pos)
-		return "", e + 1, nil
+		return "", (e or pos) + 1, nil
 	end
 
 	-- kind == "spec"
-	local conv = dir.conv
-	local width = dir.width
+	local conv = dir_.conv --[[: string]]
+	local width = dir_.width --[[: integer | nil]]
 
 	if conv == "c" then
 		-- %c: read exactly `width` (default 1) characters, no whitespace skip
@@ -207,7 +220,10 @@ local function match_directive(dir, input, pos)
 	-- For all other specs, skip leading whitespace first (C scanf behaviour)
 	-- (except %c which is handled above)
 	local _, wsend = find(input, "^%s*", pos)
-	pos = wsend + 1
+	if wsend then
+		local p = wsend + 1
+		pos = math.floor(p)
+	end
 
 	if conv == "s" then
 		-- Match non-whitespace
@@ -232,68 +248,75 @@ local function match_directive(dir, input, pos)
 	elseif conv == "d" then
 		-- signed decimal integer
 		local s, e = find(input, "^%-?%d+", pos)
-		if not s then return nil, pos, "%d: no integer" end
-		if width then e = math.min(e, pos + width - 1) end
+		if not s or not e then return nil, pos, "%d: no integer" end
+		local e_ = e
+		if width then e_ = math.min(e_, pos + width - 1) end
 		-- re-verify after width clamp
-		local text = sub(input, pos, e)
+		local text = sub(input, pos, e_)
 		if not match(text, "^%-?%d+$") then
 			-- width may have cut mid-number; just parse what we have
 			local s2, e2 = find(text, "^%-?%d+")
-			if not s2 then return nil, pos, "%d: no integer after width clamp" end
+			if not s2 or not e2 then return nil, pos, "%d: no integer after width clamp" end
 			text = sub(text, s2, e2)
-			e = pos + e2 - 1
+			e_ = pos + e2 - 1
 		end
-		return text, e + 1, nil
+		return text, e_ + 1, nil
 
 	elseif conv == "i" then
 		-- integer: 0x hex, 0 octal, or decimal
-		local text, new_pos
+		local text --: string | nil
+		local new_pos --: integer | nil
 		if sub(input, pos, pos + 1) == "0x" or sub(input, pos, pos + 1) == "0X" then
 			local s, e = find(input, "^0[xX]%x+", pos)
-			if s then
-				if width then e = math.min(e, pos + width - 1) end
-				text = sub(input, pos, e)
-				new_pos = e + 1
+			if s and e then
+				local e_ = e
+				if width then e_ = math.min(e_, pos + width - 1) end
+				text = sub(input, pos, e_)
+				new_pos = e_ + 1
 			end
 		elseif sub(input, pos, pos) == "0" and find(input, "^0[0-7]", pos) then
 			local s, e = find(input, "^0[0-7]+", pos)
-			if s then
-				if width then e = math.min(e, pos + width - 1) end
-				text = sub(input, pos, e)
-				new_pos = e + 1
+			if s and e then
+				local e_ = e
+				if width then e_ = math.min(e_, pos + width - 1) end
+				text = sub(input, pos, e_)
+				new_pos = e_ + 1
 			end
 		end
 		if not text then
 			local s, e = find(input, "^%-?%d+", pos)
-			if not s then return nil, pos, "%i: no integer" end
-			if width then e = math.min(e, pos + width - 1) end
-			text = sub(input, pos, e)
-			new_pos = e + 1
+			if not s or not e then return nil, pos, "%i: no integer" end
+			local e_ = e
+			if width then e_ = math.min(e_, pos + width - 1) end
+			text = sub(input, pos, e_)
+			new_pos = e_ + 1
 		end
-		return text, new_pos, nil
+		return text, new_pos or pos, nil
 
 	elseif conv == "u" then
 		-- unsigned decimal
 		local s, e = find(input, "^%d+", pos)
-		if not s then return nil, pos, "%u: no unsigned integer" end
-		if width then e = math.min(e, pos + width - 1) end
-		local text = sub(input, pos, e)
-		return text, e + 1, nil
+		if not s or not e then return nil, pos, "%u: no unsigned integer" end
+		local e_ = e
+		if width then e_ = math.min(e_, pos + width - 1) end
+		local text = sub(input, pos, e_)
+		return text, e_ + 1, nil
 
 	elseif conv == "f" or conv == "e" or conv == "g" or conv == "E" or conv == "G" then
 		-- floating point
 		local s, e = find(input, "^%-?%d*%.?%d+", pos)
-		if not s then
+		if not s or not e then
 			-- try just integer with no dot
 			s, e = find(input, "^%-?%d+", pos)
-			if not s then return nil, pos, "%" .. conv .. ": no float" end
+			if not s or not e then return nil, pos, "%" .. conv .. ": no float" end
 		end
+		local e_ = e
 		-- check for exponent
-		local exp_s, exp_e = find(input, "^[eE][%+%-]?%d+", e + 1)
-		if exp_s then e = exp_e end
-		if width then e = math.min(e, pos + width - 1) end
-		local text = sub(input, pos, e)
-		return text, e + 1, nil
+		local exp_s, exp_e = find(input, "^[eE][%+%-]?%d+", e_ + 1)
+		if exp_s and exp_e then e_ = exp_e end
+		if width then e_ = math.min(e_, pos + width - 1) end
+		local text = sub(input, pos, e_)
+		return text, e_ + 1, nil
 
 	elseif conv == "[" then
 		-- character class
@@ -303,7 +326,7 @@ local function match_directive(dir, input, pos)
 		local limit = width or huge
 		while e <= ilen and count < limit do
 			local cs, ce = find(input, "^" .. pat, e)
-			if not cs then break end
+			if not cs or not ce then break end
 			e = ce + 1
 			count = count + 1
 		end
@@ -321,6 +344,7 @@ end
 -- Convert a matched text to a Lua value based on the conversion specifier.
 -- ---------------------------------------------------------------------------
 
+--: (conv: string, text: string) -> (unknown, string | nil)
 local function convert_value(conv, text)
 	if conv == "d" or conv == "u" then
 		local n = tonumber(text)

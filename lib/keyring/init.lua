@@ -23,10 +23,11 @@ end
 local ffi = require("ffi")
 
 local M = {}
-M._tier = nil
+M._tier = nil --: string | nil
 
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
+--: (path: string) -> string
 local function expand_home(path)
 	if path:sub(1, 1) == "~" then
 		local home = os.getenv("HOME") or ""
@@ -35,20 +36,23 @@ local function expand_home(path)
 	return path
 end
 
+--: (path: string) -> nil
 local function mkdir_p(path)
-	os.execute('mkdir -p "' .. path:gsub('"', '\\"') .. '"')
+	local escaped = path:gsub('"', '\\"')
+	os.execute('mkdir -p "' .. escaped .. '"')
 end
 
 -- ── Tier 1: libsecret (Linux) ─────────────────────────────────────────────────
 
 local function try_libsecret()
-	local ok, lib = pcall(ffi.load, "secret-1")
+	local ok, lib_raw = pcall(ffi.load, "secret-1")
 	if not ok then return nil end
+	local lib = lib_raw --[[: any]]
 
 	-- glib is a separate shared object; try a few names.  libsecret links glib,
 	-- but LuaJIT's ffi.load uses RTLD_LOCAL so glib symbols are not visible via
 	-- the libsecret handle.
-	local glib
+	local glib --: any
 	for _, name in ipairs({ "glib-2.0", "libglib-2.0.so.0", "libglib-2.0.so" }) do
 		local gok, g = pcall(ffi.load, name)
 		if gok then glib = g; break end
@@ -207,7 +211,7 @@ local function try_libsecret()
 				if ht ~= nil then
 					local v = glib.g_hash_table_lookup(ht, "service")
 					if v ~= nil then
-						local s = ffi.string(ffi.cast("const char*", v))
+						local s = ffi.string(ffi.cast("const char*", v) --[[: any]])
 						if prefix == nil or s:sub(1, #prefix) == prefix then
 							names[#names + 1] = s
 						end
@@ -228,8 +232,9 @@ end
 -- ── Tier 2: macOS Security.framework ─────────────────────────────────────────
 
 local function try_keychain()
-	local ok, lib = pcall(ffi.load, "Security")
+	local ok, lib_raw = pcall(ffi.load, "Security")
 	if not ok then return nil end
+	local lib = lib_raw --[[: any]]
 
 	local ok2 = pcall(ffi.cdef, [[
 		typedef int            OSStatus;
@@ -356,7 +361,7 @@ local function try_keychain()
 			nil, slen, service, alen, ACCOUNT, plen, pdata, nil
 		)
 		if st ~= 0 then return nil end
-		local s = ffi.string(ffi.cast("const char*", pdata[0]), plen[0])
+		local s = ffi.string(ffi.cast("const char*", pdata[0]) --[[: any]], plen[0])
 		lib.SecKeychainItemFreeContent(nil, pdata[0])
 		return s
 	end
@@ -409,7 +414,7 @@ local function try_keychain()
 			if ast == 0 and attr_list[0] ~= nil and attr_list[0].count >= 1 then
 				local a = attr_list[0].attr[0]
 				if a.data ~= nil and a.length > 0 then
-					local s = ffi.string(ffi.cast("const char*", a.data), a.length)
+					local s = ffi.string(ffi.cast("const char*", a.data) --[[: any]], a.length)
 					if prefix == nil or s:sub(1, #prefix) == prefix then
 						names[#names + 1] = s
 					end
@@ -453,8 +458,10 @@ end
 local function try_file_tier()
 	local ok, sha256_mod = pcall(require, "lib.hash.sha256")
 	if not ok then return nil end
-	local sha256_hex = sha256_mod.sha256
+	local sha256_hex = (sha256_mod --[[: any]]).sha256
 	if not sha256_hex then return nil end
+	--: (s: string) -> string
+	local function _sha256_call(s) return sha256_hex(s) end
 
 	local bit = require("bit")
 	local bxor  = bit.bxor
@@ -462,28 +469,34 @@ local function try_file_tier()
 	local rshift = bit.rshift
 
 	-- hex_to_bin(hex) -> binary string (32 bytes for a sha256 output)
+	--: (hex: string) -> string
 	local function hex_to_bin(hex)
-		return (hex:gsub("%x%x", function(h)
-			return string.char(tonumber(h, 16))
-		end))
+		local r = hex:gsub("%x%x", function(h)
+			return string.char(tonumber(h, 16) or 0)
+		end) --[[: string]]
+		return r
 	end
 
 	-- sha256_bin(s) -> 32-byte binary string
+	--: (s: string) -> string
 	local function sha256_bin(s)
-		return hex_to_bin(sha256_hex(s))
+		return hex_to_bin(_sha256_call(s))
 	end
 
 	-- hmac_sha256_bin(key, msg) -> 32-byte binary string
 	-- Standard HMAC construction: H((k XOR opad) || H((k XOR ipad) || msg))
+	--: (key: string, msg: string) -> string
 	local function hmac_sha256_bin(key, msg)
 		-- Normalise key to 32 bytes (sha256 block = 64, key is always 32 here).
-		if #key > 64 then key = sha256_bin(key) end
-		while #key < 64 do key = key .. "\0" end
+		local k = key
+		if #k > 64 then k = sha256_bin(k) end
+		while #k < 64 do k = k .. "\0" end
+		key = k
 
 		local ipad_k = {}
 		local opad_k = {}
 		for i = 1, 64 do
-			local b = key:byte(i)
+			local b = key:byte(i) or 0
 			ipad_k[i] = string.char(bxor(b, 0x36))
 			opad_k[i] = string.char(bxor(b, 0x5c))
 		end
@@ -548,6 +561,7 @@ local function try_file_tier()
 
 	-- encrypt(plaintext, key) -> payload | nil, err
 	-- payload = tag(32) || iv(16) || ciphertext
+	--: (plaintext: string, key: string) -> (string | nil, string | nil)
 	local function encrypt(plaintext, key)
 		local enc_k = sha256_bin(key .. "enc")
 		local mac_k = sha256_bin(key .. "mac")
@@ -564,8 +578,8 @@ local function try_file_tier()
 			local chunk_end = math.min(pos + 31, pt_len)
 			local chunk = {}
 			for i = pos, chunk_end do
-				local ks_byte = ks:byte(i - pos + 1)
-				chunk[#chunk + 1] = string.char(bxor(plaintext:byte(i), ks_byte))
+				local ks_byte = ks:byte(i - pos + 1) or 0
+				chunk[#chunk + 1] = string.char(bxor(plaintext:byte(i) or 0, ks_byte))
 			end
 			ct_parts[#ct_parts + 1] = table.concat(chunk)
 			pos = chunk_end + 1
@@ -578,6 +592,7 @@ local function try_file_tier()
 	end
 
 	-- decrypt(payload, key) -> plaintext | nil, err
+	--: (payload: string, key: string) -> (string | nil, string | nil)
 	local function decrypt(payload, key)
 		if #payload < TAG_LEN + IV_LEN then
 			return nil, "keyring: payload too short"
@@ -605,7 +620,7 @@ local function try_file_tier()
 			local chunk_end = math.min(pos + 31, ct_len)
 			local chunk = {}
 			for i = pos, chunk_end do
-				chunk[#chunk + 1] = string.char(bxor(ct:byte(i), ks:byte(i - pos + 1)))
+				chunk[#chunk + 1] = string.char(bxor(ct:byte(i) or 0, ks:byte(i - pos + 1) or 0))
 			end
 			pt_parts[#pt_parts + 1] = table.concat(chunk)
 			pos = chunk_end + 1
@@ -620,14 +635,16 @@ local function try_file_tier()
 		return string.char(n % 256, math.floor(n / 256) % 256)
 	end
 
+	--: (s: string, pos: integer) -> (integer, integer)
 	local function unpack_u16_le(s, pos)
 		local b0, b1 = s:byte(pos, pos + 1)
-		return b0 + b1 * 256, pos + 2
+		return (b0 or 0) + (b1 or 0) * 256, pos + 2
 	end
 
+	--: (s: string, pos: integer) -> (integer, integer)
 	local function unpack_u32_le(s, pos)
 		local b0, b1, b2, b3 = s:byte(pos, pos + 3)
-		return b0 + b1 * 256 + b2 * 65536 + b3 * 16777216, pos + 4
+		return (b0 or 0) + (b1 or 0) * 256 + (b2 or 0) * 65536 + (b3 or 0) * 16777216, pos + 4
 	end
 
 	local function load_entries()
@@ -635,6 +652,7 @@ local function try_file_tier()
 		if not f then return {} end
 		local data = f:read("*a")
 		f:close()
+		if data == nil then return {} end
 
 		if #data < 8 then return {} end
 		if data:sub(1, 4) ~= MAGIC then return {} end
@@ -683,6 +701,7 @@ local function try_file_tier()
 
 	function tier.set(service, value)
 		local key = get_key()
+		if not key then return nil, "no key" end
 		local payload, err = encrypt(value, key)
 		if not payload then return nil, err end
 		local entries = load_entries()
@@ -692,6 +711,7 @@ local function try_file_tier()
 
 	function tier.get(service)
 		local key = get_key()
+		if not key then return nil end
 		local entries = load_entries()
 		local payload = entries[service]
 		if not payload then return nil end

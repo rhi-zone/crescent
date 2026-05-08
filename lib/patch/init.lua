@@ -54,7 +54,7 @@ end
 
 --- Parse a JSON Pointer string into an array of string keys.
 --- Returns empty table for the root pointer "".
---: (string) -> ({ [number]: string }, nil | nil, string)
+--: (string) -> ({ [number]: string } | nil, string | nil)
 M.pointer_parse = function(ptr)
   if ptr == "" then return {} end
   if ptr:sub(1, 1) ~= "/" then
@@ -80,7 +80,7 @@ end
 
 --- Resolve the parent table and final key for a pointer path.
 --- Returns (parent_table, key, nil) or (nil, nil, errmsg).
---: (unknown, { [number]: string }) -> (unknown, string | nil, nil, string)
+--: (unknown, { [number]: string }) -> (unknown | nil, string | nil, string | nil)
 local function resolve_parent(doc, keys)
   if #keys == 0 then
     return nil, nil, "cannot get parent of root pointer"
@@ -105,11 +105,11 @@ local function resolve_parent(doc, keys)
   if type(node) ~= "table" then
     return nil, nil, "path not found: parent is not a table"
   end
-  return node, keys[#keys]
+  return node, keys[#keys], nil
 end
 
 --- Get the value at a JSON Pointer path within doc.
---: (unknown, string) -> (unknown, nil | nil, string)
+--: (unknown, string) -> (unknown | nil, string | nil)
 M.get = function(doc, ptr)
   local keys, err = M.pointer_parse(ptr)
   if not keys then return nil, err end
@@ -134,7 +134,7 @@ end
 
 --- Set the value at a JSON Pointer path. Returns a deep copy with the value set.
 --- Pass opts.inplace = true to mutate doc directly (no copy).
---: (unknown, string, unknown) -> (unknown, nil | nil, string)
+--: (unknown, string, unknown, { inplace: boolean | nil } | nil) -> (unknown | nil, string | nil)
 M.set = function(doc, ptr, value, opts)
   local keys, err = M.pointer_parse(ptr)
   if not keys then return nil, err end
@@ -155,7 +155,7 @@ M.set = function(doc, ptr, value, opts)
 end
 
 --- Remove the value at a JSON Pointer path. Returns a deep copy with value removed.
---: (unknown, string) -> (unknown, nil | nil, string)
+--: (unknown, string) -> (unknown | nil, string | nil)
 M.remove = function(doc, ptr)
   local keys, err = M.pointer_parse(ptr)
   if not keys then return nil, err end
@@ -174,7 +174,7 @@ M.remove = function(doc, ptr)
     table.remove(parent, arr_idx)
   else
     if parent[final_key] == nil then
-      return nil, "key '" .. final_key .. "' does not exist"
+      return nil, "key '" .. tostring(final_key) .. "' does not exist"
     end
     parent[final_key] = nil
   end
@@ -187,7 +187,7 @@ end
 
 --- Add a value at path in a mutable document.
 --- "-" as final token appends to array.
---: (unknown, { [number]: string }, unknown) -> (boolean, nil | nil, string)
+--: (unknown, { [number]: string }, unknown) -> (boolean | nil, string | nil)
 local function patch_add(doc, keys, value)
   if #keys == 0 then
     return nil, "cannot add at root (use replace)"
@@ -210,7 +210,7 @@ local function patch_add(doc, keys, value)
 end
 
 --- Remove a value at path in a mutable document.
---: (unknown, { [number]: string }) -> (boolean, nil | nil, string)
+--: (unknown, { [number]: string }) -> (boolean | nil, string | nil)
 local function patch_remove(doc, keys)
   if #keys == 0 then
     return nil, "cannot remove root"
@@ -226,7 +226,7 @@ local function patch_remove(doc, keys)
     table.remove(parent, arr_idx)
   else
     if parent[final_key] == nil then
-      return nil, "key '" .. final_key .. "' does not exist"
+      return nil, "key '" .. tostring(final_key) .. "' does not exist"
     end
     parent[final_key] = nil
   end
@@ -234,7 +234,7 @@ local function patch_remove(doc, keys)
 end
 
 --- Get a value at path in a mutable document (no copy).
---: (unknown, { [number]: string }) -> (unknown, nil | nil, string)
+--: (unknown, { [number]: string }) -> (unknown | nil, string | nil)
 local function patch_get(doc, keys)
   if #keys == 0 then return doc end
   local node = doc
@@ -261,7 +261,7 @@ end
 
 --- Apply a sequence of patch operations to doc.
 --- Returns (new_doc, nil) on success or (nil, errmsg) on failure.
---: (unknown, { [number]: { [string]: unknown } }) -> (unknown, nil | nil, string)
+--: (unknown, { [number]: { [string]: unknown } }) -> (unknown | nil, string | nil)
 M.apply = function(doc, ops)
   local target = M.deep_copy(doc)
   for i, op_entry in ipairs(ops) do
@@ -269,16 +269,16 @@ M.apply = function(doc, ops)
     local path = op_entry.path
     local keys, err = M.pointer_parse(path or "")
     if not keys then
-      return nil, "op #" .. i .. " (" .. tostring(op) .. "): bad path: " .. err
+      return nil, "op #" .. i .. " (" .. tostring(op) .. "): bad path: " .. tostring(err)
     end
 
     if op == "add" then
       local ok, aerr = patch_add(target, keys, M.deep_copy(op_entry.value))
-      if not ok then return nil, "op #" .. i .. " (add): " .. aerr end
+      if not ok then return nil, "op #" .. i .. " (add): " .. tostring(aerr) end
 
     elseif op == "remove" then
       local ok, rerr = patch_remove(target, keys)
-      if not ok then return nil, "op #" .. i .. " (remove): " .. rerr end
+      if not ok then return nil, "op #" .. i .. " (remove): " .. tostring(rerr) end
 
     elseif op == "replace" then
       -- replace: path must exist
@@ -291,7 +291,7 @@ M.apply = function(doc, ops)
         target = M.deep_copy(op_entry.value)
       else
         local parent, final_key, perr = resolve_parent(target, keys)
-        if not parent then return nil, "op #" .. i .. " (replace): " .. perr end
+        if not parent then return nil, "op #" .. i .. " (replace): " .. tostring(perr) end
         local idx = tonumber(final_key)
         if idx then
           parent[idx + 1] = M.deep_copy(op_entry.value)
@@ -303,7 +303,7 @@ M.apply = function(doc, ops)
     elseif op == "move" then
       local from_keys, ferr = M.pointer_parse(op_entry.from or "")
       if not from_keys then
-        return nil, "op #" .. i .. " (move): bad from: " .. ferr
+        return nil, "op #" .. i .. " (move): bad from: " .. tostring(ferr)
       end
       local val, gerr = patch_get(target, from_keys)
       if val == nil and gerr then
@@ -311,21 +311,21 @@ M.apply = function(doc, ops)
       end
       local saved = M.deep_copy(val)
       local ok, rerr = patch_remove(target, from_keys)
-      if not ok then return nil, "op #" .. i .. " (move): " .. rerr end
+      if not ok then return nil, "op #" .. i .. " (move): " .. tostring(rerr) end
       local ok2, aerr = patch_add(target, keys, saved)
-      if not ok2 then return nil, "op #" .. i .. " (move): " .. aerr end
+      if not ok2 then return nil, "op #" .. i .. " (move): " .. tostring(aerr) end
 
     elseif op == "copy" then
       local from_keys, ferr = M.pointer_parse(op_entry.from or "")
       if not from_keys then
-        return nil, "op #" .. i .. " (copy): bad from: " .. ferr
+        return nil, "op #" .. i .. " (copy): bad from: " .. tostring(ferr)
       end
       local val, gerr = patch_get(target, from_keys)
       if val == nil and gerr then
         return nil, "op #" .. i .. " (copy): " .. gerr
       end
       local ok, aerr = patch_add(target, keys, M.deep_copy(val))
-      if not ok then return nil, "op #" .. i .. " (copy): " .. aerr end
+      if not ok then return nil, "op #" .. i .. " (copy): " .. tostring(aerr) end
 
     elseif op == "test" then
       local cur, gerr = patch_get(target, keys)
@@ -333,7 +333,7 @@ M.apply = function(doc, ops)
         return nil, "op #" .. i .. " (test): " .. gerr
       end
       if not deep_eq(cur, op_entry.value) then
-        return nil, "op #" .. i .. " (test): value mismatch at " .. path
+        return nil, "op #" .. i .. " (test): value mismatch at " .. tostring(path)
       end
 
     else

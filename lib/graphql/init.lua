@@ -53,7 +53,7 @@ local function new_lexer(src)
 	return { src = src, pos = 1, len = #src }
 end
 
---:: GQLLex = { src: string, pos: number, len: integer }
+--:: GQLLex = { src: string, pos: integer, len: integer }
 --: (GQLLex, string) -> (nil, string)
 local function lex_error(lex, msg)
 	local line = 1
@@ -128,17 +128,21 @@ local function read_string(lex)
 			elseif esc == 0x74 then parts[#parts + 1] = '\t'
 			elseif esc == 0x75 then -- \uXXXX
 				local hex = sub(src, pos + 1, pos + 4)
-				local cp = tonumber(hex, 16)
-				if not cp then return lex_error(lex, "invalid unicode escape") end
+				local cp_n = tonumber(hex, 16)
+				if not cp_n then return lex_error(lex, "invalid unicode escape") end
+				local cp = math.floor(cp_n + 0)
 				-- encode as UTF-8
 				if cp <= 0x7F then
 					parts[#parts + 1] = string.char(cp)
 				elseif cp <= 0x7FF then
-					parts[#parts + 1] = string.char(0xC0 + floor(cp / 64), 0x80 + (cp % 64))
+					local b1 = math.floor(0xC0 + floor(cp / 64))
+					local b2 = math.floor(0x80 + (cp % 64))
+					parts[#parts + 1] = string.char(b1, b2)
 				else
-					parts[#parts + 1] = string.char(0xE0 + floor(cp / 4096),
-					                                 0x80 + floor(cp / 64) % 64,
-					                                 0x80 + (cp % 64))
+					local b1 = math.floor(0xE0 + floor(cp / 4096))
+					local b2 = math.floor(0x80 + floor(cp / 64) % 64)
+					local b3 = math.floor(0x80 + (cp % 64))
+					parts[#parts + 1] = string.char(b1, b2, b3)
 				end
 				pos = pos + 4
 			else
@@ -162,7 +166,7 @@ local function next_token(lex)
 	if pos > len then
 		return { kind = TK.EOF }
 	end
-	local b = byte(src, pos)
+	local b = byte(src, pos) or 0
 	-- Punctuators
 	if b == 0x21 then lex.pos = pos + 1; return { kind = TK.BANG }
 	elseif b == 0x24 then lex.pos = pos + 1; return { kind = TK.DOLLAR }
@@ -191,17 +195,18 @@ local function next_token(lex)
 		return { kind = TK.STRING, value = s }
 	-- Number
 	elseif b == 0x2D or (b >= 0x30 and b <= 0x39) then
-		local s, e = find(src, "^-?[0-9]+", pos)
+		local _ws, _we = find(src, "^-?[0-9]+", pos)
+		local e = _we or pos --: integer
 		local is_float = false
-		if e and byte(src, e + 1) == 0x2E then
+		if byte(src, e + 1) == 0x2E then
 			-- fraction
-			local s2, e2 = find(src, "^%.[0-9]+", e + 1)
-			if s2 then e = e2; is_float = true end
+			local _, e2 = find(src, "^%.[0-9]+", e + 1)
+			if e2 then e = e2 + 0; is_float = true end
 		end
-		if e and (byte(src, e + 1) == 0x65 or byte(src, e + 1) == 0x45) then
+		if byte(src, e + 1) == 0x65 or byte(src, e + 1) == 0x45 then
 			-- exponent
-			local s3, e3 = find(src, "^[eE][+%-]?[0-9]+", e + 1)
-			if s3 then e = e3; is_float = true end
+			local _, e3 = find(src, "^[eE][+%-]?[0-9]+", e + 1)
+			if e3 then e = e3 + 0; is_float = true end
 		end
 		local raw = sub(src, pos, e)
 		lex.pos = e + 1
@@ -213,36 +218,37 @@ local function next_token(lex)
 	-- Name / keyword
 	elseif (b >= 0x41 and b <= 0x5A) or (b >= 0x61 and b <= 0x7A) or b == 0x5F then
 		local s, e = find(src, "^[_%a][_%w]*", pos)
-		local name = sub(src, s, e)
+		local name = sub(src, s or pos, e or pos)
 		lex.pos = (e or pos) + 1
 		return { kind = TK.NAME, value = name }
 	end
-	return lex_error(lex, ("unexpected character %q"):format(string.char(b)))
+	return lex_error(lex, ("unexpected character %q"):format(string.char(b or 0)))
 end
 
 -- ── Token stream ──────────────────────────────────────────────────────────────
 
---:: GQLToken = { kind: string, value: string | nil, ... }
---:: GQLParser = { lex: { src: string, pos: number, len: integer }, current: GQLToken, errors: { [integer]: string } }
+--:: GQLToken = { kind: string, value?: string, ... }
+--:: GQLParser = { lex: { src: string, pos: integer, len: integer }, current: GQLToken, errors: { [integer]: string } }
 local function new_parser(src)
 	local lex = new_lexer(src)
-	local p = { lex = lex, current = nil, errors = {} }
+	local p = { lex = lex, current = { kind = TK.EOF } --[[: GQLToken]], errors = {} }
 	-- pre-read first token
 	local tok, err = next_token(lex)
-	if err then p.errors[#p.errors + 1] = err; tok = { kind = TK.EOF } end
-	p.current = tok
+	if err or not tok then p.errors[#p.errors + 1] = err or "no token"; tok = { kind = TK.EOF } end
+	p.current = tok --[[: GQLToken]]
 	return p
 end
 
 --: (GQLParser) -> GQLToken
 local function advance(p)
 	local tok, err = next_token(p.lex)
-	if err then
-		p.errors[#p.errors + 1] = err
+	if err or not tok then
+		p.errors[#p.errors + 1] = err or "no token"
 		tok = { kind = TK.EOF }
 	end
-	p.current = tok
-	return tok
+	local tok_ = tok --[[: GQLToken]]
+	p.current = tok_
+	return tok_
 end
 
 --: (GQLParser) -> GQLToken
@@ -257,8 +263,9 @@ local function expect(p, kind, value)
 		local pos = p.lex.pos
 		local line = 1
 		for _ in gmatch(sub(p.lex.src, 1, pos), "\n") do line = line + 1 end
-		local msg = ("GraphQL parse error at line %d: expected %s, got %s"):format(
-			line, kind, tok.kind .. (tok.value and ("(" .. tok.value .. ")") or ""))
+		local tv = tok.value
+		local got_str = tok.kind .. (tv and ("(" .. tv .. ")") or "")
+		local msg = ("GraphQL parse error at line %d: expected %s, got %s"):format(line, kind, got_str)
 		p.errors[#p.errors + 1] = msg
 		return nil, msg
 	end
@@ -282,9 +289,10 @@ local parse_value  -- forward declaration
 local parse_type   -- forward declaration
 
 -- Parse a type reference: NamedType | ListType | NonNullType
+--:: GQLType = { kind: "ListType", type: any } | { kind: "NamedType", name: string | nil } | { kind: "NonNullType", type: any }
 parse_type = function(p)
 	local tok = peek(p)
-	local t
+	local t = nil --: GQLType | nil
 	if tok.kind == TK.LBRACKET then
 		advance(p)
 		local inner, err = parse_type(p)
@@ -648,7 +656,7 @@ local function parse_field_definitions(p)
 		local args = {}
 		if peek(p).kind == TK.LPAREN then
 			local a, err3 = parse_input_value_definitions(p)
-			if err3 then return nil, err3 end
+			if err3 or not a then return nil, err3 end
 			args = a
 		end
 		local _, err4 = expect(p, TK.COLON)
@@ -823,11 +831,14 @@ function M.schema(def)
 		local t = { name = type_name, fields = {} }
 		for field_name, field_def in pairs(fields) do
 			-- field_def can be { type, args, resolve } or just { type }
-			t.fields[field_name] = {
-				type    = field_def.type,
-				args    = field_def.args or {},
-				resolve = field_def.resolve,
-			}
+			if type(field_def) == "table" then
+				local fd = field_def
+				t.fields[field_name] = {
+					type    = fd.type,
+					args    = fd.args or {},
+					resolve = fd.resolve,
+				}
+			end
 		end
 		s.types[type_name] = t
 	end

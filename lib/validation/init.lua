@@ -87,6 +87,7 @@ end
 
 -- ── primitive factory ─────────────────────────────────────────────────────────
 
+--: (unknown) -> unknown
 local function new_schema(proto)
   proto.__index = proto
   setmetatable(proto, { __index = Schema })
@@ -143,11 +144,11 @@ function StringSchema:_validate_inner(value, path)
     return false, errs
   end
   if self._max ~= nil and #value > self._max then
-    push_error(errs, path, "too long (max " .. self._max .. ")")
+    push_error(errs, path, "too long (max " .. tostring(self._max) .. ")")
     return false, errs
   end
   if self._pattern ~= nil and not value:match(self._pattern) then
-    push_error(errs, path, self._pattern_msg or ("must match pattern " .. self._pattern))
+    push_error(errs, path, self._pattern_msg or ("must match pattern " .. tostring(self._pattern)))
     return false, errs
   end
   if self._non_empty and #value == 0 then
@@ -284,11 +285,11 @@ function NumberSchema:_validate_inner(value, path)
     return false, errs
   end
   if self._min ~= nil and value < self._min then
-    push_error(errs, path, "too small (min " .. self._min .. ")")
+    push_error(errs, path, "too small (min " .. tostring(self._min) .. ")")
     return false, errs
   end
   if self._max ~= nil and value > self._max then
-    push_error(errs, path, "too large (max " .. self._max .. ")")
+    push_error(errs, path, "too large (max " .. tostring(self._max) .. ")")
     return false, errs
   end
   return true, errs
@@ -394,11 +395,11 @@ function IntegerSchema:_validate_inner(value, path)
     return false, errs
   end
   if self._min ~= nil and value < self._min then
-    push_error(errs, path, "too small (min " .. self._min .. ")")
+    push_error(errs, path, "too small (min " .. tostring(self._min) .. ")")
     return false, errs
   end
   if self._max ~= nil and value > self._max then
-    push_error(errs, path, "too large (max " .. self._max .. ")")
+    push_error(errs, path, "too large (max " .. tostring(self._max) .. ")")
     return false, errs
   end
   return true, errs
@@ -595,11 +596,11 @@ function ArraySchema:_validate_inner(value, path)
   end
   local len = #value
   if self._min ~= nil and len < self._min then
-    push_error(errs, path, "too few items (min " .. self._min .. ")")
+    push_error(errs, path, "too few items (min " .. tostring(self._min) .. ")")
     return false, errs
   end
   if self._max ~= nil and len > self._max then
-    push_error(errs, path, "too many items (max " .. self._max .. ")")
+    push_error(errs, path, "too many items (max " .. tostring(self._max) .. ")")
     return false, errs
   end
   local all_ok = true
@@ -636,11 +637,11 @@ function ArraySchema:_parse(value, path)
   end
   local len = #value
   if self._min ~= nil and len < self._min then
-    push_error(errs, path, "too few items (min " .. self._min .. ")")
+    push_error(errs, path, "too few items (min " .. tostring(self._min) .. ")")
     return false, errs, nil
   end
   if self._max ~= nil and len > self._max then
-    push_error(errs, path, "too many items (max " .. self._max .. ")")
+    push_error(errs, path, "too many items (max " .. tostring(self._max) .. ")")
     return false, errs, nil
   end
   local all_ok = true

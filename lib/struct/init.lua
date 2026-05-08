@@ -17,10 +17,11 @@ local bit = require("bit")
 -- FFI unions for float conversion
 --:: F32Union = { f: number, b: { [integer]: integer } }
 --:: F64Union = { f: number, d: number, b: { [integer]: integer } }
-local union_f32 = ffi.typeof("union { float f; uint8_t b[4]; }") --[[: any]]
-local union_f64 = ffi.typeof("union { double d; uint8_t b[8]; }") --[[: any]]
-local u32 = ffi.typeof("union { uint32_t u; int32_t i; }")
-local u64 = ffi.typeof("union { uint64_t u; int64_t i; }")
+local _typeof = ffi.typeof --[[: any]]
+local union_f32 = _typeof("union { float f; uint8_t b[4]; }")
+local union_f64 = _typeof("union { double d; uint8_t b[8]; }")
+local u32 = _typeof("union { uint32_t u; int32_t i; }")
+local u64 = _typeof("union { uint64_t u; int64_t i; }")
 
 -- Detect native endianness
 local _ne_check = ffi.new("union { uint16_t u; uint8_t b[2]; }")
@@ -71,7 +72,7 @@ local function parse_fmt(fmt)
     -- Consume optional repeat count
     local count = 0
     while i <= n do
-      local b = fmt:byte(i)
+      local b = fmt:byte(i) or 0
       if b >= 48 and b <= 57 then -- '0'..'9'
         count = count * 10 + (b - 48)
         i = i + 1
@@ -302,57 +303,65 @@ local function read_op(op, s, pos)
   local le = op.le
 
   if c == "x" then
-    return nil, pos + op.count  -- pad: skip, return nil marker
+    return nil, pos + op.count, nil  -- pad: skip, return nil marker
 
   elseif c == "?" then
-    local b = s:byte(pos)
-    if not b then return nil, nil, "struct: buffer too short for '?'" end
-    return (b ~= 0), pos + 1
+    if pos > #s then return nil, nil, "struct: buffer too short for '?'" end
+    local b = s:byte(pos) or 0
+    return (b ~= 0), pos + 1, nil
 
   elseif c == "b" then
-    local b = s:byte(pos)
-    if not b then return nil, nil, "struct: buffer too short for 'b'" end
+    if pos > #s then return nil, nil, "struct: buffer too short for 'b'" end
+    local b = s:byte(pos) or 0
     if b >= 128 then b = b - 256 end
-    return b, pos + 1
+    return b, pos + 1, nil
 
   elseif c == "B" then
-    local b = s:byte(pos)
-    if not b then return nil, nil, "struct: buffer too short for 'B'" end
-    return b, pos + 1
+    if pos > #s then return nil, nil, "struct: buffer too short for 'B'" end
+    local b = s:byte(pos) or 0
+    return b, pos + 1, nil
 
   elseif c == "h" then
-    local b0, b1 = s:byte(pos, pos + 1)
-    if not b1 then return nil, nil, "struct: buffer too short for 'h'" end
+    if pos + 1 > #s then return nil, nil, "struct: buffer too short for 'h'" end
+    local b0 = s:byte(pos) or 0
+    local b1 = s:byte(pos + 1) or 0
     local v = 0 --: integer
-    if le then v = (b0 + b1 * 256) --[[:! integer]]
-    else      v = (b1 + b0 * 256) --[[:! integer]] end
-    if v >= 32768 then v = v - 65536 end
-    return v, pos + 2
-
-  elseif c == "H" then
-    local b0, b1 = s:byte(pos, pos + 1)
-    if not b1 then return nil, nil, "struct: buffer too short for 'H'" end
-    local v
     if le then v = b0 + b1 * 256
     else      v = b1 + b0 * 256 end
-    return v, pos + 2
+    if v >= 32768 then v = v - 65536 end
+    return v, pos + 2, nil
+
+  elseif c == "H" then
+    if pos + 1 > #s then return nil, nil, "struct: buffer too short for 'H'" end
+    local b0 = s:byte(pos) or 0
+    local b1 = s:byte(pos + 1) or 0
+    local v = 0 --: integer
+    if le then v = b0 + b1 * 256
+    else      v = b1 + b0 * 256 end
+    return v, pos + 2, nil
 
   elseif c == "i" or c == "l" then
-    local b0, b1, b2, b3 = s:byte(pos, pos + 3)
-    if not b3 then return nil, nil, "struct: buffer too short for '" .. c .. "'" end
+    if pos + 3 > #s then return nil, nil, "struct: buffer too short for '" .. c .. "'" end
+    local b0 = s:byte(pos) or 0
+    local b1 = s:byte(pos + 1) or 0
+    local b2 = s:byte(pos + 2) or 0
+    local b3 = s:byte(pos + 3) or 0
     local v = 0 --: integer
-    if le then v = (b0 + b1 * 256 + b2 * 65536 + b3 * 16777216) --[[:! integer]]
-    else      v = (b3 + b2 * 256 + b1 * 65536 + b0 * 16777216) --[[:! integer]] end
-    if v >= 2147483648 then v = (v - 4294967296) --[[:! integer]] end
-    return v, pos + 4
-
-  elseif c == "I" or c == "L" then
-    local b0, b1, b2, b3 = s:byte(pos, pos + 3)
-    if not b3 then return nil, nil, "struct: buffer too short for '" .. c .. "'" end
-    local v
     if le then v = b0 + b1 * 256 + b2 * 65536 + b3 * 16777216
     else      v = b3 + b2 * 256 + b1 * 65536 + b0 * 16777216 end
-    return v, pos + 4
+    if v >= 2147483648 then v = math.floor(v - 4294967296) end
+    return v, pos + 4, nil
+
+  elseif c == "I" or c == "L" then
+    if pos + 3 > #s then return nil, nil, "struct: buffer too short for '" .. c .. "'" end
+    local b0 = s:byte(pos) or 0
+    local b1 = s:byte(pos + 1) or 0
+    local b2 = s:byte(pos + 2) or 0
+    local b3 = s:byte(pos + 3) or 0
+    local v = 0 --: integer
+    if le then v = b0 + b1 * 256 + b2 * 65536 + b3 * 16777216
+    else      v = b3 + b2 * 256 + b1 * 65536 + b0 * 16777216 end
+    return v, pos + 4, nil
 
   elseif c == "q" then
     local bytes = { s:byte(pos, pos + 7) }
@@ -363,7 +372,7 @@ local function read_op(op, s, pos)
     else
       for k = 0, 7 do tmp.b[k] = bytes[8 - k] end
     end
-    return tonumber(tmp.i), pos + 8
+    return tonumber(tmp.i), pos + 8, nil
 
   elseif c == "Q" then
     local bytes = { s:byte(pos, pos + 7) }
@@ -374,7 +383,7 @@ local function read_op(op, s, pos)
     else
       for k = 0, 7 do tmp.b[k] = bytes[8 - k] end
     end
-    return tonumber(tmp.u), pos + 8
+    return tonumber(tmp.u), pos + 8, nil
 
   elseif c == "f" then
     local bytes = { s:byte(pos, pos + 3) }
@@ -385,7 +394,7 @@ local function read_op(op, s, pos)
     else
       u.b[0] = bytes[4]; u.b[1] = bytes[3]; u.b[2] = bytes[2]; u.b[3] = bytes[1]
     end
-    return u.f, pos + 4
+    return u.f, pos + 4, nil
 
   elseif c == "d" then
     local bytes = { s:byte(pos, pos + 7) }
@@ -396,12 +405,12 @@ local function read_op(op, s, pos)
     else
       for k = 0, 7 do u.b[k] = bytes[8 - k] end
     end
-    return u.d, pos + 8
+    return u.d, pos + 8, nil
 
   elseif c == "s" or c == "c" then
     local n = op.count
     if pos + n - 1 > #s then return nil, nil, "struct: buffer too short for 's'/'c'" end
-    return s:sub(pos, pos + n - 1), pos + n
+    return s:sub(pos, pos + n - 1), pos + n, nil
 
   else
     return nil, nil, "struct: unknown format character '" .. c .. "'"

@@ -79,6 +79,10 @@ function M.ipv4(s)
     return nil, "ipv4: invalid address: " .. s
   end
   a, b, c, d = tonumber(a), tonumber(b), tonumber(c), tonumber(d)
+  if a == nil then return nil, "ipv4: invalid address: " .. s end
+  if b == nil then return nil, "ipv4: invalid address: " .. s end
+  if c == nil then return nil, "ipv4: invalid address: " .. s end
+  if d == nil then return nil, "ipv4: invalid address: " .. s end
   if a > 255 or b > 255 or c > 255 or d > 255 then
     return nil, "ipv4: octet out of range in: " .. s
   end
@@ -163,6 +167,10 @@ local function parse_ipv6_groups(s)
     if prefix:sub(-1) == ":" then prefix = prefix:sub(1, -2) end
     local a, b, c, d = ipv4_tail:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
     a, b, c, d = tonumber(a), tonumber(b), tonumber(c), tonumber(d)
+    if a == nil then return nil, "ipv6: invalid embedded IPv4" end
+    if b == nil then return nil, "ipv6: invalid embedded IPv4" end
+    if c == nil then return nil, "ipv6: invalid embedded IPv4" end
+    if d == nil then return nil, "ipv6: invalid embedded IPv4" end
     if a > 255 or b > 255 or c > 255 or d > 255 then
       return nil, "ipv6: embedded IPv4 octet out of range"
     end

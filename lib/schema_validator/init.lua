@@ -5,6 +5,13 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Issue = { path: string, message: string, type: string }
+--:: Issues = { [integer]: Issue, ... }
+--:: CheckFn = (value: any, path: string, issues: Issues) -> any
+--:: TransformFn = (value: unknown) -> unknown
+--:: CoerceFn = (value: unknown) -> unknown
+--:: Schema = { _mt: any, _base_type: string, _checks: { [integer]: { fn: CheckFn, fatal: boolean }, ... }, _optional: boolean, _nullable: boolean, _default: unknown, _has_default: boolean, _transforms: { [integer]: TransformFn, ... }, _description: string | nil, _coerce_fn: CoerceFn | nil, _fields: { [string]: any } | nil, _strict: boolean | nil, _item_schema: any, _schemas: { [integer]: any, ... } | nil, _literal_value: unknown, _enum_values: { [integer]: unknown, ... } | nil, _arr_min: integer | nil, _arr_max: integer | nil, ... }
+
 -- ---------------------------------------------------------------------------
 -- Internal helpers
 -- ---------------------------------------------------------------------------
@@ -20,16 +27,18 @@ local function shallow_copy(t)
   return out
 end
 
+--: (issues: { [integer]: { path: string, message: string, type: string }, ... }, path: string, message: string, type_: string | nil) -> nil
 local function add_issue(issues, path, message, type_)
   issues[#issues + 1] = { path = path, message = message, type = type_ or "validation_error" }
 end
 
+--: (parent: string, key: string | integer) -> string
 local function join_path(parent, key)
   if type(key) == "number" then
     return (parent == "" and "" or parent) .. "[" .. key .. "]"
   end
   if parent == "" then return tostring(key) end
-  return parent .. "." .. key
+  return parent .. "." .. tostring(key)
 end
 
 -- ---------------------------------------------------------------------------
@@ -169,6 +178,7 @@ local function clone_schema(s)
   return c
 end
 
+--: (s: Schema, fn: CheckFn, fatal: boolean) -> Schema
 local function add_check(s, fn, fatal)
   local c = clone_schema(s)
   c._checks[#c._checks + 1] = { fn = fn, fatal = fatal }
@@ -179,6 +189,7 @@ end
 -- default_run: standard check+transform loop for most schema types
 -- ---------------------------------------------------------------------------
 
+--: (s: Schema, value: unknown, path: string, issues: Issues) -> unknown
 local function default_run(s, value, path, issues)
   if value == nil and s._has_default then
     value = s._default
@@ -220,8 +231,10 @@ end
 
 -- Vtable override registry: maps vtable -> _run function
 -- We populate this after defining the vtable functions.
+--: { [unknown]: (s: Schema, value: unknown, path: string, issues: Issues) -> unknown }
 local vtable_run_overrides = {}
 
+--: (s: Schema, value: unknown, path: string, issues: Issues) -> unknown
 run_schema = function(s, value, path, issues)
   local mt = s._mt
   if mt then
@@ -306,70 +319,84 @@ local function new_string_schema()
 end
 
 function StringVtable:min(n)
-  return add_check(self, function(value, path, issues)
+  --: (value: string, path: string, issues: { [integer]: { path: string, message: string, type: string }, ... }) -> string | nil
+  local function check(value, path, issues)
     if #value < n then
       add_issue(issues, path, "string too short: minimum length is " .. n .. ", got " .. #value)
       return nil
     end
     return value
-  end, false)
+  end
+  return add_check(self, check, false)
 end
 
 function StringVtable:max(n)
-  return add_check(self, function(value, path, issues)
+  --: (value: string, path: string, issues: { [integer]: { path: string, message: string, type: string }, ... }) -> string | nil
+  local function check(value, path, issues)
     if #value > n then
       add_issue(issues, path, "string too long: maximum length is " .. n .. ", got " .. #value)
       return nil
     end
     return value
-  end, false)
+  end
+  return add_check(self, check, false)
 end
 
 function StringVtable:length(n)
-  return add_check(self, function(value, path, issues)
+  --: (value: string, path: string, issues: { [integer]: { path: string, message: string, type: string }, ... }) -> string | nil
+  local function check(value, path, issues)
     if #value ~= n then
       add_issue(issues, path, "string must be exactly " .. n .. " characters, got " .. #value)
       return nil
     end
     return value
-  end, false)
+  end
+  return add_check(self, check, false)
 end
 
 function StringVtable:pattern(pat)
-  return add_check(self, function(value, path, issues)
+  --: (value: string, path: string, issues: { [integer]: { path: string, message: string, type: string }, ... }) -> string | nil
+  local function check(value, path, issues)
     if not value:find(pat) then
       add_issue(issues, path, "string does not match pattern '" .. pat .. "'")
       return nil
     end
     return value
-  end, false)
+  end
+  return add_check(self, check, false)
 end
 
 function StringVtable:email()
-  return add_check(self, function(value, path, issues)
+  --: (value: string, path: string, issues: { [integer]: { path: string, message: string, type: string }, ... }) -> string | nil
+  local function check(value, path, issues)
     if not value:find("^[^@]+@[^@]+%.[^@]+$") then
       add_issue(issues, path, "invalid email address")
       return nil
     end
     return value
-  end, false)
+  end
+  return add_check(self, check, false)
 end
 
 function StringVtable:url()
-  return add_check(self, function(value, path, issues)
+  --: (value: string, path: string, issues: { [integer]: { path: string, message: string, type: string }, ... }) -> string | nil
+  local function check(value, path, issues)
     if not value:find("^https?://") then
       add_issue(issues, path, "invalid URL (must start with http:// or https://)")
       return nil
     end
     return value
-  end, false)
+  end
+  return add_check(self, check, false)
 end
 
 function StringVtable:trim()
   local s = clone_schema(self)
-  s._transforms[#s._transforms + 1] = function(v)
+  --: (v: string) -> string
+  local function tr(v)
     return v:match("^%s*(.-)%s*$")
   end
+  s._transforms[#s._transforms + 1] = tr
   return s
 end
 
@@ -392,53 +419,63 @@ local function new_number_schema()
 end
 
 function NumberVtable:min(n)
-  return add_check(self, function(value, path, issues)
+  --: (value: number, path: string, issues: { [integer]: { path: string, message: string, type: string }, ... }) -> number | nil
+  local function check(value, path, issues)
     if value < n then
       add_issue(issues, path, "number too small: minimum is " .. n .. ", got " .. value)
       return nil
     end
     return value
-  end, false)
+  end
+  return add_check(self, check, false)
 end
 
 function NumberVtable:max(n)
-  return add_check(self, function(value, path, issues)
+  --: (value: number, path: string, issues: { [integer]: { path: string, message: string, type: string }, ... }) -> number | nil
+  local function check(value, path, issues)
     if value > n then
       add_issue(issues, path, "number too large: maximum is " .. n .. ", got " .. value)
       return nil
     end
     return value
-  end, false)
+  end
+  return add_check(self, check, false)
 end
 
 function NumberVtable:integer()
-  return add_check(self, function(value, path, issues)
+  --: (value: number, path: string, issues: { [integer]: { path: string, message: string, type: string }, ... }) -> number | nil
+  local function check(value, path, issues)
     if value ~= math.floor(value) then
       add_issue(issues, path, "expected integer, got " .. value)
       return nil
     end
     return value
-  end, false)
+  end
+  return add_check(self, check, false)
 end
 
 function NumberVtable:positive()
-  return add_check(self, function(value, path, issues)
+  --: (value: number, path: string, issues: { [integer]: { path: string, message: string, type: string }, ... }) -> number | nil
+  local function check(value, path, issues)
     if value <= 0 then
       add_issue(issues, path, "expected positive number, got " .. value)
       return nil
     end
     return value
-  end, false)
+  end
+  return add_check(self, check, false)
 end
 
 function NumberVtable:negative()
-  return add_check(self, function(value, path, issues)
+  --: (value: number, path: string, issues: { [integer]: { path: string, message: string, type: string }, ... }) -> number | nil
+  local function check(value, path, issues)
     if value >= 0 then
       add_issue(issues, path, "expected negative number, got " .. value)
       return nil
     end
     return value
-  end, false)
+  end
+  return add_check(self, check, false)
 end
 
 -- ---------------------------------------------------------------------------
@@ -484,6 +521,7 @@ local function new_any_schema()
   return new_schema(AnyMT, "any")
 end
 
+--: (s: Schema, value: unknown, path: string, issues: Issues) -> unknown
 local function any_run(s, value, path, issues)
   if value == nil and s._has_default then value = s._default end
   for i = 1, #s._transforms do
@@ -549,6 +587,7 @@ function ObjectVtable:strict()
   return s
 end
 
+--: (s: Schema, value: unknown, path: string, issues: Issues) -> unknown
 local function object_run(s, value, path, issues)
   if value == nil and s._has_default then value = s._default end
   if value == nil and (s._optional or s._nullable) then return nil end
@@ -559,7 +598,7 @@ local function object_run(s, value, path, issues)
   end
 
   if s._strict then
-    for k in pairs(value) do
+    for k in pairs(value --[[: { [string]: any }]]) do
       if s._fields[k] == nil then
         add_issue(issues, join_path(path, k), "unknown key '" .. tostring(k) .. "'")
       end
@@ -567,7 +606,8 @@ local function object_run(s, value, path, issues)
   end
 
   local out = {}
-  for key, field_schema in pairs(s._fields) do
+  local fields = s._fields or {}
+  for key, field_schema in pairs(fields --[[: { [string]: any }]]) do
     local child_path = join_path(path, key)
     local raw = value[key]
     local field_val = run_schema(field_schema, raw, child_path, issues)
@@ -615,6 +655,7 @@ function ArrayVtable:nonempty()
   return s
 end
 
+--: (s: Schema, value: unknown, path: string, issues: Issues) -> unknown
 local function array_run(s, value, path, issues)
   if value == nil and s._has_default then value = s._default end
   if value == nil and (s._optional or s._nullable) then return nil end
@@ -659,13 +700,15 @@ local function new_union_schema(schemas)
   return s
 end
 
+--: (s: Schema, value: unknown, path: string, issues: Issues) -> unknown
 local function union_run(s, value, path, issues)
   if value == nil and s._has_default then value = s._default end
   if value == nil and (s._optional or s._nullable) then return nil end
 
-  for i = 1, #s._schemas do
+  local schemas = s._schemas or {}
+  for i = 1, #schemas do
     local trial_issues = {}
-    local sub = s._schemas[i]
+    local sub = schemas[i]
     local result = run_schema(sub, value, path, trial_issues)
     if #trial_issues == 0 then
       for j = 1, #s._transforms do
@@ -685,6 +728,7 @@ register_run(UnionMT, union_run)
 -- Coerce wrappers
 -- ---------------------------------------------------------------------------
 
+--: (s: Schema, fn: CoerceFn) -> Schema
 local function with_coerce(s, fn)
   local c = clone_schema(s)
   c._coerce_fn = fn

@@ -19,14 +19,23 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local bit = require("bit")
-local band, bor, bxor = bit.band, bit.bor, bit.bxor
-local rshift, lshift = bit.rshift, bit.lshift
-local bnot = bit.bnot
+--: (...number) -> number
+local function band(...) return bit.band(... --[[: any]]) end
+--: (...number) -> number
+local function bor(...) return bit.bor(... --[[: any]]) end
+--: (...number) -> number
+local function bxor(...) return bit.bxor(... --[[: any]]) end
+--: (number, number) -> number
+local function rshift(a, b) return bit.rshift(a --[[: any]], b --[[: any]]) end
+--: (number, number) -> number
+local function lshift(a, b) return bit.lshift(a --[[: any]], b --[[: any]]) end
+--: (number) -> number
+local function bnot(a) return bit.bnot(a --[[: any]]) end
 
 -- ── Inline pure-Lua SHA-256 ───────────────────────────────────────────────────
 -- Returns 32-byte binary string.
 
-local K = {
+local K = { --: { [integer]: number }
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
   0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
   0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
@@ -60,21 +69,21 @@ local function sha256(msg)
     band(len * 8,             0xff)
   )
 
-  local h0 = 0x6a09e667
-  local h1 = 0xbb67ae85
-  local h2 = 0x3c6ef372
-  local h3 = 0xa54ff53a
-  local h4 = 0x510e527f
-  local h5 = 0x9b05688c
-  local h6 = 0x1f83d9ab
-  local h7 = 0x5be0cd19
+  local h0 = 0x6a09e667 --: number
+  local h1 = 0xbb67ae85 --: number
+  local h2 = 0x3c6ef372 --: number
+  local h3 = 0xa54ff53a --: number
+  local h4 = 0x510e527f --: number
+  local h5 = 0x9b05688c --: number
+  local h6 = 0x1f83d9ab --: number
+  local h7 = 0x5be0cd19 --: number
 
   for i = 1, #msg, 64 do
-    local w = {}
+    local w = {} --: { [integer]: number }
     for j = 0, 15 do
       local o = i + j * 4
       local a, b, c, d = msg:byte(o, o + 3)
-      w[j] = bor(lshift(a, 24), lshift(b, 16), lshift(c, 8), d)
+      w[j] = bor(lshift(a --[[: integer]], 24), lshift(b --[[: integer]], 16), lshift(c --[[: integer]], 8), d --[[: integer]])
     end
     for j = 16, 63 do
       local s0 = bxor(rotr32(w[j-15], 7), rotr32(w[j-15], 18), rshift(w[j-15], 3))
@@ -119,18 +128,20 @@ end
 -- ── Inline base64url (no padding) ────────────────────────────────────────────
 
 local URL64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-local url_enc = {}
-for i = 1, 64 do url_enc[i - 1] = URL64:byte(i) end
-local url_dec = {}
-for i = 1, 64 do url_dec[URL64:byte(i)] = i - 1 end
+local url_enc = {} --: { [integer]: integer }
+for i = 1, 64 do url_enc[i - 1] = URL64:byte(i) or 0 end
+local url_dec = {} --: { [integer]: integer }
+for i = 1, 64 do url_dec[URL64:byte(i) or 0] = i - 1 end
 
+--: (s: string) -> string
 local function base64url_encode(s)
   local n = #s
   local rem = n % 3
   local t = {}
   local k = 1
   for i = 1, n - rem, 3 do
-    local a, b, c = s:byte(i, i + 2)
+    local ba, bb, bc = s:byte(i, i + 2)
+    local a, b, c = ba or 0, bb or 0, bc or 0
     local v = a * 0x10000 + b * 0x100 + c
     t[k] = string.char(
       url_enc[band(rshift(v, 18), 0x3f)],
@@ -141,7 +152,8 @@ local function base64url_encode(s)
     k = k + 1
   end
   if rem == 2 then
-    local a, b = s:byte(n - 1, n)
+    local ba, bb = s:byte(n - 1, n)
+    local a, b = ba or 0, bb or 0
     local v = a * 0x10000 + b * 0x100
     t[k] = string.char(
       url_enc[band(rshift(v, 18), 0x3f)],
@@ -149,7 +161,7 @@ local function base64url_encode(s)
       url_enc[band(rshift(v,  6), 0x3f)]
     )
   elseif rem == 1 then
-    local v = s:byte(n) * 0x10000
+    local v = (s:byte(n) or 0) * 0x10000
     t[k] = string.char(
       url_enc[band(rshift(v, 18), 0x3f)],
       url_enc[band(rshift(v, 12), 0x3f)]
@@ -158,16 +170,18 @@ local function base64url_encode(s)
   return table.concat(t)
 end
 
-local function base64url_decode(s)
+--: (input: string) -> (string | nil, string | nil)
+local function base64url_decode(input)
   -- Add padding
-  local rem = #s % 4
-  if rem == 2 then s = s .. "==" elseif rem == 3 then s = s .. "=" end
+  local rem = #input % 4
+  local s = input
+  if rem == 2 then s = input .. "==" elseif rem == 3 then s = input .. "=" end
   local n = #s
-  local bytes = {}
-  local nb = 0
+  local bytes = {} --: { [integer]: integer }
+  local nb = 0 --: integer
   for i = 1, n do
-    local byte = s:byte(i)
-    if byte ~= 0x3d then -- skip '='
+    local byte = string.byte(s, i)
+    if byte ~= nil and byte ~= 0x3d then -- skip '='
       nb = nb + 1
       bytes[nb] = byte
     end
@@ -206,10 +220,11 @@ end
 -- Handles flat objects with string/number/boolean/null values.
 -- Returns a Lua table or (nil, errmsg).
 
+--: (s: string) -> (unknown, string | nil)
 local function json_parse(s)
   local pos = 1
   local function skip()
-    while pos <= #s and s:byte(pos) <= 32 do pos = pos + 1 end
+    while pos <= #s and (s:byte(pos) or 0) <= 32 do pos = pos + 1 end
   end
   local function parse_value()
     skip()
@@ -241,18 +256,19 @@ local function json_parse(s)
       return table.concat(buf)
     end
     -- Number
-    if (c >= 0x30 and c <= 0x39) or c == 0x2d then -- 0-9 or -
+    local cn = c or -1
+    if (cn >= 0x30 and cn <= 0x39) or cn == 0x2d then -- 0-9 or -
       local start = pos
-      if c == 0x2d then pos = pos + 1 end
-      while pos <= #s and s:byte(pos) >= 0x30 and s:byte(pos) <= 0x39 do pos = pos + 1 end
+      if cn == 0x2d then pos = pos + 1 end
+      while pos <= #s and (s:byte(pos) or 0) >= 0x30 and (s:byte(pos) or 0) <= 0x39 do pos = pos + 1 end
       if pos <= #s and s:byte(pos) == 0x2e then
         pos = pos + 1
-        while pos <= #s and s:byte(pos) >= 0x30 and s:byte(pos) <= 0x39 do pos = pos + 1 end
+        while pos <= #s and (s:byte(pos) or 0) >= 0x30 and (s:byte(pos) or 0) <= 0x39 do pos = pos + 1 end
       end
       if pos <= #s and (s:byte(pos) == 0x65 or s:byte(pos) == 0x45) then
         pos = pos + 1
         if pos <= #s and (s:byte(pos) == 0x2b or s:byte(pos) == 0x2d) then pos = pos + 1 end
-        while pos <= #s and s:byte(pos) >= 0x30 and s:byte(pos) <= 0x39 do pos = pos + 1 end
+        while pos <= #s and (s:byte(pos) or 0) >= 0x30 and (s:byte(pos) or 0) <= 0x39 do pos = pos + 1 end
       end
       return tonumber(s:sub(start, pos - 1))
     end
@@ -311,15 +327,19 @@ end
 
 local HEX = "0123456789ABCDEF"
 
+--: (c: string) -> string
 local function url_encode_char(c)
-  local b = c:byte(1)
-  return "%" .. HEX:sub(rshift(b, 4) + 1, rshift(b, 4) + 1)
-               .. HEX:sub(band(b, 0x0f) + 1, band(b, 0x0f) + 1)
+  local b = c:byte(1) or 0
+  local hi = math.floor(b / 16) + 1
+  local lo = (b % 16) + 1
+  return "%" .. HEX:sub(hi, hi) .. HEX:sub(lo, lo)
 end
 
 -- Percent-encode a single parameter value (RFC 3986 unreserved chars pass through).
+--: (s: string) -> string
 local function url_encode(s)
-  return (s:gsub("[^%w%-%.%_%~]", url_encode_char))
+  local r = s:gsub("[^%w%-%.%_%~]", url_encode_char)
+  return r
 end
 
 -- ── Public API ────────────────────────────────────────────────────────────────
@@ -330,8 +350,9 @@ M._tier = "pure"
 -- Build a URL by appending query parameters.
 -- params: table of key=value pairs (ordered by pairs iteration).
 -- Returns: URL string.
+--: (base_url: string, params: { [string]: string }) -> string
 function M.build_auth_url(base_url, params)
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   for k, v in pairs(params) do
     parts[#parts+1] = url_encode(tostring(k)) .. "=" .. url_encode(tostring(v))
   end
@@ -365,10 +386,11 @@ end
 -- Uses LuaJIT FFI getrandom or /dev/urandom for randomness.
 -- Falls back to math.random seeded with time_fn() if FFI unavailable.
 -- Returns: verifier (string), challenge (string) or (nil, errmsg).
+--: (opts: { time_fn: () -> number }) -> (string, string)
 function M.pkce(opts)
   assert(opts and opts.time_fn, "pkce requires opts.time_fn")
   -- Generate 32 random bytes → 43 base64url chars (enough entropy, spec min is 43).
-  local raw
+  local raw --: string | nil
   local ok_ffi, ffi = pcall(require, "ffi")
   if ok_ffi then
     pcall(ffi.cdef, "long syscall(long number, ...); int open(const char*, int); ssize_t read(int, void*, size_t); int close(int);")
@@ -390,7 +412,7 @@ function M.pkce(opts)
       end
     end
     if got then
-      raw = ffi.string(buf, 32)
+      raw = ffi.string(buf, 32) --[[: string]]
     end
   end
   if not raw then
@@ -400,6 +422,7 @@ function M.pkce(opts)
     for i = 1, 32 do bytes[i] = string.char(math.random(0, 255)) end
     raw = table.concat(bytes)
   end
+  assert(raw, "pkce: raw bytes not generated")
   local verifier = base64url_encode(raw)
   local challenge = base64url_encode(sha256(verifier))
   return verifier, challenge
@@ -428,6 +451,7 @@ end
 
 -- ── Token Store ───────────────────────────────────────────────────────────────
 
+--:: TokenStore = { _tokens: { [string]: { token: { expires_in: number | nil, ... }, issued_at: number } }, _time_fn: () -> number, ... }
 local token_store_mt = {}
 token_store_mt.__index = token_store_mt
 
@@ -448,6 +472,7 @@ end
 
 -- Returns true if the stored token has expired.
 -- Uses issued_at + expires_in to determine expiry.
+--: (self: TokenStore, key: string) -> boolean
 function token_store_mt:is_expired(key)
   local entry = self._tokens[key]
   if not entry then return true end
@@ -458,6 +483,7 @@ function token_store_mt:is_expired(key)
 end
 
 -- Returns true if the token will expire within `margin` seconds (default 60).
+--: (self: TokenStore, key: string, margin: number | nil) -> boolean
 function token_store_mt:needs_refresh(key, margin)
   local entry = self._tokens[key]
   if not entry then return true end
@@ -485,6 +511,7 @@ local client_mt = {}
 client_mt.__index = client_mt
 
 -- Build URL-encoded form body from a table.
+--: (params: { ... }) -> string
 local function form_encode(params)
   local parts = {}
   for k, v in pairs(params) do
@@ -495,6 +522,7 @@ end
 
 -- Internal: POST to token endpoint, parse response.
 -- Returns (token_table) or (nil, err_string_or_table).
+--: (http: { post: (string, { [string]: string }, string) -> ({ status: integer, body: string | nil } | nil, string | nil) } | nil, url: string, headers: { [string]: string }, body: string) -> (unknown, unknown)
 local function token_request(http, url, headers, body)
   if not http or not http.post then
     return nil, "http transport not configured"
@@ -522,24 +550,26 @@ end
 -- Build the Authorization Code redirect URL.
 -- opts: { auth_url, redirect_uri, scope, state, code_challenge, code_challenge_method, ... }
 -- Returns: URL string.
+--: (self: { _client_id: string, ... }, opts: { auth_url: string, redirect_uri: string | nil, scope: string | nil, state: string | nil, code_challenge: string | nil, code_challenge_method: string | nil, ... }) -> string
 function client_mt:authorization_url(opts)
-  local params = {
-    response_type = "code",
-    client_id     = self._client_id,
-  }
-  if opts.redirect_uri then params.redirect_uri = opts.redirect_uri end
-  if opts.scope        then params.scope = opts.scope end
-  if opts.state        then params.state = opts.state end
+  local params = {} --: { [string]: string }
+  params["response_type"] = "code"
+  params["client_id"]     = tostring(self._client_id)
+  if opts.redirect_uri then params["redirect_uri"] = opts.redirect_uri end
+  if opts.scope        then params["scope"] = opts.scope end
+  if opts.state        then params["state"] = opts.state end
   if opts.code_challenge then
-    params.code_challenge = opts.code_challenge
-    params.code_challenge_method = opts.code_challenge_method or "S256"
+    params["code_challenge"] = opts.code_challenge
+    params["code_challenge_method"] = opts.code_challenge_method or "S256"
   end
   -- Merge any extra params
   for k, v in pairs(opts) do
     if k ~= "auth_url" and k ~= "redirect_uri" and k ~= "scope" and k ~= "state"
        and k ~= "code_challenge" and k ~= "code_challenge_method" then
-      if type(v) == "string" or type(v) == "number" or type(v) == "boolean" then
+      if type(v) == "string" then
         params[k] = v
+      elseif type(v) == "number" or type(v) == "boolean" then
+        params[k] = tostring(v)
       end
     end
   end

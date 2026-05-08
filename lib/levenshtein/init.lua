@@ -10,10 +10,14 @@ end
 local M = {}
 M._tier = "pure"
 
-local byte, sub, floor, min, max = string.byte, string.sub, math.floor, math.min, math.max
+local byte = string.byte
+local sub = string.sub
+local floor = math.floor
+local min = math.min
+local max = math.max
 
 -- LuaJIT bit operations (bit library; also works on PUC-Rio via bit32 shim)
-local bit = bit or bit32 or require("bit")
+local bit = bit or rawget(_G, "bit32") or require("bit") --[[: { bor: (...integer) -> integer, band: (...integer) -> integer, bnot: (integer) -> integer, lshift: (integer, integer) -> integer, ... }]]
 local bor, band, bnot, lshift = bit.bor, bit.band, bit.bnot, bit.lshift
 
 -- ---------------------------------------------------------------------------
@@ -24,7 +28,8 @@ function M.distance(s, t)
   local m, n = #s, #t
   if m == 0 then return n end
   if n == 0 then return m end
-  local prev, curr = {}, {}
+  local prev = {} --: integer[]
+  local curr = {} --: integer[]
   for j = 0, n do prev[j] = j end
   for i = 1, m do
     curr[0] = i
@@ -65,7 +70,8 @@ function M.distance_weighted(s, t, opts)
     return sum
   end
   -- prev[j] = edit cost for s[1..i-1] -> t[1..j]
-  local prev, curr = {}, {}
+  local prev = {} --: number[]
+  local curr = {} --: number[]
   prev[0] = 0
   for j = 1, n do prev[j] = prev[j - 1] + cost(opts.insert, sub(t, j, j)) end
   for i = 1, m do
@@ -96,7 +102,9 @@ function M.osa(s, t)
   if m == 0 then return n end
   if n == 0 then return m end
   -- Three rows: pp (i-2), p (i-1), c (i)
-  local pp, p, c = {}, {}, {}
+  local pp = {} --: integer[]
+  local p = {} --: integer[]
+  local c = {} --: integer[]
   for j = 0, n do p[j] = j end
   -- We need a "zeroth" prev-prev row; initialise as large sentinel
   for j = 0, n do pp[j] = j + m + 1 end
@@ -137,11 +145,11 @@ function M.damerau(s, t)
   -- da[c] = last 1-based row in s where character c was seen.
 
   local INF = m + n + 2
-  local da = {}   -- char -> last 1-based s row that matched it (default 0)
+  local da = {} --: { [string]: integer }
 
   -- Flat array, (m+2) x (n+2), 1-based: index(i,j) = i*(n+2)+j
   local W = n + 2
-  local d = {}
+  local d = {} --: { [integer]: integer }
   -- sentinel row 0 and col 0: d[0][j] = INF for all j
   for i = 0, m + 1 do
     for j = 0, n + 1 do
@@ -187,7 +195,8 @@ end
 function M.lcs(s, t)
   local m, n = #s, #t
   if m == 0 or n == 0 then return 0 end
-  local prev, curr = {}, {}
+  local prev = {} --: integer[]
+  local curr = {} --: integer[]
   for j = 0, n do prev[j] = 0 end
   for i = 1, m do
     curr[0] = 0
@@ -217,9 +226,9 @@ function M.jaro(s, t)
   local win = floor(max(m_len, n_len) / 2) - 1
   if win < 0 then win = 0 end
 
-  local s_match = {}
-  local t_match = {}
-  local matches = 0
+  local s_match = {} --: { [integer]: boolean }
+  local t_match = {} --: { [integer]: boolean }
+  local matches = 0 --: integer
 
   for i = 1, m_len do
     local lo = max(1, i - win)
@@ -327,7 +336,7 @@ function M.fuzzy_find(text, pattern, max_errors)
   local pm = bitap_masks(pattern)
   local accept = lshift(1, plen - 1)
 
-  local states = {}
+  local states = {} --: integer[]
   for e = 0, max_errors do states[e] = 0 end
 
   for j = 1, tlen do
@@ -364,7 +373,7 @@ function M.fuzzy_find_all(text, pattern, max_errors)
   local pm = bitap_masks(pattern)
   local accept = lshift(1, plen - 1)
 
-  local states = {}
+  local states = {} --: integer[]
   for e = 0, max_errors do states[e] = 0 end
 
   for j = 1, tlen do

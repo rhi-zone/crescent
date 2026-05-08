@@ -5,6 +5,9 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Image = { width: integer, height: integer, channels: integer, data: { [integer]: integer } }
+--:: Kernel = { width: integer, height: integer, data: { [integer]: number } }
+
 local math_floor = math.floor
 local math_max   = math.max
 local math_min   = math.min
@@ -107,6 +110,7 @@ end
 -- ──────────────────────────────────────────────────────────────────
 
 function M.rgb_to_grayscale(img)
+  local img = img --[[: Image]]
   local w, h = img.width, img.height
   local src = img.data
   local dst = {}
@@ -132,6 +136,7 @@ function M.rgb_to_grayscale(img)
 end
 
 function M.grayscale_to_rgb(img)
+  local img = img --[[: Image]]
   if img.channels ~= 1 then
     return nil, "image_processing.grayscale_to_rgb: expected 1-channel image"
   end
@@ -151,6 +156,7 @@ function M.grayscale_to_rgb(img)
 end
 
 -- h in [0,360), s,v in [0,1]
+--: (r: number, g: number, b: number) -> (number, number, number)
 function M.rgb_to_hsv(r, g, b)
   local rf = r / 255
   local gf = g / 255
@@ -160,7 +166,7 @@ function M.rgb_to_hsv(r, g, b)
   local delta = mx - mn
   local v = mx
   local s = mx == 0 and 0 or delta / mx
-  local h
+  local h = 0 --: number
   if delta == 0 then
     h = 0
   elseif mx == rf then
@@ -190,6 +196,7 @@ function M.hsv_to_rgb(h, s, v)
 end
 
 function M.apply_lut(img, lut)
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local n = w * h * ch
@@ -206,6 +213,7 @@ end
 -- ──────────────────────────────────────────────────────────────────
 
 function M.brightness(img, delta)
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local n = w * h * ch
@@ -218,6 +226,7 @@ function M.brightness(img, delta)
 end
 
 function M.contrast(img, factor)
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local n = w * h * ch
@@ -230,6 +239,7 @@ function M.contrast(img, factor)
 end
 
 function M.invert(img)
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local n = w * h * ch
@@ -255,6 +265,7 @@ function M.invert(img)
 end
 
 function M.threshold(img, t)
+  local img = img --[[: Image]]
   if img.channels ~= 1 then
     return nil, "image_processing.threshold: expected 1-channel (grayscale) image"
   end
@@ -270,6 +281,7 @@ function M.threshold(img, t)
 end
 
 function M.gamma(img, g)
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local n = w * h * ch
@@ -292,6 +304,7 @@ end
 -- ──────────────────────────────────────────────────────────────────
 
 function M.crop(img, x1, y1, x2, y2)
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   if x1 < 1 or y1 < 1 or x2 > w or y2 > h or x1 > x2 or y1 > y2 then
     return nil, "image_processing.crop: out of bounds or invalid rectangle"
@@ -313,6 +326,7 @@ function M.crop(img, x1, y1, x2, y2)
 end
 
 function M.flip_h(img)
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local dst = {}
@@ -330,6 +344,7 @@ function M.flip_h(img)
 end
 
 function M.flip_v(img)
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local dst = {}
@@ -356,7 +371,7 @@ function M.rotate_90(img, n)
     return setmetatable(out, { __index = M })
   end
   -- apply one rotation at a time
-  local cur = img
+  local cur = img --: Image
   for _ = 1, n do
     local w, h, ch = cur.width, cur.height, cur.channels
     local src = cur.data
@@ -382,6 +397,7 @@ function M.rotate_90(img, n)
 end
 
 function M.scale_nearest(img, new_w, new_h)
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local dst = {}
@@ -402,6 +418,7 @@ function M.scale_nearest(img, new_w, new_h)
 end
 
 function M.scale_bilinear(img, new_w, new_h)
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local dst = {}
@@ -441,6 +458,8 @@ end
 -- kernel: { width, height, data }  (row-major float values)
 -- replicate border padding
 function M.convolve(img, kernel)
+  local img = img --[[: Image]]
+  local kernel = kernel --[[: Kernel]]
   local iw, ih, ch = img.width, img.height, img.channels
   local kw, kh = kernel.width, kernel.height
   local kdata = kernel.data
@@ -471,6 +490,7 @@ function M.convolve(img, kernel)
 end
 
 function M.blur_box(img, radius)
+  local img = img --[[: Image]]
   local r = radius or 1
   local size = 2 * r + 1
   local n = size * size
@@ -480,12 +500,14 @@ function M.blur_box(img, radius)
 end
 
 -- Gaussian blur via separable passes
+--: (img: Image, sigma: number) -> unknown
 function M.blur_gaussian(img, sigma)
+  local img = img --[[: Image]]
   local ks = math_ceil(3 * sigma) * 2 + 1
   local half = math_floor(ks / 2)
   -- build 1D kernel
   local k1d = {}
-  local sum = 0
+  local sum = 0.0 --: number
   for i = 0, ks - 1 do
     local x = i - half
     local v = math_exp(-x*x / (2*sigma*sigma))
@@ -502,6 +524,7 @@ function M.blur_gaussian(img, sigma)
 end
 
 function M.sharpen(img)
+  local img = img --[[: Image]]
   local kernel = {
     width = 3, height = 3,
     data = {
@@ -515,11 +538,12 @@ end
 
 -- Sobel edge detection — returns grayscale magnitude image
 function M.edge_detect(img)
-  local gray
+  local img = img --[[: Image]]
+  local gray = img --: Image
   if img.channels ~= 1 then
-    gray = M.rgb_to_grayscale(img)
-  else
-    gray = img
+    local g, _err = M.rgb_to_grayscale(img)
+    if not g then return nil, _err end
+    gray = g --[[: Image]]
   end
   local iw, ih = gray.width, gray.height
   local src = gray.data
@@ -527,16 +551,18 @@ function M.edge_detect(img)
   for y = 1, ih do
     for x = 1, iw do
       -- Sobel kernels
-      local gx, gy = 0, 0
-      local kx = { -1, 0, 1, -2, 0, 2, -1, 0, 1 }
-      local ky = { -1, -2, -1, 0, 0, 0, 1, 2, 1 }
+      local gx, gy = 0.0, 0.0 --: number
+      local kx = { -1, 0, 1, -2, 0, 2, -1, 0, 1 } --: { [integer]: integer }
+      local ky = { -1, -2, -1, 0, 0, 0, 1, 2, 1 } --: { [integer]: integer }
       for ky_i = 0, 2 do
         for kx_i = 0, 2 do
           local sy = math_max(1, math_min(ih, y + ky_i - 1))
           local sx = math_max(1, math_min(iw, x + kx_i - 1))
-          local v = src[(sy-1)*iw + sx]
-          gx = gx + v * kx[ky_i * 3 + kx_i + 1]
-          gy = gy + v * ky[ky_i * 3 + kx_i + 1]
+          local v = src[(sy-1)*iw + sx] or 0
+          local kxv = kx[ky_i * 3 + kx_i + 1] or 0
+          local kyv = ky[ky_i * 3 + kx_i + 1] or 0
+          gx = gx + v * kxv
+          gy = gy + v * kyv
         end
       end
       local mag = math_min(255, math_sqrt(gx*gx + gy*gy))
@@ -548,6 +574,7 @@ function M.edge_detect(img)
 end
 
 function M.emboss(img)
+  local img = img --[[: Image]]
   local kernel = {
     width = 3, height = 3,
     data = {
@@ -566,19 +593,21 @@ end
 -- Returns a table of tables, one per channel, each with indices [0..255]
 -- For grayscale returns a single table (not nested in another)
 function M.histogram(img)
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local hists = {}
   for c = 1, ch do
-    local hc = {}
+    local hc = {} --: { [integer]: integer }
     for i = 0, 255 do hc[i] = 0 end
     hists[c] = hc
   end
+  local hists_ = hists --[[: { [integer]: { [integer]: integer } }]]
   local n = w * h
   for i = 1, n do
     for c = 1, ch do
-      local v = src[(i-1)*ch + c]
-      hists[c][v] = hists[c][v] + 1
+      local v = src[(i-1)*ch + c] or 0
+      hists_[c][v] = (hists_[c][v] or 0) + 1
     end
   end
   if ch == 1 then
@@ -588,33 +617,34 @@ function M.histogram(img)
 end
 
 function M.equalize(img)
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local n = w * h
   -- equalize each channel independently
   local luts = {}
   for c = 1, ch do
-    local hist = {}
+    local hist = {} --: { [integer]: integer }
     for i = 0, 255 do hist[i] = 0 end
     for i = 1, n do
-      local v = src[(i-1)*ch + c]
-      hist[v] = hist[v] + 1
+      local v = src[(i-1)*ch + c] or 0
+      hist[v] = (hist[v] or 0) + 1
     end
     -- CDF
-    local cdf = {}
-    local cum = 0
+    local cdf = {} --: { [integer]: integer }
+    local cum = 0 --: integer
     for i = 0, 255 do
-      cum = cum + hist[i]
+      cum = cum + (hist[i] or 0)
       cdf[i] = cum
     end
     -- find cdf_min (first non-zero)
-    local cdf_min = 0
+    local cdf_min = 0 --: integer
     for i = 0, 255 do
-      if cdf[i] > 0 then cdf_min = cdf[i]; break end
+      if (cdf[i] or 0) > 0 then cdf_min = cdf[i] or 0; break end
     end
-    local lut = {}
+    local lut = {} --: { [integer]: integer }
     for i = 0, 255 do
-      lut[i] = math_floor((cdf[i] - cdf_min) / (n - cdf_min) * 255 + 0.5)
+      lut[i] = math_floor(((cdf[i] or 0) - cdf_min) / (n - cdf_min) * 255 + 0.5)
       if n == cdf_min then lut[i] = 0 end
     end
     luts[c] = lut
@@ -643,6 +673,7 @@ local function set_pixel_raw(data, width, channels, x, y, r, g, b, a)
 end
 
 function M.fill(img, r, g, b, a)
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local dst = {}
   for y = 1, h do
@@ -655,6 +686,7 @@ function M.fill(img, r, g, b, a)
 end
 
 function M.draw_rect(img, x1, y1, x2, y2, r, g, b)
+  local img = img --[[: Image]]
   -- copy image data
   local dst = {}
   for i = 1, #img.data do dst[i] = img.data[i] end
@@ -679,6 +711,7 @@ function M.draw_rect(img, x1, y1, x2, y2, r, g, b)
 end
 
 function M.fill_rect(img, x1, y1, x2, y2, r, g, b)
+  local img = img --[[: Image]]
   local dst = {}
   for i = 1, #img.data do dst[i] = img.data[i] end
   local w, h, ch = img.width, img.height, img.channels
