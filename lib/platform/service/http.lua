@@ -87,7 +87,7 @@ end
 -- Returns an empty table when not available (non-LuaJIT / no debug info).
 -- NOTE: this only works when the function was compiled with debug info.
 -- The first parameter is always "caps" by convention and is skipped.
---: (fn: unknown) -> { [integer]: string }
+--: (fn: function) -> { [integer]: string }
 local function param_names_of(fn)
 	local fn_a = fn --[[: any]]
 	local info = debug.getinfo(fn_a, "u")
@@ -131,16 +131,19 @@ end
 
 -- ── Query-string parser ────────────────────────────────────────────────────
 
+--: (string) -> string
+local function pct_decode(h) return string.char(tonumber(h, 16) or 0) end
+
 --: (string | nil) -> { [string]: string }
 local function parse_query(qs)
 	local params = {} --: { [string]: string }
 	if not qs or qs == "" then return params end
 	for kv in qs:gmatch("[^&]+") do
 		local k, v = kv:match("^([^=]+)=?(.*)")
-		if k then
-			local v1 = (v:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end))
-			local v2 = ((v1 --[[:! string]]):gsub("+", " "))
-			params[k] = v2 --[[:! string]]
+		if k and type(v) == "string" then
+			local v1 = v:gsub("%%(%x%x)", pct_decode)
+			local v2 = v1:gsub("+", " ")
+			params[k] = v2
 		end
 	end
 	return params
@@ -230,7 +233,7 @@ local function build_routes(caps, methods, descriptors)
 		local desc = descriptors[fn_name] or {}
 		local http_method
 		local path_pattern
-		local param_names = param_names_of(fn)
+		local param_names = param_names_of(fn --[[:! function]])
 
 		if desc.method then
 			http_method = desc.method:upper()

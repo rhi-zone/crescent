@@ -212,7 +212,7 @@ end
 
 --:: http_server_opts = { port?: integer, host?: string, daemon?: boolean, url?: string, on_serve?: (unknown) -> nil, tcp_nodelay?: boolean }
 -- http_server_cap(opts) -> cap_table, revoke_fn
---: (http_server_opts) -> (unknown, string | nil)
+--: (http_server_opts) -> (unknown, (() -> nil) | string | nil)
 function M.http_server_cap(opts)
 	if not opts then
 		return nil, "http_server: opts required"

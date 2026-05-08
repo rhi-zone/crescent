@@ -190,6 +190,7 @@ local function encode_string(s)
 	return nil, "string too long"
 end
 
+--: (string) -> (string | nil, string | nil)
 local function encode_binary(s)
 	local len = #s
 	if len <= 255 then
@@ -237,6 +238,7 @@ local function encode_array(t)
 	return concat(parts)
 end
 
+--: ({ [unknown]: unknown }) -> (string | nil, string | nil)
 local function encode_map(t)
 	local count = 0
 	for _ in pairs(t) do count = count + 1 end

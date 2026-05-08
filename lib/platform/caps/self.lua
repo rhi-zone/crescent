@@ -86,7 +86,7 @@ local function atomic_write(path, bytes)
 end
 
 -- self_cap(app, opts?) -> cap_table, revoke_fn
---: ({ path: string, chunks: unknown, entries: { [number]: { name: string, data: string, mode: number, mtime: number, size: number, typeflag: string, ... } } | nil, manifest: unknown, ... }, { app_id: string | nil } | nil) -> ({ _type: string, app_id: string | nil, ... }, () -> nil)
+--: ({ path: string, chunks: { [integer]: { type: string, data: string, ... } } | nil, entries: { [number]: { name: string, data: string, mode: number, mtime: number, size: number, typeflag: string, ... } } | nil, manifest: unknown, ... }, { app_id: string | nil } | nil) -> ({ _type: string, app_id: string | nil, ... }, () -> nil)
 function M.self_cap(app, opts)
 	local revoked = false
 	local app_id = opts and opts.app_id
@@ -146,7 +146,7 @@ end
 
 -- self_write_cap(app, opts?) -> cap_table, revoke_fn
 -- Superset of self_cap that also exposes write_metadata(keyword, bytes).
---: ({ path: string, chunks: unknown, entries: { [number]: { name: string, data: string, mode: number, mtime: number, size: number, typeflag: string, ... } } | nil, manifest: unknown, ... }, { app_id: string | nil } | nil) -> ({ _type: string, app_id: string | nil, ... }, () -> nil)
+--: ({ path: string, chunks: { [integer]: { type: string, data: string, ... } } | nil, entries: { [number]: { name: string, data: string, mode: number, mtime: number, size: number, typeflag: string, ... } } | nil, manifest: unknown, ... }, { app_id: string | nil } | nil) -> ({ _type: string, app_id: string | nil, ... }, () -> nil)
 function M.self_write_cap(app, opts)
 	local revoked = false
 	local app_id = opts and opts.app_id
