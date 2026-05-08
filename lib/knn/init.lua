@@ -5,6 +5,7 @@ local vec = require("lib.vec")
 local M = {}
 
 --:: Vec = { data?: unknown, n: integer, [integer]: number, ... }
+--:: Neighbor = { label: unknown, distance: number }
 --:: KnnIndex = { _k: integer, _dist: (Vec, Vec) -> number, _points: { [integer]: unknown }, _n: integer, _dims: number | nil, ... }
 
 local index_mt = {}
@@ -33,7 +34,7 @@ local builtin_distances = {
 
 --: (opts: ({ k: (number | nil), distance: string | (Vec, Vec) -> (number | nil) } | nil)) -> (KnnIndex | nil, string | nil)
 function M.new(opts)
-  opts = opts or {}
+  opts = (opts or {}) --[[:! { k: (number | nil), distance: string | (Vec, Vec) -> (number | nil), ... }]]
   local k = opts.k or 5
   local dist = opts.distance or "euclidean"
   if type(dist) == "string" then
@@ -67,7 +68,7 @@ end
 function index_mt:add_batch(batch)
   for i = 1, #batch do
     local item = batch[i]
-    self:add(item[1], item[2])
+    index_mt.add(self, item[1], item[2] --[[:! { [number]: number }]])
   end
 end
 
@@ -111,7 +112,7 @@ end
 
 --: (self: KnnIndex, target: {[number]: number}, opts: ({ k: (number | nil) } | nil)) -> {{label: unknown, distance: number}}
 function index_mt:query(target, opts)
-  local k = (opts and opts.k) or self._k
+  local k = ((opts and opts.k) or self._k) --[[:! number]]
   local tv = vec.new(target)
   local dist_fn = self._dist
   local points = self._points
@@ -120,7 +121,7 @@ function index_mt:query(target, opts)
   if n == 0 then return {} end
 
   -- Build top-k via insertion into sorted array
-  local result = {}
+  local result = {} --: { [integer]: { label: unknown, distance: number } }
   local rn = 0
   for i = 1, n do
     local p = points[i]
@@ -163,7 +164,7 @@ end
 --: (self: KnnIndex, target: {[number]: number}, opts: ({ k: (number | nil), weighted: (boolean | nil) } | nil)) -> (unknown, {[unknown]: number})
 function index_mt:classify(target, opts)
   local weighted = opts and opts.weighted
-  local neighbors = self:query(target, opts)
+  local neighbors = index_mt.query(self, target, opts)
 
   local scores = {}
   for i = 1, #neighbors do
@@ -193,32 +194,32 @@ function index_mt:classify(target, opts)
   return best_label, scores
 end
 
---: (self: KnnIndex, target: {[number]: number}, opts: ({ k: (number | nil), weighted: (boolean | nil) } | nil)) -> number
+--: (self: KnnIndex, target: {[number]: number}, opts: ({ k: (number | nil), weighted: (boolean | nil) } | nil)) -> (number | nil, string | nil)
 function index_mt:regress(target, opts)
   local weighted = opts and opts.weighted
-  local neighbors = self:query(target, opts)
+  local neighbors = index_mt.query(self, target, opts)
 
   if #neighbors == 0 then
     return nil, "no neighbors found"
   end
 
   if weighted then
-    local wsum = 0
-    local vsum = 0
+    local wsum = (0 --[[: number]])
+    local vsum = (0 --[[: number]])
     for i = 1, #neighbors do
       local nb = neighbors[i]
       if nb.distance == 0 then
-        return nb.label
+        return nb.label --[[:! number]]
       end
       local w = 1 / nb.distance
       wsum = wsum + w
-      vsum = vsum + nb.label * w
+      vsum = vsum + (nb.label --[[:! number]]) * w
     end
     return vsum / wsum
   else
-    local sum = 0
+    local sum = (0 --[[: number]])
     for i = 1, #neighbors do
-      sum = sum + neighbors[i].label
+      sum = sum + (neighbors[i].label --[[:! number]])
     end
     return sum / #neighbors
   end

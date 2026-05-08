@@ -164,12 +164,14 @@ IPv6.__index = IPv6
 local function parse_ipv6_groups(s)
   -- Handle IPv4-mapped: ::ffff:192.168.1.1
   -- Check for embedded IPv4 at the end
-  local ipv4_tail = s:match("(%d+%.%d+%.%d+%.%d+)$")
-  local prefix = s
+  local s_str = s --[[:! string]]
+  local ipv4_tail = s_str:match("(%d+%.%d+%.%d+%.%d+)$")
+  local prefix = s_str
   local ipv4_groups
   if ipv4_tail then
     -- replace the IPv4 part with two placeholder groups
-    prefix = s:sub(1, #s - #ipv4_tail)
+    local tail = ipv4_tail --[[:! string]]
+    prefix = s_str:sub(1, #s_str - #tail)
     if prefix:sub(-1) == ":" then prefix = prefix:sub(1, -2) end
     local a, b, c, d = ipv4_tail:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
     a, b, c, d = tonumber(a), tonumber(b), tonumber(c), tonumber(d)
@@ -185,12 +187,14 @@ local function parse_ipv6_groups(s)
 
   -- Split on ::
   local left_str, right_str
-  local dc_pos = prefix:find("::", 1, true)
+  --: string
+  local prefix_str = prefix
+  local dc_pos = prefix_str:find("::", 1, true)
   if dc_pos then
-    left_str  = prefix:sub(1, dc_pos - 1)
-    right_str = prefix:sub(dc_pos + 2)
+    left_str  = prefix_str:sub(1, dc_pos - 1)
+    right_str = prefix_str:sub(dc_pos + 2)
   else
-    left_str  = prefix
+    left_str  = prefix_str
     right_str = nil
   end
 
@@ -220,7 +224,9 @@ local function parse_ipv6_groups(s)
     if not right then return nil, err end
   end
 
-  local total_explicit = #left + (right and #right or 0) + (ipv4_groups and 2 or 0)
+  local right_len = 0
+  if right then right_len = #(right --[[:! { [integer]: integer }]]) end
+  local total_explicit = #left + right_len + (ipv4_groups and 2 or 0)
   if dc_pos then
     if total_explicit > 7 then
       return nil, "ipv6: too many groups with ::"
@@ -245,7 +251,8 @@ local function parse_ipv6_groups(s)
       groups[#groups + 1] = 0
     end
     if right then
-      for i = 1, #right do groups[#groups + 1] = right[i] end
+      local r = right --[[:! { [integer]: integer }]]
+      for i = 1, #r do groups[#groups + 1] = r[i] end
     end
   end
 
@@ -325,10 +332,11 @@ function IPv6:to_string()
   local result = table.concat(parts, ":")
   -- Fix up leading/trailing :: vs single :
   if best_start then
-    if best_start == 1 then
+    local bs = best_start --[[:! integer]]
+    if bs == 1 then
       result = ":" .. result
     end
-    if best_start + best_len - 1 == 8 then
+    if bs + best_len - 1 == 8 then
       result = result .. ":"
     end
   end
@@ -353,7 +361,7 @@ end
 
 -- ── CIDR ─────────────────────────────────────────────────────────────────────
 
---:: CIDR = { _net: integer, _prefix: integer, _mask: integer, ... }
+--:: CIDR = { _net: integer, _prefix: integer, _mask: integer, network: (self: CIDR) -> (IPv4 | nil, string | nil), broadcast: (self: CIDR) -> (IPv4 | nil, string | nil), ... }
 
 local CIDR = {}
 CIDR.__index = CIDR
@@ -413,7 +421,7 @@ function CIDR:broadcast()
   local mask = as_int(self._mask)
   local net  = as_int(self._net)
   local inv_mask = bnot32(mask) % 0x100000000
-  return M.ipv4_from_number(bor(net, inv_mask))
+  return M.ipv4_from_number(math.floor(bor(net, inv_mask)))
 end
 
 function CIDR:contains(ip)
@@ -429,17 +437,17 @@ end
 
 function CIDR:first_host()
   local prefix = as_int(self._prefix)
-  if prefix >= 31 then return self:network() end
+  if prefix >= 31 then return (self --[[:! CIDR]]):network() end
   return M.ipv4_from_number(as_int(self._net) + 1)
 end
 
 function CIDR:last_host()
   local prefix = as_int(self._prefix)
-  if prefix >= 31 then return self:broadcast() end
+  if prefix >= 31 then return (self --[[:! CIDR]]):broadcast() end
   local net  = as_int(self._net)
   local mask = as_int(self._mask)
   local bcast = bor(net, bnot32(mask) % 0x100000000)
-  return M.ipv4_from_number(bcast - 1)
+  return M.ipv4_from_number(math.floor(bcast - 1))
 end
 
 function CIDR:iter_hosts()
@@ -623,7 +631,7 @@ function M.url_parse(s)
   end
 
   -- path
-  local path, query_frag = rest:match("^([^?#]*)(.*)$")
+  local path, query_frag = (rest --[[:! string]]):match("^([^?#]*)(.*)$")
   url.path = path ~= "" and path or nil
 
   -- query
