@@ -14,6 +14,8 @@ M._tier = "pure"
 --:: Triangle3 = { a: Vec3, b: Vec3, c: Vec3 }
 --:: Quat = { w: number, x: number, y: number, z: number }
 --:: Mat4 = { [integer]: number }
+--:: Face3 = { [integer]: integer }
+--:: Mesh3 = { vertices: { [integer]: Vec3 }, faces: { [integer]: Face3 } }
 
 local sqrt = math.sqrt
 local abs  = math.abs
@@ -169,6 +171,7 @@ end
 -- Ray-plane intersection
 -- plane: {normal={x,y,z}, d=number}  (n·x = d)
 -- Returns: t or nil if parallel
+--: (Ray3, { normal: Vec3, d: number }) -> number | nil
 function M.ray_plane(ray, plane)
   local denom = M.dot3(plane.normal, ray.dir)
   if abs(denom) < 1e-10 then return nil end
@@ -196,7 +199,7 @@ function M.vertex_normals(mesh)
   local nv = #mesh.vertices
   local normals = {}
   for i = 1, nv do
-    normals[i] = {x = 0, y = 0, z = 0}
+    normals[i] = {x = 0.0, y = 0.0, z = 0.0} --[[:! Vec3]]
   end
   for _, face in ipairs(mesh.faces) do
     local v0 = mesh.vertices[face[1]]
@@ -255,7 +258,7 @@ end
 
 -- Surface area of a mesh (sum of triangle areas)
 function M.mesh_area(mesh)
-  local area = 0
+  local area = 0.0 --[[: number]]
   for _, face in ipairs(mesh.faces) do
     local v0 = mesh.vertices[face[1]]
     local v1 = mesh.vertices[face[2]]
@@ -269,7 +272,7 @@ end
 -- Signed volume of a closed mesh (divergence theorem)
 -- Positive for outward normals, negative for inward
 function M.mesh_volume(mesh)
-  local vol = 0
+  local vol = 0.0 --[[: number]]
   for _, face in ipairs(mesh.faces) do
     local v0 = mesh.vertices[face[1]]
     local v1 = mesh.vertices[face[2]]
@@ -281,9 +284,10 @@ end
 
 -- Check if a point is inside a closed mesh (ray casting)
 -- Uses a ray direction that avoids axis-aligned edges to reduce double-counting.
+--: (Mesh3, Vec3) -> boolean
 function M.point_in_mesh(mesh, point)
   -- Irrational-ratio direction avoids hitting shared edges and vertices exactly
-  local ray = M.ray(point, M.norm3({x = 1, y = 0.00137, z = 0.00093}))
+  local ray = M.ray(point, M.norm3({x = 1, y = 0.00137, z = 0.00093})) --[[: Ray3]]
   local count = 0
   for _, face in ipairs(mesh.faces) do
     local v0 = mesh.vertices[face[1]]
@@ -372,7 +376,7 @@ function M.mat4_mul(a, b)
   local r = {}
   for row = 0, 3 do
     for col = 0, 3 do
-      local sum = 0
+      local sum = 0.0 --[[: number]]
       for k = 0, 3 do
         sum = sum + a[row*4 + k + 1] * b[k*4 + col + 1]
       end
@@ -564,7 +568,7 @@ function M.sphere_mesh(radius, lat_segs, lon_segs)
   for lon = 0, lon_segs - 1 do
     local a = ring_start + lon
     local b = ring_start + (lon + 1) % lon_segs
-    faces[#faces + 1] = {top_idx, a, b}
+    faces[#faces + 1] = {top_idx, a, b} --[[:! Face3]]
   end
 
   -- Middle quads (as two triangles each)

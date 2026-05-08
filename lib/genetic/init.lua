@@ -17,6 +17,12 @@ local M = {}
 
 M._tier = "pure"
 
+--:: Rng = { seed: number, next: (self: Rng) -> number, float: (self: Rng) -> number, int: (self: Rng, number, number) -> number, bool: (self: Rng) -> boolean, pick: (self: Rng, { [integer]: unknown }) -> unknown }
+--:: Individual = { genome: unknown, fitness: number }
+--:: Population = { [integer]: Individual }
+--:: ConvergeOpts = { window?: integer, min_improvement?: number }
+--:: GeneticOpts = { create: (Rng) -> unknown, fitness: (unknown) -> number, crossover?: (unknown, unknown, Rng) -> unknown, mutate?: (unknown, Rng) -> unknown, population_size?: integer, generations?: integer, mutation_rate?: number, crossover_rate?: number, elitism?: integer, selection?: string, tournament_size?: integer, seed?: number, rng?: Rng, converge?: ConvergeOpts }
+
 -- ── PRNG (LCG, same as lib/test/gen) ────────────────────────────────────────
 
 local LCG_MOD = 2^32
@@ -60,18 +66,19 @@ end
 
 -- Roulette wheel (fitness-proportionate) selection.
 -- Returns a selector function that accepts (pop, rng).
+--: (Population, Rng) -> Individual
 local function select_roulette(pop, rng)
   -- Compute total fitness. If all fitness <= 0, fall back to uniform.
-  local total = 0
+  local total = 0.0 --[[: number]]
   for i = 1, #pop do
     local f = pop[i].fitness
     if f > 0 then total = total + f end
   end
   if total <= 0 then
-    return pop[rng:int(1, #pop)]
+    return pop[rng:int(1, #pop)] --[[:! Individual]]
   end
   local r = rng:float() * total
-  local cumulative = 0
+  local cumulative = 0.0 --[[: number]]
   for i = 1, #pop do
     local f = pop[i].fitness
     if f > 0 then cumulative = cumulative + f end
@@ -111,6 +118,7 @@ end
 --- Create an initial population.
 --- opts: { create, fitness, population_size, seed }
 --- Returns array of { genome, fitness }.
+--: (GeneticOpts) -> (Population | nil, string | nil)
 function M.population(opts)
   if not opts then return nil, "opts required" end
   if not opts.create then return nil, "opts.create required" end
@@ -135,6 +143,7 @@ end
 --- opts: { fitness, crossover, mutate, mutation_rate, crossover_rate, elitism,
 ---          selection, tournament_size }
 --- Returns new population (same size as input).
+--: (Population | nil, GeneticOpts) -> (Population | nil, string | nil)
 function M.step(pop, opts)
   if not pop then return nil, "pop required" end
   if not opts then return nil, "opts required" end
@@ -216,6 +225,7 @@ end
 --- opts: all of step opts, plus:
 ---   generations, converge = { min_improvement, window }
 --- Returns { best, fitness, generation, history }.
+--: (GeneticOpts) -> ({ best: unknown, fitness: number, generation: integer, history: { [integer]: unknown } } | nil, string | nil)
 function M.run(opts)
   if not opts then return nil, "opts required" end
   if not opts.create  then return nil, "opts.create required" end
@@ -226,8 +236,8 @@ function M.run(opts)
   local rng          = make_rng(opts.seed)
 
   -- Share the rng across steps so seed is deterministic end-to-end.
-  local step_opts = {}
-  for k, v in pairs(opts) do step_opts[k] = v end
+  local step_opts = {} --[[:! GeneticOpts]]
+  for k, v in pairs(opts) do step_opts[k] = v end --[[ safe: GeneticOpts has string keys ]]
   step_opts.rng = rng
 
   -- Initial population.
@@ -258,14 +268,16 @@ function M.run(opts)
   history[1]          = { 0, best_ind.fitness, avg }
 
   -- Convergence window buffer.
-  local plateau_buf   = {}
+  local plateau_buf = {} --[[:! { [integer]: number }]]
   local buf_size      = converge and (converge.window or 20) or 0
   local min_improve   = converge and (converge.min_improvement or 0.001) or 0
 
   local found_gen = 0
 
   for gen = 1, generations do
-    pop = M.step(pop, step_opts)
+    local next_pop = M.step(pop, step_opts)
+    if not next_pop then break end
+    pop = next_pop
 
     local cur_best, cur_avg = pop_stats(pop)
     history[gen + 1] = { gen, cur_best.fitness, cur_avg }
@@ -365,9 +377,10 @@ function M.genomes.real(length, lo, hi)
     end,
 
     -- Gaussian-like mutation: replace one gene with a random value in range.
+    --: ({ [integer]: number }, Rng) -> { [integer]: number }
     mutate = function(individual, rng)
       local idx  = rng:int(1, length)
-      local copy = {}
+      local copy = {} --[[:! { [integer]: number }]]
       for i = 1, length do copy[i] = individual[i] end
       copy[idx] = lo + rng:float() * range
       return copy
