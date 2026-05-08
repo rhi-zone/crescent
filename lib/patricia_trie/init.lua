@@ -9,7 +9,7 @@ end
 local M = {}
 M._tier = "pure"
 
---:: PTNode = { prefix: string, value: any, has_value: boolean, children: { [string]: PTNode } }
+--:: PTNode = { prefix: string, value: unknown, has_value: boolean, children: { [string]: PTNode } }
 --:: PatriciaTrie = { _root: PTNode, _size: integer, ... }
 
 -- Returns the length of the longest common prefix of strings a and b.
@@ -23,14 +23,14 @@ local function common_prefix_len(a, b)
 end
 
 -- Create a new node.
---: (string, any, boolean | nil) -> PTNode
+--: (string, unknown, boolean | nil) -> PTNode
 local function make_node(prefix, value, has_value)
   return { prefix = prefix, value = value, has_value = has_value or false, children = {} }
 end
 
 -- Internal insert into node, where key is the remaining (unconsumed) portion.
 -- Returns true if a new key was added, false if an existing key was updated.
---: (PTNode, string, any) -> boolean
+--: (PTNode, string, unknown) -> boolean
 local function node_insert(node, key, value)
   local first = key:sub(1, 1)
   local child = node.children[first]
@@ -80,7 +80,7 @@ local function node_insert(node, key, value)
 end
 
 -- Internal get: returns value, found_bool.
---: (PTNode, string) -> (any, boolean)
+--: (PTNode, string) -> (unknown, boolean)
 local function node_get(node, key)
   if key == "" then
     if node.has_value then return node.value, true end
@@ -110,7 +110,7 @@ local function node_remove(node, key)
     -- but merging is optional for correctness; skip for simplicity).
     local empty = true
     for _ in pairs(node.children) do empty = false; break end
-    return true, empty and not node.has_value
+    return true, empty  -- has_value was just set false, so empty iff no children
   end
 
   local first = key:sub(1, 1)
@@ -145,7 +145,7 @@ local function node_remove(node, key)
 end
 
 -- Collect all {key, value} pairs under node, prepending accumulated prefix.
---: (PTNode, string, { [integer]: { [integer]: any } }) -> nil
+--: (PTNode, string, { [integer]: { [integer]: unknown } }) -> nil
 local function collect(node, acc, results)
   if node.has_value then
     results[#results + 1] = { acc .. node.prefix, node.value }
@@ -199,7 +199,7 @@ function M.new()
 end
 
 -- Insert a key with an associated value (default true).
---: (self: PatriciaTrie, key: string, value: (unknown | nil)) -> nil
+--: (self: PatriciaTrie, key: string, value: (unknown | nil)) -> (nil, string) | nil
 function M:insert(key, value)
   if type(key) ~= "string" then return nil, "key must be a string" end
   if value == nil then value = true end
@@ -257,7 +257,7 @@ function M:remove(key)
 end
 
 -- All keys that start with prefix, returned as {{key, value},...} sorted.
---: (self: PatriciaTrie, prefix: string) -> { [integer]: { [integer]: any } }
+--: (self: PatriciaTrie, prefix: string) -> { [integer]: { [integer]: unknown } }
 function M:prefix_search(prefix)
   if type(prefix) ~= "string" then return {} end
 
@@ -376,10 +376,10 @@ end
 -- Autocomplete: all keys starting with prefix (just keys, sorted).
 --: (self: PatriciaTrie, prefix: string) -> { [integer]: string }
 function M:autocomplete(prefix)
-  local pairs_list = self:prefix_search(prefix)
+  local pairs_list = M.prefix_search(self, prefix)
   local keys = {}
   for i = 1, #pairs_list do
-    keys[i] = pairs_list[i][1]
+    keys[i] = pairs_list[i][1] --[[:! string]]
   end
   return keys
 end
@@ -393,14 +393,14 @@ end
 -- Call fn(key, value) for every key in lexicographic order.
 --: (self: PatriciaTrie, fn: (key: string, value: unknown) -> nil) -> nil
 function M:each(fn)
-  local arr = self:to_array()
+  local arr = M.to_array(self)
   for i = 1, #arr do
-    fn(arr[i][1], arr[i][2])
+    fn(arr[i][1] --[[:! string]], arr[i][2])
   end
 end
 
 -- Sorted array of {key, value} pairs.
---: (self: PatriciaTrie) -> { [integer]: { [integer]: any } }
+--: (self: PatriciaTrie) -> { [integer]: { [integer]: unknown } }
 function M:to_array()
   local results = {}
   if self._root.has_value then

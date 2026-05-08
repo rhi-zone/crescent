@@ -527,7 +527,7 @@ function M.stem_porter2(word)
 
   -- Check exceptions first
   local exc = P2_EXCEPTIONS1[word]
-  if exc then return exc end
+  if exc then return exc --[[:! string]] end
 
   -- Step 0: remove leading apostrophe
   if sub(word, 1, 1) == "'" then word = sub(word, 2) end
@@ -554,7 +554,7 @@ function M.stem_porter2(word)
 
   -- Check exceptions after step 1a
   local exc2 = P2_EXCEPTIONS2[lower(word)]
-  if exc2 then return exc2 end
+  if exc2 then return exc2 --[[:! string]] end
 
   word = p2_step1b(word, r1)
   word = p2_step1c(word)
@@ -588,7 +588,8 @@ end
 
 --: (string) -> string
 function M.normalize(word)
-  return lower(word):gsub("[^a-z]", "")
+  local result = lower(word):gsub("[^a-z]", "")
+  return result --[[:! string]]
 end
 
 -- ---------------------------------------------------------------------------
@@ -653,7 +654,7 @@ end
 
 --: (string, { algorithm: string | nil, stop_words: boolean | nil } | nil) -> string[]
 function M.stem_text(text, opts)
-  opts = opts or {}
+  opts = opts or {} --[[:! { algorithm: string | nil, stop_words: boolean | nil }]]
   local algorithm = opts.algorithm or "porter1"
   local remove_stop = opts.stop_words ~= false  -- default true
   local fn = algorithm == "porter2" and M.stem_porter2 or M.stem_porter1
@@ -672,9 +673,10 @@ end
 -- index: build inverted index from array of documents
 -- ---------------------------------------------------------------------------
 
---: (string[]) -> { [string]: { doc_idx: integer, positions: integer[] }[] }
+--:: IndexEntry = { doc_idx: integer, positions: integer[] }
+--: (string[]) -> { [string]: IndexEntry[] }
 function M.index(documents)
-  local idx = {}
+  local idx = {} --[[:! { [string]: IndexEntry[] }]]
   for doc_i, doc in ipairs(documents) do
     local pos = 0
     for word in gmatch(lower(doc), "[a-z]+") do
