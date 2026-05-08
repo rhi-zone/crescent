@@ -43,7 +43,7 @@ local function myers_forward(a, b)
     trace[d + 1] = snap
   end
 
-  return nil, "diff: no solution found"
+  return nil, "diff: no solution found", nil
 end
 
 -- Backtrack through trace to produce a flat list of regions.
@@ -137,7 +137,7 @@ end
 -- For "ins": a_start > a_end (no a elements consumed); b_start..b_end are inserted.
 -- For "del": b_start > b_end (no b elements consumed); a_start..a_end are deleted.
 -- For "eq":  a_start..a_end == b_start..b_end.
---: ({ [number]: unknown }, { [number]: unknown }) -> { [number]: { op: string, a_start: number, a_end: number, b_start: number, b_end: number } } | nil
+--: ({ [number]: unknown }, { [number]: unknown }) -> ({ [number]: { op: string, a_start: number, a_end: number, b_start: number, b_end: number } } | nil, string | nil)
 M.diff = function(a, b)
   local n = #a
   local m = #b
@@ -151,7 +151,7 @@ M.diff = function(a, b)
   end
 
   local trace, d_final, offset = myers_forward(a, b)
-  if not trace then return nil, d_final end
+  if not trace then return nil, d_final --[[:! string]] end
   local d_final_ = d_final --[[:! integer]]
   local offset_ = offset --[[:! integer]]
 
@@ -222,7 +222,7 @@ end
 
 -- Convenience: diff two strings line-by-line.
 -- Returns array of { op, line } where op = "=", "+", "-".
---: (string, string) -> { [number]: { op: string, line: string } } | nil
+--: (string, string) -> ({ [number]: { op: string, line: string } } | nil, string | nil)
 M.lines = function(str_a, str_b)
   local a = split_lines(str_a)
   local b = split_lines(str_b)
@@ -254,7 +254,7 @@ end
 
 -- Convenience: diff two strings character-by-character.
 -- Returns array of { op, line } where line is a single character and op = "=", "+", "-".
---: (string, string) -> { [number]: { op: string, line: string } } | nil
+--: (string, string) -> ({ [number]: { op: string, line: string } } | nil, string | nil)
 M.chars = function(str_a, str_b)
   local a = {}
   for i = 1, #str_a do a[i] = str_a:sub(i, i) end
@@ -419,7 +419,7 @@ end
 
 -- Parse a unified diff and apply it to original string.
 -- Returns patched string, or (nil, errmsg) on failure.
---: (string, string) -> string | nil
+--: (string, string) -> (string | nil, string | nil)
 M.apply = function(original, patch)
   if patch == "" then return original end
 
