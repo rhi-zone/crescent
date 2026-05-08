@@ -98,7 +98,8 @@ local function parse_response(body)
 	local data = raw --[[:! google_response]]
 
 	if data.error then
-		return nil, data.error.message or json.encode(data.error) or "google error"
+		local enc, _ = json.encode(data.error)
+		return nil, data.error.message or enc or "google error"
 	end
 
 	local candidates_opt = data.candidates
@@ -355,7 +356,7 @@ mod.embed = function(req)
 	data_raw, err = json.decode(res.body or "")
 	if not data_raw then return nil, "json decode: " .. (err or "unknown") end
 	local data = data_raw --[[:! google_embed_response]]
-	if data.error then return nil, data.error.message or json.encode(data.error) or "google error" end
+	if data.error then local enc, _ = json.encode(data.error); return nil, data.error.message or enc or "google error" end
 
 	local emb = data.embedding
 	if not emb then return nil, "no embedding in response" end
@@ -411,7 +412,7 @@ mod.embed_many = function(req)
 	data_raw, err = json.decode(res.body or "")
 	if not data_raw then return nil, "json decode: " .. (err or "unknown") end
 	local data = data_raw --[[:! google_embed_many_response]]
-	if data.error then return nil, data.error.message or json.encode(data.error) or "google error" end
+	if data.error then local enc, _ = json.encode(data.error); return nil, data.error.message or enc or "google error" end
 
 	local items_opt = data.embeddings
 	if not items_opt then return nil, "no embeddings in response" end

@@ -160,7 +160,7 @@ end
 function M.primes(n)
   n = floor(n)
   if n < 2 then return {} end
-  local sieve = {}
+  local sieve = {} --: { [integer]: boolean }
   for i = 2, n do sieve[i] = true end
   local i = 2
   while i * i <= n do
@@ -207,7 +207,7 @@ function M.is_power_of_two(n)
   local k = n
   while k > 1 do
     if k % 2 ~= 0 then return false end
-    k = k / 2
+    k = floor(k / 2)
   end
   return true
 end
@@ -345,7 +345,7 @@ function M.histogram(arr, bins)
     if arr[i] < mn then mn = arr[i] end
     if arr[i] > mx then mx = arr[i] end
   end
-  local result = {}
+  local result = {} --: { [integer]: integer }
   for i = 1, bins do result[i] = 0 end
   local range = mx - mn
   for i = 1, #arr do

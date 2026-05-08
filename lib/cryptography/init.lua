@@ -527,8 +527,10 @@ local function hmac(hash_fn, block_size, key, data)
 	local opad_key = {} --: { [integer]: string }
 	for i = 1, block_size do
 		local kb = string.byte(key, i, i) or 0
-		ipad_key[i] = string.char(bxor(kb, 0x36))
-		opad_key[i] = string.char(bxor(kb, 0x5c))
+		local ipad_byte = bxor(kb, 0x36) --: integer
+		local opad_byte = bxor(kb, 0x5c) --: integer
+		ipad_key[i] = string.char(ipad_byte)
+		opad_key[i] = string.char(opad_byte)
 	end
 	local ipad_key_s = table.concat(ipad_key)
 	local opad_key_s = table.concat(opad_key)
@@ -607,7 +609,8 @@ function M.pbkdf2(password, salt, iterations, key_len, hash)
 			for j = 1, hlen do
 				local fb = string.byte(f, j, j) or 0
 				local ub = string.byte(u, j, j) or 0
-				ft[j] = string.char(bxor(fb, ub))
+				local xb = bxor(fb, ub) --: integer
+				ft[j] = string.char(xb)
 			end
 			f = table.concat(ft)
 		end

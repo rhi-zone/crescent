@@ -13,7 +13,7 @@ local system_specific_mime_type = function (file_path) end
 if jit.os == "Linux" then
 	local ffi = require("ffi")
 	ffi.cdef [[ ssize_t getxattr(const char *path, const char *name, void *value, size_t size); ]]
-	local buf = ffi.new("char[128]")
+	local buf = ffi.new("char[128]") --[[:! cdata]]
 	--[[@type fun(path: string, name: string, value: ffi.cdata*, size: integer)]]
 	local getxattr = ffi.C.getxattr
 
@@ -75,7 +75,9 @@ mod.router = function (base, opts)
 		res.body = file:read("*all")
 		file:close()
 		if res.body == nil then
-			file = io_open(full_path:gsub("/$", "") .. "/index.html", "rb")
+			local full_path_s = full_path --[[: string]]
+			local dir_path = full_path_s:gsub("/$", "")
+			file = io_open(dir_path .. "/index.html", "rb")
 			if file then
 				res.body = file:read("*all")
 				file:close()
