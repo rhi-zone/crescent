@@ -30,16 +30,6 @@ local function parse_end(line)
   return label
 end
 
---- Decode the first PEM block from a string.
--- Returns: {label=string, data=binary_string}, nil  OR  nil, errmsg
---: (string) -> { label: string, data: string } | (nil, string)
-function M.decode(str)
-  local result, err = M.decode_all(str)
-  if not result then return nil, err end
-  if #result == 0 then return nil, "pem: no PEM block found" end
-  return result[1]
-end
-
 --- Decode all PEM blocks from a string.
 -- Returns: array of {label=string, data=binary_string}  OR  nil, errmsg
 --: (string) -> { { label: string, data: string } } | (nil, string)
@@ -120,15 +110,29 @@ function M.decode_all(str)
 
     -- Join and strip all whitespace from body, then base64-decode
     local b64 = concat(body_lines):gsub("%s", "")
-    local data, err = base64.decode(b64)
+    local data = base64.decode(b64)
     if not data then
-      return nil, "pem: base64 decode error: " .. err
+      return nil, "pem: base64 decode error in block: " .. begin_label
     end
 
     blocks[#blocks + 1] = { label = begin_label, data = data }
   end
 
   return blocks
+end
+
+--- Decode the first PEM block from a string.
+-- Returns: {label=string, data=binary_string}, nil  OR  nil, errmsg
+--: (string) -> { label: string, data: string } | (nil, string)
+function M.decode(str)
+  local result, err = M.decode_all(str)
+  if result then
+    local blocks = result --[[:! { { label: string, data: string }, ... } ]]
+    if #blocks == 0 then return nil, "pem: no PEM block found" end
+    return blocks[1]
+  end
+  local errmsg = err --[[:! string | nil]]
+  return nil, errmsg or "pem: decode_all failed"
 end
 
 --- Encode binary data to a PEM block.
@@ -143,19 +147,23 @@ function M.encode(label, data, opts)
   end
 
   local line_len = (opts and opts.line_length) or 64
-  if type(line_len) ~= "number" or line_len < 1 then
+  if type(line_len) ~= "number" then
     return nil, "pem: line_length must be a positive number"
   end
+  if line_len < 1 then
+    return nil, "pem: line_length must be a positive number"
+  end
+  local line_len_i = math.floor(line_len) --: integer
 
   local b64 = base64.encode(data)
   local lines = {}
   lines[#lines + 1] = "-----BEGIN " .. label .. "-----"
 
   local b64_len = #b64
-  local k = 1
+  local k = 1 --: integer
   while k <= b64_len do
-    lines[#lines + 1] = b64:sub(k, k + line_len - 1)
-    k = k + line_len
+    lines[#lines + 1] = b64:sub(k, k + line_len_i - 1)
+    k = k + line_len_i
   end
   -- empty data edge case: no body lines, that's fine
 

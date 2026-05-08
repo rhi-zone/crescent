@@ -9,6 +9,7 @@ M._tier = "pure"
 local Pat = {}
 Pat.__index = Pat
 
+--: ((string, integer) -> integer | nil) -> { match: (string, integer) -> integer | nil, ... }
 local function make_pat(fn)
   return setmetatable({ match = fn }, Pat)
 end
@@ -61,7 +62,8 @@ function M.cls(spec)
     end
   end
 
-  return make_pat(function(input, pos)
+  --: (string, integer) -> integer | nil
+  local fn = function(input, pos)
     if pos > #input then return nil end
     local c = input:sub(pos, pos)
     local found = chars[c]
@@ -70,20 +72,29 @@ function M.cls(spec)
     else
       return found and pos + 1 or nil
     end
-  end)
+  end
+  return make_pat(fn)
 end
 
 -- Primitive: match any single character
-M.any = make_pat(function(input, pos)
-  if pos <= #input then return pos + 1 end
-  return nil
-end)
+do
+  --: (string, integer) -> integer | nil
+  local fn = function(input, pos)
+    if pos <= #input then return pos + 1 end
+    return nil
+  end
+  M.any = make_pat(fn)
+end
 
 -- Primitive: match end of input
-M.eof = make_pat(function(input, pos)
-  if pos > #input then return pos end
-  return nil
-end)
+do
+  --: (string, integer) -> integer | nil
+  local fn = function(input, pos)
+    if pos > #input then return pos end
+    return nil
+  end
+  M.eof = make_pat(fn)
+end
 
 -- Primitive: always succeeds, consumes nothing
 M.empty = make_pat(function(input, pos)
@@ -154,18 +165,22 @@ end
 
 -- Negative lookahead: succeed if p fails, consume nothing
 function M.neg(p)
-  return make_pat(function(input, pos)
+  --: (string, integer) -> integer | nil
+  local fn = function(input, pos)
     local next_pos = p.match(input, pos)
     return next_pos == nil and pos or nil
-  end)
+  end
+  return make_pat(fn)
 end
 
 -- Positive lookahead: succeed if p matches, consume nothing
 function M.pos(p)
-  return make_pat(function(input, pos)
+  --: (string, integer) -> integer | nil
+  local fn = function(input, pos)
     local next_pos = p.match(input, pos)
     return next_pos ~= nil and pos or nil
-  end)
+  end
+  return make_pat(fn)
 end
 
 -- Capture: record matched substring into captures
