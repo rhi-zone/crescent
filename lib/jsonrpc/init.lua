@@ -161,7 +161,7 @@ function Dispatcher:request(method, params)
             return decoded.result, nil
         else
             -- Some other message arrived first — dispatch it.
-            local resp = dispatch_one(self, decoded)
+            local resp = dispatch_one(self, decoded --[[:! { [string]: unknown }]])
             if resp then send_msg(self, resp) end
         end
     end

@@ -1,11 +1,12 @@
 -- FIXME: html except more type-safe
 local mod = {}
 
---[[@param s string]]
+--: (string) -> string
 local html_escape = function (s)
-	return s:gsub("[&<>\"']", {
+	local result = s:gsub("[&<>\"']", {
 		["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt", ["\""] = "&quot", ["'"] = "&#039;",
 	})
+	return result
 end
 
 --[[@param tag string]]

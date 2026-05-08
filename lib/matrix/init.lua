@@ -656,7 +656,7 @@ end
 -- Returns L (lower triangular, unit diagonal) and U (upper triangular).
 -- Pivoting is absorbed into U; the decomposition satisfies P*A = L*U for some
 -- permutation P, and L*U approximates A up to row swaps.
---: (self: matrix) -> (matrix | nil, string | nil)
+--: (self: matrix) -> (matrix | nil, matrix | string | nil)
 function M:lu()
   local self_ = self --[[:! matrix]]
   if self_._rows ~= self_._cols then

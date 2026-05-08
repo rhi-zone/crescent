@@ -34,7 +34,8 @@ local function b64url_decode(s)
   if rem == 2 then s = s .. "=="
   elseif rem == 3 then s = s .. "="
   end
-  return base64.decode(s, { url = true })
+  local decoded = base64.decode(s, { url = true })
+  return decoded
 end
 
 -- ── Timing-safe comparison ────────────────────────────────────────────────────

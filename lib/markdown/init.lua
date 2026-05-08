@@ -295,7 +295,7 @@ local function parse_blocks(lines)
     -- ATX headings: # through ######
     elseif line:match("^#+ ") or line:match("^#+$") then
       local hashes, raw_text = line:match("^(#+)%s*(.*)")
-      local level = math.min(#hashes, 6) --[[:! integer]]
+      local level = math.min(#(hashes --[[:! string]]), 6) --[[:! integer]]
       -- Strip optional trailing #s
       local text = (raw_text --[[:! string]]):gsub("%s+#+%s*$", ""):gsub("%s+$", "")
       blocks[#blocks + 1] = { type = "heading", level = level, text = text }

@@ -64,7 +64,11 @@ mod.router = function (path, opts)
 	--: (string) -> any
 	handle_dir = function (path2)
 		local routes = {}
-		for entry in dir_list(path2) do
+		local dir_iter, dir_state = dir_list(path2)
+		if not dir_iter then return routes end
+		local dir_state_ = dir_state --[[:! { dir: cdata, path: string }]]
+		for entry in dir_iter, dir_state_ do
+			if not entry then break end
 			local new_path = path2 .. "/" .. entry.name
 			if entry.is_dir then
 				routes[(entry.name == "*") and 1 or entry.name] = handle_dir(new_path)
