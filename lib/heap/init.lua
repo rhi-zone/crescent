@@ -2,6 +2,9 @@ if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
 end
 
+local bit = require("bit")
+local rshift = bit.rshift
+
 local M = {}
 
 --:: Heap = {
@@ -10,17 +13,17 @@ local M = {}
 --::   _cmp: (unknown, unknown) -> boolean,
 --::   _keyed: boolean,
 --::   _index: { [unknown]: integer } | nil,
---::   push: (Heap, unknown, number | nil) -> nil,
+--::   push: (Heap, unknown, number | nil) -> (nil, string) | nil,
 --::   peek: (Heap) -> unknown | nil,
 --::   peek_priority: (Heap) -> number | nil,
 --::   pop: (Heap) -> unknown | nil,
---::   size: (Heap) -> number,
+--::   size: (Heap) -> integer,
 --::   empty: (Heap) -> boolean,
 --::   clear: (Heap) -> nil,
 --::   drain: (Heap) -> () -> unknown | nil,
 --::   to_sorted_array: (Heap) -> { [integer]: unknown },
---::   push_or_update: (Heap, unknown, number) -> nil,
---::   remove: (Heap, unknown) -> boolean,
+--::   push_or_update: (Heap, unknown, number) -> (nil, string) | nil,
+--::   remove: (Heap, unknown) -> boolean | (nil, string),
 --:: }
 
 -- Heap metatable
@@ -33,9 +36,10 @@ local function min_cmp(a, b) return a < b end
 local function max_cmp(a, b) return a > b end
 
 -- Internal: sift up element at position i
+--: ({ [integer]: unknown }, (unknown, unknown) -> boolean, integer) -> nil
 local function sift_up(data, cmp, i)
   while i > 1 do
-    local parent = (i - i % 2) / 2
+    local parent = rshift(i, 1)
     if cmp(data[i], data[parent]) then
       data[i], data[parent] = data[parent], data[i]
       i = parent
@@ -46,6 +50,7 @@ local function sift_up(data, cmp, i)
 end
 
 -- Internal: sift down element at position i
+--: ({ [integer]: unknown }, (unknown, unknown) -> boolean, integer, integer) -> nil
 local function sift_down(data, cmp, i, n)
   while true do
     local smallest = i
@@ -64,17 +69,19 @@ local function sift_down(data, cmp, i, n)
 end
 
 -- Internal: heapify an array in-place, O(n)
+--: ({ [integer]: unknown }, (unknown, unknown) -> boolean) -> nil
 local function heapify(data, cmp)
   local n = #data
-  for i = (n - n % 2) / 2, 1, -1 do
+  for i = rshift(n, 1), 1, -1 do
     sift_down(data, cmp, i, n)
   end
 end
 
 -- Internal: sift up for keyed heap (separate priority mode)
+--: ({ [integer]: unknown }, (unknown, unknown) -> boolean, { [unknown]: integer }, integer) -> nil
 local function sift_up_keyed(data, cmp, index, i)
   while i > 1 do
-    local parent = (i - i % 2) / 2
+    local parent = rshift(i, 1)
     if cmp(data[i][2], data[parent][2]) then
       data[i], data[parent] = data[parent], data[i]
       index[data[i][1]] = i
@@ -87,6 +94,7 @@ local function sift_up_keyed(data, cmp, index, i)
 end
 
 -- Internal: sift down for keyed heap
+--: ({ [integer]: unknown }, (unknown, unknown) -> boolean, { [unknown]: integer }, integer, integer) -> nil
 local function sift_down_keyed(data, cmp, index, i, n)
   while true do
     local smallest = i
@@ -109,13 +117,11 @@ end
 --- Create a new heap.
 --: (mode: "min" | "max" | (a: unknown, b: unknown) -> boolean) -> Heap
 function M.new(mode)
-  local cmp
+  local cmp = min_cmp --: (unknown, unknown) -> boolean
   if type(mode) == "function" then
-    cmp = mode
+    cmp = mode --[[:! (unknown, unknown) -> boolean]]
   elseif mode == "max" then
     cmp = max_cmp
-  else
-    cmp = min_cmp
   end
   return setmetatable({
     _data = {},
@@ -123,19 +129,17 @@ function M.new(mode)
     _cmp = cmp,
     _keyed = false,
     _index = nil,
-  }, Heap)
+  }, Heap) --[[:! Heap]]
 end
 
 --- Build a heap from an array using O(n) heapify.
 --: (arr: {unknown}, mode: "min" | "max" | (a: unknown, b: unknown) -> boolean) -> Heap
 function M.from_array(arr, mode)
-  local cmp
+  local cmp = min_cmp --: (unknown, unknown) -> boolean
   if type(mode) == "function" then
-    cmp = mode
+    cmp = mode --[[:! (unknown, unknown) -> boolean]]
   elseif mode == "max" then
     cmp = max_cmp
-  else
-    cmp = min_cmp
   end
   -- Copy the array
   local data = {}
@@ -150,12 +154,12 @@ function M.from_array(arr, mode)
     _cmp = cmp,
     _keyed = false,
     _index = nil,
-  }, Heap)
+  }, Heap) --[[:! Heap]]
 end
 
 --- Push a value onto the heap.
 --- If priority is given, switches to keyed mode (separate priority).
---: (self: Heap, value: unknown, priority: number | nil) -> nil
+--: (self: Heap, value: unknown, priority: number | nil) -> (nil, string) | nil
 function Heap:push(value, priority)
   if priority ~= nil then
     -- Keyed mode
@@ -174,7 +178,7 @@ function Heap:push(value, priority)
     local i = self._n
     self._data[i] = { value, priority }
     self._index[value] = i
-    sift_up_keyed(self._data, self._cmp, self._index, i)
+    sift_up_keyed(self._data, self._cmp, self._index --[[:! { [unknown]: integer }]], i)
   else
     -- Simple mode
     if self._keyed then
@@ -222,7 +226,7 @@ function Heap:pop()
     data[n] = nil
     self._n = n - 1
     self._index[data[1][1]] = 1
-    sift_down_keyed(data, self._cmp, self._index, 1, self._n)
+    sift_down_keyed(data, self._cmp, self._index --[[:! { [unknown]: integer }]], 1, self._n)
     return top[1]
   else
     local top = data[1]
@@ -292,7 +296,7 @@ function Heap:to_sorted_array()
       _cmp = cmp,
       _keyed = true,
       _index = copy_index,
-    }, Heap)
+    }, Heap) --[[:! Heap]]
     for val in tmp:drain() do
       result[#result + 1] = val
     end
@@ -305,7 +309,7 @@ function Heap:to_sorted_array()
       _cmp = cmp,
       _keyed = false,
       _index = nil,
-    }, Heap)
+    }, Heap) --[[:! Heap]]
     for val in tmp:drain() do
       result[#result + 1] = val
     end
@@ -314,7 +318,7 @@ function Heap:to_sorted_array()
 end
 
 --- Push or update: if key exists, update its priority; otherwise push.
---: (self: Heap, key: unknown, priority: number) -> nil
+--: (self: Heap, key: unknown, priority: number) -> (nil, string) | nil
 function Heap:push_or_update(key, priority)
   if not self._keyed then
     if self._n > 0 then
@@ -330,9 +334,9 @@ function Heap:push_or_update(key, priority)
     self._data[idx][2] = priority
     -- Re-heapify: could go up or down
     if self._cmp(priority, old_priority) then
-      sift_up_keyed(self._data, self._cmp, self._index, idx)
+      sift_up_keyed(self._data, self._cmp, self._index --[[:! { [unknown]: integer }]], idx)
     else
-      sift_down_keyed(self._data, self._cmp, self._index, idx, self._n)
+      sift_down_keyed(self._data, self._cmp, self._index --[[:! { [unknown]: integer }]], idx, self._n)
     end
   else
     -- Insert new
@@ -340,12 +344,12 @@ function Heap:push_or_update(key, priority)
     local i = self._n
     self._data[i] = { key, priority }
     self._index[key] = i
-    sift_up_keyed(self._data, self._cmp, self._index, i)
+    sift_up_keyed(self._data, self._cmp, self._index --[[:! { [unknown]: integer }]], i)
   end
 end
 
 --- Remove a key from a keyed heap.
---: (self: Heap, key: unknown) -> boolean
+--: (self: Heap, key: unknown) -> boolean | (nil, string)
 function Heap:remove(key)
   if not self._keyed or not self._index then
     return nil, "remove requires a keyed heap"
@@ -368,13 +372,13 @@ function Heap:remove(key)
   self._n = n - 1
   self._index[data[idx][1]] = idx
   -- Re-heapify
-  sift_up_keyed(data, self._cmp, self._index, idx)
-  sift_down_keyed(data, self._cmp, self._index, idx, self._n)
+  sift_up_keyed(data, self._cmp, self._index --[[:! { [unknown]: integer }]], idx)
+  sift_down_keyed(data, self._cmp, self._index --[[:! { [unknown]: integer }]], idx, self._n)
   return true
 end
 
 --- Merge two heaps into a new heap. Both must be the same mode (keyed or unkeyed).
---: (h1: Heap, h2: Heap) -> Heap
+--: (h1: Heap, h2: Heap) -> Heap | (nil, string)
 function M.merge(h1, h2)
   if h1._keyed or h2._keyed then
     return nil, "merge is not supported for keyed heaps"
@@ -397,7 +401,7 @@ function M.merge(h1, h2)
     _cmp = cmp,
     _keyed = false,
     _index = nil,
-  }, Heap)
+  }, Heap) --[[:! Heap]]
 end
 
 --- Heap sort: return a new sorted array.

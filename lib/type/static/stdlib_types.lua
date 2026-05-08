@@ -174,7 +174,9 @@
 --::     huge:       number,
 --::     pi:         number,
 --::     max_integer: integer,
---::     min_integer: integer
+--::     min_integer: integer,
+--::     rad:        (x: number) -> number,
+--::     deg:        (x: number) -> number
 --:: }
 
 ---------------------------------------------------------------------------

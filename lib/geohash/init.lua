@@ -5,6 +5,9 @@ end
 local bit = require("bit")
 local band, bor, rshift, lshift = bit.band, bit.bor, bit.rshift, bit.lshift
 
+--:: GeoPoint = { lat: number, lon: number, lat_err: number, lon_err: number }
+--:: GeoBBox = { min_lat: number, min_lon: number, max_lat: number, max_lon: number }
+
 local M = {}
 M._tier = "pure"
 
@@ -18,6 +21,7 @@ for i = 1, #BASE32 do
 end
 
 -- Encode lat/lon to geohash string of given precision (default 9)
+--: (lat: number, lon: number, precision: integer | nil) -> string | (nil, string)
 function M.encode(lat, lon, precision)
   precision = precision or 9
   if type(lat) ~= "number" or type(lon) ~= "number" then
@@ -33,8 +37,10 @@ function M.encode(lat, lon, precision)
     return nil, "precision must be in [1, 12]"
   end
 
-  local min_lat, max_lat = -90.0, 90.0
-  local min_lon, max_lon = -180.0, 180.0
+  local min_lat = -90.0 --: number
+  local max_lat = 90.0 --: number
+  local min_lon = -180.0 --: number
+  local max_lon = 180.0 --: number
 
   local chars = {}
   local bits = 0
@@ -79,13 +85,16 @@ function M.encode(lat, lon, precision)
 end
 
 -- Decode geohash to {lat, lon, lat_err, lon_err}
+--: (hash: string) -> GeoPoint | (nil, string)
 function M.decode(hash)
   if type(hash) ~= "string" or #hash == 0 then
     return nil, "hash must be a non-empty string"
   end
 
-  local min_lat, max_lat = -90.0, 90.0
-  local min_lon, max_lon = -180.0, 180.0
+  local min_lat = -90.0 --: number
+  local max_lat = 90.0 --: number
+  local min_lon = -180.0 --: number
+  local max_lon = 180.0 --: number
   local even = true
 
   for i = 1, #hash do
@@ -127,13 +136,16 @@ function M.decode(hash)
 end
 
 -- Decode geohash to bounding box {min_lat, min_lon, max_lat, max_lon}
+--: (hash: string) -> GeoBBox | (nil, string)
 function M.decode_bbox(hash)
   if type(hash) ~= "string" or #hash == 0 then
     return nil, "hash must be a non-empty string"
   end
 
-  local min_lat, max_lat = -90.0, 90.0
-  local min_lon, max_lon = -180.0, 180.0
+  local min_lat = -90.0 --: number
+  local max_lat = 90.0 --: number
+  local min_lon = -180.0 --: number
+  local max_lon = 180.0 --: number
   local even = true
 
   for i = 1, #hash do
@@ -206,10 +218,12 @@ function M.neighbor(hash, direction)
 
   local result, err = M.decode(hash)
   if not result then return nil, err end
+  local point = result --[[:! GeoPoint]]
 
   local lat_h, lon_w = get_bbox_size(hash)
 
-  local dlat, dlon = 0, 0
+  local dlat = 0.0 --: number
+  local dlon = 0.0 --: number
   local d = direction
   if d == "n" or d == "ne" or d == "nw" then dlat = lat_h end
   if d == "s" or d == "se" or d == "sw" then dlat = -lat_h end
@@ -221,16 +235,16 @@ function M.neighbor(hash, direction)
   end
 
   -- Clamp to valid ranges
-  local new_lat = result.lat + dlat
-  local new_lon = result.lon + dlon
+  local new_lat = point.lat + dlat
+  local new_lon = point.lon + dlon
 
   -- Handle longitude wrap-around
   if new_lon > 180 then new_lon = new_lon - 360 end
   if new_lon < -180 then new_lon = new_lon + 360 end
 
   -- Clamp latitude (poles don't wrap)
-  if new_lat > 90 then new_lat = 90 - result.lat_err / 2 end
-  if new_lat < -90 then new_lat = -90 + result.lat_err / 2 end
+  if new_lat > 90 then new_lat = 90 - point.lat_err / 2 end
+  if new_lat < -90 then new_lat = -90 + point.lat_err / 2 end
 
   return M.encode(new_lat, new_lon, #hash)
 end
@@ -269,7 +283,7 @@ end
 -- Get geohashes within radius (bounding-box approximation)
 -- Returns array of hashes covering the area within radius_km of (lat, lon)
 function M.within(lat, lon, radius_km, precision)
-  precision = precision or 9
+  local prec = precision or 9 --: integer
   if type(lat) ~= "number" or type(lon) ~= "number" then
     return nil, "lat and lon must be numbers"
   end
@@ -287,7 +301,7 @@ function M.within(lat, lon, radius_km, precision)
   local max_lon = math.min(180,  lon + lon_deg)
 
   -- Get cell size for the given precision
-  local total_bits = precision * 5
+  local total_bits = prec * 5
   local lon_bits = math.ceil(total_bits / 2)
   local lat_bits = math.floor(total_bits / 2)
   local cell_lat = 180.0 / (2 ^ lat_bits)
@@ -303,7 +317,7 @@ function M.within(lat, lon, radius_km, precision)
     while clon <= max_lon + cell_lon / 2 do
       local clat_c = math.max(-90, math.min(90, clat))
       local clon_c = math.max(-180, math.min(180, clon))
-      local h = M.encode(clat_c, clon_c, precision)
+      local h = M.encode(clat_c, clon_c, prec)
       if h and not seen[h] then
         seen[h] = true
         result[#result + 1] = h
