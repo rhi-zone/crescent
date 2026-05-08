@@ -39,6 +39,9 @@ local M = {}
 --:: http_req = { method: string, path: string, query?: string, headers: { [string]: string }, body: string | nil }
 --:: http_res = { status: integer, headers: { [string]: string }, body: string }
 
+--:: st_fs_cap = { read: (string) -> (string | nil, string | nil), list: (string) -> (Arr<string> | nil, string | nil), ... }
+--:: st_time_cap = { now: () -> number, ... }
+
 local SCHEMA = [[
 CREATE TABLE IF NOT EXISTS card_meta (
   filename    TEXT PRIMARY KEY,
@@ -170,9 +173,9 @@ end
 -- ── Handler ────────────────────────────────────────────────────────────────
 
 function M.create(caps)
-	local fs = caps.characters
+	local fs = caps.characters --[[:! st_fs_cap]]
 	local db = init_cache(caps.meta_cache)
-	local time_cap = caps.time
+	local time_cap = caps.time --[[:! st_time_cap | nil]]
 	local time_fn = time_cap and time_cap.now
 
 	-- ── GET / ?entry=<filename> — card detail page ───────────────────────────
@@ -187,7 +190,7 @@ function M.create(caps)
 			return
 		end
 
-		local meta = ensure_cached(db, fs, { filename }, time_fn)
+		local meta = ensure_cached(db, fs, { filename } --[[:! { [integer]: string }]], time_fn)
 		local m = meta[filename] or { name = name_from_file(filename), description = nil, tags = {} }
 
 		local tags_html = ""
@@ -308,8 +311,8 @@ a.btn:hover{background:#5a5a9a}
 		local qs = req.query or path:match("%?(.+)$")
 		local params = parse_query(qs)
 		local q       = params.q
-		local limit   = math.max(1, math.min(500, tonumber(params.limit)  or 200))
-		local offset  = math.max(0,               tonumber(params.offset) or 0)
+		local limit   = math.max(1, math.min(500, tonumber(params.limit)  or 200)) --[[:! number]]
+		local offset  = math.max(0,               tonumber(params.offset) or 0) --[[:! number]]
 
 		-- List the characters directory.
 		local files, err = fs.list(".")
@@ -339,7 +342,7 @@ a.btn:hover{background:#5a5a9a}
 		-- The cached name is used if available but we can't guarantee all files are
 		-- cached at filter time. Full-metadata search requires a full cache scan,
 		-- which is a future optimisation; for now, filename match is the search key.
-		local matched = {}
+		local matched = {} --: { [integer]: string }
 		for i = 1, #candidates do
 			if matches(candidates[i].sort_key, q) then
 				matched[#matched + 1] = candidates[i].id
@@ -349,7 +352,7 @@ a.btn:hover{background:#5a5a9a}
 		local total = #matched
 
 		-- Slice the page.
-		local page_files = {}
+		local page_files = {} --: { [integer]: string }
 		local stop = math.min(offset + limit, total)
 		for i = offset + 1, stop do
 			page_files[#page_files + 1] = matched[i]

@@ -7,6 +7,9 @@ if not package.path:find("./?/init.lua", 1, true) then package.path = "./?/init.
 --:: mustache_compiled = { _tokens: mustache_template, render: (mustache_compiled, mustache_ctx, (mustache_partials | nil)) -> ((string | nil), (string | nil)) }
 local M = {} --: { render?: (string, mustache_ctx, (mustache_partials | nil)) -> ((string | nil), (string | nil)), compile?: (string) -> ((mustache_compiled | nil), (string | nil)), [string]: unknown }
 
+--: <V>(t: { [integer]: V, ... }, pos: integer | nil) -> V | nil
+local pop = table.remove
+
 -- HTML escape map
 local escape_map = {
   ["&"] = "&amp;",
@@ -334,7 +337,7 @@ local function compile_tokens(template, otag, ctag)
         if inner:sub(-1) == "=" then
           inner = inner:sub(1, -2)
         end
-        local new_otag, new_ctag = inner:match("^%s*(%S+)%s+(%S+)%s*$")
+        local new_otag, new_ctag = (inner --[[:! string]]):match("^%s*(%S+)%s+(%S+)%s*$")
         if not new_otag then
           return nil, "invalid set delimiter tag"
         end
@@ -403,7 +406,7 @@ render_tokens = function(tokens, stack, partials, otag, ctag)
           for _, item in ipairs(val_arr) do
             stack[#stack + 1] = item --[[:! mustache_ctx]]
             buf[#buf + 1] = render_tokens(tok.tokens or {}, stack, partials, otag, ctag)
-            table.remove(stack)
+            pop(stack)
           end
         elseif val and val ~= false then
           if type(val) == "table" then
@@ -412,7 +415,7 @@ render_tokens = function(tokens, stack, partials, otag, ctag)
             stack[#stack + 1] = --[[:! mustache_ctx]] val
           end
           buf[#buf + 1] = render_tokens(tok.tokens or {}, stack, partials, otag, ctag)
-          table.remove(stack)
+          pop(stack)
         end
         -- falsy: skip
       end
@@ -446,8 +449,8 @@ render_tokens = function(tokens, stack, partials, otag, ctag)
   return table.concat(buf)
 end
 
---: (string) -> ((mustache_template | nil), (string | nil))
-function M.compile(template)
+--: (string) -> ((mustache_compiled | nil), (string | nil))
+local function compile(template)
   local tokens, err = compile_tokens(template, "{{", "}}")
   if not tokens then return nil, err end
   local compiled = {
@@ -462,10 +465,11 @@ function M.compile(template)
   end
   return compiled, nil
 end
+M.compile = compile
 
 --: (string, mustache_ctx, (mustache_partials | nil)) -> ((string | nil), (string | nil))
 function M.render(template, data, partials)
-  local compiled, err = M.compile(template)
+  local compiled, err = compile(template)
   if not compiled then return nil, err end
   return compiled:render(data, partials)
 end
