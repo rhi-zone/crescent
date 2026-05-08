@@ -400,9 +400,12 @@ end
 -- Checks table metamethods first, then prim_meta for primitive types.
 -- TAG_UNION: all arms must support the op; result is union of arm results.
 -- Returns result TID, ctx.T_ANY (any/unknown operand), or nil (not supported).
---: (Ctx, string, integer) -> integer | nil
-local function meta_op_ret_impl(ctx, op_name, tid)
+-- `seen` guards against recursive types (a union/intersection containing
+-- itself transitively, which can arise from inferred recursive structures).
+--: (Ctx, string, integer, { [integer]: boolean } | nil) -> integer | nil
+local function meta_op_ret_impl(ctx, op_name, tid, seen)
     tid = find(ctx, tid)
+    if seen and seen[tid] then return nil end
     local t = ctx.types:get(tid)
     if t.tag == TAG_ANY then return ctx.T_ANY end
     if t.tag == TAG_UNKNOWN then return nil end  -- unknown must be narrowed first
@@ -414,17 +417,21 @@ local function meta_op_ret_impl(ctx, op_name, tid)
         return nil
     end
     if t.tag == TAG_INTERSECTION then
+        seen = seen or {}
+        seen[tid] = true
         -- Intersection: if any member supports the op, use its result
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            local r = meta_op_ret_impl(ctx, op_name, ctx.lists:get(i))
+            local r = meta_op_ret_impl(ctx, op_name, ctx.lists:get(i), seen)
             if r then return r end
         end
         return nil
     end
     if t.tag == TAG_UNION then
+        seen = seen or {}
+        seen[tid] = true
         local parts = {}
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            local r = meta_op_ret_impl(ctx, op_name, ctx.lists:get(i))
+            local r = meta_op_ret_impl(ctx, op_name, ctx.lists:get(i), seen)
             if r == nil then return nil end  -- any arm unsupported → whole union fails
             parts[#parts + 1] = r
         end
