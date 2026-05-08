@@ -165,18 +165,19 @@ M.remove = function(doc, ptr)
   local target = M.deep_copy(doc)
   local parent, final_key, perr = resolve_parent(target, keys)
   if not parent then return nil, perr end
+  local tparent = parent --[[:! { [integer]: unknown, [string]: unknown }]]
   local idx = tonumber(final_key)
   if idx then
-    local arr_idx = idx + 1
-    if parent[arr_idx] == nil then
+    local arr_idx = math.floor(idx + 1)
+    if tparent[arr_idx] == nil then
       return nil, "array index " .. idx .. " does not exist"
     end
-    table.remove(parent, arr_idx)
+    table.remove(tparent, arr_idx)
   else
-    if parent[final_key] == nil then
+    if tparent[final_key] == nil then
       return nil, "key '" .. tostring(final_key) .. "' does not exist"
     end
-    parent[final_key] = nil
+    tparent[final_key] = nil
   end
   return target
 end
@@ -194,16 +195,17 @@ local function patch_add(doc, keys, value)
   end
   local parent, final_key, perr = resolve_parent(doc, keys)
   if not parent then return nil, perr end
+  local tparent = parent --[[:! { [integer]: unknown, [string]: unknown }]]
   if final_key == "-" then
     -- append to array
-    parent[#parent + 1] = value
+    tparent[#tparent + 1] = value
   else
     local idx = tonumber(final_key)
     if idx then
       -- insert at position (shift elements right)
-      table.insert(parent, idx + 1, value)
+      table.insert(tparent, idx + 1 --[[:! integer]], value)
     else
-      parent[final_key] = value
+      tparent[final_key] = value
     end
   end
   return true
@@ -217,18 +219,19 @@ local function patch_remove(doc, keys)
   end
   local parent, final_key, perr = resolve_parent(doc, keys)
   if not parent then return nil, perr end
+  local tparent = parent --[[:! { [integer]: unknown, [string]: unknown }]]
   local idx = tonumber(final_key)
   if idx then
-    local arr_idx = idx + 1
-    if parent[arr_idx] == nil then
+    local arr_idx = math.floor(idx + 1)
+    if tparent[arr_idx] == nil then
       return nil, "array index " .. idx .. " does not exist"
     end
-    table.remove(parent, arr_idx)
+    table.remove(tparent, arr_idx)
   else
-    if parent[final_key] == nil then
+    if tparent[final_key] == nil then
       return nil, "key '" .. tostring(final_key) .. "' does not exist"
     end
-    parent[final_key] = nil
+    tparent[final_key] = nil
   end
   return true
 end
@@ -261,7 +264,7 @@ end
 
 --- Apply a sequence of patch operations to doc.
 --- Returns (new_doc, nil) on success or (nil, errmsg) on failure.
---: (unknown, { [number]: { [string]: unknown } }) -> (unknown | nil, string | nil)
+--: (unknown, { [number]: PatchOp }) -> (unknown | nil, string | nil)
 M.apply = function(doc, ops)
   local target = M.deep_copy(doc)
   for i, op_entry in ipairs(ops) do
@@ -347,23 +350,33 @@ end
 -- Diff
 -- ---------------------------------------------------------------------------
 
+--:: PatchOp = { op: string, path: string, value?: unknown, from?: string }
+
 --- Generate a JSON Patch (array of ops) that transforms doc_a into doc_b.
 --- For objects: per-key add/remove/replace.
 --- For arrays: if different, emit a single replace.
 --- For primitives: emit replace if different.
---: (unknown, unknown, string) -> { [number]: { [string]: unknown } }
+--: (unknown, unknown, string) -> { [number]: PatchOp }
 local function diff_recurse(a, b, base_path)
-  local ops = {}
+  local ops = {} --: { [integer]: PatchOp }
   if type(a) == "table" and type(b) == "table" then
     -- determine if both are arrays (sequential integer keys from 1)
     local a_is_array = (#a > 0)
     local b_is_array = (#b > 0)
     -- also check for non-integer keys
     for k in pairs(a) do
-      if type(k) ~= "number" or k % 1 ~= 0 or k < 1 then a_is_array = false end
+      if type(k) == "number" then
+        if k % 1 ~= 0 or k < 1 then a_is_array = false end
+      else
+        a_is_array = false
+      end
     end
     for k in pairs(b) do
-      if type(k) ~= "number" or k % 1 ~= 0 or k < 1 then b_is_array = false end
+      if type(k) == "number" then
+        if k % 1 ~= 0 or k < 1 then b_is_array = false end
+      else
+        b_is_array = false
+      end
     end
 
     if a_is_array and b_is_array then
@@ -409,7 +422,7 @@ local function diff_recurse(a, b, base_path)
 end
 
 --- Generate a JSON Patch that transforms doc_a into doc_b.
---: (unknown, unknown) -> { [number]: { [string]: unknown } }
+--: (unknown, unknown) -> { [number]: PatchOp }
 M.diff = function(doc_a, doc_b)
   return diff_recurse(doc_a, doc_b, "")
 end

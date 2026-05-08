@@ -5,14 +5,15 @@ end
 local M = {}
 M._tier = "pure"
 
---:: handle = { key: unknown, value: unknown, children: { [integer]: unknown }, removed: boolean, handle_id: integer }
---:: Heap = { _root: handle | nil, _cmp: (unknown, unknown) -> boolean, _n: integer, _next_id: integer, _handles: { [integer]: handle } }
+--:: handle = { key: unknown, value: unknown, children: { [integer]: handle }, removed: boolean, handle_id: integer }
+--:: Heap = { _root: handle | nil, _cmp: (unknown, unknown) -> boolean, _n: integer, _next_id: integer, _handles: { [integer]: handle }, insert: (self: Heap, key: unknown, value: unknown) -> handle, peek: (self: Heap) -> (unknown, unknown), pop: (self: Heap) -> (unknown, unknown), decrease_key: (self: Heap, handle: handle, new_key: unknown) -> (handle | nil, string | nil), remove: (self: Heap, handle: handle) -> nil, merge: (self: Heap, other: Heap) -> nil, size: (self: Heap) -> number, is_empty: (self: Heap) -> boolean, to_sorted: (self: Heap) -> { [integer]: { [integer]: unknown } } }
 
 -- Default comparator: min-heap (lower key = higher priority)
 local function default_cmp(a, b) return a < b end
 
 -- Internal: merge two heap nodes (h2 becomes child of winner)
 -- Returns the new root node (or nil if both nil)
+--: (h1: handle | nil, h2: handle | nil, cmp: (unknown, unknown) -> boolean) -> handle | nil
 local function heap_merge(h1, h2, cmp)
   if h1 == nil then return h2 end
   if h2 == nil then return h1 end
@@ -30,12 +31,13 @@ local function heap_merge(h1, h2, cmp)
 end
 
 -- Two-pass pairing of a list of sub-heaps
+--: (children: { [integer]: handle }, cmp: (unknown, unknown) -> boolean) -> handle | nil
 local function pair_children(children, cmp)
   local n = #children
   if n == 0 then return nil end
   if n == 1 then return children[1] end
   -- First pass: merge consecutive pairs
-  local pairs = {}
+  local pairs = {} --: { [integer]: handle | nil }
   local i = 1
   while i <= n do
     if i + 1 <= n then
@@ -47,19 +49,21 @@ local function pair_children(children, cmp)
     end
   end
   -- Second pass: merge right to left
-  local result = pairs[#pairs]
+  local result = pairs[#pairs] --: handle | nil
   for j = #pairs - 1, 1, -1 do
-    result = heap_merge(pairs[j], result, cmp)
+    result = heap_merge(pairs[j] --[[:! handle | nil]], result, cmp)
   end
   return result
 end
 
 -- Advance root past lazily-deleted nodes, rebuilding heap as needed.
 -- Does NOT touch _n: remove() already decremented it at removal time.
+--: (heap: Heap) -> nil
 local function normalize(heap)
   while heap._root ~= nil and heap._root.removed do
-    local children = heap._root.children
-    heap._root.children = nil  -- help GC
+    local root = heap._root
+    local children = root.children --[[:! { [integer]: handle }]]
+    root.children = {}  -- help GC (clear children array)
     heap._root = pair_children(children, heap._cmp)
   end
 end
@@ -78,7 +82,7 @@ function M.new(cmp)
     _cmp = cmp or default_cmp,
     _next_id = 0,
     _handles = {},  -- handle_id -> node
-  }, Heap)
+  }, Heap) --[[:! Heap]]
 end
 
 --- Insert a key-value pair. Returns a handle for decrease_key/remove.
@@ -116,8 +120,8 @@ function Heap:pop()
   local key, value = root.key, root.value
   self._handles[root.handle_id] = nil
   root.removed = true  -- mark as gone
-  local children = root.children
-  root.children = nil  -- help GC
+  local children = root.children --[[:! { [integer]: handle }]]
+  root.children = {}  -- help GC (clear children array)
   self._n = self._n - 1
   self._root = pair_children(children, self._cmp)
   return key, value
