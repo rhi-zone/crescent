@@ -73,15 +73,15 @@ function mod.exec(cmd, args, opts)
   local stderr_pipe = (ffi.new("int[2]") --[[: any]]) --[[:! { [integer]: integer }]]
   local stdin_pipe = (opts.stdin and ffi.new("int[2]") or nil) --[[: any]] --[[:! { [integer]: integer } | nil]]
 
-  if ffi.C.pipe(stdout_pipe) ~= 0 then return nil, "pipe() failed for stdout" end
+  if ffi.C.pipe(stdout_pipe) ~= 0 then return nil, "pipe() failed for stdout", nil end
   if ffi.C.pipe(stderr_pipe) ~= 0 then
     ffi.C.close(stdout_pipe[0]); ffi.C.close(stdout_pipe[1])
-    return nil, "pipe() failed for stderr"
+    return nil, "pipe() failed for stderr", nil
   end
   if stdin_pipe and ffi.C.pipe(stdin_pipe) ~= 0 then
     ffi.C.close(stdout_pipe[0]); ffi.C.close(stdout_pipe[1])
     ffi.C.close(stderr_pipe[0]); ffi.C.close(stderr_pipe[1])
-    return nil, "pipe() failed for stdin"
+    return nil, "pipe() failed for stdin", nil
   end
 
   local pid = ffi.C.fork()
@@ -89,7 +89,7 @@ function mod.exec(cmd, args, opts)
     ffi.C.close(stdout_pipe[0]); ffi.C.close(stdout_pipe[1])
     ffi.C.close(stderr_pipe[0]); ffi.C.close(stderr_pipe[1])
     if stdin_pipe then ffi.C.close(stdin_pipe[0]); ffi.C.close(stdin_pipe[1]) end
-    return nil, "fork() failed"
+    return nil, "fork() failed", nil
   end
 
   if pid == 0 then

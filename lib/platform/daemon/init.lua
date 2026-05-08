@@ -43,8 +43,8 @@ local M = {}
 --::   host?: string,
 --::   time_fn?: () -> integer,
 --::   random_bytes_fn?: (n: integer) -> { [integer]: number },
---::   index_db?: unknown,
---::   index_obj?: unknown,
+--::   index_db?: any,
+--::   index_obj?: any,
 --::   remove_fn?: (path: string) -> (true | nil, string | nil),
 --::   write_fn?: (path: string, data: string) -> (true | nil, string | nil),
 --::   read_fn?: (path: string) -> (string | nil, string | nil),
@@ -59,7 +59,7 @@ local M = {}
 --::   secure_cookie?: boolean,
 --::   prefer_loopback?: boolean,
 --::   on_handler_error?: (app_id: string, err: string, traceback: string) -> nil,
---::   audit_log?: unknown,
+--::   audit_log?: any,
 --::   session_db_path?: string,
 --::   policy_path?: string,
 --::   tls_cert?: string,
@@ -1093,7 +1093,8 @@ function M.make(opts)
 				query  = "",
 				headers = {},
 			}
-			local card_res = { status = nil, headers = {}, body = nil }
+			--: { status: integer | nil, headers: { [string]: unknown }, body: string | nil }
+			local card_res = { status = nil, headers = {}, body = nil } --[[:! { status: integer | nil, headers: { [string]: unknown }, body: string | nil }]]
 			local ok_h, herr = pcall(src.handler, card_req, card_res)
 			if not ok_h or not card_res.body then
 				plain(res, 502, "source handler error: " .. tostring(ok_h and "empty body" or herr))
@@ -1103,7 +1104,8 @@ function M.make(opts)
 				plain(res, 502, "source returned status " .. tostring(card_res.status))
 				return
 			end
-			png_bytes = card_res.body
+			local card_body = card_res.body
+			png_bytes = card_body --[[:! string]]
 		else
 			-- Direct-upload path: body is raw PNG or gzip/tar.gz bytes.
 			png_bytes = req.body or ""
@@ -1116,19 +1118,21 @@ function M.make(opts)
 		end
 
 		-- Run the import pipeline.
-		local app_path, manifest_or_err = import_mod.import_card({
+		local import_ts = time_fn() or 0 --: integer
+		local import_result_path, manifest_or_err = import_mod.import_card({
 			png_bytes        = png_bytes,
 			runtime_files    = runtime_files or {},
 			runtime_manifest = (runtime_manifest or {}) --[[:! { name: string | nil, dom_entry: string | nil, ... }]],
 			apps_dir         = apps_dir or "",
 			index            = index_obj,
-			timestamp        = time_fn() or 0,
+			timestamp        = import_ts,
 			write_fn         = write_fn --[[:! (string, string) -> (true | nil, string)]],
 		})
-		if not app_path then
+		if not import_result_path then
 			plain(res, 500, "import failed: " .. tostring(manifest_or_err))
 			return
 		end
+		local app_path = import_result_path --: string
 
 		respond_install_result(res, app_path, manifest_or_err)
 	end)
