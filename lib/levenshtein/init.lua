@@ -217,6 +217,7 @@ end
 -- Jaro similarity
 -- ---------------------------------------------------------------------------
 
+--: (s: string, t: string) -> number
 function M.jaro(s, t)
   local m_len, n_len = #s, #t
   if m_len == 0 and n_len == 0 then return 1.0 end
@@ -275,8 +276,9 @@ end
 -- Jaro-Winkler similarity
 -- ---------------------------------------------------------------------------
 
+--: (s: string, t: string, p: number | nil) -> number
 function M.jaro_winkler(s, t, p)
-  p = p or 0.1
+  local pw = p or 0.1 --: number
   local jaro_score = M.jaro(s, t)
   -- Common prefix length (up to 4)
   local prefix = 0
@@ -288,7 +290,7 @@ function M.jaro_winkler(s, t, p)
       break
     end
   end
-  return jaro_score + prefix * p * (1 - jaro_score)
+  return jaro_score + prefix * pw * (1 - jaro_score)
 end
 
 -- ---------------------------------------------------------------------------
@@ -406,6 +408,7 @@ end
 -- Closest: sort candidates by Levenshtein distance to query
 -- ---------------------------------------------------------------------------
 
+--: (query: string, candidates: { [integer]: string }, n: integer | nil) -> { [integer]: string }
 function M.closest(query, candidates, n)
   local scored = {}
   for i = 1, #candidates do
@@ -415,7 +418,7 @@ function M.closest(query, candidates, n)
   local result = {}
   local limit = n and min(n, #scored) or #scored
   for i = 1, limit do
-    result[i] = scored[i][1]
+    result[i] = scored[i][1] --[[:! string]]
   end
   return result
 end

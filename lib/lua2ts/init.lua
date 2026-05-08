@@ -283,7 +283,7 @@ local function new_ctx(pool, nodes, lists, source, opts)
 
     -- Intern ID → Lua string
     function ctx:name(id)
-        return intern_mod.get(self.pool, id) or ("__id" .. tostring(id))
+        return intern_mod.get(self.pool, id --[[:! integer]]) or ("__id" .. tostring(id))
     end
 
     -- Retrieve items from the list pool as a Lua array of int32 values.
@@ -1538,7 +1538,7 @@ function M.transpile(source, opts)
     if not ok then
         return nil, tostring(result)
     end
-    return result
+    return result --[[:! string | nil]]
 end
 
 --: (string, ({ filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil }) | nil) -> (string | nil, string | nil)

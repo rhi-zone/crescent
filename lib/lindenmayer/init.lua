@@ -92,7 +92,7 @@ local function index_rules(spec_rules)
       ctx[desc.sym][#ctx[desc.sym] + 1] = { kind = desc.kind, left = desc.left, right = desc.right, value = value }
     end
   end
-  return plain, ctx
+  return plain, ctx, nil
 end
 
 -- ========================
@@ -113,7 +113,7 @@ local function match_parametric(s, i)
   if i + 1 > #s or s:sub(i + 1, i + 1) ~= "(" then return nil end
   local close = s:find(")", i + 2, true)
   if not close then return nil end
-  local inner = s:sub(i + 2, close - 1)
+  local inner = s:sub(i + 2, (close --[[:! integer]]) - 1)
   local params = {}
   for v in inner:gmatch("[^,]+") do
     params[#params + 1] = v

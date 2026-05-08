@@ -98,7 +98,7 @@ function M.run_ex(cmd, args, opts)
 	local fh, err = popen(augmented, "r")
 	if not fh then
 		remove(stderr_path)
-		return nil, "popen: " .. tostring(err)
+		return nil, "popen: " .. tostring(err), nil
 	end
 
 	local raw = fh:read("*a") or ""
@@ -117,7 +117,7 @@ function M.run_ex(cmd, args, opts)
 	if code ~= 0 then
 		local msg = "exit " .. tostring(code)
 		if stderr ~= "" then msg = msg .. ": " .. stderr end
-		return nil, msg
+		return nil, msg, nil
 	end
 	return stdout, stderr, code
 end

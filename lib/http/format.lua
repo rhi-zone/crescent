@@ -113,7 +113,7 @@ mod.parse_request = function(s, i)
 	return {
 		method = method, target = target, version = version,
 		headers = headers, body = #body > 0 and body or nil,
-	}, body_start + #body
+	}, body_start + #body, nil
 end
 
 -- RFC 9112 §4 — Parse response from wire bytes.
@@ -163,7 +163,7 @@ mod.parse_response = function(s, i)
 	return {
 		status = status, reason = reason, version = version,
 		headers = headers, body = #body > 0 and body or nil,
-	}, body_start + #body
+	}, body_start + #body, nil
 end
 
 -- RFC 9112 §3 — Serialize request to wire bytes.

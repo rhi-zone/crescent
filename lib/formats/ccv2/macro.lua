@@ -23,7 +23,7 @@ local function format_idle(seconds)
 	return h .. "h " .. m .. "m " .. (s % 60) .. "s"
 end
 
---: (string, string) -> { string }
+--: (string, string) -> { [integer]: string }
 local function split_args(inner, sep)
 	sep = sep or "::"
 	local parts = {}
@@ -82,8 +82,7 @@ end
 
 -- Dispatch table: macro_name -> function(env, args) -> string
 -- All keys are lowercase.
---: { [string]: (Env, { string }) -> string }
-local handlers = {}
+local handlers = {} --[[:! { [string]: (Env, { [integer]: string }) -> string }]]
 
 -- Core identity
 handlers["char"] = function(env) return env.char or "" end

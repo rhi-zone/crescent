@@ -16,6 +16,7 @@ ffi.cdef [[
 	int inotify_init1(int flags);
 	int inotify_add_watch(int fd, const char *pathname, uint32_t mask);
 	int inotify_rm_watch(int fd, int wd);
+	ssize_t read(int fd, void *buf, size_t count);
 ]]
 
 local mod = {}
@@ -96,7 +97,7 @@ inotify.new = function (self, epoll, flags)
 		fd = fd,
 		callbacks = {}, --[[@type table<inotify_wd_c, fun(event: inotify_event_c)>]]
 	}
-	local buf = ffi.new("char[65536]")
+	local buf = ffi.new("char[65536]") --[[: any]]
 	epoll:add(fd, function ()
 		local len = ffi.C.read(fd, buf, 65536)
 		local offset = 0
@@ -104,7 +105,7 @@ inotify.new = function (self, epoll, flags)
 			local event = ffi.cast("struct inotify_event *", buf + offset) --[[@type inotify_event_c]]
 			local cb = instance.callbacks[event.wd]
 			if cb then cb(event) end
-			offset = offset + 16 + event.len
+			offset = offset + 16 + (tonumber(event.len) or 0) --[[:! integer]]
 		end
 	end)
 	--[[FIXME: destructor]]
