@@ -1241,10 +1241,14 @@ end
 
 -- Display a type as a human-readable string (cold path).
 -- The `seen` table tracks (1) tids currently in progress (cycle guard) keyed
--- by tid → true; (2) recursion depth at integer key 0 (bailout at 64); and
+-- by tid → true; (2) recursion depth at integer key 0 (assert-only guard at
+-- 64 — surfaces typechecker bugs where structurally cyclic types present as
+-- fresh tids per visit and slip past the tid-keyed cycle guard); and
 -- (3) memoized display results at negative-keyed entries (-tid-1 → string)
 -- to avoid exponential re-traversal of shared subterms produced by recursive
 -- type aliases (e.g. `Term = string | { args: { [integer]: Term } }`).
+-- If the depth assert ever fires, the proper fix is hash-consing of unions
+-- and intersections so that structurally identical types share a tid.
 --: (Ctx, unknown, unknown) -> string
 function M.display(ctx, tid, seen)
     if type(tid) ~= "number" then return "?" end
@@ -1252,7 +1256,7 @@ function M.display(ctx, tid, seen)
     local tid_i = M.find(ctx, math.floor(tid))
     --: { [integer]: any, ... }
     local s = seen or {}
-    if (s[0] or 0) > 64 then return "..." end
+    if (s[0] or 0) > 64 then error("display recursion depth exceeded at tid " .. tid_i) end
     -- Memoization: keyed by negative tid to avoid colliding with the cycle
     -- guard (positive tid → true) and the depth counter (key 0).
     local cache_key = -tid_i - 1
