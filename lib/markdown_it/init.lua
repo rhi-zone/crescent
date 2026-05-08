@@ -61,7 +61,7 @@ end
 
 -- Walk an mdast tree depth-first, calling fn(node, parent, index).
 -- fn may return a replacement node, nil to remove, or nothing to keep.
---: (any, (any, any, (integer | nil)) -> any) -> any
+--: (any, (any, any) -> any) -> any
 local function walk(node, fn)
   if not node then return node end
   if node.children then
@@ -217,6 +217,9 @@ end
 
 -- ── MarkdownIt instance ───────────────────────────────────────────────────────
 
+--:: MditOpts = { html: boolean, breaks: boolean, linkify: boolean, typographer: boolean }
+--:: MditInstance = { _opts: MditOpts, _plugins: { [integer]: unknown, ... }, _transforms: { [integer]: (unknown) -> unknown, ... }, parse: (MditInstance, string) -> unknown }
+
 local MarkdownIt = {}
 MarkdownIt.__index = MarkdownIt
 
@@ -241,20 +244,20 @@ end
 
 -- Use a plugin.  plugin(md_instance, plugin_opts) is called immediately.
 -- Returns self for chaining.
---: (any, (any | nil)) -> any
+--: (self: MditInstance, any, (any | nil)) -> any
 function MarkdownIt:use(plugin, plugin_opts)
   plugin(self, plugin_opts)
   return self
 end
 
 -- Register a post-parse transform.  fn(tree) -> tree.
---: (any) -> ()
+--: (self: MditInstance, (unknown) -> unknown) -> ()
 function MarkdownIt:_add_transform(fn)
   self._transforms[#self._transforms + 1] = fn
 end
 
 -- Parse markdown string → mdast tree (with option transforms applied).
---: (string) -> any
+--: (self: MditInstance, string) -> any
 function MarkdownIt:parse(src)
   local mdast = get_mdast()
   local tree = mdast.parse(src)
@@ -282,7 +285,7 @@ function MarkdownIt:parse(src)
 end
 
 -- Render markdown string → HTML string.
---: (string) -> string
+--: (self: MditInstance, string) -> string
 function MarkdownIt:render(src)
   local hast = get_hast()
   local tree = self:parse(src)
@@ -514,7 +517,7 @@ M.plugin.footnote = function(md, _opts)
           -- the original content; title may contain further words if quoted.
           local content = node.url or ""
           if node.title and node.title ~= "" then
-            content = content .. " " .. node.title
+            content = content .. " " .. node.title --[[:! string]]
           end
           defs[id] = content
           def_nodes[node] = true

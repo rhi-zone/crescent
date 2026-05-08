@@ -74,18 +74,22 @@ end
 
 -- ── Counter ───────────────────────────────────────────────────────────────────
 
+--:: CounterObj = { _name: string, _help: string, _label_names: { [integer]: string, ... }, _values: { [string]: number } }
+
 local Counter = {}
 Counter.__index = Counter
 
+--: (string, string, { [integer]: string, ... }) -> CounterObj
 local function new_counter(name, help, label_names)
   return setmetatable({
     _name        = name,
     _help        = help,
     _label_names = label_names,
     _values      = {},  -- key → number
-  }, Counter)
+  }, Counter) --[[:! CounterObj]]
 end
 
+--: (self: CounterObj, { [string]: unknown }, (number | nil)) -> ()
 function Counter:inc(labels, n)
   n = n or 1
   if n < 0 then error("counter increment must be non-negative", 2) end
@@ -94,12 +98,14 @@ function Counter:inc(labels, n)
   self._values[k] = (self._values[k] or 0) + n
 end
 
+--: (self: CounterObj, { [string]: unknown }) -> number
 function Counter:get(labels)
   validate_labels(self._label_names, labels)
   local k = label_key(self._label_names, labels)
   return self._values[k] or 0
 end
 
+--: (self: CounterObj, { [integer]: string, ... }) -> ()
 function Counter:_render(out)
   out[#out + 1] = "# HELP " .. self._name .. " " .. self._help
   out[#out + 1] = "# TYPE " .. self._name .. " counter"
@@ -114,30 +120,36 @@ function Counter:_render(out)
   end
 end
 
+--: (self: CounterObj) -> ()
 function Counter:_reset()
   self._values = {}
 end
 
 -- ── Gauge ─────────────────────────────────────────────────────────────────────
 
+--:: GaugeObj = { _name: string, _help: string, _label_names: { [integer]: string, ... }, _values: { [string]: number } }
+
 local Gauge = {}
 Gauge.__index = Gauge
 
+--: (string, string, { [integer]: string, ... }) -> GaugeObj
 local function new_gauge(name, help, label_names)
   return setmetatable({
     _name        = name,
     _help        = help,
     _label_names = label_names,
     _values      = {},
-  }, Gauge)
+  }, Gauge) --[[:! GaugeObj]]
 end
 
+--: (self: GaugeObj, { [string]: unknown }, number) -> ()
 function Gauge:set(labels, v)
   validate_labels(self._label_names, labels)
   local k = label_key(self._label_names, labels)
   self._values[k] = v
 end
 
+--: (self: GaugeObj, { [string]: unknown }, (number | nil)) -> ()
 function Gauge:inc(labels, n)
   n = n or 1
   validate_labels(self._label_names, labels)
@@ -145,6 +157,7 @@ function Gauge:inc(labels, n)
   self._values[k] = (self._values[k] or 0) + n
 end
 
+--: (self: GaugeObj, { [string]: unknown }, (number | nil)) -> ()
 function Gauge:dec(labels, n)
   n = n or 1
   validate_labels(self._label_names, labels)
@@ -152,12 +165,14 @@ function Gauge:dec(labels, n)
   self._values[k] = (self._values[k] or 0) - n
 end
 
+--: (self: GaugeObj, { [string]: unknown }) -> number
 function Gauge:get(labels)
   validate_labels(self._label_names, labels)
   local k = label_key(self._label_names, labels)
   return self._values[k] or 0
 end
 
+--: (self: GaugeObj, { [integer]: string, ... }) -> ()
 function Gauge:_render(out)
   out[#out + 1] = "# HELP " .. self._name .. " " .. self._help
   out[#out + 1] = "# TYPE " .. self._name .. " gauge"
@@ -170,6 +185,7 @@ function Gauge:_render(out)
   end
 end
 
+--: (self: GaugeObj) -> ()
 function Gauge:_reset()
   self._values = {}
 end
@@ -178,9 +194,13 @@ end
 
 local DEFAULT_BUCKETS = {0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
 
+--:: HistEntry = { sum: number, count: number, counts: { [integer]: number, ... } }
+--:: HistogramObj = { _name: string, _help: string, _label_names: { [integer]: string, ... }, _buckets: { [integer]: number, ... }, _data: { [string]: HistEntry } }
+
 local Histogram = {}
 Histogram.__index = Histogram
 
+--: (string, string, { [integer]: string, ... }, ({ [integer]: number, ... } | nil)) -> HistogramObj
 local function new_histogram(name, help, label_names, buckets)
   buckets = buckets or DEFAULT_BUCKETS
   -- copy and sort buckets, add +Inf
@@ -196,15 +216,17 @@ local function new_histogram(name, help, label_names, buckets)
     _buckets     = bkts,
     -- per-labelset data: key → { sum, count, counts[] parallel to _buckets }
     _data        = {},
-  }, Histogram)
+  }, Histogram) --[[:! HistogramObj]]
 end
 
+--: (HistogramObj) -> HistEntry
 local function hist_entry(h)
   local counts = {}
   for i = 1, #h._buckets do counts[i] = 0 end
   return { sum = 0, count = 0, counts = counts }
 end
 
+--: (self: HistogramObj, { [string]: unknown }, number) -> ()
 function Histogram:observe(labels, v)
   validate_labels(self._label_names, labels)
   local k = label_key(self._label_names, labels)
@@ -219,12 +241,14 @@ function Histogram:observe(labels, v)
   end
 end
 
+--: (self: HistogramObj, { [string]: unknown }) -> number
 function Histogram:sum(labels)
   validate_labels(self._label_names, labels)
   local k = label_key(self._label_names, labels)
   return self._data[k] and self._data[k].sum or 0
 end
 
+--: (self: HistogramObj, { [string]: unknown }) -> number
 function Histogram:count(labels)
   validate_labels(self._label_names, labels)
   local k = label_key(self._label_names, labels)
@@ -232,6 +256,7 @@ function Histogram:count(labels)
 end
 
 -- Returns table {[le_value] = cumulative_count, ...}
+--: (self: HistogramObj, { [string]: unknown }) -> { [number]: number }
 function Histogram:buckets(labels)
   validate_labels(self._label_names, labels)
   local k = label_key(self._label_names, labels)
@@ -249,6 +274,7 @@ function Histogram:buckets(labels)
   return result
 end
 
+--: (self: HistogramObj, { [integer]: string, ... }) -> ()
 function Histogram:_render(out)
   out[#out + 1] = "# HELP " .. self._name .. " " .. self._help
   out[#out + 1] = "# TYPE " .. self._name .. " histogram"
@@ -280,24 +306,30 @@ function Histogram:_render(out)
   end
 end
 
+--: (self: HistogramObj) -> ()
 function Histogram:_reset()
   self._data = {}
 end
 
 -- ── Summary ───────────────────────────────────────────────────────────────────
 
+--:: SummaryEntry = { sum: number, count: number }
+--:: SummaryObj = { _name: string, _help: string, _label_names: { [integer]: string, ... }, _data: { [string]: SummaryEntry } }
+
 local Summary = {}
 Summary.__index = Summary
 
+--: (string, string, { [integer]: string, ... }) -> SummaryObj
 local function new_summary(name, help, label_names)
   return setmetatable({
     _name        = name,
     _help        = help,
     _label_names = label_names,
     _data        = {},  -- key → { sum, count }
-  }, Summary)
+  }, Summary) --[[:! SummaryObj]]
 end
 
+--: (self: SummaryObj, { [string]: unknown }, number) -> ()
 function Summary:observe(labels, v)
   validate_labels(self._label_names, labels)
   local k = label_key(self._label_names, labels)
@@ -307,18 +339,21 @@ function Summary:observe(labels, v)
   d.count = d.count + 1
 end
 
+--: (self: SummaryObj, { [string]: unknown }) -> number
 function Summary:sum(labels)
   validate_labels(self._label_names, labels)
   local k = label_key(self._label_names, labels)
   return self._data[k] and self._data[k].sum or 0
 end
 
+--: (self: SummaryObj, { [string]: unknown }) -> number
 function Summary:count(labels)
   validate_labels(self._label_names, labels)
   local k = label_key(self._label_names, labels)
   return self._data[k] and self._data[k].count or 0
 end
 
+--: (self: SummaryObj, { [integer]: string, ... }) -> ()
 function Summary:_render(out)
   out[#out + 1] = "# HELP " .. self._name .. " " .. self._help
   out[#out + 1] = "# TYPE " .. self._name .. " summary"
@@ -333,22 +368,28 @@ function Summary:_render(out)
   end
 end
 
+--: (self: SummaryObj) -> ()
 function Summary:_reset()
   self._data = {}
 end
 
 -- ── Registry ──────────────────────────────────────────────────────────────────
 
+--:: MetricObj = { _name: string, _render: (MetricObj, { [integer]: string, ... }) -> (), _reset: (MetricObj) -> (), ... }
+--:: RegistryObj = { _metrics: { [string]: MetricObj }, _order: { [integer]: string, ... }, counter: (RegistryObj, string, string, ({ [integer]: string, ... } | nil)) -> MetricObj, gauge: (RegistryObj, string, string, ({ [integer]: string, ... } | nil)) -> MetricObj, histogram: (RegistryObj, string, string, ({ [integer]: string, ... } | nil), ({ [integer]: number, ... } | nil)) -> MetricObj, summary: (RegistryObj, string, string, ({ [integer]: string, ... } | nil)) -> MetricObj, render: (RegistryObj) -> string, reset: (RegistryObj) -> () }
+
 local Registry = {}
 Registry.__index = Registry
 
+--: () -> RegistryObj
 local function new_registry()
   return setmetatable({
     _metrics = {},  -- name → metric object
     _order   = {},  -- insertion order list
-  }, Registry)
+  }, Registry) --[[:! RegistryObj]]
 end
 
+--: (RegistryObj, MetricObj) -> MetricObj
 local function reg_register(reg, metric)
   local name = metric._name
   if reg._metrics[name] then
@@ -359,22 +400,27 @@ local function reg_register(reg, metric)
   return metric
 end
 
+--: (self: RegistryObj, string, string, ({ [integer]: string, ... } | nil)) -> MetricObj
 function Registry:counter(name, help, label_names)
-  return reg_register(self, new_counter(name, help, label_names or {}))
+  return reg_register(self, new_counter(name, help, label_names or {}) --[[:! MetricObj]])
 end
 
+--: (self: RegistryObj, string, string, ({ [integer]: string, ... } | nil)) -> MetricObj
 function Registry:gauge(name, help, label_names)
-  return reg_register(self, new_gauge(name, help, label_names or {}))
+  return reg_register(self, new_gauge(name, help, label_names or {}) --[[:! MetricObj]])
 end
 
+--: (self: RegistryObj, string, string, ({ [integer]: string, ... } | nil), ({ [integer]: number, ... } | nil)) -> MetricObj
 function Registry:histogram(name, help, label_names, buckets)
-  return reg_register(self, new_histogram(name, help, label_names or {}, buckets))
+  return reg_register(self, new_histogram(name, help, label_names or {}, buckets) --[[:! MetricObj]])
 end
 
+--: (self: RegistryObj, string, string, ({ [integer]: string, ... } | nil)) -> MetricObj
 function Registry:summary(name, help, label_names)
-  return reg_register(self, new_summary(name, help, label_names or {}))
+  return reg_register(self, new_summary(name, help, label_names or {}) --[[:! MetricObj]])
 end
 
+--: (self: RegistryObj) -> string
 function Registry:render()
   local out = {}
   for _, name in ipairs(self._order) do
@@ -383,6 +429,7 @@ function Registry:render()
   return table.concat(out, "\n") .. (next(self._metrics) and "\n" or "")
 end
 
+--: (self: RegistryObj) -> ()
 function Registry:reset()
   for _, name in ipairs(self._order) do
     self._metrics[name]:_reset()
