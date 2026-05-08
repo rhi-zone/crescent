@@ -199,7 +199,7 @@ local decode_impl = function(packet, acc)
 	end
 	if band(h1, 0x80) ~= 0 then
 		-- RFC 6455 §5.3 — masking key present
-		mask = { byte(packet, pi, pi + 3) }
+		mask = { byte(packet, pi, pi + 3) } --[[:! ws_mask]]
 		pi = pi + 4
 	else
 		return nil, mod.error.frame_is_not_masked, nil, nil, 0

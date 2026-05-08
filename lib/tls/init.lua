@@ -1,6 +1,5 @@
 local ffi = require("ffi")
 
-local tls_c = ffi.load("tls") --[[:! $FfiC]]
 ffi.cdef [[
 	struct tls {};
 	struct tls_config {};
@@ -93,6 +92,8 @@ ffi.cdef [[
 	int tls_config_set_session_fd(struct tls_config*, int);
 	void tls_config_clear_keys(struct tls_config*);
 ]]
+
+local tls_c = ffi.load("tls") --[[: any]] -- ffi.load result is not $FfiC; any is the correct escape here
 
 --[[@class tls_config_c]]
 --[[@class tls_c]]

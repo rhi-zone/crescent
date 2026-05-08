@@ -230,7 +230,7 @@ end
 function M.provider(opts --[[:! { time_fn: () -> integer, exporter?: Exporter, id_seed?: integer }]])
   assert(opts and opts.time_fn, "provider requires opts.time_fn")
   local exporter = opts.exporter or M.noop_exporter()
-  local rng = _make_rng(opts.id_seed --[[:! integer | nil]], opts.time_fn)
+  local rng = _make_rng(opts.id_seed --[[:! integer | nil]], opts.time_fn --[[:! (() -> integer) | nil]])
   return setmetatable({
     _exporter = exporter,
     _rng      = rng,

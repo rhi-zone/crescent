@@ -38,7 +38,9 @@ M.size = function(getenv)
       end
       return nil, nil
     end)
-    if ok and w and h then return w, h end
+    if ok and w and h then
+      return math.floor(tonumber(w) or 0), math.floor(tonumber(h) or 0)
+    end
   end
   -- Fallback: environment variables
   local cols_s  = getenv("COLUMNS")

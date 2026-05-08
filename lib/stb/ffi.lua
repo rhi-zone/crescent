@@ -46,7 +46,7 @@ local function bind(lib)
       x, y, ch, channels)
     if ptr == nil then
       local reason = ffi.string(lib.stbi_failure_reason())
-      return nil, reason
+      return nil, reason, nil, nil
     end
     local out_ch = channels ~= 0 and channels or ch[0]
     local nbytes = x[0] * y[0] * out_ch

@@ -83,7 +83,7 @@ M.compile = function(opts, build_fn)
 
   local desc = k:finalize()
   local alloc = ra.allocate(desc.intervals --[[:! { [integer]: { id: integer, first: integer, last: integer, type: string, phys: string, ... }, ... }]], regfile)
-  return emit_mod.compile(desc, alloc, abi_def, ctype)
+  return (emit_mod --[[:! { compile: (unknown, unknown, unknown, string) -> (unknown, string | nil) }]]).compile(desc, alloc, abi_def, ctype)
 end
 
 return M

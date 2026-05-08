@@ -62,7 +62,7 @@ local function myers_forward(a, b)
     trace[d + 1] = snap
   end
 
-  return nil, "diff: no solution found"
+  return nil, nil, nil
 end
 
 --: ({ [integer]: string }, { [integer]: string }, { [integer]: { [integer]: integer } }, integer, integer) -> { [integer]: { [integer]: unknown } }

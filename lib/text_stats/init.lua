@@ -353,7 +353,7 @@ function M.top_words(text, n)
 		return a.word < b.word
 	end)
 	local result = {}
-	local limit = n and min(n, #pairs_list) or #pairs_list
+	local limit = n and min(n --[[:! integer]], #pairs_list) or #pairs_list
 	for i = 1, limit do
 		result[i] = pairs_list[i]
 	end

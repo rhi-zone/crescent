@@ -100,7 +100,7 @@ end
 --[[@param read fun(sock: luajitsocket, msg: websocket_message)]]
 --[[@param close fun(sock: luajitsocket)|nil]]
 --[[@param epoll epoll]]
---: (sock: ws_sock, req: { headers: { [string]: string[] }, ... }, read: (sock: ws_sock, msg: websocket_message) -> nil, close: ((sock: ws_sock) -> nil) | nil, epoll: ws_epoll) -> ((msg: websocket_message) -> nil) | nil
+--: (sock: ws_sock, req: { headers: { [string]: string[] }, ... }, read: (sock: ws_sock, msg: websocket_message) -> nil, close: ((sock: ws_sock) -> nil) | nil, epoll: ws_epoll) -> (((msg: websocket_message) -> nil) | nil, (() -> nil) | nil)
 mod.websocket = function(sock, req, read, close, epoll)
 	if (req.headers["upgrade"] or {})[1] ~= "websocket" or (req.headers["connection"] or {})[1] ~= "Upgrade" then return nil end
 	-- TODO(api): return a numeric error code here instead of sending the HTTP

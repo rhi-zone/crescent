@@ -55,9 +55,9 @@ local function write_varint(v)
   if v < 128 then
     return char(v)
   end
-  local parts = {}
+  local parts = {} --[[:! { [integer]: string }]]
   while v >= 128 do
-    parts[#parts + 1] = char(bor(band(v, 0x7F), 0x80))
+    parts[#parts + 1] = char(bor(band(v, 0x7F), 0x80)) --[[:! string]]
     v = rshift(v, 7)
   end
   parts[#parts + 1] = char(v)
@@ -68,17 +68,17 @@ end
 
 local function read_u16_le(s, i)
   local a, b = byte(s, i, i + 1)
-  return a + b * 256
+  return (a --[[:! integer]]) + (b --[[:! integer]]) * 256
 end
 
 local function read_u32_le(s, i)
   local a, b, c, d = byte(s, i, i + 3)
-  return a + b * 256 + c * 65536 + d * 16777216
+  return (a --[[:! integer]]) + (b --[[:! integer]]) * 256 + (c --[[:! integer]]) * 65536 + (d --[[:! integer]]) * 16777216
 end
 
 local function read_u24_le(s, i)
   local a, b, c = byte(s, i, i + 2)
-  return a + b * 256 + c * 65536
+  return (a --[[:! integer]]) + (b --[[:! integer]]) * 256 + (c --[[:! integer]]) * 65536
 end
 
 local function write_u16_le(v)
@@ -99,17 +99,18 @@ function M.decompress(compressed)
   end
 
   -- Read uncompressed length varint
-  local uncompressed_len, ip = read_varint(compressed, 1)
+  local uncompressed_len, ip_or_err = read_varint(compressed, 1)
   if uncompressed_len == nil then
-    return nil, "decompress: " .. ip  -- ip is errmsg here
+    return nil, "decompress: " .. ip_or_err --[[:! string]]
   end
+  local ip = ip_or_err --[[:! integer]]
 
   -- Output buffer as a flat byte array (0-based indexing) for O(1) back-reference access
   local decoded = {}
   local out_len = 0
 
   while ip <= clen do
-    local tag = byte(compressed, ip)
+    local tag = byte(compressed, ip) --[[:! integer]]
     ip = ip + 1
     local tag_type = band(tag, 0x03)
 
@@ -124,7 +125,7 @@ function M.decompress(compressed)
         if ip > clen then
           return nil, "decompress: truncated literal length (1 byte)"
         end
-        lit_len = byte(compressed, ip) + 1
+        lit_len = (byte(compressed, ip) --[[:! integer]]) + 1
         ip = ip + 1
       elseif length_code == 61 then
         -- 2 extra bytes LE
@@ -166,7 +167,7 @@ function M.decompress(compressed)
       if ip > clen then
         return nil, "decompress: truncated copy-1 offset"
       end
-      local next_b = byte(compressed, ip)
+      local next_b = byte(compressed, ip) --[[:! integer]]
       ip = ip + 1
       local offset = bor(rshift(tag, 5), lshift(next_b, 3))
       if offset == 0 then
@@ -340,7 +341,7 @@ function M.compress(input)
   end
 
   -- Hash table: hash → last seen 1-based position in input
-  local ht = {}
+  local ht = {} --: { [number]: integer }
   local ip = 1         -- current read position (1-based)
   local lit_start = 1  -- start of current pending literal run
 
@@ -357,11 +358,11 @@ function M.compress(input)
     local match_offset = 0
 
     if candidate ~= nil and ip - candidate >= 1 and ip - candidate <= 65535 then
-      local offs = ip - candidate
+      local offs = ip - candidate --[[:! integer]]
       -- Verify match
       local max_match = n - ip + 1
       local ml = 0
-      while ml < max_match and byte(input, ip + ml) == byte(input, candidate + ml) do
+      while ml < max_match and byte(input, (ip + ml) --[[:! integer]]) == byte(input, (candidate + ml) --[[:! integer]]) do
         ml = ml + 1
       end
       if ml >= 4 then
@@ -399,8 +400,9 @@ end
 -- Returns: boolean
 function M.is_valid(data)
   if type(data) ~= "string" or #data == 0 then return false end
-  local uncompressed_len, ip = read_varint(data, 1)
+  local uncompressed_len, ip_or_err = read_varint(data, 1)
   if uncompressed_len == nil then return false end
+  local ip = ip_or_err --[[:! integer]]
   -- Check that ip is plausible (at least within bounds)
   if ip > #data + 1 then return false end
   return true

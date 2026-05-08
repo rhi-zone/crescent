@@ -14,6 +14,8 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: SexpReader = { src: string, pos: integer, len: integer }
+
 -- Symbol metatable for pretty tostring
 local sym_mt = {}
 sym_mt.__index = sym_mt
@@ -40,20 +42,24 @@ end
 -- Decoder / Parser
 -- ──────────────────────────────────────────────
 
+--: (string) -> SexpReader
 local function make_reader(src)
   return { src = src, pos = 1, len = #src }
 end
 
+--: (SexpReader) -> string | nil
 local function peek(r)
   if r.pos > r.len then return nil end
   return r.src:sub(r.pos, r.pos)
 end
 
+--: (SexpReader, integer | nil) -> nil
 local function advance(r, n)
   r.pos = r.pos + (n or 1)
 end
 
 -- Skip whitespace and comments
+--: (SexpReader) -> nil
 local function skip_ws(r)
   while r.pos <= r.len do
     local c = r.src:sub(r.pos, r.pos)
@@ -71,9 +77,10 @@ local function skip_ws(r)
 end
 
 -- Parse a string literal (already consumed the opening quote)
+--: (SexpReader) -> (string | nil, string | nil)
 local function parse_string(r)
   -- r.pos is just after the opening "
-  local buf = {}
+  local buf = {} --: { [integer]: string }
   while r.pos <= r.len do
     local c = r.src:sub(r.pos, r.pos)
     if c == '"' then
@@ -113,6 +120,7 @@ end
 local atom_terminators = { [" "]=true, ["\t"]=true, ["\n"]=true, ["\r"]=true,
                            ["("]=true, [")"]=true, ['"']=true, [";"]=true }
 
+--: (SexpReader) -> string
 local function parse_atom_text(r)
   local start = r.pos
   while r.pos <= r.len and not atom_terminators[r.src:sub(r.pos, r.pos)] do
@@ -125,6 +133,7 @@ end
 local parse_value
 
 -- Parse a list (opening paren already consumed)
+--: (SexpReader) -> (unknown, string | nil)
 local function parse_list(r)
   local list = {}
   while true do
@@ -160,6 +169,7 @@ end
 -- Special sentinel so we can distinguish nil-parse-result from error
 local NIL_ATOM = {}  -- returned when atom is the nil keyword
 
+--: (SexpReader) -> (unknown, string | nil)
 parse_value = function(r)
   skip_ws(r)
   if r.pos > r.len then
@@ -265,8 +275,9 @@ local function needs_quote(s)
 end
 
 -- Escape a string for serialization
+--: (string) -> string
 local function escape_string(s)
-  local buf = { '"' }
+  local buf = { '"' } --: { [integer]: string }
   for i = 1, #s do
     local c = s:sub(i, i)
     if c == '"' then
@@ -291,40 +302,48 @@ end
 
 local encode_value  -- forward decl
 
+--: ({ [integer]: unknown, ... }) -> (string | nil, string | nil)
 local function encode_list(t)
-  local parts = { "(" }
-  for i = 1, #t do
+  local parts = { "(" } --: { [integer]: string }
+  local tlen = #t
+  for i = 1, tlen do
     if i > 1 then parts[#parts + 1] = " " end
     local s, err = encode_value(t[i])
     if err then return nil, err end
-    parts[#parts + 1] = s
+    parts[#parts + 1] = s --[[:! string]]
   end
   parts[#parts + 1] = ")"
   return table.concat(parts)
 end
 
+--: (unknown) -> (string | nil, string | nil)
 encode_value = function(v)
   local tv = type(v)
   if tv == "nil" then
     return "nil"
   elseif tv == "boolean" then
-    return v and "#t" or "#f"
+    local vb = v --[[:! boolean]]
+    return vb and "#t" or "#f"
   elseif tv == "number" then
+    local vn = v --[[:! number]]
     -- integer formatting: avoid ".0" for whole numbers
-    if v == math.floor(v) and math.abs(v) < 2^53 then
-      return string.format("%d", v)
+    if vn == math.floor(vn) and math.abs(vn) < 2^53 then
+      return string.format("%d", vn)
     else
-      return tostring(v)
+      return tostring(vn)
     end
   elseif tv == "string" then
-    return escape_string(v)
+    local vs = v --[[:! string]]
+    return escape_string(vs)
   elseif tv == "table" then
     if M.is_sym(v) then
       -- symbol: write bare
-      return v._sym
+      local vsym = v --[[:! { _sym: string, ... }]]
+      return vsym._sym
     else
       -- list/array
-      return encode_list(v)
+      local vt = v --[[:! { [integer]: unknown, ... }]]
+      return encode_list(vt)
     end
   else
     return nil, "cannot encode value of type " .. tv
@@ -342,11 +361,11 @@ end
 -- @param values table array
 -- @return string, errmsg
 function M.encode_all(values)
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   for i = 1, #values do
     local s, err = encode_value(values[i])
     if err then return nil, err end
-    parts[#parts + 1] = s
+    parts[#parts + 1] = s --[[:! string]]
   end
   return table.concat(parts, "\n")
 end

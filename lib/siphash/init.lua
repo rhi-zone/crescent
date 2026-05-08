@@ -68,9 +68,9 @@ local function u64_to_hex_le(v)
   -- Extract 8 bytes in little-endian order.
   local bytes = {} --: { [integer]: string }
   local tmp = v
-  local sfmt = string.format --[[: any]]
+  local sfmt = string.format
   for i = 1, 8 do
-    bytes[i] = sfmt("%02x", tonumber(bit.band(tmp, U64(0xff))) or 0)
+    bytes[i] = sfmt("%02x", tonumber(bit.band(tmp, U64(0xff))) or 0) --[[:! string]]
     tmp = bit.rshift(tmp, 8)
   end
   return table.concat(bytes)

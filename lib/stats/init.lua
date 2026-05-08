@@ -797,7 +797,7 @@ function M.chi2_test(observed --[[ : NumArr ]], expected --[[ : NumArr ]])
     chi2 = chi2 + diff * diff / expected[i]
   end
   -- p-value = P(chi2 > stat) = 1 - chi2_cdf(stat, df)
-  local chi2_p = (M.chi2_cdf(chi2, df) or 0) --: number
+  local chi2_p = (M.chi2_cdf(chi2, df) --[[:! number | nil]]) or 0 --: number
   local p = 1 - chi2_p
   return { chi2_stat = chi2, p_value = p, df = df }
 end

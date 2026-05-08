@@ -7,6 +7,9 @@ end
 
 local M = {}
 
+--:: SolitaireMove = { type: "draw" } | { type: "waste_to_foundation" } | { type: "waste_to_tableau", col: integer } | { type: "tableau_to_foundation", col: integer } | { type: "tableau_to_tableau", from: integer, to: integer, count: integer }
+--:: SolitaireState = { tableau: { [integer]: { [integer]: integer | nil } }, face_up: { [integer]: { [integer]: boolean | nil } }, foundation: { [integer]: integer }, stock: { [integer]: integer | nil }, waste: { [integer]: integer | nil }, draw_count: integer }
+
 -- ── Card helpers ─────────────────────────────────────────────────────────────
 
 -- suit 0=Spades 1=Hearts 2=Diamonds 3=Clubs
@@ -94,20 +97,27 @@ end
 
 -- ── Deep copy ────────────────────────────────────────────────────────────────
 
+--: (SolitaireState) -> SolitaireState
 local function copy_state(s)
-  local tableau = {}
-  local face_up = {}
+  local tableau = {} --: { [integer]: { [integer]: integer | nil } }
+  local face_up = {} --: { [integer]: { [integer]: boolean | nil } }
   for col = 1, 7 do
-    local tc, fc = {}, {}
-    for i = 1, #s.tableau[col] do tc[i] = s.tableau[col][i] end
-    for i = 1, #s.face_up[col]  do fc[i] = s.face_up[col][i]  end
+    local tc = {} --: { [integer]: integer | nil }
+    local fc = {} --: { [integer]: boolean | nil }
+    local scol = s.tableau[col] --: { [integer]: integer | nil }
+    local fcol = s.face_up[col] --: { [integer]: boolean | nil }
+    for i = 1, #scol do tc[i] = scol[i] end
+    for i = 1, #fcol do fc[i] = fcol[i] end
     tableau[col] = tc
     face_up[col] = fc
   end
   local foundation = { s.foundation[1], s.foundation[2], s.foundation[3], s.foundation[4] }
-  local stock, waste = {}, {}
-  for i = 1, #s.stock do stock[i] = s.stock[i] end
-  for i = 1, #s.waste do waste[i] = s.waste[i] end
+  local stock = {} --: { [integer]: integer | nil }
+  local waste = {} --: { [integer]: integer | nil }
+  local sstock = s.stock --: { [integer]: integer | nil }
+  local swaste = s.waste --: { [integer]: integer | nil }
+  for i = 1, #sstock do stock[i] = sstock[i] end
+  for i = 1, #swaste do waste[i] = swaste[i] end
   return {
     tableau    = tableau,
     face_up    = face_up,
@@ -121,8 +131,10 @@ end
 -- ── Move legality helpers ─────────────────────────────────────────────────────
 
 -- Returns index of first face-up card in column (or nil if all face-down / empty)
+--: (SolitaireState, integer) -> integer | nil
 local function first_faceup(state, col)
-  local col_fu = state.face_up[col]
+  local face_up = state.face_up --: { [integer]: { [integer]: boolean | nil } }
+  local col_fu = face_up[col] --: { [integer]: boolean | nil }
   for i = 1, #col_fu do
     if col_fu[i] then return i end
   end
@@ -135,6 +147,7 @@ local function can_stack(card, dest_card)
 end
 
 -- Can `card` go to its foundation pile?
+--: (SolitaireState, integer) -> boolean
 local function can_go_foundation(state, card)
   local suit = M.suit(card)
   return state.foundation[suit+1] == M.rank(card) - 1
@@ -142,17 +155,20 @@ end
 
 -- ── Move generation ───────────────────────────────────────────────────────────
 
+--: (SolitaireState) -> { [integer]: SolitaireMove }
 function M.moves(state)
-  local result = {}
+  local result = {} --: { [integer]: SolitaireMove }
 
   -- draw: always available if stock or waste non-empty
-  if #state.stock > 0 or #state.waste > 0 then
+  local stock = state.stock --: { [integer]: integer | nil }
+  local waste = state.waste --: { [integer]: integer | nil }
+  if #stock > 0 or #waste > 0 then
     result[#result+1] = { type = "draw" }
   end
 
   -- waste moves
-  if #state.waste > 0 then
-    local wcard = state.waste[#state.waste]
+  if #waste > 0 then
+    local wcard = waste[#waste] --[[:! integer]]
 
     -- waste_to_foundation
     if can_go_foundation(state, wcard) then
@@ -161,15 +177,19 @@ function M.moves(state)
 
     -- waste_to_tableau
     local wrank = M.rank(wcard)
+    local tableau = state.tableau --: { [integer]: { [integer]: integer | nil } }
+    local face_up = state.face_up --: { [integer]: { [integer]: boolean | nil } }
     for col = 1, 7 do
-      local tlen = #state.tableau[col]
+      local tcol = tableau[col] --: { [integer]: integer | nil }
+      local fcol = face_up[col] --: { [integer]: boolean | nil }
+      local tlen = #tcol
       if tlen == 0 then
         if wrank == 13 then
           result[#result+1] = { type = "waste_to_tableau", col = col }
         end
       else
-        local top = state.tableau[col][tlen]
-        if state.face_up[col][tlen] and can_stack(wcard, top) then
+        local top = tcol[tlen] --[[:! integer]]
+        if fcol[tlen] and can_stack(wcard, top) then
           result[#result+1] = { type = "waste_to_tableau", col = col }
         end
       end
@@ -177,14 +197,18 @@ function M.moves(state)
   end
 
   -- tableau moves
+  local tableau = state.tableau --: { [integer]: { [integer]: integer | nil } }
+  local face_up = state.face_up --: { [integer]: { [integer]: boolean | nil } }
   for col = 1, 7 do
-    local tlen = #state.tableau[col]
+    local tcol = tableau[col] --: { [integer]: integer | nil }
+    local fcol = face_up[col] --: { [integer]: boolean | nil }
+    local tlen = #tcol
     if tlen == 0 then goto continue_col end
 
     local fi = first_faceup(state, col)
     if not fi then goto continue_col end
 
-    local top_card = state.tableau[col][tlen]
+    local top_card = tcol[tlen] --[[:! integer]]
 
     -- tableau_to_foundation (only top card)
     if can_go_foundation(state, top_card) then
@@ -196,13 +220,13 @@ function M.moves(state)
     for count = 1, faceup_count do
       -- The bottom card of the moved sequence is at index tlen-count+1
       local bottom_idx  = tlen - count + 1
-      local bottom_card = state.tableau[col][bottom_idx]
+      local bottom_card = tcol[bottom_idx] --[[:! integer]]
 
       -- Verify sequence validity for moved cards
       local valid_seq = true
       for k = bottom_idx, tlen - 1 do
-        local c1 = state.tableau[col][k]
-        local c2 = state.tableau[col][k+1]
+        local c1 = tcol[k] --[[:! integer]]
+        local c2 = tcol[k+1] --[[:! integer]]
         if not can_stack(c2, c1) then
           valid_seq = false
           break
@@ -212,14 +236,16 @@ function M.moves(state)
 
       for dest = 1, 7 do
         if dest == col then goto continue_dest end
-        local dlen = #state.tableau[dest]
+        local dtcol = tableau[dest] --: { [integer]: integer | nil }
+        local dfcol = face_up[dest] --: { [integer]: boolean | nil }
+        local dlen = #dtcol
         if dlen == 0 then
           if M.rank(bottom_card) == 13 then
             result[#result+1] = { type = "tableau_to_tableau", from = col, to = dest, count = count }
           end
         else
-          local dtop = state.tableau[dest][dlen]
-          if state.face_up[dest][dlen] and can_stack(bottom_card, dtop) then
+          local dtop = dtcol[dlen] --[[:! integer]]
+          if dfcol[dlen] and can_stack(bottom_card, dtop) then
             result[#result+1] = { type = "tableau_to_tableau", from = col, to = dest, count = count }
           end
         end
@@ -238,74 +264,93 @@ end
 -- ── Move application ──────────────────────────────────────────────────────────
 
 -- Flip topmost face-down card of col if any face-up cards were removed.
+--: (SolitaireState, integer) -> nil
 local function maybe_flip_top(ns, col)
-  local tlen = #ns.tableau[col]
-  if tlen > 0 and not ns.face_up[col][tlen] then
-    ns.face_up[col][tlen] = true
+  local tcol = ns.tableau[col] --: { [integer]: integer | nil }
+  local fcol = ns.face_up[col] --: { [integer]: boolean | nil }
+  local tlen = #tcol
+  if tlen > 0 and not fcol[tlen] then
+    fcol[tlen] = true
   end
 end
 
+--: (SolitaireState, SolitaireMove) -> SolitaireState
 function M.apply(state, move)
   local ns = copy_state(state)
   local t = move.type
 
   if t == "draw" then
-    if #ns.stock == 0 then
+    local ns_stock = ns.stock --: { [integer]: integer | nil }
+    local ns_waste = ns.waste --: { [integer]: integer | nil }
+    if #ns_stock == 0 then
       -- Reset: reverse waste into stock
-      for i = #ns.waste, 1, -1 do
-        ns.stock[#ns.stock+1] = ns.waste[i]
+      for i = #ns_waste, 1, -1 do
+        ns_stock[#ns_stock+1] = ns_waste[i]
       end
       ns.waste = {}
     else
-      local count = math.min(ns.draw_count, #ns.stock)
+      local count = math.min(ns.draw_count, #ns_stock)
       for i = 1, count do
-        ns.waste[#ns.waste+1] = ns.stock[#ns.stock]
-        ns.stock[#ns.stock] = nil
+        ns_waste[#ns_waste+1] = ns_stock[#ns_stock]
+        ns_stock[#ns_stock] = nil
       end
     end
 
   elseif t == "waste_to_foundation" then
-    local card = ns.waste[#ns.waste]
-    ns.waste[#ns.waste] = nil
+    local ns_waste = ns.waste --: { [integer]: integer | nil }
+    local card = ns_waste[#ns_waste] --[[:! integer]]
+    ns_waste[#ns_waste] = nil
     ns.foundation[M.suit(card)+1] = M.rank(card)
 
   elseif t == "waste_to_tableau" then
-    local card = ns.waste[#ns.waste]
-    ns.waste[#ns.waste] = nil
-    local col = move.col
-    ns.tableau[col][#ns.tableau[col]+1] = card
-    ns.face_up[col][#ns.face_up[col]+1] = true
+    local ns_waste = ns.waste --: { [integer]: integer | nil }
+    local card = ns_waste[#ns_waste] --[[:! integer]]
+    ns_waste[#ns_waste] = nil
+    local m_wtab = move --[[:! { type: "waste_to_tableau", col: integer }]]
+    local col = m_wtab.col
+    local tcol = ns.tableau[col] --: { [integer]: integer | nil }
+    local fcol = ns.face_up[col] --: { [integer]: boolean | nil }
+    tcol[#tcol+1] = card
+    fcol[#fcol+1] = true
 
   elseif t == "tableau_to_foundation" then
-    local col = move.col
-    local tlen = #ns.tableau[col]
-    local card = ns.tableau[col][tlen]
-    ns.tableau[col][tlen] = nil
-    ns.face_up[col][tlen] = nil
+    local m_tf = move --[[:! { type: "tableau_to_foundation", col: integer }]]
+    local col = m_tf.col
+    local tcol = ns.tableau[col] --: { [integer]: integer | nil }
+    local fcol = ns.face_up[col] --: { [integer]: boolean | nil }
+    local tlen = #tcol
+    local card = tcol[tlen] --[[:! integer]]
+    tcol[tlen] = nil
+    fcol[tlen] = nil
     ns.foundation[M.suit(card)+1] = M.rank(card)
     maybe_flip_top(ns, col)
 
   elseif t == "tableau_to_tableau" then
-    local from, to, count = move.from, move.to, move.count
-    local flen = #ns.tableau[from]
+    local m_tt = move --[[:! { type: "tableau_to_tableau", from: integer, to: integer, count: integer }]]
+    local from, to, count = m_tt.from, m_tt.to, m_tt.count
+    local tfrom = ns.tableau[from] --: { [integer]: integer | nil }
+    local ffrom = ns.face_up[from] --: { [integer]: boolean | nil }
+    local flen = #tfrom
     -- Extract cards to move (bottom-first in the subsequence)
-    local moving = {}
-    local moving_fu = {}
+    local moving = {} --: { [integer]: integer | nil }
+    local moving_fu = {} --: { [integer]: boolean | nil }
     for i = flen - count + 1, flen do
-      moving[#moving+1] = ns.tableau[from][i]
-      moving_fu[#moving_fu+1] = ns.face_up[from][i]
+      moving[#moving+1] = tfrom[i]
+      moving_fu[#moving_fu+1] = ffrom[i]
     end
     -- Remove from source
     for i = flen - count + 1, flen do
-      ns.tableau[from][i] = nil
-      ns.face_up[from][i] = nil
+      tfrom[i] = nil
+      ffrom[i] = nil
     end
     maybe_flip_top(ns, from)
     -- Append to destination
-    local dlen = #ns.tableau[to]
+    local tto = ns.tableau[to] --: { [integer]: integer | nil }
+    local fto = ns.face_up[to] --: { [integer]: boolean | nil }
+    local dlen = #tto
     for i = 1, #moving do
-      ns.tableau[to][dlen+i] = moving[i]
-      ns.face_up[to][dlen+i] = moving_fu[i]
+      tto[dlen+i] = moving[i]
+      fto[dlen+i] = moving_fu[i]
     end
   end
 
@@ -327,12 +372,14 @@ end
 --   R <= 2 (Aces/2s never block tableau), OR
 --   both R-1 cards of the OPPOSITE color are already on foundation
 --   (meaning no card in tableau needs this card as a placement target)
+--: (SolitaireState) -> { [integer]: SolitaireMove }
 function M.auto_moves(state)
-  local result = {}
+  local result = {} --: { [integer]: SolitaireMove }
 
   -- Check waste top
-  if #state.waste > 0 then
-    local card = state.waste[#state.waste]
+  local waste = state.waste --: { [integer]: integer | nil }
+  if #waste > 0 then
+    local card = waste[#waste] --[[:! integer]]
     if can_go_foundation(state, card) then
       local r = M.rank(card)
       local safe = false
@@ -352,10 +399,14 @@ function M.auto_moves(state)
   end
 
   -- Check tableau tops
+  local tableau = state.tableau --: { [integer]: { [integer]: integer | nil } }
+  local face_up = state.face_up --: { [integer]: { [integer]: boolean | nil } }
   for col = 1, 7 do
-    local tlen = #state.tableau[col]
-    if tlen > 0 and state.face_up[col][tlen] then
-      local card = state.tableau[col][tlen]
+    local tcol = tableau[col] --: { [integer]: integer | nil }
+    local fcol = face_up[col] --: { [integer]: boolean | nil }
+    local tlen = #tcol
+    if tlen > 0 and fcol[tlen] then
+      local card = tcol[tlen] --[[:! integer]]
       if can_go_foundation(state, card) then
         local r = M.rank(card)
         local safe = false

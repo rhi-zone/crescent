@@ -86,7 +86,9 @@ local function parse_response(body)
 	local data = raw --[[:! anthropic_response]]
 
 	if data.error then
-		return nil, data.error.message or json.encode(data.error) or "anthropic error"
+		local encoded_err --: string | nil
+		encoded_err, _ = json.encode(data.error)
+		return nil, data.error.message or encoded_err or "anthropic error"
 	end
 
 	local text_parts = {}

@@ -66,7 +66,8 @@ else
 	local timespec = ffi.typeof("struct timespec")
 	--[[@type fun(interval: timespec, value: timespec): itimerspec]]
 	--[[@diagnostic disable-next-line: assign-type-mismatch]]
-	local itimerspec = ffi.typeof("struct itimerspec")
+	--: (cdata, cdata) -> cdata
+	local itimerspec = (ffi.typeof --[[: any]])("struct itimerspec") --[[:! (cdata, cdata) -> cdata]]
 	local rdbuf = ffi.new("char[8]")
 
 	local timespec0 = timespec(0, 0)
