@@ -297,7 +297,7 @@ local function strip_punct(s)
   local i = 1
   local n = len(s)
   while i <= n do
-    local c = byte(s, i)
+    local c = byte(s, i) --[[:! integer]]
     -- keep alphanumeric (a-z A-Z 0-9) and apostrophe inside a word
     if (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) then
       break
@@ -307,7 +307,7 @@ local function strip_punct(s)
   -- strip trailing punctuation
   local j = n
   while j >= i do
-    local c = byte(s, j)
+    local c = byte(s, j) --[[:! integer]]
     if (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) then
       break
     end
@@ -358,7 +358,7 @@ function Checker:check_text(text, opts)
       -- check for pure number
       local is_num = true
       for k = 1, len(word) do
-        local c = byte(word, k)
+        local c = byte(word, k) --[[:! integer]]
         if not (c >= 48 and c <= 57) then
           is_num = false
           break
@@ -367,7 +367,7 @@ function Checker:check_text(text, opts)
 
       if not is_num then
         -- ignore_capitalized: skip words whose first char is uppercase
-        local first = byte(word, 1)
+        local first = byte(word, 1) --[[:! integer]]
         local is_cap = first >= 65 and first <= 90
         if not (ignore_caps and is_cap) then
           if not Checker.check(self_, word) then

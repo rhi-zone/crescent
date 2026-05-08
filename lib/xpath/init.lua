@@ -89,7 +89,7 @@ local function tokenize(src)
       -- Re-match: names may contain colons (ns:local) but :: is tokenized separately
       name = src:match("^[%w_%-]+", pos)
       tokens[#tokens+1] = { type = T_NAME, value = name }
-      pos = pos + #name
+      pos = pos + #(name --[[:! string]])
 
     else
       return nil, "unexpected character '" .. c .. "' at position " .. pos
@@ -662,11 +662,14 @@ local function string_value(node)
   elseif node.type == "element" or node.type == "document" then
     -- concatenate all descendant text
     local parts = {}
-    local function collect(n)
+    local collect
+    --: ({ type: string, text?: string, children?: { [integer]: unknown, ... }, ... }) -> nil
+    collect = function(n)
       if n.type == "text" or n.type == "cdata" then
         parts[#parts+1] = n.text or ""
       elseif n.children then
-        for i = 1, #n.children do collect(n.children[i]) end
+        local ch = n.children --[[:! { [integer]: { type: string, text?: string, children?: { [integer]: unknown, ... }, ... }, ... }]]
+        for i = 1, #ch do collect(ch[i]) end
       end
     end
     collect(node)
@@ -680,41 +683,47 @@ end
 -- ---------------------------------------------------------------------------
 -- XPath value coercions
 -- ---------------------------------------------------------------------------
+--: (unknown) -> string
 local function to_string(v)
   if type(v) == "table" then
     -- node-set: string value of first node in doc order, or ""
-    if #v == 0 then return "" end
-    return string_value(v[1])
+    local vt = v --[[:! { [integer]: unknown, ... }]]
+    if #vt == 0 then return "" end
+    return string_value(vt[1] --[[:! { type: string, ... }]])
   elseif type(v) == "boolean" then
-    return v and "true" or "false"
+    local vb = v --[[:! boolean]]
+    return vb and "true" or "false"
   elseif type(v) == "number" then
-    if v ~= v then return "NaN" end
-    if v == math.huge then return "Infinity" end
-    if v == -math.huge then return "-Infinity" end
+    local vn = v --[[:! number]]
+    if vn ~= vn then return "NaN" end
+    if vn == math.huge then return "Infinity" end
+    if vn == -math.huge then return "-Infinity" end
     -- XPath number formatting: no trailing .0 for integers
-    if v == math.floor(v) and math.abs(v) < 1e15 then
-      return tostring(math.floor(v))
+    if vn == math.floor(vn) and math.abs(vn) < 1e15 then
+      return tostring(math.floor(vn))
     end
-    return tostring(v)
+    return tostring(vn)
   else
     return tostring(v or "")
   end
 end
 
+--: (unknown) -> number
 local function to_number(v)
-  if type(v) == "number" then return v end
-  if type(v) == "boolean" then return v and 1 or 0 end
+  if type(v) == "number" then return v --[[:! number]] end
+  if type(v) == "boolean" then return (v --[[:! boolean]]) and 1 or 0 end
   if type(v) == "table" then
     return tonumber(to_string(v)) or (0/0)
   end
   return tonumber(tostring(v)) or (0/0)
 end
 
+--: (unknown) -> boolean
 local function to_boolean(v)
-  if type(v) == "boolean" then return v end
-  if type(v) == "number" then return v ~= 0 and v == v end
-  if type(v) == "table" then return #v > 0 end
-  return v ~= nil and v ~= ""
+  if type(v) == "boolean" then return v --[[:! boolean]] end
+  if type(v) == "number" then local vn = v --[[:! number]]; return (vn ~= 0 and vn == vn) --[[:! boolean]] end
+  if type(v) == "table" then local vt = v --[[:! { [integer]: unknown, ... }]]; return #vt > 0 end
+  return (v ~= nil and v ~= "") --[[:! boolean]]
 end
 
 -- ---------------------------------------------------------------------------
@@ -896,31 +905,31 @@ local function eval_predicate(pred_node, nodes, ctx)
   return result
 end
 
+--: (AstNode, { node: { parent: unknown, ... }, position: integer, size: integer, order: unknown, ... }) -> { [integer]: { parent: unknown, ... }, ... }
 local function eval_path(ast, ctx)
-  local steps = ast.steps
-  local start_nodes
+  local steps = ast.steps --[[:! { [integer]: { axis: string, test: { kind: string, ... }, predicates: { [integer]: AstNode, ... } }, ... }]]
+  local current = {} --: { [integer]: { parent: unknown, ... }, ... }
 
   if ast.absolute then
     -- Start from document root
     local root = ctx.node
     while root.parent do root = root.parent end
-    start_nodes = { root }
+    current = { root }
   else
-    start_nodes = { ctx.node }
+    current = { ctx.node }
   end
 
-  local current = start_nodes
   for si = 1, #steps do
     local step = steps[si]
     local axis = step.axis
     local test = step.test
     local predicates = step.predicates
 
-    local next_nodes = {}
+    local next_nodes = {} --: { [integer]: { parent: unknown, ... }, ... }
     for ni = 1, #current do
-      local candidates = eval_step_axis(axis, current[ni])
+      local candidates = eval_step_axis(axis, current[ni]) --[[:! { [integer]: unknown, ... }]]
       for ci = 1, #candidates do
-        local c = candidates[ci]
+        local c = candidates[ci] --[[:! { parent: unknown, ... }]]
         if matches_node_test(c, test, axis) then
           next_nodes[#next_nodes+1] = c
         end
@@ -943,6 +952,7 @@ local function eval_path(ast, ctx)
 end
 
 -- XPath built-in functions
+--:: XPathFn = ({ [integer]: unknown, ... }, { node: unknown, position: integer, size: integer, order: unknown, ... }) -> unknown
 local FUNCTIONS = {}
 
 FUNCTIONS["count"] = function(args, ctx)
@@ -1012,11 +1022,9 @@ FUNCTIONS["string-length"] = function(args, ctx)
 end
 
 FUNCTIONS["normalize-space"] = function(args, ctx)
-  local s
-  if #args == 0 then s = string_value(ctx.node)
-  else s = to_string(eval_expr(args[1], ctx)) end
-  s = s:match("^%s*(.-)%s*$")
-  return s:gsub("%s+", " ")
+  local raw = (#args == 0) and string_value(ctx.node) or to_string(eval_expr(args[1], ctx)) --: string
+  local trimmed = raw:match("^%s*(.-)%s*$") --[[:! string]]
+  return trimmed:gsub("%s+", " ")
 end
 
 FUNCTIONS["translate"] = function(args, ctx)
@@ -1039,11 +1047,11 @@ end
 
 FUNCTIONS["substring"] = function(args, ctx)
   local s   = to_string(eval_expr(args[1], ctx))
-  local pos2 = math.floor(to_number(eval_expr(args[2], ctx)) + 0.5)
+  local pos2 = math.floor(to_number(eval_expr(args[2], ctx)) + 0.5) --[[:! integer]]
   local len_arg = args[3] and math.floor(to_number(eval_expr(args[3], ctx)) + 0.5)
   -- XPath 1-indexed
-  local start = pos2
-  local finish = len_arg and (start + len_arg - 1) or #s
+  local start = pos2 --: integer
+  local finish = (len_arg and (start + (len_arg --[[:! integer]]) - 1) or #s) --[[:! integer]]
   if start < 1 then start = 1 end
   return s:sub(start, finish)
 end
@@ -1085,7 +1093,7 @@ end
 FUNCTIONS["sum"] = function(args, ctx)
   local ns = eval_expr(args[1], ctx)
   if type(ns) ~= "table" then return to_number(ns) end
-  local total = 0
+  local total = 0 --: number
   for i = 1, #ns do total = total + to_number(string_value(ns[i])) end
   return total
 end
@@ -1114,27 +1122,27 @@ eval_expr = function(ast, ctx)
   elseif ast.kind == "union" then
     local left = eval_expr(ast.left, ctx)
     local right = eval_expr(ast.right, ctx)
-    local merged = {}
+    local merged = {} --: { [integer]: { parent: unknown, ... }, ... }
     if type(left) == "table" then for i=1,#left do merged[#merged+1]=left[i] end end
     if type(right) == "table" then for i=1,#right do merged[#merged+1]=right[i] end end
     if ctx.order then merged = sort_nodeset(merged, ctx.order) end
     return merged
   elseif ast.kind == "func" then
-    local fn = FUNCTIONS[ast.name]
+    local fn = FUNCTIONS[ast.name --[[:! string]]] --[[:! XPathFn | nil]]
     if not fn then
       -- return nil/error representation as empty string
       return ""
     end
-    return fn(ast.args, ctx)
+    return fn(ast.args --[[:! { [integer]: unknown, ... }]], ctx)
   elseif ast.kind == "filter" then
     local base = eval_expr(ast.filter, ctx)
     if type(base) ~= "table" then return base end
-    return eval_predicate(--[[:! table]] ast.predicate, base, ctx)
+    return eval_predicate(ast.predicate --[[:! AstNode]], base, ctx)
   elseif ast.kind == "filter_path" then
     local base = eval_expr(ast.filter, ctx)
     if type(base) ~= "table" then return {} end
     -- evaluate path steps relative to each node in base
-    local result = {}
+    local result = {} --: { [integer]: { parent: unknown, ... }, ... }
     for i = 1, #base do
       local sub_ctx = { node = base[i], position = i, size = #base, order = ctx.order }
       local step_ast = { kind = "path", steps = ast.steps, absolute = false }
@@ -1250,22 +1258,22 @@ end
 --- Return the string value of an XPath expression.
 --: ({ ... }, string) -> string
 function M.string(node, expr)
-  local result = M.eval(node, expr)
-  return to_string(--[[: any]] result)
+  local result, _ = M.eval(node, expr)
+  return to_string(result)
 end
 
 --- Return the numeric value of an XPath expression.
 --: ({ ... }, string) -> number
 function M.number(node, expr)
-  local result = M.eval(node, expr)
+  local result, _ = M.eval(node, expr)
   return to_number(result)
 end
 
 --- Return the boolean value of an XPath expression.
 --: ({ ... }, string) -> boolean
 function M.boolean(node, expr)
-  local result = M.eval(node, expr)
-  return to_boolean(--[[: any]] result)
+  local result, _ = M.eval(node, expr)
+  return to_boolean(result)
 end
 
 --- Compile an XPath expression for reuse.

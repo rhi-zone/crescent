@@ -34,6 +34,7 @@ local function circumcircle(ax, ay, bx, by, cx, cy)
 end
 
 -- Returns true if point (px,py) is inside the circumcircle of triangle with given cc.
+--: (number, number, number, number, number) -> boolean
 local function in_circumcircle(px, py, ccx, ccy, r2)
   return dist2(px, py, ccx, ccy) < r2 - EPSILON
 end
@@ -67,10 +68,11 @@ end
 
 -- Sutherland-Hodgman clip polygon against a half-plane defined by edge (ax,ay)->(bx,by)
 -- (keep points on left side / CCW interior).
+--: ({ [integer]: { x: number, y: number }, ... }, number, number, number, number) -> { [integer]: { x: number, y: number }, ... }
 local function clip_poly_half(verts, ax, ay, bx, by)
   local n = #verts
   if n == 0 then return verts end
-  local out = {}
+  local out = {} --: { [integer]: { x: number, y: number }, ... }
   for i = 1, n do
     local s = verts[i]
     local e = verts[(i % n) + 1]
@@ -94,6 +96,7 @@ end
 -- right:  (x1,y0)->(x1,y1)  keeps x <= x1
 -- bottom: (x0,y0)->(x1,y0)  keeps y >= y0
 -- top:    (x1,y1)->(x0,y1)  keeps y <= y1
+--: ({ [integer]: { x: number, y: number }, ... }, number, number, number, number) -> { [integer]: { x: number, y: number }, ... }
 local function clip_poly_to_bounds(verts, bx, by, bw, bh)
   local x0, y0, x1, y1 = bx, by, bx + bw, by + bh
   verts = clip_poly_half(verts, x0, y1, x0, y0)  -- left
@@ -104,14 +107,19 @@ local function clip_poly_to_bounds(verts, bx, by, bw, bh)
 end
 
 -- Sort vertices CCW around their centroid.
+--: ({ [integer]: { x: number, y: number }, ... }) -> { [integer]: { x: number, y: number }, ... }
 local function sort_ccw(verts)
   if #verts < 3 then return verts end
-  local cx, cy = 0, 0
+  local cx = 0 --: number
+  local cy = 0 --: number
   for _, v in ipairs(verts) do cx = cx + v.x; cy = cy + v.y end
   cx = cx / #verts; cy = cy / #verts
+  local ccx = cx
+  local ccy = cy
+  --: ({ x: number, y: number }, { x: number, y: number }) -> boolean
   table.sort(verts, function(a, b)
-    local aa = math.atan2(a.y - cy, a.x - cx)
-    local ab = math.atan2(b.y - cy, b.x - cx)
+    local aa = math.atan2(a.y - ccy, a.x - ccx)
+    local ab = math.atan2(b.y - ccy, b.x - ccx)
     return aa < ab
   end)
   return verts
@@ -119,7 +127,7 @@ end
 
 -- Deduplicate vertices (within epsilon).
 local function dedup_verts(verts)
-  local out = {}
+  local out = {} --: { [integer]: { x: number, y: number }, ... }
   for _, v in ipairs(verts) do
     local dup = false
     for _, u in ipairs(out) do
@@ -159,6 +167,8 @@ end
 -- Triangle representation: {a, b, c} = 1-based indices into a vertex array.
 -- We also cache circumcircle.
 
+--:: Tri = { a: integer, b: integer, c: integer, ccx: number | nil, ccy: number | nil, r2: number | nil }
+
 local function make_tri(a, b, c, verts)
   local ccx, ccy, r2 = circumcircle(
     verts[a].x, verts[a].y,
@@ -188,11 +198,11 @@ function M.delaunay(sites)
 
   -- Build vertex array: super-triangle verts first, then sites (offset = 3)
   local super = make_super_triangle(sites)
-  local all_verts = {super[1], super[2], super[3]}
+  local all_verts = {super[1], super[2], super[3]} --: { [integer]: { x: number, y: number }, ... }
   for _, s in ipairs(sites) do all_verts[#all_verts + 1] = s end
 
   -- Start with the super-triangle
-  local triangles = {make_tri(1, 2, 3, all_verts)}
+  local triangles = {make_tri(1, 2, 3, all_verts)} --: { [integer]: Tri, ... }
 
   for pi = 4, #all_verts do
     local px, py = all_verts[pi].x, all_verts[pi].y
@@ -200,7 +210,7 @@ function M.delaunay(sites)
     -- Find all triangles whose circumcircle contains the new point
     local bad = {}
     for i, tri in ipairs(triangles) do
-      if tri.ccx and in_circumcircle(px, py, tri.ccx, tri.ccy, tri.r2) then
+      if tri.ccx and in_circumcircle(px, py, tri.ccx --[[:! number]], tri.ccy --[[:! number]], tri.r2 --[[:! number]]) then
         bad[i] = true
       end
     end
@@ -232,7 +242,7 @@ function M.delaunay(sites)
     end
 
     -- Remove bad triangles
-    local new_triangles = {}
+    local new_triangles = {} --: { [integer]: Tri, ... }
     for i, tri in ipairs(triangles) do
       if not bad[i] then new_triangles[#new_triangles + 1] = tri end
     end
@@ -246,7 +256,7 @@ function M.delaunay(sites)
   end
 
   -- Remove triangles touching super-triangle vertices (indices 1,2,3)
-  local final = {}
+  local final = {} --: { [integer]: Tri, ... }
   for _, tri in ipairs(triangles) do
     if not touches_super(tri) then
       final[#final + 1] = tri
@@ -287,6 +297,10 @@ end
 -- The Voronoi edge between two neighboring sites connects the circumcenters
 -- of the two triangles sharing the Delaunay edge.
 
+--:: VoronoiCell = { site: { x: number, y: number, ... }, vertices: { [integer]: { x: number, y: number }, ... }, neighbors: { [integer]: integer, ... } }
+--:: VoronoiDiagram = { cells: { [integer]: VoronoiCell, ... } }
+
+--: ({ [integer]: { x: number, y: number }, ... }, { x?: number, y?: number, w?: number, h?: number, width?: number, height?: number, ... }) -> VoronoiDiagram
 function M.compute(sites, bounds)
   if not sites or #sites == 0 then
     return {cells = {}}
@@ -337,10 +351,10 @@ function M.compute(sites, bounds)
     local full = {{x=bx,y=by},{x=bx+bw,y=by},{x=bx+bw,y=by+bh},{x=bx,y=by+bh}}
     -- Cell 1: side of s1 relative to midpoint line p2->p1
     local c1 = clip_poly_half(full, p2.x, p2.y, p1.x, p1.y)
-    c1 = clip_poly_to_bounds(c1, bx, --[[:! number]] by, bw, bh)
+    c1 = clip_poly_to_bounds(c1, bx, by --[[:! number]], bw, bh)
     -- Cell 2: opposite side
     local c2 = clip_poly_half(full, p1.x, p1.y, p2.x, p2.y)
-    c2 = clip_poly_to_bounds(c2, bx, --[[:! number]] by, bw, bh)
+    c2 = clip_poly_to_bounds(c2, bx, by --[[:! number]], bw, bh)
     return {cells = {
       {site = s1, vertices = sort_ccw(dedup_verts(c1)), neighbors = {2}},
       {site = s2, vertices = sort_ccw(dedup_verts(c2)), neighbors = {1}},
@@ -351,16 +365,16 @@ function M.compute(sites, bounds)
 
   -- Build extended vertex set for triangulation (same as delaunay but keep cc info)
   local super = make_super_triangle(sites)
-  local all_verts = {super[1], super[2], super[3]}
+  local all_verts = {super[1], super[2], super[3]} --: { [integer]: { x: number, y: number }, ... }
   for _, s in ipairs(sites) do all_verts[#all_verts + 1] = s end
 
-  local triangles = {make_tri(1, 2, 3, all_verts)}
+  local triangles = {make_tri(1, 2, 3, all_verts)} --: { [integer]: Tri, ... }
 
   for pi = 4, #all_verts do
     local px, py = all_verts[pi].x, all_verts[pi].y
     local bad = {}
     for i, tri in ipairs(triangles) do
-      if tri.ccx and in_circumcircle(px, py, tri.ccx, tri.ccy, tri.r2) then
+      if tri.ccx and in_circumcircle(px, py, tri.ccx --[[:! number]], tri.ccy --[[:! number]], tri.r2 --[[:! number]]) then
         bad[i] = true
       end
     end
@@ -385,7 +399,7 @@ function M.compute(sites, bounds)
         end
       end
     end
-    local new_triangles = {}
+    local new_triangles = {} --: { [integer]: Tri, ... }
     for i, tri in ipairs(triangles) do
       if not bad[i] then new_triangles[#new_triangles + 1] = tri end
     end
@@ -400,8 +414,8 @@ function M.compute(sites, bounds)
   -- Also track neighbors (other sites sharing a Delaunay edge).
 
   local n = #sites
-  local cell_cc = {}    -- cell_cc[site_idx] = list of {x,y} circumcenters
-  local neighbors = {}  -- neighbors[site_idx] = set of neighbor site indices
+  local cell_cc = {} --: { [integer]: { [integer]: { x: number, y: number }, ... }, ... }
+  local neighbors = {} --: { [integer]: { [integer]: boolean, ... }, ... }
   for i = 1, n do
     cell_cc[i] = {}
     neighbors[i] = {}
@@ -413,7 +427,7 @@ function M.compute(sites, bounds)
       local va = tri.a <= 3 and 0 or (tri.a - 3)
       local vb = tri.b <= 3 and 0 or (tri.b - 3)
       local vc = tri.c <= 3 and 0 or (tri.c - 3)
-      local cc = {x = tri.ccx, y = tri.ccy}
+      local cc = {x = tri.ccx --[[:! number]], y = tri.ccy --[[:! number]]}
       if va > 0 then cell_cc[va][#cell_cc[va] + 1] = cc end
       if vb > 0 then cell_cc[vb][#cell_cc[vb] + 1] = cc end
       if vc > 0 then cell_cc[vc][#cell_cc[vc] + 1] = cc end
@@ -454,7 +468,7 @@ function M.compute(sites, bounds)
     -- Use half-plane intersection approach for all cells to be robust:
     -- cell i = intersection of half-planes {p : dist(p, site_i) <= dist(p, site_j)} for each neighbor j,
     -- clipped to bounding box.
-    local poly = {
+    local poly = { --: { [integer]: { x: number, y: number }, ... }
       {x = bx,      y = by},
       {x = bx + bw, y = by},
       {x = bx + bw, y = by + bh},
@@ -497,7 +511,7 @@ function M.compute(sites, bounds)
     end
 
     -- Also clip to bounding box
-    poly = clip_poly_to_bounds(poly, bx, --[[:! number]] by, bw, bh)
+    poly = clip_poly_to_bounds(poly, bx, by --[[:! number]], bw, bh)
     poly = dedup_verts(poly)
     poly = sort_ccw(poly)
 
