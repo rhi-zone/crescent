@@ -610,8 +610,8 @@ function M.make_array(ctx, elem_tid)
 end
 
 -- Widen literal type to base type.
---: (Ctx, integer) -> integer
-function M.widen(ctx, tid)
+--: (Ctx, integer, { [integer]: boolean, ... } | nil) -> integer
+function M.widen(ctx, tid, seen)
     tid = M.find(ctx, tid)
     local t = ctx.types:get(tid)
     if t.tag == TAG_LITERAL then
@@ -627,10 +627,14 @@ function M.widen(ctx, tid)
         if t.data[2] == LIT_STRING  then return ctx.T_STRING end
     end
     if t.tag == TAG_UNION then
+        if seen and seen[tid] then return tid end
+        seen = seen or {}
+        seen[tid] = true
         local members = {}
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            members[#members + 1] = M.widen(ctx, ctx.lists:get(i))
+            members[#members + 1] = M.widen(ctx, ctx.lists:get(i), seen)
         end
+        seen[tid] = nil
         return M.make_union(ctx, members)
     end
     return tid
@@ -1009,10 +1013,13 @@ function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit
 end
 
 -- Display a type as a human-readable string (cold path).
---: (Ctx, unknown, unknown) -> string
-function M.display(ctx, tid, seen)
-    if type(tid) ~= "number" then return "?" end
-    tid = M.find(ctx, math.floor(tid))
+-- The `seen` table is keyed by tid (truthy if currently being displayed) and
+-- by integer 0 for the recursion depth (bailout at 64 levels). Depth bailout
+-- is required because structurally cyclic types (recursive aliases that
+-- resolve to fresh tids per visit) cannot be caught by a tid-keyed seen set
+-- alone.
+--: (Ctx, integer, { [integer]: any, ... }) -> string
+local function display_inner(ctx, tid, seen)
     local t = ctx.types:get(tid)
     local tag = t.tag
 
@@ -1056,6 +1063,9 @@ function M.display(ctx, tid, seen)
     end
 
     if tag == TAG_FUNCTION then
+        if seen[tid] then return "(...)->..." end
+        seen[tid] = true
+        seen[0] = (seen[0] or 0) + 1
         local parts = {}
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
             parts[#parts + 1] = M.display(ctx, ctx.lists:get(i), seen)
@@ -1076,13 +1086,15 @@ function M.display(ctx, tid, seen)
             end
             ret = "(" .. table.concat(rs, ", ") .. ")"
         end
+        seen[tid] = nil
+        seen[0] = seen[0] - 1
         return "(" .. table.concat(parts, ", ") .. ") -> " .. ret
     end
 
     if tag == TAG_TABLE then
-        seen = seen or {}
         if seen[tid] then return "{...}" end
         seen[tid] = true
+        seen[0] = (seen[0] or 0) + 1
         local parts = {} --: { [integer]: string, ... }
         -- fields
         local field_names = {} --: { [integer]: { name: string, fe: FieldEntry }, ... }
@@ -1126,11 +1138,15 @@ function M.display(ctx, tid, seen)
             parts[#parts + 1] = "#" .. nf.name .. opt .. ": " .. M.display(ctx, nf.fe.type_id, seen)
         end
         seen[tid] = nil
+        seen[0] = seen[0] - 1
         if #parts == 0 then return "{}" end
         return "{ " .. table.concat(parts, ", ") .. " }"
     end
 
     if tag == TAG_UNION then
+        if seen[tid] then return "..." end
+        seen[tid] = true
+        seen[0] = (seen[0] or 0) + 1
         local parts = {}
         --: { [string]: boolean, ... }
         local dedup = {}
@@ -1138,27 +1154,45 @@ function M.display(ctx, tid, seen)
             local s = M.display(ctx, ctx.lists:get(i), seen)
             if not dedup[s] then dedup[s] = true; parts[#parts + 1] = s end
         end
+        seen[tid] = nil
+        seen[0] = seen[0] - 1
         return table.concat(parts, " | ")
     end
 
     if tag == TAG_INTERSECTION then
+        if seen[tid] then return "..." end
+        seen[tid] = true
+        seen[0] = (seen[0] or 0) + 1
         local parts = {}
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
             parts[#parts + 1] = M.display(ctx, ctx.lists:get(i), seen)
         end
+        seen[tid] = nil
+        seen[0] = seen[0] - 1
         return table.concat(parts, " & ")
     end
 
     if tag == TAG_TUPLE then
+        if seen[tid] then return "(...)" end
+        seen[tid] = true
+        seen[0] = (seen[0] or 0) + 1
         local parts = {}
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
             parts[#parts + 1] = M.display(ctx, ctx.lists:get(i), seen)
         end
+        seen[tid] = nil
+        seen[0] = seen[0] - 1
         return "(" .. table.concat(parts, ", ") .. ")"
     end
 
     if tag == TAG_SPREAD then
-        return "..." .. M.display(ctx, t.data[0], seen)
+        if seen[tid] then return "..." end
+        seen[tid] = true
+        seen[0] = (seen[0] or 0) + 1
+        local r = "..." .. M.display(ctx, t.data[0], seen)
+        seen[tid] = nil
+        seen[0] = seen[0] - 1
+        return r
     end
 
     if tag == TAG_NOMINAL then
@@ -1203,6 +1237,33 @@ function M.display(ctx, tid, seen)
     end
 
     return "?"
+end
+
+-- Display a type as a human-readable string (cold path).
+-- The `seen` table tracks (1) tids currently in progress (cycle guard) keyed
+-- by tid → true; (2) recursion depth at integer key 0 (bailout at 64); and
+-- (3) memoized display results at negative-keyed entries (-tid-1 → string)
+-- to avoid exponential re-traversal of shared subterms produced by recursive
+-- type aliases (e.g. `Term = string | { args: { [integer]: Term } }`).
+--: (Ctx, unknown, unknown) -> string
+function M.display(ctx, tid, seen)
+    if type(tid) ~= "number" then return "?" end
+    --: integer
+    local tid_i = M.find(ctx, math.floor(tid))
+    --: { [integer]: any, ... }
+    local s = seen or {}
+    if (s[0] or 0) > 64 then return "..." end
+    -- Memoization: keyed by negative tid to avoid colliding with the cycle
+    -- guard (positive tid → true) and the depth counter (key 0).
+    local cache_key = -tid_i - 1
+    local cached = s[cache_key]
+    if type(cached) == "string" then return cached end
+    -- If the tid is currently in-progress (cycle), don't memoize — the
+    -- early-return from display_inner is contextual to the traversal.
+    local in_progress = s[tid_i]
+    local result = display_inner(ctx, tid_i, s)
+    if not in_progress then s[cache_key] = result end
+    return result
 end
 
 -- Display a type, truncating to max_len characters with "…" appended.
