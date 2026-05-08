@@ -10,6 +10,9 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: OmNode = { key: any, value: any, prev: OmNode | nil, next: OmNode | nil }
+--:: OmMap = { _map: { [any]: OmNode }, _head: OmNode | nil, _tail: OmNode | nil, _len: integer, ... }
+
 -- Node fields: key, value, prev, next
 
 local om_mt = {}
@@ -42,7 +45,10 @@ end
 
 --- Create a new empty ordered map.
 function M.new()
-  return setmetatable({ _map = {}, _head = nil, _tail = nil, _len = 0 }, om_mt)
+  local head = nil --: OmNode | nil
+  local tail = nil --: OmNode | nil
+  local len = 0 --: integer
+  return setmetatable({ _map = {}, _head = head, _tail = tail, _len = len }, om_mt)
 end
 
 --- Construct from a plain table, with optional explicit key order.
@@ -70,6 +76,7 @@ function M.from_entries(arr)
 end
 
 --- Insert or update a key. Updates keep the existing position.
+--: (self: OmMap, k: any, v: any) -> nil
 function om_mt:set(k, v)
   local node = self._map[k]
   if node then
@@ -94,6 +101,7 @@ function om_mt:has(k)
 end
 
 --- Delete a key. Returns true if deleted, false if not present.
+--: (self: OmMap, k: any) -> boolean
 function om_mt:delete(k)
   local node = self._map[k]
   if not node then return false end
@@ -168,6 +176,7 @@ end
 
 --- Return the key and value at 1-based index i (negative = from end).
 -- Returns nil, nil if out of range.
+--: (self: OmMap, i: integer) -> (any, any)
 function om_mt:at(i)
   local len = self._len
   if i < 0 then i = len + i + 1 end
@@ -202,6 +211,7 @@ function om_mt:move_to_front(k)
 end
 
 --- Return a new ordered_map with entries from index i to j (1-based).
+--: (self: OmMap, i: integer, j: integer) -> OmMap
 function om_mt:slice(i, j)
   local len = self._len
   if i < 0 then i = len + i + 1 end
@@ -220,6 +230,7 @@ function om_mt:slice(i, j)
 end
 
 --- Return an independent copy with the same insertion order.
+--: (self: OmMap) -> OmMap
 function om_mt:copy()
   local result = M.new()
   local node = self._head
@@ -254,6 +265,7 @@ function om_mt:map(fn)
 end
 
 --- Return a new ordered_map keeping only entries where pred(k, v) is true.
+--: (self: OmMap, pred: (any, any) -> boolean) -> OmMap
 function om_mt:filter(pred)
   local result = M.new()
   local node = self._head
