@@ -482,7 +482,7 @@ local function extract_pairs_kv(ctx, T_tid)
         if #val_members == 0 then
             V_tid = ctx.T_UNKNOWN
         elseif #val_members == 1 then
-            V_tid = val_members[1]
+            V_tid = val_members[1] --[[:! integer]]
         else
             V_tid = types_mod.make_union(ctx, val_members)
         end
@@ -892,6 +892,7 @@ M.build_iter_triple = build_iter_triple
 -- arg_ids:   Lua array of resolved type_ids (the type arguments)
 -- stable_id: fnv31(filename:ann_tid) stored in TAG_TYPE_CALL.data[3];
 --            0 means not set (legacy cri or non-deferred path without filename)
+--: (Ctx, integer, { [integer]: integer, ... }, integer) -> integer
 function M.expand(ctx, name_id, arg_ids, stable_id)
     local name = intern_mod.get(ctx.pool, name_id) or ""
 

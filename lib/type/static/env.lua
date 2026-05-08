@@ -979,7 +979,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                     local intrinsic_mod = require("lib.type.static.intrinsic")
                     -- t.data[3]: stable call-site hash stored by constrain.lua when
                     -- creating this deferred TAG_TYPE_CALL. 0 = legacy/not set.
-                    return intrinsic_mod.expand(ctx, ct.data[0], new_args, t.data[3])
+                    return intrinsic_mod.expand(ctx, ct.data[0], new_args, t.data[3]) --[[:! integer]]
                 end
             end
         end
@@ -1160,7 +1160,7 @@ function M.resolve_named_type(ctx, scope, name_id, arg_ids)
             local bound = alias.resolved_bounds[i]
             if bound ~= nil then
                 -- Use mapping so default-filled args are also checked (arg_ids may be nil).
-                local arg = mapping[alias.params[i]]
+                local arg = mapping[alias.params[i]] --[[:! integer]]
                 -- Use try_unify to check structural assignability (read-only, no side effects).
                 -- Widen literal arg types first so `{ x: 1 }` satisfies `{ x: number }`.
                 local widened_arg = types_mod.widen(ctx, arg)

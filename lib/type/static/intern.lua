@@ -12,7 +12,7 @@ local tobit = bit.tobit
 
 local defs = require("lib.type.static.defs")
 
-pcall(ffi.cdef, "int memcmp(const void *s1, const void *s2, size_t n);")
+ffi.cdef("int memcmp(const void *s1, const void *s2, size_t n);")
 
 local uint8_ptr_t = ffi.typeof("const uint8_t*")
 
@@ -84,7 +84,7 @@ function M.new()
     for i = 1, #defs.keywords do kw_parts[i] = defs.keywords[i] end
     local kw_str = table.concat(kw_parts)
     pool._anchors[0] = kw_str
-    local kw_ptr = ffi.cast(uint8_ptr_t, kw_str)
+    local kw_ptr = ffi.cast(uint8_ptr_t, kw_str) --[[:! cdata]]
     pool.bufs[0] = kw_ptr
     pool.buf_count = 1
 
@@ -96,7 +96,7 @@ function M.new()
         local kw = defs.keywords[i]
         local len = #kw
         local id = pool.next_id
-        local h = fnv1a(kw_ptr + pos, len)
+        local h = fnv1a(kw_ptr --[[: any]] + pos, len)
         local idx = band(h, mask)
         while entries[idx] do idx = band(idx + 1, mask) end
         local entry = { h, 0, pos, len, id }
@@ -126,7 +126,7 @@ end
 -- ptr: const uint8_t* to the bytes
 -- len: byte count
 -- buf_id, offset: where this string lives (for storage in the entry)
---: (StringPool, unknown, integer, integer, integer) -> integer
+--: (StringPool, cdata, integer, integer, integer) -> integer
 function M.intern_raw(pool, ptr, len, buf_id, offset)
     local h = fnv1a(ptr, len)
     local mask = pool.ht_mask

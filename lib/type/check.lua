@@ -58,7 +58,7 @@ mod.checkers.array      = function(s, x)
 end
 mod.checkers.dictionary = function(s, x)
 	if type(x) ~= "table" then return false end
-	local s_key, s_value = s.key, s.value
+	local s_key, s_value = s.key, s.value --[[:! Schema<unknown>]]
 	for k, v in pairs(x) do
 		if not mod.check(s_key, k) or not mod.check(s_value, v) then return false end
 	end
@@ -102,7 +102,7 @@ end
 --   "address.city: expected string, got nil"
 -- No type coercion is performed.
 
-local validators = {}
+local validators = {} --[[:! { [string]: Validator }]]
 
 --: (Schema<unknown>, unknown, string | nil) -> (unknown, string | nil)
 local function do_validate(schema, x, path)
@@ -187,7 +187,7 @@ validators.dictionary = function(s, x, path)
 	if type(x) ~= "table" then
 		return nil, errat(path, "expected table, got " .. type(x))
 	end
-	local s_key, s_value = s.key, s.value
+	local s_key, s_value = s.key, s.value --[[:! Schema<unknown>]]
 	for k, v in pairs(x) do
 		local _, kerr = do_validate(s_key, k, (path or "") .. "[key " .. tostring(k) .. "]")
 		if kerr then return nil, kerr end
@@ -211,7 +211,7 @@ validators.all_of     = function(s, x, path)
 	return x
 end
 
---: <T>(Schema<T>, unknown) -> (T | nil, string | nil)
+--: (Schema<unknown>, unknown) -> (unknown, string | nil)
 mod.validate = function(schema, x)
 	return do_validate(schema, x, nil)
 end
@@ -228,7 +228,7 @@ end
 -- Composite types (struct, array, tuple, dictionary) are recursively coerced
 -- and a fresh copy is always returned so callers own the result.
 
-local coercers = {}
+local coercers = {} --[[:! { [string]: Validator }]]
 
 --: (Schema<unknown>, unknown, string | nil) -> (unknown, string | nil)
 local function do_coerce(schema, x, path)
@@ -335,7 +335,7 @@ coercers.dictionary = function(s, x, path)
 		return nil, errat(path, "expected table, got " .. type(x))
 	end
 	local out = {}
-	local s_key, s_value = s.key, s.value
+	local s_key, s_value = s.key, s.value --[[:! Schema<unknown>]]
 	for k, v in pairs(x) do
 		local ck, kerr = do_coerce(s_key, k, (path or "") .. "[key " .. tostring(k) .. "]")
 		if kerr then return nil, kerr end
@@ -363,7 +363,7 @@ coercers.all_of     = function(s, x, path)
 	return cur
 end
 
---: <T>(Schema<T>, unknown) -> (T | nil, string | nil)
+--: (Schema<unknown>, unknown) -> (unknown, string | nil)
 mod.coerce = function(schema, x)
 	return do_coerce(schema, x, nil)
 end

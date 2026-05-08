@@ -394,8 +394,8 @@ function M.parse_annotations(annotations, pool, filename)
                 return id
             end
             -- Parse items: support named params (x: T) alongside bare types (T)
-            local items = {}
-            local item_names = {}
+            local items = {} --: { [integer]: integer, ... }
+            local item_names = {} --: { [integer]: integer, ... }
             local has_param_names = false
             local function parse_one_param()
                 local save_pos = s.pos
@@ -426,7 +426,7 @@ function M.parse_annotations(annotations, pool, filename)
             if s.pos + 1 <= s.len and sub(s.src, s.pos, s.pos + 1) == "->" then
                 s.pos = s.pos + 2
                 -- Parse return type(s)
-                local returns = {}
+                local returns = {} --: { [integer]: integer, ... }
                 skip_ws(s)
                 if s.pos + 2 <= s.len and sub(s.src, s.pos, s.pos + 2) == "..." then
                     -- -> ...(T): explicit multi-return spread
@@ -557,8 +557,8 @@ function M.parse_annotations(annotations, pool, filename)
                         if inner_t.tag ~= defs.TAG_CAPTURE then
                             -- Normal vararg: ...T where T is not a capture
                             vararg_ann_id = last_t.data[0]
-                            items[#items] = nil
-                            item_names[#item_names] = nil
+                            items[#items] = nil --[[: any]]
+                            item_names[#item_names] = nil --[[: any]]
                         end
                         -- else: TAG_SPREAD(TAG_CAPTURE) = rest-capture param; leave in items list
                     end
@@ -604,9 +604,9 @@ function M.parse_annotations(annotations, pool, filename)
         -- Table type: { ... }
         if b == byte("{") then
             advance(s)  -- skip '{'
-            local flds = {}
+            local flds = {} --: { [integer]: integer, ... }
             local indexers = {}
-            local metas = {}
+            local metas = {} --: { [integer]: integer, ... }
             local row_var_ann_id = -1  -- set if bare ... seen (open table)
             if peek(s) ~= byte("}") then
                 while true do
@@ -747,7 +747,7 @@ function M.parse_annotations(annotations, pool, filename)
                             local ftype = parse_type(s)
                             local fi = fields:alloc()
                             local fe = fields:get(fi)
-                            fe.name_id = intern_mod.intern(pool, name)
+                            fe.name_id = intern_mod.intern(pool, name --[[:! string]])
                             fe.type_id = ftype
                             fe.flags = field_flags_val
                             flds[#flds + 1] = fi

@@ -583,7 +583,7 @@ local function propagate_multi_ret_narrowing(ctx, name_id, narrowed_tid, is_trut
             return truthy == is_truthy
         end)
     if surviving == nil then return end
-    local surviving_arms = surviving
+    local surviving_arms = surviving --[[: { [integer]: integer, ... }]]
     if #surviving_arms == 0 then return end
     -- Re-derive ALL correlated bindings (including name_id itself) from surviving arms.
     -- This overrides apply_narrowing's result for the primary binding when it cannot

@@ -96,6 +96,7 @@ end
 
 -- Normalize a raw manifest value to an entry table.
 -- Supports v1 bare-string format (backward compat) and v2 table format.
+--: (unknown) -> { cri_hash: string, deps: { [string]: string } } | nil
 local function normalize_entry(v)
     if type(v) == "string" then
         return { cri_hash = v, deps = {} }

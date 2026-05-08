@@ -137,7 +137,7 @@ end
 -- ---------------------------------------------------------------------------
 -- load(bytes, ctx) → ok, exports_or_error
 -- ---------------------------------------------------------------------------
---: (bytes: string, ctx: any) -> (boolean, any)
+--: (bytes: string, ctx: any) -> (false, string) | (true, unknown, unknown, unknown, unknown)
 function M.load(bytes, ctx)
     if #bytes < 68 then
         return false, "truncated .cri file"

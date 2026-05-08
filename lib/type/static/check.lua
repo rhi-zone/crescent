@@ -17,6 +17,7 @@ local M = {}
 -- ---------------------------------------------------------------------------
 -- v3 inference core (constraint generation + solving)
 -- ---------------------------------------------------------------------------
+--: (string, string, any, any, any, any) -> (ErrCtx, Ctx | nil)
 local function run_v3(source, filename, parent_scope, pool, cri_loader, opts)
     local ctx, constraints = constrain_mod.generate(source, filename, parent_scope, pool, cri_loader, opts)
     solve_mod.solve(ctx, constraints)
@@ -73,6 +74,7 @@ end
 -- ---------------------------------------------------------------------------
 -- Returns the type_id of the module's first return value (what `require()` gives).
 -- Returns ctx.T_ANY if the module has no return statement.
+--: (Ctx) -> integer
 local function extract_export_tid(ctx)
     local rets = ctx.module_return_tids
     if rets and #rets > 0 and rets[1] and #rets[1] > 0 then
@@ -84,6 +86,7 @@ end
 -- Extract file-level type aliases from ctx.scope for CRI serialization.
 -- Returns an array of { name, body, params, nominal, resolved_bounds }.
 -- Only collects aliases from the file's own scope (not prelude/parent).
+--: (Ctx) -> { [integer]: { name: string, body: integer, params: { [integer]: string, ... } | nil, nominal: boolean, resolved_bounds: { [integer]: integer, ... } | nil }, ... }
 local function extract_type_aliases(ctx)
     local result = {}
     local scope = ctx.scope
@@ -130,9 +133,11 @@ end
 -- Translates a Lua module name ("a.b.c") to a relative path ("a/b/c.lua").
 -- Returns the path string (not guaranteed to exist).
 -- ---------------------------------------------------------------------------
+--: (string) -> string
 local function resolve_module_path(mod_name)
     -- Replace "." with "/" and append ".lua"
-    local path = mod_name:gsub("%.", "/") .. ".lua"
+    local rel, _ = mod_name:gsub("%.", "/")
+    local path = rel .. ".lua"
     return path
 end
 
@@ -140,6 +145,7 @@ end
 -- if it exists on disk, otherwise nil.
 -- Convention: lib/foo/init.lua  → lib/foo/init_types.lua (preferred) or lib/foo/init.d.lua
 --             lib/foo.lua       → lib/foo_types.lua (preferred) or lib/foo.d.lua
+--: (string) -> string | nil
 local function find_decl_path(src_path)
     if src_path:sub(-4) ~= ".lua" then return nil end
     local base = src_path:sub(1, -5)
@@ -175,7 +181,7 @@ end
 -- Shares the session pool across calls.
 -- If the disk cache is enabled, attempts a cache hit before checking.
 -- Records the file's export_tid in the session cache for require() resolution.
---: (string, Scope | nil, InternPool | nil) -> (ErrCtx, Ctx | nil)
+--: (string, Scope | nil, InternPool | nil, { no_disk_cache: boolean | nil, globals_files: { [integer]: string, ... } | nil, ... } | nil) -> (ErrCtx, Ctx | nil)
 function M.check_file(filename, parent_scope, explicit_pool, opts)
     -- Normalise path (basic: strip leading "./" only)
     if filename:sub(1, 2) == "./" then filename = filename:sub(3) end
@@ -223,6 +229,7 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
     -- Build a cri_loader for require() type resolution.
     -- Recursively checks dependencies and caches their export types.
     -- Also records the source hash of each resolved dep into dep_hashes.
+    --: (Ctx, string) -> (integer | nil, any)
     local function cri_loader(ctx, mod_name)
         local dep_path = resolve_module_path(mod_name)
         -- Try init.lua if the direct path doesn't exist:
@@ -257,7 +264,11 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
         local function load_and_tag(cri_bytes, source_file)
             local before = ctx.types.len
             local ok, exports, aliases = cri_read.load(cri_bytes, ctx)
-            if ok and exports["__ret"] then
+            -- cri_read.load returns (false,string)|(true,unknown,unknown,...);
+            -- force-cast exports/aliases to usable types for indexing and forwarding.
+            local exp = exports --[[:! { ["__ret"]: integer | nil, ... }]]
+            local ali = aliases --[[:! { [integer]: unknown, ... } | nil]]
+            if ok and exp["__ret"] then
                 -- Mark all type IDs created by this load as originating from source_file.
                 if ctx.type_origins then
                     for i = before, ctx.types.len - 1 do
@@ -282,9 +293,10 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
 
         -- Check the dependency (may recursively resolve its own require()s).
         -- Deps use the disk cache (no_disk_cache not set); only input files skip it.
+        --: { no_disk_cache: boolean | nil, globals_files: { [integer]: string, ... } | nil, ... } | nil
         local dep_opts = opts
         if opts and opts.no_disk_cache then
-            dep_opts = {}
+            dep_opts = {} --[[:! { no_disk_cache: boolean | nil, globals_files: { [integer]: string, ... } | nil, ... }]]
             for k, v in pairs(opts) do dep_opts[k] = v end
             dep_opts.no_disk_cache = nil
         end
@@ -321,6 +333,10 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
             err_ctx, ctx = run_v3("", filename, parent_scope, _pool, cri_loader, opts)
             local ok, exports, _aliases, cached_errors, cached_warnings =
                 cri_read.load(cached_bytes or "", ctx)
+            -- cri_read.load returns (false,string)|(true,unknown*4); cast to usable types.
+            exports         = exports         --[[: any]]
+            cached_errors   = cached_errors   --[[:! { [integer]: DiagEntry, ... } | nil]]
+            cached_warnings = cached_warnings --[[:! { [integer]: DiagEntry, ... } | nil]]
             if ok and exports["__ret"] then
                 local export_tid = exports["__ret"]
                 -- Restore diagnostics from cache so callers see errors/warnings
@@ -414,7 +430,7 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
     _checking[filename] = nil
     _session[filename] = {
         err_ctx = err_ctx, ctx = ctx,
-        export_tid = export_tid, cri_bytes = cri_bytes_stored
+        export_tid = export_tid, cri_bytes = cri_bytes_stored --[[:! string | nil]]
     }
     return err_ctx, ctx
 end
@@ -434,6 +450,7 @@ function M.check_string_with_deps(source, filename, parent_scope, opts)
     -- Guard against cycles within our own cri_loader calls.
     local checking_deps = {}
 
+    --: (Ctx, string) -> (integer | nil, any)
     local function try_dep(ctx, dep_path)
         if checking_deps[dep_path] or _checking[dep_path] then return nil end
         checking_deps[dep_path] = true
@@ -441,11 +458,14 @@ function M.check_string_with_deps(source, filename, parent_scope, opts)
         checking_deps[dep_path] = nil
         if _session[dep_path] and _session[dep_path].cri_bytes then
             local ok, exports, aliases = cri_read.load(_session[dep_path].cri_bytes or "", ctx)
+            exports = exports --[[: any]]
+            aliases = aliases --[[: any]]
             if ok and exports["__ret"] then return exports["__ret"], aliases end
         end
         return nil
     end
 
+    --: (Ctx, string) -> (integer | nil, any)
     local function cri_loader(ctx, mod_name)
         -- Prefer _types.lua declaration file when present; fall back to .lua / init.lua.
         local rel = mod_name:gsub("%.", "/")

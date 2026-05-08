@@ -932,7 +932,7 @@ function M.lookup_index(ctx, subject_tid, key_tid)
             results[#results + 1] = r
         end
         if #results == 0 then return nil end
-        if #results == 1 then return results[1] end
+        if #results == 1 then return results[1] --[[:! integer]] end
         return types_mod.make_union(ctx, results)
     end
 
@@ -948,7 +948,7 @@ function M.lookup_index(ctx, subject_tid, key_tid)
             end
         end
         if #contribs == 0 then return nil end
-        if #contribs == 1 then return contribs[1] end
+        if #contribs == 1 then return contribs[1] --[[:! integer]] end
         return types_mod.make_intersection(ctx, contribs)
     end
 

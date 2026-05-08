@@ -13,6 +13,7 @@ M.description = "bare bit.* global — add `local bit = require(\"bit\")` at top
 
 -- Simple heuristic: scan source lines. The ctx.err has source_lines attached;
 -- we reconstruct the source from ctx.err.source_lines for the file.
+--: (ctx: Ctx, err_ctx: ErrCtx, filepath: string, severity: string, errors_mod: { error: (ErrCtx, string, integer, integer, string) -> (), warning: (ErrCtx, string, integer, integer, string) -> (), ... }) -> ()
 function M.check(ctx, err_ctx, filepath, severity, errors_mod)
     -- Skip test files.
     if filepath:match("_test%.lua$") then return end

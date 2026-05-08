@@ -43,8 +43,10 @@ tk_to_binop[defs.TK_OR]      = defs.OP_OR
 local UNARY_PREC = 8
 
 function M.parse(source, filename, pool)
-    pool = pool or intern_mod.new()
-    filename = filename or "?"
+    local _pool = (pool or intern_mod.new()) --[[:! InternPool]]
+    local _filename = (filename or "?") --[[:! string]]
+    pool = _pool
+    filename = _filename
     local L = lex_mod.new(source, filename, pool)
     local nodes = arena_mod.new_node_arena(256)
     local lists = arena_mod.new_list_pool(512)
@@ -294,7 +296,7 @@ function M.parse(source, filename, pool)
             inner = mknode(defs.NODE_LITERAL, line, col)
             local nn = nodes:get(inner)
             nn.data[0] = defs.LIT_NUMBER
-            nn.data[1], nn.data[2] = double_to_i32x2(L.val)
+            nn.data[1], nn.data[2] = double_to_i32x2(L.val --[[:! number]])
             L:next()
         elseif tk == defs.TK_STRING then
             inner = mknode(defs.NODE_LITERAL, line, col)

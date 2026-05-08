@@ -24,7 +24,7 @@ local BANNED = {
     free    = "M:close()",
     release = "M:close()",
     delete  = "M:close()",
-}
+} --[[: { [string]: string }]]
 
 local M = {}
 M.name        = "naming"

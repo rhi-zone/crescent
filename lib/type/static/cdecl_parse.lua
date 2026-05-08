@@ -57,7 +57,8 @@ CdeclParser = {
 ]]
 
 local function new_parser(source, pool)
-    pool = pool or intern_mod.new()
+    local _pool = (pool or intern_mod.new()) --[[:! InternPool]]
+    pool = _pool
     local lex = cdecl_lex.new(source, pool)
 
     -- Pre-intern C keywords
@@ -324,14 +325,15 @@ local function parse_enum_body(p)
             -- May be negative (indicated by '-' — but lexer skips '-', so
             -- enum { A = -1 } is tricky; handle it if TK_INT follows)
             if p.lex.tk == TK_INT then
-                value = p.lex.val
+                value = p.lex.val --[[:! integer]]
                 advance(p)
             end
         end
-        counter = value + 1
+        counter = value + 1 --[[:! integer]]
         members[#members + 1] = { name_id = name_id, value = value }
         -- Register as enum_val decl
-        p.decls[#p.decls + 1] = { decl = "enum_val", name_id = name_id, value = value }
+        local decls = p.decls --[[:! { [integer]: unknown }]]
+        decls[#decls + 1] = { decl = "enum_val", name_id = name_id, value = value }
         eat(p, TK_COMMA)
     end
     eat(p, TK_RBRACE)
@@ -555,10 +557,10 @@ parse_declarator = function(p, base_type)
             local params, vararg = parse_params(p)
             -- Build function pointer type
             local fn_type = { k = "func", ret = base_type, params = params, vararg = vararg }
-            local result = { k = "ptr", to = fn_type }
+            local result = { k = "ptr", to = fn_type } --[[:! { k: string, to: unknown }]]
             -- Apply outer pointer layers
             for _ = 1, ptr_depth do
-                result = { k = "ptr", to = result }
+                result = { k = "ptr", to = result } --[[:! { k: string, to: unknown }]]
             end
             return name_id, result
         else
@@ -599,8 +601,8 @@ parse_declarator = function(p, base_type)
             expect(p, TK_RPAREN)
             ::done_inline_params::
             local fn_type = { k = "func", ret = base_type, params = params, vararg = vararg }
-            local result = fn_type
-            for _ = 1, ptr_depth do result = { k = "ptr", to = result } end
+            local result = fn_type --[[:! { k: string, to: unknown }]]
+            for _ = 1, ptr_depth do result = { k = "ptr", to = result } --[[:! { k: string, to: unknown }]] end
             return nil, result
         end
     end
@@ -637,7 +639,7 @@ parse_declarator = function(p, base_type)
     end
 
     -- Array suffix: name[N] or name[]
-    local result_type = base_type
+    local result_type = base_type --[[:! { k: string, ... } | nil]]
     if p.lex.tk == TK_LBRACK then
         advance(p)
         local size = nil
@@ -727,7 +729,7 @@ local function parse_one_decl(p)
                 local dk
                 if decl_type.k == "func" then
                     dk = "func"
-                elseif decl_type.k == "ptr" and decl_type.to and decl_type.to.k == "func" then
+                elseif decl_type.k == "ptr" and decl_type.to and (decl_type.to --[[:! { k: string, ... }]]).k == "func" then
                     dk = "func"
                 else
                     dk = "var"

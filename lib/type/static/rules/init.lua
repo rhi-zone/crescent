@@ -46,7 +46,7 @@ function M.run(ctx, err_ctx, filepath, policy)
 end
 
 -- Return the list of registered passes (for introspection / testing).
---: () -> { [integer]: { name: string, pass: table }, ... }
+--: () -> { [integer]: { name: string, pass: { ... } }, ... }
 function M.passes()
     return _passes
 end

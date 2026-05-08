@@ -16,8 +16,9 @@ local FIELD_NAMES = { "x", "y", "z", "n", "s" }
 local BASE_TYPES  = { "integer", "string", "boolean", "number" }
 
 -- Pick a random element from a table using rng:float().
+--: ({ float: () -> number, ... }, { [integer]: string, ... }) -> string
 local function pick(rng, t)
-	return t[math.floor(rng:float() * #t) + 1]
+	return t[math.floor(rng:float() * #t) + 1] --[[:! string]]
 end
 
 -- arb_base_type: generate a random base type string (never `any`).
@@ -45,7 +46,7 @@ function M.arb_table_type(rng, size)
 
 	local fields = {}
 	for i = 1, n do
-		local name    = names[i]
+		local name    = names[i] --[[:! string]]
 		local base    = pick(rng, BASE_TYPES)
 		local optional = rng:float() < 0.20
 		local readonly = rng:float() < 0.10
@@ -73,9 +74,9 @@ function M.arb_union_base(rng, size)
 	local j
 	repeat j = math.floor(rng:float() * 4) + 1 until j ~= i
 	return {
-		lhs = bases[i],
-		rhs = bases[j],
-		type_str = bases[i] .. " | " .. bases[j]
+		lhs = bases[i] --[[:! string]],
+		rhs = bases[j] --[[:! string]],
+		type_str = (bases[i] --[[:! string]]) .. " | " .. (bases[j] --[[:! string]])
 	}
 end
 

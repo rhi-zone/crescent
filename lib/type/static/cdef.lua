@@ -102,7 +102,7 @@ local function c_type_to_tid(ctx, ctype)
 
     if k == "struct" then
         local fields = ctype.fields
-        if not fields or #fields == 0 then
+        if not fields or #(fields --[[:! { [integer]: unknown, ... }]]) == 0 then
             -- Opaque struct (forward declaration or no body).
             return types_mod.alloc_type(ctx, defs.TAG_CDATA)
         end
