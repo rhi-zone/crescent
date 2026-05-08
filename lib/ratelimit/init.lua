@@ -2,11 +2,18 @@ if not package.path:find("?/init.lua", 1, true) then
   package.path = package.path .. ";./?/init.lua"
 end
 
+--:: Limiter = { allow: (unknown, number | nil) -> boolean, reset: (unknown) -> nil, ... }
+--:: TokenBucket = { allow: (unknown, number | nil) -> boolean, tokens: (unknown) -> number, reset: (unknown) -> nil }
+--:: SlidingWindow = { allow: (unknown, number | nil) -> boolean, count: (unknown) -> number, remaining: (unknown) -> number, reset: (unknown) -> nil }
+--:: FixedWindow = { allow: (unknown, number | nil) -> boolean, count: (unknown) -> number, remaining: (unknown) -> number, reset: (unknown) -> nil }
+--:: LeakyBucket = { allow: (unknown, number | nil) -> boolean, level: (unknown) -> number, remaining: (unknown) -> number, reset: (unknown) -> nil }
+--:: KeyedLimiter = { allow: (unknown, string, number | nil) -> boolean, get: (unknown, string) -> Limiter, reset: (unknown, string) -> nil }
+
 local M = {}
 
 -- Token bucket: tokens refill at `rate` per second up to `burst`.
 -- opts: { rate: number, burst: number, clock: () -> number }
---: (opts: { rate: number, burst: number, clock: () -> number }) -> TokenBucket
+--: (opts: { rate: number, burst: number, clock: () -> number }) -> (TokenBucket | nil, string | nil)
 function M.token_bucket(opts)
   local rate = opts.rate
   local burst = opts.burst
@@ -31,7 +38,7 @@ function M.token_bucket(opts)
     end
   end
 
-  --: (n: (number | nil)) -> boolean
+  --: (unknown, n: (number | nil)) -> boolean
   function self:allow(n)
     n = n or 1
     refill()
@@ -42,13 +49,13 @@ function M.token_bucket(opts)
     return false
   end
 
-  --: () -> number
+  --: (unknown) -> number
   function self:tokens()
     refill()
     return token_count
   end
 
-  --: () -> nil
+  --: (unknown) -> nil
   function self:reset()
     token_count = burst
     last_time = clock()
@@ -60,7 +67,7 @@ end
 -- Sliding window: counts requests within a rolling time window.
 -- Uses two sub-windows for approximation (standard sliding window counter).
 -- opts: { limit: number, window: number, clock: () -> number }
---: (opts: { limit: number, window: number, clock: () -> number }) -> SlidingWindow
+--: (opts: { limit: number, window: number, clock: () -> number }) -> (SlidingWindow | nil, string | nil)
 function M.sliding_window(opts)
   local limit = opts.limit
   local window = opts.window
@@ -99,8 +106,8 @@ function M.sliding_window(opts)
     return curr_count + prev_count * (1 - fraction)
   end
 
-  --: () -> boolean
-  function self:allow()
+  --: (unknown, n: (number | nil)) -> boolean
+  function self:allow(n) -- luacheck: ignore n
     if effective_count() + 1 > limit then
       return false
     end
@@ -109,12 +116,12 @@ function M.sliding_window(opts)
     return true
   end
 
-  --: () -> number
+  --: (unknown) -> number
   function self:count()
     return effective_count()
   end
 
-  --: () -> number
+  --: (unknown) -> number
   function self:remaining()
     local c = effective_count()
     local r = limit - c
@@ -122,7 +129,7 @@ function M.sliding_window(opts)
     return r
   end
 
-  --: () -> nil
+  --: (unknown) -> nil
   function self:reset()
     prev_count = 0
     curr_count = 0
@@ -134,7 +141,7 @@ end
 
 -- Fixed window: simple counter reset at fixed intervals.
 -- opts: { limit: number, window: number, clock: () -> number }
---: (opts: { limit: number, window: number, clock: () -> number }) -> FixedWindow
+--: (opts: { limit: number, window: number, clock: () -> number }) -> (FixedWindow | nil, string | nil)
 function M.fixed_window(opts)
   local limit = opts.limit
   local window = opts.window
@@ -157,8 +164,8 @@ function M.fixed_window(opts)
     end
   end
 
-  --: () -> boolean
-  function self:allow()
+  --: (unknown, n: (number | nil)) -> boolean
+  function self:allow(n) -- luacheck: ignore n
     check_window()
     if count >= limit then
       return false
@@ -167,13 +174,13 @@ function M.fixed_window(opts)
     return true
   end
 
-  --: () -> number
+  --: (unknown) -> number
   function self:count()
     check_window()
     return count
   end
 
-  --: () -> number
+  --: (unknown) -> number
   function self:remaining()
     check_window()
     local r = limit - count
@@ -181,7 +188,7 @@ function M.fixed_window(opts)
     return r
   end
 
-  --: () -> nil
+  --: (unknown) -> nil
   function self:reset()
     count = 0
     window_start = clock()
@@ -192,7 +199,7 @@ end
 
 -- Leaky bucket: requests drain at a fixed rate; rejects when full.
 -- opts: { rate: number, capacity: number, clock: () -> number }
---: (opts: { rate: number, capacity: number, clock: () -> number }) -> LeakyBucket
+--: (opts: { rate: number, capacity: number, clock: () -> number }) -> (LeakyBucket | nil, string | nil)
 function M.leaky_bucket(opts)
   local rate = opts.rate
   local capacity = opts.capacity
@@ -202,7 +209,7 @@ function M.leaky_bucket(opts)
   if not clock then return nil, "clock is required" end
 
   local self = {}
-  local water = 0
+  local water = 0.0 --: number
   local last_time = clock()
 
   local function leak()
@@ -211,13 +218,13 @@ function M.leaky_bucket(opts)
     if elapsed > 0 then
       water = water - elapsed * rate
       if water < 0 then
-        water = 0
+        water = 0.0
       end
       last_time = now
     end
   end
 
-  --: (n: (number | nil)) -> boolean
+  --: (unknown, n: (number | nil)) -> boolean
   function self:allow(n)
     n = n or 1
     leak()
@@ -228,13 +235,13 @@ function M.leaky_bucket(opts)
     return false
   end
 
-  --: () -> number
+  --: (unknown) -> number
   function self:level()
     leak()
     return water
   end
 
-  --: () -> number
+  --: (unknown) -> number
   function self:remaining()
     leak()
     local r = capacity - water
@@ -242,9 +249,9 @@ function M.leaky_bucket(opts)
     return r
   end
 
-  --: () -> nil
+  --: (unknown) -> nil
   function self:reset()
-    water = 0
+    water = 0.0
     last_time = clock()
   end
 
@@ -254,35 +261,35 @@ end
 -- Keyed rate limiter: per-key instances of any algorithm.
 -- factory: one of M.token_bucket, M.sliding_window, etc.
 -- opts: shared options (clock, rate, etc.) passed to each new instance.
---: <O>(factory: (opts: O) -> unknown, opts: O) -> KeyedLimiter
+--: <O>(factory: (opts: O) -> unknown, opts: O) -> (KeyedLimiter | nil, string | nil)
 function M.keyed(factory, opts)
   if not factory then return nil, "factory is required" end
   if not opts then return nil, "opts is required" end
 
   local self = {}
-  --: { [string]: unknown }
+  --: { [string]: Limiter }
   local limiters = {}
 
   local function get(key)
     local l = limiters[key]
     if not l then
-      l = factory(opts)
+      l = factory(opts) --[[:! Limiter]]
       limiters[key] = l
     end
     return l
   end
 
-  --: (key: string, n: (number | nil)) -> boolean
+  --: (unknown, key: string, n: (number | nil)) -> boolean
   function self:allow(key, n)
     return get(key):allow(n)
   end
 
-  --: (key: string) -> unknown
+  --: (unknown, key: string) -> Limiter
   function self:get(key)
     return get(key)
   end
 
-  --: (key: string) -> nil
+  --: (unknown, key: string) -> nil
   function self:reset(key)
     if key then
       local l = limiters[key]
