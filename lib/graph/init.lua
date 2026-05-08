@@ -242,7 +242,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- BFS from start. Returns order (array) and parent table (id -> parent_id).
---: (any, unknown) -> ({ [integer]: unknown } | nil, { [unknown]: unknown } | nil)
+--: (any, unknown) -> ({ [integer]: unknown } | nil, { [unknown]: unknown } | string | nil)
 function M.bfs(g, start)
   if not g:has_node(start) then return nil, "start node not found" end
   local order   = {}
@@ -267,7 +267,7 @@ function M.bfs(g, start)
 end
 
 -- DFS from start. Returns order (array) and parent table (id -> parent_id).
---: (any, unknown) -> ({ [integer]: unknown } | nil, { [unknown]: unknown } | nil)
+--: (any, unknown) -> ({ [integer]: unknown } | nil, { [unknown]: unknown } | string | nil)
 function M.dfs(g, start)
   if not g:has_node(start) then return nil, "start node not found" end
   local order   = {}

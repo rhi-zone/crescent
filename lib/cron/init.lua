@@ -24,7 +24,7 @@ local DOW_NAMES = { --: { [string]: integer }
   sun = 0, mon = 1, tue = 2, wed = 3, thu = 4, fri = 5, sat = 6,
 }
 
-local SHORTHANDS = {
+local SHORTHANDS = { --: { [string]: string }
   ["@yearly"]  = "0 0 1 1 *",
   ["@annually"] = "0 0 1 1 *",
   ["@monthly"] = "0 0 1 * *",
@@ -583,11 +583,8 @@ function M.parse(expr, opts)
     return nil, "expected string, got " .. type(expr)
   end
 
-  expr = expr:match("^%s*(.-)%s*$")  -- trim
-
-  -- Check shorthands
-  local expanded = SHORTHANDS[expr:lower()]
-  if expanded then expr = expanded end
+  expr = expr:match("^%s*(.-)%s*$") or expr  -- trim; pattern always matches
+  expr = SHORTHANDS[expr:lower()] or expr     -- expand shorthands
 
   -- Split into fields
   local fields = {} --: { [integer]: string }
