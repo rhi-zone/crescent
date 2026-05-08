@@ -39,8 +39,8 @@ local str_match = string.match
 --                    (so mdast block structure is preserved)
 --   defs           : array of { label = string, content = string }
 local function extract_fn_defs(source)
-  local defs = {}
-  local lines = {}
+  local defs = {} --: { label: string, content: string }[]
+  local lines = {} --: { [integer]: string }
   local pos = 1
   local len = #source
 
@@ -82,25 +82,27 @@ end
 -- Scan a text value for [^label] patterns.
 -- Returns an array of nodes (text / footnoteReference interleaved).
 local function scan_footnote_refs(value)
-  local result = {}
+  local result = {} --: { type: string, value?: string, identifier?: string, label?: string }[]
   local pos = 1
   local len = #value
 
   while pos <= len do
     -- Look for "[^".
-    local open = str_find(value, "[^", pos, true)
-    if not open then
+    local open_or_nil = str_find(value, "[^", pos, true)
+    if not open_or_nil then
       if pos <= len then
         result[#result + 1] = { type = "text", value = str_sub(value, pos) }
       end
       break
     end
+    local open = open_or_nil --[[: integer]]
 
-    local close = str_find(value, "]", open + 2, true)
-    if not close then
+    local close_or_nil = str_find(value, "]", open + 2, true)
+    if not close_or_nil then
       result[#result + 1] = { type = "text", value = str_sub(value, pos) }
       break
     end
+    local close = close_or_nil --[[: integer]]
 
     local label = str_sub(value, open + 2, close - 1)
 

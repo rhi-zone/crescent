@@ -72,7 +72,7 @@ local prim_tags = {
 -- Scanner: minimal lexer for type expression strings
 ---------------------------------------------------------------------------
 
---:: Scanner = { src: string, pos: integer, len: integer, filename: string, line: integer, col_offset: integer, depth: integer, parse_errors: { [integer]: { line: integer, col: integer, msg: string }, ... } }
+--:: Scanner = { src: string, pos: integer, len: integer, filename: string, line: integer, col_offset: integer, depth: integer, depth_limit_hit?: boolean, parse_errors: { [integer]: { line: integer, col: integer, msg: string }, ... } }
 
 --: (string, string | nil, integer | nil, integer | nil) -> Scanner
 local function new_scanner(content, filename, line, col_offset)
@@ -277,6 +277,7 @@ function M.parse_annotations(annotations, pool, filename)
     end
 
     -- Parse primary (non-union, non-intersection) type
+    --: (Scanner) -> integer
     local function parse_primary(s)
         local b0 = peek(s)
         if not b0 then scan_error(s, "unexpected end of type") end
@@ -1050,6 +1051,7 @@ function M.parse_annotations(annotations, pool, filename)
     end
 
     -- Parse postfix: [] (array sugar) and T[K] (indexed access)
+    --: (Scanner) -> integer
     local function parse_postfix(s)
         local ty = parse_primary(s)
         while true do
@@ -1089,6 +1091,7 @@ function M.parse_annotations(annotations, pool, filename)
     end
 
     -- Parse intersection: A & B
+    --: (Scanner) -> integer
     local function parse_intersection(s)
         local left = parse_postfix(s)
         if not opt_char(s, "&") then return left end
@@ -1107,6 +1110,7 @@ function M.parse_annotations(annotations, pool, filename)
     -- Also handles top-level right-associative -> for curried function types.
     -- This allows F<A> -> F<B> (bare, without surrounding parens) and
     -- ((A -> B) -> F<A> -> F<B>) where the outer parens are transparent grouping.
+    --: (Scanner) -> integer
     parse_type = function(s)
         s.depth = s.depth + 1
         if s.depth > MAX_TYPE_DEPTH then

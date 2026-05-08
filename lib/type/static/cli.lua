@@ -254,7 +254,8 @@ local function spawn_worker(bucket, project_opts, cache_dir)
     return pid, rfd
 end
 
-local function check_parallel(files, n, project_opts, cache_dir, format, errors_mod)
+local function check_parallel(files, n, project_opts, cache_dir, format, errors_mod_arg)
+    local errors_mod = require("lib.type.static.errors")
     -- Distribute files round-robin across n workers.
     local buckets = {}
     for i = 1, n do buckets[i] = {} end
@@ -273,7 +274,7 @@ local function check_parallel(files, n, project_opts, cache_dir, format, errors_
 
     -- Fork one worker per bucket.
     local pids     = {}
-    local read_fds = {}
+    local read_fds = {} --: { [integer]: integer, ... }
 
     for i, bucket in ipairs(workers) do
         pids[i], read_fds[i] = spawn_worker(bucket, project_opts, cache_dir)

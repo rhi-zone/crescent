@@ -108,7 +108,7 @@ local function tls_write_all(ctx, data)
 			local e = tls_lib.tls_error(ctx)
 			return nil, "tls_write failed: " .. (e ~= nil and ffi.string(e) or "unknown")
 		end
-		pos = pos + tonumber(n)
+		pos = pos + (tonumber(n) or 0)
 	end
 	return true
 end
@@ -475,6 +475,7 @@ function M.http_client_cap(opts)
 			local buf = ffi.new("uint8_t[?]", BUF_SIZE)
 			local head_buf = ""
 			local status, resp_headers
+			local body_start = 0
 
 			-- Read until we have complete headers.
 			while not status do
@@ -507,7 +508,7 @@ function M.http_client_cap(opts)
 						resp_headers = parsed and parsed.headers or {}
 
 						-- Deliver body data that arrived with headers.
-						local body_start = head_end + 4
+						body_start = head_end + 4
 						if #head_buf >= body_start then
 							local initial = head_buf:sub(body_start)
 							if #initial > 0 then on_chunk(initial) end
