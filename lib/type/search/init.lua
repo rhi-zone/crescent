@@ -89,7 +89,7 @@ M.build_index = function(files)
     local index = {}
     for _, filepath in ipairs(files) do
         check_mod.clear_cache()
-        local err_ctx, ctx = check_mod.check_file(filepath, nil, nil, { no_disk_cache = nil })
+        local err_ctx, ctx = check_mod.check_file(filepath, nil, nil, { globals_files = nil, no_disk_cache = true })
         if ctx then
             local exports = extract_exports(ctx)
             for _, exp in ipairs(exports) do
