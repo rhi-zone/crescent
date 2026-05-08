@@ -50,11 +50,12 @@ local function ymd_hms_to_unix(year, month, day, hour, min, sec, tz_offset_min)
 end
 
 -- Parse CLF time: "[10/Oct/2000:13:55:36 -0700]" → unix timestamp | nil
+--: (s: string) -> number | nil
 function M.parse_clf_time(s)
   local day, mon, year, hour, min, sec, sign, tzh, tzm =
     s:match("^%[(%d+)/(%a+)/(%d+):(%d+):(%d+):(%d+) ([%+%-])(%d%d)(%d%d)%]$")
   if not day then return nil end
-  local month = MONTH[mon --[[: string]]]
+  local month = MONTH[mon]
   if not month then return nil end
   local n_tzh = tonumber(tzh) or 0
   local n_tzm = tonumber(tzm) or 0
@@ -69,7 +70,7 @@ function M.parse_iso8601(s)
   local year, month, day, hour, min, sec, tz =
     s:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)[T ](%d%d):(%d%d):(%d%d)(.*)$")
   if not year then return nil end
-  local tz_offset_min = 0
+  local tz_offset_min = 0 --: number
   if tz == "" or tz == "Z" or tz == "z" then
     tz_offset_min = 0
   else
@@ -100,10 +101,11 @@ end
 -- 127.0.0.1 - frank [10/Oct/2000:13:55:36 -0700] "GET /apache_pb.gif HTTP/1.0" 200 2326 "http://ref/" "Mozilla/5.0"
 -- Common log format omits referrer and user_agent
 
+--: (s: string, pos: integer) -> (string | nil, integer)
 local function parse_quoted(s, pos)
   -- parse a double-quoted field starting at pos (which should be at '"')
   if s:sub(pos, pos) ~= '"' then return nil, pos end
-  local result = {}
+  local result = {} --: Arr<string>
   local i = pos + 1
   while i <= #s do
     local c = s:sub(i, i)
@@ -138,6 +140,7 @@ local function parse_clf_request(req)
   return method, path, query, proto
 end
 
+--: (line: string) -> (unknown, string | nil)
 local function parse_combined_line(line)
   -- ip ident user [time] "request" status bytes ["referrer"] ["user_agent"]
   local pos = 1
@@ -162,6 +165,7 @@ local function parse_combined_line(line)
   local time_str, p4 = line:match("^(%b[])%s+()", pos)
   if not time_str then return nil, "log_parser: failed to parse combined log: missing time" end
   pos = p4
+  local time_str_s = time_str --[[:! string]]
 
   -- "request"
   if line:sub(pos, pos) ~= '"' then
@@ -208,8 +212,8 @@ local function parse_combined_line(line)
     ip        = ip,
     ident     = ident ~= "-" and ident or nil,
     user      = user ~= "-" and user or nil,
-    time      = time_str,
-    timestamp = M.parse_clf_time(time_str),
+    time      = time_str_s,
+    timestamp = M.parse_clf_time(time_str_s),
     method    = method,
     path      = path,
     query     = query,
@@ -225,10 +229,9 @@ end
 -- Syslog RFC 3164 / common variant:
 -- Oct 11 22:14:15 hostname app[1234]: message
 -- or with priority: <13>Oct 11 22:14:15 hostname app[1234]: message
+--: (line: string) -> (unknown, string | nil)
 local function parse_syslog_line(line)
-  local s = line
-  -- strip optional priority
-  s = s:gsub("^<(%d+)>", "")
+  local s = line:gsub("^<(%d+)>", "") --: string
   -- timestamp: "Oct 11 22:14:15" or "Oct  1 22:14:15"
   local mon, day, time_part, rest = s:match("^(%a+)%s+(%d+)%s+(%d%d:%d%d:%d%d)%s+(.+)$")
   if not mon then
@@ -259,22 +262,25 @@ local function parse_syslog_line(line)
 end
 
 -- JSON log line: any valid JSON object
+--: (line: string) -> (unknown, string | nil)
 local function parse_json_line(line)
   -- minimal JSON object parser sufficient for flat objects with string/number/bool/null values
   -- delegates to a hand-written parser; for production use, swap in a full JSON library
-  local s = line:match("^%s*(.-)%s*$")
+  local s = (line:match("^%s*(.-)%s*$") or line) --[[:! string]]
   if s:sub(1,1) ~= "{" then
     return nil, "log_parser: failed to parse json: not an object"
   end
 
+  --: (str: string, i: integer) -> integer
   local function skip_ws(str, i)
     while i <= #str and str:sub(i,i):match("%s") do i = i + 1 end
     return i
   end
 
+  --: (str: string, i: integer) -> (string | nil, integer)
   local function parse_string(str, i)
     if str:sub(i,i) ~= '"' then return nil, i end
-    local buf = {}
+    local buf = {} --: Arr<string>
     i = i + 1
     while i <= #str do
       local c = str:sub(i,i)
@@ -287,7 +293,8 @@ local function parse_json_line(line)
         elseif e == 'r' then buf[#buf+1] = '\r'
         elseif e == 'u' then
           local hex = str:sub(i+1, i+4)
-          buf[#buf+1] = string.char(tonumber(hex, 16) or 63)
+          local codepoint = tonumber(hex, 16) or 63 --: number
+          buf[#buf+1] = string.char(codepoint --[[:! integer]])
           i = i + 4
         else buf[#buf+1] = e end
       else
@@ -298,6 +305,7 @@ local function parse_json_line(line)
     return nil, i
   end
 
+  --: (str: string, i: integer) -> (string | number | boolean | nil, integer)
   local function parse_value(str, i)
     i = skip_ws(str, i)
     local c = str:sub(i,i)
@@ -341,8 +349,9 @@ local function parse_json_line(line)
 end
 
 -- logfmt: key=value key="quoted value" key=123
+--: (line: string) -> (unknown, string | nil)
 local function parse_logfmt_line(line)
-  local result = {}
+  local result = {} --: { [string]: string | number | boolean }
   local i = 1
   local len = #line
   while i <= len do
@@ -414,6 +423,7 @@ end
 
 -- ── M.parse ───────────────────────────────────────────────────────────────────
 
+--: (line: string, format: string | nil) -> (unknown, string | nil)
 function M.parse(line, format)
   if format == "auto" or format == nil then
     format = M.detect(line)
@@ -459,6 +469,7 @@ end
 -- Build a parser from a format string with named captures: %{name:type}
 -- Types: str, int, float, ip, timestamp
 -- Example: "%{ip:ip} [%{time:str}] %{status:int} %{bytes:int}"
+--: (fmt_string: string) -> (string) -> { [string]: string | number | nil } | nil
 function M.pattern(fmt_string)
   -- Convert format string to a Lua pattern with captures
   local fields = {}  -- ordered list of {name, type}
@@ -470,7 +481,7 @@ function M.pattern(fmt_string)
   local names = {}
   local i = 1
   local plain = {}
-  local s = fmt_string
+  local s = fmt_string --: string
   local out_parts = {}
   local field_idx = 0
 
@@ -512,9 +523,9 @@ function M.pattern(fmt_string)
     local captures = { line:match(pat) }
     if not captures[1] and #names > 0 then return nil end
     if #names == 0 and not line:match(pat) then return nil end
-    local result = {}
+    local result = {} --: { [string]: string | number | nil }
     for idx, field in ipairs(names) do
-      local raw = captures[idx]
+      local raw = captures[idx] --[[:! string | nil]]
       if field.typ == "int" then
         result[field.name] = tonumber(raw)
       elseif field.typ == "float" then
@@ -611,7 +622,7 @@ function M.sum_by(entries, num_field, group_field)
     return sums
   else
     -- sum num_field grouped by itself (all → one entry), or just return total
-    local total = 0
+    local total = 0 --: number
     for _, e in ipairs(entries) do
       total = total + (tonumber(e[num_field]) or 0)
     end
@@ -619,6 +630,7 @@ function M.sum_by(entries, num_field, group_field)
   end
 end
 
+--: (entries: unknown[], field: unknown, n: integer) -> unknown[]
 function M.top_n(entries, field, n)
   local counts = M.count_by(entries, field)
   local sorted = {}

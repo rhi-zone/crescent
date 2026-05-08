@@ -13,10 +13,11 @@ M._tier = "pure"
 -- ── Utilities ──────────────────────────────────────────────────────────────
 
 -- Sorted keys of a table (for determinism in DOT output, subset construction)
+--: (t: { [string]: unknown }) -> string[]
 local function sorted_keys(t)
-  local ks = {}
-  for k in pairs(t) do ks[#ks+1] = k end
-  table.sort(ks)
+  local ks = {} --: Arr<string>
+  for k in pairs(t --[[:! { [string]: unknown }]]) do ks[#ks+1] = k end
+  table.sort(ks --[[:! { [integer]: integer }]])
   return ks
 end
 
@@ -73,13 +74,12 @@ NFA.__index = NFA
 -- @return NFA object
 --: () -> NFA
 function M.nfa_new()
-  --: NFA
   local nfa = setmetatable({
     states = {},       -- {[id] = {accept=bool}}
     start = nil,       -- start state id
     trans = {},        -- {[from] = {[symbol or false] = {[to]=true}}}
     _next_id = 1,
-  }, NFA)
+  }, NFA) --[[:! NFA]]
   return nfa
 end
 
@@ -215,13 +215,13 @@ DFA.__index = DFA
 -- @return DFA object
 --: () -> DFA
 function M.dfa_new()
-  --: DFA
-  local dfa = setmetatable({
+  local raw = setmetatable({
     states = {},     -- {[id] = {accept=bool}}
     start = nil,
     trans = {},      -- {[from] = {[symbol] = to}}
     _next_id = 1,
-  }, DFA)
+  }, DFA) --[[: any]]
+  local dfa = raw --[[:! DFA]]
   return dfa
 end
 
@@ -252,7 +252,7 @@ function DFA:run(state, symbol)
   if not state then return nil end
   -- Allow feeding multiple characters at once (streaming helper)
   if #symbol > 1 then
-    local cur = state
+    local cur = state --: integer | nil
     for i = 1, #symbol do
       cur = self:run(cur, symbol:sub(i,i))
       if cur == nil then return nil end
@@ -307,15 +307,16 @@ function DFA:to_dot()
     lines[#lines+1] = '  ' .. id .. ' [shape=' .. shape .. '];'
   end
   for _, from in ipairs(sorted_keys(self.trans)) do
-    local row = self.trans[from]
+    local row = self.trans[tonumber(from) --[[:! integer]]]
     -- group by target to merge labels
-    local by_to = {}
-    for sym, to in pairs(row) do
-      if not by_to[to] then by_to[to] = {} end
-      by_to[to][#by_to[to]+1] = sym
+    local by_to = {} --: { [string]: Arr<string> }
+    for sym, to in pairs(row --[[:! { [string]: integer }]]) do
+      local to_s = tostring(to)
+      if not by_to[to_s] then by_to[to_s] = {} end
+      by_to[to_s][#by_to[to_s]+1] = sym
     end
     for to, syms in pairs(by_to) do
-      table.sort(syms)
+      table.sort(syms --[[:! { [integer]: integer }]])
       local label = table.concat(syms, ",")
       lines[#lines+1] = '  ' .. from .. ' -> ' .. to .. ' [label="' .. label .. '"];'
     end
@@ -342,7 +343,8 @@ function M.nfa_to_dfa(nfa)
   -- Map from frozenset-key to DFA state id
   local dfa_state = {}
   -- Queue of (nfa_set, dfa_id) to process
-  local queue = {}
+  --:: QueueEntry = { set: { [integer]: boolean }, id: integer }
+  local queue = {} --: Arr<QueueEntry>
 
   local function is_accepting(nfa_set)
     for id in pairs(nfa_set) do
@@ -360,8 +362,8 @@ function M.nfa_to_dfa(nfa)
 
   while #queue > 0 do
     local entry = queue[1]; table.remove(queue, 1)
-    local cur_set = entry.set
-    local cur_id = entry.id
+    local cur_set = (entry --[[:! QueueEntry]]).set
+    local cur_id = (entry --[[:! QueueEntry]]).id
 
     for _, sym in ipairs(syms) do
       local moved = nfa:move(cur_set, sym)
@@ -374,7 +376,7 @@ function M.nfa_to_dfa(nfa)
           dfa_state[key] = to_id
           queue[#queue+1] = { set = closed, id = to_id }
         end
-        dfa:add_transition(cur_id, sym, to_id)
+        dfa:add_transition(cur_id, sym, to_id --[[:! integer]])
       end
     end
   end
@@ -521,9 +523,9 @@ function M.minimize(dfa)
     end
     local new_from = part_to_new[pi]
     local key_base = tostring(new_from) .. ":"
-    local row = dfa.trans[rep]
+    local row = rep and dfa.trans[rep --[[:! integer]]] or nil
     if row then
-      for sym, to in pairs(row) do
+      for sym, to in pairs(row --[[:! { [string]: integer }]]) do
         if sp[to] then
           local key = key_base .. sym
           if not added[key] then
@@ -619,8 +621,9 @@ local function product(dfa1, dfa2, accept_fn)
   local result = M.dfa_new()
 
   -- States are pairs (s1, s2); encode as string key
-  local pair_to_id = {}
-  local queue = {}
+  local pair_to_id = {} --: { [string]: integer }
+  --:: ProductEntry = { s1: integer, s2: integer, id: integer }
+  local queue = {} --: Arr<ProductEntry>
 
   local function get_pair(s1, s2)
     local key = s1 .. "," .. s2
@@ -642,7 +645,7 @@ local function product(dfa1, dfa2, accept_fn)
 
   local head = 1
   while head <= #queue do
-    local entry = queue[head]; head = head + 1
+    local entry = (queue[head] --[[:! ProductEntry]]); head = head + 1
     local s1, s2, cur_id = entry.s1, entry.s2, entry.id
     for _, sym in ipairs(syms) do
       local r1 = dfa1c.trans[s1]
@@ -741,7 +744,9 @@ function M.from_regex(pattern)
 
   -- NFA fragment helpers
   -- Each fragment: {start=id, accept=id} (single accept state for simplicity)
+  --:: Frag = { start: integer, accept: integer }
 
+  --: (ch: string) -> Frag
   local function frag_literal(ch)
     local s = nfa:add_state()
     local a = nfa:add_state()
@@ -749,6 +754,7 @@ function M.from_regex(pattern)
     return { start = s, accept = a }
   end
 
+  --: () -> Frag
   local function frag_epsilon()
     local s = nfa:add_state()
     local a = nfa:add_state()
@@ -757,12 +763,14 @@ function M.from_regex(pattern)
   end
 
   -- Concatenate two fragments
+  --: (f1: Frag, f2: Frag) -> Frag
   local function frag_concat(f1, f2)
     nfa:add_transition(f1.accept, nil, f2.start)
     return { start = f1.start, accept = f2.accept }
   end
 
   -- Alternate two fragments (f1 | f2)
+  --: (f1: Frag, f2: Frag) -> Frag
   local function frag_union(f1, f2)
     local s = nfa:add_state()
     local a = nfa:add_state()
@@ -774,6 +782,7 @@ function M.from_regex(pattern)
   end
 
   -- Kleene star (zero or more)
+  --: (f: Frag) -> Frag
   local function frag_star(f)
     local s = nfa:add_state()
     local a = nfa:add_state()
@@ -785,6 +794,7 @@ function M.from_regex(pattern)
   end
 
   -- One or more (f+)
+  --: (f: Frag) -> Frag
   local function frag_plus(f)
     -- f followed by f*
     local s2 = nfa:add_state()
@@ -796,6 +806,7 @@ function M.from_regex(pattern)
   end
 
   -- Optional (f?)
+  --: (f: Frag) -> Frag
   local function frag_optional(f)
     local s = nfa:add_state()
     local a = nfa:add_state()
