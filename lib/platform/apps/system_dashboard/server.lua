@@ -363,7 +363,7 @@ local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, re
 		end
 		if line == nil then break end -- EOF
 
-		local frame_payload --: any
+		local frame_payload --: unknown
 		local skip = false
 		if frame_format == "jsonl" then
 			-- json.decode returns (nil, errmsg) on parse failure, but may also

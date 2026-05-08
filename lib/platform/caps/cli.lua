@@ -18,6 +18,7 @@ function M.cli_cap(args)
 
 	local cap = {
 		_type = "cli",
+		--: () -> ({ [number]: string } | nil, string | nil)
 		args = function()
 			if revoked then return nil, "capability revoked" end
 			local copy = {} --: { [integer]: string }

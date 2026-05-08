@@ -606,7 +606,7 @@ function M.steps.enumerate()
   end
 end
 
-function M.steps.chunk(n)
+local function steps_chunk(n)
   return function(src)
     local done = false
     return function()
@@ -625,8 +625,8 @@ function M.steps.chunk(n)
     end
   end
 end
-
-M.steps.batch = M.steps.chunk
+M.steps.chunk = steps_chunk
+M.steps.batch = steps_chunk
 
 function M.steps.unique()
   return function(src)

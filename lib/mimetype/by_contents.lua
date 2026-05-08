@@ -25,69 +25,66 @@ local mod = {}
 
 local json_parse
 
---[[@param buffer string]]
---[[@param pos integer?]]
+--: (string, integer | nil) -> unknown
 mod.mimetype = function (buffer, pos)
 	if #buffer == 0 then return end
 	pos = pos or 1
-	--[[@param pos_ integer]]
+	--: (integer) -> integer
 	local get_u16 = function (pos_)
 		local a, b = buffer:byte(pos_, pos_ + 1)
-		local num = bit.bor(bit.lshift(a, 8), b)
-		if num < 0 then return num + 0x8000 else return num end
+		local num = bit.bor(bit.lshift(a or 0, 8), b or 0)
+		if num < 0 then return math.floor(num + 0x8000) else return num end
 	end
-	--[[@param pos_ integer]]
+	--: (integer) -> integer
 	local get_u16_le = function (pos_)
 		local a, b = buffer:byte(pos_, pos_ + 1)
-		local num = bit.bor(a, bit.lshift(b, 8))
-		if num < 0 then return num + 0x8000 else return num end
+		local num = bit.bor(a or 0, bit.lshift(b or 0, 8))
+		if num < 0 then return math.floor(num + 0x8000) else return num end
 	end
-	--[[@param pos_ integer]]
+	--: (integer) -> integer
 	local get_i32 = function (pos_)
 		local a, b, c, d = buffer:byte(pos_, pos_ + 3)
-		return bit.bor(bit.lshift(a, 24), bit.lshift(b, 16), bit.lshift(c, 8), d)
+		return bit.bor(bit.lshift(a or 0, 24), bit.lshift(b or 0, 16), bit.lshift(c or 0, 8), d or 0)
 	end
-	--[[@param pos_ integer]]
+	--: (integer) -> integer
 	local get_u32 = function (pos_)
 		local num = get_i32(pos_)
-		if num < 0 then return num + 0x80000000 else return num end
+		if num < 0 then return math.floor(num + 0x80000000) else return num end
 	end
-	--[[@param pos_ integer]]
+	--: (integer) -> integer
 	local get_u32_le = function (pos_)
 		local a, b, c, d = buffer:byte(pos_, pos_ + 3)
-		local num = bit.bor(a, bit.lshift(b, 8), bit.lshift(c, 16), bit.lshift(d, 24))
-		if num < 0 then return num + 0x80000000 else return num end
+		local num = bit.bor(a or 0, bit.lshift(b or 0, 8), bit.lshift(c or 0, 16), bit.lshift(d or 0, 24))
+		if num < 0 then return math.floor(num + 0x80000000) else return num end
 	end
 	--[[returns uint64_t cdata]]
-	--[[@param pos_ integer]]
 	local get_u64_le = function (pos_)
 		return bit.bor(get_u32_le(pos_), bit.lshift(0ULL + get_u32_le(pos_ + 4), 32))
 	end
-	--[[@param s string]]
 	local trim = function (s) return s:match("%S.*%S") or s:match("%S") or "" end
-	--[[@param buffer_ string]] --[[@param header string]] --[[@param offset integer?]]
+	--: (string, string, integer | nil) -> boolean
 	local _check = function (buffer_, header, offset)
 		local start = pos + (offset or 0)
 		return buffer_:sub(start, start + #header - 1) == header
 	end
-	--[[@param buffer_ string]] --[[@param header string]] --[[@param offset integer]] --[[@param mask string]]
+	--: (string, string, integer, string) -> boolean
 	local _check_mask = function (buffer_, header, offset, mask)
 		local start = pos + offset - 1
 		for i = 1, #header do
-			local byte = buffer_:byte(start + i)
-			if header:byte(i) ~= bit.band(mask:byte(i), byte) then
+			local byte = (buffer_:byte(start + i) or 0) --[[:! integer]]
+			if header:byte(i) ~= bit.band((mask:byte(i) or 0) --[[:! integer]], byte) then
 				return false
 			end
 		end
 		return true
 	end
-	--[[@param header string]] --[[@param offset integer?]]
+	--: (string, integer | nil) -> boolean
 	local check = function (header, offset)
 		return _check(buffer, header, offset or 0)
 	end
-	--[[@param header string]] --[[@param offset integer]] --[[@param mask string]]
+	--: (string, integer | nil, string) -> boolean
 	local check_mask = function (header, offset, mask)
-		return _check_mask(buffer, header, offset or 0, mask or nil)
+		return _check_mask(buffer, header, offset or 0, mask)
 	end
 
 	-- utf8 bom
@@ -112,7 +109,7 @@ mod.mimetype = function (buffer, pos)
 	if check("BZh") then return "bz2", "application/x-bzip2" end
 	if check("ID3") then
 		pos = pos + 6
-		local n = get_u32(pos)
+		local n = get_u32(pos) --[[:! integer]]
 		pos = pos + 4
 		--[[XXX: check]]
 		local header_length = bit.bor(
@@ -170,7 +167,7 @@ mod.mimetype = function (buffer, pos)
 			if filename:find("^xl/") then return "xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" end
 			if filename:find("^3D/.+%.model$") then return "3mf", "model/3mf" end
 			if filename == "mimetype" and compressed_size == uncompressed_size then
-				local mimetype = trim(buffer:sub(pos, pos + compressed_size - 1))
+				local mimetype = trim(buffer:sub(pos, math.floor(pos + compressed_size - 1)))
 				if mimetype == "application/epub+zip" then return "epub", mimetype
 				elseif mimetype == "application/vnd.oasis.opendocument.text" then return "odt", mimetype
 				elseif mimetype == "application/vnd.oasis.opendocument.spreadsheet" then return "ods", mimetype
@@ -195,8 +192,9 @@ mod.mimetype = function (buffer, pos)
 	if check("\x50\x4b\x03\x04") or check("\x50\x4b\x05\x06") or check("\x50\x4b\x07\x08") then
 		return "zip", "application/zip"
 	end
-	if check("ftyp", 4) and bit.band(buffer:byte(pos + 7), 0x60) ~= 0x00 then
-		local brand_major = trim(buffer:sub(pos + 8, pos + 11):gsub("%z+", ""))
+	if check("ftyp", 4) and bit.band(buffer:byte(pos + 7) or 0, 0x60) ~= 0x00 then
+		local brand_raw = (buffer:sub(pos + 8, pos + 11):gsub("%z+", ""))
+		local brand_major = trim(brand_raw)
 		local lookup = {
 			avif = { "avif", "image/avif" },
 			avis = { "avif", "image/avif" },
@@ -246,9 +244,9 @@ mod.mimetype = function (buffer, pos)
 		local version = get_u16_(pos + 2)
 		if version == 42 then
 			local ifd_offset = get_u32_(pos + 4)
-			if ifd_offset >= 6 then
+			if (ifd_offset or 0) >= 6 then
 				if check("CR", 8) then return "cr2", "image/x-canon-cr2" end
-				if ifd_offset >= 8 and (check("\x1c\0\xfe\0", 8) or check("\x1f\0\x0b\0", 8)) then return "nef", "image/x-nikon-nef" end
+				if (ifd_offset or 0) >= 8 and (check("\x1c\0\xfe\0", 8) or check("\x1f\0\x0b\0", 8)) then return "nef", "image/x-nikon-nef" end
 			end
 			pos = pos + ifd_offset + 2
 			if pos + 1 > #buffer then return end -- invalid
@@ -266,12 +264,15 @@ mod.mimetype = function (buffer, pos)
 	end
 	if check("MAC ") then return "ape", "audio/ape" end
 	if check("\x1a\x45\xdf\xa3") then
+		--: () -> string
 		local  read_field = function ()
-			local msb = buffer:byte(pos) -- FIXME: `or 0` is a temporary workaround
+			local msb = buffer:byte(pos) or 0 -- FIXME: `or 0` is a temporary workaround
 			local mask = 0x80
 			local ic = 0
-			--[[@diagnostic disable-next-line: param-type-mismatch]]
-			while bit.band(msb, mask) == 0 and mask ~= 0 do ic = ic + 1; mask = mask / 2; end
+			while bit.band(msb, mask) == 0 and mask ~= 0 do
+				ic = ic + 1
+				mask = math.floor(mask / 2)
+			end
 			local start = pos
 			pos = pos + ic + 1
 			return buffer:sub(start, pos - 1)
@@ -279,14 +280,14 @@ mod.mimetype = function (buffer, pos)
 		local read_element = function ()
 			local id = read_field()
 			local len = read_field()
-			len = string.char(bit.bxor(len:byte(1), bit.rshift(0x80, #len - 1))) .. len:sub(2)
-			--[[@return integer]] --[[@param buf string]]
+			len = string.char(bit.bxor(len:byte(1) or 0, bit.rshift(0x80, #len - 1))) .. len:sub(2)
 			local read = function (buf)
-				local ret = 0ULL
-				for i = 1, #buf do
-					ret = bit.bor(bit.lshift(ret, 8), buf:byte(i))
+				local buf_s = buf --[[:! string]]
+				local ret = 0ULL --[[:! cdata]]
+				for i = 1, #buf_s do
+					local b = (buf_s:byte(i) or 0) --[[:! integer]]
+					ret = bit.bor(bit.lshift(ret, 8), b) --[[:! cdata]]
 				end
-				--[[@diagnostic disable-next-line: return-type-mismatch]]
 				return tonumber(ret) -- lossy conversion
 			end
 			return read(id), read(len)
@@ -295,8 +296,8 @@ mod.mimetype = function (buffer, pos)
 			while children > 0 do
 				local success, e, length = pcall(read_element)
 				if not success then return end --[[invalid]]
-				if e == 0x4282 then return buffer:sub(pos, pos + length - 1):gsub("%z.*", "") end
-				pos = pos + length
+				if e == 0x4282 then return (buffer:sub(pos, math.floor(pos + (length or 0) - 1)):gsub("%z.*", "")) end
+				pos = pos + (length or 0)
 				children = children - 1
 			end
 		end
@@ -338,7 +339,7 @@ mod.mimetype = function (buffer, pos)
 	if check("BEGIN:VCARD") then return "vcf", "text/vcard" end
 	if check("BEGIN:VCALENDAR") then return "ics", "text/calendar" end
 	if check("\x37\x7a\xbc\xaf\x27\x1c") then return "7z", "application/x-7z-compressed" end
-	if check("Rar!\x1a\x07") and bit.bor(buffer:byte(pos + 6), 1) == 1 then return "rar", "application/x-rar-compressed" end
+	if check("Rar!\x1a\x07") and bit.bor(buffer:byte(pos + 6) or 0, 1) == 1 then return "rar", "application/x-rar-compressed" end
 	if check("solid ") then return "stl", "model/stl" end
 	if check("BLENDER") then return "blend", "application/x-blender" end
 	if check("!<arch>") then
@@ -462,8 +463,7 @@ mod.mimetype = function (buffer, pos)
 				if _check(typeId, "\xc0\xef\x19\xbc\x4d\x5b\xcf\x11\xa8\xfd\0\x80\x5f\x5c\x44\x2b") then return "asf", "video/x-ms-asf" end
 				break
 			end
-			--[[@diagnostic disable-next-line: cast-local-type]]
-			pos = pos + tonumber(payload)
+			pos = pos + (tonumber(payload) or 0)
 		end
 		return "asf", "application/vnd.ms-asf"
 	end
@@ -511,10 +511,11 @@ mod.mimetype = function (buffer, pos)
 	if check("LP", 34) and (check("\0\0\x01", 8) or check("\x01\0\x02", 8) or check("\x02\0\x02", 8)) then return "eot", "application/vnd.ms-fontobject" end
 	if check("\x06\x06\xed\xf5\xd8\x1d\x46\xe5\xbd\x31\xef\xe7\xfe\x74\xb7\x1d") then return "indd", "application/x-indesign" end
 	--[[FIXME: is view.buffer == buffer?]]
-	local sum = (tonumber(trim(buffer:sub(149, 154):gsub("\0.*$", "")), 8) or (0/0)) - 256
+	local _tar_hdr = (buffer:sub(149, 154):gsub("\0.*$", ""))
+	local sum = (tonumber(trim(_tar_hdr), 8) or (0/0)) - 256
 	if sum == sum then -- not nan
-		for i = 1, 148 do sum = sum - buffer:byte(i) end
-		for i = 157, 512 do sum = sum - buffer:byte(i) end
+		for i = 1, 148 do sum = sum - (buffer:byte(i) or 0) end
+		for i = 157, 512 do sum = sum - (buffer:byte(i) or 0) end
 		if sum == 0 then return "tar", "application/x-tar" end
 	end
 	if check("\xfe\xff") then --[[utf16le bom]]

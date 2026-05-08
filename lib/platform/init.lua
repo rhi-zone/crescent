@@ -97,7 +97,7 @@ function M.load_app(path)
 	do
 		if path:match("%.png$") or path:match("%.jpg$") or path:match("%.jpeg$") or path:match("%.webp$") then
 			local e, c = load_tarball_from_png(path, bytes)
-			if not e then return nil, c end  -- c holds err here on failure
+			if not e then return nil, c --[[:! string | nil]] end  -- c holds err here on failure
 			entries_nn, chunks = e or error("unreachable"), c
 		else
 			local e, lerr = load_tarball_from_targz(bytes)

@@ -310,7 +310,7 @@ function M.import_preset(json_string)
 	if not val.name or type(val.name) ~= "string" or #val.name == 0 then
 		return nil, "preset must have a name"
 	end
-	return val
+	return val --[[:! { name: string, ... }]]
 end
 
 return M
