@@ -15,6 +15,8 @@ local hmac   = require("lib.hash.hmac")
 local base64 = require("lib.base64")
 local json   = require("lib.json")
 
+--:: sign_fn = (key: string, input: string) -> string
+
 -- ── base64url helpers ─────────────────────────────────────────────────────────
 
 -- Encode binary string to base64url (no padding, URL-safe alphabet).
@@ -24,8 +26,8 @@ local function b64url_encode(s)
 end
 
 -- Decode base64url string (with or without padding) to binary.
--- Returns (string) or (nil, errmsg).
---: (string) -> string | (nil, string)
+-- Returns string on success, or nil on error.
+--: (string) -> (string | nil)
 local function b64url_decode(s)
   -- Add padding if needed so base64.decode is happy
   local rem = #s % 4
@@ -52,7 +54,7 @@ end
 -- ── Supported algorithms ──────────────────────────────────────────────────────
 
 -- Map alg name → sign function(key, signing_input) → binary signature
-local ALGORITHMS = {
+local ALGORITHMS = { --: { [string]: sign_fn | nil }
   HS256 = function(key, input) return hmac.sha256_binary(key, input) end,
 }
 
@@ -60,14 +62,15 @@ local ALGORITHMS = {
 
 -- Encode a Lua table to compact JSON with sorted keys.
 -- Returns (string, nil) or (nil, errmsg).
---: (unknown) -> string | (nil, string)
+--: (unknown) -> ((string | nil), (string | nil))
 local function json_encode_sorted(t)
-  return json.encode(t, { sort_keys = true })
+  local opts = { indent = nil --[[: number|nil]], sort_keys = true --[[: boolean|nil]] }
+  return json.encode(t, opts)
 end
 
 -- Split a JWT token string into its three parts.
--- Returns header_b64, payload_b64, sig_b64  OR  nil, nil, nil, errmsg.
---: (string) -> (string, string, string | (nil, nil, nil, string))
+-- Returns header_b64, payload_b64, sig_b64, nil  OR  nil, nil, nil, errmsg.
+--: (string) -> ((string | nil), (string | nil), (string | nil), (string | nil))
 local function split_token(token)
   local parts = {}
   local n = 0
@@ -100,7 +103,7 @@ end
 --- Encode a JWT.
 -- Returns: token_string, nil  OR  nil, errmsg.
 -- opts.alg defaults to "HS256". HS384/HS512 → error. "none" → error.
---: (unknown, string, { alg: string | nil } | nil) -> string | (nil, string)
+--: (unknown, string, { alg: string | nil } | nil) -> ((string | nil), (string | nil))
 function M.encode(payload, secret, opts)
   local alg = (opts and opts.alg) or "HS256"
 
@@ -108,10 +111,11 @@ function M.encode(payload, secret, opts)
     return nil, "alg 'none' not allowed for encoding"
   end
 
-  local sign = ALGORITHMS[alg]
-  if not sign then
+  local sign_raw = ALGORITHMS[alg]
+  if not sign_raw then
     return nil, "algorithm not supported: " .. tostring(alg)
   end
+  local sign = sign_raw --[[:! sign_fn]]
 
   -- Build header
   local header = { alg = alg, typ = "JWT" }
@@ -141,7 +145,7 @@ end
 -- opts.verify (default true): verify signature and time claims.
 -- opts.algorithms: list of accepted algorithm names (default {"HS256"}).
 -- opts.time_fn: required when verify ~= false — function returning unix timestamp.
---: (string, string, { verify: boolean | nil, algorithms: unknown, time_fn: (() -> number) | nil } | nil) -> (unknown, unknown | (nil, string))
+--: (string, string, { verify: boolean | nil, algorithms: unknown, time_fn: (() -> number) | nil } | nil) -> (unknown, unknown)
 function M.decode(token, secret, opts)
   local verify = not (opts and opts.verify == false)
   local allowed_algs
@@ -156,14 +160,15 @@ function M.decode(token, secret, opts)
   if split_err then return nil, split_err end
 
   -- Decode header
-  local header_json, h_err = b64url_decode(header_b64)
-  if not header_json then return nil, "invalid header encoding: " .. (h_err or "") end
-  local header, hj_err = json.decode(header_json)
-  if not header then return nil, "invalid header JSON: " .. (hj_err or "") end
+  local header_json = b64url_decode(header_b64 or "")
+  if not header_json then return nil, "invalid header encoding" end
+  local header_raw, hj_err = json.decode(header_json)
+  if not header_raw then return nil, "invalid header JSON: " .. (hj_err or "") end
+  local header = header_raw --[[:! { alg: string, ... }]]
 
   -- Decode payload
-  local payload_json, p_err = b64url_decode(payload_b64)
-  if not payload_json then return nil, "invalid payload encoding: " .. (p_err or "") end
+  local payload_json = b64url_decode(payload_b64 or "")
+  if not payload_json then return nil, "invalid payload encoding" end
   local payload, pj_err = json.decode(payload_json)
   if not payload then return nil, "invalid payload JSON: " .. (pj_err or "") end
 
@@ -179,36 +184,39 @@ function M.decode(token, secret, opts)
   if not allowed_algs[alg] then
     return nil, "algorithm not allowed: " .. tostring(alg)
   end
-  local sign = ALGORITHMS[alg]
-  if not sign then
+  local sign_raw2 = ALGORITHMS[alg]
+  if not sign_raw2 then
     return nil, "algorithm not supported: " .. tostring(alg)
   end
+  local sign = sign_raw2 --[[:! sign_fn]]
 
   -- Signature verification (timing-safe)
-  local signing_input = header_b64 .. "." .. payload_b64
+  local signing_input = (header_b64 or "") .. "." .. (payload_b64 or "")
   local expected_bin = sign(secret, signing_input)
   local expected_b64 = b64url_encode(expected_bin)
-  if not safe_eq(sig_b64, expected_b64) then
+  if not safe_eq(sig_b64 or "", expected_b64) then
     return nil, "signature verification failed"
   end
 
   -- Time claims
   assert(opts and opts.time_fn, "decode with verify requires opts.time_fn")
-  local now = opts.time_fn()
+  local time_fn = opts.time_fn --[[:! () -> number]]
+  local now = time_fn()
   if type(payload) == "table" then
-    if payload.exp ~= nil then
-      if type(payload.exp) ~= "number" then
+    local tpayload = payload --[[:! { exp: unknown, nbf: unknown, ... }]]
+    if tpayload.exp ~= nil then
+      if type(tpayload.exp) ~= "number" then
         return nil, "invalid exp claim: not a number"
       end
-      if now > payload.exp then
+      if now > tpayload.exp --[[:! number]] then
         return nil, "token expired"
       end
     end
-    if payload.nbf ~= nil then
-      if type(payload.nbf) ~= "number" then
+    if tpayload.nbf ~= nil then
+      if type(tpayload.nbf) ~= "number" then
         return nil, "invalid nbf claim: not a number"
       end
-      if now < payload.nbf then
+      if now < tpayload.nbf --[[:! number]] then
         return nil, "token not yet valid"
       end
     end
@@ -219,18 +227,18 @@ end
 
 --- Decode a JWT without verifying the signature or time claims.
 -- Useful for inspection. Returns: payload_table, header_table  OR  nil, errmsg.
---: (string) -> (unknown, unknown | (nil, string))
+--: (string) -> (unknown, unknown)
 function M.decode_unverified(token)
   local header_b64, payload_b64, _, split_err = split_token(token)
   if split_err then return nil, split_err end
 
-  local header_json, h_err = b64url_decode(header_b64)
-  if not header_json then return nil, "invalid header encoding: " .. (h_err or "") end
+  local header_json = b64url_decode(header_b64 or "")
+  if not header_json then return nil, "invalid header encoding" end
   local header, hj_err = json.decode(header_json)
   if not header then return nil, "invalid header JSON: " .. (hj_err or "") end
 
-  local payload_json, p_err = b64url_decode(payload_b64)
-  if not payload_json then return nil, "invalid payload encoding: " .. (p_err or "") end
+  local payload_json = b64url_decode(payload_b64 or "")
+  if not payload_json then return nil, "invalid payload encoding" end
   local payload, pj_err = json.decode(payload_json)
   if not payload then return nil, "invalid payload JSON: " .. (pj_err or "") end
 

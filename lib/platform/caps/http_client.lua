@@ -21,8 +21,14 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local http   = require("lib.http.client")
-local hfmt   = require("lib.http.format")
-local socket = require("lib.ljsocket")
+local hfmt_raw = require("lib.http.format")
+--:: hfmt_mod = { parse_response: (string, integer | nil) -> (http_response | nil, integer | nil, string | nil), serialize_request: (http_request) -> string, ... }
+--:: http_response = { status: integer, reason: string, version: string, headers: { [string]: string[] }, body: string | nil }
+--:: http_request = { method: string, target: string, version: string, headers: { [string]: string[] }, body: string | nil }
+local hfmt = hfmt_raw --[[:! hfmt_mod]]
+--:: LjSocket = { receive: (self: LjSocket, size: integer | nil, flags: integer | nil) -> (string | nil, string | nil, integer | nil), send: (self: LjSocket, data: string, flags: integer | nil) -> (boolean | nil, string | nil), connect: (self: LjSocket, host: string, port: string) -> (boolean | nil, string | nil), close: (self: LjSocket) -> (boolean | nil, string | nil), ... }
+--:: ljsocket_mod = { create: (string, string, string) -> (LjSocket | nil, string | nil, integer | nil), ... }
+local socket = require("lib.ljsocket") --[[:! ljsocket_mod]]
 local ffi    = require("ffi")
 
 local M = {}
@@ -34,8 +40,9 @@ do
 	-- Try to load libtls: short name first (works when on LD_LIBRARY_PATH),
 	-- then fall back to searching known Nix store paths for LibreSSL.
 	local function try_load(name)
-		local ok, lib = pcall(ffi.load, name)
+		local ok, lib_raw = pcall(ffi.load, name)
 		if not ok then return nil end
+		local lib = lib_raw --[[: any]]
 		-- Attempt to define the minimal API we need.
 		-- pcall: cdef may error if symbols already declared (harmless).
 		pcall(ffi.cdef, [[
@@ -99,11 +106,13 @@ local function tls_make_client(host, port_str)
 end
 
 -- tls_write_all(ctx, data) -> true | nil, err
+--: (unknown, string) -> (boolean | nil, string | nil)
 local function tls_write_all(ctx, data)
-	local pos = 1
+	local pos = 1 --: number
 	local len = #data
 	while pos <= len do
-		local n = tls_lib.tls_write(ctx, data:sub(pos), len - pos + 1)
+		local ipos = pos --[[:! integer]]
+		local n = tls_lib.tls_write(ctx, data:sub(ipos), len - ipos + 1)
 		if n < 0 then
 			local e = tls_lib.tls_error(ctx)
 			return nil, "tls_write failed: " .. (e ~= nil and ffi.string(e) or "unknown")
@@ -150,7 +159,7 @@ local function tls_read_response(ctx)
 	local is_close = header_block:lower():find("connection:%s*close") ~= nil
 
 	if content_length then
-		local cl = tonumber(content_length)
+		local cl = tonumber(content_length) or 0
 		-- Read until we have all body bytes.
 		while #data - body_start + 1 < cl do
 			local n = tls_lib.tls_read(ctx, buf, BUF_SIZE)
@@ -193,11 +202,11 @@ local function tls_read_body_streaming(ctx, on_chunk, body_start_offset, initial
 	-- Determine stop condition from headers.
 	local te = resp_headers and resp_headers["transfer-encoding"]
 	local cl = resp_headers and resp_headers["content-length"]
-	local content_length = cl and tonumber(cl[1])
+	local content_length = (cl and tonumber(cl[1])) or nil --: number | nil
 	local is_chunked = te and te[1] and te[1]:lower():find("chunked", 1, true)
 
 	-- Continue reading body.
-	local body_received = #initial_data - body_start_offset + 1
+	local body_received = #initial_data - body_start_offset + 1 --: number
 	if body_received < 0 then body_received = 0 end
 
 	while true do
@@ -213,7 +222,7 @@ local function tls_read_body_streaming(ctx, on_chunk, body_start_offset, initial
 		else
 			local chunk = ffi.string(buf, n)
 			on_chunk(chunk)
-			body_received = body_received + n
+			body_received = body_received + (tonumber(n) or 0)
 		end
 	end
 	return true
@@ -269,23 +278,27 @@ local function decode_chunked(data)
 		if not size then break end
 		if size == 0 then break end  -- last chunk
 		pos = nl + 2
-		if pos + size - 1 > #data then
+		local chunk_end = pos + size - 1
+		local end_pos = chunk_end --[[:! integer]]
+		if end_pos > #data then
 			return nil, "chunked: truncated chunk"
 		end
-		parts[#parts + 1] = data:sub(pos, pos + size - 1)
-		pos = pos + size + 2  -- skip chunk data + \r\n
+		parts[#parts + 1] = data:sub(pos, end_pos)
+		local next_pos = pos + size + 2
+		pos = next_pos --[[:! integer]]  -- skip chunk data + \r\n
 	end
 	return table.concat(parts)
 end
 
 -- post_process_response(parsed) -> parsed (in-place body decode)
 -- Decodes chunked body if Transfer-Encoding: chunked is set.
+--: (http_response | nil) -> (http_response | nil)
 local function post_process_response(parsed)
 	if not parsed then return parsed end
 	local te = parsed.headers and parsed.headers["transfer-encoding"]
 	if te and te[1] and te[1]:lower():find("chunked", 1, true) then
 		if parsed.body then
-			local decoded = decode_chunked(parsed.body)
+			local decoded, _ = decode_chunked(parsed.body)
 			if decoded then parsed.body = decoded end
 		end
 	end
@@ -300,7 +313,8 @@ end
 -- the whitelist entry ends with "/".
 --: (string[] | nil, string) -> boolean
 local function path_allowed(paths, req_path)
-	if not paths or #paths == 0 then return true end
+	if not paths then return true end
+	if #paths == 0 then return true end
 	for i = 1, #paths do
 		local p = paths[i]
 		if req_path == p then return true end
@@ -376,7 +390,7 @@ function M.http_client_cap(opts)
 	cap.methods = allowed_methods
 
 	-- Non-streaming request.
-	--: ({ method: string, path: string, headers: { [string]: string } | nil, body: string | nil, ... }) -> ({ status: integer, headers: { [string]: string }, body: string | nil } | nil, string)
+	--: ({ method: string, path: string, headers: { [string]: string } | nil, body: string | nil, ... }) -> ({ status: integer, headers: { [string]: string[] }, body: string | nil } | nil, string)
 	function cap.request(req)
 		if revoked then return nil, "capability revoked" end
 		if not req then return nil, "http_client: missing request" end
@@ -413,7 +427,8 @@ function M.http_client_cap(opts)
 			tls_lib.tls_close(ctx); tls_lib.tls_free(ctx)
 			if not resp_raw then return nil, "http_client: TLS read failed: " .. tostring(rerr) end
 
-			local parsed = post_process_response(hfmt.parse_response(resp_raw))
+			local parsed_raw = hfmt.parse_response(resp_raw)
+			local parsed = post_process_response(parsed_raw)
 			if not parsed then return nil, "http_client: invalid HTTP response" end
 			return { status = parsed.status, headers = parsed.headers, body = parsed.body }
 		else
@@ -428,7 +443,8 @@ function M.http_client_cap(opts)
 			})
 			if not resp then return nil, "http_client: request failed: " .. tostring(err) end
 
-			local parsed = post_process_response(hfmt.parse_response(resp))
+			local parsed_raw2 = hfmt.parse_response(resp)
+			local parsed = post_process_response(parsed_raw2)
 			if not parsed then return nil, "http_client: invalid HTTP response" end
 			return { status = parsed.status, headers = parsed.headers, body = parsed.body }
 		end
@@ -436,7 +452,7 @@ function M.http_client_cap(opts)
 
 	-- Streaming request. Calls on_chunk(data) for each received chunk.
 	-- Returns { status, headers } on success (body delivered via callbacks).
-	--: ({ method: string, path: string, headers: { [string]: string } | nil, body: string | nil, ... }, (string) -> nil) -> ({ status: integer, headers: { [string]: string } } | nil, string)
+	--: ({ method: string, path: string, headers: { [string]: string } | nil, body: string | nil, ... }, (string) -> nil) -> ({ status: integer, headers: { [string]: string[] } } | nil, string)
 	function cap.request_stream(req, on_chunk)
 		if revoked then return nil, "capability revoked" end
 		if not req then return nil, "http_client: missing request" end
@@ -524,8 +540,8 @@ function M.http_client_cap(opts)
 			return { status = status, headers = resp_headers }
 		else
 			-- Plain TCP streaming path (original implementation).
-			local client, err = socket.create("inet", "stream", "tcp")
-			if not client then return nil, "http_client: socket failed: " .. tostring(err) end
+			local client, cerr2 = socket.create("inet", "stream", "tcp")
+			if not client then return nil, "http_client: socket failed: " .. tostring(cerr2) end
 
 			local ok
 			ok, err = client:connect(host, port)
@@ -547,7 +563,11 @@ function M.http_client_cap(opts)
 			while true do
 				if revoked then client:close(); return nil, "capability revoked" end
 				local chunk = client:receive()
-				if not chunk or #chunk == 0 then
+				if not chunk then
+					client:close()
+					return nil, "http_client: connection closed before headers"
+				end
+				if #chunk == 0 then
 					client:close()
 					return nil, "http_client: connection closed before headers"
 				end
@@ -581,24 +601,25 @@ function M.http_client_cap(opts)
 
 					-- Determine content-length if present
 					local cl = resp_headers["content-length"]
-					local content_length = cl and tonumber(cl[1])
-					local body_received = #data - body_start + 1
+					local content_length = (cl and tonumber(cl[1])) or nil --: number | nil
+					local body_received = #data - body_start + 1 --: number
 					if body_received < 0 then body_received = 0 end
 
 					-- Read remaining body
 					while true do
 						if revoked then client:close(); return nil, "capability revoked" end
 						if content_length and body_received >= content_length then break end
-						chunk = client:receive()
-						if not chunk or #chunk == 0 then break end
-						body_received = body_received + #chunk
-						on_chunk(chunk)
+						local recv_chunk, _ = client:receive()
+						if not recv_chunk then break end
+						if #recv_chunk == 0 then break end
+						body_received = body_received + #recv_chunk
+						on_chunk(recv_chunk)
 					end
 
 					client:close()
 					return {
-						status  = status,
-						headers = resp_headers,
+						status  = status --[[:! integer]],
+						headers = resp_headers --[[:! { [string]: string[] }]],
 					}
 				end
 			end

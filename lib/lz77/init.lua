@@ -50,9 +50,12 @@ local function le32(n)
 end
 
 -- Decode a 32-bit unsigned integer from 4 little-endian bytes in s at pos.
---: (string, number) -> number
+--: (string, integer) -> number
 local function read_le32(s, pos)
-  local b0, b1, b2, b3 = byte(s, pos, pos + 3)
+  local b0 = byte(s, pos) --[[:! integer]]
+  local b1 = byte(s, pos + 1) --[[:! integer]]
+  local b2 = byte(s, pos + 2) --[[:! integer]]
+  local b3 = byte(s, pos + 3) --[[:! integer]]
   return b0 + b1 * 256 + b2 * 65536 + b3 * 16777216
 end
 
@@ -65,9 +68,10 @@ local function le16(n)
 end
 
 -- Decode a 16-bit unsigned integer from 2 little-endian bytes in s at pos.
---: (string, number) -> number
+--: (string, integer) -> number
 local function read_le16(s, pos)
-  local b0, b1 = byte(s, pos, pos + 1)
+  local b0 = byte(s, pos) --[[:! integer]]
+  local b1 = byte(s, pos + 1) --[[:! integer]]
   return b0 + b1 * 256
 end
 
@@ -75,18 +79,19 @@ end
 
 -- Compute a 3-byte hash index into a table of size window_size.
 -- Returns a key string for use in the hash table.
---: (string, number, number) -> number
+--: (string, integer, number) -> number
 local function hash3(s, pos, window_size)
-  local b1, b2, b3 = byte(s, pos, pos + 2)
+  local b1 = byte(s, pos) --[[:! integer]]
+  local b2 = byte(s, pos + 1) --[[:! integer]]
+  local b3 = byte(s, pos + 2) --[[:! integer]]
   return (b1 * 65536 + b2 * 256 + b3) % window_size
 end
 
 --: (string, ({ window_bits: (number | nil), min_match: (number | nil), max_match: (number | nil) } | nil)) -> ((string | nil), (string | nil))
 local function compress(input, opts)
-  opts = opts or {}
-  local window_bits = opts.window_bits or DEFAULT_WINDOW_BITS
-  local min_match   = opts.min_match   or DEFAULT_MIN_MATCH
-  local max_match   = opts.max_match   or DEFAULT_MAX_MATCH
+  local window_bits = ((opts and opts.window_bits) or DEFAULT_WINDOW_BITS) --[[:! number]]
+  local min_match   = ((opts and opts.min_match)   or DEFAULT_MIN_MATCH) --[[:! number]]
+  local max_match   = ((opts and opts.max_match)   or DEFAULT_MAX_MATCH) --[[:! number]]
 
   if window_bits < 1 or window_bits > 15 then
     return nil, "window_bits must be 1-15"
@@ -103,22 +108,25 @@ local function compress(input, opts)
 
   -- Hash table: hash_key -> list of positions (1-indexed) that had that hash.
   -- We only keep positions within the current window.
-  local ht = {} -- ht[h] = array of positions
+  local ht = {} --: { [number]: integer[] }
+  -- ht[h] = array of positions
 
   local out = { header }
-  local pos = 1   -- current position in input (1-indexed)
+  -- current position in input (1-indexed)
+  local pos = 1 --: number
 
   while pos <= input_len do
     -- Can we attempt a match? Need at least min_match bytes remaining.
     local remaining = input_len - pos + 1
 
     if remaining >= min_match then
-      local h = hash3(input, pos, window_size)
+      local ipos = pos --[[:! integer]]
+      local h = hash3(input, ipos, window_size)
       local chain = ht[h]
 
       -- Search the chain for the best match
-      local best_len  = 0
-      local best_dist = 0
+      local best_len  = 0 --: number
+      local best_dist = 0 --: number
 
       if chain then
         local checked = 0
@@ -130,7 +138,7 @@ local function compress(input, opts)
             -- Measure match length
             local max_len = math.min(max_match, remaining)
             local mlen = 0
-            while mlen < max_len and byte(input, pos + mlen) == byte(input, cand + mlen) do
+            while mlen < max_len and byte(input, ipos + mlen --[[:! integer]]) == byte(input, cand + mlen --[[:! integer]]) do
               mlen = mlen + 1
             end
             if mlen > best_len then
@@ -146,9 +154,9 @@ local function compress(input, opts)
 
       -- Add current position to hash chain
       if not chain then
-        ht[h] = { pos }
+        ht[h] = { ipos }
       else
-        chain[#chain + 1] = pos
+        chain[#chain + 1] = ipos
       end
 
       if best_len >= min_match then
@@ -156,7 +164,7 @@ local function compress(input, opts)
         out[#out + 1] = char(TOK_MATCH) .. le16(best_dist) .. le16(best_len)
         -- Add hash entries for skipped positions
         for skip = 1, best_len - 1 do
-          local sp = pos + skip
+          local sp = ipos + skip --[[:! integer]]
           if sp + 2 <= input_len then
             local sh = hash3(input, sp, window_size)
             local sc = ht[sh]
@@ -167,21 +175,22 @@ local function compress(input, opts)
             end
           end
         end
-        pos = pos + best_len
+        pos = pos + best_len --[[:! number]]
       else
         -- Emit literal token
-        out[#out + 1] = char(TOK_LITERAL, byte(input, pos))
+        out[#out + 1] = char(TOK_LITERAL, byte(input, ipos))
         pos = pos + 1
       end
     else
       -- Not enough bytes for a match; emit literal(s)
       -- Also add to hash if possible
+      local ipos = pos --[[:! integer]]
       if remaining >= min_match then
-        local h = hash3(input, pos, window_size)
+        local h = hash3(input, ipos, window_size)
         local chain = ht[h]
-        if not chain then ht[h] = { pos } else chain[#chain + 1] = pos end
+        if not chain then ht[h] = { ipos } else chain[#chain + 1] = ipos end
       end
-      out[#out + 1] = char(TOK_LITERAL, byte(input, pos))
+      out[#out + 1] = char(TOK_LITERAL, byte(input, ipos))
       pos = pos + 1
     end
   end
@@ -211,7 +220,11 @@ local function decompress(compressed)
     return nil, "invalid magic bytes"
   end
 
-  local window_bits = byte(compressed, 5)
+  local window_bits_raw = byte(compressed, 5)
+  if not window_bits_raw then
+    return nil, "invalid window_bits in header"
+  end
+  local window_bits = window_bits_raw --[[: integer]]
   if window_bits < 1 or window_bits > 15 then
     return nil, "invalid window_bits in header"
   end
@@ -222,11 +235,12 @@ local function decompress(compressed)
   -- Output buffer as table of chars; we'll join at the end.
   -- We also need random access into the output for back-references.
   -- Use a flat array of byte values for efficiency.
-  local out_bytes = {}  -- out_bytes[i] = byte value at output position i (1-indexed)
+  local out_bytes = {} --: { [integer]: integer }
+  -- out_bytes[i] = byte value at output position i (1-indexed)
   local out_pos = 0     -- number of bytes written so far
 
   while pos <= clen do
-    local tok = byte(compressed, pos)
+    local tok = byte(compressed, pos --[[:! integer]])
     pos = pos + 1
 
     if tok == TOK_END then
@@ -235,7 +249,8 @@ local function decompress(compressed)
       if pos > clen then
         return nil, "truncated: missing literal byte"
       end
-      local b = byte(compressed, pos)
+      local ipos2 = pos --[[:! integer]]
+      local b = byte(compressed, ipos2) --[[:! integer]]
       pos = pos + 1
       out_pos = out_pos + 1
       out_bytes[out_pos] = b
@@ -244,8 +259,8 @@ local function decompress(compressed)
       if pos + 3 > clen then
         return nil, "truncated: incomplete match token"
       end
-      local dist = read_le16(compressed, pos)
-      local mlen = read_le16(compressed, pos + 2)
+      local dist = read_le16(compressed, pos --[[:! integer]])
+      local mlen = read_le16(compressed, pos + 2 --[[:! integer]])
       pos = pos + 4
 
       if dist == 0 then
@@ -258,7 +273,7 @@ local function decompress(compressed)
       -- Copy byte-by-byte to handle overlapping matches correctly
       for i = 0, mlen - 1 do
         out_pos = out_pos + 1
-        out_bytes[out_pos] = out_bytes[start + i]
+        out_bytes[out_pos] = out_bytes[start + i --[[:! integer]]] --[[:! integer]]
       end
     else
       return nil, "unknown token type: " .. tostring(tok)
@@ -272,20 +287,24 @@ local function decompress(compressed)
   -- Build output string
   local chars = {}
   for i = 1, out_pos do
-    chars[i] = char(out_bytes[i])
+    chars[i] = char(out_bytes[i --[[:! integer]]] --[[:! integer]])
   end
   return concat(chars), nil
 end
 
 -- ── Streaming compressor ──────────────────────────────────────────────────────
 
---: (({ window_bits: (number | nil), min_match: (number | nil), max_match: (number | nil) } | nil)) -> { write: (string) -> nil, finish: () -> (string | nil) }
+--:: lz77_compressor_handle = { write: (unknown, string) -> nil, finish: (unknown) -> ((string | nil), (string | nil)) }
+
+--: (({ window_bits: (number | nil), min_match: (number | nil), max_match: (number | nil) } | nil)) -> lz77_compressor_handle
 local function compressor(opts)
   local buf = {}
   return {
+    --: (unknown, string) -> nil
     write = function(self, chunk)
       buf[#buf + 1] = chunk
     end,
+    --: (unknown) -> ((string | nil), (string | nil))
     finish = function(self)
       local input = concat(buf)
       local result, err = compress(input, opts)
@@ -296,13 +315,17 @@ end
 
 -- ── Streaming decompressor ────────────────────────────────────────────────────
 
---: () -> { write: (string) -> nil, finish: () -> (string | nil) }
+--:: lz77_decompressor_handle = { write: (unknown, string) -> nil, finish: (unknown) -> ((string | nil), (string | nil)) }
+
+--: () -> lz77_decompressor_handle
 local function decompressor()
   local buf = {}
   return {
+    --: (unknown, string) -> nil
     write = function(self, chunk)
       buf[#buf + 1] = chunk
     end,
+    --: (unknown) -> ((string | nil), (string | nil))
     finish = function(self)
       local input = concat(buf)
       local result, err = decompress(input)
