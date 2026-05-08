@@ -14,8 +14,10 @@ local mod = {}
 --:: epoll = { fd: integer, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: { write: (string) -> nil, remove: () -> nil } }, weak: { [integer]: boolean }, count: integer }
 
 local epoll_ffi
-local read_c
-local write_c
+--: (integer, cdata, integer) -> integer
+local read_c = function(_fd, _buf, _n) error("epoll: read_c not initialized") end
+--: (integer, string, integer) -> integer
+local write_c = function(_fd, _buf, _n) error("epoll: write_c not initialized") end
 
 if ffi.os == "Windows" then
 	--[[@type epoll_ffi]]
@@ -46,8 +48,10 @@ if ffi.os == "Windows" then
 		int epoll_ctl(HANDLE ephnd, int op, SOCKET sock, struct epoll_event* event);
 		int epoll_wait(HANDLE ephnd, struct epoll_event* events, int maxevents, int timeout);
 	]]
-	read_c = function (s, buf, len) return ws2_32.recv(s, buf, len, 0) end
-	write_c = function (s, buf, len) return ws2_32.send(s, buf, len, 0) end
+	--: (integer, cdata, integer) -> integer
+	read_c = function (s, buf, len) return ws2_32.recv(s, buf, len, 0) end --[[:! (integer, cdata, integer) -> integer]]
+	--: (integer, string, integer) -> integer
+	write_c = function (s, buf, len) return ws2_32.send(s, buf, len, 0) end --[[:! (integer, string, integer) -> integer]]
 else
 	--[[@type epoll_ffi]]
 	epoll_ffi = ffi.C
@@ -64,12 +68,12 @@ else
 		int epoll_ctl(int epfd, int op, int fd, struct epoll_event *event);
 		int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout);
 	]]
-	read_c = epoll_ffi.read
-	write_c = epoll_ffi.write
+	read_c = epoll_ffi.read --[[:! (integer, cdata, integer) -> integer]]
+	write_c = epoll_ffi.write --[[:! (integer, string, integer) -> integer]]
 end
 
 local epoll_event = ffi.typeof("struct epoll_event[1]")
-local buf = ffi.new("char[65536]") --[[@type string_c]]
+local buf = ffi.new("char[65536]") --: cdata
 
 --[[@class epoll_event]]
 --[[@field events integer]]
@@ -91,7 +95,7 @@ local epoll = {}
 epoll.__index = epoll
 mod.epoll = epoll
 
---: (epoll) -> epoll
+--: ({ [string]: unknown, ... }) -> epoll
 epoll.new = function (self)
 	--[[@class epoll]]
 	local obj = {
@@ -114,11 +118,12 @@ mod.new = function () return epoll:new() end
 -- parameters, it is called as a bare notification and must read from the fd
 -- itself (e.g. via ljsocket:receive()). Mixing read_c and ljsocket receive on
 -- the same fd is undefined — use one or the other consistently.
-local read_cb = function (fd, read)
+--: (integer, (string) -> nil) -> (() -> nil)
+local read_cb = function (fd, read_fn)
 	return function ()
 		--[[FIXME: ioctl to get full message in one call]]
-		local len = read_c(fd, buf, 65536)
-		if len ~= -1 then read(ffi.string(buf, len)) end
+		local len = read_c(fd, buf, 65536) --[[:! integer]]
+		if len ~= -1 then read_fn(ffi.string(buf, len)) end
 	end
 end
 
@@ -136,56 +141,59 @@ local remove_fd = function (self, fd)
 	end
 end
 
---: (self: epoll, fd: integer, read: (string) -> nil, close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil)
+--: (self: epoll, fd: integer, on_read: (string) -> nil, close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil)
 --[[@return epoll_write? write, epoll_remove? remove, string? err]]
---[[@param fd fd_c]] --[[@param read epoll_read]] --[[@param close epoll_close?]] --[[@param weak boolean? if false, self.count is not incremented]]
-epoll.add = function (self, fd, read, close, weak)
-	local self = self --[[:! epoll]]
+--[[@param fd fd_c]] --[[@param on_read epoll_read]] --[[@param close epoll_close?]] --[[@param weak boolean? if false, self.count is not incremented]]
+epoll.add = function (self, fd, on_read, close, weak)
+	local ep = self --[[:! epoll]]
 	--[[@diagnostic disable-next-line: assign-type-mismatch]]
 	fd = tonumber(fd) --[[:! integer]]
-	if self.read_cbs[fd] then return nil, nil, "epoll: already polling fd: " .. fd end
+	if ep.read_cbs[fd] then return nil, nil, "epoll: already polling fd: " .. fd end
 	local events = epoll_event({ { events = 1, fd = fd } }) --- @type {[0]:epoll_event}
-	local fninfo = debug.getinfo(read)
-	self.read_cbs[fd] = (fninfo.nparams > 0 or fninfo.isvararg) and read_cb(fd, read) or read
+	local on_read_fn = on_read --[[:! (string) -> nil]]
+	local fninfo = debug.getinfo(on_read_fn)
+	ep.read_cbs[fd] = (fninfo.nparams > 0 or fninfo.isvararg) and read_cb(fd, on_read_fn) or on_read_fn
 	local write_buf = ""
-	self.write_cbs[fd] = function ()
+	local epfd = ep.fd --[[:! integer]]
+	ep.write_cbs[fd] = function ()
 		write_c(fd, write_buf, #write_buf)
 		write_buf = ""
 		events[0].events = 1 --[[EPOLLIN]]
-		if epoll_ffi.epoll_ctl(self.fd, --[[EPOLL_CTL_MOD]] 3, fd, events) ~= 0 then
+		if epoll_ffi.epoll_ctl(epfd, --[[EPOLL_CTL_MOD]] 3, fd, events) ~= 0 then
 			error("epoll: write callback failed")
 		end
 	end
-	self.close_cbs[fd] = close
+	ep.close_cbs[fd] = close
 	local write = function (data) --[[@param data string]]
 		write_buf = write_buf .. data
 		events[0].events = 5 --[[EPOLLIN | EPOLLOUT]]
-		if epoll_ffi.epoll_ctl(self.fd, --[[EPOLL_CTL_MOD]] 3, fd, events) ~= 0 then
+		if epoll_ffi.epoll_ctl(epfd, --[[EPOLL_CTL_MOD]] 3, fd, events) ~= 0 then
 			error("epoll: write failed")
 		end
 	end
 	local remove = function ()
-		remove_fd(self, fd)
+		remove_fd(ep, fd)
 		--[[this may silently fail if the socket has been closed.]]
-		epoll_ffi.epoll_ctl(self.fd, --[[EPOLL_CTL_DEL]] 2, fd, events)
+		epoll_ffi.epoll_ctl(epfd, --[[EPOLL_CTL_DEL]] 2, fd, events)
 	end
-	if epoll_ffi.epoll_ctl(self.fd, --[[EPOLL_CTL_ADD]] 1, fd, events) ~= 0 then
+	if epoll_ffi.epoll_ctl(epfd, --[[EPOLL_CTL_ADD]] 1, fd, events) ~= 0 then
 		return nil, nil, "epoll: add failed"
 	end
-	self.rets[fd] = { write = write, remove = remove }
-	if weak then self.weak[fd] = true
-	else self.count = self.count + 1 end
+	ep.rets[fd] = { write = write, remove = remove }
+	if weak then ep.weak[fd] = true
+	else ep.count = ep.count + 1 end
 	return write, remove
 end
 mod.add = epoll.add
 
 --: (epoll, number, (string) -> nil, (() -> nil) | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil)
 --[[@return epoll_write? write, epoll_remove? remove, string? error]]
---[[@param fd fd_c]] --[[@param read epoll_read]] --[[@param close epoll_close?]]
-epoll.modify = function (self, fd, read, close)
+--[[@param fd fd_c]] --[[@param on_read epoll_read]] --[[@param close epoll_close?]]
+epoll.modify = function (self, fd, on_read, close)
 	if not self.read_cbs[fd] then return nil, nil, "epoll: error: not polling fd: " .. fd end
-	local fninfo = debug.getinfo(read)
-	self.read_cbs[fd] = (fninfo.nparams > 0 or fninfo.isvararg) and read_cb(fd, read) or read
+	local on_read_fn = on_read --[[:! (string) -> nil]]
+	local fninfo = debug.getinfo(on_read_fn)
+	self.read_cbs[fd] = (fninfo.nparams > 0 or fninfo.isvararg) and read_cb(fd, on_read_fn) or on_read_fn
 	self.close_cbs[fd] = close
 	local rets = self.rets[fd]
 	--[[@diagnostic disable-next-line: need-check-nil]]

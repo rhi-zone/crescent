@@ -22,29 +22,37 @@ end
 -- that returns (value, errmsg).
 -- ---------------------------------------------------------------------------
 
+--:: StringOpts = { required: boolean | nil, default: string | nil, min_length: integer | nil, max_length: integer | nil, pattern: string | nil }
+--:: NumberOpts = { required: boolean | nil, default: number | nil, min: number | nil, max: number | nil }
+
 -- env.string(opts)
 -- opts: required, default, min_length, max_length, pattern
 function M.string(opts)
-  opts = opts or {}
-  local field = { _kind = "string", opts = opts }
+  local sopts = (opts or {}) --[[:! StringOpts]]
+  local field = { _kind = "string", opts = sopts }
   function field:validate(raw)
+    local raw = raw --[[:! string | nil]]
+    local vopts = self.opts --[[:! StringOpts]]
     if raw == nil or raw == "" then
-      if self.opts.required then
+      if vopts.required then
         return nil, "required"
       end
-      if self.opts.default ~= nil then
-        return self.opts.default, nil
+      if vopts.default ~= nil then
+        return vopts.default, nil
       end
       return nil, nil
     end
-    if self.opts.min_length and #raw < self.opts.min_length then
-      return nil, "min_length is " .. self.opts.min_length .. ", got length " .. #raw
+    local min_len = vopts.min_length
+    if min_len and #raw < min_len then
+      return nil, "min_length is " .. min_len .. ", got length " .. #raw
     end
-    if self.opts.max_length and #raw > self.opts.max_length then
-      return nil, "max_length is " .. self.opts.max_length .. ", got length " .. #raw
+    local max_len = vopts.max_length
+    if max_len and #raw > max_len then
+      return nil, "max_length is " .. max_len .. ", got length " .. #raw
     end
-    if self.opts.pattern and not raw:match(self.opts.pattern) then
-      return nil, "does not match pattern " .. self.opts.pattern
+    local pat = vopts.pattern
+    if pat and not raw:match(pat) then
+      return nil, "does not match pattern " .. pat
     end
     return raw, nil
   end
@@ -54,15 +62,16 @@ end
 -- env.number(opts)
 -- opts: required, default, min, max
 function M.number(opts)
-  opts = opts or {}
-  local field = { _kind = "number", opts = opts }
+  local nopts = (opts or {}) --[[:! NumberOpts]]
+  local field = { _kind = "number", opts = nopts }
   function field:validate(raw)
+    local vopts = self.opts --[[:! NumberOpts]]
     if raw == nil or raw == "" then
-      if self.opts.required then
+      if vopts.required then
         return nil, "required"
       end
-      if self.opts.default ~= nil then
-        return self.opts.default, nil
+      if vopts.default ~= nil then
+        return vopts.default, nil
       end
       return nil, nil
     end
@@ -70,11 +79,13 @@ function M.number(opts)
     if n == nil then
       return nil, "expected number, got " .. string.format("%q", raw)
     end
-    if self.opts.min ~= nil and n < self.opts.min then
-      return nil, "min is " .. self.opts.min .. ", got " .. n
+    local min = vopts.min
+    if min ~= nil and n < min then
+      return nil, "min is " .. min .. ", got " .. n
     end
-    if self.opts.max ~= nil and n > self.opts.max then
-      return nil, "max is " .. self.opts.max .. ", got " .. n
+    local max = vopts.max
+    if max ~= nil and n > max then
+      return nil, "max is " .. max .. ", got " .. n
     end
     return n, nil
   end
@@ -85,15 +96,16 @@ end
 -- opts: required, default, min, max
 -- Rejects values that are not whole numbers.
 function M.integer(opts)
-  opts = opts or {}
-  local field = { _kind = "integer", opts = opts }
+  local nopts = (opts or {}) --[[:! NumberOpts]]
+  local field = { _kind = "integer", opts = nopts }
   function field:validate(raw)
+    local vopts = self.opts --[[:! NumberOpts]]
     if raw == nil or raw == "" then
-      if self.opts.required then
+      if vopts.required then
         return nil, "required"
       end
-      if self.opts.default ~= nil then
-        return self.opts.default, nil
+      if vopts.default ~= nil then
+        return vopts.default, nil
       end
       return nil, nil
     end
@@ -104,11 +116,13 @@ function M.integer(opts)
     if math.floor(n) ~= n then
       return nil, "expected integer (whole number), got " .. raw
     end
-    if self.opts.min ~= nil and n < self.opts.min then
-      return nil, "min is " .. self.opts.min .. ", got " .. n
+    local min = vopts.min
+    if min ~= nil and n < min then
+      return nil, "min is " .. min .. ", got " .. n
     end
-    if self.opts.max ~= nil and n > self.opts.max then
-      return nil, "max is " .. self.opts.max .. ", got " .. n
+    local max = vopts.max
+    if max ~= nil and n > max then
+      return nil, "max is " .. max .. ", got " .. n
     end
     return n, nil
   end
@@ -176,6 +190,7 @@ function M.list(opts)
   local field = { _kind = "list", opts = opts }
   local sep = opts.sep or ","
   function field:validate(raw)
+    local raw = raw --[[:! string | nil]]
     if raw == nil or raw == "" then
       if self.opts.required then
         return nil, "required"
@@ -185,17 +200,18 @@ function M.list(opts)
       end
       return {}, nil
     end
+    local sraw = raw --[[:! string]]
     local items = {}
     -- plain-string split (sep is a literal, not a pattern)
     local start = 1
     local seplen = #sep
     while true do
-      local pos = raw:find(sep, start, true)
+      local pos = sraw:find(sep, start, true)
       if pos then
-        items[#items + 1] = trim(raw:sub(start, pos - 1))
+        items[#items + 1] = trim(sraw:sub(start, pos - 1))
         start = pos + seplen
       else
-        items[#items + 1] = trim(raw:sub(start))
+        items[#items + 1] = trim(sraw:sub(start))
         break
       end
     end
@@ -250,7 +266,10 @@ function M.port(opts)
       if err == "required" then return nil, err end
       if raw ~= nil and raw ~= "" then
         local n = tonumber(raw)
-        if n == nil or math.floor(n) ~= n then
+        if n == nil then
+          return nil, "expected port (integer 1-65535), got " .. string.format("%q", raw)
+        end
+        if math.floor(n) ~= n then
           return nil, "expected port (integer 1-65535), got " .. string.format("%q", raw)
         end
         return nil, "port out of range (1-65535), got " .. raw
