@@ -4,7 +4,8 @@ end
 
 local M = {}
 
---:: Model = { ... }
+--:: TreeNode = { value: number | nil, feature: number | nil, threshold: number | nil, left: TreeNode | nil, right: TreeNode | nil, gain: number | nil }
+--:: Model = { trees: TreeNode[], n_estimators: integer, learning_rate: number, objective: string, base_prediction: number }
 
 -- ── LCG random number generator ─────────────────────────────────────────────
 
@@ -52,16 +53,18 @@ end
 
 -- ── Tree building ───────────────────────────────────────────────────────────
 
---: { feature: (number | nil), threshold: (number | nil), left: (any | nil), right: (any | nil), value: (number | nil), gain: (number | nil) }
+--: TreeNode
 
+--: (indices: integer[], grads: number[], hessians: number[], lambda: number) -> TreeNode
 local function make_leaf(indices, grads, hessians, lambda)
-  local G, H = 0, 0
+  local G = 0.0 --: number
+  local H = 0.0 --: number
   for i = 1, #indices do
     local idx = indices[i]
     G = G + grads[idx]
     H = H + hessians[idx]
   end
-  return { value = -G / (H + lambda) }
+  return { value = -G / (H + lambda), feature = nil, threshold = nil, left = nil, right = nil, gain = nil }
 end
 
 local function find_best_split(X, indices, grads, hessians, feature_subset, lambda, gamma, min_samples_leaf)
@@ -123,6 +126,7 @@ local function find_best_split(X, indices, grads, hessians, feature_subset, lamb
   return nil
 end
 
+--: (X: number[][], indices: integer[], grads: number[], hessians: number[], feature_subset: integer[], opts: { max_depth: integer, min_samples_split: integer, min_samples_leaf: integer, lambda: number, gamma: number }, depth: integer) -> TreeNode
 local function build_tree(X, indices, grads, hessians, feature_subset, opts, depth)
   local n = #indices
   local lambda = opts.lambda
@@ -143,10 +147,11 @@ local function build_tree(X, indices, grads, hessians, feature_subset, opts, dep
     return make_leaf(indices, grads, hessians, lambda)
   end
 
-  local left = build_tree(X, left_idx, grads, hessians, feature_subset, opts, depth + 1)
-  local right = build_tree(X, right_idx, grads, hessians, feature_subset, opts, depth + 1)
+  local left = build_tree(X, left_idx --[[:! { [number]: integer }]], grads, hessians, feature_subset, opts, depth + 1)
+  local right = build_tree(X, right_idx --[[:! { [number]: integer }]], grads, hessians, feature_subset, opts, depth + 1)
 
   return {
+    value = nil,
     feature = feat,
     threshold = thresh,
     left = left,
@@ -157,12 +162,13 @@ end
 
 -- ── Tree prediction ─────────────────────────────────────────────────────────
 
+--: (tree: TreeNode, x: number[]) -> number
 local function tree_predict_one(tree, x)
   if tree.value then return tree.value end
-  if x[tree.feature] < tree.threshold then
-    return tree_predict_one(tree.left, x)
+  if x[tree.feature --[[:! number]]] < (tree.threshold --[[:! number]]) then
+    return tree_predict_one(tree.left --[[:! TreeNode]], x)
   else
-    return tree_predict_one(tree.right, x)
+    return tree_predict_one(tree.right --[[:! TreeNode]], x)
   end
 end
 
@@ -171,6 +177,7 @@ end
 local Model = {}
 Model.__index = Model
 
+--: (self: Model, x: number[]) -> number
 function Model:predict_one(x)
   local raw = self.base_prediction
   for i = 1, #self.trees do
@@ -202,10 +209,11 @@ end
 
 function Model:feature_importance()
   local importance = {}
+  --: (node: TreeNode | nil) -> nil
   local function walk(node)
     if not node or node.value then return end
     local feat = node.feature
-    importance[feat] = (importance[feat] or 0) + (node.gain or 0)
+    importance[feat --[[:! number]]] = (importance[feat --[[:! number]]] or 0) + (node.gain or 0)
     walk(node.left)
     walk(node.right)
   end
@@ -277,7 +285,7 @@ end
 
 --: (X: number[][], y: number[], opts: ({ n_estimators: integer | nil, max_depth: integer | nil, learning_rate: number | nil, min_samples_split: integer | nil, min_samples_leaf: integer | nil, subsample: number | nil, colsample: number | nil, lambda: number | nil, gamma: number | nil, objective: string | nil, seed: integer | nil, ... } | nil)) -> Model
 function M.train(X, y, opts)
-  opts = opts or {}
+  opts = opts or {} --[[:! { n_estimators: integer | nil, max_depth: integer | nil, learning_rate: number | nil, min_samples_split: integer | nil, min_samples_leaf: integer | nil, subsample: number | nil, colsample: number | nil, lambda: number | nil, gamma: number | nil, objective: string | nil, seed: integer | nil, ... }]]
   local n_estimators = opts.n_estimators or 100
   local max_depth = opts.max_depth or 6
   local learning_rate = opts.learning_rate or 0.3
@@ -314,21 +322,21 @@ function M.train(X, y, opts)
   }
 
   -- base prediction
-  local base_prediction = 0
+  local base_prediction = 0.0 --: number
   if objective == "mse" then
-    local sum = 0
+    local sum = 0.0 --: number
     for i = 1, n do sum = sum + y[i] end
     base_prediction = sum / n
   end
   -- for logistic, start at 0 (log-odds of 0.5)
 
   -- current raw predictions
-  local preds = {}
+  local preds = {} --: number[]
   for i = 1, n do preds[i] = base_prediction end
 
-  local grads = {}
-  local hessians = {}
-  local trees = {}
+  local grads = {} --: number[]
+  local hessians = {} --: number[]
+  local trees = {} --: TreeNode[]
 
   for round = 1, n_estimators do
     -- compute gradients and hessians

@@ -69,7 +69,7 @@ function M.from_array(arr)
   end)
 end
 
---: ((() -> unknown, unknown, unknown)) -> Stream
+--: (iter_fn: ((unknown, unknown) -> (unknown, unknown)), state: unknown, init: unknown) -> Stream
 function M.from_iter(iter_fn, state, init)
   local ctrl = init
   return wrap(function()
@@ -238,15 +238,15 @@ end
 --: (self: Stream, fn: (unknown) -> unknown[] | Stream) -> Stream
 function Stream:flat_map(fn)
   local next_fn = self.next
-  local inner = nil -- current inner stream or array iterator
-  local inner_arr = nil
+  local inner = nil --: (() -> unknown) | nil
+  local inner_arr = nil --: { [number]: unknown } | nil
   local inner_idx = 0
   local inner_len = 0
   return wrap(function()
     while true do
       -- try to get from inner source
       if inner then
-        local v = inner()
+        local v = (inner --[[:! () -> unknown]])()
         if v ~= nil then return v end
         inner = nil
       end
@@ -266,7 +266,7 @@ function Stream:flat_map(fn)
       elseif getmetatable(result) == Stream then
         inner = result.next
         -- immediately try to get first element
-        local first = inner()
+        local first = (inner --[[:! () -> unknown]])()
         if first ~= nil then return first end
         inner = nil
       elseif type(result) == "table" then
@@ -327,7 +327,8 @@ end
 --: (self: Stream) -> Stream
 function Stream:unique()
   local next_fn = self.next
-  local prev = {} -- unique sentinel
+  -- unique sentinel: prev tracks last-seen value
+  local prev = {} --: unknown
   return wrap(function()
     while true do
       local v = next_fn()
@@ -433,14 +434,15 @@ end
 
 --: (self: Stream) -> unknown[]
 function Stream:to_array()
-  local result = {}
-  local n = 0
+  local result = {} --: { [number]: unknown }
+  local n = 0 --: number
   while true do
     local v = self.next()
     if v == nil then return result end
     n = n + 1
     result[n] = v
   end
+  return result
 end
 
 --: (self: Stream, init: unknown, fn: (unknown, unknown) -> unknown) -> unknown
@@ -464,42 +466,48 @@ end
 
 --: () -> integer
 function Stream:count()
-  local n = 0
+  local n = 0 --: integer
   while true do
     local v = self.next()
     if v == nil then return n end
     n = n + 1
   end
+  return 0
 end
 
 --: () -> number
 function Stream:sum()
-  local s = 0
+  local s = 0.0 --: number
   while true do
     local v = self.next()
     if v == nil then return s end
-    s = s + v
+    s = s + (v --[[:! number]])
   end
+  return 0.0
 end
 
 --: (self: Stream) -> number | nil
 function Stream:min()
-  local m = nil
+  local m = nil --: number | nil
   while true do
     local v = self.next()
     if v == nil then return m end
-    if m == nil or v < m then m = v end
+    local vn = v --[[:! number]]
+    if m == nil then m = vn elseif vn < (m --[[:! number]]) then m = vn end
   end
+  return nil
 end
 
 --: (self: Stream) -> number | nil
 function Stream:max()
-  local m = nil
+  local m = nil --: number | nil
   while true do
     local v = self.next()
     if v == nil then return m end
-    if m == nil or v > m then m = v end
+    local vn = v --[[:! number]]
+    if m == nil then m = vn elseif vn > (m --[[:! number]]) then m = vn end
   end
+  return nil
 end
 
 --: (self: Stream, fn: (unknown) -> boolean) -> unknown | nil
@@ -518,6 +526,7 @@ function Stream:any(fn)
     if v == nil then return false end
     if fn(v) then return true end
   end
+  return false
 end
 
 --: ((unknown) -> boolean) -> boolean
@@ -527,6 +536,7 @@ function Stream:all(fn)
     if v == nil then return true end
     if not fn(v) then return false end
   end
+  return true
 end
 
 --: ((unknown) -> boolean) -> boolean
@@ -536,6 +546,7 @@ function Stream:none(fn)
     if v == nil then return true end
     if fn(v) then return false end
   end
+  return true
 end
 
 --: (self: Stream) -> unknown | nil
@@ -565,22 +576,24 @@ end
 function Stream:join(sep)
   sep = sep or ""
   local parts = self:to_array()
-  return table.concat(parts, sep)
+  return table.concat(parts --[[:! { [integer]: string | number }]], sep)
 end
 
 --: (self: Stream, key_fn: (unknown) -> unknown) -> { [unknown]: unknown }
 function Stream:to_map(key_fn)
-  local result = {}
+  local result = {} --: { [unknown]: unknown }
   while true do
     local v = self.next()
     if v == nil then return result end
     result[key_fn(v)] = v
   end
+  return result
 end
 
 --: (self: Stream, fn: (unknown) -> boolean) -> (unknown[], unknown[])
 function Stream:partition(fn)
-  local pass, fail = {}, {}
+  local pass = {} --: { [number]: unknown }
+  local fail = {} --: { [number]: unknown }
   local np, nf = 0, 0
   while true do
     local v = self.next()
@@ -593,22 +606,24 @@ function Stream:partition(fn)
       fail[nf] = v
     end
   end
+  return pass, fail
 end
 
 --: (self: Stream, fn: (unknown) -> unknown) -> { [unknown]: unknown[] }
 function Stream:group_by(fn)
-  local result = {}
+  local result = {} --: { [unknown]: { [number]: unknown } }
   while true do
     local v = self.next()
     if v == nil then return result end
     local key = fn(v)
     local group = result[key]
     if not group then
-      group = {}
+      group = {} --: { [number]: unknown }
       result[key] = group
     end
     group[#group + 1] = v
   end
+  return result
 end
 
 M._Stream = Stream

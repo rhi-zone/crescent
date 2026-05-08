@@ -18,6 +18,11 @@ local NODE_LEAF       = 1
 local NODE_INTERIOR   = 2
 local NODE_COLLISION  = 3
 
+--:: HamtLeaf = { type: integer, hash: number, key: unknown, val: unknown }
+--:: HamtCollision = { type: integer, hash: number, entries: { [number]: { [number]: unknown } } }
+--:: HamtInterior = { type: integer, bitmap: integer, children: { [number]: HamtNode } }
+--:: HamtNode = HamtLeaf | HamtCollision | HamtInterior
+
 -- 32-way branching: 5 bits per level, 6 levels covers 30 bits
 local BITS = 5
 local WIDTH = 32  -- 2^5
@@ -85,15 +90,18 @@ end
 
 -- ── Node constructors ─────────────────────────────────────────────────────────
 
+--: (hash: number, key: unknown, val: unknown) -> HamtLeaf
 local function make_leaf(hash, key, val)
   return { type = NODE_LEAF, hash = hash, key = key, val = val }
 end
 
+--: (hash: number, entries: { [number]: { [number]: unknown } }) -> HamtCollision
 local function make_collision(hash, entries)
   -- entries: array of {key, val} pairs sharing the same hash
   return { type = NODE_COLLISION, hash = hash, entries = entries }
 end
 
+--: (bitmap: integer, children: { [number]: HamtNode }) -> HamtInterior
 local function make_interior(bitmap, children)
   -- children: sparse array indexed by popcount of bits below
   return { type = NODE_INTERIOR, bitmap = bitmap, children = children }
@@ -102,34 +110,39 @@ end
 -- ── Trie operations ───────────────────────────────────────────────────────────
 
 -- Get value from subtree rooted at `node` for key with given hash at `shift` bits
+--: (node: HamtNode | nil, hash: number, key: unknown, shift: integer) -> unknown
 local function trie_get(node, hash, key, shift)
   if node == nil then return nil end
   local ntype = node.type
 
   if ntype == NODE_LEAF then
-    if node.hash == hash and node.key == key then
-      return node.val
+    local leaf = node --[[:! HamtLeaf]]
+    if leaf.hash == hash and leaf.key == key then
+      return leaf.val
     end
     return nil
 
   elseif ntype == NODE_COLLISION then
-    if node.hash ~= hash then return nil end
-    for _, e in ipairs(node.entries) do
+    local coll = node --[[:! HamtCollision]]
+    if coll.hash ~= hash then return nil end
+    for _, e in ipairs(coll.entries) do
       if e[1] == key then return e[2] end
     end
     return nil
 
   elseif ntype == NODE_INTERIOR then
+    local inode = node --[[:! HamtInterior]]
     local frag = band(rshift(hash, shift), MASK)
     local bit_pos = lshift(1, frag)
-    if band(node.bitmap, bit_pos) == 0 then return nil end
-    local idx = sparse_index(node.bitmap, bit_pos) + 1
-    return trie_get(node.children[idx], hash, key, shift + BITS)
+    if band(inode.bitmap, bit_pos) == 0 then return nil end
+    local idx = sparse_index(inode.bitmap, bit_pos) + 1
+    return trie_get(inode.children[idx], hash, key, shift + BITS)
   end
   return nil
 end
 
 -- Copy array with one element replaced/inserted at position idx
+--: (arr: { [number]: HamtNode }, idx: integer, val: HamtNode) -> { [number]: HamtNode }
 local function array_set(arr, idx, val)
   local n = #arr
   local new = {}
@@ -139,6 +152,7 @@ local function array_set(arr, idx, val)
 end
 
 -- Copy array with one element inserted at position idx (shifting right)
+--: (arr: { [number]: HamtNode }, idx: integer, val: HamtNode) -> { [number]: HamtNode }
 local function array_insert(arr, idx, val)
   local n = #arr
   local new = {}
@@ -149,6 +163,7 @@ local function array_insert(arr, idx, val)
 end
 
 -- Copy array with element at idx removed (shifting left)
+--: (arr: { [number]: HamtNode }, idx: integer) -> { [number]: HamtNode }
 local function array_remove(arr, idx)
   local n = #arr
   local new = {}
@@ -159,6 +174,7 @@ end
 
 -- Merge two leaves (or a leaf and an existing subtree) that both belong at a
 -- deeper level (they differ somewhere at shift..shift+BITS-1 or deeper).
+--: (existing: HamtLeaf | HamtCollision, new_leaf: HamtLeaf, shift: integer) -> HamtNode
 local function merge_leaves(existing, new_leaf, shift)
   -- Both are leaves (or collision node) — need to push them down
   local e_hash = existing.hash
@@ -167,25 +183,29 @@ local function merge_leaves(existing, new_leaf, shift)
   if e_hash == n_hash then
     -- True collision — make or extend a collision node
     if existing.type == NODE_COLLISION then
+      local coll = existing --[[:! HamtCollision]]
       -- Replace or append
-      local entries = existing.entries
+      local entries = coll.entries
       for i, e in ipairs(entries) do
         if e[1] == new_leaf.key then
-          local new_entries = array_set(entries, i, {new_leaf.key, new_leaf.val})
+          local new_entries = {} --: { [number]: { [number]: unknown } }
+          for j, x in ipairs(entries) do new_entries[j] = x end
+          new_entries[i] = {new_leaf.key, new_leaf.val}
           return make_collision(e_hash, new_entries)
         end
       end
       -- Not found — append
-      local new_entries = {}
+      local new_entries = {} --: { [number]: { [number]: unknown } }
       for i, e in ipairs(entries) do new_entries[i] = e end
       new_entries[#new_entries + 1] = {new_leaf.key, new_leaf.val}
       return make_collision(e_hash, new_entries)
     else
+      local leaf = existing --[[:! HamtLeaf]]
       -- Both are leaves with same hash
-      if existing.key == new_leaf.key then
+      if leaf.key == new_leaf.key then
         return new_leaf  -- replace
       end
-      return make_collision(e_hash, {{existing.key, existing.val}, {new_leaf.key, new_leaf.val}})
+      return make_collision(e_hash, {{leaf.key, leaf.val}, {new_leaf.key, new_leaf.val}})
     end
   end
 
@@ -197,7 +217,7 @@ local function merge_leaves(existing, new_leaf, shift)
     -- Same fragment at this level — push both down
     local child = merge_leaves(existing, new_leaf, shift + BITS)
     local bit_pos = lshift(1, e_frag)
-    return make_interior(bit_pos, {child})
+    return make_interior(bit_pos, {child} --[[:! { [number]: HamtNode }]])
   else
     local e_bit = lshift(1, e_frag)
     local n_bit = lshift(1, n_frag)
@@ -214,6 +234,7 @@ end
 
 -- Insert/update: returns (new_node, size_delta)
 -- size_delta is +1 if new key, 0 if replace
+--: (node: HamtNode | nil, hash: number, key: unknown, val: unknown, shift: integer) -> (HamtNode, integer)
 local function trie_set(node, hash, key, val, shift)
   if node == nil then
     return make_leaf(hash, key, val), 1
@@ -222,46 +243,52 @@ local function trie_set(node, hash, key, val, shift)
   local ntype = node.type
 
   if ntype == NODE_LEAF then
-    if node.hash == hash and node.key == key then
+    local leaf = node --[[:! HamtLeaf]]
+    if leaf.hash == hash and leaf.key == key then
       -- Replace value
       return make_leaf(hash, key, val), 0
     else
       -- Need to split
-      return merge_leaves(node, make_leaf(hash, key, val), shift), 1
+      return merge_leaves(leaf, make_leaf(hash, key, val), shift), 1
     end
 
   elseif ntype == NODE_COLLISION then
-    if node.hash ~= hash then
+    local coll = node --[[:! HamtCollision]]
+    if coll.hash ~= hash then
       -- Different hash — merge with new leaf into interior
-      return merge_leaves(node, make_leaf(hash, key, val), shift), 1
+      return merge_leaves(coll, make_leaf(hash, key, val), shift), 1
     end
     -- Same hash — replace or append in collision entries
-    local entries = node.entries
+    local entries = coll.entries
     for i, e in ipairs(entries) do
       if e[1] == key then
-        local new_entries = array_set(entries, i, {key, val})
+        local new_entries = {} --: { [number]: { [number]: unknown } }
+        for j, x in ipairs(entries) do new_entries[j] = x end
+        new_entries[i] = {key, val}
         return make_collision(hash, new_entries), 0
       end
     end
-    local new_entries = {}
+    local new_entries = {} --: { [number]: { [number]: unknown } }
     for i, e in ipairs(entries) do new_entries[i] = e end
     new_entries[#new_entries + 1] = {key, val}
     return make_collision(hash, new_entries), 1
 
   elseif ntype == NODE_INTERIOR then
+    local inode = node --[[:! HamtInterior]]
     local frag = band(rshift(hash, shift), MASK)
     local bit_pos = lshift(1, frag)
-    local idx = sparse_index(node.bitmap, bit_pos) + 1
+    local idx = sparse_index(inode.bitmap, bit_pos) + 1
 
-    if band(node.bitmap, bit_pos) == 0 then
+    if band(inode.bitmap, bit_pos) == 0 then
       -- Slot empty — insert new leaf here
-      local new_children = array_insert(node.children, idx, make_leaf(hash, key, val))
-      return make_interior(bor(node.bitmap, bit_pos), new_children), 1
+      local new_children = array_insert(inode.children, idx, make_leaf(hash, key, val)) --[[:! { [number]: HamtNode }]]
+      return make_interior(bor(inode.bitmap, bit_pos), new_children), 1
     else
       -- Recurse into existing child
-      local child, delta = trie_set(node.children[idx], hash, key, val, shift + BITS)
-      local new_children = array_set(node.children, idx, child)
-      return make_interior(node.bitmap, new_children), delta
+      local child, idelta = trie_set(inode.children[idx], hash, key, val, shift + BITS)
+      local idelta_int = (idelta or 0) --: integer
+      local new_children = array_set(inode.children, idx, child) --[[:! { [number]: HamtNode }]]
+      return make_interior(inode.bitmap, new_children), idelta_int
     end
   end
 
@@ -272,20 +299,23 @@ end
 -- Delete: returns (new_node_or_nil, size_delta)
 -- new_node is nil if the subtree becomes empty
 -- size_delta is -1 if deleted, 0 if not found
+--: (node: HamtNode | nil, hash: number, key: unknown, shift: integer) -> (HamtNode | nil, integer)
 local function trie_delete(node, hash, key, shift)
   if node == nil then return nil, 0 end
 
   local ntype = node.type
 
   if ntype == NODE_LEAF then
-    if node.hash == hash and node.key == key then
+    local leaf = node --[[:! HamtLeaf]]
+    if leaf.hash == hash and leaf.key == key then
       return nil, -1
     end
-    return node, 0
+    return leaf, 0
 
   elseif ntype == NODE_COLLISION then
-    if node.hash ~= hash then return node, 0 end
-    local entries = node.entries
+    local coll = node --[[:! HamtCollision]]
+    if coll.hash ~= hash then return coll, 0 end
+    local entries = coll.entries
     for i, e in ipairs(entries) do
       if e[1] == key then
         if #entries == 2 then
@@ -293,29 +323,33 @@ local function trie_delete(node, hash, key, shift)
           local other = entries[i == 1 and 2 or 1]
           return make_leaf(hash, other[1], other[2]), -1
         end
-        local new_entries = array_remove(entries, i)
+        local new_entries = {} --: { [number]: { [number]: unknown } }
+        for j, x in ipairs(entries) do
+          if j ~= i then new_entries[#new_entries + 1] = x end
+        end
         return make_collision(hash, new_entries), -1
       end
     end
-    return node, 0
+    return coll, 0
 
   elseif ntype == NODE_INTERIOR then
+    local inode = node --[[:! HamtInterior]]
     local frag = band(rshift(hash, shift), MASK)
     local bit_pos = lshift(1, frag)
 
-    if band(node.bitmap, bit_pos) == 0 then
-      return node, 0  -- key not present
+    if band(inode.bitmap, bit_pos) == 0 then
+      return inode, 0  -- key not present
     end
 
-    local idx = sparse_index(node.bitmap, bit_pos) + 1
-    local child, delta = trie_delete(node.children[idx], hash, key, shift + BITS)
+    local idx = sparse_index(inode.bitmap, bit_pos) + 1
+    local child, delta = trie_delete(inode.children[idx], hash, key, shift + BITS)
 
-    if delta == 0 then return node, 0 end
+    if delta == 0 then return inode, 0 end
 
     if child == nil then
       -- Remove slot from interior
-      local new_children = array_remove(node.children, idx)
-      local new_bitmap = band(node.bitmap, bxor(0xFFFFFFFF, bit_pos))
+      local new_children = array_remove(inode.children, idx)
+      local new_bitmap = band(inode.bitmap, bxor(0xFFFFFFFF, bit_pos))
       -- If only one child remains and it's a leaf, collapse
       if new_bitmap ~= 0 and #new_children == 1 then
         local only = new_children[1]
@@ -328,8 +362,8 @@ local function trie_delete(node, hash, key, shift)
       end
       return make_interior(new_bitmap, new_children), -1
     else
-      local new_children = array_set(node.children, idx, child)
-      return make_interior(node.bitmap, new_children), -1
+      local new_children = array_set(inode.children, idx, child)
+      return make_interior(inode.bitmap, new_children), -1
     end
   end
 
@@ -337,17 +371,21 @@ local function trie_delete(node, hash, key, shift)
 end
 
 -- Iterate all entries in a subtree, calling fn(key, val)
+--: (node: HamtNode | nil, fn: (unknown, unknown) -> nil) -> nil
 local function trie_each(node, fn)
   if node == nil then return end
   local ntype = node.type
   if ntype == NODE_LEAF then
-    fn(node.key, node.val)
+    local leaf = node --[[:! HamtLeaf]]
+    fn(leaf.key, leaf.val)
   elseif ntype == NODE_COLLISION then
-    for _, e in ipairs(node.entries) do
+    local coll = node --[[:! HamtCollision]]
+    for _, e in ipairs(coll.entries) do
       fn(e[1], e[2])
     end
   elseif ntype == NODE_INTERIOR then
-    for _, child in ipairs(node.children) do
+    local inode = node --[[:! HamtInterior]]
+    for _, child in ipairs(inode.children) do
       trie_each(child, fn)
     end
   end
@@ -355,31 +393,41 @@ end
 
 -- ── Map object ────────────────────────────────────────────────────────────────
 
+--:: HamtMap = { _root: HamtNode | nil, _size: integer, ... }
+
 local Map = {}
 Map.__index = Map
 
+--: (self: HamtMap, key: unknown) -> unknown
 function Map:get(key)
   return trie_get(self._root, hash_key(key), key, 0)
 end
 
+--: (self: HamtMap, key: unknown) -> boolean
 function Map:has(key)
   return trie_get(self._root, hash_key(key), key, 0) ~= nil
 end
 
+--: (self: HamtMap, key: unknown, val: unknown) -> HamtMap
 function Map:set(key, val)
-  local new_root, delta = trie_set(self._root, hash_key(key), key, val, 0)
+  local results = {trie_set(self._root, hash_key(key), key, val, 0)}
+  local new_root = results[1] --[[:! HamtNode]]
+  local delta = results[2] --[[:! integer]]
   local new_map = setmetatable({}, Map)
   new_map._root = new_root
-  new_map._size = self._size + delta
+  new_map._size = (self._size --[[:! integer]]) + delta
   return new_map
 end
 
+--: (self: HamtMap, key: unknown) -> HamtMap
 function Map:delete(key)
-  local new_root, delta = trie_delete(self._root, hash_key(key), key, 0)
+  local results = {trie_delete(self._root, hash_key(key), key, 0)}
+  local new_root = results[1] --[[:! HamtNode | nil]]
+  local delta = results[2] --[[:! integer]]
   if delta == 0 then return self end
   local new_map = setmetatable({}, Map)
   new_map._root = new_root
-  new_map._size = self._size + delta
+  new_map._size = (self._size --[[:! integer]]) + delta
   return new_map
 end
 
