@@ -159,12 +159,12 @@ end
 -- ---------------------------------------------------------------------------
 
 local function max_words(a, b)
-  return math.max(#a.words, #b.words) --[[:! integer]]
+  return math.max((#a.words) --[[:! integer]], (#b.words) --[[:! integer]]) --[[:! integer]]
 end
 
 --- Bitwise AND — returns new bitset. Words beyond either bitset are 0 AND x = 0.
 function BS:band(other)
-  local nw = math.min(#self.words, #other.words)
+  local nw = math.min((#self.words) --[[:! integer]], (#other.words) --[[:! integer]])
   local result = M.new()
   for i = 1, nw do
     result.words[i] = band(self.words[i], other.words[i])
@@ -360,7 +360,7 @@ end
 -- ---------------------------------------------------------------------------
 
 function BS:eq(other)
-  local nw = math.max(#self.words, #other.words)
+  local nw = math.max((#self.words) --[[:! integer]], (#other.words) --[[:! integer]])
   local sw, ow = self.words, other.words
   for i = 1, nw do
     if (sw[i] or 0) ~= (ow[i] or 0) then return false end
@@ -386,7 +386,7 @@ end
 --- Returns true if self and other share at least one set bit.
 function BS:intersects(other)
   local sw, ow = self.words, other.words
-  local nw = math.min(#sw, #ow)
+  local nw = math.min((#sw) --[[:! integer]], (#ow) --[[:! integer]])
   for i = 1, nw do
     if band(sw[i], ow[i]) ~= 0 then return true end
   end

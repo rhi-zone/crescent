@@ -89,7 +89,8 @@ local function parse_chat_response(body)
 	local data = raw --[[:! openai_chat_response]]
 
 	if data.error then
-		return nil, data.error.message or json.encode(data.error) or "openai error"
+		local encoded_err = json.encode(data.error)
+		return nil, data.error.message or encoded_err or "openai error"
 	end
 
 	local choices_opt = data.choices
@@ -379,7 +380,7 @@ mod.create = function(config)
 		data_raw, err = json.decode(res.body or "")
 		if not data_raw then return nil, "json decode: " .. (err or "unknown") end
 		local data = data_raw --[[:! openai_embed_response]]
-		if data.error then return nil, data.error.message or json.encode(data.error) or "openai error" end
+		if data.error then local encoded_err = json.encode(data.error); return nil, data.error.message or encoded_err or "openai error" end
 
 		local items_opt = data.data
 		if not items_opt then return nil, "no embeddings in response" end
@@ -430,7 +431,7 @@ mod.create = function(config)
 		data_raw, err = json.decode(res.body or "")
 		if not data_raw then return nil, "json decode: " .. (err or "unknown") end
 		local data = data_raw --[[:! openai_embed_response]]
-		if data.error then return nil, data.error.message or json.encode(data.error) or "openai error" end
+		if data.error then local encoded_err = json.encode(data.error); return nil, data.error.message or encoded_err or "openai error" end
 
 		local items_opt = data.data
 		if not items_opt then return nil, "no embeddings in response" end
@@ -492,7 +493,7 @@ mod.create = function(config)
 		data_raw, err = json.decode(res.body or "")
 		if not data_raw then return nil, "json decode: " .. (err or "unknown") end
 		local data = data_raw --[[:! openai_image_response]]
-		if data.error then return nil, data.error.message or json.encode(data.error) or "openai error" end
+		if data.error then local encoded_err = json.encode(data.error); return nil, data.error.message or encoded_err or "openai error" end
 
 		local images = {}
 		local items = data.data or {}

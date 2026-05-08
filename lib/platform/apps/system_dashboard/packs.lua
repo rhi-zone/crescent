@@ -50,7 +50,7 @@ end
 -- Resolve effective caps for an action by merging pack-level caps with
 -- action-level caps. Action-level wins on name collision.
 -- Returns the merged caps table (always a table, never nil).
---: (any, any) -> { [string]: any }
+--: (unknown, unknown) -> { [string]: any }
 local function resolve_action_caps(action_caps, pack_caps)
 	local out = {} --: { [string]: any }
 	if type(pack_caps) == "table" then
@@ -115,9 +115,9 @@ end
 -- Flatten a pack table into (aliases[], pack_meta).
 -- Each alias gets .pack_name set to the pack's name field.
 -- warn_fn(msg), if provided, is called for each skipped invalid action.
---: (pack: unknown, pack_name: string, warn_fn: ((msg: string) -> nil) | nil) -> ({ [integer]: unknown }, { name: string, description: string, author: string })
+--: (pack: unknown, pack_name: string, warn_fn: ((msg: string) -> nil) | nil) -> ({ [integer]: unknown }, { name: string, description: string, author: string, version: string })
 local function flatten_pack(pack, pack_name, warn_fn)
-	local pack_t = pack --: any
+	local pack_t = pack --[[:! { [string]: unknown, ... }]]
 	local name = tostring(pack_t.name or pack_name)
 	local meta = {
 		name        = name,
