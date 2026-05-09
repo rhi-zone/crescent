@@ -335,7 +335,7 @@ function M.arb_value_for(node)
 		if n == "integer" then
 			return arb.map(arb.int(0, 100), function(v) return tostring(v) end)
 		elseif n == "number" then
-			return arb.map(arb.int(0, 99), function(v) return v .. ".5" end)
+			return arb.map(arb.int(0, 99), function(v) return tostring(v) .. ".5" end)
 		elseif n == "string" then
 			return arb.map(arb.int(1, #STRING_LITS), function(i) return STRING_LITS[i] end)
 		elseif n == "boolean" then
