@@ -7,7 +7,6 @@ local mod = {}
 --: { [string]: (string, integer, integer | nil) -> (unknown, integer) }
 mod.readers = {}
 
---[[@type fun(s: string, i: integer, prefix_i?: integer): {type:string;}, integer]]
 mod.readers.normal = function (s, i, prefix_i)
 	local j = i
 	--[[FIXME:]]
@@ -105,7 +104,6 @@ mod.tree_to_string = tree_to_string
 
 mod.html_writers = {}
 
---[[@param s string]]
 local html_escape = function (s)
 	return s:gsub("[&<>]", {
 		["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt;",

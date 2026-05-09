@@ -122,7 +122,6 @@ if false --[[ignore_deprecated]] then
 		"TALINK", "SPF", "UINFO", "UID", "GID", "UNSPEC", "NID", "L32", "L64", "LP", "DOA"
 	}) do mod.type[k] = nil end
 end
---[[@type table<dns_type, string>]]
 mod.type_name = {}
 for k, v in pairs(mod.type) do mod.type_name[v] = k end
 
@@ -356,7 +355,6 @@ mod.dnssec_algorithm = {
 	PRIVATEDNS = 253, --[[algorithm depends on domain name. OPTIONAL.]]
 	PRIVATEOID = 254, --[[length byte + BER encoded ISO OID + algorithm data. OPTIONAL.]]
 }
---[[@type table<dnssec_algorithm, string>]]
 mod.dnssec_algorithm_name = {}
 for k, v in pairs(mod.dnssec_algorithm) do mod.dnssec_algorithm_name[v] = k end
 
@@ -365,7 +363,6 @@ for k, v in pairs(mod.dnssec_algorithm) do mod.dnssec_algorithm_name[v] = k end
 mod.dnssec_digest_type = {
 	["SHA-1"] = 1, --[[MANDATORY]]
 }
---[[@type table<dnssec_digest_type, string>]]
 mod.dnssec_digest_type_name = {}
 
 mod.encoders = {
@@ -430,7 +427,6 @@ mod.class = {
 	CH = 3, --[[the CHAOS class]]
 	HS = 4, --[[Hesiod [Dyer 87]]
 }
---[[@type table<dns_class, string>]]
 mod.class_name = {}
 for k, v in pairs(mod.class) do mod.class_name[v] = k end
 
@@ -440,14 +436,12 @@ mod.opcode = {
 	IQUERY = 1, --[[an inverse query]]
 	STATUS = 2, --[[a server status request]]
 }
---[[@type table<dns_opcode, string>]]
 mod.opcode_name = {}
 for k, v in pairs(mod.opcode) do mod.opcode_name[v] = k end
 
 -- unofficial names
 --[[@enum dns_response_code]]
 mod.response_code = { OK = 0, EINVAL = 1, ESERVFAIL = 2, ENAME = 3, ENOTIMPL = 4, EREFUSED = 5 }
---[[@type table<dns_response_code, string>]]
 mod.response_code_name = {}
 for k, v in pairs(mod.response_code) do mod.response_code_name[v] = k end
 
@@ -539,7 +533,6 @@ end
 -- RFC 1035 §4.1.1 — Header
 -- RFC 1035 §4.1.2 — Question
 -- RFC 1035 §4.1.3 — Resource record
---[[@param s string]]
 --: (string) -> { [string]: unknown }
 mod.string_to_dns_message = function (s)
 	assert(#s >= 12, "string_to_dns_message: message too short, length was " .. #s)
@@ -553,7 +546,7 @@ mod.string_to_dns_message = function (s)
 	local qr = band(b1, 0x80)
 	ret.is_query = qr == 0
 	ret.is_response = qr ~= 0
-	ret.opcode = band(rshift(b1, 3), 0xf) --[[@type dns_opcode]]
+	ret.opcode = band(rshift(b1, 3), 0xf)
 	ret.is_authoritative = band(b1, 0x4) ~= 0
 	ret.is_truncated = band(b1, 0x2) ~= 0
 	ret.is_recursion_desired = band(b1, 0x1) ~= 0
@@ -561,7 +554,7 @@ mod.string_to_dns_message = function (s)
 	ret.is_recursion_available = band(b1, 0x80) ~= 0
 	-- band(b, 0x70) must be 0 - we will ignore
 
-	ret.response_code = band(b1, 0xf) --[[@type dns_response_code]]
+	ret.response_code = band(b1, 0xf)
 	b1, b2 = read2(s, 5)
 	local question_count = bor(lshift(b1, 8), b2) -- usually 1
 	b1, b2 = read2(s, 7)
@@ -571,11 +564,11 @@ mod.string_to_dns_message = function (s)
 	b1, b2 = read2(s, 11)
 	local additional_count = bor(lshift(b1, 8), b2)
 	local i = 13
-	local questions = {} --[[@type dns_question[] ]]
+	local questions = {}
 	local b3 = 0 --: integer
 	local b4 = 0 --: integer
 	for j = 1, question_count do
-		local parts = {} --[[@type string[] ]]
+		local parts = {}
 		local length = byte(s, i) or 0 --: integer
 		while length > 0 do
 			local lbl = sub(s, i + 1, i + length)
@@ -589,13 +582,13 @@ mod.string_to_dns_message = function (s)
 		--[[@class dns_question]]
 		questions[j] = {
 			name = parts,
-			type = bor(lshift(b1, 8), b2), --[[@type dns_type]]
-			class = bor(lshift(b3, 8), b4), --[[@type dns_class]]
+			type = bor(lshift(b1, 8), b2),
+			class = bor(lshift(b3, 8), b4),
 		}
 		i = i + 5
 	end
 	ret.questions = questions
-	local resources = { {}, {}, {} } --[[@type dns_resource[][] ]]
+	local resources = { {}, {}, {} }
 	for j, count in ipairs({ answer_count, nameserver_count, additional_count }) do
 		local arr = resources[j]
 		for k = 1, count do
@@ -614,8 +607,8 @@ mod.string_to_dns_message = function (s)
 			--[[@class dns_resource]]
 			arr[k] = {
 				name = parts,
-				type = type, --[[@type dns_type]]
-				class = class, --[[@type dns_class]]
+				type = type,
+				class = class,
 				ttl = ttl, data = mod.decoders[type] and mod.decoders[type](s, data_i, length) or s:sub(data_i, data_i + length - 1),
 			}
 		end

@@ -1,6 +1,5 @@
 local mod = {}
 
---[[@param base string]] --[[@param path string]]
 --: (string, string) -> string
 mod.resolve = function (base, path)
 	--: string
@@ -9,7 +8,7 @@ mod.resolve = function (base, path)
 	local path_ = path --[[:! string]]
 	base_ = base_:gsub("/$", "")
 	if path_:byte(1) == 0x2f --[["/"]] then path_ = path_:sub(2) end
-	local path_parts = {} --[[@type string[] ]]
+	local path_parts = {}
 	local i = 1
 	while i < #base_ do
 		local start, end_ = base_:find("[^/]*", i)

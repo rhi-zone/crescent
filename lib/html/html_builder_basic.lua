@@ -9,9 +9,7 @@ local html_escape = function (s)
 	return result
 end
 
---[[@param tag string]]
 mod.element = function (tag)
-	--[[@param xs table<string|integer, string>]]
 	return function (xs)
 		if type(xs) == "string" then return string.format("<%s>%s</%s>", tag, html_escape(xs), tag) end
 		local parts = {}
@@ -30,14 +28,12 @@ mod.element = function (tag)
 	end
 end
 
---[[@type fun(tag: string): fun(xs: string|table<string|integer, string>): string]]
 mod.string_element = mod.element
 
 --[[https://html.spec.whatwg.org/multipage/dom.html#flow-content]]
 --[[[...$0.querySelectorAll("li")].flatMap(e=>(c=e.querySelector("code")?.innerText)?["html_element_"+c]:[]).join(" | ")]]
 
 local html = mod.element("html")
---[[@param xs table<string|integer, string>]]
 mod.html = function (xs) return "<!DOCTYPE html>" .. html(xs) end
 mod.head = mod.element("head")
 mod.body = mod.element("body")

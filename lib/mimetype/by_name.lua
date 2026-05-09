@@ -1,9 +1,7 @@
 local mod = {}
 
---[[@param filename string]]
 --: (string) -> string | nil
 mod.mimetype = function (filename)
-	--[[@type string]]
 	local ext = filename:match("%.([^./]+)$")
 	if not ext then return end
 	return mod.extension_to_mimetype[ext:lower()]

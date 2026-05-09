@@ -9,7 +9,6 @@ local mod = {}
 local hex_alphabet = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f" } --: { [integer]: string }
 
 --[[converts from string to urlencode]]
---[[@param string string]]
 --: (string) -> string
 mod.string_to_urlencode = function (str)
 	-- FIXME
@@ -23,7 +22,6 @@ mod.string_to_urlencode = function (str)
 end
 
 --[[converts from urlencode to string]]
---[[@param urlencoded string]]
 --: (string) -> string
 mod.urlencode_to_string = function (urlencoded)
 	-- TODO: error if invalid
