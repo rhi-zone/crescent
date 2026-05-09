@@ -447,9 +447,14 @@ Never silently work around a hang (skip the file, longer timeout, batch differen
 
 **Default: delegate. Inline is the exception.** Before any multi-step task — reading multiple files, exploring a question, making changes across files — spawn a subagent. The subagent returns a distilled summary; raw tool output never lands in the main context. Do not inline work and then decide afterward whether it should have been delegated — the decision must happen *before* the first tool call.
 
+**Hard limit: 3 tool calls.** If you have made 3 tool calls in main context since the last user message without spawning a subagent, STOP. The next action must be to spawn a subagent — not "one more check", not "just to confirm". Counting is not optional. This limit exists because every "just one more" rationalization is indistinguishable from the next one. The limit is 3, not 4, not "a few more".
+
 Inline is only acceptable for:
 - A single targeted file read (one file, one specific thing you already know is there)
 - A single grep for a known symbol in a known file
+- A single shell command to verify a known outcome (e.g. `git log --oneline -3` after a commit)
+
+**Diagnosis work is delegation work.** Any time you are running commands to *understand* something — tracing a type error, comparing two files, reading git history to find a regression — that is investigation, and investigation goes to a subagent. "Just checking one thing" is how 70-tool-call spirals start. If you don't already know what you're looking for, you are investigating, and you must delegate.
 
 **Edits: delegate implementation, inline surgical fixes.** Implementation work goes to a subagent — anything that needs reading surrounding code first, writing nontrivial new code, or is likely to iterate. The subagent's summary back is shorter than the raw tool output and exploration would be in main context. Surgical edits stay inline: a 1–5 line change in a location you already know, no exploration, no iteration expected.
 
@@ -457,16 +462,17 @@ The axis is steps + exploration + iteration risk, NOT lines changed. A 3-line ed
 
 Subagent cases (non-exhaustive):
 - Any research or exploration question → subagent (Explore for codebase questions, general-purpose for multi-step tasks)
+- Diagnosing a type error, test failure, or unexpected behavior → subagent
 - Writing a new file or new function from scratch → subagent
 - Adding a feature that needs reading other files to understand → subagent
 - Mechanical work across many files → parallel subagents
 - Any edit that's likely to iterate (typecheck might fail, tests might fail) → subagent
 
-Inline cases:
+Inline cases (exhaustive — if it's not on this list, delegate):
 - A single targeted file read (one file, one specific thing you already know is there)
 - A single grep for a known symbol in a known file
 - A surgical 1–5 line edit in a file you already understand, with no expected iteration
-- Verifying output of a change with one command
+- A single shell command to verify a known outcome
 
 **Never pre-load the answer in a delegation prompt.** Don't write "verify that X works" or "claim to verify: X" — write "what does X do?" or "find out whether X works". Pre-baked hypotheses in the prompt teach the agent to confirm, not investigate. If you have a hypothesis, name it as a hypothesis the agent should *attempt to falsify*, not as a thing to verify.
 
