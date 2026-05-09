@@ -972,7 +972,11 @@ local function collect_preceding_run(ctx, decl_line)
     if not ctx.ann then return nil end
     local results = ctx.ann.results
     local consumed = ctx._ann_consumed
+    local source_lines = ctx.err and ctx.err.source_lines[ctx.filename]
     -- Scan backward from decl_line - 1 collecting consecutive ANN_TYPE entries.
+    -- Blank lines and comment-only lines are transparent: the scan skips past them
+    -- so that a --: annotation separated from a function by whitespace/comments
+    -- still associates with the function.
     local ann_lines = {}  -- lines found, nearest-to-decl first
     local scan = decl_line - 1
     while scan >= 1 do
@@ -980,6 +984,13 @@ local function collect_preceding_run(ctx, decl_line)
         if r and r.kind == ANN_TYPE and not (consumed and consumed[scan]) then
             ann_lines[#ann_lines + 1] = scan
             scan = scan - 1
+        elseif not r and source_lines then
+            local line_text = source_lines[scan] or ""
+            if line_text:match("^%s*$") or line_text:match("^%s*%-%-") then
+                scan = scan - 1  -- blank or comment-only: skip
+            else
+                break
+            end
         else
             break
         end

@@ -10711,17 +10711,16 @@ local _ = f(42)
 ]], "cannot pass")
     end)
 
-    -- B: block comment between --: and function breaks association
-    -- The --[[@...]] block comment occupies a line between the annotation and the
-    -- function declaration, so collect_preceding_run stops there and the --: is
-    -- not consumed by the function. f is unannotated; f(42) produces no error.
-    assert.it("B: --[[@...]] block comment between --: and function breaks association; f(42) no error", function()
-        no_errors([==[
+    -- B: block comment between --: and function — annotation skips over comment-only lines
+    -- --[[@param s string]] is comment-only (starts with --), so collect_preceding_run
+    -- skips it and the --: still associates with the function. f(42) should error.
+    assert.it("B: --[[@...]] block comment between --: and function; annotation skips comment, f(42) errors", function()
+        has_error([==[
 --: (string) -> integer
 --[[@param s string]]
 local function f(s) return 1 end
 local _ = f(42)
-]==])
+]==], "cannot pass")
     end)
 
     -- C: block comment directly before function — LuaLS form, ignored by typechecker
@@ -10770,24 +10769,24 @@ local _ = f(42)
 ]])
     end)
 
-    -- G: blank line between --: and function breaks association
-    assert.it("G: blank line between --: and function breaks association; f is unannotated, f(42) no error", function()
-        no_errors([[
+    -- G: blank line between --: and function — annotation skips over blank lines
+    assert.it("G: blank line between --: and function; annotation skips blank, f(42) errors", function()
+        has_error([[
 --: (string) -> integer
 
 local function f(s) return 1 end
 local _ = f(42)
-]])
+]], "cannot pass")
     end)
 
-    -- H: regular line comment between --: and function breaks association
-    assert.it("H: regular comment between --: and function breaks association; f(42) no error", function()
-        no_errors([[
+    -- H: regular line comment between --: and function — annotation skips over comment-only lines
+    assert.it("H: regular comment between --: and function; annotation skips comment, f(42) errors", function()
+        has_error([[
 --: (string) -> integer
 -- this is a regular comment
 local function f(s) return 1 end
 local _ = f(42)
-]])
+]], "cannot pass")
     end)
 
 end)

@@ -143,13 +143,114 @@ for f in "${staged[@]}"; do
   fi
 done
 
+# ── Lint check ────────────────────────────────────────────────────────────────
+# Run only on init.lua files (module_var, path_guard, assert, emmylua_annotation
+# rules are init.lua-specific). Always disable missing_tests (test files are not
+# present in the staged blob temp dir).
+init_staged=()
+for f in "${staged[@]}"; do
+  [[ "$f" == lib/*/init.lua ]] && init_staged+=("$f")
+done
+
+if [ "${#init_staged[@]}" -gt 0 ]; then
+  echo "pre-commit: linting ${#init_staged[@]} init.lua file(s)..."
+
+  run_lint() {
+    local target="$1" outfile="$2"
+    local rc=0
+    timeout 30 bin/cr lint --disable-rule=missing_tests "$target" >"$outfile" 2>&1 || rc=$?
+    if [ "$rc" -eq 124 ]; then
+      echo "-1|124"
+      return
+    fi
+    local viols
+    viols="$(grep -oE 'Checked [0-9]+ file\(s\): [0-9]+ violation\(s\)' "$outfile" \
+      | tail -n1 | grep -oE '[0-9]+ violation' | grep -oE '[0-9]+' || true)"
+    if [ -z "$viols" ]; then
+      if [ "$rc" -ne 0 ]; then
+        echo "-1|$rc"
+      else
+        echo "0|0"
+      fi
+      return
+    fi
+    echo "$viols|$rc"
+  }
+
+  for f in "${init_staged[@]}"; do
+    staged_dir="$tmp_root/staged"
+    head_dir="$tmp_root/head"
+    staged_path="$staged_dir/$f"
+    head_path="$head_dir/$f"
+    mkdir -p "$(dirname "$staged_path")" "$(dirname "$head_path")"
+
+    if ! git show ":$f" >"$staged_path" 2>/dev/null; then
+      continue
+    fi
+
+    has_head=1
+    if ! git show "HEAD:$f" >"$head_path" 2>/dev/null; then
+      has_head=0
+    fi
+
+    lint_staged_out="$tmp_root/lint_staged.out"
+    lint_staged_result="$(run_lint "$staged_path" "$lint_staged_out")"
+    lint_staged_viols="${lint_staged_result%|*}"
+    lint_staged_rc="${lint_staged_result#*|}"
+
+    if [ "$lint_staged_viols" = "-1" ] && [ "$lint_staged_rc" = "124" ]; then
+      echo "pre-commit: TIMEOUT (>30s) on lint $f (staged)." >&2
+      failed=1
+      continue
+    fi
+    if [ "$lint_staged_viols" = "-1" ]; then
+      echo "pre-commit: lint on $f (staged) failed unparsably (exit $lint_staged_rc):" >&2
+      cat "$lint_staged_out" >&2
+      failed=1
+      continue
+    fi
+
+    if [ "$has_head" -eq 0 ]; then
+      if [ "$lint_staged_viols" -gt 0 ]; then
+        echo "pre-commit: new file $f has $lint_staged_viols lint violation(s):" >&2
+        cat "$lint_staged_out" >&2
+        failed=1
+      fi
+      continue
+    fi
+
+    lint_head_out="$tmp_root/lint_head.out"
+    lint_head_result="$(run_lint "$head_path" "$lint_head_out")"
+    lint_head_viols="${lint_head_result%|*}"
+    lint_head_rc="${lint_head_result#*|}"
+
+    if [ "$lint_head_viols" = "-1" ] && [ "$lint_head_rc" = "124" ]; then
+      echo "pre-commit: TIMEOUT (>30s) on lint $f (HEAD)." >&2
+      failed=1
+      continue
+    fi
+    if [ "$lint_head_viols" = "-1" ]; then
+      echo "pre-commit: warning: lint on $f (HEAD) unparsable; treating as 0 violations." >&2
+      lint_head_viols=0
+    fi
+
+    if [ "$lint_staged_viols" -gt "$lint_head_viols" ]; then
+      echo "pre-commit: $f introduces $((lint_staged_viols - lint_head_viols)) new lint violation(s) (HEAD: $lint_head_viols, staged: $lint_staged_viols):" >&2
+      cat "$lint_staged_out" >&2
+      failed=1
+    elif [ "$lint_staged_viols" -gt 0 ]; then
+      echo "pre-commit: $f has $lint_staged_viols pre-existing lint violation(s) (unchanged); allowing."
+    fi
+  done
+fi
+
 if [ "$failed" -ne 0 ]; then
   echo "" >&2
-  echo "pre-commit: rejecting commit due to NEW typecheck errors above." >&2
+  echo "pre-commit: rejecting commit due to NEW errors above." >&2
   echo "Fix the new errors and re-stage. Pre-existing errors are tolerated." >&2
   echo "(--no-verify exists but CLAUDE.md discourages it — fix the issue or the hook.)" >&2
   exit 1
 fi
 
-echo "pre-commit: typecheck passed (no new errors)."
+echo "pre-commit: passed (no new errors)."
 exit 0
