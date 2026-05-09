@@ -292,18 +292,17 @@ do
 		end
 
 		do
-			ffi.cdef [[int GetLastError();
-			int FormatMessageA(uint32_t dwFlags, void *lpSource, uint32_t dwMessageId, uint32_t dwLanguageId, char *lpBuffer, uint32_t nSize, void *Arguments);]]
 			local cache = {}
 
 			socket.lasterror = socket.lasterror or function(num)
 				num = num or ffi.C.GetLastError()
 
 				if not cache[num] then
-					local buf = ffi.new("char[512]")
+					local buf_arr = ffi.new("char[512]") --[[:! cdata]]
+					local buf = ffi.cast("char *", buf_arr) --[[:! cdata]]
 					--[[FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000, FORMAT_MESSAGE_IGNORE_INSERTS = 0x00000200]]
-					local len = ffi.C.FormatMessageA(0x00001200, nil, num, 0, buf, ffi.sizeof(buf), nil)
-					cache[num] = ffi.string(buf, len - 2)
+					local len = ffi.C.FormatMessageA(0x00001200, nil, num, 0, (buf --[[:! string]]), 512, nil)
+					cache[num] = ffi.string((buf --[[:! integer & { [0]: integer }]]), (len --[[:! integer]]) - 2)
 				end
 
 				return cache[num], num
@@ -314,8 +313,9 @@ do
 			ffi.cdef [[int WSAStartup(uint16_t version, void *wsa_data);]]
 			local wsa_data --: any
 
-			if jit.arch == "x64" then
-				wsa_data = ffi.typeof([[struct {
+			-- Two WSAData layouts: x64 puts pad fields first, x86 puts them last.
+			ffi.cdef [[
+				struct WSAData_x64 {
 					uint16_t wVersion;
 					uint16_t wHighVersion;
 					unsigned short iMax_M;
@@ -323,9 +323,8 @@ do
 					char * lpVendorInfo;
 					char szDescription[257];
 					char szSystemStatus[129];
-				}]])
-			else
-				wsa_data = ffi.typeof([[struct {
+				};
+				struct WSAData_x86 {
 					uint16_t wVersion;
 					uint16_t wHighVersion;
 					char szDescription[257];
@@ -333,11 +332,12 @@ do
 					unsigned short iMax_M;
 					unsigned short iMaxUdpDg;
 					char * lpVendorInfo;
-				}]])
-			end
+				};
+			]]
+			wsa_data = ffi.typeof(jit.arch == "x64" and "struct WSAData_x64" or "struct WSAData_x86")
 
 			socket.initialize = function()
-				local data = wsa_data()
+				local data = (wsa_data --[[:! (() -> unknown)]]) () --[[:! cdata]]
 
 				if ljsocket_ffi.WSAStartup(WORD(2, 2), data) == 0 then
 					return data
@@ -460,7 +460,7 @@ do
 	]]
 	-- TODO: flags type, check what happens with inet_ntoa
 	socket.getaddrinfo = function(node_name, service_name, hints, result)
-		local ret = ljsocket_ffi.getaddrinfo(node_name, service_name, hints, result)
+		local ret = ljsocket_ffi.getaddrinfo(node_name --[[:! string]], service_name --[[:! string]], hints, result)
 		if ret == 0 then return true end
 		local err = ljsocket_ffi.gai_strerror(ret) --[[: any]]
 		return nil, ffi.string(err)
@@ -820,6 +820,7 @@ local SO = capture_flags("SO_")
 local TCP = capture_flags("TCP_")
 local POLL = capture_flags("POLL")
 
+--: (flags: string | { [number]: string }, valid_flags: { [string]: integer }, operation: ((number, ...number) -> integer) | nil) -> integer
 local table_to_flags = function(flags, valid_flags, operation)
 	if type(flags) == "string" then
 		flags = { flags }
@@ -888,15 +889,16 @@ local addrinfo_to_table = function(res, host, service)
 	end
 	info.host = host ~= "*" and host or nil
 	info.service = service
-	info.family = AF.reverse[res.ai_family]
-	info.socket_type = SOCK.reverse[res.ai_socktype]
-	info.protocol = IPPROTO.reverse[res.ai_protocol]
-	info.flags = flags_to_table(--[[:! integer]] res.ai_flags, AI.lookup, bit.band)
+	info.family = AF.reverse[res.ai_family] --[[:! LjSocketFamily]]
+	info.socket_type = SOCK.reverse[res.ai_socktype] --[[:! LjSocketType]]
+	info.protocol = IPPROTO.reverse[res.ai_protocol] --[[:! LjSocketProtocol]]
+	info.flags = flags_to_table(--[[:! integer]] res.ai_flags, AI.lookup, bit.band) --[[:! { [string]: boolean }]]
 	-- Extract ip and port eagerly so the addrinfo pointer can be freed after
 	-- the linked-list walk without leaving dangling references.
 	if res.ai_addr ~= nil then
 		local str = ffi.new("char[256]")
-		local addr = socket.inet_ntop(AF.lookup[info.family], res.ai_addr.sa_data, str, ffi.sizeof(str))
+		local sa = ffi.cast("struct sockaddr *", res.ai_addr) --[[:! cdata]]
+		local addr = socket.inet_ntop(AF.lookup[info.family], (sa --[[:! { sa_data: cdata }]]).sa_data, str, ffi.sizeof(str))
 		if addr ~= nil then
 			info.ip = ffi.string(addr)
 		end
@@ -911,14 +913,16 @@ local addrinfo_to_table = function(res, host, service)
 	return info
 end
 
+--: (data: { host: string, service: string | integer | nil, family: LjSocketFamily | nil, socket_type: LjSocketType | nil, protocol: LjSocketProtocol | nil, flags: { [number]: string } | nil, ... }) -> ({ [integer]: LjSocketAddrInfo } | nil, string | nil)
 mod.get_address_info = function(data)
 	local hints
 	if data.socket_type or data.protocol or data.flags or data.family then
+		local flags_arr = data.flags --[[:! { [number]: string } | nil]]
 		hints = ffi.new("struct addrinfo", {
 			ai_family = data.family and AF.strict_lookup(data.family) or nil,
 			ai_socktype = data.socket_type and SOCK.strict_lookup(data.socket_type) or nil,
 			ai_protocol = data.protocol and IPPROTO.strict_lookup(data.protocol) or nil,
-			ai_flags = data.flags and table_to_flags(data.flags, AI.lookup, bit.bor) or nil,
+			ai_flags = flags_arr and table_to_flags(flags_arr --[[:! { [number]: string }]], AI.lookup, bit.bor) or nil,
 		})
 	end
 	local out = ffi.new("struct addrinfo*[1]")
@@ -1028,12 +1032,16 @@ do
 			ffi.sizeof(val))
 	end
 
+	--: (self: LjSocket, host: string | LjSocketAddrInfo, service: string | integer | nil) -> (boolean | nil, string | nil, integer | nil)
 	meta.connect = function(self, host, service)
 		-- Accept an addrinfo-like table (from find_first_address): extract host+service.
+		local host_str --: string | nil
 		if type(host) == "table" then
-			local tbl = host
-			host = tbl.host or tbl.ip
+			local tbl = host --[[:! LjSocketAddrInfo]]
+			host_str = tbl.host or tbl.ip
 			service = tbl.service or service
+		else
+			host_str = host --[[:! string | nil]]
 		end
 		-- Resolve fresh to get a live addrinfo pointer.
 		local hints = ffi.new("struct addrinfo", {
@@ -1042,43 +1050,48 @@ do
 			ai_protocol = IPPROTO.lookup[self.protocol] or 0,
 		})
 		local out = ffi.new("struct addrinfo*[1]")
-		local ok, err = socket.getaddrinfo(host, tostring(service or ""), hints, out)
-		if not ok then return nil, "ljsocket.connect: " .. (err or "getaddrinfo failed") end
+		local ok, err = socket.getaddrinfo(host_str, tostring(service or ""), hints, out)
+		if not ok then return nil, "ljsocket.connect: " .. (err or "getaddrinfo failed"), nil end
 		local ok2, err2, num = socket.connect(self.fd, out[0].ai_addr, out[0].ai_addrlen)
 		ffi.C.freeaddrinfo(out[0])
 		if not ok2 and not self.blocking then
 			if timeout_messages[num] then
-				self.timeout_connected = { host, service }
+				self.timeout_connected = { host_str, service }
 				return true
 			end
 		elseif ok2 and self.on_connect then
-				self:on_connect(host, service)
+			self:on_connect(host_str --[[:! string]], service --[[:! string | integer]])
 		end
 		if not ok2 then return ok2, err2, num end
 		return true
 	end
 
+	--: (self: LjSocket) -> (boolean | nil, string | nil, integer | nil)
 	meta.poll_connect = function(self)
 		if self.on_connect and self.timeout_connected and self:is_connected() then
-			local ok, err, num = self:on_connect(unpack(self.timeout_connected))
-			self.timeout_connected = nil
+			local tc = self.timeout_connected --[[:! { [number]: string | nil | string | integer | nil }]]
+			local ok, err, num = self:on_connect(tc[1] --[[:! string]], tc[2] --[[:! string | integer]])
+			;(self --[[:! { timeout_connected: { string | nil, string | integer | nil } | nil, ... }]]).timeout_connected = nil
 			return ok, err, num
 		end
-		return nil, "timeout"
+		return nil, "timeout", nil
 	end
 
+	--: (self: LjSocket, host: string | LjSocketAddrInfo | nil, service: string | integer | nil) -> (boolean | nil, string | nil)
 	meta.bind = function(self, host, service)
-		if host == "*" then host = nil end
 		-- Accept an addrinfo-like table (from find_first_address / mod.bind):
 		-- tbl.host is the original hostname (nil when binding to any address).
+		local host_str --: string | nil
 		if type(host) == "table" then
-			local tbl = host
-			host = tbl.host  -- nil → bind to any address (passive)
+			local tbl = host --[[:! LjSocketAddrInfo]]
+			host_str = tbl.host  -- nil → bind to any address (passive)
 			service = tostring(tbl.service or service or "")
+		else
+			host_str = (host == "*") and nil or host --[[:! string | nil]]
 		end
 		-- Resolve fresh to get a live addrinfo pointer.
 		-- get_address_info calls freeaddrinfo and cannot be used here.
-		local passive = host == nil
+		local passive = host_str == nil
 		local hints = ffi.new("struct addrinfo", {
 			ai_family  = AF.lookup[self.family] or 0,
 			ai_socktype = SOCK.lookup[self.socket_type] or 0,
@@ -1086,7 +1099,7 @@ do
 			ai_flags   = passive and AI.lookup["passive"] or 0,
 		})
 		local out = ffi.new("struct addrinfo*[1]")
-		local ok, err = socket.getaddrinfo(host, tostring(service or ""), hints, out)
+		local ok, err = socket.getaddrinfo(host_str, tostring(service or ""), hints, out)
 		if not ok then return nil, err end
 		local ret = socket.bind(self.fd, out[0].ai_addr, out[0].ai_addrlen)
 		ffi.C.freeaddrinfo(out[0])
@@ -1120,10 +1133,11 @@ do
 		return nil, err, num
 	end
 
+	--: (self: LjSocket) -> (boolean | nil, string | nil, integer | nil)
 	meta.is_connected = function(self)
 		local ip, service, num = self:get_peer_name()
 		local ip2, service2, num2 = self:get_name()
-		if not ip and (num == errno.ECONNRESET or num == errno.ENOTSOCK) then return false, service, num end
+		if not ip and (num == errno.ECONNRESET or num == errno.ENOTSOCK) then return false, (service --[[:! string | nil]]), num end
 		if ffi.os == "Windows" then
 			return ip ~= "0.0.0.0" and ip2 ~= "0.0.0.0" and service ~= 0 and service2 ~= 0
 		else
@@ -1184,10 +1198,14 @@ do
 		return self:receive(size, flags, src_addr, src_addr_size)
 	end
 
+	--: (self: LjSocket, size: integer | nil, flags: integer | nil, src_address: unknown, address_len: integer | nil) -> (string | nil, unknown, integer | nil)
 	meta.receive = function(self, size, flags, src_address, address_len)
 		size = size or 65536
 		local buf = type(size) == "cdata" and size or ffi.new("char[?]", size)
-		if self.on_receive then return self:on_receive(buf, size, flags) end
+		if self.on_receive then
+			local r1, r2 = self:on_receive(buf, size --[[:! integer]], flags or 0)
+			return r1, r2, nil
+		end
 		local len, err, num, len_res
 		if src_address then
 			len_res = ffi.new("int[1]", address_len)
@@ -1220,7 +1238,7 @@ do
 					family = self.family,
 					get_port = addrinfo_get_port,
 					get_ip = addrinfo_get_ip,
-				}
+				}, nil
 			end
 			return ffi.string(buf, len)
 		end
