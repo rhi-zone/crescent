@@ -1,8 +1,7 @@
 local mod = {}
 
---[[@param routes http_table_handler]]
+--: (unknown) -> (unknown, unknown, unknown) -> boolean | nil
 mod.router = function (routes)
-	--[[@type http_callback]]
 	return function (req0, res, sock)
 		local req = req0 --[[:! { path: string, globs: { rest: string, [integer]: unknown } }]]
 		local route = routes
@@ -14,7 +13,6 @@ mod.router = function (routes)
 		local end_ = 0
 		local part
 		repeat
-			--[[@diagnostic disable-next-line: cast-local-type]]
 			start, end_, part = req.path:find("/([^/]*)", end_ + 1)
 			local new_route = route[part]
 			if not new_route then

@@ -2,7 +2,7 @@ local socket_ = require("lib.socket.server")
 
 local mod = {}
 
---[[@param handler fun (write: fun(_: string), close: fun()): fun (_: string)]] --[[@param port integer]] --[[@param epoll? epoll]]
+--: (((string) -> nil, () -> nil) -> (string) -> nil, integer, unknown | nil) -> nil
 mod.server = function (handler, port, epoll)
 	return socket_.server(function (client, state)
 		local client_ = client --[[: any]]

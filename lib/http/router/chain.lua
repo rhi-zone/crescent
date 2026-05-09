@@ -1,6 +1,6 @@
 local mod = {}
 
---[[@param ... fun(req: http_request, res: http_response): boolean ]]
+--: (...(unknown, unknown) -> boolean) -> (unknown, unknown) -> boolean | nil
 mod.router = function (...)
 	local routers = { ... } --: ((unknown, unknown) -> boolean)[]
 	return function (req, res)

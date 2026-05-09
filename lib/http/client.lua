@@ -7,7 +7,7 @@ local mod = {}
 --[[TODO: tls: https://github.com/CapsAdmin/luajitsocket/blob/master/examples/tcp_client_blocking_tls.lua]]
 
 -- Blocking send: connect, send request, receive full response, return it.
---[[@param req http_client_request]]
+--: (any) -> (string | nil, string | nil)
 mod.send = function (req)
 	if not req.host then error("http_client.send: missing host") end
 	local client, err = socket.create("inet", "stream", "tcp")
@@ -27,9 +27,7 @@ end
 -- When epoll is provided, registers the socket on the caller's loop and returns immediately.
 -- When epoll is nil, creates a local epoll instance and blocks until the response is complete.
 -- cb is called as cb(response_string, err_string).
---[[@param req http_client_request]]
---[[@param cb fun(data: string?, err: string?)]]
---[[@param ep epoll?]]
+--: (any, (string | nil, string | nil) -> nil, unknown | nil) -> nil
 mod.send_async = function (req, cb, ep)
 	if not req.host then cb(nil, "http_client.send_async: missing host"); return end
 	local is_owner = not ep
@@ -64,8 +62,9 @@ mod.send_async = function (req, cb, ep)
 	local done = false
 	local remove  -- forward-declared so the read callback can capture it as an upvalue
 
+	local ep_ = ep --[[: any]]
 	local _ -- write callback (unused by client)
-	_, remove = ep:add(client.fd, function ()
+	_, remove = ep_:add(client.fd, function ()
 		if done then return end
 		-- epoll notifies readability; we read from the socket ourselves.
 		local chunk = client:receive()

@@ -3,8 +3,7 @@ local socket = require("lib.ljsocket") --[[: any]]
 
 local mod = {}
 
---[[@return fun(s: string) write, fun() close]]
---[[@param host string]] --[[@param port integer]] --[[@param cb fun(s: string) callback]] --[[@param epoll epoll?]]
+--: (string, integer, (string) -> nil, unknown | nil) -> ((string) -> nil, () -> nil)
 mod.client = function (host, port, cb, epoll)
 	local is_running = not epoll
 	epoll = epoll or epoll_.new()
@@ -23,7 +22,6 @@ mod.client = function (host, port, cb, epoll)
 	local _, remove = epoll_any:add(client_any.fd, cb, function () client_any:close() end)
 	assert(remove, "tcp_client: could not listen to socket")
 	while is_running do epoll_any:wait() end
-	--[[@param s string]]
 	local remove_any = remove --[[: any]]
 	return function (s) client_any:send(s) end, function () remove_any(); client_any:close() end
 end

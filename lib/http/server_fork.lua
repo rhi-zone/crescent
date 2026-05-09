@@ -9,7 +9,7 @@ local mod = {}
 
 ffi.cdef [[int /*pid_t*/ fork(void);]]
 
---[[@param handler http_callback]]
+--: (any) -> (SockClient) -> nil
 mod.make_connection_handler = function (handler)
 	--:: SockClient = { receive: (SockClient) -> string | nil, send: (SockClient, string) -> nil, close: (SockClient) -> nil }
 	--: (SockClient) -> nil
@@ -30,8 +30,7 @@ mod.make_connection_handler = function (handler)
 	end
 end
 
---[[@return luajitsocket sock]]
---[[@param handler http_callback]] --[[@param port? integer]] --[[@param epoll? epoll]]
+--: (any, integer | nil, unknown | nil) -> unknown
 mod.server = function (handler, port, epoll)
 	return socket.server(mod.make_connection_handler(handler), port or 80, epoll)
 end

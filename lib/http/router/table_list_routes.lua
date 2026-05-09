@@ -1,11 +1,10 @@
 local mod = {}
 
 local list_routes
---[[@param routes_parts string[] ]] --[[@param routes http_table_handler]] --[[@param prefix? string]]
+--: (Arr<string>, any, string | nil) -> nil
 list_routes = function (routes_parts, routes, prefix)
-	local keys = {} --[[@type string[] ]]
-	--[[@diagnostic disable-next-line: param-type-mismatch]]
-	for k in pairs(routes) do keys[#keys+1] = k end
+	local keys = {} --: Arr<string>
+	for k in pairs(routes) do keys[#keys+1] = k --[[:! string]] end
 	table.sort(keys)
 	for _, k in ipairs(keys) do
 		local path = prefix and (prefix .. "/" .. k) or k
@@ -19,10 +18,10 @@ list_routes = function (routes_parts, routes, prefix)
 	end
 end
 
---[[@param routes http_table_handler]] --[[@param prefix? string]]
+--: (any, string | nil) -> (any, any) -> nil
 mod.list_routes_handler = function (routes, prefix)
 	local html do
-		local routes_parts = {} --[[@type string[] ]]
+		local routes_parts = {} --: Arr<string>
 		list_routes(routes_parts, routes, prefix)
 		for i, path in ipairs(routes_parts) do
 			routes_parts[i] = [[<a href="]] .. (path ~= "" and path or ".") .. [[">]] .. (path ~= "" and path or "&nbsp;") .. [[</a><br/>]]
@@ -34,7 +33,6 @@ mod.list_routes_handler = function (routes, prefix)
 			table.concat(routes_parts, "\n")
 		)
 	end
-	--[[@param res http_response]]
 	return function (_, res)
 		res.headers["Content-Type"] = { "text/html" }
 		res.body = html

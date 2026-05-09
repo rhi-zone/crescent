@@ -141,9 +141,6 @@ local function wrap_client_tls(tls_ctx, client)
 	return true
 end
 
---[[@return luajitsocket sock]]
---[[@param handler http_callback]] --[[@param port? integer]] --[[@param epoll? epoll]]
---[[@param opts? { host?: string, tls_cert?: string, tls_key?: string }]]
 -- opts.host (optional): interface to bind, e.g. "127.0.0.1" or "0.0.0.0".
 -- Forwarded to lib.socket.server, which defaults to "*" (all interfaces) if
 -- omitted. Prefer loopback-only binds for daemons on untrusted networks.
@@ -151,8 +148,9 @@ end
 -- When both are set and libtls is available, accepted connections are wrapped
 -- in TLS. If libtls is unavailable a warning is printed and the server falls
 -- back to plaintext — it does not hard-fail.
+--: (any, integer | nil, unknown | nil, { host: string | nil, tls_cert: string | nil, tls_key: string | nil } | nil) -> unknown
 mod.server = function (handler, port, epoll, opts)
-	opts = opts or {}
+	opts = opts or {} --[[:! { host: string | nil, tls_cert: string | nil, tls_key: string | nil }]]
 	local tls_ctx --: any
 
 	if opts.tls_cert and opts.tls_key then

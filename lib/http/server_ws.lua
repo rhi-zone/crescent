@@ -14,25 +14,12 @@ local epoll_ = require("lib.epoll")
 local mod = {}
 
 --[[TODO: sse]]
---[[@alias sse_callback fun(): (send: (fun(evt: sse_event)))]]
---[[@alias ws_callback fun(sock: luajitsocket, msg: websocket_message)]]
---[[@alias ws_open_callback fun(sock: luajitsocket, send: websocket_send, close: websocket_close)]]
---[[@alias ws_close_callback fun(sock: luajitsocket)]]
-
---[[@class sse_event]]
-
---[[@class http_like_callbacks]]
---[[@field http http_callback?]]
---[[@field sse sse_callback?]]
---[[@field ws ws_callback?]]
---[[@field ws_open ws_open_callback?]]
---[[@field ws_close ws_close_callback?]]
 
 --[[TODO: figure out whether `make_connection_handler` can be removed after restructuring https server?]]
 
 --:: WsSockClient = { receive: (WsSockClient) -> string | nil, send: (WsSockClient, string) -> nil, close: (WsSockClient) -> nil }
 --:: WsHandler = { http: ((WsHttpRequest, WsHttpResponse, WsSockClient) -> nil) | nil, ws: ((WsSockClient, { payload: string, status: integer | nil, type: string }) -> nil) | nil, ws_open: ((WsSockClient, unknown, unknown) -> nil) | nil, ws_close: ((WsSockClient) -> nil) | nil }
---[[@param handler http_like_callbacks]] --[[@param epoll epoll]]
+--: (WsHandler, any) -> (WsSockClient) -> nil
 mod.make_connection_handler = function (handler, epoll)
 	local handler_ = handler --[[:! WsHandler]]
 	--: (WsSockClient) -> nil
@@ -72,12 +59,12 @@ mod.make_connection_handler = function (handler, epoll)
 	end
 end
 
---[[@param handler http_callback|http_like_callbacks]] --[[@param port? integer]] --[[@param epoll? epoll]]
+--: (any, integer | nil, unknown | nil) -> nil
 mod.server = function (handler, port, epoll)
 	local is_running = not epoll
 	epoll = epoll or epoll_:new()
 	if type(handler) == "function" then handler = { http = handler } end
-	socket.server(mod.make_connection_handler(handler, epoll), port or 80, epoll)
+	socket.server(mod.make_connection_handler(handler --[[: any]], epoll), port or 80, epoll)
 	if is_running then (epoll --[[: any]]):loop() end
 end
 

@@ -1,10 +1,7 @@
---[[@alias http_table_handler http_callback | table<string, http_callback|table<string, http_callback|table<string, http_callback|table<string, http_callback|http_table_handler>>>>]]
-
 local mod = {}
 
---[[@param routes http_table_handler]]
+--: (any) -> (any, any, any) -> unknown
 mod.router = function (routes)
-	--[[@type http_callback]]
 	return function (req, res, sock)
 		local route = routes
 		if type(route) == "function" then return route(req, res, sock) end

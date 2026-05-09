@@ -7,17 +7,15 @@ local mimetype_by_contents
 
 local mod = {}
 
---[[@param file_path string]]
+--: (string) -> string | nil
 local system_specific_mime_type = function (file_path) end
 
 if jit.os == "Linux" then
 	local ffi = require("ffi")
 	ffi.cdef [[ ssize_t getxattr(const char *path, const char *name, void *value, size_t size); ]]
 	local buf = ffi.new("char[128]") --[[:! cdata]]
-	--[[@type fun(path: string, name: string, value: ffi.cdata*, size: integer)]]
-	local getxattr = ffi.C.getxattr
+	local getxattr = ffi.C.getxattr --[[:! (string, string, cdata, integer) -> integer]]
 
-	--[[@param file_path string]]
 	system_specific_mime_type = function (file_path)
 		local size = getxattr(file_path, "user.Content-Type", buf, 128)
 		if size ~= -1 then return ffi.string(buf, size) end
@@ -26,11 +24,10 @@ if jit.os == "Linux" then
 	end
 end
 
---[[@param size? integer]]
+--: (integer | nil) -> string
 local human_readable_size = function (size)
-	if not size then
-		return ""
-	elseif size < 1024 then
+	if not size then return "" end
+	if size < 1024 then
 		return size .. " B"
 	elseif size < 1048576 then
 		return string.format("%.1f kiB", size / 1024)
@@ -48,13 +45,13 @@ local html_escape_lookup = {
 	["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt;", ["\""] = "&quot;", ["'"] = "&#039;",
 }
 
---[[@param string string]]
+--: (string) -> string
 local html_escape = function (string)
-	return string:gsub("[&<>\"']", html_escape_lookup)
+	local result, _ = string:gsub("[&<>\"']", html_escape_lookup)
+	return result
 end
 
---[[@param base? string]]
---[[@param opts? { io_open: fun(path: string, mode: string): file* | nil, os_date: fun(fmt: string, t: integer): string }]]
+--: (string | nil, { io_open: (string, string) -> any, os_date: (string, integer) -> string } | nil) -> ((any, any) -> nil) | (nil, string)
 mod.router = function (base, opts)
 	if base ~= nil and type(base) ~= "string" then
 		return nil, "static() expects string as base path, got " .. tostring(base)
@@ -64,7 +61,6 @@ mod.router = function (base, opts)
 	local os_date = opts and opts.os_date
 	if not os_date then return nil, "static() requires opts.os_date cap" end
 	base = (base or "."):gsub("/$", "")
-	--[[@return nil]] --[[@param req http_request]] --[[@param res http_response]]
 	return function (req, res)
 		--[[TODO: urldecode? urldecode(req.path)]]
 		local full_path = path.safe_resolve(base, urldecode(req.path))

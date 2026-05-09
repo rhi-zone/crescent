@@ -2,8 +2,7 @@ local static_router = require("lib.http.router.static_full").router
 
 local mod = {}
 
---[[@param base? string]]
---[[@param opts? { io_open: fun(path: string, mode: string): file* | nil, os_date: fun(fmt: string, t: integer): string }]]
+--: (string | nil, { io_open: (string, string) -> any, os_date: (string, integer) -> string } | nil) -> ((any, any) -> unknown) | (nil, string | nil)
 mod.router = function (base, opts)
 	local router, err = static_router(base, opts)
 	if not router then return nil, err end
