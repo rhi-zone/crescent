@@ -103,8 +103,6 @@ pretty_printers.table = function(t, write, seen)
 	end
 end
 
---[[@param opts? { no_trailing_newline: boolean; no_print_nil: boolean; }]]
---[[@param seen? table<unknown,true>]]
 --: (value: any, write: (...any) -> nil, not_top_level: boolean | nil, opts: { no_trailing_newline: boolean | nil, no_print_nil: boolean | nil } | nil, seen: { [any]: boolean } | nil) -> nil
 pretty_print_ = function(value, write, not_top_level, opts, seen)
 	if type(write) ~= "function" then
@@ -130,7 +128,7 @@ end
 mod.pretty_print_ = pretty_print_
 --: (any) -> string
 mod.uneval = function(value)
-	local parts = {} --[[@type string[] ]]
+	local parts = {} --: { [integer]: string }
 	local write = function(...) for i = 1, select("#", ...) do parts[#parts + 1] = tostring(select(i, ...)) end end
 	pretty_print_(value, write, true)
 	return table.concat(parts)

@@ -55,17 +55,14 @@ local bytes_to_uint32 = function (a, b, c, d)
 end
 
 --[[Splits a uint32 number into four bytes.]]
---[[@return integer, integer, integer, integer]] --[[@param a integer]]
+--: (number) -> (number, number, number, number)
 local uint32_to_bytes = function (a)
 	local a4 = a % 256
-	--[[@diagnostic disable-next-line: cast-local-type]]
 	a = (a - a4) / 256
 	local a3 = a % 256
-	--[[@diagnostic disable-next-line: cast-local-type]]
 	a = (a - a3) / 256
 	local a2 = a % 256
 	local a1 = (a - a2) / 256
-	--[[@diagnostic disable-next-line: return-type-mismatch]]
 	return a1, a2, a3, a4
 end
 
@@ -127,7 +124,7 @@ mod.sha1 = function (str)
 end
 
 --[[Calculates SHA1 for a string, returns it as a binary string]]
---[[@return string]] --[[@param str string]]
+--: (string) -> string
 mod.binary = function (str) return hex_to_binary(mod.sha1(str)) end
 
 -- Delegate HMAC to lib.hash.hmac — no duplicate implementation.

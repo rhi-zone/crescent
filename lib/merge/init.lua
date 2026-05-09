@@ -5,9 +5,6 @@ end
 local mod = {}
 
 --[[creates new object with all the keys of the inputs. handles array part as well]]
---[[@generic t]]
---[[@param ... t]]
---[[@return t]]
 --: (...{ [any]: any }) -> { [any]: any }
 mod.merge = function (...)
 	local ret = {}

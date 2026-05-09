@@ -6,14 +6,11 @@ local mod = {}
 --[[support for mcp 1.0 (both understanding and sending)]]
 --[[FIXME: can't work since idk??]]
 --[[TODO: it should wrap write...]]
---[[@return fun(s: string) cb, fun (write: fun (s: string)): fun (s: string) init]]
---[[@param cb fun(s: string) callback]]
---[[@param mcp_cb fun(type: string, value: {}) callback for mcp messages]]
+--: (cb: (string) -> nil, mcp_cb: (type: string, value: unknown) -> nil) -> ((string) -> nil, ((string) -> nil) -> (string) -> nil)
 mod.wrap = function (cb, mcp_cb)
 	local authentication_key = nil
-	--[[@type table<string, table<string, unknown>>]]
+	--: { [string]: { [string]: unknown } | nil }
 	local multiline_messages = {}
-	--[[@param s string]]
 	return function (s)
 		--[[TODO: consider switching to find() for speeeed]]
 		for line in s:gmatch("[\n]+") do
@@ -31,7 +28,7 @@ mod.wrap = function (cb, mcp_cb)
 					local key = line:match("#$#: (.+)")
 					if key then
 						local msg = multiline_messages[key] --[[:! { type: unknown, value: unknown }]]
-						mcp_cb(msg.type, msg.value)
+						mcp_cb(msg.type --[[:! string]], msg.value)
 						multiline_messages[key] = nil
 					end
 				else

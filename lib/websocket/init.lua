@@ -58,32 +58,6 @@ local err = function(sock, body)
 	sock:close()
 end
 
---[[@alias websocket_send fun(msg: websocket_message)]]
---[[@alias websocket_close fun()]]
-
---[[@class websocket_message_base]]
---[[@field type string]]
---[[@field payload string]]
-
---[[@class websocket_message_text: websocket_message_base]]
---[[@field type "text"]]
-
---[[@class websocket_message_binary: websocket_message_base]]
---[[@field type "binary"]]
-
---[[@class websocket_message_close: websocket_message_base]]
---[[@field type "close"]]
---[[@field status integer]]
-
---[[@class websocket_message_ping: websocket_message_base]]
---[[@field type "ping"]]
-
---[[@class websocket_message_pong: websocket_message_base]]
---[[@field type "pong"]]
---[[@field payload string Must be the same as the payload of the ping, if sent in response to a ping.]]
-
---[[@alias websocket_message websocket_message_text|websocket_message_binary|websocket_message_close|websocket_message_ping|websocket_message_pong]]
-
 -- TODO(api): error representation is integer codes; consider converting to string
 -- errors for a more ergonomic API. Deferred — requires a breaking API change.
 -- The second return value of decode() is currently overloaded (boolean ready OR
@@ -94,12 +68,6 @@ end
 
 -- TODO(refactor): refactor so the outer function takes the handler and returns
 -- function(sock, req), enabling use as middleware without a closure per call.
---[[@return websocket_send? send, websocket_close? close]]
---[[@param sock luajitsocket]]
---[[@param req http_request]]
---[[@param read fun(sock: luajitsocket, msg: websocket_message)]]
---[[@param close fun(sock: luajitsocket)|nil]]
---[[@param epoll epoll]]
 --: (sock: ws_sock, req: { headers: { [string]: string[] }, ... }, read: (sock: ws_sock, msg: websocket_message) -> nil, close: ((sock: ws_sock) -> nil) | nil, epoll: ws_epoll) -> (((msg: websocket_message) -> nil) | nil, (() -> nil) | nil)
 mod.websocket = function(sock, req, read, close, epoll)
 	if (req.headers["upgrade"] or {})[1] ~= "websocket" or (req.headers["connection"] or {})[1] ~= "Upgrade" then return nil end

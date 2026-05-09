@@ -2,29 +2,19 @@ local base = require("lib.mud_cp.client")
 
 local mod = {}
 
---[[@class mcp]]
---[[@field packages table<string, mcp_package>]]
---[[@field message_handlers table<string, mcp_message_handler>]]
---[[@alias mcp_message_handler fun (self_: mcp, message: {})]]
---[[@class mcp_package]]
---[[@field name string? defaults to `""`]]
---[[@field version integer[]? defaults to `{ 1, 0 }`]]
---[[@field min_version integer[]? defaults to `version`]]
---[[@field max_version integer[]? defaults to `version`]]
---[[@field message_handlers table<string, mcp_message_handler>? defaults to `{}`]]
---[[@field init fun (self_: mcp)? defaults to `nil`]]
+--:: mcp_message_handler = (self_: unknown, message: unknown) -> nil
+--:: mcp_package = { name?: string, version?: integer[], min_version?: integer[], max_version?: integer[], message_handlers?: { [string]: mcp_message_handler }, init?: (self_: unknown) -> nil }
+--:: mcp = { packages: mcp_package[], message_handlers: { [string]: mcp_message_handler } }
 
 -- TODO: need to create a mcp instance
 -- TODO: sending messages, configuring which fields must be multiline regardless of newline presence,
 -- support for mcp 1.0 (both understanding and sending)
 -- FIXME: can't work since 
 -- TODO: it should wrap write...
---[[@return fun(s: string) cb, fun (write: fun (s: string)): fun (s: string) init]]
---[[@param cb fun(s: string) callback]]
---[[@param packages mcp_package[]?]]
+--: (cb: (string) -> nil, packages: mcp_package[] | nil) -> ((string) -> nil, ((string) -> nil) -> (string) -> nil)
 mod.wrap = function (cb, packages)
 	packages = packages or {}
-	--[[@type mcp]]
+	--: mcp
 	local self = {
 		packages = packages,
 		message_handlers = {},

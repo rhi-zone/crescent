@@ -37,8 +37,7 @@ local mod = {}
 
 --:: Process = { pid: integer, kill: (Process, integer | nil) -> nil, wait: (Process) -> integer }
 
---[[@param fd integer]]
---[[@return string]]
+--: (integer) -> string
 local function read_fd(fd)
   local parts = {}
   while true do
@@ -49,8 +48,7 @@ local function read_fd(fd)
   return table.concat(parts)
 end
 
---[[@param status integer]]
---[[@return integer exit_code]]
+--: (integer) -> integer
 local function decode_status(status)
   -- WIFEXITED: (status & 0x7f) == 0 → WEXITSTATUS: (status >> 8) & 0xff
   -- WIFSIGNALED: ((status & 0x7f) + 1) >> 1 > 0 → signal = status & 0x7f
@@ -171,18 +169,16 @@ function mod.exec(cmd, args, opts)
   return exit_code, stdout_str, stderr_str
 end
 
---[[@class process_handle]]
---[[@field pid integer]]
 local handle = {}
 handle.__index = handle
 
---[[@param signal integer?]]
+--: (self: Process, integer | nil) -> nil
 function handle:kill(signal)
   local self_ = self --[[:! Process]]
   ffi.C.kill(self_.pid, signal or SIGTERM)
 end
 
---[[@return integer exit_code]]
+--: (self: Process) -> integer
 function handle:wait()
   local self_ = self --[[:! Process]]
   ffi.C.waitpid(self_.pid, int1, 0)
