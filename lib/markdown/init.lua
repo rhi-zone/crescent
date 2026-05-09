@@ -81,7 +81,7 @@ local function inline_html(s)
     end
     ms, me, url = s:find("^<(mailto:[^>]+)>", pos)
     if ms then
-      local url_ = url or "" --[[: string]]
+      local url_ = url or ""
       return ms, me, '<a href="' .. html_escape(url_) .. '">' .. html_escape(url_) .. '</a>'
     end
   end

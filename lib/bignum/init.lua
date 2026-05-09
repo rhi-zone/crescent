@@ -334,7 +334,7 @@ function M.new(v)
   if type(v) ~= "string" then
     return nil, "bignum.new: expected string or number, got " .. type(v)
   end
-  local vs = v --[[: string]]
+  local vs = v
   local str = string.match(vs, "^%s*(.-)%s*$") or ""
   if str == "" then return nil, "bignum.new: empty string" end
 

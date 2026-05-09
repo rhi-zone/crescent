@@ -183,7 +183,7 @@ end
 --: (dir: Directive, input: string, pos: integer) -> (string | nil, integer, string | nil)
 local function match_directive(dir, input, pos_in)
 	local dir_ = dir --[[: any]]
-	local pos = pos_in --[[: integer]] --: integer
+	local pos = pos_in --: integer
 	local ilen = #input
 	--: (e_in: integer, p: integer, w: integer | nil) -> integer
 	local function clamp_width(e_in, p, w)
@@ -261,7 +261,7 @@ local function match_directive(dir, input, pos_in)
 			-- width may have cut mid-number; just parse what we have
 			local s2, e2 = find(text, "^%-?%d+")
 			if not s2 or not e2 then return nil, pos, "%d: no integer after width clamp" end
-			local e2_ = e2 --[[: integer]]
+			local e2_ = e2
 			text = sub(text, s2, e2_)
 			e_ = pos + e2_ - 1
 		end

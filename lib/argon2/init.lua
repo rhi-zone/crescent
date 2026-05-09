@@ -71,12 +71,12 @@ end
 -- Base64url (no padding) encode/decode.
 --: (s: string) -> string
 local function b64url_encode(s)
-  return base64.encode(s, { url = true, pad = false }) --[[: string]]
+  return base64.encode(s, { url = true, pad = false })
 end
 
 --: (s: string) -> (string | nil)
 local function b64url_decode(s)
-  return base64.decode(s, { url = true }) --[[: string | nil]]
+  return base64.decode(s, { url = true })
 end
 
 -- Parse a PHC-format Argon2 string:

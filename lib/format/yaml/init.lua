@@ -266,7 +266,7 @@ local function parse_double_quoted(p)
         return nil, format("unknown escape '\\%s' at position %d", esc_char, p.pos)
       end
     else
-      local ch_text = sub(p.s, p.pos, p.pos) --[[: string]]
+      local ch_text = sub(p.s, p.pos, p.pos)
       parts[#parts + 1] = ch_text
       p.pos = p.pos + 1
     end
@@ -290,7 +290,7 @@ local function parse_single_quoted(p)
         return concat(parts)
       end
     else
-      local ch_text = sub(p.s, p.pos, p.pos) --[[: string]]
+      local ch_text = sub(p.s, p.pos, p.pos)
       parts[#parts + 1] = ch_text
       p.pos = p.pos + 1
     end
@@ -910,7 +910,7 @@ parse_value = function(p, min_indent, in_flow)
     end
     anchor_name = sub(p.s, anchor_start, p.pos - 1)
     skip_spaces(p)
-    c = peek(p) --[[: integer | nil]]
+    c = peek(p)
   end
 
   -- Alias

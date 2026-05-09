@@ -99,7 +99,7 @@ local function tokenize(html)
         else
           -- Find the inner of <...>
           local close_i = close --[[:! integer]]
-          local inner = html:sub(i+1, close_i-1) --[[: string]]
+          local inner = html:sub(i+1, close_i-1)
           -- Self-closing? (e.g. <br/>)
           local self_close = inner:sub(-1) == "/"
           if self_close then inner = inner:sub(1, -2) end

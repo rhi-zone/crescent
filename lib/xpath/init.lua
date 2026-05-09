@@ -952,7 +952,7 @@ local function eval_path(ast, ctx)
 end
 
 -- XPath built-in functions
---:: XPathFn = ({ [integer]: unknown, ... }, { node: unknown, position: integer, size: integer, order: unknown, ... }) -> unknown
+--:: XPathFn = (args: { [integer]: unknown, ... }, ctx: { node: unknown, position: integer, size: integer, order: unknown, ... }) -> unknown
 local FUNCTIONS = {}
 
 FUNCTIONS["count"] = function(args, ctx)

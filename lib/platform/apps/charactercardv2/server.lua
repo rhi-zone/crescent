@@ -324,7 +324,7 @@ end
 
 --: (string) -> (string, { [string]: string })
 local function parse_target(target)
-	local qpos = target:find("?", 1, true) --[[: integer | nil]]
+	local qpos = target:find("?", 1, true)
 	if not qpos then return target, {} end
 	local path = target:sub(1, qpos - 1)
 	local qs = target:sub(qpos + 1)

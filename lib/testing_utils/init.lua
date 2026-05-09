@@ -114,7 +114,7 @@ end
 function M.bench_compare(fns, opts)
   local results = {}
   for name, fn in pairs(fns) do
-    results[name] = M.bench(fn, opts) --[[: BenchResult]]
+    results[name] = M.bench(fn, opts)
   end
 
   local fastest_name, fastest_ops = nil, -1

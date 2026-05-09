@@ -70,7 +70,7 @@ end
 local hex_to_binary = function (hex)
 	local result = (hex:gsub("..", function(hexval)
 		return char(tonumber(hexval --[[:! string]], 16) --[[:! integer]])
-	end)) --[[: string]]
+	end))
 	return result
 end
 

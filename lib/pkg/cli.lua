@@ -182,7 +182,7 @@ local function cmd_install(project_dir, parsed)
 	-- any ancestor, use the workspace root as project_dir.
 	local effective_dir = project_dir
 	if parsed.workspace then
-		local ws_root = workspace.find_root(project_dir) --[[: string | nil]]
+		local ws_root = workspace.find_root(project_dir)
 		if ws_root ~= nil then
 			effective_dir = ws_root
 		else
@@ -191,7 +191,7 @@ local function cmd_install(project_dir, parsed)
 		end
 	else
 		-- Auto-detect: walk up looking for workspace.lua
-		local ws_root = workspace.find_root(project_dir) --[[: string | nil]]
+		local ws_root = workspace.find_root(project_dir)
 		if ws_root ~= nil then
 			effective_dir = ws_root
 		end

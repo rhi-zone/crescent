@@ -198,17 +198,17 @@ local function parse_locale_string(s)
   -- Patterns: ll, ll-RR, ll-Ssss, ll-Ssss-RR
   local a, b, c = s:match("^([a-zA-Z]+)%-([a-zA-Z]+)%-([a-zA-Z]+)$")
   if a and b and c then
-    local sa = a --[[: string]]
-    local sb = b --[[: string]]
-    local sc = c --[[: string]]
+    local sa = a
+    local sb = b
+    local sc = c
     lang = sa:lower()
     if #sb == 4 then script = sb:sub(1,1):upper()..sb:sub(2):lower(); region = sc:upper()
     else region = sb:upper(); script = nil end -- unusual, treat b as region
   else
     local p, q = s:match("^([a-zA-Z]+)%-([a-zA-Z]+)$")
     if p and q then
-      local sp = p --[[: string]]
-      local sq = q --[[: string]]
+      local sp = p
+      local sq = q
       lang = sp:lower()
       if #sq == 4 then script = sq:sub(1,1):upper()..sq:sub(2):lower()
       else region = sq:upper() end
@@ -469,7 +469,7 @@ function M.format_number(n, locale, opts)
     local s = string.format("%.10g", abs_n)
     local ip, fp = s:match("^(%d+)%.(%d+)$")
     if ip and fp then
-      int_part, frac_part = ip --[[: string]], fp --[[: string]]
+      int_part, frac_part = ip, fp
     else
       int_part = s:match("^(%d+)$") or "0"
       frac_part = ""

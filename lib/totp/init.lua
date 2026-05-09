@@ -219,7 +219,7 @@ end
 local function uri_encode(s)
   return s:gsub("[^%w%-%.%_%~]", function(c)
     return string.format("%%%02X", string.byte(c))
-  end) --[[: string]]
+  end)
 end
 
 --- Generate an otpauth:// URI for QR code provisioning.

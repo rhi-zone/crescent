@@ -35,9 +35,9 @@ local M = {}
 --:: http_req = { method: string | nil, path: string | nil, query: string | nil, headers: { [string]: string[] } | nil, body: string | nil }
 --:: http_res = { status: integer | nil, headers: { [string]: unknown }, body: string | nil }
 --:: host_class = { kind: "daemon" | "app" | "unknown", id: string | nil, loopback: boolean | nil }
---:: app_handler_fn = (http_req, http_res) -> nil
+--:: app_handler_fn = (req: http_req, res: http_res) -> nil
 --:: maybe_app_handler = app_handler_fn | nil
---:: app_loader_fn = (string) -> (maybe_app_handler, string | nil)
+--:: app_loader_fn = (path: string) -> (maybe_app_handler, string | nil)
 --:: source_entry = { id: string, name: string, discover: (({ [string]: string }) -> unknown) }
 --:: daemon_opts = {
 --::   host?: string,

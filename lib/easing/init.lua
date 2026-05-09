@@ -299,10 +299,12 @@ local _names = {
   "in_bounce",  "out_bounce",  "in_out_bounce",
 }
 
+--:: EasingFn = (t: number) -> number
+
 -- Returns the easing function for a given name, or nil.
---: (string) -> (((number) -> number) | nil)
+--: (name: string) -> EasingFn | nil
 M.get = function(name)
-  return M[name] --[[:! ((number) -> number) | nil]]
+  return M[name] --[[:! EasingFn | nil]]
 end
 
 -- Returns an array of all easing function names.

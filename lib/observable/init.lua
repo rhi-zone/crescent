@@ -9,7 +9,7 @@ local M = {}
 --:: Observer = { next: (unknown) -> (), error: (((string) -> ()) | nil), complete: ((() -> ()) | nil) }
 --:: Teardown = () -> ()
 --:: SafeObserverT = { _raw: Observer, _stopped: boolean, next: (SafeObserverT, unknown) -> nil, error: (SafeObserverT, string) -> nil, complete: (SafeObserverT) -> nil }
---:: SubscribeFn = (SafeObserverT) -> (Teardown | nil)
+--:: SubscribeFn = (observer: SafeObserverT) -> (Teardown | nil)
 --:: Observable = { _subscribe: SubscribeFn, subscribe: (Observable, Observer) -> (Teardown | nil) }
 --:: Subject = { next: (Subject, unknown) -> nil, error: (Subject, string) -> nil, complete: (Subject) -> nil, subscribe: (Subject, Observer) -> (Teardown | nil) }
 

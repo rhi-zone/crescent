@@ -10,7 +10,7 @@ local M = {}
 M._tier = "pure"
 
 --:: Row = { [string]: any }
---:: Pred = (Row) -> boolean
+--:: Pred = (row: Row) -> boolean
 --:: Tbl = { _db: any, _name: string, _schema: any, _pk: string | nil, _rows: { [any]: Row }, _order: { [integer]: any }, _subs: { [integer]: any }, _live: { [integer]: any }, _indexes: { [string]: { [any]: { [integer]: any } } }, _fire: (self: Tbl, event: string, row: Row | nil, old_row: Row | nil) -> nil, _index_add: (self: Tbl, pk: any, row: Row) -> nil, _index_remove: (self: Tbl, pk: any, row: Row) -> nil, insert: (self: Tbl, row: Row) -> any, update: (self: Tbl, pk: any, patch: Row) -> any, ... }
 --:: QB = { _tbl: Tbl, _where: Pred | nil, _order: string | nil, _dir: string, _limit: integer | nil, _offset: integer, _join: { other: Tbl, local_field: string, other_field: string } | nil, _base_rows: (self: QB) -> { [integer]: Row }, select: (self: QB) -> { [integer]: Row }, where: (self: QB, pred: any) -> QB, order_by: (self: QB, field: string, dir: string | nil) -> QB, limit: (self: QB, n: integer) -> QB, offset: (self: QB, n: integer) -> QB, join: (self: QB, other: Tbl, local_field: string, other_field: string) -> QB, count: (self: QB) -> integer, first: (self: QB) -> Row | nil, ... }
 --:: DB = { _tables: { [string]: Tbl }, ... }

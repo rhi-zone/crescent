@@ -5,9 +5,9 @@ end
 local M = {}
 M._tier = "pure"
 
---:: CombineFn = (any, any) -> any
---:: UpdateFn = (any, any, integer) -> any
---:: ComposeFn = (any, any) -> any
+--:: CombineFn = (a: any, b: any) -> any
+--:: UpdateFn = (val: any, lazy: any, len: integer) -> any
+--:: ComposeFn = (a: any, b: any) -> any
 --:: TreeT = { _data: { [integer]: any }, _n: integer, _size: integer, _combine: CombineFn, ... }
 --:: LazyTreeT = { _data: { [integer]: any }, _lazy: { [integer]: any }, _n: integer, _size: integer, _combine: CombineFn, _update: UpdateFn, _compose: ComposeFn, _identity: any, _push_down: (self: LazyTreeT, i: integer, node_l: integer, node_r: integer, n: integer) -> nil, _range_update: (self: LazyTreeT, node: integer, node_l: integer, node_r: integer, l: integer, r: integer, val: any) -> nil, _query: (self: LazyTreeT, node: integer, node_l: integer, node_r: integer, l: integer, r: integer) -> any, ... }
 --:: PNode = { val: any, left: any, right: any }

@@ -29,7 +29,7 @@ end
 
 -- Type validators
 
---:: ValidatorFn = (unknown) -> boolean
+--:: ValidatorFn = (value: unknown) -> boolean
 --: ValidatorFn
 local function _val_number(v) return type(v) == "number" end
 --: ValidatorFn

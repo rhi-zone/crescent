@@ -638,7 +638,7 @@ function M.resolve(deps, locked, registry_index, opts)
 			local pkg_info = idx_entry.index[name]
 			if pkg_info then
 				for _, ver_str in ipairs(pkg_info.versions or {}) do
-					local ver_ = semver.parse(ver_str) --[[: { major: integer, minor: integer, patch: integer, pre: ({ [number]: integer | string }) | nil } | nil]]
+					local ver_ = semver.parse(ver_str)
 					if ver_ ~= nil then
 						local ver = ver_
 						-- Check ALL constraints.
@@ -705,7 +705,7 @@ function M.resolve(deps, locked, registry_index, opts)
 
 		if locked_entry then
 			-- Fast path: check if the locked version satisfies ALL constraints.
-			local locked_ver_ = semver.parse(locked_entry.version) --[[: { major: integer, minor: integer, patch: integer, pre: ({ [number]: integer | string }) | nil } | nil]]
+			local locked_ver_ = semver.parse(locked_entry.version)
 			if locked_ver_ == nil then
 				return nil, ("locked version for %q is invalid"):format(name)
 			end

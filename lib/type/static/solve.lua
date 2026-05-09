@@ -204,7 +204,7 @@ local function resolve_deferred_intrinsic(ctx, tid)
             local result --: integer | nil
             result = match_mod.lookup_index(ctx, subj_tid, key_tid) --[[:! integer | nil]]
             if result ~= nil then
-                return result --[[: integer]]
+                return result
             end
         end
         return tid
@@ -2268,7 +2268,7 @@ local function solve_check_args(ctx, c)
                 -- Bind params of the winning overload so that generic TVs in the
                 -- return type get resolved (e.g. CTypeMap[S_fresh]).
                 for j = 0, ft.data[1] - 1 do
-                    local pexp = ctx.lists:get(ft.data[0] + j) --[[: integer]]
+                    local pexp = ctx.lists:get(ft.data[0] + j)
                     local exp_p = find(ctx, pexp)
                     local pact = arg_tids[j + 1]
                     if pact then

@@ -123,7 +123,7 @@ function M.load_app(path)
 	}
 end
 
---:: TarLoader = (string) -> (string | nil, string | nil)
+--:: TarLoader = (modname: string) -> (string | nil, string | nil)
 -- make_tar_loader(entries) -> function
 -- Returns a function that resolves a module name to { source, chunkname } when
 -- the module exists in the tarball entries, or nil + error string on miss.

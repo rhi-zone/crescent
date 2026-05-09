@@ -30,7 +30,7 @@ end
 -- Type aliases
 -- ---------------------------------------------------------------------------
 
---:: AQDoneCb = (string | nil, any) -> nil
+--:: AQDoneCb = (err: string | nil, result: any) -> nil
 --:: AQTask = { fn: (AQDoneCb) -> nil, priority: integer, id: any, data: any, seq: integer, retries_left: integer, cancelled: boolean, retry_after: number | nil }
 --:: AQState = { task: AQTask, started_at: number, done: boolean, err: string | nil, result: any, co: Thread | nil }
 --:: AQStats = { pending: integer, active: integer, completed: integer, failed: integer, retried: integer }

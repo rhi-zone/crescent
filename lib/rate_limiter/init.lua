@@ -11,7 +11,8 @@ M._tier = "pure"
 --:: FixedWindow = { allow: (FixedWindow, string | nil) -> (boolean, number | nil), count: (FixedWindow, string | nil) -> number, reset: (FixedWindow, string | nil) -> nil, stats: (FixedWindow) -> RLStats }
 --:: SlidingWindowLog = { allow: (SlidingWindowLog, string | nil) -> (boolean, number | nil), stats: (SlidingWindowLog) -> RLStats }
 --:: SlidingWindowCounter = { allow: (SlidingWindowCounter, string | nil) -> (boolean, number | nil), stats: (SlidingWindowCounter) -> RLStats }
---:: ConcurrentLimiter = { acquire: (ConcurrentLimiter) -> (() -> nil) | nil, count: (ConcurrentLimiter) -> number, stats: (ConcurrentLimiter) -> RLStats }
+--:: ReleaseFn = () -> nil
+--:: ConcurrentLimiter = { acquire: (ConcurrentLimiter) -> ReleaseFn | nil, count: (ConcurrentLimiter) -> number, stats: (ConcurrentLimiter) -> RLStats }
 --:: MultiLimiter = { allow: (MultiLimiter, string | nil) -> (boolean, number | nil), stats: (MultiLimiter) -> RLStats }
 --:: FWEntry = { count: number, window_start: number }
 --:: SWCEntry = { prev: number, curr: number, window_start: number }
@@ -383,7 +384,7 @@ function M.concurrent(opts)
   local allowed = 0
   local denied = 0
 
-  --: () -> ((() -> nil) | nil)
+  --: () -> ReleaseFn | nil
   function self:acquire()
     if current >= limit then
       denied = denied + 1

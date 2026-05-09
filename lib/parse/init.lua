@@ -9,7 +9,7 @@ local M = {}
 -- NOT by result == nil. This allows parsers like optional() to return
 -- nil as a valid result.
 
---:: parser = (string, integer) -> (unknown | nil, integer, string | nil)
+--:: parser = (input: string, pos: integer) -> (unknown | nil, integer, string | nil)
 
 -- ── Primitives ──────────────────────────────────────────────────────────
 

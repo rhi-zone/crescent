@@ -208,7 +208,7 @@ local function compute_box(node, px, py, bw, bh, result)
 
   -- Aspect ratio: if one dim is explicit and the other isn't, derive it.
   if node.aspect_ratio then
-    local ar = node.aspect_ratio --[[: number]]
+    local ar = node.aspect_ratio
     if type(node.width) == "number" and type(node.height) ~= "number" and node.height ~= "fill" then
       h = w / ar
     elseif type(node.height) == "number" and type(node.width) ~= "number" and node.width ~= "fill" then
@@ -448,7 +448,7 @@ local function compute_box(node, px, py, bw, bh, result)
       compute_node(c, cx, cy, cw, ch, result)
 
       local step_gap = (i < n_flow) and gap or 0.0 --: number
-      if i < n_flow and (extra_gap --[[: number]]) > 0 then step_gap = extra_gap end
+      if i < n_flow and extra_gap > 0 then step_gap = extra_gap end
       cursor = cursor + (cm --[[:! number]]) + step_gap
     end
 

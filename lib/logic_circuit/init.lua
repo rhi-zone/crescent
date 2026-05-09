@@ -15,7 +15,7 @@ local band, bor, bxor, bnot = bit.band, bit.bor, bit.bxor, bit.bnot
 
 -- ── Gate evaluation ───────────────────────────────────────────────────────────
 
---:: GateFn = ({ [integer]: integer, ... }) -> integer
+--:: GateFn = (inputs: { [integer]: integer, ... }) -> integer
 --: { [string]: GateFn }
 local GATE_FNS = {
   AND    = function(inputs) local r=1 for _,v in ipairs(inputs) do if v==0 then return 0 end end return r end,

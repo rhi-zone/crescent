@@ -7,6 +7,7 @@ local mimetype_by_contents
 
 local mod = {}
 
+--:: StaticFullHandlerFn = (req: any, res: any) -> nil
 --: (string) -> string | nil
 local system_specific_mime_type = function (file_path) end
 
@@ -51,7 +52,7 @@ local html_escape = function (string)
 	return result
 end
 
---: (string | nil, { io_open: (string, string) -> any, os_date: (string, integer) -> string } | nil) -> ((any, any) -> nil) | (nil, string)
+--: (base: string | nil, opts: { io_open: (string, string) -> any, os_date: (string, integer) -> string } | nil) -> StaticFullHandlerFn | (nil, string)
 mod.router = function (base, opts)
 	if base ~= nil and type(base) ~= "string" then
 		return nil, "static() expects string as base path, got " .. tostring(base)

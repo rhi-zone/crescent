@@ -127,7 +127,7 @@ function workspace.find_root(dir)
 		end
 	end
 
-	local current = (start --[[:! string]]):gsub("/$", "") --[[: string]]
+	local current = (start --[[:! string]]):gsub("/$", "")
 	-- Guard against infinite loops: stop at filesystem root.
 	local max_depth = 64
 	local depth = 0

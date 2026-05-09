@@ -16,7 +16,7 @@ M._tier = "pure"
 --:: Subscriber = { _obs: Observer, _sub: Subscription, _done: boolean, next: (Subscriber, unknown) -> nil, error: (Subscriber, unknown) -> nil, complete: (Subscriber) -> nil }
 --:: Subject = { _subscribers: { [integer]: Observer }, _closed: boolean, _error: unknown, subscribe: (Subject, Observer | ((unknown) -> nil) | nil) -> Subscription, next: (Subject, unknown) -> nil, error: (Subject, unknown) -> nil, complete: (Subject) -> nil }
 --:: BehaviorSubject = { _subscribers: { [integer]: Observer }, _closed: boolean, _error: unknown, _value: unknown, subscribe: (BehaviorSubject, Observer | ((unknown) -> nil) | nil) -> Subscription, next: (BehaviorSubject, unknown) -> nil, error: (BehaviorSubject, unknown) -> nil, complete: (BehaviorSubject) -> nil, get_value: (BehaviorSubject) -> unknown }
---:: SubscribeFn = (Subscriber) -> (Subscription | ((() -> nil) | nil))
+--:: SubscribeFn = (subscriber: Subscriber) -> (Subscription | ((() -> nil) | nil))
 --:: Observable = { _subscribe: SubscribeFn, subscribe: (Observable, Observer | ((unknown) -> nil) | nil) -> Subscription }
 
 -- ---------------------------------------------------------------------------

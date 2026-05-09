@@ -271,7 +271,7 @@ function M.table(data, opts)
   end
   for _, row in ipairs(rows) do
     for c = 1, ncols do
-      local cell_str = tostring(row[c] or "") --[[: string ]]
+      local cell_str = tostring(row[c] or "")
       local w = display_width(cell_str)
       if w > col_widths[c] then col_widths[c] = w end
     end

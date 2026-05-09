@@ -248,7 +248,7 @@ M.query = function(query_type_str, index, opts)
 
     -- Apply limit
     if limit ~= nil then
-        local lim = limit --[[: integer]]
+        local lim = limit
         if #matches > lim then
             local trimmed = {}
             for i = 1, lim do trimmed[i] = matches[i] end

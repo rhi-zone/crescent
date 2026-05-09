@@ -473,7 +473,7 @@ local function try_file_tier()
 	local function hex_to_bin(hex)
 		local r = hex:gsub("%x%x", function(h)
 			return string.char(tonumber(h, 16) or 0)
-		end) --[[: string]]
+		end)
 		return r
 	end
 

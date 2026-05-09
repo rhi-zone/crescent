@@ -93,13 +93,13 @@ end
 
 local function unpack_float(s, i)
 	-- i is 1-based Lua string index
-	local ss = s --[[: string]]
+	local ss = s
 	ffi.copy(_fu.b, ss:sub(i, i + 3) --[[: any]], 4)
 	return _fu.f, i + 4
 end
 
 local function unpack_double(s, i)
-	local ss = s --[[: string]]
+	local ss = s
 	ffi.copy(_du.b, ss:sub(i, i + 7) --[[: any]], 8)
 	return _du.d, i + 8
 end
@@ -224,7 +224,7 @@ local function encode_value(ftype, value)
 	elseif k == "message" then
 		local inner, err = M.encode(ftype, value)
 		if not inner then return nil, err end
-		local inner_s = inner --[[: string]]
+		local inner_s = inner
 		return encode_varint_u64(#inner_s, 0) .. inner_s
 
 	else

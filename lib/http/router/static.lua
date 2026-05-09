@@ -4,7 +4,8 @@ local mimetype_by_contents
 
 local mod = {}
 
---: (string | nil, { io_open: (string, string) -> any } | nil) -> ((any, any) -> boolean | nil) | (nil, string)
+--:: StaticHandlerFn = (req: any, res: any) -> (boolean | nil)
+--: (base: string | nil, opts: { io_open: (string, string) -> any } | nil) -> StaticHandlerFn | (nil, string)
 mod.router = function (base, opts)
 	if base ~= nil and type(base) ~= "string" then
 		return nil, "static_router() expects string as base path, got " .. tostring(base)

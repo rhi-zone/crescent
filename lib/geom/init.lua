@@ -337,9 +337,9 @@ end
 -- Point-in-triangle via barycentric coords (works for both windings)
 --: (Point2, Point2, Point2, Point2) -> boolean
 M.triangle_contains = function(p1, p2, p3, point)
-  local d1 = M.vec_cross(M.vec_sub(p2, p1), M.vec_sub(point, p1)) --[[: number]]
-  local d2 = M.vec_cross(M.vec_sub(p3, p2), M.vec_sub(point, p2)) --[[: number]]
-  local d3 = M.vec_cross(M.vec_sub(p1, p3), M.vec_sub(point, p3)) --[[: number]]
+  local d1 = M.vec_cross(M.vec_sub(p2, p1), M.vec_sub(point, p1))
+  local d2 = M.vec_cross(M.vec_sub(p3, p2), M.vec_sub(point, p2))
+  local d3 = M.vec_cross(M.vec_sub(p1, p3), M.vec_sub(point, p3))
   local has_neg = (d1 < 0) or (d2 < 0) or (d3 < 0)
   local has_pos = (d1 > 0) or (d2 > 0) or (d3 > 0)
   return not (has_neg and has_pos)

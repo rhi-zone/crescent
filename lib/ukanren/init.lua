@@ -7,7 +7,7 @@ local M = {}
 --:: Var = { __var: true, id: integer, name: string | nil }
 --:: Pair = { __pair: true, car: unknown, cdr: unknown }
 --:: Sub = { [integer]: unknown }
---:: Goal = (Sub) -> any
+--:: Goal = (sub: Sub) -> any
 
 -- Variable counter for unique ids
 local _next_id = 0

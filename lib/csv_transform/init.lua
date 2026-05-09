@@ -523,7 +523,7 @@ end
 -- @param agg        aggregator  how to aggregate value_col per cell
 -- Other non-pivot, non-value columns are used as the row identity.
 function Pipeline:pivot(pivot_col, value_col, agg)
-	local agg = agg --[[: CsvAgg]]
+	local agg = agg
 	-- collect distinct pivot values and row keys
 	local pivot_vals = {}
 	local pivot_seen = {}

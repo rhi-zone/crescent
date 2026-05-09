@@ -219,7 +219,7 @@ end
 -- Schedule object
 -- ---------------------------------------------------------------------------
 
---:: DateFn = (string, integer) -> { year: integer, month: integer, day: integer, hour: integer, min: integer, sec: integer, wday: integer, ... }
+--:: DateFn = (fmt: string, ts: integer) -> { year: integer, month: integer, day: integer, hour: integer, min: integer, sec: integer, wday: integer, ... }
 --:: CronFields = { minute: { [integer]: integer }, hour: { [integer]: integer }, dom: { [integer]: integer }, month: { [integer]: integer }, dow: { [integer]: integer }, second: { [integer]: integer } | nil }
 --:: Schedule = { fields: CronFields, _date_fn: DateFn, matches: (Schedule, integer) -> boolean, next: (Schedule, integer, integer | nil) -> integer | nil, prev: (Schedule, integer) -> integer | nil, range: (Schedule, integer, integer) -> { [integer]: integer }, describe: (Schedule) -> string, ... }
 

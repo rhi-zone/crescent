@@ -10,7 +10,7 @@ M._tier = "pure"
 
 local math2 = require("lib.math")
 
---:: RuleFn = (integer, integer) -> integer
+--:: RuleFn = (state: integer, neighbors: integer) -> integer
 --:: DenseGrid = { _w: integer, _h: integer, _wrap: boolean, _rule: RuleFn, _buf: { [integer]: integer }, _gen: integer }
 --:: SparseGrid = { _cells: { [string]: boolean }, _rule: RuleFn }
 --:: Cell2D = { [integer]: integer }

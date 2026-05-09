@@ -84,7 +84,7 @@ end
 -- opts: { lr=0.01, max_iter=1000, tol=1e-6, momentum=0,
 --         callback=nil, record_history=false }
 --:: GdInfo = { iter: integer, params: number[], loss: number, grad_norm: number }
---:: GdCallback = (GdInfo) -> (boolean | nil)
+--:: GdCallback = (info: GdInfo) -> (boolean | nil)
 --:: GdOpts = { lr?: number, max_iter?: integer, tol?: number, momentum?: number, callback?: GdCallback, record_history?: boolean }
 --:: SgdOpts = { lr?: number, epochs?: integer, tol?: number, lr_decay?: number, momentum?: number, callback?: GdCallback, record_history?: boolean }
 --:: AdamOpts = { lr?: number, max_iter?: integer, tol?: number, beta1?: number, beta2?: number, epsilon?: number, callback?: GdCallback, record_history?: boolean }

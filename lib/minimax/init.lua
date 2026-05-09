@@ -19,7 +19,7 @@ M._tier = "pure"
 
 --:: minimax_game = { moves: (unknown) -> unknown[], apply: (unknown, unknown) -> unknown, terminal: (unknown) -> boolean, evaluate: (unknown) -> number, hash?: (unknown) -> unknown, ... }
 --:: minimax_ttable = { [unknown]: { depth: integer, move: unknown, score: number } } | nil
---:: minimax_order_fn = (unknown, { [number]: unknown }) -> { [number]: unknown }
+--:: minimax_order_fn = (state: unknown, moves: { [number]: unknown }) -> { [number]: unknown }
 --:: minimax_order = (minimax_order_fn) | nil
 --:: mcts_node = { state: unknown, parent: mcts_node | nil, move: unknown, visits: number, wins: number, children: { [number]: mcts_node }, expanded: boolean }
 --:: minimax_rng = { next: (minimax_rng) -> integer, float: (minimax_rng) -> number, int: (minimax_rng, integer) -> integer }
@@ -52,7 +52,7 @@ local function ab_search(game, state, depth, alpha, beta, maximize, ttable, orde
   end
 
   if order then
-    local order_fn = order --[[: minimax_order_fn]]
+    local order_fn = order
     moves = order_fn(state, moves)
   end
 
@@ -133,7 +133,7 @@ local function negamax_ab(game, state, depth, alpha, beta, ttable, order)
   end
 
   if order then
-    local order_fn = order --[[: minimax_order_fn]]
+    local order_fn = order
     moves = order_fn(state, moves)
   end
 

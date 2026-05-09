@@ -11,8 +11,8 @@ M._tier = "pure"
 
 --:: State = "closed" | "open" | "half_open"
 --:: CBClock = () -> number
---:: CBIsFailure = (unknown, unknown) -> boolean
---:: CBOnChange = (string, string) -> nil
+--:: CBIsFailure = (result: unknown, err: unknown) -> boolean
+--:: CBOnChange = (from: string, to: string) -> nil
 --:: CB = { _failure_threshold: number, _success_threshold: number, _timeout: number, _on_state_change: CBOnChange | nil, _clock: CBClock, _is_failure: CBIsFailure, _state: string, _failures: integer, _successes: integer, _last_failure_time: number | nil, ... }
 
 local STATE_CLOSED    = "closed"

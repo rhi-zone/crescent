@@ -566,57 +566,57 @@ local function eval_arith(env, t)
       if not a then return nil, e1 end
       local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return (a --[[: number]]) + (b --[[: number]])
+      return (a) + (b)
     elseif f == "-" and #t_args == 2 then
       local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
       local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return (a --[[: number]]) - (b --[[: number]])
+      return (a) - (b)
     elseif f == "-" and #t_args == 1 then
       local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
-      return -(a --[[: number]])
+      return -(a)
     elseif f == "*" and #t_args == 2 then
       local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
       local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return (a --[[: number]]) * (b --[[: number]])
+      return (a) * (b)
     elseif f == "/" and #t_args == 2 then
       local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
       local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return (a --[[: number]]) / (b --[[: number]])
+      return (a) / (b)
     elseif f == "mod" and #t_args == 2 then
       local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
       local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return (a --[[: number]]) % (b --[[: number]])
+      return (a) % (b)
     elseif f == "^" and #t_args == 2 then
       local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
       local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return (a --[[: number]]) ^ (b --[[: number]])
+      return (a) ^ (b)
     elseif f == "abs" and #t_args == 1 then
       local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
-      return math.abs(a --[[: number]])
+      return math.abs(a)
     elseif f == "max" and #t_args == 2 then
       local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
       local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return math.max(a --[[: number]], b --[[: number]])
+      return math.max(a, b)
     elseif f == "min" and #t_args == 2 then
       local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
       local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return math.min(a --[[: number]], b --[[: number]])
+      return math.min(a, b)
     end
   end
   return nil, "cannot evaluate as arithmetic: " .. term_to_string({}, t)
@@ -865,7 +865,7 @@ solve = function(db, goals, env, depth)
   end
 
   -- arithmetic comparison predicates
-  --:: ArithCmpFn = (number, number) -> boolean
+  --:: ArithCmpFn = (a: number, b: number) -> boolean
   local ARITH_CMP = {
     --: ArithCmpFn
     ["<"]  = function(a, b) return a < b end,

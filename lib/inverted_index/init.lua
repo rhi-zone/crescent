@@ -24,8 +24,8 @@ end
 function M.new(opts)
   opts = opts or {}
   local self = {
-    k1       = (opts.k1 or 1.5) --[[: number]],
-    b        = (opts.b or 0.75) --[[: number]],
+    k1       = (opts.k1 or 1.5),
+    b        = (opts.b or 0.75),
     tokenize = opts.tokenize or default_tokenize,
     stem     = opts.stem,
     -- postings[term] = { [doc_id] = tf }
@@ -35,9 +35,9 @@ function M.new(opts)
     -- docs[doc_id] = true
     docs     = {} --[[: { [unknown]: boolean }]],
     -- total_len: sum of all doc lengths (for avgdl)
-    total_len = 0.0 --[[: number]],
+    total_len = 0.0,
     -- N: doc count
-    N        = 0 --[[: integer]],
+    N        = 0,
     -- positions[term][doc_id] = array of positions (1-indexed)
     positions = {} --[[: { [string]: { [unknown]: integer[] } }]],
   }
@@ -154,7 +154,7 @@ local function bm25_term(self, term, doc_id, avg_dl)
   local k1  = self.k1
   local b   = self.b
 
-  local safe_avg_dl = avg_dl == 0 and 1.0 or avg_dl --[[: number]]
+  local safe_avg_dl = avg_dl == 0 and 1.0 or avg_dl
   local num = tf * (k1 + 1)
   local den = tf + k1 * (1 - b + b * dl / safe_avg_dl)
   return idf * num / den
