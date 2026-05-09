@@ -26,14 +26,17 @@ end
 
 local M = {}
 
+--:: HastNode = { type: string, tag?: string, children?: { [integer]: HastNode }, props?: { [string]: unknown }, value?: string, ... }
+--:: MetaOpts = { title?: string, description?: string, keywords?: { [integer]: string }, author?: string, canonical?: string, og?: boolean, twitter?: boolean, og_type?: string, og_image?: string, color?: string }
+
 -- ── Node helpers ──────────────────────────────────────────────────────────────
 
---: (string, any, any) -> any
+--: (string, { [string]: unknown }, { [integer]: HastNode }) -> HastNode
 local function el(tag, props, children)
   return { type = "element", tag = tag, props = props or {}, children = children or {} }
 end
 
---: (string) -> any
+--: (string) -> HastNode
 local function text(value)
   return { type = "text", value = value }
 end
@@ -41,10 +44,11 @@ end
 -- ── Tree search ───────────────────────────────────────────────────────────────
 
 -- Find the first child element with the given tag name (in a children list).
---: (any, string) -> any
+--: (unknown, string) -> HastNode | nil
 local function find_child(children, tag)
   if not children then return nil end
-  for _, child in ipairs(children) do
+  local children_t = children --[[:! { [integer]: HastNode }]]
+  for _, child in ipairs(children_t) do
     if child.type == "element" and child.tag == tag then
       return child
     end
@@ -57,9 +61,9 @@ end
 --   root → html → head
 --   root → head  (direct)
 --   root only    (inserts head as first child)
---: (any) -> any
+--: (HastNode) -> HastNode
 local function find_or_create_head(tree)
-  local children = tree.children or {}
+  local children = tree.children or {} --[[:! { [integer]: HastNode }]]
 
   -- Look for <html>.
   local html_el = find_child(children, "html")
@@ -86,30 +90,32 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, MetaOpts | nil) -> nil
 function M.plugin(processor, opts)
-  opts = opts or {}
+  local opts_t = (opts or {}) --[[:! MetaOpts]]
 
-  processor:use_transformer(function(tree)
-    local head = find_or_create_head(tree)
-    local append = head.children
+  local processor_t = processor --[[:! { use_transformer: (unknown, (unknown) -> unknown) -> nil }]]
+  processor_t:use_transformer(function(tree)
+    local tree_node = tree --[[:! HastNode]]
+    local head = find_or_create_head(tree_node)
+    local append = (head.children or {}) --[[:! { [integer]: HastNode }]]
 
     -- <title>
-    if opts.title and opts.title ~= "" then
-      append[#append + 1] = el("title", {}, { text(opts.title) })
+    if opts_t.title and opts_t.title ~= "" then
+      append[#append + 1] = el("title", {}, { text(opts_t.title) })
     end
 
     -- <meta name="description">
-    if opts.description and opts.description ~= "" then
+    if opts_t.description and opts_t.description ~= "" then
       append[#append + 1] = el("meta", {
         name    = "description",
-        content = opts.description,
+        content = opts_t.description,
       }, {})
     end
 
     -- <meta name="keywords">
-    if opts.keywords and #opts.keywords > 0 then
-      local joined = table.concat(opts.keywords, ", ")
+    if opts_t.keywords and #opts_t.keywords > 0 then
+      local joined = table.concat(opts_t.keywords, ", ")
       append[#append + 1] = el("meta", {
         name    = "keywords",
         content = joined,
@@ -117,58 +123,58 @@ function M.plugin(processor, opts)
     end
 
     -- <meta name="author">
-    if opts.author and opts.author ~= "" then
+    if opts_t.author and opts_t.author ~= "" then
       append[#append + 1] = el("meta", {
         name    = "author",
-        content = opts.author,
+        content = opts_t.author,
       }, {})
     end
 
     -- <meta name="theme-color">
-    if opts.color and opts.color ~= "" then
+    if opts_t.color and opts_t.color ~= "" then
       append[#append + 1] = el("meta", {
         name    = "theme-color",
-        content = opts.color,
+        content = opts_t.color,
       }, {})
     end
 
     -- <link rel="canonical">
-    if opts.canonical and opts.canonical ~= "" then
+    if opts_t.canonical and opts_t.canonical ~= "" then
       append[#append + 1] = el("link", {
         rel  = "canonical",
-        href = opts.canonical,
+        href = opts_t.canonical,
       }, {})
     end
 
     -- Open Graph tags.
-    if opts.og then
-      if opts.title and opts.title ~= "" then
-        append[#append + 1] = el("meta", { property = "og:title",       content = opts.title }, {})
+    if opts_t.og then
+      if opts_t.title and opts_t.title ~= "" then
+        append[#append + 1] = el("meta", { property = "og:title",       content = opts_t.title }, {})
       end
-      if opts.description and opts.description ~= "" then
-        append[#append + 1] = el("meta", { property = "og:description", content = opts.description }, {})
+      if opts_t.description and opts_t.description ~= "" then
+        append[#append + 1] = el("meta", { property = "og:description", content = opts_t.description }, {})
       end
-      local og_type = opts.og_type or "website"
+      local og_type = opts_t.og_type or "website"
       append[#append + 1] = el("meta", { property = "og:type",        content = og_type }, {})
-      if opts.og_image and opts.og_image ~= "" then
-        append[#append + 1] = el("meta", { property = "og:image",      content = opts.og_image }, {})
+      if opts_t.og_image and opts_t.og_image ~= "" then
+        append[#append + 1] = el("meta", { property = "og:image",      content = opts_t.og_image }, {})
       end
-      if opts.canonical and opts.canonical ~= "" then
-        append[#append + 1] = el("meta", { property = "og:url",        content = opts.canonical }, {})
+      if opts_t.canonical and opts_t.canonical ~= "" then
+        append[#append + 1] = el("meta", { property = "og:url",        content = opts_t.canonical }, {})
       end
     end
 
     -- Twitter card tags.
-    if opts.twitter then
+    if opts_t.twitter then
       append[#append + 1] = el("meta", { name = "twitter:card",        content = "summary" }, {})
-      if opts.title and opts.title ~= "" then
-        append[#append + 1] = el("meta", { name = "twitter:title",     content = opts.title }, {})
+      if opts_t.title and opts_t.title ~= "" then
+        append[#append + 1] = el("meta", { name = "twitter:title",     content = opts_t.title }, {})
       end
-      if opts.description and opts.description ~= "" then
-        append[#append + 1] = el("meta", { name = "twitter:description", content = opts.description }, {})
+      if opts_t.description and opts_t.description ~= "" then
+        append[#append + 1] = el("meta", { name = "twitter:description", content = opts_t.description }, {})
       end
-      if opts.og_image and opts.og_image ~= "" then
-        append[#append + 1] = el("meta", { name = "twitter:image",     content = opts.og_image }, {})
+      if opts_t.og_image and opts_t.og_image ~= "" then
+        append[#append + 1] = el("meta", { name = "twitter:image",     content = opts_t.og_image }, {})
       end
     end
 

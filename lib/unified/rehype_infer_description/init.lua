@@ -26,24 +26,26 @@ end
 
 local M = {}
 
+--:: HastNode = { type: string, tag?: string, children?: { [integer]: HastNode }, props?: { [string]: unknown }, value?: string, data?: { [string]: unknown }, ... }
+
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local HEADING = { h1=true, h2=true, h3=true, h4=true, h5=true, h6=true }
 
---: (any, any) -> nil
+--: (HastNode, { [integer]: string }) -> nil
 local function collect_text(node, parts)
   if node.type == "text" then
-    parts[#parts + 1] = node.value or ""
+    parts[#parts + 1] = (node.value or "") --[[:! string]]
   elseif node.children then
-    for _, child in ipairs(node.children) do
+    for _, child in ipairs((node.children --[[:! { [integer]: HastNode }]])) do
       collect_text(child, parts)
     end
   end
 end
 
---: (any) -> string
+--: (HastNode) -> string
 local function text_content(node)
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   collect_text(node, parts)
   return table.concat(parts)
 end
@@ -91,15 +93,16 @@ end
 -- Flat linear walk of root children to find first heading then first p.
 -- Returns (heading_index, p_index) where heading_index may be nil if no
 -- heading found. Indices are into node.children of the provided list.
---: (any) -> (any, any)
+--: ({ [integer]: HastNode }) -> (integer | nil, integer | nil)
 local function find_heading_and_para(children)
-  local heading_idx = nil
-  local para_idx = nil
+  local heading_idx = nil --: integer | nil
+  local para_idx = nil --: integer | nil
   for i, child in ipairs(children) do
     if child.type == "element" then
-      if HEADING[child.tag] and not heading_idx then
+      local child_tag = (child.tag or "") --[[:! string]]
+      if HEADING[child_tag] and not heading_idx then
         heading_idx = i
-      elseif child.tag == "p" then
+      elseif child_tag == "p" then
         if heading_idx then
           -- First <p> after heading — this is what we want.
           para_idx = i
@@ -116,14 +119,16 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, { max_words?: integer, truncate_size?: integer } | nil) -> nil
 function M.plugin(processor, opts)
-  opts = opts or {}
-  local max_words     = opts.max_words     or 50
-  local truncate_size = opts.truncate_size or 300
+  local opts_t = (opts or {}) --[[:! { max_words?: integer, truncate_size?: integer }]]
+  local max_words     = opts_t.max_words     or 50
+  local truncate_size = opts_t.truncate_size or 300
 
-  processor:use_transformer(function(tree)
-    local children = tree.children or {}
+  local processor_t = processor --[[:! { use_transformer: (unknown, (unknown) -> unknown) -> nil }]]
+  processor_t:use_transformer(function(tree)
+    local tree_node = tree --[[:! HastNode]]
+    local children = (tree_node.children or {}) --[[:! { [integer]: HastNode }]]
     local _heading_idx, para_idx = find_heading_and_para(children)
 
     local para = para_idx and children[para_idx]
@@ -131,31 +136,34 @@ function M.plugin(processor, opts)
       -- No <p> among direct children — do a depth-first search for the first <p>.
       local find_first_p
       find_first_p = function(node)
-        if node.type == "element" and node.tag == "p" then
+        local node_t = node --[[:! HastNode]]
+        local node_tag = (node_t.tag or "") --[[:! string]]
+        if node_t.type == "element" and node_tag == "p" then
           return node
         end
-        if node.children then
-          for _, child in ipairs(node.children) do
+        if node_t.children then
+          for _, child in ipairs((node_t.children --[[:! { [integer]: HastNode }]])) do
             local found = find_first_p(child)
             if found then return found end
           end
         end
         return nil
       end
-      para = find_first_p(tree)
+      para = find_first_p(tree_node)
     end
 
     if para then
-      local raw_text = text_content(para)
+      local raw_text = text_content(para --[[:! HastNode]])
       -- Normalize whitespace.
-      raw_text = raw_text:gsub("%s+", " "):match("^%s*(.-)%s*$")
+      raw_text = (raw_text:gsub("%s+", " "):match("^%s*(.-)%s*$") --[[:! string]])
       if raw_text ~= "" then
-        tree.data = tree.data or {}
-        tree.data.description = truncate(raw_text, max_words, truncate_size)
+        local data = (tree_node.data or {}) --[[:! { [string]: unknown }]]
+        data.description = truncate(raw_text, max_words, truncate_size)
+        tree_node.data = data
       end
     end
 
-    return tree
+    return tree_node
   end)
 end
 

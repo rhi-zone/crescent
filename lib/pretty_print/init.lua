@@ -24,7 +24,7 @@ local pretty_print_
 local pretty_printers = {}
 pretty_printers["nil"] = function(n, write) write(tostring(n)) end
 pretty_printers.boolean = function(b, write) write(tostring(b)) end
---: (n: number, write: (...any) -> nil) -> nil
+--: (n: number, write: (...unknown) -> nil) -> nil
 pretty_printers.number = function(n, write)
 	write((n % 1 == 0 and n >= minint and n <= maxint) and string.format("%d", n) or
 		n)
@@ -40,7 +40,7 @@ pretty_printers.lightuserdata = function(_, write) write("<lightuserdata>") end
 pretty_printers.thread = function(_, write) write("<thread>") end
 pretty_printers.cdata = function(_, write) write("<cdata>") end
 pretty_printers.userdata = function(_, write) write("<userdata>") end
---: (t: { [unknown]: unknown, __keyorder?: { [integer]: unknown } }, write: (...any) -> nil, seen: { [unknown]: boolean }) -> nil
+--: (t: { [unknown]: unknown, __keyorder?: { [integer]: unknown } }, write: (...unknown) -> nil, seen: { [unknown]: boolean }) -> nil
 pretty_printers.table = function(t, write, seen)
 	seen[t] = true
 	-- do
@@ -103,7 +103,7 @@ pretty_printers.table = function(t, write, seen)
 	end
 end
 
---: (value: any, write: (...any) -> nil, not_top_level: boolean | nil, opts: { no_trailing_newline: boolean | nil, no_print_nil: boolean | nil } | nil, seen: { [any]: boolean } | nil) -> nil
+--: (value: unknown, write: (...unknown) -> nil, not_top_level: boolean | nil, opts: { no_trailing_newline: boolean | nil, no_print_nil: boolean | nil } | nil, seen: { [unknown]: boolean } | nil) -> nil
 pretty_print_ = function(value, write, not_top_level, opts, seen)
 	if type(write) ~= "function" then
 		error("pretty_print: write function is required")
@@ -124,16 +124,16 @@ pretty_print_ = function(value, write, not_top_level, opts, seen)
 	if type(printer) == "function" then printer(value, write, seen) end
 	if not not_top_level and not opts_.no_trailing_newline then write("\n") end
 end
---: (any, (...any) -> nil, boolean | nil, { no_trailing_newline: boolean | nil, no_print_nil: boolean | nil } | nil, { [any]: boolean } | nil) -> nil
+--: (unknown, (...unknown) -> nil, boolean | nil, { no_trailing_newline: boolean | nil, no_print_nil: boolean | nil } | nil, { [unknown]: boolean } | nil) -> nil
 mod.pretty_print_ = pretty_print_
---: (any) -> string
+--: (unknown) -> string
 mod.uneval = function(value)
 	local parts = {} --: { [integer]: string }
 	local write = function(...) for i = 1, select("#", ...) do parts[#parts + 1] = tostring(select(i, ...)) end end
 	pretty_print_(value, write, true)
 	return table.concat(parts)
 end
---: ((string) -> nil, ...any) -> nil
+--: ((string) -> nil, ...unknown) -> nil
 mod.pretty_print = function(write_fn, ...)
 	if type(write_fn) ~= "function" then
 		error("pretty_print: write_fn function is required")

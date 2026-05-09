@@ -21,36 +21,39 @@ end
 
 local M = {}
 
+--:: HastNode = { type: string, tag?: string, children?: { [integer]: HastNode }, props?: { [string]: unknown }, value?: string, data?: { [string]: unknown }, ... }
+
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local HEADING = { h1=true, h2=true, h3=true, h4=true, h5=true, h6=true }
 
---: (any, any) -> nil
+--: (HastNode, { [integer]: string }) -> nil
 local function collect_text(node, parts)
   if node.type == "text" then
-    parts[#parts + 1] = node.value or ""
+    parts[#parts + 1] = (node.value or "") --[[:! string]]
   elseif node.children then
-    for _, child in ipairs(node.children) do
+    for _, child in ipairs((node.children --[[:! { [integer]: HastNode }]])) do
       collect_text(child, parts)
     end
   end
 end
 
---: (any) -> string
+--: (HastNode) -> string
 local function text_content(node)
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   collect_text(node, parts)
   return table.concat(parts)
 end
 
 -- Depth-first search for the first heading element.
---: (any) -> any
+--: (HastNode) -> HastNode | nil
 local function find_first_heading(node)
-  if node.type == "element" and HEADING[node.tag] then
+  local tag = (node.tag or "") --[[:! string]]
+  if node.type == "element" and HEADING[tag] then
     return node
   end
   if node.children then
-    for _, child in ipairs(node.children) do
+    for _, child in ipairs((node.children --[[:! { [integer]: HastNode }]])) do
       local found = find_first_heading(child)
       if found then return found end
     end
@@ -60,18 +63,21 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, unknown) -> nil
 function M.plugin(processor, _opts)
-  processor:use_transformer(function(tree)
-    local heading = find_first_heading(tree)
+  local processor_t = processor --[[:! { use_transformer: (unknown, (unknown) -> unknown) -> nil }]]
+  processor_t:use_transformer(function(tree)
+    local tree_node = tree --[[:! HastNode]]
+    local heading = find_first_heading(tree_node)
     if heading then
       local title = text_content(heading)
       if title ~= "" then
-        tree.data = tree.data or {}
-        tree.data.title = title
+        local data = (tree_node.data or {}) --[[:! { [string]: unknown }]]
+        data.title = title
+        tree_node.data = data
       end
     end
-    return tree
+    return tree_node
   end)
 end
 

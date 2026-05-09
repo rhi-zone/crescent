@@ -22,8 +22,10 @@ local ERR_VALUE  = "#VALUE!"
 local ERR_CIRC   = "#CIRC!"
 local ERR_NA     = "#N/A"
 
+--: (unknown) -> boolean
 local function is_error(v)
-  return type(v) == "string" and v:sub(1,1) == "#"
+  if type(v) ~= "string" then return false end
+  return (v --[[:! string]]):sub(1,1) == "#"
 end
 
 -- ---------------------------------------------------------------------------
@@ -107,8 +109,8 @@ local TK = {
   EOF    = "EOF",
 }
 
---:: SpreadToken = { type: string, value?: any, is_range?: boolean, ... }
---:: SpreadNode = { type: string, op?: string, value?: any, left?: SpreadNode, right?: SpreadNode, operand?: SpreadNode, name?: string, args?: { [integer]: SpreadNode }, ... }
+--:: SpreadToken = { type: string, value?: unknown, is_range?: boolean, ... }
+--:: SpreadNode = { type: string, op?: string, value?: unknown, left?: SpreadNode, right?: SpreadNode, operand?: SpreadNode, name?: string, args?: { [integer]: SpreadNode }, ... }
 --:: ParserState = { tokens: { [integer]: SpreadToken }, pos: integer, peek: (ParserState) -> SpreadToken, consume: (ParserState) -> SpreadToken, expect: (ParserState, string) -> SpreadToken, expr: (ParserState) -> SpreadNode, comparison: (ParserState) -> SpreadNode, concat: (ParserState) -> SpreadNode, additive: (ParserState) -> SpreadNode, multiplicative: (ParserState) -> SpreadNode, power: (ParserState) -> SpreadNode, unary: (ParserState) -> SpreadNode, primary: (ParserState) -> SpreadNode }
 
 --: (string) -> { [integer]: SpreadToken }
@@ -387,7 +389,7 @@ local function Parser(tokens)
         end
       end
       self:expect(TK.RPAREN)
-      return { type = NT.CALL, name = tk.value, args = args }
+      return { type = NT.CALL, name = (tk.value --[[:! string]]), args = args }
     elseif tk.type == TK.LPAREN then
       self:consume()
       local e = self:expr()
@@ -413,7 +415,7 @@ end
 -- Built-in functions
 -- ---------------------------------------------------------------------------
 
---: (any) -> (number | nil, string | nil)
+--: (unknown) -> (number | nil, string | nil)
 local function num_coerce(v)
   if type(v) == "number" then return v end
   if type(v) == "boolean" then return v and 1 or 0 end
@@ -801,9 +803,9 @@ end
 
 -- Evaluate an AST node given a sheet context
 -- Returns a value or an error string
---: (SpreadNode, any, { [string]: boolean } | nil) -> any
+--: (SpreadNode, SheetType, { [string]: boolean } | nil) -> unknown
 local function eval_node(node, sheet, visiting)
-  local sheet_ = sheet --[[:! { _max_rows: integer, _max_cols: integer, _get_computed: (any, string, any) -> any, ... }]]
+  local sheet_ = sheet
   if node.type == NT.NUM then
     return node.value
   elseif node.type == NT.STR then
@@ -962,7 +964,7 @@ end
 -- Sheet object
 -- ---------------------------------------------------------------------------
 
---:: SheetType = { _cells: { [string]: any }, _dependents: { [string]: { [string]: boolean } }, _max_rows: integer, _max_cols: integer, _invalidate: (SheetType, string, { [string]: boolean } | nil) -> (), _get_computed: (SheetType, string, { [string]: boolean } | nil) -> any, set: (SheetType, string, any) -> (boolean | nil, string | nil), get: (SheetType, string) -> any, range: (SheetType, string) -> any, set_range: (SheetType, string, any) -> any, to_csv: (SheetType) -> string, from_csv: (SheetType, string) -> any, ... }
+--:: SheetType = { _cells: { [string]: unknown }, _dependents: { [string]: { [string]: boolean } }, _max_rows: integer, _max_cols: integer, _invalidate: (SheetType, string, { [string]: boolean } | nil) -> (), _get_computed: (SheetType, string, { [string]: boolean } | nil) -> unknown, set: (SheetType, string, unknown) -> (boolean | nil, string | nil), get: (SheetType, string) -> unknown, range: (SheetType, string) -> unknown, set_range: (SheetType, string, unknown) -> unknown, to_csv: (SheetType) -> string, from_csv: (SheetType, string) -> unknown, ... }
 
 local Sheet = {}
 Sheet.__index = Sheet
@@ -1008,7 +1010,7 @@ function Sheet:_get_computed(key, visiting)
   return result
 end
 
---: (any, string, any) -> (boolean | nil, string | nil)
+--: (SheetType, string, unknown) -> (boolean | nil, string | nil)
 function Sheet:set(ref, value)
   -- Normalize ref (strip $ for key)
   local clean = ref:gsub("%$", ""):upper()
@@ -1077,7 +1079,7 @@ function Sheet:get(ref)
   return self:_get_computed(key)
 end
 
---: (any, string) -> ({ [integer]: { row: integer, col: integer, value: any } } | nil, string | nil)
+--: (SheetType, string) -> ({ [integer]: { row: integer, col: integer, value: unknown } } | nil, string | nil)
 function Sheet:range(ref_range)
   local rng = parse_range(ref_range:gsub("%$", ""):upper())
   if not rng then return nil, "invalid range: " .. ref_range end
@@ -1092,7 +1094,7 @@ function Sheet:range(ref_range)
   return out
 end
 
---: (any, string, { [integer]: any }) -> (boolean | nil, string | nil)
+--: (SheetType, string, { [integer]: unknown }) -> (boolean | nil, string | nil)
 function Sheet:set_range(ref_range, values_array)
   local rng = parse_range(ref_range:gsub("%$", ""):upper())
   if not rng then return nil, "invalid range: " .. ref_range end

@@ -19,6 +19,8 @@ local methods = require("lib.lsp.methods")
 -- Server (metatable object)
 -- ---------------------------------------------------------------------------
 
+--:: Dispatcher = { method: (Dispatcher, string, unknown) -> nil, notify: (Dispatcher, string, unknown) -> nil, send_notify: (Dispatcher, string, unknown) -> nil, loop: (Dispatcher) -> nil, _methods: { [string]: unknown }, _notifs: { [string]: unknown }, ... }
+--:: ServerObj = { _dispatcher: Dispatcher, _user_init_handler: ((unknown) -> unknown) | nil, _client_capabilities: unknown, ... }
 local Server = {}
 Server.__index = Server
 
@@ -52,7 +54,7 @@ local TEXT_SYNC_NOTIFS = {
 }
 
 -- Build capabilities from registered handlers.
---: (any) -> { [string]: unknown }
+--: (ServerObj) -> { [string]: unknown }
 local function build_capabilities(self)
     local caps = {}
 
@@ -97,13 +99,13 @@ for fn_name, entry in pairs(HANDLERS) do
 end
 
 -- Special: on_initialize wraps the user handler to merge capabilities.
---: (any, ((unknown) -> unknown) | nil) -> nil
+--: (ServerObj, ((unknown) -> unknown) | nil) -> nil
 function Server:on_initialize(handler)
     self._user_init_handler = handler
 end
 
 -- Special: on_exit registers a callback that runs before os.exit.
---: (any, (() -> nil) | nil) -> nil
+--: (ServerObj, (() -> nil) | nil) -> nil
 function Server:on_exit(handler)
     self._dispatcher:notify(methods.EXIT, function(_params)
         if handler then handler() end
@@ -114,25 +116,25 @@ end
 -- Server -> client notifications.
 
 -- Publish diagnostics to the client.
---: (any, unknown) -> nil
+--: (ServerObj, unknown) -> nil
 function Server:publish_diagnostics(params)
     self._dispatcher:send_notify(methods.PUBLISH_DIAGNOSTICS, params)
 end
 
 -- Send a log message to the client.
---: (any, integer, string) -> nil
+--: (ServerObj, integer, string) -> nil
 function Server:log_message(msg_type, message)
     self._dispatcher:send_notify(methods.LOG_MESSAGE, { type = msg_type, message = message })
 end
 
 -- Send a show-message notification to the client.
---: (any, integer, string) -> nil
+--: (ServerObj, integer, string) -> nil
 function Server:show_message(msg_type, message)
     self._dispatcher:send_notify(methods.SHOW_MESSAGE, { type = msg_type, message = message })
 end
 
 -- Start processing messages (delegates to jsonrpc dispatcher loop).
---: (any) -> nil
+--: (ServerObj) -> nil
 function Server:listen()
     self._dispatcher:loop()
 end

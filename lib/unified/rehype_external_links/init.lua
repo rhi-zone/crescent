@@ -35,17 +35,18 @@ local DEFAULT_PROTOCOLS = { "http", "https" }
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 -- Build a set of protocol prefixes ("http://", "https://", …) for O(1) checks.
---: (any) -> any
+--: (unknown) -> { [string]: boolean }
 local function build_prefix_set(protocols)
-  local set = {}
-  for _, p in ipairs(protocols) do
-    set[tostring(p) .. "://"] = true
+  local protocols_t = protocols --[[:! { [integer]: string }]]
+  local set = {} --: { [string]: boolean }
+  for _, p in ipairs(protocols_t) do
+    set[p .. "://"] = true
   end
   return set
 end
 
 -- Return true when href starts with one of the external protocol prefixes.
---: (string, any) -> boolean
+--: (string, { [string]: boolean }) -> boolean
 local function is_external(href, prefix_set)
   -- Fast path: must contain "://" somewhere.
   local colon = href:find("://", 1, true)
@@ -55,7 +56,7 @@ local function is_external(href, prefix_set)
 end
 
 -- Convert rel option to a space-separated string.
---: (any) -> string
+--: (unknown) -> string
 local function rel_to_string(rel)
   if type(rel) == "string" then return rel end
   if type(rel) == "table" then return table.concat(rel, " ") end
@@ -64,19 +65,23 @@ end
 
 -- ── Tree walker ───────────────────────────────────────────────────────────────
 
---: (any, any, any, any) -> nil
+--:: HastNode = { type: string, tag?: string, children?: { [integer]: HastNode }, props?: { [string]: unknown }, value?: string, ... }
+
+--: (HastNode, { [string]: boolean }, unknown, string) -> nil
 local function walk(node, prefix_set, target, rel_str)
-  if node.type == "element" and node.tag == "a" then
-    local props = node.props or {}
+  local tag = (node.tag or "") --[[:! string]]
+  if node.type == "element" and tag == "a" then
+    local props = (node.props or {}) --[[:! { [string]: unknown }]]
     local href  = props.href
-    if type(href) == "string" and is_external(href, prefix_set) then
+    if type(href) == "string" and is_external(href --[[:! string]], prefix_set) then
       if target ~= false then
         props.target = target
       end
       if rel_str ~= "" then
         -- Merge with existing rel if present.
-        if props.rel and props.rel ~= "" then
-          props.rel = props.rel .. " " .. rel_str
+        local existing_rel = props.rel
+        if existing_rel and existing_rel ~= "" then
+          props.rel = (existing_rel --[[:! string]]) .. " " .. rel_str
         else
           props.rel = rel_str
         end
@@ -85,7 +90,7 @@ local function walk(node, prefix_set, target, rel_str)
     end
   end
   if node.children then
-    for _, child in ipairs(node.children) do
+    for _, child in ipairs((node.children --[[:! { [integer]: HastNode }]])) do
       walk(child, prefix_set, target, rel_str)
     end
   end
@@ -93,19 +98,21 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, { target?: string | boolean, rel?: string | { [integer]: string }, protocols?: { [integer]: string } } | nil) -> nil
 function M.plugin(processor, opts)
-  opts = opts or {}
-  local target    = opts.target    == nil  and DEFAULT_TARGET    or opts.target
-  local rel_opt   = opts.rel       ~= nil  and opts.rel          or DEFAULT_REL
-  local protocols = opts.protocols ~= nil  and opts.protocols    or DEFAULT_PROTOCOLS
+  local opts_t = (opts or {}) --[[:! { target?: string | boolean, rel?: string | { [integer]: string }, protocols?: { [integer]: string } }]]
+  local target    = opts_t.target    == nil  and DEFAULT_TARGET    or opts_t.target
+  local rel_opt   = opts_t.rel       ~= nil  and opts_t.rel          or DEFAULT_REL
+  local protocols = opts_t.protocols ~= nil  and opts_t.protocols    or DEFAULT_PROTOCOLS
 
   local prefix_set = build_prefix_set(protocols)
   local rel_str    = rel_to_string(rel_opt)
 
-  processor:use_transformer(function(tree)
-    walk(tree, prefix_set, target, rel_str)
-    return tree
+  local processor_t = processor --[[:! { use_transformer: (unknown, (unknown) -> unknown) -> nil }]]
+  processor_t:use_transformer(function(tree)
+    local tree_node = tree --[[:! HastNode]]
+    walk(tree_node, prefix_set, target, rel_str)
+    return tree_node
   end)
 end
 

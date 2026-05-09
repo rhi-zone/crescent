@@ -34,6 +34,8 @@ end
 
 local M = {}
 
+--:: HastNode = { type: string, tag?: string, children?: { [integer]: HastNode }, props?: { [string]: unknown }, value?: string, _splice?: { [integer]: HastNode }, ... }
+
 -- ── Void elements ─────────────────────────────────────────────────────────────
 
 local VOID = {
@@ -49,7 +51,7 @@ local VOID = {
 --              { type="close", tag= }
 --              { type="comment", value= }
 --              { type="text", value= }
---: (string) -> any
+--: (string) -> unknown
 local function tokenize(html)
   local tokens = {} --[[: any]]
   local i = 1
@@ -197,7 +199,7 @@ end
 
 -- Build a hast tree from a token list.
 -- Returns a list of top-level hast nodes.
---: (any) -> any
+--: (unknown) -> { [integer]: HastNode }
 local function tokens_to_hast(tokens)
   -- Stack of open elements. Each entry: { node = hast_element }.
   local stack = {} --[[: any]]
@@ -271,7 +273,7 @@ local function tokens_to_hast(tokens)
   return root_children
 end
 
---: (string) -> any
+--: (string) -> { [integer]: HastNode }
 local function parse_html(html)
   local trimmed = html:match("^%s*(.-)%s*$")
   if trimmed == "" then return {} end
@@ -284,25 +286,25 @@ end
 -- Replace raw/html nodes with parsed hast subtrees.
 -- Returns a (possibly different) node, or a list marker table when a raw node
 -- expands to multiple nodes. The caller is responsible for splicing lists.
---: (any) -> any
+--: (HastNode) -> HastNode
 local function transform_node(node)
   if node.type == "html" or node.type == "raw" then
     local parsed = parse_html(node.value or "")
     if #parsed == 0 then
       -- Empty — drop the node by returning a sentinel.
-      return { _splice = {} }
+      return { type = "raw", _splice = {} }
     elseif #parsed == 1 then
       return parsed[1]
     else
-      return { _splice = parsed }
+      return { type = "raw", _splice = parsed }
     end
   end
   if node.children then
-    local new_children = {}
-    for _, child in ipairs(node.children) do
+    local new_children = {} --: { [integer]: HastNode }
+    for _, child in ipairs((node.children --[[:! { [integer]: HastNode }]])) do
       local result = transform_node(child)
       if result and result._splice then
-        for _, spliced in ipairs(result._splice) do
+        for _, spliced in ipairs((result._splice --[[:! { [integer]: HastNode }]])) do
           new_children[#new_children + 1] = spliced
         end
       else
@@ -316,10 +318,12 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, unknown) -> nil
 function M.plugin(processor, _opts)
-  processor:use_transformer(function(tree)
-    return transform_node(tree)
+  local processor_t = processor --[[:! { use_transformer: (unknown, (unknown) -> unknown) -> nil }]]
+  processor_t:use_transformer(function(tree)
+    local tree_node = tree --[[:! HastNode]]
+    return transform_node(tree_node)
   end)
 end
 

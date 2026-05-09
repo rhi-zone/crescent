@@ -119,7 +119,7 @@ local function make_left_traversable_impl()
 end
 
 local function make_left_mt()
-	--: { [any]: any }
+	--: { [unknown]: unknown }
 	local index = {
 		[Mappable.key]   = left_f_impl,
 		[Applicable.key] = left_ap_impl,
@@ -236,7 +236,7 @@ local function make_right_traversable_impl()
 end
 
 local function make_right_mt()
-	--: { [any]: any }
+	--: { [unknown]: unknown }
 	local index = {
 		[Mappable.key]   = right_f_impl,
 		[Applicable.key] = right_ap_impl,

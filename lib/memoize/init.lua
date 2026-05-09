@@ -45,8 +45,8 @@ end
 
 -- Node layout: node.key, node.value, node.prev, node.next, node.expires
 
---:: LruNode = { key: any, value: any, prev: LruNode, next: LruNode, expires: number | nil, ... }
---:: Lru = { map: { [any]: LruNode }, head: LruNode, tail: LruNode, size: integer, max_size: integer }
+--:: LruNode = { key: unknown, value: unknown, prev: LruNode, next: LruNode, expires: number | nil, ... }
+--:: Lru = { map: { [string]: LruNode }, head: LruNode, tail: LruNode, size: integer, max_size: integer }
 --: (integer) -> Lru
 local function lru_new(max_size)
   -- sentinel head (MRU side) and tail (LRU side)
@@ -72,7 +72,7 @@ local function lru_push_front(lru, node)
 end
 
 -- Returns node or nil. Moves to front on hit (no TTL check here).
---: (Lru, any) -> LruNode | nil
+--: (Lru, string) -> LruNode | nil
 local function lru_get_node(lru, key)
   local node = lru.map[key]
   if not node then return nil end
@@ -82,7 +82,7 @@ local function lru_get_node(lru, key)
 end
 
 -- Insert or update. Returns evicted key (or nil).
---: (Lru, any, any, number | nil) -> any
+--: (Lru, string, unknown, number | nil) -> unknown | nil
 local function lru_put(lru, key, value, expires)
   local existing = lru.map[key]
   if existing then
@@ -109,7 +109,7 @@ local function lru_put(lru, key, value, expires)
   return evicted
 end
 
---: (Lru, any) -> nil
+--: (Lru, string) -> nil
 local function lru_delete(lru, key)
   local node = lru.map[key]
   if not node then return end
@@ -284,7 +284,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Memoize fn with optional LRU/TTL/key options.
---: ((...unknown) -> (...unknown), { max_size: number | nil, ttl: number | nil, key: ((...unknown) -> string) | nil, clock_fn: (() -> number) | nil } | nil) -> any
+--: ((...unknown) -> (...unknown), { max_size: number | nil, ttl: number | nil, key: ((...unknown) -> string) | nil, clock_fn: (() -> number) | nil } | nil) -> unknown
 function M.memoize(fn, opts)
   return wrap(fn, opts)
 end
@@ -304,11 +304,11 @@ function M.thunk(fn)
 end
 
 --- Memoize with weak values (GC-friendly for large values).
---: ((...unknown) -> (...unknown), any) -> any
+--: ((...unknown) -> (...unknown), { max_size: number | nil, ttl: number | nil, key: ((...unknown) -> string) | nil, clock_fn: (() -> number) | nil, ... } | nil) -> unknown
 function M.weak(fn, opts)
-  opts = opts or {}
-  opts.weak = true
-  return wrap(fn, opts)
+  local o = (opts or {}) --[[:! { max_size: number | nil, ttl: number | nil, key: ((...unknown) -> string) | nil, clock_fn: (() -> number) | nil, weak: boolean | nil }]]
+  o.weak = true
+  return wrap(fn, o)
 end
 
 --- Run fn exactly once; subsequent calls return the same value without calling fn.
@@ -347,7 +347,7 @@ end
 
 --- Multi-level memoize: memoize a curried function at each level.
 -- The top-level function is memoized; its returned function is also memoized.
---: (any) -> any
+--: ((...unknown) -> unknown) -> unknown
 function M.multi(fn)
   local outer = wrap(fn, nil)
   local outer_fn = outer --[[:! (...unknown) -> unknown]]

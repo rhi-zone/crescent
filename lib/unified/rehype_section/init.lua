@@ -26,20 +26,23 @@ end
 
 local M = {}
 
+--:: HastNode = { type: string, tag?: string, children?: { [integer]: HastNode }, props?: { [string]: unknown }, value?: string, ... }
+
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local HEADING_DEPTH = { h1=1, h2=2, h3=3, h4=4, h5=5, h6=6 }
 
---: (any) -> integer | nil
+--: (HastNode) -> integer | nil
 local function heading_depth(node)
   if node.type == "element" then
-    local val = HEADING_DEPTH[node.tag]
-  return val --[[:! integer | nil]]
+    local tag = (node.tag or "") --[[:! string]]
+    local val = HEADING_DEPTH[tag]
+    return val --[[:! integer | nil]]
   end
   return nil
 end
 
---: (any) -> any
+--: (unknown) -> HastNode
 local function make_section(children)
   return { type = "element", tag = "section", props = {}, children = children or {} }
 end
@@ -55,17 +58,17 @@ end
 -- Non-heading nodes are appended to the top of stack.
 -- At the end, collapse the stack bottom-up.
 
---: (any) -> any
+--: ({ [integer]: HastNode }) -> { [integer]: HastNode }
 local function sectionize(nodes)
   -- Stack: each entry = { depth = int, children = [] }
   -- We also keep a "root" accumulator for nodes before the first heading.
   local pre = {}      -- nodes before any heading
   local stack = {}    -- open section entries
 
-  --: () -> any
+  --: () -> { [integer]: HastNode }
   local function top_children()
     if #stack > 0 then
-      local top = stack[#stack] --[[:! { children: any, depth: integer }]]
+      local top = stack[#stack] --[[:! { children: { [integer]: HastNode }, depth: integer }]]
       return top.children
     end
     return pre
@@ -76,14 +79,14 @@ local function sectionize(nodes)
     if d then
       -- Close sections that are at depth >= d.
       while #stack > 0 do
-        local stk_top = stack[#stack] --[[:! { depth: integer, children: { [integer]: any } }]]
+        local stk_top = stack[#stack] --[[:! { depth: integer, children: { [integer]: HastNode } }]]
         if stk_top.depth < d then break end
-        local closed_ = table.remove(stack) --[[:! { children: { [integer]: any } }]]
+        local closed_ = table.remove(stack) --[[:! { children: { [integer]: HastNode }, depth: integer }]]
         local sec = make_section(closed_.children)
         -- Append the closed section to the new top.
         local parent
         if #stack > 0 then
-          local stk2 = stack[#stack] --[[:! { children: { [integer]: any } }]]
+          local stk2 = stack[#stack] --[[:! { children: { [integer]: HastNode }, depth: integer }]]
           parent = stk2.children
         else
           parent = pre
@@ -110,21 +113,23 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, { wrap?: boolean } | nil) -> nil
 function M.plugin(processor, opts)
-  opts = opts or {}
-  local wrap = opts.wrap
+  local opts_t = (opts or {}) --[[:! { wrap?: boolean }]]
+  local wrap = opts_t.wrap
   if wrap == nil then wrap = true end
 
-  processor:use_transformer(function(tree)
-    if not tree.children then return tree end
-    local result = sectionize(tree.children)
+  local processor_t = processor --[[:! { use_transformer: (unknown, (unknown) -> unknown) -> nil }]]
+  processor_t:use_transformer(function(tree)
+    local tree_node = tree --[[:! HastNode]]
+    if not tree_node.children then return tree_node end
+    local result = sectionize((tree_node.children --[[:! { [integer]: HastNode }]]))
     if wrap then
-      tree.children = { make_section(result) }
+      tree_node.children = { make_section(result) }
     else
-      tree.children = result
+      tree_node.children = result
     end
-    return tree
+    return tree_node
   end)
 end
 

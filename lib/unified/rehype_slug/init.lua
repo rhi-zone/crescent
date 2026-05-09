@@ -24,20 +24,22 @@ end
 
 local M = {}
 
+--:: HastNode = { type: string, tag?: string, children?: { [integer]: HastNode }, props?: { [string]: unknown }, value?: string, ... }
+
 -- ── Text extraction ───────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (HastNode, { [integer]: string }) -> nil
 local function collect_text(node, parts)
   if node.type == "text" then
-    parts[#parts + 1] = node.value or ""
+    parts[#parts + 1] = (node.value or "") --[[:! string]]
   elseif node.children then
-    for _, child in ipairs(node.children) do
+    for _, child in ipairs((node.children --[[:! { [integer]: HastNode }]])) do
       collect_text(child, parts)
     end
   end
 end
 
---: (any) -> string
+--: (HastNode) -> string
 local function text_content(node)
   local parts = {}
   collect_text(node, parts)
@@ -61,9 +63,10 @@ end
 
 local HEADING = { h1=true, h2=true, h3=true, h4=true, h5=true, h6=true }
 
---: (any, any) -> nil
+--: (HastNode, { [string]: integer }) -> nil
 local function walk(node, seen)
-  if node.type == "element" and HEADING[node.tag] then
+  local tag = (node.tag or "") --[[:! string]]
+  if node.type == "element" and HEADING[tag] then
     local slug = slugify(text_content(node))
     if slug ~= "" then
       local id = slug
@@ -73,12 +76,13 @@ local function walk(node, seen)
       else
         seen[slug] = 0
       end
-      node.props = node.props or {}
-      node.props.id = id
+      local props = (node.props or {}) --[[:! { [string]: unknown }]]
+      props.id = id
+      node.props = props
     end
   end
   if node.children then
-    for _, child in ipairs(node.children) do
+    for _, child in ipairs((node.children --[[:! { [integer]: HastNode }]])) do
       walk(child, seen)
     end
   end
@@ -86,13 +90,15 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, unknown) -> nil
 function M.plugin(processor, _opts)
-  processor:use_transformer(function(tree)
+  local processor_t = processor --[[:! { use_transformer: (unknown, (unknown) -> unknown) -> nil }]]
+  processor_t:use_transformer(function(tree)
     -- Fresh seen-ids table per transform call (i.e. per process() call).
-    local seen = {}
-    walk(tree, seen)
-    return tree
+    local seen = {} --: { [string]: integer }
+    local tree_node = tree --[[:! HastNode]]
+    walk(tree_node, seen)
+    return tree_node
   end)
 end
 

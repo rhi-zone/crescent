@@ -20,7 +20,7 @@ local co_resume  = coroutine.resume
 local co_status  = coroutine.status
 
 -- Generic array removal (avoids table.remove type inference issues)
---: ({ [integer]: any }, integer) -> nil
+--: ({ [integer]: unknown }, integer) -> nil
 local function arr_remove(t, i)
   for k = i, #t - 1 do t[k] = t[k + 1] end
   t[#t] = nil
@@ -30,12 +30,12 @@ end
 -- Type aliases
 -- ---------------------------------------------------------------------------
 
---:: AQDoneCb = (err: string | nil, result: any) -> nil
---:: AQTask = { fn: (AQDoneCb) -> nil, priority: integer, id: any, data: any, seq: integer, retries_left: integer, cancelled: boolean, retry_after: number | nil }
---:: AQState = { task: AQTask, started_at: number, done: boolean, err: string | nil, result: any, co: Thread | nil }
+--:: AQDoneCb = (err: string | nil, result: unknown) -> nil
+--:: AQTask = { fn: (AQDoneCb) -> nil, priority: integer, id: unknown, data: unknown, seq: integer, retries_left: integer, cancelled: boolean, retry_after: number | nil }
+--:: AQState = { task: AQTask, started_at: number, done: boolean, err: string | nil, result: unknown, co: Thread | nil }
 --:: AQStats = { pending: integer, active: integer, completed: integer, failed: integer, retried: integer }
---:: AQListeners = { [string]: { [integer]: any } }
---:: AQObj = { _concurrency: integer, _rate: number | nil, _retry: integer, _retry_delay: number, _timeout: number | nil, _on_error: any, _on_done: any, _clock_fn: () -> number, _pending: { [integer]: AQTask }, _active: { [integer]: AQState }, _paused: boolean, _seq: integer, _rate_window: number | nil, _rate_count: integer, _stats: AQStats, _listeners: AQListeners }
+--:: AQListeners = { [string]: { [integer]: unknown } }
+--:: AQObj = { _concurrency: integer, _rate: number | nil, _retry: integer, _retry_delay: number, _timeout: number | nil, _on_error: ((AQTask, string) -> nil) | nil, _on_done: ((AQTask, unknown) -> nil) | nil, _clock_fn: () -> number, _pending: { [integer]: AQTask }, _active: { [integer]: AQState }, _paused: boolean, _seq: integer, _rate_window: number | nil, _rate_count: integer, _stats: AQStats, _listeners: AQListeners }
 
 -- ---------------------------------------------------------------------------
 -- Internal helpers
@@ -71,7 +71,7 @@ Queue.__index = Queue
 -- opts.on_error     (fn(task, err))     — global error callback
 -- opts.on_done      (fn(task, result))  — global done callback
 function M.new(opts)
-  local opts_ = (opts or {}) --[[:! { concurrency: integer | nil, rate: number | nil, retry: integer | nil, retry_delay: number | nil, timeout: number | nil, on_error: any, on_done: any, clock_fn: (() -> number) | nil }]]
+  local opts_ = (opts or {}) --[[:! { concurrency: integer | nil, rate: number | nil, retry: integer | nil, retry_delay: number | nil, timeout: number | nil, on_error: unknown, on_done: unknown, clock_fn: (() -> number) | nil }]]
   if not opts_.clock_fn then error("async_queue.new: opts.clock_fn is required") end
   local clock_fn = opts_.clock_fn --[[:! () -> number]]
   local q = setmetatable({
@@ -98,13 +98,13 @@ function M.new(opts)
 
     -- event listeners: "done" | "error" | "drain"
     _listeners = {},
-  }, Queue) --[[: any]] --[[:! AQObj]]
+  }, Queue) --[[: unknown]] --[[:! AQObj]]
   return q
 end
 
 --- Register an event listener.
 -- event: "done" | "error" | "drain"
---: (AQObj, string, any) -> nil
+--: (AQObj, string, unknown) -> nil
 function Queue:on(event, fn)
   if not self._listeners[event] then
     self._listeners[event] = {}
@@ -130,9 +130,9 @@ end
 function Queue:push(fn_or_spec)
   local spec
   if type(fn_or_spec) == "function" then
-    spec = { fn = fn_or_spec } --[[:! { fn: (AQDoneCb) -> nil, priority: integer | nil, id: any, data: any }]]
+    spec = { fn = fn_or_spec } --[[:! { fn: (AQDoneCb) -> nil, priority: integer | nil, id: unknown, data: unknown }]]
   else
-    spec = fn_or_spec --[[:! { fn: (AQDoneCb) -> nil, priority: integer | nil, id: any, data: any }]]
+    spec = fn_or_spec --[[:! { fn: (AQDoneCb) -> nil, priority: integer | nil, id: unknown, data: unknown }]]
   end
   self._seq = self._seq + 1
   local task = {
@@ -144,7 +144,7 @@ function Queue:push(fn_or_spec)
     retries_left = self._retry,
     cancelled    = false,
     retry_after  = nil --[[:! number | nil]],
-  } --[[: any]] --[[:! AQTask]]
+  } --[[: unknown]] --[[:! AQTask]]
   pq_insert(self._pending, task)
   self._stats.pending = self._stats.pending + 1
   return task
@@ -164,7 +164,7 @@ end
 
 --- Cancel a task by id. If it is pending it will be skipped; active tasks
 --- are marked cancelled but may still run to completion in this tick.
---: (AQObj, any) -> nil
+--: (AQObj, unknown) -> nil
 function Queue:cancel(id)
   -- Mark pending tasks
   for i = 1, #self._pending do
@@ -238,7 +238,7 @@ local function rate_consume(q)
 end
 
 -- Complete a task (success or final failure).
---: (AQObj, AQState, string | nil, any) -> nil
+--: (AQObj, AQState, string | nil, unknown) -> nil
 local function finish_task(q, state, err, result)
   local task = state.task
   -- Remove from active list
@@ -282,7 +282,7 @@ local function start_task(q, task, clock)
     err        = nil,
     result     = nil,
     co         = nil,
-  } --[[: any]] --[[:! AQState]]
+  } --[[: unknown]] --[[:! AQState]]
 
   -- The task function calls done(err, result) when finished.
   local function done_cb(err, result)
@@ -318,7 +318,7 @@ end
 function Queue:tick(clock)
   local clock_ = clock or self._clock_fn() --: number
 
-  -- 1. Continue any active coroutines that have not finished yet.
+  -- 1. Continue unknown active coroutines that have not finished yet.
   local i = 1
   while i <= #self._active do
     local state = self._active[i]
@@ -444,7 +444,7 @@ end
 -- Batcher
 -- ---------------------------------------------------------------------------
 
---:: BatcherObj = { _key: any, _batch_size: integer, _delay: number, _process: any, _clock_fn: () -> number, _buckets: { [string]: { [integer]: any } }, _bucket_order: { [integer]: string }, _first_at: { [string]: number } }
+--:: BatcherObj = { _key: (({ [integer]: unknown }) -> string) | nil, _batch_size: integer, _delay: number, _process: (({ [integer]: unknown }, (string | nil, unknown) -> nil) -> nil) | nil, _clock_fn: () -> number, _buckets: { [string]: { [integer]: unknown } }, _bucket_order: { [integer]: string }, _first_at: { [string]: number } }
 
 local Batcher = {}
 Batcher.__index = Batcher
@@ -455,7 +455,7 @@ Batcher.__index = Batcher
 -- opts.delay       (number, default 0) — seconds to wait before flushing
 -- opts.process     (fn(batch, done))   — process a batch of items
 function M.batcher(opts)
-  local opts_ = (opts or {}) --[[:! { key: any, batch_size: integer | nil, delay: number | nil, process: any, clock_fn: (() -> number) | nil }]]
+  local opts_ = (opts or {}) --[[:! { key: unknown, batch_size: integer | nil, delay: number | nil, process: unknown, clock_fn: (() -> number) | nil }]]
   if not opts_.clock_fn then error("async_queue.batcher: opts.clock_fn is required") end
   local b = setmetatable({
     _key        = opts_.key,
@@ -466,16 +466,16 @@ function M.batcher(opts)
     _buckets    = {},
     _bucket_order = {},
     _first_at   = {},
-  }, Batcher) --[[: any]] --[[:! BatcherObj]]
+  }, Batcher) --[[: unknown]] --[[:! BatcherObj]]
   return b
 end
 
 --- Add an item to the batcher.
 -- clock: optional current time (os.clock() value). Used to record when the
 -- first item in a bucket arrived, so flush(clock) can respect the delay.
---: (BatcherObj, any, number | nil) -> nil
+--: (BatcherObj, unknown, number | nil) -> nil
 function Batcher:push(item, clock)
-  local key = self._key and self._key(item) or "__default__"
+  local key = self._key and self._key(item --[[:! { [integer]: unknown }]]) or "__default__"
   local key_ = key --[[:! string]]
   if not self._buckets[key_] then
     self._buckets[key_] = {}

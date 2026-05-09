@@ -33,14 +33,16 @@ end
 
 local M = {}
 
+--:: HastNode = { type: string, tag?: string, children?: { [integer]: HastNode }, props?: { [string]: unknown }, value?: string, ... }
+
 -- ── Node constructors ─────────────────────────────────────────────────────────
 
---: (string, any, any) -> any
+--: (string, { [string]: unknown }, { [integer]: HastNode }) -> HastNode
 local function el(tag, props, children)
   return { type = "element", tag = tag, props = props or {}, children = children or {} }
 end
 
---: (string) -> any
+--: (string) -> HastNode
 local function text(value)
   return { type = "text", value = value }
 end
@@ -48,27 +50,29 @@ end
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 -- Normalize a string-or-table option to a flat list of strings.
---: (any) -> any
+--: (unknown) -> { [integer]: string }
 local function to_list(v)
   if v == nil then return {} end
   if type(v) == "string" then return { v } end
-  return v
+  return v --[[:! { [integer]: string }]]
 end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, { title?: string, lang?: string, css?: string | { [integer]: string }, js?: string | { [integer]: string }, meta?: { [integer]: { [string]: string } } } | nil) -> nil
 function M.plugin(processor, opts)
-  opts = opts or {}
-  local title = opts.title or ""
-  local lang  = opts.lang
-  local css   = to_list(opts.css)
-  local js    = to_list(opts.js)
-  local meta  = opts.meta or {}
+  local opts_t = (opts or {}) --[[:! { title?: string, lang?: string, css?: unknown, js?: unknown, meta?: { [integer]: { [string]: string } } }]]
+  local title = opts_t.title or ""
+  local lang  = opts_t.lang
+  local css   = to_list(opts_t.css)
+  local js    = to_list(opts_t.js)
+  local meta  = (opts_t.meta or {}) --[[:! { [integer]: { [string]: string } }]]
 
-  processor:use_transformer(function(tree)
+  local processor_t = processor --[[:! { use_transformer: (unknown, (unknown) -> unknown) -> nil }]]
+  processor_t:use_transformer(function(tree)
+    local tree_node = tree --[[:! HastNode]]
     -- Build <head> children.
-    local head_children = {}
+    local head_children = {} --: { [integer]: HastNode }
 
     -- <meta> elements first.
     for _, attrs in ipairs(meta) do
@@ -81,18 +85,20 @@ function M.plugin(processor, opts)
     head_children[#head_children + 1] = el("title", {}, { text(title) })
 
     -- <link rel="stylesheet"> for each CSS href.
-    for _, href in ipairs(css) do
+    for i = 1, #css do
+      local href = css[i] --[[:! string]]
       head_children[#head_children + 1] = el("link", {
         rel  = "stylesheet",
-        href = tostring(href),
-      }, {})
+        href = href,
+      } --[[:! { [string]: unknown }]], {})
     end
 
     -- <script src> for each JS href.
-    for _, src in ipairs(js) do
+    for i = 1, #js do
+      local src = js[i] --[[:! string]]
       head_children[#head_children + 1] = el("script", {
-        src = tostring(src),
-      }, {})
+        src = src,
+      } --[[:! { [string]: unknown }]], {})
     end
 
     -- Build <html> props.
@@ -102,7 +108,7 @@ function M.plugin(processor, opts)
     end
 
     -- Wrap original children in <body>.
-    local body = el("body", {}, tree.children or {})
+    local body = el("body", {}, (tree_node.children or {}) --[[:! { [integer]: HastNode }]])
 
     -- Assemble <html>.
     local html_el = el("html", html_props, {
@@ -111,10 +117,10 @@ function M.plugin(processor, opts)
     })
 
     -- Prepend doctype as a raw node.
-    local doctype = { type = "raw", value = "<!doctype html>" }
+    local doctype = { type = "raw", value = "<!doctype html>" } --: HastNode
 
-    tree.children = { doctype, html_el }
-    return tree
+    tree_node.children = { doctype, html_el }
+    return tree_node
   end)
 end
 

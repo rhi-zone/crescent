@@ -18,7 +18,7 @@ local floor, concat = math.floor, table.concat
 
 --- Strip spaces and dashes from a card number string.
 --- Returns nil if any non-digit, non-space, non-dash characters remain.
---: (s: any) -> (string | nil)
+--: (s: unknown) -> (string | nil)
 local function normalize(s)
 	if type(s) ~= "string" then return nil end
 	local r = gsub(s, "[ -]", "")
@@ -54,7 +54,7 @@ end
 
 --- Validate a Luhn number. Accepts spaces and dashes as separators.
 --- Returns false for empty strings or strings with non-digit characters (besides spaces/dashes).
---: (s: any) -> boolean
+--: (s: unknown) -> boolean
 function M.valid(s)
 	local n = normalize(s)
 	if not n then return false end
@@ -65,7 +65,7 @@ end
 --- Compute the Luhn check digit for a payload string (without check digit).
 --- Returns the check digit as an integer (0–9).
 --- Returns nil, errmsg on invalid input.
---: (s: any) -> (number | nil, string | nil)
+--: (s: unknown) -> (number | nil, string | nil)
 function M.check_digit(s)
 	local n = normalize(s)
 	if not n then return nil, "invalid input: non-digit characters" end
@@ -77,7 +77,7 @@ end
 
 --- Generate a valid Luhn number with the given prefix and total length.
 --- Returns nil, errmsg on invalid input.
---: (prefix: any, length: any) -> (string | nil, string | nil)
+--: (prefix: unknown, length: unknown) -> (string | nil, string | nil)
 function M.generate(prefix, length)
 	if type(prefix) ~= "string" then return nil, "prefix must be a string" end
 	if type(length) ~= "number" or length < 1 then return nil, "length must be a positive integer" end
@@ -209,7 +209,7 @@ end
 
 --- Detect the card type from a number string.
 --- Returns the card type id (e.g. "visa") or nil if unknown.
---: (s: any) -> (string | nil)
+--: (s: unknown) -> (string | nil)
 function M.card_type(s)
 	local n = normalize(s)
 	if not n then return nil end
@@ -272,7 +272,7 @@ end
 
 --- Format a number string for display with standard space groupings.
 --- Uses card-type-specific grouping; unknown or non-standard lengths fall back to groups of 4.
---: (s: any) -> any
+--: (s: unknown) -> unknown
 function M.format(s)
 	local n = normalize(s)
 	if not n then return s end  -- return as-is if we can't normalize

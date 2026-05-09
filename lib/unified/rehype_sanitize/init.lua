@@ -6,7 +6,7 @@
 --   1. Removes disallowed elements. script/style and their children are dropped
 --      entirely. Other disallowed elements are unwrapped (children preserved).
 --   2. Strips disallowed properties from allowed elements.
---   3. For href/src (and any attribute listed in schema.protocols), removes the
+--   3. For href/src (and unknown attribute listed in schema_t.protocols), removes the
 --      attribute if its protocol is not in the allowlist. Relative URLs
 --      ("#anchor", "/path", "./path", bare words) are always allowed.
 --
@@ -27,6 +27,9 @@ if not package.path:find("?/init.lua", 1, true) then
 end
 
 local M = {}
+
+--:: HastNode = { type: string, tag?: string, children?: { [integer]: HastNode }, props?: { [string]: unknown }, value?: string, ... }
+--:: CompiledSchema = { elem_set: { [string]: boolean }, attr_sets: { [string]: { [string]: boolean } }, global_attrs: { [string]: boolean }, proto_sets: { [string]: { [string]: boolean } } }
 
 -- ── Default schema (GitHub-flavored) ─────────────────────────────────────────
 
@@ -55,20 +58,21 @@ M.DEFAULT_SCHEMA = {
 -- ── Schema compilation ────────────────────────────────────────────────────────
 
 -- Convert the schema's list-based tables into sets for O(1) lookup.
---: (any) -> any
+--: (unknown) -> unknown
 local function compile_schema(schema)
+  local schema_t = schema --[[:! { elements: { [integer]: string }, attributes: { [string]: { [integer]: string } }, protocols: { [string]: { [integer]: string } } | nil }]]
   -- elements set
   local elem_set = {}
-  for _, e in ipairs(schema.elements) do elem_set[e] = true end
+  for _, e in ipairs(schema_t.elements) do elem_set[e] = true end
 
   -- per-tag attribute sets (merged with "*" attributes)
   local global_attrs = {}
-  if schema.attributes["*"] then
-    for _, a in ipairs(schema.attributes["*"]) do global_attrs[a] = true end
+  if schema_t.attributes["*"] then
+    for _, a in ipairs(schema_t.attributes["*"]) do global_attrs[a] = true end
   end
 
   local attr_sets = {}  -- tag -> set of allowed attr names
-  for tag, attrs in pairs(schema.attributes) do
+  for tag, attrs in pairs(schema_t.attributes) do
     if tag ~= "*" then
       local s = {}
       for k in pairs(global_attrs) do s[k] = true end
@@ -79,8 +83,8 @@ local function compile_schema(schema)
 
   -- protocol sets per attribute name
   local proto_sets = {}
-  if schema.protocols then
-    for attr, protos in pairs(schema.protocols) do
+  if schema_t.protocols then
+    for attr, protos in pairs(schema_t.protocols) do
       local s = {}
       for _, p in ipairs(protos) do s[p] = true end
       proto_sets[attr] = s
@@ -126,7 +130,7 @@ local function url_protocol(url)
 end
 
 -- Return true if the URL value is allowed given the protocol set for this attr.
---: (string, any) -> boolean
+--: (string, { [string]: boolean }) -> boolean
 local function proto_allowed(value, proto_set)
   local proto = url_protocol(value)
   if proto == nil then
@@ -138,13 +142,14 @@ end
 
 -- ── Sanitize a single element's props ────────────────────────────────────────
 
---: (any, string, any) -> any
+--: (unknown, string, CompiledSchema) -> { [string]: unknown }
 local function sanitize_props(props, tag, compiled)
   if not props then return {} end
+  local props_t = props --[[:! { [string]: unknown }]]
   local allowed = compiled.attr_sets[tag] or compiled.global_attrs
   local proto_sets = compiled.proto_sets
   local out = {}
-  for k, v in pairs(props) do
+  for k, v in pairs(props_t) do
     local ks = tostring(k)
     if allowed[ks] then
       -- Check protocol constraint if applicable.
@@ -168,11 +173,12 @@ end
 -- multiple nodes when an element is unwrapped).
 local sanitize_node  -- forward declaration
 
---: (any) -> any
+--: (unknown, CompiledSchema) -> { [integer]: HastNode }
 local function sanitize_children(children, compiled)
   if not children then return {} end
-  local out = {}
-  for _, child in ipairs(children) do
+  local children_t = children --[[:! { [integer]: HastNode }]]
+  local out = {} --: { [integer]: HastNode }
+  for _, child in ipairs(children_t) do
     local replacements = sanitize_node(child, compiled)
     for _, r in ipairs(replacements) do
       out[#out + 1] = r
@@ -181,7 +187,7 @@ local function sanitize_children(children, compiled)
   return out
 end
 
---: (any, any) -> any
+--: (HastNode, CompiledSchema) -> { [integer]: HastNode }
 sanitize_node = function(node, compiled)
   local t = node.type
 
@@ -195,7 +201,7 @@ sanitize_node = function(node, compiled)
   end
 
   if t == "element" then
-    local tag = node.tag
+    local tag = (node.tag or "") --[[:! string]]
 
     if not compiled.elem_set[tag] then
       -- Disallowed element.
@@ -220,16 +226,19 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, { schema?: unknown } | nil) -> nil
 function M.plugin(processor, opts)
   opts = opts or {}
-  local schema   = opts.schema or M.DEFAULT_SCHEMA
-  local compiled = compile_schema(schema)
+  local opts_t = opts --[[:! { schema?: unknown }]]
+  local schema   = opts_t.schema or M.DEFAULT_SCHEMA
+  local compiled = (compile_schema(schema) --[[:! CompiledSchema]])
 
-  processor:use_transformer(function(tree)
-    local result = sanitize_node(tree, compiled)
+  local processor_t = processor --[[:! { use_transformer: (unknown, (unknown) -> unknown) -> nil }]]
+  processor_t:use_transformer(function(tree)
+    local tree_node = tree --[[:! HastNode]]
+    local result = sanitize_node(tree_node, compiled)
     -- The root node is always returned as a single-element list.
-    return result[1] or tree
+    return result[1] or tree_node
   end)
 end
 

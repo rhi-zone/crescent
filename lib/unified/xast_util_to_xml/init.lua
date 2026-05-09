@@ -20,6 +20,9 @@ local xast = require("lib.unified.xast")
 
 local M = {}
 
+--:: XastNode = { type: string, name?: string, value?: string, children?: { [integer]: XastNode }, attributes?: { [string]: unknown }, public?: string, system?: string, ... }
+--:: XmlOpts = { quote?: string, close_self_closing?: boolean, xml_declaration?: boolean }
+
 -- ── Escaping helpers (duplicated so this module is vendorable standalone) ─────
 
 --: (string) -> string
@@ -47,35 +50,37 @@ end
 
 local serialize_node  -- forward declaration
 
---: (any, string) -> string
+--: (unknown, string) -> string
 local function serialize_attrs(attributes, quote)
   if not attributes then return "" end
+  local attrs_t = attributes --[[:! { [string]: unknown }]]
   local keys = {} --: { [integer]: string }
-  for k in pairs(attributes) do keys[#keys + 1] = k --[[:! string]] end
+  for k in pairs(attrs_t) do keys[#keys + 1] = k --[[:! string]] end
   table.sort(keys)
   local parts = {}
   local q = quote or '"'
   for _, k in ipairs(keys) do
-    local v = attributes[k]
+    local v = attrs_t[k]
     parts[#parts + 1] = " " .. k .. "=" .. q .. escape_attr(tostring(v), q) .. q
   end
   return table.concat(parts)
 end
 
---: (any, any) -> string
+--: (unknown, XmlOpts) -> string
 local function serialize_children(children, opts)
-  if not children or #children == 0 then return "" end
+  if not children then return "" end
+  local children_t = children --[[:! { [integer]: XastNode }]]
+  if #children_t == 0 then return "" end
   local parts = {}
-  for _, child in ipairs(children) do
+  for _, child in ipairs(children_t) do
     parts[#parts + 1] = serialize_node(child, opts)
   end
   return table.concat(parts)
 end
 
---: (any, any) -> string
+--: (XastNode, XmlOpts) -> string
 serialize_node = function(node, opts)
   if not node then return "" end
-  opts = opts or {}
   local quote = opts.quote or '"'
   local close_self = opts.close_self_closing
   if close_self == nil then close_self = true end
@@ -92,7 +97,7 @@ serialize_node = function(node, opts)
   elseif t == "element" then
     local name = tostring(node.name)
     local attrs = serialize_attrs(node.attributes, quote)
-    local children = node.children or {}
+    local children = (node.children or {}) --[[:! { [integer]: XastNode }]]
     if #children == 0 then
       if close_self then
         return "<" .. name .. attrs .. "/>"
@@ -141,9 +146,10 @@ end
 -- opts.quote             ('"' | "'")   default '"'
 -- opts.close_self_closing (boolean)     default true
 -- opts.xml_declaration   (boolean)     default false
---: (any, any) -> string
+--: (unknown, XmlOpts | nil) -> string
 function M.to_xml(node, opts)
-  return serialize_node(node, opts or {})
+  local node_t = node --[[:! XastNode]]
+  return serialize_node(node_t, opts or {})
 end
 
 -- Expose xast constructors for convenience.

@@ -10,12 +10,15 @@ M._tier = "pure-lua"
 
 -- ── Character class helpers ──────────────────────────────────────────────────
 
-local function is_digit(c) return c >= 48 and c <= 57 end
+--: (integer) -> boolean
+local function is_digit(c) return (c >= 48 and c <= 57) == true end
+--: (integer) -> boolean
 local function is_word(c)
-	return (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
+	return ((c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95) == true
 end
+--: (integer) -> boolean
 local function is_space(c)
-	return c == 32 or c == 9 or c == 10 or c == 13 or c == 12 or c == 11
+	return (c == 32 or c == 9 or c == 10 or c == 13 or c == 12 or c == 11) == true
 end
 
 -- ── Regex compiler: pattern string -> node tree ─────────────────────────────
@@ -31,13 +34,15 @@ end
 --   { type="quant", child=node, min=N, max=N|math.huge, greedy=bool }
 --   { type="anchor_start" }          -- ^
 --   { type="anchor_end" }            -- $
+--:: RegexNode = { type: string, byte?: integer, neg?: boolean, ranges?: { [integer]: { [integer]: integer } }, shortcuts?: { [integer]: { fn: (integer) -> boolean, neg: boolean } }, children?: { [integer]: RegexNode }, child?: RegexNode, min?: integer, max?: number, greedy?: boolean, fn?: (integer) -> boolean, idx?: integer, ... }
+--:: CompiledPattern = { tree: RegexNode, ngroups: integer, ci: boolean, dotall: boolean, pattern: string }
 
 local function parse_error(pat, pos, msg)
 	local pat_s = pat --[[:! string]]
 	return nil, "regex: " .. msg .. " at position " .. pos .. " in /" .. pat_s .. "/"
 end
 
---: (string, integer) -> (any | nil, integer | nil)
+--: (string, integer) -> (RegexNode | nil, integer | nil)
 local function parse_class(pat, pos)
 	-- pos points to the char after '['
 	local neg = false
@@ -112,7 +117,7 @@ local function parse_class(pat, pos)
 	return parse_error(pat, pos, "unterminated character class")
 end
 
---: (string, integer) -> (any | nil, integer | nil)
+--: (string, integer) -> (RegexNode | nil, integer | nil)
 local function parse_atom(pat, pos)
 	if pos > #pat then return nil end
 	local b = pat:byte(pos) or 0
@@ -134,7 +139,7 @@ local function parse_atom(pat, pos)
 	elseif b == 92 then -- backslash
 		pos = pos + 1
 		if pos > #pat then return parse_error(pat, pos, "unexpected end of pattern") end
-		local esc = pat:byte(pos)
+		local esc = pat:byte(pos) or 0
 		if esc == 100 then return { type = "shortcut", fn = is_digit, neg = false }, pos + 1
 		elseif esc == 68 then return { type = "shortcut", fn = is_digit, neg = true }, pos + 1
 		elseif esc == 119 then return { type = "shortcut", fn = is_word, neg = false }, pos + 1
@@ -148,9 +153,9 @@ local function parse_atom(pat, pos)
 	end
 end
 
-local parse_alt --: ((string, integer, { [integer]: integer }, boolean) -> (any | nil, integer | nil)) | nil
+local parse_alt --: ((string, integer, { [integer]: integer }, boolean) -> (RegexNode | nil, integer | nil)) | nil
 
---: (string, integer, { [integer]: integer }, boolean) -> (any | nil, integer | nil)
+--: (string, integer, { [integer]: integer }, boolean) -> (RegexNode | nil, integer | nil)
 local function parse_seq(pat, pos, group_counter, dotall)
 	local children = {}
 	while pos <= #pat do
@@ -182,7 +187,7 @@ local function parse_seq(pat, pos, group_counter, dotall)
 		local npos_i = (npos or 0) --[[:! integer]]
 		if npos and npos_i <= #pat then
 			local q = pat:byte(npos_i)
-			local node_a = node --[[: any]]
+			local node_a = node --[[:! RegexNode]]
 			if q == 42 then -- *
 				node_a = { type = "quant", child = node_a, min = 0, max = math.huge, greedy = true }
 				npos_i = npos_i + 1
@@ -207,7 +212,7 @@ local function parse_seq(pat, pos, group_counter, dotall)
 	return { type = "seq", children = children }, pos
 end
 
---: (string, integer, { [integer]: integer }, boolean) -> (any | nil, integer | nil)
+--: (string, integer, { [integer]: integer }, boolean) -> (RegexNode | nil, integer | nil)
 parse_alt = function(pat, pos, group_counter, dotall)
 	local pat = (pat --[[:! string]])
 	local first, npos = parse_seq(pat, pos, group_counter, dotall)
@@ -227,7 +232,7 @@ parse_alt = function(pat, pos, group_counter, dotall)
 	return first, npos_i
 end
 
---: (string, string | nil) -> (any | nil, integer | string | nil)
+--: (string, string | nil) -> (CompiledPattern | nil, integer | string | nil)
 local function compile_pattern(pat, flags)
 	local pat = (pat --[[:! string]])
 	local flags_s = (flags or "") --[[:! string]]
@@ -253,13 +258,14 @@ local function compile_pattern(pat, flags)
 	if pos_i <= #pat_s then
 		return parse_error(pat_s, pos_i, "unexpected character '" .. pat_s:sub(pos_i, pos_i) .. "'")
 	end
-	return { tree = tree, ngroups = group_counter[1], ci = ci, dotall = dotall, pattern = pat }
+	return { tree = tree, ngroups = (group_counter[1] --[[:! integer]]), ci = ci, dotall = dotall, pattern = pat }
 end
 
 -- ── Matcher: backtracking NFA ────────────────────────────────────────────────
 
+--: (RegexNode, integer) -> boolean
 local function match_class(node, byte)
-	local node_a = node --[[: any]]
+	local node_a = node
 	local hit = false
 	local ranges = node_a.ranges --[[:! { [integer]: { [integer]: integer } }]]
 	for i = 1, #ranges do
@@ -279,9 +285,9 @@ local function match_class(node, byte)
 	return hit
 end
 
---: (any, string, integer, { [integer]: unknown }, unknown, unknown) -> (integer | nil)
+--: (RegexNode, string, integer, { [integer]: unknown }, unknown, unknown) -> (integer | nil)
 local function match_node(node, subject, pos, caps, ci, dotall)
-	local node_a = node --[[: any]]
+	local node_a = node
 	local subject_s = subject --[[:! string]]
 	local t = node_a.type
 	if t == "lit" then
@@ -352,7 +358,7 @@ local function match_node(node, subject, pos, caps, ci, dotall)
 		return nil
 	elseif t == "group" then
 		local start = pos
-		local p_group = match_node(node_a.child, subject_s, pos, caps, ci, dotall)
+		local p_group = match_node((node_a.child --[[:! RegexNode]]), subject_s, pos, caps, ci, dotall)
 		local p_group_i = (p_group or 0) --[[:! integer]]
 		if p_group then
 			caps[node_a.idx] = subject_s:sub(start, p_group_i - 1)
@@ -361,7 +367,7 @@ local function match_node(node, subject, pos, caps, ci, dotall)
 		return nil
 	elseif t == "quant" then
 		-- Greedy backtracking
-		local child = node_a.child
+		local child = node_a.child --[[:! RegexNode]]
 		local min = node_a.min --[[:! number]]
 		local max = node_a.max --[[:! number]]
 		-- First, try to match as many as possible

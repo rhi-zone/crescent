@@ -52,9 +52,9 @@ end
 local gen_mod = require("lib.test.gen")  -- for make_rng only
 
 --:: Rng = { seed: number, next: (self: Rng) -> number, float: (self: Rng) -> number, int: (self: Rng, lo: number, hi: number) -> number, bool: (self: Rng) -> boolean, pick: <T>(self: Rng, t: T[]) -> T }
---:: ShrinkIter = () -> (any, any)
---:: Arb = { generate: (rng: Rng, sz: integer) -> (any, any), shrink: (v: any, ctx: any | nil) -> ShrinkIter }
---:: CheckInfo = { desc: string, trial: integer, seed: number, original: any, shrunk: any, shrink_steps: integer, err: string, is_tuple: boolean }
+--:: ShrinkIter = () -> (unknown, unknown)
+--:: Arb = { generate: (rng: Rng, sz: integer) -> (unknown, unknown), shrink: (v: unknown, ctx: unknown | nil) -> ShrinkIter }
+--:: CheckInfo = { desc: string, trial: integer, seed: number, original: unknown, shrunk: unknown, shrink_steps: integer, err: string, is_tuple: boolean }
 
 local M = {}
 
@@ -74,12 +74,14 @@ local EMPTY_ITER = function() return nil end
 --
 -- Allocates one closure per shrink call (off the hot path).
 
+--: (unknown, integer) -> ShrinkIter
 local function int_shrink_iter(val, target)
 	if val == target then return EMPTY_ITER end
-	local diff = val - target   -- positive or negative, never 0
+	local val_n = val --[[:! integer]]
+	local diff = val_n - target   -- positive or negative, never 0
 	return function()
 		if diff == 0 then return nil end
-		local candidate = val - diff
+		local candidate = val_n - diff
 		-- Halve diff toward 0 (floor for positive, ceil for negative).
 		diff = diff > 0 and math.floor(diff / 2) or math.ceil(diff / 2)
 		return candidate, nil
@@ -109,8 +111,9 @@ function M.float(lo, hi)
 	return {
 		generate = function(rng, _) return lo + rng:float() * (hi - lo), nil end,
 		shrink   = function(v, _)
-			if math.abs(v - target) < 1e-12 then return EMPTY_ITER end
-			local mid  = (v + target) / 2
+			local v_n = v --[[:! number]]
+			if math.abs(v_n - target) < 1e-12 then return EMPTY_ITER end
+			local mid  = (v_n + target) / 2
 			local done = false
 			return function()
 				if done then return nil end; done = true
@@ -223,7 +226,7 @@ end
 -- Phase 1: binary-search length reduction (empty → half → three-quarters → ...).
 -- Phase 2: per-element shrink using stored element contexts.
 
-	--: (vals: any[], ctxs: any[] | nil, elem_arb: Arb, min_len: integer) -> ShrinkIter
+	--: (vals: unknown[], ctxs: unknown[] | nil, elem_arb: Arb, min_len: integer) -> ShrinkIter
 local function array_shrink_iter(vals, ctxs, elem_arb, min_len)
 	local n = #vals
 	if n <= min_len and n == 0 then return EMPTY_ITER end
@@ -293,7 +296,11 @@ function M.array(elem_arb, opts)
 			end
 			return vals, ctxs   -- ctxs = nil when all element ctxs are nil
 		end,
-		shrink = function(v, c) return array_shrink_iter(v, c, elem_arb, min_len) end,
+		shrink = function(v, c)
+			local va = v --[[:! { [integer]: unknown }]]
+			local ca = c --[[:! { [integer]: unknown } | nil]]
+			return array_shrink_iter(va, ca, elem_arb, min_len)
+		end,
 	}
 end
 
@@ -349,7 +356,7 @@ end
 
 -- map: ctx = {pre_val, pre_ctx}.  Shrink delegates to inner arb, re-applies fn.
 -- Allocates one {pre_val, pre_ctx} table per generated value (unavoidable).
---: (a: Arb, fn: (any) -> any) -> Arb
+--: (a: Arb, fn: (unknown) -> unknown) -> Arb
 function M.map(a, fn)
 	return {
 		generate = function(rng, sz)
@@ -370,7 +377,7 @@ function M.map(a, fn)
 end
 
 -- filter: ctx passes through unchanged.  Shrink skips invalid candidates.
---: (a: Arb, pred: (any) -> boolean, opts: { max_tries?: integer } | nil) -> Arb
+--: (a: Arb, pred: (unknown) -> boolean, opts: { max_tries?: integer } | nil) -> Arb
 function M.filter(a, pred, opts)
 	local max_tries = ((opts and opts.max_tries) or 100) --[[:! integer]]
 	return {
@@ -610,10 +617,13 @@ local function normalize(arb_arg)
 	error("arb.check: expected an arbitrary or array of arbitraries", 3)
 end
 
---: (fn: (...any) -> any, is_tuple: boolean) -> (any) -> any
+--: (fn: (...unknown) -> unknown, is_tuple: boolean) -> (unknown) -> unknown
 local function make_runner(fn, is_tuple)
 	if is_tuple then
-		return function(v) return fn(unpack(v)) end
+		return function(v)
+			local vt = v --[[:! { [integer]: unknown }]]
+			return fn(unpack(vt))
+		end
 	else
 		return function(v) return fn(v) end
 	end
@@ -653,7 +663,7 @@ end
 -- arb.check: run N trials; shrink on failure.
 -- Returns ok, info (nil on success).
 -- info = { desc, trial, seed, original, shrunk, shrink_steps, err }
---: (desc: string, arb_arg: Arb | { [integer]: Arb, ... }, fn: (...any) -> any, opts: { trials?: integer, max_size?: integer, seed?: number, max_shrink?: integer, ... } | nil) -> (boolean, CheckInfo | nil)
+--: (desc: string, arb_arg: Arb | { [integer]: Arb, ... }, fn: (...unknown) -> unknown, opts: { trials?: integer, max_size?: integer, seed?: number, max_shrink?: integer, ... } | nil) -> (boolean, CheckInfo | nil)
 function M.check(desc, arb_arg, fn, opts)
 	opts = opts or {}
 	local trials    = opts.trials    or DEFAULT_TRIALS
@@ -690,7 +700,7 @@ end
 -- fn is invoked with the generated value (or unpacked tuple); typed loosely as
 -- (...any) -> any so callers can use any callback shape without annotation churn.
 -- opts allows trial-count and seed customization; open record for forward compat.
---: (desc: string, arb_arg: Arb | { [integer]: Arb, ... }, fn: (...any) -> any, opts: { trials?: integer, max_size?: integer, seed?: number, ... } | nil) -> ()
+--: (desc: string, arb_arg: Arb | { [integer]: Arb, ... }, fn: (...unknown) -> unknown, opts: { trials?: integer, max_size?: integer, seed?: number, ... } | nil) -> ()
 function M.it(desc, arb_arg, fn, opts)
 	local T = require("lib.test.assert")
 	T.it(desc, function()
@@ -714,7 +724,7 @@ function M.it(desc, arb_arg, fn, opts)
 end
 
 -- arb.assert: inline property assertion (for use inside existing it() blocks).
---: (desc: string, arb_arg: Arb | { [integer]: Arb, ... }, fn: (...any) -> any, opts: { trials?: integer, max_size?: integer, seed?: number, max_shrink?: integer, ... } | nil) -> ()
+--: (desc: string, arb_arg: Arb | { [integer]: Arb, ... }, fn: (...unknown) -> unknown, opts: { trials?: integer, max_size?: integer, seed?: number, max_shrink?: integer, ... } | nil) -> ()
 function M.assert(desc, arb_arg, fn, opts)
 	local ok, info = M.check(desc, arb_arg, fn, opts)
 	info = info --[[:! CheckInfo]]

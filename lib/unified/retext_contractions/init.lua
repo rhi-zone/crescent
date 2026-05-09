@@ -17,14 +17,16 @@ if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
 end
 
-local nlcst = require("lib.unified.nlcst") --[[: any]]
+local nlcst = require("lib.unified.nlcst") --[[: unknown]]
 
 local M = {}
+
+--:: NlcstNode = { type: string, children?: { [integer]: NlcstNode }, data?: { [string]: unknown }, value?: string, ... }
 
 -- ── Contraction dictionary ────────────────────────────────────────────────────
 
 -- Mapping from lowercase mangled form → correct form with straight apostrophe.
--- Keys are what you'd get when someone writes the contraction without any apostrophe.
+-- Keys are what you'd get when someone writes the contraction without unknown apostrophe.
 local CONTRACTIONS = {
   -- n't contractions
   dont     = "don't",
@@ -63,15 +65,17 @@ local STRAIGHT_APOSTROPHE = "'"
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 -- Extract plain text from a word node.
---: (any) -> string
+--: (NlcstNode) -> string
 local function word_text(word_node)
-  return nlcst.to_text(word_node)
+  local nlcst_t = nlcst --[[:! { to_text: (NlcstNode) -> string, SENTENCE: string, WORD: string }]]
+  return nlcst_t.to_text(word_node)
 end
 
 -- Reconstruct full sentence text from a SentenceNode.
---: (any) -> string
+--: (NlcstNode) -> string
 local function sentence_text(sent_node)
-  return nlcst.to_text(sent_node)
+  local nlcst_t = nlcst --[[:! { to_text: (NlcstNode) -> string, SENTENCE: string, WORD: string }]]
+  return nlcst_t.to_text(sent_node)
 end
 
 -- ── Core check ────────────────────────────────────────────────────────────────
@@ -79,13 +83,14 @@ end
 -- Check a single word. Returns a contraction issue or nil.
 -- opts.straight: warn when curly apostrophe is used instead of straight.
 -- opts.smart:    warn when straight apostrophe is used instead of curly.
---: (string, string, any) -> any
+--: (string, string, { straight?: boolean, smart?: boolean, ... } | nil) -> { word: string, suggestion: string, sentence: string, reason: string } | nil
 local function check_word(word, sentence, opts)
+  local opts_t = opts --[[:! { straight?: boolean, smart?: boolean, ... } | nil]]
   local lower = word:lower()
 
   -- 1. Word contains a curly apostrophe.
   if word:find(CURLY_APOSTROPHE, 1, true) then
-    if opts.straight then
+    if opts_t and opts_t.straight then
       -- Warn: curly used, but straight expected.
       local straight_form = word:gsub(CURLY_APOSTROPHE, STRAIGHT_APOSTROPHE)
       return {
@@ -100,7 +105,7 @@ local function check_word(word, sentence, opts)
 
   -- 2. Word contains a straight apostrophe — already a contraction.
   if word:find(STRAIGHT_APOSTROPHE, 1, true) then
-    if opts.smart then
+    if opts_t and opts_t.smart then
       -- Warn: straight used, but curly expected.
       local curly_form = word:gsub(STRAIGHT_APOSTROPHE, CURLY_APOSTROPHE)
       return {
@@ -114,7 +119,7 @@ local function check_word(word, sentence, opts)
   end
 
   -- 3. Check against the contraction dictionary (missing apostrophe).
-  local suggestion = CONTRACTIONS[lower]
+  local suggestion = CONTRACTIONS[lower] --[[:! string | nil]]
   if suggestion then
     return {
       word       = word,
@@ -128,15 +133,16 @@ local function check_word(word, sentence, opts)
 end
 
 -- Walk the nlcst tree collecting issues.
---: (any, any, any) -> nil
+--: (NlcstNode, { [integer]: unknown }, { straight?: boolean, smart?: boolean, ... } | nil) -> nil
 local function walk_tree(node, issues, opts)
   if not node then return end
+  local nlcst_t = nlcst --[[:! { to_text: (NlcstNode) -> string, SENTENCE: string, WORD: string }]]
 
-  if node.type == nlcst.SENTENCE then
+  if node.type == nlcst_t.SENTENCE then
     local sent = sentence_text(node)
     -- Walk each WordNode in the sentence.
     for _, child in ipairs(node.children or {}) do
-      if child.type == nlcst.WORD then
+      if child.type == nlcst_t.WORD then
         local w = word_text(child)
         local issue = check_word(w, sent, opts)
         if issue then
@@ -154,18 +160,21 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, { straight?: boolean, smart?: boolean, ... } | nil) -> nil
 function M.plugin(processor, opts)
-  opts = opts or {}
+  local opts_t = (opts or {}) --[[:! { straight?: boolean, smart?: boolean, ... } | nil]]
 
-  processor:use_transformer(function(tree)
-    local issues = {}
-    walk_tree(tree, issues, opts)
+  local processor_t = processor --[[:! { use_transformer: (unknown, (unknown) -> unknown) -> nil }]]
+  processor_t:use_transformer(function(tree)
+    local tree_node = tree --[[:! NlcstNode]]
+    local issues = {} --: { [integer]: unknown }
+    walk_tree(tree_node, issues, opts_t)
 
-    if not tree.data then tree.data = {} end
-    tree.data.contractions = issues
+    if not tree_node.data then tree_node.data = {} end
+    local data = tree_node.data --[[:! { contractions?: unknown, [string]: unknown }]]
+    data.contractions = issues
 
-    return tree
+    return tree_node
   end)
 end
 

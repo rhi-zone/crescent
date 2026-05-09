@@ -22,6 +22,8 @@ end
 
 local M = {}
 
+--:: HastNode = { type: string, tag?: string, children?: { [integer]: HastNode }, props?: { [string]: unknown }, value?: string, ... }
+
 -- ── Emoji lookup table ────────────────────────────────────────────────────────
 -- Keys are raw UTF-8 byte strings. Values are accessible label strings.
 -- Entries with variation selector U+FE0F (0xEF 0xB8 0x8F) are listed first so
@@ -111,7 +113,7 @@ end
 
 -- Find the first emoji in s starting at byte offset `from`.
 -- Returns: start_byte, end_byte (inclusive), label  or nil if none found.
---: (string, integer) -> (any, any, any)
+--: (string, integer) -> (integer | nil, integer | nil, string | nil)
 local function find_emoji(s, from)
   local i = from
   local len = #s
@@ -133,7 +135,7 @@ end
 
 -- ── Span constructor ──────────────────────────────────────────────────────────
 
---: (string, string) -> any
+--: (string, string) -> HastNode
 local function emoji_span(emoji_str, label)
   return {
     type = "element",
@@ -150,12 +152,12 @@ end
 
 -- Split a text node's value into a list of text/span nodes.
 -- Returns a list (possibly length 1 = the original text node unchanged).
---: (any) -> any
+--: (HastNode) -> { [integer]: HastNode }
 local function split_text_node(node)
-  local s = node.value or ""
+  local s = (node.value or "") --[[:! string]]
   if #s == 0 then return { node } end
 
-  local result = {}
+  local result = {} --: { [integer]: HastNode }
   local pos = 1
 
   while pos <= #s do
@@ -168,12 +170,15 @@ local function split_text_node(node)
       break
     end
     -- Text before the emoji.
-    if es > pos then
-      result[#result + 1] = { type = "text", value = s:sub(pos, es - 1) }
+    local es_i = es --[[:! integer]]
+    local ee_i = ee --[[:! integer]]
+    local label_s = (label or "emoji") --[[:! string]]
+    if es_i > pos then
+      result[#result + 1] = { type = "text", value = s:sub(pos, es_i - 1) }
     end
     -- The emoji span.
-    result[#result + 1] = emoji_span(s:sub(es, ee), label)
-    pos = ee + 1
+    result[#result + 1] = emoji_span(s:sub(es_i, ee_i), label_s)
+    pos = ee_i + 1
   end
 
   if #result == 0 then return { node } end
@@ -184,11 +189,11 @@ end
 
 -- Walk the tree; when a text node contains emoji, replace it with the
 -- expanded list of text/span nodes in its parent's children array.
---: (any) -> nil
+--: (HastNode) -> nil
 local function walk(node)
   if not node.children then return end
-  local new_children = {}
-  for _, child in ipairs(node.children) do
+  local new_children = {} --: { [integer]: HastNode }
+  for _, child in ipairs((node.children --[[:! { [integer]: HastNode }]])) do
     if child.type == "text" then
       local parts = split_text_node(child)
       for _, p in ipairs(parts) do
@@ -204,11 +209,13 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, unknown) -> nil
 function M.plugin(processor, _opts)
-  processor:use_transformer(function(tree)
-    walk(tree)
-    return tree
+  local processor_t = processor --[[:! { use_transformer: (unknown, (unknown) -> unknown) -> nil }]]
+  processor_t:use_transformer(function(tree)
+    local tree_node = tree --[[:! HastNode]]
+    walk(tree_node)
+    return tree_node
   end)
 end
 
