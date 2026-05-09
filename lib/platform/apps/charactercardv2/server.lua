@@ -49,12 +49,16 @@ local M = {}
 -- ConvDb: the conversation DB interface (SharedDbCap + lib.conversation compat).
 -- is_lib_conv() narrows ConvDb to LibConvDb at runtime.
 --:: ConvDb = { query: (string, { [integer]: unknown }) -> (unknown, string | nil), setup?: unknown, [string]: unknown }
--- Caps: the app capability table. The code accesses many cap fields without nil checks
--- (relying on the operator having granted them), so Caps uses `any` to allow this
--- duck-typed access pattern. Cap types from cap_types.lua are documented here for
--- reference but not enforced, since enforcement would require nil-guard additions
--- throughout the 3000-line file.
---:: Caps = any
+-- Caps: the app capability table. All fields are optional (nil when not granted).
+-- Cap types come from lib/platform/caps/cap_types.lua (loaded via --:: require above).
+--:: Caps = {
+--::   self?: SelfCap,
+--::   self_write?: SelfWriteCap,
+--::   kv?: KvCap,
+--::   llm?: LlmCap,
+--::   time?: TimeCap,
+--::   conversations?: ConvDb,
+--:: }
 -- Internal types: complex duck-typed objects. Using `any` allows body code to access
 -- fields freely. These are NOT cap types — they're app-internal data structures.
 --:: CardData = any
@@ -595,13 +599,15 @@ local function default_settings()
 	return s
 end
 
+--: (OpaqueData) -> LlmCallOpts
 local function llm_opts_from_settings(settings)
-	return {
-		temperature = settings.temperature,
-		top_p = settings.top_p,
-		max_tokens = settings.max_tokens,
-		frequency_penalty = settings.frequency_penalty,
-		presence_penalty = settings.presence_penalty,
+	return --[[:! LlmCallOpts]] {
+		temperature = settings and settings.temperature or nil,
+		top_p = settings and settings.top_p or nil,
+		max_tokens = settings and settings.max_tokens or nil,
+		frequency_penalty = settings and settings.frequency_penalty or nil,
+		presence_penalty = settings and settings.presence_penalty or nil,
+		stop = nil,
 	}
 end
 
@@ -1209,7 +1215,7 @@ local function build_group_context(state, caps, speaker_member, path)
 
 	local count_tokens
 	if caps.llm and caps.llm.count_tokens then
-		count_tokens = caps.llm.count_tokens
+		count_tokens = --[[: (string) -> integer]] caps.llm.count_tokens
 	else
 		count_tokens = function(text) return math.ceil(#text / 4) end
 	end
@@ -1439,6 +1445,7 @@ end
 
 --: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_message(state, caps, _params, body, res)
+	if not caps.llm then return json_err(res, 503, "no LLM capability configured") end
 	if not body or not body.content then return json_err(res, 400, "content required") end
 	local text = body.content
 	if type(text) ~= "string" or #text == 0 then return json_err(res, 400, "empty content") end
@@ -1518,6 +1525,7 @@ end
 
 --: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_message_stream(state, caps, _params, body, res)
+	if not caps.llm then return json_err(res, 503, "no LLM capability configured") end
 	if not body or not body.content then return json_err(res, 400, "content required") end
 	local text = body.content
 	if type(text) ~= "string" or #text == 0 then return json_err(res, 400, "empty content") end
@@ -1563,11 +1571,12 @@ local function api_post_message_stream(state, caps, _params, body, res)
 	end
 
 	-- Stream LLM response.
+	local llm_stream_opts = llm_opts_from_settings(state.settings)
 	local response, err = caps.llm.call_stream(apply_instruct(state, context), function(token)
 		if client_gone then return end
 		local sok = res.send_event(json.encode({ type = "token", token = token }))
 		if not sok then client_gone = true end
-	end, llm_opts_from_settings(state.settings))
+	end, llm_stream_opts)
 
 	if not response then
 		-- Rollback: delete user message.
@@ -1620,6 +1629,7 @@ end
 
 --: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_continue(state, caps, _params, _body, res)
+	if not caps.llm then return json_err(res, 503, "no LLM capability configured") end
 	local path, perr = get_canonical_path(state)
 	if not path or #path == 0 then return json_err(res, 400, "no messages") end
 
@@ -1654,6 +1664,7 @@ end
 
 --: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_impersonate(state, caps, _params, body, res)
+	if not caps.llm then return json_err(res, 503, "no LLM capability configured") end
 	local context = build_context(state, caps)
 	if not context then return json_err(res, 500, "failed to build context") end
 	-- Append instruction to generate as the user character.
@@ -1693,6 +1704,7 @@ end
 
 --: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_swipe_new(state, caps, _params, body, res)
+	if not caps.llm then return json_err(res, 503, "no LLM capability configured") end
 	local msg_id = body and body.message_id
 	if not msg_id then return json_err(res, 400, "message_id required") end
 
@@ -2186,6 +2198,7 @@ end
 
 -- ── Persona endpoints helpers ──────────────────────────────────────────────
 
+--: (State, Caps) -> nil
 local function save_personas(state, caps)
 	if not caps.kv then return end
 	caps.kv.set("personas", json.encode(state.personas))
@@ -2364,11 +2377,16 @@ local function api_post_card_reset(state, caps, _params, _body, res)
 end
 
 -- ── Preset endpoints ───────────────────────────────────────────────────────
+--
+-- presets_mod expects a kv with string-returning get/set. KvCap.get returns
+-- (unknown | nil, string | nil); the first return is always a string in practice
+-- (kv stores JSON strings). The cast below narrows to what presets_mod expects.
+--:: PresetsKv = { get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }
 
 --: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_presets(_state, caps, _params, _body, res)
 	if not caps.kv then return json_err(res, 500, "kv not available") end
-	local data = presets_mod.load_all(caps.kv)
+	local data = presets_mod.load_all(caps.kv --[[:! PresetsKv]])
 	return json_ok(res, data)
 end
 
@@ -2382,7 +2400,7 @@ local function api_post_presets_save(_state, caps, _params, body, res)
 	if not preset.name or type(preset.name) ~= "string" or #preset.name == 0 then
 		return json_err(res, 400, "preset must have a name")
 	end
-	local ok, err = presets_mod.save(caps.kv, body.type, preset.name, --[[:! { name: string, ... }]] preset)
+	local ok, err = presets_mod.save(caps.kv --[[:! PresetsKv]], body.type, preset.name, --[[:! { name: string, ... }]] preset)
 	if not ok then return json_err(res, 400, err) end
 	return json_ok(res, { ok = true })
 end
@@ -2393,7 +2411,7 @@ local function api_post_presets_delete(_state, caps, _params, body, res)
 	if not body or not body.type or not body.name then
 		return json_err(res, 400, "type and name required")
 	end
-	local ok, err = presets_mod.delete(caps.kv, body.type, body.name)
+	local ok, err = presets_mod.delete(caps.kv --[[:! PresetsKv]], body.type, body.name)
 	if not ok then return json_err(res, 400, err) end
 	return json_ok(res, { ok = true })
 end
@@ -2404,7 +2422,7 @@ local function api_post_presets_activate(_state, caps, _params, body, res)
 	if not body or not body.type or not body.name then
 		return json_err(res, 400, "type and name required")
 	end
-	local ok, err = presets_mod.set_active(caps.kv, body.type, body.name)
+	local ok, err = presets_mod.set_active(caps.kv --[[:! PresetsKv]], body.type, body.name)
 	if not ok then return json_err(res, 400, err) end
 	return json_ok(res, { ok = true })
 end
@@ -2427,7 +2445,7 @@ local function api_post_presets_export(_state, caps, _params, body, res)
 		return json_err(res, 400, "type and name required")
 	end
 	-- Find the preset.
-	local list = presets_mod.load_all(caps.kv)
+	local list = presets_mod.load_all(caps.kv --[[:! PresetsKv]])
 	local type_key = body.type .. "s"
 	local presets_list = list[type_key]
 	if not presets_list then return json_err(res, 404, "no presets for type") end
@@ -2663,7 +2681,7 @@ local function api_get_export_chat(state, caps, params, _body, res)
 	if not path then return json_err(res, 500, err) end
 
 	local card_name = tostring(state.card and state.card.name or "Chat")
-	local now = caps.time and caps.time.now() or os.time()
+	local now = (caps.time and (caps.time.now()) or os.time()) --[[:! integer]]
 	local date_str = --[[:! string]] os.date("!%Y-%m-%d", now)
 	local format = params.format or "text"
 
@@ -2718,7 +2736,7 @@ local function api_post_connection_test(state, caps, params, body, res)
 	end
 	local test_messages = {{ role = "user", content = "Hello" }}
 	local t0 = os.clock()
-	local response, err = caps.llm.call(test_messages, { max_tokens = 10 })
+	local response, err = caps.llm.call(test_messages, { max_tokens = 10 } --[[:! LlmCallOpts]])
 	local elapsed_ms = math.floor((os.clock() - t0) * 1000 + 0.5)
 	if response then
 		return json_ok(res, {
@@ -2855,7 +2873,7 @@ local routes = {
 function M.create(caps, opts)
 	opts = opts or {}
 	-- Seed RNG for UUID generation. Use time cap if available.
-	local time_fn = caps.time and caps.time.now or nil
+	local time_fn = caps.time and (caps.time.now --[[:! () -> integer]]) or nil
 	local big = math.floor(2^31)
 	local seed = math.floor(time_fn and (time_fn() * 1000 + math.random(999)) or math.random(big))
 	math.randomseed(--[[:! integer]] seed)
@@ -2871,7 +2889,7 @@ function M.create(caps, opts)
 	if caps.kv then
 		local raw = caps.kv.get("settings")
 		if raw then
-			local ok, saved = pcall(json.decode, raw)
+			local ok, saved = pcall(json.decode, raw --[[:! string]])
 			if ok and type(saved) == "table" then
 				for _, key in ipairs(SETTINGS_KEYS) do
 					if saved[key] ~= nil then
@@ -2890,7 +2908,7 @@ function M.create(caps, opts)
 	if caps.kv and state.card then
 		local raw = caps.kv.get("card_overrides")
 		if raw then
-			local ok, overrides = pcall(json.decode, raw)
+			local ok, overrides = pcall(json.decode, raw --[[:! string]])
 			if ok and type(overrides) == "table" then
 				for k, v in pairs(overrides) do
 					state.card[k] = v
@@ -2903,7 +2921,7 @@ function M.create(caps, opts)
 	if caps.kv then
 		local raw = caps.kv.get("lorebook")
 		if raw then
-			local ok, saved = pcall(json.decode, raw)
+			local ok, saved = pcall(json.decode, raw --[[:! string]])
 			if ok and type(saved) == "table" then
 				state.lorebook = saved
 			end
@@ -2914,7 +2932,7 @@ function M.create(caps, opts)
 	if caps.kv then
 		local raw = caps.kv.get("user_lorebooks")
 		if raw then
-			local ok, saved = pcall(json.decode, raw)
+			local ok, saved = pcall(json.decode, raw --[[:! string]])
 			if ok and type(saved) == "table" then
 				state.user_lorebooks = saved
 			end
@@ -2926,7 +2944,7 @@ function M.create(caps, opts)
 		if #state.user_lorebooks == 0 then
 			local legacy = caps.kv.get("world_info")
 			if legacy then
-				local ok_l, parsed = pcall(json.decode, legacy)
+				local ok_l, parsed = pcall(json.decode, legacy --[[:! string]])
 				if ok_l and type(parsed) == "table" then
 					state.user_lorebooks[1] = {
 						id = gen_book_id(caps.time and caps.time.now),
@@ -2951,16 +2969,16 @@ function M.create(caps, opts)
 	if caps.kv then
 		local raw = caps.kv.get("personas")
 		if raw then
-			local ok_p, saved = pcall(json.decode, raw)
+			local ok_p, saved = pcall(json.decode, raw --[[:! string]])
 			if ok_p and type(saved) == "table" and #(--[[:! any[] ]] saved) > 0 then
 				state.personas = saved
 			end
 		end
 		local active = caps.kv.get("personas:active")
 		if active and active ~= "" then
-			local p = find_persona(state.personas, active)
+			local p = find_persona(state.personas, active --[[:! string | nil]])
 			if p then
-				state.active_persona = active
+				state.active_persona = active --[[:! string]]
 				state.user_name = p.name
 			end
 		end
@@ -2970,7 +2988,7 @@ function M.create(caps, opts)
 	if caps.kv then
 		local raw = caps.kv.get("regex_scripts")
 		if raw then
-			local ok_r, saved = pcall(json.decode, raw)
+			local ok_r, saved = pcall(json.decode, raw --[[:! string]])
 			if ok_r and type(saved) == "table" then
 				state.regex_scripts = saved
 			end
@@ -2999,13 +3017,13 @@ function M.create(caps, opts)
 	if caps.kv then
 		local raw = caps.kv.get("instruct_templates")
 		if raw then
-			local ok_it, saved = pcall(json.decode, raw)
+			local ok_it, saved = pcall(json.decode, raw --[[:! string]])
 			if ok_it and type(saved) == "table" and #(--[[:! any[] ]] saved) > 0 then
 				state.instruct_templates = saved
 			end
 		end
 		local active = caps.kv.get("instruct_active")
-		if active ~= nil then
+		if type(active) == "string" then
 			if active == "" then
 				state.instruct_active = nil
 			else
@@ -3024,7 +3042,7 @@ function M.create(caps, opts)
 	if caps.kv and (state.authors_note.text == nil or state.authors_note.text == "") then
 		local raw = caps.kv.get("authors_note")
 		if raw then
-			local ok_an, saved = pcall(json.decode, raw)
+			local ok_an, saved = pcall(json.decode, raw --[[:! string]])
 			if ok_an and type(saved) == "table" then
 				local s = --[[:! { [string]: any }]] saved
 				if s.text ~= nil then state.authors_note.text = s.text end
@@ -3055,12 +3073,26 @@ function M.create(caps, opts)
 	end
 
 	-- Open conversation database.
-	local time_fn = caps.time and caps.time.now or os.time
+	-- time_fn: () -> integer. Wraps caps.time.now (extracts first return) or os.time.
+	--: () -> integer
+	local time_fn = function() return os.time() end
+	do
+		local _time_cap = caps.time
+		if _time_cap then
+			--: () -> integer
+			time_fn = function()
+				local t = _time_cap.now()
+				return t or 0
+			end
+		end
+	end
 	state._time_fn = time_fn
 	local conv_db
 	if caps.conversations then
 		-- shared_db cap: set up schema (idempotent) and use raw SQL helpers.
-		caps.conversations.setup(CONV_SCHEMA)
+		-- setup is a platform-internal method not in the cap_types spec.
+		local setup_fn = caps.conversations.setup --[[:! (unknown) -> nil]]
+		setup_fn(CONV_SCHEMA)
 		conv_db = caps.conversations
 	elseif opts.conv_db then
 		conv_db = opts.conv_db  -- for tests: pass a pre-built conversation handle
@@ -3098,7 +3130,7 @@ function M.create(caps, opts)
 	if caps.kv then
 		local raw = caps.kv.get("group")
 		if raw then
-			local ok_g, saved = pcall(json.decode, raw)
+			local ok_g, saved = pcall(json.decode, raw --[[:! string]])
 			if ok_g and type(saved) == "table" then
 				local sg = --[[:! { [string]: any }]] saved
 				state.group.enabled = sg.enabled or false
