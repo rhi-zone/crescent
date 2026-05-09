@@ -165,7 +165,7 @@
 --::   status: integer,
 --::   headers: { [string]: unknown },
 --::   body: string | nil,
---::   send_event: (data: string, opts: { id: unknown | nil, event: string | nil } | nil) -> (true | nil, string | nil),
+--::   send_event: (data: string, opts: { id?: unknown, event?: string } | nil) -> (true | nil, string | nil),
 --::   close: () -> nil,
 --:: }
 

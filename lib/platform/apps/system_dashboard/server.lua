@@ -17,11 +17,18 @@ end
 
 --:: require "lib.platform.caps.cap_types"
 
-local json       = require("lib.format.json") --: any
+--:: DashCaps = { self?: SelfCap, user_packs?: unknown, stdout?: StdoutCap, time?: TimeCap, [string]: unknown }
+
+-- json.encode is typed as returning (string|nil,string|nil) in the module, but
+-- this file always encodes well-formed app data and does not check for error;
+-- the cast to string here is safe for these call sites.
+--:: JsonMod = { encode: (unknown) -> string, decode: (string) -> (unknown, string | nil), ... }
+local json       = require("lib.format.json") --[[:! JsonMod]]
 local search     = require("lib.platform.apps.system_dashboard.search")
 local packs      = require("lib.platform.apps.system_dashboard.packs")
 local cap_dispatch = require("lib.platform.cap_dispatch")
-local output_mod = require("lib.platform.apps.system_dashboard.output") --: any
+-- output_mod is typed by its own module; used as-is (returns unknown for envelope values).
+local output_mod = require("lib.platform.apps.system_dashboard.output")
 
 -- Streaming primitive set. When `exec.output.type` is one of these the
 -- dispatcher takes the SSE path instead of returning a JSON envelope.
@@ -73,7 +80,7 @@ local function parse_qs(qs)
 end
 
 -- Serve a static file from the tarball via caps.self.entry.
---: (any, any, any) -> boolean | nil
+--: (SelfCap | nil, HttpReq, HttpRes) -> boolean | nil
 local function serve_static(self_cap, req, res)
 	if not self_cap then return nil end
 	local req_path = tostring(req.path or "/")
@@ -105,7 +112,7 @@ local function build_alias_index(aliases)
 end
 
 -- Find the first cap in the caps table whose _type matches cap_type.
---: (any, string) -> any | nil
+--: ({ [string]: unknown }, string) -> unknown | nil
 local function find_cap_by_type(caps, cap_type)
 	for _, c in pairs(caps) do
 		if type(c) == "table" and c._type == cap_type then
@@ -144,9 +151,9 @@ end
 
 -- Determine output shape spec from action.exec.output. Accepts:
 --   nil / "text" / "code" / "key_value" / table with .type
---: (any) -> { [string]: unknown }
+--: (unknown) -> { [string]: unknown }
 local function output_spec_of(exec_info)
-	local exec = exec_info
+	local exec = exec_info --[[:! { output: unknown } | nil]]
 	local o = exec and exec.output
 	if o == nil then return { type = "text" } end
 	if type(o) == "string" then return { type = o } end
@@ -162,9 +169,9 @@ end
 
 -- Build a default cite list from exec_info + cap type. Best-effort: caps don't
 -- expose root paths, so use what we can read off the action declaration.
---: (any, string) -> unknown[]
+--: (unknown, string) -> unknown[]
 local function make_cite(exec_info, cap_type)
-	local exec = exec_info
+	local exec = exec_info --[[:! { args: unknown, binary: unknown, op: unknown, subkey: unknown, name: unknown, value: unknown }]]
 	if cap_type == "shell" then
 		return { output_mod.cite_command({ tostring(exec.args or "") }) }
 	end
@@ -204,9 +211,9 @@ end
 -- Build the *empty* schema body for a streaming primitive. The streamer sends
 -- this as the first SSE event so the frontend can render the table/log frame
 -- skeleton immediately. Frame data arrives in subsequent events.
---: (any) -> unknown
+--: (unknown) -> unknown
 local function build_stream_schema(spec)
-	local s = spec
+	local s = spec --[[:! { type: unknown, columns: unknown, key: unknown, row_actions: unknown }]]
 	local ty = s.type
 	if ty == "log_stream" then
 		return {
@@ -235,11 +242,11 @@ end
 -- Frames are JSON-encoded as { type="frame", frame=<payload> } and assigned
 -- monotonic ids starting at 1. A ring buffer of `replay_buffer` size is kept
 -- for Last-Event-ID resume.
---: (any, any, any, any, string, any, any) -> nil
+--: (unknown, unknown, unknown, TimeCap | nil, string, HttpReq, HttpRes) -> nil
 local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, res)
-	local s = spec
-	local sub_cap_ = sub_cap
-	local exec_info_ = exec_info
+	local s = spec --[[:! { type: unknown, replay_buffer: unknown, frame_format: unknown }]]
+	local sub_cap_ = sub_cap --[[:! { run_stream: (unknown) -> (unknown | nil, string | nil), _type: string }]]
+	local exec_info_ = exec_info --[[:! { args: unknown }]]
 	local time_cap_ = time_cap
 	local req_ = req
 	local res_ = res
@@ -281,13 +288,14 @@ local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, re
 		res_.close()
 		return
 	end
-	local iter, ierr = sub_cap_.run_stream(exec_info_.args)
-	if not iter then
+	local iter_raw, ierr = sub_cap_.run_stream(exec_info_.args)
+	if not iter_raw then
 		res_.send_event(json.encode(output_mod.err(tostring(ierr or "run_stream failed"))),
 			{ event = "error" })
 		res_.close()
 		return
 	end
+	local iter = iter_raw --[[:! (() -> (string | nil, string | nil)) & { close: () -> nil }]]
 
 	-- 5. Ring buffer for Last-Event-ID resume.
 	local replay_size = 256 --: integer
@@ -426,9 +434,9 @@ end
 -- Adapt a raw cap result into a primitive body.
 -- raw is the value returned by the cap (string for shell/exec/registry get,
 -- list of records for list_values/list_keys, etc.).
---: (any, any) -> (unknown | nil, string | nil)
+--: (unknown, unknown) -> (unknown | nil, string | nil)
 local function adapt_body(spec, raw)
-	local s = spec
+	local s = spec --[[:! { type: unknown, lang: unknown, columns: unknown, skip_header: unknown, on_match: unknown, default: unknown }]]
 	local ty = s.type
 	if ty == "text" then
 		local txt
@@ -547,7 +555,7 @@ local function adapt_body(spec, raw)
 end
 
 -- Build an envelope for a successful cap result. Returns the envelope table.
---: (any, any, string) -> any
+--: (unknown, unknown, string) -> unknown
 local function adapt_envelope(exec_info, raw, cap_type)
 	local spec = output_spec_of(exec_info)
 	local body, err = adapt_body(spec, raw)
@@ -560,24 +568,29 @@ end
 
 -- Encode an envelope as JSON, validating first; on validation failure replace
 -- with an err envelope so the client always sees a valid shape.
---: (any) -> string
-local function encode_envelope(env)
+--: (unknown) -> string
+local function encode_envelope(env_raw)
+	-- env is a duck-typed output envelope; structure varies by path.
+	-- output_mod.validate is permissive internally (casts to any), but the
+	-- typechecker infers a concrete param type. We use a table cast to bridge.
+	local env = env_raw --[[:! { ok: true, body: unknown, cite: nil, stream: nil, ttl_ms: nil }]]
 	local ok_v, err_v = output_mod.validate(env)
 	if not ok_v then
-		env = output_mod.err("invalid envelope: " .. tostring(err_v))
+		local env_err = output_mod.err("invalid envelope: " .. tostring(err_v))
+		return json.encode(env_err)
 	end
 	return json.encode(env)
 end
 
 -- Handle API routes.
---: (any, any, any) -> boolean | nil
+--: ({ aliases: unknown[], alias_index: { [string]: unknown }, pack_meta: unknown[], caps: { [string]: unknown }, time_cap: TimeCap | nil }, HttpReq, HttpRes) -> boolean | nil
 local function handle_api(state, req, res)
 	local path   = tostring(req.path or "/")
 	local method = tostring(req.method or "GET"):upper()
 
 	-- POST /api/execute
 	if path == "/api/execute" and method == "POST" then
-		local body_str = type(req.body) == "string" and req.body or ""
+		local body_str = (type(req.body) == "string" and req.body or "") --[[:! string]]
 		local ok, body = pcall(json.decode, body_str)
 		if not ok or type(body) ~= "table" then
 			res.status = 400
@@ -611,7 +624,7 @@ local function handle_api(state, req, res)
 		end
 		local action = actions[idx]
 		-- Attenuate each declared cap to produce sub-caps keyed by local name.
-		local attenuated = {} --: { [string]: any }
+		local attenuated = {} --: { [string]: unknown }
 		local action_caps = type(action.caps) == "table" and action.caps or {}
 		for name_k, decl_v in pairs(action_caps) do
 			local name = tostring(name_k)
@@ -623,7 +636,8 @@ local function handle_api(state, req, res)
 				res.body = encode_envelope(output_mod.err("no parent cap of type " .. tostring(decl.type)))
 				return true
 			end
-			local sub, err = parent.attenuate(decl)
+			local parent_cap = parent --[[:! { attenuate: (unknown) -> (unknown | nil, string | nil) }]]
+			local sub, err = parent_cap.attenuate(decl)
 			if not sub then
 				res.status = 200
 				res.headers["Content-Type"] = MIME.json
@@ -640,13 +654,14 @@ local function handle_api(state, req, res)
 			res.body = encode_envelope(output_mod.err("action.exec missing or not a table"))
 			return true
 		end
-		local sub_cap = attenuated[exec_info.cap]
-		if not sub_cap then
+		local sub_cap_raw = attenuated[exec_info.cap]
+		if not sub_cap_raw then
 			res.status = 200
 			res.headers["Content-Type"] = MIME.json
 			res.body = encode_envelope(output_mod.err("action.exec references unknown cap name: " .. tostring(exec_info.cap)))
 			return true
 		end
+		local sub_cap = sub_cap_raw --[[:! { _type: string, run: (unknown) -> (unknown | nil, string | nil), exec: (unknown, unknown) -> (unknown | nil, string | nil), get: (string, unknown) -> (unknown | nil, string | nil), set: (string, unknown, unknown, unknown) -> (unknown | nil, string | nil), list_keys: (string) -> (unknown | nil, string | nil), list_values: (string) -> (unknown | nil, string | nil) }]]
 		local cap_type = tostring(sub_cap._type)
 		-- Streaming branch: when the action's output type is a streaming
 		-- primitive, switch to SSE. Pump runs synchronously inside the
@@ -814,11 +829,12 @@ local function handle_api(state, req, res)
 	return nil
 end
 
+--: (DashCaps, unknown) -> { handler: (HttpReq, HttpRes) -> unknown }
 function M.create(caps, opts)
-	local caps_t     = caps  --[[: any]]
-	local self_cap   = caps_t and caps_t.self
-	local user_packs = caps_t and caps_t.user_packs
-	local stdout_cap = caps_t and caps_t.stdout
+	local caps_t     = caps
+	local self_cap   = caps_t.self
+	local user_packs = caps_t.user_packs
+	local stdout_cap = caps_t.stdout
 
 	local no_self = {
 		entries = function() return {} end,

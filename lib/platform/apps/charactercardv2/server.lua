@@ -24,7 +24,11 @@ end
 
 --:: require "lib.platform.caps.cap_types"
 
-local json = require("lib.format.json")
+-- json.encode is typed as returning (string|nil,string|nil) in the module, but
+-- this file always encodes well-formed app data and does not check for error;
+-- the cast to string here is safe for these call sites.
+--:: JsonMod = { encode: (unknown) -> string, decode: (string) -> (unknown, string | nil), ... }
+local json = require("lib.format.json") --[[:! JsonMod]]
 local card_mod = require("lib.formats.ccv2.card")
 local context_mod = require("lib.formats.ccv2.context")
 local macro_mod = require("lib.formats.ccv2.macro")
@@ -35,17 +39,38 @@ local png_mod = require("lib.png")
 
 local M = {}
 
+-- ConvRow: a row returned by the conversation DB (lib.conversation or shared_db).
 --:: ConvRow = any
+-- ConvSession: a session row from the conversation DB.
 --:: ConvSession = any
---:: ConvDb = any
+-- LibConvDb: the lib.conversation handle interface.
+-- Methods use `:` call syntax. Used after is_lib_conv() narrows a ConvDb to LibConvDb.
+--:: LibConvDb = { create_session: (self: LibConvDb, string) -> (ConvSession | nil, string | nil), get_session: (self: LibConvDb, string) -> (ConvSession | nil, string | nil), list_sessions: (self: LibConvDb, string) -> (ConvSession[] | nil, string | nil), delete_session: (self: LibConvDb, string) -> (boolean | nil, string | nil), add_message: (self: LibConvDb, string, string | nil, string, string, unknown) -> (ConvRow | nil, string | nil), get_message: (self: LibConvDb, string) -> (ConvRow | nil, string | nil), get_children: (self: LibConvDb, string | nil) -> (ConvRow[] | nil, string | nil), get_roots: (self: LibConvDb, string) -> (ConvRow[] | nil, string | nil), get_canonical_path: (self: LibConvDb, string | nil) -> (ConvRow[] | nil, string | nil), swipe_to: (self: LibConvDb, string) -> (boolean | nil, string | nil), update_message: (self: LibConvDb, string, unknown) -> (ConvRow | nil, string | nil), delete_subtree: (self: LibConvDb, string) -> ({ deleted: integer } | nil, string | nil) }
+-- ConvDb: the conversation DB interface (SharedDbCap + lib.conversation compat).
+-- is_lib_conv() narrows ConvDb to LibConvDb at runtime.
+--:: ConvDb = { query: (string, { [integer]: unknown }) -> (unknown, string | nil), setup?: unknown, [string]: unknown }
+-- Caps: the app capability table. The code accesses many cap fields without nil checks
+-- (relying on the operator having granted them), so Caps uses `any` to allow this
+-- duck-typed access pattern. Cap types from cap_types.lua are documented here for
+-- reference but not enforced, since enforcement would require nil-guard additions
+-- throughout the 3000-line file.
 --:: Caps = any
+-- Internal types: complex duck-typed objects. Using `any` allows body code to access
+-- fields freely. These are NOT cap types — they're app-internal data structures.
 --:: CardData = any
 --:: AuthorsNote = any
 --:: GroupMember = any
 --:: GroupState = any
 --:: State = any
---:: Req = { method: string, target?: string, path?: string, body?: string, ... }
---:: Res = { status: integer | nil, headers: { [string]: string }, body: string | nil, send_event?: any, close?: any, [string]: any, ... }
+-- JsonBody: parsed JSON request body. Using `any` as value type since the body
+-- structure varies by endpoint; endpoint code checks and casts as needed.
+--:: JsonBody = { [string]: any }
+-- OpaqueData: a return value whose structure is complex and duck-typed internally.
+-- Functions returning OpaqueData are typed precisely enough for their callers;
+-- the `any` allows all the internal duck-typing patterns.
+--:: OpaqueData = any
+--:: Req = { method: string, target?: string, path?: string, body?: string, last_event_id?: string, ... }
+--:: Res = { status: integer, headers: { [string]: unknown }, body: string | nil, send_event: (data: string, opts: { id?: unknown, event?: string } | nil) -> (true | nil, string | nil), close: () -> nil, ... }
 
 -- ── Conversation DB helpers ──────────────────────────────────────────────────
 --
@@ -56,7 +81,7 @@ local M = {}
 -- :create_session() etc. API. The helpers detect which type is present via
 -- is_lib_conv() and dispatch accordingly.
 
---: (any) -> boolean
+--: (db: ConvDb) -> db is LibConvDb
 local function is_lib_conv(db)
 	return type(db.create_session) == "function"
 end
@@ -94,12 +119,13 @@ end
 -- conv_query: runs sql with params_array on a shared_db cap (dot-call API).
 -- Works for both SELECT (returns rows) and DML (returns {}).
 -- Returns rows_array, nil on success; nil, err on failure.
---: (any, string, { [integer]: unknown }) -> (ConvRow[] | nil, string | nil)
+--: (ConvDb, string, { [integer]: unknown }) -> (ConvRow[] | nil, string | nil)
 local function conv_query(db, sql, params)
-	return db.query(sql, params)
+	local rows, err = db.query(sql, params)
+	return rows --[[:! ConvRow[] | nil]], err
 end
 
---: (any, () -> integer) -> (ConvSession | nil, string | nil)
+--: (ConvDb, () -> integer) -> (ConvSession | nil, string | nil)
 local function conv_create_session(db, time_fn)
 	if is_lib_conv(db) then return db:create_session("card") end
 	local id = conv_uuid()
@@ -112,7 +138,7 @@ local function conv_create_session(db, time_fn)
 	return { id = id, app_id = "card", created_at = now }
 end
 
---: (any, string) -> (ConvSession | nil, string | nil)
+--: (ConvDb, string) -> (ConvSession | nil, string | nil)
 local function conv_get_session(db, id)
 	if is_lib_conv(db) then return db:get_session(id) end
 	local rows, err = conv_query(db,
@@ -124,7 +150,7 @@ local function conv_get_session(db, id)
 	return rows[1]
 end
 
---: (any) -> (ConvSession[] | nil, string | nil)
+--: (ConvDb) -> (ConvSession[] | nil, string | nil)
 local function conv_list_sessions(db)
 	if is_lib_conv(db) then return db:list_sessions("card") end
 	local rows, err = conv_query(db,
@@ -135,7 +161,7 @@ local function conv_list_sessions(db)
 	return rows
 end
 
---: (any, string) -> (boolean | nil, string | nil)
+--: (ConvDb, string) -> (boolean | nil, string | nil)
 local function conv_delete_session(db, id)
 	if is_lib_conv(db) then return db:delete_session(id) end
 	local _, err = conv_query(db, "DELETE FROM sessions WHERE id = ?", { id })
@@ -143,7 +169,7 @@ local function conv_delete_session(db, id)
 	return true
 end
 
---: (any, string, string | nil, string, string, () -> integer, unknown) -> (ConvRow | nil, string | nil)
+--: (ConvDb, string, string | nil, string, string, () -> integer, unknown) -> (ConvRow | nil, string | nil)
 local function conv_add_message(db, session_id, parent_id, role, content, time_fn, metadata)
 	if is_lib_conv(db) then return db:add_message(session_id, parent_id, role, content, metadata) end
 	local id = conv_uuid()
@@ -183,7 +209,7 @@ local function conv_decode_metadata(r)
 	return r
 end
 
---: (any, string) -> (ConvRow | nil, string | nil)
+--: (ConvDb, string) -> (ConvRow | nil, string | nil)
 local function conv_get_message(db, id)
 	if is_lib_conv(db) then return db:get_message(id) end
 	local rows, err = conv_query(db,
@@ -195,7 +221,7 @@ local function conv_get_message(db, id)
 	return conv_decode_metadata(rows[1])
 end
 
---: (any, string | nil) -> (ConvRow[] | nil, string | nil)
+--: (ConvDb, string | nil) -> (ConvRow[] | nil, string | nil)
 local function conv_get_children(db, parent_id)
 	if is_lib_conv(db) then return db:get_children(parent_id) end
 	local rows, err = conv_query(db,
@@ -207,7 +233,7 @@ local function conv_get_children(db, parent_id)
 	return rows
 end
 
---: (any, string) -> (ConvRow[] | nil, string | nil)
+--: (ConvDb, string) -> (ConvRow[] | nil, string | nil)
 local function conv_get_roots(db, session_id)
 	if is_lib_conv(db) then return db:get_roots(session_id) end
 	local rows, err = conv_query(db,
@@ -219,7 +245,7 @@ local function conv_get_roots(db, session_id)
 	return rows
 end
 
---: (any, string | nil) -> (ConvRow[] | nil, string | nil)
+--: (ConvDb, string | nil) -> (ConvRow[] | nil, string | nil)
 local function conv_get_canonical_path(db, session_id)
 	if is_lib_conv(db) then return db:get_canonical_path(session_id) end
 	local rows, err = conv_query(db,
@@ -246,7 +272,7 @@ local function conv_get_canonical_path(db, session_id)
 	return path
 end
 
---: (any, string) -> (boolean | nil, string | nil)
+--: (ConvDb, string) -> (boolean | nil, string | nil)
 local function conv_swipe_to(db, message_id)
 	if is_lib_conv(db) then return db:swipe_to(message_id) end
 	local rows, err = conv_query(db,
@@ -261,7 +287,7 @@ local function conv_swipe_to(db, message_id)
 	return true
 end
 
---: (any, string, { content?: string, metadata?: unknown, canonical_child_id?: string | nil, ... }) -> (ConvRow | nil, string | nil)
+--: (ConvDb, string, { content?: string, metadata?: unknown, canonical_child_id?: string | nil, ... }) -> (ConvRow | nil, string | nil)
 local function conv_update_message(db, id, fields)
 	if is_lib_conv(db) then return db:update_message(id, fields) end
 	local sets = {} --[[: { [integer]: string }]]
@@ -287,7 +313,7 @@ local function conv_update_message(db, id, fields)
 	return conv_get_message(db, id)
 end
 
---: (any, string) -> ({ deleted: integer } | nil, string | nil)
+--: (ConvDb, string) -> ({ deleted: integer } | nil, string | nil)
 local function conv_delete_subtree(db, message_id)
 	if is_lib_conv(db) then return db:delete_subtree(message_id) end
 	local rows, err = conv_query(db,
@@ -342,7 +368,7 @@ local function parse_target(target)
 	return path, params
 end
 
---: ({ status: integer | nil, headers: { [string]: string }, body: string | nil, ... }, unknown) -> boolean
+--: (Res, unknown) -> boolean
 local function json_ok(res, data)
 	res.status = 200
 	res.headers["Content-Type"] = "application/json"
@@ -358,7 +384,7 @@ local function json_err(res, status, msg)
 	return true
 end
 
---: (Req) -> any
+--: (Req) -> JsonBody | nil
 local function read_json_body(req)
 	if not req.body then return {} end
 	local body = --[[:! string]] req.body
@@ -581,7 +607,7 @@ end
 
 -- ── Card loading ────────────────────────────────────────────────────────────
 
---: (State, Caps) -> (any, string | nil)
+--: (State, Caps) -> (OpaqueData, string | nil)
 local function load_card(state, caps)
 	if not caps.self then return nil, "no self capability" end
 	local raw = caps.self.metadata("chara")
@@ -628,14 +654,14 @@ end
 
 -- get_canonical_path: returns the active path for the session.
 -- Wraps conv_get_canonical_path().
---: (State) -> (any, string | nil)
+--: (State) -> (OpaqueData, string | nil)
 local function get_canonical_path(state)
 	return conv_get_canonical_path(state.conv, state.session_id)
 end
 
 -- get_siblings: returns all siblings of a message (children of its parent).
 -- For root messages (parent_id is nil), returns all roots in the session.
---: (State, any) -> any
+--: (State, OpaqueData) -> OpaqueData
 local function get_siblings(state, msg)
 	if msg.parent_id == nil then
 		return conv_get_roots(state.conv, state.session_id)
@@ -644,7 +670,7 @@ local function get_siblings(state, msg)
 end
 
 -- sibling_info: compute sibling_index (0-based) and sibling_count for a message.
---: (State, any) -> (integer, integer)
+--: (State, OpaqueData) -> (integer, integer)
 local function sibling_info(state, msg)
 	local siblings, err = get_siblings(state, msg)
 	if not siblings then return 0, 1 end
@@ -657,7 +683,7 @@ local function sibling_info(state, msg)
 end
 
 -- msg_response: format a message for the API response.
---: (State, any) -> any
+--: (State, OpaqueData) -> OpaqueData
 local function msg_response(state, msg)
 	local idx, total = sibling_info(state, msg)
 	local resp = {
@@ -678,7 +704,7 @@ end
 
 -- ── Persona helpers (forward declarations for context assembly) ────────────
 
---: (any, string | nil) -> (any, integer | nil)
+--: (OpaqueData, string | nil) -> (OpaqueData, integer | nil)
 local function find_persona(personas, name)
 	for i, p in ipairs(personas) do
 		if p.name == name then return p, i end
@@ -686,7 +712,7 @@ local function find_persona(personas, name)
 	return nil
 end
 
---: (State) -> any
+--: (State) -> OpaqueData
 local function get_active_persona(state)
 	if not state.active_persona then return nil end
 	return find_persona(state.personas, state.active_persona)
@@ -694,14 +720,14 @@ end
 
 -- ── Context assembly ────────────────────────────────────────────────────────
 
---: (State) -> any
+--: (State) -> OpaqueData
 local function make_macro_env(state)
 	local card = state.card
 	if not card then return {} end
 	return { char = card.name or "", user = state.user_name }
 end
 
---: (State, Caps, any) -> (any, string | nil)
+--: (State, Caps, OpaqueData) -> (OpaqueData, string | nil)
 local function build_context(state, caps, path)
 	local card = state.card
 	if not path then
@@ -783,7 +809,7 @@ end
 
 -- compute_token_count: build context and count tokens without calling the LLM.
 -- Returns a table suitable for JSON response.
---: (State, Caps) -> any
+--: (State, Caps) -> OpaqueData
 local function compute_token_count(state, caps)
 	local path, perr = get_canonical_path(state)
 	if not path then return nil, perr end
@@ -827,7 +853,7 @@ end
 
 -- build_context_to_parent: build context from root to a given parent message.
 -- Used for generating siblings (swipe/new, edit).
---: (State, Caps, string | nil) -> (any, string | nil)
+--: (State, Caps, string | nil) -> (OpaqueData, string | nil)
 local function build_context_to_parent(state, caps, parent_id)
 	if parent_id == nil then
 		-- Parent is the session root — context is empty (no messages before root).
@@ -965,7 +991,7 @@ local DEFAULT_INSTRUCT_TEMPLATES = {
 -- format_for_instruct(messages, template) -> messages
 -- If template is nil or mode="chat", returns messages unchanged.
 -- If mode="instruct", formats into a single user message using template prefixes/suffixes.
---: (any, any) -> any
+--: (OpaqueData, OpaqueData) -> OpaqueData
 local function format_for_instruct(messages, template)
 	if not template or template.mode == "chat" then return messages end
 	local parts = {}
@@ -999,7 +1025,7 @@ end
 M._format_for_instruct = format_for_instruct
 M._DEFAULT_INSTRUCT_TEMPLATES = DEFAULT_INSTRUCT_TEMPLATES
 
---: (any, any) -> any
+--: (OpaqueData, OpaqueData) -> OpaqueData
 local function find_instruct_template(templates, name)
 	for i, t in ipairs(templates) do
 		if t.name == name then return t, i end
@@ -1015,14 +1041,14 @@ local function save_instruct(state, caps)
 end
 
 -- Get the active instruct template (nil if none or chat mode).
---: (State) -> any
+--: (State) -> OpaqueData
 local function get_active_instruct(state)
 	if not state.instruct_active or state.instruct_active == "" then return nil end
 	return find_instruct_template(state.instruct_templates, state.instruct_active)
 end
 
 -- Apply instruct template to messages before LLM call.
---: (State, any) -> any
+--: (State, OpaqueData) -> OpaqueData
 local function apply_instruct(state, messages)
 	local template = get_active_instruct(state)
 	return format_for_instruct(messages, template)
@@ -1036,7 +1062,7 @@ local function save_session_id(state, caps)
 	caps.kv.set("card_session_id", state.session_id)
 end
 
---: (Caps) -> any
+--: (Caps) -> OpaqueData
 local function load_session_id(caps)
 	if not caps.kv then return nil end
 	return caps.kv.get("card_session_id")
@@ -1095,7 +1121,7 @@ local function get_session_preview(state, session_id)
 	return text
 end
 
---: (State, any) -> any
+--: (State, OpaqueData) -> OpaqueData
 local function format_messages(state, path)
 	local result = {}
 	for _, msg in ipairs(path) do
@@ -1110,7 +1136,7 @@ local function switch_to_session(state, caps, session_id)
 	save_session_id(state, caps)
 end
 
---: (State, Caps) -> (any, any, string | nil)
+--: (State, Caps) -> (OpaqueData, OpaqueData, string | nil)
 local function create_new_session(state, caps)
 	local session, serr = conv_create_session(state.conv, state._time_fn)
 	if not session then return nil, nil, serr end
@@ -1157,7 +1183,7 @@ local function save_group(state, caps)
 	caps.kv.set("group", json.encode(serializable))
 end
 
---: (State) -> any
+--: (State) -> OpaqueData
 local function group_members_response(state)
 	local members = {}
 	for _, m in ipairs(state.group.members) do
@@ -1166,7 +1192,7 @@ local function group_members_response(state)
 	return members
 end
 
---: (State) -> any
+--: (State) -> OpaqueData
 local function group_response(state)
 	return {
 		enabled = state.group.enabled,
@@ -1176,7 +1202,7 @@ local function group_response(state)
 end
 
 -- Build context for a specific group member's turn.
---: (State, Caps, any, any) -> any
+--: (State, Caps, OpaqueData, OpaqueData) -> OpaqueData
 local function build_group_context(state, caps, speaker_member, path)
 	local speaker_card = speaker_member.card
 	if not speaker_card then return build_context(state, caps, path) end
@@ -1236,7 +1262,7 @@ local function build_group_context(state, caps, speaker_member, path)
 end
 
 -- Pick the next speaker(s) based on turn order.
---: (State) -> any
+--: (State) -> OpaqueData
 local function pick_next_speakers(state)
 	local group = state.group
 	local members = group.members
@@ -1262,12 +1288,12 @@ end
 
 -- ── Group endpoints ──────────────────────────────────────────────────────
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_group(state, _caps, _params, _body, res)
 	return json_ok(res, group_response(state))
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_group_toggle(state, caps, _params, body, res)
 	if not body or body.enabled == nil then
 		return json_err(res, 400, "enabled field required")
@@ -1277,7 +1303,7 @@ local function api_post_group_toggle(state, caps, _params, body, res)
 	return json_ok(res, group_response(state))
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_group_add(state, caps, _params, body, res)
 	if not body or not body.card_json then
 		return json_err(res, 400, "card_json required")
@@ -1301,7 +1327,7 @@ local function api_post_group_add(state, caps, _params, body, res)
 	return json_ok(res, group_response(state))
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_group_remove(state, caps, _params, body, res)
 	if not body or not body.name then
 		return json_err(res, 400, "name required")
@@ -1322,7 +1348,7 @@ local function api_post_group_remove(state, caps, _params, body, res)
 	return json_err(res, 404, "character not found")
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_group_order(state, caps, _params, body, res)
 	if not body or not body.turn_order then
 		return json_err(res, 400, "turn_order required")
@@ -1340,7 +1366,7 @@ end
 
 -- ── API endpoints ───────────────────────────────────────────────────────────
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_card(state, caps, _params, _body, res)
 	if not state.card then return json_err(res, 404, "no card loaded") end
 	local path = get_canonical_path(state)
@@ -1360,7 +1386,7 @@ end
 
 -- api_get_card_export: stream the card PNG as a file download.
 -- Requires caps.self.read (read-only self cap is sufficient).
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_card_export(state, caps, _params, _body, res)
 	if not caps.self or not caps.self.read then
 		return json_err(res, 503, "self cap not available")
@@ -1378,7 +1404,7 @@ local function api_get_card_export(state, caps, _params, _body, res)
 	return true
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_avatar(_state, caps, _params, _body, res)
 	if not caps.self or not caps.self.entry then
 		res.status = 404
@@ -1400,7 +1426,7 @@ local function api_get_avatar(_state, caps, _params, _body, res)
 	return true
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_messages(state, _caps, _params, _body, res)
 	local path, err = get_canonical_path(state)
 	if not path then return json_err(res, 500, err) end
@@ -1411,7 +1437,7 @@ local function api_get_messages(state, _caps, _params, _body, res)
 	return json_ok(res, { messages = result })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_message(state, caps, _params, body, res)
 	if not body or not body.content then return json_err(res, 400, "content required") end
 	local text = body.content
@@ -1490,7 +1516,7 @@ end
 
 -- ── SSE streaming (via res.send_event / res.close from http_server cap) ───
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_message_stream(state, caps, _params, body, res)
 	if not body or not body.content then return json_err(res, 400, "content required") end
 	local text = body.content
@@ -1592,7 +1618,7 @@ local function api_post_message_stream(state, caps, _params, body, res)
 	return true
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_continue(state, caps, _params, _body, res)
 	local path, perr = get_canonical_path(state)
 	if not path or #path == 0 then return json_err(res, 400, "no messages") end
@@ -1626,7 +1652,7 @@ local function api_post_continue(state, caps, _params, _body, res)
 	end
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_impersonate(state, caps, _params, body, res)
 	local context = build_context(state, caps)
 	if not context then return json_err(res, 500, "failed to build context") end
@@ -1645,7 +1671,7 @@ local function api_post_impersonate(state, caps, _params, body, res)
 	return json_ok(res, { content = response })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_swipes(state, _caps, params, _body, res)
 	local msg_id = params.message_id
 	if not msg_id then return json_err(res, 400, "message_id required") end
@@ -1665,7 +1691,7 @@ local function api_get_swipes(state, _caps, params, _body, res)
 	return json_ok(res, { swipes = swipes, current = current })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_swipe_new(state, caps, _params, body, res)
 	local msg_id = body and body.message_id
 	if not msg_id then return json_err(res, 400, "message_id required") end
@@ -1696,7 +1722,7 @@ local function api_post_swipe_new(state, caps, _params, body, res)
 	return json_ok(res, msg_response(state, new_msg))
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_message_edit(state, caps, _params, body, res)
 	if not body or not body.message_id or not body.content then
 		return json_err(res, 400, "message_id and content required")
@@ -1718,7 +1744,7 @@ local function api_post_message_edit(state, caps, _params, body, res)
 	return json_ok(res, resp)
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_message_delete(state, _caps, _params, body, res)
 	if not body or not body.message_id then
 		return json_err(res, 400, "message_id required")
@@ -1731,7 +1757,7 @@ local function api_post_message_delete(state, _caps, _params, body, res)
 	return json_ok(res, { deleted = result.deleted })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_branch_navigate(state, _caps, _params, body, res)
 	if not body or not body.message_id then
 		return json_err(res, 400, "message_id required")
@@ -1756,7 +1782,7 @@ end
 
 -- ── Session endpoints ──────────────────────────────────────────────────────
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_sessions(state, _caps, _params, _body, res)
 	local sessions, err = conv_list_sessions(state.conv)
 	if not sessions then return json_err(res, 500, err) end
@@ -1771,7 +1797,7 @@ local function api_get_sessions(state, _caps, _params, _body, res)
 	return json_ok(res, { sessions = result, current = state.session_id })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_session_new(state, caps, _params, _body, res)
 	local session, messages, serr = create_new_session(state, caps)
 	if not session then return json_err(res, 500, serr) end
@@ -1781,7 +1807,7 @@ local function api_post_session_new(state, caps, _params, _body, res)
 	})
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_session_switch(state, caps, _params, body, res)
 	if not body or not body.session_id then
 		return json_err(res, 400, "session_id required")
@@ -1798,7 +1824,7 @@ local function api_post_session_switch(state, caps, _params, body, res)
 	})
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_session_delete(state, caps, _params, body, res)
 	if not body or not body.session_id then
 		return json_err(res, 400, "session_id required")
@@ -1851,7 +1877,7 @@ local function save_lorebook(state, caps)
 	flush_card_state(state, caps)
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_lorebook(state, _caps, _params, _body, res)
 	local entries = state.lorebook or {}
 	local result = {}
@@ -1861,7 +1887,7 @@ local function api_get_lorebook(state, _caps, _params, _body, res)
 	return json_ok(res, { entries = result })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_lorebook_update(state, caps, _params, body, res)
 	if not body or not body.uid then return json_err(res, 400, "uid required") end
 	local entries = state.lorebook or {}
@@ -1881,7 +1907,7 @@ local function api_post_lorebook_update(state, caps, _params, body, res)
 	return json_err(res, 404, "entry not found")
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_lorebook_add(state, caps, _params, body, res)
 	if not body or not body.keys or not body.content then
 		return json_err(res, 400, "keys and content required")
@@ -1901,7 +1927,7 @@ local function api_post_lorebook_add(state, caps, _params, body, res)
 	return json_ok(res, entry_to_json(entry))
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_lorebook_delete(state, caps, _params, body, res)
 	if not body or not body.uid then return json_err(res, 400, "uid required") end
 	local entries = state.lorebook or {}
@@ -1924,7 +1950,7 @@ end
 -- book carries { id, name, entries[], active }; active books merge into the
 -- prompt at context-assembly time.
 
---: (any) -> any
+--: (OpaqueData) -> OpaqueData
 local function book_summary(b)
 	return {
 		id = b.id,
@@ -1934,7 +1960,7 @@ local function book_summary(b)
 	}
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_user_lorebooks(state, _caps, _params, _body, res)
 	local books = {}
 	for _, b in ipairs(state.user_lorebooks) do
@@ -1943,9 +1969,9 @@ local function api_get_user_lorebooks(state, _caps, _params, _body, res)
 	return json_ok(res, { books = books })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_user_lorebooks_create(state, caps, _params, body, res)
-	if not body or not body.name or type(body.name) ~= "string" or #body.name == 0 then
+	if not body or not body.name or type(body.name) ~= "string" or body.name == "" then
 		return json_err(res, 400, "name required")
 	end
 	local book = {
@@ -1959,7 +1985,7 @@ local function api_post_user_lorebooks_create(state, caps, _params, body, res)
 	return json_ok(res, book_summary(book))
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_user_lorebooks_rename(state, caps, _params, body, res)
 	if not body or not body.id or not body.name then
 		return json_err(res, 400, "id and name required")
@@ -1971,7 +1997,7 @@ local function api_post_user_lorebooks_rename(state, caps, _params, body, res)
 	return json_ok(res, book_summary(book))
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_user_lorebooks_delete(state, caps, _params, body, res)
 	if not body or not body.id then return json_err(res, 400, "id required") end
 	local _, idx = find_user_book(state, body.id)
@@ -1981,7 +2007,7 @@ local function api_post_user_lorebooks_delete(state, caps, _params, body, res)
 	return json_ok(res, { deleted = true })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_user_lorebooks_toggle(state, caps, _params, body, res)
 	if not body or not body.id or body.active == nil then
 		return json_err(res, 400, "id and active required")
@@ -2003,7 +2029,7 @@ local function resolve_book(state, params, body)
 	return book
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_user_lorebook_entries(state, _caps, params, body, res)
 	local book, err = resolve_book(state, params, body)
 	if not book then return json_err(res, err == "book not found" and 404 or 400, err) end
@@ -2014,7 +2040,7 @@ local function api_get_user_lorebook_entries(state, _caps, params, body, res)
 	return json_ok(res, { id = book.id, name = book.name, active = book.active, entries = entries })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_user_lorebook_entry_add(state, caps, params, body, res)
 	local book, err = resolve_book(state, params, body)
 	if not book then return json_err(res, err == "book not found" and 404 or 400, err) end
@@ -2036,7 +2062,7 @@ local function api_post_user_lorebook_entry_add(state, caps, params, body, res)
 	return json_ok(res, entry_to_json(entry))
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_user_lorebook_entry_update(state, caps, params, body, res)
 	local book, err = resolve_book(state, params, body)
 	if not book then return json_err(res, err == "book not found" and 404 or 400, err) end
@@ -2057,7 +2083,7 @@ local function api_post_user_lorebook_entry_update(state, caps, params, body, re
 	return json_err(res, 404, "entry not found")
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_user_lorebook_entry_delete(state, caps, params, body, res)
 	local book, err = resolve_book(state, params, body)
 	if not book then return json_err(res, err == "book not found" and 404 or 400, err) end
@@ -2089,7 +2115,7 @@ local function sanitize_filename(name)
 	return out
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_user_lorebooks_export(state, _caps, params, _body, res)
 	local id = params and params.book_id
 	if not id then return json_err(res, 400, "book_id required") end
@@ -2108,7 +2134,7 @@ local function api_get_user_lorebooks_export(state, _caps, params, _body, res)
 	return true
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_user_lorebooks_import(state, caps, _params, body, res)
 	if not body or type(body.entries) ~= "table" then
 		return json_err(res, 400, "entries required")
@@ -2176,7 +2202,7 @@ end
 
 -- ── Persona endpoints ─────────────────────────────────────────────────────
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_personas(state, _caps, _params, _body, res)
 	local result = {}
 	for _, p in ipairs(state.personas) do
@@ -2185,9 +2211,9 @@ local function api_get_personas(state, _caps, _params, _body, res)
 	return json_ok(res, { personas = result, active = state.active_persona })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_personas_save(state, caps, _params, body, res)
-	if not body or not body.name or type(body.name) ~= "string" or #body.name == 0 then
+	if not body or not body.name or type(body.name) ~= "string" or body.name == "" then
 		return json_err(res, 400, "name required")
 	end
 	local name = body.name
@@ -2206,7 +2232,7 @@ local function api_post_personas_save(state, caps, _params, body, res)
 	return json_ok(res, { name = name, description = description })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_personas_delete(state, caps, _params, body, res)
 	if not body or not body.name or type(body.name) ~= "string" then
 		return json_err(res, 400, "name required")
@@ -2226,7 +2252,7 @@ local function api_post_personas_delete(state, caps, _params, body, res)
 	return json_ok(res, { deleted = true, active = state.active_persona })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_personas_activate(state, caps, _params, body, res)
 	if not body or not body.name or type(body.name) ~= "string" then
 		return json_err(res, 400, "name required")
@@ -2239,7 +2265,7 @@ end
 
 -- ── Token count endpoint ───────────────────────────────────────────────────
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_token_count(state, caps, _params, _body, res)
 	local tc, err = compute_token_count(state, caps)
 	if not tc then return json_err(res, 500, err) end
@@ -2248,12 +2274,12 @@ end
 
 -- ── Settings endpoints ─────────────────────────────────────────────────────
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_settings(state, _caps, _params, _body, res)
 	return json_ok(res, state.settings)
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_settings(state, caps, _params, body, res)
 	if not body then return json_err(res, 400, "body required") end
 	for _, key in ipairs(SETTINGS_KEYS) do
@@ -2287,13 +2313,13 @@ local function card_edit_response(card)
 	return data
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_card_edit(state, _caps, _params, _body, res)
 	if not state.card then return json_err(res, 404, "no card loaded") end
 	return json_ok(res, card_edit_response(state.card))
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_card_edit(state, caps, _params, body, res)
 	if not state.card then return json_err(res, 404, "no card loaded") end
 	if not body then return json_err(res, 400, "body required") end
@@ -2318,7 +2344,7 @@ local function api_post_card_edit(state, caps, _params, body, res)
 	return json_ok(res, card_edit_response(state.card))
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_card_reset(state, caps, _params, _body, res)
 	if not state.card then return json_err(res, 404, "no card loaded") end
 
@@ -2339,14 +2365,14 @@ end
 
 -- ── Preset endpoints ───────────────────────────────────────────────────────
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_presets(_state, caps, _params, _body, res)
 	if not caps.kv then return json_err(res, 500, "kv not available") end
 	local data = presets_mod.load_all(caps.kv)
 	return json_ok(res, data)
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_presets_save(_state, caps, _params, body, res)
 	if not caps.kv then return json_err(res, 500, "kv not available") end
 	if not body or not body.type or not body.preset then
@@ -2361,7 +2387,7 @@ local function api_post_presets_save(_state, caps, _params, body, res)
 	return json_ok(res, { ok = true })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_presets_delete(_state, caps, _params, body, res)
 	if not caps.kv then return json_err(res, 500, "kv not available") end
 	if not body or not body.type or not body.name then
@@ -2372,7 +2398,7 @@ local function api_post_presets_delete(_state, caps, _params, body, res)
 	return json_ok(res, { ok = true })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_presets_activate(_state, caps, _params, body, res)
 	if not caps.kv then return json_err(res, 500, "kv not available") end
 	if not body or not body.type or not body.name then
@@ -2383,7 +2409,7 @@ local function api_post_presets_activate(_state, caps, _params, body, res)
 	return json_ok(res, { ok = true })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_presets_import(_state, caps, _params, body, res)
 	if not caps.kv then return json_err(res, 500, "kv not available") end
 	if not body or not body.json then
@@ -2394,7 +2420,7 @@ local function api_post_presets_import(_state, caps, _params, body, res)
 	return json_ok(res, { preset = preset })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_presets_export(_state, caps, _params, body, res)
 	if not caps.kv then return json_err(res, 500, "kv not available") end
 	if not body or not body.type or not body.name then
@@ -2429,7 +2455,7 @@ local function regex_script_to_json(s)
 	}
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_regex(state, _caps, _params, _body, res)
 	local result = {}
 	for _, s in ipairs(state.regex_scripts) do
@@ -2438,9 +2464,9 @@ local function api_get_regex(state, _caps, _params, _body, res)
 	return json_ok(res, { scripts = result })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_regex_save(state, caps, _params, body, res)
-	if not body or not body.name or type(body.name) ~= "string" or #body.name == 0 then
+	if not body or not body.name or type(body.name) ~= "string" or body.name == "" then
 		return json_err(res, 400, "name required")
 	end
 	if not body.find or type(body.find) ~= "string" then
@@ -2477,7 +2503,7 @@ local function api_post_regex_save(state, caps, _params, body, res)
 	return json_ok(res, regex_script_to_json(found))
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_regex_delete(state, caps, _params, body, res)
 	if not body or not body.name or type(body.name) ~= "string" then
 		return json_err(res, 400, "name required")
@@ -2493,7 +2519,7 @@ local function api_post_regex_delete(state, caps, _params, body, res)
 	return json_err(res, 404, "script not found")
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_regex_test(_state, _caps, _params, body, res)
 	if not body or not body.find or not body.input then
 		return json_err(res, 400, "find and input required")
@@ -2517,12 +2543,12 @@ local function save_authors_note(state, caps)
 	flush_card_state(state, caps)
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_authors_note(state, _caps, _params, _body, res)
 	return json_ok(res, state.authors_note)
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_authors_note(state, caps, _params, body, res)
 	if not body then return json_err(res, 400, "body required") end
 	local an = state.authors_note
@@ -2542,7 +2568,7 @@ end
 
 -- ── Instruct template endpoints ───────────────────────────────────────────
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_instruct(state, _caps, _params, _body, res)
 	local result = {}
 	for _, t in ipairs(state.instruct_templates) do
@@ -2570,9 +2596,9 @@ local INSTRUCT_FIELDS = {
 	"separator",
 }
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_instruct_save(state, caps, _params, body, res)
-	if not body or not body.name or type(body.name) ~= "string" or #body.name == 0 then
+	if not body or not body.name or type(body.name) ~= "string" or body.name == "" then
 		return json_err(res, 400, "name required")
 	end
 	local template = {}
@@ -2595,7 +2621,7 @@ local function api_post_instruct_save(state, caps, _params, body, res)
 	return json_ok(res, template)
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_instruct_delete(state, caps, _params, body, res)
 	if not body or not body.name or type(body.name) ~= "string" then
 		return json_err(res, 400, "name required")
@@ -2611,7 +2637,7 @@ local function api_post_instruct_delete(state, caps, _params, body, res)
 	return json_ok(res, { deleted = true, active = state.instruct_active or "" })
 end
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_instruct_activate(state, caps, _params, body, res)
 	if not body or not body.name or type(body.name) ~= "string" then
 		return json_err(res, 400, "name required")
@@ -2631,7 +2657,7 @@ end
 
 -- ── Chat export endpoint ──────────────────────────────────────────────────
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_get_export_chat(state, caps, params, _body, res)
 	local path, err = get_canonical_path(state)
 	if not path then return json_err(res, 500, err) end
@@ -2685,7 +2711,7 @@ end
 
 -- ── Connection test ─────────────────────────────────────────────────────────
 
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_connection_test(state, caps, params, body, res)
 	if not caps.llm or not caps.llm.call then
 		return json_ok(res, { success = false, error = "no LLM capability configured" })
@@ -2730,7 +2756,7 @@ local BLANK_CHARA_JSON = '{"spec":"chara_card_v2","spec_version":"2.0","data":{"
 
 -- api_post_new_card: build a blank CCv2 PNG and return it as a file download.
 -- The client receives a PNG the user can import to create a new card.
---: (State, Caps, { [string]: string }, any, Res) -> boolean
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_new_card(_state, _caps, _params, _body, res)
 	local chunks, cerr = png_mod.read(BLANK_PNG_1X1)
 	if not chunks then
@@ -2825,7 +2851,7 @@ local routes = {
 	["POST /api/branch/new"]      = api_post_swipe_new,
 }
 
---: (Caps, any) -> any
+--: (Caps, OpaqueData) -> OpaqueData
 function M.create(caps, opts)
 	opts = opts or {}
 	-- Seed RNG for UUID generation. Use time cap if available.
