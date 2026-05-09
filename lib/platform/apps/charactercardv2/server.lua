@@ -22,6 +22,8 @@ if package and not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+--:: require "lib.platform.caps.cap_types"
+
 local json = require("lib.format.json")
 local card_mod = require("lib.formats.ccv2.card")
 local context_mod = require("lib.formats.ccv2.context")

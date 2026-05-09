@@ -386,6 +386,8 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/linux/` — Linux /proc parsing (no init.lua). Status: wip.
 - `lib/path/` — cross-platform path string ops (no I/O). Status: stable.
 - `lib/platform/` — platform runner: tarball app loader + sandboxed entrypoints + cap dispatch + daemon + service + session. Status: stable.
+- `lib/platform/caps/cap_types.lua` — type declarations for all platform cap interfaces (CliCap, TimeCap, DbCap, FsCap, HttpServerCap, HttpClientCap, LlmCap, ShellCap, ExecCap, HttpReq, HttpRes, etc.). Declarations only. Status: stable.
+- `lib/platform/platform_types.lua` — core platform type declarations (Manifest, CapDecl, EntryDef, AppRecord, TarEntry). Declarations only. Status: stable.
 - `lib/posix/` — POSIX (no init.lua, TODOs noted). Status: wip.
 - `lib/process/` — process spawning. Status: stable.
 - `lib/stb/` — tiered stb_image / stb_image_resize2 (vendored binary > libvips > pure). Status: stable.

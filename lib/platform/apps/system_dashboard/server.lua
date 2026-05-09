@@ -15,6 +15,8 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+--:: require "lib.platform.caps.cap_types"
+
 local json       = require("lib.format.json") --: any
 local search     = require("lib.platform.apps.system_dashboard.search")
 local packs      = require("lib.platform.apps.system_dashboard.packs")
