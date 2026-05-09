@@ -4,6 +4,8 @@ end
 
 local ffi = require("ffi")
 
+--:: epoll = { fd: integer, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: { write: (string) -> nil, remove: () -> nil } }, weak: { [integer]: boolean }, count: integer, add: (self: epoll, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), remove: (self: epoll, fd: integer) -> nil }
+
 ffi.cdef [[
 	struct inotify_event {
 		int wd;
@@ -82,7 +84,7 @@ for k, v in pairs(mod.event_mask) do mod.event_mask_name[v] = k end
 --[[@type inotify_ffi]]
 local inotify_ffi = ffi.C
 
---[[@class inotify]]
+--:: inotify = { fd: cdata, callbacks: { [cdata]: (cdata) -> nil }, ... }
 local inotify = {
 }
 inotify.__index = inotify
@@ -90,7 +92,7 @@ inotify.__index = inotify
 --: (inotify, epoll, number | nil) -> inotify
 inotify.new = function (self, epoll, flags)
 	local fd
-	if flags then fd = inotify_ffi.inotify_init1(flags)
+	if flags then fd = inotify_ffi.inotify_init1(flags --[[:! integer]])
 	else fd = inotify_ffi.inotify_init() end
 	local instance = { --[[@class inotify]]
 		fd = fd,
@@ -113,9 +115,9 @@ end
 --: (epoll, number | nil) -> inotify
 mod.new = function (epoll, flags) return inotify:new(epoll, flags) end
 
---: (inotify, string, number, (cdata) -> nil) -> (cdata | nil, () -> nil)
+--: (inotify, string, number, (cdata) -> nil) -> (cdata | nil, (() -> nil) | string)
 inotify.add = function (self, pathname, mask, cb)
-	local wd = inotify_ffi.inotify_add_watch(self.fd, pathname, mask)
+	local wd = inotify_ffi.inotify_add_watch(self.fd, pathname, mask --[[:! integer]])
 	if wd < 0 then return nil, "inotify: inotify_add_watch failed: " .. pathname end
 	self.callbacks[wd] = cb
 	return wd, function () inotify_ffi.inotify_rm_watch(self.fd, wd) end

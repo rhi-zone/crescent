@@ -4,6 +4,8 @@ end
 
 local ffi = require("ffi")
 
+--:: epoll = { fd: integer, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: { write: (string) -> nil, remove: () -> nil } }, weak: { [integer]: boolean }, count: integer, add: (self: epoll, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), remove: (self: epoll, fd: integer) -> nil }
+
 local mod = {}
 
 if ffi.os == "Windows" then
@@ -72,7 +74,7 @@ else
 
 	local timespec0 = timespec(0, 0)
 
-	--: (epoll, number, () -> nil) -> (() -> nil)
+	--: (epoll, number, () -> nil) -> ((() -> nil) | nil, string | nil)
 	mod.set_timeout = function (self, ms, cb)
 		local value = timespec(math.floor(ms / 1000), (ms % 1000) * 1000000)
 		local fd = timerfd_c.timerfd_create(--[[CLOCK_MONOTONIC]] 1, 0)
@@ -99,7 +101,7 @@ else
 		end
 	end
 
-	--: (epoll, number, () -> nil) -> (() -> nil)
+	--: (epoll, number, () -> nil) -> ((() -> nil) | nil, string | nil)
 	mod.set_interval = function (self, ms, cb)
 		local value = timespec(math.floor(ms / 1000), (ms % 1000) * 1000000)
 		local fd = timerfd_c.timerfd_create(--[[CLOCK_MONOTONIC]] 1, 0)

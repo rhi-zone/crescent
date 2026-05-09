@@ -35,6 +35,7 @@
 --     closed record per property. Untyped property names typecheck.
 
 --:: require "lib.web.js_types"
+--:: require "lib.platform.apps.system_dashboard.primitive_types"
 
 -- ── Children ────────────────────────────────────────────────────────────────
 -- An array of: Element, Text, string, number, nil, false.

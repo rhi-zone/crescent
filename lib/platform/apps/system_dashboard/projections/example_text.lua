@@ -1,5 +1,6 @@
 -- lib/platform/apps/system_dashboard/projections/example_text.lua
 -- Example projection: render a Text primitive as a styled span.
+--:: require "lib.platform.apps.system_dashboard.projections.projection_types"
 --
 -- Authored against the typed environment in projection_types.lua. Transpiled
 -- to JS via lib/lua2ts (with harden = true) and registered at runtime as a
