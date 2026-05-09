@@ -10695,3 +10695,99 @@ local _ = t.children
 ]])
     end)
 end)
+
+---------------------------------------------------------------------------
+-- annotation position edge cases
+---------------------------------------------------------------------------
+
+assert.describe("annotation position edge cases", function()
+
+    -- A: --: directly before function (baseline — must annotate)
+    assert.it("A: --: directly before function annotates it; f(42) errors", function()
+        has_error([[
+--: (string) -> integer
+local function f(s) return 1 end
+local _ = f(42)
+]], "cannot pass")
+    end)
+
+    -- B: block comment between --: and function breaks association
+    -- The --[[@...]] block comment occupies a line between the annotation and the
+    -- function declaration, so collect_preceding_run stops there and the --: is
+    -- not consumed by the function. f is unannotated; f(42) produces no error.
+    assert.it("B: --[[@...]] block comment between --: and function breaks association; f(42) no error", function()
+        no_errors([==[
+--: (string) -> integer
+--[[@param s string]]
+local function f(s) return 1 end
+local _ = f(42)
+]==])
+    end)
+
+    -- C: block comment directly before function — LuaLS form, ignored by typechecker
+    assert.it("C: --[[@param...]] alone before function; function unannotated, f(42) no error", function()
+        no_errors([==[
+--[[@param s string]]
+local function f(s) return 1 end
+local _ = f(42)
+]==])
+    end)
+
+    -- D: inline --: on the same line as a local assignment annotates the variable
+    assert.it("D: inline --: on local variable annotates its type; assigning string to integer var errors", function()
+        has_error([[
+local x = 42 --: integer
+--: string
+local y = x
+]], "cannot assign")
+    end)
+
+    assert.it("D: inline --: on local variable; assigning same type produces no error", function()
+        no_errors([[
+local x = 42 --: integer
+--: integer
+local y = x
+]])
+    end)
+
+    -- E: --[[: T]] checked cast works in expression position
+    assert.it("E: --[[: T]] checked cast works in expression position; invalid cast errors", function()
+        -- {} does not satisfy { name: string } — the checked cast catches this.
+        has_error("local x = 42 --[[: string]]\n", "cannot assign")
+    end)
+
+    assert.it("E: --[[: T]] valid checked cast on compatible type produces no error (may warn)", function()
+        -- unknown narrowed via force cast --[[:! T]] (valid usage documented in CLAUDE.md)
+        no_errors("--:: declare v = unknown\nlocal x = v --[[:! string]]\n")
+    end)
+
+    -- F: ---@param (triple-dash EmmyLua form) is not a crescent annotation
+    assert.it("F: ---@param before function; function unannotated, f(42) no error", function()
+        no_errors([[
+---@param s string
+local function f(s) return 1 end
+local _ = f(42)
+]])
+    end)
+
+    -- G: blank line between --: and function breaks association
+    assert.it("G: blank line between --: and function breaks association; f is unannotated, f(42) no error", function()
+        no_errors([[
+--: (string) -> integer
+
+local function f(s) return 1 end
+local _ = f(42)
+]])
+    end)
+
+    -- H: regular line comment between --: and function breaks association
+    assert.it("H: regular comment between --: and function breaks association; f(42) no error", function()
+        no_errors([[
+--: (string) -> integer
+-- this is a regular comment
+local function f(s) return 1 end
+local _ = f(42)
+]])
+    end)
+
+end)

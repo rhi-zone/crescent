@@ -186,7 +186,7 @@ local function check_emmylua(lines, file, diags)
         file    = file,
         line    = lineno,
         rule    = "emmylua_annotation",
-        message = "EmmyLua/LuaLS annotation `" .. earliest_form .. "` — use `--:` crescent style instead",
+        message = "EmmyLua/LuaLS annotation `" .. earliest_form .. "` — use `--:` crescent style instead (to suppress: add \"emmylua_annotation\" to disabled_rules in your lint config)",
       }
     end
   end
@@ -248,13 +248,28 @@ local function check_missing_tests(file, diags)
   end
 end
 
+--:: LintOpts = { disabled_rules: { [integer]: string } | nil, with_tests: boolean | nil }
+
+-- Return true if rule is in opts.disabled_rules.
+--: (LintOpts | nil, string) -> boolean
+local function is_disabled(opts, rule)
+  if not opts then return false end
+  local dr = opts.disabled_rules
+  if not dr then return false end
+  for _, r in ipairs(dr) do
+    if r == rule then return true end
+  end
+  return false
+end
+
 -- ── public API ────────────────────────────────────────────────────────────────
 
 --- Check a single init.lua file against all stdlib conventions.
 -- Returns an array of { file, line, rule, message } diagnostics.
 -- The file is assumed to NOT be a test file.
---: (string) -> { file: string, line: integer, rule: string, message: string }[]
-M.check_file = function(filepath)
+-- opts.disabled_rules: array of rule name strings to skip.
+--: (string, LintOpts | nil) -> { file: string, line: integer, rule: string, message: string }[]
+M.check_file = function(filepath, opts)
   local src, err = read_file(filepath)
   if not src then
     return { { file = filepath, line = 1, rule = "io_error", message = "cannot read file: " .. tostring(err) } }
@@ -266,17 +281,39 @@ M.check_file = function(filepath)
   check_module_var(lines, filepath, diags)
   check_path_guard(lines, filepath, diags)
   check_assert(lines, filepath, diags)
-  check_emmylua(lines, filepath, diags)
+  if not is_disabled(opts, "emmylua_annotation") then
+    check_emmylua(lines, filepath, diags)
+  end
   check_bare_bit(lines, filepath, diags)
   check_missing_tests(filepath, diags)
 
   return diags
 end
 
+--- Check a source string directly (for testing without disk I/O).
+-- filepath is used for diagnostic messages only.
+-- opts.disabled_rules: array of rule name strings to skip.
+--: (string, string, LintOpts | nil) -> { file: string, line: integer, rule: string, message: string }[]
+M.check_src = function(src, filepath, opts)
+  local lines = split_lines(src)
+  local diags = {}
+
+  check_module_var(lines, filepath, diags)
+  check_path_guard(lines, filepath, diags)
+  check_assert(lines, filepath, diags)
+  if not is_disabled(opts, "emmylua_annotation") then
+    check_emmylua(lines, filepath, diags)
+  end
+  check_bare_bit(lines, filepath, diags)
+
+  return diags
+end
+
 --- Find all init.lua files under dir (excluding *_test.lua and archive/) and
 -- run check_file on each. Returns array of diagnostics.
---: (string) -> ({ file: string, line: integer, rule: string, message: string }[], { [integer]: string } | nil)
-M.check_dir = function(dir)
+-- opts.disabled_rules: array of rule name strings to skip.
+--: (string, LintOpts | nil) -> ({ file: string, line: integer, rule: string, message: string }[], { [integer]: string } | nil)
+M.check_dir = function(dir, opts)
   local handle = io.popen(
     'find ' .. dir ..
     ' -name "init.lua" -type f' ..
@@ -293,7 +330,7 @@ M.check_dir = function(dir)
 
   local all_diags = {}
   for _, filepath in ipairs(files) do
-    local diags = M.check_file(filepath)
+    local diags = M.check_file(filepath, opts)
     for _, d in ipairs(diags) do
       all_diags[#all_diags + 1] = d
     end

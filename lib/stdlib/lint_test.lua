@@ -39,7 +39,9 @@ local function check_src(src, opts)
     sf:close()
   end
 
-  local diags = lint.check_file(tmpfile)
+  -- Pass lint opts (disabled_rules, etc.) to check_file.
+  local lint_opts = opts.disabled_rules and { disabled_rules = opts.disabled_rules } or nil
+  local diags = lint.check_file(tmpfile, lint_opts)
 
   -- Clean up the directory.
   os.execute("rm -rf " .. dir)
@@ -284,6 +286,46 @@ return M
     T.it("silent when sibling test file is present", function()
       local diags = check_src(GOOD_SRC, { with_tests = true })
       T.ok(not has_rule(diags, "missing_tests"))
+    end)
+  end)
+
+  T.describe("disabled_rules", function()
+    T.it("passing disabled_rules = {'emmylua_annotation'} suppresses emmylua_annotation", function()
+      local diags = check_src(BAD_EMMYLUA_DASHPARAM, { with_tests = true, disabled_rules = { "emmylua_annotation" } })
+      T.ok(not has_rule(diags, "emmylua_annotation"))
+    end)
+
+    T.it("disabled_rules does not suppress unrelated rules", function()
+      local diags = check_src(BAD_ASSERT, { with_tests = true, disabled_rules = { "emmylua_annotation" } })
+      T.ok(has_rule(diags, "assert_in_lib"))
+    end)
+
+    T.it("emmylua_annotation rule fires without disabled_rules", function()
+      local diags = check_src(BAD_EMMYLUA_DASHPARAM, { with_tests = true })
+      T.ok(has_rule(diags, "emmylua_annotation"))
+    end)
+
+    T.it("emmylua_annotation message includes suppression hint", function()
+      local diags = check_src(BAD_EMMYLUA_DASHPARAM, { with_tests = true })
+      local found_hint = false
+      for _, d in ipairs(diags) do
+        if d.rule == "emmylua_annotation" and d.message:find("disabled_rules", 1, true) then
+          found_hint = true
+        end
+      end
+      T.ok(found_hint)
+    end)
+  end)
+
+  T.describe("check_src API", function()
+    T.it("check_src returns diagnostics for bad source without disk I/O", function()
+      local diags = lint.check_src(BAD_EMMYLUA_DASHPARAM, "test.lua", nil)
+      T.ok(has_rule(diags, "emmylua_annotation"))
+    end)
+
+    T.it("check_src respects disabled_rules", function()
+      local diags = lint.check_src(BAD_EMMYLUA_DASHPARAM, "test.lua", { disabled_rules = { "emmylua_annotation" } })
+      T.ok(not has_rule(diags, "emmylua_annotation"))
     end)
   end)
 
