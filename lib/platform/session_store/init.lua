@@ -51,10 +51,10 @@ CREATE TABLE IF NOT EXISTS sessions (
 -- either is absent.
 function M.open(db_path, opts)
 	if not opts then return nil, "session_store.open: opts is required" end
-	-- `any` escape: open-table reads return unknown; cast before use.
-	local opts_any = opts --: any
-	local time_fn = opts_any.time_fn --: any
-	local idle_ttl = opts_any.idle_ttl --: any
+	-- open-table reads return unknown; cast before use.
+	local opts_any = opts --[[:! { time_fn: unknown, idle_ttl: unknown, ... }]]
+	local time_fn = opts_any.time_fn --[[:! (() -> integer) | nil]]
+	local idle_ttl = opts_any.idle_ttl --[[:! unknown]]
 	if not time_fn then
 		return nil, "session_store.open: opts.time_fn is required"
 	end
@@ -68,8 +68,8 @@ function M.open(db_path, opts)
 
 	local db, err = sqlite.open(db_path)
 	if not db then return nil, "session_store.open: " .. tostring(err) end
-	-- `any`: sqlite handle type not visible to checker (FFI cdata + metatable).
-	local real_db = db --: any
+	-- sqlite handle type not visible to checker (FFI cdata + metatable).
+	local real_db = db --[[:! { execute: (self: unknown, string, ...unknown) -> (boolean, unknown), close: (self: unknown) -> nil, query: (self: unknown, string, ...unknown) -> unknown }]]
 	local ok, serr = real_db:execute(SCHEMA)
 	if not ok then
 		real_db:close()
@@ -94,10 +94,10 @@ function M.open(db_path, opts)
 		if type(record) ~= "table" then
 			return nil, "session_store.put: record must be a table"
 		end
-		-- `any` escape for self field access.
-		local db = self._db --: any
-		local rec_any = record --: any
-		local last_seen = rec_any.last_seen --: any
+		-- self field access via force-cast to known sqlite handle type.
+		local db = self._db --[[:! { execute: (self: unknown, string, ...unknown) -> (boolean, unknown), close: (self: unknown) -> nil, query: (self: unknown, string, ...unknown) -> unknown }]]
+		local rec_any = record --[[:! { last_seen: unknown, ... }]]
+		local last_seen = rec_any.last_seen --[[:! unknown]]
 		local ts = tonumber(last_seen) --: number | nil
 		if not ts then
 			return nil, "session_store.put: record.last_seen must be a number"
@@ -133,7 +133,7 @@ function M.open(db_path, opts)
 		if type(session_id) ~= "string" or session_id == "" then
 			return nil
 		end
-		local db = self._db --: any
+		local db = self._db --[[:! { execute: (self: unknown, string, ...unknown) -> (boolean, unknown), close: (self: unknown) -> nil, query: (self: unknown, string, ...unknown) -> unknown }]]
 		local tfn = --[[:! () -> integer]] self._time_fn
 		local ttl_val = --[[:! number]] self._ttl
 		local now = tfn()
@@ -141,7 +141,7 @@ function M.open(db_path, opts)
 		local iter = db:query(
 			"SELECT last_seen, data FROM sessions WHERE session_id = ?",
 			session_id
-		) --: any
+		) --[[:! ((...unknown) -> unknown) | nil]]
 		if not iter then return nil end
 		local last_seen, data_str = iter()
 		if last_seen == nil then return nil end
@@ -166,7 +166,7 @@ function M.open(db_path, opts)
 		if type(session_id) ~= "string" or session_id == "" then
 			return false
 		end
-		local db = self._db --: any
+		local db = self._db --[[:! { execute: (self: unknown, string, ...unknown) -> (boolean, unknown), close: (self: unknown) -> nil, query: (self: unknown, string, ...unknown) -> unknown }]]
 		local tfn = --[[:! () -> integer]] self._time_fn
 		local ttl_val = --[[:! number]] self._ttl
 		local now = tfn()
@@ -175,7 +175,7 @@ function M.open(db_path, opts)
 		local iter = db:query(
 			"SELECT last_seen FROM sessions WHERE session_id = ?",
 			session_id
-		) --: any
+		) --[[:! ((...unknown) -> unknown) | nil]]
 		if not iter then return false end
 		local last_seen = iter()
 		if last_seen == nil then return false end
@@ -196,7 +196,7 @@ function M.open(db_path, opts)
 		if type(session_id) ~= "string" or session_id == "" then
 			return nil, "session_store.delete: session_id must be a non-empty string"
 		end
-		local db = self._db --: any
+		local db = self._db --[[:! { execute: (self: unknown, string, ...unknown) -> (boolean, unknown), close: (self: unknown) -> nil, query: (self: unknown, string, ...unknown) -> unknown }]]
 		local ok, err = db:execute(
 			"DELETE FROM sessions WHERE session_id = ?",
 			session_id
@@ -208,7 +208,7 @@ function M.open(db_path, opts)
 	-- purge_expired() -> true | nil, err
 	-- Deletes all rows where last_seen + idle_ttl < now().
 	function store:purge_expired()
-		local db = self._db --: any
+		local db = self._db --[[:! { execute: (self: unknown, string, ...unknown) -> (boolean, unknown), close: (self: unknown) -> nil, query: (self: unknown, string, ...unknown) -> unknown }]]
 		local tfn = --[[:! () -> integer]] self._time_fn
 		local ttl_val = --[[:! number]] self._ttl
 		local now = tfn()
@@ -225,7 +225,7 @@ function M.open(db_path, opts)
 
 	-- close()
 	function store:close()
-		local db = self._db --: any
+		local db = self._db --[[:! { execute: (self: unknown, string, ...unknown) -> (boolean, unknown), close: (self: unknown) -> nil, query: (self: unknown, string, ...unknown) -> unknown }]]
 		db:close()
 	end
 

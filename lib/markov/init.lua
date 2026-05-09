@@ -69,11 +69,13 @@ end
 -- Chain object
 -- ---------------------------------------------------------------------------
 
+--:: ChainObj = { _order: integer, _table: { [string]: { [string]: integer } }, _seed: integer, _rand: () -> number, _train_tokens: (self: ChainObj, { [integer]: string }) -> nil, train: (self: ChainObj, string | { [integer]: string }) -> nil, ... }
+
 local Chain = {}
 Chain.__index = Chain
 
 -- Train the chain from a sequence of tokens (already split).
---: (self: any, tokens: { [integer]: string }) -> nil
+--: (self: ChainObj, tokens: { [integer]: string }) -> nil
 function Chain:_train_tokens(tokens)
   local order = self._order
   -- Prepend `order` START sentinels and one END sentinel.
@@ -96,7 +98,7 @@ function Chain:_train_tokens(tokens)
 end
 
 -- Train from a string (splits on whitespace) or an array of tokens.
---: (self: any, input: string | { [integer]: string }) -> nil
+--: (self: ChainObj, input: string | { [integer]: string }) -> nil
 function Chain:train(input)
   local tokens
   if type(input) == "string" then
@@ -109,7 +111,7 @@ end
 
 -- Return the raw transitions map { token -> count } for a context.
 -- context may be a string key (pre-joined) or an array of tokens.
---: (self: any, context: string | { [integer]: string }) -> { [string]: integer }
+--: (self: ChainObj, context: string | { [integer]: string }) -> { [string]: integer }
 function Chain:transitions(context)
   local key
   if type(context) == "string" then
@@ -128,7 +130,7 @@ end
 
 -- Predict the next token given a context array (length == order).
 -- Returns next_token, probability, or nil, 0 if unknown context.
---: (self: any, context: { [integer]: string }) -> (string | nil, number)
+--: (self: ChainObj, context: { [integer]: string }) -> (string | nil, number)
 function Chain:next(context)
   local key
   if type(context) == "string" then
@@ -146,7 +148,7 @@ end
 --   max_tokens  (default 100)  — hard cap on output tokens (not counting sentinels)
 --   seed_token  (optional)     — force the first real token (must exist in chain)
 --   separator   (default " ")  — join separator
---: (self: any, opts: { max_tokens?: integer, seed_token?: string, separator?: string } | nil) -> string
+--: (self: ChainObj, opts: { max_tokens?: integer, seed_token?: string, separator?: string } | nil) -> string
 function Chain:generate(opts)
   opts = opts or {}
   local max_tokens = opts.max_tokens or 100
@@ -187,7 +189,7 @@ function Chain:generate(opts)
 end
 
 -- Serialize the chain to a plain Lua table (snapshot).
---: (self: any) -> any
+--: (self: ChainObj) -> unknown
 function Chain:save()
   local snapshot = {
     order = self._order,
@@ -210,7 +212,7 @@ end
 
 -- Create a new empty chain of the given order (default 1).
 -- seed is required for deterministic random generation.
---: (order: integer | nil, seed: integer) -> any
+--: (order: integer | nil, seed: integer) -> unknown
 function M.chain(order, seed)
   if not seed then error("markov.chain: seed is required") end
   order = order or 1
@@ -226,10 +228,11 @@ end
 
 -- Restore a chain from a snapshot produced by chain:save().
 -- seed is required for deterministic random generation.
---: (snapshot: any, seed: integer) -> any
+--: (snapshot: unknown, seed: integer) -> unknown
 function M.load(snapshot, seed)
   if not seed then error("markov.load: seed is required") end
-  local order = snapshot.order or 1
+  local snap = snapshot --[[:! { order: integer | nil, table: { [string]: { [integer]: { [integer]: unknown } } } }]]
+  local order = snap.order or 1
   math.randomseed(seed)
   local obj = setmetatable({
     _order = order,
@@ -237,10 +240,10 @@ function M.load(snapshot, seed)
     _seed  = seed,
     _rand  = math.random,
   }, Chain)
-  for ctx_key, entries in pairs(snapshot.table) do
-    local trans = {}
+  for ctx_key, entries in pairs(snap.table) do
+    local trans = {} --: { [string]: integer }
     for _, pair in ipairs(entries) do
-      trans[pair[1]] = pair[2]
+      trans[pair[1] --[[:! string]]] = pair[2] --[[:! integer]]
     end
     obj._table[ctx_key] = trans
   end
@@ -249,9 +252,9 @@ end
 
 -- Convenience: build a chain from text, train it, and return it.
 -- order defaults to 1. seed is required.
---: (text: string, seed: integer, order: integer | nil) -> any
+--: (text: string, seed: integer, order: integer | nil) -> unknown
 function M.from_text(text, seed, order)
-  local c = M.chain(order or 1, seed)
+  local c = M.chain(order or 1, seed) --[[:! ChainObj]]
   c:train(text)
   return c
 end

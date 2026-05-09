@@ -14,8 +14,8 @@ M._tier = "pure"
 local sqrt, huge, max = math.sqrt, math.huge, math.max
 
 --:: QTBounds = { x: number, y: number, w: number, h: number }
---:: QTPoint = { [integer]: any }
---:: QTHeapItem = { [integer]: any }
+--:: QTPoint = { [integer]: unknown }
+--:: QTHeapItem = { [integer]: unknown }
 --:: QTNode = { bounds: QTBounds, points: { [integer]: QTPoint }, children: { [integer]: QTNode } | nil, capacity: integer, ... }
 --:: Quadtree = { _root: QTNode, query_rect: (self: unknown, number, number, number, number) -> { [integer]: unknown }, remove: (self: unknown, number, number) -> boolean, insert: (self: unknown, number, number, unknown) -> boolean, ... }
 
@@ -93,7 +93,7 @@ local function subdivide(node)
 end
 
 -- Insert a point into a node (recursive).
---: (QTNode, number, number, any) -> nil
+--: (QTNode, number, number, unknown) -> nil
 local function node_insert(node, px, py, data)
   if node.children then
     local b = node.bounds
@@ -142,7 +142,7 @@ local function node_remove(node, px, py)
 end
 
 -- Query all points in a rect (recursive).
---: (QTNode, QTBounds, { [integer]: any }) -> nil
+--: (QTNode, QTBounds, { [integer]: unknown }) -> nil
 local function node_query_rect(node, rect, out)
   if not rects_overlap(node.bounds, rect) then return end
   if node.children then
@@ -162,7 +162,7 @@ local function node_query_rect(node, rect, out)
 end
 
 -- Query all points in a circle (recursive).
---: (QTNode, number, number, number, number, { [integer]: any }) -> nil
+--: (QTNode, number, number, number, number, { [integer]: unknown }) -> nil
 local function node_query_circle(node, cx, cy, r, r_sq, out)
   if not rect_overlaps_circle(node.bounds, cx, cy, r) then return end
   if node.children then
@@ -184,7 +184,7 @@ local function node_query_circle(node, cx, cy, r, r_sq, out)
 end
 
 -- Nearest neighbor search (recursive). best = {dist, x, y, data}.
---: (QTNode, number, number, { [integer]: any }) -> nil
+--: (QTNode, number, number, { [integer]: unknown }) -> nil
 local function node_nearest(node, cx, cy, best)
   if rect_min_dist(cx, cy, node.bounds) >= best[1] then return end
   if node.children then
@@ -285,7 +285,7 @@ local function node_count(node)
 end
 
 -- Collect all points into out (recursive).
---: (QTNode, { [integer]: any }) -> nil
+--: (QTNode, { [integer]: unknown }) -> nil
 local function node_each(node, out)
   if node.children then
     for i = 1, 4 do node_each(node.children[i], out) end
@@ -316,7 +316,7 @@ QT.__index = QT
 
 -- Insert a point into the quadtree.
 -- Returns false (without error) if the point is outside the bounds.
---: (self: Quadtree, number, number, any) -> boolean
+--: (self: Quadtree, number, number, unknown) -> boolean
 function QT:insert(px, py, data)
   if not point_in_bounds(px, py, self._root.bounds) then
     return false
@@ -334,7 +334,7 @@ end
 
 -- Query all points inside rect {x, y, w, h} (inclusive boundary).
 -- Returns array of {x, y, data}.
---: (self: Quadtree, number, number, number, number) -> { [integer]: any }
+--: (self: Quadtree, number, number, number, number) -> { [integer]: unknown }
 function QT:query_rect(x, y, w, h)
   local out = {}
   node_query_rect(self._root, { x = x, y = y, w = w, h = h }, out)
@@ -343,7 +343,7 @@ end
 
 -- Query all points within radius r of (cx, cy).
 -- Returns array of {x, y, data, dist} sorted by distance ascending.
---: (self: Quadtree, number, number, number) -> { [integer]: any }
+--: (self: Quadtree, number, number, number) -> { [integer]: unknown }
 function QT:query_circle(cx, cy, r)
   local out = {}
   node_query_circle(self._root, cx, cy, r, r * r, out)
@@ -353,10 +353,10 @@ end
 
 -- Nearest neighbor.
 -- Returns x, y, data, dist  | nil if the tree is empty.
---: (self: Quadtree, number, number) -> (number | nil, number | nil, any, number | nil)
+--: (self: Quadtree, number, number) -> (number | nil, number | nil, unknown, number | nil)
 function QT:nearest(cx, cy)
   if node_count(self._root) == 0 then return nil end
-  local best = { huge, nil, nil, nil } --: { [integer]: any }
+  local best = { huge, nil, nil, nil } --: { [integer]: unknown }
   node_nearest(self._root, cx, cy, best)
   if best[2] == nil then return nil end
   return best[2] --[[:! number | nil]], best[3] --[[:! number | nil]], best[4], best[1] --[[:! number | nil]]
@@ -364,7 +364,7 @@ end
 
 -- K nearest neighbors sorted by distance ascending.
 -- Returns array of {x, y, data, dist}.
---: (self: Quadtree, number, number, integer) -> { [integer]: any }
+--: (self: Quadtree, number, number, integer) -> { [integer]: unknown }
 function QT:knn(cx, cy, k)
   if k <= 0 then return {} end
   local heap = {} --: { [integer]: QTHeapItem }
@@ -393,7 +393,7 @@ function QT:clear()
 end
 
 -- Call fn(x, y, data) for every point.
---: (self: Quadtree, fn: (any, any, any) -> nil) -> nil
+--: (self: Quadtree, fn: (unknown, unknown, unknown) -> nil) -> nil
 function QT:each(fn)
   local all = {} --: { [integer]: QTPoint }
   node_each(self._root, all)

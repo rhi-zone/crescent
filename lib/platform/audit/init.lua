@@ -61,8 +61,8 @@ function M.open(db_path, opts)
 	local o = opts or {}
 	local db, err = sqlite.open(db_path)
 	if not db then return nil, "audit.open: " .. tostring(err) end
-	-- `any`: sqlite handle type not visible to checker (FFI cdata + metatable).
-	local real_db = db --: any
+	-- sqlite handle type not visible to checker (FFI cdata + metatable).
+	local real_db = db --[[:! { execute: (self: unknown, string, ...unknown) -> (boolean, unknown), close: (self: unknown) -> nil, query: (self: unknown, string, ...unknown) -> unknown }]]
 	local ok, serr = real_db:execute(SCHEMA)
 	if not ok then
 		real_db:close()
@@ -70,9 +70,8 @@ function M.open(db_path, opts)
 	end
 
 	-- time_fn: prefer injected, fall back to os.time.
-	-- `any` escape: o.time_fn is `(() -> integer) | nil` but open-table reads
-	-- return `unknown`; the checker can't narrow the if-then assignment.
-	local time_fn_any = o.time_fn --: any
+	-- open-table reads return `unknown`; cast before use.
+	local time_fn_any = o.time_fn --[[:! (() -> integer) | nil]]
 	--: () -> integer
 	local time_fn = time_fn_any or os.time
 
@@ -105,10 +104,9 @@ function M.open(db_path, opts)
 		-- Encode payload as JSON.
 		local payload_str = "{}" --: string
 		if payload_tbl ~= nil then
-			-- `any`: json.encode accepts any table; checker doesn't narrow payload_tbl
-			-- to non-nil here even though it was checked above.
-			local ptbl_any = payload_tbl --: any
-			local json_any = json --[[: any]]
+			-- json.encode accepts unknown; use force-cast.
+			local ptbl_any = payload_tbl --[[:! unknown]]
+			local json_any = json --[[:! { encode: (unknown) -> (string | nil, unknown), decode: (string) -> (unknown, unknown) }]]
 			local enc, enc_err = json_any.encode(ptbl_any)
 			if type(enc) ~= "string" then
 				return nil, "audit.append: payload encode failed: " .. tostring(enc_err)
@@ -122,14 +120,14 @@ function M.open(db_path, opts)
 			app_id = tostring(payload_tbl.app_id)
 		end
 
-		-- `any`: sqlite FFI handle and function fields from open-table self.
-		local db = self._db --: any
+		-- sqlite FFI handle and function fields from open-table self.
+		local db = self._db --[[:! { execute: (self: unknown, string, ...unknown) -> (boolean, unknown), close: (self: unknown) -> nil, query: (self: unknown, string, ...unknown) -> unknown }]]
 		local tfn = --[[:! () -> integer]] self._time_fn
 		local ts = tfn()
 
 		-- Get the most recent hash to chain from.
 		local prev_hash = "0"
-		local raw_iter = db:query("SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1") --: any
+		local raw_iter = db:query("SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1") --[[:! ((...unknown) -> unknown) | nil]]
 		if raw_iter then
 			local h = raw_iter()
 			if h and type(h) == "string" then
@@ -192,10 +190,11 @@ function M.open(db_path, opts)
 			sql = sql .. " LIMIT -1 OFFSET " .. tostring(offset_n)
 		end
 
-		-- `any`: sqlite iterator returns multiple unknown values via unpack.
-		local db = self._db --: any
-		local raw_iter = db:query(sql, unpack(args)) --: any
-		if not raw_iter then return {} end
+		-- sqlite iterator returns multiple unknown values via unpack.
+		local db = self._db --[[:! { execute: (self: unknown, string, ...unknown) -> (boolean, unknown), close: (self: unknown) -> nil, query: (self: unknown, string, ...unknown) -> unknown }]]
+		local raw_iter_u = db:query(sql, unpack(args))
+		if not raw_iter_u then return {} end
+		local raw_iter = raw_iter_u --[[:! () -> (integer | nil, integer | nil, string | nil, string | nil, string | nil, string | nil, string | nil)]]
 
 		local results = {} --: { [integer]: audit_entry }
 		while true do
@@ -203,7 +202,7 @@ function M.open(db_path, opts)
 			if id == nil then break end
 			results[#results + 1] = {
 				id        = id,
-				ts        = ts,
+				ts        = ts or 0,
 				event     = event or "",
 				app_id    = app_id_col,
 				payload   = payload or "",
@@ -216,12 +215,13 @@ function M.open(db_path, opts)
 
 	-- verify() -> true | nil, rowid, errmsg
 	function log:verify()
-		-- `any`: same FFI escape.
-		local db = self._db --: any
-		local raw_iter = db:query(
+		-- sqlite FFI escape.
+		local db = self._db --[[:! { execute: (self: unknown, string, ...unknown) -> (boolean, unknown), close: (self: unknown) -> nil, query: (self: unknown, string, ...unknown) -> unknown }]]
+		local raw_iter_u = db:query(
 			"SELECT id, ts, event, payload, prev_hash, hash FROM audit_log ORDER BY id ASC"
-		) --: any
-		if not raw_iter then return true end -- empty log is trivially valid
+		)
+		if not raw_iter_u then return true end -- empty log is trivially valid
+		local raw_iter = raw_iter_u --[[:! () -> (integer | nil, integer | nil, string | nil, string | nil, string | nil, string | nil)]]
 
 		local expected_prev = "0"
 		while true do
@@ -233,18 +233,22 @@ function M.open(db_path, opts)
 			end
 			-- Recompute this row's hash.
 			local sfn2 = --[[:! (string) -> string]] self._sha1_fn
-			local computed = sfn2(hash_input(prev_hash, ts, event, payload))
+			local ph = prev_hash or ""
+			local ts_ = ts or 0
+			local ev = event or ""
+			local pl = payload or ""
+			local computed = sfn2(hash_input(ph, ts_, ev, pl))
 			if computed ~= row_hash then
 				return nil, id, "broken chain: hash mismatch at row " .. tostring(id)
 			end
-			expected_prev = row_hash
+			expected_prev = row_hash or ""
 		end
 		return true
 	end
 
 	-- close()
 	function log:close()
-		local db = self._db --: any
+		local db = self._db --[[:! { execute: (self: unknown, string, ...unknown) -> (boolean, unknown), close: (self: unknown) -> nil, query: (self: unknown, string, ...unknown) -> unknown }]]
 		db:close()
 	end
 

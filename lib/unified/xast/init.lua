@@ -27,6 +27,9 @@ end
 
 local M = {}
 
+--:: XastNode = { type: string, ... }
+--:: XastOpts = { quote: string | nil, close_self_closing: boolean | nil, xml_declaration: boolean | nil, ... }
+
 -- ── Escaping ──────────────────────────────────────────────────────────────────
 
 --: (string) -> string
@@ -52,37 +55,37 @@ end
 
 -- ── Node constructors ─────────────────────────────────────────────────────────
 
---: (any) -> any
+--: (unknown) -> XastNode
 function M.root(children)
   return { type = "root", children = children or {} }
 end
 
---: (string, any, any) -> any
+--: (string, unknown, unknown) -> XastNode
 function M.element(name, attrs, children)
   return { type = "element", name = name, attributes = attrs or {}, children = children or {} }
 end
 
---: (string) -> any
+--: (string) -> XastNode
 function M.text(value)
   return { type = "text", value = value }
 end
 
---: (string) -> any
+--: (string) -> XastNode
 function M.comment(value)
   return { type = "comment", value = value }
 end
 
---: (string, any, any) -> any
+--: (string, unknown, unknown) -> XastNode
 function M.doctype(name, public, system)
   return { type = "doctype", name = name, public = public, system = system }
 end
 
---: (string, string) -> any
+--: (string, string) -> XastNode
 function M.instruction(name, value)
   return { type = "instruction", name = name, value = value }
 end
 
---: (string) -> any
+--: (string) -> XastNode
 function M.cdata(value)
   return { type = "cdata", value = value }
 end
@@ -91,47 +94,50 @@ end
 
 local serialize_node  -- forward declaration
 
---: (any, string) -> string
+--: (unknown, string) -> string
 local function serialize_attrs(attributes, quote)
   if not attributes then return "" end
+  local attrs_ = attributes --[[:! { [string]: unknown }]]
   local keys = {} --: { [integer]: string }
-  for k in pairs(attributes) do keys[#keys + 1] = k --[[:! string]] end
+  for k in pairs(attrs_) do keys[#keys + 1] = k --[[:! string]] end
   table.sort(keys)
   local parts = {}
   local q = quote or '"'
   for _, k in ipairs(keys) do
-    local v = attributes[k]
+    local v = attrs_[k]
     parts[#parts + 1] = " " .. k .. "=" .. q .. escape_attr(tostring(v), q) .. q
   end
   return table.concat(parts)
 end
 
---: (any, any) -> string
+--: (unknown, XastOpts | nil) -> string
 local function serialize_children(children, opts)
-  if not children or #children == 0 then return "" end
+  if not children then return "" end
+  local children_ = children --[[:! { [integer]: XastNode }]]
+  if #children_ == 0 then return "" end
   local parts = {}
-  for _, child in ipairs(children) do
+  for _, child in ipairs(children_) do
     parts[#parts + 1] = serialize_node(child, opts)
   end
   return table.concat(parts)
 end
 
---: (any, any) -> string
+--: (XastNode | nil, XastOpts | nil) -> string
 serialize_node = function(node, opts)
   if not node then return "" end
-  opts = opts or {}
-  local quote = opts.quote or '"'
-  local close_self = opts.close_self_closing
+  local opts_ = (opts or {}) --[[:! XastOpts]]
+  local quote = opts_.quote or '"'
+  local close_self = opts_.close_self_closing
   if close_self == nil then close_self = true end
 
   local t = node.type
 
   if t == "root" then
     local prefix = ""
-    if opts.xml_declaration then
+    if opts_.xml_declaration then
       prefix = '<?xml version="1.0" encoding="UTF-8"?>'
     end
-    return prefix .. serialize_children(node.children, opts)
+    return prefix .. serialize_children(node.children, opts_)
 
   elseif t == "element" then
     local name = tostring(node.name)
@@ -145,7 +151,7 @@ serialize_node = function(node, opts)
       end
     else
       return "<" .. name .. attrs .. ">"
-          .. serialize_children(children, opts)
+          .. serialize_children(children, opts_)
           .. "</" .. name .. ">"
     end
 
@@ -181,9 +187,9 @@ serialize_node = function(node, opts)
   end
 end
 
---: (any) -> string
+--: (unknown) -> string
 function M.to_xml(node)
-  return serialize_node(node, {})
+  return serialize_node(node --[[:! XastNode]], nil)
 end
 
 return M

@@ -34,9 +34,9 @@ end
 --   { command, args_list, undo_data, time, is_batch, batch_entries, name }
 -- args_list is a table of varargs passed after (command) to history:execute
 
---:: HistCmd = { name: string, execute: any, undo: any, description: any }
---:: HistEntry = { command: HistCmd, args_list: { [integer]: any }, undo_data: any, time: any, name: any, is_batch: any, batch_entries: any }
---:: HistObj = { _undo: { [integer]: HistEntry }, _redo: { [integer]: HistEntry }, _max: any, _on_exec: any, _on_undo: any, _on_redo: any, _batch: any, _recording: any, _time_fn: () -> any }
+--:: HistCmd = { name: string, execute: unknown, undo: unknown, description: unknown }
+--:: HistEntry = { command: HistCmd, args_list: { [integer]: unknown }, undo_data: unknown, time: unknown, name: unknown, is_batch: unknown, batch_entries: unknown }
+--:: HistObj = { _undo: { [integer]: HistEntry }, _redo: { [integer]: HistEntry }, _max: unknown, _on_exec: unknown, _on_undo: unknown, _on_redo: unknown, _batch: unknown, _recording: unknown, _time_fn: () -> unknown }
 
 local History = {}
 History.__index = History
@@ -75,7 +75,7 @@ end
 
 -- Execute a single command entry (does NOT push to history).
 -- Returns undo_data or (nil, err).
---: (HistCmd, { [integer]: any }) -> any
+--: (HistCmd, { [integer]: unknown }) -> unknown
 local function raw_execute(command, args_list)
   -- args_list: { state, args, ... } — all varargs after (command)
   local ok, result = pcall(command.execute, unpack(args_list))
@@ -106,7 +106,7 @@ local function raw_undo(entry)
   -- undo(ctx, state, args, undo_data) — same varargs as execute plus undo_data appended
   local args = entry_.args_list
   -- build call: command.undo(args[1], args[2], ..., undo_data)
-  local all = {} --: { [integer]: any }
+  local all = {} --: { [integer]: unknown }
   for i = 1, #args do all[i] = args[i] end
   all[#all + 1] = entry_.undo_data
   local ok, err = pcall(command.undo, unpack(all))
@@ -152,9 +152,9 @@ end
 
 -- history:execute(command, ...) -> undo_data or (nil, err)
 -- All args after command are forwarded to command.execute
---: (self: HistObj, command: HistCmd, ...any) -> any
+--: (self: HistObj, command: HistCmd, ...unknown) -> unknown
 function History:execute(command, ...)
-  local args_list = { ... } --: { [integer]: any }
+  local args_list = { ... } --: { [integer]: unknown }
 
   if self._batch then
     -- Accumulate into batch
@@ -173,10 +173,10 @@ function History:execute(command, ...)
     local batch = self._batch --[[:! { [integer]: HistEntry }]]
     batch[#batch + 1] = entry
     local on_exec = self._on_exec
-    if on_exec then on_exec(command, ...) end
+    if on_exec then (on_exec --[[:! (...unknown) -> unknown]])(command, ...) end
     local rec = self._recording
     if rec then
-      local recording = rec --[[:! { [integer]: { command: HistCmd, args_list: { [integer]: any } } }]]
+      local recording = rec --[[:! { [integer]: { command: HistCmd, args_list: { [integer]: unknown } } }]]
       recording[#recording + 1] = { command = command, args_list = args_list }
     end
     return undo_data
@@ -199,10 +199,10 @@ function History:execute(command, ...)
   self._redo = {}
 
   local on_exec = self._on_exec
-  if on_exec then on_exec(command, ...) end
+  if on_exec then (on_exec --[[:! (...unknown) -> unknown]])(command, ...) end
   local rec = self._recording
   if rec then
-    local recording = rec --[[:! { [integer]: { command: HistCmd, args_list: { [integer]: any } } }]]
+    local recording = rec --[[:! { [integer]: { command: HistCmd, args_list: { [integer]: unknown } } }]]
     recording[#recording + 1] = { command = command, args_list = args_list }
   end
   return undo_data
@@ -210,32 +210,32 @@ end
 
 -- history:undo(...) -> bool
 -- Varargs are passed as the first args to command.undo (ctx, state — same as execute)
---: (self: HistObj, ...any) -> (boolean | nil, string | nil)
+--: (self: HistObj, ...unknown) -> (boolean | nil, string | nil)
 function History:undo(...)
   local stack = self._undo
   if #stack == 0 then return false end
   local entry = stack[#stack]
   local ok, err = raw_undo(entry)
-  if not ok then return false, err end
+  if not ok then return false, tostring(err) end
   stack[#stack] = nil
   self._redo[#self._redo + 1] = entry
   local on_undo = self._on_undo
-  if on_undo then on_undo(entry.command or entry) end
+  if on_undo then (on_undo --[[:! (unknown) -> unknown]])(entry.command or entry) end
   return true
 end
 
 -- history:redo(...) -> bool
---: (self: HistObj, ...any) -> (boolean | nil, string | nil)
+--: (self: HistObj, ...unknown) -> (boolean | nil, string | nil)
 function History:redo(...)
   local stack = self._redo
   if #stack == 0 then return false end
   local entry = stack[#stack]
   local _, err = raw_redo(entry, self._time_fn)
-  if err then return false, err end
+  if err then return false, tostring(err) end
   stack[#stack] = nil
   push_undo(self, entry)
   local on_redo = self._on_redo
-  if on_redo then on_redo(entry.command or entry) end
+  if on_redo then (on_redo --[[:! (unknown) -> unknown]])(entry.command or entry) end
   return true
 end
 
@@ -260,7 +260,7 @@ function History:redo_depth()
 end
 
 -- history:entries() -> array of { command, args, time }
---: (self: HistObj) -> { [integer]: any }
+--: (self: HistObj) -> { [integer]: unknown }
 function History:entries()
   local result = {}
   for i = 1, #self._undo do
@@ -365,7 +365,7 @@ function History:record()
 end
 
 -- history:stop_record() -> macro (list of {command, args_list})
---: (self: HistObj) -> any
+--: (self: HistObj) -> unknown
 function History:stop_record()
   if not self._recording then
     error("stop_record called without record")
@@ -377,18 +377,18 @@ end
 
 -- history:play(macro, ...) — replay a macro; same varargs prepend is NOT done;
 -- the recorded args_list is replayed verbatim (the state/ctx were captured at record time)
---: (self: HistObj, macro: { [integer]: any }, ...any) -> (boolean | nil, string | nil)
+--: (self: HistObj, macro: { [integer]: unknown }, ...unknown) -> (boolean | nil, string | nil)
 function History:play(macro, ...)
   for i = 1, #macro do
-    local step = macro[i]
+    local step = macro[i] --[[:! { command: HistCmd, args_list: { [integer]: unknown } }]]
     -- If caller passed new args, use them; otherwise use recorded args
-    local args_list --: { [integer]: any } | nil
+    local args_list --: { [integer]: unknown } | nil
     if select("#", ...) > 0 then
       -- Caller provided leading args to override; splice into front of args_list
       -- Convention: the recorded args_list[1] is ctx/state, so we replace index 1..n
       -- with the passed varargs, keeping the rest (args table) from recording.
-      local passed = { ... } --: { [integer]: any }
-      local al = {} --: { [integer]: any }
+      local passed = { ... } --: { [integer]: unknown }
+      local al = {} --: { [integer]: unknown }
       for j = 1, #passed do al[j] = passed[j] end
       -- append remaining recorded args beyond the replaced positions
       for j = #passed + 1, #step.args_list do
@@ -398,7 +398,7 @@ function History:play(macro, ...)
     else
       args_list = step.args_list
     end
-    local al_ = (args_list or step.args_list) --[[:! { [integer]: any }]]
+    local al_ = (args_list or step.args_list) --[[:! { [integer]: unknown }]]
     local undo_data, err = raw_execute(step.command, al_)
     if undo_data == nil and err then return nil, err end
     local entry = {
@@ -413,7 +413,7 @@ function History:play(macro, ...)
     push_undo(self, entry)
     self._redo = {}
     local on_exec = self._on_exec
-    if on_exec then on_exec(step.command, unpack(al_)) end
+    if on_exec then (on_exec --[[:! (...unknown) -> unknown]])(step.command, unpack(al_)) end
   end
   return true
 end

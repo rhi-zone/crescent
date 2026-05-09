@@ -33,6 +33,8 @@ local M = {}
 
 M._tier = "pure"
 
+--:: MdNode = { type: string, ... }
+
 -- ── Lazy-load dependencies ────────────────────────────────────────────────────
 
 local _mdast, _hast
@@ -61,12 +63,13 @@ end
 
 -- Walk an mdast tree depth-first, calling fn(node, parent, index).
 -- fn may return a replacement node, nil to remove, or nothing to keep.
---: (any, (any, any) -> any) -> any
+--: (MdNode | nil, (MdNode, ...unknown) -> unknown) -> MdNode | nil
 local function walk(node, fn)
   if not node then return node end
-  if node.children then
+  local children = node.children
+  if children then
     local new_children = {}
-    for i, child in ipairs(node.children) do
+    for i, child in ipairs(children --[[:! { [integer]: MdNode }]]) do
       local replaced = fn(child, node, i)
       if replaced == nil then
         -- fn returned nothing (no explicit return) — keep original then recurse
@@ -75,11 +78,11 @@ local function walk(node, fn)
       elseif replaced == false then
         -- explicit false means remove this node
       else
-        walk(replaced, fn)
-        new_children[#new_children + 1] = replaced
+        walk(replaced --[[:! MdNode]], fn)
+        new_children[#new_children + 1] = replaced --[[:! MdNode]]
       end
     end
-    node.children = new_children
+    node.children = new_children --[[:! { [integer]: MdNode } | nil]]
   end
   return node
 end
@@ -87,7 +90,7 @@ end
 -- ── Option transforms ─────────────────────────────────────────────────────────
 
 -- html=false: strip raw HTML nodes (replace with escaped text).
---: (any) -> any
+--: (MdNode) -> MdNode
 local function transform_strip_html(tree)
   walk(tree, function(node)
     if node.type == "html" then
@@ -99,7 +102,7 @@ local function transform_strip_html(tree)
 end
 
 -- breaks=true: replace softBreak nodes with hardBreak (renders as <br>).
---: (any) -> any
+--: (MdNode) -> MdNode
 local function transform_breaks(tree)
   walk(tree, function(node)
     if node.type == "softBreak" then
@@ -111,7 +114,7 @@ end
 
 -- linkify=true: scan text nodes for bare URLs and wrap them in link nodes.
 -- Simple heuristic: http(s):// or www. prefix, up to first whitespace.
---: (any) -> any
+--: (MdNode) -> MdNode
 local function transform_linkify(tree)
   local url_pat = "(https?://[^%s<>\"']+)"
   walk(tree, function(node, parent)
@@ -170,7 +173,7 @@ end
 
 -- typographer=true: replace common punctuation patterns with typographic equivalents.
 -- Applied on text nodes only.
---: (any) -> any
+--: (MdNode) -> MdNode
 local function transform_typographer(tree)
   walk(tree, function(node)
     if node.type == "text" then
@@ -195,43 +198,46 @@ end
 -- Patch hast.from_mdast to handle our synthetic _fragment type by inlining children.
 -- We do this by post-processing the hast tree.
 
---: (any) -> any
+--: (unknown) -> MdNode | nil
 local function flatten_fragments(node)
-  if not node then return node end
-  if node.children then
+  if not node then return nil end
+  local n = node --[[:! MdNode]]
+  local children = n.children
+  if children then
     local new_children = {}
-    for _, child in ipairs(node.children) do
-      child = flatten_fragments(child)
-      if child and child.type == "_fragment" then
-        for _, gc in ipairs(child.children or {}) do
+    for _, child in ipairs(children --[[:! { [integer]: MdNode }]]) do
+      local fc = flatten_fragments(child)
+      if fc and fc.type == "_fragment" then
+        local fcc = fc.children
+        for _, gc in ipairs((fcc or {}) --[[:! { [integer]: MdNode }]]) do
           new_children[#new_children + 1] = gc
         end
-      else
-        new_children[#new_children + 1] = child
+      elseif fc ~= nil then
+        new_children[#new_children + 1] = fc
       end
     end
-    node.children = new_children
+    n.children = new_children --[[:! { [integer]: MdNode } | nil]]
   end
-  return node
+  return n
 end
 
 -- ── MarkdownIt instance ───────────────────────────────────────────────────────
 
 --:: MditOpts = { html: boolean, breaks: boolean, linkify: boolean, typographer: boolean }
---:: MditInstance = { _opts: MditOpts, _plugins: { [integer]: unknown, ... }, _transforms: { [integer]: (unknown) -> unknown, ... }, parse: (MditInstance, string) -> unknown }
+--:: MditInstance = { _opts: MditOpts, _plugins: { [integer]: unknown, ... }, _transforms: { [integer]: (unknown) -> unknown, ... }, parse: (MditInstance, string) -> unknown, render: (MditInstance, string) -> string, use: (MditInstance, unknown, unknown | nil) -> unknown, _add_transform: (MditInstance, (unknown) -> unknown) -> nil, ... }
 
 local MarkdownIt = {}
 MarkdownIt.__index = MarkdownIt
 
---: ((any | nil)) -> any
+--: ((unknown | nil)) -> unknown
 function M.new(opts)
-  opts = opts or {}
+  local opts_ = (opts or {}) --[[:! { html: boolean | nil, breaks: boolean | nil, linkify: boolean | nil, typographer: boolean | nil, ... }]]
   local self = setmetatable({}, MarkdownIt)
   self._opts = {
-    html        = opts.html        or false,
-    breaks      = opts.breaks      or false,
-    linkify     = opts.linkify     or false,
-    typographer = opts.typographer or false,
+    html        = opts_.html        or false,
+    breaks      = opts_.breaks      or false,
+    linkify     = opts_.linkify     or false,
+    typographer = opts_.typographer or false,
   }
   -- Plugins: list of {fn, plugin_opts} pairs applied after parsing, before rendering.
   -- Each plugin is a function(md_instance, plugin_opts) → transform fn(tree) → tree
@@ -244,9 +250,10 @@ end
 
 -- Use a plugin.  plugin(md_instance, plugin_opts) is called immediately.
 -- Returns self for chaining.
---: (self: MditInstance, any, (any | nil)) -> any
+--: (self: MditInstance, unknown, (unknown | nil)) -> unknown
 function MarkdownIt:use(plugin, plugin_opts)
-  plugin(self, plugin_opts)
+  local plugin_fn = plugin --[[:! (unknown, unknown | nil) -> nil]]
+  plugin_fn(self, plugin_opts)
   return self
 end
 
@@ -257,7 +264,7 @@ function MarkdownIt:_add_transform(fn)
 end
 
 -- Parse markdown string → mdast tree (with option transforms applied).
---: (self: MditInstance, string) -> any
+--: (self: MditInstance, string) -> MdNode
 function MarkdownIt:parse(src)
   local mdast = get_mdast()
   local tree = mdast.parse(src)
@@ -298,9 +305,10 @@ end
 -- ── One-shot convenience ──────────────────────────────────────────────────────
 
 -- mdit.render(src) / mdit.render(src, opts) → html string
---: (string, (any | nil)) -> string
+--: (string, (unknown | nil)) -> string
 function M.render(src, opts)
-  return M.new(opts):render(src)
+  local inst = M.new(opts) --[[:! MditInstance]]
+  return inst:render(src)
 end
 
 -- ── Built-in plugins ──────────────────────────────────────────────────────────
@@ -439,19 +447,21 @@ end
 M.plugin.deflist = function(md, _opts)
   md:_add_transform(function(tree)
     if not tree.children then return tree end
+    local tc = tree.children --[[:! { [integer]: MdNode }]]
     local new_children = {}
     local i = 1
-    while i <= #tree.children do
-      local node = tree.children[i]
+    while i <= #tc do
+      local node = tc[i]
       -- Check if next node is a definition (paragraph starting with ": ").
-      if node.type == "paragraph" and tree.children[i + 1] then
-        local next_node = tree.children[i + 1]
+      if node.type == "paragraph" and tc[i + 1] then
+        local next_node = tc[i + 1]
         if next_node.type == "paragraph" then
-          local first = next_node.children and next_node.children[1]
+          local nn_children = next_node.children --[[:! { [integer]: MdNode } | nil]]
+          local first = nn_children and nn_children[1]
           if first and first.type == "text" and (first.value or ""):sub(1, 2) == ": " then
             -- Build a <dl> node.
-            local dl = { type = "html", value = "<dl>" }
-            local dt_children = node.children or {}
+            local _dl = { type = "html", value = "<dl>" }
+            local dt_children = (node.children or {}) --[[:! { [integer]: MdNode }]]
             local dt_html = "<dt>"
             for _, c in ipairs(dt_children) do
               if c.type == "text" then dt_html = dt_html .. (c.value or "") end
@@ -460,10 +470,11 @@ M.plugin.deflist = function(md, _opts)
             -- Collect all consecutive definition paragraphs.
             local dds = {}
             local j = i + 1
-            while j <= #tree.children do
-              local dn = tree.children[j]
+            while j <= #tc do
+              local dn = tc[j]
               if dn.type == "paragraph" then
-                local df = dn.children and dn.children[1]
+                local dn_children = dn.children --[[:! { [integer]: MdNode } | nil]]
+                local df = dn_children and dn_children[1]
                 if df and df.type == "text" and (df.value or ""):sub(1, 2) == ": " then
                   local def_text = (df.value or ""):sub(3)
                   dds[#dds + 1] = "<dd>" .. def_text .. "</dd>"
@@ -573,7 +584,8 @@ M.plugin.footnote = function(md, _opts)
       end
       local section = '<section class="footnotes"><ol>' ..
         table.concat(items) .. '</ol></section>'
-      tree.children[#tree.children + 1] = { type = "html", value = section }
+      local tc_fn = tree.children --[[:! { [integer]: MdNode }]]
+      tc_fn[#tc_fn + 1] = { type = "html", value = section } --[[:! MdNode]]
     end
 
     return tree

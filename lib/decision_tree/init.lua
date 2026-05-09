@@ -7,11 +7,11 @@ local M = {}
 M._tier = "pure"
 
 --:: LabelCounts = { [string]: integer }
---:: LeafNode = { type: string, label: any, counts: LabelCounts, total: integer }
---:: BranchNode = { type: string, feature: string, children: { [any]: any }, default_label: any, counts: LabelCounts, total: integer }
---:: TreeNode = { type: string, label: any, counts: LabelCounts, total: integer, feature: string, children: { [any]: any }, default_label: any }
---:: Tree = { _root: TreeNode, predict: (self: Tree, example: unknown) -> unknown, predict_proba: (self: Tree, example: unknown) -> { [string]: number }, predict_all: (self: Tree, examples: { [integer]: any }) -> { [integer]: unknown }, accuracy: (self: Tree, test_dataset: { [integer]: any }) -> number, depth: (self: Tree) -> integer, node_count: (self: Tree) -> integer, feature_importance: (self: Tree) -> { [string]: number }, print: (self: Tree) -> string, to_rules: (self: Tree) -> { [integer]: string }, serialize: (self: Tree) -> unknown }
---:: Forest = { _trees: { [integer]: Tree }, predict: (self: Forest, example: unknown) -> unknown, predict_proba: (self: Forest, example: unknown) -> { [string]: number }, accuracy: (self: Forest, test_dataset: { [integer]: any }) -> number, feature_importance: (self: Forest) -> { [string]: number } }
+--:: LeafNode = { type: string, label: unknown, counts: LabelCounts, total: integer }
+--:: BranchNode = { type: string, feature: string, children: { [unknown]: unknown }, default_label: unknown, counts: LabelCounts, total: integer }
+--:: TreeNode = { type: string, label: unknown, counts: LabelCounts, total: integer, feature: string, children: { [unknown]: unknown }, default_label: unknown }
+--:: Tree = { _root: TreeNode, predict: (self: Tree, example: unknown) -> unknown, predict_proba: (self: Tree, example: unknown) -> { [string]: number }, predict_all: (self: Tree, examples: { [integer]: unknown }) -> { [integer]: unknown }, accuracy: (self: Tree, test_dataset: { [integer]: unknown }) -> number, depth: (self: Tree) -> integer, node_count: (self: Tree) -> integer, feature_importance: (self: Tree) -> { [string]: number }, print: (self: Tree) -> string, to_rules: (self: Tree) -> { [integer]: string }, serialize: (self: Tree) -> unknown }
+--:: Forest = { _trees: { [integer]: Tree }, predict: (self: Forest, example: unknown) -> unknown, predict_proba: (self: Forest, example: unknown) -> { [string]: number }, accuracy: (self: Forest, test_dataset: { [integer]: unknown }) -> number, feature_importance: (self: Forest) -> { [string]: number } }
 
 -- Math helpers
 
@@ -57,7 +57,7 @@ end
 
 -- Split dataset by feature value
 local function split_by_feature(dataset, feature)
-  local splits = {} --: { [any]: { [integer]: any } }
+  local splits = {} --: { [unknown]: { [integer]: unknown } }
   for _, ex in ipairs(dataset) do
     local v = ex[feature]
     if v == nil then v = "__nil__" end
@@ -154,7 +154,7 @@ local function build_tree(dataset, features, depth, max_depth, min_samples, algo
   -- Choose best feature
   local best_feature = nil
   local best_score = -math.huge --: number
-  local best_splits = nil --: { [any]: { [integer]: any } } | nil
+  local best_splits = nil --: { [unknown]: { [integer]: unknown } } | nil
   for _, f in ipairs(features) do
     local score, splits
     if algorithm == "c45" then
@@ -183,8 +183,8 @@ local function build_tree(dataset, features, depth, max_depth, min_samples, algo
     end
   end
 
-  local children = {} --: { [any]: any }
-  local best_splits_ = best_splits --[[:! { [any]: { [integer]: any } }]]
+  local children = {} --: { [unknown]: unknown }
+  local best_splits_ = best_splits --[[:! { [unknown]: { [integer]: unknown } }]]
   for val, subset in pairs(best_splits_) do
     children[val] = build_tree(subset, remaining, depth + 1, max_depth, min_samples, algorithm)
   end
@@ -370,7 +370,7 @@ local function serialize_node(node)
     for k, v in pairs(node_.counts) do counts[k] = v end
     return {type="leaf", label=node_.label, counts=counts, total=node_.total}
   end
-  local children = {} --: { [any]: any }
+  local children = {} --: { [unknown]: unknown }
   for v, child in pairs(node_.children) do
     children[v] = serialize_node(child --[[:! TreeNode]])
   end
@@ -392,7 +392,7 @@ local function deserialize_node(t)
   if t_.type == "leaf" then
     return {type="leaf", label=t_.label, counts=t_.counts, total=t_.total}
   end
-  local children = {} --: { [any]: any }
+  local children = {} --: { [unknown]: unknown }
   for v, child in pairs(t_.children) do
     children[v] = deserialize_node(child --[[:! TreeNode]])
   end
@@ -413,7 +413,7 @@ local function prune_node(node, val_dataset)
   if node_.type == "leaf" then return node_ end
 
   -- Prune children first
-  local pruned_children = {} --: { [any]: any }
+  local pruned_children = {} --: { [unknown]: unknown }
   for v, child in pairs(node_.children) do
     -- Get subset of val_dataset reaching this child
     local subset = {}
@@ -476,7 +476,7 @@ function Tree:predict_proba(example)
   return traverse_proba(self._root, example)
 end
 
---: (self: Tree, examples: { [integer]: any }) -> { [integer]: unknown }
+--: (self: Tree, examples: { [integer]: unknown }) -> { [integer]: unknown }
 function Tree:predict_all(examples)
   local results = {}
   for i, ex in ipairs(examples) do
@@ -485,13 +485,14 @@ function Tree:predict_all(examples)
   return results
 end
 
---: (self: Tree, test_dataset: { [integer]: any }) -> number
+--: (self: Tree, test_dataset: { [integer]: unknown }) -> number
 function Tree:accuracy(test_dataset)
   local correct = 0
   local total = #test_dataset
   if total == 0 then return 1.0 end
   for _, ex in ipairs(test_dataset) do
-    if traverse(self._root, ex) == ex.label then
+    local ex_ = ex --[[:! { label: unknown, [string]: unknown }]]
+    if traverse(self._root, ex) == ex_.label then
       correct = correct + 1
     end
   end
@@ -603,7 +604,7 @@ function Forest:predict_proba(example)
   return avg
 end
 
---: (self: Forest, test_dataset: { [integer]: any }) -> number
+--: (self: Forest, test_dataset: { [integer]: unknown }) -> number
 function Forest:accuracy(test_dataset)
   local correct = 0
   local total = #test_dataset
@@ -619,7 +620,8 @@ function Forest:accuracy(test_dataset)
     for lbl, cnt in pairs(votes) do
       if cnt > best_cnt then best_lbl = lbl; best_cnt = cnt end
     end
-    if best_lbl == ex.label then
+    local ex_ = ex --[[:! { label: unknown, [string]: unknown }]]
+    if best_lbl == ex_.label then
       correct = correct + 1
     end
   end
@@ -644,7 +646,8 @@ function Forest:feature_importance()
 end
 
 -- Simple LCG RNG (no external deps)
---: (integer | nil) -> any
+--:: RngObj = { next: (self: RngObj) -> integer, float: (self: RngObj) -> number, int: (self: RngObj, integer, integer) -> integer }
+--: (integer | nil) -> RngObj
 local function make_rng(seed)
   local state = (seed or 12345)
   return {

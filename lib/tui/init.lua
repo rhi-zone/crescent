@@ -124,10 +124,9 @@ local BORDERS = {
 
 -- Widgets may be called with dot syntax (ctx) or colon syntax (self, ctx).
 -- This helper normalises both call forms and returns x, y, w, h.
---: (any, any) -> (integer, integer, integer, integer)
+--: (unknown, unknown) -> (integer, integer, integer, integer)
 local function unpack_ctx(a, b)
-  --: any
-  local ctx = (b ~= nil) and b or a
+  local ctx = ((b ~= nil) and b or a) --[[:! { x: integer, y: integer, w: integer, h: integer }]]
   return ctx.x, ctx.y, ctx.w, ctx.h
 end
 
@@ -138,13 +137,14 @@ end
 -- Text widget. Renders text at the widget position.
 -- opts.align = "left"|"center"|"right"  (default "left")
 -- opts.wrap  = bool                     (default false)
---: (string, any) -> any
+--: (string, unknown) -> unknown
 M.text = function(s, opts)
   local align = "left"
   local wrap  = false
   if opts ~= nil then
-    if opts.align ~= nil then align = opts.align end
-    if opts.wrap  ~= nil then wrap  = opts.wrap  end
+    local opts_ = opts --[[:! { align: unknown, wrap: unknown, ... }]]
+    if opts_.align ~= nil then align = opts_.align --[[:! string]] end
+    if opts_.wrap  ~= nil then wrap  = opts_.wrap  --[[:! boolean]] end
   end
 
   return {
@@ -208,16 +208,17 @@ end
 -- opts.border  = "single"|"double"|"rounded"|"none"  (default "single")
 -- opts.title   = string (shown in top border, left-aligned)
 -- opts.padding = {top, right, bottom, left}          (default all 0)
---: (any, any) -> any
+--: (unknown, unknown) -> unknown
 M.box = function(inner, opts)
   local border_name = "single"
   local title       = nil --: string | nil
   local pad_t, pad_r, pad_b, pad_l = 0, 0, 0, 0
   if opts ~= nil then
-    if opts.border  ~= nil then border_name = opts.border  end
-    if opts.title   ~= nil then title       = opts.title   end
-    if opts.padding ~= nil then
-      local p = opts.padding
+    local opts_ = opts --[[:! { border: unknown, title: unknown, padding: unknown, ... }]]
+    if opts_.border  ~= nil then border_name = opts_.border  --[[:! string]] end
+    if opts_.title   ~= nil then title       = opts_.title   --[[:! string]] end
+    if opts_.padding ~= nil then
+      local p = opts_.padding --[[:! { [integer]: integer }]]
       pad_t = p[1]; pad_r = p[2]; pad_b = p[3]; pad_l = p[4]
     end
   end
@@ -266,10 +267,15 @@ M.box = function(inner, opts)
       local inner_w = clamp(w - 2 - pad_l - pad_r, 0, w)
       local inner_h = clamp(h - 2 - pad_t - pad_b, 0, h)
 
-      if inner_w > 0 and inner_h > 0 and inner ~= nil and inner.render ~= nil then
-        parts[#parts + 1] = inner:render({
-          x = inner_x, y = inner_y, w = inner_w, h = inner_h,
-        })
+      if inner_w > 0 and inner_h > 0 and inner ~= nil then
+        local inner_ = inner --[[:! { render: ((self: unknown, unknown) -> string) | nil, ... }]]
+        local rfn_i = inner_.render
+        if rfn_i then
+          local rfn_it = rfn_i --[[:! (unknown, unknown) -> string]]
+          parts[#parts + 1] = rfn_it(inner_, {
+            x = inner_x, y = inner_y, w = inner_w, h = inner_h,
+          })
+        end
       end
 
       return table.concat(parts)
@@ -283,30 +289,34 @@ end
 
 -- Horizontal layout: divides width among children.
 -- opts.flex = {1, 2, 1}  (proportional sizing; default equal)
---: (any, any) -> any
+--: (unknown, unknown) -> unknown
 M.row = function(widgets, opts)
+  local widgets_ = widgets --[[:! { [integer]: { render: unknown }, ... }]]
   local flex = nil --: { [integer]: number, ... } | nil
-  if opts ~= nil and opts.flex ~= nil then flex = opts.flex end
+  if opts ~= nil then
+    local opts_ = opts --[[:! { flex: unknown, ... }]]
+    if opts_.flex ~= nil then flex = opts_.flex --[[:! { [integer]: number, ... }]] end
+  end
 
   return {
     render = function(a, b)
       local x, y, w, h = unpack_ctx(a, b)
-      if w <= 0 or h <= 0 or #widgets == 0 then return "" end
+      if w <= 0 or h <= 0 or #widgets_ == 0 then return "" end
 
-      local total_flex = 0
-      for i = 1, #widgets do
+      local total_flex = 0.0 --: number
+      for i = 1, #widgets_ do
         total_flex = total_flex + ((flex ~= nil and flex[i] ~= nil) and flex[i] or 1)
       end
 
       local widths = {}
       local used = 0
-      for i = 1, #widgets do
+      for i = 1, #widgets_ do
         local f = (flex ~= nil and flex[i] ~= nil) and flex[i] or 1
         local cell_w
-        if i == #widgets then
+        if i == #widgets_ then
           cell_w = w - used
         else
-          cell_w = math.floor(w * f / total_flex)
+          cell_w = math.floor(w * f / total_flex) --[[:! integer]]
         end
         widths[i] = clamp(cell_w, 0, w - used)
         used = used + widths[i]
@@ -314,14 +324,17 @@ M.row = function(widgets, opts)
 
       local parts = {}
       local cur_x = x
-      for i = 1, #widgets do
+      for i = 1, #widgets_ do
         local cw = widths[i]
         if cw > 0 then
-          local wi = widgets[i]
-          if wi ~= nil and wi.render ~= nil then
-            parts[#parts + 1] = wi:render({
-              x = cur_x, y = y, w = cw, h = h,
-            })
+          local wi = widgets_[i]
+          if wi ~= nil then
+            local wi_ = wi --[[:! { render: ((self: unknown, unknown) -> string) | nil, ... }]]
+            local rfn_w = wi_.render
+            if rfn_w then
+              local rfn_wt = rfn_w --[[:! (unknown, unknown) -> string]]
+              parts[#parts + 1] = rfn_wt(wi_, { x = cur_x, y = y, w = cw, h = h })
+            end
           end
         end
         cur_x = cur_x + cw
@@ -337,30 +350,34 @@ end
 
 -- Vertical layout: divides height among children.
 -- opts.flex = {1, 2, 1}  (proportional sizing; default equal)
---: (any, any) -> any
+--: (unknown, unknown) -> unknown
 M.col = function(widgets, opts)
+  local widgets_ = widgets --[[:! { [integer]: { render: unknown }, ... }]]
   local flex = nil --: { [integer]: number, ... } | nil
-  if opts ~= nil and opts.flex ~= nil then flex = opts.flex end
+  if opts ~= nil then
+    local opts_ = opts --[[:! { flex: unknown, ... }]]
+    if opts_.flex ~= nil then flex = opts_.flex --[[:! { [integer]: number, ... }]] end
+  end
 
   return {
     render = function(a, b)
       local x, y, w, h = unpack_ctx(a, b)
-      if w <= 0 or h <= 0 or #widgets == 0 then return "" end
+      if w <= 0 or h <= 0 or #widgets_ == 0 then return "" end
 
-      local total_flex = 0
-      for i = 1, #widgets do
+      local total_flex = 0.0 --: number
+      for i = 1, #widgets_ do
         total_flex = total_flex + ((flex ~= nil and flex[i] ~= nil) and flex[i] or 1)
       end
 
       local heights = {}
       local used = 0
-      for i = 1, #widgets do
+      for i = 1, #widgets_ do
         local f = (flex ~= nil and flex[i] ~= nil) and flex[i] or 1
         local cell_h
-        if i == #widgets then
+        if i == #widgets_ then
           cell_h = h - used
         else
-          cell_h = math.floor(h * f / total_flex)
+          cell_h = math.floor(h * f / total_flex) --[[:! integer]]
         end
         heights[i] = clamp(cell_h, 0, h - used)
         used = used + heights[i]
@@ -368,14 +385,17 @@ M.col = function(widgets, opts)
 
       local parts = {}
       local cur_y = y
-      for i = 1, #widgets do
+      for i = 1, #widgets_ do
         local ch = heights[i]
         if ch > 0 then
-          local wi = widgets[i]
-          if wi ~= nil and wi.render ~= nil then
-            parts[#parts + 1] = wi:render({
-              x = x, y = cur_y, w = w, h = ch,
-            })
+          local wi = widgets_[i]
+          if wi ~= nil then
+            local wi_ = wi --[[:! { render: ((self: unknown, unknown) -> string) | nil, ... }]]
+            local rfn_w = wi_.render
+            if rfn_w then
+              local rfn_wt = rfn_w --[[:! (unknown, unknown) -> string]]
+              parts[#parts + 1] = rfn_wt(wi_, { x = x, y = cur_y, w = w, h = ch })
+            end
           end
         end
         cur_y = cur_y + ch
@@ -391,16 +411,19 @@ end
 
 -- Wrap a widget's render output in a style function.
 -- style_fn: a function (string) -> string, e.g. ansi.bold, ansi.red
---: (any, any) -> any
+--: (unknown, unknown) -> unknown
 M.styled = function(widget, style_fn)
+  local widget_ = widget --[[:! { render: ((self: unknown, unknown) -> string) | nil, ... } | nil]]
+  local style_fn_ = style_fn --[[:! (string) -> string]]
   return {
     render = function(a, b)
-      if widget == nil or widget.render == nil then return "" end
+      if widget_ == nil or widget_.render == nil then return "" end
       -- Normalize ctx first, then pass as a plain table to avoid extra self arg
       local x, y, w, h = unpack_ctx(a, b)
       local ctx = { x = x, y = y, w = w, h = h }
-      local out = widget.render(ctx)
-      return style_fn(out)
+      local rfn_s = widget_.render --[[:! (unknown, unknown) -> string]]
+      local out = rfn_s(widget_, ctx)
+      return style_fn_(out)
     end
   }
 end
@@ -412,10 +435,13 @@ end
 -- Render a widget tree to a string using absolute-position ANSI output.
 -- x, y: top-left corner (1-indexed)
 -- w, h: available width/height
---: (any, integer, integer, integer, integer) -> string
+--: (unknown, integer, integer, integer, integer) -> string
 M.render = function(widget, x, y, w, h)
-  if widget == nil or widget.render == nil then return "" end
-  return widget:render({ x = x, y = y, w = w, h = h })
+  if widget == nil then return "" end
+  local widget_ = widget --[[:! { render: ((self: unknown, unknown) -> string) | nil, ... }]]
+  if widget_.render == nil then return "" end
+  local rfn_r = widget_.render --[[:! (unknown, unknown) -> string]]
+  return rfn_r(widget_, { x = x, y = y, w = w, h = h })
 end
 
 -- ---------------------------------------------------------------------------

@@ -9,7 +9,8 @@ M._tier = "pure"
 -- Graph object
 -- ---------------------------------------------------------------------------
 
---:: Graph = { _directed: boolean, _nodes: { [unknown]: unknown }, _adj: { [unknown]: { [unknown]: unknown } }, _in_adj: { [unknown]: { [unknown]: unknown } } | nil, _nedges: integer, ... }
+--:: GraphData = { _directed: boolean, _nodes: { [unknown]: unknown }, _adj: { [unknown]: { [unknown]: unknown } }, _in_adj: { [unknown]: { [unknown]: unknown } } | nil, _nedges: integer }
+--:: Graph = { _directed: boolean, _nodes: { [unknown]: unknown }, _adj: { [unknown]: { [unknown]: unknown } }, _in_adj: { [unknown]: { [unknown]: unknown } } | nil, _nedges: integer, has_node: (self: unknown, unknown) -> boolean, has_edge: (self: unknown, unknown, unknown) -> boolean, node_data: (self: unknown, unknown) -> unknown, edge_data: (self: unknown, unknown, unknown) -> unknown, neighbors: (self: unknown, unknown) -> { [integer]: unknown }, out_neighbors: (self: unknown, unknown) -> { [integer]: unknown }, in_neighbors: (self: unknown, unknown) -> { [integer]: unknown }, degree: (self: unknown, unknown) -> integer, out_degree: (self: unknown, unknown) -> integer, in_degree: (self: unknown, unknown) -> integer, node_count: (self: unknown) -> integer, edge_count: (self: unknown) -> integer, nodes: (self: unknown) -> ((...unknown) -> unknown), edges: (self: unknown) -> (() -> { [integer]: unknown } | nil), add_node: (self: unknown, unknown, unknown) -> unknown, add_edge: (self: unknown, unknown, unknown, unknown) -> unknown, ... }
 
 local Graph = {}
 Graph.__index = Graph
@@ -30,7 +31,7 @@ function M.new(opts)
   if directed then
     self._in_adj = {}
   end
-  return self
+  return self --[[:! Graph]]
 end
 
 -- Add a node with optional data. If the node already exists, data is updated.
@@ -242,9 +243,10 @@ end
 -- ---------------------------------------------------------------------------
 
 -- BFS from start. Returns order (array) and parent table (id -> parent_id).
---: (any, unknown) -> ({ [integer]: unknown } | nil, { [unknown]: unknown } | string | nil)
+--: (unknown, unknown) -> ({ [integer]: unknown } | nil, { [unknown]: unknown } | string | nil)
 function M.bfs(g, start)
-  if not g:has_node(start) then return nil, "start node not found" end
+  local g_ = g --[[:! Graph]]
+  if not g_:has_node(start) then return nil, "start node not found" end
   local order   = {}
   local parent  = {}
   local visited = {[start] = true}
@@ -253,7 +255,7 @@ function M.bfs(g, start)
   while head <= #queue do
     local cur = queue[head]; head = head + 1
     order[#order+1] = cur
-    local nbs = g:neighbors(cur)
+    local nbs = g_:neighbors(cur)
     for i = 1, #nbs do
       local nb = nbs[i]
       if not visited[nb] then
@@ -267,9 +269,10 @@ function M.bfs(g, start)
 end
 
 -- DFS from start. Returns order (array) and parent table (id -> parent_id).
---: (any, unknown) -> ({ [integer]: unknown } | nil, { [unknown]: unknown } | string | nil)
+--: (Graph, unknown) -> ({ [integer]: unknown } | nil, { [unknown]: unknown } | string | nil)
 function M.dfs(g, start)
-  if not g:has_node(start) then return nil, "start node not found" end
+  local g_ = g --[[:! Graph]]
+  if not g_:has_node(start) then return nil, "start node not found" end
   local order   = {}
   local parent  = {}
   local visited = {}
@@ -279,7 +282,7 @@ function M.dfs(g, start)
     if not visited[cur] then
       visited[cur]    = true
       order[#order+1] = cur
-      local nbs = g:neighbors(cur)
+      local nbs = g_:neighbors(cur)
       for i = #nbs, 1, -1 do
         local nb = nbs[i]
         if not visited[nb] then
@@ -295,34 +298,35 @@ end
 -- Dijkstra shortest path.
 -- Edge weight is taken from edge_data(u,v).weight (number), or 1 if absent.
 -- Returns (dist_table, path_array) on success, (nil, errmsg) on failure.
---: (any, unknown, unknown) -> (unknown | nil, unknown)
+--: (Graph, unknown, unknown) -> (unknown | nil, unknown)
 function M.shortest_path(g, start, target)
-  if not g:has_node(start)  then return nil, "start node not found"  end
-  if not g:has_node(target) then return nil, "target node not found" end
+  local g_ = g --[[:! Graph]]
+  if not g_:has_node(start)  then return nil, "start node not found"  end
+  if not g_:has_node(target) then return nil, "target node not found" end
 
   local INF  = math.huge
   local dist = {}
   local prev = {}
   local vis  = {}
 
-  for id in g:nodes() do dist[id] = INF end
+  for id in g_:nodes() do dist[id] = INF end
   dist[start] = 0
 
   while true do
     -- Find unvisited node with minimum distance (O(V) scan)
     local u, ud = nil, INF
-    for id in g:nodes() do
+    for id in g_:nodes() do
       if not vis[id] and dist[id] < ud then u = id; ud = dist[id] end
     end
     if u == nil then break end
     vis[u] = true
     if u == target then break end
 
-    local nbs = g:neighbors(u)
+    local nbs = g_:neighbors(u)
     for i = 1, #nbs do
       local v = nbs[i]
       if not vis[v] then
-        local edata = g:edge_data(u, v)
+        local edata = g_:edge_data(u, v)
         local w = (type(edata) == "table" and type(edata.weight) == "number")
                   and edata.weight or 1
         local nd = ud + w
@@ -349,16 +353,17 @@ end
 
 -- Topological sort (Kahn's algorithm, directed graphs only).
 -- Returns sorted array on success, (nil, errmsg) if cycle or undirected.
---: (any) -> ({ [integer]: unknown } | nil, string | nil)
+--: (Graph) -> ({ [integer]: unknown } | nil, string | nil)
 function M.topological_sort(g)
-  if not g._directed then
+  local g_ = g --[[:! Graph]]
+  if not g_._directed then
     return nil, "topological sort requires a directed graph"
   end
 
   local indegree = {}
-  for id in g:nodes() do indegree[id] = 0 end
-  for id in g:nodes() do
-    for _, nb in ipairs(g:out_neighbors(id)) do
+  for id in g_:nodes() do indegree[id] = 0 end
+  for id in g_:nodes() do
+    for _, nb in ipairs(g_:out_neighbors(id)) do
       indegree[nb] = (indegree[nb] or 0) + 1
     end
   end
@@ -374,7 +379,7 @@ function M.topological_sort(g)
     table.sort(queue)
     local u = table.remove(queue, 1)
     result[#result+1] = u
-    local nbs = g:out_neighbors(u)
+    local nbs = g_:out_neighbors(u)
     table.sort(nbs)
     for i = 1, #nbs do
       local v = nbs[i]
@@ -383,18 +388,19 @@ function M.topological_sort(g)
     end
   end
 
-  if #result ~= g:node_count() then
+  if #result ~= g_:node_count() then
     return nil, "cycle detected: graph is not a DAG"
   end
   return result
 end
 
 -- Connected components (undirected). Returns array of arrays of node ids.
---: (any) -> { [integer]: { [integer]: unknown } }
+--: (Graph) -> { [integer]: { [integer]: unknown } }
 function M.components(g)
+  local g_ = g --[[:! Graph]]
   local visited = {}
   local comps   = {}
-  for id in g:nodes() do
+  for id in g_:nodes() do
     if not visited[id] then
       local order = M.bfs(g, id)
       local comp  = {}
@@ -413,16 +419,17 @@ end
 -- Cycle detection.
 -- Directed: true if any back edge (DFS 3-color).
 -- Undirected: true if BFS finds cross-edge to visited non-parent.
---: (any) -> boolean
+--: (Graph) -> boolean
 function M.has_cycle(g)
-  if g._directed then
+  local g_ = g --[[:! Graph]]
+  if g_._directed then
     local color = {}
-    for id in g:nodes() do color[id] = 0 end
+    for id in g_:nodes() do color[id] = 0 end
 
     local visit
     visit = function(u)
       color[u] = 1
-      for _, v in ipairs(g:out_neighbors(u)) do
+      for _, v in ipairs(g_:out_neighbors(u)) do
         if color[v] == 1 then return true end
         if color[v] == 0 and visit(v) then return true end
       end
@@ -430,13 +437,13 @@ function M.has_cycle(g)
       return false
     end
 
-    for id in g:nodes() do
+    for id in g_:nodes() do
       if color[id] == 0 and visit(id) then return true end
     end
     return false
   else
     local visited = {}
-    for start in g:nodes() do
+    for start in g_:nodes() do
       if not visited[start] then
         local par   = {}
         local queue = {start}
@@ -444,7 +451,7 @@ function M.has_cycle(g)
         visited[start] = true
         while head <= #queue do
           local u = queue[head]; head = head + 1
-          for _, v in ipairs(g:neighbors(u)) do
+          for _, v in ipairs(g_:neighbors(u)) do
             if not visited[v] then
               visited[v] = true
               par[v]     = u
@@ -462,23 +469,28 @@ end
 
 -- Minimum spanning tree (Kruskal, undirected only).
 -- Returns array of {from, to, data}, or (nil, errmsg) for directed graphs.
---: (any) -> (unknown | nil, string | nil)
+--: (Graph) -> (unknown | nil, string | nil)
 function M.mst(g)
-  if g._directed then return nil, "MST requires an undirected graph" end
+  local g_ = g --[[:! Graph]]
+  if g_._directed then return nil, "MST requires an undirected graph" end
 
   -- Collect edges with weights
-  local edges = {} --: { [integer]: { from: any, to: any, data: any, weight: number } }
-  for e in g:edges() do
+  local edges = {} --: { [integer]: { from: unknown, to: unknown, data: unknown, weight: number } }
+  for e in g_:edges() do
     local w = (type(e[3]) == "table" and type(e[3].weight) == "number")
               and e[3].weight or 1
     edges[#edges+1] = {from=e[1], to=e[2], data=e[3], weight=w}
   end
-  table.sort(edges, function(a, b) return a.weight < b.weight end)
+  table.sort(edges, function(a, b)
+    local a_ = a --[[:! { weight: number }]]
+    local b_ = b --[[:! { weight: number }]]
+    return a_.weight < b_.weight
+  end)
 
   -- Union-Find with path halving + union by rank
   local uf_par  = {}
   local uf_rank = {}
-  for id in g:nodes() do uf_par[id] = id; uf_rank[id] = 0 end
+  for id in g_:nodes() do uf_par[id] = id; uf_rank[id] = 0 end
 
   local function find(x)
     while uf_par[x] ~= x do
@@ -509,8 +521,9 @@ end
 
 -- Strongly-connected components (Tarjan's algorithm, directed graphs).
 -- Returns array of arrays of node ids.
---: (any) -> { [integer]: { [integer]: unknown } }
+--: (Graph) -> { [integer]: { [integer]: unknown } }
 function M.strongly_connected(g)
+  local g_ = g --[[:! Graph]]
   local idx_ctr  = 0
   local stk      = {}
   local on_stk   = {} --: { [unknown]: boolean }
@@ -525,7 +538,7 @@ function M.strongly_connected(g)
     stk[#stk+1] = v
     on_stk[v]  = true
 
-    for _, w in ipairs(g:out_neighbors(v)) do
+    for _, w in ipairs(g_:out_neighbors(v)) do
       if idx[w] == nil then
         sc(w)
         if lowlink[w] < lowlink[v] then lowlink[v] = lowlink[w] end
@@ -546,22 +559,23 @@ function M.strongly_connected(g)
     end
   end
 
-  for id in g:nodes() do
+  for id in g_:nodes() do
     if idx[id] == nil then sc(id) end
   end
   return result
 end
 
 -- Transpose a directed graph (reverse all edges). Returns a new Graph.
---: (any) -> Graph
+--: (Graph) -> Graph
 function M.transpose(g)
-  local t = M.new({directed = g._directed}) --[[: any]]
-  for id in g:nodes() do
-    t:add_node(id, g:node_data(id))
+  local g_ = g --[[:! Graph]]
+  local t = M.new({directed = g_._directed}) --[[: any]]
+  for id in g_:nodes() do
+    t:add_node(id, g_:node_data(id))
   end
-  for id in g:nodes() do
-    for _, nb in ipairs(g:out_neighbors(id)) do
-      local edata = g:edge_data(id, nb)
+  for id in g_:nodes() do
+    for _, nb in ipairs(g_:out_neighbors(id)) do
+      local edata = g_:edge_data(id, nb)
       t:add_edge(nb, id, edata)
     end
   end

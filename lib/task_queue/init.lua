@@ -5,16 +5,21 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: HeapEntry = { id: unknown, fn: () -> unknown, priority: number, delay: number, eligible_at: number, attempts: integer, max_retries: integer, retry_delay: number, key: number, seq: integer }
+--:: Heap = { [integer]: HeapEntry | nil, ... }
+--:: QueueObj = { _heap: Heap, _active: integer, _tick: number, _seq: integer, _max_retries: integer, _retry_delay: number, _max_concurrent: integer, _listeners: { [string]: { [integer]: (...unknown) -> nil } }, _stats: { processed: integer, succeeded: integer, failed: integer, retried: integer, cancelled: integer }, _id_counter: integer, _cancelled: { [unknown]: boolean } }
+
 -- Min-heap helpers (min by key)
---: (heap: any, item: any) -> nil
+--: (heap: Heap, item: HeapEntry) -> nil
 local function heap_push(heap, item)
-  heap[#heap + 1] = item
-  local i = #heap
+  local h = heap --[[:! { [integer]: HeapEntry }]]
+  h[#h + 1] = item
+  local i = #h
   while i > 1 do
     local parent = math.floor(i / 2)
-    if heap[parent].key > heap[i].key or
-       (heap[parent].key == heap[i].key and heap[parent].seq > heap[i].seq) then
-      heap[parent], heap[i] = heap[i], heap[parent]
+    if h[parent].key > h[i].key or
+       (h[parent].key == h[i].key and h[parent].seq > h[i].seq) then
+      h[parent], h[i] = h[i], h[parent]
       i = parent
     else
       break
@@ -22,12 +27,13 @@ local function heap_push(heap, item)
   end
 end
 
---: (heap: any) -> any
+--: (heap: Heap) -> HeapEntry | nil
 local function heap_pop(heap)
-  if #heap == 0 then return nil end
-  local top = heap[1]
-  local n = #heap
-  heap[1] = heap[n]
+  local h = heap --[[:! { [integer]: HeapEntry }]]
+  if #h == 0 then return nil end
+  local top = h[1]
+  local n = #h
+  h[1] = h[n]
   heap[n] = nil
   n = n - 1
   local i = 1
@@ -36,47 +42,48 @@ local function heap_pop(heap)
     local right = i * 2 + 1
     local smallest = i
     if left <= n then
-      if heap[left].key < heap[smallest].key or
-         (heap[left].key == heap[smallest].key and heap[left].seq < heap[smallest].seq) then
+      if h[left].key < h[smallest].key or
+         (h[left].key == h[smallest].key and h[left].seq < h[smallest].seq) then
         smallest = left
       end
     end
     if right <= n then
-      if heap[right].key < heap[smallest].key or
-         (heap[right].key == heap[smallest].key and heap[right].seq < heap[smallest].seq) then
+      if h[right].key < h[smallest].key or
+         (h[right].key == h[smallest].key and h[right].seq < h[smallest].seq) then
         smallest = right
       end
     end
     if smallest == i then break end
-    heap[i], heap[smallest] = heap[smallest], heap[i]
+    h[i], h[smallest] = h[smallest], h[i]
     i = smallest
   end
   return top
 end
 
---: (heap: any) -> any
+--: (heap: Heap) -> HeapEntry | nil
 local function heap_peek(heap)
   return heap[1]
 end
 
 -- Find and remove an item by id from the heap. O(n).
---: (heap: any, id: any) -> boolean
+--: (heap: Heap, id: unknown) -> boolean
 local function heap_remove_id(heap, id)
-  local found = nil
-  for i = 1, #heap do
-    if heap[i].id == id then
+  local h = heap --[[:! { [integer]: HeapEntry }]]
+  local found = nil --: integer | nil
+  for i = 1, #h do
+    if h[i].id == id then
       found = i
       break
     end
   end
   if not found then return false end
-  local n = #heap
-  heap[found] = heap[n]
+  local n = #h
+  h[found] = h[n]
   heap[n] = nil
   -- Re-heapify: simplest correct approach: rebuild from scratch
-  local items = {}
-  for i = 1, #heap do items[i] = heap[i] end
-  for i = 1, #heap do heap[i] = nil end
+  local items = {} --: { [integer]: HeapEntry }
+  for i = 1, #h do items[i] = h[i] end
+  for i = 1, #h do heap[i] = nil end
   for _, item in ipairs(items) do
     heap_push(heap, item)
   end
@@ -84,23 +91,23 @@ local function heap_remove_id(heap, id)
 end
 
 -- Queue constructor
---: (opts: any) -> any
+--: (opts: unknown) -> QueueObj
 function M.new(opts)
-  opts = opts or {}
+  local opts_ = (opts or {}) --[[:! { max_retries: unknown, retry_delay: unknown, max_concurrent: unknown, ... }]]
   local q = {
     _heap = {},         -- min-heap of pending task entries
     _active = 0,        -- count of currently "running" tasks (sync: tracks within process())
     _tick = 0,          -- internal clock
     _seq = 0,           -- monotonic sequence for FIFO within same priority
-    _max_retries = opts.max_retries ~= nil and opts.max_retries or 3,
-    _retry_delay = opts.retry_delay ~= nil and opts.retry_delay or 0,
-    _max_concurrent = opts.max_concurrent ~= nil and opts.max_concurrent or 1,
+    _max_retries = opts_.max_retries ~= nil and (opts_.max_retries --[[:! integer]]) or 3,
+    _retry_delay = opts_.retry_delay ~= nil and (opts_.retry_delay --[[:! number]]) or 0,
+    _max_concurrent = opts_.max_concurrent ~= nil and (opts_.max_concurrent --[[:! integer]]) or 1,
     _listeners = {},    -- event -> list of callbacks
     _stats = { processed = 0, succeeded = 0, failed = 0, retried = 0, cancelled = 0 },
     _id_counter = 0,    -- for auto-generated ids
     _cancelled = {},    -- set of cancelled ids
   }
-  return setmetatable(q, { __index = M })
+  return setmetatable(q, { __index = M }) --[[:! QueueObj]]
 end
 
 -- Generate a unique id
@@ -110,31 +117,32 @@ local function gen_id(q)
 end
 
 -- Push a task onto the queue. Returns the task id.
---: (self: any, task: any) -> (any, string | nil)
+--: (self: QueueObj, task: unknown) -> (unknown, string | nil)
 function M:push(task)
   if type(task) ~= "table" then
     return nil, "task must be a table"
   end
-  if type(task.fn) ~= "function" then
+  local task_ = task --[[:! { fn: unknown, id: unknown, priority: unknown, delay: unknown, max_retries: unknown, retry_delay: unknown, ... }]]
+  if type(task_.fn) ~= "function" then
     return nil, "task.fn must be a function"
   end
-  local id = task.id ~= nil and task.id or gen_id(self)
-  local priority = task.priority ~= nil and task.priority or 0
-  local delay = task.delay ~= nil and task.delay or 0
+  local id = task_.id ~= nil and task_.id or gen_id(self)
+  local priority = task_.priority ~= nil and (task_.priority --[[:! number]]) or 0
+  local delay = task_.delay ~= nil and (task_.delay --[[:! number]]) or 0
   self._seq = self._seq + 1
   local entry = {
     id = id,
-    fn = task.fn,
+    fn = task_.fn --[[:! () -> unknown]],
     priority = priority,
     delay = delay,
     eligible_at = self._tick + delay,
     attempts = 0,
-    max_retries = task.max_retries ~= nil and task.max_retries or self._max_retries,
-    retry_delay = task.retry_delay ~= nil and task.retry_delay or self._retry_delay,
+    max_retries = task_.max_retries ~= nil and (task_.max_retries --[[:! integer]]) or self._max_retries,
+    retry_delay = task_.retry_delay ~= nil and (task_.retry_delay --[[:! number]]) or self._retry_delay,
     -- heap key = priority; seq breaks ties (FIFO)
     key = priority,
     seq = self._seq,
-  }
+  } --: HeapEntry
   heap_push(self._heap, entry)
   return id
 end
@@ -149,21 +157,22 @@ local function emit(q, event, ...)
 end
 
 -- Process up to n eligible tasks. Returns array of result records.
---: (self: any, n: integer | nil) -> any
+--: (self: QueueObj, n: integer | nil) -> unknown
 function M:process(n)
   n = n or 1
-  local results = {} --[[: { id: any, status: string, error?: any, result?: any }[] ]]
+  local results = {} --: { [integer]: unknown }
   local processed = 0
 
   -- Collect eligible entries from the heap. Since the heap may contain
   -- ineligible tasks at the front, we need to scan for eligible ones.
   -- Build a temporary list of eligible entries, then put ineligible back.
   -- To keep O(k log m) we do a full extraction pass.
-  local eligible = {}
-  local ineligible = {}
+  local eligible = {} --: { [integer]: HeapEntry }
+  local ineligible = {} --: { [integer]: HeapEntry }
 
   while #self._heap > 0 do
     local entry = heap_pop(self._heap)
+    if entry == nil then break end
     if self._cancelled[entry.id] then
       -- skip cancelled tasks silently
     elseif entry.eligible_at <= self._tick then
@@ -180,8 +189,10 @@ function M:process(n)
 
   -- Sort eligible by (key, seq) — already extracted in order but rebuild for safety
   table.sort(eligible, function(a, b)
-    if a.key ~= b.key then return a.key < b.key end
-    return a.seq < b.seq
+    local a_ = a --[[:! HeapEntry]]
+    local b_ = b --[[:! HeapEntry]]
+    if a_.key ~= b_.key then return a_.key < b_.key end
+    return a_.seq < b_.seq
   end)
 
   -- Process up to n eligible tasks
@@ -295,7 +306,7 @@ function M:peek()
 end
 
 -- Cancel a task by id. Returns true if found and cancelled, false otherwise.
---: (self: any, id: any) -> boolean
+--: (self: QueueObj, id: unknown) -> boolean
 function M:cancel(id)
   -- Check if id exists in heap (non-cancelled)
   local found = false

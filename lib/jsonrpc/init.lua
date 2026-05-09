@@ -32,12 +32,13 @@ local ERR_INTERNAL       = -32603
 -- Dispatcher (metatable object)
 -- ---------------------------------------------------------------------------
 
+--:: DispatcherObj = { _methods: { [string]: (unknown) -> unknown }, _notifs: { [string]: (unknown) -> nil }, _transport: { read: (self: unknown) -> (string | nil), write: (self: unknown, string) -> nil }, _next_id: integer, _pending: { [integer]: boolean }, method: (self: DispatcherObj, string, (unknown) -> unknown) -> nil, notify: (self: DispatcherObj, string, (unknown) -> nil) -> nil, request: (self: DispatcherObj, string, unknown) -> (unknown, unknown), send_notify: (self: DispatcherObj, string, unknown) -> nil, step: (self: DispatcherObj) -> boolean, loop: (self: DispatcherObj) -> nil }
+
 local Dispatcher = {}
 Dispatcher.__index = Dispatcher
 
 -- Internal: encode and send a message via transport.
--- self is `any` — setmetatable result; we own the layout.
---: (any, unknown) -> nil
+--: (DispatcherObj, unknown) -> nil
 local function send_msg(self, msg)
     local body, err = json.encode(msg)
     if not body then
@@ -64,8 +65,7 @@ end
 -- Internal: dispatch a single parsed request/notification.
 -- Captures two return values from handler (result + optional error descriptor).
 -- Returns a response table for requests, nil for notifications.
--- self is `any` — setmetatable result; we own the layout.
---: (any, { [string]: unknown }) -> { [string]: unknown } | nil
+--: (DispatcherObj, { [string]: unknown }) -> { [string]: unknown } | nil
 local function dispatch_one(self, msg)
     local id     = msg.id
     local method = msg.method
@@ -119,14 +119,14 @@ end
 
 -- Register a method handler.
 -- handler(params) -> result | nil, {code, message, data?}
---: (any, string, (unknown) -> unknown) -> nil
+--: (DispatcherObj, string, (unknown) -> unknown) -> nil
 function Dispatcher:method(name, handler)
     self._methods[name] = handler
 end
 
 -- Register a notification handler (no response sent).
 -- handler(params) -> nil
---: (any, string, (unknown) -> nil) -> nil
+--: (DispatcherObj, string, (unknown) -> nil) -> nil
 function Dispatcher:notify(name, handler)
     self._notifs[name] = handler
 end
@@ -134,7 +134,7 @@ end
 -- Send a request from this side. Generates an id, writes the request,
 -- then synchronously reads responses until the matching one arrives.
 -- Returns result, nil on success; nil, err_obj on error.
---: (any, string, unknown) -> (unknown, unknown)
+--: (DispatcherObj, string, unknown) -> (unknown, unknown)
 function Dispatcher:request(method, params)
     local id = self._next_id
     self._next_id = id + 1
@@ -168,14 +168,14 @@ function Dispatcher:request(method, params)
 end
 
 -- Send a notification from this side (no response expected).
---: (any, string, unknown) -> nil
+--: (DispatcherObj, string, unknown) -> nil
 function Dispatcher:send_notify(method, params)
     send_msg(self, { jsonrpc = "2.0", method = method, params = params })
 end
 
 -- Process one message from the transport.
 -- Returns true on success, false on EOF.
---: (any) -> boolean
+--: (DispatcherObj) -> boolean
 function Dispatcher:step()
     local raw = self._transport:read()
     if raw == nil then return false end
@@ -214,7 +214,7 @@ function Dispatcher:step()
 end
 
 -- Loop: process messages until transport closes.
---: (any) -> nil
+--: (DispatcherObj) -> nil
 function Dispatcher:loop()
     while self:step() do end
 end
@@ -229,12 +229,13 @@ local M = {}
 -- transport: object with read() -> string|nil and write(string) methods.
 --: (unknown) -> unknown
 function M.new(transport)
-    local d = setmetatable({}, Dispatcher)
-    d._methods   = {}
-    d._notifs    = {}
-    d._transport = transport
-    d._next_id   = 1
-    d._pending   = {}
+    local d = setmetatable({
+      _methods   = {},
+      _notifs    = {},
+      _transport = transport,
+      _next_id   = 1,
+      _pending   = {},
+    }, Dispatcher) --[[:! DispatcherObj]]
     return d
 end
 
@@ -276,21 +277,23 @@ end
 -- table_transport: in-memory transport for testing.
 -- messages_in:  array of raw JSON strings served as input (consumed in order).
 -- messages_out: array that receives written messages.
--- Parameters are `any` — caller supplies concrete arrays; layout is known.
---: (any, any) -> unknown
+-- Parameters are caller-supplied arrays; layout is known.
+--: (unknown, unknown) -> unknown
 function M.table_transport(messages_in, messages_out)
     local t   = {}
     local pos = 1
+    local msgs_in  = messages_in  --[[:! { [integer]: string }]]
 
     function t:read()
-        local msg = messages_in[pos]
+        local msg = msgs_in[pos]
         if msg == nil then return nil end
         pos = pos + 1
         return msg
     end
 
     function t:write(s)
-        messages_out[#messages_out + 1] = s
+        local out = messages_out --[[:! { [integer]: string }]]
+        out[#out + 1] = s
     end
 
     return t

@@ -12,7 +12,7 @@ local M = {}
 M._tier = "pure"
 
 --:: CompRecord = { type: string, name: string, np: integer, nn: integer, value: number }
---:: CircuitShape = { _nodes: { [string]: integer }, _node_names: { [integer]: string }, _node_count: integer, _components: { [integer]: CompRecord }, _vsources: { [integer]: CompRecord }, node: (CircuitShape, string) -> integer, _ensure_node: (CircuitShape, any) -> integer, resistor: (CircuitShape, string, any, any, number) -> CircuitShape, voltage_source: (CircuitShape, string, any, any, number) -> CircuitShape, current_source: (CircuitShape, string, any, any, number) -> CircuitShape, wire: (CircuitShape, string, any, any) -> CircuitShape, _build_mna: (CircuitShape) -> any, solve_dc: (CircuitShape) -> any, sweep: (CircuitShape, string, string, any) -> any }
+--:: CircuitShape = { _nodes: { [string]: integer }, _node_names: { [integer]: string }, _node_count: integer, _components: { [integer]: CompRecord }, _vsources: { [integer]: CompRecord }, node: (CircuitShape, string) -> integer, _ensure_node: (CircuitShape, unknown) -> integer, resistor: (CircuitShape, string, unknown, unknown, number) -> CircuitShape, voltage_source: (CircuitShape, string, unknown, unknown, number) -> CircuitShape, current_source: (CircuitShape, string, unknown, unknown, number) -> CircuitShape, wire: (CircuitShape, string, unknown, unknown) -> CircuitShape, _build_mna: (CircuitShape) -> (NumMatrix, NumVec, integer, integer, { [string]: integer }), solve_dc: (CircuitShape) -> (ResultShape | nil, string | nil), sweep: (CircuitShape, string, string, unknown) -> (unknown, string | nil) }
 --:: ResultShape = { _voltages: { [string]: number }, _currents: { [string]: number }, _power: { [string]: number }, node_voltages: { [string]: number }, branch_currents: { [string]: number } }
 --:: NumMatrix = { [integer]: { [integer]: number } }
 --:: NumVec = { [integer]: number }
@@ -138,7 +138,7 @@ function Circuit:node(name)
 end
 
 -- Get or register node by id or name
---: (CircuitShape, any) -> integer
+--: (CircuitShape, unknown) -> integer
 function Circuit:_ensure_node(n)
 	if type(n) == "number" then
 		local n_ = n --[[:! integer]]
@@ -154,7 +154,7 @@ function Circuit:_ensure_node(n)
 	return self:node(n --[[:! string]])
 end
 
---: (CircuitShape, string, any, any, number) -> CircuitShape
+--: (CircuitShape, string, unknown, unknown, number) -> CircuitShape
 function Circuit:resistor(name, np, nn, r)
 	local np_ = self:_ensure_node(np)
 	local nn_ = self:_ensure_node(nn)
@@ -164,7 +164,7 @@ function Circuit:resistor(name, np, nn, r)
 	return self
 end
 
---: (CircuitShape, string, any, any, number) -> CircuitShape
+--: (CircuitShape, string, unknown, unknown, number) -> CircuitShape
 function Circuit:voltage_source(name, np, nn, v)
 	local np_ = self:_ensure_node(np)
 	local nn_ = self:_ensure_node(nn)
@@ -175,7 +175,7 @@ function Circuit:voltage_source(name, np, nn, v)
 	return self
 end
 
---: (CircuitShape, string, any, any, number) -> CircuitShape
+--: (CircuitShape, string, unknown, unknown, number) -> CircuitShape
 function Circuit:current_source(name, np, nn, i)
 	local np_ = self:_ensure_node(np)
 	local nn_ = self:_ensure_node(nn)
@@ -186,7 +186,7 @@ function Circuit:current_source(name, np, nn, i)
 end
 
 -- Wire = 0Ω resistance (implemented as voltage source with 0V)
---: (CircuitShape, string, any, any) -> CircuitShape
+--: (CircuitShape, string, unknown, unknown) -> CircuitShape
 function Circuit:wire(name, np, nn)
 	local np_ = self:_ensure_node(np)
 	local nn_ = self:_ensure_node(nn)
@@ -198,7 +198,7 @@ end
 
 -- Build the MNA matrix. Returns A, b, size, vsource_idx_map
 -- vsource_idx_map: vsource_name -> extra variable index (1-based into vsources)
---: (CircuitShape) -> any
+--: (CircuitShape) -> (NumMatrix, NumVec, integer, integer, { [string]: integer })
 function Circuit:_build_mna()
 	local N = self._node_count    -- number of non-ground nodes
 	local Nv = #self._vsources    -- number of voltage sources / wires
@@ -266,9 +266,9 @@ end
 
 -- Solve DC operating point
 -- Returns Result object or (nil, errmsg)
---: (CircuitShape) -> any
+--: (CircuitShape) -> (ResultShape | nil, string | nil)
 function Circuit:solve_dc()
-	local mna = {self:_build_mna()} --[[:! { [integer]: any }]]
+	local mna = {self:_build_mna()} --[[:! { [integer]: unknown }]]
 	local A_ = mna[1] --[[:! NumMatrix]]
 	local b_ = mna[2] --[[:! NumVec]]
 	local sz_ = mna[3] --[[:! integer]]
@@ -343,7 +343,7 @@ end
 
 -- Parameter sweep: change a component value and solve for each
 -- comp_name: component name, param: "voltage"/"current"/"resistance", values: array
---: (CircuitShape, string, string, any) -> any
+--: (CircuitShape, string, string, unknown) -> (unknown, string | nil)
 function Circuit:sweep(comp_name, param, values)
 	local values_ = values --[[:! { [integer]: number }]]
 	-- Find the component

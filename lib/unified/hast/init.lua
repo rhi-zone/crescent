@@ -13,10 +13,10 @@
 --   hast.mdast_to_html(mdast_node) -> string
 --   hast.md_to_html(source)      -> string
 --
--- AST nodes are dynamic data with no static schema — we use `any` throughout
--- for node parameters because they are genuinely untyped trees. `any` is the
--- explicit type-system opt-out for dynamic data whose shape is guaranteed by
--- the caller (mdast.parse output).
+-- AST nodes are dynamic data with no static schema.
+-- Both node types are open records (the `...` allows any additional fields).
+--:: HastNode = { type: string, ... }
+--:: MdastNode = { type: string, ... }
 
 if not package.path:find("?/init.lua", 1, true) then
   package.path = package.path .. ";./?/init.lua"
@@ -53,20 +53,19 @@ end
 
 -- ── hast node constructors ────────────────────────────────────────────────────
 
--- Returns any: tree nodes are dynamic structures; the caller always knows the
--- shape and all downstream code treats them as any.
+-- Returns HastNode: tree nodes with the open-table structure above.
 
---: (string, any, any) -> any
+--: (string, unknown, unknown) -> HastNode
 local function el(tag, props, children)
   return { type = "element", tag = tag, props = props or {}, children = children or {} }
 end
 
---: (string) -> any
+--: (string) -> HastNode
 local function text(value)
   return { type = "text", value = value }
 end
 
---: (string) -> any
+--: (string) -> HastNode
 local function raw(value)
   return { type = "raw", value = value }
 end
@@ -76,11 +75,12 @@ end
 local transform_node   -- forward declaration
 local transform_children
 
---: (any) -> any
+--: (MdastNode) -> { [integer]: HastNode }
 transform_children = function(mdast_node)
-  if not mdast_node.children then return {} end
-  local out = {}
-  for _, child in ipairs(mdast_node.children) do
+  local children = mdast_node.children
+  if not children then return {} end
+  local out = {} --: { [integer]: HastNode }
+  for _, child in ipairs(children --[[:! { [integer]: MdastNode }]]) do
     local h = transform_node(child)
     if h then
       out[#out + 1] = h
@@ -90,7 +90,7 @@ transform_children = function(mdast_node)
 end
 
 -- Transform a table: handle thead/tbody for table rows.
---: (any) -> any
+--: (MdastNode) -> HastNode
 local function transform_table(node)
   local rows = node.children or {}
   local head_children = {}
@@ -118,7 +118,7 @@ local function transform_table(node)
   return el("table", {}, table_children)
 end
 
---: (any) -> any
+--: (MdastNode) -> HastNode | nil
 transform_node = function(node)
   local t = node.type
 
@@ -230,13 +230,13 @@ end
 
 local serialize_node  -- forward declaration
 
---: (any) -> string
+--: (unknown) -> string
 local function serialize_props(props)
   if not props then return "" end
   local parts = {}
   -- Sort for deterministic output.
   local keys = {}
-  for k in pairs(props) do keys[#keys + 1] = k end
+  for k in pairs(props --[[:! { [unknown]: unknown }]]) do keys[#keys + 1] = k end
   table.sort(keys)
   for _, k in ipairs(keys) do
     local ks = tostring(k)
@@ -250,17 +250,19 @@ local function serialize_props(props)
   return table.concat(parts)
 end
 
---: (any) -> string
+--: (unknown) -> string
 local function serialize_children(children)
-  if not children or #children == 0 then return "" end
+  if not children then return "" end
+  local children_ = children --[[:! { [integer]: HastNode }]]
+  if #children_ == 0 then return "" end
   local parts = {}
-  for _, child in ipairs(children) do
+  for _, child in ipairs(children_) do
     parts[#parts + 1] = serialize_node(child)
   end
   return table.concat(parts)
 end
 
---: (any) -> string
+--: (HastNode | nil) -> string
 serialize_node = function(node)
   if not node then return "" end
   local t = node.type
@@ -290,17 +292,17 @@ end
 
 -- ── Public API ────────────────────────────────────────────────────────────────
 
---: (any) -> any
+--: (unknown) -> unknown
 M.from_mdast = function(mdast_node)
-  return transform_node(mdast_node)
+  return transform_node(mdast_node --[[:! MdastNode]])
 end
 
---: (any) -> string
+--: (unknown) -> string
 M.to_html = function(hast_node)
-  return serialize_node(hast_node)
+  return serialize_node(hast_node --[[:! HastNode]])
 end
 
---: (any) -> string
+--: (unknown) -> string
 M.mdast_to_html = function(mdast_node)
   return M.to_html(M.from_mdast(mdast_node))
 end

@@ -20,10 +20,10 @@ local huge = math.huge
 -- max_hi = max hi in subtree rooted at this node (augmented BST invariant)
 -- ---------------------------------------------------------------------------
 
---:: ITreeNode = { lo: number, hi: number, data: any, left: ITreeNode | nil, right: ITreeNode | nil, max_hi: number }
+--:: ITreeNode = { lo: number, hi: number, data: unknown, left: ITreeNode | nil, right: ITreeNode | nil, max_hi: number }
 --:: ITreeObj = { _root: ITreeNode | nil, _n: integer }
 
---: (number, number, any) -> ITreeNode
+--: (number, number, unknown) -> ITreeNode
 local function node_new(lo, hi, data)
   return { lo = lo, hi = hi, data = data, left = nil, right = nil, max_hi = hi }
 end
@@ -48,7 +48,7 @@ end
 -- BST insert (by lo, then hi as tiebreak)
 -- ---------------------------------------------------------------------------
 
---: (ITreeNode | nil, number, number, any) -> ITreeNode
+--: (ITreeNode | nil, number, number, unknown) -> ITreeNode
 local function bst_insert(root, lo, hi, data)
   if root == nil then
     return node_new(lo, hi, data)
@@ -73,7 +73,7 @@ local function find_min(n)
   return n
 end
 
---: (ITreeNode | nil, number, number, any, { [integer]: boolean }) -> (ITreeNode | nil, { [integer]: boolean })
+--: (ITreeNode | nil, number, number, unknown, { [integer]: boolean }) -> (ITreeNode | nil, { [integer]: boolean })
 local function bst_delete(root, lo, hi, data, removed)
   if root == nil then return nil, removed end
   local new_left, new_right --: ITreeNode | nil
@@ -212,7 +212,7 @@ end
 -- In-order traversal
 -- ---------------------------------------------------------------------------
 
---: (node: ITreeNode | nil, fn: (number, number, any) -> nil) -> nil
+--: (node: ITreeNode | nil, fn: (number, number, unknown) -> nil) -> nil
 local function each_inorder(node, fn)
   if node == nil then return end
   each_inorder(node.left, fn)
@@ -242,14 +242,14 @@ function M.tree()
   return setmetatable({ _root = nil, _n = 0 }, Tree)
 end
 
---: (self: ITreeObj, lo: number, hi: number, data: any) -> nil
+--: (self: ITreeObj, lo: number, hi: number, data: unknown) -> nil
 function Tree:insert(lo, hi, data)
   self._root = bst_insert(self._root, lo, hi, data)
   self._n = self._n + 1
 end
 
 -- Returns true if deleted, false if not found.
---: (self: ITreeObj, lo: number, hi: number, data: any) -> boolean
+--: (self: ITreeObj, lo: number, hi: number, data: unknown) -> boolean
 function Tree:delete(lo, hi, data)
   local removed = {} --: { [integer]: boolean }
   removed[1] = false
@@ -286,7 +286,7 @@ function Tree:contained(lo, hi)
 end
 
 -- Nearest interval to point. Returns {lo, hi, data} or nil.
---: (self: ITreeObj, point: number) -> { lo: number, hi: number, data: any } | nil
+--: (self: ITreeObj, point: number) -> { lo: number, hi: number, data: unknown } | nil
 function Tree:nearest(point)
   local best = nearest_walk(self._root, point, { nil, nil })
   if best[1] == nil then return nil end
@@ -295,7 +295,7 @@ function Tree:nearest(point)
 end
 
 -- In-order traversal: calls fn(lo, hi, data) for each interval in sorted order.
---: (self: ITreeObj, fn: (number, number, any) -> nil) -> nil
+--: (self: ITreeObj, fn: (number, number, unknown) -> nil) -> nil
 function Tree:each(fn)
   each_inorder(self._root, fn)
 end

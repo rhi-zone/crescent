@@ -24,7 +24,7 @@ local function validate_cap_decl(decl, ctx)
 	if type(decl) ~= "table" then
 		return nil, ctx .. ": decl must be a table"
 	end
-	local decl_t = decl --: any
+	local decl_t = decl --[[:! { type: unknown, ... }]]
 	if type(decl_t.type) ~= "string" then
 		return nil, ctx .. ": decl.type must be a string"
 	end
@@ -50,9 +50,9 @@ end
 -- Resolve effective caps for an action by merging pack-level caps with
 -- action-level caps. Action-level wins on name collision.
 -- Returns the merged caps table (always a table, never nil).
---: (unknown, unknown) -> { [string]: any }
+--: (unknown, unknown) -> { [string]: { type: string, ... } }
 local function resolve_action_caps(action_caps, pack_caps)
-	local out = {} --: { [string]: any }
+	local out = {} --: { [string]: { type: string, ... } }
 	if type(pack_caps) == "table" then
 		for k, v in pairs(pack_caps) do out[k] = --[[:! { type: string, ... }]] v end
 	end
@@ -64,9 +64,9 @@ end
 
 -- Validate cap declarations and exec field on an action, after pack-level
 -- caps have been merged in. Returns true on success, or nil, errmsg.
---: (unknown, { [string]: any }, string, integer) -> (boolean | nil, string | nil)
+--: (unknown, { [string]: { type: string, ... } }, string, integer) -> (boolean | nil, string | nil)
 local function validate_action(action, effective_caps, alias_id, action_idx)
-	local action_t = --[[:! { exec: any, ... }]] action
+	local action_t = --[[:! { exec: unknown, ... }]] action
 	-- An action may declare no caps inline; effective_caps may still be empty
 	-- if the pack also declared none. In that case there's nothing to dispatch
 	-- and the action is treated as a no-op container (matches prior behavior:
@@ -85,7 +85,7 @@ local function validate_action(action, effective_caps, alias_id, action_idx)
 			"alias %s action %d: caps present but exec is not a table",
 			alias_id, action_idx)
 	end
-	local exec_t = action_t.exec --: any
+	local exec_t = action_t.exec --[[:! { cap: unknown, ... }]]
 	if type(exec_t.cap) ~= "string" then
 		return nil, string.format(
 			"alias %s action %d: exec.cap must be a string",
@@ -136,10 +136,10 @@ local function flatten_pack(pack, pack_name, warn_fn)
 		end
 		return {}, meta
 	end
-	local aliases = pack_t.aliases or {}
+	local aliases = (pack_t.aliases or {}) --[[:! { [integer]: unknown }]]
 	local result  = {}
 	for idx, alias in ipairs(aliases) do
-		local alias_t = alias --: any
+		local alias_t = alias --[[:! { id: unknown, actions: unknown, ... }]]
 		local alias_id = tostring(alias_t.id or idx)
 		-- Resolve and validate each action: merge pack-level caps with
 		-- action-level caps (action wins), then validate. Mutate the action
@@ -147,8 +147,8 @@ local function flatten_pack(pack, pack_name, warn_fn)
 		local actions = alias_t.actions
 		local valid = true
 		if type(actions) == "table" then
-			for action_idx, action in ipairs(actions) do
-				local action_t = action --: any
+			for action_idx, action in ipairs(actions --[[:! { [integer]: unknown }]]) do
+				local action_t = action --[[:! { caps: unknown, ... }]]
 				local effective = resolve_action_caps(action_t.caps, pack_caps)
 				local ok, err = validate_action(action, effective, alias_id, action_idx)
 				if not ok then
@@ -175,11 +175,11 @@ end
 
 -- load_builtin(self_cap, stdout_cap) -> alias[], pack_meta[]
 function M.load_builtin(self_cap, stdout_cap)
-	local cap = self_cap --: any
+	local cap = self_cap --[[:! { entries: () -> unknown, entry: (string) -> unknown }]]
 	local all_aliases = {}
 	local all_meta    = {}
 
-	local stdout_t = stdout_cap --: any
+	local stdout_t = stdout_cap --[[:! { write: (string) -> nil } | nil]]
 	local warn_fn = stdout_t and function(msg) stdout_t.write(msg) end or nil
 
 	local entries = cap.entries()
@@ -211,8 +211,8 @@ function M.load_user(fs_cap, stdout_cap)
 
 	if not fs_cap then return all_aliases, all_meta end
 
-	local cap = fs_cap --: any
-	local stdout_t = stdout_cap --: any
+	local cap = fs_cap --[[:! { list: () -> unknown, read: (string) -> unknown }]]
+	local stdout_t = stdout_cap --[[:! { write: (string) -> nil } | nil]]
 	local warn_fn = stdout_t and function(msg) stdout_t.write(msg) end or nil
 	local files = cap.list()
 	if not files then return all_aliases, all_meta end
@@ -244,7 +244,7 @@ function M.merge(builtin_aliases, user_aliases)
 	local anon_by_idx = {}
 
 	for _, a in ipairs(builtin_aliases) do
-		local a_t = a --: any
+		local a_t = a --[[:! { id: unknown, ... }]]
 		local id = a_t.id
 		if id then
 			local id_s = tostring(id)
@@ -256,7 +256,7 @@ function M.merge(builtin_aliases, user_aliases)
 	end
 
 	for _, a in ipairs(user_aliases) do
-		local a_t = a --: any
+		local a_t = a --[[:! { id: unknown, ... }]]
 		local id = a_t.id
 		if id then
 			local id_s = tostring(id)

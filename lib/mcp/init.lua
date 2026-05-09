@@ -26,11 +26,13 @@ local LOG_LEVELS = {
 -- Server (metatable object)
 -- ---------------------------------------------------------------------------
 
+--:: ServerObj = { _dispatcher: unknown, _name: string, _version: string, _tools: { [string]: unknown }, _resources: { [string]: unknown }, _resource_templates: { [string]: unknown }, _prompts: { [string]: unknown }, _completions: { [string]: unknown }, _log_level: string }
+
 local Server = {}
 Server.__index = Server
 
 -- Register a tool.
---: (any, string, { description: string, input_schema: unknown, handler: (unknown) -> unknown }) -> nil
+--: (ServerObj, string, { description: string, input_schema: unknown, handler: (unknown) -> unknown }) -> nil
 function Server:tool(name, opts)
     self._tools[name] = {
         name = name,
@@ -41,7 +43,7 @@ function Server:tool(name, opts)
 end
 
 -- Register a static resource (exact URI match).
---: (any, string, { name?: string, description: string, handler: (string, unknown) -> unknown }) -> nil
+--: (ServerObj, string, { name?: string, description: string, handler: (string, unknown) -> unknown }) -> nil
 function Server:resource(uri, opts)
     self._resources[uri] = {
         uri = uri,
@@ -52,7 +54,7 @@ function Server:resource(uri, opts)
 end
 
 -- Register a resource template (URI template pattern).
---: (any, string, { name?: string, description: string, handler: (string, unknown) -> unknown }) -> nil
+--: (ServerObj, string, { name?: string, description: string, handler: (string, unknown) -> unknown }) -> nil
 function Server:resource_template(uri_template, opts)
     self._resource_templates[uri_template] = {
         uriTemplate = uri_template,
@@ -63,7 +65,7 @@ function Server:resource_template(uri_template, opts)
 end
 
 -- Register a prompt.
---: (any, string, { description: string, arguments: unknown, handler: (unknown) -> unknown }) -> nil
+--: (ServerObj, string, { description: string, arguments: unknown, handler: (unknown) -> unknown }) -> nil
 function Server:prompt(name, opts)
     self._prompts[name] = {
         name = name,
@@ -74,27 +76,29 @@ function Server:prompt(name, opts)
 end
 
 -- Register a completion handler for an argument name.
---: (any, string, (unknown) -> unknown) -> nil
+--: (ServerObj, string, (unknown) -> unknown) -> nil
 function Server:completion(key, handler)
     self._completions[key] = handler
 end
 
 -- Send a log notification to the client.
 -- Respects the minimum log level set by the client via logging/setLevel.
---: (any, string, string, unknown) -> nil
+--: (ServerObj, string, string, unknown) -> nil
 function Server:log(level, message, data)
     local level_n = LOG_LEVELS[level] or 7
     local min_n = LOG_LEVELS[self._log_level] or 7
     if level_n > min_n then return end
     local params = { level = level, logger = self._name, data = message }
     if data ~= nil then params.data = data --[[:! string ]] end
-    self._dispatcher:send_notify("notifications/message", params)
+    local disp = self._dispatcher --[[:! { send_notify: (self: unknown, string, unknown) -> nil, loop: (self: unknown) -> nil, method: (self: unknown, string, (unknown) -> unknown) -> nil, notify: (self: unknown, string, (unknown) -> nil) -> nil, ... }]]
+    disp:send_notify("notifications/message", params)
 end
 
 -- Start the server loop (delegates to jsonrpc dispatcher).
---: (any) -> nil
+--: (ServerObj) -> nil
 function Server:listen()
-    self._dispatcher:loop()
+    local disp = self._dispatcher --[[:! { send_notify: (self: unknown, string, unknown) -> nil, loop: (self: unknown) -> nil, method: (self: unknown, string, (unknown) -> unknown) -> nil, notify: (self: unknown, string, (unknown) -> nil) -> nil, ... }]]
+    disp:loop()
 end
 
 -- ---------------------------------------------------------------------------
@@ -131,21 +135,22 @@ end
 local M = {}
 
 -- Create an MCP server.
---: ({ name: string, version: string, transport: unknown }) -> any
+--: ({ name: string, version: string, transport: unknown }) -> unknown
 function M.server(opts)
     local transport = opts.transport or jsonrpc.stdio_transport()
-    local d = jsonrpc.new(transport) --[[:! { method: (any, string, (unknown) -> unknown) -> nil, notify: (any, string, (unknown) -> nil) -> nil, send_notify: (any, string, unknown) -> nil, loop: (any) -> nil } ]]
+    local d = jsonrpc.new(transport) --[[:! { method: (self: unknown, string, (unknown) -> unknown) -> nil, notify: (self: unknown, string, (unknown) -> nil) -> nil, send_notify: (self: unknown, string, unknown) -> nil, loop: (self: unknown) -> nil, ... } ]]
 
-    local s = setmetatable({}, Server)
-    s._dispatcher = d
-    s._name = opts.name
-    s._version = opts.version
-    s._tools = {}
-    s._resources = {}
-    s._resource_templates = {}
-    s._prompts = {}
-    s._completions = {}
-    s._log_level = "debug"
+    local s = setmetatable({
+      _dispatcher          = d,
+      _name                = opts.name,
+      _version             = opts.version,
+      _tools               = {},
+      _resources           = {},
+      _resource_templates  = {},
+      _prompts             = {},
+      _completions         = {},
+      _log_level           = "debug",
+    }, Server) --[[:! ServerObj]]
 
     -- ── initialize ──────────────────────────────────────────────────────
     d:method("initialize", function(_params)
