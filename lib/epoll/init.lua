@@ -178,20 +178,22 @@ epoll.add = function (self, fd, on_read, close, weak)
 	ep.rets[fd] = { write = write, remove = remove }
 	if weak then ep.weak[fd] = true
 	else ep.count = ep.count + 1 end
-	return write, remove
+	return write, remove, nil
 end
 mod.add = epoll.add
 
 --: (epoll, number, (string) -> nil, (() -> nil) | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil)
 epoll.modify = function (self, fd, on_read, close)
-	if not self.read_cbs[fd] then return nil, nil, "epoll: error: not polling fd: " .. fd end
+	local fd_ = fd --[[:! integer]]
+	if not self.read_cbs[fd_] then return nil, nil, "epoll: error: not polling fd: " .. fd_ end
 	local on_read_fn = on_read --[[:! (string) -> nil]]
 	local fninfo = debug.getinfo(on_read_fn)
-	self.read_cbs[fd] = (fninfo.nparams > 0 or fninfo.isvararg) and read_cb(fd, on_read_fn) or on_read_fn
-	self.close_cbs[fd] = close
-	local rets = self.rets[fd]
+	local nparams = fninfo.nparams --[[:! integer]]
+	self.read_cbs[fd_] = (nparams > 0 or fninfo.isvararg) and read_cb(fd_, on_read_fn) or on_read_fn
+	self.close_cbs[fd_] = close
+	local rets = self.rets[fd_]
 	--[[@diagnostic disable-next-line: need-check-nil]]
-	return rets.write, rets.remove
+	return rets.write, rets.remove, nil
 end
 
 --: (epoll) -> nil
@@ -227,7 +229,7 @@ mod.wait = epoll.wait
 --[[loops forever]]
 epoll.loop = function (self)
 	while self.count > 0 do
-		local ok, err = pcall(self.wait, self)
+		local ok, err = pcall(epoll.wait, self)
 		if not ok then
 			if type(err) == "string" and err:find("interrupted!", 1, true) then return end
 			error(err, 0)

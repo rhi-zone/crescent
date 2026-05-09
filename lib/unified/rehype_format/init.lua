@@ -76,8 +76,7 @@ local function format_children(node, depth, indent, in_pre)
   node.children = new_children
 end
 
---: (any, number, string, boolean) -> nil
--- (any, integer, string, boolean) -> nil
+--: (any, integer, string, boolean) -> nil
 format_node = function(node, depth, indent, in_pre)
   if node.type ~= "element" then return end
 

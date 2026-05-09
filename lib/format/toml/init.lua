@@ -999,7 +999,7 @@ local function path_to_string(keys)
   return table.concat(parts, "\0")
 end
 
---: (string) -> (table | nil, string | nil)
+--: (string) -> ({ [string]: unknown } | nil, string | nil)
 --- Decode a TOML string into a Lua table.
 -- @param str string: TOML input
 -- @return table|nil: parsed result, or nil on error
@@ -1130,7 +1130,7 @@ function M.decode(str)
       if not ok2 then return nil, e2 end
       skip_ws(p)
       local val, e3 = parse_value(p)
-      if val == nil and e3 then return nil, e3 end
+      if val == nil and e3 then return nil, e3 --[[:! string | nil]] end
 
       -- Set value at dotted key path within current table
       local target = current

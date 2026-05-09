@@ -163,7 +163,7 @@ function Chan:recv()
     -- Closed while waiting.
     return nil, false
   end
-  return value, ok
+  return value, ok --[[:! boolean]]
 end
 
 -- ── close ────────────────────────────────────────────────────────────────────

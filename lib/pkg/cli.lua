@@ -95,6 +95,7 @@ end
 function M.parse_args(argv)
 	local result_command = nil --: string | nil
 	local result_args = {} --: { [integer]: string }
+	--: ParsedArgs
 	local result = {
 		command    = result_command,
 		args       = result_args,
@@ -109,7 +110,7 @@ function M.parse_args(argv)
 		workspace  = false,
 		registry   = DEFAULT_REGISTRY,
 		jobs       = 0,
-	} --: ParsedArgs
+	}
 
 	local i = 0
 	-- argv may be 0-indexed (arg table from luajit) or 1-indexed

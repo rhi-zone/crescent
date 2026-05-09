@@ -514,8 +514,9 @@ M.open = function(path, time_fn)
 	math.randomseed(time_fn())
 	local db, err = sqlite.open(path)
 	if not db then return nil, err end
+	local db_ = db --[[:! { db: cdata, execute: (self: unknown, string, ...unknown) -> (boolean | nil, string | nil), ... }]]
 	-- Enable foreign keys and create schema.
-	local ok, serr = db:execute(SCHEMA)
+	local ok, serr = db_:execute(SCHEMA)
 	if not ok then return nil, serr end
 	return setmetatable({ _db = db, _time_fn = time_fn }, db_mt)
 end

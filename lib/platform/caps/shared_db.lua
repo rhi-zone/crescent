@@ -220,8 +220,9 @@ end
 function M.setup_schema(path, schema)
 	local db_mod = require("lib.platform.caps.db")
 	--:: DbCap = { execute: (string) -> (boolean | nil, string | nil), close: () -> (), ... }
-	local cap, err = db_mod.db_cap(path, { allow_write = true }) --: (DbCap | nil, string | nil)
-	if not cap then return nil, err end
+	local cap_raw, err = db_mod.db_cap(path, { allow_write = true })
+	if not cap_raw then return nil, err end
+	local cap = cap_raw --[[:! DbCap]]
 
 	for _, tbl in ipairs(schema) do
 		local base = "_" .. tbl.name

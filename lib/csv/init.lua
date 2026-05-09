@@ -292,11 +292,12 @@ end
 --: ({ [integer]: { [integer]: unknown } }, { separator: string|nil, quote: string|nil, line_ending: string|nil, always_quote: boolean|nil }|nil) -> string
 function M.encode(rows, opts)
   local line_ending = ((opts and opts.line_ending) or "\n") --[[:! string]]
+  --: { separator: string|nil, quote: string|nil, always_quote: boolean|nil }
   local row_opts = {
     separator    = opts and opts.separator,
     quote        = opts and opts.quote,
     always_quote = opts and opts.always_quote,
-  } --: { separator: string|nil, quote: string|nil, always_quote: boolean|nil }
+  }
 
   local lines = {}
   for i = 1, #rows do
@@ -315,11 +316,12 @@ end
 --: ({ [integer]: { [string]: unknown } }, { [integer]: string }, { separator: string|nil, quote: string|nil, line_ending: string|nil, always_quote: boolean|nil }|nil) -> string
 function M.encode_records(records, keys, opts)
   local line_ending = ((opts and opts.line_ending) or "\n") --[[:! string]]
+  --: { separator: string|nil, quote: string|nil, always_quote: boolean|nil }
   local row_opts = {
     separator    = opts and opts.separator,
     quote        = opts and opts.quote,
     always_quote = opts and opts.always_quote,
-  } --: { separator: string|nil, quote: string|nil, always_quote: boolean|nil }
+  }
 
   local lines = {}
   lines[1] = M.encode_row(keys, row_opts)
