@@ -118,9 +118,7 @@ local col_read = {
 
 -- ── parameter binding ─────────────────────────────────────────────────────────
 
---[[@param stmt sqlite_stmt_c]]
---[[@param params table]]
---[[@param length integer required because values may be nil]]
+--: (cdata, { [integer]: any }, integer) -> nil
 local function bind(stmt, params, length)
 	for i = 1, length do
 		local x = params[i]
@@ -153,13 +151,11 @@ end
 
 -- ── database ──────────────────────────────────────────────────────────────────
 
---[[@class sqlite]]
---[[@field db sqlite3*[1] ]]
 local sqlite = {}
 sqlite.__index = sqlite
 mod.sqlite = sqlite
 
---[[@return sqlite? database, string? error]] --[[@param path string]]
+--: (self: { __index: unknown, ... }, string) -> ({ db: cdata, ... } | nil, string | nil)
 sqlite.open = function(self, path)
 	local db = ffi.new("sqlite3 *[1]")
 	if sqlite_ffi.sqlite3_open(path, db) ~= 0 then
@@ -168,19 +164,19 @@ sqlite.open = function(self, path)
 	return setmetatable({ db = db }, self)
 end
 
---[[@return sqlite? database, string? error]] --[[@param path string]]
+--: (string) -> ({ db: cdata, ... } | nil, string | nil)
 mod.open = function(path) return sqlite:open(path) end
 
 sqlite.close = function(self) sqlite_ffi.sqlite3_close_v2(self.db[0]) end
 
---[[@return integer]]
+--: (self: { db: cdata, ... }) -> number | nil
 sqlite.last_insert_rowid = function(self)
 	return tonumber(sqlite_ffi.sqlite3_last_insert_rowid(self.db[0]))
 end
 sqlite.get_autocommit = function(self)
 	return sqlite_ffi.sqlite3_get_autocommit(self.db[0]) ~= 0
 end
---[[@return integer]]
+--: (self: { db: cdata, ... }) -> number | nil
 sqlite.changes = function(self)
 	return tonumber(sqlite_ffi.sqlite3_changes64(self.db[0]))
 end
@@ -189,7 +185,7 @@ local function db_errmsg(self)
 	return ffi_any.string(sqlite_ffi_any.sqlite3_errmsg(self.db[0]))
 end
 
---[[@return true? success, string? error]] --[[@param sql string]] --[[@param ... number|string|boolean?]]
+--: (self: { db: cdata, ... }, string, ...number | string | boolean | nil) -> (boolean | nil, string | nil)
 sqlite.execute = function(self, sql, ...)
 	local c_sql = sql
 	local next_sql = ffi.new("const char *[1]")
@@ -219,7 +215,7 @@ end
 -- Signals error as: nil, "sqlite: <message>"
 -- NOTE: the iterator returns nil for a NULL column; since done is also nil, keep a
 -- non-nullable sentinel column first if any column may be NULL (SELECT 1, col ...).
---[[@return (fun():...unknown)? iter, string? error]] --[[@param sql string]] --[[@param ... number|string|boolean?]]
+--: (self: { db: cdata, ... }, string, ...number | string | boolean | nil) -> (function | nil, string | nil)
 sqlite.query = function(self, sql, ...)
 	local stmt_ptr = ffi.new("sqlite3_stmt *[1]")
 	if sqlite_ffi.sqlite3_prepare_v2(self.db[0], sql, #sql + 1, stmt_ptr, nil) ~= 0 then
@@ -257,9 +253,6 @@ end
 -- stmt:rows(...)   → iterator           (SELECT; same semantics as db:query)
 -- stmt:close()
 
---[[@class sqlite_stmt]]
---[[@field _stmt sqlite3_stmt*]]
---[[@field _db sqlite]]
 local stmt_mt = {}
 stmt_mt.__index = stmt_mt
 
@@ -303,7 +296,7 @@ stmt_mt.rows = function(self, ...)
 	end
 end
 
---[[@return sqlite_stmt? stmt, string? err]] --[[@param sql string]]
+--: (self: { db: cdata, ... }, string) -> ({ _stmt: cdata, _db: unknown, ... } | nil, string | nil)
 sqlite.prepare = function(self, sql)
 	local stmt_ptr = ffi.new("sqlite3_stmt *[1]")
 	if sqlite_ffi.sqlite3_prepare_v2(self.db[0], sql, #sql + 1, stmt_ptr, nil) ~= 0 then
@@ -313,13 +306,6 @@ sqlite.prepare = function(self, sql)
 end
 
 -- ── schema metadata ───────────────────────────────────────────────────────────
-
---[[@class sqlite_table]]
---[[@field type "table"|"index"|"view"|"trigger"]]
---[[@field name string]]
---[[@field table_name string]]
---[[@field root_page integer]]
---[[@field sql string]]
 
 local table_keyorder = { "type", "name", "table_name", "root_page", "sql" }
 
