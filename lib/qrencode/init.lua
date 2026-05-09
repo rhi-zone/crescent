@@ -82,7 +82,7 @@ end
 -- Return the mode for the given string `str`.
 -- See table 2 of the spec. We only support mode 1, 2 and 4.
 -- That is: numeric, alaphnumeric and binary.
---[[@return integer]] --[[@param str string]]
+--: (str: string) -> integer
 local get_mode = function (str)
 	if match(str, "^[0-9]+$") then return 1
 	elseif match(str, "^[0-9A-Z $%%*./:+-]+$") then return 2
@@ -122,7 +122,7 @@ local capacity = {
 --- Return the smallest version for this codeword. If `requested_ec_level` is supplied,
 --- then the ec level (LMQH - 1, 2, 3, 4) must be at least the requested level.
 -- mode = 1, 2, 4, 8
---[[@param len integer]] --[[@param mode integer]] --[[@param requested_ec_level? integer]]
+--: (len: integer, mode: integer, requested_ec_level: integer | nil) -> (integer, integer)
 local get_version_eclevel = function (len, mode, requested_ec_level)
 	local local_mode = mode
 	if mode == 4 then local_mode = 3
@@ -172,7 +172,7 @@ end
 
 -- Return a bit string of 0s and 1s that includes the length of the code string.
 -- The modes are numeric = 1, alphanumeric = 2, binary = 4, and japanese = 8
---[[@param str string]] --[[@param version integer]] --[[@param mode integer]]
+--: (str: string, version: integer, mode: integer) -> string
 local get_length = function (str, version, mode)
 	local i = mode
 	if mode == 4 then i = 3
@@ -192,7 +192,7 @@ end
 --- If the `requested_ec_level` or the `mode` are provided, this will be used if possible.
 --- The mode depends on the characters used in the string `str`. It seems to be
 --- possible to split the QR code to handle multiple modes, but we don't do that.
---[[@param str string]] --[[@param requested_ec_level? integer]] --[[@param mode? integer]]
+--: (str: string, requested_ec_level: integer | nil, mode: integer | nil) -> (integer, integer, string, integer, string)
 local get_version_eclevel_mode_bistringlength = function (str, requested_ec_level, mode)
 	local local_mode
 	if mode then
@@ -230,7 +230,7 @@ local asciitbl = {
 	}
 
 -- Return a binary representation of the numeric string `str`. This must contain only digits 0-9.
---[[@param str string]]
+--: (str: string) -> string
 local encode_string_numeric = function (str)
 	local bitstring = ""
 	--: integer
@@ -246,7 +246,7 @@ end
 
 -- Return a binary representation of the alphanumeric string `str`. This must contain only
 -- digits 0-9, uppercase letters A-Z, space and the following chars: $%*./:+-.
---[[@param str string]]
+--: (str: string) -> string
 local encode_string_ascii = function (str)
 	local bitstring = ""
 	--: integer
@@ -272,7 +272,7 @@ end
 -- Return a bitstring representing string str in binary mode.
 -- We don't handle UTF-8 in any special way because we assume the
 -- scanner recognizes UTF-8 and displays it correctly.
---[[@param str string]]
+--: (str: string) -> string
 local encode_string_binary = function (str)
 	local ret = {}
 	_ = gsub(str, ".", function(x)
@@ -569,7 +569,7 @@ local remainder = {0, 7, 7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 4
 --[[The given data can be a string of 0s and 1s (with #string mod 8 == 0).]]
 --[[Alternatively the data can be a table of codewords. The number of codewords]]
 --[[must match the capacity of the qr code.]]
---[[@param version integer]] --[[@param ec_level integer]] --[[@param data string]]
+--: (version: integer, ec_level: integer, data: string) -> string
 local arrange_codewords_and_calculate_ec = function (version, ec_level, data)
 	if type(data)=="table" then
 		local tmp = ""
@@ -649,7 +649,7 @@ end
 --[[To prepare the _empty_, we add positioning, alingment and timing patters.]]
 
 --[[### Positioning patterns ###]]
---[[@param tab_x (-2|2)[][] ]]
+--: (tab_x: { [integer]: { [integer]: integer } }) -> nil
 local add_position_detection_patterns = function (tab_x)
 	local size = #tab_x
 	-- allocate quite zone in the matrix area
@@ -691,7 +691,7 @@ end
 
 --[[### Timing patterns ###]]
 --[[The timing patterns (two) are the dashed lines between two adjacent positioning patterns on row/column 7.]]
---[[@param tab_x (-2|2)[][] ]]
+--: (tab_x: { [integer]: { [integer]: integer } }) -> nil
 local add_timing_pattern = function (tab_x)
 	local line, col
 	line = 7
@@ -729,7 +729,7 @@ local alignment_pattern = {
 --[[    X X X]]
 --[[    X   X]]
 --[[    XXXXX]]
---[[@param tab_x (-2|2)[][] ]]
+--: (tab_x: { [integer]: { [integer]: integer } }) -> nil
 local add_alignment_pattern = function (tab_x)
 	local version = (#tab_x - 17) / 4
 	local ap = alignment_pattern[version]
@@ -786,7 +786,7 @@ local typeinfo = {
 }
 
 --[[The typeinfo is a mixture of mask and ec level information and is added twice to the qr code, one horizontal, one vertical.]]
---[[@param matrix (-2|2)[][] ]] --[[@param ec_level integer]] --[[@param mask integer]]
+--: (matrix: { [integer]: { [integer]: integer } }, ec_level: integer, mask: integer) -> nil
 local add_typeinfo_to_matrix = function (matrix, ec_level, mask)
 	local ec_mask_type = typeinfo[ec_level][mask]
 	local bit
@@ -828,7 +828,7 @@ local version_information = {"001010010011111000", "001111011010000100", "100110
 	"110100001101001001", "011101000010101001", "001001100101011001", "100000101010111001", "100101100011000101" }
 
 --[[Versions 7 and above need two bitfields with version information added to the code]]
---[[@param matrix (-2|2)[][] ]] --[[@param version integer]]
+--: (matrix: { [integer]: { [integer]: integer } }, version: integer) -> nil
 local add_version_information = function (matrix, version)
 	if version < 7 then return end
 	local size = #matrix
@@ -856,7 +856,7 @@ local add_version_information = function (matrix, version)
 end
 
 --[[Now it's time to use the methods above to create a prefilled matrix for the given mask]]
---[[@param version integer]] --[[@param ec_level integer]] --[[@param mask integer]]
+--: (version: integer, ec_level: integer, mask: integer) -> { [integer]: { [integer]: integer } }
 local prepare_matrix_with_mask = function (version, ec_level, mask)
 	local size
 	local tab_x = {}
@@ -887,8 +887,7 @@ end
 --[[Return 1 (black) or -1 (blank) depending on the mask, value and position.]]
 --[[Parameter mask is 0-7 (-1 for "no mask"). x and y are 1-based coordinates,]]
 --[[1, 1 = upper left. tonumber(value) must be 0 or 1.]]
---[[@return -1|1]]
---[[@param mask integer]] --[[@param x integer]] --[[@param y integer]] --[[@param value "0"|"1"]]
+--: (mask: integer, x: integer, y: integer, value: string) -> number
 local get_pixel_with_mask = function (mask, x, y, value)
 	x = x - 1
 	y = y - 1
@@ -958,7 +957,7 @@ local get_next_free_positions = function (matrix, x, y, dir, byte)
 end
 
 --[[Add the data string (0s and 1s) to the matrix for the given mask.]]
---[[@param matrix (-1|1)[][] ]] --[[@param data string]] --[[@param mask integer]]
+--: (matrix: { [integer]: { [integer]: unknown, ... }, ... }, data: string, mask: integer) -> nil
 local add_data_to_matrix = function (matrix, data, mask)
 	local size = #matrix
 	local x, y, positions
@@ -966,7 +965,7 @@ local add_data_to_matrix = function (matrix, data, mask)
 	local dir = "up"
 	local byte_number = 0
 	x, y = size, size
-	_ = gsub(data, ".?.?.?.?.?.?.?.?", function (byte) --[[@param byte string]]
+	_ = gsub(data, ".?.?.?.?.?.?.?.?", function (byte)
 		byte_number = byte_number + 1
 		positions, x, y, dir = get_next_free_positions(matrix, x, y, dir, byte)
 		for i=1, #byte do
@@ -1127,7 +1126,7 @@ local calculate_penalty = function (matrix)
 end
 
 --[[Create a matrix for the given parameters and calculate the penalty score.]]
---[[@return integer[][] matrix, integer penalty]]
+--: (version: integer, ec_level: integer, data: string, mask: integer) -> ({ [integer]: { [integer]: integer } }, integer)
 local get_matrix_and_penalty = function (version, ec_level, data, mask)
 	local tab = prepare_matrix_with_mask(version, ec_level, mask)
 	add_data_to_matrix(tab, data, mask)
@@ -1162,7 +1161,7 @@ end
 --[[1. Generate 8 matrices with different masks and calculate the penalty]]
 --[[1. Return qrcode with least penalty]]
 --[[If ec_level or mode is given, use the ones for generating the qrcode. (mode is not implemented yet)]]
---[[@param str string]] --[[@param ec_level? integer]] --[[@param _mode? integer]]
+--: (str: string, ec_level: integer | nil, _mode: integer | nil) -> (boolean, { [integer]: { [integer]: integer } } | string)
 mod.qrcode = function (str, ec_level, _mode)
 	local arranged_data, version, data_raw, mode, len_bitstring
 	version, ec_level, data_raw, mode, len_bitstring = get_version_eclevel_mode_bistringlength(str, ec_level)

@@ -25,8 +25,6 @@ local floor, huge = math.floor, math.huge
 --:: Directive = { kind: "lit", text: string } | { kind: "ws" } | { kind: "spec", suppress: boolean, width: integer | nil, conv: string, negated?: boolean, class_chars?: { [integer]: string } }
 
 --- Parse a format string into a list of directives.
----@param fmt string
----@return table
 --: (fmt: string) -> ({ [integer]: Directive } | nil, string | nil)
 local function parse_format(fmt)
 	local directives = {} --: { [integer]: Directive }
@@ -381,10 +379,6 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Run parsed directives against input starting at pos.
---- @param directives table
---- @param input string
---- @param names table|nil  — list of names in capture order (from named format)
---- @return values table|nil, named table|nil, err string|nil
 --: (directives: { [integer]: Directive }, input: string, names: { [integer]: string | false } | nil) -> ({ [integer]: unknown } | nil, { [string]: unknown } | nil, string | nil)
 local function run_directives(directives, input, names)
 	local pos = 1

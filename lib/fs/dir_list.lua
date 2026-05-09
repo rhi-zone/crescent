@@ -6,14 +6,6 @@ if register_ffi_module then register_ffi_module("lib.fs.dir_list") end
 
 local mod = {}
 
---[[@class file_info]]
---[[@field path string]]
---[[@field name string]]
---[[@field is_dir boolean]]
---[[@field size? integer]]
---[[@field created? integer]]
---[[@field modified? integer]]
-
 -- FIXME: refactor directory listing out?
 -- it'd result in duplication of work tho
 -- (you can't check whether a file is a directory...)
@@ -110,70 +102,10 @@ if ffi.os == "Linux" then
 			int statx(int dirfd, const char *restrict pathname, int flags, unsigned int mask, struct statx *restrict statxbuf);
 		]]
 
-		--[[@class dir_c]]
+		local dir_list_ffi = ffi.C
 
-		--[[@class dirent_c]]
-		--[[@field d_ino integer]]
-		--[[@field d_off integer]]
-		--[[@field d_reclen integer]]
-		--[[@field d_type integer]]
-		--[[@field d_name string_c]]
+		local stat = ffi.new("struct statx[1]")
 
-		--[[@class stat_c]]
-		--[[@field st_dev integer]]
-		--[[@field st_ino integer]]
-		--[[@field st_mode integer]]
-		--[[@field st_nlink integer]]
-		--[[@field st_uid integer]]
-		--[[@field st_gid integer]]
-		--[[@field st_rdev integer]]
-		--[[@field st_size integer]]
-		--[[@field st_blksiz integer]]
-		--[[@field st_blocks integer]]
-		--[[@field st_atime integer]]
-		--[[@field st_atime_ns integer]]
-		--[[@field st_mtime integer]]
-		--[[@field st_mtime_ns integer]]
-		--[[@field st_ctime integer]]
-		--[[@field st_ctime_ns integer]]
-
-		--[[@class statx_c]]
-		--[[@field stx_mask integer]]
-		--[[@field stx_blksize integer]]
-		--[[@field stx_attributes integer]]
-		--[[@field stx_nlink integer]]
-		--[[@field stx_uid integer]]
-		--[[@field stx_gid integer]]
-		--[[@field stx_mode integer]]
-		--[[@field stx_ino integer]]
-		--[[@field stx_size integer]]
-		--[[@field stx_blocks integer]]
-		--[[@field stx_attributes_mask integer]]
-		--[[@field stx_atime_sec integer]]
-		--[[@field stx_atime_nsec integer]]
-		--[[@field stx_btime_sec integer]]
-		--[[@field stx_btime_nsec integer]]
-		--[[@field stx_ctime_sec integer]]
-		--[[@field stx_ctime_nsec integer]]
-		--[[@field stx_mtime_sec integer]]
-		--[[@field stx_mtime_nsec integer]]
-		--[[@field stx_rdev_major integer]]
-		--[[@field stx_rdev_minor integer]]
-		--[[@field stx_dev_major integer]]
-		--[[@field stx_dev_minor integer]]
-
-		--[[@class dir_list_linux_ffi]]
-		--[[@field opendir fun(name: string): dir_c]]
-		--[[@field readdir fun(dirp: dir_c): dirent_c]]
-		--[[@field closedir fun(dirp: dir_c)]]
-		--[[@field statx fun(dirfd: integer, pathname: string, flags: integer, mask: integer, statbuf: ptr_c<statx_c>): error_c]]
-		--[[@f ield stat fun(pathname: string, statbuf: ptr_c<stat_c>): error_c]]
-
-		local dir_list_ffi = ffi.C --[[@type dir_list_linux_ffi]]
-
-		local stat = ffi.new("struct statx[1]") --[[@type { [0]: statx_c }]]
-
-		--[[@return file_info? entry, string? error]]
 		--: (self: { dir: cdata, path: string }) -> ({ name: string, path: string, is_dir: boolean, size: number | nil, created: number, modified: number } | nil, string | nil)
 		local dir_list_iter = function(self)
 			local entry = dir_list_ffi.readdir(self.dir)
@@ -198,8 +130,6 @@ if ffi.os == "Linux" then
 			}
 		end
 
-		--[[@return (fun(self: { dir: dir_c, path: string }): file_info)? iterator, dir_c|string state_or_error]]
-		--[[@param path string]]
 		mod.dir_list = function(path)
 			path = path or "."
 			if type(path) ~= "string" then return nil, "dir_list: path must be a string" end
@@ -211,8 +141,6 @@ if ffi.os == "Linux" then
 			return dir_list_iter, { dir = dir, path = path }
 		end
 
-		--[[@return file_info? info, string? error]]
-		--[[@param path string]]
 		mod.dir_info = function(path)
 			path = path or "."
 			if type(path) ~= "string" then return nil, "dir_info: path must be a string" end
@@ -261,40 +189,11 @@ elseif ffi.os == "Windows" then
 		DWORD FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPCSTR lpBuffer, DWORD nSize, va_list *Arguments);
 	]]
 
-	--[[@class win32_find_file_handle_c]]
-
-	--[[@class win32_filetime_c]]
-	--[[@field dwLowDateTime integer]]
-	--[[@field dwHighDateTime integer]]
-
-	--[[@class win32_find_data_c]]
-	--[[@field dwFileAttributes integer]]
-	--[[@field ftCreationTime win32_filetime_c]]
-	--[[@field ftLastAccessTime win32_filetime_c]]
-	--[[@field ftLastWriteTime win32_filetime_c]]
-	--[[@field nFileSizeHigh integer]]
-	--[[@field nFileSizeLow integer]]
-	--[[@field dwReserved0 integer]]
-	--[[@field dwReserved1 integer]]
-	--[[@field cFileName string_c]]
-	--[[@field cAlternateFileName string_c]]
-	--[[@field dwFileType integer obsolete]]
-	--[[@field dwCreatorType integer obsolete]]
-	--[[@field wFinderFlags integer obsolete]]
-
-	--[[@class dir_list_windows_ffi]]
-	--[[@field FindFirstFileA fun(lpFileName: string, lpFindFileData: ptr_c<win32_find_data_c>): win32_find_file_handle_c]]
-	--[[@field FindNextFileA fun(hFindFile: win32_find_file_handle_c, lpFindFileData: ptr_c<win32_find_data_c>): boolean]]
-	--[[@field FindClose fun(hFindFile: ptr_c<win32_find_file_handle_c>): boolean]]
-	--[[@field GetLastError fun(): integer]]
-	--[[@field FormatMessageA fun(dwFlags: integer, lpSource: ffi.cdata*?, dwMessageId: integer, dwLanguageId: integer, lpBuffer: string, nSize: integer, ...)]]
-
-	local dir_list_ffi = ffi.C --[[@type dir_list_windows_ffi]]
+	local dir_list_ffi = ffi.C
 
 	local err_buf = ffi.new("char[512]")
-	local entry = ffi.new("WIN32_FIND_DATA[1]") --[[@type ptr_c<win32_find_data_c>]]
+	local entry = ffi.new("WIN32_FIND_DATA[1]")
 
-	--[[@return file_info? entry, string? error]]
 	--: (self: { dir: cdata, path: string }) -> ({ name: string, path: string, is_dir: boolean, size: number | nil, created: number | nil, modified: number | nil } | nil, string | nil)
 	local dir_list_iter = function(self)
 		local success = dir_list_ffi.FindNextFileA(self.dir, entry)
@@ -322,8 +221,6 @@ elseif ffi.os == "Windows" then
 		}
 	end
 
-	--[[@return (fun(self: { dir: dir_c, path: string }): file_info)? iterator, dir_c|string state_or_error]]
-	--[[@param path string]]
 	mod.dir_list = function(path)
 		path = path or "."
 		if type(path) ~= "string" then return nil, "dir_list: path must be a string" end
@@ -333,8 +230,6 @@ elseif ffi.os == "Windows" then
 		return dir_list_iter, { dir = dir, path = path }
 	end
 
-	--[[@return file_info? info, string? error]]
-	--[[@param path string]]
 	mod.dir_info = function(path)
 		path = path or "."
 		if type(path) ~= "string" then return nil, "dir_list: path must be a string" end
@@ -348,11 +243,7 @@ elseif ffi.os == "Windows" then
 	end
 end
 
---[[@return file_info[]? entries, string? error]]
---[[@param path string]]
 mod.dir_list = mod.dir_list or function(path) return nil, "dir_list: os/processor not supported" end
---[[@return file_info? info, string? error]]
---[[@param path string]]
 mod.dir_info = mod.dir_info or function(path) return nil, "dir_info: dir_info: os/processor not supported" end
 
 return mod

@@ -174,11 +174,11 @@ encoder.integer = function (num)
 end
 
 if pack then
-	--[[@param num number]]
+	--: (num: number) -> string
 	encoder.float = function (num) return pack(">Bd", 251, num) end
 else
 	--[[Major type 7]]
-	--[[@param num number]]
+	--: (num: number) -> string
 	encoder.float = function (num)
 		--[[NaN shortcut]]
 		if num ~= num then return "\251\127\255\255\255\255\255\255\255" end
@@ -211,24 +211,24 @@ else
 end
 
 
---[[Major type 2 - byte strings]] --[[@param s string]]
+--[[Major type 2 - byte strings]]
 --: (string) -> string
 encoder.bytestring = function (s) return integer(#s, 64) .. s end
---[[Major type 3 - UTF-8 strings]] --[[@param s string]]
+--[[Major type 3 - UTF-8 strings]]
 --: (string) -> string
 encoder.utf8string = function (s) return integer(#s, 96) .. s end
 --[[Lua strings are byte strings]]
 encoder.string = encoder.bytestring
---[[@param bool boolean]]
+--: (bool: boolean) -> string
 encoder.boolean = function (bool) return bool and "\245" or "\244" end
---[[@param _ nil]]
+--: (_: nil) -> string
 encoder["nil"] = function (_) return "\246" end
 
---[[@param ud userdata]]
+--: (ud: unknown, opts: unknown) -> string
 encoder.userdata = function (ud, opts)
 	local mt = debug.getmetatable(ud)
 	if mt then
-		local mt_ = mt --[[:! { __tocbor: (unknown) -> string | nil, ... }]]
+		local mt_ = mt --[[:! { __tocbor: (unknown) -> string, ... }]]
 		local encode_ud = opts and opts[mt] or mt_.__tocbor
 		if encode_ud then
 			return encode_ud(ud, opts)
@@ -273,7 +273,7 @@ encoder.table = function (t, opts)
 end
 
 --[[Array or dict-only encoders, which can be set as __tocbor metamethod]]
---[[@param t unknown[] ]]
+--: (t: { [integer]: unknown }, opts: unknown) -> string
 encoder.array = function (t, opts)
 	local array = { }
 	for i, v in ipairs(t) do
@@ -282,7 +282,7 @@ encoder.array = function (t, opts)
 	return integer(#array, 128) .. table.concat(array)
 end
 
---[[@param t {}]]
+--: (t: { [unknown]: unknown, ... }, opts: unknown) -> string
 encoder.map = function (t, opts)
 	local map = { "\191" }
 	local p = 2
@@ -298,7 +298,7 @@ encoder.map = function (t, opts)
 end
 encoder.dict = encoder.map -- COMPAT
 
---[[@param t {}]]
+--: (t: { [unknown]: unknown, ... }, opts: unknown) -> string
 encoder.ordered_map = function (t, opts)
 	local map = {}
 	if not t[1] then -- no predefined order
@@ -312,10 +312,10 @@ encoder.ordered_map = function (t, opts)
 	for i, k in ipairs(t[1] and t or map) do
 		map[i] = encode(k, opts) .. encode(t[k], opts)
 	end
-	return integer(#map, 160) .. table.concat(map)
+	return integer(#map, 160) .. table.concat(map --[[:! { [integer]: string }]])
 end
 
---[[@param _ function]]
+--: (_: function) -> string
 encoder["function"] = function (_) error("can't encode function") end
 
 mod.type_encoders = encoder
@@ -492,8 +492,7 @@ mod.type_decoders = decoder
 local decode_raw = function (s, opts)
 	local fh = {}
 	local pos = 1
-	--[[@type fun(_: integer?, _, _)]]
-	local more
+	local more --: function | nil
 	if type(opts) == "function" then more = opts
 	elseif type(opts) == "table" then more = opts.more
 	elseif opts ~= nil then
