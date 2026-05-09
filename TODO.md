@@ -2,6 +2,12 @@
 
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
 
+## HIGH PRIORITY
+
+- [ ] **LSP daemon + VS Code extension** — The LSP daemon (`lib/type/static/lsp.lua`) is implemented: stdio JSON-RPC 2.0, diagnostics, hover, go-to-def (within-file + cross-file), completions (scope + field), signature help. What's missing: (1) a VS Code extension that spawns the daemon and wires it to the editor protocol; (2) packaging so users can install it without a dev shell. VS Code extension is the highest-leverage surface for adoption — inline type errors, hover-to-inspect, go-to-def make the typechecker usable for daily editing. Extension shell: `package.json` with `contributes.languages` for `.lua`, a `LanguageClient` pointing at `bin/cr lsp` (new subcommand that execs `lib/type/static/lsp.lua`), activation on workspace open. Stretch: JetBrains / Neovim / Helix configs (all speak LSP; just need a `bin/cr lsp` entry point and docs).
+
+---
+
 - [ ] **type/static: hash-cons unions/intersections for sound cycle detection** — recursive type aliases (e.g. `Term = string | { args: { [integer]: Term } }`) caused stack overflows in multiple typechecker functions. Patched with seen-set cycle guards in `meta_op_ret_impl`, `display`, `widen` (commits 56810b6, 32b7d5a). The deeper issue: `make_union(members)` always creates a fresh tid, so structurally-identical unions present as different tids per visit; tid-keyed cycle detection misses the cycle until a depth limit catches it. Display has a hard-assert depth limit (commit b0095b2) — fires nowhere yet. Hash-consing make_union/make_intersection so structural identity → tid identity would make all cycle detection sound and remove the depth limit. Verify if/when the assert fires before doing this work.
 
 - [ ] **type/static: stack overflows in parallel workers under structural cycle work** — distinct from the SIGSEGV thread above. Some files (proto, prolog, protocol_buffer, hamt) hit Lua stack overflow when the typechecker recurses through type structures without cycle guards. Recent passes added guards in the obvious sites; an audit-style sweep over remaining recursive walkers in `unify.lua`, `solve.lua`, `narrow.lua`, `match.lua` would catch any latent cases. None reported in the current corpus, but the pattern (cycle guard + memoization) is now the standard.
