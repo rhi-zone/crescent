@@ -4,9 +4,9 @@ local mod = {}
 
 -- ── type → SQL column type ────────────────────────────────────────────────────
 
---:: SchemaType = { type: string, inner: any, shape: any, ... }
+--:: SchemaType = { type: string, inner: unknown, shape: unknown, ... }
 
-local type_converters = ({} --[[: any]]) --[[:! { [string]: (t: SchemaType) -> (string | nil, string | nil) }]]
+local type_converters = ({} --[[: unknown]]) --[[:! { [string]: (t: SchemaType) -> (string | nil, string | nil) }]]
 --: (t: SchemaType) -> (string | nil, string | nil)
 local function convert_type(t)
 	local fn = type_converters[t.type]
@@ -26,25 +26,27 @@ end
 
 -- ── database ──────────────────────────────────────────────────────────────────
 
---:: SqlitexDatabase = { db: any, models: { [string]: any }, ... }
---:: SqlitexModel = { name: string, db: any, schema: SchemaType, keyorder: { [integer]: string }, _stmts: { [string]: any }, ... }
+--:: SqliteStmt = { exec: (self: SqliteStmt, ...unknown) -> (boolean | nil, string | nil), rows: (self: SqliteStmt, ...unknown) -> function, ... }
+--:: SqliteConn = { execute: (self: SqliteConn, sql: string, ...unknown) -> (boolean | nil, string | nil), prepare: (self: SqliteConn, sql: string) -> (SqliteStmt | nil, string | nil), last_insert_rowid: (self: SqliteConn) -> (integer | nil, string | nil), ... }
+--:: SqlitexDatabase = { db: SqliteConn, models: { [string]: unknown }, ... }
+--:: SqlitexModel = { name: string, db: SqlitexDatabase, schema: SchemaType, keyorder: { [integer]: string }, _stmts: { insert: SqliteStmt | nil, delete: SqliteStmt | nil, select: SqliteStmt | nil, find: SqliteStmt | nil, update: SqliteStmt | nil, ... }, ... }
 
 local database = {}
 mod.database   = database
 database.__index = database
 
---: (self: any, path: string) -> (any, string | nil)
+--: (self: unknown, path: string) -> (unknown, string | nil)
 database.new = function(self, path)
 	local db, err = sqlite.open(path)
 	if not db then return nil, err end
 	local ret = setmetatable({ db = db, models = {} }, self)
-	local ret_any = ret --[[: any]]
-	local ok, serr = ret_any.db:execute("PRAGMA foreign_keys = ON;")
+	local ret_any = (ret --[[:! { [string]: unknown }]]).db --[[:! SqliteConn]]
+	local ok, serr = ret_any:execute("PRAGMA foreign_keys = ON;")
 	if not ok then return nil, serr end
 	return ret
 end
 
---: (path: string) -> (any, string | nil)
+--: (path: string) -> (unknown, string | nil)
 mod.new = function(path) return database:new(path) end
 
 -- ── model ─────────────────────────────────────────────────────────────────────
@@ -61,7 +63,7 @@ local model = {}
 mod.model    = model
 model.__index = model
 
---: (self: any, db: any, name: string, schema: SchemaType, keyorder: ({ [integer]: string }) | nil) -> (any, string | nil)
+--: (self: unknown, db: unknown, name: string, schema: SchemaType, keyorder: ({ [integer]: string }) | nil) -> (unknown, string | nil)
 model.new = function(self, db, name, schema, keyorder)
 	if name:find("`") then return nil, "sqlitex: name contains backtick: " .. name end
 	if schema.type ~= "struct" and schema.type ~= "struct_exact" then
@@ -70,7 +72,7 @@ model.new = function(self, db, name, schema, keyorder)
 
 	local ko = keyorder or ({} --[[: { [integer]: string }]])
 	if not keyorder then
-		for k in pairs(schema.shape --[[:! { [string]: any }]]) do
+		for k in pairs(schema.shape --[[:! { [string]: unknown }]]) do
 			if k:find("`") then return nil, "sqlitex: column name contains backtick: " .. k end
 			ko[#ko + 1] = k
 		end
@@ -87,7 +89,7 @@ model.new = function(self, db, name, schema, keyorder)
 	end
 	parts[#parts + 1] = ");"
 
-	local db_any = db --[[: any]]
+	local db_any = db --[[:! SqlitexDatabase]]
 	local ok, err = db_any.db:execute(table.concat(parts))
 	if not ok then return nil, err end
 
@@ -100,14 +102,14 @@ model.new = function(self, db, name, schema, keyorder)
 	}, self)
 end
 
---: (self: any, name: string, schema: SchemaType, keyorder: ({ [integer]: string }) | nil) -> (any, string | nil)
+--: (self: unknown, name: string, schema: SchemaType, keyorder: ({ [integer]: string }) | nil) -> (unknown, string | nil)
 database.model = function(self, name, schema, keyorder)
 	return model:new(self, name, schema, keyorder)
 end
 
 -- ── prepared statement helpers ────────────────────────────────────────────────
 
---: (m: any) -> (any, string | nil)
+--: (m: SqlitexModel) -> (SqliteStmt | nil, string | nil)
 local function get_insert_stmt(m)
 	if m._stmts.insert then return m._stmts.insert end
 	local qs = {} --: { [integer]: string }
@@ -119,7 +121,7 @@ local function get_insert_stmt(m)
 	return stmt
 end
 
---: (m: any) -> (any, string | nil)
+--: (m: SqlitexModel) -> (SqliteStmt | nil, string | nil)
 local function get_delete_stmt(m)
 	if m._stmts.delete then return m._stmts.delete end
 	local sql = "DELETE FROM `" .. m.name .. "` WHERE `id` = ?;"
@@ -129,7 +131,7 @@ local function get_delete_stmt(m)
 	return stmt
 end
 
---: (m: any) -> (any, string | nil)
+--: (m: SqlitexModel) -> (SqliteStmt | nil, string | nil)
 local function get_select_stmt(m)
 	if m._stmts.select then return m._stmts.select end
 	local sql = "SELECT " .. table.concat(m.keyorder, ", ") .. " FROM `" .. m.name .. "`;"
@@ -139,7 +141,7 @@ local function get_select_stmt(m)
 	return stmt
 end
 
---: (m: any) -> (any, string | nil)
+--: (m: SqlitexModel) -> (SqliteStmt | nil, string | nil)
 local function get_find_stmt(m)
 	if m._stmts.find then return m._stmts.find end
 	local sql = "SELECT " .. table.concat(m.keyorder, ", ") .. " FROM `" .. m.name .. "` WHERE `id` = ?;"
@@ -149,7 +151,7 @@ local function get_find_stmt(m)
 	return stmt
 end
 
---: (m: any) -> (any, string | nil)
+--: (m: SqlitexModel) -> (SqliteStmt | nil, string | nil)
 local function get_update_stmt(m)
 	if m._stmts.update then return m._stmts.update end
 	local sets = {} --: { [integer]: string }
@@ -164,12 +166,12 @@ local function get_update_stmt(m)
 end
 
 -- Deserialize a row (positional values matching keyorder) into a Lua table.
---: (m: any, ...any) -> { [string]: any }
+--: (m: SqlitexModel, ...unknown) -> { [string]: unknown }
 local function row_to_table(m, ...)
-	local t = {} --: { [string]: any }
+	local t = {} --: { [string]: unknown }
 	local vals = { ... }
 	for i, k in ipairs(m.keyorder --[[:! { [integer]: string }]]) do
-		t[k] = (vals[i] --[[:! string | number | boolean | nil]]) --[[: any]]
+		t[k] = (vals[i] --[[:! string | number | boolean | nil]]) --[[: unknown]]
 	end
 	return t
 end
@@ -177,20 +179,20 @@ end
 -- ── CRUD ──────────────────────────────────────────────────────────────────────
 
 -- insert(value) → rowid | nil, err
---: (self: any, value: { [string]: any }) -> (integer | nil, string | nil)
+--: (self: SqlitexModel, value: { [string]: unknown }) -> (integer | nil, string | nil)
 model.insert = function(self, value)
 	local stmt, serr = get_insert_stmt(self)
 	if not stmt then return nil, serr end
 
-	local params = {} --: { [integer]: any }
+	local params = {} --: { [integer]: unknown }
 	for i, k in ipairs(self.keyorder) do params[i] = value[k] end
 	local ok, eerr = stmt:exec(unpack(params))
-	if not ok then return nil, eerr end
+	if not ok then return nil, eerr --[[:! string | nil]] end
 	return self.db.db:last_insert_rowid()
 end
 
 -- delete(id) → true | nil, err
---: (self: any, id: integer) -> (boolean | nil, string | nil)
+--: (self: SqlitexModel, id: integer) -> (boolean | nil, string | nil)
 model.delete = function(self, id)
 	local stmt, err = get_delete_stmt(self)
 	if not stmt then return nil, err end
@@ -198,22 +200,22 @@ model.delete = function(self, id)
 end
 
 -- find_all() → array of tables | nil, err
---: (self: any) -> ({ [integer]: { [string]: any } } | nil, string | nil)
+--: (self: SqlitexModel) -> ({ [integer]: { [string]: unknown } } | nil, string | nil)
 model.find_all = function(self)
 	local stmt, err = get_select_stmt(self)
 	if not stmt then return nil, err end
 	local iter = stmt:rows()
-	local rows = {} --: { [integer]: { [string]: any } }
+	local rows = {} --: { [integer]: { [string]: unknown } }
 	while true do
 		local vals = { iter() }
 		if vals[1] == nil then break end
-		rows[#rows + 1] = row_to_table(self, unpack(vals))
+		rows[#rows + 1] = row_to_table(self, unpack(vals)) --[[:! { [string]: unknown }]]
 	end
 	return rows
 end
 
 -- find(id) → table | nil, err
---: (self: any, id: integer) -> ({ [string]: any } | nil, string | nil)
+--: (self: SqlitexModel, id: integer) -> ({ [string]: unknown } | nil, string | nil)
 model.find = function(self, id)
 	local stmt, err = get_find_stmt(self)
 	if not stmt then return nil, err end
@@ -225,13 +227,13 @@ end
 
 -- update(value) → true | nil, err
 -- value must contain an 'id' field. All other keyorder fields are updated.
---: (self: any, value: { [string]: any }) -> (boolean | nil, string | nil)
+--: (self: SqlitexModel, value: { [string]: unknown }) -> (boolean | nil, string | nil)
 model.update = function(self, value)
 	local stmt, err = get_update_stmt(self)
 	if not stmt then return nil, err end
 
 	-- params: all non-id fields in keyorder, then id at the end (for WHERE)
-	local params = {} --: { [integer]: any }
+	local params = {} --: { [integer]: unknown }
 	for _, k in ipairs(self.keyorder) do
 		if k ~= "id" then params[#params + 1] = value[k] end
 	end

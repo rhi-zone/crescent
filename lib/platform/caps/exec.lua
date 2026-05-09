@@ -27,6 +27,7 @@ end
 local help     = require("lib.exec.help")
 local make_api = require("lib.exec.make_api")
 local exec     = require("lib.exec")
+--:: require "lib.caps.types"
 
 local M = {}
 
@@ -46,10 +47,10 @@ end
 -- remaining string keys are flag fields) into a flat CLI arg list,
 -- optionally validated against a HelpSchema.
 -- Returns expanded args or nil + errmsg.
---: (any, any | nil) -> (string[] | nil, string | nil)
+--: (unknown, unknown | nil) -> (string[] | nil, string | nil)
 local function expand_args_table(args_tbl, schema)
-	--: any
-	local path = args_tbl[1]
+	local args_tbl_ = args_tbl --[[:! { [integer]: unknown, [string]: unknown }]]
+	local path = args_tbl_[1]
 	local result = {}
 
 	-- Add subcommand path elements.
@@ -61,7 +62,7 @@ local function expand_args_table(args_tbl, schema)
 
 	-- Collect string flag keys (all string keys other than positional [1]).
 	local flag_keys = {}
-	for k, _ in pairs(args_tbl) do
+	for k, _ in pairs(args_tbl_) do
 		if type(k) == "string" then
 			flag_keys[#flag_keys + 1] = k
 		end
@@ -72,14 +73,13 @@ local function expand_args_table(args_tbl, schema)
 	end
 
 	-- Walk the schema to the subcommand node matching the path.
-	--: any | nil
+	--: unknown | nil
 	local node = schema
 	if node ~= nil and type(path) == "table" then
 		for i = 1, #path do
 			if node ~= nil and type(node) == "table" and
-			   type(node.subcommands) == "table" then
-				--: any
-				local subs = node.subcommands
+			   type((node --[[:! { [string]: unknown }]]).subcommands) == "table" then
+				local subs = (node --[[:! { subcommands: { [unknown]: unknown } }]]).subcommands
 				node = subs[path[i]]
 			else
 				node = nil
@@ -89,15 +89,13 @@ local function expand_args_table(args_tbl, schema)
 	end
 
 	if node ~= nil and type(node) == "table" and
-	   type(node.flag_idents) == "table" and
-	   type(node.flags) == "table" then
+	   type((node --[[:! { [string]: unknown }]]).flag_idents) == "table" and
+	   type((node --[[:! { [string]: unknown }]]).flags) == "table" then
 		-- Schema-validated flag expansion (mirrors make_api.expand_flags logic).
-		--: any
-		local flag_idents = node.flag_idents
-		--: any
-		local flags_list  = node.flags
+		local flag_idents = (node --[[:! { flag_idents: { [string]: unknown }, flags: { [integer]: { [string]: unknown } } }]]).flag_idents
+		local flags_list  = (node --[[:! { flag_idents: { [string]: unknown }, flags: { [integer]: { [string]: unknown } } }]]).flags
 		for _, key in ipairs(flag_keys) do
-			local val = args_tbl[key]
+			local val = args_tbl_[key]
 			local idx = flag_idents[key]
 			if not idx then
 				return nil, "unknown flag: " .. key
@@ -126,7 +124,7 @@ local function expand_args_table(args_tbl, schema)
 	else
 		-- No schema: naive --key [value] passthrough.
 		for _, key in ipairs(flag_keys) do
-			local val = args_tbl[key]
+			local val = args_tbl_[key]
 			if val == true then
 				result[#result + 1] = "--" .. key
 			elseif val ~= nil and val ~= false then
@@ -140,7 +138,7 @@ local function expand_args_table(args_tbl, schema)
 end
 
 -- Detect whether args is an ExecArgsTable (args[1] is a table).
---: (any) -> boolean
+--: (unknown) -> boolean
 local function is_args_table(args)
 	return type(args[1]) == "table"
 end
@@ -148,15 +146,13 @@ end
 --:: ExecManifestEntry = {
 --::   binaries: { [string]: { schema: "auto" | unknown | nil, allow: string[] | nil } },
 --::   stderr: string | nil,
---::   popen: unknown | nil,
+--::   popen: POpenFn | nil,
 --:: }
 
 -- M.new(manifest_entry, opts) -> cap, revoke_fn
---: (ExecManifestEntry, { parent_revoked_fn: (() -> boolean) | nil } | nil) -> (any, () -> nil)
+--: (ExecManifestEntry, { parent_revoked_fn: (() -> boolean) | nil } | nil) -> (unknown, () -> nil)
 function M.new(manifest_entry, opts)
-	--: any
-	local entry = manifest_entry or {}
-	--: any
+	local entry = manifest_entry --[[:! ExecManifestEntry]]
 	local binaries_spec = entry.binaries or {}
 	local stderr = entry.stderr
 	local injected_popen = entry.popen
@@ -168,23 +164,22 @@ function M.new(manifest_entry, opts)
 	local revoked = false
 
 	-- Per-binary caches built at construction time.
-	local schemas    = {}   -- [name] = HelpSchema | nil
+	-- [name] = HelpSchema | nil
+	local schemas    = {} --: { [string]: unknown }
 	local allow_sets = {}   -- [name] = { [string]: boolean } | nil
 
 	for name, spec in pairs(binaries_spec) do
 		--: string
 		local sname = tostring(name)
-		--: any
-		local s = --[[:! { schema: any, allow: any }]] spec
+		local s = spec --[[:! { schema: "auto" | unknown | nil, allow: string[] | nil }]]
 		allow_sets[sname] = build_allow_set(s.allow)
 
-		--: any
 		local schema_val = s.schema
 		if schema_val == "auto" then
-			--: any
-			local fetch_opts = { popen = injected_popen, max_depth = 4 }
-			local fetched, _ = help.fetch(sname, fetch_opts)
-			schemas[sname] = fetched  -- nil if binary absent; raw mode fallback
+			if injected_popen ~= nil then
+				local fetched, _ = help.fetch(sname, { popen = injected_popen, max_depth = 4 })
+				schemas[sname] = fetched  -- nil if binary absent; raw mode fallback
+			end
 		elseif type(schema_val) == "table" then
 			schemas[sname] = schema_val
 		else
@@ -194,6 +189,7 @@ function M.new(manifest_entry, opts)
 
 	-- Build the revoke-checked popen wrapper used for fluent API nodes.
 	-- Every fluent call goes through exec.run(... popen = checked_popen ...).
+	--: (string, string) -> (File | nil, string | nil)
 	local function checked_popen(cmd_str, mode)
 		if revoked then
 			-- Return a fake file handle that immediately errors.
@@ -205,6 +201,7 @@ function M.new(manifest_entry, opts)
 		if parent_revoked_fn and parent_revoked_fn() then
 			return nil, "capability revoked"
 		end
+		if injected_popen == nil then return nil, "popen: not provided" end
 		return injected_popen(cmd_str, mode)
 	end
 
@@ -213,10 +210,9 @@ function M.new(manifest_entry, opts)
 	for name, schema in pairs(schemas) do
 		--: string
 		local sname = tostring(name)
-		--: any
-		local s = schema
-		if s ~= nil then
-			local api, _ = make_api.make(s, sname, {
+		if schema ~= nil then
+			--:: require "lib.exec.help"
+			local api, _ = make_api.make(schema --[[:! HelpSchema]], sname, {
 				popen  = checked_popen,
 				stderr = stderr,
 			})
@@ -261,6 +257,7 @@ function M.new(manifest_entry, opts)
 			end
 		end
 
+		if injected_popen == nil then return nil, "popen: not provided" end
 		return exec.run(binary_name, flat_args, { popen = injected_popen, stderr = stderr })
 	end
 
@@ -272,9 +269,7 @@ function M.new(manifest_entry, opts)
 		if revoked then return nil, "capability revoked" end
 		if parent_revoked_fn and parent_revoked_fn() then return nil, "capability revoked" end
 
-		--: any
-		local sd = sub_decl or {}
-		--: any
+		local sd = (sub_decl or {}) --[[:! { binaries: { [string]: { allow: string[] | nil } } | nil, stderr: string | nil }]]
 		local sub_binaries_decl = sd.binaries or {}
 
 		-- Validate: sub may not request binaries not in parent.
@@ -288,9 +283,7 @@ function M.new(manifest_entry, opts)
 		local narrowed_binaries = {}
 		for bin_name, sub_spec in pairs(sub_binaries_decl) do
 			local bin_name_ = tostring(bin_name)
-			--: any
-			local parent_spec = binaries_spec[bin_name_]
-			--: string[] | nil
+			local parent_spec = binaries_spec[bin_name_] --[[:! { schema: "auto" | unknown | nil, allow: string[] | nil }]]
 			local parent_allow = parent_spec.allow
 			local sub_spec_ = sub_spec --[[:! { allow: { [integer]: string } | nil, ... }]]
 			local sub_allow = sub_spec_.allow

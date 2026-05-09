@@ -121,7 +121,7 @@ end
 
 -- Numeric / scalar
 function M.single_stat(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return {
 		type  = "single_stat",
 		value = o.value,
@@ -133,7 +133,7 @@ function M.single_stat(opts)
 end
 
 function M.gauge(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return {
 		type       = "gauge",
 		value      = o.value,
@@ -145,7 +145,7 @@ function M.gauge(opts)
 end
 
 function M.progress_bar(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return {
 		type          = "progress_bar",
 		value         = o.value,
@@ -161,7 +161,7 @@ end
 
 -- Tabular
 function M.table(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return {
 		type         = "table",
 		columns      = o.columns,
@@ -172,7 +172,7 @@ function M.table(opts)
 end
 
 function M.key_value(pairs_)
-	local pl = pairs_ --: any
+	local pl = pairs_ --[[:! { [string]: unknown }]]
 	if pl.pairs ~= nil then
 		return { type = "key_value", pairs = pl.pairs }
 	end
@@ -185,7 +185,7 @@ end
 
 -- Time-series
 function M.line_chart(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return {
 		type   = "line_chart",
 		series = o.series,
@@ -196,17 +196,17 @@ function M.line_chart(opts)
 end
 
 function M.bar_chart(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return { type = "bar_chart", series = o.series, unit = o.unit, stacked = o.stacked }
 end
 
 function M.area_chart(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return { type = "area_chart", series = o.series, unit = o.unit, stacked = o.stacked }
 end
 
 function M.heatmap(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return {
 		type   = "heatmap",
 		x_bins = o.x_bins,
@@ -216,13 +216,13 @@ function M.heatmap(opts)
 end
 
 function M.top_list(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return { type = "top_list", items = o.items, max = o.max }
 end
 
 -- Composite
 function M.card(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return {
 		type     = "card",
 		title    = o.title,
@@ -233,12 +233,12 @@ function M.card(opts)
 end
 
 function M.grid(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return { type = "grid", cells = o.cells, columns = o.columns }
 end
 
 function M.panel(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return { type = "panel", title = o.title, body = o.body, actions = o.actions }
 end
 
@@ -256,7 +256,7 @@ function M.log_stream(columns)
 end
 
 function M.live_table(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return {
 		type        = "live_table",
 		frame_type  = "table",
@@ -285,7 +285,7 @@ end
 
 -- Action
 function M.button(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return {
 		type    = "button",
 		label   = o.label,
@@ -297,7 +297,7 @@ function M.button(opts)
 end
 
 function M.form(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return {
 		type         = "form",
 		fields       = o.fields,
@@ -307,7 +307,7 @@ function M.form(opts)
 end
 
 function M.confirm(opts)
-	local o = opts --: any
+	local o = opts --[[:! { [string]: unknown }]]
 	return {
 		type   = "confirm",
 		prompt = o.prompt,
@@ -368,10 +368,11 @@ end
 function M.ok(body, opts)
 	local env = { ok = true, body = body, cite = nil, stream = nil, ttl_ms = nil }
 	if opts then
-		local o = opts --: any
-		if o.cite    ~= nil then env.cite    = o.cite end
-		if o.stream  ~= nil then env.stream  = o.stream end
-		if o.ttl_ms  ~= nil then env.ttl_ms  = o.ttl_ms end
+		local o = opts --[[:! { [string]: unknown }]]
+		local e = env --[[:! { [string]: unknown }]]
+		if o.cite    ~= nil then e.cite    = o.cite    end
+		if o.stream  ~= nil then e.stream  = o.stream  end
+		if o.ttl_ms  ~= nil then e.ttl_ms  = o.ttl_ms  end
 	end
 	return env
 end
@@ -520,12 +521,12 @@ end
 
 local function check_columns(prim_name_a, columns)
 	local prim_name = tostring(prim_name_a)
-	local cols = columns --: any
+	local cols = columns --[[:! { [integer]: unknown }]]
 	for i, col in ipairs(cols) do
 		if type(col) ~= "table" then
 			return nil, prim_name .. ": columns[" .. tostring(i) .. "] must be a table"
 		end
-		local c = col --: any
+		local c = col --[[:! { [string]: unknown }]]
 		if type(c.key) ~= "string" then
 			return nil, prim_name .. ": columns[" .. tostring(i) .. "].key must be a string"
 		end
@@ -535,7 +536,7 @@ local function check_columns(prim_name_a, columns)
 		if type(c.type) ~= "string" then
 			return nil, prim_name .. ": columns[" .. tostring(i) .. "].type must be a known column type"
 		end
-		local ct = c.type --: string
+		local ct = c.type --[[:! string]]
 		if not COLUMN_TYPES[ct] then
 			return nil, prim_name .. ": columns[" .. tostring(i) .. "].type must be one of "
 				.. "(string|number|bytes|duration|timestamp|status|code|link)"
@@ -546,12 +547,12 @@ end
 
 local function check_kv_pairs(prim_name_a, pairs_)
 	local prim_name = tostring(prim_name_a)
-	local pl = pairs_ --: any
+	local pl = pairs_ --[[:! { [integer]: unknown }]]
 	for i, p in ipairs(pl) do
 		if type(p) ~= "table" then
 			return nil, prim_name .. ": pairs[" .. tostring(i) .. "] must be a table"
 		end
-		local pt = p --: any
+		local pt = p --[[:! { [string]: unknown }]]
 		if type(pt.key) ~= "string" then
 			return nil, prim_name .. ": pairs[" .. tostring(i) .. "].key must be a string"
 		end
@@ -567,12 +568,12 @@ end
 
 local function check_form_fields(prim_name_a, fields)
 	local prim_name = tostring(prim_name_a)
-	local fl = fields --: any
+	local fl = fields --[[:! { [integer]: unknown }]]
 	for i, f in ipairs(fl) do
 		if type(f) ~= "table" then
 			return nil, prim_name .. ": fields[" .. tostring(i) .. "] must be a table"
 		end
-		local ft = f --: any
+		local ft = f --[[:! { [string]: unknown }]]
 		if type(ft.name) ~= "string" then
 			return nil, prim_name .. ": fields[" .. tostring(i) .. "].name must be a string"
 		end
@@ -582,7 +583,7 @@ local function check_form_fields(prim_name_a, fields)
 		if type(ft.type) ~= "string" then
 			return nil, prim_name .. ": fields[" .. tostring(i) .. "].type must be a known field type"
 		end
-		local fty = ft.type --: string
+		local fty = ft.type --[[:! string]]
 		if not FIELD_TYPES[fty] then
 			return nil, prim_name .. ": fields[" .. tostring(i) .. "].type must be a known field type"
 		end
@@ -613,12 +614,12 @@ local function recurse_field(prim_name_a, field_a, val, mode_a)
 		if type(val) ~= "table" then
 			return nil, prim_name .. "." .. field .. " must be an array"
 		end
-		local arr = val --: any
+		local arr = val --[[:! { [integer]: unknown }]]
 		for i, t in ipairs(arr) do
 			if type(t) ~= "table" then
 				return nil, prim_name .. ".tabs[" .. tostring(i) .. "] must be a table"
 			end
-			local tt = t --: any
+			local tt = t --[[:! { [string]: unknown }]]
 			if type(tt.label) ~= "string" then
 				return nil, prim_name .. ".tabs[" .. tostring(i) .. "].label must be a string"
 			end
@@ -635,12 +636,12 @@ local function validate_cite(cite, ctx_a)
 	if type(cite) ~= "table" then
 		return nil, ctx .. ": cite must be an array of cite entries"
 	end
-	local arr = cite --: any
+	local arr = cite --[[:! { [integer]: unknown }]]
 	for i, entry in ipairs(arr) do
 		if type(entry) ~= "table" then
 			return nil, ctx .. ": cite[" .. tostring(i) .. "] must be a table"
 		end
-		local e = entry --: any
+		local e = entry --[[:! { [string]: unknown }]]
 		local kind = e.kind
 		if type(kind) ~= "string" then
 			return nil, ctx .. ": cite[" .. tostring(i) .. "].kind must be a string"
@@ -659,7 +660,7 @@ validate_primitive = function(prim, ctx_a)
 	if type(prim) ~= "table" then
 		return nil, ctx .. ": primitive must be a table"
 	end
-	local p = prim --: any
+	local p = prim --[[:! { [string]: unknown }]]
 	local ty = p.type
 	if type(ty) ~= "string" then
 		return nil, ctx .. ": primitive.type must be a string"
@@ -737,7 +738,7 @@ function M.validate(envelope)
 	if type(envelope) ~= "table" then
 		return nil, "envelope: must be a table"
 	end
-	local e = envelope --: any
+	local e = envelope --[[:! { [string]: unknown }]]
 	if type(e.ok) ~= "boolean" then
 		return nil, "envelope: 'ok' must be a boolean"
 	end

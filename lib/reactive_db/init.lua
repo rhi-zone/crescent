@@ -9,22 +9,22 @@ end
 local M = {}
 M._tier = "pure"
 
---:: Row = { [string]: any }
+--:: Row = { [string]: unknown }
 --:: Pred = (row: Row) -> boolean
---:: Tbl = { _db: any, _name: string, _schema: any, _pk: string | nil, _rows: { [any]: Row }, _order: { [integer]: any }, _subs: { [integer]: any }, _live: { [integer]: any }, _indexes: { [string]: { [any]: { [integer]: any } } }, _fire: (self: Tbl, event: string, row: Row | nil, old_row: Row | nil) -> nil, _index_add: (self: Tbl, pk: any, row: Row) -> nil, _index_remove: (self: Tbl, pk: any, row: Row) -> nil, insert: (self: Tbl, row: Row) -> any, update: (self: Tbl, pk: any, patch: Row) -> any, ... }
---:: QB = { _tbl: Tbl, _where: Pred | nil, _order: string | nil, _dir: string, _limit: integer | nil, _offset: integer, _join: { other: Tbl, local_field: string, other_field: string } | nil, _base_rows: (self: QB) -> { [integer]: Row }, select: (self: QB) -> { [integer]: Row }, where: (self: QB, pred: any) -> QB, order_by: (self: QB, field: string, dir: string | nil) -> QB, limit: (self: QB, n: integer) -> QB, offset: (self: QB, n: integer) -> QB, join: (self: QB, other: Tbl, local_field: string, other_field: string) -> QB, count: (self: QB) -> integer, first: (self: QB) -> Row | nil, ... }
+--:: Tbl = { _db: unknown, _name: string, _schema: unknown, _pk: string | nil, _rows: { [unknown]: Row }, _order: { [integer]: unknown }, _subs: { [integer]: unknown }, _live: { [integer]: unknown }, _indexes: { [string]: { [unknown]: { [integer]: unknown } } }, _fire: (self: Tbl, event: string, row: Row | nil, old_row: Row | nil) -> nil, _index_add: (self: Tbl, pk: unknown, row: Row) -> nil, _index_remove: (self: Tbl, pk: unknown, row: Row) -> nil, insert: (self: Tbl, row: Row) -> boolean | (nil, string), update: (self: Tbl, pk: unknown, patch: Row) -> boolean | (nil, string), ... }
+--:: QB = { _tbl: Tbl, _where: Pred | nil, _order: string | nil, _dir: string, _limit: integer | nil, _offset: integer, _join: { other: Tbl, local_field: string, other_field: string } | nil, _base_rows: (self: QB) -> { [integer]: Row }, select: (self: QB) -> { [integer]: Row }, where: (self: QB, pred: unknown) -> QB, order_by: (self: QB, field: string, dir: string | nil) -> QB, limit: (self: QB, n: integer) -> QB, offset: (self: QB, n: integer) -> QB, join: (self: QB, other: Tbl, local_field: string, other_field: string) -> QB, count: (self: QB) -> integer, first: (self: QB) -> Row | nil, ... }
 --:: DB = { _tables: { [string]: Tbl }, ... }
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
---: (t: { [any]: any }) -> { [any]: any }
+--: (t: { [unknown]: unknown }) -> { [unknown]: unknown }
 local function shallow_copy(t)
   local c = {}
   for k, v in pairs(t) do c[k] = v end
   return c
 end
 
---: (t: { [any]: any }) -> integer
+--: (t: { [unknown]: unknown }) -> integer
 local function table_len(t)
   local n = 0
   for _ in pairs(t) do n = n + 1 end
@@ -56,7 +56,7 @@ local function qb_clone(qb)
   return new_qb(qb._tbl, qb)
 end
 
---: (self: QB, pred: any) -> QB
+--: (self: QB, pred: unknown) -> QB
 function QB:where(pred)
   local q = qb_clone(self)
   if type(pred) == "function" then
@@ -158,7 +158,7 @@ function QB:select()
   local other_field = j.other_field
 
   -- Build lookup index on other table keyed by other_field value.
-  local other_index = {} --[[: { [any]: { [integer]: Row } } ]]
+  local other_index = {} --[[: { [unknown]: { [integer]: Row } } ]]
   for _, row in pairs(other._rows) do
     local key = row[other_field]
     if key ~= nil then
@@ -207,13 +207,14 @@ end
 local Tbl = {}
 Tbl.__index = Tbl
 
---: (db: DB, name: string, opts: any) -> Tbl
+--: (db: DB, name: string, opts: unknown) -> Tbl
 local function new_table(db, name, opts)
+  local opts_ = opts --[[:! { schema: unknown, primary_key: string | nil } | nil]]
   return setmetatable({
     _db         = db,
     _name       = name,
-    _schema     = opts and opts.schema      or nil,
-    _pk         = opts and opts.primary_key or nil,
+    _schema     = opts_ and opts_.schema      or nil,
+    _pk         = opts_ and opts_.primary_key or nil,
     _rows       = {},   -- { [pk_value] = row }
     _order      = {},   -- insertion-order list of pk values
     _subs       = {},   -- { fn, ... }
@@ -226,16 +227,16 @@ end
 --: (self: Tbl, event: string, row: Row | nil, old_row: Row | nil) -> nil
 function Tbl:_fire(event, row, old_row)
   for _, fn in ipairs(self._subs) do
-    fn(event, row, old_row)
+    (fn --[[:! (string, Row | nil, Row | nil) -> nil]])(event, row, old_row)
   end
   -- Update live queries
   for _, lq in ipairs(self._live) do
-    lq:_refresh()
+    (lq --[[:! { _refresh: (self: unknown) -> nil }]]):_refresh()
   end
 end
 
 -- Update hash indexes for a row being added/removed.
---: (self: Tbl, pk: any, row: Row) -> nil
+--: (self: Tbl, pk: unknown, row: Row) -> nil
 function Tbl:_index_add(pk, row)
   for field, idx in pairs(self._indexes) do
     local val = row[field]
@@ -246,7 +247,7 @@ function Tbl:_index_add(pk, row)
   end
 end
 
---: (self: Tbl, pk: any, row: Row) -> nil
+--: (self: Tbl, pk: unknown, row: Row) -> nil
 function Tbl:_index_remove(pk, row)
   for field, idx in pairs(self._indexes) do
     local val = row[field]
@@ -281,14 +282,14 @@ function Tbl:insert(row)
   return true
 end
 
---: (self: Tbl, pk: any) -> Row | nil
+--: (self: Tbl, pk: unknown) -> Row | nil
 function Tbl:get(pk)
   local row = self._rows[pk]
   if not row then return nil end
   return shallow_copy(row)
 end
 
---: (self: Tbl, pk: any, patch: Row) -> boolean | (nil, string)
+--: (self: Tbl, pk: unknown, patch: Row) -> boolean | (nil, string)
 function Tbl:update(pk, patch)
   local row = self._rows[pk]
   if not row then return nil, "not found: " .. tostring(pk) end
@@ -315,7 +316,7 @@ function Tbl:upsert(row)
   end
 end
 
---: (self: Tbl, pk: any) -> boolean | (nil, string)
+--: (self: Tbl, pk: unknown) -> boolean | (nil, string)
 function Tbl:delete(pk)
   local row = self._rows[pk]
   if not row then return nil, "not found: " .. tostring(pk) end
@@ -330,7 +331,7 @@ function Tbl:delete(pk)
   return true
 end
 
---: (self: Tbl, fn: any) -> () -> nil
+--: (self: Tbl, fn: unknown) -> () -> nil
 function Tbl:subscribe(fn)
   self._subs[#self._subs + 1] = fn
   local subs = self._subs
@@ -341,25 +342,30 @@ function Tbl:subscribe(fn)
   end
 end
 
---: (self: Tbl, filter: any, fn: any) -> any
+--: (self: Tbl, filter: unknown, fn: unknown) -> unknown
 function Tbl:live_query(filter, fn)
-  local lq --[[: any]] = {
+  local lq_rows = {} --: { [integer]: Row }
+  local lq = {
     _tbl    = self,
     _filter = filter,
     _fn     = fn,
-    _rows   = {},
+    _rows   = lq_rows,
   }
-  --: (s: any) -> nil
+  --:: LiveQuery = { _tbl: Tbl, _filter: unknown, _fn: unknown, _rows: { [integer]: Row }, ... }
+  --: (s: LiveQuery) -> nil
   function lq:_refresh()
-    local rows = new_qb(self._tbl, nil):where(self._filter):select()
-    self._rows = rows
-    self._fn(rows)
+    local s = self --[[:! LiveQuery]]
+    local rows = new_qb(s._tbl, nil):where(s._filter):select()
+    s._rows = rows
+    local call_fn = s._fn --[[:! ({ [integer]: Row }) -> nil]]
+    call_fn(rows)
   end
-  --: (s: any) -> nil
+  --: (s: LiveQuery) -> nil
   function lq:destroy()
-    local live = self._tbl._live
+    local s = self --[[:! LiveQuery]]
+    local live = s._tbl._live
     for i = #live, 1, -1 do
-      if live[i] == self then table.remove(live, i); break end
+      if live[i] == s then table.remove(live, i); break end
     end
   end
   self._live[#self._live + 1] = lq
@@ -384,7 +390,7 @@ function Tbl:index(field)
 end
 
 -- Query builder entry points on table object
---: (self: Tbl, pred: any) -> QB
+--: (self: Tbl, pred: unknown) -> QB
 function Tbl:where(pred)   return new_qb(self, nil):where(pred) end
 --: (self: Tbl, field: string, dir: string | nil) -> QB
 function Tbl:order_by(field, dir) return new_qb(self, nil):order_by(field, dir) end
@@ -406,7 +412,7 @@ function Tbl:first()       return new_qb(self, nil):first() end
 local DB = {}
 DB.__index = DB
 
---: (self: DB, name: string, opts: any) -> Tbl
+--: (self: DB, name: string, opts: unknown) -> Tbl
 function DB:table(name, opts)
   if self._tables[name] then return self._tables[name] end
   local t = new_table(self, name, opts)
@@ -415,13 +421,13 @@ function DB:table(name, opts)
 end
 
 -- ACID-ish transaction: snapshot all table rows; on error, restore snapshot.
---: (self: DB, fn: any) -> boolean | (nil, any)
+--: (self: DB, fn: unknown) -> boolean | (nil, unknown)
 function DB:transaction(fn)
   -- Snapshot: deep copy all rows
   local snapshots = {}
   for tname, tbl in pairs(self._tables) do
     local snap = { rows = {}, order = {} }
-    for pk, row in pairs(tbl._rows) do snap.rows[pk] = shallow_copy(--[[: any]] row) end
+    for pk, row in pairs(tbl._rows) do snap.rows[pk] = shallow_copy(row --[[:! { [unknown]: unknown }]]) end
     for i, pk in ipairs(tbl._order) do snap.order[i] = pk end
     snapshots[tname] = snap
   end
@@ -436,7 +442,7 @@ function DB:transaction(fn)
       tbl._order = snap.order
       -- Rebuild indexes
       for field in pairs(tbl._indexes) do
-        local idx = {} --[[: { [any]: { [integer]: any } } ]]
+        local idx = {} --[[: { [unknown]: { [integer]: unknown } } ]]
         for pk, row in pairs(tbl._rows) do
           local val = row[field]
           if val ~= nil then

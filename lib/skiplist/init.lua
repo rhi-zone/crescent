@@ -10,8 +10,8 @@ local M = {}
 --: string
 M._tier = "pure"
 
---:: SLNode = { key: any, value: any, forward: { [integer]: SLNode }, span: { [integer]: integer }, level: integer }
---:: Skiplist = { _header: SLNode, _tail: SLNode, _cmp: (any, any) -> boolean, _level: integer, _size: integer }
+--:: SLNode = { key: unknown, value: unknown, forward: { [integer]: SLNode }, span: { [integer]: integer }, level: integer }
+--:: Skiplist = { _header: SLNode, _tail: SLNode, _cmp: (unknown, unknown) -> boolean, _level: integer, _size: integer }
 
 local MAX_LEVEL = 32
 local P = 0.5  -- coin-flip probability
@@ -28,7 +28,7 @@ end
 -- Create a new node.
 -- forward[i] = next node at level i (1-indexed)
 -- span[i] = number of nodes skipped at level i (for rank queries)
---: (any, any, integer) -> SLNode
+--: (unknown, unknown, integer) -> SLNode
 local function new_node(key, value, level)
   --: { [integer]: SLNode }
   local fwd = {} --[[:! { [integer]: SLNode }]]
@@ -50,7 +50,7 @@ SL.__index = SL
 function M.new(seed, cmp)
   if not seed then error("skiplist.new: seed is required") end
   math.randomseed(seed)
-  --: (any, any) -> boolean
+  --: (unknown, unknown) -> boolean
   local cmp_ = cmp or function(a, b) return a < b end
   -- Header sentinel: key = -math.huge, forward array of MAX_LEVEL nils
   local header = new_node(-math.huge, nil, MAX_LEVEL)
@@ -72,7 +72,7 @@ end
 
 -- Internal: find predecessors at each level for a given key.
 -- Returns: update[] (predecessor nodes), rank[] (cumulative rank of each predecessor)
---: (Skiplist, any) -> ({ [integer]: SLNode }, { [integer]: integer })
+--: (Skiplist, unknown) -> ({ [integer]: SLNode }, { [integer]: integer })
 local function find_update(sl, key)
   local cmp = sl._cmp
   --: { [integer]: SLNode }
@@ -96,7 +96,7 @@ local function find_update(sl, key)
 end
 
 -- Insert a key/value pair. If key already exists, update its value.
---: (Skiplist, any, any) -> Skiplist
+--: (Skiplist, unknown, unknown) -> Skiplist
 function SL:insert(key, value)
   local cmp = self._cmp
   local update, rank = find_update(self, key)
@@ -141,7 +141,7 @@ function SL:insert(key, value)
 end
 
 -- Delete a key. Returns true if found and deleted, false if not found.
---: (Skiplist, any) -> boolean
+--: (Skiplist, unknown) -> boolean
 function SL:delete(key)
   local update, _ = find_update(self, key)
   local x = update[1].forward[1]
@@ -174,7 +174,7 @@ function SL:delete(key)
 end
 
 -- Get value for key, or nil if not found.
---: (Skiplist, any) -> any
+--: (Skiplist, unknown) -> unknown
 function SL:get(key)
   local cmp = self._cmp
   local x = self._header
@@ -193,7 +193,7 @@ function SL:get(key)
 end
 
 -- Returns true if key is present.
---: (Skiplist, any) -> boolean
+--: (Skiplist, unknown) -> boolean
 function SL:has(key)
   local cmp = self._cmp
   local x = self._header
@@ -210,7 +210,7 @@ function SL:has(key)
 end
 
 -- Minimum key (nil if empty).
---: (Skiplist) -> any
+--: (Skiplist) -> unknown
 function SL:min()
   local x = self._header.forward[1]
   if x == self._tail then return nil end
@@ -218,7 +218,7 @@ function SL:min()
 end
 
 -- Maximum key (nil if empty).
---: (Skiplist) -> any
+--: (Skiplist) -> unknown
 function SL:max()
   -- Walk forward at each level greedily
   local x = self._header
@@ -240,7 +240,7 @@ function SL:size()
 end
 
 -- Iterator over all (key, value) pairs in sorted order.
---: (Skiplist) -> () -> (any, any) | nil
+--: (Skiplist) -> () -> (unknown, unknown) | nil
 function SL:iter()
   local x = self._header.forward[1]
   local tail = self._tail
@@ -253,7 +253,7 @@ function SL:iter()
 end
 
 -- Return sorted array of all keys.
---: (Skiplist) -> { [integer]: any }
+--: (Skiplist) -> { [integer]: unknown }
 function SL:keys()
   local t = {}
   local x = self._header.forward[1]
@@ -266,7 +266,7 @@ function SL:keys()
 end
 
 -- Return values in key-sorted order.
---: (Skiplist) -> { [integer]: any }
+--: (Skiplist) -> { [integer]: unknown }
 function SL:values()
   local t = {}
   local x = self._header.forward[1]
@@ -279,7 +279,7 @@ function SL:values()
 end
 
 -- Return array of {key, value} pairs in sorted order.
---: (Skiplist) -> { [integer]: { key: any, value: any } }
+--: (Skiplist) -> { [integer]: { key: unknown, value: unknown } }
 function SL:pairs()
   local t = {}
   local x = self._header.forward[1]
@@ -293,7 +293,7 @@ end
 
 -- Range query: return array of {key, value} with lo <= key <= hi.
 -- Uses the comparator: lo <= key means not(key < lo) and not(hi < key).
---: (Skiplist, any, any) -> { [integer]: { key: any, value: any } }
+--: (Skiplist, unknown, unknown) -> { [integer]: { key: unknown, value: unknown } }
 function SL:range(lo, hi)
   local cmp = self._cmp
   local result = {}
@@ -317,7 +317,7 @@ function SL:range(lo, hi)
 end
 
 -- Range query: return just the keys with lo <= key <= hi.
---: (Skiplist, any, any) -> { [integer]: any }
+--: (Skiplist, unknown, unknown) -> { [integer]: unknown }
 function SL:range_keys(lo, hi)
   local cmp = self._cmp
   local result = {}
@@ -339,7 +339,7 @@ function SL:range_keys(lo, hi)
 end
 
 -- Rank: 1-based position of key in sorted order. Returns nil if not found.
---: (Skiplist, any) -> integer | nil
+--: (Skiplist, unknown) -> integer | nil
 function SL:rank(key)
   local cmp = self._cmp
   local x = self._header
@@ -360,7 +360,7 @@ function SL:rank(key)
 end
 
 -- at_rank: return {key, value} at 1-based rank position. Returns nil if out of range.
---: (Skiplist, integer) -> { key: any, value: any } | nil
+--: (Skiplist, integer) -> { key: unknown, value: unknown } | nil
 function SL:at_rank(pos)
   if pos < 1 or pos > self._size then return nil end
   local x = self._header
@@ -380,7 +380,7 @@ end
 
 -- Predecessor: largest key strictly less than the given key.
 -- Returns {key, value} or nil if no such key exists.
---: (Skiplist, any) -> { key: any, value: any } | nil
+--: (Skiplist, unknown) -> { key: unknown, value: unknown } | nil
 function SL:pred(key)
   local cmp = self._cmp
   local x = self._header
@@ -397,7 +397,7 @@ end
 
 -- Successor: smallest key strictly greater than the given key.
 -- Returns {key, value} or nil if no such key exists.
---: (Skiplist, any) -> { key: any, value: any } | nil
+--: (Skiplist, unknown) -> { key: unknown, value: unknown } | nil
 function SL:succ(key)
   local cmp = self._cmp
   local x = self._header
@@ -420,7 +420,7 @@ end
 
 -- Floor: largest key <= the given key.
 -- Returns {key, value} or nil if no such key exists.
---: (Skiplist, any) -> { key: any, value: any } | nil
+--: (Skiplist, unknown) -> { key: unknown, value: unknown } | nil
 function SL:floor(key)
   local cmp = self._cmp
   local x = self._header
@@ -442,7 +442,7 @@ end
 
 -- Ceil: smallest key >= the given key.
 -- Returns {key, value} or nil if no such key exists.
---: (Skiplist, any) -> { key: any, value: any } | nil
+--: (Skiplist, unknown) -> { key: unknown, value: unknown } | nil
 function SL:ceil(key)
   local cmp = self._cmp
   local x = self._header

@@ -19,9 +19,13 @@ end
 local M = {}
 
 -- ffi is nil on non-Windows or when LuaJIT FFI is unavailable.
-local ffi --: any
+-- `any` opt-out: ffi module access is gated by IS_WINDOWS runtime check;
+-- the type checker cannot follow the implication IS_WINDOWS → ffi ~= nil.
+local ffi_ok
+local ffi = nil --[[: any]]
 do
 	local ok, mod = pcall(require, "ffi")
+	ffi_ok = ok
 	if ok then ffi = mod end
 end
 
@@ -163,7 +167,8 @@ end
 
 -- ── advapi32 FFI setup ─────────────────────────────────────────────────────
 
-local advapi32 --: any
+-- `any` opt-out: advapi32 is a Windows FFI library handle; ffi.load returns cdata.
+local advapi32 = nil --[[: any]]
 local ffi_ready = false
 
 if IS_WINDOWS then
@@ -196,7 +201,7 @@ end
 -- ── Cap factory ────────────────────────────────────────────────────────────
 
 function M.registry_cap(opts)
-	opts = opts or {}
+	local opts_ = (opts or {}) --[[:! { root: string | nil, allow_write: boolean | nil }]]
 
 	if not IS_WINDOWS then
 		error("registry_cap: Windows only")
@@ -206,10 +211,10 @@ function M.registry_cap(opts)
 		return nil, "registry cap: advapi32 FFI unavailable"
 	end
 
-	local root = opts.root
+	local root = opts_.root
 	if not root then error("registry_cap: opts.root is required") end
 	local root_path = root  -- preserve original string for attenuate comparisons
-	local allow_write = opts.allow_write or false
+	local allow_write = opts_.allow_write or false
 
 	local hive_int, maybe_base = parse_root(root)
 	if not hive_int then
@@ -222,8 +227,8 @@ function M.registry_cap(opts)
 	local function open_key(subkey, want_write)
 		local full = join_key(base_key, subkey or "")
 		local access = want_write and KEY_WRITE or KEY_READ
-		local hkey_out = ffi.new("HKEY[1]") --: any
-		local wfull = ffi.cast("const unsigned short*", utf8_to_utf16le(full)) --: any
+		local hkey_out = ffi.new("HKEY[1]") --: cdata
+		local wfull = ffi.cast("const unsigned short*", utf8_to_utf16le(full)) --: cdata
 		local rc = advapi32.RegOpenKeyExW(
 			ffi.cast("void*", ffi.cast("uintptr_t", hive_int)),
 			wfull, 0, access, hkey_out)
@@ -275,14 +280,14 @@ function M.registry_cap(opts)
 			local hkey, err = open_key(subkey, false)
 			if not hkey then return nil, err end
 			local wname = ffi.cast("const unsigned short*", utf8_to_utf16le(name or ""))
-			local vtype = ffi.new("unsigned long[1]") --: any
-			local size  = ffi.new("unsigned long[1]") --: any
+			local vtype = ffi.new("unsigned long[1]") --: cdata
+			local size  = ffi.new("unsigned long[1]") --: cdata
 			local rc = advapi32.RegQueryValueExW(hkey, wname, nil, vtype, nil, size)
 			if rc ~= 0 then
 				close_key(hkey)
 				return nil, "registry: RegQueryValueExW failed: " .. rc
 			end
-			local buf = ffi.new("unsigned char[?]", size[0]) --: any
+			local buf = ffi.new("unsigned char[?]", size[0]) --: cdata
 			rc = advapi32.RegQueryValueExW(hkey, wname, nil, vtype, buf, size)
 			close_key(hkey)
 			if rc ~= 0 then
@@ -301,7 +306,7 @@ function M.registry_cap(opts)
 			if not hkey then return nil, err end
 			local wname    = ffi.cast("const unsigned short*", utf8_to_utf16le(name or ""))
 			local type_int = vtype or REG_SZ
-			local data --: any
+			local data --: cdata | nil
 			local data_size
 			if type_int == REG_DWORD then
 				local v = tonumber(value) or 0
@@ -332,8 +337,8 @@ function M.registry_cap(opts)
 			local hkey, err = open_key(subkey, false)
 			if not hkey then return nil, err end
 			local result = {}
-			local name_buf  = ffi.new("unsigned short[256]") --: any
-			local name_size = ffi.new("unsigned long[1]")    --: any
+			local name_buf  = ffi.new("unsigned short[256]") --: cdata
+			local name_size = ffi.new("unsigned long[1]")    --: cdata
 			local idx = 0
 			while true do
 				name_size[0] = 256
@@ -357,11 +362,11 @@ function M.registry_cap(opts)
 			if not hkey then return nil, err end
 			local result = {}
 			local BUF       = 16384
-			local name_buf  = ffi.new("unsigned short[256]") --: any
-			local name_size = ffi.new("unsigned long[1]")    --: any
-			local vtype     = ffi.new("unsigned long[1]")    --: any
-			local data_buf  = ffi.new("unsigned char[?]", BUF) --: any
-			local data_size = ffi.new("unsigned long[1]")    --: any
+			local name_buf  = ffi.new("unsigned short[256]") --: cdata
+			local name_size = ffi.new("unsigned long[1]")    --: cdata
+			local vtype     = ffi.new("unsigned long[1]")    --: cdata
+			local data_buf  = ffi.new("unsigned char[?]", BUF) --: cdata
+			local data_size = ffi.new("unsigned long[1]")    --: cdata
 			local idx = 0
 			while true do
 				name_size[0] = 256
@@ -383,8 +388,8 @@ function M.registry_cap(opts)
 
 		attenuate = function(sub_opts)
 			if revoked then return nil, "registry: capability revoked" end
-			sub_opts = sub_opts or {}
-			local new_root = sub_opts.root
+			local sub_opts_ = (sub_opts or {}) --[[:! { root: string | nil, allow_write: boolean | nil }]]
+			local new_root = sub_opts_.root
 			if not new_root then return nil, "registry.attenuate: root required" end
 			-- Compare case-insensitively (registry paths are case-insensitive)
 			local cur_lower = root_path:lower()
@@ -393,14 +398,14 @@ function M.registry_cap(opts)
 				return nil, "registry.attenuate: root escapes current scope"
 			end
 			local new_allow_write
-			if sub_opts.allow_write == nil then
+			if sub_opts_.allow_write == nil then
 				new_allow_write = allow_write
-			elseif sub_opts.allow_write and not allow_write then
+			elseif sub_opts_.allow_write and not allow_write then
 				return nil, "registry.attenuate: cannot grant write not held"
 			else
-				new_allow_write = sub_opts.allow_write
+				new_allow_write = sub_opts_.allow_write
 			end
-			local reg_mod = --[[:! { registry_cap: any }]] require("lib.platform.caps.registry")
+			local reg_mod = --[[:! { registry_cap: (opts: { root: string, allow_write: boolean | nil }) -> (unknown, unknown) }]] require("lib.platform.caps.registry")
 			return reg_mod.registry_cap({ root = new_root, allow_write = new_allow_write })
 		end,
 	}

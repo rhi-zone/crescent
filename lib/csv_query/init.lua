@@ -17,17 +17,17 @@ local floor, sqrt = math.floor, math.sqrt
 -- ---------------------------------------------------------------------------
 
 local csv_ok, csv_any = pcall(require, "lib.csv")
-local csv = csv_ok and csv_any --[[: any]] or nil --: any
+local csv = csv_ok and csv_any --[[: unknown]] or nil --: unknown
 
 -- ---------------------------------------------------------------------------
 -- DataFrame metatable
 -- ---------------------------------------------------------------------------
 
---:: DataFrame = { _rows: { [integer]: { [string]: any } }, _cols: { [integer]: string }, ... }
+--:: DataFrame = { _rows: { [integer]: { [string]: unknown } }, _cols: { [integer]: string }, ... }
 local DataFrame = {}
 DataFrame.__index = DataFrame
 
---: ({ [integer]: { [string]: any } }, { [integer]: string } | nil) -> any
+--: ({ [integer]: { [string]: unknown } }, { [integer]: string } | nil) -> DataFrame
 local function new_df(rows, cols)
   -- cols: ordered array of column names (may be nil — will be derived)
   if not cols then
@@ -56,16 +56,16 @@ function M.from_csv(csv_string)
   if type(csv_string) ~= "string" then
     return nil, "from_csv: expected string"
   end
-  local rows --: { [integer]: { [string]: any } } | nil
+  local rows --: { [integer]: { [string]: unknown } } | nil
   local err
   if csv then
-    local rows_any, err_any = csv.decode(csv_string, { headers = true, coerce = true })
-    rows = rows_any --[[: any]]
+    local rows_any, err_any = (csv --[[:! { decode: (string, { [string]: unknown }) -> (unknown, unknown) }]]).decode(csv_string, { headers = true, coerce = true })
+    rows = rows_any --[[:! { [integer]: { [string]: unknown } } | nil]]
     err = err_any
     if not rows then return nil, err end
   else
     -- Built-in minimal CSV parser (no quoting support)
-    rows = {} --: { [integer]: { [string]: any } }
+    rows = {} --: { [integer]: { [string]: unknown } }
     local headers = nil --: { [integer]: string } | nil
     for line in (csv_string .. "\n"):gmatch("([^\r\n]*)\r?\n") do
       if #line > 0 then
@@ -76,11 +76,11 @@ function M.from_csv(csv_string)
         if not headers then
           headers = fields
         else
-          local row = {} --: { [string]: any }
+          local row = {} --: { [string]: unknown }
           for i, h in ipairs(headers) do
             row[h] = fields[i]
           end
-          local rows_ = rows --[[:! { [integer]: { [string]: any } }]]
+          local rows_ = rows --[[:! { [integer]: { [string]: unknown } }]]
           rows_[#rows_ + 1] = row
         end
       end
@@ -99,6 +99,7 @@ function M.from_csv(csv_string)
       end
     end
   end
+  if not rows then return nil, "from_csv: no rows parsed" end
   return new_df(rows, cols)
 end
 
@@ -139,9 +140,9 @@ local function copy_cols(cols)
   return c
 end
 
---: ({ [string]: any }) -> { [string]: any }
+--: ({ [string]: unknown }) -> { [string]: unknown }
 local function copy_row(row)
-  local r = {} --: { [string]: any }
+  local r = {} --: { [string]: unknown }
   for k, v in pairs(row) do r[k --[[:! string]]] = v end
   return r
 end
@@ -158,7 +159,7 @@ function DataFrame:select(...)
   for _, c in ipairs(wanted) do want_set[c] = true end
   local rows = {}
   for i, row in ipairs(self_._rows) do
-    local r = {} --: { [string]: any }
+    local r = {} --: { [string]: unknown }
     for _, c in ipairs(wanted) do
       r[c] = row[c]
     end
@@ -173,7 +174,7 @@ end
 
 function DataFrame:where(predicate)
   local self_ = self --[[:! DataFrame]]
-  local rows = {} --: { [integer]: { [string]: any } }
+  local rows = {} --: { [integer]: { [string]: unknown } }
   for _, row in ipairs(self_._rows) do
     if predicate(row) then
       local r = copy_row(row)
@@ -190,7 +191,7 @@ end
 function DataFrame:order_by(key, dir)
   local self_ = self --[[:! DataFrame]]
   dir = dir or "asc"
-  local rows = {} --: { [integer]: { [string]: any } }
+  local rows = {} --: { [integer]: { [string]: unknown } }
   for i, row in ipairs(self_._rows) do
     local r = copy_row(row)
     rows[i] = r
@@ -218,7 +219,7 @@ end
 function DataFrame:limit(n)
   local n_ = n --[[:! integer]]
   local self_ = self --[[:! DataFrame]]
-  local rows = {} --: { [integer]: { [string]: any } }
+  local rows = {} --: { [integer]: { [string]: unknown } }
   local src = self_._rows
   for i = 1, math.min(n_, #src) do
     local r = copy_row(src[i])
@@ -229,7 +230,7 @@ end
 
 function DataFrame:offset(n)
   local self_ = self --[[:! DataFrame]]
-  local rows = {} --: { [integer]: { [string]: any } }
+  local rows = {} --: { [integer]: { [string]: unknown } }
   local src = self_._rows
   for i = n + 1, #src do
     rows[#rows + 1] = copy_row(src[i])
@@ -288,7 +289,7 @@ function DataFrame:group_by(groups, aggregates)
   end
 
   -- Build group key → rows mapping (preserve insertion order)
-  local group_map = {} --: { [string]: { rows: { [integer]: { [string]: any } }, key_vals: { [string]: any } } }
+  local group_map = {} --: { [string]: { rows: { [integer]: { [string]: unknown } }, key_vals: { [string]: unknown } } }
   local group_order = {} --: { [integer]: string }
 
   for _, row in ipairs(self_._rows) do
@@ -309,7 +310,7 @@ function DataFrame:group_by(groups, aggregates)
   end
 
   -- Build result rows and determine output columns
-  local result = {} --: { [integer]: { [string]: any } }
+  local result = {} --: { [integer]: { [string]: unknown } }
   local out_cols = copy_cols(group_cols)
   -- Collect aggregate output col names in deterministic order
   local agg_col_names = {}
@@ -323,7 +324,7 @@ function DataFrame:group_by(groups, aggregates)
 
   for _, key_str in ipairs(group_order) do
     local info = group_map[key_str]
-    local new_row = {} --: { [string]: any }
+    local new_row = {} --: { [string]: unknown }
     -- Copy group-by column values
     for _, col in ipairs(group_cols) do
       new_row[col] = info.key_vals[col]
@@ -359,12 +360,12 @@ function DataFrame:join(other, on)
   local other_ = other --[[:! DataFrame]]
   local lcol, rcol = resolve_on(on)
   -- Build hash on right side
-  local hash = {} --: { [any]: { [integer]: { [string]: any } } }
+  local hash = {} --: { [unknown]: { [integer]: { [string]: unknown } } }
   for _, rrow in ipairs(other_._rows) do
     local k = rrow[rcol]
     if k ~= nil then
       if not hash[k] then hash[k] = {} end
-      local hk = hash[k] --[[:! { [integer]: { [string]: any } }]]
+      local hk = hash[k] --[[:! { [integer]: { [string]: unknown } }]]
       hk[#hk + 1] = rrow
     end
   end
@@ -377,12 +378,12 @@ function DataFrame:join(other, on)
     if not left_col_set[c] then insert(out_cols, c) end
   end
 
-  local result = {} --: { [integer]: { [string]: any } }
+  local result = {} --: { [integer]: { [string]: unknown } }
   for _, lrow in ipairs(self_._rows) do
     local k = lrow[lcol]
     local matches = k ~= nil and hash[k]
     if matches then
-      local matches_ = matches --[[:! { [integer]: { [string]: any } }]]
+      local matches_ = matches --[[:! { [integer]: { [string]: unknown } }]]
       for _, rrow in ipairs(matches_) do
         local new_row = copy_row(lrow)
         for _, c in ipairs(other_._cols) do
@@ -402,12 +403,12 @@ function DataFrame:left_join(other, on)
   local self_ = self --[[:! DataFrame]]
   local other_ = other --[[:! DataFrame]]
   local lcol, rcol = resolve_on(on)
-  local hash = {} --: { [any]: { [integer]: { [string]: any } } }
+  local hash = {} --: { [unknown]: { [integer]: { [string]: unknown } } }
   for _, rrow in ipairs(other_._rows) do
     local k = rrow[rcol]
     if k ~= nil then
       if not hash[k] then hash[k] = {} end
-      local hk = hash[k] --[[:! { [integer]: { [string]: any } }]]
+      local hk = hash[k] --[[:! { [integer]: { [string]: unknown } }]]
       hk[#hk + 1] = rrow
     end
   end
@@ -419,12 +420,12 @@ function DataFrame:left_join(other, on)
     if not left_col_set[c] then insert(out_cols, c) end
   end
 
-  local result = {} --: { [integer]: { [string]: any } }
+  local result = {} --: { [integer]: { [string]: unknown } }
   for _, lrow in ipairs(self_._rows) do
     local k = lrow[lcol]
     local matches = k ~= nil and hash[k]
     if matches then
-      local matches_ = matches --[[:! { [integer]: { [string]: any } }]]
+      local matches_ = matches --[[:! { [integer]: { [string]: unknown } }]]
       for _, rrow in ipairs(matches_) do
         local new_row = copy_row(lrow)
         for _, c in ipairs(other_._cols) do
@@ -456,7 +457,7 @@ end
 function DataFrame:distinct(col)
   local self_ = self --[[:! DataFrame]]
   local seen = {}
-  local result = {} --: { [integer]: { [string]: any } }
+  local result = {} --: { [integer]: { [string]: unknown } }
   for _, row in ipairs(self_._rows) do
     local key
     if col then
@@ -509,9 +510,9 @@ function DataFrame:drop(...)
   for _, c in ipairs(self_._cols) do
     if not drop_set[c] then insert(cols, c) end
   end
-  local rows = {} --: { [integer]: { [string]: any } }
+  local rows = {} --: { [integer]: { [string]: unknown } }
   for i, row in ipairs(self_._rows) do
-    local r = {} --: { [string]: any }
+    local r = {} --: { [string]: unknown }
     for _, c in ipairs(cols) do r[c] = row[c] end
     rows[i] = r
   end
@@ -528,9 +529,9 @@ function DataFrame:rename(mapping)
   for _, c in ipairs(self_._cols) do
     insert(cols, mapping[c] or c)
   end
-  local rows = {} --: { [integer]: { [string]: any } }
+  local rows = {} --: { [integer]: { [string]: unknown } }
   for i, row in ipairs(self_._rows) do
-    local r = {} --: { [string]: any }
+    local r = {} --: { [string]: unknown }
     for old, v in pairs(row) do
       r[mapping[old] or old] = v
     end
@@ -553,7 +554,7 @@ function DataFrame:agg(spec)
   sort(out_cols_any)
   for _, out_col in ipairs(out_cols) do
     local s = spec[out_col]
-    local agg_rows = self_._rows --[[:! { [integer]: { [string]: any } }]]
+    local agg_rows = self_._rows --[[:! { [integer]: { [string]: unknown } }]]
     result[out_col] = apply_agg(agg_rows, s[1], s[2])
   end
   return result
@@ -601,7 +602,7 @@ end
 function DataFrame:to_csv()
   local self_csv = self --[[:! DataFrame]]
   if csv then
-    return csv.encode_records(self_csv._rows, self_csv._cols)
+    return (csv --[[:! { encode_records: (unknown, unknown) -> string }]]).encode_records(self_csv._rows, self_csv._cols)
   end
   -- Built-in minimal formatter
   local lines = {}
