@@ -53,7 +53,7 @@ TypeNode =
 -- meaningful values for. We opt out of strict typing here with `any` so callers
 -- (types_mod.make_*, unify_mod.try_unify) accept the partial ctx without
 -- forcing us to fabricate every required Ctx field.
---: () -> any
+--: () -> Ctx
 local function make_ctx()
 	local pool = intern_mod.new()
 	local ctx  = types_mod.new_ctx(pool)
@@ -68,7 +68,7 @@ end
 -- Self-recursion via local function declaration.
 -- NOTE: discriminant tests use `node.tag == "..."` directly (not aliased to a local)
 -- so field_disc narrowing flows. CLAUDE.md gotcha: aliasing to a local does NOT narrow.
---: (ctx: any, node: TypeNode) -> integer
+--: (ctx: Ctx, node: TypeNode) -> integer
 local function ast_to_tid(ctx, node)
 	if     node.tag == "nil"      then return ctx.T_NIL
 	elseif node.tag == "never"    then return ctx.T_NEVER
@@ -137,7 +137,7 @@ end
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
---: (ctx: any, a: integer, b: integer) -> boolean
+--: (ctx: Ctx, a: integer, b: integer) -> boolean
 local function subtype(ctx, a, b)
 	return unify_mod.try_unify(ctx, a, b)
 end
@@ -156,7 +156,8 @@ end
 -- 1. Reflexivity: T <: T
 arb.it("[alg] reflexivity: T <: T",
 	farb.arb_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx = make_ctx()
 		local tid = ast_to_tid(ctx, T_node)
 		assert(subtype(ctx, tid, tid),
@@ -166,7 +167,9 @@ arb.it("[alg] reflexivity: T <: T",
 -- 2. Union introduction: A <: A | B
 arb.it("[alg] union intro: A <: A | B",
 	{ farb.arb_type, farb.arb_type },
-	function(A_node, B_node)
+	function(A_node_u, B_node_u)
+		local A_node = A_node_u --[[:! TypeNode]]
+		local B_node = B_node_u --[[:! TypeNode]]
 		local ctx = make_ctx()
 		local a   = ast_to_tid(ctx, A_node)
 		local b   = ast_to_tid(ctx, B_node)
@@ -179,7 +182,9 @@ arb.it("[alg] union intro: A <: A | B",
 -- 3. Intersection elimination (left): A & B <: A
 arb.it("[alg] inter elim left: A & B <: A",
 	{ farb.arb_type, farb.arb_type },
-	function(A_node, B_node)
+	function(A_node_u, B_node_u)
+		local A_node = A_node_u --[[:! TypeNode]]
+		local B_node = B_node_u --[[:! TypeNode]]
 		local ctx = make_ctx()
 		local a   = ast_to_tid(ctx, A_node)
 		local b   = ast_to_tid(ctx, B_node)
@@ -193,7 +198,9 @@ arb.it("[alg] inter elim left: A & B <: A",
 -- 4. Intersection elimination (right): A & B <: B
 arb.it("[alg] inter elim right: A & B <: B",
 	{ farb.arb_type, farb.arb_type },
-	function(A_node, B_node)
+	function(A_node_u, B_node_u)
+		local A_node = A_node_u --[[:! TypeNode]]
+		local B_node = B_node_u --[[:! TypeNode]]
 		local ctx = make_ctx()
 		local a   = ast_to_tid(ctx, A_node)
 		local b   = ast_to_tid(ctx, B_node)
@@ -207,7 +214,8 @@ arb.it("[alg] inter elim right: A & B <: B",
 -- 5. Optional introduction: T <: T | nil
 arb.it("[alg] optional intro: T <: T | nil",
 	farb.arb_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx   = make_ctx()
 		local tid   = ast_to_tid(ctx, T_node)
 		local t_nil = types_mod.make_union(ctx, { tid, ctx.T_NIL })
@@ -218,7 +226,8 @@ arb.it("[alg] optional intro: T <: T | nil",
 -- 6. nil <: T | nil (for any T)
 arb.it("[alg] nil always <: T | nil",
 	farb.arb_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx   = make_ctx()
 		local tid   = ast_to_tid(ctx, T_node)
 		local t_nil = types_mod.make_union(ctx, { tid, ctx.T_NIL })
@@ -229,7 +238,9 @@ arb.it("[alg] nil always <: T | nil",
 -- 7. Union symmetry of introduction: A <: B | A (not just A | B)
 arb.it("[alg] union intro symmetric: A <: B | A",
 	{ farb.arb_type, farb.arb_type },
-	function(A_node, B_node)
+	function(A_node_u, B_node_u)
+		local A_node = A_node_u --[[:! TypeNode]]
+		local B_node = B_node_u --[[:! TypeNode]]
 		local ctx = make_ctx()
 		local a   = ast_to_tid(ctx, A_node)
 		local b   = ast_to_tid(ctx, B_node)
@@ -242,7 +253,8 @@ arb.it("[alg] union intro symmetric: A <: B | A",
 -- 8. Reflexivity of union: A | A =:= A  (A | A <: A and A <: A | A)
 arb.it("[alg] union idempotent: A | A <: A",
 	farb.arb_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx = make_ctx()
 		local tid = ast_to_tid(ctx, T_node)
 		local t_t = types_mod.make_union(ctx, { tid, tid })
@@ -255,7 +267,10 @@ arb.it("[alg] union idempotent: A | A <: A",
 -- A <: A|B (union intro) and A|B <: A|B|C (union intro again) implies A <: A|B|C
 arb.it("[alg] transitivity: A <: A|B and A|B <: A|B|C implies A <: A|B|C",
 	{ farb.arb_type, farb.arb_type, farb.arb_type },
-	function(A_node, B_node, C_node)
+	function(A_node_u, B_node_u, C_node_u)
+		local A_node = A_node_u --[[:! TypeNode]]
+		local B_node = B_node_u --[[:! TypeNode]]
+		local C_node = C_node_u --[[:! TypeNode]]
 		local ctx      = make_ctx()
 		local a        = ast_to_tid(ctx, A_node)
 		local b        = ast_to_tid(ctx, B_node)
@@ -279,7 +294,8 @@ arb.it("[alg] transitivity: A <: A|B and A|B <: A|B|C implies A <: A|B|C",
 -- 10. Intersection intro: T <: T & T
 arb.it("[alg] intersection intro: T <: T & T",
 	farb.arb_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx   = make_ctx()
 		local tid   = ast_to_tid(ctx, T_node)
 		local t_and = types_mod.make_intersection(ctx, { tid, tid })
@@ -292,7 +308,8 @@ arb.it("[alg] intersection intro: T <: T & T",
 -- lit_int <: integer and <: number; lit_str <: string; lit_bool <: boolean
 arb.it("[alg] literal subtyping: lit <: base type",
 	farb.arb_type_leaf,
-	function(leaf)
+	function(leaf_u)
+		local leaf = leaf_u --[[:! TypeNode]]
 		local tag = leaf.tag
 		-- Only test literal nodes; skip base types, nil, never, unknown (reflexivity covers those)
 		if tag ~= "lit_int" and tag ~= "lit_str" and tag ~= "lit_bool" then return end
@@ -316,7 +333,8 @@ arb.it("[alg] literal subtyping: lit <: base type",
 -- Base types are supertypes of specific literals, not subtypes.
 arb.it("[alg] literal asymmetry: integer is not <: lit_int(n)",
 	arb.int(0, 99),
-	function(n)
+	function(n_u)
+		local n = n_u --[[:! integer]]
 		local ctx     = make_ctx()
 		local lit_tid = types_mod.make_literal(ctx, LIT_INTEGER, n)
 		-- lit_int(n) <: integer (should hold)
@@ -331,7 +349,10 @@ arb.it("[alg] literal asymmetry: integer is not <: lit_int(n)",
 -- (A) -> C  <:  (A) -> (C | B)   because C <: C | B
 arb.it("[alg] function: covariant return",
 	{ farb.arb_type, farb.arb_type, farb.arb_type },
-	function(A_node, B_node, C_node)
+	function(A_node_u, B_node_u, C_node_u)
+		local A_node = A_node_u --[[:! TypeNode]]
+		local B_node = B_node_u --[[:! TypeNode]]
+		local C_node = C_node_u --[[:! TypeNode]]
 		local ctx      = make_ctx()
 		local a        = ast_to_tid(ctx, A_node)
 		local b        = ast_to_tid(ctx, B_node)
@@ -350,7 +371,10 @@ arb.it("[alg] function: covariant return",
 -- (A | B) -> C  <:  (A) -> C   because accepting more is a subtype of accepting less
 arb.it("[alg] function: contravariant param",
 	{ farb.arb_type, farb.arb_type, farb.arb_type },
-	function(A_node, B_node, C_node)
+	function(A_node_u, B_node_u, C_node_u)
+		local A_node = A_node_u --[[:! TypeNode]]
+		local B_node = B_node_u --[[:! TypeNode]]
+		local C_node = C_node_u --[[:! TypeNode]]
 		local ctx        = make_ctx()
 		local a          = ast_to_tid(ctx, A_node)
 		local b          = ast_to_tid(ctx, B_node)
@@ -372,7 +396,8 @@ arb.it("[alg] function: contravariant param",
 -- 15. Deep reflexivity: T <: T at greater nesting depth
 arb.it("[alg] deep reflexivity: deeply-nested T <: T",
 	farb.arb_type_deep,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx = make_ctx()
 		local tid = ast_to_tid(ctx, T_node)
 		assert(subtype(ctx, tid, tid),
@@ -382,7 +407,9 @@ arb.it("[alg] deep reflexivity: deeply-nested T <: T",
 -- 16. Deep union intro: A <: A | B with deep types
 arb.it("[alg] deep union intro: A <: A | B (deep)",
 	{ farb.arb_type_deep, farb.arb_type_deep },
-	function(A_node, B_node)
+	function(A_node_u, B_node_u)
+		local A_node = A_node_u --[[:! TypeNode]]
+		local B_node = B_node_u --[[:! TypeNode]]
 		local ctx = make_ctx()
 		local a   = ast_to_tid(ctx, A_node)
 		local b   = ast_to_tid(ctx, B_node)
@@ -395,7 +422,9 @@ arb.it("[alg] deep union intro: A <: A | B (deep)",
 -- 17. Deep intersection elim: A & B <: A with deep types
 arb.it("[alg] deep inter elim: A & B <: A (deep)",
 	{ farb.arb_type_deep, farb.arb_type_deep },
-	function(A_node, B_node)
+	function(A_node_u, B_node_u)
+		local A_node = A_node_u --[[:! TypeNode]]
+		local B_node = B_node_u --[[:! TypeNode]]
 		local ctx = make_ctx()
 		local a   = ast_to_tid(ctx, A_node)
 		local b   = ast_to_tid(ctx, B_node)
@@ -409,7 +438,8 @@ arb.it("[alg] deep inter elim: A & B <: A (deep)",
 -- 18. Deep intersection intro: T <: T & T with deep types
 arb.it("[alg] deep intersection intro: T <: T & T (deep)",
 	farb.arb_type_deep,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx   = make_ctx()
 		local tid   = ast_to_tid(ctx, T_node)
 		local t_and = types_mod.make_intersection(ctx, { tid, tid })
@@ -423,7 +453,8 @@ arb.it("[alg] deep intersection intro: T <: T & T (deep)",
 -- 19. Required field satisfies optional slot: { x: T } <: { x?: T }
 arb.it("[alg] required field <: optional field: { x: T } <: { x?: T }",
 	farb.arb_base_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx  = make_ctx()
 		local xid  = intern_mod.intern(ctx.pool, "x")
 		local tid  = ast_to_tid(ctx, T_node)
@@ -439,7 +470,8 @@ arb.it("[alg] required field <: optional field: { x: T } <: { x?: T }",
 -- An optional field in the target means source can omit the field entirely.
 arb.it("[alg] empty table <: optional-field table: {} <: { x?: T }",
 	farb.arb_base_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx   = make_ctx()
 		local xid   = intern_mod.intern(ctx.pool, "x")
 		local tid   = ast_to_tid(ctx, T_node)
@@ -453,7 +485,8 @@ arb.it("[alg] empty table <: optional-field table: {} <: { x?: T }",
 -- 21. Optional field reflexivity: { x?: T } <: { x?: T }
 arb.it("[alg] optional field reflexivity: { x?: T } <: { x?: T }",
 	farb.arb_base_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx  = make_ctx()
 		local xid  = intern_mod.intern(ctx.pool, "x")
 		local tid  = ast_to_tid(ctx, T_node)
@@ -468,7 +501,8 @@ arb.it("[alg] optional field reflexivity: { x?: T } <: { x?: T }",
 -- 22. Optional field NOT subtype of required: { x?: T } </: { x: T }
 arb.it("[alg] optional field NOT <: required field: { x?: T } </: { x: T }",
 	farb.arb_base_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx  = make_ctx()
 		local xid  = intern_mod.intern(ctx.pool, "x")
 		local tid  = ast_to_tid(ctx, T_node)
@@ -483,7 +517,8 @@ arb.it("[alg] optional field NOT <: required field: { x?: T } </: { x: T }",
 -- 24. Readonly field reflexivity: { readonly x: T } <: { readonly x: T }
 arb.it("[alg] readonly field reflexivity: { readonly x: T } <: { readonly x: T }",
 	farb.arb_base_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx  = make_ctx()
 		local xid  = intern_mod.intern(ctx.pool, "x")
 		local tid  = ast_to_tid(ctx, T_node)
@@ -502,7 +537,8 @@ arb.it("[alg] readonly field reflexivity: { readonly x: T } <: { readonly x: T }
 -- 25. never <: T  for all T
 arb.it("[alg] lattice: never <: T for all T",
 	farb.arb_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx   = make_ctx()
 		local t_tid = ast_to_tid(ctx, T_node)
 		assert(subtype(ctx, ctx.T_NEVER, t_tid),
@@ -512,7 +548,8 @@ arb.it("[alg] lattice: never <: T for all T",
 -- 26. T <: unknown  for all T
 arb.it("[alg] lattice: T <: unknown for all T",
 	farb.arb_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx   = make_ctx()
 		local t_tid = ast_to_tid(ctx, T_node)
 		assert(subtype(ctx, t_tid, ctx.T_UNKNOWN),
@@ -524,7 +561,8 @@ arb.it("[alg] lattice: T <: unknown for all T",
 -- never is strictly smaller than all of them.
 arb.it("[alg] lattice: base_type </: never",
 	farb.arb_base_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx   = make_ctx()
 		local t_tid = ast_to_tid(ctx, T_node)
 		assert(not subtype(ctx, t_tid, ctx.T_NEVER),
@@ -535,7 +573,8 @@ arb.it("[alg] lattice: base_type </: never",
 -- unknown is the top — you can't flow it into a concrete type without a typecast.
 arb.it("[alg] lattice: unknown </: base_type",
 	farb.arb_base_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx   = make_ctx()
 		local t_tid = ast_to_tid(ctx, T_node)
 		assert(not subtype(ctx, ctx.T_UNKNOWN, t_tid),
@@ -545,7 +584,8 @@ arb.it("[alg] lattice: unknown </: base_type",
 -- 29. unknown | T <: unknown  (union with top is still top)
 arb.it("[alg] lattice: unknown | T <: unknown",
 	farb.arb_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx    = make_ctx()
 		local t_tid  = ast_to_tid(ctx, T_node)
 		local unk_t  = types_mod.make_union(ctx, { ctx.T_UNKNOWN, t_tid })
@@ -556,7 +596,8 @@ arb.it("[alg] lattice: unknown | T <: unknown",
 -- 30. unknown & T <: T  (intersection with top is the other type)
 arb.it("[alg] lattice: unknown & T <: T",
 	farb.arb_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx    = make_ctx()
 		local t_tid  = ast_to_tid(ctx, T_node)
 		local unk_t  = types_mod.make_intersection(ctx, { ctx.T_UNKNOWN, t_tid })
@@ -567,7 +608,8 @@ arb.it("[alg] lattice: unknown & T <: T",
 -- 31. T <: unknown & T  (T is subtype of intersection with top)
 arb.it("[alg] lattice: T <: unknown & T",
 	farb.arb_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx    = make_ctx()
 		local t_tid  = ast_to_tid(ctx, T_node)
 		local unk_t  = types_mod.make_intersection(ctx, { ctx.T_UNKNOWN, t_tid })
@@ -578,7 +620,8 @@ arb.it("[alg] lattice: T <: unknown & T",
 -- 32. (unknown)->T <: (integer)->T  (contra: integer <: unknown, so wider param OK)
 arb.it("[alg] lattice: (unknown)->T <: (base_type)->T via contravariance",
 	farb.arb_base_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx    = make_ctx()
 		local t_tid  = ast_to_tid(ctx, T_node)
 		-- (unknown) -> T_node  <:  (base_type) -> T_node
@@ -591,7 +634,8 @@ arb.it("[alg] lattice: (unknown)->T <: (base_type)->T via contravariance",
 -- 33. (integer)->T </: (unknown)->T  (contra: unknown </: integer, narrower param fails)
 arb.it("[alg] lattice: (base_type)->T </: (unknown)->T",
 	farb.arb_base_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx    = make_ctx()
 		local t_tid  = ast_to_tid(ctx, T_node)
 		local fn_base = types_mod.make_func(ctx, { t_tid }, { t_tid })
@@ -605,7 +649,8 @@ arb.it("[alg] lattice: (base_type)->T </: (unknown)->T",
 -- 28. never | T <: T  (union with never collapses on the subtype side)
 arb.it("[alg] never propagation: never | T <: T",
 	farb.arb_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx    = make_ctx()
 		local t_tid  = ast_to_tid(ctx, T_node)
 		local nev_t  = types_mod.make_union(ctx, { ctx.T_NEVER, t_tid })
@@ -616,7 +661,8 @@ arb.it("[alg] never propagation: never | T <: T",
 -- 29. T <: never | T  (union intro with never on left side)
 arb.it("[alg] never propagation: T <: never | T",
 	farb.arb_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx    = make_ctx()
 		local t_tid  = ast_to_tid(ctx, T_node)
 		local nev_t  = types_mod.make_union(ctx, { ctx.T_NEVER, t_tid })
@@ -627,7 +673,8 @@ arb.it("[alg] never propagation: T <: never | T",
 -- 30. never & T <: never  (intersection with never collapses to never)
 arb.it("[alg] never propagation: never & T <: never",
 	farb.arb_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx    = make_ctx()
 		local t_tid  = ast_to_tid(ctx, T_node)
 		local nev_t  = types_mod.make_intersection(ctx, { ctx.T_NEVER, t_tid })
@@ -641,7 +688,8 @@ arb.it("[alg] never propagation: never & T <: never",
 -- A mutable field source can be used wherever a readonly field is expected.
 arb.it("[alg] mutable satisfies readonly: { x: T } <: { readonly x: T }",
 	farb.arb_base_type,
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx  = make_ctx()
 		local xid  = intern_mod.intern(ctx.pool, "x")
 		local tid  = ast_to_tid(ctx, T_node)
@@ -668,7 +716,10 @@ arb.it("[alg] mutable satisfies readonly: { x: T } <: { readonly x: T }",
 -- Uses arb_base_type for B so B is always one of integer/number/string/boolean (no nil).
 arb.it("[alg] A3: extra required param fails: (A, B) -> C </: (A) -> C",
 	{ farb.arb_type, farb.arb_base_type, farb.arb_type },
-	function(A_node, B_node, C_node)
+	function(A_node_u, B_node_u, C_node_u)
+		local A_node = A_node_u --[[:! TypeNode]]
+		local B_node = B_node_u --[[:! TypeNode]]
+		local C_node = C_node_u --[[:! TypeNode]]
 		local ctx  = make_ctx()
 		local a    = ast_to_tid(ctx, A_node)
 		local b    = ast_to_tid(ctx, B_node)
@@ -684,7 +735,9 @@ arb.it("[alg] A3: extra required param fails: (A, B) -> C </: (A) -> C",
 -- A function with one param satisfies a type with one param (reflexivity sanity check).
 arb.it("[alg] A3: fewer params OK: (A) -> C <: (A) -> C",
 	{ farb.arb_type, farb.arb_type },
-	function(A_node, C_node)
+	function(A_node_u, C_node_u)
+		local A_node = A_node_u --[[:! TypeNode]]
+		local C_node = C_node_u --[[:! TypeNode]]
 		local ctx = make_ctx()
 		local a   = ast_to_tid(ctx, A_node)
 		local c   = ast_to_tid(ctx, C_node)
@@ -697,7 +750,8 @@ arb.it("[alg] A3: fewer params OK: (A) -> C <: (A) -> C",
 -- 32. A4: meta reflexivity: { #__add: T } <: { #__add: T }
 arb.it("[alg] A4: meta reflexivity: { #__add: T } <: { #__add: T }",
 	{ farb.arb_type },
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx    = make_ctx()
 		local tid    = ast_to_tid(ctx, T_node)
 		local add_id = intern_mod.intern(ctx.pool, "__add")
@@ -712,7 +766,9 @@ arb.it("[alg] A4: meta reflexivity: { #__add: T } <: { #__add: T }",
 -- (source has more meta fields, satisfies fewer — width subtyping for meta slots)
 arb.it("[alg] A4: meta elimination: { #__add: T, #__sub: U } <: { #__add: T }",
 	{ farb.arb_type, farb.arb_type },
-	function(T_node, U_node)
+	function(T_node_u, U_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
+		local U_node = U_node_u --[[:! TypeNode]]
 		local ctx    = make_ctx()
 		local tid    = ast_to_tid(ctx, T_node)
 		local uid    = ast_to_tid(ctx, U_node)
@@ -733,7 +789,8 @@ arb.it("[alg] A4: meta elimination: { #__add: T, #__sub: U } <: { #__add: T }",
 -- 34. A4: missing required meta field fails: {} </: { #__add: T }
 arb.it("[alg] A4: missing required meta field fails: {} </: { #__add: T }",
 	{ farb.arb_type },
-	function(T_node)
+	function(T_node_u)
+		local T_node = T_node_u --[[:! TypeNode]]
 		local ctx    = make_ctx()
 		local tid    = ast_to_tid(ctx, T_node)
 		local add_id = intern_mod.intern(ctx.pool, "__add")

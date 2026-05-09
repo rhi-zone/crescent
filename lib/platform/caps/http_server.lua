@@ -94,21 +94,22 @@ end
 -- Set TCP-level socket options for an SSE stream.
 -- We do this on the first send_event call so that buffered short-lived
 -- responses don't pay the syscall cost.
---: (any, boolean) -> nil
+--: (unknown, boolean) -> nil
 local function set_sse_socket_options(sock, want_nodelay)
 	if not sock then return end
-	local set = sock.set_option
+	local sock_t = sock --[[:! { set_option: (unknown, string, unknown, string) -> nil, ... }]]
+	local set = sock_t.set_option
 	if type(set) ~= "function" then return end
 	if want_nodelay then
-		pcall(set, sock, "tcp_nodelay", 1, "tcp")
+		pcall(set, sock_t, "tcp_nodelay", 1, "tcp")
 	end
-	pcall(set, sock, "so_keepalive", 1, "socket")
+	pcall(set, sock_t, "so_keepalive", 1, "socket")
 	-- Linux TCP keepalive tuning. macOS uses TCP_KEEPALIVE (different name);
 	-- ljsocket only declares the Linux constants — failures here are silent
 	-- via pcall so non-Linux platforms don't error.
-	pcall(set, sock, "tcp_keepidle",  15, "tcp")
-	pcall(set, sock, "tcp_keepintvl", 15, "tcp")
-	pcall(set, sock, "tcp_keepcnt",    3, "tcp")
+	pcall(set, sock_t, "tcp_keepidle",  15, "tcp")
+	pcall(set, sock_t, "tcp_keepintvl", 15, "tcp")
+	pcall(set, sock_t, "tcp_keepcnt",    3, "tcp")
 end
 
 -- Format an SSE frame body (no preamble).
@@ -124,22 +125,23 @@ end
 
 -- Wrap the raw HTTP handler to hide the socket from the app.
 -- Returns a handler compatible with lib/http/server.make_connection_handler.
---: (((req: any, res: any) -> nil), any, boolean) -> ((req: any, res: any, sock: any) -> boolean | nil)
+--: (((req: unknown, res: unknown) -> nil), unknown, boolean) -> ((req: unknown, res: unknown, sock: unknown) -> boolean | nil)
 local function wrap_handler(app_handler, revoked_ref, tcp_nodelay)
-	--: (any, any, any) -> boolean | nil
+	--: (unknown, unknown, unknown) -> boolean | nil
 	return function(raw_req, raw_res, sock)
 		if revoked_ref[1] then return end
-
-		local path, query = split_target(raw_req.target or "/")
+		local sock_s = sock --[[:! { send: (unknown, string) -> (unknown, string | nil), close: (unknown) -> nil, ... }]]
+		local req_t = raw_req --[[:! { target?: string, method?: string, headers?: { [string]: unknown }, body?: string }]]
+		local path, query = split_target(req_t.target or "/")
 
 		-- Build the sanitized request (no socket access).
 		local req = {
-			method        = raw_req.method,
+			method        = req_t.method,
 			path          = path,
 			query         = query,
-			headers       = raw_req.headers,
-			body          = raw_req.body,
-			last_event_id = header_first(raw_req.headers, "last-event-id"),
+			headers       = req_t.headers,
+			body          = req_t.body,
+			last_event_id = header_first(req_t.headers --[[:! { [string]: unknown } | nil]], "last-event-id"),
 		}
 
 		-- Build the response builder object.
@@ -160,14 +162,14 @@ local function wrap_handler(app_handler, revoked_ref, tcp_nodelay)
 			if closed then return nil, "http_server: stream closed" end
 			local id, event
 			if type(opts) == "table" then
-				local o = opts --: any
+				local o = opts --[[:! { id?: unknown, event?: unknown }]]
 				id    = o.id
 				event = o.event
 			end
 			if not streaming then
 				streaming = true
 				set_sse_socket_options(sock, tcp_nodelay)
-				local ok_p, err_p = sock:send(sse_preamble(res.status))
+				local ok_p, err_p = sock_s:send(sse_preamble(res.status))
 				if not ok_p then
 					closed = true
 					return nil, "client closed"
@@ -176,7 +178,7 @@ local function wrap_handler(app_handler, revoked_ref, tcp_nodelay)
 				if ok_p == nil then return nil, tostring(err_p or "client closed") end
 			end
 			local frame = format_sse_frame(data, id, event)
-			local ok_s, err_s = sock:send(frame)
+			local ok_s, err_s = sock_s:send(frame)
 			if not ok_s then
 				closed = true
 				return nil, tostring(err_s or "client closed")
@@ -188,7 +190,7 @@ local function wrap_handler(app_handler, revoked_ref, tcp_nodelay)
 		function res.close()
 			if closed then return end
 			closed = true
-			sock:close()
+			sock_s:close()
 		end
 
 		-- Call the app handler. It may set res.status/headers/body for a normal

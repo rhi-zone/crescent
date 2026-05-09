@@ -184,7 +184,7 @@ end
 -- @param b any (new)
 -- @return list of {path, old, new} tables
 function M.diff(a, b)
-  local changes = {} --: { [integer]: any }
+  local changes = {} --: { [integer]: unknown }
 
   local function _diff(x, y, path)
     if type(x) ~= "table" or type(y) ~= "table" then
@@ -257,7 +257,7 @@ end
 -- @return merged table
 function M.merge(...)
   local result = {}
-  local args = {...} --: { [integer]: any }
+  local args = {...} --: { [integer]: unknown }
   for i = 1, #args do
     local t = args[i]
     if type(t) == "table" then
@@ -273,11 +273,11 @@ end
 -- @param ... tables
 -- @return merged table
 function M.deep_merge(...)
-  local args = {...} --: { [integer]: any }
+  local args = {...} --: { [integer]: unknown }
 
-  --: (any, any) -> any
+  --: ({ [unknown]: unknown }, { [unknown]: unknown }) -> { [unknown]: unknown }
   local function _merge2(base, override)
-    local result = {}
+    local result = {} --: { [unknown]: unknown }
     for k, v in pairs(base) do
       result[k] = v
     end
@@ -305,7 +305,7 @@ function M.deep_merge(...)
   local result_raw = M.copy(args[1])
   local result = result_raw --[[:! { [unknown]: unknown }]]
   for i = 2, #args do
-    result = _merge2(result, args[i])
+    result = _merge2(result, args[i] --[[:! { [unknown]: unknown }]])
   end
   return result
 end

@@ -27,8 +27,8 @@ local M = {}
 local function make_line_iter(fh_in)
 	local fh = --[[:! { read: any, close: any }]] fh_in
 	local closed = false
-	local iter = {} --: any
-	setmetatable(iter, { __call = function(_self) --: (any) -> (string | nil, string | nil)
+	local iter = {} --: unknown
+	setmetatable(iter, { __call = function(_self) --: (unknown) -> (string | nil, string | nil)
 		if closed then return nil, nil end
 		local line = fh:read("*l")
 		if line == nil then
@@ -59,8 +59,7 @@ function M.shell_cap()
 	local function attenuate(sub_decl)
 		if revoked then return nil, "capability revoked" end
 
-		--: any
-		local sd = sub_decl or {}
+		local sd = (sub_decl or {}) --[[:! { type?: string }]]
 		local sub_type = sd.type or "shell"
 
 		if sub_type == "shell" then
@@ -91,8 +90,7 @@ function M.shell_cap()
 				if sub_revoked then return nil, "capability revoked" end
 				if revoked then return nil, "capability revoked" end
 
-				--: any
-				local id = inner_decl or {}
+				local id = (inner_decl or {}) --[[:! { type?: string }]]
 				local inner_type = id.type or "shell"
 
 				if inner_type == "shell" then

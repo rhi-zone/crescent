@@ -19,7 +19,7 @@ local floor = math.floor
 
 -- Returns true if t is a Lua table that represents a JSON array.
 -- An array has only consecutive integer keys starting at 1 (or is empty {}).
---: (any) -> boolean
+--: (unknown) -> boolean
 local function is_array(t)
   if type(t) ~= "table" then return false end
   local n = #(t --[[: { [integer]: any }]])
@@ -298,7 +298,7 @@ end
 
 -- Internal: apply a single operation to doc (modified in place).
 -- Returns (true, nil) or (nil, errmsg).
---: (unknown, { op: string, path: string, from?: string, value?: unknown }) -> (any, string | nil)
+--: (unknown, { op: string, path: string, from?: string, value?: unknown }) -> (unknown, string | nil)
 local function apply_one(doc, op)
   local o = op.op
   if o == "add" then

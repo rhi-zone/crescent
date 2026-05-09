@@ -7,8 +7,8 @@ local mimetype_by_contents
 
 local mod = {}
 
---:: FsRouterOpts = { io_open: (path: string, mode: string | nil) -> any, stderr_write: (...string) -> nil, lua_load: (path: string) -> (boolean, any) }
---: (string | nil, FsRouterOpts | nil) -> (any)
+--:: FsRouterOpts = { io_open: (path: string, mode: string | nil) -> unknown, stderr_write: (...string) -> nil, lua_load: (path: string) -> (boolean, unknown) }
+--: (string | nil, FsRouterOpts | nil) -> (unknown)
 mod.router = function (path, opts)
 	if not opts then error("fs_router() requires opts with io_open, stderr_write, lua_load caps") end
 	local opts_ = opts --[[:! FsRouterOpts]]
@@ -21,7 +21,7 @@ mod.router = function (path, opts)
 	local lua_load = opts_.lua_load
 	if not lua_load then error("fs_router() requires opts.lua_load cap") end
 	local lua_load_ = lua_load --[[:! (string) -> (boolean, any)]]
-	--: (string) -> any
+	--: (string) -> unknown
 	local handle_file = function (path2)
 		if path2:find("%.lua$") then
 			local success, cb_ = lua_load_(path2)
@@ -61,7 +61,7 @@ mod.router = function (path, opts)
 		end
 	end
 	local handle_dir
-	--: (string) -> any
+	--: (string) -> unknown
 	handle_dir = function (path2)
 		local routes = {}
 		local dir_iter, dir_state = dir_list(path2)
@@ -79,7 +79,7 @@ mod.router = function (path, opts)
 		end
 		return routes
 	end
-	local cb = table_router(handle_dir(path or ""))
+	local cb = table_router(handle_dir(path or "")) --[[:! (unknown, unknown, unknown) -> unknown]]
 	return function (req, res, sock)
 		local ret = cb(req, res, sock)
 		if not ret then res.status = 404 end

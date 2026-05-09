@@ -25,7 +25,7 @@ local gen_mod = require("lib.test.gen")
 local M  = {}
 M.gen    = gen_mod   -- re-export for convenience
 
---:: PropInfo = { desc: string, trial: integer, seed: number, original: any, shrunk: any, shrink_steps: integer, err: string }
+--:: PropInfo = { desc: string, trial: integer, seed: number, original: unknown, shrunk: unknown, shrink_steps: integer, err: string }
 
 local DEFAULT_TRIALS    = 100
 local DEFAULT_MAX_SHRINK = 200
@@ -77,7 +77,7 @@ local function display(v, depth)
 end
 
 -- Display a tuple (array of args) as "v1, v2, ..."
---: (args: any[]) -> string
+--: (args: { [integer]: unknown }) -> string
 local function display_tuple(args)
 	if #args == 1 then return display(args[1]) end
 	local parts = {}
@@ -89,7 +89,7 @@ end
 
 -- Given a generator and a failing value, find the minimal failing example.
 -- check_fn(value) should throw on failure and return normally on pass.
---: (shrink_fn: (any) -> any[], failing: any, check_fn: (any) -> any, max_steps: integer) -> (any, integer)
+--: (shrink_fn: (unknown) -> { [integer]: unknown }, failing: unknown, check_fn: (unknown) -> unknown, max_steps: integer) -> (unknown, integer)
 local function do_shrink(shrink_fn, failing, check_fn, max_steps)
 	local current = failing
 	local steps   = 0
@@ -131,24 +131,29 @@ function M.check(desc, gen_arg, fn, opts)
 
 	-- Normalise: single generator vs array of generators.
 	-- We always work internally with a "tuple" generator that returns an array.
-	local tup_gen --: { generate: (any, integer) -> any[], shrink: (any) -> any[] } | nil
+	local tup_gen --: { generate: (unknown, integer) -> { [integer]: unknown }, shrink: (unknown) -> { [integer]: unknown } } | nil
 	if type(gen_arg) == "table" and gen_arg.generate then
 		-- Single generator → wrap in a 1-tuple
-		tup_gen = gen_mod.tuple({gen_arg}) --[[:! { generate: (any, integer) -> any[], shrink: (any) -> any[] }]]
+		local _tup1 = gen_mod.tuple({gen_arg}) --[[: unknown]]
+	tup_gen = _tup1 --[[:! { generate: (unknown, integer) -> { [integer]: unknown }, shrink: (unknown) -> { [integer]: unknown } }]]
 	elseif type(gen_arg) == "table" and gen_arg[1] and gen_arg[1].generate then
 		-- Array of generators
-		tup_gen = gen_mod.tuple(gen_arg) --[[:! { generate: (any, integer) -> any[], shrink: (any) -> any[] }]]
+		local _tup2 = gen_mod.tuple(gen_arg) --[[: unknown]]
+		tup_gen = _tup2 --[[:! { generate: (unknown, integer) -> { [integer]: unknown }, shrink: (unknown) -> { [integer]: unknown } }]]
 	else
 		error("prop.check: expected a generator or array of generators, got " .. type(gen_arg))
 	end
 
 	-- Size increases with trial number (capped at 100).
-	local function run(args) fn(unpack(args)) end
+	--: (unknown) -> nil
+	local function run(args)
+		fn(unpack(args --[[:! { [integer]: unknown }]]))
+	end
 
-	local tg = tup_gen --[[:! { generate: (any, integer) -> any[], shrink: (any) -> any[] }]]
+	local tg = tup_gen --[[:! { generate: (unknown, integer) -> { [integer]: unknown }, shrink: (unknown) -> { [integer]: unknown } }]]
 	for trial = 1, trials do
 		local size = math.min(trial, 100)
-		local args = tg.generate(rng, size) --[[:! Arr<any>]]
+		local args = tg.generate(rng, size) --[[:! { [integer]: unknown }]]
 		local ok, err = pcall(run, args)
 		if not ok then
 			-- Shrink
@@ -184,8 +189,8 @@ function M.it(desc, gen_arg, fn, opts)
 				"property falsified after " .. info.trial
 					.. " test" .. (info.trial == 1 and "" or "s")
 					.. "  (seed=" .. info.seed .. ", replay: PROP_SEED=" .. info.seed .. ")",
-				"  input:   " .. display_tuple(info.original),
-				"  shrunk:  " .. display_tuple(info.shrunk)
+				"  input:   " .. display_tuple(info.original --[[:! { [integer]: unknown }]]),
+				"  shrunk:  " .. display_tuple(info.shrunk --[[:! { [integer]: unknown }]])
 					.. "  (" .. info.shrink_steps .. " step"
 					.. (info.shrink_steps == 1 and "" or "s") .. ")",
 				"  error:   " .. info.err,
@@ -210,8 +215,8 @@ function M.assert(desc, gen_arg, fn, opts)
 	if not ok then
 		local msg = "property falsified after " .. info.trial .. " test(s)"
 			.. "  (seed=" .. info.seed .. ")\n"
-			.. "  input:   " .. display_tuple(info.original) .. "\n"
-			.. "  shrunk:  " .. display_tuple(info.shrunk) .. "\n"
+			.. "  input:   " .. display_tuple(info.original --[[:! { [integer]: unknown }]]) .. "\n"
+			.. "  shrunk:  " .. display_tuple(info.shrunk --[[:! { [integer]: unknown }]]) .. "\n"
 			.. "  error:   " .. info.err
 		error(msg, 2)
 	end

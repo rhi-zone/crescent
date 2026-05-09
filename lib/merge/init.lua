@@ -5,7 +5,7 @@ end
 local mod = {}
 
 --[[creates new object with all the keys of the inputs. handles array part as well]]
---: (...{ [any]: any }) -> { [any]: any }
+--: (...{ [unknown]: unknown }) -> { [unknown]: unknown }
 mod.merge = function (...)
 	local ret = {}
 	local next_i = 1
@@ -16,7 +16,8 @@ mod.merge = function (...)
 		end
 		local len = #obj
 		for k, v in pairs(obj) do
-			if type(k) ~= "number" or k <= len or k%1~=0 then ret[k] = v end
+			local kn = k --[[:! number | nil]]
+			if type(k) ~= "number" or (kn and (kn <= len or kn % 1 ~= 0)) then ret[k] = v end
 		end
 	end
 	return ret

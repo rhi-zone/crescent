@@ -8,8 +8,8 @@ local M = {}
 
 --:: Subscription = { unsubscribe: () -> () }
 
---:: SubImpl = { _hub: HubImpl, _topic: string, _callback: (string, any, any) -> (), _is_pattern: boolean, _lua_pattern: string | nil, _removed: boolean, id: integer, unsubscribe: (self: SubImpl) -> () }
---:: HubImpl = { _subs: SubImpl[], _exact: { [string]: SubImpl[] }, _next_id: integer, subscribe: (self: HubImpl, string, (string, any, any) -> ()) -> SubImpl, publish: (self: HubImpl, string, any, any) -> (), subscribers: (self: HubImpl, string) -> number, topics: (self: HubImpl) -> string[], has_subscribers: (self: HubImpl, string) -> boolean }
+--:: SubImpl = { _hub: HubImpl, _topic: string, _callback: (string, unknown, unknown) -> (), _is_pattern: boolean, _lua_pattern: string | nil, _removed: boolean, id: integer, unsubscribe: (self: SubImpl) -> () }
+--:: HubImpl = { _subs: SubImpl[], _exact: { [string]: SubImpl[] }, _next_id: integer, subscribe: (self: HubImpl, string, (string, unknown, unknown) -> ()) -> SubImpl, publish: (self: HubImpl, string, unknown, unknown) -> (), subscribers: (self: HubImpl, string) -> number, topics: (self: HubImpl) -> string[], has_subscribers: (self: HubImpl, string) -> boolean }
 
 local Sub = {}
 Sub.__index = Sub
@@ -44,7 +44,7 @@ end
 
 -- ── Hub (pub/sub) ───────────────────────────────────────────────────────
 
---:: Hub = { subscribe: (string, (string, any, any) -> ()) -> Subscription, publish: (string, any, any) -> (), subscribers: (string) -> number, topics: () -> string[], has_subscribers: (string) -> boolean }
+--:: Hub = { subscribe: (string, (string, unknown, unknown) -> ()) -> Subscription, publish: (string, unknown, unknown) -> (), subscribers: (string) -> number, topics: () -> string[], has_subscribers: (string) -> boolean }
 
 local Hub = {}
 Hub.__index = Hub
@@ -74,7 +74,7 @@ local function has_wildcard(topic)
 	return topic:find("*", 1, true) ~= nil
 end
 
---: (self: HubImpl, string, (string, any, any) -> ()) -> SubImpl
+--: (self: HubImpl, string, (string, unknown, unknown) -> ()) -> SubImpl
 function Hub:subscribe(topic, callback)
 	local sub = setmetatable({
 		_hub = self,
@@ -99,7 +99,7 @@ function Hub:subscribe(topic, callback)
 	return sub
 end
 
---: (self: HubImpl, string, any, any) -> ()
+--: (self: HubImpl, string, unknown, unknown) -> ()
 function Hub:publish(topic, message, sender)
 	-- Exact-match subscribers
 	local exact = self._exact[topic]
@@ -265,8 +265,8 @@ end
 --:: event_input = { type: string, data: event_data }
 --:: read_opts = { after?: number, limit?: integer }
 --:: Event = { seq: number, global_seq: number, type: string, data: event_data, timestamp: number }
---:: EventStore = { append: (string, event_input) -> (), read: (string, (read_opts | nil)) -> Event[], read_all: ((read_opts | nil)) -> Event[], on_append: ((string, Event) -> ()) -> (), aggregate: (string, (any, Event) -> any) -> any, streams: () -> string[], stream_length: (string) -> number }
---:: EventStoreImpl = { _streams: { [string]: Event[] }, _global_seq: number, _on_append: ((string, Event) -> ())[], _time_fn: () -> number, append: (self: EventStoreImpl, string, event_input) -> (), read: (self: EventStoreImpl, string, (read_opts | nil)) -> Event[], read_all: (self: EventStoreImpl, (read_opts | nil)) -> Event[], on_append: (self: EventStoreImpl, (string, Event) -> ()) -> (), aggregate: (self: EventStoreImpl, string, (any, Event) -> any) -> any, streams: (self: EventStoreImpl) -> string[], stream_length: (self: EventStoreImpl, string) -> number }
+--:: EventStore = { append: (string, event_input) -> (), read: (string, (read_opts | nil)) -> Event[], read_all: ((read_opts | nil)) -> Event[], on_append: ((string, Event) -> ()) -> (), aggregate: (string, (unknown, Event) -> unknown) -> unknown, streams: () -> string[], stream_length: (string) -> number }
+--:: EventStoreImpl = { _streams: { [string]: Event[] }, _global_seq: number, _on_append: ((string, Event) -> ())[], _time_fn: () -> number, append: (self: EventStoreImpl, string, event_input) -> (), read: (self: EventStoreImpl, string, (read_opts | nil)) -> Event[], read_all: (self: EventStoreImpl, (read_opts | nil)) -> Event[], on_append: (self: EventStoreImpl, (string, Event) -> ()) -> (), aggregate: (self: EventStoreImpl, string, (unknown, Event) -> unknown) -> unknown, streams: (self: EventStoreImpl) -> string[], stream_length: (self: EventStoreImpl, string) -> number }
 
 local EventStore = {}
 EventStore.__index = EventStore
@@ -362,7 +362,7 @@ function EventStore:on_append(fn)
 	self._on_append[#self._on_append + 1] = fn
 end
 
---: (self: EventStoreImpl, string, (any, Event) -> any) -> any
+--: (self: EventStoreImpl, string, (unknown, Event) -> unknown) -> unknown
 function EventStore:aggregate(stream, reducer)
 	local s = self._streams[stream]
 	if not s then return nil end

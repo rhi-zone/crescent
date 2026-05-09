@@ -28,6 +28,7 @@ M._tier = "pure"
 --:: BenchOpts = { duration: number | nil, warmup: number | nil, min_iters: integer | nil, clock_fn: ClockFn | nil, overhead_ns: number | nil, batch: integer | nil }
 --:: SuiteCase = { name: string, fn: () -> nil }
 --:: SuiteResult = { name: string, result: BenchResult }
+--:: Suite = { _name: string, _cases: { [integer]: SuiteCase } }
 
 -- ---------------------------------------------------------------------------
 -- Statistics helpers
@@ -321,7 +322,7 @@ function SuiteMT:add(name, fn)
 end
 
 -- Run all benchmarks; return array of {name, result}.
---: (self: any, BenchOpts | nil) -> { [integer]: SuiteResult }
+--: (self: Suite, BenchOpts | nil) -> { [integer]: SuiteResult }
 function SuiteMT:run(opts)
   local results = {}
   for i = 1, #self._cases do
@@ -333,7 +334,7 @@ end
 
 -- Pretty-print a comparison table sorted by mean (fastest first).
 -- Shows relative speedup vs the slowest entry.
---: (self: any, { [integer]: SuiteResult }) -> nil
+--: (self: Suite, { [integer]: SuiteResult }) -> nil
 function SuiteMT:print(results)
   -- find slowest mean
   local slowest = 0 --: number

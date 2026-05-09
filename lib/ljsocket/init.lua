@@ -93,7 +93,7 @@ local errno = {}
 if register_ffi_module then register_ffi_module("dep.ljsocket") end
 
 do
-	local ljsocket_ffi --: any
+	local ljsocket_ffi --: unknown
 
 	if ffi.os == "Windows" then
 		ljsocket_ffi = assert(ffi.load("Ws2_32"))
@@ -311,7 +311,7 @@ do
 
 		do
 			ffi.cdef [[int WSAStartup(uint16_t version, void *wsa_data);]]
-			local wsa_data --: any
+			local wsa_data --: unknown
 
 			-- Two WSAData layouts: x64 puts pad fields first, x86 puts them last.
 			ffi.cdef [[

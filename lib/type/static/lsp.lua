@@ -30,7 +30,7 @@ local EMPTY_ARRAY = {[0] = 0}
 -- Wire protocol
 -- ---------------------------------------------------------------------------
 
---: (any) -> ()
+--: (unknown) -> ()
 local function send(msg)
     local body = json.encode(msg, NULL)
     if type(body) ~= "string" then return end
@@ -242,7 +242,7 @@ end
 -- Check + publish
 -- ---------------------------------------------------------------------------
 
---: (state: { text_cache: { [string]: string | nil, ... }, diag_cache: { [string]: any, ... }, ctx_cache: { [string]: Ctx | nil, ... }, ... }, uri: string, text: string) -> ()
+--: (state: { text_cache: { [string]: string | nil, ... }, diag_cache: { [string]: unknown, ... }, ctx_cache: { [string]: Ctx | nil, ... }, ... }, uri: string, text: string) -> ()
 local function run_check(state, uri, text)
     -- Skip if text is unchanged and diagnostics are cached.
     if state.text_cache[uri] == text and state.diag_cache[uri] then
@@ -480,7 +480,7 @@ local function field_completions(ctx, text, lsp_line, lsp_char, trigger)
     -- Strip trailing trigger character if present.
     if prefix:sub(-1) == trigger then prefix = prefix:sub(1, -2) end
     -- Match trailing simple identifier.
-    local name_str = (prefix --[[: string]]):match("([%a_][%w_]*)$")
+    local name_str = (prefix --[[:! string]]):match("([%a_][%w_]*)$")
     if not name_str then return nil end
     -- Look up name in intern pool (read-only via pool.map).
     local name_id = ctx.pool.map[name_str]

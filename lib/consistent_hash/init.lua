@@ -20,7 +20,7 @@ end
 
 -- Binary search: find index of first virtual node with hash >= target
 -- Returns index in [1, #ring+1]; if > #ring, wrap to 1
---: (ring: { [integer]: { [integer]: any } }, target: integer) -> integer
+--: (ring: { [integer]: { [integer]: unknown } }, target: integer) -> integer
 local function bisect(ring, target)
   local lo, hi = 1, #ring
   while lo <= hi do
@@ -34,7 +34,7 @@ local function bisect(ring, target)
   return lo
 end
 
---:: Ring = { _replicas: integer, _vring: { [integer]: { [integer]: any } }, _node_set: { [string]: boolean | nil }, _node_count: integer, get_node: (self: Ring, key: string) -> string | nil, ... }
+--:: Ring = { _replicas: integer, _vring: { [integer]: { [integer]: unknown } }, _node_set: { [string]: boolean | nil }, _node_count: integer, get_node: (self: Ring, key: string) -> string | nil, ... }
 
 local Ring = {}
 Ring.__index = Ring
@@ -63,7 +63,7 @@ function Ring:remove_node(name)
   self_._node_count = self_._node_count - 1
 
   local vring = self_._vring
-  local new_vring = {} --: { [integer]: { [integer]: any } }
+  local new_vring = {} --: { [integer]: { [integer]: unknown } }
   for i = 1, #vring do
     if vring[i][2] ~= name then
       new_vring[#new_vring + 1] = vring[i]

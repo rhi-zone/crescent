@@ -195,9 +195,9 @@ end
 --- Chinese Remainder Theorem. Takes varargs of {n, r} pairs.
 -- Returns x, N where x ≡ r_i (mod n_i) for all i and 0 <= x < N.
 -- Moduli must be pairwise coprime.
---: (...any) -> (number | nil, number | string)
+--: (...unknown) -> (number | nil, number | string)
 function M.chinese_remainder(...)
-  local pairs_list = {...} --[[: { [number]: number[] } ]]
+  local pairs_list = {...} --[[:! { [number]: { [number]: number } } ]]
   if #pairs_list == 0 then return nil, "no congruences given" end
   local x = pairs_list[1][2]
   local N = pairs_list[1][1]

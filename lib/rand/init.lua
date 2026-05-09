@@ -169,7 +169,7 @@ function mod.float()
 end
 
 --- Return a random element from an array.
---: (array: any[]) -> (any | nil, string | nil)
+--: (array: unknown[]) -> (unknown | nil, string | nil)
 function mod.choice(array)
   local n = #array
   if n == 0 then return nil, "empty array" end
@@ -180,7 +180,7 @@ function mod.choice(array)
 end
 
 --- Fisher-Yates shuffle in-place. Returns the array.
---: (array: any[]) -> (any[] | nil, string | nil)
+--: (array: unknown[]) -> (unknown[] | nil, string | nil)
 function mod.shuffle(array)
   local n = #array
   for i = n, 2, -1 do

@@ -395,7 +395,7 @@ end
 
 --- Create a streaming RFC 1924 Base85 encoder.
 --- Buffers partial groups; call finish() to flush and get the full result.
---: () -> { write: (self: any, s: string) -> nil, finish: (self: any) -> string }
+--: () -> { write: (self: unknown, s: string) -> nil, finish: (self: unknown) -> string }
 local function encoder()
   --: Arr<string>
   local buf = {}
@@ -406,7 +406,7 @@ local function encoder()
 
   local enc = {
     --- Feed bytes to the encoder.
-    --: (self: any, s: string) -> nil
+    --: (self: unknown, s: string) -> nil
     write = function(self, s)
       -- Append to buffer
       buf[#buf + 1] = s
@@ -440,7 +440,7 @@ local function encoder()
     end,
 
     --- Flush any remaining bytes and return the full encoded string.
-    --: (self: any) -> string
+    --: (self: unknown) -> string
     finish = function(self)
       -- Flush remaining buffer bytes (should be 0–3 bytes, but RFC 1924 requires
       -- input divisible by 4, so remaining bytes are silently dropped here).

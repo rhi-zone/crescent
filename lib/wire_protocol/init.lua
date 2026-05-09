@@ -569,7 +569,7 @@ function M.tlv(opts)
   local codec = {}
 
   --- Encode a TLV frame.
-  --: (any, integer, string) -> (string | nil, string)
+  --: (unknown, integer, string) -> (string | nil, string)
   function codec:encode(type_id, value)
     local vlen = #value
     if vlen > max_size then
@@ -619,7 +619,7 @@ end
 -- Framer: encodes and buffers outgoing frames
 -- ---------------------------------------------------------------------------
 
---:: FramerCodec = { encode: (FramerCodec, any) -> (string | nil, string | nil), ... }
+--:: FramerCodec = { encode: (FramerCodec, unknown) -> (string | nil, string | nil), ... }
 --:: Framer = { _codec: FramerCodec, _pending: { [integer]: string }, ... }
 --- Wrap a codec in a framer that buffers encoded output.
 --: (codec: FramerCodec) -> Framer
@@ -662,7 +662,7 @@ end
 --:: ReceiverDec = { feed: (ReceiverDec, string) -> nil, messages: (ReceiverDec) -> ({ [integer]: string } | nil, string | nil), ... }
 --:: Receiver = { _dec: ReceiverDec, _queue: { [integer]: string }, _head: integer, ... }
 --- Wrap a codec's decoder in a receiver with has_message/next interface.
---: (codec: { decoder: (any) -> ReceiverDec, ... }) -> Receiver
+--: (codec: { decoder: (unknown) -> ReceiverDec, ... }) -> Receiver
 function M.receiver(codec)
   local dec = codec:decoder() --[[:! ReceiverDec]]
   local rv = {} --[[: any]]

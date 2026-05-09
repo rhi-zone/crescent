@@ -1018,7 +1018,7 @@ end
 -- is required because structurally cyclic types (recursive aliases that
 -- resolve to fresh tids per visit) cannot be caught by a tid-keyed seen set
 -- alone.
---: (Ctx, integer, { [integer]: any, ... }) -> string
+--: (Ctx, integer, { [integer]: unknown, ... }) -> string
 local function display_inner(ctx, tid, seen)
     local t = ctx.types:get(tid)
     local tag = t.tag
@@ -1087,7 +1087,7 @@ local function display_inner(ctx, tid, seen)
             ret = "(" .. table.concat(rs, ", ") .. ")"
         end
         seen[tid] = nil
-        seen[0] = seen[0] - 1
+        seen[0] = (seen[0] --[[:! integer]]) - 1
         return "(" .. table.concat(parts, ", ") .. ") -> " .. ret
     end
 
@@ -1138,7 +1138,7 @@ local function display_inner(ctx, tid, seen)
             parts[#parts + 1] = "#" .. nf.name .. opt .. ": " .. M.display(ctx, nf.fe.type_id, seen)
         end
         seen[tid] = nil
-        seen[0] = seen[0] - 1
+        seen[0] = (seen[0] --[[:! integer]]) - 1
         if #parts == 0 then return "{}" end
         return "{ " .. table.concat(parts, ", ") .. " }"
     end
@@ -1155,7 +1155,7 @@ local function display_inner(ctx, tid, seen)
             if not dedup[s] then dedup[s] = true; parts[#parts + 1] = s end
         end
         seen[tid] = nil
-        seen[0] = seen[0] - 1
+        seen[0] = (seen[0] --[[:! integer]]) - 1
         return table.concat(parts, " | ")
     end
 
@@ -1168,7 +1168,7 @@ local function display_inner(ctx, tid, seen)
             parts[#parts + 1] = M.display(ctx, ctx.lists:get(i), seen)
         end
         seen[tid] = nil
-        seen[0] = seen[0] - 1
+        seen[0] = (seen[0] --[[:! integer]]) - 1
         return table.concat(parts, " & ")
     end
 
@@ -1181,7 +1181,7 @@ local function display_inner(ctx, tid, seen)
             parts[#parts + 1] = M.display(ctx, ctx.lists:get(i), seen)
         end
         seen[tid] = nil
-        seen[0] = seen[0] - 1
+        seen[0] = (seen[0] --[[:! integer]]) - 1
         return "(" .. table.concat(parts, ", ") .. ")"
     end
 
@@ -1191,7 +1191,7 @@ local function display_inner(ctx, tid, seen)
         seen[0] = (seen[0] or 0) + 1
         local r = "..." .. M.display(ctx, t.data[0], seen)
         seen[tid] = nil
-        seen[0] = seen[0] - 1
+        seen[0] = (seen[0] --[[:! integer]]) - 1
         return r
     end
 
@@ -1254,7 +1254,7 @@ function M.display(ctx, tid, seen)
     if type(tid) ~= "number" then return "?" end
     --: integer
     local tid_i = M.find(ctx, math.floor(tid))
-    --: { [integer]: any, ... }
+    --: { [integer]: unknown, ... }
     local s = seen or {}
     if (s[0] or 0) > 64 then error("display recursion depth exceeded at tid " .. tid_i) end
     -- Memoization: keyed by negative tid to avoid colliding with the cycle

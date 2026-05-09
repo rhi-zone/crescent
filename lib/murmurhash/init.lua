@@ -263,7 +263,7 @@ end
 -- for values > 2^53.
 local FMIX64_C1 = 0xff51afd7ed558ccdULL
 local FMIX64_C2 = 0xc4ceb9fe1a85ec53ULL
---: (any) -> any
+--: (cdata) -> cdata
 local function fmix64(k)
   k = bxor(k --[[:! integer]], rshift(k --[[:! integer]], 33)) --[[: any]]
   k = k * FMIX64_C1 --[[: any]]
@@ -337,8 +337,8 @@ function M.x64_128(key, seed)
   h1 = h1 + h2
   h2 = h2 + h1
 
-  h1 = fmix64(h1)
-  h2 = fmix64(h2)
+  h1 = fmix64((h1 --[[:! cdata]])) --[[: any]]
+  h2 = fmix64((h2 --[[:! cdata]])) --[[: any]]
 
   h1 = h1 + h2
   h2 = h2 + h1

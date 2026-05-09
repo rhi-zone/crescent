@@ -67,7 +67,7 @@ end
 -- limbs stored as uint64_t.  Value = n0 + n1·2^26 + n2·2^52 + n3·2^78 + n4·2^104.
 -- ---------------------------------------------------------------------------
 
---: ({ [integer]: integer }) -> (any, any, any, any, any)
+--: ({ [integer]: integer }) -> (cdata, cdata, cdata, cdata, cdata)
 local function decode_26(b)
   local n0 = U64(b[1])
     + U64(b[2]) * U64(256)
@@ -109,7 +109,11 @@ end
 -- Process a single 16-byte (or shorter final) block, updating h limbs.
 --: (Poly1305Ctx, { [integer]: integer }, number) -> nil
 local function process_block(ctx, n, blocklen)
-  local n0, n1, n2, n3, n4 = decode_26(n)
+  local n0r, n1r, n2r, n3r, n4r = decode_26(n)
+  -- Cast to any for FFI cdata arithmetic
+  local n0 = n0r --[[: any]]; local n1 = n1r --[[: any]]
+  local n2 = n2r --[[: any]]; local n3 = n3r --[[: any]]
+  local n4 = n4r --[[: any]]
 
   -- Add the 2^(8*blocklen) bit ("hibit") to the appropriate limb.
   local bit_pos    = 8 * blocklen
@@ -215,7 +219,7 @@ end
 -- Returns a context table, or nil+errmsg on bad input.
 -- ---------------------------------------------------------------------------
 
---: (string) -> (any | nil, string | nil)
+--: (string) -> (Poly1305Ctx | nil, string | nil)
 local function new_ctx(key)
   if type(key) ~= "string" then
     return nil, "key must be a string"
@@ -226,7 +230,11 @@ local function new_ctx(key)
 
   local r_str = clamp_r(key:sub(1, 16))
   local rb    = { sbyte(r_str, 1, 16) } --[[:! { [integer]: integer }]]
-  local r0, r1, r2, r3, r4 = decode_26(rb)
+  local r0r, r1r, r2r, r3r, r4r = decode_26(rb)
+  -- Cast cdata to any for arithmetic
+  local r0 = r0r --[[: any]]; local r1 = r1r --[[: any]]
+  local r2 = r2r --[[: any]]; local r3 = r3r --[[: any]]
+  local r4 = r4r --[[: any]]
 
   local ctx = {
     -- accumulator
@@ -242,7 +250,7 @@ local function new_ctx(key)
     -- whether finish() has been called
     done = false,
   }
-  return ctx
+  return ctx --[[:! Poly1305Ctx]]
 end
 
 -- ---------------------------------------------------------------------------
@@ -309,7 +317,7 @@ end
 
 --- Create a streaming Poly1305 context.
 -- Returns ctx (with :update() / :finish() methods), or nil+errmsg.
---: (string) -> (any | nil, string | nil)
+--: (string) -> (Poly1305Ctx | nil, string | nil)
 function M.new(key)
   local ctx, err = new_ctx(key)
   if not ctx then return nil, err end

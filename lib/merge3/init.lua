@@ -120,7 +120,8 @@ function M.diff(a_str, b_str)
 
 	-- Backtrack through the trace to reconstruct the edit.
 	-- We collect (kind, ...) steps in reverse order, then reverse.
-	local steps = {} --: { [integer]: any }
+	--:: Step = { kind: string, x0?: number, y0?: number, x1?: number, y1?: number, ai?: number, bi?: number }
+	local steps = {} --: { [integer]: Step }
 	local x, y = n, m
 
 	for d = final_d, 1, -1 do
@@ -187,11 +188,11 @@ function M.diff(a_str, b_str)
 
 	for _, st in ipairs(steps) do
 		if st.kind == "snake" then
-			for i = st.x0 + 1, st.x1 do push("keep", a[i]) end
+			for i = (st.x0 --[[:! number]]) + 1, (st.x1 --[[:! number]]) do push("keep", a[i]) end
 		elseif st.kind == "delete" then
-			push("delete", a[st.ai])
+			push("delete", a[(st.ai --[[:! number]])])
 		else
-			push("insert", b[st.bi])
+			push("insert", b[(st.bi --[[:! number]])])
 		end
 	end
 
