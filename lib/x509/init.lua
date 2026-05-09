@@ -45,6 +45,7 @@ local OID_NAMES = {
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 -- Convert binary string to hex with colon separators: "aa:bb:cc:..."
+--: (string) -> string
 local function to_hex_colons(s)
   local parts = {}
   for i = 1, #s do
@@ -54,6 +55,7 @@ local function to_hex_colons(s)
 end
 
 -- Convert binary string to plain hex: "aabbcc..."
+--: (string) -> string
 local function to_hex(s)
   local parts = {}
   for i = 1, #s do
@@ -184,10 +186,11 @@ local function parse_validity(node)
   end
 
   local function decode_time_node(n)
-    if n.tag == asn1.TAG_UTCTIME or n.tag == asn1.TAG_GENERALIZEDTIME then
-      return asn1.decode_time(n.value, n.tag)
+    local n_ = n --[[:! { tag: integer, value: string }]]
+    if n_.tag == asn1.TAG_UTCTIME or n_.tag == asn1.TAG_GENERALIZEDTIME then
+      return asn1.decode_time(n_.value, n_.tag)
     end
-    return nil, "Validity: unexpected time tag " .. n.tag
+    return nil, "Validity: unexpected time tag " .. n_.tag
   end
 
   local nb, err_nb = decode_time_node(fields[1])
@@ -320,7 +323,7 @@ local function parse_tbs(tbs_node)
     if not ver_node then return nil, "version: " .. (err_v or "") end
     local ver_val, err_vi = asn1.decode_integer(ver_node.value)
     if ver_val == nil then return nil, "version integer: " .. (err_vi or "") end
-    version = ver_val + 1  -- DER: 0=v1, 1=v2, 2=v3
+    version = (ver_val --[[:! number]] + 1) --[[:! integer]]  -- DER: 0=v1, 1=v2, 2=v3
     idx = idx + 1
   end
 
@@ -396,7 +399,7 @@ end
 
 --- Parse a DER-encoded X.509 certificate.
 -- Returns: cert_table, nil  OR  nil, errmsg
---: (string) -> { version: number, serial: string, subject: { [string]: string }, issuer: { [string]: string }, not_before: string, not_after: string, sig_algorithm: string, sig_algorithm_name: string | nil, public_key: { algorithm: string, algorithm_name: string | nil, key_data: string }, extensions: { [string]: { critical: boolean, value: string } } | nil, fingerprint_sha256: string | nil, raw: string } | (nil, string)
+--: (string) -> (X509Cert | nil, string | nil)
 function M.parse_der(der)
   if type(der) ~= "string" or #der == 0 then
     return nil, "x509: input must be a non-empty string"
@@ -430,7 +433,9 @@ function M.parse_der(der)
   local fp_sha256
   local sha256_mod = get_sha256()
   if sha256_mod then
-    local hex64 = sha256_mod.sha256(der)
+    local sha256_mod_ = sha256_mod --[[: any]]
+    local sha256_fn = (sha256_mod_ --[[:! { sha256: (string) -> string }]]).sha256
+    local hex64 = sha256_fn(der)
     -- Insert colons every 2 chars
     local parts = {}
     for i = 1, #hex64, 2 do
@@ -439,7 +444,8 @@ function M.parse_der(der)
     fp_sha256 = concat(parts, ":")
   end
 
-  return {
+  --:: X509Cert = { version: number, serial: string, subject: { [string]: string }, issuer: { [string]: string }, not_before: string, not_after: string, sig_algorithm: string, sig_algorithm_name: string | nil, public_key: { algorithm: string, algorithm_name: string | nil, key_data: string }, extensions: { [string]: { critical: boolean, value: string } } | nil, fingerprint_sha256: string | nil, raw: string }
+  return ({
     version            = tbs.version,
     serial             = tbs.serial,
     subject            = tbs.subject,
@@ -452,26 +458,29 @@ function M.parse_der(der)
     extensions         = tbs.extensions,
     fingerprint_sha256 = fp_sha256,
     raw                = der,
-  }, nil
+  } --[[:! X509Cert]]), nil
 end
 
 --- Parse a PEM-encoded X.509 certificate.
 -- The PEM block label must be "CERTIFICATE".
 -- Returns: cert_table, nil  OR  nil, errmsg
---: (string) -> { version: number, serial: string, subject: { [string]: string }, issuer: { [string]: string }, not_before: string, not_after: string, sig_algorithm: string, sig_algorithm_name: string | nil, public_key: { algorithm: string, algorithm_name: string | nil, key_data: string }, extensions: { [string]: { critical: boolean, value: string } } | nil, fingerprint_sha256: string | nil, raw: string } | (nil, string)
+--: (string) -> (X509Cert | nil, string | nil)
 function M.parse_pem(pem_str)
   if type(pem_str) ~= "string" or #pem_str == 0 then
     return nil, "x509: PEM input must be a non-empty string"
   end
 
-  local block, err = pem.decode(pem_str)
-  if not block then return nil, "x509: PEM decode: " .. (err or "") end
+  local block_, err = pem.decode(pem_str)
+  if not block_ then return nil, "x509: PEM decode: " .. (err or "") end
 
-  if block.label ~= "CERTIFICATE" then
-    return nil, "x509: expected PEM label 'CERTIFICATE', got '" .. block.label .. "'"
+  local block = block_ --[[: any]]
+  local block_label = (block --[[:! { label: string, data: string, ... }]]).label
+  local block_data  = (block --[[:! { label: string, data: string, ... }]]).data
+  if block_label ~= "CERTIFICATE" then
+    return nil, "x509: expected PEM label 'CERTIFICATE', got '" .. block_label .. "'"
   end
 
-  return M.parse_der(block.data)
+  return M.parse_der(block_data)
 end
 
 return M

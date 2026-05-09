@@ -189,8 +189,8 @@ local function match_fence_open(line)
   -- Backtick fence: 3+ backticks, no backticks in info.
   local fence = rest:match("^(`+)")
   if fence and #fence >= 3 then
-    local info = rest:sub(#fence + 1):match("^%s*(.-)%s*$")
-    if not info:find("`") then
+    local info = rest:sub(#fence + 1):match("^%s*(.-)%s*$") --[[:! string | nil]]
+    if info and not info:find("`") then
       return "`", #fence, info, indent
     end
   end
@@ -301,7 +301,7 @@ local function match_list_item(line)
     local i = #num_str + 2  -- after digit(s) + delimiter
     -- Check for bare marker at EOL (empty ordered item).
     if i > #rest then
-      return "ordered", delim, tonumber(num_str), "", indent + #num_str + 2
+      return "ordered", delim, tonumber(num_str) --[[:! integer | nil]], "", indent + #num_str + 2
     end
     local spaces_after = 0 --: integer
     while str_byte(rest, i) == 32 or str_byte(rest, i) == 9 do
@@ -316,12 +316,12 @@ local function match_list_item(line)
       local iw = indent + marker_len + 1  -- marker_start + marker_len + 1_space
       -- after starts at the second character after the delimiter (first space), i.e. marker_len+2
       local after = str_sub(rest, marker_len + 2)
-      return "ordered", delim, tonumber(num_str), after, iw
+      return "ordered", delim, tonumber(num_str) --[[:! integer | nil]], after, iw
     end
     local after = str_sub(rest, i)
     -- If after is empty (trailing spaces only), use minimum iwidth (indent + marker + 2).
     local iw = after == "" and (indent + marker_len + 1) or (indent + marker_len + spaces_after)
-    return "ordered", delim, tonumber(num_str), after, iw
+    return "ordered", delim, tonumber(num_str) --[[:! integer | nil]], after, iw
   end
   return nil
 end
@@ -792,8 +792,8 @@ local function is_unicode_punct(cp)
   if cp <= 0 then return false end
   -- ASCII punctuation.
   if cp < 128 then
-    return (cp >= 33 and cp <= 47) or (cp >= 58 and cp <= 64) or
-           (cp >= 91 and cp <= 96) or (cp >= 123 and cp <= 126)
+    return ((cp >= 33 and cp <= 47) or (cp >= 58 and cp <= 64) or
+           (cp >= 91 and cp <= 96) or (cp >= 123 and cp <= 126)) and true or false
   end
   -- Latin-1 Supplement punctuation / symbols (U+00A1–U+00BF).
   -- Includes: ¡¢£¤¥¦§¨©ª«¬®¯°±²³´µ¶·¸¹º»¼½¾¿
@@ -1413,7 +1413,8 @@ local function tokenize_inlines(src, defs)
       -- Determine can_open / can_close per CommonMark §6.1 rules.
       -- Use full Unicode codepoints (not just leading bytes) for ws/punct checks.
       local before_cp = decode_utf8_before(src, delim_start)
-      local after_cp = ((pos <= len) and (decode_utf8_at(src, pos)) or 0) --[[: integer]]
+      local after_cp_ = ((pos <= len) and (decode_utf8_at(src, pos)) or 0)
+      local after_cp = after_cp_ --[[:! integer]]
 
       local left_flanking = not is_unicode_ws(after_cp) and
         (not is_unicode_punct(after_cp) or is_unicode_ws(before_cp) or is_unicode_punct(before_cp))
@@ -1892,7 +1893,7 @@ end
 -- ── Public API ─────────────────────────────────────────────────────────────────
 
 -- Parse a Markdown string and return an mdast Root node.
---: (src: string) -> { type: string, children: { [integer]: { type: string, ... } }, ... } | nil
+--: (src: string) -> ({ type: string, children: { [number]: { type: string, ... } }, ... } | nil, string | nil)
 M.parse = function(src)
   if type(src) ~= "string" then
     return nil, "mdast.parse: expected string, got " .. type(src)

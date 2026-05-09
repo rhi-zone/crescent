@@ -102,18 +102,18 @@ function M.hotp(key, counter, opts)
   -- Step 2: HMAC
   local mac, err = hmac_binary(alg, key_, counter_bytes)
   if not mac then return nil, err end
-  local mac_ = mac --[[: string]]
+  local mac_ = mac
 
   -- Step 3: dynamic truncation (RFC 4226 §5.3)
   -- offset = last byte & 0x0f
-  local last = string.byte(mac_, #mac_)
+  local last = string.byte(mac_, #mac_) --[[:! integer]]
   local offset = band(last, 0x0f)
 
   -- Step 4: extract 4 bytes at offset (1-indexed in Lua)
-  local b1 = string.byte(mac_, offset + 1)
-  local b2 = string.byte(mac_, offset + 2)
-  local b3 = string.byte(mac_, offset + 3)
-  local b4 = string.byte(mac_, offset + 4)
+  local b1 = string.byte(mac_, offset + 1) --[[:! integer]]
+  local b2 = string.byte(mac_, offset + 2) --[[:! integer]]
+  local b3 = string.byte(mac_, offset + 3) --[[:! integer]]
+  local b4 = string.byte(mac_, offset + 4) --[[:! integer]]
 
   -- mask the most-significant bit of b1
   local code = bor(
@@ -123,7 +123,7 @@ function M.hotp(key, counter, opts)
     b4
   )
   -- code is a signed 32-bit value from bit.*; convert to unsigned Lua number
-  if code < 0 then code = code + 0x100000000 end
+  if code < 0 then code = (code + 0x100000000) --[[:! integer]] end
 
   -- Step 5: truncate to digits
   local modulus = 10 ^ digits

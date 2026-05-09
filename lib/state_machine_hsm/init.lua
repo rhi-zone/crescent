@@ -44,6 +44,7 @@ end
 -- key: this state's own name segment
 -- spec: the user-provided state definition table
 -- nodes: flat map from dot-path → compiled node
+--: (string, string, { on: { [string]: unknown }, ... }, { [string]: unknown }) -> unknown
 local function compile_state(parent_path, key, spec, nodes)
   local path = parent_path == "" and key or (parent_path .. "." .. key)
 
@@ -63,8 +64,8 @@ local function compile_state(parent_path, key, spec, nodes)
 
   if spec.states then
     for child_key, child_spec in pairs(spec.states) do
-      node.children[#node.children + 1] = child_key
-      compile_state(path, child_key, child_spec, nodes)
+      node.children[#node.children + 1] = child_key --[[:! string]]
+      compile_state(path, child_key --[[:! string]], child_spec --[[:! { on: { [string]: unknown } }]], nodes)
     end
     node.atomic = false
     -- Default initial child if not specified: first key encountered
@@ -82,6 +83,9 @@ end
 
 local Chart = {}
 Chart.__index = Chart
+
+-- Forward declaration so Chart:machine can reference it.
+local Machine
 
 -- Resolve a dot-path target to the leaf initial state.
 -- E.g. "active" with initial="running" resolves to "active.running".
@@ -186,11 +190,14 @@ end
 
 -- ── Machine prototype ─────────────────────────────────────────────────────────
 
+--:: MachineObj = { _chart: { _nodes: { [string]: unknown }, ... }, _current: string | nil, _ctx: unknown, _history: { [string]: unknown }, _deep_history: { [string]: unknown }, _started: boolean, ... }
+
 Machine = {}
 Machine.__index = Machine
 
 -- Enter a sequence of states (outermost first), firing entry actions.
 -- Updates history for parent states if applicable.
+--: (MachineObj, unknown, string | nil) -> nil
 local function do_enter(machine, enter_list, prev_leaf)
   local nodes = machine._chart._nodes
   for _, path in ipairs(enter_list) do
@@ -283,11 +290,13 @@ end
 
 function Machine:send(event, data)
   if not self._started then return false end
-  local nodes = self._chart._nodes
-  local current = self._current
+  local self_ = self --[[:! MachineObj]]
+  local nodes = self_._chart._nodes
+  local current = self_._current --[[:! string]]
 
-  local tr, source = find_transition(nodes, current, event)
-  if not tr then return false end
+  local tr_, source = find_transition(nodes, current, event)
+  if not tr_ then return false end
+  local tr = tr_ --[[:! { target: string, guard: ((unknown, unknown) -> boolean) | nil, action: ((unknown, unknown) -> nil) | nil }]]
 
   -- Check guard
   if tr.guard and not tr.guard(self._ctx, data) then
@@ -368,7 +377,7 @@ function M.chart(spec)
 
   -- Compile all top-level states under a virtual root ""
   for key, state_spec in pairs(spec.states) do
-    compile_state("", key, state_spec, nodes)
+    compile_state("", key --[[:! string]], state_spec --[[:! { on: { [string]: unknown } }]], nodes)
   end
 
   -- Validate initial state exists
