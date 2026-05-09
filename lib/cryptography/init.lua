@@ -56,7 +56,7 @@ end
 function M.unhex(s)
 	if #s % 2 ~= 0 then return nil end
 	if s:find("[^0-9a-fA-F]") then return nil end
-	local result = (s:gsub("..", function(h) return string.char(math2.tointeger(tonumber(h, 16)) or 0) end))
+	local result = (s:gsub("..", function(h) return string.char(math2.tointeger(tonumber(h, 16)) or 0) end)) --[[: string]]
 	return result
 end
 

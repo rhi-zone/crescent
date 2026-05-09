@@ -634,7 +634,7 @@ local function print_summary(file_errs_list)
         --: string
         local source = ""
         local sf = io.open(filename, "r")
-        if sf then source = (sf:read("*a") or ""); sf:close() end
+        if sf then source = (sf:read("*a") or "") --[[: string]]; sf:close() end
 
         local mods = extract_requires(source)
 

@@ -195,7 +195,7 @@ local function flush_sequence(input, lit_start, lit_end, match_offset, match_len
 		local m = match_len - 4
 		match_nibble = m >= 15 and 15 or m
 	end
-	out[#out + 1] = char(bor(lshift(lit_nibble, 4), match_nibble))
+	out[#out + 1] = char(bor(lshift(lit_nibble, 4), match_nibble)) --[[: string]]
 
 	-- Extra literal length bytes
 	if lit_nibble == 15 then

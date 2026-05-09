@@ -281,7 +281,7 @@ end
 -- (see make_ctx above for rationale).
 --: (ctx: any, name_str: string) -> (integer, integer)
 local function make_named_tid(ctx, name_str)
-	local nid = intern_mod.intern(ctx.pool, name_str)
+	local nid = intern_mod.intern(ctx.pool, name_str) --[[: integer]]
 	local tid = types_mod.alloc_type(ctx, TAG_NAMED)
 	local t   = ctx.types:get(tid)
 	t.data[0] = nid
@@ -729,7 +729,7 @@ end)
 arb.it("[eval] E5c: Parameters<F> == param tuple for random function types",
 	arb_function_parts,
 	function(parts_arg)
-		local parts = parts_arg
+		local parts = parts_arg --[[: { type_str: string, params: { [integer]: string }, ret: string }]]
 		local fn_str = parts.type_str
 		local params = parts.params
 		-- If no params, Parameters gives an empty tuple — skip (nothing interesting to assert)
@@ -783,7 +783,7 @@ end)
 arb.it("[eval] E10d: ReturnType<() -> C> == C for random 0-param function types",
 	arb_function_parts,
 	function(parts_arg)
-		local parts = parts_arg
+		local parts = parts_arg --[[: { type_str: string, params: { [integer]: string }, ret: string }]]
 		-- Only test zero-param functions for this invariant (ReturnType uses () -> %R pattern)
 		if #parts.params ~= 0 then return end
 		local fn_str  = parts.type_str  -- "() -> C"
@@ -907,7 +907,7 @@ local arb_base_type_quad = {
 arb.it("[eval] MA1: match arm selectivity — correct arm fires",
 	arb_base_type_quad,
 	function(q_arg)
-		local q = q_arg
+		local q = q_arg --[[: BaseQuad]]
 		local decl = ("--:: MatchTwo<T> = match T { %s => %s, %s => %s }\n"):format(
 			q.a, q.c, q.b, q.d)
 		-- MatchTwo<q.a> == q.c
@@ -927,7 +927,7 @@ arb.it("[eval] MA1: match arm selectivity — correct arm fires",
 arb.it("[eval] MA2: match distributivity — match (A|B) { A => C, B => D } == C | D",
 	arb_base_type_quad,
 	function(q_arg)
-		local q = q_arg
+		local q = q_arg --[[: BaseQuad]]
 		local decl     = ("--:: MatchTwo<T> = match T { %s => %s, %s => %s }\n"):format(
 			q.a, q.c, q.b, q.d)
 		local result   = "MatchTwo<" .. q.a .. " | " .. q.b .. ">"
@@ -943,7 +943,7 @@ arb.it("[eval] MA2: match distributivity — match (A|B) { A => C, B => D } == C
 arb.it("[eval] MA3: match non-matching input == never",
 	arb_base_type_quad,
 	function(q_arg)
-		local q = q_arg
+		local q = q_arg --[[: BaseQuad]]
 		-- Arms cover q.a and q.b; input is q.d (guaranteed ≠ q.a and ≠ q.b since all 4 distinct)
 		local decl = ("--:: MatchNone<T> = match T { %s => %s, %s => %s }\n"):format(
 			q.a, q.c, q.b, q.c)
@@ -1241,7 +1241,7 @@ end)
 arb.it("[eval] MA4r: FieldX<T> == x-field-type (has x) or never (no x) for random tables",
 	arb_table_type,
 	function(t_str_arg)
-		local t_str = t_str_arg
+		local t_str = t_str_arg --[[: string]]
 		-- Extract x-field base type from the string, if present.
 		-- arb_table_type format: '{ [readonly ]<name>[?]: <base>, ... }'
 		-- We look for "x[?]: <base>" — optional "?" before the colon.

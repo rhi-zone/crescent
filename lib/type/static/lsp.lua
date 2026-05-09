@@ -480,7 +480,7 @@ local function field_completions(ctx, text, lsp_line, lsp_char, trigger)
     -- Strip trailing trigger character if present.
     if prefix:sub(-1) == trigger then prefix = prefix:sub(1, -2) end
     -- Match trailing simple identifier.
-    local name_str = prefix:match("([%a_][%w_]*)$")
+    local name_str = (prefix --[[: string]]):match("([%a_][%w_]*)$")
     if not name_str then return nil end
     -- Look up name in intern pool (read-only via pool.map).
     local name_id = ctx.pool.map[name_str]
@@ -771,7 +771,7 @@ HANDLERS["textDocument/definition"] = function(state, msg)
     -- Prefer field go-to-def when the field_at match has a higher (or equal) col than name_at.
     -- This handles `x.bar`: cursor on `bar` → field wins; cursor on `x` → name wins.
     if field_id and field_col and (not name_col or field_col >= (name_col --[[:! integer]])) then
-        local field_str = (intern.get(ctx.pool, field_id))
+        local field_str = (intern.get(ctx.pool, field_id) --[[: string | nil]])
         local field_len = field_str and #field_str or 1
 
         -- Cross-file: obj is a required module — navigate into that module.

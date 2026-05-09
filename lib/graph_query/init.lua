@@ -226,8 +226,8 @@ local function make_native_adapter(g)
 end
 
 function NativeAdapter:node_ids()
-  local self = self
-  local self = self
+  local self = self --[[: NativeAdapter]]
+  local self = self --[[: NativeAdapter]]
   local g = self._g --[[: any]]
   local ids = {}
   for id in g:nodes() do ids[#ids+1] = id end
@@ -235,15 +235,15 @@ function NativeAdapter:node_ids()
 end
 
 function NativeAdapter:node_data(id)
-  local self = self
-  local self = self
+  local self = self --[[: NativeAdapter]]
+  local self = self --[[: NativeAdapter]]
   local g = self._g --[[: any]]
   return g:node_data(id)
 end
 
 function NativeAdapter:edge_list()
-  local self = self
-  local self = self
+  local self = self --[[: NativeAdapter]]
+  local self = self --[[: NativeAdapter]]
   local g = self._g --[[: any]]
   local edges = {}
   for e in g:edges() do edges[#edges+1] = e end
@@ -251,37 +251,37 @@ function NativeAdapter:edge_list()
 end
 
 function NativeAdapter:edge_data(u, v)
-  local self = self
-  local self = self
+  local self = self --[[: NativeAdapter]]
+  local self = self --[[: NativeAdapter]]
   local g = self._g --[[: any]]
   return g:edge_data(u, v)
 end
 
 function NativeAdapter:has_edge(u, v)
-  local self = self
-  local self = self
+  local self = self --[[: NativeAdapter]]
+  local self = self --[[: NativeAdapter]]
   local g = self._g --[[: any]]
   return g:has_edge(u, v)
 end
 
 function NativeAdapter:out_neighbors(id)
-  local self = self
-  local self = self
+  local self = self --[[: NativeAdapter]]
+  local self = self --[[: NativeAdapter]]
   local g = self._g --[[: any]]
   return g:neighbors(id)
 end
 
 function NativeAdapter:in_neighbors(id)
-  local self = self
-  local self = self
+  local self = self --[[: NativeAdapter]]
+  local self = self --[[: NativeAdapter]]
   local g = self._g --[[: any]]
   if g.in_neighbors then return g:in_neighbors(id) end
   return g:neighbors(id)
 end
 
 function NativeAdapter:is_directed()
-  local self = self
-  local self = self
+  local self = self --[[: NativeAdapter]]
+  local self = self --[[: NativeAdapter]]
   local g = self._g --[[: any]]
   return g._directed == true
 end
@@ -305,7 +305,7 @@ function M.graph()
 end
 
 function QGraph:node(id, data)
-  local self = self
+  local self = self --[[: QGraph]]
   if not self._nodes[id] then
     self._adj[id]   = {}
     self._in_adj[id] = {}
@@ -315,8 +315,8 @@ function QGraph:node(id, data)
 end
 
 function QGraph:edge(from, to, data)
-  local self = self
-  local self = self
+  local self = self --[[: QGraph]]
+  local self = self --[[: QGraph]]
   if not self._nodes[from] then self:node(from) end
   if not self._nodes[to]   then self:node(to)   end
   local edata = data or true
@@ -332,21 +332,21 @@ end
 
 -- Adapter methods (so query engine can treat QGraph directly)
 function QGraph:node_ids()
-  local self = self
+  local self = self --[[: QGraph]]
   local ids = {}
   for id in pairs(self._nodes) do ids[#ids+1] = id end
   return ids
 end
 
 function QGraph:node_data(id)
-  local self = self
+  local self = self --[[: QGraph]]
   local d = self._nodes[id]
   if d == nil or d == true then return nil end
   return d
 end
 
 function QGraph:edge_list()
-  local self = self
+  local self = self --[[: QGraph]]
   local edges = {}
   for from, nbrs in pairs(self._adj) do
     for to, edata in pairs(nbrs) do
@@ -357,7 +357,7 @@ function QGraph:edge_list()
 end
 
 function QGraph:edge_data(u, v)
-  local self = self
+  local self = self --[[: QGraph]]
   if not self._adj[u] then return nil end
   local d = self._adj[u][v]
   if d == nil or d == true then return nil end
@@ -365,12 +365,12 @@ function QGraph:edge_data(u, v)
 end
 
 function QGraph:has_edge(u, v)
-  local self = self
+  local self = self --[[: QGraph]]
   return self._adj[u] ~= nil and self._adj[u][v] ~= nil
 end
 
 function QGraph:out_neighbors(id)
-  local self = self
+  local self = self --[[: QGraph]]
   if not self._adj[id] then return {} end
   local r = {}
   for nb in pairs(self._adj[id]) do r[#r+1] = nb end
@@ -378,7 +378,7 @@ function QGraph:out_neighbors(id)
 end
 
 function QGraph:in_neighbors(id)
-  local self = self
+  local self = self --[[: QGraph]]
   if not self._in_adj[id] then return {} end
   local r = {}
   for nb in pairs(self._in_adj[id]) do r[#r+1] = nb end
@@ -416,7 +416,7 @@ end
 -- Query nodes, optionally filtered by a table of key=value or a predicate.
 -- Returns NodeResult of {id, data} pairs.
 function Query:nodes(filter)
-  local self = self
+  local self = self --[[: QueryT]]
   local g = self._g
   local ids = g:node_ids()
   local rows = {}
@@ -433,7 +433,7 @@ end
 -- Query edges, optionally filtered.
 -- Returns EdgeResult of {from, to, data} triples.
 function Query:edges(filter)
-  local self = self
+  local self = self --[[: QueryT]]
   local g = self._g
   local elist = g:edge_list()
   local rows = {}
@@ -455,7 +455,7 @@ end
 -- opts: { max_depth=N (default 10), direction="out"|"in"|"both" (default "out") }
 -- Returns PathResult.
 function Query:path(from, to, opts)
-  local self = self
+  local self = self --[[: QueryT]]
   opts = opts or {}
   local max_depth = opts.max_depth or 10
   local direction = opts.direction or "out"
@@ -510,7 +510,7 @@ end
 -- opts: { max_depth=N (default math.huge), direction="out"|"in"|"both" }
 -- Returns a table {node_id = true}.
 function Query:reachable(from, opts)
-  local self = self
+  local self = self --[[: QueryT]]
   opts = opts or {}
   local max_depth = opts.max_depth or math.huge
   local direction = opts.direction or "out"
@@ -559,7 +559,7 @@ end
 -- Return a NodeResult of all neighbors of `node` within `depth` hops.
 -- opts: { depth=N (default 1), direction="out"|"in"|"both" }
 function Query:neighbors(node, opts)
-  local self = self
+  local self = self --[[: QueryT]]
   opts = opts or {}
   local depth = opts.depth or 1
   local reached = self:reachable(node, {max_depth = depth, direction = opts.direction or "out"})
@@ -580,8 +580,8 @@ end
 -- Each edge entry: {var_from, var_to, edge_type_or_nil}
 -- Returns MatchResult — list of {A=id, B=id, ...} assignment tables.
 function Query:pattern(pat)
-  local self = self
-  local pat = pat
+  local self = self --[[: QueryT]]
+  local pat = pat --[[: { nodes: { [integer]: string }, edges: { [integer]: { [integer]: any } } }]]
   local g       = self._g
   local vars    = pat.nodes   -- ordered variable names
   local pedges  = pat.edges   -- {var_from, var_to, type_constraint}
@@ -643,7 +643,7 @@ end
 -- Betweenness centrality (Brandes' algorithm, O(V*E)).
 -- Returns {node_id -> score}.
 function Query:betweenness_centrality()
-  local self = self
+  local self = self --[[: QueryT]]
   local g   = self._g
   local ids = g:node_ids()
   local cb  = {} --: { [unknown]: number }
@@ -703,7 +703,7 @@ end
 -- opts: { damping=0.85, iterations=20 }
 -- Returns {node_id -> score} (scores sum to ~1).
 function Query:pagerank(opts)
-  local self = self
+  local self = self --[[: QueryT]]
   opts = opts or {}
   local d    = opts.damping    or 0.85
   local iters = opts.iterations or 20
@@ -753,7 +753,7 @@ end
 -- For directed graphs uses the undirected neighborhood.
 -- Returns {node_id -> coefficient}.
 function Query:clustering_coefficient()
-  local self = self
+  local self = self --[[: QueryT]]
   local g   = self._g
   local ids = g:node_ids()
   local cc  = {} --: { [unknown]: number }
@@ -793,7 +793,7 @@ end
 -- Connected components (treats graph as undirected via out+in neighbors).
 -- Returns array of arrays of node ids.
 function Query:connected_components()
-  local self = self
+  local self = self --[[: QueryT]]
   local g       = self._g
   local ids     = g:node_ids()
   local visited = {}
@@ -834,7 +834,7 @@ end
 -- For directed: max = n*(n-1); undirected: max = n*(n-1)/2.
 -- The queryable graph (QGraph) is always directed.
 function Query:density()
-  local self = self
+  local self = self --[[: QueryT]]
   local g   = self._g
   local ids = g:node_ids()
   local n   = #ids
@@ -853,7 +853,7 @@ end
 -- Degree distribution.
 -- Returns {node_id -> {in_deg=N, out_deg=N}}.
 function Query:degree_distribution()
-  local self = self
+  local self = self --[[: QueryT]]
   local g   = self._g
   local ids = g:node_ids()
   local dd  = {}

@@ -1116,7 +1116,7 @@ local function csv_escape(v)
   if v == nil then return "" end
   local s = tostring(v)
   if s:find('[,"\n\r]') then
-    s = '"' .. (s:gsub('"', '""')) .. '"'
+    s = '"' .. (s:gsub('"', '""') --[[: string]]) .. '"'
   end
   return s
 end

@@ -110,7 +110,7 @@ end
 -- ──────────────────────────────────────────────────────────────────
 
 function M.rgb_to_grayscale(img)
-  local img = img
+  local img = img --[[: Image]]
   local w, h = img.width, img.height
   local src = img.data
   local dst = {}
@@ -136,7 +136,7 @@ function M.rgb_to_grayscale(img)
 end
 
 function M.grayscale_to_rgb(img)
-  local img = img
+  local img = img --[[: Image]]
   if img.channels ~= 1 then
     return nil, "image_processing.grayscale_to_rgb: expected 1-channel image"
   end
@@ -196,7 +196,7 @@ function M.hsv_to_rgb(h, s, v)
 end
 
 function M.apply_lut(img, lut)
-  local img = img
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local n = w * h * ch
@@ -213,7 +213,7 @@ end
 -- ──────────────────────────────────────────────────────────────────
 
 function M.brightness(img, delta)
-  local img = img
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local n = w * h * ch
@@ -226,7 +226,7 @@ function M.brightness(img, delta)
 end
 
 function M.contrast(img, factor)
-  local img = img
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local n = w * h * ch
@@ -239,7 +239,7 @@ function M.contrast(img, factor)
 end
 
 function M.invert(img)
-  local img = img
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local n = w * h * ch
@@ -265,7 +265,7 @@ function M.invert(img)
 end
 
 function M.threshold(img, t)
-  local img = img
+  local img = img --[[: Image]]
   if img.channels ~= 1 then
     return nil, "image_processing.threshold: expected 1-channel (grayscale) image"
   end
@@ -281,7 +281,7 @@ function M.threshold(img, t)
 end
 
 function M.gamma(img, g)
-  local img = img
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local n = w * h * ch
@@ -304,7 +304,7 @@ end
 -- ──────────────────────────────────────────────────────────────────
 
 function M.crop(img, x1, y1, x2, y2)
-  local img = img
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   if x1 < 1 or y1 < 1 or x2 > w or y2 > h or x1 > x2 or y1 > y2 then
     return nil, "image_processing.crop: out of bounds or invalid rectangle"
@@ -326,7 +326,7 @@ function M.crop(img, x1, y1, x2, y2)
 end
 
 function M.flip_h(img)
-  local img = img
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local dst = {}
@@ -344,7 +344,7 @@ function M.flip_h(img)
 end
 
 function M.flip_v(img)
-  local img = img
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local dst = {}
@@ -397,7 +397,7 @@ function M.rotate_90(img, n)
 end
 
 function M.scale_nearest(img, new_w, new_h)
-  local img = img
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local dst = {}
@@ -418,7 +418,7 @@ function M.scale_nearest(img, new_w, new_h)
 end
 
 function M.scale_bilinear(img, new_w, new_h)
-  local img = img
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local dst = {}
@@ -458,8 +458,8 @@ end
 -- kernel: { width, height, data }  (row-major float values)
 -- replicate border padding
 function M.convolve(img, kernel)
-  local img = img
-  local kernel = kernel
+  local img = img --[[: Image]]
+  local kernel = kernel --[[: Kernel]]
   local iw, ih, ch = img.width, img.height, img.channels
   local kw, kh = kernel.width, kernel.height
   local kdata = kernel.data
@@ -490,7 +490,7 @@ function M.convolve(img, kernel)
 end
 
 function M.blur_box(img, radius)
-  local img = img
+  local img = img --[[: Image]]
   local r = radius or 1
   local size = 2 * r + 1
   local n = size * size
@@ -502,7 +502,7 @@ end
 -- Gaussian blur via separable passes
 --: (img: Image, sigma: number) -> unknown
 function M.blur_gaussian(img, sigma)
-  local img = img
+  local img = img --[[: Image]]
   local ks = math_ceil(3 * sigma) * 2 + 1
   local half = math_floor(ks / 2)
   -- build 1D kernel
@@ -524,7 +524,7 @@ function M.blur_gaussian(img, sigma)
 end
 
 function M.sharpen(img)
-  local img = img
+  local img = img --[[: Image]]
   local kernel = {
     width = 3, height = 3,
     data = {
@@ -538,12 +538,12 @@ end
 
 -- Sobel edge detection — returns grayscale magnitude image
 function M.edge_detect(img)
-  local img = img
+  local img = img --[[: Image]]
   local gray = img --: Image
   if img.channels ~= 1 then
     local g, _err = M.rgb_to_grayscale(img)
     if not g then return nil, _err end
-    gray = g
+    gray = g --[[: Image]]
   end
   local iw, ih = gray.width, gray.height
   local src = gray.data
@@ -574,7 +574,7 @@ function M.edge_detect(img)
 end
 
 function M.emboss(img)
-  local img = img
+  local img = img --[[: Image]]
   local kernel = {
     width = 3, height = 3,
     data = {
@@ -593,7 +593,7 @@ end
 -- Returns a table of tables, one per channel, each with indices [0..255]
 -- For grayscale returns a single table (not nested in another)
 function M.histogram(img)
-  local img = img
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local hists = {}
@@ -602,7 +602,7 @@ function M.histogram(img)
     for i = 0, 255 do hc[i] = 0 end
     hists[c] = hc
   end
-  local hists_ = hists
+  local hists_ = hists --[[: { [integer]: { [integer]: integer } }]]
   local n = w * h
   for i = 1, n do
     for c = 1, ch do
@@ -617,7 +617,7 @@ function M.histogram(img)
 end
 
 function M.equalize(img)
-  local img = img
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local src = img.data
   local n = w * h
@@ -673,7 +673,7 @@ local function set_pixel_raw(data, width, channels, x, y, r, g, b, a)
 end
 
 function M.fill(img, r, g, b, a)
-  local img = img
+  local img = img --[[: Image]]
   local w, h, ch = img.width, img.height, img.channels
   local dst = {}
   for y = 1, h do
@@ -686,7 +686,7 @@ function M.fill(img, r, g, b, a)
 end
 
 function M.draw_rect(img, x1, y1, x2, y2, r, g, b)
-  local img = img
+  local img = img --[[: Image]]
   -- copy image data
   local dst = {}
   for i = 1, #img.data do dst[i] = img.data[i] end
@@ -711,7 +711,7 @@ function M.draw_rect(img, x1, y1, x2, y2, r, g, b)
 end
 
 function M.fill_rect(img, x1, y1, x2, y2, r, g, b)
-  local img = img
+  local img = img --[[: Image]]
   local dst = {}
   for i = 1, #img.data do dst[i] = img.data[i] end
   local w, h, ch = img.width, img.height, img.channels

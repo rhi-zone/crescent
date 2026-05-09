@@ -106,7 +106,7 @@ function IPv4:to_number()
 end
 
 function IPv4:octets()
-  local n = self._n
+  local n = self._n --[[: integer]]
   return {
     rshift(n, 24) % 256,
     rshift(n, 16) % 256,
@@ -122,13 +122,13 @@ end
 
 function IPv4:is_loopback()
   -- 127.0.0.0/8
-  local n = self._n
+  local n = self._n --[[: integer]]
   return rshift(n, 24) % 256 == 127
 end
 
 function IPv4:is_private()
   -- RFC 1918: 10/8, 172.16/12, 192.168/16
-  local n = self._n
+  local n = self._n --[[: integer]]
   local a = rshift(n, 24) % 256
   local b = rshift(n, 16) % 256
   if a == 10 then return true end
@@ -139,7 +139,7 @@ end
 
 function IPv4:is_multicast()
   -- 224.0.0.0/4
-  local n = self._n
+  local n = self._n --[[: integer]]
   return rshift(n, 24) % 256 >= 224 and rshift(n, 24) % 256 <= 239
 end
 
@@ -149,7 +149,7 @@ end
 
 function IPv4:is_link_local()
   -- 169.254.0.0/16
-  local n = self._n
+  local n = self._n --[[: integer]]
   local a = rshift(n, 24) % 256
   local b = rshift(n, 16) % 256
   return a == 169 and b == 254

@@ -261,7 +261,7 @@ local function match_directive(dir, input, pos_in)
 			-- width may have cut mid-number; just parse what we have
 			local s2, e2 = find(text, "^%-?%d+")
 			if not s2 or not e2 then return nil, pos, "%d: no integer after width clamp" end
-			local e2_ = e2
+			local e2_ = e2 --[[: integer]]
 			text = sub(text, s2, e2_)
 			e_ = pos + e2_ - 1
 		end

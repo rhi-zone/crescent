@@ -95,14 +95,14 @@ local function scan_footnote_refs(value)
       end
       break
     end
-    local open = open_or_nil
+    local open = open_or_nil --[[: integer]]
 
     local close_or_nil = str_find(value, "]", open + 2, true)
     if not close_or_nil then
       result[#result + 1] = { type = "text", value = str_sub(value, pos) }
       break
     end
-    local close = close_or_nil
+    local close = close_or_nil --[[: integer]]
 
     local label = str_sub(value, open + 2, close - 1)
 
