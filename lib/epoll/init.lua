@@ -160,7 +160,7 @@ epoll.add = function (self, fd, on_read, close, weak)
 		end
 	end
 	ep.close_cbs[fd] = close
-	local write = function (data) --[[@param data string]]
+	local write = function (data)
 		write_buf = write_buf .. data
 		events[0].events = 5 --[[EPOLLIN | EPOLLOUT]]
 		if epoll_ffi.epoll_ctl(epfd, --[[EPOLL_CTL_MOD]] 3, fd, events) ~= 0 then
