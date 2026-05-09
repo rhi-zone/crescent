@@ -559,15 +559,6 @@ local function solve_sub(ctx, c)
     return ok
 end
 
--- Solve a deferred `or` expression: C_OR = { C_OR, left_tid, right_tid, result_tid, line, col }
--- Defers while left_tid is still a free TAG_VAR (not yet resolved).
--- Once concrete: result = subtract(left, nil) | right.
--- Special case: when left is T_UNKNOWN and right is a non-falsy typed default,
--- result is right. `unknown or 0` means the programmer is asserting the result
--- type via the fallback — the or-default IS the narrowing. Not applied when right
--- is falsy (nil, false literal) because those don't carry type information.
--- any: constraint arrays are heterogeneous — see solve_unify comment.
---: (Ctx, { [integer]: any, ... }) -> boolean
 -- Solve a deferred nil-narrowing: C_NARROW_NIL = { _, input_tid, result_tid, keep_nil, line, col }
 -- Defers while input is a free TAG_VAR. Once input is concrete, computes either the
 -- non-nil/non-false subset (keep_nil=false) or the nil-only subset (keep_nil=true)
@@ -619,6 +610,15 @@ local function solve_narrow_nil(ctx, c)
     return true
 end
 
+-- Solve a deferred `or` expression: C_OR = { C_OR, left_tid, right_tid, result_tid, line, col }
+-- Defers while left_tid is still a free TAG_VAR (not yet resolved).
+-- Once concrete: result = subtract(left, nil) | right.
+-- Special case: when left is T_UNKNOWN and right is a non-falsy typed default,
+-- result is right. `unknown or 0` means the programmer is asserting the result
+-- type via the fallback — the or-default IS the narrowing. Not applied when right
+-- is falsy (nil, false literal) because those don't carry type information.
+-- any: constraint arrays are heterogeneous — see solve_unify comment.
+--: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_or(ctx, c)
     local left_tid   = c[2]
     local right_tid  = c[3]

@@ -206,10 +206,6 @@ function M.generalize(ctx, tid, level)
     generalize_inner(ctx, tid, level, {})
 end
 
--- Instantiate: deep-copy a type, replacing generic vars with fresh vars.
--- mapping: { var_type_id -> fresh_var_type_id } (shared across recursion)
--- seen: { type_id -> copied_type_id } (cycle detection for circular tables)
---: (Ctx, integer, integer, { [integer]: integer, ... }, { [integer]: integer | nil, ... }) -> integer
 -- Check whether a type contains any generic type variable (TAG_VAR / TAG_ROWVAR
 -- with FLAG_GENERIC).  Returns false immediately when a concrete leaf is reached.
 -- Uses a `seen` table to break cycles (TAG_TABLE and TAG_FUNCTION can be cyclic
@@ -281,6 +277,10 @@ local function has_generic_var(ctx, tid, seen)
     return false
 end
 
+-- Instantiate: deep-copy a type, replacing generic vars with fresh vars.
+-- mapping: { var_type_id -> fresh_var_type_id } (shared across recursion)
+-- seen: { type_id -> copied_type_id } (cycle detection for circular tables)
+--: (Ctx, integer, integer, { [integer]: integer, ... }, { [integer]: integer | nil, ... }) -> integer
 local function instantiate_inner(ctx, tid, level, mapping, seen)
     tid = types_mod.find(ctx, tid)
 
