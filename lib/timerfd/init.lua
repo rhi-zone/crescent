@@ -73,8 +73,6 @@ else
 	local timespec0 = timespec(0, 0)
 
 	--: (epoll, number, () -> nil) -> (() -> nil)
-	--[[@return fun() clear_timeout]]
-	--[[@param self epoll]] --[[@param ms integer]] 	--[[@param cb fun()]]
 	mod.set_timeout = function (self, ms, cb)
 		local value = timespec(math.floor(ms / 1000), (ms % 1000) * 1000000)
 		local fd = timerfd_c.timerfd_create(--[[CLOCK_MONOTONIC]] 1, 0)
@@ -102,8 +100,6 @@ else
 	end
 
 	--: (epoll, number, () -> nil) -> (() -> nil)
-	--[[@return fun() clear_interval]]
-	--[[@param self epoll]] --[[@param ms integer]] --[[@param cb fun()]]
 	mod.set_interval = function (self, ms, cb)
 		local value = timespec(math.floor(ms / 1000), (ms % 1000) * 1000000)
 		local fd = timerfd_c.timerfd_create(--[[CLOCK_MONOTONIC]] 1, 0)

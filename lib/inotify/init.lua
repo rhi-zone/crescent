@@ -88,7 +88,6 @@ local inotify = {
 inotify.__index = inotify
 
 --: (inotify, epoll, number | nil) -> inotify
---[[@param epoll epoll]] --[[@param flags? inotify_flag]]
 inotify.new = function (self, epoll, flags)
 	local fd
 	if flags then fd = inotify_ffi.inotify_init1(flags)
@@ -112,11 +111,9 @@ inotify.new = function (self, epoll, flags)
 	return setmetatable(instance, self)
 end
 --: (epoll, number | nil) -> inotify
---[[@param epoll epoll]] --[[@param flags? inotify_flag]]
 mod.new = function (epoll, flags) return inotify:new(epoll, flags) end
 
---: (inotify, string, number, (cdata) -> nil) -> (number, () -> nil)
---[[@return inotify_wd_c wd, fun() remove]] --[[@param pathname string]] --[[@param mask inotify_event_mask]] --[[@param cb fun(event: inotify_event_c)]]
+--: (inotify, string, number, (cdata) -> nil) -> (cdata | nil, () -> nil)
 inotify.add = function (self, pathname, mask, cb)
 	local wd = inotify_ffi.inotify_add_watch(self.fd, pathname, mask)
 	if wd < 0 then return nil, "inotify: inotify_add_watch failed: " .. pathname end

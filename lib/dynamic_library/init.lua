@@ -11,12 +11,6 @@ int dlclose(void* handle);
 char* dlerror(void);
 ]]
 
----@class dl_ffi
----@field dlopen fun(path: string_c, flags: number): ptr_c<nil>
----@field dlsym fun(handle: ptr_c<nil>, name: string): ptr_c<nil>
----@field dlclose fun(handle: ptr_c<nil>): number
----@field dlerror fun(): string_c
-
 local dl_ffi = ffi.C --[[: any]]
 
 local RTLD_LAZY = 1
@@ -25,14 +19,11 @@ local mod = {}
 
 --:: DynamicLibrary = { handle: unknown, path: string }
 
----@class DynamicLibrary
 local DynamicLibrary = {}
 mod.DynamicLibrary = DynamicLibrary
 DynamicLibrary.__index = DynamicLibrary
 
 --: (string) -> (DynamicLibrary | nil, string | nil)
----@param path string The path to the dynamic library
----@return DynamicLibrary? library, string? error
 function DynamicLibrary.open(path)
   local handle = dl_ffi.dlopen(path, RTLD_LAZY)
   if handle == nil then
@@ -43,8 +34,6 @@ function DynamicLibrary.open(path)
 end
 
 --: (DynamicLibrary, string) -> (cdata | nil, string | nil)
----@param name string The name of the symbol to look up
----@return ptr_c<nil>? symbol, string? error
 function DynamicLibrary:symbol(name)
   local sym = dl_ffi.dlsym(self.handle, name)
   if sym == nil then

@@ -112,7 +112,6 @@ end
 --: () -> epoll
 mod.new = function () return epoll:new() end
 
---[[@param fd fd_c]] --[[@param read epoll_read]]
 -- If the read callback accepts a parameter, epoll wraps it to read from the fd
 -- via raw read_c and deliver the data as a string. If the callback takes no
 -- parameters, it is called as a bare notification and must read from the fd
@@ -127,7 +126,6 @@ local read_cb = function (fd, read_fn)
 	end
 end
 
---[[@param self epoll]] --[[@param fd fd_c]]
 --: (self: epoll, fd: integer) -> nil
 local remove_fd = function (self, fd)
 	if self.rets[fd] then
@@ -142,8 +140,6 @@ local remove_fd = function (self, fd)
 end
 
 --: (self: epoll, fd: integer, on_read: (string) -> nil, close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil)
---[[@return epoll_write? write, epoll_remove? remove, string? err]]
---[[@param fd fd_c]] --[[@param on_read epoll_read]] --[[@param close epoll_close?]] --[[@param weak boolean? if false, self.count is not incremented]]
 epoll.add = function (self, fd, on_read, close, weak)
 	local ep = self --[[:! epoll]]
 	--[[@diagnostic disable-next-line: assign-type-mismatch]]
@@ -187,8 +183,6 @@ end
 mod.add = epoll.add
 
 --: (epoll, number, (string) -> nil, (() -> nil) | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil)
---[[@return epoll_write? write, epoll_remove? remove, string? error]]
---[[@param fd fd_c]] --[[@param on_read epoll_read]] --[[@param close epoll_close?]]
 epoll.modify = function (self, fd, on_read, close)
 	if not self.read_cbs[fd] then return nil, nil, "epoll: error: not polling fd: " .. fd end
 	local on_read_fn = on_read --[[:! (string) -> nil]]

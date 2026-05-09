@@ -5,7 +5,7 @@ local mod = {}
 
 local ro_cb = function () return fuse.error.read_only_file_system end
 
---[[@return fuse_operations_c]] --[[@param ops fuse_operations_c]]
+--: ({ access: ((string, number) -> number) | nil, ... }) -> { [string]: unknown }
 mod.readonly = function (ops)
 	--[[@type fuse_operations_c]]
 	local ro_ops = {
