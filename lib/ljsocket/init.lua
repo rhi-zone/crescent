@@ -87,7 +87,7 @@ SOFTWARE.
 local ffi = require("ffi")
 local bit = require("bit")
 local socket = {}
-local e = {}
+local e = {} --: { [string]: integer }
 local errno = {}
 
 if register_ffi_module then register_ffi_module("dep.ljsocket") end
@@ -862,9 +862,9 @@ timeout_messages[errno.EINPROGRESS] = true
 timeout_messages[errno.EAGAIN] = true
 timeout_messages[errno.EWOULDBLOCK] = true
 
-mod.poll = function(socket, flags, timeout)
+mod.poll = function(sock, flags, timeout)
 	local pfd = ffi.new("struct pollfd[1]", { {
-		fd = socket.fd,
+		fd = sock.fd,
 		events = table_to_flags(flags, POLL.lookup, bit.bor),
 		revents = 0,
 	} })
@@ -954,7 +954,7 @@ mod.find_first_address = function(host, service, options)
 		ai_addr.sun_path = service
 		return addrinfo_to_table(addrinfo, host, service)
 	end
-	options = options or {}
+	options = (options or {}) --[[:! { family: LjSocketFamily | nil, socket_type: LjSocketType | nil, protocol: LjSocketProtocol | nil, flags: { string } | nil }]]
 	local info = {
 		host = host,
 		service = service,
