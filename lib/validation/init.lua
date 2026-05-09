@@ -7,7 +7,7 @@ end
 local M = {}
 M._tier = "pure"
 
---:: Schema = { _validate: (self: Schema, value: any, path: string) -> (boolean, any), _parse: (self: Schema, value: any, path: string) -> (boolean, any, any), _validate_inner: (self: Schema, value: any, path: string) -> (boolean, any), _is_optional: any, _default: any, _type_name: any, _coerce: any, _min: any, _max: any, _pattern: any, _items: any, _item: Schema, _shape: { [string]: Schema }, _values: Schema, _keys: Schema, _schemas: { [integer]: Schema }, _of: { [integer]: Schema }, _enum: any, _refine: any, _transform: any, _allow_extra: any, _strict: any, _negate: any, _fields: { [string]: Schema }, _key_schema: Schema, _value_schema: Schema, _val_schema: Schema, _items_schemas: { [integer]: Schema }, _options: { [integer]: Schema }, _value: any, _validator: any, _refiner: any, _types: any, _tuple: { [integer]: Schema }, _branches: { [integer]: Schema }, _validate_fn: any, _func: any, _inner: Schema, _fn: (any) -> any, ... }
+--:: Schema = { _validate: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil), _parse: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown), _validate_inner: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil), _is_optional: unknown, _default: unknown, _type_name: unknown, _coerce: unknown, _min: unknown, _max: unknown, _pattern: unknown, _items: unknown, _item: Schema, _shape: { [string]: Schema }, _values: Schema, _keys: Schema, _schemas: { [integer]: Schema }, _of: { [integer]: Schema }, _enum: unknown, _refine: unknown, _transform: unknown, _allow_extra: unknown, _strict: unknown, _negate: unknown, _fields: { [string]: Schema }, _key_schema: Schema, _value_schema: Schema, _val_schema: Schema, _items_schemas: { [integer]: Schema }, _options: { [integer]: Schema }, _value: unknown, _validator: unknown, _refiner: unknown, _types: unknown, _tuple: { [integer]: Schema }, _branches: { [integer]: Schema }, _validate_fn: unknown, _func: unknown, _inner: Schema, _fn: (unknown) -> string | nil, ... }
 --:: ErrEntry = { path: string, message: string }
 
 -- ── helpers ──────────────────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ end
 local Schema = {}
 Schema.__index = Schema
 
---: (self: Schema, value: any) -> any
+--: (self: Schema, value: unknown) -> unknown
 function Schema:check(value)
   local ok, errs = self:_validate(value, "")
   if ok then
@@ -51,7 +51,7 @@ function Schema:check(value)
   return false, make_error("validation failed", errs)
 end
 
---: (self: Schema, value: any) -> any
+--: (self: Schema, value: unknown) -> unknown
 function Schema:parse(value)
   local ok, errs, coerced = self:_parse(value, "")
   if ok then
@@ -61,25 +61,25 @@ function Schema:parse(value)
 end
 
 -- Default _parse delegates to _validate (no coercion).
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function Schema:_parse(value, path)
   local ok, errs = self:_validate(value, path)
   return ok, errs, value
 end
 
---: (self: Schema) -> any
+--: (self: Schema) -> unknown
 function Schema:is_optional()
   return self._is_optional or false
 end
 
---: (self: Schema) -> any
+--: (self: Schema) -> unknown
 function Schema:type_name()
   return self._type_name or "unknown"
 end
 
 -- Modifiers that return new schema objects (chainable).
 
---: (self: Schema) -> any
+--: (self: Schema) -> unknown
 function Schema:nullable()
   local s = setmetatable({}, getmetatable(self))
   for k, v in pairs(self) do s[k] = v end
@@ -89,7 +89,7 @@ end
 
 Schema.optional = Schema.nullable  -- alias
 
---: (self: Schema, val: any) -> any
+--: (self: Schema, val: unknown) -> unknown
 function Schema:default(val)
   local s = setmetatable({}, getmetatable(self))
   for k, v in pairs(self) do s[k] = v end
@@ -147,7 +147,7 @@ end
 
 local StringSchema = new_schema({ _type_name = "string", _coerce = false })
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function StringSchema:_validate_inner(value, path)
   local errs = {}
   if type(value) ~= "string" then
@@ -155,7 +155,7 @@ function StringSchema:_validate_inner(value, path)
     return false, errs
   end
   if self._min ~= nil and #value < self._min then
-    push_error(errs, path, "too short (min " .. self._min .. ")")
+    push_error(errs, path, "too short (min " .. tostring(self._min) .. ")")
     return false, errs
   end
   if self._max ~= nil and #value > self._max then
@@ -187,7 +187,7 @@ function StringSchema:_validate_inner(value, path)
   return true, errs
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function StringSchema:_validate(value, path)
   if value == nil then
     if self._default ~= nil then return true, {} end
@@ -197,7 +197,7 @@ function StringSchema:_validate(value, path)
   return self:_validate_inner(value, path)
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function StringSchema:_parse(value, path)
   if value == nil then
     if self._default ~= nil then return true, nil, self._default end
@@ -287,7 +287,7 @@ end
 
 local NumberSchema = new_schema({ _type_name = "number", _coerce = false })
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function NumberSchema:_validate_inner(value, path)
   local errs = {}
   if type(value) ~= "number" then
@@ -313,7 +313,7 @@ function NumberSchema:_validate_inner(value, path)
   return true, errs
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function NumberSchema:_validate(value, path)
   if value == nil then
     if self._default ~= nil then return true, {} end
@@ -323,7 +323,7 @@ function NumberSchema:_validate(value, path)
   return self:_validate_inner(value, path)
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function NumberSchema:_parse(value, path)
   if value == nil then
     if self._default ~= nil then return true, nil, self._default end
@@ -404,7 +404,7 @@ end
 
 local IntegerSchema = new_schema({ _type_name = "integer", _coerce = false })
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function IntegerSchema:_validate_inner(value, path)
   local errs = {}
   if type(value) ~= "number" then
@@ -426,7 +426,7 @@ function IntegerSchema:_validate_inner(value, path)
   return true, errs
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function IntegerSchema:_validate(value, path)
   if value == nil then
     if self._default ~= nil then return true, {} end
@@ -436,7 +436,7 @@ function IntegerSchema:_validate(value, path)
   return self:_validate_inner(value, path)
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function IntegerSchema:_parse(value, path)
   if value == nil then
     if self._default ~= nil then return true, nil, self._default end
@@ -497,7 +497,7 @@ local BooleanSchema = new_schema({ _type_name = "boolean", _coerce = false })
 local TRUTHY = { ["true"] = true, ["1"] = true, ["yes"] = true, [1] = true }
 local FALSY  = { ["false"] = true, ["0"] = true, ["no"] = true, [0] = true }
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function BooleanSchema:_validate_inner(value, path)
   local errs = {}
   if type(value) ~= "boolean" then
@@ -507,7 +507,7 @@ function BooleanSchema:_validate_inner(value, path)
   return true, errs
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function BooleanSchema:_validate(value, path)
   if value == nil then
     if self._default ~= nil then return true, {} end
@@ -517,7 +517,7 @@ function BooleanSchema:_validate(value, path)
   return self:_validate_inner(value, path)
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function BooleanSchema:_parse(value, path)
   if value == nil then
     if self._default ~= nil then return true, nil, self._default end
@@ -572,7 +572,7 @@ end
 
 local NilSchema = new_schema({ _type_name = "nil" })
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function NilSchema:_validate(value, path)
   if value ~= nil then
     local errs = {}
@@ -582,7 +582,7 @@ function NilSchema:_validate(value, path)
   return true, {}
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function NilSchema:_parse(value, path)
   local ok, errs = self:_validate(value, path)
   return ok, errs, nil
@@ -616,7 +616,7 @@ end
 
 local ArraySchema = new_schema({ _type_name = "array" })
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function ArraySchema:_validate_inner(value, path)
   local errs = {}
   if type(value) ~= "table" then
@@ -644,7 +644,7 @@ function ArraySchema:_validate_inner(value, path)
   return all_ok, errs
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function ArraySchema:_validate(value, path)
   if value == nil then
     if self._default ~= nil then return true, {} end
@@ -654,7 +654,7 @@ function ArraySchema:_validate(value, path)
   return self:_validate_inner(value, path)
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function ArraySchema:_parse(value, path)
   if value == nil then
     if self._default ~= nil then return true, nil, self._default end
@@ -730,7 +730,7 @@ end
 
 local RecordSchema = new_schema({ _type_name = "record" })
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function RecordSchema:_validate_inner(value, path)
   local errs = {}
   if type(value) ~= "table" then
@@ -749,7 +749,7 @@ function RecordSchema:_validate_inner(value, path)
   return all_ok, errs
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function RecordSchema:_validate(value, path)
   if value == nil then
     if self._default ~= nil then return true, {} end
@@ -759,7 +759,7 @@ function RecordSchema:_validate(value, path)
   return self:_validate_inner(value, path)
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function RecordSchema:_parse(value, path)
   if value == nil then
     if self._default ~= nil then return true, nil, self._default end
@@ -812,7 +812,7 @@ end
 
 local MapSchema = new_schema({ _type_name = "map" })
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function MapSchema:_validate_inner(value, path)
   local errs = {}
   if type(value) ~= "table" then
@@ -836,7 +836,7 @@ function MapSchema:_validate_inner(value, path)
   return all_ok, errs
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function MapSchema:_validate(value, path)
   if value == nil then
     if self._default ~= nil then return true, {} end
@@ -846,7 +846,7 @@ function MapSchema:_validate(value, path)
   return self:_validate_inner(value, path)
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function MapSchema:_parse(value, path)
   if value == nil then
     if self._default ~= nil then return true, nil, self._default end
@@ -904,7 +904,7 @@ end
 
 local TupleSchema = new_schema({ _type_name = "tuple" })
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function TupleSchema:_validate_inner(value, path)
   local errs = {}
   if type(value) ~= "table" then
@@ -928,7 +928,7 @@ function TupleSchema:_validate_inner(value, path)
   return all_ok, errs
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function TupleSchema:_validate(value, path)
   if value == nil then
     if self._default ~= nil then return true, {} end
@@ -938,7 +938,7 @@ function TupleSchema:_validate(value, path)
   return self:_validate_inner(value, path)
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function TupleSchema:_parse(value, path)
   if value == nil then
     if self._default ~= nil then return true, nil, self._default end
@@ -997,7 +997,7 @@ end
 
 local UnionSchema = new_schema({ _type_name = "union" })
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function UnionSchema:_validate(value, path)
   if value == nil and self._is_optional then return true, {} end
   for i = 1, #self._schemas do
@@ -1009,7 +1009,7 @@ function UnionSchema:_validate(value, path)
   return false, errs
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function UnionSchema:_parse(value, path)
   if value == nil then
     if self._default ~= nil then return true, nil, self._default end
@@ -1050,7 +1050,7 @@ end
 
 local IntersectionSchema = new_schema({ _type_name = "intersection" })
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function IntersectionSchema:_validate(value, path)
   if value == nil and self._is_optional then return true, {} end
   local errs = {}
@@ -1065,7 +1065,7 @@ function IntersectionSchema:_validate(value, path)
   return all_ok, errs
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function IntersectionSchema:_parse(value, path)
   if value == nil then
     if self._default ~= nil then return true, nil, self._default end
@@ -1113,7 +1113,7 @@ end
 
 local LiteralSchema = new_schema({ _type_name = "literal" })
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function LiteralSchema:_validate(value, path)
   if value == nil and self._is_optional then return true, {} end
   if value ~= self._value then
@@ -1124,7 +1124,7 @@ function LiteralSchema:_validate(value, path)
   return true, {}
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function LiteralSchema:_parse(value, path)
   if value == nil then
     if self._default ~= nil then return true, nil, self._default end
@@ -1159,7 +1159,7 @@ end
 
 local EnumSchema = new_schema({ _type_name = "enum" })
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function EnumSchema:_validate(value, path)
   if value == nil and self._is_optional then return true, {} end
   for i = 1, #self._values do
@@ -1170,7 +1170,7 @@ function EnumSchema:_validate(value, path)
   return false, errs
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function EnumSchema:_parse(value, path)
   if value == nil then
     if self._default ~= nil then return true, nil, self._default end
@@ -1205,7 +1205,7 @@ end
 
 local NotSchema = new_schema({ _type_name = "not" })
 
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function NotSchema:_validate(value, path)
   if value == nil and self._is_optional then return true, {} end
   local ok = self._inner:_validate(value, path)
@@ -1217,7 +1217,7 @@ function NotSchema:_validate(value, path)
   return true, {}
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function NotSchema:_parse(value, path)
   if value == nil then
     if self._default ~= nil then return true, nil, self._default end
@@ -1253,7 +1253,7 @@ end
 local CustomSchema = new_schema({ _type_name = "custom" })
 
 -- _fn(value) -> nil (ok) or string (error message)
---: (self: Schema, value: any, path: string) -> (boolean, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil)
 function CustomSchema:_validate(value, path)
   if value == nil and self._is_optional then return true, {} end
   local msg = self._fn(value)
@@ -1265,7 +1265,7 @@ function CustomSchema:_validate(value, path)
   return true, {}
 end
 
---: (self: Schema, value: any, path: string) -> (boolean, any, any)
+--: (self: Schema, value: unknown, path: string) -> (boolean, { [integer]: ErrEntry } | nil, unknown)
 function CustomSchema:_parse(value, path)
   if value == nil then
     if self._default ~= nil then return true, nil, self._default end

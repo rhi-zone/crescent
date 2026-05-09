@@ -93,9 +93,9 @@ local function serve_static(self_cap, req, res)
 end
 
 -- Build a lookup table from alias id -> alias for fast /api/execute dispatch.
---: ({ [string]: any }) -> { [string]: any }
+--: ({ [string]: unknown }) -> { [string]: unknown }
 local function build_alias_index(aliases)
-	local idx = {} --: { [string]: any }
+	local idx = {} --: { [string]: unknown }
 	for _, a in ipairs(aliases) do
 		if a.id then idx[a.id] = a end
 	end
@@ -142,14 +142,14 @@ end
 
 -- Determine output shape spec from action.exec.output. Accepts:
 --   nil / "text" / "code" / "key_value" / table with .type
---: (any) -> { [string]: any }
+--: (any) -> { [string]: unknown }
 local function output_spec_of(exec_info)
-	local exec = exec_info --: any
+	local exec = exec_info
 	local o = exec and exec.output
 	if o == nil then return { type = "text" } end
 	if type(o) == "string" then return { type = o } end
 	if type(o) == "table" then
-		local ot = o --: any
+		local ot = o --[[:! { type: unknown }]]
 		if type(ot.type) ~= "string" then
 			return { type = "text" }
 		end
@@ -160,18 +160,18 @@ end
 
 -- Build a default cite list from exec_info + cap type. Best-effort: caps don't
 -- expose root paths, so use what we can read off the action declaration.
---: (any, string) -> any[]
+--: (any, string) -> unknown[]
 local function make_cite(exec_info, cap_type)
-	local exec = exec_info --: any
+	local exec = exec_info
 	if cap_type == "shell" then
 		return { output_mod.cite_command({ tostring(exec.args or "") }) }
 	end
 	if cap_type == "exec" then
-		local argv = {} --: any
+		local argv = {} --: { [integer]: string }
 		argv[1] = tostring(exec.binary or "")
 		local args = exec.args
 		if type(args) == "table" then
-			local args_t = args --: any[]
+			local args_t = args --[[:! { [integer]: unknown }]]
 			for i, a in ipairs(args_t) do argv[i + 1] = tostring(a) end
 		end
 		return { output_mod.cite_exec(argv) }
@@ -190,7 +190,7 @@ local function make_cite(exec_info, cap_type)
 					path = name
 				end
 			end
-			local val = nil --: any
+			local val = nil --: string | nil
 			if op == "set" then val = tostring(exec.value or "") end
 			return { output_mod.cite_registry(path, val) }
 		end
@@ -202,9 +202,9 @@ end
 -- Build the *empty* schema body for a streaming primitive. The streamer sends
 -- this as the first SSE event so the frontend can render the table/log frame
 -- skeleton immediately. Frame data arrives in subsequent events.
---: (any) -> any
+--: (any) -> unknown
 local function build_stream_schema(spec)
-	local s = spec --: any
+	local s = spec
 	local ty = s.type
 	if ty == "log_stream" then
 		return {
@@ -235,50 +235,55 @@ end
 -- for Last-Event-ID resume.
 --: (any, any, any, any, string, any, any) -> nil
 local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, res)
-	local s = spec --: any
-	local cite = make_cite(exec_info, cap_type)
+	local s = spec
+	local sub_cap_ = sub_cap
+	local exec_info_ = exec_info
+	local time_cap_ = time_cap
+	local req_ = req
+	local res_ = res
+	local cite = make_cite(exec_info_, cap_type)
 
 	-- 1. Set headers first; http_server cap writes them on first send_event.
-	res.status = 200
-	res.headers["Content-Type"]  = "text/event-stream"
-	res.headers["Cache-Control"] = "no-cache"
-	res.headers["Connection"]    = "keep-alive"
+	res_.status = 200
+	res_.headers["Content-Type"]  = "text/event-stream"
+	res_.headers["Cache-Control"] = "no-cache"
+	res_.headers["Connection"]    = "keep-alive"
 
 	-- 2. Build & validate the schema envelope.
 	local schema_body = build_stream_schema(spec)
 	if not schema_body then
 		local env_err = output_mod.err("unknown streaming output type: " .. tostring(s.type))
-		res.send_event(json.encode(env_err), { event = "error" })
-		res.close()
+		res_.send_event(json.encode(env_err), { event = "error" })
+		res_.close()
 		return
 	end
 	local schema_env = output_mod.ok(schema_body, { cite = cite })
 	local sok, serr = output_mod.validate(schema_env)
 	if not sok then
 		local env_err = output_mod.err("invalid stream schema: " .. tostring(serr))
-		res.send_event(json.encode(env_err), { event = "error" })
-		res.close()
+		res_.send_event(json.encode(env_err), { event = "error" })
+		res_.close()
 		return
 	end
 
 	-- 3. Emit schema as id=0. ALWAYS sent regardless of Last-Event-ID — the
 	--    frontend uses it to construct the renderer skeleton.
-	local ok_send = res.send_event(json.encode(schema_env), { id = 0, event = "schema" })
-	if not ok_send then res.close(); return end
+	local ok_send = res_.send_event(json.encode(schema_env), { id = 0, event = "schema" })
+	if not ok_send then res_.close(); return end
 
 	-- 4. Open the stream. shell is the only cap with run_stream in this phase.
 	if cap_type ~= "shell" then
-		res.send_event(json.encode(output_mod.err(
+		res_.send_event(json.encode(output_mod.err(
 			"streaming not implemented for cap type: " .. cap_type)),
 			{ event = "error" })
-		res.close()
+		res_.close()
 		return
 	end
-	local iter, ierr = sub_cap.run_stream(exec_info.args)
+	local iter, ierr = sub_cap_.run_stream(exec_info_.args)
 	if not iter then
-		res.send_event(json.encode(output_mod.err(tostring(ierr or "run_stream failed"))),
+		res_.send_event(json.encode(output_mod.err(tostring(ierr or "run_stream failed"))),
 			{ event = "error" })
-		res.close()
+		res_.close()
 		return
 	end
 
@@ -289,7 +294,7 @@ local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, re
 		local rb_n = rb --: number
 		if rb_n > 0 then replay_size = math.floor(rb_n) end
 	end
-	local ring = {} --: any
+	local ring = {} --: { [integer]: { id: integer, payload: string } }
 	local ring_count = 0
 	local last_id = 0
 	--: (integer, string) -> nil
@@ -301,7 +306,7 @@ local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, re
 	local function ring_oldest_id()
 		local count = ring_count --: integer
 		if count == 0 then return 0 end
-		local r = ring --: any
+		local r = ring
 		if count <= replay_size then return r[1].id end
 		-- Oldest is at slot (count % replay_size) + 1.
 		local idx = (count % replay_size) + 1
@@ -313,7 +318,7 @@ local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, re
 	--    cannot replay everything missed: emit a `gap` event to tell the
 	--    client to drop state, then resume live.
 	local resume_from
-	local lei_str = req.last_event_id
+	local lei_str = req_.last_event_id
 	if type(lei_str) == "string" then
 		local n = tonumber(lei_str)
 		if n then resume_from = math.floor(n) end
@@ -324,15 +329,15 @@ local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, re
 		local oldest = ring_oldest_id()
 		if rfrom < oldest and ring_count > 0 then
 			-- Buffer doesn't cover the gap.
-			local gap_ok = res.send_event("{}", { event = "gap" })
-			if not gap_ok then iter:close(); res.close(); return end
+			local gap_ok = res_.send_event("{}", { event = "gap" })
+			if not gap_ok then iter:close(); res_.close(); return end
 		else
-			local r = ring --: any
+			local r = ring
 			for i = 1, math.min(ring_count, replay_size) do
 				local entry = r[i]
 				if entry and entry.id > rfrom then
-					local rok = res.send_event(entry.payload, { id = entry.id })
-					if not rok then iter:close(); res.close(); return end
+					local rok = res_.send_event(entry.payload, { id = entry.id })
+					if not rok then iter:close(); res_.close(); return end
 				end
 			end
 		end
@@ -344,11 +349,11 @@ local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, re
 	-- preserves the legacy log_stream message-wrapping behaviour.
 	local frame_format = s.frame_format
 	if frame_format ~= nil and frame_format ~= "jsonl" then
-		res.send_event(json.encode(output_mod.err(
+		res_.send_event(json.encode(output_mod.err(
 			"unknown frame_format: " .. tostring(frame_format))),
 			{ event = "error" })
 		iter:close()
-		res.close()
+		res_.close()
 		return
 	end
 
@@ -356,9 +361,9 @@ local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, re
 	while true do
 		local line, lerr = iter()
 		if lerr then
-			res.send_event(json.encode(output_mod.err(tostring(lerr))), { event = "error" })
+			res_.send_event(json.encode(output_mod.err(tostring(lerr))), { event = "error" })
 			iter:close()
-			res.close()
+			res_.close()
 			return
 		end
 		if line == nil then break end -- EOF
@@ -376,17 +381,17 @@ local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, re
 				fail_msg = tostring(derr or "decode returned nil")
 			end
 			if fail_msg ~= nil then
-				local err_ok = res.send_event(json.encode(output_mod.err(
+				local err_ok = res_.send_event(json.encode(output_mod.err(
 					"frame decode failed: " .. fail_msg)),
 					{ event = "error" })
-				if not err_ok then iter:close(); res.close(); return end
+				if not err_ok then iter:close(); res_.close(); return end
 				skip = true
 			else
 				frame_payload = decoded
 			end
 		elseif s.type == "log_stream" then
 			local now
-			if time_cap then now = time_cap.now() end
+			if time_cap_ then now = time_cap_.now() end
 			frame_payload = {
 				time    = now,
 				level   = "info",
@@ -402,26 +407,26 @@ local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, re
 			last_id = last_id + 1
 			local payload = json.encode({ type = "frame", frame = frame_payload })
 			ring_push(last_id, payload)
-			local ok_f, _ = res.send_event(payload, { id = last_id })
+			local ok_f, _ = res_.send_event(payload, { id = last_id })
 			if not ok_f then
 				iter:close()
-				res.close()
+				res_.close()
 				return
 			end
 		end
 	end
 
 	-- 8. Stream end.
-	res.send_event("{}", { event = "end" })
-	res.close()
+	res_.send_event("{}", { event = "end" })
+	res_.close()
 end
 
 -- Adapt a raw cap result into a primitive body.
 -- raw is the value returned by the cap (string for shell/exec/registry get,
 -- list of records for list_values/list_keys, etc.).
---: (any, any) -> (any | nil, string | nil)
+--: (any, any) -> (unknown | nil, string | nil)
 local function adapt_body(spec, raw)
-	local s = spec --: any
+	local s = spec
 	local ty = s.type
 	if ty == "text" then
 		local txt
@@ -429,8 +434,8 @@ local function adapt_body(spec, raw)
 			txt = rstrip_newline(raw)
 		elseif type(raw) == "table" then
 			-- list_keys returns string[]; render as joined lines.
-			local r = raw --: any[]
-			local parts = {} --: any
+			local r = raw --[[:! { [integer]: unknown }]]
+			local parts = {} --: { [integer]: string }
 			for i, v in ipairs(r) do parts[i] = tostring(v) end
 			txt = table.concat(parts, "\n")
 		else
@@ -446,13 +451,13 @@ local function adapt_body(spec, raw)
 		if type(raw) ~= "table" then
 			return nil, "key_value: cap result must be a list of records, got " .. type(raw)
 		end
-		local list = raw --: any[]
-		local pairs_ = {} --: any[]
+		local list = raw --[[:! { [integer]: unknown }]]
+		local pairs_ = {} --: { [integer]: { key: string, value: { type: string, text: string } } }
 		for i, rec in ipairs(list) do
 			if type(rec) ~= "table" then
 				return nil, "key_value: list[" .. tostring(i) .. "] must be a record"
 			end
-			local r = rec --: any
+			local r = rec --[[:! { name: unknown, key: unknown, value: unknown, type: unknown }]]
 			local k = r.name or r.key
 			local v = r.value
 			if v == nil then v = r.type end
@@ -468,8 +473,8 @@ local function adapt_body(spec, raw)
 		if type(cols) ~= "table" then
 			return nil, "table: spec.columns missing"
 		end
-		local cols_t = cols --: any[]
-		local rows = {} --: any[]
+		local cols_t = cols --[[:! { [integer]: unknown }]]
+		local rows = {} --: { [integer]: unknown }
 		if type(raw) == "string" then
 			local lines = split_lines(raw)
 			local start = 1
@@ -477,13 +482,13 @@ local function adapt_body(spec, raw)
 			for i = start, #lines do
 				local line = lines[i]
 				local toks = split_ws(line)
-				local row = {} --: { [string]: any }
+				local row = {} --: { [string]: unknown }
 				for ci, col in ipairs(cols_t) do
-					local c = col --: any
+					local c = col --[[:! { key: unknown, label: unknown, type: unknown, sortable: unknown, align: unknown }]]
 					local key = tostring(c.key)
 					-- Last column captures the remainder (mountpoints with spaces, etc.).
 					if ci == #cols_t and #toks > #cols_t then
-						local extra = {} --: any
+						local extra = {} --: { [integer]: string }
 						local n = 0
 						for j = ci, #toks do n = n + 1; extra[n] = toks[j] end
 						row[key] = table.concat(extra, " ")
@@ -494,7 +499,7 @@ local function adapt_body(spec, raw)
 				rows[#rows + 1] = row
 			end
 		elseif type(raw) == "table" then
-			local r = raw --: any[]
+			local r = raw --[[:! { [integer]: unknown }]]
 			for _, item in ipairs(r) do
 				if type(item) ~= "table" then
 					return nil, "table: row must be a record"
@@ -505,9 +510,9 @@ local function adapt_body(spec, raw)
 			return nil, "table: cap result must be a string or list, got " .. type(raw)
 		end
 		-- Normalise columns to satisfy validator: every entry must have key/label/type.
-		local norm_cols = {} --: any[]
+		local norm_cols = {} --: { [integer]: { key: string, label: string, type: string, sortable: unknown, align: unknown } }
 		for _, col in ipairs(cols_t) do
-			local c = col --: any
+			local c = col --[[:! { key: unknown, label: unknown, type: unknown, sortable: unknown, align: unknown }]]
 			norm_cols[#norm_cols + 1] = {
 				key      = tostring(c.key or ""),
 				label    = tostring(c.label or c.key or ""),
@@ -520,8 +525,8 @@ local function adapt_body(spec, raw)
 	end
 	if ty == "status_badge" then
 		local raw_str = type(raw) == "string" and raw or tostring(raw)
-		local on_match = s.on_match --: any
-		local default  = s.default  --: any
+		local on_match = s.on_match --[[:! { pattern: unknown, label: unknown, state: unknown } | nil]]
+		local default  = s.default  --[[:! { label: unknown, state: unknown } | nil]]
 		if on_match and type(on_match.pattern) == "string" then
 			if raw_str:find(on_match.pattern) then
 				return { type = "status_badge",
@@ -608,7 +613,7 @@ local function handle_api(state, req, res)
 		local action_caps = type(action.caps) == "table" and action.caps or {}
 		for name_k, decl_v in pairs(action_caps) do
 			local name = tostring(name_k)
-			local decl = --[[:! { type: string, reason: any, ... }]] decl_v
+			local decl = --[[:! { type: string, reason: unknown, ... }]] decl_v
 			local parent = find_cap_by_type(state.caps, decl.type)
 			if not parent then
 				res.status = 200
@@ -742,10 +747,10 @@ local function handle_api(state, req, res)
 			return true
 		end
 		local action = actions[idx]
-		local cap_entries = {} --: any
+		local cap_entries = {} --: { [integer]: unknown }
 		local action_caps = type(action.caps) == "table" and action.caps or {}
 		for name_k, decl_v in pairs(action_caps) do
-			local decl = --[[:! { type: string, reason: any, ... }]] decl_v
+			local decl = --[[:! { type: string, reason: unknown, ... }]] decl_v
 			cap_entries[#cap_entries + 1] = {
 				name   = name_k,
 				type   = decl.type,
@@ -753,7 +758,7 @@ local function handle_api(state, req, res)
 				risk   = cap_dispatch.risk(decl),
 			}
 		end
-		local exec_args --: any
+		local exec_args --: unknown
 		if type(action.exec) == "table" then
 			exec_args = action.exec.args
 		end
@@ -808,7 +813,7 @@ local function handle_api(state, req, res)
 end
 
 function M.create(caps, opts)
-	local caps_t     = caps  --: any
+	local caps_t     = caps  --[[: any]]
 	local self_cap   = caps_t and caps_t.self
 	local user_packs = caps_t and caps_t.user_packs
 	local stdout_cap = caps_t and caps_t.stdout

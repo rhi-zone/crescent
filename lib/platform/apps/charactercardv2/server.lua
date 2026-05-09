@@ -432,7 +432,7 @@ local AUTHORS_NOTE_EXT_KEY = "depth_prompt"
 -- into character_book (ST <-> CCv2 conversion), the author's note into
 -- extensions.depth_prompt/depth_prompt_depth/depth_prompt_role, and the
 -- regex scripts into extensions.regex_scripts.
---: (State) -> any
+--: (State) -> unknown
 local function build_chara_for_write(state)
 	local card = state.card
 	if not card then return nil end
@@ -3122,7 +3122,7 @@ function M.create(caps, opts)
 
 	local serve_static = not opts.no_static and caps.self and caps.self.entry
 
-	--: (Req, Res) -> any
+	--: (Req, Res) -> unknown
 	local function handler(req, res)
 		local req_path, params = parse_target(req.target or req.path or "/")
 		local key = req.method .. " " .. req_path

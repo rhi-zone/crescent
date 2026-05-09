@@ -20,10 +20,10 @@ local co_resume  = coroutine.resume
 local co_status  = coroutine.status
 local co_yield   = coroutine.yield
 
---:: ActorRecord = { _pid: integer, _name: string|nil, _restart: string, _mailbox: { [integer]: any }, _links: { [integer]: boolean }, _monitors: { [integer]: integer }, _monitor_refs: { [integer]: integer }, _status: string, _fn: (any) -> any, _co: any|nil, _ctx: any, _exit_reason: string|nil, _deadline: number|nil, _system: any }
---:: ActorCtxShape = { _actor: ActorRecord, _system: any, receive: (ActorCtxShape, number|nil) -> any, send: (ActorCtxShape, integer, any) -> any, self: (ActorCtxShape) -> integer, name: (ActorCtxShape) -> string|nil, link: (ActorCtxShape, integer) -> boolean|nil, monitor: (ActorCtxShape, integer) -> integer, spawn: (ActorCtxShape, any, any) -> integer }
---:: SystemShape = { _actors: { [integer]: ActorRecord }, _names: { [string]: integer }, _next_pid: integer, _next_ref_id: integer, _mailbox_size: integer, _clock_fn: () -> number, _next_ref: (SystemShape) -> integer, spawn: (SystemShape, any, any) -> integer, send: (SystemShape, integer, any) -> boolean|nil, call: (SystemShape, integer, any, number|nil) -> any, whereis: (SystemShape, string) -> integer|nil, stop: (SystemShape, integer) -> nil, alive: (SystemShape, integer) -> boolean, actor_count: (SystemShape) -> integer, _resume_actor: (SystemShape, ActorRecord) -> nil, _kill_actor: (SystemShape, ActorRecord, string) -> nil, step: (SystemShape) -> nil, run: (SystemShape, integer) -> nil, run_until_idle: (SystemShape) -> nil, supervisor: (SystemShape, any) -> any }
---:: SupervisorShape = { _system: SystemShape, _strategy: string, _max_restarts: integer, _period: number, _children: { [integer]: any }, _failures: { [string]: any }, _pid: integer|nil, _spawn_child: (SupervisorShape, any) -> integer, _start_child: (SupervisorShape, any) -> integer|nil, _find_child: (SupervisorShape, string) -> any, _should_restart: (SupervisorShape, any, string) -> boolean, _record_failure: (SupervisorShape, string) -> integer, _handle_exit: (SupervisorShape, string, string, any) -> nil, get_pid: (SupervisorShape, string) -> integer|nil }
+--:: ActorRecord = { _pid: integer, _name: string|nil, _restart: string, _mailbox: { [integer]: unknown }, _links: { [integer]: boolean }, _monitors: { [integer]: integer }, _monitor_refs: { [integer]: integer }, _status: string, _fn: (unknown) -> unknown, _co: any|nil, _ctx: unknown, _exit_reason: string|nil, _deadline: number|nil, _system: SystemShape }
+--:: ActorCtxShape = { _actor: ActorRecord, _system: SystemShape, receive: (ActorCtxShape, number|nil) -> unknown, send: (ActorCtxShape, integer, unknown) -> unknown, self: (ActorCtxShape) -> integer, name: (ActorCtxShape) -> string|nil, link: (ActorCtxShape, integer) -> boolean|nil, monitor: (ActorCtxShape, integer) -> integer, spawn: (ActorCtxShape, unknown, unknown) -> integer }
+--:: SystemShape = { _actors: { [integer]: ActorRecord }, _names: { [string]: integer }, _next_pid: integer, _next_ref_id: integer, _mailbox_size: integer, _clock_fn: () -> number, _next_ref: (SystemShape) -> integer, spawn: (SystemShape, unknown, unknown) -> integer, send: (SystemShape, integer, unknown) -> boolean|nil, call: (SystemShape, integer, unknown, number|nil) -> unknown, whereis: (SystemShape, string) -> integer|nil, stop: (SystemShape, integer) -> nil, alive: (SystemShape, integer) -> boolean, actor_count: (SystemShape) -> integer, _resume_actor: (SystemShape, ActorRecord) -> nil, _kill_actor: (SystemShape, ActorRecord, string) -> nil, step: (SystemShape) -> nil, run: (SystemShape, integer) -> nil, run_until_idle: (SystemShape) -> nil, supervisor: (SystemShape, unknown) -> unknown }
+--:: SupervisorShape = { _system: SystemShape, _strategy: string, _max_restarts: integer, _period: number, _children: { [integer]: unknown }, _failures: { [string]: unknown }, _pid: integer|nil, _spawn_child: (SupervisorShape, unknown) -> integer, _start_child: (SupervisorShape, unknown) -> integer|nil, _find_child: (SupervisorShape, string) -> unknown, _should_restart: (SupervisorShape, unknown, string) -> boolean, _record_failure: (SupervisorShape, string) -> integer, _handle_exit: (SupervisorShape, string, string, unknown) -> nil, get_pid: (SupervisorShape, string) -> integer|nil }
 
 -- ---------------------------------------------------------------------------
 -- Pid (opaque integer handle) — just a sequential integer, kept as-is
@@ -36,7 +36,7 @@ local co_yield   = coroutine.yield
 local ActorCtx = {}
 ActorCtx.__index = ActorCtx
 
---: (ActorCtxShape, number|nil) -> any
+--: (ActorCtxShape, number|nil) -> unknown
 function ActorCtx:receive(timeout_ms)
   local self_ = self
   -- If mailbox already has a message, return it immediately.
@@ -66,7 +66,7 @@ function ActorCtx:receive(timeout_ms)
   end
 end
 
---: (ActorCtxShape, integer, any) -> any
+--: (ActorCtxShape, integer, unknown) -> unknown
 function ActorCtx:send(pid, msg)
   local self_ = self
   local sys_ = self_._system
@@ -100,7 +100,7 @@ end
 --: (ActorCtxShape, integer) -> integer
 function ActorCtx:monitor(pid)
   local self_ = self
-  local sys_ = self_._system
+  local sys_ = self_._system --[[:! SystemShape]]
   local target = sys_._actors[pid]
   if not target then
     -- Already dead — send :down immediately next step
@@ -114,7 +114,7 @@ function ActorCtx:monitor(pid)
   return ref
 end
 
---: (ActorCtxShape, any, any) -> integer
+--: (ActorCtxShape, unknown, unknown) -> integer
 function ActorCtx:spawn(fn, opts)
   local self_ = self
   local sys_ = self_._system
@@ -125,8 +125,8 @@ end
 -- Actor record
 -- ---------------------------------------------------------------------------
 
+--: (integer, (unknown) -> unknown, { name: string|nil, restart: string|nil, mailbox_size: integer|nil, ... }, SystemShape) -> ActorRecord
 local function make_actor(pid, fn, opts, system)
-  opts = opts or {}
   local actor = {
     _pid      = pid,
     _name     = opts.name,
@@ -183,14 +183,14 @@ function System:_next_ref()
   return r
 end
 
---: (SystemShape, any, any) -> integer
+--: (SystemShape, unknown, unknown) -> integer
 function System:spawn(fn, opts)
   local self_ = self
   opts = opts or {}
   local opts_ = opts --[[:! { name: string|nil, restart: string|nil, mailbox_size: integer|nil }]]
   local pid = self_._next_pid
   self_._next_pid = pid + 1
-  local actor = make_actor(pid, fn, opts_, self_)
+  local actor = make_actor(pid, fn --[[:! (unknown) -> unknown]], opts_, self_)
   self_._actors[pid] = actor
   if opts_.name then
     self_._names[opts_.name] = pid
@@ -200,7 +200,7 @@ function System:spawn(fn, opts)
   return pid
 end
 
---: (SystemShape, integer, any) -> (boolean | nil, string | nil)
+--: (SystemShape, integer, unknown) -> (boolean | nil, string | nil)
 function System:send(pid, msg)
   local self_ = self
   local actor = self_._actors[pid]
@@ -220,14 +220,14 @@ function System:send(pid, msg)
   return true
 end
 
---: (SystemShape, integer, any, number|nil) -> any
+--: (SystemShape, integer, unknown, number|nil) -> unknown
 function System:call(pid, msg, timeout_ms)
   local self_ = self
   local timeout_ms_ = timeout_ms
   -- We need a temporary "caller" mechanism without a real actor for the
   -- return channel. We use a single-element result table and a unique reply_to
   -- pid: the pid of a synthetic receiver actor.
-  local result_box = {} --: { [integer]: any }
+  local result_box = {} --: { [integer]: unknown }
   local caller_pid = self_._next_pid
   self_._next_pid = caller_pid + 1
 
@@ -429,7 +429,7 @@ end
 local Supervisor = {}
 Supervisor.__index = Supervisor
 
---: (SystemShape, any) -> any
+--: (SystemShape, unknown) -> unknown
 function System:supervisor(opts)
   local self_ = self
   opts = opts or {}
@@ -485,11 +485,11 @@ function System:supervisor(opts)
   return sup_
 end
 
---:: ChildEntry = { id: string, fn: any, restart: string, pid: integer|nil, name: string|nil }
+--:: ChildEntry = { id: string, fn: unknown, restart: string, pid: integer|nil, name: string|nil }
 --:: FailureRec = { times: { [integer]: number } }
 
 -- Spawn the coroutine for an already-registered child entry.
---: (SupervisorShape, any) -> integer
+--: (SupervisorShape, unknown) -> integer
 function Supervisor:_spawn_child(entry)
   local self_ = self
   local sys_ = self_._system
@@ -514,7 +514,7 @@ function Supervisor:_spawn_child(entry)
   return pid
 end
 
---: (SupervisorShape, any) -> integer|nil
+--: (SupervisorShape, unknown) -> integer|nil
 function Supervisor:_start_child(spec)
   local self_ = self
   local spec_ = spec --[[:! ChildEntry]]
@@ -533,7 +533,7 @@ function Supervisor:_start_child(spec)
   return entry_.pid
 end
 
---: (SupervisorShape, string) -> any
+--: (SupervisorShape, string) -> unknown
 function Supervisor:_find_child(id)
   local self_ = self
   for i, c in ipairs(self_._children) do
@@ -543,9 +543,9 @@ function Supervisor:_find_child(id)
   return nil, nil
 end
 
---: (SupervisorShape, any, string) -> boolean
+--: (SupervisorShape, unknown, string) -> boolean
 function Supervisor:_should_restart(child, reason)
-  local child_ = child --[[: ChildEntry]]
+  local child_ = child --[[:! ChildEntry]]
   local r = child_.restart
   if r == "permanent" then return true end
   if r == "temporary" then return false end
@@ -573,7 +573,7 @@ function Supervisor:_record_failure(id)
   return #times
 end
 
---: (SupervisorShape, string, string, any) -> nil
+--: (SupervisorShape, string, string, unknown) -> nil
 function Supervisor:_handle_exit(id, reason, ctx)
   local self_ = self
   local child = self_:_find_child(id)
