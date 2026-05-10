@@ -38,6 +38,7 @@ local str_match = string.match
 -- Used to mark extracted block math positions in the source.  Unlikely to
 -- appear in real Markdown content.
 local PLACEHOLDER_PREFIX = "CRESCENT_MATH_BLOCK_"
+--:: MdastNode = { type: string, value?: string, children?: { [integer]: MdastNode }, ... }
 
 -- ── Source preprocessor ───────────────────────────────────────────────────────
 
@@ -212,9 +213,13 @@ end
 -- ── Block placeholder detection ───────────────────────────────────────────────
 
 -- Check if a paragraph is a math placeholder.  Returns the block index or nil.
+--: (MdastNode) -> number | nil
 local function para_placeholder_index(para)
-  if not para.children or #para.children ~= 1 then return nil end
-  local child = para.children[1]
+  local pchildren = para.children --[[:! { [integer]: MdastNode } | nil]]
+  if not pchildren then return nil end
+  local pchildren2 = pchildren --[[:! { [integer]: MdastNode }]]
+  if #pchildren2 ~= 1 then return nil end
+  local child = pchildren2[1]
   if child.type ~= "text" then return nil end
   local v = child.value or ""
   local idx = str_match(v, "^" .. PLACEHOLDER_PREFIX .. "(%d+)$")
@@ -225,7 +230,7 @@ end
 
 local function transform(node, allow_single, blocks)
   if node.type == "root" or node.type == "blockquote" then
-    local children = node.children --[[:! { [integer]: any }]]
+    local children = node.children --[[:! { [integer]: MdastNode }]]
     local new_children = {}
     for i = 1, #children do
       local child = children[i]

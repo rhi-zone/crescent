@@ -22,6 +22,8 @@ end
 
 local M = {}
 
+--:: HastNode = { type: string, tag?: string, value?: string, children?: { [integer]: HastNode }, ... }
+
 -- ── Block element set ─────────────────────────────────────────────────────────
 
 local BLOCK = {
@@ -56,7 +58,7 @@ end
 
 local minify_node  -- forward declaration
 
---: (any, boolean, boolean) -> nil
+--: (HastNode, boolean, boolean, boolean) -> nil
 local function minify_children(node, parent_is_block, in_pre, collapse_newlines)
   local children = node.children
   if not children then return end
@@ -82,7 +84,7 @@ local function minify_children(node, parent_is_block, in_pre, collapse_newlines)
   node.children = new_children
 end
 
---: (any, boolean, boolean) -> nil
+--: (HastNode, boolean, boolean) -> nil
 minify_node = function(node, in_pre, collapse_newlines)
   if node.type ~= "element" then return end
   local tag = node.tag or ""
@@ -93,13 +95,15 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, { newlines?: boolean, ... } | nil) -> nil
 function M.plugin(processor, opts)
   opts = opts or {}
-  local collapse_newlines = opts.newlines ~= false  -- default true
-  processor:use_transformer(function(tree)
+  local collapse_newlines = (opts --[[:! { newlines?: boolean, ... }]]).newlines ~= false
+  local proc = processor --[[:! { use_transformer: (unknown, (unknown) -> unknown) -> nil }]]
+  proc:use_transformer(function(tree_raw)
+    local tree = tree_raw --[[:! HastNode]]
     if tree.children then
-      for _, child in ipairs(tree.children) do
+      for _, child in ipairs(tree.children --[[:! { [integer]: HastNode }]]) do
         minify_node(child, false, collapse_newlines)
       end
     end

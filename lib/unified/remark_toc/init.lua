@@ -26,15 +26,18 @@ end
 
 local M = {}
 
+--:: MdastNode = { type: string, value?: string, children?: { [integer]: MdastNode }, depth?: integer, ... }
+--:: ListNode = { type: string, children: { [integer]: MdastNode }, ordered?: boolean, ... }
+
 -- ── Text extraction ───────────────────────────────────────────────────────────
 
 -- Recursively concatenate all `text` node values from a node's children.
---: (any) -> string
+--: (MdastNode) -> string
 local function extract_text(node)
   if node.type == "text" then
     return node.value or ""
   end
-  local children = node.children --[[:! { [integer]: any }]]
+  local children = node.children --[[:! { [integer]: MdastNode }]]
   if not children then return "" end
   local parts = {}
   for i = 1, #children do
@@ -69,7 +72,8 @@ local function make_matcher(pattern)
     end
   end
   return function(text)
-    local lower = text:lower():match("^%s*(.-)%s*$")
+    local text_s = text --[[:! string]]
+    local lower = text_s:lower():match("^%s*(.-)%s*$")
     for i = 1, #alts do
       if lower == alts[i] then return true end
     end
@@ -114,7 +118,7 @@ local function build_toc_list(entries, ordered, min_depth)
   local root_list = make_list()
   -- stack maps relative depth → {list_node, parent_item}
   -- stack[1] = { list = root_list, item = nil }
-  local stack = { { list = root_list, item = nil } } --: { [integer]: { list: any, item: any } }
+  local stack = { { list = root_list, item = nil } } --: { [integer]: { list: ListNode, item: ListNode | nil } }
 
   for e = 1, #entries do
     local entry = entries[e]
@@ -161,10 +165,11 @@ local DEFAULT_HEADING = "table of contents|toc|contents"
 
 local function remark_toc(processor, opts)
   opts = opts or {}
-  local heading_pattern = opts.heading   or DEFAULT_HEADING
-  local ordered         = opts.ordered   or false
-  local max_depth       = opts.max_depth or 6
-  local min_depth       = opts.min_depth or 2
+  local opts_ = opts --[[:! { heading?: string, ordered?: boolean, max_depth?: integer, min_depth?: integer, ... }]]
+  local heading_pattern = opts_.heading   or DEFAULT_HEADING
+  local ordered         = opts_.ordered   or false --[[:! boolean]]
+  local max_depth       = opts_.max_depth or 6 --[[:! integer]]
+  local min_depth       = opts_.min_depth or 2 --[[:! integer]]
 
   local matches = make_matcher(heading_pattern)
 

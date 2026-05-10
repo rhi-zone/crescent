@@ -33,14 +33,16 @@ local BLOCK = {
   details = true, summary = true,
 }
 
+--:: HastNode = { type: string, tag?: string, value?: string, children?: { [integer]: HastNode }, ... }
+
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
---: (string) -> any
+--: (string) -> HastNode
 local function text_node(value)
   return { type = "text", value = value }
 end
 
---: (any) -> boolean
+--: (HastNode) -> boolean
 local function is_whitespace_text(node)
   return (node.type == "text" and (node.value or ""):match("^%s*$") ~= nil) and true or false
 end
@@ -49,9 +51,9 @@ end
 
 local format_node  -- forward declaration
 
---: (any, integer, string, boolean) -> nil
+--: (HastNode, integer, string, boolean) -> nil
 local function format_children(node, depth, indent, in_pre)
-  local children = node.children --[[:! { [integer]: any }]]
+  local children = node.children --[[:! { [integer]: HastNode }]]
   if not children or #children == 0 then return end
 
   local pad = string.rep(indent, depth)
@@ -76,7 +78,7 @@ local function format_children(node, depth, indent, in_pre)
   node.children = new_children
 end
 
---: (any, integer, string, boolean) -> nil
+--: (HastNode, integer, string, boolean) -> nil
 format_node = function(node, depth, indent, in_pre)
   if node.type ~= "element" then return end
 
@@ -87,7 +89,7 @@ format_node = function(node, depth, indent, in_pre)
   if in_pre then return end
 
   if BLOCK[tag] and node.children then
-    local nc = node.children --[[:! { [integer]: any }]]
+    local nc = node.children --[[:! { [integer]: HastNode }]]
     if #nc <= 0 then return end
     -- Only reformat if there's at least one non-whitespace child or a block child;
     -- skip elements whose only children are already-whitespace text nodes.
@@ -114,15 +116,17 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, { indent?: string, ... } | nil) -> nil
 function M.plugin(processor, opts)
   opts = opts or {}
-  local indent = opts.indent or "  "
-  processor:use_transformer(function(tree)
+  local indent_str = (opts --[[:! { indent?: string, ... }]]).indent or "  "
+  local proc = processor --[[:! { use_transformer: (unknown, (unknown) -> unknown) -> nil }]]
+  proc:use_transformer(function(tree_raw)
+    local tree = tree_raw --[[:! HastNode]]
     -- Walk the root's children; the root itself is not an element.
     if tree.children then
-      for _, child in ipairs(tree.children) do
-        format_node(child, 0, indent, false)
+      for _, child in ipairs(tree.children --[[:! { [integer]: HastNode }]]) do
+        format_node(child, 0, indent_str, false)
       end
     end
     return tree

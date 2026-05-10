@@ -188,9 +188,9 @@ local URL_PATTERN = "https?://[^%s<>]+"
 -- Process a single text node value, splitting it into a sequence of inline
 -- nodes after applying strikethrough (~~...~~) and autolink transforms.
 -- Returns an array of inline nodes (may be a single text node if no matches).
---: (value: string) -> any
+--: (value: string) -> { [integer]: unknown }
 local function transform_text_value(value)
-  local result = {} --[[: any]]
+  local result = {} --[[:! { [integer]: unknown }]]
   local pos = 1  --: integer
   local len = #value
 
@@ -294,9 +294,9 @@ local function try_task_list_item(item)
   elseif first_child.type == "text" then
     inlines = item.children
   end
-  local inlines_any = inlines --[[: any]]
+  local inlines_any = inlines --[[:! { [integer]: { type: string, value?: string, ... } }]]
   if not inlines_any or #inlines_any == 0 then return end
-  local first_inline = inlines_any[1] --[[: any]]
+  local first_inline = inlines_any[1]
   if first_inline.type ~= "text" then return end
   local v = first_inline.value or ""
   local checked, rest

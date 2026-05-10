@@ -18,12 +18,14 @@ end
 
 local M = {}
 
+--:: MdastNode = { type: string, value?: string, children?: { [integer]: MdastNode }, ... }
+
 -- ── Predicate ─────────────────────────────────────────────────────────────────
 
 -- Returns true when a paragraph node is empty (should be removed).
 local function is_empty_paragraph(node)
   if node.type ~= "paragraph" then return false end
-  local children = node.children --[[:! { [integer]: any }]]
+  local children = node.children --[[:! { [integer]: MdastNode }]]
   if not children or #children == 0 then return true end
   -- A paragraph is also empty when every child is a whitespace-only text node.
   for i = 1, #children do
@@ -45,9 +47,9 @@ end
 
 -- Remove empty paragraphs from a children array, returning a new array.
 local function filter_children(children)
-  --: { [integer]: any } | nil
+  --: { [integer]: MdastNode } | nil
   if not children then return children end
-  local children_ = children --[[:! { [integer]: any }]]
+  local children_ = children --[[:! { [integer]: MdastNode }]]
   local out = {}
   for i = 1, #children_ do
     if not is_empty_paragraph(children_[i]) then
@@ -74,7 +76,7 @@ local function squeeze(node)
   -- structures (list > listItem > blockquote > …) are all handled.
   local children = node.children
   if children then
-    local nc = children --[[:! { [integer]: any }]]
+    local nc = children --[[:! { [integer]: MdastNode }]]
     for i = 1, #nc do
       squeeze(nc[i])
     end

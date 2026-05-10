@@ -25,8 +25,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local json_raw = require("lib.format.json")
-local json = json_raw --[[: any]]
+local json = require("lib.format.json")
 
 local M = {}
 
