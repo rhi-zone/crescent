@@ -483,10 +483,23 @@ local function solve_sub(ctx, c)
     -- In Lua `local x = f()` where f() returns (T, U, ...) → x gets T.
     -- When C_SUB receives a tuple on the left but a non-tuple on the right,
     -- check the first element instead of the whole tuple.
+    -- Track whether the original was a free var or a multi-return tuple so the
+    -- redundant-cast check below can suppress false positives (see below).
+    -- Check c[2] directly (the raw stored type ID) not via find(), because the
+    -- type var may have been bound by earlier constraints in this solver pass.
+    local original_was_free_var   = false
+    local original_was_tuple      = false
     do
+        -- Check the raw type node stored in the constraint (before find/union-find traversal).
+        -- This reflects what the expression type was at constraint-generation time.
+        local raw_t = ctx.types:get(c[2])
+        if raw_t.tag == TAG_VAR or raw_t.tag == TAG_ROWVAR then
+            original_was_free_var = true
+        end
         local at = ctx.types:get(actual)
         local et = ctx.types:get(expected)
         if at.tag == TAG_TUPLE and et.tag ~= TAG_TUPLE then
+            original_was_tuple = true
             actual = at.data[1] > 0
                 and find(ctx, ctx.lists:get(at.data[0]))
                 or ctx.T_NIL
@@ -497,7 +510,15 @@ local function solve_sub(ctx, c)
     -- and the inferred type is structurally identical to the asserted type, warn.
     -- Excludes any on either side: any unifies with everything so it's not "redundant",
     -- it's an explicit opt-out.
-    if c[6] then
+    --
+    -- Two cases where the cast is NOT redundant even if widened == expected:
+    --   1. original_was_free_var: the type var was bound via this very C_SUB constraint
+    --      (back-propagation in the fixpoint solver). In a later fixpoint pass, the var
+    --      appears to already have the cast type — but the cast is what gave it that type.
+    --   2. original_was_tuple: `(f()) --[[: T]]` where f() returns multi-return.
+    --      The cast truncates the tuple to a scalar. In return position the cast is
+    --      necessary, even though locally the first element already matches T.
+    if c[6] and not original_was_free_var and not original_was_tuple then
         local et = ctx.types:get(expected)
         local widened = widen_for_sub(ctx, actual)
         local wt = ctx.types:get(widened)

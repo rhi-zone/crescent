@@ -2737,6 +2737,32 @@ local y = (--[[: any]] x)
 local y = (--[[: string]] x)
 ]==], "redundant")
     end)
+
+    assert.it("does not warn redundant for cast of unannotated param (Bug 1)", function()
+        -- Without the cast, the body would fail (field access on TAG_VAR).
+        -- The cast is what gives the param its type via back-propagation.
+        -- A redundant-cast warning here is a false positive.
+        no_warnings([==[
+--:: Image = { width: integer, height: integer, channels: integer, data: { [integer]: integer } }
+local function test(img)
+  local img = img --[[: Image]]
+  return img.width
+end
+]==])
+    end)
+
+    assert.it("does not warn redundant for multi-return truncation cast (Bug 2)", function()
+        -- (gsub()) returns (string, integer). In return position, the cast --[[: string]]
+        -- is needed to truncate the multi-return to a scalar. The checker should not
+        -- warn that this cast is redundant just because the first element is already string.
+        no_warnings([==[
+--: () -> string
+local function test()
+  local s = "hello"
+  return (s:gsub("l", "r")) --[[: string]]
+end
+]==])
+    end)
 end)
 
 assert.describe("ffi.C intrinsic ($FfiC)", function()
