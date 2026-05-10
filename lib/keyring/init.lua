@@ -52,7 +52,7 @@ local function try_libsecret()
 	-- glib is a separate shared object; try a few names.  libsecret links glib,
 	-- but LuaJIT's ffi.load uses RTLD_LOCAL so glib symbols are not visible via
 	-- the libsecret handle.
-	local glib --: any
+	local glib --: cdata | nil
 	for _, name in ipairs({ "glib-2.0", "libglib-2.0.so.0", "libglib-2.0.so" }) do
 		local gok, g = pcall(ffi.load, name)
 		if gok then glib = g; break end

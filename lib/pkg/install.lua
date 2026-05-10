@@ -1590,7 +1590,7 @@ end
 --   - unchanged base→ours → take theirs (no conflict possible)
 --
 -- Returns { ok=bool, conflicts=N, files_merged=N } or nil, err.
---: (project_dir: string, name: string, old_version: string, new_version: string, include_glob: string | nil, opts: any) -> ({ ok: boolean, conflicts: integer, files_merged: integer } | nil, string | nil)
+--: (project_dir: string, name: string, old_version: string, new_version: string, include_glob: string | nil, opts: { [string]: unknown, ... } | nil) -> ({ ok: boolean, conflicts: integer, files_merged: integer } | nil, string | nil)
 function M.merge_package(project_dir, name, old_version, new_version, include_glob, opts)
 	opts = opts or {}
 	include_glob = include_glob or "**"

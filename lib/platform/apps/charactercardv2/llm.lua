@@ -23,7 +23,7 @@ local M = {}
 -- http_client: a table with request() and request_stream()
 -- opts.model: model name (default "default")
 -- opts.path: completions path (default "/v1/chat/completions")
---: (http_client: any, opts: ({ model: (string | nil), path: (string | nil), api_key: (string | nil) } | nil)) -> any
+--: (http_client: { request: (unknown) -> (unknown, string | nil), request_stream: (unknown) -> (unknown, string | nil), ... }, opts: ({ model: (string | nil), path: (string | nil), api_key: (string | nil) } | nil)) -> { call: (unknown, unknown) -> (unknown, string | nil), stream: (unknown, unknown) -> (unknown, string | nil) }
 function M.create(http_client, opts)
 	local opts_t = opts or { model = nil, path = nil, api_key = nil }
 	local model = opts_t.model or "default"
@@ -56,12 +56,13 @@ function M.create(http_client, opts)
 			body = body,
 		})
 		if not resp then return nil, "llm: HTTP request failed: " .. tostring(err) end
-
-		if resp.status ~= 200 then
-			return nil, "llm: HTTP " .. tostring(resp.status) .. (resp.body and (": " .. resp.body) or "")
+		local resp_ = resp --[[:! { status: integer, body: string | nil, ... }]]
+		if resp_.status ~= 200 then
+			return nil, "llm: HTTP " .. tostring(resp_.status) .. (resp_.body and (": " .. resp_.body) or "")
 		end
 
-		local ok, data = pcall(json.decode, resp.body)
+		if not resp_.body then return nil, "llm: empty response body" end
+		local ok, data = pcall(json.decode, resp_.body)
 		if not ok or not data then
 			return nil, "llm: JSON decode failed"
 		end
@@ -135,9 +136,9 @@ function M.create(http_client, opts)
 				body = body,
 			}, on_chunk)
 			if not resp then return nil, "llm: HTTP request failed: " .. tostring(err) end
-
-			if resp.status ~= 200 then
-				return nil, "llm: HTTP " .. tostring(resp.status)
+			local resp2_ = resp --[[:! { status: integer, ... }]]
+			if resp2_.status ~= 200 then
+				return nil, "llm: HTTP " .. tostring(resp2_.status)
 			end
 
 			-- Process any remaining data in buffer
