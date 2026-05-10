@@ -380,6 +380,7 @@ M.E = {
     INDEX_KEY_NOT_FOUND   = 27,  -- T[K] where T has no member K
     FORCE_CAST_TO_ANY     = 28,  -- `--[[:! any]]` is disallowed (use `--[[: any]]`)
     LOCAL_NEEDS_INIT      = 29,  -- annotated local without initializer when nil ∉ T (Gap 9)
+    MATCH_CONTAINS_ANY    = 30,  -- match type contains `any`; exhaustiveness cannot be verified (warning)
 }
 
 -- Keyword strings (ordered by token ID, for intern pre-population)

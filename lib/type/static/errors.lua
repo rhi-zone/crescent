@@ -427,6 +427,11 @@ local function build_templates()
                 .. " is not in type `" .. a.t .. "` (use `" .. a.t .. " | nil` to allow nil,"
                 .. " or provide an initializer)"
         end,
+        --: (TemplateArgs) -> string
+        [E.MATCH_CONTAINS_ANY]    = function(_a)
+            return "match type contains `any` \xe2\x80\x94 exhaustiveness cannot be verified;"
+                .. " replace `any` with `unknown` or a specific type"
+        end,
     }
 end
 

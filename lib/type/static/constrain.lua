@@ -3150,9 +3150,44 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
                 cont_tid = types_mod.find(ctx, cont_tid)
                 if cont_tid ~= ctx.T_NEVER then
                     local var_name = intern_mod.get(ctx.pool, name_id) or "?"
-                    local remaining = types_mod.display(ctx, cont_tid)
-                    warn(ctx, n.line, n.col, E.NON_EXHAUSTIVE,
-                        { name = var_name, remaining = "case(s): " .. remaining })
+                    -- Check whether the remaining type contains `any`. If so, emit a
+                    -- specific warning instead of the generic non-exhaustive one for
+                    -- the `any` member: `any` makes exhaustiveness unverifiable, so
+                    -- suggesting "add a _ branch" is misleading — the real fix is to
+                    -- eliminate `any` from the type.
+                    local cont_t = ctx.types:get(cont_tid)
+                    local has_any = (cont_t.tag == TAG_ANY)
+                    local non_any_members = {}  -- type_ids of remaining non-any members
+                    if not has_any and cont_t.tag == TAG_UNION then
+                        for i = cont_t.data[0], cont_t.data[0] + cont_t.data[1] - 1 do
+                            local m_tid = types_mod.find(ctx, ctx.lists:get(i))
+                            local m_t = ctx.types:get(m_tid)
+                            if m_t.tag == TAG_ANY then
+                                has_any = true
+                            else
+                                non_any_members[#non_any_members + 1] = m_tid
+                            end
+                        end
+                    end
+                    if has_any then
+                        warn(ctx, n.line, n.col, E.MATCH_CONTAINS_ANY, {})
+                        -- If there are also non-any unhandled members, still emit
+                        -- the generic non-exhaustive warning for those.
+                        if #non_any_members > 0 then
+                            local remaining_parts = {}
+                            for _, m_tid in ipairs(non_any_members) do
+                                remaining_parts[#remaining_parts + 1] =
+                                    types_mod.display(ctx, m_tid)
+                            end
+                            local remaining = table.concat(remaining_parts, " | ")
+                            warn(ctx, n.line, n.col, E.NON_EXHAUSTIVE,
+                                { name = var_name, remaining = "case(s): " .. remaining })
+                        end
+                    else
+                        local remaining = types_mod.display(ctx, cont_tid)
+                        warn(ctx, n.line, n.col, E.NON_EXHAUSTIVE,
+                            { name = var_name, remaining = "case(s): " .. remaining })
+                    end
                 end
             end
         end

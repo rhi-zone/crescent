@@ -1916,6 +1916,15 @@ local function no_warnings(src)
     end
 end
 
+-- Assert that no warning matching `pattern` appears in the output.
+local function no_warning(src, pattern)
+    local ec = check(src)
+    local msg = errors_mod.format_plain(ec)
+    if msg:find(pattern) then
+        error("expected no warning matching '" .. pattern .. "' but got:\n" .. msg, 2)
+    end
+end
+
 assert.describe("checker: literals", function()
     assert.it("number literal has no errors", function()
         no_errors("local x = 1")
@@ -9920,6 +9929,44 @@ local function label(t)
     return "unknown"
 end
 ]], "non%-exhaustive")
+    end)
+
+    assert.it("match on type containing any: emits MATCH_CONTAINS_ANY warning, not generic non-exhaustive for any", function()
+        -- A union containing `any` makes exhaustiveness unverifiable.
+        -- The checker should emit the specific MATCH_CONTAINS_ANY warning,
+        -- NOT the generic "non-exhaustive match: unhandled case(s): any".
+        local src = [[
+--:: T = { tag: "a" } | { tag: "b" } | any
+--: (T) -> string
+local function label(t)
+    if t.tag == "a" then return "a"
+    elseif t.tag == "b" then return "b"
+    end
+    return "unknown"
+end
+]]
+        has_warning(src, "exhaustiveness cannot be verified")
+        -- Must NOT emit the generic non-exhaustive warning for `any` itself
+        no_warning(src, "unhandled case%(s%): any")
+    end)
+
+    assert.it("match on type containing any: any absorbs all union members, only MATCH_CONTAINS_ANY is emitted", function()
+        -- `T = { tag: "a" } | any` collapses to `any` because `any` absorbs all union members.
+        -- The remaining type after covering "a" is still `any`, so only the specific warning is
+        -- emitted (there are no separately-trackable non-any unhandled members).
+        local src = [[
+--:: T = { tag: "a" } | { tag: "b" } | { tag: "c" } | any
+--: (T) -> string
+local function label(t)
+    if t.tag == "a" then return "a"
+    end
+    return "unknown"
+end
+]]
+        -- Should warn about any making exhaustiveness unverifiable
+        has_warning(src, "exhaustiveness cannot be verified")
+        -- The type collapses to `any`, so no generic non-exhaustive for specific members
+        no_warning(src, "unhandled case%(s%): any")
     end)
 end)
 
