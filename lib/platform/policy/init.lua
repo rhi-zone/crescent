@@ -104,12 +104,10 @@ function policy_mt:check_cap_decl(cap_name, decl)
 	-- Denied entirely.
 	if entry.state == "denied" then
 		return nil, "blocked by admin policy"
-	end
-
-	-- Not "allowed" (e.g. missing/unknown state) → pass through.
-	if entry.state ~= "allowed" then
+	elseif entry.state ~= "allowed" then
+		-- Not "allowed" (e.g. missing/unknown state) → pass through.
 		return true
-	end
+	else end
 
 	local decl_tbl = type(decl) == "table" and decl or nil
 

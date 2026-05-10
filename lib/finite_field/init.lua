@@ -94,14 +94,17 @@ function M.prime(p)
   end
 
   function elem_mt:inv()
-    if self._v == 0 then return nil end
-    return new_elem(modinv(self._v, p))
+    if self._v == 0 then return nil
+    else return new_elem(modinv(self._v, p))
+    end
   end
 
   function elem_mt:div(b)
-    if b._v == 0 then return nil, "division by zero in GF(" .. p .. ")" end
-    local inv = modinv(b._v, p)
-    return new_elem(self._v * inv)
+    if b._v == 0 then return nil, "division by zero in GF(" .. p .. ")"
+    else
+      local inv = modinv(b._v, p)
+      return new_elem(self._v * inv)
+    end
   end
 
   function elem_mt:pow(n)
@@ -220,31 +223,35 @@ function M.gf2n(n, poly, g)
   end
 
   function elem_mt:inv()
-    if self._v == 0 then return nil end
-    return new_elem(exp[(size - 1 - log[self._v]) % (size - 1)])
+    if self._v == 0 then return nil
+    else return new_elem(exp[(size - 1 - log[self._v]) % (size - 1)])
+    end
   end
 
   function elem_mt:div(b)
-    if b._v == 0 then return nil, "division by zero in GF(2^" .. n .. ")" end
-    if self._v == 0 then return new_elem(0) end
-    return new_elem(exp[(log[self._v] - log[b._v] + size - 1) % (size - 1)])
+    if b._v == 0 then return nil, "division by zero in GF(2^" .. n .. ")"
+    elseif self._v == 0 then return new_elem(0)
+    else return new_elem(exp[(log[self._v] - log[b._v] + size - 1) % (size - 1)])
+    end
   end
 
   function elem_mt:pow(k)
     if self._v == 0 then
+      if k == 0 then return new_elem(1)
+      elseif k < 0 then return nil, "zero has no inverse"
+      else return new_elem(0)
+      end
+    else
       if k == 0 then return new_elem(1) end
-      if k < 0 then return nil, "zero has no inverse" end
-      return new_elem(0)
+      local lv = log[self._v] --[[:! integer]]
+      local k_ = k --[[:! integer]]
+      if k < 0 then
+        -- a^k = (a^{-1})^{-k}
+        lv = (size - 1 - lv) % (size - 1)
+        k_ = -k_
+      end
+      return new_elem(exp[(lv * k_) % (size - 1)])
     end
-    if k == 0 then return new_elem(1) end
-    local lv = log[self._v] --[[:! integer]]
-    local k_ = k --[[:! integer]]
-    if k < 0 then
-      -- a^k = (a^{-1})^{-k}
-      lv = (size - 1 - lv) % (size - 1)
-      k_ = -k_
-    end
-    return new_elem(exp[(lv * k_) % (size - 1)])
   end
 
   function elem_mt:eq(b)

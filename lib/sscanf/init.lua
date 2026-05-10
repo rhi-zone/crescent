@@ -202,14 +202,11 @@ local function match_directive(dir, input, pos_in)
 		else
 			return nil, pos, "literal mismatch: expected " .. text
 		end
-	end
-
-	if dir_.kind == "ws" then
+	elseif dir_.kind == "ws" then
 		-- Match 0 or more whitespace chars (greedy)
 		local _, e = find(input, "^%s*", pos)
 		return "", (e or pos) + 1, nil
-	end
-
+	else
 	-- kind == "spec"
 	local conv = dir_.conv
 	local width = dir_.width
@@ -341,6 +338,7 @@ local function match_directive(dir, input, pos_in)
 	else
 		return nil, pos, "unknown conversion '%" .. conv .. "'"
 	end
+	end -- else kind == "spec"
 end
 
 -- ---------------------------------------------------------------------------
@@ -517,7 +515,9 @@ M.tokenize = function(input, fmt)
 	-- We expect a single spec directive
 	local spec_dir
 	for _, d in ipairs(directives) do
-		if d.kind == "spec" then spec_dir = d break end
+		if d.kind == "spec" then spec_dir = d break
+		else -- skip lit/ws directives
+		end
 	end
 	if not spec_dir then return nil end
 

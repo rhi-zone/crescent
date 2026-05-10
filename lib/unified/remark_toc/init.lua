@@ -36,14 +36,15 @@ local M = {}
 local function extract_text(node)
   if node.type == "text" then
     return node.value or ""
+  else
+    local children = node.children --[[:! { [integer]: MdastNode }]]
+    if not children then return "" end
+    local parts = {}
+    for i = 1, #children do
+      parts[i] = extract_text(children[i])
+    end
+    return table.concat(parts)
   end
-  local children = node.children --[[:! { [integer]: MdastNode }]]
-  if not children then return "" end
-  local parts = {}
-  for i = 1, #children do
-    parts[i] = extract_text(children[i])
-  end
-  return table.concat(parts)
 end
 
 -- ── Slugification ─────────────────────────────────────────────────────────────

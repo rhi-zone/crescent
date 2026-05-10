@@ -243,8 +243,9 @@ function M.define(opts)
       end
       if self_.status == "failed" then
         return nil, self_.error
+      else
+        return true, nil
       end
-      return true, nil
     end
 
     -- Serialize the instance to a plain table (no functions).

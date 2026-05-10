@@ -24,23 +24,26 @@ local M = {}
 
 -- Returns true when a paragraph node is empty (should be removed).
 local function is_empty_paragraph(node)
-  if node.type ~= "paragraph" then return false end
-  local children = node.children --[[:! { [integer]: MdastNode }]]
-  if not children or #children == 0 then return true end
-  -- A paragraph is also empty when every child is a whitespace-only text node.
-  for i = 1, #children do
-    local child = children[i]
-    if child.type ~= "text" then
-      -- Any non-text child → paragraph is not empty.
-      return false
+  if node.type ~= "paragraph" then return false
+  else
+    local children = node.children --[[:! { [integer]: MdastNode }]]
+    if not children or #children == 0 then return true end
+    -- A paragraph is also empty when every child is a whitespace-only text node.
+    for i = 1, #children do
+      local child = children[i]
+      if child.type ~= "text" then
+        -- Any non-text child → paragraph is not empty.
+        return false
+      else
+        local v = child.value or ""
+        if v:find("[^ \t\r\n]") then
+          -- Non-whitespace content found → not empty.
+          return false
+        end
+      end
     end
-    local v = child.value or ""
-    if v:find("[^ \t\r\n]") then
-      -- Non-whitespace content found → not empty.
-      return false
-    end
+    return true
   end
-  return true
 end
 
 -- ── Filter helpers ────────────────────────────────────────────────────────────

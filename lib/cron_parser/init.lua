@@ -277,7 +277,9 @@ function Schedule:matches(ts)
     if not sec_ok then return false end
   else
     -- 5-field: second must be 0
-    if t.sec ~= 0 then return false end
+    if t.sec ~= 0 then return false
+    else -- sec == 0, ok
+    end
   end
 
   return true

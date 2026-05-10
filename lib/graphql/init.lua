@@ -893,8 +893,9 @@ local function resolve_value(val, variables)
 			result[f.name] = resolve_value(f.value, variables)
 		end
 		return result
+	else
+		return nil
 	end
-	return nil
 end
 
 -- Collect arguments from AST into a Lua table

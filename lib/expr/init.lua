@@ -209,8 +209,9 @@ local function parse_tokens(tokens)
       local e, err = parse_primary()
       if not e then return nil, err end
       -- constant folding for unary minus on literals
-      if e.op == "num" then return {op="num", value=-e.value} end
-      return {op="neg", arg=e}
+      if e.op == "num" then return {op="num", value=-e.value}
+      else return {op="neg", arg=e}
+      end
 
     else
       return nil, "unexpected token " .. t.type .. " ('" .. tostring(t.value) .. "') at position " .. t.pos
@@ -494,8 +495,9 @@ simplify = function(ast)
 
   if ast.op == "neg" then
     local a = simplify(ast.arg)
-    if a.op == "num" then return {op="num", value=-a.value} --[[:! Expr]] end
-    return {op="neg", arg=a} --[[:! Expr]]
+    if a.op == "num" then return {op="num", value=-a.value} --[[:! Expr]]
+    else return {op="neg", arg=a} --[[:! Expr]]
+    end
   elseif ast.op == "call" then
     local args = ast.args  -- simplified args array, will be filled by simplifying
     local sargs = {} --[[:! Arr<Expr>]]
@@ -578,12 +580,15 @@ simplify = function(ast)
     local t = simplify(ast.then_)
     local e = simplify(ast.else_)
     if c.op == "num" then
-      if c.value ~= 0 then return t --[[:! Expr]] end
-      return e --[[:! Expr]]
+      if c.value ~= 0 then return t --[[:! Expr]]
+      else return e --[[:! Expr]]
+      end
+    else
+      return {op="ternary", cond=c, then_=t, else_=e} --[[:! Expr]]
     end
-    return {op="ternary", cond=c, then_=t, else_=e} --[[:! Expr]]
+  else
+    return ast
   end
-  return ast
 end
 
 -- ─── symbolic differentiation ─────────────────────────────────────────────

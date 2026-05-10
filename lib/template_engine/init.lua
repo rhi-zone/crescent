@@ -634,7 +634,9 @@ end
 --: (nodes: { [integer]: ASTNode }) -> ASTNode | nil
 local function find_extends(nodes)
   for _, node in ipairs(nodes) do
-    if node.type == "extends" then return node end
+    if node.type == "extends" then return node
+    else -- not extends, skip
+    end
   end
   return nil
 end

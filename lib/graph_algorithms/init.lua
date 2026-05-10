@@ -51,7 +51,8 @@ end
 
 --: (HeapT) -> (number | nil, unknown)
 function Heap:pop()
-  if self.n == 0 then return nil end
+  if self.n == 0 then return nil
+  else
   local top = self[1]
   self[1] = self[self.n]
   self[self.n] = nil
@@ -79,6 +80,7 @@ function Heap:pop()
     i = smallest
   end
   return top[1] --[[:! number]], top[2]
+  end
 end
 
 --: (HeapT) -> boolean

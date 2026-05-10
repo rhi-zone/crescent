@@ -366,8 +366,9 @@ local function eval_detailed(node, rng, breakdown_parts)
     elseif op == "-" then total = l_.total - r_.total
     elseif op == "*" then total = l_.total * r_.total
     elseif op == "/" then
-      if r_.total == 0 then return nil, "division by zero" end
-      total = floor(l_.total / r_.total)
+      if r_.total == 0 then return nil, "division by zero"
+      else total = floor(l_.total / r_.total)
+      end
     end
     local lbd = lb[1] or tostring(l_.total)
     local rbd = rb[1] or tostring(r_.total)

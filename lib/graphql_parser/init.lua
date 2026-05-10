@@ -1341,8 +1341,9 @@ local function print_type(t)
     return "[" .. print_type(t_.type) .. "]"
   elseif t_.kind == "NonNullType" then
     return print_type(t_.type) .. "!"
+  else
+    return "?"
   end
-  return "?"
 end
 
 --: (node: unknown) -> string

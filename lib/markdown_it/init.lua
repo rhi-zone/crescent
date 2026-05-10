@@ -96,6 +96,7 @@ local function transform_strip_html(tree)
     if node.type == "html" then
       -- Replace with a paragraph containing escaped text.
       return { type = "paragraph", children = { { type = "text", value = escape_html(node.value or "") } } }
+    else return nil
     end
   end)
   return tree
@@ -107,6 +108,7 @@ local function transform_breaks(tree)
   walk(tree, function(node)
     if node.type == "softBreak" then
       return { type = "hardBreak" }
+    else return nil
     end
   end)
   return tree

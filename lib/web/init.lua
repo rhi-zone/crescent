@@ -346,9 +346,9 @@ function M.cors(opts)
 			res.status = 204
 			res.body = ""
 			return
+		else
+			next()
 		end
-
-		next()
 	end
 end
 

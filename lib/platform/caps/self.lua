@@ -228,11 +228,11 @@ end
 function M.risk(decl)
 	if decl.type == "self_write" then
 		return { severity = "medium", text = "Reads and writes the app's own bundle. Can modify the app's files." }
-	end
-	if decl.writable then
+	elseif decl.writable then
 		return { severity = "medium", text = "Reads and writes the app's own bundle. Can modify the app's files." }
+	else
+		return { severity = "low", text = "Reads the app's own bundle (tarball entries, metadata). Cannot access other apps." }
 	end
-	return { severity = "low", text = "Reads the app's own bundle (tarball entries, metadata). Cannot access other apps." }
 end
 
 return M

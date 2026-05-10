@@ -241,7 +241,7 @@ end
 function M.encode(schema, msg)
 	if schema.kind ~= "message" then
 		return nil, "encode: schema must be a message"
-	end
+	else
 	local parts = {}
 	local n = 0
 	for _, field in ipairs(schema.fields) do
@@ -308,6 +308,7 @@ function M.encode(schema, msg)
 		end
 	end
 	return table.concat(parts)
+	end -- else (schema.kind == "message")
 end
 
 -- alias
@@ -482,7 +483,7 @@ end
 function M.decode(schema, data)
 	if schema.kind ~= "message" then
 		return nil, "decode: schema must be a message"
-	end
+	else
 	local result = {}
 	local pos = 1
 	local len = #data
@@ -546,6 +547,7 @@ function M.decode(schema, data)
 		end
 	end
 	return result
+	end -- else (schema.kind == "message")
 end
 
 -- alias

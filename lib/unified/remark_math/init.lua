@@ -220,10 +220,12 @@ local function para_placeholder_index(para)
   local pchildren2 = pchildren --[[:! { [integer]: MdastNode }]]
   if #pchildren2 ~= 1 then return nil end
   local child = pchildren2[1]
-  if child.type ~= "text" then return nil end
-  local v = child.value or ""
-  local idx = str_match(v, "^" .. PLACEHOLDER_PREFIX .. "(%d+)$")
-  return idx and tonumber(idx) or nil
+  if child.type ~= "text" then return nil
+  else
+    local v = child.value or ""
+    local idx = str_match(v, "^" .. PLACEHOLDER_PREFIX .. "(%d+)$")
+    return idx and tonumber(idx) or nil
+  end -- else (type == "text")
 end
 
 -- ── Tree transformer ──────────────────────────────────────────────────────────

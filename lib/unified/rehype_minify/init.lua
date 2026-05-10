@@ -86,11 +86,13 @@ end
 
 --: (HastNode, boolean, boolean) -> nil
 minify_node = function(node, in_pre, collapse_newlines)
-  if node.type ~= "element" then return end
-  local tag = node.tag or ""
-  local is_pre = tag == "pre"
-  local is_block = not not BLOCK[tag]
-  minify_children(node, is_block, in_pre or is_pre, collapse_newlines)
+  if node.type ~= "element" then return
+  else
+    local tag = node.tag or ""
+    local is_pre = tag == "pre"
+    local is_block = not not BLOCK[tag]
+    minify_children(node, is_block, in_pre or is_pre, collapse_newlines)
+  end
 end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────

@@ -189,9 +189,9 @@ mod.generate = function(req)
 	local res = res_raw --[[:! ai_http_response]]
 	if res.status ~= 200 then
 		return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
+	else
+		return parse_response(res.body or "")
 	end
-
-	return parse_response(res.body or "")
 end
 
 --: (ai_request) -> ((() -> ai_delta | nil) | nil, string | nil)
@@ -350,7 +350,7 @@ mod.embed = function(req)
 	local res = res_raw --[[:! ai_http_response]]
 	if res.status ~= 200 then
 		return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
-	end
+	else
 
 	local data_raw
 	data_raw, err = json.decode(res.body or "")
@@ -365,6 +365,7 @@ mod.embed = function(req)
 	local emb_values = emb_values_opt --[[:! Arr<number>]]
 
 	return { embedding = emb_values, usage = nil }
+	end
 end
 
 --- Embed multiple values.
@@ -406,7 +407,7 @@ mod.embed_many = function(req)
 	local res = res_raw --[[:! ai_http_response]]
 	if res.status ~= 200 then
 		return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
-	end
+	else
 
 	local data_raw
 	data_raw, err = json.decode(res.body or "")
@@ -424,6 +425,7 @@ mod.embed_many = function(req)
 	end
 
 	return { embeddings = embeddings, usage = nil }
+	end
 end
 
 return mod

@@ -23,8 +23,10 @@ end
 -- Convert output back to platform sep
 --: (string) -> string
 local function to_native(s)
-	if M.sep == "/" then return s end
-	local r, _ = s:gsub("/", "\\"); return r
+	if M.sep == "/" then return s
+	else
+		local r, _ = s:gsub("/", "\\"); return r
+	end
 end
 
 -- Split a normalized (forward-slash) path into drive and rest.

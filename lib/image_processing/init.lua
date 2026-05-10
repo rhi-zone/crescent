@@ -139,7 +139,7 @@ function M.grayscale_to_rgb(img)
   local img = img --[[: Image]]
   if img.channels ~= 1 then
     return nil, "image_processing.grayscale_to_rgb: expected 1-channel image"
-  end
+  else
   local w, h = img.width, img.height
   local src = img.data
   local n = w * h
@@ -153,6 +153,7 @@ function M.grayscale_to_rgb(img)
   end
   local out = { width = w, height = h, channels = 3, data = dst }
   return setmetatable(out, { __index = M })
+  end
 end
 
 -- h in [0,360), s,v in [0,1]
@@ -268,7 +269,7 @@ function M.threshold(img, t)
   local img = img --[[: Image]]
   if img.channels ~= 1 then
     return nil, "image_processing.threshold: expected 1-channel (grayscale) image"
-  end
+  else
   local w, h = img.width, img.height
   local src = img.data
   local n = w * h
@@ -278,6 +279,7 @@ function M.threshold(img, t)
   end
   local out = { width = w, height = h, channels = 1, data = dst }
   return setmetatable(out, { __index = M })
+  end
 end
 
 function M.gamma(img, g)

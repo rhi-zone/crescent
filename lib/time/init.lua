@@ -215,8 +215,9 @@ function Duration:format_short()
   if c.ms      > 0 then parts[#parts+1] = fmt_int(c.ms)      .. "ms" end
   if #parts == 0 then
     -- sub-millisecond or exactly zero
-    if dr._ns == 0 then return "0s" end
-    return fmt_int(dr._ns) .. "ns"
+    if dr._ns == 0 then return "0s"
+    else return fmt_int(dr._ns) .. "ns"
+    end
   end
   local s = table.concat(parts, " ")
   if dr._ns < 0 then s = "-" .. s end

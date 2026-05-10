@@ -962,8 +962,9 @@ else
 
     if o.variant ~= "i" then
       return nil, "pure tier only supports variant='i' (Argon2i); install libargon2 for Argon2id/Argon2d"
+    else
+      return argon2i_pure(password, salt, o.t, o.m, o.p, o.hash_len)
     end
-    return argon2i_pure(password, salt, o.t, o.m, o.p, o.hash_len)
   end
 
   function M.hash_encoded(password, salt, opts)
@@ -980,13 +981,14 @@ else
     if not parsed then return false, err end
     if parsed.variant ~= "i" then
       return false, "pure tier only supports Argon2i; install libargon2 for Argon2id/Argon2d"
+    elseif not parsed.hash then return false, "no hash in encoded string"
+    else
+      local opts = { variant = parsed.variant, t = parsed.t, m = parsed.m, p = parsed.p,
+                     hash_len = #parsed.hash }
+      local computed, herr = M.hash(password, parsed.salt, opts)
+      if not computed then return false, herr end
+      return ct_eq(parsed.hash, computed)
     end
-    if not parsed.hash then return false, "no hash in encoded string" end
-    local opts = { variant = parsed.variant, t = parsed.t, m = parsed.m, p = parsed.p,
-                   hash_len = #parsed.hash }
-    local computed, herr = M.hash(password, parsed.salt, opts)
-    if not computed then return false, herr end
-    return ct_eq(parsed.hash, computed)
   end
 
   function M.verify_raw(derived, password, salt, opts)

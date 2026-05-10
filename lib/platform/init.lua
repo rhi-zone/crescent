@@ -429,11 +429,12 @@ local CAP_FACTORIES = {
 			local ffi = require("ffi")
 			if ffi.os ~= "Windows" then
 				error("platform: registry cap is Windows only")
-			end
+			else
 			return require("lib.platform.caps.registry").registry_cap({
 				root        = decl.root or error("platform: registry cap requires 'root' in declaration"),
 				allow_write = decl.allow_write,
 			})
+			end -- else (Windows)
 		end,
 	},
 	shell = {

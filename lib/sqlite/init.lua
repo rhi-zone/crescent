@@ -65,7 +65,7 @@ local function load_sqlite()
 		local name = ffi.arch == "x64" and "dep/sqlite.dll" or "dep/sqlite-x86.dll"
 		local lib = ffi_any.load(name)
 		return lib, name
-	end
+	else
 	-- Build vendored name first (platform-specific compiled libraries).
 	local function vendored_name()
 		local os, arch = ffi.os, ffi.arch
@@ -92,6 +92,7 @@ local function load_sqlite()
 		end
 	end
 	error("sqlite3: no shared library found (tried: " .. table.concat(names, ", ") .. ")")
+	end -- else (not Windows)
 end
 local sqlite_ffi, sqlite_loaded_from = load_sqlite()
 local sqlite_ffi_any = sqlite_ffi --[[: any]]

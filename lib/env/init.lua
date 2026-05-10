@@ -6,7 +6,8 @@ local ffi = require("ffi")
 
 local mod = {}
 
-if ffi.os == "Windows" then error("env: windows not supported") end
+if ffi.os == "Windows" then error("env: windows not supported")
+else
 ffi.cdef [[ char **env(); ]]
 local _di = debug.getinfo(1) --[[:! { source: string }]]
 local env_ffi = ffi.load(_di.source:match("@?(.*/)") .. "env.so") --[[: any]]
@@ -35,5 +36,7 @@ mod.env = function ()
 	end
 	return env
 end
+
+end -- else (not Windows)
 
 return mod

@@ -297,7 +297,8 @@ local function try_task_list_item(item)
   local inlines_any = inlines --[[:! { [integer]: { type: string, value?: string, ... } }]]
   if not inlines_any or #inlines_any == 0 then return end
   local first_inline = inlines_any[1]
-  if first_inline.type ~= "text" then return end
+  if first_inline.type ~= "text" then return
+  else
   local v = first_inline.value or ""
   local checked, rest
   if str_sub(v, 1, 4) == "[x] " or str_sub(v, 1, 4) == "[X] " then
@@ -313,6 +314,7 @@ local function try_task_list_item(item)
   first_inline.value = rest
   -- Set checked on the listItem.
   item.checked = checked
+  end -- else (type == "text")
 end
 
 -- ── Tree walker ───────────────────────────────────────────────────────────────

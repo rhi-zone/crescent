@@ -194,24 +194,27 @@ end
 --- Peek at the top element without removing it.
 --: (self: Heap) -> unknown | nil
 function Heap:peek()
-  if self._n == 0 then return nil end
-  if self._keyed then
+  if self._n == 0 then return nil
+  elseif self._keyed then
     return self._data[1][1]
+  else
+    return self._data[1]
   end
-  return self._data[1]
 end
 
 --- Peek at the top element's priority (keyed mode only).
 --: (self: Heap) -> number | nil
 function Heap:peek_priority()
-  if self._n == 0 or not self._keyed then return nil end
-  return self._data[1][2]
+  if self._n == 0 or not self._keyed then return nil
+  else return self._data[1][2]
+  end
 end
 
 --- Pop the top element from the heap.
 --: (self: Heap) -> unknown | nil
 function Heap:pop()
-  if self._n == 0 then return nil end
+  if self._n == 0 then return nil
+  else
   local data = self._data
   local n = self._n
   if self._keyed then
@@ -241,6 +244,7 @@ function Heap:pop()
     sift_down(data, self._cmp, 1, self._n)
     return top
   end
+  end
 end
 
 --- Return the number of elements.
@@ -269,8 +273,9 @@ end
 --: (self: Heap) -> () -> unknown | nil
 function Heap:drain()
   return function()
-    if self._n == 0 then return nil end
-    return self:pop()
+    if self._n == 0 then return nil
+    else return self:pop()
+    end
   end
 end
 

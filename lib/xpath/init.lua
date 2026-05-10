@@ -307,10 +307,9 @@ function Parser:parse_path_expr()
   -- Absolute path starts with / or //
   if t.value == "/" or t.value == "//" then
     return self:parse_location_path()
-  end
   -- Check if next token is a name followed by :: (axis) or name followed by (
   -- to determine if it's a step or a primary expr
-  if t.type == T_NAME then
+  elseif t.type == T_NAME then
     local t2 = self.tokens[self.pos + 1]
     -- axis::
     if t2 and t2.value == "::" then
@@ -327,23 +326,21 @@ function Parser:parse_path_expr()
     end
     -- bare name = location path step (e.g. "title" inside predicate)
     return self:parse_location_path()
-  end
-  if t.value == "@" or t.value == ".." then
+  elseif t.value == "@" or t.value == ".." then
     return self:parse_location_path()
-  end
-  if t.value == "." then
+  elseif t.value == "." then
     -- could be . or ./... relative path
     local t2 = self.tokens[self.pos + 1]
     if t2 and (t2.value == "/" or t2.value == "//") then
       return self:parse_location_path()
     end
     return self:parse_location_path()
-  end
-  -- * = wildcard child step
-  if t.value == "*" and t.type == T_OP then
+  elseif t.value == "*" and t.type == T_OP then
+    -- * = wildcard child step
     return self:parse_location_path()
+  else
+    return self:parse_primary_then_filter()
   end
-  return self:parse_primary_then_filter()
 end
 
 --: (self: Parser) -> unknown
@@ -377,26 +374,25 @@ function Parser:parse_primary_expr()
   if t.type == T_NUMBER then
     self:consume()
     return { kind = "number", value = t.value }
-  end
-  if t.type == T_STRING then
+  elseif t.type == T_STRING then
     self:consume()
     return { kind = "literal", value = t.value }
-  end
-  if t.value == "(" then
+  elseif t.value == "(" then
     self:consume()
     local e, err = self:parse_expr()
     if not e then return nil, err end
     local _, ex = self:expect(T_OP, ")")
     if ex then return nil, ex end
     return e
-  end
-  if t.type == T_NAME then
+  elseif t.type == T_NAME then
     local t2 = self.tokens[self.pos + 1]
     if t2 and t2.value == "(" then
       return self:parse_function_call()
     end
+    return nil, "unexpected token '" .. tostring(t.value) .. "' in expression"
+  else
+    return nil, "unexpected token '" .. tostring(t.value) .. "' in expression"
   end
-  return nil, "unexpected token '" .. tostring(t.value) .. "' in expression"
 end
 
 --: (self: Parser) -> unknown
@@ -485,18 +481,16 @@ function Parser:parse_step(steps)
     local step = { axis = "parent", test = { kind = "node_type", name = "node" }, predicates = {} }
     steps[#steps+1] = step
     return true
-  end
 
   -- '.'
-  if t.value == "." then
+  elseif t.value == "." then
     self:consume()
     local step = { axis = "self", test = { kind = "node_type", name = "node" }, predicates = {} }
     steps[#steps+1] = step
     return true
-  end
 
   -- '@' = attribute axis shorthand
-  if t.value == "@" then
+  elseif t.value == "@" then
     self:consume()
     local test, err = self:parse_node_test()
     if not test then return nil, err end
@@ -505,10 +499,9 @@ function Parser:parse_step(steps)
     if perr then return nil, perr end
     steps[#steps+1] = step
     return true
-  end
 
   -- Check for axis name followed by '::'
-  if t.type == T_NAME then
+  elseif t.type == T_NAME then
     local t2 = self.tokens[self.pos + 1]
     if t2 and t2.value == "::" then
       local axis_name = t.value
@@ -534,16 +527,25 @@ function Parser:parse_step(steps)
       steps[#steps+1] = step
       return true
     end
-  end
+    -- Default: child axis (name)
+    local test, err = self:parse_node_test()
+    if not test then return nil, err end
+    local step = { axis = "child", test = test, predicates = {} }
+    local perr = self:parse_predicates(step.predicates)
+    if perr then return nil, perr end
+    steps[#steps+1] = step
+    return true
 
-  -- Default: child axis
-  local test, err = self:parse_node_test()
-  if not test then return nil, err end
-  local step = { axis = "child", test = test, predicates = {} }
-  local perr = self:parse_predicates(step.predicates)
-  if perr then return nil, perr end
-  steps[#steps+1] = step
-  return true
+  else
+    -- Default: child axis
+    local test, err = self:parse_node_test()
+    if not test then return nil, err end
+    local step = { axis = "child", test = test, predicates = {} }
+    local perr = self:parse_predicates(step.predicates)
+    if perr then return nil, perr end
+    steps[#steps+1] = step
+    return true
+  end
 end
 
 --: (self: Parser) -> unknown
@@ -676,8 +678,9 @@ local function string_value(node)
     return table.concat(parts)
   elseif node.type == "comment" or node.type == "processing_instruction" then
     return node.text or ""
+  else
+    return ""
   end
-  return ""
 end
 
 -- ---------------------------------------------------------------------------
@@ -740,15 +743,17 @@ local function axis_child(ctx_node)
 end
 
 local function axis_attribute(ctx_node)
-  if ctx_node.type ~= "element" then return {} end
-  local result = {}
-  if ctx_node.attrs then
-    for k, v in pairs(ctx_node.attrs) do
-      -- synthesize attribute nodes
-      result[#result+1] = { type = "attribute", name = k, value = v, parent = ctx_node }
+  if ctx_node.type ~= "element" then return {}
+  else
+    local result = {}
+    if ctx_node.attrs then
+      for k, v in pairs(ctx_node.attrs) do
+        -- synthesize attribute nodes
+        result[#result+1] = { type = "attribute", name = k, value = v, parent = ctx_node }
+      end
     end
+    return result
   end
-  return result
 end
 
 local function axis_descendant(ctx_node, include_self)
@@ -816,16 +821,20 @@ local function matches_node_test(node, test, axis)
     return node.type == "element" and node.tag == test.name
   elseif test.kind == "node_type" then
     local nt = test.name
-    if nt == "node" then return true end
-    if nt == "text" then return node.type == "text" or node.type == "cdata" end
-    if nt == "comment" then return node.type == "comment" end
-    if nt == "processing-instruction" then
-      if node.type ~= "processing_instruction" then return false end
-      if test.arg then return node.target == test.arg end
-      return true
+    if nt == "node" then return true
+    elseif nt == "text" then return node.type == "text" or node.type == "cdata"
+    elseif nt == "comment" then return node.type == "comment"
+    elseif nt == "processing-instruction" then
+      if node.type ~= "processing_instruction" then return false
+      elseif test.arg then return node.target == test.arg
+      else return true
+      end
+    else
+      return false
     end
+  else
+    return false
   end
-  return false
 end
 
 -- ---------------------------------------------------------------------------
@@ -1216,9 +1225,12 @@ eval_expr = function(ast, ctx)
     elseif op == "mod" then return to_number(lv) % to_number(rv)
     end
   elseif ast.kind == "unop" then
-    if ast.op == "-" then return -to_number(eval_expr(ast.operand, ctx)) end
+    if ast.op == "-" then return -to_number(eval_expr(ast.operand, ctx))
+    else return nil
+    end
+  else
+    return nil
   end
-  return nil
 end
 
 -- ---------------------------------------------------------------------------

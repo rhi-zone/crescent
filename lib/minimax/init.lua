@@ -247,8 +247,9 @@ end
 -- UCB1 score: wins/visits + c * sqrt(ln(parent_visits) / visits)
 --: (mcts_node, number, number) -> number
 local function ucb1(node, parent_visits, c)
-  if node.visits == 0 then return INF end
-  return node.wins / node.visits + c * math.sqrt(math.log(parent_visits) / node.visits)
+  if node.visits == 0 then return INF
+  else return node.wins / node.visits + c * math.sqrt(math.log(parent_visits) / node.visits)
+  end
 end
 
 -- Select best child by UCB1.

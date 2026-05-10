@@ -29,7 +29,8 @@ function M.run_task(g, executors, hooks, task_id)
 	local task = graph_mod.get(g, task_id) --: TaskNode | nil
 	if not task then error("unknown task id: " .. tostring(task_id)); return end
 
-	if task.status ~= "pending" then return end
+	if task.status ~= "pending" then return
+	else
 
 	-- Apply scaffolds before execution.
 	if hooks.scaffolds and #hooks.scaffolds > 0 then
@@ -74,6 +75,7 @@ function M.run_task(g, executors, hooks, task_id)
 		end
 	end
 	if hooks.on_task then hooks.on_task(task) end
+	end -- else (status == "pending")
 end
 
 --: (TaskDef, RunOpts | nil) -> (unknown, TrackedGraph)

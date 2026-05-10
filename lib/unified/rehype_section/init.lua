@@ -38,8 +38,9 @@ local function heading_depth(node)
     local tag = (node.tag or "") --[[:! string]]
     local val = HEADING_DEPTH[tag]
     return val --[[:! integer | nil]]
+  else
+    return nil
   end
-  return nil
 end
 
 --: (unknown) -> HastNode

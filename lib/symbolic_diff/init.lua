@@ -221,10 +221,11 @@ SIMP = function(e)
   elseif t == "neg" then
     local a = SIMP(e.arg)
     -- --x = x
-    if a.tag == "neg" then return a.arg end
+    if a.tag == "neg" then return a.arg
     -- -(num) → num
-    if is_num(a) then return M.num(-a.value) end
-    return M.neg(a)
+    elseif is_num(a) then return M.num(-a.value)
+    else return M.neg(a)
+    end
 
   elseif t == "add" then
     local l = SIMP(e.left)

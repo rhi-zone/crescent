@@ -59,7 +59,7 @@ function M.create(http_client, opts)
 		local resp_ = resp --[[:! { status: integer, body: string | nil, ... }]]
 		if resp_.status ~= 200 then
 			return nil, "llm: HTTP " .. tostring(resp_.status) .. (resp_.body and (": " .. resp_.body) or "")
-		end
+		else
 
 		if not resp_.body then return nil, "llm: empty response body" end
 		local ok, data = pcall(json.decode, resp_.body)
@@ -75,6 +75,7 @@ function M.create(http_client, opts)
 		local msg = choices[1].message
 		if not msg then return nil, "llm: no message in choice" end
 		return msg.content
+		end
 	end
 
 	-- call_stream(messages, on_token, gen_opts?) -> full_content | nil, err
@@ -139,7 +140,7 @@ function M.create(http_client, opts)
 			local resp2_ = resp --[[:! { status: integer, ... }]]
 			if resp2_.status ~= 200 then
 				return nil, "llm: HTTP " .. tostring(resp2_.status)
-			end
+			else end
 
 			-- Process any remaining data in buffer
 			if #buf > 0 then

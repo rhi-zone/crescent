@@ -1530,8 +1530,9 @@ local function tokens_to_label(inner_tokens)
           local ps = {}
           for _, c in ipairs(node.children --[[:! { [integer]: { type: string, ... } }]]) do ps[#ps+1] = extract(c) end
           return tbl_concat(ps)
+        else
+          return ""
         end
-        return ""
       end
       parts[#parts + 1] = extract(t.node --[[:! { type: string, ... }]])
     end

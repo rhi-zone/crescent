@@ -204,14 +204,15 @@ local function traverse(node, example)
   local node_ = node --[[:! TreeNode]]
   if node_.type == "leaf" then
     return node_.label
+  else
+    local v = example[node_.feature]
+    if v == nil then v = "__nil__" end
+    local child = node_.children[v]
+    if not child then
+      return node_.default_label
+    end
+    return traverse(child --[[:! TreeNode]], example)
   end
-  local v = example[node_.feature]
-  if v == nil then v = "__nil__" end
-  local child = node_.children[v]
-  if not child then
-    return node_.default_label
-  end
-  return traverse(child --[[:! TreeNode]], example)
 end
 
 -- Traverse to get probability distribution
@@ -226,76 +227,83 @@ local function traverse_proba(node, example)
       proba[lbl] = cnt / total
     end
     return proba
-  end
-  local v = example[node_.feature]
-  if v == nil then v = "__nil__" end
-  local child = node_.children[v]
-  if not child then
-    -- Return distribution from this node
-    local proba = {} --: { [string]: number }
-    local total = node_.total
-    if total == 0 then return proba end
-    for lbl, cnt in pairs(node_.counts) do
-      proba[lbl] = cnt / total
+  else
+    local v = example[node_.feature]
+    if v == nil then v = "__nil__" end
+    local child = node_.children[v]
+    if not child then
+      -- Return distribution from this node
+      local proba = {} --: { [string]: number }
+      local total = node_.total
+      if total == 0 then return proba end
+      for lbl, cnt in pairs(node_.counts) do
+        proba[lbl] = cnt / total
+      end
+      return proba
     end
-    return proba
+    return traverse_proba(child --[[:! TreeNode]], example)
   end
-  return traverse_proba(child --[[:! TreeNode]], example)
 end
 
 -- Compute max depth of a tree
 local function tree_depth(node)
   local node_ = node --[[:! TreeNode]]
-  if node_.type == "leaf" then return 0 end
-  local max_d = 0
-  for _, child in pairs(node_.children) do
-    local d = tree_depth(child --[[:! TreeNode]])
-    if d > max_d then max_d = d end
+  if node_.type == "leaf" then return 0
+  else
+    local max_d = 0
+    for _, child in pairs(node_.children) do
+      local d = tree_depth(child --[[:! TreeNode]])
+      if d > max_d then max_d = d end
+    end
+    return 1 + max_d
   end
-  return 1 + max_d
 end
 
 -- Count total nodes
 local function tree_node_count(node)
   local node_ = node --[[:! TreeNode]]
-  if node_.type == "leaf" then return 1 end
-  local cnt = 1
-  for _, child in pairs(node_.children) do
-    cnt = cnt + tree_node_count(child --[[:! TreeNode]])
+  if node_.type == "leaf" then return 1
+  else
+    local cnt = 1
+    for _, child in pairs(node_.children) do
+      cnt = cnt + tree_node_count(child --[[:! TreeNode]])
+    end
+    return cnt
   end
-  return cnt
 end
 
 -- Feature importance: sum of weighted information gain at each split
 -- importance[feature] += (node.total / root.total) * IG contributed
 local function collect_importance(node, root_total, importance)
   local node_ = node --[[:! TreeNode]]
-  if node_.type == "leaf" then return end
-  local f = node_.feature
-  -- Compute IG at this node
-  -- We already know the feature; approximate contribution as weighted entropy reduction
-  local h_parent = 0 --: number
-  for _, cnt in pairs(node_.counts) do
-    local p = cnt / node_.total
-    h_parent = h_parent - p * log2(p)
-  end
-  local h_children = 0 --: number
-  for _, child_any in pairs(node_.children) do
-    local child = child_any --[[:! TreeNode]]
-    local p_child = child.total / node_.total
-    local h_child = 0 --: number
-    for _, cnt in pairs(child.counts) do
-      local p = cnt / child.total
-      h_child = h_child - p * log2(p)
+  if node_.type == "leaf" then return
+  else
+    local f = node_.feature
+    -- Compute IG at this node
+    -- We already know the feature; approximate contribution as weighted entropy reduction
+    local h_parent = 0 --: number
+    for _, cnt in pairs(node_.counts) do
+      local p = cnt / node_.total
+      h_parent = h_parent - p * log2(p)
     end
-    h_children = h_children + p_child * h_child
-  end
-  local ig = h_parent - h_children
-  local weight = node_.total / root_total
-  importance[f] = (importance[f] or 0) + weight * ig
+    local h_children = 0 --: number
+    for _, child_any in pairs(node_.children) do
+      local child = child_any --[[:! TreeNode]]
+      local p_child = child.total / node_.total
+      local h_child = 0 --: number
+      for _, cnt in pairs(child.counts) do
+        local p = cnt / child.total
+        h_child = h_child - p * log2(p)
+      end
+      h_children = h_children + p_child * h_child
+    end
+    local ig = h_parent - h_children
+    local weight = node_.total / root_total
+    importance[f] = (importance[f] or 0) + weight * ig
 
-  for _, child_any in pairs(node_.children) do
-    collect_importance(child_any --[[:! TreeNode]], root_total, importance)
+    for _, child_any in pairs(node_.children) do
+      collect_importance(child_any --[[:! TreeNode]], root_total, importance)
+    end
   end
 end
 
@@ -325,17 +333,17 @@ local function collect_rules(node, path, rules)
       rule = "IF " .. table.concat(conds, " AND ") .. " THEN " .. tostring(node_.label)
     end
     rules[#rules + 1] = rule
-    return
-  end
-  -- Sort values for deterministic output
-  local vals = {} --: { [integer]: string }
-  for v in pairs(node_.children) do vals[#vals + 1] = tostring(v) end
-  table.sort(vals)
-  for _, v in ipairs(vals) do
-    local display_v = v == "__nil__" and "nil" or v
-    path[#path + 1] = node_.feature .. "=" .. display_v
-    collect_rules(node_.children[v] --[[:! TreeNode]], path, rules)
-    path[#path] = nil --[[: any]]
+  else
+    -- Sort values for deterministic output
+    local vals = {} --: { [integer]: string }
+    for v in pairs(node_.children) do vals[#vals + 1] = tostring(v) end
+    table.sort(vals)
+    for _, v in ipairs(vals) do
+      local display_v = v == "__nil__" and "nil" or v
+      path[#path + 1] = node_.feature .. "=" .. display_v
+      collect_rules(node_.children[v] --[[:! TreeNode]], path, rules)
+      path[#path] = nil --[[: any]]
+    end
   end
 end
 
@@ -369,21 +377,22 @@ local function serialize_node(node)
     local counts = {} --: LabelCounts
     for k, v in pairs(node_.counts) do counts[k] = v end
     return {type="leaf", label=node_.label, counts=counts, total=node_.total}
+  else
+    local children = {} --: { [unknown]: unknown }
+    for v, child in pairs(node_.children) do
+      children[v] = serialize_node(child --[[:! TreeNode]])
+    end
+    local counts = {} --: LabelCounts
+    for k, v in pairs(node_.counts) do counts[k] = v end
+    return {
+      type = "branch",
+      feature = node_.feature,
+      children = children,
+      default_label = node_.default_label,
+      counts = counts,
+      total = node_.total,
+    }
   end
-  local children = {} --: { [unknown]: unknown }
-  for v, child in pairs(node_.children) do
-    children[v] = serialize_node(child --[[:! TreeNode]])
-  end
-  local counts = {} --: LabelCounts
-  for k, v in pairs(node_.counts) do counts[k] = v end
-  return {
-    type = "branch",
-    feature = node_.feature,
-    children = children,
-    default_label = node_.default_label,
-    counts = counts,
-    total = node_.total,
-  }
 end
 
 -- Deserialize from plain Lua table
@@ -391,26 +400,28 @@ local function deserialize_node(t)
   local t_ = t --[[:! TreeNode]]
   if t_.type == "leaf" then
     return {type="leaf", label=t_.label, counts=t_.counts, total=t_.total}
+  else
+    local children = {} --: { [unknown]: unknown }
+    for v, child in pairs(t_.children) do
+      children[v] = deserialize_node(child --[[:! TreeNode]])
+    end
+    return {
+      type = "branch",
+      feature = t_.feature,
+      children = children,
+      default_label = t_.default_label,
+      counts = t_.counts,
+      total = t_.total,
+    }
   end
-  local children = {} --: { [unknown]: unknown }
-  for v, child in pairs(t_.children) do
-    children[v] = deserialize_node(child --[[:! TreeNode]])
-  end
-  return {
-    type = "branch",
-    feature = t_.feature,
-    children = children,
-    default_label = t_.default_label,
-    counts = t_.counts,
-    total = t_.total,
-  }
 end
 
 -- Reduced-error pruning (recursive)
 -- Returns new node; prunes if replacing subtree with leaf improves/maintains val accuracy
 local function prune_node(node, val_dataset)
   local node_ = node --[[:! TreeNode]]
-  if node_.type == "leaf" then return node_ end
+  if node_.type == "leaf" then return node_
+  else
 
   -- Prune children first
   local pruned_children = {} --: { [unknown]: unknown }
@@ -459,6 +470,7 @@ local function prune_node(node, val_dataset)
     return {type="leaf", label=leaf_label, counts=counts, total=#val_dataset}
   end
   return pruned
+  end -- else
 end
 
 -- Tree object methods

@@ -1120,6 +1120,7 @@ local function get_session_preview(state, session_id)
 			local text = msg.content
 			if #text > 80 then text = text:sub(1, 77) .. "..." end
 			return text
+		else -- not user, continue
 		end
 	end
 	local text = path[1].content
@@ -1284,12 +1285,13 @@ local function pick_next_speakers(state)
 		return { members[idx] }
 	elseif group.turn_order == "all" then
 		return members
+	else
+		-- Default: round_robin behavior.
+		local idx = group.next_speaker
+		if idx < 1 or idx > #members then idx = 1 end
+		group.next_speaker = (idx % #members) + 1
+		return { members[idx] }
 	end
-	-- Default: round_robin behavior.
-	local idx = group.next_speaker
-	if idx < 1 or idx > #members then idx = 1 end
-	group.next_speaker = (idx % #members) + 1
-	return { members[idx] }
 end
 
 -- ── Group endpoints ──────────────────────────────────────────────────────
@@ -2665,12 +2667,13 @@ local function api_post_instruct_activate(state, caps, _params, body, res)
 		state.instruct_active = nil
 		save_instruct(state, caps)
 		return json_ok(res, { active = "" })
+	else
+		local template = find_instruct_template(state.instruct_templates, body.name)
+		if not template then return json_err(res, 404, "template not found") end
+		state.instruct_active = body.name
+		save_instruct(state, caps)
+		return json_ok(res, { active = state.instruct_active })
 	end
-	local template = find_instruct_template(state.instruct_templates, body.name)
-	if not template then return json_err(res, 404, "template not found") end
-	state.instruct_active = body.name
-	save_instruct(state, caps)
-	return json_ok(res, { active = state.instruct_active })
 end
 
 -- ── Chat export endpoint ──────────────────────────────────────────────────

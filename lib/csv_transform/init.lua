@@ -182,8 +182,9 @@ function M.avg(col)
 		end,
 		--: ({ s: number, n: number, ... }) -> number | nil
 		final = function(acc)
-			if acc.n == 0 then return nil end
-			return acc.s / acc.n
+			if acc.n == 0 then return nil
+			else return acc.s / acc.n
+			end
 		end,
 	}
 end

@@ -80,7 +80,8 @@ end
 
 --: (HastNode, integer, string, boolean) -> nil
 format_node = function(node, depth, indent, in_pre)
-  if node.type ~= "element" then return end
+  if node.type ~= "element" then return
+  else
 
   local tag = node.tag or ""
   local is_pre = tag == "pre"
@@ -112,6 +113,7 @@ format_node = function(node, depth, indent, in_pre)
       format_node(child, depth + 1, indent, in_pre or is_pre)
     end
   end
+  end -- else (node.type == "element")
 end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────

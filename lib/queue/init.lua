@@ -188,21 +188,24 @@ FIFO.enqueue = FIFO.push
 --- Dequeue from the front. Returns nil if empty (alias: dequeue).
 --: (self: FIFOState) -> unknown
 function FIFO:pop()
-  if self._size == 0 then return nil end
+  if self._size == 0 then return nil
+  else
   local head      = self._head
   local v         = self._buf[head]
   self._buf[head] = nil
   self._head      = head % self._cap + 1
   self._size      = self._size - 1
   return v
+  end
 end
 FIFO.dequeue = FIFO.pop
 
 --- Return the front element without removing it. Returns nil if empty.
 --: (self: FIFOState) -> unknown
 function FIFO:peek()
-  if self._size == 0 then return nil end
-  return self._buf[self._head]
+  if self._size == 0 then return nil
+  else return self._buf[self._head]
+  end
 end
 
 --- Add a value to the front.
@@ -235,13 +238,15 @@ end
 --- Remove and return the back element. Returns nil if empty.
 --: (self: FIFOState) -> unknown
 function FIFO:pop_back()
-  if self._size == 0 then return nil end
+  if self._size == 0 then return nil
+  else
   local tail      = (self._tail - 2) % self._cap + 1
   local v         = self._buf[tail]
   self._buf[tail] = nil
   self._tail      = tail
   self._size      = self._size - 1
   return v
+  end
 end
 
 --- Enqueue all values from an array (in order) at the back.
@@ -320,20 +325,23 @@ end
 --- Remove and return the oldest element. Returns nil if empty.
 --: (self: RBState) -> unknown
 function RB:pop()
-  if self._size == 0 then return nil end
-  local head      = self._head
-  local v         = self._buf[head]
-  self._buf[head] = nil
-  self._head      = head % self._cap + 1
-  self._size      = self._size - 1
-  return v
+  if self._size == 0 then return nil
+  else
+    local head      = self._head
+    local v         = self._buf[head]
+    self._buf[head] = nil
+    self._head      = head % self._cap + 1
+    self._size      = self._size - 1
+    return v
+  end
 end
 
 --- Return the oldest element without removing it. Returns nil if empty.
 --: (self: RBState) -> unknown
 function RB:peek()
-  if self._size == 0 then return nil end
-  return self._buf[self._head]
+  if self._size == 0 then return nil
+  else return self._buf[self._head]
+  end
 end
 
 --- Return the number of elements currently stored.

@@ -377,7 +377,7 @@ local function Parser(tokens)
         return { type = NT.NUM, value = true }
       elseif tk.value == "FALSE" then
         return { type = NT.NUM, value = false }
-      end
+      else
       -- function call
       self:expect(TK.LPAREN)
       local args = {}
@@ -390,6 +390,7 @@ local function Parser(tokens)
       end
       self:expect(TK.RPAREN)
       return { type = NT.CALL, name = (tk.value --[[:! string]]), args = args }
+      end -- else (function call)
     elseif tk.type == TK.LPAREN then
       self:consume()
       local e = self:expr()
@@ -848,8 +849,9 @@ local function eval_node(node, sheet, visiting)
       local n, e = num_coerce(v)
       if e then return e end
       return -(n --[[:! number]])
+    else
+      return v
     end
-    return v
   elseif node.type == NT.BINOP then
     local op = node.op --[[:! string]]
     local lv = eval_node(node.left --[[:! SpreadNode]], sheet, visiting)

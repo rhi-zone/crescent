@@ -364,13 +364,14 @@ end
 M.from_geojson_point = function(obj)
   if obj.type ~= "Point" then
     return nil, "expected type 'Point', got '" .. tostring(obj.type) .. "'"
-  end
+  else
   local coords = obj.coordinates
   if not coords or #coords < 2 then
     return nil, "coordinates must have at least 2 elements"
   end
   -- GeoJSON: [lon, lat]
   return M.point(coords[2], coords[1])
+  end
 end
 
 -- ── Polygon ──────────────────────────────────────────────────────────────────

@@ -58,8 +58,7 @@ function M.make(g, executors, hooks, task_id)
 		if task.status == "pending" then
 			-- M._run_task is always set by exec.lua before any task runs.
 			if M._run_task then M._run_task(g, executors, hooks, id) end
-		end
-		if task.status == "error" then
+		elseif task.status == "error" then
 			error(task.error)
 		end
 		return task.output

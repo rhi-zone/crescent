@@ -65,28 +65,33 @@ end
 --- Pop the oldest value. Returns value, or nil when empty.
 function RingBuf:pop()
 	local s = self --[[:! RingBuf]]
-	if s._len == 0 then return nil end
-	local v = s._buf[s._head]
-	s._buf[s._head] = nil
-	s._head = s._head % s._cap + 1
-	s._len  = s._len - 1
-	return v
+	if s._len == 0 then return nil
+	else
+		local v = s._buf[s._head]
+		s._buf[s._head] = nil
+		s._head = s._head % s._cap + 1
+		s._len  = s._len - 1
+		return v
+	end
 end
 
 --- Peek at the oldest value without removing it. Returns value or nil.
 function RingBuf:peek()
 	local s = self --[[:! RingBuf]]
-	if s._len == 0 then return nil end
-	return s._buf[s._head]
+	if s._len == 0 then return nil
+	else return s._buf[s._head]
+	end
 end
 
 --- Peek at the newest value without removing it. Returns value or nil.
 function RingBuf:peek_newest()
 	local s = self --[[:! RingBuf]]
-	if s._len == 0 then return nil end
-	-- _tail points to next write slot; newest is one slot before that.
-	local idx = (s._tail - 2) % s._cap + 1
-	return s._buf[idx]
+	if s._len == 0 then return nil
+	else
+		-- _tail points to next write slot; newest is one slot before that.
+		local idx = (s._tail - 2) % s._cap + 1
+		return s._buf[idx]
+	end
 end
 
 --- Return true if the buffer has no items.

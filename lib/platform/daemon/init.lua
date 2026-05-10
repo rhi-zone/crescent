@@ -1485,8 +1485,7 @@ end
 		if classified.kind == "daemon" then
 			handle_daemon(req, res)
 			return
-		end
-		if classified.kind == "app" then
+		elseif classified.kind == "app" then
 			-- IMPORTANT: App-origin responses do NOT set or require the
 			-- __Host-session cookie. Apps get their own session story later.
 			-- See docs/daemon-design.md "Per-app subdomain (canonical)".
@@ -1498,11 +1497,12 @@ end
 			if consume_launch_if_present(req, res, app_id) then return end
 			app_handler(req, res, app_id)
 			return
+		else
+			-- Unknown host.
+			res.status = 404
+			res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+			res.body = "unknown host"
 		end
-		-- Unknown host.
-		res.status = 404
-		res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
-		res.body = "unknown host"
 	end
 
 	return {

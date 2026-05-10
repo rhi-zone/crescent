@@ -46,7 +46,8 @@ end
 
 --: (self: Heap) -> integer | nil
 function Heap:pop()
-  if self._size == 0 then return nil end
+  if self._size == 0 then return nil
+  else
   local d = self._data
   local top = d[1].key
   d[1] = d[self._size]
@@ -66,6 +67,7 @@ function Heap:pop()
     i = smallest
   end
   return top
+  end
 end
 
 --: (self: Heap) -> boolean

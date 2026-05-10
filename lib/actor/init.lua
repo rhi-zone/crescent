@@ -307,7 +307,8 @@ end
 function System:_resume_actor(actor)
   local self_ = self
   local actor_ = actor
-  if actor_._status ~= "running" then return end
+  if actor_._status ~= "running" then return
+  else
   local co_ = actor_._co --[[: any]]
   if co_status(co_) == "dead" then
     self_:_kill_actor(actor, "normal")
@@ -325,13 +326,15 @@ function System:_resume_actor(actor)
   if co_status(co_) == "dead" then
     self_:_kill_actor(actor_, "normal")
   end
+  end -- else (status == "running")
 end
 
 --: (SystemShape, ActorRecord, string) -> nil
 function System:_kill_actor(actor, reason)
   local self_ = self
   local actor_ = actor
-  if actor_._status == "dead" then return end
+  if actor_._status == "dead" then return
+  else
   actor_._status = "dead"
   actor_._exit_reason = reason
   local pid = actor_._pid
@@ -362,6 +365,7 @@ function System:_kill_actor(actor, reason)
 
   -- Remove from system (after notifications so send() still works for observers)
   self_._actors[pid] = nil
+  end -- else (status != "dead")
 end
 
 --: (SystemShape) -> nil

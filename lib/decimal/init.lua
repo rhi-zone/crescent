@@ -218,7 +218,7 @@ function M.div(a, b, scale)
   local b_ = b --[[:! Decimal]]
   if b_.coeff == 0 then
     return nil, "decimal.div: division by zero"
-  end
+  else
   scale = scale or 10
   -- We want result = a / b with `scale` fractional digits.
   -- value(a) = a.coeff * 10^a.exp,  value(b) = b.coeff * 10^b.exp
@@ -245,6 +245,7 @@ function M.div(a, b, scale)
     result_coeff = sign_r * int_part
   end
   return wrap(result_coeff, -scale)
+  end
 end
 
 --- Negate a decimal.

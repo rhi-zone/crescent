@@ -195,9 +195,9 @@ mod.create = function(config)
 		local res = res_raw --[[:! ai_http_response]]
 		if res.status ~= 200 then
 			return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
+		else
+			return parse_chat_response(res.body or "")
 		end
-
-		return parse_chat_response(res.body or "")
 	end
 
 	--: (ai_request) -> ((() -> ai_delta | nil) | nil, string | nil)
@@ -374,7 +374,7 @@ mod.create = function(config)
 		local res = res_raw --[[:! ai_http_response]]
 		if res.status ~= 200 then
 			return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
-		end
+		else
 
 		local data_raw
 		data_raw, err = json.decode(res.body or "")
@@ -393,6 +393,7 @@ mod.create = function(config)
 				input_tokens = data.usage.prompt_tokens or data.usage.total_tokens or 0,
 			} or nil,
 		}
+		end
 	end
 
 	--- Embed multiple values.
@@ -425,7 +426,7 @@ mod.create = function(config)
 		local res = res_raw --[[:! ai_http_response]]
 		if res.status ~= 200 then
 			return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
-		end
+		else
 
 		local data_raw
 		data_raw, err = json.decode(res.body or "")
@@ -450,6 +451,7 @@ mod.create = function(config)
 				input_tokens = data.usage.prompt_tokens or data.usage.total_tokens or 0,
 			} or nil,
 		}
+		end
 	end
 
 	--- Generate an image.
@@ -487,7 +489,7 @@ mod.create = function(config)
 		local res = res_raw --[[:! ai_http_response]]
 		if res.status ~= 200 then
 			return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
-		end
+		else
 
 		local data_raw
 		data_raw, err = json.decode(res.body or "")
@@ -505,6 +507,7 @@ mod.create = function(config)
 		end
 
 		return { images = images }
+		end
 	end
 
 	return provider

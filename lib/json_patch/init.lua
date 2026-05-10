@@ -305,7 +305,7 @@ local function apply_one(doc, op)
     -- Special case: add to root
     if op.path == "" then
       return nil, "cannot 'add' to root (use replace)"
-    end
+    else end
     -- For array parent, insert at index rather than overwrite
     local parts, err = M.parse(op.path)
     if not parts then return nil, err end
@@ -368,8 +368,9 @@ local function apply_one(doc, op)
     end
     if op.path == "" then
       return nil, "replace: cannot replace root"
+    else
+      return M.pointer_set(doc, op.path, op.value)
     end
-    return M.pointer_set(doc, op.path, op.value)
 
   elseif o == "move" then
     local from = op.from

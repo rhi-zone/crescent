@@ -114,7 +114,8 @@ function M.node(opts)
   local function advance_commit()
     -- Leader: find highest N > commit_index where majority have match_index >= N
     -- and log[N].term == current_term.
-    if self._state ~= "leader" then return end
+    if self._state ~= "leader" then return
+    else
     local log = self._log
     local n_peers = #self.peers
     local cluster_size = n_peers + 1  -- include self
@@ -140,6 +141,7 @@ function M.node(opts)
       self._last_applied = self._last_applied + 1
       self._committed_queue[#self._committed_queue + 1] = self._log[self._last_applied]
     end
+    end -- else
   end
 
   local function send_append_entries(peer)
@@ -253,7 +255,8 @@ function M.node(opts)
 
   --: (msg: { type: string, term: integer, from: string, granted: boolean, ... }) -> nil
   local function handle_vote_response(msg)
-    if self._state ~= "candidate" then return end
+    if self._state ~= "candidate" then return
+    else
     if msg.term > self._current_term then
       become_follower(msg.term)
       return
@@ -267,6 +270,7 @@ function M.node(opts)
         become_leader()
       end
     end
+    end -- else (state == "candidate")
   end
 
   --: (msg: { type: string, term: integer, from: string, prev_log_index: integer, prev_log_term: integer, entries: { [integer]: { term: integer, data: unknown } }, commit_index: integer, ... }) -> nil
@@ -352,7 +356,8 @@ function M.node(opts)
 
   --: (msg: { type: string, term: integer, from: string, success: boolean, match_index: integer, ... }) -> nil
   local function handle_append_entries_response(msg)
-    if self._state ~= "leader" then return end
+    if self._state ~= "leader" then return
+    else
     if msg.term > self._current_term then
       become_follower(msg.term)
       return
@@ -369,6 +374,7 @@ function M.node(opts)
       self._next_index[msg.from] = math.max(1, ni - 1)
       send_append_entries(msg.from)
     end
+    end -- else (state == "leader")
   end
 
   -- -------------------------------------------------------------------------
@@ -417,7 +423,7 @@ function M.node(opts)
   function self:propose(data)
     if self._state ~= "leader" then
       return nil, "not leader"
-    end
+    else
     local log = self._log --[[:! { [integer]: { term: integer, data: unknown } }]]
     local term = self._current_term --[[:! integer]]
     log[#log + 1] = { term = term, data = data }
@@ -431,13 +437,14 @@ function M.node(opts)
     -- Flush outbox (already drained by caller via return value, but we still
     -- want them — callers may ignore return value of propose)
     return true, nil
+    end -- else (state == "leader")
   end
 
   -- Propose that also returns outbound messages for callers who need them
   function self:propose_msgs(data)
     if self._state ~= "leader" then
       return nil, "not leader"
-    end
+    else
     local log = self._log --[[:! { [integer]: { term: integer, data: unknown } }]]
     local term = self._current_term --[[:! integer]]
     log[#log + 1] = { term = term, data = data }
@@ -447,6 +454,7 @@ function M.node(opts)
     end
     advance_commit()
     return flush()
+    end -- else (state == "leader")
   end
 
   function self:state()

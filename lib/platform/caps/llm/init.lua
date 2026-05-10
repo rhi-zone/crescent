@@ -227,7 +227,7 @@ function M.new(manifest_entry)
 		local res_any = res_raw --[[:! { status: integer, body: string }]]
 		if res_any.status ~= 200 then
 			return nil, "llm.generate: HTTP " .. tostring(res_any.status) .. ": " .. tostring(res_any.body or "")
-		end
+		else
 
 		-- Parse the OpenAI completion response.
 		local resp_data, dec_err = json_mod.decode(res_any.body)
@@ -271,6 +271,7 @@ function M.new(manifest_entry)
 		if not ok then return nil, val_err end
 
 		return decoded
+		end
 	end
 
 	local function revoke()

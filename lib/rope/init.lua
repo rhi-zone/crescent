@@ -73,15 +73,17 @@ end
 -- smart concat: auto-rebalance if depth imbalance exceeds threshold
 --: (l: Node, r: Node) -> Node
 local function smart_concat(l, r)
-  if l.len == 0 then return r end
-  if r.len == 0 then return l end
-  local node = concat_node(l, r)
-  local diff = l.depth - r.depth
-  if diff < 0 then diff = -diff end
-  if node.depth > REBALANCE_DEPTH or diff > 2 then
-    return rebalance_node(node)
+  if l.len == 0 then return r
+  elseif r.len == 0 then return l
+  else
+    local node = concat_node(l, r)
+    local diff = l.depth - r.depth
+    if diff < 0 then diff = -diff end
+    if node.depth > REBALANCE_DEPTH or diff > 2 then
+      return rebalance_node(node)
+    end
+    return node
   end
-  return node
 end
 
 -- walk tree to find char at 1-based position i; returns byte value
@@ -89,11 +91,12 @@ end
 local function node_char_at(node, i)
   if node.type == "leaf" then
     return node.str:sub(i, i)
-  end
-  if i <= node.left.len then
-    return node_char_at(node.left, i)
   else
-    return node_char_at(node.right, i - node.left.len)
+    if i <= node.left.len then
+      return node_char_at(node.left, i)
+    else
+      return node_char_at(node.right, i - node.left.len)
+    end
   end
 end
 
@@ -109,16 +112,17 @@ local function split_node(node, pos)
   end
   if node.type == "leaf" then
     return leaf(node.str:sub(1, pos)), leaf(node.str:sub(pos + 1))
-  end
-  -- concat node
-  if pos <= node.left.len then
-    local ll, lr = split_node(node.left, pos)
-    return ll, smart_concat(lr, node.right)
-  elseif pos == node.left.len then
-    return node.left, node.right
   else
-    local rl, rr = split_node(node.right, pos - node.left.len)
-    return smart_concat(node.left, rl), rr
+    -- concat node
+    if pos <= node.left.len then
+      local ll, lr = split_node(node.left, pos)
+      return ll, smart_concat(lr, node.right)
+    elseif pos == node.left.len then
+      return node.left, node.right
+    else
+      local rl, rr = split_node(node.right, pos - node.left.len)
+      return smart_concat(node.left, rl), rr
+    end
   end
 end
 
@@ -127,10 +131,11 @@ end
 local function node_to_string(node)
   if node.type == "leaf" then
     return node.str
+  else
+    local parts = {}
+    collect_leaves(node, parts)
+    return table.concat(parts)
   end
-  local parts = {}
-  collect_leaves(node, parts)
-  return table.concat(parts)
 end
 
 -- Rope object metatable

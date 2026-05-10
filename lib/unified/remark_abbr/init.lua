@@ -30,13 +30,15 @@ local M = {}
 
 -- Extract the raw text content of a node (concatenation of all text values).
 local function raw_text(node)
-  if node.type == "text" then return node.value or "" end
-  if not node.children then return "" end
-  local parts = {}
-  for _, c in ipairs(node.children) do
-    parts[#parts + 1] = raw_text(c)
+  if node.type == "text" then return node.value or ""
+  elseif not node.children then return ""
+  else
+    local parts = {}
+    for _, c in ipairs(node.children) do
+      parts[#parts + 1] = raw_text(c)
+    end
+    return table.concat(parts)
   end
-  return table.concat(parts)
 end
 
 -- Parse a single "*[ABBR]: Expansion" line.

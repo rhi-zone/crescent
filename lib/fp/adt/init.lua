@@ -104,8 +104,9 @@ function ADT.define(...)
 		end
 		if value.n == 0 then
 			return h()
+		else
+			return h(unpack(value, 1, value.n --[[:! integer]]))
 		end
-		return h(unpack(value, 1, value.n --[[:! integer]]))
 	end
 
 	-- ── ADT.is ────────────────────────────────────────────────────────────────

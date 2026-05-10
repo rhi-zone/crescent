@@ -133,8 +133,9 @@ end
 -- Compute avgdl
 --: (Index) -> number
 local function avgdl(self)
-  if self.N == 0 then return 0 end
-  return self.total_len / self.N
+  if self.N == 0 then return 0
+  else return self.total_len / self.N
+  end
 end
 
 -- BM25 score for a single term in a document

@@ -166,8 +166,9 @@ local right_ap_impl = {
 	ap = function(ff, fa)
 		if fa._tag == "left" then
 			return fa
+		else
+			return Either.right(ff.value(fa.value))
 		end
-		return Either.right(ff.value(fa.value))
 	end,
 	pure = function(a)
 		return Either.right(a)
@@ -196,9 +197,10 @@ local right_sg_impl = {
 	append = function(a, b)
 		if b._tag == "left" then
 			return a
+		else
+			-- Both Right — combine inner values via their Semigroup instance
+			return Either.right(Semigroup.append(a.value, b.value))
 		end
-		-- Both Right — combine inner values via their Semigroup instance
-		return Either.right(Semigroup.append(a.value, b.value))
 	end,
 }
 
@@ -284,15 +286,17 @@ end
 function Either.from_right(e)
 	if e._tag ~= "right" then
 		error("Either.from_right: Left", 2)
+	else
+		return e.value
 	end
-	return e.value
 end
 
 function Either.from_left(e)
 	if e._tag ~= "left" then
 		error("Either.from_left: Right", 2)
+	else
+		return e.value
 	end
-	return e.value
 end
 
 -- either(f, g, e) — eliminate: apply f for Left, g for Right

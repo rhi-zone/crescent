@@ -463,8 +463,9 @@ local function deref(env, t)
       args[i] = deref(env, t_args[i])
     end
     return { kind = "comp", functor = t.functor --[[:! string]], args = args }
+  else
+    return t
   end
-  return t
 end
 
 -- Unification
@@ -473,29 +474,23 @@ local function unify(env, t1, t2)
   t1 = walk(env, t1)
   t2 = walk(env, t2)
 
-  if t1.kind == "var" and t2.kind == "var" and t1.name == t2.name then
-    return env
-  end
   if t1.kind == "var" then
+    if t2.kind == "var" and t1.name == t2.name then return env end
     -- bind t1 → t2
     local e2 = {}
     for k, v in pairs(env) do e2[k] = v end
     e2[t1.name] = t2
     return e2
-  end
-  if t2.kind == "var" then
+  elseif t2.kind == "var" then
     local e2 = {}
     for k, v in pairs(env) do e2[k] = v end
     e2[t2.name] = t1
     return e2
-  end
-  if t1.kind == "atom" and t2.kind == "atom" and t1.name == t2.name then
+  elseif t1.kind == "atom" and t2.kind == "atom" and t1.name == t2.name then
     return env
-  end
-  if t1.kind == "num" and t2.kind == "num" and t1.value == t2.value then
+  elseif t1.kind == "num" and t2.kind == "num" and t1.value == t2.value then
     return env
-  end
-  if t1.kind == "comp" and t2.kind == "comp"
+  elseif t1.kind == "comp" and t2.kind == "comp"
     and t1.functor == t2.functor then
     local a1 = t1.args --[[:! { [integer]: PrologTerm }]]
     local a2 = t2.args --[[:! { [integer]: PrologTerm }]]
@@ -507,8 +502,9 @@ local function unify(env, t1, t2)
       if not e then return nil end
     end
     return e
+  else
+    return nil
   end
-  return nil
 end
 
 -- Convert a term back to a string (for display)
@@ -545,25 +541,24 @@ local function term_to_string(env, t)
       args[i] = term_to_string(env, t_args[i])
     end
     return (t.functor --[[:! string]]) .. "(" .. table.concat(args, ",") .. ")"
+  else
+    return "?"
   end
-  return "?"
 end
 
 -- Evaluate an arithmetic expression term to a number
 --: ({ [string]: PrologTerm }, PrologTerm) -> (number | nil, string | nil)
 local function eval_arith(env, t)
   t = deref(env, t) --[[:! PrologTerm]]
-  if t.kind == "num" then return t.value end
-  if t.kind == "var" then
+  if t.kind == "num" then return t.value
+  elseif t.kind == "var" then
     return nil, "unbound variable in arithmetic: " .. (t.name --[[:! string]])
-  end
-  if t.kind == "atom" then
+  elseif t.kind == "atom" then
     local tname = t.name --[[:! string]]
     local n = tonumber(tname)
     if n then return n end
     return nil, "non-numeric atom in arithmetic: " .. tname
-  end
-  if t.kind == "comp" then
+  elseif t.kind == "comp" then
     local f = t.functor --[[:! string]]
     local t_args = t.args --[[:! { [integer]: PrologTerm }]]
     if f == "+" and #t_args == 2 then
@@ -629,9 +624,10 @@ end
 
 -- Extract the predicate key from a term: "functor/arity"
 local function pred_key(t)
-  if t.kind == "atom" then return (t.name --[[:! string]]) .. "/0" end
-  if t.kind == "comp" then return (t.functor --[[:! string]]) .. "/" .. #(t.args --[[:! { [integer]: PrologTerm }]]) end
-  return nil
+  if t.kind == "atom" then return (t.name --[[:! string]]) .. "/0"
+  elseif t.kind == "comp" then return (t.functor --[[:! string]]) .. "/" .. #(t.args --[[:! { [integer]: PrologTerm }]])
+  else return nil
+  end
 end
 
 -- ============================================================
@@ -812,10 +808,10 @@ solve = function(db, goals, env, depth)
     local term_eq
     term_eq = function(a, b)
       if a.kind ~= b.kind then return false end
-      if a.kind == "atom" then return a.name == b.name end
-      if a.kind == "num" then return a.value == b.value end
-      if a.kind == "var" then return a.name == b.name end
-      if a.kind == "comp" then
+      if a.kind == "atom" then return a.name == b.name
+      elseif a.kind == "num" then return a.value == b.value
+      elseif a.kind == "var" then return a.name == b.name
+      elseif a.kind == "comp" then
         local aa = a.args --[[:! { [integer]: PrologTerm }]]
         local ba = b.args --[[:! { [integer]: PrologTerm }]]
         if a.functor ~= b.functor or #aa ~= #ba then return false end
@@ -823,8 +819,9 @@ solve = function(db, goals, env, depth)
           if not term_eq(aa[i], ba[i]) then return false end
         end
         return true
+      else
+        return false
       end
-      return false
     end
     if term_eq(t1, t2) then
       solve(db, rest, env, depth + 1)
@@ -840,10 +837,10 @@ solve = function(db, goals, env, depth)
     local term_eq
     term_eq = function(a, b)
       if a.kind ~= b.kind then return false end
-      if a.kind == "atom" then return a.name == b.name end
-      if a.kind == "num" then return a.value == b.value end
-      if a.kind == "var" then return a.name == b.name end
-      if a.kind == "comp" then
+      if a.kind == "atom" then return a.name == b.name
+      elseif a.kind == "num" then return a.value == b.value
+      elseif a.kind == "var" then return a.name == b.name
+      elseif a.kind == "comp" then
         local aa = a.args --[[:! { [integer]: PrologTerm }]]
         local ba = b.args --[[:! { [integer]: PrologTerm }]]
         if a.functor ~= b.functor or #aa ~= #ba then return false end
@@ -851,8 +848,9 @@ solve = function(db, goals, env, depth)
           if not term_eq(aa[i], ba[i]) then return false end
         end
         return true
+      else
+        return false
       end
-      return false
     end
     if not term_eq(t1, t2) then
       solve(db, rest, env, depth + 1)
@@ -947,13 +945,15 @@ solve = function(db, goals, env, depth)
   if functor == "arg" and arity == 3 then
     local n_term = deref(env, goal.args[1])
     local comp_term = deref(env, goal.args[2])
-    if n_term.kind ~= "num" then error("arg/3: first argument must be a number") end
-    if comp_term.kind ~= "comp" then error("arg/3: second argument must be compound") end
-    local idx = math.floor(n_term.value)
-    local arg = comp_term.args[idx]
-    if arg then
-      local e2 = unify(env, goal.args[3], arg)
-      if e2 then solve(db, rest, e2, depth + 1) end
+    if n_term.kind == "num" and comp_term.kind == "comp" then
+      local idx = math.floor(n_term.value)
+      local arg = comp_term.args[idx]
+      if arg then
+        local e2 = unify(env, goal.args[3], arg)
+        if e2 then solve(db, rest, e2, depth + 1) end
+      end
+    else
+      error(n_term.kind ~= "num" and "arg/3: first argument must be a number" or "arg/3: second argument must be compound")
     end
     return
   end

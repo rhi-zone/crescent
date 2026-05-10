@@ -222,8 +222,9 @@ end
 function M.to_string(a)
   if a.q == 1 then
     return tostring(a.p)
+  else
+    return tostring(a.p) .. "/" .. tostring(a.q)
   end
-  return tostring(a.p) .. "/" .. tostring(a.q)
 end
 
 -- Continued-fraction best-rational approximation (optional).

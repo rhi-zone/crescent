@@ -399,25 +399,26 @@ M.ONE = --[[:! Bignum]] select(1, M.new("1"))
 
 --: (a: Bignum, b: Bignum) -> Bignum
 function M.add(a, b)
-  if a.s == 0 then return --[[:! Bignum]] select(1, M.new(b)) end
-  if b.s == 0 then return --[[:! Bignum]] select(1, M.new(a)) end
-  if a.s == b.s then
+  if a.s == 0 then return --[[:! Bignum]] select(1, M.new(b))
+  elseif b.s == 0 then return --[[:! Bignum]] select(1, M.new(a))
+  elseif a.s == b.s then
     local ad, bd, base_lo = align(a, b)
     local sum = digits_add(ad, bd)
     -- sum is an integer; value = s * sum * 10^base_lo
     -- In 0.digits form: value = s * 0.sum * 10^(base_lo + #sum)
     return make(a.s, sum, base_lo + #sum)
-  end
-  -- Different signs: |a| - |b| or |b| - |a|
-  local ad, bd, base_lo = align(a, b)
-  local c = digits_cmp(ad, bd)
-  if c == 0 then return zero() end
-  if c > 0 then
-    local diff = digits_sub(ad, bd)
-    return make(a.s, diff, base_lo + #diff)
   else
-    local diff = digits_sub(bd, ad)
-    return make(b.s, diff, base_lo + #diff)
+    -- Different signs: |a| - |b| or |b| - |a|
+    local ad, bd, base_lo = align(a, b)
+    local c = digits_cmp(ad, bd)
+    if c == 0 then return zero() end
+    if c > 0 then
+      local diff = digits_sub(ad, bd)
+      return make(a.s, diff, base_lo + #diff)
+    else
+      local diff = digits_sub(bd, ad)
+      return make(b.s, diff, base_lo + #diff)
+    end
   end
 end
 
@@ -425,27 +426,31 @@ end
 function M.sub(a, b)
   if b.s == 0 then
     return --[[:! Bignum]] select(1, M.new(a))
+  else
+    local neg_b = setmetatable({ s = -b.s, digits = b.digits, exp = b.exp }, mt)
+    local r = M.add(a, neg_b)
+    return r
   end
-  local neg_b = setmetatable({ s = -b.s, digits = b.digits, exp = b.exp }, mt)
-  local r = M.add(a, neg_b)
-  return r
 end
 
 --: (a: Bignum, b: Bignum) -> Bignum
 function M.mul(a, b)
-  if a.s == 0 or b.s == 0 then return zero() end
+  if a.s == 0 or b.s == 0 then return zero()
+  else
   local prod = digits_mul(a.digits, b.digits)
   -- a = 0.a.digits × 10^a.exp,  b = 0.b.digits × 10^b.exp
   -- a×b = (a.digits × b.digits) × 10^(a.exp+b.exp) / (10^#a.digits × 10^#b.digits)
   --     = 0.prod × 10^(a.exp + b.exp - #a.digits - #b.digits + #prod)
   local new_exp = a.exp + b.exp - #a.digits - #b.digits + #prod
   return make(a.s * b.s, prod, new_exp)
+  end
 end
 
 --: (a: Bignum, b: Bignum, prec: (integer | nil)) -> (Bignum | nil, string | nil)
 function M.div(a, b, prec)
-  if b.s == 0 then return nil, "bignum.div: division by zero" end
-  if a.s == 0 then return zero() end
+  if b.s == 0 then return nil, "bignum.div: division by zero"
+  elseif a.s == 0 then return zero()
+  else
   prec = prec or _default_prec
 
   -- a = 0.a.digits × 10^a.exp,  b = 0.b.digits × 10^b.exp
@@ -464,28 +469,33 @@ function M.div(a, b, prec)
   -- In 0.q notation: 0.q × 10^(-shift + a.exp - b.exp + #b.digits - #a.digits + #q)
   local new_exp = -shift + a.exp - b.exp + #b.digits - #a.digits + #q
   return make(a.s * b.s, q, new_exp)
+  end
 end
 
 --: (a: Bignum, b: Bignum) -> (Bignum | nil, string | nil)
 function M.mod(a, b)
-  if b.s == 0 then return nil, "bignum.mod: modulo by zero" end
+  if b.s == 0 then return nil, "bignum.mod: modulo by zero"
+  else
   -- a % b = a - trunc(a/b) * b
   local q, err = M.div(a, b)
   if not q then return nil, err end
   q = M.trunc(q)
   return M.sub(a, M.mul(q, b))
+  end
 end
 
 --: (a: Bignum) -> Bignum
 function M.neg(a)
-  if a.s == 0 then return zero() end
-  return setmetatable({ s = -a.s, digits = a.digits, exp = a.exp }, mt)
+  if a.s == 0 then return zero()
+  else return setmetatable({ s = -a.s, digits = a.digits, exp = a.exp }, mt)
+  end
 end
 
 --: (a: Bignum) -> Bignum
 function M.abs(a)
-  if a.s == 0 then return zero() end
-  return setmetatable({ s = 1, digits = a.digits, exp = a.exp }, mt)
+  if a.s == 0 then return zero()
+  else return setmetatable({ s = 1, digits = a.digits, exp = a.exp }, mt)
+  end
 end
 
 -- ── Comparison ───────────────────────────────────────────────────────────────
@@ -493,13 +503,15 @@ end
 --: (a: Bignum, b: Bignum) -> integer
 local function cmp(a, b)
   if a.s ~= b.s then
-    if a.s == 0 and b.s == 0 then return 0 end
-    return a.s < b.s and -1 or 1
+    if a.s == 0 and b.s == 0 then return 0
+    else return a.s < b.s and -1 or 1
+    end
+  elseif a.s == 0 then return 0
+  else
+    local ad, bd, _ = align(a, b)
+    local c = digits_cmp(ad, bd)
+    return a.s > 0 and c or -c
   end
-  if a.s == 0 then return 0 end
-  local ad, bd, _ = align(a, b)
-  local c = digits_cmp(ad, bd)
-  return a.s > 0 and c or -c
 end
 
 --: (a: Bignum, b: Bignum) -> boolean
@@ -522,57 +534,60 @@ function M.sign(a)       return a.s            end
 
 --: (a: Bignum) -> boolean
 function M.is_integer(a)
-  if a.s == 0 then return true end
-  -- value = 0.digits × 10^exp
-  -- Is integer when the value has no fractional part, i.e., exp >= #digits
-  -- (all digits sit to the left of the decimal point)
-  if a.exp >= #a.digits then return true end
-  -- If exp <= 0, the entire number is fractional
-  if a.exp <= 0 then return false end
-  -- Fractional digits are those at index (exp+1) onwards in the digit string
-  local frac = sub(a.digits, a.exp + 1)
-  return frac:match("^0*$") ~= nil
+  if a.s == 0 then return true
+  elseif a.exp >= #a.digits then return true
+  elseif a.exp <= 0 then return false
+  else
+    -- Fractional digits are those at index (exp+1) onwards in the digit string
+    local frac = sub(a.digits, a.exp + 1)
+    return frac:match("^0*$") ~= nil
+  end
 end
 
 -- ── Rounding ─────────────────────────────────────────────────────────────────
 
 --: (a: Bignum) -> Bignum
 function M.trunc(a)
-  if a.s == 0 then return zero() end
-  -- value = 0.digits × 10^exp
-  -- Integer part: first `exp` digits of the digit string (if exp > 0)
-  if a.exp <= 0 then return zero() end       -- entirely fractional
-  if a.exp >= #a.digits then local r, _ = M.new(a); return --[[:! Bignum]] r end  -- entirely integer
-  -- Keep only the first exp digits
-  local int_digits = sub(a.digits, 1, a.exp)
-  return make(a.s, int_digits, a.exp)
+  if a.s == 0 then return zero()
+  elseif a.exp <= 0 then return zero()       -- entirely fractional
+  elseif a.exp >= #a.digits then local r, _ = M.new(a); return --[[:! Bignum]] r  -- entirely integer
+  else
+    -- Keep only the first exp digits
+    local int_digits = sub(a.digits, 1, a.exp)
+    return make(a.s, int_digits, a.exp)
+  end
 end
 
 --: (a: Bignum) -> Bignum
 function M.floor(a)
-  if a.s == 0 then return zero() end
-  local t = M.trunc(a)
-  if a.s < 0 and not M.is_integer(a) then
-    return M.sub(t, M.ONE)
+  if a.s == 0 then return zero()
+  else
+    local t = M.trunc(a)
+    if a.s < 0 and not M.is_integer(a) then
+      return M.sub(t, M.ONE)
+    end
+    return t
   end
-  return t
 end
 
 --: (a: Bignum) -> Bignum
 function M.ceil(a)
-  if a.s == 0 then return zero() end
-  local t = M.trunc(a)
-  if a.s > 0 and not M.is_integer(a) then
-    return M.add(t, M.ONE)
+  if a.s == 0 then return zero()
+  else
+    local t = M.trunc(a)
+    if a.s > 0 and not M.is_integer(a) then
+      return M.add(t, M.ONE)
+    end
+    return t
   end
-  return t
 end
 
 -- Round to `places` decimal places (round half away from zero).
 --: (a: Bignum, places: (integer | nil)) -> Bignum
 function M.round(a, places)
   places = places or 0
-  if a.s == 0 then return zero() end
+  if a.s == 0 then return zero()
+  else
   -- We keep digits at positions 1 .. (exp + places) within a.digits,
   -- where position exp corresponds to the last integer digit.
   local keep = a.exp + places
@@ -597,13 +612,15 @@ function M.round(a, places)
     kept = digits_add(kept, "1")
   end
   return make(a.s, kept, a.exp)
+  end
 end
 
 -- ── Conversion ───────────────────────────────────────────────────────────────
 
 --: (a: Bignum) -> string
 function M.to_string(a)
-  if a.s == 0 then return "0" end
+  if a.s == 0 then return "0"
+  else
   local prefix = a.s < 0 and "-" or ""
   local d = a.digits
   local e = a.exp  -- digits before decimal point
@@ -617,6 +634,7 @@ function M.to_string(a)
   else
     -- e digits before, rest after decimal
     return prefix .. sub(d, 1, e) .. "." .. sub(d, e + 1)
+  end
   end
 end
 
@@ -659,8 +677,9 @@ end
 --: (a: Bignum, prec: (integer | nil)) -> (Bignum | nil, string | nil)
 function M.sqrt(a, prec)
   prec = prec or _default_prec
-  if a.s < 0 then return nil, "bignum.sqrt: negative argument" end
-  if a.s == 0 then return zero() end
+  if a.s < 0 then return nil, "bignum.sqrt: negative argument"
+  elseif a.s == 0 then return zero()
+  else
 
   -- Initial approximation
   local aton = M.to_number(a)
@@ -684,6 +703,7 @@ function M.sqrt(a, prec)
     x = x2
   end
   return M.round(x, prec)
+  end
 end
 
 -- Compute pi to `prec` decimal places using the Machin formula:

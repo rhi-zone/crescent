@@ -542,11 +542,12 @@ local function token_request(http, url, headers, body)
       end
     end
     return nil, "http " .. tostring(resp.status)
+  else
+    if not resp.body then
+      return nil, "empty response body"
+    end
+    return M.parse_token_response(resp.body)
   end
-  if not resp.body then
-    return nil, "empty response body"
-  end
-  return M.parse_token_response(resp.body)
 end
 
 -- Build the Authorization Code redirect URL.

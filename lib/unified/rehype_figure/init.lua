@@ -49,8 +49,9 @@ local function sole_img_child(node)
         -- More than one element child.
         return nil
       end
-      if child.tag ~= "img" then return nil end
-      img_node = child
+      if child.tag ~= "img" then return nil
+      else img_node = child
+      end
     else
       return nil
     end

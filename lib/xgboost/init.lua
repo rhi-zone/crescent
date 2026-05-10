@@ -185,8 +185,9 @@ function Model:predict_one(x)
   end
   if self.objective == "logistic" then
     return sigmoid(raw)
+  else
+    return raw
   end
-  return raw
 end
 
 function Model:predict(X)

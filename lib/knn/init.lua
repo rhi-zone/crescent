@@ -174,8 +174,9 @@ function index_mt:classify(target, opts)
     if weighted then
       if nb.distance == 0 then
         return label, { [label] = 1 / 0 }
+      else
+        w = 1 / nb.distance
       end
-      w = 1 / nb.distance
     else
       w = 1
     end
@@ -210,10 +211,11 @@ function index_mt:regress(target, opts)
       local nb = neighbors[i]
       if nb.distance == 0 then
         return nb.label --[[:! number]]
-      end
+      else
       local w = 1 / nb.distance
       wsum = wsum + w
       vsum = vsum + (nb.label --[[:! number]]) * w
+      end -- else (distance ~= 0)
     end
     return vsum / wsum
   else

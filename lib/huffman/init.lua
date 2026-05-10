@@ -252,8 +252,7 @@ function M.decompress(encoded, metadata)
   -- Handle empty string
   if meta.total_bits == 0 then
     return ""
-  end
-
+  else
   local freqs = meta.freqs
   local total_bits = meta.total_bits
 
@@ -274,6 +273,7 @@ function M.decompress(encoded, metadata)
   end
 
   return table.concat(chars)
+  end
 end
 
 -- Get code lengths (depth of each leaf) from a tree.
