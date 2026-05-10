@@ -4,8 +4,8 @@ local mimetype_by_contents
 
 local mod = {}
 
---:: StaticHandlerFn = (req: any, res: any) -> (boolean | nil)
---: (base: string | nil, opts: { io_open: (string, string) -> any } | nil) -> StaticHandlerFn | (nil, string)
+--:: StaticHandlerFn = (req: { path: string, target: string, ... }, res: { body: string | nil, ... }) -> (boolean | nil)
+--: (base: string | nil, opts: { io_open: (string, string) -> (unknown, string | nil) } | nil) -> StaticHandlerFn | (nil, string)
 mod.router = function (base, opts)
 	if base ~= nil and type(base) ~= "string" then
 		return nil, "static_router() expects string as base path, got " .. tostring(base)
@@ -17,8 +17,9 @@ mod.router = function (base, opts)
 		-- TODO: urldecode? urldecode(req.path)
 		local full_path = path.safe_resolve(base, req.path)
 		if not full_path then res.status = 404; return end
-		local file = io_open(full_path, "rb")
-		if file == nil then res.status = 404; return end
+		local file_raw = io_open(full_path, "rb")
+		if file_raw == nil then res.status = 404; return end
+		local file = file_raw --[[:! { read: (self: unknown, string) -> string | nil, close: (self: unknown) -> nil }]]
 		res.status = 200
 		res.body = file:read("*all")
 		if res.body == nil then res.status = 404; return end

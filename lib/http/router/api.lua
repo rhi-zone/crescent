@@ -5,14 +5,14 @@ local mod = {}
 local json_to_value = require("lib.format.json").json_to_value
 local value_to_json = require("lib.format.json").value_to_json
 
---: (any) -> (any, any, any) -> boolean | nil
+--: (unknown) -> ({ body: string | nil, path: string, method: string, ... }, { body: string | nil, headers: { [string]: unknown }, ... }, unknown) -> boolean | nil
 mod.router = function (routes)
 	return function (req, res, sock)
 		local req_ = req --[[: any]]
 		local res_ = res --[[: any]]
 		local json_to_ = json_to_value --[[:! (unknown) -> unknown]]
 		local to_json_ = value_to_json --[[:! (unknown) -> unknown]]
-		local route = routes --[[: any]]
+		local route = routes
 		if type(route) == "function" then
 			local input = json_to_(req_.body)
 			res_.headers["Content-Type"] = { "application/json" }

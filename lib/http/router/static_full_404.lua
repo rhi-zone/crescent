@@ -2,8 +2,9 @@ local static_router = require("lib.http.router.static_full").router
 
 local mod = {}
 
---:: Static404HandlerFn = (req: any, res: any) -> unknown
---: (base: string | nil, opts: { io_open: (string, string) -> any, os_date: (string, integer) -> string } | nil) -> Static404HandlerFn | (nil, string | nil)
+--:: require "lib.http.router.static_full"
+--:: Static404HandlerFn = (req: { path: string, ... }, res: { status: integer, ... }) -> unknown
+--: (base: string | nil, opts: { io_open: (string, string) -> (unknown, string | nil), os_date: (string, integer) -> string } | nil) -> Static404HandlerFn | (nil, string | nil)
 mod.router = function (base, opts)
 	local router, err = static_router(base, opts)
 	if not router then return nil, err end

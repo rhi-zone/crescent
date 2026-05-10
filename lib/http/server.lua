@@ -27,9 +27,10 @@ local function get_tls()
 	return tls_lib
 end
 
---:: http_client_sock = { receive: (self: http_client_sock, any) -> string | nil, send: (self: http_client_sock, string) -> unknown, close: (self: http_client_sock) -> unknown, fd: integer, on_send: any, on_receive: any, close: (self: http_client_sock) -> unknown }
+--:: http_client_sock = { receive: (self: http_client_sock, unknown) -> string | nil, send: (self: http_client_sock, string) -> unknown, close: (self: http_client_sock) -> unknown, fd: integer, on_send: unknown, on_receive: unknown }
+--:: HttpHandlerFn = (req: http_request, res: http_server_response, sock: http_client_sock) -> (boolean | nil)
 
---: (any) -> (any) -> nil
+--: (HttpHandlerFn) -> (http_client_sock) -> nil
 mod.make_connection_handler = function (handler)
 	return function (client)
 		local client_ = client --[[:! http_client_sock]]
@@ -72,7 +73,7 @@ mod.make_connection_handler = function (handler)
 		end
 		local res = { status = 200, reason = "", version = "HTTP/1.1", headers = {}, body = nil } --: http_response
 		local res_any = res --[[: any]]
-		handler(req, res_any, client_)
+		handler(req --[[:! http_request]], res_any --[[:! http_server_response]], client_)
 		if not res_any.raw then
 			client_:send(http.serialize_response(res))
 			client_:close()
@@ -85,7 +86,7 @@ end
 -- Returns true on success, or (nil, errmsg) on failure.
 -- After this call, client.on_send and client.on_receive are set to go
 -- through the per-connection TLS context.
---: (any, any) -> (boolean | nil, string | nil)
+--: (cdata, http_client_sock) -> (boolean | nil, string | nil)
 local function wrap_client_tls(tls_ctx, client)
 	local t = get_tls()
 	if not t then return nil, "libtls unavailable" end
@@ -148,10 +149,10 @@ end
 -- When both are set and libtls is available, accepted connections are wrapped
 -- in TLS. If libtls is unavailable a warning is printed and the server falls
 -- back to plaintext — it does not hard-fail.
---: (any, integer | nil, unknown | nil, { host: string | nil, tls_cert: string | nil, tls_key: string | nil } | nil) -> unknown
+--: (HttpHandlerFn, integer | nil, unknown | nil, { host: string | nil, tls_cert: string | nil, tls_key: string | nil } | nil) -> unknown
 mod.server = function (handler, port, epoll, opts)
 	opts = opts or {} --[[:! { host: string | nil, tls_cert: string | nil, tls_key: string | nil }]]
-	local tls_ctx --: any
+	local tls_ctx --: cdata | nil
 
 	if opts.tls_cert and opts.tls_key then
 		local t = get_tls()

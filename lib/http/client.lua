@@ -7,7 +7,7 @@ local mod = {}
 --[[TODO: tls: https://github.com/CapsAdmin/luajitsocket/blob/master/examples/tcp_client_blocking_tls.lua]]
 
 -- Blocking send: connect, send request, receive full response, return it.
---: (any) -> (string | nil, string | nil)
+--: ({ host: string, port: string | nil, method: string | nil, path: string | nil, version: string | nil, headers: { [string]: unknown } | nil, body: string | nil, ... }) -> (string | nil, string | nil)
 mod.send = function (req)
 	if not req.host then error("http_client.send: missing host") end
 	local client, err = socket.create("inet", "stream", "tcp")
@@ -27,7 +27,7 @@ end
 -- When epoll is provided, registers the socket on the caller's loop and returns immediately.
 -- When epoll is nil, creates a local epoll instance and blocks until the response is complete.
 -- cb is called as cb(response_string, err_string).
---: (any, (string | nil, string | nil) -> nil, unknown | nil) -> nil
+--: ({ host: string, port: string | nil, method: string | nil, path: string | nil, version: string | nil, headers: { [string]: unknown } | nil, body: string | nil, ... }, (string | nil, string | nil) -> nil, unknown | nil) -> nil
 mod.send_async = function (req, cb, ep)
 	if not req.host then cb(nil, "http_client.send_async: missing host"); return end
 	local is_owner = not ep

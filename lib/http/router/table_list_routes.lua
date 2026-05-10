@@ -1,7 +1,7 @@
 local mod = {}
 
 local list_routes
---: (Arr<string>, any, string | nil) -> nil
+--: (Arr<string>, { [string]: unknown, ... }, string | nil) -> nil
 list_routes = function (routes_parts, routes, prefix)
 	local keys = {} --: Arr<string>
 	for k in pairs(routes) do keys[#keys+1] = k --[[:! string]] end
@@ -18,7 +18,7 @@ list_routes = function (routes_parts, routes, prefix)
 	end
 end
 
---: (any, string | nil) -> (any, any) -> nil
+--: ({ [string]: unknown, ... }, string | nil) -> ({ [string]: unknown }, { [string]: unknown }) -> nil
 mod.list_routes_handler = function (routes, prefix)
 	local html do
 		local routes_parts = {} --: Arr<string>

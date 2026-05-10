@@ -7,7 +7,7 @@ local mimetype_by_contents
 
 local mod = {}
 
---:: StaticFullHandlerFn = (req: any, res: any) -> nil
+--:: StaticFullHandlerFn = (req: { path: string, target: string, headers: { [string]: unknown }, ... }, res: { body: string | nil, status: integer, headers: { [string]: unknown }, ... }) -> nil
 --: (string) -> string | nil
 local system_specific_mime_type = function (file_path) end
 
@@ -52,7 +52,7 @@ local html_escape = function (string)
 	return result
 end
 
---: (base: string | nil, opts: { io_open: (string, string) -> any, os_date: (string, integer) -> string } | nil) -> StaticFullHandlerFn | (nil, string)
+--: (base: string | nil, opts: { io_open: (string, string) -> (unknown, string | nil), os_date: (string, integer) -> string } | nil) -> StaticFullHandlerFn | (nil, string)
 mod.router = function (base, opts)
 	if base ~= nil and type(base) ~= "string" then
 		return nil, "static() expects string as base path, got " .. tostring(base)
@@ -66,18 +66,21 @@ mod.router = function (base, opts)
 		--[[TODO: urldecode? urldecode(req.path)]]
 		local full_path = path.safe_resolve(base, urldecode(req.path))
 		if not full_path then res.status = 404; return end
-		local file = io_open(full_path, "rb")
-		if file == nil then res.status = 404; return end
+		local file_raw = io_open(full_path, "rb")
+		if file_raw == nil then res.status = 404; return end
+		--:: FileHandle = { read: (self: unknown, string) -> string | nil, close: (self: unknown) -> nil }
+		local file = file_raw --[[:! FileHandle]]
 		res.status = 200
 		res.body = file:read("*all")
 		file:close()
 		if res.body == nil then
 			local full_path_s = full_path --[[: string]]
 			local dir_path = full_path_s:gsub("/$", "")
-			file = io_open(dir_path .. "/index.html", "rb")
-			if file then
-				res.body = file:read("*all")
-				file:close()
+			local file2_raw = io_open(dir_path .. "/index.html", "rb")
+			if file2_raw then
+				local file2 = file2_raw --[[:! FileHandle]]
+				res.body = file2:read("*all")
+				file2:close()
 			end
 		end
 		if res.body == nil then

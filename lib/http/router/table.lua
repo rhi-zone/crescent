@@ -1,6 +1,6 @@
 local mod = {}
 
---: (any) -> (any, any, any) -> unknown
+--: (unknown) -> ({ path: string, method: string, ... }, unknown, unknown) -> unknown
 mod.router = function (routes)
 	return function (req, res, sock)
 		local route = routes

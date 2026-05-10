@@ -1,6 +1,8 @@
 local mod = {}
 
---: (any) -> (any, any, any) -> unknown
+--:: require "lib.http.server"
+
+--: ({ [string]: (http_request, http_server_response, http_client_sock) -> unknown }) -> (http_request, http_server_response, http_client_sock) -> unknown
 mod.router = function (cbs)
 	return function (req, res, sock)
 		local cb = cbs[req.method]

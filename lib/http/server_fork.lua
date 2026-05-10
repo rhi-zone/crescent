@@ -9,7 +9,7 @@ local mod = {}
 
 ffi.cdef [[int /*pid_t*/ fork(void);]]
 
---: (any) -> (SockClient) -> nil
+--: ((HttpRequest, HttpResponse, SockClient) -> unknown) -> (SockClient) -> nil
 mod.make_connection_handler = function (handler)
 	--:: SockClient = { receive: (SockClient) -> string | nil, send: (SockClient, string) -> nil, close: (SockClient) -> nil }
 	--: (SockClient) -> nil
@@ -30,7 +30,7 @@ mod.make_connection_handler = function (handler)
 	end
 end
 
---: (any, integer | nil, unknown | nil) -> unknown
+--: ((HttpRequest, HttpResponse, SockClient) -> unknown, integer | nil, unknown | nil) -> unknown
 mod.server = function (handler, port, epoll)
 	return socket.server(mod.make_connection_handler(handler), port or 80, epoll)
 end
