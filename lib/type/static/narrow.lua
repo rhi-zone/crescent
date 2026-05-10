@@ -631,6 +631,25 @@ local function record_narrowing(ctx, info, narrowed, is_truthy)
     local env_mod = require("lib.type.static.env")
     local current_ty = narrowed[name_id] or env_mod.lookup(ctx.scope, name_id)
     if not current_ty then return end
+    -- Bug fix: when nil-check narrowing a variable whose flow type is nil (e.g. after
+    -- `x = nil` on an `x: T | nil` annotated local), the annotation type is wider and
+    -- should be used as the base for narrowing.  Otherwise `subtract(nil, nil)` → never,
+    -- making the truthy branch unreachable even though the declared type admits non-nil.
+    -- Only applies to nil_check narrowing; other narrowing kinds use the flow type.
+    if info.kind == "nil_check" then
+        local ann_ty = env_mod.lookup_annotation(ctx.scope, name_id)
+        if ann_ty then
+            local ct = ctx.types:get(types_mod.find(ctx, current_ty))
+            local at = ctx.types:get(types_mod.find(ctx, ann_ty))
+            -- Use the annotation type when the flow type is narrower:
+            -- specifically when flow is nil/never and annotation is a union with non-nil.
+            if (ct.tag == TAG_NIL or ct.tag == TAG_NEVER or
+                (ct.tag == TAG_LITERAL and ct.data and ct.data[0] == LIT_NIL))
+               and at.tag == TAG_UNION then
+                current_ty = ann_ty
+            end
+        end
+    end
     narrowed[name_id] = apply_narrowing(ctx, info, current_ty, is_truthy)
     -- Propagate correlated multi-return narrowings when any binding is narrowed.
     -- Pass the narrowing direction (is_truthy_effective) so arm filtering works at gen time.

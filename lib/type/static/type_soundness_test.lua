@@ -2765,6 +2765,24 @@ end
     end)
 end)
 
+assert.describe("nil-check narrowing after nil assignment (Bug 3)", function()
+    assert.it("{ [string]: T } | nil annotated local: nil-assigned, then if-checked", function()
+        -- After `b = nil` on an annotated `b: { [string]: string } | nil`, the flow type
+        -- is nil. In the truthy branch of `if b then`, narrowing should use the declared
+        -- type (T | nil) as the base, not the flow nil. Otherwise `subtract(nil, nil)` → never,
+        -- making the truthy branch unreachable and causing cascading errors.
+        no_errors([==[
+--: { [string]: string } | nil
+local b
+b = nil
+if b then
+  local v = b["key"]
+  local s = v .. "x"
+end
+]==])
+    end)
+end)
+
 assert.describe("ffi.C intrinsic ($FfiC)", function()
     assert.it("ffi.C.func after ffi.cdef produces no error when called", function()
         no_errors([[
