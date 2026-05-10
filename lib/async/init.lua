@@ -454,22 +454,23 @@ function M.async(fn)
     local args = { ... }
     local p, resolve, reject = M.promise()
 
-    local co = coroutine.create(function()
+    -- co_box: wrap the coroutine so its type is known inside closures.
+    local co_box = { co = coroutine.create(function()
       local ok, result = pcall(fn, unpack(args))
       if ok then
         resolve(result)
       else
         reject(result)
       end
-    end) --[[: any]]
+    end) } --: { co: Thread }
 
     -- Drive the coroutine forward.
     local function step(val, is_err)
       local ok, yielded
+      local co = co_box.co
       if is_err then
         -- Resume with error propagation: re-raise inside the coroutine.
-        local nil_val --: any
-        ok, yielded = coroutine.resume(co, nil_val, val)
+        ok, yielded = coroutine.resume(co, nil, val)
       else
         ok, yielded = coroutine.resume(co, val)
       end

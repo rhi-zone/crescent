@@ -75,7 +75,7 @@ local function resolve(req)
 end
 
 --- Copy request table, clearing provider field.
---: (unknown) -> any
+--: (unknown) -> unknown
 local function make_provider_req(req)
 	local r = {}
 	for k, v in pairs(req --[[:! { [string]: unknown }]]) do r[k] = v end
@@ -89,7 +89,7 @@ mod.generate = function(req)
 	local provider_, model_name, err = resolve(req)
 	if not provider_ then return nil, err end
 	local provider = provider_ --[[:! ai_provider]]
-	return provider.generate(make_provider_req(req))
+	return provider.generate(make_provider_req(req) --[[:! ai_request]])
 end
 
 --- Streaming generation — returns closure iterator.
@@ -100,7 +100,7 @@ mod.stream = function(req)
 		return function() return nil end, err
 	end
 	local provider = provider_ --[[:! ai_provider]]
-	return provider.stream(make_provider_req(req))
+	return provider.stream(make_provider_req(req) --[[:! ai_request]])
 end
 
 --- Embed a single value.
@@ -110,7 +110,7 @@ mod.embed = function(req)
 	if not provider_ then return nil, err end
 	local provider = provider_ --[[:! ai_provider]]
 	if not provider.embed then return nil, "provider does not support embeddings" end
-	return provider.embed(make_provider_req(req))
+	return provider.embed(make_provider_req(req) --[[:! ai_embed_request]])
 end
 
 --- Embed multiple values.
@@ -120,7 +120,7 @@ mod.embed_many = function(req)
 	if not provider_ then return nil, err end
 	local provider = provider_ --[[:! ai_provider]]
 	if not provider.embed_many then return nil, "provider does not support batch embeddings" end
-	return provider.embed_many(make_provider_req(req))
+	return provider.embed_many(make_provider_req(req) --[[:! ai_embed_many_request]])
 end
 
 --- Generate an image.
@@ -130,7 +130,7 @@ mod.generate_image = function(req)
 	if not provider_ then return nil, err end
 	local provider = provider_ --[[:! ai_provider]]
 	if not provider.generate_image then return nil, "provider does not support image generation" end
-	return provider.generate_image(make_provider_req(req))
+	return provider.generate_image(make_provider_req(req) --[[:! ai_image_request]])
 end
 
 --- Register a custom provider.

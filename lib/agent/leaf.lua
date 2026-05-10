@@ -2,8 +2,8 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local set_mod    = require("lib.agent.set") --: any
-local render_mod = require("lib.agent.render") --: any
+local set_mod    = require("lib.agent.set")
+local render_mod = require("lib.agent.render")
 
 local M = {}
 
@@ -15,7 +15,7 @@ local M = {}
 
 --:: LlmResponse = { notes_add: { [integer]: { key: string, value: unknown }, ... } | nil, notes_drop: { [integer]: string, ... } | nil, tool_call: { name: string, args: { [string]: unknown } | nil, ... } | nil, result: unknown }
 --:: LlmCap = { generate: (req: { [string]: unknown }) -> (LlmResponse | nil, string | nil) }
---:: ExecCap = any
+--:: ExecCap = (name: string, args: { [string]: unknown }) -> (unknown, string | nil)
 --:: LeafCaps = { llm: LlmCap, exec: ExecCap | nil }
 
 -- Run a single leaf task. Returns task output or nil+errmsg.
@@ -79,8 +79,9 @@ function M.run(task_def, initial_set, caps, preset_spec)
 			if caps.exec == nil then
 				return nil, "tool_call in response but no exec cap provided"
 			end
+			local exec_fn = caps.exec --[[:! ExecCap]]
 			local tc     = response.tool_call --[[:! { name: string, args: { [string]: unknown } | nil, ... }]]
-			local out, terr = caps.exec(tc.name, tc.args or {})
+			local out, terr = exec_fn(tc.name, tc.args or {})
 			if terr then return nil, terr end
 			s = set_mod.note(s, "_tool_result", out)
 			tool_result_pending = true

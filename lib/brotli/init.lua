@@ -47,7 +47,7 @@ if ok_ffi then
 
   -- Try to load a library by scanning multiple candidate paths/names.
   -- Returns: library handle or nil
-  --: (names: { [integer]: string }, suffixes: { [integer]: string }) -> (any | nil)
+  --: (names: { [integer]: string }, suffixes: { [integer]: string }) -> (cdata | nil)
   local function try_load(names, suffixes)
     -- 1. Standard names (works when the lib is on LD_LIBRARY_PATH)
     for _, name in ipairs(names) do

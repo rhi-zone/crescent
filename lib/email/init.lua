@@ -211,6 +211,7 @@ end
 
 -- ── Message Object ───────────────────────────────────────────────────────
 
+--:: ParsedMessage = { from: string | nil, to: { [integer]: string }, cc: { [integer]: string }, bcc: { [integer]: string }, subject: string, text: string | nil, html: string | nil, headers: { [string]: string }, reply_to: string | nil, attachments: { [integer]: { filename: string, content_type: string, data: string, inline: boolean | nil, cid: string | nil } }, ... }
 --:: Attachment = { filename: string, content_type: string, data: string, inline: boolean | nil, cid: string | nil }
 --:: MessageObj = { from: string, to: { [integer]: string }, cc: { [integer]: string }, bcc: { [integer]: string }, subject: string, text: string | nil, html: string | nil, headers: { [string]: string }, reply_to: string | nil, attachments: { [integer]: Attachment }, _time_fn: () -> number, to_string: (MessageObj) -> (string | nil, string | nil), attach: (MessageObj, Attachment) -> nil, ... }
 
@@ -524,7 +525,7 @@ local function decode_body(body, encoding)
 end
 
 -- Extract message data from parsed MIME structure
---: (any, { { headers: { [string]: string }, body: string } }) -> nil
+--: (ParsedMessage, { [number]: { headers: { [string]: string }, body: string } }) -> nil
 local function extract_parts(msg, parts)
 	for _, part in ipairs(parts) do
 		local ct = part.headers["content-type"] or "text/plain"
@@ -560,7 +561,7 @@ local function extract_parts(msg, parts)
 end
 
 -- Parse an email from a raw RFC 5322 string
---: (string) -> (any | nil, string | nil)
+--: (string) -> (ParsedMessage | nil, string | nil)
 function M.parse(raw)
 	if type(raw) ~= "string" or #raw == 0 then
 		return nil, "empty input"

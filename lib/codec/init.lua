@@ -4,7 +4,7 @@ end
 
 local M = {}
 
---:: Codec = { encode: (any) -> any, decode: (any) -> any }
+--:: Codec = { encode: (unknown) -> unknown, decode: (unknown) -> unknown }
 
 --- Create a codec from an encode/decode table.
 --: (t: Codec) -> (Codec | nil, string | nil)
@@ -18,7 +18,7 @@ end
 M.new = new
 
 --- Create a codec from two functions.
---: (encode_fn: (any) -> any, decode_fn: (any) -> any) -> (Codec | nil, string | nil)
+--: (encode_fn: (unknown) -> unknown, decode_fn: (unknown) -> unknown) -> (Codec | nil, string | nil)
 local function from(encode_fn, decode_fn)
   if not encode_fn then return nil, "codec: missing encode function" end
   if not decode_fn then return nil, "codec: missing decode function" end
@@ -76,7 +76,7 @@ end
 M.when = when
 
 --- Map codec: transform with arbitrary functions.
---: (encode_fn: (any) -> any, decode_fn: (any) -> any) -> (Codec | nil, string | nil)
+--: (encode_fn: (unknown) -> unknown, decode_fn: (unknown) -> unknown) -> (Codec | nil, string | nil)
 local function map(encode_fn, decode_fn)
   if not encode_fn then return nil, "codec.map: missing encode function" end
   if not decode_fn then return nil, "codec.map: missing decode function" end
@@ -86,7 +86,7 @@ end
 M.map = map
 
 --- Test whether decode(encode(data)) == data.
---: (codec: Codec, data: any) -> (boolean, string | nil)
+--: (codec: Codec, data: unknown) -> (boolean, string | nil)
 local function roundtrip(codec, data)
   local encoded, err = codec.encode(data)
   if encoded == nil then return false, err end
@@ -181,7 +181,7 @@ local function xor(key)
       end
       return table.concat(t)
     end
-    local c = { encode = xor_fn_fast --[[:! (string) -> string]], decode = xor_fn_fast --[[:! (string) -> string]] } --: Codec
+    local c = { encode = xor_fn_fast --[[:! (unknown) -> unknown]], decode = xor_fn_fast --[[:! (unknown) -> unknown]] } --: Codec
     return c
   end
   -- Pure fallback: use lookup table
@@ -210,7 +210,7 @@ local function xor(key)
     end
     return table.concat(t)
   end
-  local c = { encode = xor_fn_pure --[[:! (string) -> string]], decode = xor_fn_pure --[[:! (string) -> string]] } --: Codec
+  local c = { encode = xor_fn_pure --[[:! (unknown) -> unknown]], decode = xor_fn_pure --[[:! (unknown) -> unknown]] } --: Codec
   return c
 end
 M.xor = xor

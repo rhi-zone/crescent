@@ -60,9 +60,8 @@ M.allocate = function(intervals, regfile)
   --: RegFile
   local regfile = regfile
 
-  -- assignment: vreg_id → physical register name.
-  -- any: nil-out support (stolen entries) + pairs-loop narrowing bug in typechecker.
-  local assignment      = {} --: any
+  -- assignment: vreg_id → physical register name (nil means spilled/unassigned).
+  local assignment      = {} --: { [integer]: string | nil, ... }
   local spills          = {} --: { [integer]: integer, ... }
   local num_spill_slots = 0
 

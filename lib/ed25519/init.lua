@@ -112,16 +112,15 @@ local function make_pure()
 
 	local u64 = ffi.typeof("uint64_t")
 
-	-- SHA512_H0 and SHA512_K hold FFI uint64_t cdata; annotated as any to permit
-	-- cdata arithmetic (operator overloading not tracked by the typechecker).
-	local SHA512_H0 = { --: { [integer]: any }
+	-- SHA512_H0 and SHA512_K hold FFI uint64_t cdata; typed as number for arithmetic.
+	local SHA512_H0 = { --: { [integer]: number }
 		u64(0x6a09e667f3bcc908ULL), u64(0xbb67ae8584caa73bULL),
 		u64(0x3c6ef372fe94f82bULL), u64(0xa54ff53a5f1d36f1ULL),
 		u64(0x510e527fade682d1ULL), u64(0x9b05688c2b3e6c1fULL),
 		u64(0x1f83d9abfb41bd6bULL), u64(0x5be0cd19137e2179ULL),
 	}
 
-	local SHA512_K = { --: { [integer]: any }
+	local SHA512_K = { --: { [integer]: number }
 		u64(0x428a2f98d728ae22ULL), u64(0x7137449123ef65cdULL),
 		u64(0xb5c0fbcfec4d3b2fULL), u64(0xe9b5dba58189dbbcULL),
 		u64(0x3956c25bf348b538ULL), u64(0x59f111f1b605d019ULL),

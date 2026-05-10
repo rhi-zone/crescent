@@ -8,6 +8,7 @@ end
 
 --:: require "lib.caps.types"
 --:: require "lib.exec.help"
+--:: HelpNode = { flags: HelpFlag[], positional: HelpPositional[], subcommands: { [string]: HelpSubcommand }, flag_idents?: { [string]: integer }, subcommand_idents?: { [string]: string }, ... }
 
 local exec = require("lib.exec")
 
@@ -18,9 +19,7 @@ local CALLABLE        = 0x1
 local HAS_SUBCOMMANDS = 0x2
 
 -- Detect the kind of a node (HelpSchema or HelpSubcommand).
--- `any` — node is HelpSchema | HelpSubcommand; typechecker has no union field access,
--- so we opt out and access the shared fields directly.
---: (any) -> integer
+--: (HelpNode) -> integer
 local function node_kind(node)
 	local kind = 0
 	if #node.flags > 0 or #node.positional > 0 then
@@ -40,7 +39,7 @@ end
 -- Returns a list of strings, or nil + errmsg on unknown key.
 -- flag_idents: { [string]: integer }
 -- flags_list:  HelpFlag[]
---: (any, { [string]: integer }, HelpFlag[]) -> (string[] | nil, string | nil)
+--: (unknown, { [string]: integer }, HelpFlag[]) -> (string[] | nil, string | nil)
 local function expand_flags(flags_tbl, flag_idents, flags_list)
 	local args = {}
 	for key, val in pairs(flags_tbl) do
@@ -95,7 +94,7 @@ end
 -- path_args:   list of raw subcommand names (strings) to prepend as args
 -- node:        HelpSchema or HelpSubcommand (any — either shape is valid here)
 -- opts:        MakeApiOpts (popen, stderr)
---: (string, string[], any, MakeApiOpts) -> function
+--: (string, string[], HelpNode, MakeApiOpts) -> function
 local function make_leaf_fn(cmd, path_args, node, opts)
 	return function(...)
 		local varargs = { ... }
@@ -131,7 +130,7 @@ local function make_leaf_fn(cmd, path_args, node, opts)
 			if type(flags_tbl) ~= "table" then
 				return nil, "flags argument must be a table"
 			end
-			local flag_args, ferr = expand_flags(flags_tbl, node.flag_idents, node.flags)
+			local flag_args, ferr = expand_flags(flags_tbl, node.flag_idents or {}, node.flags)
 			if not flag_args then
 				return nil, ferr
 			end
@@ -152,7 +151,7 @@ end
 -- path_args: raw subcommand names up to (not including) this node
 -- node:      HelpSchema or HelpSubcommand (any)
 -- opts:      MakeApiOpts
---: (string, string[], any, MakeApiOpts) -> any
+--: (string, string[], HelpNode, MakeApiOpts) -> unknown
 local function build_node(cmd, path_args, node, opts)
 	local kind = node_kind(node)
 	local callable = (kind % 2 == 1)          -- CALLABLE bit
@@ -212,7 +211,7 @@ end
 -- node:      HelpSchema or HelpSubcommand (any)
 -- used_names: { [string]: boolean } for collision avoidance
 -- out:       string[] accumulator
---: (string[], any, { [string]: boolean }, string[]) -> nil
+--: (string[], HelpNode, { [string]: boolean }, string[]) -> nil
 local function gen_decls(name_path, node, used_names, out)
 	local base = pascal_case(name_path)
 
@@ -332,7 +331,7 @@ end
 --
 -- Returns api_table, decls_string.
 --:: MakeApiOpts = { popen: POpenFn, stderr: string | nil }
---: (HelpSchema, string, MakeApiOpts) -> (any, string)
+--: (HelpSchema, string, MakeApiOpts) -> (unknown, string)
 function M.make(schema, cmd, opts)
 	-- Ensure field_idents are present (root schema always has them; be defensive).
 	if not schema.flag_idents then

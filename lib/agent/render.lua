@@ -3,7 +3,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local set_mod = require("lib.agent.set")
-local json_any = require("lib.format.json") --: any
+local json_mod = require("lib.format.json")
 
 local M = {}
 
@@ -14,7 +14,8 @@ local M = {}
 --: (unknown) -> string
 local function val_to_str(v)
 	if type(v) == "table" then
-		return json_any.encode(v)
+		local s, _ = json_mod.encode(v)
+		return s or tostring(v)
 	end
 	return tostring(v)
 end
@@ -23,7 +24,7 @@ end
 -- task_inputs is the current task's inputs (injected into user turn).
 --: (AgentSet, unknown) -> RenderMessage[]
 function M.render(s, task_inputs)
-	local messages = {} --: any[]
+	local messages = {} --: RenderMessage[]
 
 	-- System turn: only if _system is present.
 	local system_val = set_mod.get(s, "_system")

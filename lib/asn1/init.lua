@@ -486,9 +486,10 @@ function M.encode_oid(oid_string)
     return nil, "OID must have at least two components"
   end
 
-  local buf = {} --: { [integer]: any }
+  local buf = {} --: { [integer]: string }
   -- First two components: combined as 40*c1 + c2
-  buf[#buf + 1] = char(math.floor(parts[1] * 40 + parts[2]) --[[:! integer]])
+  local first_byte = math.floor(parts[1] * 40 + parts[2]) --[[:! integer]]
+  buf[#buf + 1] = char(first_byte)
 
   -- Remaining components: base-128 big-endian, MSB set on all but last byte
   for i = 3, #parts do

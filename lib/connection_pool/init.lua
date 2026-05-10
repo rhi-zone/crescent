@@ -288,7 +288,7 @@ end
 -- opts.idle_timeout  number  (default nil = no timeout)
 -- opts.max_lifetime  number  (default nil = no limit)
 -- opts.clock       function() -> number  (required)
---: ({ create: () -> any, destroy: ((any) -> nil) | nil, validate: ((any) -> boolean) | nil, min_size: integer | nil, max_size: integer | nil, idle_timeout: number | nil, max_lifetime: number | nil, clock: () -> number } | nil) -> (Pool | nil, string | nil)
+--: ({ create: () -> unknown, destroy: ((unknown) -> nil) | nil, validate: ((unknown) -> boolean) | nil, min_size: integer | nil, max_size: integer | nil, idle_timeout: number | nil, max_lifetime: number | nil, clock: () -> number } | nil) -> (Pool | nil, string | nil)
 function M.new(opts)
   if not opts or not opts.create then
     return nil, "connection_pool.new: opts.create is required"

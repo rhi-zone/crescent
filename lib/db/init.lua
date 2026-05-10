@@ -52,7 +52,7 @@ end
 
 -- ── Helpers ─────────────────────────────────────────────────────────────────
 
---: ({ [any]: unknown }) -> { [any]: unknown }
+--: ({ [string]: unknown, ... }) -> { [string]: unknown }
 local function shallow_copy(t)
 	local out = {}
 	for k, v in pairs(t) do out[k] = v end
@@ -66,27 +66,29 @@ local function copy_array(t)
 	return out
 end
 
---: (any, string) -> (string[] | nil, string | nil)
+--: ({ query: (self: unknown, string) -> (unknown, string | nil), ... }, string) -> (string[] | nil, string | nil)
 local function get_column_names(db, table_name)
-	local iter, err = db:query("PRAGMA table_info(" .. table_name .. ")")
-	if not iter then return nil, err end
+	local iter_raw, err = db:query("PRAGMA table_info(" .. table_name .. ")")
+	if not iter_raw then return nil, err end
+	local iter = iter_raw --[[:! () -> (unknown, unknown)]]
 	local names = {}
 	while true do
 		local cid, name = iter()
 		if cid == nil then break end
-		names[#names + 1] = name
+		names[#names + 1] = name --[[:! string]]
 	end
 	return names
 end
 
 --- Get column names from an arbitrary SQL statement via sqlite3_column_name.
---: (any, string) -> string[]
+--: ({ prepare: (self: unknown, string) -> (unknown, string | nil), ... }, string) -> string[]
 local function query_column_names(db, sql)
 	if not sqlite_lib then return {} end
-	local stmt, err = db:prepare(sql)
-	if not stmt then return {} end
+	local stmt_raw, err = db:prepare(sql)
+	if not stmt_raw then return {} end
+	local stmt = stmt_raw --[[:! { _stmt: cdata, close: (self: unknown) -> nil, ... }]]
 	local raw = stmt._stmt
-	local slib_ = sqlite_lib --[[:! { sqlite3_column_count: (any) -> integer, sqlite3_column_name: (any, integer) -> any }]]
+	local slib_ = sqlite_lib --[[:! { sqlite3_column_count: (cdata) -> integer, sqlite3_column_name: (cdata, integer) -> cdata }]]
 	local col_count = slib_.sqlite3_column_count(raw)
 	local names = {}
 	for i = 0, col_count - 1 do

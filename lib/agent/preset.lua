@@ -7,7 +7,7 @@ local leaf_mod = require("lib.agent.leaf")
 
 local M = {}
 
---:: AgentCaps = { llm: { generate: (req: { [string]: unknown }) -> (unknown, string | nil) }, exec: any | nil }
+--:: AgentCaps = { llm: { generate: (req: { [string]: unknown }) -> (unknown, string | nil) }, exec: ((name: string, args: { [string]: unknown }) -> (unknown, string | nil)) | nil }
 
 --:: PresetSpec = {
 --::   input_schema: unknown,
@@ -54,11 +54,7 @@ function M.run(name, inputs, caps)
 		max_iterations = spec.max_iterations,
 	}
 
-	--: any
-	local spec_any = spec
-	--: any
-	local caps_any = caps
-	return leaf_mod.run(task_def, s, caps_any, spec_any)
+	return leaf_mod.run(task_def, s, caps --[[:! LeafCaps]], spec --[[:! { [string]: unknown } | nil]])
 end
 
 return M

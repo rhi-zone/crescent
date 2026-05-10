@@ -172,9 +172,9 @@ end
 -- The 26-bit limb boundaries fall at bits 0,26,52,78,104, which straddle byte
 -- boundaries — each limb overlaps two bytes at its edges.
 -- b[1..16]: the 16 message/key bytes; any high bit is added by the caller.
--- Returns five uint64_t cdata limbs; annotated any because the typechecker has
--- no model for FFI cdata types — they are genuinely opaque cdata values.
---: ({ [integer]: integer }) -> (any, any, any, any, any)
+-- Returns five uint64_t cdata limbs. Typed as number for arithmetic compatibility;
+-- at runtime these are FFI uint64_t cdata values.
+--: ({ [integer]: integer }) -> (number, number, number, number, number)
 local function decode_26(b)
   -- n0: bits  0..25 — all of b[1..3], bottom 2 bits of b[4].
   local n0 = U64(b[1] or 0)
@@ -218,7 +218,16 @@ local function poly1305_mac(key32, msg)
   local r3_5 = r3 * U5
   local r4_5 = r4 * U5
 
-  local h0, h1, h2, h3, h4 = U0, U0, U0, U0, U0
+  --: number
+  local h0 = U0
+  --: number
+  local h1 = U0
+  --: number
+  local h2 = U0
+  --: number
+  local h3 = U0
+  --: number
+  local h4 = U0
 
   local msglen = #msg
   local pos = 1
