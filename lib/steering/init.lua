@@ -527,8 +527,8 @@ end
 -- Each entry is called as fn(agent, ...) and the result is weighted.
 -- The sum is clamped to agent.max_force.
 function M.combine(behaviors)
-  --: { [integer]: { [integer]: any, weight: number | nil } }
-  local behaviors_ = behaviors --[[:! { [integer]: { [integer]: any, weight: number | nil } }]]
+  --: { [integer]: { [integer]: unknown, weight: number | nil } }
+  local behaviors_ = behaviors --[[:! { [integer]: { [integer]: unknown, weight: number | nil } }]]
   if not behaviors_ or #behaviors_ == 0 then return M.vec2(0, 0) end
 
   -- Extract agent from first entry to get max_force

@@ -25,7 +25,7 @@ end
 function M.score(alias, query)
 	if not query or query == "" then return 0 end
 	local q = query:lower()
-	local alias_t = alias --: any
+	local alias_t = alias --[[:! { title: unknown, description: unknown, tags: { [integer]: unknown } | nil, ... }]]
 	local title = tostring(alias_t.title or ""):lower()
 	local desc  = tostring(alias_t.description or ""):lower()
 	local tags  = alias_t.tags or {}

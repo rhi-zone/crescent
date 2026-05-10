@@ -123,7 +123,7 @@ local DEFAULT_PROMPTS = {
 --: () -> { connections: { ... }[], generations: { ... }[], prompts: { ... }[] }
 function M.get_defaults()
 	-- Deep copy defaults so callers can't mutate them.
-	--: (any) -> any
+	--: ({ [integer]: { [string]: unknown } }) -> { [integer]: { [string]: unknown } }
 	local function copy_list(src)
 		local out = {}
 		for i = 1, #src do

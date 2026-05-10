@@ -31,7 +31,7 @@ pcall(ffi.cdef, [[
 -- Returns are typed permissively because the typechecker does not currently
 -- validate function bodies against multi-return tuple-union annotations
 -- (`-> ...((A,B) | (nil,string))` works for callers but not for body checking).
---: (lib: any) -> { decode: (data: string, channels: integer) -> (string | nil, integer | string, integer | nil, integer | nil), resize: (pixels: string, src_w: integer, src_h: integer, dst_w: integer, dst_h: integer, channels: integer) -> (string | nil, string | nil) }
+--: (lib: cdata) -> { decode: (data: string, channels: integer) -> (string | nil, integer | string, integer | nil, integer | nil), resize: (pixels: string, src_w: integer, src_h: integer, dst_w: integer, dst_h: integer, channels: integer) -> (string | nil, string | nil) }
 local function bind(lib)
   local M = {}
 

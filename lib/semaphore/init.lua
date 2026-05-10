@@ -232,7 +232,7 @@ end
 
 --- Send a value. Blocks if the buffer is full (or unbuffered and no receiver ready).
 -- Returns nil, "closed" if the channel is closed.
---: (self: ChannelT, value: any) -> (boolean | nil, string | nil)
+--: (self: ChannelT, value: unknown) -> (boolean | nil, string | nil)
 function Ch:send(value)
   if self._closed then
     return nil, "closed"
@@ -304,7 +304,7 @@ function Ch:recv()
 end
 
 --- Non-blocking send. Returns true if sent, false if full or closed.
---: (self: ChannelT, value: any) -> (boolean, string | nil)
+--: (self: ChannelT, value: unknown) -> (boolean, string | nil)
 function Ch:try_send(value)
   if self._closed then return false end
   if #self._recvers > 0 then

@@ -63,7 +63,7 @@ mod.SIGSTOP = 19
 mod.SIGTSTP = 20
 
 -- Store active callbacks to prevent GC
-local callbacks = {} --: { [integer]: any }
+local callbacks = {} --: { [integer]: cdata | nil }
 
 --- Install a Lua function as a signal handler.
 --: (integer, (integer) -> nil) -> (boolean | nil, string | nil)
