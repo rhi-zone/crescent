@@ -460,11 +460,11 @@ end
 -- fields per constraint type) — no tuple/heterogeneous-array type available.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_unify(ctx, c)
-    local t1 = find(ctx, c[2])
-    local t2 = find(ctx, c[3])
+    local t1 = find(ctx, c[2] --[[:! integer]])
+    local t2 = find(ctx, c[3] --[[:! integer]])
     local ok, err = unify_mod.unify(ctx, t1, t2)
     if not ok then
-        add_error(ctx, c[4], c[5],
+        add_error(ctx, c[4] --[[:! integer | nil]], c[5] --[[:! integer | nil]],
             "type mismatch: cannot unify `" .. types_mod.display_short(ctx, t1)
             .. "` with `" .. types_mod.display_short(ctx, t2) .. "`"
             .. (err and (": " .. err) or ""))
@@ -475,9 +475,9 @@ end
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_sub(ctx, c)
-    local actual   = find(ctx, c[2])
-    local expected = find(ctx, c[3])
-    local line, col = c[4], c[5]
+    local actual   = find(ctx, c[2] --[[:! integer]])
+    local expected = find(ctx, c[3] --[[:! integer]])
+    local line, col = c[4] --[[:! integer | nil]], c[5] --[[:! integer | nil]]
 
     -- Multi-return tuple assigned to scalar: project the first element.
     -- In Lua `local x = f()` where f() returns (T, U, ...) → x gets T.
@@ -492,7 +492,7 @@ local function solve_sub(ctx, c)
     do
         -- Check the raw type node stored in the constraint (before find/union-find traversal).
         -- This reflects what the expression type was at constraint-generation time.
-        local raw_t = ctx.types:get(c[2])
+        local raw_t = ctx.types:get(c[2] --[[:! integer]])
         if raw_t.tag == TAG_VAR or raw_t.tag == TAG_ROWVAR then
             original_was_free_var = true
         end
@@ -588,8 +588,8 @@ end
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_narrow_nil(ctx, c)
-    local input_tid  = c[2]
-    local result_tid = c[3]
+    local input_tid  = c[2] --[[:! integer]]
+    local result_tid = c[3] --[[:! integer]]
     local keep_nil   = c[4]
 
     local input = find(ctx, input_tid)
@@ -641,9 +641,9 @@ end
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_or(ctx, c)
-    local left_tid   = c[2]
-    local right_tid  = c[3]
-    local result_tid = c[4]
+    local left_tid   = c[2] --[[:! integer]]
+    local right_tid  = c[3] --[[:! integer]]
+    local result_tid = c[4] --[[:! integer]]
 
     local left = find(ctx, left_tid)
     local lt = ctx.types:get(left)
@@ -747,9 +747,9 @@ end
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_bound(ctx, c)
-    local tv_id    = c[2]
-    local bound_id = c[3]
-    local line, col = c[4], c[5]
+    local tv_id    = c[2] --[[:! integer]]
+    local bound_id = c[3] --[[:! integer]]
+    local line, col = c[4] --[[:! integer | nil]], c[5] --[[:! integer | nil]]
 
     local actual = find(ctx, tv_id)
     local at = ctx.types:get(actual)
@@ -877,10 +877,10 @@ end
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_index(ctx, c)
-    local obj_tid_raw = find(ctx, c[2])
-    local key_tid  = find(ctx, c[3])
-    local res_tid  = c[4]
-    local line, col = c[5], c[6]
+    local obj_tid_raw = find(ctx, c[2] --[[:! integer]])
+    local key_tid  = find(ctx, c[3] --[[:! integer]])
+    local res_tid  = c[4] --[[:! integer]]
+    local line, col = c[5] --[[:! integer | nil]], c[6] --[[:! integer | nil]]
 
     local key_t = ctx.types:get(key_tid)
     if key_t.tag ~= TAG_LITERAL then
@@ -1396,11 +1396,11 @@ end
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_callable(ctx, c)
-    local callee_raw = c[2]   -- raw stored id (may be TAG_VAR for method calls)
+    local callee_raw = c[2] --[[:! integer]]   -- raw stored id (may be TAG_VAR for method calls)
     local callee_tid = find(ctx, callee_raw)
-    local arg_tids   = c[3]
-    local ret_tid    = c[4]
-    local line, col  = c[5], c[6]
+    local arg_tids   = c[3] --[[:! { [integer]: integer, ... }]]
+    local ret_tid    = c[4] --[[:! integer]]
+    local line, col  = c[5] --[[:! integer | nil]], c[6] --[[:! integer | nil]]
     local callee_t   = ctx.types:get(callee_tid)
 
     if callee_t.tag == TAG_ANY then
@@ -1768,11 +1768,11 @@ end
 -- c[2] is a string (op_name like "__add"), remaining fields are integers.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean | nil
 local function solve_arith(ctx, c)
-    local op_name  = c[2]
-    local lhs_tid  = find(ctx, c[3])
-    local rhs_tid  = find(ctx, c[4])
-    local res_tid  = c[5]
-    local line, col = c[6], c[7]
+    local op_name  = c[2] --[[:! string]]
+    local lhs_tid  = find(ctx, c[3] --[[:! integer]])
+    local rhs_tid  = find(ctx, c[4] --[[:! integer]])
+    local res_tid  = c[5] --[[:! integer]]
+    local line, col = c[6] --[[:! integer | nil]], c[7] --[[:! integer | nil]]
 
     -- Defer if either operand is not yet resolved (callsite hasn't bound params yet).
     local lhs_t = ctx.types:get(lhs_tid)
@@ -1834,9 +1834,9 @@ end
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_compare(ctx, c)
-    local lhs_tid = find(ctx, c[2])
-    local rhs_tid = find(ctx, c[3])
-    local line, col = c[4], c[5]
+    local lhs_tid = find(ctx, c[2] --[[:! integer]])
+    local rhs_tid = find(ctx, c[3] --[[:! integer]])
+    local line, col = c[4] --[[:! integer | nil]], c[5] --[[:! integer | nil]]
 
     local function is_orderable(ctx, tid)
         tid = find(ctx, tid)
@@ -1902,15 +1902,15 @@ end
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_return(ctx, c)
-    local val_tid   = find(ctx, c[2])
-    local line, col = c[4], c[5]
+    local val_tid   = find(ctx, c[2] --[[:! integer]])
+    local line, col = c[4] --[[:! integer | nil]], c[5] --[[:! integer | nil]]
     local widened   = widen_for_sub(ctx, val_tid)
 
     -- c[3] is the ret_var created by gen_function for this function body.
     -- If it's still a free VAR, bind directly (first return path).
     -- If it's already bound (subsequent return path), widen to union.
     -- This mirrors v2 infer_function's return-type accumulation.
-    local ret_var_id = c[3]
+    local ret_var_id = c[3] --[[:! integer]]
     local ret_var_t  = ctx.types:get(ret_var_id)
 
     -- A FLAG_SKOLEM TAG_VAR is a skolemized generic return type (from a generic
@@ -1986,9 +1986,9 @@ end
 -- back-propagation and silently hiding mismatches.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_bind_generics(ctx, c)
-    local callee_raw = c[2]
+    local callee_raw = c[2] --[[:! integer]]
     local callee_tid = find(ctx, callee_raw)
-    local arg_tids   = c[3]
+    local arg_tids   = c[3] --[[:! { [integer]: integer, ... }]]
     local callee_t   = ctx.types:get(callee_tid)
 
     -- Unwrap nominal to inner type.
@@ -2088,11 +2088,11 @@ end
 -- have already had a chance to run, so deferral is always safe here.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_check_args(ctx, c)
-    local callee_raw = c[2]
+    local callee_raw = c[2] --[[:! integer]]
     local callee_tid = find(ctx, callee_raw)
-    local arg_tids   = c[3]
-    local ret_tid    = c[4]
-    local line, col  = c[5], c[6]
+    local arg_tids   = c[3] --[[:! { [integer]: integer, ... }]]
+    local ret_tid    = c[4] --[[:! integer]]
+    local line, col  = c[5] --[[:! integer | nil]], c[6] --[[:! integer | nil]]
     local callee_t   = ctx.types:get(callee_tid)
 
     if callee_t.tag == TAG_ANY then
@@ -2396,9 +2396,9 @@ end
 -- TAG_VAR so we don't make a soundness call against an unbound type.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_overlap(ctx, c)
-    local actual   = find(ctx, c[2])
-    local expected = find(ctx, c[3])
-    local line, col = c[4], c[5]
+    local actual   = find(ctx, c[2] --[[:! integer]])
+    local expected = find(ctx, c[3] --[[:! integer]])
+    local line, col = c[4] --[[:! integer | nil]], c[5] --[[:! integer | nil]]
     -- Defer if either side is still a free type variable: the answer would be
     -- determined by whatever the var binds to next, not by the user's program.
     do
