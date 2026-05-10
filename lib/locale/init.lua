@@ -198,17 +198,17 @@ local function parse_locale_string(s)
   -- Patterns: ll, ll-RR, ll-Ssss, ll-Ssss-RR
   local a, b, c = s:match("^([a-zA-Z]+)%-([a-zA-Z]+)%-([a-zA-Z]+)$")
   if a and b and c then
-    local sa = a --[[: string]]
-    local sb = b --[[: string]]
-    local sc = c --[[: string]]
+    local sa = a --[[:! string]]
+    local sb = b --[[:! string]]
+    local sc = c --[[:! string]]
     lang = sa:lower()
     if #sb == 4 then script = sb:sub(1,1):upper()..sb:sub(2):lower(); region = sc:upper()
     else region = sb:upper(); script = nil end -- unusual, treat b as region
   else
     local p, q = s:match("^([a-zA-Z]+)%-([a-zA-Z]+)$")
     if p and q then
-      local sp = p --[[: string]]
-      local sq = q --[[: string]]
+      local sp = p --[[:! string]]
+      local sq = q --[[:! string]]
       lang = sp:lower()
       if #sq == 4 then script = sq:sub(1,1):upper()..sq:sub(2):lower()
       else region = sq:upper() end

@@ -287,7 +287,7 @@ end
 --: (Mesh3, Vec3) -> boolean
 function M.point_in_mesh(mesh, point)
   -- Irrational-ratio direction avoids hitting shared edges and vertices exactly
-  local ray = M.ray(point, M.norm3({x = 1, y = 0.00137, z = 0.00093})) --[[: Ray3]]
+  local ray = M.ray(point, M.norm3({x = 1, y = 0.00137, z = 0.00093})) --[[:! Ray3]]
   local count = 0
   for _, face in ipairs(mesh.faces) do
     local v0 = mesh.vertices[face[1]]

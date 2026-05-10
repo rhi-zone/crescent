@@ -76,7 +76,8 @@ end
 
 --: (s: string) -> (string | nil)
 local function b64url_decode(s)
-  return base64.decode(s, { url = true }) --[[: string | nil]]
+  local decoded, _ = base64.decode(s, { url = true })
+  return decoded
 end
 
 -- Parse a PHC-format Argon2 string:

@@ -296,7 +296,7 @@ end
 -- (see make_ctx above for rationale).
 --: (ctx: any, name_str: string) -> (integer, integer)
 local function make_named_tid(ctx, name_str)
-	local nid = intern_mod.intern(ctx.pool, name_str) --[[: integer]]
+	local nid = intern_mod.intern(ctx.pool, name_str) --[[:! integer]]
 	local tid = types_mod.alloc_type(ctx, TAG_NAMED)
 	local t   = ctx.types:get(tid)
 	t.data[0] = nid
