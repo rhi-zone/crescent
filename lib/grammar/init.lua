@@ -62,10 +62,8 @@ end
 
 local SHIFT = 2^24  -- pos fits in 24 bits for typical inputs
 
--- `_parse: any` opts out of checking _parse's function signature here; the actual parse
--- functions have heterogeneous input types (string methods vs integer bytes) that require
--- the individual call sites to be typed rather than through a shared parser-function type.
---: ({ _id: integer, _parse: any, ... }, unknown, integer, { [number]: unknown, ... } | nil) -> ({} | nil, integer)
+-- `_parse: function` — heterogeneous parse functions typed generically.
+--: ({ _id: integer, _parse: (unknown, integer, { [number]: unknown } | nil) -> ({} | nil, integer), ... }, unknown, integer, { [number]: unknown, ... } | nil) -> ({} | nil, integer)
 local function cached_parse(p, input, pos, cache)
   if not cache then
     return p._parse(input, pos, nil)

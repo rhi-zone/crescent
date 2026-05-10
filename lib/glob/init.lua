@@ -30,7 +30,7 @@ end
 
 -- Parse a character class [abc], [a-z], [!abc], [^abc].
 -- Returns the index after the closing ] and a match function.
---: (pat: string, start: integer) -> any
+--: (pat: string, start: integer) -> (integer | nil, unknown)
 local function _parse_char_class(pat, start)
   local i = start
   local len = #pat
@@ -75,7 +75,7 @@ end
 -- Expand brace alternation {a,b,c} into a list of alternatives.
 -- Supports nested braces.
 -- Returns the index after the closing } and a list of strings.
---: (pat: string, start: integer) -> any
+--: (pat: string, start: integer) -> (integer | nil, unknown)
 local function _parse_braces(pat, start)
   local depth = 1
   local i = start
@@ -121,7 +121,7 @@ local TOK_ALT = 6       -- {a,b} alternation (each alt is a compiled pattern)
 
 -- Compile a glob pattern into a token list.
 -- Returns a list of tokens or (nil, errmsg).
---: (pat: string) -> any
+--: (pat: string) -> (Arr<{ type: integer, ... }> | nil, unknown)
 local function _compile(pat)
   local tokens = --[[:! { type: integer, ... }[] ]] {}
   local i = 1
@@ -191,7 +191,7 @@ local function _compile(pat)
     end
   end
 
-  return tokens
+  return tokens --[[:! Arr<{ type: integer, ... }>]]
 end
 
 -- Match a token list against a string starting at position si.
@@ -449,7 +449,7 @@ function M.to_pattern(pattern)
 
     elseif c == "{" then
       local after, alts = _parse_braces(pattern, i + 1)
-      if not after then return nil, alts end
+      if not after then return nil, alts --[[:! string | nil]] end
       -- Convert to Lua pattern alternation using nested patterns
       -- Lua patterns don't support alternation natively, so we
       -- convert each branch and combine. This is a best-effort conversion.

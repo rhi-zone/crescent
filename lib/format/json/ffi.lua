@@ -233,7 +233,7 @@ local function codepoint_to_utf8(cp)
     end
 end
 
-local _ptr8 --: any
+local _ptr8 --: cdata | nil
 local _src  = "" --: string
 local _len  = 0  --: integer
 local _pos  = 0  --: integer

@@ -59,11 +59,11 @@ function M.from_snapshot(snapshot)
 end
 
 -- Internal: emit a change event.
---: (Registry, string, any, any) -> nil
+--: (Registry, string, unknown, unknown) -> nil
 local function emit(self, name, old_val, new_val)
   local self_ = self --[[:! Registry]]
   for _, listener in ipairs(self_._listeners) do
-    local l = listener --[[:! { event: string, fn: (string, any, any) -> any }]]
+    local l = listener --[[:! { event: string, fn: (string, unknown, unknown) -> unknown }]]
     if l.event == "change" then
       l.fn(name, old_val, new_val)
     end
@@ -72,7 +72,7 @@ end
 
 -- Internal: get current effective boolean value for a flag, given optional ctx.
 -- Returns value, err.
---: (Registry, string, { user_id: any, ... } | nil) -> (any, string | nil)
+--: (Registry, string, { user_id: unknown, ... } | nil) -> (unknown, string | nil)
 local function eval_flag(self, name, ctx)
   local self_ = self --[[:! Registry]]
   local flag = self_._flags[name]

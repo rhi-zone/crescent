@@ -59,8 +59,8 @@ local nan = 0/0
 local ldexp = math_.ldexp or function (x, exp) return x * 2.0 ^ exp end
 local inf = math.huge
 local m_type = math_.type or function (n) return n % 1 == 0 and n <= maxint and n >= minint and "integer" or "float" end
-local pack --: any
-local unpack --: any
+local pack --: ((string, ...unknown) -> string) | nil
+local unpack --: ((string, string, integer | nil) -> unknown) | nil
 pack = string_.pack or softreq("struct", "pack")
 unpack = string_.unpack or softreq("struct", "unpack")
 local rshift = softreq("bit32", "rshift") or softreq("bit", "rshift") or
@@ -72,7 +72,8 @@ if pack and pack(">I2", 0) ~= "\0\0" then pack = nil end
 if unpack and unpack(">I2", "\1\2\3\4") ~= 0x102 then unpack = nil end
 local _ENV = nil
 
-local encoder = {} --: any
+--: { [string]: (unknown, unknown) -> string }
+local encoder = {} --[[:! { [string]: (unknown, unknown) -> string }]]
 
 local encode = function (obj, opts) return encoder[type(obj)](obj, opts) end
 mod._encode_raw = encode

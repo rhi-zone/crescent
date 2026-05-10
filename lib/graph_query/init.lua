@@ -517,7 +517,7 @@ function Query:reachable(from, opts)
   local g = self._g
 
   local reached = {} --: { [unknown]: boolean }
-  local queue   = {{from, 0}} --: { [integer]: { [integer]: any } }
+  local queue   = {{from, 0}} --: { [integer]: { [integer]: unknown } }
   local head    = 1 --: integer
   local visited = {[from] = true} --: { [unknown]: boolean }
 
@@ -541,7 +541,7 @@ function Query:reachable(from, opts)
 
   while head <= #queue do
     local entry = queue[head]; head = head + 1
-    local node, depth = entry[1], entry[2]
+    local node, depth = entry[1], entry[2] --[[:! integer]]
     if node ~= from then reached[node] = true end
     if depth < max_depth then
       for _, nb in ipairs(neighbors(node)) do

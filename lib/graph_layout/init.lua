@@ -443,7 +443,7 @@ function M.hierarchical(graph, opts)
   for l = 1, max_layer do
     local cur_layer = layers[l] --[[:! { [integer]: GNode }]]
     -- Score each node by average position of its parents
-    local score = {} --: { [any]: number }
+    local score = {} --: { [unknown]: number }
     for _, id in ipairs(cur_layer) do
       -- find parents (nodes in layer l-1 that have edge to id)
       local parent_sum  = 0 --: number
