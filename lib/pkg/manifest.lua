@@ -12,48 +12,51 @@ function manifest.validate(tbl)
 	if type(tbl) ~= "table" then
 		return nil, "manifest must be a table"
 	end
+	local tbl_ = tbl --[[:! { [string]: unknown }]]
 
 	-- name: required, string, [a-z0-9_-], non-empty
-	if tbl.name == nil then
+	if tbl_.name == nil then
 		return nil, "manifest missing required field: name"
 	end
-	if type(tbl.name) ~= "string" then
+	if type(tbl_.name) ~= "string" then
 		return nil, "manifest field 'name' must be a string"
 	end
-	if tbl.name == "" then
+	local name = tbl_.name --[[:! string]]
+	if name == "" then
 		return nil, "manifest field 'name' must be non-empty"
 	end
-	if tbl.name:find("[^a-z0-9_%-]") then
+	if name:find("[^a-z0-9_%-]") then
 		return nil, "manifest field 'name' contains invalid characters (only [a-z0-9_-] allowed)"
 	end
 
 	-- version: required, string, M.N.P semver format
-	if tbl.version == nil then
+	if tbl_.version == nil then
 		return nil, "manifest missing required field: version"
 	end
-	if type(tbl.version) ~= "string" then
+	if type(tbl_.version) ~= "string" then
 		return nil, "manifest field 'version' must be a string"
 	end
-	if not tbl.version:match("^%d+%.%d+%.%d+$") then
+	local version = tbl_.version --[[:! string]]
+	if not version:match("^%d+%.%d+%.%d+$") then
 		return nil, "manifest field 'version' must be in M.N.P format (e.g. 1.0.0)"
 	end
 
 	-- description: optional, string
-	if tbl.description ~= nil and type(tbl.description) ~= "string" then
+	if tbl_.description ~= nil and type(tbl_.description) ~= "string" then
 		return nil, "manifest field 'description' must be a string"
 	end
 
 	-- license: optional, string
-	if tbl.license ~= nil and type(tbl.license) ~= "string" then
+	if tbl_.license ~= nil and type(tbl_.license) ~= "string" then
 		return nil, "manifest field 'license' must be a string"
 	end
 
 	-- deps: optional, table of { name = constraint_str } or { name = { constraint=str, include=str } }
-	if tbl.deps ~= nil then
-		if type(tbl.deps) ~= "table" then
+	if tbl_.deps ~= nil then
+		if type(tbl_.deps) ~= "table" then
 			return nil, "manifest field 'deps' must be a table"
 		end
-		for k, v in pairs(tbl.deps) do
+		for k, v in pairs(tbl_.deps) do
 			if type(k) ~= "string" then
 				return nil, "manifest field 'deps' keys must be strings"
 			end
@@ -74,11 +77,11 @@ function manifest.validate(tbl)
 	end
 
 	-- registries: optional, list of URL strings
-	if tbl.registries ~= nil then
-		if type(tbl.registries) ~= "table" then
+	if tbl_.registries ~= nil then
+		if type(tbl_.registries) ~= "table" then
 			return nil, "manifest field 'registries' must be a table (list of URL strings)"
 		end
-		for i, v in ipairs(tbl.registries) do
+		for i, v in ipairs(tbl_.registries) do
 			if type(v) ~= "string" then
 				return nil, ("manifest field 'registries'[%d] must be a string"):format(i)
 			end
@@ -86,11 +89,11 @@ function manifest.validate(tbl)
 	end
 
 	-- scripts: optional, table of {string = string}
-	if tbl.scripts ~= nil then
-		if type(tbl.scripts) ~= "table" then
+	if tbl_.scripts ~= nil then
+		if type(tbl_.scripts) ~= "table" then
 			return nil, "manifest field 'scripts' must be a table"
 		end
-		for k, v in pairs(tbl.scripts) do
+		for k, v in pairs(tbl_.scripts) do
 			if type(k) ~= "string" then
 				return nil, "manifest field 'scripts' keys must be strings"
 			end
@@ -164,11 +167,13 @@ function manifest.write(path, tbl)
 	lines[#lines + 1] = "  version     = " .. lua_string(tbl.version) .. ","
 
 	if tbl.description ~= nil then
-		lines[#lines + 1] = "  description = " .. lua_string(tbl.description --[[:! string]]) .. ","
+		local desc = tbl.description --[[:! string]]
+		lines[#lines + 1] = "  description = " .. lua_string(desc) .. ","
 	end
 
 	if tbl.license ~= nil then
-		lines[#lines + 1] = "  license     = " .. lua_string(tbl.license --[[:! string]]) .. ","
+		local lic = tbl.license --[[:! string]]
+		lines[#lines + 1] = "  license     = " .. lua_string(lic) .. ","
 	end
 
 	-- deps block (always written, empty or not, to make the file self-documenting)
@@ -184,7 +189,7 @@ function manifest.write(path, tbl)
 		for _, k in ipairs(dep_keys) do
 			-- Use bare identifier syntax if valid, bracket notation otherwise (e.g. names with hyphens)
 			local key_str = k:match("^[a-zA-Z_][a-zA-Z0-9_]*$") and k or ("[" .. lua_string(k) .. "]")
-			local v = tbl.deps and tbl.deps[k] --[[: any]]
+			local v = tbl.deps[k]
 			if type(v) == "string" then
 				lines[#lines + 1] = "    " .. key_str .. " = " .. lua_string(v --[[:! string]]) .. ","
 			else
@@ -201,10 +206,9 @@ function manifest.write(path, tbl)
 	-- registries block (only written when non-empty)
 	local regs = tbl.registries
 	if regs ~= nil then
-		local regs_ = regs --[[:! { [integer]: string }]]
-		if #regs_ > 0 then
+		if #regs > 0 then
 			lines[#lines + 1] = "  registries = {"
-			for _, url in ipairs(regs_) do
+			for _, url in ipairs(regs) do
 				lines[#lines + 1] = "    " .. lua_string(url) .. ","
 			end
 			lines[#lines + 1] = "  },"
@@ -220,10 +224,9 @@ function manifest.write(path, tbl)
 		if #script_keys > 0 then
 			table.sort(script_keys)
 			lines[#lines + 1] = "  scripts = {"
-			local scripts_ = tbl.scripts --[[:! { [string]: string }]]
 			for _, k in ipairs(script_keys) do
 				local key_str = k:match("^[a-zA-Z_][a-zA-Z0-9_]*$") and k or ("[" .. lua_string(k) .. "]")
-				lines[#lines + 1] = "    " .. key_str .. " = " .. lua_string(scripts_[k]) .. ","
+				lines[#lines + 1] = "    " .. key_str .. " = " .. lua_string(tbl.scripts[k]) .. ","
 			end
 			lines[#lines + 1] = "  },"
 		end

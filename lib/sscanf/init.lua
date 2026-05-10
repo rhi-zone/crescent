@@ -162,11 +162,13 @@ local function escape_class_char(c)
 	return c
 end
 
+--: ({ negated?: boolean, class_chars?: { [integer]: string }, ... }) -> string
 local function build_class_pattern(dir)
 	-- Build [chars] or [^chars] Lua pattern from dir.class_chars
 	local t = { "[" }
 	if dir.negated then t[#t + 1] = "^" end
-	for _, ch in ipairs(dir.class_chars) do
+	local class_chars = dir.class_chars --[[:! { [integer]: string }]]
+	for _, ch in ipairs(class_chars) do
 		t[#t + 1] = escape_class_char(ch)
 	end
 	t[#t + 1] = "]"
@@ -182,7 +184,7 @@ end
 
 --: (dir: Directive, input: string, pos: integer) -> (string | nil, integer, string | nil)
 local function match_directive(dir, input, pos_in)
-	local dir_ = dir --[[: any]]
+	local dir_ = dir
 	local pos = pos_in --: integer
 	local ilen = #input
 	--: (e_in: integer, p: integer, w: integer | nil) -> integer
@@ -193,7 +195,7 @@ local function match_directive(dir, input, pos_in)
 		return lim
 	end
 	if dir_.kind == "lit" then
-		local text = dir_.text --[[: string]]
+		local text = dir_.text
 		local tlen = #text
 		if sub(input, pos, pos + tlen - 1) == text then
 			return text, pos + tlen, nil
@@ -209,8 +211,8 @@ local function match_directive(dir, input, pos_in)
 	end
 
 	-- kind == "spec"
-	local conv = dir_.conv --[[: string]]
-	local width = dir_.width --[[: integer | nil]]
+	local conv = dir_.conv
+	local width = dir_.width
 
 	if conv == "c" then
 		-- %c: read exactly `width` (default 1) characters, no whitespace skip
