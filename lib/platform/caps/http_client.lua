@@ -35,7 +35,8 @@ local M = {}
 
 -- ── TLS support via libtls (LibreSSL / OpenBSD) ──────────────────────────────
 
-local tls_lib --: any
+--:: TlsLib = { tls_client: () -> cdata, tls_config_new: () -> cdata, tls_configure: (cdata, cdata) -> integer, tls_config_free: (cdata) -> nil, tls_connect: (cdata, string, string) -> integer, tls_write: (cdata, unknown, integer) -> integer, tls_read: (cdata, cdata, integer) -> integer, tls_close: (cdata) -> integer, tls_free: (cdata) -> nil, tls_error: (cdata) -> cdata, tls_config_error: (cdata) -> cdata }
+local tls_lib --: TlsLib | nil
 do
 	-- Try to load libtls: short name first (works when on LD_LIBRARY_PATH),
 	-- then fall back to searching known Nix store paths for LibreSSL.
@@ -106,15 +107,17 @@ local function tls_make_client(host, port_str)
 end
 
 -- tls_write_all(ctx, data) -> true | nil, err
---: (unknown, string) -> (boolean | nil, string | nil)
+--: (cdata, string) -> (boolean | nil, string | nil)
 local function tls_write_all(ctx, data)
+	if not tls_lib then return nil, "libtls not available" end
+	local tlib = tls_lib
 	local pos = 1 --: number
 	local len = #data
 	while pos <= len do
 		local ipos = pos --[[:! integer]]
-		local n = tls_lib.tls_write(ctx, data:sub(ipos), len - ipos + 1)
+		local n = tlib.tls_write(ctx, data:sub(ipos), len - ipos + 1)
 		if n < 0 then
-			local e = tls_lib.tls_error(ctx)
+			local e = tlib.tls_error(ctx)
 			return nil, "tls_write failed: " .. (e ~= nil and ffi.string(e) or "unknown")
 		end
 		pos = pos + (tonumber(n) or 0)
@@ -127,6 +130,8 @@ end
 -- Stops after the full body is received (using Content-Length or chunked TE).
 -- This avoids blocking forever on keep-alive connections.
 local function tls_read_response(ctx)
+	if not tls_lib then return nil end
+	local tlib = tls_lib
 	local BUF_SIZE = 16384
 	local buf = ffi.new("uint8_t[?]", BUF_SIZE)
 	local data = ""
@@ -134,13 +139,13 @@ local function tls_read_response(ctx)
 	-- Phase 1: read until headers complete (\r\n\r\n).
 	local head_end
 	while not head_end do
-		local n = tls_lib.tls_read(ctx, buf, BUF_SIZE)
+		local n = tlib.tls_read(ctx, buf, BUF_SIZE)
 		if n == 0 then break end
 		if n < 0 then
 			if n == -2 or n == -3 then
 				-- TLS_WANT_POLLIN/POLLOUT: retry (blocking mode shouldn't hit this)
 			else
-				local e = tls_lib.tls_error(ctx)
+				local e = tlib.tls_error(ctx)
 				return nil, "tls_read failed: " .. (e ~= nil and ffi.string(e) or "n=" .. tostring(n))
 			end
 		else
@@ -162,7 +167,7 @@ local function tls_read_response(ctx)
 		local cl = tonumber(content_length) or 0
 		-- Read until we have all body bytes.
 		while #data - body_start + 1 < cl do
-			local n = tls_lib.tls_read(ctx, buf, BUF_SIZE)
+			local n = tlib.tls_read(ctx, buf, BUF_SIZE)
 			if n == 0 then break end
 			if n > 0 then data = data .. ffi.string(buf, n) end
 		end
@@ -171,7 +176,7 @@ local function tls_read_response(ctx)
 	elseif is_chunked then
 		-- Read until the terminal "0\r\n\r\n" chunk.
 		while not data:find("0\r\n\r\n", body_start, true) do
-			local n = tls_lib.tls_read(ctx, buf, BUF_SIZE)
+			local n = tlib.tls_read(ctx, buf, BUF_SIZE)
 			if n == 0 then break end
 			if n > 0 then data = data .. ffi.string(buf, n) end
 		end
@@ -180,7 +185,7 @@ local function tls_read_response(ctx)
 	elseif is_close then
 		-- Server will close after response.
 		while true do
-			local n = tls_lib.tls_read(ctx, buf, BUF_SIZE)
+			local n = tlib.tls_read(ctx, buf, BUF_SIZE)
 			if n == 0 then break end
 			if n > 0 then data = data .. ffi.string(buf, n) end
 		end
@@ -196,6 +201,8 @@ end
 -- tls_read_streaming(ctx, on_chunk, body_start, initial_data) -> true | nil, err
 -- Reads remaining body chunks after headers are parsed, calling on_chunk for each.
 local function tls_read_body_streaming(ctx, on_chunk, body_start_offset, initial_data, resp_headers)
+	if not tls_lib then return nil, "libtls not available" end
+	local tlib = tls_lib
 	local BUF_SIZE = 16384
 	local buf = ffi.new("uint8_t[?]", BUF_SIZE)
 
@@ -213,7 +220,7 @@ local function tls_read_body_streaming(ctx, on_chunk, body_start_offset, initial
 		-- Check stop conditions.
 		if content_length and body_received >= content_length then break end
 
-		local n = tls_lib.tls_read(ctx, buf, BUF_SIZE)
+		local n = tlib.tls_read(ctx, buf, BUF_SIZE)
 		if n == 0 then break end
 		if n < 0 then
 			if n == -2 or n == -3 then
@@ -412,6 +419,8 @@ function M.http_client_cap(opts)
 
 		if use_tls then
 			-- TLS path via libtls.
+			if not tls_lib then return nil, "http_client: libtls not available" end
+			local tlib = tls_lib
 			local ctx, cerr = tls_make_client(host, port)
 			if not ctx then return nil, "http_client: TLS connect failed: " .. tostring(cerr) end
 
@@ -424,12 +433,12 @@ function M.http_client_cap(opts)
 			})
 			local ok, werr = tls_write_all(ctx, request_bytes)
 			if not ok then
-				tls_lib.tls_close(ctx); tls_lib.tls_free(ctx)
+				tlib.tls_close(ctx); tlib.tls_free(ctx)
 				return nil, "http_client: TLS write failed: " .. tostring(werr)
 			end
 
 			local resp_raw, rerr = tls_read_response(ctx)
-			tls_lib.tls_close(ctx); tls_lib.tls_free(ctx)
+			tlib.tls_close(ctx); tlib.tls_free(ctx)
 			if not resp_raw then return nil, "http_client: TLS read failed: " .. tostring(rerr) end
 
 			local parsed_raw = hfmt.parse_response(resp_raw)
@@ -475,6 +484,8 @@ function M.http_client_cap(opts)
 
 		if use_tls then
 			-- TLS streaming path.
+			if not tls_lib then return nil, "http_client: libtls not available" end
+			local tlib = tls_lib
 			local ctx, cerr = tls_make_client(host, port)
 			if not ctx then return nil, "http_client: TLS connect failed: " .. tostring(cerr) end
 
@@ -487,7 +498,7 @@ function M.http_client_cap(opts)
 			})
 			local ok, werr = tls_write_all(ctx, request_bytes)
 			if not ok then
-				tls_lib.tls_close(ctx); tls_lib.tls_free(ctx)
+				tlib.tls_close(ctx); tlib.tls_free(ctx)
 				return nil, "http_client: TLS write failed: " .. tostring(werr)
 			end
 
@@ -500,17 +511,17 @@ function M.http_client_cap(opts)
 
 			-- Read until we have complete headers.
 			while not status do
-				local n = tls_lib.tls_read(ctx, buf, BUF_SIZE)
+				local n = tlib.tls_read(ctx, buf, BUF_SIZE)
 				if n == 0 then
-					tls_lib.tls_close(ctx); tls_lib.tls_free(ctx)
+					tlib.tls_close(ctx); tlib.tls_free(ctx)
 					return nil, "http_client: TLS closed before headers"
 				end
 				if n < 0 then
 					if n == -2 or n == -3 then
 						-- retry
 					else
-						tls_lib.tls_close(ctx); tls_lib.tls_free(ctx)
-						local e = tls_lib.tls_error(ctx)
+						tlib.tls_close(ctx); tlib.tls_free(ctx)
+						local e = tlib.tls_error(ctx)
 						return nil, "http_client: TLS read error: " .. (e ~= nil and ffi.string(e) or "n=" .. n)
 					end
 				else
@@ -541,7 +552,7 @@ function M.http_client_cap(opts)
 			-- Stream remaining body.
 			tls_read_body_streaming(ctx, on_chunk, body_start, head_buf, resp_headers)
 
-			tls_lib.tls_close(ctx); tls_lib.tls_free(ctx)
+			tlib.tls_close(ctx); tlib.tls_free(ctx)
 			return { status = status, headers = resp_headers }
 		else
 			-- Plain TCP streaming path (original implementation).

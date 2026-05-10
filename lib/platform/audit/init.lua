@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 --:: audit_entry = { id: integer, ts: integer, event: string, app_id: string | nil, payload: string, prev_hash: string, hash: string }
 --:: audit_open_opts = { time_fn: (() -> integer) | nil, sha1_fn: ((string) -> string) | nil }
 --:: audit_query_opts = { limit: integer | nil, offset: integer | nil, event_type: string | nil, app_id: string | nil, since: integer | nil, ["until"]: integer | nil }
+--:: AuditLog = { append: (AuditLog, string, unknown) -> (true | nil, string | nil), query: (AuditLog, audit_query_opts | nil) -> (audit_entry[] | nil, string | nil), close: (AuditLog) -> nil }
 
 -- ── Internal helpers ──────────────────────────────────────────────────────────
 

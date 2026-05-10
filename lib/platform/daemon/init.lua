@@ -28,6 +28,8 @@ local json = require("lib.format.json")
 local ratelimit = require("lib.ratelimit")
 local session_store_mod = require("lib.platform.session_store")
 local policy_mod = require("lib.platform.policy")
+local _index_types = require("lib.platform.index") -- for Index, AppRow type aliases
+local _audit_types = require("lib.platform.audit") -- for AuditLog type alias
 
 
 local M = {}
@@ -43,13 +45,13 @@ local M = {}
 --::   host?: string,
 --::   time_fn?: () -> integer,
 --::   random_bytes_fn?: (n: integer) -> { [integer]: number },
---::   index_db?: any,
---::   index_obj?: any,
+--::   index_db?: unknown,
+--::   index_obj?: unknown,
 --::   remove_fn?: (path: string) -> (true | nil, string | nil),
 --::   write_fn?: (path: string, data: string) -> (true | nil, string | nil),
 --::   read_fn?: (path: string) -> (string | nil, string | nil),
 --::   apps_dir?: string,
---::   runtime_files?: { [integer]: { name: string, data: string } },
+--::   runtime_files?: { [integer]: { name: string, data: string } } | nil,
 --::   runtime_manifest?: unknown,
 --::   sources?: { [integer]: source_entry },
 --::   app_handler?: (http_req, http_res, string) -> nil,
@@ -59,7 +61,7 @@ local M = {}
 --::   secure_cookie?: boolean,
 --::   prefer_loopback?: boolean,
 --::   on_handler_error?: (app_id: string, err: string, traceback: string) -> nil,
---::   audit_log?: any,
+--::   audit_log?: { append: (unknown, string, unknown) -> unknown },
 --::   session_db_path?: string,
 --::   policy_path?: string,
 --::   tls_cert?: string,
@@ -244,11 +246,11 @@ function M.make(opts)
 	-- `any` is a deliberate escape hatch: the library app's `caps.index_db`
 	-- is a SQLite handle, a nil, or a test stub; we don't want to bake a
 	-- schema here. Library app tolerates nil.
-	local index_db = opts.index_db --: any
+	local index_db = opts.index_db --: unknown
 	-- Wrapped index object (lib/platform/index) for operations that require
 	-- typed methods (get_grants, set_grant, etc.). Optional — tests that pass
 	-- a raw db handle without the wrapper continue to work via index_db.
-	local index_obj = opts.index_obj --: any
+	local index_obj = opts.index_obj --[[:! Index | nil]]
 	-- Injected for testability. Defaults to os.remove.
 	--: (string) -> (true | nil, string | nil)
 	local remove_fn = opts.remove_fn or os.remove
@@ -259,7 +261,7 @@ function M.make(opts)
 	local runtime_manifest = opts.runtime_manifest
 	-- Optional audit log (lib/platform/audit). When nil, all log:append calls
 	-- are skipped — tests and deployments without a configured db_path work fine.
-	local audit_log = opts.audit_log --: any
+	local audit_log = opts.audit_log --[[:! AuditLog | nil]]
 
 	-- Admin policy. Loaded once at startup from policy_path (if set). A missing
 	-- file is not an error — single-user deployments run without a policy file.
@@ -271,10 +273,9 @@ function M.make(opts)
 	-- and append to audit_log if available. See docs/daemon-design.md
 	-- "Admin policy: hard ceilings" → "Loaded on daemon start, re-read on SIGHUP".
 	--
-	-- `any` escape: policy object is a concrete type but opaque to the checker here.
-	local admin_policy = policy_mod.load(opts.policy_path or nil, { --: any
+	local admin_policy = policy_mod.load(opts.policy_path or nil, {
 		read_fn = opts.read_fn,
-	})
+	}) --: policy | nil
 
 	-- Library app handler. The daemon mounts the library app at "/" of the
 	-- daemon origin. We call create() directly; there is no sandbox in v1
@@ -417,7 +418,7 @@ function M.make(opts)
 				local h = type(decl) == "table" and decl.host
 				if index_obj.get_cap_config then
 					local cfg = index_obj:get_cap_config(iapp_id, cname)
-					if cfg and cfg.host then h = cfg.host end
+					if cfg then local cfg_ = cfg --[[:! { host: unknown, ... }]]; if cfg_.host then h = cfg_.host --[[:! string]] end end
 				end
 				if h and not seen[h] then
 					seen[h] = true
@@ -501,7 +502,7 @@ function M.make(opts)
 			-- is a hard rejection — the grant UI never shows for these caps
 			-- (per docs/daemon-design.md "Enforcement points: Manifest load").
 			if admin_policy then
-				local pol_row = irow or (index_obj and index_obj.get and tonumber(app_id) and index_obj:get(tonumber(app_id)))
+				local pol_row = irow or (index_obj and index_obj.get and tonumber(app_id) and index_obj:get(tonumber(app_id) --[[:! number]]))
 				if pol_row then
 					local pol_caps = all_cap_decls_from_manifest(pol_row.manifest or {})
 					for cname, decl in pairs(pol_caps) do
@@ -567,7 +568,7 @@ function M.make(opts)
 	local sessions = {} --: { [string]: session_record }
 	-- `any` escape: session_store is a concrete object, but the typechecker can't
 	-- see through session_store_mod.open's return type at this call site.
-	local _session_store --: any
+	local _session_store --: SessionStore | nil
 	if opts.session_db_path then
 		local ss, ss_err = session_store_mod.open(opts.session_db_path, {
 			time_fn  = time_fn,
@@ -624,8 +625,8 @@ function M.make(opts)
 	local function session_get(sid)
 		if not sid then return nil end
 		if _session_store then
-			-- `any` escape: store returns unknown; caller treats result as session_record.
-			local rec = _session_store:get(sid) --: any
+			local ss = _session_store --[[:! SessionStore]]
+			local rec = ss:get(sid) --[[:! session_record | nil]]
 			return rec
 		end
 		return sessions[sid]
@@ -637,7 +638,7 @@ function M.make(opts)
 	--: (string, session_record | nil) -> nil
 	local function session_touch(sid, rec)
 		if _session_store then
-			_session_store:touch(sid)
+			local ss = _session_store --[[:! SessionStore]]; ss:touch(sid)
 		elseif rec then
 			rec.last_seen = time_fn()
 		end
@@ -648,7 +649,7 @@ function M.make(opts)
 	--: (string) -> nil
 	local function session_delete(sid)
 		if _session_store then
-			_session_store:delete(sid)
+			local ss = _session_store --[[:! SessionStore]]; ss:delete(sid)
 		else
 			rawset(sessions, sid, nil)
 		end
@@ -659,7 +660,7 @@ function M.make(opts)
 	--: (string, session_record) -> nil
 	local function session_put(sid, rec)
 		if _session_store then
-			_session_store:put(sid, rec)
+			local ss = _session_store --[[:! SessionStore]]; ss:put(sid, rec)
 		else
 			sessions[sid] = rec
 		end
@@ -696,10 +697,12 @@ function M.make(opts)
 	--: (string) -> boolean
 	local function app_exists(app_id)
 		if not index_db then return false end
-		local db = index_db
-		local ok, iter = pcall(db.query, db, "SELECT 1 FROM apps WHERE id = ? LIMIT 1", app_id)
+		local db = index_db --[[:! { query: (unknown, string, ...unknown) -> unknown }]]
+		local ok, iter = pcall(function()
+			return db.query(db, "SELECT 1 FROM apps WHERE id = ? LIMIT 1", app_id)
+		end)
 		if not ok or not iter then return false end
-		local row = iter()
+		local row = (iter --[[:! () -> unknown]])()
 		return row ~= nil
 	end
 
@@ -817,8 +820,8 @@ function M.make(opts)
 		end
 		-- Narrowing blocked: compound `or` guards can't narrow deferred multi-return vars.
 		local app_id_str = app_id_str_m or ""
-		local app_id = tonumber(app_id_str)
-		local row = index_obj:get(app_id)
+		local app_id = tonumber(app_id_str) --: number | nil
+		local row = app_id and index_obj:get(app_id)
 		if not row then
 			plain(res, 404, "app not found")
 			return
@@ -849,7 +852,12 @@ function M.make(opts)
 			-- instead of grant radio buttons. The user is informed of the restriction
 			-- even though they cannot override it (per docs/daemon-design.md
 			-- "Visibility: the grant UI must show 'blocked by admin policy'").
-			local pol_ok, pol_reason = admin_policy:check_cap_decl(cname, decl)
+			local pol_ok --: boolean | nil
+			local pol_reason --: string | nil
+			pol_ok = true
+			if admin_policy then
+				pol_ok, pol_reason = admin_policy:check_cap_decl(cname, decl)
+			end
 			if not pol_ok then
 				rows_html[#rows_html + 1] = '<tr><td class=cname>' .. h(cname) .. '</td>'
 					.. '<td class=ctype>' .. h(cap_type) .. '</td>'
@@ -867,7 +875,8 @@ function M.make(opts)
 			end
 		end
 
-		local app_name = h(manifest.name or row.name or ("App " .. (app_id_str or "")))
+		local manifest_ = manifest --[[:! { name: string | nil, ... }]]
+		local app_name = h(manifest_.name or row.name or ("App " .. (app_id_str or "")))
 		local body = '<!doctype html>\n<html lang=en>\n<head>\n'
 			.. '<meta charset=utf-8>\n<meta name=viewport content="width=device-width,initial-scale=1">\n'
 			.. '<title>Grant permissions — ' .. app_name .. '</title>\n'
@@ -936,8 +945,8 @@ function M.make(opts)
 			return
 		end
 
-		local app_id = tonumber(app_id_str)
-		local row = index_obj:get(app_id)
+		local app_id = tonumber(app_id_str) --: number | nil
+		local row = app_id and index_obj:get(app_id)
 		if not row then
 			plain(res, 404, "app not found")
 			return
@@ -1124,7 +1133,7 @@ function M.make(opts)
 			runtime_files    = runtime_files or {},
 			runtime_manifest = (runtime_manifest or {}) --[[:! { name: string | nil, dom_entry: string | nil, ... }]],
 			apps_dir         = apps_dir or "",
-			index            = index_obj,
+			index            = index_obj --[[: any]],
 			timestamp        = import_ts,
 			write_fn         = write_fn --[[:! (string, string) -> (true | nil, string)]],
 		})
@@ -1283,20 +1292,23 @@ end
 			return
 		end
 
-		local db = index_db
-		local ok_q, iter = pcall(db.query, db, "SELECT path FROM apps WHERE id = ? LIMIT 1", app_id)
+		local db = index_db --[[:! { query: (unknown, string, ...unknown) -> unknown, execute: (unknown, string, ...unknown) -> unknown }]]
+		local ok_q, iter = pcall(function()
+			return db.query(db, "SELECT path FROM apps WHERE id = ? LIMIT 1", app_id)
+		end)
 		if not ok_q or not iter then
 			plain(res, 404, "app not found")
 			return
 		end
-		local app_path = iter()
+		local app_path = (iter --[[:! () -> unknown]])()
 		if not app_path then
 			plain(res, 404, "app not found")
 			return
 		end
 
 		-- Capture app name before deleting for the audit entry.
-		local uninstall_name = app_path --: string | nil
+		local app_path_str = app_path --[[:! string]]
+		local uninstall_name = app_path_str --: string | nil
 		if index_obj and index_obj.get then
 			local irow = index_obj:get(app_id)
 			if irow then uninstall_name = irow.name end
@@ -1314,7 +1326,7 @@ end
 			})
 		end
 
-		local ok_rm, rm_err = remove_fn(app_path)
+		local ok_rm, rm_err = remove_fn(app_path_str)
 		if not ok_rm and opts.on_handler_error then
 			opts.on_handler_error("library",
 				"uninstall " .. tostring(app_path) .. ": " .. tostring(rm_err), "")
@@ -1441,7 +1453,7 @@ end
 			-- Mount the library app at the root of the daemon origin. The
 			-- library app's handler may itself return nil for unknown paths;
 			-- in that case we fall through to a 404.
-			library_app.handler(req, res)
+			;(library_app --[[: any]]).handler(req, res)
 			if res.status == nil then
 				res.status = 404
 				res.headers["Content-Type"] = { "text/plain; charset=utf-8" }

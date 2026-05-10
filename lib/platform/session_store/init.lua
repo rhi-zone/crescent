@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 --:: session_store_opts = { time_fn: () -> integer, idle_ttl: integer }
 --:: session_record = { last_seen: integer, [string]: unknown }
+--:: SessionStore = { get: (SessionStore, string) -> session_record | nil, put: (SessionStore, string, session_record) -> (true | nil, string | nil), touch: (SessionStore, string) -> nil, delete: (SessionStore, string) -> nil, purge_expired: (SessionStore) -> nil }
 
 -- ── Open ─────────────────────────────────────────────────────────────────────
 
@@ -229,7 +230,7 @@ function M.open(db_path, opts)
 		db:close()
 	end
 
-	return store
+	return (store --[[:! SessionStore]])
 end
 
 return M

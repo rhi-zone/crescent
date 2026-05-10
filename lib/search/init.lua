@@ -258,7 +258,7 @@ function M.index(opts)
   end
 
   -- Remove a document
-  --: (id: any) -> index
+  --: (self: unknown, id: unknown) -> unknown
   function idx:remove(id)
     local doc = docs[id]
     if not doc then return self end
@@ -283,10 +283,11 @@ function M.index(opts)
   end
 
   -- Update a document
-  --: (id: any, text: string) -> index
+  --: (self: unknown, id: unknown, text: string) -> unknown
   function idx:update(id, text)
-    self:remove(id)
-    self:add(id, text)
+    local self_ = idx
+    self_:remove(id)
+    self_:add(id, text)
     return self
   end
 

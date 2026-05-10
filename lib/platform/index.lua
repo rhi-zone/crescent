@@ -29,7 +29,8 @@ local json = json_raw --[[: any]]
 
 --:: SqliteIter = () -> unknown
 --:: SqliteDb = { execute: (SqliteDb, string, ...unknown) -> any, query: (SqliteDb, string, ...unknown) -> any, close: (SqliteDb) -> any }
---:: Index = { _db: SqliteDb }
+--:: AppRow = { id: number, name: string, path: string, manifest_json: string, manifest: unknown, tags_json: string, tags: { [integer]: string }, installed_at: number }
+--:: Index = { _db: SqliteDb, close: (Index) -> nil, install: (Index, string, unknown, number | nil) -> (number | nil, string | nil), uninstall: (Index, unknown) -> (boolean | nil, string | nil), get_cap_config: (Index, unknown, string) -> (unknown | nil, string | nil), set_cap_config: (Index, unknown, string, unknown) -> (true | nil, string | nil), reset_cap_config: (Index, unknown, string) -> (true | nil, string | nil), get_grants: (Index, unknown) -> { [string]: boolean | nil }, set_grant: (Index, unknown, string, boolean) -> (true | nil, string | nil), clear_grants: (Index, unknown) -> (true | nil, string | nil), get: (Index, number) -> AppRow | nil, list: (Index, { tag: string, ... } | nil) -> AppRow[], search: (Index, string) -> AppRow[] }
 
 local M = {}
 
@@ -111,7 +112,7 @@ function M.open(db_path)
 	local db = db_raw --[[:! SqliteDb]]
 	local ok, serr = db:execute(SCHEMA)
 	if not ok then return nil, "index: schema init failed: " .. tostring(serr) end
-	return setmetatable({ _db = db }, index_mt)
+	return (setmetatable({ _db = db }, index_mt) --[[:! Index]])
 end
 
 --: (Index) -> (boolean | nil, string | nil)
@@ -321,7 +322,6 @@ local function row_from_query(id, name, path, manifest_json, tags_json, installe
 	}
 end
 
---:: AppRow = { id: number, name: string, path: string, manifest_json: string, manifest: unknown, tags_json: string, tags: { [integer]: string }, installed_at: number }
 -- Get a single app by id.
 --: (Index, number) -> AppRow | nil
 function I:get(id)

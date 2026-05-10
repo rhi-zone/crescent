@@ -28,6 +28,7 @@ local platform_raw = require("lib.platform")
 local platform = platform_raw --[[: any]]
 local cap_dispatch_raw = require("lib.platform.cap_dispatch")
 local cap_dispatch = cap_dispatch_raw --[[: any]]
+local app_index_mod = require("lib.platform.index")
 
 --:: CapDecl = { type: string | nil, required: boolean | nil, host: string | nil, model: string | nil, path: string | nil, paths: unknown, allow_write: boolean | nil, scope: unknown, tables: unknown, provider: string | nil, key_name: string | nil, base_url: string | nil, provider_default: string | nil, root: string | nil, binaries: unknown, stderr: string | nil, methods: unknown, port: integer | nil, ... }
 --:: EntryDef = { main: string | nil, caps: { [string]: CapDecl | string } | nil }
@@ -650,17 +651,16 @@ end
 -- ── Shared index helpers ──────────────────────────────────────────────────
 
 -- Open the app index DB; writes error + exits on failure.
---: (apps_dir_arg: string | nil) -> any
+--: (apps_dir_arg: string | nil) -> Index
 local function open_index(apps_dir_arg)
 	local apps_dir = expand_home(apps_dir_arg or "~/.crescent/apps")
 	mkdir_p(apps_dir)
-	local app_index_mod = require("lib.platform.index") --[[: any]]
 	local idx, ierr = app_index_mod.open(apps_dir .. "/index.db")
 	if not idx then
 		io.stderr:write("error: cannot open index: " .. tostring(ierr) .. "\n")
 		os.exit(1)
 	end
-	return idx --[[: any]]
+	return idx --[[:! Index]]
 end
 
 -- Collect all cap declarations across top-level and all entry sections.
@@ -762,14 +762,14 @@ local function cmd_caps(args)
 		idx:close(); os.exit(1)
 	end
 
-	local row = idx:get(app_id)
+	local row = idx:get(app_id --[[:! number]])
 	if not row then
 		io.stderr:write("error: no app with id " .. tostring(app_id) .. "\n")
 		idx:close(); os.exit(1)
 	end
 
 	local cap_name = positional[2]
-	local decls = all_cap_decls(row.manifest or {})
+	local decls = all_cap_decls(row.manifest --[[:! Manifest]])
 
 	-- Helper: print one cap's fields with override annotations.
 	local function print_cap(cname, decl)
@@ -986,9 +986,8 @@ local function cmd_import(args)
 	end
 
 	-- Open or create the index database.
-	local app_index = require("lib.platform.index")
 	local idx_path = apps_dir .. "/index.db"
-	local idx, ierr = app_index.open(idx_path)
+	local idx, ierr = app_index_mod.open(idx_path)
 	if not idx then
 		io.stderr:write("error: cannot open index: " .. tostring(ierr) .. "\n")
 		os.exit(1)

@@ -22,6 +22,8 @@ local function anon_var()
 end
 
 --:: PrologTerm = { kind: string, name?: string, value?: number, functor?: string, args?: { [integer]: PrologTerm }, ... }
+--:: PrologClause = { head: PrologTerm, body: { [integer]: PrologTerm } }
+--:: PrologDB = { _clauses: { [string]: { [integer]: PrologClause } }, _write_fn: ((string) -> nil) | nil, ... }
 local function mk_atom(n)  return { kind = "atom", name = n } end
 local function mk_num(v)   return { kind = "num",  value = v } end
 local function mk_var(n)   return { kind = "var",  name = n } end
@@ -466,6 +468,7 @@ local function deref(env, t)
 end
 
 -- Unification
+--: ({ [string]: PrologTerm }, PrologTerm, PrologTerm) -> { [string]: PrologTerm } | nil
 local function unify(env, t1, t2)
   t1 = walk(env, t1)
   t2 = walk(env, t2)
@@ -497,9 +500,10 @@ local function unify(env, t1, t2)
     local a1 = t1.args --[[:! { [integer]: PrologTerm }]]
     local a2 = t2.args --[[:! { [integer]: PrologTerm }]]
     if #a1 ~= #a2 then return nil end
-    local e = env
+    local e --: { [string]: PrologTerm } | nil
+    e = env
     for i = 1, #a1 do
-      e = unify(e, a1[i], a2[i])
+      e = unify(e --[[:! { [string]: PrologTerm }]], a1[i], a2[i])
       if not e then return nil end
     end
     return e
@@ -508,7 +512,7 @@ local function unify(env, t1, t2)
 end
 
 -- Convert a term back to a string (for display)
---: (any, any) -> string
+--: ({ [string]: PrologTerm }, PrologTerm) -> string
 local function term_to_string(env, t)
   t = deref(env, t) --[[:! PrologTerm]]
   if t.kind == "var" then
@@ -546,6 +550,7 @@ local function term_to_string(env, t)
 end
 
 -- Evaluate an arithmetic expression term to a number
+--: ({ [string]: PrologTerm }, PrologTerm) -> (number | nil, string | nil)
 local function eval_arith(env, t)
   t = deref(env, t) --[[:! PrologTerm]]
   if t.kind == "num" then return t.value end
@@ -669,7 +674,7 @@ function DB:assert(clause_str)
 end
 
 -- Retract matching clause (first match)
---: (any, string) -> (boolean | nil, string | nil)
+--: (PrologDB, string) -> (boolean | nil, string | nil)
 function DB:retract(clause_str)
   local head, body = parse_clause(clause_str)
   if not head then return nil, body --[[:! string]] end
@@ -722,7 +727,7 @@ local solve  -- forward declaration
 
 -- Resolve a goal list against the database, yielding solutions (envs)
 -- `depth` is used to detect infinite recursion (safety limit)
---: (any, { [integer]: PrologTerm }, { [string]: PrologTerm }, integer | nil) -> ()
+--: (PrologDB, { [integer]: PrologTerm }, { [string]: PrologTerm }, integer | nil) -> ()
 solve = function(db, goals, env, depth)
   depth = depth or 0
   if depth > 50000 then
@@ -928,7 +933,7 @@ solve = function(db, goals, env, depth)
       -- term is unbound — build compound from name/arity (not implemented)
       error("functor/3: term must be bound")
     end
-    local e2 = unify(env, name_arg, mk_atom(tostring(tname)))
+    local e2 = unify(env, name_arg, mk_atom(tostring(tname))) --: { [string]: PrologTerm } | nil
     if e2 then
       local e3 = unify(e2, arity_arg, mk_num(tarity))
       if e3 then

@@ -53,7 +53,6 @@ end
 
 -- Normal element: attrs table with string keys as HTML attributes and
 -- integer keys as pre-rendered child strings.
---: (tag: string) -> any
 local function element(tag)
 	--: (xs: { [string]: unknown, [integer]: unknown } | string) -> string
 	local function f(xs)
@@ -66,11 +65,10 @@ local function element(tag)
 		parts[#parts + 1] = "</" .. tag .. ">"
 		return table.concat(parts)
 	end
-	return f
+	return f --[[: any]]
 end
 
 -- Raw element: children not escaped (for <script>, <style>).
---: (tag: string) -> any
 local function raw_element(tag)
 	--: (xs: { [string]: unknown, [integer]: unknown } | string) -> string
 	local function f(xs)
@@ -83,18 +81,17 @@ local function raw_element(tag)
 		parts[#parts + 1] = "</" .. tag .. ">"
 		return table.concat(parts)
 	end
-	return f
+	return f --[[: any]]
 end
 
 -- Void element: no children, self-closing.
---: (tag: string) -> any
 local function void(tag)
 	--: (xs: { [string]: unknown, [integer]: unknown } | nil) -> string
 	local function f(xs)
 		local xs_ = xs --[[:! { [string]: unknown, [integer]: unknown }]]
 		return "<" .. tag .. attrs_str(xs_ or {}) .. " />"
 	end
-	return f
+	return f --[[: any]]
 end
 
 M.element     = element

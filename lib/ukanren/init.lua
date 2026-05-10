@@ -7,7 +7,7 @@ local M = {}
 --:: Var = { __var: true, id: integer, name: string | nil }
 --:: Pair = { __pair: true, car: unknown, cdr: unknown }
 --:: Sub = { [integer]: unknown }
---:: Goal = (sub: Sub) -> any
+--:: Goal = (sub: Sub) -> unknown
 
 -- Variable counter for unique ids
 local _next_id = 0
@@ -116,7 +116,7 @@ M.unify = unify
 -- Streams are: nil (empty), {head, tail} (mature), function (thunk/immature)
 
 -- mplus: interleaving merge of two streams
---: (any, any) -> any
+--: (unknown, unknown) -> unknown
 local function mplus(s1, s2)
   if s1 == nil then return s2 end
   if type(s1) == "function" then
@@ -127,13 +127,14 @@ end
 M.mplus = mplus
 
 -- bind: flatmap a goal over a stream
---: (any, any) -> any
+--: (unknown, Goal) -> unknown
 local function bind(s, g)
   if s == nil then return nil end
   if type(s) == "function" then
     return function() return bind(s(), g) end
   end
-  return mplus(g(s[1]), bind(s[2], g))
+  local pair = s --[[:! { [integer]: unknown }]]
+  return mplus(g(pair[1] --[[:! Sub]]), bind(pair[2], g))
 end
 M.bind = bind
 

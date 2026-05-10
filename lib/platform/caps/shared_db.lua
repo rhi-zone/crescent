@@ -153,7 +153,7 @@ local SQLITE_ATTACH              = 24
 local SQLITE_DETACH              = 25
 local SQLITE_FUNCTION            = 31
 
-local SQLITE_TRANSIENT = ffi.cast("void(*)(void*)", -1) --: any
+local SQLITE_TRANSIENT = ffi.cast("void(*)(void*)", -1) --: cdata
 
 -- ── column reading ────────────────────────────────────────────────────────────
 
@@ -313,7 +313,7 @@ function M.shared_db_cap(path, app_id, tables, opts)
 	local null_str = (nil --[[: any]]) --[[: string]]
 	local rc = sqlite_ffi.sqlite3_open_v2(path, db_ptr, flags, null_str)
 	if rc ~= SQLITE_OK then
-		local err_cdata = sqlite_ffi.sqlite3_errmsg(db_ptr[0]) --: any
+		local err_cdata = sqlite_ffi.sqlite3_errmsg(db_ptr[0]) --: cdata
 		local msg = ffi.string(err_cdata)
 		sqlite_ffi.sqlite3_close_v2(db_ptr[0])
 		return nil, "shared_db_cap: open failed: " .. msg
@@ -321,12 +321,12 @@ function M.shared_db_cap(path, app_id, tables, opts)
 	local db = db_ptr[0]
 
 	local function errmsg()
-		local p = sqlite_ffi.sqlite3_errmsg(db) --: any
+		local p = sqlite_ffi.sqlite3_errmsg(db) --: cdata
 		return ffi.string(p)
 	end
 
 	-- Register _app_id() custom function that returns this connection's app_id.
-	local ffi_new = ffi.new --: any
+	local ffi_new = ffi.new --[[:! (string, integer, string) -> cdata]]
 	local app_id_c = ffi_new("const char[?]", #app_id + 1, app_id)
 	local app_id_len = #app_id
 
@@ -477,7 +477,7 @@ function M.shared_db_cap(path, app_id, tables, opts)
 		local col_count = sqlite_ffi.sqlite3_column_count(stmt)
 		local col_names = {}
 		for i = 0, col_count - 1 do
-			local cn = sqlite_ffi.sqlite3_column_name(stmt, i) --: any
+			local cn = sqlite_ffi.sqlite3_column_name(stmt, i) --: cdata
 			col_names[i + 1] = ffi.string(cn)
 		end
 		local rows = {}

@@ -12,6 +12,7 @@ M._tier = "pure"
 local REBALANCE_DEPTH = 30
 
 --:: Node = { type: string, str: string, len: integer, depth: integer, left: any, right: any }
+--:: Rope = { _node: Node, ... }
 
 -- node constructors
 --: (s: string) -> Node
@@ -140,14 +141,14 @@ local function wrap(node)
   return setmetatable({ _node = node }, Rope)
 end
 
---: (s: string | nil) -> any
+--: (s: string | nil) -> Rope
 function M.new(s)
   if s == nil then s = "" end
   return wrap(leaf(s))
 end
 
 -- M.concat(a, b): concat two ropes (or strings) as a module-level function
---: (a: any, b: any) -> any
+--: (a: Rope | string, b: Rope | string) -> Rope
 function M.concat(a, b)
   if type(a) == "string" then a = M.new(a) end
   if type(b) == "string" then b = M.new(b) end
@@ -182,7 +183,7 @@ function Rope:char_at(i)
   return node_char_at(self._node, i)
 end
 
---: (self: any, i: integer, j: integer) -> any
+--: (self: Rope, i: integer, j: integer) -> Rope
 function Rope:sub(i, j)
   local len = self._node.len
   -- normalize like string.sub

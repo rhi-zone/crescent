@@ -420,7 +420,7 @@ local function render_nodes(nodes, ctx_stack, filter_registry, macros, block_ove
     parts[#parts + 1] = tostring(s)
   end
 
-  --: (sub_nodes: { [integer]: ASTNode }, extra_ctx: { [any]: unknown } | nil) -> string
+  --: (sub_nodes: { [integer]: ASTNode }, extra_ctx: { [string]: unknown } | nil) -> string
   local function render_sub(sub_nodes, extra_ctx)
     if extra_ctx then ctx_stack[#ctx_stack + 1] = extra_ctx end
     local r = render_nodes(sub_nodes, ctx_stack, filter_registry, macros, block_overrides, autoescape, loader)
@@ -619,9 +619,9 @@ local function render_nodes(nodes, ctx_stack, filter_registry, macros, block_ove
 end
 
 -- Collect block definitions from child template before rendering base
---: (nodes: { [integer]: ASTNode }) -> { [any]: { [integer]: ASTNode } }
+--: (nodes: { [integer]: ASTNode }) -> { [string]: { [integer]: ASTNode } }
 local function collect_blocks(nodes)
-  local blocks = {} --: { [any]: { [integer]: ASTNode } }
+  local blocks = {} --: { [string]: { [integer]: ASTNode } }
   for _, node in ipairs(nodes) do
     if node.type == "block" then
       blocks[node.name --[[:! string]]] = node.body --[[:! { [integer]: ASTNode }]]

@@ -19,7 +19,7 @@ local mod = {}
 
 --:: WsSockClient = { receive: (WsSockClient) -> string | nil, send: (WsSockClient, string) -> nil, close: (WsSockClient) -> nil }
 --:: WsHandler = { http: ((WsHttpRequest, WsHttpResponse, WsSockClient) -> nil) | nil, ws: ((WsSockClient, { payload: string, status: integer | nil, type: string }) -> nil) | nil, ws_open: ((WsSockClient, unknown, unknown) -> nil) | nil, ws_close: ((WsSockClient) -> nil) | nil }
---: (WsHandler, any) -> (WsSockClient) -> nil
+--: (WsHandler, ws_epoll) -> (WsSockClient) -> nil
 mod.make_connection_handler = function (handler, epoll)
 	local handler_ = handler --[[:! WsHandler]]
 	--: (WsSockClient) -> nil
@@ -59,11 +59,11 @@ mod.make_connection_handler = function (handler, epoll)
 	end
 end
 
---: (any, integer | nil, unknown | nil) -> nil
+--: (WsHandler, integer | nil, ws_epoll | nil) -> nil
 mod.server = function (handler, port, epoll)
 	local is_running = not epoll
-	epoll = epoll or epoll_:new()
-	if type(handler) == "function" then handler = { http = handler } end
+	epoll = (epoll or epoll_:new()) --[[:! ws_epoll]]
+	if type(handler) == "function" then handler = ({ http = handler } --[[:! WsHandler]]) end
 	socket.server(mod.make_connection_handler(handler --[[: any]], epoll), port or 80, epoll)
 	if is_running then (epoll --[[: any]]):loop() end
 end

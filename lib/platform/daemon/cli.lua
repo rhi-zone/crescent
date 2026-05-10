@@ -183,7 +183,8 @@ end
 -- Reads the manifest.json from runtime_dir, then loads each entry's main file.
 -- Falls back gracefully if the directory or files are missing.
 local runtime_dir = expand_home(opts.runtime_dir or "lib/platform/apps/charactercardv2")
-local runtime_files, runtime_manifest
+local runtime_files --: { [integer]: { name: string, data: string } } | nil
+local runtime_manifest
 do
 	local mf = io.open(runtime_dir .. "/manifest.json", "rb")
 	if mf then
@@ -210,7 +211,7 @@ do
 		end
 	end
 	if runtime_manifest then
-		io.stderr:write("daemon: runtime loaded from " .. runtime_dir .. " (" .. #runtime_files .. " files)\n")
+		io.stderr:write("daemon: runtime loaded from " .. runtime_dir .. " (" .. #(runtime_files or {}) .. " files)\n")
 	else
 		io.stderr:write("note: runtime dir not available (" .. runtime_dir .. ") — import endpoint disabled.\n")
 	end
@@ -234,7 +235,7 @@ local d = daemon.make({
 	app_loader = loader_fn --[[:! (string) -> (((http_req, http_res) -> nil) | nil, string | nil)]],
 	apps_dir = apps_dir,
 	write_fn = write_file,
-	runtime_files = runtime_files,
+	runtime_files = runtime_files or nil,
 	runtime_manifest = runtime_manifest,
 	on_handler_error = function(app_id, err, tb)
 		io.stderr:write("daemon: app " .. app_id .. " handler error: " .. err .. "\n" .. tb .. "\n")
