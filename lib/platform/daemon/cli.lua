@@ -268,7 +268,7 @@ local server_opts = {
 	tls_key = opts.tls_key,
 }
 
-http_server.server(function(raw_req, res)
+http_server.server(function(raw_req, res, _sock)
 	local target = (raw_req.target or "/") --[[:! string]]
 	local q = target:find("?", 1, true)
 	local path, query
