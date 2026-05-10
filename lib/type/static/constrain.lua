@@ -176,15 +176,15 @@ M.C_NARROW_NIL    = C_NARROW_NIL
 -- Helpers
 -- ---------------------------------------------------------------------------
 
---: (Ctx, integer | nil, integer | nil, integer, { [string]: any, ... }) -> ()
+--: (Ctx, integer | nil, integer | nil, integer, { [string]: unknown, ... }) -> ()
 local function report(ctx, line, col, code, args)
-    local msg = errors_mod.format_diag(code, args)
+    local msg = errors_mod.format_diag(code, args --[[:! { [string]: any }]])
     return errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
---: (Ctx, integer | nil, integer | nil, integer, { [string]: any, ... }) -> ()
+--: (Ctx, integer | nil, integer | nil, integer, { [string]: unknown, ... }) -> ()
 local function warn(ctx, line, col, code, args)
-    local msg = errors_mod.format_diag(code, args)
+    local msg = errors_mod.format_diag(code, args --[[:! { [string]: any }]])
     errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
@@ -3620,11 +3620,8 @@ local function load_decl_file(ctx, mod_name)
 
     local ok_p, pr = pcall(parse_mod.parse, source, rel_path, ctx.pool)
     if not ok_p then return end
-    -- pcall erases the parse result type; ParseResult is not declared as a named type.
-    -- `any` is required: a structural annotation would need to be a supertype of the
-    -- actual return, and the typechecker validates covariance at the assignment point.
-    --: any
-    local pr_any = pr
+    -- pcall erases the parse result type; force-cast to the fields we need.
+    local pr_any = pr --[[:! { lexer: { annotations: unknown, ... }, ... }]]
     local ok_a, ar = pcall(ann_mod.parse_annotations, pr_any.lexer.annotations, ctx.pool, rel_path)
     if not ok_a then return end
 
@@ -3660,20 +3657,15 @@ process_type_decls = function(ctx)
         end
     end
     local decls = {} --: { [integer]: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, type_params_start: integer, type_params_len: integer, type_bounds_start: integer, type_bounds_len: integer, type_defaults_start: integer, type_defaults_len: integer, ... }, ... }
-    -- decl_lines uses table-reference keys (result records as keys). No static type can
-    -- express { [table_reference]: integer } — the key type is object identity, not a
-    -- value type. `any` (not `unknown`) is correct here: indexed access must return a
-    -- type that is directly assignable to `integer` at call sites (unknown would not be).
-    --: any
-    local decl_lines = {}
+    -- decl_lines uses table-reference keys (result records as keys).
+    -- { [unknown]: integer } captures this: any key (including table refs) maps to integer.
+    local decl_lines = {} --: { [unknown]: integer }
     local module_decls = {} --: { [integer]: { kind: integer, type_id: integer, mod_name: string, ... }, ... }
     -- require_decl_lines: result record → source line (same pattern as decl_lines).
-    --: any
-    local require_decl_lines = {}
+    local require_decl_lines = {} --: { [unknown]: integer }
     local require_decls = {} --: { [integer]: { kind: integer, mod_name: string, ... }, ... }
     local augment_decls = {} --: { [integer]: { kind: integer, name_id: integer, type_id: integer, ... }, ... }
-    --: any
-    local augment_decl_lines = {}
+    local augment_decl_lines = {} --: { [unknown]: integer }
     for line, result in pairs(ann.results) do
         --: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, type_params_start: integer, type_params_len: integer, type_bounds_start: integer, type_bounds_len: integer, type_defaults_start: integer, type_defaults_len: integer, mod_name: string, ... }
         local result = result
@@ -3886,11 +3878,9 @@ process_type_decls = function(ctx)
                     -- Interface constraint check: --:: Name<T>: Constraint<T> = body
                     -- Register (name_id, constraint_name_id) in ctx.declared_subtypes and
                     -- verify body <: Constraint at definition time (symbolic check with TAG_VAR params).
-                    -- constraint_type_id is an optional field accessed via the open-table row variable.
-                    -- `any` is required here: `unknown` blocks field access; `any` lets us annotate
-                    -- the extracted fields with concrete types at each use site.
-                    --: any
-                    local r_any = r
+                    -- constraint_type_id is an optional field on the open-table row variable;
+                    -- force-cast to expose it as integer | nil.
+                    local r_any = r --[[:! { constraint_type_id: integer | nil, ... }]]
                     if r_any.constraint_type_id then
                         local unify_mod = require("lib.type.static.unify")
                         --: integer
@@ -4094,7 +4084,7 @@ end
 -- Run constraint generation on a parsed source.
 -- Returns {ctx, constraints} where ctx is the fully-initialized checker context
 -- and constraints is the flat constraint array.
---: (string, string, any, any, any, any) -> (Ctx, { [integer]: any, ... })
+--: (string, string, Scope | nil, InternPool | nil, ((unknown, string) -> (integer | nil, { [integer]: unknown, ... } | nil)) | nil, { globals_files?: { [integer]: string, ... }, ... } | nil) -> (Ctx, { [integer]: { [integer]: unknown, ... }, ... })
 function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
     local parse_mod  = require("lib.type.static.parse")
     local intern_new = require("lib.type.static.intern").new
@@ -4145,7 +4135,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
         elseif globals_files then
             -- Caller supplied an explicit list of globals files (from pkg.lua).
             -- Load each file and synthesize _G from the combined scope.
-            prelude.populate_from_files(ctx, globals_files, true)
+            prelude.populate_from_files(ctx, globals_files --[[:! { [integer]: string, ... }]], true)
         else
             -- Default: load stdlib_types.lua (hardcoded fallback for tools/tests
             -- that do not supply globals_files via opts).
@@ -4159,12 +4149,9 @@ function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
         errors_mod.error(ctx.err, filename or "?", 0, 0, tostring(pr))
         return ctx, {}
     end
-    -- pcall erases the parse result type; ParseResult is not declared as a named type.
-    -- `any` is required: a structural annotation would need to be covariant with the actual
-    -- return type, and the typechecker validates this at the assignment point.
+    -- pcall erases the parse result type; force-cast to the fields we need.
     -- Field-level types are asserted individually on the extracted locals below.
-    --: any
-    local pr_any = pr
+    local pr_any = pr --[[:! { lists: ListPool, nodes: ASTNodeArena, lexer: { annotations: { [integer]: unknown, ... }, ... } | nil, root: integer | nil }]]
     --: ListPool
     local pr_lists = pr_any.lists
     --: ASTNodeArena

@@ -88,7 +88,7 @@ end
 --   type_list_ranges     -> collected (start,len) pairs from ctx.lists (type IDs only)
 --   list_range_seen["s,l"]-> index in type_list_ranges (0-based new start, deferred)
 
---: (ctx: any, root_tids: any) -> (any, any, any, any, any, any, any)
+--: (ctx: Ctx, root_tids: { [integer]: integer, ... }) -> { seen_types: unknown, type_order: { [integer]: integer, ... }, seen_strings: unknown, str_order: { [integer]: integer, ... }, field_entries: unknown, list_ranges: unknown, list_range_seen: unknown, ... }
 local function collect(ctx, root_tids)
     local seen_types   = {}  -- old resolved tid -> new 0-based index
     local type_order   = {}  -- [1..n] = old resolved tid
@@ -422,7 +422,7 @@ end
 -- exports: { [name_string] = type_id }
 -- diagnostics: { errors = {DiagEntry, ...}, warnings = {DiagEntry, ...} } | nil
 -- Returns the raw .cri bytes as a Lua string, with SHA-256 filled in.
---: (ctx: any, exports: { [string]: integer }, type_aliases: any, diagnostics: any) -> string
+--: (ctx: Ctx, exports: { [string]: integer }, type_aliases: { [integer]: { name: string, body: integer, params: { [integer]: string, ... } | nil, nominal: boolean, resolved_bounds: { [integer]: integer | nil, ... } | nil, ... }, ... }, diagnostics: { errors: { [integer]: DiagEntry, ... }, warnings: { [integer]: DiagEntry, ... }, ... } | nil) -> string
 function M.serialize(ctx, exports, type_aliases, diagnostics)
     -- Clean up any leftover side table from a previous call.
     ctx._cri_table_fields = {}

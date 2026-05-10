@@ -500,7 +500,7 @@ end
 
 --- Return { file, bindings, ["return"] } for filename, or nil if check fails.
 -- bindings is an array of { name, type } sorted by name.
---: (string, any, any) -> { file: string, bindings: { [integer]: { name: string, type: string }, ... }, ["return"]: string | nil } | nil
+--: (string, Scope | nil, { no_disk_cache: boolean | nil, globals_files: { [integer]: string, ... } | nil, ... } | nil) -> { file: string, bindings: { [integer]: { name: string, type: string }, ... }, ["return"]: string | nil } | nil
 function M.dump_one(filename, parent_scope, opts)
     local check_mod  = require("lib.type.static.check")
     local intern_mod = require("lib.type.static.intern")

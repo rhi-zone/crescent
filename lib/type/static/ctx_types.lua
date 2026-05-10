@@ -175,7 +175,7 @@ Ctx = {
   prim_meta:    { [integer]: integer, ... },
   module_types: { [string]: integer, ... },
   module_return_tids: { [integer]: { [integer]: integer, ... }, ... } | nil,
-  cri_loader:   ((Ctx, string) -> integer) | nil,
+  cri_loader:   ((unknown, string) -> (integer | nil, { [integer]: unknown, ... } | nil)) | nil,
   ffi_hooks:    { process: (unknown, string) -> (), init: (unknown) -> (), ... } | nil,
   _last_multi_return:          { [integer]: integer, ... } | nil,
   _last_multi_return_override: integer | nil,
@@ -184,8 +184,8 @@ Ctx = {
   _ann_consumed:   { [integer]: boolean, ... } | nil,
   -- Constraint arrays are intentionally heterogeneous: values may be integer,
   -- string (op_name in C_ARITH), or { [integer]: integer, ... } (arg_tids in C_CALLABLE).
-  -- Using any here because the type system cannot track per-index types in a table array.
-  constraints:     { [integer]: { [integer]: any, ... }, ... },
+  -- Using unknown here because the type system cannot track per-index types in a table array.
+  constraints:     { [integer]: { [integer]: unknown, ... }, ... },
   var_counter:  integer,
   nominal_id:   integer,
   level:        integer,
@@ -212,7 +212,7 @@ Ctx = {
   _allow_unapplied_constructors: boolean | nil,
   _forall_bounds:  { [integer]: integer, ... },
   lit_cache:       { [integer]: integer, ... },
-  _constraints?:   { [integer]: { [integer]: any, ... }, ... },
+  _constraints?:   { [integer]: { [integer]: unknown, ... }, ... },
   ...
 }
 ]]

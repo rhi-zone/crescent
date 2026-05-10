@@ -279,22 +279,20 @@ arb.it("[eval] match CaptureId<T1 | T2> == T1 | T2 for table union",
 -- ── Oracle invariants (2000 trials each, algebra-level type construction) ─────
 
 -- Bare typing context for oracle tests (no prelude, no parsing).
--- See fuzz_alg.lua make_ctx for rationale on the `any` return: this is a
--- deliberately partial Ctx for algebra-level tests that only touch types/unify.
---: () -> any
+-- Returns a partial Ctx for algebra-level tests (only types/unify fields set).
+-- Force-cast to Ctx since not all fields are populated; callers only touch
+-- types/unify-related fields.
+--: () -> Ctx
 local function make_ctx()
 	local pool = intern_mod.new()
 	local ctx  = types_mod.new_ctx(pool)
 	ctx.err               = { errors = {} }
 	ctx.lit_cache         = {}
 	ctx.declared_subtypes = {}
-	return ctx
+	return ctx --[[:! Ctx]]
 end
 
--- Returns (tid, nid). Annotated as a tuple-returning function. The `ctx`
--- parameter is `any` because make_ctx returns a deliberately partial Ctx
--- (see make_ctx above for rationale).
---: (ctx: any, name_str: string) -> (integer, integer)
+--: (ctx: Ctx, name_str: string) -> (integer, integer)
 local function make_named_tid(ctx, name_str)
 	local nid = intern_mod.intern(ctx.pool, name_str) --[[:! integer]]
 	local tid = types_mod.alloc_type(ctx, TAG_NAMED)

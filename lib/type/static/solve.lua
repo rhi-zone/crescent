@@ -458,7 +458,7 @@ end
 
 -- any: constraint arrays are heterogeneous (integer kind tag, then mixed integer/string
 -- fields per constraint type) — no tuple/heterogeneous-array type available.
---: (Ctx, { [integer]: any, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_unify(ctx, c)
     local t1 = find(ctx, c[2])
     local t2 = find(ctx, c[3])
@@ -473,7 +473,7 @@ local function solve_unify(ctx, c)
 end
 
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
---: (Ctx, { [integer]: any, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_sub(ctx, c)
     local actual   = find(ctx, c[2])
     local expected = find(ctx, c[3])
@@ -586,7 +586,7 @@ end
 -- and unifies with result_tid. Used by narrow.lua when narrowing operates on a TAG_VAR
 -- that hasn't been resolved yet (e.g. for-in loop variables).
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
---: (Ctx, { [integer]: any, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_narrow_nil(ctx, c)
     local input_tid  = c[2]
     local result_tid = c[3]
@@ -639,7 +639,7 @@ end
 -- type via the fallback — the or-default IS the narrowing. Not applied when right
 -- is falsy (nil, false literal) because those don't carry type information.
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
---: (Ctx, { [integer]: any, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_or(ctx, c)
     local left_tid   = c[2]
     local right_tid  = c[3]
@@ -745,7 +745,7 @@ end
 --   - For other bounds: check try_unify(widen(actual), bound).
 -- Skips enforcement when the bound is TAG_NAMED (unapplied kind constraint).
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
---: (Ctx, { [integer]: any, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_bound(ctx, c)
     local tv_id    = c[2]
     local bound_id = c[3]
@@ -875,7 +875,7 @@ end
 -- Solve a slot/field index: C_INDEX = { C_INDEX, obj_tid, key_tid, res_tid, line, col }
 -- key_tid: TAG_LITERAL(LIT_STRING, name_id) for named field; TAG_LITERAL(LIT_INTEGER, slot) for tuple slot.
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
---: (Ctx, { [integer]: any, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_index(ctx, c)
     local obj_tid_raw = find(ctx, c[2])
     local key_tid  = find(ctx, c[3])
@@ -1394,7 +1394,7 @@ local function solve_index(ctx, c)
 end
 
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
---: (Ctx, { [integer]: any, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_callable(ctx, c)
     local callee_raw = c[2]   -- raw stored id (may be TAG_VAR for method calls)
     local callee_tid = find(ctx, callee_raw)
@@ -1766,7 +1766,7 @@ end
 
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 -- c[2] is a string (op_name like "__add"), remaining fields are integers.
---: (Ctx, { [integer]: any, ... }) -> boolean | nil
+--: (Ctx, { [integer]: unknown, ... }) -> boolean | nil
 local function solve_arith(ctx, c)
     local op_name  = c[2]
     local lhs_tid  = find(ctx, c[3])
@@ -1832,7 +1832,7 @@ local function solve_arith(ctx, c)
 end
 
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
---: (Ctx, { [integer]: any, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_compare(ctx, c)
     local lhs_tid = find(ctx, c[2])
     local rhs_tid = find(ctx, c[3])
@@ -1900,7 +1900,7 @@ local function solve_compare(ctx, c)
 end
 
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
---: (Ctx, { [integer]: any, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_return(ctx, c)
     local val_tid   = find(ctx, c[2])
     local line, col = c[4], c[5]
@@ -1984,7 +1984,7 @@ end
 -- C_CHECK_ARGS verifies argument compatibility.  Without this step, C_BIND_GENERICS
 -- would eagerly bind A/B from the raw args (possibly wrong types), blocking the
 -- back-propagation and silently hiding mismatches.
---: (Ctx, { [integer]: any, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_bind_generics(ctx, c)
     local callee_raw = c[2]
     local callee_tid = find(ctx, callee_raw)
@@ -2086,7 +2086,7 @@ end
 -- Checks that call arguments match the (now-concrete) param types and unifies the return type.
 -- Defers (returns false) if any param is still a free TV — C_BIND_GENERICS and C_BOUND
 -- have already had a chance to run, so deferral is always safe here.
---: (Ctx, { [integer]: any, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_check_args(ctx, c)
     local callee_raw = c[2]
     local callee_tid = find(ctx, callee_raw)
@@ -2394,7 +2394,7 @@ end
 -- Overlap-checked force cast: `--[[:! T]] expr`. Succeeds iff actual and
 -- expected have any value in common. Defers while either side is still a free
 -- TAG_VAR so we don't make a soundness call against an unbound type.
---: (Ctx, { [integer]: any, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_overlap(ctx, c)
     local actual   = find(ctx, c[2])
     local expected = find(ctx, c[3])
@@ -2421,9 +2421,9 @@ end
 -- ---------------------------------------------------------------------------
 
 -- _constraints is a scratch field set/cleared during solve; augment Ctx to allow nil assignment.
---:: augment Ctx { _constraints?: { [integer]: { [integer]: any } } }
+--:: augment Ctx { _constraints?: { [integer]: { [integer]: unknown } } }
 -- any: constraints is a list of heterogeneous arrays — see solve_unify comment.
---: (Ctx, { [integer]: { [integer]: any, ... }, ... }) -> ()
+--: (Ctx, { [integer]: { [integer]: unknown, ... }, ... }) -> ()
 function M.solve(ctx, constraints)
     -- Dispatch table by constraint kind
     local handlers = {

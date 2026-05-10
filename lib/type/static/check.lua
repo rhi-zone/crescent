@@ -17,7 +17,7 @@ local M = {}
 -- ---------------------------------------------------------------------------
 -- v3 inference core (constraint generation + solving)
 -- ---------------------------------------------------------------------------
---: (string, string, any, any, any, any) -> (ErrCtx, Ctx | nil)
+--: (string, string, Scope | nil, InternPool | nil, ((unknown, string) -> (integer | nil, { [integer]: unknown, ... } | nil)) | nil, { globals_files?: { [integer]: string, ... }, ... } | nil) -> (ErrCtx, Ctx | nil)
 local function run_v3(source, filename, parent_scope, pool, cri_loader, opts)
     local ctx, constraints = constrain_mod.generate(source, filename, parent_scope, pool, cri_loader, opts)
     solve_mod.solve(ctx, constraints)
@@ -92,10 +92,8 @@ local function extract_type_aliases(ctx)
     local scope = ctx.scope
     if not scope or not scope.type_bindings then return result end
     for name_id, alias in pairs(scope.type_bindings) do
-        -- pairs() returns unknown values even over { [integer]: TypeAlias } tables;
-        -- `any` is required so field access on `al` compiles. TypeAlias is the actual type.
-        --: any
-        local al = alias
+        -- pairs() returns unknown values; force-cast to TypeAlias to access fields.
+        local al = alias --[[:! TypeAlias | nil]]
         if al and al.body then
             local name = intern_mod.get(ctx.pool, name_id)
             if name then
@@ -169,7 +167,7 @@ end
 -- Optional opts table:
 --   opts.globals_files: list of file paths loaded as global declarations instead
 --     of the default stdlib_types.lua. Only used when parent_scope is nil.
---: (source: string, filename: string, parent_scope: Scope | nil, pool: InternPool | nil, cri_loader: ((Ctx, string) -> integer) | nil, opts: { globals_files?: { [integer]: string, ... }, ... } | nil) -> (ErrCtx, Ctx | nil)
+--: (source: string, filename: string, parent_scope: Scope | nil, pool: InternPool | nil, cri_loader: ((unknown, string) -> (integer | nil, { [integer]: unknown, ... } | nil)) | nil, opts: { globals_files?: { [integer]: string, ... }, ... } | nil) -> (ErrCtx, Ctx | nil)
 function M.check_string(source, filename, parent_scope, pool, cri_loader, opts)
     return run_v3(source, filename, parent_scope, pool, cri_loader, opts)
 end
@@ -229,8 +227,9 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
     -- Build a cri_loader for require() type resolution.
     -- Recursively checks dependencies and caches their export types.
     -- Also records the source hash of each resolved dep into dep_hashes.
-    --: (Ctx, string) -> (integer | nil, any)
-    local function cri_loader(ctx, mod_name)
+    --: (unknown, string) -> (integer | nil, { [integer]: unknown, ... } | nil)
+    local function cri_loader(ctx_arg, mod_name)
+        local ctx = ctx_arg --[[:! Ctx]]
         local dep_path = resolve_module_path(mod_name)
         -- Try init.lua if the direct path doesn't exist:
         -- lib/foo.lua → lib/foo/init.lua (standard Lua package convention).
@@ -330,9 +329,9 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
         local cached_bytes = cache_mod.lookup(src_hash, cache_mod.hash_file)
         if cached_bytes then
             err_ctx = errors_mod.new_ctx()
-            err_ctx, ctx = run_v3("", filename, parent_scope, _pool, cri_loader, opts)
+            err_ctx, ctx = run_v3("", filename, parent_scope, _pool, cri_loader, opts --[[:! { globals_files?: { [integer]: string, ... }, ... } | nil]])
             local ok, exports_raw, _aliases, cached_errors_raw, cached_warnings_raw =
-                cri_read.load(cached_bytes or "", ctx)
+                cri_read.load(cached_bytes or "", ctx --[[:! Ctx]])
             -- cri_read.load returns (false,string)|(true,unknown,...); force-cast positions 2-5.
             local exports         = exports_raw         --[[:! { ["__ret"]: integer | nil, ... }]]
             local cached_errors   = cached_errors_raw   --[[:! { [integer]: DiagEntry, ... } | nil]]
@@ -397,14 +396,12 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
         return err_ctx, nil
     end
 
-    err_ctx, ctx = run_v3(source, filename, parent_scope, _pool, cri_loader, opts)
+    err_ctx, ctx = run_v3(source, filename, parent_scope, _pool, cri_loader, opts --[[:! { globals_files?: { [integer]: string, ... }, ... } | nil]])
 
     local export_tid = ctx and extract_export_tid(ctx) or nil
 
     -- Serialize to .cri and store in disk cache.
-    -- pcall second return is unknown; `any` is required so the value can be stored and
-    -- passed to cache_mod.store (which expects string) without a static type error.
-    local cri_bytes_stored = nil --: any
+    local cri_bytes_stored = nil --: string | nil
     -- Serialize even when export_tid is T_ANY: diagnostics still need to be
     -- cached so warm cache hits skip the solver. The reader maps T_ANY back to
     -- ctx.T_ANY via the singleton table.
@@ -450,8 +447,9 @@ function M.check_string_with_deps(source, filename, parent_scope, opts)
     -- Guard against cycles within our own cri_loader calls.
     local checking_deps = {}
 
-    --: (Ctx, string) -> (integer | nil, any)
-    local function try_dep(ctx, dep_path)
+    --: (unknown, string) -> (integer | nil, { [integer]: unknown, ... } | nil)
+    local function try_dep(ctx_arg, dep_path)
+        local ctx = ctx_arg --[[:! Ctx]]
         if checking_deps[dep_path] or _checking[dep_path] then return nil end
         checking_deps[dep_path] = true
         M.check_file(dep_path, parent_scope, _pool, opts)
@@ -465,7 +463,7 @@ function M.check_string_with_deps(source, filename, parent_scope, opts)
         return nil
     end
 
-    --: (Ctx, string) -> (integer | nil, any)
+    --: (unknown, string) -> (integer | nil, { [integer]: unknown, ... } | nil)
     local function cri_loader(ctx, mod_name)
         -- Prefer _types.lua declaration file when present; fall back to .lua / init.lua.
         local rel = mod_name:gsub("%.", "/")
@@ -478,7 +476,7 @@ function M.check_string_with_deps(source, filename, parent_scope, opts)
         return try_dep(ctx, rel .. "/init.lua")
     end
 
-    return run_v3(source, filename, parent_scope, _pool, cri_loader, opts)
+    return run_v3(source, filename, parent_scope, _pool, cri_loader, opts --[[:! { globals_files?: { [integer]: string, ... }, ... } | nil]])
 end
 
 -- ---------------------------------------------------------------------------
