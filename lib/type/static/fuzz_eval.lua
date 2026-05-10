@@ -125,7 +125,8 @@ local arb_union_base = {
 -- 1. KeepAll identity: $EachField<T, KeepAll> == T (bidirectional)
 arb.it("[eval] EachField KeepAll identity: EachField<T, KeepAll> == T",
 	arb_table_type,
-	function(t_str)
+	function(t_str_arg)
+		local t_str = t_str_arg --[[:! string]]
 		local ef_str = "$EachField<" .. t_str .. ", KeepAll>"
 		assert(check_sub(t_str, ef_str),
 			"T <: EachField<T,KeepAll> failed for T = " .. t_str)
@@ -136,7 +137,8 @@ arb.it("[eval] EachField KeepAll identity: EachField<T, KeepAll> == T",
 -- 2. DropAll: $EachField<T, DropAll> <: {} (empty closed table)
 arb.it("[eval] EachField DropAll: EachField<T, DropAll> <: {}",
 	arb_table_type,
-	function(t_str)
+	function(t_str_arg)
+		local t_str = t_str_arg --[[:! string]]
 		local ef_str = "$EachField<" .. t_str .. ", DropAll>"
 		assert(check_sub(ef_str, "{}"),
 			"EachField<T,DropAll> <: {} failed for T = " .. t_str)
@@ -145,7 +147,8 @@ arb.it("[eval] EachField DropAll: EachField<T, DropAll> <: {}",
 -- 3. MakeOptional→MakeRequired round-trip == T (bidirectional)
 arb.it("[eval] EachField MakeOptional->MakeRequired round-trip == T",
 	arb_table_type,
-	function(t_str)
+	function(t_str_arg)
+		local t_str = t_str_arg --[[:! string]]
 		local rt_str = "$EachField<$EachField<" .. t_str .. ", MakeOptional>, MakeRequired>"
 		assert(check_sub(t_str, rt_str),
 			"T <: MakeRequired(MakeOptional(T)) failed for T = " .. t_str)
@@ -156,7 +159,8 @@ arb.it("[eval] EachField MakeOptional->MakeRequired round-trip == T",
 -- 4. MakeReadonly→MakeWritable round-trip == T (bidirectional)
 arb.it("[eval] EachField MakeReadonly->MakeWritable round-trip == T",
 	arb_table_type,
-	function(t_str)
+	function(t_str_arg)
+		local t_str = t_str_arg --[[:! string]]
 		local rt_str = "$EachField<$EachField<" .. t_str .. ", MakeReadonly>, MakeWritable>"
 		assert(check_sub(t_str, rt_str),
 			"T <: MakeWritable(MakeReadonly(T)) failed for T = " .. t_str)
@@ -167,7 +171,8 @@ arb.it("[eval] EachField MakeReadonly->MakeWritable round-trip == T",
 -- 5. KeepAll union distributivity: $EachField<T1 | T2, KeepAll> == T1 | T2
 arb.it("[eval] EachField KeepAll distributivity over union",
 	arb_union_table,
-	function(t_str)
+	function(t_str_arg)
+		local t_str = t_str_arg --[[:! string]]
 		local ef_str = "$EachField<" .. t_str .. ", KeepAll>"
 		assert(check_sub(t_str, ef_str),
 			"T1|T2 <: EachField<T1|T2,KeepAll> failed for T = " .. t_str)
@@ -180,7 +185,8 @@ arb.it("[eval] EachField KeepAll distributivity over union",
 -- 6. Capture identity: CaptureId<T> <: T and T <: CaptureId<T>
 arb.it("[eval] match CaptureId<T> == T for base types",
 	arb_base_type,
-	function(t_str)
+	function(t_str_arg)
+		local t_str = t_str_arg --[[:! string]]
 		local ci_str = "CaptureId<" .. t_str .. ">"
 		assert(check_sub(t_str, ci_str),
 			"T <: CaptureId<T> failed for T = " .. t_str)
@@ -191,7 +197,8 @@ arb.it("[eval] match CaptureId<T> == T for base types",
 -- 7. Wildcard constant: WildConst<T> <: integer (wildcard always gives integer)
 arb.it("[eval] match WildConst<T> <: integer for any T",
 	arb_base_type,
-	function(t_str)
+	function(t_str_arg)
+		local t_str = t_str_arg --[[:! string]]
 		local wc_str = "WildConst<" .. t_str .. ">"
 		assert(check_sub(wc_str, "integer"),
 			"WildConst<T> <: integer failed for T = " .. t_str)
@@ -200,7 +207,9 @@ arb.it("[eval] match WildConst<T> <: integer for any T",
 -- 8. Union capture round-trip: CaptureId<T1 | T2> == T1 | T2
 arb.it("[eval] match CaptureId<T1 | T2> == T1 | T2",
 	{ arb_base_type, arb_base_type },
-	function(t1, t2)
+	function(t1_arg, t2_arg)
+		local t1 = t1_arg --[[:! string]]
+		local t2 = t2_arg --[[:! string]]
 		local union_str = t1 .. " | " .. t2
 		local ci_str = "CaptureId<" .. union_str .. ">"
 		assert(check_sub(union_str, ci_str),
@@ -212,7 +221,8 @@ arb.it("[eval] match CaptureId<T1 | T2> == T1 | T2",
 -- 6b. CaptureId identity for table types: CaptureId<T> == T for random table T
 arb.it("[eval] match CaptureId<T> == T for table types",
 	arb_table_type,
-	function(t_str)
+	function(t_str_arg)
+		local t_str = t_str_arg --[[:! string]]
 		local ci_str = "CaptureId<" .. t_str .. ">"
 		assert(check_sub(t_str, ci_str),
 			"T <: CaptureId<T> failed for table T = " .. t_str)
@@ -223,7 +233,8 @@ arb.it("[eval] match CaptureId<T> == T for table types",
 -- 6c. CaptureId identity for function types: CaptureId<F> == F for random function F
 arb.it("[eval] match CaptureId<F> == F for function types",
 	arb_function_parts,
-	function(fp)
+	function(fp_arg)
+		local fp = fp_arg --[[:! { type_str: string, params: { [integer]: string }, ret: string }]]
 		local ci_str = "CaptureId<" .. fp.type_str .. ">"
 		assert(check_sub(fp.type_str, ci_str),
 			"F <: CaptureId<F> failed for F = " .. fp.type_str)
@@ -234,7 +245,8 @@ arb.it("[eval] match CaptureId<F> == F for function types",
 -- 7b. WildConst for table types: WildConst<T> <: integer for any table T
 arb.it("[eval] match WildConst<T> <: integer for table types",
 	arb_table_type,
-	function(t_str)
+	function(t_str_arg)
+		local t_str = t_str_arg --[[:! string]]
 		local wc_str = "WildConst<" .. t_str .. ">"
 		assert(check_sub(wc_str, "integer"),
 			"WildConst<T> <: integer failed for table T = " .. t_str)
@@ -243,7 +255,8 @@ arb.it("[eval] match WildConst<T> <: integer for table types",
 -- 7c. WildConst for function types: WildConst<F> <: integer for any function F
 arb.it("[eval] match WildConst<F> <: integer for function types",
 	arb_function_parts,
-	function(fp)
+	function(fp_arg)
+		local fp = fp_arg --[[:! { type_str: string, params: { [integer]: string }, ret: string }]]
 		local wc_str = "WildConst<" .. fp.type_str .. ">"
 		assert(check_sub(wc_str, "integer"),
 			"WildConst<F> <: integer failed for F = " .. fp.type_str)
@@ -252,7 +265,9 @@ arb.it("[eval] match WildConst<F> <: integer for function types",
 -- 8b. CaptureId union round-trip for table union: CaptureId<T1 | T2> == T1 | T2
 arb.it("[eval] match CaptureId<T1 | T2> == T1 | T2 for table union",
 	{ arb_table_type, arb_table_type },
-	function(t1, t2)
+	function(t1_arg, t2_arg)
+		local t1 = t1_arg --[[:! string]]
+		local t2 = t2_arg --[[:! string]]
 		local union_str = t1 .. " | " .. t2
 		local ci_str = "CaptureId<" .. union_str .. ">"
 		assert(check_sub(union_str, ci_str),
@@ -729,7 +744,7 @@ end)
 arb.it("[eval] E5c: Parameters<F> == param tuple for random function types",
 	arb_function_parts,
 	function(parts_arg)
-		local parts = parts_arg --[[: { type_str: string, params: { [integer]: string }, ret: string }]]
+		local parts = parts_arg --[[:! { type_str: string, params: { [integer]: string }, ret: string }]]
 		local fn_str = parts.type_str
 		local params = parts.params
 		-- If no params, Parameters gives an empty tuple — skip (nothing interesting to assert)
@@ -783,7 +798,7 @@ end)
 arb.it("[eval] E10d: ReturnType<() -> C> == C for random 0-param function types",
 	arb_function_parts,
 	function(parts_arg)
-		local parts = parts_arg --[[: { type_str: string, params: { [integer]: string }, ret: string }]]
+		local parts = parts_arg --[[:! { type_str: string, params: { [integer]: string }, ret: string }]]
 		-- Only test zero-param functions for this invariant (ReturnType uses () -> %R pattern)
 		if #parts.params ~= 0 then return end
 		local fn_str  = parts.type_str  -- "() -> C"
@@ -801,7 +816,8 @@ arb.it("[eval] E10d: ReturnType<() -> C> == C for random 0-param function types"
 
 arb.it("[eval] E11: MakeOptional idempotent: applying twice == applying once",
 	arb_table_type,
-	function(t_str)
+	function(t_str_arg)
+		local t_str = t_str_arg --[[:! string]]
 		local once_str  = "$EachField<" .. t_str .. ", MakeOptional>"
 		local twice_str = "$EachField<$EachField<" .. t_str .. ", MakeOptional>, MakeOptional>"
 		assert(check_sub(once_str, twice_str),
@@ -816,7 +832,8 @@ arb.it("[eval] E11: MakeOptional idempotent: applying twice == applying once",
 
 arb.it("[eval] G2a: CaptureId<A | B> == A | B for union of distinct base types",
 	arb_union_base,
-	function(u)
+	function(u_arg)
+		local u = u_arg --[[:! { lhs: string, rhs: string, type_str: string }]]
 		local union_str = u.type_str  -- "A | B"
 		local cap_str   = "CaptureId<" .. union_str .. ">"
 		assert(check_sub(cap_str, union_str),
@@ -832,7 +849,9 @@ arb.it("[eval] G2a: CaptureId<A | B> == A | B for union of distinct base types",
 
 arb.it("[eval] G2b: EachField<T1|T2, KeepAll> == EachField<T1,KeepAll> | EachField<T2,KeepAll>",
 	{ arb_table_type, arb_table_type },
-	function(t1_str, t2_str)
+	function(t1_str_arg, t2_str_arg)
+		local t1_str = t1_str_arg --[[:! string]]
+		local t2_str = t2_str_arg --[[:! string]]
 		local union_str = t1_str .. " | " .. t2_str
 		-- Dist1: EachField applied to the union directly
 		local dist1 = "$EachField<" .. union_str .. ", KeepAll>"
@@ -852,7 +871,9 @@ arb.it("[eval] G2b: EachField<T1|T2, KeepAll> == EachField<T1,KeepAll> | EachFie
 -- MA8a: MakeOptional distributes over union
 arb.it("[eval] MA8a: EachField<T1|T2, MakeOptional> distributes over union",
 	{ arb_table_type, arb_table_type },
-	function(t1, t2)
+	function(t1_arg, t2_arg)
+		local t1 = t1_arg --[[:! string]]
+		local t2 = t2_arg --[[:! string]]
 		local lhs = "$EachField<" .. t1 .. " | " .. t2 .. ", MakeOptional>"
 		local rhs = "$EachField<" .. t1 .. ", MakeOptional> | $EachField<" .. t2 .. ", MakeOptional>"
 		assert(check_sub(lhs, rhs), lhs .. " should <: " .. rhs)
@@ -862,7 +883,9 @@ arb.it("[eval] MA8a: EachField<T1|T2, MakeOptional> distributes over union",
 -- MA8b: MakeRequired distributes over union
 arb.it("[eval] MA8b: EachField<T1|T2, MakeRequired> distributes over union",
 	{ arb_table_type, arb_table_type },
-	function(t1, t2)
+	function(t1_arg, t2_arg)
+		local t1 = t1_arg --[[:! string]]
+		local t2 = t2_arg --[[:! string]]
 		local lhs = "$EachField<" .. t1 .. " | " .. t2 .. ", MakeRequired>"
 		local rhs = "$EachField<" .. t1 .. ", MakeRequired> | $EachField<" .. t2 .. ", MakeRequired>"
 		assert(check_sub(lhs, rhs), lhs .. " should <: " .. rhs)
@@ -872,7 +895,9 @@ arb.it("[eval] MA8b: EachField<T1|T2, MakeRequired> distributes over union",
 -- MA8c: MakeReadonly distributes over union
 arb.it("[eval] MA8c: EachField<T1|T2, MakeReadonly> distributes over union",
 	{ arb_table_type, arb_table_type },
-	function(t1, t2)
+	function(t1_arg, t2_arg)
+		local t1 = t1_arg --[[:! string]]
+		local t2 = t2_arg --[[:! string]]
 		local lhs = "$EachField<" .. t1 .. " | " .. t2 .. ", MakeReadonly>"
 		local rhs = "$EachField<" .. t1 .. ", MakeReadonly> | $EachField<" .. t2 .. ", MakeReadonly>"
 		assert(check_sub(lhs, rhs), lhs .. " should <: " .. rhs)
@@ -882,7 +907,9 @@ arb.it("[eval] MA8c: EachField<T1|T2, MakeReadonly> distributes over union",
 -- MA8d: MakeWritable distributes over union
 arb.it("[eval] MA8d: EachField<T1|T2, MakeWritable> distributes over union",
 	{ arb_table_type, arb_table_type },
-	function(t1, t2)
+	function(t1_arg, t2_arg)
+		local t1 = t1_arg --[[:! string]]
+		local t2 = t2_arg --[[:! string]]
 		local lhs = "$EachField<" .. t1 .. " | " .. t2 .. ", MakeWritable>"
 		local rhs = "$EachField<" .. t1 .. ", MakeWritable> | $EachField<" .. t2 .. ", MakeWritable>"
 		assert(check_sub(lhs, rhs), lhs .. " should <: " .. rhs)
@@ -907,7 +934,7 @@ local arb_base_type_quad = {
 arb.it("[eval] MA1: match arm selectivity — correct arm fires",
 	arb_base_type_quad,
 	function(q_arg)
-		local q = q_arg --[[: BaseQuad]]
+		local q = q_arg --[[:! BaseQuad]]
 		local decl = ("--:: MatchTwo<T> = match T { %s => %s, %s => %s }\n"):format(
 			q.a, q.c, q.b, q.d)
 		-- MatchTwo<q.a> == q.c
@@ -927,7 +954,7 @@ arb.it("[eval] MA1: match arm selectivity — correct arm fires",
 arb.it("[eval] MA2: match distributivity — match (A|B) { A => C, B => D } == C | D",
 	arb_base_type_quad,
 	function(q_arg)
-		local q = q_arg --[[: BaseQuad]]
+		local q = q_arg --[[:! BaseQuad]]
 		local decl     = ("--:: MatchTwo<T> = match T { %s => %s, %s => %s }\n"):format(
 			q.a, q.c, q.b, q.d)
 		local result   = "MatchTwo<" .. q.a .. " | " .. q.b .. ">"
@@ -943,7 +970,7 @@ arb.it("[eval] MA2: match distributivity — match (A|B) { A => C, B => D } == C
 arb.it("[eval] MA3: match non-matching input == never",
 	arb_base_type_quad,
 	function(q_arg)
-		local q = q_arg --[[: BaseQuad]]
+		local q = q_arg --[[:! BaseQuad]]
 		-- Arms cover q.a and q.b; input is q.d (guaranteed ≠ q.a and ≠ q.b since all 4 distinct)
 		local decl = ("--:: MatchNone<T> = match T { %s => %s, %s => %s }\n"):format(
 			q.a, q.c, q.b, q.c)
@@ -1241,7 +1268,7 @@ end)
 arb.it("[eval] MA4r: FieldX<T> == x-field-type (has x) or never (no x) for random tables",
 	arb_table_type,
 	function(t_str_arg)
-		local t_str = t_str_arg --[[: string]]
+		local t_str = t_str_arg --[[:! string]]
 		-- Extract x-field base type from the string, if present.
 		-- arb_table_type format: '{ [readonly ]<name>[?]: <base>, ... }'
 		-- We look for "x[?]: <base>" — optional "?" before the colon.
