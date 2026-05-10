@@ -247,14 +247,15 @@ function M.decompress(encoded, metadata)
   if type(metadata) ~= "table" then
     return nil, "metadata must be a table"
   end
+  local meta = metadata --[[:! { total_bits: number, freqs: { [unknown]: number } }]]
 
   -- Handle empty string
-  if metadata.total_bits == 0 then
+  if meta.total_bits == 0 then
     return ""
   end
 
-  local freqs = metadata.freqs
-  local total_bits = metadata.total_bits
+  local freqs = meta.freqs
+  local total_bits = meta.total_bits
 
   local tree, err = M.build_tree(freqs)
   if tree == nil then

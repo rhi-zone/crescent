@@ -74,7 +74,8 @@ policy_mt.__index = policy_mt
 function policy_mt:check_cap(cap_name)
 	local cp = self._data.cap_policy
 	if not cp then return "allowed" end
-	local entry = cp[cap_name]
+	local cp_ = cp --[[:! { [string]: policy_cap_entry }]]
+	local entry = cp_[cap_name]
 	if not entry then return "allowed" end
 	local state = entry.state
 	if state == "denied" then return "denied" end
@@ -96,7 +97,8 @@ end
 function policy_mt:check_cap_decl(cap_name, decl)
 	local cp = self._data.cap_policy
 	if not cp then return true end
-	local entry = cp[cap_name]
+	local cp_ = cp --[[:! { [string]: policy_cap_entry }]]
+	local entry = cp_[cap_name]
 	if not entry then return true end
 
 	-- Denied entirely.
