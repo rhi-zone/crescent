@@ -50,8 +50,10 @@ end
 function M.db_cap(path, opts)
 	opts = opts or {}
 
-	local db, err = sqlite.open(path) --: any
-	if not db then return nil, err end
+	local db_raw, err = sqlite.open(path)
+	if not db_raw then return nil, err end
+	--:: SqliteHandle = { execute: (self: unknown, string, ...unknown) -> (boolean, string | nil), close: (self: unknown) -> nil, query: (self: unknown, string, ...unknown) -> (unknown, string | nil), prepare: (self: unknown, string) -> (unknown, string | nil), last_insert_rowid: (self: unknown) -> integer, changes: (self: unknown) -> integer, ... }
+	local db = db_raw --[[:! SqliteHandle]]
 
 	if not opts.allow_write then
 		local ok, rerr = db:execute("PRAGMA query_only = ON")

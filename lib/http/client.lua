@@ -7,7 +7,7 @@ local mod = {}
 --[[TODO: tls: https://github.com/CapsAdmin/luajitsocket/blob/master/examples/tcp_client_blocking_tls.lua]]
 
 -- Blocking send: connect, send request, receive full response, return it.
---: ({ host: string, port: string | nil, method: string | nil, path: string | nil, version: string | nil, headers: { [string]: unknown } | nil, body: string | nil, ... }) -> (string | nil, string | nil)
+--: ({ host: string, port?: string, method?: string, path?: string, version?: string, headers?: { [string]: unknown }, body: string | nil, ... }) -> (string | nil, string | nil)
 mod.send = function (req)
 	if not req.host then error("http_client.send: missing host") end
 	local client, err = socket.create("inet", "stream", "tcp")

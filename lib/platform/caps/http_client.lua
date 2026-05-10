@@ -327,12 +327,13 @@ end
 -- method_allowed(methods, req_method) -> boolean
 -- Returns true when req_method is permitted by the whitelist.
 -- methods: nil/empty = allow all; otherwise exact case-insensitive match.
---: (any | nil, string) -> boolean
+--: ({ [integer]: unknown } | nil, string) -> boolean
 local function method_allowed(methods, req_method)
-	if not methods or #methods == 0 then return true end
+	if not methods then return true end
+	if #methods == 0 then return true end
 	local m = req_method:upper()
 	for i = 1, #methods do
-		if tostring(methods[i]):upper() == m then return true end
+		if tostring(methods[i] --[[:! string]]):upper() == m then return true end
 	end
 	return false
 end
@@ -340,12 +341,14 @@ end
 -- paths_subset(new_paths, old_paths) -> boolean
 -- Returns true when every path in new_paths is allowed by old_paths.
 -- old_paths nil/empty = unrestricted, any new_paths is valid.
---: (any | nil, any | nil) -> boolean
+--: ({ [integer]: unknown } | nil, { [integer]: unknown } | nil) -> boolean
 local function paths_subset(new_paths, old_paths)
-	if not old_paths or #old_paths == 0 then return true end
-	if not new_paths or #new_paths == 0 then return false end
+	if not old_paths then return true end
+	if #old_paths == 0 then return true end
+	if not new_paths then return false end
+	if #new_paths == 0 then return false end
 	for i = 1, #new_paths do
-		if not path_allowed(old_paths, new_paths[i]) then return false end
+		if not path_allowed(old_paths, new_paths[i] --[[:! string]]) then return false end
 	end
 	return true
 end
@@ -353,12 +356,14 @@ end
 -- methods_subset(new_methods, old_methods) -> boolean
 -- Returns true when every method in new_methods is allowed by old_methods.
 -- old_methods nil/empty = unrestricted, any new_methods is valid.
---: (any | nil, any | nil) -> boolean
+--: ({ [integer]: unknown } | nil, { [integer]: unknown } | nil) -> boolean
 local function methods_subset(new_methods, old_methods)
-	if not old_methods or #old_methods == 0 then return true end
-	if not new_methods or #new_methods == 0 then return false end
+	if not old_methods then return true end
+	if #old_methods == 0 then return true end
+	if not new_methods then return false end
+	if #new_methods == 0 then return false end
 	for i = 1, #new_methods do
-		if not method_allowed(old_methods, new_methods[i]) then return false end
+		if not method_allowed(old_methods, new_methods[i] --[[:! string]]) then return false end
 	end
 	return true
 end
