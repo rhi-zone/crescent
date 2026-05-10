@@ -35,7 +35,8 @@ end
 
 -- Walk a node tree and collect word strings and sentence counts.
 -- Returns total_sentences, total_words, total_syllables, total_complex_words.
---: (any) -> (integer, integer, integer, integer)
+--:: NlcstNode = { type: string, children?: { [integer]: NlcstNode }, data?: { [string]: unknown }, ... }
+--: (NlcstNode) -> (integer, integer, integer, integer)
 local function collect_stats(root)
   local sentences   = 0
   local words       = 0

@@ -104,7 +104,7 @@ end
 -- @return Bus
 function M.new()
   -- subs[topic_pattern] = array of { id, handler, filter, once }
-  local subs = {} --: { [string]: any }
+  local subs = {} --: { [string]: { [integer]: SubEntry, ... } | nil }
   -- middleware stack: array of function(topic, msg, next)
   local middleware = {}
   -- async queue: array of { topic, data }
@@ -123,12 +123,12 @@ function M.new()
     if not subs[pattern] then
       subs[pattern] = {}
     end
-    local list = subs[pattern]
+    local list = subs[pattern] --[[:! { [integer]: SubEntry, ... }]]
     list[#list + 1] = {
       id      = id,
       handler = handler,
       filter  = opts.filter,
-      once    = opts.once or false,
+      once    = (opts.once or false) --[[:! boolean]],
     }
     return function()
       local lst = subs[pattern]
@@ -173,7 +173,8 @@ function M.new()
   local function deliver(topic, msg)
     -- Collect matching subs (snapshot to handle once-removal during iteration).
     local matched = {}
-    for pattern, list in pairs(subs) do
+    for pattern, list_ in pairs(subs) do
+      local list = list_ --[[:! { [integer]: SubEntry, ... }]]
       if M.matches_pattern(topic, pattern) then
         for i = 1, #list do
           matched[#matched + 1] = { sub = list[i], pattern = pattern }
@@ -185,7 +186,7 @@ function M.new()
     for i = 1, #matched do
       local sub = matched[i].sub
       local pat = matched[i].pattern
-      if (not sub.filter) or sub.filter(msg) then
+      if (not sub.filter) or (sub.filter --[[:! (unknown) -> boolean]])(msg) then
         sub.handler(msg)
         if sub.once then
           to_remove[#to_remove + 1] = { pattern = pat, id = sub.id }
@@ -253,7 +254,8 @@ function M.new()
   -- @param pattern string
   -- @return integer
   function bus:subscriber_count(pattern)
-    return subs[pattern] and #subs[pattern] or 0
+    local sl = subs[pattern] --[[:! { [integer]: SubEntry, ... } | nil]]
+    return sl and #sl or 0
   end
 
   --- Return array of all patterns that currently have subscribers.

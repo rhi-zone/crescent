@@ -597,17 +597,18 @@ local function extract_text(children)
 end
 
 -- Walk a hast tree and apply highlighting to <pre><code> blocks.
---: (any, string, { [string]: string }) -> any
+--: (HastChild, string, { [string]: string }) -> HastChild | nil
 local function walk(node, prefix, aliases)
   if not node then return node end
 
   if node.type == "element" and node.tag == "pre" then
-    local children = node.children or {}
+    local children = (node.children or {}) --[[:! { [integer]: HastChild, ... }]]
     -- Find first element child that is <code>
     local code_node
     for _, child in ipairs(children) do
-      if child.type == "element" and child.tag == "code" then
-        code_node = child
+      local child_ = child --[[:! HastChild]]
+      if child_.type == "element" and child_.tag == "code" then
+        code_node = child_
         break
       end
     end
@@ -646,7 +647,7 @@ local function walk(node, prefix, aliases)
   -- Recurse into children
   if node.children then
     for i, child in ipairs(node.children) do
-      node.children[i] = walk(child, prefix, aliases)
+      node.children[i] = walk(child --[[:! HastChild]], prefix, aliases)
     end
   end
 
@@ -655,13 +656,13 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, { prefix: string | nil, aliases: { [string]: string } | nil, ... } | nil) -> nil
 local function plugin(processor, opts)
-  opts = opts or {}
+  opts = (opts or {}) --[[:! { prefix: string | nil, aliases: { [string]: string } | nil }]]
   local prefix  = opts.prefix  or "hljs-"
   local aliases = opts.aliases or {}
 
-  processor:use_transformer(function(tree)
+  ;(processor --[[:! { use_transformer: (...unknown) -> unknown, ... }]]):use_transformer(function(tree)
     return walk(tree, prefix, aliases)
   end)
 end

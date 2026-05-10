@@ -40,7 +40,7 @@ local str_match = string.match
 
 -- Parse an attribute string: key=val key2="val2" bool_key ...
 -- Returns a table of key → value (string or true for booleans).
---: (s: string | nil) -> any
+--: (s: string | nil) -> unknown
 local function parse_attrs(s)
   local attrs = {} --[[: any]]
   if not s or s == "" then return attrs end

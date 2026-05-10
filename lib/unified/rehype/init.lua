@@ -36,18 +36,18 @@ local M = {}
 -- A real HTML → hast parser is not yet implemented; this lets :parse() and
 -- :process() run without error and returns a root node that carries the
 -- raw HTML source for downstream transformers that know how to handle it.
---: (any, any) -> nil
+--: (unknown, unknown) -> nil
 local function rehype_parse(processor, _opts)
-  processor:parser(function(source)
+  ;(processor --[[:! { parser: (...unknown) -> unknown, ... }]]):parser(function(source)
     -- Stub: no HTML parsing. Returns a root node with raw source attached.
     return { type = "root", children = {}, raw = source }
   end)
 end
 
 -- rehype-stringify: registers the hast → HTML compiler.
---: (any, any) -> nil
+--: (unknown, unknown) -> nil
 local function rehype_stringify(processor, _opts)
-  processor:compiler(function(ast)
+  ;(processor --[[:! { compiler: (...unknown) -> unknown, ... }]]):compiler(function(ast)
     return hast.to_html(ast)
   end)
 end
@@ -57,7 +57,7 @@ end
 -- Returns a frozen unified processor pre-configured with the rehype parser
 -- stub and the hast HTML serializer. Use :use() to add transformer plugins
 -- (returns a new unfrozen clone).
---: () -> any
+--: () -> unknown
 function M.__call(_self, _opts)
   return unified.new()
     :use(rehype_parse)

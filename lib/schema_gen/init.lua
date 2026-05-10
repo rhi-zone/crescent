@@ -368,7 +368,7 @@ end
 
 --- Validate data against a JSON Schema.
 -- Returns true on success, or (false, errmsg) on failure.
---: (Schema | nil, any) -> (boolean, string | nil)
+--: (Schema | nil, unknown) -> (boolean, string | nil)
 function M.validate(schema, data)
   if not schema then return true end
 
@@ -489,19 +489,21 @@ function M.validate(schema, data)
 
   -- number/string constraints (after type check passed)
   if t == "number" or t == "integer" then
-    if schema.minimum and data < schema.minimum then
-      return false, "value " .. data .. " is less than minimum " .. schema.minimum
+    local data_n = data --[[:! number]]
+    if schema.minimum and data_n < schema.minimum then
+      return false, "value " .. data_n .. " is less than minimum " .. schema.minimum
     end
-    if schema.maximum and data > schema.maximum then
-      return false, "value " .. data .. " is greater than maximum " .. schema.maximum
+    if schema.maximum and data_n > schema.maximum then
+      return false, "value " .. data_n .. " is greater than maximum " .. schema.maximum
     end
   end
   if t == "string" then
-    if schema.minLength and #data < schema.minLength then
-      return false, "string length " .. #data .. " is less than minLength " .. schema.minLength
+    local data_s = data --[[:! string]]
+    if schema.minLength and #data_s < schema.minLength then
+      return false, "string length " .. #data_s .. " is less than minLength " .. schema.minLength
     end
-    if schema.maxLength and #data > schema.maxLength then
-      return false, "string length " .. #data .. " is greater than maxLength " .. schema.maxLength
+    if schema.maxLength and #data_s > schema.maxLength then
+      return false, "string length " .. #data_s .. " is greater than maxLength " .. schema.maxLength
     end
   end
 

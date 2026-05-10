@@ -28,10 +28,11 @@ M.REMOVE   = 1       -- remove this node from parent.children
 --   nil   -> match all nodes
 --   string -> match nodes whose .type == string
 --   table  -> match nodes whose .type is in the array
---: (any) -> (any) -> boolean
+--:: UnistNode = { type: string, ... }
+--: (string | { [integer]: string, ... } | nil) -> (UnistNode) -> boolean
 local function make_test(types)
   if types == nil then
-    return function() return true end
+    return function(_node) return true end
   elseif type(types) == "string" then
     local t = types
     return function(node) return node.type == t end

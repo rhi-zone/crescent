@@ -279,7 +279,7 @@ function G.map(g, fn)
 end
 
 -- Filter generated values to satisfy a predicate.
---: (g: { generate: (Rng, integer) -> any, shrink: (any) -> any[] }, pred: (any) -> boolean) -> { generate: (Rng, integer) -> any, shrink: (any) -> any[] }
+--: (g: { generate: (Rng, integer) -> unknown, shrink: (unknown) -> unknown[] }, pred: (unknown) -> boolean) -> { generate: (Rng, integer) -> unknown, shrink: (unknown) -> unknown[] }
 function G.filter(g, pred)
 	return {
 		generate = function(rng, sz)

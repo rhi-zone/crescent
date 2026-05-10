@@ -32,9 +32,9 @@ local M = {}
 -- Standalone plugin that registers hast.to_html as the compiler.
 -- Use this when you want to attach the HTML serializer separately, or when
 -- composing remark_rehype with additional rehype transformers.
---: (any, any) -> nil
+--: (unknown, unknown) -> nil
 local function stringify_plugin(processor, _opts)
-  processor:compiler(function(ast)
+  ;(processor --[[:! { compiler: (...unknown) -> unknown, ... }]]):compiler(function(ast)
     return hast.to_html(ast)
   end)
 end
@@ -46,15 +46,16 @@ M.stringify_plugin = stringify_plugin
 -- Main plugin function. Registers:
 --   1. A transformer that converts mdast → hast in place.
 --   2. A compiler that serializes hast → HTML (unless opts.no_stringify).
---: (any, any) -> nil
+--: (unknown, unknown) -> nil
 local function remark_rehype(processor, opts)
   -- Transformer: mdast tree → hast tree.
-  processor:use_transformer(function(ast)
+  ;(processor --[[:! { use_transformer: (...unknown) -> unknown, compiler: (...unknown) -> unknown, ... }]]):use_transformer(function(ast)
     return hast.from_mdast(ast)
   end)
 
   -- Compiler: serialize hast → HTML string (default on, skip with no_stringify).
-  if not (opts and opts.no_stringify) then
+  local opts_ = opts --[[:! { no_stringify: boolean | nil, ... } | nil]]
+  if not (opts_ and opts_.no_stringify) then
     stringify_plugin(processor, opts)
   end
 end

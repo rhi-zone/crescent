@@ -161,9 +161,9 @@ local function find_earliest_abbr(s, start, keys, abbrs)  -- luacheck: ignore ab
 end
 
 -- Split a text node value into a list of mdast/abbr nodes.
---: (string, any, any) -> { [integer]: any }
+--: (string, { [string]: string }, { [integer]: string, ... }) -> { [integer]: unknown }
 local function split_text(value, abbrs, keys)
-  local nodes = {} --: { [integer]: any }
+  local nodes = {} --: { [integer]: unknown }
   local pos = 1
   local len = #value
 
@@ -208,7 +208,8 @@ local function walk(node, abbrs, keys)
     local child = children[i]
     if child.type == "text" and child.value and #child.value > 0 then
       local parts = split_text(child.value, abbrs, keys)
-      if #parts == 1 and parts[1].type == "text" and parts[1].value == child.value then
+      local p1 = parts[1] --[[:! { type: string, value: string | nil, ... }]]
+      if #parts == 1 and p1.type == "text" and p1.value == child.value then
         new_children[#new_children + 1] = child
       else
         changed = true

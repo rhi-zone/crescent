@@ -54,7 +54,7 @@ end
 -- ── Selector compilation ──────────────────────────────────────────────────────
 
 -- Build a flat table: tag_name -> list of class strings to add.
---: (any) -> { [string]: string[] }
+--: (unknown) -> { [string]: string[] }
 local function compile_selectors(opts)
   local map = {}
   for selector_raw, classes in pairs(opts) do
@@ -73,12 +73,13 @@ end
 
 -- ── Tree walker ───────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--:: HastNode = { type: string, tag?: string, children?: { [integer]: HastNode }, props?: { class: string | nil, [string]: unknown }, ... }
+--: (HastNode, { [string]: string[] }) -> nil
 local function walk(node, map)
   if node.type == "element" then
     local class_list = map[node.tag]
     if class_list then
-      node.props = node.props or {}
+      node.props = node.props or ({} --[[:! { class: string | nil, [string]: unknown }]])
       local existing = node.props["class"] or ""
       for _, classes in ipairs(class_list) do
         existing = add_classes(existing, classes)
@@ -95,11 +96,11 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, { [string]: string | string[], ... } | nil) -> nil
 function M.plugin(processor, opts)
   opts = opts or {}
   local map = compile_selectors(opts)
-  processor:use_transformer(function(tree)
+  ;(processor --[[:! { use_transformer: ((...unknown) -> unknown) }]]):use_transformer(function(tree)
     walk(tree, map)
     return tree
   end)

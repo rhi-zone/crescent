@@ -176,7 +176,7 @@ end
 local parse_alt  -- forward declaration
 
 -- emit helpers: append instruction and return its index
---: (Insns, any) -> integer
+--: (Insns, unknown) -> integer
 local function emit(insns, instr)
   insns[#insns + 1] = instr --[[:! Instr]]
   return #insns

@@ -18,7 +18,7 @@ M._tier = "pure"
 local Expr = {}
 Expr.__index = Expr
 
---: (v: any) -> Expr
+--: (v: number | Expr) -> Expr
 local function wrap(v)
   if type(v) == "number" then return M.num(v) end
   return v
@@ -32,7 +32,7 @@ Expr.__pow = function(a, b) return M.pow(wrap(a), wrap(b)) end
 Expr.__unm = function(a)    return M.neg(a) end
 Expr.__tostring = function(a) return M.tostring(a) end
 
---: (t: any) -> Expr
+--: (t: unknown) -> Expr
 local function node(t)
   return setmetatable(t, Expr)
 end
@@ -208,7 +208,7 @@ local function is_num(e)       return e.tag == "num" end
 local function is_zero(e)      return e.tag == "num" and e.value == 0 or false end
 --: (e: Expr) -> boolean
 local function is_one(e)       return e.tag == "num" and e.value == 1 or false end
---: (e: Expr) -> any
+--: (e: Expr) -> unknown
 local function num_val(e)      return e.value end
 
 --: (e: Expr) -> Expr

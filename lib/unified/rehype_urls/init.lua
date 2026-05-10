@@ -35,7 +35,8 @@ local URL_ATTRS = { "href", "src", "action", "data" }
 
 -- ── Tree walker ───────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--:: HastNode = { type: string, tag?: string, props?: { [string]: unknown }, children?: { [integer]: HastNode }, ... }
+--: (HastNode, (...unknown) -> unknown) -> nil
 local function walk(node, fn)
   if node.type == "element" then
     local props = node.props
@@ -60,15 +61,15 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, unknown) -> nil
 function M.plugin(processor, opts)
   -- opts is the URL transform function itself (following the JS convention of
   -- passing the handler directly as the options argument).
-  local fn = opts
+  local fn = opts --[[:! (...unknown) -> unknown]]
   if type(fn) ~= "function" then
     error("rehype_urls: opts must be a function(url, node) -> string|nil")
   end
-  processor:use_transformer(function(tree)
+  ;(processor --[[:! { use_transformer: (...unknown) -> unknown, ... }]]):use_transformer(function(tree)
     walk(tree, fn)
     return tree
   end)

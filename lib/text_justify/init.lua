@@ -46,10 +46,10 @@ end
 -- Returns an array of strings.
 -- opts.break_long (bool, default true): break words longer than width
 -- opts.preserve_spaces (bool, default false): keep original whitespace
---: (text: string, width: integer, opts: any) -> string[]
+--: (text: string, width: integer, opts: { break_long: boolean | nil, preserve_spaces: boolean | nil, ... } | nil) -> string[]
 function M.wrap(text, width, opts)
   if not text or text == "" then return {""} end
-  opts = opts or {}
+  opts = (opts or {}) --[[:! { break_long: boolean | nil, preserve_spaces: boolean | nil, ... }]]
   local break_long = opts.break_long ~= false  -- default true
   local preserve_spaces = opts.preserve_spaces or false
 
@@ -222,9 +222,9 @@ end
 -- opts.sep (string, default " "): column separator
 -- opts.align (array of "left"|"right"|"center"): alignment per column
 -- Returns array of formatted lines.
---: (rows: any, widths: integer[], opts: any) -> string[]
+--: (rows: { [integer]: { [integer]: unknown, ... }, ... }, widths: integer[], opts: { sep: string | nil, align: { [integer]: string, ... } | nil, ... } | nil) -> string[]
 function M.columns(rows, widths, opts)
-  opts = opts or {}
+  opts = (opts or {}) --[[:! { sep: string | nil, align: { [integer]: string, ... } | nil, ... }]]
   local sep = opts.sep or " "
   local align = opts.align or {}
   local result = {}
@@ -249,9 +249,9 @@ end
 -- opts.align (array): alignment per column ("left","right","center")
 -- opts.padding (int, default 1): spaces inside each cell
 -- Returns a multi-line string.
---: (data: { headers?: string[], rows?: any[][] }, opts: any) -> string
+--: (data: { headers?: string[], rows?: { [integer]: { [integer]: unknown, ... }, ... } | nil, ... }, opts: { border: boolean | nil, align: { [integer]: string, ... } | nil, padding: integer | nil, ... } | nil) -> string
 function M.table(data, opts)
-  opts = opts or {}
+  opts = (opts or {}) --[[:! { border: boolean | nil, align: { [integer]: string, ... } | nil, padding: integer | nil, ... }]]
   local border = opts.border ~= false  -- default true
   local align = opts.align or {}
   local padding = opts.padding or 1

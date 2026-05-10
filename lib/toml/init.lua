@@ -1229,7 +1229,7 @@ local function quote_key(k)
 end
 
 -- Check if a value is a "simple" table (no nested tables or arrays of tables)
---: (any) -> boolean
+--: (unknown) -> boolean
 local function is_simple_value(v)
   if type(v) ~= "table" then return true end
   if v.__toml_type then return true end
@@ -1287,37 +1287,40 @@ local function format_datetime(dt)
 end
 
 -- Encode a value inline (for arrays and inline tables)
---: (any) -> (string | nil, string)
+--: (unknown) -> (string | nil, string)
 local function encode_inline(v)
   local vtype = type(v)
   if vtype == "string" then
-    return '"' .. escape_basic_string(v) .. '"'
+    local vs = v --[[:! string]]
+    return '"' .. escape_basic_string(vs) .. '"'
   elseif vtype == "number" then
-    if v ~= v then return "nan" end
-    if v == huge then return "inf" end
-    if v == -huge then return "-inf" end
+    local vn = v --[[:! number]]
+    if vn ~= vn then return "nan" end
+    if vn == huge then return "inf" end
+    if vn == -huge then return "-inf" end
     -- integer check
-    if v == floor(v) and v >= -2^53 and v <= 2^53 then
-      return format("%d", v)
+    if vn == floor(vn) and vn >= -2^53 and vn <= 2^53 then
+      return format("%d", vn)
     end
-    return tostring(v)
+    return tostring(vn)
   elseif vtype == "boolean" then
-    return v and "true" or "false"
+    return v --[[:! boolean]] and "true" or "false"
   elseif vtype == "table" then
-    if v.__toml_type then
-      return format_datetime(v)
+    local vt = v --[[:! { __toml_type: string | nil, [integer]: unknown, [string]: unknown, ... }]]
+    if vt.__toml_type then
+      return format_datetime(vt --[[:! toml_datetime]])
     end
     -- array
-    if #v > 0 or next(v) == nil then
+    if #vt > 0 or next(vt --[[:! { [unknown]: unknown }]]) == nil then
       -- treat as array if sequential keys or empty
       local is_arr = true
       local count = 0
-      for _ in pairs(v) do count = count + 1 end
-      if count ~= #v then is_arr = false end
+      for _ in pairs(vt --[[:! { [unknown]: unknown }]]) do count = count + 1 end
+      if count ~= #vt then is_arr = false end
       if is_arr then
         local parts = {}
-        for i = 1, #v do
-          local enc, err = encode_inline(v[i])
+        for i = 1, #vt do
+          local enc, err = encode_inline(vt[i])
           if not enc then return nil, err end
           parts[i] = enc
         end

@@ -59,13 +59,14 @@ end
 
 -- Extract the cap declarations for a specific entry from a manifest.
 -- Merges top-level manifest.caps with per-entry entry.caps (entry wins).
---: (any, string) -> { [string]: unknown }
+--: (unknown, string) -> { [string]: unknown }
 local function collect_entry_caps(manifest, entry_key)
 	local caps = {}
-	if type(manifest.caps) == "table" then
-		for k, v in pairs(manifest.caps) do caps[k] = v end
+	local manifest_ = manifest --[[:! { caps: unknown, entry: unknown, entries: unknown, ... }]]
+	if type(manifest_.caps) == "table" then
+		for k, v in pairs(manifest_.caps) do caps[k] = v end
 	end
-	local entries = manifest.entry or manifest.entries
+	local entries = manifest_.entry or manifest_.entries
 	if type(entries) == "table" then
 		local entry = entries[entry_key]
 		if type(entry) == "table" and type(entry.caps) == "table" then
@@ -97,13 +98,14 @@ end
 -- decision (undecided) — the daemon dispatch gate must block undecided
 -- required caps before app_loader is called. Falls back to auto_grants only
 -- when index_db lacks get_grants (test stubs with a raw db handle).
---: (any, string, { [string]: unknown }) -> { [string]: boolean | nil }
+--: (unknown, string, { [string]: unknown }) -> { [string]: boolean | nil }
 local function resolve_grants(index_db, app_id, cap_decls)
-	if not index_db or not index_db.get_grants then
+	local index_db_ = index_db --[[:! { get_grants: ((...unknown) -> unknown) | nil, ... } | nil]]
+	if not index_db_ or not index_db_.get_grants then
 		-- Raw db handle (no grant API) — auto-grant for test-stub compat.
 		return auto_grants(cap_decls)
 	end
-	local stored = index_db:get_grants(tonumber(app_id) or 0)
+	local stored = index_db_:get_grants(tonumber(app_id) or 0)
 	local grants = {}
 	for name in pairs(cap_decls) do
 		grants[name] = stored[name]  -- nil = undecided; false = denied

@@ -15,18 +15,19 @@ end
 local M = {}
 
 -- Returns a predicate from a string type name or function.
---: (string | (any) -> boolean) -> (any) -> boolean
+--:: UnistNode = { type: string, ... }
+--: (string | (UnistNode) -> boolean) -> (UnistNode) -> boolean
 local function make_test(spec)
   if type(spec) == "string" then
     local t = spec
     return function(node) return node.type == t end
   else
-    return spec
+    return spec --[[:! (UnistNode) -> boolean]]
   end
 end
 
 -- Shallow-copy a node, then give it a new children array (or none).
---: (any, any[] | nil) -> any
+--: (UnistNode, UnistNode[] | nil) -> UnistNode
 local function copy_node(node, new_children)
   local copy = {}
   local node_map = node --[[:! { [string]: any }]]

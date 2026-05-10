@@ -27,17 +27,19 @@ local M = {}
 
 -- Returns the single img child if node is a <p> with exactly one element child
 -- that is an <img>; otherwise returns nil.
---: (any) -> any
+--:: HastNode = { type: string, tag?: string, value?: string, children?: { [integer]: HastNode }, props?: { [string]: unknown }, ... }
+--: (HastNode) -> HastNode | nil
 local function sole_img_child(node)
   if node.type ~= "element" or node.tag ~= "p" then return nil end
-  local children = node.children or {}
+  local children = (node.children or {}) --[[:! { [integer]: HastNode, ... }]]
   -- Allow trailing/leading whitespace text nodes but require exactly one
   -- non-whitespace child and that child must be an <img>.
   local img_node = nil
   for _, child in ipairs(children) do
     if child.type == "text" then
       -- Allow pure-whitespace text nodes.
-      if child.value and child.value:match("^%s*$") then
+      local cv = child.value
+      if cv and cv:match("^%s*$") then
         -- ok, skip
       else
         return nil
@@ -58,7 +60,7 @@ end
 
 -- ── Tree transformer ──────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: ({ [integer]: HastNode, ... } | nil, string | nil) -> nil
 local function transform_children(children, class)
   if not children then return end
   for i, node in ipairs(children) do
@@ -96,12 +98,12 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (any, any) -> nil
+--: (unknown, { class: string | nil, ... } | nil) -> nil
 function M.plugin(processor, opts)
-  opts = opts or {}
+  opts = opts or ({} --[[:! { class: string | nil }]])
   local class = opts.class
 
-  processor:use_transformer(function(tree)
+  ;(processor --[[:! { use_transformer: (...unknown) -> unknown, ... }]]):use_transformer(function(tree)
     if tree.children then
       transform_children(tree.children, class)
     end

@@ -118,28 +118,31 @@ local col_read = {
 
 -- ── parameter binding ─────────────────────────────────────────────────────────
 
---: (cdata, { [integer]: any }, integer) -> nil
+--: (cdata, { [integer]: unknown }, integer) -> nil
 local function bind(stmt, params, length)
 	for i = 1, length do
 		local x = params[i]
 		local t = type(x)
 		if t == "number" then
-			if x % 1 == 0 and x >= -2147483648 and x <= 2147483647 then
-				sqlite_ffi.sqlite3_bind_int(stmt, i, x)
+			local xn = x --[[:! number]]
+			if xn % 1 == 0 and xn >= -2147483648 and xn <= 2147483647 then
+				sqlite_ffi.sqlite3_bind_int(stmt, i, xn)
 			else
-				sqlite_ffi.sqlite3_bind_double(stmt, i, x)
+				sqlite_ffi.sqlite3_bind_double(stmt, i, xn)
 			end
 		elseif t == "string" then
-			sqlite_ffi_any.sqlite3_bind_text(stmt, i, x, #x, SQLITE_TRANSIENT)
+			local xs = x --[[:! string]]
+			sqlite_ffi_any.sqlite3_bind_text(stmt, i, xs, #xs, SQLITE_TRANSIENT)
 		elseif t == "boolean" then
-			sqlite_ffi.sqlite3_bind_int(stmt, i, x and 1 or 0)
+			sqlite_ffi.sqlite3_bind_int(stmt, i, x --[[:! boolean]] and 1 or 0)
 		elseif t == "cdata" then
-			local n = tonumber(x)
+			local xc = x --[[:! cdata]]
+			local n = tonumber(xc)
 			if n ~= nil then
-				if is_float_cdata(x) then sqlite_ffi.sqlite3_bind_double(stmt, i, x)
-				else sqlite_ffi.sqlite3_bind_int64(stmt, i, x) end
+				if is_float_cdata(xc) then sqlite_ffi.sqlite3_bind_double(stmt, i, xc)
+				else sqlite_ffi.sqlite3_bind_int64(stmt, i, xc) end
 			else
-				error("sqlite bind: cannot bind cdata " .. tostring(ffi.typeof(x)))
+				error("sqlite bind: cannot bind cdata " .. tostring(ffi.typeof(xc)))
 			end
 		elseif x == nil then
 			sqlite_ffi.sqlite3_bind_null(stmt, i)
@@ -215,7 +218,7 @@ end
 -- Signals error as: nil, "sqlite: <message>"
 -- NOTE: the iterator returns nil for a NULL column; since done is also nil, keep a
 -- non-nullable sentinel column first if any column may be NULL (SELECT 1, col ...).
---: (self: { db: cdata, ... }, string, ...number | string | boolean | nil) -> (function | nil, string | nil)
+--: (self: { db: cdata, ... }, string, ...number | string | boolean | nil) -> ((() -> unknown) | nil, string | nil)
 sqlite.query = function(self, sql, ...)
 	local stmt_ptr = ffi.new("sqlite3_stmt *[1]")
 	if sqlite_ffi.sqlite3_prepare_v2(self.db[0], sql, #sql + 1, stmt_ptr, nil) ~= 0 then

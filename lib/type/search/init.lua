@@ -37,7 +37,7 @@ local M = {}
 -- ---------------------------------------------------------------------------
 -- Extract public exports from a typechecker context.
 -- Returns array of { name, type_str, type_id, ctx }.
---: (ctx: any) -> { [integer]: { name: string, type_str: string } }
+--: (ctx: Ctx) -> { [integer]: { name: string, type_str: string } }
 local function extract_exports(ctx)
     --: { [integer]: { name: string, type_str: string } }
     local exports = {}
@@ -147,7 +147,7 @@ end
 -- ---------------------------------------------------------------------------
 -- Scope lookup helper
 -- ---------------------------------------------------------------------------
---: (ctx: any, name_id: integer) -> integer | nil
+--: (ctx: Ctx, name_id: integer) -> integer | nil
 local function lookup_binding(ctx, name_id)
     local s = ctx.scope
     while s do
