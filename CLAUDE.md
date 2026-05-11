@@ -93,7 +93,7 @@ See `docs/conventions.md` for the full spec. Short version:
 - Protocols: `connect` / `send` / `recv` / `close` — transport injected via opts, never created internally
 - Tiers: system > FFI > pure Lua, selected at load time, each independent, `M._tier` for introspection
 - Annotations: `--:` / `--::` only. `unknown` = TS `unknown` (caller must narrow). `any` = TS `any` (opt-out). Prefer `unknown`; `any` only when explicitly opting out and documented why.
-- **Casts: `--[[: T]]` is the checked cast (full subtyping required). `--[[:! T]]` is the overlap-checked force cast (use when narrowing `unknown` to a concrete `T` or `A | B` to `A`). `--[[:! any]]` is rejected — use `--[[: any]]` if you genuinely need an `any` cast.**
+- **Casts: `--[[: T]]` is the checked cast (full subtyping required). `--[[:! T]]` is the overlap-checked force cast — it is almost never correct. If `unknown` can't be narrowed with a type guard (`if type(x) == "string"`, discriminant check, etc.), the upstream producer has the wrong type annotation. Fix the producer. If `A | B` can't be narrowed to `A` with a discriminant check, that is a typechecker bug to fix. A force cast that papers over either case is wrong. `--[[:! any]]` is rejected — use `--[[: any]]` if you genuinely need an any cast.**
 - **`...` vs index signatures** — these are distinct. `...` is a structural subtyping marker: `{ name: string, ... }` accepts any table with at least `name`. It says nothing about reading arbitrary fields. `{ [string]: T }` is an index signature: any string key maps to `T`. Confusing them leads to open types on concrete data objects (wrong) or expecting arbitrary field reads to work on `...`-typed values (also wrong).
 
 ## Typechecker quick reference (learnxinyminutes style)
@@ -229,7 +229,10 @@ Type params are instantiated independently per call site. No explicit instantiat
 
 ```lua
 local x = expr --[[: T]]    -- checked cast: T must be a supertype of expr's type
-local x = expr --[[:! T]]   -- force cast: overlap-checked; use when narrowing unknown → T or A|B → A
+local x = expr --[[:! T]]   -- force cast: overlap-checked; almost never correct.
+                             -- If unknown: fix the upstream producer's type annotation.
+                             -- If A|B → A: use a discriminant check; if that fails, fix the typechecker.
+                             -- A force cast that substitutes for either is wrong.
 -- --[[:! any]] is REJECTED. Use --[[: any]] if you genuinely need an any cast.
 ```
 
