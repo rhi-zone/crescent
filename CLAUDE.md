@@ -280,9 +280,9 @@ end
 
 ```lua
 --:: ReturnOf<F>    = match F { () -> %R => R }               -- extract return type
---:: ParamOf<F>     = match F { (%P, ...any) -> any => P }    -- extract first param type
---:: ParamsOf<F>    = match F { (...%P) -> any => P }         -- all params as tuple
---:: Tail<F>        = match F { (any, ...%P) -> any => P }    -- params after first
+--:: ParamOf<F>     = match F { (%P, ..._) -> _ => P }    -- extract first param type
+--:: ParamsOf<F>    = match F { (...%P) -> _ => P }        -- all params as tuple
+--:: Tail<F>        = match F { (_, ...%P) -> _ => P }     -- params after first
 
 -- Table field distribution (result is a union of the expression per field)
 --:: Keys<T>        = match T { { ...[%K]: %V } => K }
