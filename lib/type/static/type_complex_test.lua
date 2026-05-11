@@ -1132,14 +1132,14 @@ local y = --[[:! string | integer]] x
     end)
 
     assert.it("ERROR: string -> integer (unrelated types)", function()
-        -- string and integer have no supertype/subtype relationship.
+        -- string and integer are disjoint: no value can be both.
         has_error([==[
 --: (integer) -> nil
 local function f(n) return nil end
 --: string
 local s = "hello"
 f(--[[:! integer]] s)
-]==], "unrelated")
+]==], "disjoint")
     end)
 
     assert.it("ERROR: number -> string (unrelated types)", function()
@@ -1148,7 +1148,7 @@ f(--[[:! integer]] s)
 local n = 1
 --: string
 local s = --[[:! string]] n
-]==], "unrelated")
+]==], "disjoint")
     end)
 
     assert.it("PASS: result type is the asserted type", function()
@@ -1206,13 +1206,13 @@ local n = x --[[:! integer]]
 ]==])
     end)
 
-    assert.it("ERROR: trailing --[[:! T]] rejects unrelated types", function()
+    assert.it("ERROR: trailing --[[:! T]] rejects disjoint types", function()
         has_error([==[
 --: string
 local s = "hi"
 --: integer
 local n = s --[[:! integer]]
-]==], "unrelated")
+]==], "disjoint")
     end)
 
     assert.it("PASS: trailing cast on parenthesized expression", function()

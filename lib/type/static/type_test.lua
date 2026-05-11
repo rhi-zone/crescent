@@ -4680,15 +4680,15 @@ local function check() return s end
     end)
 
     assert.it("setmetatable: prototype methods accessible via #__index meta slot", function()
-        -- Explicit #__index meta-slot annotation. --[[:! T]] now requires a
-        -- supertype/subtype relationship (TypeScript `as` semantics). Casting
-        -- Proto (a data table) to MyMeta (a metatable shape) is a structurally
-        -- unrelated cast; the correct escape is --[[: any]] then --[[: MyMeta]].
+        -- Explicit #__index meta-slot annotation — both paths should work.
+        -- --[[:! T]] is an overlap-checked force cast: Proto and MyMeta overlap
+        -- because any table can simultaneously have both a greet method and an
+        -- __index meta slot, so the cast is sound.
         v3_no_errors([==[
 --:: Proto = { greet: (Proto) -> string, ... }
 --:: MyMeta = { #__index: Proto }
 local Proto = {}
-local meta = (Proto --[[: any]]) --[[: MyMeta]]
+local meta = Proto --[[:! MyMeta]]
 --: (Proto) -> string
 function Proto:greet() return "hello" end
 local obj = setmetatable({}, meta)

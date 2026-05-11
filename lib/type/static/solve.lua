@@ -2391,11 +2391,15 @@ local function solve_check_args(ctx, c)
     return false
 end
 
--- Bidirectional-subtype-checked force cast: `--[[:! T]] expr`.
--- Succeeds iff `actual <: expected` (widening) OR `expected <: actual` (narrowing).
--- This matches TypeScript `as` semantics: the two types must share a
--- supertype/subtype relationship.  Disjoint types (e.g. string and integer)
--- are rejected even though they could theoretically share values at runtime.
+-- Overlap-checked force cast: `--[[:! T]] expr`.
+-- Succeeds iff `actual` and `expected` have any value in common (structural overlap).
+-- Disjoint types (e.g. string and integer, or function and table) are rejected.
+-- Common patterns that succeed:
+--   - unknown --[[:! T]]          (unknown overlaps everything)
+--   - T | nil --[[:! T]]          (nil-stripping: T overlaps with T|nil member)
+--   - A | B --[[:! A]]            (union projection: A overlaps with A)
+--   - {x,y} --[[:! {x}]          (struct width subtyping: shared fields compatible)
+--   - partial_literal --[[:! Full] (partial literal to full type: absent fields ok)
 -- Defers while either side is still a free TAG_VAR.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_overlap(ctx, c)
@@ -2410,22 +2414,12 @@ local function solve_overlap(ctx, c)
         if at.tag == TAG_VAR or at.tag == TAG_ROWVAR then return false end
         if bt.tag == TAG_VAR or bt.tag == TAG_ROWVAR then return false end
     end
-    -- any on either side: always allowed (any is an opt-out)
-    do
-        local at = ctx.types:get(actual)
-        local bt = ctx.types:get(expected)
-        if at.tag == TAG_ANY or bt.tag == TAG_ANY then return true end
-    end
-    -- actual <: expected (widening: e.g. string --[[:! string | integer]])
-    -- expected <: actual (narrowing: e.g. string | integer --[[:! string]])
-    -- Both hold trivially when actual == expected.
-    if unify_mod.try_unify(ctx, actual, expected) then return true end
-    if unify_mod.try_unify(ctx, expected, actual) then return true end
+    if unify_mod.types_overlap(ctx, actual, expected) then return true end
     add_error(ctx, line, col,
-        "force cast requires a supertype/subtype relationship: `"
+        "force cast has no overlap: `"
         .. types_mod.display_short(ctx, actual)
         .. "` and `" .. types_mod.display_short(ctx, expected)
-        .. "` are unrelated; use `--[[: any]]` to escape the type system entirely if intentional")
+        .. "` are disjoint; use `--[[: any]]` to escape the type system entirely if intentional")
     return true  -- error reported; don't defer further
 end
 
