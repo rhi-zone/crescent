@@ -316,7 +316,7 @@ encoder.ordered_map = function (t, opts)
 	return integer(#map, 160) .. table.concat(map --[[:! { [integer]: string }]])
 end
 
---: (_: function) -> string
+--: (_: (...unknown) -> unknown) -> string
 encoder["function"] = function (_) error("can't encode function") end
 
 mod.type_encoders = encoder
@@ -493,9 +493,9 @@ mod.type_decoders = decoder
 local decode_raw = function (s, opts)
 	local fh = {}
 	local pos = 1
-	local more --: function | nil
+	local more --: ((...unknown) -> unknown) | nil
 	if type(opts) == "function" then more = opts
-	elseif type(opts) == "table" then more = (opts --[[:! { more: function | nil, ... }]]).more
+	elseif type(opts) == "table" then more = (opts --[[:! { more: ((...unknown) -> unknown) | nil, ... }]]).more
 	elseif opts ~= nil then
 		error(("bad argument #2 to 'decode' (function or table expected, got %s)"):format(type(opts)))
 	end

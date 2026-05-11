@@ -875,7 +875,7 @@ if system_lib then
   -- ── System tier ────────────────────────────────────────────────────────────
   M._tier = "system"
 
-  local sl = system_lib --[[:! { argon2id_hash_raw: function, argon2i_hash_raw: function, argon2d_hash_raw: function, argon2id_hash_encoded: function, argon2i_hash_encoded: function, argon2d_hash_encoded: function, argon2id_verify: function, argon2i_verify: function, argon2d_verify: function, argon2_error_message: function, ... }]]
+  local sl = system_lib --[[:! { argon2id_hash_raw: (...unknown) -> unknown, argon2i_hash_raw: (...unknown) -> unknown, argon2d_hash_raw: (...unknown) -> unknown, argon2id_hash_encoded: (...unknown) -> unknown, argon2i_hash_encoded: (...unknown) -> unknown, argon2d_hash_encoded: (...unknown) -> unknown, argon2id_verify: (...unknown) -> unknown, argon2i_verify: (...unknown) -> unknown, argon2d_verify: (...unknown) -> unknown, argon2_error_message: (...unknown) -> unknown, ... }]]
   local raw_fns = {
     id = sl.argon2id_hash_raw,
     i  = sl.argon2i_hash_raw,
@@ -893,7 +893,7 @@ if system_lib then
   }
 
   local function errmsg(code)
-    return ffi.string(sl.argon2_error_message(code))
+    return ffi.string((sl.argon2_error_message(code) --[[:! cdata]]))
   end
 
   function M.hash(password, salt, opts)
@@ -904,7 +904,7 @@ if system_lib then
     if #salt < 8 then return nil, "salt must be at least 8 bytes (RFC 9106)" end
 
     local buf = ffi.new("uint8_t[?]", o.hash_len)
-    local fn = raw_fns[o.variant] --[[:! function]]
+    local fn = raw_fns[o.variant] --[[:! (...unknown) -> unknown]]
     local rc = fn(o.t, o.m, o.p, password, #password, salt, #salt, buf, o.hash_len)
     if rc ~= 0 then return nil, errmsg(rc) end
     return ffi.string(buf, o.hash_len --[[:! integer]])
@@ -919,7 +919,7 @@ if system_lib then
 
     local enc_len = 128 + math.ceil(#salt * 4 / 3) + math.ceil(o.hash_len * 4 / 3)
     local buf = ffi.new("char[?]", enc_len)
-    local fn = enc_fns[o.variant] --[[:! function]]
+    local fn = enc_fns[o.variant] --[[:! (...unknown) -> unknown]]
     local rc = fn(o.t, o.m, o.p, password, #password, salt, #salt, o.hash_len, buf, enc_len)
     if rc ~= 0 then return nil, errmsg(rc) end
     return ffi.string(buf)
@@ -930,9 +930,9 @@ if system_lib then
     if type(password) ~= "string" then return false, "password must be a string" end
     local parsed, err = parse_phc(encoded)
     if not parsed then return false, err end
-    local fn = ver_fns[parsed.variant] --[[:! function | nil]]
+    local fn = ver_fns[parsed.variant] --[[:! ((...unknown) -> unknown) | nil]]
     if not fn then return false, "unknown variant: " .. parsed.variant end
-    local rc = (fn --[[:! function]])(encoded, password, #password)
+    local rc = (fn --[[:! (...unknown) -> unknown]])(encoded, password, #password)
     if rc == 0 then
       return true
     elseif rc == 32 then  -- ARGON2_VERIFY_MISMATCH

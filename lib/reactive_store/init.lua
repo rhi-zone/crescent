@@ -129,7 +129,7 @@ end
 M.slice = function(opts)
   local name = opts.name --[[:! string]]
   local initial = opts.initial_state
-  local case_reducers = (opts.reducers or {}) --[[:! { [string]: function, ... }]]
+  local case_reducers = (opts.reducers or {}) --[[:! { [string]: (...unknown) -> unknown, ... }]]
 
   -- Build action creators and type->handler map
   local type_map = {}   -- "name/action_name" -> handler_fn
@@ -304,10 +304,10 @@ end
 
 -- Derived state: subscribes to a store and tracks a selector's result.
 -- M.derived(store, selector_fn) -> { get(), subscribe(fn) -> unsub }
---: ({ get_state: (self: unknown) -> unknown, subscribe: (self: unknown, fn: (unknown, unknown) -> unknown) -> function, ... }, function) -> unknown
+--: ({ get_state: (self: unknown) -> unknown, subscribe: (self: unknown, fn: (unknown, unknown) -> unknown) -> ((...unknown) -> unknown), ... }, (...unknown) -> unknown) -> unknown
 M.derived = function(store, selector_fn)
   local memo  = M.selector(selector_fn)
-  local _subs = {} --: { [integer]: function, ... }
+  local _subs = {} --: { [integer]: (...unknown) -> unknown, ... }
 
   local function current()
     return memo(store:get_state())

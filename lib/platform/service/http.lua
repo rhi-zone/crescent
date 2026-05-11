@@ -87,7 +87,7 @@ end
 -- Returns an empty table when not available (non-LuaJIT / no debug info).
 -- NOTE: this only works when the function was compiled with debug info.
 -- The first parameter is always "caps" by convention and is skipped.
---: (fn: function) -> { [integer]: string }
+--: (fn: (...unknown) -> unknown) -> { [integer]: string }
 local function param_names_of(fn)
 	local fn_a = (fn --[[:! (...unknown) -> unknown]])
 	local info = debug.getinfo(fn_a, "u")
@@ -233,7 +233,7 @@ local function build_routes(caps, methods, descriptors)
 		local desc = descriptors[fn_name] or {}
 		local http_method
 		local path_pattern
-		local param_names = param_names_of(fn --[[:! function]])
+		local param_names = param_names_of(fn --[[:! (...unknown) -> unknown]])
 
 		if desc.method then
 			http_method = desc.method:upper()

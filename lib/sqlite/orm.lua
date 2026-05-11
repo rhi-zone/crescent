@@ -26,7 +26,7 @@ end
 
 -- ── database ──────────────────────────────────────────────────────────────────
 
---:: SqliteStmt = { exec: (self: SqliteStmt, ...unknown) -> (boolean | nil, string | nil), rows: (self: SqliteStmt, ...unknown) -> function, ... }
+--:: SqliteStmt = { exec: (self: SqliteStmt, ...unknown) -> (boolean | nil, string | nil), rows: (self: SqliteStmt, ...unknown) -> (...unknown) -> unknown, ... }
 --:: SqliteConn = { execute: (self: SqliteConn, sql: string, ...unknown) -> (boolean | nil, string | nil), prepare: (self: SqliteConn, sql: string) -> (SqliteStmt | nil, string | nil), last_insert_rowid: (self: SqliteConn) -> (integer | nil, string | nil), ... }
 --:: SqlitexDatabase = { db: SqliteConn, models: { [string]: unknown }, ... }
 --:: SqlitexModel = { name: string, db: SqlitexDatabase, schema: SchemaType, keyorder: { [integer]: string }, _stmts: { insert: SqliteStmt | nil, delete: SqliteStmt | nil, select: SqliteStmt | nil, find: SqliteStmt | nil, update: SqliteStmt | nil, ... }, ... }

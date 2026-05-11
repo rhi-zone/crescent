@@ -617,7 +617,7 @@ local function normalize(arb_arg)
 	error("arb.check: expected an arbitrary or array of arbitraries", 3)
 end
 
---: (fn: function, is_tuple: boolean) -> (unknown) -> unknown
+--: (fn: (...unknown) -> unknown, is_tuple: boolean) -> (unknown) -> unknown
 local function make_runner(fn, is_tuple)
 	if is_tuple then
 		return function(v)
@@ -663,7 +663,7 @@ end
 -- arb.check: run N trials; shrink on failure.
 -- Returns ok, info (nil on success).
 -- info = { desc, trial, seed, original, shrunk, shrink_steps, err }
---: (desc: string, arb_arg: Arb | { [integer]: Arb, ... }, fn: function, opts: { trials?: integer, max_size?: integer, seed?: number, max_shrink?: integer, ... } | nil) -> (boolean, CheckInfo | nil)
+--: (desc: string, arb_arg: Arb | { [integer]: Arb, ... }, fn: (...unknown) -> unknown, opts: { trials?: integer, max_size?: integer, seed?: number, max_shrink?: integer, ... } | nil) -> (boolean, CheckInfo | nil)
 function M.check(desc, arb_arg, fn, opts)
 	opts = opts or {}
 	local trials    = opts.trials    or DEFAULT_TRIALS
@@ -701,7 +701,7 @@ end
 -- (any function, untyped) so callers can annotate callbacks with specific param types
 -- without annotation churn or force casts inside the body.
 -- opts allows trial-count and seed customization; open record for forward compat.
---: (desc: string, arb_arg: Arb | { [integer]: Arb, ... }, fn: function, opts: { trials?: integer, max_size?: integer, seed?: number, ... } | nil) -> ()
+--: (desc: string, arb_arg: Arb | { [integer]: Arb, ... }, fn: (...unknown) -> unknown, opts: { trials?: integer, max_size?: integer, seed?: number, ... } | nil) -> ()
 function M.it(desc, arb_arg, fn, opts)
 	local T = require("lib.test.assert")
 	T.it(desc, function()

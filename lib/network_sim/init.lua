@@ -9,7 +9,7 @@ M._tier = "pure"
 --:: NetMsg = { from: unknown, to: unknown, msg: unknown, deliver_at: integer, id: integer }
 --:: NetTickResult = { delivered: { [integer]: NetMsg }, dropped: { [integer]: NetMsg } }
 --:: Net = {
---::   _nodes: { [string]: function },
+--::   _nodes: { [string]: (...unknown) -> unknown },
 --::   _queue: { [integer]: NetMsg },
 --::   _history: { [integer]: NetMsg },
 --::   _partitions: { [string]: boolean | nil },

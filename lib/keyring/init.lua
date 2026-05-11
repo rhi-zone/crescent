@@ -48,7 +48,7 @@ end
 local function try_libsecret()
 	local ok, lib_raw = pcall(ffi.load, "secret-1")
 	if not ok then return nil end
-	local lib = (lib_raw --[[: unknown]]) --[[:! { secret_password_store_sync: function, secret_password_lookup_sync: function, secret_password_free: function, secret_password_clear_sync: function, secret_password_search_sync: function, secret_retrievable_get_attributes: function, SecKeychainAddGenericPassword: function, SecKeychainFindGenericPassword: function, SecKeychainItemFreeContent: function, SecKeychainItemDelete: function, CFRelease: function, SecKeychainSearchCreateFromAttributes: function, SecKeychainSearchCopyNext: function, SecKeychainItemCopyAttributesAndData: function, SecKeychainItemFreeAttributesAndData: function, ... }]]
+	local lib = (lib_raw --[[: unknown]]) --[[:! { secret_password_store_sync: (...unknown) -> unknown, secret_password_lookup_sync: (...unknown) -> unknown, secret_password_free: (...unknown) -> unknown, secret_password_clear_sync: (...unknown) -> unknown, secret_password_search_sync: (...unknown) -> unknown, secret_retrievable_get_attributes: (...unknown) -> unknown, SecKeychainAddGenericPassword: (...unknown) -> unknown, SecKeychainFindGenericPassword: (...unknown) -> unknown, SecKeychainItemFreeContent: (...unknown) -> unknown, SecKeychainItemDelete: (...unknown) -> unknown, CFRelease: (...unknown) -> unknown, SecKeychainSearchCreateFromAttributes: (...unknown) -> unknown, SecKeychainSearchCopyNext: (...unknown) -> unknown, SecKeychainItemCopyAttributesAndData: (...unknown) -> unknown, SecKeychainItemFreeAttributesAndData: (...unknown) -> unknown, ... }]]
 
 	-- glib is a separate shared object; try a few names.  libsecret links glib,
 	-- but LuaJIT's ffi.load uses RTLD_LOCAL so glib symbols are not visible via
@@ -205,7 +205,7 @@ local function try_libsecret()
 			return nil, "libsecret: search failed"
 		end
 		local names = {}
-		local node = glist
+		local node = (glist --[[:! { data: unknown, next: unknown, ... } | nil]])
 		while node ~= nil do
 			local retrievable = node.data
 			if retrievable ~= nil then
@@ -221,7 +221,7 @@ local function try_libsecret()
 					glib.g_hash_table_unref(ht)
 				end
 			end
-			node = node.next
+			node = (node.next --[[:! { data: unknown, next: unknown, ... } | nil]])
 		end
 		glib.g_list_free_full(glist, glib.g_object_unref)
 		table.sort(names)
@@ -236,7 +236,7 @@ end
 local function try_keychain()
 	local ok, lib_raw = pcall(ffi.load, "Security")
 	if not ok then return nil end
-	local lib = (lib_raw --[[: unknown]]) --[[:! { secret_password_store_sync: function, secret_password_lookup_sync: function, secret_password_free: function, secret_password_clear_sync: function, secret_password_search_sync: function, secret_retrievable_get_attributes: function, SecKeychainAddGenericPassword: function, SecKeychainFindGenericPassword: function, SecKeychainItemFreeContent: function, SecKeychainItemDelete: function, CFRelease: function, SecKeychainSearchCreateFromAttributes: function, SecKeychainSearchCopyNext: function, SecKeychainItemCopyAttributesAndData: function, SecKeychainItemFreeAttributesAndData: function, ... }]]
+	local lib = (lib_raw --[[: unknown]]) --[[:! { secret_password_store_sync: (...unknown) -> unknown, secret_password_lookup_sync: (...unknown) -> unknown, secret_password_free: (...unknown) -> unknown, secret_password_clear_sync: (...unknown) -> unknown, secret_password_search_sync: (...unknown) -> unknown, secret_retrievable_get_attributes: (...unknown) -> unknown, SecKeychainAddGenericPassword: (...unknown) -> unknown, SecKeychainFindGenericPassword: (...unknown) -> unknown, SecKeychainItemFreeContent: (...unknown) -> unknown, SecKeychainItemDelete: (...unknown) -> unknown, CFRelease: (...unknown) -> unknown, SecKeychainSearchCreateFromAttributes: (...unknown) -> unknown, SecKeychainSearchCopyNext: (...unknown) -> unknown, SecKeychainItemCopyAttributesAndData: (...unknown) -> unknown, SecKeychainItemFreeAttributesAndData: (...unknown) -> unknown, ... }]]
 
 	local ok2 = pcall(ffi.cdef, [[
 		typedef int            OSStatus;

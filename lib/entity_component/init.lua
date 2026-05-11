@@ -42,7 +42,7 @@ end
 -- World
 -- ---------------------------------------------------------------------------
 
---:: WorldObj = { _next_id: integer, _alive: { [integer]: boolean }, _components: { [string]: { [integer]: unknown } }, _defaults: { [string]: unknown }, _listeners: { [string]: { [integer]: function } }, emit: function, destroy: function, ... }
+--:: WorldObj = { _next_id: integer, _alive: { [integer]: boolean }, _components: { [string]: { [integer]: unknown } }, _defaults: { [string]: unknown }, _listeners: { [string]: { [integer]: (...unknown) -> unknown } }, emit: (...unknown) -> unknown, destroy: (...unknown) -> unknown, ... }
 local World = {}
 World.__index = World
 

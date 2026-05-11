@@ -94,7 +94,7 @@ end
 -- path_args:   list of raw subcommand names (strings) to prepend as args
 -- node:        HelpSchema or HelpSubcommand (any — either shape is valid here)
 -- opts:        MakeApiOpts (popen, stderr)
---: (string, string[], HelpNode, MakeApiOpts) -> function
+--: (string, string[], HelpNode, MakeApiOpts) -> (...unknown) -> unknown
 local function make_leaf_fn(cmd, path_args, node, opts)
 	return function(...)
 		local varargs = { ... }

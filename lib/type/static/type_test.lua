@@ -5028,7 +5028,7 @@ local r = constrained("this should violate T: number")
         -- Structural constraint on a named type: passing number where F: Mappable
         -- expected should fail.
         v3_has_error([[
---:: Mappable = { map: function }
+--:: Mappable = { map: (...unknown) -> unknown }
 --: <F: Mappable, A, B>(f: A -> B, fa: F) -> F
 local function map_generic(f, fa) return fa end
 local result = map_generic(function(x) return x + 1 end, 42)

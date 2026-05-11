@@ -209,7 +209,7 @@ function M.registry_cap(opts)
 	if not ffi_ready or advapi32 == nil then
 		return nil, "registry cap: advapi32 FFI unavailable"
 	end
-	local adv = advapi32 --[[:! { RegOpenKeyExW: function, RegCloseKey: function, RegQueryValueExW: function, RegSetValueExW: function, RegEnumKeyExW: function, RegEnumValueW: function, ... }]]
+	local adv = advapi32 --[[:! { RegOpenKeyExW: (...unknown) -> unknown, RegCloseKey: (...unknown) -> unknown, RegQueryValueExW: (...unknown) -> unknown, RegSetValueExW: (...unknown) -> unknown, RegEnumKeyExW: (...unknown) -> unknown, RegEnumValueW: (...unknown) -> unknown, ... }]]
 
 	local root = opts_.root
 	if not root then error("registry_cap: opts.root is required") end

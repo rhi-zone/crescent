@@ -309,7 +309,7 @@ local function compute_hc(flg, bd)
 	local ok_xxh, xxh = pcall(require, "lib.hash.xxhash")
 	if ok_xxh then
 		local xxh_any = xxh --[[: unknown]]
-		local xxh_ = xxh_any --[[:! { xxh32: function, ... }]]
+		local xxh_ = xxh_any --[[:! { xxh32: (...unknown) -> unknown, ... }]]
 		if xxh_.xxh32 then
 			local header_bytes = char(flg, bd)
 			local h = (xxh_.xxh32(header_bytes, 0) --[[: unknown]]) --[[:! integer]]

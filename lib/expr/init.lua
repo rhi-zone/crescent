@@ -46,7 +46,7 @@ local FUNS = {
   floor = math.floor,
   ceil  = math.ceil,
   round = function(x) return math.floor(x + 0.5) end,
-} --[[:! { [string]: function }]]
+} --[[:! { [string]: (...unknown) -> unknown }]]
 
 local CONSTS = { pi = math.pi, e = math.exp(1) } --[[:! { [string]: number }]]
 
@@ -340,7 +340,7 @@ eval_ast = function(ast, env)
       if v == nil then return nil, err end
       vals[i] = v --[[:! number]]
     end
-    return fn(unpack(vals))
+    return (fn(unpack(vals)) --[[:! number | nil]])
   elseif ast.op == "neg" then
     local v, err = eval_ast(ast.arg, env)
     if v == nil then return nil, err end

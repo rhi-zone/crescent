@@ -379,7 +379,7 @@ end
 
 -- compose(f, g, ...) -> right-to-left composition. compose(f,g)(x) = f(g(x))
 function M.compose(...)
-  local fns = { ... } --: { [integer]: function }
+  local fns = { ... } --: { [integer]: (...unknown) -> unknown }
   local n = #fns
   if n == 0 then return M.identity end
   if n == 1 then return fns[1] end
@@ -394,7 +394,7 @@ end
 
 -- pipe(f, g, ...) -> left-to-right composition. pipe(f,g)(x) = g(f(x))
 function M.pipe(...)
-  local fns = { ... } --: { [integer]: function }
+  local fns = { ... } --: { [integer]: (...unknown) -> unknown }
   local n = #fns
   if n == 0 then return M.identity end
   if n == 1 then return fns[1] end
@@ -450,14 +450,14 @@ function M.partial(fn, ...)
 end
 
 -- curry(fn, n) -> curried fn accepting n arguments one at a time.
---: (function, integer | nil) -> function
+--: ((...unknown) -> unknown, integer | nil) -> (...unknown) -> unknown
 function M.curry(fn, n)
   if n == nil then
     local info = debug.getinfo(fn, "u")
     n = (info and info.nparams or 0) --[[:! integer]]
   end
   if n <= 1 then return fn end
-  --: ({ [integer]: nil }, integer) -> function
+  --: ({ [integer]: nil }, integer) -> (...unknown) -> unknown
   local function step(collected, remaining)
     return function(...)
       local args = {} --[[:! { [integer]: nil }]]
@@ -492,7 +492,7 @@ end
 -- juxt(f, g, ...) -> fn that applies each function to the same args.
 -- Returns a table of results: {f(x), g(x), h(x)}.
 function M.juxt(...)
-  local fns = { ... } --: { [integer]: function }
+  local fns = { ... } --: { [integer]: (...unknown) -> unknown }
   local n = #fns
   return function(...)
     local results = {}
@@ -563,7 +563,7 @@ end
 -- comp_xf(...) -> compose transducers left-to-right.
 -- comp_xf(map_xf(f), filter_xf(g)) applies map then filter.
 function M.comp_xf(...)
-  local xfs = { ... } --: { [integer]: function }
+  local xfs = { ... } --: { [integer]: (...unknown) -> unknown }
   local n = #xfs
   if n == 0 then return M.identity end
   if n == 1 then return xfs[1] end

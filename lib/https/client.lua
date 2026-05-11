@@ -70,8 +70,8 @@ M.request = function(req)
 	req.body = req.body or ""
 	local client_, err = socket.create("inet", "stream", "tcp")
 	if not client_ then return nil, err end
-	local client --: { connect: function, send: function, receive: function, close: function, fd: integer, ... } | nil
-	client = (client_ --[[: unknown]]) --[[:! { connect: function, send: function, receive: function, close: function, fd: integer, ... }]]
+	local client --: { connect: (self: unknown, ...unknown) -> (boolean | nil, string | nil), send: (self: unknown, ...unknown) -> (boolean | nil, string | nil), receive: (self: unknown, ...unknown) -> (string | nil, string | nil), close: (self: unknown, ...unknown) -> unknown, fd: integer, ... } | nil
+	client = (client_ --[[: unknown]]) --[[:! { connect: (self: unknown, ...unknown) -> (boolean | nil, string | nil), send: (self: unknown, ...unknown) -> (boolean | nil, string | nil), receive: (self: unknown, ...unknown) -> (string | nil, string | nil), close: (self: unknown, ...unknown) -> unknown, fd: integer, ... }]]
 
 	local client_tls, tls_config = tls_setup()
 	make_tls_hooks(client_tls, client)
@@ -157,8 +157,8 @@ M.stream = function(req)
 	req.body = req.body or ""
 	local client_, err = socket.create("inet", "stream", "tcp")
 	if not client_ then return nil, err end
-	local client --: { connect: function, send: function, receive: function, close: function, fd: integer, ... } | nil
-	client = (client_ --[[: unknown]]) --[[:! { connect: function, send: function, receive: function, close: function, fd: integer, ... }]]
+	local client --: { connect: (self: unknown, ...unknown) -> (boolean | nil, string | nil), send: (self: unknown, ...unknown) -> (boolean | nil, string | nil), receive: (self: unknown, ...unknown) -> (string | nil, string | nil), close: (self: unknown, ...unknown) -> unknown, fd: integer, ... } | nil
+	client = (client_ --[[: unknown]]) --[[:! { connect: (self: unknown, ...unknown) -> (boolean | nil, string | nil), send: (self: unknown, ...unknown) -> (boolean | nil, string | nil), receive: (self: unknown, ...unknown) -> (string | nil, string | nil), close: (self: unknown, ...unknown) -> unknown, fd: integer, ... }]]
 
 	local client_tls, tls_config = tls_setup()
 	make_tls_hooks(client_tls, client)

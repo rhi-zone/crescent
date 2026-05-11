@@ -213,8 +213,8 @@ end
 -- Optional extras used when present:
 --   g:node_data(id), g:edge_data(u,v), g._directed
 
---:: NativeAdapter = { _g: { nodes: function, node_data: function, edges: function, edge_data: function, has_edge: function, neighbors: function, in_neighbors?: function, _directed?: boolean, ... }, [string]: unknown }
---:: QGraph = { _nodes: { [unknown]: unknown }, _adj: { [unknown]: unknown }, _in_adj: { [unknown]: unknown }, _nedges: integer, _directed: boolean, node: function, edge: function, ... }
+--:: NativeAdapter = { _g: { nodes: (...unknown) -> unknown, node_data: (...unknown) -> unknown, edges: (...unknown) -> unknown, edge_data: (...unknown) -> unknown, has_edge: (...unknown) -> unknown, neighbors: (...unknown) -> unknown, in_neighbors?: (...unknown) -> unknown, _directed?: boolean, ... }, [string]: unknown }
+--:: QGraph = { _nodes: { [unknown]: unknown }, _adj: { [unknown]: unknown }, _in_adj: { [unknown]: unknown }, _nedges: integer, _directed: boolean, node: (...unknown) -> unknown, edge: (...unknown) -> unknown, ... }
 --:: QueryT = { _g: { node_ids: (self: unknown) -> { [integer]: unknown }, node_data: (self: unknown, unknown) -> unknown, edge_list: (self: unknown) -> { [integer]: unknown }, edge_data: (self: unknown, unknown, unknown) -> unknown, has_edge: (self: unknown, unknown, unknown) -> boolean, out_neighbors: (self: unknown, unknown) -> { [integer]: unknown }, in_neighbors: (self: unknown, unknown) -> { [integer]: unknown }, is_directed: (self: unknown) -> boolean, ... }, _ops: unknown, [string]: unknown }
 
 -- Wraps a native crescent Graph (from lib/graph) directly for efficiency.
