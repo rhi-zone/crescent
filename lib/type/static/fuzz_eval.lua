@@ -280,8 +280,6 @@ arb.it("[eval] match CaptureId<T1 | T2> == T1 | T2 for table union",
 
 -- Bare typing context for oracle tests (no prelude, no parsing).
 -- Returns a partial Ctx for algebra-level tests (only types/unify fields set).
--- Force-cast to Ctx since not all fields are populated; callers only touch
--- types/unify-related fields.
 --: () -> Ctx
 local function make_ctx()
 	local pool = intern_mod.new()
@@ -289,12 +287,12 @@ local function make_ctx()
 	ctx.err               = { errors = {} }
 	ctx.lit_cache         = {}
 	ctx.declared_subtypes = {}
-	return ctx --[[:! Ctx]]
+	return ctx
 end
 
 --: (ctx: Ctx, name_str: string) -> (integer, integer)
 local function make_named_tid(ctx, name_str)
-	local nid = intern_mod.intern(ctx.pool, name_str) --[[:! integer]]
+	local nid = intern_mod.intern(ctx.pool, name_str)
 	local tid = types_mod.alloc_type(ctx, TAG_NAMED)
 	local t   = ctx.types:get(tid)
 	t.data[0] = nid

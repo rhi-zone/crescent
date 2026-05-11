@@ -142,13 +142,14 @@ local function subtype(ctx, a, b)
 	return unify_mod.try_unify(ctx, a, b)
 end
 
+-- fuzz_arb.TypeNode is a single open struct (all fields merged); the local TypeNode
+-- above is the proper discriminated union. Both describe the same runtime values.
+-- Cast to `any` to cross this type boundary: the two TypeNode declarations are
+-- semantically equivalent but structurally distinct alias definitions.
+-- `any` cast is correct here (not force cast) per CLAUDE.md.
 --: (node: TypeNode) -> string
 local function type_str(node)
-	-- farb.type_to_string takes (node, outer); outer defaults to 0 at runtime,
-	-- but the inferred annotation requires it explicitly. Pass 0.
-	-- tostring narrows the unknown return value of an externally-inferred
-	-- function back to string, avoiding a force cast.
-	return tostring(farb.type_to_string((node --[[: unknown]]) --[[:! { a: TypeNode, b: TypeNode, fields: { [integer]: { name: string, type: TypeNode } }, key: string, name: string, params: { [integer]: TypeNode }, ret: TypeNode, tag: string, types: { [integer]: TypeNode }, val: TypeNode, value: unknown }]], 0))
+	return farb.type_to_string(node --[[: any]], 0)
 end
 
 -- ── Invariants ────────────────────────────────────────────────────────────────
