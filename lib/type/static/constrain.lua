@@ -2278,7 +2278,9 @@ ExprRule[NODE_CAST_EXPR] = function(ctx, nid)
             return inner_tid
         end
     end
+    ctx._ann_warn_line = n.line
     local cast_tid = resolve_annotation_type(ctx, ann.type_id)
+    ctx._ann_warn_line = 0
     if band(n.flags, defs.FLAG_FORCE_CAST) ~= 0 then
         -- --[[:! T]] expr: overlap-checked force cast. Succeeds when actual and
         -- expected have any value in common. Permits unknown→T and (A|B)→A,
@@ -3841,6 +3843,9 @@ process_type_decls = function(ctx)
                         ctx.scope = temp
                     end
 
+                    --: integer
+                    local r_line = decl_lines[r] or 0
+                    ctx._ann_warn_line = r_line
                     if r.newtype then
                         local ann_nom = ann.types:get(r.type_id)
                         local underlying = resolve_annotation_type(ctx, ann_nom.data[2])
@@ -3853,6 +3858,7 @@ process_type_decls = function(ctx)
                     else
                         alias.body = resolve_annotation_type(ctx, r.type_id)
                     end
+                    ctx._ann_warn_line = 0
 
                     -- Resolve raw_bounds (annotation-arena IDs) into checker-context type IDs.
                     -- These are resolved in the same temporary param scope so that bound types
