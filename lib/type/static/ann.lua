@@ -1005,13 +1005,11 @@ function M.parse_annotations(annotations, pool, filename)
                 return nom
             end
 
-            -- function keyword: function(A, B): C
-            if word == "function" then
-                if peek(s) == byte("(") then
-                    return parse_primary(s)  -- re-enter with '(' handling
-                end
-                -- bare 'function' means any function
-                return alloc_type(defs.TAG_FUNCTION)
+            -- function keyword: function(A, B) -> C
+            -- bare 'function' without '(' is treated as an unknown identifier name
+            -- (falls through to named-type lookup below, which produces T_UNKNOWN)
+            if word == "function" and peek(s) == byte("(") then
+                return parse_primary(s)  -- re-enter with '(' handling
             end
 
             -- Named type, possibly with generic args: Name or Name<T, U>
