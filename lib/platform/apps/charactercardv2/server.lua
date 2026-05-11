@@ -40,9 +40,9 @@ local png_mod = require("lib.png")
 local M = {}
 
 -- ConvRow: a row returned by the conversation DB (lib.conversation or shared_db).
---:: ConvRow = any
+--:: ConvRow = { id: string, session_id: string, parent_id: string | nil, role: string, content: string, created_at: integer, canonical_child_id: string | nil, metadata: unknown, speaker?: string, ... }
 -- ConvSession: a session row from the conversation DB.
---:: ConvSession = any
+--:: ConvSession = { id: string, app_id: string, created_at: integer, metadata: unknown, ... }
 -- LibConvDb: the lib.conversation handle interface.
 -- Methods use `:` call syntax. Used after is_lib_conv() narrows a ConvDb to LibConvDb.
 --:: LibConvDb = { create_session: (self: LibConvDb, string) -> (ConvSession | nil, string | nil), get_session: (self: LibConvDb, string) -> (ConvSession | nil, string | nil), list_sessions: (self: LibConvDb, string) -> (ConvSession[] | nil, string | nil), delete_session: (self: LibConvDb, string) -> (boolean | nil, string | nil), add_message: (self: LibConvDb, string, string | nil, string, string, unknown) -> (ConvRow | nil, string | nil), get_message: (self: LibConvDb, string) -> (ConvRow | nil, string | nil), get_children: (self: LibConvDb, string | nil) -> (ConvRow[] | nil, string | nil), get_roots: (self: LibConvDb, string) -> (ConvRow[] | nil, string | nil), get_canonical_path: (self: LibConvDb, string | nil) -> (ConvRow[] | nil, string | nil), swipe_to: (self: LibConvDb, string) -> (boolean | nil, string | nil), update_message: (self: LibConvDb, string, unknown) -> (ConvRow | nil, string | nil), delete_subtree: (self: LibConvDb, string) -> ({ deleted: integer } | nil, string | nil) }
@@ -59,20 +59,42 @@ local M = {}
 --::   time?: TimeCap,
 --::   conversations?: ConvDb,
 --:: }
--- Internal types: complex duck-typed objects. Using `any` allows body code to access
--- fields freely. These are NOT cap types — they're app-internal data structures.
---:: CardData = any
---:: AuthorsNote = any
---:: GroupMember = any
---:: GroupState = any
---:: State = any
--- JsonBody: parsed JSON request body. Using `any` as value type since the body
--- structure varies by endpoint; endpoint code checks and casts as needed.
---:: JsonBody = { [string]: any }
+-- Internal types: complex duck-typed objects. Open index signatures allow body
+-- code to access fields freely (returning unknown). These are NOT cap types —
+-- they're app-internal data structures.
+--:: CardData = { [string]: unknown, name?: string, description?: string, personality?: string, scenario?: string, system_prompt?: string, post_history_instructions?: string, creator_notes?: string, character_version?: string, mes_example?: string, first_mes?: string, character_book?: unknown, extensions?: { [string]: unknown }, alternate_greetings?: string[], ... }
+--:: AuthorsNote = { text: string, depth: integer | nil, position: string | nil }
+--:: GroupMember = { [string]: unknown, name?: string, description?: string, card_json?: string, is_primary?: boolean, card?: CardData | nil, ... }
+--:: GroupState = { enabled: boolean, members: Arr<GroupMember>, turn_order: string, next_speaker: integer, ... }
+-- RegexScript: a regex find-replace script entry.
+--:: RegexScript = { name: string, find: string, replace: string, enabled: boolean, scope: string, order: integer | nil, ... }
+-- InstructTemplate: an instruct formatting template.
+--:: InstructTemplate = { name: string, mode: string, system_prefix: string, system_suffix: string, user_prefix: string, user_suffix: string, assistant_prefix: string, assistant_suffix: string, separator: string, stop_strings: string[], ... }
+-- UserLorebook: a user-scope lorebook entry.
+--:: UserLorebook = { id: string, name: string, entries: { [integer]: unknown } | nil, active: boolean, ... }
+-- State: the per-session app state table. conv, session_id, _time_fn, and
+-- group are initialized to placeholder values in create_state() and replaced
+-- by M.create() before any handler runs.
+--:: State = { card: CardData | nil, lorebook: { [integer]: unknown } | nil, user_name: string, conv: ConvDb, _time_fn: () -> integer, session_id: string, settings: { [string]: unknown } | nil, personas: { [integer]: { name: string, description: string } } | nil, active_persona: string | nil, authors_note: AuthorsNote | nil, regex_scripts: Arr<RegexScript>, instruct_templates: Arr<InstructTemplate>, instruct_active: string | nil, user_lorebooks: Arr<UserLorebook>, _card_state_warned: boolean, group: GroupState, linked_lorebooks?: { [integer]: unknown }, ... }
+-- Persona: a persona entry.
+--:: Persona = { name: string, description: string }
+-- Settings: generation settings table.
+--:: Settings = { [string]: unknown, ... }
+-- Context: the assembled LLM message array (chat turns).
+--:: Context = LlmMessage[]
+-- TokenCount: result of compute_token_count.
+--:: TokenCount = { context_used: integer, context_max: integer, response_budget: integer, available: integer, messages: integer, lorebook_entries: integer }
+-- MsgResponse: the per-message response object sent to the frontend.
+--:: MsgResponse = { id: string, role: string, content: string, parent_id: string | nil, sibling_index: integer, sibling_count: integer, speaker?: string, token_count?: TokenCount | nil, reload_below?: boolean, ... }
+-- CreateOpts: options passed to M.create.
+--:: CreateOpts = { user_name?: string, no_static?: boolean, conversations?: ConvDb, ... }
+-- JsonBody: parsed JSON request body. Values are unknown since structure varies
+-- by endpoint; endpoint code checks and casts as needed.
+--:: JsonBody = { [string]: unknown }
 -- OpaqueData: a return value whose structure is complex and duck-typed internally.
 -- Functions returning OpaqueData are typed precisely enough for their callers;
--- the `any` allows all the internal duck-typing patterns.
---:: OpaqueData = any
+-- the open index signature allows all the internal duck-typing patterns.
+--:: OpaqueData = { [string]: unknown, ... }
 --:: Req = { method: string, target?: string, path?: string, body?: string, last_event_id?: string, ... }
 --:: Res = { status: integer, headers: { [string]: unknown }, body: string | nil, send_event: (data: string, opts: { id?: unknown, event?: string } | nil) -> (true | nil, string | nil), close: () -> nil, ... }
 
@@ -139,7 +161,7 @@ local function conv_create_session(db, time_fn)
 		{ id, "card", now }
 	)
 	if err then return nil, err end
-	return { id = id, app_id = "card", created_at = now }
+	return { id = id, app_id = "card", created_at = now, metadata = nil }
 end
 
 --: (ConvDb, string) -> (ConvSession | nil, string | nil)
@@ -207,7 +229,7 @@ end
 local function conv_decode_metadata(r)
 	if r and r.metadata and type(r.metadata) == "string" then
 		local json_mod = require("lib.format.json")
-		local v = json_mod.decode(r.metadata)
+		local v = json_mod.decode(r.metadata --[[:! string]])
 		if v then r.metadata = v end
 	end
 	return r
@@ -395,7 +417,7 @@ local function read_json_body(req)
 	if #body == 0 then return {} end
 	local ok, val = pcall(json.decode, body)
 	if not ok then return nil end
-	return --[[:! { [string]: any }]] val
+	return --[[:! { [string]: unknown }]] val
 end
 
 -- ── State ───────────────────────────────────────────────────────────────────
@@ -412,24 +434,29 @@ local DEFAULT_SETTINGS = {
 local SETTINGS_KEYS = { "temperature", "top_p", "max_tokens", "frequency_penalty", "presence_penalty", "max_context" }
 
 local function create_state()
+	-- Fields conv, _time_fn, session_id, group are nil at construction but are
+	-- always set in M.create() before the handler is returned. The State type
+	-- reflects the post-init invariant; M.create() must uphold it.
+	-- conv, _time_fn, session_id, group use placeholder values here and are
+	-- replaced by M.create() before handlers run; the casts are safe.
 	return {
-		card = nil,           -- CardData
-		lorebook = nil,       -- NormalizedEntry[]
+		card = nil,
+		lorebook = nil,
 		user_name = "User",
-		conv = nil,           -- conversation db handle (shared_db cap or lib.conversation handle)
-		_time_fn = nil,       -- () -> integer, set in create() before first use
-		session_id = nil,     -- active session id
-		settings = nil,       -- generation settings (initialized from defaults + kv)
-		personas = nil,       -- {name, description}[] (initialized on create)
-		active_persona = nil, -- name string or nil
-		authors_note = nil,   -- {text, depth, position} (initialized on create)
-		regex_scripts = {},   -- {name, find, replace, enabled, scope, order}[]
-		instruct_templates = {}, -- instruct template definitions
-		instruct_active = nil,   -- name of active template (nil = chat mode)
-		user_lorebooks = {},  -- { id, name, entries[], active }[] (user-scope lorebooks, persists across cards)
-		_card_state_warned = false, -- whether we've logged the "no self_write" fallback warning
-		group = nil,          -- {enabled, members[], turn_order, next_speaker}
-	}
+		conv = {} --[[:! ConvDb]],
+		_time_fn = function() return 0 end,
+		session_id = "" --[[:! string]],
+		settings = nil,
+		personas = nil,
+		active_persona = nil,
+		authors_note = nil,
+		regex_scripts = {},
+		instruct_templates = {},
+		instruct_active = nil,
+		user_lorebooks = {},
+		_card_state_warned = false,
+		group = {} --[[:! GroupState]],
+	} --[[:! State]]
 end
 
 -- gen_book_id: stable identifier for a user lorebook. Not a UUID; just a
@@ -468,10 +495,10 @@ local AUTHORS_NOTE_EXT_KEY = "depth_prompt"
 local function build_chara_for_write(state)
 	local card = state.card
 	if not card then return nil end
-	local data = {} --[[: any]]
+	local data = {} --[[:! { [string]: unknown }]]
 	local envelope = { spec = "chara_card_v2", spec_version = "2.0", data = data }
 	-- Copy all current card fields (name, description, personality, ...).
-	for k, v in pairs(--[[:! { [string]: any }]] card) do data[k] = v end
+	for k, v in pairs(--[[:! { [string]: unknown }]] card) do data[k] = v end
 	-- Bake the in-memory lorebook back into character_book.
 	if state.lorebook and #state.lorebook > 0 then
 		data.character_book = lorebook_mod.to_ccv2(--[[:! { ... }[] ]] state.lorebook)
@@ -599,21 +626,19 @@ local function default_settings()
 	return s
 end
 
---: (OpaqueData) -> LlmCallOpts
+--: (Settings | nil) -> LlmCallOpts
 local function llm_opts_from_settings(settings)
-	return --[[:! LlmCallOpts]] {
-		temperature = settings and settings.temperature or nil,
-		top_p = settings and settings.top_p or nil,
-		max_tokens = settings and settings.max_tokens or nil,
-		frequency_penalty = settings and settings.frequency_penalty or nil,
-		presence_penalty = settings and settings.presence_penalty or nil,
+	return {
+		temperature = settings and (settings.temperature --[[:! number | nil]]) or nil,
+		top_p = settings and (settings.top_p --[[:! number | nil]]) or nil,
+		max_tokens = settings and (settings.max_tokens --[[:! integer | nil]]) or nil,
 		stop = nil,
-	}
+	} --[[:! LlmCallOpts]]
 end
 
 -- ── Card loading ────────────────────────────────────────────────────────────
 
---: (State, Caps) -> (OpaqueData, string | nil)
+--: (State, Caps) -> (CardData | nil, string | nil)
 local function load_card(state, caps)
 	if not caps.self then return nil, "no self capability" end
 	local raw = caps.self.metadata("chara")
@@ -660,27 +685,27 @@ end
 
 -- get_canonical_path: returns the active path for the session.
 -- Wraps conv_get_canonical_path().
---: (State) -> (OpaqueData, string | nil)
+--: (State) -> (ConvRow[] | nil, string | nil)
 local function get_canonical_path(state)
-	return conv_get_canonical_path(state.conv, state.session_id)
+	return conv_get_canonical_path(state.conv --[[:! ConvDb]], state.session_id)
 end
 
 -- get_siblings: returns all siblings of a message (children of its parent).
 -- For root messages (parent_id is nil), returns all roots in the session.
---: (State, OpaqueData) -> OpaqueData
+--: (State, ConvRow) -> (ConvRow[] | nil, string | nil)
 local function get_siblings(state, msg)
 	if msg.parent_id == nil then
-		return conv_get_roots(state.conv, state.session_id)
+		return conv_get_roots(state.conv --[[:! ConvDb]], state.session_id --[[:! string]])
 	end
-	return conv_get_children(state.conv, msg.parent_id)
+	return conv_get_children(state.conv --[[:! ConvDb]], msg.parent_id)
 end
 
 -- sibling_info: compute sibling_index (0-based) and sibling_count for a message.
---: (State, OpaqueData) -> (integer, integer)
+--: (State, ConvRow) -> (integer, integer)
 local function sibling_info(state, msg)
 	local siblings, err = get_siblings(state, msg)
 	if not siblings then return 0, 1 end
-	local sibs = --[[:! any[] ]] siblings
+	local sibs = --[[:! ConvRow[] ]] siblings
 	local index = 0
 	for i, s in ipairs(sibs) do
 		if s.id == msg.id then index = i - 1; break end
@@ -689,7 +714,7 @@ local function sibling_info(state, msg)
 end
 
 -- msg_response: format a message for the API response.
---: (State, OpaqueData) -> OpaqueData
+--: (State, ConvRow) -> MsgResponse
 local function msg_response(state, msg)
 	local idx, total = sibling_info(state, msg)
 	local resp = {
@@ -701,16 +726,17 @@ local function msg_response(state, msg)
 		sibling_count = total,
 	}
 	local speaker = msg.speaker
-	if not speaker and msg.metadata and msg.metadata.speaker then
-		speaker = msg.metadata.speaker
+	if not speaker and type(msg.metadata) == "table" then
+		local meta = msg.metadata --[[:! { [string]: unknown }]]
+		if meta.speaker then speaker = meta.speaker --[[:! string]] end
 	end
-	if speaker then resp.speaker = speaker end
+	if speaker then resp.speaker = speaker --[[:! string]] end
 	return resp
 end
 
 -- ── Persona helpers (forward declarations for context assembly) ────────────
 
---: (OpaqueData, string | nil) -> (OpaqueData, integer | nil)
+--: (Persona[] | nil, string | nil) -> (Persona | nil, integer | nil)
 local function find_persona(personas, name)
 	for i, p in ipairs(personas) do
 		if p.name == name then return p, i end
@@ -718,22 +744,23 @@ local function find_persona(personas, name)
 	return nil
 end
 
---: (State) -> OpaqueData
+--: (State) -> Persona | nil
 local function get_active_persona(state)
 	if not state.active_persona then return nil end
-	return find_persona(state.personas, state.active_persona)
+	local p = find_persona(state.personas, state.active_persona)
+	return p
 end
 
 -- ── Context assembly ────────────────────────────────────────────────────────
 
---: (State) -> OpaqueData
+--: (State) -> { char: string, user: string }
 local function make_macro_env(state)
 	local card = state.card
-	if not card then return {} end
-	return { char = card.name or "", user = state.user_name }
+	if not card then return { char = "", user = state.user_name } end
+	return { char = card.name --[[:! string]] or "", user = state.user_name }
 end
 
---: (State, Caps, OpaqueData) -> (OpaqueData, string | nil)
+--: (State, Caps, ConvRow[] | nil) -> (Context | nil, string | nil)
 local function build_context(state, caps, path)
 	local card = state.card
 	if not path then
@@ -741,11 +768,12 @@ local function build_context(state, caps, path)
 		path, err = get_canonical_path(state)
 		if not path then return nil, err end
 	end
+	local path_ = path --[[:! ConvRow[] ]]
 
 	if not card then
-		local result = {}
-		for i = 1, #path do
-			result[#result + 1] = { role = path[i].role, content = path[i].content }
+		local result = {} --[[: LlmMessage[] ]]
+		for i = 1, #path_ do
+			result[#result + 1] = { role = path_[i].role --[[:! "user" | "assistant" | "system"]], content = path_[i].content }
 		end
 		return result
 	end
@@ -757,44 +785,45 @@ local function build_context(state, caps, path)
 		count_tokens = function(text) return math.ceil(#text / 4) end
 	end
 
-	local max_context = state.settings and state.settings.max_context or 4096
-	local max_response = state.settings and state.settings.max_tokens or 512
+	local max_context = (state.settings and state.settings.max_context --[[:! integer | nil]]) or 4096
+	local max_response = (state.settings and state.settings.max_tokens --[[:! integer | nil]]) or 512
 
 	local active_p = get_active_persona(state)
-	local lorebook_all = {} --[[: any]]
+	local lorebook_all = {} --[[: unknown[] ]]
 	if state.lorebook then
-		for _, e in ipairs(state.lorebook) do lorebook_all[#lorebook_all + 1] = e end
+		for _, e in ipairs(--[[:! { [integer]: unknown }]] state.lorebook) do lorebook_all[#lorebook_all + 1] = e end
 	end
-	for _, book in ipairs(state.linked_lorebooks or {}) do
-		if type(book.entries) == "table" then
-			for _, e in ipairs(book.entries) do lorebook_all[#lorebook_all + 1] = e end
+	for _, book in ipairs(--[[:! { [string]: unknown }[] ]] (state.linked_lorebooks or {})) do
+		if type((book --[[:! { [string]: unknown }]]).entries) == "table" then
+			for _, e in ipairs((book --[[:! { entries: { [integer]: unknown }, [string]: unknown }]]).entries) do lorebook_all[#lorebook_all + 1] = e end
 		end
 	end
 	for _, book in ipairs(state.user_lorebooks or {}) do
 		if book.active and book.entries then
-			for _, e in ipairs(book.entries) do lorebook_all[#lorebook_all + 1] = e end
+			for _, e in ipairs(--[[:! { [integer]: unknown }]] book.entries) do lorebook_all[#lorebook_all + 1] = e end
 		end
 	end
 	local assemble_opts = {
 		card = card,
-		history = path,
+		history = path_,
 		count_tokens = count_tokens,
 		max_context = max_context,
 		max_response = max_response,
-		char_name = card.name,
+		char_name = card.name --[[:! string | nil]],
 		user_name = state.user_name,
 		persona = active_p and active_p.description or nil,
-	} --[[: any]]
+	} --[[: { [string]: unknown, ... }]]
 	if #lorebook_all > 0 then
 		(assemble_opts --[[:! { lorebook_entries: { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... } }, ... }]]).lorebook_entries = lorebook_all --[[:! { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... } }]]
 	end
-	local result, err = context_mod.assemble(assemble_opts)
+	local result_raw, err = context_mod.assemble(assemble_opts)
+	local result = result_raw --[[:! LlmMessage[] | nil]]
 	if not result then
-		local fallback = {} --[[: any]]
-		for i = 1, #path do
-			fallback[#fallback + 1] = { role = path[i].role, content = path[i].content }
+		local fallback = {} --[[: LlmMessage[] ]]
+		for i = 1, #path_ do
+			fallback[#fallback + 1] = { role = path_[i].role --[[:! "user" | "assistant" | "system"]], content = path_[i].content }
 		end
-		result = --[[: any]] fallback
+		result = fallback
 	end
 
 	-- Insert Author's Note at configured depth.
@@ -815,7 +844,7 @@ end
 
 -- compute_token_count: build context and count tokens without calling the LLM.
 -- Returns a table suitable for JSON response.
---: (State, Caps) -> OpaqueData
+--: (State, Caps) -> (TokenCount | nil, string | nil)
 local function compute_token_count(state, caps)
 	local path, perr = get_canonical_path(state)
 	if not path then return nil, perr end
@@ -831,18 +860,18 @@ local function compute_token_count(state, caps)
 	end
 
 	local total = 0
-	for _, msg in ipairs(--[[:! any[] ]] context) do
+	for _, msg in ipairs(--[[:! LlmMessage[] ]] context) do
 		total = total + count_tokens(msg.content)
 	end
 
-	local max_context = state.settings and state.settings.max_context or 4096
-	local max_tokens = state.settings and state.settings.max_tokens or 512
+	local max_context = (state.settings and state.settings.max_context --[[:! integer | nil]]) or 4096
+	local max_tokens = (state.settings and state.settings.max_tokens --[[:! integer | nil]]) or 512
 	local available = math.max(0, max_context - total - max_tokens)
 
 	-- Count triggered lorebook entries.
 	local lorebook_count = 0
 	if state.lorebook then
-		for _, e in ipairs(state.lorebook) do
+		for _, e in ipairs(--[[:! { [integer]: { enabled?: boolean, [string]: unknown } }]] state.lorebook) do
 			if e.enabled then lorebook_count = lorebook_count + 1 end
 		end
 	end
@@ -859,7 +888,7 @@ end
 
 -- build_context_to_parent: build context from root to a given parent message.
 -- Used for generating siblings (swipe/new, edit).
---: (State, Caps, string | nil) -> (OpaqueData, string | nil)
+--: (State, Caps, string | nil) -> (Context | nil, string | nil)
 local function build_context_to_parent(state, caps, parent_id)
 	if parent_id == nil then
 		-- Parent is the session root — context is empty (no messages before root).
@@ -867,9 +896,10 @@ local function build_context_to_parent(state, caps, parent_id)
 	end
 	-- Walk up from parent_id to root, then reverse.
 	local chain = {}
-	local current_id = parent_id
+	local current_id = parent_id --[[:! string | nil]]
 	while current_id do
-		local msg, err = conv_get_message(state.conv, current_id)
+		local cid = current_id --[[:! string]]
+		local msg, err = conv_get_message(state.conv, cid)
 		if not msg then return nil, err end
 		chain[#chain + 1] = msg
 		current_id = msg.parent_id
@@ -997,12 +1027,12 @@ local DEFAULT_INSTRUCT_TEMPLATES = {
 -- format_for_instruct(messages, template) -> messages
 -- If template is nil or mode="chat", returns messages unchanged.
 -- If mode="instruct", formats into a single user message using template prefixes/suffixes.
---: (OpaqueData, OpaqueData) -> OpaqueData
+--: (Context, InstructTemplate | nil) -> Context
 local function format_for_instruct(messages, template)
 	if not template or template.mode == "chat" then return messages end
 	local parts = {}
 	local sep = template.separator or ""
-	for i, msg in ipairs(--[[:! any[] ]] messages) do
+	for i, msg in ipairs(--[[:! LlmMessage[] ]] messages) do
 		local prefix, suffix
 		if msg.role == "system" then
 			prefix = template.system_prefix or ""
@@ -1031,7 +1061,7 @@ end
 M._format_for_instruct = format_for_instruct
 M._DEFAULT_INSTRUCT_TEMPLATES = DEFAULT_INSTRUCT_TEMPLATES
 
---: (OpaqueData, OpaqueData) -> OpaqueData
+--: (InstructTemplate[] | nil, string | nil) -> (InstructTemplate | nil, integer | nil)
 local function find_instruct_template(templates, name)
 	for i, t in ipairs(templates) do
 		if t.name == name then return t, i end
@@ -1047,14 +1077,15 @@ local function save_instruct(state, caps)
 end
 
 -- Get the active instruct template (nil if none or chat mode).
---: (State) -> OpaqueData
+--: (State) -> InstructTemplate | nil
 local function get_active_instruct(state)
 	if not state.instruct_active or state.instruct_active == "" then return nil end
-	return find_instruct_template(state.instruct_templates, state.instruct_active)
+	local t = find_instruct_template(state.instruct_templates, state.instruct_active)
+	return t
 end
 
 -- Apply instruct template to messages before LLM call.
---: (State, OpaqueData) -> OpaqueData
+--: (State, Context) -> Context
 local function apply_instruct(state, messages)
 	local template = get_active_instruct(state)
 	return format_for_instruct(messages, template)
@@ -1068,10 +1099,11 @@ local function save_session_id(state, caps)
 	caps.kv.set("card_session_id", state.session_id)
 end
 
---: (Caps) -> OpaqueData
+--: (Caps) -> string | nil
 local function load_session_id(caps)
 	if not caps.kv then return nil end
-	return caps.kv.get("card_session_id")
+	local v = caps.kv.get("card_session_id")
+	return v --[[:! string | nil]]
 end
 
 -- ── Greeting ────────────────────────────────────────────────────────────────
@@ -1079,10 +1111,13 @@ end
 --: (State) -> nil
 local function init_greeting(state)
 	local card = state.card
-	if not card or not card.first_mes or #card.first_mes == 0 then return end
+	if not card then return end
+	local first_mes = card.first_mes --[[:! string | nil]]
+	if not first_mes then return end
+	if #first_mes == 0 then return end
 
 	local env = make_macro_env(state)
-	local content = macro_mod.substitute(card.first_mes, env)
+	local content = macro_mod.substitute(first_mes, env)
 
 	-- Create primary greeting as root message.
 	local msg, err = conv_add_message(state.conv, state.session_id, nil, "assistant", content, state._time_fn)
@@ -1128,7 +1163,7 @@ local function get_session_preview(state, session_id)
 	return text
 end
 
---: (State, OpaqueData) -> OpaqueData
+--: (State, ConvRow[]) -> MsgResponse[]
 local function format_messages(state, path)
 	local result = {}
 	for _, msg in ipairs(path) do
@@ -1143,7 +1178,7 @@ local function switch_to_session(state, caps, session_id)
 	save_session_id(state, caps)
 end
 
---: (State, Caps) -> (OpaqueData, OpaqueData, string | nil)
+--: (State, Caps) -> (ConvSession | nil, MsgResponse[] | nil, string | nil)
 local function create_new_session(state, caps)
 	local session, serr = conv_create_session(state.conv, state._time_fn)
 	if not session then return nil, nil, serr end
@@ -1183,35 +1218,37 @@ local function save_group(state, caps)
 		else
 			serializable.members[i] = {
 				name = m.name,
-				card_json = card_mod.to_json(m.card),
+				card_json = card_mod.to_json(m.card --[[: any]]),
 			}
 		end
 	end
 	caps.kv.set("group", json.encode(serializable))
 end
 
---: (State) -> OpaqueData
+--: (State) -> { name: string, is_primary: boolean }[]
 local function group_members_response(state)
-	local members = {}
-	for _, m in ipairs(state.group.members) do
-		members[#members + 1] = { name = m.name, is_primary = m.is_primary or false }
+	local g = state.group --[[:! GroupState]]
+	local members = {} --[[: { name: string, is_primary: boolean }[] ]]
+	for _, m in ipairs(g.members) do
+		members[#members + 1] = { name = m.name --[[:! string]] or "", is_primary = m.is_primary and true or false }
 	end
 	return members
 end
 
---: (State) -> OpaqueData
+--: (State) -> { enabled: boolean, members: { name: string, is_primary: boolean }[], turn_order: string }
 local function group_response(state)
+	local g = state.group --[[:! GroupState]]
 	return {
-		enabled = state.group.enabled,
+		enabled = g.enabled,
 		members = group_members_response(state),
-		turn_order = state.group.turn_order,
+		turn_order = g.turn_order,
 	}
 end
 
 -- Build context for a specific group member's turn.
---: (State, Caps, OpaqueData, OpaqueData) -> OpaqueData
+--: (State, Caps, GroupMember, ConvRow[]) -> (Context | nil, string | nil)
 local function build_group_context(state, caps, speaker_member, path)
-	local speaker_card = speaker_member.card
+	local speaker_card = speaker_member.card --[[:! CardData | nil]]
 	if not speaker_card then return build_context(state, caps, path) end
 
 	local count_tokens
@@ -1221,37 +1258,36 @@ local function build_group_context(state, caps, speaker_member, path)
 		count_tokens = function(text) return math.ceil(#text / 4) end
 	end
 
-	local max_context = state.settings and state.settings.max_context or 4096
-	local max_response = state.settings and state.settings.max_tokens or 512
+	local max_context = (state.settings and state.settings.max_context --[[:! integer | nil]]) or 4096
+	local max_response = (state.settings and state.settings.max_tokens --[[:! integer | nil]]) or 512
 
 	-- Label history messages with speaker names for group context.
-	local labeled_history = {}
-	for _, msg in ipairs(--[[:! any[] ]] path) do
+	local labeled_history = {} --[[: LlmMessage[] ]]
+	for _, msg in ipairs(--[[:! ConvRow[] ]] path) do
 		local content --[[: string]] = msg.content
 		if msg.role == "assistant" and msg.speaker then
-			content = msg.speaker .. ": " .. content
+			content = (msg.speaker --[[:! string]]) .. ": " .. content
 		elseif msg.role == "user" then
 			content = state.user_name .. ": " .. content
 		end
-		labeled_history[#labeled_history + 1] = { role = msg.role, content = content }
+		labeled_history[#labeled_history + 1] = { role = msg.role --[[:! "user" | "assistant" | "system"]], content = content }
 	end
 
 	local active_p = get_active_persona(state)
-	local result = context_mod.assemble({
+	local result_raw2 = context_mod.assemble({
 		card = speaker_card,
 		history = labeled_history,
 		count_tokens = count_tokens,
 		max_context = max_context,
 		max_response = max_response,
-		char_name = speaker_card.name,
+		char_name = (speaker_card.name --[[:! string | nil]]) or "",
 		user_name = state.user_name,
-		persona = active_p and active_p.description or nil,
-		lorebook_entries = state.lorebook,
+		lorebook_entries = (state.lorebook or {}) --[[:! { [integer]: { constant?: boolean, content?: string, depth?: integer, enabled?: boolean, ignoreBudget?: boolean, order?: integer, position?: integer, role?: integer, ... } }]],
 	})
-	if not result then
+	if not result_raw2 then
 		return labeled_history
 	end
-	local res2 = --[[: any]] result
+	local res2 = result_raw2 --[[:! LlmMessage[] ]]
 
 	-- Insert Author's Note at configured depth.
 	local an = state.authors_note
@@ -1269,14 +1305,14 @@ local function build_group_context(state, caps, speaker_member, path)
 end
 
 -- Pick the next speaker(s) based on turn order.
---: (State) -> OpaqueData
+--: (State) -> GroupMember[]
 local function pick_next_speakers(state)
-	local group = state.group
+	local group = state.group --[[:! GroupState]]
 	local members = group.members
 	if #members == 0 then return {} end
 
 	if group.turn_order == "round_robin" then
-		local idx = group.next_speaker
+		local idx = group.next_speaker or 1
 		if idx < 1 or idx > #members then idx = 1 end
 		group.next_speaker = (idx % #members) + 1
 		return { members[idx] }
@@ -1287,7 +1323,7 @@ local function pick_next_speakers(state)
 		return members
 	else
 		-- Default: round_robin behavior.
-		local idx = group.next_speaker
+		local idx = group.next_speaker or 1
 		if idx < 1 or idx > #members then idx = 1 end
 		group.next_speaker = (idx % #members) + 1
 		return { members[idx] }
@@ -1316,7 +1352,7 @@ local function api_post_group_add(state, caps, _params, body, res)
 	if not body or not body.card_json then
 		return json_err(res, 400, "card_json required")
 	end
-	local card_data, cerr = card_mod.from_json(body.card_json)
+	local card_data, cerr = card_mod.from_json(body.card_json --[[:! string]])
 	if not card_data then
 		return json_err(res, 400, "invalid card: " .. tostring(cerr))
 	end
@@ -1403,8 +1439,8 @@ local function api_get_card_export(state, caps, _params, _body, res)
 	if not bytes then
 		return json_err(res, 500, "export: " .. tostring(rerr))
 	end
-	local card_name = (state.card and state.card.name) or "card"
-	local safe_name = card_name:gsub('[/\\:*?"<>|]', "_")
+	local card_name = ((state.card and state.card.name --[[:! string | nil]]) or "card")
+	local safe_name = (card_name --[[:! string]]):gsub('[/\\:*?"<>|]', "_")
 	res.status = 200
 	res.headers["Content-Type"] = "image/png"
 	res.headers["Content-Disposition"] = 'attachment; filename="' .. safe_name .. '.png"'
@@ -1449,7 +1485,7 @@ end
 local function api_post_message(state, caps, _params, body, res)
 	if not caps.llm then return json_err(res, 503, "no LLM capability configured") end
 	if not body or not body.content then return json_err(res, 400, "content required") end
-	local text = body.content
+	local text = body.content --[[:! string]]
 	if type(text) ~= "string" or #text == 0 then return json_err(res, 400, "empty content") end
 
 	-- Apply user_input regex scripts.
@@ -1470,24 +1506,32 @@ local function api_post_message(state, caps, _params, body, res)
 		local responses = {}
 		local parent_id = user_msg.id
 		for _, speaker in ipairs(speakers) do
-			local path2 = get_canonical_path(state)
-			local context = build_group_context(state, caps, speaker, path2)
-			local resp, gerr = caps.llm.call(apply_instruct(state, context), llm_opts_from_settings(state.settings))
-			if not resp then
+			local path2, p2err = get_canonical_path(state)
+			if not path2 then return json_err(res, 500, p2err) end
+			local context, ctx_err = build_group_context(state, caps, speaker, path2)
+			if not context then return json_err(res, 500, ctx_err) end
+			local ctx_ = context --[[:! LlmMessage[] ]]
+			local inst_ctx = apply_instruct(state, ctx_) --[[:! LlmMessage[] ]]
+			local llm_ret = { caps.llm.call(inst_ctx, llm_opts_from_settings(state.settings)) }
+			local resp_raw = llm_ret[1] --[[:! string | nil]]
+			local gerr = llm_ret[2] --[[:! string | nil]]
+			if not resp_raw then
 				if #responses == 0 then
 					conv_delete_subtree(state.conv, user_msg.id)
 					return json_err(res, 502, "LLM error: " .. tostring(gerr))
 				end
 				break
 			end
-			local resp_str = apply_regex_scripts(state, --[[:! string]] resp, "ai_output")
-			local meta = { speaker = speaker.name }
+			local resp = resp_raw
+			local resp_str = apply_regex_scripts(state, resp, "ai_output")
+			local speaker_name = speaker.name --[[:! string]] or ""
+			local meta = { speaker = speaker_name }
 			local asst_msg, aerr = conv_add_message(state.conv, state.session_id, parent_id, "assistant", resp_str, state._time_fn, meta)
 			if not asst_msg then return json_err(res, 500, aerr) end
-			asst_msg.speaker = speaker.name
+			asst_msg.speaker = speaker_name
 			parent_id = asst_msg.id
 			local r = msg_response(state, asst_msg)
-			r.speaker = speaker.name
+			r.speaker = speaker_name
 			responses[#responses + 1] = r
 		end
 		save_group(state, caps)
@@ -1500,8 +1544,14 @@ local function api_post_message(state, caps, _params, body, res)
 	end
 
 	-- Build context (canonical path now includes user_msg).
-	local context = build_context(state, caps)
-	local response, err = caps.llm.call(apply_instruct(state, context), llm_opts_from_settings(state.settings))
+	local context, ctx_err = build_context(state, caps)
+	if not context then
+		conv_delete_subtree(state.conv, user_msg.id)
+		return json_err(res, 500, ctx_err)
+	end
+	local llm_r1 = { caps.llm.call(apply_instruct(state, context), llm_opts_from_settings(state.settings)) }
+	local response = llm_r1[1] --[[:! string | nil]]
+	local err = llm_r1[2] --[[:! string | nil]]
 	if not response then
 		-- Rollback: delete user message.
 		conv_delete_subtree(state.conv, user_msg.id)
@@ -1529,7 +1579,7 @@ end
 local function api_post_message_stream(state, caps, _params, body, res)
 	if not caps.llm then return json_err(res, 503, "no LLM capability configured") end
 	if not body or not body.content then return json_err(res, 400, "content required") end
-	local text = body.content
+	local text = body.content --[[:! string]]
 	if type(text) ~= "string" or #text == 0 then return json_err(res, 400, "empty content") end
 
 	-- Apply user_input regex scripts.
@@ -1552,7 +1602,11 @@ local function api_post_message_stream(state, caps, _params, body, res)
 	if not user_msg then return json_err(res, 500, uerr) end
 
 	-- Build context.
-	local context = build_context(state, caps)
+	local context, bctx_err = build_context(state, caps)
+	if not context then
+		conv_delete_subtree(state.conv, user_msg.id)
+		return json_err(res, 500, bctx_err)
+	end
 
 	-- Track client connection state. Once a send_event fails (client disconnect
 	-- or revocation), further sends are skipped. The LLM stream cannot be
@@ -1574,11 +1628,14 @@ local function api_post_message_stream(state, caps, _params, body, res)
 
 	-- Stream LLM response.
 	local llm_stream_opts = llm_opts_from_settings(state.settings)
-	local response, err = caps.llm.call_stream(apply_instruct(state, context), function(token)
+	local ctx_stream = context --[[:! LlmMessage[] ]]
+	local llm_rs = { caps.llm.call_stream(apply_instruct(state, ctx_stream), function(token)
 		if client_gone then return end
 		local sok = res.send_event(json.encode({ type = "token", token = token }))
 		if not sok then client_gone = true end
-	end, llm_stream_opts)
+	end, llm_stream_opts) }
+	local response = llm_rs[1] --[[:! string | nil]]
+	local err = llm_rs[2] --[[:! string | nil]]
 
 	if not response then
 		-- Rollback: delete user message.
@@ -1592,7 +1649,7 @@ local function api_post_message_stream(state, caps, _params, body, res)
 	end
 
 	-- Apply ai_output regex scripts.
-	local resp_str = apply_regex_scripts(state, --[[:! string]] response, "ai_output")
+	local resp_str = apply_regex_scripts(state, response --[[:! string]], "ai_output")
 
 	-- Add assistant message.
 	local asst_msg, aerr = conv_add_message(state.conv, state.session_id, user_msg.id, "assistant", resp_str, state._time_fn)
@@ -1633,20 +1690,25 @@ end
 local function api_post_continue(state, caps, _params, _body, res)
 	if not caps.llm then return json_err(res, 503, "no LLM capability configured") end
 	local path, perr = get_canonical_path(state)
-	if not path or #path == 0 then return json_err(res, 400, "no messages") end
+	if not path then return json_err(res, 400, "no messages") end
+	if #path == 0 then return json_err(res, 400, "no messages") end
 
-	local context = build_context(state, caps, path)
-	local response, err = caps.llm.call(apply_instruct(state, context), llm_opts_from_settings(state.settings))
+	local context, cerr = build_context(state, caps, path)
+	if not context then return json_err(res, 500, cerr) end
+	local ctx_cont = context --[[:! LlmMessage[] ]]
+	local llm_r2 = { caps.llm.call(apply_instruct(state, ctx_cont), llm_opts_from_settings(state.settings)) }
+	local response = llm_r2[1] --[[:! string | nil]]
+	local err = llm_r2[2] --[[:! string | nil]]
 	if not response then return json_err(res, 502, "LLM error: " .. tostring(err)) end
 
 	-- Apply ai_output regex scripts.
-	response = apply_regex_scripts(state, response, "ai_output")
+	local response_str = apply_regex_scripts(state, response, "ai_output")
 
 	local leaf = path[#path]
 	if leaf.role == "assistant" then
 		-- Append to existing assistant message (in-place update).
 		local updated, uerr = conv_update_message(state.conv, leaf.id, {
-			content = leaf.content .. response,
+			content = leaf.content .. response_str,
 		})
 		if not updated then return json_err(res, 500, uerr) end
 		save_session_id(state, caps)
@@ -1655,7 +1717,7 @@ local function api_post_continue(state, caps, _params, _body, res)
 		return json_ok(res, resp)
 	else
 		-- Add new assistant message as child of leaf.
-		local asst_msg, aerr = conv_add_message(state.conv, state.session_id, leaf.id, "assistant", response, state._time_fn)
+		local asst_msg, aerr = conv_add_message(state.conv, state.session_id, leaf.id, "assistant", response_str, state._time_fn)
 		if not asst_msg then return json_err(res, 500, aerr) end
 		save_session_id(state, caps)
 		local resp = msg_response(state, asst_msg)
@@ -1673,12 +1735,18 @@ local function api_post_impersonate(state, caps, _params, body, res)
 	local hint = "Continue the conversation as {{user}}, writing their next message in character."
 	local env = make_macro_env(state)
 	hint = hint:gsub("{{user}}", env.user or "User")
-	if body and body.prompt and type(body.prompt) == "string" and #body.prompt > 0 then
-		hint = hint .. " " .. body.prompt
+	if body and body.prompt and type(body.prompt) == "string" then
+		local prompt_str = body.prompt --[[:! string]]
+		if #prompt_str > 0 then
+			hint = hint .. " " .. prompt_str
+		end
 	end
-	context[#context + 1] = { role = "system", content = hint }
+	local ctx_imp = context --[[:! LlmMessage[] ]]
+	ctx_imp[#ctx_imp + 1] = { role = "system", content = hint }
 
-	local response, err = caps.llm.call(apply_instruct(state, context), llm_opts_from_settings(state.settings))
+	local llm_r3 = { caps.llm.call(apply_instruct(state, ctx_imp), llm_opts_from_settings(state.settings)) }
+	local response = llm_r3[1] --[[:! string | nil]]
+	local err = llm_r3[2] --[[:! string | nil]]
 	if not response then return json_err(res, 502, "LLM error: " .. tostring(err)) end
 
 	return json_ok(res, { content = response })
@@ -1697,7 +1765,7 @@ local function api_get_swipes(state, _caps, params, _body, res)
 
 	local swipes = {}
 	local current = 0
-	for i, s in ipairs(--[[:! any[] ]] siblings) do
+	for i, s in ipairs(--[[:! ConvRow[] ]] siblings) do
 		swipes[#swipes + 1] = { id = s.id, content = s.content, index = i - 1 }
 		if s.id == msg_id then current = i - 1 end
 	end
@@ -1707,7 +1775,7 @@ end
 --: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
 local function api_post_swipe_new(state, caps, _params, body, res)
 	if not caps.llm then return json_err(res, 503, "no LLM capability configured") end
-	local msg_id = body and body.message_id
+	local msg_id = body and body.message_id --[[:! string | nil]]
 	if not msg_id then return json_err(res, 400, "message_id required") end
 
 	local msg, merr = conv_get_message(state.conv, msg_id)
@@ -1716,15 +1784,18 @@ local function api_post_swipe_new(state, caps, _params, body, res)
 	-- Build context up to (but not including) this message.
 	local context, cerr = build_context_to_parent(state, caps, msg.parent_id)
 	if not context then return json_err(res, 500, cerr) end
+	local ctx_swipe = context --[[:! LlmMessage[] ]]
 
-	local response, err = caps.llm.call(apply_instruct(state, context), llm_opts_from_settings(state.settings))
+	local llm_r4 = { caps.llm.call(apply_instruct(state, ctx_swipe), llm_opts_from_settings(state.settings)) }
+	local response = llm_r4[1] --[[:! string | nil]]
+	local err = llm_r4[2] --[[:! string | nil]]
 	if not response then return json_err(res, 502, "LLM error: " .. tostring(err)) end
 
 	-- Apply ai_output regex scripts.
-	response = apply_regex_scripts(state, response, "ai_output")
+	local response_str2 = apply_regex_scripts(state, response, "ai_output")
 
 	-- Add as sibling (same parent, same role).
-	local new_msg, nerr = conv_add_message(state.conv, state.session_id, msg.parent_id, msg.role, response, state._time_fn)
+	local new_msg, nerr = conv_add_message(state.conv, state.session_id, msg.parent_id, msg.role, response_str2, state._time_fn)
 	if not new_msg then return json_err(res, 500, nerr) end
 
 	-- For root siblings, add_message doesn't update any parent canonical_child_id.
@@ -1741,8 +1812,8 @@ local function api_post_message_edit(state, caps, _params, body, res)
 	if not body or not body.message_id or not body.content then
 		return json_err(res, 400, "message_id and content required")
 	end
-	local msg_id = body.message_id
-	local new_content = body.content
+	local msg_id = body.message_id --[[:! string]]
+	local new_content = body.content --[[:! string]]
 
 	local msg, merr = conv_get_message(state.conv, msg_id)
 	if not msg then return json_err(res, 404, "message not found") end
@@ -1763,7 +1834,7 @@ local function api_post_message_delete(state, _caps, _params, body, res)
 	if not body or not body.message_id then
 		return json_err(res, 400, "message_id required")
 	end
-	local msg_id = body.message_id
+	local msg_id = body.message_id --[[:! string]]
 
 	local result, err = conv_delete_subtree(state.conv, msg_id)
 	if not result then return json_err(res, 404, "message not found") end
@@ -1776,13 +1847,14 @@ local function api_post_branch_navigate(state, _caps, _params, body, res)
 	if not body or not body.message_id then
 		return json_err(res, 400, "message_id required")
 	end
+	local branch_msg_id = body.message_id --[[:! string]]
 
-	local msg, merr = conv_get_message(state.conv, body.message_id)
+	local msg, merr = conv_get_message(state.conv, branch_msg_id)
 	if not msg then return json_err(res, 404, "message not found") end
 
 	if msg.parent_id ~= nil then
 		-- Non-root: use swipe_to to update parent's canonical_child_id.
-		local ok, err = conv_swipe_to(state.conv, body.message_id)
+		local ok, err = conv_swipe_to(state.conv, branch_msg_id)
 		if not ok then return json_err(res, 400, err) end
 	end
 	-- For root messages, get_canonical_path picks the first root by insertion order.
@@ -1826,7 +1898,7 @@ local function api_post_session_switch(state, caps, _params, body, res)
 	if not body or not body.session_id then
 		return json_err(res, 400, "session_id required")
 	end
-	local target_id = body.session_id
+	local target_id = body.session_id --[[:! string]]
 	local session, serr = conv_get_session(state.conv, target_id)
 	if not session then return json_err(res, 404, "session not found") end
 	switch_to_session(state, caps, target_id)
@@ -1843,7 +1915,7 @@ local function api_post_session_delete(state, caps, _params, body, res)
 	if not body or not body.session_id then
 		return json_err(res, 400, "session_id required")
 	end
-	local target_id = body.session_id
+	local target_id = body.session_id --[[:! string]]
 	local session, serr = conv_get_session(state.conv, target_id)
 	if not session then return json_err(res, 404, "session not found") end
 	local ok, derr = conv_delete_session(state.conv, target_id)
@@ -1874,6 +1946,7 @@ end
 
 -- ── Lorebook endpoints ──────────────────────────────────────────────────────
 
+--: ({ [string]: unknown }) -> { [string]: unknown }
 local function entry_to_json(e)
 	return {
 		uid = e.uid,
@@ -1895,8 +1968,8 @@ end
 local function api_get_lorebook(state, _caps, _params, _body, res)
 	local entries = state.lorebook or {}
 	local result = {}
-	for _, e in ipairs(entries) do
-		result[#result + 1] = entry_to_json(e)
+	for _, e in ipairs(--[[:! { [integer]: { [string]: unknown } }]] entries) do
+		result[#result + 1] = entry_to_json(e --[[:! { [string]: unknown }]])
 	end
 	return json_ok(res, { entries = result })
 end
@@ -1905,7 +1978,8 @@ end
 local function api_post_lorebook_update(state, caps, _params, body, res)
 	if not body or not body.uid then return json_err(res, 400, "uid required") end
 	local entries = state.lorebook or {}
-	for _, e in ipairs(entries) do
+	for _, e_raw in ipairs(--[[:! { [integer]: { [string]: unknown } }]] entries) do
+		local e = e_raw --[[:! { [string]: unknown }]]
 		if e.uid == body.uid then
 			if body.keys ~= nil then e.key = body.keys end
 			if body.content ~= nil then e.content = body.content end
@@ -1926,7 +2000,7 @@ local function api_post_lorebook_add(state, caps, _params, body, res)
 	if not body or not body.keys or not body.content then
 		return json_err(res, 400, "keys and content required")
 	end
-	local entry = lorebook_mod.normalize({
+	local entry = lorebook_mod.normalize(--[[: any]] {
 		key = body.keys,
 		content = body.content,
 		enabled = body.enabled,
@@ -1935,8 +2009,9 @@ local function api_post_lorebook_add(state, caps, _params, body, res)
 		order = body.order,
 		role = body.role,
 	})
-	if not state.lorebook then state.lorebook = {} end
-	state.lorebook[#state.lorebook + 1] = entry
+	if not state.lorebook then state.lorebook = {} --[[:! { [integer]: unknown }]] end
+	local lb = state.lorebook --[[:! { [integer]: unknown }]]
+	lb[#lb + 1] = entry
 	save_lorebook(state, caps)
 	return json_ok(res, entry_to_json(entry))
 end
@@ -1945,9 +2020,10 @@ end
 local function api_post_lorebook_delete(state, caps, _params, body, res)
 	if not body or not body.uid then return json_err(res, 400, "uid required") end
 	local entries = state.lorebook or {}
-	for i, e in ipairs(entries) do
-		if e.uid == body.uid then
-			table.remove(entries, i)
+	for i, e in ipairs(--[[:! { [integer]: { [string]: unknown } }]] entries) do
+		local e_ = e --[[:! { [string]: unknown }]]
+		if e_.uid == body.uid then
+			table.remove(entries --[[:! Arr<RegexScript>]], i)
 			save_lorebook(state, caps)
 			return json_ok(res, { deleted = true })
 		end
@@ -1964,13 +2040,13 @@ end
 -- book carries { id, name, entries[], active }; active books merge into the
 -- prompt at context-assembly time.
 
---: (OpaqueData) -> OpaqueData
+--: (UserLorebook) -> { id: string, name: string, active: boolean, entry_count: integer }
 local function book_summary(b)
 	return {
 		id = b.id,
 		name = b.name,
 		active = b.active == true,
-		entry_count = b.entries and #(--[[:! any[] ]] b.entries) or 0,
+		entry_count = b.entries and #(--[[:! { [integer]: unknown }]] b.entries) or 0,
 	}
 end
 
@@ -1990,8 +2066,8 @@ local function api_post_user_lorebooks_create(state, caps, _params, body, res)
 	end
 	local book = {
 		id = gen_book_id(caps.time and caps.time.now),
-		name = body.name,
-		entries = {},
+		name = body.name --[[:! string]],
+		entries = {} --[[:! { [integer]: unknown } | nil]],
 		active = false,
 	}
 	state.user_lorebooks[#state.user_lorebooks + 1] = book
@@ -2153,7 +2229,8 @@ local function api_post_user_lorebooks_import(state, caps, _params, body, res)
 	if not body or type(body.entries) ~= "table" then
 		return json_err(res, 400, "entries required")
 	end
-	local name = (type(body.name) == "string" and #body.name > 0) and body.name or "Imported"
+	local body_name = body.name --[[:! string | nil]]
+	local name = (type(body_name) == "string" and #(body_name --[[:! string]]) > 0) and (body_name --[[:! string]]) or "Imported"
 	local normalized = {}
 	for _, raw in ipairs(body.entries) do
 		if type(raw) == "table" then
@@ -2189,8 +2266,8 @@ local function api_post_user_lorebooks_import(state, caps, _params, body, res)
 	end
 	local book = {
 		id = gen_book_id(caps.time and caps.time.now),
-		name = name,
-		entries = normalized,
+		name = name --[[:! string]],
+		entries = normalized --[[:! { [integer]: unknown }]],
 		active = false,
 	}
 	state.user_lorebooks[#state.user_lorebooks + 1] = book
@@ -2231,13 +2308,15 @@ local function api_post_personas_save(state, caps, _params, body, res)
 	if not body or not body.name or type(body.name) ~= "string" or body.name == "" then
 		return json_err(res, 400, "name required")
 	end
-	local name = body.name
-	local description = body.description or ""
+	local name = body.name --[[:! string]]
+	local description = (body.description --[[:! string | nil]]) or ""
 	local existing = find_persona(state.personas, name)
 	if existing then
 		existing.description = description
 	else
-		state.personas[#state.personas + 1] = { name = name, description = description }
+		local ps = state.personas --[[:! { [integer]: { description: string, name: string } }]] or {}
+		ps[#ps + 1] = { name = name, description = description }
+		state.personas = ps
 	end
 	-- If the active persona was updated, sync user_name.
 	if state.active_persona == name then
@@ -2252,16 +2331,18 @@ local function api_post_personas_delete(state, caps, _params, body, res)
 	if not body or not body.name or type(body.name) ~= "string" then
 		return json_err(res, 400, "name required")
 	end
-	local name = body.name
+	local name = body.name --[[:! string]]
 	local _, idx = find_persona(state.personas, name)
 	if not idx then return json_err(res, 404, "persona not found") end
-	table.remove(state.personas, idx)
+	table.remove(state.personas --[[:! Arr<Persona>]], idx)
 	-- If we deleted the active persona, switch to first remaining or create Default.
 	if state.active_persona == name then
-		if #state.personas == 0 then
-			state.personas[1] = { name = "User", description = "" }
+		local ps = state.personas --[[:! { [integer]: { description: string, name: string } }]] or {}
+		if #ps == 0 then
+			ps[1] = { name = "User", description = "" }
 		end
-		activate_persona(state, state.personas[1].name)
+		activate_persona(state, ps[1].name)
+		state.personas = ps
 	end
 	save_personas(state, caps)
 	return json_ok(res, { deleted = true, active = state.active_persona })
@@ -2272,7 +2353,7 @@ local function api_post_personas_activate(state, caps, _params, body, res)
 	if not body or not body.name or type(body.name) ~= "string" then
 		return json_err(res, 400, "name required")
 	end
-	local persona, err = activate_persona(state, body.name)
+	local persona, err = activate_persona(state, body.name --[[:! string]])
 	if not persona then return json_err(res, 404, err) end
 	save_personas(state, caps)
 	return json_ok(res, { active = state.active_persona })
@@ -2318,6 +2399,7 @@ local CARD_EDIT_FIELDS = {
 	"character_version",
 }
 
+--: (CardData) -> { [string]: unknown }
 local function card_edit_response(card)
 	local data = {}
 	for _, key in ipairs(CARD_EDIT_FIELDS) do
@@ -2369,13 +2451,14 @@ local function api_post_card_reset(state, caps, _params, _body, res)
 		caps.kv.set("card_overrides", nil)
 	end
 
-	-- Reload card from PNG data.
-	state.card = nil
-	state.lorebook = nil
+	-- Reload card from PNG data (reset before re-loading).
+	-- Use rawset to bypass narrowing — state.card was narrowed to CardData above.
+	rawset(state, "card", nil)
+	rawset(state, "lorebook", nil)
 	load_card(state, caps)
 
 	if not state.card then return json_err(res, 500, "failed to reload card") end
-	return json_ok(res, card_edit_response(state.card))
+	return json_ok(res, card_edit_response(state.card --[[:! CardData]]))
 end
 
 -- ── Preset endpoints ───────────────────────────────────────────────────────
@@ -2398,11 +2481,11 @@ local function api_post_presets_save(_state, caps, _params, body, res)
 	if not body or not body.type or not body.preset then
 		return json_err(res, 400, "type and preset required")
 	end
-	local preset = body.preset
-	if not preset.name or type(preset.name) ~= "string" or #preset.name == 0 then
+	local preset = body.preset --[[:! { [string]: unknown }]]
+	if not preset.name or type(preset.name) ~= "string" or #(preset.name --[[:! string]]) == 0 then
 		return json_err(res, 400, "preset must have a name")
 	end
-	local ok, err = presets_mod.save(caps.kv --[[:! PresetsKv]], body.type, preset.name, --[[:! { name: string, ... }]] preset)
+	local ok, err = presets_mod.save(caps.kv --[[:! PresetsKv]], body.type --[[:! string]], preset.name --[[:! string]], preset --[[:! { name: string, ... }]])
 	if not ok then return json_err(res, 400, err) end
 	return json_ok(res, { ok = true })
 end
@@ -2413,7 +2496,7 @@ local function api_post_presets_delete(_state, caps, _params, body, res)
 	if not body or not body.type or not body.name then
 		return json_err(res, 400, "type and name required")
 	end
-	local ok, err = presets_mod.delete(caps.kv --[[:! PresetsKv]], body.type, body.name)
+	local ok, err = presets_mod.delete(caps.kv --[[:! PresetsKv]], body.type --[[:! string]], body.name --[[:! string]])
 	if not ok then return json_err(res, 400, err) end
 	return json_ok(res, { ok = true })
 end
@@ -2424,7 +2507,7 @@ local function api_post_presets_activate(_state, caps, _params, body, res)
 	if not body or not body.type or not body.name then
 		return json_err(res, 400, "type and name required")
 	end
-	local ok, err = presets_mod.set_active(caps.kv --[[:! PresetsKv]], body.type, body.name)
+	local ok, err = presets_mod.set_active(caps.kv --[[:! PresetsKv]], body.type --[[:! string]], body.name --[[:! string]])
 	if not ok then return json_err(res, 400, err) end
 	return json_ok(res, { ok = true })
 end
@@ -2435,7 +2518,7 @@ local function api_post_presets_import(_state, caps, _params, body, res)
 	if not body or not body.json then
 		return json_err(res, 400, "json field required")
 	end
-	local preset, err = presets_mod.import_preset(body.json)
+	local preset, err = presets_mod.import_preset(body.json --[[:! string]])
 	if not preset then return json_err(res, 400, err) end
 	return json_ok(res, { preset = preset })
 end
@@ -2448,22 +2531,23 @@ local function api_post_presets_export(_state, caps, _params, body, res)
 	end
 	-- Find the preset.
 	local list = presets_mod.load_all(caps.kv --[[:! PresetsKv]])
-	local type_key = body.type .. "s"
+	local type_key = (body.type --[[:! string]]) .. "s"
 	local presets_list = list[type_key]
 	if not presets_list then return json_err(res, 404, "no presets for type") end
 	local found
-	for i = 1, #presets_list do
-		if presets_list[i].name == body.name then
+	for i = 1, #(--[[:! { [integer]: unknown }]] presets_list) do
+		if (--[[:! { [string]: unknown }]] presets_list[i]).name == body.name then
 			found = presets_list[i]
 			break
 		end
 	end
-	if not found then return json_err(res, 404, "preset not found: " .. body.name) end
+	if not found then return json_err(res, 404, "preset not found: " .. (body.name --[[:! string]])) end
 	return json_ok(res, { json = presets_mod.export_preset(found) })
 end
 
 -- ── Regex script endpoints ─────────────────────────────────────────────────
 
+--: (RegexScript) -> { [string]: unknown }
 local function regex_script_to_json(s)
 	return {
 		name = s.name,
@@ -2498,25 +2582,27 @@ local function api_post_regex_save(state, caps, _params, body, res)
 		return json_err(res, 400, "invalid pattern: " .. tostring(pat_err))
 	end
 	-- Find existing by name.
-	local found
+	local found_raw
 	for _, s in ipairs(state.regex_scripts) do
-		if s.name == body.name then found = s; break end
+		if s.name == (body.name --[[:! string]]) then found_raw = s; break end
 	end
-	if found then
-		found.find = body.find
-		found.replace = body.replace or ""
-		if body.enabled ~= nil then found.enabled = body.enabled end
-		if body.scope ~= nil then found.scope = body.scope end
+	local found --[[:! RegexScript]]
+	if found_raw then
+		found = found_raw
+		found.find = body.find --[[:! string]]
+		found.replace = (body.replace --[[:! string | nil]]) or ""
+		if body.enabled ~= nil then found.enabled = body.enabled and true or false end
+		if body.scope ~= nil then found.scope = body.scope --[[:! string]] end
 		if body.order ~= nil then found.order = tonumber(body.order) or 0 end
 	else
 		found = {
-			name = body.name,
-			find = body.find,
-			replace = body.replace or "",
+			name = body.name --[[:! string]],
+			find = body.find --[[:! string]],
+			replace = (body.replace --[[:! string | nil]]) or "",
 			enabled = body.enabled ~= false,
-			scope = body.scope or "ai_output",
-			order = tonumber(body.order) or 0,
-		}
+			scope = (body.scope --[[:! string | nil]]) or "ai_output",
+			order = (tonumber(body.order) or 0) --[[:! integer | nil]],
+		} --[[:! RegexScript]]
 		state.regex_scripts[#state.regex_scripts + 1] = found
 	end
 	save_regex_scripts(state, caps)
@@ -2548,8 +2634,8 @@ local function api_post_regex_test(_state, _caps, _params, body, res)
 	if not ok_pat then
 		return json_err(res, 400, "invalid pattern: " .. tostring(pat_err))
 	end
-	local replace = body.replace or ""
-	local ok_gsub, output = pcall(string.gsub, body.input, body.find, replace)
+	local replace = (body.replace --[[:! string | nil]]) or ""
+	local ok_gsub, output = pcall(string.gsub, body.input --[[:! string]], body.find --[[:! string]], replace)
 	if not ok_gsub then
 		return json_err(res, 400, "gsub error: " .. tostring(output))
 	end
@@ -2621,21 +2707,22 @@ local function api_post_instruct_save(state, caps, _params, body, res)
 	if not body or not body.name or type(body.name) ~= "string" or body.name == "" then
 		return json_err(res, 400, "name required")
 	end
-	local template = {}
+	local t_name = body.name --[[:! string]]
+	local template = {} --[[:! { [string]: unknown }]]
 	for _, key in ipairs(INSTRUCT_FIELDS) do
-		template[key] = body[key] ~= nil and body[key] or ""
+		template[key] = (body[key] ~= nil and body[key] or "") --[[:! unknown]]
 	end
-	template.name = body.name
-	template.mode = body.mode == "instruct" and "instruct" or "chat"
-	template.stop_strings = body.stop_strings or {}
+	template.name = t_name
+	template.mode = (body.mode == "instruct" and "instruct" or "chat") --[[:! unknown]]
+	template.stop_strings = (body.stop_strings --[[:! unknown]]) or {}
 	-- Ensure stop_strings is a table.
-	if type(template.stop_strings) ~= "table" then template.stop_strings = {} end
+	if type(template.stop_strings) ~= "table" then template.stop_strings = {} --[[:! unknown]] end
 
-	local existing, idx = find_instruct_template(state.instruct_templates, body.name)
+	local existing, idx = find_instruct_template(state.instruct_templates, t_name)
 	if existing then
-		state.instruct_templates[idx] = template
+		state.instruct_templates[idx --[[:! integer]]] = template --[[:! InstructTemplate]]
 	else
-		state.instruct_templates[#state.instruct_templates + 1] = template
+		state.instruct_templates[#state.instruct_templates + 1] = template --[[:! InstructTemplate]]
 	end
 	save_instruct(state, caps)
 	return json_ok(res, template)
@@ -2646,11 +2733,12 @@ local function api_post_instruct_delete(state, caps, _params, body, res)
 	if not body or not body.name or type(body.name) ~= "string" then
 		return json_err(res, 400, "name required")
 	end
-	local _, idx = find_instruct_template(state.instruct_templates, body.name)
+	local del_name = body.name --[[:! string]]
+	local _, idx = find_instruct_template(state.instruct_templates, del_name)
 	if not idx then return json_err(res, 404, "template not found") end
 	table.remove(state.instruct_templates, idx)
 	-- If we deleted the active template, clear active.
-	if state.instruct_active == body.name then
+	if state.instruct_active == del_name then
 		state.instruct_active = nil
 	end
 	save_instruct(state, caps)
@@ -2662,15 +2750,16 @@ local function api_post_instruct_activate(state, caps, _params, body, res)
 	if not body or not body.name or type(body.name) ~= "string" then
 		return json_err(res, 400, "name required")
 	end
+	local act_name = body.name --[[:! string]]
 	-- Empty name clears active template (reverts to chat mode).
-	if body.name == "" then
+	if act_name == "" then
 		state.instruct_active = nil
 		save_instruct(state, caps)
 		return json_ok(res, { active = "" })
 	else
-		local template = find_instruct_template(state.instruct_templates, body.name)
+		local template = find_instruct_template(state.instruct_templates, act_name)
 		if not template then return json_err(res, 404, "template not found") end
-		state.instruct_active = body.name
+		state.instruct_active = act_name
 		save_instruct(state, caps)
 		return json_ok(res, { active = state.instruct_active })
 	end
@@ -2710,7 +2799,7 @@ local function api_get_export_chat(state, caps, params, _body, res)
 		lines[#lines + 1] = "# Conversation with " .. card_name
 		lines[#lines + 1] = "# Exported " .. date_str
 		lines[#lines + 1] = ""
-		for _, msg in ipairs(--[[:! any[] ]] path) do
+		for _, msg in ipairs(--[[:! ConvRow[] ]] path) do
 			local sender --[[: string]]
 			if msg.role == "assistant" then
 				sender = card_name
@@ -2872,7 +2961,7 @@ local routes = {
 	["POST /api/branch/new"]      = api_post_swipe_new,
 }
 
---: (Caps, OpaqueData) -> OpaqueData
+--: (Caps, CreateOpts | nil) -> { handler: (Req, Res) -> unknown, state: State }
 function M.create(caps, opts)
 	opts = opts or {}
 	-- Seed RNG for UUID generation. Use time cap if available.
@@ -2973,7 +3062,7 @@ function M.create(caps, opts)
 		local raw = caps.kv.get("personas")
 		if raw then
 			local ok_p, saved = pcall(json.decode, raw --[[:! string]])
-			if ok_p and type(saved) == "table" and #(--[[:! any[] ]] saved) > 0 then
+			if ok_p and type(saved) == "table" and #(--[[:! { [integer]: unknown }]] saved) > 0 then
 				state.personas = saved
 			end
 		end
@@ -3021,7 +3110,7 @@ function M.create(caps, opts)
 		local raw = caps.kv.get("instruct_templates")
 		if raw then
 			local ok_it, saved = pcall(json.decode, raw --[[:! string]])
-			if ok_it and type(saved) == "table" and #(--[[:! any[] ]] saved) > 0 then
+			if ok_it and type(saved) == "table" and #(--[[:! { [integer]: unknown }]] saved) > 0 then
 				state.instruct_templates = saved
 			end
 		end
@@ -3047,10 +3136,10 @@ function M.create(caps, opts)
 		if raw then
 			local ok_an, saved = pcall(json.decode, raw --[[:! string]])
 			if ok_an and type(saved) == "table" then
-				local s = --[[:! { [string]: any }]] saved
-				if s.text ~= nil then state.authors_note.text = s.text end
-				if s.depth ~= nil then state.authors_note.depth = s.depth end
-				if s.position ~= nil then state.authors_note.position = s.position end
+				local s = --[[:! { [string]: unknown }]] saved
+				if s.text ~= nil then state.authors_note.text = s.text --[[:! string]] end
+				if s.depth ~= nil then state.authors_note.depth = s.depth --[[:! integer]] end
+				if s.position ~= nil then state.authors_note.position = s.position --[[:! string]] end
 			end
 		end
 	end
@@ -3114,13 +3203,13 @@ function M.create(caps, opts)
 	-- Restore or create session.
 	local session_id = load_session_id(caps)
 	if session_id then
-		local session = conv_get_session(conv_db, session_id)
+		local session = conv_get_session(conv_db --[[:! ConvDb]], session_id)
 		if session then
 			state.session_id = session_id
 		end
 	end
-	if not state.session_id then
-		local session, serr = conv_create_session(conv_db, time_fn)
+	if not state.session_id or state.session_id == "" then
+		local session, serr = conv_create_session(conv_db --[[:! ConvDb]], time_fn)
 		if not session then
 			error("card server: failed to create session: " .. tostring(serr))
 		end
@@ -3135,20 +3224,20 @@ function M.create(caps, opts)
 		if raw then
 			local ok_g, saved = pcall(json.decode, raw --[[:! string]])
 			if ok_g and type(saved) == "table" then
-				local sg = --[[:! { [string]: any }]] saved
-				state.group.enabled = sg.enabled or false
-				state.group.turn_order = sg.turn_order or "round_robin"
-				state.group.next_speaker = sg.next_speaker or 1
+				local sg = --[[:! { [string]: unknown }]] saved
+				state.group.enabled = sg.enabled --[[:! boolean]] or false
+				state.group.turn_order = sg.turn_order --[[:! string]] or "round_robin"
+				state.group.next_speaker = sg.next_speaker --[[:! integer]] or 1
 				if sg.members then
-					for i, sm in ipairs(sg.members) do
+					for i, sm in ipairs(--[[:! { [integer]: { [string]: unknown } }]] sg.members) do
 						if sm.is_primary then
 							-- Primary member already initialized from card.
 						elseif sm.card_json then
-							local cdata = card_mod.from_json(sm.card_json)
+							local cdata = card_mod.from_json(sm.card_json --[[:! string]])
 							if cdata then
 								state.group.members[#state.group.members + 1] = {
 									card = cdata,
-									name = sm.name,
+									name = sm.name --[[:! string]],
 									is_primary = false,
 								}
 							end
@@ -3160,9 +3249,12 @@ function M.create(caps, opts)
 	end
 
 	-- If session has no messages and card has a greeting, create it.
-	local path = get_canonical_path(state)
-	if not path or #path == 0 then
+	local path3 = get_canonical_path(state)
+	if not path3 then
 		init_greeting(state)
+	else
+		local p3 = path3 --[[:! ConvRow[] ]]
+		if #p3 == 0 then init_greeting(state) end
 	end
 
 	-- Extension -> content-type map for static file serving via caps.self.

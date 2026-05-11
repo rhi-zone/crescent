@@ -7,12 +7,12 @@ local sqlite = require("lib.sqlite")
 
 local M = {}
 
---:: sqlite = any
---:: Conn = { _db: any, ... }
---:: Select = { _db: any, _table: string, _columns: { [integer]: string } | nil, _wheres: { [integer]: unknown }, _where_params: { [integer]: unknown }, _order: string | nil, _limit: number | nil, _offset: number | nil, ... }
---:: Insert = { _db: any, _table: string, _columns: { [integer]: string } | nil, _values: { [string]: unknown } | nil, _on_conflict: any, _returning: { [integer]: string } | nil, ... }
---:: Update = { _db: any, _table: string, _set: { [string]: unknown } | nil, _sets: { [integer]: unknown } | nil, _wheres: { [integer]: unknown }, _where_params: { [integer]: unknown }, _returning: { [integer]: string } | nil, ... }
---:: Delete = { _db: any, _table: string, _wheres: { [integer]: unknown }, _where_params: { [integer]: unknown }, _returning: { [integer]: string } | nil, ... }
+--:: sqlite = { db: cdata, execute: (self: sqlite, string, ...unknown) -> (true | nil, string | nil), query: (self: sqlite, string, ...unknown) -> ((() -> unknown) | nil, string | nil), close: (self: sqlite) -> nil, last_insert_rowid: (self: sqlite) -> number | nil, changes: (self: sqlite) -> number | nil, ... }
+--:: Conn = { _db: sqlite, ... }
+--:: Select = { _db: sqlite, _table: string, _columns: { [integer]: string } | nil, _wheres: { [integer]: unknown }, _where_params: { [integer]: unknown }, _order: string | nil, _limit: number | nil, _offset: number | nil, ... }
+--:: Insert = { _db: sqlite, _table: string, _columns: { [integer]: string } | nil, _values: { [string]: unknown } | nil, _on_conflict: string | nil, _returning: { [integer]: string } | nil, ... }
+--:: Update = { _db: sqlite, _table: string, _set: { [string]: unknown } | nil, _sets: { [integer]: unknown } | nil, _wheres: { [integer]: unknown }, _where_params: { [integer]: unknown }, _returning: { [integer]: string } | nil, ... }
+--:: Delete = { _db: sqlite, _table: string, _wheres: { [integer]: unknown }, _where_params: { [integer]: unknown }, _returning: { [integer]: string } | nil, ... }
 
 -- ── FFI: sqlite3_column_name (not exposed by lib.sqlite) ───────────────────
 
@@ -474,7 +474,7 @@ function Conn:migration_version()
 	if not iter then return 0 end
 	local ver = iter()
 	if not ver then return 0 end
-	return ver
+	return ver --[[:! number]]
 end
 
 --: (Conn, { [integer]: { version: integer, up: string, ... } }) -> ((boolean | nil), (string | nil))
@@ -542,12 +542,12 @@ end
 function M.connect(path)
 	local db, err = sqlite.open(path)
 	if not db then return nil, err end
-	return setmetatable({ _db = db }, Conn) --[[: any]]
+	return setmetatable({ _db = db }, Conn) --[[: Conn]]
 end
 
 --: (sqlite) -> Conn
 function M.wrap(db)
-	return setmetatable({ _db = db }, Conn) --[[: any]]
+	return setmetatable({ _db = db }, Conn) --[[: Conn]]
 end
 
 return M
