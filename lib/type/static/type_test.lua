@@ -3834,6 +3834,32 @@ end
 ]])
     end)
 
+    assert.it("type(x) == 'table' narrows to open table, not any — x.foo is unknown, not any", function()
+        -- x.foo should be unknown after table narrowing; using it as string is an error.
+        local ec = check([[
+--: (string) -> nil
+local function f(s) end
+--:: declare x = unknown
+if type(x) == "table" then
+    f(x.foo)
+end
+]])
+        assert.ok(errors_mod.has_errors(ec), "x.foo after table narrowing should be unknown, not any — passing to (string)->nil must error")
+    end)
+
+    assert.it("type(x) == 'table' narrowed x — x.foo cannot be used as string without further narrowing", function()
+        -- After table narrowing, x.foo is unknown (not any). Assigning unknown to a
+        -- string-annotated local is an error, proving the narrowed type is open-table, not any.
+        local ec = check([[
+--:: declare x = unknown
+if type(x) == "table" then
+    local s --: string
+    s = x.foo
+end
+]])
+        assert.ok(errors_mod.has_errors(ec), "x.foo after table narrowing is unknown — assigning to string must error")
+    end)
+
     assert.it("without type check, passing unknown to (string)->nil is an error (regression guard)", function()
         local ec = check([[
 --: (string) -> nil

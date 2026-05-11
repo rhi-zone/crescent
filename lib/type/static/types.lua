@@ -1287,7 +1287,16 @@ function M.typeof_to_id(ctx, s)
     if s == "boolean"  then return ctx.T_BOOLEAN end
     if s == "number"   then return ctx.T_NUMBER end
     if s == "string"   then return ctx.T_STRING end
-    if s == "table"    then return ctx.T_ANY end   -- unknown table type
+    if s == "table"    then
+        -- Return an open table type (rowvar present) so field access returns
+        -- T_UNKNOWN (requiring narrowing) rather than T_ANY (bypassing checks).
+        -- Cache per-ctx to avoid creating a new type on each narrowing application.
+        if not ctx._open_table_tid then
+            local rv = M.make_rowvar(ctx, 0)
+            ctx._open_table_tid = M.make_table(ctx, {}, {}, rv, {})
+        end
+        return ctx._open_table_tid
+    end
     if s == "function" then return ctx.T_ANY end   -- unknown function type
     return ctx.T_ANY
 end
