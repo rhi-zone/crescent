@@ -1092,14 +1092,13 @@ local n = from_maybe({
 end)
 
 -- ---------------------------------------------------------------------------
--- 9. Overlap-checked force cast: --[[:! T]]
+-- 9. Force cast: --[[:! T]] (TypeScript `as` semantics)
 -- ---------------------------------------------------------------------------
 
-assert.describe("force cast: --[[:! T]] requires overlap, not subtyping", function()
+assert.describe("force cast: --[[:! T]] requires supertype/subtype relationship", function()
     assert.it("PASS: unknown -> T (narrow unknown via force cast)", function()
         -- Without --[[:! ]], unknown cannot flow into a string param.
-        -- The force cast asserts the value's shape; overlap(unknown, string) holds
-        -- because unknown is a top type.
+        -- string <: unknown, so the bidirectional check passes.
         no_error([==[
 --: (string) -> nil
 local function f(s) return nil end
@@ -1109,10 +1108,10 @@ f(--[[:! string]] x)
 ]==])
     end)
 
-    assert.it("PASS: (A | B) -> A (project a union member)", function()
+    assert.it("PASS: (A | B) -> A (narrowing: project a union member)", function()
         -- A regular cast `--[[: string]]` from `string | integer` would fail
         -- (the union is not <: string). The force cast succeeds because
-        -- string overlaps with string|integer.
+        -- string <: string|integer (string is a subtype of the union).
         no_error([==[
 --: (string) -> nil
 local function f(s) return nil end
@@ -1122,25 +1121,34 @@ f(--[[:! string]] x)
 ]==])
     end)
 
-    assert.it("ERROR: string -> integer (no overlap)", function()
-        -- Disjoint atomic types must error even with the force cast — the
-        -- force cast is overlap-checked, not unchecked.
+    assert.it("PASS: T -> T | U (widening: T is a subtype of the union)", function()
+        -- string <: string|integer, so widening via force cast is allowed.
+        no_error([==[
+--: string
+local x = "hi"
+--: string | integer
+local y = --[[:! string | integer]] x
+]==])
+    end)
+
+    assert.it("ERROR: string -> integer (unrelated types)", function()
+        -- string and integer have no supertype/subtype relationship.
         has_error([==[
 --: (integer) -> nil
 local function f(n) return nil end
 --: string
 local s = "hello"
 f(--[[:! integer]] s)
-]==], "no overlap")
+]==], "unrelated")
     end)
 
-    assert.it("ERROR: number -> string (no overlap)", function()
+    assert.it("ERROR: number -> string (unrelated types)", function()
         has_error([==[
 --: number
 local n = 1
 --: string
 local s = --[[:! string]] n
-]==], "no overlap")
+]==], "unrelated")
     end)
 
     assert.it("PASS: result type is the asserted type", function()
@@ -1188,9 +1196,8 @@ local n = --[[: integer]] "hello"
 ]==], "integer")
     end)
 
-    assert.it("PASS: trailing --[[:! T]] (force cast) parses and overlap-checks", function()
-        -- `unknown` overlaps with `integer`, so the force cast succeeds and
-        -- the result has type `integer`.
+    assert.it("PASS: trailing --[[:! T]] (force cast) parses and checks relationship", function()
+        -- integer <: unknown, so narrowing unknown to integer is allowed.
         no_error([==[
 --: unknown
 local x = 1
@@ -1199,13 +1206,13 @@ local n = x --[[:! integer]]
 ]==])
     end)
 
-    assert.it("ERROR: trailing --[[:! T]] still requires overlap", function()
+    assert.it("ERROR: trailing --[[:! T]] rejects unrelated types", function()
         has_error([==[
 --: string
 local s = "hi"
 --: integer
 local n = s --[[:! integer]]
-]==], "no overlap")
+]==], "unrelated")
     end)
 
     assert.it("PASS: trailing cast on parenthesized expression", function()

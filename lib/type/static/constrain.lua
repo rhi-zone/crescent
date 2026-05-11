@@ -144,10 +144,10 @@ local C_CHECK_ARGS    = 12  -- {C_CHECK_ARGS,    callee_tid, arg_tids_list, ret_
 -- Checks that call arguments match the (now-concrete) param types and unifies the return type.
 -- Defers (returns false) if any param is still a free TV. No special-casing needed.
 local C_OVERLAP       = 13  -- {C_OVERLAP,       actual, expected, line, col}
--- Overlap-checked force cast (`--[[:! T]] expr`). Succeeds iff the value sets
--- of `actual` and `expected` overlap (intersection ≠ never). Used to assert a
--- specific shape from `unknown` or to project a union member, without the full
--- subtyping check that a regular cast (C_SUB with is_cast) requires.
+-- Bidirectional subtype check for force cast (`--[[:! T]] expr`). Succeeds iff
+-- `actual <: expected` (widening) or `expected <: actual` (narrowing). Matches
+-- TypeScript `as` semantics: the two types must share a supertype/subtype
+-- relationship; disjoint types (e.g. string and integer) are rejected.
 local C_NARROW_NIL    = 14  -- {C_NARROW_NIL,    input_tid, result_tid, keep_nil, line, col}
 -- Deferred narrowing for nil_check.  Defers while input_tid is a free TAG_VAR;
 -- once concrete, computes either subtract(input, nil|false) (keep_nil=false) or
@@ -2282,9 +2282,10 @@ ExprRule[NODE_CAST_EXPR] = function(ctx, nid)
     local cast_tid = resolve_annotation_type(ctx, ann.type_id)
     ctx._ann_warn_line = 0
     if band(n.flags, defs.FLAG_FORCE_CAST) ~= 0 then
-        -- --[[:! T]] expr: overlap-checked force cast. Succeeds when actual and
-        -- expected have any value in common. Permits unknown→T and (A|B)→A,
-        -- but rejects disjoint pairs (e.g. string→integer).
+        -- --[[:! T]] expr: bidirectional subtype force cast. Succeeds when actual
+        -- is a subtype of expected (widening) or expected is a subtype of actual
+        -- (narrowing). Permits unknown→T and (A|B)→A, but rejects unrelated
+        -- pairs (e.g. string→integer).
         emit(ctx, { C_OVERLAP, inner_tid, cast_tid, n.line, n.col })
     else
         emit(ctx, { C_SUB, inner_tid, cast_tid, n.line, n.col, true })  -- true = is_cast
