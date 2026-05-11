@@ -7916,6 +7916,15 @@ local m = require("mymod")
 local result = m.greet("hello")
 ]])
     end)
+
+    -- MODULE_DECL warning: --:: module in user code emits a warning
+    assert.it("--:: module declaration emits MODULE_DECL warning", function()
+        has_warning([[
+--:: module "mymod": { x: integer }
+local m = require("mymod")
+local _ = m.x
+]], "inferred from return M")
+    end)
 end)
 
 assert.describe("checker: multi-return narrowing via aliased function call", function()

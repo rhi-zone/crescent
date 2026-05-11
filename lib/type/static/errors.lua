@@ -441,6 +441,11 @@ local function build_templates()
         [E.FORCE_CAST]            = function(_a)
             return "force cast \xe2\x80\x94 fix the upstream type annotation instead; see CLAUDE.md"
         end,
+        --: (TemplateArgs) -> string
+        [E.MODULE_DECL]           = function(_a)
+            return "--:: module declaration should not be used"
+                .. " \xe2\x80\x94 require() return types are inferred from return M"
+        end,
     }
 end
 

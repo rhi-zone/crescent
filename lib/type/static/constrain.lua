@@ -3964,7 +3964,9 @@ process_type_decls = function(ctx)
     -- $Require<"mod"> in type alias bodies still works: it is expanded by the solver at
     -- call sites (after process_type_decls returns), not during resolve_annotation_type.
     for _, r in ipairs(module_decls) do
-        ctx._ann_warn_line = module_decl_lines[r] or 0
+        local decl_line = module_decl_lines[r] or 0
+        warn(ctx, decl_line, 1, E.MODULE_DECL, {})
+        ctx._ann_warn_line = decl_line
         ctx.module_types[r.mod_name] = resolve_annotation_type(ctx, r.type_id)
         ctx._ann_warn_line = 0
     end

@@ -383,6 +383,7 @@ M.E = {
     MATCH_CONTAINS_ANY    = 30,  -- match type contains `any`; exhaustiveness cannot be verified (warning)
     ANY_IN_TYPE           = 31,  -- `any` used as a component of a compound type (warning)
     FORCE_CAST            = 32,  -- `--[[:! T]]` force cast used; fix upstream annotation instead (warning)
+    MODULE_DECL           = 33,  -- `--:: module` declaration in user code; require() return types are inferred from return M (warning)
 }
 
 -- Keyword strings (ordered by token ID, for intern pre-population)
