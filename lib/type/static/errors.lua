@@ -432,6 +432,11 @@ local function build_templates()
             return "match type contains `any` \xe2\x80\x94 exhaustiveness cannot be verified;"
                 .. " replace `any` with `unknown` or a specific type"
         end,
+        --: (TemplateArgs) -> string
+        [E.ANY_IN_TYPE]           = function(_a)
+            return "type contains 'any' \xe2\x80\x94 use 'unknown' for unconstrained values,"
+                .. " or a specific type"
+        end,
     }
 end
 

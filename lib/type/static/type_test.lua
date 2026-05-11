@@ -4193,6 +4193,30 @@ local x = Status.OK
 local x = 1
 ]], "explicit `any`")
     end)
+    assert.it("any as table field type warns", function()
+        has_warning([[
+--: { value: any }
+local x = { value = 1 }
+]], "type contains 'any'")
+    end)
+    assert.it("any as function param type warns", function()
+        has_warning([[
+--: (any) -> string
+local f = function(x) return tostring(x) end
+]], "type contains 'any'")
+    end)
+    assert.it("any as union member warns", function()
+        has_warning([[
+--: string | any
+local x = "hello"
+]], "type contains 'any'")
+    end)
+    assert.it("any as index signature value type warns", function()
+        has_warning([[
+--: { [string]: any }
+local t = {}
+]], "type contains 'any'")
+    end)
 end)
 
 ---------------------------------------------------------------------------

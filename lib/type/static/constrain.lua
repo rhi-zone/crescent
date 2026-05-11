@@ -391,6 +391,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
 
     if tag == TAG_FUNCTION then
         seen[ann_tid] = true
+        local func_ann_line = ctx._ann_warn_line
         -- Pre-collect param name IDs so we can bind them in a child scope before
         -- resolving any param/return type annotations.  This makes `typeof x` work
         -- in both param types and return types of the same signature.
@@ -424,7 +425,11 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         end
         local params = {} --: { [integer]: integer }
         for i = at.data[0], at.data[0] + at.data[1] - 1 do
-            params[#params + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            local pt = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            if pt == ctx.T_ANY and func_ann_line ~= 0 then
+                warn(ctx, func_ann_line, 0, E.ANY_IN_TYPE, {})
+            end
+            params[#params + 1] = pt
         end
         -- Bind each placeholder to its resolved param type so that `typeof <param>`
         -- in return types (and later param types) resolves through union-find.
@@ -446,11 +451,18 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         end
         local returns = {}
         for i = at.data[2], at.data[2] + at.data[3] - 1 do
-            returns[#returns + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            local rt = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            if rt == ctx.T_ANY and func_ann_line ~= 0 then
+                warn(ctx, func_ann_line, 0, E.ANY_IN_TYPE, {})
+            end
+            returns[#returns + 1] = rt
         end
         local vararg_id = -1
         if at.data[4] >= 0 then
             vararg_id = resolve_annotation_type(ctx, at.data[4], seen)
+            if vararg_id == ctx.T_ANY and func_ann_line ~= 0 then
+                warn(ctx, func_ann_line, 0, E.ANY_IN_TYPE, {})
+            end
         end
         if ann_scope then
             ctx.scope = saved_scope
@@ -481,6 +493,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
 
     if tag == TAG_TABLE then
         seen[ann_tid] = true
+        local tbl_ann_line = ctx._ann_warn_line
         local field_ids = {}
         local field_pos = {}  -- name_id -> index in field_ids; later entries win (override semantics)
         local function add_field(new_fid, name_id)
@@ -525,6 +538,9 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
                 field_ids[#field_ids + 1] = types_mod.make_field(ctx, -1, sp, 0)
             else
                 local ft = resolve_annotation_type(ctx, fe.type_id, seen)
+                if ft == ctx.T_ANY and tbl_ann_line ~= 0 then
+                    warn(ctx, tbl_ann_line, 0, E.ANY_IN_TYPE, {})
+                end
                 add_field(types_mod.make_field(ctx, fe.name_id, ft, fe.flags), fe.name_id)
             end
         end
@@ -532,8 +548,13 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         local is, il = at.data[2], at.data[3]
         local i = is
         while i < is + il - 1 do
-            indexers[#indexers + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
-            indexers[#indexers + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i + 1), seen)
+            local kt = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            local vt = resolve_annotation_type(ctx, ctx.ann.lists:get(i + 1), seen)
+            if (kt == ctx.T_ANY or vt == ctx.T_ANY) and tbl_ann_line ~= 0 then
+                warn(ctx, tbl_ann_line, 0, E.ANY_IN_TYPE, {})
+            end
+            indexers[#indexers + 1] = kt
+            indexers[#indexers + 1] = vt
             i = i + 2
         end
         local row_var = -1
@@ -583,9 +604,14 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
 
     if tag == TAG_UNION then
         seen[ann_tid] = true
+        local union_ann_line = ctx._ann_warn_line
         local members = {} --: { [integer]: integer }
         for i = at.data[0], at.data[0] + at.data[1] - 1 do
-            members[#members + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            local mt = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            if mt == ctx.T_ANY and union_ann_line ~= 0 then
+                warn(ctx, union_ann_line, 0, E.ANY_IN_TYPE, {})
+            end
+            members[#members + 1] = mt
         end
         seen[ann_tid] = nil
         return types_mod.make_union(ctx, members)
@@ -593,9 +619,14 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
 
     if tag == defs.TAG_INTERSECTION then
         seen[ann_tid] = true
+        local isect_ann_line = ctx._ann_warn_line
         local members = {} --: { [integer]: integer }
         for i = at.data[0], at.data[0] + at.data[1] - 1 do
-            members[#members + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            local mt = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            if mt == ctx.T_ANY and isect_ann_line ~= 0 then
+                warn(ctx, isect_ann_line, 0, E.ANY_IN_TYPE, {})
+            end
+            members[#members + 1] = mt
         end
         seen[ann_tid] = nil
         -- Detect field conflicts: when two table members share a field name but
