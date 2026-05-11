@@ -43,7 +43,7 @@ do
 	local function try_load(name)
 		local ok, lib_raw = pcall(ffi.load, name)
 		if not ok then return nil end
-		local lib = lib_raw --[[: any]]
+		local lib = lib_raw --[[: unknown]]
 		-- Attempt to define the minimal API we need.
 		-- pcall: cdef may error if symbols already declared (harmless).
 		pcall(ffi.cdef, [[

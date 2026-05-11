@@ -38,7 +38,7 @@ local concat = table.concat
 -- FFI uint64 helpers
 -- ---------------------------------------------------------------------------
 
-local U64    = ffi.typeof("uint64_t") --[[: any]]
+local U64    = ffi.typeof("uint64_t")
 local U0     = U64(0)
 local U5     = U64(5)
 local U256   = U64(256)
@@ -67,7 +67,7 @@ end
 -- limbs stored as uint64_t.  Value = n0 + n1·2^26 + n2·2^52 + n3·2^78 + n4·2^104.
 -- ---------------------------------------------------------------------------
 
---: ({ [integer]: integer }) -> (cdata, cdata, cdata, cdata, cdata)
+--: ({ [integer]: integer }) -> (integer, integer, integer, integer, integer)
 local function decode_26(b)
   local n0 = U64(b[1])
     + U64(b[2]) * U64(256)
@@ -105,15 +105,14 @@ end
 -- in place during finish — it reads from it then returns a fresh tag.
 -- ---------------------------------------------------------------------------
 
---:: Poly1305Ctx = { h0: any, h1: any, h2: any, h3: any, h4: any, r0: any, r1: any, r2: any, r3: any, r4: any, r1_5: any, r2_5: any, r3_5: any, r4_5: any, s_str: string, buf: string, done: boolean, update: (any, string) -> (any | nil, string | nil), finish: (any) -> (string | nil, string | nil) }
+--:: Poly1305Ctx = { h0: integer, h1: integer, h2: integer, h3: integer, h4: integer, r0: integer, r1: integer, r2: integer, r3: integer, r4: integer, r1_5: integer, r2_5: integer, r3_5: integer, r4_5: integer, s_str: string, buf: string, done: boolean, update: (Poly1305Ctx, string) -> (Poly1305Ctx | nil, string | nil), finish: (Poly1305Ctx) -> (string | nil, string | nil) }
 -- Process a single 16-byte (or shorter final) block, updating h limbs.
 --: (Poly1305Ctx, { [integer]: integer }, number) -> nil
 local function process_block(ctx, n, blocklen)
   local n0r, n1r, n2r, n3r, n4r = decode_26(n)
-  -- Cast to any for FFI cdata arithmetic
-  local n0 = n0r --[[: any]]; local n1 = n1r --[[: any]]
-  local n2 = n2r --[[: any]]; local n3 = n3r --[[: any]]
-  local n4 = n4r --[[: any]]
+  local n0 = n0r; local n1 = n1r
+  local n2 = n2r; local n3 = n3r
+  local n4 = n4r
 
   -- Add the 2^(8*blocklen) bit ("hibit") to the appropriate limb.
   local bit_pos    = 8 * blocklen
@@ -150,12 +149,12 @@ local function process_block(ctx, n, blocklen)
 
   -- Carry-propagate to reduce each limb back towards 26 bits.
   local c
-  c = d0 / SHIFT26; h0 = band(d0, MASK26); d1 = d1 + c
-  c = d1 / SHIFT26; h1 = band(d1, MASK26); d2 = d2 + c
-  c = d2 / SHIFT26; h2 = band(d2, MASK26); d3 = d3 + c
-  c = d3 / SHIFT26; h3 = band(d3, MASK26); d4 = d4 + c
-  c = d4 / SHIFT26; h4 = band(d4, MASK26); h0 = h0 + c * U5
-  c = h0 / SHIFT26; h0 = band(h0, MASK26); h1 = h1 + c
+  c = (d0 / SHIFT26) --[[:! integer]]; h0 = band(d0, MASK26); d1 = d1 + c
+  c = (d1 / SHIFT26) --[[:! integer]]; h1 = band(d1, MASK26); d2 = d2 + c
+  c = (d2 / SHIFT26) --[[:! integer]]; h2 = band(d2, MASK26); d3 = d3 + c
+  c = (d3 / SHIFT26) --[[:! integer]]; h3 = band(d3, MASK26); d4 = d4 + c
+  c = (d4 / SHIFT26) --[[:! integer]]; h4 = band(d4, MASK26); h0 = h0 + c * U5
+  c = (h0 / SHIFT26) --[[:! integer]]; h0 = band(h0, MASK26); h1 = h1 + c
 
   ctx.h0 = h0; ctx.h1 = h1; ctx.h2 = h2; ctx.h3 = h3; ctx.h4 = h4
 end
@@ -231,10 +230,9 @@ local function new_ctx(key)
   local r_str = clamp_r(key:sub(1, 16))
   local rb    = { sbyte(r_str, 1, 16) } --[[:! { [integer]: integer }]]
   local r0r, r1r, r2r, r3r, r4r = decode_26(rb)
-  -- Cast cdata to any for arithmetic
-  local r0 = r0r --[[: any]]; local r1 = r1r --[[: any]]
-  local r2 = r2r --[[: any]]; local r3 = r3r --[[: any]]
-  local r4 = r4r --[[: any]]
+  local r0 = r0r; local r1 = r1r
+  local r2 = r2r; local r3 = r3r
+  local r4 = r4r
 
   local ctx = {
     -- accumulator

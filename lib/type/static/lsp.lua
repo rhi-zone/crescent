@@ -17,6 +17,15 @@ local intern = require("lib.type.static.intern")
 local defs   = require("lib.type.static.defs")
 
 -- ---------------------------------------------------------------------------
+-- LSP parameter type aliases
+--:: LspTextDocumentItem = { uri: string, text?: string, version?: integer, ... }
+--:: LspTextDocumentParams = { textDocument: LspTextDocumentItem, ... }
+--:: LspContentChange = { text: string, ... }
+--:: LspDidChangeParams = { textDocument: LspTextDocumentItem, contentChanges: { [integer]: LspContentChange }, ... }
+--:: LspPosition = { line: integer, character: integer }
+--:: LspTextDocumentPositionParams = { textDocument: LspTextDocumentItem, position: LspPosition, ... }
+
+-- ---------------------------------------------------------------------------
 -- JSON null sentinel
 -- ---------------------------------------------------------------------------
 -- lunajson.encode(v, nullv): any value == nullv is written as JSON null.
@@ -531,19 +540,20 @@ local HANDLERS = {}
 HANDLERS["initialize"] = function(state, msg)
     state.initialized = true
     -- Capture workspace root for cross-file navigation.
-    local p = msg.params --[[: any]] or {}
+    local p = msg.params --[[:! { rootUri?: string, rootPath?: string, initializationOptions?: { cachePath?: string, ... }, ... }]] or {}
     if p.rootUri then
-        state.root_path = uri_to_path(p.rootUri)
+        state.root_path = uri_to_path(p.rootUri or "")
     elseif p.rootPath then
-        state.root_path = p.rootPath
+        state.root_path = p.rootPath or "."
     else
         state.root_path = "."
     end
     -- Wire disk cache for cross-session .cri persistence.
-    local cache_dir
     local opts = p.initializationOptions
-    if opts and opts.cachePath then
-        cache_dir = opts.cachePath
+    local opts_cachepath = opts and (opts --[[:! { cachePath?: string, ... }]]).cachePath or nil
+    local cache_dir
+    if type(opts_cachepath) == "string" then
+        cache_dir = opts_cachepath
     else
         local xdg = os.getenv("XDG_CACHE_HOME")
         if xdg and xdg ~= "" then
@@ -584,7 +594,7 @@ HANDLERS["exit"] = function(state, _msg)
 end
 
 HANDLERS["textDocument/didOpen"] = function(state, msg)
-    local p = msg.params --[[: any]]
+    local p = msg.params --[[:! LspTextDocumentParams | nil]]
     if not p or not p.textDocument then return end
     local uri  = p.textDocument.uri
     local text = p.textDocument.text
@@ -594,13 +604,14 @@ HANDLERS["textDocument/didOpen"] = function(state, msg)
 end
 
 HANDLERS["textDocument/didChange"] = function(state, msg)
-    local p = msg.params --[[: any]]
+    local p = msg.params --[[:! LspDidChangeParams | nil]]
     if not p or not p.textDocument then return end
     local uri = p.textDocument.uri
     -- Full sync: last content change holds the full document text.
     local text
-    if p.contentChanges and #p.contentChanges > 0 then
-        text = p.contentChanges[#p.contentChanges].text
+    local changes = p.contentChanges
+    if changes and #changes > 0 then
+        text = changes[#changes].text
     end
     if not text then return end
     state.open_files[uri] = text
@@ -608,7 +619,7 @@ HANDLERS["textDocument/didChange"] = function(state, msg)
 end
 
 HANDLERS["textDocument/didSave"] = function(state, msg)
-    local p = msg.params --[[: any]]
+    local p = msg.params --[[:! { textDocument: LspTextDocumentItem, text?: string, ... } | nil]]
     if not p or not p.textDocument then return end
     local uri  = p.textDocument.uri
     -- If the client sends the text in didSave, use it; otherwise re-check
@@ -621,7 +632,7 @@ HANDLERS["textDocument/didSave"] = function(state, msg)
 end
 
 HANDLERS["textDocument/didClose"] = function(state, msg)
-    local p = msg.params --[[: any]]
+    local p = msg.params --[[:! LspTextDocumentParams | nil]]
     if not p or not p.textDocument then return end
     local uri = p.textDocument.uri
     state.open_files[uri] = nil
@@ -633,7 +644,7 @@ HANDLERS["textDocument/didClose"] = function(state, msg)
 end
 
 HANDLERS["textDocument/hover"] = function(state, msg)
-    local p = msg.params --[[: any]]
+    local p = msg.params --[[:! LspTextDocumentPositionParams | nil]]
     if not p or not p.textDocument or not p.position then
         send(ok_resp(msg.id, NULL))
         return
@@ -659,7 +670,7 @@ HANDLERS["textDocument/hover"] = function(state, msg)
 end
 
 HANDLERS["textDocument/completion"] = function(state, msg)
-    local p = msg.params --[[: any]]
+    local p = msg.params --[[:! { textDocument: LspTextDocumentItem, position?: LspPosition, context?: { triggerCharacter?: string, ... }, ... } | nil]]
     if not p or not p.textDocument then
         send(ok_resp(msg.id, EMPTY_ARRAY))
         return
@@ -672,12 +683,12 @@ HANDLERS["textDocument/completion"] = function(state, msg)
     end
 
     -- Field completion: triggered by "." or ":" — enumerate the object's fields.
-    local trigger = p.context and p.context.triggerCharacter
+    local trigger = p.context and (p.context --[[:! { triggerCharacter?: string, ... }]]).triggerCharacter
     local pos     = p.position
     if pos and (trigger == "." or trigger == ":") then
         local text = state.open_files[uri]
         if text then
-            local items = field_completions(ctx, text, pos.line, pos.character, trigger)
+            local items = field_completions(ctx, text, pos.line, pos.character, (trigger or "") --[[:! string]])
             if items then
                 send(ok_resp(msg.id, #items > 0 and items or EMPTY_ARRAY))
                 return
@@ -720,7 +731,7 @@ HANDLERS["textDocument/completion"] = function(state, msg)
 end
 
 HANDLERS["textDocument/signatureHelp"] = function(state, msg)
-    local p = msg.params --[[: any]]
+    local p = msg.params --[[:! LspTextDocumentPositionParams | nil]]
     if not p or not p.textDocument or not p.position then
         send(ok_resp(msg.id, NULL))
         return
@@ -751,7 +762,7 @@ HANDLERS["textDocument/signatureHelp"] = function(state, msg)
 end
 
 HANDLERS["textDocument/definition"] = function(state, msg)
-    local p = msg.params --[[: any]]
+    local p = msg.params --[[:! LspTextDocumentPositionParams | nil]]
     if not p or not p.textDocument or not p.position then
         send(ok_resp(msg.id, NULL))
         return
@@ -891,7 +902,7 @@ local function main()
     }
 
     while true do
-        local msg = recv() --[[:! { method?: string, id?: any, params?: any } | nil]]
+        local msg = recv() --[[:! { method?: string, id?: unknown, params?: unknown } | nil]]
         if msg == nil then break end
 
         local method = msg.method

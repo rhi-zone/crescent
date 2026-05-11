@@ -373,7 +373,7 @@ function M.decoder(opts)
   self._n           = 0
   self._header_row  = nil
   self._header_mode = opts and opts.headers
-  local ret = self --[[: any]]
+  local ret = self --[[: unknown]]
   return ret --[[:! Decoder]]
 end
 

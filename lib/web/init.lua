@@ -33,7 +33,7 @@ local format = string.format
 
 --: (string) -> string
 local function url_decode(s)
-	local r = s:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) or 0) end) --[[: any]]
+	local r = s:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) or 0) end) --[[: unknown]]
 	r = r:gsub("+", " ")
 	return tostring(r)
 end

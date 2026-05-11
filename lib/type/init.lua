@@ -16,23 +16,23 @@ local mod = {}
 --::   { key: K, value: { __schema: V }, optional: O, readonly: R } => { key: K, value: V, optional: O, readonly: R },
 --:: }
 
-mod.integer = ({ type = "integer" } --[[: any]]) --[[: Schema<integer>]]
-mod.number  = ({ type = "number"  } --[[: any]]) --[[: Schema<number>]]
-mod.string  = ({ type = "string"  } --[[: any]]) --[[: Schema<string>]]
-mod.boolean = ({ type = "boolean" } --[[: any]]) --[[: Schema<boolean>]]
-mod["nil"]  = ({ type = "nil"     } --[[: any]]) --[[: Schema<nil>]]
+mod.integer = ({ type = "integer" } --[[: unknown]]) --[[: Schema<integer>]]
+mod.number  = ({ type = "number"  } --[[: unknown]]) --[[: Schema<number>]]
+mod.string  = ({ type = "string"  } --[[: unknown]]) --[[: Schema<string>]]
+mod.boolean = ({ type = "boolean" } --[[: unknown]]) --[[: Schema<boolean>]]
+mod["nil"]  = ({ type = "nil"     } --[[: unknown]]) --[[: Schema<nil>]]
 
 --: <T>(T) -> Schema<T>
-mod.literal = function(value) return { type = "literal", value = value } --[[: any]] end
+mod.literal = function(value) return { type = "literal", value = value } --[[: unknown]] end
 
 --: <T: {}>(T) -> Schema<$EachField<T, UnwrapField>>
-mod.tuple = function(shape) return { type = "tuple", shape = shape } --[[: any]] end
+mod.tuple = function(shape) return { type = "tuple", shape = shape } --[[: unknown]] end
 
 --: <T: {}>(T) -> Schema<$EachField<T, UnwrapField>>
-mod.struct = function(shape) return { type = "struct", shape = shape } --[[: any]] end
+mod.struct = function(shape) return { type = "struct", shape = shape } --[[: unknown]] end
 
 --: <T: {}>(T) -> Schema<$EachField<T, UnwrapField>>
-mod.struct_exact = function(shape) return { type = "struct_exact", shape = shape } --[[: any]] end
+mod.struct_exact = function(shape) return { type = "struct_exact", shape = shape } --[[: unknown]] end
 
 mod.array = (function(item) return { type = "array", item = item } end) --[[: <T>(Schema<T>) -> Schema<T[]>]]
 
@@ -45,7 +45,7 @@ mod.any_of = (function(t, u, v, w, x, y, z, a, ...) return { type = "any_of", ty
 -- NOTE: all_of should return an intersection type; not yet expressible.
 mod.all_of = (function(t, ...) return { type = "all_of", types = { t, ... } } end) --[[: <T>(Schema<T>, ...unknown) -> Schema<T>]]
 
-local unwrap = (function(t) return (t --[[: any]]).shape end) --[[: <T>(Schema<T>) -> T]]
+local unwrap = (function(t) return (t --[[: unknown]]).shape end) --[[: <T>(Schema<T>) -> T]]
 mod._unwrap_struct       = unwrap
 mod._unwrap_tuple        = unwrap
 mod._unwrap_struct_exact = unwrap

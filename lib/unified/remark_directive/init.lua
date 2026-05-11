@@ -42,7 +42,7 @@ local str_match = string.match
 -- Returns a table of key → value (string or true for booleans).
 --: (s: string | nil) -> unknown
 local function parse_attrs(s)
-  local attrs = {} --[[: any]]
+  local attrs = {} --[[: unknown]]
   if not s or s == "" then return attrs end
   local pos = 1  --: integer
   local len = #s
@@ -109,7 +109,7 @@ local function parse_directive_head(text)
     end
   end
 
-  local attrs = {} --[[: any]]
+  local attrs = {} --[[: unknown]]
   if pos <= len and str_sub(text, pos, pos) == "{" then
     local close = str_find(text, "}", pos + 1, true)
     if close then
@@ -145,7 +145,7 @@ end
 -- Scan a text value for :name[...]{...} patterns (single colon only).
 -- Returns an array of replacement nodes.
 local function scan_text_directives(value)
-  local result = {} --[[: any]]
+  local result = {} --[[: unknown]]
   local pos = 1  --: integer
   local len = #value
 
@@ -191,7 +191,7 @@ end
 
 -- Expand inline children, scanning text nodes for text directives.
 local function expand_inline(children)
-  local result = {} --[[: any]]
+  local result = {} --[[: unknown]]
   for i = 1, #children do
     local node = children[i]
     if node.type == "text" then
@@ -301,7 +301,7 @@ local transform_children
 
 -- Transform a list of block children, detecting directives.
 transform_children = function(children)
-  local result = {} --[[: any]]
+  local result = {} --[[: unknown]]
   local i = 1
   local n = #children
 

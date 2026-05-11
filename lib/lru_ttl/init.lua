@@ -116,7 +116,7 @@ function M.new(opts)
       evictions   = 0,
       expirations = 0,
     },
-  }, Cache) --[[: any]]
+  }, Cache) --[[: unknown]]
   return cache --[[:! Cache]]
 end
 

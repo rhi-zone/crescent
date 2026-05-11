@@ -95,7 +95,7 @@ function M.main(argv)
         end
         local ok, encoded = pcall(json.encode, output)
         if ok then
-            io.write(((encoded --[[: any]]) --[[:! string]]) .. "\n")
+            io.write(((encoded --[[: unknown]]) --[[:! string]]) .. "\n")
         else
             io.stderr:write("json encode error: " .. tostring(encoded) .. "\n")
             had_error = true

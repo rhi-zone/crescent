@@ -35,7 +35,7 @@ local function majority_label(dataset)
   local best_lbl, best_cnt = nil, -1
   for lbl, cnt in pairs(counts) do
     if cnt > best_cnt then
-      best_lbl = lbl --[[: any]]
+      best_lbl = lbl --[[: unknown]]
       best_cnt = cnt
     end
   end
@@ -342,7 +342,7 @@ local function collect_rules(node, path, rules)
       local display_v = v == "__nil__" and "nil" or v
       path[#path + 1] = node_.feature .. "=" .. display_v
       collect_rules(node_.children[v] --[[:! TreeNode]], path, rules)
-      path[#path] = nil --[[: any]]
+      path[#path] = nil --[[: unknown]]
     end
   end
 end
@@ -444,7 +444,7 @@ local function prune_node(node, val_dataset)
     default_label = node_.default_label,
     counts = node_.counts,
     total = node_.total,
-    label = nil, --[[: any]]
+    label = nil, --[[: unknown]]
   }
 
   -- Count correct predictions with current subtree
@@ -592,7 +592,7 @@ function Forest:predict(example)
   local best_lbl, best_cnt = nil, -1
   for lbl, cnt in pairs(votes) do
     if cnt > best_cnt then
-      best_lbl = lbl --[[: any]]
+      best_lbl = lbl --[[: unknown]]
       best_cnt = cnt
     end
   end

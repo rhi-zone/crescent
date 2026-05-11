@@ -21,7 +21,7 @@ if not ok then
 	package.loaded["lib.regex.system"] = nil
 end
 local impl_raw = (ok and type(mod) == "table") and mod or require("lib.regex.pure")
-local impl_u = impl_raw --[[: any]]
+local impl_u = impl_raw --[[: unknown]]
 local impl_t = impl_u --[[:! { compile: unknown, match: unknown, find: unknown, gmatch: unknown, gsub: unknown, split: unknown, _tier: unknown, ... }]]
 
 --:: RegexCompile = (pattern: string, flags: string | nil) -> (unknown, string | nil)

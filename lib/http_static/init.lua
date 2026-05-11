@@ -45,7 +45,7 @@ M.router = function(root, opts)
     os_date = opts.os_date,
   })
   if not static_raw then return nil, err end
-  local static = static_raw --[[: any]]
+  local static = static_raw --[[: unknown]]
 
   local prefix_path = opts.prefix and ("/" .. opts.prefix) or nil --: string | nil
   local prefix_len  = 0 --: integer

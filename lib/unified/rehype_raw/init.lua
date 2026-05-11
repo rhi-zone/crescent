@@ -53,7 +53,7 @@ local VOID = {
 --              { type="text", value= }
 --: (string) -> unknown
 local function tokenize(html)
-  local tokens = {} --[[: any]]
+  local tokens = {} --[[: unknown]]
   local i = 1
   local len = #html
 
@@ -202,8 +202,8 @@ end
 --: (unknown) -> { [integer]: HastNode }
 local function tokens_to_hast(tokens)
   -- Stack of open elements. Each entry: { node = hast_element }.
-  local stack = {} --[[: any]]
-  local root_children = {} --[[: any]]
+  local stack = {} --[[: unknown]]
+  local root_children = {} --[[: unknown]]
 
   local function current_children()
     if #stack == 0 then
@@ -213,7 +213,7 @@ local function tokens_to_hast(tokens)
   end
 
   for _, tok_raw in ipairs(tokens) do
-    local tok = tok_raw --[[: any]]
+    local tok = tok_raw --[[: unknown]]
     if tok.type == "text" then
       local children = current_children()
       children[#children + 1] = { type = "text", value = tok.value }

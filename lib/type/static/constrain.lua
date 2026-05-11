@@ -2270,7 +2270,7 @@ ExprRule[NODE_CAST_EXPR] = function(ctx, nid)
     local ann = ctx.ann.results[n.data[1]]  -- n.data[1] is the negative cast_id
     if not ann or ann.kind ~= ANN_TYPE then return inner_tid end
     -- Reject `--[[:! any]]`: the force-cast is for narrowing `unknown` to a
-    -- concrete type, not for casting to `any`. Use `--[[: any]]` instead.
+    -- concrete type, not for casting to `any`. Use `--[[: unknown]]` instead.
     if band(n.flags, defs.FLAG_FORCE_CAST) ~= 0 then
         local at = ctx.ann and ctx.ann.types:get(ann.type_id)
         if at and at.tag == defs.TAG_ANY then

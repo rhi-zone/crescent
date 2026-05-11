@@ -238,7 +238,7 @@ end
 -- Uses LuaJIT's FFI uint64_t for true 64-bit arithmetic.
 
 local ffi = require("ffi")
-local u64  = ffi.typeof("uint64_t") --[[: any]]
+local u64  = ffi.typeof("uint64_t")
 
 -- Rotate left 64-bit.
 local function rotl64(x, r)
@@ -263,13 +263,13 @@ end
 -- for values > 2^53.
 local FMIX64_C1 = 0xff51afd7ed558ccdULL
 local FMIX64_C2 = 0xc4ceb9fe1a85ec53ULL
---: (cdata) -> cdata
+--: (cdata) -> integer
 local function fmix64(k)
-  k = bxor(k --[[:! integer]], rshift(k --[[:! integer]], 33)) --[[: any]]
-  k = k * FMIX64_C1 --[[: any]]
-  k = bxor(k --[[:! integer]], rshift(k --[[:! integer]], 33)) --[[: any]]
-  k = k * FMIX64_C2 --[[: any]]
-  k = bxor(k --[[:! integer]], rshift(k --[[:! integer]], 33)) --[[: any]]
+  k = bxor(k --[[:! integer]], rshift(k --[[:! integer]], 33)) --[[:! integer]]
+  k = (k * FMIX64_C1) --[[:! integer]]
+  k = bxor(k, rshift(k, 33)) --[[:! integer]]
+  k = (k * FMIX64_C2) --[[:! integer]]
+  k = bxor(k, rshift(k, 33)) --[[:! integer]]
   return k
 end
 
@@ -315,7 +315,7 @@ function M.x64_128(key, seed)
   if rem >= 10 then k2 = bxor(k2, lshift(u64(byte(key, tail_start +  9)),  8)) end
   if rem >=  9 then k2 = bxor(k2, u64(byte(key, tail_start + 8))) end
   if rem >=  9 then
-    k2 = k2 * C2_x64; k2 = rotl64(k2, 33); k2 = k2 * C1_x64; h2 = bxor(h2, k2)
+    k2 = (k2 * C2_x64) --[[:! integer]]; k2 = rotl64(k2, 33); k2 = (k2 * C1_x64) --[[:! integer]]; h2 = bxor(h2, k2)
   end
 
   if rem >=  8 then k1 = bxor(k1, lshift(u64(byte(key, tail_start +  7)), 56)) end
@@ -327,7 +327,7 @@ function M.x64_128(key, seed)
   if rem >=  2 then k1 = bxor(k1, lshift(u64(byte(key, tail_start +  1)),  8)) end
   if rem >=  1 then k1 = bxor(k1, u64(byte(key, tail_start))) end
   if rem >=  1 then
-    k1 = k1 * C1_x64; k1 = rotl64(k1, 31); k1 = k1 * C2_x64; h1 = bxor(h1, k1)
+    k1 = (k1 * C1_x64) --[[:! integer]]; k1 = rotl64(k1, 31); k1 = (k1 * C2_x64) --[[:! integer]]; h1 = bxor(h1, k1)
   end
 
   -- Finalization
@@ -337,8 +337,8 @@ function M.x64_128(key, seed)
   h1 = h1 + h2
   h2 = h2 + h1
 
-  h1 = fmix64((h1 --[[:! cdata]])) --[[: any]]
-  h2 = fmix64((h2 --[[:! cdata]])) --[[: any]]
+  h1 = fmix64((h1 --[[:! cdata]]))
+  h2 = fmix64((h2 --[[:! cdata]]))
 
   h1 = h1 + h2
   h2 = h2 + h1
@@ -360,7 +360,7 @@ end
 function M.x64_128_hex(key, seed)
   local h1, h2 = M.x64_128(key, seed)
   if not h1 then return nil, h2 --[[:! string | nil]] end
-  return hex64(h1) .. hex64(h2 --[[: any]])
+  return hex64(h1) .. hex64(h2 --[[:! integer]])
 end
 
 -- ---------------------------------------------------------------------------

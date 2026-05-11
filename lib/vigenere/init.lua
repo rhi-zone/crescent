@@ -518,7 +518,7 @@ function M.crack_vigenere_keylen(ciphertext, max_len)
     end
     results[#results + 1] = { len = k, score = total_ic / k }
   end
-  sort(results --[[: any]], function(a, b) return a.score > b.score end)
+  sort(results --[[: unknown]], function(a, b) return a.score > b.score end)
   -- Return top 5
   local top = {}
   for i = 1, math.min(5, #results) do top[i] = results[i] end

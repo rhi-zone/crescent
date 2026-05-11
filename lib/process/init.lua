@@ -27,11 +27,11 @@ local SIGKILL = 9
 local WNOHANG = 1
 
 --: integer & { [0]: integer }
-local buf = ffi.new("char[65536]") --[[: any]]
+local buf = ffi.new("char[65536]") --[[: unknown]]
 --: { [0]: integer }
-local int1 = ffi.new("int[1]") --[[: any]]
+local int1 = ffi.new("int[1]") --[[: unknown]]
 --: { [0]: integer, [1]: integer }
-local int2 = ffi.new("int[2]") --[[: any]]
+local int2 = ffi.new("int[2]") --[[: unknown]]
 
 local mod = {}
 
@@ -67,9 +67,9 @@ function mod.exec(cmd, args, opts)
   opts = opts_
 
   -- create pipes: stdout, stderr, stdin (if needed)
-  local stdout_pipe = (ffi.new("int[2]") --[[: any]]) --[[:! { [integer]: integer }]]
-  local stderr_pipe = (ffi.new("int[2]") --[[: any]]) --[[:! { [integer]: integer }]]
-  local stdin_pipe = (opts.stdin and ffi.new("int[2]") or nil) --[[: any]] --[[:! { [integer]: integer } | nil]]
+  local stdout_pipe = (ffi.new("int[2]") --[[: unknown]]) --[[:! { [integer]: integer }]]
+  local stderr_pipe = (ffi.new("int[2]") --[[: unknown]]) --[[:! { [integer]: integer }]]
+  local stdin_pipe = (opts.stdin and ffi.new("int[2]") or nil) --[[: unknown]] --[[:! { [integer]: integer } | nil]]
 
   if ffi.C.pipe(stdout_pipe) ~= 0 then return nil, "pipe() failed for stdout", nil end
   if ffi.C.pipe(stderr_pipe) ~= 0 then
@@ -126,7 +126,7 @@ function mod.exec(cmd, args, opts)
     local nargs = args and #args or 0
     --: { [integer]: string | nil }
     --: { [integer]: string | nil }
-    local argv = ffi.new("const char*[?]", nargs + 2) --[[: any]]
+    local argv = ffi.new("const char*[?]", nargs + 2) --[[: unknown]]
     argv[0] = cmd
     for i = 1, nargs do
       argv[i] = args[i]
@@ -210,7 +210,7 @@ function mod.spawn(cmd, args, opts)
     local nargs = args and #args or 0
     --: { [integer]: string | nil }
     --: { [integer]: string | nil }
-    local argv = ffi.new("const char*[?]", nargs + 2) --[[: any]]
+    local argv = ffi.new("const char*[?]", nargs + 2) --[[: unknown]]
     argv[0] = cmd
     for i = 1, nargs do
       argv[i] = args[i]
@@ -223,7 +223,7 @@ function mod.spawn(cmd, args, opts)
 
   -- parent
   --: Process
-  return (setmetatable({ pid = pid }, handle) --[[: any]])
+  return (setmetatable({ pid = pid }, handle) --[[: unknown]])
 end
 
 return mod

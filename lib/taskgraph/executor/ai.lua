@@ -35,7 +35,7 @@ local function exec_complete(task, _ctx)
 		provider    = inp.provider,
 		http_client = inp.http_client,
 		api_key     = inp.api_key,
-	} --[[: any]])
+	} --[[: unknown]])
 	if not res then error(err or "llm.complete failed") end
 	return { text = res.text, usage = res.usage }
 end
@@ -88,7 +88,7 @@ local function exec_tool_loop(task, ctx)
 			provider    = inp.provider,
 			http_client = inp.http_client,
 			api_key     = inp.api_key,
-		} --[[: any]])
+		} --[[: unknown]])
 		if not res then error(err or "llm.tool_loop generation failed") end
 
 		local tool_calls = res.tool_calls

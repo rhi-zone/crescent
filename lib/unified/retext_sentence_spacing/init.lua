@@ -14,7 +14,7 @@ end
 --
 -- Stores: root.data.sentence_spacing = { {actual=2, expected=1, sentence="..."}, ... }
 
-local nlcst = require("lib.unified.nlcst") --[[: any]]
+local nlcst = require("lib.unified.nlcst") --[[: unknown]]
 
 local M = {}
 

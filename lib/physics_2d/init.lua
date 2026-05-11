@@ -53,7 +53,7 @@ Body.__index = Body
 --: (unknown, (BodyOpts | nil)) -> BodyShape
 local function new_body(world, opts)
   opts = (opts or {}) --[[:! BodyOpts]]
-  local b = setmetatable({}, Body) --[[: any]]
+  local b = setmetatable({}, Body) --[[: unknown]]
   b._world        = world
   b.x             = opts.x or 0
   b.y             = opts.y or 0
@@ -295,7 +295,7 @@ Joint.__index = Joint
 --: (unknown, BodyShape, BodyShape, ({ target_dist: number | nil, stiffness: number | nil, ... } | nil)) -> JointShape
 local function new_joint(world, body_a, body_b, opts)
   opts = (opts or {}) --[[:! { target_dist: number | nil, stiffness: number | nil, ... }]]
-  local j = setmetatable({}, Joint) --[[: any]]
+  local j = setmetatable({}, Joint) --[[: unknown]]
   j._world   = world
   j.body_a   = body_a
   j.body_b   = body_b
@@ -349,7 +349,7 @@ World.__index = World
 local function new_world(opts)
   opts = (opts or {}) --[[:! WorldOpts]]
   local grav = opts.gravity or { x = 0.0, y = -9.8 }
-  local w = setmetatable({}, World) --[[: any]]
+  local w = setmetatable({}, World) --[[: unknown]]
   w.gx      = grav.x
   w.gy      = grav.y
   w.damping = opts.damping ~= nil and opts.damping or 0.999

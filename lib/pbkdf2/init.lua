@@ -91,7 +91,7 @@ function M.derive(password, salt, iterations, dklen, opts)
   local alg = opts and opts.alg
   local prf, hlen, err = get_prf(alg)
   if not prf then return nil, err end
-  local prf_any = prf --[[: any]]
+  local prf_any = prf --[[: unknown]]
   local prf_ = prf_any --[[:! (string, string) -> string]]
   local hlen_ = (hlen or 32) --[[:! integer]]
 

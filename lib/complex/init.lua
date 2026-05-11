@@ -34,7 +34,7 @@ mt.__index = mt
 
 --: (number, number) -> Complex
 local function _new(re, im)
-  return (setmetatable({ re = re, im = im }, mt) --[[: any]]) --[[:! Complex]]
+  return (setmetatable({ re = re, im = im }, mt) --[[: unknown]]) --[[:! Complex]]
 end
 
 -- ---------------------------------------------------------------------------

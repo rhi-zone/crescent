@@ -412,7 +412,7 @@ local function parse_goals(src)
       goals[#goals+1] = t
     end
   end
-  local term_any = term --[[: any]]
+  local term_any = term --[[: unknown]]
   local term_ = term_any --[[:! PrologTerm]]
   flatten_conj(term_)
   return goals
@@ -695,13 +695,13 @@ function DB:retract(clause_str)
       if #body_ > 0 and #clause_body ~= #body_ then
         body_match = false
       elseif #body_ > 0 then
-        local env_any = env --[[: any]]
+        local env_any = env --[[: unknown]]
         local env2 = env_any --[[:! { [string]: PrologTerm }]]
         for j = 1, #body_ do
           local body_copy = copy_term(clause_body[j], mapping)
           local env2_next = unify(env2, body_copy, body_[j])
           if not env2_next then body_match = false break end
-          local env2n_any = env2_next --[[: any]]
+          local env2n_any = env2_next --[[: unknown]]
           env2 = env2n_any --[[:! { [string]: PrologTerm }]]
         end
         if env2 then env = env2 end

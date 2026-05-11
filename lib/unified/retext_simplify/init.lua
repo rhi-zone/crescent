@@ -12,7 +12,7 @@ end
 --   { word="utilize", suggestion="use", sentence="..." }, ...
 -- }
 
-local nlcst = require("lib.unified.nlcst") --[[: any]]
+local nlcst = require("lib.unified.nlcst") --[[: unknown]]
 
 local M = {}
 

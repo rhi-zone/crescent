@@ -354,7 +354,7 @@ function M.sort(palette, key)
     return nil, "sort: unknown key '" .. tostring(key) .. "'"
   end
   local kfn = key_fn --[[:! (c: Color) -> number]]
-  table.sort(result --[[: any]], function(a, b)
+  table.sort(result --[[: unknown]], function(a, b)
     local av = a --[[:! Color]]; local bv = b --[[:! Color]]
     return kfn(av) < kfn(bv)
   end)

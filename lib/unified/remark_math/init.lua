@@ -271,7 +271,7 @@ local function remark_math(processor, opts)
     allow_single = false
   end
 
-  local proc_ = processor --[[: any]]
+  local proc_ = processor --[[: unknown]]
   local inner_parser = proc_._parser
 
   proc_:parser(function(source)

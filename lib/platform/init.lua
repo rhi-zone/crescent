@@ -353,7 +353,7 @@ local CAP_FACTORIES = {
 			local key_name = decl.key_name
 			if key_name then
 				local ok_kr, keyring_raw = pcall(require, "lib.keyring")
-				local keyring_any = keyring_raw --[[: any]]
+				local keyring_any = keyring_raw --[[: unknown]]
 				local keyring = keyring_any --[[:! { get: (string) -> (string | nil), set: (string, string) -> string | nil } | nil]]
 				if ok_kr and keyring then
 					local kr_key = keyring.get("crescent/" .. key_name)

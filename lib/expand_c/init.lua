@@ -79,7 +79,7 @@ M.expand = function(names, opts)
   local platform = opts.platform
   if not platform then
     -- jit is a LuaJIT global; check carefully
-    local ok, jit_os = pcall(function() return (jit --[[: any]]).os end)
+    local ok, jit_os = pcall(function() return (jit --[[: unknown]]).os end)
     if ok and jit_os then
       platform = (jit_os == "Windows") and "win" or "unix"
     else

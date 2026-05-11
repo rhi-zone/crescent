@@ -446,7 +446,7 @@ local function new_selector_parser(s)
     end
   end
   insert(tokens, { type = "eof" })
-  local p_ = setmetatable({ tokens = tokens, pos = 1 }, SelectorParser) --[[: any]]
+  local p_ = setmetatable({ tokens = tokens, pos = 1 }, SelectorParser) --[[: unknown]]
   return p_ --[[:! SelParser]]
 end
 
@@ -617,7 +617,7 @@ TokenStream.__index = TokenStream
 
 --: ({ [integer]: CssStyleToken }) -> TokStream
 local function new_token_stream(tokens)
-  local s_ = setmetatable({ tokens = tokens, pos = 1 }, TokenStream) --[[: any]]
+  local s_ = setmetatable({ tokens = tokens, pos = 1 }, TokenStream) --[[: unknown]]
   return s_ --[[:! TokStream]]
 end
 
@@ -716,9 +716,9 @@ local function parse_at_rule(stream, name)
       -- nested block
       local block_toks = parse_block(stream_)
       -- for @media/@supports etc, parse inner rules
-      local inner_stream = new_token_stream(block_toks --[[: any]] --[[:! { [integer]: CssStyleToken }]])
+      local inner_stream = new_token_stream(block_toks --[[: unknown]] --[[:! { [integer]: CssStyleToken }]])
       -- append eof
-      insert(block_toks, { type = "eof", value = "" } --[[: any]])
+      insert(block_toks, { type = "eof", value = "" } --[[: unknown]])
       rules = {}
       -- parse inner rules (simplified: only style rules)
       while true do

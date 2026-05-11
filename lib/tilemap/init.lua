@@ -22,7 +22,7 @@ Heap.__index = Heap
 
 --: () -> Heap
 local function heap_new()
-  local h = setmetatable({ _data = {}, _size = 0 }, Heap) --[[: any]]
+  local h = setmetatable({ _data = {}, _size = 0 }, Heap) --[[: unknown]]
   return h --[[:! Heap]]
 end
 
@@ -51,7 +51,7 @@ function Heap:pop()
   local d = self._data
   local top = d[1].key
   d[1] = d[self._size]
-  d[self._size] = nil --[[: any]]
+  d[self._size] = nil --[[: unknown]]
   self._size = self._size - 1
   -- sift down
   local i = 1
@@ -106,7 +106,7 @@ function M.new(width, height, opts)
     _height = h,
     _tiles = tiles,
     _tile_size = opts_.tile_size or 16,
-  }, TileMap) --[[: any]]
+  }, TileMap) --[[: unknown]]
   return tm --[[:! TileMap]]
 end
 
@@ -353,7 +353,7 @@ function TileMap:astar(sx, sy, gx, gy, opts)
         local k_ = k --[[:! integer]]
         local px = k_ % w
         local py = math.floor(k_ / w)
-        table.insert(path --[[: any]], 1, { px, py })
+        table.insert(path --[[: unknown]], 1, { px, py })
         k = came_from[k_]
       end
       return path
@@ -408,7 +408,7 @@ local function make_rng(seed)
     float = function(self)
       return self:next() / 4294967295
     end,
-  } --[[: any]]
+  } --[[: unknown]]
   return rng --[[:! Rng]]
 end
 
@@ -426,7 +426,7 @@ function M.random_rooms(width, height, opts)
   local max_size = opts.max_size or 8
   local rng = make_rng(opts.seed)
 
-  local map_res = M.new(width, height, { default_tile = 0 } --[[: any]])
+  local map_res = M.new(width, height, { default_tile = 0 } --[[: unknown]])
   local map = map_res --[[:! TileMap]]
   local rooms = {} --: { [integer]: RoomRect }
 
@@ -539,7 +539,7 @@ function M.cellular_automata(width, height, opts)
     tiles = next_tiles
   end
 
-  local map_res = M.new(width, height, { default_tile = 0 } --[[: any]])
+  local map_res = M.new(width, height, { default_tile = 0 } --[[: unknown]])
   local map = map_res --[[:! TileMap]]
   map._tiles = tiles
   return map

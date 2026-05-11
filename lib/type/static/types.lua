@@ -195,7 +195,7 @@ function M.new_ctx(pool)
         _ann_warn_line = 0,
         _ann_consumed  = {},
     }
-    return ctx --[[: any]]
+    return ctx --[[: unknown]]
 end
 
 -- Allocate and zero-initialize a TypeSlot. Returns type_id.

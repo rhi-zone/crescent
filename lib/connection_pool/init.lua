@@ -61,7 +61,7 @@ local function evict_idle(pool)
     if is_idle_expired(pool, entry, now) or is_lifetime_expired(pool, entry, now) then
       -- remove from idle list by swapping with last
       idle[i] = idle[#idle]
-      idle[#idle] = nil --[[: any]]
+      idle[#idle] = nil --[[: unknown]]
       destroy_entry(pool, entry)
     else
       i = i + 1
@@ -86,7 +86,7 @@ function pool_mt:acquire()
   -- Try idle connections first, skipping invalid or lifetime-expired ones
   while #idle > 0 do
     local entry = idle[#idle]
-    idle[#idle] = nil --[[: any]]
+    idle[#idle] = nil --[[: unknown]]
 
     -- Check lifetime before validating
     if is_lifetime_expired(self_, entry, now) then
@@ -145,7 +145,7 @@ function pool_mt:release(conn)
   if self_._closed then
     -- pool is closed: destroy the connection
     local meta = self_._conn_meta[conn]
-    self_._conn_meta[conn] = nil --[[: any]]
+    self_._conn_meta[conn] = nil --[[: unknown]]
     if meta then
       local entry = { conn = conn, created_at = meta.created_at, idle_since = 0 } --: ConnEntry
       destroy_entry(self_, entry)
@@ -163,7 +163,7 @@ function pool_mt:release(conn)
   if self_._draining then
     -- pool is draining: destroy the connection
     local meta = self_._conn_meta[conn]
-    self_._conn_meta[conn] = nil --[[: any]]
+    self_._conn_meta[conn] = nil --[[: unknown]]
     if meta then
       local entry = { conn = conn, created_at = meta.created_at, idle_since = 0 } --: ConnEntry
       destroy_entry(self_, entry)
@@ -236,7 +236,7 @@ function pool_mt:drain()
   local idle = self_._idle
   while #idle > 0 do
     local entry = idle[#idle]
-    idle[#idle] = nil --[[: any]]
+    idle[#idle] = nil --[[: unknown]]
     destroy_entry(self_, entry)
   end
 end
@@ -274,7 +274,7 @@ function pool_mt:resize(new_max)
   local idle = self_._idle
   while #idle > 0 and self_._total > new_max do
     local entry = idle[#idle]
-    idle[#idle] = nil --[[: any]]
+    idle[#idle] = nil --[[: unknown]]
     destroy_entry(self_, entry)
   end
 end
@@ -294,7 +294,7 @@ function M.new(opts)
     return nil, "connection_pool.new: opts.create is required"
   end
 
-  local pool = setmetatable({}, pool_mt) --[[: any]]
+  local pool = setmetatable({}, pool_mt) --[[: unknown]]
   local self_ = pool --[[:! Pool]]
   self_._create       = opts.create
   self_._destroy      = opts.destroy

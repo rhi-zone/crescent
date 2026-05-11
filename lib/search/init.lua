@@ -140,14 +140,14 @@ end
 -- Query constructors
 --: (word: string) -> query
 function M.term(word)
-  return { type = "term", word = word:lower() } --[[: any]]
+  return { type = "term", word = word:lower() } --[[: unknown]]
 end
 
 --: (words: {string}) -> query
 function M.phrase(words)
   local lwords = {}
   for i = 1, #words do lwords[i] = words[i]:lower() end
-  return { type = "phrase", words = lwords } --[[: any]]
+  return { type = "phrase", words = lwords } --[[: unknown]]
 end
 
 --: (op: string, queries: {query}) -> (query | nil, string | nil)
@@ -155,29 +155,29 @@ function M.boolean(op, queries)
   if op ~= "and" and op ~= "or" and op ~= "not" then
     return nil, "search: boolean op must be 'and', 'or', or 'not'"
   end
-  return { type = "boolean", op = op, queries = queries } --[[: any]]
+  return { type = "boolean", op = op, queries = queries } --[[: unknown]]
 end
 
 --: (word: string, max_dist: number | nil) -> query
 function M.fuzzy(word, max_dist)
-  return { type = "fuzzy", word = word:lower(), max_dist = max_dist or 1 } --[[: any]]
+  return { type = "fuzzy", word = word:lower(), max_dist = max_dist or 1 } --[[: unknown]]
 end
 
 --: (prefix: string) -> query
 function M.prefix(prefix)
-  return { type = "prefix", prefix = prefix:lower() } --[[: any]]
+  return { type = "prefix", prefix = prefix:lower() } --[[: unknown]]
 end
 
 --: (pattern: string) -> query
 function M.wildcard(pattern)
-  return { type = "wildcard", pattern = pattern:lower() } --[[: any]]
+  return { type = "wildcard", pattern = pattern:lower() } --[[: unknown]]
 end
 
 -- Convert wildcard pattern (? = any char, * = any chars) to Lua pattern
 --: (pattern: string) -> string
 local function wildcard_to_lua_pattern(pattern)
   local parts = {} --: { [integer]: string }
-  local parts_ = parts --[[: any]]
+  local parts_ = parts --[[: unknown]]
   for i = 1, #pattern do
     local c = pattern:sub(i, i)
     if c == "?" then
@@ -206,9 +206,9 @@ function M.index(opts)
 
   --:: InvEntry = { positions: { [integer]: integer }, freq: integer }
   -- Inverted index: term -> { doc_id -> { positions: {...}, freq: n } }
-  local inverted = {} --[[: any]]
+  local inverted = {} --[[: unknown]]
   -- Document store: doc_id -> { text: string, length: n, fields: table? }
-  local docs = {} --[[: any]]
+  local docs = {} --[[: unknown]]
   local doc_count = 0
   local total_length = 0  -- sum of all doc lengths (for BM25 avg)
 
@@ -305,7 +305,7 @@ function M.index(opts)
 
   -- Evaluate a query, returning a set of matching doc_ids
   local function eval_query(query)
-    local q = query --[[: any]]
+    local q = query --[[: unknown]]
     local qt = q.type
     if qt == "term" then
       return posting_set(q.word --[[:! string]])
@@ -334,7 +334,7 @@ function M.index(opts)
         for _, start_pos in ipairs(first_positions) do
           local ok = true
           for i = 2, #words do
-            local start_pos_ = start_pos --[[: any]]
+            local start_pos_ = start_pos --[[: unknown]]
             local target = start_pos_ + (i - 1)
             local found = false
             for _, p in ipairs(inverted[words[i]][doc_id].positions) do
@@ -436,7 +436,7 @@ function M.index(opts)
 
   -- Collect terms relevant to a query (for scoring)
   local function collect_query_terms(query)
-    local q = query --[[: any]]
+    local q = query --[[: unknown]]
     local qt = q.type
     if qt == "term" then
       return { q.word --[[:! string]] }
@@ -481,7 +481,7 @@ function M.index(opts)
       end
       return terms
     end
-    return {} --[[: any]]
+    return {} --[[: unknown]]
   end
 
   -- TF-IDF score for a doc given a list of query terms
@@ -550,8 +550,8 @@ function M.index(opts)
     local scorer = (opts.scorer or "bm25")
     local explain = opts.explain or false
 
-    local matching = eval_query(query --[[: any]])
-    local terms = collect_query_terms(query --[[: any]])
+    local matching = eval_query(query --[[: unknown]])
+    local terms = collect_query_terms(query --[[: unknown]])
 
     -- Score each matching doc
     local scored = {}
@@ -575,7 +575,7 @@ function M.index(opts)
       local doc = docs[s.id]
       local r = { id = s.id, score = s.score }
       if explain then
-        r --[[: any]].highlights = make_highlights(s.id, terms --[[:! { [number]: string }]], doc)
+        r --[[: unknown]].highlights = make_highlights(s.id, terms --[[:! { [number]: string }]], doc)
       end
       results[#results + 1] = r
     end
@@ -586,8 +586,8 @@ function M.index(opts)
   -- Facet: count results by field value
   --: (query: query, field: string) -> { [string]: number }
   function idx:facet(query, field)
-    local matching = eval_query(query --[[: any]])
-    local counts = {} --[[: any]]
+    local matching = eval_query(query --[[: unknown]])
+    local counts = {} --[[: unknown]]
     for doc_id in pairs(matching) do
       local doc = docs[doc_id]
       if doc and doc.fields then
@@ -601,7 +601,7 @@ function M.index(opts)
     return counts
   end
 
-  return idx --[[: any]]
+  return idx --[[: unknown]]
 end
 
 return M

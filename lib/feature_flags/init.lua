@@ -33,7 +33,7 @@ Registry.__index = Registry
 -- Create a new flag registry.
 --: () -> Registry
 function M.new()
-  local self = setmetatable({ _flags = {}, _overrides = {}, _listeners = {} }, Registry) --[[: any]] --[[:! Registry]]
+  local self = setmetatable({ _flags = {}, _overrides = {}, _listeners = {} }, Registry) --[[: unknown]] --[[:! Registry]]
   return self
 end
 

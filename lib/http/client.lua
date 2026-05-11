@@ -35,7 +35,7 @@ mod.send_async = function (req, cb, ep)
 
 	local client_, err = socket.create("inet", "stream", "tcp")
 	if not client_ then cb(nil, err); return end
-	local client = client_ --[[: any]]
+	local client = client_ --[[: unknown]]
 
 	local ok
 	ok, err = client:set_blocking(false)
@@ -62,7 +62,7 @@ mod.send_async = function (req, cb, ep)
 	local done = false
 	local remove  -- forward-declared so the read callback can capture it as an upvalue
 
-	local ep_ = ep --[[: any]]
+	local ep_ = ep --[[: unknown]]
 	local _ -- write callback (unused by client)
 	_, remove = ep_:add(client.fd, function ()
 		if done then return end
@@ -98,7 +98,7 @@ mod.send_async = function (req, cb, ep)
 	end
 
 	if is_owner then
-		local ep_ = ep --[[: any]]
+		local ep_ = ep --[[: unknown]]
 		ep_:loop()
 	end
 end

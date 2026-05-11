@@ -33,7 +33,7 @@ local function get_provider(name)
 	local ok, p = pcall(require, "lib.ai.providers." .. name)
 	if ok and type(p) == "table" and (p.generate or p.stream) then
 		--: ai_provider
-		local p_ = p --[[: any]]
+		local p_ = p --[[: unknown]]
 		providers[name] = p_
 		return p_
 	end
@@ -45,7 +45,7 @@ local function get_provider(name)
 		config.name = name
 		p = compat.create(config)
 		--: ai_provider
-		local p_ = p --[[: any]]
+		local p_ = p --[[: unknown]]
 		providers[name] = p_
 		return p_
 	end

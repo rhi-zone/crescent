@@ -515,7 +515,7 @@ quat_mt.__index = quat_mt
 
 --: (w: number | nil, x: number | nil, y: number | nil, z: number | nil) -> Quat
 function M.quat(w, x, y, z)
-  local r_ = setmetatable({ w = w or 1.0, x = x or 0.0, y = y or 0.0, z = z or 0.0 }, quat_mt) --[[: any]]
+  local r_ = setmetatable({ w = w or 1.0, x = x or 0.0, y = y or 0.0, z = z or 0.0 }, quat_mt) --[[: unknown]]
   return r_ --[[:! Quat]]
 end
 

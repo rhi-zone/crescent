@@ -23,11 +23,11 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local json_raw = require("lib.json")
-local json = json_raw --[[: any]]
+local json = json_raw --[[: unknown]]
 local platform_raw = require("lib.platform")
-local platform = platform_raw --[[: any]]
+local platform = platform_raw --[[: unknown]]
 local cap_dispatch_raw = require("lib.platform.cap_dispatch")
-local cap_dispatch = cap_dispatch_raw --[[: any]]
+local cap_dispatch = cap_dispatch_raw --[[: unknown]]
 local app_index_mod = require("lib.platform.index")
 
 --:: CapDecl = { type: string | nil, required: boolean | nil, host: string | nil, model: string | nil, path: string | nil, paths: unknown, allow_write: boolean | nil, scope: unknown, tables: unknown, provider: string | nil, key_name: string | nil, base_url: string | nil, provider_default: string | nil, root: string | nil, binaries: unknown, stderr: string | nil, methods: unknown, port: integer | nil, ... }
@@ -312,9 +312,9 @@ local function merge_cap_declarations(manifest, entry_key)
 				cap_declarations[name] = ({
 					type = name,
 					required = decl ~= "optional",
-				}) --[[: any]]
+				}) --[[: unknown]]
 			elseif type(decl) == "table" then
-				cap_declarations[name] = decl --[[: any]]
+				cap_declarations[name] = decl --[[: unknown]]
 			end
 		end
 	end
@@ -427,7 +427,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 	if cap_type == "cli" then
 		local mod_path = CAP_TYPE_MODULES.cli
 		local ok, mod_raw = pcall(require, mod_path)
-		local mod = mod_raw --[[: any]]
+		local mod = mod_raw --[[: unknown]]
 		if ok and mod.cli_cap then
 			return mod.cli_cap(platform_opts.app_args or {})
 		end
@@ -439,7 +439,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 	if cap_type == "stdin" then
 		local mod_path = CAP_TYPE_MODULES.stdin
 		local ok, mod_raw = pcall(require, mod_path)
-		local mod = mod_raw --[[: any]]
+		local mod = mod_raw --[[: unknown]]
 		if ok and mod.stdin_cap then
 			return mod.stdin_cap()
 		end
@@ -450,7 +450,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 	if cap_type == "stdout" then
 		local mod_path = CAP_TYPE_MODULES.stdout
 		local ok, mod_raw = pcall(require, mod_path)
-		local mod = mod_raw --[[: any]]
+		local mod = mod_raw --[[: unknown]]
 		if ok and mod.stdout_cap then
 			return mod.stdout_cap()
 		end
@@ -480,7 +480,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		if key_name then
 			local key_name_s = key_name --[[:! string]]
 			local ok_kr, keyring_raw = pcall(require, "lib.keyring")
-			local keyring = keyring_raw --[[: any]]
+			local keyring = keyring_raw --[[: unknown]]
 			if ok_kr and keyring then
 				local kr_key = keyring.get("crescent/" .. key_name_s)
 				if kr_key then
@@ -578,7 +578,7 @@ end
 -- Module cache is local to this loader — no host pollution.
 local function make_dir_loader(app_dir, env)
 	local app_dir_s = app_dir --[[:! string]]
-	local env_a = env --[[: any]]
+	local env_a = env --[[: unknown]]
 	local loaded = {}
 	-- Build the module prefix that corresponds to app_dir so that fully-qualified
 	-- sibling requires like require("lib.platform.apps.charactercardv2.presets")
@@ -591,7 +591,7 @@ local function make_dir_loader(app_dir, env)
 		if relname:sub(1, #dir_prefix) == dir_prefix then
 			relname = relname:sub(#dir_prefix + 1)
 		end
-		local relpath = (relname:gsub("%.", "/")) --[[: any]]
+		local relpath = (relname:gsub("%.", "/")) --[[: unknown]]
 		local candidates = {
 			relpath .. ".lua",
 			relpath .. "/init.lua",
@@ -615,7 +615,7 @@ end
 
 --: (app: { path: string, ... }, entry_path: string, caps: unknown) -> (unknown, string | nil)
 local function run_dir_entrypoint(app, entry_path, caps)
-	local sandbox = require("lib.sandbox") --[[: any]]
+	local sandbox = require("lib.sandbox") --[[: unknown]]
 	local cap_bundle = { globals = { caps = caps }, modules = {} }
 	local env = sandbox.env(sandbox.stdlib, cap_bundle)
 
@@ -712,7 +712,7 @@ local function cmd_list(args)
 		return
 	end
 	for _, row in ipairs(rows) do
-		local row_tags = row.tags --[[: any]]
+		local row_tags = row.tags --[[: unknown]]
 		local tags = row_tags and #row_tags > 0 and ("  [" .. table.concat(row_tags, ", ") .. "]") or ""
 		io.write(string.format("%4d  %s%s\n", row.id, row.name, tags))
 	end
@@ -883,7 +883,7 @@ local function cmd_set_key(args)
 		io.stderr:write("error: keyring unavailable: " .. tostring(keyring_raw) .. "\n")
 		os.exit(1)
 	end
-	local keyring = keyring_raw --[[: any]]
+	local keyring = keyring_raw --[[: unknown]]
 	-- No args: list all crescent/* keys.
 	if not key_name then
 		local keys, err = keyring.list("crescent/")
@@ -1000,7 +1000,7 @@ local function cmd_import(args)
 		runtime_files = runtime_files,
 		runtime_manifest = runtime_manifest,
 		apps_dir = apps_dir --[[:! string]],
-		index = idx --[[: any]],
+		index = idx --[[: unknown]],
 		timestamp = os.time() --[[:! number]],
 		write_fn = (function(path, data) local ok, err = write_file(path, data); if ok then return true, "" end; return nil, err or "" end) --[[: (string, string) -> (true | nil, string)]],
 	});
@@ -1234,7 +1234,7 @@ if app._dir_mode then
 			io.stderr:write("error: create() returned nil\n")
 			os.exit(1)
 		end
-		local result = result_ --[[: any]]
+		local result = result_ --[[: unknown]]
 		-- CLI mode: app_args after '--' → invoke CLI handler instead of HTTP server.
 		if result.cli and opts.app_args and #opts.app_args > 0 then
 			result.cli(opts.app_args)

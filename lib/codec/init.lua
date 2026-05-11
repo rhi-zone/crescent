@@ -162,11 +162,11 @@ local function xor(key)
   local ok_bit, bit_mod = pcall(require, "bit")
   local bxor_fn --: ((integer, integer) -> integer) | nil
   if ok_bit then
-    bxor_fn = (bit_mod --[[: any]]).bxor --[[:! (integer, integer) -> integer]]
+    bxor_fn = (bit_mod --[[: unknown]]).bxor --[[:! (integer, integer) -> integer]]
   else
     local ok_bit32, bit32_mod = pcall(require, "bit32")
     if ok_bit32 then
-      bxor_fn = (bit32_mod --[[: any]]).bxor --[[:! (integer, integer) -> integer]]
+      bxor_fn = (bit32_mod --[[: unknown]]).bxor --[[:! (integer, integer) -> integer]]
     end
   end
   if bxor_fn then

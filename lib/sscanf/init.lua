@@ -28,7 +28,7 @@ local floor, huge = math.floor, math.huge
 --: (fmt: string) -> ({ [integer]: Directive } | nil, string | nil)
 local function parse_format(fmt)
 	local directives = {} --: { [integer]: Directive }
-	local directives_ = directives --[[: any]]
+	local directives_ = directives --[[: unknown]]
 	local i = 1 --: integer
 	local n = #fmt
 

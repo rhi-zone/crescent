@@ -36,7 +36,7 @@ local function active_insert(active, interval)
       break
     end
   end
-  local active_any = active --[[: any]]
+  local active_any = active --[[: unknown]]
   table.insert(active_any, pos, interval)
 end
 
@@ -171,7 +171,7 @@ M.allocate = function(intervals, regfile)
     while #active > 0 do
       local j = active[1] --: Interval
       if j.last >= current_first then break end
-      local active_any = active --[[: any]]
+      local active_any = active --[[: unknown]]
       table.remove(active_any, 1)
       local pool = free_pool(j.type)
       pool[#pool + 1] = j.phys
@@ -216,7 +216,7 @@ M.allocate = function(intervals, regfile)
         local victim = active[spill_idx] --: Interval
         local stolen = victim.phys
         do
-          local active_any2 = active --[[: any]]
+          local active_any2 = active --[[: unknown]]
           table.remove(active_any2, spill_idx)
         end
         -- Victim goes to a spill slot.

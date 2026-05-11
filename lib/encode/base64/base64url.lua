@@ -5,7 +5,7 @@ if not package.path:find("?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
 end
 
-local base64 = require("lib.encode.base64") --[[: any]]
+local base64 = require("lib.encode.base64") --[[: unknown]]
 
 local M = {}
 local URL_OPTS = {url = true}

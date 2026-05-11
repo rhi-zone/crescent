@@ -487,8 +487,8 @@ function M.align(s1 --[[ : { at: (number, unknown) -> number | nil, _t: { [integ
   local a2v = {} --: { [integer]: number }
   for i = 1, m do
     local t = all_t[i]
-    local s1_any = s1 --[[: any]]
-    local s2_any = s2 --[[: any]]
+    local s1_any = s1 --[[: unknown]]
+    local s2_any = s2 --[[: unknown]]
     local v1 = s1_any:at(t, interp)
     local v2 = s2_any:at(t, interp)
     if v1 ~= nil and v2 ~= nil then

@@ -476,9 +476,9 @@ function M.cbc_encrypt(key, plaintext, iv)
   local padded_s = padded --[[:! string]]
   local iv_s = iv --[[:! string]]
   local out = {}
-  local prev = ({byte(iv_s, 1, 16)} --[[: any]]) --[[:! { [integer]: integer }]]
+  local prev = ({byte(iv_s, 1, 16)} --[[: unknown]]) --[[:! { [integer]: integer }]]
   for i = 1, #padded_s, 16 do
-    local s = ({byte(padded_s, i, i + 15)} --[[: any]]) --[[:! { [integer]: integer }]]
+    local s = ({byte(padded_s, i, i + 15)} --[[: unknown]]) --[[:! { [integer]: integer }]]
     -- XOR with previous ciphertext block (or IV for first block)
     for j = 1, 16 do
       s[j] = bxor(s[j], prev[j])
@@ -503,11 +503,11 @@ function M.cbc_decrypt(key, ciphertext, iv)
   end
   local iv_s = iv --[[:! string]]
   local out = {}
-  local prev = ({byte(iv_s, 1, 16)} --[[: any]]) --[[:! { [integer]: integer }]]
+  local prev = ({byte(iv_s, 1, 16)} --[[: unknown]]) --[[:! { [integer]: integer }]]
   for i = 1, #ct_s, 16 do
-    local ct_block = ({byte(ct_s, i, i + 15)} --[[: any]]) --[[:! { [integer]: integer }]]
+    local ct_block = ({byte(ct_s, i, i + 15)} --[[: unknown]]) --[[:! { [integer]: integer }]]
     local s_raw = {unpack(ct_block)}  -- copy for decrypt
-    local s = (s_raw --[[: any]]) --[[:! { [integer]: integer }]]
+    local s = (s_raw --[[: unknown]]) --[[:! { [integer]: integer }]]
     decrypt_block_raw(rk, nr, s_raw)
     -- XOR with previous ciphertext block (or IV)
     for j = 1, 16 do
@@ -543,13 +543,13 @@ local function ctr_crypt(key, data, nonce)
   if #nonce_s ~= 16 then
     return nil, "nonce must be 16 bytes"
   end
-  local ctr = ({byte(nonce_s, 1, 16)} --[[: any]]) --[[:! { [integer]: integer }]]
+  local ctr = ({byte(nonce_s, 1, 16)} --[[: unknown]]) --[[:! { [integer]: integer }]]
   local out = {}
   local dlen = #data_s
   local i = 1
   while i <= dlen do
     -- Encrypt counter block to get keystream block
-    local ks = ({unpack(ctr)} --[[: any]]) --[[:! { [integer]: integer }]]
+    local ks = ({unpack(ctr)} --[[: unknown]]) --[[:! { [integer]: integer }]]
     encrypt_block_raw(rk, nr, ks)
     -- XOR with plaintext/ciphertext bytes
     local block_end = math.min(i + 15, dlen)

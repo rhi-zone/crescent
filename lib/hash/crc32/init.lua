@@ -97,7 +97,7 @@ end
 -- Returns a new streaming CRC32 hasher.
 -- `seed` defaults to 0.
 function M.new(seed)
-	local h_any = setmetatable({}, H) --[[: any]]
+	local h_any = setmetatable({}, H) --[[: unknown]]
 	h_any:reset(seed)
 	return h_any
 end

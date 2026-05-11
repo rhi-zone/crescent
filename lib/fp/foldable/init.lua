@@ -10,7 +10,7 @@ end
 local Foldable = {}
 
 -- A fresh table used purely as an identity token for dispatch.
-Foldable.key = ({} --[[: any]]) --[[:! FoldableKey]]
+Foldable.key = ({} --[[: unknown]]) --[[:! FoldableKey]]
 
 -- foldr :: (a -> b -> b) -> b -> t a -> b
 -- right-fold over the structure

@@ -557,8 +557,8 @@ function M.parse_annotations(annotations, pool, filename)
                         if inner_t.tag ~= defs.TAG_CAPTURE then
                             -- Normal vararg: ...T where T is not a capture
                             vararg_ann_id = last_t.data[0]
-                            items[#items] = nil --[[: any]]
-                            item_names[#item_names] = nil --[[: any]]
+                            items[#items] = nil --[[: unknown]]
+                            item_names[#item_names] = nil --[[: unknown]]
                         end
                         -- else: TAG_SPREAD(TAG_CAPTURE) = rest-capture param; leave in items list
                     end

@@ -127,7 +127,7 @@ Select.__index = Select
 function Select:columns(...)
 	local q = shallow_copy(self) --[[:! Select]]
 	q._columns = { ... }
-	return setmetatable(q, Select) --[[: any]]
+	return setmetatable(q, Select) --[[: unknown]]
 end
 
 --: (Select, string, ...unknown) -> Select
@@ -140,28 +140,28 @@ function Select:where(clause, ...)
 	for i = 1, n do
 		q._where_params[#q._where_params + 1] = select(i, ...)
 	end
-	return setmetatable(q, Select) --[[: any]]
+	return setmetatable(q, Select) --[[: unknown]]
 end
 
 --: (Select, string) -> Select
 function Select:order(val)
 	local q = shallow_copy(self) --[[:! Select]]
 	q._order = val
-	return setmetatable(q, Select) --[[: any]]
+	return setmetatable(q, Select) --[[: unknown]]
 end
 
 --: (Select, number) -> Select
 function Select:limit(val)
 	local q = shallow_copy(self) --[[:! Select]]
 	q._limit = val
-	return setmetatable(q, Select) --[[: any]]
+	return setmetatable(q, Select) --[[: unknown]]
 end
 
 --: (Select, number) -> Select
 function Select:offset(val)
 	local q = shallow_copy(self) --[[:! Select]]
 	q._offset = val
-	return setmetatable(q, Select) --[[: any]]
+	return setmetatable(q, Select) --[[: unknown]]
 end
 
 --: (Select) -> (string, { [integer]: unknown })
@@ -189,7 +189,7 @@ end
 --: (Select) -> ({ [string]: unknown }[] | nil, string | nil)
 function Select:all()
 	local db_ = self._db
-	local select_ = self --[[: any]]
+	local select_ = self --[[: unknown]]
 	local sql, params = select_:_build()
 	local iter, err = db_:query(sql, unpack(params))
 	if not iter then return nil, err end
@@ -200,7 +200,7 @@ end
 
 --: (Select) -> ({ [string]: unknown } | nil, string | nil)
 function Select:first()
-	local q = (self --[[: any]]):limit(1)
+	local q = (self --[[: unknown]]):limit(1)
 	local rows, err = q:all()
 	if not rows then return nil, err end
 	return rows[1]
@@ -209,7 +209,7 @@ end
 --: (Select) -> ((number | nil), (string | nil))
 function Select:count()
 	local db_ = self._db
-	local select_ = self --[[: any]]
+	local select_ = self --[[: unknown]]
 	local sql, params = select_:_build()
 	local count_sql = "SELECT COUNT(*) FROM (" .. sql .. ")"
 	local iter, err = db_:query(count_sql, unpack(params))
@@ -227,14 +227,14 @@ Insert.__index = Insert
 function Insert:values(vals)
 	local q = shallow_copy(self) --[[:! Insert]]
 	q._values = vals
-	return setmetatable(q, Insert) --[[: any]]
+	return setmetatable(q, Insert) --[[: unknown]]
 end
 
 --: (Insert, ...unknown) -> Insert
 function Insert:returning(...)
 	local q = shallow_copy(self) --[[:! Insert]]
 	q._returning = { ... }
-	return setmetatable(q, Insert) --[[: any]]
+	return setmetatable(q, Insert) --[[: unknown]]
 end
 
 --: (Insert) -> (string, { [integer]: unknown })
@@ -262,14 +262,14 @@ end
 --: (Insert) -> ((true | nil), (string | nil))
 function Insert:exec()
 	local db_ = self._db
-	local sql, params = (self --[[: any]]):_build()
+	local sql, params = (self --[[: unknown]]):_build()
 	return db_:execute(sql, unpack(params))
 end
 
 --: (Insert) -> ({ [string]: unknown } | nil, string | nil)
 function Insert:first()
 	local db_ = self._db
-	local sql, params = (self --[[: any]]):_build()
+	local sql, params = (self --[[: unknown]]):_build()
 	local iter, err = db_:query(sql, unpack(params))
 	if not iter then return nil, err end
 	local ret_ = self._returning
@@ -288,7 +288,7 @@ Update.__index = Update
 function Update:set(vals)
 	local q = shallow_copy(self) --[[:! Update]]
 	q._set = vals
-	return setmetatable(q, Update) --[[: any]]
+	return setmetatable(q, Update) --[[: unknown]]
 end
 
 --: (Update, string, ...unknown) -> Update
@@ -301,7 +301,7 @@ function Update:where(clause, ...)
 	for i = 1, n do
 		q._where_params[#q._where_params + 1] = select(i, ...)
 	end
-	return setmetatable(q, Update) --[[: any]]
+	return setmetatable(q, Update) --[[: unknown]]
 end
 
 --: (Update) -> (string, { [integer]: unknown })
@@ -332,7 +332,7 @@ end
 --: (Update) -> ((true | nil), (string | nil))
 function Update:exec()
 	local db_ = self._db
-	local sql, params = (self --[[: any]]):_build()
+	local sql, params = (self --[[: unknown]]):_build()
 	return db_:execute(sql, unpack(params))
 end
 
@@ -351,7 +351,7 @@ function Delete:where(clause, ...)
 	for i = 1, n do
 		q._where_params[#q._where_params + 1] = select(i, ...)
 	end
-	return setmetatable(q, Delete) --[[: any]]
+	return setmetatable(q, Delete) --[[: unknown]]
 end
 
 --: (Delete) -> (string, { [integer]: unknown })
@@ -367,7 +367,7 @@ end
 --: (Delete) -> ((true | nil), (string | nil))
 function Delete:exec()
 	local db_ = self._db
-	local sql, params = (self --[[: any]]):_build()
+	local sql, params = (self --[[: unknown]]):_build()
 	return db_:execute(sql, unpack(params))
 end
 
@@ -387,7 +387,7 @@ function Conn:select(table_name)
 		_order = nil,
 		_limit = nil,
 		_offset = nil,
-	}, Select) --[[: any]]
+	}, Select) --[[: unknown]]
 end
 
 --: (Conn, string) -> Insert
@@ -397,7 +397,7 @@ function Conn:insert(table_name)
 		_table = table_name,
 		_values = nil,
 		_returning = nil,
-	}, Insert) --[[: any]]
+	}, Insert) --[[: unknown]]
 end
 
 --: (Conn, string) -> Update
@@ -408,7 +408,7 @@ function Conn:update(table_name)
 		_set = nil,
 		_wheres = {},
 		_where_params = {},
-	}, Update) --[[: any]]
+	}, Update) --[[: unknown]]
 end
 
 --: (Conn, string) -> Delete
@@ -418,7 +418,7 @@ function Conn:delete(table_name)
 		_table = table_name,
 		_wheres = {},
 		_where_params = {},
-	}, Delete) --[[: any]]
+	}, Delete) --[[: unknown]]
 end
 
 --: (Conn, string, ...unknown) -> ((true | nil), (string | nil))
@@ -438,7 +438,7 @@ end
 
 --: (Conn, string, ...unknown) -> ({ [string]: unknown } | nil, string | nil)
 function Conn:query_one(sql, ...)
-	local rows, err = (self --[[: any]]):query(sql, ...)
+	local rows, err = (self --[[: unknown]]):query(sql, ...)
 	if not rows then return nil, err end
 	return rows[1]
 end
@@ -480,7 +480,7 @@ end
 --: (Conn, { [integer]: { version: integer, up: string, ... } }) -> ((boolean | nil), (string | nil))
 function Conn:migrate(migrations)
 	local db_ = self._db
-	local conn_ = self --[[: any]]
+	local conn_ = self --[[: unknown]]
 	local ok, err = db_:execute(
 		"CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
 	)
@@ -489,7 +489,7 @@ function Conn:migrate(migrations)
 	--: { [integer]: { version: integer, up: string } }
 	local sorted = {}
 	for i = 1, #migrations do sorted[i] = migrations[i] --[[:! { version: integer, up: string }]] end
-	table.sort(sorted --[[: any]], function(a, b)
+	table.sort(sorted --[[: unknown]], function(a, b)
 		local a_ = a --[[:! { version: integer, up: string }]]
 		local b_ = b --[[:! { version: integer, up: string }]]
 		return a_.version < b_.version

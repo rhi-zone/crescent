@@ -20,7 +20,7 @@ local function extract_lorebook(data)
 	if not data then return nil end
 	local book = data.character_book
 	if not book then return nil end
-	local lorebook_any = lorebook --[[: any]]
+	local lorebook_any = lorebook --[[: unknown]]
 	return lorebook_any.from_ccv2(book)
 end
 

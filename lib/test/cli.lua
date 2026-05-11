@@ -11,7 +11,7 @@ local M = {}
 
 local fork_available = false
 local ffi_ok, ffi_raw = pcall(require, "ffi")
-local ffi = (ffi_raw --[[: any]]) --[[:! { cdef: (string) -> any, C: { sysconf: (integer) -> integer, fork: () -> integer, waitpid: (integer, any, integer) -> integer, pipe: (any) -> integer, read: (integer, any, integer) -> integer, write: (integer, any, integer) -> integer, close: (integer) -> integer }, new: (string, ...any) -> any, cast: (string, any) -> any, string: (any, integer) -> string, errno: () -> integer }]]
+local ffi = (ffi_raw --[[: unknown]]) --[[:! { cdef: (string) -> any, C: { sysconf: (integer) -> integer, fork: () -> integer, waitpid: (integer, any, integer) -> integer, pipe: (any) -> integer, read: (integer, any, integer) -> integer, write: (integer, any, integer) -> integer, close: (integer) -> integer }, new: (string, ...any) -> any, cast: (string, any) -> any, string: (any, integer) -> string, errno: () -> integer }]]
 if ffi_ok then
 	local cdef_ok = pcall(function()
 		ffi.cdef[[

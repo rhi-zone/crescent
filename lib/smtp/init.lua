@@ -51,8 +51,8 @@ end
 local function read_reply(transport)
 	local code, lines = M.read_response(transport)
 	if not code then return nil, lines end
-	local co = (code --[[: any]]) --[[:! integer]]
-	local lns = (lines --[[: any]]) --[[:! { [integer]: string }]]
+	local co = (code --[[: unknown]]) --[[:! integer]]
+	local lns = (lines --[[: unknown]]) --[[:! { [integer]: string }]]
 	local text = table.concat(lns, "\n")
 	return { ok = co >= 200 and co < 300, code = co, text = text, lines = lns }
 end
@@ -330,7 +330,7 @@ function Session:ehlo(hostname)
 	s:command("EHLO " .. hostname)
 	local code, lines = M.read_response(s.transport)
 	if not code then return nil, lines end
-	local lns = (lines --[[: any]]) --[[:! { [integer]: string }]]
+	local lns = (lines --[[: unknown]]) --[[:! { [integer]: string }]]
 	if code ~= 250 then
 		return { ok = false, err = "EHLO failed: " .. table.concat(lns, " ") }
 	end
@@ -535,7 +535,7 @@ M.send = function(transport, msg, opts)
 	end
 
 	-- DATA
-	local raw = M.build_message(msg_ --[[: any]])
+	local raw = M.build_message(msg_ --[[: unknown]])
 	local data_result
 	data_result, err = session:data(raw)
 	if not data_result then return nil, err end

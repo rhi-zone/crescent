@@ -33,7 +33,7 @@ local State = {}
 State.__index = State
 
 local function new_state()
-  local st = setmetatable({ _stack = {} }, State) --[[: any]]
+  local st = setmetatable({ _stack = {} }, State) --[[: unknown]]
   return st --[[:! TokState]]
 end
 
@@ -68,7 +68,7 @@ function M.new()
   local keywords = {}
   --: { [string]: TokLexer }
   local modes = {}
-  local lx = setmetatable({ _rules = rules, _keywords = keywords, _modes = modes }, Lexer) --[[: any]]
+  local lx = setmetatable({ _rules = rules, _keywords = keywords, _modes = modes }, Lexer) --[[: unknown]]
   return lx --[[:! TokLexer]]
 end
 

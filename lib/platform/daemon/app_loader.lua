@@ -134,7 +134,7 @@ function M.make(opts)
 		if not app_opt then
 			return nil, "load_app failed: " .. tostring(err)
 		end
-		local app = app_opt --[[: any]]
+		local app = app_opt --[[: unknown]]
 
 		local cap_decls = collect_entry_caps(app.manifest, entry_key)
 		-- Merge operator-supplied overrides into each cap declaration.

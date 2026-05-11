@@ -25,7 +25,7 @@ local LCG_M = 2^32
 --: (number) -> RNG
 function RNG.new(seed)
   local seed_ = seed --[[:! number]]
-  local obj = setmetatable({ state = seed_ % LCG_M }, RNG) --[[: any]]
+  local obj = setmetatable({ state = seed_ % LCG_M }, RNG) --[[: unknown]]
   return obj --[[:! RNG]]
 end
 

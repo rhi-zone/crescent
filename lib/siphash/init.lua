@@ -22,7 +22,7 @@ M._tier = "pure"
 
 --:: uint64_t = integer
 
-local U64 = ffi.typeof("uint64_t") --[[: any]]
+local U64 = ffi.typeof("uint64_t")
 
 -- Bitmask for isolating lower 32 bits (used in hash_pair).
 local MASK32 = U64(0xffffffff)
@@ -48,7 +48,7 @@ end
 -- Built from two 32-bit halves to avoid double-precision loss for the high word.
 --: (string, integer) -> uint64_t
 local function read_u64_le(s, i)
-  local byte_ = string.byte --[[: any]]
+  local byte_ = string.byte
   local b0, b1, b2, b3, b4, b5, b6, b7 = byte_(s, i, i + 7)
   local lo = U64(b0) + U64(b1) * U64(256) + U64(b2) * U64(65536) + U64(b3) * U64(16777216)
   local hi = U64(b4) + U64(b5) * U64(256) + U64(b6) * U64(65536) + U64(b7) * U64(16777216)

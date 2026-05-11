@@ -19,7 +19,7 @@ function M.new(opts)
     _size = 0,
     _compressed = opts and opts.compressed or false,
   }
-  local t = setmetatable(self, { __index = M }) --[[: any]]
+  local t = setmetatable(self, { __index = M }) --[[: unknown]]
   return t --[[:! Trie]]
 end
 
@@ -107,7 +107,7 @@ function M:has_prefix(prefix)
   local stack = { node } --: { [integer]: TrieNode }
   while #stack > 0 do
     local n = stack[#stack]
-    stack[#stack] = nil --[[: any]]
+    stack[#stack] = nil --[[: unknown]]
     for _, child in pairs(n.children) do
       local child_ = child --[[:! TrieNode]]
       if child_.has_value then return true end
@@ -133,7 +133,7 @@ local function collect(node, buf, results)
   for i = 1, #keys do
     buf[#buf + 1] = keys[i]
     collect(node.children[keys[i]], buf, results)
-    buf[#buf] = nil --[[: any]]
+    buf[#buf] = nil --[[: unknown]]
   end
 end
 
@@ -151,7 +151,7 @@ local function collect_keys(node, buf, results)
   for i = 1, #keys do
     buf[#buf + 1] = keys[i]
     collect_keys(node.children[keys[i]], buf, results)
-    buf[#buf] = nil --[[: any]]
+    buf[#buf] = nil --[[: unknown]]
   end
 end
 
@@ -172,7 +172,7 @@ local function collect_keys_limited(node, buf, results, limit)
     if #results >= limit then return end
     buf[#buf + 1] = keys[i]
     collect_keys_limited(node.children[keys[i]], buf, results, limit)
-    buf[#buf] = nil --[[: any]]
+    buf[#buf] = nil --[[: unknown]]
   end
 end
 
@@ -310,10 +310,10 @@ end
 M.completions = M.autocomplete
 
 -- all: alias for keys. Returns all keys sorted.
-M.all = M.keys --[[: any]]
+M.all = M.keys --[[: unknown]]
 
 -- iter: alias for pairs. Iterator over (key, value) in sorted order.
-M.iter = M.pairs --[[: any]]
+M.iter = M.pairs --[[: unknown]]
 
 M._tier = "pure"
 

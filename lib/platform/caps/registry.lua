@@ -22,7 +22,7 @@ local M = {}
 -- `any` opt-out: ffi module access is gated by IS_WINDOWS runtime check;
 -- the type checker cannot follow the implication IS_WINDOWS → ffi ~= nil.
 local ffi_ok
-local ffi = nil --[[: any]]
+local ffi = nil --[[: unknown]]
 do
 	local ok, mod = pcall(require, "ffi")
 	ffi_ok = ok
@@ -168,7 +168,7 @@ end
 -- ── advapi32 FFI setup ─────────────────────────────────────────────────────
 
 -- `any` opt-out: advapi32 is a Windows FFI library handle; ffi.load returns cdata.
-local advapi32 = nil --[[: any]]
+local advapi32 = nil --[[: unknown]]
 local ffi_ready = false
 
 if IS_WINDOWS then

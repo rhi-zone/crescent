@@ -37,7 +37,7 @@ local floor = math.floor
 --: (openapi_doc, string) -> unknown | nil
 local function resolve_pointer(root, ref)
 	if sub(ref, 1, 2) ~= "#/" then return nil end
-	local node = root --[[: any]]
+	local node = root --[[: unknown]]
 	local pos = 3
 	local len = #ref
 	while pos <= len do
@@ -47,7 +47,7 @@ local function resolve_pointer(root, ref)
 		seg = seg:gsub("~1", "/"):gsub("~0", "~")
 		pos = slash and slash + 1 or len + 1
 		if type_of(node) ~= "table" then return nil end
-		node = (node --[[: any]])[seg]
+		node = (node --[[: unknown]])[seg]
 		if node == nil then return nil end
 	end
 	return node

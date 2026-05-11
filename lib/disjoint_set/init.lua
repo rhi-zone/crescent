@@ -24,7 +24,7 @@ function M.new(n)
     _rank = {},
     _size = {},
     _count = 0,
-  }, BasicDSU) --[[: any]]
+  }, BasicDSU) --[[: unknown]]
   local self_ = self --[[:! BasicDSU]]
   if n then
     for i = 0, n - 1 do
@@ -131,7 +131,7 @@ function M.named()
     _name_to_id = {},
     _id_to_name = {},
     _next_id = 0,
-  }, NamedDSU) --[[: any]]
+  }, NamedDSU) --[[: unknown]]
   return self --[[:! NamedDSU]]
 end
 
@@ -208,7 +208,7 @@ function M.persistent(n)
     _size = {},
     _count = n or 0,
     _undo = {},
-  }, PersistentDSU) --[[: any]]
+  }, PersistentDSU) --[[: unknown]]
   local self_ = self --[[:! PersistentDSU]]
   if n then
     for i = 0, n - 1 do
@@ -249,16 +249,16 @@ function PersistentDSU:union(x, y)
 
   -- Record undo entries before mutating
   local undo = self._undo
-  undo[#undo + 1] = { "parent", ry, self._parent[ry] } --[[: any]]
-  undo[#undo + 1] = { "size",   rx, self._size[rx]   } --[[: any]]
-  undo[#undo + 1] = { "count",  0,  self._count       } --[[: any]]
+  undo[#undo + 1] = { "parent", ry, self._parent[ry] } --[[: unknown]]
+  undo[#undo + 1] = { "size",   rx, self._size[rx]   } --[[: unknown]]
+  undo[#undo + 1] = { "count",  0,  self._count       } --[[: unknown]]
 
   self._parent[ry] = rx
   self._size[rx] = self._size[rx] + self._size[ry]
   self._count = self._count - 1
 
   if rankx == ranky then
-    undo[#undo + 1] = { "rank", rx, self._rank[rx] } --[[: any]]
+    undo[#undo + 1] = { "rank", rx, self._rank[rx] } --[[: unknown]]
     self._rank[rx] = self._rank[rx] + 1
   end
 
@@ -289,7 +289,7 @@ end
 function PersistentDSU:restore(depth)
   local undo = self._undo
   while #undo > depth do
-    local entry = undo[#undo] --[[: any]]
+    local entry = undo[#undo] --[[: unknown]]
     undo[#undo] = nil
     local field = entry[1] --[[:! string]]
     local node  = entry[2] --[[:! integer]]
@@ -319,7 +319,7 @@ function M.weighted(n)
     _weight    = {},
     _bipartite = true,
     _count     = n or 0,
-  }, WeightedDSU) --[[: any]]
+  }, WeightedDSU) --[[: unknown]]
   local self_ = self --[[:! WeightedDSU]]
   if n then
     for i = 0, n - 1 do

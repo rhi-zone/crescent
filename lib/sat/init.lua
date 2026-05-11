@@ -152,7 +152,7 @@ end
 -- Returns true, assignment on first solution (solve mode).
 -- In collect mode, always returns false after exhausting the search space.
 local function dpll(clauses, nvars, assignment, collect)
-  local collect_any = collect --[[: any]]
+  local collect_any = collect --[[: unknown]]
   -- Unit propagation: work on a copy of both clauses and assignment.
   local new_assignment = {}
   for k, v in pairs(assignment) do new_assignment[k] = v end
@@ -213,7 +213,7 @@ local function dpll(clauses, nvars, assignment, collect)
   -- Branch var = true.
   local c_true = apply_assignment(clauses, var, true)
   if c_true ~= nil then
-    local c_true_ = (c_true --[[: any]]) --[[:! { [integer]: { [integer]: integer } }]]
+    local c_true_ = (c_true --[[: unknown]]) --[[:! { [integer]: { [integer]: integer } }]]
     local a_true = {}
     for k, v in pairs(new_assignment) do a_true[k] = v end
     a_true[var] = true
@@ -224,7 +224,7 @@ local function dpll(clauses, nvars, assignment, collect)
   -- Branch var = false.
   local c_false = apply_assignment(clauses, var, false)
   if c_false ~= nil then
-    local c_false_ = (c_false --[[: any]]) --[[:! { [integer]: { [integer]: integer } }]]
+    local c_false_ = (c_false --[[: unknown]]) --[[:! { [integer]: { [integer]: integer } }]]
     local a_false = {}
     for k, v in pairs(new_assignment) do a_false[k] = v end
     a_false[var] = false
@@ -260,7 +260,7 @@ end
 function M.solve_all(formula, _opts)
   local clauses = copy_clauses(formula.clauses)
   local nvars = (formula.vars or 0) --[[:! integer]]
-  local collect = {} --[[: any]]
+  local collect = {} --[[: unknown]]
   dpll(clauses, nvars, {}, collect)
   return collect --[[:! { [integer]: { [integer]: boolean } }]]
 end
@@ -300,7 +300,7 @@ end
 function Formula:clause(...)
   local self_ = self --[[:! FormulaObj]]
   local lits = { ... }
-  self_._clauses[#self_._clauses + 1] = lits --[[: any]]
+  self_._clauses[#self_._clauses + 1] = lits --[[: unknown]]
 end
 
 --- Solve and return { sat, assignment? } with named variables.
@@ -308,9 +308,9 @@ function Formula:solve()
   local self_ = self --[[:! FormulaObj]]
   local raw = M.solve({ clauses = self_._clauses, vars = self_._nvars })
   if not raw.sat then return { sat = false, assignment = nil } end
-  local named = {} --[[: any]]
+  local named = {} --[[: unknown]]
   for name, id in pairs(self_._vars) do
-    named[name] = (raw.assignment --[[: any]])[id]
+    named[name] = (raw.assignment --[[: unknown]])[id]
   end
   return { sat = true, assignment = named }
 end
@@ -321,7 +321,7 @@ function Formula:solve_all()
   local raws = M.solve_all({ clauses = self_._clauses, vars = self_._nvars }, nil)
   local results = {}
   for i = 1, #raws do
-    local named = {} --[[: any]]
+    local named = {} --[[: unknown]]
     for name, id in pairs(self_._vars) do
       named[name] = raws[i][id]
     end
@@ -358,7 +358,7 @@ end
 
 --- Exactly-one: exactly one of vars is true.
 -- Returns combined at-least-one + at-most-one clauses.
-local enc_any = M.encodings --[[: any]]
+local enc_any = M.encodings --[[: unknown]]
 function M.encodings.exactly_one(vars)
   local clauses = enc_any.at_least_one(vars)
   local amo = enc_any.at_most_one(vars)

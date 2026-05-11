@@ -84,7 +84,7 @@ local function load_zlib()
   for _, name in ipairs(names) do
     local ok, lib = pcall(ffi.load, name)
     if ok then
-      local typed = lib --[[: any]]
+      local typed = lib --[[: unknown]]
       return typed, name
     end
   end

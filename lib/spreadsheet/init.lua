@@ -245,7 +245,7 @@ local NT = {
 
 --: ({ [integer]: SpreadToken }) -> ParserState
 local function Parser(tokens)
-  local p = { tokens = tokens, pos = 1 } --[[: any]]
+  local p = { tokens = tokens, pos = 1 } --[[: unknown]]
 
   --: (ParserState) -> SpreadToken
   function p:peek()
@@ -905,13 +905,13 @@ local function eval_node(node, sheet, visiting)
     elseif op == "<>" then
       return lv ~= rv
     elseif op == "<" then
-      return (lv --[[: any]]) < (rv --[[: any]])
+      return (lv --[[: unknown]]) < (rv --[[: unknown]])
     elseif op == ">" then
-      return (lv --[[: any]]) > (rv --[[: any]])
+      return (lv --[[: unknown]]) > (rv --[[: unknown]])
     elseif op == "<=" then
-      return (lv --[[: any]]) <= (rv --[[: any]])
+      return (lv --[[: unknown]]) <= (rv --[[: unknown]])
     elseif op == ">=" then
-      return (lv --[[: any]]) >= (rv --[[: any]])
+      return (lv --[[: unknown]]) >= (rv --[[: unknown]])
     end
     return ERR_VALUE
   elseif node.type == NT.CALL then

@@ -433,7 +433,7 @@ function M.parse_der(der)
   local fp_sha256
   local sha256_mod = get_sha256()
   if sha256_mod then
-    local sha256_mod_ = sha256_mod --[[: any]]
+    local sha256_mod_ = sha256_mod --[[: unknown]]
     local sha256_fn = (sha256_mod_ --[[:! { sha256: (string) -> string }]]).sha256
     local hex64 = sha256_fn(der)
     -- Insert colons every 2 chars
@@ -473,7 +473,7 @@ function M.parse_pem(pem_str)
   local block_, err = pem.decode(pem_str)
   if not block_ then return nil, "x509: PEM decode: " .. (err or "") end
 
-  local block = block_ --[[: any]]
+  local block = block_ --[[: unknown]]
   local block_label = (block --[[:! { label: string, data: string, ... }]]).label
   local block_data  = (block --[[:! { label: string, data: string, ... }]]).data
   if block_label ~= "CERTIFICATE" then

@@ -20,7 +20,7 @@ M._tier = "pure"
 
 --: <T: { [string]: unknown, ... }>(T) -> T
 local function shallow_copy(t)
-	local out = {} --[[: any]]
+	local out = {} --[[: unknown]]
 	for k, v in pairs(t) do out[k] = v end
 	return out
 end
@@ -88,7 +88,7 @@ local function new_select(table_name)
 		_offset   = nil,
 		_count    = false,
 		_exists   = false,
-	}, Select) --[[: any]]) --[[:! Select]]
+	}, Select) --[[: unknown]]) --[[:! Select]]
 end
 
 -- Clone self, applying fn(copy) -> copy.
@@ -188,7 +188,7 @@ function Select:where_in(col, values)
 	return sel_clone(self, function(q)
 		if type(values) == "table" and getmetatable(values) == Select then
 			-- subquery
-			local sel_ = values --[[: any]]
+			local sel_ = values --[[: unknown]]
 			local sub_sql, sub_params = sel_:build()
 			q._wheres[#q._wheres + 1] = {
 				kind = "and",
@@ -215,7 +215,7 @@ end
 function Select:where_not_in(col, values)
 	return sel_clone(self, function(q)
 		if type(values) == "table" and getmetatable(values) == Select then
-			local sel_ = values --[[: any]]
+			local sel_ = values --[[: unknown]]
 			local sub_sql, sub_params = sel_:build()
 			q._wheres[#q._wheres + 1] = {
 				kind   = "and",
@@ -293,7 +293,7 @@ end
 -- ORDER BY columns (comma-separated string or variadic column names).
 --: (Select, ...unknown) -> Select
 function Select:order_by(...)
-	local cols = { ... } --[[: any]]
+	local cols = { ... } --[[: unknown]]
 	return sel_clone(self, function(q)
 		q._order = table.concat(cols, ", ")
 		return q
@@ -303,7 +303,7 @@ end
 -- GROUP BY columns.
 --: (Select, ...unknown) -> Select
 function Select:group_by(...)
-	local cols = { ... } --[[: any]]
+	local cols = { ... } --[[: unknown]]
 	return sel_clone(self, function(q)
 		q._group = table.concat(cols, ", ")
 		return q
@@ -408,7 +408,7 @@ local function new_insert(table_name)
 		_table = table_name,
 		_rows  = nil,   -- array of row tables (multi-row)
 		_vals  = nil,   -- single row table
-	}, Insert) --[[: any]]) --[[:! Insert]]
+	}, Insert) --[[: unknown]]) --[[:! Insert]]
 end
 
 --: (Insert, { [string]: unknown }) -> Insert
@@ -476,7 +476,7 @@ local function new_update(table_name)
 		_table        = table_name,
 		_set          = nil,
 		_wheres       = {},
-	}, Update) --[[: any]]) --[[:! Update]]
+	}, Update) --[[: unknown]]) --[[:! Update]]
 end
 
 --: (Update, (Update) -> Update) -> Update
@@ -537,7 +537,7 @@ local function new_delete(table_name)
 	return (setmetatable({
 		_table  = table_name,
 		_wheres = {},
-	}, Delete) --[[: any]]) --[[:! Delete]]
+	}, Delete) --[[: unknown]]) --[[:! Delete]]
 end
 
 --: (Delete, (Delete) -> Delete) -> Delete
@@ -573,7 +573,7 @@ Union.__index = Union
 
 --: (Select[]) -> Union
 local function new_union(queries)
-	return (setmetatable({ _queries = queries, _all = false }, Union) --[[: any]]) --[[:! Union]]
+	return (setmetatable({ _queries = queries, _all = false }, Union) --[[: unknown]]) --[[:! Union]]
 end
 
 -- Use UNION ALL instead of UNION (keeps duplicates).
@@ -624,7 +624,7 @@ end
 -- M.union(q1, q2, ...) or M.union({q1, q2, ...})
 --: (...Select) -> Union
 function M.union(...)
-	local args = { ... } --[[: any]]
+	local args = { ... } --[[: unknown]]
 	if type(args[1]) == "table" and getmetatable(args[1]) ~= Select then
 		return new_union(args[1])
 	end

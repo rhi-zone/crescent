@@ -67,9 +67,9 @@ end
 -- Returns an array of { name_id, name, type_id } for all non-meta fields.
 local function table_fields(ctx, tid)
     local ctx_ = ctx --[[:! DocCtx]]
-    local ctx_any = ctx_ --[[: any]]
+    local ctx_any = ctx_ --[[: unknown]]
     tid = types_mod.find(ctx_any, tid)
-    local t = ctx_.types:get(tid) --[[: any]]
+    local t = ctx_.types:get(tid) --[[: unknown]]
     local t_any = t --[[:! { tag: integer, data: { [integer]: integer } }]]
     if t_any.tag ~= TAG_TABLE then return nil end
     local fields = {}
@@ -137,9 +137,9 @@ end
 -- { name = "param_name", type = "param_type" }.
 local function extract_func_params(ctx, tid)
     local ctx_ = ctx --[[:! DocCtx]]
-    local ctx_any = ctx_ --[[: any]]
+    local ctx_any = ctx_ --[[: unknown]]
     tid = types_mod.find(ctx_any, tid)
-    local t = ctx_.types:get(tid) --[[: any]]
+    local t = ctx_.types:get(tid) --[[: unknown]]
     local ta = t --[[:! { tag: integer, data: { [integer]: integer } }]]
     if ta.tag ~= TAG_FUNCTION then return nil end
     local params = {}
@@ -177,7 +177,7 @@ local function build_doc(source, filename, err_ctx, ctx)
         return nil, "typecheck failed: " .. first_err
     end
     local ctx_ = ctx --[[:! DocCtx]]
-    local ctx_any = ctx_ --[[: any]]
+    local ctx_any = ctx_ --[[: unknown]]
 
     -- Extract doc comments from source
     local doc_comments = extract_doc_comments(source)
@@ -195,7 +195,7 @@ local function build_doc(source, filename, err_ctx, ctx)
     local exports = {}
 
     if export_tid then
-        local et = ctx_.types:get(export_tid) --[[: any]]
+        local et = ctx_.types:get(export_tid) --[[: unknown]]
         local et_ = et --[[:! { tag: integer }]]
         if et_.tag == TAG_TABLE then
             -- Module returns a table — enumerate its fields as exports
@@ -210,7 +210,7 @@ local function build_doc(source, filename, err_ctx, ctx)
                 end
                 -- Sort by name for stable output
                 local public_cmp = function(a, b) return a.name < b.name end
-                table.sort(public, public_cmp --[[: any]])
+                table.sort(public, public_cmp --[[: unknown]])
                 for _, f in ipairs(public) do
                     local type_str = types_mod.display(ctx_any, f.type_id)
                     -- Try to find the line: first scan AST for M.name,
@@ -265,7 +265,7 @@ local function build_doc(source, filename, err_ctx, ctx)
                 end
             end
             local names_cmp = function(a, b) return a.name < b.name end
-            table.sort(names, names_cmp --[[: any]])
+            table.sort(names, names_cmp --[[: unknown]])
             for _, n in ipairs(names) do
                 local type_str = types_mod.display(ctx_any, n.type_id)
                 local doc = n.line and doc_comments[n.line] or nil
@@ -301,7 +301,7 @@ M.generate = function(filename)
     local source = f:read("*a") or ""
     f:close()
 
-    local check_mod_ = check_mod --[[: any]]
+    local check_mod_ = check_mod --[[: unknown]]
     check_mod_.clear_cache()
     local err_ctx, ctx = check_mod_.check_file(filename)
     return build_doc(source, filename, err_ctx, ctx)
@@ -312,7 +312,7 @@ end
 --- Returns doc_table, err_string|nil.
 M.generate_string = function(source, filename)
     filename = filename or "<string>"
-    local check_mod2_ = check_mod --[[: any]]
+    local check_mod2_ = check_mod --[[: unknown]]
     check_mod2_.clear_cache()
     local err_ctx, ctx = check_mod2_.check_string(source, filename)
     return build_doc(source, filename, err_ctx, ctx)
@@ -370,7 +370,7 @@ end
 --- Format a doc result (or array of results) as a self-contained HTML page.
 M.format_html = function(results)
     -- Accept single result or array
-    local results_any = results --[[: any]]
+    local results_any = results --[[: unknown]]
     if results_any.file then results_any = { results_any } end
     local results_ = results_any --[[:! { [integer]: DocResult }]]
     local out = {}
@@ -423,7 +423,7 @@ end
 --- Format a doc result (or array of results) as Markdown.
 M.format_markdown = function(results)
     -- Accept single result or array
-    local results_any2 = results --[[: any]]
+    local results_any2 = results --[[: unknown]]
     if results_any2.file then results_any2 = { results_any2 } end
     local results2_ = results_any2 --[[:! { [integer]: DocResult }]]
     local out = {}

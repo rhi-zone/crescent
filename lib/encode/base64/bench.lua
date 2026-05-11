@@ -86,8 +86,8 @@ io.write(string.rep("-", 50) .. "\n")
 
 --:: BenchVariant = { name: string, enc: (string, { pad: boolean | nil, url: boolean | nil } | nil) -> string, dec: (string, { url: boolean | nil } | nil) -> string }
 
-local base64_any = base64 --[[: any]]
-local base64url_any = base64url --[[: any]]
+local base64_any = base64 --[[: unknown]]
+local base64url_any = base64url --[[: unknown]]
 local variants = {
     { name = "std",        enc = base64_any.encode,    dec = base64_any.decode },
     { name = "url",        enc = base64url_any.encode,  dec = base64url_any.decode },

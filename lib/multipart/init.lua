@@ -52,7 +52,7 @@ end
 --:: DispositionMap = { disposition: string | nil, name: string | nil, filename: string | nil, [string]: string }
 --: (string) -> DispositionMap
 local function parse_disposition(value)
-    local result = {} --[[: any]]
+    local result = {} --[[: unknown]]
     local result_ = result --[[:! DispositionMap]]
     -- Extract main disposition type (before first ;)
     local disp = value:match("^%s*([^;]+)")
@@ -77,7 +77,7 @@ end
 
 -- ── Builder ───────────────────────────────────────────────────────────────────
 
-local Builder = {} --[[: any]]
+local Builder = {} --[[: unknown]]
 Builder.__index = Builder
 
 --- Create a new multipart builder.
@@ -85,7 +85,7 @@ Builder.__index = Builder
 --: (string | nil, integer | nil) -> Builder
 function M.new(boundary, seed)
     if not boundary and not seed then error("multipart.new: boundary or seed is required") end
-    local self = setmetatable({}, Builder) --[[: any]]
+    local self = setmetatable({}, Builder) --[[: unknown]]
     local self_ = self --[[:! Builder]]
     self_._boundary = boundary or gen_boundary(seed)
     self_._parts = {}

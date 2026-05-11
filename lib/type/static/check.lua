@@ -206,7 +206,7 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
     -- Include globals_files (stdlib_types.lua etc.) in dep_hashes so that
     -- changes to stdlib invalidate cached .cri entries for all user files.
     --: { [integer]: string, ... } | nil
-    local globals_files = opts and (opts --[[: any]]).globals_files
+    local globals_files = opts and (opts --[[: unknown]]).globals_files
     if globals_files then
         for _, gpath in ipairs(globals_files) do
             if not dep_hashes[gpath] then

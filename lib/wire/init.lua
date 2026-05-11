@@ -326,7 +326,7 @@ function Reader:int8()
 	local rd = self --[[:! Reader]]
 	local v, err = rd:uint8()
 	if not v then return nil, err end
-	v = v --[[: any]]; v = v --[[:! integer]]
+	v = v --[[: unknown]]; v = v --[[:! integer]]
 	return (v >= 0x80) and (v - 0x100) or v
 end
 
@@ -334,7 +334,7 @@ function Reader:int16_le()
 	local rd = self --[[:! Reader]]
 	local v, err = rd:uint16_le()
 	if not v then return nil, err end
-	v = v --[[: any]]; v = v --[[:! integer]]
+	v = v --[[: unknown]]; v = v --[[:! integer]]
 	return (v >= 0x8000) and (v - 0x10000) or v
 end
 
@@ -342,7 +342,7 @@ function Reader:int16_be()
 	local rd = self --[[:! Reader]]
 	local v, err = rd:uint16_be()
 	if not v then return nil, err end
-	v = v --[[: any]]; v = v --[[:! integer]]
+	v = v --[[: unknown]]; v = v --[[:! integer]]
 	return (v >= 0x8000) and (v - 0x10000) or v
 end
 
@@ -350,7 +350,7 @@ function Reader:int32_le()
 	local rd = self --[[:! Reader]]
 	local v, err = rd:uint32_le()
 	if not v then return nil, err end
-	v = v --[[: any]]; v = v --[[:! integer]]
+	v = v --[[: unknown]]; v = v --[[:! integer]]
 	-- v is unsigned 0..4294967295; sign-extend
 	if v >= 0x80000000 then return v - 4294967296 end
 	return v
@@ -360,7 +360,7 @@ function Reader:int32_be()
 	local rd = self --[[:! Reader]]
 	local v, err = rd:uint32_be()
 	if not v then return nil, err end
-	v = v --[[: any]]; v = v --[[:! integer]]
+	v = v --[[: unknown]]; v = v --[[:! integer]]
 	if v >= 0x80000000 then return v - 4294967296 end
 	return v
 end
@@ -433,7 +433,7 @@ function Reader:varint_signed()
 	local rd = self --[[:! Reader]]
 	local zz, err = rd:varint()
 	if not zz then return nil, err end
-	zz = zz --[[: any]]; zz = zz --[[:! integer]]
+	zz = zz --[[: unknown]]; zz = zz --[[:! integer]]
 	-- zigzag decode
 	if band(zz, 1) == 0 then
 		return rshift(zz, 1)

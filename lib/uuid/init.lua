@@ -43,7 +43,7 @@ local function try_ffi_getrandom()
 	local n = ffi.C.getrandom(buf, 16, 0)
 	if n ~= 16 then error("getrandom returned " .. tostring(n)) end
 	local _buf = buf
-	local ffi_new = ffi.new --[[: any]]
+	local ffi_new = ffi.new --[[: unknown]]
 	return function(len)
 		local b = ffi_new("unsigned char[?]", len)
 		local got = ffi.C.getrandom(b, len, 0)
@@ -64,7 +64,7 @@ local function try_ffi_arc4random()
 	local buf = ffi.new("unsigned char[16]")
 	ffi.C.arc4random_buf(buf, 16)
 	local _buf = buf
-	local ffi_new = ffi.new --[[: any]]
+	local ffi_new = ffi.new --[[: unknown]]
 	return function(len)
 		local b = ffi_new("unsigned char[?]", len)
 		ffi.C.arc4random_buf(b, len)
@@ -90,7 +90,7 @@ local function try_ffi_devurandom()
 	local n = ffi.C.read(fd, probe, 1)
 	if n ~= 1 then ffi.C.close(fd); error("cannot read /dev/urandom") end
 	ffi.C.close(fd)
-	local ffi_new = ffi.new --[[: any]]
+	local ffi_new = ffi.new --[[: unknown]]
 	return function(len)
 		local lfd = ffi.C.open("/dev/urandom", O_RDONLY)
 		if lfd < 0 then error("cannot open /dev/urandom") end

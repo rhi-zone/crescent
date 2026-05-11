@@ -149,7 +149,7 @@ end
 -- ── Pipe I/O helpers ──────────────────────────────────────────────────────────
 
 local function pipe_write_all(fd, s)
-    local buf   = ffi.cast("const char *", s) --[[: any]]
+    local buf   = ffi.cast("const char *", s) --[[: unknown]]
     local total = #s
     local done  = 0
     while done < total do
@@ -175,7 +175,7 @@ local EINTR = 4
 
 local function pipe_read_all(fd)
     local chunk_size = 4096
-    local buf    = ffi.new("uint8_t[4096]") --[[: any]]
+    local buf    = ffi.new("uint8_t[4096]") --[[: unknown]]
     local chunks = {}
     while true do
         local n = ffi.C.read(fd, buf, chunk_size) --[[:! integer]]
@@ -234,7 +234,7 @@ end
 -- Fork a worker for `bucket` and return (pid, read_fd). The child does not
 -- return — run_worker calls os.exit. Aborts the process on pipe/fork failure.
 local function spawn_worker(bucket, project_opts, cache_dir)
-    local C = --[[: any]] ffi.C
+    local C = --[[: unknown]] ffi.C
     local pipefd = ffi.new("int[2]")
     if C.pipe(pipefd) ~= 0 then
         io.stderr:write("pipe() failed\n")
@@ -512,7 +512,7 @@ function M.dump_one(filename, parent_scope, opts)
         local name = intern_mod.get(ctx.pool, name_id) or tostring(name_id)
         list[#list + 1] = { name = name, type = types_mod.display(ctx, types_mod.find(ctx, type_id)) }
     end
-    table.sort(list --[[: any]], (function(a, b) return a.name < b.name end) --[[: any]])
+    table.sort(list --[[: unknown]], (function(a, b) return a.name < b.name end) --[[: unknown]])
     local result = { file = filename, bindings = list }
     local rets = ctx.module_return_tids
     if rets and #rets > 0 and rets[1] and #rets[1] > 0 then
@@ -898,9 +898,9 @@ function M.main(argv)
         if pkg_path then
             local ok_load, pkg_fn = pcall(loadfile, pkg_path)
             if ok_load and type(pkg_fn) == "function" then
-                local ok_run, manifest = pcall(pkg_fn --[[: any]])
+                local ok_run, manifest = pcall(pkg_fn --[[: unknown]])
                 if ok_run and type(manifest) == "table" then
-                    local tc = (manifest --[[: any]]).typecheck
+                    local tc = (manifest --[[: unknown]]).typecheck
                     if tc and type(tc) == "table" and type(tc.globals) == "table" then
                         -- Resolve module names to file paths.
                         -- "lib/type/static/stdlib_types" → "lib/type/static/stdlib_types.lua"

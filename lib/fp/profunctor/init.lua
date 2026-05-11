@@ -17,7 +17,7 @@ end
 local Profunctor = {}
 
 -- A fresh table used purely as an identity token for dispatch.
-Profunctor.key = ({} --[[: any]]) --[[:! ProfunctorKey]]
+Profunctor.key = ({} --[[: unknown]]) --[[:! ProfunctorKey]]
 
 local function id(x) return x end
 

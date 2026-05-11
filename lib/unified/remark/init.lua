@@ -56,7 +56,7 @@ local function serialize_children(children, sep)
 end
 
 serialize = function(node)
-  node = node --[[: any]]
+  node = node --[[: unknown]]
   local t = node.type
   if t == "root" then
     return serialize_children(node.children, "\n\n")

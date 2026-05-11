@@ -190,7 +190,7 @@ function M.new(def)
   local ok, err = validate_def(def)
   if not ok then return nil, err end
 
-  local sm_any = setmetatable({ _def = def, _state = def.initial, context = deep_copy(def.context or {}) }, SM) --[[: any]]
+  local sm_any = setmetatable({ _def = def, _state = def.initial, context = deep_copy(def.context or {}) }, SM) --[[: unknown]]
   local sm = sm_any --[[:! SMInstance]]
 
   -- Fire on_enter for the initial state.

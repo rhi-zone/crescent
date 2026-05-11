@@ -22,7 +22,7 @@ function M.new()
 		_data = {},
 		_head = 1, -- index of first element (inclusive)
 		_tail = 0, -- index of last element (inclusive); _tail < _head means empty
-	}, Deque) --[[: any]]
+	}, Deque) --[[: unknown]]
 	return self --[[:! Deque]]
 end
 

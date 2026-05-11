@@ -37,7 +37,7 @@ local function copy_node(node, new_children)
   if new_children ~= nil then
     copy.children = new_children
   else
-    local copy_any = copy --[[: any]]
+    local copy_any = copy --[[: unknown]]
     copy_any.children = nil
   end
   return copy

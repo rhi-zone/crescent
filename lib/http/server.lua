@@ -22,7 +22,7 @@ local function get_tls()
 	if not tls_loaded then
 		tls_loaded = true
 		local ok, t = pcall(require, "lib.tls")
-		if ok then tls_lib = (t --[[: any]]) --[[:! TlsMod]] end
+		if ok then tls_lib = (t --[[: unknown]]) --[[:! TlsMod]] end
 	end
 	return tls_lib
 end
@@ -72,7 +72,7 @@ mod.make_connection_handler = function (handler)
 			end
 		end
 		local res = { status = 200, reason = "", version = "HTTP/1.1", headers = {}, body = nil } --: http_response
-		local res_any = res --[[: any]]
+		local res_any = res --[[: unknown]]
 		handler(req --[[:! http_request]], res_any --[[:! http_server_response]], client_)
 		if not res_any.raw then
 			client_:send(http.serialize_response(res))
@@ -116,7 +116,7 @@ local function wrap_client_tls(tls_ctx, client)
 	end
 
 	-- Override send/receive on the client socket to go through TLS.
-	local clientm_ = client_ --[[: any]]
+	local clientm_ = client_ --[[: unknown]]
 	clientm_.on_send = function(self, data, flags)
 		local len = t.write(cctx, data, #data)
 		if len < 0 then return nil, ffi.string(t.error(cctx)) end

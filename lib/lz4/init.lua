@@ -308,11 +308,11 @@ local FRAME_BD  = 0x70
 local function compute_hc(flg, bd)
 	local ok_xxh, xxh = pcall(require, "lib.hash.xxhash")
 	if ok_xxh then
-		local xxh_any = xxh --[[: any]]
+		local xxh_any = xxh --[[: unknown]]
 		local xxh_ = xxh_any --[[:! { xxh32: function, ... }]]
 		if xxh_.xxh32 then
 			local header_bytes = char(flg, bd)
-			local h = (xxh_.xxh32(header_bytes, 0) --[[: any]]) --[[:! integer]]
+			local h = (xxh_.xxh32(header_bytes, 0) --[[: unknown]]) --[[:! integer]]
 			return band(rshift(h, 8), 0xFF)
 		end
 	end
@@ -423,7 +423,7 @@ function M.compress(input)
 	if compressed_block == nil then
 		return nil, "compress: " .. (err or "")
 	end
-	local compressed_block_ = (compressed_block --[[: any]]) --[[:! string]]
+	local compressed_block_ = (compressed_block --[[: unknown]]) --[[:! string]]
 
 	-- Frame header
 	local header = FRAME_MAGIC_BYTES

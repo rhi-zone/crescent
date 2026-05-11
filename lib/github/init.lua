@@ -6,16 +6,16 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local json = require("lib.format.json") --[[: any]]
+local json = require("lib.format.json") --[[: unknown]]
 
 -- Lazy-load the HTTPS client so that requiring lib.github does not fail
 -- in environments where TLS is unavailable (e.g. test runners without libtls).
-local _http --[[: any]]
+local _http --[[: unknown]]
 local function http()
 	if not _http then
 		_http = require("lib.https.client")
 	end
-	return _http --[[: any]]
+	return _http --[[: unknown]]
 end
 
 --:: github_client = { token: string | nil }

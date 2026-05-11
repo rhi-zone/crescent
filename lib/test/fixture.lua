@@ -325,7 +325,7 @@ function M.run_dir(dir, runner, opts)
 
 	local inputs = {} --[[: string[] ]]
 	for line in h:lines() do
-		inputs[#inputs + 1] = (line --[[: any]]) --[[:! string]]
+		inputs[#inputs + 1] = (line --[[: unknown]]) --[[:! string]]
 	end
 	h:close()
 

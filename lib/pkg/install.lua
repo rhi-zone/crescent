@@ -1282,7 +1282,7 @@ function M.run(project_dir, opts)
 				fail("failed to fetch registry index from " .. reg_url .. ": " .. tostring(idx_err))
 				return result
 			end
-			local idx, parse_err = parse_index((idx_str --[[: any]]) --[[:! string]])
+			local idx, parse_err = parse_index((idx_str --[[: unknown]]) --[[:! string]])
 			if not idx then
 				fail("failed to parse registry index from " .. reg_url .. ": " .. tostring(parse_err))
 				return result
@@ -1697,9 +1697,9 @@ function M.merge_package(project_dir, name, old_version, new_version, include_gl
 							error(("merge_package: cannot read theirs %s"):format(rel))
 						end
 
-						local bc = (base_c --[[: any]]) --[[:! string]]
-						local oc = (ours_c --[[: any]]) --[[:! string]]
-						local tc = (theirs_c --[[: any]]) --[[:! string]]
+						local bc = (base_c --[[: unknown]]) --[[:! string]]
+						local oc = (ours_c --[[: unknown]]) --[[:! string]]
+						local tc = (theirs_c --[[: unknown]]) --[[:! string]]
 						local merged_content, file_conflicts = merge3.merge3(bc, oc, tc)
 
 						-- Write merged result back.
@@ -1708,7 +1708,7 @@ function M.merge_package(project_dir, name, old_version, new_version, include_gl
 							error(("merge_package: failed to write merged %s: %s"):format(rel, tostring(wf_err)))
 						end
 
-						conflicts = conflicts + ((file_conflicts --[[: any]]) --[[:! integer]])
+						conflicts = conflicts + ((file_conflicts --[[: unknown]]) --[[:! integer]])
 						files_merged = files_merged + 1
 					end
 				end
@@ -1726,11 +1726,11 @@ function M.merge_package(project_dir, name, old_version, new_version, include_gl
 					local ours_c   = read_file(ours_path)
 					local theirs_c = read_file(theirs_path)
 					if ours_c and theirs_c then
-						local oc2 = (ours_c --[[: any]]) --[[:! string]]
-						local tc2 = (theirs_c --[[: any]]) --[[:! string]]
+						local oc2 = (ours_c --[[: unknown]]) --[[:! string]]
+						local tc2 = (theirs_c --[[: unknown]]) --[[:! string]]
 						local merged_content, file_conflicts = merge3.merge3("", oc2, tc2)
 						write_file(ours_path, merged_content)
-						conflicts    = conflicts    + ((file_conflicts --[[: any]]) --[[:! integer]])
+						conflicts    = conflicts    + ((file_conflicts --[[: unknown]]) --[[:! integer]])
 						files_merged = files_merged + 1
 					end
 				end

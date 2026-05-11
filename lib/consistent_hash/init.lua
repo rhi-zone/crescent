@@ -59,7 +59,7 @@ end
 function Ring:remove_node(name)
   local self_ = self --[[:! Ring]]
   if not self_._node_set[name] then return end
-  self_._node_set[name] = nil --[[: any]]
+  self_._node_set[name] = nil --[[: unknown]]
   self_._node_count = self_._node_count - 1
 
   local vring = self_._vring
@@ -112,7 +112,7 @@ function Ring:nodes()
   for name in pairs(self_._node_set) do
     result[#result + 1] = name
   end
-  table.sort(result --[[: any]])
+  table.sort(result --[[: unknown]])
   return result
 end
 
@@ -144,7 +144,7 @@ function M.new(opts)
     _vring = {},
     _node_set = {},
     _node_count = 0,
-  }, Ring) --[[: any]]) --[[:! Ring]]
+  }, Ring) --[[: unknown]]) --[[:! Ring]]
   return ring
 end
 

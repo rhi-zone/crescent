@@ -962,7 +962,7 @@ local function is_array(t)
   local count = 0
   for k, _ in pairs(t --[[:! { [any]: unknown }]]) do
     count = count + 1
-    local kn = tonumber(k --[[: any]]) or -1
+    local kn = tonumber(k --[[: unknown]]) or -1
     if type(k) ~= "number" or kn ~= math.floor(kn) or kn < 1 then return false end
     if kn > n then n = kn --[[:! integer]] end
   end

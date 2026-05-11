@@ -10,7 +10,7 @@ if ffi.os == "Windows" then error("env: windows not supported")
 else
 ffi.cdef [[ char **env(); ]]
 local _di = debug.getinfo(1) --[[:! { source: string }]]
-local env_ffi = ffi.load(_di.source:match("@?(.*/)") .. "env.so") --[[: any]]
+local env_ffi = ffi.load(_di.source:match("@?(.*/)") .. "env.so") --[[: unknown]]
 
 local env_iter = function (_, i)
 	local ptr = env_ffi.env()

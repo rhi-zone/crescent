@@ -85,7 +85,7 @@ function M.new(n)
   local nw = words_for(n)
   local words = {} --: { [integer]: integer }
   for i = 1, nw do words[i] = 0 end
-  local ret = setmetatable({ words = words, n = n }, BA) --[[: any]]
+  local ret = setmetatable({ words = words, n = n }, BA) --[[: unknown]]
   return ret --[[:! BAType]]
 end
 

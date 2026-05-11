@@ -111,7 +111,7 @@ function M.open(db_path, opts)
 				data_tbl[k] = v
 			end
 		end
-		local json_any = json --[[: any]]
+		local json_any = json --[[: unknown]]
 		local encoded, enc_err = json_any.encode(data_tbl)
 		if type(encoded) ~= "string" then
 			return nil, "session_store.put: encode failed: " .. tostring(enc_err)
@@ -153,7 +153,7 @@ function M.open(db_path, opts)
 		if ls + ttl_val < now then return nil end
 
 		-- Decode extra fields from data JSON.
-		local json_any2 = json --[[: any]]
+		local json_any2 = json --[[: unknown]]
 		local data = json_any2.decode(data_str or "{}") or {}
 		-- `any` escape for setting last_seen back into unknown-typed data table.
 		local rec_any = data --[[:! { last_seen: unknown, ... }]]

@@ -49,7 +49,7 @@ function M.new(capacity)
     _send_q  = sq,
     _recv_q  = rq,
     _closed  = false,
-  }, Chan) --[[: any]] --[[:! ChanObj]]
+  }, Chan) --[[: unknown]] --[[:! ChanObj]]
 end
 
 -- ── internal circular buffer helpers ─────────────────────────────────────────

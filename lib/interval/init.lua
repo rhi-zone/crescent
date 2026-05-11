@@ -757,7 +757,7 @@ function Tree:remove(iv)
     local ei = e[1] --[[:! Interval]]
     if ei.lo == iv.lo and ei.hi == iv.hi then
       for j = i, n - 1 do entries[j] = entries[j + 1] end
-      entries[n] = nil --[[: any]]
+      entries[n] = nil --[[: unknown]]
       self.n = n - 1
       if self.n > 0 then
         recompute_max(entries, self.n, i > self.n and self.n or i)

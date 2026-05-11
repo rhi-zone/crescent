@@ -624,7 +624,7 @@ end
 --- Wrap a codec in a framer that buffers encoded output.
 --: (codec: FramerCodec) -> Framer
 function M.framer(codec)
-  local fr = {} --[[: any]]
+  local fr = {} --[[: unknown]]
   local fr_ = fr --[[:! Framer]]
   fr_._codec = codec
   fr_._pending = {}
@@ -665,7 +665,7 @@ end
 --: (codec: { decoder: (unknown) -> ReceiverDec, ... }) -> Receiver
 function M.receiver(codec)
   local dec = codec:decoder() --[[:! ReceiverDec]]
-  local rv = {} --[[: any]]
+  local rv = {} --[[: unknown]]
   local rv_ = rv --[[:! Receiver]]
   rv_._dec = dec
   rv_._queue = {}
@@ -695,7 +695,7 @@ function M.receiver(codec)
     local s = self --[[:! Receiver]]
     if s._head > #s._queue then return nil end
     local msg = s._queue[s._head]
-    s._queue[s._head] = nil --[[: any]]
+    s._queue[s._head] = nil --[[: unknown]]
     s._head = s._head + 1
     return msg
   end

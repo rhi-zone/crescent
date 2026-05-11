@@ -52,7 +52,7 @@ local function new_processor()
   function P:use(plugin, opts)
     local self_any = self --[[:! { _frozen: boolean, _plugins: { [integer]: any }, ... }]]
     if self_any._frozen then
-      local c = self_any --[[: any]]
+      local c = self_any --[[: unknown]]
       return c:clone():use(plugin, opts)
     end
     self_any._plugins[#self_any._plugins + 1] = {plugin, opts}
@@ -111,7 +111,7 @@ local function new_processor()
   -- Full pipeline: parse → run → stringify.
   -- Returns (string) or (nil, errmsg).
   function P:process(source)
-    local self_any = self --[[: any]]
+    local self_any = self --[[: unknown]]
     local ast, err = self_any:parse(source)
     if not ast then return nil, err end
     ast, err = self_any:run(ast)

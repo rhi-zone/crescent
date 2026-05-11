@@ -34,8 +34,8 @@ if false then
   ]])
 end
 
-local SIG_DFL = ffi.cast("sighandler_t" --[[: any]], 0)
-local SIG_IGN = ffi.cast("sighandler_t" --[[: any]], 1)
+local SIG_DFL = ffi.cast("sighandler_t" --[[: unknown]], 0)
+local SIG_IGN = ffi.cast("sighandler_t" --[[: unknown]], 1)
 
 -- sigprocmask how constants
 local SIG_BLOCK   = 0
@@ -70,10 +70,10 @@ local callbacks = {} --: { [integer]: cdata | nil }
 function mod.handle(signum, fn)
   -- Free previous callback for this signal if any
   local prev = callbacks[signum]
-  local cb = ffi.cast("sighandler_t" --[[: any]], fn --[[: any]])
+  local cb = ffi.cast("sighandler_t" --[[: unknown]], fn --[[: unknown]])
   callbacks[signum] = cb
   local ret = ffi.C.signal(signum, cb)
-  if ret == ffi.cast("sighandler_t" --[[: any]], -1 --[[: any]]) then
+  if ret == ffi.cast("sighandler_t" --[[: unknown]], -1 --[[: unknown]]) then
     callbacks[signum] = prev
     return nil, "signal() failed"
   end
@@ -85,8 +85,8 @@ end
 --: (integer) -> (boolean | nil, string | nil)
 function mod.ignore(signum)
   local prev = callbacks[signum]
-  local ret = ffi.C.signal(signum, SIG_IGN --[[: any]])
-  if ret == ffi.cast("sighandler_t" --[[: any]], -1 --[[: any]]) then
+  local ret = ffi.C.signal(signum, SIG_IGN --[[: unknown]])
+  if ret == ffi.cast("sighandler_t" --[[: unknown]], -1 --[[: unknown]]) then
     return nil, "signal() failed"
   end
   if prev then prev:free() end
@@ -98,8 +98,8 @@ end
 --: (integer) -> (boolean | nil, string | nil)
 function mod.default(signum)
   local prev = callbacks[signum]
-  local ret = ffi.C.signal(signum, SIG_DFL --[[: any]])
-  if ret == ffi.cast("sighandler_t" --[[: any]], -1 --[[: any]]) then
+  local ret = ffi.C.signal(signum, SIG_DFL --[[: unknown]])
+  if ret == ffi.cast("sighandler_t" --[[: unknown]], -1 --[[: unknown]]) then
     return nil, "signal() failed"
   end
   if prev then prev:free() end

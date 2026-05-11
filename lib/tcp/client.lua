@@ -1,5 +1,5 @@
-local epoll_ = require("lib.epoll") --[[: any]]
-local socket = require("lib.ljsocket") --[[: any]]
+local epoll_ = require("lib.epoll") --[[: unknown]]
+local socket = require("lib.ljsocket") --[[: unknown]]
 
 local mod = {}
 
@@ -7,7 +7,7 @@ local mod = {}
 mod.client = function (host, port, cb, epoll)
 	local is_running = not epoll
 	epoll = epoll or epoll_.new()
-	local epoll_any = epoll --[[: any]]
+	local epoll_any = epoll --[[: unknown]]
 	local client = assert(socket.create(host:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$") and "inet" or "inet6", "stream", "tcp"))
 	assert(client:set_blocking(false))
 	local success, err = client:connect(host, port)
@@ -16,13 +16,13 @@ mod.client = function (host, port, cb, epoll)
 		assert(client:set_blocking(false))
 		assert(client:connect(host, port))
 	end
-	local client_any = client --[[: any]]
+	local client_any = client --[[: unknown]]
 	while not client_any:is_connected() do client_any:poll_connect() end
 	--[[TODO: receive all at once?]]
 	local _, remove = epoll_any:add(client_any.fd, cb, function () client_any:close() end)
 	assert(remove, "tcp_client: could not listen to socket")
 	while is_running do epoll_any:wait() end
-	local remove_any = remove --[[: any]]
+	local remove_any = remove --[[: unknown]]
 	return function (s) client_any:send(s) end, function () remove_any(); client_any:close() end
 end
 

@@ -117,7 +117,7 @@ function M.new()
 		_node_count = 0,    -- number of non-ground nodes
 		_components = {},   -- list of component tables
 		_vsources = {},     -- list of voltage source component tables (ordered)
-	}, Circuit) --[[: any]]
+	}, Circuit) --[[: unknown]]
 	return c --[[:! CircuitShape]]
 end
 
@@ -284,7 +284,7 @@ function Circuit:solve_dc()
 			_power = empty_pwr,
 			node_voltages = {} --[[:! { [string]: number }]],
 			branch_currents = {} --[[:! { [string]: number }]],
-		}, Result) --[[: any]]
+		}, Result) --[[: unknown]]
 	end
 
 	local Ac = copy_matrix(A_, sz_)
@@ -338,7 +338,7 @@ function Circuit:solve_dc()
 		-- public aliases for direct table access (no 'power' field — use :power() method)
 		node_voltages = node_voltages,
 		branch_currents = branch_currents,
-	}, Result) --[[: any]]
+	}, Result) --[[: unknown]]
 end
 
 -- Parameter sweep: change a component value and solve for each

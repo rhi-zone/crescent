@@ -18,7 +18,7 @@ mod.formatters = {
 	--[[@diagnostic disable-next-line: deprecated]]
 	[dns.type.MG] = domain_parts_to_string,
 	--[[@diagnostic disable-next-line: deprecated]]
-	[dns.type.MINFO] = function (x_u) local x = (x_u --[[: any]]) --[[:! { rmailbx: { [integer]: string | number }, emailbx: { [integer]: string | number }, ... }]]; (x --[[: any]]).rmailbx = domain_parts_to_string(x.rmailbx); (x --[[: any]]).emailbx = domain_parts_to_string(x.emailbx); return x end,
+	[dns.type.MINFO] = function (x_u) local x = (x_u --[[: unknown]]) --[[:! { rmailbx: { [integer]: string | number }, emailbx: { [integer]: string | number }, ... }]]; (x --[[: unknown]]).rmailbx = domain_parts_to_string(x.rmailbx); (x --[[: unknown]]).emailbx = domain_parts_to_string(x.emailbx); return x end,
 	--[[@diagnostic disable-next-line: deprecated]]
 	[dns.type.MR] = domain_parts_to_string,
 	--[[@diagnostic disable-next-line: param-type-mismatch]]
@@ -26,7 +26,7 @@ mod.formatters = {
 	[dns.type.NS] = domain_parts_to_string,
 	[dns.type.PTR] = domain_parts_to_string,
 	--[[@diagnostic disable-next-line: param-type-mismatch]]
-	[dns.type.SOA] = function (x_u) local x = (x_u --[[: any]]) --[[:! { mname: { [integer]: string | number }, rname: { [integer]: string | number }, ... }]]; (x --[[: any]]).mname = domain_parts_to_string(x.mname); (x --[[: any]]).rname = domain_parts_to_string(x.rname); return x end,
+	[dns.type.SOA] = function (x_u) local x = (x_u --[[: unknown]]) --[[:! { mname: { [integer]: string | number }, rname: { [integer]: string | number }, ... }]]; (x --[[: unknown]]).mname = domain_parts_to_string(x.mname); (x --[[: unknown]]).rname = domain_parts_to_string(x.rname); return x end,
 	[dns.type.TXT] = function (strs) return table.concat(strs, "\t") end,
 	[dns.type.A] = function (arr) return table.concat(arr, ".") end,
 	[dns.type.AAAA] = function (arr)

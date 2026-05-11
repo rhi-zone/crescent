@@ -11,7 +11,7 @@ end
 --
 -- Stores: root.data.intensify = { {word="very", sentence="..."}, ... }
 
-local nlcst = require("lib.unified.nlcst") --[[: any]]
+local nlcst = require("lib.unified.nlcst") --[[: unknown]]
 
 local M = {}
 

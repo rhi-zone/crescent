@@ -146,12 +146,12 @@ local function make_actor(pid, fn, opts, system)
   local ctx = setmetatable({
     _actor  = actor,
     _system = system,
-  }, ActorCtx) --[[: any]]
+  }, ActorCtx) --[[: unknown]]
   actor._ctx = ctx
   actor._co = co_create(function()
     local fn_ = fn --[[:! (any) -> any]]
     fn_(ctx)
-  end) --[[: any]]
+  end) --[[: unknown]]
   return actor
 end
 
@@ -213,7 +213,7 @@ function System:send(pid, msg)
   end
   mailbox[#mailbox + 1] = msg
   -- If the actor is suspended waiting for a message, resume it now.
-  local co_ = actor._co --[[: any]]
+  local co_ = actor._co --[[: unknown]]
   if co_status(co_) == "suspended" then
     self_:_resume_actor(actor)
   end
@@ -309,7 +309,7 @@ function System:_resume_actor(actor)
   local actor_ = actor
   if actor_._status ~= "running" then return
   else
-  local co_ = actor_._co --[[: any]]
+  local co_ = actor_._co --[[: unknown]]
   if co_status(co_) == "dead" then
     self_:_kill_actor(actor, "normal")
     return
@@ -379,7 +379,7 @@ function System:step()
       local has_mail  = #actor._mailbox > 0
       local dl = actor._deadline --: number|nil
       local timed_out = dl ~= nil and now >= dl
-      local co_ = actor._co --[[: any]]
+      local co_ = actor._co --[[: unknown]]
       local suspended = co_status(co_) == "suspended"
       if (has_mail or timed_out) and suspended then
         to_step[#to_step + 1] = actor
@@ -446,7 +446,7 @@ function System:supervisor(opts)
     _children     = {},   -- array of {id, fn, restart, pid}
     _failures     = {},   -- id -> {times=[], ...}
     _pid          = nil,
-  }, Supervisor) --[[: any]]
+  }, Supervisor) --[[: unknown]]
   local sup_ = sup --[[:! SupervisorShape]]
 
   -- Spawn supervisor actor

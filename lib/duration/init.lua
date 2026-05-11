@@ -22,7 +22,7 @@ local Duration = {}
 Duration.__index = Duration
 
 local function new_raw(secs)
-  local self = setmetatable({ _secs = secs }, Duration) --[[: any]]
+  local self = setmetatable({ _secs = secs }, Duration) --[[: unknown]]
   return self --[[:! Duration]]
 end
 
@@ -269,7 +269,7 @@ function Duration:format(fmt)
     elseif #parts == 2 then
       joined = parts[1] .. " and " .. parts[2]
     else
-      local last = table.remove(parts) --[[: any]] --[[:! string]]
+      local last = table.remove(parts) --[[: unknown]] --[[:! string]]
       joined = table.concat(parts, ", ") .. ", and " .. last
     end
     return sign_str .. (joined or "")

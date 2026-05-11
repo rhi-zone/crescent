@@ -130,7 +130,7 @@ function Policy:run(fn, overrides)
     return M.run(fn, self.defaults)
   end
   -- Merge: overrides take precedence over defaults
-  local merged = ({} --[[: any]]) --[[:! RetryOpts]]
+  local merged = ({} --[[: unknown]]) --[[:! RetryOpts]]
   for k, v in pairs(self.defaults --[[:! { [string]: unknown }]]) do (merged --[[:! { [string]: unknown }]])[k] = v end
   for k, v in pairs(overrides --[[:! { [string]: unknown }]]) do (merged --[[:! { [string]: unknown }]])[k] = v end
   return M.run(fn, merged)

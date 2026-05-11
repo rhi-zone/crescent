@@ -57,10 +57,10 @@ end
 --- Percent-decode a string.
 --: (string) -> string
 function M.decode(s)
-  local s2 = gsub(s, "+", " ") --[[: any]]; s2 = s2 --[[:! string]]
+  local s2 = gsub(s, "+", " ") --[[: unknown]]; s2 = s2 --[[:! string]]
   local result = gsub(s2, "%%(%x%x)", function(hex)
     return char(tonumber(hex, 16))
-  end) --[[: any]]; result = result --[[:! string]]
+  end) --[[: unknown]]; result = result --[[:! string]]
   return result
 end
 
@@ -163,7 +163,7 @@ function M.parse(s)
     return nil, "url.parse: expected string, got " .. type(s)
   end
 
-  local u = {} --[[: any]]
+  local u = {} --[[:! { scheme: string | nil, userinfo: string | nil, host: string | nil, port: number | nil, path: string | nil, query: string | nil, fragment: string | nil }]]
   local rest = s
 
   -- Fragment
@@ -219,7 +219,8 @@ function M.parse(s)
         u.host = sub(authority, 1, bracket_end)
         local port_str = sub(authority, bracket_end + 1)
         if sub(port_str, 1, 1) == ":" then
-          local p = tonumber(sub(port_str, 2))
+          local port_num_s = sub(port_str, 2)
+          local p = tonumber(port_num_s)
           if p then u.port = p end
         end
       else
@@ -299,32 +300,25 @@ end
 function M.resolve(base, ref)
   local r, err = M.parse(ref)
   if not r then return nil, err end
-  r = r --[[: any]]
 
-  local b
-  if type(base) == "string" then
-    b, err = M.parse(base)
-    if not b then return nil, err end
-    b = b --[[: any]]
-  else
-    b = base --[[: any]]
-  end
+  local b, berr = M.parse(base)
+  if not b then return nil, berr end
 
-  local t = {} --[[: any]]
+  local t = {} --[[:! { scheme: string | nil, userinfo: string | nil, host: string | nil, port: number | nil, path: string | nil, query: string | nil, fragment: string | nil }]]
 
   if r.scheme then
     t.scheme = r.scheme
     t.host = r.host
     t.port = r.port
     t.userinfo = r.userinfo
-    t.path = remove_dot_segments(r.path)
+    t.path = remove_dot_segments(r.path or "")
     t.query = r.query
   else
     if r.host then
       t.host = r.host
       t.port = r.port
       t.userinfo = r.userinfo
-      t.path = remove_dot_segments(r.path)
+      t.path = remove_dot_segments(r.path or "")
       t.query = r.query
     else
       if r.path == "" then
@@ -335,27 +329,29 @@ function M.resolve(base, ref)
           t.query = b.query
         end
       else
-        if sub(r.path, 1, 1) == "/" then
-          t.path = remove_dot_segments(r.path)
+        local r_path = r.path or ""
+        local b_path = b.path or ""
+        if sub(r_path, 1, 1) == "/" then
+          t.path = remove_dot_segments(r_path)
         else
           -- Merge: base authority + base path up to last / + ref path
-          if b.host and b.path == "" then
-            t.path = "/" .. r.path
+          if b.host and b_path == "" then
+            t.path = "/" .. r_path
           else
             local last_slash = 0
-            for i = #b.path, 1, -1 do
-              if byte(b.path, i) == byte("/") then
+            for i = #b_path, 1, -1 do
+              if byte(b_path, i) == byte("/") then
                 last_slash = i
                 break
               end
             end
             if last_slash > 0 then
-              t.path = sub(b.path, 1, last_slash) .. r.path
+              t.path = sub(b_path, 1, last_slash) .. r_path
             else
-              t.path = r.path
+              t.path = r_path
             end
           end
-          t.path = remove_dot_segments(t.path)
+          t.path = remove_dot_segments(t.path or "")
         end
         t.query = r.query
       end
@@ -394,7 +390,6 @@ local default_ports = {
 function M.normalize(s)
   local u, err = M.parse(s)
   if not u then return nil, err end
-  u = u --[[: any]]
 
   -- Lowercase scheme (already done in parse)
 
@@ -404,8 +399,11 @@ function M.normalize(s)
   end
 
   -- Remove default port
-  if u.scheme and u.port and default_ports[u.scheme] == u.port then
-    u.port = nil
+  do
+    local cur_port = u.port
+    if u.scheme and cur_port and default_ports[u.scheme] == cur_port then
+      u.port = nil
+    end
   end
 
   -- Remove dot segments
@@ -416,7 +414,7 @@ function M.normalize(s)
   -- Decode unreserved percent-encoded chars in path
   if u.path then
     u.path = gsub(u.path, "%%(%x%x)", function(hex)
-      hex = hex --[[: any]]; hex = hex --[[:! string]]
+      hex = hex --[[:! string]]
       local b = tonumber(hex, 16)
       if unreserved[b] then
         return char(b)

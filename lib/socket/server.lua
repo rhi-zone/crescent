@@ -1,5 +1,5 @@
-local socket = require("lib.ljsocket") --[[: any]]
-local epoll_ = require("lib.epoll") --[[: any]]
+local socket = require("lib.ljsocket") --[[: unknown]]
+local epoll_ = require("lib.epoll") --[[: unknown]]
 
 local M = {}
 
@@ -16,7 +16,7 @@ M.server = function(callback, port, epoll, opts)
     local opts_ = opts --[[:! { on_client: ((unknown) -> nil) | nil, on_client_close: ((unknown) -> nil) | nil, host: string | nil }]]
     local is_running = not epoll
     epoll = epoll or epoll_.new()
-    local epoll_any = epoll --[[: any]]
+    local epoll_any = epoll --[[: unknown]]
 
     -- https://github.com/CapsAdmin/luajitsocket/blob/acb3bc3236cb4551a477a74f2bc9305860ca6492/examples/tcp_server_blocking.lua
     local server = assert(socket.bind(opts_.host or "*", port))
@@ -41,7 +41,7 @@ M.server = function(callback, port, epoll, opts)
     local server_close = server.close
     server.close = function(self)
         server_close(self)
-        local remove_any = remove --[[: any]]
+        local remove_any = remove --[[: unknown]]
         remove_any()
     end
 

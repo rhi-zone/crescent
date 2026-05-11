@@ -83,7 +83,7 @@ function M.run(code, env, opts)
 	-- instruction after the error is thrown.
 	if opts.budget then
 		local budget = opts.budget
-		local debug_any = debug --[[: any]]
+		local debug_any = debug --[[: unknown]]
 		debug_any.sethook(function()
 			debug_any.sethook()
 			error("sandbox: instruction budget exceeded")
@@ -93,7 +93,7 @@ function M.run(code, env, opts)
 	local ok, result = pcall(fn)
 
 	if opts.budget then
-		local debug_any2 = debug --[[: any]]
+		local debug_any2 = debug --[[: unknown]]
 		debug_any2.sethook()  -- clear on normal exit too
 	end
 

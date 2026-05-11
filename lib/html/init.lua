@@ -28,7 +28,7 @@ local ESCAPE_MAP = {
 --: (s: string) -> string
 local function escape(s)
 	local map = ESCAPE_MAP --[[:! { [string]: string }]]
-	local r, _ = s:gsub("[&<>\"']", map --[[: any]])
+	local r, _ = s:gsub("[&<>\"']", map)
 	return r --[[:! string]]
 end
 M.escape = escape
@@ -53,8 +53,11 @@ end
 
 -- Normal element: attrs table with string keys as HTML attributes and
 -- integer keys as pre-rendered child strings.
+-- These factories return functions typed as `unknown` (the actual return type is
+-- a newtype of string; the cast to the newtype is done at each assignment site
+-- via `--[[:! Element<T, A>]]`).
+--: (string) -> unknown
 local function element(tag)
-	--: (xs: { [string]: unknown, [integer]: unknown } | string) -> string
 	local function f(xs)
 		if type(xs) == "string" then
 			return string.format("<%s>%s</%s>", tag, escape(xs --[[:! string]]), tag)
@@ -63,14 +66,14 @@ local function element(tag)
 		local parts = { "<", tag, attrs_str(xs_), ">" }
 		for i = 1, #xs_ do parts[#parts + 1] = xs_[i] --[[:! string]] end
 		parts[#parts + 1] = "</" .. tag .. ">"
-		return table.concat(parts)
+		return table.concat(parts) --[[: unknown]]
 	end
-	return f --[[: any]]
+	return f --[[: unknown]]
 end
 
 -- Raw element: children not escaped (for <script>, <style>).
+--: (string) -> unknown
 local function raw_element(tag)
-	--: (xs: { [string]: unknown, [integer]: unknown } | string) -> string
 	local function f(xs)
 		if type(xs) == "string" then
 			return string.format("<%s>%s</%s>", tag, xs --[[:! string]], tag)
@@ -79,19 +82,19 @@ local function raw_element(tag)
 		local parts = { "<", tag, attrs_str(xs_), ">" }
 		for i = 1, #xs_ do parts[#parts + 1] = xs_[i] --[[:! string]] end
 		parts[#parts + 1] = "</" .. tag .. ">"
-		return table.concat(parts)
+		return table.concat(parts) --[[: unknown]]
 	end
-	return f --[[: any]]
+	return f --[[: unknown]]
 end
 
 -- Void element: no children, self-closing.
+--: (string) -> unknown
 local function void(tag)
-	--: (xs: { [string]: unknown, [integer]: unknown } | nil) -> string
 	local function f(xs)
 		local xs_ = xs --[[:! { [string]: unknown, [integer]: unknown }]]
-		return "<" .. tag .. attrs_str(xs_ or {}) .. " />"
+		return ("<" .. tag .. attrs_str(xs_ or {}) .. " />") --[[: unknown]]
 	end
-	return f --[[: any]]
+	return f --[[: unknown]]
 end
 
 M.element     = element
@@ -230,220 +233,157 @@ M.void        = void
 
 -- Document structure ----------------------------------------------------
 
-local _html = element("html")
---: Element<HtmlElement, { lang: (string | nil), [integer]: HeadElement | BodyElement }>
-M.html = function(xs) return "<!DOCTYPE html>" .. _html(xs) end
+M.html = (function(xs) --[[:! { lang: (string | nil), [integer]: HeadElement | BodyElement, [string]: unknown }]]
+  local inner_fn = element("html") --[[:! ({ [integer]: unknown, [string]: unknown }) -> string]]
+  return ("<!DOCTYPE html>" .. inner_fn(xs)) --[[: unknown]]
+end) --[[:! Element<HtmlElement, { lang: (string | nil), [integer]: HeadElement | BodyElement }>]]
 
---: Element<HeadElement, { [integer]: HeadContent }>
-M.head = element("head")
+M.head = element("head") --[[:! Element<HeadElement, { [integer]: HeadContent }>]]
 
---: Element<BodyElement, { [integer]: FlowContent, class: (string | nil), id: (string | nil), style: (string  | nil)}>
-M.body = element("body")
+M.body = element("body") --[[:! Element<BodyElement, { [integer]: FlowContent, class: (string | nil), id: (string | nil), style: (string  | nil)}>]]
 
 -- Metadata elements (void) ---------------------------------------------
 
---: Element<MetaElement, MetaAttrs>
-M.meta = void("meta")
+M.meta = void("meta") --[[:! Element<MetaElement, MetaAttrs>]]
 
---: Element<LinkElement, LinkAttrs>
-M.link = void("link")
+M.link = void("link") --[[:! Element<LinkElement, LinkAttrs>]]
 
---: Element<ScriptElement, ScriptAttrs | { [integer]: string }>
-M.script = raw_element("script")
+M.script = raw_element("script") --[[:! Element<ScriptElement, ScriptAttrs | { [integer]: string }>]]
 
---: Element<StyleElement, { [integer]: string }>
-M.style = raw_element("style")
+M.style = raw_element("style") --[[:! Element<StyleElement, { [integer]: string }>]]
 
---: Element<TitleElement, { [integer]: string }>
-M.title = element("title")
+M.title = element("title") --[[:! Element<TitleElement, { [integer]: string }>]]
 
 -- Flow content ----------------------------------------------------------
 
---: Element<DivElement, ContainerAttrs | { [integer]: FlowContent }>
-M.div = element("div")
+M.div = element("div") --[[:! Element<DivElement, ContainerAttrs | { [integer]: FlowContent }>]]
 
---: Element<SectionElement, ContainerAttrs | { [integer]: FlowContent }>
-M.section = element("section")
+M.section = element("section") --[[:! Element<SectionElement, ContainerAttrs | { [integer]: FlowContent }>]]
 
---: Element<ArticleElement, ContainerAttrs | { [integer]: FlowContent }>
-M.article = element("article")
+M.article = element("article") --[[:! Element<ArticleElement, ContainerAttrs | { [integer]: FlowContent }>]]
 
---: Element<AsideElement, ContainerAttrs | { [integer]: FlowContent }>
-M.aside = element("aside")
+M.aside = element("aside") --[[:! Element<AsideElement, ContainerAttrs | { [integer]: FlowContent }>]]
 
---: Element<HeaderElement, ContainerAttrs | { [integer]: FlowContent }>
-M.header = element("header")
+M.header = element("header") --[[:! Element<HeaderElement, ContainerAttrs | { [integer]: FlowContent }>]]
 
---: Element<FooterElement, ContainerAttrs | { [integer]: FlowContent }>
-M.footer = element("footer")
+M.footer = element("footer") --[[:! Element<FooterElement, ContainerAttrs | { [integer]: FlowContent }>]]
 
---: Element<MainElement, ContainerAttrs | { [integer]: FlowContent }>
-M.main = element("main")
+M.main = element("main") --[[:! Element<MainElement, ContainerAttrs | { [integer]: FlowContent }>]]
 
---: Element<NavElement, ContainerAttrs | { [integer]: FlowContent }>
-M.nav = element("nav")
+M.nav = element("nav") --[[:! Element<NavElement, ContainerAttrs | { [integer]: FlowContent }>]]
 
 -- Headings --------------------------------------------------------------
 
---: Element<H1Element, ContainerAttrs | { [integer]: PhrasingContent }>
-M.h1 = element("h1")
---: Element<H2Element, ContainerAttrs | { [integer]: PhrasingContent }>
-M.h2 = element("h2")
---: Element<H3Element, ContainerAttrs | { [integer]: PhrasingContent }>
-M.h3 = element("h3")
---: Element<H4Element, ContainerAttrs | { [integer]: PhrasingContent }>
-M.h4 = element("h4")
---: Element<H5Element, ContainerAttrs | { [integer]: PhrasingContent }>
-M.h5 = element("h5")
---: Element<H6Element, ContainerAttrs | { [integer]: PhrasingContent }>
-M.h6 = element("h6")
+M.h1 = element("h1") --[[:! Element<H1Element, ContainerAttrs | { [integer]: PhrasingContent }>]]
+M.h2 = element("h2") --[[:! Element<H2Element, ContainerAttrs | { [integer]: PhrasingContent }>]]
+M.h3 = element("h3") --[[:! Element<H3Element, ContainerAttrs | { [integer]: PhrasingContent }>]]
+M.h4 = element("h4") --[[:! Element<H4Element, ContainerAttrs | { [integer]: PhrasingContent }>]]
+M.h5 = element("h5") --[[:! Element<H5Element, ContainerAttrs | { [integer]: PhrasingContent }>]]
+M.h6 = element("h6") --[[:! Element<H6Element, ContainerAttrs | { [integer]: PhrasingContent }>]]
 
 -- Phrasing content ------------------------------------------------------
 
---: Element<PElement, ContainerAttrs | { [integer]: PhrasingContent }>
-M.p = element("p")
+M.p = element("p") --[[:! Element<PElement, ContainerAttrs | { [integer]: PhrasingContent }>]]
 
---: Element<AElement, AAttrs | { [integer]: PhrasingContent }>
-M.a = element("a")
+M.a = element("a") --[[:! Element<AElement, AAttrs | { [integer]: PhrasingContent }>]]
 
---: Element<SpanElement, ContainerAttrs | { [integer]: PhrasingContent }>
-M.span = element("span")
+M.span = element("span") --[[:! Element<SpanElement, ContainerAttrs | { [integer]: PhrasingContent }>]]
 
---: Element<EmElement, ContainerAttrs | { [integer]: PhrasingContent }>
-M.em = element("em")
+M.em = element("em") --[[:! Element<EmElement, ContainerAttrs | { [integer]: PhrasingContent }>]]
 
---: Element<StrongElement, ContainerAttrs | { [integer]: PhrasingContent }>
-M.strong = element("strong")
+M.strong = element("strong") --[[:! Element<StrongElement, ContainerAttrs | { [integer]: PhrasingContent }>]]
 
---: Element<CodeElement, ContainerAttrs | { [integer]: PhrasingContent }>
-M.code = element("code")
+M.code = element("code") --[[:! Element<CodeElement, ContainerAttrs | { [integer]: PhrasingContent }>]]
 
---: Element<PreElement, ContainerAttrs | { [integer]: PhrasingContent }>
-M.pre = element("pre")
+M.pre = element("pre") --[[:! Element<PreElement, ContainerAttrs | { [integer]: PhrasingContent }>]]
 
---: Element<BlockquoteElement, ContainerAttrs | { [integer]: FlowContent }>
-M.blockquote = element("blockquote")
+M.blockquote = element("blockquote") --[[:! Element<BlockquoteElement, ContainerAttrs | { [integer]: FlowContent }>]]
 
---: Element<IElement, ContainerAttrs | { [integer]: PhrasingContent }>
-M.i = element("i")
+M.i = element("i") --[[:! Element<IElement, ContainerAttrs | { [integer]: PhrasingContent }>]]
 
---: Element<BElement, ContainerAttrs | { [integer]: PhrasingContent }>
-M.b = element("b")
+M.b = element("b") --[[:! Element<BElement, ContainerAttrs | { [integer]: PhrasingContent }>]]
 
---: Element<SmallElement, ContainerAttrs | { [integer]: PhrasingContent }>
-M.small = element("small")
+M.small = element("small") --[[:! Element<SmallElement, ContainerAttrs | { [integer]: PhrasingContent }>]]
 
---: Element<AbbrElement, ContainerAttrs | { [integer]: PhrasingContent }>
-M.abbr = element("abbr")
+M.abbr = element("abbr") --[[:! Element<AbbrElement, ContainerAttrs | { [integer]: PhrasingContent }>]]
 
 -- Void phrasing content ------------------------------------------------
 
---: BrElement
-M.br = void("br")({})
+M.br = ((void("br") --[[:! ({ [string]: unknown }) -> string]])({}) --[[: unknown]]) --[[:! BrElement]]
 
---: Element<BrElement, ContainerAttrs>
-M.br_ = void("br")
+M.br_ = void("br") --[[:! Element<BrElement, ContainerAttrs>]]
 
---: Element<HrElement, ContainerAttrs>
-M.hr = void("hr")
+M.hr = void("hr") --[[:! Element<HrElement, ContainerAttrs>]]
 
---: Element<ImgElement, ImgAttrs>
-M.img = void("img")
+M.img = void("img") --[[:! Element<ImgElement, ImgAttrs>]]
 
 -- Lists -----------------------------------------------------------------
 
---: Element<UlElement, ContainerAttrs | { [integer]: ListItemContent }>
-M.ul = element("ul")
+M.ul = element("ul") --[[:! Element<UlElement, ContainerAttrs | { [integer]: ListItemContent }>]]
 
---: Element<OlElement, OlAttrs | { [integer]: ListItemContent }>
-M.ol = element("ol")
+M.ol = element("ol") --[[:! Element<OlElement, OlAttrs | { [integer]: ListItemContent }>]]
 
---: Element<LiElement, ContainerAttrs | { [integer]: FlowContent }>
-M.li = element("li")
+M.li = element("li") --[[:! Element<LiElement, ContainerAttrs | { [integer]: FlowContent }>]]
 
---: Element<DlElement, ContainerAttrs | { [integer]: DtElement | DdElement }>
-M.dl = element("dl")
+M.dl = element("dl") --[[:! Element<DlElement, ContainerAttrs | { [integer]: DtElement | DdElement }>]]
 
---: Element<DtElement, ContainerAttrs | { [integer]: PhrasingContent }>
-M.dt = element("dt")
+M.dt = element("dt") --[[:! Element<DtElement, ContainerAttrs | { [integer]: PhrasingContent }>]]
 
---: Element<DdElement, ContainerAttrs | { [integer]: FlowContent }>
-M.dd = element("dd")
+M.dd = element("dd") --[[:! Element<DdElement, ContainerAttrs | { [integer]: FlowContent }>]]
 
 -- Tables ----------------------------------------------------------------
 
---: Element<TableElement, TableAttrs | { [integer]: TableSectionContent }>
-M.table = element("table")
+M.table = element("table") --[[:! Element<TableElement, TableAttrs | { [integer]: TableSectionContent }>]]
 
---: Element<TheadElement, ContainerAttrs | { [integer]: RowContent }>
-M.thead = element("thead")
+M.thead = element("thead") --[[:! Element<TheadElement, ContainerAttrs | { [integer]: RowContent }>]]
 
---: Element<TbodyElement, ContainerAttrs | { [integer]: RowContent }>
-M.tbody = element("tbody")
+M.tbody = element("tbody") --[[:! Element<TbodyElement, ContainerAttrs | { [integer]: RowContent }>]]
 
---: Element<TfootElement, ContainerAttrs | { [integer]: RowContent }>
-M.tfoot = element("tfoot")
+M.tfoot = element("tfoot") --[[:! Element<TfootElement, ContainerAttrs | { [integer]: RowContent }>]]
 
---: Element<TrElement, TrAttrs | { [integer]: CellContent }>
-M.tr = element("tr")
+M.tr = element("tr") --[[:! Element<TrElement, TrAttrs | { [integer]: CellContent }>]]
 
---: Element<ThElement, ThAttrs | { [integer]: PhrasingContent }>
-M.th = element("th")
+M.th = element("th") --[[:! Element<ThElement, ThAttrs | { [integer]: PhrasingContent }>]]
 
---: Element<TdElement, TdAttrs | { [integer]: FlowContent }>
-M.td = element("td")
+M.td = element("td") --[[:! Element<TdElement, TdAttrs | { [integer]: FlowContent }>]]
 
 -- Forms -----------------------------------------------------------------
 
---: Element<FormElement, FormAttrs | { [integer]: FlowContent }>
-M.form = element("form")
+M.form = element("form") --[[:! Element<FormElement, FormAttrs | { [integer]: FlowContent }>]]
 
---: Element<InputElement, InputAttrs>
-M.input = void("input")
+M.input = void("input") --[[:! Element<InputElement, InputAttrs>]]
 
---: Element<LabelElement, LabelAttrs | { [integer]: PhrasingContent }>
-M.label = element("label")
+M.label = element("label") --[[:! Element<LabelElement, LabelAttrs | { [integer]: PhrasingContent }>]]
 
---: Element<FieldsetElement, ContainerAttrs | { [integer]: FlowContent }>
-M.fieldset = element("fieldset")
+M.fieldset = element("fieldset") --[[:! Element<FieldsetElement, ContainerAttrs | { [integer]: FlowContent }>]]
 
---: Element<SelectElement, SelectAttrs | { [integer]: SelectContent }>
-M.select = element("select")
+M.select = element("select") --[[:! Element<SelectElement, SelectAttrs | { [integer]: SelectContent }>]]
 
---: Element<OptionElement, OptionAttrs | { [integer]: string }>
-M.option = element("option")
+M.option = element("option") --[[:! Element<OptionElement, OptionAttrs | { [integer]: string }>]]
 
---: Element<TextareaElement, TextareaAttrs>
-M.textarea = element("textarea")
+M.textarea = element("textarea") --[[:! Element<TextareaElement, TextareaAttrs>]]
 
---: Element<ButtonElement, ButtonAttrs | { [integer]: PhrasingContent }>
-M.button = element("button")
+M.button = element("button") --[[:! Element<ButtonElement, ButtonAttrs | { [integer]: PhrasingContent }>]]
 
 -- Media -----------------------------------------------------------------
 
---: Element<IframeElement, { id: (string | nil), class: (string | nil), style: (string | nil), width: (string | nil), height: (string | nil), name: (string | nil), src: (string | nil), [integer]: string }>
-M.iframe = element("iframe")
+M.iframe = element("iframe") --[[:! Element<IframeElement, { id: (string | nil), class: (string | nil), style: (string | nil), width: (string | nil), height: (string | nil), name: (string | nil), src: (string | nil), [integer]: string }>]]
 
---: Element<VideoElement, VideoAttrs | { [integer]: SourceElement | string }>
-M.video = element("video")
+M.video = element("video") --[[:! Element<VideoElement, VideoAttrs | { [integer]: SourceElement | string }>]]
 
---: Element<AudioElement, AudioAttrs | { [integer]: SourceElement | string }>
-M.audio = element("audio")
+M.audio = element("audio") --[[:! Element<AudioElement, AudioAttrs | { [integer]: SourceElement | string }>]]
 
---: Element<SourceElement, SourceAttrs>
-M.source = void("source")
+M.source = void("source") --[[:! Element<SourceElement, SourceAttrs>]]
 
 -- Graphics --------------------------------------------------------------
 
---: Element<CanvasElement, { id: (string | nil), class: (string | nil), style: (string | nil), width: (string | nil), height: (string  | nil)}>
-M.canvas = element("canvas")
+M.canvas = element("canvas") --[[:! Element<CanvasElement, { id: (string | nil), class: (string | nil), style: (string | nil), width: (string | nil), height: (string  | nil)}>]]
 
---: Element<SvgElement, { id: (string | nil), class: (string | nil), style: (string | nil), width: (string | nil), height: (string | nil), viewBox: (string | nil), xmlns: (string | nil), [integer]: string }>
-M.svg = element("svg")
+M.svg = element("svg") --[[:! Element<SvgElement, { id: (string | nil), class: (string | nil), style: (string | nil), width: (string | nil), height: (string | nil), viewBox: (string | nil), xmlns: (string | nil), [integer]: string }>]]
 
 -- Utility ---------------------------------------------------------------
 
---: (s: string) -> string
-M.text = escape
+M.text = escape --[[:! (s: string) -> string]]
 
 return M
+

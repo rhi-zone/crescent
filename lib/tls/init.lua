@@ -93,7 +93,7 @@ ffi.cdef [[
 	void tls_config_clear_keys(struct tls_config*);
 ]]
 
-local tls_c = ffi.load("tls") --[[: any]] -- ffi.load result is not $FfiC; any is the correct escape here
+local tls_c = ffi.load("tls")
 
 --[[@class tls_config_c]]
 --[[@class tls_c]]

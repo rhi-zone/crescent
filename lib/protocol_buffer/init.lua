@@ -651,7 +651,7 @@ function M.decode(schema, bytes)
         local value, no = decode_value(type_str, wire_type, bytes, offset, nested_schema)
         if value == nil then return nil, no end
         local value_ = value --[[:! unknown]]
-        offset = (no --[[: any]]) --[[:! integer]]
+        offset = (no --[[: unknown]]) --[[:! integer]]
         if repeated then
           local arr = msg[name] --[[:! { [integer]: unknown }]]
           arr[#arr + 1] = value_

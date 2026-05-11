@@ -38,7 +38,7 @@ mod.run = function(opts)
 			provider = opts.provider,
 			http_client = opts.http_client,
 			api_key = opts.api_key,
-		} --[[: any]]
+		} --[[: unknown]]
 		local res, err = ai.generate(req --[[:! ai_request]])
 		if not res then return nil, err end
 

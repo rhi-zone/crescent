@@ -337,7 +337,7 @@ local function parse_component(lines, start_idx, end_idx, comp_type)
         j = j + 1
       end
       local alarms_ = comp._alarms --[[:! { [integer]: unknown }]]
-      alarms_[#alarms_+1] = parse_valarm(lines, alarm_start, j - 1) --[[: any]]
+      alarms_[#alarms_+1] = parse_valarm(lines, alarm_start, j - 1) --[[: unknown]]
       i = j + 1
     else
       local prop, err = M.parse_property(line)
@@ -356,12 +356,12 @@ local function parse_component(lines, start_idx, end_idx, comp_type)
           if not comp.exdate then comp.exdate = {} end
           local exdate_ = comp.exdate --[[:! { [integer]: unknown }]]
           local dt = parse_dt_prop(prop)
-          if dt then exdate_[#exdate_+1] = dt --[[: any]] end
+          if dt then exdate_[#exdate_+1] = dt --[[: unknown]] end
         elseif prop.name == "RDATE" then
           if not comp.rdate then comp.rdate = {} end
           local rdate_ = comp.rdate --[[:! { [integer]: unknown }]]
           local dt = parse_dt_prop(prop)
-          if dt then rdate_[#rdate_+1] = dt --[[: any]] end
+          if dt then rdate_[#rdate_+1] = dt --[[: unknown]] end
         elseif prop.name == "CATEGORIES" then
           comp.categories = {} --: { [integer]: string }
           local categories_ = comp.categories --[[:! { [integer]: string }]]
@@ -378,7 +378,7 @@ local function parse_component(lines, start_idx, end_idx, comp_type)
               att[pk:lower()] = pv
             end
           end
-          attendees_[#attendees_+1] = att --[[: any]]
+          attendees_[#attendees_+1] = att --[[: unknown]]
         elseif prop.name == "ORGANIZER" then
           comp.organizer = { value = prop.value }
           if prop.params then
@@ -456,7 +456,7 @@ function M.parse(s)
         j = j + 1
       end
       local ev_ = cal.events --[[:! { [integer]: unknown }]]
-      ev_[#ev_+1] = parse_component(lines, comp_start, j - 1, "VEVENT") --[[: any]]
+      ev_[#ev_+1] = parse_component(lines, comp_start, j - 1, "VEVENT") --[[: unknown]]
       i = j + 1
     elseif upper:find("^BEGIN:VTODO") then
       local comp_start = i + 1
@@ -472,28 +472,28 @@ function M.parse(s)
         j = j + 1
       end
       local todos_ = cal.todos --[[:! { [integer]: unknown }]]
-      todos_[#todos_+1] = parse_component(lines, comp_start, j - 1, "VTODO") --[[: any]]
+      todos_[#todos_+1] = parse_component(lines, comp_start, j - 1, "VTODO") --[[: unknown]]
       i = j + 1
     elseif upper:find("^BEGIN:VJOURNAL") then
       local comp_start = i + 1
       local j = i + 1
       while j <= #lines and lines[j]:upper() ~= "END:VJOURNAL" do j = j + 1 end
       local jnl_ = cal.journals --[[:! { [integer]: unknown }]]
-      jnl_[#jnl_+1] = parse_component(lines, comp_start, j - 1, "VJOURNAL") --[[: any]]
+      jnl_[#jnl_+1] = parse_component(lines, comp_start, j - 1, "VJOURNAL") --[[: unknown]]
       i = j + 1
     elseif upper:find("^BEGIN:VFREEBUSY") then
       local comp_start = i + 1
       local j = i + 1
       while j <= #lines and lines[j]:upper() ~= "END:VFREEBUSY" do j = j + 1 end
       local fb_ = cal.freebusys --[[:! { [integer]: unknown }]]
-      fb_[#fb_+1] = parse_component(lines, comp_start, j - 1, "VFREEBUSY") --[[: any]]
+      fb_[#fb_+1] = parse_component(lines, comp_start, j - 1, "VFREEBUSY") --[[: unknown]]
       i = j + 1
     elseif upper:find("^BEGIN:VTIMEZONE") then
       local comp_start = i + 1
       local j = i + 1
       while j <= #lines and lines[j]:upper() ~= "END:VTIMEZONE" do j = j + 1 end
       local tz_ = cal.timezones --[[:! { [integer]: unknown }]]
-      tz_[#tz_+1] = parse_component(lines, comp_start, j - 1, "VTIMEZONE") --[[: any]]
+      tz_[#tz_+1] = parse_component(lines, comp_start, j - 1, "VTIMEZONE") --[[: unknown]]
       i = j + 1
     elseif upper:find("^BEGIN:") then
       -- Unknown component: skip

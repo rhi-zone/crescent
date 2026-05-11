@@ -7,9 +7,9 @@ if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
 end
 
-local base64 = require("lib.encode.base64") --[[: any]]
-local json = require("lib.format.json") --[[: any]]
-local png = require("lib.png") --[[: any]]
+local base64 = require("lib.encode.base64") --[[: unknown]]
+local json = require("lib.format.json") --[[: unknown]]
+local png = require("lib.png") --[[: unknown]]
 
 --:: require "lib.formats.ccv2.ccv2_types"
 

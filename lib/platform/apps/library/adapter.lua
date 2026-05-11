@@ -85,7 +85,7 @@ function M.index(idx, opts)
 	return {
 		list = function()
 			local filter = tag_filter and { tag = tag_filter } or nil
-			local rows = (idx_ --[[: any]]):list(filter)
+			local rows = (idx_ --[[: unknown]]):list(filter)
 			local items = {}
 			for i = 1, #rows do
 				items[i] = row_to_item(rows[i])
@@ -93,7 +93,7 @@ function M.index(idx, opts)
 			return items
 		end,
 		search = function(query)
-			local rows = (idx_ --[[: any]]):search(query)
+			local rows = (idx_ --[[: unknown]]):search(query)
 			local items = {}
 			for i = 1, #rows do
 				items[i] = row_to_item(rows[i])

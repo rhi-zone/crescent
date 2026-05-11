@@ -47,7 +47,7 @@ end
 local function try_libsecret()
 	local ok, lib_raw = pcall(ffi.load, "secret-1")
 	if not ok then return nil end
-	local lib = lib_raw --[[: any]]
+	local lib = lib_raw --[[: unknown]]
 
 	-- glib is a separate shared object; try a few names.  libsecret links glib,
 	-- but LuaJIT's ffi.load uses RTLD_LOCAL so glib symbols are not visible via
@@ -211,7 +211,7 @@ local function try_libsecret()
 				if ht ~= nil then
 					local v = glib.g_hash_table_lookup(ht, "service")
 					if v ~= nil then
-						local s = ffi.string(ffi.cast("const char*", v) --[[: any]])
+						local s = ffi.string(ffi.cast("const char*", v) --[[: unknown]])
 						if prefix == nil or s:sub(1, #prefix) == prefix then
 							names[#names + 1] = s
 						end
@@ -234,7 +234,7 @@ end
 local function try_keychain()
 	local ok, lib_raw = pcall(ffi.load, "Security")
 	if not ok then return nil end
-	local lib = lib_raw --[[: any]]
+	local lib = lib_raw --[[: unknown]]
 
 	local ok2 = pcall(ffi.cdef, [[
 		typedef int            OSStatus;
@@ -361,7 +361,7 @@ local function try_keychain()
 			nil, slen, service, alen, ACCOUNT, plen, pdata, nil
 		)
 		if st ~= 0 then return nil end
-		local s = ffi.string(ffi.cast("const char*", pdata[0]) --[[: any]], plen[0])
+		local s = ffi.string(ffi.cast("const char*", pdata[0]) --[[: unknown]], plen[0])
 		lib.SecKeychainItemFreeContent(nil, pdata[0])
 		return s
 	end
@@ -414,7 +414,7 @@ local function try_keychain()
 			if ast == 0 and attr_list[0] ~= nil and attr_list[0].count >= 1 then
 				local a = attr_list[0].attr[0]
 				if a.data ~= nil and a.length > 0 then
-					local s = ffi.string(ffi.cast("const char*", a.data) --[[: any]], a.length)
+					local s = ffi.string(ffi.cast("const char*", a.data) --[[: unknown]], a.length)
 					if prefix == nil or s:sub(1, #prefix) == prefix then
 						names[#names + 1] = s
 					end
@@ -458,7 +458,7 @@ end
 local function try_file_tier()
 	local ok, sha256_mod = pcall(require, "lib.hash.sha256")
 	if not ok then return nil end
-	local sha256_hex = (sha256_mod --[[: any]]).sha256
+	local sha256_hex = (sha256_mod --[[: unknown]]).sha256
 	if not sha256_hex then return nil end
 	--: (s: string) -> string
 	local function _sha256_call(s) return sha256_hex(s) end

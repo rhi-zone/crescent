@@ -284,7 +284,7 @@ end
 -- Mutates the listItem to strip the checkbox prefix and set .checked.
 --: (item: { type: string, ... }) -> nil
 local function try_task_list_item(item)
-  local item_any = item --[[: any]]
+  local item_any = item --[[: unknown]]
   if not item_any.children or #item_any.children == 0 then return end
   local first_child = item_any.children[1]
   -- The first child should be a paragraph (tight list) or directly inline nodes.

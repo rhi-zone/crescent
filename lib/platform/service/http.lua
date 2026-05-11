@@ -89,7 +89,7 @@ end
 -- The first parameter is always "caps" by convention and is skipped.
 --: (fn: function) -> { [integer]: string }
 local function param_names_of(fn)
-	local fn_a = fn --[[: any]]
+	local fn_a = fn --[[: unknown]]
 	local info = debug.getinfo(fn_a, "u")
 	if not info then return {} end
 	local nparams = info.nparams or 0

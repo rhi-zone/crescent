@@ -133,7 +133,7 @@ setmetatable(M, {
     end
 
     local test = make_test(types)
-    local walk_any = walk --[[: any]]
+    local walk_any = walk --[[: unknown]]
     walk_any(tree, nil, nil, test, enter, exit)
   end,
 })
@@ -194,7 +194,7 @@ local function walk_parents(node, ancestors, test, enter, exit)
   end
 
   if exit and test(node) then
-    local exit_fn = exit --[[: any]]
+    local exit_fn = exit --[[: unknown]]
     signal = exit_fn(node, ancestors)
     if signal == M.EXIT then return M.EXIT end
   end

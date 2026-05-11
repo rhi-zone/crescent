@@ -431,7 +431,7 @@ function Model:update_where(conditions, changes)
 		end
 		if match then
 			-- Validate changes against this record
-			local errs = validate(changes --[[: any]], self._fields, storage, true, id --[[:! integer]])
+			local errs = validate(changes --[[: unknown]], self._fields, storage, true, id --[[:! integer]])
 			if errs then return nil, errs end
 			for k, v in pairs(changes) do
 				rec[k] = v

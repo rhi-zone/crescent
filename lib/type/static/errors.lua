@@ -417,7 +417,7 @@ local function build_templates()
         end,
         --: (TemplateArgs) -> string
         [E.FORCE_CAST_TO_ANY]     = function(_a)
-            return "`--[[:! any]]` is not allowed. Use `--[[: any]]` (regular cast) instead."
+            return "`--[[:! any]]` is not allowed. Use `--[[: unknown]]` (regular cast) instead."
                 .. " The force-cast `:!` is for narrowing `unknown` to a concrete type,"
                 .. " not for casting to `any`."
         end,

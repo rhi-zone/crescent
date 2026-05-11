@@ -13,23 +13,23 @@ local M = {}
 local function make_tls_hooks(client_tls, client)
 	client.on_connect = function(self, host, service)
 		if tls.connect_socket(client_tls, self.fd, host) < 0 then
-			return nil, ffi.string(tls.error(client_tls) --[[: any]])
+			return nil, ffi.string(tls.error(client_tls) --[[: unknown]])
 		end
 		if tls.handshake(client_tls) < 0 then
-			return nil, ffi.string(tls.error(client_tls) --[[: any]])
+			return nil, ffi.string(tls.error(client_tls) --[[: unknown]])
 		end
 		return true
 	end
 
 	client.on_send = function(self, data, flags)
 		local len = tls.write(client_tls, data, #data)
-		if len < 0 then return nil, ffi.string(tls.error(client_tls) --[[: any]]) end
+		if len < 0 then return nil, ffi.string(tls.error(client_tls) --[[: unknown]]) end
 		return len
 	end
 
 	client.on_receive = function(self, buffer, max_size, flags)
 		local len = tls.read(client_tls, buffer, max_size)
-		if len < 0 then return nil, ffi.string(tls.error(client_tls) --[[: any]]) end
+		if len < 0 then return nil, ffi.string(tls.error(client_tls) --[[: unknown]]) end
 		return ffi.string(buffer, len)
 	end
 end
@@ -70,7 +70,7 @@ M.request = function(req)
 	req.body = req.body or ""
 	local client_, err = socket.create("inet", "stream", "tcp")
 	if not client_ then return nil, err end
-	local client = client_ --[[: any]]
+	local client = client_ --[[: unknown]]
 
 	local client_tls, tls_config = tls_setup()
 	make_tls_hooks(client_tls, client)
@@ -154,7 +154,7 @@ M.stream = function(req)
 	req.body = req.body or ""
 	local client_, err = socket.create("inet", "stream", "tcp")
 	if not client_ then return nil, err end
-	local client = client_ --[[: any]]
+	local client = client_ --[[: unknown]]
 
 	local client_tls, tls_config = tls_setup()
 	make_tls_hooks(client_tls, client)

@@ -1165,7 +1165,7 @@ end
 
 --: (src: string, defs: { [string]: { url: unknown, title: unknown } } | nil) -> { [integer]: { type: string, ... } }
 local function tokenize_inlines(src, defs)
-  local tokens = {} --[[: any]]
+  local tokens = {} --[[:! { [integer]: { type: string, value?: string, ... } }]]
   local len = #src
   local pos = 1
   local text_start = 1
@@ -1188,7 +1188,7 @@ local function tokenize_inlines(src, defs)
       local tick_len = pos - tick_start
       local end_pos, content = scan_code_span(src, pos, tick_len)
       if end_pos then
-        tokens[#tokens + 1] = { type = "code", value = content }
+        tokens[#tokens + 1] = { type = "code", value = content or "" }
         pos = end_pos
       else
         -- No matching closing backticks: emit as text.
@@ -1448,7 +1448,7 @@ local function tokenize_inlines(src, defs)
                         not (pos > 2 and str_byte(src, pos - 2) == 92))  -- '!' not preceded by '\'
       -- Remove the '!' from previous text token if image.
       if is_image and #tokens > 0 and tokens[#tokens].type == "text" then
-        local tv = tokens[#tokens].value
+        local tv = tokens[#tokens].value or ""
         if #tv > 0 and str_byte(tv, #tv) == 33 then
           tokens[#tokens].value = str_sub(tv, 1, #tv - 1)
           if tokens[#tokens].value == "" then table.remove(tokens) end
@@ -1544,18 +1544,18 @@ end
 -- Also resolves link/image open-close pairs.
 -- Returns array of inline nodes.
 local function resolve_inlines(tokens, defs, src)
-  local result = {} --[[: any]]
+  local result = {} --[[:! { [integer]: { type: string, ... } | nil }]]
 
   -- First pass: resolve links/images.
   -- Find matching link_open for each link_close.
   local n = #tokens
   local i = 1
-  local resolved = {} --[[: any]] -- new token list after link resolution
+  local resolved = {} --[[:! { [integer]: { type: string, ... } | nil }]] -- new token list after link resolution
 
   -- We need to track bracket stack.
   -- Each frame: { idx, is_image, inactive }
   -- inactive=true: deactivated link_open (can't form a link, becomes '[' text)
-  local bracket_stack = {} --[[: any]]
+  local bracket_stack = {} --[[:! { [integer]: { idx: integer, is_image: boolean, inactive: boolean } | nil }]]
 
   while i <= n do
     local tok = tokens[i]
@@ -1695,8 +1695,8 @@ local function resolve_inlines(tokens, defs, src)
   --   count       — remaining chars in the run (decremented as chars are consumed)
   --   orig_count  — original run length (for the odd-sum rule)
   --   can_open / can_close
-  local out = {} --[[: any]]
-  local delim_stack = {} --[[: any]]
+  local out = {} --[[:! { [integer]: { type: string, ... } }]]
+  local delim_stack = {} --[[:! { [integer]: { char: integer, count: integer, orig_count: integer, can_open: boolean | nil, can_close: boolean | nil } | nil }]]
 
   --: (node: { type: string, ... }) -> nil
   local function emit(node)
@@ -1852,13 +1852,13 @@ local function resolve_inlines(tokens, defs, src)
   end
 
   -- Final merge pass: remove empty text nodes, merge adjacent text.
-  result = {} --[[: any]]
+  result = {} --[[:! { [integer]: { type: string, ... } | nil }]]
   for _, node in ipairs(out) do
     if node.type == "text" and (not node.value or node.value == "") then
       -- skip
     elseif node.type == "text" and #result > 0 and result[#result].type == "text" then
-      local prev = result[#result] --[[: any]]
-      local cur_val = prev.value --[[: any]]
+      local prev = result[#result]
+      local cur_val = prev.value
       prev.value = cur_val .. (node.value or "")
     else
       result[#result + 1] = node
@@ -1925,7 +1925,6 @@ end
 
 --: (node: { type: string, ... }) -> string
 stringify_node = function(node)
-  node = node --[[: any]]
   local t = node.type
   if t == "root" then
     return stringify_children(node.children, "\n\n")
@@ -1965,8 +1964,7 @@ stringify_node = function(node)
     for idx, item in ipairs(node.children --[[:! { [integer]: { type: string, ... } }]]) do
       local node_start = (node.start or 1) --[[:! integer]]
       local prefix = node.ordered and (tostring(node_start + idx - 1) .. ". ") or "- "  --: string
-      local item_any = item --[[: any]]
-      local content = stringify_children(item_any.children, "\n\n")
+      local content = stringify_children(item.children --[[:! { [integer]: { type: string, ... } }]], "\n\n")
       -- Indent continuation lines.
       local indent = str_rep(" ", #prefix)
       local item_lines = split_lines(content)

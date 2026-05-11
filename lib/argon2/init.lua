@@ -30,17 +30,17 @@ local bit = require("bit")
 local base64 = require("lib.base64")
 
 --: (...number) -> number
-local function band(...) return bit.band(... --[[: any]]) end
+local function band(...) return bit.band(... --[[: unknown]]) end
 --: (...number) -> number
-local function bxor(...) return bit.bxor(... --[[: any]]) end
+local function bxor(...) return bit.bxor(... --[[: unknown]]) end
 --: (...number) -> number
-local function bor(...) return bit.bor(... --[[: any]]) end
+local function bor(...) return bit.bor(... --[[: unknown]]) end
 --: (number, number) -> number
-local function lshift(a, b) return bit.lshift(a --[[: any]], b --[[: any]]) end
+local function lshift(a, b) return bit.lshift(a --[[: unknown]], b --[[: unknown]]) end
 --: (number, number) -> number
-local function rshift(a, b) return bit.rshift(a --[[: any]], b --[[: any]]) end
+local function rshift(a, b) return bit.rshift(a --[[: unknown]], b --[[: unknown]]) end
 --: (number) -> number
-local function tobit(n) return bit.tobit(n --[[: any]]) end
+local function tobit(n) return bit.tobit(n --[[: unknown]]) end
 local sbyte  = string.byte
 local schar  = string.char
 local sformat = string.format
@@ -149,7 +149,7 @@ end
 local system_lib --: unknown
 
 local ok_ffi, _ffi_raw = pcall(require, "ffi")
-local ffi = _ffi_raw --[[: any]]
+local ffi = _ffi_raw --[[: unknown]]
 if ok_ffi then
   local function try_load_argon2()
     local names = { "argon2", "libargon2", "argon2-1", "libargon2.so.1", "libargon2.so" }

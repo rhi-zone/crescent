@@ -3,7 +3,7 @@ if not package.path:find("?/init.lua", 1, true) then
 end
 
 local ffi = require("ffi")
-local ffi_any = ffi --[[: any]]
+local ffi_any = ffi --[[: unknown]]
 
 local mod = {}
 
@@ -45,7 +45,7 @@ ffi.cdef [[
 ]]
 
 local double_t = ffi.typeof("double")
-local float_t  = ffi.typeof("float" --[[: any]])
+local float_t  = ffi.typeof("float" --[[: unknown]])
 local function is_float_cdata(a)
 	local t = ffi.typeof(a)
 	return t == double_t or t == float_t
@@ -95,7 +95,7 @@ local function load_sqlite()
 	end -- else (not Windows)
 end
 local sqlite_ffi, sqlite_loaded_from = load_sqlite()
-local sqlite_ffi_any = sqlite_ffi --[[: any]]
+local sqlite_ffi_any = sqlite_ffi --[[: unknown]]
 
 mod._tier = "system-sqlite"
 mod._loaded_from = sqlite_loaded_from
@@ -322,7 +322,7 @@ local function tables_raw(self)
 	end
 end
 
-local pkg_loaded = package.loaded --[[: any]]
+local pkg_loaded = package.loaded --[[: unknown]]
 sqlite.tables = pkg_loaded["lib.functional.iterable"] and function(self)
 	local iterable = require("lib.functional.iterable")
 	local iterable_any = iterable --[[:! { iter: (...unknown) -> unknown }]]

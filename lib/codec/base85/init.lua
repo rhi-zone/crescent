@@ -22,7 +22,7 @@ if bit then
   lshift = bit.lshift
   tobit  = bit.tobit
 elseif rawget(_G, "bit32") then
-  local bit32 = rawget(_G, "bit32") --[[: any]]
+  local bit32 = rawget(_G, "bit32") --[[: unknown]]
   band   = bit32.band
   bor    = bit32.bor
   rshift = bit32.rshift

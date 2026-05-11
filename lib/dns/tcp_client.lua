@@ -18,7 +18,7 @@ mod.client = function (cb, nameserver, domain, opcode, type, class, epoll)
 	local name_parts = {}
 	for s in domain:gmatch("[^.]+") do name_parts[#name_parts+1] = s end
 	if #name_parts[#name_parts] > 0 then name_parts[#name_parts+1] = "" end
-	local msg = { opcode = opcode, is_query = true, is_recursion_desired = true, questions = { { name = name_parts, type = type, class = class } } } --[[: any]]
+	local msg = { opcode = opcode, is_query = true, is_recursion_desired = true, questions = { { name = name_parts, type = type, class = class } } } --[[: unknown]]
 	local s = dns.dns_message_to_string(msg)
 	s = string.char(bit.rshift(#s, 8), bit.band(#s, 0xff)) .. s
 	local send, close
@@ -27,9 +27,9 @@ mod.client = function (cb, nameserver, domain, opcode, type, class, epoll)
 		cb(dns.string_to_dns_message(s2:sub(3)))
 		close()
 	end, epoll)
-	local send_ = send --[[: any]]
+	local send_ = send --[[: unknown]]
 	send_(s)
-	if is_running then (epoll --[[: any]]):loop() end
+	if is_running then (epoll --[[: unknown]]):loop() end
 end
 
 return mod

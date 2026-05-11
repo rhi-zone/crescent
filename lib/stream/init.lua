@@ -50,7 +50,7 @@ Stream.__index = Stream
 
 --: (next_fn: () -> (unknown | nil)) -> Stream
 local function wrap(next_fn)
-  local s = setmetatable({ next = next_fn }, Stream) --[[: any]]
+  local s = setmetatable({ next = next_fn }, Stream) --[[: unknown]]
   return s --[[:! Stream]]
 end
 

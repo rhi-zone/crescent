@@ -11,7 +11,7 @@ local concat = table.concat
 --: (string, integer) -> integer
 local function byte1(s, i) return (byte(s, i) or 0) --[[:! integer]] end
 
-local _bit = (pcall(require, "bit") and require("bit") or nil) --[[: any]]
+local _bit = (pcall(require, "bit") and require("bit") or nil) --[[: unknown]]
 local band = (_bit and _bit.band or function(a, b) return a % (b + 1) end) --[[:! (integer, integer) -> integer]]
 local rshift = (_bit and _bit.rshift or function(a, n) return math.floor(a / 2^n) end) --[[:! (integer, integer) -> integer]]
 local bxor = (_bit and _bit.bxor or function(a, b) return 0 end) --[[:! (integer, integer) -> integer]]

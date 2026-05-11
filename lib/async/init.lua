@@ -96,7 +96,7 @@ function M.promise()
     _on_fulfill = on_fulfill,
     _on_reject  = on_reject,
     _on_finally = on_finally,
-  }, Promise) --[[: any]]
+  }, Promise) --[[: unknown]]
   local p_ = p --[[:! PromiseP]]
 
   --: ResolveFn
@@ -342,7 +342,7 @@ function M.loop()
     _queue    = lq,
     _timers   = lt,
     _time     = ltime,
-  }, Loop) --[[: any]]
+  }, Loop) --[[: unknown]]
   return lobj --[[:! LoopObj]]
 end
 

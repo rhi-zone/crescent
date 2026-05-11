@@ -265,7 +265,7 @@ function M.decompress(encoded, metadata)
   if symbols == nil then
     return nil, derr
   end
-  local symbols_ = (symbols --[[: any]]) --[[:! { [integer]: integer }]]
+  local symbols_ = (symbols --[[: unknown]]) --[[:! { [integer]: integer }]]
 
   local chars = {}
   for i = 1, #symbols_ do
@@ -316,7 +316,7 @@ function M.canonical_codes(symbol_lengths)
   for sym, len in pairs(symbol_lengths) do
     pairs_list[#pairs_list + 1] = { sym = sym, len = len --[[:! integer]] }
   end
-  local sort_any = table.sort --[[: any]]
+  local sort_any = table.sort --[[: unknown]]
   sort_any(pairs_list, function(a, b)
     if a.len ~= b.len then
       return a.len < b.len
@@ -434,7 +434,7 @@ function M.entropy(freqs)
   if type(freqs) ~= "table" then
     return nil, "freqs must be a table"
   end
-  local freqs_ = freqs --[[: any]]
+  local freqs_ = freqs --[[: unknown]]
   local total = 0 --: number
   for _, freq in pairs(freqs_) do
     total = total + (freq --[[:! number]])
@@ -463,8 +463,8 @@ function M.expected_length(freqs, codes)
   if type(codes) ~= "table" then
     return nil, "codes must be a table"
   end
-  local freqs_ = freqs --[[: any]]
-  local codes_ = codes --[[: any]]
+  local freqs_ = freqs --[[: unknown]]
+  local codes_ = codes --[[: unknown]]
   local total = 0 --: number
   for _, freq in pairs(freqs_) do
     total = total + (freq --[[:! number]])

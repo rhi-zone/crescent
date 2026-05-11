@@ -115,7 +115,7 @@ local function remark_frontmatter(processor, opts)
   -- Capture the existing parser so we can delegate to it.
   local inner_parser = processor._parser
 
-  local proc_ = processor --[[: any]]
+  local proc_ = processor --[[: unknown]]
   proc_:parser(function(source)
     -- Try each active type in order.
     for i = 1, #types do

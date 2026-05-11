@@ -181,7 +181,7 @@ end
 
 --- Create a new mediator instance.
 function M.new()
-  local make_any = make_mediator --[[: any]]
+  local make_any = make_mediator --[[: unknown]]
   return make_any(nil, nil)
 end
 

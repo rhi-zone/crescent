@@ -718,7 +718,7 @@ M.compile = function(desc, alloc, abi, ctype)
 
   -- ── Step 6: Allocate executable memory and return callable ─────────────
   local code_str = buf_to_string(buf)
-  local code_str_any = code_str --[[: any]]
+  local code_str_any = code_str --[[: unknown]]
   local exec_ptr, err = alloc_exec_mem(code_str_any)
   if exec_ptr == nil then
     return nil, err --[[:! string | nil]]
@@ -726,7 +726,7 @@ M.compile = function(desc, alloc, abi, ctype)
 
   -- Cast to the requested function type.
   -- ctype is a runtime string; exact signature is unknowable, but result is callable.
-  local fn_any = ffi.cast(ctype, exec_ptr) --[[: any]]
+  local fn_any = ffi.cast(ctype, exec_ptr) --[[: unknown]]
   local fn = fn_any --[[:! (...unknown) -> unknown]]
   -- Keep exec_ptr alive (don't let GC collect it) by anchoring to fn table.
   -- We return a table wrapper so the GC anchor is maintained.

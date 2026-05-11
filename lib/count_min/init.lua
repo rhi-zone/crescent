@@ -195,7 +195,7 @@ function CMS:reset()
   self._total = 0
   if self._heavy then
     local heavy_ = self._heavy --[[:! { [string]: number }]]
-    for k in pairs(heavy_) do heavy_[k] = 0; heavy_[k] = nil --[[: any]] end
+    for k in pairs(heavy_) do heavy_[k] = 0; heavy_[k] = nil --[[: unknown]] end
   end
 end
 

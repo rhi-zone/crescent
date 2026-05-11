@@ -24,7 +24,7 @@ M._tier = "pure"
 
 --:: uint64_t = integer
 
-local U64 = ffi.typeof("uint64_t") --[[: any]]
+local U64 = ffi.typeof("uint64_t")
 
 -- ---------------------------------------------------------------------------
 -- Shared sigma permutation (12 rows × 16 entries, 0-based indices)

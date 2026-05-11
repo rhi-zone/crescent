@@ -407,8 +407,8 @@ local function clone_frag(insns, from, to)
   local new_start = #insns + 1
   for i = from, to do
     local src = insns[i]
-    local src_ = src --[[: any]]
-    local dst = { op = src.op } --[[: any]]
+    local src_ = src --[[: unknown]]
+    local dst = { op = src.op } --[[: unknown]]
     if src.op == OP_CHAR then dst.c = src_.c
     elseif src.op == OP_CLASS then dst.cls = src_.cls
     elseif src.op == OP_SPLIT then

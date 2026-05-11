@@ -10,7 +10,7 @@ end
 local Mappable = {}
 
 -- A fresh table used purely as an identity token for dispatch.
-Mappable.key = ({} --[[: any]]) --[[:! MappableKey]]
+Mappable.key = ({} --[[: unknown]]) --[[:! MappableKey]]
 
 -- map: apply f to the value(s) inside fa
 function Mappable.map(f, fa)

@@ -184,7 +184,7 @@ local function run_guided(fn, input, global_bitmap)
 		end
 	end, "l")
 	local ok, err = pcall(fn, input)
-	(debug.sethook --[[: any]])()
+	(debug.sethook --[[: unknown]])()
 
 	local new_paths = 0
 	for k in pairs(local_bitmap) do
@@ -203,13 +203,13 @@ local function load_corpus_dir(dir)
 	local corpus = {} --[[: string[] ]]
 	local fh_ = io.popen("ls -1 " .. string.format("%q", dir) .. " 2>/dev/null")
 	if not fh_ then return corpus end
-	local fh = fh_ --[[: any]]
+	local fh = fh_ --[[: unknown]]
 	for fname in fh:lines() do
-		local fname_s = (fname --[[: any]]) --[[:! string]]
+		local fname_s = (fname --[[: unknown]]) --[[:! string]]
 		if fname_s:match("%.corpus$") then
 			local f = io.open(dir .. "/" .. fname_s, "rb")
 			if f then
-				corpus[#corpus+1] = (f:read("*a") --[[: any]]) --[[:! string]]
+				corpus[#corpus+1] = (f:read("*a") --[[: unknown]]) --[[:! string]]
 				f:close()
 			end
 		end

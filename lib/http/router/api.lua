@@ -8,8 +8,8 @@ local value_to_json = require("lib.format.json").value_to_json
 --: (unknown) -> ({ body: string | nil, path: string, method: string, ... }, { body: string | nil, headers: { [string]: unknown }, ... }, unknown) -> boolean | nil
 mod.router = function (routes)
 	return function (req, res, sock)
-		local req_ = req --[[: any]]
-		local res_ = res --[[: any]]
+		local req_ = req --[[: unknown]]
+		local res_ = res --[[: unknown]]
 		local json_to_ = json_to_value --[[:! (unknown) -> unknown]]
 		local to_json_ = value_to_json --[[:! (unknown) -> unknown]]
 		local route = routes

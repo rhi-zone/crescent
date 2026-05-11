@@ -624,7 +624,7 @@ function M.parse(expr, opts)
     _expr = expr,
     _date_fn = opts.date_fn,
     _time_fn = opts.time_fn,
-  }, Expr) --[[: any]]
+  }, Expr) --[[: unknown]]
   local self = self_any --[[:! Expr]]
 
   return self

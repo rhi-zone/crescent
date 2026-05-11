@@ -86,7 +86,7 @@ function M.convex_hull(points)
   local stack = { pivot, filtered[1], filtered[2] } --: { [integer]: Point }
   for k = 3, #filtered do
     while #stack >= 2 and cross(stack[#stack - 1], stack[#stack], filtered[k]) <= 0 do
-      stack[#stack] = nil --[[: any]]
+      stack[#stack] = nil --[[: unknown]]
     end
     stack[#stack + 1] = filtered[k]
   end

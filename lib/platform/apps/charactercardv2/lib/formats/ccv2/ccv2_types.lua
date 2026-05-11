@@ -1,1 +1,77 @@
-../../../../../../../lib/formats/ccv2/ccv2_types.lua
+-- lib/formats/ccv2/ccv2_types.lua
+-- Type declarations for the CCv2 (Character Card v2) format.
+-- Declaration-only file — no runtime code.
+
+--:: CardData = {
+--::   name: string,
+--::   description: string,
+--::   personality: string,
+--::   scenario: string,
+--::   first_mes: string,
+--::   mes_example: string,
+--::   creator_notes: string,
+--::   system_prompt: string,
+--::   post_history_instructions: string,
+--::   creator: string,
+--::   character_version: string,
+--::   alternate_greetings: string[],
+--::   tags: string[],
+--::   extensions: { [string]: unknown },
+--::   character_book: CharacterBook | nil,
+--:: }
+
+--:: CharacterBook = {
+--::   entries: CharacterBookEntry[],
+--::   name: string | nil,
+--::   description: string | nil,
+--::   scan_depth: number | nil,
+--::   token_budget: number | nil,
+--::   recursive_scanning: boolean | nil,
+--::   extensions: { [string]: unknown } | nil,
+--:: }
+
+--:: CharacterBookEntry = {
+--::   keys: string[],
+--::   content: string,
+--::   extensions: { [string]: unknown },
+--::   enabled: boolean,
+--::   insertion_order: number,
+--::   case_sensitive: boolean | nil,
+--::   name: string | nil,
+--::   priority: number | nil,
+--::   id: number | nil,
+--::   comment: string | nil,
+--::   selective: boolean | nil,
+--::   secondary_keys: string[] | nil,
+--::   constant: boolean | nil,
+--::   position: string | nil,
+--:: }
+
+--:: CardEnvelope = {
+--::   spec: string,
+--::   spec_version: string,
+--::   data: CardData,
+--:: }
+
+-- Normalized internal representation (after lorebook extraction)
+--:: NormalizedEntry = {
+--::   uid: string,
+--::   key: string[],
+--::   secondaryKey: string[] | nil,
+--::   content: string,
+--::   comment: string,
+--::   enabled: boolean,
+--::   selective: boolean,
+--::   caseSensitive: boolean,
+--::   constant: boolean,
+--::   position: number,
+--::   depth: number,
+--::   order: number,
+--::   selectiveLogic: number,
+--::   role: number,
+--:: }
+
+--:: ImportResult = {
+--::   card: CardData,
+--::   lorebook: NormalizedEntry[] | nil,
+--:: }

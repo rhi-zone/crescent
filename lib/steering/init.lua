@@ -118,7 +118,7 @@ end
 --: (number, number) -> Vec2
 function M.vec2(x, y)
   local v = { x = x or 0, y = y or 0 }
-  return setmetatable(v, vec2_mt) --[[: any]]
+  return setmetatable(v, vec2_mt) --[[: unknown]]
 end
 
 
@@ -160,7 +160,7 @@ function M.agent(opts)
     -- wander state
     _wander_angle = 0,
     _wander_seeded = nil,
-  }, agent_mt) --[[: any]]
+  }, agent_mt) --[[: unknown]]
 end
 
 -- ---------------------------------------------------------------------------
@@ -536,7 +536,7 @@ function M.combine(behaviors)
   local force = M.vec2(0, 0)
 
   for _, entry in ipairs(behaviors_) do
-    local fn     = entry[1] --[[: any]]
+    local fn     = entry[1] --[[: unknown]]
     local weight = (entry.weight or 1.0)
     -- entry[2] is agent, entry[3..n] are additional args
     local args = {}

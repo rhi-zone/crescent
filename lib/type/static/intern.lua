@@ -96,7 +96,7 @@ function M.new()
         local kw = defs.keywords[i]
         local len = #kw
         local id = pool.next_id
-        local h = fnv1a(kw_ptr --[[: any]] + pos, len)
+        local h = fnv1a(kw_ptr --[[: unknown]] + pos, len)
         local idx = band(h, mask)
         while entries[idx] do idx = band(idx + 1, mask) end
         local entry = { h, 0, pos, len, id }
@@ -108,7 +108,7 @@ function M.new()
         pos = pos + len
     end
 
-    return pool --[[: any]]
+    return pool --[[: unknown]]
 end
 
 -- Register a source buffer pointer. Returns buf_id.

@@ -228,7 +228,7 @@ end
 function NativeAdapter:node_ids()
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: any]]
+  local g = self._g --[[: unknown]]
   local ids = {}
   for id in g:nodes() do ids[#ids+1] = id end
   return ids
@@ -237,14 +237,14 @@ end
 function NativeAdapter:node_data(id)
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: any]]
+  local g = self._g --[[: unknown]]
   return g:node_data(id)
 end
 
 function NativeAdapter:edge_list()
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: any]]
+  local g = self._g --[[: unknown]]
   local edges = {}
   for e in g:edges() do edges[#edges+1] = e end
   return edges
@@ -253,28 +253,28 @@ end
 function NativeAdapter:edge_data(u, v)
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: any]]
+  local g = self._g --[[: unknown]]
   return g:edge_data(u, v)
 end
 
 function NativeAdapter:has_edge(u, v)
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: any]]
+  local g = self._g --[[: unknown]]
   return g:has_edge(u, v)
 end
 
 function NativeAdapter:out_neighbors(id)
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: any]]
+  local g = self._g --[[: unknown]]
   return g:neighbors(id)
 end
 
 function NativeAdapter:in_neighbors(id)
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: any]]
+  local g = self._g --[[: unknown]]
   if g.in_neighbors then return g:in_neighbors(id) end
   return g:neighbors(id)
 end
@@ -282,7 +282,7 @@ end
 function NativeAdapter:is_directed()
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: any]]
+  local g = self._g --[[: unknown]]
   return g._directed == true
 end
 

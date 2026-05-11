@@ -405,7 +405,7 @@ function M.each(item_widget, get_key)
 			local unsub = list_signal.subscribe(function(_v)
 				render_keyed(list_signal.get())
 			end)
-			widget.register(unsub --[[: any]])
+			widget.register(unsub --[[: unknown]])
 			widget.register(keyed_teardown)
 		else
 			-- Unkeyed: re-render on length change only
@@ -418,7 +418,7 @@ function M.each(item_widget, get_key)
 			local unsub = len_computed.subscribe(function(_v)
 				render_all(list_signal.get())
 			end)
-			widget.register(unsub --[[: any]])
+			widget.register(unsub --[[: unknown]])
 			widget.register(function() len_computed.dispose() end)
 			widget.register(teardown_all)
 		end

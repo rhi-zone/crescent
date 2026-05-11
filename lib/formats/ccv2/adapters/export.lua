@@ -21,7 +21,7 @@ local function with_lorebook(data, entries)
 	if entries then
 		local entries_ = entries --[[:! { [integer]: any }]]
 		if #entries_ > 0 then
-			local lorebook_any = lorebook --[[: any]]
+			local lorebook_any = lorebook --[[: unknown]]
 			out.character_book = lorebook_any.to_ccv2(entries_)
 		else
 			out.character_book = nil

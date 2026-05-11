@@ -1133,7 +1133,7 @@ function M.make(opts)
 			runtime_files    = runtime_files or {},
 			runtime_manifest = (runtime_manifest or {}) --[[:! { name: string | nil, dom_entry: string | nil, ... }]],
 			apps_dir         = apps_dir or "",
-			index            = index_obj --[[: any]],
+			index            = index_obj --[[: unknown]],
 			timestamp        = import_ts,
 			write_fn         = write_fn --[[:! (string, string) -> (true | nil, string)]],
 		})
@@ -1453,7 +1453,7 @@ end
 			-- Mount the library app at the root of the daemon origin. The
 			-- library app's handler may itself return nil for unknown paths;
 			-- in that case we fall through to a 404.
-			;(library_app --[[: any]]).handler(req, res)
+			;(library_app --[[: unknown]]).handler(req, res)
 			if res.status == nil then
 				res.status = 404
 				res.headers["Content-Type"] = { "text/plain; charset=utf-8" }

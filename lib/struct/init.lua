@@ -17,7 +17,7 @@ local bit = require("bit")
 -- FFI unions for float conversion
 --:: F32Union = { f: number, b: { [integer]: integer } }
 --:: F64Union = { f: number, d: number, b: { [integer]: integer } }
-local _typeof = ffi.typeof --[[: any]]
+local _typeof = ffi.typeof --[[: unknown]]
 local union_f32 = _typeof("union { float f; uint8_t b[4]; }")
 local union_f64 = _typeof("union { double d; uint8_t b[8]; }")
 local u32 = _typeof("union { uint32_t u; int32_t i; }")
@@ -52,7 +52,7 @@ local function parse_fmt(fmt)
   local le --: boolean | nil
   local i = 1 --: integer
   local ops = {} --: { [integer]: StructOp }
-  local ops_ = ops --[[: any]]
+  local ops_ = ops --[[: unknown]]
 
   -- Optional byte order prefix
   local first = fmt:sub(1, 1)
@@ -111,7 +111,7 @@ end
 -- Write bytes for a single op into a table of byte strings
 --: (out: { [integer]: string }, op: StructOp, val: unknown) -> (boolean | nil, string | nil)
 local function write_op(out, op, val)
-  local out_ = out --[[: any]]
+  local out_ = out --[[: unknown]]
   local c = op.char
   local le = op.le
 

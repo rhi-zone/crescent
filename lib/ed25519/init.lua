@@ -37,7 +37,7 @@ local function try_system()
 
 	-- lib is typed as any: ffi.load result passes through pcall so its type
 	-- is unknown; the cdef block above fully specifies the ABI.
-	local lib = nil --[[: any]]
+	local lib = nil --[[: unknown]]
 	local names = { "sodium", "libsodium.so.26", "libsodium.so.23", "libsodium.so" }
 	for _, name in ipairs(names) do
 		local ok, l = pcall(ffi.load, name)
@@ -865,9 +865,9 @@ end
 -- the system (libsodium) or pure-Lua tier, each with different signatures;
 -- using any avoids a union that would block all calls.
 local _init_errmsg = "Ed25519 not yet initialized"
-local keypair_fn = function() return nil, _init_errmsg end --[[: any]]
-local sign_fn    = function() return nil, _init_errmsg end --[[: any]]
-local verify_fn  = function() return false, _init_errmsg end --[[: any]]
+local keypair_fn = function() return nil, _init_errmsg end --[[: unknown]]
+local sign_fn    = function() return nil, _init_errmsg end --[[: unknown]]
+local verify_fn  = function() return false, _init_errmsg end --[[: unknown]]
 
 local ok_sys = pcall(function()
 	keypair_fn, sign_fn, verify_fn = try_system()

@@ -12,7 +12,7 @@ end
 --   { word="blacklist", suggestion="denylist/blocklist" }, ...
 -- }
 
-local nlcst = require("lib.unified.nlcst") --[[: any]]
+local nlcst = require("lib.unified.nlcst") --[[: unknown]]
 
 local M = {}
 

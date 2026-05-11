@@ -364,8 +364,8 @@ function Table:drop_column(name)
   if not self_._col_index[name] then
     return nil, "no such column: " .. tostring(name)
   end
-  self_._columns[name] = nil --[[: any]]
-  self_._col_index[name] = nil --[[: any]]
+  self_._columns[name] = nil --[[: unknown]]
+  self_._col_index[name] = nil --[[: unknown]]
   local new_schema = {} --: { [integer]: ColDef }
   for _, col_def in ipairs(self_._schema) do
     if col_def.name ~= name then

@@ -175,9 +175,9 @@ local function split_text(value, abbrs, keys)
       nodes[#nodes + 1] = { type = "text", value = value:sub(pos) }
       break
     end
-    local s_any = s --[[: any]]
+    local s_any = s --[[: unknown]]
     local s_ = s_any --[[:! integer]]
-    local e_any = e --[[: any]]
+    local e_any = e --[[: unknown]]
     local e_ = e_any --[[:! integer]]
     if s_ > pos then
       nodes[#nodes + 1] = { type = "text", value = value:sub(pos, s_ - 1) }

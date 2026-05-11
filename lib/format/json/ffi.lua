@@ -91,7 +91,7 @@ local function ffi_encode_string(s, buf, n)
         buf[n] = s; n = n + 1
     else
         local len = #s
-        local ptr = ffi.cast("const uint8_t *", s) --[[: any]]
+        local ptr = ffi.cast("const uint8_t *", s) --[[: unknown]]
         local start = 0
         local i = 0
         while i < len do
@@ -99,7 +99,7 @@ local function ffi_encode_string(s, buf, n)
             local esc = ESC_TABLE[b]
             if esc then
                 if i > start then
-                    local ffi_str = ffi.string --[[: any]]
+                    local ffi_str = ffi.string --[[: unknown]]
                     buf[n] = ffi_str(ptr + start, i - start); n = n + 1
                 end
                 buf[n] = esc --[[:! string]]; n = n + 1
@@ -108,7 +108,7 @@ local function ffi_encode_string(s, buf, n)
             i = i + 1
         end
         if start < len then
-            local ffi_str = ffi.string --[[: any]]
+            local ffi_str = ffi.string --[[: unknown]]
             buf[n] = ffi_str(ptr + start, len - start); n = n + 1
         end
     end
@@ -124,7 +124,7 @@ local function ffi_encode_table(t, buf, n, null_sentinel, visited, depth)
     if visited[t] then error("circular reference detected") end
     visited[t] = true
 
-    local t_ = t --[[: any]]
+    local t_ = t --[[: unknown]]
     local len = #t_
     local is_array = len > 0
     if is_array then
@@ -180,7 +180,7 @@ ffi_encode_value = function(v, buf, n, null_sentinel, visited, depth)
             buf[n] = str_format("%.17g", v); n = n + 1
         end
     elseif t == "string" then
-        local v_str = v --[[: any]]
+        local v_str = v --[[: unknown]]
         n = ffi_encode_string(v_str, buf, n)
     elseif t == "table" then
         n = ffi_encode_table(v, buf, n, null_sentinel, visited, depth)

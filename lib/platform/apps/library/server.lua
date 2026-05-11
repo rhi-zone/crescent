@@ -544,8 +544,8 @@ local function parse_query(qs)
 		local k, v = kv:match("^([^=]+)=?(.*)")
 		if k and v then
 			-- Minimal percent-decode for common characters.
-			local v1 = (v:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: any]]
-			local v2 = (v1:gsub("+", " ")) --[[: any]]
+			local v1 = (v:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: unknown]]
+			local v2 = (v1:gsub("+", " ")) --[[: unknown]]
 			params[k] = v2
 		end
 	end
@@ -607,7 +607,7 @@ end
 local function get_source_discover(caps, source_id, q, limit, offset)
 	local source_map = caps._source_map
 	-- Percent-decode the source id from the path segment.
-	local decoded_id = (source_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: any]]
+	local decoded_id = (source_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: unknown]]
 	local src = source_map[decoded_id]
 	if not src then
 		return nil, { status = 404, message = "source not found: " .. decoded_id }
@@ -617,11 +617,11 @@ local function get_source_discover(caps, source_id, q, limit, offset)
 	-- Rewrite thumb_url entries to route through this server's thumb proxy.
 	if src.handler and resp and resp.entries then
 		local encoded_src_id = (decoded_id:gsub("[^%w%-_%.~]",
-			function(c) return ("%%%02X"):format((c --[[:! string]]):byte()) end)) --[[: any]]
+			function(c) return ("%%%02X"):format((c --[[:! string]]):byte()) end)) --[[: unknown]]
 		for _, entry in ipairs(resp.entries) do
 			if entry.id then
 				local encoded_entry_id = (tostring(entry.id):gsub("[^%w%-_%.~]",
-					function(c) return ("%%%02X"):format((c --[[:! string]]):byte()) end)) --[[: any]]
+					function(c) return ("%%%02X"):format((c --[[:! string]]):byte()) end)) --[[: unknown]]
 				entry.thumb_url = "/api/sources/" .. encoded_src_id
 					.. "/thumb/" .. encoded_entry_id
 			end
@@ -681,8 +681,8 @@ function M.create(caps)
 		local path = req.path or ""
 		local thumb_src_id, thumb_entry_id = path:match("^/api/sources/([^/]+)/thumb/(.+)$")
 		if not thumb_src_id then return nil end
-		thumb_src_id   = (thumb_src_id:gsub("%%(%x%x)",   function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: any]]
-		thumb_entry_id = (thumb_entry_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: any]]
+		thumb_src_id   = (thumb_src_id:gsub("%%(%x%x)",   function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: unknown]]
+		thumb_entry_id = (thumb_entry_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: unknown]]
 		local src = source_map[thumb_src_id] --[[:! { handler: ((unknown, unknown) -> any) | nil, ... } | nil]]
 		if not src or not src.handler then
 			res.status = 404

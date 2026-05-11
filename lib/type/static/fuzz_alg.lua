@@ -148,7 +148,7 @@ local function type_str(node)
 	-- but the inferred annotation requires it explicitly. Pass 0.
 	-- tostring narrows the unknown return value of an externally-inferred
 	-- function back to string, avoiding a force cast.
-	return tostring(farb.type_to_string(node --[[: any]], 0))
+	return tostring(farb.type_to_string(node --[[: unknown]], 0))
 end
 
 -- ── Invariants ────────────────────────────────────────────────────────────────

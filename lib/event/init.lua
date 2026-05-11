@@ -20,7 +20,7 @@ local _next_id = 0
 --- Create a new event emitter.
 --: () -> Emitter
 function M.new()
-  local result = setmetatable({ _listeners = {} }, Emitter) --[[: any]]
+  local result = setmetatable({ _listeners = {} }, Emitter) --[[: unknown]]
   return result --[[:! Emitter]]
 end
 
@@ -79,7 +79,7 @@ end
 --- Register a listener that fires only once.
 --: (Emitter, string, (...unknown) -> unknown, ({ priority: number, once?: boolean } | nil)) -> (integer | nil, string | nil)
 function Emitter:once(name, fn, opts)
-  local self_ = self --[[: any]]
+  local self_ = self --[[: unknown]]
   local o = { once = true, priority = opts and opts.priority or 0 }
   return self_:on(name, fn, o)
 end
@@ -131,7 +131,7 @@ Event.__index = Event
 
 --: (string, { [integer]: unknown }) -> EventObj
 local function new_event(name, args)
-  local result = setmetatable({ name = name, args = args, _stopped = false }, Event) --[[: any]]
+  local result = setmetatable({ name = name, args = args, _stopped = false }, Event) --[[: unknown]]
   return result --[[:! EventObj]]
 end
 
@@ -257,7 +257,7 @@ function Emitter:event_names()
   for name in pairs(self_._listeners) do
     result[#result + 1] = name
   end
-  table.sort(result --[[: any]])
+  table.sort(result --[[: unknown]])
   return result
 end
 

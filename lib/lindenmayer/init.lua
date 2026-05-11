@@ -125,7 +125,7 @@ end
 --: (s: string, plain: { [string]: unknown }, ctx_rules: { [string]: { [integer]: LsRule } }, rng: LsRng) -> string
 local function apply_rules_once(s, plain, ctx_rules, rng)
   local parts = {} --: { [integer]: string }
-  local parts_ = parts --[[: any]]
+  local parts_ = parts --[[: unknown]]
   local i = 1 --: integer
   local n = #s
   while i <= n do
@@ -232,9 +232,9 @@ local function interpret_string(s, opts)
   local dir     = ((opts and opts.start_angle) or 90) --[[:! number]] -- degrees, 90 = up
 
   local cmds   = {} --: { [integer]: LsCmd }
-  local cmds_  = cmds --[[: any]]
+  local cmds_  = cmds --[[: unknown]]
   local stack  = {} --: { [integer]: { x: number, y: number, dir: number } }
-  local stack_ = stack --[[: any]]
+  local stack_ = stack --[[: unknown]]
   local i      = 1 --: integer
   local n      = #s
 
@@ -406,8 +406,8 @@ function Ls:interpret(str, opts)
   if type(str) ~= "string" then
     return nil, "interpret: argument must be a string"
   end
-  local merged = {} --[[: any]]
-  if opts then for k, v in pairs(opts) do merged --[[: any]][k] = v end end
+  local merged = {} --[[: unknown]]
+  if opts then for k, v in pairs(opts) do merged --[[: unknown]][k] = v end end
   if merged.angle == nil then merged.angle = self._angle end
   return interpret_string(str, merged --[[:! LsOpts]])
 end
@@ -425,8 +425,8 @@ function Ls:to_svg(str, opts)
   if type(str) ~= "string" then
     return nil, "to_svg: first argument must be a string"
   end
-  local merged = {} --[[: any]]
-  if opts then for k, v in pairs(opts) do merged --[[: any]][k] = v end end
+  local merged = {} --[[: unknown]]
+  if opts then for k, v in pairs(opts) do merged --[[: unknown]][k] = v end end
   if merged.angle == nil then merged.angle = self._angle end
   local cmds = interpret_string(str, merged --[[:! LsOpts]])
   return to_svg(cmds, opts)
@@ -463,9 +463,9 @@ function M.new(spec)
     local sym_ = tostring(sym)
     if type(rule) == "table" then
       local total = 0 --: number
-      local rule_ = rule --[[: any]]
+      local rule_ = rule --[[: unknown]]
       for _, entry in ipairs(rule_) do
-        local entry_ = entry --[[: any]]
+        local entry_ = entry --[[: unknown]]
         if type(entry_) ~= "table" or type(entry_.prob) ~= "number" or (type(entry_.rule) ~= "string" and type(entry_.rule) ~= "function") then
           return nil, "new: stochastic rule entries must be {prob=number, rule=string|function}, got invalid entry for sym " .. sym_
         end
@@ -488,7 +488,7 @@ function M.new(spec)
     _ctx    = ctx_rules_,
     _angle  = angle,
     _rng    = make_rng(seed),
-  }, Ls) --[[: any]] --[[:! LsObj]]
+  }, Ls) --[[: unknown]] --[[:! LsObj]]
   return ls
 end
 

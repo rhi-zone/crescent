@@ -220,7 +220,7 @@ function M.dfa_new()
     start = nil,
     trans = {},      -- {[from] = {[symbol] = to}}
     _next_id = 1,
-  }, DFA) --[[: any]]
+  }, DFA) --[[: unknown]]
   local dfa = raw --[[:! DFA]]
   return dfa
 end

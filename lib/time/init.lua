@@ -29,7 +29,7 @@ if jit and jit.os == "Windows" then
     void GetSystemTimeAsFileTime(LPFILETIME lpSystemTimeAsFileTime);
   ]]
   local time_ffi = ffi.C
-  local _tv = ffi.new("FILETIME[1]") --[[: any]]
+  local _tv = ffi.new("FILETIME[1]") --[[: unknown]]
   --: () -> number
   M.time = function()
     time_ffi.GetSystemTimeAsFileTime(_tv)
@@ -49,8 +49,8 @@ else
     void gettimeofday(struct timeval *tv, struct timezone *tz);
   ]])
   if ok then
-    local time_ffi = ffi.C --[[: any]]
-    local _tv = ffi.new("struct timeval [1]") --[[: any]]
+    local time_ffi = ffi.C --[[: unknown]]
+    local _tv = ffi.new("struct timeval [1]") --[[: unknown]]
     --: () -> number
     M.time = function()
       time_ffi.gettimeofday(_tv, nil)
@@ -312,7 +312,7 @@ function M.duration_parse(s)
     if not num_s then
       return nil, "expected number at position " .. pos .. " in: " .. s
     end
-    pos = (ne --[[: any]]) --[[:! integer]]
+    pos = (ne --[[: unknown]]) --[[:! integer]]
     local num = tonumber(num_s)
 
     -- skip optional whitespace between number and unit
@@ -433,7 +433,7 @@ end
 -- Calendar decomposition (UTC) using os.date
 --: (Timestamp) -> { year: integer, month: integer, day: integer, hour: integer, min: integer, sec: integer, wday: integer, yday: integer, isdst: boolean }
 local function ts_utc(t)
-  return os.date("!*t", t._sec --[[:! integer]]) --[[: any]] --[[:! { year: integer, month: integer, day: integer, hour: integer, min: integer, sec: integer, wday: integer, yday: integer, isdst: boolean }]]
+  return os.date("!*t", t._sec --[[:! integer]]) --[[: unknown]] --[[:! { year: integer, month: integer, day: integer, hour: integer, min: integer, sec: integer, wday: integer, yday: integer, isdst: boolean }]]
 end
 
 -- Formatting helpers
@@ -476,7 +476,7 @@ function Timestamp:format(fmt)
     elseif c == "%" then return "%"
     else return "%" .. c
     end
-  end) --[[: any]]; result = result --[[:! string]]
+  end) --[[: unknown]]; result = result --[[:! string]]
   return result
 end
 
@@ -566,14 +566,14 @@ function M.parse_rfc3339(s)
 
     -- Offset
     if after and after ~= "" then
-      local a = (after --[[: any]]) --[[:! string]]
+      local a = (after --[[: unknown]]) --[[:! string]]
       if a == "Z" or a == "z" then
         off_s = 0
       else
         local sign, oh, om = a:match("^([+-])(%d%d):?(%d%d)$")
         if not sign then return nil, "invalid offset: " .. a end
-        oh = (oh --[[: any]]) --[[:! string]]
-        om = (om --[[: any]]) --[[:! string]]
+        oh = (oh --[[: unknown]]) --[[:! string]]
+        om = (om --[[: unknown]]) --[[:! string]]
         off_s = ((tonumber(oh) or 0) * 3600 + (tonumber(om) or 0) * 60) --[[:! integer]]
         if sign == "-" then off_s = -off_s end
       end

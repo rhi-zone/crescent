@@ -38,7 +38,7 @@ local _flushing      = false   -- true while flush_effects is running (prevents 
 local _queued_effects = {}     -- effects collected during a single write's propagation pass
 
 local function _push(sub) _stack[#_stack + 1] = sub end
-local function _pop()     _stack[#_stack] = nil --[[: any]] end
+local function _pop()     _stack[#_stack] = nil --[[: unknown]] end
 local function _current() return _stack[#_stack]     end
 
 -- ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ local function _notify(node)
       --: { [integer]: EffNode }
       local snapshot = {}
       for eff, _ in pairs(_queued_effects) do
-        snapshot[#snapshot + 1] = eff --[[: any]]
+        snapshot[#snapshot + 1] = eff --[[: unknown]]
       end
       _queued_effects = {}
       for i = 1, #snapshot do
@@ -143,7 +143,7 @@ local function flush_effects()
     --: { [integer]: EffNode }
     local snapshot = {}
     for eff, _ in pairs(_pending_effects) do
-      snapshot[#snapshot + 1] = eff --[[: any]]
+      snapshot[#snapshot + 1] = eff --[[: unknown]]
     end
     _pending_effects = {}
     for i = 1, #snapshot do
@@ -333,7 +333,7 @@ function M.effect(fn)
       dep._subs[self] = nil
     end
     self._deps = {}
-    _pending_effects[self] = nil --[[: any]]
+    _pending_effects[self] = nil --[[: unknown]]
   end
 end
 

@@ -19,7 +19,7 @@ local function is_var(s)
   return (b >= 65 and b <= 90) and true or false -- A-Z
 end
 
-local DB = {} --[[: any]]
+local DB = {} --[[: unknown]]
 DB.__index = DB
 
 --: () -> Database
@@ -29,7 +29,7 @@ function M.new()
     _rules = {},    -- predicate -> { {head_vars, body, guard} }
     _dirty = true,  -- whether derived facts need recomputation
     _derived = {},  -- predicate -> { [tuple_key] = tuple } (derived facts)
-  }, DB) --[[: any]]
+  }, DB) --[[: unknown]]
   return self --[[:! Database]]
 end
 
@@ -52,7 +52,7 @@ end
 --- Assert multiple facts at once.
 --: (self: Database, fact_list: { [integer]: { [integer]: string } }) -> ()
 function DB:assert_all(fact_list)
-  local self_ = self --[[: any]]
+  local self_ = self --[[: unknown]]
   for i = 1, #fact_list do
     local f = fact_list[i]
     self_:assert(f[1], unpack(f, 2))

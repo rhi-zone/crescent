@@ -36,7 +36,7 @@ GCounter.__index = GCounter
 --: (string) -> GCounter
 function M.gcounter(replica_id)
   local g = setmetatable({ _id = replica_id, _counts = {} }, GCounter)
-  return g --[[: any]]
+  return g --[[: unknown]]
 end
 
 --: ((number | nil)) -> nil
@@ -265,7 +265,7 @@ end
 --: (ORSet, unknown) -> nil
 function ORSet:remove(elem)
   -- wipe all currently observed tags
-  self._entries[elem] = nil --[[: any]]
+  self._entries[elem] = nil --[[: unknown]]
 end
 
 --: (ORSet, unknown) -> boolean

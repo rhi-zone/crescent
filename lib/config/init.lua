@@ -84,7 +84,7 @@ function M.new(opts)
     _env_reader = nil,
     _ns_prefix = nil,
   }, Config)
-  self._env_reader = opts.env_reader --[[: any]]
+  self._env_reader = opts.env_reader --[[: unknown]]
   return self
 end
 

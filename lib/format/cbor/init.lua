@@ -51,8 +51,8 @@ local dostring = function (s)
 	end
 end
 
-local math_ = math --[[: any]]
-local string_ = string --[[: any]]
+local math_ = math --[[: unknown]]
+local string_ = string --[[: unknown]]
 local maxint = math_.maxinteger or 9007199254740992
 local minint = math_.mininteger or -9007199254740992
 local nan = 0/0

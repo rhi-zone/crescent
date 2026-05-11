@@ -249,7 +249,7 @@ function Store:namespace(prefix)
   function ns:values()
     local result = {}
     local plen = #full_prefix
-    local st_ = self._store --[[: any]]
+    local st_ = self._store --[[: unknown]]
     local store_keys = st_:keys()
     for _, k in ipairs(store_keys) do
       if k:sub(1, plen) == full_prefix then
@@ -271,7 +271,7 @@ function Store:namespace(prefix)
   end
   function ns:clear()
     local plen = #full_prefix
-    local st_ = self._store --[[: any]]
+    local st_ = self._store --[[: unknown]]
     local store_keys = st_:keys()
     for _, k in ipairs(store_keys) do
       if k:sub(1, plen) == full_prefix then
@@ -281,7 +281,7 @@ function Store:namespace(prefix)
   end
   function ns:each(fn)
     local plen = #full_prefix
-    local st_ = self._store --[[: any]]
+    local st_ = self._store --[[: unknown]]
     local store_keys = st_:keys()
     for _, k in ipairs(store_keys) do
       if k:sub(1, plen) == full_prefix then

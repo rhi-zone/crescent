@@ -820,7 +820,7 @@ M.word_diff = function(text1, text2)
   local edits = diff_lib.diff(words1, words2)
   if not edits then return { { "delete", text1 }, { "insert", text2 } } end
 
-  local edits_any = edits --[[: any]]
+  local edits_any = edits --[[: unknown]]
   local edits_ = edits_any --[[:! { [integer]: { op: string, a_start: integer, a_end: integer, b_start: integer, b_end: integer } }]]
   local result = {} --: { [integer]: { [integer]: string } }
   local nr = 0

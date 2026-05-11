@@ -33,8 +33,8 @@ local buf4 = ffi.new("uint8_t[4]")
 local _read_random
 do
   local has_getrandom = false
-  local ffi_C = ffi.C --[[: any]]
-  local ffi_cast = ffi.cast --[[: any]]
+  local ffi_C = ffi.C --[[: unknown]]
+  local ffi_cast = ffi.cast --[[: unknown]]
   if SYS_getrandom then
     -- Probe: try reading 1 byte
     local probe = ffi.new("uint8_t[1]")

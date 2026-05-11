@@ -56,7 +56,7 @@ local function extract_card_meta(png_bytes)
 	local decoded, b64err = base64.decode(raw or "")
 	if not decoded then return nil, "import: chara base64 decode failed: " .. tostring(b64err) end
 
-	local decoded_s = decoded --[[: any]]
+	local decoded_s = decoded --[[: unknown]]
 	local ok, card = pcall(json_mod.decode, decoded_s)
 	if not ok or type(card) ~= "table" then return nil, "import: chara JSON parse failed" end
 

@@ -11,7 +11,7 @@ end
 local Chainable = {}
 
 -- A fresh table used purely as an identity token for dispatch.
-Chainable.key = ({} --[[: any]]) --[[:! ChainableKey]]
+Chainable.key = ({} --[[: unknown]]) --[[:! ChainableKey]]
 
 -- bind: sequence a chainable action, threading the inner value into f
 function Chainable.bind(ma, f)

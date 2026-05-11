@@ -164,7 +164,7 @@ function Sched:spawn(fn, opts)
     _sched    = self_,
     _co       = nil,
     _cancelled = false,
-  }, Task) --[[: any]]
+  }, Task) --[[: unknown]]
   local task_ = task --[[:! Task]]
 
   -- Build the ctx table (closed over the task and scheduler).
@@ -261,7 +261,7 @@ function Sched:cancel(task)
   task._cancelled = true
   task.status = "done"  -- treat as done so done() can return true
   -- Remove from ready queue
-  local ready_any = self._ready --[[: any]]
+  local ready_any = self._ready --[[: unknown]]
   for i = 1, #self._ready do
     if self._ready[i] == task then
       table.remove(ready_any, i)

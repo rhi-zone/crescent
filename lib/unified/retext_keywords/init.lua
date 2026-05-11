@@ -17,7 +17,7 @@ end
 --
 -- Stores: root.data.keywords = { {word="lua", count=5}, ... }
 
-local nlcst = require("lib.unified.nlcst") --[[: any]]
+local nlcst = require("lib.unified.nlcst") --[[: unknown]]
 
 local M = {}
 

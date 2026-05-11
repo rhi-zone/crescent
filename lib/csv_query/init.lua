@@ -550,7 +550,7 @@ function DataFrame:agg(spec)
   -- Collect agg col names in deterministic order
   local out_cols = {} --: { [integer]: string }
   for out_col in pairs(spec) do out_cols[#out_cols + 1] = out_col --[[:! string]] end
-  local out_cols_any = out_cols --[[: any]]
+  local out_cols_any = out_cols --[[: unknown]]
   sort(out_cols_any)
   for _, out_col in ipairs(out_cols) do
     local s = spec[out_col]

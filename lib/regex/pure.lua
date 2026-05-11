@@ -405,7 +405,7 @@ local Regex = {}
 Regex.__index = Regex
 
 function Regex:match(subject, init)
-	local compiled = self._compiled --[[: any]]
+	local compiled = self._compiled --[[: unknown]]
 	local subject_s = subject --[[:! string]]
 	local start = init or 1
 	local tree = compiled.tree
@@ -434,7 +434,7 @@ function Regex:match(subject, init)
 end
 
 function Regex:find(subject, init)
-	local compiled = self._compiled --[[: any]]
+	local compiled = self._compiled --[[: unknown]]
 	local subject_s = subject --[[:! string]]
 	local start = init or 1
 	local tree = compiled.tree
@@ -452,7 +452,7 @@ function Regex:find(subject, init)
 end
 
 function Regex:gmatch(subject)
-	local compiled = self._compiled --[[: any]]
+	local compiled = self._compiled --[[: unknown]]
 	local subject_s = subject --[[:! string]]
 	local offset = 1
 	local tree = compiled.tree
@@ -489,7 +489,7 @@ end
 
 --: (self: Regex, subject: string, replacement: string | ((match: string, ...string) -> string), n: number | nil) -> (string, number)
 function Regex:gsub(subject, replacement, n)
-	local compiled = self._compiled --[[: any]]
+	local compiled = self._compiled --[[: unknown]]
 	local subject_s = subject --[[:! string]]
 	local parts = {}
 	local count = 0
@@ -500,8 +500,8 @@ function Regex:gsub(subject, replacement, n)
 	local dotall = compiled.dotall
 	local len = #subject_s
 	local is_fn = type(replacement) == "function"
-	local replacement_fn = replacement --[[: any]]
-	local replacement_s = replacement --[[: any]]
+	local replacement_fn = replacement --[[: unknown]]
+	local replacement_s = replacement --[[: unknown]]
 	while offset <= len do
 		if n and count >= n then break end
 		-- Scan forward to find next match
@@ -523,7 +523,7 @@ function Regex:gsub(subject, replacement, n)
 			parts[#parts + 1] = subject_s:sub(offset, match_start - 1)
 		end
 		local full_match = subject_s:sub(match_start, match_end_i - 1)
-		local match_caps_a = match_caps --[[: any]]
+		local match_caps_a = match_caps --[[: unknown]]
 		if is_fn then
 			if ngroups > 0 then
 				local cap_args = {}
@@ -558,7 +558,7 @@ function Regex:gsub(subject, replacement, n)
 end
 
 function Regex:split(subject)
-	local compiled = self._compiled --[[: any]]
+	local compiled = self._compiled --[[: unknown]]
 	local subject_s = subject --[[:! string]]
 	local result = {}
 	local offset = 1

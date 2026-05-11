@@ -62,7 +62,7 @@ local function try_system()
 
 	-- Verify the SHA256 symbol is accessible.
 	local probe_buf = ffi.new("unsigned char[32]")
-	local sha256_fn = lib_typed.SHA256 --[[: any]]
+	local sha256_fn = lib_typed.SHA256 --[[: unknown]]
 	local ok2, err2 = pcall(sha256_fn, ffi.cast("const unsigned char *", ""), 0, probe_buf)
 	if not ok2 then error("SHA256 symbol not callable: " .. tostring(err2)) end
 

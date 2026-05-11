@@ -170,7 +170,7 @@ function H32:digest()
 end
 
 function M.new32(seed)
-	local hany = setmetatable({}, H32) --[[: any]]
+	local hany = setmetatable({}, H32) --[[: unknown]]
 	local h = hany --[[:! H32State]]
 	local r = H32.reset --[[:! (H32State, integer | nil) -> nil]]
 	r(h, seed)
@@ -182,7 +182,7 @@ end
 local ffi_ok, ffi = pcall(require, "ffi")
 
 if ffi_ok then
-	local uint64 = ffi.typeof("uint64_t") --[[: any]]
+	local uint64 = ffi.typeof("uint64_t")
 
 	local P1 = ffi.cast("uint64_t", 0x9E3779B185EBCA87ULL)
 	local P2 = ffi.cast("uint64_t", 0xC2B2AE3D27D4EB4FULL)
@@ -395,7 +395,7 @@ if ffi_ok then
 	end
 
 	function M.new64(seed)
-		local hany = setmetatable({}, H64) --[[: any]]
+		local hany = setmetatable({}, H64) --[[: unknown]]
 		local h = hany --[[:! H64State]]
 		local r = H64.reset --[[:! (H64State, integer | nil) -> nil]]
 		r(h, seed)

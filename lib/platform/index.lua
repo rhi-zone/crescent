@@ -25,7 +25,7 @@ end
 
 local sqlite = require("lib.sqlite")
 local json_raw = require("lib.format.json")
-local json = json_raw --[[: any]]
+local json = json_raw --[[: unknown]]
 
 --:: SqliteIter = () -> unknown
 --:: SqliteDb = { execute: (SqliteDb, string, ...unknown) -> any, query: (SqliteDb, string, ...unknown) -> any, close: (SqliteDb) -> any }

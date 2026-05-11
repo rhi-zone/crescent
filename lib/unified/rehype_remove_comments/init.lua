@@ -22,14 +22,14 @@ local function transformer(tree, opts)
   if preserve then
     -- Use the visit module directly so we can honour the preserve callback.
     local visit_mod = require("lib.unified.unist_util_visit")
-    local visit = visit_mod --[[: any]]
+    local visit = visit_mod --[[: unknown]]
     visit(tree, "comment", function(node)
       if not preserve(node) then
         return visit_mod.REMOVE
       end
     end)
   else
-    local remove_fn = remove --[[: any]]
+    local remove_fn = remove --[[: unknown]]
     remove_fn(tree, "comment")
   end
 

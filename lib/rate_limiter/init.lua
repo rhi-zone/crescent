@@ -252,7 +252,7 @@ function M.sliding_window_log(opts)
       for j = 1, n do
         log[j] = log[j + i - 1]
       end
-      local log_any = log --[[: any]]
+      local log_any = log --[[: unknown]]
       for j = n + 1, #log do
         log_any[j] = nil
       end

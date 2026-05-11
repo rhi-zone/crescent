@@ -56,11 +56,11 @@ local FLAG_MAP = {
 
 local errbuf = ffi.new("uint8_t[256]")
 
-local lib_a = lib --[[: any]]
+local lib_a = lib --[[: unknown]]
 
 local function pcre2_errmsg(code)
 	lib_a.pcre2_get_error_message_8(code, errbuf, 256)
-	return ffi.string(errbuf --[[: any]])
+	return ffi.string(errbuf --[[: unknown]])
 end
 
 -- Regex object methods
@@ -68,14 +68,14 @@ local Regex = {}
 Regex.__index = Regex
 
 function Regex:match(subject, init)
-	local self_a = self --[[: any]]
+	local self_a = self --[[: unknown]]
 	local subject_s = subject --[[:! string]]
 	local offset = (init or 1) - 1
 	local rc = lib_a.pcre2_match_8(
 		self_a._code, subject_s, #subject_s, offset,
 		PCRE2_NO_UTF_CHECK, self_a._md, nil)
 	if (rc --[[:! integer]]) < 0 then return nil end
-	local ov = lib_a.pcre2_get_ovector_pointer_8(self_a._md) --[[: any]]
+	local ov = lib_a.pcre2_get_ovector_pointer_8(self_a._md) --[[: unknown]]
 	local count = (tonumber(lib_a.pcre2_get_ovector_count_8(self_a._md)) or 0) --[[:! integer]]
 	if count > 1 then
 		-- Return capture groups
@@ -98,21 +98,21 @@ function Regex:match(subject, init)
 end
 
 function Regex:find(subject, init)
-	local self_a = self --[[: any]]
+	local self_a = self --[[: unknown]]
 	local subject_s = subject --[[:! string]]
 	local offset = (init or 1) - 1
 	local rc = lib_a.pcre2_match_8(
 		self_a._code, subject_s, #subject_s, offset,
 		PCRE2_NO_UTF_CHECK, self_a._md, nil)
 	if (rc --[[:! integer]]) < 0 then return nil end
-	local ov = lib_a.pcre2_get_ovector_pointer_8(self_a._md) --[[: any]]
+	local ov = lib_a.pcre2_get_ovector_pointer_8(self_a._md) --[[: unknown]]
 	local s = (tonumber(ov[0]) or 0) --[[:! integer]]
 	local e = (tonumber(ov[1]) or 0) --[[:! integer]]
 	return s + 1, e
 end
 
 function Regex:gmatch(subject)
-	local self_a = self --[[: any]]
+	local self_a = self --[[: unknown]]
 	local subject_s = subject --[[:! string]]
 	local offset = 0
 	local len = #subject_s
@@ -122,7 +122,7 @@ function Regex:gmatch(subject)
 			self_a._code, subject_s, len, offset,
 			PCRE2_NO_UTF_CHECK, self_a._md, nil)
 		if (rc --[[:! integer]]) < 0 then return nil end
-		local ov = lib_a.pcre2_get_ovector_pointer_8(self_a._md) --[[: any]]
+		local ov = lib_a.pcre2_get_ovector_pointer_8(self_a._md) --[[: unknown]]
 		local count = (tonumber(lib_a.pcre2_get_ovector_count_8(self_a._md)) or 0) --[[:! integer]]
 		local match_end = (tonumber(ov[1]) or 0) --[[:! integer]]
 		-- Advance past empty match to avoid infinite loop
@@ -152,10 +152,10 @@ end
 
 --: (self: Regex, subject: string, replacement: string | ((match: string, ...string) -> string), n: number | nil) -> (string, number)
 function Regex:gsub(subject, replacement, n)
-	local self_a = self --[[: any]]
+	local self_a = self --[[: unknown]]
 	local subject_s = subject --[[:! string]]
-	local replacement_fn = replacement --[[: any]]
-	local replacement_s = replacement --[[: any]]
+	local replacement_fn = replacement --[[: unknown]]
+	local replacement_s = replacement --[[: unknown]]
 	local parts = {} --: { [integer]: string }
 	local count = 0
 	local offset = 0
@@ -167,7 +167,7 @@ function Regex:gsub(subject, replacement, n)
 			self_a._code, subject_s, len, offset,
 			PCRE2_NO_UTF_CHECK, self_a._md, nil)
 		if (rc --[[:! integer]]) < 0 then break end
-		local ov = lib_a.pcre2_get_ovector_pointer_8(self_a._md) --[[: any]]
+		local ov = lib_a.pcre2_get_ovector_pointer_8(self_a._md) --[[: unknown]]
 		local ov_count = (tonumber(lib_a.pcre2_get_ovector_count_8(self_a._md)) or 0) --[[:! integer]]
 		local ms = (tonumber(ov[0]) or 0) --[[:! integer]]
 		local me = (tonumber(ov[1]) or 0) --[[:! integer]]
@@ -201,7 +201,7 @@ function Regex:gsub(subject, replacement, n)
 				if idx == 0 then return full_match end
 				return caps[idx] or ""
 			end)
-			parts[#parts + 1] = ((rep --[[: any]]) --[[:! string]])
+			parts[#parts + 1] = ((rep --[[: unknown]]) --[[:! string]])
 		end
 		count = count + 1
 		if me == offset then
@@ -222,7 +222,7 @@ function Regex:gsub(subject, replacement, n)
 end
 
 function Regex:split(subject)
-	local self_a = self --[[: any]]
+	local self_a = self --[[: unknown]]
 	local subject_s = subject --[[:! string]]
 	local result = {}
 	local offset = 0
@@ -235,7 +235,7 @@ function Regex:split(subject)
 			result[#result + 1] = subject_s:sub(offset + 1)
 			return result
 		end
-		local ov = lib_a.pcre2_get_ovector_pointer_8(self_a._md) --[[: any]]
+		local ov = lib_a.pcre2_get_ovector_pointer_8(self_a._md) --[[: unknown]]
 		local ms = (tonumber(ov[0]) or 0) --[[:! integer]]
 		local me = (tonumber(ov[1]) or 0) --[[:! integer]]
 		if me == ms and me == offset then
@@ -264,7 +264,7 @@ M._tier = "system-pcre2"
 
 function M.compile(pattern, flags)
 	local pattern_s = pattern --[[:! string]]
-	local flags_s = flags --[[: any]]
+	local flags_s = flags --[[: unknown]]
 	local opts = PCRE2_UTF
 	if flags then
 		for i = 1, #flags_s do
@@ -279,8 +279,8 @@ function M.compile(pattern, flags)
 	local erroffset = ffi.new("size_t[1]")
 	local code = lib_a.pcre2_compile_8(pattern_s, #pattern_s, opts, errcode, erroffset, nil)
 	if code == nil then
-		local errcode_a = errcode --[[: any]]
-		local erroffset_a = erroffset --[[: any]]
+		local errcode_a = errcode --[[: unknown]]
+		local erroffset_a = erroffset --[[: unknown]]
 		return nil, "regex: " .. pcre2_errmsg(errcode_a[0]) .. " at offset " .. tostring(tonumber(erroffset_a[0]))
 	end
 	code = ffi.gc(code, lib_a.pcre2_code_free_8)

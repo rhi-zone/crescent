@@ -17,7 +17,7 @@ end
 local Alt = {}
 
 -- A fresh table used purely as an identity token for dispatch.
-Alt.key = ({} --[[: any]]) --[[:! AltKey]]
+Alt.key = ({} --[[: unknown]]) --[[:! AltKey]]
 
 -- alt: choose fa if available, otherwise fall back to fb
 function Alt.alt(fa, fb)

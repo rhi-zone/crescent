@@ -571,7 +571,7 @@ local function mat_solve(A, b)
   -- Returns solution x via partial-pivot Gaussian elimination
   local n = #b
   -- Augmented matrix (any to allow 2D unknown indexing)
-  local M2 = {} --[[: any]]
+  local M2 = {} --[[: unknown]]
   for i = 1, n do
     M2[i] = {}
     for j = 1, n do M2[i][j] = A[i][j] end

@@ -10,7 +10,7 @@ local M = {}
 
 M._tier = "pure"
 
-local ffi --[[: any]]
+local ffi --[[: unknown]]
 do
 	local ffi_ok, ffi_ = pcall(require, "ffi")
 	if ffi_ok then ffi = ffi_ end
@@ -107,11 +107,11 @@ end
 local pack_double
 if ffi then
 	local ffi_ = ffi --[[:! { new: (string) -> any, cast: (string, any) -> any, ... }]]
-	local _tmp = ffi_.new("double[1]") --[[: any]]
+	local _tmp = ffi_.new("double[1]") --[[: unknown]]
 	local _ptr  -- will be cast after first use
 	pack_double = function(n)
 		_tmp[0] = n
-		local p = ffi_.cast("uint8_t*", _tmp) --[[: any]]
+		local p = ffi_.cast("uint8_t*", _tmp) --[[: unknown]]
 		return char(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7])
 	end
 else
@@ -213,8 +213,8 @@ end
 local unpack_double
 if ffi then
 	local ffi_ = ffi --[[:! { new: (string) -> any, cast: (string, any) -> any, ... }]]
-	local _tmp = ffi_.new("uint8_t[8]") --[[: any]]
-	local _dptr = ffi_.cast("double*", _tmp) --[[: any]]
+	local _tmp = ffi_.new("uint8_t[8]") --[[: unknown]]
+	local _dptr = ffi_.cast("double*", _tmp) --[[: unknown]]
 	--: (string, integer) -> (number, integer)
 	unpack_double = function(s, pos)
 		for i = 0, 7 do
@@ -257,7 +257,7 @@ end
 
 -- Returns true if t is a BSON array (sequential integer keys 1..n).
 local function is_array(t)
-	local t_ = t --[[: any]]
+	local t_ = t --[[: unknown]]
 	local n = 0
 	for _ in pairs(t_) do n = n + 1 end
 	if n == 0 then return false end
@@ -269,7 +269,7 @@ end
 
 -- Returns true if t looks like an array-document (keys "0","1",...,"n-1").
 local function is_array_doc(t)
-	local t_ = t --[[: any]]
+	local t_ = t --[[: unknown]]
 	local n = 0
 	for _ in pairs(t_) do n = n + 1 end
 	if n == 0 then return false end
@@ -282,7 +282,7 @@ end
 
 -- Convert a decoded array-document (keys "0","1",...) to a Lua array (keys 1,2,...).
 local function array_doc_to_array(t)
-	local t_ = t --[[: any]]
+	local t_ = t --[[: unknown]]
 	local arr = {}
 	for k, v in pairs(t_) do
 		local i = tonumber(k)
