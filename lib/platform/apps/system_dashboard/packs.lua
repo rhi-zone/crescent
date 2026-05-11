@@ -54,10 +54,10 @@ end
 local function resolve_action_caps(action_caps, pack_caps)
 	local out = {} --: { [string]: { type: string, ... } }
 	if type(pack_caps) == "table" then
-		for k, v in pairs(pack_caps) do out[k] = --[[:! { type: string, ... }]] v end
+		for k, v in pairs(pack_caps --[[:! { [string]: unknown }]]) do out[k] = v --[[:! { type: string, ... }]] end
 	end
 	if type(action_caps) == "table" then
-		for k, v in pairs(action_caps) do out[k] = --[[:! { type: string, ... }]] v end
+		for k, v in pairs(action_caps --[[:! { [string]: unknown }]]) do out[k] = v --[[:! { type: string, ... }]] end
 	end
 	return out
 end

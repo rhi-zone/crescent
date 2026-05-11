@@ -268,7 +268,7 @@ function M.any_of(...)
   return new_matcher(function(actual)
     for _, c in ipairs(candidates) do
       if type(c) == "table" and getmetatable(c) == Matcher then
-        local ok = c:test(actual)
+        local ok = (c --[[:! { test: (self: unknown, actual: unknown) -> (boolean, string), ... }]]):test(actual)
         if ok then return true, "" end
       else
         if actual == c then return true, "" end

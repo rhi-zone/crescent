@@ -94,7 +94,8 @@ local function init_particle(p, opts, rng)
   -- Lifetime
   local lt = opts.lifetime
   if type(lt) == "table" and lt.min ~= nil then
-    p.lifetime = rng:range(lt.min, lt.max)
+    local lt_ = lt --[[:! { min: number, max: number, ... }]]
+    p.lifetime = rng:range(lt_.min, lt_.max)
   elseif type(lt) == "number" then
     p.lifetime = lt
   else

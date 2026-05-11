@@ -21,6 +21,7 @@ function M.copy(v, opts)
   local transform_raw = opts and opts.transform
   local transform = transform_raw --[[:! ((unknown, integer) -> (unknown, boolean)) | nil]]
 
+  --: (unknown, integer) -> unknown
   local function _copy(x, depth)
     if type(x) ~= "table" then
       if transform then

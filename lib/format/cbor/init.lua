@@ -495,7 +495,7 @@ local decode_raw = function (s, opts)
 	local pos = 1
 	local more --: function | nil
 	if type(opts) == "function" then more = opts
-	elseif type(opts) == "table" then more = opts.more
+	elseif type(opts) == "table" then more = (opts --[[:! { more: function | nil, ... }]]).more
 	elseif opts ~= nil then
 		error(("bad argument #2 to 'decode' (function or table expected, got %s)"):format(type(opts)))
 	end

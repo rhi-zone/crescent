@@ -572,9 +572,10 @@ local remainder = {0, 7, 7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 4
 --: (version: integer, ec_level: integer, data: string) -> string
 local arrange_codewords_and_calculate_ec = function (version, ec_level, data)
 	if type(data)=="table" then
+		local data_ = data --[[:! { [integer]: integer }]]
 		local tmp = ""
-		for i=1, #data do
-			tmp = tmp .. binary(data[i], 8)
+		for i=1, #data_ do
+			tmp = tmp .. binary(data_[i], 8)
 		end
 		data = tmp
 	end

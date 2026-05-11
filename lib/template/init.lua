@@ -224,11 +224,11 @@ local function resolve(path, ctx_stack)
   for i = #ctx_stack, 1, -1 do
     local ctx = ctx_stack[i]
     if type(ctx) == "table" and ctx[parts[1]] ~= nil then
-      local v = ctx
+      local v = ctx --[[:! unknown]]
       local ok = true
       for _, part in ipairs(parts) do
         if type(v) == "table" then
-          v = v[part]
+          v = (v --[[:! { [string]: unknown }]])[part]
         else
           ok = false
           break

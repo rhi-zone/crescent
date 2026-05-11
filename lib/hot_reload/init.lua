@@ -228,7 +228,8 @@ function M.watcher(opts)
     local new_module = package.loaded[module_name]
     if saved_state ~= nil and new_module and type(new_module) == "table" then
       if type(new_module._init_hot_state) == "function" then
-        new_module:_init_hot_state(saved_state)
+        local nm_ = new_module --[[:! { _init_hot_state: (unknown, unknown) -> unknown, ... }]]
+        nm_:_init_hot_state(saved_state)
       else
         new_module[pkey] = saved_state
       end

@@ -107,11 +107,12 @@ function M.wave_to_string(wave)
 	if type(wave) ~= "table" then
 		return nil, "wave: expected table"
 	end
-	local format          = wave.format
-	local channels        = wave.channels
-	local sample_rate     = wave.sample_rate
-	local bits_per_sample = wave.bits_per_sample
-	local data            = wave.data
+	local wave_ = wave --[[:! { format: integer, channels: integer, sample_rate: integer, bits_per_sample: integer, data: unknown, ... }]]
+	local format          = wave_.format
+	local channels        = wave_.channels
+	local sample_rate     = wave_.sample_rate
+	local bits_per_sample = wave_.bits_per_sample
+	local data            = wave_.data
 	if format ~= 1 then
 		return nil, "wave: unsupported audio format " .. tostring(format)
 	end

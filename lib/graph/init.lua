@@ -328,7 +328,7 @@ function M.shortest_path(g, start, target)
       if not vis[v] then
         local edata = g_:edge_data(u, v)
         local w = (type(edata) == "table" and type(edata.weight) == "number")
-                  and edata.weight or 1
+                  and (edata --[[:! { weight: number, ... }]]).weight or 1
         local nd = ud + w
         if nd < dist[v] then
           dist[v] = nd

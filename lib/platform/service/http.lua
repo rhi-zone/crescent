@@ -339,7 +339,8 @@ function M.create(caps, methods, descriptors)
 						-- err may be a string (→ 400) or a table { status, message }
 						-- for explicit HTTP status control (e.g. 404 not found).
 						if type(err) == "table" and err.status then
-							json_err(res, err.status, tostring(err.message or "error"))
+							local err_ = err --[[:! { status: integer, message: unknown, ... }]]
+							json_err(res, err_.status, tostring(err_.message or "error"))
 						else
 							json_err(res, 400, tostring(err))
 						end

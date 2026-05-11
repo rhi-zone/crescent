@@ -266,9 +266,10 @@ end
 local function locale_tag(loc)
   if type(loc) == "string" then return loc end
   if type(loc) ~= "table" then return "en" end
-  local s = loc.language or "en"
-  if loc.script then s = s.."-"..loc.script end
-  if loc.region then s = s.."-"..loc.region end
+  local loc_ = loc --[[:! { language: unknown, script: unknown, region: unknown, ... }]]
+  local s = loc_.language --[[:! string | nil]] or "en"
+  if loc_.script then s = s.."-"..(loc_.script --[[:! string]]) end
+  if loc_.region then s = s.."-"..(loc_.region --[[:! string]]) end
   return s
 end
 

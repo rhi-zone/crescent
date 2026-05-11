@@ -22,10 +22,11 @@ local floor = math.floor
 --: (unknown) -> boolean
 local function is_array(t)
   if type(t) ~= "table" then return false end
-  local n = #(t --[[: { [integer]: unknown }]])
+  local t_ = t --[[:! { [integer]: unknown }]]
+  local n = #t_
   -- Check no non-integer or out-of-range keys exist
   local count = 0
-  for k in pairs(t --[[: { [unknown]: unknown }]]) do
+  for k in pairs(t_) do
     if type(k) ~= "number" or k ~= floor(k --[[:! number]]) or (k --[[:! number]]) < 1 or (k --[[:! number]]) > n then
       return false
     end
@@ -273,11 +274,11 @@ function M.validate_patch(patch)
   if type(patch) ~= "table" then
     return nil, "patch must be an array"
   end
-  for i, op in ipairs(patch --[[: { [integer]: { op?: unknown, path?: unknown, value?: unknown, from?: unknown } } ]]) do
+  for i, op in ipairs(patch --[[:! { [integer]: { op?: unknown, path?: unknown, value?: unknown, from?: unknown } } ]]) do
     if type(op) ~= "table" then
       return nil, "operation " .. i .. " must be a table"
     end
-    local o = op.op
+    local o = op.op --[[:! string | nil]]
     if o == nil then
       return nil, "operation " .. i .. " missing 'op' field"
     end
@@ -548,7 +549,7 @@ function M.diff(doc_a, doc_b)
         for k in pairs(doc_a) do
           ops[#ops+1] = { op = "remove", path = "/" .. M.escape(tostring(k)) }
         end
-        for i, v in ipairs(doc_b --[[: { [integer]: unknown } ]]) do
+        for i, v in ipairs(doc_b --[[:! { [integer]: unknown }]]) do
           ops[#ops+1] = { op = "add", path = "/" .. (i-1), value = deep_copy(v) }
         end
       end

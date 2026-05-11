@@ -217,8 +217,9 @@ function M.resolver(vars, env_fn)
   if type(vars) ~= "table" then
     error("dotenv.resolver: vars table is required")
   end
+  local vars_ = vars --[[:! { [string]: string }]]
   return function(key)
-    local v = vars[key]
+    local v = vars_[key]
     if v ~= nil then return v end
     return env_fn and env_fn(key)
   end

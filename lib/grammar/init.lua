@@ -428,10 +428,11 @@ function M.grammar(opts)
       if not p or type(p) ~= "table" or seen[p] then goto continue end
       seen[p] = true
       if p._is_ref then
-        if not rules[p._name] then
-          error("grammar: unknown rule '" .. p._name .. "'")
+        local p_name = p._name --[[:! string]]
+        if not rules[p_name] then
+          error("grammar: unknown rule '" .. p_name .. "'")
         end
-        p._target = rules[p._name]
+        p._target = rules[p_name]
         worklist[#worklist + 1] = p._target
         goto continue
       end

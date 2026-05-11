@@ -174,7 +174,7 @@ function I:install(app_path, manifest, timestamp)
 
 	local name = manifest.name or app_path:match("([^/]+)%.%w+$") or "unknown"
 	local manifest_str = json.encode(manifest)
-	local meta = manifest.meta or {}
+	local meta = (manifest.meta or {}) --[[:! { tags: unknown, description: unknown, ... }]]
 	local tags = meta.tags or {}
 	local description = meta.description or ""
 	local tags_str = json.encode(tags)

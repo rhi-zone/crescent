@@ -34,6 +34,7 @@ end
 
 -- ── KV helpers ─────────────────────────────────────────────────────────────
 
+--: (string) -> string
 local function list_key(ptype)
 	return "presets:" .. ptype
 end
@@ -42,12 +43,13 @@ local function active_key(ptype)
 	return "presets:active:" .. ptype
 end
 
+--: ({ get: (string) -> (string | nil), set: (string, string | nil) -> nil, ... }, string) -> { [integer]: unknown }
 local function load_list(kv, ptype)
 	local raw = kv.get(list_key(ptype))
 	if not raw then return {} end
 	local ok, val = pcall(json.decode, raw)
 	if not ok or type(val) ~= "table" then return {} end
-	return val
+	return val --[[:! { [integer]: unknown }]]
 end
 
 local function save_list(kv, ptype, list)
@@ -159,7 +161,7 @@ function M.load_all(kv)
 		local list = load_list(kv, ptype)
 		if #list == 0 then
 			local defaults = M.get_defaults()
-			list = defaults[ptype .. "s"]
+			list = defaults[ptype .. "s"] --[[:! { [integer]: unknown }]]
 		end
 		result[ptype .. "s"] = list
 	end
@@ -189,7 +191,7 @@ function M.save(kv, ptype, name, preset)
 	-- Replace existing or append.
 	local found = false
 	for i = 1, #list do
-		if list[i].name == name then
+		if (list[i] --[[:! { name: unknown, ... }]]).name == name then
 			list[i] = preset
 			found = true
 			break
@@ -216,7 +218,7 @@ function M.delete(kv, ptype, name)
 	local new_list = {}
 	local found = false
 	for i = 1, #list do
-		if list[i].name == name then
+		if (list[i] --[[:! { name: unknown, ... }]]).name == name then
 			found = true
 		else
 			new_list[#new_list + 1] = list[i]
@@ -247,7 +249,8 @@ function M.get_active(kv, ptype)
 
 	local list = load_list(kv, ptype)
 	for i = 1, #list do
-		if list[i].name == name then return list[i] end
+		local item = list[i] --[[:! { name: unknown, ... }]]
+		if item.name == name then return list[i] --[[:! { name: string } | nil]] end
 	end
 
 	-- Active name set but preset not found — check defaults.
@@ -273,7 +276,7 @@ function M.set_active(kv, ptype, name)
 	local list = load_list(kv, ptype)
 	local found = false
 	for i = 1, #list do
-		if list[i].name == name then found = true; break end
+		if (list[i] --[[:! { name: unknown, ... }]]).name == name then found = true; break end
 	end
 	if not found then
 		-- Check defaults.

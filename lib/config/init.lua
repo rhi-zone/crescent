@@ -285,7 +285,7 @@ function Config:to_table()
     for k, v in pairs(self_._layers[i]) do
       if type(v) == "table" and type(out[k]) == "table" then
         local merged = deep_copy(out[k])
-        local merged_ = merged --[[:! ConfigData]]
+        local merged_ = (merged --[[: unknown]]) --[[:! ConfigData]]
         merge_into(merged_, {}) -- no-op
         -- layer overrides: layer wins for conflicts
         for lk, lv in pairs(v) do

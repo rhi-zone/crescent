@@ -656,31 +656,32 @@ end
 -- Reconstruct URL from components table
 function M.url_build(url)
   if type(url) ~= "table" then return nil, "url_build: expected table" end
+  local url_ = url --[[:! { scheme: unknown, user: unknown, password: unknown, host: unknown, port: unknown, path: unknown, query: unknown, fragment: unknown, ... }]]
   local parts = {}
-  if url.scheme then
-    parts[#parts + 1] = url.scheme .. "://"
+  if url_.scheme then
+    parts[#parts + 1] = (url_.scheme --[[:! string]]) .. "://"
   end
-  if url.user then
-    parts[#parts + 1] = encode_percent(url.user, UNRESERVED)
-    if url.password then
-      parts[#parts + 1] = ":" .. encode_percent(url.password, UNRESERVED)
+  if url_.user then
+    parts[#parts + 1] = encode_percent(url_.user --[[:! string]], UNRESERVED)
+    if url_.password then
+      parts[#parts + 1] = ":" .. encode_percent(url_.password --[[:! string]], UNRESERVED)
     end
     parts[#parts + 1] = "@"
   end
-  if url.host then
-    parts[#parts + 1] = url.host
+  if url_.host then
+    parts[#parts + 1] = url_.host
   end
-  if url.port then
-    parts[#parts + 1] = ":" .. tostring(url.port)
+  if url_.port then
+    parts[#parts + 1] = ":" .. tostring(url_.port)
   end
-  if url.path then
-    parts[#parts + 1] = url.path
+  if url_.path then
+    parts[#parts + 1] = url_.path
   end
-  if url.query then
-    parts[#parts + 1] = "?" .. url.query
+  if url_.query then
+    parts[#parts + 1] = "?" .. (url_.query --[[:! string]])
   end
-  if url.fragment then
-    parts[#parts + 1] = "#" .. url.fragment
+  if url_.fragment then
+    parts[#parts + 1] = "#" .. (url_.fragment --[[:! string]])
   end
   return table.concat(parts)
 end

@@ -50,14 +50,17 @@ local function validate_def(def)
   if type(def) ~= "table" then
     return nil, "state_machine.new: def must be a table"
   end
-  if type(def.initial) ~= "string" then
+  local def_ = def --[[:! { initial: unknown, states: unknown, ... }]]
+  if type(def_.initial) ~= "string" then
     return nil, "state_machine.new: def.initial must be a string"
   end
-  if type(def.states) ~= "table" then
+  local initial = def_.initial --[[:! string]]
+  if type(def_.states) ~= "table" then
     return nil, "state_machine.new: def.states must be a table"
   end
-  if def.states[def.initial] == nil then
-    return nil, "state_machine.new: initial state '" .. def.initial .. "' is not defined in states"
+  local states = def_.states --[[:! { [string]: unknown }]]
+  if states[initial] == nil then
+    return nil, "state_machine.new: initial state '" .. initial .. "' is not defined in states"
   end
   -- Validate all transition targets reference defined states.
   for sname, sdef in pairs(def.states) do
@@ -207,13 +210,16 @@ function M.restore(def, snap)
   if type(snap) ~= "table" then
     return nil, "state_machine.restore: snap must be a table"
   end
-  if type(snap.state) ~= "string" then
+  local snap_ = snap --[[:! { state: unknown, ... }]]
+  if type(snap_.state) ~= "string" then
     return nil, "state_machine.restore: snap.state must be a string"
   end
+  local snap_state = snap_.state --[[:! string]]
   local ok, err = validate_def(def)
   if not ok then return nil, err end
-  if def.states[snap.state] == nil then
-    return nil, "state_machine.restore: snap.state '" .. snap.state .. "' is not defined in states"
+  local def_states = (def --[[:! { states: { [string]: unknown }, ... }]]).states
+  if def_states[snap_state] == nil then
+    return nil, "state_machine.restore: snap.state '" .. snap_state .. "' is not defined in states"
   end
 
   local sm = setmetatable({}, SM)

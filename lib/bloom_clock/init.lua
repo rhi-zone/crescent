@@ -226,31 +226,33 @@ function M.deserialize(t)
   if type(t) ~= "table" then
     return nil, "expected table"
   end
-  if type(t.node_id) ~= "string" then
+  local t_ = t --[[:! { node_id: unknown, time: unknown, size: unknown, hash_count: unknown, filter: unknown, ... }]]
+  if type(t_.node_id) ~= "string" then
     return nil, "node_id must be a string"
   end
-  if type(t.time) ~= "number" then
+  if type(t_.time) ~= "number" then
     return nil, "time must be a number"
   end
-  if type(t.size) ~= "number" then
+  if type(t_.size) ~= "number" then
     return nil, "size must be a number"
   end
   if type(t.hash_count) ~= "number" then
     return nil, "hash_count must be a number"
   end
-  if type(t.filter) ~= "table" then
+  if type(t_.filter) ~= "table" then
     return nil, "filter must be a table"
   end
   local filter_copy = {}
-  local n = words_for(t.size)
+  local n = words_for(t_.size --[[:! integer]])
+  local filter_ = t_.filter --[[:! { [integer]: unknown }]]
   for i = 1, n do
-    filter_copy[i] = t.filter[i] or 0
+    filter_copy[i] = filter_[i] or 0
   end
   local clock = {
-    _node_id = t.node_id,
-    _time = t.time,
-    _size = t.size,
-    _hash_count = t.hash_count,
+    _node_id = t_.node_id,
+    _time = t_.time,
+    _size = t_.size,
+    _hash_count = t_.hash_count,
     _filter = filter_copy,
   }
   return setmetatable(clock, Clock)

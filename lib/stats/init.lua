@@ -787,14 +787,16 @@ function M.chi2_test(observed --[[ : NumArr ]], expected --[[ : NumArr ]])
   if type(expected) ~= "table" or #expected ~= #observed then
     return nil, "chi2_test: expected must have the same length as observed"
   end
+  local observed_ = observed --[[:! { [integer]: number }]]
+  local expected_ = expected --[[:! { [integer]: number }]]
   local chi2 = 0 --: number
-  local df   = #observed - 1
-  for i = 1, #observed do
-    if expected[i] == 0 then
+  local df   = #observed_ - 1
+  for i = 1, #observed_ do
+    if expected_[i] == 0 then
       return nil, "chi2_test: expected[" .. i .. "] is zero"
     end
-    local diff = observed[i] - expected[i]
-    chi2 = chi2 + diff * diff / expected[i]
+    local diff = observed_[i] - expected_[i]
+    chi2 = chi2 + diff * diff / expected_[i]
   end
   -- p-value = P(chi2 > stat) = 1 - chi2_cdf(stat, df)
   local chi2_p = (M.chi2_cdf(chi2, df) --[[:! number | nil]]) or 0 --: number
@@ -869,8 +871,10 @@ function M.multiple_regression(X --[[ : NumArr2D ]], y --[[ : NumArr ]])
   if type(y) ~= "table" or #y ~= #X then
     return nil, "multiple_regression: y must have the same length as X"
   end
-  local n  = #X
-  local p0 = #X[1]
+  local X_ = X --[[:! { [integer]: { [integer]: number } }]]
+  local y_ = y --[[:! { [integer]: number }]]
+  local n  = #X_
+  local p0 = #X_[1]
   if p0 == 0 then return nil, "multiple_regression: X rows must be non-empty" end
   local p = p0 + 1   -- +1 for intercept
 
@@ -878,7 +882,7 @@ function M.multiple_regression(X --[[ : NumArr2D ]], y --[[ : NumArr ]])
   local A = {} --: NumArr2D
   for i = 1, n do
     A[i] = { 1 } --: NumArr
-    for j = 1, p0 do A[i][j + 1] = X[i][j] end
+    for j = 1, p0 do A[i][j + 1] = X_[i][j] end
   end
 
   -- Compute X^T X (p x p) and X^T y (p x 1).
@@ -892,7 +896,7 @@ function M.multiple_regression(X --[[ : NumArr2D ]], y --[[ : NumArr ]])
       for k = 1, n do s = s + A[k][i] * A[k][j] end
       XtX[i][j] = s
     end
-    for k = 1, n do Xty[i] = Xty[i] + A[k][i] * y[k] end
+    for k = 1, n do Xty[i] = Xty[i] + A[k][i] * y_[k] end
   end
 
   -- Solve XtX * beta = Xty via Gaussian elimination with partial pivoting.
@@ -939,9 +943,9 @@ function M.multiple_regression(X --[[ : NumArr2D ]], y --[[ : NumArr ]])
   for i = 1, n do
     local pred = 0 --: number
     for j = 1, p do pred = pred + coeffs[j] * A[i][j] end
-    residuals[i] = y[i] - pred
+    residuals[i] = y_[i] - pred
     ss_res = ss_res + residuals[i] * residuals[i]
-    ss_tot = ss_tot + (y[i] - y_mean) * (y[i] - y_mean)
+    ss_tot = ss_tot + (y_[i] - y_mean) * (y_[i] - y_mean)
   end
   local r2 = ss_tot == 0 and 1 or (1 - ss_res / ss_tot)
   return { coefficients = coeffs, r2 = r2, residuals = residuals }
@@ -957,10 +961,11 @@ function M.predict(model, x_new)
     if type(x_new) ~= "table" then
       return nil, "predict: x_new must be an array for multiple regression"
     end
-    local coeffs = model.coefficients
+    local coeffs = model.coefficients --[[:! { [integer]: number }]]
+    local x_new_ = x_new --[[:! { [integer]: number }]]
     local pred = coeffs[1]  -- intercept
-    for j = 1, #x_new do
-      pred = pred + coeffs[j + 1] * x_new[j]
+    for j = 1, #x_new_ do
+      pred = pred + coeffs[j + 1] * x_new_[j]
     end
     return pred
   elseif model.a ~= nil and model.b ~= nil then

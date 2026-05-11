@@ -1272,7 +1272,7 @@ local function validate_node(node, errors)
   elseif kind == "SelectionSet" then
     if type(node.selections) ~= "table" then
       insert(errors, "SelectionSet.selections must be a table")
-    elseif #node.selections == 0 then
+    elseif #(node.selections --[[:! { [integer]: unknown }]]) == 0 then
       insert(errors, "SelectionSet must have at least one selection")
     end
 
@@ -1291,8 +1291,9 @@ local function validate_node(node, errors)
     if node.type == nil then insert(errors, "VariableDefinition missing type") end
 
   elseif kind == "ObjectTypeDefinition" or kind == "InterfaceTypeDefinition" then
-    if node.name == nil then insert(errors, kind .. " missing name") end
-    if node.fields == nil then insert(errors, kind .. " missing fields") end
+    local kind_ = kind --[[:! string]]
+    if node.name == nil then insert(errors, kind_ .. " missing name") end
+    if node.fields == nil then insert(errors, kind_ .. " missing fields") end
   end
 end
 

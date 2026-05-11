@@ -293,9 +293,10 @@ end
 function M.new(v)
   if type(v) == "table" and getmetatable(v) == mt then
     -- Clone
+    local v_ = v --[[:! BigInt]]
     local d = {}
-    for i = 1, #v.d do d[i] = v.d[i] end
-    return from_raw(d, v.s)
+    for i = 1, #v_.d do d[i] = v_.d[i] end
+    return from_raw(d, v_.s)
   end
   if type(v) == "number" then
     v = ("%.0f"):format(v)

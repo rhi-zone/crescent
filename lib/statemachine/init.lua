@@ -58,10 +58,12 @@ end
 --: (unknown) -> { [integer]: string }
 local function default_sub_path(node)
   if type(node) ~= "table" then return {} end
-  if not node.initial then return {} end
-  local sub = node.states and node.states[node.initial]
+  local node_ = node --[[:! { initial: unknown, states: unknown, ... }]]
+  if not node_.initial then return {} end
+  local node_initial = node_.initial --[[:! string]]
+  local sub = node_.states and (node_.states --[[:! { [string]: unknown }]])[node_initial]
   local rest = sub and default_sub_path(sub) or {}
-  local path = {node.initial}
+  local path = {node_initial}
   for i = 1, #rest do path[#path + 1] = rest[i] end
   return path
 end

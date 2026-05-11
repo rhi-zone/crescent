@@ -201,12 +201,13 @@ function M.new(spec)
       return nil, "new: rule keys must be single characters, got: " .. tostring(sym)
     end
     if type(rule) == "table" then
-      local total = 0
-      for _, entry in ipairs(rule) do
+      local total = 0.0 --: number
+      for _, entry in ipairs(rule --[[:! { [integer]: unknown }]]) do
         if type(entry) ~= "table" or type(entry[1]) ~= "string" or type(entry[2]) ~= "number" then
           return nil, "new: stochastic rule entries must be {string, number}"
         end
-        total = total + entry[2]
+        local entry_ = entry --[[:! { [integer]: unknown }]]
+        total = total + (entry_[2] --[[:! number]])
       end
       -- allow small floating point error
       if math.abs(total - 1.0) > 0.01 then

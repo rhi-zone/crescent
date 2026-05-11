@@ -28,7 +28,7 @@ local function resolve(elem)
   if type(elem) == "string" then
     return elem
   elseif type(elem) == "table" and elem._is_builder then
-    return elem:build()
+    return (elem --[[:! { build: (self: unknown) -> string, ... }]]):build()
   else
     return tostring(elem)
   end

@@ -211,7 +211,7 @@ function M.run_entry(app, entry_key, env, opts)
 		return false, caps_err
 	end
 
-	local src_m = tar.get(app.entries, entry_path)
+	local src_m = tar.get(app.entries --[[:! { [number]: { data: string, mode: number, mtime: number, name: string, size: number, typeflag: string } }]], entry_path --[[:! string]])
 	if not src_m then
 		return false, "platform: entry file '" .. tostring(entry_path) .. "' not found in tarball"
 	end

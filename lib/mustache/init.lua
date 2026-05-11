@@ -31,7 +31,7 @@ local function lookup_dotted(ctx, key)
   local val = ctx
   for part in key:gmatch("[^.]+") do
     if type(val) ~= "table" then return nil end
-    val = val[part]
+    val = (val --[[:! { [string]: unknown }]])[part] --[[:! mustache_ctx]]
     if val == nil then return nil end
   end
   return val
@@ -61,7 +61,7 @@ local function resolve(stack, key)
     if type(ctx) == "table" then
       local v = ctx[first]
       if v ~= nil then
-        return lookup_dotted(v, rest)
+        return lookup_dotted(v --[[:! mustache_ctx]], rest)
       end
     end
   end

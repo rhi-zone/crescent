@@ -1075,7 +1075,7 @@ end
 
 FUNCTIONS["name"] = function(args, ctx)
   local n = (#args > 0 and eval_expr(args[1], ctx) or ctx.node) --[[: unknown]]
-  if type(n) == "table" and n[1] then n = n[1] --[[: unknown]] end
+  if type(n) == "table" and n[1] then n = n[1] end
   if type(n) == "table" then
     local nt = n.type --[[: unknown]]
     if nt == "element" then return (n.tag --[[: unknown]]) or "" end
@@ -1086,7 +1086,7 @@ end
 
 FUNCTIONS["local-name"] = function(args, ctx)
   local n = (#args > 0 and eval_expr(args[1], ctx) or ctx.node) --[[: unknown]]
-  if type(n) == "table" and n[1] then n = n[1] --[[: unknown]] end
+  if type(n) == "table" and n[1] then n = n[1] end
   if type(n) == "table" then
     local nt = n.type --[[: unknown]]
     if nt == "element" then
@@ -1104,8 +1104,9 @@ end
 FUNCTIONS["sum"] = function(args, ctx)
   local ns = eval_expr(args[1], ctx)
   if type(ns) ~= "table" then return to_number(ns) end
+  local ns_ = ns --[[:! { [integer]: { type: string } }]]
   local total = 0 --: number
-  for i = 1, #ns do total = total + to_number(string_value(ns[i])) end
+  for i = 1, #ns_ do total = total + to_number(string_value(ns_[i])) end
   return total
 end
 
@@ -1134,8 +1135,8 @@ eval_expr = function(ast, ctx)
     local left = eval_expr(ast.left, ctx)
     local right = eval_expr(ast.right, ctx)
     local merged = {} --: { [integer]: { parent: unknown, ... }, ... }
-    if type(left) == "table" then for i=1,#left do merged[#merged+1]=left[i] end end
-    if type(right) == "table" then for i=1,#right do merged[#merged+1]=right[i] end end
+    if type(left) == "table" then for i=1,#left do merged[#merged+1]=(left --[[:! { [integer]: { parent: unknown, ... } }]])[i] end end
+    if type(right) == "table" then for i=1,#right do merged[#merged+1]=(right --[[:! { [integer]: { parent: unknown, ... } }]])[i] end end
     if ctx.order then merged = sort_nodeset(merged, ctx.order) end
     return merged
   elseif ast.kind == "func" then
@@ -1154,8 +1155,9 @@ eval_expr = function(ast, ctx)
     if type(base) ~= "table" then return {} end
     -- evaluate path steps relative to each node in base
     local result = {} --: { [integer]: { parent: unknown, ... }, ... }
-    for i = 1, #base do
-      local sub_ctx = { node = base[i], position = i, size = #base, order = ctx.order }
+    local base_ = base --[[:! { [integer]: { parent: unknown, ... } }]]
+    for i = 1, #base_ do
+      local sub_ctx = { node = base_[i], position = i, size = #base_, order = ctx.order }
       local step_ast = { kind = "path", steps = ast.steps, absolute = false }
       local sub = eval_path(step_ast, sub_ctx)
       for j = 1, #sub do result[#result+1] = sub[j] end
@@ -1265,7 +1267,7 @@ end
 --: ({ ... }, string) -> { ... } | nil
 function M.first(node, expr)
   local result = M.eval(node, expr)
-  if type(result) == "table" then return result[1] end
+  if type(result) == "table" then return (result --[[:! { [integer]: unknown }]])[1] --[[:! {} | nil]] end
   return nil
 end
 

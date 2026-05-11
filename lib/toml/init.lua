@@ -804,9 +804,9 @@ local function traverse_key(root, keys, depth, implicit, defined, array_tables, 
     elseif type(v) == "table" and v.__toml_type == nil then
       -- check if it's an array-of-tables — descend into last element
       if array_tables[v] then
-        cur = v[#v]
+        cur = (v --[[:! { [integer]: { [string]: unknown } }]])[#v]
       else
-        cur = v
+        cur = v --[[:! { [string]: unknown }]]
       end
     else
       return nil, "line " .. line .. ": key '" .. k .. "' already exists as a non-table"
@@ -1236,7 +1236,8 @@ local function is_simple_value(v)
   -- check array
   if #v > 0 then
     for i = 1, #v do
-      if type(v[i]) == "table" and not v[i].__toml_type then
+      local vi = v[i]
+      if type(vi) == "table" and not (vi --[[:! { __toml_type: unknown, ... }]]).__toml_type then
         return false
       end
     end
@@ -1386,7 +1387,8 @@ local function encode(tbl)
           if count == #v then
             -- sequential array
             for j = 1, #v do
-              if type(v[j]) ~= "table" or v[j].__toml_type then
+              local vj = v[j]
+              if type(vj) ~= "table" or (vj --[[:! { __toml_type: unknown, ... }]]).__toml_type then
                 all_tables = false
                 break
               end

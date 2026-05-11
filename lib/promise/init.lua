@@ -76,13 +76,14 @@ local function resolve_promise(p, value)
 	if p._state ~= STATE_PENDING then return end
 	-- If value is a promise, adopt its state
 	if type(value) == "table" and getmetatable(value) == Promise then
-		if value._state == STATE_FULFILLED then
-			resolve_promise(p, value._value)
-		elseif value._state == STATE_REJECTED then
-			reject_promise(p, value._reason)
+		local value_ = value --[[:! Promise]]
+		if value_._state == STATE_FULFILLED then
+			resolve_promise(p, value_._value)
+		elseif value_._state == STATE_REJECTED then
+			reject_promise(p, value_._reason)
 		else
 			-- value is still pending -- attach handlers
-			value:and_then(
+			value_:and_then(
 				function(v) resolve_promise(p, v) end
 			):catch(
 				function(r) reject_promise(p, r) end

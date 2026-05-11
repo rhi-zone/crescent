@@ -196,11 +196,12 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
     push_error(errors, path, "invalid schema (not a table or boolean)")
     return false, errors
   end
+  local schema_ = schema --[[:! { ["$ref"]: unknown, type: unknown, nullable: unknown, enum: unknown, const: unknown, minLength: unknown, maxLength: unknown, pattern: unknown, format: unknown, minimum: unknown, maximum: unknown, exclusiveMinimum: unknown, exclusiveMaximum: unknown, multipleOf: unknown, minItems: unknown, maxItems: unknown, uniqueItems: unknown, items: unknown, prefixItems: unknown, contains: unknown, properties: unknown, required: unknown, additionalProperties: unknown, patternProperties: unknown, minProperties: unknown, maxProperties: unknown, allOf: unknown, anyOf: unknown, oneOf: unknown, not: unknown, if: unknown, then: unknown, else: unknown, ... }]]
 
   -- $ref — resolve and validate against resolved schema, ignoring sibling keywords
   -- (draft-7 behaviour).
-  if schema["$ref"] ~= nil then
-    local ref = schema["$ref"] --[[:! string]]
+  if schema_["$ref"] ~= nil then
+    local ref = schema_["$ref"] --[[:! string]]
     -- Guard against infinite recursion
     if ref_stack[ref] then
       -- Treat circular ref as accepted (we've already validated this path).
@@ -226,34 +227,37 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
   -- -------------------------------------------------------------------------
   -- type
   -- -------------------------------------------------------------------------
-  if schema.type ~= nil then
-    local allowed = schema.type
-    if type(allowed) == "string" then allowed = { allowed } end
+  if schema_.type ~= nil then
+    local allowed = schema_.type
+    if type(allowed) == "string" then allowed = { allowed --[[:! string]] } end
+    local allowed_ = allowed --[[:! { [integer]: string }]]
     -- OpenAPI nullable extension
-    if schema.nullable then
-      allowed = { unpack(allowed) }
-      allowed[#allowed + 1] = "null"
+    if schema_.nullable then
+      local tmp = {} --: { [integer]: string }
+      for i = 1, #allowed_ do tmp[i] = allowed_[i] end
+      tmp[#tmp + 1] = "null"
+      allowed_ = tmp
     end
     local type_ok = false
-    for _, t in ipairs(allowed) do
+    for _, t in ipairs(allowed_) do
       if t == vtype then type_ok = true; break end
       -- "number" also accepts integers
       if t == "number" and vtype == "integer" then type_ok = true; break end
     end
     if not type_ok then
-      local allowed_str = table.concat(allowed, "|")
+      local allowed_str = table.concat(allowed_, "|")
       push_error(errors, path, "expected " .. allowed_str .. ", got " .. vtype)
     end
-  elseif schema.nullable and vtype == "null" then
+  elseif schema_.nullable and vtype == "null" then
     -- nullable without type: null is always allowed
   end
 
   -- -------------------------------------------------------------------------
   -- enum
   -- -------------------------------------------------------------------------
-  if schema.enum ~= nil then
+  if schema_.enum ~= nil then
     local found = false
-    for _, candidate in ipairs(schema.enum) do
+    for _, candidate in ipairs(schema_.enum) do
       if deep_equal(value, candidate) then found = true; break end
     end
     if not found then
@@ -264,8 +268,8 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
   -- -------------------------------------------------------------------------
   -- const
   -- -------------------------------------------------------------------------
-  if schema["const"] ~= nil then
-    if not deep_equal(value, schema["const"]) then
+  if schema_["const"] ~= nil then
+    if not deep_equal(value, schema_["const"]) then
       push_error(errors, path, "value does not match const")
     end
   end
@@ -278,23 +282,27 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
     -- approximation (correct for ASCII, which covers most use-cases).
     local len = #value
 
-    if schema.minLength ~= nil and len < schema.minLength then
-      push_error(errors, path, "string too short: " .. len .. " < " .. schema.minLength)
+    local minLength = schema_.minLength --[[:! number | nil]]
+    local maxLength = schema_.maxLength --[[:! number | nil]]
+    local pattern = schema_.pattern --[[:! string | nil]]
+    local format = schema_.format --[[:! string | nil]]
+    if minLength ~= nil and len < minLength then
+      push_error(errors, path, "string too short: " .. len .. " < " .. minLength)
     end
-    if schema.maxLength ~= nil and len > schema.maxLength then
-      push_error(errors, path, "string too long: " .. len .. " > " .. schema.maxLength)
+    if maxLength ~= nil and len > maxLength then
+      push_error(errors, path, "string too long: " .. len .. " > " .. maxLength)
     end
-    if schema.pattern ~= nil then
-      if not value:find(schema.pattern) then
-        push_error(errors, path, "string does not match pattern: " .. schema.pattern)
+    if pattern ~= nil then
+      if not value:find(pattern) then
+        push_error(errors, path, "string does not match pattern: " .. pattern)
       end
     end
-    if schema.format ~= nil then
-      local fv = format_validators[schema.format]
+    if format ~= nil then
+      local fv = format_validators[format]
       if fv then
         local fok, ferr = fv(value)
         if not fok then
-          push_error(errors, path, "format " .. schema.format .. ": " .. (ferr or "invalid"))
+          push_error(errors, path, "format " .. format .. ": " .. (ferr or "invalid"))
         end
       end
       -- Unknown formats are silently skipped (advisory per spec).
@@ -306,41 +314,48 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
   -- -------------------------------------------------------------------------
   if vtype == "number" or vtype == "integer" then
     local n = value --[[:! number]]
-    if schema.minimum ~= nil then
-      if schema.exclusiveMinimum == true then
-        if n <= schema.minimum then
-          push_error(errors, path, "value " .. n .. " must be > " .. schema.minimum)
+    local minimum = schema_.minimum --[[:! number | nil]]
+    local maximum = schema_.maximum --[[:! number | nil]]
+    local exclusiveMinimum = schema_.exclusiveMinimum
+    local exclusiveMaximum = schema_.exclusiveMaximum
+    local multipleOf = schema_.multipleOf --[[:! number | nil]]
+    if minimum ~= nil then
+      if exclusiveMinimum == true then
+        if n <= minimum then
+          push_error(errors, path, "value " .. n .. " must be > " .. minimum)
         end
       else
-        if n < schema.minimum then
-          push_error(errors, path, "value " .. n .. " must be >= " .. schema.minimum)
+        if n < minimum then
+          push_error(errors, path, "value " .. n .. " must be >= " .. minimum)
         end
       end
     end
-    if schema.maximum ~= nil then
-      if schema.exclusiveMaximum == true then
-        if n >= schema.maximum then
-          push_error(errors, path, "value " .. n .. " must be < " .. schema.maximum)
+    if maximum ~= nil then
+      if exclusiveMaximum == true then
+        if n >= maximum then
+          push_error(errors, path, "value " .. n .. " must be < " .. maximum)
         end
       else
-        if n > schema.maximum then
-          push_error(errors, path, "value " .. n .. " must be <= " .. schema.maximum)
+        if n > maximum then
+          push_error(errors, path, "value " .. n .. " must be <= " .. maximum)
         end
       end
     end
     -- Draft-6+ numeric exclusiveMinimum / exclusiveMaximum as numbers
-    if type(schema.exclusiveMinimum) == "number" then
-      if n <= schema.exclusiveMinimum then
-        push_error(errors, path, "value " .. n .. " must be > " .. schema.exclusiveMinimum)
+    if type(exclusiveMinimum) == "number" then
+      local excMin = exclusiveMinimum --[[:! number]]
+      if n <= excMin then
+        push_error(errors, path, "value " .. n .. " must be > " .. excMin)
       end
     end
-    if type(schema.exclusiveMaximum) == "number" then
-      if n >= schema.exclusiveMaximum then
-        push_error(errors, path, "value " .. n .. " must be < " .. schema.exclusiveMaximum)
+    if type(exclusiveMaximum) == "number" then
+      local excMax = exclusiveMaximum --[[:! number]]
+      if n >= excMax then
+        push_error(errors, path, "value " .. n .. " must be < " .. excMax)
       end
     end
-    if schema.multipleOf ~= nil then
-      local divisor = schema.multipleOf
+    if multipleOf ~= nil then
+      local divisor = multipleOf
       -- Use modulo with tolerance for floating-point
       local remainder = n % divisor
       if remainder ~= 0 and math.abs(remainder - divisor) > 1e-10 then
@@ -356,16 +371,18 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
     local arr = value --[[:! { [integer]: unknown, ... }]]
     local len = #arr
 
-    if schema.minItems ~= nil and len < schema.minItems then
-      push_error(errors, path, "array too short: " .. len .. " < " .. schema.minItems)
+    local minItems = schema_.minItems --[[:! number | nil]]
+    local maxItems = schema_.maxItems --[[:! number | nil]]
+    if minItems ~= nil and len < minItems then
+      push_error(errors, path, "array too short: " .. len .. " < " .. minItems)
     end
-    if schema.maxItems ~= nil and len > schema.maxItems then
-      push_error(errors, path, "array too long: " .. len .. " > " .. schema.maxItems)
+    if maxItems ~= nil and len > maxItems then
+      push_error(errors, path, "array too long: " .. len .. " > " .. maxItems)
     end
 
     -- items: schema (all items) or array of schemas (tuple validation)
-    local items_schema = schema.items
-    local additional_items_schema = schema.additionalItems
+    local items_schema = schema_.items
+    local additional_items_schema = schema_.additionalItems
     if items_schema ~= nil then
       if type(items_schema) == "table" and #items_schema > 0 then
         -- Tuple mode
@@ -401,7 +418,7 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
     end
 
     -- uniqueItems
-    if schema.uniqueItems then
+    if schema_.uniqueItems then
       for i = 1, len do
         for j = i + 1, len do
           if deep_equal(arr[i], arr[j]) then
@@ -413,10 +430,10 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
     end
 
     -- contains
-    if schema.contains ~= nil then
+    if schema_.contains ~= nil then
       local found = false
       for _, item in ipairs(arr) do
-        local ok2 = validate_value(item, schema.contains, path, root_schema, ref_stack)
+        local ok2 = validate_value(item, schema_.contains, path, root_schema, ref_stack)
         if ok2 then found = true; break end
       end
       if not found then
@@ -435,16 +452,18 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
     local prop_count = 0
     for _ in pairs(obj) do prop_count = prop_count + 1 end
 
-    if schema.minProperties ~= nil and prop_count < schema.minProperties then
-      push_error(errors, path, "too few properties: " .. prop_count .. " < " .. schema.minProperties)
+    local minProperties = schema_.minProperties --[[:! number | nil]]
+    local maxProperties = schema_.maxProperties --[[:! number | nil]]
+    if minProperties ~= nil and prop_count < minProperties then
+      push_error(errors, path, "too few properties: " .. prop_count .. " < " .. minProperties)
     end
-    if schema.maxProperties ~= nil and prop_count > schema.maxProperties then
-      push_error(errors, path, "too many properties: " .. prop_count .. " > " .. schema.maxProperties)
+    if maxProperties ~= nil and prop_count > maxProperties then
+      push_error(errors, path, "too many properties: " .. prop_count .. " > " .. maxProperties)
     end
 
     -- required
-    if schema.required ~= nil then
-      for _, key in ipairs(schema.required --[[:! { [integer]: string, ... }]]) do
+    if schema_.required ~= nil then
+      for _, key in ipairs(schema_.required --[[:! { [integer]: string, ... }]]) do
         if obj[key] == nil then
           push_error(errors, join_path(path, key), "required property missing: " .. key)
         end
@@ -455,8 +474,8 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
     local validated_keys = {}
 
     -- properties
-    if schema.properties ~= nil then
-      for key, prop_schema in pairs(schema.properties --[[:! { [string]: unknown, ... }]]) do
+    if schema_.properties ~= nil then
+      for key, prop_schema in pairs(schema_.properties --[[:! { [string]: unknown, ... }]]) do
         if obj[key] ~= nil then
           validated_keys[key] = true
           local ok2, sub_errors = validate_value(obj[key], prop_schema, join_path(path, key), root_schema, ref_stack)
@@ -468,8 +487,8 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
     end
 
     -- patternProperties
-    if schema.patternProperties ~= nil then
-      for pattern, prop_schema in pairs(schema.patternProperties) do
+    if schema_.patternProperties ~= nil then
+      for pattern, prop_schema in pairs(schema_.patternProperties) do
         for key, v in pairs(obj) do
           if key:find(pattern) then
             validated_keys[key] = true
@@ -483,8 +502,8 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
     end
 
     -- additionalProperties
-    if schema.additionalProperties ~= nil then
-      local ap = schema.additionalProperties
+    if schema_.additionalProperties ~= nil then
+      local ap = schema_.additionalProperties
       for key in pairs(obj) do
         if not validated_keys[key] then
           if ap == false then
@@ -500,8 +519,8 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
     end
 
     -- dependencies
-    if schema.dependencies ~= nil then
-      for dep_key, dep_val in pairs(schema.dependencies --[[:! { [string]: unknown, ... }]]) do
+    if schema_.dependencies ~= nil then
+      for dep_key, dep_val in pairs(schema_.dependencies --[[:! { [string]: unknown, ... }]]) do
         if obj[dep_key] ~= nil then
           if type(dep_val) == "table" and #(dep_val --[[:! { [integer]: unknown, ... }]]) > 0 then
             -- Array of required keys
@@ -527,8 +546,8 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
   -- -------------------------------------------------------------------------
 
   -- allOf
-  if schema.allOf ~= nil then
-    for i, sub_schema in ipairs(schema.allOf --[[:! { [integer]: unknown, ... }]]) do
+  if schema_.allOf ~= nil then
+    for i, sub_schema in ipairs(schema_.allOf --[[:! { [integer]: unknown, ... }]]) do
       local ok2, sub_errors = validate_value(value, sub_schema, path, root_schema, ref_stack)
       if not ok2 then
         push_error(errors, path, "allOf[" .. (i-1) .. "] failed")
@@ -538,10 +557,10 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
   end
 
   -- anyOf
-  if schema.anyOf ~= nil then
+  if schema_.anyOf ~= nil then
     local any_ok = false
     local all_sub_errors = {}
-    for _, sub_schema in ipairs(schema.anyOf) do
+    for _, sub_schema in ipairs(schema_.anyOf) do
       local ok2, sub_errors = validate_value(value, sub_schema, path, root_schema, ref_stack)
       if ok2 then any_ok = true; break end
       for _, e in ipairs(sub_errors) do all_sub_errors[#all_sub_errors + 1] = e end
@@ -553,10 +572,10 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
   end
 
   -- oneOf
-  if schema.oneOf ~= nil then
+  if schema_.oneOf ~= nil then
     local match_count = 0
     local all_sub_errors = {}
-    for _, sub_schema in ipairs(schema.oneOf) do
+    for _, sub_schema in ipairs(schema_.oneOf) do
       local ok2, sub_errors = validate_value(value, sub_schema, path, root_schema, ref_stack)
       if ok2 then
         match_count = match_count + 1
@@ -573,8 +592,8 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
   end
 
   -- not
-  if schema["not"] ~= nil then
-    local ok2 = validate_value(value, schema["not"], path, root_schema, ref_stack)
+  if schema_["not"] ~= nil then
+    local ok2 = validate_value(value, schema_["not"], path, root_schema, ref_stack)
     if ok2 then
       push_error(errors, path, "'not' subschema matched (should not)")
     end
@@ -583,19 +602,19 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
   -- -------------------------------------------------------------------------
   -- Conditional: if/then/else
   -- -------------------------------------------------------------------------
-  if schema["if"] ~= nil then
-    local cond_ok = validate_value(value, schema["if"], path, root_schema, ref_stack)
+  if schema_["if"] ~= nil then
+    local cond_ok = validate_value(value, schema_["if"], path, root_schema, ref_stack)
     if cond_ok then
-      if schema["then"] ~= nil then
-        local ok2, sub_errors = validate_value(value, schema["then"], path, root_schema, ref_stack)
+      if schema_["then"] ~= nil then
+        local ok2, sub_errors = validate_value(value, schema_["then"], path, root_schema, ref_stack)
         if not ok2 then
           push_error(errors, path, "if matched but then failed")
           for _, e in ipairs(sub_errors) do errors[#errors + 1] = e end
         end
       end
     else
-      if schema["else"] ~= nil then
-        local ok2, sub_errors = validate_value(value, schema["else"], path, root_schema, ref_stack)
+      if schema_["else"] ~= nil then
+        local ok2, sub_errors = validate_value(value, schema_["else"], path, root_schema, ref_stack)
         if not ok2 then
           push_error(errors, path, "if did not match and else failed")
           for _, e in ipairs(sub_errors) do errors[#errors + 1] = e end

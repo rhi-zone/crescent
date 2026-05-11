@@ -136,7 +136,7 @@ function M.check(desc, gen_arg, fn, opts)
 		-- Single generator → wrap in a 1-tuple
 		local _tup1 = gen_mod.tuple({gen_arg}) --[[: unknown]]
 	tup_gen = _tup1 --[[:! { generate: (unknown, integer) -> { [integer]: unknown }, shrink: (unknown) -> { [integer]: unknown } }]]
-	elseif type(gen_arg) == "table" and gen_arg[1] and gen_arg[1].generate then
+	elseif type(gen_arg) == "table" and gen_arg[1] and (gen_arg[1] --[[:! { generate: unknown, ... }]]).generate then
 		-- Array of generators
 		local _tup2 = gen_mod.tuple(gen_arg) --[[: unknown]]
 		tup_gen = _tup2 --[[:! { generate: (unknown, integer) -> { [integer]: unknown }, shrink: (unknown) -> { [integer]: unknown } }]]

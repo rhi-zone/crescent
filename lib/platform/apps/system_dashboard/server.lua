@@ -622,10 +622,10 @@ local function handle_api(state, req, res)
 			res.body = encode_envelope(output_mod.err("action_index out of range"))
 			return true
 		end
-		local action = actions[idx]
+		local action = (actions --[[:! { [integer]: unknown }]])[idx] --[[:! { caps: unknown, exec: unknown, label: unknown, ... }]]
 		-- Attenuate each declared cap to produce sub-caps keyed by local name.
 		local attenuated = {} --: { [string]: unknown }
-		local action_caps = type(action.caps) == "table" and action.caps or {}
+		local action_caps = type(action.caps) == "table" and (action.caps --[[:! { [string]: unknown }]]) or {}
 		for name_k, decl_v in pairs(action_caps) do
 			local name = tostring(name_k)
 			local decl = --[[:! { type: string, reason: unknown, ... }]] decl_v
@@ -763,9 +763,9 @@ local function handle_api(state, req, res)
 			res.body = json.encode({ ok = false, error = "action_index out of range" })
 			return true
 		end
-		local action = actions[idx]
+		local action = (actions --[[:! { [integer]: unknown }]])[idx] --[[:! { caps: unknown, exec: unknown, label: unknown, ... }]]
 		local cap_entries = {} --: { [integer]: unknown }
-		local action_caps = type(action.caps) == "table" and action.caps or {}
+		local action_caps = type(action.caps) == "table" and (action.caps --[[:! { [string]: unknown }]]) or {}
 		for name_k, decl_v in pairs(action_caps) do
 			local decl = --[[:! { type: string, reason: unknown, ... }]] decl_v
 			cap_entries[#cap_entries + 1] = {
@@ -777,7 +777,8 @@ local function handle_api(state, req, res)
 		end
 		local exec_args --: unknown
 		if type(action.exec) == "table" then
-			exec_args = action.exec.args
+			local exec_ = action.exec --[[:! { args: unknown, ... }]]
+			exec_args = exec_.args
 		end
 		res.status = 200
 		res.headers["Content-Type"] = MIME.json

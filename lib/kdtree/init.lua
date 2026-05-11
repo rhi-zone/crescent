@@ -434,10 +434,11 @@ function M.build(input)
     if type(item) ~= "table" then
       return nil, "build: entry " .. i .. " is not a table"
     end
-    if item.point then
-      entries[i] = { point = item.point, data = item.data }
+    local item_ = item --[[:! { point: unknown, data: unknown, ... }]]
+    if item_.point then
+      entries[i] = { point = item_.point --[[:! { [integer]: number }]], data = item_.data }
     else
-      entries[i] = { point = item, data = nil }
+      entries[i] = { point = item --[[:! { [integer]: number }]], data = nil }
     end
   end
 

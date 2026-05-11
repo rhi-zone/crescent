@@ -296,9 +296,10 @@ function mat4_mt:mul_vec4(x, y, z, w)
   -- accepts (x,y,z,w) or a table {x,y,z,w}
   local vx, vy, vz, vw
   if type(x) == "table" then
-    vx, vy, vz, vw = x[1], x[2], x[3], x[4]
+    local x_ = x --[[:! { [integer]: number }]]
+    vx, vy, vz, vw = x_[1], x_[2], x_[3], x_[4]
   else
-    vx, vy, vz, vw = x, y, z, w
+    vx, vy, vz, vw = x --[[:! number]], y --[[:! number]], z --[[:! number]], w --[[:! number]]
   end
   local m = self
   return

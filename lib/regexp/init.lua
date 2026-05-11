@@ -985,11 +985,13 @@ function M.compile(pattern)
   return setmetatable({ _prog = prog }, Re)
 end
 
+--:: Regexp = { _prog: unknown, test: (self: Regexp, str: string) -> boolean, find: (self: Regexp, str: string, init: integer | nil) -> (integer | nil, integer | nil, ...(string | nil)), match: (self: Regexp, str: string) -> (string | nil), find_all: (self: Regexp, str: string) -> { [integer]: unknown }, sub: (self: Regexp, str: string, repl: unknown, n: integer | nil) -> (string, integer), gsub: (self: Regexp, str: string, repl: unknown) -> (string, integer), split: (self: Regexp, str: string, max_splits: integer | nil) -> { [integer]: string } }
+--: (unknown) -> (Regexp | nil, string | nil)
 local function ensure_re(pat_or_re)
   if type(pat_or_re) == "table" and pat_or_re._prog then
-    return pat_or_re, nil
+    return pat_or_re --[[:! Regexp]], nil
   end
-  return M.compile(pat_or_re)
+  return M.compile(pat_or_re --[[:! string]]) --[[:! (Regexp | nil, string | nil)]]
 end
 
 function M.test(pat, str)

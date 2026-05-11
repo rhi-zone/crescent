@@ -155,9 +155,10 @@ function M.join(shares)
     if type(s) ~= "table" then
       return nil, "share " .. i .. " is not a table"
     end
-    local x = s.x
-    local y = s.y
-    if type(x) ~= "number" or x < 1 or x > 255 or math.floor(x) ~= x then
+    local s_ = s --[[:! { x: unknown, y: unknown, ... }]]
+    local x = s_.x
+    local y = s_.y
+    if type(x) ~= "number" or (x --[[:! number]]) < 1 or (x --[[:! number]]) > 255 or math.floor(x --[[:! number]]) ~= (x --[[:! number]]) then
       return nil, "share " .. i .. " has invalid x: " .. tostring(x)
     end
     if type(y) ~= "string" then
@@ -179,7 +180,7 @@ function M.join(shares)
   local out = {}
   local ys = {}
   for bi = 1, len do
-    for i = 1, k do ys[i] = shares[i].y:byte(bi) end
+    for i = 1, k do ys[i] = (shares[i] --[[:! { y: string, ... }]]).y:byte(bi) end
     out[bi] = string.char(lagrange_at_zero(xs, ys))
   end
   return table.concat(out)
