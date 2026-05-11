@@ -111,7 +111,7 @@ local x --: integer                   -- inline: annotates the local declaration
 --:: Foo = { name: string, age: integer }  -- type alias declaration
 --:: declare x = integer              -- global variable declaration
 --:: newtype UserId = integer         -- nominal newtype (not assignable to/from integer)
---:: module "mylib": { foo: string }  -- declares what require("mylib") returns
+-- --:: module "mylib": { foo: string }  -- DO NOT USE in crescent source; require() return types are inferred from return M
 --:: augment string { upper: () -> string }  -- merges fields into an existing type binding
 --:: template                         -- marks next function as a generic template (advanced)
 ```
