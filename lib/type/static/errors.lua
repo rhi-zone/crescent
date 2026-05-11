@@ -437,6 +437,10 @@ local function build_templates()
             return "type contains 'any' \xe2\x80\x94 use 'unknown' for unconstrained values,"
                 .. " or a specific type"
         end,
+        --: (TemplateArgs) -> string
+        [E.FORCE_CAST]            = function(_a)
+            return "force cast \xe2\x80\x94 fix the upstream type annotation instead; see CLAUDE.md"
+        end,
     }
 end
 

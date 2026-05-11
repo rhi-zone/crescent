@@ -2414,6 +2414,7 @@ local function solve_overlap(ctx, c)
         if at.tag == TAG_VAR or at.tag == TAG_ROWVAR then return false end
         if bt.tag == TAG_VAR or bt.tag == TAG_ROWVAR then return false end
     end
+    add_warning(ctx, line, col, errors_mod.format_diag(defs.E.FORCE_CAST, {}))
     if unify_mod.types_overlap(ctx, actual, expected) then return true end
     add_error(ctx, line, col,
         "force cast has no overlap: `"

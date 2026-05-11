@@ -382,6 +382,7 @@ M.E = {
     LOCAL_NEEDS_INIT      = 29,  -- annotated local without initializer when nil ∉ T (Gap 9)
     MATCH_CONTAINS_ANY    = 30,  -- match type contains `any`; exhaustiveness cannot be verified (warning)
     ANY_IN_TYPE           = 31,  -- `any` used as a component of a compound type (warning)
+    FORCE_CAST            = 32,  -- `--[[:! T]]` force cast used; fix upstream annotation instead (warning)
 }
 
 -- Keyword strings (ordered by token ID, for intern pre-population)

@@ -10904,6 +10904,12 @@ local y = x
         no_errors("--:: declare v = unknown\nlocal x = v --[[:! string]]\n")
     end)
 
+    assert.it("E: --[[:! T]] force cast always emits FORCE_CAST warning", function()
+        -- Force cast emits a warning regardless of whether the cast succeeds.
+        has_warning("--:: declare y = unknown\nlocal x = y --[[:! string]]\n",
+            "force cast")
+    end)
+
     -- F: ---@param (triple-dash EmmyLua form) is not a crescent annotation
     assert.it("F: ---@param before function; function unannotated, f(42) no error", function()
         no_errors([[
