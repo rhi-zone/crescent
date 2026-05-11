@@ -658,9 +658,11 @@ function client_mt:introspect(access_token, opts)
   local resp, err = self._http.post(introspect_url, headers, form_encode(params))
   if not resp then return nil, err or "http request failed" end
   if type(resp) ~= "table" then return nil, "unexpected response type" end
-  if resp.status ~= 200 then return nil, "http " .. tostring(resp.status) end
-  if not resp.body then return nil, "empty response body" end
-  local obj, jerr = json_parse(resp.body)
+  local resp_ = resp --[[: { status: integer, body: string | nil }]]
+  local status = resp_.status
+  if status ~= 200 then return nil, "http " .. tostring(status) end
+  if not resp_.body then return nil, "empty response body" end
+  local obj, jerr = json_parse(resp_.body)
   if not obj then return nil, jerr or "invalid JSON" end
   return obj
 end

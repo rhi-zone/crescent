@@ -224,8 +224,11 @@ end
 -- Get the first text value from a paragraph's children.
 local function para_first_text(para)
   if not para.children or #para.children == 0 then return nil end
-  local first = para.children[1]
-  if first.type == "text" then return first.value or "" end
+  local first = para.children[1] --[[: unknown]]
+  if type(first) == "table" then
+    local ft = first.type --[[: unknown]]
+    if ft == "text" then return (first.value --[[: unknown]]) or "" end
+  end
   return nil
 end
 

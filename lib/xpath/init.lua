@@ -1074,26 +1074,28 @@ FUNCTIONS["concat"] = function(args, ctx)
 end
 
 FUNCTIONS["name"] = function(args, ctx)
-  local n = #args > 0 and eval_expr(args[1], ctx) or ctx.node
-  if type(n) == "table" and n[1] then n = n[1] end
+  local n = (#args > 0 and eval_expr(args[1], ctx) or ctx.node) --[[: unknown]]
+  if type(n) == "table" and n[1] then n = n[1] --[[: unknown]] end
   if type(n) == "table" then
-    if n.type == "element" then return n.tag or "" end
-    if n.type == "attribute" then return n.name or "" end
+    local nt = n.type --[[: unknown]]
+    if nt == "element" then return (n.tag --[[: unknown]]) or "" end
+    if nt == "attribute" then return (n.name --[[: unknown]]) or "" end
   end
   return ""
 end
 
 FUNCTIONS["local-name"] = function(args, ctx)
-  local n = #args > 0 and eval_expr(args[1], ctx) or ctx.node
-  if type(n) == "table" and n[1] then n = n[1] end
+  local n = (#args > 0 and eval_expr(args[1], ctx) or ctx.node) --[[: unknown]]
+  if type(n) == "table" and n[1] then n = n[1] --[[: unknown]] end
   if type(n) == "table" then
-    if n.type == "element" then
-      local tag = n.tag or ""
-      return tag:match(":(.+)$") or tag
+    local nt = n.type --[[: unknown]]
+    if nt == "element" then
+      local tag = (n.tag --[[: unknown]]) or ""
+      return (tag --[[: string]]):match(":(.+)$") or tag
     end
-    if n.type == "attribute" then
-      local nm = n.name or ""
-      return nm:match(":(.+)$") or nm
+    if nt == "attribute" then
+      local nm = (n.name --[[: unknown]]) or ""
+      return (nm --[[: string]]):match(":(.+)$") or nm
     end
   end
   return ""

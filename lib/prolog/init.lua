@@ -147,18 +147,21 @@ local function parse_primary(toks, pos)
   local tok = toks[pos]
   if not tok then return nil, "unexpected end of input" end
 
+  local tok_type = tok.type --[[: unknown]]
+  local tok_value = tok.value --[[: unknown]]
+
   -- anonymous variable
-  if tok.type == "var" and tok.value == "_" then
+  if tok_type == "var" and tok_value == "_" then
     return anon_var(), pos + 1
   end
 
   -- variable
-  if tok.type == "var" then
+  if tok_type == "var" then
     return mk_var(tok.value), pos + 1
   end
 
   -- number
-  if tok.type == "num" then
+  if tok_type == "num" then
     return mk_num(tok.value), pos + 1
   end
 
@@ -223,7 +226,7 @@ local function parse_primary(toks, pos)
   end
 
   -- atom, possibly followed by (args)
-  if tok.type == "atom" then
+  if tok_type == "atom" then
     local name = tok.value
     pos = pos + 1
     -- compound term?

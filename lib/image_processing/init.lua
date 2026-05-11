@@ -504,7 +504,6 @@ end
 -- Gaussian blur via separable passes
 --: (img: Image, sigma: number) -> unknown
 function M.blur_gaussian(img, sigma)
-  local img = img --[[: Image]]
   local ks = math_ceil(3 * sigma) * 2 + 1
   local half = math_floor(ks / 2)
   -- build 1D kernel
@@ -595,21 +594,20 @@ end
 -- Returns a table of tables, one per channel, each with indices [0..255]
 -- For grayscale returns a single table (not nested in another)
 function M.histogram(img)
-  local img = img --[[: Image]]
-  local w, h, ch = img.width, img.height, img.channels
-  local src = img.data
+  local img_ = img --[[: Image]]
+  local w, h, ch = img_.width, img_.height, img_.channels
+  local src = img_.data
   local hists = {}
   for c = 1, ch do
     local hc = {} --: { [integer]: integer }
     for i = 0, 255 do hc[i] = 0 end
     hists[c] = hc
   end
-  local hists_ = hists --[[: { [integer]: { [integer]: integer } }]]
   local n = w * h
   for i = 1, n do
     for c = 1, ch do
       local v = src[(i-1)*ch + c] or 0
-      hists_[c][v] = (hists_[c][v] or 0) + 1
+      hists[c][v] = (hists[c][v] or 0) + 1
     end
   end
   if ch == 1 then
