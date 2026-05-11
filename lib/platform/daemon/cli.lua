@@ -198,13 +198,20 @@ do
 			local entries = decoded.entry or {}
 			local seen = {}
 			for _, entry_def in pairs(entries) do
-				local main = type(entry_def) == "table" and entry_def.main
-				if main and not seen[main] then
-					seen[main] = true
-					local f = io.open(runtime_dir .. "/" .. main, "rb")
-					if f then
-						runtime_files[#runtime_files + 1] = { name = main, data = f:read("*a") }
-						f:close()
+				local main
+				if type(entry_def) == "table" then
+					local entry_def_ = entry_def --[[:! { main: string | nil, ... }]]
+					main = entry_def_.main
+				end
+				if main then
+					local main_str = main --[[:! string]]
+					if not seen[main_str] then
+						seen[main_str] = true
+						local f = io.open(runtime_dir .. "/" .. main_str, "rb")
+						if f then
+							runtime_files[#runtime_files + 1] = { name = main_str, data = f:read("*a") }
+							f:close()
+						end
 					end
 				end
 			end

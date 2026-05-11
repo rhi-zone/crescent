@@ -58,20 +58,22 @@ local function extract_card_meta(png_bytes)
 
 	local ok, card = pcall(json_mod.decode, decoded)
 	if not ok or type(card) ~= "table" then return nil, "import: chara JSON parse failed" end
+	local card_ = card --[[:! { data: { name: string | nil, description: string | nil, tags: unknown, ... } | nil, name: string | nil, description: string | nil, tags: unknown, ... }]]
 
 	-- CCv2 wraps data under .data; some formats use top-level.
-	local data = card.data or card
+	local data = card_.data or card_
 
 	local meta = {
 		name = data.name or nil,
 		description = (data.description or ""):sub(1, 500),  -- truncate for index
-		tags = {},
+		tags = {}, --: string[]
 	}
 
 	-- Merge card tags if present.
 	if type(data.tags) == "table" then
-		for _, t in ipairs(data.tags) do
-			meta.tags[#meta.tags + 1] = t
+		local tags = data.tags --[[:! { [integer]: unknown }]]
+		for _, t in ipairs(tags) do
+			meta.tags[#meta.tags + 1] = t --[[:! string]]
 		end
 	end
 

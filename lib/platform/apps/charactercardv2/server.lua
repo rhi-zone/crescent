@@ -661,21 +661,23 @@ local function load_card(state, caps)
 	-- the card is self-contained (they round-trip through flush_card_state).
 	local ext = card_data.extensions
 	if type(ext) == "table" then
-		if ext.depth_prompt and type(ext.depth_prompt) == "string" and #ext.depth_prompt > 0 then
+		local ext_ = ext --[[:! { [string]: unknown }]]
+		local depth_prompt = ext_.depth_prompt
+		if depth_prompt and type(depth_prompt) == "string" and #depth_prompt > 0 then
 			state.authors_note = state.authors_note or { text = "", depth = 4, position = "after" }
-			state.authors_note.text = ext.depth_prompt
-			if type(ext.depth_prompt_depth) == "number" then
-				state.authors_note.depth = ext.depth_prompt_depth
+			state.authors_note.text = depth_prompt
+			if type(ext_.depth_prompt_depth) == "number" then
+				state.authors_note.depth = ext_.depth_prompt_depth
 			end
-			if ext.depth_prompt_role == "before" or ext.depth_prompt_role == "after" then
-				state.authors_note.position = ext.depth_prompt_role
+			if ext_.depth_prompt_role == "before" or ext_.depth_prompt_role == "after" then
+				state.authors_note.position = ext_.depth_prompt_role --[[:! string]]
 			end
 		end
-		if type(ext.regex_scripts) == "table" then
-			state.regex_scripts = ext.regex_scripts
+		if type(ext_.regex_scripts) == "table" then
+			state.regex_scripts = ext_.regex_scripts --[[:! { [integer]: { enabled: boolean, find: string, name: string, order: integer | nil, replace: string, scope: string } }]]
 		end
-		if type(ext.linked_lorebooks) == "table" then
-			state.linked_lorebooks = ext.linked_lorebooks
+		if type(ext_.linked_lorebooks) == "table" then
+			state.linked_lorebooks = ext_.linked_lorebooks --[[:! { [integer]: unknown }]]
 		end
 	end
 	return card_data

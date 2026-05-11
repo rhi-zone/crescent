@@ -17,9 +17,10 @@ function M.build_tree(freqs)
   if type(freqs) ~= "table" then
     return nil, "freqs must be a table"
   end
+  local freqs_ = freqs --[[:! { [unknown]: number }]]
 
   local nodes = {} --: { [integer]: HuffNode }
-  for sym, freq in pairs(freqs) do
+  for sym, freq in pairs(freqs_) do
     if type(freq) ~= "number" or freq < 0 then
       return nil, "frequency for symbol " .. tostring(sym) .. " must be a non-negative number"
     end
@@ -310,11 +311,12 @@ function M.canonical_codes(symbol_lengths)
   if type(symbol_lengths) ~= "table" then
     return nil, "symbol_lengths must be a table"
   end
+  local symbol_lengths_ = symbol_lengths --[[:! { [unknown]: integer }]]
 
   -- Collect (symbol, length) pairs and sort by (length, symbol)
   local pairs_list = {} --: { [integer]: { sym: unknown, len: integer } }
-  for sym, len in pairs(symbol_lengths) do
-    pairs_list[#pairs_list + 1] = { sym = sym, len = len --[[:! integer]] }
+  for sym, len in pairs(symbol_lengths_) do
+    pairs_list[#pairs_list + 1] = { sym = sym, len = len }
   end
   -- insertion sort by (len, tostring(sym))
   for i = 2, #pairs_list do

@@ -1101,6 +1101,7 @@ if not entry_path then
 	io.stderr:write("error: entrypoint '" .. entrypoint_name .. "' has no 'main' field\n")
 	os.exit(1)
 end
+local entry_path_str = entry_path --[[:! string]]
 
 -- Resolve app identity and data directory.
 --: string
@@ -1214,13 +1215,15 @@ save_grants(data_dir, app_id, grants)
 -- Run the entrypoint.
 if (app --[[:! AppRecord]])._dir_mode then
 	-- Directory mode: require the module directly.
-	local entry_mod_, load_err = run_dir_entrypoint(app --[[:! AppRecord]], entry_path, caps)
+	local entry_mod_, load_err = run_dir_entrypoint(app --[[:! AppRecord]], entry_path_str, caps)
 	if not entry_mod_ then
 		io.stderr:write("error: " .. tostring(load_err) .. "\n")
 		os.exit(1)
 	end
-	local entry_mod = entry_mod_ or {}
-	if type(entry_mod) ~= "table" then entry_mod = {} end
+	local entry_mod_ = entry_mod_ or {}
+	if type(entry_mod_) ~= "table" then entry_mod_ = {} end
+	--: { create: ((unknown, unknown) -> unknown) | nil, handler: unknown, cli: unknown, ... }
+	local entry_mod = entry_mod_ --[[:! { create: ((unknown, unknown) -> unknown) | nil, handler: unknown, cli: unknown, ... }]]
 
 	if entry_mod.create then
 		-- Module exports create(caps, opts) -> app instance.
@@ -1234,7 +1237,7 @@ if (app --[[:! AppRecord]])._dir_mode then
 			io.stderr:write("error: create() returned nil\n")
 			os.exit(1)
 		end
-		local result = result_
+		local result = result_ --[[:! { cli: ((unknown) -> nil) | nil, handler: unknown, ... }]]
 		-- CLI mode: app_args after '--' → invoke CLI handler instead of HTTP server.
 		if result.cli and opts.app_args and #opts.app_args > 0 then
 			result.cli(opts.app_args)

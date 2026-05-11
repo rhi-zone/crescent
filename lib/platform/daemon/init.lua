@@ -420,14 +420,17 @@ function M.make(opts)
 					local cfg = index_obj:get_cap_config(iapp_id, cname)
 					if cfg then local cfg_ = cfg --[[:! { host: unknown, ... }]]; if cfg_.host then h = cfg_.host --[[:! string]] end end
 				end
-				if h and not seen[h] then
-					seen[h] = true
-					-- Emit both schemes; the actual scheme is operator-determined.
-					local bare = h:gsub("^https?://", "")
-					if not seen["http://" .. bare] then
-						extra_origins[#extra_origins + 1] = "http://" .. bare
-						extra_origins[#extra_origins + 1] = "https://" .. bare
-						seen["http://" .. bare] = true
+				if h then
+					local h_str = h --[[:! string]]
+					if not seen[h_str] then
+						seen[h_str] = true
+						-- Emit both schemes; the actual scheme is operator-determined.
+						local bare = h_str:gsub("^https?://", "")
+						if not seen["http://" .. bare] then
+							extra_origins[#extra_origins + 1] = "http://" .. bare
+							extra_origins[#extra_origins + 1] = "https://" .. bare
+							seen["http://" .. bare] = true
+						end
 					end
 				end
 			end
