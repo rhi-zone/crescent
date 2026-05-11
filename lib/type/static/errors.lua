@@ -9,7 +9,7 @@ local M = {}
 -- specific fields it expects (e.g. FIELD_NOT_FOUND uses obj/name; CALL_ARG_MISMATCH
 -- uses param_name/act/fn/exp/idx/detail). `any` is used because the union of all
 -- per-code shapes would be unwieldy; templates effectively know their inputs.
---:: TemplateArgs = { [string]: any }
+--:: TemplateArgs = { [string]: string | integer }
 
 -- Create a new error context.
 -- source_lines: filename -> array of source lines (populated by set_source).
@@ -369,11 +369,11 @@ local function build_templates()
         end,
         --: (TemplateArgs) -> string
         [E.NO_MATCHING_OVERLOAD]  = function(a)
-            return a.msg  -- pre-formatted multi-line string
+            return (a.msg --[[:! string]])  -- pre-formatted multi-line string
         end,
         --: (TemplateArgs) -> string
         [E.UNION_CALL_MISMATCH]   = function(a)
-            return a.msg  -- pre-formatted multi-line string
+            return (a.msg --[[:! string]])  -- pre-formatted multi-line string
         end,
         --: (TemplateArgs) -> string
         [E.CANNOT_CALL]           = function(a)

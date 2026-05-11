@@ -118,7 +118,7 @@ local tmp_c = os.tmpname() .. ".c"
 do
   local f0 = io.open(tmp_c, "w")
   if not f0 then error("failed to open " .. tmp_c) end
-  local f = f0 --[[:! { close: (any) -> (boolean | nil, string | nil), flush: (any) -> (boolean | nil, string | nil), lines: (any) -> () -> string | nil, read: (any, ...string | number) -> string | nil, seek: (any, string | nil, integer | nil) -> (integer | nil, string | nil), setvbuf: (any, string, integer | nil) -> (boolean | nil, string | nil), write: (any, ...string | number) -> (any, string | nil) }]]
+  local f = f0 --[[:! { close: (unknown) -> (boolean | nil, string | nil), flush: (unknown) -> (boolean | nil, string | nil), lines: (unknown) -> () -> string | nil, read: (unknown, ...string | number) -> string | nil, seek: (unknown, string | nil, integer | nil) -> (integer | nil, string | nil), setvbuf: (unknown, string, integer | nil) -> (boolean | nil, string | nil), write: (unknown, ...string | number) -> (unknown, string | nil) }]]
   f:write('#define STB_IMAGE_IMPLEMENTATION\n')
   f:write('#define STB_IMAGE_RESIZE2_IMPLEMENTATION\n')
   f:write('#define STB_TRUETYPE_IMPLEMENTATION\n')

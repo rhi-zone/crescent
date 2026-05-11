@@ -20,7 +20,7 @@ local M = {}
 --:: FlagSpec = { short: string|nil, desc: string, ... }
 --:: OptionSpec = { short: string|nil, desc: string, default: unknown, type: string|nil, array: boolean|nil, ... }
 --:: PosSpec = { name: string, desc: string, required: boolean|false, ... }
---:: CmdSpec = { name: string, desc: string|nil, flags: { [string]: FlagSpec }|nil, options: { [string]: OptionSpec }|nil, positionals: { [integer]: PosSpec }|nil, commands: { [string]: CmdSpec }|nil, action: ((any) -> any)|nil, _flag_order: { [integer]: string }, _option_order: { [integer]: string }, _command_order: { [integer]: string }, _short_to_flag: { [string]: string }, _short_to_option: { [string]: string }, version: string|nil, ... }
+--:: CmdSpec = { name: string, desc: string|nil, flags: { [string]: FlagSpec }|nil, options: { [string]: OptionSpec }|nil, positionals: { [integer]: PosSpec }|nil, commands: { [string]: CmdSpec }|nil, action: ((unknown) -> unknown)|nil, _flag_order: { [integer]: string }, _option_order: { [integer]: string }, _command_order: { [integer]: string }, _short_to_flag: { [string]: string }, _short_to_option: { [string]: string }, version: string|nil, ... }
 
 -- ── Spec normalization ────────────────────────────────────────────────────
 

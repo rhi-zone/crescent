@@ -112,7 +112,7 @@ end
 
 --[[::
 LexState = {
-  src: any, srclen: integer, pos: integer, b: integer,
+  src: number, srclen: integer, pos: integer, b: integer,
   line: integer, col: integer, tk: integer, val: unknown,
   pool: InternPool, _buf_id: integer, filename: string,
   _la_tk: integer, _la_val: unknown, _la_line: integer, _la_col: integer,
@@ -326,13 +326,13 @@ function Lexer:_read_long_string(sep)
             if self.b == B_RBRK and count == sep then
                 self:_nextbyte()
                 if plain then
-                    return ffi.string(self.src + start, content_end - start)
+                    return ffi.string(((self.src + start) --[[: unknown]]) --[[:! cdata]], content_end - start)
                 else
                     -- flush remaining plain segment
                     --: integer
                     local s0 = start
                     if content_end > s0 then
-                        parts[#parts + 1] = ffi.string(self.src + s0, content_end - s0)
+                        parts[#parts + 1] = ffi.string(((self.src + s0) --[[: unknown]]) --[[:! cdata]], content_end - s0)
                     end
                     return table.concat(parts)
                 end
@@ -348,7 +348,7 @@ function Lexer:_read_long_string(sep)
                     --: integer
                     local s1 = start
                     if self.pos - 1 > s1 then
-                        parts[#parts + 1] = ffi.string(self.src + s1, self.pos - 1 - s1)
+                        parts[#parts + 1] = ffi.string(((self.src + s1) --[[: unknown]]) --[[:! cdata]], self.pos - 1 - s1)
                     end
                     parts[#parts + 1] = "\n"
                     self:_incline()
@@ -363,7 +363,7 @@ function Lexer:_read_long_string(sep)
                         --: integer
                         local s2 = start
                         if self.pos - 1 > s2 then
-                            parts[#parts + 1] = ffi.string(self.src + s2, self.pos - 1 - s2)
+                            parts[#parts + 1] = ffi.string(((self.src + s2) --[[: unknown]]) --[[:! cdata]], self.pos - 1 - s2)
                         end
                         parts[#parts + 1] = "\n"
                         self:_incline()
@@ -378,7 +378,7 @@ function Lexer:_read_long_string(sep)
                 --: integer
                 local s3 = start
                 if self.pos - 1 > s3 then
-                    parts[#parts + 1] = ffi.string(self.src + s3, self.pos - 1 - s3)
+                    parts[#parts + 1] = ffi.string(((self.src + s3) --[[: unknown]]) --[[:! cdata]], self.pos - 1 - s3)
                 end
                 parts[#parts + 1] = "\n"
                 self:_incline()
@@ -553,9 +553,9 @@ function Lexer:_read_number()
             break
         end
     end
-    local str = ffi.string(self.src + start, self.pos - 1 - start)
+    local str = ffi.string(((self.src + start) --[[: unknown]]) --[[:! cdata]], self.pos - 1 - start)
     if self.b == EOF then
-        str = ffi.string(self.src + start, self.srclen - start)
+        str = ffi.string(((self.src + start) --[[: unknown]]) --[[:! cdata]], self.srclen - start)
     end
     -- Strip LuaJIT integer suffixes (ULL, LL, UL, L, case-insensitive)
     -- e.g. 0x1ULL, 255ULL, 0xFF00LL
@@ -602,7 +602,7 @@ function Lexer:_capture_line_annotation(ann_line, ann_col)
     if self.b ~= EOF then
         content_end = self.pos - 1  -- don't include the newline byte
     end
-    local content = ffi.string(self.src + start, content_end - start)
+    local content = ffi.string(((self.src + start) --[[: unknown]]) --[[:! cdata]], content_end - start)
 
     -- For ANN_DECL, check for continuation lines starting with --::
     -- Only continue if brackets are unbalanced (the declaration isn't complete yet).
@@ -657,7 +657,7 @@ function Lexer:_capture_line_annotation(ann_line, ann_col)
             end
             local cend = self.pos
             if self.b ~= EOF then cend = self.pos - 1 end
-            local line_content = ffi.string(self.src + cstart, cend - cstart)
+            local line_content = ffi.string(((self.src + cstart) --[[: unknown]]) --[[:! cdata]], cend - cstart)
             parts[#parts + 1] = line_content
             -- Update bracket depth
             for i = 1, #line_content do

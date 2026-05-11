@@ -143,7 +143,7 @@ if not f1 then
 end
 local f2 = f1 or io.open("/tmp/commonmark_spec.json", "r")
 if not f2 then error("could not open commonmark spec") end
-local f = f2 --[[:! { close: (any) -> (boolean | nil, string | nil), flush: (any) -> (boolean | nil, string | nil), lines: (any) -> () -> string | nil, read: (any, ...string | number) -> string | nil, seek: (any, string | nil, integer | nil) -> (integer | nil, string | nil), setvbuf: (any, string, integer | nil) -> (boolean | nil, string | nil), write: (any, ...string | number) -> (any, string | nil) }]]
+local f = f2 --[[:! { close: (unknown) -> (boolean | nil, string | nil), flush: (unknown) -> (boolean | nil, string | nil), lines: (unknown) -> () -> string | nil, read: (unknown, ...string | number) -> string | nil, seek: (unknown, string | nil, integer | nil) -> (integer | nil, string | nil), setvbuf: (unknown, string, integer | nil) -> (boolean | nil, string | nil), write: (unknown, ...string | number) -> (unknown, string | nil) }]]
 local src = f:read("*a") --[[:! string]]
 f:close()
 local data_raw = json.decode(src)

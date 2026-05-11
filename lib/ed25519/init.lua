@@ -37,13 +37,14 @@ local function try_system()
 
 	-- lib is typed as any: ffi.load result passes through pcall so its type
 	-- is unknown; the cdef block above fully specifies the ABI.
-	local lib = nil --[[: unknown]]
+	local lib_raw = nil --[[: unknown]]
 	local names = { "sodium", "libsodium.so.26", "libsodium.so.23", "libsodium.so" }
 	for _, name in ipairs(names) do
 		local ok, l = pcall(ffi.load, name)
-		if ok then lib = l; break end
+		if ok then lib_raw = l; break end
 	end
-	if not lib then error("libsodium not found") end
+	if not lib_raw then error("libsodium not found") end
+	local lib = lib_raw --[[:! $FfiC]]
 
 	-- Smoke test
 	local pk = ffi.new("unsigned char[32]")

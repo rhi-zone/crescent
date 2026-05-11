@@ -46,7 +46,7 @@ History.__index = History
 function M.history(opts)
   assert(opts and opts.time_fn, "history requires opts.time_fn")
   local opts_any = opts --[[: unknown]]
-  local opts_ = opts_any --[[:! { time_fn: () -> any, max_size: any, on_execute: any, on_undo: any, on_redo: any, ... }]]
+  local opts_ = opts_any --[[:! { time_fn: () -> unknown, max_size: unknown, on_execute: unknown, on_undo: unknown, on_redo: unknown, ... }]]
   local h_any = setmetatable({}, History) --[[: unknown]]
   local h = h_any --[[:! HistObj]]
   h._undo    = {}   -- stack of entries, index 1 = oldest
@@ -117,7 +117,7 @@ end
 -- Re-execute an entry (for redo). Returns undo_data or (nil, err).
 local function raw_redo(entry, time_fn)
   local entry_ = entry --[[:! HistEntry]]
-  local time_fn_ = time_fn --[[:! () -> any]]
+  local time_fn_ = time_fn --[[:! () -> unknown]]
   if entry_.is_batch then
     local new_batch_entries = {} --: { [integer]: HistEntry }
     local batch = entry_.batch_entries --[[:! { [integer]: HistEntry }]]

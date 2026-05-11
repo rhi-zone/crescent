@@ -7,12 +7,12 @@ local sqlite = require("lib.sqlite")
 
 local M = {}
 
---:: sqlite = { db: cdata, execute: (self: sqlite, string, ...unknown) -> (true | nil, string | nil), query: (self: sqlite, string, ...unknown) -> ((() -> unknown) | nil, string | nil), close: (self: sqlite) -> nil, last_insert_rowid: (self: sqlite) -> number | nil, changes: (self: sqlite) -> number | nil, ... }
---:: Conn = { _db: sqlite, ... }
---:: Select = { _db: sqlite, _table: string, _columns: { [integer]: string } | nil, _wheres: { [integer]: unknown }, _where_params: { [integer]: unknown }, _order: string | nil, _limit: number | nil, _offset: number | nil, ... }
---:: Insert = { _db: sqlite, _table: string, _columns: { [integer]: string } | nil, _values: { [string]: unknown } | nil, _on_conflict: string | nil, _returning: { [integer]: string } | nil, ... }
---:: Update = { _db: sqlite, _table: string, _set: { [string]: unknown } | nil, _sets: { [integer]: unknown } | nil, _wheres: { [integer]: unknown }, _where_params: { [integer]: unknown }, _returning: { [integer]: string } | nil, ... }
---:: Delete = { _db: sqlite, _table: string, _wheres: { [integer]: unknown }, _where_params: { [integer]: unknown }, _returning: { [integer]: string } | nil, ... }
+--:: sqlite = { db: cdata, execute: (self: sqlite, string, ...unknown) -> (true | nil, string | nil), query: (self: sqlite, string, ...unknown) -> ((() -> (unknown | nil)) | nil, string | nil), close: (self: sqlite) -> nil, last_insert_rowid: (self: sqlite) -> number | nil, changes: (self: sqlite) -> number | nil, ... }
+--:: Conn = { _db: sqlite, query: (self: Conn, string, ...unknown) -> ({ [integer]: { [string]: unknown } } | nil, string | nil), migration_version: (self: Conn) -> (integer | nil), ... }
+--:: Select = { _db: sqlite, _table: string, _columns: { [integer]: string } | nil, _wheres: { [integer]: unknown }, _where_params: { [integer]: unknown }, _order: string | nil, _limit: number | nil, _offset: number | nil, _build: (self: Select) -> (string, { [integer]: unknown }), _resolve_col_names: (self: Select) -> ({ [integer]: string } | nil, string | nil), limit: (self: Select, number) -> Select, all: (self: Select) -> ({ [integer]: { [string]: unknown } } | nil, string | nil), ... }
+--:: Insert = { _db: sqlite, _table: string, _columns: { [integer]: string } | nil, _values: { [string]: unknown } | nil, _on_conflict: string | nil, _returning: { [integer]: string } | nil, _build: (self: Insert) -> (string, { [integer]: unknown }), ... }
+--:: Update = { _db: sqlite, _table: string, _set: { [string]: unknown } | nil, _sets: { [integer]: unknown } | nil, _wheres: { [integer]: unknown }, _where_params: { [integer]: unknown }, _returning: { [integer]: string } | nil, _build: (self: Update) -> (string, { [integer]: unknown }), ... }
+--:: Delete = { _db: sqlite, _table: string, _wheres: { [integer]: unknown }, _where_params: { [integer]: unknown }, _returning: { [integer]: string } | nil, _build: (self: Delete) -> (string, { [integer]: unknown }), ... }
 
 -- ── FFI: sqlite3_column_name (not exposed by lib.sqlite) ───────────────────
 
@@ -82,9 +82,10 @@ end
 
 --- Get column names from an arbitrary SQL statement via sqlite3_column_name.
 --: ({ prepare: (self: unknown, string) -> (unknown, string | nil), ... }, string) -> string[]
+--: (unknown, string) -> { [integer]: string }
 local function query_column_names(db, sql)
 	if not sqlite_lib then return {} end
-	local stmt_raw, err = db:prepare(sql)
+	local stmt_raw, err = (db --[[:! { prepare: (self: unknown, string) -> (unknown, string | nil), ... }]]):prepare(sql)
 	if not stmt_raw then return {} end
 	local stmt = stmt_raw --[[:! { _stmt: cdata, close: (self: unknown) -> nil, ... }]]
 	local raw = stmt._stmt
@@ -103,7 +104,7 @@ local function query_column_names(db, sql)
 	return names
 end
 
---: (() -> (...unknown), string[]) -> { [string]: unknown }[]
+--: (() -> (unknown | nil), { [integer]: string }) -> { [integer]: { [string]: unknown } }
 local function collect_rows(iter, col_names)
 	local rows = {}
 	while true do
@@ -127,7 +128,7 @@ Select.__index = Select
 function Select:columns(...)
 	local q = shallow_copy(self) --[[:! Select]]
 	q._columns = { ... }
-	return setmetatable(q, Select) --[[: unknown]]
+	return setmetatable(q, Select) --[[:! Select]]
 end
 
 --: (Select, string, ...unknown) -> Select
@@ -140,28 +141,28 @@ function Select:where(clause, ...)
 	for i = 1, n do
 		q._where_params[#q._where_params + 1] = select(i, ...)
 	end
-	return setmetatable(q, Select) --[[: unknown]]
+	return setmetatable(q, Select) --[[:! Select]]
 end
 
 --: (Select, string) -> Select
 function Select:order(val)
 	local q = shallow_copy(self) --[[:! Select]]
 	q._order = val
-	return setmetatable(q, Select) --[[: unknown]]
+	return setmetatable(q, Select) --[[:! Select]]
 end
 
 --: (Select, number) -> Select
 function Select:limit(val)
 	local q = shallow_copy(self) --[[:! Select]]
 	q._limit = val
-	return setmetatable(q, Select) --[[: unknown]]
+	return setmetatable(q, Select) --[[:! Select]]
 end
 
 --: (Select, number) -> Select
 function Select:offset(val)
 	local q = shallow_copy(self) --[[:! Select]]
 	q._offset = val
-	return setmetatable(q, Select) --[[: unknown]]
+	return setmetatable(q, Select) --[[:! Select]]
 end
 
 --: (Select) -> (string, { [integer]: unknown })
@@ -189,18 +190,18 @@ end
 --: (Select) -> ({ [string]: unknown }[] | nil, string | nil)
 function Select:all()
 	local db_ = self._db
-	local select_ = self --[[: unknown]]
+	local select_ = self
 	local sql, params = select_:_build()
 	local iter, err = db_:query(sql, unpack(params))
-	if not iter then return nil, err end
+	if not iter then return nil, err --[[:! string | nil]] end
 	local col_names, cerr = select_:_resolve_col_names()
 	if not col_names then return nil, cerr end
-	return collect_rows(iter, col_names)
+	return collect_rows(iter --[[:! () -> (unknown | nil)]], col_names --[[:! { [integer]: string }]])
 end
 
 --: (Select) -> ({ [string]: unknown } | nil, string | nil)
 function Select:first()
-	local q = (self --[[: unknown]]):limit(1)
+	local q = self:limit(1)
 	local rows, err = q:all()
 	if not rows then return nil, err end
 	return rows[1]
@@ -209,13 +210,13 @@ end
 --: (Select) -> ((number | nil), (string | nil))
 function Select:count()
 	local db_ = self._db
-	local select_ = self --[[: unknown]]
+	local select_ = self
 	local sql, params = select_:_build()
 	local count_sql = "SELECT COUNT(*) FROM (" .. sql .. ")"
 	local iter, err = db_:query(count_sql, unpack(params))
-	if not iter then return nil, err end
-	local n = iter()
-	return n
+	if not iter then return nil, err --[[:! string | nil]] end
+	local n = (iter --[[:! () -> unknown]])()
+	return n --[[:! number | nil]]
 end
 
 -- ── INSERT builder ──────────────────────────────────────────────────────────
@@ -227,14 +228,14 @@ Insert.__index = Insert
 function Insert:values(vals)
 	local q = shallow_copy(self) --[[:! Insert]]
 	q._values = vals
-	return setmetatable(q, Insert) --[[: unknown]]
+	return setmetatable(q, Insert) --[[:! Insert]]
 end
 
 --: (Insert, ...unknown) -> Insert
 function Insert:returning(...)
 	local q = shallow_copy(self) --[[:! Insert]]
 	q._returning = { ... }
-	return setmetatable(q, Insert) --[[: unknown]]
+	return setmetatable(q, Insert) --[[:! Insert]]
 end
 
 --: (Insert) -> (string, { [integer]: unknown })
@@ -262,21 +263,21 @@ end
 --: (Insert) -> ((true | nil), (string | nil))
 function Insert:exec()
 	local db_ = self._db
-	local sql, params = (self --[[: unknown]]):_build()
+	local sql, params = self:_build()
 	return db_:execute(sql, unpack(params))
 end
 
 --: (Insert) -> ({ [string]: unknown } | nil, string | nil)
 function Insert:first()
 	local db_ = self._db
-	local sql, params = (self --[[: unknown]]):_build()
+	local sql, params = self:_build()
 	local iter, err = db_:query(sql, unpack(params))
-	if not iter then return nil, err end
+	if not iter then return nil, err --[[:! string | nil]] end
 	local ret_ = self._returning
 	if not ret_ then return nil end
 	local ret2_ = ret_ --[[:! { [integer]: string }]]
 	if #ret2_ == 0 then return nil end
-	return collect_rows(iter, ret2_)[1]
+	return collect_rows(iter --[[:! () -> (unknown | nil)]], ret2_)[1]
 end
 
 -- ── UPDATE builder ──────────────────────────────────────────────────────────
@@ -288,7 +289,7 @@ Update.__index = Update
 function Update:set(vals)
 	local q = shallow_copy(self) --[[:! Update]]
 	q._set = vals
-	return setmetatable(q, Update) --[[: unknown]]
+	return setmetatable(q, Update) --[[:! Update]]
 end
 
 --: (Update, string, ...unknown) -> Update
@@ -301,7 +302,7 @@ function Update:where(clause, ...)
 	for i = 1, n do
 		q._where_params[#q._where_params + 1] = select(i, ...)
 	end
-	return setmetatable(q, Update) --[[: unknown]]
+	return setmetatable(q, Update) --[[:! Update]]
 end
 
 --: (Update) -> (string, { [integer]: unknown })
@@ -332,7 +333,7 @@ end
 --: (Update) -> ((true | nil), (string | nil))
 function Update:exec()
 	local db_ = self._db
-	local sql, params = (self --[[: unknown]]):_build()
+	local sql, params = self:_build()
 	return db_:execute(sql, unpack(params))
 end
 
@@ -351,7 +352,7 @@ function Delete:where(clause, ...)
 	for i = 1, n do
 		q._where_params[#q._where_params + 1] = select(i, ...)
 	end
-	return setmetatable(q, Delete) --[[: unknown]]
+	return setmetatable(q, Delete) --[[:! Delete]]
 end
 
 --: (Delete) -> (string, { [integer]: unknown })
@@ -367,7 +368,7 @@ end
 --: (Delete) -> ((true | nil), (string | nil))
 function Delete:exec()
 	local db_ = self._db
-	local sql, params = (self --[[: unknown]]):_build()
+	local sql, params = self:_build()
 	return db_:execute(sql, unpack(params))
 end
 
@@ -387,7 +388,7 @@ function Conn:select(table_name)
 		_order = nil,
 		_limit = nil,
 		_offset = nil,
-	}, Select) --[[: unknown]]
+	}, Select) --[[:! Select]]
 end
 
 --: (Conn, string) -> Insert
@@ -397,7 +398,7 @@ function Conn:insert(table_name)
 		_table = table_name,
 		_values = nil,
 		_returning = nil,
-	}, Insert) --[[: unknown]]
+	}, Insert) --[[:! Insert]]
 end
 
 --: (Conn, string) -> Update
@@ -408,7 +409,7 @@ function Conn:update(table_name)
 		_set = nil,
 		_wheres = {},
 		_where_params = {},
-	}, Update) --[[: unknown]]
+	}, Update) --[[:! Update]]
 end
 
 --: (Conn, string) -> Delete
@@ -418,7 +419,7 @@ function Conn:delete(table_name)
 		_table = table_name,
 		_wheres = {},
 		_where_params = {},
-	}, Delete) --[[: unknown]]
+	}, Delete) --[[:! Delete]]
 end
 
 --: (Conn, string, ...unknown) -> ((true | nil), (string | nil))
@@ -431,14 +432,14 @@ end
 function Conn:query(sql, ...)
 	local db_ = self._db
 	local iter, err = db_:query(sql, ...)
-	if not iter then return nil, err end
+	if not iter then return nil, err --[[:! string | nil]] end
 	local col_names = query_column_names(db_, sql)
-	return collect_rows(iter, col_names)
+	return collect_rows(iter --[[:! () -> (unknown | nil)]], col_names)
 end
 
 --: (Conn, string, ...unknown) -> ({ [string]: unknown } | nil, string | nil)
 function Conn:query_one(sql, ...)
-	local rows, err = (self --[[: unknown]]):query(sql, ...)
+	local rows, err = self:query(sql, ...)
 	if not rows then return nil, err end
 	return rows[1]
 end
@@ -480,16 +481,16 @@ end
 --: (Conn, { [integer]: { version: integer, up: string, ... } }) -> ((boolean | nil), (string | nil))
 function Conn:migrate(migrations)
 	local db_ = self._db
-	local conn_ = self --[[: unknown]]
+	local conn_ = self
 	local ok, err = db_:execute(
 		"CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
 	)
-	if not ok then return nil, err end
+	if not ok then return nil, err --[[:! string | nil]] end
 	local current = conn_:migration_version()
 	--: { [integer]: { version: integer, up: string } }
 	local sorted = {}
 	for i = 1, #migrations do sorted[i] = migrations[i] --[[:! { version: integer, up: string }]] end
-	table.sort(sorted --[[: unknown]], function(a, b)
+	table.sort(sorted --[[:! { [integer]: string }]], function(a, b)
 		local a_ = a --[[:! { version: integer, up: string }]]
 		local b_ = b --[[:! { version: integer, up: string }]]
 		return a_.version < b_.version
@@ -498,7 +499,7 @@ function Conn:migrate(migrations)
 	local pending = {}
 	for _, m in ipairs(sorted) do
 		local m_ = m --[[:! { version: integer, up: string }]]
-		if m_.version > current then
+		if m_.version > (current or 0) then
 			pending[#pending + 1] = m_
 		end
 	end
@@ -542,12 +543,12 @@ end
 function M.connect(path)
 	local db, err = sqlite.open(path)
 	if not db then return nil, err end
-	return setmetatable({ _db = db }, Conn) --[[: Conn]]
+	return setmetatable({ _db = db }, Conn) --[[:! Conn]]
 end
 
 --: (sqlite) -> Conn
 function M.wrap(db)
-	return setmetatable({ _db = db }, Conn) --[[: Conn]]
+	return setmetatable({ _db = db }, Conn) --[[:! Conn]]
 end
 
 return M

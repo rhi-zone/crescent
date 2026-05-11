@@ -637,8 +637,8 @@ function M.create(caps)
 
 	-- Injected I/O for the CLI handler — use caps when present, fall back to
 	-- globals only when the caller has not provided them (e.g. in tests).
-	local stdout_cap = caps.stdout --[[:! { write: (string) -> any, ... } | nil]]
-	local stderr_cap = caps.stderr --[[:! { write: (string) -> any, ... } | nil]]
+	local stdout_cap = caps.stdout --[[:! { write: (string) -> unknown, ... } | nil]]
+	local stderr_cap = caps.stderr --[[:! { write: (string) -> unknown, ... } | nil]]
 	local stdout_write = stdout_cap and stdout_cap.write or function(s) io.write(s) end
 	local stderr_write = stderr_cap and stderr_cap.write or function(s) io.stderr:write(s) end
 
@@ -672,7 +672,7 @@ function M.create(caps)
 		},
 	}
 
-	local svc = service.create(caps_ext, methods, descriptors) --[[:! { handler: (unknown, unknown) -> any, cli: (unknown) -> any, ... }]]
+	local svc = service.create(caps_ext, methods, descriptors) --[[:! { handler: (unknown, unknown) -> unknown, cli: (unknown) -> unknown, ... }]]
 
 	-- ── Thumb proxy ────────────────────────────────────────────────────────
 	-- Binary passthrough — cannot use the service JSON layer.
@@ -683,7 +683,7 @@ function M.create(caps)
 		if not thumb_src_id then return nil end
 		thumb_src_id   = (thumb_src_id:gsub("%%(%x%x)",   function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: unknown]]
 		thumb_entry_id = (thumb_entry_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: unknown]]
-		local src = source_map[thumb_src_id] --[[:! { handler: ((unknown, unknown) -> any) | nil, ... } | nil]]
+		local src = source_map[thumb_src_id] --[[:! { handler: ((unknown, unknown) -> unknown) | nil, ... } | nil]]
 		if not src or not src.handler then
 			res.status = 404
 			res.headers["Content-Type"] = { "text/plain; charset=utf-8" }

@@ -11,7 +11,9 @@ M._tier = "pure"
 -- Depth threshold for auto-rebalance in concat
 local REBALANCE_DEPTH = 30
 
---:: Node = { type: string, str: string, len: integer, depth: integer, left: any, right: any }
+--:: LeafNode = { type: "leaf", str: string, len: integer, depth: integer }
+--:: ConcatNode = { type: "concat", str: string, len: integer, depth: integer, left: Node, right: Node }
+--:: Node = LeafNode | ConcatNode
 --:: Rope = { _node: Node, ... }
 
 -- node constructors
@@ -47,10 +49,12 @@ local function build_balanced(leaves, lo, hi)
     return leaf("")
   end
   if lo == hi then
-    return leaves[lo]
+    return (leaves[lo] --[[:! Node]])
   end
   local mid = lo + math.floor((hi - lo) / 2)
+  --: Node
   local l = build_balanced(leaves, lo, mid)
+  --: Node
   local r = build_balanced(leaves, mid + 1, hi)
   return concat_node(l, r)
 end

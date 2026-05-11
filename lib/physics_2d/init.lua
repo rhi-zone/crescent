@@ -53,18 +53,18 @@ Body.__index = Body
 --: (unknown, (BodyOpts | nil)) -> BodyShape
 local function new_body(world, opts)
   opts = (opts or {}) --[[:! BodyOpts]]
-  local b = setmetatable({}, Body) --[[: unknown]]
+  local b = setmetatable({}, Body) --[[:! BodyShape]]
   b._world        = world
   b.x             = opts.x or 0
   b.y             = opts.y or 0
   b.vx            = opts.vx or 0
   b.vy            = opts.vy or 0
-  b.mass          = opts.mass ~= nil and opts.mass or 1.0
+  b.mass          = (opts.mass or 1.0)
   b.inv_mass      = (b.mass == 0) and 0 or (1.0 / b.mass)
   b._angle        = opts.angle or 0
   b.angular_vel   = opts.angular_vel or 0
-  b.restitution   = opts.restitution ~= nil and opts.restitution or 0.5
-  b.friction      = opts.friction ~= nil and opts.friction or 0.3
+  b.restitution   = (opts.restitution or 0.5)
+  b.friction      = (opts.friction or 0.3)
   b.shape         = opts.shape or "circle"
   b.radius        = opts.radius or 10
   b.width         = opts.width or 10
@@ -295,14 +295,14 @@ Joint.__index = Joint
 --: (unknown, BodyShape, BodyShape, ({ target_dist: number | nil, stiffness: number | nil, ... } | nil)) -> JointShape
 local function new_joint(world, body_a, body_b, opts)
   opts = (opts or {}) --[[:! { target_dist: number | nil, stiffness: number | nil, ... }]]
-  local j = setmetatable({}, Joint) --[[: unknown]]
+  local j = setmetatable({}, Joint) --[[:! JointShape]]
   j._world   = world
   j.body_a   = body_a
   j.body_b   = body_b
   local dx = body_b.x - body_a.x
   local dy = body_b.y - body_a.y
   j.target_dist = opts.target_dist or sqrt(dx * dx + dy * dy)
-  j.stiffness   = opts.stiffness ~= nil and opts.stiffness or 1.0
+  j.stiffness   = (opts.stiffness or 1.0)
   return j --[[:! JointShape]]
 end
 
@@ -349,10 +349,10 @@ World.__index = World
 local function new_world(opts)
   opts = (opts or {}) --[[:! WorldOpts]]
   local grav = opts.gravity or { x = 0.0, y = -9.8 }
-  local w = setmetatable({}, World) --[[: unknown]]
+  local w = setmetatable({}, World) --[[:! WorldShape]]
   w.gx      = grav.x
   w.gy      = grav.y
-  w.damping = opts.damping ~= nil and opts.damping or 0.999
+  w.damping = (opts.damping or 0.999)
   w._bodies = {}
   w._joints = {}
   return w --[[:! WorldShape]]

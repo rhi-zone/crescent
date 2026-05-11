@@ -83,7 +83,7 @@ function M.generate(prefix, length)
 	if type(length) ~= "number" or length < 1 then return nil, "length must be a positive integer" end
 	local p = normalize(prefix)
 	if not p then return nil, "prefix contains non-digit characters" end
-	local len_n = length --[[: any ]]
+	local len_n = length --[[:! integer]]
 	if #p >= len_n then return nil, "prefix length must be less than total length" end
 	-- Fill remaining digits (except check digit) with zeros, then compute check digit.
 	local payload = p .. rep("0", len_n - #p - 1)

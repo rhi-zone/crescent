@@ -45,7 +45,7 @@ local function transformer(root, opts)
   local function walk(node)
     if node.type == nlcst.SENTENCE then
       local sent_text = nlcst.to_text(node)
-      local children = node.children --[[:! { [integer]: any }]]
+      local children = node.children --[[:! { [integer]: { type: string, children?: unknown, value?: string, ... } }]]
       for i = 1, #children do
         local child = children[i]
         if child.type == nlcst.WORD then
@@ -61,7 +61,7 @@ local function transformer(root, opts)
       return
     end
     if node.children then
-      local nc = node.children --[[:! { [integer]: any }]]
+      local nc = node.children --[[:! { [integer]: { type: string, children?: unknown, value?: string, ... } }]]
       for i = 1, #nc do walk(nc[i]) end
     end
   end

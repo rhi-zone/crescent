@@ -28,7 +28,7 @@ function M.env(...)
 	local allowed = {}
 
 	for i = 1, select("#", ...) do
-		local cap = select(i, ...)
+		local cap = (select(i, ...) --[[:! { globals?: { [string]: unknown }, modules?: { [integer]: string }, ... }]])
 		if cap.globals then
 			for k, v in pairs(cap.globals) do
 				merged[k] = v

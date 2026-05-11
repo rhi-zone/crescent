@@ -615,7 +615,7 @@ local person_names = {
 --: (string) -> { { string } }
 M.extract_entities = function(text)
   local tokens = M.tokenize(text)
-  local entities = {} --[[: any[] ]]
+  local entities = {} --[[: { [integer]: { [integer]: string } }]]
   local i = 1
   while i <= #tokens do
     local tok = tokens[i]

@@ -1227,7 +1227,7 @@ function M.run(project_dir, opts)
 			fail("failed to parse crescent.lock: " .. tostring(l_err))
 			return result
 		end
-		locked = l --[[:! { [string]: any }]]
+		locked = l --[[:! { [string]: unknown }]]
 	end
 
 	-- 3. Two-pass MVS resolution.
@@ -1371,7 +1371,7 @@ function M.run(project_dir, opts)
 
 	local qi = 1  -- queue read index (breadth-first)
 	while qi <= #queue do
-		local item = queue[qi] --[[:! { name: string, info: { version: string, url?: string, tarball_hash?: string, _needs_fetch?: boolean, [string]: any } }]]
+		local item = queue[qi] --[[:! { name: string, info: { version: string, url?: string, tarball_hash?: string, _needs_fetch?: boolean, [string]: unknown } }]]
 		qi = qi + 1
 		local name = item.name
 		local info = item.info
@@ -1390,7 +1390,7 @@ function M.run(project_dir, opts)
 		if M.dep_ok(project_dir, name, version) and not info._needs_fetch then
 			-- Check whether the include glob has widened since last install.
 			-- If so, re-link from cache with the wider glob (no re-download needed).
-			local locked_entry = new_lock[name] --[[:! { include?: string, url?: string, tarball_hash?: string, tree_hash?: string, version?: string, [string]: any } | nil]]
+			local locked_entry = new_lock[name] --[[:! { include?: string, url?: string, tarball_hash?: string, tree_hash?: string, version?: string, [string]: unknown } | nil]]
 			local locked_include = (locked_entry and locked_entry.include) or "**"
 			local glob_widened = (effective_include ~= locked_include)
 

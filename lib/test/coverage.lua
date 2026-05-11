@@ -43,7 +43,7 @@ local path_cache = {}
 
 --: (event: string, line: integer | nil) -> nil
 local function hook(_, line)
-	local info = debug.getinfo(2, "S") --[[:! { source: string, [string]: any }]]
+	local info = debug.getinfo(2, "S") --[[:! { source: string, [string]: unknown }]]
 	local raw = info.source
 	local source = path_cache[raw] --[[:! string | false | nil]]
 	if source == nil then

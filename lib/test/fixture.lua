@@ -46,9 +46,8 @@ end
 local function write_file(path, content)
 	local f_, err = io.open(path, "wb")
 	if not f_ then error("fixture: cannot write " .. path .. ": " .. tostring(err)) end
-	local f = f_ --[[:! { write: (any, string) -> any, close: (any) -> any }]]
-	f:write(content)
-	f:close()
+	f_:write(content)
+	f_:close()
 end
 
 -- ── Binary detection ──────────────────────────────────────────────────────────

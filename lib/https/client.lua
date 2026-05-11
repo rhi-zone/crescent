@@ -13,23 +13,23 @@ local M = {}
 local function make_tls_hooks(client_tls, client)
 	client.on_connect = function(self, host, service)
 		if tls.connect_socket(client_tls, self.fd, host) < 0 then
-			return nil, ffi.string(tls.error(client_tls) --[[: unknown]])
+			return nil, ffi.string(tls.error(client_tls) --[[:! cdata]])
 		end
 		if tls.handshake(client_tls) < 0 then
-			return nil, ffi.string(tls.error(client_tls) --[[: unknown]])
+			return nil, ffi.string(tls.error(client_tls) --[[:! cdata]])
 		end
 		return true
 	end
 
 	client.on_send = function(self, data, flags)
 		local len = tls.write(client_tls, data, #data)
-		if len < 0 then return nil, ffi.string(tls.error(client_tls) --[[: unknown]]) end
+		if len < 0 then return nil, ffi.string(tls.error(client_tls) --[[:! cdata]]) end
 		return len
 	end
 
 	client.on_receive = function(self, buffer, max_size, flags)
 		local len = tls.read(client_tls, buffer, max_size)
-		if len < 0 then return nil, ffi.string(tls.error(client_tls) --[[: unknown]]) end
+		if len < 0 then return nil, ffi.string(tls.error(client_tls) --[[:! cdata]]) end
 		return ffi.string(buffer, len)
 	end
 end
@@ -70,7 +70,8 @@ M.request = function(req)
 	req.body = req.body or ""
 	local client_, err = socket.create("inet", "stream", "tcp")
 	if not client_ then return nil, err end
-	local client = client_ --[[: unknown]]
+	local client --: { connect: function, send: function, receive: function, close: function, fd: integer, ... } | nil
+	client = (client_ --[[: unknown]]) --[[:! { connect: function, send: function, receive: function, close: function, fd: integer, ... }]]
 
 	local client_tls, tls_config = tls_setup()
 	make_tls_hooks(client_tls, client)
@@ -109,12 +110,13 @@ M.request = function(req)
 	end
 
 	local data = parts[1] --[[:! string]]
-	local res, _, parse_err = (format.parse_response --[[:! (s: string, i: integer | nil) -> (any, integer | nil, string | nil)]])(data)
-	if not res then
+	local res_, _, parse_err = (format.parse_response --[[:! (s: string, i: integer | nil) -> (unknown, integer | nil, string | nil)]])(data)
+	if not res_ then
 		tls_teardown(client_tls, tls_config)
 		client:close()
 		return nil, parse_err or "failed to parse response"
 	end
+	local res = res_ --[[:! http_response]]
 
 	-- read remaining body if Content-Length specified
 	local cl_header = res.headers["content-length"]
@@ -124,15 +126,16 @@ M.request = function(req)
 			local body_start = header_end + 4
 			local body_so_far = #data - body_start
 			while body_so_far < content_length do
-				local s
-				s, err = client:receive()
-				if not s then break end
+				local s_raw_1
+				s_raw_1, err = client:receive()
+				if not s_raw_1 then break end
+				local s = (s_raw_1 --[[: unknown]]) --[[:! string]]
 				parts[#parts + 1] = s
 				body_so_far = body_so_far + #s
 			end
 			if #parts > 1 then
 				data = table.concat(parts)
-				res = (format.parse_response --[[:! (s: string, i: integer | nil) -> (any, integer | nil, string | nil)]])(data)
+				res = ((format.parse_response --[[:! (s: string, i: integer | nil) -> (unknown, integer | nil, string | nil)]])(data) --[[: unknown]]) --[[:! http_response]]
 			end
 		end
 	end
@@ -154,7 +157,8 @@ M.stream = function(req)
 	req.body = req.body or ""
 	local client_, err = socket.create("inet", "stream", "tcp")
 	if not client_ then return nil, err end
-	local client = client_ --[[: unknown]]
+	local client --: { connect: function, send: function, receive: function, close: function, fd: integer, ... } | nil
+	client = (client_ --[[: unknown]]) --[[:! { connect: function, send: function, receive: function, close: function, fd: integer, ... }]]
 
 	local client_tls, tls_config = tls_setup()
 	make_tls_hooks(client_tls, client)
@@ -177,11 +181,12 @@ M.stream = function(req)
 
 	local closed = false
 
+	--: () -> (string | nil, string | nil)
 	local recv_fn = function()
-		if closed then return nil end
-		local s, recv_err = client:receive()
-		if not s then return nil, recv_err end
-		return s
+		if closed then return nil, nil end
+		local s_raw_, recv_err = client:receive()
+		if not s_raw_ then return nil, (recv_err --[[: unknown]]) --[[:! string | nil]] end
+		return (s_raw_ --[[: unknown]]) --[[:! string]], nil
 	end
 
 	local close_fn = function()

@@ -81,7 +81,7 @@ function M.analyze(sheet, var_names)
     end
   end
 
-  local sheet_ = sheet --[[:! { items: { [integer]: any } }]]
+  local sheet_ = sheet --[[:! { items: { [integer]: unknown } }]]
   analyze_items(sheet_.items)
   return report
 end

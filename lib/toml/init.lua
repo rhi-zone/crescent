@@ -5,7 +5,7 @@ end
 local M = {}
 
 --:: toml_state = { s: string, pos: integer, len: integer, line: integer }
---:: toml_datetime = { __toml_type: string, year?: any, month?: any, day?: any, hour?: any, min?: any, sec?: any, frac?: any, tz?: string }
+--:: toml_datetime = { __toml_type: string, year?: unknown, month?: unknown, day?: unknown, hour?: unknown, min?: unknown, sec?: unknown, frac?: unknown, tz?: string }
 --:: toml_value = string | number | boolean | toml_datetime | { [string]: unknown } | { [integer]: unknown }
 --:: toml_table = { [string]: unknown }
 --:: toml_key_set = { [string]: boolean }

@@ -105,7 +105,7 @@ end
 
 --[[::
 CdeclLexState = {
-  src: any, srclen: integer, pos: integer, b: integer,
+  src: number, srclen: integer, pos: integer, b: integer,
   tk: integer, val: integer, pool: { ht_cap: integer, ht_mask: integer, ht_count: integer, next_id: integer, buf_count: integer, entries: { [integer]: unknown, ... }, bufs: { [integer]: unknown, ... }, rev: { [integer]: unknown, ... }, map: { [string]: integer, ... }, _anchors: { [integer]: string, ... }, ... }, _buf_id: integer,
   _nextbyte: (CdeclLexState) -> integer,
   _peekbyte: (CdeclLexState) -> integer,
@@ -235,7 +235,7 @@ function Lexer:_lex()
                 self.b = EOF
             end
             local name_id = intern_mod.intern_raw(
-                self.pool, src + start, p - start, self._buf_id, start)
+                self.pool, ((src + start) --[[: unknown]]) --[[:! cdata]], p - start, self._buf_id, start)
             return M.TK_IDENT, name_id
 
         -- Integer literals: decimal or 0x hex, optional u/U/l/L suffixes

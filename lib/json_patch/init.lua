@@ -22,11 +22,11 @@ local floor = math.floor
 --: (unknown) -> boolean
 local function is_array(t)
   if type(t) ~= "table" then return false end
-  local n = #(t --[[: { [integer]: any }]])
+  local n = #(t --[[: { [integer]: unknown }]])
   -- Check no non-integer or out-of-range keys exist
   local count = 0
-  for k in pairs(t --[[: { [any]: any }]]) do
-    if type(k) ~= "number" or k ~= floor(k --[[: number]]) or (k --[[: number]]) < 1 or (k --[[: number]]) > n then
+  for k in pairs(t --[[: { [unknown]: unknown }]]) do
+    if type(k) ~= "number" or k ~= floor(k --[[:! number]]) or (k --[[:! number]]) < 1 or (k --[[:! number]]) > n then
       return false
     end
     count = count + 1

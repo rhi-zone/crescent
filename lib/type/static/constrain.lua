@@ -178,13 +178,13 @@ M.C_NARROW_NIL    = C_NARROW_NIL
 
 --: (Ctx, integer | nil, integer | nil, integer, { [string]: unknown, ... }) -> ()
 local function report(ctx, line, col, code, args)
-    local msg = errors_mod.format_diag(code, args --[[:! { [string]: any }]])
+    local msg = errors_mod.format_diag(code, args --[[:! { [string]: string | integer }]])
     return errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
 --: (Ctx, integer | nil, integer | nil, integer, { [string]: unknown, ... }) -> ()
 local function warn(ctx, line, col, code, args)
-    local msg = errors_mod.format_diag(code, args --[[:! { [string]: any }]])
+    local msg = errors_mod.format_diag(code, args --[[:! { [string]: string | integer }]])
     errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 

@@ -26,7 +26,7 @@ function M.curry(fn, n)
       local args = {}
       for i = 1, #collected do args[i] = collected[i] end
       local added = select("#", ...) --[[:! integer]]
-      for i = 1, added do args[#collected + i] = select(i, ...) end
+      for i = 1, added do args[#collected + i] = (select(i, ...) --[[:! nil]]) end
       local new_remaining = remaining_ - added
       if new_remaining <= 0 then
         local fn_ = fn --[[:! (...unknown) -> unknown]]
@@ -48,7 +48,7 @@ function M.partial(fn, ...)
     for i = 1, nbound do args[i] = bound[i] end
     local extra = select("#", ...)
     for i = 1, extra do args[nbound + i] = select(i, ...) end
-    return fn(unpack(--[[:! { [integer]: any }]] args, 1, nbound + extra))
+    return fn(unpack(--[[:! { [integer]: unknown }]] args, 1, nbound + extra))
   end
 end
 

@@ -25,7 +25,7 @@ local M = {}
 -- Returns a callable table with a :close method (idempotent).
 --: (unknown) -> unknown
 local function make_line_iter(fh_in)
-	local fh = --[[:! { read: any, close: any }]] fh_in
+	local fh = --[[:! { read: (self: unknown, unknown) -> string | nil, close: (self: unknown) -> unknown }]] fh_in
 	local closed = false
 	local iter = {} --: unknown
 	setmetatable(iter, { __call = function(_self) --: (unknown) -> (string | nil, string | nil)

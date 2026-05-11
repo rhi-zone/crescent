@@ -7,9 +7,9 @@ if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
 end
 
-local base64 = require("lib.encode.base64") --[[: unknown]]
-local json = require("lib.format.json") --[[: unknown]]
-local png = require("lib.png") --[[: unknown]]
+local base64 = require("lib.encode.base64")
+local json = require("lib.format.json")
+local png = require("lib.png")
 
 --:: require "lib.formats.ccv2.ccv2_types"
 
@@ -61,10 +61,11 @@ end
 
 --: (string) -> (CardData | nil, string)
 function M.from_json(json_str)
-  local obj, err = json.decode(json_str)
-  if not obj then
+  local obj_raw, err = json.decode(json_str)
+  if not obj_raw then
     return nil, "json decode error: " .. tostring(err)
   end
+  local obj = (obj_raw --[[: unknown]]) --[[:! { spec?: string, data?: { [string]: unknown, ... }, name?: string, ... }]]
 
   local data
   if obj.spec == "chara_card_v2" and obj.data then
@@ -89,7 +90,7 @@ end
 -- Serialize card data to JSON string wrapped in V2 envelope.
 -- ---------------------------------------------------------------------------
 
---: (CardData) -> (string | nil, string)
+--: (CardData) -> (string | nil, string | nil)
 function M.to_json(data)
   local envelope = {
     spec = "chara_card_v2",

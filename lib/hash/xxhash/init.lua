@@ -214,37 +214,42 @@ if ffi_ok then
 	end
 
 	-- Left rotate uint64 by n bits (0 < n < 64).
+	--: (number, number) -> number
 	local function rol64(v, n)
 		-- (v << n) | (v >> (64-n))
 		-- Use multiply for left shift, divide for right shift on uint64.
-		local left = v * (2ULL ^ n)
-		local right = (v - v % (2ULL ^ (64 - n))) / (2ULL ^ (64 - n))
+		local left = (v * (2ULL ^ n) --[[: number]])
+		local right = ((v - v % (2ULL ^ (64 - n))) / (2ULL ^ (64 - n)) --[[: number]])
 		-- OR = add since bits don't overlap
 		return left + right
 	end
 
 	-- Right shift uint64 by n bits.
+	--: (number, number) -> number
 	local function shr64(v, n)
-		return (v - v % (2ULL ^ n)) / (2ULL ^ n)
+		return ((v - v % (2ULL ^ n)) / (2ULL ^ n) --[[: number]])
 	end
 
 	-- Read uint64 little-endian from string at 1-based offset.
+	--: (string, integer) -> number
 	local function read64(s, i)
 		local lo = read32(s, i)
 		local hi = read32(s, i + 4)
-		return join64(u32(hi), u32(lo))
+		return (join64(u32(hi), u32(lo)) --[[: number]])
 	end
 
+	--: (number, number) -> number
 	local function round64(acc, input)
-		acc = acc + input * P2
+		acc = acc + input * (P2 --[[: number]])
 		acc = rol64(acc, 31)
-		return acc * P1
+		return acc * (P1 --[[: number]])
 	end
 
+	--: (number, number) -> number
 	local function merge_round64(acc, val)
-		val = round64(0ULL, val)
-		acc = xor64(acc, val)
-		return acc * P1 + P4
+		val = round64((0ULL --[[: number]]), val)
+		acc = (xor64(acc, val) --[[: number]])
+		return acc * (P1 --[[: number]]) + (P4 --[[: number]])
 	end
 
 	local function avalanche64(h)
@@ -316,7 +321,7 @@ if ffi_ok then
 
 	-- ── xxHash64 streaming ──────────────────────────────────────────────────
 
-	--:: H64State = { _seed: any, _v1: any, _v2: any, _v3: any, _v4: any, _total_len: integer, _buf: string, _large: boolean }
+	--:: H64State = { _seed: number, _v1: number, _v2: number, _v3: number, _v4: number, _total_len: integer, _buf: string, _large: boolean }
 
 	local H64 = {}
 	H64.__index = H64
@@ -371,7 +376,7 @@ if ffi_ok then
 			h = merge_round64(h, v3)
 			h = merge_round64(h, v4)
 		else
-			h = st._seed + P5
+			h = st._seed + (P5 --[[: number]])
 		end
 		h = h + uint64(st._total_len)
 		local buf = st._buf

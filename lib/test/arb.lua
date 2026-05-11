@@ -595,7 +595,7 @@ end
 local function display_arg(v, is_tuple)
 	if is_tuple then
 		local parts = {}
-		local arr = v --[[:! any[] ]]
+		local arr = v --[[:! { [integer]: unknown }]]
 		for i = 1, #arr do parts[i] = display(arr[i]) end
 		return "(" .. table.concat(parts, ", ") .. ")"
 	end

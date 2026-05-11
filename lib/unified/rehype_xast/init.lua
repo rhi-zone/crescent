@@ -21,9 +21,8 @@ local M = {}
 local convert_node  -- forward declaration
 
 local function convert_children(children)
-  --: { [integer]: any } | nil
   if not children then return {} end
-  local children_ = children --[[:! { [integer]: any }]]
+  local children_ = children --[[:! { [integer]: { type: string, children?: unknown, value?: string, ... } }]]
   local out = {}
   for i = 1, #children_ do
     local x = convert_node(children_[i])

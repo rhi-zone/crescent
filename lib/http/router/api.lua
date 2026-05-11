@@ -8,15 +8,15 @@ local value_to_json = require("lib.format.json").value_to_json
 --: (unknown) -> ({ body: string | nil, path: string, method: string, ... }, { body: string | nil, headers: { [string]: unknown }, ... }, unknown) -> boolean | nil
 mod.router = function (routes)
 	return function (req, res, sock)
-		local req_ = req --[[: unknown]]
-		local res_ = res --[[: unknown]]
+		local req_ = req --[[:! { body: string | nil, path: string, method: string, globs?: { [integer]: string, rest?: string }, ... }]]
+		local res_ = res --[[:! { body: string | nil, headers: { [string]: unknown }, ... }]]
 		local json_to_ = json_to_value --[[:! (unknown) -> unknown]]
 		local to_json_ = value_to_json --[[:! (unknown) -> unknown]]
 		local route = routes
 		if type(route) == "function" then
 			local input = json_to_(req_.body)
 			res_.headers["Content-Type"] = { "application/json" }
-			res_.body = to_json_(route(input))
+			res_.body = (to_json_(route(input)) --[[: unknown]]) --[[:! string | nil]]
 			return true
 		end
 		local start
@@ -37,7 +37,7 @@ mod.router = function (routes)
 				if end_ < #req_.path then req_.globs = req_.globs or {}; req_.globs.rest = req_.path:sub(end_ + 1) end
 				local input = json_to_(req_.body)
 				res_.headers["Content-Type"] = { "application/json" }
-				res_.body = to_json_(route(input))
+				res_.body = (to_json_(route(input)) --[[: unknown]]) --[[:! string | nil]]
 				return true
 			elseif route == nil then return end
 		until end_ == #req_.path
@@ -46,7 +46,7 @@ mod.router = function (routes)
 			if end_ < #req_.path then req_.globs = req_.globs or {}; req_.globs.rest = req_.path:sub(end_ + 1) end
 			local input = json_to_(req_.body)
 			res_.headers["Content-Type"] = { "application/json" }
-			res_.body = to_json_(route(input))
+			res_.body = (to_json_(route(input)) --[[: unknown]]) --[[:! string | nil]]
 			return true
 		end
 	end

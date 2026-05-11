@@ -203,7 +203,7 @@ local function load_corpus_dir(dir)
 	local corpus = {} --[[: string[] ]]
 	local fh_ = io.popen("ls -1 " .. string.format("%q", dir) .. " 2>/dev/null")
 	if not fh_ then return corpus end
-	local fh = fh_ --[[: unknown]]
+	local fh = (fh_ --[[: unknown]]) --[[:! { lines: (self: unknown) -> (() -> string | nil), close: (self: unknown) -> nil }]]
 	for fname in fh:lines() do
 		local fname_s = (fname --[[: unknown]]) --[[:! string]]
 		if fname_s:match("%.corpus$") then
@@ -278,7 +278,7 @@ function M.run(fn, opts)
 				unique_paths = unique_paths + new_paths
 				corpus[#corpus+1] = input
 				if corpus_dir then save_to_corpus(corpus_dir --[[:! string]], input, "path") end
-				if opts.on_new_path then (opts.on_new_path --[[:! (string, integer) -> any]])(input, new_paths) end
+				if opts.on_new_path then (opts.on_new_path --[[:! (string, integer) -> unknown]])(input, new_paths) end
 			end
 		else
 			ok, err = pcall(fn, input)
@@ -297,7 +297,7 @@ function M.run(fn, opts)
 			if not is_expected then
 				crashes[#crashes+1] = { input = input, err = tostring(err) }
 				if corpus_dir then save_to_corpus(corpus_dir --[[:! string]], input, "crash") end
-				if opts.on_crash then (opts.on_crash --[[:! (string, any) -> any]])(input, err) end
+				if opts.on_crash then (opts.on_crash --[[:! (string, unknown) -> unknown]])(input, err) end
 			end
 		end
 	end

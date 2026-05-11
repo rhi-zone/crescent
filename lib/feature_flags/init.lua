@@ -10,7 +10,7 @@ M._tier = "pure"
 
 local bit = require("bit")
 
---:: Registry = { _flags: { [string]: any }, _overrides: { [string]: any }, _listeners: { [integer]: any }, ... }
+--:: Registry = { _flags: { [string]: unknown }, _overrides: { [string]: unknown }, _listeners: { [integer]: unknown }, ... }
 
 -- Deterministic hash of a string → float in [0, 1).
 -- Uses a simple FNV-1a variant, good enough for consistent rollout.

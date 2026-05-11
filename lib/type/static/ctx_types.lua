@@ -149,8 +149,8 @@ DefsModule = {
 -- ignore the return value so -> () is the correct external signature.
 ---------------------------------------------------------------------------
 
---:: declare report = (ctx: Ctx, line: integer | nil, col: integer | nil, code: integer, args: { [string]: any, ... }) -> ()
---:: declare warn = (ctx: Ctx, line: integer | nil, col: integer | nil, code: integer, args: { [string]: any, ... }) -> ()
+--:: declare report = (ctx: Ctx, line: integer | nil, col: integer | nil, code: integer, args: { [string]: string | integer, ... }) -> ()
+--:: declare warn = (ctx: Ctx, line: integer | nil, col: integer | nil, code: integer, args: { [string]: string | integer, ... }) -> ()
 --:: declare warn_raw = (ctx: Ctx, line: integer | nil, col: integer | nil, msg: string) -> ()
 -- snapshot_table: (ctx, TAG_TABLE type_id) -> (field_ids, indexer_pairs, row_var_id, meta_field_ids)
 --:: declare snapshot_table = (ctx: Ctx, type_id: integer) -> ({ [integer]: integer, ... }, { [integer]: integer, ... }, integer, { [integer]: integer, ... })

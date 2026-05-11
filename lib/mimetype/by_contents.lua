@@ -292,7 +292,8 @@ mod.mimetype = function (buffer, pos)
 			end
 			return read(id), read(len)
 		end
-		local read_children = function (children)
+		local read_children = function (children_)
+			local children = children_ --[[:! integer]]
 			while children > 0 do
 				local success, e, length = pcall(read_element)
 				if not success then return end --[[invalid]]

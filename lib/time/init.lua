@@ -49,7 +49,7 @@ else
     void gettimeofday(struct timeval *tv, struct timezone *tz);
   ]])
   if ok then
-    local time_ffi = ffi.C --[[: unknown]]
+    local time_ffi = ffi.C
     local _tv = ffi.new("struct timeval [1]") --[[: unknown]]
     --: () -> number
     M.time = function()

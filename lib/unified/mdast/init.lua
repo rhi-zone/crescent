@@ -1544,13 +1544,13 @@ end
 -- Also resolves link/image open-close pairs.
 -- Returns array of inline nodes.
 local function resolve_inlines(tokens, defs, src)
-  local result = {} --[[:! { [integer]: { type: string, ... } | nil }]]
+  local result = {} --[[:! { [integer]: { type: string, value?: string, node?: unknown, ... } | nil }]]
 
   -- First pass: resolve links/images.
   -- Find matching link_open for each link_close.
   local n = #tokens
   local i = 1
-  local resolved = {} --[[:! { [integer]: { type: string, ... } | nil }]] -- new token list after link resolution
+  local resolved = {} --[[:! { [integer]: { type: string, value?: string, node?: unknown, pos?: integer, url?: string, title?: string, ref?: string, close_pos?: integer, collapsed?: boolean, shortcut?: boolean, is_image?: boolean, inactive?: boolean, ... } | nil }]] -- new token list after link resolution
 
   -- We need to track bracket stack.
   -- Each frame: { idx, is_image, inactive }
@@ -1569,7 +1569,9 @@ local function resolve_inlines(tokens, defs, src)
       i = i + 1
     elseif tok.type == "link_close" or tok.type == "link_ref_close" then
       if #bracket_stack > 0 then
-        local frame = bracket_stack[#bracket_stack]
+        local frame_ = bracket_stack[#bracket_stack]
+        if not frame_ then goto continue_resolve end
+        local frame = frame_ --[[:! { idx: integer, is_image: boolean, inactive: boolean }]]
 
         -- Collect content tokens between frame.idx and current position.
         local inner_tokens = {}
@@ -1668,6 +1670,7 @@ local function resolve_inlines(tokens, defs, src)
           resolved[#resolved + 1] = { type = "text", value = "(" .. tok.url .. ")" }
         end
       end
+      ::continue_resolve::
       i = i + 1
     else
       resolved[#resolved + 1] = tok
@@ -1695,8 +1698,8 @@ local function resolve_inlines(tokens, defs, src)
   --   count       — remaining chars in the run (decremented as chars are consumed)
   --   orig_count  — original run length (for the odd-sum rule)
   --   can_open / can_close
-  local out = {} --[[:! { [integer]: { type: string, ... } }]]
-  local delim_stack = {} --[[:! { [integer]: { char: integer, count: integer, orig_count: integer, can_open: boolean | nil, can_close: boolean | nil } | nil }]]
+  local out = {} --[[:! { [integer]: { type: string, value?: string, ... } | nil }]]
+  local delim_stack = {} --[[:! { [integer]: { idx_in_out: integer, char: integer, count: integer, orig_count: integer, can_open: boolean | nil, can_close: boolean | nil } | nil }]]
 
   --: (node: { type: string, ... }) -> nil
   local function emit(node)
@@ -1705,7 +1708,8 @@ local function resolve_inlines(tokens, defs, src)
 
   local function emit_text(v)
     if #out > 0 and out[#out].type == "text" then
-      out[#out].value = out[#out].value .. v
+      local last = out[#out]
+      if last then last.value = (last.value or "") .. v end
     else
       out[#out + 1] = { type = "text", value = v }
     end
@@ -1719,7 +1723,9 @@ local function resolve_inlines(tokens, defs, src)
       -- Search delimiter stack from top for a matching opener.
       local found = nil
       for di = #delim_stack, 1, -1 do
-        local d = delim_stack[di]
+        local d_ = delim_stack[di]
+        if not d_ then break end
+        local d = d_ --[[:! { char: integer, count: integer, orig_count: integer, can_open: boolean | nil, can_close: boolean | nil }]]
         if d.char == tok.char and d.can_open then
           -- CommonMark rule 17: if both can_open and can_close, the sum of the
           -- original run lengths must not be a multiple of 3 (unless both are
@@ -1739,7 +1745,9 @@ local function resolve_inlines(tokens, defs, src)
       end
 
       if found then
-        local opener = delim_stack[found]
+        local opener_ = delim_stack[found]
+        if not opener_ then goto continue_delim end
+        local opener = opener_ --[[:! { char: integer, count: integer, orig_count: integer, can_open: boolean | nil, can_close: boolean | nil }]]
         -- Use 2 chars if both have >= 2, otherwise 1.
         local use = (opener.count >= 2 and tok.count >= 2) and 2 or 1
         local node_type = use == 2 and "strong" or "emphasis"
@@ -1747,7 +1755,9 @@ local function resolve_inlines(tokens, defs, src)
         -- Convert any intermediate (between found+1 and top of stack) delim
         -- placeholders in `out` to text — they are "enclosed" by this match.
         for k = found + 1, #delim_stack do
-          local d2 = delim_stack[k]
+          local d2_ = delim_stack[k]
+          if not d2_ then break end
+          local d2 = d2_ --[[:! { idx_in_out: integer, char: integer, count: integer, orig_count: integer, can_open: boolean | nil, can_close: boolean | nil }]]
           local ph = out[d2.idx_in_out]
           if ph and ph.type == "_delim_placeholder" then
             ph.type = "text"
@@ -1801,6 +1811,7 @@ local function resolve_inlines(tokens, defs, src)
         return
       end
       -- Falls through to opener handling below (can_open and can_close but no match).
+      ::continue_delim::
     end
 
     -- Opener (or can_open+can_close with no match as closer): push to delimiter stack
@@ -1823,7 +1834,7 @@ local function resolve_inlines(tokens, defs, src)
 
   for _, tok in ipairs(resolved) do
     if tok.type == "text" then
-      if tok.value and tok.value ~= "" then emit_text(tok.value) end
+      if tok.value and tok.value ~= "" then emit_text(tok.value --[[:! string]]) end
     elseif tok.type == "code" then
       emit({ type = "inlineCode", value = tok.value })
     elseif tok.type == "html" then
@@ -1833,17 +1844,19 @@ local function resolve_inlines(tokens, defs, src)
     elseif tok.type == "softbreak" then
       emit({ type = "softBreak" })
     elseif tok.type == "node" then
-      emit(tok.node)
+      emit(tok.node --[[:! { type: string, ... }]])
     elseif tok.type == "link_open" or tok.type == "image_open" then
       emit_text(tok.type == "image_open" and "![" or "[")
     elseif tok.type == "delim" then
       tok.orig_count = tok.count
-      process_delim(tok)
+      process_delim(tok --[[:! { type: string, char: integer, count: integer, can_open: boolean | nil, can_close: boolean | nil, orig_count: integer | nil, ... }]])
     end
   end
 
   -- Unmatched openers: convert placeholders to text.
-  for _, d in ipairs(delim_stack) do
+  for _, d_ in ipairs(delim_stack) do
+    if not d_ then break end
+    local d = d_ --[[:! { idx_in_out: integer, char: integer, count: integer, orig_count: integer, can_open: boolean | nil, can_close: boolean | nil }]]
     local placeholder = out[d.idx_in_out]
     if placeholder and placeholder.type == "_delim_placeholder" then
       placeholder.type = "text"
@@ -1852,13 +1865,13 @@ local function resolve_inlines(tokens, defs, src)
   end
 
   -- Final merge pass: remove empty text nodes, merge adjacent text.
-  result = {} --[[:! { [integer]: { type: string, ... } | nil }]]
+  result = {} --[[:! { [integer]: { type: string, value?: string, node?: unknown, ... } | nil }]]
   for _, node in ipairs(out) do
     if node.type == "text" and (not node.value or node.value == "") then
       -- skip
     elseif node.type == "text" and #result > 0 and result[#result].type == "text" then
       local prev = result[#result]
-      local cur_val = prev.value
+      local cur_val = prev.value or ""
       prev.value = cur_val .. (node.value or "")
     else
       result[#result + 1] = node
@@ -1923,13 +1936,13 @@ local function stringify_children(children, sep)
   return tbl_concat(parts, sep or "")
 end
 
---: (node: { type: string, ... }) -> string
+--: (node: { type: string, value?: string, children?: { [integer]: { type: string, ... } }, depth?: integer, url?: string, title?: string, lang?: string, start?: integer, ordered?: boolean, label?: string, ... }) -> string
 stringify_node = function(node)
   local t = node.type
   if t == "root" then
     return stringify_children(node.children, "\n\n")
   elseif t == "heading" then
-    return str_rep("#", node.depth) .. " " .. stringify_children(node.children)
+    return str_rep("#", node.depth or 1) .. " " .. stringify_children(node.children)
   elseif t == "paragraph" then
     return stringify_children(node.children)
   elseif t == "text" then

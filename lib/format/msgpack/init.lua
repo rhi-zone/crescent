@@ -672,7 +672,7 @@ decode = function(s, pos)
   return nil, "msgpack: unknown format byte 0x" .. string.format("%02x", b)
 end
 
---: (string, number | nil) -> (any, number | string)
+--: (string, number | nil) -> (unknown, number | string)
 M.decode = decode
 
 return M

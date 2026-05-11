@@ -729,10 +729,10 @@ BUILTINS.VLOOKUP = function(args)
   if exact == nil then exact = true end
   if type(exact) == "number" then exact = exact ~= 0 end
 
-  if not (type(range_arg) == "table" and (range_arg --[[:! { __range: any, ... }]]).__range) then
+  if not (type(range_arg) == "table" and (range_arg --[[:! { __range: unknown, ... }]]).__range) then
     return ERR_VALUE
   end
-  local range_arg_ = range_arg --[[:! { range: { r1: integer, c1: integer, r2: integer, c2: integer }, sheet: { get: (any, string) -> any, ... }, values: { [integer]: any } }]]
+  local range_arg_ = range_arg --[[:! { range: { r1: integer, c1: integer, r2: integer, c2: integer }, sheet: { get: (unknown, string) -> unknown, ... }, values: { [integer]: unknown } }]]
 
   local rng = range_arg_.range
   local sheet = range_arg_.sheet
@@ -767,10 +767,10 @@ end
 BUILTINS.INDEX = function(args)
   if #args < 2 then return ERR_VALUE end
   local range_arg = args[1]
-  if not (type(range_arg) == "table" and (range_arg --[[:! { __range: any, ... }]]).__range) then
+  if not (type(range_arg) == "table" and (range_arg --[[:! { __range: unknown, ... }]]).__range) then
     return ERR_VALUE
   end
-  local range_arg_ = range_arg --[[:! { range: { r1: integer, c1: integer, r2: integer, c2: integer }, sheet: { get: (any, string) -> any, ... }, values: { [integer]: any } }]]
+  local range_arg_ = range_arg --[[:! { range: { r1: integer, c1: integer, r2: integer, c2: integer }, sheet: { get: (unknown, string) -> unknown, ... }, values: { [integer]: unknown } }]]
   local rng = range_arg_.range
   local sheet = range_arg_.sheet
   local row_idx = math.floor(tonumber(args[2]) or 1) --[[:! integer]]
@@ -786,10 +786,10 @@ BUILTINS.MATCH = function(args)
   if #args < 2 then return ERR_VALUE end
   local lookup = args[1]
   local range_arg = args[2]
-  if not (type(range_arg) == "table" and (range_arg --[[:! { __range: any, ... }]]).__range) then
+  if not (type(range_arg) == "table" and (range_arg --[[:! { __range: unknown, ... }]]).__range) then
     return ERR_VALUE
   end
-  local range_arg_ = range_arg --[[:! { range: { r1: integer, c1: integer, r2: integer, c2: integer }, sheet: { get: (any, string) -> any, ... }, values: { [integer]: any } }]]
+  local range_arg_ = range_arg --[[:! { range: { r1: integer, c1: integer, r2: integer, c2: integer }, sheet: { get: (unknown, string) -> unknown, ... }, values: { [integer]: unknown } }]]
   local rng = range_arg_.range
   local vals = range_arg_.values
   for i, v in ipairs(vals) do
@@ -857,8 +857,8 @@ local function eval_node(node, sheet, visiting)
     local lv = eval_node(node.left --[[:! SpreadNode]], sheet, visiting)
     local rv = eval_node(node.right --[[:! SpreadNode]], sheet, visiting)
     -- ranges aren't valid in binary ops (except &)
-    if type(lv) == "table" and (lv --[[:! { __range: any, ... }]]).__range then lv = ERR_VALUE end
-    if type(rv) == "table" and (rv --[[:! { __range: any, ... }]]).__range then rv = ERR_VALUE end
+    if type(lv) == "table" and (lv --[[:! { __range: unknown, ... }]]).__range then lv = ERR_VALUE end
+    if type(rv) == "table" and (rv --[[:! { __range: unknown, ... }]]).__range then rv = ERR_VALUE end
 
     if op == "&" then
       if is_error(lv) then return lv end
@@ -905,13 +905,13 @@ local function eval_node(node, sheet, visiting)
     elseif op == "<>" then
       return lv ~= rv
     elseif op == "<" then
-      return (lv --[[: unknown]]) < (rv --[[: unknown]])
+      return (lv ) < (rv )
     elseif op == ">" then
-      return (lv --[[: unknown]]) > (rv --[[: unknown]])
+      return (lv ) > (rv )
     elseif op == "<=" then
-      return (lv --[[: unknown]]) <= (rv --[[: unknown]])
+      return (lv ) <= (rv )
     elseif op == ">=" then
-      return (lv --[[: unknown]]) >= (rv --[[: unknown]])
+      return (lv ) >= (rv )
     end
     return ERR_VALUE
   elseif node.type == NT.CALL then

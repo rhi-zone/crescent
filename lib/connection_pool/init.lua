@@ -11,8 +11,8 @@ M._tier = "pure"
 
 --:: PoolStats = { active: integer, created: integer, destroyed: integer, acquire_count: integer, acquire_errors: integer }
 --:: ConnMeta = { created_at: number }
---:: ConnEntry = { conn: any, created_at: number, idle_since: number }
---:: Pool = { _create: () -> any, _destroy: ((any) -> nil) | nil, _validate: ((any) -> boolean) | nil, _min_size: integer, _max_size: integer, _idle_timeout: number | nil, _max_lifetime: number | nil, _clock: () -> number, _idle: { [integer]: ConnEntry }, _conn_meta: { [any]: ConnMeta }, _total: integer, _closed: boolean, _draining: boolean, _stats: PoolStats, acquire: (Pool) -> (any | nil, string | nil), release: (Pool, any) -> nil, with: (Pool, (any) -> any) -> (any | nil, string | nil), stats: (Pool) -> any, evict: (Pool) -> nil, drain: (Pool) -> nil, close: (Pool) -> nil, warm: (Pool) -> nil, resize: (Pool, integer) -> nil }
+--:: ConnEntry = { conn: unknown, created_at: number, idle_since: number }
+--:: Pool = { _create: () -> unknown, _destroy: (( unknown) -> nil) | nil, _validate: (( unknown) -> boolean) | nil, _min_size: integer, _max_size: integer, _idle_timeout: number | nil, _max_lifetime: number | nil, _clock: () -> number, _idle: { [integer]: ConnEntry }, _conn_meta: { [unknown]: ConnMeta }, _total: integer, _closed: boolean, _draining: boolean, _stats: PoolStats, acquire: (Pool) -> (unknown | nil, string | nil), release: (Pool, unknown) -> nil, with: (Pool, ( unknown) -> unknown) -> (unknown | nil, string | nil), stats: (Pool) -> unknown, evict: (Pool) -> nil, drain: (Pool) -> nil, close: (Pool) -> nil, warm: (Pool) -> nil, resize: (Pool, integer) -> nil }
 
 local pool_mt = {}
 pool_mt.__index = pool_mt
@@ -39,7 +39,7 @@ end
 --: (Pool, ConnEntry) -> nil
 local function destroy_entry(pool, entry)
   if pool._destroy then
-    local destroy_ = pool._destroy --[[:! (any) -> nil]]
+    local destroy_ = pool._destroy --[[:! ( unknown) -> nil]]
     local ok, err = pcall(destroy_, entry.conn)
     if not ok then
       -- suppress errors from destroy callbacks
@@ -95,7 +95,7 @@ function pool_mt:acquire()
       -- Run validate if provided
       local valid = true
       if self_._validate then
-        local validate_ = self_._validate --[[:! (any) -> boolean]]
+        local validate_ = self_._validate --[[:! ( unknown) -> boolean]]
         local ok, result = pcall(validate_, entry.conn)
         if ok and result then valid = true else valid = false end
       end
@@ -151,7 +151,7 @@ function pool_mt:release(conn)
       destroy_entry(self_, entry)
     else
       if self_._destroy then
-        local destroy_ = self_._destroy --[[:! (any) -> nil]]
+        local destroy_ = self_._destroy --[[:! ( unknown) -> nil]]
         pcall(destroy_, conn)
       end
       self_._stats.destroyed = self_._stats.destroyed + 1
@@ -169,7 +169,7 @@ function pool_mt:release(conn)
       destroy_entry(self_, entry)
     else
       if self_._destroy then
-        local destroy_ = self_._destroy --[[:! (any) -> nil]]
+        local destroy_ = self_._destroy --[[:! ( unknown) -> nil]]
         pcall(destroy_, conn)
       end
       self_._stats.destroyed = self_._stats.destroyed + 1

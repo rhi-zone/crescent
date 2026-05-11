@@ -190,7 +190,7 @@ local URL_PATTERN = "https?://[^%s<>]+"
 -- Returns an array of inline nodes (may be a single text node if no matches).
 --: (value: string) -> { [integer]: unknown }
 local function transform_text_value(value)
-  local result = {} --[[:! { [integer]: unknown }]]
+  local result = {} --[[:! { [integer]: { type: string, children?: unknown, value?: string, ... } }]]
   local pos = 1  --: integer
   local len = #value
 

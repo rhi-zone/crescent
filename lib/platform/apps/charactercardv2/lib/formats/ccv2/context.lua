@@ -183,7 +183,7 @@ function M.assemble(opts)
 
 	local entries = opts.lorebook_entries
 	if not entries and card.character_book then
-		entries = lorebook.from_ccv2(--[[:! { entries: any, ... }]] card.character_book) --[[:! { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... }, ... } ]]
+		entries = lorebook.from_ccv2(--[[:! { entries: unknown, ... }]] card.character_book) --[[:! { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... }, ... } ]]
 	end
 	entries = entries --[[:! { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... }, ... } | nil]]
 

@@ -213,9 +213,9 @@ end
 -- Optional extras used when present:
 --   g:node_data(id), g:edge_data(u,v), g._directed
 
---:: NativeAdapter = { [string]: any }
---:: QGraph = { [string]: any }
---:: QueryT = { [string]: any }
+--:: NativeAdapter = { _g: { nodes: function, node_data: function, edges: function, edge_data: function, has_edge: function, neighbors: function, in_neighbors?: function, _directed?: boolean, ... }, [string]: unknown }
+--:: QGraph = { _nodes: { [unknown]: unknown }, _adj: { [unknown]: unknown }, _in_adj: { [unknown]: unknown }, _nedges: integer, _directed: boolean, node: function, edge: function, ... }
+--:: QueryT = { _g: { node_ids: (self: unknown) -> { [integer]: unknown }, node_data: (self: unknown, unknown) -> unknown, edge_list: (self: unknown) -> { [integer]: unknown }, edge_data: (self: unknown, unknown, unknown) -> unknown, has_edge: (self: unknown, unknown, unknown) -> boolean, out_neighbors: (self: unknown, unknown) -> { [integer]: unknown }, in_neighbors: (self: unknown, unknown) -> { [integer]: unknown }, is_directed: (self: unknown) -> boolean, ... }, _ops: unknown, [string]: unknown }
 
 -- Wraps a native crescent Graph (from lib/graph) directly for efficiency.
 local NativeAdapter = {}
@@ -228,61 +228,61 @@ end
 function NativeAdapter:node_ids()
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: unknown]]
+  local g = self._g
   local ids = {}
-  for id in g:nodes() do ids[#ids+1] = id end
+  for id in (g:nodes() --[[: unknown]]) --[[:! () -> unknown]] do ids[#ids+1] = id end
   return ids
 end
 
 function NativeAdapter:node_data(id)
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: unknown]]
+  local g = self._g
   return g:node_data(id)
 end
 
 function NativeAdapter:edge_list()
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: unknown]]
+  local g = self._g
   local edges = {}
-  for e in g:edges() do edges[#edges+1] = e end
+  for e in (g:edges() --[[: unknown]]) --[[:! () -> unknown]] do edges[#edges+1] = e end
   return edges
 end
 
 function NativeAdapter:edge_data(u, v)
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: unknown]]
+  local g = self._g
   return g:edge_data(u, v)
 end
 
 function NativeAdapter:has_edge(u, v)
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: unknown]]
+  local g = self._g
   return g:has_edge(u, v)
 end
 
 function NativeAdapter:out_neighbors(id)
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: unknown]]
+  local g = self._g
   return g:neighbors(id)
 end
 
 function NativeAdapter:in_neighbors(id)
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: unknown]]
-  if g.in_neighbors then return g:in_neighbors(id) end
+  local g = self._g
+  local gin_ = g.in_neighbors; if gin_ then return gin_(g, id) end
   return g:neighbors(id)
 end
 
 function NativeAdapter:is_directed()
   local self = self --[[: NativeAdapter]]
   local self = self --[[: NativeAdapter]]
-  local g = self._g --[[: unknown]]
+  local g = self._g
   return g._directed == true
 end
 
@@ -562,7 +562,7 @@ function Query:neighbors(node, opts)
   local self = self --[[: QueryT]]
   opts = opts or {}
   local depth = opts.depth or 1
-  local reached = self:reachable(node, {max_depth = depth, direction = opts.direction or "out"})
+  local reached = (self --[[:! { reachable: (self: unknown, unknown, unknown) -> { [unknown]: boolean }, ... }]]):reachable(node, {max_depth = depth, direction = opts.direction or "out"})
   local g = self._g
   local rows = {}
   for id in pairs(reached) do
@@ -581,7 +581,7 @@ end
 -- Returns MatchResult — list of {A=id, B=id, ...} assignment tables.
 function Query:pattern(pat)
   local self = self --[[: QueryT]]
-  local pat = pat --[[: { nodes: { [integer]: string }, edges: { [integer]: { [integer]: any } } }]]
+  local pat = pat --[[: { nodes: { [integer]: string }, edges: { [integer]: { [integer]: unknown } } }]]
   local g       = self._g
   local vars    = pat.nodes   -- ordered variable names
   local pedges  = pat.edges   -- {var_from, var_to, type_constraint}
@@ -599,7 +599,7 @@ function Query:pattern(pat)
       if pe[3] then
         -- check edge type
         local edata = g:edge_data(from_id, to_id)
-        if type(edata) ~= "table" or edata.type ~= pe[3] then return false end
+        if type(edata) ~= "table" or (edata --[[:! { type: unknown, ... }]]).type ~= pe[3] then return false end
       end
     end
     return true

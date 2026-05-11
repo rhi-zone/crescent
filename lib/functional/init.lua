@@ -438,14 +438,14 @@ end
 
 -- partial(fn, ...) -> fn with leading arguments bound.
 function M.partial(fn, ...)
-  local bound = { ... }
+  local bound = ({ ... } --[[:! { [integer]: nil }]])
   local nbound = select("#", ...)
   return function(...)
-    local args = {}
+    local args = {} --[[:! { [integer]: nil }]]
     for i = 1, nbound do args[i] = bound[i] end
     local extra = select("#", ...)
-    for i = 1, extra do args[nbound + i] = select(i, ...) end
-    return fn(unpack(args --[[:! { [integer]: any }]], 1, nbound + extra))
+    for i = 1, extra do args[nbound + i] = (select(i, ...) --[[:! nil]]) end
+    return fn(unpack(args, 1, nbound + extra))
   end
 end
 
@@ -457,22 +457,22 @@ function M.curry(fn, n)
     n = (info and info.nparams or 0) --[[:! integer]]
   end
   if n <= 1 then return fn end
-  --: ({ [integer]: unknown }, integer) -> function
+  --: ({ [integer]: nil }, integer) -> function
   local function step(collected, remaining)
     return function(...)
-      local args = {} --: { [integer]: unknown }
+      local args = {} --[[:! { [integer]: nil }]]
       for i = 1, #collected do args[i] = collected[i] end
       local added = select("#", ...)
-      for i = 1, added do args[#collected + i] = select(i, ...) end
+      for i = 1, added do args[#collected + i] = (select(i, ...) --[[:! nil]]) end
       local new_remaining = remaining - added
       if new_remaining <= 0 then
-        return fn(unpack(args --[[:! { [integer]: any }]]))
+        return fn(unpack(args))
       else
         return step(args, new_remaining)
       end
     end
   end
-  return step({}, n)
+  return step({} --[[:! { [integer]: nil }]], n)
 end
 
 -- flip(fn) -> fn with first two arguments swapped.

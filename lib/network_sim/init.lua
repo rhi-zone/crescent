@@ -6,11 +6,12 @@ local M = {}
 M._tier = "pure"
 
 --:: Rng = { float: (self: Rng) -> number, int: (self: Rng, a: integer, b: integer) -> integer, next: (self: Rng) -> integer }
---:: NetTickResult = { delivered: { any }, dropped: { any } }
+--:: NetMsg = { from: unknown, to: unknown, msg: unknown, deliver_at: integer, id: integer }
+--:: NetTickResult = { delivered: { [integer]: NetMsg }, dropped: { [integer]: NetMsg } }
 --:: Net = {
 --::   _nodes: { [string]: function },
---::   _queue: { any },
---::   _history: { any },
+--::   _queue: { [integer]: NetMsg },
+--::   _history: { [integer]: NetMsg },
 --::   _partitions: { [string]: boolean | nil },
 --::   _latency: { [string]: number | nil },
 --::   _loss: { [string]: number | nil },
@@ -21,7 +22,7 @@ M._tier = "pure"
 --::   tick_count: integer,
 --::   send: (self: Net, from: unknown, to: unknown, msg: unknown, opts: unknown | nil) -> (integer | nil, string | nil),
 --::   broadcast: (self: Net, from: unknown, msg: unknown, opts: unknown | nil) -> ({ integer } | nil, string | nil),
---::   pending: (self: Net) -> { any },
+--::   pending: (self: Net) -> { [integer]: NetMsg },
 --::   tick: (self: Net, n: integer | nil) -> NetTickResult,
 --::   ...
 --:: }

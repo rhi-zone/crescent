@@ -106,7 +106,7 @@ end
 -- Uses FFI when available for exact bit-level representation.
 local pack_double
 if ffi then
-	local ffi_ = ffi --[[:! { new: (string) -> any, cast: (string, any) -> any, ... }]]
+	local ffi_ = ffi --[[:! { new: (string) -> cdata, cast: (string, unknown) -> cdata, ... }]]
 	local _tmp = ffi_.new("double[1]") --[[: unknown]]
 	local _ptr  -- will be cast after first use
 	pack_double = function(n)
@@ -212,7 +212,7 @@ end
 -- Unpack IEEE 754 double from little-endian 8 bytes.
 local unpack_double
 if ffi then
-	local ffi_ = ffi --[[:! { new: (string) -> any, cast: (string, any) -> any, ... }]]
+	local ffi_ = ffi --[[:! { new: (string) -> cdata, cast: (string, unknown) -> cdata, ... }]]
 	local _tmp = ffi_.new("uint8_t[8]") --[[: unknown]]
 	local _dptr = ffi_.cast("double*", _tmp) --[[: unknown]]
 	--: (string, integer) -> (number, integer)

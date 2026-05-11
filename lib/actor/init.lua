@@ -20,7 +20,7 @@ local co_resume  = coroutine.resume
 local co_status  = coroutine.status
 local co_yield   = coroutine.yield
 
---:: ActorRecord = { _pid: integer, _name: string|nil, _restart: string, _mailbox: { [integer]: unknown }, _links: { [integer]: boolean }, _monitors: { [integer]: integer }, _monitor_refs: { [integer]: integer }, _status: string, _fn: (unknown) -> unknown, _co: any|nil, _ctx: unknown, _exit_reason: string|nil, _deadline: number|nil, _system: SystemShape }
+--:: ActorRecord = { _pid: integer, _name: string|nil, _restart: string, _mailbox: { [integer]: unknown }, _links: { [integer]: boolean }, _monitors: { [integer]: integer }, _monitor_refs: { [integer]: integer }, _status: string, _fn: (unknown) -> unknown, _co: cdata|nil, _ctx: unknown, _exit_reason: string|nil, _deadline: number|nil, _system: SystemShape }
 --:: ActorCtxShape = { _actor: ActorRecord, _system: SystemShape, receive: (ActorCtxShape, number|nil) -> unknown, send: (ActorCtxShape, integer, unknown) -> unknown, self: (ActorCtxShape) -> integer, name: (ActorCtxShape) -> string|nil, link: (ActorCtxShape, integer) -> boolean|nil, monitor: (ActorCtxShape, integer) -> integer, spawn: (ActorCtxShape, unknown, unknown) -> integer }
 --:: SystemShape = { _actors: { [integer]: ActorRecord }, _names: { [string]: integer }, _next_pid: integer, _next_ref_id: integer, _mailbox_size: integer, _clock_fn: () -> number, _next_ref: (SystemShape) -> integer, spawn: (SystemShape, unknown, unknown) -> integer, send: (SystemShape, integer, unknown) -> boolean|nil, call: (SystemShape, integer, unknown, number|nil) -> unknown, whereis: (SystemShape, string) -> integer|nil, stop: (SystemShape, integer) -> nil, alive: (SystemShape, integer) -> boolean, actor_count: (SystemShape) -> integer, _resume_actor: (SystemShape, ActorRecord) -> nil, _kill_actor: (SystemShape, ActorRecord, string) -> nil, step: (SystemShape) -> nil, run: (SystemShape, integer) -> nil, run_until_idle: (SystemShape) -> nil, supervisor: (SystemShape, unknown) -> unknown }
 --:: SupervisorShape = { _system: SystemShape, _strategy: string, _max_restarts: integer, _period: number, _children: { [integer]: unknown }, _failures: { [string]: unknown }, _pid: integer|nil, _spawn_child: (SupervisorShape, unknown) -> integer, _start_child: (SupervisorShape, unknown) -> integer|nil, _find_child: (SupervisorShape, string) -> unknown, _should_restart: (SupervisorShape, unknown, string) -> boolean, _record_failure: (SupervisorShape, string) -> integer, _handle_exit: (SupervisorShape, string, string, unknown) -> nil, get_pid: (SupervisorShape, string) -> integer|nil }
@@ -127,7 +127,7 @@ end
 
 --: (integer, (unknown) -> unknown, { name: string|nil, restart: string|nil, mailbox_size: integer|nil, ... }, SystemShape) -> ActorRecord
 local function make_actor(pid, fn, opts, system)
-  local actor = {
+  local actor = ({
     _pid      = pid,
     _name     = opts.name,
     _restart  = opts.restart or "temporary",
@@ -142,16 +142,16 @@ local function make_actor(pid, fn, opts, system)
     _exit_reason = nil,
     _deadline = nil,   -- coroutine waiting until this clock value
     _system   = system,
-  }
+  }) --[[:! ActorRecord]]
   local ctx = setmetatable({
     _actor  = actor,
     _system = system,
   }, ActorCtx) --[[: unknown]]
   actor._ctx = ctx
   actor._co = co_create(function()
-    local fn_ = fn --[[:! (any) -> any]]
+    local fn_ = fn --[[:! (unknown) -> unknown]]
     fn_(ctx)
-  end) --[[: unknown]]
+  end) --[[:! cdata]]
   return actor
 end
 
@@ -213,7 +213,7 @@ function System:send(pid, msg)
   end
   mailbox[#mailbox + 1] = msg
   -- If the actor is suspended waiting for a message, resume it now.
-  local co_ = actor._co --[[: unknown]]
+  local co_ = actor._co --[[:! cdata]]
   if co_status(co_) == "suspended" then
     self_:_resume_actor(actor)
   end
@@ -241,7 +241,7 @@ function System:call(pid, msg, timeout_ms)
 
   -- Inject reply_to into msg
   msg = msg or {}
-  local msg_ = msg --[[:! { [string]: any }]]
+  local msg_ = msg --[[:! { [string]: unknown }]]
   msg_["reply_to"] = caller_pid
 
   -- Send the message
@@ -309,7 +309,7 @@ function System:_resume_actor(actor)
   local actor_ = actor
   if actor_._status ~= "running" then return
   else
-  local co_ = actor_._co --[[: unknown]]
+  local co_ = actor_._co --[[:! cdata]]
   if co_status(co_) == "dead" then
     self_:_kill_actor(actor, "normal")
     return
@@ -379,7 +379,7 @@ function System:step()
       local has_mail  = #actor._mailbox > 0
       local dl = actor._deadline --: number|nil
       local timed_out = dl ~= nil and now >= dl
-      local co_ = actor._co --[[: unknown]]
+      local co_ = actor._co --[[:! cdata]]
       local suspended = co_status(co_) == "suspended"
       if (has_mail or timed_out) and suspended then
         to_step[#to_step + 1] = actor
@@ -437,7 +437,7 @@ Supervisor.__index = Supervisor
 function System:supervisor(opts)
   local self_ = self
   opts = opts or {}
-  local opts_ = opts --[[:! { strategy: string|nil, max_restarts: integer|nil, period: number|nil, name: string|nil, children: { [integer]: any }|nil }]]
+  local opts_ = opts --[[:! { strategy: string|nil, max_restarts: integer|nil, period: number|nil, name: string|nil, children: { [integer]: unknown }|nil }]]
   local sup = setmetatable({
     _system       = self_,
     _strategy     = opts_.strategy or "one_for_one",
@@ -469,7 +469,7 @@ function System:supervisor(opts)
   local children_ = opts_.children
   if children_ then
     for _, spec in ipairs(children_) do
-      local spec_ = spec --[[:! { id: string, fn: any, restart: string|nil, name: string|nil }]]
+      local spec_ = spec --[[:! { id: string, fn: unknown, restart: string|nil, name: string|nil }]]
       local entry = {
         id      = spec_.id,
         fn      = spec_.fn,

@@ -199,7 +199,7 @@ local function aead_decrypt(cipher, key, nonce, ciphertext_with_tag, aad)
 
 	-- Set expected tag
 	local tag_buf = ffi.new("unsigned char[?]", TAG_LEN) --[[: unknown]]
-	ffi.copy(tag_buf --[[: unknown]], tag --[[: unknown]], TAG_LEN)
+	ffi.copy(tag_buf, tag, TAG_LEN)
 	if lib.EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, TAG_LEN, tag_buf) ~= 1 then
 		lib.EVP_CIPHER_CTX_free(ctx)
 		return nil, "failed to set tag"

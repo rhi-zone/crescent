@@ -58,7 +58,7 @@ end
 -- Parser state
 -- ---------------------------------------------------------------------------
 
---:: YState = { s: string, pos: integer, len: integer, line: integer, col: integer, anchors: { [string]: any } }
+--:: YState = { s: string, pos: integer, len: integer, line: integer, col: integer, anchors: { [string]: unknown } }
 
 --: (str: string) -> YState
 local function new_state(str)
@@ -960,7 +960,7 @@ local function is_array(t)
   if type(t) ~= "table" then return false end
   local n = 0
   local count = 0
-  for k, _ in pairs(t --[[:! { [any]: unknown }]]) do
+  for k, _ in pairs(t --[[:! { [unknown]: unknown }]]) do
     count = count + 1
     local kn = tonumber(k --[[: unknown]]) or -1
     if type(k) ~= "number" or kn ~= math.floor(kn) or kn < 1 then return false end

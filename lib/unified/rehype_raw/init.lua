@@ -51,9 +51,10 @@ local VOID = {
 --              { type="close", tag= }
 --              { type="comment", value= }
 --              { type="text", value= }
---: (string) -> unknown
+--:: HtmlToken = { type: string, value?: string, tag?: string, attrs?: { [string]: string }, void?: boolean }
+--: (string) -> { [integer]: HtmlToken }
 local function tokenize(html)
-  local tokens = {} --[[: unknown]]
+  local tokens = {} --[[:! { [integer]: HtmlToken }]]
   local i = 1
   local len = #html
 
@@ -199,37 +200,42 @@ end
 
 -- Build a hast tree from a token list.
 -- Returns a list of top-level hast nodes.
---: (unknown) -> { [integer]: HastNode }
+--: ({ [integer]: HtmlToken }) -> { [integer]: HastNode }
 local function tokens_to_hast(tokens)
   -- Stack of open elements. Each entry: { node = hast_element }.
-  local stack = {} --[[: unknown]]
-  local root_children = {} --[[: unknown]]
+  local stack = {} --[[:! { [integer]: { node: HastNode } | nil }]]
+  local root_children = {} --[[:! { [integer]: HastNode }]]
 
+  --: () -> { [integer]: HastNode }
   local function current_children()
     if #stack == 0 then
       return root_children
     end
-    return stack[#stack].node.children
+    local top_ = stack[#stack]
+    if not top_ then return root_children end
+    local ch = top_.node.children
+    if ch then return ch --[[:! { [integer]: HastNode }]] end
+    return root_children
   end
 
-  for _, tok_raw in ipairs(tokens) do
-    local tok = tok_raw --[[: unknown]]
+  for _, tok in ipairs(tokens) do
     if tok.type == "text" then
       local children = current_children()
-      children[#children + 1] = { type = "text", value = tok.value }
+      children[#children + 1] = { type = "text", value = tok.value or "" } --[[:! HastNode]]
 
     elseif tok.type == "comment" then
       -- Preserve as raw HTML comment.
       local children = current_children()
-      children[#children + 1] = { type = "raw", value = "<!--" .. tok.value .. "-->" }
+      children[#children + 1] = { type = "raw", value = "<!--" .. (tok.value or "") .. "-->" } --[[:! HastNode]]
 
     elseif tok.type == "open" then
+      local node_children = {} --[[:! { [integer]: HastNode }]]
       local node = {
         type = "element",
         tag = tok.tag,
-        props = tok.attrs,
-        children = {},
-      }
+        props = tok.attrs --[[:! { [string]: unknown } | nil]],
+        children = node_children,
+      } --[[:! HastNode]]
       if tok.void then
         -- Void elements are immediately appended (no push/pop).
         local children = current_children()
@@ -243,7 +249,8 @@ local function tokens_to_hast(tokens)
       -- Pop matching open tag from stack.
       local pop_idx = nil
       for k = #stack, 1, -1 do
-        if stack[k].node.tag == tok.tag then
+        local se_ = stack[k]
+        if se_ and se_.node.tag == tok.tag then
           pop_idx = k
           break
         end
@@ -251,11 +258,13 @@ local function tokens_to_hast(tokens)
       if pop_idx then
         -- Close all tags from top down to pop_idx (handles implicit close).
         while #stack >= pop_idx do
-          local entry = stack[#stack]
+          local entry_ = stack[#stack]
           stack[#stack] = nil
-          -- Append the now-complete node to its parent (or root).
-          local children = current_children()
-          children[#children + 1] = entry.node
+          if entry_ then
+            -- Append the now-complete node to its parent (or root).
+            local children = current_children()
+            children[#children + 1] = entry_.node
+          end
         end
       end
       -- Unmatched close tags are silently ignored.
@@ -264,10 +273,12 @@ local function tokens_to_hast(tokens)
 
   -- Close any unclosed elements (append to parent as-is).
   while #stack > 0 do
-    local entry = stack[#stack]
+    local entry_ = stack[#stack]
     stack[#stack] = nil
-    local children = current_children()
-    children[#children + 1] = entry.node
+    if entry_ then
+      local children = current_children()
+      children[#children + 1] = entry_.node
+    end
   end
 
   return root_children

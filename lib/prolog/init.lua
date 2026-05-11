@@ -304,7 +304,7 @@ parse_term = function(toks, pos, maxprec)
   -- Try prefix operator
   local tok = toks[pos]
   if tok then
-    local pfx = PREFIX_OPS[tok.value] --[[:! { [integer]: any }]]
+    local pfx = PREFIX_OPS[tok.value] --[[:! { [integer]: unknown }]]
     if pfx and (pfx[1] --[[:! integer]]) <= maxprec then
       local rprec = pfx[2] == "fy" and (pfx[1] --[[:! integer]]) or (pfx[1] --[[:! integer]]) - 1
       local rhs, np2 = parse_term(toks, pos + 1, rprec)
@@ -338,7 +338,7 @@ parse_term = function(toks, pos, maxprec)
     else
       break
     end
-    local info = INFIX_OPS[op] --[[:! { [integer]: any }]]
+    local info = INFIX_OPS[op] --[[:! { [integer]: unknown }]]
     local prec = info[1] --[[:! integer]]
     local assoc = info[2] --[[:! string]]
     if prec > maxprec then break end

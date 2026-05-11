@@ -30,7 +30,7 @@ end
 --: (UnistNode, UnistNode[] | nil) -> UnistNode
 local function copy_node(node, new_children)
   local copy = {}
-  local node_map = node --[[:! { [string]: any }]]
+  local node_map = node --[[:! { [string]: unknown }]]
   for k, v in pairs(node_map) do
     copy[k] = v
   end

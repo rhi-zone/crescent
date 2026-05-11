@@ -19,7 +19,7 @@
 --:: declare pcall = <F: (...P) -> R, P, R>(f: F, ...P) -> ...(PcallReturn<F>)
 --:: declare xpcall = <F: (...P) -> R, P, R>(f: F, handler: (string) -> string, ...P) -> ...(PcallReturn<F>)
 --:: declare require = <T: string>(module: T) -> $Require<T>
---:: declare select = (("#") -> integer) & ((integer, ...any) -> any)
+--:: declare select = (("#") -> integer) & ((integer, ...unknown) -> unknown)
 --:: declare rawget = <T>(t: T, k: unknown) -> Values<T> | nil
 --:: declare rawset = <T>(t: T, k: unknown, v: unknown) -> T
 --:: declare rawequal = (a: unknown, b: unknown) -> boolean
@@ -63,7 +63,7 @@
 --:: }
 --:: module "ffi": {
 --::   cdef:     (string) -> nil,
---::   new:      (<T>(ct: Ctype<T>, init: T | nil) -> T) & (<S: Keys<CTypeMap>>(ct: S, init: CTypeMap[S] | nil) -> CTypeMap[S]) & ((ct: string, count: integer, init: unknown | nil) -> any) & ((ct: string, init: unknown | nil) -> any),
+--::   new:      (<T>(ct: Ctype<T>, init: T | nil) -> T) & (<S: Keys<CTypeMap>>(ct: S, init: CTypeMap[S] | nil) -> CTypeMap[S]) & ((ct: string, count: integer, init: unknown | nil) -> cdata) & ((ct: string, init: unknown | nil) -> cdata),
 --::   cast:     (<T, U>(ct: Ctype<T>, obj: U) -> T) & (<S: Keys<CTypeMap>, U>(ct: S, obj: U) -> CTypeMap[S]) & ((ct: string, obj: unknown) -> cdata),
 --::   sizeof:   (ct: string | Ctype<unknown>) -> integer,
 --::   typeof:   (<T>(ct: Ctype<T>) -> Ctype<T>) & (<S: Keys<CTypeMap>>(ct: S) -> Ctype<CTypeMap[S]>),
@@ -114,7 +114,7 @@
 ---------------------------------------------------------------------------
 
 --:: augment string {
---::     format:  (fmt: string, ...any) -> string,
+--::     format:  (fmt: string, ...unknown) -> string,
 --::     len:     (s: string) -> integer,
 --::     sub:     (s: string, i: integer, j: integer | nil) -> string,
 --::     find:    <P: string>(s: string, pattern: P, init: integer | nil, plain: boolean | nil) -> ...($FindReturn<P>),

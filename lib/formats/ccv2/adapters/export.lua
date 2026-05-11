@@ -19,7 +19,7 @@ local function with_lorebook(data, entries)
 	local out = {}
 	for k, v in pairs(data) do out[k] = v end
 	if entries then
-		local entries_ = entries --[[:! { [integer]: any }]]
+		local entries_ = entries --[[:! { [integer]: unknown }]]
 		if #entries_ > 0 then
 			local lorebook_any = lorebook --[[: unknown]]
 			out.character_book = lorebook_any.to_ccv2(entries_)

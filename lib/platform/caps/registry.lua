@@ -19,8 +19,6 @@ end
 local M = {}
 
 -- ffi is nil on non-Windows or when LuaJIT FFI is unavailable.
--- `any` opt-out: ffi module access is gated by IS_WINDOWS runtime check;
--- the type checker cannot follow the implication IS_WINDOWS → ffi ~= nil.
 local ffi_ok
 local ffi = nil --[[: unknown]]
 do
@@ -28,8 +26,10 @@ do
 	ffi_ok = ok
 	if ok then ffi = mod end
 end
+-- ffi_m: non-nil ffi module reference used where IS_WINDOWS guarantees availability
+local ffi_m = ffi --[[:! { cdef: (string) -> nil, new: (string, unknown | nil) -> cdata, cast: (string, unknown) -> cdata, load: (string, boolean | nil) -> $FfiC, string: (cdata, integer | nil) -> string, os: string, ... }]]
 
-local IS_WINDOWS = ffi ~= nil and ffi.os == "Windows"
+local IS_WINDOWS = ffi ~= nil and ffi_m.os == "Windows"
 
 -- ── Constants ──────────────────────────────────────────────────────────────
 
@@ -167,13 +167,12 @@ end
 
 -- ── advapi32 FFI setup ─────────────────────────────────────────────────────
 
--- `any` opt-out: advapi32 is a Windows FFI library handle; ffi.load returns cdata.
 local advapi32 = nil --[[: unknown]]
 local ffi_ready = false
 
 if IS_WINDOWS then
 	local ok = pcall(function()
-		ffi.cdef [[
+		ffi_m.cdef [[
 			typedef void*          HKEY;
 			typedef long           LONG;
 			typedef unsigned long  DWORD;
@@ -193,7 +192,7 @@ if IS_WINDOWS then
 				DWORD* lpcchValueName, DWORD* lpReserved, DWORD* lpType,
 				BYTE* lpData, DWORD* lpcbData);
 		]]
-		advapi32 = ffi.load("advapi32")
+		advapi32 = ffi_m.load("advapi32")
 		ffi_ready = true
 	end)
 end
@@ -210,6 +209,7 @@ function M.registry_cap(opts)
 	if not ffi_ready or advapi32 == nil then
 		return nil, "registry cap: advapi32 FFI unavailable"
 	end
+	local adv = advapi32 --[[:! { RegOpenKeyExW: function, RegCloseKey: function, RegQueryValueExW: function, RegSetValueExW: function, RegEnumKeyExW: function, RegEnumValueW: function, ... }]]
 
 	local root = opts_.root
 	if not root then error("registry_cap: opts.root is required") end
@@ -227,19 +227,20 @@ function M.registry_cap(opts)
 	local function open_key(subkey, want_write)
 		local full = join_key(base_key, subkey or "")
 		local access = want_write and KEY_WRITE or KEY_READ
-		local hkey_out = ffi.new("HKEY[1]") --: cdata
-		local wfull = ffi.cast("const unsigned short*", utf8_to_utf16le(full)) --: cdata
-		local rc = advapi32.RegOpenKeyExW(
-			ffi.cast("void*", ffi.cast("uintptr_t", hive_int)),
+		local hkey_out = ffi_m.new("HKEY[1]") --: cdata
+		local wfull = ffi_m.cast("const unsigned short*", utf8_to_utf16le(full)) --: cdata
+		local rc = adv.RegOpenKeyExW(
+			ffi_m.cast("void*", ffi_m.cast("uintptr_t", hive_int)),
 			wfull, 0, access, hkey_out)
-		if rc ~= 0 then return nil, "registry: RegOpenKeyExW failed: " .. rc end
+		if rc ~= 0 then return nil, "registry: RegOpenKeyExW failed: " .. tostring(rc) end
 		return hkey_out[0]
 	end
 
 	local function close_key(hkey)
-		advapi32.RegCloseKey(hkey)
+		adv.RegCloseKey(hkey)
 	end
 
+	--: (vtype: unknown, buf: cdata, size: integer) -> (unknown, string | nil)
 	local function decode_value(vtype, buf, size)
 		if vtype == REG_DWORD then
 			if size < 4 then return nil, "registry: short DWORD" end
@@ -251,11 +252,11 @@ function M.registry_cap(opts)
 			local hi = buf[4] + buf[5]*256 + buf[6]*65536 + buf[7]*16777216
 			return hi * 4294967296 + lo, TYPE_NAMES[REG_QWORD]
 		elseif vtype == REG_BINARY then
-			return ffi.string(buf, size), TYPE_NAMES[REG_BINARY]
+			return ffi_m.string(buf, size), TYPE_NAMES[REG_BINARY]
 		elseif vtype == REG_SZ or vtype == REG_EXPAND_SZ then
-			return utf16le_to_utf8(ffi.string(buf, size), size), TYPE_NAMES[vtype]
+			return utf16le_to_utf8(ffi_m.string(buf, size), size), TYPE_NAMES[vtype]
 		elseif vtype == REG_MULTI_SZ then
-			local raw = ffi.string(buf, size)
+			local raw = ffi_m.string(buf, size)
 			local result = {}
 			local pos = 1
 			while pos + 1 <= size do
@@ -266,7 +267,7 @@ function M.registry_cap(opts)
 			end
 			return result, TYPE_NAMES[REG_MULTI_SZ]
 		else
-			return ffi.string(buf, size), "REG_UNKNOWN_" .. tostring(vtype)
+			return ffi_m.string(buf, size), "REG_UNKNOWN_" .. tostring(vtype)
 		end
 	end
 
@@ -279,19 +280,19 @@ function M.registry_cap(opts)
 			end
 			local hkey, err = open_key(subkey, false)
 			if not hkey then return nil, err end
-			local wname = ffi.cast("const unsigned short*", utf8_to_utf16le(name or ""))
-			local vtype = ffi.new("unsigned long[1]") --: cdata
-			local size  = ffi.new("unsigned long[1]") --: cdata
-			local rc = advapi32.RegQueryValueExW(hkey, wname, nil, vtype, nil, size)
+			local wname = ffi_m.cast("const unsigned short*", utf8_to_utf16le(name or ""))
+			local vtype = ffi_m.new("unsigned long[1]") --: cdata
+			local size  = ffi_m.new("unsigned long[1]") --: cdata
+			local rc = adv.RegQueryValueExW(hkey, wname, nil, vtype, nil, size)
 			if rc ~= 0 then
 				close_key(hkey)
-				return nil, "registry: RegQueryValueExW failed: " .. rc
+				return nil, "registry: RegQueryValueExW failed: " .. tostring(rc)
 			end
-			local buf = ffi.new("unsigned char[?]", size[0]) --: cdata
-			rc = advapi32.RegQueryValueExW(hkey, wname, nil, vtype, buf, size)
+			local buf = ffi_m.new("unsigned char[?]", size[0]) --: cdata
+			rc = adv.RegQueryValueExW(hkey, wname, nil, vtype, buf, size)
 			close_key(hkey)
 			if rc ~= 0 then
-				return nil, "registry: RegQueryValueExW (data) failed: " .. rc
+				return nil, "registry: RegQueryValueExW (data) failed: " .. tostring(rc)
 			end
 			return decode_value(vtype[0], buf, size[0])
 		end,
@@ -304,28 +305,28 @@ function M.registry_cap(opts)
 			end
 			local hkey, err = open_key(subkey, true)
 			if not hkey then return nil, err end
-			local wname    = ffi.cast("const unsigned short*", utf8_to_utf16le(name or ""))
+			local wname    = ffi_m.cast("const unsigned short*", utf8_to_utf16le(name or ""))
 			local type_int = vtype or REG_SZ
 			local data --: cdata | nil
 			local data_size
 			if type_int == REG_DWORD then
 				local v = tonumber(value) or 0
-				data = ffi.new("unsigned char[4]",
+				data = ffi_m.new("unsigned char[4]",
 					{ v % 256, math.floor(v/256) % 256,
 					  math.floor(v/65536) % 256, math.floor(v/16777216) % 256 })
 				data_size = 4
 			elseif type_int == REG_SZ or type_int == REG_EXPAND_SZ then
 				local encoded = utf8_to_utf16le(tostring(value))
-				data = ffi.cast("const unsigned char*", encoded)
+				data = ffi_m.cast("const unsigned char*", encoded)
 				data_size = #encoded
 			else
 				local s = tostring(value)
-				data = ffi.cast("const unsigned char*", s)
+				data = ffi_m.cast("const unsigned char*", s)
 				data_size = #s
 			end
-			local rc = advapi32.RegSetValueExW(hkey, wname, 0, type_int, data, data_size)
+			local rc = adv.RegSetValueExW(hkey, wname, 0, type_int, data, data_size)
 			close_key(hkey)
-			if rc ~= 0 then return nil, "registry: RegSetValueExW failed: " .. rc end
+			if rc ~= 0 then return nil, "registry: RegSetValueExW failed: " .. tostring(rc) end
 			return true
 		end,
 
@@ -337,16 +338,16 @@ function M.registry_cap(opts)
 			local hkey, err = open_key(subkey, false)
 			if not hkey then return nil, err end
 			local result = {}
-			local name_buf  = ffi.new("unsigned short[256]") --: cdata
-			local name_size = ffi.new("unsigned long[1]")    --: cdata
+			local name_buf  = ffi_m.new("unsigned short[256]") --: cdata
+			local name_size = ffi_m.new("unsigned long[1]")    --: cdata
 			local idx = 0
 			while true do
 				name_size[0] = 256
-				local rc = advapi32.RegEnumKeyExW(hkey, idx, name_buf, name_size,
+				local rc = adv.RegEnumKeyExW(hkey, idx, name_buf, name_size,
 					nil, nil, nil, nil)
 				if rc ~= 0 then break end
 				result[#result + 1] = utf16le_to_utf8(
-					ffi.string(name_buf, name_size[0] * 2), name_size[0] * 2)
+					ffi_m.string(name_buf, name_size[0] * 2), name_size[0] * 2)
 				idx = idx + 1
 			end
 			close_key(hkey)
@@ -362,20 +363,20 @@ function M.registry_cap(opts)
 			if not hkey then return nil, err end
 			local result = {}
 			local BUF       = 16384
-			local name_buf  = ffi.new("unsigned short[256]") --: cdata
-			local name_size = ffi.new("unsigned long[1]")    --: cdata
-			local vtype     = ffi.new("unsigned long[1]")    --: cdata
-			local data_buf  = ffi.new("unsigned char[?]", BUF) --: cdata
-			local data_size = ffi.new("unsigned long[1]")    --: cdata
+			local name_buf  = ffi_m.new("unsigned short[256]") --: cdata
+			local name_size = ffi_m.new("unsigned long[1]")    --: cdata
+			local vtype     = ffi_m.new("unsigned long[1]")    --: cdata
+			local data_buf  = ffi_m.new("unsigned char[?]", BUF) --: cdata
+			local data_size = ffi_m.new("unsigned long[1]")    --: cdata
 			local idx = 0
 			while true do
 				name_size[0] = 256
 				data_size[0] = BUF
-				local rc = advapi32.RegEnumValueW(hkey, idx, name_buf, name_size,
+				local rc = adv.RegEnumValueW(hkey, idx, name_buf, name_size,
 					nil, vtype, data_buf, data_size)
 				if rc ~= 0 then break end
 				local n = utf16le_to_utf8(
-					ffi.string(name_buf, name_size[0] * 2), name_size[0] * 2)
+					ffi_m.string(name_buf, name_size[0] * 2), name_size[0] * 2)
 				result[#result + 1] = {
 					name = n,
 					type = TYPE_NAMES[vtype[0]] or ("REG_" .. tostring(vtype[0])),

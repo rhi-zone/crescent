@@ -26,7 +26,7 @@ end
 
 local M = {}
 
---:: PromiseHandler = { [integer]: any }
+--:: PromiseHandler = { [integer]: unknown }
 --:: Promise = { _state: string, _value: unknown, _reason: unknown, _handlers: { [integer]: PromiseHandler }, and_then: (self: Promise, on_fulfilled: ((value: unknown) -> unknown) | nil) -> Promise, catch: (self: Promise, on_rejected: ((reason: unknown) -> unknown) | nil) -> Promise, finally: (self: Promise, on_settled: () -> ()) -> Promise, await: (self: Promise) -> (unknown, string | nil), state: (self: Promise) -> string, value: (self: Promise) -> unknown, reason: (self: Promise) -> unknown }
 
 local STATE_PENDING   = "pending"

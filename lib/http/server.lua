@@ -14,7 +14,7 @@ local max_header_size = 65536
 
 -- TLS support: loaded lazily so the server still works when libtls is absent.
 -- tls_lib is the lib/tls module (or nil if unavailable).
---:: TlsMod = { tls_c_ptr: () -> any, accept_socket: (any, any, integer) -> integer, error: (any) -> any, handshake: (any) -> integer, free: (any) -> nil, write: (any, any, integer) -> integer, read: (any, any, integer) -> integer, close: (any) -> nil, config_new: () -> any, config_set_keypair_file: (any, any, any) -> integer, config_error: (any) -> any, config_free: (any) -> nil, server: () -> any, configure: (any, any) -> integer }
+--:: TlsMod = { tls_c_ptr: () -> cdata, accept_socket: (cdata, cdata, integer) -> integer, error: (cdata) -> cdata, handshake: (cdata) -> integer, free: (cdata) -> nil, write: (cdata, unknown, integer) -> integer, read: (cdata, cdata, integer) -> integer, close: (cdata) -> nil, config_new: () -> cdata, config_set_keypair_file: (cdata, cdata, cdata) -> integer, config_error: (cdata) -> cdata, config_free: (cdata) -> nil, server: () -> cdata, configure: (cdata, cdata) -> integer }
 local tls_lib --: TlsMod | nil
 local tls_loaded = false
 --: () -> TlsMod | nil
@@ -74,7 +74,7 @@ mod.make_connection_handler = function (handler)
 		local res = { status = 200, reason = "", version = "HTTP/1.1", headers = {}, body = nil } --: http_response
 		local res_any = res --[[: unknown]]
 		handler(req --[[:! http_request]], res_any --[[:! http_server_response]], client_)
-		if not res_any.raw then
+		if not (res_any --[[:! { raw?: boolean, ... }]]).raw then
 			client_:send(http.serialize_response(res))
 			client_:close()
 		end
@@ -132,7 +132,7 @@ local function wrap_client_tls(tls_ctx, client)
 	end
 
 	-- Extend client:close() to also close the TLS context.
-	local orig_close = clientm_.close
+	local orig_close = (clientm_ --[[:! { close: (self: unknown) -> unknown, ... }]]).close
 	clientm_.close = function(self)
 		t.close(cctx)
 		t.free(cctx)

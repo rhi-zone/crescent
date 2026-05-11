@@ -20,17 +20,17 @@ end
 
 local bit = require("bit")
 --: (...number) -> number
-local function band(...) return bit.band(... --[[: unknown]]) end
+local function band(...) return bit.band(...) end
 --: (...number) -> number
-local function bor(...) return bit.bor(... --[[: unknown]]) end
+local function bor(...) return bit.bor(...) end
 --: (...number) -> number
-local function bxor(...) return bit.bxor(... --[[: unknown]]) end
+local function bxor(...) return bit.bxor(...) end
 --: (number, number) -> number
-local function rshift(a, b) return bit.rshift(a --[[: unknown]], b --[[: unknown]]) end
+local function rshift(a, b) return bit.rshift(a, b) end
 --: (number, number) -> number
-local function lshift(a, b) return bit.lshift(a --[[: unknown]], b --[[: unknown]]) end
+local function lshift(a, b) return bit.lshift(a, b) end
 --: (number) -> number
-local function bnot(a) return bit.bnot(a --[[: unknown]]) end
+local function bnot(a) return bit.bnot(a) end
 
 -- ── Inline pure-Lua SHA-256 ───────────────────────────────────────────────────
 -- Returns 32-byte binary string.

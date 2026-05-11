@@ -55,8 +55,8 @@ local function serialize_children(children, sep)
   return tbl_concat(parts, sep or "")
 end
 
+--: (node: { type: string, children?: { [integer]: { type: string, ... } }, value?: string, depth?: integer, lang?: string, url?: string, title?: string, label?: string, ordered?: boolean, start?: integer, ... }) -> string
 serialize = function(node)
-  node = node --[[: unknown]]
   local t = node.type
   if t == "root" then
     return serialize_children(node.children, "\n\n")
@@ -65,7 +65,7 @@ serialize = function(node)
     return serialize_children(node.children)
 
   elseif t == "heading" then
-    return str_rep("#", node.depth) .. " " .. serialize_children(node.children)
+    return str_rep("#", node.depth or 1) .. " " .. serialize_children(node.children)
 
   elseif t == "text" then
     return node.value or ""
@@ -110,8 +110,9 @@ serialize = function(node)
   elseif t == "list" then
     local parts = {}
     local start = node.start or 1
-    for idx = 1, #node.children do
-      local item    = node.children[idx]
+    local ch = node.children or {}
+    for idx = 1, #ch do
+      local item    = ch[idx]
       local prefix  = node.ordered and (tostring(start + idx - 1) .. ". ") or "- "
       local content = serialize_children(item.children, "\n\n")
       local indent  = str_rep(" ", #prefix)

@@ -14,13 +14,13 @@ mod.router = function (path, opts)
 	local opts_ = opts --[[:! FsRouterOpts]]
 	local io_open = opts_.io_open
 	if not io_open then error("fs_router() requires opts.io_open cap") end
-	local io_open_ = io_open --[[:! (string, string | nil) -> any]]
+	local io_open_ = io_open --[[:! (string, string | nil) -> ({ read: (self: unknown, string) -> string | nil, close: (self: unknown) -> nil } | nil)]]
 	local stderr_write = opts_.stderr_write
 	if not stderr_write then error("fs_router() requires opts.stderr_write cap") end
 	local stderr_write_ = stderr_write --[[:! (...string) -> nil]]
 	local lua_load = opts_.lua_load
 	if not lua_load then error("fs_router() requires opts.lua_load cap") end
-	local lua_load_ = lua_load --[[:! (string) -> (boolean, any)]]
+	local lua_load_ = lua_load --[[:! (string) -> (boolean, unknown)]]
 	--: (string) -> unknown
 	local handle_file = function (path2)
 		if path2:find("%.lua$") then

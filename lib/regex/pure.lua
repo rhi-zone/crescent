@@ -167,7 +167,7 @@ local function parse_seq(pat, pos, group_counter, dotall)
 			local idx = group_counter[1]
 			local child
 			local alt_pos
-			child, alt_pos = (parse_alt --[[:! (string, integer, { [integer]: integer }, boolean) -> (any | nil, integer | nil)]])(pat, pos + 1, group_counter, dotall)
+			child, alt_pos = (parse_alt --[[:! (string, integer, { [integer]: integer }, boolean) -> (RegexNode | nil, integer | nil)]])(pat, pos + 1, group_counter, dotall)
 			local alt_pos_i = (alt_pos or 0) --[[:! integer]]
 			if not child then return child, alt_pos_i end -- propagate error
 			if alt_pos_i > #pat or pat:byte(alt_pos_i) ~= 41 then
@@ -337,14 +337,14 @@ local function match_node(node, subject, pos, caps, ci, dotall)
 	elseif t == "seq" then
 		local p --: integer | nil
 		p = pos
-		local children_s = node_a.children --[[:! { [integer]: any }]]
+		local children_s = node_a.children --[[:! { [integer]: RegexNode }]]
 		for i = 1, #children_s do
 			p = match_node(children_s[i], subject_s, (p or 0) --[[:! integer]], caps, ci, dotall)
 			if not p then return nil end
 		end
 		return p
 	elseif t == "alt" then
-		local children_a = node_a.children --[[:! { [integer]: any }]]
+		local children_a = node_a.children --[[:! { [integer]: RegexNode }]]
 		for i = 1, #children_a do
 			-- Save captures
 			local saved = {}
@@ -400,12 +400,12 @@ end
 
 -- ── Regex object ─────────────────────────────────────────────────────────────
 
---:: Regex = { _compiled: { tree: any, ngroups: integer, ci: boolean, dotall: boolean, pattern: string }, match: (self: Regex, subject: string, init: integer | nil) -> any, find: (self: Regex, subject: string, init: integer | nil) -> (integer | nil, integer | nil), gmatch: (self: Regex, subject: string) -> (() -> any), gsub: (self: Regex, subject: string, replacement: string | ((match: string, ...string) -> string), n: number | nil) -> (string, number), split: (self: Regex, subject: string) -> { [integer]: string } }
+--:: Regex = { _compiled: { tree: { type: string, ... }, ngroups: integer, ci: boolean, dotall: boolean, pattern: string }, match: (self: Regex, subject: string, init: integer | nil) -> unknown, find: (self: Regex, subject: string, init: integer | nil) -> (integer | nil, integer | nil), gmatch: (self: Regex, subject: string) -> (() -> unknown), gsub: (self: Regex, subject: string, replacement: string | ((match: string, ...string) -> string), n: number | nil) -> (string, number), split: (self: Regex, subject: string) -> { [integer]: string } }
 local Regex = {}
 Regex.__index = Regex
 
 function Regex:match(subject, init)
-	local compiled = self._compiled --[[: unknown]]
+	local compiled = self._compiled
 	local subject_s = subject --[[:! string]]
 	local start = init or 1
 	local tree = compiled.tree
@@ -434,7 +434,7 @@ function Regex:match(subject, init)
 end
 
 function Regex:find(subject, init)
-	local compiled = self._compiled --[[: unknown]]
+	local compiled = self._compiled
 	local subject_s = subject --[[:! string]]
 	local start = init or 1
 	local tree = compiled.tree
@@ -452,7 +452,7 @@ function Regex:find(subject, init)
 end
 
 function Regex:gmatch(subject)
-	local compiled = self._compiled --[[: unknown]]
+	local compiled = self._compiled
 	local subject_s = subject --[[:! string]]
 	local offset = 1
 	local tree = compiled.tree
@@ -489,7 +489,7 @@ end
 
 --: (self: Regex, subject: string, replacement: string | ((match: string, ...string) -> string), n: number | nil) -> (string, number)
 function Regex:gsub(subject, replacement, n)
-	local compiled = self._compiled --[[: unknown]]
+	local compiled = self._compiled
 	local subject_s = subject --[[:! string]]
 	local parts = {}
 	local count = 0
@@ -500,8 +500,8 @@ function Regex:gsub(subject, replacement, n)
 	local dotall = compiled.dotall
 	local len = #subject_s
 	local is_fn = type(replacement) == "function"
-	local replacement_fn = replacement --[[: unknown]]
-	local replacement_s = replacement --[[: unknown]]
+	local replacement_fn = replacement --[[:! (match: string, ...string) -> string]]
+	local replacement_s = replacement --[[:! string]]
 	while offset <= len do
 		if n and count >= n then break end
 		-- Scan forward to find next match
@@ -558,7 +558,7 @@ function Regex:gsub(subject, replacement, n)
 end
 
 function Regex:split(subject)
-	local compiled = self._compiled --[[: unknown]]
+	local compiled = self._compiled
 	local subject_s = subject --[[:! string]]
 	local result = {}
 	local offset = 1

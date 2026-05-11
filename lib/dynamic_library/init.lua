@@ -11,7 +11,7 @@ int dlclose(void* handle);
 char* dlerror(void);
 ]]
 
-local dl_ffi = ffi.C --[[: unknown]]
+local dl_ffi = ffi.C
 
 local RTLD_LAZY = 1
 

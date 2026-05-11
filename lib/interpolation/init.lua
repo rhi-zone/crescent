@@ -571,7 +571,7 @@ local function mat_solve(A, b)
   -- Returns solution x via partial-pivot Gaussian elimination
   local n = #b
   -- Augmented matrix (any to allow 2D unknown indexing)
-  local M2 = {} --[[: unknown]]
+  local M2 = {} --[[:! { [integer]: { [integer]: number } }]]
   for i = 1, n do
     M2[i] = {}
     for j = 1, n do M2[i][j] = A[i][j] end
@@ -579,14 +579,14 @@ local function mat_solve(A, b)
   end
   for col = 1, n do
     -- Pivot
-    local max_val, max_row = abs(M2[col][col] --[[: number]]), col
+    local max_val, max_row = abs(M2[col][col]), col
     for row = col+1, n do
-      if abs(M2[row][col] --[[: number]]) > max_val then
-        max_val = abs(M2[row][col] --[[: number]]); max_row = row
+      if abs(M2[row][col]) > max_val then
+        max_val = abs(M2[row][col]); max_row = row
       end
     end
     M2[col], M2[max_row] = M2[max_row], M2[col]
-    local pivot = M2[col][col] --[[: number]]
+    local pivot = M2[col][col]
     if abs(pivot) < 1e-14 then
       -- Singular — return zeros
       local x = {} --[[: { [integer]: number }]]
@@ -595,14 +595,14 @@ local function mat_solve(A, b)
     end
     for row = 1, n do
       if row ~= col then
-        local factor = M2[row][col] --[[: number]] / pivot
+        local factor = M2[row][col] / pivot
         for j = col, n+1 do
-          M2[row][j] = M2[row][j] --[[: number]] - factor * (M2[col][j] --[[: number]])
+          M2[row][j] = M2[row][j] - factor * (M2[col][j])
         end
       end
     end
     -- Normalize pivot row
-    for j = col, n+1 do M2[col][j] = M2[col][j] --[[: number]] / pivot end
+    for j = col, n+1 do M2[col][j] = M2[col][j] / pivot end
   end
   local x = {}
   for i = 1, n do x[i] = M2[i][n+1] end

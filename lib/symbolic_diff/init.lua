@@ -9,7 +9,7 @@ end
 local M = {}
 M._tier = "pure"
 
---:: Expr = { tag: string, value: any, name: any, left: any, right: any, base: any, exp: any, arg: any, ... }
+--:: Expr = { tag: string, value?: number, name?: string, left?: Expr, right?: Expr, base?: Expr, exp?: Expr, arg?: Expr, ... }
 
 -- ---------------------------------------------------------------------------
 -- Expression metatable — enables operator overloading
@@ -112,13 +112,13 @@ TOSTR = function(e)
   local t = e.tag
   if t == "num" then
     -- display integers without decimal point
-    local v = e.value
+    local v = e.value or 0
     if v == math.floor(v) and math.abs(v) < 1e15 then
       return tostring(math.floor(v))
     end
     return tostring(v)
   elseif t == "var" then
-    return e.name
+    return e.name or ""
   elseif t == "add" then
     return "(" .. TOSTR(e.left) .. " + " .. TOSTR(e.right) .. ")"
   elseif t == "sub" then
@@ -159,11 +159,12 @@ local EVAL  -- forward ref
 EVAL = function(e, env)
   local t = e.tag
   if t == "num" then
-    return e.value
+    return e.value or 0
   elseif t == "var" then
-    local v = env[e.name]
+    local ename = e.name or ""
+    local v = env[ename]
     if v == nil then
-      error("symbolic_diff.eval: unbound variable '" .. e.name .. "'")
+      error("symbolic_diff.eval: unbound variable '" .. ename .. "'")
     end
     return v
   elseif t == "add" then
@@ -345,8 +346,8 @@ DIFF = function(e, v)
     -- product rule: (f*g)' = f'*g + f*g'
     local f, g = e.left, e.right
     return M.add(
-      M.mul(DIFF(f, v), --[[: unknown]] g),
-      M.mul(--[[: unknown]] f, DIFF(g, v))
+      M.mul(DIFF(f, v), --[[:! Expr]] g),
+      M.mul(--[[:! Expr]] f, DIFF(g, v))
     )
 
   elseif t == "div" then
@@ -354,10 +355,10 @@ DIFF = function(e, v)
     local f, g = e.left, e.right
     return M.div(
       M.sub(
-        M.mul(DIFF(f, v), --[[: unknown]] g),
-        M.mul(--[[: unknown]] f, DIFF(g, v))
+        M.mul(DIFF(f, v), --[[:! Expr]] g),
+        M.mul(--[[:! Expr]] f, DIFF(g, v))
       ),
-      M.pow(--[[: unknown]] g, M.num(2))
+      M.pow(--[[:! Expr]] g, M.num(2))
     )
 
   elseif t == "pow" then
@@ -365,37 +366,37 @@ DIFF = function(e, v)
     -- Check if exponent is a numeric constant → simple power rule
     if g.tag == "num" then
       -- d/dx(f^n) = n * f^(n-1) * f'
-      local n = g.value
+      local n = g.value or 0
       return M.mul(
-        M.mul(M.num(n), M.pow(--[[: unknown]] f, M.num(n - 1))),
+        M.mul(M.num(n), M.pow(--[[:! Expr]] f, M.num(n - 1))),
         DIFF(f, v)
       )
     else
       -- General case: d/dx(f^g) = f^g * (g'*ln(f) + g*f'/f)
       return M.mul(
-        M.pow(--[[: unknown]] f, --[[: unknown]] g),
+        M.pow(--[[:! Expr]] f, --[[:! Expr]] g),
         M.add(
-          M.mul(DIFF(g, v), M.ln(--[[: unknown]] f)),
-          M.mul(--[[: unknown]] g, M.div(DIFF(f, v), --[[: unknown]] f))
+          M.mul(DIFF(g, v), M.ln(--[[:! Expr]] f)),
+          M.mul(--[[:! Expr]] g, M.div(DIFF(f, v), --[[:! Expr]] f))
         )
       )
     end
 
   elseif t == "sin" then
     -- d/dx(sin(f)) = cos(f)*f'
-    return M.mul(M.cos(--[[: unknown]] e.arg), DIFF(e.arg, v))
+    return M.mul(M.cos(--[[:! Expr]] e.arg), DIFF(e.arg, v))
 
   elseif t == "cos" then
     -- d/dx(cos(f)) = -sin(f)*f'
-    return M.mul(M.neg(M.sin(--[[: unknown]] e.arg)), DIFF(e.arg, v))
+    return M.mul(M.neg(M.sin(--[[:! Expr]] e.arg)), DIFF(e.arg, v))
 
   elseif t == "ln" then
     -- d/dx(ln(f)) = f'/f
-    return M.div(DIFF(e.arg, v), --[[: unknown]] e.arg)
+    return M.div(DIFF(e.arg, v), --[[:! Expr]] e.arg)
 
   elseif t == "exp" then
     -- d/dx(exp(f)) = exp(f)*f'
-    return M.mul(M.exp(--[[: unknown]] e.arg), DIFF(e.arg, v))
+    return M.mul(M.exp(--[[:! Expr]] e.arg), DIFF(e.arg, v))
 
   else
     error("symbolic_diff.diff: unknown tag '" .. t .. "'")

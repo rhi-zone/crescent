@@ -35,7 +35,8 @@ mod.send_async = function (req, cb, ep)
 
 	local client_, err = socket.create("inet", "stream", "tcp")
 	if not client_ then cb(nil, err); return end
-	local client = client_ --[[: unknown]]
+	local client --: { set_blocking: function, connect: function, is_connected: function, poll_connect: function, send: function, receive: function, close: function, fd: integer, ... } | nil
+	client = (client_ --[[: unknown]]) --[[:! { set_blocking: function, connect: function, is_connected: function, poll_connect: function, send: function, receive: function, close: function, fd: integer, ... }]]
 
 	local ok
 	ok, err = client:set_blocking(false)
@@ -62,12 +63,13 @@ mod.send_async = function (req, cb, ep)
 	local done = false
 	local remove  -- forward-declared so the read callback can capture it as an upvalue
 
-	local ep_ = ep --[[: unknown]]
+	local ep_ = (ep --[[: unknown]]) --[[:! { add: function, loop: function, ... }]]
 	local _ -- write callback (unused by client)
 	_, remove = ep_:add(client.fd, function ()
 		if done then return end
 		-- epoll notifies readability; we read from the socket ourselves.
-		local chunk = client:receive()
+		local chunk_r = client:receive()
+		local chunk = (chunk_r --[[: unknown]]) --[[:! string | nil]]
 		if chunk and #chunk > 0 then
 			buf[#buf + 1] = chunk
 		end
@@ -98,7 +100,7 @@ mod.send_async = function (req, cb, ep)
 	end
 
 	if is_owner then
-		local ep_ = ep --[[: unknown]]
+		local ep_ = (ep --[[: unknown]]) --[[:! { add: function, loop: function, ... }]]
 		ep_:loop()
 	end
 end

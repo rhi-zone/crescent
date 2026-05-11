@@ -308,7 +308,7 @@ end
 -- ========================
 
 --:: CspFn = (...unknown) -> boolean
---:: CspProblem = { _vars: { [integer]: string }, _domain: { [string]: { [integer]: unknown } }, _constraints: { [string]: { [integer]: CspFn } }, _unary: { [string]: { [integer]: CspFn } }, _ternary: { [integer]: { [integer]: any } } }
+--:: CspProblem = { _vars: { [integer]: string }, _domain: { [string]: { [integer]: unknown } }, _constraints: { [string]: { [integer]: CspFn } }, _unary: { [string]: { [integer]: CspFn } }, _ternary: { [integer]: { [integer]: unknown } } }
 
 local Problem = {}
 Problem.__index = Problem

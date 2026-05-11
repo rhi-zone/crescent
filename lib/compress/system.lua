@@ -84,7 +84,7 @@ local function load_zlib()
   for _, name in ipairs(names) do
     local ok, lib = pcall(ffi.load, name)
     if ok then
-      local typed = lib --[[: unknown]]
+      local typed = (lib --[[: unknown]]) --[[:! $FfiC]]
       return typed, name
     end
   end
@@ -106,14 +106,14 @@ local u8_ptr = ffi.typeof("uint8_t *")
 local z_version = zlib.zlibVersion()
 local z_stream_size = ffi.sizeof("z_stream")
 
---: (string) -> number
+--: (string) -> integer
 local function window_bits_deflate(format)
   if format == "raw" then return -15 end
   if format == "gzip" then return 15 + 16 end
   return 15 -- zlib (default)
 end
 
---: (string) -> number
+--: (string) -> integer
 local function window_bits_inflate(format)
   if format == "raw" then return -15 end
   if format == "gzip" then return 15 + 16 end
@@ -143,7 +143,7 @@ local function deflate(input, opts)
   -- Use streaming API for format support (compress2 only does zlib)
   local strm = ffi.new("z_stream")
   local wb = window_bits_deflate(format)
-  local ret = zlib.deflateInit2_(strm, level, Z_DEFLATED, wb, 8,
+  local ret = zlib.deflateInit2_(strm, level --[[:! integer]], Z_DEFLATED, wb, 8,
                                   Z_DEFAULT_STRATEGY, z_version, z_stream_size)
   if ret ~= Z_OK then
     return nil, "deflateInit2 failed: " .. ret
@@ -231,7 +231,7 @@ local function deflater(opts)
 
   local strm = ffi.new("z_stream")
   local wb = window_bits_deflate(format)
-  local ret = zlib.deflateInit2_(strm, level, Z_DEFLATED, wb, 8,
+  local ret = zlib.deflateInit2_(strm, level --[[:! integer]], Z_DEFLATED, wb, 8,
                                   Z_DEFAULT_STRATEGY, z_version, z_stream_size)
   if ret ~= Z_OK then
     return nil, "deflateInit2 failed: " .. ret

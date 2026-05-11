@@ -108,13 +108,13 @@ local M = {}
 --:: SymbolEl         = { _tag: string, node: HTMLElement }
 --:: UseEl            = { _tag: string, node: HTMLElement }
 --:: ClipPathEl       = { _tag: string, node: HTMLElement }
---:: MaskEl           = { _tag: string, node: any }
---:: LinearGradientEl = { _tag: string, node: any }
---:: RadialGradientEl = { _tag: string, node: any }
---:: StopEl           = { _tag: string, node: any }
---:: PatternEl        = { _tag: string, node: any }
---:: SvgImageEl       = { _tag: string, node: any }
---:: ForeignObjectEl  = { _tag: string, node: any }
+--:: MaskEl           = { _tag: string, node: unknown }
+--:: LinearGradientEl = { _tag: string, node: unknown }
+--:: RadialGradientEl = { _tag: string, node: unknown }
+--:: StopEl           = { _tag: string, node: unknown }
+--:: PatternEl        = { _tag: string, node: unknown }
+--:: SvgImageEl       = { _tag: string, node: unknown }
+--:: ForeignObjectEl  = { _tag: string, node: unknown }
 
 -- Content category unions
 --:: HeadContent       = MetaEl | LinkEl | ScriptEl | StyleEl | TitleEl

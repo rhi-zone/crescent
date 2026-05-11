@@ -23,22 +23,24 @@ end
 local M = {}
 M._tier = "pure"
 
---:: EffNode = { _kind: string, _fn: () -> unknown, _deps: { [any]: boolean }, _subs: { [any]: boolean }, _disposed: boolean, _dirty: boolean, _computing: boolean, _value: unknown }
---:: SubNode = { _kind: string, _deps: { [any]: boolean }, _subs: { [any]: boolean }, _disposed: boolean, _dirty: boolean, _computing: boolean, _value: unknown }
+--:: EffNode = { _kind: string, _fn: () -> unknown, _deps: { [unknown]: boolean }, _subs: { [unknown]: boolean }, _disposed: boolean, _dirty: boolean, _computing: boolean, _value: unknown }
+--:: SubNode = { _kind: string, _deps: { [unknown]: boolean }, _subs: { [unknown]: boolean }, _disposed: boolean, _dirty: boolean, _computing: boolean, _value: unknown }
 
 -- ---------------------------------------------------------------------------
 -- Subscriber stack and batch state
 -- ---------------------------------------------------------------------------
 
---: { [integer]: SubNode }
+--: { [integer]: SubNode | nil }
 local _stack  = {}             -- stack of active subscriber objects
 local _batch_depth   = 0       -- nesting level of M.batch()
+--: { [unknown]: true | nil }
 local _pending_effects = {}    -- effects queued during a batch: { [eff] = true }
 local _flushing      = false   -- true while flush_effects is running (prevents re-entry glitch)
+--: { [unknown]: true | nil }
 local _queued_effects = {}     -- effects collected during a single write's propagation pass
 
 local function _push(sub) _stack[#_stack + 1] = sub end
-local function _pop()     _stack[#_stack] = nil --[[: unknown]] end
+local function _pop()     _stack[#_stack] = nil end
 local function _current() return _stack[#_stack]     end
 
 -- ---------------------------------------------------------------------------
@@ -100,7 +102,7 @@ local function _notify(node)
       --: { [integer]: EffNode }
       local snapshot = {}
       for eff, _ in pairs(_queued_effects) do
-        snapshot[#snapshot + 1] = eff --[[: unknown]]
+        snapshot[#snapshot + 1] = eff --[[:! EffNode]]
       end
       _queued_effects = {}
       for i = 1, #snapshot do
@@ -143,7 +145,7 @@ local function flush_effects()
     --: { [integer]: EffNode }
     local snapshot = {}
     for eff, _ in pairs(_pending_effects) do
-      snapshot[#snapshot + 1] = eff --[[: unknown]]
+      snapshot[#snapshot + 1] = eff --[[:! EffNode]]
     end
     _pending_effects = {}
     for i = 1, #snapshot do
@@ -333,7 +335,7 @@ function M.effect(fn)
       dep._subs[self] = nil
     end
     self._deps = {}
-    _pending_effects[self] = nil --[[: unknown]]
+    _pending_effects[self] = nil
   end
 end
 

@@ -20,7 +20,7 @@ local function make_mediator(prefix, parent)
   -- If parent provided, share their tables so namespace dispatch hits parent state.
   local handlers     = parent and parent._handlers     or {}
   local event_lists  = parent and parent._event_lists  or {}
-  local global_mw    = (parent and parent._global_mw    or {}) --[[:! { [integer]: any }]]
+  local global_mw    = (parent and parent._global_mw    or {}) --[[:! { [integer]: unknown }]]
   local command_mw   = parent and parent._command_mw   or {}
 
   -- Expose for namespace children.

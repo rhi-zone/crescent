@@ -30,17 +30,17 @@ local bit = require("bit")
 local base64 = require("lib.base64")
 
 --: (...number) -> number
-local function band(...) return bit.band(... --[[: unknown]]) end
+local function band(...) return bit.band(...) end
 --: (...number) -> number
-local function bxor(...) return bit.bxor(... --[[: unknown]]) end
+local function bxor(...) return bit.bxor(...) end
 --: (...number) -> number
-local function bor(...) return bit.bor(... --[[: unknown]]) end
+local function bor(...) return bit.bor(...) end
 --: (number, number) -> number
-local function lshift(a, b) return bit.lshift(a --[[: unknown]], b --[[: unknown]]) end
+local function lshift(a, b) return bit.lshift(a, b) end
 --: (number, number) -> number
-local function rshift(a, b) return bit.rshift(a --[[: unknown]], b --[[: unknown]]) end
+local function rshift(a, b) return bit.rshift(a, b) end
 --: (number) -> number
-local function tobit(n) return bit.tobit(n --[[: unknown]]) end
+local function tobit(n) return bit.tobit(n) end
 local sbyte  = string.byte
 local schar  = string.char
 local sformat = string.format
@@ -149,7 +149,7 @@ end
 local system_lib --: unknown
 
 local ok_ffi, _ffi_raw = pcall(require, "ffi")
-local ffi = _ffi_raw --[[: unknown]]
+local ffi = (_ffi_raw --[[: unknown]]) --[[:! { load: (string, boolean | nil) -> $FfiC, cdef: (string) -> nil, new: (string, unknown) -> cdata, cast: (string, unknown) -> cdata, string: (cdata, integer | nil) -> string, typeof: (string) -> Ctype<cdata>, ... }]]
 if ok_ffi then
   local function try_load_argon2()
     local names = { "argon2", "libargon2", "argon2-1", "libargon2.so.1", "libargon2.so" }
@@ -907,7 +907,7 @@ if system_lib then
     local fn = raw_fns[o.variant] --[[:! function]]
     local rc = fn(o.t, o.m, o.p, password, #password, salt, #salt, buf, o.hash_len)
     if rc ~= 0 then return nil, errmsg(rc) end
-    return ffi.string(buf, o.hash_len)
+    return ffi.string(buf, o.hash_len --[[:! integer]])
   end
 
   function M.hash_encoded(password, salt, opts)

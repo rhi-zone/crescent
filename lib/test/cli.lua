@@ -11,7 +11,7 @@ local M = {}
 
 local fork_available = false
 local ffi_ok, ffi_raw = pcall(require, "ffi")
-local ffi = (ffi_raw --[[: unknown]]) --[[:! { cdef: (string) -> any, C: { sysconf: (integer) -> integer, fork: () -> integer, waitpid: (integer, any, integer) -> integer, pipe: (any) -> integer, read: (integer, any, integer) -> integer, write: (integer, any, integer) -> integer, close: (integer) -> integer }, new: (string, ...any) -> any, cast: (string, any) -> any, string: (any, integer) -> string, errno: () -> integer }]]
+local ffi = (ffi_raw --[[: unknown]]) --[[:! { cdef: (string) -> nil, C: { sysconf: (integer) -> integer, fork: () -> integer, waitpid: (integer, cdata, integer) -> integer, pipe: (cdata) -> integer, read: (integer, cdata, integer) -> integer, write: (integer, cdata, integer) -> integer, close: (integer) -> integer }, new: (string, ...unknown) -> cdata, cast: (string, unknown) -> cdata, string: (cdata, integer) -> string, errno: () -> integer }]]
 if ffi_ok then
 	local cdef_ok = pcall(function()
 		ffi.cdef[[
@@ -124,7 +124,7 @@ end
 
 -- ── sequential runner (used for coverage and --jobs=1) ───────────────────────
 
---:: Coverage = { start: () -> any, stop: () -> any, report: (any) -> any }
+--:: Coverage = { start: () -> unknown, stop: () -> unknown, report: (unknown) -> unknown }
 local function run_sequential(file_list, coverage)
 	local cov --: Coverage | nil
 	if coverage then
@@ -291,13 +291,20 @@ local function run_worker(file_subset, write_fd)
 
 	-- Write all results to the pipe in one shot.
 	local out = table.concat(results)
-	local buf = ffi.cast("const char *", out)
 	local total = #out
-	local written = 0
-	while written < total do
-		local n = ffi.C.write(write_fd, buf + written, total - written)
-		if n <= 0 then break end
-		written = written + n
+	local buf = ffi.cast("const char *", out) --: cdata
+	-- Write loop: retry on partial writes. Pointer arithmetic on cdata is
+	-- valid in LuaJIT but unsupported by the typechecker; we suppress the
+	-- arithmetic by going through the write syscall directly for each chunk.
+	do
+		local nwritten = 0
+		while nwritten < total do
+			local sub = out:sub(nwritten + 1)
+			local sbuf = ffi.cast("const char *", sub) --: cdata
+			local n = ffi.C.write(write_fd, sbuf, total - nwritten)
+			if n <= 0 then break end
+			nwritten = nwritten + n
+		end
 	end
 	ffi.C.close(write_fd)
 	os.exit(0)
@@ -416,7 +423,7 @@ local function run_parallel(file_list, n)
 				io.write("\n")
 
 				if #r.tests > 0 then
-					for _, t_ in ipairs(r.tests --[[:! any[] ]]) do
+					for _, t_ in ipairs(r.tests --[[:! { [integer]: unknown }]]) do
 						local t = t_ --[[:! { ok: boolean, name: string, err: string | nil }]]
 						if not t.ok then
 							local detail = (t.err and (": " .. tostring(t.err))) or ""

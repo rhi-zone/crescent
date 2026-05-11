@@ -72,7 +72,7 @@ end
 
 --- Set key to value. Promotes to MRU. Evicts LRU if at capacity.
 function Cache:set(key, value)
-  local self_ = self --[[:! { _len: integer, _cap: integer, _map: { [any]: any }, _tail: any, _on_evict: ((any, any) -> nil) | nil, _head: any }]]
+  local self_ = self --[[:! { _len: integer, _cap: integer, _map: { [unknown]: unknown }, _tail: unknown, _on_evict: ((unknown, unknown) -> nil) | nil, _head: unknown }]]
   local node = self_._map[key]
   if node then
     node[2] = value
@@ -98,7 +98,7 @@ end
 
 --- Delete a key. Returns true if it existed, false otherwise.
 function Cache:delete(key)
-  local self_ = self --[[:! { _len: integer, _map: { [any]: any } }]]
+  local self_ = self --[[:! { _len: integer, _map: { [unknown]: unknown } }]]
   local node = self_._map[key]
   if not node then return false end
   _unlink(node)

@@ -289,7 +289,7 @@ local parse_value  -- forward declaration
 local parse_type   -- forward declaration
 
 -- Parse a type reference: NamedType | ListType | NonNullType
---:: GQLType = { kind: "ListType", type: any } | { kind: "NamedType", name: string | nil } | { kind: "NonNullType", type: any }
+--:: GQLType = { kind: "ListType", type: unknown } | { kind: "NamedType", name: string | nil } | { kind: "NonNullType", type: unknown }
 parse_type = function(p)
 	local tok = peek(p)
 	local t = nil --: GQLType | nil

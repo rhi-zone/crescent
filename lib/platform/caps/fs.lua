@@ -103,7 +103,7 @@ function M.fs_cap(opts)
 			else
 				new_allow_write = sub_opts.allow_write
 			end
-			local fs_mod = --[[:! { fs_cap: any }]] require("lib.platform.caps.fs")
+			local fs_mod = --[[:! { fs_cap: (unknown) -> unknown }]] require("lib.platform.caps.fs")
 			return fs_mod.fs_cap({ root = new_root, allow_write = new_allow_write })
 		end,
 	}

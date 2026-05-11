@@ -33,8 +33,8 @@ local buf4 = ffi.new("uint8_t[4]")
 local _read_random
 do
   local has_getrandom = false
-  local ffi_C = ffi.C --[[: unknown]]
-  local ffi_cast = ffi.cast --[[: unknown]]
+  local ffi_C = (ffi.C --[[: unknown]]) --[[:! { syscall: (long: cdata, ...cdata) -> cdata, open: (path: cdata, flags: integer) -> integer, read: (fd: integer, buf: cdata, n: integer) -> integer, close: (fd: integer) -> integer, ... }]]
+  local ffi_cast = ffi.cast
   if SYS_getrandom then
     -- Probe: try reading 1 byte
     local probe = ffi.new("uint8_t[1]")
@@ -51,7 +51,7 @@ do
           ffi_cast("void*", dst + total),
           ffi_cast("size_t", n - total),
           ffi_cast("long", 0))
-        if ret < 0 then return nil, "getrandom() failed" end
+        if (tonumber(ret) or 0) < 0 then return nil, "getrandom() failed" end
         total = (total + (tonumber(ret) or 0)) --[[:! integer]]
       end
       return true

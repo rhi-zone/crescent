@@ -43,7 +43,8 @@ end
 -- c_type_to_tid: map a C type descriptor to a TypeSlot ID in ctx
 ---------------------------------------------------------------------------
 
---:: CTypeDesc = { k: string, to?: any, of?: any, fields?: { [integer]: any, ... }, members?: { [integer]: any, ... }, name?: string, name_id?: integer, params?: { [integer]: any, ... }, ret?: any, vararg?: boolean, ... }
+--:: CFieldDesc = { name_id: integer, type: CTypeDesc }
+--:: CTypeDesc = { k: string, to?: CTypeDesc, of?: CTypeDesc, fields?: { [integer]: CFieldDesc, ... }, members?: { [integer]: CFieldDesc, ... }, name?: string, name_id?: integer, params?: { [integer]: CTypeDesc, ... }, ret?: CTypeDesc, vararg?: boolean, ... }
 
 --: (ctx: Ctx, ctype: CTypeDesc) -> integer
 local function c_type_to_tid(ctx, ctype)
@@ -67,7 +68,8 @@ local function c_type_to_tid(ctx, ctype)
                 return c_type_to_tid(ctx, to)
             end
             if tok == "struct" then
-                if to.fields and #to.fields > 0 then
+                local to_fields = to.fields
+                if to_fields and #(to_fields --[[:! { [integer]: CFieldDesc }]]) > 0 then
                     -- Build the struct table type, then wrap as Ptr<T>.
                     local inner = c_type_to_tid(ctx, to)
                     return make_ptr(ctx, inner)
@@ -91,6 +93,7 @@ local function c_type_to_tid(ctx, ctype)
 
     if k == "arr" then
         -- Arr<T> = { [integer]: T } — array pointer with integer indexer.
+        if not ctype.of then return ctx.T_ANY end
         local elem_tid = c_type_to_tid(ctx, ctype.of)
         return make_arr(ctx, elem_tid)
     end

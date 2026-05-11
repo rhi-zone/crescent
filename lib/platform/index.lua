@@ -28,7 +28,7 @@ local json_raw = require("lib.format.json")
 local json = json_raw --[[: unknown]]
 
 --:: SqliteIter = () -> unknown
---:: SqliteDb = { execute: (SqliteDb, string, ...unknown) -> any, query: (SqliteDb, string, ...unknown) -> any, close: (SqliteDb) -> any }
+--:: SqliteDb = { execute: (SqliteDb, string, ...unknown) -> unknown, query: (SqliteDb, string, ...unknown) -> unknown, close: (SqliteDb) -> unknown }
 --:: AppRow = { id: number, name: string, path: string, manifest_json: string, manifest: unknown, tags_json: string, tags: { [integer]: string }, installed_at: number }
 --:: Index = { _db: SqliteDb, close: (Index) -> nil, install: (Index, string, unknown, number | nil) -> (number | nil, string | nil), uninstall: (Index, unknown) -> (boolean | nil, string | nil), get_cap_config: (Index, unknown, string) -> (unknown | nil, string | nil), set_cap_config: (Index, unknown, string, unknown) -> (true | nil, string | nil), reset_cap_config: (Index, unknown, string) -> (true | nil, string | nil), get_grants: (Index, unknown) -> { [string]: boolean | nil }, set_grant: (Index, unknown, string, boolean) -> (true | nil, string | nil), clear_grants: (Index, unknown) -> (true | nil, string | nil), get: (Index, number) -> AppRow | nil, list: (Index, { tag: string, ... } | nil) -> AppRow[], search: (Index, string) -> AppRow[] }
 

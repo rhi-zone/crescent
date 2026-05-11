@@ -128,8 +128,9 @@ local FIELD_NAMES = { "x", "y", "z", "n", "s", "flag", "value", "name", "key", "
 -- ── arb_base_type ─────────────────────────────────────────────────────────────
 -- Uniform over the four base types (integer, number, string, boolean).
 
+--:: ArbT = { generate: (unknown, integer) -> (unknown, unknown), shrink: (unknown, unknown) -> (() -> (unknown, unknown)) }
 M.arb_base_type = arb.one_of(
-	--[[:! Arr<{ generate: function, shrink: function, ... }>]]
+	--[[:! { [integer]: ArbT, ... }]]
 	{
 		arb.constant(M.T_INTEGER),
 		arb.constant(M.T_NUMBER),
@@ -167,7 +168,7 @@ M.arb_type_leaf = arb.frequency({
 local arb_type       -- assigned below
 local arb_type_lazy = {   -- thin proxy, resolved after assignment
 	generate = function(rng, sz) return arb_type.generate(rng, sz) end,
-	shrink   = function(v, c)   return (arb_type --[[:! { generate: function, shrink: (unknown, unknown) -> function, ... }]]).shrink(v, c) end,
+	shrink   = function(v, c)   return (arb_type --[[:! ArbT]]).shrink(v, c) end,
 }
 
 -- arb_field_name: uniform over field name pool (shrinks toward index 1 = "x")
@@ -280,7 +281,7 @@ M.arb_type = arb_type
 local arb_type_deep       -- assigned below
 local arb_type_deep_lazy = {
 	generate = function(rng, sz) return arb_type_deep.generate(rng, sz) end,
-	shrink   = function(v, c)   return (arb_type_deep --[[:! { generate: function, shrink: (unknown, unknown) -> function, ... }]]).shrink(v, c) end,
+	shrink   = function(v, c)   return (arb_type_deep --[[:! ArbT]]).shrink(v, c) end,
 }
 
 arb_type_deep = arb.sized(function(size)

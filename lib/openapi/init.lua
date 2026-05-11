@@ -47,7 +47,7 @@ local function resolve_pointer(root, ref)
 		seg = seg:gsub("~1", "/"):gsub("~0", "~")
 		pos = slash and slash + 1 or len + 1
 		if type_of(node) ~= "table" then return nil end
-		node = (node --[[: unknown]])[seg]
+		node = (node --[[:! { [string]: unknown }]])[seg]
 		if node == nil then return nil end
 	end
 	return node

@@ -1873,24 +1873,24 @@
 ---------------------------------------------------------------------------
 
 --:: Console = {
---::   log:          (...any) -> (),
---::   info:         (...any) -> (),
---::   warn:         (...any) -> (),
---::   error:        (...any) -> (),
---::   debug:        (...any) -> (),
---::   trace:        (...any) -> (),
---::   dir:          (any, any | nil) -> (),
---::   dirxml:       (...any) -> (),
---::   table:        (any, any | nil) -> (),
---::   group:        (...any) -> (),
---::   groupCollapsed: (...any) -> (),
+--::   log:          (...unknown) -> (),
+--::   info:         (...unknown) -> (),
+--::   warn:         (...unknown) -> (),
+--::   error:        (...unknown) -> (),
+--::   debug:        (...unknown) -> (),
+--::   trace:        (...unknown) -> (),
+--::   dir:          (unknown, unknown | nil) -> (),
+--::   dirxml:       (...unknown) -> (),
+--::   table:        (unknown, unknown | nil) -> (),
+--::   group:        (...unknown) -> (),
+--::   groupCollapsed: (...unknown) -> (),
 --::   groupEnd:     () -> (),
 --::   count:        (string | nil) -> (),
 --::   countReset:   (string | nil) -> (),
 --::   time:         (string | nil) -> (),
---::   timeLog:      (string | nil, ...any) -> (),
+--::   timeLog:      (string | nil, ...unknown) -> (),
 --::   timeEnd:      (string | nil) -> (),
---::   assert:       (boolean, ...any) -> (),
+--::   assert:       (boolean, ...unknown) -> (),
 --::   clear:        () -> (),
 --::   profile:      (string | nil) -> (),
 --::   profileEnd:   (string | nil) -> (),
@@ -1994,9 +1994,9 @@
 ---------------------------------------------------------------------------
 
 --:: Window = {
---::   setTimeout:             ((any) -> (), integer, ...any) -> integer,
+--::   setTimeout:             ((unknown) -> (), integer, ...unknown) -> integer,
 --::   clearTimeout:           (integer) -> (),
---::   setInterval:            ((any) -> (), integer, ...any) -> integer,
+--::   setInterval:            ((unknown) -> (), integer, ...unknown) -> integer,
 --::   clearInterval:          (integer) -> (),
 --::   requestAnimationFrame:  ((number) -> ()) -> integer,
 --::   cancelAnimationFrame:   (integer) -> (),
@@ -2076,3 +2076,4 @@
 --:: declare console   = Console
 --:: declare localStorage   = Storage
 --:: declare sessionStorage  = Storage
+

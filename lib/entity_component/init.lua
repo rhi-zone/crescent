@@ -42,6 +42,7 @@ end
 -- World
 -- ---------------------------------------------------------------------------
 
+--:: WorldObj = { _next_id: integer, _alive: { [integer]: boolean }, _components: { [string]: { [integer]: unknown } }, _defaults: { [string]: unknown }, _listeners: { [string]: { [integer]: function } }, emit: function, destroy: function, ... }
 local World = {}
 World.__index = World
 
@@ -78,7 +79,7 @@ end
 
 --- Create a new entity and return its integer ID.
 function World:entity()
-  local self_ = self --[[: unknown]]
+  local self_ = self --[[:! WorldObj]]
   local id = self_._next_id
   self_._next_id = id + 1
   self_._alive[id] = true
@@ -88,7 +89,7 @@ end
 
 --- Remove an entity and all its components.
 function World:destroy(e)
-  local self_ = self --[[: unknown]]
+  local self_ = self --[[:! WorldObj]]
   if not self_._alive[e] then return end
   -- remove from every component store
   for name, store in pairs(self_._components) do
@@ -103,7 +104,7 @@ end
 
 --- Remove all entities (and their components) from the world.
 function World:clear()
-  local self_ = self --[[: unknown]]
+  local self_ = self --[[:! WorldObj]]
   -- collect alive IDs first to avoid modifying during iteration
   local ids = {}
   for id in pairs(self_._alive) do ids[#ids+1] = id end
@@ -122,7 +123,7 @@ end
 -- @param data  table|nil  initial field values
 -- @return true | nil, errmsg
 function World:add(e, name, data)
-  local self_ = self --[[: unknown]]
+  local self_ = self --[[:! WorldObj]]
   if not self_._alive[e] then
     return nil, "entity " .. tostring(e) .. " does not exist"
   end
@@ -139,7 +140,7 @@ end
 --- Remove a component from an entity.
 -- No-op if entity doesn't have the component.
 function World:remove(e, name)
-  local self_ = self --[[: unknown]]
+  local self_ = self --[[:! WorldObj]]
   local store = self_._components[name]
   if store and store[e] ~= nil then
     store[e] = nil

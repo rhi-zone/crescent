@@ -161,7 +161,7 @@ local function days_in_month(month, year)
 end
 
 -- Expr methods
---:: Expr = { minutes: { [integer]: boolean }, hours: { [integer]: boolean }, doms: { [integer]: boolean }, months: { [integer]: boolean }, dows: { [integer]: boolean }, _expr: string, _date_fn: any, _time_fn: any, ... }
+--:: Expr = { minutes: { [integer]: boolean }, hours: { [integer]: boolean }, doms: { [integer]: boolean }, months: { [integer]: boolean }, dows: { [integer]: boolean }, _expr: string, _date_fn: (string, number) -> { wday: integer, min: integer, hour: integer, day: integer, month: integer, year: integer, sec: integer }, _time_fn: () -> number, ... }
 local Expr = {}
 Expr.__index = Expr
 

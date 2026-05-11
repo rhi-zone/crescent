@@ -50,7 +50,7 @@ local function new_processor()
   -- Apply a plugin (and optional opts) to this processor.
   -- If the processor is frozen, clone first and apply to the clone.
   function P:use(plugin, opts)
-    local self_any = self --[[:! { _frozen: boolean, _plugins: { [integer]: any }, ... }]]
+    local self_any = self --[[:! { _frozen: boolean, _plugins: { [integer]: unknown }, ... }]]
     if self_any._frozen then
       local c = self_any --[[: unknown]]
       return c:clone():use(plugin, opts)

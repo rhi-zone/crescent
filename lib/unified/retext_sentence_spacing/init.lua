@@ -63,7 +63,7 @@ local function transformer(root, opts)
       return
     end
     if node.children then
-      local nc = node.children --[[:! { [integer]: any }]]
+      local nc = node.children --[[:! { [integer]: { type: string, children?: unknown, value?: string, ... } }]]
       for i = 1, #nc do walk(nc[i]) end
     end
   end
