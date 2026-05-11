@@ -146,14 +146,14 @@ function M.load(bytes, ctx)
         return false, "invalid .cri magic"
     end
     local version = r_u32be(bytes, 4)
-    if version ~= 2 then
+    if version ~= 3 then
         return false, "unsupported .cri version " .. version
     end
     if not verify_hash(bytes) then
         return false, "SHA-256 mismatch: .cri file is corrupted"
     end
 
-    -- v2 header layout:
+    -- v3 header layout (identical to v2, version bump invalidates stale v2 entries):
     --   magic(0..3) version(4..7) alias_off(8..11) diag_off(12..15)
     --   hash(16..47) str_off(48..51) type_off(52..55) field_off(56..59)
     --   list_off(60..63) export_off(64..67)

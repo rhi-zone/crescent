@@ -771,14 +771,15 @@ function M.serialize(ctx, exports, type_aliases, diagnostics)
     end
 
     -- -----------------------------------------------------------------------
-    -- Header (72 bytes, v2)
+    -- Header (72 bytes, v3)
     -- magic(4) + version(4) + alias_offset(4) + diag_offset(4) + hash(32)
     --   + str_off(4) + type_off(4) + field_off(4) + list_off(4) + export_off(4)
     -- = 4+4+4+4+32+5*4 = 68 bytes
     -- v1 layout was 64 bytes (magic+version+flags+hash+5*offsets) and used the
     -- "flags" field as alias_offset. v2 separates alias_offset and adds
-    -- diag_offset. Old v1 .cri files are rejected by the reader (version != 2)
-    -- and trigger a full re-check.
+    -- diag_offset. v3 is identical to v2 but forces cache invalidation so that
+    -- cached entries without `any` warnings are not reused. Old v1/v2 .cri files
+    -- are rejected by the reader (version != 3) and trigger a full re-check.
     -- -----------------------------------------------------------------------
     local HEADER_SIZE = 68
     local str_offset    = HEADER_SIZE
@@ -792,7 +793,7 @@ function M.serialize(ctx, exports, type_aliases, diagnostics)
     local diag_off_val  = #diag_bytes > 0 and diag_offset_section or 0
 
     local header = "CRIF"
-        .. u32be(2)                    -- version
+        .. u32be(3)                    -- version
         .. u32be(alias_off_val)        -- alias section offset (0 = none)
         .. u32be(diag_off_val)         -- diagnostics section offset (0 = none)
         .. string.rep("\0", 32)        -- hash (zeroed)

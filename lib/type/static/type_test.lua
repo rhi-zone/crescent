@@ -3001,17 +3001,18 @@ assert.describe("cri: round-trip", function()
         local ctx = make_ctx("")
         local bytes = cri_write.serialize(ctx, {})
         assert.eq(bytes:sub(1, 4), "CRIF")
-        -- version = 2 in big-endian u32 (v2 added diag_offset and explicit alias_offset)
+        -- version = 3 in big-endian u32 (v3 identical to v2 but forces cache invalidation
+        -- so cached entries without `any` warnings are not reused)
         assert.eq(bytes:byte(5), 0)
         assert.eq(bytes:byte(6), 0)
         assert.eq(bytes:byte(7), 0)
-        assert.eq(bytes:byte(8), 2)
+        assert.eq(bytes:byte(8), 3)
     end)
 
     assert.it("SHA-256 hash is valid", function()
         local ctx = make_ctx("")
         local bytes = cri_write.serialize(ctx, {})
-        -- v2: hash is at bytes 17-48 (after magic + version + alias_off + diag_off).
+        -- v3: hash is at bytes 17-48 (after magic + version + alias_off + diag_off).
         local zeroed = bytes:sub(1, 16) .. string.rep("\0", 32) .. bytes:sub(49)
         local expected = sha256_mod.hash(zeroed)
         local stored = {}

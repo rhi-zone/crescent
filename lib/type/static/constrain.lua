@@ -2841,7 +2841,9 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                 -- type ID via resolve_annotation_type (same as LOCAL_STMT does).
                 local ann_field_tid
                 if stmt_ann and stmt_ann.kind == ANN_TYPE then
+                    ctx._ann_warn_line = tn.line
                     ann_field_tid = resolve_annotation_type(ctx, stmt_ann.type_id)
+                    ctx._ann_warn_line = 0
                     local ann_resolved = types_mod.find(ctx, ann_field_tid)
                     local ann_t = ctx.types:get(ann_resolved)
                     if ann_t.tag ~= TAG_VAR and ann_t.tag ~= TAG_ROWVAR then
@@ -3694,6 +3696,7 @@ process_type_decls = function(ctx)
     -- { [unknown]: integer } captures this: any key (including table refs) maps to integer.
     local decl_lines = {} --: { [unknown]: integer }
     local module_decls = {} --: { [integer]: { kind: integer, type_id: integer, mod_name: string, ... }, ... }
+    local module_decl_lines = {} --: { [unknown]: integer }
     -- require_decl_lines: result record → source line (same pattern as decl_lines).
     local require_decl_lines = {} --: { [unknown]: integer }
     local require_decls = {} --: { [integer]: { kind: integer, mod_name: string, ... }, ... }
@@ -3707,6 +3710,7 @@ process_type_decls = function(ctx)
             decl_lines[result] = line
         elseif result.kind == ANN_MODULE then
             module_decls[#module_decls + 1] = result
+            module_decl_lines[result] = line
         elseif result.kind == ANN_REQUIRE then
             require_decls[#require_decls + 1] = result
             require_decl_lines[result] = line
@@ -3959,7 +3963,9 @@ process_type_decls = function(ctx)
     -- $Require<"mod"> in type alias bodies still works: it is expanded by the solver at
     -- call sites (after process_type_decls returns), not during resolve_annotation_type.
     for _, r in ipairs(module_decls) do
+        ctx._ann_warn_line = module_decl_lines[r] or 0
         ctx.module_types[r.mod_name] = resolve_annotation_type(ctx, r.type_id)
+        ctx._ann_warn_line = 0
     end
 
     -- Pass 2b: bind declared variables (decl_var), which may reference aliases set above.
@@ -3979,7 +3985,9 @@ process_type_decls = function(ctx)
                 local r_line = decl_lines[r]
                 warn(ctx, r_line, 1, E.UNNAMED_PARAMS, {})
             end
+            ctx._ann_warn_line = decl_lines[r] or 0
             env_mod.bind(ctx.scope, r.name_id, resolve_annotation_type(ctx, r.type_id))
+            ctx._ann_warn_line = 0
         end
     end
 
@@ -3994,7 +4002,9 @@ process_type_decls = function(ctx)
     end
     for _, r in ipairs(augment_decls) do
         -- Resolve the augment table type into the checker arena.
+        ctx._ann_warn_line = augment_decl_lines[r] or 0
         local aug_tid = resolve_annotation_type(ctx, r.type_id)
+        ctx._ann_warn_line = 0
         local aug_t = ctx.types:get(types_mod.find(ctx, aug_tid))
         if aug_t.tag == TAG_TABLE then
             -- Determine which prim tag this name corresponds to, if any.
