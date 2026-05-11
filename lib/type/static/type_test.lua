@@ -8414,9 +8414,9 @@ local n = select('#', "a", "b", "c")
 ]])
     end)
 
-    assert.it("select(n, ...) returns any", function()
+    assert.it("select(n, ...) returns unknown", function()
         no_errors([[
---: any
+--: unknown
 local v = select(1, "a", "b")
 ]])
     end)
