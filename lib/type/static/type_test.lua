@@ -3802,6 +3802,49 @@ f(v)
     end)
 end)
 
+assert.describe("checker: type() narrows unknown", function()
+    assert.it("unknown narrowed to string via type(x) == 'string' — passes to (string)->nil", function()
+        no_errors([[
+--: (string) -> nil
+local function f(x) end
+--:: declare x = unknown
+if type(x) == "string" then
+    f(x)
+end
+]])
+    end)
+
+    assert.it("unknown narrowed to number via type(x) == 'number' — passes to (number)->nil", function()
+        no_errors([[
+--: (number) -> nil
+local function f(x) end
+--:: declare x = unknown
+if type(x) == "number" then
+    f(x)
+end
+]])
+    end)
+
+    assert.it("unknown narrowed to table via type(x) == 'table' — field access works", function()
+        no_errors([[
+--:: declare x = unknown
+if type(x) == "table" then
+    local _ = x.foo
+end
+]])
+    end)
+
+    assert.it("without type check, passing unknown to (string)->nil is an error (regression guard)", function()
+        local ec = check([[
+--: (string) -> nil
+local function f(x) end
+--:: declare x = unknown
+f(x)
+]])
+        assert.ok(errors_mod.has_errors(ec), "unknown is not assignable to string without narrowing")
+    end)
+end)
+
 assert.describe("checker: object narrowing via field access", function()
     assert.it("if t.x then: t narrowed so t.x is non-nil inside branch", function()
         -- t.x is string|nil; after `if t.x then`, t.x should be string
