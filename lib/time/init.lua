@@ -29,7 +29,7 @@ if jit and jit.os == "Windows" then
     void GetSystemTimeAsFileTime(LPFILETIME lpSystemTimeAsFileTime);
   ]]
   local time_ffi = ffi.C
-  local _tv = ffi.new("FILETIME[1]") --[[: unknown]]
+  local _tv = (ffi.new("FILETIME[1]") --[[: unknown]]) --[[:! { [548]: { dwHighDateTime: integer, dwLowDateTime: integer }, dwHighDateTime: integer, dwLowDateTime: integer }]]
   --: () -> number
   M.time = function()
     time_ffi.GetSystemTimeAsFileTime(_tv)
@@ -37,20 +37,22 @@ if jit and jit.os == "Windows" then
   end
 else
   -- Linux / macOS / BSD
-  local ok = pcall(ffi.cdef, [[
-    struct timeval {
-      long tv_sec;
-      long tv_usec;
-    };
-    struct timezone {
-      int tz_minuteswest;
-      int tz_dsttime;
-    };
-    void gettimeofday(struct timeval *tv, struct timezone *tz);
-  ]])
+  local ok = pcall(function()
+    ffi.cdef [[
+      struct timeval {
+        long tv_sec;
+        long tv_usec;
+      };
+      struct timezone {
+        int tz_minuteswest;
+        int tz_dsttime;
+      };
+      void gettimeofday(struct timeval *tv, struct timezone *tz);
+    ]]
+  end)
   if ok then
     local time_ffi = ffi.C
-    local _tv = ffi.new("struct timeval [1]") --[[: unknown]]
+    local _tv = (ffi.new("struct timeval [1]") --[[: unknown]]) --[[:! { [0]: { tv_sec: integer, tv_usec: integer } }]]
     --: () -> number
     M.time = function()
       time_ffi.gettimeofday(_tv, nil)

@@ -11,7 +11,7 @@ end
 --
 -- Stores: root.data.intensify = { {word="very", sentence="..."}, ... }
 
-local nlcst = require("lib.unified.nlcst") --[[: unknown]]
+local nlcst = require("lib.unified.nlcst")
 
 local M = {}
 
@@ -45,7 +45,7 @@ local function transformer(root, opts)
   local function walk(node)
     if node.type == nlcst.SENTENCE then
       local sent_text = nlcst.to_text(node)
-      local children = node.children --[[:! { [integer]: { type: string, children?: unknown, value?: string, ... } }]]
+      local children = node.children --[[:! { [integer]: { type: string, children?: { [integer]: unknown }, value?: string, ... } }]]
       for i = 1, #children do
         local child = children[i]
         if child.type == nlcst.WORD then

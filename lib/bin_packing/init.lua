@@ -401,7 +401,7 @@ function M.guillotine(rects, bin_w, bin_h, opts)
 
       -- Remove used free rect
       free[best_idx] = free[#free]
-      free[#free] = nil --[[: unknown]]
+      free[#free] = ((nil --[[: unknown]]) --[[:! { h: number, w: number, x: number, y: number }]])
 
       if split_horiz then
         -- Top strip (full width of original free rect)

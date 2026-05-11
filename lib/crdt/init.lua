@@ -36,7 +36,7 @@ GCounter.__index = GCounter
 --: (string) -> GCounter
 function M.gcounter(replica_id)
   local g = setmetatable({ _id = replica_id, _counts = {} }, GCounter)
-  return g --[[: unknown]]
+  return (g --[[:! GCounter]])
 end
 
 --: ((number | nil)) -> nil

@@ -47,12 +47,16 @@ end
 -- `data` is the user-supplied table; `fields` is the model field schema.
 -- `existing_records` is the table of all records (for unique checks).
 -- `is_update` skips required check for fields not present in data.
+--: (unknown, unknown, unknown, unknown, unknown) -> ({ [string]: string } | nil)
 local function validate(data, fields, existing_records, is_update, record_id)
 	local errs = {} --[[: { [string]: string } ]]
 	local has_err = false
+	local data_ = (data --[[:! { [string]: unknown }]])
+	local fields_ = (fields --[[:! { [string]: { type: string, primary_key: boolean | nil, auto_increment: boolean | nil, required: boolean | nil, unique: boolean | nil, max_length: integer | nil } }]])
+	local existing_records_ = (existing_records --[[:! { [unknown]: { [string]: unknown } }]])
 
-	for field_name, def in pairs(fields) do
-		local val = data[field_name]
+	for field_name, def in pairs(fields_) do
+		local val = data_[field_name]
 		local present = val ~= nil
 
 		-- Skip auto_increment/primary_key fields
@@ -64,7 +68,7 @@ local function validate(data, fields, existing_records, is_update, record_id)
 		elseif present then
 			-- Type checking
 			if def.type == "integer" then
-				if type(val) ~= "number" or math.floor(val) ~= val then
+				if type(val) ~= "number" or math.floor((val --[[:! number]])) ~= val then
 					errs[field_name] = "must be integer"
 					has_err = true
 				end
@@ -72,9 +76,12 @@ local function validate(data, fields, existing_records, is_update, record_id)
 				if type(val) ~= "string" then
 					errs[field_name] = "must be string"
 					has_err = true
-				elseif def.max_length and #val > def.max_length then
-					errs[field_name] = "max_length " .. def.max_length .. " exceeded"
-					has_err = true
+				else
+					local max_len = def.max_length
+					if max_len and #(val --[[:! string]]) > max_len then
+						errs[field_name] = "max_length " .. max_len .. " exceeded"
+						has_err = true
+					end
 				end
 			elseif def.type == "boolean" then
 				if type(val) ~= "boolean" then
@@ -90,7 +97,7 @@ local function validate(data, fields, existing_records, is_update, record_id)
 
 			-- Unique check
 			if def.unique and not errs[field_name] then
-				for rec_id, rec in pairs(existing_records) do
+				for rec_id, rec in pairs(existing_records_) do
 					-- On update, skip the current record
 					if rec_id ~= record_id and rec[field_name] == val then
 						errs[field_name] = "must be unique"
@@ -431,7 +438,7 @@ function Model:update_where(conditions, changes)
 		end
 		if match then
 			-- Validate changes against this record
-			local errs = validate(changes --[[: unknown]], self._fields, storage, true, id --[[:! integer]])
+			local errs = validate(changes, self._fields, storage, true, id --[[:! integer]])
 			if errs then return nil, errs end
 			for k, v in pairs(changes) do
 				rec[k] = v

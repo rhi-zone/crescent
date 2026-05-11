@@ -125,7 +125,7 @@ end
 --: (s: string, plain: { [string]: unknown }, ctx_rules: { [string]: { [integer]: LsRule } }, rng: LsRng) -> string
 local function apply_rules_once(s, plain, ctx_rules, rng)
   local parts = {} --: { [integer]: string }
-  local parts_ = parts --[[: unknown]]
+  -- parts_ removed
   local i = 1 --: integer
   local n = #s
   while i <= n do
@@ -142,7 +142,7 @@ local function apply_rules_once(s, plain, ctx_rules, rng)
             local vfn = crule.value --[[:! (...unknown) -> unknown]]
             local result = vfn(params)
             if result ~= nil then
-              parts_[#parts + 1] = result
+              parts[#parts + 1] = result --[[:! string]]
               i = end_pos_ + 1
               advanced = true
               break
@@ -151,7 +151,7 @@ local function apply_rules_once(s, plain, ctx_rules, rng)
         end
         if not advanced then
           -- parametric token but no rule matched; emit as-is
-          parts_[#parts + 1] = s:sub(i, end_pos_)
+          parts[#parts + 1] = s:sub(i, end_pos_)
           i = end_pos_ + 1
           advanced = true
         end
@@ -172,10 +172,10 @@ local function apply_rules_once(s, plain, ctx_rules, rng)
           if match then
             local value = crule.value
             if type(value) == "string" then
-              parts_[#parts + 1] = value
+              parts[#parts + 1] = value
             elseif type(value) == "function" then
               local vfn2 = value --[[:! (...unknown) -> string]]
-              parts_[#parts + 1] = vfn2({})
+              parts[#parts + 1] = vfn2({})
             end
             applied_ctx = true
             break
@@ -189,12 +189,12 @@ local function apply_rules_once(s, plain, ctx_rules, rng)
         -- Apply plain rule
         local rule = plain[ch]
         if rule == nil then
-          parts_[#parts + 1] = ch
+          parts[#parts + 1] = ch
         elseif type(rule) == "string" then
-          parts_[#parts + 1] = rule
+          parts[#parts + 1] = rule
         elseif type(rule) == "function" then
           local rfn = rule --[[:! (...unknown) -> string]]
-          parts_[#parts + 1] = rfn({})
+          parts[#parts + 1] = rfn({})
         else
           -- stochastic: array of {prob=p, rule=s}
           local r = rng:float()
@@ -208,7 +208,7 @@ local function apply_rules_once(s, plain, ctx_rules, rng)
               break
             end
           end
-          parts_[#parts + 1] = chosen
+          parts[#parts + 1] = chosen
         end
         i = i + 1
       end
@@ -232,9 +232,9 @@ local function interpret_string(s, opts)
   local dir     = ((opts and opts.start_angle) or 90) --[[:! number]] -- degrees, 90 = up
 
   local cmds   = {} --: { [integer]: LsCmd }
-  local cmds_  = cmds --[[: unknown]]
+  -- cmds_ removed
   local stack  = {} --: { [integer]: { x: number, y: number, dir: number } }
-  local stack_ = stack --[[: unknown]]
+  -- stack_ removed
   local i      = 1 --: integer
   local n      = #s
 
@@ -244,12 +244,12 @@ local function interpret_string(s, opts)
     if ch == "F" then
       local nx = x + step * math.cos(dir * RAD)
       local ny = y + step * math.sin(dir * RAD)
-      cmds_[#cmds + 1] = { type = "line", x1 = x, y1 = y, x2 = nx, y2 = ny }
+      cmds[#cmds + 1] = ({ type = "line", x1 = x, y1 = y, x2 = nx, y2 = ny } --[[:! LsCmd]])
       x, y = nx, ny
     elseif ch == "f" then
       local nx = x + step * math.cos(dir * RAD)
       local ny = y + step * math.sin(dir * RAD)
-      cmds_[#cmds + 1] = { type = "move", x1 = x, y1 = y, x2 = nx, y2 = ny }
+      cmds[#cmds + 1] = ({ type = "move", x1 = x, y1 = y, x2 = nx, y2 = ny } --[[:! LsCmd]])
       x, y = nx, ny
     elseif ch == "+" then
       dir = dir + angle
@@ -258,14 +258,14 @@ local function interpret_string(s, opts)
     elseif ch == "|" then
       dir = dir + 180
     elseif ch == "[" then
-      cmds_[#cmds + 1] = { type = "push", x = x, y = y, angle = dir }
-      stack_[#stack + 1] = { x = x, y = y, dir = dir }
+      cmds[#cmds + 1] = ({ type = "push", x = x, y = y, angle = dir } --[[:! LsCmd]])
+      stack[#stack + 1] = { x = x, y = y, dir = dir }
     elseif ch == "]" then
       local top = stack[#stack]
       if top then
-        stack_[#stack] = nil
+        stack[#stack] = ((nil --[[: unknown]]) --[[:! { x: number, y: number, dir: number }]])
         x, y, dir = top.x, top.y, top.dir
-        cmds_[#cmds + 1] = { type = "pop", x = x, y = y, angle = dir }
+        cmds[#cmds + 1] = ({ type = "pop", x = x, y = y, angle = dir } --[[:! LsCmd]])
       end
     elseif ch == "(" then
       -- skip parametric value "(n)" — turtle doesn't act on it
@@ -406,10 +406,11 @@ function Ls:interpret(str, opts)
   if type(str) ~= "string" then
     return nil, "interpret: argument must be a string"
   end
-  local merged = {} --[[: unknown]]
-  if opts then for k, v in pairs(opts) do merged --[[: unknown]][k] = v end end
-  if merged.angle == nil then merged.angle = self._angle end
-  return interpret_string(str, merged --[[:! LsOpts]])
+  local merged = {} --[[:! { [string]: unknown }]]
+  if opts then for k, v in pairs(opts) do merged[k] = v end end
+  local merged_opts = (merged --[[: unknown]]) --[[:! LsOpts]]
+  if merged_opts.angle == nil then merged_opts.angle = self._angle end
+  return interpret_string(str, merged_opts)
 end
 
 --: (self: LsObj, cmds: { [integer]: LsCmd }) -> (LsBounds | nil, string | nil)
@@ -425,10 +426,11 @@ function Ls:to_svg(str, opts)
   if type(str) ~= "string" then
     return nil, "to_svg: first argument must be a string"
   end
-  local merged = {} --[[: unknown]]
-  if opts then for k, v in pairs(opts) do merged --[[: unknown]][k] = v end end
-  if merged.angle == nil then merged.angle = self._angle end
-  local cmds = interpret_string(str, merged --[[:! LsOpts]])
+  local merged = {} --[[:! { [string]: unknown }]]
+  if opts then for k, v in pairs(opts) do merged[k] = v end end
+  local merged2 = (merged --[[: unknown]]) --[[:! LsOpts]]
+  if merged2.angle == nil then merged2.angle = self._angle end
+  local cmds = interpret_string(str, merged2)
   return to_svg(cmds, opts)
 end
 
@@ -463,9 +465,8 @@ function M.new(spec)
     local sym_ = tostring(sym)
     if type(rule) == "table" then
       local total = 0 --: number
-      local rule_ = rule --[[: unknown]]
-      for _, entry in ipairs(rule_) do
-        local entry_ = entry --[[: unknown]]
+      for _, entry in ipairs(rule --[[:! { [integer]: unknown }]]) do
+        local entry_ = (entry --[[: unknown]]) --[[:! { prob?: unknown, rule?: unknown }]]
         if type(entry_) ~= "table" or type(entry_.prob) ~= "number" or (type(entry_.rule) ~= "string" and type(entry_.rule) ~= "function") then
           return nil, "new: stochastic rule entries must be {prob=number, rule=string|function}, got invalid entry for sym " .. sym_
         end

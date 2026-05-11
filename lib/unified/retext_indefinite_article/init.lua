@@ -18,7 +18,7 @@ end
 -- Stores: root.data.indefinite_article =
 --   { {actual="a", expected="an", word="apple", sentence="..."}, ... }
 
-local nlcst = require("lib.unified.nlcst") --[[: unknown]]
+local nlcst = require("lib.unified.nlcst")
 
 local M = {}
 

@@ -426,7 +426,7 @@ function M.random_rooms(width, height, opts)
   local max_size = opts.max_size or 8
   local rng = make_rng(opts.seed)
 
-  local map_res = M.new(width, height, { default_tile = 0 } --[[: unknown]])
+  local map_res = M.new(width, height, { default_tile = (0 --[[:! unknown]]), tile_size = nil })
   local map = map_res --[[:! TileMap]]
   local rooms = {} --: { [integer]: RoomRect }
 
@@ -539,7 +539,7 @@ function M.cellular_automata(width, height, opts)
     tiles = next_tiles
   end
 
-  local map_res = M.new(width, height, { default_tile = 0 } --[[: unknown]])
+  local map_res = M.new(width, height, { default_tile = (0 --[[:! unknown]]), tile_size = nil })
   local map = map_res --[[:! TileMap]]
   map._tiles = tiles
   return map

@@ -21,8 +21,7 @@ local function with_lorebook(data, entries)
 	if entries then
 		local entries_ = entries --[[:! { [integer]: unknown }]]
 		if #entries_ > 0 then
-			local lorebook_any = lorebook --[[: unknown]]
-			out.character_book = lorebook_any.to_ccv2(entries_)
+				out.character_book = lorebook.to_ccv2((entries_ --[[: unknown]]) --[[:! { [number]: {} }]])
 		else
 			out.character_book = nil
 		end
@@ -38,7 +37,7 @@ function M.to_png(data, entries, png_bytes)
 	return card_mod.to_png(out, png_bytes)
 end
 
---: (unknown, (unknown | nil)) -> (string | nil, string)
+--: (unknown, (unknown | nil)) -> (string | nil, string | nil)
 function M.to_json(data, entries)
 	local out = with_lorebook(data, entries)
 	return card_mod.to_json(out)

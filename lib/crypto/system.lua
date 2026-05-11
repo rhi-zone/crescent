@@ -86,8 +86,7 @@ local EVP_CTRL_AEAD_SET_TAG   = 0x11
 local TAG_LEN = 16
 
 -- Scratch buffers for outl parameter
---: { [0]: integer }
-local outl_buf = ffi.new("int[1]") --[[: unknown]]
+local outl_buf = (ffi.new("int[1]") --[[: unknown]]) --[[:! { [0]: integer }]]
 
 -- ── Internal helpers ────────────────────────────────────────────────────────
 
@@ -124,7 +123,7 @@ local function aead_encrypt(cipher, key, nonce, plaintext, aad)
 	end
 
 	-- Encrypt plaintext
-	local ct_buf = ffi.new("unsigned char[?]", #plaintext + 16) --[[: unknown]]
+	local ct_buf = ffi.new("unsigned char[?]", #plaintext + 16) --[[:! number]]
 	if lib.EVP_EncryptUpdate(ctx, ct_buf, outl_buf, plaintext, #plaintext) ~= 1 then
 		lib.EVP_CIPHER_CTX_free(ctx)
 		return nil, "EVP_EncryptUpdate failed"
@@ -139,7 +138,7 @@ local function aead_encrypt(cipher, key, nonce, plaintext, aad)
 	ct_len = ct_len + outl_buf[0]
 
 	-- Get tag
-	local tag_buf = ffi.new("unsigned char[?]", TAG_LEN) --[[: unknown]]
+	local tag_buf = ffi.new("unsigned char[?]", TAG_LEN) --[[:! number]]
 	if lib.EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, TAG_LEN, tag_buf) ~= 1 then
 		lib.EVP_CIPHER_CTX_free(ctx)
 		return nil, "failed to get tag"
@@ -190,7 +189,7 @@ local function aead_decrypt(cipher, key, nonce, ciphertext_with_tag, aad)
 	end
 
 	-- Decrypt ciphertext
-	local pt_buf = ffi.new("unsigned char[?]", ct_len + 16) --[[: unknown]]
+	local pt_buf = ffi.new("unsigned char[?]", ct_len + 16) --[[:! number]]
 	if lib.EVP_DecryptUpdate(ctx, pt_buf, outl_buf, ct, ct_len) ~= 1 then
 		lib.EVP_CIPHER_CTX_free(ctx)
 		return nil, "EVP_DecryptUpdate failed"
@@ -198,8 +197,8 @@ local function aead_decrypt(cipher, key, nonce, ciphertext_with_tag, aad)
 	local pt_len = outl_buf[0]
 
 	-- Set expected tag
-	local tag_buf = ffi.new("unsigned char[?]", TAG_LEN) --[[: unknown]]
-	ffi.copy(tag_buf, tag, TAG_LEN)
+	local tag_buf = ffi.new("unsigned char[?]", TAG_LEN) --[[:! number]]
+	ffi.copy(tag_buf --[[:! Ptr<integer>]], (tag --[[: unknown]]) --[[:! Ptr<integer>]], TAG_LEN)
 	if lib.EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, TAG_LEN, tag_buf) ~= 1 then
 		lib.EVP_CIPHER_CTX_free(ctx)
 		return nil, "failed to set tag"
@@ -298,11 +297,11 @@ end
 --: (integer) -> (string | nil, string | nil)
 function M.random_bytes(n)
 	if n <= 0 then return "" end
-	local buf = ffi.new("unsigned char[?]", n) --[[: unknown]]
+	local buf = ffi.new("unsigned char[?]", n) --[[:! number]]
 	if lib.RAND_bytes(buf, n) ~= 1 then
 		return nil, "RAND_bytes failed"
 	end
-	return ffi.string(buf, n)
+	return ffi.string(buf --[[:! Ptr<integer>]], n)
 end
 
 return M

@@ -50,10 +50,10 @@ local function new_processor()
   -- Apply a plugin (and optional opts) to this processor.
   -- If the processor is frozen, clone first and apply to the clone.
   function P:use(plugin, opts)
-    local self_any = self --[[:! { _frozen: boolean, _plugins: { [integer]: unknown }, ... }]]
+    local self_any = self --[[:! { _frozen: boolean, _plugins: { [integer]: unknown }, clone: (unknown) -> unknown, use: (unknown, unknown, unknown) -> unknown, ... }]]
     if self_any._frozen then
-      local c = self_any --[[: unknown]]
-      return c:clone():use(plugin, opts)
+      local cloned = (self_any:clone() --[[:! { use: (unknown, unknown, unknown) -> unknown }]])
+      return cloned:use(plugin, opts)
     end
     self_any._plugins[#self_any._plugins + 1] = {plugin, opts}
     plugin(self_any, opts)
@@ -111,12 +111,12 @@ local function new_processor()
   -- Full pipeline: parse → run → stringify.
   -- Returns (string) or (nil, errmsg).
   function P:process(source)
-    local self_any = self --[[: unknown]]
-    local ast, err = self_any:parse(source)
+    local self_ = self --[[:! { parse: (unknown, unknown) -> (unknown, string | nil), run: (unknown, unknown) -> (unknown, string | nil), stringify: (unknown, unknown) -> (string, string | nil) }]]
+    local ast, err = self_:parse(source)
     if not ast then return nil, err end
-    ast, err = self_any:run(ast)
+    ast, err = self_:run(ast)
     if not ast then return nil, err end
-    return self_any:stringify(ast)
+    return self_:stringify(ast)
   end
 
   return P

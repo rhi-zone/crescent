@@ -77,7 +77,7 @@ end
 
 -- ── Builder ───────────────────────────────────────────────────────────────────
 
-local Builder = {} --[[: unknown]]
+local Builder = {}
 Builder.__index = Builder
 
 --- Create a new multipart builder.

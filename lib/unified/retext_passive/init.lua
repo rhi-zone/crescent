@@ -13,7 +13,7 @@ end
 --
 -- Stores: root.data.passive = { {sentence="...", pattern="was written"}, ... }
 
-local nlcst = require("lib.unified.nlcst") --[[: unknown]]
+local nlcst = require("lib.unified.nlcst")
 
 local M = {}
 

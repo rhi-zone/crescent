@@ -157,7 +157,7 @@ local FIXED_BLOCKS = {
 }
 
 -- assemble(opts) -> messages[] | nil, err
---: ({ card?: { name?: string, description?: string, personality?: string, scenario?: string, system_prompt?: string, post_history_instructions?: string, creator_notes?: string, character_version?: string, mes_example?: string, first_mes?: string, character_book?: unknown, ... }, history?: { role: string, content: string }[], count_tokens?: (string) -> integer, max_context?: integer, max_response?: integer, char_name?: string, user_name?: string, persona?: string, lorebook_entries?: { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... }, ... }, lorebook_budget_pct?: integer, lorebook_scan_depth?: integer, pin_examples?: boolean, context_order?: string[], ... }) -> ({ role: string, content: string }[] | nil, string | nil)
+--: ({ card?: { name?: string, description?: string, personality?: string, scenario?: string, system_prompt?: string, post_history_instructions?: string, creator_notes?: string, character_version?: string, mes_example?: string, first_mes?: string, character_book?: unknown, ... }, history?: { role: string, content: string }[], count_tokens?: (string) -> integer, max_context?: integer, max_response?: integer, char_name?: string, user_name?: string, persona?: string, lorebook_entries?: { [number]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... }, ... }, lorebook_budget_pct?: integer, lorebook_scan_depth?: integer, pin_examples?: boolean, context_order?: string[], ... }) -> ({ role: string, content: string }[] | nil, string | nil)
 function M.assemble(opts)
 	if not opts.card then return nil, "context: card is required" end
 	if not opts.count_tokens then return nil, "context: count_tokens is required" end
@@ -183,15 +183,14 @@ function M.assemble(opts)
 
 	local entries = opts.lorebook_entries
 	if not entries and card.character_book then
-		entries = lorebook.from_ccv2(--[[:! { entries: unknown, ... }]] card.character_book) --[[:! { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... }, ... } ]]
+		entries = lorebook.from_ccv2(--[[:! { entries: unknown, ... }]] card.character_book) --[[: { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... }, ... } ]]
 	end
-	entries = entries --[[:! { [integer]: { content?: string, role?: integer, position?: integer, depth?: integer, order?: integer, constant?: boolean, enabled?: boolean, ignoreBudget?: boolean, ... }, ... } | nil]]
 
 	local triggered_before = {}
 	local triggered_after = {}
 	local triggered_depth = {}
 
-	if entries and #entries > 0 then
+	if entries and #(entries --[[:! { [integer]: unknown }]]) > 0 then
 		-- Build scan text from recent history
 		local scan_parts = {}
 		local scan_start = math.max(1, #history - lorebook_scan_depth + 1)

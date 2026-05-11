@@ -238,7 +238,11 @@ end
 -- Uses LuaJIT's FFI uint64_t for true 64-bit arithmetic.
 
 local ffi = require("ffi")
-local u64  = ffi.typeof("uint64_t")
+local u64  = (ffi.typeof("uint64_t") --[[: unknown]]) --[[:! (number) -> number]]
+
+-- byte() wrapper that returns number (byte returns integer|nil for position args).
+--: (string, integer) -> number
+local function byt(s, i) return byte(s, i) --[[:! number]] end
 
 -- Rotate left 64-bit.
 local function rotl64(x, r)
@@ -263,13 +267,13 @@ end
 -- for values > 2^53.
 local FMIX64_C1 = 0xff51afd7ed558ccdULL
 local FMIX64_C2 = 0xc4ceb9fe1a85ec53ULL
---: (cdata) -> integer
+--: (number) -> number
 local function fmix64(k)
-  k = bxor(k --[[:! integer]], rshift(k --[[:! integer]], 33)) --[[:! integer]]
-  k = (k * FMIX64_C1) --[[:! integer]]
-  k = bxor(k, rshift(k, 33)) --[[:! integer]]
-  k = (k * FMIX64_C2) --[[:! integer]]
-  k = bxor(k, rshift(k, 33)) --[[:! integer]]
+  k = bxor(k --[[:! integer]], rshift(k --[[:! integer]], 33)) --[[: number]]
+  k = (k --[[:! number]]) * FMIX64_C1
+  k = bxor(k --[[:! integer]], rshift(k --[[:! integer]], 33)) --[[: number]]
+  k = (k --[[:! number]]) * FMIX64_C2
+  k = bxor(k --[[:! integer]], rshift(k --[[:! integer]], 33)) --[[: number]]
   return k
 end
 
@@ -307,27 +311,27 @@ function M.x64_128(key, seed)
   local rem = band(len, 15)
   local k1, k2 = u64(0), u64(0)
 
-  if rem >= 15 then k2 = bxor(k2, lshift(u64(byte(key, tail_start + 14)), 48)) end
-  if rem >= 14 then k2 = bxor(k2, lshift(u64(byte(key, tail_start + 13)), 40)) end
-  if rem >= 13 then k2 = bxor(k2, lshift(u64(byte(key, tail_start + 12)), 32)) end
-  if rem >= 12 then k2 = bxor(k2, lshift(u64(byte(key, tail_start + 11)), 24)) end
-  if rem >= 11 then k2 = bxor(k2, lshift(u64(byte(key, tail_start + 10)), 16)) end
-  if rem >= 10 then k2 = bxor(k2, lshift(u64(byte(key, tail_start +  9)),  8)) end
-  if rem >=  9 then k2 = bxor(k2, u64(byte(key, tail_start + 8))) end
+  if rem >= 15 then k2 = bxor(k2, lshift(u64(byt(key, tail_start + 14)), 48)) end
+  if rem >= 14 then k2 = bxor(k2, lshift(u64(byt(key, tail_start + 13)), 40)) end
+  if rem >= 13 then k2 = bxor(k2, lshift(u64(byt(key, tail_start + 12)), 32)) end
+  if rem >= 12 then k2 = bxor(k2, lshift(u64(byt(key, tail_start + 11)), 24)) end
+  if rem >= 11 then k2 = bxor(k2, lshift(u64(byt(key, tail_start + 10)), 16)) end
+  if rem >= 10 then k2 = bxor(k2, lshift(u64(byt(key, tail_start +  9)),  8)) end
+  if rem >=  9 then k2 = bxor(k2, u64(byt(key, tail_start + 8))) end
   if rem >=  9 then
-    k2 = (k2 * C2_x64) --[[:! integer]]; k2 = rotl64(k2, 33); k2 = (k2 * C1_x64) --[[:! integer]]; h2 = bxor(h2, k2)
+    k2 = k2 * C2_x64; k2 = rotl64(k2, 33); k2 = k2 * C1_x64; h2 = bxor(h2, k2)
   end
 
-  if rem >=  8 then k1 = bxor(k1, lshift(u64(byte(key, tail_start +  7)), 56)) end
-  if rem >=  7 then k1 = bxor(k1, lshift(u64(byte(key, tail_start +  6)), 48)) end
-  if rem >=  6 then k1 = bxor(k1, lshift(u64(byte(key, tail_start +  5)), 40)) end
-  if rem >=  5 then k1 = bxor(k1, lshift(u64(byte(key, tail_start +  4)), 32)) end
-  if rem >=  4 then k1 = bxor(k1, lshift(u64(byte(key, tail_start +  3)), 24)) end
-  if rem >=  3 then k1 = bxor(k1, lshift(u64(byte(key, tail_start +  2)), 16)) end
-  if rem >=  2 then k1 = bxor(k1, lshift(u64(byte(key, tail_start +  1)),  8)) end
-  if rem >=  1 then k1 = bxor(k1, u64(byte(key, tail_start))) end
+  if rem >=  8 then k1 = bxor(k1, lshift(u64(byt(key, tail_start +  7)), 56)) end
+  if rem >=  7 then k1 = bxor(k1, lshift(u64(byt(key, tail_start +  6)), 48)) end
+  if rem >=  6 then k1 = bxor(k1, lshift(u64(byt(key, tail_start +  5)), 40)) end
+  if rem >=  5 then k1 = bxor(k1, lshift(u64(byt(key, tail_start +  4)), 32)) end
+  if rem >=  4 then k1 = bxor(k1, lshift(u64(byt(key, tail_start +  3)), 24)) end
+  if rem >=  3 then k1 = bxor(k1, lshift(u64(byt(key, tail_start +  2)), 16)) end
+  if rem >=  2 then k1 = bxor(k1, lshift(u64(byt(key, tail_start +  1)),  8)) end
+  if rem >=  1 then k1 = bxor(k1, u64(byt(key, tail_start))) end
   if rem >=  1 then
-    k1 = (k1 * C1_x64) --[[:! integer]]; k1 = rotl64(k1, 31); k1 = (k1 * C2_x64) --[[:! integer]]; h1 = bxor(h1, k1)
+    k1 = k1 * C1_x64; k1 = rotl64(k1, 31); k1 = k1 * C2_x64; h1 = bxor(h1, k1)
   end
 
   -- Finalization
@@ -337,8 +341,8 @@ function M.x64_128(key, seed)
   h1 = h1 + h2
   h2 = h2 + h1
 
-  h1 = fmix64((h1 --[[:! cdata]]))
-  h2 = fmix64((h2 --[[:! cdata]]))
+  h1 = fmix64(h1)
+  h2 = fmix64(h2)
 
   h1 = h1 + h2
   h2 = h2 + h1
@@ -360,7 +364,7 @@ end
 function M.x64_128_hex(key, seed)
   local h1, h2 = M.x64_128(key, seed)
   if not h1 then return nil, h2 --[[:! string | nil]] end
-  return hex64(h1) .. hex64(h2 --[[:! integer]])
+  return hex64(h1) .. hex64(h2 --[[:! number]])
 end
 
 -- ---------------------------------------------------------------------------

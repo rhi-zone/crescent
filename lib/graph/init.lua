@@ -51,8 +51,8 @@ end
 -- Auto-creates nodes. For undirected graphs both directions share the same
 -- data table reference.
 function Graph:add_edge(u, v, data)
-  if not self._nodes[u] then (self --[[: unknown]]):add_node(u) end
-  if not self._nodes[v] then (self --[[: unknown]]):add_node(v) end
+  if not self._nodes[u] then (self --[[:! Graph]]):add_node(u) end
+  if not self._nodes[v] then (self --[[:! Graph]]):add_node(v) end
   local edata = data ~= nil and data or true
   if self._directed then
     if not self._adj[u][v] then
@@ -149,7 +149,7 @@ end
 
 -- In-neighbors for directed graphs; same as neighbors for undirected.
 function Graph:in_neighbors(id)
-  if not self._directed then return (self --[[: unknown]]):neighbors(id) end
+  if not self._directed then return (self --[[:! Graph]]):neighbors(id) end
   if not self._in_adj[id] then return {} end
   local r = {}
   for nb in pairs(self._in_adj[id]) do r[#r+1] = nb end
@@ -176,7 +176,7 @@ function Graph:out_degree(id)
 end
 
 function Graph:in_degree(id)
-  if not self._directed then return (self --[[: unknown]]):degree(id) end
+  if not self._directed then return (self --[[:! Graph]]):degree(id) end
   if not self._in_adj[id] then return 0 end
   local n = 0
   for _ in pairs(self._in_adj[id]) do n = n + 1 end
@@ -569,7 +569,7 @@ end
 --: (Graph) -> Graph
 function M.transpose(g)
   local g_ = g --[[:! Graph]]
-  local t = M.new({directed = g_._directed}) --[[: unknown]]
+  local t = M.new({directed = g_._directed})
   for id in g_:nodes() do
     t:add_node(id, g_:node_data(id))
   end

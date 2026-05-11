@@ -75,7 +75,7 @@ local function make_mediator(prefix, parent)
 
     -- Global middleware wraps command-specific chain (outermost).
     for i = #global_mw, 1, -1 do
-      local mw = global_mw[i]
+      local mw = (global_mw[i] --[[:! (unknown, unknown, unknown) -> unknown]])
       local next_fn = chain
       chain = function(_name, _payload)
         return mw(_name, _payload, next_fn)
@@ -181,7 +181,7 @@ end
 
 --- Create a new mediator instance.
 function M.new()
-  local make_any = make_mediator --[[: unknown]]
+  local make_any = (make_mediator --[[:! (unknown, unknown) -> unknown]])
   return make_any(nil, nil)
 end
 

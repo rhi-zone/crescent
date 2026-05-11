@@ -399,10 +399,10 @@ decimal_mt = {
 
   -- Method-style access: d:add(b), d:round(2), etc.
   __index = function(self, key)
-    local M_ = M --[[: unknown]]
-    local fn = M_[key]
+    local fn = (M --[[:! { [string]: unknown }]])[key]
     if fn then
-      return function(s, ...) return fn(s, ...) end
+      local fn_ = (fn --[[:! (unknown, ...unknown) -> unknown]])
+      return function(s, ...) return fn_(s, ...) end
     end
   end,
 }

@@ -37,16 +37,18 @@ mod.make_connection_handler = function (handler, epoll)
 		-- it's a lot harder to just use if-else
 		if (req.headers["upgrade"] or {})[1] == "websocket" then
 			--[[FIXME: api. the handler needs a persistent handle to the connection]]
-			local handler_any = handler_ --[[: unknown]]
-			local send, close = ws.websocket(client_ --[[: unknown]], req, handler_any.ws, handler_any.ws_close, epoll)
+			local send, close = ws.websocket(
+				(client_ --[[:! { close: (ws_sock) -> unknown, fd: integer, receive: (ws_sock) -> string | nil, send: (ws_sock, string) -> unknown }]]),
+				req,
+				((handler_.ws --[[: unknown]]) --[[:! (ws_sock, { payload?: string, status?: integer, type: string }) -> nil]]),
+				handler_.ws_close, epoll)
 			local ws_open_ = handler_.ws_open
 			if send and close and ws_open_ then
 				local ws_open_fn_ = ws_open_ --[[:! (WsSockClient, unknown, unknown) -> nil]]
 				ws_open_fn_(client_, send, close)
 			end
 		else
-			local http_fn_any = handler_ --[[: unknown]]
-			local ok, err = pcall(http_fn_any.http, req, res, client_)
+			local ok, err = pcall(handler_.http --[[:! (unknown, unknown, unknown) -> nil]], req, res, client_)
 			if not ok then
 				local msg = tostring(err):gsub('"', '\\"')
 				res.status = 500
@@ -64,8 +66,8 @@ mod.server = function (handler, port, epoll)
 	local is_running = not epoll
 	epoll = (epoll or epoll_:new()) --[[:! ws_epoll]]
 	if type(handler) == "function" then handler = ({ http = handler } --[[:! WsHandler]]) end
-	socket.server(mod.make_connection_handler(handler --[[: unknown]], epoll), port or 80, epoll)
-	if is_running then (epoll --[[: unknown]]):loop() end
+	socket.server(mod.make_connection_handler(handler, epoll), port or 80, epoll)
+	if is_running then (epoll --[[:! { loop: (unknown) -> nil, ... }]]):loop() end
 end
 
 return mod

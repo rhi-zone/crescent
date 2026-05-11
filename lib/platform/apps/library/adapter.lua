@@ -63,7 +63,7 @@ end
 -- opts.tag: optional tag filter for list()
 -- opts.on_open: function(row) called when an item is opened
 function M.index(idx, opts)
-	local idx_ = idx --[[:! { list: unknown, search: unknown }]]
+	local idx_ = idx --[[:! { list: (unknown, unknown) -> unknown, search: (unknown, unknown) -> unknown }]]
 	opts = opts or {}
 	local tag_filter = opts.tag
 	local on_open = opts.on_open
@@ -85,7 +85,7 @@ function M.index(idx, opts)
 	return {
 		list = function()
 			local filter = tag_filter and { tag = tag_filter } or nil
-			local rows = (idx_ --[[: unknown]]):list(filter)
+			local rows = (idx_:list(filter) --[[:! { [integer]: { manifest: { meta: {} } } }]])
 			local items = {}
 			for i = 1, #rows do
 				items[i] = row_to_item(rows[i])
@@ -93,7 +93,7 @@ function M.index(idx, opts)
 			return items
 		end,
 		search = function(query)
-			local rows = (idx_ --[[: unknown]]):search(query)
+			local rows = (idx_:search(query) --[[:! { [integer]: { manifest: { meta: {} } } }]])
 			local items = {}
 			for i = 1, #rows do
 				items[i] = row_to_item(rows[i])

@@ -19,7 +19,7 @@ end
 --   sentences=N, words=N, syllables=N
 -- }
 
-local nlcst = require("lib.unified.nlcst") --[[: unknown]]
+local nlcst = require("lib.unified.nlcst")
 
 local M = {}
 

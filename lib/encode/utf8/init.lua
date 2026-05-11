@@ -137,7 +137,7 @@ mod.codepoint = function (s, i, j)
 			i = i + plen
 		end
 	end
-	return unpack(cs) --[[: unknown]]
+	return ((unpack(cs) --[[: unknown]]) --[[:! number]])
 end
 
 --: (string, integer | nil) -> (integer | nil, integer | nil)

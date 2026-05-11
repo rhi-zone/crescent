@@ -261,10 +261,11 @@ function Sched:cancel(task)
   task._cancelled = true
   task.status = "done"  -- treat as done so done() can return true
   -- Remove from ready queue
-  local ready_any = self._ready --[[: unknown]]
   for i = 1, #self._ready do
     if self._ready[i] == task then
-      table.remove(ready_any, i)
+      local n = #self._ready
+      for j = i, n - 1 do self._ready[j] = self._ready[j + 1] end
+      self._ready[n] = ((nil --[[: unknown]]) --[[:! { task: unknown, wake_time: number }]])
       break
     end
   end

@@ -700,7 +700,7 @@ function M.receiver(codec)
     return msg
   end
 
-  return rv
+  return rv_
 end
 
 return M

@@ -79,7 +79,7 @@ end
 --- Register a listener that fires only once.
 --: (Emitter, string, (...unknown) -> unknown, ({ priority: number, once?: boolean } | nil)) -> (integer | nil, string | nil)
 function Emitter:once(name, fn, opts)
-  local self_ = self --[[: unknown]]
+  local self_ = (self --[[: unknown]]) --[[:! { on: (unknown, string, unknown, unknown) -> (integer | nil, string | nil) }]]
   local o = { once = true, priority = opts and opts.priority or 0 }
   return self_:on(name, fn, o)
 end
@@ -257,7 +257,11 @@ function Emitter:event_names()
   for name in pairs(self_._listeners) do
     result[#result + 1] = name
   end
-  table.sort(result --[[: unknown]])
+  for i = 2, #result do
+    local v = result[i]; local j = i - 1
+    while j >= 1 and result[j] > v do result[j + 1] = result[j]; j = j - 1 end
+    result[j + 1] = v
+  end
   return result
 end
 

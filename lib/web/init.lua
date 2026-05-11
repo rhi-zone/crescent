@@ -33,9 +33,10 @@ local format = string.format
 
 --: (string) -> string
 local function url_decode(s)
-	local r = s:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) or 0) end) --[[: unknown]]
-	r = r:gsub("+", " ")
-	return tostring(r)
+	local r0 = s:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) or 0) end)
+	local r = ((r0 --[[: unknown]]) --[[:! string]])
+	local r1, _ = r:gsub("+", " ")
+	return ((r1 --[[: unknown]]) --[[:! string]])
 end
 
 --: (string) -> { [string]: string }

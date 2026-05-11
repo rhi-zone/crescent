@@ -30,9 +30,7 @@ end
 
 local sqlite = require("lib.sqlite")
 local json   = require("lib.format.json")
-local json_any = json --[[: unknown]]
---: { encode: (unknown) -> (string | nil, string | nil), decode: (string) -> (unknown, string | nil) }
-local json_ = json_any
+local json_ = json
 
 local M = {}
 

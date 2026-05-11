@@ -9,20 +9,20 @@ local M = {}
 
 --: (string) -> string | nil
 M.by_name = function(filename)
-	return (by_name.mimetype --[[: unknown]])(filename)
+	return (by_name.mimetype)(filename)
 end
 
 --: (string, integer | nil) -> (string | nil, string | nil)
 M.by_contents = function(buffer, pos)
-	local ext, mt = (by_contents.mimetype --[[: unknown]])(buffer, pos)
+	local ext, mt = (by_contents.mimetype)(buffer, pos)
 	return ext --[[:! string | nil]], mt --[[:! string | nil]]
 end
 
 --: (string, string) -> string | nil
 M.detect = function(filename, buffer)
-	local mt = (by_name.mimetype --[[: unknown]])(filename)
+	local mt = (by_name.mimetype)(filename)
 	if mt then return mt end
-	local _, mt2 = (by_contents.mimetype --[[: unknown]])(buffer)
+	local _, mt2 = (by_contents.mimetype)(buffer)
 	return mt2 --[[:! string | nil]]
 end
 

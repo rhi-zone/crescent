@@ -407,18 +407,18 @@ local function clone_frag(insns, from, to)
   local new_start = #insns + 1
   for i = from, to do
     local src = insns[i]
-    local src_ = src --[[: unknown]]
-    local dst = { op = src.op } --[[: unknown]]
+    local src_ = src --[[:! { op: integer, c?: unknown, cls?: unknown, x?: integer, y?: integer, n?: unknown, ... }]]
+    local dst = { op = src.op } --[[:! { op: integer, c?: unknown, cls?: unknown, x?: integer, y?: integer, n?: unknown, ... }]]
     if src.op == OP_CHAR then dst.c = src_.c
     elseif src.op == OP_CLASS then dst.cls = src_.cls
     elseif src.op == OP_SPLIT then
-      dst.x = src_.x and src_.x + offset
-      dst.y = src_.y and src_.y + offset
+      if src_.x then dst.x = src_.x + offset end
+      if src_.y then dst.y = src_.y + offset end
     elseif src.op == OP_JUMP then
-      dst.x = src_.x and src_.x + offset
+      if src_.x then dst.x = src_.x + offset end
     elseif src.op == OP_SAVE then dst.n = src_.n
     end
-    insns[#insns + 1] = dst
+    insns[#insns + 1] = dst --[[:! Instr]]
   end
   return new_start
 end

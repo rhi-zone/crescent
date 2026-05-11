@@ -462,15 +462,15 @@ do
 	socket.getaddrinfo = function(node_name, service_name, hints, result)
 		local ret = ljsocket_ffi.getaddrinfo(node_name --[[:! string]], service_name --[[:! string]], hints, result)
 		if ret == 0 then return true end
-		local err = ljsocket_ffi.gai_strerror(ret) --[[: unknown]]
-		return nil, ffi.string(err)
+		local err = ljsocket_ffi.gai_strerror(ret)
+		return nil, ffi.string(err --[[:! Ptr<integer>]])
 	end
 
 	socket.getnameinfo = function(address, length, host, hostlen, serv, servlen, flags)
 		local ret = ljsocket_ffi.getnameinfo(address, length, host, hostlen, serv, servlen, flags)
 		if ret == 0 then return true end
-		local err = socket.lasterror(ret) --[[: unknown]]
-		return nil, ffi.string(err)
+		local err = socket.lasterror(ret)
+		return nil, ffi.string(err --[[:! Ptr<integer>]])
 	end
 
 	do

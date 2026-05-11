@@ -271,7 +271,7 @@ local function remark_math(processor, opts)
     allow_single = false
   end
 
-  local proc_ = processor --[[: unknown]]
+  local proc_ = processor --[[:! { _parser: unknown, parser: (unknown, unknown) -> unknown, use_transformer: (unknown, unknown) -> unknown }]]
   local inner_parser = proc_._parser
 
   proc_:parser(function(source)
@@ -279,7 +279,7 @@ local function remark_math(processor, opts)
 
     local ast, err
     if inner_parser then
-      ast, err = inner_parser(cleaned)
+      ast, err = (inner_parser --[[:! (string) -> (unknown, string | nil)]])(cleaned)
     else
       return nil, "remark_math: no base parser registered"
     end

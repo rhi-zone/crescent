@@ -90,7 +90,7 @@ local function walk(node, index, parent, test, enter, exit)
 
   -- Exit phase
   if exit and test(node) then
-    local exit_fn = exit --[[:! (unknown, unknown, unknown) -> unknown]]
+    local exit_fn = ((exit --[[: unknown]]) --[[:! (unknown, unknown, unknown) -> unknown]])
     local exit_signal = exit_fn(node, index, parent)
     if exit_signal == M.EXIT then return M.EXIT end
     if exit_signal == M.REMOVE then
@@ -133,8 +133,8 @@ setmetatable(M, {
     end
 
     local test = make_test(types)
-    local walk_any = walk --[[: unknown]]
-    walk_any(tree, nil, nil, test, enter, exit)
+    local walk_ = (walk --[[:! (unknown, unknown, unknown, unknown, unknown, unknown) -> unknown]])
+    walk_(tree, nil, nil, test, enter, exit)
   end,
 })
 
@@ -194,8 +194,7 @@ local function walk_parents(node, ancestors, test, enter, exit)
   end
 
   if exit and test(node) then
-    local exit_fn = exit --[[: unknown]]
-    signal = exit_fn(node, ancestors)
+    signal = exit(node, ancestors)
     if signal == M.EXIT then return M.EXIT end
   end
 

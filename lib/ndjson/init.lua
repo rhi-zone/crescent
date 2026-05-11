@@ -17,7 +17,7 @@ if not package.path:find("./?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
 end
 
-local json = require("lib.format.json") --[[: unknown]]
+local json = require("lib.format.json")
 
 local M = {}
 
@@ -38,7 +38,7 @@ function M.encode(values)
     for i = 1, #values do
         local s, err = json.encode(values[i])
         if not s then
-            return nil, "line " .. i .. ": " .. err
+            return nil, "line " .. i .. ": " .. (err or "unknown error")
         end
         parts[i] = s
     end

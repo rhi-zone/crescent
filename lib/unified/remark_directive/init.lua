@@ -145,7 +145,7 @@ end
 -- Scan a text value for :name[...]{...} patterns (single colon only).
 -- Returns an array of replacement nodes.
 local function scan_text_directives(value)
-  local result = {} --[[: unknown]]
+  local result = {} --[[:! { [integer]: unknown }]]
   local pos = 1  --: integer
   local len = #value
 
@@ -191,7 +191,7 @@ end
 
 -- Expand inline children, scanning text nodes for text directives.
 local function expand_inline(children)
-  local result = {} --[[: unknown]]
+  local result = {} --[[:! { [integer]: unknown }]]
   for i = 1, #children do
     local node = children[i]
     if node.type == "text" then
@@ -301,7 +301,7 @@ local transform_children
 
 -- Transform a list of block children, detecting directives.
 transform_children = function(children)
-  local result = {} --[[: unknown]]
+  local result = {} --[[:! { [integer]: unknown }]]
   local i = 1
   local n = #children
 

@@ -112,7 +112,11 @@ function Ring:nodes()
   for name in pairs(self_._node_set) do
     result[#result + 1] = name
   end
-  table.sort(result --[[: unknown]])
+  for i = 2, #result do
+    local v = result[i]; local j = i - 1
+    while j >= 1 and result[j] > v do result[j + 1] = result[j]; j = j - 1 end
+    result[j + 1] = v
+  end
   return result
 end
 

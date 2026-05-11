@@ -5,10 +5,10 @@ if not package.path:find("?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
 end
 
-local base64 = require("lib.encode.base64") --[[: unknown]]
+local base64 = require("lib.encode.base64")
 
 local M = {}
-local URL_OPTS = {url = true}
+local URL_OPTS = ({ url = (true --[[:! boolean | nil]]) } --[[:! { pad: boolean | nil, url: boolean | nil }]])
 
 --: (string, { pad: boolean | nil, url: boolean | nil } | nil) -> string
 M.encode = function(str, opts)
@@ -19,7 +19,7 @@ M.encode = function(str, opts)
     return base64.encode(str, URL_OPTS)
 end
 
---: (string) -> string
+--: (string) -> (string | nil, string | nil)
 M.decode = function(b64)
     return base64.decode(b64, URL_OPTS)
 end

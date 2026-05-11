@@ -40,10 +40,11 @@ local tls_lib --: TlsLib | nil
 do
 	-- Try to load libtls: short name first (works when on LD_LIBRARY_PATH),
 	-- then fall back to searching known Nix store paths for LibreSSL.
+	--: (string) -> TlsLib | nil
 	local function try_load(name)
 		local ok, lib_raw = pcall(ffi.load, name)
 		if not ok then return nil end
-		local lib = lib_raw --[[: unknown]]
+		local lib = ((lib_raw --[[: unknown]]) --[[:! { tls_client: unknown }]])
 		-- Attempt to define the minimal API we need.
 		-- pcall: cdef may error if symbols already declared (harmless).
 		pcall(ffi.cdef, [[
@@ -64,7 +65,7 @@ do
 		-- Verify the symbol exists.
 		local ok2 = pcall(function() return lib.tls_client end)
 		if not ok2 then return nil end
-		return lib
+		return ((lib --[[: unknown]]) --[[:! TlsLib]])
 	end
 
 	tls_lib = try_load("tls")

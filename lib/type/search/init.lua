@@ -208,7 +208,7 @@ M.query = function(query_type_str, index, opts)
         check_mod.clear_cache()
         local _, ctx_raw = check_mod.check_string(src, "_search.lua")
         if ctx_raw ~= nil then
-            local ctx = ctx_raw --[[: unknown]]
+            local ctx = ctx_raw
             local q_nid = intern_mod.intern(ctx.pool, "_q")
             local q_tid = lookup_binding(ctx, q_nid)
             if q_tid then
@@ -239,12 +239,18 @@ M.query = function(query_type_str, index, opts)
         end
     end
 
-    -- Sort: highest score first, then by name
-    local sort_fn = table.sort --[[: unknown]]
-    sort_fn(matches, function(a, b)
-        if a.score ~= b.score then return a.score > b.score end
-        return a.name < b.name
-    end)
+    -- Sort: highest score first, then by name (insertion sort avoids table.sort V-bleeding).
+    for i = 2, #matches do
+        local key = matches[i] --[[:! { score: integer, name: string, ... }]]
+        local j = i - 1
+        while j >= 1 do
+            local jv = matches[j] --[[:! { score: integer, name: string, ... }]]
+            if jv.score > key.score or (jv.score == key.score and jv.name <= key.name) then break end
+            matches[j + 1] = matches[j]
+            j = j - 1
+        end
+        matches[j + 1] = key
+    end
 
     -- Apply limit
     if limit ~= nil then

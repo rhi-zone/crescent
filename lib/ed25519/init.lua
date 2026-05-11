@@ -21,18 +21,14 @@ local function try_system()
 	local ffi = require("ffi")
 
 	ffi.cdef [[
-		int crypto_sign_ed25519_keypair(unsigned char *pk, unsigned char *sk);
-		int crypto_sign_ed25519_seed_keypair(unsigned char *pk, unsigned char *sk,
-		                                     const unsigned char *seed);
-		int crypto_sign_ed25519_detached(unsigned char *sig,
-		                                 unsigned long long *siglen_p,
-		                                 const unsigned char *m,
-		                                 unsigned long long mlen,
-		                                 const unsigned char *sk);
-		int crypto_sign_ed25519_verify_detached(const unsigned char *sig,
-		                                         const unsigned char *m,
+		int crypto_sign_ed25519_keypair(void *pk, void *sk);
+		int crypto_sign_ed25519_seed_keypair(void *pk, void *sk, const void *seed);
+		int crypto_sign_ed25519_detached(void *sig, unsigned long long *siglen_p,
+		                                 const void *m, unsigned long long mlen,
+		                                 const void *sk);
+		int crypto_sign_ed25519_verify_detached(const void *sig, const void *m,
 		                                         unsigned long long mlen,
-		                                         const unsigned char *pk);
+		                                         const void *pk);
 	]]
 
 	-- lib is typed as any: ffi.load result passes through pcall so its type
@@ -58,8 +54,7 @@ local function try_system()
 		local _sk = ffi.new("unsigned char[64]")
 		if seed then
 			if #seed ~= 32 then return nil, "seed must be 32 bytes" end
-			local ret = lib.crypto_sign_ed25519_seed_keypair(
-				_pk, _sk, ffi.cast("const unsigned char *", seed))
+			local ret = lib.crypto_sign_ed25519_seed_keypair(_pk, _sk, seed)
 			if ret ~= 0 then return nil, "crypto_sign_ed25519_seed_keypair failed" end
 		else
 			local ret = lib.crypto_sign_ed25519_keypair(_pk, _sk)
@@ -75,12 +70,9 @@ local function try_system()
 		end
 		local sig    = ffi.new("unsigned char[64]")
 		local siglen = ffi.new("unsigned long long[1]")
-		local ret = lib.crypto_sign_ed25519_detached(
-			sig, siglen,
-			ffi.cast("const unsigned char *", message), #message,
-			ffi.cast("const unsigned char *", privkey))
+		local ret = lib.crypto_sign_ed25519_detached(sig, siglen, message, #message, privkey)
 		if ret ~= 0 then return nil, "signing failed" end
-		return ffi.string(sig, 64)
+		return ffi.string(sig --[[:! Ptr<integer>]], 64)
 	end
 
 	--: (string, string, string) -> (boolean, string | nil)
@@ -91,10 +83,7 @@ local function try_system()
 		if type(signature) ~= "string" or #signature ~= 64 then
 			return false, "signature must be 64 bytes"
 		end
-		local ret = lib.crypto_sign_ed25519_verify_detached(
-			ffi.cast("const unsigned char *", signature),
-			ffi.cast("const unsigned char *", message), #message,
-			ffi.cast("const unsigned char *", pubkey))
+		local ret = lib.crypto_sign_ed25519_verify_detached(signature, message, #message, pubkey)
 		if ret ~= 0 then return false, "signature verification failed" end
 		return true
 	end
@@ -862,13 +851,12 @@ end
 
 -- ── Tier selection ────────────────────────────────────────────────────────────
 
--- keypair_fn/sign_fn/verify_fn are typed as any: they are assigned from either
--- the system (libsodium) or pure-Lua tier, each with different signatures;
--- using any avoids a union that would block all calls.
+-- keypair_fn/sign_fn/verify_fn: assigned from either the system or pure tier.
+-- Typed unknown so tier-specific stubs and reassignments don't fight the annotation.
 local _init_errmsg = "Ed25519 not yet initialized"
-local keypair_fn = function() return nil, _init_errmsg end --[[: unknown]]
-local sign_fn    = function() return nil, _init_errmsg end --[[: unknown]]
-local verify_fn  = function() return false, _init_errmsg end --[[: unknown]]
+local keypair_fn = (function() return nil, _init_errmsg end) --[[: unknown]]
+local sign_fn    = (function() return nil, _init_errmsg end) --[[: unknown]]
+local verify_fn  = (function() return false, _init_errmsg end) --[[: unknown]]
 
 local ok_sys = pcall(function()
 	keypair_fn, sign_fn, verify_fn = try_system()
@@ -890,8 +878,14 @@ end
 
 -- ── Public API ────────────────────────────────────────────────────────────────
 
-function M.keypair(seed, random_bytes_fn) return keypair_fn(seed, random_bytes_fn) end
-function M.sign(sk, msg)   return sign_fn(sk, msg)                  end
-function M.verify(pk, msg, sig) return verify_fn(pk, msg, sig)     end
+function M.keypair(seed, random_bytes_fn)
+	return (keypair_fn --[[:! (string | nil, unknown) -> (string, string) | (nil, string)]])(seed, random_bytes_fn)
+end
+function M.sign(sk, msg)
+	return (sign_fn --[[:! (string, string) -> (string | nil, string | nil)]])(sk, msg)
+end
+function M.verify(pk, msg, sig)
+	return (verify_fn --[[:! (string, string, string) -> (boolean, string | nil)]])(pk, msg, sig)
+end
 
 return M

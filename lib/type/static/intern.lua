@@ -96,7 +96,7 @@ function M.new()
         local kw = defs.keywords[i]
         local len = #kw
         local id = pool.next_id
-        local h = fnv1a(kw_ptr --[[: unknown]] + pos, len)
+        local h = fnv1a((kw_ptr --[[: unknown]]) --[[:! number]] + pos, len)
         local idx = band(h, mask)
         while entries[idx] do idx = band(idx + 1, mask) end
         local entry = { h, 0, pos, len, id }
@@ -108,7 +108,7 @@ function M.new()
         pos = pos + len
     end
 
-    return pool --[[: unknown]]
+    return (pool --[[:! { _anchors: { [integer]: string }, _assert_predicates: { [integer]: { param_idx: integer, type_id: integer } } | nil, _pending_assert_predicate: { param_idx: integer, type_id: integer } | nil, _pending_predicate: { param_idx: integer, type_id: integer } | nil, _type_predicates: { [integer]: { param_idx: integer, type_id: integer } } | nil, buf_count: integer, bufs: { [integer]: unknown }, entries: { [integer]: unknown }, ht_cap: integer, ht_count: integer, ht_mask: integer, map: { [string]: integer }, next_id: integer, rev: { [integer]: unknown } }]])
 end
 
 -- Register a source buffer pointer. Returns buf_id.

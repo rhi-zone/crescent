@@ -91,7 +91,7 @@ local function ffi_encode_string(s, buf, n)
         buf[n] = s; n = n + 1
     else
         local len = #s
-        local ptr = ffi.cast("const uint8_t *", s) --[[: unknown]]
+        local ptr = (ffi.cast("const uint8_t *", s) --[[: unknown]]) --[[:! number]]
         local start = 0
         local i = 0
         while i < len do
@@ -99,8 +99,8 @@ local function ffi_encode_string(s, buf, n)
             local esc = ESC_TABLE[b]
             if esc then
                 if i > start then
-                    local ffi_str = ffi.string --[[: unknown]]
-                    buf[n] = ffi_str(ptr + start, i - start); n = n + 1
+                    local ffi_str = ffi.string
+                    buf[n] = ffi_str((ptr + start) --[[:! Ptr<integer>]], i - start); n = n + 1
                 end
                 buf[n] = esc --[[:! string]]; n = n + 1
                 start = i + 1
@@ -108,8 +108,8 @@ local function ffi_encode_string(s, buf, n)
             i = i + 1
         end
         if start < len then
-            local ffi_str = ffi.string --[[: unknown]]
-            buf[n] = ffi_str(ptr + start, len - start); n = n + 1
+            local ffi_str = ffi.string
+            buf[n] = ffi_str((ptr + start) --[[:! Ptr<integer>]], len - start); n = n + 1
         end
     end
     buf[n] = '"'; n = n + 1
@@ -124,12 +124,11 @@ local function ffi_encode_table(t, buf, n, null_sentinel, visited, depth)
     if visited[t] then error("circular reference detected") end
     visited[t] = true
 
-    local t_ = t --[[: unknown]]
-    local len = #t_
+    local len = #((t --[[: unknown]]) --[[:! { [integer]: unknown }]])
     local is_array = len > 0
     if is_array then
         local count = 0
-        for _ in pairs(t_) do count = count + 1 end
+        for _ in pairs(t) do count = count + 1 end
         if count ~= len then is_array = false end
     end
 
@@ -137,13 +136,13 @@ local function ffi_encode_table(t, buf, n, null_sentinel, visited, depth)
         buf[n] = "["; n = n + 1
         for i = 1, len do
             if i > 1 then buf[n] = ","; n = n + 1 end
-            n = (ffi_encode_value(t_[i], buf, n, null_sentinel, visited, depth + 1) --[[:! integer]])
+            n = (ffi_encode_value(t[i], buf, n, null_sentinel, visited, depth + 1) --[[:! integer]])
         end
         buf[n] = "]"; n = n + 1
     else
         buf[n] = "{"; n = n + 1
         local first = true
-        for k, v in pairs(t_) do
+        for k, v in pairs(t) do
             if type_fn(k) ~= "string" then
                 error("object key must be a string, got " .. type_fn(k))
             end
@@ -180,8 +179,7 @@ ffi_encode_value = function(v, buf, n, null_sentinel, visited, depth)
             buf[n] = str_format("%.17g", v); n = n + 1
         end
     elseif t == "string" then
-        local v_str = v --[[: unknown]]
-        n = ffi_encode_string(v_str, buf, n)
+        n = ffi_encode_string((v --[[: unknown]]) --[[:! string]], buf, n)
     elseif t == "table" then
         n = ffi_encode_table(v, buf, n, null_sentinel, visited, depth)
     else

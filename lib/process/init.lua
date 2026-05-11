@@ -26,12 +26,9 @@ local SIGTERM = 15
 local SIGKILL = 9
 local WNOHANG = 1
 
---: integer & { [0]: integer }
-local buf = ffi.new("char[65536]") --[[: unknown]]
---: { [0]: integer }
-local int1 = ffi.new("int[1]") --[[: unknown]]
---: { [0]: integer, [1]: integer }
-local int2 = ffi.new("int[2]") --[[: unknown]]
+local buf = (ffi.new("char[65536]") --[[: unknown]]) --[[:! integer & { [0]: integer }]]
+local int1 = (ffi.new("int[1]") --[[: unknown]]) --[[:! { [0]: integer }]]
+local int2 = (ffi.new("int[2]") --[[: unknown]]) --[[:! { [0]: integer, [1]: integer }]]
 
 local mod = {}
 
@@ -126,7 +123,7 @@ function mod.exec(cmd, args, opts)
     local nargs = args and #args or 0
     --: { [integer]: string | nil }
     --: { [integer]: string | nil }
-    local argv = ffi.new("const char*[?]", nargs + 2) --[[: unknown]]
+    local argv = (ffi.new("const char*[?]", nargs + 2) --[[: unknown]]) --[[:! { [integer]: string | nil }]]
     argv[0] = cmd
     for i = 1, nargs do
       argv[i] = args[i]
@@ -210,7 +207,7 @@ function mod.spawn(cmd, args, opts)
     local nargs = args and #args or 0
     --: { [integer]: string | nil }
     --: { [integer]: string | nil }
-    local argv = ffi.new("const char*[?]", nargs + 2) --[[: unknown]]
+    local argv = (ffi.new("const char*[?]", nargs + 2) --[[: unknown]]) --[[:! { [integer]: string | nil }]]
     argv[0] = cmd
     for i = 1, nargs do
       argv[i] = args[i]
@@ -223,7 +220,7 @@ function mod.spawn(cmd, args, opts)
 
   -- parent
   --: Process
-  return (setmetatable({ pid = pid }, handle) --[[: unknown]])
+  return (setmetatable({ pid = pid }, handle) --[[:! Process]])
 end
 
 return mod

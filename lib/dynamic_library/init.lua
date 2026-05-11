@@ -17,7 +17,7 @@ local RTLD_LAZY = 1
 
 local mod = {}
 
---:: DynamicLibrary = { handle: unknown, path: string }
+--:: DynamicLibrary = { handle: cdata, path: string }
 
 local DynamicLibrary = {}
 mod.DynamicLibrary = DynamicLibrary
@@ -27,7 +27,7 @@ DynamicLibrary.__index = DynamicLibrary
 function DynamicLibrary.open(path)
   local handle = dl_ffi.dlopen(path, RTLD_LAZY)
   if handle == nil then
-    local err = ffi.string(dl_ffi.dlerror())
+    local err = dl_ffi.dlerror()
     return nil, "dynamic_library.open: " .. err
   end
   return setmetatable({ handle = handle }, DynamicLibrary)
@@ -37,7 +37,7 @@ end
 function DynamicLibrary:symbol(name)
   local sym = dl_ffi.dlsym(self.handle, name)
   if sym == nil then
-    local err = ffi.string(dl_ffi.dlerror())
+    local err = dl_ffi.dlerror()
     return nil, "dynamic_library.symbol: " .. err
   end
   return sym

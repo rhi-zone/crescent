@@ -27,7 +27,7 @@ local M = {}
 -- output = { text, usage }
 local function exec_complete(task, _ctx)
 	local inp = task.input --[[:! CompleteInput]]
-	local res, err = ai.generate({
+	local res, err = (ai.generate --[[:! (unknown) -> (unknown, string | nil)]])({
 		messages    = inp.messages,
 		model       = inp.model,
 		temperature = inp.temperature,
@@ -35,9 +35,10 @@ local function exec_complete(task, _ctx)
 		provider    = inp.provider,
 		http_client = inp.http_client,
 		api_key     = inp.api_key,
-	} --[[: unknown]])
+	})
 	if not res then error(err or "llm.complete failed") end
-	return { text = res.text, usage = res.usage }
+	local res_ = (res --[[:! { text: string | nil, usage: unknown }]])
+	return { text = res_.text, usage = res_.usage }
 end
 
 -- llm.tool_loop: agentic loop with tool call → subtask lineage.
@@ -79,7 +80,7 @@ local function exec_tool_loop(task, ctx)
 
 	for _ = 1, max_rounds do
 		rounds = rounds + 1
-		local res, err = ai.generate({
+		local res, err = (ai.generate --[[:! (unknown) -> (unknown, string | nil)]])({
 			messages    = messages,
 			model       = inp.model,
 			tools       = tool_specs,
@@ -88,19 +89,20 @@ local function exec_tool_loop(task, ctx)
 			provider    = inp.provider,
 			http_client = inp.http_client,
 			api_key     = inp.api_key,
-		} --[[: unknown]])
+		})
 		if not res then error(err or "llm.tool_loop generation failed") end
+		local res_ = (res --[[:! { text: string | nil, tool_calls: { [integer]: { arguments: { [string]: unknown }, id: string, name: string } } | nil }]])
 
-		local tool_calls = res.tool_calls
+		local tool_calls = res_.tool_calls
 		if not tool_calls then
-			return { text = res.text, rounds = rounds, tool_calls = total_tool_calls }
+			return { text = res_.text, rounds = rounds, tool_calls = total_tool_calls }
 		end
 		local tool_calls_ = tool_calls --[[:! { [integer]: { arguments: { [string]: unknown }, id: string, name: string } }]]
 		if #tool_calls_ == 0 then
-			return { text = res.text, rounds = rounds, tool_calls = total_tool_calls }
+			return { text = res_.text, rounds = rounds, tool_calls = total_tool_calls }
 		end
 
-		messages[#messages + 1] = { role = "assistant", content = res.text or "" }
+		messages[#messages + 1] = { role = "assistant", content = res_.text or "" }
 
 		for i = 1, #tool_calls_ do
 			local tc      = tool_calls_[i]

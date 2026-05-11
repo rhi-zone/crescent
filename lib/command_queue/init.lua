@@ -91,7 +91,7 @@ function M.history(opts)
   function h:undo()
     if #undo_stack == 0 then return nil, "nothing to undo" end
     local cmd = undo_stack[#undo_stack]
-    undo_stack[#undo_stack] = nil --[[: unknown]]
+    undo_stack[#undo_stack] = ((nil --[[: unknown]]) --[[:! Cmd]])
     local ok, err = pcall(cmd.undo)
     if not ok then
       -- Restore the command to the undo stack since undo failed
@@ -105,7 +105,7 @@ function M.history(opts)
   function h:redo()
     if #redo_stack == 0 then return nil, "nothing to redo" end
     local cmd = redo_stack[#redo_stack]
-    redo_stack[#redo_stack] = nil --[[: unknown]]
+    redo_stack[#redo_stack] = ((nil --[[: unknown]]) --[[:! Cmd]])
     local ok, err = pcall(cmd.execute)
     if not ok then
       redo_stack[#redo_stack + 1] = cmd
@@ -219,7 +219,7 @@ function M.queue()
     local fn = items[1] --[[:! () -> nil]]
     local n = #items
     for i = 1, n - 1 do items[i] = items[i + 1] end
-    items[n] = nil --[[: unknown]]
+    items[n] = ((nil --[[: unknown]]) --[[:! Cmd]])
     local ok, err = pcall(fn)
     if not ok then return nil, err end
     return true
@@ -270,7 +270,7 @@ function M.priority_queue()
     local entry = items[1] --[[:! PQEntry]]
     local n2 = #items
     for i = 1, n2 - 1 do items[i] = items[i + 1] end
-    items[n2] = nil --[[: unknown]]
+    items[n2] = ((nil --[[: unknown]]) --[[:! PQEntry]])
     local ok, err = pcall(entry.fn)
     if not ok then return nil, err end
     return true

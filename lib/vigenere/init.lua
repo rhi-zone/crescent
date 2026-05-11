@@ -518,7 +518,11 @@ function M.crack_vigenere_keylen(ciphertext, max_len)
     end
     results[#results + 1] = { len = k, score = total_ic / k }
   end
-  sort(results --[[: unknown]], function(a, b) return a.score > b.score end)
+  for i = 2, #results do
+    local v = results[i] --[[:! { len: integer, score: integer }]]; local j = i - 1
+    while j >= 1 and results[j].score < v.score do results[j + 1] = results[j]; j = j - 1 end
+    results[j + 1] = v
+  end
   -- Return top 5
   local top = {}
   for i = 1, math.min(5, #results) do top[i] = results[i] end

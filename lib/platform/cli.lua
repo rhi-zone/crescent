@@ -22,12 +22,9 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local json_raw = require("lib.json")
-local json = json_raw --[[: unknown]]
-local platform_raw = require("lib.platform")
-local platform = platform_raw --[[: unknown]]
-local cap_dispatch_raw = require("lib.platform.cap_dispatch")
-local cap_dispatch = cap_dispatch_raw --[[: unknown]]
+local json = require("lib.json")
+local platform = require("lib.platform")
+local cap_dispatch = require("lib.platform.cap_dispatch")
 local app_index_mod = require("lib.platform.index")
 
 --:: CapDecl = { type: string | nil, required: boolean | nil, host: string | nil, model: string | nil, path: string | nil, paths: unknown, allow_write: boolean | nil, scope: unknown, tables: unknown, provider: string | nil, key_name: string | nil, base_url: string | nil, provider_default: string | nil, root: string | nil, binaries: unknown, stderr: string | nil, methods: unknown, port: integer | nil, ... }
@@ -312,9 +309,9 @@ local function merge_cap_declarations(manifest, entry_key)
 				cap_declarations[name] = ({
 					type = name,
 					required = decl ~= "optional",
-				}) --[[: unknown]]
+				} --[[:! CapDecl]])
 			elseif type(decl) == "table" then
-				cap_declarations[name] = decl --[[: unknown]]
+				cap_declarations[name] = (decl --[[:! CapDecl]])
 			end
 		end
 	end
@@ -363,7 +360,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		if app._dir_mode then
 			return make_dir_self_cap(app.path)
 		else
-			local mod = (require(CAP_TYPE_MODULES.self) --[[:! { [string]: any, ... }]])
+			local mod = (require(CAP_TYPE_MODULES.self) --[[:! { self_cap: (unknown) -> unknown }]])
 			return mod.self_cap(app)
 		end
 	end
@@ -375,19 +372,19 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		if app._dir_mode then
 			return nil, "self_write not supported in directory mode"
 		end
-		local mod = (require(CAP_TYPE_MODULES.self_write) --[[:! { [string]: any, ... }]])
+		local mod = (require(CAP_TYPE_MODULES.self_write) --[[:! { self_write_cap: (unknown) -> unknown }]])
 		return mod.self_write_cap(app)
 	end
 
 	-- http_server: inject port from platform flags.
 	if cap_type == "http_server" then
-		local mod = (require(CAP_TYPE_MODULES.http_server) --[[:! { [string]: any, ... }]])
+		local mod = (require(CAP_TYPE_MODULES.http_server) --[[:! { http_server_cap: (unknown) -> unknown }]])
 		return mod.http_server_cap({ port = platform_opts.port or 0 })
 	end
 
 	-- http_client: pass through host and any extra fields from declaration.
 	if cap_type == "http_client" then
-		local mod = (require(CAP_TYPE_MODULES.http_client) --[[:! { [string]: any, ... }]])
+		local mod = (require(CAP_TYPE_MODULES.http_client) --[[:! { http_client_cap: (unknown) -> unknown }]])
 		return mod.http_client_cap({
 			host  = decl.host,
 			model = decl.model,
@@ -399,18 +396,18 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 	-- Storage caps: resolve data path from scope dimensions.
 	-- If decl.path is set explicitly (e.g. via --cap.NAME.path=FILE), use it directly.
 	if cap_type == "kv" or cap_type == "db" or cap_type == "shared_db" then
-		local data_path = decl.path and expand_home(decl.path) or platform._resolve_data_path(cap_name, decl.scope, context)
+		local data_path = decl.path and expand_home(decl.path) or platform._resolve_data_path(cap_name, (decl.scope --[[: unknown]]) --[[:! { [integer]: string } | nil]], context)
 		-- Ensure parent directory exists for the backing store file.
 		local parent_dir = data_path:match("^(.*)/[^/]+$")
 		if parent_dir then mkdir_p(parent_dir) end
 		if cap_type == "kv" then
-			local mod = (require(CAP_TYPE_MODULES.kv) --[[:! { [string]: any, ... }]])
+			local mod = (require(CAP_TYPE_MODULES.kv) --[[:! { kv_cap: (unknown) -> unknown }]])
 			return mod.kv_cap(data_path)
 		elseif cap_type == "db" then
-			local mod = (require(CAP_TYPE_MODULES.db) --[[:! { [string]: any, ... }]])
+			local mod = (require(CAP_TYPE_MODULES.db) --[[:! { db_cap: (unknown, unknown) -> unknown }]])
 			return mod.db_cap(data_path, { allow_write = decl.allow_write })
 		elseif cap_type == "shared_db" then
-			local mod = (require(CAP_TYPE_MODULES.shared_db) --[[:! { [string]: any, ... }]])
+			local mod = (require(CAP_TYPE_MODULES.shared_db) --[[:! { shared_db_cap: (unknown, unknown, unknown, unknown) -> unknown }]])
 			return mod.shared_db_cap(data_path, context.app_id, decl.tables or {}, {
 				allow_write = decl.allow_write,
 			})
@@ -419,7 +416,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 
 	-- time: no args.
 	if cap_type == "time" then
-		local mod = (require(CAP_TYPE_MODULES.time) --[[:! { [string]: any, ... }]])
+		local mod = (require(CAP_TYPE_MODULES.time) --[[:! { time_cap: () -> unknown }]])
 		return mod.time_cap()
 	end
 
@@ -427,9 +424,9 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 	if cap_type == "cli" then
 		local mod_path = CAP_TYPE_MODULES.cli
 		local ok, mod_raw = pcall(require, mod_path)
-		local mod = mod_raw --[[: unknown]]
+		local mod = (mod_raw --[[: unknown]]) --[[:! { [string]: unknown, ... }]]
 		if ok and mod.cli_cap then
-			return mod.cli_cap(platform_opts.app_args or {})
+			return (mod.cli_cap --[[:! (unknown) -> unknown]])(platform_opts.app_args or {})
 		end
 		-- Fallback: plain table.
 		return { args = function() return platform_opts.app_args or {} end }
@@ -439,9 +436,9 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 	if cap_type == "stdin" then
 		local mod_path = CAP_TYPE_MODULES.stdin
 		local ok, mod_raw = pcall(require, mod_path)
-		local mod = mod_raw --[[: unknown]]
+		local mod = (mod_raw --[[: unknown]]) --[[:! { [string]: unknown, ... }]]
 		if ok and mod.stdin_cap then
-			return mod.stdin_cap()
+			return (mod.stdin_cap --[[:! () -> unknown]])()
 		end
 		return nil, "stdin cap module not available"
 	end
@@ -450,9 +447,9 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 	if cap_type == "stdout" then
 		local mod_path = CAP_TYPE_MODULES.stdout
 		local ok, mod_raw = pcall(require, mod_path)
-		local mod = mod_raw --[[: unknown]]
+		local mod = (mod_raw --[[: unknown]]) --[[:! { [string]: unknown, ... }]]
 		if ok and mod.stdout_cap then
-			return mod.stdout_cap()
+			return (mod.stdout_cap --[[:! () -> unknown]])()
 		end
 		return nil, "stdout cap module not available"
 	end
@@ -465,7 +462,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		end
 		root = expand_home(root --[[:! string]])
 		mkdir_p(root)
-		local mod = (require(CAP_TYPE_MODULES.fs) --[[:! { [string]: any, ... }]])
+		local mod = (require(CAP_TYPE_MODULES.fs) --[[:! { fs_cap: (unknown) -> unknown }]])
 		return mod.fs_cap({ root = root, allow_write = decl.allow_write })
 	end
 
@@ -480,7 +477,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		if key_name then
 			local key_name_s = key_name --[[:! string]]
 			local ok_kr, keyring_raw = pcall(require, "lib.keyring")
-			local keyring = keyring_raw --[[: unknown]]
+			local keyring = (keyring_raw --[[: unknown]]) --[[:! { get: (string) -> string | nil, set: (string, string) -> nil, ... }]]
 			if ok_kr and keyring then
 				local kr_key = keyring.get("crescent/" .. key_name_s)
 				if kr_key then
@@ -505,7 +502,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		-- operator; default to "openai" as the most common case.
 		provider = provider or decl.provider_default or "openai"
 
-		local mod = (require(CAP_TYPE_MODULES.llm) --[[:! { [string]: any, ... }]])
+		local mod = (require(CAP_TYPE_MODULES.llm) --[[:! { llm_cap: (unknown) -> unknown }]])
 		return mod.llm_cap({
 			provider    = provider,
 			key         = api_key,
@@ -531,7 +528,7 @@ local function construct_caps(cap_declarations, grants, app, context, platform_o
 			end
 			-- Optional and not granted: skip (app gets nil).
 		else
-			local ok, cap, revoke_or_err = pcall(build_cap, name, decl, app, context, platform_opts)
+			local ok, cap, revoke_or_err = pcall(build_cap, name, decl, app --[[:! AppRecord]], context, platform_opts)
 			if not ok then
 				-- build_cap threw an error (cap holds the error message).
 				if required then
@@ -578,7 +575,7 @@ end
 -- Module cache is local to this loader — no host pollution.
 local function make_dir_loader(app_dir, env)
 	local app_dir_s = app_dir --[[:! string]]
-	local env_a = env --[[: unknown]]
+	local env_a = env --[[:! { [string]: unknown } | nil]]
 	local loaded = {}
 	-- Build the module prefix that corresponds to app_dir so that fully-qualified
 	-- sibling requires like require("lib.platform.apps.charactercardv2.presets")
@@ -591,7 +588,7 @@ local function make_dir_loader(app_dir, env)
 		if relname:sub(1, #dir_prefix) == dir_prefix then
 			relname = relname:sub(#dir_prefix + 1)
 		end
-		local relpath = (relname:gsub("%.", "/")) --[[: unknown]]
+		local relpath = relname:gsub("%.", "/")
 		local candidates = {
 			relpath .. ".lua",
 			relpath .. "/init.lua",
@@ -615,7 +612,7 @@ end
 
 --: (app: { path: string, ... }, entry_path: string, caps: unknown) -> (unknown, string | nil)
 local function run_dir_entrypoint(app, entry_path, caps)
-	local sandbox = require("lib.sandbox") --[[: unknown]]
+	local sandbox = require("lib.sandbox")
 	local cap_bundle = { globals = { caps = caps }, modules = {} }
 	local env = sandbox.env(sandbox.stdlib, cap_bundle)
 
@@ -712,7 +709,7 @@ local function cmd_list(args)
 		return
 	end
 	for _, row in ipairs(rows) do
-		local row_tags = row.tags --[[: unknown]]
+		local row_tags = row.tags --[[:! { [integer]: string } | nil]]
 		local tags = row_tags and #row_tags > 0 and ("  [" .. table.concat(row_tags, ", ") .. "]") or ""
 		io.write(string.format("%4d  %s%s\n", row.id, row.name, tags))
 	end
@@ -883,7 +880,7 @@ local function cmd_set_key(args)
 		io.stderr:write("error: keyring unavailable: " .. tostring(keyring_raw) .. "\n")
 		os.exit(1)
 	end
-	local keyring = keyring_raw --[[: unknown]]
+	local keyring = (keyring_raw --[[: unknown]]) --[[:! { get: (string) -> string | nil, set: (string, string) -> nil, list: (string) -> ({ [integer]: string } | nil, string | nil), delete: (string) -> nil, ... }]]
 	-- No args: list all crescent/* keys.
 	if not key_name then
 		local keys, err = keyring.list("crescent/")
@@ -967,7 +964,8 @@ local function cmd_import(args)
 		io.stderr:write("error: cannot read runtime manifest: " .. tostring(merr) .. "\n")
 		os.exit(1)
 	end
-	local runtime_manifest = json.decode(manifest_src)
+	local runtime_manifest_ = json.decode(manifest_src --[[:! string]])
+	local runtime_manifest = (runtime_manifest_ --[[: unknown]]) --[[:! { dom_entry: string | nil, name: string | nil } | nil]]
 	if not runtime_manifest then
 		io.stderr:write("error: cannot parse runtime manifest\n")
 		os.exit(1)
@@ -998,9 +996,9 @@ local function cmd_import(args)
 	local app_path, result_or_err = import_mod.import_card({
 		png_bytes = png_bytes --[[:! string]],
 		runtime_files = runtime_files,
-		runtime_manifest = runtime_manifest,
+		runtime_manifest = runtime_manifest --[[:! { dom_entry: string | nil, name: string | nil }]],
 		apps_dir = apps_dir --[[:! string]],
-		index = idx --[[: unknown]],
+		index = (idx --[[: unknown]]) --[[:! { install: (unknown, string, {}, number) -> (number | nil, string) } | nil]],
 		timestamp = os.time() --[[:! number]],
 		write_fn = (function(path, data) local ok, err = write_file(path, data); if ok then return true, "" end; return nil, err or "" end) --[[: (string, string) -> (true | nil, string)]],
 	});
@@ -1056,6 +1054,7 @@ if not app then
 	io.stderr:write("error: " .. tostring(err) .. "\n")
 	os.exit(1)
 end
+
 
 local manifest = app.manifest
 
@@ -1185,7 +1184,8 @@ if #missing > 0 then
 			io.stderr:write("  " .. name .. " (" .. cap_type .. ", " .. req .. ")\n")
 			local risk = cap_dispatch.risk(decl)
 			if risk then
-				io.stderr:write("    [" .. risk.severity:upper() .. "] " .. risk.text .. "\n")
+				local risk_ = (risk --[[: unknown]]) --[[:! { severity: string, text: string }]]
+				io.stderr:write("    [" .. risk_.severity:upper() .. "] " .. risk_.text .. "\n")
 			end
 		end
 		io.stderr:write("\ngrant individually with --grant=NAME or deny with --deny=NAME\n")
@@ -1212,9 +1212,9 @@ local revoke_fns = revoke_fns_or_err
 save_grants(data_dir, app_id, grants)
 
 -- Run the entrypoint.
-if app._dir_mode then
+if (app --[[:! AppRecord]])._dir_mode then
 	-- Directory mode: require the module directly.
-	local entry_mod_, load_err = run_dir_entrypoint(app, entry_path, caps)
+	local entry_mod_, load_err = run_dir_entrypoint(app --[[:! AppRecord]], entry_path, caps)
 	if not entry_mod_ then
 		io.stderr:write("error: " .. tostring(load_err) .. "\n")
 		os.exit(1)
@@ -1234,7 +1234,7 @@ if app._dir_mode then
 			io.stderr:write("error: create() returned nil\n")
 			os.exit(1)
 		end
-		local result = result_ --[[: unknown]]
+		local result = result_
 		-- CLI mode: app_args after '--' → invoke CLI handler instead of HTTP server.
 		if result.cli and opts.app_args and #opts.app_args > 0 then
 			result.cli(opts.app_args)
@@ -1281,7 +1281,8 @@ else
 	local sandbox = require("lib.sandbox")
 	local cap_bundle = { globals = { caps = caps }, modules = {} }
 	local env = sandbox.env(sandbox.stdlib, cap_bundle)
-	local ok, result = platform.run_entry(app, opts.entrypoint, env)
+	local app_for_run = (app --[[: unknown]]) --[[:! { _dir_mode: boolean | nil, chunks: unknown, entries: { [number]: { data: string, mode: number, mtime: number, name: string, size: number, typeflag: string } }, manifest: Manifest | nil, path: string }]]
+	local ok, result = platform.run_entry(app_for_run, opts.entrypoint --[[:! string]], env)
 	if not ok then
 		io.stderr:write("error: " .. tostring(result) .. "\n")
 		os.exit(1)

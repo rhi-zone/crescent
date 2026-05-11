@@ -13,7 +13,7 @@ end
 --   positive={"good","great",...}, negative={"bad",...}
 -- }
 
-local nlcst = require("lib.unified.nlcst") --[[: unknown]]
+local nlcst = require("lib.unified.nlcst")
 
 local M = {}
 

@@ -98,12 +98,13 @@ inotify.new = function (self, epoll, flags)
 		fd = fd,
 		callbacks = {}, --[[@type table<inotify_wd_c, fun(event: inotify_event_c)>]]
 	}
-	local buf = ffi.new("char[65536]") --[[: unknown]]
+	local buf_raw = ffi.new("char[65536]")
+	local buf_num = (buf_raw --[[: unknown]]) --[[:! number]]
 	epoll:add(fd, function ()
-		local len = ffi.C.read(fd, buf, 65536)
-		local offset = 0
+		local len = ffi.C.read(fd, buf_num, 65536)
+		local offset = 0 --: number
 		while offset < len do
-			local event = ffi.cast("struct inotify_event *", buf + offset) --[[@type inotify_event_c]]
+			local event = ffi.cast("struct inotify_event *", buf_num + offset) --[[@type inotify_event_c]]
 			local cb = instance.callbacks[event.wd]
 			if cb then cb(event) end
 			offset = offset + 16 + (tonumber(event.len) or 0) --[[:! integer]]

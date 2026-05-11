@@ -20,6 +20,8 @@ end
 
 local M = {}
 
+--:: GfmNode = { type: string, value?: string, children?: { [integer]: GfmNode }, depth?: integer, url?: string, title?: string, ordered?: boolean, start?: integer, lang?: string, checked?: boolean, label?: string, align?: unknown, header?: unknown, rows?: unknown, ... }
+
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local str_find  = string.find
@@ -284,8 +286,8 @@ end
 -- Mutates the listItem to strip the checkbox prefix and set .checked.
 --: (item: { type: string, ... }) -> nil
 local function try_task_list_item(item)
-  local item_any = item --[[: unknown]]
-  if not item_any.children or #item_any.children == 0 then return end
+  local item_any = item --[[:! { children: { [integer]: GfmNode } | nil, checked?: boolean, ... }]]
+  if not item_any.children or #(item_any.children --[[:! { [integer]: GfmNode }]]) == 0 then return end
   local first_child = item_any.children[1]
   -- The first child should be a paragraph (tight list) or directly inline nodes.
   local inlines
@@ -322,13 +324,13 @@ end
 -- Walk the block tree depth-first, applying all GFM transforms.
 local function transform(node)
   if node.type == "root" or node.type == "blockquote" then
-    local children = node.children --[[:! { [integer]: any, ... }]]
+    local children = node.children --[[:! { [integer]: GfmNode, ... }]]
     local new_children = {}
     for i = 1, #children do
       local child = children[i]
       -- Try table conversion on paragraphs.
       if child.type == "paragraph" then
-        local tbl = try_parse_table(child)
+        local tbl = try_parse_table(child --[[:! { children: { [integer]: GfmNode } }]])
         if tbl then
           new_children[#new_children + 1] = tbl
         else
@@ -340,8 +342,9 @@ local function transform(node)
         end
       elseif child.type == "list" then
         -- Process task list items and recurse.
-        for j = 1, #child.children do
-          local item = child.children[j]
+        local child_ch = child.children or {} --[[:! { [integer]: GfmNode }]]
+        for j = 1, #child_ch do
+          local item = child_ch[j]
           try_task_list_item(item)
           -- Expand inline content inside list item children.
           if item.children then

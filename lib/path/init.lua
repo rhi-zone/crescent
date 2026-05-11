@@ -178,7 +178,7 @@ M.normalize = function(p)
 			-- skip
 		elseif part == ".." then
 			if #stack > 0 and stack[#stack] ~= ".." then
-				stack[#stack] = nil --[[: unknown]]
+				stack[#stack] = ((nil --[[: unknown]]) --[[:! string]])
 			elseif not is_abs then
 				stack[#stack + 1] = ".."
 			end

@@ -6,16 +6,16 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local json = require("lib.format.json") --[[: unknown]]
+local json = require("lib.format.json")
 
 -- Lazy-load the HTTPS client so that requiring lib.github does not fail
 -- in environments where TLS is unavailable (e.g. test runners without libtls).
-local _http --[[: unknown]]
+local _http --: { request: (unknown) -> (unknown, string | nil) } | nil
 local function http()
 	if not _http then
-		_http = require("lib.https.client")
+		_http = (require("lib.https.client") --[[:! { request: (unknown) -> (unknown, string | nil) }]])
 	end
-	return _http --[[: unknown]]
+	return _http --[[:! { request: (unknown) -> (unknown, string | nil) }]]
 end
 
 --:: github_client = { token: string | nil }
@@ -47,16 +47,17 @@ local function request(self, method, path, body)
 	if body then
 		headers["Content-Type"] = { "application/json" }
 	end
-	local res, err = http().request({
+	local res_raw, err = http().request({
 		method = method,
 		host = BASE_HOST,
 		path = path,
 		headers = headers,
 		body = body,
 	})
-	if not res then
+	if not res_raw then
 		return nil, err
 	end
+	local res = (res_raw --[[:! { status: integer, body: string | nil }]])
 	if res.status >= 400 then
 		return nil, "github: HTTP " .. res.status .. ": " .. (res.body or "")
 	end

@@ -193,7 +193,7 @@ local function decode_header_value(str)
 		end
 		return data
 	end
-	local result = str:gsub("=?([^?]+)?([BbQq])?([^?]*)?=", cb --[[: unknown]])
+	local result = str:gsub("=?([^?]+)?([BbQq])?([^?]*)?=", ((cb --[[: unknown]]) --[[:! (string) -> string | nil]]))
 	return result
 end
 

@@ -316,13 +316,18 @@ function M.canonical_codes(symbol_lengths)
   for sym, len in pairs(symbol_lengths) do
     pairs_list[#pairs_list + 1] = { sym = sym, len = len --[[:! integer]] }
   end
-  local sort_any = table.sort --[[: unknown]]
-  sort_any(pairs_list, function(a, b)
-    if a.len ~= b.len then
-      return a.len < b.len
+  -- insertion sort by (len, tostring(sym))
+  for i = 2, #pairs_list do
+    local v = pairs_list[i] --[[:! { sym: unknown, len: integer }]]
+    local j = i - 1
+    while j >= 1 do
+      local u = pairs_list[j] --[[:! { sym: unknown, len: integer }]]
+      if u.len > v.len or (u.len == v.len and tostring(u.sym) > tostring(v.sym)) then
+        pairs_list[j + 1] = u; j = j - 1
+      else break end
     end
-    return tostring(a.sym) < tostring(b.sym)
-  end)
+    pairs_list[j + 1] = v
+  end
 
   local codes = {}
   local code = 0
@@ -478,7 +483,8 @@ function M.expected_length(freqs, codes)
     if code == nil then
       return nil, "no code for symbol: " .. tostring(sym)
     end
-    avg = avg + ((freq --[[:! number]]) / total) * #code
+    local code_s = (code --[[:! string]])
+    avg = avg + ((freq --[[:! number]]) / total) * #code_s
   end
   return avg
 end

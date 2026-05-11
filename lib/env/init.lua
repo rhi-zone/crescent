@@ -10,7 +10,7 @@ if ffi.os == "Windows" then error("env: windows not supported")
 else
 ffi.cdef [[ char **env(); ]]
 local _di = debug.getinfo(1) --[[:! { source: string }]]
-local env_ffi = ffi.load(_di.source:match("@?(.*/)") .. "env.so") --[[: unknown]]
+local env_ffi = ffi.load(_di.source:match("@?(.*/)") .. "env.so")
 
 local env_iter = function (_, i)
 	local ptr = env_ffi.env()
@@ -25,13 +25,14 @@ mod.env_stateless = function ()	return env_iter, nil, -1 end
 
 --: () -> { [string]: string }
 mod.env = function ()
-	local ptr = env_ffi.env()
+	local ptr = (env_ffi.env() --[[: unknown]]) --[[:! { [integer]: unknown }]]
 	local env = {}
+	local pi = 0
 	while true do
-		local str = ptr[0]
+		local str = ptr[pi]
 		if str == nil then break end
-		ptr = ptr + 1
-		local name, value = ffi.string(str):match("(.-)=(.*)")
+		pi = pi + 1
+		local name, value = ffi.string(str --[[:! Ptr<integer>]]):match("(.-)=(.*)")
 		env[name] = value
 	end
 	return env

@@ -718,8 +718,7 @@ M.compile = function(desc, alloc, abi, ctype)
 
   -- ── Step 6: Allocate executable memory and return callable ─────────────
   local code_str = buf_to_string(buf)
-  local code_str_any = code_str --[[: unknown]]
-  local exec_ptr, err = alloc_exec_mem(code_str_any)
+  local exec_ptr, err = alloc_exec_mem((code_str --[[: unknown]]) --[[:! Ptr<integer>]])
   if exec_ptr == nil then
     return nil, err --[[:! string | nil]]
   end

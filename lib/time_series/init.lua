@@ -487,13 +487,13 @@ function M.align(s1 --[[ : { at: (number, unknown) -> number | nil, _t: { [integ
   local a2v = {} --: { [integer]: number }
   for i = 1, m do
     local t = all_t[i]
-    local s1_any = s1 --[[: unknown]]
-    local s2_any = s2 --[[: unknown]]
-    local v1 = s1_any:at(t, interp)
-    local v2 = s2_any:at(t, interp)
+    local s1_ = (s1 --[[:! { at: (unknown, unknown, unknown) -> unknown }]])
+    local s2_ = (s2 --[[:! { at: (unknown, unknown, unknown) -> unknown }]])
+    local v1 = s1_:at(t, interp)
+    local v2 = s2_:at(t, interp)
     if v1 ~= nil and v2 ~= nil then
-      a1t[#a1t + 1] = t; a1v[#a1v + 1] = v1
-      a2t[#a2t + 1] = t; a2v[#a2v + 1] = v2
+      a1t[#a1t + 1] = t; a1v[#a1v + 1] = (v1 --[[:! number]])
+      a2t[#a2t + 1] = t; a2v[#a2v + 1] = (v2 --[[:! number]])
     end
   end
   return { series_from(a1t, a1v), series_from(a2t, a2v) }

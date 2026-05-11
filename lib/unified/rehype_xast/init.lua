@@ -14,7 +14,7 @@ end
 --   hast doctype -> xast doctype("html")
 --   hast raw     -> xast text(value)   (raw HTML can't round-trip through XML)
 
-local xast = require("lib.unified.xast") --[[: unknown]]
+local xast = require("lib.unified.xast")
 
 local M = {}
 

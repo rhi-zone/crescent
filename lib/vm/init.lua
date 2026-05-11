@@ -286,10 +286,11 @@ function Machine:step()
   local instr = self_._prog[pc]
   self_._pc = pc + 1
   local h = handlers --[[: unknown]]
-  local hfn = h[instr --[[: unknown]]]
-  if not hfn then
-    error("vm: unknown opcode '" .. tostring(instr --[[: unknown]]) .. "'")
+  local hfn_ = (h --[[:! { [unknown]: unknown }]])[instr]
+  if not hfn_ then
+    error("vm: unknown opcode '" .. tostring(instr) .. "'")
   end
+  local hfn = (hfn_ --[[:! (unknown, unknown) -> ()]])
   hfn(self_, instr)
   return not self_._halted
 end

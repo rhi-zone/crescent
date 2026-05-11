@@ -12,21 +12,21 @@ local hex_alphabet = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b
 --: (string) -> string
 mod.string_to_urlencode = function (str)
 	-- FIXME
-	local gsub_any = str.gsub --[[: unknown]]
-	return gsub_any(str, "[^%w-._~:%[%]@!$'%(%)*+,;=]", function (char)
+	local out = str:gsub("[^%w-._~:%[%]@!$'%(%)*+,;=]", function (char)
 		local char_ = char --[[:! string]]
 		local code = (string.byte(char_, 1) or 0) --[[:! integer]]
 		local hi = math.floor(code / 16) --[[:! integer]]
 		return "%" .. hex_alphabet[hi + 1] .. hex_alphabet[code % 16 + 1]
 	end)
+	return (out --[[: unknown]]) --[[:! string]]
 end
 
 --[[converts from urlencode to string]]
 --: (string) -> string
 mod.urlencode_to_string = function (urlencoded)
 	-- TODO: error if invalid
-	local gsub_any2 = urlencoded.gsub --[[: unknown]]
-	return gsub_any2(urlencoded, "%%([0-9a-fA-F][0-9a-fA-F])", function (code) return string.char(math2.tointeger(tonumber(code, 16)) or 0) end)
+	local out2 = urlencoded:gsub("%%([0-9a-fA-F][0-9a-fA-F])", function (code) return string.char(math2.tointeger(tonumber(code, 16)) or 0) end)
+	return (out2 --[[: unknown]]) --[[:! string]]
 end
 
 return mod

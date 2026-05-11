@@ -22,7 +22,7 @@ if package and not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local json = (require("lib.format.json") --[[: unknown]])
+local json = require("lib.format.json")
 
 local M = {}
 
@@ -243,7 +243,8 @@ function M.create(caps, methods, descriptors)
 		end
 
 		if want_json then
-			io_out:write(json.encode(result) .. "\n")
+			local encoded_s, _ = json.encode(result)
+			io_out:write((encoded_s or "") .. "\n")
 		else
 			pretty_print(result, io_out)
 		end

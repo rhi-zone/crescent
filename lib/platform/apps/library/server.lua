@@ -544,8 +544,10 @@ local function parse_query(qs)
 		local k, v = kv:match("^([^=]+)=?(.*)")
 		if k and v then
 			-- Minimal percent-decode for common characters.
-			local v1 = (v:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: unknown]]
-			local v2 = (v1:gsub("+", " ")) --[[: unknown]]
+			local v2 = (v:gsub("%%(%x%x)", function(h)
+				local n = tonumber(h, 16)
+				return n and string.char(n) or h
+			end):gsub("+", " "))
 			params[k] = v2
 		end
 	end
@@ -607,7 +609,11 @@ end
 local function get_source_discover(caps, source_id, q, limit, offset)
 	local source_map = caps._source_map
 	-- Percent-decode the source id from the path segment.
-	local decoded_id = (source_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: unknown]]
+	local decoded_id_raw, _ = source_id:gsub("%%(%x%x)", function(h)
+		local n = tonumber(h, 16)
+		return n and string.char(n) or h
+	end)
+	local decoded_id = decoded_id_raw
 	local src = source_map[decoded_id]
 	if not src then
 		return nil, { status = 404, message = "source not found: " .. decoded_id }
@@ -616,12 +622,12 @@ local function get_source_discover(caps, source_id, q, limit, offset)
 	local resp = src.discover(params) --[[:! { entries: { [integer]: { id: unknown, thumb_url: string | nil, ... } } | nil, ... }]]
 	-- Rewrite thumb_url entries to route through this server's thumb proxy.
 	if src.handler and resp and resp.entries then
-		local encoded_src_id = (decoded_id:gsub("[^%w%-_%.~]",
-			function(c) return ("%%%02X"):format((c --[[:! string]]):byte()) end)) --[[: unknown]]
+		local encoded_src_id = decoded_id:gsub("[^%w%-_%.~]",
+			function(c) return ("%%%02X"):format((c --[[:! string]]):byte()) end)
 		for _, entry in ipairs(resp.entries) do
 			if entry.id then
-				local encoded_entry_id = (tostring(entry.id):gsub("[^%w%-_%.~]",
-					function(c) return ("%%%02X"):format((c --[[:! string]]):byte()) end)) --[[: unknown]]
+				local encoded_entry_id = tostring(entry.id):gsub("[^%w%-_%.~]",
+					function(c) return ("%%%02X"):format((c --[[:! string]]):byte()) end)
 				entry.thumb_url = "/api/sources/" .. encoded_src_id
 					.. "/thumb/" .. encoded_entry_id
 			end
@@ -682,7 +688,11 @@ function M.create(caps)
 		local thumb_src_id, thumb_entry_id = path:match("^/api/sources/([^/]+)/thumb/(.+)$")
 		if not thumb_src_id then return nil end
 		thumb_src_id   = (thumb_src_id:gsub("%%(%x%x)",   function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: unknown]]
-		thumb_entry_id = (thumb_entry_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16) --[[:! integer]]) end)) --[[: unknown]]
+		local thumb_entry_id_raw, _ = thumb_entry_id:gsub("%%(%x%x)", function(h)
+			local n = tonumber(h, 16)
+			return n and string.char(n) or h
+		end)
+		thumb_entry_id = thumb_entry_id_raw
 		local src = source_map[thumb_src_id] --[[:! { handler: ((unknown, unknown) -> unknown) | nil, ... } | nil]]
 		if not src or not src.handler then
 			res.status = 404

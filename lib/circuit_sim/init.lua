@@ -278,13 +278,13 @@ function Circuit:solve_dc()
 	if sz_ == 0 then
 		-- trivial: only ground node
 		local empty_pwr = { total = 0.0 } --: { [string]: number }
-		return setmetatable({
+		return (setmetatable({
 			_voltages = {} --[[:! { [string]: number }]],
 			_currents = {} --[[:! { [string]: number }]],
 			_power = empty_pwr,
 			node_voltages = {} --[[:! { [string]: number }]],
 			branch_currents = {} --[[:! { [string]: number }]],
-		}, Result) --[[: unknown]]
+		}, Result) --[[:! { _currents: { [string]: number }, _power: { [string]: number }, _voltages: { [string]: number }, branch_currents: { [string]: number }, node_voltages: { [string]: number } }]])
 	end
 
 	local Ac = copy_matrix(A_, sz_)
@@ -331,14 +331,14 @@ function Circuit:solve_dc()
 	end
 	power["total"] = total_power
 
-	return setmetatable({
+	return (setmetatable({
 		_voltages = node_voltages,
 		_currents = branch_currents,
 		_power = power,
 		-- public aliases for direct table access (no 'power' field — use :power() method)
 		node_voltages = node_voltages,
 		branch_currents = branch_currents,
-	}, Result) --[[: unknown]]
+	}, Result) --[[:! { _currents: { [string]: number }, _power: { [string]: number }, _voltages: { [string]: number }, branch_currents: { [string]: number }, node_voltages: { [string]: number } }]])
 end
 
 -- Parameter sweep: change a component value and solve for each

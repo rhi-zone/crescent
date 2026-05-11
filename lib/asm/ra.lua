@@ -171,8 +171,9 @@ M.allocate = function(intervals, regfile)
     while #active > 0 do
       local j = active[1] --: Interval
       if j.last >= current_first then break end
-      local active_any = active --[[: unknown]]
-      table.remove(active_any, 1)
+      local na = #active
+      for ii = 1, na - 1 do active[ii] = active[ii + 1] end
+      active[na] = ((nil --[[: unknown]]) --[[:! Interval]])
       local pool = free_pool(j.type)
       pool[#pool + 1] = j.phys
       unblock_alias(j.phys)
@@ -216,8 +217,9 @@ M.allocate = function(intervals, regfile)
         local victim = active[spill_idx] --: Interval
         local stolen = victim.phys
         do
-          local active_any2 = active --[[: unknown]]
-          table.remove(active_any2, spill_idx)
+          local na2 = #active
+          for ii = spill_idx, na2 - 1 do active[ii] = active[ii + 1] end
+          active[na2] = ((nil --[[: unknown]]) --[[:! Interval]])
         end
         -- Victim goes to a spill slot.
         local victim_id = victim.id --[[:! integer]]

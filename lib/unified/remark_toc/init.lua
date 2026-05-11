@@ -143,7 +143,7 @@ local function build_toc_list(entries, ordered, min_depth)
 
     -- If the stack is deeper, pop back.
     while #stack > rel do
-      stack[#stack] = nil --[[: unknown]]
+      stack[#stack] = ((nil --[[: unknown]]) --[[:! { list: ListNode, item: ListNode | nil }]])
     end
 
     -- Add the item to the current list.

@@ -11,11 +11,13 @@ local M = {}
 
 -- Generic arena factory for a given FFI ctype.
 -- Returns an arena with alloc/reset/grow/get and raw .items access.
+--: (unknown, integer | nil) -> unknown
 local function new_arena(ct, initial_cap)
     initial_cap = initial_cap or 1024
-    local ct_ptr = ffi.typeof("$*", ct)
-    local ct_arr = ffi.typeof("$[?]" --[[: unknown]], ct) --[[:! Ctype<unknown>]]
-    local elem_size = ffi.sizeof(ct)
+    local ct_ = (ct --[[:! cdata]])
+    local ct_ptr = ffi.typeof("$*", ct_)
+    local ct_arr = ((ffi.typeof --[[:! (unknown, unknown) -> unknown]])("$[?]", ct) --[[:! (integer) -> cdata]])
+    local elem_size = ffi.sizeof(ct_)
     local arena = {
         items = ct_arr(initial_cap),
         cap = initial_cap,
@@ -55,17 +57,17 @@ end
 
 --: (integer | nil) -> ASTNodeArena
 function M.new_node_arena(initial_cap)
-    return new_arena(ffi.typeof("ASTNode" --[[: unknown]]) --[[: unknown]], initial_cap) --[[: ASTNodeArena]]
+    return new_arena((ffi.typeof --[[:! (unknown) -> unknown]])("ASTNode"), initial_cap) --[[:! ASTNodeArena]]
 end
 
 --: (integer | nil) -> TypeSlotArena
 function M.new_type_arena(initial_cap)
-    return new_arena(ffi.typeof("TypeSlot" --[[: unknown]]) --[[: unknown]], initial_cap) --[[: TypeSlotArena]]
+    return new_arena((ffi.typeof --[[:! (unknown) -> unknown]])("TypeSlot"), initial_cap) --[[:! TypeSlotArena]]
 end
 
 --: (integer | nil) -> FieldEntryArena
 function M.new_field_arena(initial_cap)
-    return new_arena(ffi.typeof("FieldEntry" --[[: unknown]]) --[[: unknown]], initial_cap) --[[: FieldEntryArena]]
+    return new_arena((ffi.typeof --[[:! (unknown) -> unknown]])("FieldEntry"), initial_cap) --[[:! FieldEntryArena]]
 end
 
 -- List pool: flat int32_t array for variable-length sequences.
@@ -73,7 +75,7 @@ end
 --: (integer | nil) -> ListPool
 function M.new_list_pool(initial_cap)
     initial_cap = initial_cap or 4096
-    local int32_arr = ffi.typeof("int32_t[?]" --[[: unknown]])
+    local int32_arr = ((ffi.typeof --[[:! (unknown) -> unknown]])("int32_t[?]") --[[:! (integer) -> cdata]])
     local pool = {
         items = int32_arr(initial_cap),
         cap = initial_cap,

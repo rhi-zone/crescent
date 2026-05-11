@@ -134,9 +134,10 @@ function M.make(opts)
 		if not app_opt then
 			return nil, "load_app failed: " .. tostring(err)
 		end
-		local app = app_opt --[[: unknown]]
+		local app = (app_opt --[[: unknown]])
+		local app_typed = (app --[[:! { manifest: { caps: { [string]: unknown } | nil, default_entry: string | nil, entry: { [string]: unknown } | nil, meta: { description: string | nil, tags: { [integer]: string } | nil } | nil, name: string | nil, version: string | nil } | nil, path: string, chunks: unknown, entries: { [number]: { data: string, mode: number, mtime: number, name: string, size: number, typeflag: string } }, _dir_mode: boolean | nil }]])
 
-		local cap_decls = collect_entry_caps(app.manifest, entry_key)
+		local cap_decls = collect_entry_caps(app_typed.manifest, entry_key)
 		-- Merge operator-supplied overrides into each cap declaration.
 		if idx.get_cap_config then
 			for name, decl in pairs(cap_decls) do
@@ -152,7 +153,8 @@ function M.make(opts)
 		}
 
 		local override, get_captured = make_http_server_override(app_id, app_url)
-		local caps, caps_err = platform.make_caps(app, cap_decls, grants, context, {
+		local app_full = (app --[[:! { _dir_mode: boolean | nil, chunks: unknown, entries: { [number]: { data: string, mode: number, mtime: number, name: string, size: number, typeflag: string } }, manifest: { caps: { [string]: { allow_write: boolean | nil, base_url: string | nil, binaries: unknown, host: string | nil, key_name: string | nil, methods: unknown, model: string | nil, path: string | nil, paths: unknown, port: integer | nil, provider: string | nil, provider_default: string | nil, required: boolean | nil, root: string | nil, scope: unknown, stderr: string | nil, tables: unknown, type: string | nil } | string } | nil, default_entry: string | nil, entry: { [string]: { caps: { [string]: { allow_write: boolean | nil, base_url: string | nil, binaries: unknown, host: string | nil, key_name: string | nil, methods: unknown, model: string | nil, path: string | nil, paths: unknown, port: integer | nil, provider: string | nil, provider_default: string | nil, required: boolean | nil, root: string | nil, scope: unknown, stderr: string | nil, tables: unknown, type: string | nil } | string } | nil, main: string | nil } | string } | nil, meta: { description: string | nil, tags: { [integer]: string } | nil } | nil, name: string | nil, version: string | nil } | nil, path: string }]])
+		local caps, caps_err = platform.make_caps(app_full, cap_decls, grants, context, {
 			http_server = override,
 		})
 		if not caps then
@@ -160,7 +162,7 @@ function M.make(opts)
 		end
 
 		local env = sandbox.env(sandbox.stdlib, { globals = { caps = caps }, modules = {} })
-		local ok, run_err = platform.run_entry(app, entry_key, env)
+		local ok, run_err = platform.run_entry(app_full, entry_key, env)
 		if not ok then
 			return nil, "run_entry failed: " .. tostring(run_err)
 		end

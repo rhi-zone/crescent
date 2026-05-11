@@ -354,11 +354,13 @@ function M.sort(palette, key)
     return nil, "sort: unknown key '" .. tostring(key) .. "'"
   end
   local kfn = key_fn --[[:! (c: Color) -> number]]
-  table.sort(result --[[: unknown]], function(a, b)
-    local av = a --[[:! Color]]; local bv = b --[[:! Color]]
-    return kfn(av) < kfn(bv)
-  end)
-  return result
+  local result_ = (result --[[:! { [integer]: Color }]])
+  for i = 2, #result_ do
+    local v = result_[i]; local j = i - 1
+    while j >= 1 and kfn(result_[j]) > kfn(v) do result_[j + 1] = result_[j]; j = j - 1 end
+    result_[j + 1] = v
+  end
+  return result_
 end
 
 -- Remove near-duplicate colors using Euclidean RGB distance threshold

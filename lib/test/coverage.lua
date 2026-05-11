@@ -64,7 +64,7 @@ mod.start = function ()
 end
 
 mod.stop = function ()
-	(debug.sethook --[[: unknown]])()
+	;((debug.sethook --[[: unknown]]) --[[:! () -> ()]])()
 end
 
 --[[read a file and return its lines]]

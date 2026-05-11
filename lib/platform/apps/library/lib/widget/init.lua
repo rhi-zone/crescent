@@ -107,12 +107,13 @@ end
 function M.dynamic(init_state, widget)
 	return function(signal)
 		local state_sig = R.signal(init_state)
-		local state_sig_ = state_sig --[[: unknown]]
+		local state_sig_ = (state_sig --[[: unknown]]) --[[:! { get: () -> unknown, set: (unknown) -> nil, update: ((unknown) -> unknown) -> nil }]]
 
 		-- Combined signal: {state=S, value=A}
-		local combined = R.computed(function()
+		local combined_ = R.computed(function()
 			return { state = state_sig_.get(), value = signal.get() }
-		end, { state_sig, signal }) --[[: unknown]]
+		end, { state_sig, signal })
+		local combined = (combined_ --[[:! { get: () -> unknown, subscribe: (unknown) -> nil, focus: (unknown) -> unknown, narrow: (unknown) -> unknown, dispose: () -> nil }]])
 
 		-- Expose state setter on the combined signal so child can update state.
 		-- The child receives a signal with the combined value; they can call

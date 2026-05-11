@@ -278,7 +278,7 @@ local function cmd_add(project_dir, parsed)
 
 	m.deps[name] = constraint
 
-	local write_ok, write_err = manifest.write(pkg_path, m --[[: unknown]])
+	local write_ok, write_err = manifest.write(pkg_path, (m --[[:! { deps: { [string]: unknown } | nil, description: string | nil, license: string | nil, name: string, registries: { [integer]: string } | nil, scripts: { [string]: string } | nil, version: string }]]))
 	if not write_ok then
 		stderr("add: failed to write pkg.lua: %s", tostring(write_err))
 		return false
@@ -315,7 +315,7 @@ local function cmd_remove(project_dir, parsed)
 
 	m.deps[name] = nil
 
-	local write_ok, write_err = manifest.write(pkg_path, m --[[: unknown]])
+	local write_ok, write_err = manifest.write(pkg_path, m)
 	if not write_ok then
 		stderr("remove: failed to write pkg.lua: %s", tostring(write_err))
 		return false
@@ -697,7 +697,7 @@ local function cmd_eject(project_dir, parsed)
 			m.deps = m.deps or {}
 			if m.deps[name] then
 				m.deps[name] = nil
-				manifest.write(pkg_path, m --[[: unknown]])  -- ignore write errors; lock already updated
+				manifest.write(pkg_path, m)  -- ignore write errors; lock already updated
 			else
 				io.stderr:write(("warning: %q is not in pkg.lua deps (lockfile entry removed anyway)\n"):format(name))
 			end

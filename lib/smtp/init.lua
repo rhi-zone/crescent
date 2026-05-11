@@ -535,7 +535,7 @@ M.send = function(transport, msg, opts)
 	end
 
 	-- DATA
-	local raw = M.build_message(msg_ --[[: unknown]])
+	local raw = M.build_message((msg_ --[[: unknown]]) --[[:! { body: string | nil, cc: { [integer]: unknown } | nil, from: string | nil, headers: { [string]: string } | nil, html: string | nil, seed: integer | nil, subject: string | nil, text: string | nil, time_fn: (() -> { day: integer, hour: integer, min: integer, month: integer, sec: integer, wday: integer, year: integer }) | nil, to: { [integer]: unknown } | nil }]])
 	local data_result
 	data_result, err = session:data(raw)
 	if not data_result then return nil, err end

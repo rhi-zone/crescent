@@ -94,13 +94,13 @@ end
 local function unpack_float(s, i)
 	-- i is 1-based Lua string index
 	local ss = s --[[:! string]]
-	ffi.copy(_fu.b, ss:sub(i, i + 3) --[[: unknown]], 4)
+	ffi.copy(_fu.b, (ss:sub(i, i + 3) --[[: unknown]]) --[[:! Ptr<integer>]], 4)
 	return _fu.f, i + 4
 end
 
 local function unpack_double(s, i)
 	local ss = s --[[:! string]]
-	ffi.copy(_du.b, ss:sub(i, i + 7) --[[: unknown]], 8)
+	ffi.copy(_du.b, (ss:sub(i, i + 7) --[[: unknown]]) --[[:! Ptr<integer>]], 8)
 	return _du.d, i + 8
 end
 

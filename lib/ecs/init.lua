@@ -23,7 +23,7 @@ if not package.path:find("?/init.lua", 1, true) then
 	package.path = package.path .. ";./?/init.lua"
 end
 
-local json_any = require("lib.format.json") --[[: unknown]]
+local json_any = require("lib.format.json")
 --:: json_mod = { encode: (unknown) -> (string | nil, string | nil), decode: (string) -> (unknown, string | nil) }
 local json = json_any --[[:! json_mod]]
 

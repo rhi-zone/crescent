@@ -1218,7 +1218,7 @@ local function save_group(state, caps)
 		else
 			serializable.members[i] = {
 				name = m.name,
-				card_json = card_mod.to_json(m.card --[[: unknown]]),
+				card_json = card_mod.to_json((m.card --[[: unknown]]) --[[:! { alternate_greetings: { [number]: string }, character_book: CharacterBook | nil, character_version: string, creator: string, creator_notes: string, description: string, extensions: { [string]: unknown }, first_mes: string, mes_example: string, name: string, personality: string, post_history_instructions: string, scenario: string, system_prompt: string, tags: { [number]: string } }]]),
 			}
 		end
 	end
@@ -2000,7 +2000,7 @@ local function api_post_lorebook_add(state, caps, _params, body, res)
 	if not body or not body.keys or not body.content then
 		return json_err(res, 400, "keys and content required")
 	end
-	local entry = lorebook_mod.normalize(--[[: unknown]] {
+	local entry = lorebook_mod.normalize({
 		key = body.keys,
 		content = body.content,
 		enabled = body.enabled,

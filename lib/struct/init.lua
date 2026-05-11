@@ -17,11 +17,11 @@ local bit = require("bit")
 -- FFI unions for float conversion
 --:: F32Union = { f: number, b: { [integer]: integer } }
 --:: F64Union = { f: number, d: number, b: { [integer]: integer } }
-local _typeof = ffi.typeof --[[: unknown]]
-local union_f32 = _typeof("union { float f; uint8_t b[4]; }")
-local union_f64 = _typeof("union { double d; uint8_t b[8]; }")
-local u32 = _typeof("union { uint32_t u; int32_t i; }")
-local u64 = _typeof("union { uint64_t u; int64_t i; }")
+local _typeof = (ffi.typeof --[[:! (unknown) -> unknown]])
+local union_f32 = (_typeof("union { float f; uint8_t b[4]; }") --[[:! () -> F32Union]])
+local union_f64 = (_typeof("union { double d; uint8_t b[8]; }") --[[:! () -> F64Union]])
+local u32 = (_typeof("union { uint32_t u; int32_t i; }") --[[:! () -> { u: number, i: integer }]])
+local u64 = (_typeof("union { uint64_t u; int64_t i; }") --[[:! () -> { u: number, i: integer }]])
 
 -- Detect native endianness
 local _ne_check = ffi.new("union { uint16_t u; uint8_t b[2]; }")

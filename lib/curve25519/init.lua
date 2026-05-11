@@ -305,7 +305,7 @@ local BASE_POINT = schar(9) .. string.rep("\0", 31)
 -- Clamp a 32-byte private key per RFC 7748 §5.
 --: string -> string
 M.clamp = function(key)
-  local b = {sbyte(key, 1, 32)} --[[: unknown]]
+  local b = {sbyte(key, 1, 32)} --[[:! { [integer]: integer }]]
   b[1]  = b[1]  % 256 - b[1]  % 8       -- clear low 3 bits: b[1] &= 248
   b[32] = b[32] % 128                    -- clear high bit: b[32] &= 127
   b[32] = b[32] + (b[32] % 64 == b[32] and 64 or 0)  -- set bit 6: b[32] |= 64

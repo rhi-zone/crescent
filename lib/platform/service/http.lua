@@ -89,14 +89,14 @@ end
 -- The first parameter is always "caps" by convention and is skipped.
 --: (fn: function) -> { [integer]: string }
 local function param_names_of(fn)
-	local fn_a = fn --[[: unknown]]
+	local fn_a = (fn --[[:! (...unknown) -> unknown]])
 	local info = debug.getinfo(fn_a, "u")
 	if not info then return {} end
 	local nparams = info.nparams or 0
 	local params = {}
 	-- parameters are locals 1..nparams; local 1 is "caps", skip it
 	for i = 2, nparams do
-		local name = debug.getlocal(fn_a, i)
+		local name = debug.getlocal((fn_a --[[: unknown]]) --[[:! integer]], i)
 		if name then
 			params[#params + 1] = name
 		end

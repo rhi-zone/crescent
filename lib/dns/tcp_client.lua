@@ -18,7 +18,8 @@ mod.client = function (cb, nameserver, domain, opcode, type, class, epoll)
 	local name_parts = {}
 	for s in domain:gmatch("[^.]+") do name_parts[#name_parts+1] = s end
 	if #name_parts[#name_parts] > 0 then name_parts[#name_parts+1] = "" end
-	local msg = { opcode = opcode, is_query = true, is_recursion_desired = true, questions = { { name = name_parts, type = type, class = class } } } --[[: unknown]]
+	local msg_raw = { opcode = opcode, is_query = true, is_recursion_desired = true, questions = { { name = name_parts, type = type, class = class } } }
+	local msg = ((msg_raw --[[: unknown]]) --[[:! { additional?: { [integer]: { class: integer, data: string, name: { [integer]: string }, ttl: integer, type: integer } }, answers?: { [integer]: { class: integer, data: string, name: { [integer]: string }, ttl: integer, type: integer } }, id?: integer, is_authoritative?: boolean, is_query?: boolean, is_recursion_available?: boolean, is_recursion_desired?: boolean, is_response?: boolean, is_truncated?: boolean, nameservers?: { [integer]: { class: integer, data: string, name: { [integer]: string }, ttl: integer, type: integer } }, opcode?: integer, questions?: { [integer]: { class: integer, name: { [integer]: string }, type: integer } }, response_code?: integer }]])
 	local s = dns.dns_message_to_string(msg)
 	s = string.char(bit.rshift(#s, 8), bit.band(#s, 0xff)) .. s
 	local send, close
@@ -27,9 +28,8 @@ mod.client = function (cb, nameserver, domain, opcode, type, class, epoll)
 		cb(dns.string_to_dns_message(s2:sub(3)))
 		close()
 	end, epoll)
-	local send_ = send --[[: unknown]]
-	send_(s)
-	if is_running then (epoll --[[: unknown]]):loop() end
+	;((send --[[: unknown]]) --[[:! (string) -> ()]])(s)
+	if is_running then ((epoll --[[: unknown]]) --[[:! { loop: () -> () }]]):loop() end
 end
 
 return mod

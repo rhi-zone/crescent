@@ -120,14 +120,14 @@ function M.from_hex(hex)
   if #clean % 2 ~= 0 then
     return nil, "hex string has odd length"
   end
-  local t = {} --[[: unknown]]
+  local t = {} --[[:! { [integer]: string | number }]]
   for i = 1, #clean, 2 do
     local hi = clean:sub(i, i)
     local lo = clean:sub(i + 1, i + 1)
     if not hi:match("[0-9a-fA-F]") or not lo:match("[0-9a-fA-F]") then
       return nil, "invalid hex character at position " .. i
     end
-    t[#t + 1] = string.char(tonumber(hi .. lo, 16))
+    t[#t + 1] = (string.char(math.floor(tonumber(hi .. lo, 16) or 0)) --[[:! string | number]])
   end
   return table.concat(t)
 end
@@ -137,7 +137,7 @@ end
 -- @param dump_str  string produced by dump()
 -- @return          binary string
 function M.parse(dump_str)
-  local bytes = {} --[[: unknown]]
+  local bytes = {} --[[:! { [integer]: string | number }]]
   for line in (dump_str .. "\n"):gmatch("([^\n]*)\n") do
     -- strip optional diff prefix ("> " or "< " or "  ")
     local rest = line:gsub("^[><]?%s", "")
@@ -147,7 +147,7 @@ function M.parse(dump_str)
     rest = rest:gsub("%s*|[^|]*|%s*$", "")
     -- collect hex byte tokens (pairs of hex digits separated by spaces)
     for hex in rest:gmatch("%x%x") do
-      bytes[#bytes + 1] = string.char(tonumber(hex, 16))
+      bytes[#bytes + 1] = (string.char(math.floor(tonumber(hex, 16) or 0)) --[[:! string | number]])
     end
   end
   return table.concat(bytes)

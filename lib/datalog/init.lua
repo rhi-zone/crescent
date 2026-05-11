@@ -52,7 +52,7 @@ end
 --- Assert multiple facts at once.
 --: (self: Database, fact_list: { [integer]: { [integer]: string } }) -> ()
 function DB:assert_all(fact_list)
-  local self_ = self --[[: unknown]]
+  local self_ = (self --[[:! { assert: (unknown, unknown, ...unknown) -> unknown }]])
   for i = 1, #fact_list do
     local f = fact_list[i]
     self_:assert(f[1], unpack(f, 2))

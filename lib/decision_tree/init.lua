@@ -444,7 +444,7 @@ local function prune_node(node, val_dataset)
     default_label = node_.default_label,
     counts = node_.counts,
     total = node_.total,
-    label = nil, --[[: unknown]]
+    label = nil,
   }
 
   -- Count correct predictions with current subtree

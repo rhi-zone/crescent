@@ -24,8 +24,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local sqlite = require("lib.sqlite")
-local json_raw = require("lib.format.json")
-local json = json_raw --[[: unknown]]
+local json = require("lib.format.json")
 
 --:: SqliteIter = () -> unknown
 --:: SqliteDb = { execute: (SqliteDb, string, ...unknown) -> unknown, query: (SqliteDb, string, ...unknown) -> unknown, close: (SqliteDb) -> unknown }
@@ -117,7 +116,7 @@ end
 
 --: (Index) -> (boolean | nil, string | nil)
 function I:close()
-	return self._db:close()
+	return (self._db:close() --[[:! boolean | nil]])
 end
 
 -- ── Install ─────────────────────────────────────────────────────────────────
@@ -237,7 +236,10 @@ function I:get_cap_config(app_id, cap_name)
 		app_id, cap_name) --[[:! SqliteIter | nil]]
 	if iter then
 		local raw = iter()
-		if raw then return json.decode(raw) or {} end
+		if raw then
+			local decoded = json.decode(raw --[[:! string]])
+			return (decoded --[[:! { [string]: unknown } | nil]]) or {}
+		end
 	end
 	return {}
 end
@@ -317,7 +319,7 @@ local function row_from_query(id, name, path, manifest_json, tags_json, installe
 		manifest_json = manifest_json --[[:! string]],
 		manifest = json.decode(manifest_json --[[:! string]]),
 		tags_json = tags_json --[[:! string]],
-		tags = json.decode(tags_json --[[:! string]]) or {},
+		tags = (function() local v = json.decode(tags_json --[[:! string]]); return (v --[[:! { [integer]: string } | nil]]) or {} end)(),
 		installed_at = installed_at --[[:! number]],
 	}
 end

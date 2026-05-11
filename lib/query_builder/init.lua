@@ -10,7 +10,7 @@ end
 local M = {}
 M._tier = "pure"
 
---:: Select = { _table: string, _columns: { [integer]: string } | nil, _raw_cols: string | nil, _joins: { [integer]: unknown }, _wheres: { [integer]: unknown }, _order: string | nil, _group: string | nil, _having: unknown, _limit: integer | nil, _offset: integer | nil, _count: boolean, _exists: boolean }
+--:: Select = { _table: string, _columns: { [integer]: string } | nil, _raw_cols: string | nil, _joins: { [integer]: unknown }, _wheres: { [integer]: unknown }, _order: string | nil, _group: string | nil, _having: unknown, _limit: integer | nil, _offset: integer | nil, _count: boolean, _exists: boolean, build: (self: unknown) -> (string | nil, { [integer]: unknown }) }
 --:: Insert = { _table: string, _rows: { [integer]: unknown } | nil, _vals: unknown, _on_conflict: unknown, _returning: { [integer]: string } | nil }
 --:: Update = { _table: string, _set: unknown, _wheres: { [integer]: unknown }, _returning: { [integer]: string } | nil }
 --:: Delete = { _table: string, _wheres: { [integer]: unknown }, _returning: { [integer]: string } | nil }
@@ -188,7 +188,7 @@ function Select:where_in(col, values)
 	return sel_clone(self, function(q)
 		if type(values) == "table" and getmetatable(values) == Select then
 			-- subquery
-			local sel_ = values --[[: unknown]]
+			local sel_ = values --[[:! Select]]
 			local sub_sql, sub_params = sel_:build()
 			q._wheres[#q._wheres + 1] = {
 				kind = "and",
@@ -215,7 +215,7 @@ end
 function Select:where_not_in(col, values)
 	return sel_clone(self, function(q)
 		if type(values) == "table" and getmetatable(values) == Select then
-			local sel_ = values --[[: unknown]]
+			local sel_ = values --[[:! Select]]
 			local sub_sql, sub_params = sel_:build()
 			q._wheres[#q._wheres + 1] = {
 				kind   = "and",
@@ -293,7 +293,7 @@ end
 -- ORDER BY columns (comma-separated string or variadic column names).
 --: (Select, ...unknown) -> Select
 function Select:order_by(...)
-	local cols = { ... } --[[: unknown]]
+	local cols = { ... } --[[:! { [integer]: string | number }]]
 	return sel_clone(self, function(q)
 		q._order = table.concat(cols, ", ")
 		return q
@@ -303,7 +303,7 @@ end
 -- GROUP BY columns.
 --: (Select, ...unknown) -> Select
 function Select:group_by(...)
-	local cols = { ... } --[[: unknown]]
+	local cols = { ... } --[[:! { [integer]: string | number }]]
 	return sel_clone(self, function(q)
 		q._group = table.concat(cols, ", ")
 		return q
@@ -624,9 +624,9 @@ end
 -- M.union(q1, q2, ...) or M.union({q1, q2, ...})
 --: (...Select) -> Union
 function M.union(...)
-	local args = { ... } --[[: unknown]]
+	local args = { ... } --[[:! { [integer]: Select }]]
 	if type(args[1]) == "table" and getmetatable(args[1]) ~= Select then
-		return new_union(args[1])
+		return new_union(args[1] --[[:! { [integer]: Select }]])
 	end
 	return new_union(args)
 end

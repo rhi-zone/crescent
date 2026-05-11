@@ -55,7 +55,7 @@ end
 
 --: (self: Index, items: { Entry }) -> (boolean | nil, string | nil)
 function idx_mt:add_batch(items)
-  local self_ = self --[[: unknown]]
+  local self_ = (self --[[:! { add: (unknown, unknown, unknown, unknown) -> (unknown, string | nil) }]])
   for i = 1, #items do
     local item = items[i]
     local ok, err = self_:add(item.id, item.vector, item.metadata)
@@ -91,8 +91,7 @@ function idx_mt:search(query, k, opts)
   local ids = self._ids
   for i = 1, #ids do
     local entry = entries[ids[i]]
-    local filter_ = filter --[[: unknown]]
-    if not filter or filter_(entry.metadata) then
+    if not filter or (filter --[[:! (unknown) -> boolean]])(entry.metadata) then
       local s = score_fn_(query, entry.vector)
       n = n + 1
       candidates[n] = { id = entry.id, score = s, metadata = entry.metadata }
@@ -174,7 +173,7 @@ function M.deserialize(data)
   if not data.dims then return nil, "missing dims" end
   local idx, err = M.index({ dims = data.dims, metric = data.metric or "cosine" })
   if not idx then return nil, err end
-  local idx_ = idx --[[: unknown]]
+  local idx_ = (idx --[[:! { add: (unknown, unknown, unknown, unknown) -> (unknown, string | nil) }]])
   local items = data.items
   if items then
     for i = 1, #items do

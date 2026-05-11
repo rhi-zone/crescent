@@ -14,7 +14,7 @@ if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
 end
 
-local visit = require("lib.unified.unist_util_visit") --[[: unknown]]
+local visit = require("lib.unified.unist_util_visit")
 
 local M = {}
 
@@ -40,7 +40,7 @@ setmetatable(M, {
       return nil
     end
 
-    visit(tree, function(node)
+    ;((visit --[[: unknown]]) --[[:! (unknown, unknown) -> ()]])(tree, function(node)
       if test(node) then
         return visit.REMOVE
       end

@@ -1,5 +1,5 @@
-local socket = require("lib.ljsocket") --[[: unknown]]
-local epoll_ = require("lib.epoll") --[[: unknown]]
+local socket = require("lib.ljsocket")
+local epoll_ = require("lib.epoll")
 
 local M = {}
 
@@ -16,21 +16,22 @@ M.server = function(callback, port, epoll, opts)
     local opts_ = opts --[[:! { on_client: ((unknown) -> nil) | nil, on_client_close: ((unknown) -> nil) | nil, host: string | nil }]]
     local is_running = not epoll
     epoll = epoll or epoll_.new()
-    local epoll_any = epoll --[[: unknown]]
+    local epoll_any = epoll
 
     -- https://github.com/CapsAdmin/luajitsocket/blob/acb3bc3236cb4551a477a74f2bc9305860ca6492/examples/tcp_server_blocking.lua
     local server = assert(socket.bind(opts_.host or "*", port))
     assert(server:listen())
 
     local _, remove = epoll_any:add(server.fd, function()
-        local client = server:accept()
+        local client_ = (server --[[:! { accept: (unknown) -> unknown, fd: integer, close: (unknown) -> nil, ... }]]):accept()
+        local client = (client_ --[[:! { fd: integer, close: (unknown) -> nil, ... }]])
         if not client then return end
         local state, remove_client
         local client_close = client.close
-        client.close = function()
+        client.close = function(_self)
             if opts_.on_client_close then opts_.on_client_close(client) end
             client_close(client)
-            remove_client()
+            ;(remove_client --[[:! () -> nil]])()
         end
         _, remove_client = epoll_any:add(client.fd, function()
             state = callback(client, state)
@@ -40,12 +41,11 @@ M.server = function(callback, port, epoll, opts)
 
     local server_close = server.close
     server.close = function(self)
-        server_close(self)
-        local remove_any = remove --[[: unknown]]
-        remove_any()
+        ;(server_close --[[:! (unknown) -> nil]])(self)
+        remove()
     end
 
-    while is_running do epoll_any:wait() end
+    while is_running do (epoll_any --[[:! { wait: (unknown) -> nil, add: (unknown, integer, (unknown) -> nil, (unknown) -> nil | nil) -> (unknown, () -> nil), ... }]]):wait() end
 
     return server
 end

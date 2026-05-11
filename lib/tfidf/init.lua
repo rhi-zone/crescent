@@ -294,8 +294,13 @@ function Corpus:vocab()
     n = n + 1
     terms[n] = term
   end
-  table.sort(terms --[[: unknown]])
-  return terms
+  local terms_s = (terms --[[:! { [integer]: string }]])
+  for i = 2, #terms_s do
+    local v = terms_s[i]; local j = i - 1
+    while j >= 1 and terms_s[j] > v do terms_s[j + 1] = terms_s[j]; j = j - 1 end
+    terms_s[j + 1] = v
+  end
+  return terms_s
 end
 
 --: (self: Corpus) -> number
@@ -319,7 +324,11 @@ function Corpus:keywords(id, opts)
     n = n + 1
     kw[n] = { term = term, score = score }
   end
-  table.sort(kw --[[: unknown]], function(a, b) return a.score > b.score end)
+  for i = 2, n do
+    local v = kw[i] --[[:! { term: string, score: number }]]; local j = i - 1
+    while j >= 1 and kw[j].score < v.score do kw[j + 1] = kw[j]; j = j - 1 end
+    kw[j + 1] = v
+  end
   local limit = opts and opts.limit --: number | nil
   if limit ~= nil and limit < n then
     local kw_any = kw --[[: { [integer]: { term: string, score: number } | nil }]]

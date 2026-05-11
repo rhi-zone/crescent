@@ -3,7 +3,7 @@ if not package.path:find("?/init.lua", 1, true) then
 end
 
 local ffi = require("ffi")
-local ffi_any = ffi --[[: unknown]]
+local ffi_any = ffi
 
 local mod = {}
 
@@ -45,7 +45,7 @@ ffi.cdef [[
 ]]
 
 local double_t = ffi.typeof("double")
-local float_t  = ffi.typeof("float" --[[: unknown]])
+local float_t  = (ffi.typeof --[[:! (unknown) -> unknown]])("float")
 local function is_float_cdata(a)
 	local t = ffi.typeof(a)
 	return t == double_t or t == float_t
@@ -94,8 +94,9 @@ local function load_sqlite()
 	error("sqlite3: no shared library found (tried: " .. table.concat(names, ", ") .. ")")
 	end -- else (not Windows)
 end
-local sqlite_ffi, sqlite_loaded_from = load_sqlite()
-local sqlite_ffi_any = sqlite_ffi --[[: unknown]]
+local sqlite_ffi_raw, sqlite_loaded_from = load_sqlite()
+local sqlite_ffi = (sqlite_ffi_raw --[[: unknown]]) --[[:! $FfiC]]
+local sqlite_ffi_any = sqlite_ffi
 
 mod._tier = "system-sqlite"
 mod._loaded_from = sqlite_loaded_from
@@ -127,13 +128,13 @@ local function bind(stmt, params, length)
 		if t == "number" then
 			local xn = x --[[:! number]]
 			if xn % 1 == 0 and xn >= -2147483648 and xn <= 2147483647 then
-				sqlite_ffi.sqlite3_bind_int(stmt, i, xn)
+				sqlite_ffi.sqlite3_bind_int(stmt, i, xn --[[:! integer]])
 			else
 				sqlite_ffi.sqlite3_bind_double(stmt, i, xn)
 			end
 		elseif t == "string" then
 			local xs = x --[[:! string]]
-			sqlite_ffi_any.sqlite3_bind_text(stmt, i, xs, #xs, SQLITE_TRANSIENT)
+			sqlite_ffi.sqlite3_bind_text(stmt, i, xs, #xs, (SQLITE_TRANSIENT --[[: unknown]]) --[[:! (unknown) -> nil]])
 		elseif t == "boolean" then
 			sqlite_ffi.sqlite3_bind_int(stmt, i, x --[[:! boolean]] and 1 or 0)
 		elseif t == "cdata" then
@@ -186,7 +187,7 @@ sqlite.changes = function(self)
 end
 
 local function db_errmsg(self)
-	return ffi_any.string(sqlite_ffi_any.sqlite3_errmsg(self.db[0]))
+	return sqlite_ffi.sqlite3_errmsg(self.db[0])
 end
 
 --: (self: { db: cdata, ... }, string, ...number | string | boolean | nil) -> (boolean | nil, string | nil)

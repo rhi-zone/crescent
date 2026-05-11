@@ -11,7 +11,7 @@ end
 --
 -- Stores: root.data.repeated_words = { {word="the", sentence="..."}, ... }
 
-local nlcst = require("lib.unified.nlcst") --[[: unknown]]
+local nlcst = require("lib.unified.nlcst")
 
 local M = {}
 

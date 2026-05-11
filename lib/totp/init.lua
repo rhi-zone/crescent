@@ -146,7 +146,7 @@ function M.totp(key, opts --[[:! TotpOpts | nil]])
   end
   local t = (opts_ and opts_.time) or 0 --[[:! number]]
   local step = math.floor(t / period)
-  return M.hotp(key, step, opts --[[: unknown]])
+  return M.hotp(key, step, opts)
 end
 
 --- TOTP with base32-encoded secret (common for authenticator apps).
@@ -159,7 +159,7 @@ function M.totp_base32(secret, opts)
   end
   local key, err = base32.decode(secret)
   if not key then return nil, "base32 decode failed: " .. tostring(err) end
-  return M.totp(key, opts --[[: unknown]])
+  return M.totp(key, opts)
 end
 
 -- ── Secret generation ─────────────────────────────────────────────────────────
@@ -201,10 +201,10 @@ function M.verify(secret, code, opts --[[:! VerifyOpts | nil]])
   local step = math.floor(t / period)
 
   for delta = -window, window do
-    local otp, e = M.hotp(key_, step + delta, {
+    local otp, e = M.hotp(key_, step + delta, ({
       digits = (opts_ and opts_.digits) or 6,
       alg    = (opts_ and opts_.alg) or "sha1",
-    } --[[: unknown]])
+    } --[[: unknown]]) --[[:! { alg?: string, digits?: integer, period?: number }]])
     if otp and otp == code then
       return true
     end
