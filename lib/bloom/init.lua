@@ -20,11 +20,11 @@ local LN2 = log(2)
 -- ---------------------------------------------------------------------------
 
 -- FNV-1a 32-bit hash of a string, seeded by an integer offset (for double hashing)
+--: (string, number) -> number
 local function fnv1a(s, seed)
   local h = band(2166136261 + seed * 16777619, 0xFFFFFFFF)
-  local str = s --[[:! string]]
-  for i = 1, #str do
-    local b = string.byte(str, i) or 0
+  for i = 1, #s do
+    local b = string.byte(s, i) or 0
     h = band(h, 0xFFFFFFFF)
     h = band(bit.bxor(h, b) * 16777619, 0xFFFFFFFF)
   end
@@ -32,13 +32,13 @@ local function fnv1a(s, seed)
 end
 
 -- Compute h1 and h2 for Kirsch-Mitzenmacher double hashing
+--: (string) -> (number, number)
 local function hash_pair(s)
   local h1 = fnv1a(s, 0)
   -- Simple polynomial second hash — different enough from FNV-1a
   local h2 = 0
-  local str = s --[[:! string]]
-  for i = 1, #str do
-    h2 = band(h2 * 31 + (string.byte(str, i) or 0), 0xFFFFFFFF)
+  for i = 1, #s do
+    h2 = band(h2 * 31 + (string.byte(s, i) or 0), 0xFFFFFFFF)
   end
   -- h2 must be odd to avoid degeneracy in double hashing (ensures all m slots reachable)
   h2 = bor(h2, 1)
@@ -104,7 +104,7 @@ local function to_key(v)
 end
 
 -- Internal: probe k bit positions for key s, calling fn(pos) for each
---: (b: BloomObj, s: string, fn: (integer) -> nil) -> nil
+--: (b: BloomObj, s: string, fn: (number) -> nil) -> nil
 local function probe(b, s, fn)
   local m, k = b._m, b._k
   local h1, h2 = hash_pair(s)
@@ -288,8 +288,9 @@ end
 -- Reconstruct from serialized string produced by to_string/serialize.
 -- Format (8-byte header): 4-byte big-endian m, 4-byte big-endian k, then nwords*4 bytes.
 -- The optional second argument k is ignored when using the new format (k is in header).
+--: (string, unknown) -> (BloomObj | nil, string | nil)
 function M.from_string(s, _k_ignored)
-  local str = s --[[:! string]]
+  local str = s
   local nbytes = #str
   -- Minimum: 8-byte header + 0 data words
   if nbytes < 8 or (nbytes - 8) % 4 ~= 0 then
@@ -339,7 +340,7 @@ end
 local CountingBloom = {}
 CountingBloom.__index = CountingBloom
 
---: (cb: CountingBloomObj, s: string, fn: (integer) -> nil) -> nil
+--: (cb: CountingBloomObj, s: string, fn: (number) -> nil) -> nil
 local function cprobe(cb, s, fn)
   local m, k = cb._m, cb._k
   local h1, h2 = hash_pair(s)
