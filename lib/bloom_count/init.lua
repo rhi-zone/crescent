@@ -202,19 +202,19 @@ local function cf_positions(self, item)
   return b1, b2, fp
 end
 
+--: (CFShape, unknown) -> boolean
 function CF:add(item)
-  local self_ = self --[[:! CFShape]]
   local s = tostring(item)
-  local b1, b2, fp = cf_positions(self_, s)
-  local buckets = self_._buckets
-  local bsz = self_._bucket_size
+  local b1, b2, fp = cf_positions(self, s)
+  local buckets = self._buckets
+  local bsz = self._bucket_size
 
   -- Try bucket 1
   local bucket = buckets[b1]
   for i = 1, bsz do
     if bucket[i] == 0 then
       bucket[i] = fp
-      self_._count = self_._count + 1
+      self._count = self._count + 1
       return true
     end
   end
@@ -224,7 +224,7 @@ function CF:add(item)
   for i = 1, bsz do
     if bucket[i] == 0 then
       bucket[i] = fp
-      self_._count = self_._count + 1
+      self._count = self._count + 1
       return true
     end
   end
@@ -232,7 +232,7 @@ function CF:add(item)
   -- Cuckoo eviction: randomly evict from one of the two buckets
   local cur_b = (math.random(2) == 1) and b1 or b2
   local cur_fp = fp
-  local max_kicks = self_._max_kicks
+  local max_kicks = self._max_kicks
   for _ = 1, max_kicks do
     -- Pick a random entry in cur_b to evict
     local slot = math.random(bsz)
@@ -240,12 +240,12 @@ function CF:add(item)
     buckets[cur_b][slot] = cur_fp
     cur_fp = evicted
     -- Find the alternate bucket for the evicted fingerprint
-    local alt_b = bxor(cur_b, fnv1a(tostring(cur_fp), 0) % self_._num_buckets)
+    local alt_b = bxor(cur_b, fnv1a(tostring(cur_fp), 0) % self._num_buckets)
     bucket = buckets[alt_b]
     for i = 1, bsz do
       if bucket[i] == 0 then
         bucket[i] = cur_fp
-        self_._count = self_._count + 1
+        self._count = self._count + 1
         return true
       end
     end
@@ -256,18 +256,18 @@ function CF:add(item)
   return false
 end
 
+--: (CFShape, unknown) -> boolean
 function CF:remove(item)
-  local self_ = self --[[:! CFShape]]
   local s = tostring(item)
-  local b1, b2, fp = cf_positions(self_, s)
-  local buckets = self_._buckets
-  local bsz = self_._bucket_size
+  local b1, b2, fp = cf_positions(self, s)
+  local buckets = self._buckets
+  local bsz = self._bucket_size
 
   local bucket = buckets[b1]
   for i = 1, bsz do
     if bucket[i] == fp then
       bucket[i] = 0
-      self_._count = self_._count - 1
+      self._count = self._count - 1
       return true
     end
   end
@@ -276,7 +276,7 @@ function CF:remove(item)
   for i = 1, bsz do
     if bucket[i] == fp then
       bucket[i] = 0
-      self_._count = self_._count - 1
+      self._count = self._count - 1
       return true
     end
   end
@@ -284,12 +284,12 @@ function CF:remove(item)
   return false
 end
 
+--: (CFShape, unknown) -> boolean
 function CF:contains(item)
-  local self_ = self --[[:! CFShape]]
   local s = tostring(item)
-  local b1, b2, fp = cf_positions(self_, s)
-  local buckets = self_._buckets
-  local bsz = self_._bucket_size
+  local b1, b2, fp = cf_positions(self, s)
+  local buckets = self._buckets
+  local bsz = self._bucket_size
 
   local bucket = buckets[b1]
   for i = 1, bsz do
@@ -304,21 +304,21 @@ function CF:contains(item)
   return false
 end
 
+--: (CFShape) -> number
 function CF:load_factor()
-  local self_ = self --[[:! CFShape]]
-  return self_._count / (self_._num_buckets * self_._bucket_size)
+  return self._count / (self._num_buckets * self._bucket_size)
 end
 
+--: (CFShape) -> nil
 function CF:clear()
-  local self_ = self --[[:! CFShape]]
-  local bsz = self_._bucket_size
-  local nb = self_._num_buckets
-  local buckets = self_._buckets
+  local bsz = self._bucket_size
+  local nb = self._num_buckets
+  local buckets = self._buckets
   for i = 0, nb - 1 do
     local bucket = buckets[i]
     for j = 1, bsz do bucket[j] = 0 end
   end
-  self_._count = 0
+  self._count = 0
 end
 
 -- Construct cuckoo filter from options table
@@ -380,25 +380,25 @@ local function sbloom_probe(self, s, fn)
   end
 end
 
+--: (SBFInner, string) -> nil
 function SBF_inner:add(s)
-  local self_ = self --[[:! SBFInner]]
-  sbloom_probe(self_, s, function(pos) sbloom_bit_set(self_._bits, pos) end)
-  self_._count = self_._count + 1
+  sbloom_probe(self, s, function(pos) sbloom_bit_set(self._bits, pos) end)
+  self._count = self._count + 1
 end
 
+--: (SBFInner, string) -> boolean
 function SBF_inner:contains(s)
-  local self_ = self --[[:! SBFInner]]
   local found = true
-  sbloom_probe(self_, s, function(pos)
-    if not sbloom_bit_get(self_._bits, pos) then found = false end
+  sbloom_probe(self, s, function(pos)
+    if not sbloom_bit_get(self._bits, pos) then found = false end
   end)
   return found
 end
 
+--: (SBFInner) -> boolean
 function SBF_inner:at_capacity()
-  local self_ = self --[[:! SBFInner]]
   -- Consider "full" when 90% of capacity has been used
-  return self_._count >= self_._capacity * 0.9
+  return self._count >= self._capacity * 0.9
 end
 
 --: (n: number, p: number) -> SBFInner
@@ -426,41 +426,41 @@ end
 local ScalableBloom = {}
 ScalableBloom.__index = ScalableBloom
 
+--: (ScalableBloomShape, unknown) -> nil
 function ScalableBloom:add(item)
-  local self_ = self --[[:! ScalableBloomShape]]
   local s = tostring(item)
   -- Check if current filter needs expanding
-  local current = self_._filters[#self_._filters]
+  local current = self._filters[#self._filters]
   if current:at_capacity() then
-    local new_cap = current._capacity * self_._growth_factor
+    local new_cap = current._capacity * self._growth_factor
     -- Tighten error rate by factor of 0.85 per level to bound total FP rate
-    local new_p = self_._base_error_rate * (0.85 ^ #self_._filters)
+    local new_p = self._base_error_rate * (0.85 ^ #self._filters)
     if new_p < 1e-10 then new_p = 1e-10 end
     current = make_inner_bloom(new_cap, new_p)
-    self_._filters[#self_._filters + 1] = current
+    self._filters[#self._filters + 1] = current
   end
   current:add(s)
 end
 
+--: (ScalableBloomShape, unknown) -> boolean
 function ScalableBloom:contains(item)
-  local self_ = self --[[:! ScalableBloomShape]]
   local s = tostring(item)
-  for i = 1, #self_._filters do
-    if self_._filters[i]:contains(s) then return true end
+  for i = 1, #self._filters do
+    if self._filters[i]:contains(s) then return true end
   end
   return false
 end
 
+--: (ScalableBloomShape) -> integer
 function ScalableBloom:filter_count()
-  local self_ = self --[[:! ScalableBloomShape]]
-  return #self_._filters
+  return #self._filters
 end
 
+--: (ScalableBloomShape) -> number
 function ScalableBloom:total_capacity()
-  local self_ = self --[[:! ScalableBloomShape]]
   local total = 0
-  for i = 1, #self_._filters do
-    total = total + self_._filters[i]._capacity
+  for i = 1, #self._filters do
+    total = total + self._filters[i]._capacity
   end
   return total
 end
