@@ -48,8 +48,8 @@ end
 local function heap_pop(heap)
   if #heap == 0 then return nil end
   local top = heap[1]
-  local last_ = table.remove(heap)
-  local last = last_ --[[:! HeapEntry]]
+  local last = table.remove(heap)
+  if not last then return top end
   if #heap > 0 then
     heap[1] = last
     local i = 1

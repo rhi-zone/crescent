@@ -49,7 +49,8 @@ end
 -- Total bits = 5 * prec.  Even-position bits (0-indexed) = longitude;
 -- odd-position bits = latitude.
 -- lon_bits = ceil(5*prec/2), lat_bits = floor(5*prec/2).
-local PRECISION_INFO = {}
+--:: PrecInfo = { width_km: number, height_km: number, lat_err: number, lon_err: number }
+local PRECISION_INFO = {} --: { [integer]: PrecInfo }
 for prec = 1, 12 do
   local total     = 5 * prec
   local lon_bits  = math.ceil(total / 2)
@@ -153,35 +154,33 @@ M.encode = function(lat, lng, precision)
   return hash
 end
 
+--: (string) -> ({ lat: { min: number, max: number, center: number }, lng: { min: number, max: number, center: number } } | nil, string | nil)
 M.decode = function(hash)
   if type(hash) ~= "string" or #hash == 0 then
     return nil, "hash must be a non-empty string"
   end
   local min_lat, max_lat, min_lng, max_lng, err = decode_bounds(hash)
   if err then return nil, err end
-  local nlat_min = min_lat --[[:! number]]
-  local nlat_max = max_lat --[[:! number]]
-  local nlng_min = min_lng --[[:! number]]
-  local nlng_max = max_lng --[[:! number]]
+  if not min_lat or not max_lat or not min_lng or not max_lng then return nil, "decode_bounds returned nil" end
   return {
     lat = {
-      min    = nlat_min,
-      max    = nlat_max,
-      center = (nlat_min + nlat_max) * 0.5,
+      min    = min_lat,
+      max    = max_lat,
+      center = (min_lat + max_lat) * 0.5,
     },
     lng = {
-      min    = nlng_min,
-      max    = nlng_max,
-      center = (nlng_min + nlng_max) * 0.5,
+      min    = min_lng,
+      max    = max_lng,
+      center = (min_lng + max_lng) * 0.5,
     },
   }
 end
 
+--: (string) -> (number | nil, number | nil, string | nil)
 M.decode_center = function(hash)
   local bounds, err = M.decode(hash)
-  if not bounds then return nil, err end
-  local b = bounds --[[:! { lat: { center: number, ... }, lng: { center: number, ... } }]]
-  return b.lat.center, b.lng.center
+  if not bounds then return nil, nil, err end
+  return bounds.lat.center, bounds.lng.center, nil
 end
 
 -- ── Neighbors ────────────────────────────────────────────────────────────────
@@ -201,18 +200,15 @@ M.neighbor = function(hash, dir)
 
   local min_lat, max_lat, min_lng, max_lng, err = decode_bounds(hash)
   if err then return nil, err end
-  local nmin_lat = min_lat --[[:! number]]
-  local nmax_lat = max_lat --[[:! number]]
-  local nmin_lng = min_lng --[[:! number]]
-  local nmax_lng = max_lng --[[:! number]]
+  if not min_lat or not max_lat or not min_lng or not max_lng then return nil, "decode_bounds returned nil" end
   local ndlat_dir = dlat_dir --[[:! number]]
   local ndlng_dir = dlng_dir --[[:! number]]
 
   local prec    = #hash
-  local lat_err = (nmax_lat - nmin_lat) * 0.5
-  local lng_err = (nmax_lng - nmin_lng) * 0.5
-  local clat    = (nmin_lat + nmax_lat) * 0.5
-  local clng    = (nmin_lng + nmax_lng) * 0.5
+  local lat_err = (max_lat - min_lat) * 0.5
+  local lng_err = (max_lng - min_lng) * 0.5
+  local clat    = (min_lat + max_lat) * 0.5
+  local clng    = (min_lng + max_lng) * 0.5
 
   local nlat = clat + ndlat_dir * lat_err * 2
   local nlng = clng + ndlng_dir * lng_err * 2
@@ -244,8 +240,9 @@ end
 M.bboxes = function(min_lat, min_lng, max_lat, max_lng, precision)
   precision = precision or 6
   local info    = PRECISION_INFO[precision]
-  local lat_err = info.lat_err --[[:! number]]
-  local lng_err = info.lon_err --[[:! number]]
+  if not info then return {} end
+  local lat_err = info.lat_err
+  local lng_err = info.lon_err
 
   -- Find SW corner hash and step through the grid.
   local result = {}
@@ -293,10 +290,10 @@ end
 
 M.distance = function(hash1, hash2)
   local lat1, lng1, err = M.decode_center(hash1)
-  if not lat1 then return nil, err end
+  if not lat1 or not lng1 then return nil, err end
   local lat2, lng2
   lat2, lng2, err = M.decode_center(hash2)
-  if not lat2 then return nil, err end
+  if not lat2 or not lng2 then return nil, err end
   return M.haversine(lat1, lng1, lat2, lng2)
 end
 
@@ -304,7 +301,7 @@ end
 
 M.within_radius = function(hash, center_lat, center_lng, radius_km)
   local lat, lng, err = M.decode_center(hash)
-  if not lat then return nil, err end
+  if not lat or not lng then return nil, err end
   return M.haversine(lat, lng, center_lat, center_lng) <= radius_km
 end
 
