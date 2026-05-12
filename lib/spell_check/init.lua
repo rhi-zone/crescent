@@ -175,56 +175,56 @@ function M.new(words)
   local d, bl = build_index(src)
   local cnt = 0
   for _ in pairs(d) do cnt = cnt + 1 end
-  local self_ = setmetatable({ _dict = d, _by_len = bl, _count = cnt }, Checker) --[[:! Checker]]
-  return self_
+  local self = setmetatable({ _dict = d, _by_len = bl, _count = cnt }, Checker) --[[:! Checker]]
+  return self
 end
 
 -- Check if a word is spelled correctly (case-insensitive).
+--: (Checker, string) -> boolean
 function Checker:check(word)
-  local self_ = self --[[:! Checker]]
-  return self_._dict[lower(word)] == true
+  return self._dict[lower(word)] == true
 end
 
 -- Alias for check.
 Checker.correct = Checker.check
 
 -- Return the number of words in the dictionary.
+--: (Checker) -> integer
 function Checker:size()
-  local self_ = self --[[:! Checker]]
-  return self_._count
+  return self._count
 end
 
 -- Add a single word to the dictionary.
+--: (Checker, string) -> nil
 function Checker:add(word)
-  local self_ = self --[[:! Checker]]
   local lw = lower(word)
-  if not self_._dict[lw] then
-    self_._dict[lw] = true
-    self_._count = self_._count + 1
+  if not self._dict[lw] then
+    self._dict[lw] = true
+    self._count = self._count + 1
     local l = len(lw)
-    if not self_._by_len[l] then self_._by_len[l] = {} end
-    insert(self_._by_len[l], lw)
+    if not self._by_len[l] then self._by_len[l] = {} end
+    insert(self._by_len[l], lw)
   end
 end
 
 -- Add multiple words.
+--: (Checker, { [integer]: string }) -> nil
 function Checker:add_all(words)
-  local self_ = self --[[:! Checker]]
   for _, w in ipairs(words) do
-    Checker.add(self_, w)
+    Checker.add(self, w)
   end
 end
 
 -- Remove a word from the dictionary.
+--: (Checker, string) -> nil
 function Checker:remove(word)
-  local self_ = self --[[:! Checker]]
   local lw = lower(word)
-  if self_._dict[lw] then
-    self_._dict[lw] = nil
-    self_._count = self_._count - 1
+  if self._dict[lw] then
+    self._dict[lw] = nil
+    self._count = self._count - 1
     local l = len(lw)
-    if self_._by_len[l] then
-      local arr = self_._by_len[l]
+    if self._by_len[l] then
+      local arr = self._by_len[l]
       for i = 1, #arr do
         if arr[i] == lw then
           table.remove(arr, i)
@@ -238,19 +238,18 @@ end
 -- Get spelling suggestions for a word.
 -- opts: { max_suggestions=5, max_distance=2, case_sensitive=false }
 -- Returns array of candidate words sorted by distance then alphabetically.
+--: (Checker, string, { [string]: unknown } | nil) -> { [integer]: string }
 function Checker:suggest(word, opts)
-  local self_ = self --[[:! Checker]]
-  opts = opts or {}
-  local max_sugg   = (opts.max_suggestions or 5) --[[:! integer]]
-  local max_dist   = (opts.max_distance or 2) --[[:! integer]]
-  local case_sens  = opts.case_sensitive or false
+  local max_sugg   = (opts and opts.max_suggestions or 5) --[[:! integer]]
+  local max_dist   = (opts and opts.max_distance or 2) --[[:! integer]]
+  local case_sens  = opts and opts.case_sensitive or false
 
   local query = case_sens and word or lower(word)
   local qlen  = len(query)
 
   -- Collect candidates from length buckets within reach
   local candidates = {}
-  for bucket_len, words_in_bucket in pairs(self_._by_len) do
+  for bucket_len, words_in_bucket in pairs(self._by_len) do
     if abs(bucket_len - qlen) <= max_dist then
       for _, w in ipairs(words_in_bucket) do
         if w ~= query then
@@ -281,11 +280,10 @@ end
 -- Check a word and return suggestions if incorrect.
 -- Returns (true, nil) if correct; (false, suggestions) if incorrect.
 function Checker:check_with_suggestions(word, opts)
-  local self_ = self --[[:! Checker]]
-  if Checker.check(self_, word) then
+  if Checker.check(self, word) then
     return true, nil
   end
-  return false, Checker.suggest(self_, word, opts)
+  return false, Checker.suggest(self, word, opts)
 end
 
 -- ── Text checking ─────────────────────────────────────────────────────────────
@@ -320,11 +318,10 @@ end
 -- Check all words in a text string.
 -- Returns array of { word, position, suggestions } for each misspelled word.
 -- opts: { max_suggestions=3, ignore_capitalized=true }
+--: (Checker, string, { max_suggestions: integer | nil, ignore_capitalized: boolean | nil } | nil) -> { [integer]: { word: string, position: integer, suggestions: { [integer]: string } } }
 function Checker:check_text(text, opts)
-  local self_ = self --[[:! Checker]]
-  opts = opts or {}
-  local max_sugg       = opts.max_suggestions or 3
-  local ignore_caps    = opts.ignore_capitalized
+  local max_sugg       = opts and opts.max_suggestions or 3
+  local ignore_caps    = opts and opts.ignore_capitalized
   if ignore_caps == nil then ignore_caps = true end
 
   local errors = {}
@@ -370,8 +367,8 @@ function Checker:check_text(text, opts)
         local first = byte(word, 1) --[[:! integer]]
         local is_cap = first >= 65 and first <= 90
         if not (ignore_caps and is_cap) then
-          if not Checker.check(self_, word) then
-            local sugg = Checker.suggest(self_, word, { max_suggestions = max_sugg })
+          if not Checker.check(self, word) then
+            local sugg = Checker.suggest(self, word, { max_suggestions = max_sugg })
             insert(errors, { word = word, position = tok_start, suggestions = sugg })
           end
         end
@@ -384,8 +381,8 @@ end
 -- Correct a text by replacing each misspelled word with its top suggestion,
 -- but only when there is exactly one candidate at distance 1.
 -- Returns the corrected string.
+--: (Checker, string) -> string
 function Checker:correct_text(text)
-  local self_ = self --[[:! Checker]]
   local result = {}
   local pos = 1
   local tlen = len(text)
@@ -414,7 +411,7 @@ function Checker:correct_text(text)
     local token = sub(text, tok_start, tok_end)
 
     local word = strip_punct(token)
-    if len(word) >= 2 and not Checker.check(self_, word) then
+    if len(word) >= 2 and not Checker.check(self, word) then
       -- find how much leading/trailing punctuation was stripped
       local lead = token:find(word, 1, true)
       local before = lead and sub(token, 1, lead - 1) or ""
@@ -422,7 +419,7 @@ function Checker:correct_text(text)
       local after = sub(token, after_start)
 
       -- Only replace if there is exactly one candidate at distance 1
-      local sugg = Checker.suggest(self_, word, { max_suggestions = 2, max_distance = 1 })
+      local sugg = Checker.suggest(self, word, { max_suggestions = 2, max_distance = 1 })
       if #sugg == 1 then
         insert(result, before .. sugg[1] .. after)
       else

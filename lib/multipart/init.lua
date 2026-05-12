@@ -84,47 +84,42 @@ Builder.__index = Builder
 --: (string | nil, integer | nil) -> Builder
 function M.new(boundary, seed)
     if not boundary and not seed then error("multipart.new: boundary or seed is required") end
-    local self = setmetatable({}, Builder) --[[: unknown]]
-    local self_ = self --[[:! Builder]]
-    self_._boundary = boundary or gen_boundary(seed)
-    self_._parts = {}
-    return self_
+    local obj = (setmetatable({}, Builder) --[[: unknown]]) --[[:! Builder]]
+    obj._boundary = boundary or gen_boundary(seed)
+    obj._parts = {}
+    return obj
 end
 
 --- Add a plain form field.
 --: (Builder, string, string) -> nil
 function Builder:field(name, value)
-    local self_ = self --[[:! Builder]]
     local headers = { ["Content-Disposition"] = format('form-data; name="%s"', name) } --: HeaderMap
-    Builder.part(self_, headers, value)
+    Builder.part(self, headers, value)
 end
 
 --- Add a file part.
 --: (Builder, string, string, string, string | nil) -> nil
 function Builder:file(name, filename, content, content_type)
-    local self_ = self --[[:! Builder]]
     local headers = {
         ["Content-Disposition"] = format('form-data; name="%s"; filename="%s"', name, filename),
         ["Content-Type"] = content_type or "application/octet-stream",
     } --: HeaderMap
-    Builder.part(self_, headers, content)
+    Builder.part(self, headers, content)
 end
 
 --- Add a part with custom headers and body.
 --: (Builder, HeaderMap, string) -> nil
 function Builder:part(headers, body)
-    local self_ = self --[[:! Builder]]
-    self_._parts[#self_._parts + 1] = { headers = headers, body = body }
+    self._parts[#self._parts + 1] = { headers = headers, body = body }
 end
 
 --- Finalize and return the multipart body and boundary.
 --: (Builder) -> (string, string)
 function Builder:body()
-    local self_ = self --[[:! Builder]]
     local t = {} --: { [integer]: string }
     local k = 1
-    local boundary = self_._boundary
-    for _, part in ipairs(self_._parts) do
+    local boundary = self._boundary
+    for _, part in ipairs(self._parts) do
         local part_ = part --[[:! Part]]
         t[k] = "--"; k = k + 1
         t[k] = boundary; k = k + 1
@@ -157,8 +152,7 @@ end
 --- Return the Content-Type header value for this multipart body.
 --: (Builder) -> string
 function Builder:content_type()
-    local self_ = self --[[:! Builder]]
-    return format("multipart/form-data; boundary=%s", self_._boundary)
+    return format("multipart/form-data; boundary=%s", self._boundary)
 end
 
 -- ── One-shot encode ───────────────────────────────────────────────────────────

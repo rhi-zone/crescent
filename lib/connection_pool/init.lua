@@ -70,18 +70,18 @@ local function evict_idle(pool)
 end
 
 -- acquire() returns (conn, nil) or (nil, errmsg)
+--: (Pool) -> (unknown | nil, string | nil)
 function pool_mt:acquire()
-  local self_ = self --[[:! Pool]]
-  if self_._closed or self_._draining then
-    self_._stats.acquire_errors = self_._stats.acquire_errors + 1
-    return nil, self_._closed and "pool closed" or "pool draining"
+  if self._closed or self._draining then
+    self._stats.acquire_errors = self._stats.acquire_errors + 1
+    return nil, self._closed and "pool closed" or "pool draining"
   end
 
   -- evict stale connections before acquiring
-  evict_idle(self_)
+  evict_idle(self)
 
-  local now = self_._clock()
-  local idle = self_._idle
+  local now = self._clock()
+  local idle = self._idle
 
   -- Try idle connections first, skipping invalid or lifetime-expired ones
   while #idle > 0 do
@@ -89,119 +89,119 @@ function pool_mt:acquire()
     idle[#idle] = nil --[[: unknown]]
 
     -- Check lifetime before validating
-    if is_lifetime_expired(self_, entry, now) then
-      destroy_entry(self_, entry)
+    if is_lifetime_expired(self, entry, now) then
+      destroy_entry(self, entry)
     else
       -- Run validate if provided
       local valid = true
-      if self_._validate then
-        local validate_ = self_._validate --[[:! ( unknown) -> boolean]]
+      if self._validate then
+        local validate_ = self._validate --[[:! ( unknown) -> boolean]]
         local ok, result = pcall(validate_, entry.conn)
         if ok and result then valid = true else valid = false end
       end
 
       if valid then
-        self_._stats.active = self_._stats.active + 1
-        self_._stats.acquire_count = self_._stats.acquire_count + 1
+        self._stats.active = self._stats.active + 1
+        self._stats.acquire_count = self._stats.acquire_count + 1
         return entry.conn, nil
       else
         -- Invalid connection: destroy it
-        destroy_entry(self_, entry)
+        destroy_entry(self, entry)
       end
     end
   end
 
   -- No idle connections available: create a new one
-  if self_._total >= self_._max_size then
-    self_._stats.acquire_errors = self_._stats.acquire_errors + 1
+  if self._total >= self._max_size then
+    self._stats.acquire_errors = self._stats.acquire_errors + 1
     return nil, "pool exhausted"
   end
 
-  local ok, conn_or_err = pcall(self_._create)
+  local ok, conn_or_err = pcall(self._create)
   if not ok then
-    self_._stats.acquire_errors = self_._stats.acquire_errors + 1
+    self._stats.acquire_errors = self._stats.acquire_errors + 1
     return nil, "create failed: " .. tostring(conn_or_err)
   end
 
-  self_._total = self_._total + 1
-  self_._stats.created = self_._stats.created + 1
-  self_._stats.active = self_._stats.active + 1
-  self_._stats.acquire_count = self_._stats.acquire_count + 1
+  self._total = self._total + 1
+  self._stats.created = self._stats.created + 1
+  self._stats.active = self._stats.active + 1
+  self._stats.acquire_count = self._stats.acquire_count + 1
 
   -- Store the creation time for this connection
   -- We need to track per-connection metadata; store in a lookup table
-  self_._conn_meta[conn_or_err] = { created_at = now }
+  self._conn_meta[conn_or_err] = { created_at = now }
 
   return conn_or_err, nil
 end
 
 -- release(conn) returns conn to idle pool
+--: (Pool, unknown) -> nil
 function pool_mt:release(conn)
-  local self_ = self --[[:! Pool]]
   if conn == nil then return end
 
-  self_._stats.active = self_._stats.active - 1
+  self._stats.active = self._stats.active - 1
 
-  if self_._closed then
+  if self._closed then
     -- pool is closed: destroy the connection
-    local meta = self_._conn_meta[conn]
-    self_._conn_meta[conn] = nil --[[: unknown]]
+    local meta = self._conn_meta[conn]
+    self._conn_meta[conn] = nil --[[: unknown]]
     if meta then
       local entry = { conn = conn, created_at = meta.created_at, idle_since = 0 } --: ConnEntry
-      destroy_entry(self_, entry)
+      destroy_entry(self, entry)
     else
-      if self_._destroy then
-        local destroy_ = self_._destroy --[[:! ( unknown) -> nil]]
+      if self._destroy then
+        local destroy_ = self._destroy --[[:! ( unknown) -> nil]]
         pcall(destroy_, conn)
       end
-      self_._stats.destroyed = self_._stats.destroyed + 1
-      self_._total = self_._total - 1
+      self._stats.destroyed = self._stats.destroyed + 1
+      self._total = self._total - 1
     end
     return
   end
 
-  if self_._draining then
+  if self._draining then
     -- pool is draining: destroy the connection
-    local meta = self_._conn_meta[conn]
-    self_._conn_meta[conn] = nil --[[: unknown]]
+    local meta = self._conn_meta[conn]
+    self._conn_meta[conn] = nil --[[: unknown]]
     if meta then
       local entry = { conn = conn, created_at = meta.created_at, idle_since = 0 } --: ConnEntry
-      destroy_entry(self_, entry)
+      destroy_entry(self, entry)
     else
-      if self_._destroy then
-        local destroy_ = self_._destroy --[[:! ( unknown) -> nil]]
+      if self._destroy then
+        local destroy_ = self._destroy --[[:! ( unknown) -> nil]]
         pcall(destroy_, conn)
       end
-      self_._stats.destroyed = self_._stats.destroyed + 1
-      self_._total = self_._total - 1
+      self._stats.destroyed = self._stats.destroyed + 1
+      self._total = self._total - 1
     end
     return
   end
 
   -- Return to idle pool if there's room
-  local now = self_._clock()
-  local meta = self_._conn_meta[conn]
+  local now = self._clock()
+  local meta = self._conn_meta[conn]
   local created_at = meta and meta.created_at or now
 
-  if self_._total <= self_._max_size then
+  if self._total <= self._max_size then
     local entry = { conn = conn, created_at = created_at, idle_since = now } --: ConnEntry
-    self_._idle[#self_._idle + 1] = entry
+    self._idle[#self._idle + 1] = entry
   else
     -- over capacity: destroy
     local entry = { conn = conn, created_at = created_at, idle_since = now } --: ConnEntry
-    destroy_entry(self_, entry)
+    destroy_entry(self, entry)
   end
 end
 
 -- with(fn) acquires a connection, calls fn(conn), releases on return or error
+--: (Pool, (unknown) -> unknown) -> (unknown | nil, string | nil)
 function pool_mt:with(fn)
-  local self_ = self --[[:! Pool]]
-  local conn, err = self_:acquire()
+  local conn, err = self:acquire()
   if conn == nil then
     return nil, err
   end
   local ok, result = pcall(fn, conn)
-  self_:release(conn)
+  self:release(conn)
   if not ok then
     return nil, result
   end
@@ -209,12 +209,12 @@ function pool_mt:with(fn)
 end
 
 -- stats() returns a snapshot of pool statistics
+--: (Pool) -> unknown
 function pool_mt:stats()
-  local self_ = self --[[:! Pool]]
-  local s = self_._stats
+  local s = self._stats
   return {
-    size    = self_._total,
-    idle    = #self_._idle,
+    size    = self._total,
+    idle    = #self._idle,
     active  = s.active,
     created = s.created,
     destroyed = s.destroyed,
@@ -224,58 +224,58 @@ function pool_mt:stats()
 end
 
 -- evict() removes stale idle connections based on idle_timeout and max_lifetime
+--: (Pool) -> nil
 function pool_mt:evict()
-  local self_ = self --[[:! Pool]]
-  evict_idle(self_)
+  evict_idle(self)
 end
 
 -- drain() blocks new acquires and destroys all idle connections
+--: (Pool) -> nil
 function pool_mt:drain()
-  local self_ = self --[[:! Pool]]
-  self_._draining = true
-  local idle = self_._idle
+  self._draining = true
+  local idle = self._idle
   while #idle > 0 do
     local entry = idle[#idle]
     idle[#idle] = nil --[[: unknown]]
-    destroy_entry(self_, entry)
+    destroy_entry(self, entry)
   end
 end
 
 -- close() drains + destroys all active connections (marks pool closed)
+--: (Pool) -> nil
 function pool_mt:close()
-  local self_ = self --[[:! Pool]]
-  self_:drain()
-  self_._closed = true
+  self:drain()
+  self._closed = true
   -- Active connections will be destroyed when released
 end
 
 -- warm() pre-creates min_size connections
+--: (Pool) -> nil
 function pool_mt:warm()
-  local self_ = self --[[:! Pool]]
-  local target = self_._min_size
+  local target = self._min_size
   if target == 0 then return end
-  local now = self_._clock()
-  while self_._total < target and self_._total < self_._max_size do
-    local ok, conn_or_err = pcall(self_._create)
+  local now = self._clock()
+  while self._total < target and self._total < self._max_size do
+    local ok, conn_or_err = pcall(self._create)
     if not ok then break end
-    self_._total = self_._total + 1
-    self_._stats.created = self_._stats.created + 1
-    self_._conn_meta[conn_or_err] = { created_at = now }
+    self._total = self._total + 1
+    self._stats.created = self._stats.created + 1
+    self._conn_meta[conn_or_err] = { created_at = now }
     local entry = { conn = conn_or_err, created_at = now, idle_since = now } --: ConnEntry
-    self_._idle[#self_._idle + 1] = entry
+    self._idle[#self._idle + 1] = entry
   end
 end
 
 -- resize(new_max) adjusts the max pool size
+--: (Pool, integer) -> nil
 function pool_mt:resize(new_max)
-  local self_ = self --[[:! Pool]]
-  self_._max_size = new_max
+  self._max_size = new_max
   -- Evict excess idle connections if needed
-  local idle = self_._idle
-  while #idle > 0 and self_._total > new_max do
+  local idle = self._idle
+  while #idle > 0 and self._total > new_max do
     local entry = idle[#idle]
     idle[#idle] = nil --[[: unknown]]
-    destroy_entry(self_, entry)
+    destroy_entry(self, entry)
   end
 end
 
