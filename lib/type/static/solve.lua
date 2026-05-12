@@ -2461,6 +2461,23 @@ function M.solve(ctx, constraints)
     local real_err = ctx.err
     --: ErrCtx
     local silent_err = { errors = {}, warnings = {}, source_lines = {} }
+    -- Track warnings already flushed to real_err to avoid duplicates across passes.
+    -- Key: "filename\0line\0col\0msg"
+    --: { [string]: boolean }
+    local seen_warnings = {}
+
+    -- Flush any warnings from silent_err into real_err, deduplicating by location+msg.
+    --: () -> ()
+    local function flush_warnings()
+        for _, w in ipairs(silent_err.warnings) do
+            local key = w.filename .. "\0" .. w.line .. "\0" .. w.col .. "\0" .. w.msg
+            if not seen_warnings[key] then
+                seen_warnings[key] = true
+                real_err.warnings[#real_err.warnings + 1] = w
+            end
+        end
+        silent_err.warnings = {}
+    end
 
     -- Expose the constraint list on ctx so handlers can scan for pending C_BOUND constraints.
     ctx._constraints = constraints
@@ -2473,8 +2490,8 @@ function M.solve(ctx, constraints)
     for pass = 1, 4 do
         local changed = false
         local n_deferred = 0
-        -- Use silent error context on non-final passes
-        ctx.err = (pass < 4) and silent_err or real_err
+        -- Use silent error context on all passes; errors are only flushed on the final pass.
+        ctx.err = silent_err
         silent_err.errors = {}
         silent_err.warnings = {}
 
@@ -2502,6 +2519,14 @@ function M.solve(ctx, constraints)
             end
         end
 
+        -- Flush warnings into real_err (deduped). On the final pass, also flush errors.
+        flush_warnings()
+        if pass == 4 then
+            for _, e in ipairs(silent_err.errors) do
+                real_err.errors[#real_err.errors + 1] = e
+            end
+        end
+
         -- If any progress was made this pass, re-enable all deferred constraints
         -- so they get another chance to run (their blocking TVs may now be bound).
         if changed then
@@ -2512,15 +2537,21 @@ function M.solve(ctx, constraints)
 
         if not changed then
             -- No progress: converged (or stuck on deferred that can never progress).
-            -- Run one final pass with real_err to emit errors, including any stuck deferred.
+            -- Run one final pass via silent_err to emit errors, including any stuck deferred.
             if pass < 4 then
-                ctx.err = real_err
+                silent_err.errors = {}
+                silent_err.warnings = {}
                 for _, c in ipairs(constraints) do
                     c._deferred = false  -- run everything on final error pass
                 end
                 for _, c in ipairs(constraints) do
                     local handler = handlers[c[1]]
                     if handler then handler(ctx, c) end
+                end
+                -- Flush warnings and errors from this final convergence pass.
+                flush_warnings()
+                for _, e in ipairs(silent_err.errors) do
+                    real_err.errors[#real_err.errors + 1] = e
                 end
             end
             break
