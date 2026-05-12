@@ -18,7 +18,8 @@ M._tier = "pure"
 -- Resolve a transition spec.  It can be either:
 --   a string  → {target=string}
 --   a table   → {target, guard?, action?}
---: (string | { target: string, guard: unknown, action: unknown }) -> { target: string, guard: unknown, action: unknown }
+--:: Transition = { target: string, guard: (((unknown, unknown) -> boolean) | nil), action: (((unknown, unknown) -> nil) | nil) }
+--: (string | Transition) -> Transition
 local function resolve_transition(spec)
   if type(spec) == "string" then
     return { target = spec, guard = nil, action = nil }
@@ -55,7 +56,7 @@ function Machine:can(event)
   local spec = on[event]
   if not spec then return false end
   local tr = resolve_transition(spec)
-  if tr.guard and not (tr.guard --[[:! (unknown, unknown) -> boolean]])(self._ctx, nil) then return false end
+  if tr.guard and not tr.guard(self._ctx, nil) then return false end
   return true
 end
 
@@ -128,7 +129,7 @@ function Machine:send(event, data)
   local tr = resolve_transition(spec)
 
   -- Check guard
-  if tr.guard and not (tr.guard --[[:! (unknown, unknown) -> boolean]])(self._ctx, data) then
+  if tr.guard and not tr.guard(self._ctx, data) then
     return nil, "guard rejected event '" .. event .. "' in state '" .. current .. "'"
   end
 
@@ -156,7 +157,7 @@ function Machine:send(event, data)
 
   -- Run action if present
   if tr.action then
-    (tr.action --[[:! (unknown, unknown) -> nil]])(self._ctx, data)
+    tr.action(self._ctx, data)
   end
 
   -- Notify listeners

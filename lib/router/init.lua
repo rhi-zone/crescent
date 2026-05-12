@@ -127,7 +127,7 @@ function Router:find(method, path)
 	end
 
 	-- Split path into parts
-	local parts = {}
+	local parts = {} --: { [integer]: string }
 	local np = 0
 	for part in path:gmatch("[^/]+") do
 		np = np + 1
@@ -138,7 +138,7 @@ function Router:find(method, path)
 	local node = self.root
 
 	for i = 1, np do
-		local part = parts[i] --[[:! string]]
+		local part = parts[i]
 		local matched = false
 
 		-- Try static children first (highest priority)

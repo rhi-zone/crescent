@@ -63,7 +63,8 @@ end
 --- Flatten nested arrays. depth=1 by default, nil=infinite.
 --: (unknown, number | nil) -> { [integer]: unknown }
 function M.flatten(t, depth)
-	local depth_ = (depth == nil and math.huge or depth) --[[:! number]]
+	local depth_
+	if depth == nil then depth_ = math.huge else depth_ = depth end
 	local out = {} --: { [integer]: unknown }
 	local n = 0
 	--: (unknown, number) -> nil
@@ -336,7 +337,7 @@ end
 --: (integer, integer, integer | nil) -> { [integer]: integer }
 function M.range(from, to, step)
 	if step == nil then step = (to >= from) and 1 or -1 end
-	local step_ = step --[[:! integer]]
+	local step_ = step
 	local out = {} --: { [integer]: integer }
 	local n = 0
 	if step_ > 0 then
