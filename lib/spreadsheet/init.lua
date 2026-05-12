@@ -121,9 +121,9 @@ local function lex(src)
   local i = 1
   local n = #src
 
-  local function peek() return src:sub(i, i) --[[:! string]] end
+  local function peek() return src:sub(i, i) end
   local function advance() i = i + 1 end
-  local function cur() return src:sub(i, i) --[[:! string]] end
+  local function cur() return src:sub(i, i) end
 
   while i <= n do
     local c = cur()

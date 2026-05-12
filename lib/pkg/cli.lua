@@ -141,9 +141,9 @@ function M.parse_args(argv)
 		elseif v == "--skip-check" then
 			result.skip_check = true
 		elseif v:sub(1, 11) == "--registry=" then
-			result.registry = (v:sub(12) --[[:! string]])
+			result.registry = (v:sub(12))
 		elseif v:sub(1, 7) == "--jobs=" then
-			local n = tonumber(v:sub(8) --[[:! string]])
+			local n = tonumber(v:sub(8))
 			if n and n >= 0 then
 				result.jobs = math.floor(n)
 			end
