@@ -121,9 +121,9 @@ local function parse_partial(s)
 end
 
 -- Build a version with pre=nil (release) for boundary comparisons.
---: (number, number, number) -> Version
+--: (integer, integer, integer) -> Version
 local function v(maj, min, pat)
-	return { major = maj --[[:! integer]], minor = min --[[:! integer]], patch = pat --[[:! integer]], pre = nil }
+	return { major = maj, minor = min, patch = pat, pre = nil }
 end
 
 --- Parse a constraint string into a structured form.
