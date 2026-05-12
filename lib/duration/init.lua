@@ -63,7 +63,7 @@ local UNIT = {
   m = 60,     min  = 60,     minute = 60, minutes = 60,
   s = 1,      sec  = 1,      second = 1, seconds = 1,
   ms = 0.001, millisecond = 0.001, milliseconds = 0.001,
-} --[[:! { [string]: number }]]
+}
 
 -- Parse a human string like "1h30m45s", "1:30:45", "90m", "1.5h", "-30s", "90".
 -- Returns (duration) or (nil, errmsg).
@@ -267,7 +267,7 @@ function Duration:format(fmt)
     elseif #parts == 2 then
       joined = parts[1] .. " and " .. parts[2]
     else
-      local last = table.remove(parts) --[[: unknown]] --[[:! string]]
+      local last = table.remove(parts) or ""
       joined = table.concat(parts, ", ") .. ", and " .. last
     end
     return sign_str .. (joined or "")
@@ -307,9 +307,9 @@ end
 -- ---------------------------------------------------------------------------
 
 --: (Duration, Duration) -> Duration
-function Duration:add(other)  return new_raw(self._secs + (other --[[:! Duration]])._secs) end
+function Duration:add(other)  return new_raw(self._secs + other._secs) end
 --: (Duration, Duration) -> Duration
-function Duration:sub(other)  return new_raw(self._secs - (other --[[:! Duration]])._secs) end
+function Duration:sub(other)  return new_raw(self._secs - other._secs) end
 --: (Duration, number) -> Duration
 function Duration:mul(n)      return new_raw(self._secs * n) end
 --: (Duration, number) -> Duration
@@ -324,15 +324,15 @@ function Duration:abs()       return new_raw(math.abs(self._secs)) end
 -- ---------------------------------------------------------------------------
 
 --: (Duration, Duration) -> boolean
-function Duration:eq(other)  return self._secs == (other --[[:! Duration]])._secs end
+function Duration:eq(other)  return self._secs == other._secs end
 --: (Duration, Duration) -> boolean
-function Duration:lt(other)  return self._secs <  (other --[[:! Duration]])._secs end
+function Duration:lt(other)  return self._secs <  other._secs end
 --: (Duration, Duration) -> boolean
-function Duration:lte(other) return self._secs <= (other --[[:! Duration]])._secs end
+function Duration:lte(other) return self._secs <= other._secs end
 --: (Duration, Duration) -> boolean
-function Duration:gt(other)  return self._secs >  (other --[[:! Duration]])._secs end
+function Duration:gt(other)  return self._secs >  other._secs end
 --: (Duration, Duration) -> boolean
-function Duration:gte(other) return self._secs >= (other --[[:! Duration]])._secs end
+function Duration:gte(other) return self._secs >= other._secs end
 
 -- ---------------------------------------------------------------------------
 -- Utilities

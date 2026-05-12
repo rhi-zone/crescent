@@ -61,16 +61,15 @@ end
 function Emitter:on(name, fn, opts)
   if type(name) ~= "string" then return nil, "event name must be a string" end
   if type(fn) ~= "function" then return nil, "listener must be a function" end
-  local self_ = self --[[:! Emitter]]
   _next_id = _next_id + 1
   local id = _next_id
   local priority = (opts and opts.priority) or 0
   local once = (opts and opts.once) or false
   local entry = { fn = fn, priority = priority, once = once and true or false, id = id }
-  local listeners = self_._listeners[name]
+  local listeners = self._listeners[name]
   if not listeners then
     listeners = {} --: { [integer]: Listener }
-    self_._listeners[name] = listeners
+    self._listeners[name] = listeners
   end
   insert_sorted(listeners, entry)
   return id
@@ -90,12 +89,11 @@ end
 --: (Emitter, string, (((...unknown) -> unknown) | nil)) -> nil
 function Emitter:off(name, fn)
   if type(name) ~= "string" then return end
-  local self_ = self --[[:! Emitter]]
   if not fn then
-    self_._listeners[name] = nil
+    self._listeners[name] = nil
     return
   end
-  local listeners = self_._listeners[name]
+  local listeners = self._listeners[name]
   if not listeners then return end
   for i = #listeners, 1, -1 do
     if listeners[i].fn == fn then
@@ -103,20 +101,19 @@ function Emitter:off(name, fn)
     end
   end
   if #listeners == 0 then
-    self_._listeners[name] = nil
+    self._listeners[name] = nil
   end
 end
 
 --- Remove a listener by its unique id.
 --: (Emitter, integer) -> boolean
 function Emitter:off_by_id(id)
-  local self_ = self --[[:! Emitter]]
-  for name, listeners in pairs(self_._listeners) do
+  for name, listeners in pairs(self._listeners) do
     for i = #listeners, 1, -1 do
       if listeners[i].id == id then
         table.remove(listeners, i)
         if #listeners == 0 then
-          self_._listeners[name] = nil
+          self._listeners[name] = nil
         end
         return true
       end
@@ -138,8 +135,7 @@ end
 --- Stop propagation to remaining listeners.
 --: (EventObj) -> nil
 function Event:stop()
-  local self_ = self --[[:! EventObj]]
-  self_._stopped = true
+  self._stopped = true
 end
 
 --- Emit an event, calling all matching listeners.
@@ -148,13 +144,12 @@ end
 --: (Emitter, string, ...unknown) -> boolean
 function Emitter:emit(name, ...)
   if type(name) ~= "string" then return false end
-  local self_ = self --[[:! Emitter]]
   local evt = new_event(name, { ... })
   local called = false
 
   -- Collect all matching listener entries: exact match first, then wildcards.
   local to_call = {} --: { [integer]: { entry: Listener, key: string, _order: integer } }
-  local exact = self_._listeners[name]
+  local exact = self._listeners[name]
   if exact then
     for i = 1, #exact do
       to_call[#to_call + 1] = { entry = exact[i], key = name, _order = 0 }
@@ -162,7 +157,7 @@ function Emitter:emit(name, ...)
   end
 
   -- Wildcard matches
-  for pattern, listeners in pairs(self_._listeners) do
+  for pattern, listeners in pairs(self._listeners) do
     if pattern ~= name and is_wildcard(pattern) then
       local lua_pat = wildcard_to_pattern(pattern)
       if name:find(lua_pat) then
@@ -194,7 +189,7 @@ function Emitter:emit(name, ...)
     local item = to_call[i]
     local entry = item.entry
     -- Check if entry was already removed (e.g. by a previous listener calling off)
-    local key_listeners = self_._listeners[item.key]
+    local key_listeners = self._listeners[item.key]
     if key_listeners then
       local still_present = false
       for j = 1, #key_listeners do
@@ -215,7 +210,7 @@ function Emitter:emit(name, ...)
             end
           end
           if #key_listeners == 0 then
-            self_._listeners[item.key] = nil
+            self._listeners[item.key] = nil
           end
         end
         if evt._stopped then break end
@@ -230,9 +225,8 @@ end
 -- Only returns exact-match listeners (not wildcard).
 --: (Emitter, string) -> { [integer]: (...unknown) -> unknown }
 function Emitter:listeners(name)
-  local self_ = self --[[:! Emitter]]
   local result = {} --: { [integer]: (...unknown) -> unknown }
-  local listeners = self_._listeners[name]
+  local listeners = self._listeners[name]
   if listeners then
     for i = 1, #listeners do
       result[#result + 1] = listeners[i].fn
@@ -244,17 +238,15 @@ end
 --- Return the count of listeners for a given event name.
 --: (Emitter, string) -> integer
 function Emitter:listener_count(name)
-  local self_ = self --[[:! Emitter]]
-  local listeners = self_._listeners[name]
+  local listeners = self._listeners[name]
   return listeners and #listeners or 0
 end
 
 --- Return an array of all event names that have listeners.
 --: (Emitter) -> { [integer]: string }
 function Emitter:event_names()
-  local self_ = self --[[:! Emitter]]
   local result = {} --: { [integer]: string }
-  for name in pairs(self_._listeners) do
+  for name in pairs(self._listeners) do
     result[#result + 1] = name
   end
   for i = 2, #result do
