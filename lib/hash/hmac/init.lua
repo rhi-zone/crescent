@@ -106,7 +106,7 @@ end
 -- key: HMAC key (any length)
 -- message: data to authenticate
 -- Returns: binary string (raw HMAC digest)
---: ((string) -> string, number, string, string) -> string
+--: ((string) -> string, integer, string, string) -> string
 function M.compute(hash_fn, block_size, key, message)
 	-- Step 1: If key longer than block size, hash it.
 	if #key > block_size then
@@ -115,7 +115,7 @@ function M.compute(hash_fn, block_size, key, message)
 
 	-- Step 2: Pad key to block_size with zeros.
 	if #key < block_size then
-		key = key .. string.rep("\0", (block_size - #key) --[[:! integer]])
+		key = key .. string.rep("\0", block_size - #key)
 	end
 
 	-- Step 3: XOR key with ipad (0x36) and opad (0x5c).

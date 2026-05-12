@@ -14,7 +14,7 @@ function Set:__tostring()
   local self_ = self --[[:! Set]]
   local parts = {} --: { [integer]: string }
   for v in pairs(self_._data) do
-    parts[#parts + 1] = tostring(v) --[[:! string]]
+    parts[#parts + 1] = tostring(v)
   end
   table.sort(parts)
   return "Set{" .. table.concat(parts, ", ") .. "}"

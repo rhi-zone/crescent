@@ -168,7 +168,7 @@ local function build_doc(source, filename, err_ctx, ctx)
         local err_ctx_ = err_ctx --[[:! DocErrCtx]]
         if err_ctx_ and err_ctx_.errors then
             for _, e in ipairs(err_ctx_.errors) do
-                local msg_ = tostring(e.msg or e) --[[:! string]]
+                local msg_ = tostring(e.msg or e)
                 errs[#errs + 1] = msg_
             end
         end
