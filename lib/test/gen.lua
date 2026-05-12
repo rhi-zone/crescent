@@ -180,7 +180,7 @@ function G.list(elem_gen, opts)
 end
 
 -- Table with generated keys and values.  opts: { min=int, max=int }
---: (k_gen: unknown, v_gen: unknown, opts: ListOpts | nil) -> unknown
+--: (k_gen: Generator<unknown>, v_gen: Generator<unknown>, opts: ListOpts | nil) -> unknown
 function G.table(k_gen, v_gen, opts)
 	local o = opts or {}
 	local min_n = o.min or 0
@@ -189,11 +189,9 @@ function G.table(k_gen, v_gen, opts)
 		generate = function(rng, sz)
 			local n   = rng:int(min_n, math.max(min_n, math.min(max_n, sz)))
 			local out = {}
-			local k_gen_ = k_gen --[[:! { generate: (...unknown) -> unknown }]]
-			local v_gen_ = v_gen --[[:! { generate: (...unknown) -> unknown }]]
 			for _ = 1, n do
-				local k = k_gen_.generate(rng, sz)
-				local v = v_gen_.generate(rng, sz)
+				local k = k_gen.generate(rng, sz)
+				local v = v_gen.generate(rng, sz)
 				out[k] = v
 			end
 			return out
