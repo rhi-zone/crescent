@@ -450,6 +450,8 @@ Never silently work around a hang (skip the file, longer timeout, batch differen
 
 **All investigation and all implementation goes in subagents.** The only exception is work you are almost 100% certain is shorter to do inline AND are absolutely certain will not poison context. When in doubt, delegate. There is no list of acceptable inline cases — if you are asking yourself whether something qualifies, the answer is no.
 
+**Subagent prompts must have a hard scope.** Every delegation prompt must specify exactly what the agent should do and when to stop — not "fix what you can" but "fix these N files, then stop." Open-ended prompts ("fix the clearly quick ones", "clean up what you find") produce agents that run for hours burning quota. If the scope is genuinely open-ended, break it into explicit batches before delegating.
+
 **Never pre-load the answer in a delegation prompt.** Don't write "verify that X works" or "claim to verify: X" — write "what does X do?" or "find out whether X works". Pre-baked hypotheses in the prompt teach the agent to confirm, not investigate. If you have a hypothesis, name it as a hypothesis the agent should *attempt to falsify*, not as a thing to verify.
 
 **"X works" and "X doesn't work" are claims of equal weight. Both require runnable evidence.** A claim grounded in code-tracing without a paste-able command and its output is a hypothesis, not a finding. If your investigation concluded "Y doesn't work" and you didn't actually run Y, your conclusion may be wrong — say so explicitly. The cost of running a 5-line `bin/cr check` repro is always lower than the cost of a wrong report.
