@@ -8460,6 +8460,13 @@ local n = math.abs(-5)
 local n = math.floor(3.7) --: integer
 ]])
     end)
+
+    assert.it("math.floor(1.5) is typed as integer", function()
+        no_errors([[
+--: integer
+local n = math.floor(1.5)
+]])
+    end)
 end)
 
 assert.describe("stdlib: table table declared", function()
