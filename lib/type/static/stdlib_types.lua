@@ -104,7 +104,7 @@
 --:: module "bit": BitLib
 --:: declare bit = BitLib
 --:: declare _G = $GlobalScope
---:: declare package = { path: string, cpath: string, loaded: { [string]: unknown, ... }, preload: { [string]: unknown, ... }, ... }
+--:: declare package = { path: string, cpath: string, config: string, loaded: { [string]: unknown, ... }, preload: { [string]: unknown, ... }, ... }
 --:: declare arg = { [integer]: string, ... }
 --:: declare jit = { version: string, version_num: integer, os: string, arch: string, ... }
 --:: declare register_ffi_module = ((string) -> nil) | nil

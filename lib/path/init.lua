@@ -8,7 +8,7 @@ local M = {}
 M._tier = "pure"
 
 -- Platform detection via package.config (first char is dir separator)
-local _plat_sep = (package.config --[[:! string]]):sub(1, 1)
+local _plat_sep = package.config:sub(1, 1)
 M.sep     = _plat_sep
 M.altsep  = _plat_sep == "\\" and "/" or nil
 M.pathsep = _plat_sep == "\\" and ";" or ":"
