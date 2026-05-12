@@ -333,23 +333,6 @@ local function merge_cap_declarations(manifest, entry_key)
 end
 
 -- ── Cap construction ──────────────────────────────────────────────────────
--- Maps cap type strings to factory modules. Uses . calling convention.
-
-local CAP_TYPE_MODULES = {
-	self        = "lib.platform.caps.self",
-	self_write  = "lib.platform.caps.self",
-	http_server = "lib.platform.caps.http_server",
-	http_client = "lib.platform.caps.http_client",
-	kv          = "lib.platform.caps.kv",
-	db          = "lib.platform.caps.db",
-	shared_db   = "lib.platform.caps.shared_db",
-	time        = "lib.platform.caps.time",
-	cli         = "lib.platform.caps.cli",
-	stdin       = "lib.platform.caps.stdin",
-	stdout      = "lib.platform.caps.stdout",
-	fs          = "lib.platform.caps.fs",
-	llm = "lib.platform.caps.llm",
-}
 
 --: (string, CapDecl, AppRecord, { app_id: string, user_id: string | nil, data_dir: string | nil, ... }, { port: integer, app_args: { [integer]: string } | nil, ... }) -> (unknown, unknown)
 local function build_cap(cap_name, decl, app, context, platform_opts)
@@ -360,7 +343,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		if app._dir_mode then
 			return make_dir_self_cap(app.path)
 		else
-			local mod = (require(CAP_TYPE_MODULES.self) --[[:! { self_cap: (unknown) -> unknown }]])
+			local mod = require("lib.platform.caps.self")
 			return mod.self_cap(app)
 		end
 	end
@@ -372,19 +355,19 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		if app._dir_mode then
 			return nil, "self_write not supported in directory mode"
 		end
-		local mod = (require(CAP_TYPE_MODULES.self_write) --[[:! { self_write_cap: (unknown) -> unknown }]])
+		local mod = require("lib.platform.caps.self")
 		return mod.self_write_cap(app)
 	end
 
 	-- http_server: inject port from platform flags.
 	if cap_type == "http_server" then
-		local mod = (require(CAP_TYPE_MODULES.http_server) --[[:! { http_server_cap: (unknown) -> unknown }]])
+		local mod = require("lib.platform.caps.http_server")
 		return mod.http_server_cap({ port = platform_opts.port or 0 })
 	end
 
 	-- http_client: pass through host and any extra fields from declaration.
 	if cap_type == "http_client" then
-		local mod = (require(CAP_TYPE_MODULES.http_client) --[[:! { http_client_cap: (unknown) -> unknown }]])
+		local mod = require("lib.platform.caps.http_client")
 		return mod.http_client_cap({
 			host  = decl.host,
 			model = decl.model,
@@ -401,13 +384,13 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		local parent_dir = data_path:match("^(.*)/[^/]+$")
 		if parent_dir then mkdir_p(parent_dir) end
 		if cap_type == "kv" then
-			local mod = (require(CAP_TYPE_MODULES.kv) --[[:! { kv_cap: (unknown) -> unknown }]])
+			local mod = require("lib.platform.caps.kv")
 			return mod.kv_cap(data_path)
 		elseif cap_type == "db" then
-			local mod = (require(CAP_TYPE_MODULES.db) --[[:! { db_cap: (unknown, unknown) -> unknown }]])
+			local mod = require("lib.platform.caps.db")
 			return mod.db_cap(data_path, { allow_write = decl.allow_write })
 		elseif cap_type == "shared_db" then
-			local mod = (require(CAP_TYPE_MODULES.shared_db) --[[:! { shared_db_cap: (unknown, unknown, unknown, unknown) -> unknown }]])
+			local mod = require("lib.platform.caps.shared_db")
 			return mod.shared_db_cap(data_path, context.app_id, decl.tables or {}, {
 				allow_write = decl.allow_write,
 			})
@@ -416,14 +399,13 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 
 	-- time: no args.
 	if cap_type == "time" then
-		local mod = (require(CAP_TYPE_MODULES.time) --[[:! { time_cap: () -> unknown }]])
+		local mod = require("lib.platform.caps.time")
 		return mod.time_cap()
 	end
 
 	-- cli: pass app args.
 	if cap_type == "cli" then
-		local mod_path = CAP_TYPE_MODULES.cli
-		local ok, mod_raw = pcall(require, mod_path)
+		local ok, mod_raw = pcall(require, "lib.platform.caps.cli")
 		local mod = (mod_raw --[[: unknown]]) --[[:! { [string]: unknown, ... }]]
 		if ok and mod.cli_cap then
 			return (mod.cli_cap --[[:! (unknown) -> unknown]])(platform_opts.app_args or {})
@@ -434,8 +416,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 
 	-- stdin: grant access to process stdin.
 	if cap_type == "stdin" then
-		local mod_path = CAP_TYPE_MODULES.stdin
-		local ok, mod_raw = pcall(require, mod_path)
+		local ok, mod_raw = pcall(require, "lib.platform.caps.stdin")
 		local mod = (mod_raw --[[: unknown]]) --[[:! { [string]: unknown, ... }]]
 		if ok and mod.stdin_cap then
 			return (mod.stdin_cap --[[:! () -> unknown]])()
@@ -445,8 +426,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 
 	-- stdout: grant access to process stdout.
 	if cap_type == "stdout" then
-		local mod_path = CAP_TYPE_MODULES.stdout
-		local ok, mod_raw = pcall(require, mod_path)
+		local ok, mod_raw = pcall(require, "lib.platform.caps.stdout")
 		local mod = (mod_raw --[[: unknown]]) --[[:! { [string]: unknown, ... }]]
 		if ok and mod.stdout_cap then
 			return (mod.stdout_cap --[[:! () -> unknown]])()
@@ -462,7 +442,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		end
 		root = expand_home(root --[[:! string]])
 		mkdir_p(root)
-		local mod = (require(CAP_TYPE_MODULES.fs) --[[:! { fs_cap: (unknown) -> unknown }]])
+		local mod = require("lib.platform.caps.fs")
 		return mod.fs_cap({ root = root, allow_write = decl.allow_write })
 	end
 
@@ -502,7 +482,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		-- operator; default to "openai" as the most common case.
 		provider = provider or decl.provider_default or "openai"
 
-		local mod = (require(CAP_TYPE_MODULES.llm) --[[:! { llm_cap: (unknown) -> unknown }]])
+		local mod = require("lib.platform.caps.llm")
 		return mod.llm_cap({
 			provider    = provider,
 			key         = api_key,
