@@ -60,24 +60,24 @@ end
 
 --- Read and parse HTTP response status line + headers.
 -- RFC 9112 §5 — Field lines
+--: (http_stream) -> ({ [string]: string[] } | nil, string | nil)
 function mt.__index:read_headers()
-	local self_ = self --[[:! http_stream]]
-	if self_._headers then return self_._headers end
+	if self._headers then return self._headers end
 	--: integer | nil
-	local pos = fill_until(self_, "\r\n\r\n")
+	local pos = fill_until(self, "\r\n\r\n")
 	if not pos then return nil, "incomplete headers" end
 
-	local head = self_._buf:sub(self_._pos, pos - 1)
-	self_._pos = pos + 4
-	maybe_compact(self_)
+	local head = self._buf:sub(self._pos, pos - 1)
+	self._pos = pos + 4
+	maybe_compact(self)
 
 	-- parse status line
 	local version_raw, status_raw, status_text = head:match("^([^ ]+) ([^ ]+) ([^\r]*)")
 	if not version_raw then return nil, "invalid status line" end
 
-	self_._version = version_raw
-	self_._status = math2.tointeger(status_raw) or 0
-	self_._status_text = status_text
+	self._version = version_raw
+	self._status = math2.tointeger(status_raw) or 0
+	self._status_text = status_text
 
 	-- parse headers
 	local headers = {} --: { [string]: string[] }
@@ -95,21 +95,21 @@ function mt.__index:read_headers()
 		end
 	end
 
-	self_._headers = headers
+	self._headers = headers
 	return headers
 end
 
 --- Return parsed status code.
+--: (http_stream) -> integer | nil
 function mt.__index:status()
-	local self_ = self --[[:! http_stream]]
-	return self_._status
+	return self._status
 end
 
 --- Read full body using Content-Length.
 -- RFC 9112 §6.3 / RFC 9110 §8.6 — Body length from Content-Length
+--: (http_stream) -> (string | nil, string | nil)
 function mt.__index:read_body()
-	local self_ = self --[[:! http_stream]]
-	local headers, err = self_:read_headers()
+	local headers, err = self:read_headers()
 	if not headers then return nil, err end
 
 	local cl = headers["content-length"]
@@ -117,52 +117,53 @@ function mt.__index:read_body()
 		local len = math2.tointeger(cl[1]) or 0
 		if not len or len == 0 then return nil, "invalid content-length" end
 		-- fill buffer until we have enough
-		while buf_len(self_) < len and not self_._eof do
+		while buf_len(self) < len and not self._eof do
 			--: string | nil
-			local chunk = self_._recv()
-			if not chunk then self_._eof = true; break end
-			maybe_compact(self_)
-			self_._buf = self_._buf .. chunk
+			local chunk = self._recv()
+			if not chunk then self._eof = true; break end
+			maybe_compact(self)
+			self._buf = self._buf .. chunk
 		end
-		local body = self_._buf:sub(self_._pos, self_._pos + len - 1)
-		self_._pos = self_._pos + len
-		maybe_compact(self_)
+		local body = self._buf:sub(self._pos, self._pos + len - 1)
+		self._pos = self._pos + len
+		maybe_compact(self)
 		return body
 	end
 
 	-- no content-length: read until EOF
-	while not self_._eof do
+	while not self._eof do
 		--: string | nil
-		local chunk = self_._recv()
-		if not chunk then self_._eof = true; break end
-		maybe_compact(self_)
-		self_._buf = self_._buf .. chunk
+		local chunk = self._recv()
+		if not chunk then self._eof = true; break end
+		maybe_compact(self)
+		self._buf = self._buf .. chunk
 	end
-	local body = self_._buf:sub(self_._pos)
-	self_._buf = ""
-	self_._pos = 1
+	local body = self._buf:sub(self._pos)
+	self._buf = ""
+	self._pos = 1
 	return body
 end
 
 --- Iterator for chunked transfer encoding.
 -- RFC 9112 §6.1 — Chunked transfer coding
 -- Yields decoded chunk data (not hex lengths or trailers).
+--: (http_stream) -> () -> string | nil
 function mt.__index:chunks()
-	local self_ = self --[[:! http_stream]]
-	local headers, err = self_:read_headers()
+	local headers, err = self:read_headers()
 	if not headers then return function() return nil end end
 	local done = false
+	local stream = self
 
 	return function()
 		if done then return nil end
 		-- read chunk size line
 		--: integer | nil
-		local pos = fill_until(self_, "\r\n")
+		local pos = fill_until(stream, "\r\n")
 		if not pos then done = true; return nil end
 
-		local size_line = self_._buf:sub(self_._pos, pos - 1)
-		self_._pos = pos + 2
-		maybe_compact(self_)
+		local size_line = stream._buf:sub(stream._pos, pos - 1)
+		stream._pos = pos + 2
+		maybe_compact(stream)
 
 		-- strip chunk extensions
 		local hex = size_line:match("^([0-9a-fA-F]+)")
@@ -173,38 +174,39 @@ function mt.__index:chunks()
 
 		-- read chunk data + trailing \r\n
 		local need = size + 2
-		while buf_len(self_) < need and not self_._eof do
+		while buf_len(stream) < need and not stream._eof do
 			--: string | nil
-			local chunk = self_._recv()
-			if not chunk then self_._eof = true; break end
-			maybe_compact(self_)
-			self_._buf = self_._buf .. chunk
+			local chunk = stream._recv()
+			if not chunk then stream._eof = true; break end
+			maybe_compact(stream)
+			stream._buf = stream._buf .. chunk
 		end
 
-		local data = self_._buf:sub(self_._pos, self_._pos + size - 1)
-		self_._pos = self_._pos + size + 2 -- skip data + \r\n
-		maybe_compact(self_)
+		local data = stream._buf:sub(stream._pos, stream._pos + size - 1)
+		stream._pos = stream._pos + size + 2 -- skip data + \r\n
+		maybe_compact(stream)
 		return data
 	end
 end
 
 --- Iterator for Server-Sent Events.
 -- Yields tables: { event: string?, data: string, id: string? }
+--: (http_stream) -> () -> { event: string | nil, data: string, id: string | nil } | nil
 function mt.__index:events()
-	local self_ = self --[[:! http_stream]]
-	local headers, err = self_:read_headers()
+	local headers, err = self:read_headers()
 	if not headers then return function() return nil end end
 
 	-- SSE state
 	local event_type = nil
 	local data_parts = {}
 	local event_id = nil
+	local stream = self
 
 	return function()
 		while true do
 			-- try to find next line
 			--: integer | nil
-			local pos = fill_until(self_, "\n")
+			local pos = fill_until(stream, "\n")
 			if not pos then
 				-- EOF: flush pending event
 				if #data_parts > 0 then
@@ -218,10 +220,10 @@ function mt.__index:events()
 			end
 
 			-- extract line (handle \r\n and \n)
-			local line_raw = self_._buf:sub(self_._pos, pos - 1)
+			local line_raw = stream._buf:sub(stream._pos, pos - 1)
 			local line = (line_raw:sub(-1) == "\r") and line_raw:sub(1, -2) or line_raw --: string
-			self_._pos = pos + 1
-			maybe_compact(self_)
+			stream._pos = pos + 1
+			maybe_compact(stream)
 
 			if line == "" then
 				-- dispatch event
