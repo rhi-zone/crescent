@@ -241,17 +241,17 @@ local function parse_double_quoted(p)
         p.pos = p.pos + 1
         local ch, err = parse_hex_escape(p, 2)
         if not ch then return nil, err end
-        parts[#parts + 1] = ch --[[:! string]]
+        parts[#parts + 1] = ch
       elseif esc_char == "u" then
         p.pos = p.pos + 1
         local ch, err = parse_hex_escape(p, 4)
         if not ch then return nil, err end
-        parts[#parts + 1] = ch --[[:! string]]
+        parts[#parts + 1] = ch
       elseif esc_char == "U" then
         p.pos = p.pos + 1
         local ch, err = parse_hex_escape(p, 8)
         if not ch then return nil, err end
-        parts[#parts + 1] = ch --[[:! string]]
+        parts[#parts + 1] = ch
       elseif DOUBLE_ESCAPES[esc_char] then
         parts[#parts + 1] = DOUBLE_ESCAPES[esc_char]
         p.pos = p.pos + 1
@@ -740,7 +740,7 @@ local function parse_block_mapping(p, indent, first_at_pos)
       skip_blank_lines(p)
       if at_end(p) then break end
 
-      cur_indent = get_indent(p) --[[:! integer]]
+      cur_indent = get_indent(p)
       if cur_indent ~= indent then
         break
       end
@@ -1201,20 +1201,18 @@ local function encode_flow_value(val)
   elseif type(val) == "boolean" then
     return val and "true" or "false"
   elseif type(val) == "number" then
-    local n = val --[[:! number]]
-    if n ~= n then return ".nan" end
-    if n == huge then return ".inf" end
-    if n == -huge then return "-.inf" end
-    if n == math.floor(n) and n > -1e15 and n < 1e15 then
-      return format("%d", n)
+    if val ~= val then return ".nan" end
+    if val == huge then return ".inf" end
+    if val == -huge then return "-.inf" end
+    if val == math.floor(val) and val > -1e15 and val < 1e15 then
+      return format("%d", val)
     end
-    return tostring(n)
+    return tostring(val)
   elseif type(val) == "string" then
-    local s = val --[[:! string]]
-    if needs_quoting(s) then
-      return quote_string(s)
+    if needs_quoting(val) then
+      return quote_string(val)
     end
-    return s
+    return val
   elseif type(val) == "table" then
     local tb = val --[[:! { [string]: unknown, [integer]: unknown }]]
     if is_sequence(tb) then
@@ -1246,20 +1244,18 @@ encode_value = function(val, indent_str, depth, opts)
   elseif type(val) == "boolean" then
     return val and "true" or "false"
   elseif type(val) == "number" then
-    local n = val --[[:! number]]
-    if n ~= n then return ".nan" end
-    if n == huge then return ".inf" end
-    if n == -huge then return "-.inf" end
-    if n == math.floor(n) and n > -1e15 and n < 1e15 then
-      return format("%d", n)
+    if val ~= val then return ".nan" end
+    if val == huge then return ".inf" end
+    if val == -huge then return "-.inf" end
+    if val == math.floor(val) and val > -1e15 and val < 1e15 then
+      return format("%d", val)
     end
-    return tostring(n)
+    return tostring(val)
   elseif type(val) == "string" then
-    local s = val --[[:! string]]
-    if needs_quoting(s) then
-      return quote_string(s)
+    if needs_quoting(val) then
+      return quote_string(val)
     end
-    return s
+    return val
   elseif type(val) == "table" then
     local val_t = val --[[:! { [string]: unknown, [integer]: unknown }]]
     if flow_level ~= nil and depth >= (flow_level --[[:! number]]) then
