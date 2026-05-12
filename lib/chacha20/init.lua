@@ -344,7 +344,7 @@ local function poly1305_mac(key32, msg)
   for i = 1, 16 do
     local sum = out[i] + sb[i] + carry
     out[i] = sum % 256 --[[:! integer]]
-    carry = math.floor(sum / 256) --[[:! integer]]
+    carry = math.floor(sum / 256)
   end
 
   return schar(unpack(out))

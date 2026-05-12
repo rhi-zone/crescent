@@ -22,7 +22,7 @@ local function bisect_le(times --[[ : { [integer]: number } ]], t --[[ : number 
   local lo, hi = 1, #times
   if hi == 0 or times[1] > t then return 0 end
   while lo < hi do
-    local fl = math.floor((hi - lo + 1) / 2) --[[:! integer]]
+    local fl = math.floor((hi - lo + 1) / 2)
     local mid = lo + fl
     if times[mid] <= t then lo = mid else hi = mid - 1 end
   end
@@ -34,7 +34,7 @@ local function bisect_ge(times --[[ : { [integer]: number } ]], t --[[ : number 
   local lo, hi = 1, #times
   if hi == 0 or times[hi] < t then return hi + 1 end
   while lo < hi do
-    local fl = math.floor((hi - lo) / 2) --[[:! integer]]
+    local fl = math.floor((hi - lo) / 2)
     local mid = lo + fl
     if times[mid] >= t then hi = mid else lo = mid + 1 end
   end
@@ -405,8 +405,8 @@ function Series:outliers(opts)
     local sorted = {} --: { [integer]: number }
     for i = 1, n do sorted[i] = vals[i] end
     table.sort(sorted)
-    local q1 = sorted[math.floor(n * 0.25) + 1 --[[:! integer]]] or sorted[1]
-    local q3 = sorted[math.floor(n * 0.75) + 1 --[[:! integer]]] or sorted[n]
+    local q1 = sorted[math.floor(n * 0.25) + 1] or sorted[1]
+    local q3 = sorted[math.floor(n * 0.75) + 1] or sorted[n]
     local iqr = q3 - q1
     local lo_fence = q1 - threshold * iqr
     local hi_fence = q3 + threshold * iqr

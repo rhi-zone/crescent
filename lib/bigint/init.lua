@@ -594,7 +594,7 @@ function M.to_hex(a)
     if rv < 10 then
       hex_digits[#hex_digits + 1] = tostring(rv)
     else
-      local rv_int = math.floor(rv) --[[:! integer]]
+      local rv_int = math.floor(rv)
       local hex_c = string.char(55 + rv_int)
       hex_digits[#hex_digits + 1] = hex_c
     end

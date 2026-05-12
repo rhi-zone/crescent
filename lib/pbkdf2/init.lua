@@ -110,7 +110,7 @@ function M.derive(password, salt, iterations, dklen, opts)
   -- represent the limit precisely only up to 2^53. In practice dklen fits.
 
   local dklen_ = dklen --[[:! integer]]
-  local blocks = math.ceil(dklen_ / hlen_) --[[:! integer]]
+  local blocks = math.ceil(dklen_ / hlen_)
   local parts = {}
   for i = 1, blocks do
     parts[i] = compute_block(prf_, password, salt, iterations, i)

@@ -15,7 +15,7 @@ M._tier = "pure"
 -- FNV-1a hash (32-bit)
 --: (string) -> integer
 local function fnv1a(s)
-  local h = math.floor(2166136261) --[[:! integer]]
+  local h = math.floor(2166136261)
   for i = 1, #s do
     h = bxor(h, s:byte(i))
     -- FNV prime = 16777619; multiply via shifts to avoid overflow issues
@@ -80,7 +80,7 @@ end
 -- k = (m/n) * ln(2)
 --: (m: number, n: number) -> integer
 local function optimal_k(m, n)
-  return math.max(1, math.floor((m / n) * math.log(2) + 0.5)) --[[:! integer]]
+  return math.max(1, math.floor((m / n) * math.log(2) + 0.5))
 end
 
 -- Validate opts, return (m, k, err)

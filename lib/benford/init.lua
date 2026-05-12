@@ -43,7 +43,7 @@ local function leading_two_digits(n)
 	if x == 0 then return nil end
 	while x < 10 do x = x * 10 end
 	while x >= 100 do x = x / 10 end
-	return math.floor(x) --[[:! integer]]
+	return math.floor(x)
 end
 
 -- ── Expected Benford probabilities ───────────────────────────────────────────

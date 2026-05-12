@@ -9,7 +9,7 @@ M._tier = "pure"
 
 --: (s: string) -> integer
 local function fnv1a(s)
-  local h = math.floor(2166136261) --[[:! integer]]
+  local h = math.floor(2166136261)
   for i = 1, #s do
     h = bit.bxor(h, (string.byte(s, i) or 0) --[[:! integer]])
     h = bit.band(h * 16777619, 0xffffffff)

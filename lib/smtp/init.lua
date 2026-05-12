@@ -561,12 +561,12 @@ M.base64_encode = function(s)
 		local b1 = s:byte(i + 1) or 0
 		local b2 = s:byte(i + 2) or 0
 		local n = b0 * 65536 + b1 * 256 + b2
-		local i0 = math.floor(n / 262144) % 64 + 1 --[[:! integer]]
-		local i1 = math.floor(n / 4096) % 64 + 1 --[[:! integer]]
+		local i0 = math.floor(n / 262144) % 64 + 1
+		local i1 = math.floor(n / 4096) % 64 + 1
 		out[#out + 1] = b64_chars:sub(i0, i0)
 		out[#out + 1] = b64_chars:sub(i1, i1)
 		if i + 1 <= len then
-			local i2 = math.floor(n / 64) % 64 + 1 --[[:! integer]]
+			local i2 = math.floor(n / 64) % 64 + 1
 			out[#out + 1] = b64_chars:sub(i2, i2)
 		else
 			out[#out + 1] = "="

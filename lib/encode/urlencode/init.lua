@@ -15,7 +15,7 @@ mod.string_to_urlencode = function (str)
 	local out = str:gsub("[^%w-._~:%[%]@!$'%(%)*+,;=]", function (char)
 		local char_ = char --[[:! string]]
 		local code = (string.byte(char_, 1) or 0) --[[:! integer]]
-		local hi = math.floor(code / 16) --[[:! integer]]
+		local hi = math.floor(code / 16)
 		return "%" .. hex_alphabet[hi + 1] .. hex_alphabet[code % 16 + 1]
 	end)
 	return (out --[[: unknown]]) --[[:! string]]

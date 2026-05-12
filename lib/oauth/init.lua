@@ -197,12 +197,12 @@ local function parse_string(s, pos)
           if cp < 0x80 then
             buf[#buf + 1] = string.char(cp)
           elseif cp < 0x800 then
-            local c1 = 0xC0 + math.floor(cp / 0x40) --[[:! integer]]
+            local c1 = 0xC0 + math.floor(cp / 0x40)
             local c2 = 0x80 + cp % 0x40
             buf[#buf + 1] = string.char(c1, c2)
           else
-            local c1 = 0xE0 + math.floor(cp / 0x1000) --[[:! integer]]
-            local c2 = 0x80 + math.floor(cp / 0x40) % 0x40 --[[:! integer]]
+            local c1 = 0xE0 + math.floor(cp / 0x1000)
+            local c2 = 0x80 + math.floor(cp / 0x40) % 0x40
             local c3 = 0x80 + cp % 0x40
             buf[#buf + 1] = string.char(c1, c2, c3)
           end

@@ -291,7 +291,7 @@ function M.derive(password, salt, N, r, p, dklen)
   if type(N) ~= "number" or N < 2 or math.floor(N) ~= N then
     return nil, "scrypt: N must be an integer >= 2"
   end
-  local N_ = math.floor(N) --[[:! integer]]
+  local N_ = math.floor(N)
   if band(N_, N_ - 1) ~= 0 then
     return nil, "scrypt: N must be a power of 2"
   end

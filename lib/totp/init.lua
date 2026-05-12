@@ -46,8 +46,8 @@ local function counter_to_bytes(n)
   local lo = n % 0x100000000        -- lower 32 bits
   local hi = (n - lo) / 0x100000000 -- upper 32 bits (integer division)
   hi = hi % 0x100000000
-  local lo_i = math.floor(lo) --[[:! integer]]
-  local hi_i = math.floor(hi) --[[:! integer]]
+  local lo_i = math.floor(lo)
+  local hi_i = math.floor(hi)
   return string.char(
     band(rshift(hi_i, 24), 0xff),
     band(rshift(hi_i, 16), 0xff),
@@ -138,13 +138,14 @@ end
 -- key: raw binary secret
 -- opts: { digits = 6, period = 30, alg = "sha1", time = <required> }
 -- Returns: otp_string, nil  OR  nil, errmsg
-function M.totp(key, opts --[[:! TotpOpts | nil]])
-  local opts_ = opts --[[:! TotpOpts | nil]]
+--: (unknown, TotpOpts | nil) -> (string | nil, string | nil)
+function M.totp(key, opts)
+  local opts_ = opts
   local period = ((opts_ and opts_.period) or 30) --[[:! number]]
   if type(period) ~= "number" or period <= 0 then
     return nil, "period must be a positive number"
   end
-  local t = (opts_ and opts_.time) or 0 --[[:! number]]
+  local t = ((opts_ and opts_.time) or 0) --[[:! number]]
   local step = math.floor(t / period)
   return M.hotp(key, step, opts)
 end
@@ -167,10 +168,11 @@ end
 --- Generate a new random secret.
 -- opts: { bytes = 20 }
 -- Returns: base32_string
-function M.new_secret(opts --[[:! NewSecretOpts | nil]])
-  local opts_ = opts --[[:! NewSecretOpts | nil]]
+--: (NewSecretOpts | nil) -> string
+function M.new_secret(opts)
+  local opts_ = opts
   local nbytes = (opts_ and opts_.bytes) or 20
-  local t = (opts_ and opts_.time) or 0 --[[:! number]]
+  local t = ((opts_ and opts_.time) or 0) --[[:! number]]
   math.randomseed(t + math.random(0, 65535))
   local bytes = {}
   for i = 1, nbytes do
@@ -186,7 +188,8 @@ end
 -- code: string like "123456"
 -- opts: { window = 1, period = 30, time = <required> }
 -- Returns: true or false
-function M.verify(secret, code, opts --[[:! VerifyOpts | nil]])
+--: (unknown, unknown, VerifyOpts | nil) -> boolean
+function M.verify(secret, code, opts)
   if type(secret) ~= "string" or type(code) ~= "string" then
     return false
   end
@@ -194,17 +197,17 @@ function M.verify(secret, code, opts --[[:! VerifyOpts | nil]])
   if not key then return false end
   local key_ = tostring(key)
 
-  local opts_ = opts --[[:! VerifyOpts | nil]]
+  local opts_ = opts
   local window = ((opts_ and opts_.window) or 1) --[[:! integer]]
   local period = ((opts_ and opts_.period) or 30) --[[:! number]]
-  local t = (opts_ and opts_.time) or 0 --[[:! number]]
+  local t = ((opts_ and opts_.time) or 0) --[[:! number]]
   local step = math.floor(t / period)
 
   for delta = -window, window do
     local otp, e = M.hotp(key_, step + delta, ({
       digits = (opts_ and opts_.digits) or 6,
       alg    = (opts_ and opts_.alg) or "sha1",
-    } --[[: unknown]]) --[[:! { alg?: string, digits?: integer, period?: number }]])
+    } --[[: unknown]]) --[[:! HotpOpts]])
     if otp and otp == code then
       return true
     end

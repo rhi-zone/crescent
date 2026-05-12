@@ -48,7 +48,7 @@ local function modpow(base, exp, m)
   while exp_ > 0 do
     if exp_ % 2 == 1 then result = (result * base) % m end
     base = (base * base) % m
-    exp_ = math.floor(exp_ / 2) --[[:! integer]]
+    exp_ = math.floor(exp_ / 2)
   end
   return result
 end

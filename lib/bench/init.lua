@@ -230,7 +230,7 @@ function M.run(fn, opts)
     local single = clock() - s0
     if single < 100 then
       -- aim for ~10µs per batch sample
-      batch = math.max(1, math.floor(10000 / math.max(1, single))) --[[:! integer]]
+      batch = math.max(1, math.floor(10000 / math.max(1, single)))
     else
       batch = 1
     end

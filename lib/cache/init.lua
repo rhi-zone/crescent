@@ -22,7 +22,7 @@ function M.new(capacity, opts)
   if type(capacity) ~= "number" or capacity < 1 then
     return nil, "capacity must be a positive number"
   end
-  capacity = math.floor(capacity) --[[:! integer]]
+  capacity = math.floor(capacity)
   local self = setmetatable({
     _cap = capacity,
     _size = 0,
@@ -267,7 +267,7 @@ function Cache:resize(new_cap)
   if type(new_cap) ~= "number" or new_cap < 1 then
     return nil, "capacity must be a positive number"
   end
-  new_cap = math.floor(new_cap) --[[:! integer]]
+  new_cap = math.floor(new_cap)
   while self_._size > new_cap do
     _evict_tail(self_)
   end

@@ -488,12 +488,12 @@ function M.encode_oid(oid_string)
 
   local buf = {} --: { [integer]: string }
   -- First two components: combined as 40*c1 + c2
-  local first_byte = math.floor(parts[1] * 40 + parts[2]) --[[:! integer]]
+  local first_byte = math.floor(parts[1] * 40 + parts[2])
   buf[#buf + 1] = char(first_byte)
 
   -- Remaining components: base-128 big-endian, MSB set on all but last byte
   for i = 3, #parts do
-    local v = math.floor(parts[i]) --[[:! integer]]
+    local v = math.floor(parts[i])
     if v == 0 then
       buf[#buf + 1] = char(0)
     else

@@ -316,7 +316,7 @@ M.row = function(widgets, opts)
         if i == #widgets_ then
           cell_w = w - used
         else
-          cell_w = math.floor(w * f / total_flex) --[[:! integer]]
+          cell_w = math.floor(w * f / total_flex)
         end
         widths[i] = clamp(cell_w, 0, w - used)
         used = used + widths[i]
@@ -377,7 +377,7 @@ M.col = function(widgets, opts)
         if i == #widgets_ then
           cell_h = h - used
         else
-          cell_h = math.floor(h * f / total_flex) --[[:! integer]]
+          cell_h = math.floor(h * f / total_flex)
         end
         heights[i] = clamp(cell_h, 0, h - used)
         used = used + heights[i]

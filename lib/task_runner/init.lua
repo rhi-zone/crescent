@@ -164,7 +164,7 @@ function M.new(opts)
           ok, value_or_err = true, true
         end
 
-        local duration_ms = math.floor((runner__._clock_fn() - t0) * 1000 + 0.5) --[[:! integer]]
+        local duration_ms = math.floor((runner__._clock_fn() - t0) * 1000 + 0.5)
 
         if ok then
           local result = { ok = true, value = value_or_err, err = nil, duration_ms = duration_ms } --[[:! TaskResult]]

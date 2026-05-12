@@ -36,13 +36,13 @@ end
 -- Number of uint32 words needed to hold `size` bits
 --: (integer) -> integer
 local function words_for(size)
-  return math.floor((size + 31) / 32) --[[:! integer]]
+  return math.floor((size + 31) / 32)
 end
 
 -- Set bit `idx` (0-based) in the filter array
 --: ({ [integer]: integer }, integer) -> nil
 local function set_bit(filter, idx)
-  local word = math.floor(idx / 32) + 1 --[[:! integer]]
+  local word = math.floor(idx / 32) + 1
   local bit_pos = idx % 32
   filter[word] = bor(filter[word] or 0, lshift(1, bit_pos))
 end
@@ -50,7 +50,7 @@ end
 -- Test bit `idx` (0-based) in the filter array
 --: ({ [integer]: integer }, integer) -> boolean
 local function test_bit(filter, idx)
-  local word = math.floor(idx / 32) + 1 --[[:! integer]]
+  local word = math.floor(idx / 32) + 1
   local bit_pos = idx % 32
   return band(filter[word] or 0, lshift(1, bit_pos)) ~= 0
 end

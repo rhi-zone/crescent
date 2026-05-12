@@ -48,7 +48,7 @@ local function _rand_hex(n, rng_state_ref)
     local nibble = val % 16 --[[:! integer]]
     local pos = (nibble + 1) --[[:! integer]]
     t[i] = _hex:sub(pos, pos)
-    val  = math.floor(val / 16) --[[:! integer]]
+    val  = math.floor(val / 16)
     bits = bits - 4
   end
   rng_state_ref[1] = s
