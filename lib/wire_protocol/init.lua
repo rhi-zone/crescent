@@ -630,25 +630,25 @@ function M.framer(codec)
   fr_._pending = {}
 
   --- Encode a message and buffer it.
+  --: (Framer, unknown) -> (boolean | nil, string | nil)
   function fr_:write(msg)
-    local s = self --[[:! Framer]]
-    local frame, err = s._codec:encode(msg)
+    local frame, err = self._codec:encode(msg)
     if not frame then return nil, err end
-    s._pending[#s._pending + 1] = frame
+    self._pending[#self._pending + 1] = frame
     return true
   end
 
   --- Return all buffered bytes as a single string (without clearing).
+  --: (Framer) -> string
   function fr_:pending()
-    local s = self --[[:! Framer]]
-    return concat(s._pending)
+    return concat(self._pending)
   end
 
   --- Return and clear all buffered bytes.
+  --: (Framer) -> string
   function fr_:flush()
-    local s = self --[[:! Framer]]
-    local out = concat(s._pending)
-    s._pending = {}
+    local out = concat(self._pending)
+    self._pending = {}
     return out
   end
 
@@ -672,31 +672,31 @@ function M.receiver(codec)
   rv_._head = 1
 
   --- Feed bytes into the receiver.
+  --: (Receiver, string) -> (boolean | nil, string | nil)
   function rv_:feed(data)
-    local s = self --[[:! Receiver]]
-    s._dec:feed(data)
-    local msgs, err = s._dec:messages()
+    self._dec:feed(data)
+    local msgs, err = self._dec:messages()
     if not msgs then return nil, err end
     local msgs_ = msgs --[[:! { [integer]: string }]]
     for i = 1, #msgs_ do
-      s._queue[#s._queue + 1] = msgs_[i]
+      self._queue[#self._queue + 1] = msgs_[i]
     end
     return true
   end
 
   --- Returns true if at least one complete message is available.
+  --: (Receiver) -> boolean
   function rv_:has_message()
-    local s = self --[[:! Receiver]]
-    return s._head <= #s._queue
+    return self._head <= #self._queue
   end
 
   --- Return the next complete message (or nil if none).
+  --: (Receiver) -> string | nil
   function rv_:next()
-    local s = self --[[:! Receiver]]
-    if s._head > #s._queue then return nil end
-    local msg = s._queue[s._head]
-    s._queue[s._head] = nil --[[: unknown]]
-    s._head = s._head + 1
+    if self._head > #self._queue then return nil end
+    local msg = self._queue[self._head]
+    self._queue[self._head] = nil --[[: unknown]]
+    self._head = self._head + 1
     return msg
   end
 

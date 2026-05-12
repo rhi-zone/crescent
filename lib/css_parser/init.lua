@@ -450,22 +450,22 @@ local function new_selector_parser(s)
   return p_ --[[:! SelParser]]
 end
 
+--: (SelParser) -> CssToken
 function SelectorParser:peek()
-  local self_ = self --[[:! SelParser]]
-  return self_.tokens[self_.pos]
+  return self.tokens[self.pos]
 end
 
+--: (SelParser) -> CssToken
 function SelectorParser:consume()
-  local self_ = self --[[:! SelParser]]
-  local t = self_.tokens[self_.pos]
-  self_.pos = self_.pos + 1
+  local t = self.tokens[self.pos]
+  self.pos = self.pos + 1
   return t
 end
 
+--: (SelParser) -> nil
 function SelectorParser:skip_ws()
-  local self_ = self --[[:! SelParser]]
-  while self_.tokens[self_.pos] and self_.tokens[self_.pos].type == "ws" do
-    self_.pos = self_.pos + 1
+  while self.tokens[self.pos] and self.tokens[self.pos].type == "ws" do
+    self.pos = self.pos + 1
   end
 end
 
@@ -621,30 +621,30 @@ local function new_token_stream(tokens)
   return s_ --[[:! TokStream]]
 end
 
+--: (TokStream) -> CssStyleToken
 function TokenStream:peek()
-  local self_ = self --[[:! TokStream]]
-  return self_.tokens[self_.pos]
+  return self.tokens[self.pos]
 end
 
+--: (TokStream) -> CssStyleToken
 function TokenStream:consume()
-  local self_ = self --[[:! TokStream]]
-  local t = self_.tokens[self_.pos]
-  self_.pos = self_.pos + 1
+  local t = self.tokens[self.pos]
+  self.pos = self.pos + 1
   return t
 end
 
+--: (TokStream) -> nil
 function TokenStream:skip_ws()
-  local self_ = self --[[:! TokStream]]
-  while self_.tokens[self_.pos] and self_.tokens[self_.pos].type == "whitespace" do
-    self_.pos = self_.pos + 1
+  while self.tokens[self.pos] and self.tokens[self.pos].type == "whitespace" do
+    self.pos = self.pos + 1
   end
 end
 
+--: (TokStream) -> CssStyleToken
 function TokenStream:peek_nonws()
-  local self_ = self --[[:! TokStream]]
-  local j = self_.pos
-  while self_.tokens[j] and self_.tokens[j].type == "whitespace" do j = j + 1 end
-  return self_.tokens[j]
+  local j = self.pos
+  while self.tokens[j] and self.tokens[j].type == "whitespace" do j = j + 1 end
+  return self.tokens[j]
 end
 
 -- Read tokens into a string until a given token type is found (not consumed)
