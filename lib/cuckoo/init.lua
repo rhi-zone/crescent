@@ -107,9 +107,8 @@ end
 -- Compute fingerprint and two bucket indices for element s.
 --: (CuckooFilter, string) -> (integer, integer, integer)
 local function fingerprints(self, s)
-  local self_ = self --[[:! CuckooFilter]]
-  local fp_mask = self_._fp_mask
-  local num_buckets = self_._num_buckets
+  local fp_mask = self._fp_mask
+  local num_buckets = self._num_buckets
   local fp = band(fnv1a32(s, 0xdeadbeef), fp_mask)
   if fp == 0 then fp = 1 end  -- 0 is reserved for empty slots
 
@@ -122,31 +121,30 @@ end
 -- Alternate bucket given current bucket index and fingerprint.
 --: (CuckooFilter, integer, integer) -> integer
 local function alt_index(self, i, fp)
-  local self_ = self --[[:! CuckooFilter]]
-  return band(bxor(i, band(hash_fp(fp), self_._num_buckets - 1)), self_._num_buckets - 1)
+  return band(bxor(i, band(hash_fp(fp), self._num_buckets - 1)), self._num_buckets - 1)
 end
 
+--: (CuckooFilter, unknown) -> (boolean | nil, string | nil)
 function Filter:insert(element)
-  local self_ = self --[[:! CuckooFilter]]
   local s = to_key(element)
-  local fp, i1, i2 = fingerprints(self_, s)
-  local data = self_._data
-  local bs = self_._bucket_size
+  local fp, i1, i2 = fingerprints(self, s)
+  local data = self._data
+  local bs = self._bucket_size
 
   -- Try direct insert into i1 or i2.
   if bucket_insert(data, i1 * bs, bs, fp) then
-    self_._count = self_._count + 1
+    self._count = self._count + 1
     return true
   end
   if bucket_insert(data, i2 * bs, bs, fp) then
-    self_._count = self_._count + 1
+    self._count = self._count + 1
     return true
   end
 
   -- Both full — cuckoo eviction loop.
   -- Randomly pick starting bucket (deterministic: use i1 ^ fp for spread).
   local i = (band(i1 + fp, 1) == 0) and i1 or i2
-  local max_kicks = self_._max_kicks
+  local max_kicks = self._max_kicks
   for _ = 1, max_kicks do
     -- Evict a random (deterministic) entry from bucket i.
     -- Pick slot via a simple rotation based on current fp.
@@ -156,9 +154,9 @@ function Filter:insert(element)
     data[base + slot] = fp
     fp = evicted
     -- Move evicted fingerprint to its alternate bucket.
-    i = alt_index(self_, i, fp)
+    i = alt_index(self, i, fp)
     if bucket_insert(data, i * bs, bs, fp) then
-      self_._count = self_._count + 1
+      self._count = self._count + 1
       return true
     end
   end
@@ -167,60 +165,60 @@ function Filter:insert(element)
   return nil, "full"
 end
 
+--: (CuckooFilter, unknown) -> boolean
 function Filter:contains(element)
-  local self_ = self --[[:! CuckooFilter]]
   local s = to_key(element)
-  local fp, i1, i2 = fingerprints(self_, s)
-  local data = self_._data
-  local bs = self_._bucket_size
+  local fp, i1, i2 = fingerprints(self, s)
+  local data = self._data
+  local bs = self._bucket_size
   return bucket_find(data, i1 * bs, bs, fp) ~= nil
       or bucket_find(data, i2 * bs, bs, fp) ~= nil
 end
 
+--: (CuckooFilter, unknown) -> boolean
 function Filter:delete(element)
-  local self_ = self --[[:! CuckooFilter]]
   local s = to_key(element)
-  local fp, i1, i2 = fingerprints(self_, s)
-  local data = self_._data
-  local bs = self_._bucket_size
+  local fp, i1, i2 = fingerprints(self, s)
+  local data = self._data
+  local bs = self._bucket_size
   if bucket_delete(data, i1 * bs, bs, fp) then
-    self_._count = self_._count - 1
+    self._count = self._count - 1
     return true
   end
   if bucket_delete(data, i2 * bs, bs, fp) then
-    self_._count = self_._count - 1
+    self._count = self._count - 1
     return true
   end
   return false
 end
 
+--: (CuckooFilter) -> integer
 function Filter:count()
-  local self_ = self --[[:! CuckooFilter]]
-  return self_._count
+  return self._count
 end
 
+--: (CuckooFilter) -> integer
 function Filter:capacity()
-  local self_ = self --[[:! CuckooFilter]]
-  return self_._capacity
+  return self._capacity
 end
 
+--: (CuckooFilter) -> number
 function Filter:false_positive_rate()
   -- Theoretical FPR: (1 - (1 - 1/2^f)^(2*b))
   -- where f = fingerprint bits, b = bucket size.
   -- Approximation: 2b / 2^f
-  local self_ = self --[[:! CuckooFilter]]
-  local f = self_._fp_bits
-  local b = self_._bucket_size
+  local f = self._fp_bits
+  local b = self._bucket_size
   return (2 * b) / (2 ^ f)
 end
 
+--: (CuckooFilter) -> number
 function Filter:load_factor()
-  local self_ = self --[[:! CuckooFilter]]
-  local total = self_._num_buckets * self_._bucket_size
+  local total = self._num_buckets * self._bucket_size
   if total == 0 then return 0 end
   -- Count actual filled slots by scanning (data is 0-indexed).
   local filled = 0
-  local data = self_._data
+  local data = self._data
   for i = 0, total - 1 do
     if data[i] ~= 0 then filled = filled + 1 end
   end
@@ -236,14 +234,14 @@ end
 -- for byte-aligned simplicity (simplifies round-trip). Total = num_buckets*bucket_size
 -- entries * bytes_per_fp bytes.
 
+--: (CuckooFilter) -> string
 function Filter:serialize()
-  local self_ = self --[[:! CuckooFilter]]
-  local nb = self_._num_buckets
-  local bs = self_._bucket_size
-  local fp_bits = self_._fp_bits
-  local max_kicks = self_._max_kicks
-  local count = self_._count
-  local data = self_._data
+  local nb = self._num_buckets
+  local bs = self._bucket_size
+  local fp_bits = self._fp_bits
+  local max_kicks = self._max_kicks
+  local count = self._count
+  local data = self._data
   local total = nb * bs
 
   -- Bytes per fingerprint: 1 for 4/8 bits, 2 for 16 bits.
