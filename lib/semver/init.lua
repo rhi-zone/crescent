@@ -70,19 +70,15 @@ local function cmp_prerelease(a_ids, b_ids)
 		if ai == nil then return -1 end -- shorter < longer
 		if bi == nil then return 1 end
 		if type(ai) == "number" and type(bi) == "number" then
-			local ain = ai --[[:! number]]
-			local bin = bi --[[:! number]]
-			if ain < bin then return -1 end
-			if ain > bin then return 1 end
+			if ai < bi then return -1 end
+			if ai > bi then return 1 end
 		elseif type(ai) == "number" then
 			return -1 -- numeric < string
 		elseif type(bi) == "number" then
 			return 1
 		else
-			local ais = ai --[[:! string]]
-			local bis = bi --[[:! string]]
-			if ais < bis then return -1 end
-			if ais > bis then return 1 end
+			if ai < bi then return -1 end
+			if ai > bi then return 1 end
 		end
 	end
 	return 0
