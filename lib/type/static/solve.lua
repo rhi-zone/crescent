@@ -2490,9 +2490,24 @@ local function solve_overlap(ctx, c)
     local actual   = find(ctx, c[2] --[[:! integer]])
     local expected = find(ctx, c[3] --[[:! integer]])
     local line, col = c[4] --[[:! integer | nil]], c[5] --[[:! integer | nil]]
-    -- Emit the FORCE_CAST warning exactly once per source site, regardless of
-    -- whether we defer.  Use a (line, col) key so re-tries after type-variable
-    -- resolution do not produce duplicate diagnostics.
+    -- Defer if either side is still a free type variable: the answer would be
+    -- determined by whatever the var binds to next, not by the user's program.
+    -- Do NOT emit the warning yet — the actual type may resolve to exactly the
+    -- cast target (making the cast genuinely redundant), and we should only
+    -- warn once the actual type is concrete.
+    do
+        local at = ctx.types:get(actual)
+        local bt = ctx.types:get(expected)
+        if at.tag == TAG_VAR or at.tag == TAG_ROWVAR then return false end
+        if bt.tag == TAG_VAR or bt.tag == TAG_ROWVAR then return false end
+    end
+    -- If the actual type is already assignable to the expected type, the force
+    -- cast is completely redundant — no warning needed, just silently succeed.
+    if unify_mod.try_unify(ctx, actual, expected) then return true end
+    -- Actual type is concrete but NOT already assignable to expected.
+    -- Emit the FORCE_CAST warning exactly once per source site.  Use a
+    -- (line, col) key so re-tries after type-variable resolution do not
+    -- produce duplicate diagnostics.
     do
         local key = (line or 0) * 100000 + (col or 0)
         if not ctx._overlap_warned then ctx._overlap_warned = {} end
@@ -2500,14 +2515,6 @@ local function solve_overlap(ctx, c)
             ctx._overlap_warned[key] = true
             add_warning_code(ctx, line, col, defs.E.FORCE_CAST)
         end
-    end
-    -- Defer if either side is still a free type variable: the answer would be
-    -- determined by whatever the var binds to next, not by the user's program.
-    do
-        local at = ctx.types:get(actual)
-        local bt = ctx.types:get(expected)
-        if at.tag == TAG_VAR or at.tag == TAG_ROWVAR then return false end
-        if bt.tag == TAG_VAR or bt.tag == TAG_ROWVAR then return false end
     end
     if unify_mod.types_overlap(ctx, actual, expected) then return true end
     add_error(ctx, line, col,

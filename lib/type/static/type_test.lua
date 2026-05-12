@@ -10953,10 +10953,21 @@ local y = x
         no_errors("--:: declare v = unknown\nlocal x = v --[[:! string]]\n")
     end)
 
-    assert.it("E: --[[:! T]] force cast always emits FORCE_CAST warning", function()
-        -- Force cast emits a warning regardless of whether the cast succeeds.
+    assert.it("E: --[[:! T]] force cast emits FORCE_CAST warning when cast is not redundant", function()
+        -- Force cast emits a warning when actual type is not already assignable to expected.
         has_warning("--:: declare y = unknown\nlocal x = y --[[:! string]]\n",
             "force cast")
+    end)
+
+    assert.it("E2: --[[:! T]] redundant force cast on typed function return has no warning", function()
+        -- When a function is declared to return T and the call site uses --[[:! T]],
+        -- the cast is genuinely redundant — no warning should fire even though the
+        -- return type variable is unresolved at constraint-generation time.
+        no_errors(
+            "--: (number) -> integer\n" ..
+            "local function floor(x) return math.floor(x) end\n" ..
+            "local a = floor(1.5) --[" .. "[:! integer" .. "]]\n"
+        )
     end)
 
     -- F: ---@param (triple-dash EmmyLua form) is not a crescent annotation
