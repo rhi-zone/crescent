@@ -47,7 +47,7 @@ mod.read_literal = function(s, i)
 	local _, end_, length_raw = s:find("{(%d+)+?}", i)
 	if not end_ then return nil, nil, "imap: literal string is missing length" end
 	local ni = end_ + 1
-	local length = tonumber(length_raw --[[:! string]])
+	local length = tonumber(length_raw)
 	if not length then return nil, nil, "imap: literal: invalid length" end
 	local ilen = length --[[:! integer]]
 	if length > maxint then
@@ -55,7 +55,7 @@ mod.read_literal = function(s, i)
 			ffi = require("ffi")
 			ffi.cdef [[ long long atoll(const char *str); ]]
 		end
-		ilen = (ffi --[[:! { C: { atoll: (string) -> integer } }]]).C.atoll(length_raw --[[:! string]])
+		ilen = (ffi --[[:! { C: { atoll: (string) -> integer } }]]).C.atoll(length_raw)
 	end
 	return s:sub(ni, ni + ilen - 1), ni + ilen, nil
 end
@@ -109,9 +109,9 @@ mod.read_date_time = function(s, i)
 		"\"([ %d]%d)-([a-z][a-z][a-z])-(%d%d%d%d) (%d%d):(%d%d):(%d%d) ([+-])(%d%d)(%d%d)\"")
 	if not end_ then return nil, nil, "imap: date_time: invalid" end
 	local ret = {
-		day = day --[[:! string]], month = month --[[:! string]], year = year --[[:! string]],
-		hour = hour --[[:! string]], minute = minute --[[:! string]], second = second --[[:! string]],
-		zone = { sign = zone_sign --[[:! string]], hour = zone_hour --[[:! string]], minute = zone_minute --[[:! string]] }
+		day = day, month = month, year = year,
+		hour = hour, minute = minute, second = second,
+		zone = { sign = zone_sign, hour = zone_hour, minute = zone_minute }
 	} --: imap_date_time
 	return ret, end_ + 1, nil
 end
