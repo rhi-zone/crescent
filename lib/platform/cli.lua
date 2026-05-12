@@ -563,7 +563,7 @@ local function make_dir_loader(app_dir, env)
 	-- Build the module prefix that corresponds to app_dir so that fully-qualified
 	-- sibling requires like require("lib.platform.apps.charactercardv2.presets")
 	-- resolve to "presets.lua" inside the app dir instead of a double path.
-	local dir_prefix = ((app_dir_s:gsub("^%./", "")):gsub("/", ".")) --[[:! string]]
+	local dir_prefix = (app_dir_s:gsub("^%./", "")):gsub("/", ".")
 	dir_prefix = dir_prefix .. "."
 	return function(modname)
 		if loaded[modname] then return function() return loaded[modname] end end

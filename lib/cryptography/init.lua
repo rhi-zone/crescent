@@ -963,7 +963,7 @@ function M.chacha20_poly1305_decrypt(key, nonce, ciphertext_with_tag, aad)
 
 	local pt, pt_err = M.chacha20(key, nonce, 1, ciphertext)
 	if not pt then return nil, pt_err end
-	return pt --[[:! string]]
+	return pt
 end
 
 -- ── Constant-time comparison ─────────────────────────────────────────────────

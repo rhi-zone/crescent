@@ -29,7 +29,7 @@ local ESCAPE_MAP = {
 local function escape(s)
 	local map = ESCAPE_MAP --[[:! { [string]: string }]]
 	local r, _ = s:gsub("[&<>\"']", map)
-	return r --[[:! string]]
+	return r
 end
 M.escape = escape
 

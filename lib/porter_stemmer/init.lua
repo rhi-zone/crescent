@@ -589,7 +589,7 @@ end
 --: (string) -> string
 function M.normalize(word)
   local result = lower(word):gsub("[^a-z]", "")
-  return result --[[:! string]]
+  return result
 end
 
 -- ---------------------------------------------------------------------------
