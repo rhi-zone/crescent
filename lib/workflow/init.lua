@@ -59,19 +59,19 @@ function M.define(opts)
 
   -- Validate definition: check for missing step references, detect unreachable steps.
   -- Returns true, nil on success; false, {errmsg,...} on failure.
+  --: (WfDef) -> (boolean, { [integer]: string } | nil)
   function wf:validate()
-    local self_ = self --[[:! WfDef]]
     local errs = {} --: { [integer]: string }
     local reachable = {} --: { [string]: boolean }
     local queue = {} --: { [integer]: string }
 
-    if not self_._start then
+    if not self._start then
       errs[#errs+1] = "no start step defined"
-    elseif not self_._steps[self_._start] then
-      local start_ = self_._start --[[:! string]]
+    elseif not self._steps[self._start] then
+      local start_ = self._start --[[:! string]]
       errs[#errs+1] = "start step '" .. start_ .. "' not found"
     else
-      queue[#queue+1] = self_._start
+      queue[#queue+1] = self._start
     end
 
     -- BFS over steps reachable from start
@@ -82,7 +82,7 @@ function M.define(opts)
       if not visited[name] then
         visited[name] = true
         reachable[name] = true
-        local step = self_._steps[name]
+        local step = self._steps[name]
         if not step then
           errs[#errs+1] = "step '" .. name .. "' referenced but not defined"
         else
@@ -97,7 +97,7 @@ function M.define(opts)
     end
 
     -- Check for steps defined but not reachable
-    for name in pairs(self_._steps) do
+    for name in pairs(self._steps) do
       if not reachable[name] then
         errs[#errs+1] = "step '" .. name .. "' is unreachable from start"
       end
@@ -110,12 +110,12 @@ function M.define(opts)
   end
 
   -- Create a new workflow instance with optional initial context.
+  --: (WfDef, unknown) -> WfInst
   function wf:start(ctx)
-    local self_ = self --[[:! WfDef]]
     local inst = {
-      _wf      = self_,
+      _wf      = self,
       status   = "pending",
-      current  = self_._start,
+      current  = self._start,
       context  = ctx and deep_copy(ctx) or {},
       history  = {},
       error    = nil,
@@ -124,12 +124,12 @@ function M.define(opts)
     -- Run a single named step (internal helper).
     -- Returns "done", "advance", next_step, or "failed", errmsg.
     local function run_step(name)
-      local step = self_._steps[name]
+      local step = self._steps[name]
       if not step then
         return "failed", "step '" .. name .. "' not found"
       end
 
-      fire(self_._hooks.step_start, inst, name)
+      fire(self._hooks.step_start, inst, name)
 
       local max_tries = 1 + (step.retry or 0)
       local last_err
@@ -155,9 +155,9 @@ function M.define(opts)
           result    = nil,
           error     = last_err,
           retries   = step.retry or 0,
-          timestamp = self_._time_fn(),
+          timestamp = self._time_fn(),
         }
-        fire(self_._hooks.step_failed, inst, name, last_err)
+        fire(self._hooks.step_failed, inst, name, last_err)
         if step.on_failure then
           return "advance", step.on_failure
         end
@@ -170,9 +170,9 @@ function M.define(opts)
         result    = result,
         error     = nil,
         retries   = 0,
-        timestamp = self_._time_fn(),
+        timestamp = self._time_fn(),
       }
-      fire(self_._hooks.step_done, inst, name, result)
+      fire(self._hooks.step_done, inst, name, result)
 
       -- Determine next step
       if type(result) == "string" then
@@ -207,41 +207,41 @@ function M.define(opts)
     -- Advance one step.
     -- Returns true, nil on success (step completed, workflow still running or done).
     -- Returns nil, errmsg if the workflow fails.
+    --: (WfInst) -> (boolean | nil, string | nil)
     function inst:step()
-      local self_ = self --[[:! WfInst]]
-      if self_.status == "done" or self_.status == "failed" then
-        return nil, "workflow already " .. self_.status
+      if self.status == "done" or self.status == "failed" then
+        return nil, "workflow already " .. self.status
       end
-      self_.status = "running"
+      self.status = "running"
 
-      local action, val = run_step(self_.current --[[:! string]])
+      local action, val = run_step(self.current --[[:! string]])
 
       if action == "done" then
-        self_.current = nil
-        self_.status = "done"
-        fire(self_._wf._hooks.complete, self_)
+        self.current = nil
+        self.status = "done"
+        fire(self._wf._hooks.complete, self)
         return true, nil
       elseif action == "advance" then
-        self_.current = val
+        self.current = val
         return true, nil
       else
         -- "failed"
-        self_.status = "failed"
-        self_.error  = val
-        self_.current = nil
+        self.status = "failed"
+        self.error  = val
+        self.current = nil
         return nil, val
       end
     end
 
     -- Run all steps until done or failed.
+    --: (WfInst) -> (boolean | nil, string | nil)
     function inst:run()
-      local self_ = self --[[:! WfInst]]
-      while self_.status ~= "done" and self_.status ~= "failed" do
-        local ok, err = inst.step(self_)
+      while self.status ~= "done" and self.status ~= "failed" do
+        local ok, err = inst.step(self)
         if not ok then return nil, err end
       end
-      if self_.status == "failed" then
-        return nil, self_.error
+      if self.status == "failed" then
+        return nil, self.error
       else
         return true, nil
       end

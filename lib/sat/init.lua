@@ -288,42 +288,42 @@ function M.formula()
 end
 
 --- Declare a named variable; returns its positive literal id.
+--: (FormulaObj, string) -> integer
 function Formula:var(name)
-  local self_ = self --[[:! FormulaObj]]
-  if self_._vars[name] then return self_._vars[name] end
-  self_._nvars = self_._nvars + 1
-  local id = self_._nvars
-  self_._vars[name] = id
+  if self._vars[name] then return self._vars[name] end
+  self._nvars = self._nvars + 1
+  local id = self._nvars
+  self._vars[name] = id
   return id
 end
 
 --- Add a clause (vararg literals).
+--: (FormulaObj, ...integer) -> nil
 function Formula:clause(...)
-  local self_ = self --[[:! FormulaObj]]
   local lits = { ... }
-  self_._clauses[#self_._clauses + 1] = lits --[[:! { [integer]: integer }]]
+  self._clauses[#self._clauses + 1] = lits --[[:! { [integer]: integer }]]
 end
 
 --- Solve and return { sat, assignment? } with named variables.
+--: (FormulaObj) -> { sat: boolean, assignment: { [string]: boolean } | nil }
 function Formula:solve()
-  local self_ = self --[[:! FormulaObj]]
-  local raw = M.solve({ clauses = self_._clauses, vars = self_._nvars })
+  local raw = M.solve({ clauses = self._clauses, vars = self._nvars })
   if not raw.sat then return { sat = false, assignment = nil } end
   local named = {} --[[:! { [string]: boolean }]]
-  for name, id in pairs(self_._vars) do
+  for name, id in pairs(self._vars) do
     named[name] = ((raw.assignment --[[:! { [integer]: boolean }]])[id])
   end
   return { sat = true, assignment = named }
 end
 
 --- Enumerate all solutions with named variables.
+--: (FormulaObj) -> { [integer]: { [string]: boolean } }
 function Formula:solve_all()
-  local self_ = self --[[:! FormulaObj]]
-  local raws = M.solve_all({ clauses = self_._clauses, vars = self_._nvars }, nil)
+  local raws = M.solve_all({ clauses = self._clauses, vars = self._nvars }, nil)
   local results = {}
   for i = 1, #raws do
     local named = {} --[[:! { [string]: boolean }]]
-    for name, id in pairs(self_._vars) do
+    for name, id in pairs(self._vars) do
       named[name] = raws[i][id]
     end
     results[i] = named

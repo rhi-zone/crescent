@@ -37,19 +37,19 @@ local function new_state()
   return st --[[:! TokState]]
 end
 
+--: (TokState, string) -> nil
 function State:push(mode)
-  local self_ = self --[[:! TokState]]
-  self_._stack[#self_._stack + 1] = mode
+  self._stack[#self._stack + 1] = mode
 end
 
+--: (TokState) -> nil
 function State:pop()
-  local self_ = self --[[:! TokState]]
-  self_._stack[#self_._stack] = nil
+  self._stack[#self._stack] = nil
 end
 
+--: (TokState) -> string | nil
 function State:current()
-  local self_ = self --[[:! TokState]]
-  return self_._stack[#self_._stack]
+  return self._stack[#self._stack]
 end
 
 -- ---------------------------------------------------------------------------
@@ -132,8 +132,8 @@ end
 -- Returns: array of token tables, or nil + error table.
 -- ---------------------------------------------------------------------------
 
+--: (TokLexer, string) -> unknown
 function Lexer:tokenize(input)
-  local self_ = self --[[:! TokLexer]]
   local tokens = {}
   local state  = new_state()
   local pos    = 1
@@ -144,7 +144,7 @@ function Lexer:tokenize(input)
   while pos <= len do
     -- Determine which lexer to use based on current mode.
     local mode      = state:current()
-    local active    = (mode and self_._modes[mode]) or self_
+    local active    = (mode and self._modes[mode]) or self
     local rules     = active._rules
     local keywords  = active._keywords
 
@@ -169,12 +169,12 @@ function Lexer:tokenize(input)
       end
       -- Reclassify IDENT as keyword if applicable.
       local effective_type = ttype
-      if ttype == "IDENT" and self_._keywords[matched] then
+      if ttype == "IDENT" and self._keywords[matched] then
         effective_type = matched
       end
       -- Also reclassify from sublexer's keywords.
-      if mode and self_._modes[mode] then
-        local sub = self_._modes[mode]
+      if mode and self._modes[mode] then
+        local sub = self._modes[mode]
         if ttype == "IDENT" and sub._keywords[matched] then
           effective_type = matched
         end
