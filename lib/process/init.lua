@@ -171,14 +171,12 @@ handle.__index = handle
 
 --: (self: Process, integer | nil) -> nil
 function handle:kill(signal)
-  local self_ = self --[[:! Process]]
-  ffi.C.kill(self_.pid, signal or SIGTERM)
+  ffi.C.kill(self.pid, signal or SIGTERM)
 end
 
 --: (self: Process) -> integer
 function handle:wait()
-  local self_ = self --[[:! Process]]
-  ffi.C.waitpid(self_.pid, int1, 0)
+  ffi.C.waitpid(self.pid, int1, 0)
   return decode_status(int1[0])
 end
 
