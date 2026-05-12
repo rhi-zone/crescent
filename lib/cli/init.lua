@@ -32,10 +32,10 @@ local normalize --: ((CmdSpec) -> nil) | nil
 normalize = function(spec)
 	spec.name = spec.name or "app"
 	spec.desc = spec.desc or ""
-	local flags_ = spec.flags or {} --[[:! { [string]: FlagSpec }]]
-	local options_ = spec.options or {} --[[:! { [string]: OptionSpec }]]
-	local positionals_ = spec.positionals or {} --[[:! { [integer]: PosSpec }]]
-	local commands_ = spec.commands or {} --[[:! { [string]: CmdSpec }]]
+	local flags_ = spec.flags or {} --[[: { [string]: FlagSpec }]]
+	local options_ = spec.options or {} --[[: { [string]: OptionSpec }]]
+	local positionals_ = spec.positionals or {} --[[: { [integer]: PosSpec }]]
+	local commands_ = spec.commands or {} --[[: { [string]: CmdSpec }]]
 	spec.flags = flags_
 	spec.options = options_
 	spec.positionals = positionals_
@@ -97,10 +97,10 @@ end
 
 --: (CmdSpec, string|nil) -> string
 local function generate_help(spec, program_name)
-	local flags_ = spec.flags or {} --[[:! { [string]: FlagSpec }]]
-	local options_ = spec.options or {} --[[:! { [string]: OptionSpec }]]
-	local positionals_ = spec.positionals or {} --[[:! { [integer]: PosSpec }]]
-	local commands_ = spec.commands or {} --[[:! { [string]: CmdSpec }]]
+	local flags_ = spec.flags or {} --[[: { [string]: FlagSpec }]]
+	local options_ = spec.options or {} --[[: { [string]: OptionSpec }]]
+	local positionals_ = spec.positionals or {} --[[: { [integer]: PosSpec }]]
+	local commands_ = spec.commands or {} --[[: { [string]: CmdSpec }]]
 	local parts = {} --: { [integer]: string }
 	local pname = program_name or spec.name
 
@@ -220,10 +220,10 @@ end
 
 --: (CmdSpec, { [integer]: string }, string|nil) -> ({ [string]: unknown }|nil, string|nil)
 local function parse_spec(spec, argv, program_name)
-	local flags_ = spec.flags or {} --[[:! { [string]: FlagSpec }]]
-	local options_ = spec.options or {} --[[:! { [string]: OptionSpec }]]
-	local positionals_ = spec.positionals or {} --[[:! { [integer]: PosSpec }]]
-	local commands_ = spec.commands or {} --[[:! { [string]: CmdSpec }]]
+	local flags_ = spec.flags or {} --[[: { [string]: FlagSpec }]]
+	local options_ = spec.options or {} --[[: { [string]: OptionSpec }]]
+	local positionals_ = spec.positionals or {} --[[: { [integer]: PosSpec }]]
+	local commands_ = spec.commands or {} --[[: { [string]: CmdSpec }]]
 	local args = {} --: { [string]: unknown }
 	local pos_index = 1
 	local dashdash = false
@@ -409,8 +409,8 @@ end
 
 --: (CmdSpec) -> string
 local function completions_zsh(spec)
-	local flags_ = spec.flags or {} --[[:! { [string]: FlagSpec }]]
-	local options_ = spec.options or {} --[[:! { [string]: OptionSpec }]]
+	local flags_ = spec.flags or {} --[[: { [string]: FlagSpec }]]
+	local options_ = spec.options or {} --[[: { [string]: OptionSpec }]]
 	local name = spec.name
 	local parts = {
 		"#compdef " .. name,
@@ -447,9 +447,9 @@ end
 
 --: (CmdSpec) -> string
 local function completions_fish(spec)
-	local flags_ = spec.flags or {} --[[:! { [string]: FlagSpec }]]
-	local options_ = spec.options or {} --[[:! { [string]: OptionSpec }]]
-	local commands_ = spec.commands or {} --[[:! { [string]: CmdSpec }]]
+	local flags_ = spec.flags or {} --[[: { [string]: FlagSpec }]]
+	local options_ = spec.options or {} --[[: { [string]: OptionSpec }]]
+	local commands_ = spec.commands or {} --[[: { [string]: CmdSpec }]]
 	local name = spec.name
 	local parts = {
 		"complete -c " .. name .. " -s h -l help -d 'Show help'",
@@ -506,7 +506,7 @@ function M.run(argv, spec)
 
 	local cmd = args["_command"]
 	if cmd ~= nil then
-		local commands_ = spec_.commands or {} --[[:! { [string]: CmdSpec }]]
+		local commands_ = spec_.commands or {} --[[: { [string]: CmdSpec }]]
 		local subcmd = commands_[cmd --[[:! string]]]
 		if subcmd and subcmd.action then
 			return subcmd.action(args)

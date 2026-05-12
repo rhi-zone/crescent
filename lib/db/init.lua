@@ -240,7 +240,7 @@ end
 
 --: (Insert) -> (string, { [integer]: unknown })
 function Insert:_build()
-	local values_ = self._values or {} --[[:! { [string]: unknown }]]
+	local values_ = self._values or {} --[[: { [string]: unknown }]]
 	--: { [integer]: string }
 	local keys = {}
 	for k in pairs(values_) do keys[#keys + 1] = k end
@@ -307,7 +307,7 @@ end
 
 --: (Update) -> (string, { [integer]: unknown })
 function Update:_build()
-	local set_ = self._set or {} --[[:! { [string]: unknown }]]
+	local set_ = self._set or {} --[[: { [string]: unknown }]]
 	--: { [integer]: string }
 	local keys = {}
 	for k in pairs(set_) do keys[#keys + 1] = k end

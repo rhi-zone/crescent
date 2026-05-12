@@ -199,17 +199,17 @@ function M.decode(s, opts)
   end
 
   -- Strip a single trailing empty row produced by a trailing newline
-  if nrow > 0 and #(rows[nrow] or {} --[[:! { [integer]: unknown }]]) == 0 then
+  if nrow > 0 and #(rows[nrow] or {} --[[: { [integer]: unknown }]]) == 0 then
     rows[nrow] = nil
     nrow = nrow - 1
   end
 
   if do_headers then
     if nrow == 0 then return {} --[[:! { [integer]: unknown }]] end
-    local headers = rows[1] or {} --[[:! { [integer]: unknown }]]
+    local headers = rows[1] or {} --[[: { [integer]: unknown }]]
     local result = {}
     for ri = 2, nrow do
-      local r = rows[ri] or {} --[[:! { [integer]: unknown }]]
+      local r = rows[ri] or {} --[[: { [integer]: unknown }]]
       local rec = {}
       for hi = 1, #headers do
         rec[headers[hi] --[[:! string]]] = r[hi]

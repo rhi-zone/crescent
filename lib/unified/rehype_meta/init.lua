@@ -63,7 +63,7 @@ end
 --   root only    (inserts head as first child)
 --: (HastNode) -> HastNode
 local function find_or_create_head(tree)
-  local children = tree.children or {} --[[:! { [integer]: HastNode }]]
+  local children = tree.children or {} --[[: { [integer]: HastNode }]]
 
   -- Look for <html>.
   local html_el = find_child(children, "html")

@@ -553,7 +553,7 @@ local function render_nodes(nodes, ctx_stack, filter_registry, macros, block_ove
           if src then
             local sub_nodes_raw, perr = parse(src or "")
             if sub_nodes_raw then
-              local sub_nodes = sub_nodes_raw or {} --[[:! { [integer]: ASTNode }]]
+              local sub_nodes = sub_nodes_raw or {} --[[: { [integer]: ASTNode }]]
               out(render_sub(sub_nodes))
             end
           end
@@ -572,7 +572,7 @@ local function render_nodes(nodes, ctx_stack, filter_registry, macros, block_ove
           -- current nodes should have been pre-processed; blocks already in block_overrides
           local base_nodes_raw, _ = parse(base_src or "")
           if base_nodes_raw then
-            local base_nodes = base_nodes_raw or {} --[[:! { [integer]: ASTNode }]]
+            local base_nodes = base_nodes_raw or {} --[[: { [integer]: ASTNode }]]
             out(render_nodes(base_nodes, ctx_stack, filter_registry, macros, child_blocks, autoescape, loader))
           end
         end
@@ -767,7 +767,7 @@ function Env:compile(src)
             if not base_src then return nil, "template not found: " .. tostring(name_val) end
             local base_nodes_raw, perr = parse(base_src or "")
             if not base_nodes_raw then return nil, perr end
-            local base_nodes = base_nodes_raw or {} --[[:! { [integer]: ASTNode }]]
+            local base_nodes = base_nodes_raw or {} --[[: { [integer]: ASTNode }]]
             return render_nodes(base_nodes, ctx_stack, s2_env._filters, macros,
                                 block_overrides, s2_env._autoescape, loader)
           end

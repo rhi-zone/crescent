@@ -342,7 +342,7 @@ local function transform(node)
         end
       elseif child.type == "list" then
         -- Process task list items and recurse.
-        local child_ch = child.children or {} --[[:! { [integer]: GfmNode }]]
+        local child_ch = child.children or {} --[[: { [integer]: GfmNode }]]
         for j = 1, #child_ch do
           local item = child_ch[j]
           try_task_list_item(item)

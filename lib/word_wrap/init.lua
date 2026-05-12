@@ -22,7 +22,7 @@ end
 -- opts.preserve_spaces = false  (currently ignored — always collapses)
 --: (string, integer, { [string]: unknown } | nil) -> { [integer]: string }
 function M.greedy(text, width, opts)
-  local opts_ = opts or {} --[[:! { [string]: unknown }]]
+  local opts_ = opts or {} --[[: { [string]: unknown }]]
   local break_long = opts_.break_long_words and true or false
   local words = split_words(text)
   if #words == 0 then return {} end
