@@ -179,9 +179,8 @@ end
 
 --: (self: Expr) -> boolean
 function Expr:matches_now()
-  local self_ = self --[[:! Expr]]
-  local time_fn = self_._time_fn --[[:! () -> number]]
-  return Expr.matches(self_, time_fn())
+  local time_fn = self._time_fn
+  return Expr.matches(self, time_fn())
 end
 
 -- Find next valid value >= val in sorted array, or nil if none
@@ -432,11 +431,10 @@ end
 
 --: (self: Expr, time: number, n: number) -> { [number]: number }
 function Expr:next_n(time, n)
-  local self_ = self --[[:! Expr]]
   local results = {}
   local t = time --: number | nil
   for _ = 1, n do
-    t = Expr.next(self_, t or 0)
+    t = Expr.next(self, t or 0)
     if not t then break end
     results[#results + 1] = t
   end

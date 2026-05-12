@@ -288,11 +288,11 @@ function Machine:start()
   do_enter(self, enter_list, nil)
 end
 
+--: (MachineObj, unknown, unknown) -> boolean
 function Machine:send(event, data)
   if not self._started then return false end
-  local self_ = self --[[:! MachineObj]]
-  local nodes = self_._chart._nodes
-  local current = self_._current --[[:! string]]
+  local nodes = self._chart._nodes
+  local current = self._current --[[:! string]]
 
   local tr_, source = find_transition(nodes, current, event)
   if not tr_ then return false end
