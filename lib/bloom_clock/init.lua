@@ -102,6 +102,7 @@ end
 
 -- Check if filter `a` is a subset of filter `b` (every 1-bit in a is also in b)
 --: ({ [integer]: integer }, { [integer]: integer }, integer) -> boolean
+--: ({ [integer]: integer }, { [integer]: integer }, integer) -> boolean
 local function filter_subset(a, b, size)
   local n = words_for(size)
   for i = 1, n do
@@ -127,23 +128,23 @@ end
 local Clock = {}
 Clock.__index = Clock
 
+--: (Clock) -> nil
 function Clock:tick()
-  local self_ = self --[[:! Clock]]
-  self_._time = self_._time + 1
-  local key = self_._node_id .. ":" .. tostring(self_._time)
-  bloom_add(self_._filter, self_._size, self_._hash_count, key)
+  self._time = self._time + 1
+  local key = self._node_id .. ":" .. tostring(self._time)
+  bloom_add(self._filter, self._size, self._hash_count, key)
 end
 
+--: (Clock) -> integer
 function Clock:time()
   return self._time
 end
 
+--: (Clock, Clock) -> nil
 function Clock:merge(other)
-  local self_ = self --[[:! Clock]]
-  local other_ = other --[[:! Clock]]
-  filter_or(self_._filter, other_._filter, self_._size)
-  if other_._time > self_._time then
-    self_._time = other_._time
+  filter_or(self._filter, other._filter, self._size)
+  if other._time > self._time then
+    self._time = other._time
   end
 end
 
@@ -161,14 +162,14 @@ function Clock:serialize()
   }
 end
 
+--: (Clock) -> Clock
 function Clock:clone()
-  local self_ = self --[[:! Clock]]
   local c = {
-    _node_id = self_._node_id,
-    _time = self_._time,
-    _size = self_._size,
-    _hash_count = self_._hash_count,
-    _filter = filter_clone(self_._filter, self_._size),
+    _node_id = self._node_id,
+    _time = self._time,
+    _size = self._size,
+    _hash_count = self._hash_count,
+    _filter = filter_clone(self._filter, self._size),
   }
   return setmetatable(c, Clock)
 end
@@ -207,13 +208,12 @@ end
 
 -- happened_before(a, b): returns true if a causally precedes b
 -- Condition: a's filter is a subset of b's filter AND a.time < b.time
+--: (Clock, Clock) -> boolean | nil
 function M.happened_before(a, b)
-  local a_ = a --[[:! Clock]]
-  local b_ = b --[[:! Clock]]
-  if a_._size ~= b_._size then
+  if a._size ~= b._size then
     return false
   end
-  return a_._time < b_._time and filter_subset(a_._filter, b_._filter, a_._size)
+  return a._time < b._time and filter_subset(a._filter, b._filter, a._size)
 end
 
 -- concurrent(a, b): neither happened before the other
