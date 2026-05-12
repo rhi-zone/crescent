@@ -114,7 +114,7 @@ function M.bitset(n)
   if type(n) ~= "number" or n < 0 then
     return nil, "bitset: size must be a non-negative number"
   end
-  local ni = floor(--[[:! number]] n)
+  local ni = floor(n)
   local nwords = ceil(ni / BITS_PER_WORD)
   if nwords == 0 then nwords = 1 end
   --: { [integer]: number }
@@ -375,7 +375,7 @@ function M.bloom(expected_items, fp_rate)
   if not bs then return nil, bs_err end
 
   return setmetatable({
-    _bits = --[[:! Bitset]] bs,
+    _bits = bs,
     _m = m,
     _k = k,
     _n = expected_items,

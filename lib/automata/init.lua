@@ -16,7 +16,7 @@ M._tier = "pure"
 --: (t: { [string]: unknown }) -> string[]
 local function sorted_keys(t)
   local ks = {} --: Arr<string>
-  for k in pairs(t --[[:! { [string]: unknown }]]) do ks[#ks+1] = k end
+  for k in pairs(t) do ks[#ks+1] = k end
   table.sort(ks --[[:! { [integer]: integer }]])
   return ks
 end
