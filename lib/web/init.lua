@@ -419,7 +419,7 @@ end
 function M.json_body()
 	--: (req: web_request, res: web_response, next: () -> nil) -> nil
 	local mw = function(req, res, next)
-		local headers = req.headers or ({} --[[:! { [string]: unknown }]])
+		local headers = req.headers or ({} --[[: { [string]: unknown }]])
 		local ct = headers["content-type"] or headers["Content-Type"] or ""
 		local body = req.body
 		if find(ct --[[:! string]], "application/json", 1, true) and type(body) == "string" and #(body --[[:! string]]) > 0 then
@@ -440,7 +440,7 @@ function M.cookies()
 	--: (req: web_request, res: web_response, next: () -> nil) -> nil
 	local mw = function(req, res, next)
 		-- Parse Cookie header
-		local headers = req.headers or ({} --[[:! { [string]: unknown }]])
+		local headers = req.headers or ({} --[[: { [string]: unknown }]])
 		local cookie_header = (headers["cookie"] or headers["Cookie"] or "")
 		local cookies = {}
 		for pair in cookie_header:gmatch("[^;]+") do
@@ -506,8 +506,8 @@ function M.csrf(opts)
 
 	return (function(req, res, next)
 		local method = req.method
-		local cookies = req.cookies or ({} --[[:! { [string]: string }]])
-		local headers = req.headers or ({} --[[:! { [string]: unknown }]])
+		local cookies = req.cookies or ({} --[[: { [string]: string }]])
+		local headers = req.headers or ({} --[[: { [string]: unknown }]])
 		local session_key = cookies["session"] or "default"
 		local token = make_token(session_key)
 
