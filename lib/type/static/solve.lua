@@ -39,11 +39,13 @@ local LIT_NUMBER    = defs.LIT_NUMBER
 local LIT_STRING    = defs.LIT_STRING
 local LIT_OPAQUE_KEY = defs.LIT_OPAQUE_KEY
 
-local FLAG_OPTIONAL   = defs.FLAG_OPTIONAL
-local FLAG_PRIVATE    = defs.FLAG_PRIVATE
-local FLAG_OPAQUE_KEY = defs.FLAG_OPAQUE_KEY
-local FLAG_SKOLEM     = defs.FLAG_SKOLEM
-local band            = require("bit").band
+local FLAG_OPTIONAL      = defs.FLAG_OPTIONAL
+local FLAG_PRIVATE       = defs.FLAG_PRIVATE
+local FLAG_OPAQUE_KEY    = defs.FLAG_OPAQUE_KEY
+local FLAG_SKOLEM        = defs.FLAG_SKOLEM
+local FLAG_ROWVAR_INFER  = defs.FLAG_ROWVAR_INFER
+local band               = require("bit").band
+local bor                = require("bit").bor
 
 local C_UNIFY         = constrain.C_UNIFY
 local C_SUB           = constrain.C_SUB
@@ -1181,8 +1183,61 @@ local function solve_index(ctx, c)
                 return true
             end
         end
-        -- Open table: field may exist
+        -- Open table with a row variable: follow the row variable chain to find
+        -- the field, or extend the deepest free row variable with a new field.
+        --
+        -- This only applies to INFERENCE row variables (FLAG_ROWVAR_INFER).
+        -- Declared open records { name: string, ... } use a plain row variable
+        -- and accessing an unlisted field on them returns unknown.  Inference
+        -- row variables are marked FLAG_ROWVAR_INFER and are created by the
+        -- TAG_VAR/TAG_ROWVAR branch below when an unannotated parameter is first
+        -- accessed.  They MUST be extended so that multiple field accesses on the
+        -- same unannotated parameter each get their own fresh type variable.
         if obj_t.data[4] >= 0 then
+            -- Walk the row variable chain to find the deepest free var.
+            -- Along the way, check fields in intermediate tables.
+            local row_tid = find(ctx, obj_t.data[4])
+            for _ = 1, 64 do  -- cycle-safe depth limit
+                local row_t = ctx.types:get(row_tid)
+                if row_t.tag == TAG_VAR or row_t.tag == TAG_ROWVAR then
+                    -- Reached a free row variable.
+                    -- Only extend if it was created for inference (FLAG_ROWVAR_INFER).
+                    if band(row_t.flags, FLAG_ROWVAR_INFER) ~= 0 then
+                        local field_var = types_mod.make_var(ctx, 0)
+                        local new_row   = types_mod.make_rowvar(ctx, 0)
+                        -- Propagate the inference flag so the chain stays extensible.
+                        ctx.types:get(new_row).flags = bor(
+                            ctx.types:get(new_row).flags, FLAG_ROWVAR_INFER)
+                        local fid2    = types_mod.make_field(ctx, name_id, field_var, false)
+                        local ext_tbl = types_mod.make_table(ctx, { fid2 }, {}, new_row, {})
+                        unify_mod.unify(ctx, row_tid, ext_tbl)
+                        unify_mod.unify(ctx, res_tid, field_var)
+                        return true
+                    end
+                    -- Non-inference row var: declared open record; fall through to unknown.
+                    break
+                elseif row_t.tag == TAG_TABLE then
+                    -- Row was already extended by a previous field access.
+                    -- Check if the field we want is in this intermediate table.
+                    local row_fe = types_mod.table_field(ctx, row_tid, name_id)
+                    if row_fe then
+                        local ft = find(ctx, row_fe.type_id)
+                        if band(row_fe.flags, FLAG_OPTIONAL) ~= 0 then
+                            ft = types_mod.make_union(ctx, { ft, ctx.T_NIL })
+                        end
+                        unify_mod.unify(ctx, res_tid, ft)
+                        return true
+                    end
+                    -- Field not here; follow this table's own row variable deeper.
+                    if row_t.data[4] >= 0 then
+                        row_tid = find(ctx, row_t.data[4])
+                    else
+                        break  -- closed intermediate table; fall through to unknown
+                    end
+                else
+                    break  -- unexpected type in chain; fall through to unknown
+                end
+            end
             bind_to(ctx, res_tid, ctx.T_UNKNOWN)
             return true
         end
@@ -1193,9 +1248,13 @@ local function solve_index(ctx, c)
     end
 
     if obj_t.tag == TAG_VAR or obj_t.tag == TAG_ROWVAR then
-        -- Open table: add the field constraint by binding var to a table with this field
+        -- Open table: add the field constraint by binding var to a table with this field.
+        -- Mark the row variable with FLAG_ROWVAR_INFER so that subsequent field accesses
+        -- on the same object (after it resolves to the created table) can extend the chain
+        -- rather than returning unknown.
         local field_var = types_mod.make_var(ctx, 0)
         local row_var   = types_mod.make_rowvar(ctx, 0)
+        ctx.types:get(row_var).flags = bor(ctx.types:get(row_var).flags, FLAG_ROWVAR_INFER)
         local fid = types_mod.make_field(ctx, name_id, field_var, false)
         local tbl_ty = types_mod.make_table(ctx, { fid }, {}, row_var, {})
         unify_mod.unify(ctx, obj_tid, tbl_ty)

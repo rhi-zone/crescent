@@ -239,6 +239,7 @@ M.FLAG_FORCE_CAST       = 1  -- NODE_CAST_EXPR: --[[:! T]] overlap-checked force
 M.FLAG_GENERIC          = 1
 M.FLAG_RECURSIVE        = 2
 M.FLAG_SKOLEM           = 4   -- type variable that must never be bound (used for generic body checking)
+M.FLAG_ROWVAR_INFER     = 8   -- row variable created for type inference (vs. declared open record's `...`)
 
 -- Flag bits (field entries)
 M.FLAG_OPTIONAL         = 0x01  -- field may be absent; access returns T|nil

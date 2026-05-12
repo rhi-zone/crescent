@@ -2236,6 +2236,39 @@ local y = x + 1
     end)
 end)
 
+assert.describe("checker: multiple field accesses on unannotated params (row variable merge)", function()
+    assert.it("two field accesses on one unannotated param both return non-unknown", function()
+        no_errors([[
+local function f(a)
+  local x = a.x
+  local y = a.y
+  return x + y
+end
+]])
+    end)
+    assert.it("field accesses on two unannotated params with interleaved arithmetic both return non-unknown", function()
+        -- Previously, a.y returned unknown after a.x - b.x was processed,
+        -- because the row variable for a was already bound to a table and the
+        -- open-table fallback didn't follow the chain.
+        no_errors([[
+local function dist(a, b)
+  local ax = a.x
+  local bx = b.x
+  local ay = a.y
+  local by = b.y
+  return ax + bx + ay + by
+end
+]])
+    end)
+    assert.it("original dist() reproducer: math.sqrt with multiple field accesses no error", function()
+        no_errors([[
+local function dist(a, b)
+  return math.sqrt((a.x - b.x)^2 + (a.y - b.y)^2)
+end
+]])
+    end)
+end)
+
 assert.describe("checker: nested recursive local function (Cat J regression)", function()
     assert.it("local function calling itself recursively doesn't error", function()
         no_errors([[
