@@ -107,32 +107,32 @@ end
 local H32 = {}
 H32.__index = H32
 
+--: (H32State, integer | nil) -> nil
 function H32:reset(seed)
-	local s = self --[[:! H32State]]
 	seed = tobit(seed or 0)
-	s._seed = seed
-	s._v1 = tobit(seed + PRIME32_1 + PRIME32_2)
-	s._v2 = tobit(seed + PRIME32_2)
-	s._v3 = seed
-	s._v4 = tobit(seed - PRIME32_1)
-	s._total_len = 0
-	s._buf = ""
-	s._large = false
+	self._seed = seed
+	self._v1 = tobit(seed + PRIME32_1 + PRIME32_2)
+	self._v2 = tobit(seed + PRIME32_2)
+	self._v3 = seed
+	self._v4 = tobit(seed - PRIME32_1)
+	self._total_len = 0
+	self._buf = ""
+	self._large = false
 end
 
+--: (H32State, string) -> (boolean | nil, string | nil)
 function H32:update(data)
-	local s = self --[[:! H32State]]
 	if type(data) ~= "string" then return nil, "xxh32: update expects a string" end
-	s._total_len = s._total_len + #data
-	if #s._buf > 0 then
-		data = s._buf .. data
-		s._buf = ""
+	self._total_len = self._total_len + #data
+	if #self._buf > 0 then
+		data = self._buf .. data
+		self._buf = ""
 	end
 	local len = #data
 	local i = 1
 	if len >= 16 then
-		s._large = true
-		local v1, v2, v3, v4 = s._v1, s._v2, s._v3, s._v4
+		self._large = true
+		local v1, v2, v3, v4 = self._v1, self._v2, self._v3, self._v4
 		local limit = len - 15
 		while i <= limit do
 			v1 = round32(v1, read32(data, i))
@@ -141,21 +141,21 @@ function H32:update(data)
 			v4 = round32(v4, read32(data, i + 12))
 			i = i + 16
 		end
-		s._v1, s._v2, s._v3, s._v4 = v1, v2, v3, v4
+		self._v1, self._v2, self._v3, self._v4 = v1, v2, v3, v4
 	end
-	if i <= len then s._buf = string.sub(data, i) end
+	if i <= len then self._buf = string.sub(data, i) end
 end
 
+--: (H32State) -> number
 function H32:digest()
-	local s = self --[[:! H32State]]
 	local h
-	if s._large then
-		h = tobit(rol(s._v1, 1) + rol(s._v2, 7) + rol(s._v3, 12) + rol(s._v4, 18))
+	if self._large then
+		h = tobit(rol(self._v1, 1) + rol(self._v2, 7) + rol(self._v3, 12) + rol(self._v4, 18))
 	else
-		h = tobit(s._seed + PRIME32_5)
+		h = tobit(self._seed + PRIME32_5)
 	end
-	h = tobit(h + s._total_len)
-	local buf = s._buf
+	h = tobit(h + self._total_len)
+	local buf = self._buf
 	local blen = #buf
 	local i = 1
 	while i <= blen - 3 do
@@ -326,32 +326,32 @@ if ffi_ok then
 	local H64 = {}
 	H64.__index = H64
 
+	--: (H64State, unknown) -> nil
 	function H64:reset(seed)
-		local st = self --[[:! H64State]]
 		local s = uint64(seed or 0)
-		st._seed = s
-		st._v1 = s + P1 + P2
-		st._v2 = s + P2
-		st._v3 = s
-		st._v4 = s - P1
-		st._total_len = 0
-		st._buf = ""
-		st._large = false
+		self._seed = s
+		self._v1 = s + P1 + P2
+		self._v2 = s + P2
+		self._v3 = s
+		self._v4 = s - P1
+		self._total_len = 0
+		self._buf = ""
+		self._large = false
 	end
 
+	--: (H64State, string) -> (boolean | nil, string | nil)
 	function H64:update(data)
-		local st = self --[[:! H64State]]
 		if type(data) ~= "string" then return nil, "xxh64: update expects a string" end
-		st._total_len = st._total_len + #data
-		if #st._buf > 0 then
-			data = st._buf .. data
-			st._buf = ""
+		self._total_len = self._total_len + #data
+		if #self._buf > 0 then
+			data = self._buf .. data
+			self._buf = ""
 		end
 		local len = #data
 		local i = 1
 		if len >= 32 then
-			st._large = true
-			local v1, v2, v3, v4 = st._v1, st._v2, st._v3, st._v4
+			self._large = true
+			local v1, v2, v3, v4 = self._v1, self._v2, self._v3, self._v4
 			local limit = len - 31
 			while i <= limit do
 				v1 = round64(v1, read64(data, i))
@@ -360,26 +360,26 @@ if ffi_ok then
 				v4 = round64(v4, read64(data, i + 24))
 				i = i + 32
 			end
-			st._v1, st._v2, st._v3, st._v4 = v1, v2, v3, v4
+			self._v1, self._v2, self._v3, self._v4 = v1, v2, v3, v4
 		end
-		if i <= len then st._buf = string.sub(data, i) end
+		if i <= len then self._buf = string.sub(data, i) end
 	end
 
+	--: (H64State) -> unknown
 	function H64:digest()
-		local st = self --[[:! H64State]]
 		local h
-		if st._large then
-			local v1, v2, v3, v4 = st._v1, st._v2, st._v3, st._v4
+		if self._large then
+			local v1, v2, v3, v4 = self._v1, self._v2, self._v3, self._v4
 			h = rol64(v1, 1) + rol64(v2, 7) + rol64(v3, 12) + rol64(v4, 18)
 			h = merge_round64(h, v1)
 			h = merge_round64(h, v2)
 			h = merge_round64(h, v3)
 			h = merge_round64(h, v4)
 		else
-			h = st._seed + (P5 --[[: number]])
+			h = self._seed + (P5 --[[: number]])
 		end
-		h = h + uint64(st._total_len)
-		local buf = st._buf
+		h = h + uint64(self._total_len)
+		local buf = self._buf
 		local blen = #buf
 		local i = 1
 		while i <= blen - 7 do
