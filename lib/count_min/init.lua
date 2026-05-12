@@ -101,9 +101,8 @@ function CMS:update(element, amount)
   self._total = self._total + amount
   -- Track heavy hitters if enabled.
   if self._heavy then
-    local heavy_ = self._heavy --[[:! { [string]: number }]]
-    local cur = heavy_[s] or 0
-    heavy_[s] = cur + amount
+    local cur = self._heavy[s] or 0
+    self._heavy[s] = cur + amount
   end
 end
 
@@ -137,9 +136,8 @@ function CMS:update_conservative(element, amount)
   end
   self._total = self._total + amount
   if self._heavy then
-    local heavy_ = self._heavy --[[:! { [string]: number }]]
-    local cur = heavy_[s] or 0
-    heavy_[s] = cur + amount
+    local cur = self._heavy[s] or 0
+    self._heavy[s] = cur + amount
   end
 end
 
@@ -165,25 +163,22 @@ end
 -- Returns self, err.
 --: (CMS, CMS) -> (CMS | nil, string | nil)
 function CMS:merge(other)
-  local other_ = other --[[:! CMS]]
-  if self._w ~= other_._w or self._d ~= other_._d then
+  if self._w ~= other._w or self._d ~= other._d then
     return nil, "count_min:merge: incompatible dimensions (w or d mismatch)"
   end
   local cnt1 = self._counters
-  local cnt2 = other_._counters
+  local cnt2 = other._counters
   local n    = self._w * self._d
   for i = 1, n do
     cnt1[i] = cnt1[i] + cnt2[i]
   end
-  self._total = self._total + other_._total
-  if self._heavy and other_._heavy then
-    local h1_ = self._heavy --[[:! { [string]: number }]]
-    local h2_ = other_._heavy --[[:! { [string]: number }]]
-    for k, v in pairs(h2_) do
-      h1_[k] = (h1_[k] or 0) + v
+  self._total = self._total + other._total
+  if self._heavy and other._heavy then
+    for k, v in pairs(other._heavy) do
+      self._heavy[k] = (self._heavy[k] or 0) + v
     end
   end
-  return self --[[:! CMS]]
+  return self
 end
 
 -- reset(): set all counters to zero, reset total.
@@ -194,8 +189,7 @@ function CMS:reset()
   for i = 1, n do cnt[i] = 0 end
   self._total = 0
   if self._heavy then
-    local heavy_ = self._heavy --[[:! { [string]: number }]]
-    for k in pairs(heavy_) do heavy_[k] = 0; heavy_[k] = ((nil --[[: unknown]]) --[[:! number]]) end
+    for k in pairs(self._heavy) do self._heavy[k] = 0 end
   end
 end
 
@@ -230,8 +224,8 @@ function CMS:serialize()
   -- LuaJIT numbers are doubles; support up to 2^53 safely.
   local lo  = tot % 0x100000000
   local hi  = floor(tot / 0x100000000)
-  pack_u32(t, d --[[:! integer]])
-  pack_u32(t, w --[[:! integer]])
+  pack_u32(t, d)
+  pack_u32(t, w)
   pack_u32(t, math.floor(lo))
   pack_u32(t, math.floor(hi))
   local cnt = self._counters
@@ -249,9 +243,8 @@ function CMS:heavy_hitters(k)
   if not self._heavy then
     return nil, "count_min:heavy_hitters: sketch not created with track_heavy=true"
   end
-  local heavy_ = self._heavy --[[:! { [string]: number }]]
   local list = {}
-  for elem, cnt in pairs(heavy_) do
+  for elem, cnt in pairs(self._heavy) do
     list[#list + 1] = { elem, cnt }
   end
   table.sort(list, function(a, b) return a[2] > b[2] end)
