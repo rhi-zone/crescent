@@ -440,9 +440,9 @@ M.double_metaphone = function(word)
   --: (integer, integer | nil) -> string
   local function sub(pos, n)
     if pos < 1 then return "" end
-    local nn = (n or 1) --[[:! integer]]
+    local nn = (n or 1)
     if pos > len then return "" end
-    return s:sub(pos, math.min(pos + nn - 1, len) --[[:! integer]])
+    return s:sub(pos, math.min(pos + nn - 1, len))
   end
 
   --: (string, string | nil) -> ()
@@ -1126,7 +1126,7 @@ local function lcs_length(a, b)
       if a:sub(i_idx, i_idx) == b:sub(j_idx, j_idx) then
         curr[j_idx] = prev[j_idx - 1] + 1
       else
-        curr[j_idx] = math.max(prev[j_idx], curr[j_idx - 1]) --[[:! integer]]
+        curr[j_idx] = math.max(prev[j_idx], curr[j_idx - 1])
       end
     end
     -- Swap
@@ -1141,10 +1141,8 @@ M.similarity = function(a, b)
   local pa = M.soundex(a)
   local pb = M.soundex(b)
   if pa == nil or pb == nil then return 0.0 end
-  local pa_s = pa --[[:! string]]
-  local pb_s = pb --[[:! string]]
-  local lcs = lcs_length(pa_s, pb_s)
-  local maxlen = math.max(#pa_s, #pb_s)
+  local lcs = lcs_length(pa, pb)
+  local maxlen = math.max(#pa, #pb)
   if maxlen == 0 then return 1.0 end
   return lcs / maxlen
 end
