@@ -110,7 +110,7 @@ function M.decompress(compressed)
   local out_len = 0
 
   while ip <= clen do
-    local tag = byte(compressed, ip) --[[:! integer]]
+    local tag = (byte(compressed, ip) or 0)
     ip = ip + 1
     local tag_type = band(tag, 0x03)
 
@@ -125,7 +125,7 @@ function M.decompress(compressed)
         if ip > clen then
           return nil, "decompress: truncated literal length (1 byte)"
         end
-        lit_len = (byte(compressed, ip) --[[:! integer]]) + 1
+        lit_len = ((byte(compressed, ip) or 0)) + 1
         ip = ip + 1
       elseif length_code == 61 then
         -- 2 extra bytes LE
@@ -167,7 +167,7 @@ function M.decompress(compressed)
       if ip > clen then
         return nil, "decompress: truncated copy-1 offset"
       end
-      local next_b = byte(compressed, ip) --[[:! integer]]
+      local next_b = (byte(compressed, ip) or 0)
       ip = ip + 1
       local offset = bor(rshift(tag, 5), lshift(next_b, 3))
       if offset == 0 then
@@ -362,7 +362,7 @@ function M.compress(input)
       -- Verify match
       local max_match = n - ip + 1
       local ml = 0
-      while ml < max_match and byte(input, (ip + ml) --[[:! integer]]) == byte(input, (candidate + ml) --[[:! integer]]) do
+      while ml < max_match and (byte(input, (ip + ml) or 0)) == (byte(input, (candidate + ml) or 0)) do
         ml = ml + 1
       end
       if ml >= 4 then

@@ -58,7 +58,7 @@ function M.dump(data, opts)
     for col = 0, width - 1 do
       local idx = row * width + col
       if idx < n then
-        local b = string.byte(data, idx + 1) --[[:! integer]]
+        local b = (string.byte(data, idx + 1) or 0)
         line_parts[#line_parts + 1] = hex_tab[b]
         if show_ascii then
           if b >= 32 and b <= 126 then
@@ -106,7 +106,7 @@ end
 function M.to_hex(data)
   local t = {}
   for i = 1, #data do
-    t[i] = HEX_LO[string.byte(data, i) --[[:! integer]]]
+    t[i] = HEX_LO[(string.byte(data, i) or 0)]
   end
   return table.concat(t)
 end
@@ -362,7 +362,7 @@ end
 function M.bytes(data)
   local t = {}
   for i = 1, #data do
-    t[i] = string.byte(data, i) --[[:! integer]]
+    t[i] = (string.byte(data, i) or 0)
   end
   return t
 end

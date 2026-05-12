@@ -106,14 +106,14 @@ function M.hotp(key, counter, opts)
 
   -- Step 3: dynamic truncation (RFC 4226 §5.3)
   -- offset = last byte & 0x0f
-  local last = string.byte(mac_, #mac_) --[[:! integer]]
+  local last = (string.byte(mac_, #mac_) or 0)
   local offset = band(last, 0x0f)
 
   -- Step 4: extract 4 bytes at offset (1-indexed in Lua)
-  local b1 = string.byte(mac_, offset + 1) --[[:! integer]]
-  local b2 = string.byte(mac_, offset + 2) --[[:! integer]]
-  local b3 = string.byte(mac_, offset + 3) --[[:! integer]]
-  local b4 = string.byte(mac_, offset + 4) --[[:! integer]]
+  local b1 = (string.byte(mac_, offset + 1) or 0)
+  local b2 = (string.byte(mac_, offset + 2) or 0)
+  local b3 = (string.byte(mac_, offset + 3) or 0)
+  local b4 = (string.byte(mac_, offset + 4) or 0)
 
   -- mask the most-significant bit of b1
   local code = bor(

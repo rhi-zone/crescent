@@ -26,7 +26,7 @@ local function build_sa(s)
 
   for i = 1, n do
     sa[i] = i
-    rank[i] = string.byte(s, i) --[[:! integer]]
+    rank[i] = (string.byte(s, i) or 0)
   end
 
   local k = 1
@@ -108,8 +108,8 @@ local function cmp_suffix_prefix(s, sa_i, p, plen)
       -- Suffix is shorter than pattern: suffix < pattern
       return -1
     end
-    local sc = string.byte(s, pos) --[[:! integer]]
-    local pc = string.byte(p, k + 1) --[[:! integer]]
+    local sc = (string.byte(s, pos) or 0)
+    local pc = (string.byte(p, k + 1) or 0)
     if sc ~= pc then
       return sc < pc and -1 or 1
     end

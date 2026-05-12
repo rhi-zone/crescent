@@ -52,10 +52,10 @@ end
 -- Decode a 32-bit unsigned integer from 4 little-endian bytes in s at pos.
 --: (string, integer) -> number
 local function read_le32(s, pos)
-  local b0 = byte(s, pos) --[[:! integer]]
-  local b1 = byte(s, pos + 1) --[[:! integer]]
-  local b2 = byte(s, pos + 2) --[[:! integer]]
-  local b3 = byte(s, pos + 3) --[[:! integer]]
+  local b0 = (byte(s, pos) or 0)
+  local b1 = (byte(s, pos + 1) or 0)
+  local b2 = (byte(s, pos + 2) or 0)
+  local b3 = (byte(s, pos + 3) or 0)
   return b0 + b1 * 256 + b2 * 65536 + b3 * 16777216
 end
 
@@ -70,8 +70,8 @@ end
 -- Decode a 16-bit unsigned integer from 2 little-endian bytes in s at pos.
 --: (string, integer) -> number
 local function read_le16(s, pos)
-  local b0 = byte(s, pos) --[[:! integer]]
-  local b1 = byte(s, pos + 1) --[[:! integer]]
+  local b0 = (byte(s, pos) or 0)
+  local b1 = (byte(s, pos + 1) or 0)
   return b0 + b1 * 256
 end
 
@@ -81,9 +81,9 @@ end
 -- Returns a key string for use in the hash table.
 --: (string, integer, number) -> number
 local function hash3(s, pos, window_size)
-  local b1 = byte(s, pos) --[[:! integer]]
-  local b2 = byte(s, pos + 1) --[[:! integer]]
-  local b3 = byte(s, pos + 2) --[[:! integer]]
+  local b1 = (byte(s, pos) or 0)
+  local b2 = (byte(s, pos + 1) or 0)
+  local b3 = (byte(s, pos + 2) or 0)
   return (b1 * 65536 + b2 * 256 + b3) % window_size
 end
 
@@ -250,7 +250,7 @@ local function decompress(compressed)
         return nil, "truncated: missing literal byte"
       end
       local ipos2 = pos --[[:! integer]]
-      local b = byte(compressed, ipos2) --[[:! integer]]
+      local b = (byte(compressed, ipos2) or 0)
       pos = pos + 1
       out_pos = out_pos + 1
       out_bytes[out_pos] = b

@@ -55,25 +55,25 @@ end
 --: (s: string, pos: integer | nil) -> (integer, integer)
 function M.unpack_u8(s, pos)
   local p = (pos or 1) --[[:! integer]]
-  local byte = string.byte(s, p) --[[:! integer]]
+  local byte = (string.byte(s, p) or 0)
   return byte, p + 1
 end
 
 --: (s: string, pos: integer | nil) -> (integer, integer)
 function M.unpack_u16(s, pos)
   local p = (pos or 1) --[[:! integer]]
-  local b1 = string.byte(s, p) --[[:! integer]]
-  local b2 = string.byte(s, p + 1) --[[:! integer]]
+  local b1 = (string.byte(s, p) or 0)
+  local b2 = (string.byte(s, p + 1) or 0)
   return bit.bor(bit.lshift(b1, 8), b2), p + 2
 end
 
 --: (s: string, pos: integer | nil) -> (integer, integer)
 function M.unpack_u32(s, pos)
   local p = (pos or 1) --[[:! integer]]
-  local b1 = string.byte(s, p) --[[:! integer]]
-  local b2 = string.byte(s, p + 1) --[[:! integer]]
-  local b3 = string.byte(s, p + 2) --[[:! integer]]
-  local b4 = string.byte(s, p + 3) --[[:! integer]]
+  local b1 = (string.byte(s, p) or 0)
+  local b2 = (string.byte(s, p + 1) or 0)
+  local b3 = (string.byte(s, p + 2) or 0)
+  local b4 = (string.byte(s, p + 3) or 0)
   -- use unsigned arithmetic to avoid sign issues on 32-bit values >= 2^31
   local hi = bit.bor(bit.lshift(b1, 8), b2)
   local lo = bit.bor(bit.lshift(b3, 8), b4)
@@ -83,7 +83,7 @@ end
 --: (s: string, pos: integer | nil) -> (integer, integer)
 function M.unpack_i8(s, pos)
   local p = (pos or 1) --[[:! integer]]
-  local v = string.byte(s, p) --[[:! integer]]
+  local v = (string.byte(s, p) or 0)
   if v >= 128 then v = v - 256 end
   return v, p + 1
 end
@@ -100,10 +100,10 @@ end
 --: (s: string, pos: integer | nil) -> (integer, integer)
 function M.unpack_i32(s, pos)
   local p = (pos or 1) --[[:! integer]]
-  local b1 = string.byte(s, p) --[[:! integer]]
-  local b2 = string.byte(s, p + 1) --[[:! integer]]
-  local b3 = string.byte(s, p + 2) --[[:! integer]]
-  local b4 = string.byte(s, p + 3) --[[:! integer]]
+  local b1 = (string.byte(s, p) or 0)
+  local b2 = (string.byte(s, p + 1) or 0)
+  local b3 = (string.byte(s, p + 2) or 0)
+  local b4 = (string.byte(s, p + 3) or 0)
   local v = bit.bor(
     bit.lshift(b1, 24),
     bit.lshift(b2, 16),
@@ -137,7 +137,7 @@ function M.decode_varint(buf, pos)
   local shift = 0
   local len = #buf
   while p <= len do
-    local b = string.byte(buf, p) --[[:! integer]]
+    local b = (string.byte(buf, p) or 0)
     p = p + 1
     result = bit.bor(result, bit.lshift(bit.band(b, 0x7f), shift))
     if bit.band(b, 0x80) == 0 then

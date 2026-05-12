@@ -15,10 +15,10 @@ local tonumber = tonumber
 local type = type
 
 -- Character constants
-local NEWLINE    = byte("\n") --[[:! integer]]
-local CR         = byte("\r") --[[:! integer]]
+local NEWLINE    = byte("\n") or 0
+local CR         = byte("\r") or 0
 local SPACE      = byte(" ")  --[[:! integer]]
-local TAB        = byte("\t") --[[:! integer]]
+local TAB        = byte("\t") or 0
 local HASH       = byte("#")  --[[:! integer]]
 local EQUALS     = byte("=")  --[[:! integer]]
 local DOT        = byte(".")  --[[:! integer]]
@@ -29,7 +29,7 @@ local LBRACE     = byte("{")  --[[:! integer]]
 local RBRACE     = byte("}")  --[[:! integer]]
 local DQUOTE     = byte('"')  --[[:! integer]]
 local SQUOTE     = byte("'")  --[[:! integer]]
-local BACKSLASH  = byte("\\") --[[:! integer]]
+local BACKSLASH  = byte("\\") or 0
 local PLUS       = byte("+")  --[[:! integer]]
 local MINUS      = byte("-")  --[[:! integer]]
 local UNDERSCORE = byte("_")  --[[:! integer]]
@@ -610,7 +610,7 @@ local function parse_number(p)
     elseif c2 == byte("o") or c2 == byte("O") then
       p.pos = p.pos + 2
       local oct_start = p.pos
-      local CHAR_7 = byte("7") --[[:! integer]]
+      local CHAR_7 = byte("7") or 0
       while p.pos <= p.len do
         local cc = byte(p.str, p.pos) or 0
         if cc >= CHAR_0 and cc <= CHAR_7 then
@@ -627,7 +627,7 @@ local function parse_number(p)
     elseif c2 == byte("b") or c2 == byte("B") then
       p.pos = p.pos + 2
       local bin_start = p.pos
-      local CHAR_1 = byte("1") --[[:! integer]]
+      local CHAR_1 = byte("1") or 0
       while p.pos <= p.len do
         local cc = byte(p.str, p.pos) or 0
         if cc == CHAR_0 or cc == CHAR_1 then
