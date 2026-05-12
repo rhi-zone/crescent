@@ -139,48 +139,48 @@ end
 
 --- Chain a fulfillment handler. Returns a new promise.
 -- fn(value) -> value | promise
+--: (PromiseP, (unknown) -> unknown) -> PromiseP
 function Promise:and_then(fn)
-  local self_ = self --[[:! PromiseP]]
   local next_p = M.promise()
   -- Only one branch will fire depending on source state.
-  if self_._state == PENDING then
+  if self._state == PENDING then
     -- Queue both handlers; exactly one will fire.
-    self_._on_fulfill[#self_._on_fulfill + 1] = function(v)
+    self._on_fulfill[#self._on_fulfill + 1] = function(v)
       local ok, result = pcall(fn, v)
       if ok then settle(next_p, FULFILLED, result)
       else      settle(next_p, REJECTED,  result) end
     end
-    self_._on_reject[#self_._on_reject + 1] = function(r)
+    self._on_reject[#self._on_reject + 1] = function(r)
       settle(next_p, REJECTED, r)
     end
-  elseif self_._state == FULFILLED then
-    local ok, result = pcall(fn, self_.value)
+  elseif self._state == FULFILLED then
+    local ok, result = pcall(fn, self.value)
     if ok then settle(next_p, FULFILLED, result)
     else      settle(next_p, REJECTED,  result) end
   else
-    settle(next_p, REJECTED, self_.reason)
+    settle(next_p, REJECTED, self.reason)
   end
   return next_p
 end
 
 --- Chain a rejection handler. Returns a new promise.
 -- fn(reason) -> value | promise  (can recover)
+--: (PromiseP, (unknown) -> unknown) -> PromiseP
 function Promise:catch(fn)
-  local self_ = self --[[:! PromiseP]]
   local next_p = M.promise()
-  if self_._state == PENDING then
-    self_._on_fulfill[#self_._on_fulfill + 1] = function(v)
+  if self._state == PENDING then
+    self._on_fulfill[#self._on_fulfill + 1] = function(v)
       settle(next_p, FULFILLED, v)
     end
-    self_._on_reject[#self_._on_reject + 1] = function(r)
+    self._on_reject[#self._on_reject + 1] = function(r)
       local ok, result = pcall(fn, r)
       if ok then settle(next_p, FULFILLED, result)
       else      settle(next_p, REJECTED,  result) end
     end
-  elseif self_._state == FULFILLED then
-    settle(next_p, FULFILLED, self_.value)
+  elseif self._state == FULFILLED then
+    settle(next_p, FULFILLED, self.value)
   else
-    local ok, result = pcall(fn, self_.reason)
+    local ok, result = pcall(fn, self.reason)
     if ok then settle(next_p, FULFILLED, result)
     else      settle(next_p, REJECTED,  result) end
   end
@@ -189,8 +189,8 @@ end
 
 --- Register a callback called regardless of outcome. Returns a new promise
 -- that settles with the same value/reason as self.
+--: (PromiseP, () -> unknown) -> PromiseP
 function Promise:finally(fn)
-  local self_ = self --[[:! PromiseP]]
   local next_p = M.promise()
 
   local function on_settle_fulfill(v)
@@ -202,21 +202,24 @@ function Promise:finally(fn)
     settle(next_p, REJECTED, r)
   end
 
-  if self_._state == PENDING then
-    self_._on_fulfill[#self_._on_fulfill + 1] = on_settle_fulfill
-    self_._on_reject[#self_._on_reject + 1]   = on_settle_reject
-  elseif self_._state == FULFILLED then
-    on_settle_fulfill(self_.value)
+  if self._state == PENDING then
+    self._on_fulfill[#self._on_fulfill + 1] = on_settle_fulfill
+    self._on_reject[#self._on_reject + 1]   = on_settle_reject
+  elseif self._state == FULFILLED then
+    on_settle_fulfill(self.value)
   else
-    on_settle_reject(self_.reason)
+    on_settle_reject(self.reason)
   end
 
   return next_p
 end
 
-function Promise:is_pending()   local s = self --[[:! PromiseP]]; return s._state == PENDING   end
-function Promise:is_resolved()  local s = self --[[:! PromiseP]]; return s._state == FULFILLED end
-function Promise:is_rejected()  local s = self --[[:! PromiseP]]; return s._state == REJECTED  end
+--: (PromiseP) -> boolean
+function Promise:is_pending()   return self._state == PENDING   end
+--: (PromiseP) -> boolean
+function Promise:is_resolved()  return self._state == FULFILLED end
+--: (PromiseP) -> boolean
+function Promise:is_rejected()  return self._state == REJECTED  end
 
 -- ── Combinators ──────────────────────────────────────────────────────────────
 
@@ -347,30 +350,30 @@ function M.loop()
 end
 
 --- Schedule fn for the next tick.
+--: (LoopObj, () -> unknown) -> nil
 function Loop:queue(fn)
-  local self_ = self --[[:! LoopObj]]
-  self_._queue[#self_._queue + 1] = fn
+  self._queue[#self._queue + 1] = fn
 end
 
 --- Run all currently queued functions (and anything they enqueue), advancing
 -- internal time by `elapsed` milliseconds (default 0).
+--: (LoopObj, number | nil) -> nil
 function Loop:tick(elapsed)
-  local self_ = self --[[:! LoopObj]]
   elapsed = elapsed or 0
-  self_._time = self_._time + (elapsed --[[:! number]])
+  self._time = self._time + (elapsed --[[:! number]])
 
   -- Fire elapsed timers.
-  for i = #self_._timers, 1, -1 do
-    local t = self_._timers[i]
-    if self_._time >= t[1] then
-      table.remove(self_._timers, i)
+  for i = #self._timers, 1, -1 do
+    local t = self._timers[i]
+    if self._time >= t[1] then
+      table.remove(self._timers, i)
       t[2](nil)  -- resolve the timer promise with nil
     end
   end
 
   -- Drain the queue (snapshot to avoid infinite loops if tick re-enqueues).
-  local batch = self_._queue
-  self_._queue = {}
+  local batch = self._queue
+  self._queue = {}
   for i = 1, #batch do
     batch[i]()
   end
@@ -378,16 +381,16 @@ end
 
 --- Run the loop until `promise` settles. Returns value, err.
 -- Runs a bounded number of ticks (prevents infinite loops).
+--: (LoopObj, PromiseP) -> (unknown, unknown)
 function Loop:run_until(promise)
-  local self_ = self --[[:! LoopObj]]
-  local p_ = promise --[[:! PromiseP]]
+  local p_ = promise
   local max_ticks = 100000
   local ticks = 0
   while p_._state == PENDING and ticks < max_ticks do
-    self_:tick(0)
+    self:tick(0)
     ticks = ticks + 1
     -- If no more work to do but promise is still pending, bail.
-    if #self_._queue == 0 and #self_._timers == 0 then break end
+    if #self._queue == 0 and #self._timers == 0 then break end
   end
   if p_._state == FULFILLED then
     return p_.value, nil
@@ -399,19 +402,19 @@ function Loop:run_until(promise)
 end
 
 --- Clear all queued work and timers.
+--: (LoopObj) -> nil
 function Loop:clear()
-  local self_ = self --[[:! LoopObj]]
-  self_._queue  = {}
-  self_._timers = {}
+  self._queue  = {}
+  self._timers = {}
 end
 
 --- Create a sleep promise that resolves after `ms` milliseconds.
 -- Uses `clock_fn()` (defaults to loop's internal time counter).
+--: (LoopObj, number) -> PromiseP
 function Loop:sleep(ms)
-  local self_ = self --[[:! LoopObj]]
-  local deadline = self_._time + ms
+  local deadline = self._time + ms
   local p, resolve, _ = M.promise()
-  self_._timers[#self_._timers + 1] = { deadline, resolve }
+  self._timers[#self._timers + 1] = { deadline, resolve }
   return p
 end
 
