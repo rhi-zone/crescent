@@ -241,10 +241,10 @@ M.query = function(query_type_str, index, opts)
 
     -- Sort: highest score first, then by name (insertion sort avoids table.sort V-bleeding).
     for i = 2, #matches do
-        local key = matches[i] --[[:! { score: integer, name: string, ... }]]
+        local key = matches[i]
         local j = i - 1
         while j >= 1 do
-            local jv = matches[j] --[[:! { score: integer, name: string, ... }]]
+            local jv = matches[j]
             if jv.score > key.score or (jv.score == key.score and jv.name <= key.name) then break end
             matches[j + 1] = matches[j]
             j = j - 1
