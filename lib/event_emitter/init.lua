@@ -96,13 +96,13 @@ function emitter_mt:off(event, fn)
 	return self
 end
 
+--: (Emitter, string, ...unknown) -> boolean
 function emitter_mt:emit(event, ...)
-	local self_ = self --[[:! Emitter]]
 	-- error event with no listeners raises
 	if event == "error" then
-		local list = self_._listeners["error"]
+		local list = self._listeners["error"]
 		if not list or #list == 0 then
-			local wild = self_._listeners["*"]
+			local wild = self._listeners["*"]
 			if not wild or #wild == 0 then
 				local msg = ...
 				error(msg ~= nil and msg or "unhandled error event")
@@ -112,21 +112,20 @@ function emitter_mt:emit(event, ...)
 
 	local fired = 0 --: integer
 
-	local list = self_._listeners[event]
+	local list = self._listeners[event]
 	if list then
 		fired = fired + call_list(list, ...)
 	end
 
 	-- wildcard listeners receive (event_name, ...)
 	if event ~= "*" then
-		local wild = self_._listeners["*"]
+		local wild = self._listeners["*"]
 		if wild then
 			fired = fired + call_list(wild, event, ...)
 		end
 	end
 
-	local fired_ = fired --[[:! integer]]
-	return fired_ > 0
+	return fired > 0
 end
 
 function emitter_mt:listener_count(event)

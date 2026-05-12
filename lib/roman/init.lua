@@ -103,8 +103,8 @@ M.decode = function(s)
   local total = 0
   local len = #upper
   for i = 1, len do
-    local cur = (SYMBOL_VALUE[upper:sub(i, i)] or 0) --[[:! integer]]
-    local nxt = (i < len and SYMBOL_VALUE[upper:sub(i + 1, i + 1)] or 0) --[[:! integer]]
+    local cur = SYMBOL_VALUE[upper:sub(i, i)] or 0
+    local nxt = i < len and SYMBOL_VALUE[upper:sub(i + 1, i + 1)] or 0
     if cur < nxt then
       total = total - cur
     else

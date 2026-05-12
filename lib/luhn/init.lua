@@ -77,13 +77,13 @@ end
 
 --- Generate a valid Luhn number with the given prefix and total length.
 --- Returns nil, errmsg on invalid input.
---: (prefix: unknown, length: unknown) -> (string | nil, string | nil)
+--: (prefix: unknown, length: integer) -> (string | nil, string | nil)
 function M.generate(prefix, length)
 	if type(prefix) ~= "string" then return nil, "prefix must be a string" end
-	if type(length) ~= "number" or length < 1 then return nil, "length must be a positive integer" end
+	if length < 1 then return nil, "length must be a positive integer" end
 	local p = normalize(prefix)
 	if not p then return nil, "prefix contains non-digit characters" end
-	local len_n = length --[[:! integer]]
+	local len_n = length
 	if #p >= len_n then return nil, "prefix length must be less than total length" end
 	-- Fill remaining digits (except check digit) with zeros, then compute check digit.
 	local payload = p .. rep("0", len_n - #p - 1)

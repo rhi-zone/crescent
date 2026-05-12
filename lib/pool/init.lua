@@ -69,10 +69,9 @@ end
 
 --: (self: Pool, fn: (unknown) -> unknown) -> unknown
 function pool_mt:use(fn)
-	local self_pool = self --[[:! Pool]]
-	local obj = self_pool:acquire()
+	local obj = self:acquire()
 	local ok, result = pcall(fn, obj)
-	self_pool:release(obj)
+	self:release(obj)
 	if not ok then
 		error(result, 2)
 	end
@@ -118,14 +117,13 @@ function M.new(opts)
 	if not opts or not opts.create then
 		return nil, "pool.new: opts.create is required"
 	end
-	local typed_opts = opts --[[:! PoolOpts]]
 	local self = setmetatable({}, pool_mt) --[[:! Pool]]
 	self._idle = {}
-	self._create = typed_opts.create
-	self._reset = typed_opts.reset
-	self._max = typed_opts.max
-	self._on_acquire = typed_opts.on_acquire
-	self._on_release = typed_opts.on_release
+	self._create = opts.create
+	self._reset = opts.reset
+	self._max = opts.max
+	self._on_acquire = opts.on_acquire
+	self._on_release = opts.on_release
 	return self
 end
 
