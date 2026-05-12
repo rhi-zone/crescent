@@ -51,6 +51,7 @@ local type_validators = { --: { [string]: ValidatorFn }
 local Table = {}
 Table.__index = Table
 
+--: (ColTable, ColDef, unknown) -> (boolean | nil, string | nil)
 function Table:_validate(col_def, value)
   local col_def_ = col_def --[[:! ColDef]]
   if value == nil then return true end  -- nil is allowed (null)
@@ -65,79 +66,78 @@ function Table:_validate(col_def, value)
   return true
 end
 
+--: (ColTable, { [string]: unknown }) -> (boolean | nil, string | nil)
 function Table:insert(row)
-  local self_ = self --[[:! ColTable]]
-  for i = 1, #self_._schema do
-    local col_def = self_._schema[i]
+  for i = 1, #self._schema do
+    local col_def = self._schema[i]
     local value = row[col_def.name]
-    local ok, err = self_:_validate(col_def, value)
+    local ok, err = self:_validate(col_def, value)
     if not ok then return nil, err end
   end
-  self_._count = self_._count + 1
-  for i = 1, #self_._schema do
-    local name = self_._schema[i].name
-    self_._columns[name][self_._count] = row[name]
+  self._count = self._count + 1
+  for i = 1, #self._schema do
+    local name = self._schema[i].name
+    self._columns[name][self._count] = row[name]
   end
   return true
 end
 
+--: (ColTable, { [integer]: { [string]: unknown } }) -> (boolean | nil, string | nil)
 function Table:insert_many(rows)
-  local self_ = self --[[:! ColTable]]
   for _, row in ipairs(rows) do
-    local ok, err = self_:insert(row)
+    local ok, err = self:insert(row)
     if not ok then return nil, err end
   end
   return true
 end
 
+--: (ColTable) -> integer
 function Table:count()
-  local self_ = self --[[:! ColTable]]
-  return self_._count
+  return self._count
 end
 
+--: (ColTable, string) -> ({ [integer]: unknown } | nil, string | nil)
 function Table:column(name)
-  local self_ = self --[[:! ColTable]]
-  local col = self_._columns[name]
+  local col = self._columns[name]
   if not col then return nil, "no such column: " .. tostring(name) end
   local result = {}
-  for i = 1, self_._count do
+  for i = 1, self._count do
     result[i] = col[i]
   end
   return result
 end
 
+--: (ColTable, integer) -> ({ [string]: unknown } | nil, string | nil)
 function Table:row(i)
-  local self_ = self --[[:! ColTable]]
-  if i < 1 or i > self_._count then
+  if i < 1 or i > self._count then
     return nil, "row index out of range: " .. tostring(i)
   end
   local result = {}
-  for j = 1, #self_._schema do
-    local name = self_._schema[j].name
-    result[name] = self_._columns[name][i]
+  for j = 1, #self._schema do
+    local name = self._schema[j].name
+    result[name] = self._columns[name][i]
   end
   return result
 end
 
 -- Reconstruct a row table from column arrays for a given index
+--: (ColTable, integer) -> { [string]: unknown }
 function Table:_row_at(i)
-  local self_ = self --[[:! ColTable]]
   local result = {}
-  for j = 1, #self_._schema do
-    local name = self_._schema[j].name
-    result[name] = self_._columns[name][i]
+  for j = 1, #self._schema do
+    local name = self._schema[j].name
+    result[name] = self._columns[name][i]
   end
   return result
 end
 
+--: (ColTable, { where: (({ [string]: unknown }) -> boolean) | nil, columns: { [integer]: string } | nil, order_by: string | nil, desc: boolean | nil, limit: integer | nil, ... } | nil) -> { [integer]: { [string]: unknown } }
 function Table:select(opts)
-  local self_ = self --[[:! ColTable]]
-  opts = opts or {}
-  local where = opts.where
-  local proj = opts.columns
-  local order_by = opts.order_by
-  local desc = opts.desc
-  local limit = opts.limit
+  local where = opts and opts.where
+  local proj = opts and opts.columns
+  local order_by = opts and opts.order_by
+  local desc = opts and opts.desc
+  local limit = opts and opts.limit
 
   -- Build column projection set
   local proj_set
@@ -150,9 +150,14 @@ function Table:select(opts)
 
   -- Filter rows
   local rows = {}
-  for i = 1, self_._count do
-    local row = self_:_row_at(i)
-    if not where or where(row) then
+  for i = 1, self._count do
+    local row = self:_row_at(i)
+    local include = not where
+    if not include then
+      local where_ = where --[[:! (({ [string]: unknown }) -> boolean)]]
+      include = where_(row)
+    end
+    if include then
       if proj_set then
         local projected = {}
         for _, name in ipairs(proj) do
@@ -199,7 +204,7 @@ function Table:select(opts)
   end
 
   -- Limit
-  if limit and #rows > limit then
+  if limit and #rows > (limit --[[:! integer]]) then
     local limited = {}
     for i = 1, limit do
       limited[i] = rows[i]
@@ -210,20 +215,19 @@ function Table:select(opts)
   return rows
 end
 
+--: (ColTable, { group_by: string | nil, aggregations: { [string]: { op: string, col: string | nil } } | nil, ... } | nil) -> { [string]: { [string]: unknown } }
 function Table:aggregate(opts)
-  local self_ = self --[[:! ColTable]]
-  opts = opts or {}
-  local group_by = opts.group_by
-  local aggregations = opts.aggregations or {}
+  local group_by = opts and opts.group_by
+  local aggregations = opts and opts.aggregations or {}
 
   -- Group rows
   local groups = {}   -- key -> {rows...}
   local group_keys = {} -- ordered list of unique keys
 
-  for i = 1, self_._count do
+  for i = 1, self._count do
     local key
     if group_by then
-      key = self_._columns[group_by][i]
+      key = self._columns[group_by][i]
     else
       key = "__all__"
     end
@@ -253,7 +257,7 @@ function Table:aggregate(opts)
       elseif op == "sum" then
         local s = 0 --: number
         for _, idx in ipairs(g.indices) do
-          local v = self_._columns[agg_def_.col][idx]
+          local v = self._columns[agg_def_.col][idx]
           if v ~= nil then s = s + (v --[[:! number]]) end
         end
         result[agg_name] = s
@@ -261,14 +265,14 @@ function Table:aggregate(opts)
         local s = 0 --: number
         local c = 0
         for _, idx in ipairs(g.indices) do
-          local v = self_._columns[agg_def_.col][idx]
+          local v = self._columns[agg_def_.col][idx]
           if v ~= nil then s = s + (v --[[:! number]]); c = c + 1 end
         end
         result[agg_name] = c > 0 and (s / c) or nil
       elseif op == "min" then
         local mn = nil --: number | nil
         for _, idx in ipairs(g.indices) do
-          local v = self_._columns[agg_def_.col][idx]
+          local v = self._columns[agg_def_.col][idx]
           if v ~= nil then
             local v_ = v --[[:! number]]
             if mn == nil or v_ < (mn --[[:! number]]) then mn = v_ end
@@ -278,7 +282,7 @@ function Table:aggregate(opts)
       elseif op == "max" then
         local mx = nil --: number | nil
         for _, idx in ipairs(g.indices) do
-          local v = self_._columns[agg_def_.col][idx]
+          local v = self._columns[agg_def_.col][idx]
           if v ~= nil then
             local v_ = v --[[:! number]]
             if mx == nil or v_ > (mx --[[:! number]]) then mx = v_ end
@@ -294,9 +298,9 @@ function Table:aggregate(opts)
   return results
 end
 
+--: (ColTable, string) -> ({ [string]: number | nil } | nil, string | nil)
 function Table:stats(col_name)
-  local self_ = self --[[:! ColTable]]
-  local col = self_._columns[col_name]
+  local col = self._columns[col_name]
   if not col then return nil, "no such column: " .. tostring(col_name) end
 
   local mn = nil --: number | nil
@@ -305,7 +309,7 @@ function Table:stats(col_name)
   local s2 = 0 --: number
   local c = 0
   local nulls = 0
-  for i = 1, self_._count do
+  for i = 1, self._count do
     local v = col[i]
     if v == nil then
       nulls = nulls + 1
@@ -339,75 +343,75 @@ function Table:stats(col_name)
   }
 end
 
+--: (ColTable, ColDef) -> (boolean | nil, string | nil)
 function Table:add_column(col_def)
-  local self_ = self --[[:! ColTable]]
   local col_def_ = col_def --[[:! ColDef]]
   if not col_def or not col_def_.name then
     return nil, "column definition requires a name"
   end
-  if self_._col_index[col_def_.name] then
+  if self._col_index[col_def_.name] then
     return nil, "column already exists: " .. col_def_.name
   end
   local default = col_def_.default
   local arr = {} --: { [integer]: unknown }
-  for i = 1, self_._count do
+  for i = 1, self._count do
     arr[i] = default
   end
-  self_._columns[col_def_.name] = arr
-  self_._schema[#self_._schema + 1] = { name = col_def_.name, type = col_def_.type or "string" }
-  self_._col_index[col_def_.name] = #self_._schema
+  self._columns[col_def_.name] = arr
+  self._schema[#self._schema + 1] = { name = col_def_.name, type = col_def_.type or "string" }
+  self._col_index[col_def_.name] = #self._schema
   return true
 end
 
+--: (ColTable, string) -> (boolean | nil, string | nil)
 function Table:drop_column(name)
-  local self_ = self --[[:! ColTable]]
-  if not self_._col_index[name] then
+  if not self._col_index[name] then
     return nil, "no such column: " .. tostring(name)
   end
-  self_._columns[name] = nil --[[: unknown]]
-  self_._col_index[name] = nil --[[: unknown]]
+  self._columns[name] = nil --[[: unknown]]
+  self._col_index[name] = nil --[[: unknown]]
   local new_schema = {} --: { [integer]: ColDef }
-  for _, col_def in ipairs(self_._schema) do
+  for _, col_def in ipairs(self._schema) do
     if col_def.name ~= name then
       new_schema[#new_schema + 1] = col_def
     end
   end
-  self_._schema = new_schema
+  self._schema = new_schema
   -- Rebuild index
-  for i, col_def in ipairs(self_._schema) do
-    self_._col_index[col_def.name] = i
+  for i, col_def in ipairs(self._schema) do
+    self._col_index[col_def.name] = i
   end
   return true
 end
 
+--: (ColTable, ({ [string]: unknown }) -> boolean) -> boolean
 function Table:delete(predicate)
-  local self_ = self --[[:! ColTable]]
   local kept = {} --: { [string]: { [integer]: unknown } }
-  for _, col_def in ipairs(self_._schema) do
+  for _, col_def in ipairs(self._schema) do
     kept[col_def.name] = {}
   end
   local new_count = 0
-  for i = 1, self_._count do
-    local row = self_:_row_at(i)
+  for i = 1, self._count do
+    local row = self:_row_at(i)
     if not predicate(row) then
       new_count = new_count + 1
-      for _, col_def in ipairs(self_._schema) do
+      for _, col_def in ipairs(self._schema) do
         local name = col_def.name
-        kept[name][new_count] = self_._columns[name][i]
+        kept[name][new_count] = self._columns[name][i]
       end
     end
   end
-  self_._count = new_count
-  for _, col_def in ipairs(self_._schema) do
-    self_._columns[col_def.name] = kept[col_def.name]
+  self._count = new_count
+  for _, col_def in ipairs(self._schema) do
+    self._columns[col_def.name] = kept[col_def.name]
   end
   return true
 end
 
+--: (ColTable) -> { [integer]: { name: string, type: string } }
 function Table:schema()
-  local self_ = self --[[:! ColTable]]
   local result = {} --: { [integer]: { name: string, type: string } }
-  for i, col_def in ipairs(self_._schema) do
+  for i, col_def in ipairs(self._schema) do
     result[i] = { name = col_def.name, type = col_def.type }
   end
   return result
