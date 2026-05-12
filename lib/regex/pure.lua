@@ -163,12 +163,12 @@ local function parse_seq(pat, pos, group_counter, dotall)
 		if b == 41 or b == 124 then break end -- ) or |
 		local node, npos
 		if b == 40 then -- (
-			group_counter[1] = (group_counter[1] --[[:! integer]]) + 1
+			group_counter[1] = group_counter[1] + 1
 			local idx = group_counter[1]
 			local child
 			local alt_pos
 			child, alt_pos = (parse_alt --[[:! (string, integer, { [integer]: integer }, boolean) -> (RegexNode | nil, integer | nil)]])(pat, pos + 1, group_counter, dotall)
-			local alt_pos_i = (alt_pos or 0) --[[:! integer]]
+			local alt_pos_i = (alt_pos or 0)
 			if not child then return child, alt_pos_i end -- propagate error
 			if alt_pos_i > #pat or pat:byte(alt_pos_i) ~= 41 then
 				return parse_error(pat, alt_pos_i, "unterminated group")
@@ -184,7 +184,7 @@ local function parse_seq(pat, pos, group_counter, dotall)
 			end
 		end
 		-- Check for quantifier
-		local npos_i = (npos or 0) --[[:! integer]]
+		local npos_i = (npos or 0)
 		if npos and npos_i <= #pat then
 			local q = pat:byte(npos_i)
 			local node_a = node --[[:! RegexNode]]
@@ -214,17 +214,16 @@ end
 
 --: (string, integer, { [integer]: integer }, boolean) -> (RegexNode | nil, integer | nil)
 parse_alt = function(pat, pos, group_counter, dotall)
-	local pat = (pat --[[:! string]])
 	local first, npos = parse_seq(pat, pos, group_counter, dotall)
 	if not first then return first, npos end
-	local npos_i = (npos or 0) --[[:! integer]]
+	local npos_i = (npos or 0)
 	if npos and npos_i <= #pat and pat:byte(npos_i) == 124 then -- |
 		local alts = { first }
 		while npos_i <= #pat and pat:byte(npos_i) == 124 do
 			local branch
 			branch, npos = parse_seq(pat, npos_i + 1, group_counter, dotall)
 			if not branch then return branch, npos end
-			npos_i = (npos or 0) --[[:! integer]]
+			npos_i = (npos or 0)
 			alts[#alts + 1] = branch
 		end
 		return { type = "alt", children = alts }, npos_i
@@ -234,8 +233,7 @@ end
 
 --: (string, string | nil) -> (CompiledPattern | nil, integer | string | nil)
 local function compile_pattern(pat, flags)
-	local pat = (pat --[[:! string]])
-	local flags_s = (flags or "") --[[:! string]]
+	local flags_s = (flags or "")
 	local ci = false
 	local dotall = false
 	if flags then
@@ -253,10 +251,9 @@ local function compile_pattern(pat, flags)
 	local group_counter = { 0 }
 	local tree, pos = parse_alt(pat, 1, group_counter, dotall)
 	if not tree then return tree, pos end
-	local pos_i = (pos or 0) --[[:! integer]]
-	local pat_s = pat --[[:! string]]
-	if pos_i <= #pat_s then
-		return parse_error(pat_s, pos_i, "unexpected character '" .. pat_s:sub(pos_i, pos_i) .. "'")
+	local pos_i = (pos or 0)
+	if pos_i <= #pat then
+		return parse_error(pat, pos_i, "unexpected character '" .. pat:sub(pos_i, pos_i) .. "'")
 	end
 	return { tree = tree, ngroups = (group_counter[1] --[[:! integer]]), ci = ci, dotall = dotall, pattern = pat }
 end
@@ -339,7 +336,7 @@ local function match_node(node, subject, pos, caps, ci, dotall)
 		p = pos
 		local children_s = node_a.children --[[:! { [integer]: RegexNode }]]
 		for i = 1, #children_s do
-			p = match_node(children_s[i], subject_s, (p or 0) --[[:! integer]], caps, ci, dotall)
+			p = match_node(children_s[i], subject_s, (p or 0), caps, ci, dotall)
 			if not p then return nil end
 		end
 		return p
@@ -359,7 +356,7 @@ local function match_node(node, subject, pos, caps, ci, dotall)
 	elseif t == "group" then
 		local start = pos
 		local p_group = match_node((node_a.child --[[:! RegexNode]]), subject_s, pos, caps, ci, dotall)
-		local p_group_i = (p_group or 0) --[[:! integer]]
+		local p_group_i = (p_group or 0)
 		if p_group then
 			caps[node_a.idx] = subject_s:sub(start, p_group_i - 1)
 			return p_group_i
@@ -385,7 +382,7 @@ local function match_node(node, subject, pos, caps, ci, dotall)
 				break
 			end
 			count = count + 1
-			positions[#positions + 1] = (p or 0) --[[:! integer]]
+			positions[#positions + 1] = (p or 0)
 			saved_caps[count] = cp
 		end
 		-- Now backtrack from most to min
@@ -517,7 +514,7 @@ function Regex:gsub(subject, replacement, n)
 			end
 		end
 		if not match_start then break end
-		local match_end_i = (match_end_pos or 0) --[[:! integer]]
+		local match_end_i = (match_end_pos or 0)
 		-- Append text before match
 		if match_start > offset then
 			parts[#parts + 1] = subject_s:sub(offset, match_start - 1)
@@ -581,7 +578,7 @@ function Regex:split(subject)
 			result[#result + 1] = subject_s:sub(offset)
 			return result
 		end
-		local match_end_i = (match_end_pos or 0) --[[:! integer]]
+		local match_end_i = (match_end_pos or 0)
 		if match_end_i == match_start then
 			-- Empty match
 			result[#result + 1] = subject_s:sub(offset, offset)

@@ -11,7 +11,7 @@ M._tier = "pure"
 
 local byte, char, sub, find, format, rep = string.byte, string.char, string.sub, string.find, string.format, string.rep
 --: (string, integer) -> integer
-local function byte1(s, i) return (string.byte(s, i, i) or 0) --[[:! integer]] end
+local function byte1(s, i) return (string.byte(s, i, i) or 0) end
 local concat, sort = table.concat, table.sort
 local floor, huge = math.floor, math.huge
 local type, tostring, pairs, ipairs, next = type, tostring, pairs, ipairs, next

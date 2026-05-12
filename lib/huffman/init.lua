@@ -211,7 +211,7 @@ function M.compress(str)
   -- Compute byte frequencies
   local freqs = {} --: { [integer]: number }
   for i = 1, #str do
-    local b = (string.byte(str, i) or 0) --[[:! integer]]
+    local b = (string.byte(str, i) or 0)
     freqs[b] = (freqs[b] or 0) + 1
   end
 

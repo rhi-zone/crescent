@@ -69,10 +69,10 @@ end
 -- Unpack a big-endian uint32 from string s at byte offset (1-based).
 --: (string, integer) -> integer
 local function unpack_u32(s, off)
-  local b1 = (string.byte(s, off, off) or 0) --[[:! integer]]
-  local b2 = (string.byte(s, off + 1, off + 1) or 0) --[[:! integer]]
-  local b3 = (string.byte(s, off + 2, off + 2) or 0) --[[:! integer]]
-  local b4 = (string.byte(s, off + 3, off + 3) or 0) --[[:! integer]]
+  local b1 = (string.byte(s, off, off) or 0)
+  local b2 = (string.byte(s, off + 1, off + 1) or 0)
+  local b3 = (string.byte(s, off + 2, off + 2) or 0)
+  local b4 = (string.byte(s, off + 3, off + 3) or 0)
   return bor(lshift(b1, 24), lshift(b2, 16), lshift(b3, 8), b4)
 end
 

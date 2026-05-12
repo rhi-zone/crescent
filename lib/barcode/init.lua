@@ -232,7 +232,7 @@ function M.ean13(s)
   end
 
   local digits = {} --: { [integer]: integer }
-  for i = 1, #s do local bi = s:byte(i); digits[i] = (bi or 0) --[[:! integer]] - 48 end
+  for i = 1, #s do local bi = s:byte(i); digits[i] = (bi or 0) - 48 end
 
   local check, err
   if #s == 12 then
@@ -304,7 +304,7 @@ function M.ean8(s)
   end
 
   local digits = {} --: { [integer]: integer }
-  for i = 1, #s do local bi = s:byte(i); digits[i] = (bi or 0) --[[:! integer]] - 48 end
+  for i = 1, #s do local bi = s:byte(i); digits[i] = (bi or 0) - 48 end
 
   -- EAN-8 check digit: same algorithm as EAN-13 but on 7 digits
   -- Weights: odd=3, even=1 (reversed from EAN-13)

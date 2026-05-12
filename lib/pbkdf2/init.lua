@@ -24,8 +24,8 @@ M._tier = "pure"
 local function xor_strings(a, b)
   local result = {}
   for i = 1, #a do
-    local ba = (string.byte(a, i, i) or 0) --[[:! integer]]
-    local bb = (string.byte(b, i, i) or 0) --[[:! integer]]
+    local ba = (string.byte(a, i, i) or 0)
+    local bb = (string.byte(b, i, i) or 0)
     result[i] = string.char(bit.bxor(ba, bb))
   end
   return table.concat(result)
@@ -153,8 +153,8 @@ function M.verify(password, salt, iterations, derived_key, opts)
   local sc = candidate --[[:! string]]
   local ss = stored --[[:! string]]
   for i = 1, #ss do
-    local bc = (string.byte(sc, i, i) or 0) --[[:! integer]]
-    local bs = (string.byte(ss, i, i) or 0) --[[:! integer]]
+    local bc = (string.byte(sc, i, i) or 0)
+    local bs = (string.byte(ss, i, i) or 0)
     diff = bit.bor(diff, bit.bxor(bc, bs))
   end
   return diff == 0

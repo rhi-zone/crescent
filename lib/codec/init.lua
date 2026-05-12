@@ -175,7 +175,7 @@ local function xor(key)
       if type(s) ~= "string" then return nil, "codec.xor: expected string" end
       local t = {} --: { [integer]: string }
       for i = 1, #s do
-        local b = (string.byte(s, i, i) or 0) --[[:! integer]]
+        local b = (string.byte(s, i, i) or 0)
         local xored = bxor_(b, key_) --: integer
         t[i] = string.char(xored)
       end

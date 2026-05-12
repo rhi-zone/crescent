@@ -40,7 +40,7 @@ end
 local function to_hex(s)
   local t = {}
   for i = 1, #s do
-    t[i] = string.format("%02x", (string.byte(s, i) or 0) --[[:! integer]])
+    t[i] = string.format("%02x", (string.byte(s, i) or 0))
   end
   return table.concat(t)
 end
@@ -352,8 +352,8 @@ function M.verify(password, salt, N, r, p, derived_key, opts)
   local diff = 0
   for i = 1, dklen do
     diff = bor(diff, bxor(
-      (string.byte(candidate_, i) or 0) --[[:! integer]],
-      (string.byte(stored_, i) or 0) --[[:! integer]]))
+      (string.byte(candidate_, i) or 0),
+      (string.byte(stored_, i) or 0)))
   end
   return diff == 0
 end

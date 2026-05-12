@@ -79,7 +79,7 @@ function M.decode_tlv(data, pos)
   end
 
   -- ── Tag byte(s) ──
-  local tag_byte = (byte(data, pos) or 0) --[[:! integer]]
+  local tag_byte = (byte(data, pos) or 0)
   local class_num   = band(rshift(tag_byte, 6), 0x03)
   local constructed = band(tag_byte, 0x20) ~= 0
   local tag_num     = band(tag_byte, 0x1f)
@@ -92,7 +92,7 @@ function M.decode_tlv(data, pos)
       if pos > data_len then
         return nil, "unexpected end of data in long-form tag"
       end
-      local b = (byte(data, pos) or 0) --[[:! integer]]
+      local b = (byte(data, pos) or 0)
       pos = pos + 1
       tag_num = tag_num * 128 + band(b, 0x7f)
       if band(b, 0x80) == 0 then break end
@@ -103,7 +103,7 @@ function M.decode_tlv(data, pos)
   if pos > data_len then
     return nil, "unexpected end of data before length"
   end
-  local len_byte = (byte(data, pos) or 0) --[[:! integer]]
+  local len_byte = (byte(data, pos) or 0)
   pos = pos + 1
   local vlen = 0
   if band(len_byte, 0x80) == 0 then
@@ -122,7 +122,7 @@ function M.decode_tlv(data, pos)
       if pos > data_len then
         return nil, "unexpected end of data in length field"
       end
-      vlen = vlen * 256 + ((byte(data, pos) or 0) --[[:! integer]])
+      vlen = vlen * 256 + ((byte(data, pos) or 0))
       pos = pos + 1
     end
   end
@@ -171,18 +171,18 @@ function M.decode_integer(value_bytes)
   if slen(value_bytes) == 0 then
     return nil, "empty INTEGER value"
   end
-  local first = (byte(value_bytes, 1) or 0) --[[:! integer]]
+  local first = (byte(value_bytes, 1) or 0)
   local negative = band(first, 0x80) ~= 0
   local n = 0 --: number
   if negative then
     -- Two's complement: each byte inverted, then +1 at the end, then negated.
     for i = 1, slen(value_bytes) do
-      n = n * 256 + bxor((byte(value_bytes, i) or 0) --[[:! integer]], 0xff)
+      n = n * 256 + bxor((byte(value_bytes, i) or 0), 0xff)
     end
     n = -(n + 1)
   else
     for i = 1, slen(value_bytes) do
-      n = n * 256 + ((byte(value_bytes, i) or 0) --[[:! integer]])
+      n = n * 256 + ((byte(value_bytes, i) or 0))
     end
   end
   -- 2^53 boundary for safe integer representation
@@ -190,7 +190,7 @@ function M.decode_integer(value_bytes)
   if n_ > 9007199254740992 or n_ < -9007199254740992 then
     local hex = {}
     for i = 1, slen(value_bytes) do
-      hex[i] = string.format("%02x", (byte(value_bytes, i) or 0) --[[:! integer]])
+      hex[i] = string.format("%02x", (byte(value_bytes, i) or 0))
     end
     return "0x" .. concat(hex), nil
   end

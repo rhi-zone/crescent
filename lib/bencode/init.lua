@@ -165,7 +165,7 @@ local function decode_at(s, pos)
 		local len_s = sub(s, pos, colon_i - 1)
 		local len_i = 0
 		for i = 1, #len_s do
-			local d = (byte(len_s, i) or 0) --[[:! integer]] - 0x30
+			local d = (byte(len_s, i) or 0) - 0x30
 			if d < 0 or d > 9 then len_i = -1 break end
 			len_i = len_i * 10 + d
 		end

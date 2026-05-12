@@ -9,7 +9,7 @@ local char = string.char
 local concat = table.concat
 -- Helper: extract a single byte as integer
 --: (string, integer) -> integer
-local function byte1(s, i) return (byte(s, i) or 0) --[[:! integer]] end
+local function byte1(s, i) return (byte(s, i) or 0) end
 
 local _bit = (pcall(require, "bit") and require("bit") or nil)
 local band = (_bit and _bit.band or function(a, b) return a % (b + 1) end) --[[:! (integer, integer) -> integer]]

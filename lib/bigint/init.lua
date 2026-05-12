@@ -359,7 +359,7 @@ function M.from_hex(s)
   local d = {} --: { [integer]: number }
   d[1] = 0
   for i = 1, #s do
-    local c = (s:byte(i) or 0) --[[:! integer]]
+    local c = (s:byte(i) or 0)
     local digit = 0
     if c >= 48 and c <= 57 then digit = c - 48
     elseif c >= 65 and c <= 70 then digit = c - 55

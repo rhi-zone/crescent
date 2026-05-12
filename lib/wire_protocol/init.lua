@@ -204,9 +204,9 @@ function M.unpack(fmt, s)
     local c = sub(fmt, fi, fi)
     fi = fi + 1
     if c == "B" then
-      results[ri] = (byte(s, pos) or 0) --[[:! integer]]; pos = pos + 1; ri = ri + 1
+      results[ri] = (byte(s, pos) or 0); pos = pos + 1; ri = ri + 1
     elseif c == "b" then
-      local v = (byte(s, pos) or 0) --[[:! integer]]; pos = pos + 1
+      local v = (byte(s, pos) or 0); pos = pos + 1
       if v >= 128 then v = v - 256 end
       results[ri] = v; ri = ri + 1
     elseif c == "H" then

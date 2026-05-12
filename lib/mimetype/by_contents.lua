@@ -71,8 +71,8 @@ mod.mimetype = function (buffer, pos)
 	local _check_mask = function (buffer_, header, offset, mask)
 		local start = pos + offset - 1
 		for i = 1, #header do
-			local byte = (buffer_:byte(start + i) or 0) --[[:! integer]]
-			if header:byte(i) ~= bit.band((mask:byte(i) or 0) --[[:! integer]], byte) then
+			local byte = (buffer_:byte(start + i) or 0)
+			if header:byte(i) ~= bit.band((mask:byte(i) or 0), byte) then
 				return false
 			end
 		end
@@ -285,7 +285,7 @@ mod.mimetype = function (buffer, pos)
 				local buf_s = buf --[[:! string]]
 				local ret = 0ULL --[[:! cdata]]
 				for i = 1, #buf_s do
-					local b = (buf_s:byte(i) or 0) --[[:! integer]]
+					local b = (buf_s:byte(i) or 0)
 					ret = bit.bor(bit.lshift(ret, 8), b) --[[:! cdata]]
 				end
 				return tonumber(ret) -- lossy conversion
