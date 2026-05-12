@@ -318,17 +318,16 @@ end
 -- Send a raw command line (CRLF appended automatically)
 --: (SmtpSession, string) -> unknown
 function Session:command(cmd)
-	local s = self --[[:! SmtpSession]]
-	return s.transport:send(cmd .. "\r\n")
+	return self.transport:send(cmd .. "\r\n")
 end
 
 -- Send EHLO and parse the extension list.
 -- Returns {ok=true, extensions={...}} or {ok=false, err="..."}
+--: (SmtpSession, string | nil) -> unknown
 function Session:ehlo(hostname)
-	local s = self --[[:! SmtpSession]]
 	hostname = hostname or "localhost"
-	s:command("EHLO " .. hostname)
-	local code, lines = M.read_response(s.transport)
+	self:command("EHLO " .. hostname)
+	local code, lines = M.read_response(self.transport)
 	if not code then return nil, lines end
 	local lns = (lines --[[: unknown]]) --[[:! { [integer]: string }]]
 	if code ~= 250 then
@@ -343,14 +342,14 @@ function Session:ehlo(hostname)
 end
 
 -- AUTH PLAIN: sends credentials in base64
+--: (SmtpSession, string, string) -> unknown
 function Session:auth_plain(user, password)
-	local s = self --[[:! SmtpSession]]
 	-- PLAIN: "\0user\0password" base64-encoded
 	local credentials = "\0" .. user .. "\0" .. password
 	-- base64 encode
 	local b64 = M.base64_encode(credentials)
-	s:command("AUTH PLAIN " .. b64)
-	local code, lines = M.read_response(s.transport)
+	self:command("AUTH PLAIN " .. b64)
+	local code, lines = M.read_response(self.transport)
 	if not code then return nil, lines end
 	if code ~= 235 then
 		return { ok = false, err = "AUTH PLAIN failed: " .. (lines and lines[1] or "") }
@@ -359,24 +358,24 @@ function Session:auth_plain(user, password)
 end
 
 -- AUTH LOGIN: two-step challenge/response
+--: (SmtpSession, string, string) -> unknown
 function Session:auth_login(user, password)
-	local s = self --[[:! SmtpSession]]
-	s:command("AUTH LOGIN")
-	local code, lines = M.read_response(s.transport)
+	self:command("AUTH LOGIN")
+	local code, lines = M.read_response(self.transport)
 	if not code then return nil, lines end
 	if code ~= 334 then
 		return { ok = false, err = "AUTH LOGIN: unexpected response: " .. (lines and lines[1] or "") }
 	end
 	-- send username
-	s:command(M.base64_encode(user))
-	code, lines = M.read_response(s.transport)
+	self:command(M.base64_encode(user))
+	code, lines = M.read_response(self.transport)
 	if not code then return nil, lines end
 	if code ~= 334 then
 		return { ok = false, err = "AUTH LOGIN: username not accepted: " .. (lines and lines[1] or "") }
 	end
 	-- send password
-	s:command(M.base64_encode(password))
-	code, lines = M.read_response(s.transport)
+	self:command(M.base64_encode(password))
+	code, lines = M.read_response(self.transport)
 	if not code then return nil, lines end
 	if code ~= 235 then
 		return { ok = false, err = "AUTH LOGIN failed: " .. (lines and lines[1] or "") }
@@ -385,10 +384,10 @@ function Session:auth_login(user, password)
 end
 
 -- MAIL FROM command
+--: (SmtpSession, string) -> unknown
 function Session:mail_from(addr)
-	local s = self --[[:! SmtpSession]]
-	s:command("MAIL FROM:<" .. addr .. ">")
-	local code, lines = M.read_response(s.transport)
+	self:command("MAIL FROM:<" .. addr .. ">")
+	local code, lines = M.read_response(self.transport)
 	if not code then return nil, lines end
 	if code ~= 250 then
 		return { ok = false, err = "MAIL FROM failed: " .. (lines and lines[1] or "") }
@@ -397,10 +396,10 @@ function Session:mail_from(addr)
 end
 
 -- RCPT TO command
+--: (SmtpSession, string) -> unknown
 function Session:rcpt_to(addr)
-	local s = self --[[:! SmtpSession]]
-	s:command("RCPT TO:<" .. addr .. ">")
-	local code, lines = M.read_response(s.transport)
+	self:command("RCPT TO:<" .. addr .. ">")
+	local code, lines = M.read_response(self.transport)
 	if not code then return nil, lines end
 	if code ~= 250 and code ~= 251 then
 		return { ok = false, err = "RCPT TO failed (" .. addr .. "): " .. (lines and lines[1] or "") }
@@ -411,10 +410,10 @@ end
 -- DATA command: send raw message body
 -- raw_message should already be a properly formatted RFC 2822 message.
 -- Lines starting with "." are dot-stuffed automatically.
+--: (SmtpSession, string) -> unknown
 function Session:data(raw_message)
-	local s = self --[[:! SmtpSession]]
-	s:command("DATA")
-	local code, lines = M.read_response(s.transport)
+	self:command("DATA")
+	local code, lines = M.read_response(self.transport)
 	if not code then return nil, lines end
 	if code ~= 354 then
 		return { ok = false, err = "DATA not accepted: " .. (lines and lines[1] or "") }
@@ -425,8 +424,8 @@ function Session:data(raw_message)
 	if not stuffed:match("\r\n$") then
 		stuffed = stuffed .. "\r\n"
 	end
-	s.transport:send(stuffed .. ".\r\n")
-	code, lines = M.read_response(s.transport)
+	self.transport:send(stuffed .. ".\r\n")
+	code, lines = M.read_response(self.transport)
 	if not code then return nil, lines end
 	if code ~= 250 then
 		return { ok = false, err = "DATA delivery failed: " .. (lines and lines[1] or "") }
@@ -435,18 +434,18 @@ function Session:data(raw_message)
 end
 
 -- QUIT command
+--: (SmtpSession) -> unknown
 function Session:quit()
-	local s = self --[[:! SmtpSession]]
-	s:command("QUIT")
+	self:command("QUIT")
 	-- read the 221 goodbye (best effort)
-	M.read_response(s.transport)
+	M.read_response(self.transport)
 end
 
 -- RSET command (reset mail transaction)
+--: (SmtpSession) -> unknown
 function Session:rset()
-	local s = self --[[:! SmtpSession]]
-	s:command("RSET")
-	local code, lines = M.read_response(s.transport)
+	self:command("RSET")
+	local code, lines = M.read_response(self.transport)
 	if not code then return nil, lines end
 	if code ~= 250 then
 		return { ok = false, err = "RSET failed: " .. (lines and lines[1] or "") }
@@ -455,10 +454,10 @@ function Session:rset()
 end
 
 -- NOOP command
+--: (SmtpSession) -> unknown
 function Session:noop()
-	local s = self --[[:! SmtpSession]]
-	s:command("NOOP")
-	local code, lines = M.read_response(s.transport)
+	self:command("NOOP")
+	local code, lines = M.read_response(self.transport)
 	if not code then return nil, lines end
 	return { ok = code == 250, code = code, text = lines and lines[1] or "" }
 end
@@ -557,7 +556,7 @@ M.base64_encode = function(s)
 	local len = #s
 	local i = 1
 	while i <= len do
-		local b0 = s:byte(i)
+		local b0 = s:byte(i) or 0
 		local b1 = s:byte(i + 1) or 0
 		local b2 = s:byte(i + 2) or 0
 		local n = b0 * 65536 + b1 * 256 + b2
@@ -572,7 +571,7 @@ M.base64_encode = function(s)
 			out[#out + 1] = "="
 		end
 		if i + 2 <= len then
-			local i3 = n % 64 + 1 --[[:! integer]]
+			local i3 = math.floor(n % 64) + 1
 			out[#out + 1] = b64_chars:sub(i3, i3)
 		else
 			out[#out + 1] = "="
