@@ -23,18 +23,16 @@ end
 --- Number of unread bytes currently in the buffer.
 --: (http_stream) -> integer
 local function buf_len(self)
-	local self_ = self --[[:! http_stream]]
-	return #self_._buf - self_._pos + 1
+	return #self._buf - self._pos + 1
 end
 
 --- Compact the buffer when the consumed prefix is larger than the remaining data.
 -- Avoids unbounded memory growth from accumulated prefixes.
 --: (http_stream) -> nil
 local function maybe_compact(self)
-	local self_ = self --[[:! http_stream]]
-	if self_._pos > 1 and self_._pos > (#self_._buf / 2) then
-		self_._buf = self_._buf:sub(self_._pos)
-		self_._pos = 1
+	if self._pos > 1 and self._pos > (#self._buf / 2) then
+		self._buf = self._buf:sub(self._pos)
+		self._pos = 1
 	end
 end
 
