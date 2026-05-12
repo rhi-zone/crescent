@@ -19,10 +19,10 @@ local function myers_forward(a, b)
   for d = 0, max_d do
     for k = -d, d, 2 do
       local x
-      if k == -d or (k ~= d and (v[offset + k - 1] or -1) --[[:! integer]] < (v[offset + k + 1] or -1) --[[:! integer]]) then
-        x = (v[offset + k + 1] or 0) --[[:! integer]]
+      if k == -d or (k ~= d and (v[offset + k - 1] or -1) < (v[offset + k + 1] or -1)) then
+        x = (v[offset + k + 1] or 0)
       else
-        x = (v[offset + k - 1] or 0) --[[:! integer]] + 1
+        x = (v[offset + k - 1] or 0) + 1
       end
       local x_ = x --[[:! integer]]
       local y = x_ - k
@@ -178,10 +178,10 @@ M.distance = function(a, b)
   for d = 0, max_d do
     for k = -d, d, 2 do
       local x
-      if k == -d or (k ~= d and (v[offset + k - 1] or -1) --[[:! integer]] < (v[offset + k + 1] or -1) --[[:! integer]]) then
-        x = (v[offset + k + 1] or 0) --[[:! integer]]
+      if k == -d or (k ~= d and (v[offset + k - 1] or -1) < (v[offset + k + 1] or -1)) then
+        x = (v[offset + k + 1] or 0)
       else
-        x = (v[offset + k - 1] or 0) --[[:! integer]] + 1
+        x = (v[offset + k - 1] or 0) + 1
       end
       local x_ = x --[[:! integer]]
       local y = x_ - k

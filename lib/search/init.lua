@@ -230,16 +230,15 @@ function M.index(opts)
   -- Add a document
   --: (self: unknown, id: unknown, text: string, opts: ({ fields: ({ [string]: unknown } | nil) } | nil)) -> unknown
   function idx:add(id, text, add_opts)
-    local text_ = text --[[:! string]]
     if docs[id] then
-      local self_ = idx; return self_:update(id --[[:! string]], text_)
+      local self_ = idx; return self_:update(id --[[:! string]], text)
     end
     add_opts = add_opts or {} --[[:! { fields: { [string]: unknown } | nil }]]
-    local raw_tokens = (tokenize_fn --[[:! (string) -> { [integer]: string }]])(text_)
+    local raw_tokens = (tokenize_fn --[[:! (string) -> { [integer]: string }]])(text)
     local tokens = process_tokens(raw_tokens)
     local doc_len = #tokens
 
-    docs[id] = { text = text_, length = doc_len, fields = add_opts.fields }
+    docs[id] = { text = text, length = doc_len, fields = add_opts.fields }
     doc_count = doc_count + 1
     total_length = total_length + doc_len
 
@@ -402,9 +401,8 @@ function M.index(opts)
       local max_dist = (q.max_dist or 1)
       local result = {}
       for term in pairs(inverted) do
-        local term_ = term --[[:! string]]
-        if edit_distance(word, term_) <= max_dist then
-          for doc_id in pairs(inverted[term_]) do
+        if edit_distance(word, term) <= max_dist then
+          for doc_id in pairs(inverted[term]) do
             result[doc_id] = true
           end
         end
@@ -416,9 +414,8 @@ function M.index(opts)
       local plen = #prefix
       local result = {}
       for term in pairs(inverted) do
-        local term_ = term --[[:! string]]
-        if term_:sub(1, plen) == prefix then
-          for doc_id in pairs(inverted[term_]) do
+        if term:sub(1, plen) == prefix then
+          for doc_id in pairs(inverted[term]) do
             result[doc_id] = true
           end
         end
@@ -429,9 +426,8 @@ function M.index(opts)
       local lua_pat = wildcard_to_lua_pattern(q.pattern --[[:! string]])
       local result = {}
       for term in pairs(inverted) do
-        local term_ = term --[[:! string]]
-        if term_:match(lua_pat) then
-          for doc_id in pairs(inverted[term_]) do
+        if term:match(lua_pat) then
+          for doc_id in pairs(inverted[term]) do
             result[doc_id] = true
           end
         end
@@ -466,9 +462,8 @@ function M.index(opts)
       local max_dist = (q.max_dist or 1)
       local terms = {} --: { [integer]: string }
       for term in pairs(inverted) do
-        local term_ = term --[[:! string]]
-        if edit_distance(word, term_) <= max_dist then
-          terms[#terms + 1] = term_
+        if edit_distance(word, term) <= max_dist then
+          terms[#terms + 1] = term
         end
       end
       return terms
@@ -477,16 +472,14 @@ function M.index(opts)
       local plen = #prefix
       local terms = {} --: { [integer]: string }
       for term in pairs(inverted) do
-        local term_ = term --[[:! string]]
-        if term_:sub(1, plen) == prefix then terms[#terms + 1] = term_ end
+        if term:sub(1, plen) == prefix then terms[#terms + 1] = term end
       end
       return terms
     elseif qt == "wildcard" then
       local lua_pat = wildcard_to_lua_pattern(q.pattern --[[:! string]])
       local terms = {} --: { [integer]: string }
       for term in pairs(inverted) do
-        local term_ = term --[[:! string]]
-        if term_:match(lua_pat) then terms[#terms + 1] = term_ end
+        if term:match(lua_pat) then terms[#terms + 1] = term end
       end
       return terms
     end
