@@ -75,16 +75,16 @@ local function cbf_probe(self, s, fn)
   end
 end
 
+--: (CBFShape, unknown) -> nil
 function CBF:add(item)
-  local self_ = self --[[:! CBFShape]]
   local s = tostring(item)
-  local counters = self_._counters
-  local max = self_._max
-  cbf_probe(self_, s, function(pos)
+  local counters = self._counters
+  local max = self._max
+  cbf_probe(self, s, function(pos)
     local c = counters[pos]
     if c < max then counters[pos] = c + 1 end
   end)
-  self_._size = self_._size + 1
+  self._size = self._size + 1
 end
 
 function CBF:remove(item)
@@ -124,22 +124,22 @@ function CBF:count(item)
   return mn
 end
 
+--: (CBFShape) -> nil
 function CBF:clear()
-  local self_ = self --[[:! CBFShape]]
-  local counters = self_._counters
-  for i = 0, self_._m - 1 do counters[i] = 0 end
-  self_._size = 0
+  local counters = self._counters
+  for i = 0, self._m - 1 do counters[i] = 0 end
+  self._size = 0
 end
 
+--: (CBFShape) -> integer
 function CBF:size()
-  local self_ = self --[[:! CBFShape]]
-  return self_._size
+  return self._size
 end
 
+--: (CBFShape) -> number
 function CBF:false_positive_rate()
-  local self_ = self --[[:! CBFShape]]
-  local n = self_._size
-  local m, k = self_._m, self_._k
+  local n = self._size
+  local m, k = self._m, self._k
   if n == 0 then return 0 end
   return (1 - exp(-k * n / m)) ^ k
 end
