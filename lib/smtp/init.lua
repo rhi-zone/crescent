@@ -111,7 +111,7 @@ M.format_address = function(t)
 	if not t or not t.addr then return nil, "smtp: format_address: missing addr" end
 	if t.name and t.name ~= "" then
 		-- quote name if it contains special chars
-		local name = t.name --[[:! string]]
+		local name = t.name
 		if name:find('[",;:<>@%(%)%[%]\\]') then
 			local escaped = name:gsub('"', '\\"')
 			name = '"' .. escaped .. '"'

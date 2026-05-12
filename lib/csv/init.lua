@@ -100,23 +100,23 @@ local function parse_field(s, pos, len, sep_b, quot_b, do_trim)
     c = (byte(s, pos)) or 0
     if c == sep_b then
       local field = sub(s, start, pos - 1)
-      if do_trim then field = (field:match("^%s*(.-)%s*$")) or field --[[:! string]] end
+      if do_trim then field = (field:match("^%s*(.-)%s*$")) or field end
       return field, pos + 1, "delim", nil
     elseif c == BYTE_CR then
       local field = sub(s, start, pos - 1)
-      if do_trim then field = (field:match("^%s*(.-)%s*$")) or field --[[:! string]] end
+      if do_trim then field = (field:match("^%s*(.-)%s*$")) or field end
       pos = pos + 1
       if pos <= len and ((byte(s, pos)) or 0) == BYTE_LF then pos = pos + 1 end
       return field, pos, "newline", nil
     elseif c == BYTE_LF then
       local field = sub(s, start, pos - 1)
-      if do_trim then field = (field:match("^%s*(.-)%s*$")) or field --[[:! string]] end
+      if do_trim then field = (field:match("^%s*(.-)%s*$")) or field end
       return field, pos + 1, "newline", nil
     end
     pos = pos + 1
   end
   local field = sub(s, start, pos - 1)
-  if do_trim then field = (field:match("^%s*(.-)%s*$")) or field --[[:! string]] end
+  if do_trim then field = (field:match("^%s*(.-)%s*$")) or field end
   return field, pos, "eof", nil
 end
 
@@ -174,7 +174,7 @@ function M.decode(s, opts)
       while true do
         local field, next_pos, term, err = parse_field(s, pos, len, sep_b, quot_b, do_trim)
         if err then
-          return nil, err --[[:! string]]
+          return nil, err
         end
         if do_coerce and field ~= nil then field = coerce_value(field) end
         nfield = nfield + 1
