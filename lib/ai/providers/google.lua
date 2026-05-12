@@ -166,7 +166,7 @@ mod.generate = function(req)
 
 	local body_str_raw, body_err = json.encode(body)
 	if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
-	local body_str = body_str_raw --[[:! string]]
+	local body_str = body_str_raw
 	local path = "/v1beta/models/" .. req.model .. ":generateContent?key=" .. api_key
 
 	local http_client_opt = req.http_client
@@ -215,7 +215,7 @@ mod.stream = function(req)
 
 	local body_str_raw, body_err = json.encode(body)
 	if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
-	local body_str = body_str_raw --[[:! string]]
+	local body_str = body_str_raw
 	local path = "/v1beta/models/" .. req.model .. ":streamGenerateContent?key=" .. api_key .. "&alt=sse"
 
 	local http_client_opt = req.http_client
@@ -327,7 +327,7 @@ mod.embed = function(req)
 		content = { parts = { { text = req.value } } },
 	})
 	if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
-	local body_str = body_str_raw --[[:! string]]
+	local body_str = body_str_raw
 	local path = "/v1beta/models/" .. req.model .. ":embedContent?key=" .. api_key
 
 	local http_client_opt = req.http_client
@@ -384,7 +384,7 @@ mod.embed_many = function(req)
 
 	local body_str_raw, body_err = json.encode({ requests = requests })
 	if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
-	local body_str = body_str_raw --[[:! string]]
+	local body_str = body_str_raw
 	local path = "/v1beta/models/" .. req.model .. ":batchEmbedContents?key=" .. api_key
 
 	local http_client_opt = req.http_client

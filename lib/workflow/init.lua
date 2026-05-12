@@ -98,9 +98,8 @@ function M.define(opts)
 
     -- Check for steps defined but not reachable
     for name in pairs(self_._steps) do
-      local name_ = name --[[:! string]]
-      if not reachable[name_] then
-        errs[#errs+1] = "step '" .. name_ .. "' is unreachable from start"
+      if not reachable[name] then
+        errs[#errs+1] = "step '" .. name .. "' is unreachable from start"
       end
     end
 

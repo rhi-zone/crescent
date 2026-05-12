@@ -176,7 +176,7 @@ mod.create = function(config)
 
 		local body_str_raw, body_err = json.encode(body)
 		if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
-		local body_str = body_str_raw --[[:! string]]
+		local body_str = body_str_raw
 
 		local http_client_opt = req.http_client
 		if not http_client_opt then return nil, "http_client is required" end
@@ -218,7 +218,7 @@ mod.create = function(config)
 
 		local body_str_raw, body_err = json.encode(body)
 		if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
-		local body_str = body_str_raw --[[:! string]]
+		local body_str = body_str_raw
 
 		local http_client_opt = req.http_client
 		if not http_client_opt then return nil, "http_client is required" end
@@ -306,13 +306,11 @@ mod.create = function(config)
 						if fn then
 							local fn_name = fn.name
 							if fn_name ~= nil then
-								local nm = fn_name --[[:! string]]
-								acc.name = nm
+								acc.name = fn_name
 							end
 							local fn_args = fn.arguments
 							if fn_args ~= nil then
-								local fa = fn_args --[[:! string]]
-								acc.arguments_parts[#acc.arguments_parts + 1] = fa
+								acc.arguments_parts[#acc.arguments_parts + 1] = fn_args
 							end
 						end
 					end
@@ -355,7 +353,7 @@ mod.create = function(config)
 			input = req.value,
 		})
 		if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
-		local body_str = body_str_raw --[[:! string]]
+		local body_str = body_str_raw
 
 		local http_client_opt = req.http_client
 		if not http_client_opt then return nil, "http_client is required" end
@@ -407,7 +405,7 @@ mod.create = function(config)
 			input = req.values,
 		})
 		if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
-		local body_str = body_str_raw --[[:! string]]
+		local body_str = body_str_raw
 
 		local http_client_opt = req.http_client
 		if not http_client_opt then return nil, "http_client is required" end
@@ -470,7 +468,7 @@ mod.create = function(config)
 
 		local body_str_raw, body_err = json.encode(body)
 		if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
-		local body_str = body_str_raw --[[:! string]]
+		local body_str = body_str_raw
 
 		local http_client_opt = req.http_client
 		if not http_client_opt then return nil, "http_client is required" end

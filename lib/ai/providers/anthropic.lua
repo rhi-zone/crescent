@@ -137,7 +137,7 @@ mod.generate = function(req)
 
 	local body_str_raw, body_err = json.encode(body)
 	if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
-	local body_str = body_str_raw --[[:! string]]
+	local body_str = body_str_raw
 
 	local http_client_opt = req.http_client
 	if not http_client_opt then return nil, "http_client is required" end
@@ -184,7 +184,7 @@ mod.stream = function(req)
 
 	local body_str_raw, body_err = json.encode(body)
 	if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
-	local body_str = body_str_raw --[[:! string]]
+	local body_str = body_str_raw
 
 	local http_client_opt = req.http_client
 	if not http_client_opt then return nil, "http_client is required" end
