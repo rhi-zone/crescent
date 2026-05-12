@@ -126,14 +126,14 @@ end
 local ResultMT = {}
 ResultMT.__index = ResultMT
 
+--: (BenchResult) -> string
 function ResultMT:format()
-  local self_ = self --[[:! BenchResult]]
   return string.format(
     "mean=%s \xc2\xb1%s, %s, %d iters",
-    M.format_ns(self_.mean_ns),
-    M.format_ns(self_.stddev_ns),
-    M.format_ops(self_.ops_per_sec),
-    self_.iters
+    M.format_ns(self.mean_ns),
+    M.format_ns(self.stddev_ns),
+    M.format_ops(self.ops_per_sec),
+    self.iters
   )
 end
 
