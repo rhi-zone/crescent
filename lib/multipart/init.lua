@@ -61,13 +61,12 @@ local function parse_disposition(value)
     end
     -- More robust param extraction
     for param in value:gmatch(";([^;]+)") do
-        local param_ = param --[[:! string]]
-        local k = param_:match("^%s*([%w%-]+)%s*=")
+        local k = param:match("^%s*([%w%-]+)%s*=")
         if k then
             -- Try quoted
-            local v = param_:match("^%s*[%w%-]+%s*=%s*\"([^\"]*)\"")
+            local v = param:match("^%s*[%w%-]+%s*=%s*\"([^\"]*)\"")
             if not v then
-                v = param_:match("^%s*[%w%-]+%s*=%s*(.-)%s*$")
+                v = param:match("^%s*[%w%-]+%s*=%s*(.-)%s*$")
             end
             if v then result_[k] = v end
         end
@@ -138,12 +137,10 @@ function Builder:body()
             t[k] = "\r\n"; k = k + 1
         end
         for hname, hval in pairs(part_.headers) do
-            local hname_ = hname --[[:! string]]
-            local hval_ = hval --[[:! string]]
-            if hname_:lower() ~= "content-disposition" then
-                t[k] = hname_; k = k + 1
+            if hname:lower() ~= "content-disposition" then
+                t[k] = hname; k = k + 1
                 t[k] = ": "; k = k + 1
-                t[k] = hval_; k = k + 1
+                t[k] = hval; k = k + 1
                 t[k] = "\r\n"; k = k + 1
             end
         end
@@ -289,9 +286,8 @@ function M.decode(body, boundary)
             if line ~= "" then
                 local hname, hval = parse_header_line(line)
                 if hname then
-                    local hname_ = hname --[[:! string]]
                     local hval_ = (hval or "")
-                    headers[hname_] = hval_
+                    headers[hname] = hval_
                 end
             end
         end
