@@ -446,6 +446,10 @@ local function build_templates()
             return "--:: module declaration should not be used"
                 .. " \xe2\x80\x94 require() return types are inferred from return M"
         end,
+        --: (TemplateArgs) -> string
+        [E.REDUNDANT_CAST]        = function(_a)
+            return "redundant force cast \xe2\x80\x94 actual type is already assignable to target; remove the cast"
+        end,
     }
 end
 

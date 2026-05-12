@@ -2676,13 +2676,15 @@ local n = lib --: integer
 ]], "cannot assign")
     end)
     assert.it("pcall with field-access callee narrows under if ok", function()
+        -- pcall already narrows `lib` to { foo: integer } in the success arm,
+        -- so the --[[:! { foo: integer }]] cast is redundant and emits REDUNDANT_CAST.
+        -- Remove the cast: lib is already the correct type.
         no_errors([==[
 --: () -> { foo: integer }
 local function make() return { foo = 1 } end
 local ok, lib = pcall(make)
 if ok then
-    local typed = lib --[[:! { foo: integer }]]
-    local n = typed.foo
+    local n = lib.foo
 end
 ]==])
     end)
@@ -10959,14 +10961,15 @@ local y = x
             "force cast")
     end)
 
-    assert.it("E2: --[[:! T]] redundant force cast on typed function return has no warning", function()
+    assert.it("E2: --[[:! T]] redundant force cast on typed function return emits REDUNDANT_CAST", function()
         -- When a function is declared to return T and the call site uses --[[:! T]],
-        -- the cast is genuinely redundant — no warning should fire even though the
+        -- the cast is redundant — REDUNDANT_CAST (error) fires even though the
         -- return type variable is unresolved at constraint-generation time.
-        no_errors(
+        has_error(
             "--: (number) -> integer\n" ..
             "local function floor(x) return math.floor(x) end\n" ..
-            "local a = floor(1.5) --[" .. "[:! integer" .. "]]\n"
+            "local a = floor(1.5) --[" .. "[:! integer" .. "]]\n",
+            "redundant"
         )
     end)
 

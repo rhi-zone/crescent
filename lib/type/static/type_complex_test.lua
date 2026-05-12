@@ -1121,14 +1121,15 @@ f(--[[:! string]] x)
 ]==])
     end)
 
-    assert.it("PASS: T -> T | U (widening: T is a subtype of the union)", function()
-        -- string <: string|integer, so widening via force cast is allowed.
-        no_error([==[
+    assert.it("ERROR: T -> T | U (widening: T is already assignable to the union — redundant cast)", function()
+        -- string <: string|integer, so the force cast is redundant: the actual type
+        -- is already assignable to the target.  REDUNDANT_CAST is emitted.
+        has_error([==[
 --: string
 local x = "hi"
 --: string | integer
 local y = --[[:! string | integer]] x
-]==])
+]==], "redundant")
     end)
 
     assert.it("ERROR: string -> integer (unrelated types)", function()
@@ -1164,15 +1165,14 @@ local y = id(--[[:! string]] x)
 ]==])
     end)
 
-    assert.it("PASS: regular --[[: T]] cast still warns on redundant assertion", function()
-        -- The redundant-cast warning is preserved for the checked form.
-        -- The force form does not produce this warning (it's a different
-        -- constraint), and that's fine — the user opted into a stricter check.
-        no_error([==[
+    assert.it("ERROR: --[[:! T]] when actual is already T emits REDUNDANT_CAST", function()
+        -- When actual type is already T, the force cast is redundant.
+        -- REDUNDANT_CAST (error severity) is emitted so the cast gets stripped.
+        has_error([==[
 --: string
 local x = "hi"
 local y = --[[:! string]] x
-]==])
+]==], "redundant")
     end)
 end)
 

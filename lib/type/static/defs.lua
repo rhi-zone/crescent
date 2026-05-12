@@ -385,6 +385,7 @@ M.E = {
     ANY_IN_TYPE           = 31,  -- `any` used as a component of a compound type (warning)
     FORCE_CAST            = 32,  -- `--[[:! T]]` force cast used; fix upstream annotation instead (warning)
     MODULE_DECL           = 33,  -- `--:: module` declaration in user code; require() return types are inferred from return M (warning)
+    REDUNDANT_CAST        = 34,  -- `--[[:! T]]` is redundant: actual type is already assignable to T; remove the cast
 }
 
 -- Keyword strings (ordered by token ID, for intern pre-population)
@@ -415,6 +416,7 @@ do
         [E.EXPLICIT_ANY]       = { severity = "warning", name = "explicit_any" },
         [E.ANY_IN_TYPE]        = { severity = "warning", name = "any_in_type" },
         [E.FORCE_CAST]         = { severity = "warning", name = "force_cast" },
+        [E.REDUNDANT_CAST]     = { severity = "error",   name = "redundant_cast" },
         [E.MATCH_CONTAINS_ANY] = { severity = "warning", name = "match_contains_any" },
         [E.MODULE_DECL]        = { severity = "warning", name = "module_decl" },
         [E.UNNAMED_PARAMS]     = { severity = "warning", name = "unnamed_params" },

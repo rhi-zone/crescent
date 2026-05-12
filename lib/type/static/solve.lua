@@ -2501,19 +2501,24 @@ local function solve_overlap(ctx, c)
         if at.tag == TAG_VAR or at.tag == TAG_ROWVAR then return false end
         if bt.tag == TAG_VAR or bt.tag == TAG_ROWVAR then return false end
     end
-    -- If the actual type is already assignable to the expected type, the force
-    -- cast is completely redundant — no warning needed, just silently succeed.
-    if unify_mod.try_unify(ctx, actual, expected) then return true end
-    -- Actual type is concrete but NOT already assignable to expected.
-    -- Emit the FORCE_CAST warning exactly once per source site.  Use a
-    -- (line, col) key so re-tries after type-variable resolution do not
-    -- produce duplicate diagnostics.
+    -- Emit a diagnostic exactly once per source site.  Use a (line, col) key
+    -- so re-tries after type-variable resolution do not produce duplicates.
     do
         local key = (line or 0) * 100000 + (col or 0)
         if not ctx._overlap_warned then ctx._overlap_warned = {} end
         if not ctx._overlap_warned[key] then
             ctx._overlap_warned[key] = true
+            -- If the actual type is already assignable to the expected type, the
+            -- force cast is redundant — emit REDUNDANT_CAST (error) so it gets stripped.
+            -- Otherwise, emit FORCE_CAST (warning) for a genuine narrowing cast.
+            if unify_mod.try_unify(ctx, actual, expected) then
+                add_warning_code(ctx, line, col, defs.E.REDUNDANT_CAST)
+                return true
+            end
             add_warning_code(ctx, line, col, defs.E.FORCE_CAST)
+        else
+            -- Already diagnosed this site; still need to check assignability for return value.
+            if unify_mod.try_unify(ctx, actual, expected) then return true end
         end
     end
     if unify_mod.types_overlap(ctx, actual, expected) then return true end
