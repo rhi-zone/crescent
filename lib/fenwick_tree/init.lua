@@ -67,23 +67,20 @@ end
 
 --: (self: BIT, i: integer, val: number) -> ()
 function BIT:set(i, val)
-  local self_ = self --[[:! BIT]]
-  local cur = BIT.get(self_, i)
-  BIT.update(self_, i, val - cur)
+  local cur = BIT.get(self, i)
+  BIT.update(self, i, val - cur)
 end
 
 --: (self: BIT, i: integer) -> number
 function BIT:get(i)
-  local self_ = self --[[:! BIT]]
-  if self_._pts then return self_._pts[i] end
+  if self._pts then return self._pts[i] end
   -- Fall back to prefix difference
-  return BIT.prefix(self_, i) - BIT.prefix(self_, i - 1)
+  return BIT.prefix(self, i) - BIT.prefix(self, i - 1)
 end
 
 --: (self: BIT, i: integer) -> number
 function BIT:prefix(i)
-  local self_ = self --[[:! BIT]]
-  local s, data = 0, self_.data
+  local s, data = 0, self.data
   while i > 0 do
     s = s + data[i]
     i = i - lsb(i)
@@ -93,8 +90,7 @@ end
 
 --: (self: BIT, l: integer, r: integer) -> number
 function BIT:query(l, r)
-  local self_ = self --[[:! BIT]]
-  return BIT.prefix(self_, r) - BIT.prefix(self_, l - 1)
+  return BIT.prefix(self, r) - BIT.prefix(self, l - 1)
 end
 
 -- Find smallest index where prefix_sum >= k (binary lifting), O(log n).
@@ -126,10 +122,9 @@ end
 
 --: (self: BIT) -> { [integer]: number }
 function BIT:to_array()
-  local self_ = self --[[:! BIT]]
   local arr = {}
-  for i = 1, self_.n do
-    arr[i] = BIT.get(self_, i)
+  for i = 1, self.n do
+    arr[i] = BIT.get(self, i)
   end
   return arr
 end
@@ -217,9 +212,8 @@ end
 
 --: (self: BITOP, i: integer, val: unknown) -> ()
 function BITOP:update(i, val)
-  local self_ = self --[[:! BITOP]]
-  local combine = self_._combine
-  local pt = self_._point_update(self_._pts[i], val)
+  local combine = self._combine
+  local pt = self._point_update(self._pts[i], val)
   self._pts[i] = pt
   local data, n = self.data, self.n
   -- Re-build affected cells by recomputing from scratch via point values
@@ -240,8 +234,7 @@ end
 
 --: (self: BITOP, i: integer) -> unknown
 function BITOP:prefix(i)
-  local self_ = self --[[:! BITOP]]
-  local s, data, combine = self_._identity, self_.data, self_._combine
+  local s, data, combine = self._identity, self.data, self._combine
   while i > 0 do
     s = combine(s, data[i])
     i = i - lsb(i)
