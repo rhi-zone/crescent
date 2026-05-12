@@ -2406,6 +2406,17 @@ local function solve_overlap(ctx, c)
     local actual   = find(ctx, c[2] --[[:! integer]])
     local expected = find(ctx, c[3] --[[:! integer]])
     local line, col = c[4] --[[:! integer | nil]], c[5] --[[:! integer | nil]]
+    -- Emit the FORCE_CAST warning exactly once per source site, regardless of
+    -- whether we defer.  Use a (line, col) key so re-tries after type-variable
+    -- resolution do not produce duplicate diagnostics.
+    do
+        local key = (line or 0) * 100000 + (col or 0)
+        if not ctx._overlap_warned then ctx._overlap_warned = {} end
+        if not ctx._overlap_warned[key] then
+            ctx._overlap_warned[key] = true
+            add_warning(ctx, line, col, errors_mod.format_diag(defs.E.FORCE_CAST, {}))
+        end
+    end
     -- Defer if either side is still a free type variable: the answer would be
     -- determined by whatever the var binds to next, not by the user's program.
     do
@@ -2414,7 +2425,6 @@ local function solve_overlap(ctx, c)
         if at.tag == TAG_VAR or at.tag == TAG_ROWVAR then return false end
         if bt.tag == TAG_VAR or bt.tag == TAG_ROWVAR then return false end
     end
-    add_warning(ctx, line, col, errors_mod.format_diag(defs.E.FORCE_CAST, {}))
     if unify_mod.types_overlap(ctx, actual, expected) then return true end
     add_error(ctx, line, col,
         "force cast has no overlap: `"
@@ -2430,6 +2440,9 @@ end
 
 -- _constraints is a scratch field set/cleared during solve; augment Ctx to allow nil assignment.
 --:: augment Ctx { _constraints?: { [integer]: { [integer]: unknown } } }
+-- _overlap_warned tracks force-cast sites that have already emitted the FORCE_CAST warning,
+-- so the warning fires exactly once per site even when the constraint is deferred and retried.
+--:: augment Ctx { _overlap_warned?: { [integer]: boolean } }
 -- any: constraints is a list of heterogeneous arrays — see solve_unify comment.
 --: (Ctx, { [integer]: { [integer]: unknown, ... }, ... }) -> ()
 function M.solve(ctx, constraints)
