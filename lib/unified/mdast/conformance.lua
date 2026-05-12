@@ -130,7 +130,7 @@ render_node = function(node)
     end
     return "<" .. tag .. start_attr .. ">\n" .. table.concat(parts) .. "</" .. tag .. ">\n"
   elseif t == "html" then
-    local v = node.value or ""
+    local v = node.value or "" --: string
     if v ~= "" and v:sub(-1) ~= "\n" then v = v .. "\n" end
     return v
   elseif t == "definition" then return ""

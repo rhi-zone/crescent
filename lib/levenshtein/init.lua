@@ -51,21 +51,22 @@ end
 -- ---------------------------------------------------------------------------
 
 -- opts.insert / opts.delete / opts.substitute may be numbers or functions(char)->number
+--: (number | (string) -> number | nil, string) -> number
 local function cost(opt, c)
-  if type(opt) == "function" then return opt(c) end
-  return opt or 1
+  if type(opt) == "function" then return (opt --[[:! (string) -> number]])(c) end
+  return (opt --[[:! number | nil]]) or 1
 end
 
 function M.distance_weighted(s, t, opts)
   opts = opts or {}
   local m, n = #s, #t
   if m == 0 then
-    local sum = 0
+    local sum = 0 --: number
     for j = 1, n do sum = sum + cost(opts.insert, sub(t, j, j)) end
     return sum
   end
   if n == 0 then
-    local sum = 0
+    local sum = 0 --: number
     for i = 1, m do sum = sum + cost(opts.delete, sub(s, i, i)) end
     return sum
   end

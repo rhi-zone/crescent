@@ -185,7 +185,7 @@ render_node = function(node)
           for ci, c in ipairs(ch --[[:! { [integer]: { type: string, children: unknown } }]]) do
             if c.type == "paragraph" then
               local nl = (ci < #(ch --[[:! { [integer]: unknown }]])) and "\n" or ""
-              inner = inner .. render_inlines(c.children) .. nl
+              inner = inner .. render_inlines(c.children --[[:! { [integer]: unknown }]]) .. nl
             else inner = inner .. render_node(c) end
           end
           parts[#parts + 1] = "<li>\n" .. inner .. "</li>\n"
@@ -194,7 +194,7 @@ render_node = function(node)
     end
     return "<" .. tag .. start_attr .. ">\n" .. table.concat(parts) .. "</" .. tag .. ">\n"
   elseif t == "html" then
-    local v = node.value or ""
+    local v = node.value or "" --: string
     if v ~= "" and v:sub(-1) ~= "\n" then v = v .. "\n" end
     return v
   elseif t == "definition" then return ""
@@ -219,14 +219,14 @@ for _, e in ipairs(data) do
   if target_sections[e.section] then
     local parsed_tree = mdast.parse(e.markdown)
     local tree = parsed_tree --[[:! { type: string }]]
-    local got = render_node(tree)
+    local got = render_node(tree) --[[:! string]]
     local html = e.html
     local markdown = e.markdown
     if got ~= html then
       print(string.format("=== FAIL ex%d [%s] ===", e.example, e.section))
       local md_str = (markdown:gsub("\n", "\\n"))
       local want_str = (html:gsub("\n", "\\n"))
-      local got_str = ((got --[[:! string]]):gsub("\n", "\\n"))
+      local got_str = (got:gsub("\n", "\\n"))
       print("MARKDOWN: " .. md_str)
       print("WANT:     " .. want_str)
       print("GOT:      " .. got_str)

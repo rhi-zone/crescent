@@ -138,7 +138,7 @@ render_node = function(node)
           for ci, c in ipairs(ch --[[:! { [integer]: { type: string, children: unknown } }]]) do
             if c.type == "paragraph" then
               local nl = (ci < #(ch --[[:! { [integer]: unknown }]])) and "\n" or ""
-              inner = inner .. render_inlines(c.children) .. nl
+              inner = inner .. render_inlines(c.children --[[:! { [integer]: unknown }]]) .. nl
             else inner = inner .. render_node(c) end
           end
           parts[#parts+1] = "<li>\n"..inner.."</li>\n"
@@ -147,7 +147,7 @@ render_node = function(node)
     end
     return "<"..tag..start_attr..">\n"..table.concat(parts).."</"..tag..">\n"
   elseif t == "html" then
-    local v = node.value or ""
+    local v = node.value or "" --: string
     if v ~= "" and v:sub(-1) ~= "\n" then v = v .. "\n" end
     return v
   elseif t == "definition" then return ""
@@ -199,7 +199,7 @@ for _, sec in ipairs(section_order) do
     for _, e in ipairs(fails) do
       local parsed_tree2 = mdast.parse(e.markdown)
       print(string.format("  ex%d: want=%s got=%s", e.example,
-        e.html:gsub("\n","\\n"), render_node(parsed_tree2 --[[:! { type: string }]]):gsub("\n","\\n")))
+        e.html:gsub("\n","\\n"), (render_node(parsed_tree2 --[[:! { type: string }]]) --[[:! string]]):gsub("\n","\\n")))
     end
   end
   ::cont::

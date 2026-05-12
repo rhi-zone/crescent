@@ -236,7 +236,7 @@ function M.run(fn, opts)
 	local mode         = opts.mode         or "fast"
 	local corpus_dir   = opts.corpus_dir
 	local expected_errs = opts.expected_errs or {}
-	local max_len      = opts.max_input_len or 4096
+	local max_len      = opts.max_input_len or 4096 --: integer
 	local mut_min      = opts.mutations_per and opts.mutations_per[1] or 1
 	local mut_max      = opts.mutations_per and opts.mutations_per[2] or 4
 	local prng_seed    = opts.seed

@@ -656,6 +656,7 @@ end
 -- ---------------------------------------------------------------------------
 -- String value of a node
 -- ---------------------------------------------------------------------------
+--: ({ type: string, value?: string, text?: string, children?: { [integer]: unknown, ... }, ... }) -> string
 local function string_value(node)
   if node.type == "attribute" then
     return node.value or ""
@@ -1024,9 +1025,7 @@ FUNCTIONS["ends-with"] = function(args, ctx)
 end
 
 FUNCTIONS["string-length"] = function(args, ctx)
-  local s
-  if #args == 0 then s = string_value(ctx.node)
-  else s = to_string(eval_expr(args[1], ctx)) end
+  local s = (#args == 0) and string_value(ctx.node) or to_string(eval_expr(args[1], ctx)) --: string
   return #s
 end
 

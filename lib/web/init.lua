@@ -489,6 +489,7 @@ function M.csrf(opts)
 
 	-- Simple token generation: secret .. ":" .. session_id-like value
 	-- In real usage, this would use HMAC. For now, concatenation + comparison.
+	--: (string | nil) -> string
 	local function make_token(session_key)
 		return secret .. ":" .. (session_key or "default")
 	end

@@ -677,6 +677,7 @@ local function make_rng(seed)
 end
 
 -- Bootstrap sample (sample with replacement)
+--: ({ [integer]: unknown, ... }, RngObj) -> { [integer]: unknown }
 local function bootstrap_sample(dataset, rng)
   local n = #dataset
   local sample = {}
@@ -688,6 +689,7 @@ local function bootstrap_sample(dataset, rng)
 end
 
 -- Randomly select k features
+--: ({ [integer]: string, ... }, integer, RngObj) -> { [integer]: string }
 local function sample_features(features, k, rng)
   -- Fisher-Yates partial shuffle
   local pool = {}
