@@ -11,8 +11,8 @@ M._tier = "pure"
 local math2 = require("lib.math")
 
 --:: RuleFn = (state: integer, neighbors: integer) -> integer
---:: DenseGrid = { _w: integer, _h: integer, _wrap: boolean, _rule: RuleFn, _buf: { [integer]: integer }, _gen: integer }
---:: SparseGrid = { _cells: { [string]: boolean }, _rule: RuleFn }
+--:: DenseGrid = { _w: integer, _h: integer, _wrap: boolean, _rule: RuleFn, _buf: { [integer]: integer }, _gen: integer, step: (DenseGrid) -> nil, ... }
+--:: SparseGrid = { _cells: { [string]: boolean }, _rule: RuleFn, step: (SparseGrid) -> nil, ... }
 --:: Cell2D = { [integer]: integer }
 
 -- Hash key for sparse grid: encode (x,y) as a string to support arbitrary
@@ -86,36 +86,36 @@ local DenseGrid = {}
 DenseGrid.__index = DenseGrid
 
 --- Get cell value at 0-indexed (x, y). Returns 0 for out-of-bounds.
+--: (DenseGrid, integer, integer) -> integer
 function DenseGrid:get(x, y)
-  local self_ = self --[[:! DenseGrid]]
-  if x < 0 or x >= self_._w or y < 0 or y >= self_._h then return 0 end
-  return self_._buf[y * self_._w + x + 1]
+  if x < 0 or x >= self._w or y < 0 or y >= self._h then return 0 end
+  return self._buf[y * self._w + x + 1]
 end
 
 --- Set cell value at 0-indexed (x, y). Returns nil, errmsg on out-of-bounds.
+--: (DenseGrid, integer, integer, integer) -> (boolean | nil, string | nil)
 function DenseGrid:set(x, y, value)
-  local self_ = self --[[:! DenseGrid]]
-  if x < 0 or x >= self_._w or y < 0 or y >= self_._h then
+  if x < 0 or x >= self._w or y < 0 or y >= self._h then
     return nil, "dense:set: position out of bounds"
   end
-  self_._buf[y * self_._w + x + 1] = value or 0
+  self._buf[y * self._w + x + 1] = value or 0
   return true
 end
 
 --- Clear all cells to 0.
+--: (DenseGrid) -> nil
 function DenseGrid:clear()
-  local self_ = self --[[:! DenseGrid]]
-  local buf = self_._buf
-  local sz = self_._w * self_._h
+  local buf = self._buf
+  local sz = self._w * self._h
   for i = 1, sz do buf[i] = 0 end
 end
 
 --- Return the number of live cells.
+--: (DenseGrid) -> integer
 function DenseGrid:population()
-  local self_ = self --[[:! DenseGrid]]
   local count = 0
-  local buf = self_._buf
-  local sz = self_._w * self_._h
+  local buf = self._buf
+  local sz = self._w * self._h
   for i = 1, sz do
     if buf[i] == 1 then count = count + 1 end
   end
@@ -123,17 +123,17 @@ function DenseGrid:population()
 end
 
 --- Return the number of steps taken.
+--: (DenseGrid) -> integer
 function DenseGrid:generation()
-  local self_ = self --[[:! DenseGrid]]
-  return self_._gen
+  return self._gen
 end
 
 --- Return an array of {x, y} (0-indexed) for all live cells.
+--: (DenseGrid) -> { [integer]: { [integer]: integer } }
 function DenseGrid:alive_cells()
-  local self_ = self --[[:! DenseGrid]]
   local result = {} --: { [integer]: Cell2D }
-  local buf = self_._buf
-  local w, h = self_._w, self_._h
+  local buf = self._buf
+  local w, h = self._w, self._h
   for y = 0, h - 1 do
     for x = 0, w - 1 do
       if buf[y * w + x + 1] == 1 then
@@ -145,12 +145,12 @@ function DenseGrid:alive_cells()
 end
 
 --- Set cells from an array of {x, y} (like alive_cells output). Clears first.
+--: (DenseGrid, { [integer]: { integer, integer } }) -> nil
 function DenseGrid:pattern(cells)
-  local self_ = self --[[:! DenseGrid]]
-  DenseGrid.clear(self_)
+  DenseGrid.clear(self)
   for _, cell in ipairs(cells) do
     local cell_ = cell --[[:! Cell2D]]
-    DenseGrid.set(self_, cell_[1], cell_[2], 1)
+    DenseGrid.set(self, cell_[1], cell_[2], 1)
   end
 end
 
@@ -178,12 +178,12 @@ local function dense_neighbors(buf, x, y, w, h, wrap)
 end
 
 --- Advance one generation.
+--: (DenseGrid) -> nil
 function DenseGrid:step()
-  local self_ = self --[[:! DenseGrid]]
-  local w, h = self_._w, self_._h
-  local wrap = self_._wrap
-  local rule = self_._rule
-  local buf = self_._buf
+  local w, h = self._w, self._h
+  local wrap = self._wrap
+  local rule = self._rule
+  local buf = self._buf
   -- Allocate next buffer.
   local next = {} --: { [integer]: integer }
   for i = 1, w * h do next[i] = 0 end
@@ -194,11 +194,12 @@ function DenseGrid:step()
       next[y * w + x + 1] = rule(n, cur)
     end
   end
-  self_._buf = next
-  self_._gen = self_._gen + 1
+  self._buf = next
+  self._gen = self._gen + 1
 end
 
 --- Advance n generations.
+--: (DenseGrid, integer) -> nil
 function DenseGrid:step_n(n)
   for _ = 1, n do self:step() end
 end
@@ -243,36 +244,36 @@ local SparseGrid = {}
 SparseGrid.__index = SparseGrid
 
 --- Mark cell (x, y) alive.
+--: (SparseGrid, integer, integer) -> nil
 function SparseGrid:set(x, y)
-  local self_ = self --[[:! SparseGrid]]
-  self_._cells[key(x, y)] = true
+  self._cells[key(x, y)] = true
 end
 
 --- Mark cell (x, y) dead.
+--: (SparseGrid, integer, integer) -> nil
 function SparseGrid:unset(x, y)
-  local self_ = self --[[:! SparseGrid]]
-  self_._cells[key(x, y)] = nil
+  self._cells[key(x, y)] = nil
 end
 
 --- Returns 1 if alive, 0 if dead.
+--: (SparseGrid, integer, integer) -> integer
 function SparseGrid:get(x, y)
-  local self_ = self --[[:! SparseGrid]]
-  return self_._cells[key(x, y)] and 1 or 0
+  return self._cells[key(x, y)] and 1 or 0
 end
 
 --- Return the number of live cells.
+--: (SparseGrid) -> integer
 function SparseGrid:population()
-  local self_ = self --[[:! SparseGrid]]
   local count = 0
-  for _ in pairs(self_._cells) do count = count + 1 end
+  for _ in pairs(self._cells) do count = count + 1 end
   return count
 end
 
 --- Return an array of {x, y} for all live cells.
+--: (SparseGrid) -> { [integer]: { [integer]: integer } }
 function SparseGrid:alive_cells()
-  local self_ = self --[[:! SparseGrid]]
   local result = {} --: { [integer]: Cell2D }
-  for k in pairs(self_._cells) do
+  for k in pairs(self._cells) do
     local x, y = unkey(k)
     result[#result + 1] = {x, y}
   end
@@ -281,14 +282,14 @@ end
 
 --- Return {min_x, min_y, max_x, max_y} bounding box of live cells.
 -- Returns nil if no live cells.
+--: (SparseGrid) -> { [integer]: number } | nil
 function SparseGrid:bounds()
-  local self_ = self --[[:! SparseGrid]]
   local first = true
   local min_x = 0 --: number
   local min_y = 0 --: number
   local max_x = 0 --: number
   local max_y = 0 --: number
-  for k in pairs(self_._cells) do
+  for k in pairs(self._cells) do
     local x, y = unkey(k)
     if first then
       min_x, min_y, max_x, max_y = x, y, x, y
@@ -305,12 +306,12 @@ function SparseGrid:bounds()
 end
 
 --- Set cells from an array of {x, y}. Clears first.
+--: (SparseGrid, { [integer]: { integer, integer } }) -> nil
 function SparseGrid:pattern(cells)
-  local self_ = self --[[:! SparseGrid]]
-  self_._cells = {}
+  self._cells = {}
   for _, cell in ipairs(cells) do
     local cell_ = cell --[[:! Cell2D]]
-    SparseGrid.set(self_, cell_[1], cell_[2])
+    SparseGrid.set(self, cell_[1], cell_[2])
   end
 end
 
@@ -329,10 +330,10 @@ local function sparse_neighbors(cells, x, y)
 end
 
 --- Advance one generation.
+--: (SparseGrid) -> nil
 function SparseGrid:step()
-  local self_ = self --[[:! SparseGrid]]
-  local old = self_._cells
-  local rule = self_._rule
+  local old = self._cells
+  local rule = self._rule
   -- Collect candidates: all alive cells + all their neighbors.
   local candidates = {} --: { [string]: boolean }
   for k in pairs(old) do
@@ -354,10 +355,11 @@ function SparseGrid:step()
       new_cells[k] = true
     end
   end
-  self_._cells = new_cells
+  self._cells = new_cells
 end
 
 --- Advance n generations.
+--: (SparseGrid, integer) -> nil
 function SparseGrid:step_n(n)
   for _ = 1, n do self:step() end
 end
