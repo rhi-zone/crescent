@@ -158,8 +158,8 @@ local function gf_decode(s)
   local o = gf_new()
   -- Each pair of bytes forms one 16-bit limb.
   for i = 1, 16 do
-    local lo = sbyte(s, 2*i - 1) --[[:! integer]]
-    local hi = sbyte(s, 2*i) --[[:! integer]]
+    local lo = (sbyte(s, 2*i - 1) or 0)
+    local hi = (sbyte(s, 2*i) or 0)
     o[i] = lo + hi * 256
   end
   -- Clear the high bit of byte 31 (index 31 in 1-based = o[16] bit 15).

@@ -17,33 +17,33 @@ local type = type
 -- Character constants
 local NEWLINE    = byte("\n") or 0
 local CR         = byte("\r") or 0
-local SPACE      = byte(" ")  --[[:! integer]]
+local SPACE      = byte(" ") or 0
 local TAB        = byte("\t") or 0
-local HASH       = byte("#")  --[[:! integer]]
-local EQUALS     = byte("=")  --[[:! integer]]
-local DOT        = byte(".")  --[[:! integer]]
-local COMMA      = byte(",")  --[[:! integer]]
-local LBRACKET   = byte("[")  --[[:! integer]]
-local RBRACKET   = byte("]")  --[[:! integer]]
-local LBRACE     = byte("{")  --[[:! integer]]
-local RBRACE     = byte("}")  --[[:! integer]]
-local DQUOTE     = byte('"')  --[[:! integer]]
-local SQUOTE     = byte("'")  --[[:! integer]]
+local HASH       = byte("#") or 0
+local EQUALS     = byte("=") or 0
+local DOT        = byte(".") or 0
+local COMMA      = byte(",") or 0
+local LBRACKET   = byte("[") or 0
+local RBRACKET   = byte("]") or 0
+local LBRACE     = byte("{") or 0
+local RBRACE     = byte("}") or 0
+local DQUOTE     = byte('"') or 0
+local SQUOTE     = byte("'") or 0
 local BACKSLASH  = byte("\\") or 0
-local PLUS       = byte("+")  --[[:! integer]]
-local MINUS      = byte("-")  --[[:! integer]]
-local UNDERSCORE = byte("_")  --[[:! integer]]
-local COLON      = byte(":")  --[[:! integer]]
-local CHAR_T     = byte("T")  --[[:! integer]]
-local CHAR_t     = byte("t")  --[[:! integer]]
-local CHAR_Z     = byte("Z")  --[[:! integer]]
-local CHAR_z     = byte("z")  --[[:! integer]]
-local CHAR_0     = byte("0")  --[[:! integer]]
-local CHAR_9     = byte("9")  --[[:! integer]]
-local CHAR_a     = byte("a")  --[[:! integer]]
-local CHAR_f     = byte("f")  --[[:! integer]]
-local CHAR_A     = byte("A")  --[[:! integer]]
-local CHAR_F     = byte("F")  --[[:! integer]]
+local PLUS       = byte("+") or 0
+local MINUS      = byte("-") or 0
+local UNDERSCORE = byte("_") or 0
+local COLON      = byte(":") or 0
+local CHAR_T     = byte("T") or 0
+local CHAR_t     = byte("t") or 0
+local CHAR_Z     = byte("Z") or 0
+local CHAR_z     = byte("z") or 0
+local CHAR_0     = byte("0") or 0
+local CHAR_9     = byte("9") or 0
+local CHAR_a     = byte("a") or 0
+local CHAR_f     = byte("f") or 0
+local CHAR_A     = byte("A") or 0
+local CHAR_F     = byte("F") or 0
 
 --: (integer | nil) -> boolean
 local function is_digit(c)
