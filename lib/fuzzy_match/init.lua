@@ -87,8 +87,8 @@ function M.positions(str, pattern, opts)
   local plen = #pattern
 
   -- Normalize strings for matching (single assignment to avoid conditional-reassign nil issue)
-  local str_cmp = (not case_sensitive and str:lower() or str) --[[:! string]]
-  local pat_cmp = (not case_sensitive and pattern:lower() or pattern) --[[:! string]]
+  local str_cmp = not case_sensitive and str:lower() or str
+  local pat_cmp = not case_sensitive and pattern:lower() or pattern
 
   -- Quick match check
   if not M.match(str_cmp, pat_cmp, {case_sensitive = true}) then

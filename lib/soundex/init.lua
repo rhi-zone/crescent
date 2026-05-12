@@ -998,7 +998,7 @@ M.nysiis = function(word)
   -- Apply substitution rules (left to right, longest match first)
   --: (string) -> string
   local function encode_body(str)
-    local result = {} --[[:! { [integer]: string }]]
+    local result = {} --[[: { [integer]: string }]]
     local j = 1
     local blen = #str
     while j <= blen do
@@ -1117,8 +1117,8 @@ local function lcs_length(a, b)
   local la, lb = #a, #b
   if la == 0 or lb == 0 then return 0 end
   -- Use two-row DP
-  local prev = {} --[[:! { [integer]: integer }]]
-  local curr = {} --[[:! { [integer]: integer }]]
+  local prev = {} --[[: { [integer]: integer }]]
+  local curr = {} --[[: { [integer]: integer }]]
   for j = 0, lb do prev[j] = 0 end
   for i_idx = 1, la do
     curr[0] = 0
