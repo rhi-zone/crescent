@@ -60,7 +60,7 @@ end
 local function element(tag)
 	local function f(xs)
 		if type(xs) == "string" then
-			return string.format("<%s>%s</%s>", tag, escape(xs --[[:! string]]), tag)
+			return string.format("<%s>%s</%s>", tag, escape(xs), tag)
 		end
 		local xs_ = xs --[[:! { [string]: unknown, [integer]: unknown }]]
 		local parts = { "<", tag, attrs_str(xs_), ">" }
@@ -76,7 +76,7 @@ end
 local function raw_element(tag)
 	local function f(xs)
 		if type(xs) == "string" then
-			return string.format("<%s>%s</%s>", tag, xs --[[:! string]], tag)
+			return string.format("<%s>%s</%s>", tag, xs, tag)
 		end
 		local xs_ = xs --[[:! { [string]: unknown, [integer]: unknown }]]
 		local parts = { "<", tag, attrs_str(xs_), ">" }

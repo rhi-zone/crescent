@@ -198,7 +198,7 @@ end
 --: (s: string) -> string
 local function urlencode(s)
 	local result = s:gsub("([%c%s%%])", function(c)
-		return ("%%%02X"):format(string.byte(c --[[:! string]]) or 0)
+		return ("%%%02X"):format(string.byte(c) or 0)
 	end)
 	return result
 end

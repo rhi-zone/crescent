@@ -149,7 +149,7 @@ validate_schema = function(schema, value, path, errors, root_schema)
   -- ── type ──────────────────────────────────────────────────────────────────
   if schema_.type ~= nil then
     local types = schema_.type
-    if type(types) == "string" then types = { types --[[:! string]] } end
+    if type(types) == "string" then types = { types } end
     local types_ = types --[[:! { [integer]: string }]]
     local type_ok = false
     for i = 1, #types_ do

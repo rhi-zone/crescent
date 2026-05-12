@@ -229,7 +229,7 @@ local function validate_value(value, schema, path, root_schema, ref_stack)
   -- -------------------------------------------------------------------------
   if schema_.type ~= nil then
     local allowed = schema_.type
-    if type(allowed) == "string" then allowed = { allowed --[[:! string]] } end
+    if type(allowed) == "string" then allowed = { allowed } end
     local allowed_ = allowed --[[:! { [integer]: string }]]
     -- OpenAPI nullable extension
     if schema_.nullable then
