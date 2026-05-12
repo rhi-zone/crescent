@@ -153,7 +153,7 @@ local function match_atx_heading(line)
   local stripped = str_sub(line, col)
   local hashes = stripped:match("^(#+)")
   if not hashes or #hashes > 6 then return nil end
-  local depth = #(hashes --[[:! string]])
+  local depth = #hashes
   -- Must be followed by space/tab or end of line.
   local after_hashes = str_sub(stripped, depth + 1)
   if after_hashes == "" or after_hashes:match("^%s*$") then
@@ -189,7 +189,7 @@ local function match_fence_open(line)
   -- Backtick fence: 3+ backticks, no backticks in info.
   local fence = rest:match("^(`+)")
   if fence and #fence >= 3 then
-    local info = rest:sub(#fence + 1):match("^%s*(.-)%s*$") --[[:! string | nil]]
+    local info = rest:sub(#fence + 1):match("^%s*(.-)%s*$")
     if info and not info:find("`") then
       return "`", #fence, info, indent
     end
