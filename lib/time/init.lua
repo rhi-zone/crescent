@@ -98,25 +98,24 @@ local UNIT_NS = {
 local Duration = {}
 Duration.__index = Duration
 
---: () -> number
+--: (Duration) -> number
 function Duration:to_ns()    return self._ns end
---: () -> number
+--: (Duration) -> number
 function Duration:to_us()    return self._ns / NS_PER_US end
---: () -> number
+--: (Duration) -> number
 function Duration:to_ms()    return self._ns / NS_PER_MS end
---: () -> number
+--: (Duration) -> number
 function Duration:to_s()     return self._ns / NS_PER_S end
---: () -> number
+--: (Duration) -> number
 function Duration:to_minutes() return self._ns / NS_PER_MIN end
---: () -> number
+--: (Duration) -> number
 function Duration:to_hours()   return self._ns / NS_PER_H end
---: () -> number
+--: (Duration) -> number
 function Duration:to_days()    return self._ns / NS_PER_DAY end
 
---: () -> { days: number, hours: number, minutes: number, seconds: number, ms: number }
+--: (Duration) -> { days: number, hours: number, minutes: number, seconds: number, ms: number }
 function Duration:components()
-  local dr = self --[[:! Duration]]
-  local total_ns = math.abs(dr._ns)
+  local total_ns = math.abs(self._ns)
   local days    = math.floor(total_ns / NS_PER_DAY)
   local rem     = total_ns - days * NS_PER_DAY
   local hours   = math.floor(rem / NS_PER_H)
@@ -129,16 +128,14 @@ function Duration:components()
   return { days = days, hours = hours, minutes = minutes, seconds = seconds, ms = ms }
 end
 
---: () -> Duration
+--: (Duration) -> Duration
 function Duration:abs()
-  local dr = self --[[:! Duration]]
-  return setmetatable({ _ns = math.abs(dr._ns) }, Duration) --[[:! Duration]]
+  return setmetatable({ _ns = math.abs(self._ns) }, Duration) --[[:! Duration]]
 end
 
 -- __unm
 function Duration:__unm()
-  local dr = self --[[:! Duration]]
-  return setmetatable({ _ns = -dr._ns }, Duration) --[[:! Duration]]
+  return setmetatable({ _ns = -self._ns }, Duration) --[[:! Duration]]
 end
 
 -- __add
@@ -191,24 +188,22 @@ end
 --: (number) -> string
 local function fmt_int(n) return tostring(math.floor(n)) end
 
---: () -> string
+--: (Duration) -> string
 function Duration:format()
-  local dr = self --[[:! Duration]]
-  local c = dr:components()
+  local c = self:components()
   local parts = {}
   if c.days > 0 then parts[#parts+1] = fmt_int(c.days) .. "d" end
   parts[#parts+1] = fmt_int(c.hours)   .. "h"
   parts[#parts+1] = fmt_int(c.minutes) .. "m"
   parts[#parts+1] = fmt_int(c.seconds) .. "s"
   local s = table.concat(parts, " ")
-  if dr._ns < 0 then s = "-" .. s end
+  if self._ns < 0 then s = "-" .. s end
   return s
 end
 
---: () -> string
+--: (Duration) -> string
 function Duration:format_short()
-  local dr = self --[[:! Duration]]
-  local c = dr:components()
+  local c = self:components()
   local parts = {}
   if c.days    > 0 then parts[#parts+1] = fmt_int(c.days)    .. "d" end
   if c.hours   > 0 then parts[#parts+1] = fmt_int(c.hours)   .. "h" end
@@ -217,19 +212,18 @@ function Duration:format_short()
   if c.ms      > 0 then parts[#parts+1] = fmt_int(c.ms)      .. "ms" end
   if #parts == 0 then
     -- sub-millisecond or exactly zero
-    if dr._ns == 0 then return "0s"
-    else return fmt_int(dr._ns) .. "ns"
+    if self._ns == 0 then return "0s"
+    else return fmt_int(self._ns) .. "ns"
     end
   end
   local s = table.concat(parts, " ")
-  if dr._ns < 0 then s = "-" .. s end
+  if self._ns < 0 then s = "-" .. s end
   return s
 end
 
---: () -> string
+--: (Duration) -> string
 function Duration:format_precise()
-  local dr = self --[[:! Duration]]
-  local c = dr:components()
+  local c = self:components()
   local parts = {}
   if c.days > 0 then parts[#parts+1] = fmt_int(c.days) .. "d" end
   parts[#parts+1] = fmt_int(c.hours)   .. "h"
@@ -238,7 +232,7 @@ function Duration:format_precise()
   local sec_frac = string.format("%d.%03d", c.seconds, c.ms) .. "s"
   parts[#parts+1] = sec_frac
   local s = table.concat(parts, " ")
-  if dr._ns < 0 then s = "-" .. s end
+  if self._ns < 0 then s = "-" .. s end
   return s
 end
 
@@ -370,20 +364,17 @@ local function make_ts(sec, ns)
   return setmetatable({ _sec = math.floor(sec), _ns = math.floor(ns) }, Timestamp) --[[:! Timestamp]]
 end
 
---: () -> number
+--: (Timestamp) -> number
 function Timestamp:to_unix()
-  local ts = self --[[:! Timestamp]]
-  return ts._sec
+  return self._sec
 end
---: () -> number
+--: (Timestamp) -> number
 function Timestamp:to_unix_ms()
-  local ts = self --[[:! Timestamp]]
-  return ts._sec * 1000 + math.floor(ts._ns / NS_PER_MS)
+  return self._sec * 1000 + math.floor(self._ns / NS_PER_MS)
 end
---: () -> { secs: number, ns: number }
+--: (Timestamp) -> { secs: number, ns: number }
 function Timestamp:to_unix_ns()
-  local ts = self --[[:! Timestamp]]
-  return { secs = ts._sec, ns = ts._ns }
+  return { secs = self._sec, ns = self._ns }
 end
 
 -- Timestamp + Duration → Timestamp
@@ -444,20 +435,20 @@ local function p2(n)  return string.format("%02d", n) end
 --: (number, number) -> string
 local function p4(n)  return string.format("%04d", n) end
 
---: () -> string
+--: (Timestamp) -> string
 function Timestamp:format_rfc3339()
   local t = ts_utc(self --[[:! Timestamp]])
   return p4(t.year) .. "-" .. p2(t.month) .. "-" .. p2(t.day)
       .. "T" .. p2(t.hour) .. ":" .. p2(t.min) .. ":" .. p2(t.sec) .. "Z"
 end
 
---: () -> string
+--: (Timestamp) -> string
 function Timestamp:format_date()
   local t = ts_utc(self --[[:! Timestamp]])
   return p4(t.year) .. "-" .. p2(t.month) .. "-" .. p2(t.day)
 end
 
---: () -> string
+--: (Timestamp) -> string
 function Timestamp:format_time()
   local t = ts_utc(self --[[:! Timestamp]])
   return p2(t.hour) .. ":" .. p2(t.min) .. ":" .. p2(t.sec)
