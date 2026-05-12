@@ -113,10 +113,8 @@ function M.parse(s)
   while pos <= #lower do
     -- Skip optional spaces.
     local sp = lower:match("^%s+", pos)
-    if sp then pos = pos + #(sp --[[:! string]]) end
-    local pos_ = pos --[[:! integer]]
-    if pos_ > #lower then break end
-    pos = pos_
+    if sp then pos = pos + #sp end
+    if pos > #lower then break end
 
     -- Number (int or decimal).
     local num_s = lower:match("^%d+%.?%d*", pos)
@@ -124,11 +122,11 @@ function M.parse(s)
       return nil, "duration.parse: unexpected character at position " .. pos .. " in '" .. orig .. "'"
     end
     local num = tonumber(num_s) or 0
-    pos = pos + #(num_s --[[:! string]])
+    pos = pos + #num_s
 
     -- Optional space before unit.
-    local sp2 = lower:match("^%s*", pos)
-    pos = pos + #(sp2 --[[:! string]])
+    local sp2 = lower:match("^%s*", pos) or ""
+    pos = pos + #sp2
 
     -- Unit (longest match first to handle "ms" before "m").
     local unit_mult = 0 --: number
