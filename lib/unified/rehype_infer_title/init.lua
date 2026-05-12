@@ -30,7 +30,7 @@ local HEADING = { h1=true, h2=true, h3=true, h4=true, h5=true, h6=true }
 --: (HastNode, { [integer]: string }) -> nil
 local function collect_text(node, parts)
   if node.type == "text" then
-    parts[#parts + 1] = (node.value or "") --[[:! string]]
+    parts[#parts + 1] = (node.value or "")
   elseif node.children then
     for _, child in ipairs((node.children --[[:! { [integer]: HastNode }]])) do
       collect_text(child, parts)
@@ -48,7 +48,7 @@ end
 -- Depth-first search for the first heading element.
 --: (HastNode) -> HastNode | nil
 local function find_first_heading(node)
-  local tag = (node.tag or "") --[[:! string]]
+  local tag = (node.tag or "")
   if node.type == "element" and HEADING[tag] then
     return node
   end

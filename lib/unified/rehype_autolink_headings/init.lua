@@ -59,7 +59,7 @@ end
 
 --: (HastNode, string, unknown) -> nil
 local function walk(node, behavior, content_opt)
-  local tag = (node.tag or "") --[[:! string]]
+  local tag = (node.tag or "")
   if node.type == "element" and HEADING[tag] then
     local props = node.props --[[:! { [string]: unknown } | nil]]
     local id = props and (props.id --[[:! string | nil]])

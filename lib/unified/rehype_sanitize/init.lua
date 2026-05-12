@@ -201,7 +201,7 @@ sanitize_node = function(node, compiled)
   end
 
   if t == "element" then
-    local tag = (node.tag or "") --[[:! string]]
+    local tag = (node.tag or "")
 
     if not compiled.elem_set[tag] then
       -- Disallowed element.

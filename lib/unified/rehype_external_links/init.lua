@@ -69,7 +69,7 @@ end
 
 --: (HastNode, { [string]: boolean }, unknown, string) -> nil
 local function walk(node, prefix_set, target, rel_str)
-  local tag = (node.tag or "") --[[:! string]]
+  local tag = (node.tag or "")
   if node.type == "element" and tag == "a" then
     local props = (node.props or {}) --[[:! { [string]: unknown }]]
     local href  = props.href

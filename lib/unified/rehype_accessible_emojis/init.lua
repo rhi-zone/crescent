@@ -154,7 +154,7 @@ end
 -- Returns a list (possibly length 1 = the original text node unchanged).
 --: (HastNode) -> { [integer]: HastNode }
 local function split_text_node(node)
-  local s = (node.value or "") --[[:! string]]
+  local s = (node.value or "")
   if #s == 0 then return { node } end
 
   local result = {} --: { [integer]: HastNode }

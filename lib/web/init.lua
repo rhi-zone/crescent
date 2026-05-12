@@ -441,7 +441,7 @@ function M.cookies()
 	local mw = function(req, res, next)
 		-- Parse Cookie header
 		local headers = req.headers or ({} --[[:! { [string]: unknown }]])
-		local cookie_header = (headers["cookie"] or headers["Cookie"] or "") --[[:! string]]
+		local cookie_header = (headers["cookie"] or headers["Cookie"] or "")
 		local cookies = {}
 		for pair in cookie_header:gmatch("[^;]+") do
 			pair = pair:match("^%s*(.-)%s*$") -- trim

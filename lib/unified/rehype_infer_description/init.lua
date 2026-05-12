@@ -35,7 +35,7 @@ local HEADING = { h1=true, h2=true, h3=true, h4=true, h5=true, h6=true }
 --: (HastNode, { [integer]: string }) -> nil
 local function collect_text(node, parts)
   if node.type == "text" then
-    parts[#parts + 1] = (node.value or "") --[[:! string]]
+    parts[#parts + 1] = (node.value or "")
   elseif node.children then
     for _, child in ipairs((node.children --[[:! { [integer]: HastNode }]])) do
       collect_text(child, parts)
@@ -99,7 +99,7 @@ local function find_heading_and_para(children)
   local para_idx = nil --: integer | nil
   for i, child in ipairs(children) do
     if child.type == "element" then
-      local child_tag = (child.tag or "") --[[:! string]]
+      local child_tag = (child.tag or "")
       if HEADING[child_tag] and not heading_idx then
         heading_idx = i
       elseif child_tag == "p" then
@@ -137,7 +137,7 @@ function M.plugin(processor, opts)
       local find_first_p
       find_first_p = function(node)
         local node_t = node --[[:! HastNode]]
-        local node_tag = (node_t.tag or "") --[[:! string]]
+        local node_tag = (node_t.tag or "")
         if node_t.type == "element" and node_tag == "p" then
           return node
         end

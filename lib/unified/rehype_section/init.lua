@@ -35,7 +35,7 @@ local HEADING_DEPTH = { h1=1, h2=2, h3=3, h4=4, h5=5, h6=6 }
 --: (HastNode) -> integer | nil
 local function heading_depth(node)
   if node.type == "element" then
-    local tag = (node.tag or "") --[[:! string]]
+    local tag = (node.tag or "")
     local val = HEADING_DEPTH[tag]
     return val --[[:! integer | nil]]
   else
