@@ -151,14 +151,14 @@ end
 -- SELECT
 -- ---------------------------------------------------------------------------
 
+--: (DataFrame, ...string) -> DataFrame
 function DataFrame:select(...)
-  local self_ = self --[[:! DataFrame]]
   local wanted = { ... } --: { [integer]: string }
   -- Build set for fast lookup
   local want_set = {}
   for _, c in ipairs(wanted) do want_set[c] = true end
   local rows = {}
-  for i, row in ipairs(self_._rows) do
+  for i, row in ipairs(self._rows) do
     local r = {} --: { [string]: unknown }
     for _, c in ipairs(wanted) do
       r[c] = row[c]
@@ -172,27 +172,27 @@ end
 -- WHERE
 -- ---------------------------------------------------------------------------
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:where(predicate)
-  local self_ = self --[[:! DataFrame]]
   local rows = {} --: { [integer]: { [string]: unknown } }
-  for _, row in ipairs(self_._rows) do
+  for _, row in ipairs(self._rows) do
     if predicate(row) then
       local r = copy_row(row)
       rows[#rows + 1] = r
     end
   end
-  return new_df(rows, copy_cols(self_._cols))
+  return new_df(rows, copy_cols(self._cols))
 end
 
 -- ---------------------------------------------------------------------------
 -- ORDER BY
 -- ---------------------------------------------------------------------------
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:order_by(key, dir)
-  local self_ = self --[[:! DataFrame]]
   dir = dir or "asc"
   local rows = {} --: { [integer]: { [string]: unknown } }
-  for i, row in ipairs(self_._rows) do
+  for i, row in ipairs(self._rows) do
     local r = copy_row(row)
     rows[i] = r
   end
@@ -209,33 +209,33 @@ function DataFrame:order_by(key, dir)
     if kb == nil then return dir == "desc" end
     if dir == "asc" then return ka < kb else return ka > kb end
   end)
-  return new_df(rows, copy_cols(self_._cols))
+  return new_df(rows, copy_cols(self._cols))
 end
 
 -- ---------------------------------------------------------------------------
 -- LIMIT / OFFSET
 -- ---------------------------------------------------------------------------
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:limit(n)
   local n_ = n --[[:! integer]]
-  local self_ = self --[[:! DataFrame]]
   local rows = {} --: { [integer]: { [string]: unknown } }
-  local src = self_._rows
+  local src = self._rows
   for i = 1, math.min(n_, #src) do
     local r = copy_row(src[i])
     rows[i] = r
   end
-  return new_df(rows, copy_cols(self_._cols))
+  return new_df(rows, copy_cols(self._cols))
 end
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:offset(n)
-  local self_ = self --[[:! DataFrame]]
   local rows = {} --: { [integer]: { [string]: unknown } }
-  local src = self_._rows
+  local src = self._rows
   for i = n + 1, #src do
     rows[#rows + 1] = copy_row(src[i])
   end
-  return new_df(rows, copy_cols(self_._cols))
+  return new_df(rows, copy_cols(self._cols))
 end
 
 -- ---------------------------------------------------------------------------
@@ -278,8 +278,8 @@ local function apply_agg(group_rows, fn_name, source_col)
   return nil
 end
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:group_by(groups, aggregates)
-  local self_ = self --[[:! DataFrame]]
   -- Normalize groups to array
   local group_cols = {} --: { [integer]: string }
   if type(groups) == "string" then
@@ -292,7 +292,7 @@ function DataFrame:group_by(groups, aggregates)
   local group_map = {} --: { [string]: { rows: { [integer]: { [string]: unknown } }, key_vals: { [string]: unknown } } }
   local group_order = {} --: { [integer]: string }
 
-  for _, row in ipairs(self_._rows) do
+  for _, row in ipairs(self._rows) do
     local parts = {} --: { [integer]: string }
     for _, col in ipairs(group_cols) do
       insert(parts, tostring(row[col] ~= nil and row[col] or ""))
@@ -355,8 +355,8 @@ local function resolve_on(on)
   end
 end
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:join(other, on)
-  local self_ = self --[[:! DataFrame]]
   local other_ = other --[[:! DataFrame]]
   local lcol, rcol = resolve_on(on)
   -- Build hash on right side
@@ -371,15 +371,15 @@ function DataFrame:join(other, on)
   end
 
   -- Determine output columns: all left cols + right cols not in left
-  local out_cols = copy_cols(self_._cols)
+  local out_cols = copy_cols(self._cols)
   local left_col_set = {}
-  for _, c in ipairs(self_._cols) do left_col_set[c] = true end
+  for _, c in ipairs(self._cols) do left_col_set[c] = true end
   for _, c in ipairs(other_._cols) do
     if not left_col_set[c] then insert(out_cols, c) end
   end
 
   local result = {} --: { [integer]: { [string]: unknown } }
-  for _, lrow in ipairs(self_._rows) do
+  for _, lrow in ipairs(self._rows) do
     local k = lrow[lcol]
     local matches = k ~= nil and hash[k]
     if matches then
@@ -399,8 +399,8 @@ function DataFrame:join(other, on)
   return new_df(result, out_cols)
 end
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:left_join(other, on)
-  local self_ = self --[[:! DataFrame]]
   local other_ = other --[[:! DataFrame]]
   local lcol, rcol = resolve_on(on)
   local hash = {} --: { [unknown]: { [integer]: { [string]: unknown } } }
@@ -413,15 +413,15 @@ function DataFrame:left_join(other, on)
     end
   end
 
-  local out_cols = copy_cols(self_._cols)
+  local out_cols = copy_cols(self._cols)
   local left_col_set = {}
-  for _, c in ipairs(self_._cols) do left_col_set[c] = true end
+  for _, c in ipairs(self._cols) do left_col_set[c] = true end
   for _, c in ipairs(other_._cols) do
     if not left_col_set[c] then insert(out_cols, c) end
   end
 
   local result = {} --: { [integer]: { [string]: unknown } }
-  for _, lrow in ipairs(self_._rows) do
+  for _, lrow in ipairs(self._rows) do
     local k = lrow[lcol]
     local matches = k ~= nil and hash[k]
     if matches then
@@ -454,18 +454,18 @@ end
 -- DISTINCT
 -- ---------------------------------------------------------------------------
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:distinct(col)
-  local self_ = self --[[:! DataFrame]]
   local seen = {}
   local result = {} --: { [integer]: { [string]: unknown } }
-  for _, row in ipairs(self_._rows) do
+  for _, row in ipairs(self._rows) do
     local key
     if col then
       key = tostring(row[col] ~= nil and row[col] or "")
     else
       -- Serialize all columns
       local parts = {} --: { [integer]: string }
-      for _, c in ipairs(self_._cols) do
+      for _, c in ipairs(self._cols) do
         insert(parts, tostring(row[c] ~= nil and row[c] or ""))
       end
       key = concat(parts, "\0")
@@ -475,22 +475,22 @@ function DataFrame:distinct(col)
       result[#result + 1] = copy_row(row)
     end
   end
-  return new_df(result, copy_cols(self_._cols))
+  return new_df(result, copy_cols(self._cols))
 end
 
 -- ---------------------------------------------------------------------------
 -- ADD COLUMN
 -- ---------------------------------------------------------------------------
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:add_column(name, fn)
-  local self_ = self --[[:! DataFrame]]
   local rows = {}
-  for i, row in ipairs(self_._rows) do
+  for i, row in ipairs(self._rows) do
     local r = copy_row(row)
     r[name] = fn(row)
     rows[i] = r
   end
-  local cols = copy_cols(self_._cols)
+  local cols = copy_cols(self._cols)
   -- Add name if not already present
   local found = false
   for _, c in ipairs(cols) do if c == name then found = true; break end end
@@ -502,16 +502,16 @@ end
 -- DROP
 -- ---------------------------------------------------------------------------
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:drop(...)
-  local self_ = self --[[:! DataFrame]]
   local drop_set = {}
   for _, c in ipairs({ ... }) do drop_set[c] = true end
   local cols = {} --: { [integer]: string }
-  for _, c in ipairs(self_._cols) do
+  for _, c in ipairs(self._cols) do
     if not drop_set[c] then insert(cols, c) end
   end
   local rows = {} --: { [integer]: { [string]: unknown } }
-  for i, row in ipairs(self_._rows) do
+  for i, row in ipairs(self._rows) do
     local r = {} --: { [string]: unknown }
     for _, c in ipairs(cols) do r[c] = row[c] end
     rows[i] = r
@@ -523,14 +523,14 @@ end
 -- RENAME
 -- ---------------------------------------------------------------------------
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:rename(mapping)
-  local self_ = self --[[:! DataFrame]]
   local cols = {} --: { [integer]: string }
-  for _, c in ipairs(self_._cols) do
+  for _, c in ipairs(self._cols) do
     insert(cols, mapping[c] or c)
   end
   local rows = {} --: { [integer]: { [string]: unknown } }
-  for i, row in ipairs(self_._rows) do
+  for i, row in ipairs(self._rows) do
     local r = {} --: { [string]: unknown }
     for old, v in pairs(row) do
       r[mapping[old] or old] = v
@@ -544,8 +544,8 @@ end
 -- AGGREGATE (without grouping)
 -- ---------------------------------------------------------------------------
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:agg(spec)
-  local self_ = self --[[:! DataFrame]]
   local result = {}
   -- Collect agg col names in deterministic order
   local out_cols = {} --: { [integer]: string }
@@ -557,7 +557,7 @@ function DataFrame:agg(spec)
   end
   for _, out_col in ipairs(out_cols) do
     local s = spec[out_col]
-    local agg_rows = self_._rows --[[:! { [integer]: { [string]: unknown } }]]
+    local agg_rows = self._rows --[[:! { [integer]: { [string]: unknown } }]]
     result[out_col] = apply_agg(agg_rows, s[1], s[2])
   end
   return result
@@ -567,41 +567,42 @@ end
 -- Conversion
 -- ---------------------------------------------------------------------------
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:rows()
-  local self_ = self --[[:! DataFrame]]
   local result = {}
-  for i, row in ipairs(self_._rows) do
+  for i, row in ipairs(self._rows) do
     result[i] = copy_row(row)
   end
   return result
 end
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:columns()
-  local self_ = self --[[:! DataFrame]]
-  return copy_cols(self_._cols)
+  return copy_cols(self._cols)
 end
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:count()
-  local self_ = self --[[:! DataFrame]]
-  return #self_._rows
+  return #self._rows
 end
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:row(i)
-  local self_ = self --[[:! DataFrame]]
-  local r = self_._rows[i]
+  local r = self._rows[i]
   if not r then return nil end
   return copy_row(r)
 end
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:col_values(name)
-  local self_ = self --[[:! DataFrame]]
   local result = {}
-  for i, row in ipairs(self_._rows) do
+  for i, row in ipairs(self._rows) do
     result[i] = row[name]
   end
   return result
 end
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:to_csv()
   local self_csv = self --[[:! DataFrame]]
   if csv then
@@ -621,10 +622,9 @@ function DataFrame:to_csv()
   end
   insert(lines, concat(header_parts, ","))
   -- Rows
-  local self_ = self --[[:! DataFrame]]
-  for _, row in ipairs(self_._rows) do
+  for _, row in ipairs(self._rows) do
     local parts = {}
-    for _, c in ipairs(self_._cols) do
+    for _, c in ipairs(self._cols) do
       local v = row[c]
       local s = v ~= nil and tostring(v) or ""
       if s:find(",") or s:find('"') or s:find("\n") then
@@ -642,12 +642,12 @@ end
 -- DESCRIBE
 -- ---------------------------------------------------------------------------
 
+--: (DataFrame, ...unknown) -> unknown
 function DataFrame:describe()
-  local self_ = self --[[:! DataFrame]]
   local result = {}
-  for _, col in ipairs(self_._cols) do
+  for _, col in ipairs(self._cols) do
     local vals = {} --: { [integer]: number }
-    for _, row in ipairs(self_._rows) do
+    for _, row in ipairs(self._rows) do
       local v = row[col]
       if type(v) == "number" then vals[#vals + 1] = v --[[:! number]] end
     end
