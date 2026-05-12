@@ -211,17 +211,17 @@ function M.new(opts)
   end
 
   -- ── run_all() ───────────────────────────────────────────────────────────────
+  --: (Runner) -> { [string]: unknown }
   function runner:run_all()
-    local self_ = self --[[:! Runner]]
-    local names = all_task_names(self_._tasks)
-    return self_:run(names)
+    local names = all_task_names(self._tasks)
+    return self:run(names)
   end
 
   -- ── run_tagged(tag) ─────────────────────────────────────────────────────────
+  --: (Runner, string) -> ({ [string]: unknown } | nil, string | nil)
   function runner:run_tagged(tag)
-    local self_ = self --[[:! Runner]]
     local tagged = {}
-    for name, def in pairs(self_._tasks) do
+    for name, def in pairs(self._tasks) do
       for _, t in ipairs(def.tags) do
         if t == tag then
           tagged[#tagged + 1] = name
@@ -233,7 +233,7 @@ function M.new(opts)
     if #tagged == 0 then
       return {}, nil
     end
-    return self_:run(tagged)
+    return self:run(tagged)
   end
 
   -- ── watch(name, opts) ───────────────────────────────────────────────────────

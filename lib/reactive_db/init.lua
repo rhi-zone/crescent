@@ -352,20 +352,18 @@ function Tbl:live_query(filter, fn)
     _rows   = lq_rows,
   }
   --:: LiveQuery = { _tbl: Tbl, _filter: unknown, _fn: unknown, _rows: { [integer]: Row }, ... }
-  --: (s: LiveQuery) -> nil
+  --: (LiveQuery) -> nil
   function lq:_refresh()
-    local s = self --[[:! LiveQuery]]
-    local rows = new_qb(s._tbl, nil):where(s._filter):select()
-    s._rows = rows
-    local call_fn = s._fn --[[:! ({ [integer]: Row }) -> nil]]
+    local rows = new_qb(self._tbl, nil):where(self._filter):select()
+    self._rows = rows
+    local call_fn = self._fn --[[:! ({ [integer]: Row }) -> nil]]
     call_fn(rows)
   end
-  --: (s: LiveQuery) -> nil
+  --: (LiveQuery) -> nil
   function lq:destroy()
-    local s = self --[[:! LiveQuery]]
-    local live = s._tbl._live
+    local live = self._tbl._live
     for i = #live, 1, -1 do
-      if live[i] == s then table.remove(live, i); break end
+      if live[i] == self then table.remove(live, i); break end
     end
   end
   self._live[#self._live + 1] = lq

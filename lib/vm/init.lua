@@ -275,39 +275,39 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Execute one instruction.  Returns false if halted, true otherwise.
+--: (Machine) -> boolean
 function Machine:step()
-  local self_ = self --[[:! Machine]]
-  if self_._halted then return false end
-  local pc = self_._pc
-  if pc > self_._size then
-    self_._halted = true
+  if self._halted then return false end
+  local pc = self._pc
+  if pc > self._size then
+    self._halted = true
     return false
   end
-  local instr = self_._prog[pc]
-  self_._pc = pc + 1
+  local instr = self._prog[pc]
+  self._pc = pc + 1
   local h = handlers --[[: unknown]]
   local hfn_ = (h --[[:! { [unknown]: unknown }]])[instr]
   if not hfn_ then
     error("vm: unknown opcode '" .. tostring(instr) .. "'")
   end
   local hfn = (hfn_ --[[:! (unknown, unknown) -> ()]])
-  hfn(self_, instr)
-  return not self_._halted
+  hfn(self, instr)
+  return not self._halted
 end
 
 -- Execute n instructions (or until halted).
+--: (Machine, integer) -> nil
 function Machine:steps(n)
-  local self_ = self --[[:! Machine]]
   for _ = 1, n do
-    if not self_:step() then break end
+    if not self:step() then break end
   end
 end
 
 -- Run until HALT or end of program.
+--: (Machine) -> nil
 function Machine:run()
-  local self_ = self --[[:! Machine]]
-  while not self_._halted do
-    if not self_:step() then break end
+  while not self._halted do
+    if not self:step() then break end
   end
 end
 
