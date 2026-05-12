@@ -65,8 +65,8 @@
 
 --:: AppRecord = {
 --::   path: string,
---::   chunks: unknown,
---::   entries: { [number]: TarEntry } | nil,
+--::   chunks: { [integer]: { type: string, data: string } } | nil,
+--::   entries: { [number]: TarEntry },
 --::   manifest: Manifest | nil,
 --::   _dir_mode: boolean | nil,
 --:: }

@@ -31,7 +31,7 @@ local app_index_mod = require("lib.platform.index")
 --:: EntryDef = { main: string | nil, caps: { [string]: CapDecl | string } | nil }
 --:: Manifest = { name: string | nil, version: string | nil, entry: { [string]: EntryDef | string } | nil, caps: { [string]: CapDecl | string } | nil, default_entry: string | nil, meta: { tags: { [integer]: string } | nil, description: string | nil, ... } | nil, ... }
 --:: TarEntry = { name: string, mode: number, size: number, mtime: number, data: string, typeflag: string }
---:: AppRecord = { path: string, chunks: unknown, entries: { [number]: TarEntry } | nil, manifest: Manifest | nil, _dir_mode: boolean | nil }
+--:: AppRecord = { path: string, chunks: { [integer]: { type: string, data: string } } | nil, entries: { [number]: TarEntry }, manifest: Manifest | nil, _dir_mode: boolean | nil }
 
 -- ── LLM env-var key resolution ────────────────────────────────────────────────
 -- At cap construction time, check well-known env vars in priority order and
@@ -367,6 +367,9 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 
 	-- http_client: pass through host and any extra fields from declaration.
 	if cap_type == "http_client" then
+		if not decl.host then
+			return nil, "http_client cap requires a host field in the capability declaration"
+		end
 		local mod = require("lib.platform.caps.http_client")
 		return mod.http_client_cap({
 			host  = decl.host,
@@ -1264,7 +1267,7 @@ else
 	local sandbox = require("lib.sandbox")
 	local cap_bundle = { globals = { caps = caps }, modules = {} }
 	local env = sandbox.env(sandbox.stdlib, cap_bundle)
-	local app_for_run = (app --[[: unknown]]) --[[:! { _dir_mode: boolean | nil, chunks: unknown, entries: { [number]: { data: string, mode: number, mtime: number, name: string, size: number, typeflag: string } }, manifest: Manifest | nil, path: string }]]
+	local app_for_run = (app --[[: unknown]]) --[[:! AppRecord]]
 	local ok, result = platform.run_entry(app_for_run, opts.entrypoint --[[:! string]], env)
 	if not ok then
 		io.stderr:write("error: " .. tostring(result) .. "\n")
