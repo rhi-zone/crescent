@@ -61,8 +61,7 @@ end
 -- Internal: emit a change event.
 --: (Registry, string, unknown, unknown) -> nil
 local function emit(self, name, old_val, new_val)
-  local self_ = self --[[:! Registry]]
-  for _, listener in ipairs(self_._listeners) do
+  for _, listener in ipairs(self._listeners) do
     local l = listener --[[:! { event: string, fn: (string, unknown, unknown) -> unknown }]]
     if l.event == "change" then
       l.fn(name, old_val, new_val)
@@ -74,15 +73,14 @@ end
 -- Returns value, err.
 --: (Registry, string, { user_id: unknown, ... } | nil) -> (unknown, string | nil)
 local function eval_flag(self, name, ctx)
-  local self_ = self --[[:! Registry]]
-  local flag = self_._flags[name]
+  local flag = self._flags[name]
   if not flag then
     return nil, "unknown flag: " .. tostring(name)
   end
 
   -- Override takes highest precedence.
-  if self_._overrides[name] ~= nil then
-    return self_._overrides[name], nil
+  if self._overrides[name] ~= nil then
+    return self._overrides[name], nil
   end
 
   -- Programmatic set takes next precedence.
