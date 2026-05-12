@@ -242,8 +242,8 @@ function M.network(opts)
     _weights     = weights,
     _biases      = biases,
     _n_layers    = n_layers,
-    _zs          = {} --[[:! { [integer]: number[] }]],
-    _as          = {} --[[:! { [integer]: number[] }]],
+    _zs          = {} --[[: { [integer]: number[] }]],
+    _as          = {} --[[: { [integer]: number[] }]],
   } --[[:! Net]]
 
   -- -------------------------------------------------------------------------

@@ -268,7 +268,7 @@ function M.run(opts)
   history[1]          = { 0, best_ind.fitness, avg }
 
   -- Convergence window buffer.
-  local plateau_buf = {} --[[:! { [integer]: number }]]
+  local plateau_buf = {} --[[: { [integer]: number }]]
   local buf_size      = converge and (converge.window or 20) or 0
   local min_improve   = converge and (converge.min_improvement or 0.001) or 0
 
@@ -380,7 +380,7 @@ function M.genomes.real(length, lo, hi)
     --: ({ [integer]: number }, Rng) -> { [integer]: number }
     mutate = function(individual, rng)
       local idx  = rng:int(1, length)
-      local copy = {} --[[:! { [integer]: number }]]
+      local copy = {} --[[: { [integer]: number }]]
       for i = 1, length do copy[i] = individual[i] end
       copy[idx] = lo + rng:float() * range
       return copy

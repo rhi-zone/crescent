@@ -667,7 +667,7 @@ function M:lu()
   local a = {} --: { [integer]: { [integer]: number } }
   local d = self_._data
   for i = 1, n do
-    a[i] = {} --[[:! { [integer]: number }]]
+    a[i] = {} --[[: { [integer]: number }]]
     local base = (i - 1) * n
     for j = 1, n do a[i][j] = d[base + j] end
   end

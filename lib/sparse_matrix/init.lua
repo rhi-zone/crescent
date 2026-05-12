@@ -74,8 +74,8 @@ end
 
 function DOK:each()
   local t = self.data
-  local keys = {} --[[:! { [integer]: number }]]
-  local vals = {} --[[:! { [integer]: number }]]
+  local keys = {} --[[: { [integer]: number }]]
+  local vals = {} --[[: { [integer]: number }]]
   local n = 0
   for k, v in pairs(t) do
     n = n + 1
@@ -119,9 +119,9 @@ function DOK:to_csr()
     return a[2] < b[2]
   end)
 
-  local rp = {} --[[:! { [integer]: integer }]]  -- row pointers (length rows+1)
-  local ci = {} --[[:! { [integer]: integer }]]  -- column indices
-  local cv = {} --[[:! { [integer]: number }]]   -- values
+  local rp = {} --[[: { [integer]: integer }]]  -- row pointers (length rows+1)
+  local ci = {} --[[: { [integer]: integer }]]  -- column indices
+  local cv = {} --[[: { [integer]: number }]]   -- values
 
   for r = 1, rows + 1 do rp[r] = 1 end
 
@@ -141,9 +141,9 @@ end
 
 --: (DOKMatrix) -> COOMatrix
 function DOK:to_coo()
-  local rows_list = {} --[[:! { [integer]: integer }]]
-  local cols_list = {} --[[:! { [integer]: integer }]]
-  local vals = {} --[[:! { [integer]: number }]]
+  local rows_list = {} --[[: { [integer]: integer }]]
+  local cols_list = {} --[[: { [integer]: integer }]]
+  local vals = {} --[[: { [integer]: number }]]
   for k, v in pairs(self.data) do
     local i, j = unkey(k)
     rows_list[#rows_list + 1] = i --[[:! integer]]
@@ -156,7 +156,7 @@ end
 --: (DOKMatrix, { [integer]: number }) -> { [integer]: number }
 function DOK:mul_vec(vec)
   local rows, cols = self.rows, self.cols
-  local out = {} --[[:! { [integer]: number }]]
+  local out = {} --[[: { [integer]: number }]]
   for r = 1, rows do out[r] = 0 end
   for k, v in pairs(self.data) do
     local i, j = unkey(k)

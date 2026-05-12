@@ -2011,7 +2011,7 @@ local function api_post_lorebook_add(state, caps, _params, body, res)
 		order = body.order,
 		role = body.role,
 	})
-	if not state.lorebook then state.lorebook = {} --[[:! { [integer]: unknown }]] end
+	if not state.lorebook then state.lorebook = {} --[[: { [integer]: unknown }]] end
 	local lb = state.lorebook --[[:! { [integer]: unknown }]]
 	lb[#lb + 1] = entry
 	save_lorebook(state, caps)
@@ -2069,7 +2069,7 @@ local function api_post_user_lorebooks_create(state, caps, _params, body, res)
 	local book = {
 		id = gen_book_id(caps.time and caps.time.now),
 		name = body.name --[[:! string]],
-		entries = {} --[[:! { [integer]: unknown } | nil]],
+		entries = {} --[[: { [integer]: unknown } | nil]],
 		active = false,
 	}
 	state.user_lorebooks[#state.user_lorebooks + 1] = book

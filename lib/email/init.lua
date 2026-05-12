@@ -783,7 +783,7 @@ function SMTP:send_raw(opts)
 	end
 
 	-- RCPT TO for all recipients
-	local all_rcpts = {} --[[:! { [integer]: string }]]
+	local all_rcpts = {} --[[: { [integer]: string }]]
 	if opts.to then
 		for _, addr in ipairs(opts.to) do all_rcpts[#all_rcpts + 1] = addr end
 	end
@@ -853,7 +853,7 @@ end
 --: ({ [integer]: string }) -> MockTransport
 function M.mock_transport(responses)
 	-- Split multiline responses into individual lines for realistic socket behavior.
-	local lines = {} --[[:! { [integer]: string }]]
+	local lines = {} --[[: { [integer]: string }]]
 	for _, resp in ipairs(responses or {}) do
 		local pos = 1
 		while pos <= #resp do
@@ -871,7 +871,7 @@ function M.mock_transport(responses)
 		end
 	end
 	local t = {
-		sent = {} --[[:! { [integer]: string }]],
+		sent = {} --[[: { [integer]: string }]],
 		_lines = lines,
 		_pos = 1 --[[:! integer]],
 		_closed = false,

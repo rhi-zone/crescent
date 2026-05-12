@@ -31,7 +31,7 @@ end
 --: (unknown, unknown, integer) -> SLNode
 local function new_node(key, value, level)
   --: { [integer]: SLNode }
-  local fwd = {} --[[:! { [integer]: SLNode }]]
+  local fwd = {} --[[: { [integer]: SLNode }]]
   --: { [integer]: integer }
   local span = {}
   for i = 1, level do

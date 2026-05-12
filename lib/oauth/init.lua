@@ -173,7 +173,7 @@ local function parse_string(s, pos)
   -- pos is on the opening quote
   assert(s:sub(pos, pos) == '"')
   pos = pos + 1
-  local buf = {} --[[:! { [integer]: string }]]
+  local buf = {} --[[: { [integer]: string }]]
   while pos <= #s do
     local c = s:sub(pos, pos)
     if c == '"' then

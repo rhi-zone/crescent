@@ -54,7 +54,7 @@ local VOID = {
 --:: HtmlToken = { type: string, value?: string, tag?: string, attrs?: { [string]: string }, void?: boolean }
 --: (string) -> { [integer]: HtmlToken }
 local function tokenize(html)
-  local tokens = {} --[[:! { [integer]: HtmlToken }]]
+  local tokens = {} --[[: { [integer]: HtmlToken }]]
   local i = 1
   local len = #html
 
@@ -203,8 +203,8 @@ end
 --: ({ [integer]: HtmlToken }) -> { [integer]: HastNode }
 local function tokens_to_hast(tokens)
   -- Stack of open elements. Each entry: { node = hast_element }.
-  local stack = {} --[[:! { [integer]: { node: HastNode } | nil }]]
-  local root_children = {} --[[:! { [integer]: HastNode }]]
+  local stack = {} --[[: { [integer]: { node: HastNode } | nil }]]
+  local root_children = {} --[[: { [integer]: HastNode }]]
 
   --: () -> { [integer]: HastNode }
   local function current_children()
@@ -229,7 +229,7 @@ local function tokens_to_hast(tokens)
       children[#children + 1] = { type = "raw", value = "<!--" .. (tok.value or "") .. "-->" } --[[:! HastNode]]
 
     elseif tok.type == "open" then
-      local node_children = {} --[[:! { [integer]: HastNode }]]
+      local node_children = {} --[[: { [integer]: HastNode }]]
       local node = {
         type = "element",
         tag = tok.tag,

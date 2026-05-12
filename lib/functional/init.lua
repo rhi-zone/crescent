@@ -441,7 +441,7 @@ function M.partial(fn, ...)
   local bound = ({ ... } --[[:! { [integer]: nil }]])
   local nbound = select("#", ...)
   return function(...)
-    local args = {} --[[:! { [integer]: nil }]]
+    local args = {} --[[: { [integer]: nil }]]
     for i = 1, nbound do args[i] = bound[i] end
     local extra = select("#", ...)
     for i = 1, extra do args[nbound + i] = (select(i, ...) --[[:! nil]]) end
@@ -460,7 +460,7 @@ function M.curry(fn, n)
   --: ({ [integer]: nil }, integer) -> (...unknown) -> unknown
   local function step(collected, remaining)
     return function(...)
-      local args = {} --[[:! { [integer]: nil }]]
+      local args = {} --[[: { [integer]: nil }]]
       for i = 1, #collected do args[i] = collected[i] end
       local added = select("#", ...)
       for i = 1, added do args[#collected + i] = (select(i, ...) --[[:! nil]]) end

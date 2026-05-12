@@ -1165,7 +1165,7 @@ end
 
 --: (src: string, defs: { [string]: { url: unknown, title: unknown } } | nil) -> { [integer]: { type: string, ... } }
 local function tokenize_inlines(src, defs)
-  local tokens = {} --[[:! { [integer]: { type: string, value?: string, ... } }]]
+  local tokens = {} --[[: { [integer]: { type: string, value?: string, ... } }]]
   local len = #src
   local pos = 1
   local text_start = 1
@@ -1544,18 +1544,18 @@ end
 -- Also resolves link/image open-close pairs.
 -- Returns array of inline nodes.
 local function resolve_inlines(tokens, defs, src)
-  local result = {} --[[:! { [integer]: { type: string, value?: string, node?: unknown, ... } | nil }]]
+  local result = {} --[[: { [integer]: { type: string, value?: string, node?: unknown, ... } | nil }]]
 
   -- First pass: resolve links/images.
   -- Find matching link_open for each link_close.
   local n = #tokens
   local i = 1
-  local resolved = {} --[[:! { [integer]: { type: string, value?: string, node?: unknown, pos?: integer, url?: string, title?: string, ref?: string, close_pos?: integer, collapsed?: boolean, shortcut?: boolean, is_image?: boolean, inactive?: boolean, ... } | nil }]] -- new token list after link resolution
+  local resolved = {} --[[: { [integer]: { type: string, value?: string, node?: unknown, pos?: integer, url?: string, title?: string, ref?: string, close_pos?: integer, collapsed?: boolean, shortcut?: boolean, is_image?: boolean, inactive?: boolean, ... } | nil }]] -- new token list after link resolution
 
   -- We need to track bracket stack.
   -- Each frame: { idx, is_image, inactive }
   -- inactive=true: deactivated link_open (can't form a link, becomes '[' text)
-  local bracket_stack = {} --[[:! { [integer]: { idx: integer, is_image: boolean, inactive: boolean } | nil }]]
+  local bracket_stack = {} --[[: { [integer]: { idx: integer, is_image: boolean, inactive: boolean } | nil }]]
 
   while i <= n do
     local tok = tokens[i]
@@ -1698,8 +1698,8 @@ local function resolve_inlines(tokens, defs, src)
   --   count       — remaining chars in the run (decremented as chars are consumed)
   --   orig_count  — original run length (for the odd-sum rule)
   --   can_open / can_close
-  local out = {} --[[:! { [integer]: { type: string, value?: string, ... } | nil }]]
-  local delim_stack = {} --[[:! { [integer]: { idx_in_out: integer, char: integer, count: integer, orig_count: integer, can_open: boolean | nil, can_close: boolean | nil } | nil }]]
+  local out = {} --[[: { [integer]: { type: string, value?: string, ... } | nil }]]
+  local delim_stack = {} --[[: { [integer]: { idx_in_out: integer, char: integer, count: integer, orig_count: integer, can_open: boolean | nil, can_close: boolean | nil } | nil }]]
 
   --: (node: { type: string, ... }) -> nil
   local function emit(node)
@@ -1865,7 +1865,7 @@ local function resolve_inlines(tokens, defs, src)
   end
 
   -- Final merge pass: remove empty text nodes, merge adjacent text.
-  result = {} --[[:! { [integer]: { type: string, value?: string, node?: unknown, ... } | nil }]]
+  result = {} --[[: { [integer]: { type: string, value?: string, node?: unknown, ... } | nil }]]
   for _, node in ipairs(out) do
     if node.type == "text" and (not node.value or node.value == "") then
       -- skip

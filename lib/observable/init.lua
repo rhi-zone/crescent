@@ -502,8 +502,8 @@ function M.zip(...)
   local n = select("#", ...)
   return M.create(function(observer)
     local obs = observer --[[:! SafeObserverT]]
-    local queues = {} --[[:! { [integer]: { [integer]: unknown } }]]
-    local done = {} --[[:! { [integer]: boolean }]]
+    local queues = {} --[[: { [integer]: { [integer]: unknown } }]]
+    local done = {} --[[: { [integer]: boolean }]]
     for i = 1, n do
       queues[i] = {}
       done[i] = false
@@ -553,7 +553,7 @@ function M.combine_latest(...)
   return M.create(function(observer)
     local obs = observer --[[:! SafeObserverT]]
     local latest = {}
-    local has_value = {} --[[:! { [integer]: boolean }]]
+    local has_value = {} --[[: { [integer]: boolean }]]
     local ready = 0
     local completed = 0
     for i = 1, n do
@@ -591,7 +591,7 @@ end
 --- Subscribers receive values pushed via :next(), :error(), :complete().
 --: () -> Subject
 function M.subject()
-  local subscribers = {} --[[:! { [integer]: Observer }]]
+  local subscribers = {} --[[: { [integer]: Observer }]]
   local stopped = false --: boolean
 
   local subj = {} --[[:! Subject]]
@@ -643,11 +643,11 @@ end
 --- A replay subject buffers the last n values and replays them to late subscribers.
 --: (number) -> Subject
 function M.replay_subject(n)
-  local subscribers = {} --[[:! { [integer]: Observer }]]
+  local subscribers = {} --[[: { [integer]: Observer }]]
   local stopped = false --: boolean
   local err_value = nil --: string | nil
   local completed = false --: boolean
-  local buffer = {} --[[:! { [integer]: unknown }]]
+  local buffer = {} --[[: { [integer]: unknown }]]
 
   local subj = {} --[[:! Subject]]
 

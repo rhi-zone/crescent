@@ -355,7 +355,7 @@ end
 --: (Schedule, integer, integer) -> { [integer]: integer }
 function Schedule:range(start_ts, end_ts)
   local has_sec = self.fields.second ~= nil
-  local result = {} --[[:! { [integer]: integer }]]
+  local result = {} --[[: { [integer]: integer }]]
   -- Snap start to a candidate boundary
   local t = self._date_fn("*t", start_ts)
   local cur = (has_sec and start_ts or start_ts - t.sec) --[[:! integer]]
@@ -482,7 +482,7 @@ function Schedule:describe()
 
   -- Multiple doms + all dow + single time
   if not all_dom and all_dow and #f.hour == 1 and #f.minute == 1 and all_month then
-    local dom_parts = {} --[[:! { [integer]: string }]]
+    local dom_parts = {} --[[: { [integer]: string }]]
     for _, v in ipairs(f.dom) do dom_parts[#dom_parts+1] = ordinal(v) end
     local dom_str = "" --: string
     if #dom_parts == 1 then
@@ -490,7 +490,7 @@ function Schedule:describe()
     elseif #dom_parts == 2 then
       dom_str = dom_parts[1] .. " and " .. dom_parts[2]
     else
-      local tmp = {} --[[:! { [integer]: string }]]
+      local tmp = {} --[[: { [integer]: string }]]
       for i = 1, #dom_parts - 1 do tmp[#tmp+1] = dom_parts[i] end
       dom_str = table.concat(tmp, ", ") .. " and " .. dom_parts[#dom_parts]
     end

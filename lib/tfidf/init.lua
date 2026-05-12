@@ -122,8 +122,8 @@ Corpus.__index = Corpus
 --: (opts: CorpusOpts | nil) -> Corpus
 function M.corpus(opts)
   local self = {
-    docs = {} --[[:! { [string]: CorpusDoc }]],
-    df = {} --[[:! { [string]: number }]],
+    docs = {} --[[: { [string]: CorpusDoc }]],
+    df = {} --[[: { [string]: number }]],
     doc_n = 0 --[[: number]],
     idf_cache = nil --[[: { [string]: number } | nil]],
     opts = opts,

@@ -134,7 +134,7 @@ function M.sax(xml, handlers)
 
   local pos = 1 --: integer
   local len = #xml
-  local stack = {} --[[:! { [integer]: string | nil }]] -- open tag names for error reporting
+  local stack = {} --[[: { [integer]: string | nil }]] -- open tag names for error reporting
 
   fire("start_document")
 
@@ -367,7 +367,7 @@ function M.text_content(node)
   if nd.type == "text" or nd.type == "cdata" then
     return nd.text or ""
   end
-  local parts = {} --[[:! { [integer]: string }]]
+  local parts = {} --[[: { [integer]: string }]]
   local function walk(n)
     local wn = n --[[:! { type: string, text: string | nil, children: { [integer]: unknown }, parent: unknown, ... }]]
     if wn.type == "text" or wn.type == "cdata" then
@@ -418,7 +418,7 @@ function M.xpath_simple(node, path)
   local current_nodes = { node } --[[:! { [integer]: XmlNode }]]
 
   -- Split into segments while preserving '//' markers
-  local segments = {} --[[:! { [integer]: { deep: boolean, tag: string | nil } }]]
+  local segments = {} --[[: { [integer]: { deep: boolean, tag: string | nil } }]]
   local i = 1
   while i <= #path do
     if path:sub(i, i + 1) == "//" then
@@ -442,7 +442,7 @@ function M.xpath_simple(node, path)
   end
 
   for _, seg in ipairs(segments) do
-    local next_nodes = {} --[[:! { [integer]: XmlNode }]]
+    local next_nodes = {} --[[: { [integer]: XmlNode }]]
     if seg.deep then
       for _, nd in ipairs(current_nodes) do
         local found = descendants(nd, seg.tag or "*")
@@ -472,7 +472,7 @@ end
 function M.serialize(node, opts)
   opts = opts or {} --[[:! { indent: integer | nil, declare: boolean | nil }]]
   local indent_size = opts.indent
-  local parts = {} --[[:! { [integer]: string }]]
+  local parts = {} --[[: { [integer]: string }]]
 
   if opts.declare then
     parts[#parts + 1] = '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -490,7 +490,7 @@ function M.serialize(node, opts)
       parts[#parts + 1] = pad .. "<" .. (nd.tag or "")
       if nd.attrs then
         -- stable attribute order: sort keys
-        local keys = {} --[[:! { [integer]: string }]]
+        local keys = {} --[[: { [integer]: string }]]
         for k in pairs(nd.attrs) do keys[#keys + 1] = k end
         table.sort(keys)
         for _, k in ipairs(keys) do

@@ -1030,7 +1030,7 @@ local function decode(s)
         local last = keys[#keys]
         local arr = parent[last] --[[:! { [integer]: unknown }]]
         if arr == nil then
-          arr = {} --[[:! { [integer]: unknown }]]
+          arr = {} --[[: { [integer]: unknown }]]
           parent[last] = arr
           array_tables[arr] = true
         elseif not array_tables[arr] then

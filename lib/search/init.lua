@@ -206,9 +206,9 @@ function M.index(opts)
 
   --:: InvEntry = { positions: { [integer]: integer }, freq: integer }
   -- Inverted index: term -> { doc_id -> { positions: {...}, freq: n } }
-  local inverted = {} --[[:! { [string]: { [string]: InvEntry | nil } | nil }]]
+  local inverted = {} --[[: { [string]: { [string]: InvEntry | nil } | nil }]]
   -- Document store: doc_id -> { text: string, length: n, fields: table? }
-  local docs = {} --[[:! { [string]: { text: string, length: integer, fields: { [string]: unknown } | nil } | nil }]]
+  local docs = {} --[[: { [string]: { text: string, length: integer, fields: { [string]: unknown } | nil } | nil }]]
   local doc_count = 0
   local total_length = 0  -- sum of all doc lengths (for BM25 avg)
 

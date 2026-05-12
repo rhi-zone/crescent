@@ -406,7 +406,7 @@ function Ls:interpret(str, opts)
   if type(str) ~= "string" then
     return nil, "interpret: argument must be a string"
   end
-  local merged = {} --[[:! { [string]: unknown }]]
+  local merged = {} --[[: { [string]: unknown }]]
   if opts then for k, v in pairs(opts) do merged[k] = v end end
   local merged_opts = (merged --[[: unknown]]) --[[:! LsOpts]]
   if merged_opts.angle == nil then merged_opts.angle = self._angle end
@@ -426,7 +426,7 @@ function Ls:to_svg(str, opts)
   if type(str) ~= "string" then
     return nil, "to_svg: first argument must be a string"
   end
-  local merged = {} --[[:! { [string]: unknown }]]
+  local merged = {} --[[: { [string]: unknown }]]
   if opts then for k, v in pairs(opts) do merged[k] = v end end
   local merged2 = (merged --[[: unknown]]) --[[:! LsOpts]]
   if merged2.angle == nil then merged2.angle = self._angle end

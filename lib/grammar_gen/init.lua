@@ -45,7 +45,7 @@ local VOWELS = { a=true, e=true, i=true, o=true, u=true,
                  A=true, E=true, I=true, O=true, U=true }
 
 --: { [string]: (s: string) -> string }
-local modifiers = {} --[[:! { [string]: (s: string) -> string }]]
+local modifiers = {} --[[: { [string]: (s: string) -> string }]]
 
 --: (s: string) -> string
 function modifiers.capitalize(s)
@@ -220,13 +220,13 @@ function expand_raw(grammar, s, depth, max_depth)
     local inner = s:sub(hash_start + 1, hash_end - 1)
 
     -- Parse symbol and modifiers: symbol.mod1.mod2...
-    local parts = {} --[[:! { [integer]: string, ... }]]
+    local parts = {} --[[: { [integer]: string, ... }]]
     for part in (inner .. "."):gmatch("([^.]*)[.]") do
       parts[#parts + 1] = part
     end
 
     local symbol = parts[1]
-    local mods = {} --[[:! { [integer]: string, ... }]]
+    local mods = {} --[[: { [integer]: string, ... }]]
     for i = 2, #parts do
       mods[#mods + 1] = parts[i]
     end

@@ -359,7 +359,7 @@ local function parse_arguments(lex)
   skip_ignored(lex)
   if peek(lex) ~= byte("(") then return {} end
   advance(lex, 1) -- skip '('
-  local args = {} --[[:! { [integer]: unknown }]]
+  local args = {} --[[: { [integer]: unknown }]]
   while true do
     skip_ignored(lex)
     if peek(lex) == byte(")") then advance(lex, 1); break end
@@ -381,7 +381,7 @@ end
 
 --: (Lexer) -> unknown
 local function parse_directives(lex)
-  local directives = {} --[[:! { [integer]: unknown }]]
+  local directives = {} --[[: { [integer]: unknown }]]
   while true do
     skip_ignored(lex)
     if peek(lex) ~= byte("@") then break end
@@ -400,7 +400,7 @@ end
 local function parse_selection_set(lex)
   local ok, err = expect_char(lex, "{")
   if not ok then return nil, err end
-  local selections = {} --[[:! { [integer]: unknown }]]
+  local selections = {} --[[: { [integer]: unknown }]]
   while true do
     skip_ignored(lex)
     if peek(lex) == byte("}") then advance(lex, 1); break end
@@ -544,7 +544,7 @@ parse_value = function(lex)
   -- List value [...]
   if c == byte("[") then
     advance(lex, 1)
-    local values = {} --[[:! { [integer]: unknown }]]
+    local values = {} --[[: { [integer]: unknown }]]
     while true do
       skip_ignored(lex)
       if peek(lex) == byte("]") then advance(lex, 1); break end
@@ -559,7 +559,7 @@ parse_value = function(lex)
   -- Object value {...}
   if c == byte("{") then
     advance(lex, 1)
-    local fields = {} --[[:! { [integer]: unknown }]]
+    local fields = {} --[[: { [integer]: unknown }]]
     while true do
       skip_ignored(lex)
       if peek(lex) == byte("}") then advance(lex, 1); break end
@@ -685,7 +685,7 @@ end
 --: (Lexer, integer) -> unknown
 --: (Lexer, string) -> unknown
 local function parse_input_value_defs(lex, close_char)
-  local defs = {} --[[:! { [integer]: unknown }]]
+  local defs = {} --[[: { [integer]: unknown }]]
   while true do
     skip_ignored(lex)
     if peek(lex) == byte(close_char) then advance(lex, 1); break end
@@ -731,7 +731,7 @@ end
 local function parse_field_defs(lex)
   local ok, err = expect_char(lex, "{")
   if not ok then return nil, err end
-  local fields = {} --[[:! { [integer]: unknown }]]
+  local fields = {} --[[: { [integer]: unknown }]]
   while true do
     skip_ignored(lex)
     if peek(lex) == byte("}") then advance(lex, 1); break end
@@ -742,7 +742,7 @@ local function parse_field_defs(lex)
     name, err = expect_name(lex)
     if not name then return nil, err end
     -- optional arguments
-    local args = {} --[[:! { [integer]: unknown }]]
+    local args = {} --[[: { [integer]: unknown }]]
     skip_ignored(lex)
     if peek(lex) == byte("(") then
       advance(lex, 1)
@@ -917,7 +917,7 @@ local function parse_definition(lex)
     local type_name, err = expect_name(lex)
     if not type_name then return nil, err end
     -- optional "implements"
-    local interfaces = {} --[[:! { [integer]: unknown }]]
+    local interfaces = {} --[[: { [integer]: unknown }]]
     skip_ignored(lex)
     local saved2_pos, saved2_line, saved2_col = lex.pos, lex.line, lex.col
     local kw = read_name(lex)
@@ -961,7 +961,7 @@ local function parse_definition(lex)
     local type_name, err = expect_name(lex)
     if not type_name then return nil, err end
     -- optional "implements"
-    local interfaces = {} --[[:! { [integer]: unknown }]]
+    local interfaces = {} --[[: { [integer]: unknown }]]
     skip_ignored(lex)
     local saved2_pos, saved2_line, saved2_col = lex.pos, lex.line, lex.col
     local kw = read_name(lex)
@@ -1007,7 +1007,7 @@ local function parse_definition(lex)
     local dirs
     dirs, err = parse_directives(lex)
     if not dirs then return nil, err end
-    local types = {} --[[:! { [integer]: unknown }]]
+    local types = {} --[[: { [integer]: unknown }]]
     skip_ignored(lex)
     if peek(lex) == byte("=") then
       advance(lex, 1)
@@ -1041,7 +1041,7 @@ local function parse_definition(lex)
     local ok
     ok, err = expect_char(lex, "{")
     if not ok then return nil, err end
-    local values = {} --[[:! { [integer]: unknown }]]
+    local values = {} --[[: { [integer]: unknown }]]
     while true do
       skip_ignored(lex)
       if peek(lex) == byte("}") then advance(lex, 1); break end
@@ -1076,7 +1076,7 @@ local function parse_definition(lex)
     local dirs
     dirs, err = parse_directives(lex)
     if not dirs then return nil, err end
-    local fields = {} --[[:! { [integer]: unknown }]]
+    local fields = {} --[[: { [integer]: unknown }]]
     skip_ignored(lex)
     if peek(lex) == byte("{") then
       advance(lex, 1)
@@ -1099,7 +1099,7 @@ local function parse_definition(lex)
     local dir_name
     dir_name, err = expect_name(lex)
     if not dir_name then return nil, err end
-    local args = {} --[[:! { [integer]: unknown }]]
+    local args = {} --[[: { [integer]: unknown }]]
     skip_ignored(lex)
     if peek(lex) == byte("(") then
       advance(lex, 1)
@@ -1198,7 +1198,7 @@ function M.parse(src)
     return nil, "expected string"
   end
   local lex = new_lexer(src)
-  local defs = {} --[[:! { [integer]: unknown }]]
+  local defs = {} --[[: { [integer]: unknown }]]
   while true do
     skip_ignored(lex)
     if lex.pos > lex.len then break end
@@ -1366,13 +1366,13 @@ local function print_value(node)
     local var_name = node_.name --[[:! { value: string, ... }]]
     return "$" .. var_name.value
   elseif k == "ListValue" then
-    local parts = {} --[[:! { [integer]: string }]]
+    local parts = {} --[[: { [integer]: string }]]
     for _, v in ipairs(node_.values --[[:! { [integer]: unknown }]]) do
       parts[#parts + 1] = print_value(v) --[[:! string]]
     end
     return "[" .. concat(parts, ", ") .. "]"
   elseif k == "ObjectValue" then
-    local parts = {} --[[:! { [integer]: string }]]
+    local parts = {} --[[: { [integer]: string }]]
     for _, f in ipairs(node_.fields --[[:! { [integer]: unknown }]]) do
       local f_ = f --[[:! { name: { value: string, ... }, value: unknown, ... }]]
       parts[#parts + 1] = f_.name.value .. ": " .. print_value(f_.value)
@@ -1386,7 +1386,7 @@ end
 local function print_arguments(args)
   local args_ = args --[[:! { [integer]: unknown }]]
   if not args_ or #args_ == 0 then return "" end
-  local parts = {} --[[:! { [integer]: string }]]
+  local parts = {} --[[: { [integer]: string }]]
   for _, arg in ipairs(args_) do
     local arg_ = arg --[[:! { name: { value: string, ... }, value: unknown, ... }]]
     parts[#parts + 1] = arg_.name.value .. ": " .. print_value(arg_.value)
@@ -1653,7 +1653,7 @@ print_node = function(node_, indent)
       s = s .. "\n)"
     end
     if node.repeatable then s = s .. " repeatable" end
-    local locs = {} --[[:! { [integer]: string }]]
+    local locs = {} --[[: { [integer]: string }]]
     for _, l in ipairs(node.locations --[[:! { [integer]: { value: string } }]]) do insert(locs, l.value) end
     s = s .. " on " .. concat(locs, " | ")
     return s

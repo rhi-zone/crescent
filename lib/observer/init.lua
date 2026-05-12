@@ -646,7 +646,7 @@ function M.merge(...)
   local sources = { ... }
   --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local subs = {} --[[:! { [integer]: Subscription }]]
+    local subs = {} --[[: { [integer]: Subscription }]]
     local completed = 0
     local total = #sources
     for i = 1, total do
@@ -700,8 +700,8 @@ function M.zip(...)
   local n = #sources
   --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
-    local buffers = {} --[[:! { [integer]: { [integer]: unknown } }]]
-    local completed_mask = {} --[[:! { [integer]: boolean }]]
+    local buffers = {} --[[: { [integer]: { [integer]: unknown } }]]
+    local completed_mask = {} --[[: { [integer]: boolean }]]
     for i = 1, n do buffers[i] = {}; completed_mask[i] = false end
 
     local function try_emit()
@@ -727,7 +727,7 @@ function M.zip(...)
       subscriber:complete()
     end
 
-    local subs = {} --[[:! { [integer]: Subscription }]]
+    local subs = {} --[[: { [integer]: Subscription }]]
     for i = 1, n do
       local idx = i
       local src = sources[i] --[[:! Observable]]
@@ -751,11 +751,11 @@ function M.combine_latest(...)
   --: (Subscriber) -> (Subscription | ((() -> nil) | nil))
   return new_observable(function(subscriber)
     local latest = {}
-    local has_value = {} --[[:! { [integer]: boolean }]]
+    local has_value = {} --[[: { [integer]: boolean }]]
     local completed_count = 0
     local ready = 0  -- count of sources that have emitted at least once
 
-    local subs = {} --[[:! { [integer]: Subscription }]]
+    local subs = {} --[[: { [integer]: Subscription }]]
     for i = 1, n do
       local idx = i
       local src = sources[i] --[[:! Observable]]
@@ -792,7 +792,7 @@ Subject.__index = Subject
 
 function M.subject()
   local self = setmetatable({
-    _subscribers = {} --[[:! { [integer]: Observer }]],
+    _subscribers = {} --[[: { [integer]: Observer }]],
     _closed = false,
     _error = nil,
   }, Subject)
@@ -883,7 +883,7 @@ BehaviorSubject.__index = BehaviorSubject
 
 function M.behavior_subject(initial)
   local self = setmetatable({
-    _subscribers = {} --[[:! { [integer]: Observer }]],
+    _subscribers = {} --[[: { [integer]: Observer }]],
     _closed = false,
     _error = nil,
     _value = initial,

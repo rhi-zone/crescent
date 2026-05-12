@@ -297,7 +297,7 @@ end
 
 --: (openapi_spec) -> string[]
 function Spec:paths()
-	local result = {} --[[:! { [integer]: string }]]
+	local result = {} --[[: { [integer]: string }]]
 	if self._doc.paths then
 		local paths_doc = self._doc.paths --[[:! { [string]: { [string]: unknown } }]]
 		for p in pairs(paths_doc) do

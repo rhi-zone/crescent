@@ -676,7 +676,7 @@ end
 --:: IndexEntry = { doc_idx: integer, positions: integer[] }
 --: (string[]) -> { [string]: IndexEntry[] }
 function M.index(documents)
-  local idx = {} --[[:! { [string]: IndexEntry[] }]]
+  local idx = {} --[[: { [string]: IndexEntry[] }]]
   for doc_i, doc in ipairs(documents) do
     local pos = 0
     for word in gmatch(lower(doc), "[a-z]+") do

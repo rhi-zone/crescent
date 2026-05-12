@@ -66,7 +66,7 @@ end
 --: ({ [integer]: integer }) -> string
 local function chacha20_block(state)
 	-- Working copy
-	local s = {} --[[:! { [integer]: integer }]]
+	local s = {} --[[: { [integer]: integer }]]
 	for i = 1, 16 do s[i] = state[i] end
 
 	-- 20 rounds (10 double rounds)
@@ -84,11 +84,11 @@ local function chacha20_block(state)
 	end
 
 	-- Add original state
-	local out = {} --[[:! { [integer]: integer }]]
+	local out = {} --[[: { [integer]: integer }]]
 	for i = 1, 16 do
 		put_u32le(out, (i - 1) * 4 + 1, tobit(s[i] + state[i]))
 	end
-	local bytes = {} --[[:! { [integer]: string }]]
+	local bytes = {} --[[: { [integer]: string }]]
 	for i = 1, 64 do bytes[i] = string.char(out[i]) end
 	return table.concat(bytes)
 end
@@ -119,7 +119,7 @@ local function chacha20_crypt(key, nonce, counter, data)
 	while pos <= #data do
 		local ks = chacha20_block(state)
 		local chunk_len = math.min(64, #data - pos + 1)
-		local out = {} --[[:! { [integer]: string }]]
+		local out = {} --[[: { [integer]: string }]]
 		for i = 1, chunk_len do
 			out[i] = string.char(bxor(string.byte(data, pos + i - 1) or 0, string.byte(ks, i) or 0)) --[[:! string]]
 		end

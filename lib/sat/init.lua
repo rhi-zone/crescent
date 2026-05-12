@@ -175,7 +175,7 @@ local function dpll(clauses, nvars, assignment, collect)
   -- All clauses satisfied and all variables assigned?
   if #clauses == 0 and var == nil then
     if collect_any then
-      local copy = {} --[[:! { [string]: boolean }]]
+      local copy = {} --[[: { [string]: boolean }]]
       for k, v in pairs(new_assignment) do copy[k --[[:! string]]] = v --[[:! boolean]] end
       local ca = ((collect_any --[[: unknown]]) --[[:! { [integer]: { [string]: boolean } }]])
       ca[#ca + 1] = copy
@@ -261,7 +261,7 @@ end
 function M.solve_all(formula, _opts)
   local clauses = copy_clauses(formula.clauses)
   local nvars = (formula.vars or 0) --[[:! integer]]
-  local collect = {} --[[:! { [integer]: { [string]: boolean } }]]
+  local collect = {} --[[: { [integer]: { [string]: boolean } }]]
   dpll(clauses, nvars, {}, nil)
   return collect --[[:! { [integer]: { [integer]: boolean } }]]
 end
@@ -309,7 +309,7 @@ end
 function Formula:solve()
   local raw = M.solve({ clauses = self._clauses, vars = self._nvars })
   if not raw.sat then return { sat = false, assignment = nil } end
-  local named = {} --[[:! { [string]: boolean }]]
+  local named = {} --[[: { [string]: boolean }]]
   for name, id in pairs(self._vars) do
     named[name] = ((raw.assignment --[[:! { [integer]: boolean }]])[id])
   end
@@ -322,7 +322,7 @@ function Formula:solve_all()
   local raws = M.solve_all({ clauses = self._clauses, vars = self._nvars }, nil)
   local results = {}
   for i = 1, #raws do
-    local named = {} --[[:! { [string]: boolean }]]
+    local named = {} --[[: { [string]: boolean }]]
     for name, id in pairs(self._vars) do
       named[name] = raws[i][id]
     end

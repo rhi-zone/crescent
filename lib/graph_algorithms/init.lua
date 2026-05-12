@@ -373,7 +373,7 @@ function M.bfs(graph, start)
   if not graph:has_node(start) then
     return nil, "graph: node not found: " .. tostring(start)
   end
-  local order = {} --[[:! { [integer]: unknown, ... }]]
+  local order = {} --[[: { [integer]: unknown, ... }]]
   local distances = {} --[[:! { [unknown]: integer }]]
   local parents = {} --[[:! { [unknown]: unknown }]]
   distances[start] = 0
@@ -668,11 +668,11 @@ function M.floyd_warshall(graph)
   local idx = {}
   for i, id in ipairs(nodes) do idx[id] = i end
 
-  local dist = {} --[[:! { [integer]: { [integer]: number, ... }, ... }]]
-  local nxt = {} --[[:! { [integer]: { [integer]: unknown, ... }, ... }]]
+  local dist = {} --[[: { [integer]: { [integer]: number, ... }, ... }]]
+  local nxt = {} --[[: { [integer]: { [integer]: unknown, ... }, ... }]]
   for i = 1, n do
-    dist[i] = {} --[[:! { [integer]: number, ... }]]
-    nxt[i] = {} --[[:! { [integer]: unknown, ... }]]
+    dist[i] = {} --[[: { [integer]: number, ... }]]
+    nxt[i] = {} --[[: { [integer]: unknown, ... }]]
     for j = 1, n do
       if i == j then
         dist[i][j] = 0
@@ -1124,12 +1124,12 @@ function M.betweenness_centrality(graph)
 
   for _, s in ipairs(nodes) do
     -- BFS from s
-    local stack = {} --[[:! { [integer]: unknown, ... }]]
+    local stack = {} --[[: { [integer]: unknown, ... }]]
     local pred = {} --[[:! { [unknown]: { [integer]: unknown, ... }, ... }]]
     local sigma = {} --[[:! { [unknown]: number }]]
     local dist2 = {} --[[:! { [unknown]: integer }]]
     for _, id in ipairs(nodes) do
-      pred[id] = {} --[[:! { [integer]: unknown, ... }]]
+      pred[id] = {} --[[: { [integer]: unknown, ... }]]
       sigma[id] = 0
       dist2[id] = -1
     end

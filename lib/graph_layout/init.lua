@@ -367,7 +367,7 @@ function M.hierarchical(graph, opts)
   local out_adj = {} --: OutAdjList
   local in_deg  = {} --: InDegMap
   for i = 1, n do
-    out_adj[nodes[i]] = {} --[[:! { [integer]: GNode }]]
+    out_adj[nodes[i]] = {} --[[: { [integer]: GNode }]]
     in_deg[nodes[i]]  = 0
   end
 
@@ -431,7 +431,7 @@ function M.hierarchical(graph, opts)
   end
 
   local layers = {} --: { [integer]: { [integer]: GNode } }
-  for l = 0, max_layer do layers[l] = {} --[[:! { [integer]: GNode }]] end
+  for l = 0, max_layer do layers[l] = {} --[[: { [integer]: GNode }]] end
   for i = 1, n do
     local id = nodes[i]
     local l  = layer[id] --[[:! integer]]

@@ -279,11 +279,11 @@ function Circuit:solve_dc()
 		-- trivial: only ground node
 		local empty_pwr = { total = 0.0 } --: { [string]: number }
 		return (setmetatable({
-			_voltages = {} --[[:! { [string]: number }]],
-			_currents = {} --[[:! { [string]: number }]],
+			_voltages = {} --[[: { [string]: number }]],
+			_currents = {} --[[: { [string]: number }]],
 			_power = empty_pwr,
-			node_voltages = {} --[[:! { [string]: number }]],
-			branch_currents = {} --[[:! { [string]: number }]],
+			node_voltages = {} --[[: { [string]: number }]],
+			branch_currents = {} --[[: { [string]: number }]],
 		}, Result) --[[:! { _currents: { [string]: number }, _power: { [string]: number }, _voltages: { [string]: number }, branch_currents: { [string]: number }, node_voltages: { [string]: number } }]])
 	end
 

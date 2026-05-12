@@ -192,7 +192,7 @@ function CFG:dominators()
 		rpo_idx[rpo[i]] = i
 	end
 
-	local doms = {} --[[:! { [string]: string | nil }]]
+	local doms = {} --[[: { [string]: string | nil }]]
 	local entry_name = rpo[1]
 	doms[entry_name] = entry_name
 

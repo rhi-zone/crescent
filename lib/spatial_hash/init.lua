@@ -74,8 +74,8 @@ function M.new(cell_size)
   local cs = cell_size or 64
   local self = {
     _cs      = cs,
-    _cells   = {} --[[:! { [string]: { [string]: boolean } }]],
-    _objects = {} --[[:! { [string]: SpatialObj }]],
+    _cells   = {} --[[: { [string]: { [string]: boolean } }]],
+    _objects = {} --[[: { [string]: SpatialObj }]],
     _count   = 0,
   } --[[:! SpatialGrid]]
 

@@ -58,17 +58,17 @@ mod.br_ = mod.element("br")
 
 --: ({ [string]: { [string]: string } }) -> string
 mod.style = function(styles)
-	local parts = {} --[[:! string[] ]]
+	local parts = {} --[[: { [integer]: string, ... } ]]
 	parts[#parts + 1] = "<style>"
 	for selector, style in pairs(styles) do
 		parts[#parts + 1] = "\t" .. selector .. " {"
-		for prop, v in pairs(style --[[:! { [string]: string } ]]) do
+		for prop, v in pairs(style) do
 			parts[#parts + 1] = "\t\t" .. prop .. ": " .. v .. ";"
 		end
 		parts[#parts + 1] = "\t}"
 	end
 	parts[#parts + 1] = "</style>"
-	return table.concat(parts --[[:! { [integer]: string }]], "\n")
+	return table.concat(parts, "\n")
 end
 
 mod.script = function(fn)

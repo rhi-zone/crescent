@@ -73,7 +73,7 @@ if unpack and unpack(">I2", "\1\2\3\4") ~= 0x102 then unpack = nil end
 local _ENV = nil
 
 --: { [string]: (unknown, unknown) -> string }
-local encoder = {} --[[:! { [string]: (unknown, unknown) -> string }]]
+local encoder = {} --[[: { [string]: (unknown, unknown) -> string }]]
 
 local encode = function (obj, opts) return encoder[type(obj)](obj, opts) end
 mod._encode_raw = encode

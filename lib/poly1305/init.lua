@@ -189,7 +189,7 @@ local function finalise(ctx)
   local hi64  = h2_hi + h3 * U64(0x4000) + h4 * U64(0x10000000000ULL)
 
   -- Extract bytes from lo64 then hi64.
-  local out = {} --[[:! { [integer]: integer }]]
+  local out = {} --[[: { [integer]: integer }]]
   local v = lo64
   for i = 1, 8 do
     out[i] = math2.tointeger(tonumber(band(v, U64(0xff)))) or 0

@@ -225,7 +225,7 @@ end
 
 --: (sheet: { _type: string, items: { [number]: { _type: string, selector: { _str: string, ... } | string, decls: { [string]: CssValue }, ... } } }) -> string
 M.render = function(sheet)
-  local parts = {} --[[:! { [integer]: string }]]
+  local parts = {} --[[: { [integer]: string }]]
   for _, item in ipairs(sheet.items) do
     if item._type == "rule" then
       table.insert(parts, M.render_rule(item))

@@ -55,7 +55,7 @@ local function write_varint(v)
   if v < 128 then
     return char(v)
   end
-  local parts = {} --[[:! { [integer]: string }]]
+  local parts = {} --[[: { [integer]: string }]]
   while v >= 128 do
     parts[#parts + 1] = char(bor(band(v, 0x7F), 0x80)) --[[:! string]]
     v = rshift(v, 7)
