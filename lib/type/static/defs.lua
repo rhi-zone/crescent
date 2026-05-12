@@ -408,6 +408,20 @@ function M.i32x2_to_double(lo, hi)
     return _f64buf.d
 end
 
+-- Populate rule_defaults after M.E is available.
+do
+    local E = M.E
+    M.rule_defaults = {
+        [E.EXPLICIT_ANY]       = { severity = "warning", name = "explicit_any" },
+        [E.ANY_IN_TYPE]        = { severity = "warning", name = "any_in_type" },
+        [E.FORCE_CAST]         = { severity = "warning", name = "force_cast" },
+        [E.MATCH_CONTAINS_ANY] = { severity = "warning", name = "match_contains_any" },
+        [E.MODULE_DECL]        = { severity = "warning", name = "module_decl" },
+        [E.UNNAMED_PARAMS]     = { severity = "warning", name = "unnamed_params" },
+        [E.NON_EXHAUSTIVE]     = { severity = "warning", name = "non_exhaustive" },
+    }
+end
+
 -- fnv31: FNV-1a hash of a string, kept in int32 range.
 -- Used to derive stable nominal type identities from source positions.
 -- Collision probability is negligible for practical type declaration counts.

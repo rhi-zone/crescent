@@ -910,17 +910,30 @@ function M.main(argv)
                 local ok_run, manifest = pcall(pkg_fn --[[:! () -> unknown]])
                 if ok_run and type(manifest) == "table" then
                     local tc = (manifest --[[:! { typecheck: unknown, ... }]]).typecheck
-                    if tc and type(tc) == "table" and type(tc.globals) == "table" then
-                        -- Resolve module names to file paths.
-                        -- "lib/type/static/stdlib_types" → "lib/type/static/stdlib_types.lua"
-                        local globals_files = {}
-                        for _, mod_name in ipairs(tc.globals --[[:! { [integer]: string, ... }]]) do
-                            -- Accept both slash-path and dot-path conventions.
-                            local rel, _ = mod_name:gsub("%.", "/")
-                            globals_files[#globals_files + 1] = rel .. ".lua"
+                    if tc and type(tc) == "table" then
+                        project_opts = {}
+                        if type(tc.globals) == "table" then
+                            -- Resolve module names to file paths.
+                            -- "lib/type/static/stdlib_types" → "lib/type/static/stdlib_types.lua"
+                            local globals_files = {} --: { [integer]: string, ... }
+                            for _, mod_name in ipairs(tc.globals --[[:! { [integer]: string, ... }]]) do
+                                -- Accept both slash-path and dot-path conventions.
+                                local rel, _ = mod_name:gsub("%.", "/")
+                                globals_files[#globals_files + 1] = rel .. ".lua"
+                            end
+                            if #globals_files > 0 then
+                                project_opts.globals_files = globals_files
+                            end
                         end
-                        if #globals_files > 0 then
-                            project_opts = { globals_files = globals_files }
+                        -- Extract rules config: { [rule_name]: { severity?, enabled?, allow? } }
+                        if type(tc.rules) == "table" then
+                            local rules_config = {} --: { [string]: unknown, ... }
+                            for rule_name, rule_cfg in pairs(tc.rules --[[:! { [string]: unknown, ... }]]) do
+                                if type(rule_cfg) == "table" then
+                                    rules_config[rule_name] = rule_cfg
+                                end
+                            end
+                            project_opts.rules_config = rules_config
                         end
                     end
                 end

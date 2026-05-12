@@ -184,6 +184,24 @@ end
 
 --: (Ctx, integer | nil, integer | nil, integer, { [string]: unknown, ... }) -> ()
 local function warn(ctx, line, col, code, args)
+    --: { [string]: { severity?: string, enabled?: boolean, allow?: { [integer]: string, ... }, ... }, ... } | nil
+    local rc = ctx.rules_config --[[:! { [string]: { severity?: string, enabled?: boolean, allow?: { [integer]: string, ... }, ... }, ... } | nil]]
+    --: { [integer]: { name: string, severity: string }, ... }
+    local rd = defs.rule_defaults --[[:! { [integer]: { name: string, severity: string }, ... }]]
+    if rd[code] then
+        local rc_mod = require("lib.type.static.rules_config")
+        local sev = rc_mod.effective_severity(code, rc, rd)
+        if sev == "off" then return end
+        local allow = rc_mod.allow_patterns(code, rc, rd)
+        if rc_mod.is_allowed(ctx.filename, allow) then return end
+        local msg = errors_mod.format_diag(code, args --[[:! { [string]: string | integer }]])
+        if sev == "error" then
+            errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
+        else
+            errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
+        end
+        return
+    end
     local msg = errors_mod.format_diag(code, args --[[:! { [string]: string | integer }]])
     errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
@@ -4162,6 +4180,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
     ctx.catch_mode         = false   -- true while inside $Catch<T, ...> first-arg resolution
     ctx.catch_threw        = false   -- set to true by $Throw when catch_mode is active
     ctx._in_match_arm_subst = false  -- true during match arm result substitution (defers $Throw)
+    ctx.rules_config       = opts and opts.rules_config or nil
     ctx.type_at            = {}
     ctx.name_at            = {}
     ctx.field_at           = {}

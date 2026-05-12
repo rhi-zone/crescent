@@ -79,6 +79,31 @@ local function add_warning(ctx, line, col, msg)
     errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
+-- Rule-aware warning: looks up effective severity from rules_config on ctx.
+-- Falls back to add_warning when the code has no rule default (non-configurable).
+--: (Ctx, integer | nil, integer | nil, integer) -> ()
+local function add_warning_code(ctx, line, col, code)
+    --: { [integer]: { name: string, severity: string }, ... }
+    local rd = defs.rule_defaults --[[:! { [integer]: { name: string, severity: string }, ... }]]
+    if rd[code] then
+        local rc_mod = require("lib.type.static.rules_config")
+        --: { [string]: { severity?: string, enabled?: boolean, allow?: { [integer]: string, ... }, ... }, ... } | nil
+        local rc = ctx.rules_config --[[:! { [string]: { severity?: string, enabled?: boolean, allow?: { [integer]: string, ... }, ... }, ... } | nil]]
+        local sev = rc_mod.effective_severity(code, rc, rd)
+        if sev == "off" then return end
+        local allow = rc_mod.allow_patterns(code, rc, rd)
+        if rc_mod.is_allowed(ctx.filename, allow) then return end
+        local msg = errors_mod.format_diag(code, {})
+        if sev == "error" then
+            errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
+        else
+            errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
+        end
+        return
+    end
+    add_warning(ctx, line, col, errors_mod.format_diag(code, {}))
+end
+
 -- Widen literal to base type for Sub constraints.
 --: (Ctx, integer) -> integer
 local function widen_for_sub(ctx, tid)
@@ -2473,7 +2498,7 @@ local function solve_overlap(ctx, c)
         if not ctx._overlap_warned then ctx._overlap_warned = {} end
         if not ctx._overlap_warned[key] then
             ctx._overlap_warned[key] = true
-            add_warning(ctx, line, col, errors_mod.format_diag(defs.E.FORCE_CAST, {}))
+            add_warning_code(ctx, line, col, defs.E.FORCE_CAST)
         end
     end
     -- Defer if either side is still a free type variable: the answer would be
@@ -2537,8 +2562,16 @@ function M.solve(ctx, constraints)
     -- Key: "filename\0line\0col\0msg"
     --: { [string]: boolean }
     local seen_warnings = {}
+    -- Track rule-upgraded errors (from add_warning_code) flushed to real_err.
+    -- These are emitted into silent_err.errors but must be deduped like warnings.
+    -- Regular constraint-failure errors are only emitted on the final pass, so
+    -- they don't need this treatment. Rule-upgraded errors are emitted every pass
+    -- (same as warnings via _overlap_warned guard) so need the same dedup.
+    --: { [string]: boolean }
+    local seen_rule_errors = {}
 
     -- Flush any warnings from silent_err into real_err, deduplicating by location+msg.
+    -- Also flushes rule-upgraded errors (those that came from add_warning_code).
     --: () -> ()
     local function flush_warnings()
         for _, w in ipairs(silent_err.warnings) do
@@ -2549,6 +2582,21 @@ function M.solve(ctx, constraints)
             end
         end
         silent_err.warnings = {}
+        -- Flush rule-upgraded errors with the same dedup. These are identified by
+        -- having been placed in silent_err.errors during a pass where we know only
+        -- rule-upgraded diagnostics produce errors (constraint-failure errors are
+        -- suppressed until the final pass via the _overlap_warned and similar guards).
+        -- Strategy: flush ALL errors from silent_err with dedup on every pass.
+        -- On the final pass the caller also flushes silent_err.errors — that's fine
+        -- because seen_rule_errors prevents duplicates.
+        for _, e in ipairs(silent_err.errors) do
+            local key = e.filename .. "\0" .. e.line .. "\0" .. e.col .. "\0" .. e.msg
+            if not seen_rule_errors[key] then
+                seen_rule_errors[key] = true
+                real_err.errors[#real_err.errors + 1] = e
+            end
+        end
+        silent_err.errors = {}
     end
 
     -- Expose the constraint list on ctx so handlers can scan for pending C_BOUND constraints.
@@ -2591,9 +2639,14 @@ function M.solve(ctx, constraints)
             end
         end
 
-        -- Flush warnings into real_err (deduped). On the final pass, also flush errors.
+        -- Flush warnings and rule-upgraded errors into real_err (deduped).
+        -- On the final pass, also flush any remaining constraint-failure errors.
         flush_warnings()
         if pass == 4 then
+            -- flush_warnings() already consumed silent_err.errors; this is a no-op
+            -- for rule-upgraded errors. Constraint-failure errors (not emitted
+            -- through add_warning_code) are flushed here without dedup since
+            -- they are only emitted once on the final pass.
             for _, e in ipairs(silent_err.errors) do
                 real_err.errors[#real_err.errors + 1] = e
             end
@@ -2611,8 +2664,7 @@ function M.solve(ctx, constraints)
             -- No progress: converged (or stuck on deferred that can never progress).
             -- Run one final pass via silent_err to emit errors, including any stuck deferred.
             if pass < 4 then
-                silent_err.errors = {}
-                silent_err.warnings = {}
+                -- silent_err.errors and warnings are already empty (flush_warnings cleared them).
                 for _, c in ipairs(constraints) do
                     c._deferred = false  -- run everything on final error pass
                 end
@@ -2620,7 +2672,8 @@ function M.solve(ctx, constraints)
                     local handler = handlers[c[1]]
                     if handler then handler(ctx, c) end
                 end
-                -- Flush warnings and errors from this final convergence pass.
+                -- Flush warnings and rule-upgraded errors from this final convergence pass.
+                -- Then flush any remaining constraint-failure errors without dedup.
                 flush_warnings()
                 for _, e in ipairs(silent_err.errors) do
                     real_err.errors[#real_err.errors + 1] = e
