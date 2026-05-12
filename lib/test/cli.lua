@@ -33,7 +33,7 @@ local function get_cpu_count()
 	if not fork_available then return 1 end
 	local n = ffi.C.sysconf(84)  -- _SC_NPROCESSORS_ONLN = 84 on Linux
 	if n <= 0 then return 1 end
-	return tonumber(n) --[[:! integer]]
+	return math.floor(tonumber(n) or 1)
 end
 
 -- ── argument parsing ──────────────────────────────────────────────────────────
@@ -258,9 +258,9 @@ local function decode_result(line)
 	return {
 		status    = status,
 		file      = urldecode(file_enc),
-		pass      = tonumber(pass_s) --[[:! integer]],
-		fail      = tonumber(fail_s) --[[:! integer]],
-		skip      = (tonumber(skip_s) or 0) --[[:! integer]],
+		pass      = math.floor(tonumber(pass_s) or 0),
+		fail      = math.floor(tonumber(fail_s) or 0),
+		skip      = math.floor(tonumber(skip_s) or 0),
 		pcall_err = urldecode(pcall_enc),
 		tests     = tests,
 	}
