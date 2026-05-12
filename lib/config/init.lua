@@ -55,6 +55,7 @@ local function merge_into(dst, src)
 end
 
 -- Deep copy a table
+--: (unknown) -> unknown
 local function deep_copy(t)
   if type(t) ~= "table" then return t end
   local out = {}
@@ -89,38 +90,38 @@ function M.new(opts)
 end
 
 -- Set defaults (lowest priority). Returns self for chaining.
+--: (Config, ConfigData) -> Config
 function Config:defaults(t)
-  local self_ = self --[[:! Config]]
-  self_._defaults = deep_copy(t) --[[:! ConfigData]]
-  return self_
+  self._defaults = deep_copy(t) --[[:! ConfigData]]
+  return self
 end
 
 -- Add a table layer (higher priority than defaults and prior layers).
 -- Returns self for chaining.
+--: (Config, ConfigData) -> Config
 function Config:layer(t)
-  local self_ = self --[[:! Config]]
-  self_._layers[#self_._layers + 1] = deep_copy(t) --[[:! ConfigData]]
-  return self_
+  self._layers[#self._layers + 1] = deep_copy(t) --[[:! ConfigData]]
+  return self
 end
 
 -- Register an env prefix for lookups.
 -- APP_DB_HOST with prefix "APP" -> key "db.host"
 -- Returns self for chaining.
+--: (Config, string) -> Config
 function Config:env(prefix)
-  local self_ = self --[[:! Config]]
-  if not self_._env_reader then
+  if not self._env_reader then
     error("config:env() requires env_reader to be set in opts")
   end
-  self_._env_prefix = prefix
-  return self_
+  self._env_prefix = prefix
+  return self
 end
 
 -- Register a parsed CLI args table for lookups.
 -- Returns self for chaining.
+--: (Config, ConfigData | nil) -> Config
 function Config:args(t)
-  local self_ = self --[[:! Config]]
-  self_._args_table = t and (deep_copy(t) --[[:! ConfigData]]) or nil
-  return self_
+  self._args_table = t and (deep_copy(t) --[[:! ConfigData]]) or nil
+  return self
 end
 
 -- Convert a key to the env variable name for the given prefix.
@@ -147,32 +148,31 @@ end
 
 -- Look up a key across all layers in priority order.
 -- Priority: args > env > layers (later index = higher priority) > defaults
+--: (Config, string, unknown) -> unknown
 function Config:get(key, default)
-  local self_ = self --[[:! Config]]
-  local key_ = key --[[:! string]]
   -- 1. args
-  if self_._args_table ~= nil then
-    local v = table_get(self_._args_table, key_)
+  if self._args_table ~= nil then
+    local v = table_get(self._args_table, key)
     if v ~= nil then return v end
   end
 
   -- 2. env
-  if self_._env_prefix ~= nil then
-    local prefix_ = self_._env_prefix --[[:! string]]
-    local env_name = key_to_env_name(prefix_, key_)
-    local env_reader_ = self_._env_reader --[[:! EnvReader]]
+  if self._env_prefix ~= nil then
+    local prefix_ = self._env_prefix --[[:! string]]
+    local env_name = key_to_env_name(prefix_, key)
+    local env_reader_ = self._env_reader --[[:! EnvReader]]
     local v = env_reader_(env_name)
     if v ~= nil then return v end
   end
 
   -- 3. layers (later = higher priority, so iterate from end)
-  for i = #self_._layers, 1, -1 do
-    local v = table_get(self_._layers[i], key_)
+  for i = #self._layers, 1, -1 do
+    local v = table_get(self._layers[i], key)
     if v ~= nil then return v end
   end
 
   -- 4. defaults
-  local v = table_get(self_._defaults, key_)
+  local v = table_get(self._defaults, key)
   if v ~= nil then return v end
 
   return default
@@ -181,9 +181,9 @@ end
 -- Typed accessors
 
 -- Returns integer or nil (+ errmsg on type mismatch)
+--: (Config, string, unknown) -> (integer | nil, string | nil)
 function Config:int(key, default)
-  local self_ = self --[[:! Config]]
-  local v = self_:get(key, default)
+  local v = self:get(key, default)
   if v == nil then return nil end
   local n = tonumber(v)
   if n == nil then
@@ -193,9 +193,9 @@ function Config:int(key, default)
 end
 
 -- Returns number (float) or nil
+--: (Config, string, unknown) -> (number | nil, string | nil)
 function Config:float(key, default)
-  local self_ = self --[[:! Config]]
-  local v = self_:get(key, default)
+  local v = self:get(key, default)
   if v == nil then return nil end
   local n = tonumber(v)
   if n == nil then
@@ -205,9 +205,9 @@ function Config:float(key, default)
 end
 
 -- Returns boolean or nil. Coerces "true"/"false"/"1"/"0".
+--: (Config, string, unknown) -> (boolean | nil, string | nil)
 function Config:bool(key, default)
-  local self_ = self --[[:! Config]]
-  local v = self_:get(key, default)
+  local v = self:get(key, default)
   if v == nil then return nil end
   if type(v) == "boolean" then return v end
   local s = tostring(v):lower()
@@ -217,18 +217,18 @@ function Config:bool(key, default)
 end
 
 -- Returns string or nil
+--: (Config, string, unknown) -> (string | nil)
 function Config:string(key, default)
-  local self_ = self --[[:! Config]]
-  local v = self_:get(key, default)
+  local v = self:get(key, default)
   if v == nil then return nil end
   return tostring(v)
 end
 
 -- Returns array. If value is already a table, returns it as-is.
 -- If value is a string, splits on commas.
+--: (Config, string, unknown) -> unknown
 function Config:list(key, default)
-  local self_ = self --[[:! Config]]
-  local v = self_:get(key, default)
+  local v = self:get(key, default)
   if v == nil then return nil end
   if type(v) == "table" then return v end
   local s = tostring(v)
@@ -240,9 +240,9 @@ function Config:list(key, default)
 end
 
 -- Get or error if nil
+--: (Config, string) -> unknown
 function Config:require(key)
-  local self_ = self --[[:! Config]]
-  local v = self_:get(key)
+  local v = self:get(key)
   if v == nil then
     error("config key '" .. key .. "' is required but not set", 2)
   end
@@ -250,39 +250,39 @@ function Config:require(key)
 end
 
 -- Return a namespaced view: all lookups prepend prefix + "."
+--: (Config, string) -> Config
 function Config:ns(prefix)
-  local self_ = self --[[:! Config]]
   local ns = setmetatable({
-    _defaults = self_._defaults,
-    _layers = self_._layers,
-    _env_prefix = self_._env_prefix,
-    _args_table = self_._args_table,
-    _env_reader = self_._env_reader,
-    _ns_prefix = (self_._ns_prefix and (self_._ns_prefix .. ".") or "") .. prefix,
+    _defaults = self._defaults,
+    _layers = self._layers,
+    _env_prefix = self._env_prefix,
+    _args_table = self._args_table,
+    _env_reader = self._env_reader,
+    _ns_prefix = (self._ns_prefix and (self._ns_prefix .. ".") or "") .. prefix,
   }, Config)
   return ns
 end
 
 -- Override get to prepend namespace prefix
 local _orig_get = Config.get
+--: (Config, string, unknown) -> unknown
 function Config:get(key, default)
-  local self_ = self --[[:! Config]]
-  if self_._ns_prefix then
-    key = self_._ns_prefix .. "." .. key
+  if self._ns_prefix then
+    key = self._ns_prefix .. "." .. key
   end
-  return _orig_get(self_, key, default)
+  return _orig_get(self, key, default)
 end
 
 -- Produce a merged flat table snapshot of all current values.
 -- Higher-priority layers win. Nested tables are merged recursively.
+--: (Config) -> { [string]: unknown }
 function Config:to_table()
-  local self_ = self --[[:! Config]]
   local out = {} --: { [string]: unknown }
   -- Start with defaults
-  merge_into(out, self_._defaults)
+  merge_into(out, self._defaults)
   -- Apply layers in order (later layers override)
-  for i = 1, #self_._layers do
-    for k, v in pairs(self_._layers[i]) do
+  for i = 1, #self._layers do
+    for k, v in pairs(self._layers[i]) do
       if type(v) == "table" and type(out[k]) == "table" then
         local merged = deep_copy(out[k])
         local merged_ = (merged --[[: unknown]]) --[[:! ConfigData]]
@@ -298,17 +298,17 @@ function Config:to_table()
     end
   end
   -- Apply env values (for known keys already in the table)
-  if self_._env_prefix then
-    local env_reader_ = self_._env_reader --[[:! EnvReader]]
+  if self._env_prefix then
+    local env_reader_ = self._env_reader --[[:! EnvReader]]
     for k, _ in pairs(out) do
-      local env_name = key_to_env_name(self_._env_prefix, tostring(k))
+      local env_name = key_to_env_name(self._env_prefix, tostring(k))
       local ev = env_reader_(env_name)
       if ev ~= nil then out[k] = ev end
     end
   end
   -- Apply args
-  if self_._args_table then
-    for k, v in pairs(self_._args_table) do
+  if self._args_table then
+    for k, v in pairs(self._args_table) do
       out[k] = v
     end
   end
@@ -319,15 +319,14 @@ end
 -- opts.required: list of keys that must be present
 -- opts.types: { [key] = "integer"|"number"|"boolean"|"string" }
 -- Returns true on success, or (nil, errmsg) listing all failures.
+--: (Config, { required: { [integer]: string } | nil, types: { [string]: string } | nil } | nil) -> (boolean | nil, string | nil)
 function Config:validate(opts)
-  local self_ = self --[[:! Config]]
-  opts = opts or {}
   local failures = {} --: { [integer]: string }
 
   if opts.required then
     for _, key in ipairs(opts.required) do
       local key_ = key --[[:! string]]
-      if self_:get(key_) == nil then
+      if self:get(key_) == nil then
         failures[#failures + 1] = "missing required key: " .. key_
       end
     end
@@ -336,20 +335,20 @@ function Config:validate(opts)
   if opts.types then
     for key, expected_type in pairs(opts.types) do
       local key_ = key --[[:! string]]
-      local v = self_:get(key_)
+      local v = self:get(key_)
       if v ~= nil then
         if expected_type == "integer" then
-          local n, err = self_:int(key_)
+          local n, err = self:int(key_)
           if err or (n ~= nil and n ~= math.floor(n --[[:! number]])) then
             failures[#failures + 1] = "key '" .. key_ .. "': expected integer"
           end
         elseif expected_type == "number" then
-          local _, err = self_:float(key_)
+          local _, err = self:float(key_)
           if err then
             failures[#failures + 1] = "key '" .. key_ .. "': expected number"
           end
         elseif expected_type == "boolean" then
-          local _, err = self_:bool(key_)
+          local _, err = self:bool(key_)
           if err then
             failures[#failures + 1] = "key '" .. key_ .. "': expected boolean"
           end
