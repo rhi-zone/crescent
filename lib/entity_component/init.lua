@@ -78,37 +78,37 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Create a new entity and return its integer ID.
+--: (WorldObj) -> integer
 function World:entity()
-  local self_ = self --[[:! WorldObj]]
-  local id = self_._next_id
-  self_._next_id = id + 1
-  self_._alive[id] = true
-  self_:emit("entity_created", id)
+  local id = self._next_id
+  self._next_id = id + 1
+  self._alive[id] = true
+  self:emit("entity_created", id)
   return id
 end
 
 --- Remove an entity and all its components.
+--: (WorldObj, integer) -> nil
 function World:destroy(e)
-  local self_ = self --[[:! WorldObj]]
-  if not self_._alive[e] then return end
+  if not self._alive[e] then return end
   -- remove from every component store
-  for name, store in pairs(self_._components) do
+  for name, store in pairs(self._components) do
     if store[e] ~= nil then
       store[e] = nil
-      self_:emit("component_removed", e, name)
+      self:emit("component_removed", e, name)
     end
   end
-  self_._alive[e] = nil
-  self_:emit("entity_destroyed", e)
+  self._alive[e] = nil
+  self:emit("entity_destroyed", e)
 end
 
 --- Remove all entities (and their components) from the world.
+--: (WorldObj) -> nil
 function World:clear()
-  local self_ = self --[[:! WorldObj]]
   -- collect alive IDs first to avoid modifying during iteration
   local ids = {}
-  for id in pairs(self_._alive) do ids[#ids+1] = id end
-  for _, id in ipairs(ids) do self_:destroy(id) end
+  for id in pairs(self._alive) do ids[#ids+1] = id end
+  for _, id in ipairs(ids) do self:destroy(id) end
 end
 
 -- ---------------------------------------------------------------------------
@@ -122,29 +122,29 @@ end
 -- @param name  string
 -- @param data  table|nil  initial field values
 -- @return true | nil, errmsg
+--: (WorldObj, integer, string, unknown) -> (boolean | nil, string | nil)
 function World:add(e, name, data)
-  local self_ = self --[[:! WorldObj]]
-  if not self_._alive[e] then
+  if not self._alive[e] then
     return nil, "entity " .. tostring(e) .. " does not exist"
   end
-  if self_._components[name] == nil then
+  if self._components[name] == nil then
     return nil, "component '" .. name .. "' not registered"
   end
   local comp = shallow_copy(data)
-  merge_defaults(comp, self_._defaults[name])
-  self_._components[name][e] = comp
-  self_:emit("component_added", e, name)
+  merge_defaults(comp, self._defaults[name])
+  self._components[name][e] = comp
+  self:emit("component_added", e, name)
   return true
 end
 
 --- Remove a component from an entity.
 -- No-op if entity doesn't have the component.
+--: (WorldObj, integer, string) -> nil
 function World:remove(e, name)
-  local self_ = self --[[:! WorldObj]]
-  local store = self_._components[name]
+  local store = self._components[name]
   if store and store[e] ~= nil then
     store[e] = nil
-    self_:emit("component_removed", e, name)
+    self:emit("component_removed", e, name)
   end
 end
 

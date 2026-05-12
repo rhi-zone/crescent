@@ -230,7 +230,6 @@ Schedule.__index = Schedule
 -- Check whether a given Unix timestamp matches this schedule.
 --: (Schedule, integer) -> boolean
 function Schedule:matches(ts)
-  local self = self --[[:! Schedule]]
   local t = self._date_fn("*t", ts)
   -- Check month
   local month_ok = false
@@ -319,7 +318,6 @@ end
 -- Returns timestamp or nil if not found within 4 years.
 --: (Schedule, integer, integer | nil) -> integer | nil
 function Schedule:next(ts, n)
-  local self = self --[[:! Schedule]]
   n = n or 1
   local has_sec = self.fields.second ~= nil
   local limit = ts + 4 * 365 * 24 * 3600
@@ -341,7 +339,6 @@ end
 -- Returns timestamp or nil if not found within 4 years.
 --: (Schedule, integer) -> integer | nil
 function Schedule:prev(ts)
-  local self = self --[[:! Schedule]]
   local has_sec = self.fields.second ~= nil
   local limit = ts - 4 * 365 * 24 * 3600
   local cur = (snap_backward(ts, has_sec, self._date_fn) --[[:! integer]])
@@ -357,7 +354,6 @@ end
 -- Return all matching timestamps in [start_ts, end_ts] inclusive.
 --: (Schedule, integer, integer) -> { [integer]: integer }
 function Schedule:range(start_ts, end_ts)
-  local self = self --[[:! Schedule]]
   local has_sec = self.fields.second ~= nil
   local result = {} --[[:! { [integer]: integer }]]
   -- Snap start to a candidate boundary
@@ -462,7 +458,6 @@ end
 
 --: (Schedule) -> string
 function Schedule:describe()
-  local self = self --[[:! Schedule]]
   local f = self.fields
   local all_min   = #f.minute == 60
   local all_hour  = #f.hour == 24

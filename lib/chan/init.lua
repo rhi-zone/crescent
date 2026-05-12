@@ -74,14 +74,13 @@ end
 
 --: (ChanObj, unknown) -> (boolean | nil, string | nil)
 function Chan:send(value)
-  local self_ = self --[[:! ChanObj]]
-  if self_._closed then
+  if self._closed then
     return nil, "closed"
   end
 
   -- Fast path: a receiver is waiting — hand off directly.
-  if #self_._recv_q > 0 then
-    local rq_ = self_._recv_q
+  if #self._recv_q > 0 then
+    local rq_ = self._recv_q
     local entry = rq_[1] --[[:! RecvEntry]]
     rq_[1] = nil; for ii=1,#rq_-1 do rq_[ii]=rq_[ii+1] end; rq_[#rq_]=nil
     local eco = entry.co --[[:! Thread]]
@@ -91,8 +90,8 @@ function Chan:send(value)
   end
 
   -- Buffered: room in buffer.
-  if self_._cap > 0 and self_._len < self_._cap then
-    buf_push(self_, value)
+  if self._cap > 0 and self._len < self._cap then
+    buf_push(self, value)
     return true
   end
 
@@ -102,10 +101,10 @@ function Chan:send(value)
     return nil, "cannot block: not inside a coroutine"
   end
   local entry = { value = value, co = me }
-  self_._send_q[#self_._send_q + 1] = entry
+  self._send_q[#self._send_q + 1] = entry
   co_yield()
   -- Resumed by a receiver or by the scheduler after channel close.
-  if self_._closed then
+  if self._closed then
     return nil, "closed"
   end
   return true
@@ -116,16 +115,15 @@ end
 -- ── recv ─────────────────────────────────────────────────────────────────────
 
 function Chan:recv()
-  local self_ = self --[[:! ChanObj]]
   -- Data in buffer.
-  if self_._len > 0 then
-    local value = buf_pop(self_)
+  if self._len > 0 then
+    local value = buf_pop(self)
     -- Pump one waiting sender into the buffer.
-    if #self_._send_q > 0 then
-      local sq_ = self_._send_q
+    if #self._send_q > 0 then
+      local sq_ = self._send_q
       local raw_e = sq_[1] --[[:! SendEntry]]
       sq_[1] = nil; for ii=1,#sq_-1 do sq_[ii]=sq_[ii+1] end; sq_[#sq_]=nil
-      buf_push(self_, raw_e.value)
+      buf_push(self, raw_e.value)
       local eco = raw_e.co --[[:! Thread]]
       local ok, err = co_resume(eco)
       if not ok then error(err) end
@@ -134,8 +132,8 @@ function Chan:recv()
   end
 
   -- No buffer data: waiting sender can rendezvous.
-  if #self_._send_q > 0 then
-    local sq2_ = self_._send_q
+  if #self._send_q > 0 then
+    local sq2_ = self._send_q
     local raw_e2 = sq2_[1] --[[:! SendEntry]]
     sq2_[1] = nil; for ii=1,#sq2_-1 do sq2_[ii]=sq2_[ii+1] end; sq2_[#sq2_]=nil
     local value = raw_e2.value
@@ -146,7 +144,7 @@ function Chan:recv()
   end
 
   -- Closed and empty.
-  if self_._closed then
+  if self._closed then
     return nil, false
   end
 
@@ -156,7 +154,7 @@ function Chan:recv()
     return nil, false
   end
   local entry = { co = me }
-  self_._recv_q[#self_._recv_q + 1] = entry
+  self._recv_q[#self._recv_q + 1] = entry
   local value, ok = co_yield()
   -- Resumed by sender (value passed back) or channel close.
   if ok == nil then
@@ -168,33 +166,33 @@ end
 
 -- ── close ────────────────────────────────────────────────────────────────────
 
+--: (ChanObj) -> nil
 function Chan:close()
-  local self_ = self --[[:! ChanObj]]
-  if self_._closed then return end
-  self_._closed = true
+  if self._closed then return end
+  self._closed = true
   -- Wake all waiting receivers with closed signal.
-  for _, entry in ipairs(self_._recv_q) do
+  for _, entry in ipairs(self._recv_q) do
     local eco = entry.co --[[:! Thread]]
     co_resume(eco, nil, nil)   -- value=nil, ok=nil → closed
   end
-  self_._recv_q = {}
+  self._recv_q = {}
   -- Wake all waiting senders; they will see _closed=true and return nil,"closed".
-  for _, entry in ipairs(self_._send_q) do
+  for _, entry in ipairs(self._send_q) do
     local eco = entry.co --[[:! Thread]]
     co_resume(eco)
   end
-  self_._send_q = {}
+  self._send_q = {}
 end
 
 -- ── non-blocking variants ────────────────────────────────────────────────────
 
+--: (ChanObj, unknown) -> (boolean | nil, string | nil)
 function Chan:try_send(value)
-  local self_ = self --[[:! ChanObj]]
-  if self_._closed then
+  if self._closed then
     return nil, "closed"
   end
-  if #self_._recv_q > 0 then
-    local rq2_ = self_._recv_q
+  if #self._recv_q > 0 then
+    local rq2_ = self._recv_q
     local entry = rq2_[1] --[[:! RecvEntry]]
     rq2_[1] = nil; for ii=1,#rq2_-1 do rq2_[ii]=rq2_[ii+1] end; rq2_[#rq2_]=nil
     local eco = entry.co --[[:! Thread]]
@@ -202,30 +200,30 @@ function Chan:try_send(value)
     if not ok then error(err) end
     return true
   end
-  if self_._cap > 0 and self_._len < self_._cap then
-    buf_push(self_, value)
+  if self._cap > 0 and self._len < self._cap then
+    buf_push(self, value)
     return true
   end
   return nil, "full"
 end
 
+--: (ChanObj) -> (unknown, boolean)
 function Chan:try_recv()
-  local self_ = self --[[:! ChanObj]]
-  if self_._len > 0 then
-    local value = buf_pop(self_)
-    if #self_._send_q > 0 then
-      local sq3_ = self_._send_q
+  if self._len > 0 then
+    local value = buf_pop(self)
+    if #self._send_q > 0 then
+      local sq3_ = self._send_q
       local raw_e3 = sq3_[1] --[[:! SendEntry]]
       sq3_[1] = nil; for ii=1,#sq3_-1 do sq3_[ii]=sq3_[ii+1] end; sq3_[#sq3_]=nil
-      buf_push(self_, raw_e3.value)
+      buf_push(self, raw_e3.value)
       local eco = raw_e3.co --[[:! Thread]]
       local ok, err = co_resume(eco)
       if not ok then error(err) end
     end
     return value, true
   end
-  if #self_._send_q > 0 then
-    local sq4_ = self_._send_q
+  if #self._send_q > 0 then
+    local sq4_ = self._send_q
     local raw_e4 = sq4_[1] --[[:! SendEntry]]
     sq4_[1] = nil; for ii=1,#sq4_-1 do sq4_[ii]=sq4_[ii+1] end; sq4_[#sq4_]=nil
     local value = raw_e4.value
@@ -234,10 +232,10 @@ function Chan:try_recv()
     if not ok then error(err) end
     return value, true
   end
-  if self_._closed then
+  if self._closed then
     return nil, false
   end
-  return nil, false, "empty"
+  return nil, false
 end
 
 -- ── state queries ─────────────────────────────────────────────────────────────
