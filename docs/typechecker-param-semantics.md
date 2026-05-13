@@ -1,8 +1,8 @@
 # Unannotated parameter semantics
 
 **Status:** Decided 2026-05. Going with Option 4 (inference + warning + autofix).
-See "Chosen direction" at bottom. Phase A and B landed (commits `c43bd439`,
-`a61c7cbb`); Phase C deferred — see TODO.md.
+See "Chosen direction" at bottom. Phases A, B, and C all landed (Phase A:
+commit `c43bd439`; Phase B: `a61c7cbb`; Phase C: this commit).
 
 # Original framing (preserved for context)
 

@@ -1478,6 +1478,10 @@ end
 gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line, fn_def_col)
     local fn_scope = env_mod.child(ctx.scope)
     local param_tids = {} --: { [integer]: integer, ... }
+    -- Track the starting index of unannotated-param records added by this
+    -- gen_function call so we can patch fn_tid / param_idx in after the
+    -- function type is constructed (Phase C autofix metadata).
+    local inferred_start = (ctx._inferred_params and #ctx._inferred_params or 0) --[[: integer]]
 
     local has_ann_fn = ann_fn_tid ~= nil
     -- body_ann_fn_tid: the annotation function type used for body checking.
@@ -1522,10 +1526,12 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
                     ctx._inferred_param_tid[body_pt_id] = true
                     ctx._inferred_params = ctx._inferred_params or {}
                     ctx._inferred_params[#ctx._inferred_params + 1] = {
-                        name_id = name_id,
-                        var_tid = body_pt_id,
-                        fn_line = fn_def_line,
-                        fn_col  = fn_def_col,
+                        name_id   = name_id,
+                        var_tid   = body_pt_id,
+                        fn_line   = fn_def_line,
+                        fn_col    = fn_def_col,
+                        param_idx = i,
+                        -- fn_tid filled in after make_func below.
                     }
                 end
                 env_mod.bind(fn_scope, name_id, body_pt_id)
@@ -1562,10 +1568,12 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
             ctx._inferred_param_tid[pt_id] = true
             ctx._inferred_params = ctx._inferred_params or {}
             ctx._inferred_params[#ctx._inferred_params + 1] = {
-                name_id = name_id,
-                var_tid = pt_id,
-                fn_line = fn_def_line,
-                fn_col  = fn_def_col,
+                name_id   = name_id,
+                var_tid   = pt_id,
+                fn_line   = fn_def_line,
+                fn_col    = fn_def_col,
+                param_idx = i,
+                -- fn_tid filled in after make_func below.
             }
             param_tids[#param_tids + 1] = pt_id
         end
@@ -1691,6 +1699,14 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
     local param_name_ids = {}
     for i = 0, pl - 1 do param_name_ids[i + 1] = ctx.ast_lists:get(ps + i) end
     local fn_tid = types_mod.make_func(ctx, param_tids, returns, vararg_id, param_name_ids)
+
+    -- Phase C: patch fn_tid into unannotated-param records added during this
+    -- gen_function call so the post-pass can render full signatures.
+    if ctx._inferred_params and inferred_start < #ctx._inferred_params then
+        for j = inferred_start + 1, #ctx._inferred_params do
+            ctx._inferred_params[j].fn_tid = fn_tid
+        end
+    end
 
     -- Propagate type/assertion predicate from the annotation type ID to the runtime
     -- fn_tid so that narrow.lua / constrain.lua can look it up by the bound type ID.

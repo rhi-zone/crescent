@@ -1584,9 +1584,23 @@ local function solve_callable(ctx, c)
             end
         end
         for i = 0, pl - 1 do
-            local exp_tid = find(ctx, ctx.lists:get(callee_t.data[0] + i))
+            local raw_param_tid = ctx.lists:get(callee_t.data[0] + i)
+            local exp_tid = find(ctx, raw_param_tid)
             local act_tid = arg_tids[i + 1]
             if act_tid then
+                -- Phase C: record per-call-site arg for unannotated-param autofix.
+                -- Recording happens BEFORE the unify attempt so that callers whose
+                -- types the solver subsequently rejects are still counted.
+                if ctx._inferred_param_tid
+                    and ctx._inferred_param_tid[raw_param_tid] then
+                    ctx._inferred_param_callsites = ctx._inferred_param_callsites or {}
+                    local cs = ctx._inferred_param_callsites[raw_param_tid]
+                    if not cs then
+                        cs = {}
+                        ctx._inferred_param_callsites[raw_param_tid] = cs
+                    end
+                    cs[#cs + 1] = { line = line, col = col, arg_tid = act_tid }
+                end
                 -- Fast path: try direct assignability (preserves literal-to-literal/union).
                 -- Skip when exp_tid contains free vars: try_unify is read-only and won't bind them.
                 -- Skip for closed table params: the full unify path enforces the excess-field check.
@@ -2223,9 +2237,23 @@ local function solve_check_args(ctx, c)
             end
         end
         for i = 0, pl - 1 do
-            local exp_tid = find(ctx, ctx.lists:get(callee_t.data[0] + i))
+            local raw_param_tid = ctx.lists:get(callee_t.data[0] + i)
+            local exp_tid = find(ctx, raw_param_tid)
             local act_tid = arg_tids[i + 1]
             if act_tid then
+                -- Phase C: record per-call-site arg for unannotated-param autofix.
+                -- Recording happens BEFORE the unify attempt so that callers whose
+                -- types the solver subsequently rejects are still counted.
+                if ctx._inferred_param_tid
+                    and ctx._inferred_param_tid[raw_param_tid] then
+                    ctx._inferred_param_callsites = ctx._inferred_param_callsites or {}
+                    local cs = ctx._inferred_param_callsites[raw_param_tid]
+                    if not cs then
+                        cs = {}
+                        ctx._inferred_param_callsites[raw_param_tid] = cs
+                    end
+                    cs[#cs + 1] = { line = line, col = col, arg_tid = act_tid }
+                end
                 -- Fast path: try direct assignability (preserves literal-to-literal/union).
                 local act_r = find(ctx, act_tid)
                 local et = ctx.types:get(exp_tid)
@@ -2599,6 +2627,343 @@ end
 -- _overlap_byte_range maps (line, col) → {byte_start, byte_end} of the cast comment,
 -- set by constrain.lua at NODE_CAST_EXPR emit so solve_overlap can attach an autofix.
 --:: augment Ctx { _overlap_byte_range?: { [integer]: { [integer]: integer } } }
+-- _inferred_param_callsites maps param-var tid → list of {line, col, arg_tid}
+-- recorded at every call site where the param appears as an argument target.
+-- Populated by solve_callable / solve_check_args; consumed by Phase C autofix.
+--:: augment Ctx { _inferred_param_callsites?: { [integer]: { [integer]: { line: integer, col: integer, arg_tid: integer }, ... }, ... } }
+
+-- Return the 0-indexed byte offset of the start of `line_num` (1-indexed) in `source`.
+-- Returns nil if line_num is out of range.
+--: (string, integer) -> integer | nil
+local function line_start_byte(source, line_num)
+    if line_num <= 0 then return nil end
+    if line_num == 1 then return 0 end
+    local i = 1
+    local n = 1
+    local len = #source
+    while i <= len do
+        local nl = source:find("\n", i, true) --[[: integer | nil]]
+        if not nl then return nil end
+        n = n + 1
+        -- nl is 1-indexed pos of "\n"; the byte offset (0-indexed) of the
+        -- start of the NEXT line is `nl` (since the char after "\n" is at
+        -- 1-indexed pos nl+1, which is 0-indexed offset nl).
+        if n == line_num then return nl end
+        i = nl + 1
+    end
+    return nil
+end
+
+-- Return the substring of `source` corresponding to line `line_num`
+-- (1-indexed; excluding trailing newline). Returns "" if out of range.
+--: (string, integer) -> string
+local function get_line(source, line_num)
+    local start_b = line_start_byte(source, line_num)
+    if not start_b then return "" end
+    -- start_b is 0-indexed byte offset; Lua sub is 1-indexed.
+    local s = start_b + 1
+    local e = source:find("\n", s, true)
+    if not e then return source:sub(s) end
+    return source:sub(s, e - 1)
+end
+
+-- Walk a TAG_NAMED chain to verify all named references are resolvable in scope.
+-- Returns true if every TAG_NAMED encountered has a binding in ctx.scope's
+-- type aliases. Used by Phase C to decide whether to render with alias names
+-- (option iii) or fall back to a structural rendering.
+--: (Ctx, integer, { [integer]: boolean, ... }) -> boolean
+local function aliases_in_scope(ctx, tid, seen)
+    tid = find(ctx, tid)
+    if seen[tid] then return true end
+    seen[tid] = true
+    local t = ctx.types:get(tid)
+    local tag = t.tag
+    if tag == TAG_NAMED then
+        if not env_mod.lookup_type(ctx.scope, t.data[0]) then return false end
+        local al = t.data[2]
+        for i = t.data[1], t.data[1] + al - 1 do
+            if not aliases_in_scope(ctx, ctx.lists:get(i), seen) then return false end
+        end
+        return true
+    end
+    if tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            if not aliases_in_scope(ctx, ctx.lists:get(i), seen) then return false end
+        end
+        return true
+    end
+    if tag == TAG_FUNCTION then
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            if not aliases_in_scope(ctx, ctx.lists:get(i), seen) then return false end
+        end
+        for i = t.data[2], t.data[2] + t.data[3] - 1 do
+            if not aliases_in_scope(ctx, ctx.lists:get(i), seen) then return false end
+        end
+        if t.data[4] >= 0 then
+            if not aliases_in_scope(ctx, t.data[4], seen) then return false end
+        end
+        return true
+    end
+    if tag == TAG_TABLE then
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            local fid = ctx.lists:get(i)
+            local fe = ctx.fields:get(fid)
+            if not aliases_in_scope(ctx, fe.type_id, seen) then return false end
+        end
+        local is, il = t.data[2], t.data[3]
+        local ix = is
+        while ix < is + il - 1 do
+            if not aliases_in_scope(ctx, ctx.lists:get(ix), seen) then return false end
+            if not aliases_in_scope(ctx, ctx.lists:get(ix + 1), seen) then return false end
+            ix = ix + 2
+        end
+        return true
+    end
+    return true
+end
+
+-- Render a type as a `--:`-parseable string for the Phase C autofix.
+-- Uses display_short for now; if any TAG_NAMED reference is not resolvable
+-- in the destination file's scope (option iii fallback), returns nil so the
+-- caller suppresses the autofix for safety. The warning still fires.
+--: (Ctx, integer) -> string | nil
+local function render_for_annotation(ctx, tid)
+    if not aliases_in_scope(ctx, tid, {}) then return nil end
+    local s = types_mod.display(ctx, tid)
+    -- Refuse anonymous/leaky shapes that won't round-trip through ann.lua.
+    if s:find("?", 1, true) or s:find("_", 1, true) == 1 then return nil end
+    -- The TAG_VAR display ("_") and TAG_ROWVAR display ("..._") are not
+    -- valid annotation source; treat as unrenderable.
+    if s == "_" or s:find("...", 1, true) then
+        -- "..." is fine inside open-table markers; only reject when used as
+        -- a bare row-var rendering. Detect "..._" pattern.
+        if s:find("..._", 1, true) then return nil end
+    end
+    return s
+end
+
+-- Compose the modal-or-union representative for a list of widened tids.
+-- Returns the rendered string and the count of contributing call sites.
+-- If any rendering fails, returns nil.
+--: (Ctx, { [integer]: integer, ... }) -> string | nil
+local function combine_inferred(ctx, widened_tids)
+    if #widened_tids == 0 then return nil end
+    -- Count by rendered string (canonicalizes equal types).
+    local counts = {} --: { [string]: integer, ... }
+    local order = {} --: { [integer]: string, ... }
+    local total = 0
+    for _, tid in ipairs(widened_tids) do
+        local s = render_for_annotation(ctx, tid)
+        if not s then return nil end
+        if counts[s] then
+            counts[s] = counts[s] + 1
+        else
+            counts[s] = 1
+            order[#order + 1] = s
+        end
+        total = total + 1
+    end
+    if #order == 1 then return order[1] end
+    -- Modal: find the most-frequent rendering; require ≥80% AND strictly
+    -- dominant (modal count > next-most-frequent count).
+    local best, best_n, second_n = nil, 0, 0
+    for _, s in ipairs(order) do
+        local n = counts[s]
+        if n > best_n then
+            second_n = best_n
+            best, best_n = s, n
+        elseif n > second_n then
+            second_n = n
+        end
+    end
+    if best and best_n * 5 >= total * 4 and best_n > second_n then
+        return best
+    end
+    -- Otherwise: union of distinct rendered types (sorted for determinism).
+    table.sort(order)
+    return table.concat(order, " | ")
+end
+
+-- Emit MISSING_PARAM_ANNOTATION warnings + Phase C autofix payloads.
+--: (Ctx, ErrCtx, string) -> ()
+local function emit_missing_param_annotation(ctx, real_err, sev)
+    -- Group records by function (keyed by fn_line, fn_col, fn_tid).
+    --: { [string]: { recs: { [integer]: { name_id: integer, var_tid: integer, fn_line: integer, fn_col: integer, param_idx: integer, fn_tid: integer, ... }, ... }, fn_tid: integer, fn_line: integer, fn_col: integer }, ... }
+    local groups = {}
+    local order = {} --: { [integer]: string, ... }
+    for _, rec in ipairs(ctx._inferred_params) do
+        local key = tostring(rec.fn_line or 0) .. ":" .. tostring(rec.fn_col or 0)
+            .. ":" .. tostring(rec.fn_tid or 0)
+        local g = groups[key]
+        if not g then
+            g = { recs = {}, fn_tid = rec.fn_tid, fn_line = rec.fn_line, fn_col = rec.fn_col }
+            groups[key] = g
+            order[#order + 1] = key
+        end
+        g.recs[#g.recs + 1] = rec
+    end
+
+    -- Dedup per-param warning emissions across re-checks.
+    local seen_warn = {}
+
+    for _, key in ipairs(order) do
+        local g = groups[key]
+        -- Sort params by index for deterministic rendering. Insertion sort
+        -- in place to avoid wrestling with table.sort's generic constraint
+        -- inference on a dynamically-typed record list.
+        for i = 2, #g.recs do
+            local cur = g.recs[i]
+            local cur_idx = cur.param_idx or 0
+            local j = i - 1
+            while j >= 1 and (g.recs[j].param_idx or 0) > cur_idx do
+                g.recs[j + 1] = g.recs[j]
+                j = j - 1
+            end
+            g.recs[j + 1] = cur
+        end
+
+        -- Compute per-param state: bound type and renderable string (modal/union).
+        local param_renders = {} --: { [integer]: string | nil, ... }
+        local any_actionable = false
+        local all_have_callers = true
+        local first_entry = nil
+        for pi, rec in ipairs(g.recs) do
+            local bound = find(ctx, rec.var_tid)
+            local bt = ctx.types:get(bound)
+            local actionable = bt.tag ~= TAG_VAR and bt.tag ~= TAG_ROWVAR
+                and bt.tag ~= TAG_UNKNOWN and bt.tag ~= TAG_ANY
+            if actionable then
+                any_actionable = true
+                local wkey = (rec.fn_line or 0) * 100000 + (rec.fn_col or 0) + rec.name_id * 1e9
+                if not seen_warn[wkey] then
+                    seen_warn[wkey] = true
+                    local name = intern_mod.get(ctx.pool, rec.name_id) or "?"
+                    local inferred_str = types_mod.display_short(ctx, bound)
+                    local msg = errors_mod.format_diag(
+                        defs.E.MISSING_PARAM_ANNOTATION,
+                        { name = name, inferred = inferred_str })
+                    local entry
+                    if sev == "error" then
+                        entry = errors_mod.error(real_err, ctx.filename,
+                            rec.fn_line or 0, rec.fn_col or 0, msg)
+                    else
+                        entry = errors_mod.warning(real_err, ctx.filename,
+                            rec.fn_line or 0, rec.fn_col or 0, msg)
+                    end
+                    if not first_entry then first_entry = entry end
+                end
+            end
+            -- Modal-or-union: build the rendered string from recorded call sites.
+            local sites = ctx._inferred_param_callsites
+                and ctx._inferred_param_callsites[rec.var_tid]
+            if not sites or #sites == 0 then
+                all_have_callers = false
+                param_renders[pi] = nil
+            else
+                local widened = {}
+                for _, s in ipairs(sites) do
+                    widened[#widened + 1] = find(ctx, widen_for_sub(ctx, s.arg_tid))
+                end
+                local rendered = combine_inferred(ctx, widened)
+                if not rendered then
+                    all_have_callers = false  -- treat unrenderable as "can't autofix"
+                end
+                param_renders[pi] = rendered
+            end
+        end
+
+        -- Autofix preconditions:
+        --   1. At least one param has an actionable warning to attach the fix to.
+        --   2. Every param has at least one recorded caller (full signature).
+        --   3. ctx.source available.
+        --   4. fn_tid available (return type rendering).
+        --   5. Preceding non-blank line is not `--:` / `--::`.
+        if not any_actionable or not all_have_callers or not first_entry
+            or not ctx.source or not g.fn_tid or not g.fn_line then
+            -- nothing more to do for this group
+        else
+            -- Render return type from fn_tid.
+            local fn_t = ctx.types:get(find(ctx, g.fn_tid))
+            local ret_s
+            if fn_t.tag == TAG_FUNCTION then
+                local rl = fn_t.data[3]
+                if rl == 0 then
+                    ret_s = "()"
+                elseif rl == 1 then
+                    local rid = find(ctx, ctx.lists:get(fn_t.data[2]))
+                    -- A still-free return TV becomes TAG_NIL by post-pass
+                    -- semantics elsewhere; for our purposes, render as `nil`
+                    -- when free. This is the same behavior the runtime would
+                    -- exhibit for a `return` statement that never executes
+                    -- on a code path.
+                    local rt = ctx.types:get(rid)
+                    if rt.tag == TAG_VAR or rt.tag == TAG_ROWVAR then
+                        ret_s = "nil"
+                    else
+                        ret_s = render_for_annotation(ctx, rid)
+                    end
+                else
+                    local parts = {} --: { [integer]: string, ... }
+                    local parts_ok = true
+                    for i = fn_t.data[2], fn_t.data[2] + rl - 1 do
+                        local part = render_for_annotation(ctx, find(ctx, ctx.lists:get(i)))
+                        if not part then parts_ok = false; break end
+                        parts[#parts + 1] = part
+                    end
+                    if parts_ok then ret_s = "(" .. table.concat(parts, ", ") .. ")" end
+                end
+            end
+            if ret_s then
+                local ret_str = ret_s --[[: string]]
+                -- Build params section.
+                local pparts = {} --: { [integer]: string, ... }
+                local ok = true
+                for pi = 1, #g.recs do
+                    local r = param_renders[pi]
+                    if not r then ok = false; break end
+                    pparts[pi] = r --[[: string]]
+                end
+                if ok then
+                    local sig = "(" .. table.concat(pparts, ", ") .. ") -> " .. ret_str
+                    -- Check the preceding non-blank line for existing annotation.
+                    local fn_line = g.fn_line
+                    local skip_autofix = false
+                    local probe = fn_line - 1
+                    while probe >= 1 do
+                        local line_s = get_line(ctx.source, probe)
+                        if line_s:find("%S") then
+                            -- Non-blank: reject if already annotated.
+                            if line_s:find("%-%-:") or line_s:find("%-%-::") then
+                                skip_autofix = true
+                            end
+                            break
+                        end
+                        probe = probe - 1
+                    end
+                    if not skip_autofix then
+                        local insert_at = line_start_byte(ctx.source, fn_line)
+                        if insert_at then
+                            -- Match the indentation of the function-def line.
+                            local target_line = get_line(ctx.source, fn_line)
+                            local indent = target_line:match("^[ \t]*") or ""
+                            local replacement = indent .. "--: " .. sig .. "\n"
+                            first_entry.fix = {
+                                kind = "safe",
+                                rule = "missing_param_annotation",
+                                edits = { {
+                                    byte_start  = insert_at,
+                                    byte_end    = insert_at,
+                                    replacement = replacement,
+                                } },
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
 -- any: constraints is a list of heterogeneous arrays — see solve_unify comment.
 --: (Ctx, { [integer]: { [integer]: unknown, ... }, ... }) -> ()
 function M.solve(ctx, constraints)
@@ -2757,13 +3122,22 @@ function M.solve(ctx, constraints)
     ctx.err = real_err
     rawset(ctx, "_constraints", nil)  -- rawset: field type doesn't accept nil directly
 
-    -- Post-pass: MISSING_PARAM_ANNOTATION (Phase B).
+    -- Post-pass: MISSING_PARAM_ANNOTATION (Phase B) + autofix (Phase C).
     -- For each unannotated function parameter whose type was inferred from
     -- caller-side bindings (not an annotation), emit a warning at the
     -- function-def site. Skip when the inferred type is still a free var
     -- (no callers exercised the param) or resolves to unknown/any (we have
     -- nothing actionable to suggest). Severity is configurable via the
     -- linting `missing_param_annotation` rule.
+    --
+    -- Phase C: when every param in the function has at least one recorded
+    -- caller, render the inferred signature `--: (T1, ..., TN) -> R` and
+    -- attach it as a safe autofix to the first param's warning entry.
+    -- Modal-or-union selection: single distinct widened type → write it;
+    -- modal ≥80% and strictly dominant → write the modal; otherwise → write
+    -- the union of distinct widened types. Outliers continue to error at
+    -- their call sites (CALL_ARG_MISMATCH path), making typo-vs-legitimate
+    -- callers self-localizing.
     local rd2 = defs.rule_defaults --[[:! { [integer]: { name: string, severity: string }, ... }]]
     local rd_entry = rd2[defs.E.MISSING_PARAM_ANNOTATION]
     if ctx._inferred_params and rd_entry then
@@ -2773,33 +3147,7 @@ function M.solve(ctx, constraints)
         local allow = rc_mod.allow_patterns(defs.E.MISSING_PARAM_ANNOTATION, rc, rd2)
         local suppressed = sev == "off" or rc_mod.is_allowed(ctx.filename, allow)
         if not suppressed then
-            -- Dedup by (line, col, name_id) so re-checks don't emit twice.
-            local seen = {}
-            for _, rec in ipairs(ctx._inferred_params) do
-                local bound = find(ctx, rec.var_tid)
-                local bt = ctx.types:get(bound)
-                -- Skip if still free (no caller) or trivially unknown/any.
-                local actionable = bt.tag ~= TAG_VAR and bt.tag ~= TAG_ROWVAR
-                    and bt.tag ~= TAG_UNKNOWN and bt.tag ~= TAG_ANY
-                if actionable then
-                    local key = (rec.fn_line or 0) * 100000 + (rec.fn_col or 0) + rec.name_id * 1e9
-                    if not seen[key] then
-                        seen[key] = true
-                        local name = intern_mod.get(ctx.pool, rec.name_id) or "?"
-                        local inferred_str = types_mod.display_short(ctx, bound)
-                        local msg = errors_mod.format_diag(
-                            defs.E.MISSING_PARAM_ANNOTATION,
-                            { name = name, inferred = inferred_str })
-                        if sev == "error" then
-                            errors_mod.error(real_err, ctx.filename,
-                                rec.fn_line or 0, rec.fn_col or 0, msg)
-                        else
-                            errors_mod.warning(real_err, ctx.filename,
-                                rec.fn_line or 0, rec.fn_col or 0, msg)
-                        end
-                    end
-                end
-            end
+            emit_missing_param_annotation(ctx, real_err, sev)
         end
     end
 end

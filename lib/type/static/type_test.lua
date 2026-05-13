@@ -10981,6 +10981,78 @@ local y = x
             "has no annotation")
     end)
 
+    -- ---------------------------------------------------------------------
+    -- Phase C: autofix payload on MISSING_PARAM_ANNOTATION
+    -- ---------------------------------------------------------------------
+
+    -- Find the first warning carrying a missing_param_annotation autofix.
+    -- ec is the ErrCtx returned by check_string; we narrow to the fix entry.
+    --:: FixEdit = { byte_start: integer, byte_end: integer, replacement: string, ... }
+    --:: MpaFix  = { rule?: string, edits?: { [integer]: FixEdit, ... }, ... }
+    --:: MpaWarn = { fix?: MpaFix, ... }
+    --:: MpaEc   = { warnings: { [integer]: MpaWarn, ... }, ... }
+    --: (MpaEc) -> FixEdit | nil
+    local function find_mpa_fix(ec)
+        for _, w in ipairs(ec.warnings) do
+            local fix = w.fix
+            if fix and fix.rule == "missing_param_annotation" and fix.edits then
+                local e = fix.edits[1]
+                if e then return e end
+            end
+        end
+        return nil
+    end
+
+    assert.it("missing_param_annotation autofix: single string caller writes `--: (string) -> string`", function()
+        local ec = check("local function greet(s) return s .. '!' end\ngreet('alice')\n")
+        local e = find_mpa_fix(ec)
+        if not e then error("expected a missing_param_annotation fix payload", 2) end
+        -- Insertion (byte_start == byte_end), at top of file (offset 0), exact text.
+        assert.eq(e.byte_start, 0)
+        assert.eq(e.byte_end, 0)
+        assert.eq(e.replacement, "--: (string) -> string\n")
+    end)
+
+    assert.it("missing_param_annotation autofix: multiple same-type callers writes that type", function()
+        local ec = check("local function f(x) return x end\nf('a'); f('b'); f('c')\n")
+        local e = find_mpa_fix(ec)
+        if not e then error("expected a fix payload", 2) end
+        assert.eq(e.replacement, "--: (string) -> string\n")
+    end)
+
+    assert.it("missing_param_annotation autofix: 50/50 split writes the union", function()
+        local ec = check("local function f(x) return tostring(x) end\nf('a'); f(1)\n")
+        local e = find_mpa_fix(ec)
+        if not e then error("expected a fix payload", 2) end
+        -- Two distinct types, neither modal (1 each, 50/50 < 80%): union.
+        -- Note: x is bound to the first caller's type (string), but the
+        -- recorded second-caller arg still contributes to the union.
+        assert.eq(e.replacement, "--: (integer | string) -> string\n")
+    end)
+
+    assert.it("missing_param_annotation autofix: 9 string + 1 integer picks modal `string`", function()
+        local src = "local function f(x) return x end\n" ..
+            "f('a'); f('b'); f('c'); f('d'); f('e'); f('f'); f('g'); f('h'); f('i'); f(1)\n"
+        local ec = check(src)
+        local e = find_mpa_fix(ec)
+        if not e then error("expected a fix payload", 2) end
+        assert.eq(e.replacement, "--: (string) -> string\n")
+        -- Outlier still errors at the call site (CALL_ARG_MISMATCH).
+        local msg = errors_mod.format_plain(ec)
+        if not msg:find("cannot pass `1`") then
+            error("expected outlier integer caller to error normally; got:\n" .. msg, 2)
+        end
+    end)
+
+    assert.it("missing_param_annotation autofix: skipped when preceding line already has `--::`", function()
+        -- `--::` on the line above is treated as an existing annotation comment;
+        -- the autofix is suppressed to avoid mangling it. The warning may still
+        -- fire (its emission is independent of the autofix payload).
+        local ec = check("--:: declare q = string\nlocal function f(x) return x end\nf('a')\n")
+        local e = find_mpa_fix(ec)
+        if e then error("expected no autofix payload when prior `--::` exists", 2) end
+    end)
+
     assert.it("E2: --[[:! T]] redundant force cast on typed function return emits REDUNDANT_CAST", function()
         -- When a function is declared to return T and the call site uses --[[:! T]],
         -- the cast is redundant — REDUNDANT_CAST (error) fires even though the
