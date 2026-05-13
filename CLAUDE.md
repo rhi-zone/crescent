@@ -176,13 +176,19 @@ Never silently work around a hang (skip the file, longer timeout, batch differen
 
 ## Context Management
 
-**Subagent prompts for git work must include: clone the repo locally, verify `git config user.name` and `git config user.email` match the target account before committing, commit with git directly, push with git. Never instruct subagents to use `gh api` to create commits — it bypasses git config and produces wrong authorship.**
+**Delegation criterion: poison risk, not uncertainty.** The question before spawning a subagent is "will doing this in the main thread flood my context with material I don't need to retain?" — not "am I unsure how to do this?" Exploration (broad search, reading many files to find something, scanning logs) almost always delegates: the byproduct is context noise regardless of how confident you are in the search. Uncertain *implementation* work does the opposite — it stays with the orchestrator until the spec is solid, because a delegated agent inherits the prompt as ground truth and burns quota proving wrong premises. If you don't know what to build, talk to the user; don't launder the uncertainty into a subagent prompt.
 
 **Subagent prompts must have a hard scope.** Every delegation prompt must specify exactly what the agent should do and when to stop — not "fix what you can" but "fix these N files, then stop." Open-ended prompts ("fix the clearly quick ones", "clean up what you find") produce agents that run for hours burning quota. If the scope is genuinely open-ended, break it into explicit batches before delegating.
 
 **Never pre-load the answer in a delegation prompt.** Don't write "verify that X works" or "claim to verify: X" — write "what does X do?" or "find out whether X works". Pre-baked hypotheses in the prompt teach the agent to confirm, not investigate. If you have a hypothesis, name it as a hypothesis the agent should *attempt to falsify*, not as a thing to verify.
 
+**Subagent prompts for git work must include: clone the repo locally, verify `git config user.name` and `git config user.email` match the target account before committing, commit with git directly, push with git. Never instruct subagents to use `gh api` to create commits — it bypasses git config and produces wrong authorship.**
+
 **"X works" and "X doesn't work" are claims of equal weight. Both require runnable evidence.** A claim grounded in code-tracing without a paste-able command and its output is a hypothesis, not a finding. If your investigation concluded "Y doesn't work" and you didn't actually run Y, your conclusion may be wrong — say so explicitly. The cost of running a 5-line `bin/cr check` repro is always lower than the cost of a wrong report.
+
+**Corrections are conversation, not file edits.** When the user corrects you, acknowledge and adjust in-thread — do not reach for CLAUDE.md. A single correction never warrants a rule. Rules encode patterns observed across multiple sessions and multiple corrections; until then, the correction is feedback to act on now, not material to encode. Writing a rule from one data point is how this file accreted contradictions in the first place. If you believe you are seeing a recurring pattern, *say so to the user* and let them decide whether it warrants a rule — do not edit CLAUDE.md unilaterally.
+
+**CLAUDE.md has a soft 300-line budget. New rules require a removal or a collapse.** Adding a rule that pushes the file over 300 lines means identifying a rule to delete or merge in the same change — no exceptions, no "but this one is genuinely new." If you can't find anything to remove, the new rule is probably not load-bearing enough to add. The line count is a forcing function: the file must remain small enough to internalize in one read, and monotonic growth defeats that. Reductions that fit existing rules together more tightly are always welcome and never need a counterweighting addition.
 
 ## Commit Convention
 
