@@ -1,4 +1,10 @@
-# Unannotated parameter semantics — open question
+# Unannotated parameter semantics
+
+**Status:** Decided 2026-05. Going with Option 4 (inference + warning + autofix).
+See "Chosen direction" at bottom. Phase A and B landed (commits `c43bd439`,
+`a61c7cbb`); Phase C deferred — see TODO.md.
+
+# Original framing (preserved for context)
 
 ## Context
 
@@ -81,12 +87,55 @@ This rules out a fourth option that might seem tempting — "leave params as
 fresh vars but require narrowing in the body before use." That is option 1
 with a worse error location.
 
-## What's not decided
+## Chosen direction: Option 4 — inference + warning + autofix
 
-Which option to take. The choice belongs to the user, not the session
-implementing the fix. A session arriving at this work should read this note,
-understand the trade-offs, present the choice freshly to the user — and not
-commit to one unilaterally.
+User chose a fifth option in 2026-05: keep usage-driven inference for
+unannotated params, but surface each inferred param as a warning at the
+function-def site, plus (eventually) an autofix that writes the inferred
+signature back. This preserves the convenience of inferred params while
+making them visible and self-healing.
+
+Three mechanisms, all landing at the function-def site:
+
+1. **Track unannotated-param origin on type vars.** `constrain.lua` records
+   each fresh `TAG_VAR` for an unannotated param in `ctx._inferred_param_tid`
+   (set) and `ctx._inferred_params` (per-fn metadata: name_id, var_tid,
+   fn_line, fn_col). Solver behavior is unchanged — these are post-pass
+   metadata only, not solver predicates.
+
+2. **REDUNDANT_CAST classifier guard** (Phase A, commit `c43bd439`).
+   `solve_overlap` checks whether the raw constraint LHS tid is in
+   `_inferred_param_tid`. If so, the cast asserts a type that was inferred
+   from callers, not annotated — neither REDUNDANT_CAST (would strip the
+   only explicit assertion) nor FORCE_CAST is right. Suppress both.
+
+3. **MISSING_PARAM_ANNOTATION diagnostic** (Phase B, commit `a61c7cbb`).
+   Post-pass walk over `ctx._inferred_params`. For each param whose var
+   got bound to a concrete type (not free var, unknown, or any), emit a
+   warning at the function-def site listing the inferred type. Suppressed
+   when the linting config disables `missing_param_annotation`, when no
+   callers bound the param, or when the inferred type is unknown/any.
+
+4. **Autofix + modal inference + outlier detection** (Phase C, deferred).
+   Plan called for autofix that writes `--: (T1, ..., TN) -> R` above the
+   function, using the *modal* type across call sites (≥80% threshold,
+   strictly more frequent than alternatives), with a separate
+   `PARAM_INFERENCE_OUTLIER` warning at minority call sites. The current
+   solver does not maintain per-call-site bindings — `solve_sub` destructively
+   binds the param var to a single type. Implementing modal inference
+   requires either (a) a non-destructive variant of `solve_sub` for inferred
+   params that records per-call-site bindings into a side table, or
+   (b) recording (call_site_line, arg_tid) tuples on C_SUB at constraint-
+   emit time and aggregating post-pass. Tracked in TODO.md.
+
+## Rejected alternatives
+
+The original options 1-3 were considered and rejected for the reasons above:
+Option 1 (`unknown` default) and Option 2 (hard error at def site) both
+produce a corpus-wide surge of errors on first run with no migration path;
+Option 3 (HM generalization) is a substantial typechecker change and may
+produce confusing errors for non-generic functions. Option 4 is a strictly
+additive change layered over the existing inference behavior.
 
 ## Related files
 
