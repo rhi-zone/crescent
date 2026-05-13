@@ -2722,23 +2722,100 @@ local function aliases_in_scope(ctx, tid, seen)
     return true
 end
 
+-- Reject types whose annotation rendering would contain a free type variable
+-- at any nesting level (e.g. `{ gsub: _ }` from a partial method-call shape).
+-- TAG_VAR / TAG_ROWVAR at any depth, except FLAG_SKOLEM (which represents
+-- a generic parameter and is intentional), are disqualifying.
+--: (Ctx, integer, { [integer]: boolean, ... }) -> boolean
+local function has_free_var(ctx, tid, seen)
+    tid = find(ctx, tid)
+    if seen[tid] then return false end
+    seen[tid] = true
+    local t = ctx.types:get(tid)
+    local tag = t.tag
+    if tag == TAG_VAR or tag == TAG_ROWVAR then
+        local bit_mod = require("bit")
+        if bit_mod.band(t.flags, defs.FLAG_SKOLEM) ~= 0 then return false end
+        return true
+    end
+    if tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            if has_free_var(ctx, ctx.lists:get(i), seen) then return true end
+        end
+        return false
+    end
+    if tag == TAG_FUNCTION then
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            if has_free_var(ctx, ctx.lists:get(i), seen) then return true end
+        end
+        for i = t.data[2], t.data[2] + t.data[3] - 1 do
+            if has_free_var(ctx, ctx.lists:get(i), seen) then return true end
+        end
+        if t.data[4] >= 0 and has_free_var(ctx, t.data[4], seen) then return true end
+        return false
+    end
+    if tag == TAG_TABLE then
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            local fid = ctx.lists:get(i)
+            local fe = ctx.fields:get(fid)
+            if has_free_var(ctx, fe.type_id, seen) then return true end
+        end
+        return false
+    end
+    return false
+end
+
+-- Deep-widen literals in compound types. Returns a new tid where every
+-- TAG_LITERAL inside tuples / functions / unions / intersections has been
+-- replaced with its base type. Tables are left untouched (their field types
+-- are part of the structural contract). Used to clean up function return
+-- types like `(nil, "hex string has odd length")` → `(nil, string)` before
+-- rendering as an annotation.
+--: (Ctx, integer, { [integer]: integer, ... }) -> integer
+local function widen_for_annotation(ctx, tid, seen)
+    tid = find(ctx, tid)
+    if seen[tid] then return tid end
+    local t = ctx.types:get(tid)
+    local tag = t.tag
+    if tag == TAG_LITERAL then return types_mod.widen(ctx, tid) end
+    if tag == TAG_UNION then
+        seen[tid] = tid
+        local members = {} --: { [integer]: integer, ... }
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            members[#members + 1] = widen_for_annotation(ctx, ctx.lists:get(i), seen)
+        end
+        seen[tid] = nil
+        return types_mod.make_union(ctx, members)
+    end
+    if tag == TAG_TUPLE then
+        seen[tid] = tid
+        local parts = {} --: { [integer]: integer, ... }
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            parts[#parts + 1] = widen_for_annotation(ctx, ctx.lists:get(i), seen)
+        end
+        seen[tid] = nil
+        return types_mod.make_tuple(ctx, parts)
+    end
+    return tid
+end
+
 -- Render a type as a `--:`-parseable string for the Phase C autofix.
--- Uses display_short for now; if any TAG_NAMED reference is not resolvable
--- in the destination file's scope (option iii fallback), returns nil so the
--- caller suppresses the autofix for safety. The warning still fires.
+-- Deep-widens literals first, then rejects:
+--   - types containing free TAG_VAR/TAG_ROWVAR at any nesting level
+--   - types whose TAG_NAMED references aren't resolvable in the destination
+--     file's scope (option iii fallback)
+-- Returns nil to signal the caller to suppress the autofix.
 --: (Ctx, integer) -> string | nil
 local function render_for_annotation(ctx, tid)
+    tid = widen_for_annotation(ctx, tid, {})
+    if has_free_var(ctx, tid, {}) then return nil end
     if not aliases_in_scope(ctx, tid, {}) then return nil end
     local s = types_mod.display(ctx, tid)
-    -- Refuse anonymous/leaky shapes that won't round-trip through ann.lua.
+    -- Belt-and-suspenders: the structural checks above should have caught
+    -- these, but keep the string-level guards in case display() emits an
+    -- unexpected token for a shape the checks miss.
     if s:find("?", 1, true) or s:find("_", 1, true) == 1 then return nil end
-    -- The TAG_VAR display ("_") and TAG_ROWVAR display ("..._") are not
-    -- valid annotation source; treat as unrenderable.
-    if s == "_" or s:find("...", 1, true) then
-        -- "..." is fine inside open-table markers; only reject when used as
-        -- a bare row-var rendering. Detect "..._" pattern.
-        if s:find("..._", 1, true) then return nil end
-    end
+    if s == "_" or s:find("..._", 1, true) then return nil end
     return s
 end
 
@@ -2854,11 +2931,27 @@ local function emit_missing_param_annotation(ctx, real_err, sev)
                 end
             end
             -- Modal-or-union: build the rendered string from recorded call sites.
+            -- Fallback: if no callsites were recorded (e.g. an exported function
+            -- with no in-file callers), use the solver's bound type for the var
+            -- — that captures inference from body usage (e.g. `rshift(x, i)`
+            -- binds x to integer via stdlib's rshift signature). The Phase B
+            -- warning already displays this same type; without the fallback,
+            -- the autofix is suppressed exactly where the user most needs it.
             local sites = ctx._inferred_param_callsites
                 and ctx._inferred_param_callsites[rec.var_tid]
             if not sites or #sites == 0 then
-                all_have_callers = false
-                param_renders[pi] = nil
+                if actionable then
+                    local rendered = render_for_annotation(ctx, bound)
+                    if rendered then
+                        param_renders[pi] = rendered
+                    else
+                        all_have_callers = false
+                        param_renders[pi] = nil
+                    end
+                else
+                    all_have_callers = false
+                    param_renders[pi] = nil
+                end
             else
                 local widened = {}
                 for _, s in ipairs(sites) do

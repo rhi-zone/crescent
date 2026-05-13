@@ -455,7 +455,7 @@ local function build_templates()
         --: (TemplateArgs) -> string
         [E.MISSING_PARAM_ANNOTATION] = function(a)
             return "parameter `" .. tostring(a.name) .. "` has no annotation; inferred `"
-                .. tostring(a.inferred) .. "` from call sites \xe2\x80\x94"
+                .. tostring(a.inferred) .. "` from usage \xe2\x80\x94"
                 .. " add a `--: (...) -> ...` annotation above the function"
         end,
     }
