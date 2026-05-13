@@ -75,8 +75,6 @@ Context is poisoned the moment you confidently state something wrong. Retraction
 
 **`docs/inventory_summary.md` is loaded at session start** — it lists what categories of library exist in crescent and roughly what's in each. Read it. **`docs/inventory.md` is the full per-library index** — grep it before designing or implementing anything reusable. If `inventory.md` doesn't list what you're looking for, spot-check `lib/` directly; the index can lag by a commit. **When adding a new library or `_types.lua` file, add a line to `docs/inventory.md` in the same commit. Add a line to `docs/inventory_summary.md` only if the new library belongs to a category not already there.**
 
-**Something unexpected is a signal, not noise.** Stop and ask why before continuing.
-
 **Don't add type aliases that legitimize laziness.** When N annotations fail because they used a vague type name (`table`, `function`, `any`), the fix is to correct each annotation to a specific type — not to add a permissive alias that makes them "pass". The errors are the typechecker doing its job; suppressing them by widening the type system silently accepts wrong code. Same family of mistake as `any` proliferation: reducing the error count is not the goal, accuracy is. If a type alias would change a strict check into a permissive one, do not add it.
 
 **Lua code must not regress typechecking before commit.** The pre-commit hook in `.githooks/pre-commit` enforces this — to activate it, run `git config core.hooksPath .githooks` once per clone (the repo does not auto-activate hooks for safety). For each staged `lib/**/*.lua` file the hook runs `timeout 30 bin/cr check <file>` on both the staged blob and the `HEAD` blob and rejects the commit only when the staged version has MORE errors than `HEAD` (or when a new file has any errors). Pre-existing errors in a file you happen to edit are tolerated. Timeouts always reject. Do not bypass with `--no-verify` — fix the new error or fix the hook.
@@ -174,7 +172,9 @@ Never silently work around a hang (skip the file, longer timeout, batch differen
 
 **When verifying a newly built library, run only that library's test file — not the full suite.** Use `bin/cr test lib/mylib/` or `bin/cr test lib/mylib/mylib_test.lua` directly. Only run the full suite (`bin/cr test`) when checking global regressions.
 
-## Context Management
+## Context Is The Only Scarce Resource
+
+Every byte that enters the main session stays in the main session for its entire lifetime. File contents, command output, search results, page text — once read, it lingers in cache and shapes every downstream token. There is no "just looking." Renaming the activity ("quick check", "spot read") does not change what it is.
 
 **Delegation criterion: poison risk, not uncertainty.** The question before spawning a subagent is "will doing this in the main thread flood my context with material I don't need to retain?" — not "am I unsure how to do this?" Exploration (broad search, reading many files to find something, scanning logs) almost always delegates: the byproduct is context noise regardless of how confident you are in the search. Uncertain *implementation* work does the opposite — it stays with the orchestrator until the spec is solid, because a delegated agent inherits the prompt as ground truth and burns quota proving wrong premises. If you don't know what to build, talk to the user; don't launder the uncertainty into a subagent prompt.
 
@@ -189,6 +189,14 @@ Never silently work around a hang (skip the file, longer timeout, batch differen
 **Corrections are conversation, not file edits.** When the user corrects you, acknowledge and adjust in-thread — do not reach for CLAUDE.md. A single correction never warrants a rule. Rules encode patterns observed across multiple sessions and multiple corrections; until then, the correction is feedback to act on now, not material to encode. Writing a rule from one data point is how this file accreted contradictions in the first place. If you believe you are seeing a recurring pattern, *say so to the user* and let them decide whether it warrants a rule — do not edit CLAUDE.md unilaterally.
 
 **CLAUDE.md has a soft 300-line budget. New rules require a removal or a collapse.** Adding a rule that pushes the file over 300 lines means identifying a rule to delete or merge in the same change — no exceptions, no "but this one is genuinely new." If you can't find anything to remove, the new rule is probably not load-bearing enough to add. The line count is a forcing function: the file must remain small enough to internalize in one read, and monotonic growth defeats that. Reductions that fit existing rules together more tightly are always welcome and never need a counterweighting addition.
+
+## Authenticity
+
+When asked to analyze X, read X. Do not synthesize from conversation memory, prior summaries, or what the file probably says. Claims must correspond to evidence produced this session.
+
+**The filesystem is ground truth**, not your memory of it or an agent's narrative output. Before acting on "the agent must have…", "the file should still be…", "this failure must be from my change…": run `git status`/`git log`/re-Read the file/`git stash` and re-test. Cost of one check is always lower than the wrong action plus cleanup.
+
+**Something unexpected is a signal, not noise.** Surprising output, anomalous numbers, a file containing what it shouldn't — stop and find out why. Do not accept the anomaly and proceed.
 
 ## Commit Convention
 
@@ -248,14 +256,6 @@ rt = N.runtime({ executors = { foo = function() rt:bar() end } })
 
 The same applies to test code that passes executors inline to a constructor. Always pre-declare the variable, then assign.
 
-## Verify state before acting on assumptions
-
-The filesystem is ground truth, not your memory of it or an agent's narrative
-output. Before acting on "the agent must have…", "the file should still be…",
-"this failure must be from my change…": run `git status`/`git log`/re-Read
-the file/`git stash` and re-test. Cost of one check is always lower than the
-wrong action plus cleanup.
-
 ## Pause before guessing
 
 If you can't state in one sentence the property your answer must satisfy,
@@ -264,12 +264,11 @@ what you just said — another interpretation, another proposal, another
 framing — is the loop signal. Applies to any response: code, prose, design
 answers, conversation.
 
-## Negative Constraints
+## Hard Constraints
 
-Do not:
-- Announce actions ("I will now...") - just do them
-- Leave work uncommitted
-- Use interactive git commands (`git add -p`, `git add -i`, `git rebase -i`) — these block on stdin and hang in non-interactive shells; stage files by name instead
-- Use `--no-verify` - fix the issue or fix the hook
-- Assume tools are missing - check if `nix develop` is available for the right environment
-- Add dependencies that require a build step — pure Lua + FFI only
+- No announcing actions ("I will now...") — just do them.
+- No leaving work uncommitted.
+- No interactive git (`git add -p`, `git add -i`, `git rebase -i`) — these block on stdin and hang in non-interactive shells; stage files by name instead.
+- No `--no-verify` — fix the issue or fix the hook.
+- No assuming a tool is missing — check whether `nix develop` provides it.
+- No dependencies that require a build step — pure Lua + FFI only.
