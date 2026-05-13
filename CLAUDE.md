@@ -71,13 +71,11 @@ nix develop                  # Dev shell for contributors (bun, etc.)
 
 **"Out of scope" is not a reason to omit.** Scope is not a budget for correctness. If a security property, invariant, or design constraint applies to the thing being built, it is in scope by definition. Deferring it because it's inconvenient is not scoping — it's avoidance. The only legitimate reason to omit something is that it genuinely does not apply yet (no caller, no user, no data). That reason must survive scrutiny: if challenged, justify it, don't just re-assert it.
 
-**Write things down immediately.** Problems and tech debt → TODO.md. Design decisions → docs/ or CLAUDE.md. Completed items → mark `[x]` in TODO.md in the same commit. Conversation evaporates — if it matters to a future session, write it now. Never delete unchecked TODO items.
+**Write things down immediately.** Problems and tech debt → TODO.md. Design decisions → docs/. Completed items → mark `[x]` in TODO.md in the same commit. Conversation evaporates — if it matters to a future session, write it now. Never delete unchecked TODO items.
 
 **`docs/batteries.md` is the definitive ecosystem scope document.** Read it before discussing future libraries or roadmap.
 
 **`docs/inventory_summary.md` is loaded at session start** — it lists what categories of library exist in crescent and roughly what's in each. Read it. **`docs/inventory.md` is the full per-library index** — grep it before designing or implementing anything reusable. If `inventory.md` doesn't list what you're looking for, spot-check `lib/` directly; the index can lag by a commit. **When adding a new library or `_types.lua` file, add a line to `docs/inventory.md` in the same commit. Add a line to `docs/inventory_summary.md` only if the new library belongs to a category not already there.**
-
-**Corrections mean a rule is missing or wrong.** When the user corrects you, ask what rule would have prevented it and write it before proceeding. "The rule exists, I just didn't follow it" is never the diagnosis.
 
 **Something unexpected is a signal, not noise.** Stop and ask why before continuing.
 
@@ -458,8 +456,6 @@ Never silently work around a hang (skip the file, longer timeout, batch differen
 
 **Subagent prompts for git work must include: clone the repo locally, verify `git config user.name` and `git config user.email` match the target account before committing, commit with git directly, push with git. Never instruct subagents to use `gh api` to create commits — it bypasses git config and produces wrong authorship.**
 
-**All investigation and all implementation goes in subagents.** The only exception is work you are almost 100% certain is shorter to do inline AND are absolutely certain will not poison context. When in doubt, delegate. There is no list of acceptable inline cases — if you are asking yourself whether something qualifies, the answer is no.
-
 **Subagent prompts must have a hard scope.** Every delegation prompt must specify exactly what the agent should do and when to stop — not "fix what you can" but "fix these N files, then stop." Open-ended prompts ("fix the clearly quick ones", "clean up what you find") produce agents that run for hours burning quota. If the scope is genuinely open-ended, break it into explicit batches before delegating.
 
 **Never pre-load the answer in a delegation prompt.** Don't write "verify that X works" or "claim to verify: X" — write "what does X do?" or "find out whether X works". Pre-baked hypotheses in the prompt teach the agent to confirm, not investigate. If you have a hypothesis, name it as a hypothesis the agent should *attempt to falsify*, not as a thing to verify.
@@ -547,6 +543,5 @@ Do not:
 - Leave work uncommitted
 - Use interactive git commands (`git add -p`, `git add -i`, `git rebase -i`) — these block on stdin and hang in non-interactive shells; stage files by name instead
 - Use `--no-verify` - fix the issue or fix the hook
-- Edit files inline because the change "seems small" or is "just one function" — size in lines is the wrong axis. If the edit needs exploration or might iterate, delegate.
 - Assume tools are missing - check if `nix develop` is available for the right environment
 - Add dependencies that require a build step — pure Lua + FFI only
