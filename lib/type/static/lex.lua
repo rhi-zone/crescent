@@ -789,6 +789,8 @@ function Lexer:_lex()
 
         -- Minus / comment
         elseif b == B_MINUS then
+            -- Byte offset (0-indexed) of the first '-' of this possible comment.
+            local comment_byte_start = self.pos - 1
             self:_nextbyte()
             if self.b ~= B_MINUS then return defs.TK_MINUS, 0 end
             -- Comment
@@ -808,11 +810,18 @@ function Lexer:_lex()
                         -- Regular long comment: skip content until close
                         self:_skip_long_comment(sep)
                     else
+                        -- _capture_block_annotation has consumed the closing ']]'.
+                        -- self.pos is now the byte index AFTER the final ']'.
+                        -- byte_end (exclusive) = self.pos - 1.
+                        local comment_byte_end = self.pos - 1
                         -- For ANN_TYPE expression casts: rekey to a unique negative
                         -- ID so it doesn't collide with real line numbers, and signal
                         -- the parser to wrap the next expression in NODE_CAST_EXPR.
                         local stored = self.annotations[ann_line]
                         if stored and stored.kind == defs.ANN_TYPE then
+                            stored.byte_start = comment_byte_start
+                            stored.byte_end   = comment_byte_end
+                            stored.line       = ann_line
                             self._cast_id_seq = self._cast_id_seq - 1
                             local cast_id = self._cast_id_seq
                             self.annotations[ann_line] = nil

@@ -395,6 +395,8 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **Derive from values, not from precedent.** When designing interfaces or making architecture decisions, start from crescent's values (vendorable, pure, fast, hackable, composable). Don't reach for what Java/Go/Rust/TypeScript does — their designs embed assumptions that don't apply here. Other ecosystems are references, not templates.
 
+This applies to *internal* precedent too. The existing repo is not a source of truth for design decisions either. Past sessions wrote patterns that are inconsistent or wrong. A pattern existing in `lib/`, `bin/`, or `docs/` is not by itself a justification — derive from values, not from what previous sessions happened to write. If a current-repo pattern conflicts with the values, the values win and the pattern is the thing to fix.
+
 **No framework code in lib/.** Libraries provide functions callers invoke; they do not own the server, the serving strategy, or the application architecture. No HTTP servers, no cross-language code generation (Lua emitting JS strings), no generic dispatch/routing layers, no JSON-to-function-call adapters. If a "library" is wrapping something the caller could write in five lines, it does not belong in `lib/`.
 
 **`dep/` is the vendor namespace for third-party packages.** `require("dep.foo")` is the convention (see existing `dep.sha1` in websocket). New vendored deps go under `dep/`, not `lib/`.

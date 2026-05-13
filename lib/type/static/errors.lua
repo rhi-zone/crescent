@@ -3,7 +3,9 @@
 
 local M = {}
 
---:: DiagEntry = { kind: string, filename: string, line: integer, col: integer, msg: string, notes: { [integer]: { filename: string, line: integer, col: integer, msg: string }, ... } }
+--:: DiagFixEdit = { byte_start: integer, byte_end: integer, replacement: string }
+--:: DiagFix = { edits: { [integer]: DiagFixEdit, ... }, kind: string, rule: string }
+--:: DiagEntry = { kind: string, filename: string, line: integer, col: integer, msg: string, notes: { [integer]: { filename: string, line: integer, col: integer, msg: string }, ... }, fix?: DiagFix }
 --:: ErrCtx = { errors: { [integer]: DiagEntry, ... }, warnings: { [integer]: DiagEntry, ... }, source_lines: { [string]: { [integer]: string, ... }, ... } }
 -- Heterogeneous arg table for diagnostic templates. Each template knows the
 -- specific fields it expects (e.g. FIELD_NOT_FOUND uses obj/name; CALL_ARG_MISMATCH

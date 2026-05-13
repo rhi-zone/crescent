@@ -176,7 +176,7 @@ M.C_NARROW_NIL    = C_NARROW_NIL
 -- Helpers
 -- ---------------------------------------------------------------------------
 
---: (Ctx, integer | nil, integer | nil, integer, { [string]: unknown, ... }) -> ()
+--: (Ctx, integer | nil, integer | nil, integer, { [string]: unknown, ... }) -> DiagEntry
 local function report(ctx, line, col, code, args)
     local msg = errors_mod.format_diag(code, args --[[:! { [string]: string | integer }]])
     return errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
@@ -2292,7 +2292,19 @@ ExprRule[NODE_CAST_EXPR] = function(ctx, nid)
     if band(n.flags, defs.FLAG_FORCE_CAST) ~= 0 then
         local at = ctx.ann and ctx.ann.types:get(ann.type_id)
         if at and at.tag == defs.TAG_ANY then
-            report(ctx, n.line, n.col, E.FORCE_CAST_TO_ANY, {})
+            local entry = report(ctx, n.line, n.col, E.FORCE_CAST_TO_ANY, {})
+            -- Attach autofix: replace `--[[:! any]]` with `--[[: any]]`.
+            if entry and ann.byte_start and ann.byte_end then
+                entry.fix = {
+                    kind = "safe",
+                    rule = "force_cast_to_any",
+                    edits = { {
+                        byte_start  = ann.byte_start,
+                        byte_end    = ann.byte_end,
+                        replacement = "--[[: any]]",
+                    } },
+                }
+            end
             return inner_tid
         end
     end
@@ -2304,6 +2316,11 @@ ExprRule[NODE_CAST_EXPR] = function(ctx, nid)
         -- is a subtype of expected (widening) or expected is a subtype of actual
         -- (narrowing). Permits unknown→T and (A|B)→A, but rejects unrelated
         -- pairs (e.g. string→integer).
+        if ann.byte_start and ann.byte_end then
+            ctx._overlap_byte_range = ctx._overlap_byte_range or {}
+            ctx._overlap_byte_range[(n.line or 0) * 100000 + (n.col or 0)] =
+                { ann.byte_start, ann.byte_end }
+        end
         emit(ctx, { C_OVERLAP, inner_tid, cast_tid, n.line, n.col })
     else
         emit(ctx, { C_SUB, inner_tid, cast_tid, n.line, n.col, true })  -- true = is_cast
@@ -4164,6 +4181,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
     ctx.ann                = nil
     ctx.err                = errors_mod.new_ctx()
     ctx.filename           = filename or "?"
+    ctx.source             = source  -- original source text; used for autofix byte slicing
     ctx.return_types       = {}
     ctx.return_stub_vars   = {}
     ctx.return_vars        = {}   -- v3: stack of return type variables

@@ -42,7 +42,9 @@
 --:: AnnResult = { types: TypeSlotArena, fields: FieldEntryArena, lists: ListPool, results: { [integer]: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, ... }, ... }, warnings: { [integer]: { line: integer, col: integer, msg: string, ... }, ... }, parse_errors: { [integer]: { line: integer, col: integer, msg: string, ... }, ... }, pool: InternPool, make_intersection: ({ [integer]: integer, ... }) -> integer }
 
 -- Error context from errors.lua.
---:: DiagEntry = { kind: string, filename: string, line: integer, col: integer, msg: string, notes: { [integer]: { filename: string, line: integer, col: integer, msg: string }, ... } }
+--:: DiagFixEdit = { byte_start: integer, byte_end: integer, replacement: string }
+--:: DiagFix = { edits: { [integer]: DiagFixEdit, ... }, kind: string, rule: string }
+--:: DiagEntry = { kind: string, filename: string, line: integer, col: integer, msg: string, notes: { [integer]: { filename: string, line: integer, col: integer, msg: string }, ... }, fix?: DiagFix }
 --:: ErrCtx = { errors: { [integer]: DiagEntry, ... }, warnings: { [integer]: DiagEntry, ... }, source_lines: { [string]: { [integer]: string, ... }, ... } }
 
 -- Type alias table stored in scope.type_bindings.
@@ -199,6 +201,7 @@ Ctx = {
   T_UNKNOWN:    integer,
   T_FFI_C:      integer | nil,
   filename:     string,
+  source:       string,
   -- LSP / annotation data fields populated by constrain.lua
   return_vars:     { [integer]: integer, ... },
   type_at:         { [integer]: integer, ... },

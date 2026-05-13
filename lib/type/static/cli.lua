@@ -95,34 +95,76 @@ local function decode_note(s)
     }
 end
 
+-- Encode a single fix edit: byte_start|byte_end|replacement (replacement url-encoded).
+local function encode_fix(fix)
+    -- fix: { kind, rule, edits = { { byte_start, byte_end, replacement }, ... } }
+    local edits = fix.edits or {}
+    local parts = {}
+    for _, e in ipairs(edits) do
+        parts[#parts + 1] = tostring(e.byte_start or 0) .. "," ..
+            tostring(e.byte_end or 0) .. "," .. urlencode(e.replacement or "")
+    end
+    return "FIX " .. urlencode(fix.kind or "safe") .. "|"
+        .. urlencode(fix.rule or "") .. "|"
+        .. table.concat(parts, ";")
+end
+
+local function decode_fix(s)
+    local kind_enc, rule_enc, edits_s = s:match("^FIX ([^|]*)|([^|]*)|(.*)$")
+    if not kind_enc then return nil end
+    local edits = {}
+    for chunk in edits_s:gmatch("[^;]+") do
+        local bs, be, rep = chunk:match("^(%d+),(%d+),(.*)$")
+        if bs then
+            edits[#edits + 1] = {
+                byte_start  = tonumber(bs),
+                byte_end    = tonumber(be),
+                replacement = urldecode(rep),
+            }
+        end
+    end
+    return {
+        kind  = urldecode(kind_enc),
+        rule  = urldecode(rule_enc),
+        edits = edits,
+    }
+end
+
 local function encode_diag(d, kind)
-    -- d: DiagEntry with fields filename, line, col, msg, notes
+    -- d: DiagEntry with fields filename, line, col, msg, notes, fix?
     local notes_parts = {}
     for _, n in ipairs(d.notes or {}) do
         notes_parts[#notes_parts + 1] = encode_note(n)
     end
     local notes_str = #notes_parts > 0 and (" " .. table.concat(notes_parts, " ")) or ""
+    local fix_str = d.fix and (" " .. encode_fix(d.fix)) or ""
     return kind .. "|" .. urlencode(d.filename or "") .. "|"
         .. tostring(d.line or 0) .. "|"
         .. tostring(d.col or 0) .. "|"
         .. urlencode(d.msg or "")
         .. notes_str
+        .. fix_str
 end
 
 local function decode_diag(s)
-    -- Parse: KIND|filename|line|col|msg[ NOTE fname|line|col|msg ...]*
+    -- Parse: KIND|filename|line|col|msg[ NOTE fname|line|col|msg ...]*[ FIX ...]?
     local kind, fname_enc, line_s, col_s, rest = s:match("^([EW])|([^|]*)|(%d+)|(%d+)|(.*)$")
     if not kind then return nil end
 
-    -- rest = url-encoded msg, then zero or more " NOTE ..." groups.
-    -- Split on " NOTE " delimiter.
+    -- rest = url-encoded msg, then zero or more " NOTE ..." groups, then optional " FIX ...".
+    -- Split on " NOTE " and " FIX " delimiters in order.
     local parts = {} --: { [integer]: string, ... }
     local pos = 1
     while pos <= #rest do
-        local nxt = rest:find(" NOTE ", pos, true)
+        local n_at = rest:find(" NOTE ", pos, true)
+        local f_at = rest:find(" FIX ", pos, true)
+        local nxt --: integer | nil
+        if n_at and (not f_at or n_at < f_at) then nxt = n_at
+        elseif f_at then nxt = f_at end
         if nxt then
-            parts[#parts + 1] = rest:sub(pos, nxt - 1)
-            pos = nxt + 1  -- skip the space before NOTE
+            local nxt_i = nxt --[[: integer]]
+            parts[#parts + 1] = rest:sub(pos, nxt_i - 1)
+            pos = nxt_i + 1
         else
             parts[#parts + 1] = rest:sub(pos)
             break
@@ -131,9 +173,15 @@ local function decode_diag(s)
 
     local msg_enc = parts[1] or ""
     local notes = {}
+    local fix
     for i = 2, #parts do
-        local n = decode_note(parts[i])
-        if n then notes[#notes + 1] = n end
+        local p = parts[i]
+        if p:sub(1, 4) == "FIX " then
+            fix = decode_fix(p)
+        else
+            local n = decode_note(p)
+            if n then notes[#notes + 1] = n end
+        end
     end
 
     return {
@@ -143,6 +191,7 @@ local function decode_diag(s)
         col      = tonumber(col_s),
         msg      = urldecode(msg_enc),
         notes    = notes,
+        fix      = fix,
     }
 end
 
@@ -381,6 +430,7 @@ local function check_parallel(files, n, project_opts, cache_dir, format, errors_
                         col      = d.col,
                         msg      = d.msg,
                         notes    = d.notes,
+                        fix      = d.fix,
                     }
                     ec.errors[#ec.errors + 1] = entry
                     total_errors = total_errors + 1
@@ -392,6 +442,7 @@ local function check_parallel(files, n, project_opts, cache_dir, format, errors_
                         col      = d.col,
                         msg      = d.msg,
                         notes    = d.notes,
+                        fix      = d.fix,
                     }
                     ec.warnings[#ec.warnings + 1] = entry
                     total_warnings = total_warnings + 1
@@ -831,6 +882,7 @@ function M.main(argv)
     local annotate  = false
     local run_rules = false  -- --rules flag: run lint passes after check
     local summary   = false  -- --summary flag: print bucketed root-cause summary
+    local do_fix    = false  -- --fix flag: apply safe autofixes from diagnostics
     local files     = {}
 
     local i = 1
@@ -849,6 +901,9 @@ function M.main(argv)
             i = i + 1
         elseif argv[i] == "--summary" then
             summary = true
+            i = i + 1
+        elseif argv[i] == "--fix" then
+            do_fix = true
             i = i + 1
         else
             files[#files + 1] = argv[i]
@@ -1020,11 +1075,17 @@ function M.main(argv)
     -- (Section 7, v2). To force a re-check, delete .crescentcache or bump the
     -- .cri schema version.
     local input_opts = (project_opts or {}) --[[:! { no_disk_cache: boolean | nil, globals_files: { [integer]: string, ... } | nil, ... }]]
+    if do_fix then
+        input_opts.no_disk_cache = true
+    end
 
     -- Determine parallelism level.
     -- Don't parallelize when --rules or --summary is active (state lives in-process).
+    -- Also serial for --fix: we need direct access to err_ctx entries (with fix
+    -- field) in this process, and we must disable the disk cache so that emit
+    -- sites that attach fixes are re-run.
     local njobs
-    if run_rules or summary or not fork_available then
+    if run_rules or summary or do_fix or not fork_available then
         njobs = 1
     else
         njobs = math.min(get_cpu_count(), #files)
@@ -1044,6 +1105,9 @@ function M.main(argv)
     -- Accumulates { filename, err_ctx } for --summary output.
     --: { [integer]: { filename: string, err_ctx: ErrCtx }, ... }
     local summary_entries = {}
+    -- For --fix: filename -> list of edits gathered from diagnostics.
+    --: { [string]: { [integer]: { byte_start: integer, byte_end: integer, replacement: string }, ... }, ... }
+    local fix_edits = {}
 
     for _, filename in ipairs(files) do
         local err_ctx, ctx = check_mod.check_file(filename, nil, nil, input_opts)
@@ -1051,6 +1115,26 @@ function M.main(argv)
         -- Run lint rule passes when --rules is active and the check succeeded.
         if run_rules and ctx then
             (rules_mod --[[:! { run: (Ctx, ErrCtx, string, nil) -> (), ... }]]).run(ctx, err_ctx, filename, nil)
+        end
+
+        if do_fix then
+            -- Gather safe fixes from this file's diagnostics.
+            --: ({ [integer]: DiagEntry, ... }) -> ()
+            local function gather(list)
+                for _, d in ipairs(list) do
+                    local fx = d.fix
+                    if fx and fx.kind == "safe" and fx.edits then
+                        for _, e in ipairs(fx.edits) do
+                            local key = d.filename or filename
+                            if not fix_edits[key] then fix_edits[key] = {} end
+                            local L = fix_edits[key]
+                            L[#L + 1] = e
+                        end
+                    end
+                end
+            end
+            gather(err_ctx.errors)
+            gather(err_ctx.warnings)
         end
 
         local ne = #err_ctx.errors
@@ -1062,7 +1146,7 @@ function M.main(argv)
             summary_entries[#summary_entries + 1] = { filename = filename, err_ctx = err_ctx }
         end
 
-        if not summary then
+        if not summary and not do_fix then
             if format == "json" then
                 structured_parts[#structured_parts + 1] = errors_mod.format_json(err_ctx)
             elseif format == "sarif" then
@@ -1072,6 +1156,38 @@ function M.main(argv)
                     io.stderr:write(errors_mod.format_plain(err_ctx))
                 else
                     io.stderr:write(errors_mod.format_ansi(err_ctx))
+                end
+                io.stderr:write("\n")
+            end
+        end
+    end
+
+    -- --fix: apply collected edits, then re-check from scratch.
+    if do_fix then
+        local edit_mod = require("lib.edit")
+        local _, nfiles, nedits, errs = edit_mod.apply(fix_edits)
+        io.stderr:write(string.format("Applied %d fixes across %d files\n",
+            nedits, nfiles))
+        if #errs > 0 then
+            for _, e in ipairs(errs) do
+                io.stderr:write(string.format("  %s: %s\n", e.filename, e.msg))
+            end
+        end
+        -- Re-check from scratch so the user sees the post-fix state.
+        check_mod.clear_cache()
+        total_errors   = 0
+        total_warnings = 0
+        for _, filename in ipairs(files) do
+            local err_ctx2 = check_mod.check_file(filename, nil, nil, input_opts)
+            local ne = #err_ctx2.errors
+            local nw = #err_ctx2.warnings
+            total_errors   = total_errors   + ne
+            total_warnings = total_warnings + nw
+            if ne > 0 or nw > 0 then
+                if format == "plain" then
+                    io.stderr:write(errors_mod.format_plain(err_ctx2))
+                else
+                    io.stderr:write(errors_mod.format_ansi(err_ctx2))
                 end
                 io.stderr:write("\n")
             end

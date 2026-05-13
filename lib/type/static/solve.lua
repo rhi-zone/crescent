@@ -81,7 +81,8 @@ end
 
 -- Rule-aware warning: looks up effective severity from rules_config on ctx.
 -- Falls back to add_warning when the code has no rule default (non-configurable).
---: (Ctx, integer | nil, integer | nil, integer) -> ()
+-- Returns the resulting DiagEntry (so callers can attach a fix) or nil if suppressed.
+--: (Ctx, integer | nil, integer | nil, integer) -> DiagEntry | nil
 local function add_warning_code(ctx, line, col, code)
     --: { [integer]: { name: string, severity: string }, ... }
     local rd = defs.rule_defaults --[[:! { [integer]: { name: string, severity: string }, ... }]]
@@ -90,18 +91,17 @@ local function add_warning_code(ctx, line, col, code)
         --: { [string]: { severity?: string, enabled?: boolean, allow?: { [integer]: string, ... }, ... }, ... } | nil
         local rc = ctx.rules_config --[[:! { [string]: { severity?: string, enabled?: boolean, allow?: { [integer]: string, ... }, ... }, ... } | nil]]
         local sev = rc_mod.effective_severity(code, rc, rd)
-        if sev == "off" then return end
+        if sev == "off" then return nil end
         local allow = rc_mod.allow_patterns(code, rc, rd)
-        if rc_mod.is_allowed(ctx.filename, allow) then return end
+        if rc_mod.is_allowed(ctx.filename, allow) then return nil end
         local msg = errors_mod.format_diag(code, {})
         if sev == "error" then
-            errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
+            return errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
         else
-            errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
+            return errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
         end
-        return
     end
-    add_warning(ctx, line, col, errors_mod.format_diag(code, {}))
+    return errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, errors_mod.format_diag(code, {}))
 end
 
 -- Widen literal to base type for Sub constraints.
@@ -2490,6 +2490,14 @@ local function solve_overlap(ctx, c)
     local actual   = find(ctx, c[2] --[[:! integer]])
     local expected = find(ctx, c[3] --[[:! integer]])
     local line, col = c[4] --[[:! integer | nil]], c[5] --[[:! integer | nil]]
+    -- Look up byte range of the `--[[:! T]]` comment for autofix (set by
+    -- constrain.lua at the NODE_CAST_EXPR emit site). Keyed by (line, col)
+    -- so the lookup survives constraint deferral/retry.
+    local byte_start, byte_end
+    if line and col and ctx._overlap_byte_range then
+        local range = ctx._overlap_byte_range[(line or 0) * 100000 + (col or 0)]
+        if range then byte_start, byte_end = range[1], range[2] end
+    end
     -- Defer if either side is still a free type variable: the answer would be
     -- determined by whatever the var binds to next, not by the user's program.
     -- Do NOT emit the warning yet — the actual type may resolve to exactly the
@@ -2512,7 +2520,38 @@ local function solve_overlap(ctx, c)
             -- force cast is redundant — emit REDUNDANT_CAST (error) so it gets stripped.
             -- Otherwise, emit FORCE_CAST (warning) for a genuine narrowing cast.
             if unify_mod.try_unify(ctx, actual, expected) then
-                add_warning_code(ctx, line, col, defs.E.REDUNDANT_CAST)
+                local entry = add_warning_code(ctx, line, col, defs.E.REDUNDANT_CAST)
+                if entry and byte_start and byte_end then
+                    -- Compute fix: delete the `--[[:! T]]` span. Optionally include
+                    -- a single preceding whitespace char that would otherwise become
+                    -- trailing whitespace on its line.
+                    local source = ctx.source
+                    local edit_start = byte_start
+                    if source and source ~= "" and byte_start > 0 then
+                        local prev = source:sub(byte_start, byte_start)  -- 1-indexed
+                        if prev == " " or prev == "\t" then
+                            -- After deletion, the char at (byte_end..) follows the prev char.
+                            -- If the char before (byte_start - 1) is also non-newline content
+                            -- (so the prev space is between code and the cast), and the next
+                            -- char after the cast is a newline or end-of-line, the prev space
+                            -- becomes trailing whitespace. Drop it.
+                            local before = byte_start >= 2 and source:sub(byte_start - 1, byte_start - 1) or ""
+                            local after = byte_end < #source and source:sub(byte_end + 1, byte_end + 1) or ""
+                            if before ~= "" and before ~= "\n" and (after == "" or after == "\n" or after == "\r") then
+                                edit_start = byte_start - 1
+                            end
+                        end
+                    end
+                    entry.fix = {
+                        kind = "safe",
+                        rule = "redundant_cast",
+                        edits = { {
+                            byte_start  = edit_start,
+                            byte_end    = byte_end,
+                            replacement = "",
+                        } },
+                    }
+                end
                 return true
             end
             add_warning_code(ctx, line, col, defs.E.FORCE_CAST)
@@ -2539,6 +2578,9 @@ end
 -- _overlap_warned tracks force-cast sites that have already emitted the FORCE_CAST warning,
 -- so the warning fires exactly once per site even when the constraint is deferred and retried.
 --:: augment Ctx { _overlap_warned?: { [integer]: boolean } }
+-- _overlap_byte_range maps (line, col) → {byte_start, byte_end} of the cast comment,
+-- set by constrain.lua at NODE_CAST_EXPR emit so solve_overlap can attach an autofix.
+--:: augment Ctx { _overlap_byte_range?: { [integer]: { [integer]: integer } } }
 -- any: constraints is a list of heterogeneous arrays — see solve_unify comment.
 --: (Ctx, { [integer]: { [integer]: unknown, ... }, ... }) -> ()
 function M.solve(ctx, constraints)

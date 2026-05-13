@@ -41,6 +41,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/cli/` — declarative CLI argument parser. Status: stable.
 - `lib/pkg/` — package manager. Foundation only (semver, manifest, lock parsers); install algorithm not yet implemented. Status: wip.
 - `lib/bundle/` — Lua module bundler (resolves static `require()`s and inlines). Status: stable.
+- `lib/edit/` — byte-range file edit applier. Used by `cr check --fix` to apply diagnostic autofixes atomically. Status: stable.
 - `lib/embed/` — module embedding helper. Status: wip.
 - `lib/sandbox/` — capability-based script sandbox. Status: stable.
 - `lib/stdlib/` — stdlib lint CLI. Status: wip.
