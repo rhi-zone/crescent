@@ -10961,6 +10961,26 @@ local y = x
             "force cast")
     end)
 
+    assert.it("missing_param_annotation: unannotated param + caller emits warning at fn-def site", function()
+        has_warning(
+            "local function greet(s) return s .. '!' end\ngreet('alice')\n",
+            "has no annotation")
+    end)
+
+    assert.it("missing_param_annotation: annotated function does not warn", function()
+        no_warning(
+            "--: (string) -> string\nlocal function greet(s) return s .. '!' end\ngreet('alice')\n",
+            "has no annotation")
+    end)
+
+    assert.it("missing_param_annotation: no callers (param stays free) does not warn", function()
+        -- With no caller, the param var never gets bound; the diagnostic is
+        -- suppressed because we have no inferred type to suggest.
+        no_warning(
+            "local function unused(x) return x end\n",
+            "has no annotation")
+    end)
+
     assert.it("E2: --[[:! T]] redundant force cast on typed function return emits REDUNDANT_CAST", function()
         -- When a function is declared to return T and the call site uses --[[:! T]],
         -- the cast is redundant — REDUNDANT_CAST (error) fires even though the

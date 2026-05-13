@@ -2756,6 +2756,52 @@ function M.solve(ctx, constraints)
     end
     ctx.err = real_err
     rawset(ctx, "_constraints", nil)  -- rawset: field type doesn't accept nil directly
+
+    -- Post-pass: MISSING_PARAM_ANNOTATION (Phase B).
+    -- For each unannotated function parameter whose type was inferred from
+    -- caller-side bindings (not an annotation), emit a warning at the
+    -- function-def site. Skip when the inferred type is still a free var
+    -- (no callers exercised the param) or resolves to unknown/any (we have
+    -- nothing actionable to suggest). Severity is configurable via the
+    -- linting `missing_param_annotation` rule.
+    local rd2 = defs.rule_defaults --[[:! { [integer]: { name: string, severity: string }, ... }]]
+    local rd_entry = rd2[defs.E.MISSING_PARAM_ANNOTATION]
+    if ctx._inferred_params and rd_entry then
+        local rc_mod = require("lib.type.static.rules_config")
+        local rc = ctx.rules_config --[[:! { [string]: { severity?: string, enabled?: boolean, allow?: { [integer]: string, ... }, ... }, ... } | nil]]
+        local sev = rc_mod.effective_severity(defs.E.MISSING_PARAM_ANNOTATION, rc, rd2)
+        local allow = rc_mod.allow_patterns(defs.E.MISSING_PARAM_ANNOTATION, rc, rd2)
+        local suppressed = sev == "off" or rc_mod.is_allowed(ctx.filename, allow)
+        if not suppressed then
+            -- Dedup by (line, col, name_id) so re-checks don't emit twice.
+            local seen = {}
+            for _, rec in ipairs(ctx._inferred_params) do
+                local bound = find(ctx, rec.var_tid)
+                local bt = ctx.types:get(bound)
+                -- Skip if still free (no caller) or trivially unknown/any.
+                local actionable = bt.tag ~= TAG_VAR and bt.tag ~= TAG_ROWVAR
+                    and bt.tag ~= TAG_UNKNOWN and bt.tag ~= TAG_ANY
+                if actionable then
+                    local key = (rec.fn_line or 0) * 100000 + (rec.fn_col or 0) + rec.name_id * 1e9
+                    if not seen[key] then
+                        seen[key] = true
+                        local name = intern_mod.get(ctx.pool, rec.name_id) or "?"
+                        local inferred_str = types_mod.display_short(ctx, bound)
+                        local msg = errors_mod.format_diag(
+                            defs.E.MISSING_PARAM_ANNOTATION,
+                            { name = name, inferred = inferred_str })
+                        if sev == "error" then
+                            errors_mod.error(real_err, ctx.filename,
+                                rec.fn_line or 0, rec.fn_col or 0, msg)
+                        else
+                            errors_mod.warning(real_err, ctx.filename,
+                                rec.fn_line or 0, rec.fn_col or 0, msg)
+                        end
+                    end
+                end
+            end
+        end
+    end
 end
 
 return M

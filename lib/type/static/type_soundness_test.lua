@@ -2741,14 +2741,19 @@ local y = (--[[: string]] x)
     assert.it("does not warn redundant for cast of unannotated param (Bug 1)", function()
         -- Without the cast, the body would fail (field access on TAG_VAR).
         -- The cast is what gives the param its type via back-propagation.
-        -- A redundant-cast warning here is a false positive.
-        no_warnings([==[
+        -- A redundant-cast warning here is a false positive. (A separate
+        -- MISSING_PARAM_ANNOTATION warning at the function-def site is
+        -- expected and correct — that's the Phase B diagnostic.)
+        local ec = check([==[
 --:: Image = { width: integer, height: integer, channels: integer, data: { [integer]: integer } }
 local function test(img)
   local img = img --[[: Image]]
   return img.width
 end
 ]==])
+        local msg = errors_mod.format_plain(ec)
+        assert.ok(not msg:find("redundant"),
+            "expected no redundant-cast warning, got:\n" .. msg)
     end)
 
     assert.it("does not warn redundant for multi-return truncation cast (Bug 2)", function()

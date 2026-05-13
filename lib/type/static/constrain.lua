@@ -1474,8 +1474,8 @@ end
 
 -- Generate constraints for a function body.
 -- Returns the function type_id.
---: (Ctx, integer, integer, integer, integer, boolean, integer | nil) -> integer
-gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
+--: (Ctx, integer, integer, integer, integer, boolean, integer | nil, integer | nil, integer | nil) -> integer
+gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line, fn_def_col)
     local fn_scope = env_mod.child(ctx.scope)
     local param_tids = {} --: { [integer]: integer, ... }
 
@@ -1516,9 +1516,17 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
                     body_pt_id = types_mod.make_var(ctx, fn_scope.level)
                     -- Param has no annotation slot; mark as inferred-only so the
                     -- REDUNDANT_CAST classifier can suppress false positives on
-                    -- force casts in the body (see solve_overlap).
+                    -- force casts in the body (see solve_overlap). Also record
+                    -- per-fn metadata for the MISSING_PARAM_ANNOTATION pass.
                     ctx._inferred_param_tid = ctx._inferred_param_tid or {}
                     ctx._inferred_param_tid[body_pt_id] = true
+                    ctx._inferred_params = ctx._inferred_params or {}
+                    ctx._inferred_params[#ctx._inferred_params + 1] = {
+                        name_id = name_id,
+                        var_tid = body_pt_id,
+                        fn_line = fn_def_line,
+                        fn_col  = fn_def_col,
+                    }
                 end
                 env_mod.bind(fn_scope, name_id, body_pt_id)
                 -- fn_tid param uses original annotation (FLAG_GENERIC for generic fns)
@@ -1549,8 +1557,16 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
             -- Unannotated param: mark as inferred-only so the REDUNDANT_CAST
             -- classifier can suppress false positives on force casts whose
             -- type came from caller-side inference rather than an annotation.
+            -- Also record per-fn metadata for the MISSING_PARAM_ANNOTATION pass.
             ctx._inferred_param_tid = ctx._inferred_param_tid or {}
             ctx._inferred_param_tid[pt_id] = true
+            ctx._inferred_params = ctx._inferred_params or {}
+            ctx._inferred_params[#ctx._inferred_params + 1] = {
+                name_id = name_id,
+                var_tid = pt_id,
+                fn_line = fn_def_line,
+                fn_col  = fn_def_col,
+            }
             param_tids[#param_tids + 1] = pt_id
         end
         if has_vararg then
@@ -1809,7 +1825,7 @@ ExprRule[NODE_FUNC_EXPR] = function(ctx, nid)
             return isect_tid
         end
     end
-    return gen_function(ctx, n.data[0], n.data[1], n.data[2], n.data[3], has_vararg, ann_fn_tid)
+    return gen_function(ctx, n.data[0], n.data[1], n.data[2], n.data[3], has_vararg, ann_fn_tid, n.line, n.col)
 end
 
 -- Recover a concrete type for an argument AST node when its constraint-gen
@@ -3504,7 +3520,7 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
         end
     end
     local fn_tid = ann_isect_tid or
-        gen_function(ctx, n.data[1], n.data[2], n.data[3], n.data[4], has_vararg, ann_fn_tid)
+        gen_function(ctx, n.data[1], n.data[2], n.data[3], n.data[4], has_vararg, ann_fn_tid, n.line, n.col)
 
     if name_n.kind == NODE_IDENTIFIER then
         local name_id = name_n.data[0]

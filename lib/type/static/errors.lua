@@ -452,6 +452,12 @@ local function build_templates()
         [E.REDUNDANT_CAST]        = function(_a)
             return "redundant force cast \xe2\x80\x94 actual type is already assignable to target; remove the cast"
         end,
+        --: (TemplateArgs) -> string
+        [E.MISSING_PARAM_ANNOTATION] = function(a)
+            return "parameter `" .. tostring(a.name) .. "` has no annotation; inferred `"
+                .. tostring(a.inferred) .. "` from call sites \xe2\x80\x94"
+                .. " add a `--: (...) -> ...` annotation above the function"
+        end,
     }
 end
 

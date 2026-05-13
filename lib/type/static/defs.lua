@@ -386,6 +386,7 @@ M.E = {
     FORCE_CAST            = 32,  -- `--[[:! T]]` force cast used; fix upstream annotation instead (warning)
     MODULE_DECL           = 33,  -- `--:: module` declaration in user code; require() return types are inferred from return M (warning)
     REDUNDANT_CAST        = 34,  -- `--[[:! T]]` is redundant: actual type is already assignable to T; remove the cast
+    MISSING_PARAM_ANNOTATION = 35,  -- function parameter has no annotation; type inferred from call sites (warning)
 }
 
 -- Keyword strings (ordered by token ID, for intern pre-population)
@@ -421,6 +422,7 @@ do
         [E.MODULE_DECL]        = { severity = "warning", name = "module_decl" },
         [E.UNNAMED_PARAMS]     = { severity = "warning", name = "unnamed_params" },
         [E.NON_EXHAUSTIVE]     = { severity = "warning", name = "non_exhaustive" },
+        [E.MISSING_PARAM_ANNOTATION] = { severity = "warning", name = "missing_param_annotation" },
     }
 end
 
