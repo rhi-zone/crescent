@@ -133,16 +133,20 @@ transient: typecheck runs, warnings + errors guide the user to accept
 autofixes, after one round trip the code is fully annotated. Design from
 that end state, not from "unannotated must always typecheck cleanly."
 
-### Mechanism: record at C_SUB emit, autofix at post-pass
+### Mechanism: record at arg-param subtype check, autofix at post-pass
 
 Solver semantics unchanged. `solve_sub` keeps destructive binding — first
 caller wins; mismatching callers error at the call site. (This is what
 localizes typo-among-many-callers bugs.)
 
-In `constrain.lua`, when emitting `C_SUB(arg_tid, param_var)` and
-`param_var ∈ ctx._inferred_param_tid`, also append
+Call-argument subtyping does not actually go through `C_SUB` — it's
+performed directly via `unify_mod.unify` inside `solve_check_args` and
+`solve_callable`. At each of those sites, before the unify attempt, if
+the param's raw tid is in `ctx._inferred_param_tid`, append
 `(line, col, arg_tid)` to `ctx._inferred_param_callsites[param_var]`.
-This records *all attempts*, including ones the solver subsequently rejects.
+Recording before the unify is what captures rejected callers' attempted
+types — those are exactly the typo-or-refactor cases the user needs to
+see in the autofix output.
 
 Post-pass (extending the Phase B walk):
 
