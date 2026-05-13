@@ -116,17 +116,104 @@ Three mechanisms, all landing at the function-def site:
    when the linting config disables `missing_param_annotation`, when no
    callers bound the param, or when the inferred type is unknown/any.
 
-4. **Autofix + modal inference + outlier detection** (Phase C, deferred).
-   Plan called for autofix that writes `--: (T1, ..., TN) -> R` above the
-   function, using the *modal* type across call sites (≥80% threshold,
-   strictly more frequent than alternatives), with a separate
-   `PARAM_INFERENCE_OUTLIER` warning at minority call sites. The current
-   solver does not maintain per-call-site bindings — `solve_sub` destructively
-   binds the param var to a single type. Implementing modal inference
-   requires either (a) a non-destructive variant of `solve_sub` for inferred
-   params that records per-call-site bindings into a side table, or
-   (b) recording (call_site_line, arg_tid) tuples on C_SUB at constraint-
-   emit time and aggregating post-pass. Tracked in TODO.md.
+4. **Autofix** (Phase C — design below; implementation pending).
+
+## Phase C design
+
+**Decided 2026-05** after evaluating realistic failure modes. The original
+plan called for modal inference + `PARAM_INFERENCE_OUTLIER` detection as a
+safety mechanism against autofixing genuinely-polymorphic functions. That
+safety mechanism presupposed a solver change (non-destructive
+inferred-param binding) that the current solver doesn't have — and under
+current destructive-bind semantics, polymorphic-by-accident callers already
+error out at their call sites, so there's nothing to "outlier-warn" about.
+
+The end state is *all functions annotated*. The unannotated phase is
+transient: typecheck runs, warnings + errors guide the user to accept
+autofixes, after one round trip the code is fully annotated. Design from
+that end state, not from "unannotated must always typecheck cleanly."
+
+### Mechanism: record at C_SUB emit, autofix at post-pass
+
+Solver semantics unchanged. `solve_sub` keeps destructive binding — first
+caller wins; mismatching callers error at the call site. (This is what
+localizes typo-among-many-callers bugs.)
+
+In `constrain.lua`, when emitting `C_SUB(arg_tid, param_var)` and
+`param_var ∈ ctx._inferred_param_tid`, also append
+`(line, col, arg_tid)` to `ctx._inferred_param_callsites[param_var]`.
+This records *all attempts*, including ones the solver subsequently rejects.
+
+Post-pass (extending the Phase B walk):
+
+- Resolve each recorded `arg_tid` via `find()` and widen it.
+- **One distinct widened type** → write that type. Trivial case.
+- **Modal type covers ≥80% and is strictly more frequent than alternatives**
+  → write the modal type. Outliers continue to error at their call sites
+  (the existing `CALL_ARG_MISMATCH` path); user investigates whether each
+  outlier is a typo or a legitimate-but-missing-from-the-annotation type.
+- **No clear modal** (close split, three-way, etc.) → write the **union**
+  of distinct widened types. After accepting the autofix, all callers
+  typecheck. User can narrow the annotation by hand later if they want.
+- **Zero recorded callers** → no autofix (Phase B already suppresses the
+  warning).
+
+The 80% threshold is a starting heuristic. Tune after corpus results.
+
+### How this handles realistic patterns
+
+- **Multi-type log helper** (`log("hi"); log(42); log(true)`): no modal,
+  autofix writes union; one round trip clears all call-site errors.
+- **Pure forwarding wrapper**: same as above.
+- **Implicit polymorphism** (`pair(1, "x")`): same as above.
+- **Structural duck typing** (callers pass different shapes with a
+  common field): union; body field-access works iff the field is in all
+  branches.
+- **Refactoring in progress**: union; body errors point at the actual
+  shape mismatch.
+- **Typo among many callers** (99 string + 1 integer): modal=string,
+  autofix writes `(string) -> R`, typo caller errors normally at its site.
+
+### Annotation rendering — open subproblem
+
+The autofix needs a tid → `--:`-parseable source converter. `display_short`
+exists but is not guaranteed round-trippable through `ann.lua` for all
+type shapes (generics, complex unions, opaques, nominals, intersections).
+
+Type-level `require` is the hairy case. If an inferred type references a
+type defined in another module — e.g. `MyType` from `lib/foo` — the
+rendered annotation needs to make that name resolvable in the destination
+file. Three sub-options:
+
+- (i) Render the type *structurally* (inline the structural shape). Avoids
+  the require problem entirely but loses the alias name; produces unwieldy
+  annotations for deeply-nested types.
+- (ii) Render the alias name and insert a `--:: T = require("lib.foo").T`
+  (or equivalent) at the top of the file if not already imported. Requires
+  detecting whether the name is already in scope and synthesizing import
+  text; touches more of the file than a single-line annotation.
+- (iii) Render the alias name *only if already in scope* in the destination
+  file; otherwise fall back to (i) for that type. Most conservative;
+  may produce a mix of structural and alias forms across the file.
+
+Decision: start with **(iii)**. It's the lowest-risk option, doesn't
+touch top-of-file imports, and the structural-fallback case for
+non-imported aliases is at worst noisy, never wrong. Re-evaluate after
+corpus results — if structural fallbacks are pervasive, escalate to (ii).
+
+### Autofix placement
+
+Insert `--: (T1, ..., TN) -> R` on the line immediately above the
+function definition (matching the existing `--:` convention). Single-line
+defs: trivial — use the function-def line's byte position to compute the
+insertion point. Multi-line defs (`local function f(\n  a,\n  b\n)`):
+same rule — insertion is keyed to the `function` keyword's line, not the
+end of the param list. Param-list multi-line layout doesn't affect where
+the annotation goes.
+
+If an annotation already exists on the preceding line (e.g. a partial
+`--::` or a stale `--:`), the autofix is skipped to avoid mangling it.
+The warning still fires; user resolves by hand.
 
 ## Rejected alternatives
 
