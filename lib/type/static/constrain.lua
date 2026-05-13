@@ -1514,6 +1514,11 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
                     body_pt_id = types_mod.find(ctx, ctx.lists:get(aft_body.data[0] + i))
                 else
                     body_pt_id = types_mod.make_var(ctx, fn_scope.level)
+                    -- Param has no annotation slot; mark as inferred-only so the
+                    -- REDUNDANT_CAST classifier can suppress false positives on
+                    -- force casts in the body (see solve_overlap).
+                    ctx._inferred_param_tid = ctx._inferred_param_tid or {}
+                    ctx._inferred_param_tid[body_pt_id] = true
                 end
                 env_mod.bind(fn_scope, name_id, body_pt_id)
                 -- fn_tid param uses original annotation (FLAG_GENERIC for generic fns)
@@ -1541,6 +1546,11 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
             local name_id = ctx.ast_lists:get(ps + i)
             local pt_id = types_mod.make_var(ctx, fn_scope.level)
             env_mod.bind(fn_scope, name_id, pt_id)
+            -- Unannotated param: mark as inferred-only so the REDUNDANT_CAST
+            -- classifier can suppress false positives on force casts whose
+            -- type came from caller-side inference rather than an annotation.
+            ctx._inferred_param_tid = ctx._inferred_param_tid or {}
+            ctx._inferred_param_tid[pt_id] = true
             param_tids[#param_tids + 1] = pt_id
         end
         if has_vararg then
