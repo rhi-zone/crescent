@@ -99,8 +99,11 @@ local function encode_string(s, buf, n)
     return n
 end
 
--- Forward declaration for mutual recursion.
-local encode_value --: ((v: unknown, buf: { [integer]: string }, n: integer, null_sentinel: unknown, visited: { [unknown]: boolean | nil }, depth: integer) -> integer) | nil
+-- Forward declaration for mutual recursion. We hold the function in a single-
+-- slot table so the assignment below can write to `slot.fn` and reads narrow
+-- to the function type (avoiding a `fn | nil` reading at use sites).
+--:: EncodeValueFn = (v: unknown, buf: { [integer]: string }, n: integer, null_sentinel: unknown, visited: { [unknown]: boolean | nil }, depth: integer) -> integer
+local encode_value --: EncodeValueFn | nil
 
 -- Encode a Lua table. Determines array vs object heuristic.
 --: (t: { [unknown]: unknown }, buf: { [integer]: string }, n: integer, null_sentinel: unknown, visited: { [unknown]: boolean | nil }, depth: integer) -> integer
@@ -124,26 +127,26 @@ local function encode_table(t, buf, n, null_sentinel, visited, depth)
         if count ~= len then is_array = false end
     end
 
-    local ev = encode_value --[[:! (v: unknown, buf: { [integer]: string }, n: integer, null_sentinel: unknown, visited: { [unknown]: boolean | nil }, depth: integer) -> integer]]
+    if not encode_value then error("encode_value not initialized") end
     if is_array then
         buf[n] = "["; n = n + 1
         for i = 1, len do
             if i > 1 then buf[n] = ","; n = n + 1 end
-            n = ev(t[i], buf, n, null_sentinel, visited, depth + 1)
+            n = encode_value(t[i], buf, n, null_sentinel, visited, depth + 1)
         end
         buf[n] = "]"; n = n + 1
     else
         buf[n] = "{"; n = n + 1
         local first = true
         for k, v in pairs(t) do
-            if type_fn(k) ~= "string" then
-                error("object key must be a string, got " .. type_fn(k))
+            if type(k) ~= "string" then
+                error("object key must be a string, got " .. type(k))
             end
             if not first then buf[n] = ","; n = n + 1 end
             first = false
-            n = encode_string(k --[[:! string]], buf, n) --[[:! integer]]
+            n = encode_string(k, buf, n)
             buf[n] = ":"; n = n + 1
-            n = ev(v, buf, n, null_sentinel, visited, depth + 1)
+            n = encode_value(v, buf, n, null_sentinel, visited, depth + 1)
         end
         buf[n] = "}"; n = n + 1
     end
@@ -155,44 +158,48 @@ end
 -- Encode any Lua value to JSON, appending to `buf` at index `n`.
 --: (v: unknown, buf: { [integer]: string }, n: integer, null_sentinel: unknown, visited: { [unknown]: boolean | nil }, depth: integer) -> integer
 encode_value = function(v, buf, n, null_sentinel, visited, depth)
-    local t = type_fn(v)
+    -- Note: use `type` directly (not the `type_fn` alias) so the typechecker
+    -- can narrow `v` from `unknown` to the corresponding concrete type via
+    -- each `type(v) == "..."` guard.
     if v == null_sentinel then
         buf[n] = "null"; n = n + 1
-    elseif t == "nil" then
+    elseif type(v) == "nil" then
         -- nil inside an array becomes null (caller must handle omission in objects)
         buf[n] = "null"; n = n + 1
-    elseif t == "boolean" then
+    elseif type(v) == "boolean" then
         buf[n] = v and "true" or "false"; n = n + 1
-    elseif t == "number" then
-        local vn = v --[[:! number]]
-        if vn ~= vn or vn == math_huge or vn == -math_huge then
+    elseif type(v) == "number" then
+        if v ~= v or v == math_huge or v == -math_huge then
             error("invalid number (nan or inf)")
         end
         -- Use integer formatting for values that are exact integers in safe range.
-        if vn == math_floor(vn) and vn >= -2^53 and vn <= 2^53 then
-            buf[n] = str_format("%d", vn); n = n + 1
+        if v == math_floor(v) and v >= -2^53 and v <= 2^53 then
+            buf[n] = str_format("%d", v); n = n + 1
         else
-            buf[n] = str_format("%.17g", vn); n = n + 1
+            buf[n] = str_format("%.17g", v); n = n + 1
         end
-    elseif t == "string" then
-        n = encode_string(v --[[:! string]], buf, n)
-    elseif t == "table" then
-        n = encode_table(v --[[:! { [unknown]: unknown }]], buf, n, null_sentinel, visited, depth)
+    elseif type(v) == "string" then
+        n = encode_string(v, buf, n)
+    elseif type(v) == "table" then
+        n = encode_table(v, buf, n, null_sentinel, visited, depth)
     else
-        error("cannot encode value of type " .. t)
+        error("cannot encode value of type " .. type(v))
     end
     return n
 end
 
 -- Raw encode: throws on error.
+--: (v: unknown, null_sentinel: unknown) -> string
 local function encode_raw(v, null_sentinel)
     null_sentinel = null_sentinel or M.null
     local buf = {}
+    if not encode_value then error("encode_value not initialized") end
     local n = encode_value(v, buf, 1, null_sentinel, {}, 0)
     return tbl_concat(buf)
 end
 
 -- Public encode: returns (result) or (nil, errmsg).
+--: (v: unknown, null_sentinel: unknown) -> (string | nil, string | nil)
 M.encode = function(v, null_sentinel)
     local ok, result = pcall(encode_raw, v, null_sentinel)
     if ok then return result end
@@ -425,12 +432,16 @@ end
 -- Each frame: { t=table, is_array=bool, key=string|nil, n=int }
 --:: DecodeFrame = { t: { [unknown]: unknown } | nil, is_array: boolean, key: string | nil, n: integer }
 local _stack = {} --: { [integer]: DecodeFrame }
-for _i = 1, 512 do _stack[_i] = {t=nil, is_array=false, key=nil, n=0} --[[:! DecodeFrame]] end
+for _i = 1, 512 do
+    local frame = { t = nil, is_array = false, key = nil, n = 0 } --: DecodeFrame
+    _stack[_i] = frame
+end
 
 -- Iterative decoder: replaces mutually-recursive decode_value/decode_array/
 -- decode_object. The entire parse path is a single function with goto-based
 -- state transitions, letting LuaJIT trace end-to-end without "return to lower
 -- frame" NYI aborts.
+--: (s: string, null_sentinel: unknown) -> unknown
 local function decode_raw(s, null_sentinel)
     _src  = s
     _len  = #s
@@ -741,6 +752,7 @@ local function decode_raw(s, null_sentinel)
 end
 
 -- Public decode: returns (result) or (nil, errmsg).
+--: (s: string, null_sentinel: unknown) -> (unknown, string | nil)
 M.decode = function(s, null_sentinel)
     local ok, result = pcall(decode_raw, s, null_sentinel)
     if ok then return result end

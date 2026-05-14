@@ -137,6 +137,10 @@ mod.codepoint = function (s, i, j)
 			i = i + plen
 		end
 	end
+	-- The force cast here works around a typechecker limitation: generic
+	-- instantiation of `unpack` (T = integer, since cs: { [integer]: integer })
+	-- does not flow into the return position, so the vararg return type stays
+	-- unbound. Fixing this requires typechecker work outside this directory.
 	return ((unpack(cs) --[[: unknown]]) --[[:! number]])
 end
 

@@ -84,47 +84,53 @@ ESC_TABLE[0x09] = "\\t"
 
 local ESC_PAT = '[%z\1-\31"\\]'
 
+--: (s: string, buf: { [integer]: string }, n: integer) -> integer
 local function ffi_encode_string(s, buf, n)
-    n = n --[[:! integer]]
     buf[n] = '"'; n = n + 1
     if not str_find(s, ESC_PAT) then
         buf[n] = s; n = n + 1
     else
         local len = #s
-        local ptr = (ffi.cast("const uint8_t *", s) --[[: unknown]]) --[[:! number]]
+        -- ffi.cast("const uint8_t *", s) returns opaque `cdata` in stdlib (the
+        -- pointer-typed CTypeMap overload only covers unqualified scalars).
+        -- Hold the pointer as `number` for arithmetic, and re-cast each
+        -- offset back to Ptr<integer> for ffi.string. These are FFI-boundary
+        -- casts: there's no source we can fix without extending stdlib's
+        -- ffi.cast overloads to cover qualified pointer types.
+        local ptr = ffi.cast("const uint8_t *", s) --[[:! Ptr<integer>]]
         local start = 0
         local i = 0
         while i < len do
             local b = ptr[i]
             local esc = ESC_TABLE[b]
-            if esc then
+            if type(esc) == "string" then
                 if i > start then
-                    local ffi_str = ffi.string
-                    buf[n] = ffi_str((ptr + start) --[[:! Ptr<integer>]], i - start); n = n + 1
+                    buf[n] = ffi.string((ptr + start) --[[:! Ptr<integer>]], i - start); n = n + 1
                 end
-                buf[n] = esc --[[:! string]]; n = n + 1
+                buf[n] = esc; n = n + 1
                 start = i + 1
             end
             i = i + 1
         end
         if start < len then
-            local ffi_str = ffi.string
-            buf[n] = ffi_str((ptr + start) --[[:! Ptr<integer>]], len - start); n = n + 1
+            buf[n] = ffi.string((ptr + start) --[[:! Ptr<integer>]], len - start); n = n + 1
         end
     end
     buf[n] = '"'; n = n + 1
     return n
 end
 
-local ffi_encode_value
+--:: FfiEncodeValueFn = (v: unknown, buf: { [integer]: string }, n: integer, null_sentinel: unknown, visited: { [unknown]: boolean | nil }, depth: integer) -> integer
+-- Forward decl for mutual recursion; assigned below before any call.
+local ffi_encode_value --: FfiEncodeValueFn | nil
 
+--: (t: { [unknown]: unknown }, buf: { [integer]: string }, n: integer, null_sentinel: unknown, visited: { [unknown]: boolean | nil }, depth: integer) -> integer
 local function ffi_encode_table(t, buf, n, null_sentinel, visited, depth)
-    n = n --[[:! integer]]
     if depth > 512 then error("maximum nesting depth (512) exceeded") end
     if visited[t] then error("circular reference detected") end
     visited[t] = true
 
-    local len = #((t --[[: unknown]]) --[[:! { [integer]: unknown }]])
+    local len = #t
     local is_array = len > 0
     if is_array then
         local count = 0
@@ -132,26 +138,26 @@ local function ffi_encode_table(t, buf, n, null_sentinel, visited, depth)
         if count ~= len then is_array = false end
     end
 
+    if not ffi_encode_value then error("ffi_encode_value not initialized") end
     if is_array then
         buf[n] = "["; n = n + 1
         for i = 1, len do
             if i > 1 then buf[n] = ","; n = n + 1 end
-            n = (ffi_encode_value(t[i], buf, n, null_sentinel, visited, depth + 1) --[[:! integer]])
+            n = ffi_encode_value(t[i], buf, n, null_sentinel, visited, depth + 1)
         end
         buf[n] = "]"; n = n + 1
     else
         buf[n] = "{"; n = n + 1
         local first = true
         for k, v in pairs(t) do
-            if type_fn(k) ~= "string" then
-                error("object key must be a string, got " .. type_fn(k))
+            if type(k) ~= "string" then
+                error("object key must be a string, got " .. type(k))
             end
-            local k_ = k --[[:! string]]
             if not first then buf[n] = ","; n = n + 1 end
             first = false
-            n = ffi_encode_string(k_, buf, n)
+            n = ffi_encode_string(k, buf, n)
             buf[n] = ":"; n = n + 1
-            n = (ffi_encode_value(v, buf, n, null_sentinel, visited, depth + 1) --[[:! integer]])
+            n = ffi_encode_value(v, buf, n, null_sentinel, visited, depth + 1)
         end
         buf[n] = "}"; n = n + 1
     end
@@ -160,16 +166,15 @@ local function ffi_encode_table(t, buf, n, null_sentinel, visited, depth)
     return n
 end
 
+--: (v: unknown, buf: { [integer]: string }, n: integer, null_sentinel: unknown, visited: { [unknown]: boolean | nil }, depth: integer) -> integer
 ffi_encode_value = function(v, buf, n, null_sentinel, visited, depth)
-    n = n --[[:! integer]]
-    local t = type_fn(v)
     if v == null_sentinel then
         buf[n] = "null"; n = n + 1
-    elseif t == "nil" then
+    elseif type(v) == "nil" then
         buf[n] = "null"; n = n + 1
-    elseif t == "boolean" then
+    elseif type(v) == "boolean" then
         buf[n] = v and "true" or "false"; n = n + 1
-    elseif t == "number" then
+    elseif type(v) == "number" then
         if v ~= v or v == math_huge or v == -math_huge then
             error("invalid number (nan or inf)")
         end
@@ -178,23 +183,26 @@ ffi_encode_value = function(v, buf, n, null_sentinel, visited, depth)
         else
             buf[n] = str_format("%.17g", v); n = n + 1
         end
-    elseif t == "string" then
-        n = ffi_encode_string((v --[[: unknown]]) --[[:! string]], buf, n)
-    elseif t == "table" then
+    elseif type(v) == "string" then
+        n = ffi_encode_string(v, buf, n)
+    elseif type(v) == "table" then
         n = ffi_encode_table(v, buf, n, null_sentinel, visited, depth)
     else
-        error("cannot encode value of type " .. t)
+        error("cannot encode value of type " .. type(v))
     end
     return n
 end
 
+--: (v: unknown, null_sentinel: unknown) -> string
 local function encode_raw(v, null_sentinel)
     null_sentinel = null_sentinel or M.null
     local buf = {}
+    if not ffi_encode_value then error("ffi_encode_value not initialized") end
     ffi_encode_value(v, buf, 1, null_sentinel, {}, 0)
     return tbl_concat(buf)
 end
 
+--: (v: unknown, null_sentinel: unknown) -> (string | nil, string | nil)
 M.encode = function(v, null_sentinel)
     local ok, result = pcall(encode_raw, v, null_sentinel)
     if ok then return result end
@@ -245,9 +253,10 @@ end
 -- _pos (0-indexed) points to the first byte of string content on entry.
 -- Byte access uses _ptr8[_pos]; string extraction uses str_sub (faster than
 -- ffi.string() for the short strings typical in JSON keys/values).
+--: () -> string
 local function decode_string()
     local start = _pos
-    local buf = nil
+    local buf = nil --: { [integer]: string } | nil
 
     while _pos < _len do
         local b = _ptr8[_pos]
@@ -267,22 +276,23 @@ local function decode_string()
         elseif b < 0x20 then
             decode_error("unescaped control character in string")
         elseif b == 0x5C then  -- backslash
+            local sbuf
             if not buf then
-                buf = {}
+                sbuf = {} --: { [integer]: string }
                 if _pos > start then
-                    buf[1] = str_sub(_src, start + 1, _pos)
+                    sbuf[1] = str_sub(_src, start + 1, _pos)
                 end
+                buf = sbuf
             else
+                sbuf = buf
                 if _pos > start then
-                    buf[#buf + 1] = str_sub(_src, start + 1, _pos)
+                    sbuf[#sbuf + 1] = str_sub(_src, start + 1, _pos)
                 end
             end
             _pos = _pos + 1
             if _pos >= _len then decode_error("truncated escape sequence") end
             local esc = _ptr8[_pos]
             _pos = _pos + 1
-            -- buf is guaranteed non-nil here (set above in this branch)
-            local sbuf = buf --[[:! string[] ]]
             if esc == 0x22 then sbuf[#sbuf + 1] = '"'
             elseif esc == 0x5C then sbuf[#sbuf + 1] = '\\'
             elseif esc == 0x2F then sbuf[#sbuf + 1] = '/'
@@ -404,8 +414,8 @@ local function skip_ws()
     if _pos >= _len then return end
     local b = _ptr8[_pos]
     if b ~= 0x20 and b ~= 0x09 and b ~= 0x0A and b ~= 0x0D then return end
-    local nws, _ = str_find(_src, WS_SKIP_PAT, _pos + 1)  -- +1: 0→1-indexed
-    _pos = nws and ((nws --[[:! integer]]) - 1) or _len  -- back to 0-indexed
+    local nws = str_find(_src, WS_SKIP_PAT, _pos + 1)  -- +1: 0→1-indexed
+    if nws then _pos = nws - 1 else _pos = _len end  -- back to 0-indexed
 end
 
 local function decode_array()
@@ -504,6 +514,7 @@ decode_value = function()
     end
 end
 
+--: (s: string, null_sentinel: unknown) -> unknown
 local function decode_raw(s, null_sentinel)
     _src   = s
     _len   = #s
@@ -517,6 +528,7 @@ local function decode_raw(s, null_sentinel)
     return v
 end
 
+--: (s: string, null_sentinel: unknown) -> (unknown, string | nil)
 M.decode = function(s, null_sentinel)
     local ok, result = pcall(decode_raw, s, null_sentinel)
     if ok then return result end

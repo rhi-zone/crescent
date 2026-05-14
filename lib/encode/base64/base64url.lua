@@ -8,7 +8,7 @@ end
 local base64 = require("lib.encode.base64")
 
 local M = {}
-local URL_OPTS = ({ url = (true --[[:! boolean | nil]]) } --[[:! { pad: boolean | nil, url: boolean | nil }]])
+local URL_OPTS = { url = true, pad = nil } --: { pad: boolean | nil, url: boolean | nil }
 
 --: (string, { pad: boolean | nil, url: boolean | nil } | nil) -> string
 M.encode = function(str, opts)
@@ -19,8 +19,8 @@ M.encode = function(str, opts)
     return base64.encode(str, URL_OPTS)
 end
 
---: (string) -> (string | nil, string | nil)
-M.decode = function(b64)
+--: (string, { url: boolean | nil } | nil) -> (string | nil, string | nil)
+M.decode = function(b64, _opts)
     return base64.decode(b64, URL_OPTS)
 end
 

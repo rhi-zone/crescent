@@ -25,6 +25,13 @@ end
 mod.urlencode_to_string = function (urlencoded)
 	-- TODO: error if invalid
 	local out2 = urlencoded:gsub("%%([0-9a-fA-F][0-9a-fA-F])", function (code) return string.char(math2.tointeger(tonumber(code, 16)) or 0) end)
+	-- The force cast pins the boundary type. Removing it surfaces a latent
+	-- typechecker limitation: gsub's repl-callback parameter type does not
+	-- flow from the function-type annotation onto the inline callback, so
+	-- `tonumber(code, 16)` is checked with `code` as `unknown` and the
+	-- chained return degrades to `number | nil`. Fixing that requires
+	-- typechecker work (parameter-type flow into inline function literals)
+	-- outside the scope of this directory.
 	return (out2 --[[: unknown]]) --[[:! string]]
 end
 

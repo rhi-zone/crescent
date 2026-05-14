@@ -22,6 +22,7 @@ local sizes = {
 }
 
 -- Choose iteration counts so each timed run takes a meaningful slice of wall time.
+--: (bytes: integer) -> integer
 local function iters_for(bytes)
     if bytes <=       64 then return 200000 end
     if bytes <=     1024 then return  20000 end
@@ -29,19 +30,21 @@ local function iters_for(bytes)
     return 30
 end
 
+--: (fn: (input: string, opts: { pad: boolean | nil, url: boolean | nil } | nil) -> string, input: string, n: integer) -> number
 local function bench(fn, input, n)
-    for _ = 1, WARMUP do fn(input) end
+    for _ = 1, WARMUP do fn(input, nil) end
     local t0 = os.clock()
-    for _ = 1, n do fn(input) end
+    for _ = 1, n do fn(input, nil) end
     local t1 = os.clock()
     local mb = (#input * n) / (1024 * 1024)
     return mb / (t1 - t0)
 end
 
+--: (fn: (encoded: string, opts: { url: boolean | nil } | nil) -> (string | nil, string | nil), encoded: string, orig_bytes: integer, n: integer) -> number
 local function bench_decode(fn, encoded, orig_bytes, n)
-    for _ = 1, WARMUP do fn(encoded) end
+    for _ = 1, WARMUP do fn(encoded, nil) end
     local t0 = os.clock()
-    for _ = 1, n do fn(encoded) end
+    for _ = 1, n do fn(encoded, nil) end
     local t1 = os.clock()
     -- Report throughput in terms of original (decoded) bytes.
     local mb = (orig_bytes * n) / (1024 * 1024)
@@ -84,7 +87,7 @@ io.write(string.format("%-8s  %-6s  %14s  %14s\n",
     "variant", "size", "encode MB/s", "decode MB/s"))
 io.write(string.rep("-", 50) .. "\n")
 
---:: BenchVariant = { name: string, enc: (string, { pad: boolean | nil, url: boolean | nil } | nil) -> string, dec: (string, { url: boolean | nil } | nil) -> string }
+--:: BenchVariant = { name: string, enc: (s: string, opts: { pad: boolean | nil, url: boolean | nil } | nil) -> string, dec: (s: string, opts: { url: boolean | nil } | nil) -> (string | nil, string | nil) }
 
 local base64_any = base64
 local base64url_any = base64url
@@ -99,10 +102,8 @@ for _, v in ipairs(variants) do
         local encoded = v.enc(input, nil)
         local n       = iters_for(s.bytes)
 
-        local venc = (v.enc --[[: unknown]]) --[[:! (string, unknown) -> string]]
-        local vdec = (v.dec --[[: unknown]]) --[[:! (string, unknown) -> (string | nil, string | nil)]]
-        local enc_mbps = bench(venc, input, n)
-        local dec_mbps = bench_decode(vdec, encoded, s.bytes, n)
+        local enc_mbps = bench(v.enc, input, n)
+        local dec_mbps = bench_decode(v.dec, encoded, s.bytes, n)
 
         io.write(string.format("%-8s  %-6s  %11.1f MB/s  %11.1f MB/s\n",
             v.name, s.label, enc_mbps, dec_mbps))
