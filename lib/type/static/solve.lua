@@ -3020,22 +3020,26 @@ local function emit_missing_param_annotation(ctx, real_err, sev)
                     local sig = "(" .. table.concat(pparts, ", ") .. ") -> " .. ret_str
                     local fn_line = g.fn_line
                     local skip_autofix = false
-                    -- Only autofix when the function definition begins its own
-                    -- line (modulo indentation). Inline anonymous functions
-                    -- like `s:gsub(p, function(c) ... end)` have no clean
-                    -- placement: a `--:` on the line above attaches to the
-                    -- outer statement, not the inline function. Detect by
-                    -- requiring the function-def line, trimmed of leading
-                    -- whitespace, to start with `function` or `local function`
-                    -- (the only two top-level forms). Also `M.foo = function(...)`
-                    -- is rejected — it is mid-expression even though it looks
-                    -- statement-like; the right surface for that is to refactor
-                    -- to `function M.foo(...)`.
+                    -- Only autofix when the function definition is the entire
+                    -- right-hand side of a top-level statement (so a `--:` on
+                    -- the preceding line cleanly attaches to it). Accepted
+                    -- forms (trimmed of leading whitespace):
+                    --   function name[.path][:method](...)   -- function-def stmt
+                    --   local function name(...)             -- local function stmt
+                    --   local name = function(...)           -- local assigned to fn
+                    --   name[.path] = function(...)          -- assignment to fn
+                    -- Rejected: inline anonymous functions appearing mid-
+                    -- expression like `s:gsub(p, function(c) ... end)`. There,
+                    -- a `--:` on the line above attaches to the outer
+                    -- statement, not the inline function.
                     local target_line = get_line(ctx.source, fn_line)
                     local trimmed = target_line:match("^[ \t]*(.*)$") or target_line
-                    if not (trimmed:find("^function%s") or trimmed:find("^function%(")
-                        or trimmed:find("^local%s+function%s") or trimmed == "function"
-                        or trimmed:find("^local%s+function%(")) then
+                    local is_statement_form =
+                        trimmed:find("^function%s+[%w_][%w_.:]*%s*%(")
+                        or trimmed:find("^local%s+function%s+[%w_]+%s*%(")
+                        or trimmed:find("^local%s+[%w_]+%s*=%s*function%s*%(")
+                        or trimmed:find("^[%w_][%w_.]*%s*=%s*function%s*%(")
+                    if not is_statement_form then
                         skip_autofix = true
                     end
                     -- Check the preceding non-blank line for existing annotation.
