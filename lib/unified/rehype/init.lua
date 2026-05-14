@@ -30,24 +30,26 @@ local hast    = require("lib.unified.hast")
 
 local M = {}
 
+--:: processor = { parser: (processor, (string) -> unknown) -> processor, compiler: (processor, (unknown) -> string) -> processor, use_transformer: (processor, (unknown) -> unknown) -> processor, ... }
+
 -- ── Plugins ───────────────────────────────────────────────────────────────────
 
 -- rehype-parse (stub): registers a minimal pass-through parser.
 -- A real HTML → hast parser is not yet implemented; this lets :parse() and
 -- :process() run without error and returns a root node that carries the
 -- raw HTML source for downstream transformers that know how to handle it.
---: (unknown, unknown) -> nil
+--: (processor, unknown) -> nil
 local function rehype_parse(processor, _opts)
-  ;(processor --[[:! { parser: (...unknown) -> unknown, ... }]]):parser(function(source)
+  processor:parser(function(source)
     -- Stub: no HTML parsing. Returns a root node with raw source attached.
     return { type = "root", children = {}, raw = source }
   end)
 end
 
 -- rehype-stringify: registers the hast → HTML compiler.
---: (unknown, unknown) -> nil
+--: (processor, unknown) -> nil
 local function rehype_stringify(processor, _opts)
-  ;(processor --[[:! { compiler: (...unknown) -> unknown, ... }]]):compiler(function(ast)
+  processor:compiler(function(ast)
     return hast.to_html(ast)
   end)
 end

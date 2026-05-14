@@ -115,26 +115,34 @@ end
 --   type_or_types : string | string[] | nil  (nil = visit all nodes)
 --   enter         : function(node, index, parent) -> signal | nil
 --   exit          : function(node, index, parent) -> signal | nil  (optional)
+--: (unknown, unknown, unknown | nil, unknown | nil) -> nil
+local function visit_impl(tree, a, b, c)
+  local types, enter, exit
+
+  -- Determine argument layout: type_or_types is optional.
+  if type(a) == "function" then
+    -- visit(tree, enter [, exit])
+    types = nil
+    enter = a
+    exit  = b
+  else
+    -- visit(tree, type_or_types, enter [, exit])
+    types = a
+    enter = b
+    exit  = c
+  end
+
+  local test = make_test(types)
+  local walk_ = (walk --[[:! (unknown, unknown, unknown, unknown, unknown, unknown) -> unknown]])
+  walk_(tree, nil, nil, test, enter, exit)
+end
+
+M.visit = visit_impl
+
 setmetatable(M, {
+  --: (unknown, unknown, unknown, unknown | nil, unknown | nil) -> nil
   __call = function(_, tree, a, b, c)
-    local types, enter, exit
-
-    -- Determine argument layout: type_or_types is optional.
-    if type(a) == "function" then
-      -- visit(tree, enter [, exit])
-      types = nil
-      enter = a
-      exit  = b
-    else
-      -- visit(tree, type_or_types, enter [, exit])
-      types = a
-      enter = b
-      exit  = c
-    end
-
-    local test = make_test(types)
-    local walk_ = (walk --[[:! (unknown, unknown, unknown, unknown, unknown, unknown) -> unknown]])
-    walk_(tree, nil, nil, test, enter, exit)
+    return visit_impl(tree, a, b, c)
   end,
 })
 

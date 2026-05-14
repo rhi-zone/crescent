@@ -582,6 +582,7 @@ local TOKENIZERS = {
 
 -- Extract concatenated text content from a list of hast children.
 --:: HastChild = { type: string, value: string | nil, children: list | nil, ... }
+--:: processor = { parser: (processor, (string) -> unknown) -> processor, compiler: (processor, (unknown) -> string) -> processor, use_transformer: (processor, (unknown) -> unknown) -> processor, ... }
 --: (list) -> string
 local function extract_text(children)
   local parts = {} --: { [integer]: string }
@@ -656,13 +657,13 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (unknown, { prefix: string | nil, aliases: { [string]: string } | nil, ... } | nil) -> nil
+--: (processor, { prefix: string | nil, aliases: { [string]: string } | nil, ... } | nil) -> nil
 local function plugin(processor, opts)
   opts = (opts or {}) --[[:! { prefix: string | nil, aliases: { [string]: string } | nil }]]
   local prefix  = opts.prefix  or "hljs-"
   local aliases = opts.aliases or {}
 
-  ;(processor --[[:! { use_transformer: (...unknown) -> unknown, ... }]]):use_transformer(function(tree)
+  processor:use_transformer(function(tree)
     return walk(tree, prefix, aliases)
   end)
 end

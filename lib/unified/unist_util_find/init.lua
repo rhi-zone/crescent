@@ -33,7 +33,7 @@ setmetatable(M, {
   __call = function(_, tree, spec)
     local test = make_test(spec)
     local found = nil
-    ;((visit --[[: unknown]]) --[[:! (unknown, unknown) -> ()]])(tree, function(node)
+    visit.visit(tree, function(node)
       if test(node) then
         found = node
         return visit.EXIT

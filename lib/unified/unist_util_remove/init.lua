@@ -31,22 +31,30 @@ local function make_test(spec)
 end
 
 -- remove(tree, test) -> tree | nil
-setmetatable(M, {
-  __call = function(_, tree, spec)
-    local test = make_test(spec)
+--: (UnistNode, string | (UnistNode) -> boolean) -> UnistNode | nil
+local function remove_impl(tree, spec)
+  local test = make_test(spec)
 
-    -- Check if root itself matches.
-    if test(tree) then
-      return nil
+  -- Check if root itself matches.
+  if test(tree) then
+    return nil
+  end
+
+  visit.visit(tree, function(node)
+    if test(node) then
+      return visit.REMOVE
     end
+  end)
 
-    ;((visit --[[: unknown]]) --[[:! (unknown, unknown) -> ()]])(tree, function(node)
-      if test(node) then
-        return visit.REMOVE
-      end
-    end)
+  return tree
+end
 
-    return tree
+M.remove = remove_impl
+
+setmetatable(M, {
+  --: (unknown, UnistNode, string | (UnistNode) -> boolean) -> UnistNode | nil
+  __call = function(_, tree, spec)
+    return remove_impl(tree, spec)
   end,
 })
 

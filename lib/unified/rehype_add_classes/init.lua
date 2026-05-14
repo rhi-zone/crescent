@@ -74,6 +74,7 @@ end
 -- ── Tree walker ───────────────────────────────────────────────────────────────
 
 --:: HastNode = { type: string, tag?: string, children?: { [integer]: HastNode }, props?: { class: string | nil, [string]: unknown }, ... }
+--:: processor = { parser: (processor, (string) -> unknown) -> processor, compiler: (processor, (unknown) -> string) -> processor, use_transformer: (processor, (unknown) -> unknown) -> processor, ... }
 --: (HastNode, { [string]: string[] }) -> nil
 local function walk(node, map)
   if node.type == "element" then
@@ -96,11 +97,11 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (unknown, { [string]: string | string[], ... } | nil) -> nil
+--: (processor, { [string]: string | string[], ... } | nil) -> nil
 function M.plugin(processor, opts)
   opts = opts or {}
   local map = compile_selectors(opts)
-  ;(processor --[[:! { use_transformer: ((...unknown) -> unknown) }]]):use_transformer(function(tree)
+  processor:use_transformer(function(tree)
     walk(tree, map)
     return tree
   end)

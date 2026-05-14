@@ -33,6 +33,7 @@ local M = {}
 -- ── Tree transformer ──────────────────────────────────────────────────────────
 
 --:: MathNode = { type: string, value?: string, children?: { [integer]: MathNode }, ... }
+--:: processor = { parser: (processor, (string) -> unknown) -> processor, compiler: (processor, (unknown) -> string) -> processor, use_transformer: (processor, (unknown) -> unknown) -> processor, ... }
 --: (MathNode, string, string, string) -> MathNode
 local function make_math_node(math_node, inline_class, display_class, _output)
   local t = math_node.type
@@ -76,7 +77,7 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (unknown, { class_names: { inline: string | nil, display: string | nil } | nil, output: string | nil, ... } | nil) -> nil
+--: (processor, { class_names: { inline: string | nil, display: string | nil } | nil, output: string | nil, ... } | nil) -> nil
 function M.plugin(processor, opts)
   opts = (opts or {}) --[[:! { class_names: { inline: string | nil, display: string | nil } | nil, output: string | nil }]]
   local class_names   = opts.class_names or ({} --[[:! { inline: string | nil, display: string | nil }]])
@@ -84,7 +85,7 @@ function M.plugin(processor, opts)
   local display_class = class_names.display or "math math-display"
   local output        = opts.output or "html"
 
-  ;(processor --[[:! { use_transformer: (...unknown) -> unknown, ... }]]):use_transformer(function(tree)
+  processor:use_transformer(function(tree)
     return transform(tree --[[:! MathNode]], inline_class, display_class, output)
   end)
 end

@@ -21,6 +21,7 @@ local HEADING_LEVEL = { h1=1, h2=2, h3=3, h4=4, h5=5, h6=6 } --: { [string]: int
 -- ── Tree walker ───────────────────────────────────────────────────────────────
 
 --:: HastNode = { type: string, tag?: string, children?: { [integer]: HastNode }, ... }
+--:: processor = { parser: (processor, (string) -> unknown) -> processor, compiler: (processor, (unknown) -> string) -> processor, use_transformer: (processor, (unknown) -> unknown) -> processor, ... }
 --: (HastNode, number) -> nil
 local function walk(node, shift)
   if node.type == "element" then
@@ -42,11 +43,11 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (unknown, { shift: number | nil, ... } | nil) -> nil
+--: (processor, { shift: number | nil, ... } | nil) -> nil
 function M.plugin(processor, opts)
   opts = (opts or {}) --[[:! { shift: number | nil }]]
   local shift = (opts.shift or 1) --[[:! number]]
-  ;(processor --[[:! { use_transformer: (...unknown) -> unknown, ... }]]):use_transformer(function(tree)
+  processor:use_transformer(function(tree)
     walk(tree, shift)
     return tree
   end)

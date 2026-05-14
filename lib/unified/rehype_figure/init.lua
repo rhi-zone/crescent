@@ -28,6 +28,7 @@ local M = {}
 -- Returns the single img child if node is a <p> with exactly one element child
 -- that is an <img>; otherwise returns nil.
 --:: HastNode = { type: string, tag?: string, value?: string, children?: { [integer]: HastNode }, props?: { [string]: unknown }, ... }
+--:: processor = { parser: (processor, (string) -> unknown) -> processor, compiler: (processor, (unknown) -> string) -> processor, use_transformer: (processor, (unknown) -> unknown) -> processor, ... }
 --: (HastNode) -> HastNode | nil
 local function sole_img_child(node)
   if node.type ~= "element" or node.tag ~= "p" then return nil end
@@ -99,12 +100,12 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (unknown, { class: string | nil, ... } | nil) -> nil
+--: (processor, { class: string | nil, ... } | nil) -> nil
 function M.plugin(processor, opts)
   opts = opts or ({} --[[:! { class: string | nil }]])
   local class = opts.class
 
-  ;(processor --[[:! { use_transformer: (...unknown) -> unknown, ... }]]):use_transformer(function(tree)
+  processor:use_transformer(function(tree)
     if tree.children then
       transform_children(tree.children, class)
     end

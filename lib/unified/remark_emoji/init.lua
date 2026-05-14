@@ -166,7 +166,8 @@ end
 
 -- ── Plugin ────────────────────────────────────────────────────────────────────
 
---: (processor: unknown, opts: { emoticon: boolean | nil, alias: { [string]: string } | nil } | nil) -> nil
+--:: processor = { parser: (processor, (string) -> unknown) -> processor, compiler: (processor, (unknown) -> string) -> processor, use_transformer: (processor, (unknown) -> unknown) -> processor, ... }
+--: (processor: processor, opts: { emoticon: boolean | nil, alias: { [string]: string } | nil } | nil) -> nil
 local function remark_emoji(processor, opts)
   local use_emoticon = opts and opts.emoticon
   local extra_alias  = opts and opts.alias
@@ -181,7 +182,7 @@ local function remark_emoji(processor, opts)
     lookup = EMOJI
   end
 
-  ;(processor --[[:! { use_transformer: (...unknown) -> unknown, ... }]]):use_transformer(function(ast)
+  processor:use_transformer(function(ast)
     walk(ast, function(node)
       if node.type == "text" and node.value then
         local v = replace_shortcodes(node.value --[[:! string]], lookup)
