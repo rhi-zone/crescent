@@ -4,6 +4,98 @@
 
 ## HIGH PRIORITY
 
+### Typechecker work — paused 2026-05-14 (resumable)
+
+> *Pivot to platform/UI work; typechecker is in a working state. Resume here later.*
+
+**State at pause:** Phases A/B/C of the unannotated-param-semantics plan all
+landed (`c43bd439`, `a61c7cbb`, `eff69f9d`) with five rounds of follow-up
+fixes (`c4d55139`, `931ea329`, `333bd691`, `ee4184f4`, plus stdlib bit-typedef
+tightening at `73f24041`). Smoke tested on 11 libraries: 0 error regressions,
+67 annotations applied. Design captured in `docs/typechecker-param-semantics.md`.
+
+Open items, ordered by priority:
+
+- [ ] **Cosmetic: union dedup in compound shapes.** Some autofix outputs still
+  surface visible duplicates like `string | integer | string | integer | nil`
+  where literals widened in nested positions re-introduce structurally-equal
+  members that `make_union`'s `struct_equal` doesn't catch in compound contexts.
+  Output is valid Lua, just ugly. Probably needs a string-level dedup pass
+  after `widen_for_annotation`, OR a tighter `union_has` for nested positions.
+- [ ] **Cosmetic: huge enum unions inline in returns.** Functions returning a
+  value out of a `"a" | "b" | ... | "z"` enum get the full enum spelled out
+  in the autofix annotation. Technically correct, unwieldy as source. Consider
+  detecting the alias and rendering the alias name when in scope. (The
+  in-scope check exists for params; same logic should apply to returns.)
+- [ ] **`bit` typedef tightening interacts badly with REDUNDANT_CAST autofix
+  on bit-wrapping libs.** `lib/bits/init.lua` regresses 13→17 errors when
+  `--fix` runs because it had explicit casts on bit ops that were widening
+  to `(number, number)` — those casts are no longer redundant in the right
+  direction after `73f24041`, but the autofix still strips them. Either:
+  (a) re-survey the REDUNDANT_CAST autofix classifier for the new typedef
+  shape, or (b) carve out an exception for libs that intentionally re-typed
+  the bit ops. The MISSING_PARAM_ANNOTATION autofix itself is unaffected.
+- [ ] **Corpus-wide `--fix` run — go/no-go.** Smoke tests are clean across
+  11 small/medium libraries. Surveyed counts: 2010 REDUNDANT_CAST + 3502
+  MISSING_PARAM_ANNOTATION across 777 files. Recommended approach: commit
+  per-library so a regression in one doesn't poison the batch. Need user
+  go-ahead before running (this is the same territory as the abandoned
+  REDUNDANT_CAST bulk-autofix from earlier).
+- [ ] **`PARAM_INFERENCE_OUTLIER` (deferred from Phase C).** Original plan
+  called for a separate diagnostic at minority call sites when the modal
+  autofix runs. Dropped because under destructive-bind semantics outliers
+  already error at their call sites. If the solver semantics change later
+  (HM-style or non-destructive inferred-param binding), revisit.
+- [ ] **Smoke-test surface coverage.** Tested 11 libraries (mix of small +
+  large). `lib/grammar` got 0 annotations applied — most warnings are leaky
+  structural shapes (`{ _parse: _ }`) or inline anon functions, both
+  correctly suppressed. Worth one more pass after refining union dedup to
+  see what gets unblocked.
+
+### Platform pivot — directions (2026-05-14)
+
+> *Triggered by chub.ai banning underage content; pivoting to get our own
+> frontend properly up. Four directions, ordered roughly by sequencing.*
+
+- [ ] **Stabilize the platform.** Before piling on UI work or ecosystem
+  features, get the current platform reliable. Audit what's flaky / what's
+  half-finished / what blocks daily use. Concrete first pass: identify the
+  top 3 reliability or correctness issues that would bite a new user in
+  their first session, and fix those before anything else. Surface the
+  list here once it exists.
+
+- [ ] **Make the UI actually best-in-class.** Not "good enough" — the
+  benchmark is "the user prefers this over chub.ai / janitorai / SillyTavern
+  for the same task." Means: deliberate visual design, fast interactions,
+  no jank, proper keyboard support, mobile-viable. Define what "best in
+  class" means concretely (compare against named competitors on specific
+  flows: first-message latency, message editing, character switching,
+  multi-character scenes) before building.
+
+- [ ] **Better LLM self-feedback / analysis on UI usability.** Build a
+  loop where Claude (or another model) can inspect the running UI and
+  assess how it looks/feels to use — screenshot + DOM dump + interaction
+  trace, scored against a rubric. Goal: catch usability regressions
+  before users do, and produce concrete actionable feedback ("this button
+  is unclear", "this layout breaks at <viewport>", "this flow takes 4
+  clicks when it could take 1") rather than vibes-level "looks good."
+  Tools to consider: chrome-devtools-mcp, playwright snapshots,
+  computer-use API. Open question: scored manually-curated rubric vs.
+  open-ended critique.
+
+- [ ] **Build the repository — decentralized, local-first, noncanon-style.**
+  A character/persona/world-content repository that lives on user
+  machines, not on a platform. Same primitive as noncanon (the world
+  lives with the user; canon is a local concept; divergence is a feature),
+  applied to the chat-content domain. Not a clone of chub or
+  characterhub-as-a-service — explicitly local-first so it can't be
+  taken down by a single org's content policy. Open questions: addressing
+  scheme (git remotes? IPFS? content-addressed?), discoverability without
+  a central index, NSFW/age-gate enforcement model that doesn't require
+  a trusted central authority. Likely needs a separate repo
+  (`~/git/exoplace/<name>/`) once direction is clear; meantime track
+  thinking here.
+
 ### Surfaced from recent sessions (2026-05-13 grooming)
 
 > *Added 2026-05-13 by a backlog-grooming pass over the prior three session transcripts (`d4565916`, `e4f73deb`, `9501a0b0`). These are open threads identified mid-session and not closed; treat as starting context, not directives.*
