@@ -241,12 +241,15 @@ function renderTagBar(apps) {
   tagBar.innerHTML = "";
   const btn = document.createElement("button");
   btn.className = `tag-btn${activeTag === null ? " active" : ""}`;
+  btn.setAttribute("aria-pressed", activeTag === null ? "true" : "false");
   btn.textContent = "All";
   btn.onclick = () => { activeTag = null; refresh(); };
   tagBar.appendChild(btn);
   Object.keys(tags).sort().forEach(t => {
     const b = document.createElement("button");
-    b.className = `tag-btn${activeTag === t ? " active" : ""}`;
+    const pressed = activeTag === t;
+    b.className = `tag-btn${pressed ? " active" : ""}`;
+    b.setAttribute("aria-pressed", pressed ? "true" : "false");
     b.textContent = `${t} (${tags[t]})`;
     b.onclick = () => { activeTag = (activeTag === t) ? null : t; refresh(); };
     tagBar.appendChild(b);

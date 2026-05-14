@@ -11,6 +11,9 @@
   --bg-system: #2a1a3e;
   --text: #e0e0e0;
   --text-dim: #888;
+  /* Speaker labels appear on --bg-message (#16213e); --text-dim (#888) is ~3:1
+     and fails WCAG AA. Lighter shade gives ~6:1 while keeping the muted look. */
+  --text-speaker: #b8b8c8;
   --accent: #e94560;
   --border: #333;
   --input-bg: #0f0f23;
@@ -33,6 +36,7 @@
     --bg-system: #ede8f5;
     --text: #1a1a2e;
     --text-dim: #666;
+    --text-speaker: #555;
     --accent: #c0304a;
     --border: #ccc;
     --input-bg: #f8f8fc;
@@ -746,6 +750,7 @@ body {
 .settings-panel__title {
   font-weight: 600;
   font-size: 1rem;
+  margin: 0;
 }
 
 .settings-panel__close {
@@ -899,6 +904,7 @@ body {
   font-weight: 600;
   font-size: 1rem;
   flex: 1;
+  margin: 0;
 }
 
 .session-panel__new {
@@ -1062,6 +1068,7 @@ body {
   font-weight: 600;
   font-size: 1rem;
   flex: 1;
+  margin: 0;
 }
 
 .lorebook-panel__add {
@@ -1406,6 +1413,7 @@ body {
   text-overflow: ellipsis;
   max-width: 10rem;
   flex-shrink: 1;
+  margin: 0;
 }
 
 /* Tab bar inside the header */
@@ -1692,6 +1700,7 @@ body {
   font-weight: 600;
   color: #ccc;
   display: block;
+  margin-top: 0;
   margin-bottom: 0.5rem;
   border-bottom: 1px solid var(--glass-border);
   padding-bottom: 0.25rem;
@@ -2218,7 +2227,8 @@ body {
 .message__speaker {
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--accent);
+  /* WCAG AA: --text-speaker ~6:1 on --bg-message; --accent was borderline. */
+  color: var(--text-speaker);
   margin-bottom: 0.25rem;
   text-transform: uppercase;
   letter-spacing: 0.025em;
@@ -2268,6 +2278,7 @@ body {
 .group-panel__title {
   font-weight: 600;
   font-size: 1rem;
+  margin: 0;
 }
 
 .group-panel__close {
@@ -2644,6 +2655,7 @@ body {
   font-size: 0.9375rem;
   flex: 1;
   color: var(--text);
+  margin: 0;
 }
 
 .linked-lorebooks__list {

@@ -429,16 +429,16 @@ Audit run across `lib/platform/apps/charactercardv2/static/*` and `lib/platform/
 
 ### medium — degrades but workaround exists
 
-- [ ] **Swipe buttons (`<`/`>`) need descriptive labels** — "Previous message" / "Next message" via `aria-label` instead of symbol-only content.
-- [ ] **Error/status messages dynamically inserted without `aria-live`** — connection test failure, persona save errors, lorebook errors. Mark error containers as live regions.
-- [ ] **Message edit cancel doesn't return focus to message** — small but standard pattern; restore focus to the `[data-action="edit"]` trigger.
-- [ ] **`.message__speaker` contrast borderline** — `--text-dim: #888` on `#16213e` is ~3:1, fails WCAG AA for normal text. Bump to lighter dim color for speaker names.
+- [x] ~~**Swipe buttons (`<`/`>`) need descriptive labels**~~ — already done in template: `aria-label="Previous message"` / `aria-label="Next message"`.
+- [x] ~~**Error/status messages dynamically inserted without `aria-live`**~~ — fixed: `#card-edit-notice`, `#lorebook-notice`, `#regex-test-output` now have `role="status" aria-live="polite"`; `#message-list` got `role="log"`. Persona save errors flow through `addMessage` → message-list (covered by `role="log"`).
+- [x] ~~**Message edit cancel doesn't return focus to message**~~ — fixed: `exitEdit` now refocuses the originating Edit button (Escape also exits).
+- [x] ~~**`.message__speaker` contrast borderline**~~ — fixed: new `--text-speaker` variable (~6:1 on `--bg-message`) replaces `--accent` on `.message__speaker`.
 
 ### low — polish
 
-- [ ] **Avatar `alt=""` in group chat** — when the avatar represents a specific speaker, alt should carry the speaker name; decorative-only when single-character.
-- [ ] **Tag buttons in library need `aria-pressed`** — toggle state currently only in CSS `.active`; add `aria-pressed="true|false"`.
-- [ ] **Heading semantics** — most panel titles are `<div>`/`<span>` styled like headings. Promote to `<h2>` / `<h3>` where appropriate for document outline.
+- [x] ~~**Avatar `alt=""` in group chat**~~ — fixed: `addMessage` sets `avatar.alt = msg.speaker + " avatar"` when a speaker is present; stays empty in single-character chat.
+- [x] ~~**Tag buttons in library need `aria-pressed`**~~ — fixed: `renderTagBar` sets `aria-pressed="true|false"` on the "All" button and each tag.
+- [x] ~~**Heading semantics**~~ — fixed: promoted panel titles to `<h2>` (session, settings, my-lorebooks, card-edit, group) and `<h3>` (settings sections, linked-lorebooks). Library already had `<h1>`. CSS rules updated with `margin: 0` to preserve visuals.
 - [ ] **Long message list could benefit from a "Jump to input" skip link** — speculative; revisit if a user reports the navigation cost.
 
 ## admin app

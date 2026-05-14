@@ -30,7 +30,7 @@
 
   <div class="session-panel" id="session-panel" role="dialog" aria-modal="true" aria-labelledby="session-panel-title" hidden>
     <div class="session-panel__header">
-      <span class="session-panel__title" id="session-panel-title">Chats</span>
+      <h2 class="session-panel__title" id="session-panel-title">Chats</h2>
       <button class="session-panel__new" id="btn-new-session" title="New Chat (Ctrl+Shift+N)">+ New Chat</button>
       <button class="session-panel__close" id="btn-close-sessions" aria-label="Close chats panel">&times;</button>
     </div>
@@ -54,7 +54,7 @@
     </div>
   </div>
 
-  <div class="message-list" id="message-list"></div>
+  <div class="message-list" id="message-list" role="log"></div>
 
   <div class="loading-indicator" id="loading" role="status" aria-live="polite">
     <span class="loading-indicator__text">...</span>
@@ -82,19 +82,19 @@
   <div class="settings-overlay" id="settings-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-panel-title" hidden>
     <div class="settings-panel" id="settings-panel">
       <div class="settings-panel__header">
-        <span class="settings-panel__title" id="settings-panel-title">Generation Settings</span>
+        <h2 class="settings-panel__title" id="settings-panel-title">Generation Settings</h2>
         <button class="settings-panel__close" id="settings-close" aria-label="Close settings">&times;</button>
       </div>
       <div class="settings-panel__body">
         <div class="settings-section">
-          <span class="settings-section__title">Connection</span>
+          <h3 class="settings-section__title">Connection</h3>
           <div class="settings-connection">
             <button id="btn-test-connection" class="settings-connection__btn">Test Connection</button>
             <span id="connection-result" class="connection-result" role="status" aria-live="polite"></span>
           </div>
         </div>
         <div class="settings-section">
-          <span class="settings-section__title">Persona</span>
+          <h3 class="settings-section__title">Persona</h3>
           <div class="settings-persona">
             <div class="settings-persona__row">
               <select id="persona-select" class="settings-persona__select"></select>
@@ -113,7 +113,7 @@
           </div>
         </div>
         <div class="settings-section">
-          <span class="settings-section__title">Generation</span>
+          <h3 class="settings-section__title">Generation</h3>
         </div>
         <label class="settings-field">
           <span class="settings-field__label">Temperature <span class="settings-field__value" id="val-temperature">0.7</span></span>
@@ -149,7 +149,7 @@
   <div class="lorebook-overlay" id="my-lorebooks-overlay" role="dialog" aria-modal="true" aria-labelledby="my-lorebooks-panel-title" hidden>
     <div class="lorebook-panel lorebook-panel--wide" id="my-lorebooks-panel">
       <div class="lorebook-panel__header">
-        <span class="lorebook-panel__title" id="my-lorebooks-panel-title">My Lorebooks</span>
+        <h2 class="lorebook-panel__title" id="my-lorebooks-panel-title">My Lorebooks</h2>
         <button class="lorebook-panel__import" id="my-lorebooks-import" title="Import lorebook from JSON" aria-label="Import lorebook from JSON">&#128194; Import</button>
         <button class="lorebook-panel__add" id="my-lorebooks-new">+ New Lorebook</button>
         <input type="file" id="my-lorebooks-import-file" accept=".json,application/json" hidden>
@@ -175,7 +175,7 @@
   <div class="card-edit-overlay" id="card-edit-overlay" role="dialog" aria-modal="true" aria-labelledby="card-edit-panel-title" hidden>
     <div class="card-edit-panel">
       <div class="card-edit-panel__header">
-        <span class="card-edit-panel__title" id="card-edit-panel-title"></span>
+        <h2 class="card-edit-panel__title" id="card-edit-panel-title"></h2>
         <div class="card-edit-tabs" role="tablist">
           <button class="card-edit-tab" id="tab-btn-identity" role="tab" aria-controls="tab-identity" aria-selected="true">Identity</button>
           <button class="card-edit-tab" id="tab-btn-greetings" role="tab" aria-controls="tab-greetings" aria-selected="false">Greetings</button>
@@ -184,7 +184,7 @@
         </div>
         <button class="card-edit-panel__close" id="card-edit-close" aria-label="Close card editor">&times;</button>
       </div>
-      <div class="card-edit-panel__notice" id="card-edit-notice" hidden></div>
+      <div class="card-edit-panel__notice" id="card-edit-notice" role="status" aria-live="polite" hidden></div>
 
       <!-- Identity tab -->
       <div class="card-edit-tab-pane" id="tab-identity" role="tabpanel" aria-labelledby="tab-btn-identity">
@@ -274,12 +274,12 @@
         <div class="card-edit-panel__header-action">
           <button class="lorebook-panel__add" id="lorebook-add">+ Add Entry</button>
         </div>
-        <div class="lorebook-panel__notice" id="lorebook-notice" hidden></div>
+        <div class="lorebook-panel__notice" id="lorebook-notice" role="status" aria-live="polite" hidden></div>
         <div class="lorebook-panel__body" id="lorebook-list"></div>
 
         <div class="linked-lorebooks" id="linked-lorebooks">
           <div class="linked-lorebooks__header">
-            <span class="linked-lorebooks__title">Linked Lorebooks</span>
+            <h3 class="linked-lorebooks__title">Linked Lorebooks</h3>
             <button class="lorebook-panel__add" id="linked-lorebooks-add" title="Add linked lorebook (upload JSON)">+ Add Linked Lorebook</button>
             <input type="file" id="linked-lorebooks-file" accept=".json,application/json" hidden>
           </div>
@@ -299,7 +299,7 @@
           <input class="regex-panel__test-input" id="regex-test-replace" placeholder="Replacement">
           <textarea class="regex-panel__test-textarea" id="regex-test-input" rows="2" placeholder="Test input text..."></textarea>
           <button class="regex-panel__test-btn" id="regex-test-btn">Test</button>
-          <div class="regex-panel__test-output" id="regex-test-output"></div>
+          <div class="regex-panel__test-output" id="regex-test-output" role="status" aria-live="polite"></div>
         </div>
       </div>
 
@@ -313,7 +313,7 @@
   <div class="group-overlay" id="group-overlay" role="dialog" aria-modal="true" aria-labelledby="group-panel-title" hidden>
     <div class="group-panel">
       <div class="group-panel__header">
-        <span class="group-panel__title" id="group-panel-title">Group Chat</span>
+        <h2 class="group-panel__title" id="group-panel-title">Group Chat</h2>
         <button class="group-panel__close" id="group-close" aria-label="Close group chat">&times;</button>
       </div>
       <div class="group-panel__body">
