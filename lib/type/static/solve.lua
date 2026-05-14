@@ -1936,59 +1936,91 @@ local function solve_compare(ctx, c)
     local rhs_tid = find(ctx, c[3] --[[:! integer]])
     local line, col = c[4] --[[:! integer | nil]], c[5] --[[:! integer | nil]]
 
-    local function is_orderable(ctx, tid)
-        tid = find(ctx, tid)
-        local t = ctx.types:get(tid)
-        -- Unwrap TAG_NOMINAL (newtype) — comparisons act on the underlying type.
-        while t.tag == TAG_NOMINAL do
-            tid = find(ctx, t.data[2])
-            t   = ctx.types:get(tid)
-        end
-        if t.tag == TAG_ANY or t.tag == TAG_UNKNOWN or t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return true end
-        if t.tag == TAG_NUMBER or t.tag == TAG_INTEGER then return "number" end
-        if t.tag == TAG_STRING then return "string" end
-        if t.tag == TAG_LITERAL then
-            local k = t.data[0]
-            if k == LIT_NUMBER or k == LIT_INTEGER then return "number" end
-            if k == LIT_STRING then return "string" end
-        end
-        -- TAG_UNION: orderable iff every arm is orderable and they agree on the
-        -- kind ("number" vs "string").  A phi-join of two integer branches can
-        -- produce an `integer | integer` union (different unresolved TAG_VAR IDs
-        -- that both resolve to T_INTEGER after solving); without this branch,
-        -- such unions would always produce a false "cannot compare" error.
-        if t.tag == TAG_UNION then
-            local kind = nil  -- "number" or "string" once determined
-            for i = t.data[0], t.data[0] + t.data[1] - 1 do
-                -- lists:get returns unknown in non-self-check mode; cast to integer
-                -- so the recursive call doesn't widen is_orderable's tid parameter type.
-                local mk = is_orderable(ctx, ctx.lists:get(i) --[[:! integer]])
-                if mk == false then return false end  -- non-orderable arm
-                if mk == true then return true end    -- any/unknown/var arm → defer to caller
-                -- mk is "number" or "string"
-                if kind == nil then kind = mk
-                elseif kind ~= mk then return false end  -- mixed number/string
-            end
-            return kind or false  -- empty union → false
-        end
-        return false
+    -- Defer if either operand is not yet resolved (callsite hasn't bound params yet).
+    local lhs_t = ctx.types:get(lhs_tid)
+    local rhs_t = ctx.types:get(rhs_tid)
+    if lhs_t.tag == TAG_VAR or lhs_t.tag == TAG_ROWVAR then return false end
+    if rhs_t.tag == TAG_VAR or rhs_t.tag == TAG_ROWVAR then return false end
+
+    -- Auto-unwrap TAG_NOMINAL (newtype) for metamethod dispatch — mirrors
+    -- solve_arith. Newtypes inherit their underlying type's operators.
+    while lhs_t.tag == TAG_NOMINAL do
+        lhs_tid = find(ctx, lhs_t.data[2])
+        lhs_t   = ctx.types:get(lhs_tid)
+    end
+    while rhs_t.tag == TAG_NOMINAL do
+        rhs_tid = find(ctx, rhs_t.data[2])
+        rhs_t   = ctx.types:get(rhs_tid)
     end
 
-    local lk = is_orderable(ctx, lhs_tid)
-    local rk = is_orderable(ctx, rhs_tid)
+    -- Dispatch via metamethod lookup: __lt is the canonical comparison metamethod
+    -- (Lua semantics: `<`, `>`, `<=`, `>=` all reduce to `__lt` / `__le`; `__le`
+    -- falls back to `__lt` when missing). Both operands must support `__lt`.
+    -- Mirrors solve_arith: prim_meta for primitives, table meta for user types.
+    local lr = meta_op_ret_impl(ctx, "__lt", lhs_tid)
+    local rr = meta_op_ret_impl(ctx, "__lt", rhs_tid)
 
-    if lk == false then
+    if lr == nil then
         add_error(ctx, line, col,
             "cannot compare `" .. types_mod.display_short(ctx, lhs_tid) .. "` with `<`")
         return false
     end
-    if rk == false then
+    if rr == nil then
         add_error(ctx, line, col,
             "cannot compare `" .. types_mod.display_short(ctx, rhs_tid) .. "` with `<`")
         return false
     end
-    -- Cross-type comparison (string vs number): error
-    if lk and rk and lk ~= rk and lk ~= true and rk ~= true then
+
+    -- Cross-type check: verify the rhs is assignable to the second parameter of
+    -- the lhs's __lt metamethod (and vice versa). This faithfully simulates the
+    -- metamethod call: `__lt: (number, number) -> boolean` for `number` rejects
+    -- a string rhs, because rhs is not assignable to the second param. This is
+    -- not a special-case predicate — it's the metamethod's declared signature
+    -- being honored, the same way C_CALLABLE would honor it.
+    local function meta_op_fn(ctx, tid)
+        tid = find(ctx, tid)
+        local t = ctx.types:get(tid)
+        while t.tag == TAG_NOMINAL do
+            tid = find(ctx, t.data[2])
+            t   = ctx.types:get(tid)
+        end
+        local mm_id = intern_mod.intern(ctx.pool, "__lt")
+        if t.tag == TAG_TABLE then
+            local fe = types_mod.table_meta_field(ctx, tid, mm_id)
+            if fe then return find(ctx, fe.type_id) end
+            return nil
+        end
+        local ptag = t.tag
+        if ptag == TAG_LITERAL then
+            local k = t.data[0]
+            if k == LIT_NUMBER  then ptag = TAG_NUMBER
+            elseif k == LIT_INTEGER then ptag = TAG_INTEGER
+            elseif k == LIT_STRING  then ptag = TAG_STRING
+            else return nil end
+        elseif ptag ~= TAG_NUMBER and ptag ~= TAG_INTEGER and ptag ~= TAG_STRING then
+            return nil
+        end
+        local pm = ctx.prim_meta[ptag]
+        if not pm then return nil end
+        local fe = types_mod.table_meta_field(ctx, pm, mm_id)
+        if fe then return find(ctx, fe.type_id) end
+        return nil
+    end
+
+    local function check_against(fn_tid, a_tid, b_tid)
+        if fn_tid == nil then return true end
+        local ft = ctx.types:get(fn_tid)
+        if ft.tag ~= TAG_FUNCTION or ft.data[1] < 2 then return true end
+        local p1 = find(ctx, ctx.lists:get(ft.data[0]))
+        local p2 = find(ctx, ctx.lists:get(ft.data[0] + 1))
+        return unify_mod.try_unify(ctx, a_tid, p1) and unify_mod.try_unify(ctx, b_tid, p2)
+    end
+
+    local lhs_fn = meta_op_fn(ctx, lhs_tid)
+    local rhs_fn = meta_op_fn(ctx, rhs_tid)
+    -- Skip cross-type check when either operand resolved to any/unknown via prim_meta
+    -- (meta_op_fn returns nil for those; we already gated lr/rr above).
+    if not check_against(lhs_fn, lhs_tid, rhs_tid) and not check_against(rhs_fn, lhs_tid, rhs_tid) then
         add_error(ctx, line, col,
             "cannot compare `" .. types_mod.display_short(ctx, lhs_tid)
             .. "` with `" .. types_mod.display_short(ctx, rhs_tid) .. "`")
