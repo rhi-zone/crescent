@@ -27,7 +27,7 @@ Crescent is that ecosystem. Not a framework — a collection of libraries you ca
 ## Getting started
 
 ```bash
-git clone https://github.com/pterror/crescent
+git clone https://github.com/rhi-zone/crescent
 cd crescent
 bin/cr test        # run tests (Linux x86_64 / aarch64, macOS arm64, Windows x86_64/x86)
 ```
