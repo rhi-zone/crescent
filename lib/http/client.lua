@@ -68,15 +68,13 @@ mod.send_async = function (req, cb, ep)
 	_, remove = ep_:add(client.fd, function ()
 		if done then return end
 		-- epoll notifies readability; we read from the socket ourselves.
-		local chunk_r = client:receive()
-		local chunk = (chunk_r --[[: unknown]]) --[[:! string | nil]]
-		if chunk and #chunk > 0 then
+		local chunk = client:receive()
+		if type(chunk) == "string" and #chunk > 0 then
 			buf[#buf + 1] = chunk
 		end
 		-- Check if we have a complete response: headers terminated + content-length satisfied.
 		local data = table.concat(buf)
-		local parse_response_ = format.parse_response --[[:! (string) -> unknown]]
-		local resp = parse_response_(data)
+		local resp = format.parse_response(data)
 		if resp then
 			done = true
 			if remove then remove() end

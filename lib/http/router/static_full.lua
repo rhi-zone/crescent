@@ -15,6 +15,7 @@ if jit.os == "Linux" then
 	local ffi = require("ffi")
 	ffi.cdef [[ ssize_t getxattr(const char *path, const char *name, void *value, size_t size); ]]
 	local buf = ffi.new("char[128]") --[[:! cdata]]
+	-- TODO: cdef-derived ffi.C.getxattr type doesn't unify with normal call shape; cast at FFI boundary.
 	local getxattr = ffi.C.getxattr --[[:! (string, string, cdata, integer) -> integer]]
 
 	system_specific_mime_type = function (file_path)
@@ -52,7 +53,8 @@ local html_escape = function (string)
 	return result
 end
 
---: (base: string | nil, opts: { io_open: (string, string) -> (unknown, string | nil), os_date: (string, integer) -> string } | nil) -> StaticFullHandlerFn | (nil, string)
+--:: FileHandle = { read: (self: unknown, string) -> string | nil, close: (self: unknown) -> nil }
+--: (base: string | nil, opts: { io_open: (string, string) -> (FileHandle | nil, string | nil), os_date: (string, integer) -> string } | nil) -> StaticFullHandlerFn | (nil, string)
 mod.router = function (base, opts)
 	if base ~= nil and type(base) ~= "string" then
 		return nil, "static() expects string as base path, got " .. tostring(base)
@@ -66,19 +68,16 @@ mod.router = function (base, opts)
 		--[[TODO: urldecode? urldecode(req.path)]]
 		local full_path = path.safe_resolve(base, urldecode(req.path))
 		if not full_path then res.status = 404; return end
-		local file_raw = io_open(full_path, "rb")
-		if file_raw == nil then res.status = 404; return end
-		--:: FileHandle = { read: (self: unknown, string) -> string | nil, close: (self: unknown) -> nil }
-		local file = file_raw --[[:! FileHandle]]
+		local file = io_open(full_path, "rb")
+		if file == nil then res.status = 404; return end
 		res.status = 200
 		res.body = file:read("*all")
 		file:close()
 		if res.body == nil then
 			local full_path_s = full_path --[[: string]]
 			local dir_path = full_path_s:gsub("/$", "")
-			local file2_raw = io_open(dir_path .. "/index.html", "rb")
-			if file2_raw then
-				local file2 = file2_raw --[[:! FileHandle]]
+			local file2 = io_open(dir_path .. "/index.html", "rb")
+			if file2 then
 				res.body = file2:read("*all")
 				file2:close()
 			end

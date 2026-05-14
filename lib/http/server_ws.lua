@@ -7,8 +7,7 @@ local socket = require("lib.socket.server")
 local ws = require("lib.websocket")
 --:: WsHttpRequest = { method: string, target: string, version: string, headers: { [string]: string[] }, body: string | nil }
 --:: WsHttpResponse = { status: integer, reason: string, version: string, headers: { [string]: string[] }, body: string | nil }
---:: WsHttpMod = { parse_request: (string, integer | nil) -> (WsHttpRequest | nil, integer | nil, string | nil), serialize_response: (WsHttpResponse) -> string }
-local http = require("lib.http.format") --[[:! WsHttpMod]]
+local http = require("lib.http.format")
 local epoll_ = require("lib.epoll")
 
 local mod = {}
@@ -21,10 +20,10 @@ local mod = {}
 --:: WsHandler = { http: ((WsHttpRequest, WsHttpResponse, WsSockClient) -> nil) | nil, ws: ((WsSockClient, { payload: string, status: integer | nil, type: string }) -> nil) | nil, ws_open: ((WsSockClient, unknown, unknown) -> nil) | nil, ws_close: ((WsSockClient) -> nil) | nil }
 --: (WsHandler, ws_epoll) -> (WsSockClient) -> nil
 mod.make_connection_handler = function (handler, epoll)
-	local handler_ = handler --[[:! WsHandler]]
+	local handler_ = handler
 	--: (WsSockClient) -> nil
 	return function (client)
-		local client_ = client --[[:! WsSockClient]]
+		local client_ = client
 		local s = client_:receive()
 		if not s then return end -- silently fail
 
@@ -44,11 +43,12 @@ mod.make_connection_handler = function (handler, epoll)
 				handler_.ws_close, epoll)
 			local ws_open_ = handler_.ws_open
 			if send and close and ws_open_ then
-				local ws_open_fn_ = ws_open_ --[[:! (WsSockClient, unknown, unknown) -> nil]]
-				ws_open_fn_(client_, send, close)
+				ws_open_(client_, send, close)
 			end
 		else
-			local ok, err = pcall(handler_.http --[[:! (unknown, unknown, unknown) -> nil]], req, res, client_)
+			local http_fn = handler_.http
+			if not http_fn then client_:close(); return end
+			local ok, err = pcall(http_fn, req, res, client_)
 			if not ok then
 				local msg = tostring(err):gsub('"', '\\"')
 				res.status = 500

@@ -4,7 +4,7 @@ local list_routes
 --: (Arr<string>, { [string]: unknown, ... }, string | nil) -> nil
 list_routes = function (routes_parts, routes, prefix)
 	local keys = {} --: Arr<string>
-	for k in pairs(routes) do keys[#keys+1] = k --[[:! string]] end
+	for k in pairs(routes) do keys[#keys+1] = k end
 	table.sort(keys)
 	for _, k in ipairs(keys) do
 		local path = prefix and (prefix .. "/" .. k) or k

@@ -1,5 +1,5 @@
 local socket = require("lib.socket.server")
-local http = require("lib.http.format") --[[:! { parse_request: (string, integer | nil) -> (http_request | nil, integer | nil, string | nil), serialize_response: (http_response) -> string, parse_response: (string) -> unknown }]]
+local http = require("lib.http.format")
 
 local mod = {}
 
@@ -21,6 +21,7 @@ local tls_loaded = false
 local function get_tls()
 	if not tls_loaded then
 		tls_loaded = true
+		-- TODO: TlsMod type uses cdata for what real lib.tls returns as string; fix TlsMod to match lib.tls export shape, then this can be `tls_lib = require("lib.tls")` directly.
 		local ok, t = pcall(require, "lib.tls")
 		if ok then tls_lib = (t --[[: unknown]]) --[[:! TlsMod]] end
 	end
@@ -33,7 +34,7 @@ end
 --: (HttpHandlerFn) -> (http_client_sock) -> nil
 mod.make_connection_handler = function (handler)
 	return function (client)
-		local client_ = client --[[:! http_client_sock]]
+		local client_ = client
 		local parts = {}
 		local total = 0
 		local header_end
@@ -71,10 +72,9 @@ mod.make_connection_handler = function (handler)
 				end
 			end
 		end
-		local res = { status = 200, reason = "", version = "HTTP/1.1", headers = {}, body = nil } --: http_response
-		local res_any = res --[[: unknown]]
-		handler(req --[[:! http_request]], res_any --[[:! http_server_response]], client_)
-		if not (res_any --[[:! { raw?: boolean, ... }]]).raw then
+		local res = { status = 200, reason = "", version = "HTTP/1.1", headers = {}, body = nil, raw = nil } --: http_server_response
+		handler(req, res, client_)
+		if not res.raw then
 			client_:send(http.serialize_response(res))
 			client_:close()
 		end
@@ -90,9 +90,8 @@ end
 local function wrap_client_tls(tls_ctx, client)
 	local t = get_tls()
 	if not t then return nil, "libtls unavailable" end
-	local client_ = client --[[:! { fd: integer, ... }]]
 	local cctx_ptr = t.tls_c_ptr()
-	local rc = t.accept_socket(tls_ctx, cctx_ptr, client_.fd)
+	local rc = t.accept_socket(tls_ctx, cctx_ptr, client.fd)
 	if rc < 0 then
 		return nil, ffi.string(t.error(tls_ctx))
 	end
@@ -116,7 +115,7 @@ local function wrap_client_tls(tls_ctx, client)
 	end
 
 	-- Override send/receive on the client socket to go through TLS.
-	local clientm_ = client_ --[[: unknown]]
+	local clientm_ = client --[[: unknown]]
 	clientm_.on_send = function(self, data, flags)
 		local len = t.write(cctx, data, #data)
 		if len < 0 then return nil, ffi.string(t.error(cctx)) end
@@ -132,7 +131,7 @@ local function wrap_client_tls(tls_ctx, client)
 	end
 
 	-- Extend client:close() to also close the TLS context.
-	local orig_close = (clientm_ --[[:! { close: (self: unknown) -> unknown, ... }]]).close
+	local orig_close = client.close
 	clientm_.close = function(self)
 		t.close(cctx)
 		t.free(cctx)
@@ -151,18 +150,18 @@ end
 -- back to plaintext — it does not hard-fail.
 --: (HttpHandlerFn, integer | nil, unknown | nil, { host: string | nil, tls_cert: string | nil, tls_key: string | nil } | nil) -> unknown
 mod.server = function (handler, port, epoll, opts)
-	opts = opts or {} --[[:! { host: string | nil, tls_cert: string | nil, tls_key: string | nil }]]
+	local opts_ = opts or { host = nil, tls_cert = nil, tls_key = nil } --: { host: string | nil, tls_cert: string | nil, tls_key: string | nil }
 	local tls_ctx --: cdata | nil
 
-	if opts.tls_cert and opts.tls_key then
+	local tls_cert = opts_.tls_cert
+	local tls_key = opts_.tls_key
+	if tls_cert and tls_key then
 		local t = get_tls()
 		if not t then
 			io.stderr:write("lib/http/server: WARNING: tls_cert/tls_key set but libtls unavailable — falling back to plaintext\n")
 		else
 			local cfg = t.config_new()
-			local tls_cert_ = opts.tls_cert --[[:! string]]
-			local tls_key_ = opts.tls_key --[[:! string]]
-			local rc = t.config_set_keypair_file(cfg, tls_cert_, tls_key_)
+			local rc = t.config_set_keypair_file(cfg, tls_cert, tls_key)
 			if rc < 0 then
 				io.stderr:write("lib/http/server: WARNING: tls_config_set_keypair_file failed: "
 					.. ffi.string(t.config_error(cfg)) .. " — falling back to plaintext\n")
@@ -183,14 +182,14 @@ mod.server = function (handler, port, epoll, opts)
 
 	-- When TLS is active, inject an on_client hook that wraps each accepted
 	-- connection before the HTTP handler sees it.
-	local server_opts = { host = opts.host }
+	local server_opts = { host = opts_.host }
 	if tls_ctx then
+		local tls_ctx_ = tls_ctx
 		server_opts.on_client = function(client)
-			local ok, err = wrap_client_tls(tls_ctx, client)
+			local ok, err = wrap_client_tls(tls_ctx_, client)
 			if not ok then
 				io.stderr:write("lib/http/server: TLS accept failed: " .. tostring(err) .. "\n")
-				local c_ = client --[[:! http_client_sock]]
-				c_:close()
+				client:close()
 			end
 		end
 	end

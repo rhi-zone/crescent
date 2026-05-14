@@ -7,26 +7,23 @@ local mimetype_by_contents
 
 local mod = {}
 
---:: FsRouterOpts = { io_open: (path: string, mode: string | nil) -> unknown, stderr_write: (...string) -> nil, lua_load: (path: string) -> (boolean, unknown) }
+--:: FsRouterFile = { read: (self: unknown, string) -> string | nil, close: (self: unknown) -> nil }
+--:: FsRouterOpts = { io_open: (path: string, mode: string | nil) -> (FsRouterFile | nil), stderr_write: (...string) -> nil, lua_load: (path: string) -> (boolean, unknown) }
 --: (string | nil, FsRouterOpts | nil) -> (unknown)
 mod.router = function (path, opts)
 	if not opts then error("fs_router() requires opts with io_open, stderr_write, lua_load caps") end
-	local opts_ = opts --[[:! FsRouterOpts]]
-	local io_open = opts_.io_open
-	if not io_open then error("fs_router() requires opts.io_open cap") end
-	local io_open_ = io_open --[[:! (string, string | nil) -> ({ read: (self: unknown, string) -> string | nil, close: (self: unknown) -> nil } | nil)]]
-	local stderr_write = opts_.stderr_write
-	if not stderr_write then error("fs_router() requires opts.stderr_write cap") end
-	local stderr_write_ = stderr_write --[[:! (...string) -> nil]]
-	local lua_load = opts_.lua_load
-	if not lua_load then error("fs_router() requires opts.lua_load cap") end
-	local lua_load_ = lua_load --[[:! (string) -> (boolean, unknown)]]
+	local io_open_ = opts.io_open
+	if not io_open_ then error("fs_router() requires opts.io_open cap") end
+	local stderr_write_ = opts.stderr_write
+	if not stderr_write_ then error("fs_router() requires opts.stderr_write cap") end
+	local lua_load_ = opts.lua_load
+	if not lua_load_ then error("fs_router() requires opts.lua_load cap") end
 	--: (string) -> unknown
 	local handle_file = function (path2)
 		if path2:find("%.lua$") then
 			local success, cb_ = lua_load_(path2)
-			local cb = cb_ --[[:! string]]
-			if not success then stderr_write_("fs_router: caught error when rendering page: ", cb, "\n") end
+			-- cb_ is unknown (could be loaded function or error string); when not success it's the error string
+			if not success then stderr_write_("fs_router: caught error when rendering page: ", tostring(cb_), "\n") end
 			return success and cb_ or nil
 		elseif rawget(_G, "DEV") then
 			return function (req, res)
@@ -66,6 +63,7 @@ mod.router = function (path, opts)
 		local routes = {}
 		local dir_iter, dir_state = dir_list(path2)
 		if not dir_iter then return routes end
+		-- TODO: dir_list's return is platform-dependent (cdata-keyed table on Linux, nil/error otherwise); typed dir_list module would remove this.
 		local dir_state_ = dir_state --[[:! { dir: cdata, path: string }]]
 		for entry in dir_iter, dir_state_ do
 			if not entry then break end
@@ -79,9 +77,12 @@ mod.router = function (path, opts)
 		end
 		return routes
 	end
-	local cb = table_router(handle_dir(path or "")) --[[:! (unknown, unknown, unknown) -> unknown]]
+	--:: FsRouterReq = { path: string, globs: { rest: string, [integer]: unknown } }
+	-- table_router returns `unknown` because its input parameter is `unknown` (routes is structurally arbitrary).
+	-- The returned function has a stable shape; narrow it here so call sites don't need to.
+	local cb = table_router(handle_dir(path or "")) --[[:! (FsRouterReq, unknown, unknown) -> (boolean | nil)]]
 	return function (req, res, sock)
-		local ret = cb(req, res, sock)
+		local ret = cb(req --[[:! FsRouterReq]], res, sock)
 		if not ret then res.status = 404 end
 		return ret
 	end
