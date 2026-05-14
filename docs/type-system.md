@@ -27,7 +27,12 @@ The checker should infer precise types from code structure:
 ```lua
 local x = 42           -- x: 42 (literal type), not number
 local t = { a = 1 }    -- t: { a: number }, not table
-local f = function(a, b) return a + b end  -- f: (number, number) -> number
+local f = function(a, b) return a + b end
+-- f: <A: { #__add: (A, B) -> C }, B, C>(A, B) -> C
+-- Not `(number, number) -> number` — that would be a predicate-style collapse
+-- ("must be numeric") which violates Principle 10. The body's `a + b` requires
+-- only that `a` has `__add` taking `(A, B)` and returning some type; `number`,
+-- `integer`, and any user type with `__add` defined all satisfy this.
 ```
 
 Widening happens at well-defined points:
