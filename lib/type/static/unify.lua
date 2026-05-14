@@ -1107,6 +1107,70 @@ function M.is_primitive_tag(tag)
         or tag == TAG_INTEGER or tag == TAG_STRING
 end
 
+-- Strict subtype check: `actual` is assignable to `expected` (actual <: expected)
+-- under the same lattice that `unify` enforces — including the closed-table
+-- excess-field check that `try_unify` deliberately omits.
+--
+-- `try_unify` is "shape overlap": shared fields must agree, but extra fields
+-- on `actual` are tolerated even when `expected` is closed. That is the right
+-- semantics for force-cast overlap (`--[[:! T]]`) and for narrowing oracles,
+-- but it is NOT the right semantics for the REDUNDANT_CAST classifier — a cast
+-- that strips fields is doing real work even though `try_unify` says "they
+-- overlap". For redundancy classification we need the assignability lattice.
+--
+-- Implementation: try_unify (which checks shape recursively), then for the
+-- top-level closed-table case, additionally enforce the excess-field rule.
+-- Side-effect free.
+--: (Ctx, integer, integer) -> boolean
+function M.is_subtype(ctx, actual, expected)
+    if not M.try_unify(ctx, actual, expected) then return false end
+    local a = find(ctx, actual)
+    local b = find(ctx, expected)
+    local ta = ctx.types:get(a)
+    local tb = ctx.types:get(b)
+    -- Closed-target excess check: when both sides are closed tables, every
+    -- named field of `actual` must exist in `expected` (or be covered by an
+    -- indexer on `expected`). Otherwise the cast is removing a field — not
+    -- redundant.
+    if ta.tag == TAG_TABLE and tb.tag == TAG_TABLE
+        and tb.data[4] < 0 and ta.data[4] < 0 then
+        for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+            local afid = ctx.lists:get(i)
+            local afe  = ctx.fields:get(afid)
+            if band(afe.flags, FLAG_OPAQUE_KEY) == 0 then
+                local bfe_match = types_mod.table_field(ctx, b, afe.name_id)
+                if not bfe_match then
+                    -- Indexer cover check (mirrors unify's logic at line 776+).
+                    local fname = intern_mod.get(ctx.pool, afe.name_id) or "?"
+                    local covered = false
+                    local bis, bil = tb.data[2], tb.data[3]
+                    local j = bis
+                    while j < bis + bil - 1 do
+                        local bkt = ctx.types:get(find(ctx, ctx.lists:get(j)))
+                        local is_numeric_key = fname:match("^%d+$")
+                        local key_ok = false
+                        if is_numeric_key and (bkt.tag == TAG_NUMBER or bkt.tag == TAG_INTEGER) then
+                            key_ok = true
+                        elseif not is_numeric_key and bkt.tag == TAG_STRING then
+                            key_ok = true
+                        end
+                        if key_ok then
+                            local bv = find(ctx, ctx.lists:get(j + 1))
+                            local av = find(ctx, afe.type_id)
+                            if M.try_unify(ctx, av, bv) then
+                                covered = true; break
+                            end
+                        end
+                        j = j + 2
+                    end
+                    if not covered then return false end
+                end
+            end
+        end
+    end
+    return true
+end
+
 -- Overlap (read-only): does there exist any value v with v : a AND v : b?
 -- Used by C_OVERLAP (--[[:! T]] force casts). Returns boolean.
 --

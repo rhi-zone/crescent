@@ -2589,7 +2589,10 @@ local function solve_overlap(ctx, c)
             -- If the actual type is already assignable to the expected type, the
             -- force cast is redundant — emit REDUNDANT_CAST (error) so it gets stripped.
             -- Otherwise, emit FORCE_CAST (warning) for a genuine narrowing cast.
-            if unify_mod.try_unify(ctx, actual, expected) then
+            -- Use is_subtype, not try_unify: try_unify is overlap (allows extra
+            -- fields on actual when expected is closed), which would falsely
+            -- classify field-stripping casts as redundant.
+            if unify_mod.is_subtype(ctx, actual, expected) then
                 if inferred_param then
                     -- Cast asserts a type that was inferred from callers, not
                     -- annotated. Neither REDUNDANT_CAST (would strip the only
