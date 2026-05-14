@@ -1422,7 +1422,10 @@ local function solve_index(ctx, c)
         end
         local fname = intern_mod.get(ctx.pool, name_id) or "?"
         add_error(ctx, line, col, "field `" .. fname .. "` doesn't exist in union")
-        bind_to(ctx, res_tid, ctx.T_ANY)
+        -- Field exists in no union arm: the access is dead code. Result is `never`
+        -- (the type of expressions that cannot produce a value). Returning `any` here
+        -- would let downstream constraints succeed silently on the stripped type.
+        bind_to(ctx, res_tid, ctx.T_NEVER)
         return false
     end
 
@@ -1467,7 +1470,8 @@ local function solve_index(ctx, c)
         if all_miss and not any_open then
             local fname = intern_mod.get(ctx.pool, name_id) or "?"
             add_error(ctx, line, col, "field `" .. fname .. "` doesn't exist")
-            bind_to(ctx, res_tid, ctx.T_ANY)
+            -- Field exists in no intersection member: dead code; result is never.
+            bind_to(ctx, res_tid, ctx.T_NEVER)
             return false
         end
         if any_open then field_types[#field_types + 1] = ctx.T_UNKNOWN end
