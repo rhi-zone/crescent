@@ -526,6 +526,11 @@ local function build_chara_for_write(state)
 	else
 		ext.regex_scripts = nil
 	end
+	if state.linked_lorebooks and #(--[[:! { [integer]: unknown }]] state.linked_lorebooks) > 0 then
+		ext.linked_lorebooks = state.linked_lorebooks
+	else
+		ext.linked_lorebooks = nil
+	end
 	data.extensions = ext
 	return envelope
 end
@@ -2277,6 +2282,165 @@ local function api_post_user_lorebooks_import(state, caps, _params, body, res)
 	return json_ok(res, book_summary(book))
 end
 
+-- ── Linked lorebooks (card-vendored snapshots) ────────────────────────────
+--
+-- Linked lorebooks live on the card itself under
+-- extensions.linked_lorebooks. They're informational snapshots
+-- (`{ name, source?, entries }`) that the context-assembly side merges
+-- into the prompt. The Card Editor surfaces them so authors can view
+-- which books are bundled and add/remove entries. Persistence rides on
+-- flush_card_state (writes the chara PNG chunk).
+
+--: ({ [string]: unknown }) -> { name: string, source: string | nil, entry_count: integer }
+local function linked_book_summary(b)
+	local entries = b.entries
+	local count = 0
+	if type(entries) == "table" then count = #(--[[:! { [integer]: unknown }]] entries) end
+	return {
+		name = (type(b.name) == "string" and (b.name --[[:! string]])) or "",
+		source = (type(b.source) == "string" and (b.source --[[:! string]])) or nil,
+		entry_count = count,
+	}
+end
+
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
+local function api_get_linked_lorebooks(state, _caps, _params, _body, res)
+	local books = {}
+	local entries_out = {}
+	local raw = state.linked_lorebooks or {}
+	for i, b in ipairs(--[[:! { [integer]: { [string]: unknown } }]] raw) do
+		books[i] = linked_book_summary(b --[[:! { [string]: unknown }]])
+		local e_out = {}
+		if type(b.entries) == "table" then
+			for _, e in ipairs(--[[:! { [integer]: { [string]: unknown } }]] b.entries) do
+				e_out[#e_out + 1] = entry_to_json(e --[[:! { [string]: unknown }]])
+			end
+		end
+		entries_out[i] = e_out
+	end
+	return json_ok(res, { books = books, entries = entries_out })
+end
+
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
+local function api_post_linked_lorebooks_add(state, caps, _params, body, res)
+	if not body or not body.name or type(body.name) ~= "string" or body.name == "" then
+		return json_err(res, 400, "name required")
+	end
+	if body.entries ~= nil and type(body.entries) ~= "table" then
+		return json_err(res, 400, "entries must be an array")
+	end
+	local entries_in = (body.entries --[[:! { [integer]: { [string]: unknown } } | nil]]) or {}
+	local entries = {}
+	for _, raw in ipairs(--[[:! { [integer]: { [string]: unknown } }]] entries_in) do
+		entries[#entries + 1] = lorebook_mod.normalize({
+			uid             = raw.uid,
+			comment         = raw.comment,
+			key             = raw.key or raw.keys,
+			keysecondary    = raw.keysecondary,
+			selectiveLogic  = raw.selectiveLogic,
+			content         = raw.content,
+			enabled         = raw.enabled,
+			constant        = raw.constant,
+			order           = raw.order,
+			position        = raw.position,
+			depth           = raw.depth,
+			role            = raw.role,
+			caseSensitive   = raw.caseSensitive,
+			matchWholeWords = raw.matchWholeWords,
+			probability     = raw.probability,
+			sticky          = raw.sticky,
+			cooldown        = raw.cooldown,
+			delay           = raw.delay,
+			ignoreBudget    = raw.ignoreBudget,
+			excludeRecursion = raw.excludeRecursion,
+			preventRecursion = raw.preventRecursion,
+			group           = raw.group,
+			groupWeight     = raw.groupWeight,
+			displayIndex    = raw.displayIndex,
+		})
+	end
+	local book = {
+		name = body.name --[[:! string]],
+		source = (type(body.source) == "string" and (body.source --[[:! string]])) or nil,
+		entries = entries,
+	}
+	state.linked_lorebooks = state.linked_lorebooks or {}
+	local list = --[[:! { [integer]: unknown }]] state.linked_lorebooks
+	list[#list + 1] = book
+	flush_card_state(state, caps)
+	return json_ok(res, linked_book_summary(book --[[:! { [string]: unknown }]]))
+end
+
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
+local function api_post_linked_lorebooks_delete(state, caps, params, body, res)
+	local idx_str = (params and params.index) or (body and body.index)
+	if idx_str == nil then return json_err(res, 400, "index required") end
+	local idx = tonumber(--[[:! number | string]] idx_str)
+	if not idx then return json_err(res, 400, "index must be a number") end
+	local list = state.linked_lorebooks
+	if not list then return json_err(res, 404, "no linked lorebooks") end
+	local lua_idx = math.floor(--[[:! number]] idx) + 1  -- 0-indexed → 1-indexed
+	local list_t = --[[:! { [integer]: { [string]: unknown } }]] list
+	if lua_idx < 1 or lua_idx > #list_t then
+		return json_err(res, 404, "index out of range")
+	end
+	table.remove(list_t, lua_idx)
+	flush_card_state(state, caps)
+	return json_ok(res, { deleted = true })
+end
+
+--: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
+local function api_post_linked_lorebooks_import(state, caps, _params, body, res)
+	if not body or type(body.entries) ~= "table" then
+		return json_err(res, 400, "entries required")
+	end
+	local body_name = body.name --[[:! string | nil]]
+	local name = (type(body_name) == "string" and #(body_name --[[:! string]]) > 0) and (body_name --[[:! string]]) or "Imported"
+	local normalized = {}
+	for _, raw in ipairs(body.entries) do
+		if type(raw) == "table" then
+			local entry_in = {
+				uid             = raw.uid,
+				comment         = raw.comment,
+				key             = raw.key or raw.keys,
+				keysecondary    = raw.keysecondary,
+				selectiveLogic  = raw.selectiveLogic,
+				content         = raw.content,
+				enabled         = raw.enabled,
+				constant        = raw.constant,
+				order           = raw.order,
+				position        = raw.position,
+				depth           = raw.depth,
+				role            = raw.role,
+				caseSensitive   = raw.caseSensitive,
+				matchWholeWords = raw.matchWholeWords,
+				probability     = raw.probability,
+				sticky          = raw.sticky,
+				cooldown        = raw.cooldown,
+				delay           = raw.delay,
+				ignoreBudget    = raw.ignoreBudget,
+				excludeRecursion = raw.excludeRecursion,
+				preventRecursion = raw.preventRecursion,
+				group           = raw.group,
+				groupWeight     = raw.groupWeight,
+				displayIndex    = raw.displayIndex,
+			}
+			normalized[#normalized + 1] = lorebook_mod.normalize(entry_in)
+		end
+	end
+	local source_v = body.source --[[:! string | nil]]
+	local book = {
+		name = name,
+		source = (type(source_v) == "string" and (source_v --[[:! string]])) or nil,
+		entries = normalized,
+	}
+	state.linked_lorebooks = state.linked_lorebooks or {}
+	local list = --[[:! { [integer]: unknown }]] state.linked_lorebooks
+	list[#list + 1] = book
+	flush_card_state(state, caps)
+	return json_ok(res, linked_book_summary(book --[[:! { [string]: unknown }]]))
+end
+
 -- ── Persona endpoints helpers ──────────────────────────────────────────────
 
 --: (State, Caps) -> nil
@@ -2920,6 +3084,11 @@ local routes = {
 	["POST /api/user_lorebooks/entry/delete"]  = api_post_user_lorebook_entry_delete,
 	["GET /api/user_lorebooks/export"]         = api_get_user_lorebooks_export,
 	["POST /api/user_lorebooks/import"]        = api_post_user_lorebooks_import,
+	-- Card-vendored linked lorebooks (live under extensions.linked_lorebooks).
+	["GET /api/linked_lorebooks"]              = api_get_linked_lorebooks,
+	["POST /api/linked_lorebooks"]             = api_post_linked_lorebooks_add,
+	["POST /api/linked_lorebooks/delete"]      = api_post_linked_lorebooks_delete,
+	["POST /api/linked_lorebooks/import"]      = api_post_linked_lorebooks_import,
 	["GET /api/sessions"]         = api_get_sessions,
 	["POST /api/session/new"]     = api_post_session_new,
 	["POST /api/session/switch"]  = api_post_session_switch,
