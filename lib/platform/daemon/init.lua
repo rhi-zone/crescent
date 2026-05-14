@@ -285,7 +285,7 @@ function M.make(opts)
 	-- library.create expects `caps.index_db` to be a SQLite-like handle (with a
 	-- :query method) or nil. We propagate whatever the caller passed — library
 	-- tolerates nil and falls back to an empty list.
-	local library_app = library.create({ index_db = index_db, sources = opts.sources }) --[[:! { handler: (http_req, http_res) -> (boolean | nil), ... }]]
+	local library_app = library.create({ index_db = index_db, sources = opts.sources })
 
 	-- App-origin handler. Three modes, in priority order:
 	--   1. opts.app_handler — direct override (tests use this to bypass loading).
@@ -1456,7 +1456,7 @@ end
 			-- Mount the library app at the root of the daemon origin. The
 			-- library app's handler may itself return nil for unknown paths;
 			-- in that case we fall through to a 404.
-			;(library_app --[[:! { handler: (unknown, unknown) -> unknown }]]).handler(req, res)
+			library_app.handler(req, res)
 			if res.status == nil then
 				res.status = 404
 				res.headers["Content-Type"] = { "text/plain; charset=utf-8" }

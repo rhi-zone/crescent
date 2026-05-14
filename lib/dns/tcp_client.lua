@@ -28,8 +28,12 @@ mod.client = function (cb, nameserver, domain, opcode, type, class, epoll)
 		cb(dns.string_to_dns_message(s2:sub(3)))
 		close()
 	end, epoll)
-	;((send --[[: unknown]]) --[[:! (string) -> ()]])(s)
-	if is_running then ((epoll --[[: unknown]]) --[[:! { loop: () -> () }]]):loop() end
+	local send_fn = (send --[[: unknown]]) --[[:! (string) -> ()]]
+	send_fn(s)
+	if is_running then
+		local ep = (epoll --[[: unknown]]) --[[:! { loop: () -> () }]]
+		ep:loop()
+	end
 end
 
 return mod

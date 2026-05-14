@@ -93,7 +93,7 @@ function M.run(code, env, opts)
 	local ok, result = pcall(fn)
 
 	if opts.budget then
-		;(debug.sethook --[[:! (unknown, unknown, unknown) -> ()]])(nil, "", nil)  -- clear hook
+		debug.sethook(nil, "", nil)  -- clear hook
 	end
 
 	return ok, result

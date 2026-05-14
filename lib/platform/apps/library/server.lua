@@ -745,6 +745,7 @@ end
 
 -- ── Router ─────────────────────────────────────────────────────────────────
 
+--: (unknown) -> { handler: (unknown, unknown) -> (boolean | nil), cli: (unknown) -> unknown }
 function M.create(caps)
 	local source_map = build_source_map(caps.sources)
 

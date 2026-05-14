@@ -31,7 +31,8 @@ M.server = function(callback, port, epoll, opts)
         client.close = function(_self)
             if opts_.on_client_close then opts_.on_client_close(client) end
             client_close(client)
-            ;(remove_client --[[:! () -> nil]])()
+            local rc = remove_client --[[:! () -> nil]]
+            rc()
         end
         _, remove_client = epoll_any:add(client.fd, function()
             state = callback(client, state)
@@ -41,11 +42,13 @@ M.server = function(callback, port, epoll, opts)
 
     local server_close = server.close
     server.close = function(self)
-        ;(server_close --[[:! (unknown) -> nil]])(self)
+        local sc = server_close --[[:! (unknown) -> nil]]
+        sc(self)
         remove()
     end
 
-    while is_running do (epoll_any --[[:! { wait: (unknown) -> nil, add: (unknown, integer, (unknown) -> nil, (unknown) -> nil | nil) -> (unknown, () -> nil), ... }]]):wait() end
+    local ep = epoll_any --[[:! { wait: (unknown) -> nil, add: (unknown, integer, (unknown) -> nil, (unknown) -> nil | nil) -> (unknown, () -> nil), ... }]]
+    while is_running do ep:wait() end
 
     return server
 end

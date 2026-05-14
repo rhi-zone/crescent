@@ -1071,7 +1071,8 @@ do
 		if self.on_connect and self.timeout_connected and self:is_connected() then
 			local tc = self.timeout_connected --[[:! { [number]: string | nil | string | integer | nil }]]
 			local ok, err, num = self:on_connect(tc[1] --[[:! string]], tc[2] --[[:! string | integer]])
-			;(self --[[:! { timeout_connected: { string | nil, string | integer | nil } | nil, ... }]]).timeout_connected = nil
+			local self_ = self --[[:! { timeout_connected: { string | nil, string | integer | nil } | nil, ... }]]
+			self_.timeout_connected = nil
 			return ok, err, num
 		end
 		return nil, "timeout", nil
