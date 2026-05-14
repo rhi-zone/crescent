@@ -14,9 +14,9 @@
       <div class="message__content"></div>
       <div class="message__footer">
         <div class="message__swipe" hidden>
-          <button class="message__swipe-button" data-dir="prev">&lt;</button>
+          <button class="message__swipe-button" data-dir="prev" aria-label="Previous message">&lt;</button>
           <span class="message__swipe-label"></span>
-          <button class="message__swipe-button" data-dir="next">&gt;</button>
+          <button class="message__swipe-button" data-dir="next" aria-label="Next message">&gt;</button>
         </div>
         <div class="message__actions">
           <button class="message__action-button" data-action="edit">Edit</button>
@@ -26,13 +26,13 @@
     </div>
   </template>
 
-  <button class="session-toggle" id="btn-sessions" title="Chats">&#9776;</button>
+  <button class="session-toggle" id="btn-sessions" title="Chats" aria-label="Open chats panel">&#9776;</button>
 
-  <div class="session-panel" id="session-panel" hidden>
+  <div class="session-panel" id="session-panel" role="dialog" aria-modal="true" aria-labelledby="session-panel-title" hidden>
     <div class="session-panel__header">
-      <span class="session-panel__title">Chats</span>
+      <span class="session-panel__title" id="session-panel-title">Chats</span>
       <button class="session-panel__new" id="btn-new-session" title="New Chat (Ctrl+Shift+N)">+ New Chat</button>
-      <button class="session-panel__close" id="btn-close-sessions">&times;</button>
+      <button class="session-panel__close" id="btn-close-sessions" aria-label="Close chats panel">&times;</button>
     </div>
     <div class="session-panel__list" id="session-list"></div>
   </div>
@@ -56,7 +56,7 @@
 
   <div class="message-list" id="message-list"></div>
 
-  <div class="loading-indicator" id="loading">
+  <div class="loading-indicator" id="loading" role="status" aria-live="polite">
     <span class="loading-indicator__text">...</span>
   </div>
 
@@ -73,24 +73,24 @@
       <button class="input-row__button input-row__button--send" id="btn-send" title="Send (Enter or Ctrl+Enter)">Send</button>
       <button class="input-row__button input-row__button--continue" id="btn-continue">Continue</button>
       <button class="input-row__button input-row__button--impersonate" id="btn-impersonate">Impersonate</button>
-      <button class="input-row__button input-row__button--settings" id="btn-settings" title="Settings (Ctrl+Shift+S)">&#9881;</button>
-      <button class="input-row__button input-row__button--world-info" id="btn-my-lorebooks" title="My Lorebooks (Ctrl+Shift+W)">&#128218;</button>
-      <button class="input-row__button input-row__button--group" id="btn-group" title="Group Chat">&#128101;</button>
+      <button class="input-row__button input-row__button--settings" id="btn-settings" title="Settings (Ctrl+Shift+S)" aria-label="Settings">&#9881;</button>
+      <button class="input-row__button input-row__button--world-info" id="btn-my-lorebooks" title="My Lorebooks (Ctrl+Shift+W)" aria-label="My Lorebooks">&#128218;</button>
+      <button class="input-row__button input-row__button--group" id="btn-group" title="Group Chat" aria-label="Group chat">&#128101;</button>
     </div>
   </div>
 
-  <div class="settings-overlay" id="settings-overlay" hidden>
+  <div class="settings-overlay" id="settings-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-panel-title" hidden>
     <div class="settings-panel" id="settings-panel">
       <div class="settings-panel__header">
-        <span class="settings-panel__title">Generation Settings</span>
-        <button class="settings-panel__close" id="settings-close">&times;</button>
+        <span class="settings-panel__title" id="settings-panel-title">Generation Settings</span>
+        <button class="settings-panel__close" id="settings-close" aria-label="Close settings">&times;</button>
       </div>
       <div class="settings-panel__body">
         <div class="settings-section">
           <span class="settings-section__title">Connection</span>
           <div class="settings-connection">
             <button id="btn-test-connection" class="settings-connection__btn">Test Connection</button>
-            <span id="connection-result" class="connection-result"></span>
+            <span id="connection-result" class="connection-result" role="status" aria-live="polite"></span>
           </div>
         </div>
         <div class="settings-section">
@@ -146,14 +146,14 @@
     </div>
   </div>
 
-  <div class="lorebook-overlay" id="my-lorebooks-overlay" hidden>
+  <div class="lorebook-overlay" id="my-lorebooks-overlay" role="dialog" aria-modal="true" aria-labelledby="my-lorebooks-panel-title" hidden>
     <div class="lorebook-panel lorebook-panel--wide" id="my-lorebooks-panel">
       <div class="lorebook-panel__header">
-        <span class="lorebook-panel__title">My Lorebooks</span>
-        <button class="lorebook-panel__import" id="my-lorebooks-import" title="Import lorebook from JSON">&#128194; Import</button>
+        <span class="lorebook-panel__title" id="my-lorebooks-panel-title">My Lorebooks</span>
+        <button class="lorebook-panel__import" id="my-lorebooks-import" title="Import lorebook from JSON" aria-label="Import lorebook from JSON">&#128194; Import</button>
         <button class="lorebook-panel__add" id="my-lorebooks-new">+ New Lorebook</button>
         <input type="file" id="my-lorebooks-import-file" accept=".json,application/json" hidden>
-        <button class="lorebook-panel__close" id="my-lorebooks-close">&times;</button>
+        <button class="lorebook-panel__close" id="my-lorebooks-close" aria-label="Close lorebooks">&times;</button>
       </div>
       <div class="lorebook-panel__split">
         <div class="book-list" id="book-list"></div>
@@ -172,7 +172,7 @@
     </div>
   </div>
 
-  <div class="card-edit-overlay" id="card-edit-overlay" hidden>
+  <div class="card-edit-overlay" id="card-edit-overlay" role="dialog" aria-modal="true" aria-labelledby="card-edit-panel-title" hidden>
     <div class="card-edit-panel">
       <div class="card-edit-panel__header">
         <span class="card-edit-panel__title" id="card-edit-panel-title"></span>
@@ -182,12 +182,12 @@
           <button class="card-edit-tab" id="tab-btn-lorebook" role="tab" aria-controls="tab-lorebook" aria-selected="false">Lorebook</button>
           <button class="card-edit-tab" id="tab-btn-regex" role="tab" aria-controls="tab-regex" aria-selected="false">Regex</button>
         </div>
-        <button class="card-edit-panel__close" id="card-edit-close">&times;</button>
+        <button class="card-edit-panel__close" id="card-edit-close" aria-label="Close card editor">&times;</button>
       </div>
       <div class="card-edit-panel__notice" id="card-edit-notice" hidden></div>
 
       <!-- Identity tab -->
-      <div class="card-edit-tab-pane" id="tab-identity" role="tabpanel">
+      <div class="card-edit-tab-pane" id="tab-identity" role="tabpanel" aria-labelledby="tab-btn-identity">
         <div class="card-edit-panel__body">
           <label class="card-edit-field">
             <span class="card-edit-field__label">Name</span>
@@ -251,7 +251,7 @@
       </div>
 
       <!-- Greetings tab -->
-      <div class="card-edit-tab-pane" id="tab-greetings" role="tabpanel" hidden>
+      <div class="card-edit-tab-pane" id="tab-greetings" role="tabpanel" aria-labelledby="tab-btn-greetings" hidden>
         <div class="card-edit-panel__body">
           <label class="card-edit-field">
             <span class="card-edit-field__label">First Message</span>
@@ -270,7 +270,7 @@
       </div>
 
       <!-- Lorebook tab -->
-      <div class="card-edit-tab-pane" id="tab-lorebook" role="tabpanel" hidden>
+      <div class="card-edit-tab-pane" id="tab-lorebook" role="tabpanel" aria-labelledby="tab-btn-lorebook" hidden>
         <div class="card-edit-panel__header-action">
           <button class="lorebook-panel__add" id="lorebook-add">+ Add Entry</button>
         </div>
@@ -288,7 +288,7 @@
       </div>
 
       <!-- Regex tab -->
-      <div class="card-edit-tab-pane" id="tab-regex" role="tabpanel" hidden>
+      <div class="card-edit-tab-pane" id="tab-regex" role="tabpanel" aria-labelledby="tab-btn-regex" hidden>
         <div class="card-edit-panel__header-action">
           <button class="regex-panel__add" id="regex-add">+ Add Script</button>
         </div>
@@ -310,11 +310,11 @@
     </div>
   </div>
 
-  <div class="group-overlay" id="group-overlay" hidden>
+  <div class="group-overlay" id="group-overlay" role="dialog" aria-modal="true" aria-labelledby="group-panel-title" hidden>
     <div class="group-panel">
       <div class="group-panel__header">
-        <span class="group-panel__title">Group Chat</span>
-        <button class="group-panel__close" id="group-close">&times;</button>
+        <span class="group-panel__title" id="group-panel-title">Group Chat</span>
+        <button class="group-panel__close" id="group-close" aria-label="Close group chat">&times;</button>
       </div>
       <div class="group-panel__body">
         <div class="group-toggle-row">

@@ -420,11 +420,12 @@ Audit run across `lib/platform/apps/charactercardv2/static/*` and `lib/platform/
 
 ### high — blocks SR / keyboard-only on core flows
 
-- [ ] **Icon-only buttons missing `aria-label`** — ccv2: session-toggle (`&#9776;`), all `&times;` close buttons (settings/lorebook/card-edit/group/session), settings gear (`&#9881;`), my-lorebooks book emoji, group people emoji, swipe `&lt;`/`&gt;`. Library: card-delete `\xD7` button. Title attributes are not read by screen readers — must be `aria-label`.
-- [ ] **Overlays missing `role="dialog"` + `aria-modal="true"` + `aria-labelledby`** — ccv2: settings-overlay, lorebook-overlay (legacy — confirm if still present after tabbed surface), card-edit-overlay, group-overlay, session-panel. SR cannot announce that a dialog has opened.
-- [ ] **No focus management on overlay open/close** — opening an overlay does not move focus into it; closing does not return focus to the trigger. Add focus capture + restore. Consider `inert` on background or a manual focus trap.
-- [ ] **Loading indicator not announced** — `#loading` div in ccv2 needs `role="status"` + `aria-live="polite"`. Same for connection-test result and other dynamically-updated status messages.
-- [ ] **Tabpanel `aria-labelledby` missing** — tab buttons have `role="tab"` + `aria-controls` (good) but the tabpanels lack `aria-labelledby="tab-btn-…"` back-references.
+- [x] ~~**Icon-only buttons missing `aria-label`**~~ — fixed: ccv2 session-toggle/close, settings gear/close, my-lorebooks/close, group/close, card-edit close, swipe prev/next, library card-delete all have `aria-label`.
+- [x] ~~**Overlays missing `role="dialog"` + `aria-modal="true"` + `aria-labelledby`**~~ — fixed across settings, my-lorebooks, card-edit, group, session-panel.
+- [x] ~~**No focus management on overlay open/close**~~ — first-pass implemented: `trapFocus`/`releaseFocus` in app.js move focus into overlay on open and restore on close. See follow-up item below.
+- [x] ~~**Loading indicator not announced**~~ — `#loading` and `#connection-result` now have `role="status"` + `aria-live="polite"`.
+- [x] ~~**Tabpanel `aria-labelledby` missing**~~ — added on `#tab-identity`, `#tab-greetings`, `#tab-lorebook`, `#tab-regex`.
+- [ ] **Full focus cycling (Tab key cycle within overlay)** — first-pass focus management lands focus on open and restores on close, but doesn't trap Tab inside the overlay. Users can still Tab into background content.
 
 ### medium — degrades but workaround exists
 

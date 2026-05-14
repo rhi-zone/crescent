@@ -179,6 +179,7 @@ function makeCard(item, onLaunch, onDelete, onImport) {
     const del = document.createElement("button");
     del.className = "card-delete";
     del.title = "Uninstall";
+    del.setAttribute("aria-label", "Uninstall");
     del.textContent = "\xD7";
     del.onclick = e => { e.stopPropagation(); onDelete(); };
     card.appendChild(del);
