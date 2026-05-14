@@ -1483,12 +1483,12 @@ T.describe("install.merge_package", function()
 	local diff3_ok = os.execute("diff3 --version >/dev/null 2>&1")
 	local diff3_available = (diff3_ok == 0 or diff3_ok == true)
 
-	-- Set up a project with fake cache dirs under the real HOME/.crescent/cache.
+	-- Set up a project with fake cache dirs under the real XDG pkg cache.
 	-- Returns project_dir, ours_dir.
+	local _xdg = require("lib.platform.xdg")
 	local function setup_merge_test(name, old_version, new_version, base_files, ours_files, theirs_files)
 		local tmp       = make_tmpdir()
-		local home      = os.getenv("HOME") or "/tmp"
-		local croot     = home .. "/.crescent/cache"
+		local croot     = _xdg.cache_home() .. "/pkg"
 		local base_dir   = croot .. "/" .. name .. "@" .. old_version
 		local theirs_dir = croot .. "/" .. name .. "@" .. new_version
 		local ours_dir   = tmp .. "/lib/" .. name
@@ -1503,8 +1503,7 @@ T.describe("install.merge_package", function()
 	end
 
 	local function cleanup_cache(name, old_version, new_version)
-		local home  = os.getenv("HOME") or "/tmp"
-		local croot = home .. "/.crescent/cache"
+		local croot = _xdg.cache_home() .. "/pkg"
 		os.execute(("rm -rf %q %q"):format(
 			croot .. "/" .. name .. "@" .. old_version,
 			croot .. "/" .. name .. "@" .. new_version

@@ -123,10 +123,31 @@ local function mkdir_p(path)
 	return run_cmd(("mkdir -p %q"):format(path))
 end
 
--- Return the global cache directory root (~/.crescent/cache).
+-- Return the global cache directory root.
+-- Follows XDG Base Directory: $XDG_CACHE_HOME/crescent/pkg
+-- (default $HOME/.cache/crescent/pkg). Resolved via lib.platform.xdg.
+local _xdg = require("lib.platform.xdg")
+local _migration_warned = false
+local function _maybe_warn_legacy()
+	if _migration_warned then return end
+	_migration_warned = true
+	local home = os.getenv("HOME")
+	if not home or home == "" then return end
+	local legacy = home .. "/.crescent/cache"
+	local f = io.open(legacy, "r")
+	local exists = false
+	if f then f:close(); exists = true
+	else
+		local esc = (legacy:gsub('"','\\"'))
+		exists = (os.execute('test -d "' .. esc .. '"') == 0)
+	end
+	if not exists then return end
+	io.stderr:write("note: legacy " .. legacy .. " detected; pkg cache now expected at "
+		.. _xdg.cache_home() .. "/pkg (no automatic migration)\n")
+end
 local function cache_root()
-	local home = os.getenv("HOME") or "/tmp"
-	return home .. "/.crescent/cache"
+	_maybe_warn_legacy()
+	return _xdg.cache_home() .. "/pkg"
 end
 
 -- Return the path for a specific package version in the global cache.
@@ -1162,7 +1183,7 @@ end
 --   verbose    = false
 --
 -- Effective registry list (highest priority first):
---   opts.registry (if set) → opts.registries → user ~/.crescent/config.lua → pkg.lua.registries → default
+--   opts.registry (if set) → opts.registries → user $XDG_CONFIG_HOME/crescent/config.lua → pkg.lua.registries → default
 --
 -- Returns: { ok=bool, errors={string,...}, installed={string,...}, skipped={string,...} }
 function M.run(project_dir, opts)
@@ -1578,9 +1599,9 @@ end
 --- Perform a three-way merge of a single package.
 --
 -- Three inputs:
---   base  = ~/.crescent/cache/<name>@<old_version>/  (must exist)
+--   base  = $XDG_CACHE_HOME/crescent/pkg/<name>@<old_version>/  (must exist)
 --   ours  = project_dir/lib/<name>/                  (local modifications)
---   theirs = ~/.crescent/cache/<name>@<new_version>/ (fetched if not already cached)
+--   theirs = $XDG_CACHE_HOME/crescent/pkg/<name>@<new_version>/ (fetched if not already cached)
 --
 -- For each file in the union of all three trees (filtered by include_glob):
 --   - exists in all three → diff3 -m ours base theirs → write back to ours

@@ -14,7 +14,7 @@
 --   png_bytes: string        — raw PNG bytes of the card
 --   runtime_files: table[]   — { name, data }[] of card app runtime files
 --   runtime_manifest: table  — base manifest from runtime (has entry, caps, etc.)
---   apps_dir: string         — directory to install to (e.g. ~/.crescent/apps)
+--   apps_dir: string         — directory to install to (e.g. $XDG_STATE_HOME/crescent/apps)
 --   index: table             — index database (from lib/platform/index)
 --   timestamp: number        — unix timestamp for install
 --   write_fn: (path, data) -> true | nil, err  — file writer

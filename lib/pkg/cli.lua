@@ -78,10 +78,31 @@ local function path_exists(path)
 	return false
 end
 
--- Return the global cache directory root (~/.crescent/cache).
+-- Return the global cache directory root.
+-- Follows XDG Base Directory: $XDG_CACHE_HOME/crescent/pkg
+-- (default $HOME/.cache/crescent/pkg). Resolved via lib.platform.xdg.
+local _xdg = require("lib.platform.xdg")
+local _migration_warned = false
+local function _maybe_warn_legacy()
+	if _migration_warned then return end
+	_migration_warned = true
+	local home = os.getenv("HOME")
+	if not home or home == "" then return end
+	local legacy = home .. "/.crescent/cache"
+	local f = io.open(legacy, "r")
+	local exists = false
+	if f then f:close(); exists = true
+	else
+		local esc = (legacy:gsub('"','\\"'))
+		exists = (os.execute('test -d "' .. esc .. '"') == 0)
+	end
+	if not exists then return end
+	io.stderr:write("note: legacy " .. legacy .. " detected; pkg cache now expected at "
+		.. _xdg.cache_home() .. "/pkg (no automatic migration)\n")
+end
 local function cache_root()
-	local home = os.getenv("HOME") or "/tmp"
-	return home .. "/.crescent/cache"
+	_maybe_warn_legacy()
+	return _xdg.cache_home() .. "/pkg"
 end
 
 -- ── argument parsing ─────────────────────────────────────────────────────────
@@ -709,7 +730,7 @@ local function cmd_eject(project_dir, parsed)
 end
 
 --- cr diff <name>
--- Diffs lib/<name>/ against ~/.crescent/cache/<name>@<version>/ for each file
+-- Diffs lib/<name>/ against $XDG_CACHE_HOME/crescent/pkg/<name>@<version>/ for each file
 -- present in lib/<name>/. No network required — the cache holds the original
 -- extracted tree from install time.
 --

@@ -14,7 +14,7 @@ end
 --      Registry protocol (PUT):
 --        PUT /<name>/<version>.tar.gz       body: tarball bytes
 --        PUT /<name>/<version>.sha256       body: hex checksum newline
---      Auth: Bearer token from ~/.crescent/config.lua
+--      Auth: Bearer token from $XDG_CONFIG_HOME/crescent/config.lua
 --        config.auth["<registry-host>"].token
 --   6. Print success message
 

@@ -555,12 +555,8 @@ HANDLERS["initialize"] = function(state, msg)
     if type(opts_cachepath) == "string" then
         cache_dir = opts_cachepath
     else
-        local xdg = os.getenv("XDG_CACHE_HOME")
-        if xdg and xdg ~= "" then
-            cache_dir = xdg .. "/crescent/cri/"
-        else
-            cache_dir = (os.getenv("HOME") or ".") .. "/.cache/crescent/cri/"
-        end
+        local xdg = require("lib.platform.xdg")
+        cache_dir = xdg.cache_home() .. "/cri/"
     end
     os.execute("mkdir -p " .. cache_dir)
     check.set_cache_dir(cache_dir)

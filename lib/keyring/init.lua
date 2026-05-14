@@ -3,8 +3,9 @@
 --   1. Linux:   libsecret via libsecret-1.so
 --   2. macOS:   Security.framework keychain APIs
 --   3. Fallback: authenticated encryption using SHA-256-CTR + HMAC-SHA256
---               stored in ~/.crescent/keyring.enc.  Key derived from
---               machine-id (Linux) or IOPlatformUUID (macOS).
+--               stored in $XDG_DATA_HOME/crescent/keyring/keyring.enc
+--               (default $HOME/.local/share/crescent/keyring/keyring.enc).
+--               Key derived from machine-id (Linux) or IOPlatformUUID (macOS).
 --               Requires lib.hash.sha256 (ships with crescent).
 --
 -- API:
@@ -448,7 +449,7 @@ end
 --   tag          = HMAC-SHA256(mac_k, iv || ciphertext) (32 bytes)
 --   payload      = tag (32) || iv (16) || ciphertext
 --
--- Layout of ~/.crescent/keyring.enc (binary):
+-- Layout of $XDG_DATA_HOME/crescent/keyring/keyring.enc (binary):
 --   4 bytes  magic "CKR2"
 --   4 bytes  number of entries (uint32 LE)
 --   [per entry]:
@@ -535,8 +536,28 @@ local function try_file_tier()
 		return table.concat(parts)
 	end
 
-	local keyring_dir  = expand_home("~/.crescent")
+	local xdg = require("lib.platform.xdg")
+	local keyring_dir  = xdg.data_home() .. "/keyring"
 	local keyring_path = keyring_dir .. "/keyring.enc"
+
+	-- One-shot migration hint: if the legacy ~/.crescent/keyring.enc exists and
+	-- the new XDG path does not, warn the user. We never auto-migrate secrets.
+	do
+		local home = os.getenv("HOME")
+		if home and home ~= "" then
+			local legacy = home .. "/.crescent/keyring.enc"
+			local lf = io.open(legacy, "rb")
+			if lf then
+				lf:close()
+				local nf = io.open(keyring_path, "rb")
+				if nf then nf:close()
+				else
+					io.stderr:write("note: legacy " .. legacy .. " detected; keyring now expected at "
+						.. keyring_path .. " (no automatic migration)\n")
+				end
+			end
+		end
+	end
 
 	-- machine_key() -> 32-byte binary string
 	local function machine_key()
