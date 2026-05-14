@@ -58,7 +58,17 @@ STATIC["index.html"] = [[<!DOCTYPE html>
   <div class="import-error" id="import-error" hidden></div>
   <div class="tag-bar" id="tag-bar"></div>
   <main class="grid" id="grid"></main>
-  <div class="empty" id="empty" hidden>No apps found.</div>
+  <div class="empty empty--filtered" id="empty-filtered" hidden>
+    <div class="empty-msg">No apps match your filters.</div>
+    <button class="clear-filters-btn" id="clear-filters-btn" type="button">Clear filters</button>
+  </div>
+  <div class="empty empty--welcome" id="empty-welcome" hidden>
+    <div class="welcome-title">Welcome to your library</div>
+    <div class="welcome-sub">Drag an app file anywhere on this page, or click <strong>Import</strong> above.</div>
+    <div class="welcome-hint">Supported: <code>.png</code>, <code>.tar.gz</code>, <code>.tgz</code></div>
+    <div class="welcome-sources" id="welcome-sources" hidden></div>
+    <div class="welcome-arrow" aria-hidden="true">&uarr; Import is up there</div>
+  </div>
 </div>
 <script src="/app.js"></script>
 </body>
@@ -87,8 +97,20 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1a2e;color:#e0
 .card-tags{display:flex;flex-wrap:wrap;gap:.25rem}
 .tag{font-size:.65rem;padding:.125rem .4rem;border-radius:4px;background:#0f3460;color:#a0a0b0}
 .empty{text-align:center;padding:3rem;color:#a0a0b0;font-size:.9rem}
+.empty--filtered{display:flex;flex-direction:column;align-items:center;gap:.75rem}
+.clear-filters-btn{padding:.4rem .85rem;border-radius:6px;border:1px solid #0f3460;background:transparent;color:#e0e0e0;font-size:.85rem;cursor:pointer}
+.clear-filters-btn:hover{border-color:#e94560;color:#e94560}
+.empty--welcome{padding:4rem 1.5rem;max-width:560px;margin:0 auto}
+.welcome-title{font-size:1.4rem;font-weight:600;color:#e0e0e0;margin-bottom:.75rem}
+.welcome-sub{font-size:1rem;color:#c0c0d0;margin-bottom:.75rem;line-height:1.5}
+.welcome-hint{font-size:.8rem;color:#808090;margin-bottom:1.25rem}
+.welcome-hint code{background:#0f1728;padding:.1rem .3rem;border-radius:3px;color:#a0a0b0}
+.welcome-sources{font-size:.9rem;color:#c0c0d0;margin-top:1rem;padding-top:1rem;border-top:1px solid #0f3460}
+.welcome-arrow{margin-top:1.5rem;font-size:.8rem;color:#e94560;letter-spacing:.05em}
+@keyframes import-pulse{0%,100%{box-shadow:0 0 0 0 rgba(233,69,96,.55)}50%{box-shadow:0 0 0 6px rgba(233,69,96,0)}}
 .import-btn{padding:.4rem .85rem;border-radius:6px;border:1px solid #0f3460;background:transparent;color:#e0e0e0;font-size:.875rem;cursor:pointer;white-space:nowrap;flex-shrink:0}
 .import-btn:hover{border-color:#e94560;color:#e94560}
+.import-btn--pulse{border-color:#e94560;color:#e94560;animation:import-pulse 1.6s ease-out infinite}
 .import-error{padding:.5rem 1.5rem;background:#3a1020;color:#ff8099;font-size:.85rem;word-break:break-word;border-bottom:1px solid #6a2040}
 .source-section{border-top:1px solid #0f3460;padding-top:.5rem}
 .source-header{padding:.5rem 1.5rem;font-size:.8rem;font-weight:600;color:#a0a0b0;letter-spacing:.05em;text-transform:uppercase}
@@ -99,10 +121,14 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1a2e;color:#e0
 STATIC["app.js"] = [=[const grid = document.getElementById("grid");
 const search = document.getElementById("search");
 const tagBar = document.getElementById("tag-bar");
-const empty = document.getElementById("empty");
+const emptyFiltered = document.getElementById("empty-filtered");
+const emptyWelcome  = document.getElementById("empty-welcome");
+const welcomeSources = document.getElementById("welcome-sources");
+const clearFiltersBtn = document.getElementById("clear-filters-btn");
 const appEl = document.getElementById("app");
 
 let activeTag = null;
+let sourceNames = [];
 
 // ── Card rendering ────────────────────────────────────────────────────────
 
@@ -181,9 +207,18 @@ function makeCard(item, onLaunch, onDelete, onImport) {
 
 // ── Installed section ─────────────────────────────────────────────────────
 
-function renderApps(apps) {
+function renderApps(apps, total) {
   grid.innerHTML = "";
-  empty.hidden = apps.length > 0;
+  const hasFilter = !!(search.value.trim() || activeTag);
+  const totalApps = typeof total === "number" ? total : apps.length;
+  // Welcome state: zero apps anywhere in the index (ignore filter — if total is 0, there's nothing to filter).
+  // Filtered-out state: apps exist in index, but the current filter produced zero results.
+  const showWelcome = totalApps === 0 && !hasFilter;
+  const showFiltered = apps.length === 0 && !showWelcome;
+  emptyWelcome.hidden = !showWelcome;
+  emptyFiltered.hidden = !showFiltered;
+  updateImportPulse(showWelcome);
+  updateWelcomeSources();
   apps.forEach(app => {
     grid.appendChild(makeCard(
       app,
@@ -226,8 +261,29 @@ async function refresh() {
   if (params.length) url += `?${params.join("&")}`;
 
   const data = await fetch(url).then(r => r.json());
-  renderApps(data.apps || []);
+  renderApps(data.apps || [], data.total);
   if (!q && !activeTag) renderTagBar(data.apps || []);
+}
+
+function updateImportPulse(on) {
+  if (!importBtn) return;
+  importBtn.classList.toggle("import-btn--pulse", !!on);
+}
+
+function updateWelcomeSources() {
+  if (!welcomeSources) return;
+  if (!sourceNames.length) { welcomeSources.hidden = true; welcomeSources.textContent = ""; return; }
+  const list = sourceNames.length === 1
+    ? sourceNames[0]
+    : `${sourceNames.slice(0, -1).join(", ")} and ${sourceNames[sourceNames.length - 1]}`;
+  welcomeSources.textContent = `Or browse your ${list} ${sourceNames.length === 1 ? "characters" : "sources"} below.`;
+  welcomeSources.hidden = false;
+}
+
+function clearFilters() {
+  search.value = "";
+  activeTag = null;
+  refreshAll();
 }
 
 // ── Source adapter sections ────────────────────────────────────────────────
@@ -305,7 +361,10 @@ const sourceSections = [];
 
 async function loadSources() {
   const data = await fetch("/api/sources").then(r => r.json());
-  (data.sources || []).forEach(src => {
+  const list = data.sources || [];
+  sourceNames = list.map(s => s.name).filter(Boolean);
+  updateWelcomeSources();
+  list.forEach(src => {
     const sec = makeSourceSection(src);
     sourceSections.push(sec);
     appEl.appendChild(sec.el);
@@ -405,6 +464,7 @@ document.addEventListener("drop", e => {
 });
 
 search.addEventListener("input", refreshAll);
+if (clearFiltersBtn) clearFiltersBtn.addEventListener("click", clearFilters);
 refresh();
 loadSources();
 ]=]
