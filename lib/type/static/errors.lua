@@ -464,6 +464,12 @@ local function build_templates()
             return n .. " has no signature \xe2\x80\x94"
                 .. " add a `--: (...) -> ...` annotation above the function definition"
         end,
+        --: (TemplateArgs) -> string
+        [E.IMPLICIT_ANY] = function(a)
+            local where = a.site and (" at " .. tostring(a.site)) or ""
+            return "inference fell back to `any`" .. where
+                .. " \xe2\x80\x94 narrow the source type or annotate to avoid the firewall"
+        end,
     }
 end
 

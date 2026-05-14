@@ -388,6 +388,7 @@ M.E = {
     REDUNDANT_CAST        = 34,  -- `--[[:! T]]` is redundant: actual type is already assignable to T; remove the cast
     MISSING_PARAM_ANNOTATION = 35,  -- (deprecated) function parameter has no annotation — superseded by MISSING_FUNCTION_SIGNATURE
     MISSING_FUNCTION_SIGNATURE = 36,  -- function definition has no `--:` annotation; signatures are mandatory at statement position (error)
+    IMPLICIT_ANY               = 37,  -- inference fell back to `any` at this site; narrow the source type or annotate (warning)
 }
 
 -- Keyword strings (ordered by token ID, for intern pre-population)
@@ -425,6 +426,7 @@ do
         [E.NON_EXHAUSTIVE]     = { severity = "warning", name = "non_exhaustive" },
         [E.MISSING_PARAM_ANNOTATION]   = { severity = "warning", name = "missing_param_annotation" },
         [E.MISSING_FUNCTION_SIGNATURE] = { severity = "error",   name = "missing_function_signature" },
+        [E.IMPLICIT_ANY]               = { severity = "warning", name = "implicit_any" },
     }
 end
 

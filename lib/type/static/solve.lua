@@ -911,6 +911,7 @@ local function solve_index(ctx, c)
 
     local key_t = ctx.types:get(key_tid)
     if key_t.tag ~= TAG_LITERAL then
+        add_warning_code(ctx, line, col, defs.E.IMPLICIT_ANY)
         bind_to(ctx, res_tid, ctx.T_ANY)
         return true
     end
@@ -947,15 +948,20 @@ local function solve_index(ctx, c)
                 unify_mod.unify(ctx, res_tid, ft)
                 return true
             end
-            -- No matching opaque field: open table returns unknown, closed returns any (silently)
+            -- No matching opaque field: open table returns unknown, closed returns any.
+            -- Closed-table fallback to any is implicit — emit IMPLICIT_ANY so the user
+            -- sees that inference gave up.
             if obj_t.data[4] >= 0 then
                 bind_to(ctx, res_tid, ctx.T_UNKNOWN)
             else
+                add_warning_code(ctx, line, col, defs.E.IMPLICIT_ANY)
                 bind_to(ctx, res_tid, ctx.T_ANY)
             end
             return true
         end
-        -- Not a table: return any silently
+        -- Not a table (and not any/unknown/never/var, which are handled above):
+        -- inference cannot determine a result type — emit IMPLICIT_ANY.
+        add_warning_code(ctx, line, col, defs.E.IMPLICIT_ANY)
         bind_to(ctx, res_tid, ctx.T_ANY)
         return true
     end
@@ -1472,7 +1478,8 @@ local function solve_index(ctx, c)
         return true
     end
 
-    -- For any other type, resolve result to T_ANY
+    -- For any other type, inference cannot determine a result type — emit IMPLICIT_ANY.
+    add_warning_code(ctx, line, col, defs.E.IMPLICIT_ANY)
     bind_to(ctx, res_tid, ctx.T_ANY)
     return true
 end
