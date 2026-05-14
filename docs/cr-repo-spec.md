@@ -1,4 +1,4 @@
-# cr-repo protocol — draft v0.7
+# cr-repo protocol — draft v0.8
 
 A protocol family for local-first, optionally-signed, optionally-content-addressed repositories. No central anything; no privileged module; interop emerges from intersection of advertised module sets.
 
@@ -286,7 +286,7 @@ This is an intentional consequence of modular addressing: sub-container granular
 
 **Depends on:** `cr-canonical-json`.
 
-**Contributes:** the `pubkey` reference kind, cryptographic primitives, signed records, maker logs.
+**Contributes:** the `pubkey` reference kind, cryptographic primitives, and a generic signed wrapper. No chain, no log, no append-only invariant — those belong to `cr-log`.
 
 ### Cryptographic primitives
 
@@ -298,11 +298,55 @@ PubkeyRef = { kind: "pubkey", alg: string, bytes: <opaque> }
 
 Conventional algorithm values: `"ed25519"`, `"ml-dsa-65"`, `"slh-dsa-128s"`. Unknown values are opaque.
 
-A `PubkeyRef` is the reference form of a `Pubkey`. A consumer dereferencing a `PubkeyRef` is asking "give me the current state of this maker" — typically the maker's log head, resolved via `cr-resolve` or a known host.
+A `PubkeyRef` is the reference form of a `Pubkey`. Its dereferencing semantics depend on which modules are also loaded — under `cr-log`, the natural interpretation is "the current head of this maker's log."
+
+### Signed wrapper
+
+```
+{
+  cr-type:  "cr-signed",
+  payload:  <any JSON value>,
+  maker:    Pubkey,
+  created:  <rfc3339-timestamp>,
+  sig:      Sig,
+}
+```
+
+`sig` is over the canonical JSON encoding of the wrapper with `sig` omitted. The wrapper asserts: the holder of `maker`'s private key produced these bytes for this payload at this time.
+
+`payload` may be anything — a record, a bundle, a primitive value, another module's content shape. The wrapper does not interpret it; it only signs it.
+
+This wrapper alone is sufficient for one-shot signed publication, third-party endorsements, ephemeral identities, and any case where signing is wanted but a maker log is not. For chained, append-only history under a stable identity, see `cr-log`.
+
+### Capability records
+
+A maker MAY publish a `cr-capabilities` record (signed via the wrapper above, or included in a log if `cr-log` is loaded) declaring which modules they produce content under:
+
+```
+{
+  cr-type:  "cr-record",
+  ref:      null,
+  metadata: {
+    types:        [ "cr-capabilities" ],
+    capabilities: [ "cr-record", "cr-identity", "cr-log", "cr-multi-device", ... ],
+  },
+  created:  <rfc3339-timestamp>,
+}
+```
+
+Latest such record (by `cr-log` chain position if available, else by `created`) is authoritative.
+
+---
+
+## `cr-log`
+
+**Depends on:** `cr-identity`.
+
+**Contributes:** a chained, append-only log of signed content under a stable maker identity. Adds tamper-evident history and cheap incremental sync. *This* module — not `cr-identity` — is the source of the append-only invariant.
 
 ### Pages
 
-A page is a signed JSON object attributed to a maker:
+A page is a signed log entry:
 
 ```
 {
@@ -326,37 +370,25 @@ A maker's pages form a linked log. Genesis pages have `prev: null`.
 - `sig` verifies against `maker`.
 - `prev` is `null` or dereferences to an existing page by the same maker.
 - A maker has exactly one genesis page.
+- Pages are append-only: once published and linked, a page's contents do not change. Republishing a different page with the same `prev` is a fork (see `cr-multi-device`); replacing a published page is a protocol violation that breaks the chain for any consumer who saw the original.
 
 A page violating any invariant is rejected; the maker's log ends at the last valid page. When `prev` uses an addressing scheme the consumer does not support, the consumer cannot validate the chain at that point and treats subsequent pages as unverified.
+
+### Why append-only
+
+Append-only is the load-bearing property that makes `cr-log` worth loading: it gives consumers tamper-evident history (the maker cannot silently rewrite the past without the chain breaking), cheap incremental sync (fetch from a known head forward), and a stable target for citations and retractions. A maker who wants none of these does not need `cr-log` — `cr-identity`'s signed wrapper covers signing without chaining.
 
 ### Addressing-scheme agility within a log
 
 A maker MAY publish a page whose `prev` uses a different `Ref` kind, or a different `alg` within the same kind, than the prior page's natural self-address. The chain is valid as long as the prior page, addressed under the new scheme, matches `prev`. Practical migration: publish under both schemes during transition.
 
-### Capability records
-
-A maker MAY include `cr-capabilities` records in their log declaring which modules they produce content under:
-
-```
-{
-  ref:      null,
-  metadata: {
-    types:        [ "cr-capabilities" ],
-    capabilities: [ "cr-record", "cr-identity", "cr-multi-device", ... ],
-  },
-  created:  <rfc3339-timestamp>,
-}
-```
-
-Latest such record in the log is authoritative.
-
 ---
 
 ## `cr-multi-device`
 
-**Depends on:** `cr-identity`.
+**Depends on:** `cr-log`.
 
-**Contributes:** relaxation of the page log to a DAG, allowing concurrent publication from multiple devices owned by the same maker.
+**Contributes:** relaxation of the linear log to a DAG, allowing concurrent publication from multiple devices owned by the same maker.
 
 ### Snowflake sequence
 
@@ -391,9 +423,9 @@ Tips converge once the maker publishes merge pages.
 
 ## `cr-attestation`
 
-**Depends on:** `cr-identity`.
+**Depends on:** `cr-identity`, `cr-record`.
 
-**Contributes:** a sign-once content shape, independent of any maker log.
+**Contributes:** an attestation content shape — a signed record whose `ref` points at the thing being attested. A thin convenience over `cr-identity`'s generic signed wrapper, with a fixed shape suitable for "I, signer X, endorse the content at ref Y."
 
 ```
 {
@@ -408,7 +440,7 @@ Tips converge once the maker publishes merge pages.
 
 `sig` is over the canonical encoding with `sig` omitted. No chain, no `prev`. `ref` may be any kind contributed by a loaded addressing module — a bundle hash, a record hash, a URI, a pubkey (endorsing another maker), etc.
 
-Attestations let a signer endorse arbitrary content without committing to a long-lived log.
+`cr-attestation` exists for cases where consumers want to dispatch on the shape directly ("show me all attestations referencing X"). For arbitrary signed payloads with no need for this specific shape, use `cr-identity`'s `cr-signed` wrapper instead.
 
 ---
 
@@ -444,9 +476,9 @@ This kind is location-bearing in the sense that `in` carries the location; the i
 
 ## `cr-host`
 
-**Depends on:** `cr-content-address` and `cr-identity`.
+**Depends on:** `cr-content-address`. Optionally integrates with `cr-log` and `cr-multi-device` (for the pubkey-keyed endpoints).
 
-**Contributes:** an HTTP adapter for hash and pubkey addressing — the two addressing schemes among the common ones that do not carry location information.
+**Contributes:** an HTTP adapter for hash and (when `cr-log` is loaded) pubkey addressing — the addressing schemes that do not carry location information.
 
 URI refs already carry their location; path refs are local. Neither uses `cr-host`. HTTP adapters for other addressing schemes, if wanted, would be sibling modules (`cr-host-foo`), not extensions of this one.
 
@@ -454,10 +486,12 @@ URI refs already carry their location; path refs are local. Neither uses `cr-hos
 
 ```
 GET /by-hash/<alg>/<hex>           # bytes addressed by hash
-GET /head/by-pubkey/<alg>/<hex>    # current head page for a maker
+GET /head/by-pubkey/<alg>/<hex>    # current log head for a maker (cr-log)
 GET /tips/by-pubkey/<alg>/<hex>    # tip refs (cr-multi-device)
 GET /capabilities                   # JSON list of loaded modules
 ```
+
+`/head/...` and `/tips/...` are meaningful only when `cr-log` (and `cr-multi-device` for the latter) is also loaded; a host that serves only hash-addressed content omits them.
 
 `GET /by-hash/...` returns any hash-addressed object — blob, record, bundle, page, attestation, future content kinds. The host does not interpret the object; clients identify content by what they asked for. Range requests on blobs supported.
 
@@ -473,9 +507,9 @@ No auth, no query parameters, no write API. Static file hosting satisfies the re
 
 ## `cr-resolve`
 
-**Depends on:** `cr-identity`.
+**Depends on:** `cr-log`.
 
-**Contributes:** an abstract mechanism mapping a `Pubkey` to current host URLs and head pointer, with pluggable backend adapters.
+**Contributes:** an abstract mechanism mapping a `Pubkey` to current host URLs and head pointer, with pluggable backend adapters. The "head pointer" concept is what makes this a `cr-log` dependency; resolution is only meaningful for makers with a log.
 
 ### Announcement
 
@@ -515,7 +549,7 @@ A consumer may load any subset.
 
 ## `cr-host-announcement`
 
-**Depends on:** `cr-identity`.
+**Depends on:** `cr-log`.
 
 **Contributes:** an in-log record type for advertising host URLs without going through `cr-resolve`.
 
@@ -537,9 +571,9 @@ A consumer holding any recent page from the maker consults the most-recent unexp
 
 ## `cr-retraction`
 
-**Depends on:** `cr-identity`.
+**Depends on:** `cr-log`.
 
-**Contributes:** advisory retraction.
+**Contributes:** advisory retraction. Depends on `cr-log` rather than `cr-identity` directly because retraction's "honored when the same maker issued the replaced record" semantics rely on log-scoped maker continuity.
 
 ```
 {
@@ -560,7 +594,7 @@ The retraction is meaningful only when the referenced record can be unambiguousl
 
 ## `cr-revision`
 
-**Depends on:** `cr-identity`.
+**Depends on:** `cr-log`.
 
 **Contributes:** explicit supersession between records, for cases where "the latest in the log wins" is insufficient.
 
@@ -637,9 +671,9 @@ The encrypted bytes are `AEAD(plaintext, key, nonce)`. The record's `created` an
 
 ## `cr-successor`
 
-**Depends on:** `cr-identity`.
+**Depends on:** `cr-log`.
 
-**Contributes:** record types for declaring key rotation and algorithm migration.
+**Contributes:** record types for declaring key rotation and algorithm migration. Lives in `cr-log` rather than `cr-identity` because it operates on logs (old log's last entries point at new maker; new log's first entry points back).
 
 In the old maker's log:
 
