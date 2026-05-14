@@ -117,7 +117,19 @@ body{min-height:100vh}
 .source-header{padding:.5rem 1.5rem;font-size:.8rem;font-weight:600;color:var(--fg-muted);letter-spacing:.05em;text-transform:uppercase}
 .source-count{font-weight:400;color:var(--fg-muted);margin-left:.5rem;opacity:.7}
 .source-more{display:block;margin:.25rem 1.5rem 1rem;padding:.35rem .75rem;border-radius:var(--radius-md);border:1px solid var(--translucent-border);background:transparent;color:var(--fg-muted);font-size:.75rem;cursor:pointer}
-.source-more:hover{border-color:var(--primary);color:var(--primary)}]]
+.source-more:hover{border-color:var(--primary);color:var(--primary)}
+@media (max-width:768px){
+.header{flex-direction:column;align-items:stretch;gap:.5rem;padding:.75rem 1rem}
+.header h1{font-size:var(--font-size-lg);text-align:center}
+.search-bar{max-width:none;width:100%}
+.tag-bar{padding:.5rem 1rem;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tag-btn{flex-shrink:0}
+.grid{grid-template-columns:1fr;gap:.75rem;padding:1rem}
+.source-header{padding:.5rem 1rem}
+.source-more{margin:.25rem 1rem 1rem}
+.import-btn{width:100%}
+.import-error{padding:.5rem 1rem}
+}]]
 
 STATIC["app.js"] = [=[const grid = document.getElementById("grid");
 const search = document.getElementById("search");

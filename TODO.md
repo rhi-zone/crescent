@@ -317,6 +317,7 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] Markdown rendering — client-side renderer (bold, italic, code, lists, quotes, headings, links) with XSS protection
 - [x] User personas — named profiles with description injected into context, selectable per session
 - [x] Token counter — context usage progress bar with color thresholds, updated after each action
+- [x] Mobile responsive — ccv2 + library at 768px breakpoint: burger-menu card-header, full-screen overlays/session-panel on mobile, single-column grid + stacked header for library, horizontal-scroll tag bar. Deferred: touch gestures (swipe-to-dismiss), pinch-zoom for avatars, viewport-units fallback for older iOS Safari address-bar quirks
 - [x] Character avatar — header + message avatars from PNG via `caps.self`, 400 assertions
 - [x] Library app — BFF server + index adapter + static frontend, 135 assertions (0e9d187). Index adapter bridges index DB into adapter interface. Server serves HTML/JS/CSS + JSON API with tag/search filtering.
 - [x] **App import + install pipeline** — complete end-to-end flow:

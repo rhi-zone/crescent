@@ -89,3 +89,23 @@ body {
   -webkit-backdrop-filter: blur(4px);
   z-index: 10;
 }
+
+/* Mobile (<768px): overlays become full-viewport takeovers. Panels inside
+ * the overlay drop their max-width/max-height/border-radius so the panel
+ * fills the screen. Match `--breakpoint-mobile` in tokens.css. */
+@media (max-width: 768px) {
+  .translucent-overlay {
+    padding: 0;
+  }
+  .translucent-overlay > .translucent-panel {
+    width: 100vw;
+    height: 100vh;
+    max-width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    border-bottom: none;
+  }
+}

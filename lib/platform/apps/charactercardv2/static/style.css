@@ -171,6 +171,27 @@ body {
   color: var(--button-text);
 }
 
+/* Burger toggle inside .card-header__top — hidden on desktop, visible only
+ * at mobile widths (<768px). Tap toggles `.card-header--menu-open` on the
+ * header which reveals the actions row as a dropdown. */
+.card-header__burger {
+  display: none;
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
+  color: var(--fg);
+  font-size: 1.125rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1;
+  margin-left: 0.25rem;
+  flex-shrink: 0;
+}
+
+.card-header__burger:hover {
+  background: var(--translucent-hover);
+}
+
 /* Message list */
 
 .message-list {
@@ -2781,4 +2802,90 @@ body {
   word-break: break-word;
   max-height: 8rem;
   overflow-y: auto;
+}
+
+/* ── Mobile (<768px) ────────────────────────────────────────────────────
+ *
+ * Industry-standard 768px breakpoint (Tailwind `md`, Bootstrap, Material).
+ * Matches `--breakpoint-mobile` in translucent-css-theme/tokens.css.
+ *
+ * Strategy:
+ *   - All modal overlays (settings, card editor, lorebooks, group) become
+ *     full-viewport takeovers via fixed inset:0 + width/height:100vw/100vh.
+ *   - Session panel becomes a full-screen overlay rather than a sidebar.
+ *   - Card header's action row (Edit / Export / Export Chat) collapses
+ *     behind a burger button — tapping reveals it as a dropdown.
+ *   - Token counter font shrinks slightly.
+ *   - Input row keeps its anchor at bottom via existing flex layout. */
+@media (max-width: 768px) {
+  /* --- Card header: burger + collapsible action row --- */
+  .card-header__burger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* On mobile we drop the hover-to-reveal: the burger gates visibility.
+     `opacity: 1` so that when expanded the row is fully visible. */
+  .card-header__actions {
+    display: none;
+    height: auto;
+    opacity: 1;
+    pointer-events: auto;
+    flex-wrap: wrap;
+    padding: 0.25rem 0;
+  }
+  .card-header.card-header--menu-open .card-header__actions {
+    display: flex;
+  }
+  /* The hover/focus-within reveal from desktop must not apply on mobile —
+     it would force the actions row open even when the burger says closed.
+     Re-asserting display:none under hover/focus-within keeps the gate. */
+  .card-header:hover .card-header__actions,
+  .card-header:focus-within .card-header__actions {
+    display: none;
+  }
+  .card-header.card-header--menu-open:hover .card-header__actions,
+  .card-header.card-header--menu-open:focus-within .card-header__actions {
+    display: flex;
+  }
+
+  /* --- Overlays: full-viewport takeover --- */
+  .settings-overlay,
+  .card-edit-overlay,
+  .lorebook-overlay,
+  .group-overlay {
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+  }
+  .settings-panel,
+  .card-edit-panel,
+  .lorebook-panel,
+  .group-panel {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    border-bottom: none;
+  }
+
+  /* --- Session panel: full-screen overlay --- */
+  .session-panel {
+    width: 100vw;
+    max-width: 100vw;
+    bottom: 0;
+    right: 0;
+    border-right: none;
+  }
+
+  /* --- Token counter: smaller font, less padding --- */
+  .token-counter__text {
+    font-size: 0.6875rem;
+  }
+
+  /* --- Lorebook split: already stacked at 48rem (768px); keep behavior --- */
 }
