@@ -50,6 +50,16 @@ It **is**:
 - A way to make curated lists, write bookmarks, post images, share code, whatever — in a format that other tools can read without asking anyone.
 - A way to do all of the above, today, with a text editor and a static web host you already have.
 
+## Two ideas worth naming up front
+
+**Canon is what you have.** There is no central truth in this protocol. There is no "the official version" of anything. The things you've fetched, indexed, and chosen not to retract or unfollow — that's your canon. Another person, fetching the same makers, ends up with a similar but not identical canon. A third person, following completely different makers, has a wildly different canon. None of these is wrong. There is no place from which "wrongness" could be declared.
+
+In practical terms: the question "is this real / true / canonical?" doesn't have a protocol-level answer. The protocol just gives you content, signed or unsigned, fetched from wherever, and lets you decide what to keep. Verification (when applicable) tells you whether the bytes match the signature — not whether the bytes are true.
+
+**Divergence is normal.** Two people can hold the same list, edit it different ways, and now there are two lists. This is the design, not a failure mode. You can fork someone's curated list and maintain your own version forever, with their original still intact, with no one calling the diff a conflict. You can fork yourself and reconcile later via merge — or never reconcile, and keep two parallel canons indefinitely.
+
+If you've used git, this rhymes with the mental model — though cr-repo is explicitly **not** a version control system. The protocol does not preserve every edit, does not track three-way merges, does not give you `git log` over arbitrary records. What it gives you is: signed-maker logs are append-only (so a maker's history of *what they published* is preserved), and explicit primitives for fork and revision relationships when you want them (`cr-revision`, `cr-provenance.derived_from`). Anything richer — full edit history per record, merge tooling, conflict resolution UI — is something tools build on top, deliberately not baked into the substrate. The protocol is enough to *support* divergence as normal; it doesn't manage divergence for you.
+
 ## A bundle in 30 seconds
 
 Here is a file you can hand-type. Save it as `my-bookmarks.json`, put it anywhere a web browser can fetch it, and you have published a cr-repo bundle.

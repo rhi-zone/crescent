@@ -581,6 +581,35 @@ Revisions are honored only when issued by the same maker who issued the replaced
 
 ---
 
+## `cr-provenance`
+
+**Depends on:** `cr-record`.
+
+**Contributes:** the reserved metadata key `cr-provenance` for capturing how content came into existence.
+
+A record MAY carry:
+
+```
+metadata: {
+  cr-provenance: {
+    source:       <Ref?>,           // where the content came from (URL, prior record, etc.)
+    captured_at:  <rfc3339?>,       // when it was captured (may differ from `created`)
+    captured_via: <string?>,        // freeform method: "manual", "scrape", "import-goodreads", ...
+    derived_from: [ Ref, ... ]?,    // prior records this was derived or transformed from
+    notes:        <string?>,        // freeform additional context
+  },
+  ...
+}
+```
+
+All fields are optional; producers fill in what they have. The block is descriptive, not load-bearing for verification — consumers MAY use it for display, deduplication-with-history, re-fetch-on-bitrot, or filtering, but the protocol does not require any specific behavior.
+
+Provenance is distinct from authorship: a signed page's maker is the authorial identity; `cr-provenance` records the content's origin trail independent of who is publishing it. The same external article ingested by two makers will share provenance (same `source`) while having different authors (different signing keys).
+
+For richer provenance graphs — recording each transformation as its own event record linked by edges — use record-records-as-edges (see content-type cookbook) rather than packing arbitrarily-deep history into a single block.
+
+---
+
 ## `cr-encryption`
 
 **Depends on:** `cr-record`.
