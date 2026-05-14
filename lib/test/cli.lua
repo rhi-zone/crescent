@@ -10,8 +10,7 @@ local M = {}
 -- ── FFI for fork/pipe/waitpid ─────────────────────────────────────────────────
 
 local fork_available = false
-local ffi_ok, ffi_raw = pcall(require, "ffi")
-local ffi = (ffi_raw --[[: unknown]]) --[[:! { cdef: (string) -> nil, C: { sysconf: (integer) -> integer, fork: () -> integer, waitpid: (integer, cdata, integer) -> integer, pipe: (cdata) -> integer, read: (integer, cdata, integer) -> integer, write: (integer, cdata, integer) -> integer, close: (integer) -> integer }, new: (string, ...unknown) -> cdata, cast: (string, unknown) -> cdata, string: (cdata, integer) -> string, errno: () -> integer }]]
+local ffi_ok, ffi = pcall(require, "ffi")
 if ffi_ok then
 	local cdef_ok = pcall(function()
 		ffi.cdef[[
@@ -51,7 +50,8 @@ local function parse_args(argv)
 		if v == "--coverage" or v == "-c" then
 			coverage = true
 		elseif v:match("^%-%-jobs=(%d+)$") then
-			jobs_arg = tonumber(v:match("^%-%-jobs=(%d+)$")) --[[:! integer | nil]]
+			local n = tonumber(v:match("^%-%-jobs=(%d+)$"))
+			jobs_arg = n and math.floor(n) or nil
 		elseif not v:match("^%-") then
 			files[#files + 1] = v
 		end
@@ -124,11 +124,11 @@ end
 
 -- ── sequential runner (used for coverage and --jobs=1) ───────────────────────
 
---:: Coverage = { start: () -> unknown, stop: () -> unknown, report: (unknown) -> unknown }
+--:: Coverage = { start: () -> unknown, stop: () -> unknown, report: ({ uncovered?: boolean } | nil) -> unknown, ... }
 local function run_sequential(file_list, coverage)
 	local cov --: Coverage | nil
 	if coverage then
-		cov = require("lib.test.coverage") --[[:! Coverage]]
+		cov = require("lib.test.coverage")
 		cov.start()
 	end
 
@@ -174,7 +174,7 @@ local function run_sequential(file_list, coverage)
 		end
 	end
 
-	if cov then (cov --[[:! Coverage]]).stop() end
+	if cov then cov.stop() end
 
 	print("")
 	local total_assertions = grand_pass + grand_fail
@@ -182,7 +182,7 @@ local function run_sequential(file_list, coverage)
 	io.write("\n")
 
 	if cov then
-		(cov --[[:! Coverage]]).report({ uncovered = true })
+		cov.report({ uncovered = true })
 	end
 
 	if total_fail_files > 0 then os.exit(1) end
@@ -218,13 +218,17 @@ local function encode_test(t)
 	return ok_flag .. "|" .. name_enc .. "|" .. err_enc
 end
 
+--:: TestResult = { ok: boolean, name: string, err: string | nil }
+
+--: (s: string) -> TestResult | nil
 local function decode_test(s)
 	local ok_flag, name_enc, err_enc = s:match("^([01])|([^|]*)|(.*)$")
 	if not ok_flag then return nil end
+	local err_dec = urldecode(err_enc)
 	return {
 		ok   = ok_flag == "1",
 		name = urldecode(name_enc),
-		err  = urldecode(err_enc) ~= "" and urldecode(err_enc) or nil,
+		err  = err_dec ~= "" and err_dec or nil,
 	}
 end
 
@@ -242,12 +246,15 @@ local function encode_result(file, ok_file, pass, fail, skip, pcall_err, tests)
 		.. " " .. (skip or 0) .. " " .. pcall_enc .. " " .. tests_str
 end
 
+--:: DecodedResult = { status: string, file: string, pass: integer, fail: integer, skip: integer, pcall_err: string, tests: TestResult[] }
+
+--: (line: string) -> DecodedResult | nil
 local function decode_result(line)
 	local status, file_enc, pass_s, fail_s, skip_s, pcall_enc, tests_str =
 		line:match("^(%u+) (%S+) (%d+) (%d+) (%d+) (%S*) ?(.*)$")
 	if not status then return nil end
 
-	local tests = {}
+	local tests = {} --[[: TestResult[] ]]
 	if tests_str and tests_str ~= "" then
 		for enc in tests_str:gmatch("[^,]+") do
 			local t = decode_test(urldecode(enc))
@@ -423,8 +430,7 @@ local function run_parallel(file_list, n)
 				io.write("\n")
 
 				if #r.tests > 0 then
-					for _, t_ in ipairs(r.tests --[[:! { [integer]: unknown }]]) do
-						local t = t_ --[[:! { ok: boolean, name: string, err: string | nil }]]
+					for _, t in ipairs(r.tests) do
 						if not t.ok then
 							local detail = (t.err and (": " .. tostring(t.err))) or ""
 							print("        \xE2\x9C\x97 " .. t.name .. detail)

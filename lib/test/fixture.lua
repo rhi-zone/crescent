@@ -39,7 +39,7 @@ local function read_file(path)
 	if not f then return nil end
 	local content = f:read("*all")
 	f:close()
-	return content --[[:! string | nil]]
+	return content
 end
 
 --: (path: string, content: string) -> nil
@@ -207,7 +207,7 @@ end
 -- Sort lines alphabetically.
 --: (s: string) -> string
 M.normalize.sort_lines = function(s)
-	local lines = split_lines(s) --[[:! Arr<string>]]
+	local lines = split_lines(s)
 	table.sort(lines)
 	return table.concat(lines, "\n")
 end
@@ -240,14 +240,14 @@ function M.check(input_path, expected_path, runner, opts)
 	if not ok then
 		return false, "fail", "runner raised error:\n  " .. tostring(actual)
 	end
-	local actual_s = actual --[[:! string]]
 
-	if type(actual_s) ~= "string" then
-		return false, "fail", "runner must return a string, got " .. type(actual_s)
+	if type(actual) ~= "string" then
+		return false, "fail", "runner must return a string, got " .. type(actual)
 	end
+	local actual_s = actual
 
 	if normalize then
-		actual_s = (normalize --[[:! (string) -> string]])(actual_s)
+		actual_s = normalize(actual_s)
 	end
 
 	local expected = read_file(expected_path)
@@ -263,10 +263,10 @@ function M.check(input_path, expected_path, runner, opts)
 			"no expected file: " .. expected_path
 				.. "\n  run with UPDATE_SNAPSHOTS=1 to create it"
 	end
-	local expected_s = expected --[[:! string]]
+	local expected_s = expected
 
 	if normalize then
-		expected_s = (normalize --[[:! (string) -> string]])(expected_s)
+		expected_s = normalize(expected_s)
 	end
 
 	if actual_s == expected_s then
@@ -324,7 +324,7 @@ function M.run_dir(dir, runner, opts)
 
 	local inputs = {} --[[: string[] ]]
 	for line in h:lines() do
-		inputs[#inputs + 1] = (line --[[: unknown]]) --[[:! string]]
+		if line then inputs[#inputs + 1] = line end
 	end
 	h:close()
 

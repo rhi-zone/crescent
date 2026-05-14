@@ -51,7 +51,7 @@ end
 
 local gen_mod = require("lib.test.gen")  -- for make_rng only
 
---:: Rng = { seed: number, next: (self: Rng) -> number, float: (self: Rng) -> number, int: (self: Rng, lo: number, hi: number) -> number, bool: (self: Rng) -> boolean, pick: <T>(self: Rng, t: T[]) -> T }
+--:: Rng = { seed: number, next: (self: Rng) -> number, float: (self: Rng) -> number, int: (self: Rng, lo: integer, hi: integer) -> integer, bool: (self: Rng) -> boolean, pick: <T>(self: Rng, t: T[]) -> T }
 --:: ShrinkIter = () -> (unknown, unknown)
 --:: Arb = { generate: (rng: Rng, sz: integer) -> (unknown, unknown), shrink: (v: unknown, ctx: unknown | nil) -> ShrinkIter }
 --:: CheckInfo = { desc: string, trial: integer, seed: number, original: unknown, shrunk: unknown, shrink_steps: integer, err: string, is_tuple: boolean }
@@ -74,7 +74,7 @@ local EMPTY_ITER = function() return nil end
 --
 -- Allocates one closure per shrink call (off the hot path).
 
---: (unknown, integer) -> ShrinkIter
+--: (val: unknown, target: integer) -> ShrinkIter
 local function int_shrink_iter(val, target)
 	if val == target then return EMPTY_ITER end
 	local val_n = val --[[:! integer]]
@@ -101,7 +101,7 @@ function M.int(lo, hi)
 	}
 end
 
-M.uint = M.int(0, (2^31 - 1) --[[:! integer]])
+M.uint = M.int(0, math.floor(2^31 - 1))
 M.byte = M.int(0, 255)
 
 --: (lo: number | nil, hi: number | nil) -> Arb
@@ -161,12 +161,12 @@ function M.string(opts)
 			local len = rng:int(min_len, math.max(min_len, top))
 			local buf = {}
 			if charset then
-				local cs = charset --[[:! string]]
+				local cs = charset
 				local nc = #cs
 				for i = 1, len do
-					local a = (1 + (rng:next() % nc)) --[[:! integer]]
-				local b = (1 + (rng:next() % nc)) --[[:! integer]]
-				buf[i] = cs:sub(a, b)
+					local a = math.floor(1 + (rng:next() % nc))
+					local b = math.floor(1 + (rng:next() % nc))
+					buf[i] = cs:sub(a, b)
 				end
 			else
 				for i = 1, len do buf[i] = string.char(rng:int(1, 127)) end
@@ -252,10 +252,9 @@ local function array_shrink_iter(vals, ctxs, elem_arb, min_len)
 		end
 		-- Phase 2: element shrink
 		while eidx <= n do
-			if not eiter then
-				eiter = elem_arb.shrink(vals[eidx], ctxs and ctxs[eidx])
-			end
-			local sv, sc = (eiter --[[:! ShrinkIter]])()
+			local cur_iter = eiter or elem_arb.shrink(vals[eidx], ctxs and ctxs[eidx])
+			eiter = cur_iter
+			local sv, sc = cur_iter()
 			if sv ~= nil then
 				local c = {}; for i = 1, n do c[i] = vals[i] end; c[eidx] = sv
 				local nc
@@ -330,10 +329,9 @@ function M.record(spec)
 			return function()
 				while kidx <= #keys do
 					local k = keys[kidx]
-					if not kiter then
-						kiter = spec[k].shrink(vals[k], ctxs and ctxs[k])
-					end
-					local sv, sc = (kiter --[[:! ShrinkIter]])()
+					local cur_iter = kiter or spec[k].shrink(vals[k], ctxs and ctxs[k])
+					kiter = cur_iter
+					local sv, sc = cur_iter()
 					if sv ~= nil then
 						local c = {}; for f, v in pairs(vals) do c[f] = v end; c[k] = sv
 						local nc
@@ -379,7 +377,7 @@ end
 -- filter: ctx passes through unchanged.  Shrink skips invalid candidates.
 --: (a: Arb, pred: (unknown) -> boolean, opts: { max_tries?: integer } | nil) -> Arb
 function M.filter(a, pred, opts)
-	local max_tries = ((opts and opts.max_tries) or 100) --[[:! integer]]
+	local max_tries = (opts and opts.max_tries) or 100
 	return {
 		generate = function(rng, sz)
 			for _ = 1, max_tries do
@@ -454,10 +452,9 @@ function M.tuple(arbs_list)
 			local eiter = nil
 			return function()
 				while eidx <= n do
-					if not eiter then
-						eiter = arbs_list[eidx].shrink(vals[eidx], ctxs and ctxs[eidx])
-					end
-					local sv, sc = (eiter --[[:! ShrinkIter]])()
+					local cur_iter = eiter or arbs_list[eidx].shrink(vals[eidx], ctxs and ctxs[eidx])
+					eiter = cur_iter
+					local sv, sc = cur_iter()
 					if sv ~= nil then
 						local c = {}; for i = 1, n do c[i] = vals[i] end; c[eidx] = sv
 						local nc
@@ -706,8 +703,7 @@ function M.it(desc, arb_arg, fn, opts)
 	local T = require("lib.test.assert")
 	T.it(desc, function()
 		local ok, info = M.check(desc, arb_arg, fn, opts)
-		info = info --[[:! CheckInfo]]
-		if not ok then
+		if not ok and info then
 			local lines = {
 				"property falsified after " .. info.trial
 					.. " test" .. (info.trial == 1 and "" or "s")
@@ -728,8 +724,7 @@ end
 --: (desc: string, arb_arg: Arb | { [integer]: Arb, ... }, fn: (...unknown) -> unknown, opts: { trials?: integer, max_size?: integer, seed?: number, max_shrink?: integer, ... } | nil) -> ()
 function M.assert(desc, arb_arg, fn, opts)
 	local ok, info = M.check(desc, arb_arg, fn, opts)
-	info = info --[[:! CheckInfo]]
-	if not ok then
+	if not ok and info then
 		error(
 			"property falsified after " .. info.trial .. " test(s)"
 			.. "  (seed=" .. info.seed .. ")\n"

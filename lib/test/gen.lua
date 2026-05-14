@@ -12,7 +12,7 @@ end
 
 local G = {}
 
---:: Rng = { seed: number, next: (self: Rng) -> number, float: (self: Rng) -> number, int: (self: Rng, lo: number, hi: number) -> number, bool: (self: Rng) -> boolean, pick: <T>(self: Rng, t: T[]) -> T }
+--:: Rng = { seed: number, next: (self: Rng) -> number, float: (self: Rng) -> number, int: (self: Rng, lo: integer, hi: integer) -> integer, bool: (self: Rng) -> boolean, pick: <T>(self: Rng, t: T[]) -> T }
 --:: Generator<T> = { generate: (rng: Rng, sz: integer) -> T, shrink: (v: T) -> T[] }
 --:: StringOpts = { charset?: string, min?: integer, max?: integer }
 --:: ListOpts = { min?: integer, max?: integer }
@@ -111,13 +111,13 @@ function G.string(opts)
 	return {
 		--: (rng: Rng, sz: integer) -> string
 		generate = function(rng, sz)
-			local cs   = charset --[[:! string]]
+			local cs   = charset
 			local top  = max_fn or math.min(sz, 20)
 			local len  = rng:int(min_len, math.max(min_len, top))
 			local buf  = {}
 			local nc   = #cs
 			for i = 1, len do
-				local ci = (1 + (rng:next() % nc)) --[[:! integer]]
+				local ci = math.floor(1 + (rng:next() % nc))
 				buf[i] = cs:sub(ci, ci)
 			end
 			return table.concat(buf)
@@ -196,8 +196,8 @@ function G.table(k_gen, v_gen, opts)
 			end
 			return out
 		end,
-		shrink = function(v_)
-			local v = v_ --[[:! { [unknown]: unknown }]]
+		--: (v: { [unknown]: unknown }) -> { [unknown]: unknown }[]
+		shrink = function(v)
 			local keys = {}
 			for k in pairs(v) do keys[#keys+1] = k end
 			if #keys == 0 then return {} end

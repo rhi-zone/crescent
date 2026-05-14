@@ -9,7 +9,7 @@
 local mod = {}
 
 --[[line hit counts per source file: {[source] = {[line] = count}}]]
-local hits = {}
+local hits = {} --[[: { [string]: { [integer]: integer } }]]
 
 --[[files to include (prefix match)]]
 local include_prefix = "lib/"
@@ -23,10 +23,9 @@ local exclude_patterns = {
 --[[normalize source path: strip @ prefix and leading ./]]
 --: (source0: string) -> string
 local function normalize(source0)
-	local source = source0
-	if source:sub(1, 1) == "@" then source = source:sub(2) --[[:! string]] end
-	if source:sub(1, 2) == "./" then source = source:sub(3) --[[:! string]] end
-	return source
+	local s1 = source0:sub(1, 1) == "@" and source0:sub(2) or source0
+	local s2 = s1:sub(1, 2) == "./" and s1:sub(3) or s1
+	return s2
 end
 
 --: (source: string) -> boolean
@@ -39,20 +38,23 @@ local function should_track(source)
 end
 
 --[[cache of source path -> normalized path or false]]
-local path_cache = {}
+local path_cache = {} --[[: { [string]: string | false }]]
 
 --: (event: string, line: integer | nil) -> nil
 local function hook(_, line)
-	local info = debug.getinfo(2, "S") --[[:! { source: string, [string]: unknown }]]
+	local info = debug.getinfo(2, "S")
+	if not info then return end
 	local raw = info.source
-	local source = path_cache[raw] --[[:! string | false | nil]]
+	if type(raw) ~= "string" then return end
+	local cached = path_cache[raw] --: string | false | nil
+	local source --: string | false | nil
+	source = cached
 	if source == nil then
 		local norm = normalize(raw)
 		source = (should_track(norm) and norm) or false
 		path_cache[raw] = source
 	end
 	if not source then return end
-	source = source --[[:! string]]
 	local file_hits = hits[source]
 	if not file_hits then file_hits = {}; hits[source] = file_hits end
 	file_hits[line] = (file_hits[line] or 0) + 1
@@ -157,11 +159,11 @@ mod.report = function (opts)
 	if opts.uncovered then
 		print("")
 		for _, fs in ipairs(file_stats) do
-			if fs.stats.pct < 100 then
-				local lines = read_lines(fs.source)
+			local lines = fs.stats.pct < 100 and read_lines(fs.source) or nil
+			if lines then
 				local file_hits = hits[fs.source] or {}
 				local uncovered = {} --[[: Arr<integer>]]
-				for i, line in ipairs(lines --[[:! Arr<string>]]) do
+				for i, line in ipairs(lines) do
 					if is_executable(line) and not file_hits[i] then
 						uncovered[#uncovered + 1] = i
 					end

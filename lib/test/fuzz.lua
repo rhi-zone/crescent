@@ -66,23 +66,23 @@ end
 
 -- ── Interesting values ────────────────────────────────────────────────────────
 
-local INTERESTING_BYTES = { 0, 1, 127, 128, 254, 255, 10, 13, 34, 39, 92, 47 }
+local INTERESTING_BYTES = { 0, 1, 127, 128, 254, 255, 10, 13, 34, 39, 92, 47 } --: integer[]
 
 local INTERESTING_STRINGS = {
 	"", "\n", "\r\n", "--", "//", "\"\"", "''", "{}", "[]", "()",
 	"0", "-1", "1", "9999999", "0x0", "0xff",
 	"nil", "true", "false", "null",
 	"do end", "return", "local",
-}
+} --: string[]
 
 -- ── Individual mutation strategies ───────────────────────────────────────────
 
---:: Rng = { seed: number, next: (self: Rng) -> number, float: (self: Rng) -> number, int: (self: Rng, lo: number, hi: number) -> number, bool: (self: Rng) -> boolean, pick: <T>(self: Rng, t: T[]) -> T }
+--:: Rng = { seed: number, next: (self: Rng) -> number, float: (self: Rng) -> number, int: (self: Rng, lo: integer, hi: integer) -> integer, bool: (self: Rng) -> boolean, pick: <T>(self: Rng, t: T[]) -> T }
 
 --: (input: string, rng: Rng) -> string
 local function mut_byte_flip(input, rng)
 	if #input == 0 then return input end
-	local pos     = rng:int(1, #input) --[[:! integer]]
+	local pos     = rng:int(1, #input)
 	local b       = string.byte(input, pos) or 0
 	local bit_idx = rng:int(0, 7)
 	local nb      = flip_bit(b, bit_idx)
@@ -91,8 +91,8 @@ end
 
 local function mut_byte_replace(input, rng)
 	if #input == 0 then return input end
-	local pos = rng:int(1, #input) --[[:! integer]]
-	local nb  = rng:int(0, 255) --[[:! integer]]
+	local pos = rng:int(1, #input)
+	local nb  = rng:int(0, 255)
 	return input:sub(1, pos-1) .. string.char(nb) .. input:sub(pos+1)
 end
 
@@ -104,7 +104,7 @@ end
 
 local function mut_byte_delete(input, rng)
 	if #input == 0 then return input end
-	local pos = rng:int(1, #input) --[[:! integer]]
+	local pos = rng:int(1, #input)
 	return input:sub(1, pos-1) .. input:sub(pos+1)
 end
 
@@ -116,8 +116,8 @@ end
 
 --: (input: string, rng: Rng) -> string
 local function mut_interesting_string(input, rng)
-	local s   = INTERESTING_STRINGS[rng:int(1, #INTERESTING_STRINGS)] --[[:! string]]
-	local pos = rng:int(0, #input) --[[:! integer]]
+	local s   = INTERESTING_STRINGS[rng:int(1, #INTERESTING_STRINGS)]
+	local pos = rng:int(0, #input)
 	return input:sub(1, pos) .. s .. input:sub(pos+1)
 end
 
@@ -140,25 +140,24 @@ end
 --: (input: string, other: string, rng: Rng) -> string
 local function mut_splice(input, other, rng)
 	if #input == 0 or #other == 0 then return input end
-	local pivot1 = rng:int(1, #input) --[[:! integer]]
-	local pivot2 = rng:int(1, #other) --[[:! integer]]
+	local pivot1 = rng:int(1, #input)
+	local pivot2 = rng:int(1, #other)
 	return input:sub(1, pivot1) .. other:sub(pivot2)
 end
 
 local FAST_MUTATIONS = {
 	mut_byte_flip, mut_byte_replace, mut_byte_insert, mut_byte_delete,
 	mut_interesting_byte, mut_interesting_string, mut_block_repeat, mut_block_delete,
-}
+} --: ((string, Rng) -> string)[]
 
 -- Apply one random mutation.  corpus is optional (used for splice).
 --: (input: string, rng: Rng, corpus: string[] | nil) -> string
 function M.mutate(input, rng, corpus)
 	if corpus and #corpus > 1 and rng:float() < 0.15 then
-		local cs = corpus --[[:! string[] ]]
-		local other = cs[rng:int(1, #cs)]
+		local other = corpus[rng:int(1, #corpus)]
 		return mut_splice(input, other, rng)
 	end
-	local fn = FAST_MUTATIONS[rng:int(1, #FAST_MUTATIONS)] --[[:! (string, Rng) -> string]]
+	local fn = FAST_MUTATIONS[rng:int(1, #FAST_MUTATIONS)]
 	return fn(input, rng)
 end
 
@@ -201,15 +200,14 @@ end
 --: (dir: string) -> string[]
 local function load_corpus_dir(dir)
 	local corpus = {} --[[: string[] ]]
-	local fh_ = io.popen("ls -1 " .. string.format("%q", dir) .. " 2>/dev/null")
-	if not fh_ then return corpus end
-	local fh = (fh_ --[[: unknown]]) --[[:! { lines: (self: unknown) -> (() -> string | nil), close: (self: unknown) -> nil }]]
+	local fh = io.popen("ls -1 " .. string.format("%q", dir) .. " 2>/dev/null")
+	if not fh then return corpus end
 	for fname in fh:lines() do
-		local fname_s = (fname --[[: unknown]]) --[[:! string]]
-		if fname_s:match("%.corpus$") then
-			local f = io.open(dir .. "/" .. fname_s, "rb")
+		if fname and fname:match("%.corpus$") then
+			local f = io.open(dir .. "/" .. fname, "rb")
 			if f then
-				corpus[#corpus+1] = (f:read("*a") --[[: unknown]]) --[[:! string]]
+				local content = f:read("*a")
+				if content then corpus[#corpus+1] = content end
 				f:close()
 			end
 		end
@@ -229,6 +227,9 @@ end
 
 -- ── fuzz.run ──────────────────────────────────────────────────────────────────
 
+--:: FuzzOpts = { seeds?: string[], iters?: integer, mode?: string, corpus_dir?: string, expected_errs?: string[], max_input_len?: integer, mutations_per?: { [integer]: integer }, seed?: number, on_crash?: (string, unknown) -> unknown, on_new_path?: (string, integer) -> unknown, expect_no_crashes?: boolean, ... }
+
+--: (fn: (string) -> unknown, opts: FuzzOpts | nil) -> { iters: integer, crashes: { [integer]: { input: string, err: string } }, unique_paths: integer, corpus_size: integer, seed: number }
 function M.run(fn, opts)
 	opts = opts or {}
 	local seeds        = opts.seeds        or {""}
@@ -249,7 +250,7 @@ function M.run(fn, opts)
 	local corpus = {}
 	for _, s in ipairs(seeds) do corpus[#corpus+1] = s end
 	if corpus_dir then
-		for _, s in ipairs(load_corpus_dir(corpus_dir --[[:! string]])) do
+		for _, s in ipairs(load_corpus_dir(corpus_dir)) do
 			corpus[#corpus+1] = s
 		end
 	end
@@ -277,8 +278,8 @@ function M.run(fn, opts)
 			if new_paths and new_paths > 0 then
 				unique_paths = unique_paths + new_paths
 				corpus[#corpus+1] = input
-				if corpus_dir then save_to_corpus(corpus_dir --[[:! string]], input, "path") end
-				if opts.on_new_path then (opts.on_new_path --[[:! (string, integer) -> unknown]])(input, new_paths) end
+				if corpus_dir then save_to_corpus(corpus_dir, input, "path") end
+				if opts.on_new_path then opts.on_new_path(input, new_paths) end
 			end
 		else
 			ok, err = pcall(fn, input)
@@ -296,8 +297,8 @@ function M.run(fn, opts)
 			end
 			if not is_expected then
 				crashes[#crashes+1] = { input = input, err = tostring(err) }
-				if corpus_dir then save_to_corpus(corpus_dir --[[:! string]], input, "crash") end
-				if opts.on_crash then (opts.on_crash --[[:! (string, unknown) -> unknown]])(input, err) end
+				if corpus_dir then save_to_corpus(corpus_dir, input, "crash") end
+				if opts.on_crash then opts.on_crash(input, err) end
 			end
 		end
 	end

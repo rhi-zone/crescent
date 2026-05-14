@@ -25,7 +25,7 @@ local gen_mod = require("lib.test.gen")
 local M  = {}
 M.gen    = gen_mod   -- re-export for convenience
 
---:: PropInfo = { desc: string, trial: integer, seed: number, original: unknown, shrunk: unknown, shrink_steps: integer, err: string }
+--:: PropInfo = { desc: string, trial: integer, seed: number, original: { [integer]: unknown }, shrunk: { [integer]: unknown }, shrink_steps: integer, err: string }
 
 local DEFAULT_TRIALS    = 100
 local DEFAULT_MAX_SHRINK = 200
@@ -121,6 +121,7 @@ end
 --
 -- Returns: ok (bool), info (nil on success, table on failure).
 -- info = { trial, seed, original, shrunk, shrink_steps, err }
+--: (desc: string, gen_arg: { generate: unknown, [integer]: { generate: unknown, ... }, ... }, fn: (...unknown) -> unknown, opts: { trials?: integer, seed?: number, max_shrink?: integer } | nil) -> (boolean, PropInfo | nil)
 function M.check(desc, gen_arg, fn, opts)
 	opts        = opts or {}
 	local trials    = opts.trials    or DEFAULT_TRIALS
@@ -182,15 +183,14 @@ end
 function M.it(desc, gen_arg, fn, opts)
 	local assert_mod = require("lib.test.assert")
 	assert_mod.it(desc, function()
-		local ok, info_ = M.check(desc, gen_arg, fn, opts)
-		local info = info_ --[[:! PropInfo]]
-		if not ok then
+		local ok, info = M.check(desc, gen_arg, fn, opts)
+		if not ok and info then
 			local lines = {
 				"property falsified after " .. info.trial
 					.. " test" .. (info.trial == 1 and "" or "s")
 					.. "  (seed=" .. info.seed .. ", replay: PROP_SEED=" .. info.seed .. ")",
-				"  input:   " .. display_tuple(info.original --[[:! { [integer]: unknown }]]),
-				"  shrunk:  " .. display_tuple(info.shrunk --[[:! { [integer]: unknown }]])
+				"  input:   " .. display_tuple(info.original),
+				"  shrunk:  " .. display_tuple(info.shrunk)
 					.. "  (" .. info.shrink_steps .. " step"
 					.. (info.shrink_steps == 1 and "" or "s") .. ")",
 				"  error:   " .. info.err,
@@ -210,13 +210,12 @@ end
 --     end)
 --   end)
 function M.assert(desc, gen_arg, fn, opts)
-	local ok, info_ = M.check(desc, gen_arg, fn, opts)
-	local info = info_ --[[:! PropInfo]]
-	if not ok then
+	local ok, info = M.check(desc, gen_arg, fn, opts)
+	if not ok and info then
 		local msg = "property falsified after " .. info.trial .. " test(s)"
 			.. "  (seed=" .. info.seed .. ")\n"
-			.. "  input:   " .. display_tuple(info.original --[[:! { [integer]: unknown }]]) .. "\n"
-			.. "  shrunk:  " .. display_tuple(info.shrunk --[[:! { [integer]: unknown }]]) .. "\n"
+			.. "  input:   " .. display_tuple(info.original) .. "\n"
+			.. "  shrunk:  " .. display_tuple(info.shrunk) .. "\n"
 			.. "  error:   " .. info.err
 		error(msg, 2)
 	end
