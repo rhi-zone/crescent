@@ -450,7 +450,7 @@ Audit run across `lib/platform/apps/charactercardv2/static/*` and `lib/platform/
 > adjust tests to match buggy behavior.*
 
 - [x] **card-editor: Escape inside the overlay does not close it** — fixed: card-editor.js registers a `keydown` listener on the overlay. Other overlays (settings, group, my-lorebooks, sessions) still rely on the document-level handler — same pattern should apply to them as follow-up.
-- [ ] **Per-overlay Escape handlers** — follow-up to the card-editor Escape fix. Settings, group, my-lorebooks, sessions overlays each rely on `closeAnyPanel` (document-level Escape). Move each to own its own overlay keydown handler for consistency and so module-local tests can verify the close path without touching `document`.
+- [x] **Per-overlay Escape handlers** — done: settings, group, my-lorebooks, sessions each register their own overlay (or panel) `keydown` listener that stops propagation and calls `close()` when `isOpen()`. Module-local tests verify the close path without touching `document`.
 - [x] **card-editor: save does not surface storage path (kv vs PNG)** — fixed: `POST /api/card/edit` now returns `storage: "png"` or `storage: "kv"` (mirrors the `flush_card_state` branch — `caps.self_write.write_metadata` present → PNG; otherwise kv). Frontend `card-editor.js` already calls `showInfo("Saved to " + data.storage)` when the field is present.
 - [x] **messages: sibling cache is keyed by current message id, not by the originating swipe-set id** — fixed by aliasing every sibling's id to the same cache entry in `ensureSiblings` + `addSiblingToCache`. The next swipe finds the entry regardless of which sibling's id the DOM is currently showing.
 
