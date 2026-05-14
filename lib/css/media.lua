@@ -34,7 +34,8 @@ M.all                  = make_query("all")
 -- items: list of rule/keyframes/nested-media tables
 --: (query: { _q: string, ... } | string, items: { [integer]: unknown }) -> { _type: string, query: string, items: { [integer]: unknown } }
 function M.media(query, items)
-  local q = (type(query) == "table" and query._q or query) --[[:! string]]
+  local q --: string
+  if type(query) == "table" then q = query._q else q = query end
   return { _type = "media", query = q, items = items }
 end
 

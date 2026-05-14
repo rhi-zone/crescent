@@ -139,9 +139,8 @@ mod.generate = function(req)
 	if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
 	local body_str = body_str_raw
 
-	local http_client_opt = req.http_client
-	if not http_client_opt then return nil, "http_client is required" end
-	local http_client = http_client_opt --[[:! ai_http_client]]
+	local http_client = req.http_client
+	if not http_client then return nil, "http_client is required" end
 
 	local req_obj = {
 		host = API_URL,
@@ -155,9 +154,8 @@ mod.generate = function(req)
 		},
 		body = body_str,
 	}
-	local res_raw, err = http_client.request(req_obj)
-	if not res_raw then return nil, err end
-	local res = res_raw --[[:! ai_http_response]]
+	local res, err = http_client.request(req_obj)
+	if not res then return nil, err end
 	if res.status ~= 200 then
 		return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
 	else
@@ -186,9 +184,8 @@ mod.stream = function(req)
 	if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
 	local body_str = body_str_raw
 
-	local http_client_opt = req.http_client
-	if not http_client_opt then return nil, "http_client is required" end
-	local http_client = http_client_opt --[[:! ai_http_client]]
+	local http_client = req.http_client
+	if not http_client then return nil, "http_client is required" end
 
 	local stream_req = {
 		host = API_URL,

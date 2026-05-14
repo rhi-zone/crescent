@@ -16,13 +16,13 @@ local mod = {}
 mod.client = function (cb, nameserver, domain, opcode, type, class, epoll)
 	local is_running = not epoll
 	local ep = epoll or require("lib.epoll").new()
-	type = (type or (dns.type --[[:! { [string]: unknown }]])["*"]) --[[:! integer]]
+	type = type or dns.type["*"]
 	class = class or dns.class.IN
 	local name_parts = {}
 	for s in domain:gmatch("[^.]+") do name_parts[#name_parts+1] = s end
 	if #name_parts[#name_parts] > 0 then name_parts[#name_parts+1] = "" end
-	local msg_raw = { opcode = opcode, is_query = true, is_recursion_desired = true, questions = { { name = name_parts, type = type, class = class } } }
-	local msg = ((msg_raw --[[: unknown]]) --[[:! { additional?: { [integer]: { class: integer, data: string, name: { [integer]: string }, ttl: integer, type: integer } }, answers?: { [integer]: { class: integer, data: string, name: { [integer]: string }, ttl: integer, type: integer } }, id?: integer, is_authoritative?: boolean, is_query?: boolean, is_recursion_available?: boolean, is_recursion_desired?: boolean, is_response?: boolean, is_truncated?: boolean, nameservers?: { [integer]: { class: integer, data: string, name: { [integer]: string }, ttl: integer, type: integer } }, opcode?: integer, questions?: { [integer]: { class: integer, name: { [integer]: string }, type: integer } }, response_code?: integer }]])
+	local msg = { is_query = true, is_recursion_desired = true, questions = { { name = name_parts, type = type, class = class } } } --[[: { is_query: boolean, is_recursion_desired: boolean, opcode?: integer, questions: { [integer]: { name: { [integer]: string }, type: integer, class: integer } } }]]
+	if opcode ~= nil then msg.opcode = opcode end
 	local s = dns.dns_message_to_string(msg)
 	s = string.char(bit.rshift(#s, 8), bit.band(#s, 0xff)) .. s
 	local send, close

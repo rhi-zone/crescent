@@ -25,7 +25,8 @@ function M.embed(sheet, css_mod)
   for _, item in ipairs(sheet.items) do
     if item._type == "rule" then
       local sel = item.selector
-      local sel_str = (type(sel) == "table" and sel._str or tostring(sel)) --[[:! string]]
+      local sel_str --: string
+      if type(sel) == "table" then sel_str = sel._str else sel_str = tostring(sel) end
       -- Extract class name from simple class selectors like ".btn"
       local name = sel_str:match("^%.([%w_%-]+)$")
       if name then

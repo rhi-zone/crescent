@@ -243,6 +243,6 @@ end
 -- M.embed(sheet) — renders sheet to a <style> block and returns class name map.
 -- Convenience wrapper: passes M itself as css_mod to avoid circular require.
 --: (sheet: { items: { [integer]: { _type: string, selector: unknown, ... } }, ... }) -> (string, { [string]: unknown })
-M.embed = function(sheet) return embed_mod.embed(sheet, M --[[:! { render: (unknown) -> string, class: (string) -> unknown, ... }]]) end
+M.embed = function(sheet) return embed_mod.embed(sheet, { render = M.render, class = M.class }) end
 
 return M

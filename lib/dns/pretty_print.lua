@@ -18,7 +18,7 @@ mod.formatters = {
 	--[[@diagnostic disable-next-line: deprecated]]
 	[dns.type.MG] = domain_parts_to_string,
 	--[[@diagnostic disable-next-line: deprecated]]
-	[dns.type.MINFO] = function (x_u) local x = (x_u --[[: unknown]]) --[[:! { rmailbx: { [integer]: string | number }, emailbx: { [integer]: string | number }, ... }]]; (x --[[: unknown]]).rmailbx = domain_parts_to_string(x.rmailbx); (x --[[: unknown]]).emailbx = domain_parts_to_string(x.emailbx); return x end,
+	[dns.type.MINFO] = function (x --[[: { rmailbx: { [integer]: string | number }, emailbx: { [integer]: string | number }, ... }]]) x.rmailbx = domain_parts_to_string(x.rmailbx); x.emailbx = domain_parts_to_string(x.emailbx); return x end,
 	--[[@diagnostic disable-next-line: deprecated]]
 	[dns.type.MR] = domain_parts_to_string,
 	--[[@diagnostic disable-next-line: param-type-mismatch]]
@@ -26,15 +26,14 @@ mod.formatters = {
 	[dns.type.NS] = domain_parts_to_string,
 	[dns.type.PTR] = domain_parts_to_string,
 	--[[@diagnostic disable-next-line: param-type-mismatch]]
-	[dns.type.SOA] = function (x_u) local x = (x_u --[[: unknown]]) --[[:! { mname: { [integer]: string | number }, rname: { [integer]: string | number }, ... }]]; (x --[[: unknown]]).mname = domain_parts_to_string(x.mname); (x --[[: unknown]]).rname = domain_parts_to_string(x.rname); return x end,
+	[dns.type.SOA] = function (x --[[: { mname: { [integer]: string | number }, rname: { [integer]: string | number }, ... }]]) x.mname = domain_parts_to_string(x.mname); x.rname = domain_parts_to_string(x.rname); return x end,
 	[dns.type.TXT] = function (strs) return table.concat(strs, "\t") end,
 	[dns.type.A] = function (arr) return table.concat(arr, ".") end,
-	[dns.type.AAAA] = function (arr)
+	[dns.type.AAAA] = function (arr --[[: { [integer]: integer }]])
 		-- Convert 16 bytes to IPv6 hex notation
-		local arr_t = arr --[[:! { [integer]: integer }]]
 		local hex_parts = {}
 		for idx = 1, 16, 2 do
-			hex_parts[#hex_parts+1] = string.format("%x", bit.bor(bit.lshift(arr_t[idx] or 0, 8), arr_t[idx+1] or 0))
+			hex_parts[#hex_parts+1] = string.format("%x", bit.bor(bit.lshift(arr[idx] or 0, 8), arr[idx+1] or 0))
 		end
 		local s = table.concat(hex_parts, ":")
 		local max0s = ""

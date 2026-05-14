@@ -42,7 +42,7 @@ end
 -- "declared" = rule has var_name as a property key
 -- "referenced" = rule has a value containing "var(var_name)"
 -- Also reports @property registrations under report[var_name].registered = true
---: (sheet: unknown, var_names: { [integer]: string }) -> { [string]: unknown }
+--: (sheet: { items: { [integer]: unknown }, ... }, var_names: { [integer]: string }) -> { [string]: unknown }
 function M.analyze(sheet, var_names)
   local watched = {}
   for _, name in ipairs(var_names) do watched[name] = true end
@@ -81,8 +81,7 @@ function M.analyze(sheet, var_names)
     end
   end
 
-  local sheet_ = sheet --[[:! { items: { [integer]: unknown } }]]
-  analyze_items(sheet_.items)
+  analyze_items(sheet.items)
   return report
 end
 

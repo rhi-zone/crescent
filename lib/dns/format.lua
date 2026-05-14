@@ -24,6 +24,7 @@ end
 
 -- RFC 1035 §3.2.2 — TYPE values
 --[[@enum dns_type]]
+--: { [string]: integer }
 mod.type = {
 	A = 1, --[[a host address - see RFC1035]]
 	NS = 2, --[[an authoritative name server - see RFC1035]]

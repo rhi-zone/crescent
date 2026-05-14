@@ -13,8 +13,8 @@ local function create(base_url)
 	if base_url then
 		local h, p = base_url:match("^https?://([^/]+)(.*)")
 		if not h then h, p = base_url:match("^([^/]+)(.*)") end
-		host = (h or "api.openai.com") --[[:! string]]
-		if p and #p > 0 then chat_path = p --[[:! string]] end
+		host = h or "api.openai.com"
+		if p and #p > 0 then chat_path = p end
 	end
 	local ep2 = nil --: string | nil
 	local ip2 = nil --: string | nil

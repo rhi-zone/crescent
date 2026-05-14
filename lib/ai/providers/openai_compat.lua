@@ -178,9 +178,8 @@ mod.create = function(config)
 		if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
 		local body_str = body_str_raw
 
-		local http_client_opt = req.http_client
-		if not http_client_opt then return nil, "http_client is required" end
-		local http_client = http_client_opt --[[:! ai_http_client]]
+		local http_client = req.http_client
+		if not http_client then return nil, "http_client is required" end
 
 		local req_obj = {
 			host = host,
@@ -189,10 +188,9 @@ mod.create = function(config)
 			headers = make_headers(api_key, body_str),
 			body = body_str,
 		}
-		local res_raw
-		res_raw, err = http_client.request(req_obj)
-		if not res_raw then return nil, err end
-		local res = res_raw --[[:! ai_http_response]]
+		local res
+		res, err = http_client.request(req_obj)
+		if not res then return nil, err end
 		if res.status ~= 200 then
 			return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
 		else
@@ -220,9 +218,8 @@ mod.create = function(config)
 		if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
 		local body_str = body_str_raw
 
-		local http_client_opt = req.http_client
-		if not http_client_opt then return nil, "http_client is required" end
-		local http_client = http_client_opt --[[:! ai_http_client]]
+		local http_client = req.http_client
+		if not http_client then return nil, "http_client is required" end
 
 		local stream_req = {
 			host = host,
@@ -355,9 +352,8 @@ mod.create = function(config)
 		if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
 		local body_str = body_str_raw
 
-		local http_client_opt = req.http_client
-		if not http_client_opt then return nil, "http_client is required" end
-		local http_client = http_client_opt --[[:! ai_http_client]]
+		local http_client = req.http_client
+		if not http_client then return nil, "http_client is required" end
 
 		local req_obj = {
 			host = host,
@@ -366,10 +362,9 @@ mod.create = function(config)
 			headers = make_headers(api_key, body_str),
 			body = body_str,
 		}
-		local res_raw
-		res_raw, err = http_client.request(req_obj)
-		if not res_raw then return nil, err end
-		local res = res_raw --[[:! ai_http_response]]
+		local res
+		res, err = http_client.request(req_obj)
+		if not res then return nil, err end
 		if res.status ~= 200 then
 			return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
 		else
@@ -407,9 +402,8 @@ mod.create = function(config)
 		if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
 		local body_str = body_str_raw
 
-		local http_client_opt = req.http_client
-		if not http_client_opt then return nil, "http_client is required" end
-		local http_client = http_client_opt --[[:! ai_http_client]]
+		local http_client = req.http_client
+		if not http_client then return nil, "http_client is required" end
 
 		local req_obj = {
 			host = host,
@@ -418,10 +412,9 @@ mod.create = function(config)
 			headers = make_headers(api_key, body_str),
 			body = body_str,
 		}
-		local res_raw
-		res_raw, err = http_client.request(req_obj)
-		if not res_raw then return nil, err end
-		local res = res_raw --[[:! ai_http_response]]
+		local res
+		res, err = http_client.request(req_obj)
+		if not res then return nil, err end
 		if res.status ~= 200 then
 			return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
 		else
@@ -470,9 +463,8 @@ mod.create = function(config)
 		if not body_str_raw then return nil, "json encode: " .. (body_err or "unknown") end
 		local body_str = body_str_raw
 
-		local http_client_opt = req.http_client
-		if not http_client_opt then return nil, "http_client is required" end
-		local http_client = http_client_opt --[[:! ai_http_client]]
+		local http_client = req.http_client
+		if not http_client then return nil, "http_client is required" end
 
 		local req_obj = {
 			host = host,
@@ -481,10 +473,9 @@ mod.create = function(config)
 			headers = make_headers(api_key, body_str),
 			body = body_str,
 		}
-		local res_raw
-		res_raw, err = http_client.request(req_obj)
-		if not res_raw then return nil, err end
-		local res = res_raw --[[:! ai_http_response]]
+		local res
+		res, err = http_client.request(req_obj)
+		if not res then return nil, err end
 		if res.status ~= 200 then
 			return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
 		else

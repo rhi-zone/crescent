@@ -169,9 +169,8 @@ mod.generate = function(req)
 	local body_str = body_str_raw
 	local path = "/v1beta/models/" .. req.model .. ":generateContent?key=" .. api_key
 
-	local http_client_opt = req.http_client
-	if not http_client_opt then return nil, "http_client is required" end
-	local http_client = http_client_opt --[[:! ai_http_client]]
+	local http_client = req.http_client
+	if not http_client then return nil, "http_client is required" end
 
 	local req_obj = {
 		host = API_HOST,
@@ -183,10 +182,9 @@ mod.generate = function(req)
 		},
 		body = body_str,
 	}
-	local res_raw
-	res_raw, err = http_client.request(req_obj)
-	if not res_raw then return nil, err end
-	local res = res_raw --[[:! ai_http_response]]
+	local res
+	res, err = http_client.request(req_obj)
+	if not res then return nil, err end
 	if res.status ~= 200 then
 		return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
 	else
@@ -218,9 +216,8 @@ mod.stream = function(req)
 	local body_str = body_str_raw
 	local path = "/v1beta/models/" .. req.model .. ":streamGenerateContent?key=" .. api_key .. "&alt=sse"
 
-	local http_client_opt = req.http_client
-	if not http_client_opt then return nil, "http_client is required" end
-	local http_client = http_client_opt --[[:! ai_http_client]]
+	local http_client = req.http_client
+	if not http_client then return nil, "http_client is required" end
 
 	local stream_req = {
 		host = API_HOST,
@@ -330,9 +327,8 @@ mod.embed = function(req)
 	local body_str = body_str_raw
 	local path = "/v1beta/models/" .. req.model .. ":embedContent?key=" .. api_key
 
-	local http_client_opt = req.http_client
-	if not http_client_opt then return nil, "http_client is required" end
-	local http_client = http_client_opt --[[:! ai_http_client]]
+	local http_client = req.http_client
+	if not http_client then return nil, "http_client is required" end
 
 	local req_obj = {
 		host = API_HOST,
@@ -344,10 +340,9 @@ mod.embed = function(req)
 		},
 		body = body_str,
 	}
-	local res_raw
-	res_raw, err = http_client.request(req_obj)
-	if not res_raw then return nil, err end
-	local res = res_raw --[[:! ai_http_response]]
+	local res
+	res, err = http_client.request(req_obj)
+	if not res then return nil, err end
 	if res.status ~= 200 then
 		return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
 	else
@@ -387,9 +382,8 @@ mod.embed_many = function(req)
 	local body_str = body_str_raw
 	local path = "/v1beta/models/" .. req.model .. ":batchEmbedContents?key=" .. api_key
 
-	local http_client_opt = req.http_client
-	if not http_client_opt then return nil, "http_client is required" end
-	local http_client = http_client_opt --[[:! ai_http_client]]
+	local http_client = req.http_client
+	if not http_client then return nil, "http_client is required" end
 
 	local req_obj = {
 		host = API_HOST,
@@ -401,10 +395,9 @@ mod.embed_many = function(req)
 		},
 		body = body_str,
 	}
-	local res_raw
-	res_raw, err = http_client.request(req_obj)
-	if not res_raw then return nil, err end
-	local res = res_raw --[[:! ai_http_response]]
+	local res
+	res, err = http_client.request(req_obj)
+	if not res then return nil, err end
 	if res.status ~= 200 then
 		return nil, "HTTP " .. tostring(res.status or "?") .. ": " .. (res.body or "")
 	else
