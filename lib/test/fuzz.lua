@@ -184,7 +184,7 @@ local function run_guided(fn, input, global_bitmap)
 		end
 	end, "l")
 	local ok, err = pcall(fn, input)
-	(debug.sethook --[[: unknown]])()
+	debug.sethook()
 
 	local new_paths = 0
 	for k in pairs(local_bitmap) do

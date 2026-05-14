@@ -9,10 +9,13 @@ local mod = {}
 
 --[[this only sends a single message so "client" is a bit of a misnomer]]
 --[[TODO: the positioning of epoll is very inconvenient. but breaking up the arguments isn't a great option either]]
---: ((unknown) -> nil, string, string, integer | nil, integer | nil, integer | nil, unknown | nil) -> nil
+--[[TODO: epoll is `unknown | nil` because the `epoll` type alias declared in
+     lib/epoll/init.lua is not visible across modules. Once cross-module named
+     types are supported, type this as `epoll | nil`.]]
+--: (cb: (unknown) -> nil, nameserver: string, domain: string, opcode: integer | nil, type: integer | nil, class: integer | nil, epoll: unknown | nil) -> nil
 mod.client = function (cb, nameserver, domain, opcode, type, class, epoll)
 	local is_running = not epoll
-	epoll = epoll or require("lib.epoll").new()
+	local ep = epoll or require("lib.epoll").new()
 	type = (type or (dns.type --[[:! { [string]: unknown }]])["*"]) --[[:! integer]]
 	class = class or dns.class.IN
 	local name_parts = {}
@@ -26,12 +29,10 @@ mod.client = function (cb, nameserver, domain, opcode, type, class, epoll)
 	send, close = tcp_client(nameserver, 53, function (s2)
 		--[[local length = bit.bor(bit.lshift(s2:byte(1), 8), s2:byte(2))]]
 		cb(dns.string_to_dns_message(s2:sub(3)))
-		close()
-	end, epoll)
-	local send_fn = (send --[[: unknown]]) --[[:! (string) -> ()]]
-	send_fn(s)
+		if close then close() end
+	end, ep)
+	if send then send(s) end
 	if is_running then
-		local ep = (epoll --[[: unknown]]) --[[:! { loop: () -> () }]]
 		ep:loop()
 	end
 end

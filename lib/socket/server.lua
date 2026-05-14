@@ -3,51 +3,59 @@ local epoll_ = require("lib.epoll")
 
 local M = {}
 
--- NOTE: lib/ljsocket has no crescent type annotations; interactions with
--- ljsocket objects are untyped until lib/ljsocket gets --:: declarations.
+-- NOTE: cross-module named types are not yet supported, so callbacks
+-- accept the client as `unknown` rather than `LjSocket`. When that lands,
+-- replace these `unknown` with `LjSocket` and the `epoll: unknown | nil`
+-- with `epoll | nil` (see lib/ljsocket and lib/epoll for the type aliases).
 
 --:: server_opts = { host: string | nil, on_client: ((unknown) -> nil) | nil, on_client_close: ((unknown) -> nil) | nil }
+
+--:: server_socket = { fd: integer, close: (self: server_socket) -> (boolean | nil, string | nil), accept: (self: server_socket) -> (server_client | nil, string | nil, integer | nil), listen: (self: server_socket, max: integer | nil) -> (boolean | nil, string | nil), ... }
+
+--:: server_client = { fd: integer, close: (self: server_client) -> (boolean | nil, string | nil), ... }
 
 -- Bind and listen on port. callback(client, state) -> state is called on each
 -- readable event per client. epoll is optional — if omitted, a new one is
 -- created and the call blocks until the server socket is closed.
+--: (callback: (unknown, unknown) -> unknown, port: integer | string, epoll: unknown | nil, opts: server_opts | nil) -> unknown
 M.server = function(callback, port, epoll, opts)
-    opts = opts or {}
-    local opts_ = opts --[[:! { on_client: ((unknown) -> nil) | nil, on_client_close: ((unknown) -> nil) | nil, host: string | nil }]]
+    local opts_ = opts or {}
     local is_running = not epoll
-    epoll = epoll or epoll_.new()
-    local epoll_any = epoll
+    local ep = (epoll or epoll_.new()) --[[: { add: (self: unknown, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), wait: (self: unknown) -> nil, ... }]]
 
     -- https://github.com/CapsAdmin/luajitsocket/blob/acb3bc3236cb4551a477a74f2bc9305860ca6492/examples/tcp_server_blocking.lua
-    local server = assert(socket.bind(opts_.host or "*", port))
+    local server = assert(socket.bind(opts_.host or "*", port)) --[[: server_socket]]
     assert(server:listen())
 
-    local _, remove = epoll_any:add(server.fd, function()
-        local client_ = (server --[[:! { accept: (unknown) -> unknown, fd: integer, close: (unknown) -> nil, ... }]]):accept()
-        local client = (client_ --[[:! { fd: integer, close: (unknown) -> nil, ... }]])
+    local _, remove = ep:add(server.fd, function()
+        local client = server:accept()
         if not client then return end
-        local state, remove_client
+        local state
+        local remove_client --: (() -> nil) | nil
         local client_close = client.close
+        --: (self: server_client) -> (boolean | nil, string | nil)
         client.close = function(_self)
-            if opts_.on_client_close then opts_.on_client_close(client) end
-            client_close(client)
-            local rc = remove_client --[[:! () -> nil]]
-            rc()
+            local on_close = opts_.on_client_close
+            if on_close then on_close(client) end
+            if client_close then client_close(client) end
+            if remove_client then remove_client() end
+            return true
         end
-        _, remove_client = epoll_any:add(client.fd, function()
+        _, remove_client = ep:add(client.fd, function()
             state = callback(client, state)
         end, client.close)
-        if opts_.on_client then opts_.on_client(client) end
+        local on_client = opts_.on_client
+        if on_client then on_client(client) end
     end, is_running and function() is_running = false end or nil)
 
     local server_close = server.close
+    --: (self: server_socket) -> (boolean | nil, string | nil)
     server.close = function(self)
-        local sc = server_close --[[:! (unknown) -> nil]]
-        sc(self)
-        remove()
+        local r = server_close(self)
+        if remove then remove() end
+        return r
     end
 
-    local ep = epoll_any --[[:! { wait: (unknown) -> nil, add: (unknown, integer, (unknown) -> nil, (unknown) -> nil | nil) -> (unknown, () -> nil), ... }]]
     while is_running do ep:wait() end
 
     return server

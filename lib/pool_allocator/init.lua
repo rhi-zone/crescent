@@ -80,7 +80,7 @@ function M.pool(opts)
   function self:with(fn)
     local obj = self:acquire()
     local ok, err = pcall(fn, obj)
-    ;(self --[[: { release: (unknown, unknown) -> nil }]]):release(obj)
+    self:release(obj)
     if not ok then
       error(err, 2)
     end
@@ -181,7 +181,7 @@ function M.fixed_pool(opts)
       return nil, err
     end
     local ok, e = pcall(fn, obj)
-    ;(self --[[: { release: (unknown, unknown) -> nil }]]):release(obj)
+    self:release(obj)
     if not ok then
       error(e, 2)
     end

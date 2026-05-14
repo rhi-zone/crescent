@@ -83,9 +83,8 @@ function M.run(code, env, opts)
 	-- instruction after the error is thrown.
 	if opts.budget then
 		local budget = opts.budget
-		local sethook_ = (debug.sethook --[[:! (unknown, unknown, unknown) -> ()]])
-		sethook_(function()
-			sethook_(nil, "", nil)
+		debug.sethook(function()
+			debug.sethook(nil, "", nil)
 			error("sandbox: instruction budget exceeded")
 		end, "", budget)
 	end

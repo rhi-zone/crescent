@@ -11,7 +11,7 @@ local ffi = require("ffi")
 
 local mod = {}
 
---:: epoll = { fd: integer, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: { write: (string) -> nil, remove: () -> nil } }, weak: { [integer]: boolean }, count: integer, add: (self: epoll, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), remove: (self: epoll, fd: integer) -> nil }
+--:: epoll = { fd: integer, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: { write: (string) -> nil, remove: () -> nil } }, weak: { [integer]: boolean }, count: integer, add: (self: epoll, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), remove: (self: epoll, fd: integer) -> nil, wait: (self: epoll) -> nil, loop: (self: epoll) -> nil }
 
 local epoll_ffi
 --: (integer, cdata, integer) -> integer
