@@ -1466,7 +1466,7 @@ local function gen_function_skip_body(ctx, ps, pl, has_vararg)
         param_tids[#param_tids + 1] = types_mod.make_var(ctx, ctx.scope.level)
     end
     local ret_var = types_mod.make_var(ctx, ctx.scope.level)
-    local vararg_id = has_vararg and ctx.T_ANY or -1
+    local vararg_id = has_vararg and ctx.T_UNKNOWN or -1
     local param_name_ids = {}
     for i = 0, pl - 1 do param_name_ids[i + 1] = ctx.ast_lists:get(ps + i) end
     return types_mod.make_func(ctx, param_tids, { ret_var }, vararg_id, param_name_ids)
@@ -1546,7 +1546,7 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
             end
             if has_vararg then
                 local dots_id = intern_mod.intern(ctx.pool, "...")
-                local vt = aft_body.data[4] >= 0 and aft_body.data[4] or ctx.T_ANY
+                local vt = aft_body.data[4] >= 0 and aft_body.data[4] or ctx.T_UNKNOWN
                 env_mod.bind(fn_scope, dots_id, vt)
             end
         else
@@ -1579,7 +1579,7 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
         end
         if has_vararg then
             local dots_id = intern_mod.intern(ctx.pool, "...")
-            env_mod.bind(fn_scope, dots_id, ctx.T_ANY)
+            env_mod.bind(fn_scope, dots_id, ctx.T_UNKNOWN)
         end
     end
 
@@ -1695,7 +1695,7 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
         end
     end
 
-    local vararg_id = has_vararg and ctx.T_ANY or -1
+    local vararg_id = has_vararg and ctx.T_UNKNOWN or -1
     local param_name_ids = {}
     for i = 0, pl - 1 do param_name_ids[i + 1] = ctx.ast_lists:get(ps + i) end
     local fn_tid = types_mod.make_func(ctx, param_tids, returns, vararg_id, param_name_ids)
