@@ -425,7 +425,7 @@ Audit run across `lib/platform/apps/charactercardv2/static/*` and `lib/platform/
 - [x] ~~**No focus management on overlay open/close**~~ — first-pass implemented: `trapFocus`/`releaseFocus` in app.js move focus into overlay on open and restore on close. See follow-up item below.
 - [x] ~~**Loading indicator not announced**~~ — `#loading` and `#connection-result` now have `role="status"` + `aria-live="polite"`.
 - [x] ~~**Tabpanel `aria-labelledby` missing**~~ — added on `#tab-identity`, `#tab-greetings`, `#tab-lorebook`, `#tab-regex`.
-- [ ] **Full focus cycling (Tab key cycle within overlay)** — first-pass focus management lands focus on open and restores on close, but doesn't trap Tab inside the overlay. Users can still Tab into background content.
+- [x] ~~**Full focus cycling (Tab key cycle within overlay)**~~ — fixed: `setupFocusTrap` in app.js cycles Tab/Shift+Tab within overlays (settings, my-lorebooks, card-edit, group, session-panel); visible-only filter avoids hidden tab panes.
 
 ### medium — degrades but workaround exists
 
