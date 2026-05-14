@@ -4,13 +4,33 @@ This is a friendly tour of what cr-repo is, why it exists, and how to use it. Fo
 
 The `cr-` prefix is a placeholder; the name will change.
 
-## The problem
+## The problems
 
-You spent five years on chub.ai writing characters. One morning the policy changed and they're all gone. You spent a decade on Tumblr. 2018 happened. You built an audience on Twitter. The terms changed. You sold games on a platform. The platform got acquired and shut down.
+There isn't one problem this protocol exists to solve. There's a cluster of them, all rooted in the same missing piece: **the web does not give you a substrate for structured, typed, owned-by-you pointers to things in the world.** URLs are anonymous and location-bound and have no idea what they point at. Accounts on platforms are typed but walled. Spreadsheets and notes apps are yours but inert and isolated.
 
-The pattern: someone else owns the floor your work stands on. When they tilt it, you fall.
+Each of the following is a real, common, daily frustration. They look like different problems. They have the same root.
 
-This protocol is for things that should not fall when a platform tilts. It does not solve "how do I make centralized platforms be nice." It assumes they won't.
+**Walled-garden actuation.** You cannot have a list anywhere that mixes a bookmark, a Steam game, an itch game, a Discord channel, and a Carrd profile, where double-clicking each one *does the right thing* — opens the URL, launches the steam game, opens the itch app, deep-links into Discord, opens the profile. Every walled garden does actuation only for its own things. The cross-cutting list doesn't exist anywhere because no platform's business model lets it exist.
+
+**Personal library across silos.** Your relationship to culture is fragmented across one service per medium — Goodreads owns "books I read," Letterboxd owns "movies I watched," Steam owns "games I have," Last.fm owns "music I listened to," Backloggd, Pocket, Raindrop, your browser bookmarks bar. Each service indexes only what it sells or hosts. No place exists where the union — *the things I care about* — can live as one queryable thing.
+
+**Following a person, not a platform-projection of them.** A creator on itch + Substack + Cohost + Discord is three or four accounts to the platforms but one human to you. You currently follow each projection separately. The platforms don't know about each other and the person can't make them.
+
+**Annotation portability.** Your reviews, tags, notes, and ratings are formatted for one service's UI and die when that service does — or when it changes its export format, or when its terms of service change so you'd rather not give it any more data.
+
+**Discovery without algorithmic intermediation.** Finding new things via curators, friends, and lists you trust, rather than via opaque feeds tuned for engagement. Currently the only places this happens informally (group chats, mailing lists, RSS readers) are also the places with the worst tooling.
+
+**Composable data layer between apps that don't know each other.** A bookmark app and a game-tracker app should both be able to read the same bundle, each acting on what it recognizes, neither needing the other to exist. Currently every app has its own format and no app reads any other's.
+
+**Long-term durability of references.** Bookmarks rot. Services close. Links 404. Even your own data evaporates when its host does. There is no general mechanism for "the same thing, addressed several ways, mirrored several places."
+
+**Platform-tilt.** You spent five years on chub.ai writing characters. One morning the policy changed and they're all gone. You spent a decade on Tumblr. 2018 happened. You built an audience on Twitter. The terms changed. You sold games on a platform. The platform got acquired and shut down. This is the *dramatic* version of all the above; it's also the one most readers have personally lost something to.
+
+---
+
+The unifying thing: **there is no general substrate for structured pointers to things, owned by you, readable by anyone, mixable across domains.** URLs are too flat. Platforms are too walled. Files are too inert. cr-repo is trying to be that missing substrate, and the cluster of problems above are what fall out as consequences.
+
+The protocol does not solve "how do I make centralized platforms be nice." It assumes they won't.
 
 ## What this is (and isn't)
 
@@ -106,12 +126,16 @@ cr-repo offers none of those things directly. Instead:
 
 In exchange you get:
 
-- **No one can take your stuff down.** Your bundles live on whatever hosts you choose. If one goes down, you move. If you go down, the people who mirrored your stuff still have it.
-- **No one can take your audience.** Followers store your pubkey, not a username on someone else's database. When you move hosts, they find you.
+- **Heterogeneous, actuatable mixes.** One list can hold bookmarks + steam games + itch games + Discord channels + profiles + your own notes about them, and a sufficiently-equipped client knows how to open each.
+- **Your own personal library, unified.** Books, games, movies, music, sites, people, recipes, papers, places — anything you have a relationship to lives in one place you own and can query across.
+- **You follow people, not their platform-projections.** A creator's bundle can reference all their other accounts, and you follow the human-shaped thing.
+- **Your annotations are yours.** Tags, ratings, notes, reviews — all in records you own, in a format any other tool can read.
+- **No one can take your stuff down.** Bundles live on whatever hosts you choose. If one goes down, you move; mirrors persist.
+- **No one can take your audience.** Followers store your pubkey, not a username on someone else's database.
 - **No one can change the rules underneath you.** A protocol can be extended; it cannot be retroactively narrowed. Your old bundles stay valid forever.
 - **You can leave whenever, taking everything.** Your repo is files on disk. Tar them up. Move them. Done.
 
-This is a deliberate trade. It is the right trade for some uses (your art, your writing, your friend group, your knowledge base) and the wrong trade for others (mass-market consumer apps that need centralized identity recovery, content moderation, and search-from-zero). The protocol does not try to be both.
+This is a deliberate trade. It is the right trade for some uses (your art, your writing, your friend group, your knowledge base, your relationship to everything you find online) and the wrong trade for others (mass-market consumer apps that need centralized identity recovery, content moderation, and search-from-zero). The protocol does not try to be both.
 
 ## Why not just use ActivityPub / Nostr / IPFS / AT Protocol
 
