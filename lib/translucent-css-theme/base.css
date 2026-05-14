@@ -1,8 +1,8 @@
 /* Glassmorphism base components.
  *
  * Reusable shapes with the layered 3D border treatment (light top-left,
- * dark bottom-right) over a translucent `--glass-bg` fill. Apply these as
- * classes (`.glass-button`, `.glass-input`, `.glass-panel`, `.glass-overlay`)
+ * dark bottom-right) over a translucent `--translucent-bg` fill. Apply these as
+ * classes (`.translucent-button`, `.translucent-input`, `.translucent-panel`, `.translucent-overlay`)
  * on elements you want to opt in to the aesthetic. Element styles in
  * consuming apps remain free to use the tokens directly.
  */
@@ -13,27 +13,27 @@ body {
   color: var(--fg);
 }
 
-.glass-panel {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+.translucent-panel {
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: var(--radius-md);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
 
-.glass-button {
+.translucent-button {
   padding: var(--space-md) var(--space-lg);
   border-radius: var(--radius-md);
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
-  background: var(--glass-bg);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
+  background: var(--translucent-bg);
   color: var(--fg);
   font-family: var(--font-family);
   font-size: var(--font-size-sm);
@@ -41,30 +41,30 @@ body {
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.glass-button:hover {
-  background: var(--glass-hover);
+.translucent-button:hover {
+  background: var(--translucent-hover);
 }
 
-.glass-button:focus {
+.translucent-button:focus {
   outline: none;
   border-color: var(--primary);
 }
 
-.glass-button--primary {
+.translucent-button--primary {
   background: var(--primary);
   border-color: var(--primary-hover);
   color: white;
 }
 
-.glass-button--primary:hover {
+.translucent-button--primary:hover {
   background: var(--primary-hover);
 }
 
-.glass-input {
+.translucent-input {
   padding: var(--space-md);
   border-radius: var(--radius-md);
-  border: 1px solid var(--glass-border);
-  background: var(--glass-bg);
+  border: 1px solid var(--translucent-border);
+  background: var(--translucent-bg);
   color: var(--fg);
   font-family: var(--font-family);
   font-size: var(--font-size-base);
@@ -72,16 +72,16 @@ body {
   -webkit-backdrop-filter: blur(8px);
 }
 
-.glass-input::placeholder {
+.translucent-input::placeholder {
   color: var(--fg-muted);
 }
 
-.glass-input:focus {
+.translucent-input:focus {
   outline: none;
   border-color: var(--primary);
 }
 
-.glass-overlay {
+.translucent-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.4);

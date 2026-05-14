@@ -4,9 +4,9 @@
   padding: 0;
 }
 
-/* App-specific tokens layered on top of /glass-ui.css.
+/* App-specific tokens layered on top of /translucent-css-theme.css.
  * Tokens defined there: --bg, --fg, --fg-muted, --primary, --primary-hover,
- *   --glass-bg/-border/-border-light/-border-dark/-hover,
+ *   --translucent-bg/-border/-border-light/-border-dark/-hover,
  *   --success, --error, --warning, --info, plus space/font/radius/shadow.
  * The tokens below are ccv2-specific (message backgrounds, etc.) and
  * reference the design-system tokens when they correspond. */
@@ -150,8 +150,8 @@ body {
 .card-header__action-btn {
   display: inline-flex;
   align-items: center;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
   color: var(--fg-muted);
   padding: 0.125rem 0.625rem;
   border-radius: 4px;
@@ -194,21 +194,21 @@ body {
   background: var(--bg-message);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   word-wrap: break-word;
 }
 
 .message--user {
   background: var(--bg-user);
-  border-color: var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border-color: var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
 }
 
 .message--assistant {
@@ -291,7 +291,7 @@ body {
 
 .message__content .md-code-block {
   background: #0d0d1a;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   border-radius: 6px;
   padding: 0.75rem 1rem;
   margin: 0.5em 0;
@@ -337,7 +337,7 @@ body {
 
 .message__content .md-hr {
   border: none;
-  border-top: 1px solid var(--glass-border);
+  border-top: 1px solid var(--translucent-border);
   margin: 0.75em 0;
 }
 
@@ -375,8 +375,8 @@ body {
 }
 
 .message__action-button {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
   color: var(--fg-muted);
   padding: 0.125rem 0.5rem;
   border-radius: 4px;
@@ -400,7 +400,7 @@ body {
   border: 1px solid var(--primary);
   border-radius: 6px;
   padding: 0.5rem 0.75rem;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
@@ -422,7 +422,7 @@ body {
 
 .message__edit-button {
   padding: 0.25rem 0.75rem;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.8125rem;
@@ -441,12 +441,12 @@ body {
 }
 
 .message__edit-button--cancel {
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   color: var(--fg-muted);
 }
 
 .message__edit-button--cancel:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
   color: var(--fg);
 }
 
@@ -469,8 +469,8 @@ body {
 }
 
 .message__swipe-button {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
   color: var(--fg-muted);
   padding: 0.125rem 0.5rem;
   border-radius: 4px;
@@ -481,7 +481,7 @@ body {
 }
 
 .message__swipe-button:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
   color: var(--fg);
 }
 
@@ -531,8 +531,8 @@ body {
 .token-counter__bar {
   flex: 1;
   height: 4px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -573,9 +573,9 @@ body {
 
 .card-edit-an-input {
   padding: 0.25rem 0.375rem;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   border-radius: 4px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
@@ -609,8 +609,8 @@ body {
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  border-top: 1px solid var(--glass-border);
-  background: var(--glass-bg);
+  border-top: 1px solid var(--translucent-border);
+  background: var(--translucent-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   flex-shrink: 0;
@@ -629,14 +629,14 @@ body {
 .input-row__textarea {
   width: 100%;
   resize: none;
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 8px;
   padding: 0.5rem 0.75rem;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
@@ -675,24 +675,24 @@ body {
 }
 
 .input-row__button--regen {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
   color: var(--fg);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
 
 .input-row__button--continue {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
   color: var(--fg);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
 
 .input-row__button--impersonate {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
   color: var(--fg);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
@@ -701,8 +701,8 @@ body {
 /* Settings button */
 
 .input-row__button--settings {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
   color: var(--fg);
   font-size: 1.125rem;
   padding: 0.375rem 0.625rem;
@@ -729,14 +729,14 @@ body {
 }
 
 .settings-panel {
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 12px;
   width: 24rem;
   max-width: 90vw;
@@ -751,7 +751,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--translucent-border);
 }
 
 .settings-panel__title {
@@ -771,7 +771,7 @@ body {
 }
 
 .settings-panel__close:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
   color: var(--fg);
 }
 
@@ -808,13 +808,13 @@ body {
 .settings-field input[type="number"] {
   width: 100%;
   padding: 0.375rem 0.5rem;
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 6px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
@@ -829,7 +829,7 @@ body {
 
 .settings-panel__footer {
   padding: 0.75rem 1rem;
-  border-top: 1px solid var(--glass-border);
+  border-top: 1px solid var(--translucent-border);
   display: flex;
   justify-content: flex-end;
 }
@@ -855,14 +855,14 @@ body {
   top: 0.5rem;
   left: 0.5rem;
   z-index: 50;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   color: var(--fg);
   font-size: 1.25rem;
   padding: 0.25rem 0.5rem;
@@ -872,7 +872,7 @@ body {
 }
 
 .session-toggle:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
 }
 
 /* Session panel */
@@ -884,10 +884,10 @@ body {
   bottom: 0;
   width: 18rem;
   max-width: 85vw;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border-right: 1px solid var(--glass-border);
+  border-right: 1px solid var(--translucent-border);
   z-index: 200;
   display: flex;
   flex-direction: column;
@@ -903,7 +903,7 @@ body {
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--translucent-border);
   flex-shrink: 0;
 }
 
@@ -940,7 +940,7 @@ body {
 }
 
 .session-panel__close:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
   color: var(--fg);
 }
 
@@ -957,12 +957,12 @@ body {
   gap: 0.5rem;
   padding: 0.625rem 1rem;
   cursor: pointer;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--translucent-border);
   transition: background 0.1s;
 }
 
 .session-item:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
 }
 
 .session-item--active {
@@ -1045,14 +1045,14 @@ body {
 }
 
 .lorebook-panel {
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 12px;
   width: 36rem;
   max-width: 95vw;
@@ -1067,7 +1067,7 @@ body {
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--translucent-border);
   flex-shrink: 0;
 }
 
@@ -1118,7 +1118,7 @@ body {
 }
 
 .lorebook-panel__close:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
   color: var(--fg);
 }
 
@@ -1133,14 +1133,14 @@ body {
 /* Lorebook entries */
 
 .lorebook-entry {
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -1159,15 +1159,15 @@ body {
 }
 
 .lorebook-entry__header:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
 }
 
 .lorebook-entry__toggle {
   width: 2.5rem;
   height: 1.25rem;
   border-radius: 0.625rem;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
   cursor: pointer;
   position: relative;
   flex-shrink: 0;
@@ -1205,8 +1205,8 @@ body {
 }
 
 .lorebook-entry__key {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
   color: var(--fg);
   padding: 0.0625rem 0.375rem;
   border-radius: 3px;
@@ -1232,7 +1232,7 @@ body {
 
 .lorebook-entry__body {
   padding: 0.5rem 0.75rem;
-  border-top: 1px solid var(--glass-border);
+  border-top: 1px solid var(--translucent-border);
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -1256,13 +1256,13 @@ body {
 .lorebook-entry__input {
   width: 100%;
   padding: 0.375rem 0.5rem;
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 6px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
@@ -1280,13 +1280,13 @@ body {
   min-height: 4rem;
   resize: vertical;
   padding: 0.375rem 0.5rem;
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 6px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
@@ -1333,9 +1333,9 @@ body {
 
 .lorebook-entry__delete {
   padding: 0.25rem 0.75rem;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   border-radius: 4px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   color: var(--fg-muted);
   font-size: 0.8125rem;
   cursor: pointer;
@@ -1385,14 +1385,14 @@ body {
 }
 
 .card-edit-panel {
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 12px;
   width: 36rem;
   max-width: 95vw;
@@ -1407,7 +1407,7 @@ body {
   align-items: center;
   gap: 0.5rem;
   padding: 0.625rem 1rem;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--translucent-border);
   flex-shrink: 0;
   flex-wrap: wrap;
 }
@@ -1433,9 +1433,9 @@ body {
 
 .card-edit-tab {
   padding: 0.25rem 0.75rem;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   border-radius: 4px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   color: var(--fg-muted);
   font-size: 0.8125rem;
   cursor: pointer;
@@ -1447,7 +1447,7 @@ body {
 }
 
 .card-edit-tab:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
   color: var(--fg);
 }
 
@@ -1483,7 +1483,7 @@ body {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--translucent-border);
   flex-shrink: 0;
 }
 
@@ -1499,7 +1499,7 @@ body {
 }
 
 .card-edit-panel__close:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
   color: var(--fg);
 }
 
@@ -1507,7 +1507,7 @@ body {
   margin: 0.5rem 1rem 0;
   padding: 0.5rem 0.75rem;
   border-radius: 6px;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   background: rgba(255, 170, 60, 0.08);
   color: var(--fg);
   font-size: 0.8125rem;
@@ -1540,13 +1540,13 @@ body {
 .card-edit-field__input {
   width: 100%;
   padding: 0.375rem 0.5rem;
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 6px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
@@ -1564,13 +1564,13 @@ body {
   min-height: 3rem;
   resize: vertical;
   padding: 0.375rem 0.5rem;
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 6px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
@@ -1601,13 +1601,13 @@ body {
   min-height: 2.5rem;
   resize: vertical;
   padding: 0.375rem 0.5rem;
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 6px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
@@ -1622,8 +1622,8 @@ body {
 }
 
 .card-edit-alt-row__remove {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
   color: var(--fg-muted);
   font-size: 1rem;
   cursor: pointer;
@@ -1639,8 +1639,8 @@ body {
 }
 
 .card-edit-alt-add {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
   color: var(--fg-muted);
   padding: 0.25rem 0.75rem;
   border-radius: 4px;
@@ -1653,13 +1653,13 @@ body {
 }
 
 .card-edit-alt-add:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
   color: var(--fg);
 }
 
 .card-edit-panel__footer {
   padding: 0.75rem 1rem;
-  border-top: 1px solid var(--glass-border);
+  border-top: 1px solid var(--translucent-border);
   display: flex;
   justify-content: space-between;
   gap: 0.5rem;
@@ -1667,9 +1667,9 @@ body {
 
 .card-edit-panel__reset {
   padding: 0.5rem 1rem;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   border-radius: 8px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   color: var(--fg-muted);
@@ -1678,7 +1678,7 @@ body {
 }
 
 .card-edit-panel__reset:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
   color: var(--fg);
 }
 
@@ -1709,7 +1709,7 @@ body {
   display: block;
   margin-top: 0;
   margin-bottom: 0.5rem;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--translucent-border);
   padding-bottom: 0.25rem;
 }
 
@@ -1759,11 +1759,11 @@ body {
 .settings-persona__select {
   flex: 1;
   padding: 0.375rem 0.5rem;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   border-radius: 4px;
   font-size: 0.875rem;
 }
@@ -1771,11 +1771,11 @@ body {
 .settings-persona__input {
   width: 100%;
   padding: 0.375rem 0.5rem;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   border-radius: 4px;
   font-size: 0.875rem;
   box-sizing: border-box;
@@ -1784,11 +1784,11 @@ body {
 .settings-persona__textarea {
   width: 100%;
   padding: 0.375rem 0.5rem;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   border-radius: 4px;
   font-size: 0.875rem;
   resize: vertical;
@@ -1797,11 +1797,11 @@ body {
 
 .settings-persona__btn {
   padding: 0.375rem 0.75rem;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   color: var(--fg);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   border-radius: 4px;
   font-size: 0.8125rem;
   cursor: pointer;
@@ -1809,7 +1809,7 @@ body {
 }
 
 .settings-persona__btn:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
 }
 
 .settings-persona__btn--danger {
@@ -1850,14 +1850,14 @@ body {
 }
 
 .regex-panel {
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 12px;
   width: 36rem;
   max-width: 95vw;
@@ -1872,7 +1872,7 @@ body {
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--translucent-border);
   flex-shrink: 0;
 }
 
@@ -1908,7 +1908,7 @@ body {
 }
 
 .regex-panel__close:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
   color: var(--fg);
 }
 
@@ -1923,14 +1923,14 @@ body {
 /* Regex script entries */
 
 .regex-entry {
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -1949,15 +1949,15 @@ body {
 }
 
 .regex-entry__header:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
 }
 
 .regex-entry__toggle {
   width: 2.5rem;
   height: 1.25rem;
   border-radius: 0.625rem;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
   cursor: pointer;
   position: relative;
   flex-shrink: 0;
@@ -1998,8 +1998,8 @@ body {
 .regex-entry__scope {
   font-size: 0.6875rem;
   color: var(--fg-muted);
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
   padding: 0.0625rem 0.375rem;
   border-radius: 3px;
   white-space: nowrap;
@@ -2013,7 +2013,7 @@ body {
 
 .regex-entry__body {
   padding: 0.5rem 0.75rem;
-  border-top: 1px solid var(--glass-border);
+  border-top: 1px solid var(--translucent-border);
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -2037,13 +2037,13 @@ body {
 .regex-entry__input {
   width: 100%;
   padding: 0.375rem 0.5rem;
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 6px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
@@ -2094,9 +2094,9 @@ body {
 
 .regex-entry__delete {
   padding: 0.25rem 0.75rem;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   border-radius: 4px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   color: var(--fg-muted);
   font-size: 0.8125rem;
   cursor: pointer;
@@ -2119,7 +2119,7 @@ body {
 
 .regex-panel__test {
   padding: 0.75rem 1rem;
-  border-top: 1px solid var(--glass-border);
+  border-top: 1px solid var(--translucent-border);
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
@@ -2134,13 +2134,13 @@ body {
 .regex-panel__test-input {
   width: 100%;
   padding: 0.375rem 0.5rem;
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 6px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
@@ -2158,13 +2158,13 @@ body {
   min-height: 2rem;
   resize: vertical;
   padding: 0.375rem 0.5rem;
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 6px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
@@ -2196,13 +2196,13 @@ body {
 .regex-panel__test-output {
   min-height: 1.5rem;
   padding: 0.375rem 0.5rem;
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 6px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
@@ -2258,14 +2258,14 @@ body {
 }
 
 .group-panel {
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 12px;
   width: 90%;
   max-width: 480px;
@@ -2279,7 +2279,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--translucent-border);
 }
 
 .group-panel__title {
@@ -2331,9 +2331,9 @@ body {
 .group-order-select {
   flex: 1;
   padding: 0.375rem 0.5rem;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   border-radius: 6px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
@@ -2360,10 +2360,10 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0.375rem 0.5rem;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   border-radius: 6px;
 }
 
@@ -2404,13 +2404,13 @@ body {
   margin-top: 0.5rem;
   resize: vertical;
   padding: 0.5rem;
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 6px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--fg);
@@ -2449,7 +2449,7 @@ body {
   margin: 0.5rem 1rem 0;
   padding: 0.5rem 0.75rem;
   border-radius: 6px;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   background: rgba(255, 170, 60, 0.08);
   color: var(--fg);
   font-size: 0.8125rem;
@@ -2470,7 +2470,7 @@ body {
 .book-list {
   width: 16rem;
   flex-shrink: 0;
-  border-right: 1px solid var(--glass-border);
+  border-right: 1px solid var(--translucent-border);
   overflow-y: auto;
   padding: 0.5rem;
   display: flex;
@@ -2484,19 +2484,19 @@ body {
   gap: 0.5rem;
   padding: 0.5rem 0.625rem;
   border-radius: 6px;
-  border: 1px solid var(--glass-border);
-  background: var(--glass-bg);
+  border: 1px solid var(--translucent-border);
+  background: var(--translucent-bg);
   cursor: pointer;
   user-select: none;
 }
 
 .book-row:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
 }
 
 .book-row--selected {
   border-color: var(--primary);
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
 }
 
 .book-row__name {
@@ -2544,7 +2544,7 @@ body {
 }
 
 .book-row__export:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
   color: var(--fg);
 }
 
@@ -2572,16 +2572,16 @@ body {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--translucent-border);
   flex-shrink: 0;
 }
 
 .book-detail__name {
   flex: 1;
   padding: 0.375rem 0.5rem;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--translucent-border);
   border-radius: 6px;
-  background: var(--glass-bg);
+  background: var(--translucent-bg);
   color: var(--fg);
   font-family: inherit;
   font-size: 0.875rem;
@@ -2594,8 +2594,8 @@ body {
 }
 
 .book-detail__rename {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
   color: var(--fg);
   padding: 0.25rem 0.625rem;
   border-radius: 4px;
@@ -2631,7 +2631,7 @@ body {
   .book-list {
     width: 100%;
     border-right: none;
-    border-bottom: 1px solid var(--glass-border);
+    border-bottom: 1px solid var(--translucent-border);
     max-height: 12rem;
   }
 }
@@ -2641,7 +2641,7 @@ body {
 .linked-lorebooks {
   margin-top: 1rem;
   padding: 0.5rem;
-  border: 1px dashed var(--glass-border);
+  border: 1px dashed var(--translucent-border);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.02);
   display: flex;
@@ -2654,7 +2654,7 @@ body {
   align-items: center;
   gap: 0.5rem;
   padding: 0.25rem 0.25rem 0.5rem 0.25rem;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--translucent-border);
 }
 
 .linked-lorebooks__title {
@@ -2672,12 +2672,12 @@ body {
 }
 
 .linked-lorebook {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-top-color: var(--glass-border-light);
-  border-left-color: var(--glass-border-light);
-  border-bottom-color: var(--glass-border-dark);
-  border-right-color: var(--glass-border-dark);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
+  border-top-color: var(--translucent-border-light);
+  border-left-color: var(--translucent-border-light);
+  border-bottom-color: var(--translucent-border-dark);
+  border-right-color: var(--translucent-border-dark);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -2692,7 +2692,7 @@ body {
 }
 
 .linked-lorebook__header:hover {
-  background: var(--glass-hover);
+  background: var(--translucent-hover);
 }
 
 .linked-lorebook__caret {
@@ -2749,7 +2749,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
-  border-top: 1px solid var(--glass-border);
+  border-top: 1px solid var(--translucent-border);
   background: rgba(0, 0, 0, 0.08);
 }
 
@@ -2762,8 +2762,8 @@ body {
 .linked-lorebook__entry {
   padding: 0.375rem 0.5rem;
   border-radius: 4px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--translucent-bg);
+  border: 1px solid var(--translucent-border);
 }
 
 .linked-lorebook__entry-keys {

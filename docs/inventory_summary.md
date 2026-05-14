@@ -30,7 +30,7 @@ PEG impls in three places (`lib/grammar/`, `lib/peg/`, `lib/parser_combinators/`
 `lib/unified/` (unified.js port — many submodules, wip with empty shells). Top-level `lib/hast/`, `lib/mdast/`, `lib/remark*`, `lib/rehype*` are stub shells; real impls live under `lib/unified/`. Stable text utilities: template/template_engine/string_template/mustache, html builder, word_wrap/text_justify/text_stats/spell_check/porter_stemmer/soundex/levenshtein/fuzzy_match/markov/nat_lang/i18n/locale/humanize.
 
 ## Web / UI
-`lib/web/` framework (middleware, routing, cookies, CSRF, static, html builder, reactive_dom). `lib/glass-ui/` opt-in design tokens + components + theme toggle (CSS/JS, no Lua). Router, canvas (PPM/PGM/BMP), color toolchain, TUI on top of ANSI, layout, pretty_print, barcode, qrencode (wip).
+`lib/web/` framework (middleware, routing, cookies, CSRF, static, html builder, reactive_dom). `lib/translucent-css-theme/` opt-in design tokens + components + theme toggle (CSS/JS, no Lua). Router, canvas (PPM/PGM/BMP), color toolchain, TUI on top of ANSI, layout, pretty_print, barcode, qrencode (wip).
 
 ## Reactive / state / signals
 Push signals (`lib/reactive/`) and auto-tracking signals (`lib/signals/`) parallel. reactive_db (live queries), reactive_optics, reactive_store (Redux-style), reactive_stream (Rx pull), reactive_var. Two observable impls (`observable`, `observer`); two event-bus impls (`event`, `event_emitter`). pubsub, mediator, event_sourcing. `lib/signal/` is POSIX signals (different concept).

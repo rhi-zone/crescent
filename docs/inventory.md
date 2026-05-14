@@ -215,7 +215,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 
 ## Web / UI
 
-- `lib/glass-ui/` — opt-in glassmorphic design system (translucent panels, layered 3D borders, blue primary). Pure CSS tokens + components plus `theme.js` (dark/light/system toggle persisted to localStorage). No Lua. Used by ccv2 and library platform apps via symlinks under their `static/` dirs. Status: stable.
+- `lib/translucent-css-theme/` — opt-in glassmorphic design system (translucent panels, layered 3D borders, blue primary). Pure CSS tokens + components plus `theme.js` (dark/light/system toggle persisted to localStorage). No Lua. Used by ccv2 and library platform apps via symlinks under their `static/` dirs. Status: stable.
 - `lib/web/` — web app framework (middleware, routing, cookies, CSRF, static). Status: stable.
   - `lib/web/html/` — typed HTML builder. Status: stable.
   - `lib/web/reactive_dom/` — reactive DOM bindings (uses `lib/web/js_types.lua`). Status: stable.

@@ -43,18 +43,18 @@ STATIC["index.html"] = [[<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Library</title>
-<link rel="stylesheet" href="/glass-ui.css">
+<link rel="stylesheet" href="/translucent-css-theme.css">
 <link rel="stylesheet" href="/style.css">
 <script type="module" src="/theme.js"></script>
 </head>
 <body>
 <div id="app">
-  <header class="header glass-panel">
+  <header class="header translucent-panel">
     <h1>Library</h1>
     <div class="search-bar">
-      <input type="text" id="search" class="glass-input" placeholder="Search apps..." autocomplete="off">
+      <input type="text" id="search" class="translucent-input" placeholder="Search apps..." autocomplete="off">
     </div>
-    <button class="import-btn glass-button" id="import-btn">Import</button>
+    <button class="import-btn translucent-button" id="import-btn">Import</button>
     <input type="file" id="import-file" accept="image/png,.png,.tar.gz,.tgz,application/gzip,application/x-tar" multiple hidden>
   </header>
   <div class="import-error" id="import-error" hidden></div>
@@ -78,45 +78,45 @@ STATIC["index.html"] = [[<!DOCTYPE html>
 
 STATIC["style.css"] = [[*{margin:0;padding:0;box-sizing:border-box}
 body{min-height:100vh}
-.header{padding:1rem 1.5rem;display:flex;align-items:center;gap:1rem;border-bottom:1px solid var(--glass-border)}
+.header{padding:1rem 1.5rem;display:flex;align-items:center;gap:1rem;border-bottom:1px solid var(--translucent-border)}
 .header h1{font-size:var(--font-size-xl);white-space:nowrap}
 .search-bar{flex:1;max-width:400px}
 .search-bar input{width:100%;padding:.5rem .75rem;font-size:.875rem}
-.tag-bar{padding:.5rem 1.5rem;display:flex;gap:.5rem;flex-wrap:wrap;background:var(--glass-bg);border-bottom:1px solid var(--glass-border)}
-.tag-btn{padding:.25rem .75rem;border-radius:999px;border:1px solid var(--glass-border);background:transparent;color:var(--fg);font-size:.75rem;cursor:pointer;transition:all .15s}
+.tag-bar{padding:.5rem 1.5rem;display:flex;gap:.5rem;flex-wrap:wrap;background:var(--translucent-bg);border-bottom:1px solid var(--translucent-border)}
+.tag-btn{padding:.25rem .75rem;border-radius:999px;border:1px solid var(--translucent-border);background:transparent;color:var(--fg);font-size:.75rem;cursor:pointer;transition:all .15s}
 .tag-btn:hover,.tag-btn.active{background:var(--primary);border-color:var(--primary-hover);color:#fff}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;padding:1.5rem}
-.card{position:relative;background:var(--glass-bg);border-radius:var(--radius-md);padding:1rem;border:1px solid var(--glass-border);border-top-color:var(--glass-border-light);border-left-color:var(--glass-border-light);border-bottom-color:var(--glass-border-dark);border-right-color:var(--glass-border-dark);cursor:pointer;transition:border-color .15s,transform .15s,background .15s;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
-.card:hover{border-color:var(--primary);background:var(--glass-hover);transform:translateY(-2px)}
+.card{position:relative;background:var(--translucent-bg);border-radius:var(--radius-md);padding:1rem;border:1px solid var(--translucent-border);border-top-color:var(--translucent-border-light);border-left-color:var(--translucent-border-light);border-bottom-color:var(--translucent-border-dark);border-right-color:var(--translucent-border-dark);cursor:pointer;transition:border-color .15s,transform .15s,background .15s;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.card:hover{border-color:var(--primary);background:var(--translucent-hover);transform:translateY(-2px)}
 .card-delete{position:absolute;top:.35rem;right:.35rem;background:none;border:none;color:var(--fg-muted);font-size:.9rem;cursor:pointer;padding:.15rem .3rem;border-radius:3px;line-height:1}
 .card-delete:hover{background:var(--error);color:#fff}
-.card-import{position:absolute;bottom:.5rem;left:.5rem;padding:.2rem .5rem;border-radius:var(--radius-sm);border:1px solid var(--glass-border);background:transparent;color:var(--fg-muted);font-size:.75rem;cursor:pointer;z-index:1}
+.card-import{position:absolute;bottom:.5rem;left:.5rem;padding:.2rem .5rem;border-radius:var(--radius-sm);border:1px solid var(--translucent-border);background:transparent;color:var(--fg-muted);font-size:.75rem;cursor:pointer;z-index:1}
 .card-import:hover{background:var(--primary);color:#fff;border-color:var(--primary-hover)}
-.card-thumb{width:100%;height:120px;object-fit:cover;border-radius:var(--radius-sm);margin-bottom:.5rem;display:block;background:var(--glass-bg)}
+.card-thumb{width:100%;height:120px;object-fit:cover;border-radius:var(--radius-sm);margin-bottom:.5rem;display:block;background:var(--translucent-bg)}
 .card-name{font-weight:600;font-size:.95rem;margin-bottom:.35rem}
 .card-desc{font-size:.8rem;color:var(--fg-muted);margin-bottom:.5rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card-tags{display:flex;flex-wrap:wrap;gap:.25rem}
-.tag{font-size:.65rem;padding:.125rem .4rem;border-radius:var(--radius-sm);background:var(--glass-bg);color:var(--fg-muted);border:1px solid var(--glass-border)}
+.tag{font-size:.65rem;padding:.125rem .4rem;border-radius:var(--radius-sm);background:var(--translucent-bg);color:var(--fg-muted);border:1px solid var(--translucent-border)}
 .empty{text-align:center;padding:3rem;color:var(--fg-muted);font-size:.9rem}
 .empty--filtered{display:flex;flex-direction:column;align-items:center;gap:.75rem}
-.clear-filters-btn{padding:.4rem .85rem;border-radius:var(--radius-md);border:1px solid var(--glass-border);background:transparent;color:var(--fg);font-size:.85rem;cursor:pointer}
+.clear-filters-btn{padding:.4rem .85rem;border-radius:var(--radius-md);border:1px solid var(--translucent-border);background:transparent;color:var(--fg);font-size:.85rem;cursor:pointer}
 .clear-filters-btn:hover{border-color:var(--primary);color:var(--primary)}
 .empty--welcome{padding:4rem 1.5rem;max-width:560px;margin:0 auto}
 .welcome-title{font-size:1.4rem;font-weight:600;color:var(--fg);margin-bottom:.75rem}
 .welcome-sub{font-size:1rem;color:var(--fg);margin-bottom:.75rem;line-height:1.5}
 .welcome-hint{font-size:.8rem;color:var(--fg-muted);margin-bottom:1.25rem}
-.welcome-hint code{background:var(--glass-bg);padding:.1rem .3rem;border-radius:3px;color:var(--fg-muted)}
-.welcome-sources{font-size:.9rem;color:var(--fg);margin-top:1rem;padding-top:1rem;border-top:1px solid var(--glass-border)}
+.welcome-hint code{background:var(--translucent-bg);padding:.1rem .3rem;border-radius:3px;color:var(--fg-muted)}
+.welcome-sources{font-size:.9rem;color:var(--fg);margin-top:1rem;padding-top:1rem;border-top:1px solid var(--translucent-border)}
 .welcome-arrow{margin-top:1.5rem;font-size:.8rem;color:var(--primary);letter-spacing:.05em}
 @keyframes import-pulse{0%,100%{box-shadow:0 0 0 0 rgba(59,130,246,.55)}50%{box-shadow:0 0 0 6px rgba(59,130,246,0)}}
 .import-btn{padding:.4rem .85rem;font-size:.875rem;white-space:nowrap;flex-shrink:0}
 .import-btn:hover{border-color:var(--primary);color:var(--primary)}
 .import-btn--pulse{border-color:var(--primary);color:var(--primary);animation:import-pulse 1.6s ease-out infinite}
 .import-error{padding:.5rem 1.5rem;background:rgba(239,68,68,.15);color:var(--error);font-size:.85rem;word-break:break-word;border-bottom:1px solid var(--error)}
-.source-section{border-top:1px solid var(--glass-border);padding-top:.5rem}
+.source-section{border-top:1px solid var(--translucent-border);padding-top:.5rem}
 .source-header{padding:.5rem 1.5rem;font-size:.8rem;font-weight:600;color:var(--fg-muted);letter-spacing:.05em;text-transform:uppercase}
 .source-count{font-weight:400;color:var(--fg-muted);margin-left:.5rem;opacity:.7}
-.source-more{display:block;margin:.25rem 1.5rem 1rem;padding:.35rem .75rem;border-radius:var(--radius-md);border:1px solid var(--glass-border);background:transparent;color:var(--fg-muted);font-size:.75rem;cursor:pointer}
+.source-more{display:block;margin:.25rem 1.5rem 1rem;padding:.35rem .75rem;border-radius:var(--radius-md);border:1px solid var(--translucent-border);background:transparent;color:var(--fg-muted);font-size:.75rem;cursor:pointer}
 .source-more:hover{border-color:var(--primary);color:var(--primary)}]]
 
 STATIC["app.js"] = [=[const grid = document.getElementById("grid");
@@ -483,12 +483,12 @@ local CONTENT_TYPES = {
 	json = "application/json",
 }
 
--- Tarball-bundled static entries (e.g. glass-ui.css, theme.js).
+-- Tarball-bundled static entries (e.g. translucent-css-theme.css, theme.js).
 -- Served via caps.self.entry("static/<name>") when caps.self is present.
 -- Falls back to nothing if caps.self is unavailable (e.g. in unit tests
 -- without a full sandbox).
 local BUNDLED = {
-	["/glass-ui.css"] = { entry = "static/glass-ui.css", ext = "css" },
+	["/translucent-css-theme.css"] = { entry = "static/translucent-css-theme.css", ext = "css" },
 	["/theme.js"] = { entry = "static/theme.js", ext = "js" },
 }
 
@@ -524,7 +524,7 @@ local function serve_static(caps, req, res)
 		end
 		-- caps.self unavailable or entry missing — serve empty stylesheet/script
 		-- so the missing-file 404 doesn't break the page. Apps without the
-		-- glass-ui bundle still get usable (un-themed) UI.
+		-- translucent-css-theme bundle still get usable (un-themed) UI.
 		res.status = 200
 		res.headers["Content-Type"] = { CONTENT_TYPES[bundle.ext] or "application/octet-stream" }
 		res.body = ""
