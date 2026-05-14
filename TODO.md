@@ -442,6 +442,21 @@ Audit run across `lib/platform/apps/charactercardv2/static/*` and `lib/platform/
 - [x] ~~**Heading semantics**~~ — fixed: promoted panel titles to `<h2>` (session, settings, my-lorebooks, card-edit, group) and `<h3>` (settings sections, linked-lorebooks). Library already had `<h1>`. CSS rules updated with `margin: 0` to preserve visuals.
 - [ ] **Long message list could benefit from a "Jump to input" skip link** — speculative; revisit if a user reports the navigation cost.
 
+## frontend test regressions
+
+> *Failing tests in `lib/platform/apps/charactercardv2/static/test/` — tests
+> encode aspirational correct behavior. Each entry below is a red test that
+> will turn green automatically when the underlying bug is fixed. Do NOT
+> adjust tests to match buggy behavior.*
+
+- [ ] **`api.request` does not surface non-2xx HTTP status as error.**
+  `lib/platform/apps/charactercardv2/static/test/api.test.js:52` —
+  test `"non-2xx HTTP status surfaces as error"`. Current behavior: `request()`
+  ignores `res.status` and returns whatever JSON the body parses to,
+  including 500 responses. Aspirational: `(nil, error)`-equivalent with
+  `onError` invoked. Fix-shape: check `res.ok` (or `res.status >= 400`)
+  after `await fetch(...)` and treat as an error path before `res.json()`.
+
 ## admin app
 
 - [ ] **Admin app** — single app (`lib/platform/apps/admin/`) with `server` (HTTP UI) and `headless` (agent/script) entrypoints. Caps: `keyring` (write) for secret management, `fs` (write, apps dir) for install/uninstall. Grant management stays in the daemon (an app that can modify other apps' grants could silently escalate its own privileges). Design in `docs/platform-design.md` under "First-party apps".
