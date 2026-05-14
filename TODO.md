@@ -4,6 +4,51 @@
 
 ## HIGH PRIORITY
 
+### Polymorphic recursion (future, optional)
+
+Standard HM (Damas-Milner) is **monomorphic-recursive**: inside a function's
+body, the recursive self-call sees the function as locked to the current
+call's instantiation, not free to re-instantiate at a different type.
+Crescent's HM-for-unannotated-params work (the active backlog item below)
+deliberately ships monomorphic recursion only.
+
+A polymorphic-recursive function calls itself at a *different* instantiation
+of its type variable than the outer call. Example:
+
+```lua
+local function nest(n, x)
+  if n == 0 then return {x} end
+  return nest(n - 1, {x})  -- outer x: T; recursive arg {x}: { [integer]: T }
+end
+nest(3, "hi")  -- outer T = string; recursive call needs T = { [integer]: string }
+```
+
+**Why type *inference* of polymorphic recursion is undecidable** (Henglein
+1993, "Type inference with polymorphic recursion"): inferring the
+polymorphic type signature without an annotation reduces to semi-unification,
+which is undecidable. The typechecker would have to guess the polymorphic
+shape of the recursive function's signature from a finite number of body
+operations, in a way that's consistent across infinitely-many possible
+instantiations of the recursive call. There is no algorithm that always
+terminates and always finds the most-general signature.
+
+**With an explicit annotation, polymorphic recursion is decidable and easy.**
+The annotation `--: <T>(integer, T) -> { T }` *tells* the typechecker the
+polymorphic signature; the body's recursive call instantiates against the
+declared signature exactly like any other call. crescent's existing
+annotated-generic instantiation (commits before the unannotated-params work)
+already handles this case correctly.
+
+**If we ever want to support polymorphic-recursive *inference***, the path is:
+- Adopt a *bounded* form (e.g. polymorphic recursion only when the user
+  marks the function with a `--::` template directive saying "infer
+  polymorphic recursion here, may not terminate").
+- Or accept best-effort inference that may fail to terminate on adversarial
+  inputs — and document the timeout.
+
+Not on the roadmap. Captured here so future sessions don't re-derive the
+problem from scratch.
+
 ### Typechecker work — paused 2026-05-14 (resumable)
 
 > *Pivot to platform/UI work; typechecker is in a working state. Resume here later.*
