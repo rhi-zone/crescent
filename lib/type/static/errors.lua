@@ -458,6 +458,12 @@ local function build_templates()
                 .. tostring(a.inferred) .. "` from usage \xe2\x80\x94"
                 .. " add a `--: (...) -> ...` annotation above the function"
         end,
+        --: (TemplateArgs) -> string
+        [E.MISSING_FUNCTION_SIGNATURE] = function(a)
+            local n = a.name and ("`" .. tostring(a.name) .. "`") or "function"
+            return n .. " has no signature \xe2\x80\x94"
+                .. " add a `--: (...) -> ...` annotation above the function definition"
+        end,
     }
 end
 

@@ -2861,216 +2861,180 @@ local function combine_inferred(ctx, widened_tids)
     return table.concat(order, " | ")
 end
 
--- Emit MISSING_PARAM_ANNOTATION warnings + Phase C autofix payloads.
---: (Ctx, ErrCtx, string) -> ()
-local function emit_missing_param_annotation(ctx, real_err, sev)
-    -- Group records by function (keyed by fn_line, fn_col, fn_tid).
-    --: { [string]: { recs: { [integer]: { name_id: integer, var_tid: integer, fn_line: integer, fn_col: integer, param_idx: integer, fn_tid: integer, ... }, ... }, fn_tid: integer, fn_line: integer, fn_col: integer }, ... }
-    local groups = {}
-    local order = {} --: { [integer]: string, ... }
-    for _, rec in ipairs(ctx._inferred_params) do
-        local key = tostring(rec.fn_line or 0) .. ":" .. tostring(rec.fn_col or 0)
-            .. ":" .. tostring(rec.fn_tid or 0)
-        local g = groups[key]
-        if not g then
-            g = { recs = {}, fn_tid = rec.fn_tid, fn_line = rec.fn_line, fn_col = rec.fn_col }
-            groups[key] = g
-            order[#order + 1] = key
+-- Build the body of a `--: (...) -> R` annotation for a function-def site.
+-- Returns the signature string (without the `--: ` prefix) on success,
+-- or nil if any param/return type can't be cleanly rendered.
+--: (Ctx, { recs: { [integer]: { var_tid: integer, ... }, ... }, fn_tid: integer | nil }) -> string | nil
+local function render_signature(ctx, g)
+    if not g or not g.fn_tid then return nil end
+    local fn_t = ctx.types:get(find(ctx, g.fn_tid))
+    if fn_t.tag ~= TAG_FUNCTION then return nil end
+    -- Render return.
+    local ret_s
+    local rl = fn_t.data[3]
+    if rl == 0 then
+        ret_s = "()"
+    elseif rl == 1 then
+        local rid = find(ctx, ctx.lists:get(fn_t.data[2]))
+        local rt = ctx.types:get(rid)
+        if rt.tag == TAG_VAR or rt.tag == TAG_ROWVAR then
+            ret_s = "nil"
+        else
+            ret_s = render_for_annotation(ctx, rid)
         end
-        g.recs[#g.recs + 1] = rec
+    else
+        local parts = {} --: { [integer]: string, ... }
+        local parts_ok = true
+        for i = fn_t.data[2], fn_t.data[2] + rl - 1 do
+            local part = render_for_annotation(ctx, find(ctx, ctx.lists:get(i)))
+            if not part then parts_ok = false; break end
+            parts[#parts + 1] = part
+        end
+        if parts_ok then ret_s = "(" .. table.concat(parts, ", ") .. ")" end
+    end
+    if not ret_s then return nil end
+    -- Render params.
+    local pparts = {} --: { [integer]: string, ... }
+    for pi, rec in ipairs(g.recs) do
+        local sites = ctx._inferred_param_callsites
+            and ctx._inferred_param_callsites[rec.var_tid]
+        local rendered
+        if sites and #sites > 0 then
+            local widened = {} --: { [integer]: integer, ... }
+            for _, s in ipairs(sites) do
+                widened[#widened + 1] = find(ctx, widen_for_sub(ctx, s.arg_tid))
+            end
+            rendered = combine_inferred(ctx, widened)
+        end
+        if not rendered then
+            local bound = find(ctx, rec.var_tid)
+            rendered = render_for_annotation(ctx, bound)
+        end
+        if not rendered then return nil end
+        pparts[pi] = rendered --[[: string]]
+    end
+    return "(" .. table.concat(pparts, ", ") .. ") -> " .. ret_s
+end
+
+-- Emit MISSING_FUNCTION_SIGNATURE errors for function definitions that lack
+-- a `--:` annotation. Statement-form definitions always fire; expression-
+-- form definitions fire only when the source line is at statement position
+-- (`local f = function(...)`, `M.f = function(...)`, etc.). Inline
+-- anonymous functions like `s:gsub(p, function(c) end)` are typed by their
+-- call context and do not need a separate signature.
+--
+-- Where the existing per-param inference data is available (recorded by
+-- gen_function), an autofix is attached: the rendered signature is
+-- inserted on the line above the function definition.
+--: (Ctx, ErrCtx, string) -> ()
+local function emit_missing_function_signature(ctx, real_err, sev)
+    if not ctx._missing_signatures then return end
+    -- Build a (line:col) -> param-group index from _inferred_params.
+    local param_groups = {} --: { [string]: { recs: { [integer]: { var_tid: integer, param_idx: integer, fn_tid: integer, fn_line: integer, fn_col: integer, name_id: integer, ... }, ... }, fn_tid: integer | nil }, ... }
+    if ctx._inferred_params then
+        for _, rec in ipairs(ctx._inferred_params) do
+            local key = tostring(rec.fn_line or 0) .. ":" .. tostring(rec.fn_col or 0)
+            local g = param_groups[key]
+            if not g then
+                g = { recs = {}, fn_tid = rec.fn_tid }
+                param_groups[key] = g
+            end
+            g.recs[#g.recs + 1] = rec
+        end
+        for _, g in pairs(param_groups) do
+            for i = 2, #g.recs do
+                local cur = g.recs[i]
+                local cur_idx = cur.param_idx or 0
+                local j = i - 1
+                while j >= 1 and (g.recs[j].param_idx or 0) > cur_idx do
+                    g.recs[j + 1] = g.recs[j]
+                    j = j - 1
+                end
+                g.recs[j + 1] = cur
+            end
+        end
     end
 
-    -- Dedup per-param warning emissions across re-checks.
-    local seen_warn = {}
-
-    for _, key in ipairs(order) do
-        local g = groups[key]
-        -- Sort params by index for deterministic rendering. Insertion sort
-        -- in place to avoid wrestling with table.sort's generic constraint
-        -- inference on a dynamically-typed record list.
-        for i = 2, #g.recs do
-            local cur = g.recs[i]
-            local cur_idx = cur.param_idx or 0
-            local j = i - 1
-            while j >= 1 and (g.recs[j].param_idx or 0) > cur_idx do
-                g.recs[j + 1] = g.recs[j]
-                j = j - 1
-            end
-            g.recs[j + 1] = cur
-        end
-
-        -- Compute per-param state: bound type and renderable string (modal/union).
-        local param_renders = {} --: { [integer]: string | nil, ... }
-        local any_actionable = false
-        local all_have_callers = true
-        local first_entry = nil
-        for pi, rec in ipairs(g.recs) do
-            local bound = find(ctx, rec.var_tid)
-            local bt = ctx.types:get(bound)
-            local actionable = bt.tag ~= TAG_VAR and bt.tag ~= TAG_ROWVAR
-                and bt.tag ~= TAG_UNKNOWN and bt.tag ~= TAG_ANY
-            if actionable then
-                any_actionable = true
-                local wkey = (rec.fn_line or 0) * 100000 + (rec.fn_col or 0) + rec.name_id * 1e9
-                if not seen_warn[wkey] then
-                    seen_warn[wkey] = true
-                    local name = intern_mod.get(ctx.pool, rec.name_id) or "?"
-                    local inferred_str = types_mod.display_short(ctx, bound)
-                    local msg = errors_mod.format_diag(
-                        defs.E.MISSING_PARAM_ANNOTATION,
-                        { name = name, inferred = inferred_str })
-                    local entry
-                    if sev == "error" then
-                        entry = errors_mod.error(real_err, ctx.filename,
-                            rec.fn_line or 0, rec.fn_col or 0, msg)
-                    else
-                        entry = errors_mod.warning(real_err, ctx.filename,
-                            rec.fn_line or 0, rec.fn_col or 0, msg)
-                    end
-                    if not first_entry then first_entry = entry end
+    local seen = {}
+    for _, sig in ipairs(ctx._missing_signatures) do
+        local dkey = sig.line * 100000 + sig.col
+        local skip = seen[dkey]
+        if not skip then
+            seen[dkey] = true
+            local target_line = ctx.source and get_line(ctx.source, sig.line) or ""
+            local trimmed = target_line:match("^[ \t]*(.*)$") or target_line
+            local is_statement_form =
+                trimmed:find("^function%s+[%w_][%w_.:]*%s*%(")
+                or trimmed:find("^function%s*%(")
+                or trimmed:find("^local%s+function%s+[%w_]+%s*%(")
+                or trimmed:find("^local%s+[%w_]+%s*=%s*function%s*%(")
+                or trimmed:find("^[%w_][%w_.]*%s*=%s*function%s*%(")
+            -- Expression-form (inline anon) functions get their type from
+            -- their enclosing call context — no signature required.
+            if sig.source_kind ~= "expr" or is_statement_form then
+                local name --: string | nil
+                if sig.name_id and sig.name_id ~= -1 then
+                    name = intern_mod.get(ctx.pool, sig.name_id)
                 end
-            end
-            -- Modal-or-union: build the rendered string from recorded call sites.
-            -- Fallback: if no callsites were recorded (e.g. an exported function
-            -- with no in-file callers), use the solver's bound type for the var
-            -- — that captures inference from body usage (e.g. `rshift(x, i)`
-            -- binds x to integer via stdlib's rshift signature). The Phase B
-            -- warning already displays this same type; without the fallback,
-            -- the autofix is suppressed exactly where the user most needs it.
-            local sites = ctx._inferred_param_callsites
-                and ctx._inferred_param_callsites[rec.var_tid]
-            if not sites or #sites == 0 then
-                if actionable then
-                    local rendered = render_for_annotation(ctx, bound)
-                    if rendered then
-                        param_renders[pi] = rendered
-                    else
-                        all_have_callers = false
-                        param_renders[pi] = nil
-                    end
+                if not name then
+                    name = trimmed:match("^function%s+([%w_][%w_.:]*)")
+                        or trimmed:match("^local%s+function%s+([%w_]+)")
+                        or trimmed:match("^local%s+([%w_]+)%s*=")
+                        or trimmed:match("^([%w_][%w_.]*)%s*=")
+                end
+                local msg = errors_mod.format_diag(
+                    defs.E.MISSING_FUNCTION_SIGNATURE,
+                    { name = name or "" })
+                local entry
+                if sev == "error" then
+                    entry = errors_mod.error(real_err, ctx.filename,
+                        sig.line, sig.col, msg)
                 else
-                    all_have_callers = false
-                    param_renders[pi] = nil
+                    entry = errors_mod.warning(real_err, ctx.filename,
+                        sig.line, sig.col, msg)
                 end
-            else
-                local widened = {}
-                for _, s in ipairs(sites) do
-                    widened[#widened + 1] = find(ctx, widen_for_sub(ctx, s.arg_tid))
-                end
-                local rendered = combine_inferred(ctx, widened)
-                if not rendered then
-                    all_have_callers = false  -- treat unrenderable as "can't autofix"
-                end
-                param_renders[pi] = rendered
-            end
-        end
-
-        -- Autofix preconditions:
-        --   1. At least one param has an actionable warning to attach the fix to.
-        --   2. Every param has at least one recorded caller (full signature).
-        --   3. ctx.source available.
-        --   4. fn_tid available (return type rendering).
-        --   5. Preceding non-blank line is not `--:` / `--::`.
-        if not any_actionable or not all_have_callers or not first_entry
-            or not ctx.source or not g.fn_tid or not g.fn_line then
-            -- nothing more to do for this group
-        else
-            -- Render return type from fn_tid.
-            local fn_t = ctx.types:get(find(ctx, g.fn_tid))
-            local ret_s
-            if fn_t.tag == TAG_FUNCTION then
-                local rl = fn_t.data[3]
-                if rl == 0 then
-                    ret_s = "()"
-                elseif rl == 1 then
-                    local rid = find(ctx, ctx.lists:get(fn_t.data[2]))
-                    -- A still-free return TV becomes TAG_NIL by post-pass
-                    -- semantics elsewhere; for our purposes, render as `nil`
-                    -- when free. This is the same behavior the runtime would
-                    -- exhibit for a `return` statement that never executes
-                    -- on a code path.
-                    local rt = ctx.types:get(rid)
-                    if rt.tag == TAG_VAR or rt.tag == TAG_ROWVAR then
-                        ret_s = "nil"
-                    else
-                        ret_s = render_for_annotation(ctx, rid)
+                -- Try to attach autofix when the def is at a statement-form
+                -- line and we have rendered-signature data.
+                if entry and ctx.source and is_statement_form then
+                    local g = param_groups[tostring(sig.line) .. ":" .. tostring(sig.col)]
+                    -- 0-param functions still need the signature; build a
+                    -- skeleton group from the line's NODE_FUNC_DECL info if
+                    -- no inferred-params records exist (g == nil).
+                    if not g then
+                        g = { recs = {}, fn_tid = nil }
                     end
-                else
-                    local parts = {} --: { [integer]: string, ... }
-                    local parts_ok = true
-                    for i = fn_t.data[2], fn_t.data[2] + rl - 1 do
-                        local part = render_for_annotation(ctx, find(ctx, ctx.lists:get(i)))
-                        if not part then parts_ok = false; break end
-                        parts[#parts + 1] = part
-                    end
-                    if parts_ok then ret_s = "(" .. table.concat(parts, ", ") .. ")" end
-                end
-            end
-            if ret_s then
-                local ret_str = ret_s --[[: string]]
-                -- Build params section.
-                local pparts = {} --: { [integer]: string, ... }
-                local ok = true
-                for pi = 1, #g.recs do
-                    local r = param_renders[pi]
-                    if not r then ok = false; break end
-                    pparts[pi] = r --[[: string]]
-                end
-                if ok then
-                    local sig = "(" .. table.concat(pparts, ", ") .. ") -> " .. ret_str
-                    local fn_line = g.fn_line
-                    local skip_autofix = false
-                    -- Only autofix when the function definition is the entire
-                    -- right-hand side of a top-level statement (so a `--:` on
-                    -- the preceding line cleanly attaches to it). Accepted
-                    -- forms (trimmed of leading whitespace):
-                    --   function name[.path][:method](...)   -- function-def stmt
-                    --   local function name(...)             -- local function stmt
-                    --   local name = function(...)           -- local assigned to fn
-                    --   name[.path] = function(...)          -- assignment to fn
-                    -- Rejected: inline anonymous functions appearing mid-
-                    -- expression like `s:gsub(p, function(c) ... end)`. There,
-                    -- a `--:` on the line above attaches to the outer
-                    -- statement, not the inline function.
-                    local target_line = get_line(ctx.source, fn_line)
-                    local trimmed = target_line:match("^[ \t]*(.*)$") or target_line
-                    local is_statement_form =
-                        trimmed:find("^function%s+[%w_][%w_.:]*%s*%(")
-                        or trimmed:find("^local%s+function%s+[%w_]+%s*%(")
-                        or trimmed:find("^local%s+[%w_]+%s*=%s*function%s*%(")
-                        or trimmed:find("^[%w_][%w_.]*%s*=%s*function%s*%(")
-                    if not is_statement_form then
-                        skip_autofix = true
-                    end
-                    -- Check the preceding non-blank line for existing annotation.
-                    local probe = fn_line - 1
-                    while probe >= 1 and not skip_autofix do
-                        local line_s = get_line(ctx.source, probe)
-                        if line_s:find("%S") then
-                            -- Non-blank: reject if already annotated.
-                            if line_s:find("%-%-:") or line_s:find("%-%-::") then
-                                skip_autofix = true
+                    -- Belt-and-suspenders: skip if preceding non-blank line
+                    -- already starts with `--:` (annotation parse may have
+                    -- missed it, or it parsed to a non-function type).
+                    local already_annotated = false
+                    local probe = sig.line - 1
+                    while probe >= 1 do
+                        local ls = get_line(ctx.source, probe)
+                        if ls:find("%S") then
+                            if ls:find("%-%-:") or ls:find("%-%-::") then
+                                already_annotated = true
                             end
                             break
                         end
                         probe = probe - 1
                     end
-                    if not skip_autofix then
-                        local insert_at = line_start_byte(ctx.source, fn_line)
-                        if insert_at then
-                            -- Match the indentation of the function-def line.
-                            local target_line = get_line(ctx.source, fn_line)
-                            local indent = target_line:match("^[ \t]*") or ""
-                            local replacement = indent .. "--: " .. sig .. "\n"
-                            first_entry.fix = {
-                                kind = "safe",
-                                rule = "missing_param_annotation",
-                                edits = { {
-                                    byte_start  = insert_at,
-                                    byte_end    = insert_at,
-                                    replacement = replacement,
-                                } },
-                            }
+                    if not already_annotated then
+                        local sig_str = render_signature(ctx, g)
+                        if sig_str then
+                            local insert_at = line_start_byte(ctx.source, sig.line)
+                            if insert_at then
+                                local indent = target_line:match("^[ \t]*") or ""
+                                local replacement = indent .. "--: " .. sig_str .. "\n"
+                                entry.fix = {
+                                    kind = "safe",
+                                    rule = "missing_function_signature",
+                                    edits = { {
+                                        byte_start  = insert_at,
+                                        byte_end    = insert_at,
+                                        replacement = replacement,
+                                    } },
+                                }
+                            end
                         end
                     end
                 end
@@ -3078,6 +3042,7 @@ local function emit_missing_param_annotation(ctx, real_err, sev)
         end
     end
 end
+
 
 -- any: constraints is a list of heterogeneous arrays — see solve_unify comment.
 --: (Ctx, { [integer]: { [integer]: unknown, ... }, ... }) -> ()
@@ -3237,38 +3202,31 @@ function M.solve(ctx, constraints)
     ctx.err = real_err
     rawset(ctx, "_constraints", nil)  -- rawset: field type doesn't accept nil directly
 
-    -- Post-pass: MISSING_PARAM_ANNOTATION (Phase B) + autofix (Phase C).
-    -- For each unannotated function parameter whose type was inferred from
-    -- caller-side bindings (not an annotation), emit a warning at the
-    -- function-def site. Skip when the inferred type is still a free var
-    -- (no callers exercised the param) or resolves to unknown/any (we have
-    -- nothing actionable to suggest). Severity is configurable via the
-    -- linting `missing_param_annotation` rule.
+    -- Post-pass: MISSING_FUNCTION_SIGNATURE (error). Every function-def site
+    -- without a `--:` annotation gets reported at the function-def line.
+    -- Statement-form definitions always fire; expression-form (inline anon)
+    -- functions only fire when the source line is itself at statement
+    -- position (`local f = function(...)`, `M.f = function(...)`, etc.) —
+    -- truly inline functions are typed by their call context.
     --
-    -- Phase C: when every param in the function has at least one recorded
-    -- caller, render the inferred signature `--: (T1, ..., TN) -> R` and
-    -- attach it as a safe autofix to the first param's warning entry.
-    -- Modal-or-union selection: single distinct widened type → write it;
-    -- modal ≥80% and strictly dominant → write the modal; otherwise → write
-    -- the union of distinct widened types. Outliers continue to error at
-    -- their call sites (CALL_ARG_MISMATCH path), making typo-vs-legitimate
-    -- callers self-localizing.
+    -- An autofix is attached when the per-param inference data (recorded by
+    -- gen_function and call sites) is sufficient to render a full signature.
+    -- See render_signature for the modal-or-union rules.
     local rd2 = defs.rule_defaults --[[:! { [integer]: { name: string, severity: string }, ... }]]
-    local rd_entry = rd2[defs.E.MISSING_PARAM_ANNOTATION]
-    if ctx._inferred_params and rd_entry then
+    local rd_entry = rd2[defs.E.MISSING_FUNCTION_SIGNATURE]
+    if ctx._missing_signatures and rd_entry then
         local rc_mod = require("lib.type.static.rules_config")
         local rc = ctx.rules_config --[[:! { [string]: { severity?: string, enabled?: boolean, allow?: { [integer]: string, ... }, ... }, ... } | nil]]
-        local sev = rc_mod.effective_severity(defs.E.MISSING_PARAM_ANNOTATION, rc, rd2)
-        local allow = rc_mod.allow_patterns(defs.E.MISSING_PARAM_ANNOTATION, rc, rd2)
+        local sev = rc_mod.effective_severity(defs.E.MISSING_FUNCTION_SIGNATURE, rc, rd2)
+        local allow = rc_mod.allow_patterns(defs.E.MISSING_FUNCTION_SIGNATURE, rc, rd2)
         local suppressed = sev == "off" or rc_mod.is_allowed(ctx.filename, allow)
         if not suppressed then
             -- Normalize unions before rendering: phi-join artifacts can leave
             -- `string | string | nil` shapes where two TAG_VARs both resolved
             -- to T_STRING via different paths. The post-solve normalization
-            -- in check.lua runs AFTER us, so we need to invoke it here too
-            -- or the autofix output contains visible duplicates.
+            -- in check.lua runs AFTER us, so invoke it here too.
             types_mod.normalize_unions(ctx)
-            emit_missing_param_annotation(ctx, real_err, sev)
+            emit_missing_function_signature(ctx, real_err, sev)
         end
     end
 end

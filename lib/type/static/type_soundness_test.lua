@@ -14,8 +14,20 @@ local function check(src)
     return check_mod.check_string(src, "test")
 end
 
+-- Filter MISSING_FUNCTION_SIGNATURE — soundness tests use unannotated
+-- fixtures throughout to focus on solver behavior, not annotation hygiene.
+local function _filter_signature_only(ec)
+    local real_errs = {}
+    for _, e in ipairs(ec.errors) do
+        if not e.msg:find("has no signature") then
+            real_errs[#real_errs + 1] = e
+        end
+    end
+    return { errors = real_errs, warnings = ec.warnings, source_lines = ec.source_lines }
+end
+
 local function no_errors(src)
-    local ec = check(src)
+    local ec = _filter_signature_only(check(src))
     if errors_mod.has_errors(ec) then
         local msg = errors_mod.format_plain(ec)
         assert.ok(false, "expected no errors but got:\n" .. msg)

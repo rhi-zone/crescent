@@ -18,14 +18,26 @@ local farb  = require("lib.type.static.fuzz_arb")
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
+-- MISSING_FUNCTION_SIGNATURE fires on every unannotated function. Fuzz
+-- programs are generated mechanically and may not include `--:` lines;
+-- the fuzz suite is asserting type-system invariants, not annotation
+-- hygiene. Filter that error class out.
+local function _filter_errs(err_ctx)
+	local n = 0
+	for _, e in ipairs(err_ctx.errors) do
+		if not e.msg:find("has no signature") then n = n + 1 end
+	end
+	return n
+end
+
 local function typechecks(src)
 	local err_ctx = check.check_string(src, "fuzz_test")
-	return #err_ctx.errors == 0
+	return _filter_errs(err_ctx) == 0
 end
 
 local function rejects(src)
 	local err_ctx = check.check_string(src, "fuzz_test")
-	return #err_ctx.errors > 0
+	return _filter_errs(err_ctx) > 0
 end
 
 -- ── Invariant 1: Reflexivity (base) ──────────────────────────────────────────

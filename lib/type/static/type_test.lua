@@ -1871,8 +1871,23 @@ local function check(src)
     return check_mod.check_string(src, "test")
 end
 
+-- MISSING_FUNCTION_SIGNATURE fires on every unannotated function. Most
+-- typechecker tests are about other semantics (narrowing, unification,
+-- overloads, etc.) and intentionally use unannotated fixtures for brevity.
+-- Filter that error class out of `no_errors` so those tests stay focused;
+-- the dedicated missing_function_signature tests assert the rule directly.
+local function _filter_signature_only(ec)
+    local real_errs = {}
+    for _, e in ipairs(ec.errors) do
+        if not e.msg:find("has no signature") then
+            real_errs[#real_errs + 1] = e
+        end
+    end
+    return { errors = real_errs, warnings = ec.warnings, source_lines = ec.source_lines }
+end
+
 local function no_errors(src)
-    local ec = check(src)
+    local ec = _filter_signature_only(check(src))
     if errors_mod.has_errors(ec) then
         local msg = errors_mod.format_plain(ec)
         assert.fail("expected no errors but got:\n" .. msg)
@@ -3150,6 +3165,7 @@ assert.describe("field assignment M.foo = val", function()
     assert.it("function M.foo still works after field assignment fix", function()
         local err = check_mod.check_string([[
             local M = {}
+            --: () -> string
             function M.greet() return "hi" end
             local s = M.greet()
         ]], "t.lua")
@@ -4586,7 +4602,7 @@ local function v3(src)
 end
 
 local function v3_no_errors(src)
-    local ec = v3(src)
+    local ec = _filter_signature_only(v3(src))
     if errors_mod.has_errors(ec) then
         local msg = errors_mod.format_plain(ec)
         assert.fail("v3: expected no errors but got:\n" .. msg)
@@ -10961,95 +10977,96 @@ local y = x
             "force cast")
     end)
 
-    assert.it("missing_param_annotation: unannotated param + caller emits warning at fn-def site", function()
-        has_warning(
+    assert.it("missing_function_signature: unannotated function emits error at fn-def site", function()
+        has_error(
             "local function greet(s) return s .. '!' end\ngreet('alice')\n",
-            "has no annotation")
+            "has no signature")
     end)
 
-    assert.it("missing_param_annotation: annotated function does not warn", function()
+    assert.it("missing_function_signature: annotated function does not error", function()
         no_warning(
             "--: (string) -> string\nlocal function greet(s) return s .. '!' end\ngreet('alice')\n",
-            "has no annotation")
+            "has no signature")
     end)
 
-    assert.it("missing_param_annotation: no callers (param stays free) does not warn", function()
-        -- With no caller, the param var never gets bound; the diagnostic is
-        -- suppressed because we have no inferred type to suggest.
-        no_warning(
+    assert.it("missing_function_signature: no callers still errors (signature is required regardless)", function()
+        has_error(
             "local function unused(x) return x end\n",
-            "has no annotation")
+            "has no signature")
+    end)
+
+    assert.it("missing_function_signature: zero-param unannotated function still errors", function()
+        has_error(
+            "local function noargs() return 1 end\n",
+            "has no signature")
+    end)
+
+    assert.it("missing_function_signature: inline anonymous function does not error", function()
+        no_warning(
+            "local s = 'hello'\nlocal r = s:gsub('l', function(c) return c end)\n",
+            "has no signature")
     end)
 
     -- ---------------------------------------------------------------------
-    -- Phase C: autofix payload on MISSING_PARAM_ANNOTATION
+    -- Autofix payload on MISSING_FUNCTION_SIGNATURE
     -- ---------------------------------------------------------------------
 
-    -- Find the first warning carrying a missing_param_annotation autofix.
-    -- ec is the ErrCtx returned by check_string; we narrow to the fix entry.
+    -- Find the first error carrying a missing_function_signature autofix.
     --:: FixEdit = { byte_start: integer, byte_end: integer, replacement: string, ... }
-    --:: MpaFix  = { rule?: string, edits?: { [integer]: FixEdit, ... }, ... }
-    --:: MpaWarn = { fix?: MpaFix, ... }
-    --:: MpaEc   = { warnings: { [integer]: MpaWarn, ... }, ... }
-    --: (MpaEc) -> FixEdit | nil
-    local function find_mpa_fix(ec)
-        for _, w in ipairs(ec.warnings) do
-            local fix = w.fix
-            if fix and fix.rule == "missing_param_annotation" and fix.edits then
-                local e = fix.edits[1]
-                if e then return e end
+    --:: MfsFix  = { rule?: string, edits?: { [integer]: FixEdit, ... }, ... }
+    --:: MfsErr  = { fix?: MfsFix, ... }
+    --:: MfsEc   = { errors: { [integer]: MfsErr, ... }, ... }
+    --: (MfsEc) -> FixEdit | nil
+    local function find_mfs_fix(ec)
+        for _, e in ipairs(ec.errors) do
+            local fix = e.fix
+            if fix and fix.rule == "missing_function_signature" and fix.edits then
+                local fe = fix.edits[1]
+                if fe then return fe end
             end
         end
         return nil
     end
 
-    assert.it("missing_param_annotation autofix: single string caller writes `--: (string) -> string`", function()
+    assert.it("missing_function_signature autofix: single string caller writes `--: (string) -> string`", function()
         local ec = check("local function greet(s) return s .. '!' end\ngreet('alice')\n")
-        local e = find_mpa_fix(ec)
-        if not e then error("expected a missing_param_annotation fix payload", 2) end
-        -- Insertion (byte_start == byte_end), at top of file (offset 0), exact text.
+        local e = find_mfs_fix(ec)
+        if not e then error("expected a missing_function_signature fix payload", 2) end
         assert.eq(e.byte_start, 0)
         assert.eq(e.byte_end, 0)
         assert.eq(e.replacement, "--: (string) -> string\n")
     end)
 
-    assert.it("missing_param_annotation autofix: multiple same-type callers writes that type", function()
+    assert.it("missing_function_signature autofix: multiple same-type callers writes that type", function()
         local ec = check("local function f(x) return x end\nf('a'); f('b'); f('c')\n")
-        local e = find_mpa_fix(ec)
+        local e = find_mfs_fix(ec)
         if not e then error("expected a fix payload", 2) end
         assert.eq(e.replacement, "--: (string) -> string\n")
     end)
 
-    assert.it("missing_param_annotation autofix: 50/50 split writes the union", function()
+    assert.it("missing_function_signature autofix: 50/50 split writes the union", function()
         local ec = check("local function f(x) return tostring(x) end\nf('a'); f(1)\n")
-        local e = find_mpa_fix(ec)
+        local e = find_mfs_fix(ec)
         if not e then error("expected a fix payload", 2) end
-        -- Two distinct types, neither modal (1 each, 50/50 < 80%): union.
-        -- Note: x is bound to the first caller's type (string), but the
-        -- recorded second-caller arg still contributes to the union.
         assert.eq(e.replacement, "--: (integer | string) -> string\n")
     end)
 
-    assert.it("missing_param_annotation autofix: 9 string + 1 integer picks modal `string`", function()
+    assert.it("missing_function_signature autofix: 9 string + 1 integer picks modal `string`", function()
         local src = "local function f(x) return x end\n" ..
             "f('a'); f('b'); f('c'); f('d'); f('e'); f('f'); f('g'); f('h'); f('i'); f(1)\n"
         local ec = check(src)
-        local e = find_mpa_fix(ec)
+        local e = find_mfs_fix(ec)
         if not e then error("expected a fix payload", 2) end
         assert.eq(e.replacement, "--: (string) -> string\n")
-        -- Outlier still errors at the call site (CALL_ARG_MISMATCH).
         local msg = errors_mod.format_plain(ec)
         if not msg:find("cannot pass `1`") then
             error("expected outlier integer caller to error normally; got:\n" .. msg, 2)
         end
     end)
 
-    assert.it("missing_param_annotation autofix: skipped when preceding line already has `--::`", function()
-        -- `--::` on the line above is treated as an existing annotation comment;
-        -- the autofix is suppressed to avoid mangling it. The warning may still
-        -- fire (its emission is independent of the autofix payload).
+    assert.it("missing_function_signature autofix: skipped when preceding line already has `--::`", function()
         local ec = check("--:: declare q = string\nlocal function f(x) return x end\nf('a')\n")
-        local e = find_mpa_fix(ec)
+        local e = find_mfs_fix(ec)
         if e then error("expected no autofix payload when prior `--::` exists", 2) end
     end)
 
