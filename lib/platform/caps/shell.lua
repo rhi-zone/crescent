@@ -21,11 +21,12 @@ end
 
 local M = {}
 
+--:: PopenFile = { read: (self: unknown, unknown) -> string | nil, close: (self: unknown) -> unknown, ... }
+
 -- Build a streaming iterator wrapping a popen file handle.
 -- Returns a callable table with a :close method (idempotent).
---: (unknown) -> unknown
-local function make_line_iter(fh_in)
-	local fh = --[[:! { read: (self: unknown, unknown) -> string | nil, close: (self: unknown) -> unknown }]] fh_in
+--: (PopenFile) -> unknown
+local function make_line_iter(fh)
 	local closed = false
 	local iter = {} --: unknown
 	setmetatable(iter, { __call = function(_self) --: (unknown) -> (string | nil, string | nil)
@@ -56,10 +57,11 @@ end
 function M.shell_cap()
 	local revoked = false
 
+	--: (sub_decl: { type?: string, ... } | nil) -> (unknown, (() -> nil) | string | nil)
 	local function attenuate(sub_decl)
 		if revoked then return nil, "capability revoked" end
 
-		local sd = (sub_decl or {}) --[[:! { type?: string }]]
+		local sd = sub_decl or {}
 		local sub_type = sd.type or "shell"
 
 		if sub_type == "shell" then
@@ -86,11 +88,12 @@ function M.shell_cap()
 
 			-- attenuate on sub_cap produces further shell sub-caps chained through
 			-- sub_revoked and the parent's revoked.
+			--: (inner_decl: { type?: string, ... } | nil) -> (unknown, (() -> nil) | string | nil)
 			sub_cap.attenuate = function(inner_decl)
 				if sub_revoked then return nil, "capability revoked" end
 				if revoked then return nil, "capability revoked" end
 
-				local id = (inner_decl or {}) --[[:! { type?: string }]]
+				local id = inner_decl or {}
 				local inner_type = id.type or "shell"
 
 				if inner_type == "shell" then

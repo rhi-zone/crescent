@@ -91,25 +91,26 @@ local function header_first(headers, name)
 	return nil
 end
 
+--:: HttpServerSock = { set_option: (unknown, string, unknown, string) -> nil, send: (unknown, string) -> (unknown, string | nil), close: (unknown) -> nil, ... }
+
 -- Set TCP-level socket options for an SSE stream.
 -- We do this on the first send_event call so that buffered short-lived
 -- responses don't pay the syscall cost.
---: (unknown, boolean) -> nil
+--: (HttpServerSock | nil, boolean) -> nil
 local function set_sse_socket_options(sock, want_nodelay)
 	if not sock then return end
-	local sock_t = sock --[[:! { set_option: (unknown, string, unknown, string) -> nil, ... }]]
-	local set = sock_t.set_option
+	local set = sock.set_option
 	if type(set) ~= "function" then return end
 	if want_nodelay then
-		pcall(set, sock_t, "tcp_nodelay", 1, "tcp")
+		pcall(set, sock, "tcp_nodelay", 1, "tcp")
 	end
-	pcall(set, sock_t, "so_keepalive", 1, "socket")
+	pcall(set, sock, "so_keepalive", 1, "socket")
 	-- Linux TCP keepalive tuning. macOS uses TCP_KEEPALIVE (different name);
 	-- ljsocket only declares the Linux constants — failures here are silent
 	-- via pcall so non-Linux platforms don't error.
-	pcall(set, sock_t, "tcp_keepidle",  15, "tcp")
-	pcall(set, sock_t, "tcp_keepintvl", 15, "tcp")
-	pcall(set, sock_t, "tcp_keepcnt",    3, "tcp")
+	pcall(set, sock, "tcp_keepidle",  15, "tcp")
+	pcall(set, sock, "tcp_keepintvl", 15, "tcp")
+	pcall(set, sock, "tcp_keepcnt",    3, "tcp")
 end
 
 -- Format an SSE frame body (no preamble).
@@ -123,15 +124,18 @@ local function format_sse_frame(data, id, event)
 	return table.concat(parts)
 end
 
+--:: HttpServerRawReq = { target?: string, method?: string, headers?: { [string]: unknown }, body?: string, ... }
+--:: HttpServerRawRes = { status: integer, headers: { [string]: unknown }, body: string | nil, ... }
+
 -- Wrap the raw HTTP handler to hide the socket from the app.
 -- Returns a handler compatible with lib/http/server.make_connection_handler.
---: (((req: unknown, res: unknown) -> nil), unknown, boolean) -> ((req: unknown, res: unknown, sock: unknown) -> boolean | nil)
+--: (((req: unknown, res: unknown) -> nil), { [integer]: boolean }, boolean) -> ((req: HttpServerRawReq, res: HttpServerRawRes, sock: HttpServerSock) -> boolean | nil)
 local function wrap_handler(app_handler, revoked_ref, tcp_nodelay)
-	--: (unknown, unknown, unknown) -> boolean | nil
+	--: (HttpServerRawReq, HttpServerRawRes, HttpServerSock) -> boolean | nil
 	return function(raw_req, raw_res, sock)
 		if revoked_ref[1] then return end
-		local sock_s = sock --[[:! { send: (unknown, string) -> (unknown, string | nil), close: (unknown) -> nil, ... }]]
-		local req_t = raw_req --[[:! { target?: string, method?: string, headers?: { [string]: unknown }, body?: string }]]
+		local sock_s = sock
+		local req_t = raw_req
 		local path, query = split_target(req_t.target or "/")
 
 		-- Build the sanitized request (no socket access).
@@ -141,7 +145,7 @@ local function wrap_handler(app_handler, revoked_ref, tcp_nodelay)
 			query         = query,
 			headers       = req_t.headers,
 			body          = req_t.body,
-			last_event_id = header_first(req_t.headers --[[:! { [string]: unknown } | nil]], "last-event-id"),
+			last_event_id = header_first(req_t.headers, "last-event-id"),
 		}
 
 		-- Build the response builder object.
@@ -162,9 +166,8 @@ local function wrap_handler(app_handler, revoked_ref, tcp_nodelay)
 			if closed then return nil, "http_server: stream closed" end
 			local id, event
 			if type(opts) == "table" then
-				local o = opts --[[:! { id?: unknown, event?: unknown }]]
-				id    = o.id
-				event = o.event
+				id    = opts.id
+				event = opts.event
 			end
 			if not streaming then
 				streaming = true
@@ -225,7 +228,8 @@ function M.http_server_cap(opts)
 
 	-- Daemon mode: register handler only, no socket binding.
 	if opts.daemon then
-		if type(opts.on_serve) ~= "function" then
+		local on_serve = opts.on_serve
+		if type(on_serve) ~= "function" then
 			return nil, "http_server: daemon mode requires opts.on_serve callback"
 		end
 		local cap = {
@@ -238,7 +242,7 @@ function M.http_server_cap(opts)
 			if type(handler) ~= "function" then
 				return nil, "http_server: handler must be a function"
 			end
-			(opts.on_serve --[[:! (unknown) -> nil]])(handler)
+			on_serve(handler)
 			return true
 		end
 		return cap, function() revoked_ref[1] = true end
@@ -299,7 +303,7 @@ function M.http_server_cap(opts)
 				if header_end then parts = { combined } end
 			end
 			local data = parts[1]
-			local req, i = (http_format.parse_request --[[:! (string) -> ({ headers: { [string]: { [integer]: string } | nil }, ... } | nil, integer | nil)]])(data)
+			local req, i = http_format.parse_request(data)
 			if not req or not i then client:send(err_res); return end
 
 			-- Read remaining body if Content-Length specified
@@ -317,7 +321,7 @@ function M.http_server_cap(opts)
 					end
 					if #parts > 1 then
 						data = table.concat(parts)
-						req = (http_format.parse_request --[[:! (string) -> { headers: { [string]: { [integer]: string } | nil }, ... } | nil]])(data)
+						req = http_format.parse_request(data)
 						if not req then client:send(err_res); return end
 					end
 				end

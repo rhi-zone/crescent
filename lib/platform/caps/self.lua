@@ -116,10 +116,9 @@ function M.self_cap(app, opts)
 			if err_msg then return err_nil, err_msg end
 			local paths = {}
 			local ents = app.entries
-			if type(ents) == "table" then
-				local ents_ = ents --[[:! { [integer]: { name: unknown, ... } }]]
-				for i = 1, #ents_ do
-					paths[i] = ents_[i].name --[[:! string]]
+			if ents ~= nil then
+				for i = 1, #ents do
+					paths[i] = ents[i].name
 				end
 			end
 			return paths
@@ -174,10 +173,9 @@ function M.self_write_cap(app, opts)
 			if err_msg then return err_nil, err_msg end
 			local paths = {}
 			local ents = app.entries
-			if type(ents) == "table" then
-				local ents_ = ents --[[:! { [integer]: { name: unknown, ... } }]]
-				for i = 1, #ents_ do
-					paths[i] = ents_[i].name --[[:! string]]
+			if ents ~= nil then
+				for i = 1, #ents do
+					paths[i] = ents[i].name
 				end
 			end
 			return paths

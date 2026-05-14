@@ -63,7 +63,7 @@ local function extract_runtime(app_path)
 	if magic4 == "\x89PNG" then
 		local chunks, perr = png.read(bytes)
 		if not chunks then return nil, "extract_runtime: PNG parse: " .. tostring(perr) end
-		local lua_b64 = png.get_itxt(chunks --[[:! { [integer]: { type: string, data: string, ... } }]], "lua")
+		local lua_b64 = png.get_itxt(chunks, "lua")
 		if not lua_b64 then return nil, "extract_runtime: PNG has no 'lua' iTXt chunk" end
 		local gz, b64err = base64.decode(lua_b64)
 		if not gz then return nil, "extract_runtime: base64 decode: " .. tostring(b64err) end
@@ -141,6 +141,9 @@ function M.create_instance_cap(app_info, opts)
 	local audit_log = opts.audit_log
 
 	-- import_card is loaded lazily so unit tests can inject a fake via _set_import_card.
+	-- TODO(types): import_card from lib.platform.import has divergent signature
+	-- compared to CreateInstanceImportOpts; force cast is preserved until those
+	-- are reconciled (would require touching lib/platform/import.lua + import_card_fn types).
 	local import_card_fn --: unknown
 
 	local cap = {

@@ -82,7 +82,7 @@ end
 -- read(bytes) -> chunks | nil, err
 -- Returns an array of {type=string, data=string} in file order.
 -- Stops at IEND (inclusive). IDAT bytes are passed through untouched.
---: (bytes: string) -> (unknown | nil, string | nil)
+--: (bytes: string) -> ({ [integer]: { type: string, data: string } } | nil, string | nil)
 function M.read(bytes)
 	if bytes:sub(1, 8) ~= PNG_SIG then
 		return nil, "not a PNG file"

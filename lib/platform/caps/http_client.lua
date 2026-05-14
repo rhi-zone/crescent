@@ -25,6 +25,8 @@ local hfmt_raw = require("lib.http.format")
 --:: hfmt_mod = { parse_response: (string, integer | nil) -> (http_response | nil, integer | nil, string | nil), serialize_request: (http_request) -> string, ... }
 --:: http_response = { status: integer, reason: string, version: string, headers: { [string]: string[] }, body: string | nil }
 --:: http_request = { method: string, target: string, version: string, headers: { [string]: string[] }, body: string | nil }
+-- TODO(types): require() returns unknown — replace cast when lib.http.format
+-- and lib.ljsocket are converted to declare their module shape via $Require<T>.
 local hfmt = hfmt_raw --[[:! hfmt_mod]]
 --:: LjSocket = { receive: (self: LjSocket, size: integer | nil, flags: integer | nil) -> (string | nil, string | nil, integer | nil), send: (self: LjSocket, data: string, flags: integer | nil) -> (boolean | nil, string | nil), connect: (self: LjSocket, host: string, port: string) -> (boolean | nil, string | nil), close: (self: LjSocket) -> (boolean | nil, string | nil), ... }
 --:: ljsocket_mod = { create: (string, string, string) -> (LjSocket | nil, string | nil, integer | nil), ... }
@@ -44,6 +46,8 @@ do
 	local function try_load(name)
 		local ok, lib_raw = pcall(ffi.load, name)
 		if not ok then return nil end
+		-- TODO(types): ffi.load returns cdata (typed as unknown); the libtls
+		-- API shape is fixed by libtls.h. Casts here are the FFI binding boundary.
 		local lib = ((lib_raw --[[: unknown]]) --[[:! { tls_client: unknown }]])
 		-- Attempt to define the minimal API we need.
 		-- pcall: cdef may error if symbols already declared (harmless).
@@ -112,16 +116,15 @@ end
 local function tls_write_all(ctx, data)
 	if not tls_lib then return nil, "libtls not available" end
 	local tlib = tls_lib
-	local pos = 1 --: number
+	local pos = 1 --: integer
 	local len = #data
 	while pos <= len do
-		local ipos = pos --[[:! integer]]
-		local n = tlib.tls_write(ctx, data:sub(ipos), len - ipos + 1)
+		local n = tlib.tls_write(ctx, data:sub(pos), len - pos + 1)
 		if n < 0 then
 			local e = tlib.tls_error(ctx)
 			return nil, "tls_write failed: " .. (e ~= nil and ffi.string(e) or "unknown")
 		end
-		pos = pos + (tonumber(n) or 0)
+		pos = pos + math.floor(tonumber(n) or 0)
 	end
 	return true
 end
@@ -282,18 +285,17 @@ local function decode_chunked(data)
 		-- Strip any chunk extensions (e.g. "a2;ext=val" -> "a2")
 		size_str = size_str:match("^([%x]+)")
 		if not size_str then break end
-		local size = tonumber(size_str, 16)
-		if not size then break end
-		if size == 0 then break end  -- last chunk
+		local size_num = tonumber(size_str, 16)
+		if not size_num then break end
+		if size_num == 0 then break end  -- last chunk
+		local size = math.floor(size_num)
 		pos = nl + 2
-		local chunk_end = pos + size - 1
-		local end_pos = chunk_end --[[:! integer]]
+		local end_pos = pos + size - 1
 		if end_pos > #data then
 			return nil, "chunked: truncated chunk"
 		end
 		parts[#parts + 1] = data:sub(pos, end_pos)
-		local next_pos = pos + size + 2
-		pos = next_pos --[[:! integer]]  -- skip chunk data + \r\n
+		pos = pos + size + 2  -- skip chunk data + \r\n
 	end
 	return table.concat(parts)
 end
@@ -335,13 +337,13 @@ end
 -- method_allowed(methods, req_method) -> boolean
 -- Returns true when req_method is permitted by the whitelist.
 -- methods: nil/empty = allow all; otherwise exact case-insensitive match.
---: ({ [integer]: unknown } | nil, string) -> boolean
+--: (methods: string[] | nil, req_method: string) -> boolean
 local function method_allowed(methods, req_method)
 	if not methods then return true end
 	if #methods == 0 then return true end
 	local m = req_method:upper()
 	for i = 1, #methods do
-		if tostring(methods[i] --[[:! string]]):upper() == m then return true end
+		if methods[i]:upper() == m then return true end
 	end
 	return false
 end
@@ -349,14 +351,14 @@ end
 -- paths_subset(new_paths, old_paths) -> boolean
 -- Returns true when every path in new_paths is allowed by old_paths.
 -- old_paths nil/empty = unrestricted, any new_paths is valid.
---: ({ [integer]: unknown } | nil, { [integer]: unknown } | nil) -> boolean
+--: (new_paths: string[] | nil, old_paths: string[] | nil) -> boolean
 local function paths_subset(new_paths, old_paths)
 	if not old_paths then return true end
 	if #old_paths == 0 then return true end
 	if not new_paths then return false end
 	if #new_paths == 0 then return false end
 	for i = 1, #new_paths do
-		if not path_allowed(old_paths, new_paths[i] --[[:! string]]) then return false end
+		if not path_allowed(old_paths, new_paths[i]) then return false end
 	end
 	return true
 end
@@ -364,21 +366,24 @@ end
 -- methods_subset(new_methods, old_methods) -> boolean
 -- Returns true when every method in new_methods is allowed by old_methods.
 -- old_methods nil/empty = unrestricted, any new_methods is valid.
---: ({ [integer]: unknown } | nil, { [integer]: unknown } | nil) -> boolean
+--: (new_methods: string[] | nil, old_methods: string[] | nil) -> boolean
 local function methods_subset(new_methods, old_methods)
 	if not old_methods then return true end
 	if #old_methods == 0 then return true end
 	if not new_methods then return false end
 	if #new_methods == 0 then return false end
 	for i = 1, #new_methods do
-		if not method_allowed(old_methods, new_methods[i] --[[:! string]]) then return false end
+		if not method_allowed(old_methods, new_methods[i]) then return false end
 	end
 	return true
 end
 
 -- ── Cap factory ───────────────────────────────────────────────────────────────
 
+--:: HttpClientCapOpts = { host: string, model: string | nil, path: string | nil, paths: string[] | nil, methods: string[] | nil, tls: boolean | nil, ... }
+
 -- http_client_cap(opts) -> cap_table, revoke_fn
+--: (opts: HttpClientCapOpts) -> (unknown, () -> nil)
 function M.http_client_cap(opts)
 	if not opts or not opts.host then
 		error("http_client_cap: opts.host is required")
@@ -409,10 +414,10 @@ function M.http_client_cap(opts)
 		if not req then return nil, "http_client: missing request" end
 		if not req.method then return nil, "http_client: missing method" end
 		if not req.path then return nil, "http_client: missing path" end
-		if not path_allowed(--[[:! string[] | nil]] allowed_paths, req.path) then
+		if not path_allowed(allowed_paths, req.path) then
 			return nil, "path not allowed: " .. req.path
 		end
-		if not method_allowed(--[[:! string[] | nil]] allowed_methods, req.method) then
+		if not method_allowed(allowed_methods, req.method) then
 			return nil, "method not allowed: " .. req.method
 		end
 
@@ -474,10 +479,10 @@ function M.http_client_cap(opts)
 		if not req.method then return nil, "http_client: missing method" end
 		if not req.path then return nil, "http_client: missing path" end
 		if not on_chunk then return nil, "http_client: missing on_chunk callback" end
-		if not path_allowed(--[[:! string[] | nil]] allowed_paths, req.path) then
+		if not path_allowed(allowed_paths, req.path) then
 			return nil, "path not allowed: " .. req.path
 		end
-		if not method_allowed(--[[:! string[] | nil]] allowed_methods, req.method) then
+		if not method_allowed(allowed_methods, req.method) then
 			return nil, "method not allowed: " .. req.method
 		end
 
@@ -600,8 +605,9 @@ function M.http_client_cap(opts)
 					if not sp1 then client:close(); return nil, "http_client: malformed status line" end
 					local sp2 = status_line:find(" ", sp1 + 1, true)
 					local status_str = sp2 and status_line:sub(sp1 + 1, sp2 - 1) or status_line:sub(sp1 + 1)
-					local status = tonumber(status_str)
-					if not status then client:close(); return nil, "http_client: invalid status code" end
+					local status_num = tonumber(status_str)
+					if not status_num then client:close(); return nil, "http_client: invalid status code" end
+					local status = math.floor(status_num)
 
 					-- Parse headers using format module on the full head
 					local parsed = hfmt.parse_response(data:sub(1, head_end + 3) .. "\r\n")
@@ -635,8 +641,8 @@ function M.http_client_cap(opts)
 
 					client:close()
 					return {
-						status  = status --[[:! integer]],
-						headers = resp_headers --[[:! { [string]: string[] }]],
+						status  = status,
+						headers = resp_headers,
 					}
 				end
 			end
@@ -652,12 +658,12 @@ function M.http_client_cap(opts)
 		end
 		-- Paths must be a subset of the current whitelist.
 		local new_paths = sub_opts.paths
-		if not paths_subset(--[[:! string[] | nil]] new_paths, --[[:! string[] | nil]] allowed_paths) then
+		if not paths_subset(new_paths, allowed_paths) then
 			return nil, "http_client.attenuate: paths escape current scope"
 		end
 		-- Methods must be a subset of the current whitelist.
 		local new_methods = sub_opts.methods
-		if not methods_subset(--[[:! string[] | nil]] new_methods, --[[:! string[] | nil]] allowed_methods) then
+		if not methods_subset(new_methods, allowed_methods) then
 			return nil, "http_client.attenuate: methods escape current scope"
 		end
 		return M.http_client_cap({

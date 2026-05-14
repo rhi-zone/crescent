@@ -26,22 +26,23 @@ local sqlite = require("lib.sqlite")
 
 local M = {}
 
+--:: DbStmtRaw = { exec: (self: unknown, ...unknown) -> unknown, rows: (self: unknown, ...unknown) -> unknown, close: (self: unknown) -> nil, ... }
+
 -- wrap_stmt(raw_stmt, is_revoked) -> wrapped_stmt
 -- Returns a statement proxy that checks revocation before each operation.
---: (unknown, () -> boolean) -> unknown
+--: (DbStmtRaw, () -> boolean) -> { exec: (...unknown) -> unknown, rows: (...unknown) -> unknown, close: () -> nil }
 local function wrap_stmt(raw_stmt, is_revoked)
-	local stmt_any = raw_stmt --[[:! { exec: (...unknown) -> unknown, rows: (...unknown) -> unknown, close: () -> nil }]]
 	return {
 		exec = function(...)
 			if is_revoked() then return nil, "db: capability revoked" end
-			return stmt_any.exec(stmt_any, ...)
+			return raw_stmt:exec(...)
 		end,
 		rows = function(...)
 			if is_revoked() then return nil, "db: capability revoked" end
-			return stmt_any.rows(stmt_any, ...)
+			return raw_stmt:rows(...)
 		end,
 		close = function()
-			stmt_any.close(stmt_any)
+			raw_stmt:close()
 		end,
 	}
 end
@@ -52,7 +53,9 @@ function M.db_cap(path, opts)
 
 	local db_raw, err = sqlite.open(path)
 	if not db_raw then return nil, err end
-	--:: SqliteHandle = { execute: (self: unknown, string, ...unknown) -> (boolean, string | nil), close: (self: unknown) -> nil, query: (self: unknown, string, ...unknown) -> (unknown, string | nil), prepare: (self: unknown, string) -> (unknown, string | nil), last_insert_rowid: (self: unknown) -> integer, changes: (self: unknown) -> integer, ... }
+	--:: SqliteHandle = { execute: (self: unknown, string, ...unknown) -> (boolean, string | nil), close: (self: unknown) -> nil, query: (self: unknown, string, ...unknown) -> (unknown, string | nil), prepare: (self: unknown, string) -> (DbStmtRaw | nil, string | nil), last_insert_rowid: (self: unknown) -> integer, changes: (self: unknown) -> integer, ... }
+	-- TODO(types): lib/sqlite.open's return type omits prototype methods; force
+	-- cast survives until lib/sqlite uses a structural return type that includes them.
 	local db = db_raw --[[:! SqliteHandle]]
 
 	if not opts.allow_write then

@@ -27,6 +27,8 @@ do
 	if ok then ffi = mod end
 end
 -- ffi_m: non-nil ffi module reference used where IS_WINDOWS guarantees availability
+-- TODO(types): pcall(require, "ffi") returns unknown; cast typed against the
+-- subset of the FFI API used here. Replace if/when ffi's module type is exported.
 local ffi_m = ffi --[[:! { cdef: (string) -> nil, new: (string, unknown | nil) -> cdata, cast: (string, unknown) -> cdata, load: (string, boolean | nil) -> $FfiC, string: (cdata, integer | nil) -> string, os: string, ... }]]
 
 local IS_WINDOWS = ffi ~= nil and ffi_m.os == "Windows"
@@ -199,8 +201,11 @@ end
 
 -- ── Cap factory ────────────────────────────────────────────────────────────
 
+--:: RegistryCapOpts = { root: string | nil, allow_write: boolean | nil, ... }
+
+--: (opts: RegistryCapOpts | nil) -> (unknown, () -> nil | string)
 function M.registry_cap(opts)
-	local opts_ = (opts or {}) --[[:! { root: string | nil, allow_write: boolean | nil }]]
+	local opts_ = opts or {}
 
 	if not IS_WINDOWS then
 		error("registry_cap: Windows only")
@@ -209,6 +214,8 @@ function M.registry_cap(opts)
 	if not ffi_ready or advapi32 == nil then
 		return nil, "registry cap: advapi32 FFI unavailable"
 	end
+	-- TODO(types): ffi_m.load returns $FfiC (effectively cdata); narrowing to the
+	-- known advapi32 surface is the FFI binding boundary.
 	local adv = advapi32 --[[:! { RegOpenKeyExW: (...unknown) -> unknown, RegCloseKey: (...unknown) -> unknown, RegQueryValueExW: (...unknown) -> unknown, RegSetValueExW: (...unknown) -> unknown, RegEnumKeyExW: (...unknown) -> unknown, RegEnumValueW: (...unknown) -> unknown, ... }]]
 
 	local root = opts_.root
@@ -387,9 +394,10 @@ function M.registry_cap(opts)
 			return result
 		end,
 
+		--: (sub_opts: RegistryCapOpts | nil) -> (unknown, () -> nil | string)
 		attenuate = function(sub_opts)
 			if revoked then return nil, "registry: capability revoked" end
-			local sub_opts_ = (sub_opts or {}) --[[:! { root: string | nil, allow_write: boolean | nil }]]
+			local sub_opts_ = sub_opts or {}
 			local new_root = sub_opts_.root
 			if not new_root then return nil, "registry.attenuate: root required" end
 			-- Compare case-insensitively (registry paths are case-insensitive)
@@ -406,8 +414,7 @@ function M.registry_cap(opts)
 			else
 				new_allow_write = sub_opts_.allow_write
 			end
-			local reg_mod = --[[:! { registry_cap: (opts: { root: string, allow_write: boolean | nil }) -> (unknown, unknown) }]] require("lib.platform.caps.registry")
-			return reg_mod.registry_cap({ root = new_root, allow_write = new_allow_write })
+			return M.registry_cap({ root = new_root, allow_write = new_allow_write })
 		end,
 	}
 

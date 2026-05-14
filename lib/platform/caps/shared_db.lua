@@ -100,6 +100,8 @@ local function load_sqlite()
 	end
 	for _, name in ipairs(names) do
 		local ok, lib = pcall(ffi.load, name)
+		-- TODO(types): pcall return value is unknown; ffi.load returns $FfiC by design.
+		-- Cast preserved as FFI binding boundary.
 		if ok then return (lib --[[: unknown]]) --[[:! $FfiC]] end
 	end
 	error("shared_db_cap: sqlite3 shared library not found")
@@ -220,9 +222,8 @@ end
 function M.setup_schema(path, schema)
 	local db_mod = require("lib.platform.caps.db")
 	--:: DbCap = { execute: (string) -> (boolean | nil, string | nil), close: () -> (), ... }
-	local cap_raw, err = db_mod.db_cap(path, { allow_write = true })
-	if not cap_raw then return nil, err end
-	local cap = cap_raw --[[:! DbCap]]
+	local cap, err = db_mod.db_cap(path, { allow_write = true })
+	if not cap then return nil, err end
 
 	for _, tbl in ipairs(schema) do
 		local base = "_" .. tbl.name
@@ -310,7 +311,7 @@ function M.shared_db_cap(path, app_id, tables, opts)
 	local db_ptr = ffi.new("sqlite3 *[1]")
 	local flags = allow_write and SQLITE_OPEN_READWRITE or SQLITE_OPEN_READONLY
 	-- Passing nil as const char* VFS arg; LuaJIT FFI converts nil to NULL for pointer params.
-	local null_str = ffi.cast("const char*", 0) --[[:! cdata]]
+	local null_str = ffi.cast("const char*", 0)
 	local rc = sqlite_ffi.sqlite3_open_v2(path, db_ptr, flags, null_str)
 	if rc ~= SQLITE_OK then
 		local err_cdata = sqlite_ffi.sqlite3_errmsg(db_ptr[0]) --: cdata
@@ -326,8 +327,7 @@ function M.shared_db_cap(path, app_id, tables, opts)
 	end
 
 	-- Register _app_id() custom function that returns this connection's app_id.
-	local ffi_new = ffi.new --[[:! (string, integer, string) -> cdata]]
-	local app_id_c = ffi_new("const char[?]", #app_id + 1, app_id)
+	local app_id_c = ffi.new("const char[?]", #app_id + 1, app_id)
 	local app_id_len = #app_id
 
 	local ffi_cast = ffi.cast
@@ -336,11 +336,11 @@ function M.shared_db_cap(path, app_id, tables, opts)
 		function(ctx, _nargs, _args)
 			sqlite_ffi.sqlite3_result_text(ctx, app_id_c, app_id_len, SQLITE_TRANSIENT)
 		end
-	) --[[:! cdata]]
+	)
 
-	local null_step = ffi_cast("void (*)(sqlite3_context *, int, sqlite3_value **)", 0) --[[:! cdata]]
-	local null_final = ffi_cast("void (*)(sqlite3_context *)", 0) --[[:! cdata]]
-	local null_destroy = ffi_cast("void (*)(void *)", 0) --[[:! cdata]]
+	local null_step = ffi_cast("void (*)(sqlite3_context *, int, sqlite3_value **)", 0)
+	local null_final = ffi_cast("void (*)(sqlite3_context *)", 0)
+	local null_destroy = ffi_cast("void (*)(void *)", 0)
 	rc = sqlite_ffi.sqlite3_create_function_v2(
 		db, "_app_id", 0, SQLITE_UTF8, nil,
 		app_id_func,
@@ -423,7 +423,7 @@ function M.shared_db_cap(path, app_id, tables, opts)
 
 			return SQLITE_DENY
 		end
-	) --[[:! cdata]]
+	)
 
 	sqlite_ffi.sqlite3_set_authorizer(db, auth_cb, nil)
 
@@ -502,9 +502,9 @@ function M.shared_db_cap(path, app_id, tables, opts)
 	end
 
 	local function close()
-		local null_authcb = ffi_cast("int (*)(void *, int, const char *, const char *, const char *, const char *)", 0) --[[:! cdata]]
+		local null_authcb = ffi_cast("int (*)(void *, int, const char *, const char *, const char *, const char *)", 0)
 		sqlite_ffi.sqlite3_set_authorizer(db, null_authcb, nil)
-		auth_cb --[[:! cdata]]:free()
+		auth_cb:free()
 		app_id_func:free()
 		sqlite_ffi.sqlite3_close_v2(db)
 	end

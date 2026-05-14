@@ -47,9 +47,9 @@ end
 -- remaining string keys are flag fields) into a flat CLI arg list,
 -- optionally validated against a HelpSchema.
 -- Returns expanded args or nil + errmsg.
---: (unknown, unknown | nil) -> (string[] | nil, string | nil)
+--: (args_tbl: { [integer]: unknown, [string]: unknown }, schema: unknown | nil) -> (string[] | nil, string | nil)
 local function expand_args_table(args_tbl, schema)
-	local args_tbl_ = args_tbl --[[:! { [integer]: unknown, [string]: unknown }]]
+	local args_tbl_ = args_tbl
 	local path = args_tbl_[1]
 	local result = {}
 
@@ -73,13 +73,12 @@ local function expand_args_table(args_tbl, schema)
 	end
 
 	-- Walk the schema to the subcommand node matching the path.
-	--: unknown | nil
-	local node = schema
+	local node = schema --: { subcommands: { [unknown]: unknown }, flag_idents: { [string]: unknown }, flags: { [integer]: { [string]: unknown } }, [string]: unknown, ... } | nil
 	if node ~= nil and type(path) == "table" then
 		for i = 1, #path do
 			if node ~= nil and type(node) == "table" and
-			   type((node --[[:! { [string]: unknown }]]).subcommands) == "table" then
-				local subs = (node --[[:! { subcommands: { [unknown]: unknown } }]]).subcommands
+			   type(node.subcommands) == "table" then
+				local subs = node.subcommands
 				node = subs[path[i]]
 			else
 				node = nil
@@ -89,11 +88,11 @@ local function expand_args_table(args_tbl, schema)
 	end
 
 	if node ~= nil and type(node) == "table" and
-	   type((node --[[:! { [string]: unknown }]]).flag_idents) == "table" and
-	   type((node --[[:! { [string]: unknown }]]).flags) == "table" then
+	   type(node.flag_idents) == "table" and
+	   type(node.flags) == "table" then
 		-- Schema-validated flag expansion (mirrors make_api.expand_flags logic).
-		local flag_idents = (node --[[:! { flag_idents: { [string]: unknown }, flags: { [integer]: { [string]: unknown } } }]]).flag_idents
-		local flags_list  = (node --[[:! { flag_idents: { [string]: unknown }, flags: { [integer]: { [string]: unknown } } }]]).flags
+		local flag_idents = node.flag_idents
+		local flags_list  = node.flags
 		for _, key in ipairs(flag_keys) do
 			local val = args_tbl_[key]
 			local idx = flag_idents[key]
@@ -152,7 +151,7 @@ end
 -- M.new(manifest_entry, opts) -> cap, revoke_fn
 --: (ExecManifestEntry, { parent_revoked_fn: (() -> boolean) | nil } | nil) -> (unknown, () -> nil)
 function M.new(manifest_entry, opts)
-	local entry = manifest_entry --[[:! ExecManifestEntry]]
+	local entry = manifest_entry
 	local binaries_spec = entry.binaries or {}
 	local stderr = entry.stderr
 	local injected_popen = entry.popen
@@ -163,18 +162,18 @@ function M.new(manifest_entry, opts)
 
 	local revoked = false
 
+	--:: require "lib.exec.help"
 	-- Per-binary caches built at construction time.
 	-- [name] = HelpSchema | nil
-	local schemas    = {} --: { [string]: unknown }
+	local schemas    = {} --: { [string]: HelpSchema }
 	local allow_sets = {}   -- [name] = { [string]: boolean } | nil
 
 	for name, spec in pairs(binaries_spec) do
 		--: string
 		local sname = tostring(name)
-		local s = spec --[[:! { schema: "auto" | unknown | nil, allow: string[] | nil }]]
-		allow_sets[sname] = build_allow_set(s.allow)
+		allow_sets[sname] = build_allow_set(spec.allow)
 
-		local schema_val = s.schema
+		local schema_val = spec.schema
 		if schema_val == "auto" then
 			if injected_popen ~= nil then
 				local fetched, _ = help.fetch(sname, { popen = injected_popen, max_depth = 4 })
@@ -211,8 +210,7 @@ function M.new(manifest_entry, opts)
 		--: string
 		local sname = tostring(name)
 		if schema ~= nil then
-			--:: require "lib.exec.help"
-			local api, _ = make_api.make(schema --[[:! HelpSchema]], sname, {
+			local api, _ = make_api.make(schema, sname, {
 				popen  = checked_popen,
 				stderr = stderr,
 			})
@@ -269,7 +267,7 @@ function M.new(manifest_entry, opts)
 		if revoked then return nil, "capability revoked" end
 		if parent_revoked_fn and parent_revoked_fn() then return nil, "capability revoked" end
 
-		local sd = (sub_decl or {}) --[[:! { binaries: { [string]: { allow: string[] | nil } } | nil, stderr: string | nil }]]
+		local sd = sub_decl or {}
 		local sub_binaries_decl = sd.binaries or {}
 
 		-- Validate: sub may not request binaries not in parent.
@@ -283,10 +281,9 @@ function M.new(manifest_entry, opts)
 		local narrowed_binaries = {}
 		for bin_name, sub_spec in pairs(sub_binaries_decl) do
 			local bin_name_ = tostring(bin_name)
-			local parent_spec = binaries_spec[bin_name_] --[[:! { schema: "auto" | unknown | nil, allow: string[] | nil }]]
+			local parent_spec = binaries_spec[bin_name_]
 			local parent_allow = parent_spec.allow
-			local sub_spec_ = sub_spec --[[:! { allow: { [integer]: string } | nil, ... }]]
-			local sub_allow = sub_spec_.allow
+			local sub_allow = sub_spec.allow
 
 			local final_allow
 			if sub_allow == nil then
@@ -298,14 +295,13 @@ function M.new(manifest_entry, opts)
 			else
 				-- Both specify allow lists: sub must be a subset of parent.
 				local parent_set = build_allow_set(parent_allow)
-				local sub_allow_ = sub_allow --[[:! { [integer]: string }]]
-				for i = 1, #sub_allow_ do
-					if not parent_set[sub_allow_[i]] then
-						return nil, "attenuate: sub allow '" .. sub_allow_[i] ..
+				for i = 1, #sub_allow do
+					if not parent_set[sub_allow[i]] then
+						return nil, "attenuate: sub allow '" .. sub_allow[i] ..
 							"' not in parent allow for binary: " .. bin_name_
 					end
 				end
-				final_allow = sub_allow_
+				final_allow = sub_allow
 			end
 
 			narrowed_binaries[bin_name] = {

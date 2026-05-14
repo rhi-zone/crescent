@@ -43,6 +43,12 @@ end
 local ai = require("lib.ai")
 local json = require("lib.format.json")
 
+--:: LlmHttpClient = { request: (req: unknown) -> (unknown, unknown), ... }
+--:: LlmManifestEntry = { endpoint: string | nil, model: string | nil, api_key: string | nil, http_client: LlmHttpClient | nil, ... }
+--:: LlmGenerateReq = { messages: { [integer]: { role: unknown, content: unknown }, ... } | nil, max_tokens: unknown, temperature: unknown, schema: { required: { [integer]: string } | nil, ... } | nil, ... }
+--:: LlmGenerateRes = { status: integer, body: string, ... }
+--:: LlmGenerateRespData = { error: { message: unknown, ... } | nil, choices: { [integer]: { message: { content: unknown } | nil } } | nil, ... }
+
 local M = {}
 
 -- llm_cap(opts) -> cap, revoke | nil, err
@@ -149,15 +155,14 @@ end
 
 -- Validate that all keys in schema.required are present in decoded_table.
 -- Returns true, nil on success; nil, errmsg on failure.
+--: (decoded: { [string]: unknown }, schema: { required: { [integer]: string } | nil, ... } | nil) -> (true | nil, string | nil)
 local function validate_required(decoded, schema)
 	if type(schema) ~= "table" then return true end
-	local s = schema --[[:! { required: unknown, ... }]]
-	local required = s["required"]
+	local required = schema.required
 	if type(required) ~= "table" then return true end
-	local d = decoded --[[:! { [string]: unknown } ]]
 	for i = 1, #required do
 		local key = required[i]
-		if d[key] == nil then
+		if decoded[key] == nil then
 			return nil, "response failed schema validation: missing required field '" .. tostring(key) .. "'"
 		end
 	end
@@ -165,13 +170,14 @@ local function validate_required(decoded, schema)
 end
 
 -- M.new(manifest_entry) -> cap, revoke_fn
+--: (manifest_entry: LlmManifestEntry | nil) -> (unknown, () -> nil)
 function M.new(manifest_entry)
-	local entry = (manifest_entry or {}) --[[:! { endpoint: unknown, model: unknown, api_key: unknown, http_client: unknown, ... }]]
+	local entry = manifest_entry or {}
 
 	local endpoint    = entry.endpoint   or "http://127.0.0.1:8081"
 	local model       = entry.model      or "local"
 	local api_key     = entry.api_key    or ""
-	local http_client = entry.http_client --[[:! { request: (unknown) -> (unknown, unknown) } | nil]]
+	local http_client = entry.http_client
 
 	local host = strip_scheme(endpoint)
 
@@ -180,24 +186,27 @@ function M.new(manifest_entry)
 	local cap = { _type = "llm" }
 
 	-- cap.generate(req) -> decoded_table | nil, string | nil
+	--: (req: LlmGenerateReq | nil) -> (unknown, string | nil)
 	function cap.generate(req)
 		if revoked then return nil, "capability revoked" end
-		local r = (req or {}) --[[:! { messages: unknown, max_tokens: unknown, temperature: unknown, schema: unknown, ... }]]
+		local r = req or {}
 
 		-- Build the request body. openai_compat does not forward arbitrary fields
 		-- like response_format, so we build the body and POST via http_client directly.
-		local msgs = (r.messages or {}) --[[:! { [integer]: { role: unknown, content: unknown } }]]
+		local msgs = r.messages or {}
 		local messages_converted = {}
 		for i = 1, #msgs do
 			messages_converted[i] = { role = msgs[i].role, content = msgs[i].content }
 		end
 
-		local body = --[[:! { [string]: unknown }]] {
-			model    = model,
-			messages = messages_converted,
-		}
-		if r.max_tokens  then body.max_tokens  = r.max_tokens  end
-		if r.temperature then body.temperature = r.temperature end
+		--:: LlmReqBody = { model: unknown, messages: unknown, max_tokens: unknown, temperature: unknown, response_format: { type: string, json_schema: { schema: unknown } } | nil }
+		local body = {
+			model           = model,
+			messages        = messages_converted,
+			max_tokens      = r.max_tokens,
+			temperature     = r.temperature,
+			response_format = nil,
+		} --: LlmReqBody
 		if r.schema then
 			body.response_format = {
 				type        = "json_schema",
@@ -205,8 +214,7 @@ function M.new(manifest_entry)
 			}
 		end
 
-		local json_mod = json --[[:! { encode: (unknown) -> (string | nil, unknown), decode: (string) -> (unknown, unknown) }]]
-		local body_str, enc_err = json_mod.encode(body)
+		local body_str, enc_err = json.encode(body)
 		if not body_str then return nil, "llm.generate: json encode: " .. tostring(enc_err) end
 
 		if not http_client then return nil, "llm.generate: http_client is required" end
@@ -223,29 +231,33 @@ function M.new(manifest_entry)
 			body = body_str,
 		})
 		if not res then return nil, "llm.generate: http error: " .. tostring(req_err) end
-		local res_raw = res --[[: unknown]]
-		local res_any = res_raw --[[:! { status: integer, body: string }]]
+		-- TODO(types): http_client.request returns unknown; the OpenAI-compat response
+		-- shape is fixed by API contract. Replace cast when LlmHttpClient.request is
+		-- typed to return HttpClientRes.
+		local res_any = res --[[:! LlmGenerateRes]]
 		if res_any.status ~= 200 then
 			return nil, "llm.generate: HTTP " .. tostring(res_any.status) .. ": " .. tostring(res_any.body or "")
 		else
 
 		-- Parse the OpenAI completion response.
-		local resp_data, dec_err = json_mod.decode(res_any.body)
+		local resp_data, dec_err = json.decode(res_any.body)
 		if not resp_data then
 			return nil, "llm.generate: json decode response: " .. tostring(dec_err)
 		end
-		local rd = resp_data --[[:! { error: { message: unknown, ... } | nil, choices: { [integer]: { message: { content: unknown } | nil } } | nil }]]
+		-- TODO(types): json.decode necessarily returns unknown. OpenAI response
+		-- shape is fixed by the API contract — cast survives until per-key
+		-- runtime validation is added or a schema-typed decode helper exists.
+		local rd = resp_data --[[:! LlmGenerateRespData]]
 
 		if rd.error then
-			local rderr = rd.error --[[:! { message: unknown, ... }]]
-			return nil, "llm.generate: API error: " .. tostring(rderr.message or json_mod.encode(rderr))
+			local rderr = rd.error
+			return nil, "llm.generate: API error: " .. tostring(rderr.message or json.encode(rderr))
 		end
 
-		local choices_u = rd.choices
-		if not choices_u then
+		local choices = rd.choices
+		if not choices then
 			return nil, "llm.generate: no choices in response"
 		end
-		local choices = choices_u --[[:! { [integer]: { message: { content: unknown } | nil } }]]
 		if #choices == 0 then
 			return nil, "llm.generate: no choices in response"
 		end
@@ -262,7 +274,7 @@ function M.new(manifest_entry)
 		end
 
 		-- With schema: decode content as JSON and validate required fields.
-		local decoded, json_err = json_mod.decode(content --[[:! string]])
+		local decoded, json_err = json.decode(content --[[:! string]])
 		if not decoded then
 			return nil, "llm.generate: content is not valid JSON: " .. tostring(json_err)
 		end
