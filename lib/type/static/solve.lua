@@ -3018,11 +3018,29 @@ local function emit_missing_param_annotation(ctx, real_err, sev)
                 end
                 if ok then
                     local sig = "(" .. table.concat(pparts, ", ") .. ") -> " .. ret_str
-                    -- Check the preceding non-blank line for existing annotation.
                     local fn_line = g.fn_line
                     local skip_autofix = false
+                    -- Only autofix when the function definition begins its own
+                    -- line (modulo indentation). Inline anonymous functions
+                    -- like `s:gsub(p, function(c) ... end)` have no clean
+                    -- placement: a `--:` on the line above attaches to the
+                    -- outer statement, not the inline function. Detect by
+                    -- requiring the function-def line, trimmed of leading
+                    -- whitespace, to start with `function` or `local function`
+                    -- (the only two top-level forms). Also `M.foo = function(...)`
+                    -- is rejected — it is mid-expression even though it looks
+                    -- statement-like; the right surface for that is to refactor
+                    -- to `function M.foo(...)`.
+                    local target_line = get_line(ctx.source, fn_line)
+                    local trimmed = target_line:match("^[ \t]*(.*)$") or target_line
+                    if not (trimmed:find("^function%s") or trimmed:find("^function%(")
+                        or trimmed:find("^local%s+function%s") or trimmed == "function"
+                        or trimmed:find("^local%s+function%(")) then
+                        skip_autofix = true
+                    end
+                    -- Check the preceding non-blank line for existing annotation.
                     local probe = fn_line - 1
-                    while probe >= 1 do
+                    while probe >= 1 and not skip_autofix do
                         local line_s = get_line(ctx.source, probe)
                         if line_s:find("%S") then
                             -- Non-blank: reject if already annotated.

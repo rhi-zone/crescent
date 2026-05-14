@@ -1701,10 +1701,15 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
     local fn_tid = types_mod.make_func(ctx, param_tids, returns, vararg_id, param_name_ids)
 
     -- Phase C: patch fn_tid into unannotated-param records added during this
-    -- gen_function call so the post-pass can render full signatures.
+    -- gen_function call so the post-pass can render full signatures. Only
+    -- patch records that don't already have an fn_tid — nested gen_function
+    -- calls (anonymous functions in the body) already patched their own
+    -- records before returning, and we must not overwrite those.
     if ctx._inferred_params and inferred_start < #ctx._inferred_params then
         for j = inferred_start + 1, #ctx._inferred_params do
-            ctx._inferred_params[j].fn_tid = fn_tid
+            if not ctx._inferred_params[j].fn_tid then
+                ctx._inferred_params[j].fn_tid = fn_tid
+            end
         end
     end
 
