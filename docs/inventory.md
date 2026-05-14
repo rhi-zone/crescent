@@ -388,7 +388,8 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/linux/` — Linux /proc parsing (no init.lua). Status: wip.
 - `lib/path/` — cross-platform path string ops (no I/O). Status: stable.
 - `lib/platform/` — platform runner: tarball app loader + sandboxed entrypoints + cap dispatch + daemon + service + session. Status: stable.
-- `lib/platform/caps/cap_types.lua` — type declarations for all platform cap interfaces (CliCap, TimeCap, DbCap, FsCap, HttpServerCap, HttpClientCap, LlmCap, ShellCap, ExecCap, HttpReq, HttpRes, etc.). Declarations only. Status: stable.
+- `lib/platform/caps/cap_types.lua` — type declarations for all platform cap interfaces (CliCap, TimeCap, DbCap, FsCap, HttpServerCap, HttpClientCap, LlmCap, ShellCap, ExecCap, CreateInstanceCap, HttpReq, HttpRes, etc.). Declarations only. Status: stable.
+- `lib/platform/caps/create_instance.lua` — `create_instance` cap: lets a sandboxed app install a new instance of itself by handing the platform raw PNG/tarball bytes; the cap extracts the calling app's runtime from its installed tarball and feeds it through `import_card`. Returns `(app_id, launch_url)`. Designed for the "frictionless new card" cross-origin path (ccv2). Status: stable.
 - `lib/platform/platform_types.lua` — core platform type declarations (Manifest, CapDecl, EntryDef, AppRecord, TarEntry). Declarations only. Status: stable.
 - `lib/posix/` — POSIX (no init.lua, TODOs noted). Status: wip.
 - `lib/process/` — process spawning. Status: stable.

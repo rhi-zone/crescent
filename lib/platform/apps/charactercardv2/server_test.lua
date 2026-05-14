@@ -930,3 +930,52 @@ T.describe("card state PNG writeback", function()
 		T.eq(envelope.data.extensions.depth_prompt, "migrate me")
 	end)
 end)
+
+-- ── POST /api/new-card ──────────────────────────────────────────────────────
+
+T.describe("POST /api/new-card", function()
+	T.it("falls back to PNG download when create_instance cap is absent", function()
+		local caps = make_caps("reply")
+		local app = server.create(caps, { no_static = true })
+		local req = make_req("POST", "/api/new-card")
+		local res = make_res()
+		app.handler(req, res, nil)
+		T.eq(res.status, 200)
+		T.eq(res.headers["Content-Type"], "image/png")
+		T.ok(res.body and #res.body > 0)
+		-- PNG signature.
+		T.eq(res.body:sub(1, 8), "\137PNG\r\n\26\n")
+	end)
+
+	T.it("uses create_instance cap when granted and returns launch_url", function()
+		local cap_calls = {} --[[: { [integer]: string }]]
+		local create_instance = {
+			create = function(bytes)
+				cap_calls[#cap_calls + 1] = bytes
+				return 42, "/launch/42"
+			end,
+		}
+		local caps = make_caps("reply", nil, { create_instance = create_instance })
+		local app = server.create(caps, { no_static = true })
+		local status, body = call(app, "POST", "/api/new-card")
+		T.eq(status, 200)
+		T.ok(body ~= nil)
+		T.eq(body.launch_url, "/launch/42")
+		T.eq(#cap_calls, 1)
+		T.eq(cap_calls[1]:sub(1, 8), "\137PNG\r\n\26\n")
+	end)
+
+	T.it("falls back to PNG download when create_instance cap returns an error", function()
+		local create_instance = {
+			create = function() return nil, "boom" end,
+		}
+		local caps = make_caps("reply", nil, { create_instance = create_instance })
+		local app = server.create(caps, { no_static = true })
+		local req = make_req("POST", "/api/new-card")
+		local res = make_res()
+		app.handler(req, res, nil)
+		T.eq(res.status, 200)
+		T.eq(res.headers["Content-Type"], "image/png")
+		T.eq(res.body:sub(1, 8), "\137PNG\r\n\26\n")
+	end)
+end)

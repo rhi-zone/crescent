@@ -3036,10 +3036,12 @@ local BLANK_PNG_1X1 = (
 --: string
 local BLANK_CHARA_JSON = '{"spec":"chara_card_v2","spec_version":"2.0","data":{"name":"New Character","description":"","personality":"","scenario":"","first_mes":"","mes_example":"","creator_notes":"","system_prompt":"","post_history_instructions":"","tags":[],"creator":"","character_version":"","alternate_greetings":[],"extensions":{},"character_book":{"name":"","description":"","scan_depth":50,"token_budget":500,"recursive_scanning":false,"extensions":{},"entries":[]}}}'
 
--- api_post_new_card: build a blank CCv2 PNG and return it as a file download.
--- The client receives a PNG the user can import to create a new card.
+-- api_post_new_card: build a blank CCv2 PNG. If the `create_instance` cap is
+-- available, use it to install the PNG as a new app instance and return
+-- { launch_url } so the frontend can redirect into the new card. Otherwise
+-- fall back to a file download (the user re-imports it manually).
 --: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean
-local function api_post_new_card(_state, _caps, _params, _body, res)
+local function api_post_new_card(_state, caps, _params, _body, res)
 	local chunks, cerr = png_mod.read(BLANK_PNG_1X1)
 	if not chunks then
 		return json_err(res, 500, "new-card: PNG parse failed: " .. tostring(cerr))
@@ -3051,6 +3053,21 @@ local function api_post_new_card(_state, _caps, _params, _body, res)
 	if not png_bytes then
 		return json_err(res, 500, "new-card: PNG write failed: " .. tostring(werr))
 	end
+
+	-- Preferred path: use the create_instance cap to install the new card as
+	-- a fresh app and hand the frontend a launch URL. Avoids the cross-origin
+	-- problem of trying to POST /api/apps directly from the app subdomain.
+	local caps_t = caps --[[:! { create_instance: { create: (string) -> (integer | nil, string) } | nil, ... }]]
+	local ci = caps_t.create_instance
+	if ci then
+		local create_fn = ci.create
+		local new_id, launch_or_err = create_fn(png_bytes)
+		if new_id then
+			return json_ok(res, { launch_url = launch_or_err })
+		end
+		-- Fall through to download on cap failure.
+	end
+
 	res.status = 200
 	res.headers["Content-Type"] = "image/png"
 	res.headers["Content-Disposition"] = 'attachment; filename="new-character.png"'

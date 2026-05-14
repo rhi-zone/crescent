@@ -116,6 +116,18 @@ if idx then
 		context = { data_dir = apps_dir, user_id = nil },
 		entry_key = "server",
 		app_url = app_url,
+		-- Threaded for the create_instance cap (lets an app install a new
+		-- instance of itself through the existing import pipeline).
+		apps_dir = apps_dir,
+		write_fn = function(path, data)
+			local f, err = io.open(path, "wb")
+			if not f then return nil, err end
+			f:write(data)
+			f:close()
+			return true, nil
+		end,
+		time_fn = os.time,
+		audit_log = nil,
 	})
 end
 

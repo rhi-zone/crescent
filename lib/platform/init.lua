@@ -301,6 +301,24 @@ local CAP_FACTORIES = {
 			return require("lib.platform.caps.self").self_write_cap(app, { app_id = context and context.app_id })
 		end,
 	},
+	create_instance = {
+		mod = "lib.platform.caps.create_instance",
+		build = function(_decl, app, context)
+			local ctx = context or {}
+			if not ctx.apps_dir or not ctx.write_fn or not ctx.index_obj or not ctx.time_fn then
+				return nil, "create_instance cap requires apps_dir, write_fn, index_obj, time_fn in context (daemon-only)"
+			end
+			return require("lib.platform.caps.create_instance").create_instance_cap(
+				{ path = app.path },
+				{
+					apps_dir  = ctx.apps_dir,
+					write_fn  = ctx.write_fn,
+					index_obj = ctx.index_obj,
+					time_fn   = ctx.time_fn,
+					audit_log = ctx.audit_log,
+				})
+		end,
+	},
 	http_server = {
 		mod = "lib.platform.caps.http_server",
 		build = function(decl)

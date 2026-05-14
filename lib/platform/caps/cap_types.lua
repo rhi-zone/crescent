@@ -133,6 +133,13 @@
 --::   write_metadata: (keyword: string, bytes: string) -> (true | nil, string | nil),
 --:: }
 
+-- ── CreateInstanceCap ────────────────────────────────────────────────────────
+
+--:: CreateInstanceCap = {
+--::   _type: "create_instance",
+--::   create: (bytes: string) -> (integer | nil, string),
+--:: }
+
 -- ── HttpClientCap ─────────────────────────────────────────────────────────────
 
 --:: HttpClientCap = {

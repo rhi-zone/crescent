@@ -37,6 +37,10 @@ local M = {}
 --::   context: { user_id: string | nil, data_dir: string | nil } | nil,
 --::   entry_key: string | nil,
 --::   app_url: ((string) -> string) | nil,
+--::   apps_dir: string | nil,
+--::   write_fn: ((string, string) -> (true | nil, string | nil)) | nil,
+--::   time_fn: (() -> integer) | nil,
+--::   audit_log: { append: (unknown, string, unknown) -> unknown } | nil,
 --:: }
 
 -- Build the http_server factory override that captures the app's handler.
@@ -119,6 +123,13 @@ function M.make(opts)
 	local ctx_base = opts.context or {}
 	local entry_key = opts.entry_key or "server"
 	local app_url = opts.app_url
+	-- Extra caps-construction inputs needed by the create_instance cap.
+	-- Threaded through context so make_caps can construct the cap without
+	-- the platform reaching for globals (caps-first discipline).
+	local apps_dir = opts.apps_dir
+	local write_fn = opts.write_fn
+	local time_fn = opts.time_fn
+	local audit_log = opts.audit_log
 
 	--: (string) -> (unknown, string | nil)
 	return function(app_id)
@@ -147,9 +158,14 @@ function M.make(opts)
 		end
 		local grants = resolve_grants(idx, app_id, cap_decls)
 		local context   = {
-			user_id  = ctx_base.user_id,
-			app_id   = app_id,
-			data_dir = ctx_base.data_dir,
+			user_id   = ctx_base.user_id,
+			app_id    = app_id,
+			data_dir  = ctx_base.data_dir,
+			apps_dir  = apps_dir,
+			write_fn  = write_fn,
+			index_obj = index_db,
+			time_fn   = time_fn,
+			audit_log = audit_log,
 		}
 
 		local override, get_captured = make_http_server_override(app_id, app_url)
