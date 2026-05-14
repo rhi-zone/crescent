@@ -61,7 +61,8 @@ end
 -- Machine constructor
 -- ---------------------------------------------------------------------------
 
---:: Machine = { _prog: { [integer]: unknown }, _size: integer, _stack: { [integer]: unknown }, _sp: integer, _pc: integer, _env: { [string]: unknown }, _halted: boolean, _call_stack: { [integer]: integer }, step: (Machine) -> boolean }
+--:: Instr = { op: string, value: unknown, name: string, target: integer | string }
+--:: Machine = { _prog: { [integer]: Instr }, _size: integer, _stack: { [integer]: unknown }, _sp: integer, _pc: integer, _env: { [string]: unknown }, _halted: boolean, _call_stack: { [integer]: integer }, step: (Machine) -> boolean }
 
 local Machine = {}
 Machine.__index = Machine
@@ -285,12 +286,10 @@ function Machine:step()
   end
   local instr = self._prog[pc]
   self._pc = pc + 1
-  local h = handlers --[[: unknown]]
-  local hfn_ = (h --[[:! { [unknown]: unknown }]])[instr]
-  if not hfn_ then
-    error("vm: unknown opcode '" .. tostring(instr) .. "'")
+  local hfn = handlers[instr.op]
+  if not hfn then
+    error("vm: unknown opcode '" .. tostring(instr.op) .. "'")
   end
-  local hfn = (hfn_ --[[:! (unknown, unknown) -> ()]])
   hfn(self, instr)
   return not self._halted
 end
