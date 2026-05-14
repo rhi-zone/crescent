@@ -43,16 +43,18 @@ STATIC["index.html"] = [[<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Library</title>
+<link rel="stylesheet" href="/glassmorphism.css">
 <link rel="stylesheet" href="/style.css">
+<script type="module" src="/theme.js"></script>
 </head>
 <body>
 <div id="app">
-  <header class="header">
+  <header class="header glass-panel">
     <h1>Library</h1>
     <div class="search-bar">
-      <input type="text" id="search" placeholder="Search apps..." autocomplete="off">
+      <input type="text" id="search" class="glass-input" placeholder="Search apps..." autocomplete="off">
     </div>
-    <button class="import-btn" id="import-btn">Import</button>
+    <button class="import-btn glass-button" id="import-btn">Import</button>
     <input type="file" id="import-file" accept="image/png,.png,.tar.gz,.tgz,application/gzip,application/x-tar" multiple hidden>
   </header>
   <div class="import-error" id="import-error" hidden></div>
@@ -75,48 +77,47 @@ STATIC["index.html"] = [[<!DOCTYPE html>
 </html>]]
 
 STATIC["style.css"] = [[*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:system-ui,-apple-system,sans-serif;background:#1a1a2e;color:#e0e0e0;min-height:100vh}
-.header{padding:1rem 1.5rem;display:flex;align-items:center;gap:1rem;background:#16213e;border-bottom:1px solid #0f3460}
-.header h1{font-size:1.25rem;white-space:nowrap}
+body{min-height:100vh}
+.header{padding:1rem 1.5rem;display:flex;align-items:center;gap:1rem;border-bottom:1px solid var(--glass-border)}
+.header h1{font-size:var(--font-size-xl);white-space:nowrap}
 .search-bar{flex:1;max-width:400px}
-.search-bar input{width:100%;padding:.5rem .75rem;border-radius:6px;border:1px solid #0f3460;background:#1a1a2e;color:#e0e0e0;font-size:.875rem}
-.search-bar input:focus{outline:none;border-color:#e94560}
-.tag-bar{padding:.5rem 1.5rem;display:flex;gap:.5rem;flex-wrap:wrap;background:#16213e;border-bottom:1px solid #0f3460}
-.tag-btn{padding:.25rem .75rem;border-radius:999px;border:1px solid #0f3460;background:transparent;color:#e0e0e0;font-size:.75rem;cursor:pointer;transition:all .15s}
-.tag-btn:hover,.tag-btn.active{background:#e94560;border-color:#e94560;color:#fff}
+.search-bar input{width:100%;padding:.5rem .75rem;font-size:.875rem}
+.tag-bar{padding:.5rem 1.5rem;display:flex;gap:.5rem;flex-wrap:wrap;background:var(--glass-bg);border-bottom:1px solid var(--glass-border)}
+.tag-btn{padding:.25rem .75rem;border-radius:999px;border:1px solid var(--glass-border);background:transparent;color:var(--fg);font-size:.75rem;cursor:pointer;transition:all .15s}
+.tag-btn:hover,.tag-btn.active{background:var(--primary);border-color:var(--primary-hover);color:#fff}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;padding:1.5rem}
-.card{position:relative;background:#16213e;border-radius:8px;padding:1rem;border:1px solid #0f3460;cursor:pointer;transition:border-color .15s,transform .15s}
-.card:hover{border-color:#e94560;transform:translateY(-2px)}
-.card-delete{position:absolute;top:.35rem;right:.35rem;background:none;border:none;color:#606070;font-size:.9rem;cursor:pointer;padding:.15rem .3rem;border-radius:3px;line-height:1}
-.card-delete:hover{background:#e94560;color:#fff}
-.card-import{position:absolute;bottom:.5rem;left:.5rem;padding:.2rem .5rem;border-radius:4px;border:1px solid #4a4a8a;background:transparent;color:#8888cc;font-size:.75rem;cursor:pointer;z-index:1}
-.card-import:hover{background:#4a4a8a;color:#fff}
-.card-thumb{width:100%;height:120px;object-fit:cover;border-radius:4px;margin-bottom:.5rem;display:block;background:#0f1728}
+.card{position:relative;background:var(--glass-bg);border-radius:var(--radius-md);padding:1rem;border:1px solid var(--glass-border);border-top-color:var(--glass-border-light);border-left-color:var(--glass-border-light);border-bottom-color:var(--glass-border-dark);border-right-color:var(--glass-border-dark);cursor:pointer;transition:border-color .15s,transform .15s,background .15s;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.card:hover{border-color:var(--primary);background:var(--glass-hover);transform:translateY(-2px)}
+.card-delete{position:absolute;top:.35rem;right:.35rem;background:none;border:none;color:var(--fg-muted);font-size:.9rem;cursor:pointer;padding:.15rem .3rem;border-radius:3px;line-height:1}
+.card-delete:hover{background:var(--error);color:#fff}
+.card-import{position:absolute;bottom:.5rem;left:.5rem;padding:.2rem .5rem;border-radius:var(--radius-sm);border:1px solid var(--glass-border);background:transparent;color:var(--fg-muted);font-size:.75rem;cursor:pointer;z-index:1}
+.card-import:hover{background:var(--primary);color:#fff;border-color:var(--primary-hover)}
+.card-thumb{width:100%;height:120px;object-fit:cover;border-radius:var(--radius-sm);margin-bottom:.5rem;display:block;background:var(--glass-bg)}
 .card-name{font-weight:600;font-size:.95rem;margin-bottom:.35rem}
-.card-desc{font-size:.8rem;color:#a0a0b0;margin-bottom:.5rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card-desc{font-size:.8rem;color:var(--fg-muted);margin-bottom:.5rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card-tags{display:flex;flex-wrap:wrap;gap:.25rem}
-.tag{font-size:.65rem;padding:.125rem .4rem;border-radius:4px;background:#0f3460;color:#a0a0b0}
-.empty{text-align:center;padding:3rem;color:#a0a0b0;font-size:.9rem}
+.tag{font-size:.65rem;padding:.125rem .4rem;border-radius:var(--radius-sm);background:var(--glass-bg);color:var(--fg-muted);border:1px solid var(--glass-border)}
+.empty{text-align:center;padding:3rem;color:var(--fg-muted);font-size:.9rem}
 .empty--filtered{display:flex;flex-direction:column;align-items:center;gap:.75rem}
-.clear-filters-btn{padding:.4rem .85rem;border-radius:6px;border:1px solid #0f3460;background:transparent;color:#e0e0e0;font-size:.85rem;cursor:pointer}
-.clear-filters-btn:hover{border-color:#e94560;color:#e94560}
+.clear-filters-btn{padding:.4rem .85rem;border-radius:var(--radius-md);border:1px solid var(--glass-border);background:transparent;color:var(--fg);font-size:.85rem;cursor:pointer}
+.clear-filters-btn:hover{border-color:var(--primary);color:var(--primary)}
 .empty--welcome{padding:4rem 1.5rem;max-width:560px;margin:0 auto}
-.welcome-title{font-size:1.4rem;font-weight:600;color:#e0e0e0;margin-bottom:.75rem}
-.welcome-sub{font-size:1rem;color:#c0c0d0;margin-bottom:.75rem;line-height:1.5}
-.welcome-hint{font-size:.8rem;color:#808090;margin-bottom:1.25rem}
-.welcome-hint code{background:#0f1728;padding:.1rem .3rem;border-radius:3px;color:#a0a0b0}
-.welcome-sources{font-size:.9rem;color:#c0c0d0;margin-top:1rem;padding-top:1rem;border-top:1px solid #0f3460}
-.welcome-arrow{margin-top:1.5rem;font-size:.8rem;color:#e94560;letter-spacing:.05em}
-@keyframes import-pulse{0%,100%{box-shadow:0 0 0 0 rgba(233,69,96,.55)}50%{box-shadow:0 0 0 6px rgba(233,69,96,0)}}
-.import-btn{padding:.4rem .85rem;border-radius:6px;border:1px solid #0f3460;background:transparent;color:#e0e0e0;font-size:.875rem;cursor:pointer;white-space:nowrap;flex-shrink:0}
-.import-btn:hover{border-color:#e94560;color:#e94560}
-.import-btn--pulse{border-color:#e94560;color:#e94560;animation:import-pulse 1.6s ease-out infinite}
-.import-error{padding:.5rem 1.5rem;background:#3a1020;color:#ff8099;font-size:.85rem;word-break:break-word;border-bottom:1px solid #6a2040}
-.source-section{border-top:1px solid #0f3460;padding-top:.5rem}
-.source-header{padding:.5rem 1.5rem;font-size:.8rem;font-weight:600;color:#a0a0b0;letter-spacing:.05em;text-transform:uppercase}
-.source-count{font-weight:400;color:#606070;margin-left:.5rem}
-.source-more{display:block;margin:.25rem 1.5rem 1rem;padding:.35rem .75rem;border-radius:6px;border:1px solid #0f3460;background:transparent;color:#a0a0b0;font-size:.75rem;cursor:pointer}
-.source-more:hover{border-color:#e94560;color:#e94560}]]
+.welcome-title{font-size:1.4rem;font-weight:600;color:var(--fg);margin-bottom:.75rem}
+.welcome-sub{font-size:1rem;color:var(--fg);margin-bottom:.75rem;line-height:1.5}
+.welcome-hint{font-size:.8rem;color:var(--fg-muted);margin-bottom:1.25rem}
+.welcome-hint code{background:var(--glass-bg);padding:.1rem .3rem;border-radius:3px;color:var(--fg-muted)}
+.welcome-sources{font-size:.9rem;color:var(--fg);margin-top:1rem;padding-top:1rem;border-top:1px solid var(--glass-border)}
+.welcome-arrow{margin-top:1.5rem;font-size:.8rem;color:var(--primary);letter-spacing:.05em}
+@keyframes import-pulse{0%,100%{box-shadow:0 0 0 0 rgba(59,130,246,.55)}50%{box-shadow:0 0 0 6px rgba(59,130,246,0)}}
+.import-btn{padding:.4rem .85rem;font-size:.875rem;white-space:nowrap;flex-shrink:0}
+.import-btn:hover{border-color:var(--primary);color:var(--primary)}
+.import-btn--pulse{border-color:var(--primary);color:var(--primary);animation:import-pulse 1.6s ease-out infinite}
+.import-error{padding:.5rem 1.5rem;background:rgba(239,68,68,.15);color:var(--error);font-size:.85rem;word-break:break-word;border-bottom:1px solid var(--error)}
+.source-section{border-top:1px solid var(--glass-border);padding-top:.5rem}
+.source-header{padding:.5rem 1.5rem;font-size:.8rem;font-weight:600;color:var(--fg-muted);letter-spacing:.05em;text-transform:uppercase}
+.source-count{font-weight:400;color:var(--fg-muted);margin-left:.5rem;opacity:.7}
+.source-more{display:block;margin:.25rem 1.5rem 1rem;padding:.35rem .75rem;border-radius:var(--radius-md);border:1px solid var(--glass-border);background:transparent;color:var(--fg-muted);font-size:.75rem;cursor:pointer}
+.source-more:hover{border-color:var(--primary);color:var(--primary)}]]
 
 STATIC["app.js"] = [=[const grid = document.getElementById("grid");
 const search = document.getElementById("search");
@@ -482,7 +483,16 @@ local CONTENT_TYPES = {
 	json = "application/json",
 }
 
-local function serve_static(req, res)
+-- Tarball-bundled static entries (e.g. glassmorphism.css, theme.js).
+-- Served via caps.self.entry("static/<name>") when caps.self is present.
+-- Falls back to nothing if caps.self is unavailable (e.g. in unit tests
+-- without a full sandbox).
+local BUNDLED = {
+	["/glassmorphism.css"] = { entry = "static/glassmorphism.css", ext = "css" },
+	["/theme.js"] = { entry = "static/theme.js", ext = "js" },
+}
+
+local function serve_static(caps, req, res)
 	local path = req.path or "/"
 	local name, ext
 	if path == "/" then
@@ -491,15 +501,36 @@ local function serve_static(req, res)
 		name, ext = "app.js", "js"
 	elseif path == "/style.css" then
 		name, ext = "style.css", "css"
-	else
-		return nil
 	end
-	local content = STATIC[name]
-	if not content then return nil end
-	res.status = 200
-	res.headers["Content-Type"] = { CONTENT_TYPES[ext] or "application/octet-stream" }
-	res.body = content
-	return true
+	if name then
+		local content = STATIC[name]
+		if not content then return nil end
+		res.status = 200
+		res.headers["Content-Type"] = { CONTENT_TYPES[ext] or "application/octet-stream" }
+		res.body = content
+		return true
+	end
+	local bundle = BUNDLED[path]
+	if bundle then
+		local entry_fn = caps and caps.self and caps.self.entry
+		if entry_fn then
+			local content = entry_fn(bundle.entry)
+			if content then
+				res.status = 200
+				res.headers["Content-Type"] = { CONTENT_TYPES[bundle.ext] or "application/octet-stream" }
+				res.body = content
+				return true
+			end
+		end
+		-- caps.self unavailable or entry missing — serve empty stylesheet/script
+		-- so the missing-file 404 doesn't break the page. Apps without the
+		-- glassmorphism bundle still get usable (un-themed) UI.
+		res.status = 200
+		res.headers["Content-Type"] = { CONTENT_TYPES[bundle.ext] or "application/octet-stream" }
+		res.body = ""
+		return true
+	end
+	return nil
 end
 
 -- ── Index DB queries ───────────────────────────────────────────────────────
@@ -777,7 +808,7 @@ function M.create(caps)
 	local function handler(req, res)
 		local method = (req.method or "GET"):upper()
 		if method == "GET" then
-			if serve_static(req, res) then return true end
+			if serve_static(caps, req, res) then return true end
 			if handle_thumb(req, res) then return true end
 		end
 		return svc.handler(req, res)

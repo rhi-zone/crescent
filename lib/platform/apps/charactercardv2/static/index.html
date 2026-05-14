@@ -4,7 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Character Card v2</title>
+  <link rel="stylesheet" href="/glassmorphism.css">
   <link rel="stylesheet" href="style.css">
+  <script type="module" src="/theme.js"></script>
 </head>
 <body>
   <template id="message-template">
@@ -38,7 +40,7 @@
   </div>
   <div class="session-overlay" id="session-overlay" hidden></div>
 
-  <div class="card-header" id="card-header">
+  <div class="card-header glass-panel" id="card-header">
     <div class="card-header__top">
       <img class="card-header__avatar" id="card-avatar" src="/api/avatar" alt="">
       <div class="card-header__info">
@@ -67,7 +69,7 @@
     </div>
   </div>
 
-  <div class="input-row">
+  <div class="input-row glass-panel">
     <textarea class="input-row__textarea" id="input" rows="3" placeholder="Type a message..."></textarea>
     <div class="input-row__actions">
       <button class="input-row__button input-row__button--send" id="btn-send" title="Send (Enter or Ctrl+Enter)">Send</button>
@@ -79,7 +81,7 @@
     </div>
   </div>
 
-  <div class="settings-overlay" id="settings-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-panel-title" hidden>
+  <div class="settings-overlay glass-overlay" id="settings-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-panel-title" hidden>
     <div class="settings-panel" id="settings-panel">
       <div class="settings-panel__header">
         <h2 class="settings-panel__title" id="settings-panel-title">Generation Settings</h2>

@@ -1,0 +1,123 @@
+/* Glassmorphism design tokens.
+ *
+ * Defaults follow `prefers-color-scheme`. Apply `body.theme-dark` or
+ * `body.theme-light` to force a specific theme regardless of the OS setting.
+ *
+ * Color tokens mirror the canonical claude-code-hub palette so apps that
+ * adopt this design system share visual identity.
+ */
+
+:root {
+  /* Surface */
+  --bg: #0a0a0f;
+  --fg: #e8e8ed;
+  --fg-muted: #888892;
+
+  /* Glass */
+  --glass-bg: rgba(255, 255, 255, 0.04);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-light: rgba(255, 255, 255, 0.12);
+  --glass-border-dark: rgba(0, 0, 0, 0.2);
+  --glass-hover: rgba(255, 255, 255, 0.08);
+
+  /* Semantic */
+  --primary: rgba(59, 130, 246, 0.7);
+  --primary-hover: rgba(59, 130, 246, 0.8);
+  --success: rgba(34, 197, 94, 0.7);
+  --error: rgba(239, 68, 68, 0.8);
+  --warning: rgba(234, 179, 8, 0.8);
+  --info: rgba(59, 130, 246, 0.7);
+
+  /* Spacing */
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 0.75rem;
+  --space-lg: 1rem;
+  --space-xl: 1.5rem;
+
+  /* Typography */
+  --font-family: system-ui, -apple-system, sans-serif;
+  --font-size-xs: 0.7rem;
+  --font-size-sm: 0.8rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.1rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 1.5rem;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Shadow */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.4);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f5f5f7;
+    --fg: #1a1a1f;
+    --fg-muted: #666670;
+
+    --glass-bg: rgba(0, 0, 0, 0.03);
+    --glass-border: rgba(0, 0, 0, 0.06);
+    --glass-border-light: rgba(255, 255, 255, 0.7);
+    --glass-border-dark: rgba(0, 0, 0, 0.1);
+    --glass-hover: rgba(0, 0, 0, 0.06);
+
+    --primary: rgba(37, 99, 235, 0.75);
+    --primary-hover: rgba(37, 99, 235, 0.85);
+    --success: rgba(22, 163, 74, 0.75);
+    --error: rgba(220, 38, 38, 0.85);
+    --warning: rgba(202, 138, 4, 0.85);
+    --info: rgba(37, 99, 235, 0.75);
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.16);
+  }
+}
+
+/* Forced-theme overrides — `body.theme-dark` / `body.theme-light` win over
+ * `prefers-color-scheme`. Use applyTheme() from theme.js to toggle. */
+body.theme-dark {
+  --bg: #0a0a0f;
+  --fg: #e8e8ed;
+  --fg-muted: #888892;
+  --glass-bg: rgba(255, 255, 255, 0.04);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-light: rgba(255, 255, 255, 0.12);
+  --glass-border-dark: rgba(0, 0, 0, 0.2);
+  --glass-hover: rgba(255, 255, 255, 0.08);
+  --primary: rgba(59, 130, 246, 0.7);
+  --primary-hover: rgba(59, 130, 246, 0.8);
+  --success: rgba(34, 197, 94, 0.7);
+  --error: rgba(239, 68, 68, 0.8);
+  --warning: rgba(234, 179, 8, 0.8);
+  --info: rgba(59, 130, 246, 0.7);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.4);
+}
+
+body.theme-light {
+  --bg: #f5f5f7;
+  --fg: #1a1a1f;
+  --fg-muted: #666670;
+  --glass-bg: rgba(0, 0, 0, 0.03);
+  --glass-border: rgba(0, 0, 0, 0.06);
+  --glass-border-light: rgba(255, 255, 255, 0.7);
+  --glass-border-dark: rgba(0, 0, 0, 0.1);
+  --glass-hover: rgba(0, 0, 0, 0.06);
+  --primary: rgba(37, 99, 235, 0.75);
+  --primary-hover: rgba(37, 99, 235, 0.85);
+  --success: rgba(22, 163, 74, 0.75);
+  --error: rgba(220, 38, 38, 0.85);
+  --warning: rgba(202, 138, 4, 0.85);
+  --info: rgba(37, 99, 235, 0.75);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.16);
+}
