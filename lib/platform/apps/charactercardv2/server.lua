@@ -2604,7 +2604,13 @@ local function api_post_card_edit(state, caps, _params, body, res)
 	-- else falls back to per-bucket kv writes (card_overrides).
 	flush_card_state(state, caps)
 
-	return json_ok(res, card_edit_response(state.card))
+	-- Surface which storage path the edit took so the frontend can show the
+	-- user where the card state landed (PNG = self-contained; kv = legacy
+	-- per-bucket fallback). Mirrors the flush_card_state branch condition.
+	local storage_path = (caps.self_write and caps.self_write.write_metadata) and "png" or "kv"
+	local data = card_edit_response(state.card)
+	data.storage = storage_path
+	return json_ok(res, data)
 end
 
 --: (State, Caps, { [string]: string }, JsonBody | nil, Res) -> boolean

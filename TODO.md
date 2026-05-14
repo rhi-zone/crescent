@@ -451,10 +451,8 @@ Audit run across `lib/platform/apps/charactercardv2/static/*` and `lib/platform/
 
 - [x] **card-editor: Escape inside the overlay does not close it** — fixed: card-editor.js registers a `keydown` listener on the overlay. Other overlays (settings, group, my-lorebooks, sessions) still rely on the document-level handler — same pattern should apply to them as follow-up.
 - [ ] **Per-overlay Escape handlers** — follow-up to the card-editor Escape fix. Settings, group, my-lorebooks, sessions overlays each rely on `closeAnyPanel` (document-level Escape). Move each to own its own overlay keydown handler for consistency and so module-local tests can verify the close path without touching `document`.
-- [ ] **card-editor: save does not surface storage path (kv vs PNG)** — when `cardWritable: false`, the backend writes the edit to kv but the UI gives the user no indication of which storage path their edit took. Aspirational: when the backend returns `{ storage: "kv" }` (or `"png"`), the card editor should show an info notice with that label. The module already accepts `showInfo` and surfaces it if `data.storage` arrives — needs the backend to add the field.
+- [x] **card-editor: save does not surface storage path (kv vs PNG)** — fixed: `POST /api/card/edit` now returns `storage: "png"` or `storage: "kv"` (mirrors the `flush_card_state` branch — `caps.self_write.write_metadata` present → PNG; otherwise kv). Frontend `card-editor.js` already calls `showInfo("Saved to " + data.storage)` when the field is present.
 - [x] **messages: sibling cache is keyed by current message id, not by the originating swipe-set id** — fixed by aliasing every sibling's id to the same cache entry in `ensureSiblings` + `addSiblingToCache`. The next swipe finds the entry regardless of which sibling's id the DOM is currently showing.
-
-(96/97 frontend tests pass — the storage-path regression above is held by a backend change; the sibling-cache regression is a JS fix in `messages.js`.)
 
 ## admin app
 
