@@ -449,13 +449,7 @@ Audit run across `lib/platform/apps/charactercardv2/static/*` and `lib/platform/
 > will turn green automatically when the underlying bug is fixed. Do NOT
 > adjust tests to match buggy behavior.*
 
-- [ ] **`api.request` does not surface non-2xx HTTP status as error.**
-  `lib/platform/apps/charactercardv2/static/test/api.test.js:52` —
-  test `"non-2xx HTTP status surfaces as error"`. Current behavior: `request()`
-  ignores `res.status` and returns whatever JSON the body parses to,
-  including 500 responses. Aspirational: `(nil, error)`-equivalent with
-  `onError` invoked. Fix-shape: check `res.ok` (or `res.status >= 400`)
-  after `await fetch(...)` and treat as an error path before `res.json()`.
+(All current aspirational tests pass — 44/44 as of this commit. Expect this section to grow as more aspirational tests are added.)
 
 ## admin app
 
