@@ -414,6 +414,32 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] **`lib/http/` x-suffix naming cleanup** — renamed to `server_ws.lua`, `table_glob.lua`, `static_full.lua`, `static_full_404.lua` via git mv, all callers updated. 0c8444e.
 - [x] **http_client TLS — add to `lib/http/server_tls_test.lua`** — TLS client path added in `lib/platform/caps/http_client.lua` is not yet tested. Add integration test: start a TLS server, make a TLS client request, verify round-trip. The existing `server_tls_test.lua` tests the server side; extend it to also test the client path.
 
+## frontend accessibility audit (2026-04-30)
+
+Audit run across `lib/platform/apps/charactercardv2/static/*` and `lib/platform/apps/library/server.lua` inline frontend. Grouped by severity. Fix-shapes are sketches, not specs.
+
+### high — blocks SR / keyboard-only on core flows
+
+- [ ] **Icon-only buttons missing `aria-label`** — ccv2: session-toggle (`&#9776;`), all `&times;` close buttons (settings/lorebook/card-edit/group/session), settings gear (`&#9881;`), my-lorebooks book emoji, group people emoji, swipe `&lt;`/`&gt;`. Library: card-delete `\xD7` button. Title attributes are not read by screen readers — must be `aria-label`.
+- [ ] **Overlays missing `role="dialog"` + `aria-modal="true"` + `aria-labelledby`** — ccv2: settings-overlay, lorebook-overlay (legacy — confirm if still present after tabbed surface), card-edit-overlay, group-overlay, session-panel. SR cannot announce that a dialog has opened.
+- [ ] **No focus management on overlay open/close** — opening an overlay does not move focus into it; closing does not return focus to the trigger. Add focus capture + restore. Consider `inert` on background or a manual focus trap.
+- [ ] **Loading indicator not announced** — `#loading` div in ccv2 needs `role="status"` + `aria-live="polite"`. Same for connection-test result and other dynamically-updated status messages.
+- [ ] **Tabpanel `aria-labelledby` missing** — tab buttons have `role="tab"` + `aria-controls` (good) but the tabpanels lack `aria-labelledby="tab-btn-…"` back-references.
+
+### medium — degrades but workaround exists
+
+- [ ] **Swipe buttons (`<`/`>`) need descriptive labels** — "Previous message" / "Next message" via `aria-label` instead of symbol-only content.
+- [ ] **Error/status messages dynamically inserted without `aria-live`** — connection test failure, persona save errors, lorebook errors. Mark error containers as live regions.
+- [ ] **Message edit cancel doesn't return focus to message** — small but standard pattern; restore focus to the `[data-action="edit"]` trigger.
+- [ ] **`.message__speaker` contrast borderline** — `--text-dim: #888` on `#16213e` is ~3:1, fails WCAG AA for normal text. Bump to lighter dim color for speaker names.
+
+### low — polish
+
+- [ ] **Avatar `alt=""` in group chat** — when the avatar represents a specific speaker, alt should carry the speaker name; decorative-only when single-character.
+- [ ] **Tag buttons in library need `aria-pressed`** — toggle state currently only in CSS `.active`; add `aria-pressed="true|false"`.
+- [ ] **Heading semantics** — most panel titles are `<div>`/`<span>` styled like headings. Promote to `<h2>` / `<h3>` where appropriate for document outline.
+- [ ] **Long message list could benefit from a "Jump to input" skip link** — speculative; revisit if a user reports the navigation cost.
+
 ## admin app
 
 - [ ] **Admin app** — single app (`lib/platform/apps/admin/`) with `server` (HTTP UI) and `headless` (agent/script) entrypoints. Caps: `keyring` (write) for secret management, `fs` (write, apps dir) for install/uninstall. Grant management stays in the daemon (an app that can modify other apps' grants could silently escalate its own privileges). Design in `docs/platform-design.md` under "First-party apps".
