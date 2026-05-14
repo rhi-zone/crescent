@@ -1,7 +1,7 @@
 /* Glassmorphism design system — bundled entry point.
  *
  * Concatenation of tokens.css + base.css for consumers that want a single
- * file (e.g. served at /glassmorphism.css). For granular use, link
+ * file (e.g. served at /glass-ui.css). For granular use, link
  * tokens.css and base.css separately.
  *
  * Keep this file in sync with tokens.css and base.css. The duplication is

@@ -4,7 +4,7 @@
   padding: 0;
 }
 
-/* App-specific tokens layered on top of /glassmorphism.css.
+/* App-specific tokens layered on top of /glass-ui.css.
  * Tokens defined there: --bg, --fg, --fg-muted, --primary, --primary-hover,
  *   --glass-bg/-border/-border-light/-border-dark/-hover,
  *   --success, --error, --warning, --info, plus space/font/radius/shadow.

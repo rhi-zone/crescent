@@ -1,4 +1,4 @@
-# lib/glassmorphism
+# lib/glass-ui
 
 A glassmorphic design system — translucent surfaces, layered 3D borders, a
 blue primary on deep-black (or near-white) background. Pure CSS + a tiny ES
@@ -24,13 +24,13 @@ components). Apps that don't import it keep their own look.
 In the app's HTML head:
 
 ```html
-<link rel="stylesheet" href="/glassmorphism.css">
+<link rel="stylesheet" href="/glass-ui.css">
 <link rel="stylesheet" href="style.css">
 <script type="module" src="/theme.js"></script>
 ```
 
 In the app's own `style.css`, drop any `:root { --bg: ... }` blocks — the
-tokens come from `glassmorphism.css`. Reference values with `var(--bg)`,
+tokens come from `glass-ui.css`. Reference values with `var(--bg)`,
 `var(--fg)`, `var(--primary)`, etc.
 
 ## Token contract
@@ -43,6 +43,6 @@ consuming apps.
 
 ## Not a Lua library
 
-`lib/glassmorphism/` has no Lua. It lives under `lib/` because that's where
+`lib/glass-ui/` has no Lua. It lives under `lib/` because that's where
 crescent libraries live, and apps vendor it via symlink (`tar -h`) into their
 static directory.

@@ -43,7 +43,7 @@ STATIC["index.html"] = [[<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Library</title>
-<link rel="stylesheet" href="/glassmorphism.css">
+<link rel="stylesheet" href="/glass-ui.css">
 <link rel="stylesheet" href="/style.css">
 <script type="module" src="/theme.js"></script>
 </head>
@@ -483,12 +483,12 @@ local CONTENT_TYPES = {
 	json = "application/json",
 }
 
--- Tarball-bundled static entries (e.g. glassmorphism.css, theme.js).
+-- Tarball-bundled static entries (e.g. glass-ui.css, theme.js).
 -- Served via caps.self.entry("static/<name>") when caps.self is present.
 -- Falls back to nothing if caps.self is unavailable (e.g. in unit tests
 -- without a full sandbox).
 local BUNDLED = {
-	["/glassmorphism.css"] = { entry = "static/glassmorphism.css", ext = "css" },
+	["/glass-ui.css"] = { entry = "static/glass-ui.css", ext = "css" },
 	["/theme.js"] = { entry = "static/theme.js", ext = "js" },
 }
 
@@ -524,7 +524,7 @@ local function serve_static(caps, req, res)
 		end
 		-- caps.self unavailable or entry missing — serve empty stylesheet/script
 		-- so the missing-file 404 doesn't break the page. Apps without the
-		-- glassmorphism bundle still get usable (un-themed) UI.
+		-- glass-ui bundle still get usable (un-themed) UI.
 		res.status = 200
 		res.headers["Content-Type"] = { CONTENT_TYPES[bundle.ext] or "application/octet-stream" }
 		res.body = ""
