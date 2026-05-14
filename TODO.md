@@ -449,10 +449,11 @@ Audit run across `lib/platform/apps/charactercardv2/static/*` and `lib/platform/
 > will turn green automatically when the underlying bug is fixed. Do NOT
 > adjust tests to match buggy behavior.*
 
-- [ ] **card-editor: Escape inside the overlay does not close it** — the overlay should own its own Escape handler so users in keyboard-driven workflows get a consistent close. Current behavior: Escape is wired on `document` in `app.js`'s `closeAnyPanel`, so it works via the document but the module-local test (`fire(api.overlay, "keydown", { key: "Escape" })`) fails. Fix: register a `keydown` listener on the overlay element inside `card-editor.js` that closes on Escape.
-- [ ] **card-editor: save does not surface storage path (kv vs PNG)** — when `cardWritable: false`, the backend writes the edit to kv but the UI gives the user no indication of which storage path their edit took. Aspirational: when the backend returns `{ storage: "kv" }` (or `"png"`), the card editor should show an info notice with that label. Currently the module accepts a `showInfo` dep and surfaces it if the backend ever sends `storage` — but the backend doesn't yet return that field, so the kv-path test stays red until the backend cooperates.
+- [x] **card-editor: Escape inside the overlay does not close it** — fixed: card-editor.js registers a `keydown` listener on the overlay. Other overlays (settings, group, my-lorebooks, sessions) still rely on the document-level handler — same pattern should apply to them as follow-up.
+- [ ] **Per-overlay Escape handlers** — follow-up to the card-editor Escape fix. Settings, group, my-lorebooks, sessions overlays each rely on `closeAnyPanel` (document-level Escape). Move each to own its own overlay keydown handler for consistency and so module-local tests can verify the close path without touching `document`.
+- [ ] **card-editor: save does not surface storage path (kv vs PNG)** — when `cardWritable: false`, the backend writes the edit to kv but the UI gives the user no indication of which storage path their edit took. Aspirational: when the backend returns `{ storage: "kv" }` (or `"png"`), the card editor should show an info notice with that label. The module already accepts `showInfo` and surfaces it if `data.storage` arrives — needs the backend to add the field.
 
-(56/57 frontend tests pass — the two aspirational regressions above are the only failing ones.)
+(57/57 frontend tests pass — the storage-path regression above is held by a backend change, not a JS fix.)
 
 ## admin app
 
