@@ -3262,6 +3262,12 @@ function M.solve(ctx, constraints)
         local allow = rc_mod.allow_patterns(defs.E.MISSING_PARAM_ANNOTATION, rc, rd2)
         local suppressed = sev == "off" or rc_mod.is_allowed(ctx.filename, allow)
         if not suppressed then
+            -- Normalize unions before rendering: phi-join artifacts can leave
+            -- `string | string | nil` shapes where two TAG_VARs both resolved
+            -- to T_STRING via different paths. The post-solve normalization
+            -- in check.lua runs AFTER us, so we need to invoke it here too
+            -- or the autofix output contains visible duplicates.
+            types_mod.normalize_unions(ctx)
             emit_missing_param_annotation(ctx, real_err, sev)
         end
     end
