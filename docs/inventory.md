@@ -391,6 +391,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/platform/caps/cap_types.lua` — type declarations for all platform cap interfaces (CliCap, TimeCap, DbCap, FsCap, HttpServerCap, HttpClientCap, LlmCap, ShellCap, ExecCap, CreateInstanceCap, HttpReq, HttpRes, etc.). Declarations only. Status: stable.
 - `lib/platform/caps/create_instance.lua` — `create_instance` cap: lets a sandboxed app install a new instance of itself by handing the platform raw PNG/tarball bytes; the cap extracts the calling app's runtime from its installed tarball and feeds it through `import_card`. Returns `(app_id, launch_url)`. Designed for the "frictionless new card" cross-origin path (ccv2). Status: stable.
 - `lib/platform/platform_types.lua` — core platform type declarations (Manifest, CapDecl, EntryDef, AppRecord, TarEntry). Declarations only. Status: stable.
+- `lib/platform/xdg.lua` — XDG Base Directory path resolution (data/state/config/cache/bin) with cross-platform fallbacks: Unix follows the XDG spec, Windows folds everything under `%LOCALAPPDATA%\crescent`. `CRESCENT_HOME` overrides the data dir; XDG env vars (`XDG_DATA_HOME`, `XDG_STATE_HOME`, etc.) override their respective paths. Convenience accessors `apps_dir()`, `db_dir()`. Status: stable.
 - `lib/posix/` — POSIX (no init.lua, TODOs noted). Status: wip.
 - `lib/process/` — process spawning. Status: stable.
 - `lib/stb/` — tiered stb_image / stb_image_resize2 (vendored binary > libvips > pure). Status: stable.

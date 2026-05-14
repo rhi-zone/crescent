@@ -7,7 +7,8 @@
 -- Flags:
 --   --host=IFACE          Bind interface (default 127.0.0.1)
 --   --port=N              Listen port (default 7777)
---   --apps-dir=PATH       Where the app index DB lives (default ~/.crescent/apps)
+--   --apps-dir=PATH       App tarball directory (default $XDG_STATE_HOME/crescent/apps).
+--                          Index/audit/session DBs default to $XDG_STATE_HOME/crescent/db.
 --   --daemon-host=H       Canonical daemon host (default "<host>:<port>")
 --   --runtime-dir=PATH    Card app runtime directory (default lib/platform/apps/charactercardv2)
 --
@@ -23,6 +24,7 @@ local app_loader = require("lib.platform.daemon.app_loader")
 local http_server = require("lib.http.server")
 local app_index = require("lib.platform.index")
 local json = require("lib.format.json")
+local xdg = require("lib.platform.xdg")
 
 -- ── Arg parsing ────────────────────────────────────────────────────────────
 
@@ -85,7 +87,31 @@ function M.main(argv)
 math.randomseed(os.time())
 
 local opts = parse_args(argv)
-local apps_dir = expand_home(opts.apps_dir or "~/.crescent/apps")
+-- Legacy migration hint.
+do
+	local function path_exists(p)
+		local f = io.open(p, "r")
+		if f then f:close(); return true end
+		return os.execute('test -e "' .. p:gsub('"', '\\"') .. '"') == 0
+	end
+	local legacy = xdg.legacy_path_if_present(path_exists)
+	if legacy then
+		io.stderr:write("note: legacy " .. legacy .. " detected. Crescent now uses XDG paths;\n")
+		io.stderr:write("      consider moving it to " .. xdg.data_home() .. " (no automatic migration).\n")
+	end
+end
+-- Apps tarball dir + DB dir. When --apps-dir is given, keep the index DB next
+-- to the apps (legacy / test layout). On the default path, split per XDG:
+-- apps under STATE/apps, DBs under STATE/db.
+local apps_dir, db_dir
+if opts.apps_dir then
+	apps_dir = expand_home(opts.apps_dir)
+	db_dir = apps_dir
+else
+	apps_dir = xdg.apps_dir()
+	db_dir = xdg.db_dir()
+end
+os.execute(("mkdir -p %q %q"):format(apps_dir, db_dir))
 local daemon_host = opts.daemon_host or (opts.host .. ":" .. tostring(opts.port))
 
 -- Open the app index DB (read-only use from the library app is fine; the DB
@@ -94,7 +120,7 @@ local daemon_host = opts.daemon_host or (opts.host .. ":" .. tostring(opts.port)
 -- own SQL queries — `app_exists` + library app's `caps.index_db`).
 -- `idx` is the wrapped index (exposes `:get(id)`), used by app_loader.
 local raw_index_db
-local idx, ierr = app_index.open(apps_dir .. "/index.db")
+local idx, ierr = app_index.open(db_dir .. "/index.db")
 if idx then
 	raw_index_db = idx._db
 else
@@ -256,6 +282,7 @@ local d = daemon.make({
 	write_fn = write_file,
 	runtime_files = runtime_files or nil,
 	runtime_manifest = runtime_manifest,
+	session_db_path = db_dir .. "/session_store.db",
 	on_handler_error = function(app_id, err, tb)
 		io.stderr:write("daemon: app " .. app_id .. " handler error: " .. err .. "\n" .. tb .. "\n")
 	end,

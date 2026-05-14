@@ -1,12 +1,22 @@
 #Requires -Version 5.1
 $ErrorActionPreference = "Stop"
 
-$CrescentHome = if ($env:CRESCENT_HOME) { $env:CRESCENT_HOME } else { Join-Path $env:USERPROFILE ".crescent" }
+# Windows: fold source + state under %LOCALAPPDATA%\crescent (overridable via $env:CRESCENT_HOME).
+$LocalAppData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $env:USERPROFILE "AppData\Local" }
+$CrescentHome = if ($env:CRESCENT_HOME) { $env:CRESCENT_HOME } else { Join-Path $LocalAppData "crescent" }
 $Repo = "https://github.com/rhi-zone/crescent.git"
 $ZipUrl = "https://github.com/rhi-zone/crescent/archive/refs/heads/master.zip"
 
 function Test-Command($name) {
   $null -ne (Get-Command $name -ErrorAction SilentlyContinue)
+}
+
+# Migration hint for users who installed under the old path.
+$LegacyHome = Join-Path $env:USERPROFILE ".crescent"
+if ((Test-Path $LegacyHome) -and -not (Test-Path $CrescentHome)) {
+  Write-Host "note: $LegacyHome exists from a previous install."
+  Write-Host "      Consider moving it to $CrescentHome (XDG-style layout on Windows):"
+  Write-Host "        Move-Item `"$LegacyHome`" `"$CrescentHome`""
 }
 
 if (Test-Path (Join-Path $CrescentHome ".git")) {
@@ -17,6 +27,8 @@ if (Test-Path (Join-Path $CrescentHome ".git")) {
   exit 1
 } elseif (Test-Command git) {
   Write-Host "Cloning crescent to $CrescentHome..."
+  $parent = Split-Path -Parent $CrescentHome
+  if ($parent -and -not (Test-Path $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
   git clone --depth 1 $Repo $CrescentHome
 } else {
   Write-Host "Git not found; downloading zip to $CrescentHome..."
@@ -39,7 +51,7 @@ if (Test-Path (Join-Path $CrescentHome ".git")) {
 
 $BinDir = Join-Path $CrescentHome "bin"
 
-# Update user PATH (idempotent)
+# Update user PATH (idempotent). No symlink — Windows symlinks need admin.
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if (-not $userPath) { $userPath = "" }
 $paths = $userPath -split ";" | Where-Object { $_ -ne "" }

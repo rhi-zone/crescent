@@ -9,7 +9,7 @@
 --
 -- Platform flags (before --):
 --   --port=N            HTTP port for http_server cap (default 7860)
---   --data-dir=PATH     Directory for persistent data (default ~/.crescent/data)
+--   --data-dir=PATH     Directory for persistent data (default $XDG_STATE_HOME/crescent/data)
 --   --grant=NAME        Grant a specific capability (repeatable)
 --   --deny=NAME         Deny a specific capability (repeatable)
 --   --reset-grants      Clear stored grants
@@ -26,6 +26,23 @@ local json = require("lib.json")
 local platform = require("lib.platform")
 local cap_dispatch = require("lib.platform.cap_dispatch")
 local app_index_mod = require("lib.platform.index")
+local xdg = require("lib.platform.xdg")
+
+-- Migration hint: warn once if a legacy $HOME/.crescent dir exists alongside
+-- the new XDG layout. We never auto-move data — silent data movement is unsafe.
+do
+	local function path_exists(p)
+		local f = io.open(p, "r")
+		if f then f:close(); return true end
+		-- Directory open via io.open often fails on Linux; fall back to a stat-ish probe.
+		return os.execute('test -e "' .. p:gsub('"', '\\"') .. '"') == 0
+	end
+	local legacy = xdg.legacy_path_if_present(path_exists)
+	if legacy then
+		io.stderr:write("note: legacy " .. legacy .. " detected. Crescent now uses XDG paths;\n")
+		io.stderr:write("      consider moving it to " .. xdg.data_home() .. " (no automatic migration).\n")
+	end
+end
 
 --:: CapDecl = { type: string | nil, required: boolean | nil, host: string | nil, model: string | nil, path: string | nil, paths: unknown, allow_write: boolean | nil, scope: unknown, tables: unknown, provider: string | nil, key_name: string | nil, base_url: string | nil, provider_default: string | nil, root: string | nil, binaries: unknown, stderr: string | nil, methods: unknown, port: integer | nil, ... }
 --:: EntryDef = { main: string | nil, caps: { [string]: CapDecl | string } | nil }
@@ -633,9 +650,19 @@ end
 -- Open the app index DB; writes error + exits on failure.
 --: (apps_dir_arg: string | nil) -> Index
 local function open_index(apps_dir_arg)
-	local apps_dir = expand_home(apps_dir_arg or "~/.crescent/apps")
+	-- When --apps-dir is set, keep the index DB next to the apps (legacy / test layout).
+	-- On the default path, follow XDG: apps under STATE/apps, DBs under STATE/db.
+	local apps_dir, db_dir
+	if apps_dir_arg then
+		apps_dir = expand_home(apps_dir_arg)
+		db_dir = apps_dir
+	else
+		apps_dir = xdg.apps_dir()
+		db_dir = xdg.db_dir()
+	end
 	mkdir_p(apps_dir)
-	local idx, ierr = app_index_mod.open(apps_dir .. "/index.db")
+	mkdir_p(db_dir)
+	local idx, ierr = app_index_mod.open(db_dir .. "/index.db")
 	if not idx then
 		io.stderr:write("error: cannot open index: " .. tostring(ierr) .. "\n")
 		os.exit(1)
@@ -931,7 +958,7 @@ local function cmd_import(args)
 	end
 
 	runtime_dir = runtime_dir or "lib/platform/apps/charactercardv2"
-	apps_dir = expand_home(apps_dir or "~/.crescent/apps")
+	apps_dir = apps_dir and expand_home(apps_dir) or xdg.apps_dir()
 	mkdir_p(apps_dir)
 
 	-- Read the card PNG.
@@ -1091,7 +1118,7 @@ local entry_path_str = entry_path --[[:! string]]
 local app_id = manifest.name or opts.app:gsub("/$", ""):match("[^/]+$") or "app"
 -- Sanitize app_id for filesystem use.
 app_id = (app_id:gsub("[^%w._-]", "_"))
-local data_dir = expand_home(opts.data_dir or "~/.crescent/data")
+local data_dir = opts.data_dir and expand_home(opts.data_dir) or (xdg.state_home() .. "/data")
 mkdir_p(data_dir)
 
 -- Context for cap construction.
