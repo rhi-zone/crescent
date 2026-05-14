@@ -68,7 +68,31 @@ if (($env:Path -split ";") -notcontains $BinDir) {
   $env:Path = "$env:Path;$BinDir"
 }
 
+# ── Start Menu shortcut ─────────────────────────────────────────────────────
+# Creates Crescent.lnk under the user's Start Menu Programs folder pointing at
+# `cr.bat open`. Icon set to branding\crescent.ico when present; otherwise the
+# shortcut works without an icon (Windows shows a generic application icon).
+$StartMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+if (Test-Path $StartMenu) {
+  $LinkPath = Join-Path $StartMenu "Crescent.lnk"
+  $WshShell = New-Object -ComObject WScript.Shell
+  $Shortcut = $WshShell.CreateShortcut($LinkPath)
+  $Shortcut.TargetPath = Join-Path $BinDir "cr.bat"
+  $Shortcut.Arguments = "open"
+  $Shortcut.WorkingDirectory = $CrescentHome
+  $Shortcut.Description = "Open the Crescent library"
+  $IcoPath = Join-Path $CrescentHome "branding\crescent.ico"
+  if (Test-Path $IcoPath) {
+    $Shortcut.IconLocation = $IcoPath
+  }
+  $Shortcut.Save()
+  Write-Host "Installed launcher: $LinkPath"
+} else {
+  Write-Host "note: $StartMenu not present; skipping Start Menu shortcut."
+}
+
 Write-Host ""
 Write-Host "Installed crescent at $CrescentHome"
 Write-Host "Run: $BinDir\cr.bat test  # verify"
+Write-Host "Run: $BinDir\cr.bat open  # launch the library in your browser"
 Write-Host "Open a new terminal to pick up the PATH change."

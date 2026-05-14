@@ -3,6 +3,7 @@
 --
 -- Usage:
 --   luajit lib/platform/daemon/cli.lua [--host=IFACE] [--port=N] [--apps-dir=PATH]
+--   luajit lib/platform/daemon/cli.lua --status
 --
 -- Flags:
 --   --host=IFACE          Bind interface (default 127.0.0.1)
@@ -11,6 +12,12 @@
 --                          Index/audit/session DBs default to $XDG_STATE_HOME/crescent/db.
 --   --daemon-host=H       Canonical daemon host (default "<host>:<port>")
 --   --runtime-dir=PATH    Card app runtime directory (default lib/platform/apps/charactercardv2)
+--   --status              Print URL of running daemon (from PID file) and exit;
+--                          exit 0 if running, 1 if not.
+--
+-- The daemon writes its PID + host + port to a runtime file (Linux/macOS:
+-- $XDG_RUNTIME_DIR/crescent/daemon.pid; Windows: %LOCALAPPDATA%\crescent\runtime\daemon.pid).
+-- `cr open` reads this file to discover an already-running daemon.
 --
 -- v1: only serves the library app at the daemon origin + an app-origin stub.
 -- See docs/daemon-design.md and TODO.md for the multi-step bring-up plan.
@@ -25,10 +32,11 @@ local http_server = require("lib.http.server")
 local app_index = require("lib.platform.index")
 local json = require("lib.format.json")
 local xdg = require("lib.platform.xdg")
+local pid_mod = require("lib.platform.daemon.pid")
 
 -- ── Arg parsing ────────────────────────────────────────────────────────────
 
---: ({ [integer]: string }) -> { host: string, port: integer, apps_dir: string | nil, daemon_host: string | nil, runtime_dir: string | nil, tls_cert: string | nil, tls_key: string | nil }
+--: ({ [integer]: string }) -> { host: string, port: integer, apps_dir: string | nil, daemon_host: string | nil, runtime_dir: string | nil, tls_cert: string | nil, tls_key: string | nil, status: boolean }
 local function parse_args(args)
 	local opts = {
 		host = "127.0.0.1",
@@ -38,6 +46,7 @@ local function parse_args(args)
 		runtime_dir = nil --[[: string | nil]],
 		tls_cert = nil --[[: string | nil]],
 		tls_key = nil --[[: string | nil]],
+		status = false,
 	}
 	for i = 1, #args do
 		local a = args[i]
@@ -57,6 +66,9 @@ local function parse_args(args)
 			opts.tls_cert = val
 		elseif key == "tls-key" then
 			opts.tls_key = val
+		elseif a == "--status" then
+			-- Marker; handled before parse_args returns (see main).
+			opts.status = true
 		elseif a:sub(1, 1) == "-" then
 			io.stderr:write("unknown flag: " .. a .. "\n")
 			os.exit(1)
@@ -87,6 +99,21 @@ function M.main(argv)
 math.randomseed(os.time())
 
 local opts = parse_args(argv)
+
+-- ── --status: report whether a daemon is running ──────────────────────────
+-- Reads the PID file written by a running instance and verifies the process
+-- is alive. Prints a URL on success, exits non-zero if no daemon found.
+if opts.status then
+	local pid_io = pid_mod.make({ pid_file = xdg.pid_file() })
+	local info, err = pid_io.read()
+	if not info then
+		io.stderr:write("daemon: not running (" .. tostring(err) .. ")\n")
+		os.exit(1)
+	end
+	io.write("http://" .. tostring(info.host) .. ":" .. tostring(info.port) .. "/\n")
+	os.exit(0)
+end
+
 -- Legacy migration hint.
 do
 	local function path_exists(p)
@@ -308,6 +335,33 @@ end
 local scheme = opts.tls_cert and "https" or "http"
 io.write("daemon: " .. scheme .. "://" .. daemon_host .. "/\n")
 io.flush()
+
+-- Write PID file so `cr open` and `cr daemon --status` can discover us.
+-- Best-effort: a failure here logs but does not abort the daemon.
+do
+	local pid_io = pid_mod.make({ pid_file = xdg.pid_file() })
+	local ffi_ok, ffi = pcall(require, "ffi")
+	local self_pid = 0
+	if ffi_ok then
+		local ok_decl = pcall(function() ffi.cdef("int getpid(void);") end)
+		if ok_decl then
+			local ok_call, pid_ret = pcall(ffi.C.getpid)
+			if ok_call then
+				local n = tonumber(pid_ret)
+				if n then self_pid = math.floor(n) end
+			end
+		end
+	end
+	-- If we can't get a real pid, write 0; --status will treat it as stale.
+	local _, perr = pid_io.write({
+		pid  = self_pid,
+		host = opts.host,
+		port = opts.port,
+	})
+	if perr then
+		io.stderr:write("daemon: pid file write failed: " .. tostring(perr) .. "\n")
+	end
+end
 
 local server_opts = {
 	host = opts.host,

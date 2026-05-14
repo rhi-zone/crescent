@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>crescent</title>
+  <!--
+    Placeholder crescent moon. Outer disc (cx=128,cy=128,r=112) minus inner
+    offset disc (cx=168,cy=120,r=96) using even-odd fill, producing a waxing
+    crescent. Single path, transparent background, readable at 16x16.
+    Fill #3b82f6 (Tailwind blue-500).
+  -->
+  <path fill="#3b82f6" fill-rule="evenodd"
+        d="M 128 16
+           a 112 112 0 1 1 0 224
+           a 112 112 0 1 1 0 -224 Z
+           M 168 24
+           a 96 96 0 1 0 0 192
+           a 96 96 0 1 0 0 -192 Z"/>
+</svg>

@@ -147,6 +147,8 @@ commands:
   platform <app> [entry]    run a platform app
   daemon                    run the platform daemon
   doc [files...]            generate documentation
+  open [file]               start daemon (if needed) and open the library UI
+  uninstall [--purge]       remove installer artifacts (--purge: also state)
 
   <file>.lua                run a Lua file directly
   <script>                  run a script defined in pkg.lua scripts table

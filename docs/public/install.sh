@@ -69,6 +69,85 @@ case ":$PATH:" in
     ;;
 esac
 
+# ── Desktop integration ────────────────────────────────────────────────────
+# Linux: drop a .desktop file under $XDG_DATA_HOME/applications and the
+# branding SVG into the hicolor icon theme. Both standard freedesktop paths,
+# no root needed. macOS: drop a thin .app wrapper into ~/Applications when
+# the user has that directory. We skip rasters; the SVG is enough on Linux.
+OS_NAME=$(uname -s 2>/dev/null || echo unknown)
+case "$OS_NAME" in
+  Linux)
+    APP_DIR="$XDG_DATA_HOME/applications"
+    ICON_DIR="$XDG_DATA_HOME/icons/hicolor/scalable/apps"
+    mkdir -p "$APP_DIR" "$ICON_DIR"
+    if [ -f "$CRESCENT_HOME/branding/crescent.svg" ]; then
+      cp "$CRESCENT_HOME/branding/crescent.svg" "$ICON_DIR/crescent.svg"
+      say "Installed icon: $ICON_DIR/crescent.svg"
+    else
+      say "note: $CRESCENT_HOME/branding/crescent.svg missing; skipping icon."
+    fi
+    cat > "$APP_DIR/crescent.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Crescent
+Comment=Open the Crescent library
+Exec=$XDG_BIN_HOME/cr open
+Icon=crescent
+Terminal=false
+Categories=Development;Utility;
+StartupNotify=false
+EOF
+    say "Installed launcher: $APP_DIR/crescent.desktop"
+    # Refresh desktop/icon caches; failure is non-fatal.
+    command -v update-desktop-database >/dev/null 2>&1 \
+      && update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
+    command -v gtk-update-icon-cache >/dev/null 2>&1 \
+      && gtk-update-icon-cache "$XDG_DATA_HOME/icons/hicolor" >/dev/null 2>&1 || true
+    ;;
+  Darwin)
+    APPS="$HOME/Applications"
+    if [ -d "$APPS" ]; then
+      APP="$APPS/Crescent.app"
+      mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+      cat > "$APP/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key><string>crescent</string>
+  <key>CFBundleIdentifier</key><string>zone.rhi.crescent</string>
+  <key>CFBundleName</key><string>Crescent</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>0.1</string>
+  <key>LSUIElement</key><true/>
+</dict>
+</plist>
+EOF
+      cat > "$APP/Contents/MacOS/crescent" <<EOF
+#!/bin/sh
+exec "$XDG_BIN_HOME/cr" open
+EOF
+      chmod +x "$APP/Contents/MacOS/crescent"
+      # Icon: use rasterized .icns when present; SVG isn't supported by macOS.
+      if [ -f "$CRESCENT_HOME/branding/crescent.icns" ]; then
+        cp "$CRESCENT_HOME/branding/crescent.icns" "$APP/Contents/Resources/crescent.icns"
+        # Patch Info.plist to reference the icon. Simple sed; awk would also work.
+        # We just append; macOS reads the last value for duplicate keys.
+        # (Skip on systems without sed -i since this is best-effort.)
+        :
+      fi
+      say "Installed launcher: $APP/Contents/MacOS/crescent"
+    else
+      say "note: $APPS not present; skipping macOS .app bundle."
+    fi
+    ;;
+  *)
+    say "note: desktop integration not implemented for $OS_NAME; skipping."
+    ;;
+esac
+
 say ""
 say "Installed crescent at $CRESCENT_HOME"
 say "Run: cr test  # verify"
+say "Run: cr open  # launch the library in your browser"

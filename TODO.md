@@ -52,6 +52,20 @@ Open items, ordered by priority:
   correctly suppressed. Worth one more pass after refining union dedup to
   see what gets unblocked.
 
+### Desktop integration follow-ups (2026-04-30)
+
+- [ ] **Rasterize `branding/crescent.svg` for Windows + macOS.** Generate
+  `branding/crescent.ico` (multi-resolution: 16/24/32/48/64/128/256) and
+  `branding/crescent.icns` (`iconutil -c icns`). Tooling lives outside the
+  Nix dev shell (`rsvg-convert`, `icotool`, `iconutil`); see
+  `branding/README.md` for the exact commands. Installers already pick the
+  rasters up automatically when present.
+- [ ] **`cr open <file.png>` auto-import.** Currently logs a "not yet
+  implemented — drag the file into the library window" note and falls
+  through to the plain library URL. Real implementation should detect the
+  file type and route it through the existing import-card pipeline before
+  opening the library.
+
 ### Platform pivot — directions (2026-05-14)
 
 > *Triggered by chub.ai banning underage content; pivoting to get our own

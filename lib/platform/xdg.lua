@@ -92,6 +92,25 @@ function M.apps_dir() return M.state_home() .. "/apps" end
 --: () -> string
 function M.db_dir() return M.state_home() .. "/db" end
 
+-- Runtime dir for transient per-process state (PID files, sockets).
+-- Linux: $XDG_RUNTIME_DIR/crescent (falls back to /tmp/crescent-$UID).
+-- macOS: $TMPDIR/crescent (per-user temp; survives reasonably during session).
+-- Windows: %LOCALAPPDATA%\crescent\runtime.
+--: () -> string
+function M.runtime_home()
+	if M.is_windows() then return M.data_home() .. "/runtime" end
+	local xrd = M._getenv("XDG_RUNTIME_DIR")
+	if xrd and xrd ~= "" then return xrd .. "/crescent" end
+	local tmp = M._getenv("TMPDIR")
+	if tmp and tmp ~= "" then return tmp .. "/crescent" end
+	-- Linux fallback: /tmp/crescent-<uid> (uid keeps it per-user when shared).
+	local uid = M._getenv("UID") or M._getenv("USER") or "user"
+	return "/tmp/crescent-" .. uid
+end
+
+--: () -> string
+function M.pid_file() return M.runtime_home() .. "/daemon.pid" end
+
 -- Migration helper: returns the legacy path (`$HOME/.crescent`) if it exists
 -- and the current XDG data dir does not. Callers can warn the user.
 --: ((string) -> boolean) -> (string | nil)
