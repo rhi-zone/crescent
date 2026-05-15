@@ -25,7 +25,7 @@ local url = require("lib.url")
 local library = require("lib.platform.apps.library.server")
 local import_mod = require("lib.platform.import")
 local json = require("lib.format.json")
-local ratelimit = require("lib.ratelimit")
+local ratelimit = require("lib.rate_limiter")
 local session_store_mod = require("lib.platform.session_store")
 local policy_mod = require("lib.platform.policy")
 local _index_types = require("lib.platform.index") -- for Index, AppRow type aliases
@@ -336,10 +336,10 @@ function M.make(opts)
 	-- can only click so many apps.
 	-- POST /grant: 10 per 10 s (burst=10) — form submissions are interactive.
 	local launch_limiter = ratelimit.keyed(ratelimit.token_bucket, {
-		rate = 0.5, burst = 5, clock = time_fn,
+		rate = 0.5, capacity = 5, clock = time_fn,
 	})
 	local grant_limiter = ratelimit.keyed(ratelimit.token_bucket, {
-		rate = 1.0, burst = 10, clock = time_fn,
+		rate = 1.0, capacity = 10, clock = time_fn,
 	})
 
 	-- Per-request handler invocation. App handlers are untrusted code running
