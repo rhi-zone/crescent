@@ -440,13 +440,18 @@ Open items, ordered by priority:
 
 ## Codebase consolidation
 
-- [ ] **Duplicate library clusters** — `docs/duplicate_clusters.md` (commit `c17f053`) triages 22 clusters under `lib/`. 17 have clear recommendations (the longer / more-tested / strict-superset wins); 5 need decisions:
-  - `cron` vs `cron_parser` — different scope (scheduler vs parser-only)?
-  - `proto` vs `protocol_buffer` — raw wire format vs higher-level DSL?
-  - JSON Schema cluster (`json_schema` / `jsonschema` / `schema_validator`) — pick canonical, verify spec coverage.
-  - `automata_2d` vs `cellular_automata` — 2D-only-with-RLE vs 1D-Wolfram+2D, not a clean superset.
-  - `option` / `either` / `fp/either` / `fp/maybe` — depends on whether `lib/fp/` typeclass design is endorsed.
-  Consolidation isn't urgent (none of these are actively breaking anything), but each unresolved duplicate is a future foot-gun where someone imports the wrong one. The 17 clear-cut deletions could land as small per-cluster commits whenever convenient.
+- [ ] **Duplicate library clusters (low priority)** — `docs/duplicate_clusters.md` (commit `c17f053`) triages 22 clusters under `lib/`. Strict-superset and port-then-drop clusters resolved 2026-05-15 (`648ca3be`..`18f98347`, 16 commits): unified stubs, merkle, noise, expression_evaluator, roman, patch, geohash, lsystem, observable, finite_automata, ratelimit. Remaining clusters require human design decisions before any agent can act:
+  - `cron` vs `cron_parser` — different scope (scheduler vs parser-only)? Could merge by folding `parse_field`/`validate` into `cron`.
+  - `proto` vs `protocol_buffer` — high-level DSL vs raw wire primitives. Decide whether raw helpers stay public.
+  - JSON Schema cluster (`json_schema` vs `jsonschema`) — pick canonical; both ~same API, different impls. Separately: combinator cluster (`validate` / `schema_validator` / `validation`) — `validation` is largest; verify before dropping the other two.
+  - `automata_2d` vs `cellular_automata` — different scopes (2D-with-RLE vs 1D-Wolfram+2D). Either keep both (rename for clarity) or merge with explicit 1D/2D submodules.
+  - `option` / `either` / `fp/either` / `fp/maybe` — gated on whether `lib/fp/` typeclass design is endorsed (currently wip).
+  - FSM family (5 impls): pick one flat (lean `state_machine`) and one hierarchical (lean `state_machine_hsm`); drop `fsm`, `state`, `statemachine`.
+  - Caches (4 impls): `lru` is broadest; fold `lru_cache` + `lru_ttl` policies into it; decide whether `cache` (generic TTL store) stays separate.
+  - Bloom (4 impls): keep `bloom_clock` (different concern); among the rest, merge into `bloom` and fold `bloom_count`'s Cuckoo; drop `bloom_filter`. Decide if Cuckoo belongs in a Bloom module.
+  - `neural` vs `neural_net` — not a strict superset; single-call vs compositional API. Pick a winner (doc leans `neural_net`).
+  - `lib/json/` vs `lib/format/json/` — doc says `format/json` is canonical (tiered impl); verify the pure-Lua tier covers `lib/json/`'s behaviour before dropping.
+  None of these are actively breaking anything, but each unresolved duplicate is a future foot-gun where someone imports the wrong one.
 
 ## Documentation infrastructure
 
