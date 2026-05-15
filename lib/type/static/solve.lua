@@ -3407,31 +3407,6 @@ end
 --: (Ctx, ErrCtx, string) -> ()
 local function emit_missing_function_signature(ctx, real_err, sev)
     if not ctx._missing_signatures then return end
-    -- Build a (line:col) -> param-group index from _inferred_params.
-    local param_groups = {} --: { [string]: { recs: { [integer]: { var_tid: integer, param_idx: integer, fn_tid: integer, fn_line: integer, fn_col: integer, name_id: integer, ... }, ... }, fn_tid: integer | nil }, ... }
-    if ctx._inferred_params then
-        for _, rec in ipairs(ctx._inferred_params) do
-            local key = tostring(rec.fn_line or 0) .. ":" .. tostring(rec.fn_col or 0)
-            local g = param_groups[key]
-            if not g then
-                g = { recs = {}, fn_tid = rec.fn_tid }
-                param_groups[key] = g
-            end
-            g.recs[#g.recs + 1] = rec
-        end
-        for _, g in pairs(param_groups) do
-            for i = 2, #g.recs do
-                local cur = g.recs[i]
-                local cur_idx = cur.param_idx or 0
-                local j = i - 1
-                while j >= 1 and (g.recs[j].param_idx or 0) > cur_idx do
-                    g.recs[j + 1] = g.recs[j]
-                    j = j - 1
-                end
-                g.recs[j + 1] = cur
-            end
-        end
-    end
 
     local seen = {}
     for _, sig in ipairs(ctx._missing_signatures) do
@@ -3474,13 +3449,6 @@ local function emit_missing_function_signature(ctx, real_err, sev)
                 -- Try to attach autofix when the def is at a statement-form
                 -- line and we have rendered-signature data.
                 if entry and ctx.source and is_statement_form then
-                    local g = param_groups[tostring(sig.line) .. ":" .. tostring(sig.col)]
-                    -- 0-param functions still need the signature; build a
-                    -- skeleton group from the line's NODE_FUNC_DECL info if
-                    -- no inferred-params records exist (g == nil).
-                    if not g then
-                        g = { recs = {}, fn_tid = nil }
-                    end
                     -- Belt-and-suspenders: skip if preceding non-blank line
                     -- already starts with `--:` (annotation parse may have
                     -- missed it, or it parsed to a non-function type).
@@ -3502,7 +3470,7 @@ local function emit_missing_function_signature(ctx, real_err, sev)
                         -- callsite-aggregating renderer for cases without HM
                         -- generalization (e.g. annotated functions that
                         -- somehow trigger the warning).
-                        local sig_str = g.fn_tid and render_hm_signature(ctx, g.fn_tid)
+                        local sig_str = sig.fn_tid and render_hm_signature(ctx, sig.fn_tid)
                         if sig_str then
                             local insert_at = line_start_byte(ctx.source, sig.line)
                             if insert_at then

@@ -1899,15 +1899,17 @@ ExprRule[NODE_FUNC_EXPR] = function(ctx, nid)
     -- statement position (`local f = function(...)`, `M.f = function(...)`,
     -- etc.) — inline anonymous functions like `s:gsub(p, function(c) end)`
     -- are typed by their call context, not by a separate `--:` line.
+    local fn_tid = gen_function(ctx, n.data[0], n.data[1], n.data[2], n.data[3], has_vararg, ann_fn_tid, n.line, n.col)
     if not ann_fn_tid then
         ctx._missing_signatures = ctx._missing_signatures or {}
         ctx._missing_signatures[#ctx._missing_signatures + 1] = {
             line = n.line, col = n.col,
             source_kind = "expr",
             name_id = -1,
+            fn_tid = fn_tid,
         }
     end
-    return gen_function(ctx, n.data[0], n.data[1], n.data[2], n.data[3], has_vararg, ann_fn_tid, n.line, n.col)
+    return fn_tid
 end
 
 -- Recover a concrete type for an argument AST node when its constraint-gen
@@ -3601,6 +3603,8 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
                 has_vararg, ann_isect_tid, n.line, n.col)
         end
     end
+    local fn_tid = ann_isect_tid or
+        gen_function(ctx, n.data[1], n.data[2], n.data[3], n.data[4], has_vararg, ann_fn_tid, n.line, n.col)
     -- Function statements ALWAYS require a signature (`--:` line above). If no
     -- function-typed annotation was found, record for the post-pass diagnostic.
     if not ann_fn_tid and not ann_isect_tid then
@@ -3611,10 +3615,9 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
             line = n.line, col = n.col,
             source_kind = "stmt",
             name_id = sig_name_id,
+            fn_tid = fn_tid,
         }
     end
-    local fn_tid = ann_isect_tid or
-        gen_function(ctx, n.data[1], n.data[2], n.data[3], n.data[4], has_vararg, ann_fn_tid, n.line, n.col)
 
     if name_n.kind == NODE_IDENTIFIER then
         local name_id = name_n.data[0]
