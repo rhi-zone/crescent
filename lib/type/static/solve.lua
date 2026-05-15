@@ -1771,6 +1771,20 @@ local function solve_callable(ctx, c)
     end
 
     if callee_t.tag == TAG_VAR or callee_t.tag == TAG_ROWVAR then
+        -- HM Phase 1c step 2: free callee that is a sub-solve param emits a
+        -- function-shape bound `(arg_types...) -> R`, registered into
+        -- ctx._forall_bounds. At call site, propagate_function_bound (in
+        -- solve_bound) decomposes the actual function's signature into the
+        -- bound's free TVs.
+        if ctx._sub_solve_params and ctx._sub_solve_params[callee_raw] then
+            local var_t = ctx.types:get(callee_tid)
+            local var_level = var_t.data[1]
+            local r_var = types_mod.make_var(ctx, var_level)
+            local sig_tid = types_mod.make_func(ctx, arg_tids, { r_var }, -1, nil)
+            merge_inferred_bound(ctx, callee_tid, sig_tid)
+            unify_mod.unify(ctx, ret_tid, r_var)
+            return true
+        end
         -- Unknown callee: resolve ret to T_ANY
         bind_to(ctx, ret_tid, ctx.T_ANY)
         return true
