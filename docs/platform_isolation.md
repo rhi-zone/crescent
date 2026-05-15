@@ -141,9 +141,25 @@ Columns of concern:
   host shell.
 - **DoS against the daemon** — a misbehaving page driving its caps faster
   than the daemon can serve them.
+- **Catastrophic-backtracking regexes (ReDoS)** — an author can write or
+  load a regex that takes super-linear time on adversarial input. Hits the
+  iframe's main thread; sandbox doesn't help because the work is real. CSP
+  doesn't help. Even pack-author-trusted regexes can have ReDoS by
+  accident — `(a+)+b` style patterns.
+- **String/array amplification** — `"x".repeat(1e9)`, `Array(1e9).fill(...)`,
+  `JSON.stringify` on deeply-nested structures. Allocates until the tab
+  dies; sandbox doesn't help. Bounded-method transpile mitigation (already
+  in lua2ts harden) covers some specific cases (`padStart`/`padEnd`/`join`)
+  but not `repeat`/`Array(n)`/etc.
+- **Pathological JSON / parser inputs** — feeding the cap bridge or any
+  host-bridged parser a deeply-nested structure that explodes during
+  validation. Stub-side concern, not realm-side; worth flagging here.
 
 Mitigations today are mostly absent. The browser's own watchdog kills
-runaway tabs; that is not pack-aware.
+runaway tabs; that is not pack-aware. These vectors point at the need for
+resource quotas at multiple layers — transpile-time bounded-method rewrites
+for known DoS APIs, a realm-side wall-clock watchdog, stub-side validation
+limits — rather than relying on any single mechanism.
 
 ### UI deception
 
@@ -252,6 +268,19 @@ const fetchApi = (path, body) => __cap__.http_client({path, body});
 Pack code cannot reach the original cap-fn except by going through the same
 postMessage channel — and that channel only enacts caps the stub agrees the
 pack declared.
+
+### lua2ts harden mode (defense-in-depth)
+
+Harden mode is **defense-in-depth plus authoring hygiene**, not a security
+boundary. CSP (no `'unsafe-eval'`) handles `eval`/`new Function` at runtime
+regardless of source. Realm isolation handles `fetch`/network globals —
+they are literally absent inside the iframe. The still-load-bearing pieces
+of harden are: null-prototype record creation (defends intra-realm
+prototype pollution), bounded-method rewrites for known DoS-prone APIs
+(`padStart`, `padEnd`, `join`, and extending to `repeat`, `Array(n).fill`,
+deeply-nested JSON), and authoring-hygiene blocking of hazard identifiers
+so failures land at `bin/cr check` time rather than as runtime CSP
+refusals.
 
 ### Future option: ShadowRealm
 
