@@ -3748,7 +3748,14 @@ local function solve_range(ctx, constraints, lo, hi)
         silent_err.errors = {}
     end
 
-    -- Initialize deferred flags on the slice.
+    -- Initialize deferred flags on the slice. _solved is preserved across
+    -- solve_range invocations: a constraint successfully handled during a
+    -- per-function sub-solve must not re-fire in the outer global solve
+    -- (HM Phase 1c: body emitters like emit_field_bound succeed during
+    -- sub-solve while obj is still a free param TAG_VAR with
+    -- _sub_solve_params set; on outer solve _sub_solve_params is empty so
+    -- the same C_INDEX would fall through to structural extension and bind
+    -- the now-FLAG_GENERIC param var, destroying generalization).
     for i = lo, hi do
         constraints[i]._deferred = false
     end
@@ -3764,7 +3771,7 @@ local function solve_range(ctx, constraints, lo, hi)
             local c = constraints[i]
             local kind = c[1]
             local handler = handlers[kind]
-            if handler then
+            if handler and not c._solved then
                 if c._deferred then
                     n_deferred = n_deferred + 1
                 else
@@ -3777,6 +3784,8 @@ local function solve_range(ctx, constraints, lo, hi)
                     if result == false then
                         c._deferred = true
                         n_deferred = n_deferred + 1
+                    else
+                        c._solved = true
                     end
                     local t_after = ctx.types:get(find(ctx, probe))
                     if t_after.tag ~= tag_before then changed = true end
@@ -3804,8 +3813,13 @@ local function solve_range(ctx, constraints, lo, hi)
                 end
                 for i = lo, hi do
                     local c = constraints[i]
-                    local handler = handlers[c[1]]
-                    if handler then handler(ctx, c) end
+                    if not c._solved then
+                        local handler = handlers[c[1]]
+                        if handler then
+                            local result = handler(ctx, c)
+                            if result ~= false then c._solved = true end
+                        end
+                    end
                 end
                 flush_warnings()
                 for _, e in ipairs(silent_err.errors) do
