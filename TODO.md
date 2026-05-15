@@ -49,6 +49,70 @@ already handles this case correctly.
 Not on the roadmap. Captured here so future sessions don't re-derive the
 problem from scratch.
 
+### HM let-polymorphism — Phase 0 in, Phase 1+2 deferred (2026-05-15)
+
+**State:** Phase 0 of the HM-for-unannotated-params plan landed
+(commit `af471572`): `solve.lua`'s `M.solve` extracted into a
+`solve_range(ctx, constraints, lo, hi)` so per-function sub-solves can
+operate on a slice of the constraint list. Pure refactor, no behavior
+change. Six contained audit fixes preceded it (`ebd46803`, `7d9283ab`,
+`ff184ac8`, `2fc794e4`, `9c15889f`, `9f68a66f`).
+
+**What's still open and harder than the planner estimated:**
+
+The naive "just call `env_mod.generalize` after `make_func`" attempt
+fails — verified twice this session — because the architecture has a
+prescan + delayed-solve timing problem: call sites instantiate the
+function type at *constraint-emit time* (`gen_call` →
+`env_mod.instantiate` at `constrain.lua:2245`), but body constraints
+aren't solved until `solve.solve` runs after the entire file is
+processed. Result: `id`'s `ret_var` gets captured by call-site
+instantiation BEFORE `solve_return` aliases it to the param. Each
+call's instantiated function shares the same un-resolved `ret_var`,
+which never binds because the param it aliases is FLAG_GENERIC.
+
+The architectural fix from the Plan agent's design (use a planning
+agent on this — see session 2026-05-15):
+
+1. `gen_function` brackets body emission with `body_start = #ctx.constraints`
+   ... body emission ... `body_end = #ctx.constraints`.
+2. **Before `make_func`**, populate `ctx._sub_solve_params` with the
+   unannotated param tids and call
+   `solve_mod.solve_range(ctx, ctx.constraints, body_start + 1, body_end)`.
+3. **Inside the body sub-solve**, body solvers (`solve_index`,
+   `solve_arith`, `solve_compare`, `solve_callable`) must IMPOSE
+   metamethod-shaped row-poly constraints on free param vars in
+   `_sub_solve_params` instead of deferring. E.g. `t.x` builds a fresh
+   `{ x: U, ... }` and unifies; `a + b` builds
+   `{ #__add: (A, B) -> C }`. Per Principle 10 — metamethod, not
+   primitive collapse.
+4. **Then `make_func`** with the shapes baked into the param tids.
+5. **Then `env_mod.generalize(ctx, fn_tid, saved.level)`** — free vars
+   above saved.level (params + nested temporaries) become FLAG_GENERIC.
+6. Function exposed to outer scope. Existing `gen_call` instantiation
+   path produces fresh per-call vars correctly.
+
+This is multi-day work. The body-solver shape inference (step 3) alone
+touches ~12 defer points across `solve.lua` and needs careful
+metamethod-shape construction helpers. The Plan agent's full breakdown
+(7-9 working days, 6 phases) lives in the session 2026-05-15 transcript.
+
+**Decisions committed for the eventual landing:**
+- Polymorphic recursion: not supported — undecidable to infer (see the
+  "Polymorphic recursion (future, optional)" entry above).
+- Argument widening: widen by default. `id(1)` instantiates `T = integer`,
+  not `T = 1`.
+- `MISSING_FUNCTION_SIGNATURE` (commit `f39c619f`): demote to warning
+  when HM lands. Currently still error; loadbearing because it masks
+  the broken inference. Stays put until HM is in.
+
+**Blocker on next session:** the body-solver shape-inference work
+(Phase 1) is non-trivial and probably benefits from a *second* Plan
+agent specifically for the per-solver shape construction (one helper
+per body operation: field-access, arith, compare, call, narrow).
+Resume by reading this entry, the polymorphic-recursion entry, and the
+Plan agent's design from session 2026-05-15 (in the transcript).
+
 ### Typechecker work — paused 2026-05-14 (resumable)
 
 > *Pivot to platform/UI work; typechecker is in a working state. Resume here later.*
