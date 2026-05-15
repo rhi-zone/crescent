@@ -211,6 +211,31 @@ local function emit(ctx, constraint)
     ctx.constraints[#ctx.constraints + 1] = constraint
 end
 
+-- HM Phase 2: record polymorphic-rooted body ops keyed by template TV.
+-- Re-emitted at call sites (Phase 2 commit 3) so per-call instance TVs feed
+-- body operations. Scoped to C_ARITH for now; other kinds in commit 5.
+--: (Ctx, { [integer]: unknown, ... }) -> ()
+local function record_polymorphic_op(ctx, c)
+    local fb = ctx._forall_bounds
+    if not fb or not next(fb) then return end
+    local clone
+    for i = 3, 5 do
+        local tid = c[i]
+        if type(tid) == "number" and fb[tid] then
+            local bucket = ctx._forall_ops[tid]
+            if not bucket then
+                bucket = {}
+                ctx._forall_ops[tid] = bucket
+            end
+            if not clone then
+                clone = {}
+                for k, v in ipairs(c) do clone[k] = v end
+            end
+            bucket[#bucket + 1] = clone
+        end
+    end
+end
+
 --: (Ctx) -> integer
 local function fresh_var(ctx)
     return types_mod.make_var(ctx, ctx.scope.level)
@@ -1205,12 +1230,14 @@ ExprRule[NODE_UNARY_EXPR] = function(ctx, nid)
     if op == OP_NOT then return ctx.T_BOOLEAN end
     if op == OP_UNM then
         local res = fresh_var(ctx)
-        emit(ctx, { C_ARITH, "__unm", arg_tid, arg_tid, res, n.line, n.col })
+        local _c = { C_ARITH, "__unm", arg_tid, arg_tid, res, n.line, n.col }
+        emit(ctx, _c); record_polymorphic_op(ctx, _c)
         return res
     end
     if op == OP_LEN then
         local res = fresh_var(ctx)
-        emit(ctx, { C_ARITH, "__len", arg_tid, arg_tid, res, n.line, n.col })
+        local _c = { C_ARITH, "__len", arg_tid, arg_tid, res, n.line, n.col }
+        emit(ctx, _c); record_polymorphic_op(ctx, _c)
         return res
     end
     return ctx.T_ANY
@@ -1246,7 +1273,8 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
 
     if ARITH_OPS[op] then
         local res = fresh_var(ctx)
-        emit(ctx, { C_ARITH, ARITH_OPS[op], left_tid, right_tid, res, n.line, n.col })
+        local _c = { C_ARITH, ARITH_OPS[op], left_tid, right_tid, res, n.line, n.col }
+        emit(ctx, _c); record_polymorphic_op(ctx, _c)
         return res
     end
 
@@ -1259,7 +1287,8 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
 
     if op == OP_CONCAT then
         local res = fresh_var(ctx)
-        emit(ctx, { C_ARITH, "__concat", left_tid, right_tid, res, n.line, n.col })
+        local _c = { C_ARITH, "__concat", left_tid, right_tid, res, n.line, n.col }
+        emit(ctx, _c); record_polymorphic_op(ctx, _c)
         return res
     end
 
@@ -4292,6 +4321,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
     ctx.type_origins       = {}   -- [type_id] -> filename; populated for cross-file types
     ctx.constraints        = {}   -- v3: emitted constraints
     ctx._forall_bounds     = {}   -- [generic_tv_id] -> resolved_bound_type_id
+    ctx._forall_ops = {}   -- [generic_tv_id] -> { op_descriptor, ... } (HM Phase 2)
     ctx.lit_cache          = {}   -- literal type interning: (kind<<32|val) → type_id
 
     if not parent_scope then
