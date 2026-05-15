@@ -332,6 +332,8 @@ LOC = sum of `.lua` lines under the dir excluding `*_test.lua`. "tests" = number
 
 **Recommendation:** `json_patch` is canonical. Drop `patch`. Naming is also more discoverable.
 
+**Resolved 2026-05-15:** patch dropped; json_patch is canonical.
+
 ---
 
 ## Unified pipeline shells

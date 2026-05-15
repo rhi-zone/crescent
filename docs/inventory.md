@@ -119,7 +119,6 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/multipart/` — RFC 2046 multipart encoder/decoder. Status: stable.
 - `lib/ndjson/` — NDJSON / JSON Lines. Status: stable.
 - `lib/netstring/` — DJB netstring framing. Status: stable.
-- `lib/patch/` — RFC 6902 JSON Patch. Status: stable. **Parallel to `lib/json_patch/` — both exist.**
 - `lib/pem/` — PEM RFC 7468 parser/writer. Status: stable.
 - `lib/png/` — PNG chunk-level reader/writer. Status: stable.
 - `lib/proto/` — Protocol Buffers 3 wire format (schemas as Lua tables). Status: stable.
