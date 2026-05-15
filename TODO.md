@@ -2,6 +2,20 @@
 
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
 
+## Platform isolation (top priority)
+
+- [ ] **Browser-side pack isolation architecture** — draft design doc at
+  `docs/platform_isolation.md`. Frames the ambient-capability problem
+  (per-app CSP narrows the outer envelope but does not partition the inner
+  surface between scripts on a page), proposes a sandboxed-iframe realm
+  per pack plus a postMessage capability bridge to a daemon-served stub
+  page, and leaves the rendering model (Options A/B/C) as an open question.
+  Blocks all browser-side pack work, including Initiative B (the pack-load
+  pipeline for projection-Lua), pack-shipped UI beyond projections, and any
+  third-party-pack browser UX work. Next step: settle the open questions in
+  §7 of the design doc, in particular the rendering model and the per-pack
+  origin mechanism.
+
 ## HIGH PRIORITY
 
 ### Polymorphic recursion (future, optional)
@@ -409,7 +423,7 @@ Open items, ordered by priority:
 - [x] **Primitives renderers — first 5 end-to-end** — backend dispatcher (`server.lua`) adapts cap results into validated envelopes via `output.lua`; pack actions declare `exec.output` (string shorthand or table spec) to pick a primitive. Frontend `static/app.js` `renderEnvelope`/`renderPrimitive` covers `text`, `code`, `key_value`, `table`, `status_badge` with DOM construction (no innerHTML for pack-supplied strings). Demo actions in `packs/default.lua`: `disk-usage` (table), `system-info-linux/macos` (code), `win-reg-list-startup` (key_value), `service-status-linux` (status_badge), `win-reg-product-name` (text default).
 - [x] **Primitives renderers — full catalogue (frontend)** — `renderPrimitive` switch superseded by the projection registry below. All 30 catalogue tags have dedicated projection modules.
 - [x] **Renderer architecture: shape-dispatch + projection registry** — `static/app.js` collapsed from a 1731-line IIFE with a 30-case switch into a 658-line ES module that imports `static/dom.js` (sealed `createElement` builder with strict tag/attr/style allowlists), `static/harden.js` (freezes built-in prototypes at load), and `static/projections/registry.js` (`Map<tag, Projection[]>` with most-recently-registered-wins selection, runtime overridable). Each of the 33 catalogue tags lives in its own file under `static/projections/` and self-registers via `static/projections/index.js`. `shapeOf(v)` keys the registry by `typeof` for primitives, `"array"` for arrays, `value.type` for tagged variants, `"object"` for plain records. `Ctx = {project, action}` — `ctx.action(alias_id, args?, onResult?)` returns a click handler that POSTs to `/api/execute` and feeds the response envelope back to `onResult` for inline re-projection. Streaming projections return `{__stream: true, el, onFrame, onGap?, onError?, onEnd?, dispose?}`; SSE consumer calls those hooks per frame. `index.html` loads as `<script type="module">`. Wire shape (envelopes via `output.lua`) unchanged.
-- [ ] **Initiative B — lua2ts + projection-Lua subset for pack-shipped projections** — partial.
+- [ ] **Initiative B — lua2ts + projection-Lua subset for pack-shipped projections** — partial. **Gated on platform isolation landing** (`docs/platform_isolation.md`): Initiative B's output (transpiled pack JS) has to land into whatever rendering and isolation model the platform-isolation design picks, so resume after that doc's open questions (especially the rendering model — Options A/B/C) are settled.
   - [x] **lua2ts harden mode** (commits `5df9003`, `56deab2`) — `opts.harden: bool`. Emits `__rec({...})` for record table constructors (null-prototype via `Object.create(null) + Object.assign`); rewrites `padStart` / `padEnd` / `join` (and `repeat`, modulo Lua keyword caveat) to `__safe_*` helpers with 100KB output cap; `__safeGet(t, k)` wraps non-numeric-literal bracket access with a 7-key prototype-key blocklist (`__proto__`, `constructor`, `prototype`, `__defineGetter__`, `__defineSetter__`, `__lookupGetter__`, `__lookupSetter__`); refuses emission of identifiers in a fixed JS-hazard blocklist (`globalThis`, `window`, `document`, `eval`, `Function`, `setTimeout`, `fetch`, `Worker`, ...) exported as `M.JS_HAZARDS`. 111 assertions in `lib/lua2ts/lua2ts_harden_test.lua`.
   - [x] **Projection prelude** (commits `56f9838`, `8624a2e`, `85ac3d3`) — `lib/platform/apps/system_dashboard/projections/projection_types.lua` declares the sealed `dom.<tag>(props, children) -> Element` builder (64 tags), `Ctx`, `Projection`, `Style`, `Props`. Imports `Element` / `Event` / `MouseEvent` / `KeyboardEvent` / `Text` from `lib/web/js_types.lua` rather than re-declaring. `Primitive` extracted to `lib/platform/apps/system_dashboard/primitive_types.lua` for sharing with `output.lua`. E2E test typechecks an example projection against the prelude and transpiles it through harden mode.
   - **Layering settled**: typechecker (with `opts.globals_files = projection_types + primitive_types + js_types + stdlib_types`) is the primary gate; lua2ts harden mode is the JS-runtime-hazard backstop for `any` / soundness gaps / skipped-typecheck cases. No "projection mode detection" — caller passes preludes explicitly. No typechecker projection-mode rule (the original "reject computed string keys" idea was wrong-headed — the typechecker can't know runtime key values; that's lua2ts's `__safeGet` job).
