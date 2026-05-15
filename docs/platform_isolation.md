@@ -216,6 +216,27 @@ The set of `allow-*` tokens is the explicit "additive" surface. We start with
 `allow-scripts` only. Anything beyond requires a written rationale tied to a
 specific cap.
 
+### Allow-list realm, not deny-list
+
+The realm starts with JS language primitives only — `Object`, `Array`,
+`Math`, `JSON`, the primitive constructors — and **nothing** of the host
+environment. No `document`, `Element`, `Node`, `fetch`, `setTimeout`,
+`navigator`, `location`, `history`. Whatever the pack realm needs comes
+through capabilities the host explicitly bridges in.
+
+The bootstrap script enforces this structurally:
+
+```js
+for (const k of Object.getOwnPropertyNames(globalThis))
+  if (!allow.has(k)) delete globalThis[k];
+// then seal what remains
+```
+
+The framing is "allow only X, Y, Z; everything else is structurally absent,"
+not "block X, Y, Z." Deny-lists rot as the browser ships new APIs; an
+allow-list does not. When ShadowRealm ships, it provides the same shape
+natively via the realm primitive itself, in place of bootstrap-stripping.
+
 Per-pack-page-instance origin is desirable so that even two instances of the
 same pack don't share storage in unintended ways. Mechanism is an open
 question (see §7).
@@ -226,13 +247,15 @@ The first (and possibly only) script loaded into the iframe is host-controlled,
 served by the daemon, and admitted via the CSP nonce. It runs *before*
 pack-author code and:
 
-- Removes or stubs ambient globals that are not security-relevant but are
-  trust-relevant: `console`, `alert`, `prompt`, `confirm`. (Routed through
-  the bridge so the host can render them in a controlled way if it chooses.)
+- Applies the allow-list strip described above: deletes every property of
+  `globalThis` not on the explicit allow-list, then seals what remains.
+  After this runs the realm has language primitives and nothing else.
 - Sets up the postMessage protocol with the host frame.
 - Installs `globalThis.__cap__` — the bridge-backed cap call table.
-- Optionally hardens timing primitives (`performance.now`, `Date.now`,
-  `setTimeout`) where threat-model warrants.
+- Re-installs controlled equivalents of trust-relevant primitives that the
+  pack legitimately needs (`console`, `alert`, `prompt`, `confirm`,
+  bridge-mediated timing primitives) — these are cap-bridge tokens, not the
+  host globals.
 - Then loads the pack-author entry, also via the nonce.
 
 The bootstrap is the only code that needs to fully trust the host. Pack
@@ -272,15 +295,29 @@ pack declared.
 ### lua2ts harden mode (defense-in-depth)
 
 Harden mode is **defense-in-depth plus authoring hygiene**, not a security
-boundary. CSP (no `'unsafe-eval'`) handles `eval`/`new Function` at runtime
-regardless of source. Realm isolation handles `fetch`/network globals —
-they are literally absent inside the iframe. The still-load-bearing pieces
-of harden are: null-prototype record creation (defends intra-realm
-prototype pollution), bounded-method rewrites for known DoS-prone APIs
-(`padStart`, `padEnd`, `join`, and extending to `repeat`, `Array(n).fill`,
-deeply-nested JSON), and authoring-hygiene blocking of hazard identifiers
-so failures land at `bin/cr check` time rather than as runtime CSP
-refusals.
+boundary. CSP (no `'unsafe-eval'`) and realm isolation do the heavy
+runtime lifting. Harden's still-load-bearing pieces:
+
+- **Statically banned APIs.** `eval`, `new Function`, `Function`
+  constructor, string-form `setTimeout`/`setInterval`, dynamic `import()`,
+  direct DOM APIs (`document.createElement`, `innerHTML`/`outerHTML`
+  setters, `setAttribute` on event-handler keys), `__proto__` mutation,
+  `Object.setPrototypeOf`. These are real-security bans, not
+  preferred-style. CSP and the sandbox cover *some* of these at runtime,
+  but the static block is the primary line because (a) CSP can be
+  misconfigured, (b) defense-in-depth has cumulative value, (c) the
+  presence of these identifiers in pack source is itself a smell worth
+  surfacing at check time. Direct DOM API access lands in the banned set,
+  not in "preferred patterns" — bypassing the structured builder
+  (`dom.span()` and similar) bypasses prop validation, the cap-bridge for
+  events, and the rendering-model invariants.
+- **Null-prototype record creation** (`__rec({...})`) — intra-realm
+  prototype-pollution defense.
+- **Bounded-method rewrites** for known DoS-prone APIs: `padStart`,
+  `padEnd`, `join`, `repeat`, `Array(n).fill`, deeply-nested
+  `JSON.stringify`/`JSON.parse`. No runtime layer mitigates these.
+- **Authoring hygiene** — failures land at `bin/cr check` time rather
+  than as runtime CSP refusals in browser devtools.
 
 ### Future option: ShadowRealm
 
@@ -377,50 +414,50 @@ const data = await __cap__.fetch_api({ path: "/items" });
 
 Initial list. Expected to grow.
 
-## 5. Rendering model — open question
+## 5. Rendering model — resolved: Option B
 
-The proposal above isolates *execution*. It does not pick how pack UI
-*reaches the screen*. Three plausible models:
+The proposal above isolates *execution*. The remaining question was how
+pack UI *reaches the screen*. **Resolved to Option B: the pack realm
+produces virtual structures; the host paints them in the host's realm.**
 
-### Option A — pack owns its iframe DOM
+### Rationale
 
-The pack iframe contains the pack's rendered UI directly. The stub composes
-iframes into a layout (CSS grid, splitter widgets, etc.).
+- **Consistent with the allow-list realm.** §3's bootstrap removes
+  `document`, `Element`, `Node`, and the rest of the DOM surface from the
+  pack realm. There is no DOM in there to render into.
+- **"Direct DOM access banned" from §2 lands here naturally** — there is
+  no DOM to access. The static block in harden mode and the structural
+  absence in the realm are the same decision viewed from two layers.
+- **`Element` Lua-side is a structural VNode shape**, not the browser DOM
+  `Element`. `dom.lua`-style libraries describe a plain table
+  `{ tag, props, children }`; nothing in pack-author code needs the
+  browser DOM type. No cross-realm type alignment problem.
+- **Event handling via cap-bridge tokens.** The pack's virtual structure
+  declares handler intents as cap-bridge tokens (`{ onClick: "<cap-id>" }`
+  or similar); the host wires real DOM events to dispatch the named cap.
+  The pack never sees a DOM `Event` object.
 
-- **Pros**: easy to author — pack writes DOM directly. Familiar mental model.
-  Full DOM API available inside the realm.
-- **Cons**: iframes are heavy (memory, layout). Composition between
-  iframes is awkward (no native flex/grid across the boundary).
-  Inter-pack DOM interaction (e.g. dragging an item from pack A into pack B)
-  requires explicit inter-iframe protocols.
+### Trade-off, named
 
-### Option B — pack emits virtual structure via postMessage
+Any pack-author behavior not expressible in the VNode + cap-bridge
+protocol requires extending the protocol. Extensions are host-controlled
+and additive — not pack-author-controlled. This is the cost of structural
+isolation: rich-editor / canvas / audio-visualizer use cases need
+protocol extensions rather than free DOM access. The decision accepts that
+cost as the price of the threat model.
 
-The pack iframe runs *no DOM at all*. It emits a virtual structure
-(the projection tree, more or less) via postMessage. The stub paints it
-into the host DOM, in the stub's realm.
+### Options considered (for posterity)
 
-- **Pros**: lightweight. Layout composition is trivial (it's all host DOM).
-  Inter-pack interaction is host-controlled and observable.
-  Natural match for the existing projection registry.
-- **Cons**: the virtual-structure protocol becomes the *only* surface pack
-  UI can express through. Anything the protocol doesn't allow, the pack
-  can't do. Complex UIs (rich editors, canvas, audio visualizers) may not
-  fit.
-
-### Option C — hybrid
-
-Small packs / simple projections use (B). Larger packs that need full DOM
-get (A). Selection per-pack or per-route within a pack.
-
-- **Pros**: matches the actual range of UI needs.
-- **Cons**: two rendering models to maintain; pack authors pick wrong; cap
-  surface differs between them.
-
-**This is an open question. Do not pick yet.** The choice has consequences
-for Initiative B (which is currently aimed at Option B by virtue of the
-projection registry shape), the pack manifest schema (per-rendering-model
-declarations?), and the host shell's complexity.
+- **Option A — pack owns its iframe DOM.** Pack iframe contains rendered
+  UI directly; stub composes iframes into a layout. Easy authoring and
+  full DOM API, but iframes are heavy, composition across iframe
+  boundaries is awkward (no flex/grid), and inter-pack DOM interaction
+  requires explicit inter-iframe protocols. Conflicts with the allow-list
+  realm.
+- **Option C — hybrid.** Simple packs use B, complex packs use A. Two
+  rendering models to maintain; pack authors pick wrong; cap surface
+  differs between them. Rejected for the same reason A is: A's DOM-in-realm
+  shape conflicts with §3's allow-list bootstrap.
 
 ## 6. Migration from current state
 
@@ -457,10 +494,10 @@ host code and pack code is *type-system shaped*, not runtime shaped.
 3. Build the sandboxed-iframe host with bootstrap script and the bridge.
 4. Implement initial bridge cap handlers daemon-side (`http_client`,
    `ui_toast`, `dialog`, `clipboard_write`, `kv_read/write`).
-5. Pick rendering model (Option A/B/C).
-6. Port `system_dashboard` to the new model. The existing projection
-   registry maps cleanly to Option B; Option A requires more surgery.
-7. Resume Initiative B with the rendering model in hand. lua2ts harden mode
+5. Port `system_dashboard` to the resolved rendering model (Option B —
+   pack realm emits virtual structures, host paints). The existing
+   projection registry maps cleanly.
+6. Resume Initiative B with the rendering model in hand. lua2ts harden mode
    stays as a backstop, but the *primary* isolation boundary is the iframe,
    not the transpile.
 
@@ -478,12 +515,6 @@ decision-level attention, not skimming.
   both? Is the architecture worth restating in terms of "the realm primitive"
   with two backends, or do we commit to iframe forever and treat ShadowRealm
   as a non-event?
-- **Rendering model.** Option A / B / C above. Has downstream consequences
-  for Initiative B, manifest schema, host shell complexity.
-- **DOM API surface inside the pack realm.** If we pick Option B, the pack
-  realm has *no* DOM. Pack code writes pure virtual structures. If we pick
-  Option A, the pack realm has the full DOM in an isolated origin. If
-  hybrid, packs declare which mode in the manifest.
 - **Per-pack origins.** Real subdomains
   (`pack-<id>.<n>.localhost`)? Unique `srcdoc` iframes? `blob:` URLs?
   Each has tradeoffs:
@@ -518,7 +549,33 @@ decision-level attention, not skimming.
   like? They have to test their pack inside the sandbox model; the harness
   has to replicate the runtime.
 
-## 8. Non-goals
+## 8. Alternatives considered
+
+### Server-side rendering (LiveView / Hotwire pattern) — rejected
+
+Considered an architecture where pack Lua runs in the daemon and the
+browser is a thin host-controlled painter consuming a daemon-pushed
+render stream. Eliminates lua2ts and most browser-side isolation work.
+Rejected because: (a) the latency requirement is "minimal latency
+regardless of network conditions, including through VPNs/proxies" —
+every-interaction-is-a-roundtrip breaks under 50–200ms+ link latency, and
+(b) the requirement is full pack-author flexibility, which a
+host-shipped primitive set cannot cover. The cleaner local-first variant
+(rich host primitives + optimistic concurrency) covers some cases but
+caps flexibility to the host's primitive set, violating (b).
+Browser-side pack execution with full isolation is required.
+
+### Dusklight's trusted-in-realm renderer model — rejected
+
+Dusklight (`~/git/rhizone/dusklight`) runs renderer plugins in-realm with
+the host, with direct DOM access and no isolation; this works for
+dusklight because its plugins don't reach OS capabilities. Crescent's
+packs *do* reach OS capabilities (FS, processes, network) through the
+daemon's grant model, so the "user installed it = trusted" assumption
+does not transfer. Every pack is untrusted user code with capability
+surface; in-realm execution is unsafe.
+
+## 9. Non-goals
 
 - **This is not a security-against-adversarial-internet-code spec.**
   The threat model is user-installed packs (extension-grade trust), not
@@ -536,7 +593,7 @@ decision-level attention, not skimming.
   Those layers stay. This proposal is *additive* — a new realm boundary
   inside the existing per-app origin, not a replacement for it.
 
-## 9. Status
+## 10. Status
 
 Draft. No code committed. No manifest schema changes. No daemon changes.
 The doc exists to (a) ground the next session's design conversation in a
