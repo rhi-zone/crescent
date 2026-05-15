@@ -3042,16 +3042,6 @@ local function solve_overlap(ctx, c)
         if at.tag == TAG_VAR or at.tag == TAG_ROWVAR then return false end
         if bt.tag == TAG_VAR or bt.tag == TAG_ROWVAR then return false end
     end
-    -- If the LHS originated at an unannotated function parameter, its current
-    -- type came from caller-side inference, not from an annotation. A force
-    -- cast on such a param is the *first* explicit assertion of the type —
-    -- emitting REDUNDANT_CAST here would strip a load-bearing cast. Suppress
-    -- the redundant-cast classification (the param-annotation diagnostic at
-    -- the function-def site is the correct place to drive this).
-    local raw_actual_tid = c[2] --[[:! integer]]
-    local inferred_param = ctx._inferred_param_tid
-        and ctx._inferred_param_tid[raw_actual_tid]
-        or false
     -- Emit a diagnostic exactly once per source site.  Use a (line, col) key
     -- so re-tries after type-variable resolution do not produce duplicates.
     do
@@ -3066,14 +3056,6 @@ local function solve_overlap(ctx, c)
             -- fields on actual when expected is closed), which would falsely
             -- classify field-stripping casts as redundant.
             if unify_mod.is_subtype(ctx, actual, expected) then
-                if inferred_param then
-                    -- Cast asserts a type that was inferred from callers, not
-                    -- annotated. Neither REDUNDANT_CAST (would strip the only
-                    -- explicit assertion) nor FORCE_CAST (noisy: the user did
-                    -- nothing wrong) is right here. Phase B emits a separate
-                    -- MISSING_PARAM_ANNOTATION at the function-def site.
-                    return true
-                end
                 local entry = add_warning_code(ctx, line, col, defs.E.REDUNDANT_CAST)
                 if entry and byte_start and byte_end then
                     -- Compute fix: delete the `--[[:! T]]` span. Optionally include
