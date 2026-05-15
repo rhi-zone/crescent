@@ -13,6 +13,13 @@
 --   strict   : boolean          (emit // @ts-strict-mode, default false)
 --   harden   : boolean          (sandboxed JS output: null-proto records,
 --                                bounded methods, JS-hazard ident blocklist)
+--   imports  : { [string]: string } | nil
+--       Caller-supplied map from require-name (the string passed to require)
+--       to the literal import-path string to emit. Consulted in ESM mode
+--       before the default dot-path transformation; absent keys fall through
+--       unchanged. Use for cross-language linkage (e.g. require("foo") →
+--       import * as foo from "./foo.js") or any case where the default
+--       "./a/b" mapping is wrong for the consumer's module resolver.
 
 if not package.path:find("./?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
@@ -160,7 +167,7 @@ local binop_prec = {
 --:: L2TSAnn = { kind: string, content: string }
 --:: L2TSNodeData = { [integer]: number }
 --:: L2TSNodeInfo = { kind: number, flags: number, line: number, col: number, d: L2TSNodeData }
---:: L2TSCtx = { pool: unknown, nodes: unknown, lists: unknown, indent: integer, lines: { [integer]: string }, anns: { [integer]: L2TSAnn }, opts: { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil }, imports: { [string]: string }, import_order: { [integer]: string }, bundle_mode: boolean, bundle_requires: { [integer]: string }, bundle_req_seen: { [string]: boolean }, harden: boolean, harden_used: { [string]: boolean }, skip_stmts: { [integer]: boolean } | nil, check_ident: (self: L2TSCtx, name: string) -> nil, use_harden: (self: L2TSCtx, name: string) -> nil, istr: (self: L2TSCtx) -> string, emit: (self: L2TSCtx, line: string) -> nil, raw: (self: L2TSCtx, line: string) -> nil, name: (self: L2TSCtx, id: number) -> string, list: (self: L2TSCtx, start: number, len: number) -> { [integer]: number }, node: (self: L2TSCtx, id: number) -> L2TSNodeInfo, ann_for: (self: L2TSCtx, lineno: number) -> L2TSAnn | nil, add_import: (self: L2TSCtx, alias: string, modname: string) -> nil, add_bundle_require: (self: L2TSCtx, modname: string) -> nil }
+--:: L2TSCtx = { pool: unknown, nodes: unknown, lists: unknown, indent: integer, lines: { [integer]: string }, anns: { [integer]: L2TSAnn }, opts: { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil }, imports: { [string]: string }, import_order: { [integer]: string }, bundle_mode: boolean, bundle_requires: { [integer]: string }, bundle_req_seen: { [string]: boolean }, harden: boolean, harden_used: { [string]: boolean }, skip_stmts: { [integer]: boolean } | nil, check_ident: (self: L2TSCtx, name: string) -> nil, use_harden: (self: L2TSCtx, name: string) -> nil, istr: (self: L2TSCtx) -> string, emit: (self: L2TSCtx, line: string) -> nil, raw: (self: L2TSCtx, line: string) -> nil, name: (self: L2TSCtx, id: number) -> string, list: (self: L2TSCtx, start: number, len: number) -> { [integer]: number }, node: (self: L2TSCtx, id: number) -> L2TSNodeInfo, ann_for: (self: L2TSCtx, lineno: number) -> L2TSAnn | nil, add_import: (self: L2TSCtx, alias: string, modname: string) -> nil, add_bundle_require: (self: L2TSCtx, modname: string) -> nil }
 --: (string) -> { [integer]: L2TSAnn }
 local function scan_annotations(source)
   --: { [integer]: L2TSAnn }
@@ -217,7 +224,7 @@ end
 -- Emit context
 -- Produces indented TS output line by line.
 -- ---------------------------------------------------------------------------
---: (unknown, unknown, unknown, string, { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil } | nil) -> L2TSCtx
+--: (unknown, unknown, unknown, string, { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil } | nil) -> L2TSCtx
 local function new_ctx(pool, nodes, lists, source, opts)
     local ctx = {
         pool   = pool,
@@ -227,7 +234,7 @@ local function new_ctx(pool, nodes, lists, source, opts)
         lines  = {},    -- collected output lines
         -- annotation map: lineno → { kind, content }
         anns   = scan_annotations(source),
-        opts   = opts or {} --[[:! { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil }]],
+        opts   = opts or {} --[[:! { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil }]],
         -- pending ESM imports: { modname → alias }
         imports = {},
         import_order = {},
@@ -348,6 +355,9 @@ end
 
 local emit_expr  -- forward declaration
 local emit_stmt  -- forward declaration
+local mod_to_alias  -- forward declaration
+local mod_to_import_path  -- forward declaration
+local resolve_import_path  -- forward declaration
 local emit_block -- forward declaration
 
 -- Escape a Lua string literal for JS/TS output.
@@ -537,17 +547,28 @@ emit_expr = function(ctx, nid, parent_prec)
                     return "Object.entries(" .. t .. ")"
                 end
             elseif callee_name == "require" then
-                -- require("lib.foo") → handled at call-site statement level
-                -- return as-is for now; import hoisting happens in stmt handler.
-                -- In bundle mode, rewrite to __require("lib/foo") and record dep.
-                if ctx.bundle_mode and args_len == 1 then
+                -- require("lib.foo"):
+                --   bundle mode: rewrite to __require("lib/foo") and record dep.
+                --   ESM mode: hoist as `import * as alias from "<path>"` and
+                --     return the alias as the expression. opts.imports may
+                --     remap the literal path; absent keys fall through to the
+                --     default dot-path transformation.
+                --   cjs / non-literal arg: keep the literal require(...) call.
+                if args_len == 1 then
                     local arg_items = ctx:list(args_start, 1)
                     local arg_n = ctx:node(arg_items[1])
                     if arg_n.kind == defs.NODE_LITERAL and arg_n.d[1] == defs.LIT_STRING then
                         local mod_name = ctx:name(arg_n.d[2])
-                        ctx:add_bundle_require(mod_name)
-                        local mod_id, _ = mod_name:gsub("%.", "/")
-                        return '__require("' .. mod_id .. '")'
+                        if ctx.bundle_mode then
+                            ctx:add_bundle_require(mod_name)
+                            local mod_id, _ = mod_name:gsub("%.", "/")
+                            return '__require("' .. mod_id .. '")'
+                        elseif ctx.opts.module ~= "cjs" then
+                            local alias = mod_to_alias(mod_name)
+                            local path = resolve_import_path(ctx, mod_name)
+                            ctx:add_import(alias, path)
+                            return alias
+                        end
                     end
                 end
                 local args = emit_expr_list(ctx, args_start, args_len)
@@ -744,14 +765,27 @@ end
 
 -- Convert a module name like "lib.foo.bar" to an import path like "./lib/foo/bar".
 --: (string) -> string
-local function mod_to_import_path(modname)
+mod_to_import_path = function(modname)
     local path, _ = modname:gsub("%.", "/")
     return "./" .. path
 end
 
+-- Resolve a require-name to its emitted import path, honouring an optional
+-- caller-supplied opts.imports map. The map (when present) is consulted first;
+-- on a miss (or when the map is nil) we fall back to mod_to_import_path.
+--: (L2TSCtx, string) -> string
+resolve_import_path = function(ctx, modname)
+    local imap = ctx.opts.imports
+    if imap then
+        local mapped = imap[modname]
+        if mapped then return mapped end
+    end
+    return mod_to_import_path(modname)
+end
+
 -- Derive a variable alias from a module name: "lib.foo.bar" → "bar".
 --: (string) -> string
-local function mod_to_alias(modname)
+mod_to_alias = function(modname)
     return modname:match("([^%.]+)$") or modname
 end
 
@@ -804,7 +838,7 @@ emit_stmt = function(ctx, nid)
                     return
                 elseif ctx.opts.module ~= "cjs" then
                     local alias = name_parts[1]
-                    local path = mod_to_import_path(mod_name)
+                    local path = resolve_import_path(ctx, mod_name)
                     ctx:add_import(alias, path)
                     -- Don't emit a local statement; the import will be hoisted.
                     return
@@ -1472,9 +1506,9 @@ end
 -- Public API
 -- ---------------------------------------------------------------------------
 
---: (string, ({ filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil }) | nil) -> (string | nil, string | nil)
+--: (string, ({ filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil }) | nil) -> (string | nil, string | nil)
 function M.transpile(source, opts)
-    opts = opts or {} --[[:! { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil }]]
+    opts = opts or {} --[[:! { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil }]]
     local filename = opts.filename or "?"
     local ok, result = pcall(function()
         local parsed = parse_mod.parse(source, filename)
@@ -1541,13 +1575,13 @@ function M.transpile(source, opts)
     return result --[[:! string | nil]]
 end
 
---: (string, ({ filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil }) | nil) -> (string | nil, string | nil)
+--: (string, ({ filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil }) | nil) -> (string | nil, string | nil)
 function M.transpile_file(path, opts)
     local f, err = io.open(path, "r")
     if not f then return nil, "cannot open " .. path .. ": " .. (err or "?") end
     local source = f:read("*a") --[[:! string]]
     f:close()
-    opts = opts or {} --[[:! { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil }]]
+    opts = opts or {} --[[:! { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil }]]
     opts.filename = opts.filename or path
     return M.transpile(source, opts)
 end

@@ -167,6 +167,82 @@ T.describe("require becomes ESM import", function()
     hasnt([[local foo = require("lib.foo")]], "const foo", "no const for require")
 end)
 
+T.describe("opts.imports remaps require to literal ESM path", function()
+    local src = [[local registry = require("registry")]]
+    local ts, err = lua2ts.transpile(src, {
+        module = "esm",
+        imports = { registry = "./registry.js" },
+    })
+    T.ok(ts ~= nil, "remap transpiles: " .. tostring(err))
+    if ts then
+        T.ok(ts:find('import * as registry from "./registry.js"', 1, true) ~= nil,
+            "mapped import path emitted:\n" .. ts)
+    end
+end)
+
+T.describe("opts.imports remaps multiple requires under harden", function()
+    local src = [[local register = require("register")
+local dom = require("dom")
+local x = register.add(1, 2)
+local y = dom.render({ tag = "p" })
+return x + (y == nil and 0 or 1)]]
+    local ts, err = lua2ts.transpile(src, {
+        module = "esm",
+        harden = true,
+        imports = {
+            register = "./register.js",
+            dom = "./dom.js",
+        },
+    })
+    T.ok(ts ~= nil, "multi-remap+harden transpiles: " .. tostring(err))
+    if ts then
+        T.ok(ts:find('import * as register from "./register.js"', 1, true) ~= nil,
+            "register import emitted:\n" .. ts)
+        T.ok(ts:find('import * as dom from "./dom.js"', 1, true) ~= nil,
+            "dom import emitted:\n" .. ts)
+        T.ok(ts:find("__rec", 1, true) ~= nil, "harden helper __rec present")
+    end
+end)
+
+T.describe("opts.imports only remaps listed keys", function()
+    local src = [[local registry = require("registry")
+local foo = require("lib.foo")]]
+    local ts, err = lua2ts.transpile(src, {
+        module = "esm",
+        imports = { registry = "./registry.js" },
+    })
+    T.ok(ts ~= nil, "mixed remap transpiles: " .. tostring(err))
+    if ts then
+        T.ok(ts:find('import * as registry from "./registry.js"', 1, true) ~= nil,
+            "registry uses mapped path")
+        T.ok(ts:find('import * as foo from "./lib/foo"', 1, true) ~= nil,
+            "lib.foo uses default dot-path:\n" .. ts)
+    end
+end)
+
+T.describe("absent opts.imports preserves default behaviour", function()
+    local src = [[local foo = require("lib.foo")]]
+    local ts, err = lua2ts.transpile(src, { module = "esm" })
+    T.ok(ts ~= nil, "no-imports transpiles: " .. tostring(err))
+    if ts then
+        T.ok(ts:find('import * as foo from "./lib/foo"', 1, true) ~= nil,
+            "default import path emitted")
+    end
+end)
+
+T.describe("empty opts.imports preserves default behaviour", function()
+    local src = [[local foo = require("lib.foo")]]
+    local ts, err = lua2ts.transpile(src, {
+        module = "esm",
+        imports = {},
+    })
+    T.ok(ts ~= nil, "empty-imports transpiles: " .. tostring(err))
+    if ts then
+        T.ok(ts:find('import * as foo from "./lib/foo"', 1, true) ~= nil,
+            "default import path emitted with empty map")
+    end
+end)
+
 T.describe("cjs mode keeps require", function()
     local ts = lua2ts.transpile([[local foo = require("lib.foo")]], { module = "cjs" })
     T.ok(ts ~= nil, "cjs mode transpiles")
