@@ -229,6 +229,28 @@ end
 -- inside it. Used to (1) generalize TVs hiding inside _forall_bounds[T] so
 -- env.instantiate mints fresh copies for them at call sites, and (2) build
 -- the operand→root_T reverse index for record_polymorphic_ops_post.
+--
+-- SELF-CHECK BASELINE NOTE (HM Phase 2, +11 errors here):
+-- Every `t.data[N]` access below (lines ~244-275) reports as `unknown` /
+-- wide-union arithmetic from the typechecker. This is the same pre-existing
+-- baseline limitation as in env.lua (~120 instances) and types.lua: the
+-- `t.data` slot is a fixed-shape integer-keyed sub-record but the
+-- typechecker models it as a homogeneous indexer. Annotating these as
+-- integers would require a typechecker-level feature (per-tag struct-field
+-- typing for arena entries) — not a force-cast fix. Do NOT paper over
+-- with `--[[:! integer]]`: that hides the same defect everywhere it is
+-- already known to exist. Resolved when the typechecker gains positional /
+-- per-tag typing for arena `data` slots.
+--
+-- The single force cast at the bottom of `record_polymorphic_ops_post`
+-- (`val --[[:! integer]]`) is also baseline: `c` is typed
+-- `{ [integer]: unknown, ... }` (constraint arrays are intentionally
+-- heterogeneous; see ctx_types.lua line 187). After `type(val) == "number"`
+-- narrowing, `unknown` becomes `number`; casting `number → integer` would
+-- be unsound in general (the cast is sound here because constraint TIDs
+-- are always integers). Removing it would require typing constraint
+-- arrays as a discriminated union per code, a significant ctx_types.lua
+-- refactor.
 --: (Ctx, integer, { [integer]: boolean, ... }, { [integer]: boolean, ... }) -> ()
 local function collect_bound_tvs(ctx, tid, out, seen)
     tid = types_mod.find(ctx, tid)
