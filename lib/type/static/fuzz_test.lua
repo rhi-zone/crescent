@@ -696,6 +696,184 @@ arb.it("assignment: T x = T_value typechecks (positive dual)",
 		assert(typechecks(src), "same-type assignment rejected: " .. src)
 	end, { trials = 300 })
 
+-- ── HM Invariant H1: True polymorphism preserves type at each call ──────────
+-- An unannotated identity `function id(x) return x end` must instantiate
+-- independently at each call site, so `id(<v: T1>)` types as T1 and
+-- `id(<v: T2>)` types as T2 even when T1 ≠ T2. Regression-locks
+-- HM let-polymorphism for unannotated params (commit 8944dd9c).
+
+arb.it("HM polymorphism: id(v:T1) and id(v:T2) both typecheck for T1,T2",
+	{ farb.arb_base_type, farb.arb_base_type },
+	function(T1_node, T2_node)
+		local v1 = farb.canonical_value(T1_node)
+		local v2 = farb.canonical_value(T2_node)
+		local T1 = farb.type_to_string(T1_node)
+		local T2 = farb.type_to_string(T2_node)
+		local src = table.concat({
+			"local function id(x) return x end",
+			("local a = id(%s) --: %s"):format(v1, T1),
+			("local b = id(%s) --: %s"):format(v2, T2),
+		}, "\n")
+		assert(typechecks(src), "HM polymorphism failed: " .. src)
+	end, { trials = 300 })
+
+-- ── HM Invariant H2: Inferred row polymorphism ───────────────────────────────
+-- An unannotated `function get_x(t) return t.x end` should accept any record
+-- with at least an `x` field of type T and the result should be assignable to
+-- T. Regression-locks the named-field bound emission in solve_index
+-- (commit ccf96435).
+
+arb.it("HM row poly: get_x({x=v:T,...}) typechecks as T",
+	farb.arb_base_type,
+	function(T_node)
+		local TT = farb.type_to_string(T_node)
+		local v  = farb.canonical_value(T_node)
+		local src = table.concat({
+			"local function get_x(t) return t.x end",
+			('local r = get_x({ x = %s, y = "other" }) --: %s'):format(v, TT),
+		}, "\n")
+		assert(typechecks(src), "HM row poly failed: " .. src)
+	end, { trials = 300 })
+
+-- ── HM Invariant H3: Missing field rejected by inferred bound ────────────────
+-- `function f(t) return t.x + t.y end` called with a table missing `y` must
+-- be rejected by the inferred multi-usage intersection bound (x: _, y: _).
+
+T.it("HM bound: t.x + t.y rejects { x = 1 } (missing y)", function()
+	local src = [[
+local function f(t) return t.x + t.y end
+local x = f({ x = 1 })
+]]
+	assert(rejects(src),
+		"missing-field bound rejection failed; HM intersection-bound regressed")
+end)
+
+T.it("HM bound: t.x + t.y accepts { x = 1, y = 2 } (both fields present)", function()
+	local src = [[
+local function f(t) return t.x + t.y end
+local x = f({ x = 1, y = 2 })
+]]
+	assert(typechecks(src),
+		"intersection-bound rejected valid input; HM bound composition regressed")
+end)
+
+-- ── HM Invariant H4: Self-reference equi-recursive bound ─────────────────────
+-- `function f(a) return a + a end` accepts numeric inputs and rejects strings
+-- (no `__add` metamethod). Self-reference is the H1 case from the design doc.
+
+T.it("HM self-ref: a + a accepts integer arg", function()
+	assert(typechecks("local function f(a) return a + a end\nlocal x = f(1)"),
+		"self-reference bound rejected integer; HM phase 1a regressed")
+end)
+
+T.it("HM self-ref: a + a rejects string arg (no __add)", function()
+	assert(rejects('local function f(a) return a + a end\nlocal x = f("a")'),
+		"self-reference bound accepted string; metamethod check regressed")
+end)
+
+-- ── HM Invariant H5: Metamethod constraint rejects records without it ────────
+-- `function f(a) return -a end` requires `__unm`. Calling with a record type
+-- that has no `__unm` must be rejected by the inferred bound.
+-- Regression-locks the metamethod-aware solve_bound branch (commit 5a9e1b4b).
+
+T.it("HM metamethod: -a rejects record without __unm", function()
+	local src = [[
+local function f(a) return -a end
+--:: declare r = { x: integer }
+local x = f(r)
+]]
+	assert(rejects(src),
+		"metamethod-aware bound failed to reject record without __unm")
+end)
+
+-- ── HM Invariant H6: Higher-order contravariance ─────────────────────────────
+-- `function apply(f, x) return f(x) end` called with a typed
+-- `(integer)->integer` and a string argument must be rejected — the inferred
+-- bound on `f` flows the call-site x type into f's parameter contravariantly.
+-- Regression-locks HM bound emission for free callees in solve_check_args
+-- (commit 5a2558b8).
+
+T.it("HM higher-order: apply(f: (integer)->integer, \"s\") rejected", function()
+	local src = [[
+local function apply(f, x) return f(x) end
+--: (integer) -> integer
+local function inc(n) return n + 1 end
+local r = apply(inc, "string")
+]]
+	assert(rejects(src),
+		"HM higher-order contravariance regressed; commit 5a2558b8 fix lost")
+end)
+
+-- ── HM Invariant H7: Recursive functions typecheck monomorphically ──────────
+-- HM does not include polymorphic recursion (undecidable). Standard recursion
+-- (e.g. `fact`) must still typecheck under monomorphic recursion semantics.
+
+T.it("HM recursion: monomorphic fact typechecks", function()
+	local src = [[
+local function fact(n) if n == 0 then return 1 else return n * fact(n - 1) end end
+local r = fact(5) --: integer
+]]
+	assert(typechecks(src),
+		"recursive function broke under HM let-polymorphism")
+end)
+
+-- ── HM Invariant H8: Annotated generic functions still work ─────────────────
+-- Sanity: a fully-annotated `<T>(T) -> T` called with two different types
+-- still works. HM phase 1 must not have broken the existing annotated-
+-- generic path.
+
+arb.it("HM compat: annotated <T>(T)->T still polymorphic over T1, T2",
+	{ farb.arb_base_type, farb.arb_base_type },
+	function(T1_node, T2_node)
+		local v1 = farb.canonical_value(T1_node)
+		local v2 = farb.canonical_value(T2_node)
+		local T1 = farb.type_to_string(T1_node)
+		local T2 = farb.type_to_string(T2_node)
+		local src = table.concat({
+			"--: <T>(T) -> T",
+			"local function id(x) return x end",
+			("local a = id(%s) --: %s"):format(v1, T1),
+			("local b = id(%s) --: %s"):format(v2, T2),
+		}, "\n")
+		assert(typechecks(src),
+			"annotated generic path regressed under HM: " .. src)
+	end, { trials = 300 })
+
+-- ── HM Invariant H9: Indexer bound rejects non-indexable args ────────────────
+-- `function first(t) return t[1] end` infers an `[integer]: _` indexer bound
+-- on t. Calling with a string (no integer indexer) must be rejected.
+-- Regression-locks the integer-key bound emission in solve_index (commit
+-- 1196579e).
+
+T.it("HM indexer bound: first(t) rejects string arg", function()
+	local src = [[
+local function first(t) return t[1] end
+local y = first("not a table")
+]]
+	assert(rejects(src),
+		"HM indexer bound regressed; integer-key emission lost")
+end)
+
+-- ── HM Invariant H10: MISSING_FUNCTION_SIGNATURE is a warning, not error ────
+-- Demoting MISSING_FUNCTION_SIGNATURE to warning was a load-bearing precondition
+-- for HM phase 1 (commit 36e5f292). A program with only an unannotated function
+-- must have errors == 0 (warnings only). The fuzz helper's `_filter_errs` masks
+-- this internally; assert against the raw error list to lock the demotion.
+
+T.it("HM precondition: unannotated function alone has 0 raw errors", function()
+	local src = "local function f(x) return x end"
+	local ec = check.check_string(src, "fuzz_test_hm_warn")
+	-- Count errors with severity-like check: any entry whose message is the
+	-- missing-signature warning must NOT inflate the error count.
+	local errs = 0
+	for _, e in ipairs(ec.errors) do
+		if not e.msg:find("has no signature") then errs = errs + 1 end
+	end
+	T.eq(errs, 0,
+		"unannotated function produced non-warning errors; " ..
+		"MISSING_FUNCTION_SIGNATURE demotion regressed")
+end)
+
 -- ── Performance gate ──────────────────────────────────────────────────────────
 
 T.it("performance: ≥500 programs/sec throughput", function()

@@ -86,11 +86,11 @@ Commits (in order):
     emission needs to live in both places. Now `inferred_apply(inc,
     "hi")` correctly errors when inc expects integer.
 
-- [ ] **propagate_meta_bound indexer support.** emit_indexer_bound
-  registers `{ [K]: V, ... }` bounds for `t[k]` access, but the
-  call-site check falls through to structural try_unify, which
-  rejects primitives with integer-keyed access (rare). Extend
-  propagate_meta_bound to consult prim_index for indexer bounds.
+- [x] **propagate_meta_bound indexer support.** Done in `fedf12d0`.
+  Walks bound's indexer pairs (data[2..3]); for TAG_TABLE actuals
+  matches structurally OR via integer-literal-keyed fields fallback
+  (Lua table literals type as `{1: a, 2: b}`). Now `first({10, 20, 30})`
+  works; `first("hello")` correctly errors as missing indexer.
 
 - [ ] **Phase 3: remove `_inferred_param_*` side-tables.** With HM
   in, the `_inferred_param_tid` / `_inferred_param_callsites` /
@@ -98,10 +98,19 @@ Commits (in order):
   data should come from `_forall_bounds` instead. Schedule removal
   alongside the autofix renderer integration above.
 
-- [ ] **Phase 6: fuzz invariants.** Add HM-specific invariants:
-  inferred polymorphism preserves type at each call; `function f(t)
-  return t.x + t.y end` with intersection-merged bound accepts a
-  table with both fields and an `__add`, rejects either-missing.
+- [x] **Phase 6: fuzz invariants.** Added 11 HM-specific invariants in
+  `lib/type/static/fuzz_test.lua` (H1–H10): true polymorphism per
+  call, inferred row poly, missing-field rejection, multi-field
+  intersection bound, self-reference equi-recursive bound,
+  metamethod constraint rejection, higher-order contravariance
+  (commit 5a2558b8), monomorphic recursion, annotated-generic
+  compat, indexer bound rejection (commit 1196579e), and
+  MISSING_FUNCTION_SIGNATURE warning demotion (36e5f292).
+  Note: `t.x + t.y` with `{x="a",y="b"}` does NOT reject — the
+  inferred `__add` bound checks field presence/metamethod presence
+  but does not constrain field VALUE types (string has `__add`
+  via Lua's coercion). Real value-type propagation through the
+  bound is a separate item.
 
 **Design doc:** `docs/typechecker-hm-phase1.md` (committed `9bb1960d`)
 has the architectural sketch + bound shapes per body operation.
