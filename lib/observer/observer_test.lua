@@ -764,6 +764,92 @@ T.describe("behavior_subject", function()
   end)
 end)
 
+T.describe("replay_subject", function()
+  T.it("new subscriber receives all buffered values", function()
+    local rs = Obs.replay_subject(10)
+    rs:next(1)
+    rs:next(2)
+    rs:next(3)
+    local got = {}
+    rs:subscribe(function(v) got[#got + 1] = v end)
+    T.eq(got[1], 1)
+    T.eq(got[2], 2)
+    T.eq(got[3], 3)
+  end)
+
+  T.it("buffer is bounded to size n", function()
+    local rs = Obs.replay_subject(2)
+    rs:next(1)
+    rs:next(2)
+    rs:next(3)
+    local got = {}
+    rs:subscribe(function(v) got[#got + 1] = v end)
+    T.eq(#got, 2)
+    T.eq(got[1], 2)
+    T.eq(got[2], 3)
+  end)
+
+  T.it("late subscriber receives buffered values then live values", function()
+    local rs = Obs.replay_subject(5)
+    rs:next("a")
+    local got = {}
+    rs:subscribe(function(v) got[#got + 1] = v end)
+    rs:next("b")
+    T.eq(got[1], "a")
+    T.eq(got[2], "b")
+  end)
+
+  T.it("after complete, new subscriber gets buffered values then complete", function()
+    local rs = Obs.replay_subject(3)
+    rs:next(10)
+    rs:next(20)
+    rs:complete()
+    local got = {}
+    local done = false
+    rs:subscribe({
+      next = function(v) got[#got + 1] = v end,
+      complete = function() done = true end,
+    })
+    T.eq(got[1], 10)
+    T.eq(got[2], 20)
+    T.ok(done)
+  end)
+
+  T.it("after error, new subscriber gets buffered values then error", function()
+    local rs = Obs.replay_subject(3)
+    rs:next(1)
+    rs:error("boom")
+    local got = {}
+    local err
+    rs:subscribe({
+      next = function(v) got[#got + 1] = v end,
+      error = function(e) err = e end,
+    })
+    T.eq(got[1], 1)
+    T.eq(err, "boom")
+  end)
+
+  T.it("nil n means unbounded buffer", function()
+    local rs = Obs.replay_subject()
+    for i = 1, 50 do rs:next(i) end
+    local got = {}
+    rs:subscribe(function(v) got[#got + 1] = v end)
+    T.eq(#got, 50)
+    T.eq(got[1], 1)
+    T.eq(got[50], 50)
+  end)
+
+  T.it("values emitted after subscribe are delivered", function()
+    local rs = Obs.replay_subject(2)
+    local got = {}
+    rs:subscribe(function(v) got[#got + 1] = v end)
+    rs:next(1)
+    rs:next(2)
+    T.eq(got[1], 1)
+    T.eq(got[2], 2)
+  end)
+end)
+
 -- ---------------------------------------------------------------------------
 -- Chaining / composition
 -- ---------------------------------------------------------------------------

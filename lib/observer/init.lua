@@ -16,6 +16,7 @@ M._tier = "pure"
 --:: Subscriber = { _obs: Observer, _sub: Subscription, _done: boolean, next: (Subscriber, unknown) -> nil, error: (Subscriber, unknown) -> nil, complete: (Subscriber) -> nil }
 --:: Subject = { _subscribers: { [integer]: Observer }, _closed: boolean, _error: unknown, subscribe: (Subject, Observer | ((unknown) -> nil) | nil) -> Subscription, next: (Subject, unknown) -> nil, error: (Subject, unknown) -> nil, complete: (Subject) -> nil }
 --:: BehaviorSubject = { _subscribers: { [integer]: Observer }, _closed: boolean, _error: unknown, _value: unknown, subscribe: (BehaviorSubject, Observer | ((unknown) -> nil) | nil) -> Subscription, next: (BehaviorSubject, unknown) -> nil, error: (BehaviorSubject, unknown) -> nil, complete: (BehaviorSubject) -> nil, get_value: (BehaviorSubject) -> unknown }
+--:: ReplaySubject = { _subscribers: { [integer]: Observer }, _closed: boolean, _error: unknown, _completed: boolean, _buffer: { [integer]: unknown }, _size: number, subscribe: (ReplaySubject, Observer | ((unknown) -> nil) | nil) -> Subscription, next: (ReplaySubject, unknown) -> nil, error: (ReplaySubject, unknown) -> nil, complete: (ReplaySubject) -> nil }
 --:: SubscribeFn = (subscriber: Subscriber) -> (Subscription | ((() -> nil) | nil))
 --:: Observable = { _subscribe: SubscribeFn, subscribe: (Observable, Observer | ((unknown) -> nil) | nil) -> Subscription }
 
@@ -962,6 +963,101 @@ end
 for k, v in pairs(Observable) do
   if BehaviorSubject[k] == nil then
     BehaviorSubject[k] = v
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- ReplaySubject (hot + replays the last `n` values to each new subscriber)
+-- ---------------------------------------------------------------------------
+
+local ReplaySubject = {}
+ReplaySubject.__index = ReplaySubject
+
+--: (integer | nil) -> ReplaySubject
+function M.replay_subject(n)
+  local size = n or math.huge
+  local self = setmetatable({
+    _subscribers = {} --[[: { [integer]: Observer }]],
+    _closed = false,
+    _error = nil,
+    _completed = false,
+    _buffer = {} --[[: { [integer]: unknown }]],
+    _size = size,
+  }, ReplaySubject)
+  return self
+end
+
+--: (ReplaySubject, Observer | ((unknown) -> nil) | nil) -> Subscription
+function ReplaySubject:subscribe(observer_or_fn)
+  local observer = normalize_observer(observer_or_fn)
+  -- Replay buffered values
+  local buf = self._buffer
+  for i = 1, #buf do
+    if observer.next then observer.next(buf[i]) end
+  end
+  if self._closed then
+    if self._error then
+      if observer.error then observer.error(self._error) end
+    elseif self._completed then
+      if observer.complete then observer.complete() end
+    end
+    return new_subscription(nil)
+  end
+
+  local subs_list = self._subscribers
+  subs_list[#subs_list + 1] = observer
+  return new_subscription(function()
+    for i = 1, #subs_list do
+      if subs_list[i] == observer then
+        table.remove(subs_list, i)
+        return
+      end
+    end
+  end)
+end
+
+--: (ReplaySubject, unknown) -> nil
+function ReplaySubject:next(v)
+  if self._closed then return end
+  local buf = self._buffer
+  buf[#buf + 1] = v
+  if #buf > self._size then
+    table.remove(buf, 1)
+  end
+  for i = 1, #self._subscribers do
+    local obs = self._subscribers[i]
+    if obs.next then obs.next(v) end
+  end
+end
+
+--: (ReplaySubject, unknown) -> nil
+function ReplaySubject:error(e)
+  if self._closed then return end
+  self._closed = true
+  self._error = e
+  for i = 1, #self._subscribers do
+    local obs = self._subscribers[i]
+    if obs.error then obs.error(e) end
+  end
+  self._subscribers = {}
+end
+
+--: (ReplaySubject) -> nil
+function ReplaySubject:complete()
+  if self._closed then return end
+  self._closed = true
+  self._completed = true
+  for i = 1, #self._subscribers do
+    local obs = self._subscribers[i]
+    if obs.complete then obs.complete() end
+  end
+  self._subscribers = {}
+end
+
+-- Inherit Observable operators
+for k, v in pairs(Observable) do
+  if ReplaySubject[k] == nil then
+    ReplaySubject[k] = v
   end
 end
 
