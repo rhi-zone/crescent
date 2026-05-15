@@ -473,8 +473,26 @@ T.describe("presets", function()
     T.ok(#s > 10)
   end)
 
+  T.it("HILBERT preset generate n=2 non-empty", function()
+    local sys = L.new(L.HILBERT)
+    local s = sys:generate(2)
+    T.ok(#s > 0)
+  end)
+
+  T.it("PENTIGREE preset generate n=2 non-empty and grows", function()
+    local sys = L.new(L.PENTIGREE)
+    local s1 = sys:generate(1)
+    local s2 = sys:generate(2)
+    T.ok(#s2 > #s1)
+  end)
+
+  T.it("PLANT preset matches FERN axiom/rules/angle", function()
+    T.eq(L.PLANT.axiom, L.FERN.axiom)
+    T.eq(L.PLANT.angle, L.FERN.angle)
+  end)
+
   T.it("all presets can be interpreted without error", function()
-    local names = { "SIERPINSKI_TRIANGLE", "DRAGON_CURVE", "KOCH_SNOWFLAKE", "FERN", "BINARY_TREE" }
+    local names = { "SIERPINSKI_TRIANGLE", "DRAGON_CURVE", "KOCH_SNOWFLAKE", "FERN", "BINARY_TREE", "PLANT", "HILBERT", "PENTIGREE" }
     for _, name in ipairs(names) do
       local sys = L.new(L[name])
       local s = sys:generate(2)

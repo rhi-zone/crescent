@@ -536,4 +536,33 @@ M.BINARY_TREE = {
   angle = 45,
 }
 
+-- Classic fractal plant (alias for FERN: same axiom/rules/angle).
+M.PLANT = {
+  axiom = "X",
+  rules = {
+    X = "F+[[X]-X]-F[-FX]+X",
+    F = "FF",
+  },
+  angle = 25,
+}
+
+-- Hilbert curve (2D space-filling).
+M.HILBERT = {
+  axiom = "A",
+  rules = {
+    A = "+BF-AFA-FB+",
+    B = "-AF+BFB+FA-",
+  },
+  angle = 90,
+}
+
+-- Pentigree (pentaflake / pentigree L-system).
+M.PENTIGREE = {
+  axiom = "F-F-F-F-F",
+  rules = {
+    F = "F-F++F+F-F-F",
+  },
+  angle = 72,
+}
+
 return M
