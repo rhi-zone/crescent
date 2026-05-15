@@ -347,7 +347,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/pid/` — PID controller. Status: stable.
 - `lib/rand/` — RNG. Status: stable.
 - `lib/rational/` — exact rationals (GCD-normalized). Status: stable.
-- `lib/roman/`, `lib/roman_numeral/` — Roman numerals; `roman_numeral` is the extended/Unicode one. Status: stable.
+- `lib/roman_numeral/` — Roman numerals (Unicode, vinculum, ordinals, additive notation). Status: stable.
 - `lib/sat/` — DPLL SAT solver. Status: stable.
 - `lib/simulated_annealing/` — simulated annealing. Status: stable.
 - `lib/stats/` — descriptive stats, distributions, hypothesis tests, regression. Status: stable.

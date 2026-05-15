@@ -270,6 +270,8 @@ LOC = sum of `.lua` lines under the dir excluding `*_test.lua`. "tests" = number
 
 **Recommendation:** `roman_numeral` is canonical. Drop `roman`.
 
+**Resolved 2026-05-15:** roman dropped; roman_numeral is canonical.
+
 ---
 
 ## L-systems
