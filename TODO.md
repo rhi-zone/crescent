@@ -99,6 +99,13 @@ Commits (in order):
   body force-cast operates on the inst-fresh var). Suite green;
   motivating false-positive class did not return.
 
+  `_inferred_params` removed (commits 695b55b3, 88c3c3cd):
+  after f230643d had solve.lua consume `fn_tid` directly from
+  `_missing_signatures`, the side-table had no remaining readers
+  — only writes in `gen_function`. All write sites, the
+  `inferred_start` snapshot, and the post-make_func fn_tid patch
+  loop are gone. Suite green.
+
   `_inferred_param_callsites` and the old `render_signature` /
   `combine_inferred` / `widen_for_annotation` /
   `render_for_annotation` / `aliases_in_scope` / `has_free_var`
@@ -112,9 +119,6 @@ Commits (in order):
   these would silently drop the autofix payload on those
   diagnostics. Real fix: extend `render_hm_signature` to cover
   the cases it currently rejects, then re-evaluate.
-
-  `_inferred_params` itself is load-bearing for the
-  MISSING_FUNCTION_SIGNATURE warning emission and stays.
 
 - [x] **Phase 6: fuzz invariants.** Added 11 HM-specific invariants in
   `lib/type/static/fuzz_test.lua` (H1–H10): true polymorphism per
