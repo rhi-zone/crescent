@@ -4737,8 +4737,8 @@ local y = x
     --     types into the inst-mapped nested TVs. Re-emitting body C_INDEX
     --     creates duplicate field bounds and breaks the merged-bound shape.
     --   * C_CALLABLE: body-level call exprs emit C_BIND_GENERICS/C_CHECK_ARGS
-    --     (richer than C_CALLABLE), not C_CALLABLE itself — so recording
-    --     C_CALLABLE is a no-op for the field-call propagation case. See
+    --     (handled by separate Phase 2 extension), not C_CALLABLE itself —
+    --     C_CALLABLE only fires for for-loop iterator triples. See
     --     record_polymorphic_ops_post in constrain.lua for the rationale.
     assert.it("HM Phase 2: t.x < t.y rejects {x={}, y={}} (no __lt on tables)", function()
         v3_has_error("local function f(t) return t.x < t.y end\nlocal _ = f({x={}, y={}})\n", "cannot compare")
@@ -4751,6 +4751,23 @@ local y = x
     end)
     assert.it("HM Phase 2: t.x < t.y still accepts {x='a', y='b'} (string has __lt)", function()
         v3_no_errors("local function f(t) return t.x < t.y end\nlocal _ = f({x='a', y='b'})\n")
+    end)
+
+    -- HM Phase 2: extend _forall_ops to cover body-call C_BIND_GENERICS /
+    -- C_CHECK_ARGS. `t.x()` body emits these on the field-result TV U_x;
+    -- re-emitted at call sites with operands mapped to per-call fresh
+    -- instances, so caller field types flow into the callability check.
+    -- Required companion change: solve_check_args must defer (not silently
+    -- bind T_ANY) when the callee is a free TV outside _sub_solve_params,
+    -- so the C_BOUND propagation has a chance to bind it before checking.
+    assert.it("HM Phase 2: t.x() rejects {x=42} (integer not callable)", function()
+        v3_has_error("local function f(t) return t.x() end\nlocal _ = f({x=42})\n", "cannot call value")
+    end)
+    assert.it("HM Phase 2: t.x() rejects {x='a'} (string not callable)", function()
+        v3_has_error("local function f(t) return t.x() end\nlocal _ = f({x='a'})\n", "cannot call value")
+    end)
+    assert.it("HM Phase 2: t.x() accepts {x=function() return 1 end}", function()
+        v3_no_errors("local function f(t) return t.x() end\nlocal _ = f({x=function() return 1 end})\n")
     end)
 
     -- Higher-order signature contravariance: `<F: (P) -> R>` bound rejects

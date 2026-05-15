@@ -2707,8 +2707,10 @@ local function solve_check_args(ctx, c)
             unify_mod.unify(ctx, ret_tid, r_var)
             return true
         end
-        bind_to(ctx, ret_tid, ctx.T_ANY)
-        return true
+        -- Defer: callee is a free TV. Phase 2 _forall_ops re-emits C_CHECK_ARGS
+        -- on TVs that will be bound by C_BOUND propagation from the actual call's
+        -- argument unification; we must wait for that to settle before checking.
+        return false
     end
 
     if callee_t.tag == TAG_FUNCTION then

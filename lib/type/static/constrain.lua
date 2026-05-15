@@ -320,8 +320,13 @@ local function record_polymorphic_ops_post(ctx, param_tids, body_start, body_end
     local cs = ctx.constraints
     --: { [integer]: { [integer]: integer, ... }, ... }
     local OPERAND_INDICES = {
-        [C_ARITH]    = { 3, 4, 5 },     -- {_, op, lhs, rhs, res, line, col}
-        [C_COMPARE]  = { 2, 3 },        -- {_, lhs, rhs, line, col}
+        [C_ARITH]         = { 3, 4, 5 },  -- {_, op, lhs, rhs, res, line, col}
+        [C_COMPARE]       = { 2, 3 },     -- {_, lhs, rhs, line, col}
+        -- C_BIND_GENERICS / C_CHECK_ARGS: {_, callee_tid, arg_tids_list, ret_tid, line, col}
+        -- The arg_tids slot at index 3 is a Lua array of TIDs, not a TID;
+        -- handled as a special case below (treated as additional operands).
+        [C_BIND_GENERICS] = { 2, 4 },
+        [C_CHECK_ARGS]    = { 2, 4 },
         -- C_INDEX intentionally omitted: emit_field_bound/emit_indexer_bound
         -- in solve.lua already merge open-record/indexer bounds into
         -- _forall_bounds, and call-site C_BOUND propagates field types into
@@ -329,12 +334,8 @@ local function record_polymorphic_ops_post(ctx, param_tids, body_start, body_end
         -- creates duplicate field bounds and breaks the merged-bound shape.
         --
         -- C_CALLABLE intentionally omitted: body-level call expressions
-        -- emit C_BIND_GENERICS / C_CHECK_ARGS (richer than C_CALLABLE),
-        -- not C_CALLABLE itself — C_CALLABLE only fires for for-loop
-        -- iterator triples. Recording it here is therefore a no-op for the
-        -- field-value-type propagation case (e.g. `t.x()` on a poly param).
-        -- Extending the recording to C_BIND_GENERICS/C_CHECK_ARGS is a
-        -- larger change with unexplored solver interactions; deferred.
+        -- emit C_BIND_GENERICS / C_CHECK_ARGS (handled above), not C_CALLABLE
+        -- itself — C_CALLABLE only fires for for-loop iterator triples.
     }
     for i = body_start + 1, body_end do
         local c = cs[i]
@@ -356,14 +357,29 @@ local function record_polymorphic_ops_post(ctx, param_tids, body_start, body_end
                                 ctx._forall_ops[root] = bucket
                             end
                             local clone = {}
-                            for k, v in ipairs(c) do clone[k] = v end
+                            for k, v in ipairs(c) do
+                                if type(v) == "table" then
+                                    -- shallow-copy operand list (e.g. arg_tids)
+                                    local list = {}
+                                    for kk, vv in ipairs(v --[[: { [integer]: integer, ... }]]) do list[kk] = vv end
+                                    clone[k] = list
+                                else
+                                    clone[k] = v
+                                end
+                            end
                             bucket[#bucket + 1] = clone
                         end
                     end
                 end
                 for _, idx in ipairs(indices) do
                     local val = c[idx]
-                    if type(val) == "number" then check_tid(val --[[:! integer]]) end
+                    if type(val) == "number" then
+                        check_tid(val --[[:! integer]])
+                    elseif type(val) == "table" then
+                        for _, tid in ipairs(val --[[: { [integer]: integer, ... }]]) do
+                            check_tid(tid)
+                        end
+                    end
                 end
             end
         end
@@ -2443,6 +2459,15 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                                 local lhs = inst_mapping[op[2]] or op[2]
                                 local rhs = inst_mapping[op[3]] or op[3]
                                 emit(ctx, { C_COMPARE, lhs, rhs, n.line, n.col })
+                            elseif code == C_BIND_GENERICS or code == C_CHECK_ARGS then
+                                local callee = inst_mapping[op[2]] or op[2]
+                                local orig_args = op[3] --[[: { [integer]: integer, ... }]]
+                                local mapped_args = {}
+                                for k, a in ipairs(orig_args) do
+                                    mapped_args[k] = inst_mapping[a] or a
+                                end
+                                local ret = inst_mapping[op[4]] or op[4]
+                                emit(ctx, { code, callee, mapped_args, ret, n.line, n.col })
                             end
                             -- C_INDEX and C_CALLABLE intentionally not
                             -- re-emitted; see record_polymorphic_ops_post.
