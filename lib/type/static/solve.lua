@@ -2071,19 +2071,66 @@ local function solve_callable(ctx, c)
     return false
 end
 
+-- HM Phase 1c: build a metamethod-shape bound `{ #op: (Self, Other) -> R, ... }`
+-- and merge it into ctx._forall_bounds[var_tid]. Self is the param tid itself
+-- (equi-recursive — verified working via H1 repro). Returns the bound tid for
+-- caller-side wiring (Other / R unifies).
+--: (Ctx, integer, string, integer, integer) -> ()
+local function emit_meta_bound(ctx, var_tid, op_name, other_tid, res_tid)
+    local var_t = ctx.types:get(var_tid)
+    local var_level = var_t.data[1]
+    local sig_tid = types_mod.make_func(ctx, { var_tid, other_tid }, { res_tid }, -1, nil)
+    local op_name_id = intern_mod.intern(ctx.pool, op_name)
+    local mm_field = types_mod.make_field(ctx, op_name_id, sig_tid, 0)
+    local rowvar = types_mod.make_rowvar(ctx, var_level)
+    local bound = types_mod.make_table(ctx, {}, {}, rowvar, { mm_field })
+    local existing = ctx._forall_bounds[var_tid]
+    if existing then
+        ctx._forall_bounds[var_tid] = types_mod.make_intersection(ctx, { existing, bound })
+    else
+        ctx._forall_bounds[var_tid] = bound
+    end
+end
+
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 -- c[2] is a string (op_name like "__add"), remaining fields are integers.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean | nil
 local function solve_arith(ctx, c)
     local op_name  = c[2] --[[:! string]]
-    local lhs_tid  = find(ctx, c[3] --[[:! integer]])
-    local rhs_tid  = find(ctx, c[4] --[[:! integer]])
+    local lhs_raw  = c[3] --[[:! integer]]
+    local rhs_raw  = c[4] --[[:! integer]]
+    local lhs_tid  = find(ctx, lhs_raw)
+    local rhs_tid  = find(ctx, rhs_raw)
     local res_tid  = c[5] --[[:! integer]]
     local line, col = c[6] --[[:! integer | nil]], c[7] --[[:! integer | nil]]
 
-    -- Defer if either operand is not yet resolved (callsite hasn't bound params yet).
+    -- HM Phase 1c: if an operand is a free param of the function currently
+    -- being sub-solved, register a metamethod-shape bound on it instead of
+    -- deferring. The bound captures the body's structural requirement (e.g.
+    -- `a + b` requires `a` to have `__add: (a, b) -> R`); at call sites the
+    -- bound is checked via solve_bound's propagate_meta_bound (Phase 1a).
     local lhs_t = ctx.types:get(lhs_tid)
     local rhs_t = ctx.types:get(rhs_tid)
+    if ctx._sub_solve_params then
+        local lhs_is_param = lhs_t.tag == TAG_VAR and ctx._sub_solve_params[lhs_raw]
+        local rhs_is_param = rhs_t.tag == TAG_VAR and ctx._sub_solve_params[rhs_raw]
+        if lhs_is_param then
+            emit_meta_bound(ctx, lhs_tid, op_name, rhs_tid, res_tid)
+        end
+        if rhs_is_param and lhs_raw ~= rhs_raw then
+            -- Symmetric bound on rhs (skip if same tid as lhs to avoid duplicate).
+            emit_meta_bound(ctx, rhs_tid, op_name, lhs_tid, res_tid)
+        end
+        if lhs_is_param or rhs_is_param then
+            -- Bound(s) registered; the bound's signature has the result tid
+            -- as the return slot, so res_tid is connected to the bound's R.
+            -- The actual __op result type resolves at call sites when
+            -- propagate_meta_bound back-propagates the metamethod's signature.
+            return true
+        end
+    end
+
+    -- Defer if either operand is not yet resolved (callsite hasn't bound params yet).
     if lhs_t.tag == TAG_VAR or lhs_t.tag == TAG_ROWVAR then return false end
     if rhs_t.tag == TAG_VAR or rhs_t.tag == TAG_ROWVAR then return false end
 
@@ -3430,6 +3477,11 @@ end
 
 -- any: constraints is a list of heterogeneous arrays — see solve_unify comment.
 --: (Ctx, { [integer]: { [integer]: unknown, ... }, ... }) -> ()
+-- Public for HM Phase 1b: per-function sub-solve called from constrain.lua's
+-- gen_function. Resolves the body's constraints against still-free param
+-- vars before the function type is generalized and exposed to call sites.
+M.solve_range = solve_range
+
 function M.solve(ctx, constraints)
     -- Expose the constraint list on ctx so handlers can scan for pending C_BOUND constraints.
     ctx._constraints = constraints

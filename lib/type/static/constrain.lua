@@ -1660,6 +1660,13 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
     end
     ctx.return_vars[#ctx.return_vars + 1] = push_ret_id
 
+    -- HM Phase 1b: snapshot constraint-list start so we can sub-solve the
+    -- body's constraints against still-free param vars BEFORE the function
+    -- type is generalized and exposed to call sites. Without this, gen_call's
+    -- env_mod.instantiate (called at constraint-emit time) captures the
+    -- still-unresolved ret_var, which then never binds.
+    local body_start = #ctx.constraints
+
     gen_prescan_block(ctx, bs, bl)
     local definitely_returning = gen_block(ctx, bs, bl)
 
@@ -1675,6 +1682,30 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
 
     ctx.return_vars[#ctx.return_vars] = nil
     ctx.scope = saved
+
+    -- HM Phase 1b: per-function sub-solve. Resolve body constraints against
+    -- still-free param vars before generalization, so body usages refine the
+    -- param shapes (Phase 1c body-solver hooks will emit metamethod-shape
+    -- bounds via _forall_bounds; for now this just runs body constraints
+    -- early so ret_var binding settles before call-site instantiation).
+    -- Skipped for annotated functions (params are already concrete).
+    --
+    -- ctx._sub_solve_params marks this function's param tids so future
+    -- Phase 1c body-solver hooks know which free vars to emit bounds on
+    -- instead of deferring. Empty for now (Phase 1b is plumbing only).
+    if not has_ann_fn then
+        local body_end = #ctx.constraints
+        if body_end > body_start then
+            local solve_mod = require("lib.type.static.solve")
+            local saved_sub_params = ctx._sub_solve_params
+            ctx._sub_solve_params = {}
+            for _, ptid in ipairs(param_tids) do
+                ctx._sub_solve_params[ptid] = true
+            end
+            solve_mod.solve_range(ctx, ctx.constraints, body_start + 1, body_end)
+            ctx._sub_solve_params = saved_sub_params
+        end
+    end
 
     local returns
     if ann_fn_tid then
@@ -1699,6 +1730,16 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
     local param_name_ids = {}
     for i = 0, pl - 1 do param_name_ids[i + 1] = ctx.ast_lists:get(ps + i) end
     local fn_tid = types_mod.make_func(ctx, param_tids, returns, vararg_id, param_name_ids)
+
+    -- HM Phase 1b generalize: with body sub-solved above, the param vars
+    -- carry whatever shape body usage imposed (Phase 1c will add the
+    -- bound-emission hooks). Mark remaining free vars at level > saved.level
+    -- as FLAG_GENERIC so each call site instantiates fresh copies.
+    -- Skipped for annotated functions: param vars are concrete from the
+    -- annotation and have no free vars at the function's level.
+    if not has_ann_fn then
+        env_mod.generalize(ctx, fn_tid, saved.level)
+    end
 
     -- Phase C: patch fn_tid into unannotated-param records added during this
     -- gen_function call so the post-pass can render full signatures. Only
