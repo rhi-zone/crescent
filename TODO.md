@@ -92,11 +92,29 @@ Commits (in order):
   (Lua table literals type as `{1: a, 2: b}`). Now `first({10, 20, 30})`
   works; `first("hello")` correctly errors as missing indexer.
 
-- [ ] **Phase 3: remove `_inferred_param_*` side-tables.** With HM
-  in, the `_inferred_param_tid` / `_inferred_param_callsites` /
-  `_inferred_params` machinery is largely vestigial — the autofix
-  data should come from `_forall_bounds` instead. Schedule removal
-  alongside the autofix renderer integration above.
+- [ ] **Phase 3: remove `_inferred_param_*` side-tables — partial.**
+  `_inferred_param_tid` removed (commit c3a71a73): the
+  REDUNDANT_CAST suppression it gated is no longer needed under HM
+  (param vars are FLAG_GENERIC, instantiated fresh per call, so a
+  body force-cast operates on the inst-fresh var). Suite green;
+  motivating false-positive class did not return.
+
+  `_inferred_param_callsites` and the old `render_signature` /
+  `combine_inferred` / `widen_for_annotation` /
+  `render_for_annotation` / `aliases_in_scope` / `has_free_var`
+  helpers are STILL load-bearing — `render_hm_signature` returns
+  nil for many real shapes (open-table receiver methods with
+  open-table param types, multi-return functions whose returns
+  involve `unknown`, intersection-of-function returns), and the
+  callsite-aggregating renderer fills the gap. Verified by
+  instrumented run over `lib/type/static/*.lua`: ~10 distinct
+  fallback hits across `lib/test/{gen,arb}.lua` alone. Removing
+  these would silently drop the autofix payload on those
+  diagnostics. Real fix: extend `render_hm_signature` to cover
+  the cases it currently rejects, then re-evaluate.
+
+  `_inferred_params` itself is load-bearing for the
+  MISSING_FUNCTION_SIGNATURE warning emission and stays.
 
 - [x] **Phase 6: fuzz invariants.** Added 11 HM-specific invariants in
   `lib/type/static/fuzz_test.lua` (H1–H10): true polymorphism per
