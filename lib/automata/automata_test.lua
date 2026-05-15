@@ -434,6 +434,86 @@ end)
 
 -- ── DOT serialization ───────────────────────────────────────────────────────
 
+T.describe("equivalent", function()
+  T.it("identical DFAs are equivalent", function()
+    local d1 = automata.dfa_new()
+    local p0 = d1:add_state({ start = true })
+    local p1 = d1:add_state({ accept = true })
+    d1:add_transition(p0, "a", p1)
+
+    local d2 = automata.dfa_new()
+    local q0 = d2:add_state({ start = true })
+    local q1 = d2:add_state({ accept = true })
+    d2:add_transition(q0, "a", q1)
+
+    T.ok(automata.equivalent(d1, d2))
+  end)
+
+  T.it("DFAs with different accepted languages are not equivalent", function()
+    local d1 = automata.dfa_new()
+    local p0 = d1:add_state({ start = true })
+    local p1 = d1:add_state({ accept = true })
+    d1:add_transition(p0, "a", p1)
+
+    local d2 = automata.dfa_new()
+    local q0 = d2:add_state({ start = true })
+    local q1 = d2:add_state({ accept = true })
+    d2:add_transition(q0, "b", q1)
+
+    T.fail(automata.equivalent(d1, d2))
+  end)
+
+  T.it("DFA equivalent to itself", function()
+    local d = automata.dfa_new()
+    local s0 = d:add_state({ start = true })
+    local s1 = d:add_state({ accept = true })
+    d:add_transition(s0, "a", s1)
+    d:add_transition(s1, "a", s1)
+    T.ok(automata.equivalent(d, d))
+  end)
+
+  T.it("structurally different but language-equivalent DFAs are equivalent", function()
+    -- d1: accepts strings with even number of 'a' (single accepting state at start)
+    local d1 = automata.dfa_new()
+    local e1 = d1:add_state({ start = true, accept = true })
+    local o1 = d1:add_state()
+    d1:add_transition(e1, "a", o1)
+    d1:add_transition(o1, "a", e1)
+
+    -- d2: same language, redundant state
+    local d2 = automata.dfa_new()
+    local e2 = d2:add_state({ start = true, accept = true })
+    local o2 = d2:add_state()
+    local e2b = d2:add_state({ accept = true })
+    d2:add_transition(e2, "a", o2)
+    d2:add_transition(o2, "a", e2b)
+    d2:add_transition(e2b, "a", o2)
+
+    T.ok(automata.equivalent(d1, d2))
+  end)
+
+  T.it("differs in one accepting state -> not equivalent", function()
+    local d1 = automata.dfa_new()
+    local p0 = d1:add_state({ start = true, accept = true })
+    d1:add_transition(p0, "a", p0)
+
+    local d2 = automata.dfa_new()
+    local q0 = d2:add_state({ start = true })
+    d2:add_transition(q0, "a", q0)
+
+    T.fail(automata.equivalent(d1, d2))
+  end)
+
+  T.it("union(d, d) is equivalent to d", function()
+    local d = automata.dfa_new()
+    local s0 = d:add_state({ start = true })
+    local s1 = d:add_state({ accept = true })
+    d:add_transition(s0, "a", s1)
+    local u = automata.union(d, d)
+    T.ok(automata.equivalent(d, u))
+  end)
+end)
+
 T.describe("to_dot", function()
   T.it("contains digraph keyword", function()
     local dfa = automata.dfa_new()

@@ -680,6 +680,81 @@ function M.union(dfa1, dfa2)
   return product(dfa1, dfa2, function(a, b) return a or b end)
 end
 
+--- DFA equivalence: two DFAs accept exactly the same language.
+-- Walks the product DFA (state pairs) reachable from the two start states.
+-- A nil transition is treated as a non-accepting dead sink.
+-- @param dfa1  DFA object
+-- @param dfa2  DFA object
+-- @return boolean
+--: (dfa1: DFA, dfa2: DFA) -> boolean
+function M.equivalent(dfa1, dfa2)
+  -- If either DFA has no start state, equivalence is whether the other
+  -- accepts the empty language. We treat missing start as the dead state.
+  local s1_start = dfa1.start
+  local s2_start = dfa2.start
+
+  -- Union of alphabets reachable in both DFAs
+  local alpha = {} --: { [string]: boolean }
+  for sym in pairs(dfa1:alphabet()) do alpha[sym] = true end
+  for sym in pairs(dfa2:alphabet()) do alpha[sym] = true end
+
+  --: (integer | nil) -> boolean
+  local function is_accept1(s)
+    if not s then return false end
+    local st = dfa1.states[s]
+    return (st and st.accept) and true or false
+  end
+  --: (integer | nil) -> boolean
+  local function is_accept2(s)
+    if not s then return false end
+    local st = dfa2.states[s]
+    return (st and st.accept) and true or false
+  end
+
+  --: (integer | nil) -> string
+  local function key1(s) if s then return tostring(s) else return "\0d" end end
+  --: (integer | nil) -> string
+  local function key2(s) if s then return tostring(s) else return "\0d" end end
+
+  local visited = {} --: { [string]: boolean }
+  --: { [integer]: { [integer]: integer | nil } }
+  local queue = { { s1_start, s2_start } }
+  local qi = 1
+
+  while qi <= #queue do
+    local pair = queue[qi]
+    qi = qi + 1
+    local s1 = pair[1]
+    local s2 = pair[2]
+    local pk = key1(s1) .. "\0" .. key2(s2)
+    if not visited[pk] then
+      visited[pk] = true
+      if is_accept1(s1) ~= is_accept2(s2) then
+        return false
+      end
+      for sym in pairs(alpha) do
+        local n1 = nil --: integer | nil
+        local n2 = nil --: integer | nil
+        if s1 then
+          local row = dfa1.trans[s1]
+          if row then n1 = row[sym] end
+        end
+        if s2 then
+          local row = dfa2.trans[s2]
+          if row then n2 = row[sym] end
+        end
+        if n1 or n2 then
+          local nk = key1(n1) .. "\0" .. key2(n2)
+          if not visited[nk] then
+            queue[#queue + 1] = { n1, n2 }
+          end
+        end
+      end
+    end
+  end
+  return true
+end
+
 -- ── Thompson's construction (regex → NFA) ──────────────────────────────────
 --
 -- Regex syntax supported:
