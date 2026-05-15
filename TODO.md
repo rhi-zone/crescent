@@ -113,6 +113,37 @@ per body operation: field-access, arith, compare, call, narrow).
 Resume by reading this entry, the polymorphic-recursion entry, and the
 Plan agent's design from session 2026-05-15 (in the transcript).
 
+**Discovery from session 2026-05-15 attempted execution:** the naive
+"impose structural meta-table on free param var" approach for Phase 1
+shape inference doesn't work for arithmetic, because primitive types
+(integer/number/string) carry their metamethods via `prim_meta`, NOT
+as structural meta-tables. So `function add(a, b) return a + b end`
+called with `add(1, 2)` would fail: param `a` (now bound to a structural
+meta-table with `__add`) wouldn't unify with `1` (integer, which has
+`__add` via prim_meta).
+
+The correct mechanism is the existing **`<T: bound>(T) -> ...`** path
+(`ctx._forall_bounds` + `C_BOUND` + `solve_bound`). When body usage
+imposes a metamethod requirement, emit it as a BOUND on the param var
+(not a structural binding). Generalize marks the var FLAG_GENERIC.
+Call site instantiation transfers the bound to the fresh var via
+`env_mod.instantiate`'s mapping (existing path at `constrain.lua:2256`).
+`solve_bound` then checks the actual arg satisfies the bound — and
+that check already handles both structural meta-tables AND prim_meta
+correctly for primitives.
+
+So Phase 1 isn't "construct meta-table and unify" — it's "synthesize
+a bound and register it via `_forall_bounds`." The mechanism exists;
+the per-body-solver hooks for emitting inferred bounds don't.
+
+Sub-solve infrastructure (Phase 2 mechanics) was prototyped this
+session and verified working for `id(x) return x end` (pure forwarding
+case), then reverted because partial-state without Phase 1 would ship
+a code path that handles `id` but breaks `add`. Per CLAUDE.md "do the
+correct thing fully" / "minimal change banned": do not re-land Phase 2
+without Phase 1. The sub-solve+generalize prototype patch is captured
+in the session transcript if the next session wants to start from it.
+
 ### Typechecker work — paused 2026-05-14 (resumable)
 
 > *Pivot to platform/UI work; typechecker is in a working state. Resume here later.*
