@@ -1139,6 +1139,22 @@ local function emit_field_bound(ctx, var_tid, field_name_id, res_tid)
     merge_inferred_bound(ctx, var_tid, bound)
 end
 
+-- Build an indexer bound `{ [key_tid]: res_tid, ... }` and merge.
+-- Used by solve_index for `t[k]` access on a free param var, where k is
+-- a typed (non-name) key. propagate_meta_bound's indexer-shape support
+-- isn't yet implemented; for now this emits the bound but the call-site
+-- check falls through to try_unify, which works for table actuals
+-- carrying matching indexers but rejects primitives. (Phase 1c step 7.5
+-- TODO: extend propagate_meta_bound to consult prim_index for indexers.)
+--: (Ctx, integer, integer, integer) -> ()
+local function emit_indexer_bound(ctx, var_tid, key_tid, res_tid)
+    local var_t = ctx.types:get(var_tid)
+    local var_level = var_t.data[1]
+    local rowvar = types_mod.make_rowvar(ctx, var_level)
+    local bound = types_mod.make_table(ctx, {}, { key_tid, res_tid }, rowvar, {})
+    merge_inferred_bound(ctx, var_tid, bound)
+end
+
 -- Solve a slot/field index: C_INDEX = { C_INDEX, obj_tid, key_tid, res_tid, line, col }
 -- key_tid: TAG_LITERAL(LIT_STRING, name_id) for named field; TAG_LITERAL(LIT_INTEGER, slot) for tuple slot.
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
@@ -1211,6 +1227,16 @@ local function solve_index(ctx, c)
         local slot = key_t.data[1]
         local obj_tid = find(ctx, obj_tid_raw)
         local obj_t = ctx.types:get(obj_tid)
+        -- HM Phase 1c step 7: free param + integer-key access → emit
+        -- `{ [integer]: V, ... }` bound. The bound captures "this param
+        -- has integer-keyed indexer access"; specific tuple-slot semantics
+        -- (slot < tuple length) are deferred until the actual is resolved
+        -- at the call site. For now use ctx.T_INTEGER as the bound's key.
+        if ctx._sub_solve_params and ctx._sub_solve_params[obj_tid_raw]
+            and obj_t.tag == TAG_VAR then
+            emit_indexer_bound(ctx, obj_tid, ctx.T_INTEGER, res_tid)
+            return true
+        end
         if obj_t.tag == TAG_VAR or obj_t.tag == TAG_ROWVAR then
             return false  -- defer until obj is resolved
         end
