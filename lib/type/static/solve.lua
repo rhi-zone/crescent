@@ -713,6 +713,161 @@ end
 --   - Named-param form: if bound has concrete regular params (e.g. <F: (A,B)->R>), unify
 --     each pair contravariantly to bind A_fresh, B_fresh from actual's params.
 --: (Ctx, integer, integer) -> ()
+-- Look up a metamethod's full signature on a type, dispatching prim_meta
+-- for primitives and structural meta-slots for tables. Returns the
+-- TAG_FUNCTION tid of the metamethod, or nil if the type doesn't have it.
+-- Mirrors meta_op_ret_impl's dispatch but returns the whole signature
+-- rather than just the return type. Used by propagate_meta_bound to
+-- back-propagate metamethod params/returns into bound-side free TVs.
+--: (Ctx, integer, string) -> integer | nil
+local function find_metamethod_sig(ctx, tid, mm_name)
+    tid = find(ctx, tid)
+    local t = ctx.types:get(tid)
+    if t.tag == TAG_NOMINAL then
+        return find_metamethod_sig(ctx, t.data[2], mm_name)
+    end
+    local mm_id = intern_mod.intern(ctx.pool, mm_name)
+    if t.tag == TAG_TABLE then
+        local fe = types_mod.table_meta_field(ctx, tid, mm_id)
+        if not fe then return nil end
+        local sig_tid = find(ctx, fe.type_id)
+        local st = ctx.types:get(sig_tid)
+        if st.tag == TAG_FUNCTION then return sig_tid end
+        return nil
+    end
+    -- Primitive: map via prim_meta.
+    local ptag = t.tag
+    if ptag == TAG_LITERAL then
+        local k = t.data[0]
+        if     k == LIT_NUMBER  then ptag = TAG_NUMBER
+        elseif k == LIT_INTEGER then ptag = TAG_INTEGER
+        elseif k == LIT_STRING  then ptag = TAG_STRING
+        else return nil end
+    elseif ptag ~= TAG_NUMBER and ptag ~= TAG_INTEGER and ptag ~= TAG_STRING then
+        return nil
+    end
+    local pm = ctx.prim_meta[ptag]
+    if not pm then return nil end
+    local fe = types_mod.table_meta_field(ctx, pm, mm_id)
+    if not fe then return nil end
+    local sig_tid = find(ctx, fe.type_id)
+    local st = ctx.types:get(sig_tid)
+    if st.tag == TAG_FUNCTION then return sig_tid end
+    return nil
+end
+
+-- Back-propagate a structural-meta-slot bound (HM Phase 1a). Bound is a
+-- TAG_TABLE with one or more meta-slots and an open row var:
+-- `{ #__add: (Self, Other) -> R, ... }`. For each meta-slot in the bound,
+-- find the corresponding metamethod on the actual via find_metamethod_sig
+-- (handles both prim_meta and structural meta-slots), then unify the
+-- bound's signature TVs with the actual's signature (contravariant for
+-- params, covariant for returns). Same shape as propagate_function_bound,
+-- but per-meta-slot instead of for the whole function.
+--
+-- Also handles named fields in the bound (e.g. `{ x: U, ... }`) by
+-- looking the field up on the actual via prim_index for primitives
+-- (string:upper(), etc.) or table_field for tables.
+--
+-- Returns "ok" on success, "missing"/<msg> string on failure.
+--: (Ctx, integer, integer) -> string
+local function propagate_meta_bound(ctx, actual_tid, bound_tid)
+    actual_tid = find(ctx, actual_tid)
+    bound_tid  = find(ctx, bound_tid)
+    local bt = ctx.types:get(bound_tid)
+    if bt.tag ~= TAG_TABLE then return "not_meta_bound" end
+    -- Must be open (row var) to be a bound; closed tables are exact-shape requirements.
+    if bt.data[4] < 0 then return "not_meta_bound" end
+
+    -- Meta-slots: iterate (data[5..6]) and back-propagate.
+    local meta_start, meta_len = bt.data[5], bt.data[6]
+    for i = meta_start, meta_start + meta_len - 1 do
+        local fid = ctx.lists:get(i)
+        local fe  = ctx.fields:get(fid)
+        local mm_name = intern_mod.get(ctx.pool, fe.name_id) or "?"
+        local bound_sig_tid = find(ctx, fe.type_id)
+        local bound_sig     = ctx.types:get(bound_sig_tid)
+        if bound_sig.tag ~= TAG_FUNCTION then
+            return "metamethod `" .. mm_name .. "` bound is not a function signature"
+        end
+        local actual_sig_tid = find_metamethod_sig(ctx, actual_tid, mm_name)
+        if not actual_sig_tid then
+            return "missing metamethod `" .. mm_name .. "`"
+        end
+        local actual_sig = ctx.types:get(actual_sig_tid)
+        -- Back-propagate params (contravariant: bound's free param TV gets actual's param type).
+        local apl, bpl = actual_sig.data[1], bound_sig.data[1]
+        local min_p = apl < bpl and apl or bpl
+        for j = 0, min_p - 1 do
+            local bp_id = ctx.lists:get(bound_sig.data[0] + j)
+            local bp = ctx.types:get(find(ctx, bp_id))
+            if bp.tag == TAG_VAR or bp.tag == TAG_ROWVAR then
+                local ap_id = find(ctx, ctx.lists:get(actual_sig.data[0] + j))
+                unify_mod.unify(ctx, ap_id, bp_id)
+            end
+        end
+        -- Back-propagate returns (covariant).
+        local arl, brl = actual_sig.data[3], bound_sig.data[3]
+        local min_r = arl < brl and arl or brl
+        for j = 0, min_r - 1 do
+            local br_id = ctx.lists:get(bound_sig.data[2] + j)
+            local br = ctx.types:get(find(ctx, br_id))
+            if br.tag == TAG_VAR or br.tag == TAG_ROWVAR then
+                local ar_id = find(ctx, ctx.lists:get(actual_sig.data[2] + j))
+                unify_mod.unify(ctx, ar_id, br_id)
+            end
+        end
+    end
+
+    -- Named fields: iterate (data[0..1]) and back-propagate via field lookup.
+    -- For primitives, consult prim_index; for tables, table_field.
+    local field_start, field_len = bt.data[0], bt.data[1]
+    if field_len > 0 then
+        local at = ctx.types:get(actual_tid)
+        for i = field_start, field_start + field_len - 1 do
+            local bfid = ctx.lists:get(i)
+            local bfe  = ctx.fields:get(bfid)
+            local fname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
+            local bf_tid = find(ctx, bfe.type_id)
+            -- Resolve the actual's field type.
+            local actual_field_tid
+            if at.tag == TAG_TABLE then
+                local afe = types_mod.table_field(ctx, actual_tid, bfe.name_id)
+                if afe then actual_field_tid = find(ctx, afe.type_id) end
+            else
+                -- Primitive: prim_index lookup.
+                local ptag = at.tag
+                if ptag == TAG_LITERAL then
+                    local k = at.data[0]
+                    if     k == LIT_NUMBER  then ptag = TAG_NUMBER
+                    elseif k == LIT_INTEGER then ptag = TAG_INTEGER
+                    elseif k == LIT_STRING  then ptag = TAG_STRING
+                    else ptag = nil end
+                end
+                if ptag and ctx.prim_index and ctx.prim_index[ptag] then
+                    local pi = ctx.prim_index[ptag]
+                    local pfe = types_mod.table_field(ctx, pi, bfe.name_id)
+                    if pfe then actual_field_tid = find(ctx, pfe.type_id) end
+                end
+            end
+            if not actual_field_tid then
+                return "missing field `" .. fname .. "`"
+            end
+            -- Bind the bound's field TV (if free) from the actual's field type.
+            local bft = ctx.types:get(bf_tid)
+            if bft.tag == TAG_VAR or bft.tag == TAG_ROWVAR then
+                unify_mod.unify(ctx, actual_field_tid, bf_tid)
+            else
+                -- Concrete field requirement: try_unify must succeed.
+                if not unify_mod.try_unify(ctx, actual_field_tid, bf_tid) then
+                    return "field `" .. fname .. "` type mismatch"
+                end
+            end
+        end
+    end
+    return "ok"
+end
+
 local function propagate_function_bound(ctx, actual, resolved_bound)
     local at = ctx.types:get(find(ctx, actual))
     local bt = ctx.types:get(find(ctx, resolved_bound))
@@ -881,6 +1036,49 @@ local function solve_bound(ctx, c)
             propagate_function_bound(ctx, wa_tid, resolved_bound)
         end
         return true
+    end
+
+    -- HM Phase 1a: open-table bounds with meta-slots or named fields are
+    -- metamethod-shape constraints (e.g. `<T: { #__add: (T,T) -> T, ... }>`).
+    -- The fallthrough try_unify below would reject primitives like `integer`
+    -- because they carry metamethods via prim_meta, not as structural meta-
+    -- slots. propagate_meta_bound dispatches the same way meta_op_ret_impl
+    -- does (prim_meta + table) and back-propagates the bound's free TVs.
+    --
+    -- TAG_INTERSECTION bounds (composed via make_intersection during body
+    -- usage merging) recurse into each member.
+    local function check_meta(actual_check_tid, bound_check_tid)
+        local result = propagate_meta_bound(ctx, actual_check_tid, bound_check_tid)
+        if result == "not_meta_bound" then return nil end  -- defer to fallback
+        if result == "ok" then return true end
+        add_error(ctx, line, col,
+            "type argument `" .. types_mod.display_short(ctx, actual_check_tid)
+            .. "` does not satisfy constraint `"
+            .. types_mod.display_short(ctx, bound_check_tid) .. "`: " .. result)
+        return false
+    end
+    if bt.tag == TAG_TABLE and bt.data[4] >= 0 then
+        local r = check_meta(actual, resolved_bound)
+        if r ~= nil then return r end
+    end
+    if bt.tag == TAG_INTERSECTION then
+        local all_meta = true
+        for i = bt.data[0], bt.data[0] + bt.data[1] - 1 do
+            local mid = find(ctx, ctx.lists:get(i))
+            local mt  = ctx.types:get(mid)
+            if not (mt.tag == TAG_TABLE and mt.data[4] >= 0) then
+                all_meta = false
+                break
+            end
+        end
+        if all_meta then
+            for i = bt.data[0], bt.data[0] + bt.data[1] - 1 do
+                local mid = find(ctx, ctx.lists:get(i))
+                local r = check_meta(actual, mid)
+                if r == false then return false end
+            end
+            return true
+        end
     end
 
     -- TV is bound — check the bound via structural assignability.
