@@ -101,6 +101,14 @@ implicitly extending some trust. But that trust is bounded, not blanket:
 - The operator must be able to audit and kill packs. Every cap invocation
   is observable; revocation is enforceable; a runaway pack can be stopped.
 
+**Latency requirement.** UX must remain responsive even when the
+browser↔daemon channel runs through VPNs and proxies (50–200ms+ link
+latency, not just loopback). This rules out architectures where every
+interaction is a round-trip (vanilla LiveView/Hotwire pattern). Reactive
+logic that needs sub-100ms response runs in the pack's browser realm;
+daemon round-trips happen async with optimistic concurrency where
+applicable. The §8 server-rendering rejection follows from this.
+
 Columns of concern:
 
 ### Confidentiality
@@ -261,6 +269,89 @@ pack-author code and:
 The bootstrap is the only code that needs to fully trust the host. Pack
 author code never sees the raw postMessage channel.
 
+### Realm lockdown (open)
+
+**Bootstrap-delete-globals alone is insufficient.** The `Function`
+constructor is reachable via prototype chain even after `delete
+globalThis.Function`:
+
+```js
+const F = ({}).__proto__.constructor.constructor;
+F("return 1")(); // works — F is Function
+// also: (function(){}).constructor === Function
+// AsyncFunction, GeneratorFunction, AsyncGeneratorFunction — similar shadows
+```
+
+Naive bootstrap leaves dynamic code execution reachable inside the realm.
+Closing this requires walking and neutralising every reachable
+intrinsic-constructor path, not just deleting top-level globals.
+
+**Lockdown options (open question — not yet decided):**
+
+1. **SES / Lockdown** (Endo's library): freezes intrinsic prototypes,
+   replaces dangerous constructors with throwers, closes known reflection
+   paths. ~100–200kb minified. Battle-tested but JS-on-JS lockdown;
+   periodically catches up to new TC39 features. Vendor into `dep/`.
+2. **Tighter primordial allow-list within an SES-style approach.** Strip
+   `Object.create`, `Reflect`, classes, generators, async/await beyond
+   the minimum. Drastically smaller realm; lots of idiomatic JS
+   unavailable to authors.
+3. **WASM-based sandbox** (e.g. AssemblyScript or Lua→WASM): pack code
+   compiled to WASM. The prototype-chain escape class doesn't exist
+   (WASM has no prototypes, no host objects, explicit imports).
+   Structurally stronger than any pure-JS lockdown. Trade-off: toolchain
+   plus runtime (AssemblyScript runtime ~50kb). Changes the authoring
+   format back toward a compilation step.
+4. **JS-in-WASM (QuickJS-in-WASM)**: a JS interpreter compiled to WASM;
+   pack JS runs inside the interpreter inside WASM. Two layers of
+   isolation. ~300–500kb bundle. Keeps JS authoring intact; structurally
+   stronger than SES.
+5. **Process isolation**: a Web Worker per pack with stripped APIs plus
+   IPC. Strong boundary. Within-worker, still needs SES-or-equivalent to
+   close the prototype-chain escape.
+
+Decision affects bundle size, attack surface, author ergonomics, and
+whether browser-side authoring (next subsection) needs to target WASM.
+Listed in §7 as an open question.
+
+### Browser-side authoring
+
+**Primary source format: JS + JSDoc.** Standard JS with type annotations
+in JSDoc comments. Runs in the browser directly with no transpile step
+(comments stripped at parse). Type-checked in the author's dev
+environment via the TypeScript Language Server with `// @ts-check` (TS
+LSP natively supports JSDoc). No bundled compiler; no `tsc` shipped
+with packs; no Lua typechecker shipped with packs.
+
+**lua2ts is an optional source path.** Authors who prefer Lua can
+transpile via lua2ts; the output target should be JS + JSDoc so the
+distributed form is uniform regardless of source. Existing lua2ts
+harden mode contributes when Lua is the source; for JS + JSDoc sources,
+harden's role is the static authoring-hygiene checks (banned-API source
+patterns) at `bin/cr check` time. lua2ts is *free* — we maintain it for
+other reasons; using it is opt-in for browser-side authoring.
+
+**Why not TypeScript with `.ts` source format?** Pack distribution would
+need to ship the TS compiler (~10MB) or require pack authors to
+pre-build. JS + JSDoc gets the same type-safety benefits with zero
+toolchain cost (browsers run JS; TS LSP type-checks JSDoc in the
+author's dev env).
+
+**Why not Lua as mandatory source?** Would require shipping a Lua
+typechecker plus transpiler bundle with the platform. Authors who
+already know JS shouldn't be forced through that ceremony. Lua remains
+crescent's daemon language.
+
+**Single shared `.d.ts`** (not per-pack) declares: the JS language
+primitives in the realm allow-list, the cap signatures (signed by the
+host), the VNode / `Element` type for return values, and the cap-bridge
+protocol message shape. Pack authors reference this `.d.ts` to get
+type-checking against the actual realm shape. Single source of truth —
+when the allow-list or cap protocol evolves, one file changes and packs
+re-typecheck against the updated declarations. Location TBD; candidates
+include `lib/platform/browser_types.d.ts` or a daemon-served static
+asset. Open question.
+
 ### Capability bridge
 
 `postMessage` (or `MessageChannel` for a cleaner protocol) connects the
@@ -302,20 +393,41 @@ runtime lifting. Harden's still-load-bearing pieces:
   constructor, string-form `setTimeout`/`setInterval`, dynamic `import()`,
   direct DOM APIs (`document.createElement`, `innerHTML`/`outerHTML`
   setters, `setAttribute` on event-handler keys), `__proto__` mutation,
-  `Object.setPrototypeOf`. These are real-security bans, not
-  preferred-style. CSP and the sandbox cover *some* of these at runtime,
-  but the static block is the primary line because (a) CSP can be
-  misconfigured, (b) defense-in-depth has cumulative value, (c) the
-  presence of these identifiers in pack source is itself a smell worth
-  surfacing at check time. Direct DOM API access lands in the banned set,
-  not in "preferred patterns" — bypassing the structured builder
-  (`dom.span()` and similar) bypasses prop validation, the cap-bridge for
-  events, and the rendering-model invariants.
+  `Object.setPrototypeOf`. The justification is *not* "bootstrap can't
+  replace these at runtime" — bootstrap can (with
+  `Object.defineProperty` non-configurable on the relevant slots, plus
+  the prototype-chain neutralisation discussed under "Realm lockdown"
+  above). The actual justifications are:
+  - **Authoring DX.** Error at `bin/cr check` time rather than runtime
+    in browser devtools. Shorter feedback loop, pre-deploy.
+  - **Belt-and-braces / defense in depth.** Bootstrap is one
+    independent layer; the static check is another. If a future browser
+    ships a new escape path, the static block still catches obvious
+    patterns.
+  - **Smell flagging.** `eval(...)` in source is a code smell regardless
+    of whether runtime blocks it. Static block forces authors to surface
+    intent (and optionally a manifest-declared exception).
+
+  Direct DOM API access lands in the banned set, not in "preferred
+  patterns" — bypassing the structured builder (`dom.span()` and
+  similar) bypasses prop validation, the cap-bridge for events, and the
+  rendering-model invariants.
 - **Null-prototype record creation** (`__rec({...})`) — intra-realm
   prototype-pollution defense.
-- **Bounded-method rewrites** for known DoS-prone APIs: `padStart`,
-  `padEnd`, `join`, `repeat`, `Array(n).fill`, deeply-nested
-  `JSON.stringify`/`JSON.parse`. No runtime layer mitigates these.
+- **Bounded-method patches — once-per-realm in bootstrap.** The
+  *primary* mitigation for known DoS-prone APIs is bootstrap-installed
+  bounded versions on the relevant prototypes:
+  `String.prototype.padStart`/`padEnd`/`repeat`,
+  `Array.prototype.join`, the `Array` constructor, `JSON.stringify` /
+  `JSON.parse`. Replaced once at realm bootstrap with bounded versions,
+  sealed (non-configurable) so an adversary inside the realm cannot
+  re-patch them. Per-call-site rewrites in lua2ts harden become
+  belt-and-braces (catch the call at source level too); the
+  load-bearing defense is the realm-level patch. Regex methods
+  (`String.prototype.match`/`replace`, `RegExp.prototype.test`/`exec`)
+  need ReDoS mitigation — harder because there is no native timeout
+  primitive. Options: compile-time safe-regex check, realm-installed
+  wrappers with budgeting, or input-length caps. Open.
 - **Authoring hygiene** — failures land at `bin/cr check` time rather
   than as runtime CSP refusals in browser devtools.
 
@@ -511,6 +623,17 @@ Initiative B's resumption.
 These are explicit. They are not buried in prose because they need
 decision-level attention, not skimming.
 
+- **Lockdown approach** (SES / SES-tightened / WASM / JS-in-WASM /
+  process-isolation) — see the "Realm lockdown" subsection in §3.
+  Bootstrap-delete-globals alone is insufficient because the `Function`
+  constructor is reachable via prototype chain; which lockdown
+  technology crescent commits to is not yet decided and affects bundle
+  size, attack surface, ergonomics, and whether browser-side authoring
+  has to target WASM.
+- **Shared `.d.ts` location.** Single host-served declaration file for
+  the realm allow-list, cap signatures, VNode shape, and bridge
+  protocol. `lib/platform/browser_types.d.ts` or a daemon-served static
+  asset — open.
 - **ShadowRealm vs iframe primitive.** Today: iframe only. Future: maybe
   both? Is the architecture worth restating in terms of "the realm primitive"
   with two backends, or do we commit to iframe forever and treat ShadowRealm
@@ -556,9 +679,10 @@ decision-level attention, not skimming.
 Considered an architecture where pack Lua runs in the daemon and the
 browser is a thin host-controlled painter consuming a daemon-pushed
 render stream. Eliminates lua2ts and most browser-side isolation work.
-Rejected because: (a) the latency requirement is "minimal latency
-regardless of network conditions, including through VPNs/proxies" —
-every-interaction-is-a-roundtrip breaks under 50–200ms+ link latency, and
+Rejected because: (a) the latency requirement (see §2) is "minimal
+latency regardless of network conditions, including through
+VPNs/proxies" — every-interaction-is-a-roundtrip breaks under
+50–200ms+ link latency, and
 (b) the requirement is full pack-author flexibility, which a
 host-shipped primitive set cannot cover. The cleaner local-first variant
 (rich host primitives + optimistic concurrency) covers some cases but
