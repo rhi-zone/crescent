@@ -1556,17 +1556,6 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
             local name_id = ctx.ast_lists:get(ps + i)
             local pt_id = types_mod.make_var(ctx, fn_scope.level)
             env_mod.bind(fn_scope, name_id, pt_id)
-            -- Unannotated param: record per-fn metadata for the
-            -- MISSING_FUNCTION_SIGNATURE pass.
-            ctx._inferred_params = ctx._inferred_params or {}
-            ctx._inferred_params[#ctx._inferred_params + 1] = {
-                name_id   = name_id,
-                var_tid   = pt_id,
-                fn_line   = fn_def_line,
-                fn_col    = fn_def_col,
-                param_idx = i,
-                -- fn_tid filled in after make_func below.
-            }
             param_tids[#param_tids + 1] = pt_id
         end
         if has_vararg then
@@ -1731,19 +1720,6 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
     -- annotation and have no free vars at the function's level.
     if not has_ann_fn then
         env_mod.generalize(ctx, fn_tid, saved.level)
-    end
-
-    -- Phase C: patch fn_tid into unannotated-param records added during this
-    -- gen_function call so the post-pass can render full signatures. Only
-    -- patch records that don't already have an fn_tid — nested gen_function
-    -- calls (anonymous functions in the body) already patched their own
-    -- records before returning, and we must not overwrite those.
-    if ctx._inferred_params and inferred_start < #ctx._inferred_params then
-        for j = inferred_start + 1, #ctx._inferred_params do
-            if not ctx._inferred_params[j].fn_tid then
-                ctx._inferred_params[j].fn_tid = fn_tid
-            end
-        end
     end
 
     -- Propagate type/assertion predicate from the annotation type ID to the runtime
