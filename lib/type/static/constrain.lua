@@ -212,26 +212,135 @@ local function emit(ctx, constraint)
 end
 
 -- HM Phase 2: record polymorphic-rooted body ops keyed by template TV.
--- Re-emitted at call sites (Phase 2 commit 3) so per-call instance TVs feed
--- body operations. Scoped to C_ARITH for now; other kinds in commit 5.
+-- Inline record at op-emit time is a no-op for HM-inferred params: at body
+-- emission time `_forall_bounds` is empty (bounds populated by sub_solve via
+-- emit_field_bound / emit_meta_bound). The real recording runs in
+-- record_polymorphic_ops_post (called after sub_solve), which scans the body
+-- constraint range and walks each operand TV back to its root template TV via
+-- the bound's structure. See `collect_bound_tvs` below.
 --: (Ctx, { [integer]: unknown, ... }) -> ()
 local function record_polymorphic_op(ctx, c)
+    -- Kept for potential explicit-forall fast path; the post-pass is the
+    -- source of truth for HM-inferred bounds. No-op for now.
+    local _, _ = ctx, c
+end
+
+-- Walk a type's structure collecting every TAG_VAR / TAG_ROWVAR id reachable
+-- inside it. Used to (1) generalize TVs hiding inside _forall_bounds[T] so
+-- env.instantiate mints fresh copies for them at call sites, and (2) build
+-- the operand→root_T reverse index for record_polymorphic_ops_post.
+--: (Ctx, integer, { [integer]: boolean, ... }, { [integer]: boolean, ... }) -> ()
+local function collect_bound_tvs(ctx, tid, out, seen)
+    tid = types_mod.find(ctx, tid)
+    if seen[tid] then return end
+    seen[tid] = true
+    local t = ctx.types:get(tid)
+    local tag = t.tag
+    if tag == TAG_VAR or tag == TAG_ROWVAR then
+        out[tid] = true
+        return
+    end
+    if tag == TAG_FUNCTION then
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            collect_bound_tvs(ctx, ctx.lists:get(i), out, seen)
+        end
+        for i = t.data[2], t.data[2] + t.data[3] - 1 do
+            collect_bound_tvs(ctx, ctx.lists:get(i), out, seen)
+        end
+        if t.data[4] >= 0 then collect_bound_tvs(ctx, t.data[4], out, seen) end
+        return
+    end
+    if tag == TAG_TABLE then
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            local fe = ctx.fields:get(ctx.lists:get(i))
+            collect_bound_tvs(ctx, fe.type_id, out, seen)
+        end
+        for i = t.data[2], t.data[2] + t.data[3] - 1 do
+            collect_bound_tvs(ctx, ctx.lists:get(i), out, seen)
+        end
+        if t.data[4] >= 0 then collect_bound_tvs(ctx, t.data[4], out, seen) end
+        for j = t.data[5], t.data[5] + t.data[6] - 1 do
+            local fe = ctx.fields:get(ctx.lists:get(j))
+            collect_bound_tvs(ctx, fe.type_id, out, seen)
+        end
+        return
+    end
+    if tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            collect_bound_tvs(ctx, ctx.lists:get(i), out, seen)
+        end
+        return
+    end
+    if tag == defs.TAG_SPREAD then
+        collect_bound_tvs(ctx, t.data[0], out, seen)
+        return
+    end
+end
+
+-- HM Phase 2 post-pass: after sub_solve has populated `_forall_bounds` for
+-- the function's generalized params, walk body constraints in [body_start+1,
+-- body_end] and record each polymorphic-rooted op into `_forall_ops[T]` for
+-- the root template TV T whose bound contains the operand. Also generalizes
+-- TVs hiding inside each bound so call-site instantiation refreshes them.
+--: (Ctx, { [integer]: integer, ... }, integer, integer) -> ()
+local function record_polymorphic_ops_post(ctx, param_tids, body_start, body_end)
     local fb = ctx._forall_bounds
-    if not fb or not next(fb) then return end
-    local clone
-    for i = 3, 5 do
-        local tid = c[i]
-        if type(tid) == "number" and fb[tid] then
-            local bucket = ctx._forall_ops[tid]
-            if not bucket then
-                bucket = {}
-                ctx._forall_ops[tid] = bucket
+    if not fb then return end
+    -- Collect TVs of each generalized param's bound and reverse-index
+    -- bound_tv → root_template_tv. Also generalize collected TVs so
+    -- env.instantiate populates inst_mapping for them at call sites.
+    local tv_to_root = {}  --: { [integer]: integer, ... }
+    for _, ptid in ipairs(param_tids) do
+        local root = types_mod.find(ctx, ptid)
+        local pt = ctx.types:get(root)
+        if pt.tag == TAG_VAR and pt.flags == defs.FLAG_GENERIC then
+            local bound = fb[root]
+            if bound then
+                local tvs = {}
+                collect_bound_tvs(ctx, bound, tvs, {})
+                for tv in pairs(tvs) do
+                    if tv ~= root then
+                        local tvt = ctx.types:get(tv)
+                        if (tvt.tag == TAG_VAR or tvt.tag == TAG_ROWVAR)
+                            and tvt.flags ~= defs.FLAG_GENERIC then
+                            tvt.flags = defs.FLAG_GENERIC
+                        end
+                    end
+                    -- index every TV (including root) so operand=root case is recorded too
+                    if not tv_to_root[tv] then tv_to_root[tv] = root end
+                end
             end
-            if not clone then
-                clone = {}
-                for k, v in ipairs(c) do clone[k] = v end
+        end
+    end
+    if not next(tv_to_root) then return end
+    -- Walk body constraints; record arith/compare/concat ops keyed by root.
+    local cs = ctx.constraints
+    for i = body_start + 1, body_end do
+        local c = cs[i]
+        if c then
+            local code = c[1]
+            if code == C_ARITH then
+                -- {C_ARITH, op_str, lhs, rhs, res, line, col}
+                local roots_seen = {}
+                for _, idx in ipairs({ 3, 4, 5 }) do
+                    local tid = c[idx]
+                    if type(tid) == "number" then
+                        local resolved = types_mod.find(ctx, tid)
+                        local root = tv_to_root[resolved] or tv_to_root[tid]
+                        if root and not roots_seen[root] then
+                            roots_seen[root] = true
+                            local bucket = ctx._forall_ops[root]
+                            if not bucket then
+                                bucket = {}
+                                ctx._forall_ops[root] = bucket
+                            end
+                            local clone = {}
+                            for k, v in ipairs(c) do clone[k] = v end
+                            bucket[#bucket + 1] = clone
+                        end
+                    end
+                end
             end
-            bucket[#bucket + 1] = clone
         end
     end
 end
@@ -1716,6 +1825,7 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
             ctx._sub_solve_params = saved_sub_params
         end
     end
+    local hm_body_end = #ctx.constraints
 
     local returns
     if ann_fn_tid then
@@ -1749,6 +1859,11 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
     -- annotation and have no free vars at the function's level.
     if not has_ann_fn then
         env_mod.generalize(ctx, fn_tid, saved.level)
+        -- HM Phase 2: with bounds populated by sub_solve and params marked
+        -- FLAG_GENERIC, record body ops keyed by root template TV. Also
+        -- generalizes nested bound TVs so call-site env.instantiate mints
+        -- fresh per-call copies (driving inst_mapping[U_x] = U_x').
+        record_polymorphic_ops_post(ctx, param_tids, body_start, hm_body_end)
     end
 
     -- Propagate type/assertion predicate from the annotation type ID to the runtime
@@ -2276,6 +2391,33 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
             if bound then
                 local inst_bound = env_mod.instantiate(ctx, bound, ctx.scope.level, inst_mapping)
                 emit(ctx, { C_BOUND, fresh_tv, inst_bound, n.line, n.col })
+            end
+        end
+        -- HM Phase 2: re-emit recorded body ops with operand TVs mapped to
+        -- their per-call fresh instances. The bound walk above populated
+        -- inst_mapping for every TV nested inside each generalized bound
+        -- (because record_polymorphic_ops_post marked them FLAG_GENERIC).
+        -- A single op may be reachable from multiple template TVs (e.g. an
+        -- arith op uses operands from two distinct param bounds): use a
+        -- per-call seen set to avoid double-emit.
+        if ctx._forall_ops then
+            local seen_ops = {}
+            for orig_tv in pairs(inst_mapping) do
+                local bucket = ctx._forall_ops[orig_tv]
+                if bucket then
+                    for _, op in ipairs(bucket) do
+                        if not seen_ops[op] then
+                            seen_ops[op] = true
+                            local code = op[1]
+                            if code == C_ARITH then
+                                local lhs = inst_mapping[op[3]] or op[3]
+                                local rhs = inst_mapping[op[4]] or op[4]
+                                local res = inst_mapping[op[5]] or op[5]
+                                emit(ctx, { C_ARITH, op[2], lhs, rhs, res, n.line, n.col })
+                            end
+                        end
+                    end
+                end
             end
         end
     end
