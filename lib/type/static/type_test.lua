@@ -4710,6 +4710,25 @@ local y = x
 ]])
     end)
 
+    -- TODO Phase 2 commit 3 (see docs/typechecker-hm-phase2.md):
+    -- Field-value-type propagation through HM bounds. Body's deferred
+    -- C_ARITH references template TVs but call-site propagate_meta_bound
+    -- binds instance TVs, so caller field types never flow into body
+    -- operations. Uncomment + flip when the fix lands:
+    --
+    --   assert.it("HM Phase 2: t.x + t.y rejects {x='a', y='b'}", function()
+    --       v3_has_error("local function f(t) return t.x + t.y end\nlocal _ = f({x='a', y='b'})\n", "missing metamethod")
+    --   end)
+    --   assert.it("HM Phase 2: t.x + t.y rejects {x=true, y=false}", function()
+    --       v3_has_error("local function f(t) return t.x + t.y end\nlocal _ = f({x=true, y=false})\n", "missing metamethod")
+    --   end)
+    --   assert.it("HM Phase 2: t.x + t.y rejects {x=nil, y=nil}", function()
+    --       v3_has_error("local function f(t) return t.x + t.y end\nlocal _ = f({x=nil, y=nil})\n", "missing metamethod")
+    --   end)
+    --   assert.it("HM Phase 2: t.x + t.y still accepts {x=1, y=2}", function()
+    --       v3_no_errors("local function f(t) return t.x + t.y end\nlocal _ = f({x=1, y=2})\n")
+    --   end)
+
     -- Higher-order signature contravariance: `<F: (P) -> R>` bound rejects
     -- callers whose function signature is incompatible with the bound. The
     -- check runs at C_BOUND time after propagate_function_bound has bound
