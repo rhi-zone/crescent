@@ -338,3 +338,5 @@ LOC = sum of `.lua` lines under the dir excluding `*_test.lua`. "tests" = number
 **Diff in approach:** Top-level shells are empty squatters; `lib/unified/` holds the real implementations.
 
 **Recommendation:** Drop all top-level stub shells (hast, mdast, remark*, rehype*). `lib/unified/` is canonical. This is the clearest cut in the entire triage.
+
+**Resolved 2026-05-15:** stubs deleted; `lib/unified/` is canonical.

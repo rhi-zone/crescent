@@ -202,10 +202,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 
 ## Markup / unified pipeline
 
-- `lib/unified/` — unified.js-style pipeline; many submodules: `mdast/`, `hast/`, `nlcst/`, `xast/`, `remark*`, `rehype*`, `retext*`, `unist_util_*`, `xast_util_to_xml/`. Status: wip (some modules empty; see `lib/unified/STATUS.md`).
-- `lib/hast/` — top-level hast (no init.lua). Status: stub.
-- `lib/mdast/` — top-level mdast (no init.lua). Status: stub.
-- `lib/remark/`, `lib/remark_*/`, `lib/rehype/`, `lib/rehype_*/` — top-level shells, no init.lua. Status: stub. **The real impls are under `lib/unified/`.**
+- `lib/unified/` — unified.js-style pipeline; many submodules: `mdast/`, `hast/`, `nlcst/`, `xast/`, `remark*`, `rehype*`, `retext*`, `unist_util_*`, `xast_util_to_xml/`. Status: wip (some modules empty; see `lib/unified/STATUS.md`). This is the canonical home for all hast/mdast/remark*/rehype* implementations.
 - `lib/template/` — HTML template (escape + render). Status: stable.
 - `lib/template_engine/` — Jinja2-style with inheritance, filters, macros. Status: stable.
 - `lib/string_template/` — simple string interpolation. Status: stable.
