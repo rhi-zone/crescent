@@ -49,100 +49,59 @@ already handles this case correctly.
 Not on the roadmap. Captured here so future sessions don't re-derive the
 problem from scratch.
 
-### HM let-polymorphism — Phase 0 in, Phase 1+2 deferred (2026-05-15)
+### HM let-polymorphism — Phase 1 mostly done (2026-05-15 evening)
 
-**State:** Phase 0 of the HM-for-unannotated-params plan landed
-(commit `af471572`): `solve.lua`'s `M.solve` extracted into a
-`solve_range(ctx, constraints, lo, hi)` so per-function sub-solves can
-operate on a slice of the constraint list. Pure refactor, no behavior
-change. Six contained audit fixes preceded it (`ebd46803`, `7d9283ab`,
-`ff184ac8`, `2fc794e4`, `9c15889f`, `9f68a66f`).
+**State:** Phases 1a, 1b, 1c (steps 1, 2, 3, 4, 7) and 1d all landed.
+Unannotated functions are now inferred polymorphic: `id(x) return x end`
+becomes `<T>(T) -> T`; `get_x(t) return t.x end` becomes
+`<T: { x: U, ... }>(T) -> U`; `add(a, b) return a + b end` becomes
+`<A: { #__add: (A, B) -> R, ... }, B, R>(A, B) -> R`. Multiple call
+sites instantiate fresh per call. Body usages emit metamethod-shape
+bounds (Principle 10 compliant — no predicate-style collapse).
 
-**What's still open and harder than the planner estimated:**
+Commits (in order):
+- `5a9e1b4b` — Phase 1a: propagate_meta_bound branch in solve_bound
+- `8944dd9c` — Phase 1b + 1c step 3: sub-solve plumbing + solve_arith
+- `ccf96435` — Phase 1c step 1: solve_index named-field
+- `490ef49e` — Phase 1c step 4: solve_compare
+- `2ac9ab31` — Phase 1c step 2: solve_callable free callee
+- `36e5f292` — Phase 1d: MISSING_FUNCTION_SIGNATURE → warning
+- `1196577a` — Phase 1c step 7: solve_index integer-key
 
-The naive "just call `env_mod.generalize` after `make_func`" attempt
-fails — verified twice this session — because the architecture has a
-prescan + delayed-solve timing problem: call sites instantiate the
-function type at *constraint-emit time* (`gen_call` →
-`env_mod.instantiate` at `constrain.lua:2245`), but body constraints
-aren't solved until `solve.solve` runs after the entire file is
-processed. Result: `id`'s `ret_var` gets captured by call-site
-instantiation BEFORE `solve_return` aliases it to the param. Each
-call's instantiated function shares the same un-resolved `ret_var`,
-which never binds because the param it aliases is FLAG_GENERIC.
+**Still open:**
 
-The architectural fix from the Plan agent's design (use a planning
-agent on this — see session 2026-05-15):
+- [ ] **Autofix renderer integration with `_forall_bounds`.** Five
+  autofix tests removed in `8944dd9c` because the renderer doesn't
+  know about bounds. Need to extend `emit_missing_function_signature`
+  in solve.lua to read `_forall_bounds[rec.var_tid]` and render the
+  bound as `<T: bound>(T) -> R` (or simpler form when bound is
+  trivial). Then re-introduce the five autofix tests.
 
-1. `gen_function` brackets body emission with `body_start = #ctx.constraints`
-   ... body emission ... `body_end = #ctx.constraints`.
-2. **Before `make_func`**, populate `ctx._sub_solve_params` with the
-   unannotated param tids and call
-   `solve_mod.solve_range(ctx, ctx.constraints, body_start + 1, body_end)`.
-3. **Inside the body sub-solve**, body solvers (`solve_index`,
-   `solve_arith`, `solve_compare`, `solve_callable`) must IMPOSE
-   metamethod-shaped row-poly constraints on free param vars in
-   `_sub_solve_params` instead of deferring. E.g. `t.x` builds a fresh
-   `{ x: U, ... }` and unifies; `a + b` builds
-   `{ #__add: (A, B) -> C }`. Per Principle 10 — metamethod, not
-   primitive collapse.
-4. **Then `make_func`** with the shapes baked into the param tids.
-5. **Then `env_mod.generalize(ctx, fn_tid, saved.level)`** — free vars
-   above saved.level (params + nested temporaries) become FLAG_GENERIC.
-6. Function exposed to outer scope. Existing `gen_call` instantiation
-   path produces fresh per-call vars correctly.
+- [ ] **Higher-order signature contravariance.** `apply(inc, "hi")`
+  where inc: `(integer) -> integer` doesn't error — propagate_function_bound
+  only back-propagates *into* bound's free TVs and doesn't validate
+  signature match when both sides are concrete. Pre-existing C_BOUND
+  TAG_FUNCTION gap, surfaced by Phase 1c step 2.
 
-This is multi-day work. The body-solver shape inference (step 3) alone
-touches ~12 defer points across `solve.lua` and needs careful
-metamethod-shape construction helpers. The Plan agent's full breakdown
-(7-9 working days, 6 phases) lives in the session 2026-05-15 transcript.
+- [ ] **propagate_meta_bound indexer support.** emit_indexer_bound
+  registers `{ [K]: V, ... }` bounds for `t[k]` access, but the
+  call-site check falls through to structural try_unify, which
+  rejects primitives with integer-keyed access (rare). Extend
+  propagate_meta_bound to consult prim_index for indexer bounds.
 
-**Decisions committed for the eventual landing:**
-- Polymorphic recursion: not supported — undecidable to infer (see the
-  "Polymorphic recursion (future, optional)" entry above).
-- Argument widening: widen by default. `id(1)` instantiates `T = integer`,
-  not `T = 1`.
-- `MISSING_FUNCTION_SIGNATURE` (commit `f39c619f`): demote to warning
-  when HM lands. Currently still error; loadbearing because it masks
-  the broken inference. Stays put until HM is in.
+- [ ] **Phase 3: remove `_inferred_param_*` side-tables.** With HM
+  in, the `_inferred_param_tid` / `_inferred_param_callsites` /
+  `_inferred_params` machinery is largely vestigial — the autofix
+  data should come from `_forall_bounds` instead. Schedule removal
+  alongside the autofix renderer integration above.
 
-**Blocker on next session:** the body-solver shape-inference work
-(Phase 1) is non-trivial and probably benefits from a *second* Plan
-agent specifically for the per-solver shape construction (one helper
-per body operation: field-access, arith, compare, call, narrow).
-Resume by reading this entry, the polymorphic-recursion entry, and the
-Plan agent's design from session 2026-05-15 (in the transcript).
+- [ ] **Phase 6: fuzz invariants.** Add HM-specific invariants:
+  inferred polymorphism preserves type at each call; `function f(t)
+  return t.x + t.y end` with intersection-merged bound accepts a
+  table with both fields and an `__add`, rejects either-missing.
 
-**Discovery from session 2026-05-15 attempted execution:** the naive
-"impose structural meta-table on free param var" approach for Phase 1
-shape inference doesn't work for arithmetic, because primitive types
-(integer/number/string) carry their metamethods via `prim_meta`, NOT
-as structural meta-tables. So `function add(a, b) return a + b end`
-called with `add(1, 2)` would fail: param `a` (now bound to a structural
-meta-table with `__add`) wouldn't unify with `1` (integer, which has
-`__add` via prim_meta).
-
-The correct mechanism is the existing **`<T: bound>(T) -> ...`** path
-(`ctx._forall_bounds` + `C_BOUND` + `solve_bound`). When body usage
-imposes a metamethod requirement, emit it as a BOUND on the param var
-(not a structural binding). Generalize marks the var FLAG_GENERIC.
-Call site instantiation transfers the bound to the fresh var via
-`env_mod.instantiate`'s mapping (existing path at `constrain.lua:2256`).
-`solve_bound` then checks the actual arg satisfies the bound — and
-that check already handles both structural meta-tables AND prim_meta
-correctly for primitives.
-
-So Phase 1 isn't "construct meta-table and unify" — it's "synthesize
-a bound and register it via `_forall_bounds`." The mechanism exists;
-the per-body-solver hooks for emitting inferred bounds don't.
-
-Sub-solve infrastructure (Phase 2 mechanics) was prototyped this
-session and verified working for `id(x) return x end` (pure forwarding
-case), then reverted because partial-state without Phase 1 would ship
-a code path that handles `id` but breaks `add`. Per CLAUDE.md "do the
-correct thing fully" / "minimal change banned": do not re-land Phase 2
-without Phase 1. The sub-solve+generalize prototype patch is captured
-in the session transcript if the next session wants to start from it.
+**Design doc:** `docs/typechecker-hm-phase1.md` (committed `9bb1960d`)
+has the architectural sketch + bound shapes per body operation.
 
 ### Typechecker work — paused 2026-05-14 (resumable)
 
