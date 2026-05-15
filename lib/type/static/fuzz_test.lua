@@ -757,6 +757,20 @@ local x = f({ x = 1, y = 2 })
 		"intersection-bound rejected valid input; HM bound composition regressed")
 end)
 
+-- Field-value-type propagation (HM Phase 2, commit 9260751e): the inferred
+-- bound on `t` must constrain not just field PRESENCE but field VALUE TYPES.
+-- `t.x + t.y` requires `t.x` and `t.y` to satisfy the `__add` metamethod
+-- constraint (numeric). Calling with `{ x = "a", y = "b" }` — both fields
+-- present, neither numeric — must be rejected.
+T.it("HM bound: t.x + t.y rejects { x = \"a\", y = \"b\" } (fields present, wrong value types)", function()
+	local src = [[
+local function f(t) return t.x + t.y end
+local x = f({ x = "a", y = "b" })
+]]
+	assert(rejects(src),
+		"field-value-type propagation regressed; HM Phase 2 (commit 9260751e) lost")
+end)
+
 -- ── HM Invariant H4: Self-reference equi-recursive bound ─────────────────────
 -- `function f(a) return a + a end` accepts numeric inputs and rejects strings
 -- (no `__add` metamethod). Self-reference is the H1 case from the design doc.
