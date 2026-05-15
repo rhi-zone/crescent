@@ -2221,13 +2221,37 @@ end
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_compare(ctx, c)
-    local lhs_tid = find(ctx, c[2] --[[:! integer]])
-    local rhs_tid = find(ctx, c[3] --[[:! integer]])
+    local lhs_raw = c[2] --[[:! integer]]
+    local rhs_raw = c[3] --[[:! integer]]
+    local lhs_tid = find(ctx, lhs_raw)
+    local rhs_tid = find(ctx, rhs_raw)
     local line, col = c[4] --[[:! integer | nil]], c[5] --[[:! integer | nil]]
 
-    -- Defer if either operand is not yet resolved (callsite hasn't bound params yet).
+    -- HM Phase 1c step 4: bound emission for free param operands. Same
+    -- pattern as solve_arith. The result is hardwired to boolean (set at
+    -- constraint emit time in constrain.lua), so we use a fresh discard
+    -- var as the bound's R slot — comparison's signature is morally
+    -- `(Self, Other) -> boolean`, but the propagate_meta_bound check just
+    -- needs to find `__lt` on the actual.
     local lhs_t = ctx.types:get(lhs_tid)
     local rhs_t = ctx.types:get(rhs_tid)
+    if ctx._sub_solve_params then
+        local lhs_is_param = lhs_t.tag == TAG_VAR and ctx._sub_solve_params[lhs_raw]
+        local rhs_is_param = rhs_t.tag == TAG_VAR and ctx._sub_solve_params[rhs_raw]
+        if lhs_is_param then
+            local r_discard = types_mod.make_var(ctx, lhs_t.data[1])
+            emit_meta_bound(ctx, lhs_tid, "__lt", rhs_tid, r_discard)
+        end
+        if rhs_is_param and lhs_raw ~= rhs_raw then
+            local r_discard = types_mod.make_var(ctx, rhs_t.data[1])
+            emit_meta_bound(ctx, rhs_tid, "__lt", lhs_tid, r_discard)
+        end
+        if lhs_is_param or rhs_is_param then
+            return true
+        end
+    end
+
+    -- Defer if either operand is not yet resolved (callsite hasn't bound params yet).
     if lhs_t.tag == TAG_VAR or lhs_t.tag == TAG_ROWVAR then return false end
     if rhs_t.tag == TAG_VAR or rhs_t.tag == TAG_ROWVAR then return false end
 
