@@ -1493,10 +1493,6 @@ end
 gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line, fn_def_col)
     local fn_scope = env_mod.child(ctx.scope)
     local param_tids = {} --: { [integer]: integer, ... }
-    -- Track the starting index of unannotated-param records added by this
-    -- gen_function call so we can patch fn_tid / param_idx in after the
-    -- function type is constructed (Phase C autofix metadata).
-    local inferred_start = (ctx._inferred_params and #ctx._inferred_params or 0) --[[: integer]]
 
     local has_ann_fn = ann_fn_tid ~= nil
     -- body_ann_fn_tid: the annotation function type used for body checking.
@@ -1533,17 +1529,6 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
                     body_pt_id = types_mod.find(ctx, ctx.lists:get(aft_body.data[0] + i))
                 else
                     body_pt_id = types_mod.make_var(ctx, fn_scope.level)
-                    -- Param has no annotation slot; record per-fn metadata for
-                    -- the MISSING_FUNCTION_SIGNATURE pass.
-                    ctx._inferred_params = ctx._inferred_params or {}
-                    ctx._inferred_params[#ctx._inferred_params + 1] = {
-                        name_id   = name_id,
-                        var_tid   = body_pt_id,
-                        fn_line   = fn_def_line,
-                        fn_col    = fn_def_col,
-                        param_idx = i,
-                        -- fn_tid filled in after make_func below.
-                    }
                 end
                 env_mod.bind(fn_scope, name_id, body_pt_id)
                 -- fn_tid param uses original annotation (FLAG_GENERIC for generic fns)
