@@ -1367,6 +1367,21 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
         return res
     end
 
+    -- Integer literal key on a still-free param var → defer via C_INDEX so
+    -- solve_index's integer-key HM branch can register `{ [integer]: U, ... }`
+    -- bound on the param (Phase 1c step 7). Without this emission, `t[n]`
+    -- on an unannotated function param would silently return T_ANY and the
+    -- inferred return type would render as `any` instead of the polymorphic
+    -- indexer-value type. For concrete obj types (tuple/table/etc.) the
+    -- existing "Generic index" branch below handles the lookup directly,
+    -- preserving the long-standing C_INDEX-free fast path for those cases.
+    if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_INTEGER
+        and obj_t.tag == TAG_VAR then
+        local res = fresh_var(ctx)
+        emit(ctx, { C_INDEX, obj_tid, types_mod.make_literal(ctx, LIT_INTEGER, kt_t.data[1]), res, n.line, n.col })
+        return res
+    end
+
     -- Generic index
     if obj_t.tag == TAG_TABLE then
         local is, il = obj_t.data[2], obj_t.data[3]
