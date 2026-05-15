@@ -2636,6 +2636,20 @@ local function solve_check_args(ctx, c)
     end
 
     if callee_t.tag == TAG_VAR or callee_t.tag == TAG_ROWVAR then
+        -- HM Phase 1c step 2 (extension): same as solve_callable's free-callee
+        -- bound emission. Ordinary `f(x)` calls in user code go through
+        -- C_CHECK_ARGS, not C_CALLABLE — so the bound emission must live here
+        -- too, or HM's higher-order inference is silently broken (callee
+        -- silently binds to T_ANY, no contravariance check fires).
+        if ctx._sub_solve_params and ctx._sub_solve_params[callee_raw] then
+            local var_t = ctx.types:get(callee_tid)
+            local var_level = var_t.data[1]
+            local r_var = types_mod.make_var(ctx, var_level)
+            local sig_tid = types_mod.make_func(ctx, arg_tids, { r_var }, -1, nil)
+            merge_inferred_bound(ctx, callee_tid, sig_tid)
+            unify_mod.unify(ctx, ret_tid, r_var)
+            return true
+        end
         bind_to(ctx, ret_tid, ctx.T_ANY)
         return true
     end
