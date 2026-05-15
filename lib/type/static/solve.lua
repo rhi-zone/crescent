@@ -820,6 +820,75 @@ local function propagate_meta_bound(ctx, actual_tid, bound_tid)
         end
     end
 
+    -- Indexer pairs: iterate (data[2..3]) and back-propagate via indexer lookup.
+    -- Bound `{ [K]: V, ... }` requires the actual to have an indexer matching
+    -- key K with value type V. For TAG_TABLE actuals, walk the indexer list.
+    -- For primitives, the prim_index table is consulted (rare — strings have
+    -- prim_index for method names, not for integer indexing).
+    do
+        local idx_start, idx_len = bt.data[2], bt.data[3]
+        if idx_len > 0 then
+            local at_now = ctx.types:get(actual_tid)
+            local ix = idx_start
+            while ix < idx_start + idx_len - 1 do
+                local bk_tid = find(ctx, ctx.lists:get(ix))
+                local bv_tid = find(ctx, ctx.lists:get(ix + 1))
+                ix = ix + 2
+                local actual_value_tid
+                if at_now.tag == TAG_TABLE then
+                    -- Walk actual's indexers for a matching key (structurally).
+                    local ais, ail = at_now.data[2], at_now.data[3]
+                    local aix = ais
+                    while aix < ais + ail - 1 do
+                        local ak = find(ctx, ctx.lists:get(aix))
+                        if unify_mod.try_unify(ctx, bk_tid, ak) then
+                            actual_value_tid = find(ctx, ctx.lists:get(aix + 1))
+                            break
+                        end
+                        aix = aix + 2
+                    end
+                    -- Fallback: integer-literal-keyed fields satisfy `[integer]`
+                    -- (Lua table literals `{a, b, c}` type as `{1: a, 2: b, 3: c}`
+                    -- — literal-keyed fields, not an explicit indexer). The key
+                    -- check is by literal subtyping: bk = integer accepts
+                    -- 1: a, 2: b, etc. Returns the union of matching field types.
+                    if not actual_value_tid then
+                        local matched_value_tids = {} --: { [integer]: integer, ... }
+                        for fi = at_now.data[0], at_now.data[0] + at_now.data[1] - 1 do
+                            local afid = ctx.lists:get(fi)
+                            local afe = ctx.fields:get(afid)
+                            local fname = intern_mod.get(ctx.pool, afe.name_id)
+                            if fname and tonumber(fname) then
+                                -- Integer-literal field; its key type is the literal
+                                -- integer, which is a subtype of `integer`. Match if
+                                -- bk_tid accepts integer (i.e. is integer or wider).
+                                if unify_mod.try_unify(ctx, bk_tid, ctx.T_INTEGER) then
+                                    matched_value_tids[#matched_value_tids + 1] = find(ctx, afe.type_id)
+                                end
+                            end
+                        end
+                        if #matched_value_tids == 1 then
+                            actual_value_tid = matched_value_tids[1]
+                        elseif #matched_value_tids > 1 then
+                            actual_value_tid = types_mod.make_union(ctx, matched_value_tids)
+                        end
+                    end
+                end
+                if not actual_value_tid then
+                    return "missing indexer `[" .. types_mod.display_short(ctx, bk_tid) .. "]`"
+                end
+                local bvt = ctx.types:get(bv_tid)
+                if bvt.tag == TAG_VAR or bvt.tag == TAG_ROWVAR then
+                    unify_mod.unify(ctx, actual_value_tid, bv_tid)
+                else
+                    if not unify_mod.try_unify(ctx, actual_value_tid, bv_tid) then
+                        return "indexer `[" .. types_mod.display_short(ctx, bk_tid) .. "]` value type mismatch"
+                    end
+                end
+            end
+        end
+    end
+
     -- Named fields: iterate (data[0..1]) and back-propagate via field lookup.
     -- For primitives, consult prim_index; for tables, table_field.
     local field_start, field_len = bt.data[0], bt.data[1]
