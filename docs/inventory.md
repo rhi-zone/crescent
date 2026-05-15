@@ -176,7 +176,6 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/datalog/` — Datalog. Status: stable.
 - `lib/diff/` — Myers O(ND) diff. Status: stable.
 - `lib/expr/` — math expression parser/evaluator + symbolic differentiation. Status: stable.
-- `lib/expression_evaluator/` — expression evaluator with builtins. Status: stable. **Parallel to `lib/expr/`.**
 - `lib/glob/` — glob pattern matching. Status: stable.
 - `lib/grammar/` — PEG parser combinators. Status: stable.
 - `lib/grammar_gen/` — context-free grammar text generation (Tracery-style). Status: stable.
