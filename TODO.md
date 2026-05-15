@@ -67,15 +67,11 @@ Commits (in order):
 - `2ac9ab31` — Phase 1c step 2: solve_callable free callee
 - `36e5f292` — Phase 1d: MISSING_FUNCTION_SIGNATURE → warning
 - `1196577a` — Phase 1c step 7: solve_index integer-key
+- `748a67a9` — Autofix renderer Phase A: walk fn_tid + bounds
+- `3943f919` — `_solved` flag prevents body-constraint re-fire after sub-solve
+- `47e56146` — emit C_INDEX for literal-int key on free param vars (bug 3 fix)
 
 **Still open:**
-
-- [ ] **Autofix renderer integration with `_forall_bounds`.** Five
-  autofix tests removed in `8944dd9c` because the renderer doesn't
-  know about bounds. Need to extend `emit_missing_function_signature`
-  in solve.lua to read `_forall_bounds[rec.var_tid]` and render the
-  bound as `<T: bound>(T) -> R` (or simpler form when bound is
-  trivial). Then re-introduce the five autofix tests.
 
 - [ ] **Higher-order signature contravariance.** `apply(inc, "hi")`
   where inc: `(integer) -> integer` doesn't error — propagate_function_bound
