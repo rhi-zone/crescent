@@ -124,11 +124,40 @@ Commits (in order):
   (commit 5a2558b8), monomorphic recursion, annotated-generic
   compat, indexer bound rejection (commit 1196579e), and
   MISSING_FUNCTION_SIGNATURE warning demotion (36e5f292).
-  Note: `t.x + t.y` with `{x="a",y="b"}` does NOT reject — the
-  inferred `__add` bound checks field presence/metamethod presence
-  but does not constrain field VALUE types (string has `__add`
-  via Lua's coercion). Real value-type propagation through the
-  bound is a separate item.
+
+- [ ] **Field-value-type propagation through HM bounds (Phase 2 unsoundness).**
+  `function f(t) return t.x + t.y end` called with `{x="a", y="b"}` (both
+  literal strings — non-numeric, would runtime-error on `"a" + "b"`) is
+  silently accepted. Same for `{x=true, y=false}`, `{x=nil, y=nil}`, etc.
+  Verified via probe at session-end 2026-05-15. The earlier note
+  attributing this to "string has __add via Lua's coercion" was wrong —
+  `"a" + "b"` is a real runtime error in LuaJIT (`attempt to perform
+  arithmetic on a string value`); only numeric strings coerce.
+
+  **Root cause.** The HM body uses a polymorphic *template*: param `t`
+  is a free TV, `t.x` access creates a fresh field-result TV `U_x` and
+  emits `{ x: U_x, ... }` into `_forall_bounds[t]`. The body's C_ARITH
+  references `U_x` and `U_y` directly. At each call site the template
+  is *instantiated* with fresh TVs (`t'`, `U_x'`, `U_y'`); the bound is
+  checked against the instance, so propagate_meta_bound's `unify(actual,
+  bf_tid)` (solve.lua line 930) binds `U_x' = "a"`, NOT `U_x = "a"`. The
+  body's C_ARITH still sees `U_x` as TAG_VAR forever (confirmed via
+  trace: `lhs.tag=13 rhs.tag=13` on every re-fire post call site). The
+  meta-op dispatch never gets to inspect `"a"` and reject it.
+
+  **Why H3 missing-field works:** propagate_meta_bound's `table_field`
+  lookup runs against the *actual* table at the call site, so a missing
+  field is caught structurally. Field-value-type checks would require
+  running the body's metamethod dispatch with the instance's bf_tids
+  substituted in — i.e. either re-checking the body per call site, or
+  adding an explicit operand-value constraint to each emitted bound and
+  having propagate_meta_bound re-trigger that constraint after binding
+  the bf_tid.
+
+  **Scope:** non-trivial. Re-running body per call breaks
+  generalization (back to monomorphisation). The cleaner path is to
+  attach a deferred operation constraint to `_forall_bounds` entries
+  that fires when the bound is checked. Out of scope for Phase 1.
 
 **Design doc:** `docs/typechecker-hm-phase1.md` (committed `9bb1960d`)
 has the architectural sketch + bound shapes per body operation.
