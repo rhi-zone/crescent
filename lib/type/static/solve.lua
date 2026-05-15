@@ -44,6 +44,7 @@ local FLAG_PRIVATE       = defs.FLAG_PRIVATE
 local FLAG_OPAQUE_KEY    = defs.FLAG_OPAQUE_KEY
 local FLAG_SKOLEM        = defs.FLAG_SKOLEM
 local FLAG_ROWVAR_INFER  = defs.FLAG_ROWVAR_INFER
+local FLAG_GENERIC       = defs.FLAG_GENERIC
 local band               = require("bit").band
 local bor                = require("bit").bor
 
@@ -3249,6 +3250,245 @@ local function combine_inferred(ctx, widened_tids)
     return table.concat(order, " | ")
 end
 
+-- HM-aware annotation renderer (Phase 1 follow-up). Walks a function tid
+-- collecting FLAG_GENERIC vars, assigns names (T, U, V, W, X, Y, Z, T1+),
+-- and renders the function as `<T[: bound], U[: bound], ...>(params) -> ret`
+-- with var occurrences substituted. Bounds come from ctx._forall_bounds.
+--
+-- The standard display() renders FLAG_GENERIC vars as `_` — indistinguishable
+-- from each other and unparseable as annotation source. This renderer needs
+-- to produce parseable `--:` annotation text for the autofix to write back.
+--
+-- Returns the signature string (without the `--: ` prefix) on success, or
+-- nil if any tid can't be cleanly rendered (free non-generic vars, leaky
+-- shapes, etc.).
+--: (Ctx, integer) -> string | nil
+local function render_hm_signature(ctx, fn_tid)
+    fn_tid = find(ctx, fn_tid)
+    local fn_t = ctx.types:get(fn_tid)
+    if fn_t.tag ~= TAG_FUNCTION then return nil end
+
+    -- var_names: tid -> name; var_order: ordered list of generic tids
+    local var_names = {} --: { [integer]: string, ... }
+    local var_order = {} --: { [integer]: integer, ... }
+    local NAMES = { "T", "U", "V", "W", "X", "Y", "Z" }
+
+    -- Assign a name to a generic var if not already named. Returns name or nil.
+    local function name_for(tid)
+        tid = find(ctx, tid)
+        if var_names[tid] then return var_names[tid] end
+        local t = ctx.types:get(tid)
+        if t.tag ~= TAG_VAR then return nil end
+        if band(t.flags, FLAG_GENERIC) == 0 then return nil end
+        local idx = #var_order + 1
+        local name = NAMES[idx] or ("T" .. idx)
+        var_names[tid] = name
+        var_order[#var_order + 1] = tid
+        return name
+    end
+
+    -- Render a tid with var-name substitution. seen guards cycles. Returns
+    -- nil if the tid can't be rendered (non-generic free var, etc.).
+    local render
+    render = function(tid, seen)
+        tid = find(ctx, tid)
+        if seen[tid] then return var_names[tid] end  -- cycle: use name if available
+        seen[tid] = true
+        local t = ctx.types:get(tid)
+        local tag = t.tag
+        if tag == TAG_VAR then
+            local n = name_for(tid)
+            if n then return n end
+            return nil  -- non-generic free var
+        end
+        if tag == TAG_NIL      then return "nil" end
+        if tag == TAG_BOOLEAN  then return "boolean" end
+        if tag == TAG_NUMBER   then return "number" end
+        if tag == TAG_STRING   then return "string" end
+        if tag == TAG_INTEGER  then return "integer" end
+        if tag == TAG_ANY      then return "any" end
+        if tag == TAG_NEVER    then return "never" end
+        if tag == TAG_UNKNOWN  then return "unknown" end
+        if tag == TAG_FUNCTION then
+            local pparts = {} --: { [integer]: string, ... }
+            for i = t.data[0], t.data[0] + t.data[1] - 1 do
+                local p = render(ctx.lists:get(i), seen)
+                if not p then return nil end
+                pparts[#pparts + 1] = p
+            end
+            local rparts = {} --: { [integer]: string, ... }
+            for i = t.data[2], t.data[2] + t.data[3] - 1 do
+                local r = render(ctx.lists:get(i), seen)
+                if not r then return nil end
+                rparts[#rparts + 1] = r
+            end
+            local rs = #rparts == 0 and "()"
+                or #rparts == 1 and rparts[1]
+                or "(" .. table.concat(rparts, ", ") .. ")"
+            return "(" .. table.concat(pparts, ", ") .. ") -> " .. rs
+        end
+        if tag == TAG_TABLE then
+            local parts = {} --: { [integer]: string, ... }
+            -- Named fields
+            for i = t.data[0], t.data[0] + t.data[1] - 1 do
+                local fid = ctx.lists:get(i)
+                local fe = ctx.fields:get(fid)
+                local fname = intern_mod.get(ctx.pool, fe.name_id)
+                if not fname then return nil end
+                local ft = render(fe.type_id, seen)
+                if not ft then return nil end
+                parts[#parts + 1] = fname .. ": " .. ft
+            end
+            -- Indexers (key, value pairs)
+            local is, il = t.data[2], t.data[3]
+            local ix = is
+            while ix < is + il - 1 do
+                local kt = render(ctx.lists:get(ix), seen)
+                local vt = render(ctx.lists:get(ix + 1), seen)
+                if not kt or not vt then return nil end
+                parts[#parts + 1] = "[" .. kt .. "]: " .. vt
+                ix = ix + 2
+            end
+            -- Meta slots
+            for i = t.data[5], t.data[5] + t.data[6] - 1 do
+                local fid = ctx.lists:get(i)
+                local fe = ctx.fields:get(fid)
+                local mname = intern_mod.get(ctx.pool, fe.name_id)
+                if not mname then return nil end
+                local ft = render(fe.type_id, seen)
+                if not ft then return nil end
+                parts[#parts + 1] = "#" .. mname .. ": " .. ft
+            end
+            -- Open/closed
+            if t.data[4] >= 0 then
+                parts[#parts + 1] = "..."
+            end
+            return "{ " .. table.concat(parts, ", ") .. " }"
+        end
+        if tag == TAG_LITERAL then
+            local kind = t.data[0]
+            if kind == LIT_STRING then
+                local s = intern_mod.get(ctx.pool, t.data[1]) or "?"
+                return '"' .. s .. '"'
+            end
+            if kind == LIT_INTEGER then return tostring(t.data[1]) end
+            if kind == LIT_BOOLEAN then return t.data[1] == 1 and "true" or "false" end
+            if kind == LIT_NIL     then return "nil" end
+            return nil  -- LIT_NUMBER (float) — unsupported in this renderer
+        end
+        if tag == TAG_UNION then
+            local parts = {} --: { [integer]: string, ... }
+            for i = t.data[0], t.data[0] + t.data[1] - 1 do
+                local p = render(ctx.lists:get(i), seen)
+                if not p then return nil end
+                parts[#parts + 1] = p
+            end
+            return table.concat(parts, " | ")
+        end
+        if tag == TAG_INTERSECTION then
+            local parts = {} --: { [integer]: string, ... }
+            for i = t.data[0], t.data[0] + t.data[1] - 1 do
+                local p = render(ctx.lists:get(i), seen)
+                if not p then return nil end
+                parts[#parts + 1] = p
+            end
+            return table.concat(parts, " & ")
+        end
+        return nil  -- unsupported tag
+    end
+
+    -- Walk the function type to discover generic vars in encounter order.
+    -- (The actual rendering of param/return parts happens in a second pass.)
+    local function collect(tid, seen)
+        tid = find(ctx, tid)
+        if seen[tid] then return end
+        seen[tid] = true
+        local t = ctx.types:get(tid)
+        if t.tag == TAG_VAR then name_for(tid); return end
+        if t.tag == TAG_FUNCTION then
+            for i = t.data[0], t.data[0] + t.data[1] - 1 do collect(ctx.lists:get(i), seen) end
+            for i = t.data[2], t.data[2] + t.data[3] - 1 do collect(ctx.lists:get(i), seen) end
+            return
+        end
+        if t.tag == TAG_TABLE then
+            for i = t.data[0], t.data[0] + t.data[1] - 1 do
+                local fid = ctx.lists:get(i)
+                local fe = ctx.fields:get(fid)
+                collect(fe.type_id, seen)
+            end
+            local is, il = t.data[2], t.data[3]
+            for i = is, is + il - 1 do collect(ctx.lists:get(i), seen) end
+            for i = t.data[5], t.data[5] + t.data[6] - 1 do
+                local fid = ctx.lists:get(i)
+                local fe = ctx.fields:get(fid)
+                collect(fe.type_id, seen)
+            end
+            return
+        end
+        if t.tag == TAG_UNION or t.tag == TAG_INTERSECTION then
+            for i = t.data[0], t.data[0] + t.data[1] - 1 do collect(ctx.lists:get(i), seen) end
+            return
+        end
+    end
+    collect(fn_tid, {})
+
+    -- Render params.
+    local pparts = {} --: { [integer]: string, ... }
+    for i = fn_t.data[0], fn_t.data[0] + fn_t.data[1] - 1 do
+        local p = render(ctx.lists:get(i), {})
+        if not p then return nil end
+        pparts[#pparts + 1] = p
+    end
+    -- Render returns.
+    local rl = fn_t.data[3]
+    local ret_s
+    if rl == 0 then
+        ret_s = "nil"
+    elseif rl == 1 then
+        local rid = find(ctx, ctx.lists:get(fn_t.data[2]))
+        local rt  = ctx.types:get(rid)
+        if rt.tag == TAG_VAR and band(rt.flags, FLAG_GENERIC) == 0 then
+            -- Free non-generic return — typically an unbound ret_var (no
+            -- return statement). Emit `nil` to match the runtime behavior
+            -- of a function that doesn't return.
+            ret_s = "nil"
+        else
+            ret_s = render(rid, {})
+        end
+    else
+        local rparts = {} --: { [integer]: string, ... }
+        for i = fn_t.data[2], fn_t.data[2] + rl - 1 do
+            local r = render(ctx.lists:get(i), {})
+            if not r then return nil end
+            rparts[#rparts + 1] = r
+        end
+        ret_s = "(" .. table.concat(rparts, ", ") .. ")"
+    end
+    if not ret_s then return nil end
+
+    -- Build generic-prefix `<T1[: bound1], T2[: bound2], ...>` if any vars.
+    local generic_prefix = ""
+    if #var_order > 0 then
+        local gparts = {} --: { [integer]: string, ... }
+        for _, vtid in ipairs(var_order) do
+            local name = var_names[vtid]
+            local bound = ctx._forall_bounds and ctx._forall_bounds[vtid]
+            if bound then
+                local bs = render(bound, {})
+                if bs then
+                    gparts[#gparts + 1] = name .. ": " .. bs
+                else
+                    gparts[#gparts + 1] = name  -- bound un-renderable; skip it
+                end
+            else
+                gparts[#gparts + 1] = name
+            end
+        end
+        generic_prefix = "<" .. table.concat(gparts, ", ") .. ">"
+    end
+    return generic_prefix .. "(" .. table.concat(pparts, ", ") .. ") -> " .. ret_s
+end
+
 -- Build the body of a `--: (...) -> R` annotation for a function-def site.
 -- Returns the signature string (without the `--: ` prefix) on success,
 -- or nil if any param/return type can't be cleanly rendered.
@@ -3407,7 +3647,13 @@ local function emit_missing_function_signature(ctx, real_err, sev)
                         probe = probe - 1
                     end
                     if not already_annotated then
-                        local sig_str = render_signature(ctx, g)
+                        -- Prefer the HM-aware renderer (handles FLAG_GENERIC
+                        -- vars + bounds via _forall_bounds). Falls back to the
+                        -- callsite-aggregating renderer for cases without HM
+                        -- generalization (e.g. annotated functions that
+                        -- somehow trigger the warning).
+                        local sig_str = g.fn_tid and render_hm_signature(ctx, g.fn_tid)
+                        if not sig_str then sig_str = render_signature(ctx, g) end
                         if sig_str then
                             local insert_at = line_start_byte(ctx.source, sig.line)
                             if insert_at then
