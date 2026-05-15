@@ -1036,6 +1036,42 @@ local function solve_bound(ctx, c)
         if wa_tag == TAG_FUNCTION and contains_free_var(ctx, resolved_bound) then
             propagate_function_bound(ctx, wa_tid, resolved_bound)
         end
+        -- Signature validity: after back-propagation, any concrete slots on both
+        -- sides must satisfy function variance (params contravariant, returns
+        -- covariant). Free TVs on either side were either bound by the
+        -- back-propagation step above or are genuinely unconstrained — try_unify
+        -- handles both. Without this check, a bound like `(string) -> R` (with R
+        -- free) silently accepts an actual `(integer) -> integer` because
+        -- propagate_function_bound only writes into free TVs and never validates
+        -- concrete-vs-concrete slots. See HM Phase 1c step 2: callers of
+        -- inferred-shape parameters narrow the bound's param TVs from real call
+        -- arguments, after which the bound becomes concrete and must agree with
+        -- the actual function's signature.
+        -- Skip the validity check when the bound uses the vararg-as-tuple
+        -- encoding `(...P) -> R`. propagate_function_bound binds the bound's
+        -- vararg TV to a tuple of actual's params (Parameters<F>-style); a
+        -- direct unify would then compare actual's named-param shape against
+        -- a tuple-typed vararg and spuriously reject. The vararg-only form
+        -- is recognized by: zero regular params + a vararg slot.
+        -- Skip the validity check when the bound has zero named params:
+        -- the vararg-as-tuple encoding `(...P) -> R` (Parameters<F>-style)
+        -- causes propagate_function_bound to bind the vararg slot to a tuple
+        -- of actual's params, which a direct unify against actual's named
+        -- params would spuriously reject.
+        local bound_named_param_count = bt.data[1] or 0
+        if wa_tag == TAG_FUNCTION and bound_named_param_count > 0 then
+            local widened_actual = find(ctx, widen_deep(ctx, wa_tid))
+            local widened_bound  = find(ctx, widen_deep(ctx, resolved_bound))
+            local ok, err = unify_mod.unify(ctx, widened_actual, widened_bound)
+            if not ok then
+                local msg = "type argument `" .. types_mod.display_short(ctx, actual)
+                    .. "` does not satisfy constraint `"
+                    .. types_mod.display_short(ctx, find(ctx, bound_id)) .. "`"
+                if type(err) == "string" and #err > 0 then msg = msg .. ": " .. err end
+                add_error(ctx, line, col, msg)
+                return false
+            end
+        end
         return true
     end
 

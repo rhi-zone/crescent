@@ -73,11 +73,22 @@ Commits (in order):
 
 **Still open:**
 
-- [ ] **Higher-order signature contravariance.** `apply(inc, "hi")`
-  where inc: `(integer) -> integer` doesn't error — propagate_function_bound
-  only back-propagates *into* bound's free TVs and doesn't validate
-  signature match when both sides are concrete. Pre-existing C_BOUND
-  TAG_FUNCTION gap, surfaced by Phase 1c step 2.
+- [x] **Higher-order signature contravariance.** Partially fixed:
+  `solve_bound` TAG_FUNCTION branch now runs a final `unify` after
+  `propagate_function_bound` so that concrete-vs-concrete slots are
+  validated under function variance. Catches mismatches via annotated
+  `<F: (T)->U>` bounds (`apply(from_str, 1)` errors when `from_str`
+  expects `string` but bound expects `integer`; `apply(bad, 1)` errors
+  when `bad` returns `string` but bound expects `integer`). Skips the
+  vararg-as-tuple encoding `(...P) -> R` to avoid spurious rejection
+  of pcall-style callers.
+  - Still open: the user's original repro `inferred_apply(inc, "hi")`
+    (no annotation on `inferred_apply`) does not error because Phase 1c
+    step 2's bound emission lives in `solve_callable`, but ordinary
+    `f(x)` calls go through `solve_check_args` (which has a free-TV
+    fallthrough that binds the call return to `T_ANY` without emitting
+    a function-shape bound). Extending the emission to that hook is a
+    separate change.
 
 - [ ] **propagate_meta_bound indexer support.** emit_indexer_bound
   registers `{ [K]: V, ... }` bounds for `t[k]` access, but the

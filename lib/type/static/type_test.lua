@@ -4710,6 +4710,50 @@ local y = x
 ]])
     end)
 
+    -- Higher-order signature contravariance: `<F: (P) -> R>` bound rejects
+    -- callers whose function signature is incompatible with the bound. The
+    -- check runs at C_BOUND time after propagate_function_bound has bound
+    -- any free TVs; the residual concrete-vs-concrete slots must agree
+    -- under function variance (params contravariant, returns covariant).
+    -- Without the check, a `(string) -> integer` actual silently passed a
+    -- `(integer) -> integer` bound because propagate_function_bound only
+    -- back-propagates into free TVs and never validates fully concrete slots.
+    assert.it("HM higher-order: <F: (T) -> U> bound rejects actual with incompatible param type", function()
+        v3_has_error([[
+--: (string) -> integer
+local function from_str(s) return 1 end
+
+--: <F: (integer) -> integer>(F, integer) -> integer
+local function apply(f, n) return f(n) end
+
+local _ = apply(from_str, 1)
+]], "does not satisfy constraint")
+    end)
+
+    assert.it("HM higher-order: <F: (T) -> U> bound rejects actual with incompatible return type", function()
+        v3_has_error([[
+--: (integer) -> string
+local function bad(n) return "x" end
+
+--: <F: (integer) -> integer>(F, integer) -> integer
+local function apply(f, n) return f(n) end
+
+local _ = apply(bad, 1)
+]], "does not satisfy constraint")
+    end)
+
+    assert.it("HM higher-order: <F: (T) -> U> bound accepts matching signature", function()
+        v3_no_errors([[
+--: (integer) -> integer
+local function inc(n) return n + 1 end
+
+--: <F: (integer) -> integer>(F, integer) -> integer
+local function apply(f, n) return f(n) end
+
+local _ = apply(inc, 1)
+]])
+    end)
+
     assert.it("setmetatable: generic U binds to metatable type, no stack overflow on __index=self", function()
         -- setmetatable = <T,U>(t:T, mt:{__index:U,...}) -> T & U
         -- MyClass.__index = MyClass (cyclic) must not cause infinite occurs-check recursion.
