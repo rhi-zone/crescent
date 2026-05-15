@@ -259,7 +259,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/pipeline_dsl/` — composable lazy DSL. Status: stable.
 - `lib/circuit_breaker/` — fault-tolerant call wrapper (CLOSED/OPEN/HALF_OPEN). Status: stable.
 - `lib/connection_pool/` — generic connection pool. Status: stable.
-- `lib/ratelimit/`, `lib/rate_limiter/` — token bucket. Status: stable. **Two parallel impls.**
+- `lib/rate_limiter/` — token bucket. Status: stable.
 - `lib/retry/` — retry strategies (exp/linear/fib/none) + circuit breaker. Status: stable.
 - `lib/cron/` — cron scheduler. Status: stable.
 - `lib/cron_parser/` — cron expression parser (5-field + 6-field). Status: stable. **Parallel to `lib/cron/`.**

@@ -186,6 +186,8 @@ LOC = sum of `.lua` lines under the dir excluding `*_test.lua`. "tests" = number
 
 **Recommendation:** Lean `rate_limiter` (more algorithm coverage). Port `keyed` from `ratelimit` if not present. Drop `ratelimit`.
 
+**Resolved 2026-05-15:** ratelimit dropped; daemon migrated; rate_limiter is canonical.
+
 ---
 
 ## Observable / observer
