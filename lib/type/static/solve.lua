@@ -3090,11 +3090,12 @@ local function emit_missing_function_signature(ctx, real_err, sev)
 end
 
 
--- any: constraints is a list of heterogeneous arrays — see solve_unify comment.
---: (Ctx, { [integer]: { [integer]: unknown, ... }, ... }) -> ()
-function M.solve(ctx, constraints)
-    -- Dispatch table by constraint kind
-    local handlers = {
+-- Dispatch table by constraint kind. Module-level so both M.solve and the
+-- per-function sub-solve (Phase 2 of HM-for-unannotated-params) share it.
+local _handlers --: { [integer]: ((Ctx, { [integer]: unknown, ... }) -> boolean | nil) | nil }
+local function get_handlers()
+    if _handlers then return _handlers end
+    _handlers = {
         [C_UNIFY]         = solve_unify,
         [C_SUB]           = solve_sub,
         [C_INDEX]         = solve_index,
@@ -3109,32 +3110,36 @@ function M.solve(ctx, constraints)
         [C_OVERLAP]       = solve_overlap,
         [C_NARROW_NIL]    = solve_narrow_nil,
     }
+    return _handlers
+end
 
-    -- Dependency-aware fixpoint solver.
-    -- Handlers return false to mean "I'm waiting on unbound type variables — defer me."
-    -- Deferred constraints are skipped each pass; they are re-enabled when any progress
-    -- is made (any TV gets bound → tag change → changed=true → all deferred become ready).
-    -- This prevents deferred handlers from being called every pass regardless of readiness,
-    -- and eliminates the need for complex multi-condition guards inside handlers.
-    --
+-- Run the dependency-aware fixpoint solver over a slice [lo, hi] of the
+-- constraint list. Behavior over the full range [1, #constraints] is
+-- identical to the pre-extraction M.solve. The slice form exists so
+-- per-function HM sub-solves (Phase 2) can resolve a function's body
+-- constraints before the function type gets generalized.
+--
+-- Each call has its own silent_err / dedup tables. When called multiple
+-- times against the same constraint list (sub-solve then global solve),
+-- each call's dedup is independent — duplicate warnings across calls
+-- are possible but rare in practice (a body constraint solved during
+-- sub-solve typically completes there and is a no-op when re-visited).
+--: (Ctx, { [integer]: { [integer]: unknown, ... }, ... }, integer, integer) -> ()
+local function solve_range(ctx, constraints, lo, hi)
+    local handlers = get_handlers()
+    if hi < lo then return end
+
     -- Suppress error emission on all but the final pass to avoid duplicates.
     local real_err = ctx.err
     --: ErrCtx
     local silent_err = { errors = {}, warnings = {}, source_lines = {} }
     -- Track warnings already flushed to real_err to avoid duplicates across passes.
-    -- Key: "filename\0line\0col\0msg"
     --: { [string]: boolean }
     local seen_warnings = {}
     -- Track rule-upgraded errors (from add_warning_code) flushed to real_err.
-    -- These are emitted into silent_err.errors but must be deduped like warnings.
-    -- Regular constraint-failure errors are only emitted on the final pass, so
-    -- they don't need this treatment. Rule-upgraded errors are emitted every pass
-    -- (same as warnings via _overlap_warned guard) so need the same dedup.
     --: { [string]: boolean }
     local seen_rule_errors = {}
 
-    -- Flush any warnings from silent_err into real_err, deduplicating by location+msg.
-    -- Also flushes rule-upgraded errors (those that came from add_warning_code).
     --: () -> ()
     local function flush_warnings()
         for _, w in ipairs(silent_err.warnings) do
@@ -3145,13 +3150,6 @@ function M.solve(ctx, constraints)
             end
         end
         silent_err.warnings = {}
-        -- Flush rule-upgraded errors with the same dedup. These are identified by
-        -- having been placed in silent_err.errors during a pass where we know only
-        -- rule-upgraded diagnostics produce errors (constraint-failure errors are
-        -- suppressed until the final pass via the _overlap_warned and similar guards).
-        -- Strategy: flush ALL errors from silent_err with dedup on every pass.
-        -- On the final pass the caller also flushes silent_err.errors — that's fine
-        -- because seen_rule_errors prevents duplicates.
         for _, e in ipairs(silent_err.errors) do
             local key = e.filename .. "\0" .. e.line .. "\0" .. e.col .. "\0" .. e.msg
             if not seen_rule_errors[key] then
@@ -3162,23 +3160,20 @@ function M.solve(ctx, constraints)
         silent_err.errors = {}
     end
 
-    -- Expose the constraint list on ctx so handlers can scan for pending C_BOUND constraints.
-    ctx._constraints = constraints
-
-    -- Initialize deferred flags on all constraints.
-    for _, c in ipairs(constraints) do
-        c._deferred = false
+    -- Initialize deferred flags on the slice.
+    for i = lo, hi do
+        constraints[i]._deferred = false
     end
 
     for pass = 1, 4 do
         local changed = false
         local n_deferred = 0
-        -- Use silent error context on all passes; errors are only flushed on the final pass.
         ctx.err = silent_err
         silent_err.errors = {}
         silent_err.warnings = {}
 
-        for _, c in ipairs(constraints) do
+        for i = lo, hi do
+            local c = constraints[i]
             local kind = c[1]
             local handler = handlers[kind]
             if handler then
@@ -3192,7 +3187,6 @@ function M.solve(ctx, constraints)
                     local tag_before = t_before.tag
                     local result = handler(ctx, c)
                     if result == false then
-                        -- Handler is waiting on unbound TVs — skip until progress is made.
                         c._deferred = true
                         n_deferred = n_deferred + 1
                     end
@@ -3202,41 +3196,29 @@ function M.solve(ctx, constraints)
             end
         end
 
-        -- Flush warnings and rule-upgraded errors into real_err (deduped).
-        -- On the final pass, also flush any remaining constraint-failure errors.
         flush_warnings()
         if pass == 4 then
-            -- flush_warnings() already consumed silent_err.errors; this is a no-op
-            -- for rule-upgraded errors. Constraint-failure errors (not emitted
-            -- through add_warning_code) are flushed here without dedup since
-            -- they are only emitted once on the final pass.
             for _, e in ipairs(silent_err.errors) do
                 real_err.errors[#real_err.errors + 1] = e
             end
         end
 
-        -- If any progress was made this pass, re-enable all deferred constraints
-        -- so they get another chance to run (their blocking TVs may now be bound).
         if changed then
-            for _, c in ipairs(constraints) do
-                c._deferred = false
+            for i = lo, hi do
+                constraints[i]._deferred = false
             end
         end
 
         if not changed then
-            -- No progress: converged (or stuck on deferred that can never progress).
-            -- Run one final pass via silent_err to emit errors, including any stuck deferred.
             if pass < 4 then
-                -- silent_err.errors and warnings are already empty (flush_warnings cleared them).
-                for _, c in ipairs(constraints) do
-                    c._deferred = false  -- run everything on final error pass
+                for i = lo, hi do
+                    constraints[i]._deferred = false
                 end
-                for _, c in ipairs(constraints) do
+                for i = lo, hi do
+                    local c = constraints[i]
                     local handler = handlers[c[1]]
                     if handler then handler(ctx, c) end
                 end
-                -- Flush warnings and rule-upgraded errors from this final convergence pass.
-                -- Then flush any remaining constraint-failure errors without dedup.
                 flush_warnings()
                 for _, e in ipairs(silent_err.errors) do
                     real_err.errors[#real_err.errors + 1] = e
@@ -3246,6 +3228,14 @@ function M.solve(ctx, constraints)
         end
     end
     ctx.err = real_err
+end
+
+-- any: constraints is a list of heterogeneous arrays — see solve_unify comment.
+--: (Ctx, { [integer]: { [integer]: unknown, ... }, ... }) -> ()
+function M.solve(ctx, constraints)
+    -- Expose the constraint list on ctx so handlers can scan for pending C_BOUND constraints.
+    ctx._constraints = constraints
+    solve_range(ctx, constraints, 1, #constraints)
     rawset(ctx, "_constraints", nil)  -- rawset: field type doesn't accept nil directly
 
     -- Post-pass: MISSING_FUNCTION_SIGNATURE (error). Every function-def site
@@ -3272,7 +3262,8 @@ function M.solve(ctx, constraints)
             -- to T_STRING via different paths. The post-solve normalization
             -- in check.lua runs AFTER us, so invoke it here too.
             types_mod.normalize_unions(ctx)
-            emit_missing_function_signature(ctx, real_err, sev)
+            -- ctx.err was restored to real_err by solve_range on exit.
+            emit_missing_function_signature(ctx, ctx.err, sev)
         end
     end
 end
