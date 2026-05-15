@@ -425,7 +425,7 @@ do
         [E.UNNAMED_PARAMS]     = { severity = "warning", name = "unnamed_params" },
         [E.NON_EXHAUSTIVE]     = { severity = "warning", name = "non_exhaustive" },
         [E.MISSING_PARAM_ANNOTATION]   = { severity = "warning", name = "missing_param_annotation" },
-        [E.MISSING_FUNCTION_SIGNATURE] = { severity = "error",   name = "missing_function_signature" },
+        [E.MISSING_FUNCTION_SIGNATURE] = { severity = "warning", name = "missing_function_signature" },
         [E.IMPLICIT_ANY]               = { severity = "warning", name = "implicit_any" },
     }
 end

@@ -10983,8 +10983,8 @@ local y = x
             "force cast")
     end)
 
-    assert.it("missing_function_signature: unannotated function emits error at fn-def site", function()
-        has_error(
+    assert.it("missing_function_signature: unannotated function emits warning at fn-def site", function()
+        has_warning(
             "local function greet(s) return s .. '!' end\ngreet('alice')\n",
             "has no signature")
     end)
@@ -10995,14 +10995,14 @@ local y = x
             "has no signature")
     end)
 
-    assert.it("missing_function_signature: no callers still errors (signature is required regardless)", function()
-        has_error(
+    assert.it("missing_function_signature: no callers still warns (signature is recommended regardless)", function()
+        has_warning(
             "local function unused(x) return x end\n",
             "has no signature")
     end)
 
-    assert.it("missing_function_signature: zero-param unannotated function still errors", function()
-        has_error(
+    assert.it("missing_function_signature: zero-param unannotated function still warns", function()
+        has_warning(
             "local function noargs() return 1 end\n",
             "has no signature")
     end)

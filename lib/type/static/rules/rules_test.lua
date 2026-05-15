@@ -431,7 +431,10 @@ M.is_valid = function() return 42 end
 return M
 ]]
         local err_ctx = check_and_run(src, "mylib_test.lua")
-        T.ok(no_warning(err_ctx, "is_valid"), "skipped for test file")
+        -- Use the predicate_return-specific message substring rather than
+        -- just "is_valid", since the missing-signature warning (after HM
+        -- demotion in 2026-05-15) also includes the function name.
+        T.ok(no_warning(err_ctx, "should return boolean"), "skipped for test file")
     end)
 end)
 

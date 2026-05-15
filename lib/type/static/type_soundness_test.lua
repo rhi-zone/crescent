@@ -501,24 +501,19 @@ local y = x + 1
     end)
 end)
 
-assert.describe("soundness: unannotated params bind at call site", function()
-    assert.it("unannotated param binds to first call site type", function()
-        -- Unannotated params are TAG_VAR: they bind to the type at the first call site.
-        -- After id(1) binds x to integer, id("hello") and id(true) fail.
+assert.describe("soundness: HM let-polymorphism for unannotated params", function()
+    assert.it("HM polymorphism: id is `<T>(T) -> T`, accepted at multiple types", function()
+        -- HM Phase 1 (commits 5a9e1b4b through 2ac9ab31): unannotated params
+        -- are inferred polymorphic via per-function sub-solve + generalize.
+        -- (Pre-HM, this test asserted destructive-bind behavior — the second
+        -- call errored because the first call's binding stuck.)
         no_errors([[
 local function id(x)
     return x
 end
 local a = id(1)
-]])
-        -- Calling with a different type after binding should fail
-        has_error([[
-local function id(x)
-    return x
-end
-local a = id(1)
 local b = id("hello")
-]], "")
+]])
     end)
 
     assert.it("unannotated param used in arithmetic — only numeric callers valid", function()
