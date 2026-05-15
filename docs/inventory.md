@@ -401,10 +401,9 @@ These declare shared types and have no runtime code (or only declaration-side gl
 
 ## Game / generative / simulation
 
-- `lib/automata/` — NFA/DFA construction + simulation. Status: stable.
+- `lib/automata/` — NFA/DFA construction + simulation + equivalence + minimization + regex. Status: stable.
 - `lib/automata_2d/` — advanced 2D CA (Game of Life variants, totalistic). Status: stable.
 - `lib/cellular_automata/` — 1D Wolfram + 2D totalistic. Status: stable. **Parallel to `lib/automata_2d/`.**
-- `lib/finite_automata/` — finite automata. Status: stable. **Parallel to `lib/automata/`.**
 - `lib/behavior_tree/` — behavior tree. Status: stable.
 - `lib/circuit_sim/` — analog circuit MNA simulator. Status: stable.
 - `lib/logic_circuit/` — digital logic + Quine-McCluskey. Status: stable.

@@ -230,6 +230,8 @@ LOC = sum of `.lua` lines under the dir excluding `*_test.lua`. "tests" = number
 
 **Recommendation:** `automata` is canonical. Port `equivalent` if not present. Drop `finite_automata`.
 
+**Resolved 2026-05-15:** finite_automata dropped; equivalent ported to automata.
+
 ---
 
 ## Cellular automata
