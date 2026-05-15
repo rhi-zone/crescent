@@ -325,7 +325,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/finite_field/` — GF(p) and GF(2^n) + polynomials. Status: stable.
 - `lib/flow_network/` — Edmonds-Karp max flow + min cut. Status: stable.
 - `lib/genetic/` — genetic algorithm framework. Status: stable.
-- `lib/geo/`, `lib/geo_hash/`, `lib/geohash/` — geospatial; `geohash` is duplicate of `geo_hash`. Status: stable.
+- `lib/geo/`, `lib/geo_hash/` — geospatial. Status: stable.
 - `lib/geom/`, `lib/geometry_3d/`, `lib/game_math/`, `lib/vec/`, `lib/matrix/`, `lib/matrix_ext/` — geometry/linear algebra. Status: stable.
 - `lib/graph/`, `lib/graph_algorithms/`, `lib/graph_coloring/`, `lib/graph_layout/`, `lib/graph_query/` — graph family. Status: stable.
 - `lib/gradient_descent/` — GD/Adam/RMSProp/L-BFGS/CG/SGD/line search/numdiff. Status: stable.

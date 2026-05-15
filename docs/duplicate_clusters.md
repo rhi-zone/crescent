@@ -112,6 +112,8 @@ LOC = sum of `.lua` lines under the dir excluding `*_test.lua`. "tests" = number
 
 **Recommendation:** `geo_hash` is canonical. Drop `geohash`.
 
+**Resolved 2026-05-15:** geohash dropped; geo_hash is canonical. `decode_bbox` is `decode` (same data, nested shape); `are_neighbors` / `within` are trivial compositions of `neighbors` / `bboxes` + `haversine`.
+
 ---
 
 ## Cron
