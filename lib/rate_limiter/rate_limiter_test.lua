@@ -484,6 +484,95 @@ T.describe("rate_limiter", function()
     end)
   end)
 
+  T.describe("keyed", function()
+    T.it("per-key independent token buckets", function()
+      local t = 0
+      local clock = function() return t end
+      local keyed = RL.keyed(RL.token_bucket, { capacity = 2, rate = 0.0001, clock = clock })
+      T.ok(keyed:allow("a"))
+      T.ok(keyed:allow("a"))
+      T.eq(keyed:allow("a"), false)
+      -- "b" is independent
+      T.ok(keyed:allow("b"))
+      T.ok(keyed:allow("b"))
+      T.eq(keyed:allow("b"), false)
+    end)
+
+    T.it("get returns the same underlying limiter for a key", function()
+      local t = 0
+      local clock = function() return t end
+      local keyed = RL.keyed(RL.token_bucket, { capacity = 5, rate = 1, clock = clock })
+      keyed:allow("x")
+      local limiter = keyed:get("x")
+      T.ok(limiter ~= nil)
+      T.ok(type(limiter.allow) == "function")
+    end)
+
+    T.it("reset(key) drops state for that key", function()
+      local t = 0
+      local clock = function() return t end
+      local keyed = RL.keyed(RL.token_bucket, { capacity = 2, rate = 0.0001, clock = clock })
+      keyed:allow("a")
+      keyed:allow("a")
+      T.eq(keyed:allow("a"), false)
+      keyed:reset("a")
+      T.ok(keyed:allow("a"))
+    end)
+
+    T.it("reset() with no key drops all state", function()
+      local t = 0
+      local clock = function() return t end
+      local keyed = RL.keyed(RL.token_bucket, { capacity = 1, rate = 0.0001, clock = clock })
+      keyed:allow("a")
+      keyed:allow("b")
+      T.eq(keyed:allow("a"), false)
+      T.eq(keyed:allow("b"), false)
+      keyed:reset()
+      T.ok(keyed:allow("a"))
+      T.ok(keyed:allow("b"))
+    end)
+
+    T.it("works with leaky_bucket factory", function()
+      local t = 0
+      local clock = function() return t end
+      local keyed = RL.keyed(RL.leaky_bucket, { rate = 0.0001, capacity = 2, clock = clock })
+      T.ok(keyed:allow("k"))
+      T.ok(keyed:allow("k"))
+      T.eq(keyed:allow("k"), false)
+    end)
+
+    T.it("reset(nonexistent_key) is safe", function()
+      local t = 0
+      local clock = function() return t end
+      local keyed = RL.keyed(RL.token_bucket, { capacity = 5, rate = 1, clock = clock })
+      keyed:reset("nonexistent")
+    end)
+
+    T.it("missing factory returns nil, err", function()
+      local l, err = RL.keyed(nil, {})
+      T.eq(l, nil)
+      T.ok(err ~= nil)
+    end)
+
+    T.it("missing opts returns nil, err", function()
+      local l, err = RL.keyed(RL.token_bucket, nil)
+      T.eq(l, nil)
+      T.ok(err ~= nil)
+    end)
+
+    T.it("scales to many distinct keys", function()
+      local t = 0
+      local clock = function() return t end
+      local keyed = RL.keyed(RL.token_bucket, { capacity = 1, rate = 0.0001, clock = clock })
+      for i = 1, 100 do
+        T.ok(keyed:allow("user:" .. i))
+      end
+      for i = 1, 100 do
+        T.eq(keyed:allow("user:" .. i), false)
+      end
+    end)
+  end)
+
   T.describe("error handling", function()
     T.it("token_bucket rejects missing clock", function()
       local result, err = RL.token_bucket({ capacity = 10, rate = 1 })

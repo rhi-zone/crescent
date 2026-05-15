@@ -14,6 +14,7 @@ M._tier = "pure"
 --:: ReleaseFn = () -> nil
 --:: ConcurrentLimiter = { acquire: (ConcurrentLimiter) -> ReleaseFn | nil, count: (ConcurrentLimiter) -> number, stats: (ConcurrentLimiter) -> RLStats }
 --:: MultiLimiter = { allow: (MultiLimiter, string | nil) -> (boolean, number | nil), stats: (MultiLimiter) -> RLStats }
+--:: KeyedLimiter = { allow: (KeyedLimiter, string, number | nil) -> (boolean, number | nil), get: (KeyedLimiter, string) -> unknown, reset: (KeyedLimiter, string | nil) -> nil }
 --:: FWEntry = { count: number, window_start: number }
 --:: SWCEntry = { prev: number, curr: number, window_start: number }
 
@@ -442,6 +443,52 @@ function M.multi(...)
       end
     end
     return true
+  end
+
+  return self
+end
+
+-- Keyed limiter: wraps any factory (M.token_bucket, M.leaky_bucket, etc.) and
+-- maintains independent limiter state per key.
+-- factory: limiter constructor (e.g. M.token_bucket)
+-- opts: shared options passed to each new instance
+--: <O>(factory: (opts: O) -> unknown, opts: O) -> (KeyedLimiter | nil, string | nil)
+function M.keyed(factory, opts)
+  if not factory then return nil, "factory is required" end
+  if not opts then return nil, "opts is required" end
+
+  local self = {}
+  --:: KLInner = { allow: (KLInner, number | nil) -> (boolean, number | nil), ... }
+  local limiters = {} --: { [string]: KLInner }
+
+  --: (string) -> KLInner
+  local function get(key)
+    local l = limiters[key]
+    if not l then
+      l = factory(opts) --[[: KLInner]]
+      limiters[key] = l
+    end
+    return l
+  end
+
+  --: (KeyedLimiter, key: string, n: (number | nil)) -> (boolean, (number | nil))
+  function self:allow(key, n)
+    return get(key):allow(n)
+  end
+
+  --: (KeyedLimiter, key: string) -> unknown
+  function self:get(key)
+    return get(key)
+  end
+
+  --: (KeyedLimiter, key: (string | nil)) -> nil
+  function self:reset(key)
+    if key then
+      local limiters_any = limiters --[[: { [string]: KLInner | nil }]]
+      limiters_any[key] = nil
+    else
+      limiters = {}
+    end
   end
 
   return self
