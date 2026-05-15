@@ -4727,6 +4727,32 @@ local y = x
         v3_no_errors("local function f(t) return t.x + t.y end\nlocal _ = f({x=1, y=2})\n")
     end)
 
+    -- HM Phase 2 commit 5: extend _forall_ops to cover C_COMPARE body ops.
+    -- A `t.x < t.y` body emits C_COMPARE on the field-result TVs U_x/U_y; the
+    -- recorded op is re-emitted at each call site with operands mapped to
+    -- per-call fresh instances, so caller field types flow into the compare.
+    -- C_INDEX and C_CALLABLE recording are intentionally NOT extended:
+    --   * C_INDEX: emit_field_bound / emit_indexer_bound already merge field
+    --     bounds into _forall_bounds and call-site C_BOUND propagates field
+    --     types into the inst-mapped nested TVs. Re-emitting body C_INDEX
+    --     creates duplicate field bounds and breaks the merged-bound shape.
+    --   * C_CALLABLE: body-level call exprs emit C_BIND_GENERICS/C_CHECK_ARGS
+    --     (richer than C_CALLABLE), not C_CALLABLE itself — so recording
+    --     C_CALLABLE is a no-op for the field-call propagation case. See
+    --     record_polymorphic_ops_post in constrain.lua for the rationale.
+    assert.it("HM Phase 2: t.x < t.y rejects {x={}, y={}} (no __lt on tables)", function()
+        v3_has_error("local function f(t) return t.x < t.y end\nlocal _ = f({x={}, y={}})\n", "cannot compare")
+    end)
+    assert.it("HM Phase 2: t.x < t.y rejects {x=true, y=false}", function()
+        v3_has_error("local function f(t) return t.x < t.y end\nlocal _ = f({x=true, y=false})\n", "cannot compare")
+    end)
+    assert.it("HM Phase 2: t.x < t.y still accepts {x=1, y=2}", function()
+        v3_no_errors("local function f(t) return t.x < t.y end\nlocal _ = f({x=1, y=2})\n")
+    end)
+    assert.it("HM Phase 2: t.x < t.y still accepts {x='a', y='b'} (string has __lt)", function()
+        v3_no_errors("local function f(t) return t.x < t.y end\nlocal _ = f({x='a', y='b'})\n")
+    end)
+
     -- Higher-order signature contravariance: `<F: (P) -> R>` bound rejects
     -- callers whose function signature is incompatible with the bound. The
     -- check runs at C_BOUND time after propagate_function_bound has bound

@@ -313,18 +313,39 @@ local function record_polymorphic_ops_post(ctx, param_tids, body_start, body_end
         end
     end
     if not next(tv_to_root) then return end
-    -- Walk body constraints; record arith/compare/concat ops keyed by root.
+    -- Walk body constraints; record arith/compare/index/callable ops keyed
+    -- by root template TV. Each constraint kind has a different operand-TID
+    -- layout; describe per-kind index lists. C_CALLABLE's arg_tids slot is
+    -- a Lua array, not an inline TID — handled as a special case.
     local cs = ctx.constraints
+    --: { [integer]: { [integer]: integer, ... }, ... }
+    local OPERAND_INDICES = {
+        [C_ARITH]    = { 3, 4, 5 },     -- {_, op, lhs, rhs, res, line, col}
+        [C_COMPARE]  = { 2, 3 },        -- {_, lhs, rhs, line, col}
+        -- C_INDEX intentionally omitted: emit_field_bound/emit_indexer_bound
+        -- in solve.lua already merge open-record/indexer bounds into
+        -- _forall_bounds, and call-site C_BOUND propagates field types into
+        -- the inst-mapped nested TVs. Re-emitting body C_INDEX at call sites
+        -- creates duplicate field bounds and breaks the merged-bound shape.
+        --
+        -- C_CALLABLE intentionally omitted: body-level call expressions
+        -- emit C_BIND_GENERICS / C_CHECK_ARGS (richer than C_CALLABLE),
+        -- not C_CALLABLE itself — C_CALLABLE only fires for for-loop
+        -- iterator triples. Recording it here is therefore a no-op for the
+        -- field-value-type propagation case (e.g. `t.x()` on a poly param).
+        -- Extending the recording to C_BIND_GENERICS/C_CHECK_ARGS is a
+        -- larger change with unexplored solver interactions; deferred.
+    }
     for i = body_start + 1, body_end do
         local c = cs[i]
         if c then
             local code = c[1]
-            if code == C_ARITH then
-                -- {C_ARITH, op_str, lhs, rhs, res, line, col}
+            local indices = OPERAND_INDICES[code]
+            if indices then
                 local roots_seen = {}
-                for _, idx in ipairs({ 3, 4, 5 }) do
-                    local tid = c[idx]
-                    if type(tid) == "number" then
+                --: (integer | nil) -> ()
+                local function check_tid(tid)
+                    if tid then
                         local resolved = types_mod.find(ctx, tid)
                         local root = tv_to_root[resolved] or tv_to_root[tid]
                         if root and not roots_seen[root] then
@@ -339,6 +360,10 @@ local function record_polymorphic_ops_post(ctx, param_tids, body_start, body_end
                             bucket[#bucket + 1] = clone
                         end
                     end
+                end
+                for _, idx in ipairs(indices) do
+                    local val = c[idx]
+                    if type(val) == "number" then check_tid(val --[[:! integer]]) end
                 end
             end
         end
@@ -2414,7 +2439,13 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                                 local rhs = inst_mapping[op[4]] or op[4]
                                 local res = inst_mapping[op[5]] or op[5]
                                 emit(ctx, { C_ARITH, op[2], lhs, rhs, res, n.line, n.col })
+                            elseif code == C_COMPARE then
+                                local lhs = inst_mapping[op[2]] or op[2]
+                                local rhs = inst_mapping[op[3]] or op[3]
+                                emit(ctx, { C_COMPARE, lhs, rhs, n.line, n.col })
                             end
+                            -- C_INDEX and C_CALLABLE intentionally not
+                            -- re-emitted; see record_polymorphic_ops_post.
                         end
                     end
                 end
