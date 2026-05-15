@@ -11017,11 +11017,13 @@ local y = x
     -- Autofix payload on MISSING_FUNCTION_SIGNATURE
     -- ---------------------------------------------------------------------
 
-    -- Find the first error carrying a missing_function_signature autofix.
+    -- Find the first diagnostic carrying a missing_function_signature autofix.
+    -- MISSING_FUNCTION_SIGNATURE is a warning (commit 36e5f292), so scan
+    -- both errors and warnings for the fix payload.
     --:: FixEdit = { byte_start: integer, byte_end: integer, replacement: string, ... }
     --:: MfsFix  = { rule?: string, edits?: { [integer]: FixEdit, ... }, ... }
     --:: MfsErr  = { fix?: MfsFix, ... }
-    --:: MfsEc   = { errors: { [integer]: MfsErr, ... }, ... }
+    --:: MfsEc   = { errors: { [integer]: MfsErr, ... }, warnings: { [integer]: MfsErr, ... }, ... }
     --: (MfsEc) -> FixEdit | nil
     local function find_mfs_fix(ec)
         for _, e in ipairs(ec.errors) do
@@ -11031,26 +11033,79 @@ local y = x
                 if fe then return fe end
             end
         end
+        for _, e in ipairs(ec.warnings) do
+            local fix = e.fix
+            if fix and fix.rule == "missing_function_signature" and fix.edits then
+                local fe = fix.edits[1]
+                if fe then return fe end
+            end
+        end
         return nil
     end
 
-    -- Autofix tests temporarily removed pending Phase 1d.
-    -- HM Phase 1b/1c (this commit) generalize unannotated params and at call
-    -- sites instantiate fresh per-call vars. The autofix recording in
-    -- solve_check_args (`_inferred_param_callsites[raw_param_tid]`) is keyed
-    -- by the inst-fresh tid, but `_inferred_param_tid` (the gate) is keyed by
-    -- the original FLAG_GENERIC param tid — so the gate now never matches
-    -- and no callsite data is recorded for HM functions. Phase 1d will rework
-    -- the autofix renderer to consult `_forall_bounds` directly (rendering
-    -- `<T: { ... }>(T) -> ...` from the bound) instead of aggregating
-    -- per-callsite arg types. Re-introduce these tests then.
-    --
-    -- The skipped scenarios were:
-    --   single string caller         → `--: (string) -> string\n`
-    --   multiple same-type callers   → `--: (string) -> string\n`
-    --   50/50 split                  → `--: (integer | string) -> string\n`
-    --   9 string + 1 integer (modal) → `--: (string) -> string\n` + outlier err
-    --   preceding `--::` annotation  → no autofix payload
+    -- HM-aware autofix renderer (commit 748a67a9 + the three follow-up
+    -- bugfixes): for unannotated function definitions the renderer walks
+    -- the generalized fn_tid, names FLAG_GENERIC vars (T, U, V, ...), and
+    -- substitutes _forall_bounds entries as `<Var: bound, ...>` prefixes.
+    -- The expected outputs below are the polymorphic forms, not the
+    -- pre-HM modal/union aggregation of callsite arg types: with HM the
+    -- function type itself is polymorphic, so the rendered annotation is
+    -- the inferred forall, independent of how many call sites pass which
+    -- concrete types.
+    assert.it("missing_function_signature autofix: single string caller writes the polymorphic concat form", function()
+        -- `s .. '!'` constrains s via __concat: bound is `{ #__concat: (T, "!") -> U, ... }`.
+        local ec = check("local function greet(s) return s .. '!' end\ngreet('alice')\n")
+        local e = find_mfs_fix(ec)
+        if not e then error("expected a missing_function_signature fix payload", 2) end
+        assert.eq(e.byte_start, 0)
+        assert.eq(e.byte_end, 0)
+        assert.eq(e.replacement,
+            "--: <T: { #__concat: (T, \"!\") -> U, ... }, U>(T) -> U\n")
+    end)
+
+    assert.it("missing_function_signature autofix: identity body, multiple callers writes <T>(T) -> T", function()
+        local ec = check("local function f(x) return x end\nf('a'); f('b'); f('c')\n")
+        local e = find_mfs_fix(ec)
+        if not e then error("expected a fix payload", 2) end
+        assert.eq(e.replacement, "--: <T>(T) -> T\n")
+    end)
+
+    assert.it("missing_function_signature autofix: tostring body returns string regardless of arg type", function()
+        -- `tostring(x)` is `<T>(T) -> string`, so the inferred form is
+        -- `<T>(T) -> string` — call sites with mixed arg types are all
+        -- accepted, no union forced into the param.
+        local ec = check("local function f(x) return tostring(x) end\nf('a'); f(1)\n")
+        local e = find_mfs_fix(ec)
+        if not e then error("expected a fix payload", 2) end
+        assert.eq(e.replacement, "--: <T>(T) -> string\n")
+    end)
+
+    assert.it("missing_function_signature autofix: identity body accepts mixed callers as polymorphic", function()
+        -- Pre-HM this test asserted modal `(string) -> string` plus an
+        -- "cannot pass `1`" error for the integer outlier. With HM the
+        -- function is `<T>(T) -> T`, so the integer caller is legitimately
+        -- accepted — no outlier error.
+        local src = "local function f(x) return x end\n" ..
+            "f('a'); f('b'); f('c'); f('d'); f('e'); f('f'); f('g'); f('h'); f('i'); f(1)\n"
+        local ec = check(src)
+        local e = find_mfs_fix(ec)
+        if not e then error("expected a fix payload", 2) end
+        assert.eq(e.replacement, "--: <T>(T) -> T\n")
+        -- No "cannot pass" diagnostic — every call site instantiates fresh.
+        local msg = errors_mod.format_plain(ec)
+        if msg:find("cannot pass `1`") then
+            error("expected polymorphic acceptance of integer caller; got:\n" .. msg, 2)
+        end
+    end)
+
+    assert.it("missing_function_signature autofix: skipped when preceding line already has `--::`", function()
+        -- The autofix gate checks for any `--:` or `--::` on the preceding
+        -- non-blank line; a `--::` declare line above the function counts
+        -- as already-annotated even though it's a separate top-level decl.
+        local ec = check("--:: declare q = string\nlocal function f(x) return x end\nf('a')\n")
+        local e = find_mfs_fix(ec)
+        if e then error("expected no autofix payload when prior `--::` exists", 2) end
+    end)
 
     assert.it("E2: --[[:! T]] redundant force cast on typed function return emits REDUNDANT_CAST", function()
         -- When a function is declared to return T and the call site uses --[[:! T]],
