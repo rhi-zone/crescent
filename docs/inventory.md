@@ -236,7 +236,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/reactive_var/` — fine-grained reactive var (MobX/Solid/Vue style). Status: stable.
 - `lib/signals/` — auto-tracking signals (Solid/Preact style). Status: stable. **Note: parallel to `lib/reactive/`; signals auto-tracks, reactive is explicit.**
 - `lib/signal/` — POSIX signal handling. Status: stable.
-- `lib/observable/`, `lib/observer/` — push observables with operators (cold, sync). Status: stable. **Two parallel impls.**
+- `lib/observer/` — push observables with operators (cold, sync) + subject/behavior_subject/replay_subject. Status: stable.
 - `lib/event/`, `lib/event_emitter/` — event bus / pub-sub. Status: stable. **Two parallel impls.**
 - `lib/event_sourcing/` — event store + aggregates + projections + sagas. Status: stable.
 - `lib/pubsub/` — pub/sub with topic patterns + middleware. Status: stable.

@@ -200,6 +200,8 @@ LOC = sum of `.lua` lines under the dir excluding `*_test.lua`. "tests" = number
 
 **Recommendation:** Lean `observer` (larger, more recent, more operators); port `replay_subject` over. Drop `observable`. Note: distinct from `lib/reactive/` and `lib/signals/` per inventory.
 
+**Resolved 2026-05-15:** observable dropped; replay_subject ported to observer.
+
 ---
 
 ## Event emitter
