@@ -333,7 +333,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/interpolation/`, `lib/interpolation_curves/` — 1D/2D splines. Status: stable.
 - `lib/kalman/` — Kalman filter. Status: stable.
 - `lib/knn/` — k-nearest neighbors. Status: stable.
-- `lib/lindenmayer/`, `lib/lsystem/` — L-systems; `lsystem` is parallel/older. Status: stable.
+- `lib/lindenmayer/` — L-systems with turtle graphics + named presets. Status: stable.
 - `lib/luhn/` — Luhn checksum. Status: stable.
 - `lib/math/` — math utilities: `tointeger(x) -> integer | nil`. Status: stable.
 - `lib/math_ext/` — extended math.*. Status: stable.

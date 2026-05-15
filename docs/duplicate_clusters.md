@@ -288,6 +288,8 @@ LOC = sum of `.lua` lines under the dir excluding `*_test.lua`. "tests" = number
 
 **Recommendation:** `lindenmayer` is canonical. Drop `lsystem`.
 
+**Resolved 2026-05-15:** lsystem dropped; hilbert/pentigree/plant presets ported to lindenmayer.
+
 ---
 
 ## Option / Maybe / Either — four impls
