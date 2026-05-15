@@ -457,7 +457,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/ir/` — intermediate representation. Status: stable.
 - `lib/memoize/` — memoize/once/debounce/lru/ttl/weak/multi. Status: stable.
 - `lib/merge/` — table merge. Status: stable.
-- `lib/merkle/`, `lib/merkle_tree/` — Merkle tree. Status: stable. **Two parallel impls.**
+- `lib/merkle_tree/` — Merkle tree (build, verify, sparse, diff, concat). Status: stable.
 - `lib/search/` — search. Status: stable.
 - `lib/semver/` — Semver 2.0 parser/comparator. Status: stable.
 - `lib/string_ext/`, `lib/table_ext/` — extended Lua stdlib utilities. Status: stable.

@@ -96,6 +96,8 @@ LOC = sum of `.lua` lines under the dir excluding `*_test.lua`. "tests" = number
 
 **Recommendation:** `merkle_tree` is canonical. Drop `merkle`.
 
+**Resolved 2026-05-15:** merkle dropped; merkle_tree is canonical.
+
 ---
 
 ## Geohash
