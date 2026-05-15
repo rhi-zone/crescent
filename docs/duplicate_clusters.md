@@ -168,6 +168,8 @@ LOC = sum of `.lua` lines under the dir excluding `*_test.lua`. "tests" = number
 
 **Recommendation:** `noise_gen` is canonical. Drop `noise`.
 
+**Resolved 2026-05-15:** noise dropped; noise_gen is canonical.
+
 ---
 
 ## Rate limiting

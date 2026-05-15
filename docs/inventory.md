@@ -341,7 +341,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/math_ext/` — extended math.*. Status: stable.
 - `lib/minimax/` — minimax + αβ + iterative deepening + MCTS. Status: stable.
 - `lib/neural/`, `lib/neural_net/` — feedforward NN with backprop. Status: stable. **Two parallel impls.**
-- `lib/noise/`, `lib/noise_gen/` — Perlin/Simplex/Worley/fBm/turbulence/domain-warping. Status: stable. **`noise_gen` is the larger/newer one.**
+- `lib/noise_gen/` — Value/Perlin/Simplex/Worley + fBm/turbulence/domain-warping/ridged. Status: stable.
 - `lib/number_theory/` — number theory utilities. Status: stable.
 - `lib/particle/` — particle systems. Status: stable.
 - `lib/physics_2d/` — 2D rigid body (semi-implicit Euler, AABB/circle, joints). Status: stable.
