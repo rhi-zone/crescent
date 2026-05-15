@@ -13,6 +13,7 @@ local constrain  = require("lib.type.static.constrain")
 local TAG_ANY          = defs.TAG_ANY
 local TAG_UNKNOWN      = defs.TAG_UNKNOWN
 local TAG_NIL          = defs.TAG_NIL
+local TAG_BOOLEAN      = defs.TAG_BOOLEAN
 local TAG_NUMBER       = defs.TAG_NUMBER
 local TAG_INTEGER      = defs.TAG_INTEGER
 local TAG_STRING       = defs.TAG_STRING
@@ -1997,19 +1998,6 @@ local function solve_callable(ctx, c)
             local exp_tid = find(ctx, raw_param_tid)
             local act_tid = arg_tids[i + 1]
             if act_tid then
-                -- Phase C: record per-call-site arg for unannotated-param autofix.
-                -- Recording happens BEFORE the unify attempt so that callers whose
-                -- types the solver subsequently rejects are still counted.
-                if ctx._inferred_param_tid
-                    and ctx._inferred_param_tid[raw_param_tid] then
-                    ctx._inferred_param_callsites = ctx._inferred_param_callsites or {}
-                    local cs = ctx._inferred_param_callsites[raw_param_tid]
-                    if not cs then
-                        cs = {}
-                        ctx._inferred_param_callsites[raw_param_tid] = cs
-                    end
-                    cs[#cs + 1] = { line = line, col = col, arg_tid = act_tid }
-                end
                 -- Fast path: try direct assignability (preserves literal-to-literal/union).
                 -- Skip when exp_tid contains free vars: try_unify is read-only and won't bind them.
                 -- Skip for closed table params: the full unify path enforces the excess-field check.
@@ -2746,19 +2734,6 @@ local function solve_check_args(ctx, c)
             local exp_tid = find(ctx, raw_param_tid)
             local act_tid = arg_tids[i + 1]
             if act_tid then
-                -- Phase C: record per-call-site arg for unannotated-param autofix.
-                -- Recording happens BEFORE the unify attempt so that callers whose
-                -- types the solver subsequently rejects are still counted.
-                if ctx._inferred_param_tid
-                    and ctx._inferred_param_tid[raw_param_tid] then
-                    ctx._inferred_param_callsites = ctx._inferred_param_callsites or {}
-                    local cs = ctx._inferred_param_callsites[raw_param_tid]
-                    if not cs then
-                        cs = {}
-                        ctx._inferred_param_callsites[raw_param_tid] = cs
-                    end
-                    cs[#cs + 1] = { line = line, col = col, arg_tid = act_tid }
-                end
                 -- Fast path: try direct assignability (preserves literal-to-literal/union).
                 local act_r = find(ctx, act_tid)
                 local et = ctx.types:get(exp_tid)
@@ -3117,11 +3092,6 @@ end
 -- _overlap_byte_range maps (line, col) → {byte_start, byte_end} of the cast comment,
 -- set by constrain.lua at NODE_CAST_EXPR emit so solve_overlap can attach an autofix.
 --:: augment Ctx { _overlap_byte_range?: { [integer]: { [integer]: integer } } }
--- _inferred_param_callsites maps param-var tid → list of {line, col, arg_tid}
--- recorded at every call site where the param appears as an argument target.
--- Populated by solve_callable / solve_check_args; consumed by Phase C autofix.
---:: augment Ctx { _inferred_param_callsites?: { [integer]: { [integer]: { line: integer, col: integer, arg_tid: integer }, ... }, ... } }
-
 -- Return the 0-indexed byte offset of the start of `line_num` (1-indexed) in `source`.
 -- Returns nil if line_num is out of range.
 --: (string, integer) -> integer | nil
@@ -3157,199 +3127,6 @@ local function get_line(source, line_num)
     return source:sub(s, e - 1)
 end
 
--- Walk a TAG_NAMED chain to verify all named references are resolvable in scope.
--- Returns true if every TAG_NAMED encountered has a binding in ctx.scope's
--- type aliases. Used by Phase C to decide whether to render with alias names
--- (option iii) or fall back to a structural rendering.
---: (Ctx, integer, { [integer]: boolean, ... }) -> boolean
-local function aliases_in_scope(ctx, tid, seen)
-    tid = find(ctx, tid)
-    if seen[tid] then return true end
-    seen[tid] = true
-    local t = ctx.types:get(tid)
-    local tag = t.tag
-    if tag == TAG_NAMED then
-        if not env_mod.lookup_type(ctx.scope, t.data[0]) then return false end
-        local al = t.data[2]
-        for i = t.data[1], t.data[1] + al - 1 do
-            if not aliases_in_scope(ctx, ctx.lists:get(i), seen) then return false end
-        end
-        return true
-    end
-    if tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            if not aliases_in_scope(ctx, ctx.lists:get(i), seen) then return false end
-        end
-        return true
-    end
-    if tag == TAG_FUNCTION then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            if not aliases_in_scope(ctx, ctx.lists:get(i), seen) then return false end
-        end
-        for i = t.data[2], t.data[2] + t.data[3] - 1 do
-            if not aliases_in_scope(ctx, ctx.lists:get(i), seen) then return false end
-        end
-        if t.data[4] >= 0 then
-            if not aliases_in_scope(ctx, t.data[4], seen) then return false end
-        end
-        return true
-    end
-    if tag == TAG_TABLE then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            local fid = ctx.lists:get(i)
-            local fe = ctx.fields:get(fid)
-            if not aliases_in_scope(ctx, fe.type_id, seen) then return false end
-        end
-        local is, il = t.data[2], t.data[3]
-        local ix = is
-        while ix < is + il - 1 do
-            if not aliases_in_scope(ctx, ctx.lists:get(ix), seen) then return false end
-            if not aliases_in_scope(ctx, ctx.lists:get(ix + 1), seen) then return false end
-            ix = ix + 2
-        end
-        return true
-    end
-    return true
-end
-
--- Reject types whose annotation rendering would contain a free type variable
--- at any nesting level (e.g. `{ gsub: _ }` from a partial method-call shape).
--- TAG_VAR / TAG_ROWVAR at any depth, except FLAG_SKOLEM (which represents
--- a generic parameter and is intentional), are disqualifying.
---: (Ctx, integer, { [integer]: boolean, ... }) -> boolean
-local function has_free_var(ctx, tid, seen)
-    tid = find(ctx, tid)
-    if seen[tid] then return false end
-    seen[tid] = true
-    local t = ctx.types:get(tid)
-    local tag = t.tag
-    if tag == TAG_VAR or tag == TAG_ROWVAR then
-        local bit_mod = require("bit")
-        if bit_mod.band(t.flags, defs.FLAG_SKOLEM) ~= 0 then return false end
-        return true
-    end
-    if tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            if has_free_var(ctx, ctx.lists:get(i), seen) then return true end
-        end
-        return false
-    end
-    if tag == TAG_FUNCTION then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            if has_free_var(ctx, ctx.lists:get(i), seen) then return true end
-        end
-        for i = t.data[2], t.data[2] + t.data[3] - 1 do
-            if has_free_var(ctx, ctx.lists:get(i), seen) then return true end
-        end
-        if t.data[4] >= 0 and has_free_var(ctx, t.data[4], seen) then return true end
-        return false
-    end
-    if tag == TAG_TABLE then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            local fid = ctx.lists:get(i)
-            local fe = ctx.fields:get(fid)
-            if has_free_var(ctx, fe.type_id, seen) then return true end
-        end
-        return false
-    end
-    return false
-end
-
--- Deep-widen literals in compound types. Returns a new tid where every
--- TAG_LITERAL inside tuples / functions / unions / intersections has been
--- replaced with its base type. Tables are left untouched (their field types
--- are part of the structural contract). Used to clean up function return
--- types like `(nil, "hex string has odd length")` → `(nil, string)` before
--- rendering as an annotation.
---: (Ctx, integer, { [integer]: integer, ... }) -> integer
-local function widen_for_annotation(ctx, tid, seen)
-    tid = find(ctx, tid)
-    if seen[tid] then return tid end
-    local t = ctx.types:get(tid)
-    local tag = t.tag
-    if tag == TAG_LITERAL then return types_mod.widen(ctx, tid) end
-    if tag == TAG_UNION then
-        seen[tid] = tid
-        local members = {} --: { [integer]: integer, ... }
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            members[#members + 1] = widen_for_annotation(ctx, ctx.lists:get(i), seen)
-        end
-        seen[tid] = nil
-        return types_mod.make_union(ctx, members)
-    end
-    if tag == TAG_TUPLE then
-        seen[tid] = tid
-        local parts = {} --: { [integer]: integer, ... }
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            parts[#parts + 1] = widen_for_annotation(ctx, ctx.lists:get(i), seen)
-        end
-        seen[tid] = nil
-        return types_mod.make_tuple(ctx, parts)
-    end
-    return tid
-end
-
--- Render a type as a `--:`-parseable string for the Phase C autofix.
--- Deep-widens literals first, then rejects:
---   - types containing free TAG_VAR/TAG_ROWVAR at any nesting level
---   - types whose TAG_NAMED references aren't resolvable in the destination
---     file's scope (option iii fallback)
--- Returns nil to signal the caller to suppress the autofix.
---: (Ctx, integer) -> string | nil
-local function render_for_annotation(ctx, tid)
-    tid = widen_for_annotation(ctx, tid, {})
-    if has_free_var(ctx, tid, {}) then return nil end
-    if not aliases_in_scope(ctx, tid, {}) then return nil end
-    local s = types_mod.display(ctx, tid)
-    -- Belt-and-suspenders: the structural checks above should have caught
-    -- these, but keep the string-level guards in case display() emits an
-    -- unexpected token for a shape the checks miss.
-    if s:find("?", 1, true) or s:find("_", 1, true) == 1 then return nil end
-    if s == "_" or s:find("..._", 1, true) then return nil end
-    return s
-end
-
--- Compose the modal-or-union representative for a list of widened tids.
--- Returns the rendered string and the count of contributing call sites.
--- If any rendering fails, returns nil.
---: (Ctx, { [integer]: integer, ... }) -> string | nil
-local function combine_inferred(ctx, widened_tids)
-    if #widened_tids == 0 then return nil end
-    -- Count by rendered string (canonicalizes equal types).
-    local counts = {} --: { [string]: integer, ... }
-    local order = {} --: { [integer]: string, ... }
-    local total = 0
-    for _, tid in ipairs(widened_tids) do
-        local s = render_for_annotation(ctx, tid)
-        if not s then return nil end
-        if counts[s] then
-            counts[s] = counts[s] + 1
-        else
-            counts[s] = 1
-            order[#order + 1] = s
-        end
-        total = total + 1
-    end
-    if #order == 1 then return order[1] end
-    -- Modal: find the most-frequent rendering; require ≥80% AND strictly
-    -- dominant (modal count > next-most-frequent count).
-    local best, best_n, second_n = nil, 0, 0
-    for _, s in ipairs(order) do
-        local n = counts[s]
-        if n > best_n then
-            second_n = best_n
-            best, best_n = s, n
-        elseif n > second_n then
-            second_n = n
-        end
-    end
-    if best and best_n * 5 >= total * 4 and best_n > second_n then
-        return best
-    end
-    -- Otherwise: union of distinct rendered types (sorted for determinism).
-    table.sort(order)
-    return table.concat(order, " | ")
-end
 
 -- HM-aware annotation renderer (Phase 1 follow-up). Walks a function tid
 -- collecting FLAG_GENERIC vars, assigns names (T, U, V, W, X, Y, Z, T1+),
@@ -3400,7 +3177,17 @@ local function render_hm_signature(ctx, fn_tid)
         if tag == TAG_VAR then
             local n = name_for(tid)
             if n then return n end
-            return nil  -- non-generic free var
+            -- Non-generic free var (e.g. body usage produced a var that didn't
+            -- get generalized because it's at the outer scope level). Render
+            -- as `unknown` — sound (unknown is the top type, must be narrowed
+            -- before use) and parseable. Loses precision but doesn't break
+            -- the autofix output.
+            return "unknown"
+        end
+        if tag == TAG_ROWVAR then
+            -- Free row var inside a structural type — render as `...` (open
+            -- record marker) for parseability.
+            return "..."
         end
         if tag == TAG_NIL      then return "nil" end
         if tag == TAG_BOOLEAN  then return "boolean" end
@@ -3495,7 +3282,23 @@ local function render_hm_signature(ctx, fn_tid)
             end
             return table.concat(parts, " & ")
         end
-        return nil  -- unsupported tag
+        if tag == TAG_NAMED then
+            -- Use the alias name. If args, render them too.
+            local name = intern_mod.get(ctx.pool, t.data[0]) or "?"
+            local arg_l = t.data[2]
+            if arg_l == 0 then return name end
+            local args = {} --: { [integer]: string, ... }
+            for i = t.data[1], t.data[1] + arg_l - 1 do
+                local a = render(ctx.lists:get(i), seen)
+                if not a then return nil end
+                args[#args + 1] = a
+            end
+            return name .. "<" .. table.concat(args, ", ") .. ">"
+        end
+        -- Unsupported tag (TAG_LITERAL float, TAG_TUPLE, TAG_NOMINAL, etc.):
+        -- render as `unknown` — sound fallback. Specific tags can be added
+        -- as their use cases surface.
+        return "unknown"
     end
 
     -- Walk the function type to discover generic vars in encounter order.
@@ -3590,60 +3393,6 @@ local function render_hm_signature(ctx, fn_tid)
     return generic_prefix .. "(" .. table.concat(pparts, ", ") .. ") -> " .. ret_s
 end
 
--- Build the body of a `--: (...) -> R` annotation for a function-def site.
--- Returns the signature string (without the `--: ` prefix) on success,
--- or nil if any param/return type can't be cleanly rendered.
---: (Ctx, { recs: { [integer]: { var_tid: integer, ... }, ... }, fn_tid: integer | nil }) -> string | nil
-local function render_signature(ctx, g)
-    if not g or not g.fn_tid then return nil end
-    local fn_t = ctx.types:get(find(ctx, g.fn_tid))
-    if fn_t.tag ~= TAG_FUNCTION then return nil end
-    -- Render return.
-    local ret_s
-    local rl = fn_t.data[3]
-    if rl == 0 then
-        ret_s = "()"
-    elseif rl == 1 then
-        local rid = find(ctx, ctx.lists:get(fn_t.data[2]))
-        local rt = ctx.types:get(rid)
-        if rt.tag == TAG_VAR or rt.tag == TAG_ROWVAR then
-            ret_s = "nil"
-        else
-            ret_s = render_for_annotation(ctx, rid)
-        end
-    else
-        local parts = {} --: { [integer]: string, ... }
-        local parts_ok = true
-        for i = fn_t.data[2], fn_t.data[2] + rl - 1 do
-            local part = render_for_annotation(ctx, find(ctx, ctx.lists:get(i)))
-            if not part then parts_ok = false; break end
-            parts[#parts + 1] = part
-        end
-        if parts_ok then ret_s = "(" .. table.concat(parts, ", ") .. ")" end
-    end
-    if not ret_s then return nil end
-    -- Render params.
-    local pparts = {} --: { [integer]: string, ... }
-    for pi, rec in ipairs(g.recs) do
-        local sites = ctx._inferred_param_callsites
-            and ctx._inferred_param_callsites[rec.var_tid]
-        local rendered
-        if sites and #sites > 0 then
-            local widened = {} --: { [integer]: integer, ... }
-            for _, s in ipairs(sites) do
-                widened[#widened + 1] = find(ctx, widen_for_sub(ctx, s.arg_tid))
-            end
-            rendered = combine_inferred(ctx, widened)
-        end
-        if not rendered then
-            local bound = find(ctx, rec.var_tid)
-            rendered = render_for_annotation(ctx, bound)
-        end
-        if not rendered then return nil end
-        pparts[pi] = rendered --[[: string]]
-    end
-    return "(" .. table.concat(pparts, ", ") .. ") -> " .. ret_s
-end
 
 -- Emit MISSING_FUNCTION_SIGNATURE errors for function definitions that lack
 -- a `--:` annotation. Statement-form definitions always fire; expression-
@@ -3754,7 +3503,6 @@ local function emit_missing_function_signature(ctx, real_err, sev)
                         -- generalization (e.g. annotated functions that
                         -- somehow trigger the warning).
                         local sig_str = g.fn_tid and render_hm_signature(ctx, g.fn_tid)
-                        if not sig_str then sig_str = render_signature(ctx, g) end
                         if sig_str then
                             local insert_at = line_start_byte(ctx.source, sig.line)
                             if insert_at then
