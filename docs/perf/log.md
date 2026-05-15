@@ -6,6 +6,64 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-05-15: typechecker — HM Phase 2 baseline + post-change comparison
+
+**Commits:** pre-Phase-2 = `772fb7dd` (parent of `9260751e`); post-Phase-2 = `391bde98` (HEAD)
+
+HM Phase 2 (`9260751e`, `92f866b2`, `391bde98`) added a
+`record_polymorphic_ops_post` pass plus per-call-site re-emission of recorded
+body ops (field-value-type propagation, then extension to `C_COMPARE`). The
+architectural cost is up to `(call_sites × body_ops)` extra constraint
+emissions per generic helper — at realistic scale (~50 call sites × ~10 body
+ops ≈ ~500 extra constraints per helper) this should be tolerable for a
+solver that already handles 10⁵+ constraints, but the design risk per
+`docs/typechecker-hm-phase2.md` is quadratic blowup, so verify.
+
+Bench: cold-cache `time timeout 120 bin/cr check <files>` (`.crescentcache`
+removed before each run). Best of three runs reported.
+
+### Results
+
+| Workload | Pre-Phase-2 (772fb7dd) | HEAD (391bde98) | Δ |
+|---|---|---|---|
+| `lib/type/static/*.lua` (typechecker self-check, ~30 files) | 5.509s | 5.907s | **+7.2%** |
+| `lib/iter/init.lua` (generics-heavy, 17 generic call sites) | 0.046s | 0.043s | -6.5% |
+| `lib/hex_dump/init.lua` (non-generic control) | 0.060s | 0.058s | -3.3% |
+
+Raw runs (all three, in order):
+
+```
+HEAD lib/type/static/*.lua:   6.090s 6.270s 5.907s
+PRE  lib/type/static/*.lua:   5.509s 5.796s 8.068s
+HEAD lib/iter/init.lua:       0.048s 0.047s 0.043s
+PRE  lib/iter/init.lua:       0.050s 0.050s 0.046s
+HEAD lib/hex_dump/init.lua:   0.063s 0.072s 0.058s
+PRE  lib/hex_dump/init.lua:   0.060s 0.064s 0.068s
+```
+
+### Notes
+
+- Single-file workloads (`iter`, `hex_dump`) check only the file itself —
+  their dependency closure is satisfied from the disk cache *for files other
+  than the target*, so they exercise the per-file solver but not a wide
+  re-emission surface. Both are noise-level (within ±10%).
+- The self-check workload is the meaningful signal: 30 files including
+  `infer.lua`, `solver.lua`, etc., which are the heaviest typechecker
+  modules and exercise `_forall_ops` recording extensively. +7.2% wallclock
+  overhead is well within the 20% gate.
+- Pre-Phase-2 run 3 (8.068s) is an outlier; using best-of-three to discount
+  it. Even using mean (6.46s pre vs 6.09s post) the change is within noise.
+- No quadratic blowup observed at current scale. The (call_sites × body_ops)
+  budget is being spent, but the constants are small enough that the solver
+  absorbs it.
+
+### Verdict
+
+Phase 2 ships within the perf budget. Re-measure after Phase 3
+(`_inferred_params` removal) to confirm direction of travel.
+
+---
+
 ## 2026-04-17: library index — FTS5 + app_tags at 20k apps
 
 **Commits:** d25e174 (schema), 98316cd (wire-up), follow-up (query shape fix)
