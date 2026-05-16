@@ -349,26 +349,39 @@ replaced with `undefined`-returning getters.
   `isPrototypeOf`. Justification: prototype-access / mutation reach.
 - **`Function` constructor.** Removed entirely. Closes
   `new Function("...")`.
-- **`Function.prototype`.** Kept: `call`, `apply`, `bind`.
+- **`Function.prototype`.** Kept: `call`, `apply`, `bind` (bind kept
+  pending adversarial review — see §7).
   `.constructor` neutralised (`undefined`, non-configurable).
   `toString` removed (function-source leak).
 - **`AsyncFunction` / `GeneratorFunction` / `AsyncGeneratorFunction`
   constructors.** Removed entirely; the corresponding
   `.prototype.constructor` slots neutralised to close shadow paths.
-- **`Array` constructor.** Kept, wrapped: throws if `n > THRESHOLD`.
+  Source-level `async function` / `await` remain allowed (see
+  "Language-level constraints"); only the dynamic-construction-from-string
+  path is closed.
+- **`Array` constructor.** Kept, wrapped: throws if `n > SIZE_CAP`.
   Most prototype methods kept;
   `join` / `fill` / `flat` / `flatMap` replaced with bounded versions.
 - **`String` constructor and prototype.** Kept; bounded
-  `padStart` / `padEnd` / `repeat` / `normalize` (output-length cap).
+  `padStart` / `padEnd` / `repeat` / `normalize` (output-length cap
+  `SIZE_CAP`).
   Regex methods (`match`, `matchAll`, `replace`, `split`) wrapped
   with an input-size cap and optional regex-shape check.
 - **`Number`, `Boolean`, `BigInt`.** Kept full.
 - **`Math`.** Kept full (no security-relevant state).
 - **`JSON`.** `stringify` / `parse` wrapped with input-size cap,
-  output-size cap, depth cap.
-- **`Date`.** Replaced with a coarse-time variant; granularity is
-  host-controlled (e.g. 50ms ticks) to mitigate timing oracles.
-  `Date.now` and `performance.now` similarly coarsened.
+  output-size cap (both `SIZE_CAP`), depth cap.
+- **Size cap (`SIZE_CAP`).** Single canonical value applied across
+  `Array(n)`, `String.prototype.repeat`, and JSON input/output size.
+  Default: **128M (`2^27 = 134_217_728`)**. Configurable per-pack via
+  manifest entry; a pack manifest may declare a *lower* cap to
+  constrain itself further, but cannot exceed the default.
+- **`Date` / `performance.now` / `Date.now`.** Kept as the browser
+  provides them — no custom coarsening layer. The realm relies on the
+  browser's built-in Spectre-mitigation coarsening of `performance.now`
+  (~5μs or ~100μs depending on COOP/COEP cross-origin-isolated state).
+  Adding our own coarsening on top is redundant with the browser's
+  protection and reduces UX fidelity.
 - **`Promise`.** Kept. Microtask scheduling is a timing channel; we
   accept this (no JS sandbox defends against it).
 - **`Map`, `Set`, `WeakMap`, `WeakSet`.** Kept. `WeakRef` and
@@ -381,8 +394,18 @@ replaced with `undefined`-returning getters.
   cases). `SharedArrayBuffer` removed (cross-thread / Spectre).
 - **`eval`, `Function`, dynamic `import()`.** Removed.
 - **Module / loader globals.** None in this realm.
+- **`globalThis`.** Curated namespace object — a fresh object
+  containing only the allow-listed names, constructed by the
+  bootstrap *before* pack code loads. Pack-side references to
+  `globalThis` resolve to this curated object, never to the real
+  realm global (which would leak `eval`, `Function`, and the rest).
 - **Host-bridged caps.** Installed by name as declared in the pack
   manifest, after lockdown completes.
+
+**Library location.** The lockdown library lives at
+`lib/js_realm_sandbox/`. Convention: **`lib/js_*/` prefix for
+browser-side libraries**, parallel to plain `lib/<name>/` for
+daemon/general libraries.
 
 #### Language-level constraints
 
@@ -392,9 +415,10 @@ removable at runtime:
 - `class` syntax disallowed (desugars to prototype manipulation,
   bypassing the runtime removal of `Object.setPrototypeOf`).
 - Generators / `function*` disallowed.
-- `async function` / `await` — open question (Promise itself is kept;
-  if `async` is disallowed, `Promise.then` chaining is the only
-  async path). See §7.
+- `async function` / `await` — kept (source-level allowed;
+  `AsyncFunction` constructor removed, so dynamic construction from
+  string is blocked while normal async/await syntax remains
+  available).
 - `with` statement disallowed (legacy reflection).
 - `eval` keyword and `Function` constructor in source — already
   removed at runtime; static check flags at `bin/cr check` for DX.
@@ -747,20 +771,16 @@ Initiative B's resumption.
 These are explicit. They are not buried in prose because they need
 decision-level attention, not skimming.
 
-- **Async / await — kept or disallowed?** Promise itself is on the
-  allow-list, so `Promise.then` chaining is always available. The
-  question is whether `async function` / `await` syntax is permitted
-  at the source level. If disallowed, `Promise.then` chaining is the
-  only async path; if permitted, the AsyncFunction shadow constructor
-  removal still has to hold. Called out in the allow-list spec.
-- **Coarse-time tick granularity.** What value? 50ms? 100ms? Trades
-  timing-oracle mitigation against UX (animation, perceived
-  responsiveness). The spec leaves the granularity host-controlled;
-  the concrete number is TBD.
-- **Allow-list size thresholds.** Concrete numbers for the array max
-  size, `String.prototype.repeat` output cap, `JSON` depth and total
-  size cap, regex input-size cap. The spec names the dimensions;
-  picking values is downstream work.
+- **Adversarial review of `Function.prototype.bind`.** Bind is kept
+  in the allow-list by default, but is the explicit remaining gate
+  on the spec before lockdown ships. A reviewer must attempt
+  escapes: `.bind.bind.bind...` chains, `bind` on stripped-constructor
+  `[[Construct]]` shadows, `bind` interactions with allowed
+  intrinsics (typed arrays, Promise, Reflect-shaped surfaces that
+  survive lockdown, etc.). If the review clears after an honest
+  attempt, `bind` stays as specified. If any vector is found, `bind`
+  is removed from the allow-list and the attack is documented in the
+  spec.
 - **Shared `.d.ts` location.** Single host-served declaration file for
   the realm allow-list, cap signatures, VNode shape, and bridge
   protocol. `lib/platform/browser_types.d.ts` or a daemon-served static
