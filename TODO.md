@@ -13,13 +13,14 @@ no separate `browser_caps` manifest field; first-party apps migrate to
 "Framing" for the consolidated decisions. The work below is the migration
 to that endpoint.
 
-- [ ] **Revert the `browser_caps` manifest field.** Drop the field and
+- [x] **Revert the `browser_caps` manifest field.** Dropped the field and
   related plumbing from `lib/platform/platform_types.lua`,
   `lib/platform/init.lua`, `lib/platform/cli.lua`,
-  `lib/platform/manifest_caps.lua`. Drop the corresponding tests. Drop
-  documentation of the field. The existing `caps` field (with
-  `type: "web_runtime"`) is the abstraction; no parallel field is added.
-  Background: commit `e6e7b532` introduced the field; revert is mandatory.
+  `lib/platform/manifest_caps.lua`, plus the corresponding tests and the
+  `docs/browser_caps.md` §3 cross-references that pointed at the now-gone
+  code. The existing `caps` field (with `type: "web_runtime"`) is the
+  abstraction; no parallel field is added. Background: commit `e6e7b532`
+  introduced the field.
 
 - [ ] **Design the explicit `web_runtime` cap interface.** Entry function
   (inputs: pack source + declared sub-caps; output: sandboxed-realm handle),

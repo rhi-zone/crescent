@@ -173,21 +173,14 @@ Per-cap "shape digest" definitions live in §4 entries that need them. Default: 
 ## 3. Manifest entry format
 
 > **Note (post-`web_runtime` reframing).** The schema described in this
-> section was drafted against the now-reverted `browser_caps` top-level
-> manifest field. Sub-caps will instead be scoped under a `web_runtime`
-> cap entry in the existing `caps` field; the concrete shape is owed
-> (see `TODO.md` "Define the cap-impl's manifest schema"). The per-entry
-> axes below — local cap name, `kind`, `config`, factory shape, grant
-> recording — carry over; only the outer binding changes. Treat this
-> section as describing the per-entry shape, not the top-level field
-> name. The references to `lib/platform/platform_types.lua`
-> `BrowserCapDecl`, `lib/platform/manifest_caps.lua`, and the
-> `merge_browser_cap_declarations` / `validate_browser_caps` functions
-> point at code slated for revert with the `browser_caps` field.
-
-Schema location: [`lib/platform/platform_types.lua`](../lib/platform/platform_types.lua) (canonical `BrowserCapDecl`, with duplicates in `lib/platform/init.lua` and `lib/platform/cli.lua` kept in sync).
-
-Merge + validation logic: [`lib/platform/manifest_caps.lua`](../lib/platform/manifest_caps.lua) — `merge_browser_cap_declarations(manifest, entry_key)` mirrors the daemon-side `merge_cap_declarations` line-by-line (same shorthand `"required"` / `"optional"`, same default-required-true, same top-level-plus-per-entrypoint merge). `validate_browser_caps(manifest)` rejects unknown kinds at manifest-parse time against the day-zero set in §5; per-kind config validation is deferred to cap-impl time.
+> section was drafted against an earlier `browser_caps` top-level
+> manifest field (since reverted). Sub-caps will instead be scoped under
+> a `web_runtime` cap entry in the existing `caps` field; the concrete
+> shape is owed (see `TODO.md` "Define the cap-impl's manifest schema").
+> The per-entry axes below — local cap name, `kind`, `config`, factory
+> shape, grant recording — carry over; only the outer binding changes.
+> Treat this section as describing the per-entry shape, not the
+> top-level field name.
 
 Each browser cap an app uses is a manifest entry under `browser_caps`. The schema:
 

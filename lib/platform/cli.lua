@@ -46,9 +46,8 @@ do
 end
 
 --:: CapDecl = { type: string | nil, required: boolean | nil, host: string | nil, model: string | nil, path: string | nil, paths: unknown, allow_write: boolean | nil, scope: unknown, tables: unknown, provider: string | nil, key_name: string | nil, base_url: string | nil, provider_default: string | nil, root: string | nil, binaries: unknown, stderr: string | nil, methods: unknown, port: integer | nil, ... }
---:: BrowserCapDecl = { type: string | nil, required: boolean | nil, allowed_origins: unknown, allowed_methods: unknown, allowed_navigations: unknown, max_body_size: integer | nil, max_response_size: integer | nil, timeout_ms: integer | nil, max_keys: integer | nil, max_value_bytes: integer | nil, max_total_bytes: integer | nil, max_per_minute: integer | nil, ... }
---:: EntryDef = { main: string | nil, caps: { [string]: CapDecl | string } | nil, browser_caps: { [string]: BrowserCapDecl | string } | nil }
---:: Manifest = { name: string | nil, version: string | nil, entry: { [string]: EntryDef | string } | nil, caps: { [string]: CapDecl | string } | nil, browser_caps: { [string]: BrowserCapDecl | string } | nil, default_entry: string | nil, meta: { tags: { [integer]: string } | nil, description: string | nil, ... } | nil, ... }
+--:: EntryDef = { main: string | nil, caps: { [string]: CapDecl | string } | nil }
+--:: Manifest = { name: string | nil, version: string | nil, entry: { [string]: EntryDef | string } | nil, caps: { [string]: CapDecl | string } | nil, default_entry: string | nil, meta: { tags: { [integer]: string } | nil, description: string | nil, ... } | nil, ... }
 --:: TarEntry = { name: string, mode: number, size: number, mtime: number, data: string, typeflag: string }
 --:: AppRecord = { path: string, chunks: { [integer]: { type: string, data: string } } | nil, entries: { [number]: TarEntry }, manifest: Manifest | nil, _dir_mode: boolean | nil }
 
@@ -317,8 +316,7 @@ end
 -- See lib/platform/manifest_caps.lua for the shared shorthand/merge logic
 -- (extracted so it can be tested without loading the CLI's auto-main side
 -- effects).
-local merge_cap_declarations         = manifest_caps.merge_cap_declarations
-local merge_browser_cap_declarations = manifest_caps.merge_browser_cap_declarations
+local merge_cap_declarations = manifest_caps.merge_cap_declarations
 
 -- ── Cap construction ──────────────────────────────────────────────────────
 
@@ -1099,24 +1097,8 @@ local context = {
 	data_dir = data_dir,
 }
 
--- Validate manifest browser_caps shape (rejects unknown kinds / malformed
--- entries early). Per-kind config validation is deferred to cap-impl time.
-do
-	local bok, berr = manifest_caps.validate_browser_caps(manifest)
-	if not bok then
-		io.stderr:write("error: " .. tostring(berr) .. "\n")
-		os.exit(1)
-	end
-end
-
 -- Merge cap declarations from manifest (top-level + per-entrypoint).
 local cap_declarations = merge_cap_declarations(manifest, entrypoint_name)
-
--- Merge browser cap declarations the same way. Browser caps are not
--- constructed here — that wiring lives in the iframe-host bridge — but the
--- merged set is computed so the daemon can surface it to grant UIs etc.
-local browser_cap_declarations = merge_browser_cap_declarations(manifest, entrypoint_name)
-local _ = browser_cap_declarations  -- consumed by future iframe-host wiring
 
 -- Apply --cap.NAME.KEY=VALUE overrides from CLI.
 for cap_name, overrides in pairs(opts.cap_overrides) do

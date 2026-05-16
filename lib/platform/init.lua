@@ -48,9 +48,8 @@ end
 
 --:: TarEntry = { name: string, mode: number, size: number, mtime: number, data: string, typeflag: string }
 --:: CapDecl = { type: string | nil, required: boolean | nil, host: string | nil, model: string | nil, path: string | nil, paths: unknown, allow_write: boolean | nil, scope: unknown, tables: unknown, provider: string | nil, key_name: string | nil, base_url: string | nil, provider_default: string | nil, root: string | nil, binaries: unknown, stderr: string | nil, methods: unknown, port: integer | nil, ... }
---:: BrowserCapDecl = { type: string | nil, required: boolean | nil, allowed_origins: unknown, allowed_methods: unknown, allowed_navigations: unknown, max_body_size: integer | nil, max_response_size: integer | nil, timeout_ms: integer | nil, max_keys: integer | nil, max_value_bytes: integer | nil, max_total_bytes: integer | nil, max_per_minute: integer | nil, ... }
---:: EntryDef = { main: string | nil, caps: { [string]: CapDecl | string } | nil, browser_caps: { [string]: BrowserCapDecl | string } | nil }
---:: Manifest = { name: string | nil, version: string | nil, entry: { [string]: EntryDef | string } | nil, caps: { [string]: CapDecl | string } | nil, browser_caps: { [string]: BrowserCapDecl | string } | nil, default_entry: string | nil, meta: { tags: { [integer]: string } | nil, description: string | nil, ... } | nil, ... }
+--:: EntryDef = { main: string | nil, caps: { [string]: CapDecl | string } | nil }
+--:: Manifest = { name: string | nil, version: string | nil, entry: { [string]: EntryDef | string } | nil, caps: { [string]: CapDecl | string } | nil, default_entry: string | nil, meta: { tags: { [integer]: string } | nil, description: string | nil, ... } | nil, ... }
 --:: AppRecord = { path: string, chunks: { [integer]: { type: string, data: string } } | nil, entries: { [number]: TarEntry }, manifest: Manifest | nil, _dir_mode: boolean | nil }
 -- load_tarball_from_png(path, bytes) -> entries, chunks | nil, err
 --: (string, string) -> ({ [number]: TarEntry } | nil, unknown | nil)

@@ -39,36 +39,12 @@
 --::   ...
 --:: }
 
--- ── BrowserCapDecl ────────────────────────────────────────────────────────────
--- A browser-side capability declaration as it appears in manifest.json under
--- `browser_caps`. Parallel to `CapDecl` but enforced host-stub-side in the
--- pack realm (sandboxed iframe / ShadowRealm). See docs/browser_caps.md §3.
--- Fields are optional — the platform reads only what it understands; unknown
--- fields are passed through to the cap factory.
-
---:: BrowserCapDecl = {
---::   type: string | nil,
---::   required: boolean | nil,
---::   allowed_origins: unknown,
---::   allowed_methods: unknown,
---::   allowed_navigations: unknown,
---::   max_body_size: integer | nil,
---::   max_response_size: integer | nil,
---::   timeout_ms: integer | nil,
---::   max_keys: integer | nil,
---::   max_value_bytes: integer | nil,
---::   max_total_bytes: integer | nil,
---::   max_per_minute: integer | nil,
---::   ...
---:: }
-
 -- ── EntryDef ──────────────────────────────────────────────────────────────────
 -- One entry in manifest.entry; may be a plain path string or a table.
 
 --:: EntryDef = {
 --::   main: string | nil,
 --::   caps: { [string]: CapDecl | string } | nil,
---::   browser_caps: { [string]: BrowserCapDecl | string } | nil,
 --:: }
 
 -- ── ManifestMeta ─────────────────────────────────────────────────────────────
@@ -82,7 +58,6 @@
 --::   version: string | nil,
 --::   entry: { [string]: EntryDef | string } | nil,
 --::   caps: { [string]: CapDecl | string } | nil,
---::   browser_caps: { [string]: BrowserCapDecl | string } | nil,
 --::   default_entry: string | nil,
 --::   meta: ManifestMeta | nil,
 --::   ...
