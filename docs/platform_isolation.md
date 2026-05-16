@@ -475,10 +475,164 @@ replaced with `undefined`-returning getters.
 browser-side libraries**, parallel to plain `lib/<name>/` for
 daemon/general libraries.
 
+#### Pack-source validation (daemon-side)
+
+**Resolved: daemon-side parse-and-validate at pack-load using a
+vendored JS parser (acorn, or equivalent).** The runtime allow-list
+realm cannot enforce syntax-level bans — by the time JS reaches the
+browser engine, parsing has already happened and `class` /
+generator / `with` / dynamic-import syntax has already been
+constructed. Static analysis pre-serve is the only mechanism that
+actually enforces syntactic constraints.
+
+The daemon parses every pack-supplied browser JS file with acorn at
+pack-load time and validates the resulting AST against a defined
+"pack JS" subset grammar — an allow-list of AST node shapes.
+Validation failure rejects the pack with a structured error pointing
+at the offending source location; the pack does not serve. Acorn is
+small (~50kb), pure-JS, well-tested; vendored into `dep/`. No
+author-side toolchain requirement: the author ships standard JS, the
+daemon does the gate.
+
+The framing is allow-list, not deny-list, for the same reasons the
+runtime lockdown is: deny-lists rot as the language grows; an
+allow-list closes new TC39 syntax by structural absence.
+
+**Prior art: hologram.** `~/git/exoplace/hologram/src/logic/expr-compiler.ts`
+validates expressions against a restricted grammar at compile time;
+the attack surface is enumerable from the grammar definition itself,
+with no runtime lockdown library needed for the expression layer.
+Crescent's pack-JS subset is much richer than hologram's 7-node
+expression grammar (full pack apps, not single expressions), but the
+*principle is the same*: allow-list of AST node shapes, not deny-list
+of dangerous forms.
+
+#### Pack JS subset (draft)
+
+> *Draft. Spec the daemon validator implements. Invites revision —
+> the open questions at the end of this subsection block its move to
+> "stable".*
+
+**Allowed AST node types:**
+
+- Function declarations and expressions (including arrow functions).
+- Variable declarations: `let`, `const`, `var`.
+- Control flow: `if` / `else`, `for` (C-style, `for-of`, `for-in`),
+  `while`, `do-while`, `switch`, `try` / `catch` / `finally`,
+  `break`, `continue`, `return`, `throw`.
+- Literals: numeric, string, template (untagged), boolean, null,
+  regex literal, array literal, object literal.
+- Operators: arithmetic, comparison, logical, bitwise, ternary,
+  nullish, optional chaining, spread (in calls and literals).
+- Member access: dot notation.
+- Member access: bracket notation **with literal-string or
+  numeric-literal keys only** (no dynamic keys).
+- Call expressions.
+- `new` expressions **against allow-listed constructor identifiers
+  only** (allowed constructors enumerated below).
+- `async function` / `await`.
+- Destructuring (object + array).
+- Modules: `export` / `import` (static only, no dynamic `import()`).
+
+**Banned AST node types:**
+
+- `ClassDeclaration` / `ClassExpression` — banned in both forms;
+  `extends <any-expression>` is the load-bearing ban (see
+  `Function.prototype` bind rationale).
+- `MetaProperty` of kind `import.meta` (or any other unspecified
+  meta).
+- `WithStatement` — legacy reflection.
+- `YieldExpression` / generator function syntax (`function*`,
+  `async function*`).
+- Tagged template literals — `String.raw` is benign but custom tags
+  execute arbitrary code per template; eval-equivalent in some
+  idioms.
+- Dynamic `import()` — `ImportExpression` node.
+- `Identifier` nodes resolving to banned globals (`eval`, `Function`,
+  `AsyncFunction`, etc.) in *any* context — the validator walks
+  identifier references and rejects.
+
+**Restricted forms:**
+
+- Bracket member access (`obj[expr]`) where `expr` is not a literal
+  is rejected. Forces all dynamic property access through explicit
+  pack code (or the cap bridge).
+- `new SomeName(...)` where `SomeName` is not in the allow-listed
+  constructor set is rejected. Allow list: `Array`, `Object`,
+  `String`, `Number`, `Boolean`, `Map`, `Set`, `Date`, `Promise`,
+  `RegExp`, `Error` (and its subclasses), `ArrayBuffer`, `DataView`,
+  `Uint8Array` and the TypedArray family — plus any pack-side
+  function names defined in the same module (these become
+  constructable; pack-author responsibility for those).
+
+**Open questions for the subset:**
+
+- Object spread / rest patterns with computed property keys — allow,
+  or restrict to literal keys?
+- `Proxy` / `Reflect` are runtime-removed; their identifiers should
+  also be rejected at parse time for early failure.
+- Symbol literals — only well-known symbols whose identifier is
+  whitelisted, or any local `Symbol("desc")`?
+- Top-level `await` — allowed in ESM; decide.
+
+#### Regex validation
+
+Three sites turn strings into regex patterns; all three are validated
+by the same safe-regex check.
+
+**Validator algorithm.** Hologram-style single-pass parser enforcing
+"no quantifier (`*`, `+`, `?`, `{n,m}`) may be applied to an
+expression that itself contains a quantifier." Catches
+catastrophic-backtracking patterns like `(a+)+b`. Stronger variants
+(alternation overlap analysis, full Thompson-NFA construction with
+state-explosion check) are a future improvement; the simple
+invariant covers the common attack class. Reference implementation:
+`~/git/exoplace/hologram/src/logic/safe-regex.ts`.
+
+**Site 1: Regex literals (`/pattern/flags`).** Parse-time. The acorn
+pass walks every `Literal` node with a `regex` field and runs the
+safe-regex check on the pattern. Reject pack-load on failure.
+
+**Site 2: `new RegExp(pat, flags)`.** Hybrid:
+
+- If `pat` is a static string literal: parse-time check.
+- If `pat` is dynamic (variable, expression, computed): runtime
+  check via the realm-installed `RegExp` constructor wrapper.
+
+**Site 3: `String.prototype.match(pat)`, `.matchAll(pat)`,
+`.search(pat)`.** These methods implicitly coerce a string `pat` to
+a regex via `new RegExp(pat)` internally. Validate. (Note:
+`.replace` / `.replaceAll` / `.split` treat string args as literal,
+not regex — they do NOT need this check.)
+
+- If `pat` is a static string literal in source: parse-time check.
+- If `pat` is dynamic: runtime check via realm-installed
+  prototype-method wrapper.
+
+**Shared verdict cache.** Realm-installed at bootstrap:
+
+- Key: pattern string.
+- Value: `safe` | `unsafe`.
+- LRU-bounded (default ~1024 entries; tune if needed). Eviction
+  prevents pack-driven memory growth.
+- Sealed in the bootstrap closure; pack cannot read or mutate.
+- Used by the `new RegExp` wrapper, the `match` / `matchAll` /
+  `search` wrappers, and any future site that needs pattern
+  validation.
+- **Verdict only, not compiled object.** Regex objects have mutable
+  `lastIndex`; caching and sharing instances would corrupt
+  iteration state across pack callers. Construction is cheap; only
+  validation is worth caching.
+
+A single helper `validatePattern(patternString) -> safe | throws`
+is consulted by all wrappers. After verdict-safe, the wrapper builds
+a fresh regex per call (or, for the `String.prototype.*` path,
+delegates to the underlying native method which builds its own).
+
 #### Language-level constraints
 
-Enforced statically by the source-level checker (`bin/cr check`), not
-removable at runtime:
+Enforced by the daemon-side pack-source validator described in
+"Pack-source validation" above, not removable at runtime:
 
 - `class` syntax disallowed — both class declarations (`class X {}`)
   and class expressions (`const X = class {}`). The ban explicitly
@@ -494,7 +648,8 @@ removable at runtime:
   available).
 - `with` statement disallowed (legacy reflection).
 - `eval` keyword and `Function` constructor in source — already
-  removed at runtime; static check flags at `bin/cr check` for DX.
+  removed at runtime; the daemon validator rejects pack-load on
+  occurrence for early failure and clear error reporting.
 - Pack code is loaded in strict mode — either as `<script
   type='module'>` (strict by spec) or with a `'use strict';` prelude
   applied by the bootstrap. Non-strict mode is forbidden because
@@ -666,11 +821,10 @@ runtime lifting. Harden's still-load-bearing pieces:
   sealed (non-configurable) so an adversary inside the realm cannot
   re-patch them. Per-call-site rewrites in lua2ts harden become
   belt-and-braces (catch the call at source level too); the
-  load-bearing defense is the realm-level patch. Regex methods
-  (`String.prototype.match`/`replace`, `RegExp.prototype.test`/`exec`)
-  need ReDoS mitigation — harder because there is no native timeout
-  primitive. Options: compile-time safe-regex check, realm-installed
-  wrappers with budgeting, or input-length caps. Open.
+  load-bearing defense is the realm-level patch. Regex ReDoS
+  mitigation is resolved separately — see "Regex validation" under
+  §3 (three sites, shared verdict cache, hologram-shaped
+  quantifier-on-quantifier check).
 - **Authoring hygiene** — failures land at `bin/cr check` time rather
   than as runtime CSP refusals in browser devtools.
 
@@ -920,6 +1074,19 @@ decision-level attention, not skimming.
 - **Testing.** What does a pack author's local development experience look
   like? They have to test their pack inside the sandbox model; the harness
   has to replicate the runtime.
+- **Pack-JS subset finalisation.** Convert the §3 "Pack JS subset
+  (draft)" into a stable spec; resolve the open questions inline
+  (computed property keys in spread/rest patterns, `Proxy`/`Reflect`
+  identifier rejection at parse, Symbol literal policy, top-level
+  `await`).
+- **Acorn versioning and vendoring strategy.** Pin a specific acorn
+  version under `dep/`; decide upgrade cadence and how
+  parser-spec drift (new ECMAScript editions) feeds back into the
+  subset spec.
+- **Safe-regex algorithm.** Stick with the
+  quantifier-on-quantifier ban (cheap, hologram-shaped) or upgrade
+  to alternation-overlap analysis / Thompson-NFA
+  state-explosion check? Cost-benefit unevaluated.
 
 ## 8. Alternatives considered
 
@@ -980,6 +1147,20 @@ packs *do* reach OS capabilities (FS, processes, network) through the
 daemon's grant model, so the "user installed it = trusted" assumption
 does not transfer. Every pack is untrusted user code with capability
 surface; in-realm execution is unsafe.
+
+### Language-level constraints enforced only at runtime (no static analysis) — rejected
+
+Considered relying solely on the realm allow-list to neutralise
+language features — no daemon-side parser, no pack-source
+validation, just deletion of the relevant constructors and runtime
+wrappers. Rejected because by the time JS reaches the browser
+engine, `class` syntax has already been parsed and constructed;
+runtime cannot un-define syntax. `class X extends boundBuiltin {}`
+is a syntactic form, not a method call — there is no slot to delete
+that closes it. Static analysis pre-serve (the daemon-side acorn
+pass described in §3) is the only mechanism that actually enforces
+syntactic bans. The runtime allow-list closes constructor-reach;
+the daemon validator closes syntax-reach; both are required.
 
 ## 9. Non-goals
 
