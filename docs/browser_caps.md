@@ -537,6 +537,8 @@ Permission: per-install with allow-list. Audit: full URL recorded (it's already 
 
 Day-zero because the use case is concrete (a pack wants to link to an external doc, or to another pack's view in the same operator dashboard).
 
+Status: shipped. Impl: `lib/js_caps/ui.js` via `makeUiCaps({ requestNavigate })`. The shipped cap is the simpler pure-routing form (`{ path: string } → Promise<void>`); the host app owns route validation and external-vs-internal disposition via its `requestNavigate` primitive. Tests: `lib/js_caps/caps.test.js`. The schema above (target/url/allowed_navigations) is the spec ceiling -- it lands when host-app routing semantics generalise enough to need a discriminant.
+
 #### 4.4.11 View Transitions API — **future**
 
 CSS-driven page transitions. Belongs in a future "VNode rendering protocol — animations" design, not as a standalone cap.
@@ -740,6 +742,8 @@ Permission: per-install. Host renders the dialog in the host's realm with the ho
 
 Day-zero because dialogs are the simplest interaction primitive a pack might legitimately need.
 
+Status: shipped. Impl: `lib/js_caps/ui.js` via `makeUiCaps({ renderDialog })`. The shipped cap is the simpler open-button-set form (`{ message: string, buttons: string[] } → Promise<string>` resolving to the selected button name); it subsumes alert (one button), confirm (two), and prompt (replaced by explicit-button choices). The host-supplied `renderDialog` is contractually required to return one of the input button strings; a mismatch surfaces as a `dialog: host returned unknown button` error. Tests: `lib/js_caps/caps.test.js`.
+
 #### 4.10.4 `toast` (no W3C API, host-rendered primitive) — **exposed-now** as `toast`
 
 ```ts
@@ -758,6 +762,8 @@ type ToastConfig = {
 Permission: per-install. Host renders in its own realm; pack cannot style. Audit: text logged (it's user-visible already).
 
 Day-zero — foreground notification is a base UX need.
+
+Status: shipped. Impl: `lib/js_caps/ui.js` via `makeUiCaps({ renderToast })`. The shipped signature is `{ message: string, level?: "info"|"warning"|"error", duration?: number } → Promise<void>` (defaults: `level="info"`, `duration=3000`; bounded: message ≤ 512 chars, duration ≤ 30 000 ms). The doc-spec `text`/`kind`/`duration_ms` names land at the manifest layer when the per-cap-kind config-schema design (§7) resolves; the cap interface here is the pack-facing one. Tests: `lib/js_caps/caps.test.js`.
 
 #### 4.10.5 Clipboard API (`navigator.clipboard.readText` / `writeText`) — **exposed-now** as `clipboard_write`; clipboard_read **placeholder day-one**
 

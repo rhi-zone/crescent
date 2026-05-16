@@ -11,15 +11,20 @@ end
 --
 -- index.js exports `dayZeroCaps`, a Map<string, function> that callers
 -- pass as `opts.capImpls` to lib/js_pack_host/host.js#mountPack. Each
--- entry name corresponds to a cap kind in docs/browser_caps.md §5.
--- This module ships the 6 trivial pure-wrap caps plus `set_timeout`
--- (cancellable via the cap-bridge AbortSignal extension,
--- docs/platform_isolation.md §4) plus `web_crypto_subtle` (op-
--- discriminated wrap of SubtleCrypto) plus `clipboard_write` plus the
--- `makeFetchApi` factory (host-side instantiation with manifest-
--- supplied `allowed_origins`; the produced cap function is not in
--- `dayZeroCaps` because it is config-bound per pack, not a global
--- pure function). The remaining caps land in subsequent commits.
+-- entry name corresponds to a cap kind in docs/browser_caps.md §5. The
+-- full day-zero surface (17/17 caps) is shipped:
+--
+--   * 9 pure-function caps in `dayZeroCaps` (6 trivial pure-wraps plus
+--     `set_timeout`, `web_crypto_subtle`, `clipboard_write`).
+--   * 1 `fetch_api` via the `makeFetchApi` factory (config-bound on
+--     `allowed_origins`).
+--   * 4 `kv_*` caps via the `makeKvCaps` factory (config-bound on
+--     `pack_id`; share an IndexedDB backend).
+--   * 3 UI caps (`toast`, `dialog`, `navigate`) via the `makeUiCaps`
+--     factory (host-app-bound on `renderToast`/`renderDialog`/
+--     `requestNavigate` -- pure routing over host-supplied primitives).
+--
+-- `buildDayZeroCapImpls` composes the full Map for the common case.
 --
 -- Lua callers MUST NOT call any cap function at runtime -- they error.
 -- The functions exist so Lua code that assembles browser-side pipelines
@@ -95,6 +100,62 @@ local M = {}
 --::   kv_keys:   KvKeysFn,
 --:: }
 --:: MakeKvCapsFn = (config: KvConfig) -> KvCaps
+
+-- toast/dialog/navigate: factory-shaped per docs/browser_caps.md
+-- §4.4.10, §4.10.3, §4.10.4. `makeUiCaps` binds three caps to a host-
+-- app-provided set of UI primitives (the host app, not the browser,
+-- renders toasts / dialogs / navigation; the caps are pure routing over
+-- structured input). The factory returns the three caps as a record,
+-- mirroring makeKvCaps -- the host page merges them into the cap-impls
+-- Map alongside the rest.
+--:: ToastArgs = {
+--::   message: string,
+--::   level: string | nil,
+--::   duration: number | nil,
+--:: }
+--:: DialogArgs = {
+--::   message: string,
+--::   buttons: { [integer]: string },
+--:: }
+--:: NavigateArgs = { path: string }
+--:: RenderToastArgs = {
+--::   message: string,
+--::   level: string,
+--::   duration: number,
+--:: }
+--:: RenderDialogArgs = {
+--::   message: string,
+--::   buttons: { [integer]: string },
+--:: }
+--:: RequestNavigateArgs = { path: string }
+--:: UiPrimitives = {
+--::   renderToast:     (RenderToastArgs) -> nil,
+--::   renderDialog:    (RenderDialogArgs) -> string,
+--::   requestNavigate: (RequestNavigateArgs) -> nil,
+--:: }
+--:: ToastFn    = (args: ToastArgs) -> nil
+--:: DialogFn   = (args: DialogArgs) -> string
+--:: NavigateFn = (args: NavigateArgs) -> nil
+--:: UiCaps = {
+--::   toast:    ToastFn,
+--::   dialog:   DialogFn,
+--::   navigate: NavigateFn,
+--:: }
+--:: MakeUiCapsFn = (uiPrimitives: UiPrimitives) -> UiCaps
+
+-- buildDayZeroCapImpls: convenience composer. Takes the per-pack /
+-- per-host-app configs for each factory cap and returns the full
+-- cap-impls Map ready to drop into mountPack's `opts.capImpls`. Map
+-- values are typed `unknown` on the Lua side because Lua does not have
+-- a Map type and the function shapes within the Map are heterogeneous;
+-- Lua callers should not be constructing this Map -- it is built by
+-- the JS host page in `lib/js_pack_host/host.js` callers.
+--:: BuildDayZeroCapImplsOpts = {
+--::   fetchConfig:  FetchApiConfig | nil,
+--::   kvConfig:     KvConfig | nil,
+--::   uiPrimitives: UiPrimitives | nil,
+--:: }
+--:: BuildDayZeroCapImplsFn = (opts: BuildDayZeroCapImplsOpts) -> unknown
 
 -- WebCryptoSubtleFn: op-discriminated single-cap dispatch over
 -- crypto.subtle. The args shape varies per op (encrypt/decrypt/sign/
@@ -172,6 +233,16 @@ end
 
 --: (KvConfig) -> KvCaps
 function M.makeKvCaps(_config)
+  error("lib/js_caps is type-only on the Lua side.")
+end
+
+--: (UiPrimitives) -> UiCaps
+function M.makeUiCaps(_uiPrimitives)
+  error("lib/js_caps is type-only on the Lua side.")
+end
+
+--: (BuildDayZeroCapImplsOpts) -> unknown
+function M.buildDayZeroCapImpls(_opts)
   error("lib/js_caps is type-only on the Lua side.")
 end
 
