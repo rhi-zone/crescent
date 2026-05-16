@@ -3,7 +3,7 @@
 At-a-glance index of what's in `lib/`. For per-library detail, grep `docs/inventory.md`.
 
 ## Type preludes
-LuaJIT stdlib in `lib/type/static/stdlib_types.lua` (default-loaded). Browser/DOM/JS host surface (Element, Event, fetch, history, ...) in `lib/web/js_types.lua` (2078 lines). Other `_types.lua` for caps, http, imap, ccv2, taskgraph, ctx, and per-app preludes under `lib/platform/apps/*/`. **Use `lib/web/js_types.lua` before redeclaring any browser/JS type.**
+LuaJIT stdlib in `lib/type/static/stdlib_types.lua` (default-loaded). Browser/DOM/JS host surface (Element, Event, fetch, history, ...) in `lib/js_types/init.lua` (2078 lines). Other `_types.lua` for caps, http, imap, ccv2, taskgraph, ctx, and per-app preludes under `lib/platform/apps/*/`. **Use `lib/js_types/init.lua` before redeclaring any browser/JS type.**
 
 ## Type system / tooling
 Static typechecker at `lib/type/static/` (stable; cli + lsp + parser + constrain/narrow/unify). Runtime schema typechecker at `lib/type/`. Wip: `lib/type/search/` (Hoogle-style), `lib/lua2ts/`, `lib/doc/`, `lib/lsp/`, `lib/mcp/`, `lib/pkg/` (foundation only — no install algo). Stable: `lib/jsonrpc/`, `lib/cr/`, `lib/cli/`, `lib/bundle/`, `lib/sandbox/`.

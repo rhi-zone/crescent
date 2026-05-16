@@ -103,7 +103,7 @@ frontend. Thumbnail generation via stb_image_resize via FFI.
 | LLM task dispatch | `lib/taskgraph` + `lib/taskgraph/executor/ai` |
 | Reactive UI (server) | `lib/reactive_optics` |
 | Reactive UI (browser) | `lib/web/reactive_dom` + `lib/widget` |
-| Browser type shims | `lib/web/js_types.lua` |
+| Browser type shims | `lib/js_types/init.lua` |
 | HTTP server/API | `lib/http` |
 | User config (signals) | `lib/platform/caps/config` |
 | Thumbnail generation | stb_image_resize via FFI (compiled in) |

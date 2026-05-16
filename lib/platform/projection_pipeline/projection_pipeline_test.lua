@@ -19,7 +19,7 @@ local EXAMPLE_PATH   = PROJECTION_DIR .. "example_text.lua"
 -- the full globals a projection author sees.
 local GLOBALS_FILES = {
     "lib/type/static/stdlib_types.lua",
-    "lib/web/js_types.lua",
+    "lib/js_types/init.lua",
     "lib/platform/apps/system_dashboard/primitive_types.lua",
     PROJECTION_DIR .. "projection_types.lua",
 }

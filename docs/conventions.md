@@ -86,6 +86,15 @@ lib/foo/
 - Tests are named `<lib>_test.lua` and live in the library directory.
 - No `src/`, no `test/`, no `lib/` subdirectory inside a library.
 
+## Browser-side library prefix
+
+Libraries whose contents target the browser realm (JS type declarations,
+runtime sandbox, host-bridged cap shims) use the prefix `lib/js_*/`.
+Examples: `lib/js_types/`, `lib/js_realm_sandbox/`. This signals at the
+library boundary that the package is part of the browser-side surface area,
+distinct from daemon-side libraries (`lib/<name>/` with no prefix). See
+`docs/platform_isolation.md` for the platform model.
+
 ## Naming
 
 - Functions: `snake_case`.

@@ -9550,9 +9550,9 @@ end)
 
 assert.describe("--:: require: load declaration files", function()
     assert.it("loads types from referenced declaration file", function()
-        -- lib/web/js_types.lua declares DOMTokenList; check it's in scope after require
+        -- lib/js_types/init.lua declares DOMTokenList; check it's in scope after require
         v3_no_errors([[
---:: require "lib.web.js_types"
+--:: require "lib.js_types"
 --:: declare t = DOMTokenList
 --: integer
 local n = t.length
@@ -9561,7 +9561,7 @@ local n = t.length
 
     assert.it("loaded types can be used in type aliases", function()
         v3_no_errors([[
---:: require "lib.web.js_types"
+--:: require "lib.js_types"
 --:: El = HTMLElement
 --:: declare e = El
 --: string
@@ -9585,7 +9585,7 @@ local x = 1
         -- Since HTMLElement is open (has ...), let's use CSSStyleDeclaration which has [string] indexer.
         -- Instead, verify a field that IS present returns the right type.
         v3_no_errors([[
---:: require "lib.web.js_types"
+--:: require "lib.js_types"
 --:: declare s = CSSStyleDeclaration
 --: integer
 local n = s.length

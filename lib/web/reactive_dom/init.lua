@@ -10,7 +10,7 @@
 -- Depends on: lib.widget, lib.reactive, lib.fp.optics.lens
 -- Runtime requirement: `document` global (browser / mock DOM in tests)
 
---:: require "lib.web.js_types"
+--:: require "lib.js_types"
 --:: declare document = Document
 
 --:: require "lib.reactive"

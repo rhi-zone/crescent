@@ -27,7 +27,7 @@
 -- for now; Commit D removes them once projection sources migrate from the
 -- declared-global style to require() everywhere.
 
---:: require "lib.web.js_types"
+--:: require "lib.js_types"
 --:: require "lib.platform.apps.system_dashboard.primitive_types"
 --:: require "lib.platform.apps.system_dashboard.projections.projection_types"
 

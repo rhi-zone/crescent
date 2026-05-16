@@ -19,7 +19,7 @@
 -- is loaded earlier.
 --
 -- DOM and event types come from the canonical browser prelude in
--- lib/web/js_types.lua via the `require` annotation below — Element, Text,
+-- lib/js_types/init.lua via the `require` annotation below — Element, Text,
 -- Event, MouseEvent, KeyboardEvent, InputEvent, etc. are all imported, not
 -- redeclared here.
 --
@@ -34,13 +34,13 @@
 --     type style as { [string]: string | number | nil, ... } rather than a
 --     closed record per property. Untyped property names typecheck.
 
---:: require "lib.web.js_types"
+--:: require "lib.js_types"
 --:: require "lib.platform.apps.system_dashboard.primitive_types"
 
 -- ── Children ────────────────────────────────────────────────────────────────
 -- An array of: Element, Text, string, number, nil, false.
 -- Matches the appendChildren contract in dom.js. `Element` and `Text` come
--- from lib/web/js_types.lua.
+-- from lib/js_types/init.lua.
 
 --:: Child    = Element | Text | string | number | nil | false
 --:: Children = Child[]
@@ -68,7 +68,7 @@
 -- `...` (string-keyed indexer fallthrough) for the rest. Runtime allowlists
 -- in dom.js still reject anything not on its per-tag list.
 --
--- Event handler argument types come from lib/web/js_types.lua. We keep the
+-- Event handler argument types come from lib/js_types/init.lua. We keep the
 -- four projection-relevant handlers typed minimally (Event for click/submit,
 -- InputEvent for input/change targeting form fields). Authors who need
 -- specific shapes (MouseEvent.clientX, KeyboardEvent.key, etc.) can read
@@ -136,7 +136,7 @@
 -- ── DOM constructor table ───────────────────────────────────────────────────
 -- One method per tag in dom.js's HTML and SVG allowlists. All share the same
 -- (props?, children?) -> Element shape. The returned `Element` is the canonical
--- browser type from lib/web/js_types.lua (a real DOM element produced by
+-- browser type from lib/js_types/init.lua (a real DOM element produced by
 -- document.createElement). The sealed `dom` table is the project-specific
 -- allowlist of tags — separate concern from the native DOM API surface.
 

@@ -16,13 +16,13 @@ Status legend:
 
 These declare shared types and have no runtime code (or only declaration-side glue). Load via `--:: require "..."`.
 
-- `lib/web/js_types.lua` — DOM, browser, and JS host API surface (DOMTokenList, Element, Event, fetch, history, etc., 2078 lines). **Use this** before redeclaring `Element` or any browser/JS type. Status: stable.
+- `lib/js_types/init.lua` — DOM, browser, and JS host API surface (DOMTokenList, Element, Event, fetch, history, etc., 2078 lines). **Use this** before redeclaring `Element` or any browser/JS type. Status: stable.
 - `lib/caps/types.lua` — injected I/O capability function aliases (POpenFn, etc.). Status: stable.
 - `lib/formats/ccv2/ccv2_types.lua` — Character Card v2 format types. Status: stable.
 - `lib/http/format_types.lua` — `http_request` / `http_response` shape aliases. Status: stable.
 - `lib/imap/format_types.lua` — IMAP (RFC 9051) flags and capability aliases. Status: stable.
 - `lib/platform/apps/system_dashboard/primitive_types.lua` — system_dashboard pack output schema. Status: stable.
-- `lib/platform/apps/system_dashboard/projections/projection_types.lua` — typed environment for projection authors (Children, Style, Props, sealed `dom` tag table, `text`, `Ctx`, `Projection`). Imports `Element`, `Text`, `Event` etc. from `lib/web/js_types.lua` rather than redeclaring them. Status: stable.
+- `lib/platform/apps/system_dashboard/projections/projection_types.lua` — typed environment for projection authors (Children, Style, Props, sealed `dom` tag table, `text`, `Ctx`, `Projection`). Imports `Element`, `Text`, `Event` etc. from `lib/js_types/init.lua` rather than redeclaring them. Status: stable.
 - `lib/taskgraph/taskgraph_types.lua` — taskgraph aliases. Status: stable.
 - `lib/type/static/ctx_types.lua` — typechecker context (ctx) struct, used in self-check. Status: stable.
 - `lib/type/static/stdlib_types.lua` — Lua 5.1 / LuaJIT stdlib type declarations. Status: stable.
@@ -213,8 +213,8 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/translucent-css-theme/` — opt-in glassmorphic design system (translucent panels, layered 3D borders, blue primary). Pure CSS tokens + components plus `theme.js` (dark/light/system toggle persisted to localStorage). No Lua. Used by ccv2 and library platform apps via symlinks under their `static/` dirs. Status: stable.
 - `lib/web/` — web app framework (middleware, routing, cookies, CSRF, static). Status: stable.
   - `lib/web/html/` — typed HTML builder. Status: stable.
-  - `lib/web/reactive_dom/` — reactive DOM bindings (uses `lib/web/js_types.lua`). Status: stable.
-  - `lib/web/js_types.lua` — see Type preludes.
+  - `lib/web/reactive_dom/` — reactive DOM bindings (uses `lib/js_types/`). Status: stable.
+- `lib/js_types/` — see Type preludes. The `lib/js_*/` prefix is the convention for browser-side libraries (JS type declarations, runtime sandbox, host-bridged cap shims).
 - `lib/router/` — URL routing (trie-based). Status: stable.
 - `lib/canvas/` — 2D pixel canvas with PPM/PGM/BMP export. Status: stable.
 - `lib/color/`, `lib/color_palette/`, `lib/color_space/`, `lib/gradient_descent/` (numerics, see below) — color toolchain. Status: stable.

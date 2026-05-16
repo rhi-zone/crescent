@@ -19,7 +19,7 @@ end
 local M = {}
 
 -- ── Type declarations ─────────────────────────────────────────────────────────
---:: require "lib.web.js_types"
+--:: require "lib.js_types"
 --:: declare document = Document
 
 -- Base El type: nominal wrapper pairing a tag name with a DOM node.

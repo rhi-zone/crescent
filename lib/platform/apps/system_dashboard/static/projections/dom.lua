@@ -25,7 +25,7 @@
 -- and `unmount` will land in separate stub files (or stay as declared
 -- globals) when Commit D wires up the full prelude refactor.
 
---:: require "lib.web.js_types"
+--:: require "lib.js_types"
 --:: require "lib.platform.apps.system_dashboard.primitive_types"
 --:: require "lib.platform.apps.system_dashboard.projections.projection_types"
 
