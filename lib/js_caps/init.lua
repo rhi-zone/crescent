@@ -15,8 +15,11 @@ end
 -- This module ships the 6 trivial pure-wrap caps plus `set_timeout`
 -- (cancellable via the cap-bridge AbortSignal extension,
 -- docs/platform_isolation.md §4) plus `web_crypto_subtle` (op-
--- discriminated wrap of SubtleCrypto) plus `clipboard_write`. The
--- remaining caps land in subsequent commits.
+-- discriminated wrap of SubtleCrypto) plus `clipboard_write` plus the
+-- `makeFetchApi` factory (host-side instantiation with manifest-
+-- supplied `allowed_origins`; the produced cap function is not in
+-- `dayZeroCaps` because it is config-bound per pack, not a global
+-- pure function). The remaining caps land in subsequent commits.
 --
 -- Lua callers MUST NOT call any cap function at runtime -- they error.
 -- The functions exist so Lua code that assembles browser-side pipelines
@@ -48,6 +51,29 @@ local M = {}
 --:: RandomFn       = (byte_length: integer) -> unknown
 --:: SetTimeoutFn   = (delay_ms: number, opts: SetTimeoutOpts | nil) -> nil
 --:: ClipboardWriteFn = (text: string) -> nil
+
+-- fetch_api: factory-shaped per docs/browser_caps.md §4.1.1.
+-- `makeFetchApi({ allowed_origins })` returns the cap function; the
+-- cap function takes a single args record. Args carry the request URL,
+-- optional method/headers/body, optional responseFormat, and an
+-- opaque AbortSignal (bridge-translated, see SetTimeoutOpts).
+--:: FetchApiConfig = { allowed_origins: { [integer]: string } }
+--:: FetchApiArgs = {
+--::   url: string,
+--::   method: string | nil,
+--::   headers: { [string]: string } | nil,
+--::   body: unknown | nil,
+--::   responseFormat: string | nil,
+--::   signal: unknown | nil,
+--:: }
+--:: FetchApiResult = {
+--::   status: integer,
+--::   statusText: string,
+--::   headers: { [string]: string },
+--::   body: unknown,
+--:: }
+--:: FetchApiFn = (args: FetchApiArgs) -> FetchApiResult
+--:: MakeFetchApiFn = (config: FetchApiConfig) -> FetchApiFn
 
 -- WebCryptoSubtleFn: op-discriminated single-cap dispatch over
 -- crypto.subtle. The args shape varies per op (encrypt/decrypt/sign/
@@ -115,6 +141,11 @@ end
 
 --: (string) -> nil
 function M.clipboard_write(_text)
+  error("lib/js_caps is type-only on the Lua side.")
+end
+
+--: (FetchApiConfig) -> FetchApiFn
+function M.makeFetchApi(_config)
   error("lib/js_caps is type-only on the Lua side.")
 end
 

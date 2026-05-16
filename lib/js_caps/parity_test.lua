@@ -33,7 +33,11 @@ end
 -- (six trivial pure-wrap caps + set_timeout + web_crypto_subtle, which consumes the
 -- cap-bridge AbortSignal extension per docs/platform_isolation.md §4,
 -- + clipboard_write); the remaining caps land in subsequent commits
--- and will be added here when their impls land.
+-- and will be added here when their impls land. fetch_api is a
+-- factory cap (per-pack config-bound at host-side instantiation per
+-- docs/browser_caps.md §4.1.1); its impl is shipped but `fetch_api` is
+-- NOT in dayZeroCaps -- the host page constructs it via makeFetchApi
+-- and inserts the result into the cap-impls Map per manifest entry.
 -- =====================================================================
 
 local SPEC_RULES = { --: SpecItem[]
@@ -145,6 +149,41 @@ local SPEC_RULES = { --: SpecItem[]
     doc = "clipboard_write: graceful error when API absent" },
   { needle = "clipboard_write: non-constructable",
     doc = "clipboard_write: non-constructable (arrow function)" },
+  -- fetch_api (factory)
+  { needle = "fetch_api factory: null config throws TypeError",
+    doc = "fetch_api: factory rejects null config" },
+  { needle = "fetch_api factory: non-array allowed_origins throws TypeError",
+    doc = "fetch_api: factory rejects non-array allowed_origins" },
+  { needle = "fetch_api factory: non-string allowed_origins entry throws TypeError",
+    doc = "fetch_api: factory rejects non-string allowed_origins entry" },
+  { needle = "fetch_api: non-constructable",
+    doc = "fetch_api: non-constructable (concise method)" },
+  { needle = "fetch_api: invalid url throws TypeError",
+    doc = "fetch_api: validation failure on non-absolute URL" },
+  { needle = "fetch_api: missing url throws TypeError",
+    doc = "fetch_api: validation failure on missing url" },
+  { needle = "fetch_api: origin not in allowlist throws TypeError",
+    doc = "fetch_api: origin allowlist enforcement" },
+  { needle = "fetch_api: invalid method throws TypeError",
+    doc = "fetch_api: validation failure on disallowed method" },
+  { needle = "fetch_api: non-object headers throws TypeError",
+    doc = "fetch_api: validation failure on non-object headers" },
+  { needle = "fetch_api: non-string header value throws TypeError",
+    doc = "fetch_api: validation failure on non-string header value" },
+  { needle = "fetch_api: happy path returns arraybuffer body by default",
+    doc = "fetch_api: happy path with default response format" },
+  { needle = "fetch_api: responseFormat json returns decoded JSON",
+    doc = "fetch_api: responseFormat json branch" },
+  { needle = "fetch_api: responseFormat text returns string",
+    doc = "fetch_api: responseFormat text branch" },
+  { needle = "fetch_api: invalid responseFormat throws TypeError",
+    doc = "fetch_api: validation failure on bad responseFormat" },
+  { needle = "fetch_api: AbortSignal propagates abort to fetch",
+    doc = "fetch_api: AbortSignal cancellation" },
+  { needle = "fetch_api: invalid signal throws TypeError",
+    doc = "fetch_api: validation failure on bad signal" },
+  { needle = "fetch_api: missing globalThis.fetch throws clear error",
+    doc = "fetch_api: graceful error when fetch absent" },
   -- dayZeroCaps aggregate
   { needle = "dayZeroCaps: contains the 9 shipped caps",
     doc = "dayZeroCaps map contains the 9 shipped names" },

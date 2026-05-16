@@ -247,6 +247,8 @@ Permission: per-install. Audit: shape only (no body in log). Lockdown: response 
 
 This cap shadows the daemon's `http_client` cap; for many packs the daemon-side variant is preferable because it does not require the browser realm to be online. The browser-side `fetch_api` is for cases where the pack genuinely needs a request from the user's browser (CORS-bound APIs, sticky-session origins, geo-IP-dependent endpoints).
 
+Status: shipped. Impl: `lib/js_caps/fetch_api.js`. Unlike the other day-zero caps it is **factory-shaped**: `makeFetchApi({ allowed_origins })` returns the cap function, with the origin allowlist bound at host-side instantiation rather than passed as a per-call arg (a pack-supplied allowlist would defeat the manifest grant). The host page reads `manifest.browser_caps.<entry>.config` and constructs the cap-impls Map by merging `dayZeroCaps` with `makeFetchApi(entry.config)` per `fetch_api`-kind entry. `lib/js_caps/index.js` documents the merge pattern. Day-zero only supports `allowed_origins`; the other config fields documented above (`allowed_methods`, `max_body_size`, `max_response_size`, `timeout_ms`) land in subsequent commits. Tests: `lib/js_caps/caps.test.js` (factory validation, non-constructable, URL/method/headers/responseFormat validation, origin-allowlist enforcement, happy path with mocked `globalThis.fetch`, JSON/text/arraybuffer response formats, AbortSignal propagation, graceful error when `fetch` is absent).
+
 #### 4.1.2 `XMLHttpRequest` — **not shipping**
 
 Superseded by `fetch`. Adding a second HTTP cap with overlapping semantics doubles audit surface and bridge complexity for no benefit. Packs that want streaming bodies, request progress, or other XHR-specific features get a future `fetch_api_stream` variant (placeholder, §4.1.4 below), not XHR.
@@ -861,7 +863,9 @@ Distilling §4 to the day-zero set:
 
 Seventeen caps. The set is small and deliberate: it covers basic HTTP, storage, navigation, simple UI primitives, cryptography, encoding, and timing — enough for a wide range of pack designs without exposing anything that needs a careful threat-model design (sensors, media, workers, WebRTC).
 
-Cancellation is uniformly expressed via AbortController / AbortSignal (the standard JS cancellation primitive) — there is no per-cap "cancel" sibling. `set_timeout` is the first cap that uses this; `fetch_api` will follow. Bridge-layer protocol in [`platform_isolation.md`](platform_isolation.md) §4 "Cancellation via AbortSignal".
+Cancellation is uniformly expressed via AbortController / AbortSignal (the standard JS cancellation primitive) — there is no per-cap "cancel" sibling. `set_timeout` and `fetch_api` both use this; future cancellable caps will follow the same pattern. Bridge-layer protocol in [`platform_isolation.md`](platform_isolation.md) §4 "Cancellation via AbortSignal".
+
+Most day-zero caps are pure functions safe for every pack and live in `lib/js_caps/index.js#dayZeroCaps` directly. **Factory-shaped caps** — `fetch_api` today, and future per-pack-configured kinds — carry manifest-supplied config that binds at host-side instantiation, not as a per-call arg. The host page constructs them per manifest entry and merges the results into the cap-impls Map; see `lib/js_caps/index.js` for the merge pattern.
 
 Each `lib/platform/browser_caps/<kind>/` directory holds the host-side cap impl (Lua or JS depending on whether the impl runs in the daemon or in the host stub realm), the per-kind config schema validator, and tests. The single `lib/js_realm_sandbox/` continues to lock down the realm; the cap shells are installed onto `__cap__` per-pack from the granted manifest entries.
 
