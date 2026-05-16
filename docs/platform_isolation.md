@@ -102,8 +102,8 @@ implicitly extending some trust. But that trust is bounded, not blanket:
   is observable; revocation is enforceable; a runaway pack can be stopped.
 
 **Latency requirement.** UX must remain responsive even when the
-browser↔daemon channel runs through VPNs and proxies (50–200ms+ link
-latency, not just loopback). This rules out architectures where every
+browser↔daemon channel runs through VPNs and proxies (50ms to
+multi-second link latency, not just loopback). This rules out architectures where every
 interaction is a round-trip (vanilla LiveView/Hotwire pattern). Reactive
 logic that needs sub-100ms response runs in the pack's browser realm;
 daemon round-trips happen async with optimistic concurrency where
@@ -682,7 +682,7 @@ render stream. Eliminates lua2ts and most browser-side isolation work.
 Rejected because: (a) the latency requirement (see §2) is "minimal
 latency regardless of network conditions, including through
 VPNs/proxies" — every-interaction-is-a-roundtrip breaks under
-50–200ms+ link latency, and
+50ms to multi-second link latency, and
 (b) the requirement is full pack-author flexibility, which a
 host-shipped primitive set cannot cover. The cleaner local-first variant
 (rich host primitives + optimistic concurrency) covers some cases but
