@@ -400,7 +400,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 ## Apps and demos
 
 - `lib/crescent_examples/` — small demos (3d_view etc.). Not a library — examples only.
-- `lib/platform/apps/charactercardv2/` — Character Card v2 app (server, llm, presets, import, manifest). Status: stable.
+- `lib/platform/apps/charactercardv2/` — Character Card v2 app (server, presets, import, manifest). LLM access via caps.llm. Status: stable.
 - `lib/platform/apps/library/` — general-purpose collection browser with adapter interface. Status: stable.
 - `lib/platform/apps/sillytavern/` — SillyTavern source adapter. Status: wip.
 - `lib/platform/apps/system_dashboard/` — system dashboard BFF (search, packs, projections, output). Status: stable.
