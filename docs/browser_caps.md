@@ -646,7 +646,7 @@ Permission: per-install (default-grant). Lockdown: host-side timer, host-side fi
 
 Day-zero because nearly every pack needs scheduled work. The realm has no `setTimeout` ambient — the bridged version is the only path. There is no separate `clear_timeout` cap: cancellation is uniformly expressed via AbortSignal, the standard JS primitive, so packs do not learn a parallel cancel API per cap.
 
-Status: design fixed; ships once the cap-bridge AbortSignal extension lands. The previous shipped implementation (a Promise-returning `set_timeout` with a no-op `clear_timeout`) was reverted because it surfaced no cancellation handle to packs — half-measure.
+Status: shipped. The cap-bridge AbortSignal extension (`lib/js_cap_bridge/bridge.js`) handles wire translation; the impl in `lib/js_caps/set_timeout.js` consumes a host-realm AbortSignal supplied by the bridge. An earlier implementation (a Promise-returning `set_timeout` with a no-op `clear_timeout`) was reverted because it surfaced no cancellation handle to packs — half-measure.
 
 #### 4.9.2 `setInterval` / `clearInterval` — **placeholder day-one** as `set_interval`
 
@@ -847,7 +847,7 @@ Distilling §4 to the day-zero set:
 
 Seventeen caps. The set is small and deliberate: it covers basic HTTP, storage, navigation, simple UI primitives, cryptography, encoding, and timing — enough for a wide range of pack designs without exposing anything that needs a careful threat-model design (sensors, media, workers, WebRTC).
 
-Cancellation is uniformly expressed via AbortController / AbortSignal (the standard JS cancellation primitive) — there is no per-cap "cancel" sibling. `set_timeout` is the first cap that uses this; `fetch_api` will follow. Bridge-layer protocol in [`platform_isolation.md`](platform_isolation.md) §4 "Cancellation via AbortSignal". `set_timeout` ships once that bridge extension lands.
+Cancellation is uniformly expressed via AbortController / AbortSignal (the standard JS cancellation primitive) — there is no per-cap "cancel" sibling. `set_timeout` is the first cap that uses this; `fetch_api` will follow. Bridge-layer protocol in [`platform_isolation.md`](platform_isolation.md) §4 "Cancellation via AbortSignal".
 
 Each `lib/platform/browser_caps/<kind>/` directory holds the host-side cap impl (Lua or JS depending on whether the impl runs in the daemon or in the host stub realm), the per-kind config schema validator, and tests. The single `lib/js_realm_sandbox/` continues to lock down the realm; the cap shells are installed onto `__cap__` per-pack from the granted manifest entries.
 

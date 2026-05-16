@@ -12,10 +12,10 @@ end
 -- index.js exports `dayZeroCaps`, a Map<string, function> that callers
 -- pass as `opts.capImpls` to lib/js_pack_host/host.js#mountPack. Each
 -- entry name corresponds to a cap kind in docs/browser_caps.md §5.
--- This commit ships the 6 trivial caps (pure wraps with no design
--- questions). The remaining 12 land in subsequent commits, including
--- `set_timeout` which is blocked on the cap-bridge AbortSignal
--- extension (docs/platform_isolation.md §4).
+-- This module ships the 6 trivial caps (pure wraps with no design
+-- questions) plus `set_timeout` (cancellable via the cap-bridge
+-- AbortSignal extension, docs/platform_isolation.md §4). The remaining
+-- 10 land in subsequent commits.
 --
 -- Lua callers MUST NOT call any cap function at runtime -- they error.
 -- The functions exist so Lua code that assembles browser-side pipelines
@@ -33,12 +33,19 @@ local M = {}
 
 --:: TextDecodeOpts = { encoding: string | nil, fatal: boolean | nil, ignoreBOM: boolean | nil }
 
+-- SetTimeoutOpts.signal is the JS-side AbortSignal value. Lua has no
+-- native AbortSignal type; the value is opaque from Lua's perspective
+-- and would only ever originate as a host-bridged JS value. Annotated
+-- as `unknown` so callers cannot read into its shape from Lua.
+--:: SetTimeoutOpts = { signal: unknown | nil }
+
 --:: TextEncodeFn   = (text: string) -> unknown
 --:: TextDecodeFn   = (bytes: unknown, opts: TextDecodeOpts | nil) -> string
 --:: CompressFn     = (bytes: unknown, format: string) -> unknown
 --:: DecompressFn   = (bytes: unknown, format: string) -> unknown
 --:: ConsoleLogFn   = (...unknown) -> nil
 --:: RandomFn       = (byte_length: integer) -> unknown
+--:: SetTimeoutFn   = (delay_ms: number, opts: SetTimeoutOpts | nil) -> nil
 
 --:: DayZeroCaps = {
 --::   text_encode:       TextEncodeFn,
@@ -47,6 +54,7 @@ local M = {}
 --::   decompress:        DecompressFn,
 --::   console_log:       ConsoleLogFn,
 --::   web_crypto_random: RandomFn,
+--::   set_timeout:       SetTimeoutFn,
 --:: }
 
 --: (string) -> unknown
@@ -81,6 +89,11 @@ function M.web_crypto_random(_byte_length)
   error("lib/js_caps is type-only on the Lua side.")
 end
 
+--: (number, SetTimeoutOpts | nil) -> nil
+function M.set_timeout(_delay_ms, _opts)
+  error("lib/js_caps is type-only on the Lua side.")
+end
+
 --:: dayZeroCaps_type = DayZeroCaps
 M.dayZeroCaps = {
   text_encode       = M.text_encode,
@@ -89,6 +102,7 @@ M.dayZeroCaps = {
   decompress        = M.decompress,
   console_log       = M.console_log,
   web_crypto_random = M.web_crypto_random,
+  set_timeout       = M.set_timeout,
 }
 
 return M

@@ -29,11 +29,11 @@ end
 -- =====================================================================
 -- Cap-kind corpus. Each entry maps a documented day-zero cap kind (in
 -- docs/browser_caps.md §5) to a substring that MUST appear in
--- caps.test.js. The six kinds below are the ones this commit ships;
--- the remaining twelve (including set_timeout, which is blocked on the
--- cap-bridge AbortSignal extension per docs/platform_isolation.md §4)
--- land in subsequent commits and will be added here when their impls
--- land.
+-- caps.test.js. The seven kinds below are the ones currently shipped
+-- (six trivial pure-wrap caps + set_timeout, which consumes the
+-- cap-bridge AbortSignal extension per docs/platform_isolation.md §4);
+-- the remaining ten land in subsequent commits and will be added here
+-- when their impls land.
 -- =====================================================================
 
 local SPEC_RULES = { --: SpecItem[]
@@ -80,9 +80,32 @@ local SPEC_RULES = { --: SpecItem[]
     doc = "web_crypto_random: lower-bound validation" },
   { needle = "web_crypto_random: length 65537 rejected",
     doc = "web_crypto_random: upper-bound validation" },
+  -- set_timeout
+  { needle = "set_timeout: resolves after delay",
+    doc = "set_timeout: happy path resolves after delay" },
+  { needle = "set_timeout: zero delay resolves promptly",
+    doc = "set_timeout: zero-delay boundary" },
+  { needle = "set_timeout: negative delay throws TypeError",
+    doc = "set_timeout: validation failure on negative delay" },
+  { needle = "set_timeout: Infinity delay throws TypeError",
+    doc = "set_timeout: validation failure on Infinity" },
+  { needle = "set_timeout: NaN delay throws TypeError",
+    doc = "set_timeout: validation failure on NaN" },
+  { needle = "set_timeout: string delay throws TypeError",
+    doc = "set_timeout: validation failure on non-number delay" },
+  { needle = "set_timeout: AbortSignal cancellation rejects with AbortError",
+    doc = "set_timeout: cancellation via AbortSignal" },
+  { needle = "set_timeout: pre-aborted signal rejects immediately",
+    doc = "set_timeout: pre-aborted signal short-circuits" },
+  { needle = "set_timeout: signal aborted after fire is a no-op",
+    doc = "set_timeout: post-fire abort is a no-op" },
+  { needle = "set_timeout: invalid opts.signal throws TypeError",
+    doc = "set_timeout: validation failure on bad signal type" },
+  { needle = "set_timeout: non-constructable",
+    doc = "set_timeout: non-constructable (concise/arrow)" },
   -- dayZeroCaps aggregate
-  { needle = "dayZeroCaps: contains the 6 trivial caps",
-    doc = "dayZeroCaps map contains the 6 shipped names" },
+  { needle = "dayZeroCaps: contains the 7 shipped caps",
+    doc = "dayZeroCaps map contains the 7 shipped names" },
   { needle = "dayZeroCaps: does not contain the deferred caps",
     doc = "dayZeroCaps map excludes deferred cap names" },
 }
