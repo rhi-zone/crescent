@@ -16,6 +16,25 @@
   §7 of the design doc, in particular the rendering model and the per-pack
   origin mechanism.
 
+- [ ] **Browser caps day-zero implementation** — design doc at
+  `docs/browser_caps.md` enumerates the entire Web Platform surface and
+  classifies each API (exposed-now / placeholder / future / not-shipping /
+  realm-incompatible). Day-zero surface is ~18 caps (`fetch_api`, `kv_*`,
+  `navigate`, `dialog`, `toast`, `clipboard_write`, `web_crypto_random`,
+  `web_crypto_subtle`, `text_encode`, `text_decode`, `compress`,
+  `decompress`, `console_log`, `set_timeout`, `clear_timeout`).
+  Implementation steps: (1) extend `lib/pkg/manifest.lua` with the
+  `browser_caps` field per `browser_caps.md` §3 (cross-reference
+  `docs/pkg-design.md` and `docs/pkg-versioning.md` before changing
+  manifest); (2) add per-kind modules under
+  `lib/platform/browser_caps/<kind>/` carrying impl + config-schema
+  validator; (3) wire the host stub to register granted caps into
+  `lib/js_cap_bridge`'s host bridge per `__cap__` install; (4) resolve
+  the `event` frame format for streaming caps (open question in
+  `browser_caps.md` §7) before any of `websocket` / `sse` /
+  `set_interval` ship. Follow-up to platform-isolation work above;
+  cross-references: `docs/platform_isolation.md`, `docs/browser_caps.md`.
+
 ## HIGH PRIORITY
 
 ### Polymorphic recursion (future, optional)

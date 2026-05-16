@@ -975,7 +975,7 @@ const data = await __cap__.fetch_api({ path: "/items" });
 - `navigate` — request the host navigate to a pack-internal route.
 - `stream_subscribe` — bind to a daemon SSE source (already pack-declared).
 
-Initial list. Expected to grow.
+Initial list. Expected to grow. **See [`browser_caps.md`](browser_caps.md)** for the comprehensive Web-Platform-API enumeration, per-cap schema pattern (entry args, return type, async/event surface, lockdown, permission, audit), the day-zero exposed cap surface, and versioning/discovery/composition decisions. Every "cap" reference in this doc should be read against that enumeration; this section is the protocol sketch, `browser_caps.md` is the cap-kind catalog.
 
 ## 5. Rendering model — resolved: Option B
 
@@ -1052,7 +1052,7 @@ host code and pack code is *type-system shaped*, not runtime shaped.
 
 ### Migration steps (rough, not committed)
 
-1. Add `browser_caps` field to manifest schema (`lib/pkg/manifest.lua`).
+1. Add `browser_caps` field to manifest schema (`lib/pkg/manifest.lua`). Schema and per-kind config conventions in [`browser_caps.md`](browser_caps.md) §3.
 2. Build daemon stub-page generator (per pack, per instance).
 3. Build the sandboxed-iframe host with bootstrap script and the bridge.
 4. Implement initial bridge cap handlers daemon-side (`http_client`,
