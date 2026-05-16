@@ -269,6 +269,20 @@ pack-author code and:
 The bootstrap is the only code that needs to fully trust the host. Pack
 author code never sees the raw postMessage channel.
 
+**URL convention for browser-side platform code.** The daemon serves the
+browser-side platform libraries (`lib/js_pack_host/`, `lib/js_realm_sandbox/`,
+`lib/js_cap_bridge/`, `lib/js_safe_regex/`, `lib/js_caps/`) under the prefix
+`/_platform/lib/<js_pkg>/<file>.js`. Both the daemon origin and the per-app
+subdomains expose the same URL space — pack iframes are cross-origin by
+construction, so a stable address reachable from every origin is mandatory.
+Responses are served as `text/javascript; charset=utf-8` with
+`Access-Control-Allow-Origin: *` (these files are bootstrap glue, not
+secrets). Only `js_*` packages and `.js` files match; Lua source is
+unreachable through this route and path traversal is rejected before any
+filesystem read. Cache-busting query strings (`?v=<hash>`) are accepted but
+ignored for resolution. This is Phase A; later phases attach pack-script
+strict-mode prepend, per-pack HTML stubs, and CSP headers.
+
 ### Realm lockdown (allow-list)
 
 **Resolved: in-house allow-list lockdown.** The realm is defined

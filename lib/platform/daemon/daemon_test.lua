@@ -1976,3 +1976,143 @@ T.describe("POST /api/apps", function()
 		idx:close()
 	end)
 end)
+
+-- ── /_platform/lib/<js_pkg>/<file> — browser-side platform JS ───────────────
+-- Phase A: serve real files from lib/js_*/ under a stable URL prefix so pack
+-- iframes (sandboxed cross-origin) and the host page can load them as modules.
+-- See lib/platform/daemon/init.lua "try_platform_lib" and
+-- docs/platform_isolation.md §3.
+
+T.describe("/_platform/lib browser-asset routing", function()
+	-- Helper: probe a specific header name via pairs (avoids opening up the
+	-- closed-table `res.headers` shape that make_res infers).
+	--: ({ status: integer | nil, headers: { [string]: { [integer]: string } | nil } | nil, body: string | nil }, string) -> string | nil
+	local function header_one(res, name)
+		local h = res.headers or {}
+		for k, v in pairs(h) do
+			if k == name then
+				return v and v[1] or nil
+			end
+		end
+		return nil
+	end
+
+	T.it("serves lib/js_pack_host/host.js with text/javascript and CORS", function()
+		local d = make_daemon()
+		local req = make_req("GET", "/_platform/lib/js_pack_host/host.js", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+		T.eq(header_one(res, "Content-Type"), "text/javascript; charset=utf-8")
+		T.eq(header_one(res, "Access-Control-Allow-Origin"), "*")
+		T.ok((res.body or ""):find("lib/js_pack_host/host.js", 1, true) ~= nil)
+	end)
+
+	T.it("serves lib/js_pack_host/bootstrap.js", function()
+		local d = make_daemon()
+		local req = make_req("GET", "/_platform/lib/js_pack_host/bootstrap.js", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+		T.ok((res.body or ""):find("lib/js_pack_host/bootstrap.js", 1, true) ~= nil)
+	end)
+
+	T.it("serves lib/js_realm_sandbox/sandbox.js", function()
+		local d = make_daemon()
+		local req = make_req("GET", "/_platform/lib/js_realm_sandbox/sandbox.js", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+		T.ok((res.body or ""):find("lib/js_realm_sandbox/sandbox.js", 1, true) ~= nil)
+	end)
+
+	T.it("serves lib/js_caps/index.js", function()
+		local d = make_daemon()
+		local req = make_req("GET", "/_platform/lib/js_caps/index.js", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+		T.ok((res.body or ""):find("lib/js_caps/index.js", 1, true) ~= nil)
+	end)
+
+	T.it("serves lib/js_caps/text_encode.js", function()
+		local d = make_daemon()
+		local req = make_req("GET", "/_platform/lib/js_caps/text_encode.js", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+		T.ok((res.body or ""):find("lib/js_caps/text_encode.js", 1, true) ~= nil)
+	end)
+
+	T.it("rejects non-js_* packages with 404", function()
+		local d = make_daemon()
+		local req = make_req("GET", "/_platform/lib/platform/daemon.js", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		-- Note: this URL has three path segments under /_platform/lib/, so
+		-- the route pattern (which requires exactly <pkg>/<file>) doesn't
+		-- match — falls through to library app 404 / not-found dispatch.
+		T.eq(res.status, 404)
+	end)
+
+	T.it("rejects flat non-js_* package names with 404", function()
+		local d = make_daemon()
+		local req = make_req("GET", "/_platform/lib/not_js_caps/x.js", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 404)
+	end)
+
+	T.it("rejects non-.js suffixes with 404", function()
+		local d = make_daemon()
+		local req = make_req("GET", "/_platform/lib/js_caps/init.lua", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 404)
+	end)
+
+	T.it("rejects path traversal with 404", function()
+		local d = make_daemon()
+		-- The file segment matcher allows only [A-Za-z0-9_-]+\.js, so any
+		-- `..` substring is rejected before it reaches the filesystem.
+		local req = make_req("GET", "/_platform/lib/js_caps/..etc.js", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 404)
+	end)
+
+	T.it("returns 404 for a missing file", function()
+		local d = make_daemon()
+		local req = make_req("GET", "/_platform/lib/js_caps/definitely_missing.js", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 404)
+	end)
+
+	T.it("includes CORS header on 404 (so cross-origin iframes can see the failure)", function()
+		local d = make_daemon()
+		local req = make_req("GET", "/_platform/lib/not_js/x.js", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 404)
+		T.eq(header_one(res, "Access-Control-Allow-Origin"), "*")
+	end)
+
+	T.it("is reachable from the per-app subdomain too (pack iframes are cross-origin)", function()
+		local d = make_daemon()
+		d.register_app("alice")
+		local req = make_req("GET", "/_platform/lib/js_pack_host/host.js", "app-alice.localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+		T.eq(header_one(res, "Content-Type"), "text/javascript; charset=utf-8")
+	end)
+
+	T.it("ignores cache-busting query string for path resolution", function()
+		local d = make_daemon()
+		local req = make_req("GET", "/_platform/lib/js_pack_host/host.js?v=deadbeef", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+	end)
+end)

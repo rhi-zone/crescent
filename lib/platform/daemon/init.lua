@@ -1477,9 +1477,81 @@ end
 		end
 	end
 
+	-- ── /_platform/lib/<js_pkg>/<file> — browser-side platform JS ─────────────
+	-- Serves files under lib/js_<name>/ as static JS modules so pack iframes
+	-- (sandboxed origins) and the host page can fetch them with a stable URL.
+	-- See docs/platform_isolation.md §3 "Bootstrap script" for the role this
+	-- plays in pack realm bring-up.
+	--
+	-- Validation rejects anything that isn't a `js_*` package + a `.js` file
+	-- with no path-traversal components. 404 on any failure — never leak
+	-- filesystem detail. CORS is wide-open (`*`) because pack iframes are
+	-- cross-origin by construction and these files contain no secrets.
+	--
+	-- Phase A: this route. Subsequent phases attach strict-mode prepend,
+	-- per-pack HTML stubs, and CSP headers.
+	--: (string) -> (string | nil, string | nil)
+	local function default_read_fn(path)
+		local fh, oerr = io.open(path, "rb")
+		if not fh then return nil, oerr end
+		local data = fh:read("*a")
+		fh:close()
+		if not data then return nil, "read failed" end
+		return data
+	end
+	local platform_read_fn = opts.read_fn or default_read_fn
+	-- Returns true and writes a response into `res` when the path matched the
+	-- /_platform/lib/ prefix (whether the file was served or rejected as 404).
+	-- Returns false when the path is unrelated and the caller should continue
+	-- normal dispatch.
+	--: (http_req, http_res) -> boolean
+	local function try_platform_lib(req, res)
+		local path = req.path or ""
+		-- Strip query string before matching — cache-busting `?v=<hash>` is
+		-- ignored for resolution.
+		local path_no_qs = path:match("^([^?]+)") or path
+		local pkg_m, file_m = path_no_qs:match("^/_platform/lib/([^/]+)/([^/]+)$")
+		if not pkg_m or not file_m then return false end
+		-- Narrowing blocked: compound `or` guards can't narrow deferred multi-return vars.
+		local pkg = pkg_m or "" --: string
+		local file = file_m or "" --: string
+		--: () -> nil
+		local function not_found()
+			res.status = 404
+			res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+			-- Open CORS even on 404: a sandboxed iframe must still be able to
+			-- observe the failure (otherwise the browser raises a CORS error
+			-- that masks the real 404).
+			res.headers["Access-Control-Allow-Origin"] = { "*" }
+			res.body = "not found"
+		end
+		-- Only js_<lowercase_underscore> packages are platform-served. This
+		-- gate is what prevents Lua sources from being served as JS — e.g.
+		-- `/_platform/lib/platform/daemon/init.lua` cannot pass.
+		if not pkg:match("^js_[a-z_]+$") then not_found(); return true end
+		-- File must end in `.js` and contain no path separators or traversal.
+		-- The capture above already excluded `/`, so the residual concern is
+		-- `..` and the suffix.
+		if not file:match("^[A-Za-z0-9_%-]+%.js$") then not_found(); return true end
+		if file:find("..", 1, true) then not_found(); return true end
+		local fs_path = "lib/" .. pkg .. "/" .. file
+		local data, _err = platform_read_fn(fs_path)
+		if not data then not_found(); return true end
+		res.status = 200
+		res.headers["Content-Type"] = { "text/javascript; charset=utf-8" }
+		res.headers["Cache-Control"] = { "public, max-age=3600" }
+		res.headers["Access-Control-Allow-Origin"] = { "*" }
+		res.body = data
+		return true
+	end
+
 	-- Top-level Host dispatch.
 	--: (http_req, http_res) -> nil
 	local function handle(req, res)
+		-- Platform JS modules: same URL space on every origin (daemon and
+		-- per-app subdomain). Cross-origin iframes need a stable address.
+		if try_platform_lib(req, res) then return end
+
 		local headers = req.headers or {}
 		local host_arr = headers["host"]
 		local host_val = host_arr and host_arr[1] or ""
