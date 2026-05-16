@@ -3681,6 +3681,121 @@ local x = 3.14
 end)
 
 -- ---------------------------------------------------------------------------
+-- Rank-N polymorphism call-site (KNOWN GAP)
+-- ---------------------------------------------------------------------------
+-- Argument subsumption against forall-typed parameters is missing.
+-- `solve_check_args` (solve.lua ~2716) dispatches on TAG_FUNCTION with no
+-- TAG_FORALL case; `env.instantiate_inner` (env.lua ~515) has no TAG_FORALL
+-- arm either. As a result, a parameter annotated `<T>(T)->T` accepts any
+-- function-typed argument — including monomorphic functions and even
+-- wrong-arity ones. Body usage of the forall param IS checked correctly;
+-- the gap is purely at the call site. Tracked in TODO.md.
+--
+-- These tests pin CURRENT behavior (no_errors). When the fix lands they
+-- will fail loudly; flip them to has_error then.
+assert.describe("soundness: rank-N polymorphism call-site (KNOWN GAP)", function()
+    assert.it("KNOWN GAP: monomorphic (number)->number accepted where <T>(T)->T required (N1)", function()
+        -- KNOWN GAP: should error — see TODO.md
+        -- only_number cannot satisfy <T>(T)->T because the body calls f at both
+        -- number and string. Currently 0 errors.
+        no_errors([[
+--: (x: number) -> number
+local function only_number(x) return x end
+--: (f: <T>(T)->T) -> number
+local function apply_twice(f)
+  local a = f(42)
+  local b = f("hello")
+  return 0
+end
+local r = apply_twice(only_number)
+]])
+    end)
+
+    assert.it("KNOWN GAP: nullary () -> number accepted where <T>(T)->T required (N5)", function()
+        -- KNOWN GAP: should error — see TODO.md
+        -- nullary takes 0 args; slot needs a 1-arg polymorphic function.
+        -- Wrong arity alone should reject. Currently 0 errors.
+        no_errors([[
+--: () -> number
+local function nullary() return 0 end
+--: (f: <T>(T)->T) -> number
+local function apply_twice(f)
+  return f(42)
+end
+local r = apply_twice(nullary)
+]])
+    end)
+
+    assert.it("KNOWN GAP: (string)->string accepted where <T>(T)->T required, body uses at two types (N6)", function()
+        -- KNOWN GAP: should error — see TODO.md
+        -- only_string is specialized; the body calls f at both number and
+        -- string. Currently 0 errors.
+        no_errors([[
+--: (x: string) -> string
+local function only_string(x) return x end
+--: (f: <T>(T)->T) -> number
+local function uses_both(f)
+  local a = f(42)
+  local b = f("hello")
+  return 0
+end
+local r = uses_both(only_string)
+]])
+    end)
+
+    assert.it("KNOWN GAP: forall in return position — monomorphic returned where polymorphic required (N7)", function()
+        -- KNOWN GAP: should error — see TODO.md
+        -- returns_poly claims to return <T>(T)->T but returns a
+        -- (number)->number. Currently 0 errors.
+        no_errors([[
+--: (x: number) -> number
+local function only_number(x) return x end
+--: (x: number) -> <T>(T)->T
+local function returns_poly(x)
+  return only_number
+end
+]])
+    end)
+
+    assert.it("KNOWN GAP: rank-3 nested forall — monomorphic forced into forall slot via inner call (N8)", function()
+        -- KNOWN GAP: should error — see TODO.md
+        -- rank3's `g` expects `(f: <T>(T)->T) -> number`. Inside, we hand
+        -- g a (number)->number cast to <T>(T)->T; the regular cast should
+        -- reject the subtyping but does not. Currently 0 errors.
+        no_errors([==[
+--: (n: number) -> number
+local function uses_mono(n) return n end
+--: (f: <T>(T)->T) -> number
+local function call_at_two_types(f)
+  local a = f(42)
+  local b = f("hi")
+  return 0
+end
+--: (g: (f: <T>(T)->T) -> number) -> number
+local function rank3(g)
+  return g(uses_mono --[[: <T>(T)->T]])
+end
+local r = rank3(call_at_two_types)
+]==])
+    end)
+
+    assert.it("CONTROL: body check still rejects forall used at incompatible annotated type (N9)", function()
+        -- CONTROL (not a gap): the body of a forall-param function IS
+        -- checked polymorphically. Assigning f("hello") (-> string under
+        -- <T>(T)->T at T=string) into a `number` slot must error. The fix
+        -- for the call-site gap above MUST NOT regress this.
+        has_error([[
+--: (f: <T>(T)->T) -> number
+local function bad(f)
+  --: number
+  local a = f("hello")
+  return 0
+end
+]], "cannot assign")
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Phi-join union normalization (integer|integer should not cause errors)
 -- ---------------------------------------------------------------------------
 assert.describe("phi-join: branch merge produces correct types", function()
