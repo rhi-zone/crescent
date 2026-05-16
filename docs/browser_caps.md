@@ -129,6 +129,10 @@ Per-cap "shape digest" definitions live in §4 entries that need them. Default: 
 
 ## 3. Manifest entry format
 
+Schema location: [`lib/platform/platform_types.lua`](../lib/platform/platform_types.lua) (canonical `BrowserCapDecl`, with duplicates in `lib/platform/init.lua` and `lib/platform/cli.lua` kept in sync).
+
+Merge + validation logic: [`lib/platform/manifest_caps.lua`](../lib/platform/manifest_caps.lua) — `merge_browser_cap_declarations(manifest, entry_key)` mirrors the daemon-side `merge_cap_declarations` line-by-line (same shorthand `"required"` / `"optional"`, same default-required-true, same top-level-plus-per-entrypoint merge). `validate_browser_caps(manifest)` rejects unknown kinds at manifest-parse time against the day-zero set in §5; per-kind config validation is deferred to cap-impl time.
+
 Each browser cap a pack uses is a manifest entry under `browser_caps`. The schema:
 
 ```lua

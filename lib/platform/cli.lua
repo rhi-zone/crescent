@@ -26,6 +26,7 @@ local json = require("lib.json")
 local platform = require("lib.platform")
 local cap_dispatch = require("lib.platform.cap_dispatch")
 local app_index_mod = require("lib.platform.index")
+local manifest_caps = require("lib.platform.manifest_caps")
 local xdg = require("lib.platform.xdg")
 
 -- Migration hint: warn once if a legacy $HOME/.crescent dir exists alongside
@@ -45,8 +46,9 @@ do
 end
 
 --:: CapDecl = { type: string | nil, required: boolean | nil, host: string | nil, model: string | nil, path: string | nil, paths: unknown, allow_write: boolean | nil, scope: unknown, tables: unknown, provider: string | nil, key_name: string | nil, base_url: string | nil, provider_default: string | nil, root: string | nil, binaries: unknown, stderr: string | nil, methods: unknown, port: integer | nil, ... }
---:: EntryDef = { main: string | nil, caps: { [string]: CapDecl | string } | nil }
---:: Manifest = { name: string | nil, version: string | nil, entry: { [string]: EntryDef | string } | nil, caps: { [string]: CapDecl | string } | nil, default_entry: string | nil, meta: { tags: { [integer]: string } | nil, description: string | nil, ... } | nil, ... }
+--:: BrowserCapDecl = { type: string | nil, required: boolean | nil, allowed_origins: unknown, allowed_methods: unknown, allowed_navigations: unknown, max_body_size: integer | nil, max_response_size: integer | nil, timeout_ms: integer | nil, max_keys: integer | nil, max_value_bytes: integer | nil, max_total_bytes: integer | nil, max_per_minute: integer | nil, ... }
+--:: EntryDef = { main: string | nil, caps: { [string]: CapDecl | string } | nil, browser_caps: { [string]: BrowserCapDecl | string } | nil }
+--:: Manifest = { name: string | nil, version: string | nil, entry: { [string]: EntryDef | string } | nil, caps: { [string]: CapDecl | string } | nil, browser_caps: { [string]: BrowserCapDecl | string } | nil, default_entry: string | nil, meta: { tags: { [integer]: string } | nil, description: string | nil, ... } | nil, ... }
 --:: TarEntry = { name: string, mode: number, size: number, mtime: number, data: string, typeflag: string }
 --:: AppRecord = { path: string, chunks: { [integer]: { type: string, data: string } } | nil, entries: { [number]: TarEntry }, manifest: Manifest | nil, _dir_mode: boolean | nil }
 
@@ -312,42 +314,11 @@ end
 -- ── Entrypoint resolution ─────────────────────────────────────────────────
 
 -- Merge top-level and per-entrypoint cap declarations.
---: (Manifest | nil, string) -> { [string]: CapDecl }
-local function merge_cap_declarations(manifest, entry_key)
-	--: { [string]: CapDecl }
-	local cap_declarations = {}
-
-	-- Top-level caps: may be shorthand ("required"/"optional") or full tables.
-	local top_caps = manifest.caps
-	if top_caps then
-		for name, decl in pairs(top_caps) do
-			if type(decl) == "string" then
-				-- Shorthand: "required" or "optional"
-				cap_declarations[name] = ({
-					type = name,
-					required = decl ~= "optional",
-				} --[[:! CapDecl]])
-			elseif type(decl) == "table" then
-				cap_declarations[name] = (decl --[[:! CapDecl]])
-			end
-		end
-	end
-
-	-- Per-entrypoint caps override/merge with top-level.
-	local entry_map = manifest.entry
-	if entry_map then
-		local entry_def = entry_map[entry_key]
-		if type(entry_def) == "table" and entry_def.caps then
-			for name, decl in pairs(entry_def.caps) do
-				if type(decl) == "table" then
-					cap_declarations[name] = decl --[[: CapDecl]]
-				end
-			end
-		end
-	end
-
-	return cap_declarations
-end
+-- See lib/platform/manifest_caps.lua for the shared shorthand/merge logic
+-- (extracted so it can be tested without loading the CLI's auto-main side
+-- effects).
+local merge_cap_declarations         = manifest_caps.merge_cap_declarations
+local merge_browser_cap_declarations = manifest_caps.merge_browser_cap_declarations
 
 -- ── Cap construction ──────────────────────────────────────────────────────
 
@@ -1128,8 +1099,24 @@ local context = {
 	data_dir = data_dir,
 }
 
+-- Validate manifest browser_caps shape (rejects unknown kinds / malformed
+-- entries early). Per-kind config validation is deferred to cap-impl time.
+do
+	local bok, berr = manifest_caps.validate_browser_caps(manifest)
+	if not bok then
+		io.stderr:write("error: " .. tostring(berr) .. "\n")
+		os.exit(1)
+	end
+end
+
 -- Merge cap declarations from manifest (top-level + per-entrypoint).
 local cap_declarations = merge_cap_declarations(manifest, entrypoint_name)
+
+-- Merge browser cap declarations the same way. Browser caps are not
+-- constructed here — that wiring lives in the iframe-host bridge — but the
+-- merged set is computed so the daemon can surface it to grant UIs etc.
+local browser_cap_declarations = merge_browser_cap_declarations(manifest, entrypoint_name)
+local _ = browser_cap_declarations  -- consumed by future iframe-host wiring
 
 -- Apply --cap.NAME.KEY=VALUE overrides from CLI.
 for cap_name, overrides in pairs(opts.cap_overrides) do
