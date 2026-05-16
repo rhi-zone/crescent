@@ -2,6 +2,47 @@
 
 > *Draft. Starting-point design doc. Decisions are framed as proposals with rationale; expect revision. Open questions are called out explicitly in their own section — do not read them as settled. Comments and counterproposals welcome before any of this is treated as load-bearing.*
 
+## Framing — this doc is the design of a single cap (`web_runtime`)
+
+**Capabilities are the platform's only abstraction.** The platform itself is
+target-agnostic: `lib/platform/` mediates caps and knows nothing about
+browsers, JS, or web APIs. Everything described in this document — the
+sandboxed iframe realm, the allow-list lockdown, the cap bridge, the day-zero
+sub-cap surface enumerated in `browser_caps.md` — is the *implementation* of
+a single platform-level cap, currently named **`web_runtime`** (name not
+final). Apps that ship browser UI declare a `web_runtime` cap in the existing
+manifest `caps` field (with `type: "web_runtime"` dispatching to this cap
+impl); the cap impl then provides sub-caps (`fetch_api`, `kv_*`, `dialog`,
+etc.) to its tenant apps via the cap bridge.
+
+There is **no separate `browser_caps` manifest field**. An earlier commit
+(`e6e7b532`) introduced one; that was a mistake and is slated for revert
+(see `TODO.md`). The existing `caps` field, with cap kind dispatched by
+`type`, is the abstraction.
+
+The `web_runtime` cap impl can be loaded or not loaded per deployment. Apps
+that declare `web_runtime` but the deployment lacks the cap impl → platform
+refuses to host them. Apps that don't ship browser UI never trigger the
+load. This isolation is part of why the platform stays target-agnostic.
+
+**The allow-list realm sandbox model is structurally tight, not best-effort.**
+Allow-list (vs deny-list) means new TC39 features are absent by construction;
+bind-patched non-constructable closures close `[[Construct]]` resurrection;
+strict-mode forced kills sloppy-mode escapes; the cap bridge mediates all
+I/O. The pack-JS source subset (`lib/js_pack_validator/`) and the realm
+lockdown (`lib/js_realm_sandbox/`) compose: pack code that passes the subset
+can only use what the realm allows. Modulo bugs in platform code and engine
+bugs in the browser runtime, the composition is structurally sound against
+the threat model in §2. Treat this as the load-bearing claim; do not weaken
+the framing to "best-effort" or "defense in depth."
+
+**Migration is mandatory, not eventual.** First-party apps (`charactercardv2`,
+`library`, `sillytavern`, `system_dashboard`) are NOT architecturally
+privileged. The migration from `http_server` (which serves unsandboxed JS)
+to `web_runtime` (sandboxed) is required for the platform's security
+guarantees to hold uniformly; first-party apps go through it on the same
+terms as any third-party app. See `TODO.md` "Platform isolation migration".
+
 ## Terminology
 
 **App** is the only unit of installable code. Each app lives at
@@ -951,24 +992,33 @@ frames against the same `id`, terminated by a final `result` (success) or
 
 ### Cap declaration
 
-Apps declare browser-side caps in the manifest, parallel to the existing
-daemon-side cap declarations:
+An app that needs browser UI declares the `web_runtime` cap in the existing
+manifest `caps` field. The cap impl described in this doc is the
+implementation that runs when an app's `caps` entry has
+`type: "web_runtime"`. Sub-caps (the day-zero set enumerated in
+`browser_caps.md` §5 — `fetch_api`, `kv_*`, `dialog`, `toast`, etc.) are
+provided by the `web_runtime` cap impl to its tenant apps via the cap bridge;
+they are not platform-level caps and do not appear directly in the app's
+top-level `caps` field. The exact manifest shape for sub-cap declarations
+under a `web_runtime` cap entry is an open question (see `browser_caps.md`
+§3 and `TODO.md` "Platform isolation migration" → "Define the cap-impl's
+manifest schema").
 
-```
-{
-  "name": "my-pack",
-  "caps": { "http_client": { "type": "http_client", "host": "api.x.com" } },
-  "browser_caps": {
-    "fetch_api": { "type": "http_client", "host": "api.x.com" },
-    "toast":     { "type": "ui_toast" },
-    "clipboard": { "type": "clipboard_write" }
-  }
-}
-```
+### Cap interface (web_runtime)
 
-The browser-cap list is its own namespace. Some entries shadow daemon caps
-(`http_client` that is actually a daemon-cap call routed through the stub);
-others are browser-only (`clipboard`, `ui_toast`, `dialog`).
+The `web_runtime` cap, like any platform cap, has an entry function that
+the platform invokes when a tenant app is launched. Its inputs are the
+tenant's pack source and declared sub-caps; its output is a handle for a
+sandboxed realm that the platform serves to the user's browser. Cleanup,
+auditing, and sub-cap delegation flow through the cap impl, not the
+platform. The concrete interface (function signatures, lifecycle hooks,
+audit envelope) is owed — see `TODO.md`.
+
+Some sub-caps shadow daemon-side caps (`fetch_api` may route through the
+daemon-side `http_client` cap rather than performing a browser-side
+`fetch`); others are browser-only (`clipboard_write`, `toast`, `dialog`).
+The sub-cap namespace is the `web_runtime` cap's, parallel to and not
+subsumed by platform-level caps.
 
 ### Grant
 

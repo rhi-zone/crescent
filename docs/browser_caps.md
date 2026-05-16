@@ -2,6 +2,32 @@
 
 > *Draft. Enumerates the Web Platform surface and proposes a classification per API for the app realm. Decisions framed as proposals; expect revision. Open questions are called out in §7 — do not read them as settled. Counterproposals, "you missed Y," and "the classification of X is wrong because Z" are all in scope.*
 
+## Framing — these are sub-caps of `web_runtime`, not platform-level caps
+
+The caps enumerated in this document are **sub-caps provided by the
+`web_runtime` cap impl** (see `platform_isolation.md` "Framing"), not
+platform-level caps. The platform's only abstraction is capabilities; the
+sandbox + cap-bridge + lockdown + day-zero cap surface is the
+*implementation* of a single platform-level cap (`web_runtime`). Apps that
+ship browser UI declare `web_runtime` in the existing manifest `caps`
+field; that cap's impl mediates which sub-caps each tenant app receives.
+
+**There is no separate `browser_caps` manifest field.** An earlier commit
+(`e6e7b532`) introduced one in `lib/platform/platform_types.lua` and
+related files; that was a mistake and is slated for revert (see `TODO.md`
+"Platform isolation migration"). Apps declare the parent `web_runtime` cap;
+`web_runtime` decides which sub-caps to expose to each tenant. Whether
+tenants declare sub-caps individually (scoped under the `web_runtime` cap
+entry) or whether the cap impl decides unilaterally is the open question
+the manifest-schema design must answer — see §3 below and `TODO.md`.
+
+For now, treat every "`browser_caps` manifest field" reference in this
+document as **describing the API surface, not a literal manifest schema**.
+The schema will be redone under the `web_runtime` cap entry. The cap-kind
+catalog (§4, §5), the schema axes (§2), the per-cap classifications, and
+the day-zero exposed surface are all unchanged by this reframing; only the
+manifest binding is open.
+
 ## Terminology
 
 **App** is the only unit of installable code. Each app lives at `lib/platform/apps/<name>/` with a `manifest.json` declaring caps and entrypoints (per `lib/platform/platform_types.lua`: `Manifest`, `EntryDef`, `CapDecl`). Apps shipped in the crescent source tree (`charactercardv2`, `library`, `sillytavern`, `system_dashboard`) are not architecturally privileged; they are user code that crescent's team happened to author. The threat model treats them equivalently to any user-installed app — every browser cap in this doc is gated identically regardless of who authored the calling app.
@@ -20,13 +46,22 @@ A **daemon cap** is a Lua-side capability, enforced by the platform daemon, medi
 
 A **browser cap** is a JS-side capability, enforced by the host stub via [`lib/js_cap_bridge/bridge.js`](../lib/js_cap_bridge/bridge.js), exposed to the app realm (a sandboxed iframe today, a ShadowRealm tomorrow) under `globalThis.__cap__.<name>`. The app realm has been stripped of every Web Platform global by the [`lib/js_realm_sandbox/`](../lib/js_realm_sandbox/) bootstrap; the only way the realm reaches anything beyond pure JS computation is by calling a declared, granted cap.
 
-The two are parallel, both flowing from the same manifest:
+The two are parallel, both flowing from the same manifest. As of the
+"Framing" note at the top of this doc, browser caps are sub-caps of the
+`web_runtime` cap rather than a top-level manifest field:
 
 ```
 app manifest
-├── caps          → daemon caps, enforced daemon-side, OS resources
-└── browser_caps  → browser caps, enforced host-stub-side, browser APIs / host UI
+└── caps
+    ├── <daemon caps>      → enforced daemon-side, OS resources
+    └── web_runtime cap    → enforced host-stub-side; mediates browser sub-caps
+                             (fetch_api, kv_*, dialog, toast, ... — this doc's §4/§5)
 ```
+
+Earlier drafts (and the `browser_caps` field commit `e6e7b532` slated for
+revert) treated browser caps as a parallel top-level field. That framing is
+gone; the cap-kind catalog below describes what `web_runtime` makes
+available, not what apps declare directly at the top of the manifest.
 
 Some browser caps proxy a daemon cap (the `fetch_api` browser cap, for instance, routes through the daemon-side `http_client` cap rather than performing a direct browser `fetch`). Some are browser-only (clipboard, toast, navigate, Web Crypto). The browser-cap namespace is its own, parallel to and not subsumed by daemon caps.
 
@@ -136,6 +171,19 @@ Args are recorded by **shape, not contents**, by default. The audit log is opera
 Per-cap "shape digest" definitions live in §4 entries that need them. Default: record only the argument arity and the top-level types (`["string", "object", "number"]`).
 
 ## 3. Manifest entry format
+
+> **Note (post-`web_runtime` reframing).** The schema described in this
+> section was drafted against the now-reverted `browser_caps` top-level
+> manifest field. Sub-caps will instead be scoped under a `web_runtime`
+> cap entry in the existing `caps` field; the concrete shape is owed
+> (see `TODO.md` "Define the cap-impl's manifest schema"). The per-entry
+> axes below — local cap name, `kind`, `config`, factory shape, grant
+> recording — carry over; only the outer binding changes. Treat this
+> section as describing the per-entry shape, not the top-level field
+> name. The references to `lib/platform/platform_types.lua`
+> `BrowserCapDecl`, `lib/platform/manifest_caps.lua`, and the
+> `merge_browser_cap_declarations` / `validate_browser_caps` functions
+> point at code slated for revert with the `browser_caps` field.
 
 Schema location: [`lib/platform/platform_types.lua`](../lib/platform/platform_types.lua) (canonical `BrowserCapDecl`, with duplicates in `lib/platform/init.lua` and `lib/platform/cli.lua` kept in sync).
 

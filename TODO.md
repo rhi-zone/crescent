@@ -2,6 +2,93 @@
 
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
 
+## Platform isolation migration (mandatory, not eventual)
+
+Architectural reframing settled this session: capabilities are the
+platform's only abstraction; the sandbox+bridge+lockdown work is the
+implementation of a single platform-level cap (`web_runtime`); there is
+no separate `browser_caps` manifest field; first-party apps migrate to
+`web_runtime` on the same terms as any third-party app. See
+`docs/platform_isolation.md` "Framing" and `docs/browser_caps.md`
+"Framing" for the consolidated decisions. The work below is the migration
+to that endpoint.
+
+- [ ] **Revert the `browser_caps` manifest field.** Drop the field and
+  related plumbing from `lib/platform/platform_types.lua`,
+  `lib/platform/init.lua`, `lib/platform/cli.lua`,
+  `lib/platform/manifest_caps.lua`. Drop the corresponding tests. Drop
+  documentation of the field. The existing `caps` field (with
+  `type: "web_runtime"`) is the abstraction; no parallel field is added.
+  Background: commit `e6e7b532` introduced the field; revert is mandatory.
+
+- [ ] **Design the explicit `web_runtime` cap interface.** Entry function
+  (inputs: pack source + declared sub-caps; output: sandboxed-realm handle),
+  sub-cap delegation, audit envelope, cleanup hooks, lifecycle (launch,
+  reload, shutdown). Document in `docs/platform_isolation.md` "Cap interface
+  (web_runtime)".
+
+- [ ] **Decide where the `web_runtime` cap impl lives.** Candidate:
+  `lib/platform/caps/web_runtime/`. Document the choice once made.
+
+- [ ] **Move the existing browser-side libraries under the cap impl
+  directory.** Sources to relocate: `lib/js_realm_sandbox/`,
+  `lib/js_cap_bridge/`, `lib/js_pack_host/`, `lib/js_caps/`,
+  `lib/js_pack_validator/`, `lib/js_safe_regex/`, `lib/js_types/`. Update
+  all imports. Run typecheck + parity tests + manual sanity after the move.
+
+- [ ] **Define the `web_runtime` cap-impl's manifest schema.** It is a cap
+  kind dispatched by `type: "web_runtime"` in the existing `caps` field;
+  decide what fields the entry's value accepts (declared sub-caps, sub-cap
+  configs, entry-point selection). Document in `docs/browser_caps.md` §3
+  alongside the existing per-entry axes. Resolves the open question called
+  out in §3 about how tenants declare sub-caps under `web_runtime`.
+
+- [ ] **Migrate `charactercardv2` (ccv2) from `http_server` to `web_runtime`.**
+  ccv2's `static/*.js` (currently plain JS with full DOM access) gets
+  adapted into pack-JS subset form running in the sandboxed realm. This is
+  mandatory for the platform's security guarantees to hold uniformly; ccv2
+  is not architecturally privileged.
+
+- [ ] **Migrate `library` from `http_server` to `web_runtime`.** Same terms.
+
+- [ ] **Migrate `sillytavern` from `http_server` to `web_runtime`.** Same
+  terms.
+
+- [ ] **Migrate `system_dashboard` from `http_server` to `web_runtime`.**
+  Largest migration — projection registry and friends. Same terms.
+
+- [ ] **Tighten the `http_server` cap once browser-UI consumers are migrated.**
+  Long-term, `http_server` is retained only for "expose an API endpoint" use
+  cases — no HTML response type, no JS-serving. Possible rename to
+  `http_endpoint`, response-type restriction (no `text/html`), tighter
+  content-type allowlist, possibly require explicit `--bind-external` to
+  listen on anything other than localhost. Decide and document.
+
+- [ ] **Move the `/_platform/lib/js_*/` daemon route into the
+  `web_runtime` cap impl.** The platform daemon currently serves the
+  browser-side platform libraries directly (commit `622efc40`). That route
+  doesn't belong in platform code — the `web_runtime` cap impl owns serving
+  its runtime files to its tenant iframes. Move accordingly once the cap
+  impl exists.
+
+- [ ] **Strip `browser_caps` references from `docs/platform_isolation.md`
+  and `docs/browser_caps.md` after migration.** The current "Framing" notes
+  in both docs flag the field as slated-for-revert; once revert lands, the
+  surrounding prose that still describes the field as if it exists (`§3`
+  schema discussion, the `app manifest` ASCII diagram in browser_caps §1,
+  the manifest example in platform_isolation §4) gets rewritten against
+  the `web_runtime`-sub-cap model.
+
+- [ ] **Decide whether first-party apps move from `lib/platform/apps/<name>/`
+  to `lib/apps/<name>/`.** The current path is a historical misnomer —
+  first-party apps are not part of the platform; they are crescent-team-
+  authored apps that happen to ship in the source tree. Purely
+  organizational; not blocking the migration above.
+
+- [ ] **Audit the `path_guard` lint violation across `lib/js_*/init.lua`.**
+  Pre-existing per commit `746b5ef7`. Resolves when the `lib/js_*/`
+  packages move under the cap impl directory.
+
 ## Platform isolation (top priority)
 
 - [ ] **Deprecate `http_server` in favour of `web_runtime` for browser-UI apps.**
