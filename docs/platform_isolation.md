@@ -269,7 +269,15 @@ pack-author code and:
 The bootstrap is the only code that needs to fully trust the host. Pack
 author code never sees the raw postMessage channel.
 
-### Realm lockdown (open)
+### Realm lockdown (allow-list)
+
+**Resolved: in-house allow-list lockdown.** The realm is defined
+positively — bootstrap installs exactly the intrinsics listed in the
+allow-list specification (next subsection) and the host-bridged caps,
+and structurally deletes everything else. SES becomes *reference
+material*: its safe-intrinsics whitelist and neutralisation logic are
+the authoritative engineering source to read while implementing
+crescent's lockdown, not a runtime dependency to vendor.
 
 **Bootstrap-delete-globals alone is insufficient.** The `Function`
 constructor is reachable via prototype chain even after `delete
@@ -282,37 +290,153 @@ F("return 1")(); // works — F is Function
 // AsyncFunction, GeneratorFunction, AsyncGeneratorFunction — similar shadows
 ```
 
-Naive bootstrap leaves dynamic code execution reachable inside the realm.
-Closing this requires walking and neutralising every reachable
-intrinsic-constructor path, not just deleting top-level globals.
+Closing this requires walking every kept intrinsic prototype,
+neutralising `.constructor` slots, and removing the
+`AsyncFunction` / `GeneratorFunction` / `AsyncGeneratorFunction`
+shadow constructors. The allow-list framing makes this a positive
+construction: the constructors aren't in the list, so they're absent;
+the prototype-chain escape class is closed by *absence*, not by
+patching a known-list of dangerous slots.
 
-**Lockdown options (open question — not yet decided):**
+**Why allow-list, not SES.** The "TC39 catch-up gap" only exists for
+deny-list approaches: SES enumerates dangerous intrinsics, and new
+features can ship outside the list. Allow-list inverts the framing —
+the realm has exactly the primitives we declare, and new TC39
+features are absent by construction. The "code outside the lockdown
+context" failure mode that recurs in SES post-mortems is a
+mixed-trust-app deployment hazard; crescent's deployment has one
+trust boundary (the iframe bootstrap), and we own the whole iframe.
+SES's deny-list framing exists for backwards-compat with existing JS
+libraries that use the wider intrinsic surface — pack code targets
+*our* allow-list, so we don't carry that compat tax.
 
-1. **SES / Lockdown** (Endo's library): freezes intrinsic prototypes,
-   replaces dangerous constructors with throwers, closes known reflection
-   paths. ~100–200kb minified. Battle-tested but JS-on-JS lockdown;
-   periodically catches up to new TC39 features. Vendor into `dep/`.
-2. **Tighter primordial allow-list within an SES-style approach.** Strip
-   `Object.create`, `Reflect`, classes, generators, async/await beyond
-   the minimum. Drastically smaller realm; lots of idiomatic JS
-   unavailable to authors.
-3. **WASM-based sandbox** (e.g. AssemblyScript or Lua→WASM): pack code
-   compiled to WASM. The prototype-chain escape class doesn't exist
-   (WASM has no prototypes, no host objects, explicit imports).
-   Structurally stronger than any pure-JS lockdown. Trade-off: toolchain
-   plus runtime (AssemblyScript runtime ~50kb). Changes the authoring
-   format back toward a compilation step.
-4. **JS-in-WASM (QuickJS-in-WASM)**: a JS interpreter compiled to WASM;
-   pack JS runs inside the interpreter inside WASM. Two layers of
-   isolation. ~300–500kb bundle. Keeps JS authoring intact; structurally
-   stronger than SES.
-5. **Process isolation**: a Web Worker per pack with stripped APIs plus
-   IPC. Strong boundary. Within-worker, still needs SES-or-equivalent to
-   close the prototype-chain escape.
+WASM-based approaches become unnecessary for the structural-isolation
+argument: once the allow-list realm is structurally tight, the
+prototype-chain escape class is already closed. WASM's 500kb bundle
+no longer earns its keep. (WASM remains an option if a future threat
+model genuinely needs it — see §8.)
 
-Decision affects bundle size, attack surface, author ergonomics, and
-whether browser-side authoring (next subsection) needs to target WASM.
-Listed in §7 as an open question.
+**Alternatives considered** are catalogued in §8.
+
+### Allow-list specification (draft)
+
+> *Draft. This is the spec the bootstrap implements — per-intrinsic
+> kept/removed lists, bootstrap order, escape-test corpus. The
+> per-intrinsic lists are the starting point an implementer reads,
+> not the final word; expect tightening as the corpus grows.*
+
+#### Declared intent
+
+The realm bootstrap removes everything from `globalThis` and from
+every reachable intrinsic prototype except the items below. Kept
+slots are sealed (non-configurable, non-writable) after installation.
+Anything not listed is deleted; non-deletable host-provided slots are
+replaced with `undefined`-returning getters.
+
+#### Intrinsics
+
+- **`Object` constructor.** Kept: `keys`, `values`, `entries`,
+  `freeze`, `isFrozen`, `assign` (shallow-only semantics). Removed:
+  `create`, `defineProperty`, `defineProperties`, `getPrototypeOf`,
+  `setPrototypeOf`, `getOwnPropertyDescriptor`,
+  `getOwnPropertyDescriptors`, `getOwnPropertyNames`,
+  `getOwnPropertySymbols`, `preventExtensions`, `seal`, `isSealed`,
+  `isExtensible`, `fromEntries`. Justification: every removed method
+  is a reflection or constructor-reach path.
+- **`Object.prototype`.** Kept: `toString`, `hasOwnProperty`. Removed:
+  `__proto__` getter/setter, `__defineGetter__`, `__defineSetter__`,
+  `__lookupGetter__`, `__lookupSetter__`, `propertyIsEnumerable`,
+  `isPrototypeOf`. Justification: prototype-access / mutation reach.
+- **`Function` constructor.** Removed entirely. Closes
+  `new Function("...")`.
+- **`Function.prototype`.** Kept: `call`, `apply`, `bind`.
+  `.constructor` neutralised (`undefined`, non-configurable).
+  `toString` removed (function-source leak).
+- **`AsyncFunction` / `GeneratorFunction` / `AsyncGeneratorFunction`
+  constructors.** Removed entirely; the corresponding
+  `.prototype.constructor` slots neutralised to close shadow paths.
+- **`Array` constructor.** Kept, wrapped: throws if `n > THRESHOLD`.
+  Most prototype methods kept;
+  `join` / `fill` / `flat` / `flatMap` replaced with bounded versions.
+- **`String` constructor and prototype.** Kept; bounded
+  `padStart` / `padEnd` / `repeat` / `normalize` (output-length cap).
+  Regex methods (`match`, `matchAll`, `replace`, `split`) wrapped
+  with an input-size cap and optional regex-shape check.
+- **`Number`, `Boolean`, `BigInt`.** Kept full.
+- **`Math`.** Kept full (no security-relevant state).
+- **`JSON`.** `stringify` / `parse` wrapped with input-size cap,
+  output-size cap, depth cap.
+- **`Date`.** Replaced with a coarse-time variant; granularity is
+  host-controlled (e.g. 50ms ticks) to mitigate timing oracles.
+  `Date.now` and `performance.now` similarly coarsened.
+- **`Promise`.** Kept. Microtask scheduling is a timing channel; we
+  accept this (no JS sandbox defends against it).
+- **`Map`, `Set`, `WeakMap`, `WeakSet`.** Kept. `WeakRef` and
+  `FinalizationRegistry` removed (GC observation).
+- **`Symbol`.** Kept; `Symbol.unscopables` and any reflection-relevant
+  well-known symbols neutralised.
+- **`Proxy`, `Reflect`.** Removed entirely. Powerful reflection; pack
+  code does not need these.
+- **`ArrayBuffer`, `DataView`, typed-array family.** Kept (real use
+  cases). `SharedArrayBuffer` removed (cross-thread / Spectre).
+- **`eval`, `Function`, dynamic `import()`.** Removed.
+- **Module / loader globals.** None in this realm.
+- **Host-bridged caps.** Installed by name as declared in the pack
+  manifest, after lockdown completes.
+
+#### Language-level constraints
+
+Enforced statically by the source-level checker (`bin/cr check`), not
+removable at runtime:
+
+- `class` syntax disallowed (desugars to prototype manipulation,
+  bypassing the runtime removal of `Object.setPrototypeOf`).
+- Generators / `function*` disallowed.
+- `async function` / `await` — open question (Promise itself is kept;
+  if `async` is disallowed, `Promise.then` chaining is the only
+  async path). See §7.
+- `with` statement disallowed (legacy reflection).
+- `eval` keyword and `Function` constructor in source — already
+  removed at runtime; static check flags at `bin/cr check` for DX.
+
+#### Bootstrap order
+
+1. Capture references to original intrinsics in a closure, before
+   any modification.
+2. Delete or replace global slots not on the allow-list.
+3. Walk every kept intrinsic prototype; replace methods with the
+   wrapped/bounded versions or `undefined`.
+4. Neutralise `.constructor` slots on every kept prototype.
+5. Install host-bridged caps under their declared names.
+6. `Object.freeze` every kept intrinsic and its prototype.
+7. Load pack code.
+
+#### Escape-test corpus
+
+The implementation MUST defeat all of these. This corpus is *the*
+spec the lockdown must satisfy; these are the regression tests, and
+the implementation isn't done until each one either throws or
+returns a safe value.
+
+- `({}).__proto__.constructor.constructor`
+- `({}).constructor.constructor`
+- `(function(){}).constructor`
+- `(async function(){}).constructor`
+- `(function*(){}).constructor`
+- `(async function*(){}).constructor`
+- `Object.getPrototypeOf({}).constructor`
+- `Reflect.getPrototypeOf({}).constructor`
+- `Object.create({}).__proto__.constructor`
+- `[].constructor.constructor`
+- `"".constructor.constructor`
+- `(/x/).constructor.constructor`
+- `(new Error()).constructor.constructor`
+- All `__proto__` mutation attempts
+- All `Object.setPrototypeOf` calls
+- String / Array DoS: `"x".repeat(1e9)`, `Array(1e9).fill(0)`,
+  deep JSON, ReDoS regex
+- Dynamic `import("data:...")`
+- Source-level `eval("...")`, `new Function("...")`
 
 ### Browser-side authoring
 
@@ -623,13 +747,20 @@ Initiative B's resumption.
 These are explicit. They are not buried in prose because they need
 decision-level attention, not skimming.
 
-- **Lockdown approach** (SES / SES-tightened / WASM / JS-in-WASM /
-  process-isolation) — see the "Realm lockdown" subsection in §3.
-  Bootstrap-delete-globals alone is insufficient because the `Function`
-  constructor is reachable via prototype chain; which lockdown
-  technology crescent commits to is not yet decided and affects bundle
-  size, attack surface, ergonomics, and whether browser-side authoring
-  has to target WASM.
+- **Async / await — kept or disallowed?** Promise itself is on the
+  allow-list, so `Promise.then` chaining is always available. The
+  question is whether `async function` / `await` syntax is permitted
+  at the source level. If disallowed, `Promise.then` chaining is the
+  only async path; if permitted, the AsyncFunction shadow constructor
+  removal still has to hold. Called out in the allow-list spec.
+- **Coarse-time tick granularity.** What value? 50ms? 100ms? Trades
+  timing-oracle mitigation against UX (animation, perceived
+  responsiveness). The spec leaves the granularity host-controlled;
+  the concrete number is TBD.
+- **Allow-list size thresholds.** Concrete numbers for the array max
+  size, `String.prototype.repeat` output cap, `JSON` depth and total
+  size cap, regex input-size cap. The spec names the dimensions;
+  picking values is downstream work.
 - **Shared `.d.ts` location.** Single host-served declaration file for
   the realm allow-list, cap signatures, VNode shape, and bridge
   protocol. `lib/platform/browser_types.d.ts` or a daemon-served static
@@ -673,6 +804,39 @@ decision-level attention, not skimming.
   has to replicate the runtime.
 
 ## 8. Alternatives considered
+
+### Lockdown technologies — superseded by in-house allow-list
+
+The §3 lockdown decision was previously open across five options.
+All five are recorded here as considered-and-superseded:
+
+- **SES / Lockdown (vendored from Endo) — superseded.** Battle-tested
+  JS-on-JS lockdown, ~100–200kb minified. Deny-list framing means it
+  periodically has to catch up to new TC39 features; mixed-trust
+  deployment caveats apply to its typical usage. In-house allow-list
+  lockdown avoids the framing tax. SES remains *reference material*
+  for the safe-intrinsics whitelist and neutralisation logic.
+- **Tightened SES — superseded.** Stripping `Object.create`,
+  `Reflect`, classes, generators down to a smaller surface inside an
+  SES-style frame helps, but the underlying framing remains
+  deny-list. Allow-list achieves the structural-absence property
+  directly.
+- **WASM-based sandbox (AssemblyScript / Lua→WASM) — overkill.**
+  Structurally stronger than any pure-JS lockdown (no prototypes, no
+  host objects, explicit imports), but the allow-list lockdown
+  already closes the prototype-chain escape class by construction.
+  WASM brings a toolchain plus runtime (~50kb baseline,
+  authoring-format reversal) for an isolation property the cheaper
+  approach already gives us.
+- **JS-in-WASM (QuickJS-in-WASM) — cost without unique benefit.**
+  ~300–500kb runtime bundle. Two layers of isolation, JS authoring
+  intact, but the structural-isolation argument it offers is
+  redundant with allow-list lockdown.
+- **Process isolation (Web Worker per pack) — orthogonal.** Strong
+  boundary; still needs an in-realm lockdown inside the worker to
+  close the prototype-chain escape. Can be layered on top of the
+  allow-list approach if a future threat model demands it; not a
+  substitute.
 
 ### Server-side rendering (LiveView / Hotwire pattern) — rejected
 
