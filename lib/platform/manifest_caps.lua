@@ -137,7 +137,6 @@ M.BROWSER_CAP_KINDS = {
 	decompress         = true,
 	console_log        = true,
 	set_timeout        = true,
-	clear_timeout      = true,
 }
 
 -- Merge top-level (`manifest.browser_caps`) and per-entrypoint

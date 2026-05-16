@@ -977,6 +977,14 @@ const data = await __cap__.fetch_api({ path: "/items" });
 
 Initial list. Expected to grow. **See [`browser_caps.md`](browser_caps.md)** for the comprehensive Web-Platform-API enumeration, per-cap schema pattern (entry args, return type, async/event surface, lockdown, permission, audit), the day-zero exposed cap surface, and versioning/discovery/composition decisions. Every "cap" reference in this doc should be read against that enumeration; this section is the protocol sketch, `browser_caps.md` is the cap-kind catalog.
 
+### Cancellation via AbortSignal
+
+Cap calls with AbortSignal args support cancellation. The realm-side bridge intercepts AbortSignal instances in cap args before sending the call message: it stores the signal locally, sets up an abort listener, and replaces the signal in the wire-args with a marker (`{__cap_signal: true, ref: <local-id>}`). On `signal.aborted`, the bridge sends a `{id, kind: "cancel"}` message keyed to the call's correlation id. The host-side bridge receives the call, creates a fresh `AbortController` on the host side, replaces the marker with `controller.signal` in the args passed to the impl, and stores the controller keyed by correlation id. On `{kind: "cancel"}` for that id, the host aborts the controller; the cap impl's underlying operation responds (e.g. `fetch(url, {signal})` rejects; a setTimeout wrapper calls `clearTimeout`). The pack-realm Promise rejects with an `AbortError`.
+
+This applies to any long-running cap. AbortSignal is the standard JS primitive for cancellation; using it consistently avoids inventing a parallel cancel API and matches what pack authors already know. There is no separate `clear_<cap>` cap surface — the design space collapses to one cancellation primitive across the bridge.
+
+Implementation status: bridge protocol extension not yet shipped. `set_timeout` and `fetch_api` are the first caps that will use it; both are blocked on this extension landing. Future cancellable caps default to AbortSignal-cancellable where applicable.
+
 ## 5. Rendering model — resolved: Option B
 
 The proposal above isolates *execution*. The remaining question was how
@@ -1124,6 +1132,18 @@ decision-level attention, not skimming.
   as a separate package? It is JS+bun, runs in author dev/CI, and
   is explicitly outside the daemon critical path — that makes its
   packaging location a real question rather than a default.
+- **AbortSignal handling: opt-in per cap, or universal?** §4
+  "Cancellation via AbortSignal" extends the bridge so any AbortSignal
+  in cap args is intercepted and translated into a cancel message.
+  Should this be opt-in per cap (the cap kind's schema declares
+  `cancellable: true` and only those calls scan args for signals), or
+  universal (every cap call scans args, free for any cap to accept a
+  signal)? Universal is simpler and matches the standard-primitive
+  framing; opt-in is more conservative (audit list of cancellable caps
+  is explicit). Default leaning: universal — the scan is cheap, the
+  authoring story is one rule across all caps, and packs cannot
+  smuggle anything by attaching a signal to a non-cancellable cap
+  (the host just ignores it).
 
 ## 8. Alternatives considered
 

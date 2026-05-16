@@ -12,8 +12,10 @@ end
 -- index.js exports `dayZeroCaps`, a Map<string, function> that callers
 -- pass as `opts.capImpls` to lib/js_pack_host/host.js#mountPack. Each
 -- entry name corresponds to a cap kind in docs/browser_caps.md §5.
--- This commit ships the 8 trivial caps (pure wraps with no design
--- questions). The remaining 10 land in subsequent commits.
+-- This commit ships the 6 trivial caps (pure wraps with no design
+-- questions). The remaining 12 land in subsequent commits, including
+-- `set_timeout` which is blocked on the cap-bridge AbortSignal
+-- extension (docs/platform_isolation.md §4).
 --
 -- Lua callers MUST NOT call any cap function at runtime -- they error.
 -- The functions exist so Lua code that assembles browser-side pipelines
@@ -37,8 +39,6 @@ local M = {}
 --:: DecompressFn   = (bytes: unknown, format: string) -> unknown
 --:: ConsoleLogFn   = (...unknown) -> nil
 --:: RandomFn       = (byte_length: integer) -> unknown
---:: SetTimeoutFn   = (delay_ms: number) -> unknown
---:: ClearTimeoutFn = (handle: unknown) -> nil
 
 --:: DayZeroCaps = {
 --::   text_encode:       TextEncodeFn,
@@ -47,8 +47,6 @@ local M = {}
 --::   decompress:        DecompressFn,
 --::   console_log:       ConsoleLogFn,
 --::   web_crypto_random: RandomFn,
---::   set_timeout:       SetTimeoutFn,
---::   clear_timeout:     ClearTimeoutFn,
 --:: }
 
 --: (string) -> unknown
@@ -83,16 +81,6 @@ function M.web_crypto_random(_byte_length)
   error("lib/js_caps is type-only on the Lua side.")
 end
 
---: (number) -> unknown
-function M.set_timeout(_delay_ms)
-  error("lib/js_caps is type-only on the Lua side.")
-end
-
---: (unknown) -> nil
-function M.clear_timeout(_handle)
-  error("lib/js_caps is type-only on the Lua side.")
-end
-
 --:: dayZeroCaps_type = DayZeroCaps
 M.dayZeroCaps = {
   text_encode       = M.text_encode,
@@ -101,8 +89,6 @@ M.dayZeroCaps = {
   decompress        = M.decompress,
   console_log       = M.console_log,
   web_crypto_random = M.web_crypto_random,
-  set_timeout       = M.set_timeout,
-  clear_timeout     = M.clear_timeout,
 }
 
 return M

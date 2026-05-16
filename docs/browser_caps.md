@@ -633,21 +633,20 @@ These are pure-computation APIs; many can be reimplemented in pack-author JS wit
 
 ### 4.9 Time / scheduling
 
-#### 4.9.1 `setTimeout` / `clearTimeout` — **exposed-now** as `set_timeout` / `clear_timeout`
+#### 4.9.1 `setTimeout` — **exposed-now** as `set_timeout` (AbortSignal-cancellable)
 
 ```ts
-type SetTimeoutArgs = { delay_ms: number; callback_token: string };  // delay clamped 0 ≤ ms ≤ 86400000 (1 day)
-type SetTimeoutResult = { handle: string };
-
-type ClearTimeoutArgs = { handle: string };
-type ClearTimeoutResult = { ok: true };
+type SetTimeoutOpts = { signal?: AbortSignal };
+type set_timeout = (delay_ms: number, opts?: SetTimeoutOpts) => Promise<void>;
 ```
 
-When the timer fires, the host emits `{ id, kind: "event", event_type: "timer_fire", token: callback_token }`. The pack realm dispatches via its subscriber map.
+The Promise resolves after `delay_ms` elapses. If `opts.signal` is provided and `signal.aborted` becomes true before the timer fires, the Promise rejects with an `AbortError`. `delay_ms` is bounded by the browser's native `setTimeout` ceiling (INT32_MAX ms, ~24.8 days); there is no additional platform-side clamp — longer waits are out-of-scope and should be expressed as cap-chained scheduling.
 
-Permission: per-install (default-grant). Lockdown: host-side timer, host-side fire; realm sees only the token round-trip. Per-pack concurrent-timer cap (default 64) prevents DoS.
+Permission: per-install (default-grant). Lockdown: host-side timer, host-side fire; the pack realm sees only the awaited Promise. The pack's AbortSignal never crosses the wire — see [`platform_isolation.md`](platform_isolation.md) §4 "Cancellation via AbortSignal" for the bridge-layer protocol that intercepts the signal locally and emits a cancel message keyed to the call's correlation id. Per-pack concurrent-timer cap (default 64) prevents DoS.
 
-Day-zero because nearly every pack needs scheduled work. The realm has no `setTimeout` ambient — the bridged version is the only path.
+Day-zero because nearly every pack needs scheduled work. The realm has no `setTimeout` ambient — the bridged version is the only path. There is no separate `clear_timeout` cap: cancellation is uniformly expressed via AbortSignal, the standard JS primitive, so packs do not learn a parallel cancel API per cap.
+
+Status: design fixed; ships once the cap-bridge AbortSignal extension lands. The previous shipped implementation (a Promise-returning `set_timeout` with a no-op `clear_timeout`) was reverted because it surfaced no cancellation handle to packs — half-measure.
 
 #### 4.9.2 `setInterval` / `clearInterval` — **placeholder day-one** as `set_interval`
 
@@ -844,10 +843,11 @@ Distilling §4 to the day-zero set:
 | `compress` | gzip / deflate | per-install | none |
 | `decompress` | gzip / deflate inverse | per-install | none |
 | `console_log` | Pack-side console bridged to host | per-install | none |
-| `set_timeout` | Bounded scheduled callback via event token | per-install | optional |
-| `clear_timeout` | Cancel a scheduled callback | per-install | none |
+| `set_timeout` | Delay-resolved Promise; cancel via AbortSignal | per-install | optional |
 
-Eighteen caps. The set is small and deliberate: it covers basic HTTP, storage, navigation, simple UI primitives, cryptography, encoding, and timing — enough for a wide range of pack designs without exposing anything that needs a careful threat-model design (sensors, media, workers, WebRTC).
+Seventeen caps. The set is small and deliberate: it covers basic HTTP, storage, navigation, simple UI primitives, cryptography, encoding, and timing — enough for a wide range of pack designs without exposing anything that needs a careful threat-model design (sensors, media, workers, WebRTC).
+
+Cancellation is uniformly expressed via AbortController / AbortSignal (the standard JS cancellation primitive) — there is no per-cap "cancel" sibling. `set_timeout` is the first cap that uses this; `fetch_api` will follow. Bridge-layer protocol in [`platform_isolation.md`](platform_isolation.md) §4 "Cancellation via AbortSignal". `set_timeout` ships once that bridge extension lands.
 
 Each `lib/platform/browser_caps/<kind>/` directory holds the host-side cap impl (Lua or JS depending on whether the impl runs in the daemon or in the host stub realm), the per-kind config schema validator, and tests. The single `lib/js_realm_sandbox/` continues to lock down the realm; the cap shells are installed onto `__cap__` per-pack from the granted manifest entries.
 

@@ -29,9 +29,11 @@ end
 -- =====================================================================
 -- Cap-kind corpus. Each entry maps a documented day-zero cap kind (in
 -- docs/browser_caps.md §5) to a substring that MUST appear in
--- caps.test.js. The eight kinds below are the ones this commit ships;
--- the remaining ten land in subsequent commits and will be added here
--- when their impls land.
+-- caps.test.js. The six kinds below are the ones this commit ships;
+-- the remaining twelve (including set_timeout, which is blocked on the
+-- cap-bridge AbortSignal extension per docs/platform_isolation.md §4)
+-- land in subsequent commits and will be added here when their impls
+-- land.
 -- =====================================================================
 
 local SPEC_RULES = { --: SpecItem[]
@@ -78,21 +80,11 @@ local SPEC_RULES = { --: SpecItem[]
     doc = "web_crypto_random: lower-bound validation" },
   { needle = "web_crypto_random: length 65537 rejected",
     doc = "web_crypto_random: upper-bound validation" },
-  -- set_timeout
-  { needle = "set_timeout: resolves with performance.now after delay",
-    doc = "set_timeout: happy path resolves with timestamp" },
-  { needle = "set_timeout: negative delay clamps to 0",
-    doc = "set_timeout: clamping boundary" },
-  { needle = "set_timeout: NaN rejected",
-    doc = "set_timeout: validation failure on non-finite" },
-  -- clear_timeout
-  { needle = "clear_timeout: returns undefined",
-    doc = "clear_timeout: day-zero no-op returns undefined" },
   -- dayZeroCaps aggregate
-  { needle = "dayZeroCaps: contains the 8 trivial caps",
-    doc = "dayZeroCaps map contains the 8 shipped names" },
-  { needle = "dayZeroCaps: does not contain the deferred 10 caps",
-    doc = "dayZeroCaps map excludes the 10 deferred cap names" },
+  { needle = "dayZeroCaps: contains the 6 trivial caps",
+    doc = "dayZeroCaps map contains the 6 shipped names" },
+  { needle = "dayZeroCaps: does not contain the deferred caps",
+    doc = "dayZeroCaps map excludes deferred cap names" },
 }
 
 T.describe("js_caps / cap-kind parity", function()

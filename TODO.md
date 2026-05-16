@@ -19,21 +19,40 @@
 - [ ] **Browser caps day-zero implementation** — design doc at
   `docs/browser_caps.md` enumerates the entire Web Platform surface and
   classifies each API (exposed-now / placeholder / future / not-shipping /
-  realm-incompatible). Day-zero surface is ~18 caps (`fetch_api`, `kv_*`,
+  realm-incompatible). Day-zero surface is ~17 caps (`fetch_api`, `kv_*`,
   `navigate`, `dialog`, `toast`, `clipboard_write`, `web_crypto_random`,
   `web_crypto_subtle`, `text_encode`, `text_decode`, `compress`,
-  `decompress`, `console_log`, `set_timeout`, `clear_timeout`).
-  Implementation steps: (1) extend `lib/pkg/manifest.lua` with the
-  `browser_caps` field per `browser_caps.md` §3 (cross-reference
-  `docs/pkg-design.md` and `docs/pkg-versioning.md` before changing
-  manifest); (2) add per-kind modules under
-  `lib/platform/browser_caps/<kind>/` carrying impl + config-schema
-  validator; (3) wire the host stub to register granted caps into
-  `lib/js_cap_bridge`'s host bridge per `__cap__` install; (4) resolve
-  the `event` frame format for streaming caps (open question in
-  `browser_caps.md` §7) before any of `websocket` / `sse` /
+  `decompress`, `console_log`, `set_timeout`). Implementation steps:
+  (1) extend `lib/pkg/manifest.lua` with the `browser_caps` field per
+  `browser_caps.md` §3 (cross-reference `docs/pkg-design.md` and
+  `docs/pkg-versioning.md` before changing manifest); (2) add per-kind
+  modules under `lib/platform/browser_caps/<kind>/` carrying impl +
+  config-schema validator; (3) wire the host stub to register granted
+  caps into `lib/js_cap_bridge`'s host bridge per `__cap__` install;
+  (4) resolve the `event` frame format for streaming caps (open question
+  in `browser_caps.md` §7) before any of `websocket` / `sse` /
   `set_interval` ship. Follow-up to platform-isolation work above;
   cross-references: `docs/platform_isolation.md`, `docs/browser_caps.md`.
+
+- [ ] **Cap-bridge AbortSignal cancellation extension (commit B)** —
+  per `docs/platform_isolation.md` §4 "Cancellation via AbortSignal",
+  extend `lib/js_cap_bridge` so cap calls with AbortSignal args get
+  cancellation routed across the bridge: realm side intercepts the
+  signal locally, replaces it on the wire with a marker, and emits a
+  `{kind:"cancel"}` frame on abort; host side reconstructs a fresh
+  `AbortController` per call and aborts it on the cancel frame. The
+  pack-realm Promise rejects with `AbortError`. Decide opt-in-per-cap
+  vs universal scan (open question §7). Blocks `set_timeout` and
+  `fetch_api` shipping.
+
+- [ ] **Re-add `set_timeout` cap on AbortSignal (commit C)** — once
+  the bridge extension above lands, ship `set_timeout(delay_ms, {signal?})
+  : Promise<void>` per `docs/browser_caps.md` §4.9.1: Promise resolves
+  after the delay; if `signal.aborted` becomes true the Promise rejects
+  with `AbortError`. No platform-side delay clamp beyond the browser
+  native `setTimeout` ceiling. Re-add to `lib/js_caps/index.js`
+  `dayZeroCaps`, add tests + parity needles, update inventory count.
+  Follow-up to the broken-cap revert (this commit).
 
 ## HIGH PRIORITY
 
