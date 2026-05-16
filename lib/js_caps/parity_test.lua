@@ -29,10 +29,10 @@ end
 -- =====================================================================
 -- Cap-kind corpus. Each entry maps a documented day-zero cap kind (in
 -- docs/browser_caps.md §5) to a substring that MUST appear in
--- caps.test.js. The seven kinds below are the ones currently shipped
--- (six trivial pure-wrap caps + set_timeout, which consumes the
+-- caps.test.js. The eight kinds below are the ones currently shipped
+-- (six trivial pure-wrap caps + set_timeout + web_crypto_subtle, which consumes the
 -- cap-bridge AbortSignal extension per docs/platform_isolation.md §4);
--- the remaining ten land in subsequent commits and will be added here
+-- the remaining caps land in subsequent commits and will be added here
 -- when their impls land.
 -- =====================================================================
 
@@ -103,9 +103,34 @@ local SPEC_RULES = { --: SpecItem[]
     doc = "set_timeout: validation failure on bad signal type" },
   { needle = "set_timeout: non-constructable",
     doc = "set_timeout: non-constructable (concise/arrow)" },
+  -- web_crypto_subtle
+  { needle = "web_crypto_subtle: digest happy path SHA-256",
+    doc = "web_crypto_subtle: digest op" },
+  { needle = "web_crypto_subtle: unknown op throws TypeError",
+    doc = "web_crypto_subtle: validation failure on unknown op" },
+  { needle = "web_crypto_subtle: null args throws TypeError",
+    doc = "web_crypto_subtle: validation failure on null args" },
+  { needle = "web_crypto_subtle: missing op throws TypeError",
+    doc = "web_crypto_subtle: validation failure on missing op" },
+  { needle = "web_crypto_subtle: missing required field throws TypeError",
+    doc = "web_crypto_subtle: validation failure on missing required field" },
+  { needle = "web_crypto_subtle: generateKey + encrypt + decrypt round trip",
+    doc = "web_crypto_subtle: generateKey/encrypt/decrypt ops" },
+  { needle = "web_crypto_subtle: sign + verify HMAC",
+    doc = "web_crypto_subtle: sign/verify ops" },
+  { needle = "web_crypto_subtle: importKey + exportKey jwk round trip",
+    doc = "web_crypto_subtle: importKey/exportKey ops" },
+  { needle = "web_crypto_subtle: deriveKey via PBKDF2",
+    doc = "web_crypto_subtle: deriveKey op" },
+  { needle = "web_crypto_subtle: wrapKey + unwrapKey round trip",
+    doc = "web_crypto_subtle: wrapKey/unwrapKey ops" },
+  { needle = "web_crypto_subtle: non-constructable",
+    doc = "web_crypto_subtle: non-constructable (concise/arrow)" },
+  { needle = "web_crypto_subtle: CryptoKey survives structured clone",
+    doc = "web_crypto_subtle: CryptoKey survives the bridge boundary" },
   -- dayZeroCaps aggregate
-  { needle = "dayZeroCaps: contains the 7 shipped caps",
-    doc = "dayZeroCaps map contains the 7 shipped names" },
+  { needle = "dayZeroCaps: contains the 8 shipped caps",
+    doc = "dayZeroCaps map contains the 8 shipped names" },
   { needle = "dayZeroCaps: does not contain the deferred caps",
     doc = "dayZeroCaps map excludes deferred cap names" },
 }

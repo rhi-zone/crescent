@@ -595,28 +595,40 @@ Day-zero because secure randomness is a baseline primitive every cryptographic l
 #### 4.7.2 `crypto.subtle` (SubtleCrypto) — **exposed-now** as `web_crypto_subtle`
 
 ```ts
-// One unified cap with an "op" discriminant:
+// One unified cap with an "op" discriminant; args mirror the
+// corresponding SubtleCrypto method's parameter list, keyed by name.
 type SubtleArgs =
-  | { op: "digest", algorithm: "SHA-256" | "SHA-384" | "SHA-512", data: ArrayBuffer }
-  | { op: "encrypt", algorithm: "AES-GCM", key_handle: string, iv: ArrayBuffer, data: ArrayBuffer }
-  | { op: "decrypt", algorithm: "AES-GCM", key_handle: string, iv: ArrayBuffer, data: ArrayBuffer }
-  | { op: "sign", algorithm: "HMAC" | "ECDSA", key_handle: string, data: ArrayBuffer }
-  | { op: "verify", algorithm: "HMAC" | "ECDSA", key_handle: string, signature: ArrayBuffer, data: ArrayBuffer }
-  | { op: "generate_key", algorithm: "AES-GCM" | "HMAC" | "ECDSA", extractable: false, usages: string[] }
-  | { op: "export_key", key_handle: string, format: "raw" | "jwk" }
-  | { op: "import_key", format: "raw" | "jwk", key_data: ArrayBuffer | object, algorithm: any, extractable: false, usages: string[] };
+  | { op: "encrypt",     algorithm: object | string, key: CryptoKey, data: BufferSource }
+  | { op: "decrypt",     algorithm: object | string, key: CryptoKey, data: BufferSource }
+  | { op: "sign",        algorithm: object | string, key: CryptoKey, data: BufferSource }
+  | { op: "verify",      algorithm: object | string, key: CryptoKey, signature: BufferSource, data: BufferSource }
+  | { op: "digest",      algorithm: object | string, data: BufferSource }
+  | { op: "generateKey", algorithm: object, extractable: boolean, keyUsages: string[] }
+  | { op: "deriveKey",   algorithm: object, baseKey: CryptoKey, derivedKeyType: object, extractable: boolean, keyUsages: string[] }
+  | { op: "deriveBits",  algorithm: object, baseKey: CryptoKey, length: number }
+  | { op: "importKey",   format: "raw" | "pkcs8" | "spki" | "jwk", keyData: BufferSource | JsonWebKey, algorithm: object | string, extractable: boolean, keyUsages: string[] }
+  | { op: "exportKey",   format: "raw" | "pkcs8" | "spki" | "jwk", key: CryptoKey }
+  | { op: "wrapKey",     format: string, key: CryptoKey, wrappingKey: CryptoKey, wrapAlgorithm: object | string }
+  | { op: "unwrapKey",   format: string, wrappedKey: BufferSource, unwrappingKey: CryptoKey, unwrapAlgorithm: object | string, unwrappedKeyAlgorithm: object | string, extractable: boolean, keyUsages: string[] };
 
 type SubtleResult =
-  | { bytes: ArrayBuffer }       // digest, encrypt, decrypt, sign, export_key
-  | { ok: boolean }              // verify
-  | { key_handle: string };      // generate_key, import_key
+  | ArrayBuffer       // encrypt, decrypt, sign, digest, deriveBits, wrapKey
+  | boolean           // verify
+  | CryptoKey         // generateKey (symmetric), deriveKey, importKey, unwrapKey
+  | CryptoKeyPair     // generateKey (asymmetric)
+  | ArrayBuffer       // exportKey (raw/pkcs8/spki)
+  | JsonWebKey;       // exportKey (jwk)
 ```
 
-CryptoKey objects do **not** cross the bridge; the host issues handles, the pack passes handles back. Keys are non-extractable by default (extractable: false enforced at host).
+`CryptoKey` is structured-clone-transferable per the Web Crypto spec, so the host returns CryptoKey objects directly across the cap-bridge `postMessage` boundary between same-origin realms (which is the pack-host configuration). The pack realm receives a real CryptoKey it can hand back to subsequent `web_crypto_subtle` calls. If a deployment ever targets a cross-origin boundary that does **not** structured-clone CryptoKey, pack code works around it by `exportKey`/`importKey` round-trips through a wire-safe format (`raw` / `pkcs8` / `spki` / `jwk`).
 
-Permission: per-install. Audit: shape only (do not log key handles in plaintext — log a per-key hash). The Web Crypto surface is large; the day-zero subset above covers digest, AEAD, HMAC, ECDSA. RSA / ECDH / PBKDF2 / HKDF added as the use cases arrive — but the cap schema is op-discriminated, so adding ops is purely additive.
+Validation in the cap impl is shallow: it checks that `args` is an object with a known `op` and that the per-op required fields are present. Detailed type checking (algorithm name validity, key-usage compatibility, etc.) is delegated to `crypto.subtle` itself — re-checking would duplicate the spec, and the host API surfaces clearer errors than a hand-rolled validator could.
+
+Permission: per-install. Audit: shape only (do not log key material). The cap exposes every SubtleCrypto method, so RSA / ECDH / PBKDF2 / HKDF are all reachable on day zero; further algorithms become available automatically as the host's WebCrypto implementation gains them.
 
 This is the largest day-zero schema, and it earns the size: cryptographic ops touch user secrets directly, and getting the boundary right is high-stakes.
+
+Status: shipped. Impl: `lib/js_caps/web_crypto_subtle.js`. Tests: `lib/js_caps/caps.test.js` (digest, generateKey/encrypt/decrypt, sign/verify, importKey/exportKey, deriveKey, wrapKey/unwrapKey, CryptoKey structured-clone round-trip, validation failures).
 
 ### 4.8 Encoding / utilities
 
@@ -837,7 +849,7 @@ Distilling §4 to the day-zero set:
 | `toast` | Host-rendered ephemeral notification | per-install | optional |
 | `clipboard_write` | Copy text to clipboard | per-invocation | optional |
 | `web_crypto_random` | Cryptographically secure random bytes | per-install | none |
-| `web_crypto_subtle` | SubtleCrypto digest/AEAD/HMAC/ECDSA + key handles | per-install | none |
+| `web_crypto_subtle` | SubtleCrypto (op-discriminated wrap; CryptoKey crosses the bridge via structured clone) | per-install | none |
 | `text_encode` | UTF-8 encode | per-install | none |
 | `text_decode` | UTF-8 decode | per-install | none |
 | `compress` | gzip / deflate | per-install | none |

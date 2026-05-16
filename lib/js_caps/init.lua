@@ -12,10 +12,11 @@ end
 -- index.js exports `dayZeroCaps`, a Map<string, function> that callers
 -- pass as `opts.capImpls` to lib/js_pack_host/host.js#mountPack. Each
 -- entry name corresponds to a cap kind in docs/browser_caps.md §5.
--- This module ships the 6 trivial caps (pure wraps with no design
--- questions) plus `set_timeout` (cancellable via the cap-bridge
--- AbortSignal extension, docs/platform_isolation.md §4). The remaining
--- 10 land in subsequent commits.
+-- This module ships the 6 trivial pure-wrap caps plus `set_timeout`
+-- (cancellable via the cap-bridge AbortSignal extension,
+-- docs/platform_isolation.md §4) plus `web_crypto_subtle` (op-
+-- discriminated wrap of SubtleCrypto). The remaining caps land in
+-- subsequent commits.
 --
 -- Lua callers MUST NOT call any cap function at runtime -- they error.
 -- The functions exist so Lua code that assembles browser-side pipelines
@@ -47,6 +48,16 @@ local M = {}
 --:: RandomFn       = (byte_length: integer) -> unknown
 --:: SetTimeoutFn   = (delay_ms: number, opts: SetTimeoutOpts | nil) -> nil
 
+-- WebCryptoSubtleFn: op-discriminated single-cap dispatch over
+-- crypto.subtle. The args shape varies per op (encrypt/decrypt/sign/
+-- verify/digest/generateKey/deriveKey/deriveBits/importKey/exportKey/
+-- wrapKey/unwrapKey); the union of shapes is too unwieldy to express in
+-- the Lua annotation grammar without losing structural fidelity, so the
+-- args parameter is typed `unknown` -- Lua callers must construct the
+-- table per docs/browser_caps.md §4.7.2 and treat the returned value as
+-- opaque (CryptoKey / ArrayBuffer / JsonWebKey are not Lua-native).
+--:: WebCryptoSubtleFn = (args: unknown) -> unknown
+
 --:: DayZeroCaps = {
 --::   text_encode:       TextEncodeFn,
 --::   text_decode:       TextDecodeFn,
@@ -54,6 +65,7 @@ local M = {}
 --::   decompress:        DecompressFn,
 --::   console_log:       ConsoleLogFn,
 --::   web_crypto_random: RandomFn,
+--::   web_crypto_subtle: WebCryptoSubtleFn,
 --::   set_timeout:       SetTimeoutFn,
 --:: }
 
@@ -94,6 +106,11 @@ function M.set_timeout(_delay_ms, _opts)
   error("lib/js_caps is type-only on the Lua side.")
 end
 
+--: (unknown) -> unknown
+function M.web_crypto_subtle(_args)
+  error("lib/js_caps is type-only on the Lua side.")
+end
+
 --:: dayZeroCaps_type = DayZeroCaps
 M.dayZeroCaps = {
   text_encode       = M.text_encode,
@@ -102,6 +119,7 @@ M.dayZeroCaps = {
   decompress        = M.decompress,
   console_log       = M.console_log,
   web_crypto_random = M.web_crypto_random,
+  web_crypto_subtle = M.web_crypto_subtle,
   set_timeout       = M.set_timeout,
 }
 
