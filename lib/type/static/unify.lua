@@ -303,8 +303,20 @@ function M.unify(ctx, a, b, seen)
     -- never is bottom
     if ta.tag == TAG_NEVER then return true end
 
-    -- Type variable binding (TAG_ROWVAR is treated the same as TAG_VAR for binding)
+    -- Type variable binding (TAG_ROWVAR is treated the same as TAG_VAR for binding).
+    -- When both sides are TVs but one is a skolem and the other is a free
+    -- unification var, prefer to bind the free var TO the skolem (skolems can
+    -- never be bound themselves, but a free var binding to a skolem is fine —
+    -- it just means "this var stands for the abstract type"). This is the
+    -- rank-N positive case: a polymorphic argument's fresh TV must accept the
+    -- param slot's skolem as its value.
     if ta.tag == TAG_VAR or ta.tag == TAG_ROWVAR then
+        if (tb.tag == TAG_VAR or tb.tag == TAG_ROWVAR)
+            and band(ta.flags, FLAG_SKOLEM) ~= 0
+            and band(tb.flags, FLAG_SKOLEM) == 0 then
+            local ok, msg = bind_var(ctx, b, a)
+            return ok, msg, nil
+        end
         local ok, msg = bind_var(ctx, a, b)
         return ok, msg, nil
     end

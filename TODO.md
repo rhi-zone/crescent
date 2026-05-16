@@ -403,24 +403,21 @@ Commits (in order):
   attach a deferred operation constraint to `_forall_bounds` entries
   that fires when the bound is checked. Out of scope for Phase 1.
 
-- [ ] **Rank-N subsumption at call sites (unsound).** Call-site argument
-  subsumption against forall-typed parameters is missing: a slot annotated
-  `<T>(T)->T` accepts any function-typed argument, including monomorphic
-  `(number)->number` and even wrong-arity `() -> number`. The body of the
-  forall-param function IS checked polymorphically (control test N9 in
-  `lib/type/static/type_soundness_test.lua` confirms), but the call site
-  never enforces that the argument is *at least as polymorphic* as the
-  declared slot. Dispatch sites: `solve.lua:solve_check_args` near line
-  2716 branches on `callee_t.tag == TAG_FUNCTION` with no `TAG_FORALL`
-  case; `env.lua:instantiate_inner` near line 515 has no `TAG_FORALL` arm
-  and falls through. Pinned by the
-  `soundness: rank-N polymorphism call-site (KNOWN GAP)` describe block
-  (cases N1, N5, N6, N7, N8) in `type_soundness_test.lua`; N9 is the
-  body-check control the fix must not regress. The standard fix is rank-N
-  subsumption — skolemize the RHS forall (slot type), instantiate the LHS
-  forall (argument type), then unify — but the required skolem-scope /
-  escape check has not yet been verified to exist in the codebase, so the
-  fix is not a one-liner.
+- [x] **Rank-N subsumption at call sites.** Landed 2026-05-17. Call-site
+  argument subsumption against forall-typed parameters now skolemizes the
+  rank-N quantifier with a per-call identifier, rejecting monomorphic and
+  wrong-arity arguments (cases N1/N5/N6/N7/N8 in
+  `lib/type/static/type_soundness_test.lua`). Implementation:
+  `env_mod.collect_rank_n_generics` identifies FLAG_GENERIC TVs nested in a
+  function-typed param/return slot of the callee; at the call site those
+  fresh images become FLAG_SKOLEM with the call's id stored in `data[4]`.
+  Rank-N in return position is handled by `env_mod.skolemize_return_for_rank_n`
+  used by `gen_function` when pushing the annotated return slot. Per-call
+  escape check via new `C_ESCAPE_CHECK` constraint walks the inferred return
+  type and rejects any skolem with the matching call id. Unify's TV bind
+  ordering now prefers binding a free TV TO a skolem when both sides are TVs
+  (positive rank-N case where a `<T>(T)->T` argument is accepted). See
+  `docs/typechecker-rank-n.md`.
 
 **Design doc:** `docs/typechecker-hm-phase1.md` (committed `9bb1960d`)
 has the architectural sketch + bound shapes per body operation.

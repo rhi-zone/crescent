@@ -1,7 +1,9 @@
 # Typechecker — Rank-N Subsumption
 
-Design for closing a known unsoundness: call-site argument checking against a
-forall-typed parameter.
+**Status: landed 2026-05-17.** Call-site argument subsumption against
+forall-typed parameters is implemented; cases N1/N5/N6/N7/N8 in
+`lib/type/static/type_soundness_test.lua` flip to `has_error`, body-check
+control N9 unchanged. See `feat(type): rank-N call-site subsumption` commit.
 
 ## The gap
 
@@ -133,24 +135,26 @@ Order of work:
    `docs/typechecker-reference.md` to document forall in parameter and
    return positions as a first-class feature.
 
-## Open questions
+## Decisions on landing
 
-- **Skolem scope representation.** Today, `data[1]` is the level a tv was
-  introduced at. Is that single field sufficient to express "skolem belongs
-  to call site at AST node X," or do skolems need a distinct identifier
-  (e.g., the AST node id of the call)? The simpler representation likely
-  works because two concurrent calls live at different levels, but worth
-  verifying with a nested-call repro before committing to it.
-- **Interaction with `_forall_bounds` / `C_BOUND`.** The existing rank-1
-  let-poly machinery uses `_forall_bounds` to defer bound checking. The
-  rank-N path may need to thread bounds through skolemization too. If a
-  forall parameter has constraints (`<T: number>(T)->T`), the skolem must
-  satisfy those constraints during the body-side check on the argument.
-- **Variance.** `docs/soundness-audit.md` Gap 3 already flags that generic
-  params have no variance annotation. Rank-N subsumption interacts with
-  variance in container types (`<T>(Container<T>) -> T` vs.
-  `(Container<number>) -> number`). The fix may need to wait on or coordinate
-  with the variance work.
+- **Skolem scope representation: per-call counter on ctx**
+  (`ctx._rank_n_call_counter`), stored in the skolem TV's `data[4]` slot.
+  Levels alone are insufficient because nested calls live at the same
+  `ctx.scope.level`. A monotonic counter is cheaper than threading AST node
+  ids and only matters for the per-call escape walk lookup.
+- **`_forall_bounds` / `C_BOUND` interaction:** the call-site loop at
+  `constrain.lua` already emits `C_BOUND` for every TV in `inst_mapping`,
+  which includes the rank-N skolems. `solve_bound` defers on skolems (they
+  remain free TAG_VARs in find()), which is harmless — the bound never
+  fires, but it also never errors. Adequate for the current tests; a future
+  pass may want active bound enforcement on skolems.
+- **Variance probe outcome:** the variance hypothesis (Gap 3) is closed
+  for the rank-N case by structural invariance of table fields plus
+  FLAG_SKOLEM bind rejection. The probe `take_poly(only_number_array)` in
+  `type_soundness_test.lua` confirms `(Arrn<number>) -> number` is rejected
+  where `<T>(Arrn<T>) -> T` is required, without needing variance
+  annotations. Variance work remains relevant for broader scenarios but
+  was not a blocker here.
 
 ## Tests
 

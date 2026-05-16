@@ -3681,24 +3681,19 @@ local x = 3.14
 end)
 
 -- ---------------------------------------------------------------------------
--- Rank-N polymorphism call-site (KNOWN GAP)
+-- Rank-N polymorphism call-site subsumption
 -- ---------------------------------------------------------------------------
--- Argument subsumption against forall-typed parameters is missing.
--- `solve_check_args` (solve.lua ~2716) dispatches on TAG_FUNCTION with no
--- TAG_FORALL case; `env.instantiate_inner` (env.lua ~515) has no TAG_FORALL
--- arm either. As a result, a parameter annotated `<T>(T)->T` accepts any
--- function-typed argument — including monomorphic functions and even
--- wrong-arity ones. Body usage of the forall param IS checked correctly;
--- the gap is purely at the call site. Tracked in TODO.md.
---
--- These tests pin CURRENT behavior (no_errors). When the fix lands they
--- will fail loudly; flip them to has_error then.
-assert.describe("soundness: rank-N polymorphism call-site (KNOWN GAP)", function()
-    assert.it("KNOWN GAP: monomorphic (number)->number accepted where <T>(T)->T required (N1)", function()
-        -- KNOWN GAP: should error — see TODO.md
-        -- only_number cannot satisfy <T>(T)->T because the body calls f at both
-        -- number and string. Currently 0 errors.
-        no_errors([[
+-- A parameter annotated `<T>(T)->T` must reject monomorphic and wrong-arity
+-- arguments at the call site (bidirectional subsumption). Implemented via
+-- per-call skolemization of nested-forall TVs in the callee's parameter
+-- slots, with a focused per-call escape check on the return type. See
+-- docs/typechecker-rank-n.md.
+assert.describe("soundness: rank-N polymorphism call-site", function()
+    assert.it("monomorphic (number)->number rejected where <T>(T)->T required (N1)", function()
+        -- only_number cannot satisfy <T>(T)->T because the body calls f at
+        -- both number and string. The argument's (number)->number must fail
+        -- to unify against the skolemized (skolem_T)->skolem_T param slot.
+        has_error([[
 --: (x: number) -> number
 local function only_number(x) return x end
 --: (f: <T>(T)->T) -> number
@@ -3708,14 +3703,13 @@ local function apply_twice(f)
   return 0
 end
 local r = apply_twice(only_number)
-]])
+]], "skolem")
     end)
 
-    assert.it("KNOWN GAP: nullary () -> number accepted where <T>(T)->T required (N5)", function()
-        -- KNOWN GAP: should error — see TODO.md
+    assert.it("nullary () -> number rejected where <T>(T)->T required (N5)", function()
         -- nullary takes 0 args; slot needs a 1-arg polymorphic function.
-        -- Wrong arity alone should reject. Currently 0 errors.
-        no_errors([[
+        -- Wrong arity alone should reject.
+        has_error([[
 --: () -> number
 local function nullary() return 0 end
 --: (f: <T>(T)->T) -> number
@@ -3726,11 +3720,8 @@ local r = apply_twice(nullary)
 ]])
     end)
 
-    assert.it("KNOWN GAP: (string)->string accepted where <T>(T)->T required, body uses at two types (N6)", function()
-        -- KNOWN GAP: should error — see TODO.md
-        -- only_string is specialized; the body calls f at both number and
-        -- string. Currently 0 errors.
-        no_errors([[
+    assert.it("(string)->string rejected where <T>(T)->T required, body uses at two types (N6)", function()
+        has_error([[
 --: (x: string) -> string
 local function only_string(x) return x end
 --: (f: <T>(T)->T) -> number
@@ -3740,14 +3731,13 @@ local function uses_both(f)
   return 0
 end
 local r = uses_both(only_string)
-]])
+]], "skolem")
     end)
 
-    assert.it("KNOWN GAP: forall in return position — monomorphic returned where polymorphic required (N7)", function()
-        -- KNOWN GAP: should error — see TODO.md
+    assert.it("forall in return position — monomorphic returned where polymorphic required (N7)", function()
         -- returns_poly claims to return <T>(T)->T but returns a
-        -- (number)->number. Currently 0 errors.
-        no_errors([[
+        -- (number)->number — the return check must catch this.
+        has_error([[
 --: (x: number) -> number
 local function only_number(x) return x end
 --: (x: number) -> <T>(T)->T
@@ -3757,12 +3747,8 @@ end
 ]])
     end)
 
-    assert.it("KNOWN GAP: rank-3 nested forall — monomorphic forced into forall slot via inner call (N8)", function()
-        -- KNOWN GAP: should error — see TODO.md
-        -- rank3's `g` expects `(f: <T>(T)->T) -> number`. Inside, we hand
-        -- g a (number)->number cast to <T>(T)->T; the regular cast should
-        -- reject the subtyping but does not. Currently 0 errors.
-        no_errors([==[
+    assert.it("rank-3 nested forall — monomorphic forced into forall slot via inner call (N8)", function()
+        has_error([==[
 --: (n: number) -> number
 local function uses_mono(n) return n end
 --: (f: <T>(T)->T) -> number
@@ -3774,6 +3760,62 @@ end
 --: (g: (f: <T>(T)->T) -> number) -> number
 local function rank3(g)
   return g(uses_mono --[[: <T>(T)->T]])
+end
+local r = rank3(call_at_two_types)
+]==])
+    end)
+
+    assert.it("variance probe: (Array<number>)->number rejected where <T>(Array<T>)->T required", function()
+        -- Container variance: Array<T> is invariant in T (structural fields are
+        -- invariant). A monomorphic (Array<number>)->number cannot satisfy a
+        -- <T>(Array<T>)->T slot — the polymorphic slot's skolem T must not
+        -- specialize to number. FLAG_SKOLEM's bind rejection in unify (via
+        -- structural invariance of table fields) closes this without needing
+        -- explicit variance annotations on the generic param.
+        has_error([==[
+--:: declare type Arrn<T> = { [integer]: T }
+
+--: (f: <T>(Arrn<T>) -> T) -> number
+local function take_poly(f) return 0 end
+
+--: (a: Arrn<number>) -> number
+local function only_number_array(a) return a[1] end
+
+local r = take_poly(only_number_array)
+]==])
+    end)
+
+    assert.it("positive: <T>(T)->T identity is accepted where <T>(T)->T required", function()
+        -- The argument is polymorphic enough: unifying its FLAG_GENERIC TV
+        -- (instantiated to a fresh free TV at the call site) against the
+        -- skolem param slot binds the free TV to the skolem — allowed.
+        no_errors([[
+--: <T>(T) -> T
+local function id(x) return x end
+--: (f: <T>(T)->T) -> number
+local function apply_twice(f)
+  local a = f(42)
+  local b = f("hello")
+  return 0
+end
+local r = apply_twice(id)
+]])
+    end)
+
+    assert.it("positive: rank-3 forwarder with a genuine polymorphic arg", function()
+        -- The argument is itself rank-2: its inner skolem matches the slot.
+        no_errors([==[
+--: <T>(T) -> T
+local function id(x) return x end
+--: (f: <T>(T)->T) -> number
+local function call_at_two_types(f)
+  local a = f(42)
+  local b = f("hi")
+  return 0
+end
+--: (g: (f: <T>(T)->T) -> number) -> number
+local function rank3(g)
+  return g(id)
 end
 local r = rank3(call_at_two_types)
 ]==])

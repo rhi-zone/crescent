@@ -62,6 +62,7 @@ local C_BIND_GENERICS = constrain.C_BIND_GENERICS
 local C_CHECK_ARGS    = constrain.C_CHECK_ARGS
 local C_OVERLAP       = constrain.C_OVERLAP
 local C_NARROW_NIL    = constrain.C_NARROW_NIL
+local C_ESCAPE_CHECK  = constrain.C_ESCAPE_CHECK
 
 local find = types_mod.find
 
@@ -657,6 +658,50 @@ local function solve_narrow_nil(ctx, c)
         resolved = types_mod.subtract(ctx, r, false_lit)
     end
     unify_mod.unify(ctx, result_tid, resolved)
+    return true
+end
+
+-- Rank-N escape check: after a call site introduces per-call skolems for nested
+-- forall quantifiers, verify that no skolem with the matching call_id is
+-- reachable from the inferred return type. If one is, the polymorphic value
+-- escaped its quantifier (unsoundness) and we emit a diagnostic.
+-- Defers while ret_tid is still a free TAG_VAR (waiting for C_CHECK_ARGS).
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
+local function solve_escape_check(ctx, c)
+    local ret_tid = c[2] --[[:! integer]]
+    local call_id = c[3] --[[:! integer]]
+    local line, col = c[4] --[[:! integer | nil]], c[5] --[[:! integer | nil]]
+
+    local resolved = find(ctx, ret_tid)
+    local rt = ctx.types:get(resolved)
+    -- Defer while the return is still a free (non-skolem) TV — C_CHECK_ARGS
+    -- hasn't run yet. A skolem TV at the top is itself an immediate escape.
+    if (rt.tag == TAG_VAR or rt.tag == TAG_ROWVAR)
+        and band(rt.flags, FLAG_SKOLEM) == 0 then
+        return false
+    end
+
+    -- Collect every TV reachable from the resolved return type. A rank-N
+    -- skolem with matching call_id appearing in this set means it leaked.
+    local reachable = {} --: { [integer]: boolean, ... }
+    constrain.collect_bound_tvs(ctx, resolved, reachable, {})
+    local found_name --: integer | nil
+    for tv_id in pairs(reachable) do
+        local t = ctx.types:get(tv_id)
+        if (t.tag == TAG_VAR or t.tag == TAG_ROWVAR)
+            and band(t.flags, FLAG_SKOLEM) ~= 0
+            and t.data[4] == call_id then
+            found_name = t.data[3]
+            break
+        end
+    end
+
+    if found_name then
+        local skolem_name = intern_mod.get(ctx.pool, found_name) or "?"
+        add_error(ctx, line, col,
+            "polymorphic value escapes its quantifier: type parameter `"
+            .. skolem_name .. "` would leak into the call's return type")
+    end
     return true
 end
 
@@ -3516,6 +3561,7 @@ local function get_handlers()
         [C_CHECK_ARGS]    = solve_check_args,
         [C_OVERLAP]       = solve_overlap,
         [C_NARROW_NIL]    = solve_narrow_nil,
+        [C_ESCAPE_CHECK]  = solve_escape_check,
     }
     return _handlers
 end

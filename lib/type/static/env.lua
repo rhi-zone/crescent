@@ -525,6 +525,107 @@ function M.instantiate(ctx, tid, level, out_mapping)
     return result, mapping
 end
 
+-- Rank-N: collect FLAG_GENERIC TVs that are STRICTLY nested inside a
+-- function-typed parameter/return slot of `callee_tid` and are NOT also
+-- reachable from a top-level non-function slot. Returns a set
+-- { [tv_id] = true, ... } of TVs that should be skolemized at the call
+-- site (instead of getting fresh let-poly unification vars).
+--
+-- Strategy: reuse env.instantiate (which already walks the entire type
+-- structure with full coverage and is accepted at baseline) to enumerate
+-- every FLAG_GENERIC TV via the mapping it produces. Compute "top-level"
+-- TVs by instantiating each top-level slot individually with a SEPARATE
+-- mapping when that slot is not itself a TAG_FUNCTION — any TV in such a
+-- mapping belongs to the callee's own quantifier. Rank-N set is the
+-- difference. This piggybacks on existing walker code and adds no new
+-- arena-typing baseline errors.
+--
+-- Only annotation-introduced FLAG_GENERIC TVs (those with a name_id in
+-- data[3], set by resolve_annotation_type) qualify. HM-generalized TVs
+-- (without a name) are let-poly artifacts and must be instantiated normally.
+--: (Ctx, integer) -> { [integer]: boolean, ... }
+function M.collect_rank_n_generics(ctx, callee_tid)
+    local result = {} --: { [integer]: boolean, ... }
+    callee_tid = types_mod.find(ctx, callee_tid)
+    local t = ctx.types:get(callee_tid)
+    if t.tag == defs.TAG_NOMINAL then
+        callee_tid = types_mod.find(ctx, t.data[2])
+        t = ctx.types:get(callee_tid)
+    end
+    if t.tag ~= TAG_FUNCTION then return result end
+
+    -- All FLAG_GENERIC TVs reachable from the callee: instantiate to a
+    -- throwaway, the mapping's keys are exactly the FLAG_GENERIC TVs we want.
+    local all_map = {} --: { [integer]: integer, ... }
+    M.instantiate(ctx, callee_tid, ctx.scope.level, all_map)
+
+    -- Top-level FLAG_GENERIC TVs: walk each top slot via instantiate, but
+    -- only when the slot is NOT itself a TAG_FUNCTION (nested function
+    -- contributes only rank-N TVs by definition).
+    local top_map = {} --: { [integer]: integer, ... }
+    --: (integer) -> ()
+    local function consider_top_slot(slot_tid)
+        slot_tid = types_mod.find(ctx, slot_tid)
+        local st = ctx.types:get(slot_tid)
+        if st.tag == defs.TAG_NOMINAL then
+            slot_tid = types_mod.find(ctx, st.data[2])
+            st = ctx.types:get(slot_tid)
+        end
+        if st.tag == TAG_FUNCTION then return end
+        M.instantiate(ctx, slot_tid, ctx.scope.level, top_map)
+    end
+    for i = t.data[0], t.data[0] + t.data[1] - 1 do consider_top_slot(ctx.lists:get(i)) end
+    for i = t.data[2], t.data[2] + t.data[3] - 1 do consider_top_slot(ctx.lists:get(i)) end
+    if t.data[4] >= 0 then consider_top_slot(t.data[4]) end
+
+    for orig_tv in pairs(all_map) do
+        if not top_map[orig_tv] then
+            local ot = ctx.types:get(orig_tv)
+            if (ot.tag == TAG_VAR or ot.tag == TAG_ROWVAR)
+                and ot.flags == FLAG_GENERIC
+                and ot.data[3] > 0 then
+                result[orig_tv] = true
+            end
+        end
+    end
+    return result
+end
+
+-- Rank-N: skolemize annotation-introduced FLAG_GENERIC TVs reachable from
+-- `ret_tid`. Used by gen_function when pushing the annotated return type
+-- onto the body's return slot — rank-N in return position must be
+-- skolemized so the body cannot produce a monomorphic value that silently
+-- specializes the polymorphic return. Returns a fresh tid (when
+-- skolemization fires) or the input tid unchanged.
+--: (Ctx, integer) -> integer
+function M.skolemize_return_for_rank_n(ctx, ret_tid)
+    -- Probe for annotation-introduced FLAG_GENERIC TVs anywhere reachable
+    -- by piggybacking on instantiate's mapping (no new walker required).
+    local probe = {} --: { [integer]: integer, ... }
+    M.instantiate(ctx, ret_tid, ctx.scope.level, probe)
+    local has_ann_gen = false
+    for tv_id in pairs(probe) do
+        local nt = ctx.types:get(tv_id)
+        if (nt.tag == TAG_VAR or nt.tag == TAG_ROWVAR)
+            and nt.flags == FLAG_GENERIC
+            and nt.data[3] > 0 then
+            has_ann_gen = true; break
+        end
+    end
+    if not has_ann_gen then return ret_tid end
+
+    local skolem_tid, mapping = M.instantiate(ctx, ret_tid, ctx.scope.level)
+    for orig_tv, fresh_tv in pairs(mapping) do
+        local ot = ctx.types:get(orig_tv)
+        if ot.data[3] > 0 then
+            local ft = ctx.types:get(fresh_tv)
+            ft.flags = defs.FLAG_SKOLEM
+            ft.data[3] = ot.data[3]
+        end
+    end
+    return skolem_tid
+end
+
 -- Substitute: replace TAG_NAMED references matching mapping keys.
 -- mapping:    { [name_id] -> type_id }
 -- eval_seen:  cycle-detection set shared with match.evaluate (optional)

@@ -156,6 +156,13 @@ local C_NARROW_NIL    = 14  -- {C_NARROW_NIL,    input_tid, result_tid, keep_nil
 -- loop variables that depend on deferred C_BIND_GENERICS / C_INDEX).  Without
 -- this, narrowing on an unresolved TAG_VAR is a silent no-op.
 
+local C_ESCAPE_CHECK  = 15  -- {C_ESCAPE_CHECK,  ret_tid, call_id, line, col}
+-- Rank-N skolem escape check. After a call site introduces per-call skolems
+-- for nested forall quantifiers in the callee's parameter slots, verify that
+-- no such skolem leaks into the call's return type. If a skolem with the
+-- matching call_id is reachable from ret_tid, the polymorphic value escaped
+-- its quantifier (unsoundness). Defers while ret_tid is a free TAG_VAR.
+
 local M = {}
 
 M.C_UNIFY         = C_UNIFY
@@ -171,6 +178,7 @@ M.C_BIND_GENERICS = C_BIND_GENERICS
 M.C_CHECK_ARGS    = C_CHECK_ARGS
 M.C_OVERLAP       = C_OVERLAP
 M.C_NARROW_NIL    = C_NARROW_NIL
+M.C_ESCAPE_CHECK  = C_ESCAPE_CHECK
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -1639,6 +1647,13 @@ end
 local function skolemize_fn(ctx, ann_fn_tid)
     local aft = ctx.types:get(ann_fn_tid)
     -- Detect whether any param (or the return) is a FLAG_GENERIC TAG_VAR.
+    -- We deliberately do NOT walk nested function types: those FLAG_GENERIC
+    -- TVs belong to a rank-N quantifier carried by a parameter/return whose
+    -- own callers must skolemize them at their own use sites (call site for
+    -- parameter-position rank-N, return-statement check for return-position
+    -- rank-N). Conflating them with the outer function's quantifier breaks
+    -- the body check (the body must be able to instantiate a rank-N param's
+    -- `<T>` per call to use the function polymorphically).
     local has_generic = false
     for i = aft.data[0], aft.data[0] + aft.data[1] - 1 do
         local pt = ctx.types:get(types_mod.find(ctx, ctx.lists:get(i)))
@@ -1669,6 +1684,19 @@ local function skolemize_fn(ctx, ann_fn_tid)
         fresh_t.data[3] = orig_t.data[3]  -- copy name_id for error messages
     end
     return skolem_fn_tid, true
+end
+
+-- Rank-N helpers live in env.lua. Call site dispatch uses
+-- env_mod.collect_rank_n_generics and env_mod.skolemize_return_for_rank_n.
+
+-- Per-call identifier counter for rank-N skolem grouping. Each call site that
+-- introduces nested-forall skolems gets a unique id, stored in the skolem TV's
+-- data[4] slot, and matched by C_ESCAPE_CHECK when verifying that no skolem
+-- leaked into the call's return type.
+--: (Ctx) -> integer
+local function next_rank_n_call_id(ctx)
+    ctx._rank_n_call_counter = (ctx._rank_n_call_counter or 0) + 1
+    return ctx._rank_n_call_counter
 end
 
 -- Build a function type for a template at definition time, without checking the body.
@@ -1810,6 +1838,13 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
                 if aft.data[3] == 1 then
                     -- Single return slot: use it directly.
                     push_ret_id = ann_ret
+                    -- Rank-N in return position: if the return slot carries a
+                    -- `<T>...` quantifier (annotation-introduced FLAG_GENERIC
+                    -- TVs nested anywhere inside), the body's return value
+                    -- must conform to the polymorphic shape. Skolemize those
+                    -- TVs for the body's C_RETURN check so a monomorphic
+                    -- value can't masquerade as the polymorphic slot.
+                    push_ret_id = env_mod.skolemize_return_for_rank_n(ctx, push_ret_id)
                 else
                     -- Multiple return slots: pack as a TAG_TUPLE so that a single
                     -- tuple-typed expression (e.g. Parameters<typeof f>) can be
@@ -2439,9 +2474,37 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
         return ret
     end
 
+    -- Identify rank-N skolem candidates BEFORE instantiation: any FLAG_GENERIC
+    -- TV that lives strictly inside a function-typed parameter or return slot
+    -- of the callee. These belong to the nested forall's quantifier, not the
+    -- callee's own — they must be skolemized at the call site so the argument
+    -- subsumption check enforces the polymorphic shape (rank-N subsumption).
+    -- See docs/typechecker-rank-n.md.
+    local rank_n_set = env_mod.collect_rank_n_generics(ctx, callee_tid)
+    local has_rank_n = next(rank_n_set) ~= nil
+
     -- Instantiate callee at this call site (let-polymorphism)
     local inst_mapping = {}
     local inst_callee = env_mod.instantiate(ctx, callee_tid, ctx.scope.level, inst_mapping)
+
+    -- For each FLAG_GENERIC TV in `rank_n_set`, convert its fresh image to a
+    -- per-call skolem. The skolem can't be bound by unify (unify.bind_var
+    -- rejects FLAG_SKOLEM), so a monomorphic argument trying to specialize
+    -- the polymorphic slot fails — exactly the rank-N rejection we need.
+    local rank_n_call_id = 0 --: integer
+    if has_rank_n then
+        rank_n_call_id = next_rank_n_call_id(ctx)
+        for orig_tv in pairs(rank_n_set) do
+            local fresh_tv = inst_mapping[orig_tv]
+            if fresh_tv then
+                local ft = ctx.types:get(fresh_tv)
+                local ot = ctx.types:get(orig_tv)
+                ft.flags = defs.FLAG_SKOLEM
+                ft.data[3] = ot.data[3]   -- carry name_id for error messages
+                ft.data[4] = rank_n_call_id  -- per-call grouping for escape check
+            end
+        end
+    end
 
     -- Emit deferred bound checks for each instantiated generic TV that has a bound.
     -- Instantiate the bound with inst_mapping so that generic TVs inside it (e.g. the
@@ -2503,6 +2566,11 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     local ret = fresh_var(ctx)
     emit(ctx, { C_BIND_GENERICS, inst_callee, arg_tids, ret, n.line, n.col })
     emit(ctx, { C_CHECK_ARGS,    inst_callee, arg_tids, ret, n.line, n.col })
+    if has_rank_n then
+        -- Per-call escape check: ensure no skolem with this call_id reaches
+        -- the inferred return type. See docs/typechecker-rank-n.md.
+        emit(ctx, { M.C_ESCAPE_CHECK, ret, rank_n_call_id, n.line, n.col })
+    end
     ctx._last_multi_return = { ret }
 
     -- Eagerly evaluate $PcallReturn<F> at constraint-gen time so that
@@ -4629,5 +4697,6 @@ function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
 end
 
 M.resolve_annotation_type = resolve_annotation_type
+M.collect_bound_tvs = collect_bound_tvs  -- exposed for solve_escape_check
 
 return M
