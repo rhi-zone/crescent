@@ -89,6 +89,42 @@ to that endpoint.
   Pre-existing per commit `746b5ef7`. Resolves when the `lib/js_*/`
   packages move under the cap impl directory.
 
+- [ ] **Daemon serve path Phase B: pack JS source with `'use strict';` prepend
+  + hash-verify against installed-pack-hash recorded in manifest.** Phase A
+  shipped as `622efc40`; Phase B was named but never started; orphaned by the
+  `web_runtime` cap pivot — fold into the cap impl's responsibilities or
+  revisit when cap-impl lands.
+
+- [ ] **Daemon serve path Phase C: per-pack host HTML stub generation.**
+  Same orphaning context as Phase B.
+
+- [ ] **Daemon serve path Phase D: CSP headers per pack manifest's web cap
+  config.** Same orphaning context as Phase B.
+
+- [ ] **Rename `lib/js_pack_host/`** to align with the terminology pinned in
+  `138b8661` (pack vs app). Either `lib/js_app_host/` or move entirely into
+  the `web_runtime` cap impl directory.
+
+- [ ] **Rename `lib/js_pack_validator/`** similarly.
+
+- [ ] **Rename `pack_id` → `app_id`** in `lib/js_caps/kv.js` and any other
+  places. Same for `pack-abc.localhost` doc examples.
+
+- [ ] **Move `_skipGlobalFreeze` opt off the production `installLockdown`
+  API into a test-internal API.** Currently the test-only flag is part of
+  the public production signature; foot-gun for any future real-browser
+  caller.
+
+- [ ] **Audit `lib/platform/`'s duplicate type declarations across
+  `platform_types.lua`, `cli.lua`, `init.lua`.** Single source of truth.
+
+- [ ] **Verify commit `352aab90` (stub `registry.lua`/`dom.lua`) has no
+  vestige after the real impls landed.** Stubs may be dead code.
+
+- [ ] **Re-evaluate `lib/lua2ts/` retention** given Initiative B is dead.
+  Commits `844dd384` (`opts.imports`) and related lua2ts work shipped under
+  an abandoned framing; their continued purpose needs explicit assessment.
+
 ## Platform isolation (top priority)
 
 - [ ] **Deprecate `http_server` in favour of `web_runtime` for browser-UI apps.**
@@ -158,6 +194,52 @@ to that endpoint.
   native `setTimeout` ceiling. Re-add to `lib/js_caps/index.js`
   `dayZeroCaps`, add tests + parity needles, update inventory count.
   Follow-up to the broken-cap revert (this commit).
+
+## Platform polish
+
+- [ ] **Filed: `ExitPlanMode` triggers auto mode.** Raised very early in the
+  audited session (Turn 4); user wanted this filed somewhere. Harness-level,
+  not crescent-level; may belong in `~/.claude/` notes — recorded here so it
+  is not lost again.
+
+- [ ] **`core.hooksPath` per-clone-activation structural issue.** CLAUDE.md
+  still requires `git config core.hooksPath .githooks` per clone. Possible
+  fixes: ship a one-time bootstrap script, or rethink the convention so the
+  hook auto-activates without per-clone config.
+
+- [ ] **`lib/safe_regex/` algorithm upgrade: alternation overlap.** Current
+  v1 ban (no quantifier-on-quantifier) explicitly accepts patterns like
+  `(a|aa)+` as a "known limit". User flagged this in-session as unacceptable
+  ("'known limit' is objectively GARBAGE"). Upgrade the algorithm or
+  document why this specific limit is acceptable.
+
+- [ ] **Typechecker latent narrowing gap: `tonumber(string.sub(...))`** is
+  inferred as `string` rather than `number | nil`. Worked around in
+  `02812180` without `any`/force-casts. Worth a typechecker-side fix.
+
+- [ ] **Typechecker latent narrowing gap: `local b = string.byte(s, i)`**
+  doesn't narrow against `nil` after a guard; requires explicit
+  `--: integer | nil` annotation. Same workaround commit (`02812180`).
+  Worth a typechecker-side fix.
+
+- [ ] **`set_interval` cap with AbortSignal cancellation** — parallel to
+  `set_timeout`. User asked in-session.
+
+- [ ] **`notification` cap** (browser's `Notification` API, distinct from
+  host-rendered `toast`). Browser-permission-gated. Currently a placeholder
+  in `docs/browser_caps.md` §4 but no TODO entry until now.
+
+- [ ] **Third-party projections design** — concrete answer to "how do
+  third-party projections work?" given the cap-based reframe. Likely: each
+  projection is an app declaring it provides type-X-projection; daemon-side
+  registry maps type → projection app; consuming apps query the registry and
+  invoke projection apps via cap-bridge. Needs a design doc.
+
+- [ ] **Shared `.d.ts` for pack-JS authoring** — the `web_runtime` cap impl
+  ships a `.d.ts` (or equivalent) that pack authors reference for
+  type-checking against the runtime's actual surface. Single source of
+  truth; matches the platform's actually-exposed API. Cross-references
+  `docs/platform_isolation.md` §7 (`.d.ts` location).
 
 ## HIGH PRIORITY
 
@@ -606,7 +688,7 @@ Open items, ordered by priority:
   - FSM family (5 impls): pick one flat (lean `state_machine`) and one hierarchical (lean `state_machine_hsm`); drop `fsm`, `state`, `statemachine`.
   - Caches (4 impls): `lru` is broadest; fold `lru_cache` + `lru_ttl` policies into it; decide whether `cache` (generic TTL store) stays separate.
   - Bloom (4 impls): keep `bloom_clock` (different concern); among the rest, merge into `bloom` and fold `bloom_count`'s Cuckoo; drop `bloom_filter`. Decide if Cuckoo belongs in a Bloom module.
-  - `neural` vs `neural_net` — not a strict superset; single-call vs compositional API. Pick a winner (doc leans `neural_net`).
+  - `neural` vs `neural_net` — not a strict superset; single-call vs compositional API. Pick a winner (doc leans `neural_net`). Pulled out of Tier 2 strict-superset batch because the APIs don't actually align.
   - `lib/json/` vs `lib/format/json/` — doc says `format/json` is canonical (tiered impl); verify the pure-Lua tier covers `lib/json/`'s behaviour before dropping.
   None of these are actively breaking anything, but each unresolved duplicate is a future foot-gun where someone imports the wrong one.
 

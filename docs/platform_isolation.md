@@ -1241,6 +1241,29 @@ decision-level attention, not skimming.
   smuggle anything by attaching a signal to a non-cancellable cap
   (the host just ignores it).
 
+### Resolved during design (kept here for reader continuity)
+
+These were raised as open questions in conversation, resolved during the
+same design pass, and now live in the doc body. Listed here so a reader
+scanning §7 sees the resolution rather than wondering whether the question
+was forgotten.
+
+- **`async function` / `await` at the source level.** Resolved: kept. The
+  language-level constructs remain allowed and compose with the bridge's
+  `Promise`-shaped cap returns. See §3 "App JS subset" and the
+  language-level constraints subsection.
+- **`SIZE_CAP` default value.** Resolved: **128M** is the single canonical
+  default for every per-operation size limit (`Array` constructor, JSON
+  parse input + output, etc.). See §3 "Size cap (`SIZE_CAP`)".
+- **`globalThis` shape: in-place pruning vs replacement object.** Resolved:
+  pruned in place via `delete` over `Object.getOwnPropertyNames(globalThis)`
+  for any key not on the allow-list, then `Object.freeze`d. Not replaced
+  with a new curated object. See §3 "Bootstrap script" and "Realm
+  lockdown (allow-list)".
+- **`Function.prototype.bind` verdict.** Resolved: replaced with a
+  non-constructable wrapper that drops `[[Construct]]`. Not kept as-is;
+  not removed wholesale. See §3 "Intrinsics" entry for `Function.prototype`.
+
 ## 8. Alternatives considered
 
 ### Lockdown technologies — superseded by in-house allow-list
