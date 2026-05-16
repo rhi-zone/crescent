@@ -192,6 +192,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/prolog/` — Prolog (Horn clause + unification). Status: stable.
 - `lib/regex/` — tiered PCRE2 FFI > pure Lua. Status: stable.
 - `lib/regex_builder/` — fluent DSL → Lua pattern strings. Status: stable.
+- `lib/safe_regex/` — JS-regex catastrophic-backtracking validator, hologram-shaped algorithm ("no quantifier on a subexpression containing an unbounded quantifier"); pure Lua. Companion `lib/js_safe_regex/` planned for browser realm bootstrap. Status: stable.
 - `lib/regexp/` — Thompson-NFA regex with capture groups (pure). Status: stable.
 - `lib/sscanf/` — C-style scanf/sscanf. Status: stable.
 - `lib/text_diff/` — character-level diff (diff-match-patch style). Status: stable.
