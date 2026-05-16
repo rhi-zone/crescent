@@ -483,6 +483,17 @@ The platform binds the port and owns the socket. The app provides a request hand
 The cap must support streaming responses (SSE) without giving the app raw socket
 access. The app also needs to know its own URL (e.g. to open a browser).
 
+**WARNING — unsandboxed browser JS.** Granting `http_server` lets the app serve
+arbitrary HTML/JS to the user's browser at the app's own origin. That JS runs
+**unsandboxed** with full webpage privileges (fetch within CSP, keystroke /
+clipboard access for its own page, deceptive UI construction, etc.). The
+platform's cap system does **not** mediate what the served JS does — it only
+controls whether the app can serve at all. This is a structural gap, not a bug:
+the browser is a separate execution environment outside the daemon-side sandbox.
+The forthcoming `web_runtime` cap is the sandboxed alternative for apps that
+just need browser UI; `http_server` should be reserved for apps that
+legitimately need to expose an HTTP endpoint for external tools.
+
 ### `caps.http_client` — outbound HTTP
 
 Makes HTTP requests to whitelisted domains. The platform controls which hosts the

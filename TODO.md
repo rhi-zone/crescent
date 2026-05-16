@@ -4,6 +4,24 @@
 
 ## Platform isolation (top priority)
 
+- [ ] **Deprecate `http_server` in favour of `web_runtime` for browser-UI apps.**
+  `http_server` currently doubles as (a) "expose an HTTP API for external
+  tools" and (b) "serve a browser UI for the user". Case (b) is the dangerous
+  one: the served JS runs unsandboxed at the app's origin, outside the cap
+  boundary, so a grant of `http_server` is effectively "let this app do
+  anything to the browser tab it owns". The risk text on the cap warns the
+  operator, but the structural fix is to split:
+    - `web_runtime` (forthcoming, sandboxed) — for apps that need browser UI.
+      The platform serves the shell; the app supplies declarative content and
+      browser-cap calls. See `docs/browser_caps.md` / `docs/platform_isolation.md`.
+    - `http_server` (retained, tightened contract) — for apps that legitimately
+      need to expose an HTTP endpoint to external tools. Design open: drop the
+      HTML response type, require a content-type allowlist, possibly require
+      explicit `--bind-external` to listen on anything other than localhost.
+  Migration: identify which existing apps use `http_server` purely for browser
+  UI vs which actually need a public HTTP API; port the former to `web_runtime`
+  once it exists, leave the latter on the tightened `http_server`.
+
 - [ ] **Browser-side pack isolation architecture** — draft design doc at
   `docs/platform_isolation.md`. Frames the ambient-capability problem
   (per-app CSP narrows the outer envelope but does not partition the inner

@@ -3,6 +3,18 @@
 -- Inbound HTTP server capability for sandboxed apps.
 -- The platform owns the socket — the app provides a handler function.
 --
+-- SECURITY WARNING (see M.risk below for the operator-facing copy):
+--   Granting http_server lets the app serve arbitrary HTML/JS to the user's
+--   browser at the app's own origin. That JS runs UNSANDBOXED with full
+--   webpage privileges (fetch within CSP, keystroke/clipboard access for its
+--   own page, deceptive UI construction, etc.). The platform's cap system
+--   does NOT mediate what the served JS does — it only controls whether the
+--   app can serve at all. This is a structural gap, not a bug: the browser
+--   is a separate execution environment outside the daemon-side sandbox.
+--   The forthcoming `web_runtime` cap is the sandboxed alternative for apps
+--   that just need browser UI; `http_server` should be reserved for apps
+--   that legitimately need to expose an HTTP endpoint for external tools.
+--
 -- Modes:
 --   Standalone (default): the cap binds its own port. cap.serve(handler) blocks.
 --     opts.port         : integer (required) — port to bind
@@ -358,7 +370,10 @@ M._wrap_handler = wrap_handler
 M._split_target = split_target
 
 function M.risk(_)
-	return { severity = "low", text = "Accepts inbound HTTP connections on a local port. Exposes an HTTP endpoint." }
+	return {
+		severity = "high",
+		text = "WARNING: Granting http_server lets this app serve arbitrary HTML and JavaScript to your browser at its own origin. That JavaScript runs UNSANDBOXED with full webpage privileges — it can make network requests (within CSP), read what you type into its pages, access clipboard reads/writes the page is granted, and construct UI that looks like other parts of the platform. This is NOT mediated by the platform's cap boundary: once the browser loads the app's JS, the cap system has no say over what that JS does to the page. Do not grant this cap to apps you do not trust. For apps that need browser UI but should be sandboxed by the platform, use the `web_runtime` cap (forthcoming) instead.",
+	}
 end
 
 return M
