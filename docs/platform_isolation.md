@@ -1,11 +1,43 @@
-# Platform Isolation — Browser-Side Pack Isolation
+# Platform Isolation — Browser-Side App Isolation
 
 > *Draft. Starting-point design doc. Decisions are framed as proposals with rationale; expect revision. Open questions are called out explicitly in their own section — do not read them as settled. Comments and counterproposals welcome before any of this is treated as load-bearing.*
 
-This doc covers browser-side isolation for pack-shipped UI. The daemon-side
+## Terminology
+
+**App** is the only unit of installable code. Each app lives at
+`lib/platform/apps/<name>/` with a `manifest.json` declaring caps and
+entrypoints (per `lib/platform/platform_types.lua`: `Manifest`,
+`EntryDef`, `CapDecl`). Apps shipped in the crescent source tree
+(`charactercardv2`, `library`, `sillytavern`, `system_dashboard`) are
+not architecturally privileged; they are user code that crescent's
+team happened to author. The threat model treats them equivalently to
+any user-installed app — the sandbox and cap bridge described below
+apply uniformly, with no grandfathering for source-tree apps.
+
+Earlier drafts of this doc used "pack" to mean "app." That was a
+misnomer. In the current codebase, **pack** is reserved for a
+declarative data structure inside `system_dashboard`
+(`{ name, caps, aliases }`, see
+`lib/platform/apps/system_dashboard/packs.lua`) — alias and command
+config bundled inside an app's tarball, not an installable unit.
+This doc now uses **app** consistently for the installable unit; the
+legacy "pack" data-structure meaning is qualified explicitly wherever
+it appears.
+
+An app may ship browser-side JS (in which case it runs in a sandboxed
+iframe with the cap bridge described below) OR be daemon-side-only
+(no JS shipped; its UI, if any, is rendered by a separate host app
+consuming structured data the app's BFF emits). That is an authoring
+choice, not a trust tier. Every app that ships JS goes through the
+same sandbox; the source-tree apps that today serve plain `<script>`
+content from `static/` (notably `charactercardv2`) are slated for the
+same migration as any third-party app — their current state is a
+not-yet-migrated implementation detail, not a privilege.
+
+This doc covers browser-side isolation for app-shipped UI. The daemon-side
 sandbox is described in [`daemon-isolation.md`](daemon-isolation.md); the
 browser half is the parallel concern this doc opens up. Both halves are
-required for the pack ecosystem; neither is sufficient alone.
+required for the app ecosystem; neither is sufficient alone.
 
 ## 1. Problem statement
 
@@ -30,16 +62,16 @@ The platform daemon already does several things right at the browser layer:
   grant page; the operator's grant decisions are recorded before the app
   origin gets any traffic.
 - **Prototype freeze (`harden.js`)** — for the bundled system_dashboard,
-  `Object.freeze` is applied to built-in prototypes at boot so pack-author
+  `Object.freeze` is applied to built-in prototypes at boot so app-author
   JS cannot mutate them after the fact.
 
 This is a credible baseline for trusted single-app development. It is
-insufficient the moment packs ship browser UI.
+insufficient the moment apps ship browser UI.
 
 ### The ambient-capability problem
 
 Browser JavaScript has **ambient access** to whatever the page's origin and
-CSP permit. A pack-author script running inside the app's origin:
+CSP permit. A app-author script running inside the app's origin:
 
 - Can `fetch()` any `connect-src` host the daemon allowed. There is no
   per-function attenuation; if any code in the page may reach a host, all
@@ -56,7 +88,7 @@ CSP permit. A pack-author script running inside the app's origin:
 
 CSP narrows the *outer envelope* of what the origin can reach. It does not
 partition the *inner surface* available to scripts loaded into the page.
-Pack-author code today executes with the page's full ambient authority —
+App-author code today executes with the page's full ambient authority —
 the same authority the host-shipped trusted code runs with.
 
 ### The current rendering boundary is not a security boundary
@@ -74,38 +106,38 @@ controls a `<script>` tag.
 
 ### Stake
 
-This is a precondition for the pack ecosystem, not a projection-specific
-concern. Any pack that ships browser UI — projections today, full pack apps
+This is a precondition for the app ecosystem, not a projection-specific
+concern. Any app that ships browser UI — projections today, full app apps
 tomorrow, future card/library/import UIs — is browser-author code with
 ambient page authority. The current model is acceptable while every script
-on the page is host-controlled. It is not acceptable once a third pack
+on the page is host-controlled. It is not acceptable once a third app
 author's code runs on the same origin.
 
-Initiative B (pack-load pipeline for projection Lua sources, see TODO.md)
+Initiative B (app-load pipeline for projection Lua sources, see TODO.md)
 is downstream of this design: its output has to land *into* whatever
 rendering and isolation model we pick.
 
 ## 2. Threat model
 
 Authors are **user-installed**. Trust here is closer to "browser extension"
-than to "arbitrary web code" — the operator chose to install the pack and is
+than to "arbitrary web code" — the operator chose to install the app and is
 implicitly extending some trust. But that trust is bounded, not blanket:
 
-- Granted caps must match declared caps. A pack must not silently acquire
+- Granted caps must match declared caps. An app must not silently acquire
   capabilities it did not declare.
-- No escalation across pack boundaries. Pack A's UI must not be able to
-  exfiltrate pack B's data, drive pack B's caps, or impersonate pack B
+- No escalation across app boundaries. App A's UI must not be able to
+  exfiltrate app B's data, drive app B's caps, or impersonate app B
   to the operator.
-- Bugs in one pack must not affect others. A crashed projection in pack A
-  must not freeze the dashboard or corrupt pack B's state.
-- The operator must be able to audit and kill packs. Every cap invocation
-  is observable; revocation is enforceable; a runaway pack can be stopped.
+- Bugs in one app must not affect others. A crashed projection in app A
+  must not freeze the dashboard or corrupt app B's state.
+- The operator must be able to audit and kill apps. Every cap invocation
+  is observable; revocation is enforceable; a runaway app can be stopped.
 
 **Latency requirement.** UX must remain responsive even when the
 browser↔daemon channel runs through VPNs and proxies (50ms to
 multi-second link latency, not just loopback). This rules out architectures where every
 interaction is a round-trip (vanilla LiveView/Hotwire pattern). Reactive
-logic that needs sub-100ms response runs in the pack's browser realm;
+logic that needs sub-100ms response runs in the app's browser realm;
 daemon round-trips happen async with optimistic concurrency where
 applicable. The §8 server-rendering rejection follows from this.
 
@@ -115,8 +147,8 @@ Columns of concern:
 
 - **Direct exfiltration** — fetching to an arbitrary host. Today: blocked
   by `connect-src` for hosts not on the allowlist. Missing: per-cap
-  attenuation. If pack A declared `http_client(api.x.com)`, any code on
-  the page can use that host, including pack B's code if both run in the
+  attenuation. If app A declared `http_client(api.x.com)`, any code on
+  the page can use that host, including app B's code if both run in the
   same origin.
 - **Side-channel exfiltration** — timing attacks, DOM-coupling, observable
   resource hints. Largely out of scope at this layer; partially mitigated by
@@ -130,16 +162,16 @@ Columns of concern:
 
 ### Integrity
 
-- **Cross-pack DOM interference** — pack A's script mutates pack B's
-  rendered nodes, intercepts pack B's event handlers, or replaces pack B's
+- **Cross-app DOM interference** — app A's script mutates app B's
+  rendered nodes, intercepts app B's event handlers, or replaces app B's
   cap-call results before they render.
 - **Persistent state poisoning** — writing into shared storage that another
-  pack reads. Today: per-app storage scoping limits this between apps;
+  app reads. Today: per-app storage scoping limits this between apps;
   unmanaged within an app.
 - **Capability misuse** — calling a granted cap with arguments outside what
   the operator imagined when granting. The cap impl is responsible for
   argument validation, but the page itself today is *one* trust principal
-  per origin, not per-pack-within-an-origin.
+  per origin, not per-app-within-an-origin.
 
 ### Availability
 
@@ -152,7 +184,7 @@ Columns of concern:
 - **Catastrophic-backtracking regexes (ReDoS)** — an author can write or
   load a regex that takes super-linear time on adversarial input. Hits the
   iframe's main thread; sandbox doesn't help because the work is real. CSP
-  doesn't help. Even pack-author-trusted regexes can have ReDoS by
+  doesn't help. Even app-author-trusted regexes can have ReDoS by
   accident — `(a+)+b` style patterns.
 - **String/array amplification** — `"x".repeat(1e9)`, `Array(1e9).fill(...)`,
   `JSON.stringify` on deeply-nested structures. Allocates until the tab
@@ -164,14 +196,14 @@ Columns of concern:
   validation. Stub-side concern, not realm-side; worth flagging here.
 
 Mitigations today are mostly absent. The browser's own watchdog kills
-runaway tabs; that is not pack-aware. These vectors point at the need for
+runaway tabs; that is not app-aware. These vectors point at the need for
 resource quotas at multiple layers — transpile-time bounded-method rewrites
 for known DoS APIs, a realm-side wall-clock watchdog, stub-side validation
 limits — rather than relying on any single mechanism.
 
 ### UI deception
 
-- **Phishing** — pack renders fake daemon UI ("grant this cap?") and the
+- **Phishing** — app renders fake daemon UI ("grant this cap?") and the
   operator confirms thinking it's the daemon.
 - **Clickjacking** — `frame-ancestors 'none'` blocks the app being framed
   by other origins. Within the app origin, layered UI is not constrained.
@@ -188,7 +220,7 @@ proposal below targets that gap.
 
 ## 3. Architecture proposal
 
-**Every pack-served browser app runs in a sandboxed realm with no ambient
+**Every app-served browser app runs in a sandboxed realm with no ambient
 world-state. Capabilities are bridged in by declaration plus grant.**
 
 ### Realm primitive
@@ -208,7 +240,7 @@ frame-ancestors 'self';
 base-uri 'none';
 ```
 
-The pack realm has, by construction:
+The app realm has, by construction:
 
 - No DOM access to the host page (different origin, sandboxed).
 - No fetch authority of its own (`connect-src 'none'`). All I/O goes through
@@ -229,7 +261,7 @@ specific cap.
 The realm starts with JS language primitives only — `Object`, `Array`,
 `Math`, `JSON`, the primitive constructors — and **nothing** of the host
 environment. No `document`, `Element`, `Node`, `fetch`, `setTimeout`,
-`navigator`, `location`, `history`. Whatever the pack realm needs comes
+`navigator`, `location`, `history`. Whatever the app realm needs comes
 through capabilities the host explicitly bridges in.
 
 The bootstrap script enforces this structurally:
@@ -245,15 +277,15 @@ not "block X, Y, Z." Deny-lists rot as the browser ships new APIs; an
 allow-list does not. When ShadowRealm ships, it provides the same shape
 natively via the realm primitive itself, in place of bootstrap-stripping.
 
-Per-pack-page-instance origin is desirable so that even two instances of the
-same pack don't share storage in unintended ways. Mechanism is an open
+Per-app-page-instance origin is desirable so that even two instances of the
+same app don't share storage in unintended ways. Mechanism is an open
 question (see §7).
 
 ### Bootstrap script
 
 The first (and possibly only) script loaded into the iframe is host-controlled,
 served by the daemon, and admitted via the CSP nonce. It runs *before*
-pack-author code and:
+app-author code and:
 
 - Applies the allow-list strip described above: deletes every property of
   `globalThis` not on the explicit allow-list, then seals what remains.
@@ -261,27 +293,27 @@ pack-author code and:
 - Sets up the postMessage protocol with the host frame.
 - Installs `globalThis.__cap__` — the bridge-backed cap call table.
 - Re-installs controlled equivalents of trust-relevant primitives that the
-  pack legitimately needs (`console`, `alert`, `prompt`, `confirm`,
+  app legitimately needs (`console`, `alert`, `prompt`, `confirm`,
   bridge-mediated timing primitives) — these are cap-bridge tokens, not the
   host globals.
-- Then loads the pack-author entry, also via the nonce.
+- Then loads the app-author entry, also via the nonce.
 
-The bootstrap is the only code that needs to fully trust the host. Pack
+The bootstrap is the only code that needs to fully trust the host. App
 author code never sees the raw postMessage channel.
 
 **URL convention for browser-side platform code.** The daemon serves the
 browser-side platform libraries (`lib/js_pack_host/`, `lib/js_realm_sandbox/`,
 `lib/js_cap_bridge/`, `lib/js_safe_regex/`, `lib/js_caps/`) under the prefix
 `/_platform/lib/<js_pkg>/<file>.js`. Both the daemon origin and the per-app
-subdomains expose the same URL space — pack iframes are cross-origin by
+subdomains expose the same URL space — app iframes are cross-origin by
 construction, so a stable address reachable from every origin is mandatory.
 Responses are served as `text/javascript; charset=utf-8` with
 `Access-Control-Allow-Origin: *` (these files are bootstrap glue, not
 secrets). Only `js_*` packages and `.js` files match; Lua source is
 unreachable through this route and path traversal is rejected before any
 filesystem read. Cache-busting query strings (`?v=<hash>`) are accepted but
-ignored for resolution. This is Phase A; later phases attach pack-script
-strict-mode prepend, per-pack HTML stubs, and CSP headers.
+ignored for resolution. This is Phase A; later phases attach app-script
+strict-mode prepend, per-app HTML stubs, and CSP headers.
 
 ### Realm lockdown (allow-list)
 
@@ -321,7 +353,7 @@ context" failure mode that recurs in SES post-mortems is a
 mixed-trust-app deployment hazard; crescent's deployment has one
 trust boundary (the iframe bootstrap), and we own the whole iframe.
 SES's deny-list framing exists for backwards-compat with existing JS
-libraries that use the wider intrinsic surface — pack code targets
+libraries that use the wider intrinsic surface — app code targets
 *our* allow-list, so we don't carry that compat tax.
 
 WASM-based approaches become unnecessary for the structural-isolation
@@ -377,7 +409,7 @@ replaced with `undefined`-returning getters.
   the same pattern for `eval`. (Supersedes the earlier "bind kept
   after adversarial review" verdict — that was conditional on
   daemon-side parser enforcement of the `class` ban, which is no
-  longer assumed; see "Pack-source validation".)
+  longer assumed; see "App-source validation".)
 
 ##### Non-constructable wrapper pattern
 
@@ -394,7 +426,7 @@ Apply this to:
   ```js
   const safeCap = { [name](...args) { return cap(...args); } }[name];
   ```
-  Pack code can't `new __cap__.foo(...)` to trigger constructor
+  App code can't `new __cap__.foo(...)` to trigger constructor
   semantics on a function the host didn't intend to be constructable.
 - **All bootstrap-installed wrappers** (bounded methods, regex
   wrappers, etc.): authored as concise method syntax or arrow
@@ -426,8 +458,8 @@ function for pure delegation.
 - **`JSON`.** `stringify` / `parse` wrapped with input-size cap,
   output-size cap (both `SIZE_CAP`), depth cap.
 - **Size cap (`SIZE_CAP`).** Single canonical value. Default: **128M
-  (`2^27 = 134_217_728`)**. Configurable per-pack via manifest entry; a
-  pack manifest may declare a *lower* cap to constrain itself further,
+  (`2^27 = 134_217_728`)**. Configurable per-app via manifest entry; a
+  app manifest may declare a *lower* cap to constrain itself further,
   but cannot exceed the default. Enforced uniformly on every known
   amplifier path:
   - `Array(n)` constructor.
@@ -443,7 +475,7 @@ function for pure delegation.
     depth).
 
   `SIZE_CAP` is per-operation, not a realm-wide live-allocation
-  budget. A pack issuing many cap-sized operations can still exhaust
+  budget. An app issuing many cap-sized operations can still exhaust
   the tab; the wall-clock + memory watchdog (§2) is the
   defence-in-depth for that.
 - **`Date` / `performance.now` / `Date.now`.** Kept as the browser
@@ -459,7 +491,7 @@ function for pure delegation.
 - **`Symbol`.** Kept; `Symbol.unscopables` and any reflection-relevant
   well-known symbols neutralised. **`Symbol.for` and `Symbol.keyFor`
   removed** — the well-known symbol registry is process-wide and
-  cross-realm, and a covert side-channel between two pack realms in
+  cross-realm, and a covert side-channel between two app realms in
   the same agent cluster has no legitimate use. Local symbols
   (`Symbol("desc")`) remain available.
 - **`Object.prototype.toString`** is kept (callers rely on
@@ -472,7 +504,7 @@ function for pure delegation.
 - **`Error` / `TypeError` / `SyntaxError` / `RangeError` /
   `ReferenceError` / `URIError` / `EvalError` / `AggregateError`.**
   Kept as types. `.stack` neutralised on each prototype — getter
-  returns an empty string (or a fixed placeholder) so pack code
+  returns an empty string (or a fixed placeholder) so app code
   cannot introspect bootstrap or bridge source paths.
   `Error.captureStackTrace`, `Error.stackTraceLimit`, and
   `Error.prepareStackTrace` (V8) are removed. `.prototype.constructor`
@@ -492,7 +524,7 @@ function for pure delegation.
   and neutralise their `.constructor` slot like other prototypes.
   (Generator and async iterator prototypes are inert because their
   constructors are removed.)
-- **`Proxy`, `Reflect`.** Removed entirely. Powerful reflection; pack
+- **`Proxy`, `Reflect`.** Removed entirely. Powerful reflection; app
   code does not need these.
 - **`ArrayBuffer`, `DataView`, typed-array family.** Kept (real use
   cases). `SharedArrayBuffer` removed (cross-thread / Spectre).
@@ -500,16 +532,16 @@ function for pure delegation.
 - **Module / loader globals.** None in this realm.
 - **`globalThis`.** Curated namespace object — a fresh object
   containing only the allow-listed names, constructed by the
-  bootstrap *before* pack code loads. Pack-side references to
+  bootstrap *before* app code loads. App-side references to
   `globalThis` resolve to this curated object, never to the real
   realm global (which would leak `eval`, `Function`, and the rest).
   The curated `globalThis` is itself `Object.freeze`d at the end of
-  bootstrap (see step 6) so pack code cannot add, replace, or shadow
+  bootstrap (see step 6) so app code cannot add, replace, or shadow
   host-installed slots on it. `__cap__` is installed via
   `defineProperty` with `writable:false, configurable:false` *before*
-  the freeze. Pack code can still create its own local variables; it
+  the freeze. App code can still create its own local variables; it
   just cannot mutate the realm root.
-- **Host-bridged caps.** Installed by name as declared in the pack
+- **Host-bridged caps.** Installed by name as declared in the app
   manifest, after lockdown completes.
 
 **Library location.** The lockdown library lives at
@@ -517,12 +549,12 @@ function for pure delegation.
 browser-side libraries**, parallel to plain `lib/<name>/` for
 daemon/general libraries.
 
-#### Pack-source validation (author-side hygiene)
+#### App-source validation (author-side hygiene)
 
 **Resolved: the daemon enforces no parser-side rules. The runtime
 sandbox (`lib/js_realm_sandbox/`) is the security boundary, period.**
 An earlier revision called for daemon-side parse-and-validate at
-pack-load using a vendored JS parser (acorn or equivalent). Rejected
+app-load using a vendored JS parser (acorn or equivalent). Rejected
 because:
 
 - Bundling bun (or any JS interpreter) into crescent's runtime
@@ -545,13 +577,13 @@ publishing. It is NOT in the daemon critical path.
 **Prior art: hologram.** `~/git/exoplace/hologram/src/logic/expr-compiler.ts`
 validates expressions against a restricted grammar at compile time;
 the attack surface is enumerable from the grammar definition itself.
-The pack-JS subset documented below is the *recommended* author-side
+The app-JS subset documented below is the *recommended* author-side
 shape the optional validator enforces — same allow-list-of-AST-shapes
 principle, but applied as author hygiene rather than a daemon gate.
 
-#### Pack JS subset (draft)
+#### App JS subset (draft)
 
-> *Draft. The pack-author's recommended subset, enforced by the
+> *Draft. The app-author's recommended subset, enforced by the
 > optional `lib/js_pack_validator/` author tool. Not a daemon
 > requirement — the daemon serves whatever the author ships; the
 > runtime sandbox is the security boundary. Invites revision.*
@@ -599,14 +631,14 @@ principle, but applied as author hygiene rather than a daemon gate.
 
 - Bracket member access (`obj[expr]`) where `expr` is not a literal
   is rejected. Forces all dynamic property access through explicit
-  pack code (or the cap bridge).
+  app code (or the cap bridge).
 - `new SomeName(...)` where `SomeName` is not in the allow-listed
   constructor set is rejected. Allow list: `Array`, `Object`,
   `String`, `Number`, `Boolean`, `Map`, `Set`, `Date`, `Promise`,
   `RegExp`, `Error` (and its subclasses), `ArrayBuffer`, `DataView`,
-  `Uint8Array` and the TypedArray family — plus any pack-side
+  `Uint8Array` and the TypedArray family — plus any app-side
   function names defined in the same module (these become
-  constructable; pack-author responsibility for those).
+  constructable; app-author responsibility for those).
 
 **Open questions for the subset:**
 
@@ -656,14 +688,14 @@ they do NOT need this check.)
 - Key: pattern string.
 - Value: `safe` | `unsafe`.
 - LRU-bounded (default ~1024 entries; tune if needed). Eviction
-  prevents pack-driven memory growth.
-- Sealed in the bootstrap closure; pack cannot read or mutate.
+  prevents app-driven memory growth.
+- Sealed in the bootstrap closure; app cannot read or mutate.
 - Used by the `new RegExp` wrapper, the `match` / `matchAll` /
   `search` wrappers, and any future site that needs pattern
   validation.
 - **Verdict only, not compiled object.** Regex objects have mutable
   `lastIndex`; caching and sharing instances would corrupt
-  iteration state across pack callers. Construction is cheap; only
+  iteration state across app callers. Construction is cheap; only
   validation is worth caching.
 
 A single helper `validatePattern(patternString) -> safe | throws`
@@ -700,10 +732,10 @@ recommended via `lib/js_pack_validator/` but not daemon-enforced.
 - `eval` keyword and `Function` constructor in source — already
   removed at runtime; author validator may flag for early feedback.
 - **Strict mode is daemon-side enforced.** The daemon prepends
-  `'use strict';` to every served pack JS file (string concat at
+  `'use strict';` to every served app JS file (string concat at
   serve time), OR serves with `Content-Type: text/javascript`
   inside a `<script type='module'>` (ESM is strict by default).
-  Either path is absolute and trivial; pack-author can't opt out.
+  Either path is absolute and trivial; app-author can't opt out.
   This is the load-bearing strict-mode mechanism. Non-strict mode
   is forbidden because `this` in a sloppy-mode function returns the
   realm's `globalThis`, which the curated-namespace approach
@@ -720,11 +752,11 @@ recommended via `lib/js_pack_validator/` but not daemon-enforced.
 4. Neutralise `.constructor` slots on every kept prototype.
 5. Install host-bridged caps under their declared names.
 6. `Object.freeze` every kept intrinsic and its prototype, **and the
-   curated `globalThis` namespace object itself**, so pack code
+   curated `globalThis` namespace object itself**, so app code
    cannot add, replace, or shadow host-installed properties on it.
    `__cap__` is installed via `defineProperty` with `writable:false,
    configurable:false` *before* this freeze.
-7. Load pack code (in strict mode — see "Language-level constraints").
+7. Load app code (in strict mode — see "Language-level constraints").
 
 #### Escape-test corpus
 
@@ -774,7 +806,7 @@ in JSDoc comments. Runs in the browser directly with no transpile step
 (comments stripped at parse). Type-checked in the author's dev
 environment via the TypeScript Language Server with `// @ts-check` (TS
 LSP natively supports JSDoc). No bundled compiler; no `tsc` shipped
-with packs; no Lua typechecker shipped with packs.
+with apps; no Lua typechecker shipped with apps.
 
 **lua2ts is an optional source path.** Authors who prefer Lua can
 transpile via lua2ts; the output target should be JS + JSDoc so the
@@ -784,8 +816,8 @@ harden's role is the static authoring-hygiene checks (banned-API source
 patterns) at `bin/cr check` time. lua2ts is *free* — we maintain it for
 other reasons; using it is opt-in for browser-side authoring.
 
-**Why not TypeScript with `.ts` source format?** Pack distribution would
-need to ship the TS compiler (~10MB) or require pack authors to
+**Why not TypeScript with `.ts` source format?** App distribution would
+need to ship the TS compiler (~10MB) or require app authors to
 pre-build. JS + JSDoc gets the same type-safety benefits with zero
 toolchain cost (browsers run JS; TS LSP type-checks JSDoc in the
 author's dev env).
@@ -795,12 +827,12 @@ typechecker plus transpiler bundle with the platform. Authors who
 already know JS shouldn't be forced through that ceremony. Lua remains
 crescent's daemon language.
 
-**Single shared `.d.ts`** (not per-pack) declares: the JS language
+**Single shared `.d.ts`** (not per-app) declares: the JS language
 primitives in the realm allow-list, the cap signatures (signed by the
 host), the VNode / `Element` type for return values, and the cap-bridge
-protocol message shape. Pack authors reference this `.d.ts` to get
+protocol message shape. App authors reference this `.d.ts` to get
 type-checking against the actual realm shape. Single source of truth —
-when the allow-list or cap protocol evolves, one file changes and packs
+when the allow-list or cap protocol evolves, one file changes and apps
 re-typecheck against the updated declarations. Location TBD; candidates
 include `lib/platform/browser_types.d.ts` or a daemon-served static
 asset. Open question.
@@ -811,30 +843,30 @@ asset. Open question.
 sandboxed iframe to the *stub page* served by the daemon at a host-controlled
 origin. The stub:
 
-- Holds the user's cap grants for this pack.
-- Validates every inbound message against the pack manifest's declared
+- Holds the user's cap grants for this app.
+- Validates every inbound message against the app manifest's declared
   browser caps.
 - Performs the side effect in its own realm — which has the real fetch
   authority for the granted hosts, the real DOM if it's painting, etc.
 - Sends the result, error, or event back.
 
-The stub is the only code with the real cap surface. The pack iframe holds
+The stub is the only code with the real cap surface. The app iframe holds
 only `__cap__` proxies that round-trip through it.
 
 ### Cap function attenuation
 
 A granted cap is exposed inside the iframe as `globalThis.__cap__.<name>(...)`.
-Pack code can compose narrower wrappers and pass them on to sub-components:
+App code can compose narrower wrappers and pass them on to sub-components:
 
 ```js
 const fetchApi = (path, body) => __cap__.http_client({path, body});
-// pack code passes fetchApi to its sub-modules; they cannot reach the
+// app code passes fetchApi to its sub-modules; they cannot reach the
 // underlying cap except via the same bridge.
 ```
 
-Pack code cannot reach the original cap-fn except by going through the same
+App code cannot reach the original cap-fn except by going through the same
 postMessage channel — and that channel only enacts caps the stub agrees the
-pack declared.
+app declared.
 
 ### lua2ts harden mode (defense-in-depth)
 
@@ -919,7 +951,7 @@ frames against the same `id`, terminated by a final `result` (success) or
 
 ### Cap declaration
 
-Packs declare browser-side caps in the manifest, parallel to the existing
+Apps declare browser-side caps in the manifest, parallel to the existing
 daemon-side cap declarations:
 
 ```
@@ -948,27 +980,27 @@ later requests pull from stored grants.
 
 The stub:
 
-1. Looks up `msg.cap` in the pack's `browser_caps`. If absent → reject.
+1. Looks up `msg.cap` in the app's `browser_caps`. If absent → reject.
 2. Looks up the operator's grant for that cap. If denied → reject.
 3. Validates `msg.args` against the cap's argument schema.
 4. Performs the effect.
 5. Logs an entry (cap name, arg digest, timestamp, result kind) to the
    daemon audit log.
 
-**No implicit coercion of pack-supplied values.** A cap implementation
-that receives a pack value and does `String(value)`, `"" + value`, or
+**No implicit coercion of app-supplied values.** A cap implementation
+that receives an app value and does `String(value)`, `"" + value`, or
 arithmetic on it triggers `Symbol.toPrimitive` / `valueOf` /
-`toString` callbacks, which run synchronously back in the pack realm
-on the host's stack. Always treat pack values as opaque: validate
+`toString` callbacks, which run synchronously back in the app realm
+on the host's stack. Always treat app values as opaque: validate
 shape against the declared cap argument type before any operation
 that might trigger coercion, and prefer structured-clone semantics
 (`postMessage`-style) at the bridge boundary so coercion cannot
-occur. Symmetrically, stub→pack values must be pre-serialised
+occur. Symmetrically, stub→app values must be pre-serialised
 JSON-safe values, never thenables the stub did not construct
 itself — `Promise.resolve(thenable)` invokes `thenable.then` and
-foreign thenables are pack-controlled callable surface.
+foreign thenables are app-controlled callable surface.
 
-### Pack-side API
+### App-side API
 
 Synchronous-feeling, async-implemented:
 
@@ -982,65 +1014,65 @@ const data = await __cap__.fetch_api({ path: "/items" });
 ### Cap types (initial sketch)
 
 - `http_client` — proxy daemon-side `http_client` cap, host-attenuated.
-- `kv_read` / `kv_write` — per-pack key-value storage in the stub's realm.
+- `kv_read` / `kv_write` — per-app key-value storage in the stub's realm.
 - `clipboard_write` — copy to clipboard; requires explicit user gesture.
-- `dialog` — host-rendered confirm/prompt with pack-supplied prompt text.
+- `dialog` — host-rendered confirm/prompt with app-supplied prompt text.
 - `ui_toast` — host-rendered ephemeral notification.
-- `navigate` — request the host navigate to a pack-internal route.
-- `stream_subscribe` — bind to a daemon SSE source (already pack-declared).
+- `navigate` — request the host navigate to a app-internal route.
+- `stream_subscribe` — bind to a daemon SSE source (already app-declared).
 
 Initial list. Expected to grow. **See [`browser_caps.md`](browser_caps.md)** for the comprehensive Web-Platform-API enumeration, per-cap schema pattern (entry args, return type, async/event surface, lockdown, permission, audit), the day-zero exposed cap surface, and versioning/discovery/composition decisions. Every "cap" reference in this doc should be read against that enumeration; this section is the protocol sketch, `browser_caps.md` is the cap-kind catalog.
 
 ### Cancellation via AbortSignal
 
-Cap calls with AbortSignal args support cancellation. The realm-side bridge intercepts AbortSignal instances in cap args before sending the call message: it stores the signal locally, sets up an abort listener, and replaces the signal in the wire-args with a marker (`{__cap_signal: true, ref: <local-id>}`). On `signal.aborted`, the bridge sends a `{id, kind: "cancel"}` message keyed to the call's correlation id. The host-side bridge receives the call, creates a fresh `AbortController` on the host side, replaces the marker with `controller.signal` in the args passed to the impl, and stores the controller keyed by correlation id. On `{kind: "cancel"}` for that id, the host aborts the controller; the cap impl's underlying operation responds (e.g. `fetch(url, {signal})` rejects; a setTimeout wrapper calls `clearTimeout`). The pack-realm Promise rejects with an `AbortError`.
+Cap calls with AbortSignal args support cancellation. The realm-side bridge intercepts AbortSignal instances in cap args before sending the call message: it stores the signal locally, sets up an abort listener, and replaces the signal in the wire-args with a marker (`{__cap_signal: true, ref: <local-id>}`). On `signal.aborted`, the bridge sends a `{id, kind: "cancel"}` message keyed to the call's correlation id. The host-side bridge receives the call, creates a fresh `AbortController` on the host side, replaces the marker with `controller.signal` in the args passed to the impl, and stores the controller keyed by correlation id. On `{kind: "cancel"}` for that id, the host aborts the controller; the cap impl's underlying operation responds (e.g. `fetch(url, {signal})` rejects; a setTimeout wrapper calls `clearTimeout`). The app-realm Promise rejects with an `AbortError`.
 
-This applies to any long-running cap. AbortSignal is the standard JS primitive for cancellation; using it consistently avoids inventing a parallel cancel API and matches what pack authors already know. There is no separate `clear_<cap>` cap surface — the design space collapses to one cancellation primitive across the bridge.
+This applies to any long-running cap. AbortSignal is the standard JS primitive for cancellation; using it consistently avoids inventing a parallel cancel API and matches what app authors already know. There is no separate `clear_<cap>` cap surface — the design space collapses to one cancellation primitive across the bridge.
 
 Implementation status: bridge protocol extension not yet shipped. `set_timeout` and `fetch_api` are the first caps that will use it; both are blocked on this extension landing. Future cancellable caps default to AbortSignal-cancellable where applicable.
 
 ## 5. Rendering model — resolved: Option B
 
 The proposal above isolates *execution*. The remaining question was how
-pack UI *reaches the screen*. **Resolved to Option B: the pack realm
+app UI *reaches the screen*. **Resolved to Option B: the app realm
 produces virtual structures; the host paints them in the host's realm.**
 
 ### Rationale
 
 - **Consistent with the allow-list realm.** §3's bootstrap removes
   `document`, `Element`, `Node`, and the rest of the DOM surface from the
-  pack realm. There is no DOM in there to render into.
+  app realm. There is no DOM in there to render into.
 - **"Direct DOM access banned" from §2 lands here naturally** — there is
   no DOM to access. The static block in harden mode and the structural
   absence in the realm are the same decision viewed from two layers.
 - **`Element` Lua-side is a structural VNode shape**, not the browser DOM
   `Element`. `dom.lua`-style libraries describe a plain table
-  `{ tag, props, children }`; nothing in pack-author code needs the
+  `{ tag, props, children }`; nothing in app-author code needs the
   browser DOM type. No cross-realm type alignment problem.
-- **Event handling via cap-bridge tokens.** The pack's virtual structure
+- **Event handling via cap-bridge tokens.** The app's virtual structure
   declares handler intents as cap-bridge tokens (`{ onClick: "<cap-id>" }`
   or similar); the host wires real DOM events to dispatch the named cap.
-  The pack never sees a DOM `Event` object.
+  The app never sees a DOM `Event` object.
 
 ### Trade-off, named
 
-Any pack-author behavior not expressible in the VNode + cap-bridge
+Any app-author behavior not expressible in the VNode + cap-bridge
 protocol requires extending the protocol. Extensions are host-controlled
-and additive — not pack-author-controlled. This is the cost of structural
+and additive — not app-author-controlled. This is the cost of structural
 isolation: rich-editor / canvas / audio-visualizer use cases need
 protocol extensions rather than free DOM access. The decision accepts that
 cost as the price of the threat model.
 
 ### Options considered (for posterity)
 
-- **Option A — pack owns its iframe DOM.** Pack iframe contains rendered
+- **Option A — app owns its iframe DOM.** App iframe contains rendered
   UI directly; stub composes iframes into a layout. Easy authoring and
   full DOM API, but iframes are heavy, composition across iframe
-  boundaries is awkward (no flex/grid), and inter-pack DOM interaction
+  boundaries is awkward (no flex/grid), and inter-app DOM interaction
   requires explicit inter-iframe protocols. Conflicts with the allow-list
   realm.
-- **Option C — hybrid.** Simple packs use B, complex packs use A. Two
-  rendering models to maintain; pack authors pick wrong; cap surface
+- **Option C — hybrid.** Simple apps use B, complex apps use A. Two
+  rendering models to maintain; app authors pick wrong; cap surface
   differs between them. Rejected for the same reason A is: A's DOM-in-realm
   shape conflicts with §3's allow-list bootstrap.
 
@@ -1055,32 +1087,32 @@ position in the stack.
 2. Host JS loads via `<script type="module">` directly in the page.
 3. `harden.js` freezes prototypes.
 4. `projections/registry.js` and per-tag projection modules render envelopes.
-5. lua2ts harden mode (planned) transpiles pack-shipped projection-Lua into
+5. lua2ts harden mode (planned) transpiles app-shipped projection-Lua into
    JS that registers into the registry at runtime.
 
 All four upper layers share the page's realm. The boundary between
-host code and pack code is *type-system shaped*, not runtime shaped.
+host code and app code is *type-system shaped*, not runtime shaped.
 
 ### Target state
 
-1. Daemon serves a *stub page* per pack instance.
+1. Daemon serves a *stub page* per app instance.
 2. Stub page CSP allows it to render UI, hold caps, and round-trip
    postMessage with sandboxed iframes.
-3. Stub page creates one sandboxed iframe per pack realm with strict CSP
+3. Stub page creates one sandboxed iframe per app realm with strict CSP
    and the bootstrap script.
-4. Pack code runs in the iframe; calls `__cap__.X(...)` for anything
+4. App code runs in the iframe; calls `__cap__.X(...)` for anything
    beyond local computation.
 5. Rendering model A / B / C lands between the iframe and the screen.
 
 ### Migration steps (rough, not committed)
 
 1. Add `browser_caps` field to manifest schema (`lib/pkg/manifest.lua`). Schema and per-kind config conventions in [`browser_caps.md`](browser_caps.md) §3.
-2. Build daemon stub-page generator (per pack, per instance).
+2. Build daemon stub-page generator (per app, per instance).
 3. Build the sandboxed-iframe host with bootstrap script and the bridge.
 4. Implement initial bridge cap handlers daemon-side (`http_client`,
    `ui_toast`, `dialog`, `clipboard_write`, `kv_read/write`).
 5. Port `system_dashboard` to the resolved rendering model (Option B —
-   pack realm emits virtual structures, host paints). The existing
+   app realm emits virtual structures, host paints). The existing
    projection registry maps cleanly.
 6. Resume Initiative B with the rendering model in hand. lua2ts harden mode
    stays as a backstop, but the *primary* isolation boundary is the iframe,
@@ -1104,7 +1136,7 @@ decision-level attention, not skimming.
   both? Is the architecture worth restating in terms of "the realm primitive"
   with two backends, or do we commit to iframe forever and treat ShadowRealm
   as a non-event?
-- **Per-pack origins.** Real subdomains
+- **Per-app origins.** Real subdomains
   (`pack-<id>.<n>.localhost`)? Unique `srcdoc` iframes? `blob:` URLs?
   Each has tradeoffs:
   - Subdomains require DNS or hosts-file cooperation; cleanest origin
@@ -1113,29 +1145,29 @@ decision-level attention, not skimming.
     for storage scoping.
   - `blob:` URLs are origin-tied to the creating document; storage and
     revocation semantics need a close read.
-- **Storage scope.** Per-pack-instance? Per-pack-version? What survives a
-  pack reinstall? What survives a pack upgrade? The choice ties into the
-  per-pack-origin choice above.
+- **Storage scope.** Per-app-instance? Per-app-version? What survives a
+  app reinstall? What survives a app upgrade? The choice ties into the
+  per-app-origin choice above.
 - **Cap revocation propagation.** When the operator revokes a granted cap,
   how does the active iframe learn? Polling? Stub forces an iframe reload?
   Heartbeat from stub to iframe with a "you've been revoked" message that
   the bootstrap script handles? Force-reload is simplest but disruptive
   mid-task.
-- **Cross-pack composition.** Pack A renders pack B's content (e.g.
-  nesting, embedding, "include this pack's projection here"). How do caps
-  compose? *Principle* answer: attenuation — pack A passes pack B only a
-  subset of its own caps via the bridge. *Protocol* answer: TBD. Does pack
-  B get its own iframe inside pack A's iframe? Does pack A's bridge proxy
-  to pack B's bridge? Who validates against whose grants?
+- **Cross-app composition.** App A renders app B's content (e.g.
+  nesting, embedding, "include this app's projection here"). How do caps
+  compose? *Principle* answer: attenuation — app A passes app B only a
+  subset of its own caps via the bridge. *Protocol* answer: TBD. Does app
+  B get its own iframe inside app A's iframe? Does app A's bridge proxy
+  to app B's bridge? Who validates against whose grants?
 - **Failure modes.** When the bridge times out or the iframe crashes, what
   does the operator see? What does the rest of the dashboard do? The
   current single-realm model doesn't have to answer this; the new one does.
-- **Performance budget.** Each pack iframe is real memory (~1-5 MB
-  baseline). At what number of concurrent packs does this become operator-
+- **Performance budget.** Each app iframe is real memory (~1-5 MB
+  baseline). At what number of concurrent apps does this become operator-
   visible? Are there strategies for sharing realms across "trusted"
-  pack-bundles?
-- **Testing.** What does a pack author's local development experience look
-  like? They have to test their pack inside the sandbox model; the harness
+  app-bundles?
+- **Testing.** What does a app author's local development experience look
+  like? They have to test their app inside the sandbox model; the harness
   has to replicate the runtime.
 - **Safe-regex algorithm.** Stick with the
   quantifier-on-quantifier ban (cheap, hologram-shaped) or upgrade
@@ -1155,7 +1187,7 @@ decision-level attention, not skimming.
   signal)? Universal is simpler and matches the standard-primitive
   framing; opt-in is more conservative (audit list of cancellable caps
   is explicit). Default leaning: universal — the scan is cheap, the
-  authoring story is one rule across all caps, and packs cannot
+  authoring story is one rule across all caps, and apps cannot
   smuggle anything by attaching a signal to a non-cancellable cap
   (the host just ignores it).
 
@@ -1188,7 +1220,7 @@ All five are recorded here as considered-and-superseded:
   ~300–500kb runtime bundle. Two layers of isolation, JS authoring
   intact, but the structural-isolation argument it offers is
   redundant with allow-list lockdown.
-- **Process isolation (Web Worker per pack) — orthogonal.** Strong
+- **Process isolation (Web Worker per app) — orthogonal.** Strong
   boundary; still needs an in-realm lockdown inside the worker to
   close the prototype-chain escape. Can be layered on top of the
   allow-list approach if a future threat model demands it; not a
@@ -1196,33 +1228,33 @@ All five are recorded here as considered-and-superseded:
 
 ### Server-side rendering (LiveView / Hotwire pattern) — rejected
 
-Considered an architecture where pack Lua runs in the daemon and the
+Considered an architecture where app Lua runs in the daemon and the
 browser is a thin host-controlled painter consuming a daemon-pushed
 render stream. Eliminates lua2ts and most browser-side isolation work.
 Rejected because: (a) the latency requirement (see §2) is "minimal
 latency regardless of network conditions, including through
 VPNs/proxies" — every-interaction-is-a-roundtrip breaks under
 50ms to multi-second link latency, and
-(b) the requirement is full pack-author flexibility, which a
+(b) the requirement is full app-author flexibility, which a
 host-shipped primitive set cannot cover. The cleaner local-first variant
 (rich host primitives + optimistic concurrency) covers some cases but
 caps flexibility to the host's primitive set, violating (b).
-Browser-side pack execution with full isolation is required.
+Browser-side app execution with full isolation is required.
 
 ### Dusklight's trusted-in-realm renderer model — rejected
 
 Dusklight (`~/git/rhizone/dusklight`) runs renderer plugins in-realm with
 the host, with direct DOM access and no isolation; this works for
 dusklight because its plugins don't reach OS capabilities. Crescent's
-packs *do* reach OS capabilities (FS, processes, network) through the
+apps *do* reach OS capabilities (FS, processes, network) through the
 daemon's grant model, so the "user installed it = trusted" assumption
-does not transfer. Every pack is untrusted user code with capability
+does not transfer. Every app is untrusted user code with capability
 surface; in-realm execution is unsafe.
 
 ### Daemon-side parser-level enforcement (acorn vendored, JS-parser-from-Lua, etc.) — rejected
 
 An earlier revision called for daemon-side parse-and-validate at
-pack-load using acorn (or a Lua-native JS parser, or a WASM JS
+app-load using acorn (or a Lua-native JS parser, or a WASM JS
 parser). Rejected because:
 
 - Bundling bun or any JS interpreter into crescent's runtime
@@ -1256,8 +1288,8 @@ load-bearing syntactic vector without parser-side enforcement.
 ## 9. Non-goals
 
 - **This is not a security-against-adversarial-internet-code spec.**
-  The threat model is user-installed packs (extension-grade trust), not
-  arbitrary web content. If adversarial pack distribution becomes a
+  The threat model is user-installed apps (extension-grade trust), not
+  arbitrary web content. If adversarial app distribution becomes a
   concern, that's a separate doc with stricter assumptions.
 - **This does not claim the typechecker is a sandbox.** Type-level
   hardening (lua2ts harden mode, projection prelude, JS hazard blocklist)
@@ -1275,7 +1307,7 @@ load-bearing syntactic vector without parser-side enforcement.
 
 Draft. No code committed. No manifest schema changes. No daemon changes.
 The doc exists to (a) ground the next session's design conversation in a
-shared frame, (b) explicitly mark Initiative B and other browser-side pack
+shared frame, (b) explicitly mark Initiative B and other browser-side app
 work as gated on this design being settled, and (c) collect the open
 questions in one place so they can be picked off deliberately.
 
