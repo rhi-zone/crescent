@@ -332,36 +332,45 @@ Pure-computation API (no I/O), but the realm bootstrap removes it as part of the
 
 The realm has no ambient storage. The host stub partitions storage per pack.
 
-#### 4.2.1 `localStorage` / `sessionStorage` — **exposed-now** as `kv_read` / `kv_write`
+#### 4.2.1 `localStorage` / `sessionStorage` — **exposed-now** as `kv_read` / `kv_write` / `kv_delete` / `kv_keys`
+
+Implemented in `lib/js_caps/kv.js`. Factory-shaped:
+`makeKvCaps({ pack_id })` returns the four cap functions bound to a
+per-pack IndexedDB database (`pack_<pack_id>`) with a single object
+store `kv`. Values are structured-clone (Uint8Array / Map / Set / Date
+round-trip directly; no JSON.stringify hop).
 
 ```ts
-// kv_read
-type KvReadArgs = { key: string };
-type KvReadResult = { value: string | null };  // null = absent
+// kv_read(key) -> stored value, or undefined if absent.
+type KvRead = (key: string) => Promise<unknown>;
 
-// kv_write
-type KvWriteArgs = { key: string; value: string };
-type KvWriteResult = { ok: true };
+// kv_write({ key, value }) -> void. Structured-clone the value;
+// non-cloneable values (functions, DOM nodes, ...) reject with the
+// underlying DataCloneError.
+type KvWrite = (args: { key: string; value: unknown }) => Promise<void>;
 
-// kv_delete
-type KvDeleteArgs = { key: string };
-type KvDeleteResult = { ok: true };
+// kv_delete(key) -> void. No-op when the key is absent.
+type KvDelete = (key: string) => Promise<void>;
 
-// kv_keys
-type KvKeysArgs = { prefix?: string };
-type KvKeysResult = { keys: string[] };
+// kv_keys() -> all keys, arbitrary order.
+type KvKeys = () => Promise<string[]>;
 
-// config
-type KvConfig = {
-  max_keys?: number;            // default 10000
-  max_value_bytes?: number;     // default 1 MB
-  max_total_bytes?: number;     // default 16 MB
-};
+// factory config
+type KvConfig = { pack_id: string };  // db name = "pack_" + pack_id
 ```
 
-Permission: per-install. Storage backend: the host stub's own `localStorage` (or `IndexedDB`), namespaced by `pack-id + manifest-entry-key`. The pack realm never touches the actual browser `localStorage` — the host stub is the only realm with that access.
+Per-call validation: keys are non-empty strings up to 1024 chars.
 
-Why pre-pick a host-side backend rather than mirror the browser KV verb-set: localStorage is sync, IndexedDB is async, and the realm-facing protocol is async over the bridge regardless. Picking one host-side backend (IndexedDB for unlimited quota) gets day-zero storage without dragging in either API's quirks.
+Permission: per-install. Storage backend: IndexedDB in the host realm, one database per pack named by `pack_id`. The pack realm never touches `indexedDB` directly — the host stub is the only realm with that access, and partitioning is by database name (plus the surrounding origin scoping).
+
+Why IndexedDB over localStorage:
+- Quota: GB-scale vs the 5–10 MB localStorage cap.
+- Async: no main-thread blocking on writes.
+- Structured-clone values directly — Uint8Array / Map / Set / Date round-trip with no JSON.stringify hop, so packs storing binary blobs avoid the base64 detour.
+
+The realm-facing protocol is async over the bridge regardless, so picking IndexedDB host-side does not change pack-side ergonomics.
+
+Status: shipped. Impl: `lib/js_caps/kv.js`. Factory-shaped (like `fetch_api`): `makeKvCaps({ pack_id })` returns a record of the four cap functions bound to that pack's database. The four caps share a backend so the factory returns the whole record at once; the host page reads `manifest.browser_caps.<entry>.config` (or, more typically, derives `pack_id` from the manifest itself) and merges all four into the cap-impls Map per pack. `lib/js_caps/index.js` documents the merge pattern. Tests: `lib/js_caps/caps.test.js` (factory validation, non-constructable, read/write roundtrip, missing-key undefined, delete + delete-absent, kv_keys enumeration, structured-clone fidelity for Uint8Array, per-pack partitioning isolation, key validation: non-string / empty / oversized / null args).
 
 Distinct from session: a `session_kv` variant tied to the realm's lifetime is a future placeholder. Day-zero `kv` is persistent.
 
@@ -865,7 +874,7 @@ Seventeen caps. The set is small and deliberate: it covers basic HTTP, storage, 
 
 Cancellation is uniformly expressed via AbortController / AbortSignal (the standard JS cancellation primitive) — there is no per-cap "cancel" sibling. `set_timeout` and `fetch_api` both use this; future cancellable caps will follow the same pattern. Bridge-layer protocol in [`platform_isolation.md`](platform_isolation.md) §4 "Cancellation via AbortSignal".
 
-Most day-zero caps are pure functions safe for every pack and live in `lib/js_caps/index.js#dayZeroCaps` directly. **Factory-shaped caps** — `fetch_api` today, and future per-pack-configured kinds — carry manifest-supplied config that binds at host-side instantiation, not as a per-call arg. The host page constructs them per manifest entry and merges the results into the cap-impls Map; see `lib/js_caps/index.js` for the merge pattern.
+Most day-zero caps are pure functions safe for every pack and live in `lib/js_caps/index.js#dayZeroCaps` directly. **Factory-shaped caps** — `fetch_api` (via `makeFetchApi({ allowed_origins })`) and the `kv_*` family (via `makeKvCaps({ pack_id })`, which returns the four caps at once because they share an IndexedDB backend), and future per-pack-configured kinds — carry manifest-supplied config that binds at host-side instantiation, not as a per-call arg. The host page constructs them per manifest entry and merges the results into the cap-impls Map; see `lib/js_caps/index.js` for the merge pattern.
 
 Each `lib/platform/browser_caps/<kind>/` directory holds the host-side cap impl (Lua or JS depending on whether the impl runs in the daemon or in the host stub realm), the per-kind config schema validator, and tests. The single `lib/js_realm_sandbox/` continues to lock down the realm; the cap shells are installed onto `__cap__` per-pack from the granted manifest entries.
 

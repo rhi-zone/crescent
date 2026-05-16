@@ -29,15 +29,20 @@ end
 -- =====================================================================
 -- Cap-kind corpus. Each entry maps a documented day-zero cap kind (in
 -- docs/browser_caps.md §5) to a substring that MUST appear in
--- caps.test.js. The nine kinds below are the ones currently shipped
--- (six trivial pure-wrap caps + set_timeout + web_crypto_subtle, which consumes the
--- cap-bridge AbortSignal extension per docs/platform_isolation.md §4,
--- + clipboard_write); the remaining caps land in subsequent commits
--- and will be added here when their impls land. fetch_api is a
--- factory cap (per-pack config-bound at host-side instantiation per
--- docs/browser_caps.md §4.1.1); its impl is shipped but `fetch_api` is
--- NOT in dayZeroCaps -- the host page constructs it via makeFetchApi
--- and inserts the result into the cap-impls Map per manifest entry.
+-- caps.test.js. The nine kinds below are the bare-function dayZeroCaps
+-- entries (six trivial pure-wrap caps + set_timeout + web_crypto_subtle,
+-- which consumes the cap-bridge AbortSignal extension per
+-- docs/platform_isolation.md §4, + clipboard_write). The remaining
+-- caps (navigate, dialog, toast) land in subsequent commits.
+--
+-- fetch_api and the four kv_* caps are factory caps (per-pack
+-- config-bound at host-side instantiation per docs/browser_caps.md
+-- §4.1.1, §4.2.1); their impls are shipped but they are NOT in
+-- dayZeroCaps -- the host page constructs them via makeFetchApi /
+-- makeKvCaps and inserts the results into the cap-impls Map per
+-- manifest entry. kv_* in particular share a backend (one IndexedDB
+-- database `pack_<pack_id>` with a single `kv` object store) and the
+-- factory returns a record of all four caps.
 -- =====================================================================
 
 local SPEC_RULES = { --: SpecItem[]
@@ -184,6 +189,39 @@ local SPEC_RULES = { --: SpecItem[]
     doc = "fetch_api: validation failure on bad signal" },
   { needle = "fetch_api: missing globalThis.fetch throws clear error",
     doc = "fetch_api: graceful error when fetch absent" },
+  -- kv_* (factory: makeKvCaps)
+  { needle = "kv factory: null config throws TypeError",
+    doc = "kv_*: factory rejects null config" },
+  { needle = "kv factory: non-string pack_id throws TypeError",
+    doc = "kv_*: factory rejects non-string pack_id" },
+  { needle = "kv factory: empty pack_id throws TypeError",
+    doc = "kv_*: factory rejects empty pack_id" },
+  { needle = "kv_read: non-constructable",
+    doc = "kv_*: caps are non-constructable (concise method)" },
+  { needle = "kv_read: write then read roundtrip",
+    doc = "kv_read/kv_write: roundtrip" },
+  { needle = "kv_read: missing key returns undefined",
+    doc = "kv_read: absent-key sentinel" },
+  { needle = "kv_delete: removes a key",
+    doc = "kv_delete: happy path" },
+  { needle = "kv_delete: absent key is a no-op",
+    doc = "kv_delete: missing-key no-op" },
+  { needle = "kv_keys: enumerates all keys",
+    doc = "kv_keys: enumeration" },
+  { needle = "kv: structured clone preserves Uint8Array and nested shape",
+    doc = "kv: structured-clone fidelity for Uint8Array values" },
+  { needle = "kv: per-pack partitioning isolates writes by pack_id",
+    doc = "kv: per-pack storage partitioning" },
+  { needle = "kv_read: non-string key throws TypeError",
+    doc = "kv_read: validation failure on non-string key" },
+  { needle = "kv_write: non-string key throws TypeError",
+    doc = "kv_write: validation failure on non-string key" },
+  { needle = "kv_write: empty key throws TypeError",
+    doc = "kv_write: validation failure on empty key" },
+  { needle = "kv_write: oversized key throws TypeError",
+    doc = "kv_write: validation failure on oversized key" },
+  { needle = "kv_write: null args throws TypeError",
+    doc = "kv_write: validation failure on null args" },
   -- dayZeroCaps aggregate
   { needle = "dayZeroCaps: contains the 9 shipped caps",
     doc = "dayZeroCaps map contains the 9 shipped names" },

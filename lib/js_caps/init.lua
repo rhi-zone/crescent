@@ -75,6 +75,27 @@ local M = {}
 --:: FetchApiFn = (args: FetchApiArgs) -> FetchApiResult
 --:: MakeFetchApiFn = (config: FetchApiConfig) -> FetchApiFn
 
+-- kv_*: factory-shaped per docs/browser_caps.md §4.2.1. `makeKvCaps`
+-- binds the four caps to a per-pack IndexedDB database
+-- (`pack_<pack_id>`). The factory returns a record of four functions
+-- rather than a single cap because they share a backend; the host page
+-- merges all four into the cap-impls Map at mount time. Values are
+-- structured-clone-cloneable JS values -- opaque from Lua's view, so
+-- they appear as `unknown`.
+--:: KvConfig = { pack_id: string }
+--:: KvWriteArgs = { key: string, value: unknown }
+--:: KvReadFn   = (key: string) -> unknown
+--:: KvWriteFn  = (args: KvWriteArgs) -> nil
+--:: KvDeleteFn = (key: string) -> nil
+--:: KvKeysFn   = () -> { [integer]: string }
+--:: KvCaps = {
+--::   kv_read:   KvReadFn,
+--::   kv_write:  KvWriteFn,
+--::   kv_delete: KvDeleteFn,
+--::   kv_keys:   KvKeysFn,
+--:: }
+--:: MakeKvCapsFn = (config: KvConfig) -> KvCaps
+
 -- WebCryptoSubtleFn: op-discriminated single-cap dispatch over
 -- crypto.subtle. The args shape varies per op (encrypt/decrypt/sign/
 -- verify/digest/generateKey/deriveKey/deriveBits/importKey/exportKey/
@@ -146,6 +167,11 @@ end
 
 --: (FetchApiConfig) -> FetchApiFn
 function M.makeFetchApi(_config)
+  error("lib/js_caps is type-only on the Lua side.")
+end
+
+--: (KvConfig) -> KvCaps
+function M.makeKvCaps(_config)
   error("lib/js_caps is type-only on the Lua side.")
 end
 
