@@ -752,7 +752,7 @@ Day-zero — foreground notification is a base UX need.
 
 ```ts
 // clipboard_write
-type ClipboardWriteArgs = { text: string };  // bounded: ≤ 256 KB
+type ClipboardWriteArgs = { text: string };  // bounded: ≤ 1 MiB
 type ClipboardWriteResult = { ok: true };
 
 // clipboard_read (placeholder)
@@ -761,6 +761,8 @@ type ClipboardReadResult = { text: string };
 ```
 
 Permission: per-invocation for both (browser's own permission prompts mediated by host). Day-zero is write-only because read leaks ambient user data; write is the common pack need (copy-this-link-style flows).
+
+Status: shipped. Impl: `lib/js_caps/clipboard_write.js`. Tests: `lib/js_caps/caps.test.js` (validation, 1 MiB size cap, happy path / NotAllowedError / missing-API via mocked `navigator.clipboard`, non-constructable). The 1 MiB cap reflects clipboard usage in practice -- it is a UI primitive for paste-back flows (links, snippets, short text), not a bulk-data channel; multi-megabyte payloads are almost certainly a serialisation bug and should be surfaced at the cap call rather than handed to the OS clipboard.
 
 #### 4.10.6 Fullscreen — see 4.4.12.
 

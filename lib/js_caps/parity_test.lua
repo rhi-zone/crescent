@@ -29,11 +29,11 @@ end
 -- =====================================================================
 -- Cap-kind corpus. Each entry maps a documented day-zero cap kind (in
 -- docs/browser_caps.md §5) to a substring that MUST appear in
--- caps.test.js. The eight kinds below are the ones currently shipped
+-- caps.test.js. The nine kinds below are the ones currently shipped
 -- (six trivial pure-wrap caps + set_timeout + web_crypto_subtle, which consumes the
--- cap-bridge AbortSignal extension per docs/platform_isolation.md §4);
--- the remaining caps land in subsequent commits and will be added here
--- when their impls land.
+-- cap-bridge AbortSignal extension per docs/platform_isolation.md §4,
+-- + clipboard_write); the remaining caps land in subsequent commits
+-- and will be added here when their impls land.
 -- =====================================================================
 
 local SPEC_RULES = { --: SpecItem[]
@@ -128,9 +128,26 @@ local SPEC_RULES = { --: SpecItem[]
     doc = "web_crypto_subtle: non-constructable (concise/arrow)" },
   { needle = "web_crypto_subtle: CryptoKey survives structured clone",
     doc = "web_crypto_subtle: CryptoKey survives the bridge boundary" },
+  -- clipboard_write
+  { needle = "clipboard_write: non-string number throws TypeError",
+    doc = "clipboard_write: validation failure on non-string number" },
+  { needle = "clipboard_write: non-string object throws TypeError",
+    doc = "clipboard_write: validation failure on non-string object" },
+  { needle = "clipboard_write: null throws TypeError",
+    doc = "clipboard_write: validation failure on null" },
+  { needle = "clipboard_write: oversized text rejects with RangeError",
+    doc = "clipboard_write: 1 MiB size cap" },
+  { needle = "clipboard_write: happy path writes through to navigator.clipboard.writeText",
+    doc = "clipboard_write: happy path via mocked navigator.clipboard" },
+  { needle = "clipboard_write: NotAllowedError propagates",
+    doc = "clipboard_write: permission denial propagates" },
+  { needle = "clipboard_write: missing navigator.clipboard throws clear error",
+    doc = "clipboard_write: graceful error when API absent" },
+  { needle = "clipboard_write: non-constructable",
+    doc = "clipboard_write: non-constructable (arrow function)" },
   -- dayZeroCaps aggregate
-  { needle = "dayZeroCaps: contains the 8 shipped caps",
-    doc = "dayZeroCaps map contains the 8 shipped names" },
+  { needle = "dayZeroCaps: contains the 9 shipped caps",
+    doc = "dayZeroCaps map contains the 9 shipped names" },
   { needle = "dayZeroCaps: does not contain the deferred caps",
     doc = "dayZeroCaps map excludes deferred cap names" },
 }

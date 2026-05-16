@@ -15,8 +15,8 @@ end
 -- This module ships the 6 trivial pure-wrap caps plus `set_timeout`
 -- (cancellable via the cap-bridge AbortSignal extension,
 -- docs/platform_isolation.md §4) plus `web_crypto_subtle` (op-
--- discriminated wrap of SubtleCrypto). The remaining caps land in
--- subsequent commits.
+-- discriminated wrap of SubtleCrypto) plus `clipboard_write`. The
+-- remaining caps land in subsequent commits.
 --
 -- Lua callers MUST NOT call any cap function at runtime -- they error.
 -- The functions exist so Lua code that assembles browser-side pipelines
@@ -47,6 +47,7 @@ local M = {}
 --:: ConsoleLogFn   = (...unknown) -> nil
 --:: RandomFn       = (byte_length: integer) -> unknown
 --:: SetTimeoutFn   = (delay_ms: number, opts: SetTimeoutOpts | nil) -> nil
+--:: ClipboardWriteFn = (text: string) -> nil
 
 -- WebCryptoSubtleFn: op-discriminated single-cap dispatch over
 -- crypto.subtle. The args shape varies per op (encrypt/decrypt/sign/
@@ -67,6 +68,7 @@ local M = {}
 --::   web_crypto_random: RandomFn,
 --::   web_crypto_subtle: WebCryptoSubtleFn,
 --::   set_timeout:       SetTimeoutFn,
+--::   clipboard_write:   ClipboardWriteFn,
 --:: }
 
 --: (string) -> unknown
@@ -111,6 +113,11 @@ function M.web_crypto_subtle(_args)
   error("lib/js_caps is type-only on the Lua side.")
 end
 
+--: (string) -> nil
+function M.clipboard_write(_text)
+  error("lib/js_caps is type-only on the Lua side.")
+end
+
 --:: dayZeroCaps_type = DayZeroCaps
 M.dayZeroCaps = {
   text_encode       = M.text_encode,
@@ -121,6 +128,7 @@ M.dayZeroCaps = {
   web_crypto_random = M.web_crypto_random,
   web_crypto_subtle = M.web_crypto_subtle,
   set_timeout       = M.set_timeout,
+  clipboard_write   = M.clipboard_write,
 }
 
 return M
