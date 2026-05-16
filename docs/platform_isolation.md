@@ -349,10 +349,22 @@ replaced with `undefined`-returning getters.
   `isPrototypeOf`. Justification: prototype-access / mutation reach.
 - **`Function` constructor.** Removed entirely. Closes
   `new Function("...")`.
-- **`Function.prototype`.** Kept: `call`, `apply`, `bind` (bind kept
-  pending adversarial review — see §7).
+- **`Function.prototype`.** Kept: `call`, `apply`, `bind`.
   `.constructor` neutralised (`undefined`, non-configurable).
   `toString` removed (function-source leak).
+  **`bind` kept** after adversarial review. Attack matrix tried: bind
+  chains, bind on stripped-constructor remnants,
+  `Function.prototype.call.bind(call)` uncurry, `Symbol.hasInstance`
+  interaction, `[[Construct]]` via `new boundFn`,
+  `Function.prototype.toString` source leak. Each is independently
+  closed by other spec elements (stripped globals, `.constructor =
+  undefined`, removed Reflect, banned `class`, removed
+  `Function.prototype.toString`). The `[[Construct]]` preservation
+  under `extends boundBuiltin` is the only residual hazard and is
+  closed by the class ban — load-bearing. `bind` safety is
+  **conditional** on strict-mode loading of pack code and the `class`
+  ban (including `extends <any-expression>`); see "Language-level
+  constraints" and "Bootstrap order".
 - **`AsyncFunction` / `GeneratorFunction` / `AsyncGeneratorFunction`
   constructors.** Removed entirely; the corresponding
   `.prototype.constructor` slots neutralised to close shadow paths.
@@ -371,11 +383,27 @@ replaced with `undefined`-returning getters.
 - **`Math`.** Kept full (no security-relevant state).
 - **`JSON`.** `stringify` / `parse` wrapped with input-size cap,
   output-size cap (both `SIZE_CAP`), depth cap.
-- **Size cap (`SIZE_CAP`).** Single canonical value applied across
-  `Array(n)`, `String.prototype.repeat`, and JSON input/output size.
-  Default: **128M (`2^27 = 134_217_728`)**. Configurable per-pack via
-  manifest entry; a pack manifest may declare a *lower* cap to
-  constrain itself further, but cannot exceed the default.
+- **Size cap (`SIZE_CAP`).** Single canonical value. Default: **128M
+  (`2^27 = 134_217_728`)**. Configurable per-pack via manifest entry; a
+  pack manifest may declare a *lower* cap to constrain itself further,
+  but cannot exceed the default. Enforced uniformly on every known
+  amplifier path:
+  - `Array(n)` constructor.
+  - `Array.from(arrayLike)` and `Array.from(iterable, mapFn)` — check
+    `arrayLike.length` or iterator count against the cap.
+  - `Array.of(...args)` — cap argument count.
+  - `String.fromCharCode(...args)` / `String.fromCodePoint(...args)`
+    — cap argument count.
+  - `String.prototype.repeat` / `padStart` / `padEnd` — cap output
+    length.
+  - `Array.prototype.join` / `flat` / `flatMap` — cap output length.
+  - `JSON.stringify` (output size) and `JSON.parse` (input size +
+    depth).
+
+  `SIZE_CAP` is per-operation, not a realm-wide live-allocation
+  budget. A pack issuing many cap-sized operations can still exhaust
+  the tab; the wall-clock + memory watchdog (§2) is the
+  defence-in-depth for that.
 - **`Date` / `performance.now` / `Date.now`.** Kept as the browser
   provides them — no custom coarsening layer. The realm relies on the
   browser's built-in Spectre-mitigation coarsening of `performance.now`
@@ -387,7 +415,41 @@ replaced with `undefined`-returning getters.
 - **`Map`, `Set`, `WeakMap`, `WeakSet`.** Kept. `WeakRef` and
   `FinalizationRegistry` removed (GC observation).
 - **`Symbol`.** Kept; `Symbol.unscopables` and any reflection-relevant
-  well-known symbols neutralised.
+  well-known symbols neutralised. **`Symbol.for` and `Symbol.keyFor`
+  removed** — the well-known symbol registry is process-wide and
+  cross-realm, and a covert side-channel between two pack realms in
+  the same agent cluster has no legitimate use. Local symbols
+  (`Symbol("desc")`) remain available.
+- **`Object.prototype.toString`** is kept (callers rely on
+  `.toString()` working on arbitrary values). It leaks `[[Class]]`
+  brand info (e.g. `Object.prototype.toString.call([])` returns
+  `"[object Array]"`). Accepted as a side channel; no attempt to
+  mask. If brand-fingerprinting of bridged values becomes a concern,
+  replace with a brand-agnostic version returning `"[object Object]"`
+  for everything.
+- **`Error` / `TypeError` / `SyntaxError` / `RangeError` /
+  `ReferenceError` / `URIError` / `EvalError` / `AggregateError`.**
+  Kept as types. `.stack` neutralised on each prototype — getter
+  returns an empty string (or a fixed placeholder) so pack code
+  cannot introspect bootstrap or bridge source paths.
+  `Error.captureStackTrace`, `Error.stackTraceLimit`, and
+  `Error.prepareStackTrace` (V8) are removed. `.prototype.constructor`
+  neutralised like every other kept prototype.
+- **`RegExp` static legacy properties** (`$1`–`$9`, `input`,
+  `leftContext`, `rightContext`, `lastMatch`, `lastParen`, plus the
+  `$_` / `$&` / `` $` `` / `$'` / `$+` aliases): all neutralised —
+  getter returns empty string or `undefined`. These are global
+  state shared across every regex operation in the realm, including
+  bootstrap and bridge code, and would leak last-match contents.
+  `RegExp.prototype.compile` removed.
+- **Anonymous iterator prototypes** (e.g. `%IteratorPrototype%`,
+  `%ArrayIteratorPrototype%`, `%StringIteratorPrototype%`,
+  `%MapIteratorPrototype%`, `%SetIteratorPrototype%`,
+  `%RegExpStringIteratorPrototype%`, `%TypedArrayPrototype%`): walk
+  reachable via `Symbol.iterator` calls on allowed intrinsics; freeze
+  and neutralise their `.constructor` slot like other prototypes.
+  (Generator and async iterator prototypes are inert because their
+  constructors are removed.)
 - **`Proxy`, `Reflect`.** Removed entirely. Powerful reflection; pack
   code does not need these.
 - **`ArrayBuffer`, `DataView`, typed-array family.** Kept (real use
@@ -399,6 +461,12 @@ replaced with `undefined`-returning getters.
   bootstrap *before* pack code loads. Pack-side references to
   `globalThis` resolve to this curated object, never to the real
   realm global (which would leak `eval`, `Function`, and the rest).
+  The curated `globalThis` is itself `Object.freeze`d at the end of
+  bootstrap (see step 6) so pack code cannot add, replace, or shadow
+  host-installed slots on it. `__cap__` is installed via
+  `defineProperty` with `writable:false, configurable:false` *before*
+  the freeze. Pack code can still create its own local variables; it
+  just cannot mutate the realm root.
 - **Host-bridged caps.** Installed by name as declared in the pack
   manifest, after lockdown completes.
 
@@ -412,8 +480,13 @@ daemon/general libraries.
 Enforced statically by the source-level checker (`bin/cr check`), not
 removable at runtime:
 
-- `class` syntax disallowed (desugars to prototype manipulation,
-  bypassing the runtime removal of `Object.setPrototypeOf`).
+- `class` syntax disallowed — both class declarations (`class X {}`)
+  and class expressions (`const X = class {}`). The ban explicitly
+  covers `extends <any-expression>`: `class X extends someValue {}`
+  for *any* value of `someValue` is forbidden, because `extends` can
+  resurrect `[[Construct]]` slots from values reachable via allowed
+  paths (notably `bind`, see the `Function.prototype` entry — class
+  ban is load-bearing for bind safety).
 - Generators / `function*` disallowed.
 - `async function` / `await` — kept (source-level allowed;
   `AsyncFunction` constructor removed, so dynamic construction from
@@ -422,6 +495,13 @@ removable at runtime:
 - `with` statement disallowed (legacy reflection).
 - `eval` keyword and `Function` constructor in source — already
   removed at runtime; static check flags at `bin/cr check` for DX.
+- Pack code is loaded in strict mode — either as `<script
+  type='module'>` (strict by spec) or with a `'use strict';` prelude
+  applied by the bootstrap. Non-strict mode is forbidden because
+  `this` in a sloppy-mode function returns the realm's `globalThis`,
+  which the curated-namespace approach assumes is unreachable as a
+  free `this`. The bootstrap is responsible for guaranteeing
+  strict-mode loading.
 
 #### Bootstrap order
 
@@ -432,8 +512,12 @@ removable at runtime:
    wrapped/bounded versions or `undefined`.
 4. Neutralise `.constructor` slots on every kept prototype.
 5. Install host-bridged caps under their declared names.
-6. `Object.freeze` every kept intrinsic and its prototype.
-7. Load pack code.
+6. `Object.freeze` every kept intrinsic and its prototype, **and the
+   curated `globalThis` namespace object itself**, so pack code
+   cannot add, replace, or shadow host-installed properties on it.
+   `__cap__` is installed via `defineProperty` with `writable:false,
+   configurable:false` *before* this freeze.
+7. Load pack code (in strict mode — see "Language-level constraints").
 
 #### Escape-test corpus
 
@@ -461,6 +545,17 @@ returns a safe value.
   deep JSON, ReDoS regex
 - Dynamic `import("data:...")`
 - Source-level `eval("...")`, `new Function("...")`
+- `new Error().stack` — must return `""` or a fixed placeholder.
+- `"abc".match(/(a)/); RegExp.$1` — must return `""` or `undefined`.
+- `Array.from({length: 1e9}, () => 0)` — must throw above `SIZE_CAP`.
+- `Array.of(...Array(1e9))` — must throw above `SIZE_CAP`.
+- `String.fromCharCode.apply(null, Array(1e9))` — must throw above
+  `SIZE_CAP`.
+- `Symbol.for("x")` — must throw or return `undefined` (removed).
+- `globalThis.__cap__ = "evil"` — must throw (curated `globalThis`
+  frozen).
+- `class X extends [].constructor {}` — must SyntaxError at parse
+  (class banned, including `extends <any-expression>`).
 
 ### Browser-side authoring
 
@@ -651,6 +746,19 @@ The stub:
 5. Logs an entry (cap name, arg digest, timestamp, result kind) to the
    daemon audit log.
 
+**No implicit coercion of pack-supplied values.** A cap implementation
+that receives a pack value and does `String(value)`, `"" + value`, or
+arithmetic on it triggers `Symbol.toPrimitive` / `valueOf` /
+`toString` callbacks, which run synchronously back in the pack realm
+on the host's stack. Always treat pack values as opaque: validate
+shape against the declared cap argument type before any operation
+that might trigger coercion, and prefer structured-clone semantics
+(`postMessage`-style) at the bridge boundary so coercion cannot
+occur. Symmetrically, stub→pack values must be pre-serialised
+JSON-safe values, never thenables the stub did not construct
+itself — `Promise.resolve(thenable)` invokes `thenable.then` and
+foreign thenables are pack-controlled callable surface.
+
 ### Pack-side API
 
 Synchronous-feeling, async-implemented:
@@ -771,16 +879,6 @@ Initiative B's resumption.
 These are explicit. They are not buried in prose because they need
 decision-level attention, not skimming.
 
-- **Adversarial review of `Function.prototype.bind`.** Bind is kept
-  in the allow-list by default, but is the explicit remaining gate
-  on the spec before lockdown ships. A reviewer must attempt
-  escapes: `.bind.bind.bind...` chains, `bind` on stripped-constructor
-  `[[Construct]]` shadows, `bind` interactions with allowed
-  intrinsics (typed arrays, Promise, Reflect-shaped surfaces that
-  survive lockdown, etc.). If the review clears after an honest
-  attempt, `bind` stays as specified. If any vector is found, `bind`
-  is removed from the allow-list and the attack is documented in the
-  spec.
 - **Shared `.d.ts` location.** Single host-served declaration file for
   the realm allow-list, cap signatures, VNode shape, and bridge
   protocol. `lib/platform/browser_types.d.ts` or a daemon-served static
