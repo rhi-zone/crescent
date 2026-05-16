@@ -349,22 +349,50 @@ replaced with `undefined`-returning getters.
   `isPrototypeOf`. Justification: prototype-access / mutation reach.
 - **`Function` constructor.** Removed entirely. Closes
   `new Function("...")`.
-- **`Function.prototype`.** Kept: `call`, `apply`, `bind`.
-  `.constructor` neutralised (`undefined`, non-configurable).
-  `toString` removed (function-source leak).
-  **`bind` kept** after adversarial review. Attack matrix tried: bind
-  chains, bind on stripped-constructor remnants,
-  `Function.prototype.call.bind(call)` uncurry, `Symbol.hasInstance`
-  interaction, `[[Construct]]` via `new boundFn`,
-  `Function.prototype.toString` source leak. Each is independently
-  closed by other spec elements (stripped globals, `.constructor =
-  undefined`, removed Reflect, banned `class`, removed
-  `Function.prototype.toString`). The `[[Construct]]` preservation
-  under `extends boundBuiltin` is the only residual hazard and is
-  closed by the class ban — load-bearing. `bind` safety is
-  **conditional** on strict-mode loading of pack code and the `class`
-  ban (including `extends <any-expression>`); see "Language-level
-  constraints" and "Bootstrap order".
+- **`Function.prototype`.** Kept: `call`, `apply`. `bind` replaced
+  (see below). `.constructor` neutralised (`undefined`,
+  non-configurable). `toString` removed (function-source leak).
+  **`Function.prototype.bind`**: replaced with a non-constructable
+  wrapper. The wrapper preserves call semantics, `.length`, and
+  `.name` (per native bind spec), but its returned function has no
+  `[[Construct]]` slot. `new bound()` and `class X extends bound {}`
+  both throw `TypeError`. Achieved via concise method syntax
+  (`{ bound(...args) {...} }.bound`) or arrow function — both produce
+  callables without `[[Construct]]`. Reference: endo's
+  `makeEvalFunction` (`packages/ses/src/make-eval-function.js`) uses
+  the same pattern for `eval`. (Supersedes the earlier "bind kept
+  after adversarial review" verdict — that was conditional on
+  daemon-side parser enforcement of the `class` ban, which is no
+  longer assumed; see "Pack-source validation".)
+
+##### Non-constructable wrapper pattern
+
+Any callable installed into the realm that doesn't need to be a
+constructor SHOULD have its `[[Construct]]` slot removed. This is a
+uniform application of least-privilege at the function-shape level.
+Reduces attack surface against any future class-extends-`X` vector.
+
+Apply this to:
+
+- **`Function.prototype.bind` replacement** (above).
+- **Host-bridged caps**: when installing `opts.caps` onto the curated
+  `__cap__` namespace, wrap each in a non-constructable shell:
+  ```js
+  const safeCap = { [name](...args) { return cap(...args); } }[name];
+  ```
+  Pack code can't `new __cap__.foo(...)` to trigger constructor
+  semantics on a function the host didn't intend to be constructable.
+- **All bootstrap-installed wrappers** (bounded methods, regex
+  wrappers, etc.): authored as concise method syntax or arrow
+  functions, NOT as `function () {...}` (which has `[[Construct]]`).
+  Audit-required.
+- **`eval` equivalents** if any exposed (none currently; pattern
+  applies if it ever becomes one).
+
+Two equivalent techniques: arrow function (no `[[Construct]]`, no own
+`this`) and concise method syntax (no `[[Construct]]`, has own
+`this`). Pick concise method when caller's `this` matters; arrow
+function for pure delegation.
 - **`AsyncFunction` / `GeneratorFunction` / `AsyncGeneratorFunction`
   constructors.** Removed entirely; the corresponding
   `.prototype.constructor` slots neutralised to close shadow paths.
@@ -475,43 +503,44 @@ replaced with `undefined`-returning getters.
 browser-side libraries**, parallel to plain `lib/<name>/` for
 daemon/general libraries.
 
-#### Pack-source validation (daemon-side)
+#### Pack-source validation (author-side hygiene)
 
-**Resolved: daemon-side parse-and-validate at pack-load using a
-vendored JS parser (acorn, or equivalent).** The runtime allow-list
-realm cannot enforce syntax-level bans — by the time JS reaches the
-browser engine, parsing has already happened and `class` /
-generator / `with` / dynamic-import syntax has already been
-constructed. Static analysis pre-serve is the only mechanism that
-actually enforces syntactic constraints.
+**Resolved: the daemon enforces no parser-side rules. The runtime
+sandbox (`lib/js_realm_sandbox/`) is the security boundary, period.**
+An earlier revision called for daemon-side parse-and-validate at
+pack-load using a vendored JS parser (acorn or equivalent). Rejected
+because:
 
-The daemon parses every pack-supplied browser JS file with acorn at
-pack-load time and validates the resulting AST against a defined
-"pack JS" subset grammar — an allow-list of AST node shapes.
-Validation failure rejects the pack with a structured error pointing
-at the offending source location; the pack does not serve. Acorn is
-small (~50kb), pure-JS, well-tested; vendored into `dep/`. No
-author-side toolchain requirement: the author ships standard JS, the
-daemon does the gate.
+- Bundling bun (or any JS interpreter) into crescent's runtime
+  distribution violates zero-dependency.
+- A Lua-native JS parser is multi-week effort and a maintenance
+  burden.
+- Acorn-as-WASM has no clean off-the-shelf path.
 
-The framing is allow-list, not deny-list, for the same reasons the
-runtime lockdown is: deny-lists rot as the language grows; an
-allow-list closes new TC39 syntax by structural absence.
+Therefore: **daemon enforces no parser-side rules.** All
+language-level constraints that the parser-side rules covered are
+either handled at runtime (eval, Function constructor, dynamic import
+via CSP, `with` via strict mode, class-extends-bind via patched-bind),
+OR become author hygiene (no daemon enforcement, recommended-tool
+only).
+
+A `lib/js_pack_validator/` library (author hygiene tool, JS+bun,
+optional) will exist for authors to validate during dev/CI before
+publishing. It is NOT in the daemon critical path.
 
 **Prior art: hologram.** `~/git/exoplace/hologram/src/logic/expr-compiler.ts`
 validates expressions against a restricted grammar at compile time;
-the attack surface is enumerable from the grammar definition itself,
-with no runtime lockdown library needed for the expression layer.
-Crescent's pack-JS subset is much richer than hologram's 7-node
-expression grammar (full pack apps, not single expressions), but the
-*principle is the same*: allow-list of AST node shapes, not deny-list
-of dangerous forms.
+the attack surface is enumerable from the grammar definition itself.
+The pack-JS subset documented below is the *recommended* author-side
+shape the optional validator enforces — same allow-list-of-AST-shapes
+principle, but applied as author hygiene rather than a daemon gate.
 
 #### Pack JS subset (draft)
 
-> *Draft. Spec the daemon validator implements. Invites revision —
-> the open questions at the end of this subsection block its move to
-> "stable".*
+> *Draft. The pack-author's recommended subset, enforced by the
+> optional `lib/js_pack_validator/` author tool. Not a daemon
+> requirement — the daemon serves whatever the author ships; the
+> runtime sandbox is the security boundary. Invites revision.*
 
 **Allowed AST node types:**
 
@@ -589,25 +618,24 @@ state-explosion check) are a future improvement; the simple
 invariant covers the common attack class. Reference implementation:
 `~/git/exoplace/hologram/src/logic/safe-regex.ts`.
 
-**Site 1: Regex literals (`/pattern/flags`).** Parse-time. The acorn
-pass walks every `Literal` node with a `regex` field and runs the
-safe-regex check on the pattern. Reject pack-load on failure.
+**Site 1: Regex literals (`/pattern/flags`).** Runtime. The realm's
+`RegExp` constructor wrapper sees literal-built regex objects through
+the same path it sees `new RegExp` calls (via `.source`). The
+optional `lib/js_pack_validator/` author tool may additionally walk
+every `Literal` node with a `regex` field at author time for early
+feedback, but the load-bearing check is runtime.
 
-**Site 2: `new RegExp(pat, flags)`.** Hybrid:
-
-- If `pat` is a static string literal: parse-time check.
-- If `pat` is dynamic (variable, expression, computed): runtime
-  check via the realm-installed `RegExp` constructor wrapper.
+**Site 2: `new RegExp(pat, flags)`.** Runtime. The realm-installed
+`RegExp` constructor wrapper runs the safe-regex check on `pat`
+before delegating to the native constructor. (Author-side static
+hygiene via the optional validator is welcome but not load-bearing.)
 
 **Site 3: `String.prototype.match(pat)`, `.matchAll(pat)`,
 `.search(pat)`.** These methods implicitly coerce a string `pat` to
-a regex via `new RegExp(pat)` internally. Validate. (Note:
-`.replace` / `.replaceAll` / `.split` treat string args as literal,
-not regex — they do NOT need this check.)
-
-- If `pat` is a static string literal in source: parse-time check.
-- If `pat` is dynamic: runtime check via realm-installed
-  prototype-method wrapper.
+a regex via `new RegExp(pat)` internally. Validate at runtime via
+the realm-installed prototype-method wrapper. (Note: `.replace` /
+`.replaceAll` / `.split` treat string args as literal, not regex —
+they do NOT need this check.)
 
 **Shared verdict cache.** Realm-installed at bootstrap:
 
@@ -631,32 +659,42 @@ delegates to the underlying native method which builds its own).
 
 #### Language-level constraints
 
-Enforced by the daemon-side pack-source validator described in
-"Pack-source validation" above, not removable at runtime:
+The bootstrap-side runtime defends against the load-bearing
+language-level vectors (bind patched non-constructable closes
+class-extends-bind; strict mode forced via daemon-side prepend
+closes `with` and sloppy-`this`); the rest become author hygiene,
+recommended via `lib/js_pack_validator/` but not daemon-enforced.
 
-- `class` syntax disallowed — both class declarations (`class X {}`)
-  and class expressions (`const X = class {}`). The ban explicitly
-  covers `extends <any-expression>`: `class X extends someValue {}`
-  for *any* value of `someValue` is forbidden, because `extends` can
-  resurrect `[[Construct]]` slots from values reachable via allowed
-  paths (notably `bind`, see the `Function.prototype` entry — class
-  ban is load-bearing for bind safety).
-- Generators / `function*` disallowed.
+- `class` syntax — author hygiene only (recommended off). The
+  load-bearing `extends <bound>` vector is closed structurally by
+  the non-constructable bind wrapper (see `Function.prototype`
+  entry), so the class ban is no longer security-load-bearing.
+  `extends <any-expression>` against other reachable values
+  remains a recommended-against pattern; the validator flags it.
+- Generators / `function*` — author hygiene only. Source-level
+  generators are inert because `GeneratorFunction` is removed and
+  the iterator prototypes are neutralised; generator syntax in
+  source has no escape path, but is recommended-against for
+  consistency.
 - `async function` / `await` — kept (source-level allowed;
   `AsyncFunction` constructor removed, so dynamic construction from
   string is blocked while normal async/await syntax remains
   available).
-- `with` statement disallowed (legacy reflection).
+- `with` statement — closed structurally by strict-mode loading
+  (strict mode forbids `with`). No author-side check needed; the
+  syntax errors at parse time inside a strict script.
 - `eval` keyword and `Function` constructor in source — already
-  removed at runtime; the daemon validator rejects pack-load on
-  occurrence for early failure and clear error reporting.
-- Pack code is loaded in strict mode — either as `<script
-  type='module'>` (strict by spec) or with a `'use strict';` prelude
-  applied by the bootstrap. Non-strict mode is forbidden because
-  `this` in a sloppy-mode function returns the realm's `globalThis`,
-  which the curated-namespace approach assumes is unreachable as a
-  free `this`. The bootstrap is responsible for guaranteeing
-  strict-mode loading.
+  removed at runtime; author validator may flag for early feedback.
+- **Strict mode is daemon-side enforced.** The daemon prepends
+  `'use strict';` to every served pack JS file (string concat at
+  serve time), OR serves with `Content-Type: text/javascript`
+  inside a `<script type='module'>` (ESM is strict by default).
+  Either path is absolute and trivial; pack-author can't opt out.
+  This is the load-bearing strict-mode mechanism. Non-strict mode
+  is forbidden because `this` in a sloppy-mode function returns the
+  realm's `globalThis`, which the curated-namespace approach
+  assumes is unreachable as a free `this`. The bootstrap *assumes*
+  strict; it does not have to enforce it.
 
 #### Bootstrap order
 
@@ -709,8 +747,11 @@ returns a safe value.
 - `Symbol.for("x")` — must throw or return `undefined` (removed).
 - `globalThis.__cap__ = "evil"` — must throw (curated `globalThis`
   frozen).
-- `class X extends [].constructor {}` — must SyntaxError at parse
-  (class banned, including `extends <any-expression>`).
+- `class X extends [].constructor.bind() {}` — must throw at class
+  evaluation (the bound function has no `[[Construct]]` slot, so
+  `extends` rejects it).
+- `new ([].constructor.bind())()` — must throw `TypeError` (bound
+  wrapper non-constructable).
 
 ### Browser-side authoring
 
@@ -1074,19 +1115,15 @@ decision-level attention, not skimming.
 - **Testing.** What does a pack author's local development experience look
   like? They have to test their pack inside the sandbox model; the harness
   has to replicate the runtime.
-- **Pack-JS subset finalisation.** Convert the §3 "Pack JS subset
-  (draft)" into a stable spec; resolve the open questions inline
-  (computed property keys in spread/rest patterns, `Proxy`/`Reflect`
-  identifier rejection at parse, Symbol literal policy, top-level
-  `await`).
-- **Acorn versioning and vendoring strategy.** Pin a specific acorn
-  version under `dep/`; decide upgrade cadence and how
-  parser-spec drift (new ECMAScript editions) feeds back into the
-  subset spec.
 - **Safe-regex algorithm.** Stick with the
   quantifier-on-quantifier ban (cheap, hologram-shaped) or upgrade
   to alternation-overlap analysis / Thompson-NFA
   state-explosion check? Cost-benefit unevaluated.
+- **`lib/js_pack_validator/` packaging.** Where does the optional
+  author-hygiene validator live, and does it ship with crescent or
+  as a separate package? It is JS+bun, runs in author dev/CI, and
+  is explicitly outside the daemon critical path — that makes its
+  packaging location a real question rather than a default.
 
 ## 8. Alternatives considered
 
@@ -1148,19 +1185,39 @@ daemon's grant model, so the "user installed it = trusted" assumption
 does not transfer. Every pack is untrusted user code with capability
 surface; in-realm execution is unsafe.
 
-### Language-level constraints enforced only at runtime (no static analysis) — rejected
+### Daemon-side parser-level enforcement (acorn vendored, JS-parser-from-Lua, etc.) — rejected
 
-Considered relying solely on the realm allow-list to neutralise
-language features — no daemon-side parser, no pack-source
-validation, just deletion of the relevant constructors and runtime
-wrappers. Rejected because by the time JS reaches the browser
-engine, `class` syntax has already been parsed and constructed;
-runtime cannot un-define syntax. `class X extends boundBuiltin {}`
-is a syntactic form, not a method call — there is no slot to delete
-that closes it. Static analysis pre-serve (the daemon-side acorn
-pass described in §3) is the only mechanism that actually enforces
-syntactic bans. The runtime allow-list closes constructor-reach;
-the daemon validator closes syntax-reach; both are required.
+An earlier revision called for daemon-side parse-and-validate at
+pack-load using acorn (or a Lua-native JS parser, or a WASM JS
+parser). Rejected because:
+
+- Bundling bun or any JS interpreter into crescent's runtime
+  distribution violates zero-dependency.
+- A Lua-native JS parser is multi-week effort and a continuing
+  maintenance burden against an evolving language.
+- Acorn-as-WASM has no clean off-the-shelf path.
+
+The runtime sandbox (`lib/js_realm_sandbox/`) is therefore the only
+security boundary. Language-level constraints either get a runtime
+fallback (class-extends-bind closed by non-constructable bind;
+`with` and sloppy-`this` closed by daemon-prepended strict mode;
+`eval` / `Function` / dynamic `import()` closed by deletion + CSP) or
+become author hygiene via the optional `lib/js_pack_validator/`.
+
+### Language-level constraints enforced only at runtime — accepted (with runtime fallbacks for the load-bearing cases)
+
+An earlier revision listed this option as rejected on the grounds
+that runtime cannot un-define syntax. That framing was wrong: the
+load-bearing syntactic vectors all have runtime fallbacks. `class X
+extends boundBuiltin {}` is closed not by banning the `class`
+keyword but by making `boundBuiltin` non-constructable, so
+`extends` rejects it at class-evaluation time. `with` and
+sloppy-`this` are closed by forcing strict mode at serve time
+(strict scripts SyntaxError on `with`). Generator syntax is inert
+because the relevant constructors and iterator prototypes are
+removed. The runtime allow-list + non-constructable wrappers +
+daemon-side strict-mode prepend, together, close every
+load-bearing syntactic vector without parser-side enforcement.
 
 ## 9. Non-goals
 
