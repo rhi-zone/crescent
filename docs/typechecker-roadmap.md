@@ -14,8 +14,9 @@ Summary:
 discriminated union narrowing, bidirectional inference, type predicates,
 match-types-as-type-level-computation.
 
-**Known unsoundness:** rank-N subsumption at call sites, HM Phase 2
-field-value-type propagation, variance annotations on generic params.
+**Known unsoundness:** HM Phase 2 field-value-type propagation. (Rank-N
+subsumption landed 2026-05-17, commit `289bc54d`. Variance was demoted from
+soundness to expressiveness — see Phase A.5 below.)
 
 **Not implemented:** higher-kinded types, effect tracking, impredicativity,
 GADT-strength flow typing, refinement types, linear types.
@@ -31,15 +32,12 @@ Any "more powerful" claim presupposes the basics are sound. These items
 actively poison the repo today: future sessions will reach for features that
 appear to work and build on the unsoundness.
 
-### A1. Rank-N subsumption at call sites
+### A1. Rank-N subsumption at call sites — **DONE**
 
-**State:** designed, pinned, not implemented.
-
-- Design: `docs/typechecker-rank-n.md`
-- Pinned tests: `lib/type/static/type_soundness_test.lua`,
-  `assert.describe("soundness: rank-N polymorphism call-site (KNOWN GAP)")`,
-  commit `a017b046`.
-- TODO: `TODO.md` under HM let-polymorphism Phase 1 → Still open.
+Landed 2026-05-17, commit `289bc54d`. Design: `docs/typechecker-rank-n.md`.
+Pinned tests in `lib/type/static/type_soundness_test.lua` (`soundness:
+rank-N polymorphism call-site`) all flip to `has_error`; body-check control
+N9 unchanged; variance probe confirms no variance dependency.
 
 ### A2. HM Phase 2 — field-value-type propagation
 
@@ -49,16 +47,8 @@ designed.
 Generic params do not propagate field-value constraints through bounds.
 Example from TODO.md: `f(t) return t.x + t.y end; f({x="a", y="b"})` silently
 passes when it should error. Needs a design doc analogous to
-`typechecker-rank-n.md` before implementation.
-
-### A3. Variance annotations
-
-**State:** known unsoundness, `docs/soundness-audit.md` Gap 3. Structural
-subtyping happens to catch some bad cases but the discipline is missing.
-
-Interacts with A1: rank-N subsumption needs variance-correct behavior on
-container types (`<T>(Container<T>) -> T` vs. `(Container<number>) -> number`).
-The two should probably be designed jointly or A3 deferred until A1 lands.
+`typechecker-rank-n.md` before implementation. **Real soundness work — the
+only remaining Phase A item.**
 
 ## Phase B — Power (in priority order)
 
