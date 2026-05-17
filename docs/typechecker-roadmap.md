@@ -14,9 +14,13 @@ Summary:
 discriminated union narrowing, bidirectional inference, type predicates,
 match-types-as-type-level-computation.
 
-**Known unsoundness:** HM Phase 2 field-value-type propagation. (Rank-N
-subsumption landed 2026-05-17, commit `289bc54d`. Variance was demoted from
-soundness to expressiveness — see Phase A.5 below.)
+**Known unsoundness:** none currently identified. Rank-N landed 2026-05-17
+(commit `289bc54d`); HM Phase 2 field-value-type propagation landed
+2026-05-15 (commits `3c3cadaf` design through `52873f05` perf baseline);
+variance was demoted from soundness to expressiveness (Phase A.5). The
+session that wrote earlier versions of this roadmap incorrectly listed A2
+as open work based on a stale TODO.md entry — verifying against actual
+commits before designing future work is mandatory.
 
 **Not implemented:** higher-kinded types, effect tracking, impredicativity,
 GADT-strength flow typing, refinement types, linear types.
@@ -39,16 +43,21 @@ Pinned tests in `lib/type/static/type_soundness_test.lua` (`soundness:
 rank-N polymorphism call-site`) all flip to `has_error`; body-check control
 N9 unchanged; variance probe confirms no variance dependency.
 
-### A2. HM Phase 2 — field-value-type propagation
+### A2. HM Phase 2 — field-value-type propagation — **DONE**
 
-**State:** known unsoundness, open in TODO.md (line 372 area). Not yet
-designed.
+Landed 2026-05-15. Design: `docs/typechecker-hm-phase2.md`. Commits:
+`3c3cadaf` (design), `772fb7dd` (record `_forall_ops` on bound vars),
+`9260751e` (re-emit operations against instantiated arguments at call
+sites), `391bde98` (extend to `C_COMPARE`), `52873f05` (perf baseline),
+`92f866b2` (flip H3/H10 fuzz invariants), `169228eb` (xfail-comment
+sweep).
 
-Generic params do not propagate field-value constraints through bounds.
-Example from TODO.md: `f(t) return t.x + t.y end; f({x="a", y="b"})` silently
-passes when it should error. Needs a design doc analogous to
-`typechecker-rank-n.md` before implementation. **Real soundness work — the
-only remaining Phase A item.**
+Mechanism: generic parameters record field-projection and arithmetic
+operations performed on them inside the body as `_forall_ops`; at the
+call site, after argument types are known, those operations are re-emitted
+against the concrete argument types, so `f(t) return t.x + t.y end;
+f({x="a", y="b"})` now correctly errors with `cannot perform arithmetic
+on "a"` instead of silently passing.
 
 ## Phase A.5 — Variance (expressiveness, optional)
 

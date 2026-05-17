@@ -369,9 +369,20 @@ Commits (in order):
   compat, indexer bound rejection (commit 1196579e), and
   MISSING_FUNCTION_SIGNATURE warning demotion (36e5f292).
 
-- [ ] **Field-value-type propagation through HM bounds (Phase 2 unsoundness).**
+- [x] **Field-value-type propagation through HM bounds (Phase 2 unsoundness).**
+  Landed 2026-05-15. Design: `docs/typechecker-hm-phase2.md`. Commits
+  `3c3cadaf` (design), `772fb7dd` (record `_forall_ops` on bound vars),
+  `9260751e` (re-emission of recorded ops against instantiated arguments
+  at the call site), `391bde98` (extend to `C_COMPARE`), `52873f05`
+  (perf baseline), `92f866b2` (flip H3/H10 fuzz invariant from
+  "incorrectly passes" to "now errors"), `169228eb` (xfail-comment
+  sweep). Probe `local function f(t) return t.x + t.y end;
+  f({x="a", y="b"})` now correctly errors with `cannot perform
+  arithmetic on "a"`. Historical analysis below kept for design
+  archaeology.
+
   `function f(t) return t.x + t.y end` called with `{x="a", y="b"}` (both
-  literal strings — non-numeric, would runtime-error on `"a" + "b"`) is
+  literal strings — non-numeric, would runtime-error on `"a" + "b"`) was
   silently accepted. Same for `{x=true, y=false}`, `{x=nil, y=nil}`, etc.
   Verified via probe at session-end 2026-05-15. The earlier note
   attributing this to "string has __add via Lua's coercion" was wrong —
@@ -1600,8 +1611,10 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   - [ ] **`cr add` / `cr publish`** — blocked on live registry infrastructure
 
 - [ ] **Typechecker** — large ongoing backlog; dedicated sessions welcome.
-  Near-term candidates: access control design (see below), module-level LSP cache,
-  soundness gap 3 (generic variance). See typechecker section below for full list.
+  Near-term candidates: access control design (see below), module-level LSP cache.
+  (Variance was demoted from soundness to expressiveness, commit `ca64aeb1`; see
+  `docs/typechecker-variance.md` and the variance entry below.) See typechecker
+  section below for full list.
   - [x] **Overload checking against body** — implemented: `collect_preceding_run` in
     constrain.lua accumulates consecutive `--:` annotations into intersection types;
     `check_body_against_intersection` runs N inference passes (one per overload member).
@@ -1732,11 +1745,16 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   parameter is not substituted at instantiation. The indexer key stays as the raw type
   variable rather than the concrete argument. Found 2026-03-29 via lib/fp/ testing.
 
-- [ ] **Typechecker: generic variance** — all generics are currently invariant.
-  `Box<Dog>` is not a subtype of `Box<Animal>`. Blocks HKT subtype relationships
-  (`F<A> <: G<A>`) and natural covariant container usage. Needs design before
-  implementation — declaration-site vs use-site, inference vs annotation.
-  See `docs/type-system.md` line 864, `docs/soundness-audit.md` gap 3.
+- [ ] **Typechecker: generic variance (expressiveness, not soundness).**
+  All generics are currently invariant. `Box<Dog>` is not a subtype of
+  `Box<Animal>`. Demoted from soundness to expressiveness in commit
+  `ca64aeb1` after the design pass (`docs/typechecker-variance.md`,
+  2026-05-17): probing showed structural invariance + function
+  contravariance + FLAG_SKOLEM rejection already prevent the bad cases
+  the soundness audit worried about. Remaining gap is purely
+  expressiveness — can't declare covariant/contravariant containers
+  like `ReadOnlyMap`. Implement when a user writes the first
+  heavily-generic library that wants it. Not blocking.
 
 ## security (fix soon)
 - [x] http/router: path traversal via symlinks — `path.safe_resolve()` with FFI `realpath()`
@@ -2135,7 +2153,7 @@ Blocking items for cutover:
 
 - [ ] **Typechecker bug: `any?` as last param corrupts struct field resolution** — when a local function has `any?` as its last parameter (e.g. `--: (SomeStruct, integer, string, any?) -> nil`), the checker fails to resolve fields of `SomeStruct` in the function body, treating them as `unknown`. Workaround: drop the `?` from `any?` params (use `any` — makes no runtime difference since `any` absorbs nil). Found in lib/log/init.lua emit() during 2026-04-10 implementation.
 - [ ] **Soundness fix: mutual recursion via non-table types** — `bind_var` has occurs() for simple self-ref; `display()` has seen guard for tables. Mutual recursion through function types (very rare in Lua) is not protected. Very low priority. See `docs/soundness-audit.md` Gap 4.
-- [ ] **Soundness fix: generic variance** — type params in `<T>` generics have no variance annotation; covariant/contravariant positions not enforced. Requires design. See `docs/soundness-audit.md` Gap 3.
+- [ ] **Generic variance (expressiveness, not soundness)** — type params in `<T>` generics have no variance annotation. Demoted from soundness to expressiveness in commit `ca64aeb1`; design at `docs/typechecker-variance.md`. Structural invariance + function contravariance + FLAG_SKOLEM rejection already prevent the bad cases. Remaining gap is being unable to *declare* covariant/contravariant containers. See `docs/soundness-audit.md` Gap 3 (historical framing).
 - [ ] **Error message quality audit** — bar is Rust-level helpfulness. Specific gaps identified:
   - Source line + caret: **DONE** (2026-03-10) — errors.lua set_source/format_plain/format_ansi
   - "missing required argument" now shows expected type: **DONE** (2026-03-10) — `argument 1: missing required argument (expected 'string', got nil)`
