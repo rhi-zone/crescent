@@ -3,6 +3,43 @@
 Decomposition of the two cleanup TODOs (added in commit `9599884e`) into a
 sequence of small, hook-passing commits.
 
+## Status — BLOCKED (2026-05-17)
+
+C2 was attempted and reverted. The plan's assumption that typed accessors
+would close pre-existing errors is **wrong**: the typechecker does not
+narrow `cdata_struct.array_field[index]` from the array type
+(`{[integer]: integer}`) to the element type (`integer`) when the cdef
+declares a fixed-size array (`int32_t[7]`). Minimal repro:
+
+```lua
+ffi.cdef[[ typedef struct { int32_t data[7]; } TypeSlot; ]]
+--: (TypeSlot) -> integer
+local function f(t) return t.data[0] end
+-- error: cannot return `{[integer]: integer}`: cannot assign to `integer`
+```
+
+This is the root cause of the hundreds of pre-existing errors in
+`lib/type/static/*.lua` — direct `t.data[N]` accesses survive in the
+codebase today only because they are followed by a narrowing comparison
+(`if parent == -1`) that the typechecker can use. Without a narrowing
+guard or an indexed-element-typing fix in the typechecker, typed accessors
+add 56 NEW errors of the same pattern (one per accessor body) instead of
+eliminating any.
+
+**Prerequisite for this cleanup:** the typechecker must correctly type
+`cdata_struct.array_field[index]` as the element type when the cdef
+declares a fixed-size array. That's an FFI-typing fix in the typechecker
+itself, not a refactor — and is on the critical path for ALL phases of
+this cleanup (the Type.data half and the constraint-payload half).
+
+The discriminant-narrowing prerequisite (§4) was probed and **passes**, so
+the constraint-payload half is otherwise viable once the FFI-element-typing
+prerequisite lands.
+
+Sections below describe the plan as originally written — they remain
+correct in shape, but execution is blocked until the prerequisite is
+addressed.
+
 ## 1. Verified inventory
 
 Site counts (non-test `lib/type/static/`):
