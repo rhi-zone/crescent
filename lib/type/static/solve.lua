@@ -1400,6 +1400,50 @@ local function solve_index(ctx, c)
             end
             return true
         end
+        if obj_t.tag == TAG_TABLE then
+            -- 1) Positional/integer-named field: `{1, 2, 3}` uses fields named "1", "2", "3".
+            local slot_name_id = intern_mod.intern(ctx.pool, tostring(slot))
+            local fe = types_mod.table_field(ctx, obj_tid, slot_name_id)
+            if fe then
+                local ft = find(ctx, fe.type_id)
+                if band(fe.flags, FLAG_OPTIONAL) ~= 0 then
+                    ft = types_mod.make_union(ctx, { ft, ctx.T_NIL })
+                end
+                unify_mod.unify(ctx, res_tid, ft)
+                return true
+            end
+            -- 2) Integer/number indexer: `{ [integer]: T }` (FFI fixed-size arrays land
+            --    here when cdef declares `int32_t[N]`) or `{ [number]: T }`.
+            --    Literal-integer key matches base integer/number indexer or matching literal key.
+            local is, il = obj_t.data[2], obj_t.data[3]
+            local i = is
+            while i < is + il - 1 do
+                local kt   = find(ctx, ctx.lists:get(i))
+                local kt_t = ctx.types:get(kt)
+                if kt_t.tag == TAG_INTEGER or kt_t.tag == TAG_NUMBER then
+                    unify_mod.unify(ctx, res_tid, find(ctx, ctx.lists:get(i + 1)))
+                    return true
+                end
+                if kt_t.tag == TAG_LITERAL
+                    and (kt_t.data[0] == LIT_INTEGER or kt_t.data[0] == LIT_NUMBER)
+                    and kt_t.data[1] == slot then
+                    unify_mod.unify(ctx, res_tid, find(ctx, ctx.lists:get(i + 1)))
+                    return true
+                end
+                i = i + 2
+            end
+            -- Fallback: preserve the "slot 0 is the value itself" semantics so multi-return
+            -- slot extraction (LOCAL_STMT / ASSIGN_STMT emit C_INDEX(call_ret, 0) to project
+            -- the first return slot) works when the function returns a plain non-tuple table
+            -- (e.g. `local m = require("mod")` where mod's return type is a TAG_TABLE).
+            -- For other slots, no value exists.
+            if slot == 0 then
+                unify_mod.unify(ctx, res_tid, obj_tid)
+            else
+                bind_to(ctx, res_tid, ctx.T_NIL)
+            end
+            return true
+        end
         if obj_t.tag == TAG_UNION then
             local parts = {}
             for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do

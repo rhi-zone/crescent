@@ -3,42 +3,31 @@
 Decomposition of the two cleanup TODOs (added in commit `9599884e`) into a
 sequence of small, hook-passing commits.
 
-## Status — BLOCKED (2026-05-17)
+## Status — Prerequisite landed; cleanup unblocked (2026-05-17)
 
-C2 was attempted and reverted. The plan's assumption that typed accessors
-would close pre-existing errors is **wrong**: the typechecker does not
-narrow `cdata_struct.array_field[index]` from the array type
-(`{[integer]: integer}`) to the element type (`integer`) when the cdef
-declares a fixed-size array (`int32_t[7]`). Minimal repro:
+The FFI-element-typing prerequisite has been fixed. Root cause was in
+`lib/type/static/solve.lua` `solve_index`: the LIT_INTEGER branch handled
+`TAG_TUPLE` but had no `TAG_TABLE` case, so a `t.data[N]` access on a field
+typed as `{ [integer]: T }` fell through to the slot-0-is-self fallback
+(`unify(res, obj_tid)`) and bound the result to the whole array type
+instead of the element type. Fixed by adding a `TAG_TABLE` branch that
+(1) checks for an integer-named positional field, (2) consults
+integer/number indexers and returns the value type, (3) preserves the
+slot-0-is-self fallback only when neither matches (so multi-return slot
+extraction via `local x = require("mod")` still works when `mod`'s return
+is a plain TAG_TABLE).
 
-```lua
-ffi.cdef[[ typedef struct { int32_t data[7]; } TypeSlot; ]]
---: (TypeSlot) -> integer
-local function f(t) return t.data[0] end
--- error: cannot return `{[integer]: integer}`: cannot assign to `integer`
-```
-
-This is the root cause of the hundreds of pre-existing errors in
-`lib/type/static/*.lua` — direct `t.data[N]` accesses survive in the
-codebase today only because they are followed by a narrowing comparison
-(`if parent == -1`) that the typechecker can use. Without a narrowing
-guard or an indexed-element-typing fix in the typechecker, typed accessors
-add 56 NEW errors of the same pattern (one per accessor body) instead of
-eliminating any.
-
-**Prerequisite for this cleanup:** the typechecker must correctly type
-`cdata_struct.array_field[index]` as the element type when the cdef
-declares a fixed-size array. That's an FFI-typing fix in the typechecker
-itself, not a refactor — and is on the critical path for ALL phases of
-this cleanup (the Type.data half and the constraint-payload half).
+The fix also closed >1000 pre-existing errors across `lib/type/static/`:
+constrain.lua 388→38, solve.lua 333→114, types.lua 129→30, env.lua
+138→12, unify.lua 144→5, narrow.lua 42→6, match.lua 113→3, intrinsic.lua
+50→1, cri_write.lua 176→20, cri_read.lua 53→11. No file gained errors;
+all type tests and the full `bin/cr test` suite pass with the same
+runtime-failure set as baseline (pre-existing FFI/runtime issues unrelated
+to typing).
 
 The discriminant-narrowing prerequisite (§4) was probed and **passes**, so
-the constraint-payload half is otherwise viable once the FFI-element-typing
-prerequisite lands.
-
-Sections below describe the plan as originally written — they remain
-correct in shape, but execution is blocked until the prerequisite is
-addressed.
+the constraint-payload half is also viable. The plan below executes as
+originally written.
 
 ## 1. Verified inventory
 
