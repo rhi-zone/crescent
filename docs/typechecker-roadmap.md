@@ -50,6 +50,20 @@ passes when it should error. Needs a design doc analogous to
 `typechecker-rank-n.md` before implementation. **Real soundness work — the
 only remaining Phase A item.**
 
+## Phase A.5 — Variance (expressiveness, optional)
+
+Originally A3, demoted after the design pass (`docs/typechecker-variance.md`,
+2026-05-17). Probing showed structural invariance + function contravariance
++ FLAG_SKOLEM rejection already prevent the bad cases the soundness audit
+worried about; A3 is purely an expressiveness gap (can't declare covariant /
+contravariant containers).
+
+Implement when a user writes the first heavily-generic library that wants
+`ReadOnlyMap`-style types. Until then, defer. Not blocking anything.
+
+Estimated size: medium (400–650 lines). Design committed; implementation
+deferred.
+
 ## Phase B — Power (in priority order)
 
 ### B1. Higher-kinded types
