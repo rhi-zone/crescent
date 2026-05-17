@@ -273,10 +273,10 @@ local function narrow_field_non_nil(ctx, tid, field_name_id)
 
     if t.tag == TAG_TABLE then
         -- Collect field data before any allocs (FFI pointers invalidated on arena grow)
-        local fs, fl = t.data[0], t.data[1]
-        local is, il = t.data[2], t.data[3]
-        local rv     = t.data[4]
-        local ms, ml = t.data[5], t.data[6]
+        local fs, fl = types_mod.tbl_fields_start(t), types_mod.tbl_fields_len(t)
+        local is, il = types_mod.tbl_indexers_start(t), types_mod.tbl_indexers_len(t)
+        local rv     = types_mod.tbl_row_var(t)
+        local ms, ml = types_mod.tbl_meta_start(t), types_mod.tbl_meta_len(t)
         --: { [integer]: { fid: integer, name_id: integer, type_id: integer, flags: integer }, ... }
         local field_data = {}
         for i = fs, fs + fl - 1 do
@@ -320,7 +320,7 @@ local function narrow_field_non_nil(ctx, tid, field_name_id)
 
     elseif t.tag == TAG_UNION then
         -- Collect member IDs before recursing (allocation may reallocate list pool)
-        local s, l = t.data[0], t.data[1]
+        local s, l = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
         --: { [integer]: integer, ... }
         local member_ids = {}
         for i = s, s + l - 1 do
@@ -380,10 +380,11 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
             if tt.tag == TAG_UNION then
                 --: { [integer]: integer, ... }
                 local nil_members = {}
-                for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+                local us, ul = types_mod.agg_members_start(tt), types_mod.agg_members_len(tt)
+                for i = us, us + ul - 1 do
                     local mid = types_mod.find(ctx, ctx.lists:get(i))
                     local mt = ctx.types:get(mid)
-                    if mt.tag == TAG_NIL or (mt.tag == TAG_LITERAL and mt.data[0] == LIT_NIL) then
+                    if mt.tag == TAG_NIL or (mt.tag == TAG_LITERAL and types_mod.lit_kind(mt) == LIT_NIL) then
                         nil_members[#nil_members + 1] = mid
                     end
                 end
@@ -392,7 +393,7 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
                 return types_mod.make_union(ctx, nil_members)
             end
             if tt.tag == TAG_NIL then return t end
-            if tt.tag == TAG_LITERAL and tt.data[0] == LIT_NIL then return t end
+            if tt.tag == TAG_LITERAL and types_mod.lit_kind(tt) == LIT_NIL then return t end
             return ctx.T_NEVER
         end
     elseif info.kind == "field_disc" then
@@ -415,7 +416,8 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
             local tt = ctx.types:get(tr)
             if tt.tag == TAG_UNION then
                 local has_match = false
-                for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+                local us, ul = types_mod.agg_members_start(tt), types_mod.agg_members_len(tt)
+                for i = us, us + ul - 1 do
                     local mid = types_mod.find(ctx, ctx.lists:get(i))
                     if unify_mod.try_unify(ctx, lit_tid, mid) then
                         has_match = true; break
@@ -439,7 +441,8 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
             local tt = ctx.types:get(tr)
             if tt.tag == TAG_UNION then
                 local has_match = false
-                for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+                local us, ul = types_mod.agg_members_start(tt), types_mod.agg_members_len(tt)
+                for i = us, us + ul - 1 do
                     local mid = types_mod.find(ctx, ctx.lists:get(i))
                     if unify_mod.try_unify(ctx, info.member_tid, mid) then
                         has_match = true; break
@@ -475,7 +478,8 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
             if tt.tag == TAG_UNION then
                 --: { [integer]: integer, ... }
                 local matching = {}
-                for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+                local us, ul = types_mod.agg_members_start(tt), types_mod.agg_members_len(tt)
+                for i = us, us + ul - 1 do
                     local mid = types_mod.find(ctx, ctx.lists:get(i))
                     local unify_mod = require("lib.type.static.unify")
                     if unify_mod.try_unify(ctx, mid, target_id) then matching[#matching + 1] = mid end
@@ -499,7 +503,8 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
                 --: { [integer]: integer, ... }
                 local matching = {}
                 local unify_mod = require("lib.type.static.unify")
-                for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+                local us, ul = types_mod.agg_members_start(tt), types_mod.agg_members_len(tt)
+                for i = us, us + ul - 1 do
                     local mid = types_mod.find(ctx, ctx.lists:get(i))
                     if unify_mod.try_unify(ctx, mid, target_id) then
                         matching[#matching + 1] = mid
@@ -561,7 +566,7 @@ local function arm_slot_truthy(ctx, tid)
     if t.tag == TAG_NIL   then return false end
     if t.tag == TAG_NEVER then return false end
     if t.tag == TAG_VAR   then return nil   end  -- unresolved — skip filtering
-    if t.tag == TAG_LITERAL and t.data[0] == defs.LIT_BOOLEAN and t.data[1] == 0 then
+    if t.tag == TAG_LITERAL and types_mod.lit_kind(t) == defs.LIT_BOOLEAN and types_mod.lit_bool(t) == 0 then
         return false  -- literal false
     end
     return true
@@ -596,14 +601,14 @@ local function propagate_multi_ret_narrowing(ctx, name_id, narrowed_tid, is_trut
                 local parts = {}
                 for _, arm in ipairs(surviving_arms) do
                     local arm_t = ctx.types:get(arm)
-                    if arm_t.data[1] > other_entry.slot then
+                    if types_mod.agg_members_len(arm_t) > other_entry.slot then
                         local elem = types_mod.find(ctx,
-                            ctx.lists:get(arm_t.data[0] + other_entry.slot))
+                            ctx.lists:get(types_mod.agg_members_start(arm_t) + other_entry.slot))
                         -- Unwrap TAG_SPREAD: (true, ...R) stores TAG_SPREAD(R) at slot 1.
                         -- After if-guard narrowing, the slot value is R, not the spread.
                         local elem_t = ctx.types:get(elem)
                         if elem_t.tag == defs.TAG_SPREAD then
-                            elem = types_mod.find(ctx, elem_t.data[0])
+                            elem = types_mod.find(ctx, types_mod.spread_inner(elem_t))
                         end
                         parts[#parts + 1] = elem
                     else
@@ -644,7 +649,7 @@ local function record_narrowing(ctx, info, narrowed, is_truthy)
             -- Use the annotation type when the flow type is narrower:
             -- specifically when flow is nil/never and annotation is a union with non-nil.
             if (ct.tag == TAG_NIL or ct.tag == TAG_NEVER or
-                (ct.tag == TAG_LITERAL and ct.data and ct.data[0] == LIT_NIL))
+                (ct.tag == TAG_LITERAL and ct.data and types_mod.lit_kind(ct) == LIT_NIL))
                and at.tag == TAG_UNION then
                 current_ty = ann_ty
             end
