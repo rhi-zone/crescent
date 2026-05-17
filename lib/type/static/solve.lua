@@ -121,11 +121,14 @@ end
 -- caller must preserve the literal type so the intrinsic can resolve the module.
 --: (Ctx, { tag: integer, data: { [integer]: integer, ... }, ... }, integer) -> boolean
 local function ret_uses_tv_in_intrinsic(ctx, callee_t, tv_id)
-    local rl = callee_t.data[3]
+    local rl = types_mod.fn_returns_len(callee_t)
+    local rs = types_mod.fn_returns_start(callee_t)
     for ri = 0, rl - 1 do
-        local ret_tid = ctx.lists:get(callee_t.data[2] + ri)
+        local ret_tid = ctx.lists:get(rs + ri)
         local rt = ctx.types:get(ret_tid)
         if rt.tag == TAG_TYPE_CALL then
+            -- TAG_TYPE_CALL direct: tycall accessors trigger spurious cascading
+            -- errors elsewhere (typechecker flow-sensitivity quirk noted in C14).
             local callee_id = ctx.types:get(rt.data[0])
             if callee_id and callee_id.tag == TAG_INTRINSIC then
                 for ai = rt.data[1], rt.data[1] + rt.data[2] - 1 do
@@ -155,7 +158,7 @@ local function resolve_deferred_intrinsic(ctx, tid)
     -- (param was a generic TV bound during solve_callable argument unification).
     -- PairsReturn<T>/IpairsReturn<T> match aliases use this path.
     if t.tag == TAG_SPREAD then
-        local inner_tid = find(ctx, t.data[0])
+        local inner_tid = find(ctx, types_mod.spread_inner(t))
         local inner_t = ctx.types:get(inner_tid)
         -- TAG_MATCH_TYPE with a now-concrete param: evaluate the match.
         -- PairsReturn<T>/IpairsReturn<T> match aliases return a 2-tuple (K, V);
@@ -163,7 +166,7 @@ local function resolve_deferred_intrinsic(ctx, tid)
         -- extract iter_fn at slot 0.  The match param (data[0]) is the table
         -- type T used as iterator state.
         if inner_t.tag == TAG_MATCH_TYPE then
-            local param_resolved = find(ctx, inner_t.data[0])
+            local param_resolved = find(ctx, types_mod.match_param(inner_t))
             local param_t = ctx.types:get(param_resolved)
             -- Defer only when param is an unresolved generic-alias placeholder (TAG_NAMED).
             -- TAG_VAR / TAG_ROWVAR are free type variables: evaluate the match anyway —
@@ -183,20 +186,23 @@ local function resolve_deferred_intrinsic(ctx, tid)
             local intrinsic_mod = require("lib.type.static.intrinsic")
             local result_canon = find(ctx, result_tid)
             local result_t = ctx.types:get(result_canon)
-            if result_t.tag == TAG_TUPLE and result_t.data[1] == 2 then
-                local K_tid = find(ctx, ctx.lists:get(result_t.data[0]))
-                local V_tid = find(ctx, ctx.lists:get(result_t.data[0] + 1))
+            if result_t.tag == TAG_TUPLE and types_mod.agg_members_len(result_t) == 2 then
+                local rs = types_mod.agg_members_start(result_t)
+                local K_tid = find(ctx, ctx.lists:get(rs))
+                local V_tid = find(ctx, ctx.lists:get(rs + 1))
                 return intrinsic_mod.build_iter_triple(ctx, param_resolved, K_tid, V_tid)
             end
             if result_t.tag == TAG_UNION then
                 -- Check if all union members are 2-tuples; if so, collapse K and V.
                 local ks, vs = {}, {}
                 local all_pairs = true
-                for ui = result_t.data[0], result_t.data[0] + result_t.data[1] - 1 do
+                local us, ul = types_mod.agg_members_start(result_t), types_mod.agg_members_len(result_t)
+                for ui = us, us + ul - 1 do
                     local member = ctx.types:get(find(ctx, ctx.lists:get(ui)))
-                    if member.tag == TAG_TUPLE and member.data[1] == 2 then
-                        ks[#ks + 1] = find(ctx, ctx.lists:get(member.data[0]))
-                        vs[#vs + 1] = find(ctx, ctx.lists:get(member.data[0] + 1))
+                    if member.tag == TAG_TUPLE and types_mod.agg_members_len(member) == 2 then
+                        local ms = types_mod.agg_members_start(member)
+                        ks[#ks + 1] = find(ctx, ctx.lists:get(ms))
+                        vs[#vs + 1] = find(ctx, ctx.lists:get(ms + 1))
                     elseif member.tag == TAG_NEVER then
                         -- skip never members (e.g. from filtered-out ipairs arms)
                     else
@@ -225,8 +231,8 @@ local function resolve_deferred_intrinsic(ctx, tid)
     -- TAG_INDEX_TYPE: evaluate T[K] when both subject and key are now concrete.
     -- Arises when a generic return type like CTypeMap[S] has S bound after arg unification.
     if t.tag == TAG_INDEX_TYPE then
-        local subj_tid = find(ctx, t.data[0])
-        local key_tid  = find(ctx, t.data[1])
+        local subj_tid = find(ctx, types_mod.index_subject(t))
+        local key_tid  = find(ctx, types_mod.index_key(t))
         local st = ctx.types:get(subj_tid)
         local kt = ctx.types:get(key_tid)
         if st.tag ~= TAG_VAR and st.tag ~= TAG_ROWVAR and st.tag ~= TAG_NAMED
@@ -242,6 +248,9 @@ local function resolve_deferred_intrinsic(ctx, tid)
     end
 
     if t.tag ~= TAG_TYPE_CALL then return tid end
+    -- TAG_TYPE_CALL direct: tycall accessors trigger spurious cascading errors
+    -- elsewhere (typechecker flow-sensitivity quirk noted in C14). data[3] is
+    -- the undocumented stable_id slot (not exposed via a typed accessor).
     local callee_id = find(ctx, t.data[0])
     local ct = ctx.types:get(callee_id)
     if ct.tag ~= TAG_INTRINSIC then return tid end
@@ -253,7 +262,7 @@ local function resolve_deferred_intrinsic(ctx, tid)
     local intrinsic_mod = require("lib.type.static.intrinsic")
     -- stable_id is stored in data[3]; 0 means not set.
     local stable = t.data[3]
-    return (intrinsic_mod.expand(ctx, ct.data[0], arg_ids, stable) --[[:! integer]])
+    return (intrinsic_mod.expand(ctx, types_mod.intrinsic_name_id(ct), arg_ids, stable) --[[:! integer]])
 end
 
 -- Widen a literal type to its base type at argument position.
@@ -300,7 +309,8 @@ local function widen_deep(ctx, tid, seen)
         seen[tid] = true
         local changed = false
         local new_fields = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local fs, fl = types_mod.tbl_fields_start(t), types_mod.tbl_fields_len(t)
+        for i = fs, fs + fl - 1 do
             local fid = ctx.lists:get(i)
             local fe  = ctx.fields:get(fid)
             local wt  = widen_deep(ctx, fe.type_id, seen)
@@ -311,7 +321,7 @@ local function widen_deep(ctx, tid, seen)
         if not changed then seen[tid] = nil; return tid end
         -- Rebuild indexers (unchanged)
         local new_indexers = {}
-        local is, il = t.data[2], t.data[3]
+        local is, il = types_mod.tbl_indexers_start(t), types_mod.tbl_indexers_len(t)
         local i = is
         while i < is + il - 1 do
             new_indexers[#new_indexers + 1] = ctx.lists:get(i)
@@ -319,7 +329,7 @@ local function widen_deep(ctx, tid, seen)
             i = i + 2
         end
         seen[tid] = nil
-        return types_mod.make_table(ctx, new_fields, new_indexers, t.data[4], {})
+        return types_mod.make_table(ctx, new_fields, new_indexers, types_mod.tbl_row_var(t), {})
     end
     return tid
 end
@@ -335,28 +345,34 @@ local function contains_free_var(ctx, tid, seen)
     if seen and seen[tid] then return false end
     if tag == TAG_TABLE then
         seen = seen or {}; seen[tid] = true
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local fs, fl = types_mod.tbl_fields_start(t), types_mod.tbl_fields_len(t)
+        for i = fs, fs + fl - 1 do
             local fe = ctx.fields:get(ctx.lists:get(i))
             if contains_free_var(ctx, fe.type_id, seen) then return true end
         end
-        if t.data[4] >= 0 and contains_free_var(ctx, t.data[4], seen) then return true end
+        local rv = types_mod.tbl_row_var(t)
+        if rv >= 0 and contains_free_var(ctx, rv, seen) then return true end
         return false
     end
     if tag == TAG_FUNCTION then
         seen = seen or {}; seen[tid] = true
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ps, pl = types_mod.fn_params_start(t), types_mod.fn_params_len(t)
+        for i = ps, ps + pl - 1 do
             if contains_free_var(ctx, ctx.lists:get(i), seen) then return true end
         end
-        for i = t.data[2], t.data[2] + t.data[3] - 1 do
+        local rs, rl = types_mod.fn_returns_start(t), types_mod.fn_returns_len(t)
+        for i = rs, rs + rl - 1 do
             if contains_free_var(ctx, ctx.lists:get(i), seen) then return true end
         end
-        -- Also check vararg_id (data[4]): TAG_SPREAD(P) or a free TV for ...P.
-        if t.data[4] >= 0 and contains_free_var(ctx, t.data[4], seen) then return true end
+        -- Also check vararg_id: TAG_SPREAD(P) or a free TV for ...P.
+        local va = types_mod.fn_vararg(t)
+        if va >= 0 and contains_free_var(ctx, va, seen) then return true end
         return false
     end
     if tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
         seen = seen or {}; seen[tid] = true
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ms, ml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
+        for i = ms, ms + ml - 1 do
             if contains_free_var(ctx, ctx.lists:get(i), seen) then return true end
         end
         return false
@@ -421,8 +437,8 @@ local function table_meta_op_ret(ctx, tbl_tid, mm_name)
     if not fe then return nil end
     local fn_tid = find(ctx, fe.type_id)
     local ft = ctx.types:get(fn_tid)
-    if ft.tag == TAG_FUNCTION and ft.data[3] > 0 then
-        return find(ctx, ctx.lists:get(ft.data[2]))
+    if ft.tag == TAG_FUNCTION and types_mod.fn_returns_len(ft) > 0 then
+        return find(ctx, ctx.lists:get(types_mod.fn_returns_start(ft)))
     end
     return ctx.T_ANY
 end
@@ -451,7 +467,8 @@ local function meta_op_ret_impl(ctx, op_name, tid, seen)
         seen = seen or {}
         seen[tid] = true
         -- Intersection: if any member supports the op, use its result
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ms, ml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
+        for i = ms, ms + ml - 1 do
             local r = meta_op_ret_impl(ctx, op_name, ctx.lists:get(i), seen)
             if r then return r end
         end
@@ -461,7 +478,8 @@ local function meta_op_ret_impl(ctx, op_name, tid, seen)
         seen = seen or {}
         seen[tid] = true
         local parts = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ms, ml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
+        for i = ms, ms + ml - 1 do
             local r = meta_op_ret_impl(ctx, op_name, ctx.lists:get(i), seen)
             if r == nil then return nil end  -- any arm unsupported → whole union fails
             parts[#parts + 1] = r
@@ -471,7 +489,7 @@ local function meta_op_ret_impl(ctx, op_name, tid, seen)
     -- Primitive: map tag (or literal kind) to prim_meta entry
     local ptag = t.tag
     if ptag == TAG_LITERAL then
-        local k = t.data[0]
+        local k = types_mod.lit_kind(t)
         if k == LIT_NUMBER  then ptag = TAG_NUMBER
         elseif k == LIT_INTEGER then ptag = TAG_INTEGER
         elseif k == LIT_STRING  then ptag = TAG_STRING
@@ -531,8 +549,8 @@ local function solve_sub(ctx, c)
         local et = ctx.types:get(expected)
         if at.tag == TAG_TUPLE and et.tag ~= TAG_TUPLE then
             original_was_tuple = true
-            actual = at.data[1] > 0
-                and find(ctx, ctx.lists:get(at.data[0]))
+            actual = types_mod.agg_members_len(at) > 0
+                and find(ctx, ctx.lists:get(types_mod.agg_members_start(at)))
                 or ctx.T_NIL
         end
     end
@@ -569,7 +587,7 @@ local function solve_sub(ctx, c)
     -- (width subtyping only holds when the target is open with a row variable).
     do
         local et = ctx.types:get(expected)
-        local is_closed_table = et.tag == TAG_TABLE and et.data[4] < 0
+        local is_closed_table = et.tag == TAG_TABLE and types_mod.tbl_row_var(et) < 0
         if not is_closed_table and et.tag ~= TAG_VAR and et.tag ~= TAG_ROWVAR then
             if unify_mod.try_unify(ctx, actual, expected) then
                 return true
@@ -586,13 +604,14 @@ local function solve_sub(ctx, c)
         local act_t = ctx.types:get(find(ctx, actual))
         if act_t.tag == TAG_UNION then
             local failing = {}
-            for i = act_t.data[0], act_t.data[0] + act_t.data[1] - 1 do
+            local ams, aml = types_mod.agg_members_start(act_t), types_mod.agg_members_len(act_t)
+            for i = ams, ams + aml - 1 do
                 local mid = find(ctx, ctx.lists:get(i))
                 if not unify_mod.try_unify(ctx, mid, expected) then
                     failing[#failing + 1] = mid
                 end
             end
-            local total = act_t.data[1]
+            local total = aml
             if #failing > 0 and #failing < total then
                 local fail_tid = #failing == 1 and failing[1]
                     or types_mod.make_union(ctx, failing)
@@ -637,10 +656,11 @@ local function solve_narrow_nil(ctx, c)
         elseif it.tag == TAG_UNION then
             --: { [integer]: integer, ... }
             local nil_members = {}
-            for i = it.data[0], it.data[0] + it.data[1] - 1 do
+            local ims, iml = types_mod.agg_members_start(it), types_mod.agg_members_len(it)
+            for i = ims, ims + iml - 1 do
                 local mid = find(ctx, ctx.lists:get(i))
                 local mt = ctx.types:get(mid)
-                if mt.tag == TAG_NIL or (mt.tag == TAG_LITERAL and mt.data[0] == defs.LIT_NIL) then
+                if mt.tag == TAG_NIL or (mt.tag == TAG_LITERAL and types_mod.lit_kind(mt) == defs.LIT_NIL) then
                     nil_members[#nil_members + 1] = mid
                 end
             end
@@ -649,7 +669,7 @@ local function solve_narrow_nil(ctx, c)
             elseif #nil_members > 1 then
                 resolved = types_mod.make_union(ctx, nil_members)
             end
-        elseif it.tag == TAG_NIL or (it.tag == TAG_LITERAL and it.data[0] == defs.LIT_NIL) then
+        elseif it.tag == TAG_NIL or (it.tag == TAG_LITERAL and types_mod.lit_kind(it) == defs.LIT_NIL) then
             resolved = input
         end
     else
@@ -691,6 +711,8 @@ local function solve_escape_check(ctx, c)
         local t = ctx.types:get(tv_id)
         if (t.tag == TAG_VAR or t.tag == TAG_ROWVAR)
             and band(t.flags, FLAG_SKOLEM) ~= 0
+            -- TAG_VAR.data[3..4] are undocumented skolem slots (name_id, rank_n_call_id)
+            -- not exposed via typed accessors (noted in C12).
             and t.data[4] == call_id then
             found_name = t.data[3]
             break
@@ -733,7 +755,7 @@ local function solve_or(ctx, c)
         -- `unknown or false` / `unknown or nil` don't assert the result type.
         local rt = ctx.types:get(right)
         local is_falsy = right == ctx.T_NIL or rt.tag == TAG_NIL
-            or (rt.tag == TAG_LITERAL and rt.data[0] == defs.LIT_BOOLEAN and rt.data[1] == 0)
+            or (rt.tag == TAG_LITERAL and types_mod.lit_kind(rt) == defs.LIT_BOOLEAN and types_mod.lit_bool(rt) == 0)
         if not is_falsy then
             resolved = right
         else
@@ -772,7 +794,7 @@ local function find_metamethod_sig(ctx, tid, mm_name)
     tid = find(ctx, tid)
     local t = ctx.types:get(tid)
     if t.tag == TAG_NOMINAL then
-        return find_metamethod_sig(ctx, t.data[2], mm_name)
+        return find_metamethod_sig(ctx, types_mod.nom_underlying(t), mm_name)
     end
     local mm_id = intern_mod.intern(ctx.pool, mm_name)
     if t.tag == TAG_TABLE then
@@ -786,7 +808,7 @@ local function find_metamethod_sig(ctx, tid, mm_name)
     -- Primitive: map via prim_meta.
     local ptag = t.tag
     if ptag == TAG_LITERAL then
-        local k = t.data[0]
+        local k = types_mod.lit_kind(t)
         if     k == LIT_NUMBER  then ptag = TAG_NUMBER
         elseif k == LIT_INTEGER then ptag = TAG_INTEGER
         elseif k == LIT_STRING  then ptag = TAG_STRING
@@ -825,10 +847,10 @@ local function propagate_meta_bound(ctx, actual_tid, bound_tid)
     local bt = ctx.types:get(bound_tid)
     if bt.tag ~= TAG_TABLE then return "not_meta_bound" end
     -- Must be open (row var) to be a bound; closed tables are exact-shape requirements.
-    if bt.data[4] < 0 then return "not_meta_bound" end
+    if types_mod.tbl_row_var(bt) < 0 then return "not_meta_bound" end
 
-    -- Meta-slots: iterate (data[5..6]) and back-propagate.
-    local meta_start, meta_len = bt.data[5], bt.data[6]
+    -- Meta-slots: iterate and back-propagate.
+    local meta_start, meta_len = types_mod.tbl_meta_start(bt), types_mod.tbl_meta_len(bt)
     for i = meta_start, meta_start + meta_len - 1 do
         local fid = ctx.lists:get(i)
         local fe  = ctx.fields:get(fid)
@@ -844,24 +866,26 @@ local function propagate_meta_bound(ctx, actual_tid, bound_tid)
         end
         local actual_sig = ctx.types:get(actual_sig_tid)
         -- Back-propagate params (contravariant: bound's free param TV gets actual's param type).
-        local apl, bpl = actual_sig.data[1], bound_sig.data[1]
+        local apl, bpl = types_mod.fn_params_len(actual_sig), types_mod.fn_params_len(bound_sig)
+        local aps, bps = types_mod.fn_params_start(actual_sig), types_mod.fn_params_start(bound_sig)
         local min_p = apl < bpl and apl or bpl
         for j = 0, min_p - 1 do
-            local bp_id = ctx.lists:get(bound_sig.data[0] + j)
+            local bp_id = ctx.lists:get(bps + j)
             local bp = ctx.types:get(find(ctx, bp_id))
             if bp.tag == TAG_VAR or bp.tag == TAG_ROWVAR then
-                local ap_id = find(ctx, ctx.lists:get(actual_sig.data[0] + j))
+                local ap_id = find(ctx, ctx.lists:get(aps + j))
                 unify_mod.unify(ctx, ap_id, bp_id)
             end
         end
         -- Back-propagate returns (covariant).
-        local arl, brl = actual_sig.data[3], bound_sig.data[3]
+        local arl, brl = types_mod.fn_returns_len(actual_sig), types_mod.fn_returns_len(bound_sig)
+        local ars, brs = types_mod.fn_returns_start(actual_sig), types_mod.fn_returns_start(bound_sig)
         local min_r = arl < brl and arl or brl
         for j = 0, min_r - 1 do
-            local br_id = ctx.lists:get(bound_sig.data[2] + j)
+            local br_id = ctx.lists:get(brs + j)
             local br = ctx.types:get(find(ctx, br_id))
             if br.tag == TAG_VAR or br.tag == TAG_ROWVAR then
-                local ar_id = find(ctx, ctx.lists:get(actual_sig.data[2] + j))
+                local ar_id = find(ctx, ctx.lists:get(ars + j))
                 unify_mod.unify(ctx, ar_id, br_id)
             end
         end
@@ -873,7 +897,7 @@ local function propagate_meta_bound(ctx, actual_tid, bound_tid)
     -- For primitives, the prim_index table is consulted (rare — strings have
     -- prim_index for method names, not for integer indexing).
     do
-        local idx_start, idx_len = bt.data[2], bt.data[3]
+        local idx_start, idx_len = types_mod.tbl_indexers_start(bt), types_mod.tbl_indexers_len(bt)
         if idx_len > 0 then
             local at_now = ctx.types:get(actual_tid)
             local ix = idx_start
@@ -884,7 +908,7 @@ local function propagate_meta_bound(ctx, actual_tid, bound_tid)
                 local actual_value_tid
                 if at_now.tag == TAG_TABLE then
                     -- Walk actual's indexers for a matching key (structurally).
-                    local ais, ail = at_now.data[2], at_now.data[3]
+                    local ais, ail = types_mod.tbl_indexers_start(at_now), types_mod.tbl_indexers_len(at_now)
                     local aix = ais
                     while aix < ais + ail - 1 do
                         local ak = find(ctx, ctx.lists:get(aix))
@@ -901,7 +925,8 @@ local function propagate_meta_bound(ctx, actual_tid, bound_tid)
                     -- 1: a, 2: b, etc. Returns the union of matching field types.
                     if not actual_value_tid then
                         local matched_value_tids = {} --: { [integer]: integer, ... }
-                        for fi = at_now.data[0], at_now.data[0] + at_now.data[1] - 1 do
+                        local afs, afl = types_mod.tbl_fields_start(at_now), types_mod.tbl_fields_len(at_now)
+                        for fi = afs, afs + afl - 1 do
                             local afid = ctx.lists:get(fi)
                             local afe = ctx.fields:get(afid)
                             local fname = intern_mod.get(ctx.pool, afe.name_id)
@@ -936,9 +961,9 @@ local function propagate_meta_bound(ctx, actual_tid, bound_tid)
         end
     end
 
-    -- Named fields: iterate (data[0..1]) and back-propagate via field lookup.
+    -- Named fields: iterate and back-propagate via field lookup.
     -- For primitives, consult prim_index; for tables, table_field.
-    local field_start, field_len = bt.data[0], bt.data[1]
+    local field_start, field_len = types_mod.tbl_fields_start(bt), types_mod.tbl_fields_len(bt)
     if field_len > 0 then
         local at = ctx.types:get(actual_tid)
         for i = field_start, field_start + field_len - 1 do
@@ -955,7 +980,7 @@ local function propagate_meta_bound(ctx, actual_tid, bound_tid)
                 -- Primitive: prim_index lookup.
                 local ptag = at.tag
                 if ptag == TAG_LITERAL then
-                    local k = at.data[0]
+                    local k = types_mod.lit_kind(at)
                     if     k == LIT_NUMBER  then ptag = TAG_NUMBER
                     elseif k == LIT_INTEGER then ptag = TAG_INTEGER
                     elseif k == LIT_STRING  then ptag = TAG_STRING
@@ -991,11 +1016,12 @@ local function propagate_function_bound(ctx, actual, resolved_bound)
     if at.tag ~= TAG_FUNCTION or bt.tag ~= TAG_FUNCTION then return end
 
     -- Return slots: bind bound's free return TVs from actual's returns.
-    local arl, brl = at.data[3], bt.data[3]
+    local arl, brl = types_mod.fn_returns_len(at), types_mod.fn_returns_len(bt)
+    local ars, brs = types_mod.fn_returns_start(at), types_mod.fn_returns_start(bt)
     local min_ret = arl < brl and arl or brl
     for i = 0, min_ret - 1 do
-        local ar_id = find(ctx, ctx.lists:get(at.data[2] + i))
-        local br_id = ctx.lists:get(bt.data[2] + i)
+        local ar_id = find(ctx, ctx.lists:get(ars + i))
+        local br_id = ctx.lists:get(brs + i)
         local br = ctx.types:get(find(ctx, br_id))
         if br.tag == TAG_VAR or br.tag == TAG_ROWVAR then
             unify_mod.unify(ctx, ar_id, br_id)
@@ -1006,15 +1032,16 @@ local function propagate_function_bound(ctx, actual, resolved_bound)
     -- as a tuple and bind the TV.  This handles <F: (...P) -> R> where P absorbs
     -- all of F's params as a tuple type (consistent with how (...%P) -> %R in match
     -- binds P to the full param tuple).
-    local bva_id = bt.data[4]
+    local bva_id = types_mod.fn_vararg(bt)
     if bva_id >= 0 then
         local bva_root = find(ctx, bva_id)
         local bvt = ctx.types:get(bva_root)
         if bvt.tag == TAG_VAR or bvt.tag == TAG_ROWVAR then
             -- Collect actual's regular params as a tuple.
             local param_types = {}
-            for i = 0, at.data[1] - 1 do
-                param_types[#param_types + 1] = find(ctx, ctx.lists:get(at.data[0] + i))
+            local aps_va = types_mod.fn_params_start(at)
+            for i = 0, types_mod.fn_params_len(at) - 1 do
+                param_types[#param_types + 1] = find(ctx, ctx.lists:get(aps_va + i))
             end
             local tuple_id = types_mod.make_tuple(ctx, param_types)
             unify_mod.unify(ctx, tuple_id, bva_root)
@@ -1023,11 +1050,12 @@ local function propagate_function_bound(ctx, actual, resolved_bound)
 
     -- Named-param form: if the bound has regular params that are free TVs,
     -- bind them contravariantly from actual's params (e.g. <F: (A, B) -> R>).
-    local apl, bpl = at.data[1], bt.data[1]
+    local apl, bpl = types_mod.fn_params_len(at), types_mod.fn_params_len(bt)
+    local aps, bps = types_mod.fn_params_start(at), types_mod.fn_params_start(bt)
     local min_param = apl < bpl and apl or bpl
     for i = 0, min_param - 1 do
-        local ap_id = find(ctx, ctx.lists:get(at.data[0] + i))
-        local bp_id = ctx.lists:get(bt.data[0] + i)
+        local ap_id = find(ctx, ctx.lists:get(aps + i))
+        local bp_id = ctx.lists:get(bps + i)
         local bp = ctx.types:get(find(ctx, bp_id))
         -- Contravariant: bind bound's free param TV from actual's param.
         if bp.tag == TAG_VAR or bp.tag == TAG_ROWVAR then
@@ -1077,19 +1105,19 @@ local function solve_bound(ctx, c)
     -- Kind arity enforcement: TAG_NAMED with no args is a kind constraint.
     -- <F: T1> where T1<X>=any means F must be a * -> * type constructor (arity 1).
     -- Check that the actual type has the same arity as the alias.
-    if bt.tag == TAG_NAMED and bt.data[2] == 0 then
-        local bound_alias = env_mod.lookup_type(ctx.scope, bt.data[0])
+    if bt.tag == TAG_NAMED and types_mod.named_args_len(bt) == 0 then
+        local bound_alias = env_mod.lookup_type(ctx.scope, types_mod.named_name_id(bt))
         local bound_arity = (bound_alias and bound_alias.params) and #bound_alias.params or 0
         if bound_arity > 0 then
             -- Actual type must also be a TAG_NAMED alias with matching arity.
             local actual_arity = 0
-            if at.tag == TAG_NAMED and at.data[2] == 0 then
-                local actual_alias = env_mod.lookup_type(ctx.scope, at.data[0])
+            if at.tag == TAG_NAMED and types_mod.named_args_len(at) == 0 then
+                local actual_alias = env_mod.lookup_type(ctx.scope, types_mod.named_name_id(at))
                 actual_arity = (actual_alias and actual_alias.params) and #actual_alias.params or 0
             end
             -- Primitives and non-generic types have arity 0; they fail the kind check.
             if actual_arity ~= bound_arity then
-                local bound_name = intern_mod.get(ctx.pool, bt.data[0]) or "?"
+                local bound_name = intern_mod.get(ctx.pool, types_mod.named_name_id(bt)) or "?"
                 local kind_arrows = string.rep("* -> ", bound_arity) .. "*"
                 add_error(ctx, line, col,
                     "type `" .. types_mod.display_short(ctx, actual)
@@ -1112,9 +1140,10 @@ local function solve_bound(ctx, c)
         -- Build a temporary match-type node with the concrete actual type as subject.
         local new_mt = types_mod.alloc_type(ctx, TAG_MATCH_TYPE)
         local mtt = ctx.types:get(new_mt)
+        -- Writes are direct (accessors are read-only per types.lua).
         mtt.data[0] = actual
-        mtt.data[1] = bt.data[1]
-        mtt.data[2] = bt.data[2]
+        mtt.data[1] = types_mod.match_arms_start(bt)
+        mtt.data[2] = types_mod.match_arms_len(bt)
         local result = match_mod.evaluate(ctx, new_mt)
         if find(ctx, result) == ctx.T_NEVER then
             add_error(ctx, line, col,
@@ -1174,7 +1203,7 @@ local function solve_bound(ctx, c)
         -- causes propagate_function_bound to bind the vararg slot to a tuple
         -- of actual's params, which a direct unify against actual's named
         -- params would spuriously reject.
-        local bound_named_param_count = bt.data[1] or 0
+        local bound_named_param_count = types_mod.fn_params_len(bt) or 0
         if wa_tag == TAG_FUNCTION and bound_named_param_count > 0 then
             local widened_actual = find(ctx, widen_deep(ctx, wa_tid))
             local widened_bound  = find(ctx, widen_deep(ctx, resolved_bound))
@@ -1210,22 +1239,23 @@ local function solve_bound(ctx, c)
             .. types_mod.display_short(ctx, bound_check_tid) .. "`: " .. result)
         return false
     end
-    if bt.tag == TAG_TABLE and bt.data[4] >= 0 then
+    if bt.tag == TAG_TABLE and types_mod.tbl_row_var(bt) >= 0 then
         local r = check_meta(actual, resolved_bound)
         if r ~= nil then return r end
     end
     if bt.tag == TAG_INTERSECTION then
         local all_meta = true
-        for i = bt.data[0], bt.data[0] + bt.data[1] - 1 do
+        local bms, bml = types_mod.agg_members_start(bt), types_mod.agg_members_len(bt)
+        for i = bms, bms + bml - 1 do
             local mid = find(ctx, ctx.lists:get(i))
             local mt  = ctx.types:get(mid)
-            if not (mt.tag == TAG_TABLE and mt.data[4] >= 0) then
+            if not (mt.tag == TAG_TABLE and types_mod.tbl_row_var(mt) >= 0) then
                 all_meta = false
                 break
             end
         end
         if all_meta then
-            for i = bt.data[0], bt.data[0] + bt.data[1] - 1 do
+            for i = bms, bms + bml - 1 do
                 local mid = find(ctx, ctx.lists:get(i))
                 local r = check_meta(actual, mid)
                 if r == false then return false end
@@ -1271,7 +1301,7 @@ end
 --: (Ctx, integer, string, integer, integer) -> ()
 local function emit_meta_bound(ctx, var_tid, op_name, other_tid, res_tid)
     local var_t = ctx.types:get(var_tid)
-    local var_level = var_t.data[1]
+    local var_level = types_mod.var_level(var_t)
     local sig_tid = types_mod.make_func(ctx, { var_tid, other_tid }, { res_tid }, -1, nil)
     local op_name_id = intern_mod.intern(ctx.pool, op_name)
     local mm_field = types_mod.make_field(ctx, op_name_id, sig_tid, 0)
@@ -1285,7 +1315,7 @@ end
 --: (Ctx, integer, integer, integer) -> ()
 local function emit_field_bound(ctx, var_tid, field_name_id, res_tid)
     local var_t = ctx.types:get(var_tid)
-    local var_level = var_t.data[1]
+    local var_level = types_mod.var_level(var_t)
     local field = types_mod.make_field(ctx, field_name_id, res_tid, 0)
     local rowvar = types_mod.make_rowvar(ctx, var_level)
     local bound = types_mod.make_table(ctx, { field }, {}, rowvar, {})
@@ -1302,7 +1332,7 @@ end
 --: (Ctx, integer, integer, integer) -> ()
 local function emit_indexer_bound(ctx, var_tid, key_tid, res_tid)
     local var_t = ctx.types:get(var_tid)
-    local var_level = var_t.data[1]
+    local var_level = types_mod.var_level(var_t)
     local rowvar = types_mod.make_rowvar(ctx, var_level)
     local bound = types_mod.make_table(ctx, {}, { key_tid, res_tid }, rowvar, {})
     merge_inferred_bound(ctx, var_tid, bound)
@@ -1326,8 +1356,8 @@ local function solve_index(ctx, c)
     end
 
     -- Opaque table-valued key: t[TC] — look for a FLAG_OPAQUE_KEY field by variable name.
-    if key_t.data[0] == LIT_OPAQUE_KEY then
-        local key_name_id = key_t.data[1]
+    if types_mod.lit_kind(key_t) == LIT_OPAQUE_KEY then
+        local key_name_id = types_mod.lit_str_id(key_t)
         local obj_tid = find(ctx, obj_tid_raw)
         local obj_t   = ctx.types:get(obj_tid)
 
@@ -1360,7 +1390,7 @@ local function solve_index(ctx, c)
             -- No matching opaque field: open table returns unknown, closed returns any.
             -- Closed-table fallback to any is implicit — emit IMPLICIT_ANY so the user
             -- sees that inference gave up.
-            if obj_t.data[4] >= 0 then
+            if types_mod.tbl_row_var(obj_t) >= 0 then
                 bind_to(ctx, res_tid, ctx.T_UNKNOWN)
             else
                 add_warning_code(ctx, line, col, defs.E.IMPLICIT_ANY)
@@ -1375,9 +1405,9 @@ local function solve_index(ctx, c)
         return true
     end
 
-    if key_t.data[0] == LIT_INTEGER then
+    if types_mod.lit_kind(key_t) == LIT_INTEGER then
         -- Tuple slot projection
-        local slot = key_t.data[1]
+        local slot = types_mod.lit_str_id(key_t)
         local obj_tid = find(ctx, obj_tid_raw)
         local obj_t = ctx.types:get(obj_tid)
         -- HM Phase 1c step 7: free param + integer-key access → emit
@@ -1394,8 +1424,8 @@ local function solve_index(ctx, c)
             return false  -- defer until obj is resolved
         end
         if obj_t.tag == TAG_TUPLE then
-            if slot < obj_t.data[1] then
-                unify_mod.unify(ctx, res_tid, find(ctx, ctx.lists:get(obj_t.data[0] + slot)))
+            if slot < types_mod.agg_members_len(obj_t) then
+                unify_mod.unify(ctx, res_tid, find(ctx, ctx.lists:get(types_mod.agg_members_start(obj_t) + slot)))
             else
                 bind_to(ctx, res_tid, ctx.T_NIL)
             end
@@ -1416,7 +1446,7 @@ local function solve_index(ctx, c)
             -- 2) Integer/number indexer: `{ [integer]: T }` (FFI fixed-size arrays land
             --    here when cdef declares `int32_t[N]`) or `{ [number]: T }`.
             --    Literal-integer key matches base integer/number indexer or matching literal key.
-            local is, il = obj_t.data[2], obj_t.data[3]
+            local is, il = types_mod.tbl_indexers_start(obj_t), types_mod.tbl_indexers_len(obj_t)
             local i = is
             while i < is + il - 1 do
                 local kt   = find(ctx, ctx.lists:get(i))
@@ -1426,8 +1456,8 @@ local function solve_index(ctx, c)
                     return true
                 end
                 if kt_t.tag == TAG_LITERAL
-                    and (kt_t.data[0] == LIT_INTEGER or kt_t.data[0] == LIT_NUMBER)
-                    and kt_t.data[1] == slot then
+                    and (types_mod.lit_kind(kt_t) == LIT_INTEGER or types_mod.lit_kind(kt_t) == LIT_NUMBER)
+                    and types_mod.lit_str_id(kt_t) == slot then
                     unify_mod.unify(ctx, res_tid, find(ctx, ctx.lists:get(i + 1)))
                     return true
                 end
@@ -1447,11 +1477,12 @@ local function solve_index(ctx, c)
         end
         if obj_t.tag == TAG_UNION then
             local parts = {}
-            for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
+            local oms, oml = types_mod.agg_members_start(obj_t), types_mod.agg_members_len(obj_t)
+            for i = oms, oms + oml - 1 do
                 local arm = find(ctx, ctx.lists:get(i))
                 local arm_t = ctx.types:get(arm)
-                if arm_t.tag == TAG_TUPLE and slot < arm_t.data[1] then
-                    parts[#parts + 1] = find(ctx, ctx.lists:get(arm_t.data[0] + slot))
+                if arm_t.tag == TAG_TUPLE and slot < types_mod.agg_members_len(arm_t) then
+                    parts[#parts + 1] = find(ctx, ctx.lists:get(types_mod.agg_members_start(arm_t) + slot))
                 else
                     parts[#parts + 1] = ctx.T_NIL
                 end
@@ -1478,7 +1509,7 @@ local function solve_index(ctx, c)
         -- the inner element type. This covers method calls like str:match(pat)
         -- where the return type resolves to TAG_SPREAD before C_INDEX fires.
         if obj_t.tag == TAG_SPREAD then
-            bind_to(ctx, res_tid, find(ctx, obj_t.data[0]))
+            bind_to(ctx, res_tid, find(ctx, types_mod.spread_inner(obj_t)))
             return true
         end
         -- Non-tuple: slot 0 = the value itself, others = nil
@@ -1491,7 +1522,7 @@ local function solve_index(ctx, c)
     end
 
     -- LIT_STRING key: named field access (was solve_has_field)
-    local name_id  = key_t.data[1]
+    local name_id  = types_mod.lit_str_id(key_t)
     local obj_tid  = resolve_ffic(ctx, find(ctx, obj_tid_raw))
     local obj_t = ctx.types:get(obj_tid)
 
@@ -1529,7 +1560,7 @@ local function solve_index(ctx, c)
     --   One-arg: no view entry; field access is always an error.
     -- newtype nominals: fall through to unwrap as usual.
     if obj_t.tag == TAG_NOMINAL then
-        local nom_identity = obj_t.data[1]
+        local nom_identity = types_mod.nom_identity(obj_t)
         if ctx._opaque_nominals and ctx._opaque_nominals[nom_identity] then
             local fname = intern_mod.get(ctx.pool, name_id) or "?"
             if ctx._opaque_view and ctx._opaque_view[nom_identity] ~= nil then
@@ -1557,7 +1588,7 @@ local function solve_index(ctx, c)
                 return false
             end
         end
-        obj_tid = find(ctx, obj_t.data[2])
+        obj_tid = find(ctx, types_mod.nom_underlying(obj_t))
         obj_t   = ctx.types:get(obj_tid)
     end
 
@@ -1566,7 +1597,7 @@ local function solve_index(ctx, c)
     do
         local base_tag = obj_t.tag
         if base_tag == TAG_LITERAL then
-            local kind = obj_t.data[0]
+            local kind = types_mod.lit_kind(obj_t)
             if     kind == LIT_STRING  then base_tag = TAG_STRING
             elseif kind == LIT_NUMBER  then base_tag = TAG_NUMBER
             elseif kind == LIT_INTEGER then base_tag = TAG_INTEGER
@@ -1619,12 +1650,13 @@ local function solve_index(ctx, c)
         end
         -- Spread field fallback: check { ...T } placeholders when named field not found.
         -- Handles { ...(A | B) } where the union wasn't distributed at substitution time.
-        for si = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
+        local ofs, ofl = types_mod.tbl_fields_start(obj_t), types_mod.tbl_fields_len(obj_t)
+        for si = ofs, ofs + ofl - 1 do
             local sfe = ctx.fields:get(ctx.lists:get(si))
             if sfe.name_id == -1 then
                 local sp_t = ctx.types:get(find(ctx, sfe.type_id))
                 if sp_t.tag == TAG_SPREAD then
-                    local inner_tid = find(ctx, sp_t.data[0])
+                    local inner_tid = find(ctx, types_mod.spread_inner(sp_t))
                     local inner_t   = ctx.types:get(inner_tid)
                     if inner_t.tag == TAG_TABLE then
                         local sfe2 = types_mod.table_field(ctx, inner_tid, name_id)
@@ -1640,7 +1672,8 @@ local function solve_index(ctx, c)
                         -- Collect field types from all union arms that have it.
                         local field_types = {}
                         local all_have   = true
-                        for ai = inner_t.data[0], inner_t.data[0] + inner_t.data[1] - 1 do
+                        local ims, iml = types_mod.agg_members_start(inner_t), types_mod.agg_members_len(inner_t)
+                        for ai = ims, ims + iml - 1 do
                             local arm_tid = find(ctx, ctx.lists:get(ai))
                             local arm_t   = ctx.types:get(arm_tid)
                             if arm_t.tag == TAG_TABLE then
@@ -1667,7 +1700,7 @@ local function solve_index(ctx, c)
             end
         end
         -- String indexer fallback
-        local is, il = obj_t.data[2], obj_t.data[3]
+        local is, il = types_mod.tbl_indexers_start(obj_t), types_mod.tbl_indexers_len(obj_t)
         local i = is
         while i < is + il - 1 do
             local kt = find(ctx, ctx.lists:get(i))
@@ -1699,10 +1732,10 @@ local function solve_index(ctx, c)
         -- TAG_VAR/TAG_ROWVAR branch below when an unannotated parameter is first
         -- accessed.  They MUST be extended so that multiple field accesses on the
         -- same unannotated parameter each get their own fresh type variable.
-        if obj_t.data[4] >= 0 then
+        if types_mod.tbl_row_var(obj_t) >= 0 then
             -- Walk the row variable chain to find the deepest free var.
             -- Along the way, check fields in intermediate tables.
-            local row_tid = find(ctx, obj_t.data[4])
+            local row_tid = find(ctx, types_mod.tbl_row_var(obj_t))
             for _ = 1, 64 do  -- cycle-safe depth limit
                 local row_t = ctx.types:get(row_tid)
                 if row_t.tag == TAG_VAR or row_t.tag == TAG_ROWVAR then
@@ -1735,8 +1768,8 @@ local function solve_index(ctx, c)
                         return true
                     end
                     -- Field not here; follow this table's own row variable deeper.
-                    if row_t.data[4] >= 0 then
-                        row_tid = find(ctx, row_t.data[4])
+                    if types_mod.tbl_row_var(row_t) >= 0 then
+                        row_tid = find(ctx, types_mod.tbl_row_var(row_t))
                     else
                         break  -- closed intermediate table; fall through to unknown
                     end
@@ -1822,7 +1855,7 @@ local function solve_index(ctx, c)
             local fe = types_mod.table_field(ctx2, mid, nid)
             if fe then
                 return { find(ctx2, fe.type_id) }, false, false, false
-            elseif mt.data[4] >= 0 then
+            elseif types_mod.tbl_row_var(mt) >= 0 then
                 return {}, true, false, false
             else
                 return {}, false, true, false
@@ -1832,7 +1865,8 @@ local function solve_index(ctx, c)
             -- Distribute: field must be reachable from each member that is a closed type.
             -- Collect types from all members; any_open means result may contain unknown.
             local ftypes, any_open2, all_miss2 = {}, false, true
-            for i = mt.data[0], mt.data[0] + mt.data[1] - 1 do
+            local mms, mml = types_mod.agg_members_start(mt), types_mod.agg_members_len(mt)
+            for i = mms, mms + mml - 1 do
                 local arm_mid = ctx2.lists:get(i)
                 local arm_ft, arm_open, arm_closed, arm_any = field_access_on(ctx2, arm_mid, nid)
                 if arm_any then return {}, false, false, true end
@@ -1859,7 +1893,8 @@ local function solve_index(ctx, c)
         if mt.tag == TAG_UNION then
             -- Distribute: collect from each arm.
             local ftypes, any_open2, any_closed2 = {}, false, false
-            for i = mt.data[0], mt.data[0] + mt.data[1] - 1 do
+            local ums, uml = types_mod.agg_members_start(mt), types_mod.agg_members_len(mt)
+            for i = ums, ums + uml - 1 do
                 local arm_mid = ctx2.lists:get(i)
                 local arm_ft, arm_open, arm_closed, arm_any = field_access_on(ctx2, arm_mid, nid)
                 if arm_any then return {}, false, false, true end
@@ -1877,7 +1912,8 @@ local function solve_index(ctx, c)
         local field_types = {}
         local closed_miss = false
         local open_miss   = false
-        for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
+        local ums, uml = types_mod.agg_members_start(obj_t), types_mod.agg_members_len(obj_t)
+        for i = ums, ums + uml - 1 do
             local mid = ctx.lists:get(i)
             local arm_ft, arm_open, arm_closed, arm_any = field_access_on(ctx, mid, name_id)
             if arm_any then
@@ -1911,7 +1947,8 @@ local function solve_index(ctx, c)
         local field_types = {}
         local any_open = false
         local all_miss = true
-        for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
+        local ims, iml = types_mod.agg_members_start(obj_t), types_mod.agg_members_len(obj_t)
+        for i = ims, ims + iml - 1 do
             local mid = find(ctx, ctx.lists:get(i))
             local mt  = ctx.types:get(mid)
             if mt.tag == TAG_TABLE then
@@ -1925,7 +1962,7 @@ local function solve_index(ctx, c)
                     if proto_ft then
                         field_types[#field_types + 1] = proto_ft
                         all_miss = false
-                    elseif mt.data[4] >= 0 then
+                    elseif types_mod.tbl_row_var(mt) >= 0 then
                         any_open = true
                         all_miss = false
                     end
@@ -1989,7 +2026,7 @@ local function solve_callable(ctx, c)
     end
 
     if callee_t.tag == TAG_NOMINAL then
-        callee_tid = find(ctx, callee_t.data[2])
+        callee_tid = find(ctx, types_mod.nom_underlying(callee_t))
         callee_t   = ctx.types:get(callee_tid)
     end
 
@@ -2001,7 +2038,7 @@ local function solve_callable(ctx, c)
         -- bound's free TVs.
         if ctx._sub_solve_params and ctx._sub_solve_params[callee_raw] then
             local var_t = ctx.types:get(callee_tid)
-            local var_level = var_t.data[1]
+            local var_level = types_mod.var_level(var_t)
             local r_var = types_mod.make_var(ctx, var_level)
             local sig_tid = types_mod.make_func(ctx, arg_tids, { r_var }, -1, nil)
             merge_inferred_bound(ctx, callee_tid, sig_tid)
@@ -2025,8 +2062,8 @@ local function solve_callable(ctx, c)
             callee_t   = ctx.types:get(callee_tid)
         end
         -- Unify arguments with parameters
-        local pl = callee_t.data[1]
-        local has_names = callee_t.data[6] > 0
+        local pl = types_mod.fn_params_len(callee_t)
+        local has_names = types_mod.fn_param_names_len(callee_t) > 0
         -- Named-param generic bound deferral (<F: (A,B)->R, A, B, R>).
         -- When first called, F is a free TV that gets bound by processing param 0 (f: F).
         -- Params A and B are ALSO free TVs at this point — C_BOUND hasn't fired yet to
@@ -2045,12 +2082,13 @@ local function solve_callable(ctx, c)
         -- C_CALLABLE in constraint order; if C_CALLABLE defers without binding all params,
         -- those body constraints see unbound TVs on the final error pass and silently skip.
         do
-            local exp0_t = ctx.types:get(find(ctx, ctx.lists:get(callee_t.data[0])))
+            local ps = types_mod.fn_params_start(callee_t)
+            local exp0_t = ctx.types:get(find(ctx, ctx.lists:get(ps)))
             -- Param 0 must itself be a free TV (F_fresh) for the deferral to apply.
             if pl > 1 and (exp0_t.tag == TAG_VAR or exp0_t.tag == TAG_ROWVAR) then
                 local has_unbound_named_param = false
                 for si = 1, pl - 1 do
-                    local st = ctx.types:get(find(ctx, ctx.lists:get(callee_t.data[0] + si)))
+                    local st = ctx.types:get(find(ctx, ctx.lists:get(ps + si)))
                     if st.tag == TAG_VAR or st.tag == TAG_ROWVAR then
                         has_unbound_named_param = true
                         break
@@ -2062,7 +2100,7 @@ local function solve_callable(ctx, c)
                     -- is bound. This generalises the old TAG_FUNCTION check: any compound bound
                     -- (function, table, etc.) will have a C_BOUND; checking the tag directly
                     -- would miss non-function bounds like <T: { x: A, y: B }, A, B>.
-                    local param0_tv = find(ctx, ctx.lists:get(callee_t.data[0]))
+                    local param0_tv = find(ctx, ctx.lists:get(ps))
                     local has_pending_bound = false
                     if ctx._constraints then
                         for _, bc in ipairs(ctx._constraints) do
@@ -2076,15 +2114,16 @@ local function solve_callable(ctx, c)
                         local act0 = arg_tids[1]
                         if act0 then
                             -- Bind param 0 from arg 0, then defer A/B checking until C_BOUND fires.
-                            unify_mod.unify(ctx, widen_literal(ctx, act0), find(ctx, ctx.lists:get(callee_t.data[0])))
+                            unify_mod.unify(ctx, widen_literal(ctx, act0), find(ctx, ctx.lists:get(ps)))
                         end
                         return false
                     end
                 end
             end
         end
+        local ps_main = types_mod.fn_params_start(callee_t)
         for i = 0, pl - 1 do
-            local raw_param_tid = ctx.lists:get(callee_t.data[0] + i)
+            local raw_param_tid = ctx.lists:get(ps_main + i)
             local exp_tid = find(ctx, raw_param_tid)
             local act_tid = arg_tids[i + 1]
             if act_tid then
@@ -2093,7 +2132,7 @@ local function solve_callable(ctx, c)
                 -- Skip for closed table params: the full unify path enforces the excess-field check.
                 local act_r = find(ctx, act_tid)
                 local et = ctx.types:get(exp_tid)
-                local param_is_closed_table = et.tag == TAG_TABLE and et.data[4] < 0
+                local param_is_closed_table = et.tag == TAG_TABLE and types_mod.tbl_row_var(et) < 0
                 if not param_is_closed_table
                   and et.tag ~= TAG_VAR and et.tag ~= TAG_ROWVAR
                   and not contains_free_var(ctx, exp_tid)
@@ -2124,19 +2163,20 @@ local function solve_callable(ctx, c)
                     local union_msg = nil
                     if act_t.tag == TAG_UNION then
                         local failing = {}
-                        for mi = act_t.data[0], act_t.data[0] + act_t.data[1] - 1 do
+                        local atms, atml = types_mod.agg_members_start(act_t), types_mod.agg_members_len(act_t)
+                        for mi = atms, atms + atml - 1 do
                             local mid = find(ctx, ctx.lists:get(mi))
                             if not unify_mod.try_unify(ctx, mid, exp_tid) then
                                 failing[#failing + 1] = mid
                             end
                         end
-                        local total = act_t.data[1]
+                        local total = atml
                         if #failing > 0 and #failing < total then
                             local fail_tid = #failing == 1 and failing[1]
                                 or types_mod.make_union(ctx, failing)
                             local param_name = nil
                             if has_names then
-                                local name_id = ctx.lists:get(callee_t.data[5] + i)
+                                local name_id = ctx.lists:get(types_mod.fn_param_names_start(callee_t) + i)
                                 param_name = intern_mod.get(ctx.pool, name_id)
                             end
                             local pn = param_name or ""
@@ -2170,11 +2210,11 @@ local function solve_callable(ctx, c)
                 end
             end
         end
-        -- Handle extra args against the function's vararg slot (data[4]).
+        -- Handle extra args against the function's vararg slot.
         -- This covers calls like wrap(f, 5) where wrap is <F: (...P)->R, P, R>(f: F, ...P)->R:
         -- after C_BOUND back-propagates P from F's concrete params, P_fresh is a TAG_TUPLE
         -- and each extra arg must satisfy the corresponding tuple slot.
-        local va_id = callee_t.data[4]
+        local va_id = types_mod.fn_vararg(callee_t)
         if va_id >= 0 and #arg_tids > pl then
             local va_resolved = find(ctx, va_id)
             local vat = ctx.types:get(va_resolved)
@@ -2187,8 +2227,8 @@ local function solve_callable(ctx, c)
                 for ei = pl, #arg_tids - 1 do
                     local slot_idx = ei - pl  -- 0-based index into the tuple
                     local exp_slot
-                    if slot_idx < vat.data[1] then
-                        exp_slot = find(ctx, ctx.lists:get(vat.data[0] + slot_idx))
+                    if slot_idx < types_mod.agg_members_len(vat) then
+                        exp_slot = find(ctx, ctx.lists:get(types_mod.agg_members_start(vat) + slot_idx))
                     else
                         exp_slot = ctx.T_NIL  -- more args than tuple slots
                     end
@@ -2208,11 +2248,12 @@ local function solve_callable(ctx, c)
             -- If vararg is TAG_ANY or other non-tuple type, extra args are accepted silently.
         end
         -- Unify return
-        local rl = callee_t.data[3]
+        local rl = types_mod.fn_returns_len(callee_t)
+        local rs_main = types_mod.fn_returns_start(callee_t)
         if rl == 0 then
             unify_mod.unify(ctx, ret_tid, ctx.T_NIL)
         elseif rl == 1 then
-            local first_ret = find(ctx, ctx.lists:get(callee_t.data[2]))
+            local first_ret = find(ctx, ctx.lists:get(rs_main))
             -- Parameterized intrinsic return: evaluate deferred TAG_TYPE_CALL(TAG_INTRINSIC,...)
             -- now that all type variables from argument unification are bound.
             -- E.g. $Require<T> where T was bound to LIT_STRING("mod") during param unification.
@@ -2222,7 +2263,7 @@ local function solve_callable(ctx, c)
             -- Multiple return values: assemble TAG_TUPLE so C_INDEX can project slots.
             local slots = {}
             for ri = 0, rl - 1 do
-                slots[ri + 1] = find(ctx, ctx.lists:get(callee_t.data[2] + ri))
+                slots[ri + 1] = find(ctx, ctx.lists:get(rs_main + ri))
             end
             unify_mod.unify(ctx, ret_tid, types_mod.make_tuple(ctx, slots))
         end
@@ -2232,7 +2273,8 @@ local function solve_callable(ctx, c)
     -- Intersection: overload dispatch — first matching overload wins.
     if callee_t.tag == TAG_INTERSECTION then
         local members = {}
-        for i = callee_t.data[0], callee_t.data[0] + callee_t.data[1] - 1 do
+        local cms, cml = types_mod.agg_members_start(callee_t), types_mod.agg_members_len(callee_t)
+        for i = cms, cms + cml - 1 do
             local mid = find(ctx, ctx.lists:get(i))
             local mt  = ctx.types:get(mid)
             if mt.tag == TAG_FUNCTION then
@@ -2249,19 +2291,21 @@ local function solve_callable(ctx, c)
         for _, m in ipairs(members) do
             local ft = m.t
             local ok = true
-            for j = 0, ft.data[1] - 1 do
-                local exp_tid = find(ctx, ctx.lists:get(ft.data[0] + j))
+            local fps = types_mod.fn_params_start(ft)
+            local fpl = types_mod.fn_params_len(ft)
+            for j = 0, fpl - 1 do
+                local exp_tid = find(ctx, ctx.lists:get(fps + j))
                 local act_tid = arg_tids[j + 1]
                 if act_tid and not unify_mod.try_unify(ctx, find(ctx, act_tid), exp_tid) then
                     ok = false; break
                 end
             end
             if ok then
-                local rl = ft.data[3]
+                local rl = types_mod.fn_returns_len(ft)
                 if rl == 0 then
                     bind_to(ctx, ret_tid, ctx.T_NIL)
                 else
-                    local first_ret = find(ctx, ctx.lists:get(ft.data[2]))
+                    local first_ret = find(ctx, ctx.lists:get(types_mod.fn_returns_start(ft)))
                     first_ret = resolve_deferred_intrinsic(ctx, first_ret)
                     bind_to(ctx, ret_tid, first_ret)
                 end
@@ -2274,8 +2318,10 @@ local function solve_callable(ctx, c)
             local ft = m.t
             --: { [integer]: string, ... }
             local reasons = {}
-            for j = 0, ft.data[1] - 1 do
-                local exp_tid = find(ctx, ctx.lists:get(ft.data[0] + j))
+            local fps = types_mod.fn_params_start(ft)
+            local fpl = types_mod.fn_params_len(ft)
+            for j = 0, fpl - 1 do
+                local exp_tid = find(ctx, ctx.lists:get(fps + j))
                 local act_tid = arg_tids[j + 1]
                 if act_tid then
                     local a = find(ctx, act_tid)
@@ -2304,7 +2350,8 @@ local function solve_callable(ctx, c)
         local ret_types = {}
         --: { [integer]: string, ... }
         local fail_msgs = {}
-        for i = callee_t.data[0], callee_t.data[0] + callee_t.data[1] - 1 do
+        local ums, uml = types_mod.agg_members_start(callee_t), types_mod.agg_members_len(callee_t)
+        for i = ums, ums + uml - 1 do
             local mid = find(ctx, ctx.lists:get(i))
             local mt  = ctx.types:get(mid)
             if mt.tag ~= TAG_FUNCTION then
@@ -2312,8 +2359,10 @@ local function solve_callable(ctx, c)
                     .. types_mod.display_short(ctx, mid) .. "` is not callable"
             else
                 local member_ok = true
-                for j = 0, mt.data[1] - 1 do
-                    local exp_tid = find(ctx, ctx.lists:get(mt.data[0] + j))
+                local mps = types_mod.fn_params_start(mt)
+                local mpl = types_mod.fn_params_len(mt)
+                for j = 0, mpl - 1 do
+                    local exp_tid = find(ctx, ctx.lists:get(mps + j))
                     local act_tid = arg_tids[j + 1]
                     if act_tid and not unify_mod.try_unify(ctx, find(ctx, act_tid), exp_tid) then
                         member_ok = false
@@ -2324,9 +2373,9 @@ local function solve_callable(ctx, c)
                     end
                 end
                 if member_ok then
-                    local rl = mt.data[3]
+                    local rl = types_mod.fn_returns_len(mt)
                     ret_types[#ret_types + 1] = rl > 0
-                        and find(ctx, ctx.lists:get(mt.data[2]))
+                        and find(ctx, ctx.lists:get(types_mod.fn_returns_start(mt)))
                         or  ctx.T_NIL
                 end
             end
@@ -2397,11 +2446,11 @@ local function solve_arith(ctx, c)
     -- arithmetic "promotes" newtypes back to their underlying type. Walk down
     -- recursively in case of nested newtypes.
     while lhs_t.tag == TAG_NOMINAL do
-        lhs_tid = find(ctx, lhs_t.data[2])
+        lhs_tid = find(ctx, types_mod.nom_underlying(lhs_t))
         lhs_t   = ctx.types:get(lhs_tid)
     end
     while rhs_t.tag == TAG_NOMINAL do
-        rhs_tid = find(ctx, rhs_t.data[2])
+        rhs_tid = find(ctx, types_mod.nom_underlying(rhs_t))
         rhs_t   = ctx.types:get(rhs_tid)
     end
 
@@ -2463,11 +2512,11 @@ local function solve_compare(ctx, c)
         local lhs_is_param = lhs_t.tag == TAG_VAR and ctx._sub_solve_params[lhs_raw]
         local rhs_is_param = rhs_t.tag == TAG_VAR and ctx._sub_solve_params[rhs_raw]
         if lhs_is_param then
-            local r_discard = types_mod.make_var(ctx, lhs_t.data[1])
+            local r_discard = types_mod.make_var(ctx, types_mod.var_level(lhs_t))
             emit_meta_bound(ctx, lhs_tid, "__lt", rhs_tid, r_discard)
         end
         if rhs_is_param and lhs_raw ~= rhs_raw then
-            local r_discard = types_mod.make_var(ctx, rhs_t.data[1])
+            local r_discard = types_mod.make_var(ctx, types_mod.var_level(rhs_t))
             emit_meta_bound(ctx, rhs_tid, "__lt", lhs_tid, r_discard)
         end
         if lhs_is_param or rhs_is_param then
@@ -2482,11 +2531,11 @@ local function solve_compare(ctx, c)
     -- Auto-unwrap TAG_NOMINAL (newtype) for metamethod dispatch — mirrors
     -- solve_arith. Newtypes inherit their underlying type's operators.
     while lhs_t.tag == TAG_NOMINAL do
-        lhs_tid = find(ctx, lhs_t.data[2])
+        lhs_tid = find(ctx, types_mod.nom_underlying(lhs_t))
         lhs_t   = ctx.types:get(lhs_tid)
     end
     while rhs_t.tag == TAG_NOMINAL do
-        rhs_tid = find(ctx, rhs_t.data[2])
+        rhs_tid = find(ctx, types_mod.nom_underlying(rhs_t))
         rhs_t   = ctx.types:get(rhs_tid)
     end
 
@@ -2518,7 +2567,7 @@ local function solve_compare(ctx, c)
         tid = find(ctx, tid)
         local t = ctx.types:get(tid)
         while t.tag == TAG_NOMINAL do
-            tid = find(ctx, t.data[2])
+            tid = find(ctx, types_mod.nom_underlying(t))
             t   = ctx.types:get(tid)
         end
         local mm_id = intern_mod.intern(ctx.pool, "__lt")
@@ -2529,7 +2578,7 @@ local function solve_compare(ctx, c)
         end
         local ptag = t.tag
         if ptag == TAG_LITERAL then
-            local k = t.data[0]
+            local k = types_mod.lit_kind(t)
             if k == LIT_NUMBER  then ptag = TAG_NUMBER
             elseif k == LIT_INTEGER then ptag = TAG_INTEGER
             elseif k == LIT_STRING  then ptag = TAG_STRING
@@ -2547,9 +2596,10 @@ local function solve_compare(ctx, c)
     local function check_against(fn_tid, a_tid, b_tid)
         if fn_tid == nil then return true end
         local ft = ctx.types:get(fn_tid)
-        if ft.tag ~= TAG_FUNCTION or ft.data[1] < 2 then return true end
-        local p1 = find(ctx, ctx.lists:get(ft.data[0]))
-        local p2 = find(ctx, ctx.lists:get(ft.data[0] + 1))
+        if ft.tag ~= TAG_FUNCTION or types_mod.fn_params_len(ft) < 2 then return true end
+        local fps = types_mod.fn_params_start(ft)
+        local p1 = find(ctx, ctx.lists:get(fps))
+        local p2 = find(ctx, ctx.lists:get(fps + 1))
         return unify_mod.try_unify(ctx, a_tid, p1) and unify_mod.try_unify(ctx, b_tid, p2)
     end
 
@@ -2592,7 +2642,7 @@ local function solve_return(ctx, c)
         local expected_tid = find(ctx, ret_var_id)
         local et = ctx.types:get(expected_tid)
         if et.tag == TAG_SPREAD then
-            expected_tid = find(ctx, et.data[0])
+            expected_tid = find(ctx, types_mod.spread_inner(et))
             et = ctx.types:get(expected_tid)
         end
         -- When the annotated return is a TAG_TUPLE (multi-return packed as tuple)
@@ -2603,8 +2653,8 @@ local function solve_return(ctx, c)
         -- expected tuple for the per-slot check.
         if et.tag == TAG_TUPLE and ctx.types:get(widened).tag ~= TAG_TUPLE then
             -- Normal multi-return: `return a, b` — ret_tids[1] = a, check against slot 0.
-            if et.data[1] > 0 then
-                expected_tid = find(ctx, ctx.lists:get(et.data[0]))
+            if types_mod.agg_members_len(et) > 0 then
+                expected_tid = find(ctx, ctx.lists:get(types_mod.agg_members_start(et)))
             end
         end
         local ok, err = unify_mod.unify(ctx, widened, expected_tid)
@@ -2621,14 +2671,15 @@ local function solve_return(ctx, c)
     -- Following the chain can reach a different unbound var (e.g. prescan_ret_var
     -- after C_UNIFY extended the chain). Binding that var to `widened` where
     -- widened == find(ret_var_id) creates a self-loop and hangs find().
-    if ret_var_t.data[2] == -1 then
+    if types_mod.var_parent(ret_var_t) == -1 then
         -- First return path: bind ret_var_id directly.
+        -- Write stays direct (no typed setter exists; accessors are read-only per types.lua).
         ret_var_t.data[2] = widened
     else
         -- Subsequent return path (multiple `return` stmts, or fixpoint re-pass).
-        -- Use ret_var_t.data[2] to find the current concrete binding without
+        -- Use ret_var_t's parent slot to find the current concrete binding without
         -- following the full chain past what this constraint owns.
-        local prev_root = find(ctx, ret_var_t.data[2])
+        local prev_root = find(ctx, types_mod.var_parent(ret_var_t))
         if prev_root ~= widened then
             -- Widen: new union of what we had and the new return value.
             local new_union = types_mod.make_union(ctx, { prev_root, widened })
@@ -2660,7 +2711,7 @@ local function solve_bind_generics(ctx, c)
 
     -- Unwrap nominal to inner type.
     if callee_t.tag == TAG_NOMINAL then
-        callee_tid = find(ctx, callee_t.data[2])
+        callee_tid = find(ctx, types_mod.nom_underlying(callee_t))
         callee_t   = ctx.types:get(callee_tid)
     end
 
@@ -2674,7 +2725,8 @@ local function solve_bind_generics(ctx, c)
         callee_t   = ctx.types:get(callee_tid)
     end
 
-    local pl = callee_t.data[1]
+    local pl = types_mod.fn_params_len(callee_t)
+    local ps = types_mod.fn_params_start(callee_t)
 
     -- Named-param generic deferral: when param 0 is a free TV (F) and some later param
     -- is also a free TV (A, B, R), and the first argument is a function type:
@@ -2683,11 +2735,11 @@ local function solve_bind_generics(ctx, c)
     -- Without this, C_BIND_GENERICS would eagerly bind A/B from the raw args
     -- (potentially wrong types), blocking C_BOUND and silently hiding mismatches.
     do
-        local exp0_t = ctx.types:get(find(ctx, ctx.lists:get(callee_t.data[0])))
+        local exp0_t = ctx.types:get(find(ctx, ctx.lists:get(ps)))
         if pl > 1 and (exp0_t.tag == TAG_VAR or exp0_t.tag == TAG_ROWVAR) then
             local has_free_later_param = false
             for si = 1, pl - 1 do
-                local st = ctx.types:get(find(ctx, ctx.lists:get(callee_t.data[0] + si)))
+                local st = ctx.types:get(find(ctx, ctx.lists:get(ps + si)))
                 if st.tag == TAG_VAR or st.tag == TAG_ROWVAR then
                     has_free_later_param = true
                     break
@@ -2700,7 +2752,7 @@ local function solve_bind_generics(ctx, c)
                 -- This generalises the old TAG_FUNCTION check: any compound bound
                 -- (function, table, etc.) will have a C_BOUND; checking the tag directly
                 -- would miss non-function bounds like <T: { x: A, y: B }, A, B>.
-                local param0_tv = find(ctx, ctx.lists:get(callee_t.data[0]))
+                local param0_tv = find(ctx, ctx.lists:get(ps))
                 local has_pending_bound = false
                 if ctx._constraints then
                     for _, bc in ipairs(ctx._constraints) do
@@ -2716,7 +2768,7 @@ local function solve_bind_generics(ctx, c)
                         -- Bind param 0 (F_fresh / T_fresh) from arg 0, then defer.
                         -- C_BOUND fires next pass to back-propagate A, B, R from the bound type.
                         unify_mod.unify(ctx, widen_literal(ctx, act0),
-                            find(ctx, ctx.lists:get(callee_t.data[0])))
+                            find(ctx, ctx.lists:get(ps)))
                     end
                     return false
                 end
@@ -2725,7 +2777,7 @@ local function solve_bind_generics(ctx, c)
     end
 
     for i = 0, pl - 1 do
-        local exp_tid = find(ctx, ctx.lists:get(callee_t.data[0] + i))
+        local exp_tid = find(ctx, ctx.lists:get(ps + i))
         local et      = ctx.types:get(exp_tid)
         -- Bind when the param slot is a free TV (top-level) OR contains nested free TVs
         -- (e.g. Maybe<T> where T is a free TV in a union-of-tables param).
@@ -2778,7 +2830,7 @@ local function solve_check_args(ctx, c)
     end
 
     if callee_t.tag == TAG_NOMINAL then
-        callee_tid = find(ctx, callee_t.data[2])
+        callee_tid = find(ctx, types_mod.nom_underlying(callee_t))
         callee_t   = ctx.types:get(callee_tid)
     end
 
@@ -2790,7 +2842,7 @@ local function solve_check_args(ctx, c)
         -- silently binds to T_ANY, no contravariance check fires).
         if ctx._sub_solve_params and ctx._sub_solve_params[callee_raw] then
             local var_t = ctx.types:get(callee_tid)
-            local var_level = var_t.data[1]
+            local var_level = types_mod.var_level(var_t)
             local r_var = types_mod.make_var(ctx, var_level)
             local sig_tid = types_mod.make_func(ctx, arg_tids, { r_var }, -1, nil)
             merge_inferred_bound(ctx, callee_tid, sig_tid)
@@ -2810,26 +2862,27 @@ local function solve_check_args(ctx, c)
             callee_tid = env_mod.instantiate(ctx, callee_tid, 0)
             callee_t   = ctx.types:get(callee_tid)
         end
-        local pl = callee_t.data[1]
-        local has_names = callee_t.data[6] > 0
+        local pl = types_mod.fn_params_len(callee_t)
+        local ps = types_mod.fn_params_start(callee_t)
+        local has_names = types_mod.fn_param_names_len(callee_t) > 0
         -- Simple deferral: if any param is still a free TV, wait.
         -- C_BIND_GENERICS and C_BOUND have already had a chance to run; if a param
         -- is still free, more solver progress is needed before we can check args.
         for i = 0, pl - 1 do
-            local et = ctx.types:get(find(ctx, ctx.lists:get(callee_t.data[0] + i)))
+            local et = ctx.types:get(find(ctx, ctx.lists:get(ps + i)))
             if et.tag == TAG_VAR or et.tag == TAG_ROWVAR then
                 return false  -- defer
             end
         end
         for i = 0, pl - 1 do
-            local raw_param_tid = ctx.lists:get(callee_t.data[0] + i)
+            local raw_param_tid = ctx.lists:get(ps + i)
             local exp_tid = find(ctx, raw_param_tid)
             local act_tid = arg_tids[i + 1]
             if act_tid then
                 -- Fast path: try direct assignability (preserves literal-to-literal/union).
                 local act_r = find(ctx, act_tid)
                 local et = ctx.types:get(exp_tid)
-                local param_is_closed_table = et.tag == TAG_TABLE and et.data[4] < 0
+                local param_is_closed_table = et.tag == TAG_TABLE and types_mod.tbl_row_var(et) < 0
                 if not param_is_closed_table
                   and et.tag ~= TAG_VAR and et.tag ~= TAG_ROWVAR
                   and not contains_free_var(ctx, exp_tid)
@@ -2848,19 +2901,20 @@ local function solve_check_args(ctx, c)
                     local union_msg = nil
                     if act_t.tag == TAG_UNION then
                         local failing = {}
-                        for mi = act_t.data[0], act_t.data[0] + act_t.data[1] - 1 do
+                        local atms, atml = types_mod.agg_members_start(act_t), types_mod.agg_members_len(act_t)
+                        for mi = atms, atms + atml - 1 do
                             local mid = find(ctx, ctx.lists:get(mi))
                             if not unify_mod.try_unify(ctx, mid, exp_tid) then
                                 failing[#failing + 1] = mid
                             end
                         end
-                        local total = act_t.data[1]
+                        local total = atml
                         if #failing > 0 and #failing < total then
                             local fail_tid = #failing == 1 and failing[1]
                                 or types_mod.make_union(ctx, failing)
                             local param_name = nil
                             if has_names then
-                                local name_id = ctx.lists:get(callee_t.data[5] + i)
+                                local name_id = ctx.lists:get(types_mod.fn_param_names_start(callee_t) + i)
                                 param_name = intern_mod.get(ctx.pool, name_id)
                             end
                             local pn = param_name or ""
@@ -2894,8 +2948,8 @@ local function solve_check_args(ctx, c)
                 end
             end
         end
-        -- Handle extra args against the function's vararg slot (data[4]).
-        local va_id = callee_t.data[4]
+        -- Handle extra args against the function's vararg slot.
+        local va_id = types_mod.fn_vararg(callee_t)
         if va_id >= 0 and #arg_tids > pl then
             local va_resolved = find(ctx, va_id)
             local vat = ctx.types:get(va_resolved)
@@ -2906,8 +2960,8 @@ local function solve_check_args(ctx, c)
                 for ei = pl, #arg_tids - 1 do
                     local slot_idx = ei - pl
                     local exp_slot
-                    if slot_idx < vat.data[1] then
-                        exp_slot = find(ctx, ctx.lists:get(vat.data[0] + slot_idx))
+                    if slot_idx < types_mod.agg_members_len(vat) then
+                        exp_slot = find(ctx, ctx.lists:get(types_mod.agg_members_start(vat) + slot_idx))
                     else
                         exp_slot = ctx.T_NIL
                     end
@@ -2926,17 +2980,18 @@ local function solve_check_args(ctx, c)
             end
         end
         -- Unify return
-        local rl = callee_t.data[3]
+        local rl = types_mod.fn_returns_len(callee_t)
+        local rs = types_mod.fn_returns_start(callee_t)
         if rl == 0 then
             unify_mod.unify(ctx, ret_tid, ctx.T_NIL)
         elseif rl == 1 then
-            local first_ret = find(ctx, ctx.lists:get(callee_t.data[2]))
+            local first_ret = find(ctx, ctx.lists:get(rs))
             first_ret = resolve_deferred_intrinsic(ctx, first_ret)
             unify_mod.unify(ctx, ret_tid, first_ret)
         else
             local slots = {}
             for ri = 0, rl - 1 do
-                slots[ri + 1] = find(ctx, ctx.lists:get(callee_t.data[2] + ri))
+                slots[ri + 1] = find(ctx, ctx.lists:get(rs + ri))
             end
             unify_mod.unify(ctx, ret_tid, types_mod.make_tuple(ctx, slots))
         end
@@ -2946,7 +3001,8 @@ local function solve_check_args(ctx, c)
     -- Intersection: overload dispatch — first matching overload wins.
     if callee_t.tag == TAG_INTERSECTION then
         local members = {}
-        for i = callee_t.data[0], callee_t.data[0] + callee_t.data[1] - 1 do
+        local cms, cml = types_mod.agg_members_start(callee_t), types_mod.agg_members_len(callee_t)
+        for i = cms, cms + cml - 1 do
             local mid = find(ctx, ctx.lists:get(i))
             local mt  = ctx.types:get(mid)
             if mt.tag == TAG_FUNCTION then
@@ -2962,8 +3018,10 @@ local function solve_check_args(ctx, c)
         for _, m in ipairs(members) do
             local ft = m.t
             local ok = true
-            for j = 0, ft.data[1] - 1 do
-                local exp_tid = find(ctx, ctx.lists:get(ft.data[0] + j))
+            local fps = types_mod.fn_params_start(ft)
+            local fpl = types_mod.fn_params_len(ft)
+            for j = 0, fpl - 1 do
+                local exp_tid = find(ctx, ctx.lists:get(fps + j))
                 local act_tid = arg_tids[j + 1]
                 if act_tid and not unify_mod.try_unify(ctx, find(ctx, act_tid), exp_tid) then
                     ok = false; break
@@ -2972,8 +3030,8 @@ local function solve_check_args(ctx, c)
             if ok then
                 -- Bind params of the winning overload so that generic TVs in the
                 -- return type get resolved (e.g. CTypeMap[S_fresh]).
-                for j = 0, ft.data[1] - 1 do
-                    local pexp = ctx.lists:get(ft.data[0] + j)
+                for j = 0, fpl - 1 do
+                    local pexp = ctx.lists:get(fps + j)
                     local exp_p = find(ctx, pexp)
                     local pact = arg_tids[j + 1]
                     if pact then
@@ -2984,11 +3042,11 @@ local function solve_check_args(ctx, c)
                         end
                     end
                 end
-                local rl = ft.data[3]
+                local rl = types_mod.fn_returns_len(ft)
                 if rl == 0 then
                     bind_to(ctx, ret_tid, ctx.T_NIL)
                 else
-                    local first_ret = find(ctx, ctx.lists:get(ft.data[2]))
+                    local first_ret = find(ctx, ctx.lists:get(types_mod.fn_returns_start(ft)))
                     first_ret = resolve_deferred_intrinsic(ctx, first_ret)
                     bind_to(ctx, ret_tid, first_ret)
                 end
@@ -3000,8 +3058,10 @@ local function solve_check_args(ctx, c)
             local ft = m.t
             --: { [integer]: string, ... }
             local reasons = {}
-            for j = 0, ft.data[1] - 1 do
-                local exp_tid = find(ctx, ctx.lists:get(ft.data[0] + j))
+            local fps = types_mod.fn_params_start(ft)
+            local fpl = types_mod.fn_params_len(ft)
+            for j = 0, fpl - 1 do
+                local exp_tid = find(ctx, ctx.lists:get(fps + j))
                 local act_tid = arg_tids[j + 1]
                 if act_tid then
                     local a = find(ctx, act_tid)
@@ -3030,7 +3090,8 @@ local function solve_check_args(ctx, c)
         local ret_types = {}
         --: { [integer]: string, ... }
         local fail_msgs = {}
-        for i = callee_t.data[0], callee_t.data[0] + callee_t.data[1] - 1 do
+        local ums, uml = types_mod.agg_members_start(callee_t), types_mod.agg_members_len(callee_t)
+        for i = ums, ums + uml - 1 do
             local mid = find(ctx, ctx.lists:get(i))
             local mt  = ctx.types:get(mid)
             if mt.tag ~= TAG_FUNCTION then
@@ -3038,8 +3099,10 @@ local function solve_check_args(ctx, c)
                     .. types_mod.display_short(ctx, mid) .. "` is not callable"
             else
                 local member_ok = true
-                for j = 0, mt.data[1] - 1 do
-                    local exp_tid = find(ctx, ctx.lists:get(mt.data[0] + j))
+                local mps = types_mod.fn_params_start(mt)
+                local mpl = types_mod.fn_params_len(mt)
+                for j = 0, mpl - 1 do
+                    local exp_tid = find(ctx, ctx.lists:get(mps + j))
                     local act_tid = arg_tids[j + 1]
                     if act_tid and not unify_mod.try_unify(ctx, find(ctx, act_tid), exp_tid) then
                         member_ok = false
@@ -3050,9 +3113,9 @@ local function solve_check_args(ctx, c)
                     end
                 end
                 if member_ok then
-                    local rl = mt.data[3]
+                    local rl = types_mod.fn_returns_len(mt)
                     ret_types[#ret_types + 1] = rl > 0
-                        and find(ctx, ctx.lists:get(mt.data[2]))
+                        and find(ctx, ctx.lists:get(types_mod.fn_returns_start(mt)))
                         or  ctx.T_NIL
                 end
             end
@@ -3291,13 +3354,15 @@ local function render_hm_signature(ctx, fn_tid)
         if tag == TAG_UNKNOWN  then return "unknown" end
         if tag == TAG_FUNCTION then
             local pparts = {} --: { [integer]: string, ... }
-            for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            local ps, pl = types_mod.fn_params_start(t), types_mod.fn_params_len(t)
+            for i = ps, ps + pl - 1 do
                 local p = render(ctx.lists:get(i), seen)
                 if not p then return nil end
                 pparts[#pparts + 1] = p
             end
             local rparts = {} --: { [integer]: string, ... }
-            for i = t.data[2], t.data[2] + t.data[3] - 1 do
+            local rs, rl = types_mod.fn_returns_start(t), types_mod.fn_returns_len(t)
+            for i = rs, rs + rl - 1 do
                 local r = render(ctx.lists:get(i), seen)
                 if not r then return nil end
                 rparts[#rparts + 1] = r
@@ -3310,7 +3375,8 @@ local function render_hm_signature(ctx, fn_tid)
         if tag == TAG_TABLE then
             local parts = {} --: { [integer]: string, ... }
             -- Named fields
-            for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            local fs, fl = types_mod.tbl_fields_start(t), types_mod.tbl_fields_len(t)
+            for i = fs, fs + fl - 1 do
                 local fid = ctx.lists:get(i)
                 local fe = ctx.fields:get(fid)
                 local fname = intern_mod.get(ctx.pool, fe.name_id)
@@ -3320,7 +3386,7 @@ local function render_hm_signature(ctx, fn_tid)
                 parts[#parts + 1] = fname .. ": " .. ft
             end
             -- Indexers (key, value pairs)
-            local is, il = t.data[2], t.data[3]
+            local is, il = types_mod.tbl_indexers_start(t), types_mod.tbl_indexers_len(t)
             local ix = is
             while ix < is + il - 1 do
                 local kt = render(ctx.lists:get(ix), seen)
@@ -3330,7 +3396,8 @@ local function render_hm_signature(ctx, fn_tid)
                 ix = ix + 2
             end
             -- Meta slots
-            for i = t.data[5], t.data[5] + t.data[6] - 1 do
+            local ms, ml = types_mod.tbl_meta_start(t), types_mod.tbl_meta_len(t)
+            for i = ms, ms + ml - 1 do
                 local fid = ctx.lists:get(i)
                 local fe = ctx.fields:get(fid)
                 local mname = intern_mod.get(ctx.pool, fe.name_id)
@@ -3340,25 +3407,26 @@ local function render_hm_signature(ctx, fn_tid)
                 parts[#parts + 1] = "#" .. mname .. ": " .. ft
             end
             -- Open/closed
-            if t.data[4] >= 0 then
+            if types_mod.tbl_row_var(t) >= 0 then
                 parts[#parts + 1] = "..."
             end
             return "{ " .. table.concat(parts, ", ") .. " }"
         end
         if tag == TAG_LITERAL then
-            local kind = t.data[0]
+            local kind = types_mod.lit_kind(t)
             if kind == LIT_STRING then
-                local s = intern_mod.get(ctx.pool, t.data[1]) or "?"
+                local s = intern_mod.get(ctx.pool, types_mod.lit_str_id(t)) or "?"
                 return '"' .. s .. '"'
             end
-            if kind == LIT_INTEGER then return tostring(t.data[1]) end
-            if kind == LIT_BOOLEAN then return t.data[1] == 1 and "true" or "false" end
+            if kind == LIT_INTEGER then return tostring(types_mod.lit_str_id(t)) end
+            if kind == LIT_BOOLEAN then return types_mod.lit_bool(t) == 1 and "true" or "false" end
             if kind == LIT_NIL     then return "nil" end
             return nil  -- LIT_NUMBER (float) — unsupported in this renderer
         end
         if tag == TAG_UNION then
             local parts = {} --: { [integer]: string, ... }
-            for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            local uums, uuml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
+            for i = uums, uums + uuml - 1 do
                 local p = render(ctx.lists:get(i), seen)
                 if not p then return nil end
                 parts[#parts + 1] = p
@@ -3367,7 +3435,8 @@ local function render_hm_signature(ctx, fn_tid)
         end
         if tag == TAG_INTERSECTION then
             local parts = {} --: { [integer]: string, ... }
-            for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            local iims, iiml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
+            for i = iims, iims + iiml - 1 do
                 local p = render(ctx.lists:get(i), seen)
                 if not p then return nil end
                 parts[#parts + 1] = p
@@ -3376,11 +3445,12 @@ local function render_hm_signature(ctx, fn_tid)
         end
         if tag == TAG_NAMED then
             -- Use the alias name. If args, render them too.
-            local name = intern_mod.get(ctx.pool, t.data[0]) or "?"
-            local arg_l = t.data[2]
+            local name = intern_mod.get(ctx.pool, types_mod.named_name_id(t)) or "?"
+            local arg_l = types_mod.named_args_len(t)
             if arg_l == 0 then return name end
             local args = {} --: { [integer]: string, ... }
-            for i = t.data[1], t.data[1] + arg_l - 1 do
+            local nas = types_mod.named_args_start(t)
+            for i = nas, nas + arg_l - 1 do
                 local a = render(ctx.lists:get(i), seen)
                 if not a then return nil end
                 args[#args + 1] = a
@@ -3402,19 +3472,23 @@ local function render_hm_signature(ctx, fn_tid)
         local t = ctx.types:get(tid)
         if t.tag == TAG_VAR then name_for(tid); return end
         if t.tag == TAG_FUNCTION then
-            for i = t.data[0], t.data[0] + t.data[1] - 1 do collect(ctx.lists:get(i), seen) end
-            for i = t.data[2], t.data[2] + t.data[3] - 1 do collect(ctx.lists:get(i), seen) end
+            local cps, cpl = types_mod.fn_params_start(t), types_mod.fn_params_len(t)
+            for i = cps, cps + cpl - 1 do collect(ctx.lists:get(i), seen) end
+            local crs, crl = types_mod.fn_returns_start(t), types_mod.fn_returns_len(t)
+            for i = crs, crs + crl - 1 do collect(ctx.lists:get(i), seen) end
             return
         end
         if t.tag == TAG_TABLE then
-            for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            local cfs, cfl = types_mod.tbl_fields_start(t), types_mod.tbl_fields_len(t)
+            for i = cfs, cfs + cfl - 1 do
                 local fid = ctx.lists:get(i)
                 local fe = ctx.fields:get(fid)
                 collect(fe.type_id, seen)
             end
-            local is, il = t.data[2], t.data[3]
+            local is, il = types_mod.tbl_indexers_start(t), types_mod.tbl_indexers_len(t)
             for i = is, is + il - 1 do collect(ctx.lists:get(i), seen) end
-            for i = t.data[5], t.data[5] + t.data[6] - 1 do
+            local cms, cml = types_mod.tbl_meta_start(t), types_mod.tbl_meta_len(t)
+            for i = cms, cms + cml - 1 do
                 local fid = ctx.lists:get(i)
                 local fe = ctx.fields:get(fid)
                 collect(fe.type_id, seen)
@@ -3422,7 +3496,8 @@ local function render_hm_signature(ctx, fn_tid)
             return
         end
         if t.tag == TAG_UNION or t.tag == TAG_INTERSECTION then
-            for i = t.data[0], t.data[0] + t.data[1] - 1 do collect(ctx.lists:get(i), seen) end
+            local ams, aml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
+            for i = ams, ams + aml - 1 do collect(ctx.lists:get(i), seen) end
             return
         end
     end
@@ -3430,18 +3505,20 @@ local function render_hm_signature(ctx, fn_tid)
 
     -- Render params.
     local pparts = {} --: { [integer]: string, ... }
-    for i = fn_t.data[0], fn_t.data[0] + fn_t.data[1] - 1 do
+    local fnps, fnpl = types_mod.fn_params_start(fn_t), types_mod.fn_params_len(fn_t)
+    for i = fnps, fnps + fnpl - 1 do
         local p = render(ctx.lists:get(i), {})
         if not p then return nil end
         pparts[#pparts + 1] = p
     end
     -- Render returns.
-    local rl = fn_t.data[3]
+    local rl = types_mod.fn_returns_len(fn_t)
+    local fnrs = types_mod.fn_returns_start(fn_t)
     local ret_s
     if rl == 0 then
         ret_s = "nil"
     elseif rl == 1 then
-        local rid = find(ctx, ctx.lists:get(fn_t.data[2]))
+        local rid = find(ctx, ctx.lists:get(fnrs))
         local rt  = ctx.types:get(rid)
         if rt.tag == TAG_VAR and band(rt.flags, FLAG_GENERIC) == 0 then
             -- Free non-generic return — typically an unbound ret_var (no
@@ -3453,7 +3530,7 @@ local function render_hm_signature(ctx, fn_tid)
         end
     else
         local rparts = {} --: { [integer]: string, ... }
-        for i = fn_t.data[2], fn_t.data[2] + rl - 1 do
+        for i = fnrs, fnrs + rl - 1 do
             local r = render(ctx.lists:get(i), {})
             if not r then return nil end
             rparts[#rparts + 1] = r
@@ -3609,7 +3686,7 @@ local function solve_hkt_decompose_impl(ctx, f_fresh, args_fresh, bound_alias_id
         -- given the emission guard, but be defensive). Defer-consume.
         return true
     end
-    local alias = env_mod.lookup_type(ctx.scope, bt.data[0])
+    local alias = env_mod.lookup_type(ctx.scope, types_mod.named_name_id(bt))
     if not alias or not alias.params or #alias.params == 0 or alias.body == nil then
         return true
     end
@@ -3618,7 +3695,7 @@ local function solve_hkt_decompose_impl(ctx, f_fresh, args_fresh, bound_alias_id
     -- explicit error rather than miscompiling.
     local body_t = ctx.types:get(find(ctx, alias.body))
     if body_t.tag == TAG_MATCH_TYPE then
-        local alias_name = intern_mod.get(ctx.pool, bt.data[0]) or "?"
+        local alias_name = intern_mod.get(ctx.pool, types_mod.named_name_id(bt)) or "?"
         add_error(ctx, line, col,
             "higher-kinded type `" .. alias_name
             .. "` has a non-invertible alias body (match type); "
@@ -3639,7 +3716,7 @@ local function solve_hkt_decompose_impl(ctx, f_fresh, args_fresh, bound_alias_id
         add_error(ctx, line, col,
             "higher-kinded application has arity " .. #args_fresh
             .. " but bound alias `"
-            .. (intern_mod.get(ctx.pool, bt.data[0]) or "?")
+            .. (intern_mod.get(ctx.pool, types_mod.named_name_id(bt)) or "?")
             .. "` has arity " .. #alias.params)
         return false
     end
