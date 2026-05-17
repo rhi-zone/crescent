@@ -6,6 +6,7 @@
 local defs = require("lib.type.static.defs")
 local arena_mod = require("lib.type.static.arena")
 local intern_mod = require("lib.type.static.intern")
+local types_mod = require("lib.type.static.types")
 local double_to_i32x2 = defs.double_to_i32x2
 local band = require("bit").band
 
@@ -270,7 +271,7 @@ function M.parse_annotations(annotations, pool, filename)
     local function union_contains_fn(tid)
         local t = types:get(tid)
         if t.tag ~= defs.TAG_UNION then return false end
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        for i = types_mod.agg_members_start(t), types_mod.agg_members_start(t) + types_mod.agg_members_len(t) - 1 do
             if types:get(type_lists:get(i)).tag == defs.TAG_FUNCTION then return true end
         end
         return false
@@ -377,8 +378,8 @@ function M.parse_annotations(annotations, pool, filename)
                     local rets
                     if ret_t.tag == defs.TAG_TUPLE then
                         rets = {}
-                        for i = 0, ret_t.data[1] - 1 do
-                            rets[#rets + 1] = type_lists:get(ret_t.data[0] + i)
+                        for i = 0, types_mod.agg_members_len(ret_t) - 1 do
+                            rets[#rets + 1] = type_lists:get(types_mod.agg_members_start(ret_t) + i)
                         end
                     else
                         rets = { ret }
@@ -533,7 +534,7 @@ function M.parse_annotations(annotations, pool, filename)
                         -- while allowing -> () -> T to correctly parse as returning a function.
                         local ret1_t = types:get(returns[1])
                         if ret1_t.tag == defs.TAG_TUPLE then
-                            local ts, tl = ret1_t.data[0], ret1_t.data[1]
+                            local ts, tl = types_mod.agg_members_start(ret1_t), types_mod.agg_members_len(ret1_t)
                             returns = {}
                             for i = 0, tl - 1 do
                                 returns[#returns + 1] = type_lists:get(ts + i)
@@ -553,10 +554,10 @@ function M.parse_annotations(annotations, pool, filename)
                 if #items > 0 then
                     local last_t = types:get(items[#items])
                     if last_t.tag == defs.TAG_SPREAD then
-                        local inner_t = types:get(last_t.data[0])
+                        local inner_t = types:get(types_mod.spread_inner(last_t))
                         if inner_t.tag ~= defs.TAG_CAPTURE then
                             -- Normal vararg: ...T where T is not a capture
-                            vararg_ann_id = last_t.data[0]
+                            vararg_ann_id = types_mod.spread_inner(last_t)
                             items[#items] = ((nil --[[: unknown]]) --[[:! integer]])
                             item_names[#item_names] = ((nil --[[: unknown]]) --[[:! integer]])
                         end
@@ -699,9 +700,9 @@ function M.parse_annotations(annotations, pool, filename)
                             expect_char(s, ":")
                             local val_type = parse_type(s)
                             local kt = types:get(key_type)
-                            if kt.tag == defs.TAG_LITERAL and kt.data[0] == defs.LIT_STRING then
+                            if kt.tag == defs.TAG_LITERAL and types_mod.lit_kind(kt) == defs.LIT_STRING then
                                 -- { ["foo"]: V } → named field entry (equivalent to { foo: V })
-                                local name_id = kt.data[1]
+                                local name_id = types_mod.lit_str_id(kt)
                                 local fi = fields:alloc()
                                 local fe = fields:get(fi)
                                 fe.name_id = name_id
@@ -712,7 +713,7 @@ function M.parse_annotations(annotations, pool, filename)
                                 -- { [%K]: V } is a footgun: field order is non-deterministic.
                                 -- Use { ...[%K]: %V } for per-field distribution instead.
                                 -- Push to parse_errors so it survives the inner pcall.
-                                local cap_name = intern_mod.get(pool, kt.data[0]) or "?"
+                                local cap_name = intern_mod.get(pool, types_mod.capture_name_id(kt)) or "?"
                                 parse_errors[#parse_errors + 1] = {
                                     line = s.line, col = s.pos,
                                     msg = "capture key [%" .. cap_name ..
