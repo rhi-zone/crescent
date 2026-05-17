@@ -3837,6 +3837,22 @@ end
     end)
 end)
 
+---------------------------------------------------------------------------
+-- HKT: unapplied generic constructors as constraint bounds
+---------------------------------------------------------------------------
+assert.describe("soundness: unapplied generic constructor as bound", function()
+    assert.it("<F: Functor> accepts a generic alias as a higher-kinded bound", function()
+        -- Functor is a generic alias (kind: * -> *). Using it as a bound on
+        -- another alias's type parameter (<F: Functor>) must not error with
+        -- "expects N argument(s), got 0" at definition time — bounds are an
+        -- HKT context, mirroring the type-argument site.
+        no_errors([[
+--:: Functor<F> = { map: <A, B>(fa: F<A>, f: (A) -> B) -> F<B> }
+--:: UsesFunctor<F: Functor> = { wrapped: F<integer> }
+]])
+    end)
+end)
+
 -- ---------------------------------------------------------------------------
 -- Phi-join union normalization (integer|integer should not cause errors)
 -- ---------------------------------------------------------------------------

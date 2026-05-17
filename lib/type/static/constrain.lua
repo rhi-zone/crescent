@@ -4307,6 +4307,11 @@ process_type_decls = function(ctx)
                     if alias.raw_bounds then
                         alias.resolved_bounds = {}
                         local rb = alias.raw_bounds or {} --: { [integer]: integer, ... }
+                        -- Allow unapplied type constructors as HKT bounds (e.g.
+                        -- `<F: Functor>` where Functor is a generic alias). Mirrors
+                        -- the argument-resolution site at lines 514-519.
+                        local prev_allow = ctx._allow_unapplied_constructors
+                        ctx._allow_unapplied_constructors = true
                         for _, raw_id in ipairs(rb) do
                             if raw_id == -1 then
                                 alias.resolved_bounds[#alias.resolved_bounds + 1] = nil
@@ -4315,6 +4320,7 @@ process_type_decls = function(ctx)
                                     resolve_annotation_type(ctx, raw_id)
                             end
                         end
+                        ctx._allow_unapplied_constructors = prev_allow
                     end
 
                     -- Resolve raw_defaults (annotation-arena IDs) into checker-context type IDs.
