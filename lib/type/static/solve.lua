@@ -3587,19 +3587,101 @@ local function emit_missing_function_signature(ctx, real_err, sev)
 end
 
 
--- Solve C_HKT_DECOMPOSE = { C_HKT_DECOMPOSE, f_fresh, args_fresh_list,
---                            bound_alias_tid, actual_arg_tid, line, col }
--- Bidirectional propagation: bind F := bound_alias and pattern-match the
--- structural actual_arg against the alias body template (with the alias's
--- params replaced by args_fresh as fresh-arg slots). For TAG_MATCH_TYPE
--- alias bodies, emit the explicit non-invertible-alias-body error (H6).
--- See docs/typechecker-hkt-broader.md (Approach 2).
+-- Strongly-typed inner solver — payload comes from ctx._hkt_payloads to keep
+-- the dispatch shim's force-cast surface to a single integer payload id (the
+-- alternative would be ~6 `c[N] --[[:! T]]` destructures, multiplying the
+-- existing force-cast count in this file).
+--: (Ctx, integer, { [integer]: integer, ... }, integer, integer, integer | nil, integer | nil) -> boolean
+local function solve_hkt_decompose_impl(ctx, f_fresh, args_fresh, bound_alias_id, actual_id, line, col)
+    -- Defer while the actual argument is still a free TV — we can't pattern
+    -- match against an unresolved structural witness.
+    local actual = find(ctx, actual_id)
+    local at = ctx.types:get(actual)
+    if at.tag == TAG_VAR or at.tag == TAG_ROWVAR then
+        return false
+    end
+
+    -- Resolve the bound alias to its TAG_NAMED form and look up the alias entry.
+    local bound_tid = find(ctx, bound_alias_id)
+    local bt = ctx.types:get(bound_tid)
+    if bt.tag ~= TAG_NAMED then
+        -- Bound is not a generic-alias reference any more (shouldn't happen
+        -- given the emission guard, but be defensive). Defer-consume.
+        return true
+    end
+    local alias = env_mod.lookup_type(ctx.scope, bt.data[0])
+    if not alias or not alias.params or #alias.params == 0 or alias.body == nil then
+        return true
+    end
+
+    -- H6: match-typed alias bodies cannot be inverted. Emit the documented
+    -- explicit error rather than miscompiling.
+    local body_t = ctx.types:get(find(ctx, alias.body))
+    if body_t.tag == TAG_MATCH_TYPE then
+        local alias_name = intern_mod.get(ctx.pool, bt.data[0]) or "?"
+        add_error(ctx, line, col,
+            "higher-kinded type `" .. alias_name
+            .. "` has a non-invertible alias body (match type); "
+            .. "cannot decompose `" .. types_mod.display_short(ctx, actual)
+            .. "` against `" .. alias_name .. "<...>`. "
+            .. "Approach 2 HKT requires plain structural alias bodies "
+            .. "(union, table, tuple).")
+        return false
+    end
+
+    -- Build mapping: alias.params[i] (name_id) -> args_fresh[i] (tid). This
+    -- substitutes the alias body to produce a "template" that has the
+    -- call-site fresh TVs in the positions where the alias's params were.
+    -- Unifying the actual against this template back-solves the fresh TVs.
+    if #args_fresh ~= #alias.params then
+        -- Arity mismatch (caller's F<A> has a different arity than the
+        -- bound alias). Surface as an error so it doesn't silently pass.
+        add_error(ctx, line, col,
+            "higher-kinded application has arity " .. #args_fresh
+            .. " but bound alias `"
+            .. (intern_mod.get(ctx.pool, bt.data[0]) or "?")
+            .. "` has arity " .. #alias.params)
+        return false
+    end
+    local mapping = {}
+    for i = 1, #alias.params do
+        mapping[alias.params[i]] = args_fresh[i]
+    end
+    local template = env_mod.substitute(ctx, alias.body, mapping)
+
+    -- Unify actual against the template. This binds args_fresh from the
+    -- structural witness (e.g. `{tag:"some",value:integer}|{tag:"none"}`
+    -- vs `{tag:"some",value:A_fresh}|{tag:"none"}` solves A_fresh := integer).
+    unify_mod.unify(ctx, actual, template)
+
+    -- Bind F_fresh := bound_alias so return-side slots (e.g. F<B>) can
+    -- substitute back to the named alias for re-resolution. M.unify
+    -- short-circuits TAG_NAMED to true without binding, so use the direct
+    -- bind helper.
+    local ff_root = find(ctx, f_fresh)
+    local ff_t = ctx.types:get(ff_root)
+    if ff_t.tag == TAG_VAR or ff_t.tag == TAG_ROWVAR then
+        unify_mod.bind_var_to_type(ctx, ff_root, bound_tid)
+    end
+
+    return true
+end
+
+-- Solve C_HKT_DECOMPOSE = { C_HKT_DECOMPOSE, payload_id }
+-- payload_id indexes ctx._hkt_payloads (populated by constrain.lua at emission time).
+-- Each payload is { f_fresh, args_fresh, bound_alias, actual_arg, line, col } —
+-- typed, no destructure casts needed once retrieved.
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_hkt_decompose(ctx, c)
-    -- Stub: defer (return true so the constraint is consumed); structural
-    -- decomposition lands in the next commit.
-    return true
+    local v = c[2]
+    if type(v) ~= "number" then return true end
+    local payloads = ctx._hkt_payloads
+    if not payloads then return true end
+    local p = payloads[v]
+    if not p then return true end
+    return solve_hkt_decompose_impl(ctx, p.f_fresh, p.args_fresh,
+        p.bound_alias, p.actual_arg, p.line, p.col)
 end
 
 

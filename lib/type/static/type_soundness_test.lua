@@ -3861,16 +3861,15 @@ end)
 -- it MUST remain green throughout the implementation.
 -- ---------------------------------------------------------------------------
 assert.describe("HKT broader: F<A> composition", function()
-    -- H1: fmap round-trip. Today: error `_(_)` (unbound HKT call). After fix:
-    -- accepted with y : Maybe<string>. Pinned `has_error` until decomposition
-    -- lands.
-    assert.it("H1: fmap(maybe_int, tostring) — currently errors with _(_)", function()
-        has_error([[
+    -- H1: fmap round-trip. After HKT decomposition lands, accepted with
+    -- y : Maybe<string>. Previously errored with `_(_)` (unbound HKT call).
+    assert.it("H1: fmap(maybe_int, tostring) — flipped to no-error", function()
+        no_errors([[
 --:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
 --:: declare fmap = <F: Maybe, A, B>(fa: F<A>, f: (A) -> B) -> F<B>
 local x = { tag = "none" } --: Maybe<integer>
 local y = fmap(x, function(a) return tostring(a) end)
-]], "_%(_%)")
+]])
     end)
 
     -- H2: Functor<Maybe> record instantiation, then call .map. Today: F
@@ -3894,17 +3893,17 @@ local y = functor_maybe.map(x, function(a) return tostring(a) end)
     -- string "does not satisfy bound" (which is what a true bound check would
     -- produce). After C4 lands, this assertion gets updated to look for the
     -- bound-violation text.
-    assert.it("H3: bound violation List vs <F: Maybe> — currently errors at unify, not at bound", function()
-        local src = [[
+    assert.it("H3: bound violation List vs <F: Maybe> — rejected via decomposition", function()
+        -- After C_HKT_DECOMPOSE lands, F is bound to Maybe (the kind bound),
+        -- and the structural attempt to unify List<integer> against Maybe's
+        -- body template fails — surfacing as a unify error mentioning Maybe.
+        has_error([[
 --:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
 --:: List<A> = { [integer]: A, ... }
 --:: declare fmap = <F: Maybe, A, B>(fa: F<A>, f: (A) -> B) -> F<B>
 local x = {} --: List<integer>
 local y = fmap(x, function(a) return tostring(a) end)
-]]
-        -- Today: errors with "_(_)" from unify. After C4: should error with
-        -- a bound-mismatch message that mentions "Maybe" or "bound".
-        has_error(src)
+]], "Maybe")
     end)
 
     -- H4: pure inference. Today: return is `_(integer)`, fails to satisfy

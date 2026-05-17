@@ -214,6 +214,7 @@ Ctx = {
   _in_match_arm:             boolean | nil,
   _allow_unapplied_constructors: boolean | nil,
   _forall_bounds:  { [integer]: integer, ... },
+  _hkt_payloads?:  { [integer]: { f_fresh: integer, args_fresh: { [integer]: integer, ... }, bound_alias: integer, actual_arg: integer, line: integer | nil, col: integer | nil }, ... },
   lit_cache:       { [integer]: integer, ... },
   _constraints?:   { [integer]: { [integer]: unknown, ... }, ... },
   ...

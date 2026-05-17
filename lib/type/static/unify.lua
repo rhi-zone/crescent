@@ -28,6 +28,34 @@ local TAG_CDATA        = defs.TAG_CDATA
 local TAG_NAMED        = defs.TAG_NAMED
 local TAG_SPREAD       = defs.TAG_SPREAD
 local TAG_ENUM_MEMBER  = defs.TAG_ENUM_MEMBER
+local TAG_TYPE_CALL    = defs.TAG_TYPE_CALL
+
+-- Resolve a TAG_TYPE_CALL whose callee is a concrete TAG_NAMED alias and
+-- whose args are all concrete (no free TVs). Returns the resolved tid or
+-- the original tid if resolution isn't applicable / fails. Used at unify
+-- entry to allow `Maybe<integer>` (resolved structural) to unify against
+-- `TAG_TYPE_CALL(F_bound_to_Maybe, A_bound_to_integer)` once HKT
+-- decomposition has bound F and A.
+--: (Ctx, integer) -> integer
+local function normalize_type_call(ctx, tid)
+    local t = ctx.types:get(tid)
+    if t.tag ~= TAG_TYPE_CALL then return tid end
+    local callee_tid = types_mod.find(ctx, t.data[0])
+    local ct = ctx.types:get(callee_tid)
+    if ct.tag ~= TAG_NAMED then return tid end
+    -- Collect args; bail if any is still a free TV.
+    local args = {}
+    for i = t.data[1], t.data[1] + t.data[2] - 1 do
+        local a_tid = types_mod.find(ctx, ctx.lists:get(i))
+        local at = ctx.types:get(a_tid)
+        if at.tag == TAG_VAR or at.tag == TAG_ROWVAR then return tid end
+        args[#args + 1] = a_tid
+    end
+    local env_mod = require("lib.type.static.env")
+    local resolved = env_mod.resolve_named_type(ctx, ctx.scope, ct.data[0], args)
+    if resolved then return resolved end
+    return tid
+end
 
 local LIT_STRING  = defs.LIT_STRING
 local LIT_NUMBER  = defs.LIT_NUMBER
@@ -236,12 +264,29 @@ local function copy_seen(s)
 end
 
 -- unify(ctx, a, b): check if a is assignable to b, binding vars as needed.
+-- Public access to the local bind_var. Required by solve_hkt_decompose to
+-- directly bind a fresh TV to a TAG_NAMED bound alias — M.unify short-circuits
+-- TAG_NAMED to true without binding.
+--: (Ctx, integer, integer) -> (boolean, string | nil, { kind: string, path: { [integer]: unknown } | nil, expected?: unknown, got?: unknown, field?: string } | nil)
+function M.bind_var_to_type(ctx, var_tid, target_tid)
+    local ok, msg, info = bind_var(ctx, find(ctx, var_tid), target_tid)
+    return ok, msg, info
+end
+
 -- Returns true, or false + error_message [+ detail_table]
 -- seen: coinductive cycle guard — pair already being unified returns true immediately.
 --: (ctx: Ctx, a: integer, b: integer, seen: { [integer]: { [integer]: boolean } | nil } | nil) -> (boolean, string | nil, UnifyDetail | nil)
 function M.unify(ctx, a, b, seen)
     a = find(ctx, a)
     b = find(ctx, b)
+
+    -- Resolve TAG_TYPE_CALL nodes whose callee + args are now concrete (HKT
+    -- decomposition has bound them). Without this, post-decomposition slots
+    -- like TAG_TYPE_CALL(F=Maybe, A=integer) remain as opaque nodes and
+    -- unify treats them as a tag mismatch against the actual `Maybe<integer>`
+    -- structural expansion.
+    a = normalize_type_call(ctx, a)
+    b = normalize_type_call(ctx, b)
 
     -- Coinductive cycle detection: if we're already unifying (a,b) in this chain,
     -- assume compatible. Handles recursive/mutually-referential table types (typeclasses, etc).

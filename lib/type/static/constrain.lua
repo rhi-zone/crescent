@@ -2563,8 +2563,18 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                             end
                             local actual_arg = arg_tids[i + 1]
                             if actual_arg then
-                                emit(ctx, { C_HKT_DECOMPOSE, callee2, args_list,
-                                            bound_alias, actual_arg, n.line, n.col })
+                                local payloads = ctx._hkt_payloads or {}
+                                local pid = #payloads + 1
+                                payloads[pid] = {
+                                    f_fresh = callee2,
+                                    args_fresh = args_list,
+                                    bound_alias = bound_alias,
+                                    actual_arg = actual_arg,
+                                    line = n.line,
+                                    col = n.col,
+                                }
+                                ctx._hkt_payloads = payloads
+                                emit(ctx, { C_HKT_DECOMPOSE, pid, n.line, n.col })
                             end
                         end
                     end
