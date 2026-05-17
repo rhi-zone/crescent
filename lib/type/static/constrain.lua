@@ -1803,9 +1803,12 @@ ExprRule[NODE_TABLE_EXPR] = function(ctx, nid)
         local key_nid = fn.data[0]
 
         if key_nid == -1 then
-            --: integer
-            local pos_key = intern_mod.intern(ctx.pool, tostring(pos_idx))
-            field_ids[#field_ids + 1] = types_mod.make_field(ctx, pos_key, val_tid, field_flags(ctx, pos_key))
+            -- Positional entry — emit indexer with TAG_LITERAL(LIT_INTEGER, slot)
+            -- key, mirroring the type-side shape produced by ann.lua. This is
+            -- the expression-side companion to commit 58d10766.
+            local key_tid = types_mod.make_literal(ctx, LIT_INTEGER, pos_idx)
+            indexers[#indexers + 1] = key_tid
+            indexers[#indexers + 1] = val_tid
             pos_idx = pos_idx + 1
         elseif (fn.flags % (FLAG_COMPUTED * 2)) >= FLAG_COMPUTED then
             local key_tid = gen_expr(ctx, key_nid)

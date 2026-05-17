@@ -820,6 +820,56 @@ function M.unify(ctx, a, b, seen)
             end
         end
 
+        -- Excess-indexer check: every indexer entry in `a` (source) must be
+        -- covered by some indexer entry in `b` (target). A target indexer
+        -- `[BK] -> BV` covers a source indexer `[AK] -> AV` when AK <: BK and
+        -- AV <: BV. Without this, source indexers carrying values that violate
+        -- the target value type slip through (e.g. `{ "a", 2 }` typed as
+        -- `{ [number]: string }` — both positional entries become indexers
+        -- with LIT_INTEGER keys, and the b-driven loop above only finds the
+        -- first matching a-entry per target indexer).
+        if tb.data[4] < 0 and ta.data[4] < 0 then
+            local ais, ail = ta.data[2], ta.data[3]
+            local j = ais
+            while j < ais + ail - 1 do
+                local ak = find(ctx, ctx.lists:get(j))
+                local av = find(ctx, ctx.lists:get(j + 1))
+                local akt = ctx.types:get(ak)
+                local covered = false
+                local last_err = nil --: string | nil
+                -- Skip TAG_VAR / TAG_ROWVAR source keys: the b-driven loop
+                -- above already bound them where compatible, and an unbound
+                -- key cannot be meaningfully checked for excess.
+                if akt.tag == TAG_VAR or akt.tag == defs.TAG_ROWVAR then
+                    covered = true
+                end
+                local bis, bil = tb.data[2], tb.data[3]
+                local k = bis
+                while not covered and k < bis + bil - 1 do
+                    local bk = find(ctx, ctx.lists:get(k))
+                    local bv = find(ctx, ctx.lists:get(k + 1))
+                    if M.try_unify(ctx, ak, bk, seen) then
+                        local ok_v, err_v = M.unify(ctx, av, bv, seen)
+                        if ok_v then covered = true; break
+                        else last_err = err_v end
+                    end
+                    k = k + 2
+                end
+                if not covered then
+                    if last_err then
+                        return false, "indexer value for " .. types_mod.display(ctx, ak) .. ": " .. last_err, nil
+                    end
+                    -- No target indexer key subsumed `ak` — only an error when
+                    -- target has at least one indexer; otherwise the field
+                    -- excess check below (or open-table absorption) handles it.
+                    if bil > 0 then
+                        return false, "excess indexer for key " .. types_mod.display(ctx, ak) .. " not in target type", nil
+                    end
+                end
+                j = j + 2
+            end
+        end
+
         -- Excess-field check: if the target is closed (no row var) and the source
         -- is also closed, every field in the source must exist in the target.
         -- Width subtyping ({x,y} <: {x}) only holds when the target is open ({x,...}).
