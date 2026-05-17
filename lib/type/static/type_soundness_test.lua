@@ -3854,6 +3854,100 @@ assert.describe("soundness: unapplied generic constructor as bound", function()
 end)
 
 -- ---------------------------------------------------------------------------
+-- HKT broader: F<A> composition (PINNED — see docs/typechecker-hkt-broader.md)
+-- These tests pin the current (mostly wrong) behavior of F<A> at call sites
+-- where F is a forall-bound type variable with a generic-alias bound, so that
+-- the implementation flip is visible commit-by-commit. H5 is the control —
+-- it MUST remain green throughout the implementation.
+-- ---------------------------------------------------------------------------
+assert.describe("HKT broader: F<A> composition", function()
+    -- H1: fmap round-trip. Today: error `_(_)` (unbound HKT call). After fix:
+    -- accepted with y : Maybe<string>. Pinned `has_error` until decomposition
+    -- lands.
+    assert.it("H1: fmap(maybe_int, tostring) — currently errors with _(_)", function()
+        has_error([[
+--:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
+--:: declare fmap = <F: Maybe, A, B>(fa: F<A>, f: (A) -> B) -> F<B>
+local x = { tag = "none" } --: Maybe<integer>
+local y = fmap(x, function(a) return tostring(a) end)
+]], "_%(_%)")
+    end)
+
+    -- H2: Functor<Maybe> record instantiation, then call .map. Today: F
+    -- substitutes to TAG_NAMED(Maybe) but the inner `<A,B>` forall keeps
+    -- TAG_TYPE_CALL(Maybe, A) un-re-resolved at call time.
+    assert.it("H2: Functor<Maybe>.map — currently errors with Maybe(_)", function()
+        has_error([[
+--:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
+--:: Functor<F: Maybe> = { map: <A, B>(F<A>, (A) -> B) -> F<B> }
+--:: declare functor_maybe = Functor<Maybe>
+local x = { tag = "none" } --: Maybe<integer>
+local y = functor_maybe.map(x, function(a) return tostring(a) end)
+]], "Maybe%(_%)")
+    end)
+
+    -- H3: Bound enforcement. <F: Maybe> called with List should reject.
+    -- Today: passes silently because solve_bound skips TAG_TYPE_CALL bounds.
+    -- After fix: H3 must error. Pinned at silent-accept (wrong) until step C4.
+    -- The error we *do* see today is `_(_)` from the unify side, not a bound
+    -- violation — pin that the current behavior errors but NOT with the
+    -- string "does not satisfy bound" (which is what a true bound check would
+    -- produce). After C4 lands, this assertion gets updated to look for the
+    -- bound-violation text.
+    assert.it("H3: bound violation List vs <F: Maybe> — currently errors at unify, not at bound", function()
+        local src = [[
+--:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
+--:: List<A> = { [integer]: A, ... }
+--:: declare fmap = <F: Maybe, A, B>(fa: F<A>, f: (A) -> B) -> F<B>
+local x = {} --: List<integer>
+local y = fmap(x, function(a) return tostring(a) end)
+]]
+        -- Today: errors with "_(_)" from unify. After C4: should error with
+        -- a bound-mismatch message that mentions "Maybe" or "bound".
+        has_error(src)
+    end)
+
+    -- H4: pure inference. Today: return is `_(integer)`, fails to satisfy
+    -- Maybe<integer>. After C5: substitute_inner re-resolves M<integer> →
+    -- Maybe<integer> and this passes.
+    assert.it("H4: pure(42) : Maybe<integer> — currently errors with _(integer)", function()
+        has_error([[
+--:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
+--:: declare pure = <M: Maybe, A>(a: A) -> M<A>
+--: () -> Maybe<integer>
+local function get_some() return pure(42) end
+]], "_%(integer%)")
+    end)
+
+    -- H5: CONTROL — monomorphic must always typecheck. This line must stay
+    -- green through every commit. If H5 ever turns red, the implementation
+    -- has regressed sound code.
+    assert.it("H5 (CONTROL): monomorphic Maybe<integer> → Maybe<string> must always typecheck", function()
+        no_errors([[
+--:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
+--:: declare fmap_int_str = (fa: Maybe<integer>, f: (integer) -> string) -> Maybe<string>
+local x = { tag = "none" } --: Maybe<integer>
+local y = fmap_int_str(x, function(a) return tostring(a) end)
+]])
+    end)
+
+    -- H6: Match-typed alias body used as an HKT bound. Approach 2 cannot
+    -- invert match-typed alias bodies. The design specifies this must emit
+    -- an explicit "non-invertible alias body" error after implementation.
+    -- Pinned at today's silent-ish behavior (errors via unify) — after the
+    -- decomposition path lands and detects TAG_MATCH_TYPE bodies, this
+    -- assertion gets updated to look for the explicit error string.
+    assert.it("H6: match-typed alias body as HKT bound — currently errors at unify, target is explicit non-invertible error", function()
+        has_error([[
+--:: NotInvertible<X> = match X { integer => string, _ => boolean }
+--:: declare bad = <F: NotInvertible, A>(fa: F<A>) -> nil
+local x = "hi" --: string
+bad(x)
+]])
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Phi-join union normalization (integer|integer should not cause errors)
 -- ---------------------------------------------------------------------------
 assert.describe("phi-join: branch merge produces correct types", function()
