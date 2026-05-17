@@ -1193,6 +1193,8 @@ Items that currently lack an implementer-ready spec:
 
 - [ ] **Add `unknown` to `fuzz_arb.lua` type generator.** Currently absent (see `lib/type/static/CLAUDE.md` "Generator coverage"). Adding it will let the new annotation invariant cover the `unknown <: T` case, plus narrow / type-guard / call-result invariants currently blind to the unknown boundary.
 
+- [ ] **HKT return-slot flow through C_INDEX-bound locals.** Affects H1 and H2 alike. When `local y = call(...)` is bound, LOCAL_STMT projects the call's return via C_INDEX(call_ret_tid, LIT_INTEGER 0, slot_var) and `y` becomes `slot_var`. If the call's return slot is `TAG_TYPE_CALL(NAMED:Maybe, B_fresh)` and B_fresh is bound *after* the slot projection (e.g. from the lambda's body), the slot_var resolution does not re-normalize the TAG_TYPE_CALL once B is concrete. Consequence: `local z = y --: Maybe<string>` rejects with the un-normalized form, even though an inline annotation on the call (`local y = call(...) --: Maybe<string>`) accepts. Fix likely needs a deferred-normalize constraint or post-pass that walks TAG_TYPE_CALL nodes after the solver settles and re-resolves callee + args. Symptom test: extend H2a with `local z = y` + `--: Maybe<string>` annotation on z.
+
 ## typechecker cast / annotation syntax
 
 - [ ] **Decide: implement `--[[as T]]` semi-sound cast (overlap-required)?** Previously documented in `docs/type-system.md` as if real, but never implemented. The doc has been corrected to remove the false claim. If we want this, design and implement: an "overlap" check (target type must share *some* value with the source), then accept the cast even if neither direction is a subtype. Otherwise leave as-is — the current `--[[: T]] expr` is a sound checked cast and may be all we need.

@@ -67,15 +67,9 @@ slot resolves to `Maybe<integer>` once A is bound from the argument.
   body is a `match` type (`type Foo<X> = match X { ... }`), Approach 2
   cannot pattern-match the actual against the body to recover X. The
   typechecker emits an explicit "non-invertible alias body" error.
-- **Field-access call sites (`functor_maybe.map(...)`) do not yet emit
-  C_HKT_DECOMPOSE for inner-forall TAG_TYPE_CALL slots** — only direct
-  function calls do. Method dispatch through a typeclass-style record
-  remains a gap. The Functor<Maybe> instantiation itself works (F
-  substitutes to Maybe), but the inner `<A, B>` forall's `Maybe<A>` slot
-  isn't decomposed at the call site.
-
 See `docs/typechecker-hkt-broader.md` for the design and the explicit
-test pins H1-H6 in `lib/type/static/type_soundness_test.lua`.
+test pins H1-H6 (plus H2a-H2f for record dispatch) in
+`lib/type/static/type_soundness_test.lua`.
 
 ## Generic defaults: `<T = Default>`
 
