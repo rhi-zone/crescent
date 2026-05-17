@@ -42,13 +42,40 @@ Contrast:
 - `<T: SomeGeneric<integer>>` — regular constraint (T is a concrete type assignable to
   the instantiation `SomeGeneric<integer>`)
 
-### Known limitation
+### What works (Approach 2, B1)
 
-When `F<A>` is expanded to its structural form, the type-constructor/argument
-decomposition is lost. Constraints on `A` in `<F, A: Semigroup>(fa: F<A>)` are
-unenforceable at call sites — `A` is unbound after expansion. Fixing this requires
-nominal type preservation or bidirectional propagation of `F<A>` before expansion.
-Tracked in TODO.md.
+`F<A>` composition at direct call sites is supported via bidirectional
+propagation. The kind bound `<F: SomeGeneric>` pins F to SomeGeneric at the
+call site, and the alias body of SomeGeneric is pattern-matched against the
+actual argument to back-solve the inner type arguments (`A`, `B`, ...).
+
+```lua
+--:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
+--:: declare fmap = <F: Maybe, A, B>(fa: F<A>, f: (A) -> B) -> F<B>
+local x = { tag = "none" } --: Maybe<integer>
+local y = fmap(x, function(a) return tostring(a) end)
+-- y : Maybe<string>
+```
+
+Return-only HKT slots (e.g. `pure: <M: Maybe>(a: A) -> M<A>` where M never
+appears in a param) are pinned eagerly to the bound alias, so the return
+slot resolves to `Maybe<integer>` once A is bound from the argument.
+
+### Known limitations
+
+- **Match-typed alias bodies cannot be inverted.** When the bound alias's
+  body is a `match` type (`type Foo<X> = match X { ... }`), Approach 2
+  cannot pattern-match the actual against the body to recover X. The
+  typechecker emits an explicit "non-invertible alias body" error.
+- **Field-access call sites (`functor_maybe.map(...)`) do not yet emit
+  C_HKT_DECOMPOSE for inner-forall TAG_TYPE_CALL slots** — only direct
+  function calls do. Method dispatch through a typeclass-style record
+  remains a gap. The Functor<Maybe> instantiation itself works (F
+  substitutes to Maybe), but the inner `<A, B>` forall's `Maybe<A>` slot
+  isn't decomposed at the call site.
+
+See `docs/typechecker-hkt-broader.md` for the design and the explicit
+test pins H1-H6 in `lib/type/static/type_soundness_test.lua`.
 
 ## Generic defaults: `<T = Default>`
 
