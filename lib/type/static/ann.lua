@@ -607,6 +607,13 @@ function M.parse_annotations(annotations, pool, filename)
             local flds = {} --: { [integer]: integer, ... }
             local indexers = {}
             local metas = {} --: { [integer]: integer, ... }
+            -- Positional slot counter for brace-tuple entries (1-based).
+            -- Each positional entry `{ A, B, C }` emits an indexer pair with
+            -- key TAG_LITERAL(LIT_INTEGER, slot_number) so `c[N]` narrows to
+            -- the N-th slot's type rather than the first positional indexer.
+            -- Named fields (`name: T`) and indexer entries (`[K]: V`) do not
+            -- advance the counter.
+            local positional_slot = 1
             local row_var_ann_id = -1  -- set if bare ... seen (open table)
             if peek(s) ~= byte("}") then
                 while true do
@@ -755,10 +762,14 @@ function M.parse_annotations(annotations, pool, filename)
                             -- Not a field declaration, might be just a type (positional)
                             -- Rewind and parse as type
                             s.pos = save_pos
-                            -- Positional entry — treat as indexer [number]: T
+                            -- Positional entry — emit indexer with literal slot key.
                             local val_type = parse_type(s)
-                            local num_type = alloc_type(defs.TAG_NUMBER)
-                            indexers[#indexers + 1] = num_type
+                            local key_type = alloc_type(defs.TAG_LITERAL)
+                            local kt = types:get(key_type)
+                            kt.data[0] = defs.LIT_INTEGER
+                            kt.data[1] = positional_slot
+                            positional_slot = positional_slot + 1
+                            indexers[#indexers + 1] = key_type
                             indexers[#indexers + 1] = val_type
                         end
                     elseif fb == byte(".") and s.pos + 2 <= s.len
@@ -831,8 +842,12 @@ function M.parse_annotations(annotations, pool, filename)
                         -- Positional type entry starting with a non-ident character
                         -- (e.g. { {inner_table} } for brace-tuples, ("type"), etc.)
                         local val_type = parse_type(s)
-                        local num_type = alloc_type(defs.TAG_NUMBER)
-                        indexers[#indexers + 1] = num_type
+                        local key_type = alloc_type(defs.TAG_LITERAL)
+                        local kt = types:get(key_type)
+                        kt.data[0] = defs.LIT_INTEGER
+                        kt.data[1] = positional_slot
+                        positional_slot = positional_slot + 1
+                        indexers[#indexers + 1] = key_type
                         indexers[#indexers + 1] = val_type
                     else
                         break

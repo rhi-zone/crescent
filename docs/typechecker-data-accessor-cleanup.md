@@ -3,7 +3,17 @@
 Decomposition of the two cleanup TODOs (added in commit `9599884e`) into a
 sequence of small, hook-passing commits.
 
-## Status — Prerequisite landed; cleanup unblocked (2026-05-17)
+## Status — Both prerequisites landed; cleanup fully unblocked (2026-05-17)
+
+Both prerequisites are now fixed: the FFI fixed-size-array element typing
+(below) and the brace-tuple positional-slot typing bug (the C4 blocker
+identified in this doc's review pass). The latter was fixed via a parser
+change in `ann.lua` (positional brace-tuple entries now emit
+`TAG_LITERAL(LIT_INTEGER, N)` keys instead of bare `TAG_NUMBER`) and a
+small constraint-routing change in `constrain.lua` NODE_INDEX_EXPR (defers
+literal-integer access on TAG_TABLE to `C_INDEX` so `solve_index`'s
+slot-aware branch handles it instead of the legacy "first indexer wins"
+shortcut). See TODO.md entry for full details.
 
 The FFI-element-typing prerequisite has been fixed. Root cause was in
 `lib/type/static/solve.lua` `solve_index`: the LIT_INTEGER branch handled

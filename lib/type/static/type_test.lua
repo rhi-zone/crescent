@@ -8155,7 +8155,10 @@ end
 ]])
     end)
 
-    assert.it("closed table with no integer indexer returns unknown for t[i]", function()
+    assert.it("closed table with no integer indexer returns nil for t[i]", function()
+        -- A closed record `{ x: integer, y: integer }` has no positional slot
+        -- and no integer indexer, so `q[1]` projects to nil (out-of-bounds tuple
+        -- slot semantics in solve_index). Arithmetic on nil then errors.
         has_error([[
 --:: Point = { x: integer, y: integer }
 local function test()
@@ -8163,7 +8166,7 @@ local function test()
     local q = { x = 1, y = 2 }
     local z = q[1] + 1
 end
-]], "unknown")
+]], "nil")
     end)
 end)
 

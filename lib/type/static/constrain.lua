@@ -1617,7 +1617,11 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
     -- existing "Generic index" branch below handles the lookup directly,
     -- preserving the long-standing C_INDEX-free fast path for those cases.
     if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_INTEGER
-        and obj_t.tag == TAG_VAR then
+        and (obj_t.tag == TAG_VAR or obj_t.tag == TAG_TABLE) then
+        -- TAG_VAR: defer to solve_index's HM branch for indexer-bound inference.
+        -- TAG_TABLE: defer so solve_index narrows positional brace-tuple slots
+        -- (`{ A, B, C }[N]` → slot N's type) instead of the legacy
+        -- "first indexer value wins" shortcut below.
         local res = fresh_var(ctx)
         emit(ctx, { C_INDEX, obj_tid, types_mod.make_literal(ctx, LIT_INTEGER, kt_t.data[1]), res, n.line, n.col })
         return res

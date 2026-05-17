@@ -4003,4 +4003,50 @@ local y = x < 5
 local z = x + 1
 ]])
     end)
+
+    -- Brace-tuple positional slot typing: `{ A, B, C }[N]` must narrow to the
+    -- N-th slot's type, not the first positional indexer's type. Regression
+    -- pin for the parser/solver fix that lowered positional entries to
+    -- `TAG_LITERAL(LIT_INTEGER, N)` keys and routed concrete-table integer
+    -- access through C_INDEX/solve_index instead of the legacy
+    -- "first indexer value wins" shortcut.
+    assert.it("brace-tuple: c[N] narrows to slot N's type (positive)", function()
+        no_errors([[
+--: (c: { string, integer }) -> integer
+local function test(c) return c[2] end
+]])
+        no_errors([[
+--: (c: { string, integer }) -> string
+local function test(c) return c[1] end
+]])
+        no_errors([[
+--: (c: { string, integer, boolean }) -> boolean
+local function test(c) return c[3] end
+]])
+    end)
+
+    assert.it("brace-tuple: c[N] narrows to slot N's type (negative)", function()
+        has_error([[
+--: (c: { string, integer }) -> string
+local function test(c) return c[2] end
+]], "string")
+        has_error([[
+--: (c: { string, integer }) -> integer
+local function test(c) return c[1] end
+]], "integer")
+    end)
+
+    assert.it("brace-tuple: out-of-bounds slot is nil", function()
+        -- Per spec (docs/type-system.md): out-of-bounds tuple slot projects to
+        -- nil. Annotating the return as nil typechecks; annotating as a
+        -- non-nil type errors.
+        no_errors([[
+--: (c: { string, integer }) -> nil
+local function test(c) return c[5] end
+]])
+        has_error([[
+--: (c: { string, integer }) -> integer
+local function test(c) return c[5] end
+]], "nil")
+    end)
 end)
