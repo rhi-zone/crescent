@@ -190,6 +190,28 @@ M.C_NARROW_NIL    = C_NARROW_NIL
 M.C_ESCAPE_CHECK  = C_ESCAPE_CHECK
 M.C_HKT_DECOMPOSE = C_HKT_DECOMPOSE
 
+-- Typed per-C_TAG payload aliases. Constructors and accessors land in C4-C5.
+-- Each tuple's first slot is the C_TAG discriminant (an integer literal);
+-- remaining slots match the constructor call sites in this file. Slot types
+-- reflect what the constructors actually pass, not the comment-form summaries
+-- on the C_TAG constants above (which the plan transcribed slightly off for
+-- C_SUB, C_NARROW_NIL, and the *_GENERICS / CHECK_ARGS / CALLABLE arg-list
+-- slot — see commit body).
+--:: ConstraintUnify        = { integer, integer, integer, integer, integer }
+--:: ConstraintSub          = { integer, integer, integer, integer, integer, boolean }
+--:: ConstraintCallable     = { integer, integer, { [integer]: integer, ... }, integer, integer, integer }
+--:: ConstraintArith        = { integer, string,  integer, integer, integer, integer, integer }
+--:: ConstraintReturn       = { integer, integer, integer, integer, integer }
+--:: ConstraintCompare      = { integer, integer, integer, integer, integer }
+--:: ConstraintIndex        = { integer, integer, integer, integer, integer, integer }
+--:: ConstraintBound        = { integer, integer, integer, integer, integer }
+--:: ConstraintOr           = { integer, integer, integer, integer, integer, integer }
+--:: ConstraintBindGenerics = { integer, integer, { [integer]: integer, ... }, integer, integer, integer }
+--:: ConstraintCheckArgs    = { integer, integer, { [integer]: integer, ... }, integer, integer, integer }
+--:: ConstraintOverlap      = { integer, integer, integer, integer, integer }
+--:: ConstraintNarrowNil    = { integer, integer, integer, boolean, integer, integer }
+--:: ConstraintEscapeCheck  = { integer, integer, integer, integer, integer }
+
 -- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
