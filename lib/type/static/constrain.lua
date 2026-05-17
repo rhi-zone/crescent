@@ -3464,8 +3464,9 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             local at_resolved = types_mod.find(ctx, ann_tid)
             local at_t = ctx.types:get(at_resolved)
             if at_t.tag == TAG_TUPLE then
-                for ti = 0, at_t.data[1] - 1 do
-                    local elem_tid = types_mod.find(ctx, ctx.lists:get(at_t.data[0] + ti))
+                local at_ms, at_ml = types_mod.agg_members_start(at_t), types_mod.agg_members_len(at_t)
+                for ti = 0, at_ml - 1 do
+                    local elem_tid = types_mod.find(ctx, ctx.lists:get(at_ms + ti))
                     local rhs_elem = rhs_types[ti + 1]
                     if rhs_elem then
                         emit(ctx, M.make_sub(rhs_elem, elem_tid, n.line, n.col, false))
@@ -3526,7 +3527,7 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                 ctx._multi_ret[name_id] = { source_tid = call_ret_tid, slot = call_slot, call_uid = nid }
             elseif rhs_tid then
                 local rt = ctx.types:get(types_mod.find(ctx, rhs_tid))
-                if rt.tag == TAG_LITERAL and rt.data[0] == LIT_BOOLEAN then
+                if rt.tag == TAG_LITERAL and types_mod.lit_kind(rt) == LIT_BOOLEAN then
                     bind_tid = ctx.T_BOOLEAN
                 elseif rt.tag == defs.TAG_NIL then
                     bind_tid = types_mod.make_var(ctx, ctx.scope.level)
@@ -3697,17 +3698,18 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                     -- Add field.  Use the annotation type as the field's stored type when
                     -- one is present; this makes the declared type visible to later reads.
                     local field_tid = ann_field_tid or rhs_tid
-                    local fields, indexers, rv, meta = {}, {}, ot.data[4], {}
-                    local fs, fl = ot.data[0], ot.data[1]
+                    local fields, indexers, rv, meta = {}, {}, types_mod.tbl_row_var(ot), {}
+                    local fs, fl = types_mod.tbl_fields_start(ot), types_mod.tbl_fields_len(ot)
                     for j = fs, fs + fl - 1 do fields[#fields + 1] = ctx.lists:get(j) end
-                    local is2, il2 = ot.data[2], ot.data[3]
+                    local is2, il2 = types_mod.tbl_indexers_start(ot), types_mod.tbl_indexers_len(ot)
                     local ix = is2
                     while ix < is2 + il2 - 1 do
                         indexers[#indexers + 1] = ctx.lists:get(ix)
                         indexers[#indexers + 1] = ctx.lists:get(ix + 1)
                         ix = ix + 2
                     end
-                    for j = ot.data[5], ot.data[5] + ot.data[6] - 1 do meta[#meta + 1] = ctx.lists:get(j) end
+                    local ms_, ml_ = types_mod.tbl_meta_start(ot), types_mod.tbl_meta_len(ot)
+                    for j = ms_, ms_ + ml_ - 1 do meta[#meta + 1] = ctx.lists:get(j) end
                     fields[#fields + 1] = types_mod.make_field(ctx, field_id, field_tid, field_flags(ctx, field_id))
                     local new_tbl = types_mod.make_table(ctx, fields, indexers, rv, meta)
                     local ot2 = ctx.types:get(obj_tid)
@@ -3718,7 +3720,8 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                 -- Readonly check for fields accessed through an intersection type.
                 -- Search each member for the field; if any member declares it readonly,
                 -- the write is an error (readonly is preserved across intersection).
-                for j = ot.data[0], ot.data[0] + ot.data[1] - 1 do
+                local ints, intl = types_mod.agg_members_start(ot), types_mod.agg_members_len(ot)
+                for j = ints, ints + intl - 1 do
                     local mid = types_mod.find(ctx, ctx.lists:get(j))
                     local mt = ctx.types:get(mid)
                     if mt.tag == TAG_TABLE then
@@ -3742,8 +3745,8 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                 local key_r = types_mod.find(ctx, key_tid)
                 local kt_t = ctx.types:get(key_r)
                 -- String literal key: treat as named field (same as t.field syntax)
-                if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_STRING then
-                    local field_id = kt_t.data[1]
+                if kt_t.tag == TAG_LITERAL and types_mod.lit_kind(kt_t) == LIT_STRING then
+                    local field_id = types_mod.lit_str_id(kt_t)
                     local fe = types_mod.table_field(ctx, obj_tid, field_id)
                     if fe then
                         -- Re-assignment: check type compatibility (widen to base type first)
@@ -3754,17 +3757,18 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                         end
                     else
                         -- New field: add it
-                        local fields, indexers, rv, meta = {}, {}, ot.data[4], {}
-                        local fs2, fl2 = ot.data[0], ot.data[1]
+                        local fields, indexers, rv, meta = {}, {}, types_mod.tbl_row_var(ot), {}
+                        local fs2, fl2 = types_mod.tbl_fields_start(ot), types_mod.tbl_fields_len(ot)
                         for j = fs2, fs2 + fl2 - 1 do fields[#fields+1] = ctx.lists:get(j) end
-                        local is3, il3 = ot.data[2], ot.data[3]
+                        local is3, il3 = types_mod.tbl_indexers_start(ot), types_mod.tbl_indexers_len(ot)
                         local ix2 = is3
                         while ix2 < is3 + il3 - 1 do
                             indexers[#indexers+1] = ctx.lists:get(ix2)
                             indexers[#indexers+1] = ctx.lists:get(ix2+1)
                             ix2 = ix2 + 2
                         end
-                        for j = ot.data[5], ot.data[5] + ot.data[6] - 1 do meta[#meta+1] = ctx.lists:get(j) end
+                        local ms3, ml3 = types_mod.tbl_meta_start(ot), types_mod.tbl_meta_len(ot)
+                        for j = ms3, ms3 + ml3 - 1 do meta[#meta+1] = ctx.lists:get(j) end
                         fields[#fields+1] = types_mod.make_field(ctx, field_id, rhs_tid, field_flags(ctx, field_id))
                         local new_tbl = types_mod.make_table(ctx, fields, indexers, rv, meta)
                         local ot2 = ctx.types:get(obj_tid)
@@ -3774,7 +3778,7 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                 else
                     -- Non-literal key: check rhs against indexer value type if known,
                     -- or add an indexer to open tables (loop-populated: t[i] = v).
-                    local is2, il2 = ot.data[2], ot.data[3]
+                    local is2, il2 = types_mod.tbl_indexers_start(ot), types_mod.tbl_indexers_len(ot)
                     if il2 > 0 then
                         -- Check first indexer pair's value type
                         local idx_val = types_mod.find(ctx, ctx.lists:get(is2 + 1))
@@ -3786,13 +3790,14 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                         -- No existing indexer: add one for this key/value type pair.
                         -- Only for open tables (row_var_id != -1); closed tables reject
                         -- writes to undeclared index patterns.
-                        local rv = ot.data[4]
+                        local rv = types_mod.tbl_row_var(ot)
                         if rv ~= -1 then
                             local key_wid = types_mod.widen(ctx, key_tid)
                             local fields, indexers, meta = {}, { key_wid, rhs_tid }, {}
-                            local fs, fl = ot.data[0], ot.data[1]
+                            local fs, fl = types_mod.tbl_fields_start(ot), types_mod.tbl_fields_len(ot)
                             for j = fs, fs + fl - 1 do fields[#fields + 1] = ctx.lists:get(j) end
-                            for j = ot.data[5], ot.data[5] + ot.data[6] - 1 do meta[#meta + 1] = ctx.lists:get(j) end
+                            local ms4, ml4 = types_mod.tbl_meta_start(ot), types_mod.tbl_meta_len(ot)
+                            for j = ms4, ms4 + ml4 - 1 do meta[#meta + 1] = ctx.lists:get(j) end
                             local new_tbl = types_mod.make_table(ctx, fields, indexers, rv, meta)
                             -- Re-fetch ot after make_table (arena:grow() may have moved it)
                             local ot2 = ctx.types:get(obj_tid)
@@ -4019,7 +4024,8 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
                     local has_any = (cont_t.tag == TAG_ANY)
                     local non_any_members = {}  -- type_ids of remaining non-any members
                     if not has_any and cont_t.tag == TAG_UNION then
-                        for i = cont_t.data[0], cont_t.data[0] + cont_t.data[1] - 1 do
+                        local cms, cml = types_mod.agg_members_start(cont_t), types_mod.agg_members_len(cont_t)
+                        for i = cms, cms + cml - 1 do
                             local m_tid = types_mod.find(ctx, ctx.lists:get(i))
                             local m_t = ctx.types:get(m_tid)
                             if m_t.tag == TAG_ANY then
@@ -4327,17 +4333,18 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
         if ot.tag == TAG_TABLE then
             local fe = types_mod.table_field(ctx, obj_tid, field_id)
             if not fe then
-                local fields, indexers, rv, meta = {}, {}, ot.data[4], {}
-                local fs, fl = ot.data[0], ot.data[1]
+                local fields, indexers, rv, meta = {}, {}, types_mod.tbl_row_var(ot), {}
+                local fs, fl = types_mod.tbl_fields_start(ot), types_mod.tbl_fields_len(ot)
                 for j = fs, fs + fl - 1 do fields[#fields + 1] = ctx.lists:get(j) end
-                local is2, il2 = ot.data[2], ot.data[3]
+                local is2, il2 = types_mod.tbl_indexers_start(ot), types_mod.tbl_indexers_len(ot)
                 local ix = is2
                 while ix < is2 + il2 - 1 do
                     indexers[#indexers + 1] = ctx.lists:get(ix)
                     indexers[#indexers + 1] = ctx.lists:get(ix + 1)
                     ix = ix + 2
                 end
-                for j = ot.data[5], ot.data[5] + ot.data[6] - 1 do meta[#meta + 1] = ctx.lists:get(j) end
+                local ms_, ml_ = types_mod.tbl_meta_start(ot), types_mod.tbl_meta_len(ot)
+                for j = ms_, ms_ + ml_ - 1 do meta[#meta + 1] = ctx.lists:get(j) end
                 fields[#fields + 1] = types_mod.make_field(ctx, field_id, fn_tid, field_flags(ctx, field_id))
                 local new_tbl = types_mod.make_table(ctx, fields, indexers, rv, meta)
                 local ot2 = ctx.types:get(obj_tid)
@@ -4391,17 +4398,18 @@ gen_prescan_block = function(ctx, bs, bl)
                         if ot.tag == TAG_TABLE then
                             local field_id = nn.data[1]
                             if not types_mod.table_field(ctx, obj_tid, field_id) then
-                                local fields, indexers, rv, meta = {}, {}, ot.data[4], {}
-                                local fs, fl = ot.data[0], ot.data[1]
+                                local fields, indexers, rv, meta = {}, {}, types_mod.tbl_row_var(ot), {}
+                                local fs, fl = types_mod.tbl_fields_start(ot), types_mod.tbl_fields_len(ot)
                                 for j = fs, fs + fl - 1 do fields[#fields + 1] = ctx.lists:get(j) end
-                                local is2, il2 = ot.data[2], ot.data[3]
+                                local is2, il2 = types_mod.tbl_indexers_start(ot), types_mod.tbl_indexers_len(ot)
                                 local ix = is2
                                 while ix < is2 + il2 - 1 do
                                     indexers[#indexers + 1] = ctx.lists:get(ix)
                                     indexers[#indexers + 1] = ctx.lists:get(ix + 1)
                                     ix = ix + 2
                                 end
-                                for j = ot.data[5], ot.data[5] + ot.data[6] - 1 do meta[#meta + 1] = ctx.lists:get(j) end
+                                local ms_, ml_ = types_mod.tbl_meta_start(ot), types_mod.tbl_meta_len(ot)
+                                for j = ms_, ms_ + ml_ - 1 do meta[#meta + 1] = ctx.lists:get(j) end
                                 fields[#fields + 1] = types_mod.make_field(ctx, field_id, make_prescan_stub(ctx, pl), field_flags(ctx, field_id))
                                 local new_tbl = types_mod.make_table(ctx, fields, indexers, rv, meta)
                                 local ot2 = ctx.types:get(obj_tid)
@@ -4654,10 +4662,11 @@ process_type_decls = function(ctx)
                 if at.tag == defs.TAG_FUNCTION then
                     fn_at = at
                 elseif at.tag == defs.TAG_FORALL then
-                    local body = ann.types:get(at.data[2])
+                    local body = ann.types:get(types_mod.forall_body(at))
                     if body.tag == defs.TAG_FUNCTION then fn_at = body end
                 end
-                if fn_at and fn_at.data[1] > 0 and fn_at.data[6] == 0 then
+                if fn_at and types_mod.fn_params_len(fn_at) > 0
+                  and types_mod.fn_param_names_len(fn_at) == 0 then
                     --: integer
                     local r_line = decl_lines[r]
                     warn(ctx, r_line, 1, E.UNNAMED_PARAMS, {})
@@ -4690,7 +4699,7 @@ process_type_decls = function(ctx)
                     ctx._ann_warn_line = r_line
                     if r.newtype then
                         local ann_nom = ann.types:get(r.type_id)
-                        local underlying = resolve_annotation_type(ctx, ann_nom.data[2])
+                        local underlying = resolve_annotation_type(ctx, types_mod.nom_underlying(ann_nom))
                         -- Stable nominal identity: hash of (filename, type name).
                         -- A newtype name is unique within a file; the filename prefix
                         -- makes it globally unique, so the hash is deterministic across runs.
@@ -4774,7 +4783,7 @@ process_type_decls = function(ctx)
                         local constraint_tid = resolve_annotation_type(ctx, ctid)
                         -- Extract the constraint name_id from the annotation-arena TAG_NAMED node.
                         local ann_ct = ann.types:get(ctid)
-                        local constraint_name_id = ann_ct.data[0]
+                        local constraint_name_id = types_mod.named_name_id(ann_ct)
                         -- Structural check: body <: constraint
                         -- Only register the oracle pair if the check passes.
                         if alias.body and not unify_mod.try_unify(ctx, alias.body, constraint_tid) then
@@ -4823,10 +4832,11 @@ process_type_decls = function(ctx)
             if at.tag == defs.TAG_FUNCTION then
                 fn_at = at
             elseif at.tag == defs.TAG_FORALL then
-                local body = ann.types:get(at.data[2])
+                local body = ann.types:get(types_mod.forall_body(at))
                 if body.tag == defs.TAG_FUNCTION then fn_at = body end
             end
-            if fn_at and fn_at.data[1] > 0 and fn_at.data[6] == 0 then
+            if fn_at and types_mod.fn_params_len(fn_at) > 0
+              and types_mod.fn_param_names_len(fn_at) == 0 then
                 --: integer
                 local r_line = decl_lines[r]
                 warn(ctx, r_line, 1, E.UNNAMED_PARAMS, {})
@@ -4865,10 +4875,12 @@ process_type_decls = function(ctx)
             -- Collect new fields from the augment table.
             local new_field_ids = {}
             local new_meta_field_ids = {}
-            for i = aug_t.data[0], aug_t.data[0] + aug_t.data[1] - 1 do
+            local aug_fs, aug_fl = types_mod.tbl_fields_start(aug_t), types_mod.tbl_fields_len(aug_t)
+            for i = aug_fs, aug_fs + aug_fl - 1 do
                 new_field_ids[#new_field_ids + 1] = ctx.lists:get(i)
             end
-            for i = aug_t.data[5], aug_t.data[5] + aug_t.data[6] - 1 do
+            local aug_ms, aug_ml = types_mod.tbl_meta_start(aug_t), types_mod.tbl_meta_len(aug_t)
+            for i = aug_ms, aug_ms + aug_ml - 1 do
                 new_meta_field_ids[#new_meta_field_ids + 1] = ctx.lists:get(i)
             end
 
@@ -4879,10 +4891,10 @@ process_type_decls = function(ctx)
                 if bt.tag ~= TAG_TABLE then
                     return types_mod.make_table(ctx, new_field_ids, {}, -1, new_meta_field_ids)
                 end
-                local fs, fl = bt.data[0], bt.data[1]
-                local is2, il = bt.data[2], bt.data[3]
-                local rv = bt.data[4]
-                local ms, ml = bt.data[5], bt.data[6]
+                local fs, fl = types_mod.tbl_fields_start(bt), types_mod.tbl_fields_len(bt)
+                local is2, il = types_mod.tbl_indexers_start(bt), types_mod.tbl_indexers_len(bt)
+                local rv = types_mod.tbl_row_var(bt)
+                local ms, ml = types_mod.tbl_meta_start(bt), types_mod.tbl_meta_len(bt)
                 local merged = {}
                 local name_pos = {}
                 for i = fs, fs + fl - 1 do
@@ -4941,7 +4953,7 @@ process_type_decls = function(ctx)
                 existing_alias.body = merged_tid
                 if prim_tag then
                     ctx.prim_index[prim_tag] = merged_tid
-                    if aug_t.data[6] > 0 then ctx.prim_meta[prim_tag] = merged_tid end
+                    if types_mod.tbl_meta_len(aug_t) > 0 then ctx.prim_meta[prim_tag] = merged_tid end
                 end
             else
                 -- No existing binding: create fresh value binding from augment.
