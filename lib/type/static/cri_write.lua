@@ -31,6 +31,7 @@ local ffi    = require("ffi")
 local bit    = require("bit")
 local sha256 = require("lib.type.static.sha256")
 local defs   = require("lib.type.static.defs")
+local types_mod  = require("lib.type.static.types")
 local intern_mod = require("lib.type.static.intern")
 
 local band, rshift, tobit = bit.band, bit.rshift, bit.tobit
@@ -64,8 +65,9 @@ local function resolve(ctx, tid)
     for _ = 1, 64 do
         local slot = ctx.types:get(tid)
         if slot.tag ~= TAG_VAR and slot.tag ~= TAG_ROWVAR then return tid end
-        if slot.data[2] < 0 then return tid end  -- unbound
-        tid = slot.data[2]
+        local parent = types_mod.var_parent(slot)
+        if parent < 0 then return tid end  -- unbound
+        tid = parent
     end
     return tid
 end
@@ -138,21 +140,26 @@ local function collect(ctx, root_tids)
 
         if tag == TAG_LITERAL then
             -- data[0]=lit_kind, data[1]=value (intern_id for string/number)
-            if slot.data[0] == LIT_STRING then
-                intern_str(slot.data[1])
+            if types_mod.lit_kind(slot) == LIT_STRING then
+                intern_str(types_mod.lit_str_id(slot))
             end
 
         elseif tag == TAG_FUNCTION then
             -- data[0..1]=params list, data[2..3]=returns list, data[4]=vararg_tid
-            intern_list_range(slot.data[0], slot.data[1])
-            intern_list_range(slot.data[2], slot.data[3])
-            for i = slot.data[0], slot.data[0] + slot.data[1] - 1 do
+            local ps = types_mod.fn_params_start(slot)
+            local pl = types_mod.fn_params_len(slot)
+            local rs = types_mod.fn_returns_start(slot)
+            local rl = types_mod.fn_returns_len(slot)
+            local vararg = types_mod.fn_vararg(slot)
+            intern_list_range(ps, pl)
+            intern_list_range(rs, rl)
+            for i = ps, ps + pl - 1 do
                 walk_tid(ctx.lists:get(i))
             end
-            for i = slot.data[2], slot.data[2] + slot.data[3] - 1 do
+            for i = rs, rs + rl - 1 do
                 walk_tid(ctx.lists:get(i))
             end
-            if slot.data[4] >= 0 then walk_tid(slot.data[4]) end
+            if vararg >= 0 then walk_tid(vararg) end
 
         elseif tag == TAG_TABLE then
             -- data[0..1]=fields (list of field_arena IDs)
@@ -184,16 +191,23 @@ local function collect(ctx, root_tids)
             -- We can't use a simple dedup here — just collect in order (tables rarely share field lists).
             -- Store (start_idx, len) in slot-local vars; referenced in serialization by old_tid lookup.
             -- Since we call this at walk time, we store it in a side table keyed by old_tid.
-            local fields_start = collect_fields_from_list(slot.data[0], slot.data[1])
-            local meta_start   = collect_fields_from_list(slot.data[5], slot.data[6])
+            local tbl_fields_start = types_mod.tbl_fields_start(slot)
+            local tbl_fields_len   = types_mod.tbl_fields_len(slot)
+            local tbl_indexers_start = types_mod.tbl_indexers_start(slot)
+            local tbl_indexers_len   = types_mod.tbl_indexers_len(slot)
+            local tbl_row_var      = types_mod.tbl_row_var(slot)
+            local tbl_meta_start   = types_mod.tbl_meta_start(slot)
+            local tbl_meta_len     = types_mod.tbl_meta_len(slot)
+            local fields_start = collect_fields_from_list(tbl_fields_start, tbl_fields_len)
+            local meta_start   = collect_fields_from_list(tbl_meta_start, tbl_meta_len)
 
             -- Indexers: type ID pairs in list pool
-            intern_list_range(slot.data[2], slot.data[3])
-            for i = slot.data[2], slot.data[2] + slot.data[3] - 1 do
+            intern_list_range(tbl_indexers_start, tbl_indexers_len)
+            for i = tbl_indexers_start, tbl_indexers_start + tbl_indexers_len - 1 do
                 walk_tid(ctx.lists:get(i))
             end
             -- Row variable
-            if slot.data[4] >= 0 then walk_tid(slot.data[4]) end
+            if tbl_row_var >= 0 then walk_tid(tbl_row_var) end
 
             -- Store field pool positions for serialization
             -- We embed them in a side table to look up by tid.
@@ -201,60 +215,70 @@ local function collect(ctx, root_tids)
             ctx._cri_table_fields = ctx._cri_table_fields or {}
             ctx._cri_table_fields[tid] = {
                 fields_start = fields_start,
-                fields_len   = slot.data[1],
+                fields_len   = tbl_fields_len,
                 meta_start   = meta_start,
-                meta_len     = slot.data[6],
+                meta_len     = tbl_meta_len,
             }
 
         elseif tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
-            intern_list_range(slot.data[0], slot.data[1])
-            for i = slot.data[0], slot.data[0] + slot.data[1] - 1 do
+            local ms = types_mod.agg_members_start(slot)
+            local ml = types_mod.agg_members_len(slot)
+            intern_list_range(ms, ml)
+            for i = ms, ms + ml - 1 do
                 walk_tid(ctx.lists:get(i))
             end
 
         elseif tag == TAG_NOMINAL then
             -- data[0]=name_id, data[1]=identity, data[2]=underlying_tid
-            intern_str(slot.data[0])
-            walk_tid(slot.data[2])
+            intern_str(types_mod.nom_name_id(slot))
+            walk_tid(types_mod.nom_underlying(slot))
 
         elseif tag == TAG_NAMED then
             -- data[0]=name_id, data[1..2]=args list
-            intern_str(slot.data[0])
-            intern_list_range(slot.data[1], slot.data[2])
-            for i = slot.data[1], slot.data[1] + slot.data[2] - 1 do
+            intern_str(types_mod.named_name_id(slot))
+            local s = types_mod.named_args_start(slot)
+            local l = types_mod.named_args_len(slot)
+            intern_list_range(s, l)
+            for i = s, s + l - 1 do
                 walk_tid(ctx.lists:get(i))
             end
 
         elseif tag == TAG_MATCH_TYPE then
             -- data[0]=param_tid, data[1..2]=arms list (tid pairs)
-            walk_tid(slot.data[0])
-            intern_list_range(slot.data[1], slot.data[2])
-            for i = slot.data[1], slot.data[1] + slot.data[2] - 1 do
+            walk_tid(types_mod.match_param(slot))
+            local s = types_mod.match_arms_start(slot)
+            local l = types_mod.match_arms_len(slot)
+            intern_list_range(s, l)
+            for i = s, s + l - 1 do
                 walk_tid(ctx.lists:get(i))
             end
 
         elseif tag == TAG_TYPE_CALL then
             -- data[0]=callee_tid, data[1..2]=args list
-            walk_tid(slot.data[0])
-            intern_list_range(slot.data[1], slot.data[2])
-            for i = slot.data[1], slot.data[1] + slot.data[2] - 1 do
+            walk_tid(types_mod.tycall_callee(slot))
+            local s = types_mod.tycall_args_start(slot)
+            local l = types_mod.tycall_args_len(slot)
+            intern_list_range(s, l)
+            for i = s, s + l - 1 do
                 walk_tid(ctx.lists:get(i))
             end
 
         elseif tag == TAG_FORALL then
             -- data[0..1]=type_params list (name_ids), data[2]=body_tid
-            intern_list_range(slot.data[0], slot.data[1])
+            local s = types_mod.forall_params_start(slot)
+            local l = types_mod.forall_params_len(slot)
+            intern_list_range(s, l)
             -- type_params are name_ids (strings), not type IDs — intern strings
-            for i = slot.data[0], slot.data[0] + slot.data[1] - 1 do
+            for i = s, s + l - 1 do
                 intern_str(ctx.lists:get(i))
             end
-            walk_tid(slot.data[2])
+            walk_tid(types_mod.forall_body(slot))
 
         elseif tag == TAG_SPREAD then
-            walk_tid(slot.data[0])
+            walk_tid(types_mod.spread_inner(slot))
 
         elseif tag == TAG_INTRINSIC then
-            intern_str(slot.data[0])
+            intern_str(types_mod.intrinsic_name_id(slot))
 
         elseif tag == TAG_VAR or tag == TAG_ROWVAR then
             -- Unbound generic type variable (data[2] < 0).
@@ -557,86 +581,88 @@ function M.serialize(ctx, exports, type_aliases, diagnostics)
         local d = {-1, -1, -1, -1, -1, -1, -1} --: { [integer]: integer }
 
         if tag == TAG_LITERAL then
-            d[1] = slot.data[0]  -- lit_kind (unchanged)
+            local lk = types_mod.lit_kind(slot)
+            d[1] = lk  -- lit_kind (unchanged)
             -- data[1] = value; remap string ID if LIT_STRING; for LIT_NUMBER store lo+hi
-            if slot.data[0] == LIT_STRING then
-                d[2] = remap_sid(seen_strings, slot.data[1])
-            elseif slot.data[0] == LIT_NUMBER then
-                d[2] = slot.data[1]  -- lo int32 of double
-                d[3] = slot.data[2]  -- hi int32 of double
+            if lk == LIT_STRING then
+                d[2] = remap_sid(seen_strings, types_mod.lit_str_id(slot))
+            elseif lk == LIT_NUMBER then
+                d[2] = types_mod.lit_num_lo(slot)  -- lo int32 of double
+                d[3] = types_mod.lit_num_hi(slot)  -- hi int32 of double
             else
-                d[2] = slot.data[1]  -- boolean 0/1
+                d[2] = types_mod.lit_bool(slot)  -- boolean 0/1
             end
 
         elseif tag == TAG_FUNCTION then
-            local ps, pl = map_list(slot.data[0], slot.data[1])
-            local rs, rl = map_list(slot.data[2], slot.data[3])
+            local ps, pl = map_list(types_mod.fn_params_start(slot), types_mod.fn_params_len(slot))
+            local rs, rl = map_list(types_mod.fn_returns_start(slot), types_mod.fn_returns_len(slot))
             d[1] = ps; d[2] = pl
             d[3] = rs; d[4] = rl
-            d[5] = remap_tid(seen_types, ctx, slot.data[4])
+            d[5] = remap_tid(seen_types, ctx, types_mod.fn_vararg(slot))
 
         elseif tag == TAG_TABLE then
             -- data layout: [0]=fs,[1]=fl,[2]=is,[3]=il,[4]=row_var,[5]=ms,[6]=ml
             -- In .cri format, fields/meta are direct field pool offsets (not list-of-field-IDs).
             local tf = cri_table_fields[old_tid]
-            local is, il = map_list(slot.data[2], slot.data[3])
+            local is, il = map_list(types_mod.tbl_indexers_start(slot), types_mod.tbl_indexers_len(slot))
             d[1] = tf and tf.fields_start or 0
             d[2] = tf and tf.fields_len   or 0
             d[3] = is; d[4] = il
-            d[5] = remap_tid(seen_types, ctx, slot.data[4])  -- row_var
+            d[5] = remap_tid(seen_types, ctx, types_mod.tbl_row_var(slot))  -- row_var
             d[6] = tf and tf.meta_start   or 0
             d[7] = tf and tf.meta_len     or 0
 
         elseif tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
-            local s, l = map_list(slot.data[0], slot.data[1])
+            local s, l = map_list(types_mod.agg_members_start(slot), types_mod.agg_members_len(slot))
             d[1] = s; d[2] = l
 
         elseif tag == TAG_NOMINAL then
             -- data[0]=name_id, data[1]=identity, data[2]=underlying_tid
-            d[1] = remap_sid(seen_strings, slot.data[0])
-            d[2] = slot.data[1]  -- identity integer, unchanged
-            d[3] = remap_tid(seen_types, ctx, slot.data[2])
+            d[1] = remap_sid(seen_strings, types_mod.nom_name_id(slot))
+            d[2] = types_mod.nom_identity(slot)  -- identity integer, unchanged
+            d[3] = remap_tid(seen_types, ctx, types_mod.nom_underlying(slot))
 
         elseif tag == TAG_NAMED then
             -- data[0]=name_id, data[1..2]=args list
-            d[1] = remap_sid(seen_strings, slot.data[0])
-            local s, l = map_list(slot.data[1], slot.data[2])
+            d[1] = remap_sid(seen_strings, types_mod.named_name_id(slot))
+            local s, l = map_list(types_mod.named_args_start(slot), types_mod.named_args_len(slot))
             d[2] = s; d[3] = l
 
         elseif tag == TAG_MATCH_TYPE then
             -- data[0]=param_tid, data[1..2]=arms list
-            d[1] = remap_tid(seen_types, ctx, slot.data[0])
-            local s, l = map_list(slot.data[1], slot.data[2])
+            d[1] = remap_tid(seen_types, ctx, types_mod.match_param(slot))
+            local s, l = map_list(types_mod.match_arms_start(slot), types_mod.match_arms_len(slot))
             d[2] = s; d[3] = l
 
         elseif tag == TAG_TYPE_CALL then
             -- data[0]=callee_tid, data[1..2]=args list, data[3]=stable call-site hash
-            d[1] = remap_tid(seen_types, ctx, slot.data[0])
-            local s, l = map_list(slot.data[1], slot.data[2])
+            d[1] = remap_tid(seen_types, ctx, types_mod.tycall_callee(slot))
+            local s, l = map_list(types_mod.tycall_args_start(slot), types_mod.tycall_args_len(slot))
             d[2] = s; d[3] = l
+            -- data[3] is the stable call-site hash; no §4 accessor (undocumented slot, kept direct).
             d[4] = slot.data[3]  -- stable hash; 0 if not set (primitive TAG_TYPE_CALL from old cri)
 
         elseif tag == TAG_FORALL then
             -- data[0..1]=type_params list (name_ids), data[2]=body_tid
             -- In the serialized list pool, FORALL param ranges contain remapped string IDs.
             -- We need to re-remap them here since build_list_pool treated them as type IDs.
-            local s, l = map_list(slot.data[0], slot.data[1])
+            local s, l = map_list(types_mod.forall_params_start(slot), types_mod.forall_params_len(slot))
             d[1] = s; d[2] = l
-            d[3] = remap_tid(seen_types, ctx, slot.data[2])
+            d[3] = remap_tid(seen_types, ctx, types_mod.forall_body(slot))
             -- Fix the list entries: overwrite the list pool entries for this range
             -- with remapped string IDs (build_list_pool stored type IDs).
             -- We do this as a post-pass below.
 
         elseif tag == TAG_SPREAD then
-            d[1] = remap_tid(seen_types, ctx, slot.data[0])
+            d[1] = remap_tid(seen_types, ctx, types_mod.spread_inner(slot))
 
         elseif tag == TAG_INTRINSIC then
-            d[1] = remap_sid(seen_strings, slot.data[0])
+            d[1] = remap_sid(seen_strings, types_mod.intrinsic_name_id(slot))
 
         elseif tag == TAG_VAR or tag == TAG_ROWVAR then
             -- Unbound generic var: data[0]=var_id, data[1]=level, data[2]=-1
-            d[1] = slot.data[0]  -- var_id unchanged
-            d[2] = slot.data[1]  -- level unchanged
+            d[1] = types_mod.var_id(slot)  -- var_id unchanged
+            d[2] = types_mod.var_level(slot)  -- level unchanged
             d[3] = -1            -- unbound
 
         else
@@ -662,7 +688,7 @@ function M.serialize(ctx, exports, type_aliases, diagnostics)
     for _, old_tid in ipairs(type_order) do
         local slot = ctx.types:get(old_tid)
         if slot.tag == TAG_FORALL then
-            local s, l = slot.data[0], slot.data[1]
+            local s, l = types_mod.forall_params_start(slot), types_mod.forall_params_len(slot)
             if l > 0 then
                 local key = s .. "," .. l
                 local new_s = list_range_map[key]
