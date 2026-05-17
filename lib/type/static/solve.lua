@@ -3864,6 +3864,10 @@ local function solve_range(ctx, constraints, lo, hi)
     end
 
     for pass = 1, 4 do
+        -- (η) emit-during-solve: rebind hi each pass so handlers that emit
+        -- child constraints (returning { solved, emit }) see them solved in
+        -- the same range. See docs/typechecker-solver-emit-during-solve.md.
+        hi = #constraints
         local changed = false
         local n_deferred = 0
         ctx.err = silent_err
@@ -3884,11 +3888,28 @@ local function solve_range(ctx, constraints, lo, hi)
                     local t_before = ctx.types:get(find(ctx, probe))
                     local tag_before = t_before.tag
                     local result = handler(ctx, c)
-                    if result == false then
-                        c._deferred = true
-                        n_deferred = n_deferred + 1
+                    if type(result) == "boolean" then
+                        if result == false then
+                            c._deferred = true
+                            n_deferred = n_deferred + 1
+                        else
+                            c._solved = true
+                        end
                     else
-                        c._solved = true
+                        -- Structured form: { solved: boolean, emit?: { Constraint... } }
+                        if result.solved == false then
+                            c._deferred = true
+                            n_deferred = n_deferred + 1
+                        else
+                            c._solved = true
+                        end
+                        if result.emit then
+                            for _, nc in ipairs(result.emit) do
+                                constraints[#constraints + 1] = nc
+                                nc._deferred = false
+                            end
+                            changed = true
+                        end
                     end
                     local t_after = ctx.types:get(find(ctx, probe))
                     if t_after.tag ~= tag_before then changed = true end
@@ -3914,13 +3935,24 @@ local function solve_range(ctx, constraints, lo, hi)
                 for i = lo, hi do
                     constraints[i]._deferred = false
                 end
+                hi = #constraints
                 for i = lo, hi do
                     local c = constraints[i]
                     if not c._solved then
                         local handler = handlers[c[1]]
                         if handler then
                             local result = handler(ctx, c)
-                            if result ~= false then c._solved = true end
+                            if type(result) == "boolean" then
+                                if result ~= false then c._solved = true end
+                            else
+                                if result.solved ~= false then c._solved = true end
+                                if result.emit then
+                                    for _, nc in ipairs(result.emit) do
+                                        constraints[#constraints + 1] = nc
+                                        nc._deferred = false
+                                    end
+                                end
+                            end
                         end
                     end
                 end
