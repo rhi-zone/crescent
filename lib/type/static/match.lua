@@ -927,9 +927,7 @@ function M.evaluate(ctx, mt_id, seen)
                             arg_ids[#arg_ids + 1] = ctx.lists:get(j)
                         end
                         local intrinsic_mod = require("lib.type.static.intrinsic")
-                        -- rt.data[3] is a stable_id slot not documented in types.lua layout for TYPE_CALL;
-                        -- no accessor exists in C2. Keep direct read until layout is updated.
-                        result = intrinsic_mod.expand(ctx, callee_name_id, arg_ids, rt.data[3])
+                        result = intrinsic_mod.expand(ctx, callee_name_id, arg_ids, types_mod.tycall_stable_id(rt))
                     end
                 end
             end

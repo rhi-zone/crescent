@@ -207,10 +207,7 @@ local function bind_var(ctx, var_tid, target_tid)
     local vt_check = ctx.types:get(var_tid)
     if band(vt_check.flags, FLAG_SKOLEM) ~= 0 then
         local intern_mod2 = require("lib.type.static.intern")
-        -- vt_check.data[3]: skolem name_id — undocumented TAG_VAR slot (only
-        -- set for skolems); keep direct, same pattern as TAG_TYPE_CALL.data[3]
-        -- noted in d17cf651 (C7).
-        local var_name = intern_mod2.get(ctx.pool, vt_check.data[3]) or ("$sk" .. tostring(types_mod.var_id(vt_check)))
+        local var_name = intern_mod2.get(ctx.pool, types_mod.var_skolem_name_id(vt_check)) or ("$sk" .. tostring(types_mod.var_id(vt_check)))
         local target_str = types_mod.display(ctx, target_tid)
         return false, "type parameter `" .. var_name .. "` is abstract (skolem) — body produces `" .. target_str .. "` which cannot unify with an abstract type parameter"
     end

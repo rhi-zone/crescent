@@ -25,12 +25,22 @@ solve=38, unify=0.
 
 ### Surfaced findings (followup work, not blocking)
 
-- `TAG_TYPE_CALL.data[3]` (stable_id slot) is **undocumented in §2**.
-  Sites in `env.lua:1136` / `constrain.lua:1469`–1470 / `solve.lua:265`
-  still read it directly with a `--[[:! integer]]` cast as a documented
-  baseline.
-- `TAG_VAR.data[3..4]` (skolem `name_id`, `rank_n_call_id`) **undocumented in §2**.
-- `TAG_FORALL.data[3..4]` (`bounds_start`, `bounds_len`) **undocumented in §2**.
+- `TAG_TYPE_CALL.data[3]` (stable_id slot) — **§2 updated, accessor added
+  (`tycall_stable_id`)**; reads migrated in match.lua, env.lua, solve.lua,
+  cri_write.lua. Force casts at env.lua and solve.lua call sites became
+  redundant and were removed (1 fewer force-cast error in solve.lua, 1 fewer
+  error in env.lua).
+- `TAG_VAR.data[3..4]` (skolem `name_id`, `rank_n_call_id`) — **§2 updated,
+  accessors added (`var_skolem_name_id`, `var_skolem_call_id`)**; reads
+  migrated in unify.lua, env.lua, solve.lua. The two `constrain.lua` write
+  sites (and one read paired with a write) remain direct: any accessor use
+  there triggers the C14 flow-sensitivity quirk (+5 cascading narrowing
+  errors), so the local pattern was kept with an explanatory comment.
+- `TAG_FORALL.data[3..4]` (`bounds_start`, `bounds_len`) — **§2 updated,
+  accessors added (`forall_bounds_start`, `forall_bounds_len`)**. The single
+  `constrain.lua` read site also tripped the C14 flow-sensitivity quirk (+2
+  errors), so reads are bound to locals (`bounds_start`, `bounds_len`) but
+  kept as direct `at.data[N]` access with a comment.
 - Flow-sensitivity quirk: two `TAG_TYPE_CALL` sites in `constrain.lua`
   and five in `solve.lua` triggered cascading errors when migrated to
   accessors; kept as direct `t.data[N]` access with explanatory comments.
@@ -106,7 +116,7 @@ surface. Plan accordingly: multi-week cleanup, not an afternoon.
 
 | TAG | d[0] | d[1] | d[2] | d[3] | d[4] | d[5] | d[6] |
 |---|---|---|---|---|---|---|---|
-| VAR / ROWVAR | var_id | level | parent_tid (-1=unbound) | — | — | — | — |
+| VAR / ROWVAR | var_id | level | parent_tid (-1=unbound) | skolem name_id (only if FLAG_SKOLEM or annotation-introduced FLAG_GENERIC; 0=unset) | rank_n_call_id (only if FLAG_SKOLEM; 0=unset) | — | — |
 | LITERAL | lit_kind | str: intern_id; bool: 0/1; num: lo i32 | num: hi i32 | — | — | — | — |
 | FUNCTION | params_start | params_len | returns_start | returns_len | vararg_tid (-1) | param_names_start | param_names_len |
 | TABLE | fields_start | fields_len | indexers_start | indexers_len | row_var_id (-1) | meta_start | meta_len |
@@ -114,10 +124,10 @@ surface. Plan accordingly: multi-week cleanup, not an afternoon.
 | NOMINAL | name_id | identity | underlying_tid | — | — | — | — |
 | NAMED | name_id | args_start | args_len | — | — | — | — |
 | MATCH_TYPE | param_tid | arms_start | arms_len | — | — | — | — |
-| FORALL | type_params_start | type_params_len | body_tid | — | — | — | — |
+| FORALL | type_params_start | type_params_len | body_tid | bounds_start (parallel list; -1 entries = no bound) | bounds_len (== params_len when bounds present; 0=no bounds) | — | — |
 | SPREAD | inner_tid | — | — | — | — | — | — |
 | INTRINSIC | name_id | — | — | — | — | — | — |
-| TYPE_CALL | callee_id | args_start | args_len | — | — | — | — |
+| TYPE_CALL | callee_id | args_start | args_len | stable call-site hash (fnv31; 0=unset) | — | — | — |
 | ENUM_MEMBER | enum_name_id | member_name_id | lit_kind | value | — | — | — |
 | TYPEOF | name_id | — | — | — | — | — | — |
 | CAPTURE | name_id | — | — | — | — | — | — |
@@ -128,10 +138,12 @@ surface. Plan accordingly: multi-week cleanup, not an afternoon.
 | INDEX_TYPE | subject_tid | key_tid | — | — | — | — | — |
 | Atomics (NIL, BOOL, NUM, STR, ANY, NEVER, INT, UNKNOWN, CDATA, FFIC) | — | — | — | — | — | — | — |
 
-**Rank-N additions:** TAG_VAR with FLAG_SKOLEM uses the same data layout;
-no extra slots. The TODO's mention of "skolem_call_id" was speculative —
-the call-id lives in the `C_ESCAPE_CHECK` constraint payload (slot 2), not
-in `Type.data`.
+**Rank-N additions:** TAG_VAR with FLAG_SKOLEM stores its `name_id` in
+data[3] and the per-call `rank_n_call_id` in data[4] (see TAG_VAR row above).
+Annotation-introduced FLAG_GENERIC TVs also use data[3] for their source
+name (used by `collect_rank_n_generics` to distinguish them from
+HM-generalized TVs). The `C_ESCAPE_CHECK` constraint payload also carries a
+call_id (slot 2) that is matched against the skolem's data[4] at solve time.
 
 ## 3. C_TAG payload layout (transcribed from `constrain.lua:125–159`)
 

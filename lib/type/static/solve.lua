@@ -248,9 +248,9 @@ local function resolve_deferred_intrinsic(ctx, tid)
     end
 
     if t.tag ~= TAG_TYPE_CALL then return tid end
-    -- TAG_TYPE_CALL direct: tycall accessors trigger spurious cascading errors
-    -- elsewhere (typechecker flow-sensitivity quirk noted in C14). data[3] is
-    -- the undocumented stable_id slot (not exposed via a typed accessor).
+    -- TAG_TYPE_CALL callee/args kept direct: tycall_callee/_args_* accessors
+    -- trigger spurious cascading errors here (typechecker flow-sensitivity
+    -- quirk noted in C14).
     local callee_id = find(ctx, t.data[0])
     local ct = ctx.types:get(callee_id)
     if ct.tag ~= TAG_INTRINSIC then return tid end
@@ -260,9 +260,8 @@ local function resolve_deferred_intrinsic(ctx, tid)
         arg_ids[#arg_ids + 1] = find(ctx, ctx.lists:get(i))
     end
     local intrinsic_mod = require("lib.type.static.intrinsic")
-    -- stable_id is stored in data[3]; 0 means not set.
-    local stable = t.data[3]
-    return (intrinsic_mod.expand(ctx, types_mod.intrinsic_name_id(ct), arg_ids, stable) --[[:! integer]])
+    local stable = types_mod.tycall_stable_id(t)
+    return intrinsic_mod.expand(ctx, types_mod.intrinsic_name_id(ct), arg_ids, stable)
 end
 
 -- Widen a literal type to its base type at argument position.
@@ -711,10 +710,8 @@ local function solve_escape_check(ctx, c)
         local t = ctx.types:get(tv_id)
         if (t.tag == TAG_VAR or t.tag == TAG_ROWVAR)
             and band(t.flags, FLAG_SKOLEM) ~= 0
-            -- TAG_VAR.data[3..4] are undocumented skolem slots (name_id, rank_n_call_id)
-            -- not exposed via typed accessors (noted in C12).
-            and t.data[4] == call_id then
-            found_name = t.data[3]
+            and types_mod.var_skolem_call_id(t) == call_id then
+            found_name = types_mod.var_skolem_name_id(t)
             break
         end
     end

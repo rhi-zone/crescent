@@ -639,8 +639,7 @@ function M.serialize(ctx, exports, type_aliases, diagnostics)
             d[1] = remap_tid(seen_types, ctx, types_mod.tycall_callee(slot))
             local s, l = map_list(types_mod.tycall_args_start(slot), types_mod.tycall_args_len(slot))
             d[2] = s; d[3] = l
-            -- data[3] is the stable call-site hash; no §4 accessor (undocumented slot, kept direct).
-            d[4] = slot.data[3]  -- stable hash; 0 if not set (primitive TAG_TYPE_CALL from old cri)
+            d[4] = types_mod.tycall_stable_id(slot)  -- stable hash; 0 if not set (primitive TAG_TYPE_CALL from old cri)
 
         elseif tag == TAG_FORALL then
             -- data[0..1]=type_params list (name_ids), data[2]=body_tid

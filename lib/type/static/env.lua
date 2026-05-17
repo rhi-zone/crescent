@@ -611,10 +611,9 @@ function M.collect_rank_n_generics(ctx, callee_tid)
             local ot = ctx.types:get(orig_tv)
             if (ot.tag == TAG_VAR or ot.tag == TAG_ROWVAR)
                 and ot.flags == FLAG_GENERIC
-                -- ot.data[3]: undocumented skolem name_id slot on TAG_VAR
-                -- (annotation-introduced TVs have name_id > 0; HM-generalized
-                -- TVs have 0). No typed accessor exists; kept direct.
-                and ot.data[3] > 0 then
+                -- Annotation-introduced FLAG_GENERIC TVs have name_id > 0;
+                -- HM-generalized TVs have 0.
+                and types_mod.var_skolem_name_id(ot) > 0 then
                 result[orig_tv] = true
             end
         end
@@ -637,11 +636,9 @@ function M.skolemize_return_for_rank_n(ctx, ret_tid)
     local has_ann_gen = false
     for tv_id in pairs(probe) do
         local nt = ctx.types:get(tv_id)
-        -- nt.data[3]: undocumented skolem name_id slot on TAG_VAR (see
-        -- collect_rank_n_generics above for the slot description). No accessor.
         if (nt.tag == TAG_VAR or nt.tag == TAG_ROWVAR)
             and nt.flags == FLAG_GENERIC
-            and nt.data[3] > 0 then
+            and types_mod.var_skolem_name_id(nt) > 0 then
             has_ann_gen = true; break
         end
     end
@@ -650,12 +647,11 @@ function M.skolemize_return_for_rank_n(ctx, ret_tid)
     local skolem_tid, mapping = M.instantiate(ctx, ret_tid, ctx.scope.level)
     for orig_tv, fresh_tv in pairs(mapping) do
         local ot = ctx.types:get(orig_tv)
-        -- ot.data[3] / ft.data[3]: undocumented skolem name_id slot (read +
-        -- propagate to the freshly-skolemized TV). No accessor.
-        if ot.data[3] > 0 then
+        local ot_name_id = types_mod.var_skolem_name_id(ot)
+        if ot_name_id > 0 then
             local ft = ctx.types:get(fresh_tv)
             ft.flags = defs.FLAG_SKOLEM
-            ft.data[3] = ot.data[3]
+            ft.data[3] = ot_name_id
         end
     end
     return skolem_tid
@@ -1129,11 +1125,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                 end
                 if not has_unresolved then
                     local intrinsic_mod = require("lib.type.static.intrinsic")
-                    -- t.data[3]: stable call-site hash stored by constrain.lua when
-                    -- creating this deferred TAG_TYPE_CALL. Undocumented slot on
-                    -- TAG_TYPE_CALL (layout doc covers data[0..2]); no accessor.
-                    -- 0 = legacy/not set.
-                    return intrinsic_mod.expand(ctx, types_mod.intrinsic_name_id(ct), new_args, t.data[3]) --[[:! integer]]
+                    return intrinsic_mod.expand(ctx, types_mod.intrinsic_name_id(ct), new_args, types_mod.tycall_stable_id(t))
                 end
             end
         end

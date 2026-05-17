@@ -1171,9 +1171,11 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
     if tag == TAG_FORALL then
         seen[ann_tid] = true
         local param_scope = env_mod.child(ctx.scope)
-        -- TAG_FORALL slots 3 and 4 are bounds_start/bounds_len; no typed
-        -- accessors exist yet (forall_* accessors only cover slots 0..2).
-        local has_bounds = at.data[3] >= 0 and at.data[4] > 0
+        -- Direct reads kept: forall_bounds_start/len accessors trigger
+        -- flow-sensitivity cascading narrowing errors here (see C14).
+        local bounds_start = at.data[3]
+        local bounds_len = at.data[4]
+        local has_bounds = bounds_start >= 0 and bounds_len > 0
         local param_tvs = {}  -- tv ids, parallel to params (used for bound storage)
         local fp_s, fp_l = types_mod.forall_params_start(at), types_mod.forall_params_len(at)
         for i = fp_s, fp_s + fp_l - 1 do
@@ -1196,8 +1198,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             local prev_allow = ctx._allow_unapplied_constructors
             ctx._allow_unapplied_constructors = true
             for idx = 1, #param_tvs do
-                -- TAG_FORALL.data[3] = bounds_start (no typed accessor; see above).
-                local bound_ann_id = ctx.ann.lists:get(at.data[3] + idx - 1)
+                local bound_ann_id = ctx.ann.lists:get(bounds_start + idx - 1)
                 if bound_ann_id ~= -1 then
                     local resolved_bound = resolve_annotation_type(ctx, bound_ann_id, seen)
                     ctx._forall_bounds[param_tvs[idx]] = resolved_bound
@@ -1967,6 +1968,8 @@ local function skolemize_fn(ctx, ann_fn_tid)
         local fresh_t = ctx.types:get(fresh_tid)
         local orig_t  = ctx.types:get(generic_tid)
         fresh_t.flags = defs.FLAG_SKOLEM
+        -- Direct read: var_skolem_name_id accessor triggers cascading
+        -- narrowing errors here (typechecker flow-sensitivity quirk noted in C14).
         fresh_t.data[3] = orig_t.data[3]  -- copy name_id for error messages
     end
     return skolem_fn_tid, true
@@ -2799,6 +2802,7 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                 local ft = ctx.types:get(fresh_tv)
                 local ot = ctx.types:get(orig_tv)
                 ft.flags = defs.FLAG_SKOLEM
+                -- Direct read kept: accessor triggers flow-sensitivity quirk (see C14).
                 ft.data[3] = ot.data[3]   -- carry name_id for error messages
                 ft.data[4] = rank_n_call_id  -- per-call grouping for escape check
             end

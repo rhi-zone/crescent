@@ -58,7 +58,13 @@ local M = {}
 --   data[0] = unique var ID (for occurs check)
 --   data[1] = level (for generalization)
 --   data[2] = parent type_id (-1 = unbound root, >=0 = bound)
---   flags: FLAG_GENERIC if generalized
+--   data[3] = skolem name_id (intern ID; only meaningful when FLAG_SKOLEM is
+--             set, or when FLAG_GENERIC TVs are annotation-introduced and
+--             carry their source name for rank-N detection / error messages;
+--             0 = unset)
+--   data[4] = rank_n_call_id (per-call grouping for C_ESCAPE_CHECK; only
+--             meaningful when FLAG_SKOLEM is set; 0 = unset)
+--   flags: FLAG_GENERIC if generalized; FLAG_SKOLEM if skolemized at a call site
 --
 -- TAG_LITERAL:
 --   data[0] = LIT_STRING/LIT_NUMBER/LIT_BOOLEAN/LIT_NIL
@@ -104,6 +110,8 @@ local M = {}
 --   data[0] = type_params_start (name_ids)
 --   data[1] = type_params_len
 --   data[2] = body type_id
+--   data[3] = bounds_start (parallel to params; -1 entries = no bound)
+--   data[4] = bounds_len (== type_params_len when bounds present; 0 = no bounds)
 --
 -- TAG_SPREAD:
 --   data[0] = inner type_id
@@ -115,6 +123,8 @@ local M = {}
 --   data[0] = callee_id
 --   data[1] = args_start
 --   data[2] = args_len
+--   data[3] = stable call-site hash (fnv31 of filename:ann_tid; used by
+--             $Opaque memoization and propagated through cri; 0 = unset)
 --
 -- TAG_ENUM_MEMBER:
 --   data[0] = enum_name_id   (intern ID of the enum variable name)
@@ -214,6 +224,13 @@ function M.var_id(t) return t.data[0] end
 function M.var_level(t) return t.data[1] end
 --: (TypeSlot) -> integer
 function M.var_parent(t) return t.data[2] end
+-- Skolem-only slots on TAG_VAR: meaningful when FLAG_SKOLEM is set, and also
+-- borrowed by annotation-introduced FLAG_GENERIC TVs (which carry a name_id
+-- for skolem error messages and rank-N detection). 0 = unset.
+--: (TypeSlot) -> integer
+function M.var_skolem_name_id(t) return t.data[3] end
+--: (TypeSlot) -> integer
+function M.var_skolem_call_id(t) return t.data[4] end
 
 -- LITERAL
 --: (TypeSlot) -> integer
@@ -296,6 +313,12 @@ function M.forall_params_start(t) return t.data[0] end
 function M.forall_params_len(t) return t.data[1] end
 --: (TypeSlot) -> integer
 function M.forall_body(t) return t.data[2] end
+-- Parallel bounds list (one entry per type param, -1 = no bound). Stored when
+-- the forall has `<T: Bound, ...>` syntax. has_bounds == (start >= 0 and len > 0).
+--: (TypeSlot) -> integer
+function M.forall_bounds_start(t) return t.data[3] end
+--: (TypeSlot) -> integer
+function M.forall_bounds_len(t) return t.data[4] end
 
 -- SPREAD
 --: (TypeSlot) -> integer
@@ -312,6 +335,10 @@ function M.tycall_callee(t) return t.data[0] end
 function M.tycall_args_start(t) return t.data[1] end
 --: (TypeSlot) -> integer
 function M.tycall_args_len(t) return t.data[2] end
+-- Stable call-site hash (fnv31 of filename:ann_tid), used by $Opaque memoization
+-- and propagated through cri. 0 = unset (e.g. legacy cri without this field).
+--: (TypeSlot) -> integer
+function M.tycall_stable_id(t) return t.data[3] end
 
 -- ENUM_MEMBER
 --: (TypeSlot) -> integer
