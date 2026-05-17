@@ -3,7 +3,41 @@
 Decomposition of the two cleanup TODOs (added in commit `9599884e`) into a
 sequence of small, hook-passing commits.
 
-## Status — Both prerequisites landed; cleanup fully unblocked (2026-05-17)
+## Status — COMPLETE (2026-05-17, commit range `a644d0aa`..`dfaf8233`)
+
+The cleanup landed across 14 commits (Phase A: C2–C5; Phase B: C6–C16;
+Phase C: C18; C19 sweep) plus 3 prerequisite/by-product bug fixes
+(`bb930ab5` FFI element typing, `58d10766` tuple positional-slot fix in
+`ann.lua`/`constrain.lua`, `0c2939d2` tuple expression-side fix).
+
+### Outcome vs plan estimates
+
+| Dimension                    | Plan estimate              | Actual                                |
+|------------------------------|----------------------------|----------------------------------------|
+| Commits                      | 20–24 over ~2 sessions     | 14 cleanup + 3 prerequisite by-products |
+| `Type.data` read sites       | ~1580 (table at §1)        | Far fewer — the §1 count conflated reads, writes, Node-arena accesses, and accessors covered by AST-side work |
+| Error-count reduction        | "hundreds across the dir"  | ~1300 from FFI fix (`bb930ab5`) alone; ~50 more from C18 cast cleanup in `solve.lua`; tens more across other files |
+| Force casts removed (C18)    | (not enumerated)           | 51 in `solve.lua` at migrated payload sites |
+| Force casts removed (C19)    | (sweep)                    | 6: solve x4, env x1, unify x1                       |
+
+Final per-file error counts at end of series: types=13, env=3, constrain=31,
+solve=38, unify=0.
+
+### Surfaced findings (followup work, not blocking)
+
+- `TAG_TYPE_CALL.data[3]` (stable_id slot) is **undocumented in §2**.
+  Sites in `env.lua:1136` / `constrain.lua:1469`–1470 / `solve.lua:265`
+  still read it directly with a `--[[:! integer]]` cast as a documented
+  baseline.
+- `TAG_VAR.data[3..4]` (skolem `name_id`, `rank_n_call_id`) **undocumented in §2**.
+- `TAG_FORALL.data[3..4]` (`bounds_start`, `bounds_len`) **undocumented in §2**.
+- Flow-sensitivity quirk: two `TAG_TYPE_CALL` sites in `constrain.lua`
+  and five in `solve.lua` triggered cascading errors when migrated to
+  accessors; kept as direct `t.data[N]` access with explanatory comments.
+  Root cause is likely an `unknown`-tagged accessor return interacting
+  with downstream union widening; worth a dedicated investigation.
+
+## Status (historical) — Both prerequisites landed; cleanup unblocked (2026-05-17)
 
 Both prerequisites are now fixed: the FFI fixed-size-array element typing
 (below) and the brace-tuple positional-slot typing bug (the C4 blocker

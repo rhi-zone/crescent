@@ -433,22 +433,22 @@ Commits (in order):
   limitations (~140 sites at HEAD); local fixes would require banned force
   casts. Tracked as the two items below.
 
-- [ ] **Typed accessors for `Type.data` slots.** Today `Type.data` is modeled
-  as `{[integer]: integer, ...}`, forcing every per-tag positional access
-  (`fn_param_off`, `fn_param_count`, `fn_vararg`, etc.) to either pass
-  unannotated or carry `--[[:! integer]]` force casts. Pervasive: ~75 sites at
-  HEAD; the rank-N landing added 9 more in `env.lua`. Fix is per-tag typed
-  accessor helpers in `types.lua` with precise `--:` signatures. Mechanical
-  but high-volume cleanup; closes 80+ errors and removes the most common
-  reason new typechecker work needs `--no-verify`.
+- [x] **Typed accessors for `Type.data` slots.** Landed via the data-accessor
+  cleanup series (Phase A+B, commits `a644d0aa` through `7192eed7`). Per-tag
+  typed accessor helpers added in `types.lua`; all call sites in `env.lua`,
+  `unify.lua`, `constrain.lua`, `narrow.lua`, `match.lua`, `ann.lua`,
+  `intrinsic.lua`, `solve.lua`, `cri_write.lua` migrated. See plan
+  `docs/typechecker-data-accessor-cleanup.md`.
 
-- [ ] **Typed constraint payload tuples.** Constraint payloads
-  (`{C_TAG, a, b, ...}` shapes in `constrain.lua` / `solve.lua`) are typed
-  `{[integer]: unknown, ...}`, forcing every destructure (`c[1]`, `c[2]`, ...)
-  to use `--[[:! integer]]` casts. ~62 sites at HEAD; rank-N added 4 more in
-  `solve.lua`. Fix is per-constraint-kind tuple shapes (`{integer, integer,
-  integer}` etc.) wired into the constraint constructors and the solver
-  dispatch. Companion to the `Type.data` cleanup above.
+- [x] **Typed constraint payload tuples.** Landed via the payload-migration
+  phase (C18, commit `a9c82ff7`); 51 force casts removed in `solve.lua`.
+  C17 skipped (no payload reads in `constrain.lua` to migrate). C19 sweep
+  (commit `dfaf8233`) removed 6 further redundant casts across `solve.lua`,
+  `env.lua`, `unify.lua`.
+
+  By-products surfaced during the cleanup and landed independently:
+  FFI fixed-size-array element typing (`bb930ab5`), tuple positional-slot
+  fix (`58d10766`), tuple expression-side fix (`0c2939d2`).
 
 **Design doc:** `docs/typechecker-hm-phase1.md` (committed `9bb1960d`)
 has the architectural sketch + bound shapes per body operation.
