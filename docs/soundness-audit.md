@@ -97,9 +97,44 @@ unconstrained params; cross-call-site mutation catches some cases.
 
 ---
 
-## Gap 3 — Covariant/contravariant generics not enforced
+## Gap 3 — Variance annotations missing (expressiveness, not soundness) — DEMOTED
 
-**Severity:** High (false negative for generic type parameters)
+**Severity:** ~~High (false negative for generic type parameters)~~ **Low (expressiveness limitation, not unsoundness)**
+
+**Demotion (commit `ca64aeb1`, design in `docs/typechecker-variance.md`).** The
+original framing of this gap as a soundness hole was wrong. Three existing
+mechanisms together prevent the bad cases the section described:
+
+1. **Structural invariance on table fields** (`unify.lua:582+`): when unifying
+   two tables, each shared field is checked bidirectionally (`A <: B` and
+   `B <: A`). A `Container<number>` field cannot be satisfied by a
+   `Container<string>` field — the field types must match invariantly.
+2. **Function parameter contravariance** (`unify.lua:497-527`): function
+   subtyping checks parameters contravariantly and returns covariantly, so a
+   `(v: number) -> nil` cannot stand in for `(v: string) -> nil`.
+3. **FLAG_SKOLEM bind-rejection**: rank-N positions skolemize the type
+   variable; a monomorphic function cannot be passed where a polymorphic one
+   is expected because the skolem refuses to unify with a concrete type.
+
+Concrete probes confirm the example in this section is *already rejected*
+today — not silently accepted. The remaining gap is purely about
+**expressiveness**: users cannot DECLARE intent (covariant or contravariant
+type parameters) explicitly the way Scala's `+T` / `-T` or Kotlin's `out`/`in`
+do. Everything is implicitly invariant on the field side and contravariant on
+the parameter side, which is sound but inflexible — e.g. you cannot say
+"a producer of `T` is also a producer of any supertype of `T`" as a first-class
+declaration.
+
+What was correct in the original analysis: the variance taxonomy (covariant
+in return position, contravariant in parameter position, bivariant when both)
+is right and remains the basis for any future explicit-variance design.
+
+What was wrong: the claim that the absence of variance annotations creates
+silent false negatives. It does not. The example below is rejected by
+mechanism (1) above.
+
+**Original analysis (kept as design archaeology — the taxonomy is correct,
+the soundness claim is not):**
 
 Generic type parameters (forall vars, `<T>` annotations) have no variance
 annotation. The checker instantiates them at call sites by substitution, but
@@ -113,15 +148,23 @@ Without enforced variance, code like:
 
 ```lua
 --:: Container<T> = { get: () -> T, set: (v: T) -> nil }
-local c: Container<number> = make_string_container()  -- should fail
+local c: Container<number> = make_string_container()  -- claimed: silently passes
+                                                       -- actual: rejected today
+                                                       -- by structural invariance
+                                                       -- on the `get`/`set` fields
 ```
 
-may silently pass if the structural unification of the table fields succeeds
-due to loose var binding.
+was claimed to silently pass if structural unification of the table fields
+succeeded due to loose var binding. In practice the field-level invariance
+check rejects it: `get: () -> string` is not bidirectionally equal to
+`get: () -> number`, so the table unification fails.
 
-**Fix direction:** Add variance inference (flow through all param/return
-positions) or explicit annotations (`+T` covariant, `-T` contravariant). Low
-priority for LuaJIT target where generics are already advisory.
+**Fix direction (expressiveness):** Add explicit variance annotations (`+T`
+covariant, `-T` contravariant) so users can opt into looser-than-invariant
+subtyping where it is semantically valid. Variance *inference* (flow analysis
+through param/return positions) is also a possibility but is not required for
+soundness — it would only widen what is accepted, not narrow it. Low priority;
+see `docs/typechecker-variance.md` for the full design and demotion rationale.
 
 ---
 
@@ -548,7 +591,7 @@ replaced by full structural checking once resolution completes.
 |---|-----|----------|---------------------|
 | 1 | TAG_VAR in try_unify | ~~Critical~~ **FIXED** | Union/intersection function dispatch silently passes wrong types |
 | 2 | Unannotated params | High | By design; mitigated by implicit-any warnings |
-| 3 | Generic variance | High | Type params in generic containers not variance-checked |
+| 3 | Generic variance annotations | ~~High~~ **Low (demoted)** | Expressiveness only — soundness cases already prevented by structural invariance + function contravariance + FLAG_SKOLEM. See `docs/typechecker-variance.md`. |
 | 4 | Recursive types | Medium | Self-referential types may cause display loops |
 | 5 | Intersection dedup | Low | Arena bloat, no soundness impact |
 | 6 | Function arity nil-padding | Low | Correct for Lua semantics |
@@ -565,4 +608,4 @@ replaced by full structural checking once resolution completes.
 4. Gap 11 (small, unify.lua: reject `unknown <: any`)
 5. Gap 1 (requires distinguishing constrained vs. unconstrained TAG_VAR in try_unify)
 6. Gap 4 (occurs check in bind_var)
-7. Gap 3 (variance annotations — design required before implementation)
+7. Gap 3 (variance annotations — expressiveness only, not a soundness fix; design in `docs/typechecker-variance.md`)
