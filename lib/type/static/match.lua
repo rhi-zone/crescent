@@ -44,12 +44,13 @@ local function expand_named(ctx, ty_id, seen_named)
     if seen_named[ty_id] then return nil end
     local t = ctx.types:get(ty_id)
     if t.tag ~= TAG_NAMED then return nil end
-    local name_id  = t.data[0]
-    local args_len = t.data[2]
+    local name_id  = types_mod.named_name_id(t)
+    local args_len = types_mod.named_args_len(t)
     local arg_ids  = nil
     if args_len > 0 then
         arg_ids = {}
-        for i = t.data[1], t.data[1] + args_len - 1 do
+        local args_start = types_mod.named_args_start(t)
+        for i = args_start, args_start + args_len - 1 do
             --: integer
             local aid = ctx.lists:get(i)
             arg_ids[#arg_ids + 1] = aid
@@ -87,8 +88,8 @@ local function intersect_field_in_type(ctx, ty_id, name_id, seen_named, pat_seen
             return fe.type_id
         end
         -- Field absent: open or closed?
-        -- data[4] >= 0 means has row variable (open table).
-        if t.data[4] >= 0 then
+        -- tbl_row_var >= 0 means has row variable (open table).
+        if types_mod.tbl_row_var(t) >= 0 then
             return nil  -- open: neutral, skip
         else
             return ctx.T_NEVER  -- closed: this member forbids the field
@@ -99,9 +100,11 @@ local function intersect_field_in_type(ctx, ty_id, name_id, seen_named, pat_seen
         -- Recurse into each intersection member and intersect contributions.
         --: { [integer]: integer, ... }
         local contributions = {}
-        for i = 0, t.data[1] - 1 do
+        local mstart = types_mod.agg_members_start(t)
+        local mlen   = types_mod.agg_members_len(t)
+        for i = 0, mlen - 1 do
             --: integer
-            local mid = ctx.lists:get(t.data[0] + i)
+            local mid = ctx.lists:get(mstart + i)
             local contrib = intersect_field_in_type(ctx, mid, name_id, seen_named, pat_seen)
             if contrib == ctx.T_NEVER then
                 return ctx.T_NEVER  -- fast-fail
@@ -122,9 +125,11 @@ local function intersect_field_in_type(ctx, ty_id, name_id, seen_named, pat_seen
         -- (since an open member might have the field at runtime).
         --: { [integer]: integer, ... }
         local parts = {}
-        for i = 0, t.data[1] - 1 do
+        local mstart = types_mod.agg_members_start(t)
+        local mlen   = types_mod.agg_members_len(t)
+        for i = 0, mlen - 1 do
             --: integer
-            local mid = ctx.lists:get(t.data[0] + i)
+            local mid = ctx.lists:get(mstart + i)
             local contrib = intersect_field_in_type(ctx, mid, name_id, seen_named, pat_seen)
             if contrib == ctx.T_NEVER then
                 -- This union member cannot have the field — contribute never (it will be filtered)
@@ -197,24 +202,25 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
 
     -- Explicit capture: %Name → always matches, binds name_id → input type
     if pt.tag == TAG_CAPTURE then
-        return true, { [pt.data[0]] = ty_id }
+        return true, { [types_mod.capture_name_id(pt)] = ty_id }
     end
 
     -- Named pattern (bare name, no type args) in pattern position → concrete type lookup.
     -- Exception: `_` is a wildcard that always succeeds without binding.
     -- For all other bare names: look up in scope; fail the arm if not found.
     -- (Previously this was an implicit capture; now TAG_CAPTURE handles that.)
-    if pt.tag == TAG_NAMED and pt.data[2] == 0 then  -- no args
+    if pt.tag == TAG_NAMED and types_mod.named_args_len(pt) == 0 then  -- no args
         -- `_` wildcard: always succeeds, no binding
         local intern_mod = require("lib.type.static.intern")
-        local name = intern_mod.get(ctx.pool, pt.data[0]) or ""
+        local pt_name_id = types_mod.named_name_id(pt)
+        local name = intern_mod.get(ctx.pool, pt_name_id) or ""
         if name == "_" then
             return true, {}
         end
         local env_mod = require("lib.type.static.env")
         local scope = ctx.scope
         if scope then
-            local resolved = env_mod.resolve_named_type(ctx, scope, pt.data[0], {})
+            local resolved = env_mod.resolve_named_type(ctx, scope, pt_name_id, {})
             if resolved then
                 -- Resolved: check subtype compatibility (ty_id <: resolved)
                 local unify_mod = require("lib.type.static.unify")
@@ -235,7 +241,9 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             return true, {}
         end
         if tt.tag == TAG_LITERAL then
-            if tt.data[0] == pt.data[0] and tt.data[1] == pt.data[1] then
+            -- Both slot[1] reads on LITERAL: meaning varies by lit_kind (str_id/bool/num_lo).
+            -- This is a raw-integer structural equality check, kind already compared via lit_kind.
+            if types_mod.lit_kind(tt) == types_mod.lit_kind(pt) and tt.data[1] == pt.data[1] then
                 return true, {}
             end
             return false, nil
@@ -247,7 +255,7 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
         return true, {}
     end
     if tt.tag == TAG_LITERAL then
-        local kind = tt.data[0]
+        local kind = types_mod.lit_kind(tt)
         if kind == LIT_STRING   and pt.tag == TAG_STRING  then return true, {} end
         if kind == LIT_NUMBER   and pt.tag == TAG_NUMBER  then return true, {} end
         if kind == LIT_BOOLEAN  and pt.tag == TAG_BOOLEAN then return true, {} end
@@ -274,14 +282,16 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             local rest_capture_name_id = nil
             -- Each named field in the pattern must exist in the actual type.
             -- Also detect the rest-capture field (name_id == -2).
-            for pi = pt.data[0], pt.data[0] + pt.data[1] - 1 do
+            local pt_fstart = types_mod.tbl_fields_start(pt)
+            local pt_flen   = types_mod.tbl_fields_len(pt)
+            for pi = pt_fstart, pt_fstart + pt_flen - 1 do
                 --: integer
                 local pfid = ctx.lists:get(pi)
                 local pfe  = ctx.fields:get(pfid)
                 if pfe.name_id == -2 then
                     -- Rest-field capture: store the capture name_id for later processing.
                     local prf_t = ctx.types:get(types_mod.find(ctx, pfe.type_id))
-                    rest_capture_name_id = prf_t.data[0]
+                    rest_capture_name_id = types_mod.pat_rest_name_id(prf_t)
                 else
                     -- Find the matching field in the input type
                     local afe = types_mod.table_field(ctx, ty_id, pfe.name_id)
@@ -297,7 +307,9 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             -- actual type that were NOT explicitly matched and bind them to a synthetic table.
             if rest_capture_name_id then
                 local rest_field_ids = {}
-                for ti = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+                local tt_fstart = types_mod.tbl_fields_start(tt)
+                local tt_flen   = types_mod.tbl_fields_len(tt)
+                for ti = tt_fstart, tt_fstart + tt_flen - 1 do
                     --: integer
                     local tfid = ctx.lists:get(ti)
                     local tfe  = ctx.fields:get(tfid)
@@ -313,12 +325,12 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             end
             -- If the pattern has indexer pairs, match them positionally against the subject.
             -- { [K]: V } binds K → subject key type, V → subject value type.
-            local pil = pt.data[3]
+            local pil = types_mod.tbl_indexers_len(pt)
             if pil >= 2 then
                 -- Subject must have at least as many indexer pairs as the pattern requires.
-                if tt.data[3] < pil then return false, nil end
-                local pis = pt.data[2]
-                local tis = tt.data[2]
+                if types_mod.tbl_indexers_len(tt) < pil then return false, nil end
+                local pis = types_mod.tbl_indexers_start(pt)
+                local tis = types_mod.tbl_indexers_start(tt)
                 for i = 0, pil / 2 - 1 do
                     --: integer
                     local pk_id = ctx.lists:get(pis + i * 2)
@@ -341,20 +353,23 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             -- If the pattern has a meta-spread capture (#...%M in the meta slot list),
             -- collect all meta slots from the input and bind M to a synthetic table.
             -- Succeeds only if the input has at least one meta slot; fails otherwise.
-            local pml = pt.data[6]
+            local pml = types_mod.tbl_meta_len(pt)
             if pml > 0 then
-                for mi = pt.data[5], pt.data[5] + pml - 1 do
+                local pmstart = types_mod.tbl_meta_start(pt)
+                for mi = pmstart, pmstart + pml - 1 do
                     local mfid = ctx.lists:get(mi)
                     local mfe  = ctx.fields:get(mfid)
                     if mfe.name_id == -3 then
                         -- Meta-spread capture: #...%M
                         local pms_t = ctx.types:get(types_mod.find(ctx, mfe.type_id))
-                        local cap_name_id = pms_t.data[0]
+                        local cap_name_id = types_mod.pat_meta_name_id(pms_t)
                         -- Fail if input has no meta slots
-                        if tt.data[6] == 0 then return false, nil end
+                        if types_mod.tbl_meta_len(tt) == 0 then return false, nil end
                         -- Build synthetic table from input's meta slots
                         local syn_meta_ids = {}
-                        for ti2 = tt.data[5], tt.data[5] + tt.data[6] - 1 do
+                        local tt_mstart = types_mod.tbl_meta_start(tt)
+                        local tt_mlen   = types_mod.tbl_meta_len(tt)
+                        for ti2 = tt_mstart, tt_mstart + tt_mlen - 1 do
                             local inner_fid = ctx.lists:get(ti2)
                             local inner_fe  = ctx.fields:get(inner_fid)
                             if inner_fe.name_id >= 0 then  -- skip spread markers
@@ -389,14 +404,16 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
 
             -- Check pattern fields via coinductive field merging
             local rest_capture_name_id = nil
-            for pi = pt.data[0], pt.data[0] + pt.data[1] - 1 do
+            local pt_fstart2 = types_mod.tbl_fields_start(pt)
+            local pt_flen2   = types_mod.tbl_fields_len(pt)
+            for pi = pt_fstart2, pt_fstart2 + pt_flen2 - 1 do
                 --: integer
                 local pfid = ctx.lists:get(pi)
                 local pfe  = ctx.fields:get(pfid)
                 if pfe.name_id == -2 then
                     -- Rest-field capture: deferred (handled below if needed)
                     local prf_t = ctx.types:get(types_mod.find(ctx, pfe.type_id))
-                    rest_capture_name_id = prf_t.data[0]
+                    rest_capture_name_id = types_mod.pat_rest_name_id(prf_t)
                 else
                     -- Collect this field's type from all intersection members.
                     local field_ty = intersect_field_in_type(ctx, ty_id, pfe.name_id, seen_named, seen)
@@ -430,7 +447,7 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             -- This is a best-effort: we enumerate fields from the first TAG_TABLE member.
             if rest_capture_name_id then
                 local matched_name_ids = {}
-                for pi = pt.data[0], pt.data[0] + pt.data[1] - 1 do
+                for pi = pt_fstart2, pt_fstart2 + pt_flen2 - 1 do
                     local pfid = ctx.lists:get(pi)
                     local pfe  = ctx.fields:get(pfid)
                     if pfe.name_id >= 0 then
@@ -440,11 +457,15 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
                 -- Gather unmatched fields from all TABLE members.
                 local rest_names = {}  -- name_id → true, deduped
                 local rest_field_ids = {}
-                for i = 0, tt.data[1] - 1 do
-                    local mid = ctx.lists:get(tt.data[0] + i)
+                local tt_mstart2 = types_mod.agg_members_start(tt)
+                local tt_mlen2   = types_mod.agg_members_len(tt)
+                for i = 0, tt_mlen2 - 1 do
+                    local mid = ctx.lists:get(tt_mstart2 + i)
                     local mt = ctx.types:get(types_mod.find(ctx, mid))
                     if mt.tag == TAG_TABLE then
-                        for fi = mt.data[0], mt.data[0] + mt.data[1] - 1 do
+                        local mt_fstart = types_mod.tbl_fields_start(mt)
+                        local mt_flen   = types_mod.tbl_fields_len(mt)
+                        for fi = mt_fstart, mt_fstart + mt_flen - 1 do
                             local fid = ctx.lists:get(fi)
                             local fe  = ctx.fields:get(fid)
                             if fe.name_id >= 0 and not matched_name_ids[fe.name_id] and not rest_names[fe.name_id] then
@@ -465,7 +486,7 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
 
             -- Pattern indexers: for intersection inputs, check that any pattern indexer
             -- is satisfied by the intersection. Use try_unify as a subtype check.
-            local pil = pt.data[3]
+            local pil = types_mod.tbl_indexers_len(pt)
             if pil >= 2 then
                 local unify_mod = require("lib.type.static.unify")
                 if not unify_mod.try_unify(ctx, ty_id, pat_id, {}) then
@@ -512,8 +533,10 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
         --: { [integer]: integer, ... } | nil
         local bindings = {}
         -- Match params
-        local ppl = pt.data[1]  -- param count in pattern
-        local tpl = tt.data[1]  -- param count in input
+        local ppl = types_mod.fn_params_len(pt)  -- param count in pattern
+        local tpl = types_mod.fn_params_len(tt)  -- param count in input
+        local pt_pstart = types_mod.fn_params_start(pt)
+        local tt_pstart = types_mod.fn_params_start(tt)
 
         -- Detect rest-capture param: TAG_SPREAD(TAG_CAPTURE) anywhere in the param list.
         -- Evaluator matches concrete prefix params left-to-right and concrete suffix params
@@ -523,13 +546,13 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
         if ppl > 0 then
             for i = 0, ppl - 1 do
                 --: integer
-                local p_param = ctx.lists:get(pt.data[0] + i)
+                local p_param = ctx.lists:get(pt_pstart + i)
                 local p_param_t = ctx.types:get(types_mod.find(ctx, p_param))
                 if p_param_t.tag == TAG_SPREAD then
-                    local inner_t = ctx.types:get(types_mod.find(ctx, p_param_t.data[0]))
+                    local inner_t = ctx.types:get(types_mod.find(ctx, types_mod.spread_inner(p_param_t)))
                     if inner_t.tag == TAG_CAPTURE then
                         rest_pos = i
-                        rest_name_id = inner_t.data[0]
+                        rest_name_id = types_mod.capture_name_id(inner_t)
                         break
                     end
                 end
@@ -545,9 +568,9 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             -- Match prefix params
             for i = 0, prefix_len - 1 do
                 --: integer
-                local p_param = ctx.lists:get(pt.data[0] + i)
+                local p_param = ctx.lists:get(pt_pstart + i)
                 --: integer
-                local t_param = ctx.lists:get(tt.data[0] + i)
+                local t_param = ctx.lists:get(tt_pstart + i)
                 local ok, sub = M.match_pattern(ctx, t_param, p_param, seen)
                 if not ok then return false, nil end
                 bindings = merge_bindings(bindings, sub)
@@ -556,9 +579,9 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             -- Match suffix params (right-to-left)
             for j = 0, suffix_len - 1 do
                 --: integer
-                local p_param = ctx.lists:get(pt.data[0] + ppl - 1 - j)
+                local p_param = ctx.lists:get(pt_pstart + ppl - 1 - j)
                 --: integer
-                local t_param = ctx.lists:get(tt.data[0] + tpl - 1 - j)
+                local t_param = ctx.lists:get(tt_pstart + tpl - 1 - j)
                 local ok, sub = M.match_pattern(ctx, t_param, p_param, seen)
                 if not ok then return false, nil end
                 bindings = merge_bindings(bindings, sub)
@@ -569,7 +592,7 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             local middle_count = tpl - prefix_len - suffix_len
             local middle_ids = {}
             for i = 0, middle_count - 1 do
-                middle_ids[i + 1] = ctx.lists:get(tt.data[0] + prefix_len + i)
+                middle_ids[i + 1] = ctx.lists:get(tt_pstart + prefix_len + i)
             end
             local rest_tid = types_mod.make_tuple(ctx, middle_ids)
             bindings = merge_bindings(bindings, { [rest_name_id] = rest_tid })
@@ -579,9 +602,9 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             if tpl ~= ppl then return false, nil end
             for i = 0, ppl - 1 do
                 --: integer
-                local p_param = ctx.lists:get(pt.data[0] + i)
+                local p_param = ctx.lists:get(pt_pstart + i)
                 --: integer
-                local t_param = ctx.lists:get(tt.data[0] + i)
+                local t_param = ctx.lists:get(tt_pstart + i)
                 local ok, sub = M.match_pattern(ctx, t_param, p_param, seen)
                 if not ok then return false, nil end
                 bindings = merge_bindings(bindings, sub)
@@ -589,9 +612,9 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             end
         end
         -- Match vararg
-        local p_va = pt.data[4]
+        local p_va = types_mod.fn_vararg(pt)
         if p_va >= 0 then
-            local t_va = tt.data[4]
+            local t_va = types_mod.fn_vararg(tt)
             if t_va < 0 then return false, nil end
             local ok, sub = M.match_pattern(ctx, t_va, p_va, seen)
             if not ok then return false, nil end
@@ -599,8 +622,10 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             if bindings == nil then return false, nil end
         end
         -- Match returns
-        local prl = pt.data[3]
-        local trl = tt.data[3]
+        local prl = types_mod.fn_returns_len(pt)
+        local trl = types_mod.fn_returns_len(tt)
+        local pt_rstart = types_mod.fn_returns_start(pt)
+        local tt_rstart = types_mod.fn_returns_start(tt)
         if prl > 0 then
             -- Special case: single capture variable in return position.
             -- `() -> %R` where %R is a TAG_CAPTURE binds R to:
@@ -610,12 +635,12 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             -- This enables `ReturnType<F> = match F { () -> %R => R }` for any F.
             if prl == 1 then
                 --: integer
-                local p_ret0 = ctx.lists:get(pt.data[2])
+                local p_ret0 = ctx.lists:get(pt_rstart)
                 --: integer
                 local p_ret0_canon = types_mod.find(ctx, p_ret0)
                 local p_ret0_t = ctx.types:get(p_ret0_canon)
                 if p_ret0_t.tag == TAG_CAPTURE or
-                   (p_ret0_t.tag == TAG_NAMED and p_ret0_t.data[2] == 0) then
+                   (p_ret0_t.tag == TAG_NAMED and types_mod.named_args_len(p_ret0_t) == 0) then
                     if trl == 0 then return false, nil end
                     -- Bind R to first return type (trl=1) or tuple of all returns (trl>1).
                     -- trl>1 tuple-binding enables `PcallReturn<F> = match F { () -> R => (true, R) | ... }`
@@ -623,12 +648,12 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
                     local bound_tid
                     if trl == 1 then
                         --: integer
-                        bound_tid = ctx.lists:get(tt.data[2])
+                        bound_tid = ctx.lists:get(tt_rstart)
                     else
                         local rets = {}
                         for ri = 0, trl - 1 do
                             --: integer
-                            rets[ri + 1] = ctx.lists:get(tt.data[2] + ri)
+                            rets[ri + 1] = ctx.lists:get(tt_rstart + ri)
                         end
                         bound_tid = types_mod.make_tuple(ctx, rets)
                     end
@@ -643,9 +668,9 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             if trl ~= prl then return false, nil end
             for i = 0, prl - 1 do
                 --: integer
-                local p_ret = ctx.lists:get(pt.data[2] + i)
+                local p_ret = ctx.lists:get(pt_rstart + i)
                 --: integer
-                local t_ret = ctx.lists:get(tt.data[2] + i)
+                local t_ret = ctx.lists:get(tt_rstart + i)
                 local ok, sub = M.match_pattern(ctx, t_ret, p_ret, seen)
                 if not ok then return false, nil end
                 bindings = merge_bindings(bindings, sub)
@@ -675,8 +700,10 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
     -- is inside the intersection).
     -- No bindings are produced (the pattern has no captures at this point).
     if tt.tag == TAG_INTERSECTION then
-        for i = 0, tt.data[1] - 1 do
-            local mid = ctx.lists:get(tt.data[0] + i)
+        local tt_mstart3 = types_mod.agg_members_start(tt)
+        local tt_mlen3   = types_mod.agg_members_len(tt)
+        for i = 0, tt_mlen3 - 1 do
+            local mid = ctx.lists:get(tt_mstart3 + i)
             local ok, sub = M.match_pattern(ctx, mid, pat_id, seen)
             if ok then
                 return true, sub or {}
@@ -729,9 +756,9 @@ function M.evaluate(ctx, mt_id, seen)
         return ctx.T_NEVER
     end
 
-    local param_id = types_mod.find(ctx, mt.data[0])
-    local arms_start = mt.data[1]
-    local arms_len   = mt.data[2]
+    local param_id = types_mod.find(ctx, types_mod.match_param(mt))
+    local arms_start = types_mod.match_arms_start(mt)
+    local arms_len   = types_mod.match_arms_len(mt)
 
     -- Memoization: cache (mt_id, param_id) → result across evaluations.
     -- The seen-set prevents loops within an evaluation; the cache reuses completed results.
@@ -750,8 +777,10 @@ function M.evaluate(ctx, mt_id, seen)
     if top.tag == TAG_UNION then
         --: { [integer]: integer, ... }
         local results = {}
-        for idx = 0, top.data[1] - 1 do
-            local member_id = ctx.lists:get(top.data[0] + idx)
+        local top_mstart = types_mod.agg_members_start(top)
+        local top_mlen   = types_mod.agg_members_len(top)
+        for idx = 0, top_mlen - 1 do
+            local member_id = ctx.lists:get(top_mstart + idx)
             -- Build a temporary match-type node with this member as the param.
             -- Reuse the existing arms slice from the list pool (no new allocation).
             local sub_mt = types_mod.alloc_type(ctx, TAG_MATCH_TYPE)
@@ -793,8 +822,8 @@ function M.evaluate(ctx, mt_id, seen)
         -- Always matches (total).
         local pat_t = ctx.types:get(types_mod.find(ctx, pat_id))
         if pat_t.tag == TAG_PAT_ALL_FIELDS then
-            local k_name_id = pat_t.data[0]
-            local v_name_id = pat_t.data[1]
+            local k_name_id = types_mod.pat_all_k_id(pat_t)
+            local v_name_id = types_mod.pat_all_v_id(pat_t)
             --: { [integer]: integer, ... }
             local results = {}
             local env_mod = require("lib.type.static.env")
@@ -814,7 +843,9 @@ function M.evaluate(ctx, mt_id, seen)
             elseif pt.tag == TAG_TABLE then
                 -- Named fields: K = lit_integer(name) if name is an integer, else lit_string(name)
                 local intern_mod_af = require("lib.type.static.intern")
-                for fi_idx = pt.data[0], pt.data[0] + pt.data[1] - 1 do
+                local pt_fstart3 = types_mod.tbl_fields_start(pt)
+                local pt_flen3   = types_mod.tbl_fields_len(pt)
+                for fi_idx = pt_fstart3, pt_fstart3 + pt_flen3 - 1 do
                     local fid = ctx.lists:get(fi_idx)
                     local fe  = ctx.fields:get(fid)
                     if fe.name_id >= 0 then  -- skip spread markers (name_id == -1)
@@ -835,8 +866,10 @@ function M.evaluate(ctx, mt_id, seen)
                     end
                 end
                 -- Indexers: K = key_type, V = value_type
-                local j = pt.data[2]
-                while j < pt.data[2] + pt.data[3] - 1 do
+                local pt_istart = types_mod.tbl_indexers_start(pt)
+                local pt_ilen   = types_mod.tbl_indexers_len(pt)
+                local j = pt_istart
+                while j < pt_istart + pt_ilen - 1 do
                     local k_tid = types_mod.find(ctx, ctx.lists:get(j))
                     local v_tid = types_mod.find(ctx, ctx.lists:get(j + 1))
                     results[#results + 1] = eval_with_kv(k_tid, v_tid)
@@ -882,16 +915,21 @@ function M.evaluate(ctx, mt_id, seen)
             result = types_mod.find(ctx, result)
             local rt = ctx.types:get(result)
             if rt.tag == defs.TAG_TYPE_CALL then
-                local callee_t = ctx.types:get(types_mod.find(ctx, rt.data[0]))
+                local callee_t = ctx.types:get(types_mod.find(ctx, types_mod.tycall_callee(rt)))
                 if callee_t.tag == defs.TAG_INTRINSIC then
-                    local intr_name = require("lib.type.static.intern").get(ctx.pool, callee_t.data[0]) or ""
+                    local callee_name_id = types_mod.intrinsic_name_id(callee_t)
+                    local intr_name = require("lib.type.static.intern").get(ctx.pool, callee_name_id) or ""
                     if intr_name == "Throw" then
                         local arg_ids = {}
-                        for j = rt.data[1], rt.data[1] + rt.data[2] - 1 do
+                        local rt_astart = types_mod.tycall_args_start(rt)
+                        local rt_alen   = types_mod.tycall_args_len(rt)
+                        for j = rt_astart, rt_astart + rt_alen - 1 do
                             arg_ids[#arg_ids + 1] = ctx.lists:get(j)
                         end
                         local intrinsic_mod = require("lib.type.static.intrinsic")
-                        result = intrinsic_mod.expand(ctx, callee_t.data[0], arg_ids, rt.data[3])
+                        -- rt.data[3] is a stable_id slot not documented in types.lua layout for TYPE_CALL;
+                        -- no accessor exists in C2. Keep direct read until layout is updated.
+                        result = intrinsic_mod.expand(ctx, callee_name_id, arg_ids, rt.data[3])
                     end
                 end
             end
@@ -925,8 +963,10 @@ function M.lookup_index(ctx, subject_tid, key_tid)
 
     if st.tag == TAG_UNION then
         local results = {}
-        for i = 0, st.data[1] - 1 do
-            local mid = ctx.lists:get(st.data[0] + i)
+        local st_mstart = types_mod.agg_members_start(st)
+        local st_mlen   = types_mod.agg_members_len(st)
+        for i = 0, st_mlen - 1 do
+            local mid = ctx.lists:get(st_mstart + i)
             local r = M.lookup_index(ctx, mid, key_tid)
             if r == nil then return nil end  -- any member missing → fail the whole lookup
             results[#results + 1] = r
@@ -940,8 +980,10 @@ function M.lookup_index(ctx, subject_tid, key_tid)
         -- Mirror match.lua's indexer unification approach: collect contributions
         -- from members that have the key; intersect them.
         local contribs = {}
-        for i = 0, st.data[1] - 1 do
-            local mid = ctx.lists:get(st.data[0] + i)
+        local st_mstart2 = types_mod.agg_members_start(st)
+        local st_mlen2   = types_mod.agg_members_len(st)
+        for i = 0, st_mlen2 - 1 do
+            local mid = ctx.lists:get(st_mstart2 + i)
             local r = M.lookup_index(ctx, mid, key_tid)
             if r ~= nil then
                 contribs[#contribs + 1] = r
@@ -971,16 +1013,16 @@ function M.lookup_index(ctx, subject_tid, key_tid)
     local kt = ctx.types:get(key_tid)
 
     -- String literal key: try named-field lookup first.
-    if kt.tag == TAG_LITERAL and kt.data[0] == LIT_STRING then
-        local name_id = kt.data[1]
+    if kt.tag == TAG_LITERAL and types_mod.lit_kind(kt) == LIT_STRING then
+        local name_id = types_mod.lit_str_id(kt)
         local fe = types_mod.table_field(ctx, subject_tid, name_id)
         if fe then return fe.type_id end
         -- Fall through to indexer lookup (string literal can match `[string]: V`).
     end
 
     -- Indexer lookup: scan indexer pairs, find one whose key type accepts the query key.
-    local pis = st.data[2]
-    local pil = st.data[3]
+    local pis = types_mod.tbl_indexers_start(st)
+    local pil = types_mod.tbl_indexers_len(st)
     if pil >= 2 then
         local unify_mod = require("lib.type.static.unify")
         local i = pis
