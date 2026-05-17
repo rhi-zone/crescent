@@ -360,6 +360,70 @@ function M.escape_line(c) return c[4] end
 --: (ConstraintEscapeCheck) -> integer
 function M.escape_col(c) return c[5] end
 
+-- Typed per-C_TAG constructors. One per alias. Each produces the matching
+-- Constraint* tuple with the C_TAG discriminant already in slot 1, so call
+-- sites never write the raw `{ C_TAG, ... }` literal.
+
+--: (integer, integer, integer, integer) -> ConstraintUnify
+function M.make_unify(t1, t2, line, col)
+    return { C_UNIFY, t1, t2, line, col }
+end
+
+--: (integer, integer, integer, integer, boolean) -> ConstraintSub
+function M.make_sub(actual, expected, line, col, is_cast)
+    return { C_SUB, actual, expected, line, col, is_cast }
+end
+
+--: (string, integer, integer, integer, integer, integer) -> ConstraintArith
+function M.make_arith(op, lhs, rhs, result, line, col)
+    return { C_ARITH, op, lhs, rhs, result, line, col }
+end
+
+--: (integer, integer, integer, integer) -> ConstraintReturn
+function M.make_return(val, expected, line, col)
+    return { C_RETURN, val, expected, line, col }
+end
+
+--: (integer, integer, integer, integer) -> ConstraintCompare
+function M.make_compare(lhs, rhs, line, col)
+    return { C_COMPARE, lhs, rhs, line, col }
+end
+
+--: (integer, integer, integer, integer, integer) -> ConstraintIndex
+function M.make_index(obj, key, result, line, col)
+    return { C_INDEX, obj, key, result, line, col }
+end
+
+--: (integer, integer, integer, integer) -> ConstraintBound
+function M.make_bound(tv, bound_type, line, col)
+    return { C_BOUND, tv, bound_type, line, col }
+end
+
+--: (integer, integer, integer, integer, integer) -> ConstraintOr
+function M.make_or(left, right, result, line, col)
+    return { C_OR, left, right, result, line, col }
+end
+
+--: (integer, { [integer]: integer, ... }, integer, integer, integer) -> ConstraintBindGenerics
+function M.make_bindgen(callee, args, ret, line, col)
+    return { C_BIND_GENERICS, callee, args, ret, line, col }
+end
+
+--: (integer, { [integer]: integer, ... }, integer, integer, integer) -> ConstraintCheckArgs
+function M.make_checkargs(callee, args, ret, line, col)
+    return { C_CHECK_ARGS, callee, args, ret, line, col }
+end
+
+--: (integer, integer, integer, integer) -> ConstraintOverlap
+function M.make_overlap(actual, expected, line, col)
+    return { C_OVERLAP, actual, expected, line, col }
+end
+
+--: (integer, integer, integer, integer) -> ConstraintEscapeCheck
+function M.make_escape(ret, call_id, line, col)
+    return { C_ESCAPE_CHECK, ret, call_id, line, col }
+end
+
 -- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
@@ -1590,13 +1654,13 @@ ExprRule[NODE_UNARY_EXPR] = function(ctx, nid)
     if op == OP_NOT then return ctx.T_BOOLEAN end
     if op == OP_UNM then
         local res = fresh_var(ctx)
-        local _c = { C_ARITH, "__unm", arg_tid, arg_tid, res, n.line, n.col }
+        local _c = M.make_arith("__unm", arg_tid, arg_tid, res, n.line, n.col)
         emit(ctx, _c); record_polymorphic_op(ctx, _c)
         return res
     end
     if op == OP_LEN then
         local res = fresh_var(ctx)
-        local _c = { C_ARITH, "__len", arg_tid, arg_tid, res, n.line, n.col }
+        local _c = M.make_arith("__len", arg_tid, arg_tid, res, n.line, n.col)
         emit(ctx, _c); record_polymorphic_op(ctx, _c)
         return res
     end
@@ -1633,7 +1697,7 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
 
     if ARITH_OPS[op] then
         local res = fresh_var(ctx)
-        local _c = { C_ARITH, ARITH_OPS[op], left_tid, right_tid, res, n.line, n.col }
+        local _c = M.make_arith(ARITH_OPS[op], left_tid, right_tid, res, n.line, n.col)
         emit(ctx, _c); record_polymorphic_op(ctx, _c)
         return res
     end
@@ -1641,20 +1705,20 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
     if op == OP_EQ or op == OP_NE then return ctx.T_BOOLEAN end
 
     if op == OP_LT or op == OP_GT or op == OP_LE or op == OP_GE then
-        emit(ctx, { C_COMPARE, left_tid, right_tid, n.line, n.col })
+        emit(ctx, M.make_compare(left_tid, right_tid, n.line, n.col))
         return ctx.T_BOOLEAN
     end
 
     if op == OP_CONCAT then
         local res = fresh_var(ctx)
-        local _c = { C_ARITH, "__concat", left_tid, right_tid, res, n.line, n.col }
+        local _c = M.make_arith("__concat", left_tid, right_tid, res, n.line, n.col)
         emit(ctx, _c); record_polymorphic_op(ctx, _c)
         return res
     end
 
     if op == OP_OR then
         local res = fresh_var(ctx)
-        emit(ctx, { C_OR, left_tid, right_tid, res, n.line, n.col })
+        emit(ctx, M.make_or(left_tid, right_tid, res, n.line, n.col))
         return res
     end
 
@@ -1693,7 +1757,7 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
         end
     end
     local res = fresh_var(ctx)
-    emit(ctx, { C_INDEX, obj_tid, types_mod.make_literal(ctx, LIT_STRING, fname_id), res, n.line, n.col })
+    emit(ctx, M.make_index(obj_tid, types_mod.make_literal(ctx, LIT_STRING, fname_id), res, n.line, n.col))
     -- Record the field-access origin so peek_callee_ret_union can trace local aliases
     -- like `local find = string.find` back to the concrete function type.
     ctx._var_origin[res] = { obj_tid, fname_id }
@@ -1733,7 +1797,7 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
                 if obj_t.tag == TAG_ANY     then return ctx.T_ANY end
                 local res = fresh_var(ctx)
                 local opaque_key = types_mod.make_literal(ctx, LIT_OPAQUE_KEY, var_name_id)
-                emit(ctx, { C_INDEX, obj_tid, opaque_key, res, n.line, n.col })
+                emit(ctx, M.make_index(obj_tid, opaque_key, res, n.line, n.col))
                 return res
             end
         end
@@ -1752,7 +1816,7 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
     local kt_t = ctx.types:get(key_r)
     if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_STRING then
         local res = fresh_var(ctx)
-        emit(ctx, { C_INDEX, obj_tid, types_mod.make_literal(ctx, LIT_STRING, kt_t.data[1]), res, n.line, n.col })
+        emit(ctx, M.make_index(obj_tid, types_mod.make_literal(ctx, LIT_STRING, kt_t.data[1]), res, n.line, n.col))
         return res
     end
 
@@ -1771,7 +1835,7 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
         -- (`{ A, B, C }[N]` → slot N's type) instead of the legacy
         -- "first indexer value wins" shortcut below.
         local res = fresh_var(ctx)
-        emit(ctx, { C_INDEX, obj_tid, types_mod.make_literal(ctx, LIT_INTEGER, kt_t.data[1]), res, n.line, n.col })
+        emit(ctx, M.make_index(obj_tid, types_mod.make_literal(ctx, LIT_INTEGER, kt_t.data[1]), res, n.line, n.col))
         return res
     end
 
@@ -2081,7 +2145,7 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
     -- Unannotated functions are skipped: they infer their return type from actual
     -- returns, so adding nil would be overly noisy.
     if has_ann_fn and not definitely_returning then
-        emit(ctx, { C_RETURN, ctx.T_NIL, push_ret_id, 0, 0 })
+        emit(ctx, M.make_return(ctx.T_NIL, push_ret_id, 0, 0))
     end
 
     ctx.return_vars[#ctx.return_vars] = nil
@@ -2643,19 +2707,19 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
         if call_fn_t.tag == TAG_FUNCTION then
             local rl = call_fn_t.data[3]
             if rl == 0 then
-                emit(ctx, { C_UNIFY, ret, ctx.T_NIL, n.line, n.col })
+                emit(ctx, M.make_unify(ret, ctx.T_NIL, n.line, n.col))
             elseif rl == 1 then
                 local first_ret = types_mod.find(ctx, ctx.lists:get(call_fn_t.data[2]))
-                emit(ctx, { C_UNIFY, ret, first_ret, n.line, n.col })
+                emit(ctx, M.make_unify(ret, first_ret, n.line, n.col))
             else
                 local slots = {}
                 for ri = 0, rl - 1 do
                     slots[ri + 1] = types_mod.find(ctx, ctx.lists:get(call_fn_t.data[2] + ri))
                 end
-                emit(ctx, { C_UNIFY, ret, types_mod.make_tuple(ctx, slots), n.line, n.col })
+                emit(ctx, M.make_unify(ret, types_mod.make_tuple(ctx, slots), n.line, n.col))
             end
         else
-            emit(ctx, { C_UNIFY, ret, ctx.T_ANY, n.line, n.col })
+            emit(ctx, M.make_unify(ret, ctx.T_ANY, n.line, n.col))
         end
         ctx._last_multi_return = { ret }
         return ret
@@ -2708,7 +2772,7 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
             local bound = ctx._forall_bounds[orig_tv]
             if bound then
                 local inst_bound = env_mod.instantiate(ctx, bound, ctx.scope.level, inst_mapping)
-                emit(ctx, { C_BOUND, fresh_tv, inst_bound, n.line, n.col })
+                emit(ctx, M.make_bound(fresh_tv, inst_bound, n.line, n.col))
                 local resolved_bound = types_mod.find(ctx, inst_bound)
                 local bt = ctx.types:get(resolved_bound)
                 if bt.tag == defs.TAG_NAMED and bt.data[2] == 0 then
@@ -2819,11 +2883,11 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                                 local lhs = inst_mapping[op[3]] or op[3]
                                 local rhs = inst_mapping[op[4]] or op[4]
                                 local res = inst_mapping[op[5]] or op[5]
-                                emit(ctx, { C_ARITH, op[2], lhs, rhs, res, n.line, n.col })
+                                emit(ctx, M.make_arith(op[2], lhs, rhs, res, n.line, n.col))
                             elseif code == C_COMPARE then
                                 local lhs = inst_mapping[op[2]] or op[2]
                                 local rhs = inst_mapping[op[3]] or op[3]
-                                emit(ctx, { C_COMPARE, lhs, rhs, n.line, n.col })
+                                emit(ctx, M.make_compare(lhs, rhs, n.line, n.col))
                             elseif code == C_BIND_GENERICS or code == C_CHECK_ARGS then
                                 local callee = inst_mapping[op[2]] or op[2]
                                 local orig_args = op[3] --[[: { [integer]: integer, ... }]]
@@ -2844,12 +2908,12 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     end
 
     local ret = fresh_var(ctx)
-    emit(ctx, { C_BIND_GENERICS, inst_callee, arg_tids, ret, n.line, n.col })
-    emit(ctx, { C_CHECK_ARGS,    inst_callee, arg_tids, ret, n.line, n.col })
+    emit(ctx, M.make_bindgen(inst_callee, arg_tids, ret, n.line, n.col))
+    emit(ctx, M.make_checkargs(inst_callee, arg_tids, ret, n.line, n.col))
     if has_rank_n then
         -- Per-call escape check: ensure no skolem with this call_id reaches
         -- the inferred return type. See docs/typechecker-rank-n.md.
-        emit(ctx, { M.C_ESCAPE_CHECK, ret, rank_n_call_id, n.line, n.col })
+        emit(ctx, M.make_escape(ret, rank_n_call_id, n.line, n.col))
     end
     ctx._last_multi_return = { ret }
 
@@ -2885,7 +2949,7 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
 
     -- Get method field
     local method_var = fresh_var(ctx)
-    emit(ctx, { C_INDEX, recv_tid, types_mod.make_literal(ctx, LIT_STRING, method_name_id), method_var, n.line, n.col })
+    emit(ctx, M.make_index(recv_tid, types_mod.make_literal(ctx, LIT_STRING, method_name_id), method_var, n.line, n.col))
 
     local extra = gen_expr_list(ctx, n.data[2], n.data[3])
     local arg_tids = { recv_tid }
@@ -2901,14 +2965,14 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
             local bound = ctx._forall_bounds[orig_tv]
             if bound then
                 local inst_bound = env_mod.instantiate(ctx, bound, ctx.scope.level, meth_mapping)
-                emit(ctx, { C_BOUND, fresh_tv, inst_bound, n.line, n.col })
+                emit(ctx, M.make_bound(fresh_tv, inst_bound, n.line, n.col))
             end
         end
     end
 
     local ret = fresh_var(ctx)
-    emit(ctx, { C_BIND_GENERICS, inst_method, arg_tids, ret, n.line, n.col })
-    emit(ctx, { C_CHECK_ARGS,    inst_method, arg_tids, ret, n.line, n.col })
+    emit(ctx, M.make_bindgen(inst_method, arg_tids, ret, n.line, n.col))
+    emit(ctx, M.make_checkargs(inst_method, arg_tids, ret, n.line, n.col))
     ctx._last_multi_return = { ret }
 
     -- Eagerly peek the method's return type so LOCAL_STMT can extract slots at
@@ -2989,9 +3053,9 @@ ExprRule[NODE_CAST_EXPR] = function(ctx, nid)
             ctx._overlap_byte_range[(n.line or 0) * 100000 + (n.col or 0)] =
                 { ann.byte_start, ann.byte_end }
         end
-        emit(ctx, { C_OVERLAP, inner_tid, cast_tid, n.line, n.col })
+        emit(ctx, M.make_overlap(inner_tid, cast_tid, n.line, n.col))
     else
-        emit(ctx, { C_SUB, inner_tid, cast_tid, n.line, n.col, true })  -- true = is_cast
+        emit(ctx, M.make_sub(inner_tid, cast_tid, n.line, n.col, true))
     end
     return cast_tid
 end
@@ -3353,11 +3417,11 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                     local elem_tid = types_mod.find(ctx, ctx.lists:get(at_t.data[0] + ti))
                     local rhs_elem = rhs_types[ti + 1]
                     if rhs_elem then
-                        emit(ctx, { C_SUB, rhs_elem, elem_tid, n.line, n.col })
+                        emit(ctx, M.make_sub(rhs_elem, elem_tid, n.line, n.col, false))
                     end
                 end
             elseif rhs_tid then
-                emit(ctx, { C_SUB, rhs_tid, ann_tid, n.line, n.col })
+                emit(ctx, M.make_sub(rhs_tid, ann_tid, n.line, n.col, false))
             elseif el == 0 then
                 -- Gap 9: `local x --: T` with no initializer is sound only if nil ∈ T
                 -- (the runtime value is nil). Reject otherwise; user can write `T | nil`
@@ -3402,9 +3466,9 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                 else
                     -- Unannotated callee: defer via C_INDEX until solve binds the tuple.
                     local slot_var = fresh_var(ctx)
-                    emit(ctx, { C_INDEX, call_ret_tid,
+                    emit(ctx, M.make_index(call_ret_tid,
                         types_mod.make_literal(ctx, LIT_INTEGER, call_slot),
-                        slot_var, n.line, n.col })
+                        slot_var, n.line, n.col))
                     bind_tid = slot_var
                 end
                 if not ctx._multi_ret then ctx._multi_ret = {} end
@@ -3491,9 +3555,15 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                 rhs_tid = concrete
             else
                 local slot_var = fresh_var(ctx)
-                emit(ctx, { C_INDEX, assign_call_ret_tid,
-                    types_mod.make_literal(ctx, LIT_INTEGER, call_slot),
-                    slot_var, n.line, n.col })
+                -- Re-narrow assign_call_ret_tid after the eager_slot call: function
+                -- calls drop narrowing in the typechecker, so `acrt` is widened
+                -- back to integer | nil here.  Use a type-guard to re-narrow.
+                local acrt = assign_call_ret_tid
+                if type(acrt) == "number" then
+                    emit(ctx, M.make_index(acrt,
+                        types_mod.make_literal(ctx, LIT_INTEGER, call_slot),
+                        slot_var, n.line, n.col))
+                end
                 rhs_tid = slot_var
             end
         else
@@ -3519,7 +3589,7 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                 local ca_resolved = types_mod.find(ctx, check_against)
                 local ca_tag = ctx.types:get(ca_resolved).tag
                 if ca_tag ~= TAG_VAR then
-                    emit(ctx, { C_SUB, rhs_tid, check_against, tn.line, tn.col })
+                    emit(ctx, M.make_sub(rhs_tid, check_against, tn.line, tn.col, false))
                 end
                 env_mod.bind(ctx.scope, name_id, rhs_tid)
                 -- Track correlated multi-return for narrowing propagation (e.g. x, y = f())
@@ -3551,7 +3621,7 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                     local ann_resolved = types_mod.find(ctx, ann_field_tid)
                     local ann_t = ctx.types:get(ann_resolved)
                     if ann_t.tag ~= TAG_VAR and ann_t.tag ~= TAG_ROWVAR then
-                        emit(ctx, { C_SUB, rhs_tid, ann_field_tid, tn.line, tn.col })
+                        emit(ctx, M.make_sub(rhs_tid, ann_field_tid, tn.line, tn.col, false))
                     end
                 end
                 local fe = types_mod.table_field(ctx, obj_tid, field_id)
@@ -3569,7 +3639,7 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                         local expected = types_mod.widen(ctx, fe.type_id)
                         local et = ctx.types:get(types_mod.find(ctx, expected))
                         if et.tag ~= TAG_VAR then
-                            emit(ctx, { C_SUB, rhs_tid, expected, tn.line, tn.col })
+                            emit(ctx, M.make_sub(rhs_tid, expected, tn.line, tn.col, false))
                         end
                     end
                 else
@@ -3629,7 +3699,7 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                         local expected = types_mod.widen(ctx, fe.type_id)
                         local et = ctx.types:get(types_mod.find(ctx, expected))
                         if et.tag ~= TAG_VAR then
-                            emit(ctx, { C_SUB, rhs_tid, expected, tn.line, tn.col })
+                            emit(ctx, M.make_sub(rhs_tid, expected, tn.line, tn.col, false))
                         end
                     else
                         -- New field: add it
@@ -3659,7 +3729,7 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                         local idx_val = types_mod.find(ctx, ctx.lists:get(is2 + 1))
                         local ivt = ctx.types:get(idx_val)
                         if ivt.tag ~= TAG_VAR then
-                            emit(ctx, { C_SUB, rhs_tid, idx_val, tn.line, tn.col })
+                            emit(ctx, M.make_sub(rhs_tid, idx_val, tn.line, tn.col, false))
                         end
                     else
                         -- No existing indexer: add one for this key/value type pair.
@@ -4040,17 +4110,17 @@ StmtRule[NODE_FOR_IN] = function(ctx, nid)
         -- Single-expr: explist returns a triple (may be TAG_VAR pointing at a tuple).
         local triple_var = iter_types[1]
         iter_fn_tid = fresh_var(ctx)
-        emit(ctx, { C_INDEX, triple_var,
+        emit(ctx, M.make_index(triple_var,
             types_mod.make_literal(ctx, LIT_INTEGER, 0),
-            iter_fn_tid, n.line, n.col })
+            iter_fn_tid, n.line, n.col))
         state_tid = fresh_var(ctx)
-        emit(ctx, { C_INDEX, triple_var,
+        emit(ctx, M.make_index(triple_var,
             types_mod.make_literal(ctx, LIT_INTEGER, 1),
-            state_tid, n.line, n.col })
+            state_tid, n.line, n.col))
         key0_tid = fresh_var(ctx)
-        emit(ctx, { C_INDEX, triple_var,
+        emit(ctx, M.make_index(triple_var,
             types_mod.make_literal(ctx, LIT_INTEGER, 2),
-            key0_tid, n.line, n.col })
+            key0_tid, n.line, n.col))
     else
         -- Multi-expr: iter_types[1] = iter_fn, [2] = state, [3] = initial_key.
         iter_fn_tid = iter_types[1] or ctx.T_ANY
@@ -4062,17 +4132,17 @@ StmtRule[NODE_FOR_IN] = function(ctx, nid)
     -- The return type (a tuple of loop-var types) is projected slot-by-slot into
     -- individual loop variables via C_INDEX.
     local loop_ret_var = fresh_var(ctx)
-    emit(ctx, { C_BIND_GENERICS, iter_fn_tid, { state_tid, key0_tid },
-        loop_ret_var, n.line, n.col })
-    emit(ctx, { C_CHECK_ARGS,    iter_fn_tid, { state_tid, key0_tid },
-        loop_ret_var, n.line, n.col })
+    emit(ctx, M.make_bindgen(iter_fn_tid, { state_tid, key0_tid },
+        loop_ret_var, n.line, n.col))
+    emit(ctx, M.make_checkargs(iter_fn_tid, { state_tid, key0_tid },
+        loop_ret_var, n.line, n.col))
 
     for i = 0, nl - 1 do
         local name_id = ctx.ast_lists:get(ns + i)
         local slot_var = fresh_var(ctx)
-        emit(ctx, { C_INDEX, loop_ret_var,
+        emit(ctx, M.make_index(loop_ret_var,
             types_mod.make_literal(ctx, LIT_INTEGER, i),
-            slot_var, n.line, n.col })
+            slot_var, n.line, n.col))
         env_mod.bind(ctx.scope, name_id, slot_var)
     end
 
@@ -4096,7 +4166,7 @@ StmtRule[NODE_RETURN_STMT] = function(ctx, nid)
         else
             ret_tid = ret_tids[1] or ctx.T_NIL
         end
-        emit(ctx, { C_RETURN, ret_tid, ret_var, n.line, n.col })
+        emit(ctx, M.make_return(ret_tid, ret_var, n.line, n.col))
     end
 end
 
@@ -4193,7 +4263,7 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
             if stub_t.tag == TAG_FUNCTION and real_t.tag == TAG_FUNCTION then
                 for k = 0, 6 do stub_t.data[k] = real_t.data[k] end
             else
-                emit(ctx, { C_UNIFY, fn_tid, existing, n.line, n.col })
+                emit(ctx, M.make_unify(fn_tid, existing, n.line, n.col))
             end
         end
         env_mod.bind(ctx.scope, name_id, fn_tid)
