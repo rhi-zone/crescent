@@ -3906,16 +3906,16 @@ local y = fmap(x, function(a) return tostring(a) end)
 ]], "Maybe")
     end)
 
-    -- H4: pure inference. Today: return is `_(integer)`, fails to satisfy
-    -- Maybe<integer>. After C5: substitute_inner re-resolves M<integer> →
-    -- Maybe<integer> and this passes.
-    assert.it("H4: pure(42) : Maybe<integer> — currently errors with _(integer)", function()
-        has_error([[
+    -- H4: pure inference. After eager F := bound_alias pinning at the
+    -- call site, the return slot M<integer> normalizes to Maybe<integer>
+    -- once A is bound from the arg. Previously errored with `_(integer)`.
+    assert.it("H4: pure(42) : Maybe<integer> — flipped to no-error", function()
+        no_errors([[
 --:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
 --:: declare pure = <M: Maybe, A>(a: A) -> M<A>
 --: () -> Maybe<integer>
 local function get_some() return pure(42) end
-]], "_%(integer%)")
+]])
     end)
 
     -- H5: CONTROL — monomorphic must always typecheck. This line must stay

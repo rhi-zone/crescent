@@ -2532,12 +2532,13 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
             if bound then
                 local inst_bound = env_mod.instantiate(ctx, bound, ctx.scope.level, inst_mapping)
                 emit(ctx, { C_BOUND, fresh_tv, inst_bound, n.line, n.col })
-                local bt = ctx.types:get(types_mod.find(ctx, inst_bound))
+                local resolved_bound = types_mod.find(ctx, inst_bound)
+                local bt = ctx.types:get(resolved_bound)
                 if bt.tag == defs.TAG_NAMED and bt.data[2] == 0 then
                     local alias = env_mod.lookup_type(ctx.scope, bt.data[0])
                     if alias and alias.params and #alias.params >= 1 then
                         hkt_fresh_to_bound = hkt_fresh_to_bound or {}
-                        hkt_fresh_to_bound[fresh_tv] = inst_bound
+                        hkt_fresh_to_bound[fresh_tv] = resolved_bound
                     end
                 end
             end
@@ -2546,17 +2547,29 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
         -- HKT decomposition: walk the instantiated callee's parameter slots
         -- and emit C_HKT_DECOMPOSE for each top-level TAG_TYPE_CALL whose
         -- callee is one of the HKT-bounded fresh TVs.
+        --
+        -- Eager-bind decision: for fresh TVs that appear ONLY in the return
+        -- slot as a TAG_TYPE_CALL callee (e.g. `pure: <M: Maybe>(a) -> M<A>`),
+        -- pin F := bound_alias so the return slot can normalize once A is
+        -- bound. Do NOT eager-bind when F also appears as a bare param-slot
+        -- type (e.g. `id_hkt: <F: T1>(fa: F) -> F`) — that case relies on
+        -- C_BOUND's kind-arity check to reject mismatched actuals.
         if hkt_fresh_to_bound and arg_tids then
+            local decomposed = {}
+            local appears_bare_in_param = {}
+            local appears_in_return_as_callee = {}
             local ic = ctx.types:get(inst_callee)
             if ic.tag == TAG_FUNCTION then
                 local p_start, p_len = ic.data[0], ic.data[1]
                 for i = 0, p_len - 1 do
                     local slot_tid = ctx.lists:get(p_start + i)
-                    local slot = ctx.types:get(types_mod.find(ctx, slot_tid))
+                    local slot_root = types_mod.find(ctx, slot_tid)
+                    local slot = ctx.types:get(slot_root)
                     if slot.tag == defs.TAG_TYPE_CALL then
                         local callee2 = types_mod.find(ctx, slot.data[0])
                         local bound_alias = hkt_fresh_to_bound[callee2]
                         if bound_alias then
+                            decomposed[callee2] = true
                             local args_list = {}
                             for j = slot.data[1], slot.data[1] + slot.data[2] - 1 do
                                 args_list[#args_list + 1] = ctx.lists:get(j)
@@ -2577,6 +2590,34 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                                 emit(ctx, { C_HKT_DECOMPOSE, pid, n.line, n.col })
                             end
                         end
+                    elseif hkt_fresh_to_bound[slot_root] then
+                        appears_bare_in_param[slot_root] = true
+                    end
+                end
+                local r_start, r_len = ic.data[2], ic.data[3]
+                for i = 0, r_len - 1 do
+                    local rslot = ctx.types:get(types_mod.find(ctx, ctx.lists:get(r_start + i)))
+                    if rslot.tag == defs.TAG_TYPE_CALL then
+                        local rcallee = types_mod.find(ctx, rslot.data[0])
+                        if hkt_fresh_to_bound[rcallee] then
+                            appears_in_return_as_callee[rcallee] = true
+                        end
+                    end
+                end
+            end
+
+            -- Eager bind: F appears as TAG_TYPE_CALL callee in return AND
+            -- not as a bare param type AND not already decomposed from a
+            -- param. (If decomposed, the structural path will bind it.)
+            local unify_mod2 = require("lib.type.static.unify")
+            for fresh_tv, bound_alias in pairs(hkt_fresh_to_bound) do
+                if appears_in_return_as_callee[fresh_tv]
+                    and not decomposed[fresh_tv]
+                    and not appears_bare_in_param[fresh_tv] then
+                    local ff_root = types_mod.find(ctx, fresh_tv)
+                    local ff_t = ctx.types:get(ff_root)
+                    if ff_t.tag == TAG_VAR or ff_t.tag == defs.TAG_ROWVAR then
+                        unify_mod2.bind_var_to_type(ctx, ff_root, bound_alias)
                     end
                 end
             end
