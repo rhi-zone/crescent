@@ -50,7 +50,8 @@ local function expand_keys(ctx, arg_ids)
         return ctx.T_NEVER
     end
     local members = {}
-    for i = t.data[0], t.data[0] + t.data[1] - 1 do
+    local fs, fl = types_mod.tbl_fields_start(t), types_mod.tbl_fields_len(t)
+    for i = fs, fs + fl - 1 do
         local fid = ctx.lists:get(i)
         local fe  = ctx.fields:get(fid)
         if fe.name_id >= 0 then  -- skip spread markers (name_id == -1)
@@ -79,24 +80,25 @@ local function apply_type_fn(ctx, fn_tid, member_tid)
         local id = types_mod.alloc_type(ctx, TAG_MATCH_TYPE)
         local mtt = ctx.types:get(id)
         mtt.data[0] = member_tid
-        mtt.data[1] = ft.data[1]
-        mtt.data[2] = ft.data[2]
+        mtt.data[1] = types_mod.match_arms_start(ft)
+        mtt.data[2] = types_mod.match_arms_len(ft)
         local match_mod = require("lib.type.static.match")
         return match_mod.evaluate(ctx, id)
     end
 
     if ft.tag == TAG_NAMED then
         local env_mod = require("lib.type.static.env")
-        local resolved = env_mod.resolve_named_type(ctx, ctx.scope, ft.data[0], { member_tid })
+        local resolved = env_mod.resolve_named_type(ctx, ctx.scope, types_mod.named_name_id(ft), { member_tid })
         if resolved then return resolved or 0 end
     end
 
     if ft.tag == defs.TAG_PARTIAL_APP then
         -- Complete the partial application by appending the new arg.
         local env_mod = require("lib.type.static.env")
-        local name_id = ft.data[0]
+        local name_id = types_mod.partial_name_id(ft)
+        local ps, pl = types_mod.partial_args_start(ft), types_mod.partial_args_len(ft)
         local partial_args = {}
-        for i = ft.data[1], ft.data[1] + ft.data[2] - 1 do
+        for i = ps, ps + pl - 1 do
             partial_args[#partial_args + 1] = ctx.lists:get(i)
         end
         partial_args[#partial_args + 1] = member_tid
@@ -120,7 +122,8 @@ local function expand_each_union(ctx, arg_ids)
 
     local results = {}
     if ut.tag == TAG_UNION then
-        for i = ut.data[0], ut.data[0] + ut.data[1] - 1 do
+        local us, ul = types_mod.agg_members_start(ut), types_mod.agg_members_len(ut)
+        for i = us, us + ul - 1 do
             local member = types_mod.find(ctx, ctx.lists:get(i))
             results[#results + 1] = apply_type_fn(ctx, fn_tid, member)
         end
@@ -202,8 +205,8 @@ local function push_descriptor_field(ctx, out_fields, desc_tid, fe)
     local out_name_id = fe.name_id
     if key_tid then
         local kt = ctx.types:get(key_tid)
-        if kt.tag == defs.TAG_LITERAL and kt.data[0] == LIT_STRING then
-            out_name_id = kt.data[1]
+        if kt.tag == defs.TAG_LITERAL and types_mod.lit_kind(kt) == LIT_STRING then
+            out_name_id = types_mod.lit_str_id(kt)
         end
     end
 
@@ -214,13 +217,13 @@ local function push_descriptor_field(ctx, out_fields, desc_tid, fe)
     local out_flags = 0
     if opt_tid then
         local ot = ctx.types:get(opt_tid)
-        if ot.tag == defs.TAG_LITERAL and ot.data[0] == LIT_BOOLEAN and ot.data[1] == 1 then
+        if ot.tag == defs.TAG_LITERAL and types_mod.lit_kind(ot) == LIT_BOOLEAN and types_mod.lit_bool(ot) == 1 then
             out_flags = out_flags + FLAG_OPTIONAL
         end
     end
     if ro_tid then
         local rt = ctx.types:get(ro_tid)
-        if rt.tag == defs.TAG_LITERAL and rt.data[0] == LIT_BOOLEAN and rt.data[1] == 1 then
+        if rt.tag == defs.TAG_LITERAL and types_mod.lit_kind(rt) == LIT_BOOLEAN and types_mod.lit_bool(rt) == 1 then
             out_flags = out_flags + FLAG_READONLY
         end
     end
@@ -243,16 +246,17 @@ local function collect_result_descriptors(ctx, result_tid, out)
 
     if rt.tag == TAG_TUPLE then
         -- Paren-tuple: () = drop, (D1, D2) = expand.
-        for j = rt.data[0], rt.data[0] + rt.data[1] - 1 do
+        local ts, tl = types_mod.agg_members_start(rt), types_mod.agg_members_len(rt)
+        for j = ts, ts + tl - 1 do
             out[#out + 1] = types_mod.find(ctx, ctx.lists:get(j))
         end
         return
     end
 
     if rt.tag == TAG_TABLE then
-        local fl = rt.data[1]   -- named fields count
-        local il = rt.data[3]   -- indexer list length (pairs: il/2 entries)
-        local rv = rt.data[4]   -- row var (-1 = closed)
+        local fl = types_mod.tbl_fields_len(rt)   -- named fields count
+        local il = types_mod.tbl_indexers_len(rt) -- indexer list length (pairs: il/2 entries)
+        local rv = types_mod.tbl_row_var(rt)      -- row var (-1 = closed)
         if fl == 0 and rv == -1 then
             if il == 0 then
                 -- {} (empty closed table) → brace-empty-tuple: drop the field.
@@ -261,7 +265,7 @@ local function collect_result_descriptors(ctx, result_tid, out)
                 -- { D } or { D1, D2 } → positional entries → brace-positional-tuple.
                 -- Indexer list is stored as pairs (key_type, val_type).
                 -- Each positional entry D becomes a descriptor element.
-                local is = rt.data[2]
+                local is = types_mod.tbl_indexers_start(rt)
                 local j = is + 1  -- +1: skip key type of first pair, take value type
                 while j < is + il do
                     out[#out + 1] = types_mod.find(ctx, ctx.lists:get(j))
@@ -285,7 +289,8 @@ local function expand_each_field_table(ctx, tbl_tid, fn_tid)
 
     local out_fields = {}
 
-    for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+    local fs, fl = types_mod.tbl_fields_start(tt), types_mod.tbl_fields_len(tt)
+    for i = fs, fs + fl - 1 do
         local fid = ctx.lists:get(i)
         local fe  = ctx.fields:get(fid)
         if fe.name_id >= 0 then  -- skip spreads
@@ -322,7 +327,8 @@ local function expand_each_field(ctx, arg_ids)
     -- union input -> distribute over each arm and union results
     if tt.tag == TAG_UNION then
         local arms = {}
-        for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+        local us, ul = types_mod.agg_members_start(tt), types_mod.agg_members_len(tt)
+        for i = us, us + ul - 1 do
             local member_tid = types_mod.find(ctx, ctx.lists:get(i))
             arms[#arms + 1] = expand_each_field_table(ctx, member_tid, fn_tid)
         end
@@ -363,7 +369,8 @@ local function extract_values(ctx, T_tid, ipairs_mode)
     -- TAG_UNION: distribute over each arm
     if T_t.tag == TAG_UNION then
         local members = {}
-        for i = T_t.data[0], T_t.data[0] + T_t.data[1] - 1 do
+        local us, ul = types_mod.agg_members_start(T_t), types_mod.agg_members_len(T_t)
+        for i = us, us + ul - 1 do
             local arm_tid = types_mod.find(ctx, ctx.lists:get(i))
             members[#members + 1] = extract_values(ctx, arm_tid, ipairs_mode)
         end
@@ -373,7 +380,8 @@ local function extract_values(ctx, T_tid, ipairs_mode)
 
     -- TAG_INTERSECTION: first TAG_TABLE member
     if T_t.tag == defs.TAG_INTERSECTION then
-        for i = T_t.data[0], T_t.data[0] + T_t.data[1] - 1 do
+        local is_, il_ = types_mod.agg_members_start(T_t), types_mod.agg_members_len(T_t)
+        for i = is_, is_ + il_ - 1 do
             local arm_tid = types_mod.find(ctx, ctx.lists:get(i))
             local arm_t = ctx.types:get(arm_tid)
             if arm_t.tag == TAG_TABLE then
@@ -388,11 +396,13 @@ local function extract_values(ctx, T_tid, ipairs_mode)
         return ctx.T_UNKNOWN
     end
 
+    local fs, fl = types_mod.tbl_fields_start(T_t), types_mod.tbl_fields_len(T_t)
+    local is, il = types_mod.tbl_indexers_start(T_t), types_mod.tbl_indexers_len(T_t)
     if ipairs_mode then
         -- ipairs: prefer integer indexer
-        if T_t.data[3] >= 2 then
-            local j = T_t.data[2]
-            while j < T_t.data[2] + T_t.data[3] - 1 do
+        if il >= 2 then
+            local j = is
+            while j < is + il - 1 do
                 local kt = ctx.types:get(types_mod.find(ctx, ctx.lists:get(j)))
                 if kt.tag == defs.TAG_NUMBER or kt.tag == defs.TAG_INTEGER then
                     return types_mod.find(ctx, ctx.lists:get(j + 1))
@@ -401,9 +411,9 @@ local function extract_values(ctx, T_tid, ipairs_mode)
             end
         end
         -- Positional fields: widen value types
-        if T_t.data[1] > 0 then
+        if fl > 0 then
             local val_members = {} --: { [integer]: integer }
-            for i = T_t.data[0], T_t.data[0] + T_t.data[1] - 1 do
+            for i = fs, fs + fl - 1 do
                 local fid = ctx.lists:get(i)
                 local fe  = ctx.fields:get(fid)
                 if fe.name_id >= 0 then
@@ -416,13 +426,13 @@ local function extract_values(ctx, T_tid, ipairs_mode)
         return ctx.T_UNKNOWN
     else
         -- pairs: prefer indexer value type
-        if T_t.data[3] >= 2 then
-            return types_mod.find(ctx, ctx.lists:get(T_t.data[2] + 1))
+        if il >= 2 then
+            return types_mod.find(ctx, ctx.lists:get(is + 1))
         end
         -- Named fields: widen value types
-        if T_t.data[1] > 0 then
+        if fl > 0 then
             local val_members = {} --: { [integer]: integer }
-            for i = T_t.data[0], T_t.data[0] + T_t.data[1] - 1 do
+            for i = fs, fs + fl - 1 do
                 local fid = ctx.lists:get(i)
                 local fe  = ctx.fields:get(fid)
                 if fe.name_id >= 0 then
@@ -460,16 +470,18 @@ local function extract_pairs_kv(ctx, T_tid)
         -- Non-table (any, unknown, var, etc.): return unknown, unknown
         return ctx.T_UNKNOWN, ctx.T_UNKNOWN
     end
+    local fs, fl = types_mod.tbl_fields_start(T_t), types_mod.tbl_fields_len(T_t)
+    local is, il = types_mod.tbl_indexers_start(T_t), types_mod.tbl_indexers_len(T_t)
     -- Check for an indexer
-    if T_t.data[3] >= 2 then
-        local K_tid = types_mod.find(ctx, ctx.lists:get(T_t.data[2]))
-        local V_tid = types_mod.find(ctx, ctx.lists:get(T_t.data[2] + 1))
+    if il >= 2 then
+        local K_tid = types_mod.find(ctx, ctx.lists:get(is))
+        local V_tid = types_mod.find(ctx, ctx.lists:get(is + 1))
         return K_tid, V_tid
     end
     -- No indexer: use named fields
-    if T_t.data[1] > 0 then
+    if fl > 0 then
         local val_members = {}
-        for i = T_t.data[0], T_t.data[0] + T_t.data[1] - 1 do
+        for i = fs, fs + fl - 1 do
             local fid = ctx.lists:get(i)
             local fe  = ctx.fields:get(fid)
             if fe.name_id >= 0 then  -- skip spread markers
@@ -500,10 +512,12 @@ local function extract_ipairs_v(ctx, T_tid)
     if T_t.tag ~= TAG_TABLE then
         return ctx.T_UNKNOWN
     end
+    local fs, fl = types_mod.tbl_fields_start(T_t), types_mod.tbl_fields_len(T_t)
+    local is, il = types_mod.tbl_indexers_start(T_t), types_mod.tbl_indexers_len(T_t)
     -- Look for an integer-compatible indexer
-    if T_t.data[3] >= 2 then
-        local j = T_t.data[2]
-        while j < T_t.data[2] + T_t.data[3] - 1 do
+    if il >= 2 then
+        local j = is
+        while j < is + il - 1 do
             local kt = ctx.types:get(types_mod.find(ctx, ctx.lists:get(j)))
             if kt.tag == defs.TAG_NUMBER or kt.tag == defs.TAG_INTEGER then
                 return types_mod.find(ctx, ctx.lists:get(j + 1))
@@ -514,9 +528,9 @@ local function extract_ipairs_v(ctx, T_tid)
     -- No integer indexer: try positional (named "1","2",...) fields
     -- Collect value types from all named fields (positional array entries).
     -- Widen literals so `ipairs({1,2,3})` yields v: integer, not v: 1|2|3.
-    if T_t.data[1] > 0 then
+    if fl > 0 then
         local val_members = {} --: { [integer]: integer }
-        for i = T_t.data[0], T_t.data[0] + T_t.data[1] - 1 do
+        for i = fs, fs + fl - 1 do
             local fid = ctx.lists:get(i)
             local fe  = ctx.fields:get(fid)
             if fe.name_id >= 0 then
@@ -577,8 +591,8 @@ local function expand_require(ctx, arg_ids)
     if #arg_ids ~= 1 then return ctx.T_UNKNOWN end
     local T_tid = types_mod.find(ctx, arg_ids[1])
     local T_t = ctx.types:get(T_tid)
-    if T_t.tag == TAG_LITERAL and T_t.data[0] == LIT_STRING then
-        local module_name = intern_mod.get(ctx.pool, T_t.data[1])
+    if T_t.tag == TAG_LITERAL and types_mod.lit_kind(T_t) == LIT_STRING then
+        local module_name = intern_mod.get(ctx.pool, types_mod.lit_str_id(T_t))
         if module_name then
             -- Side effect: record module name so NODE_LOCAL_STMT can populate
             -- ctx.require_sources (used by LSP go-to-def).
@@ -639,7 +653,7 @@ local function T_fingerprint(ctx, T)
     if tag == defs.TAG_NIL      then return 5 end
     if tag == defs.TAG_ANY      then return 6 end
     if tag == defs.TAG_NEVER    then return 7 end
-    if tag == TAG_NOMINAL_I     then return t.data[1] end  -- recursive: its own stable id
+    if tag == TAG_NOMINAL_I     then return types_mod.nom_identity(t) end  -- recursive: its own stable id
     return tag * 0x1000 + T  -- structural types: per-run unique, not cross-run stable
 end
 
@@ -679,7 +693,8 @@ local function expand_opaque(ctx, arg_ids, stable_id)
         if ut.tag == TAG_TABLE and t.tag == TAG_TABLE then
             local unify_mod = require("lib.type.static.unify")
             local errors_mod = require("lib.type.static.errors")
-            for i = ut.data[0], ut.data[0] + ut.data[1] - 1 do
+            local ufs, ufl = types_mod.tbl_fields_start(ut), types_mod.tbl_fields_len(ut)
+            for i = ufs, ufs + ufl - 1 do
                 local fid = ctx.lists:get(i)
                 local ufe = ctx.fields:get(fid)
                 if ufe.name_id >= 0 then
@@ -724,8 +739,8 @@ local function expand_throw(ctx, arg_ids)
         local resolved = types_mod.find(ctx, tid)
         local t = ctx.types:get(resolved)
         -- String literal arg: emit the raw string value without quotes.
-        if t.tag == TAG_LITERAL and t.data[0] == LIT_STRING then
-            local s = intern_mod.get(ctx.pool, t.data[1])
+        if t.tag == TAG_LITERAL and types_mod.lit_kind(t) == LIT_STRING then
+            local s = intern_mod.get(ctx.pool, types_mod.lit_str_id(t))
             parts[#parts + 1] = s or ""
         else
             -- Type arg: render to display form.
@@ -819,9 +834,9 @@ local function expand_pattern_return(ctx, arg_ids)
     end
     local P_tid = types_mod.find(ctx, arg_ids[1])
     local P_t = ctx.types:get(P_tid)
-    if P_t.tag == TAG_LITERAL and P_t.data[0] == LIT_STRING then
+    if P_t.tag == TAG_LITERAL and types_mod.lit_kind(P_t) == LIT_STRING then
         local pool = ctx.pool
-        local pat = intern_mod.get(pool, P_t.data[1]) or ""
+        local pat = intern_mod.get(pool, types_mod.lit_str_id(P_t)) or ""
         local n = count_pattern_captures(pat)
         if n == 0 then
             -- No captures: whole match returned as string | nil
@@ -862,8 +877,8 @@ local function expand_find_return(ctx, arg_ids)
     if #arg_ids == 1 then
         local P_tid = types_mod.find(ctx, arg_ids[1])
         local P_t = ctx.types:get(P_tid)
-        if P_t.tag == TAG_LITERAL and P_t.data[0] == LIT_STRING then
-            local pat = intern_mod.get(ctx.pool, P_t.data[1]) or ""
+        if P_t.tag == TAG_LITERAL and types_mod.lit_kind(P_t) == LIT_STRING then
+            local pat = intern_mod.get(ctx.pool, types_mod.lit_str_id(P_t)) or ""
             n = count_pattern_captures(pat)
         end
     end
