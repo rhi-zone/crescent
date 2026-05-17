@@ -144,35 +144,40 @@ local function generalize_inner(ctx, tid, level, seen)
     local tag = t.tag
 
     if tag == TAG_VAR or tag == TAG_ROWVAR then
-        if t.data[1] > level then
+        if types_mod.var_level(t) > level then
             t.flags = FLAG_GENERIC
         end
         return
     end
 
     if tag == TAG_FUNCTION then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ps, pl = types_mod.fn_params_start(t), types_mod.fn_params_len(t)
+        for i = ps, ps + pl - 1 do
             generalize_inner(ctx, ctx.lists:get(i), level, seen)
         end
-        for i = t.data[2], t.data[2] + t.data[3] - 1 do
+        local rs, rl = types_mod.fn_returns_start(t), types_mod.fn_returns_len(t)
+        for i = rs, rs + rl - 1 do
             generalize_inner(ctx, ctx.lists:get(i), level, seen)
         end
-        if t.data[4] >= 0 then
-            generalize_inner(ctx, t.data[4], level, seen)
+        local va = types_mod.fn_vararg(t)
+        if va >= 0 then
+            generalize_inner(ctx, va, level, seen)
         end
         return
     end
 
     if tag == TAG_TABLE then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local fs, fl = types_mod.tbl_fields_start(t), types_mod.tbl_fields_len(t)
+        for i = fs, fs + fl - 1 do
             local fe = ctx.fields:get(ctx.lists:get(i))
             generalize_inner(ctx, fe.type_id, level, seen)
         end
-        local is, il = t.data[2], t.data[3]
+        local is, il = types_mod.tbl_indexers_start(t), types_mod.tbl_indexers_len(t)
         for i = is, is + il - 1 do
             generalize_inner(ctx, ctx.lists:get(i), level, seen)
         end
-        for i = t.data[5], t.data[5] + t.data[6] - 1 do
+        local ms, ml = types_mod.tbl_meta_start(t), types_mod.tbl_meta_len(t)
+        for i = ms, ms + ml - 1 do
             local fe = ctx.fields:get(ctx.lists:get(i))
             generalize_inner(ctx, fe.type_id, level, seen)
         end
@@ -180,20 +185,22 @@ local function generalize_inner(ctx, tid, level, seen)
     end
 
     if tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ms, ml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
+        for i = ms, ms + ml - 1 do
             generalize_inner(ctx, ctx.lists:get(i), level, seen)
         end
         return
     end
 
     if tag == TAG_SPREAD then
-        generalize_inner(ctx, t.data[0], level, seen)
+        generalize_inner(ctx, types_mod.spread_inner(t), level, seen)
         return
     end
 
     if tag == defs.TAG_TYPE_CALL then
-        generalize_inner(ctx, t.data[0], level, seen)
-        for i = t.data[1], t.data[1] + t.data[2] - 1 do
+        generalize_inner(ctx, types_mod.tycall_callee(t), level, seen)
+        local as, al = types_mod.tycall_args_start(t), types_mod.tycall_args_len(t)
+        for i = as, as + al - 1 do
             generalize_inner(ctx, ctx.lists:get(i), level, seen)
         end
         return
@@ -222,56 +229,65 @@ local function has_generic_var(ctx, tid, seen)
     if seen[tid] then return false end
     seen[tid] = true
     if tag == TAG_FUNCTION then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ps, pl = types_mod.fn_params_start(t), types_mod.fn_params_len(t)
+        for i = ps, ps + pl - 1 do
             if has_generic_var(ctx, ctx.lists:get(i), seen) then return true end
         end
-        for i = t.data[2], t.data[2] + t.data[3] - 1 do
+        local rs, rl = types_mod.fn_returns_start(t), types_mod.fn_returns_len(t)
+        for i = rs, rs + rl - 1 do
             if has_generic_var(ctx, ctx.lists:get(i), seen) then return true end
         end
-        if t.data[4] >= 0 and has_generic_var(ctx, t.data[4], seen) then return true end
+        local va = types_mod.fn_vararg(t)
+        if va >= 0 and has_generic_var(ctx, va, seen) then return true end
         return false
     end
     if tag == TAG_TABLE then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local fs, fl = types_mod.tbl_fields_start(t), types_mod.tbl_fields_len(t)
+        for i = fs, fs + fl - 1 do
             local fe = ctx.fields:get(ctx.lists:get(i))
             if has_generic_var(ctx, fe.type_id, seen) then return true end
         end
-        if t.data[4] >= 0 and has_generic_var(ctx, t.data[4], seen) then return true end
-        for j = t.data[5], t.data[5] + t.data[6] - 1 do
+        local rv = types_mod.tbl_row_var(t)
+        if rv >= 0 and has_generic_var(ctx, rv, seen) then return true end
+        local ms, ml = types_mod.tbl_meta_start(t), types_mod.tbl_meta_len(t)
+        for j = ms, ms + ml - 1 do
             local fe = ctx.fields:get(ctx.lists:get(j))
             if has_generic_var(ctx, fe.type_id, seen) then return true end
         end
         return false
     end
     if tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ms, ml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
+        for i = ms, ms + ml - 1 do
             if has_generic_var(ctx, ctx.lists:get(i), seen) then return true end
         end
         return false
     end
     if tag == defs.TAG_SPREAD then
-        return has_generic_var(ctx, t.data[0], seen)
+        return has_generic_var(ctx, types_mod.spread_inner(t), seen)
     end
     -- TAG_TYPE_CALL: callee + args list (e.g. $Require<T>, PairsReturn<T>)
     if tag == defs.TAG_TYPE_CALL then
-        if has_generic_var(ctx, t.data[0], seen) then return true end
-        for i = t.data[1], t.data[1] + t.data[2] - 1 do
+        if has_generic_var(ctx, types_mod.tycall_callee(t), seen) then return true end
+        local as, al = types_mod.tycall_args_start(t), types_mod.tycall_args_len(t)
+        for i = as, as + al - 1 do
             if has_generic_var(ctx, ctx.lists:get(i), seen) then return true end
         end
         return false
     end
     -- TAG_MATCH_TYPE: subject + arms pairs
     if tag == defs.TAG_MATCH_TYPE then
-        if has_generic_var(ctx, t.data[0], seen) then return true end
-        for i = t.data[1], t.data[1] + t.data[2] - 1 do
+        if has_generic_var(ctx, types_mod.match_param(t), seen) then return true end
+        local as, al = types_mod.match_arms_start(t), types_mod.match_arms_len(t)
+        for i = as, as + al - 1 do
             if has_generic_var(ctx, ctx.lists:get(i), seen) then return true end
         end
         return false
     end
     -- TAG_INDEX_TYPE: subject + key
     if tag == defs.TAG_INDEX_TYPE then
-        if has_generic_var(ctx, t.data[0], seen) then return true end
-        if has_generic_var(ctx, t.data[1], seen) then return true end
+        if has_generic_var(ctx, types_mod.index_subject(t), seen) then return true end
+        if has_generic_var(ctx, types_mod.index_key(t), seen) then return true end
         return false
     end
     return false
@@ -309,22 +325,25 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
     end
 
     if tag == TAG_FUNCTION then
+        local ps, pl = types_mod.fn_params_start(t), types_mod.fn_params_len(t)
         local params = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        for i = ps, ps + pl - 1 do
             params[#params + 1] = instantiate_inner(ctx, ctx.lists:get(i), level, mapping, seen)
         end
+        local rs, rl = types_mod.fn_returns_start(t), types_mod.fn_returns_len(t)
         local returns = {}
-        for i = t.data[2], t.data[2] + t.data[3] - 1 do
+        for i = rs, rs + rl - 1 do
             returns[#returns + 1] = instantiate_inner(ctx, ctx.lists:get(i), level, mapping, seen)
         end
-        local vararg_id = t.data[4]
+        local vararg_id = types_mod.fn_vararg(t)
         if vararg_id >= 0 then
             vararg_id = instantiate_inner(ctx, vararg_id, level, mapping, seen)
         end
         local param_name_ids = nil
-        if t.data[6] > 0 then
+        local pns, pnl = types_mod.fn_param_names_start(t), types_mod.fn_param_names_len(t)
+        if pnl > 0 then
             param_name_ids = {}
-            for i = t.data[5], t.data[5] + t.data[6] - 1 do
+            for i = pns, pns + pnl - 1 do
                 param_name_ids[#param_name_ids + 1] = ctx.lists:get(i)
             end
         end
@@ -336,13 +355,13 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
         -- Snapshot all needed type data BEFORE any arena-modifying operations.
         -- make_table / make_field / instantiate_inner can all grow ctx.types or
         -- ctx.fields, invalidating any FFI pointer previously obtained via :get().
-        local fields_start   = t.data[0]
-        local fields_len     = t.data[1]
-        local indexers_start = t.data[2]
-        local indexers_len   = t.data[3]
-        local row_var_orig   = t.data[4]
-        local meta_start     = t.data[5]
-        local meta_len       = t.data[6]
+        local fields_start   = types_mod.tbl_fields_start(t)
+        local fields_len     = types_mod.tbl_fields_len(t)
+        local indexers_start = types_mod.tbl_indexers_start(t)
+        local indexers_len   = types_mod.tbl_indexers_len(t)
+        local row_var_orig   = types_mod.tbl_row_var(t)
+        local meta_start     = types_mod.tbl_meta_start(t)
+        local meta_len       = types_mod.tbl_meta_len(t)
 
         -- Pre-register to handle cycles (make_table can grow ctx.types, invalidating t)
         local result_id = types_mod.make_table(ctx, {}, {}, -1, {})
@@ -381,13 +400,13 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
                 -- Meta-spread placeholder: instantiate inner, then expand if now concrete.
                 local new_sp_inner = instantiate_inner(ctx, fe_type_id, level, mapping, seen)
                 local sp_t   = ctx.types:get(types_mod.find(ctx, new_sp_inner))
-                local exp_id = types_mod.find(ctx, sp_t.data[0])
+                local exp_id = types_mod.find(ctx, types_mod.spread_inner(sp_t))
                 local exp_t  = ctx.types:get(exp_id)
                 if exp_t.tag == TAG_TABLE then
                     -- Copy meta slots from the resolved type.
                     -- Snapshot exp_t bounds before the loop (make_field can grow ctx.types).
-                    local exp_ms = exp_t.data[5]
-                    local exp_ml = exp_t.data[6]
+                    local exp_ms = types_mod.tbl_meta_start(exp_t)
+                    local exp_ml = types_mod.tbl_meta_len(exp_t)
                     for k = exp_ms, exp_ms + exp_ml - 1 do
                         local inner_fid = ctx.lists:get(k)
                         local inner_fe  = ctx.fields:get(inner_fid)
@@ -424,6 +443,8 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
         -- Re-fetch both pointers after make_table (arena may have grown)
         local nrt = ctx.types:get(new_result)
         local rrt = ctx.types:get(result_id)
+        -- Polymorphic clone across all 7 data slots (raw copy regardless of tag).
+        -- Per migration plan §6 risk #1: not a per-tag access, no accessor applies.
         for k = 0, 6 do rrt.data[k] = nrt.data[k] end
         -- result_id now has correct data; new_result is orphaned (harmless)
         seen[tid] = nil  -- clean up
@@ -431,40 +452,44 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
     end
 
     if tag == TAG_UNION then
+        local ms, ml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
         local members = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        for i = ms, ms + ml - 1 do
             members[#members + 1] = instantiate_inner(ctx, ctx.lists:get(i), level, mapping, seen)
         end
         return types_mod.make_union(ctx, members)
     end
 
     if tag == TAG_INTERSECTION then
+        local ms, ml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
         local members = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        for i = ms, ms + ml - 1 do
             members[#members + 1] = instantiate_inner(ctx, ctx.lists:get(i), level, mapping, seen)
         end
         return types_mod.make_intersection(ctx, members)
     end
 
     if tag == TAG_TUPLE then
+        local ms, ml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
         local elems = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        for i = ms, ms + ml - 1 do
             elems[#elems + 1] = instantiate_inner(ctx, ctx.lists:get(i), level, mapping, seen)
         end
         return types_mod.make_tuple(ctx, elems)
     end
 
     if tag == TAG_SPREAD then
-        local inner = instantiate_inner(ctx, t.data[0], level, mapping, seen)
+        local inner = instantiate_inner(ctx, types_mod.spread_inner(t), level, mapping, seen)
         local id = types_mod.alloc_type(ctx, defs.TAG_SPREAD)
         ctx.types:get(id).data[0] = inner
         return id
     end
 
     if tag == defs.TAG_TYPE_CALL then
-        local callee = instantiate_inner(ctx, t.data[0], level, mapping, seen)
+        local callee = instantiate_inner(ctx, types_mod.tycall_callee(t), level, mapping, seen)
+        local cas, cal = types_mod.tycall_args_start(t), types_mod.tycall_args_len(t)
         local new_args = {}
-        for i = t.data[1], t.data[1] + t.data[2] - 1 do
+        for i = cas, cas + cal - 1 do
             new_args[#new_args + 1] = instantiate_inner(ctx, ctx.lists:get(i), level, mapping, seen)
         end
         local mk = ctx.lists:mark()
@@ -481,9 +506,9 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
     -- bound match types are replaced by their fresh TVs.  Arms are also instantiated
     -- to propagate any generic TVs that appear in result types.
     if tag == defs.TAG_MATCH_TYPE then
-        local new_param = instantiate_inner(ctx, t.data[0], level, mapping, seen)
+        local new_param = instantiate_inner(ctx, types_mod.match_param(t), level, mapping, seen)
         local new_arms = {}
-        local as, al = t.data[1], t.data[2]
+        local as, al = types_mod.match_arms_start(t), types_mod.match_arms_len(t)
         local i = as
         while i < as + al - 1 do
             new_arms[#new_arms + 1] = instantiate_inner(ctx, ctx.lists:get(i),     level, mapping, seen)
@@ -503,8 +528,8 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
     -- TAG_INDEX_TYPE: instantiate subject and key. Eager evaluation happens in
     -- substitute_inner once concrete types are bound.
     if tag == defs.TAG_INDEX_TYPE then
-        local new_subj = instantiate_inner(ctx, t.data[0], level, mapping, seen)
-        local new_key  = instantiate_inner(ctx, t.data[1], level, mapping, seen)
+        local new_subj = instantiate_inner(ctx, types_mod.index_subject(t), level, mapping, seen)
+        local new_key  = instantiate_inner(ctx, types_mod.index_key(t), level, mapping, seen)
         local id = types_mod.alloc_type(ctx, defs.TAG_INDEX_TYPE)
         local it = ctx.types:get(id)
         it.data[0] = new_subj
@@ -549,7 +574,7 @@ function M.collect_rank_n_generics(ctx, callee_tid)
     callee_tid = types_mod.find(ctx, callee_tid)
     local t = ctx.types:get(callee_tid)
     if t.tag == defs.TAG_NOMINAL then
-        callee_tid = types_mod.find(ctx, t.data[2])
+        callee_tid = types_mod.find(ctx, types_mod.nom_underlying(t))
         t = ctx.types:get(callee_tid)
     end
     if t.tag ~= TAG_FUNCTION then return result end
@@ -568,21 +593,27 @@ function M.collect_rank_n_generics(ctx, callee_tid)
         slot_tid = types_mod.find(ctx, slot_tid)
         local st = ctx.types:get(slot_tid)
         if st.tag == defs.TAG_NOMINAL then
-            slot_tid = types_mod.find(ctx, st.data[2])
+            slot_tid = types_mod.find(ctx, types_mod.nom_underlying(st))
             st = ctx.types:get(slot_tid)
         end
         if st.tag == TAG_FUNCTION then return end
         M.instantiate(ctx, slot_tid, ctx.scope.level, top_map)
     end
-    for i = t.data[0], t.data[0] + t.data[1] - 1 do consider_top_slot(ctx.lists:get(i)) end
-    for i = t.data[2], t.data[2] + t.data[3] - 1 do consider_top_slot(ctx.lists:get(i)) end
-    if t.data[4] >= 0 then consider_top_slot(t.data[4]) end
+    local ps, pl = types_mod.fn_params_start(t), types_mod.fn_params_len(t)
+    for i = ps, ps + pl - 1 do consider_top_slot(ctx.lists:get(i)) end
+    local rs, rl = types_mod.fn_returns_start(t), types_mod.fn_returns_len(t)
+    for i = rs, rs + rl - 1 do consider_top_slot(ctx.lists:get(i)) end
+    local va = types_mod.fn_vararg(t)
+    if va >= 0 then consider_top_slot(va) end
 
     for orig_tv in pairs(all_map) do
         if not top_map[orig_tv] then
             local ot = ctx.types:get(orig_tv)
             if (ot.tag == TAG_VAR or ot.tag == TAG_ROWVAR)
                 and ot.flags == FLAG_GENERIC
+                -- ot.data[3]: undocumented skolem name_id slot on TAG_VAR
+                -- (annotation-introduced TVs have name_id > 0; HM-generalized
+                -- TVs have 0). No typed accessor exists; kept direct.
                 and ot.data[3] > 0 then
                 result[orig_tv] = true
             end
@@ -606,6 +637,8 @@ function M.skolemize_return_for_rank_n(ctx, ret_tid)
     local has_ann_gen = false
     for tv_id in pairs(probe) do
         local nt = ctx.types:get(tv_id)
+        -- nt.data[3]: undocumented skolem name_id slot on TAG_VAR (see
+        -- collect_rank_n_generics above for the slot description). No accessor.
         if (nt.tag == TAG_VAR or nt.tag == TAG_ROWVAR)
             and nt.flags == FLAG_GENERIC
             and nt.data[3] > 0 then
@@ -617,6 +650,8 @@ function M.skolemize_return_for_rank_n(ctx, ret_tid)
     local skolem_tid, mapping = M.instantiate(ctx, ret_tid, ctx.scope.level)
     for orig_tv, fresh_tv in pairs(mapping) do
         local ot = ctx.types:get(orig_tv)
+        -- ot.data[3] / ft.data[3]: undocumented skolem name_id slot (read +
+        -- propagate to the freshly-skolemized TV). No accessor.
         if ot.data[3] > 0 then
             local ft = ctx.types:get(fresh_tv)
             ft.flags = defs.FLAG_SKOLEM
@@ -645,9 +680,9 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
 
     -- TAG_NAMED: check if name matches a substitution
     if tag == defs.TAG_NAMED then
-        local name_id = t.data[0]
+        local name_id = types_mod.named_name_id(t)
         local repl = mapping[name_id]
-        if repl ~= nil and t.data[2] == 0 then  -- no args
+        if repl ~= nil and types_mod.named_args_len(t) == 0 then  -- no args
             seen[tid] = nil
             return repl
         end
@@ -656,22 +691,25 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     end
 
     if tag == TAG_FUNCTION then
+        local ps, pl = types_mod.fn_params_start(t), types_mod.fn_params_len(t)
         local params = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        for i = ps, ps + pl - 1 do
             params[#params + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
         end
+        local rs, rl = types_mod.fn_returns_start(t), types_mod.fn_returns_len(t)
         local returns = {}
-        for i = t.data[2], t.data[2] + t.data[3] - 1 do
+        for i = rs, rs + rl - 1 do
             returns[#returns + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
         end
-        local vararg_id = t.data[4]
+        local vararg_id = types_mod.fn_vararg(t)
         if vararg_id >= 0 then
             vararg_id = substitute_inner(ctx, vararg_id, mapping, seen, eval_seen)
         end
         local param_name_ids = nil
-        if t.data[6] > 0 then
+        local pns, pnl = types_mod.fn_param_names_start(t), types_mod.fn_param_names_len(t)
+        if pnl > 0 then
             param_name_ids = {}
-            for i = t.data[5], t.data[5] + t.data[6] - 1 do
+            for i = pns, pns + pnl - 1 do
                 param_name_ids[#param_name_ids + 1] = ctx.lists:get(i)
             end
         end
@@ -690,17 +728,19 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                 field_pos[name_id] = #new_field_ids
             end
         end
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local tfs, tfl = types_mod.tbl_fields_start(t), types_mod.tbl_fields_len(t)
+        for i = tfs, tfs + tfl - 1 do
             local fid = ctx.lists:get(i)
             local fe = ctx.fields:get(fid)
             if fe.name_id == -1 then
                 -- Spread placeholder: substitute inner, then expand if now concrete.
                 local new_sp = substitute_inner(ctx, fe.type_id, mapping, seen, eval_seen)
                 local sp_t   = ctx.types:get(types_mod.find(ctx, new_sp))
-                local exp_id = types_mod.find(ctx, sp_t.data[0])
+                local exp_id = types_mod.find(ctx, types_mod.spread_inner(sp_t))
                 local exp_t  = ctx.types:get(exp_id)
                 if exp_t.tag == TAG_TABLE then
-                    for j = exp_t.data[0], exp_t.data[0] + exp_t.data[1] - 1 do
+                    local efs, efl = types_mod.tbl_fields_start(exp_t), types_mod.tbl_fields_len(exp_t)
+                    for j = efs, efs + efl - 1 do
                         local inner_fid = ctx.lists:get(j)
                         local inner_fe  = ctx.fields:get(inner_fid)
                         local copied = types_mod.make_field(ctx, inner_fe.name_id, inner_fe.type_id, inner_fe.flags)
@@ -711,8 +751,8 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                     --   { ...(A | B), k: V } → { ...A, k: V } | { ...B, k: V }
                     -- This is true union distribution: each arm gets its own table,
                     -- not a single table with unioned field types.
-                    local arms_start = exp_t.data[0]
-                    local arms_len   = exp_t.data[1]
+                    local arms_start = types_mod.agg_members_start(exp_t)
+                    local arms_len   = types_mod.agg_members_len(exp_t)
                     local all_tables = true
                     for k = arms_start, arms_start + arms_len - 1 do
                         local arm_t = ctx.types:get(types_mod.find(ctx, ctx.lists:get(k)))
@@ -722,7 +762,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                         -- Build indexers and meta once — they are shared across all union arms.
                         local dist_indexers = {}
                         do
-                            local is2, il2 = t.data[2], t.data[3]
+                            local is2, il2 = types_mod.tbl_indexers_start(t), types_mod.tbl_indexers_len(t)
                             local j = is2
                             while j < is2 + il2 - 1 do
                                 dist_indexers[#dist_indexers + 1] = substitute_inner(ctx, ctx.lists:get(j),     mapping, seen, eval_seen)
@@ -732,16 +772,18 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                         end
                         local dist_meta = {}
                         do
-                            for j = t.data[5], t.data[5] + t.data[6] - 1 do
+                            local tms, tml = types_mod.tbl_meta_start(t), types_mod.tbl_meta_len(t)
+                            for j = tms, tms + tml - 1 do
                                 local mfid = ctx.lists:get(j)
                                 local mfe  = ctx.fields:get(mfid)
                                 if mfe.name_id == -1 then
                                     local new_msp  = substitute_inner(ctx, mfe.type_id, mapping, seen, eval_seen)
                                     local msp_t    = ctx.types:get(types_mod.find(ctx, new_msp))
-                                    local mexp_id  = types_mod.find(ctx, msp_t.data[0])
+                                    local mexp_id  = types_mod.find(ctx, types_mod.spread_inner(msp_t))
                                     local mexp_t   = ctx.types:get(mexp_id)
                                     if mexp_t.tag == TAG_TABLE then
-                                        for mk = mexp_t.data[5], mexp_t.data[5] + mexp_t.data[6] - 1 do
+                                        local mems, meml = types_mod.tbl_meta_start(mexp_t), types_mod.tbl_meta_len(mexp_t)
+                                        for mk = mems, mems + meml - 1 do
                                             local mife = ctx.fields:get(ctx.lists:get(mk))
                                             if mife.name_id >= 0 then
                                                 dist_meta[#dist_meta + 1] = types_mod.make_field(ctx, mife.name_id, mife.type_id, mife.flags)
@@ -783,22 +825,24 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                                 end
                             end
                             -- Expand this arm's spread fields
-                            for j = arm_t2.data[0], arm_t2.data[0] + arm_t2.data[1] - 1 do
+                            local afs, afl = types_mod.tbl_fields_start(arm_t2), types_mod.tbl_fields_len(arm_t2)
+                            for j = afs, afs + afl - 1 do
                                 local inner_fe = ctx.fields:get(ctx.lists:get(j))
                                 if inner_fe.name_id ~= -1 then
                                     add_af(types_mod.make_field(ctx, inner_fe.name_id, inner_fe.type_id, inner_fe.flags), inner_fe.name_id)
                                 end
                             end
                             -- Process remaining fields after this spread position
-                            for fi = i + 1, t.data[0] + t.data[1] - 1 do
+                            for fi = i + 1, tfs + tfl - 1 do
                                 local rfe = ctx.fields:get(ctx.lists:get(fi))
                                 if rfe.name_id == -1 then
                                     local r_new_sp = substitute_inner(ctx, rfe.type_id, mapping, seen, eval_seen)
                                     local r_sp_t   = ctx.types:get(types_mod.find(ctx, r_new_sp))
-                                    local r_exp_id = types_mod.find(ctx, r_sp_t.data[0])
+                                    local r_exp_id = types_mod.find(ctx, types_mod.spread_inner(r_sp_t))
                                     local r_exp_t  = ctx.types:get(r_exp_id)
                                     if r_exp_t.tag == TAG_TABLE then
-                                        for j2 = r_exp_t.data[0], r_exp_t.data[0] + r_exp_t.data[1] - 1 do
+                                        local refs, refl = types_mod.tbl_fields_start(r_exp_t), types_mod.tbl_fields_len(r_exp_t)
+                                        for j2 = refs, refs + refl - 1 do
                                             local rife = ctx.fields:get(ctx.lists:get(j2))
                                             if rife.name_id ~= -1 then
                                                 add_af(types_mod.make_field(ctx, rife.name_id, rife.type_id, rife.flags), rife.name_id)
@@ -812,7 +856,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                                     add_af(types_mod.make_field(ctx, rfe.name_id, r_new_type, band(rfe.flags, defs.FLAG_OPTIONAL) ~= 0), rfe.name_id)
                                 end
                             end
-                            union_members[#union_members + 1] = types_mod.make_table(ctx, arm_fids, dist_indexers, t.data[4], dist_meta)
+                            union_members[#union_members + 1] = types_mod.make_table(ctx, arm_fids, dist_indexers, types_mod.tbl_row_var(t), dist_meta)
                         end
                         return types_mod.make_union(ctx, union_members)
                     else
@@ -829,7 +873,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
             end
         end
         local new_indexers = {}
-        local is, il = t.data[2], t.data[3]
+        local is, il = types_mod.tbl_indexers_start(t), types_mod.tbl_indexers_len(t)
         local i = is
         while i < is + il - 1 do
             new_indexers[#new_indexers + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
@@ -837,18 +881,20 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
             i = i + 2
         end
         local new_meta = {}
-        for j = t.data[5], t.data[5] + t.data[6] - 1 do
+        local tms, tml = types_mod.tbl_meta_start(t), types_mod.tbl_meta_len(t)
+        for j = tms, tms + tml - 1 do
             local fid = ctx.lists:get(j)
             local fe = ctx.fields:get(fid)
             if fe.name_id == -1 then
                 -- Meta-spread placeholder: substitute inner, then expand if now concrete.
                 local new_sp = substitute_inner(ctx, fe.type_id, mapping, seen, eval_seen)
                 local sp_t   = ctx.types:get(types_mod.find(ctx, new_sp))
-                local exp_id = types_mod.find(ctx, sp_t.data[0])
+                local exp_id = types_mod.find(ctx, types_mod.spread_inner(sp_t))
                 local exp_t  = ctx.types:get(exp_id)
                 if exp_t.tag == TAG_TABLE then
                     -- Copy meta slots from the resolved type
-                    for k = exp_t.data[5], exp_t.data[5] + exp_t.data[6] - 1 do
+                    local ems, eml = types_mod.tbl_meta_start(exp_t), types_mod.tbl_meta_len(exp_t)
+                    for k = ems, ems + eml - 1 do
                         local inner_fid = ctx.lists:get(k)
                         local inner_fe  = ctx.fields:get(inner_fid)
                         if inner_fe.name_id >= 0 then
@@ -865,12 +911,13 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
             end
         end
         seen[tid] = nil
-        return types_mod.make_table(ctx, new_field_ids, new_indexers, t.data[4], new_meta)
+        return types_mod.make_table(ctx, new_field_ids, new_indexers, types_mod.tbl_row_var(t), new_meta)
     end
 
     if tag == TAG_UNION then
+        local ms, ml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
         local members = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        for i = ms, ms + ml - 1 do
             members[#members + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
         end
         seen[tid] = nil
@@ -878,8 +925,9 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     end
 
     if tag == TAG_INTERSECTION then
+        local ms, ml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
         local members = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        for i = ms, ms + ml - 1 do
             members[#members + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
         end
         seen[tid] = nil
@@ -887,8 +935,9 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     end
 
     if tag == TAG_TUPLE then
+        local ms, ml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
         local new_elems = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        for i = ms, ms + ml - 1 do
             local elem_tid = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
             local elem_t   = ctx.types:get(types_mod.find(ctx, elem_tid))
             if elem_t.tag == TAG_SPREAD then
@@ -896,11 +945,12 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                 -- (A, ...R) with R=tuple(X,Y) → (A, X, Y); (A, ...never) → (A)
                 -- If the inner type is still unresolved (TAG_NAMED or TAG_VAR), keep the
                 -- TAG_SPREAD in the element list so a later substitution pass can splice it.
-                local inner_tid = types_mod.find(ctx, elem_t.data[0])
+                local inner_tid = types_mod.find(ctx, types_mod.spread_inner(elem_t))
                 local inner_t   = ctx.types:get(inner_tid)
                 if inner_t.tag == TAG_TUPLE then
                     -- Multi-return tuple: splice all elements in-place
-                    for j = inner_t.data[0], inner_t.data[0] + inner_t.data[1] - 1 do
+                    local ims, iml = types_mod.agg_members_start(inner_t), types_mod.agg_members_len(inner_t)
+                    for j = ims, ims + iml - 1 do
                         new_elems[#new_elems + 1] = ctx.lists:get(j)
                     end
                 elseif inner_t.tag == TAG_VAR or inner_t.tag == TAG_ROWVAR
@@ -921,7 +971,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     end
 
     if tag == TAG_SPREAD then
-        local inner = substitute_inner(ctx, t.data[0], mapping, seen, eval_seen)
+        local inner = substitute_inner(ctx, types_mod.spread_inner(t), mapping, seen, eval_seen)
         seen[tid] = nil
         local id = types_mod.alloc_type(ctx, defs.TAG_SPREAD)
         ctx.types:get(id).data[0] = inner
@@ -933,7 +983,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     -- replaces the placeholder with the concrete type and then evaluates the match.
     if tag == defs.TAG_MATCH_TYPE then
         -- Substitute into the param
-        local new_param = substitute_inner(ctx, t.data[0], mapping, seen, eval_seen)
+        local new_param = substitute_inner(ctx, types_mod.match_param(t), mapping, seen, eval_seen)
         -- Substitute into each arm.
         -- Patterns: apply the full mapping so that alias params used as concrete matchers
         -- (e.g. `Keys` in `match K { Keys => ... }`) get replaced with their concrete types.
@@ -943,7 +993,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         -- Results: apply the full mapping so that references to alias params (e.g. T
         -- in `$Values<T>`) are correctly replaced with concrete types.
         local new_arms = {}
-        local as, al = t.data[1], t.data[2]
+        local as, al = types_mod.match_arms_start(t), types_mod.match_arms_len(t)
         local i = as
         -- Set _in_match_arm_subst so that $Throw in result expressions is
         -- deferred (not evaluated eagerly). The throw should only fire when
@@ -988,8 +1038,8 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     -- TAG_INDEX_TYPE node so a future substitution can finish the job.
     -- Mirrors the deferred TAG_MATCH_TYPE pattern above.
     if tag == defs.TAG_INDEX_TYPE then
-        local new_subj = substitute_inner(ctx, t.data[0], mapping, seen, eval_seen)
-        local new_key  = substitute_inner(ctx, t.data[1], mapping, seen, eval_seen)
+        local new_subj = substitute_inner(ctx, types_mod.index_subject(t), mapping, seen, eval_seen)
+        local new_key  = substitute_inner(ctx, types_mod.index_key(t), mapping, seen, eval_seen)
         seen[tid] = nil
         local rs = types_mod.find(ctx, new_subj)
         local rk = types_mod.find(ctx, new_key)
@@ -1022,9 +1072,10 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     -- Substitute through callee and args so that when F is replaced by a concrete
     -- type constructor (e.g. Maybe), the application can be evaluated later.
     if tag == defs.TAG_TYPE_CALL then
-        local callee_id = substitute_inner(ctx, t.data[0], mapping, seen, eval_seen)
+        local callee_id = substitute_inner(ctx, types_mod.tycall_callee(t), mapping, seen, eval_seen)
+        local cas, cal = types_mod.tycall_args_start(t), types_mod.tycall_args_len(t)
         local new_args = {}
-        for i = t.data[1], t.data[1] + t.data[2] - 1 do
+        for i = cas, cas + cal - 1 do
             new_args[#new_args + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
         end
         seen[tid] = nil
@@ -1061,13 +1112,13 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
             -- It should only fire when its arm is actually taken by match.evaluate.
             -- When _in_match_arm_subst is true, leave $Throw as a deferred TAG_TYPE_CALL
             -- so match.evaluate can fire it after confirming the arm is selected.
-            local intr_name = require("lib.type.static.intern").get(ctx.pool, ct.data[0]) or ""
+            local intr_name = require("lib.type.static.intern").get(ctx.pool, types_mod.intrinsic_name_id(ct)) or ""
             local defer_throw = intr_name == "Throw" and ctx._in_match_arm_subst
             if not defer_throw then
                 local has_unresolved = false
                 for _, aid in ipairs(new_args) do
                     local at2 = ctx.types:get(types_mod.find(ctx, aid))
-                    if at2.tag == defs.TAG_NAMED and mapping[at2.data[0]] ~= nil then
+                    if at2.tag == defs.TAG_NAMED and mapping[types_mod.named_name_id(at2)] ~= nil then
                         has_unresolved = true
                         break
                     end
@@ -1079,8 +1130,10 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                 if not has_unresolved then
                     local intrinsic_mod = require("lib.type.static.intrinsic")
                     -- t.data[3]: stable call-site hash stored by constrain.lua when
-                    -- creating this deferred TAG_TYPE_CALL. 0 = legacy/not set.
-                    return intrinsic_mod.expand(ctx, ct.data[0], new_args, t.data[3]) --[[:! integer]]
+                    -- creating this deferred TAG_TYPE_CALL. Undocumented slot on
+                    -- TAG_TYPE_CALL (layout doc covers data[0..2]); no accessor.
+                    -- 0 = legacy/not set.
+                    return intrinsic_mod.expand(ctx, types_mod.intrinsic_name_id(ct), new_args, t.data[3]) --[[:! integer]]
                 end
             end
         end
@@ -1091,7 +1144,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
             local has_unresolved = false
             for _, aid in ipairs(new_args) do
                 local at2 = ctx.types:get(types_mod.find(ctx, aid))
-                if at2.tag == defs.TAG_NAMED and mapping[at2.data[0]] ~= nil then
+                if at2.tag == defs.TAG_NAMED and mapping[types_mod.named_name_id(at2)] ~= nil then
                     has_unresolved = true
                     break
                 end
@@ -1101,7 +1154,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                 end
             end
             if not has_unresolved then
-                local resolved = M.resolve_named_type(ctx, ctx.scope, ct.data[0], new_args)
+                local resolved = M.resolve_named_type(ctx, ctx.scope, types_mod.named_name_id(ct), new_args)
                 if resolved then return resolved or 0 end
             end
         end
@@ -1122,8 +1175,10 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     -- attempt to re-evaluate via resolve_named_type (which may produce a fully-resolved
     -- type, another TAG_PARTIAL_APP, or a concrete result).
     if tag == defs.TAG_PARTIAL_APP then
+        local pname_id = types_mod.partial_name_id(t)
+        local pas, pal = types_mod.partial_args_start(t), types_mod.partial_args_len(t)
         local new_partial_args = {}
-        for i = t.data[1], t.data[1] + t.data[2] - 1 do
+        for i = pas, pas + pal - 1 do
             new_partial_args[#new_partial_args + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
         end
         seen[tid] = nil
@@ -1131,7 +1186,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         local has_unresolved = false
         for _, aid in ipairs(new_partial_args) do
             local at2 = ctx.types:get(types_mod.find(ctx, aid))
-            if at2.tag == defs.TAG_NAMED and mapping[at2.data[0]] ~= nil then
+            if at2.tag == defs.TAG_NAMED and mapping[types_mod.named_name_id(at2)] ~= nil then
                 has_unresolved = true; break
             end
             if at2.tag == TAG_VAR or at2.tag == TAG_ROWVAR then
@@ -1140,7 +1195,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         end
         if not has_unresolved then
             -- Try to re-evaluate with the now-concrete args
-            local resolved = M.resolve_named_type(ctx, ctx.scope, t.data[0], new_partial_args)
+            local resolved = M.resolve_named_type(ctx, ctx.scope, pname_id, new_partial_args)
             if resolved then return resolved or 0 end
         end
         -- Still unresolved: rebuild the TAG_PARTIAL_APP with substituted args
@@ -1149,7 +1204,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         local ls, ll = ctx.lists:since(mk)
         local id = types_mod.alloc_type(ctx, defs.TAG_PARTIAL_APP)
         local pt = ctx.types:get(id)
-        pt.data[0] = t.data[0]  -- name_id unchanged
+        pt.data[0] = pname_id  -- name_id unchanged
         pt.data[1] = ls
         pt.data[2] = ll
         return id
