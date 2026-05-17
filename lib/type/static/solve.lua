@@ -63,6 +63,7 @@ local C_CHECK_ARGS    = constrain.C_CHECK_ARGS
 local C_OVERLAP       = constrain.C_OVERLAP
 local C_NARROW_NIL    = constrain.C_NARROW_NIL
 local C_ESCAPE_CHECK  = constrain.C_ESCAPE_CHECK
+local C_HKT_DECOMPOSE = constrain.C_HKT_DECOMPOSE
 
 local find = types_mod.find
 
@@ -3586,6 +3587,22 @@ local function emit_missing_function_signature(ctx, real_err, sev)
 end
 
 
+-- Solve C_HKT_DECOMPOSE = { C_HKT_DECOMPOSE, f_fresh, args_fresh_list,
+--                            bound_alias_tid, actual_arg_tid, line, col }
+-- Bidirectional propagation: bind F := bound_alias and pattern-match the
+-- structural actual_arg against the alias body template (with the alias's
+-- params replaced by args_fresh as fresh-arg slots). For TAG_MATCH_TYPE
+-- alias bodies, emit the explicit non-invertible-alias-body error (H6).
+-- See docs/typechecker-hkt-broader.md (Approach 2).
+-- any: constraint arrays are heterogeneous — see solve_unify comment.
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
+local function solve_hkt_decompose(ctx, c)
+    -- Stub: defer (return true so the constraint is consumed); structural
+    -- decomposition lands in the next commit.
+    return true
+end
+
+
 -- Dispatch table by constraint kind. Module-level so both M.solve and the
 -- per-function sub-solve (Phase 2 of HM-for-unannotated-params) share it.
 local _handlers --: { [integer]: ((Ctx, { [integer]: unknown, ... }) -> boolean | nil) | nil }
@@ -3606,6 +3623,7 @@ local function get_handlers()
         [C_OVERLAP]       = solve_overlap,
         [C_NARROW_NIL]    = solve_narrow_nil,
         [C_ESCAPE_CHECK]  = solve_escape_check,
+        [C_HKT_DECOMPOSE] = solve_hkt_decompose,
     }
     return _handlers
 end

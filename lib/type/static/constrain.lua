@@ -156,6 +156,15 @@ local C_NARROW_NIL    = 14  -- {C_NARROW_NIL,    input_tid, result_tid, keep_nil
 -- loop variables that depend on deferred C_BIND_GENERICS / C_INDEX).  Without
 -- this, narrowing on an unresolved TAG_VAR is a silent no-op.
 
+local C_HKT_DECOMPOSE = 16  -- {C_HKT_DECOMPOSE, f_fresh_tid, args_fresh_list, bound_alias_tid, actual_arg_tid, line, col}
+-- Higher-kinded type decomposition at a call site. Emitted when a call-site
+-- parameter slot is TAG_TYPE_CALL(F_fresh, A_fresh) and F_fresh is a fresh TV
+-- with a generic-alias bound (e.g. <F: Maybe>). Bidirectional propagation:
+-- when the actual argument is the structural expansion of bound_alias<A>, we
+-- pattern-match the actual against the alias's body template to recover the
+-- inner type arguments (binding A_fresh), and bind F_fresh := bound_alias.
+-- See docs/typechecker-hkt-broader.md (Approach 2).
+
 local C_ESCAPE_CHECK  = 15  -- {C_ESCAPE_CHECK,  ret_tid, call_id, line, col}
 -- Rank-N skolem escape check. After a call site introduces per-call skolems
 -- for nested forall quantifiers in the callee's parameter slots, verify that
@@ -179,6 +188,7 @@ M.C_CHECK_ARGS    = C_CHECK_ARGS
 M.C_OVERLAP       = C_OVERLAP
 M.C_NARROW_NIL    = C_NARROW_NIL
 M.C_ESCAPE_CHECK  = C_ESCAPE_CHECK
+M.C_HKT_DECOMPOSE = C_HKT_DECOMPOSE
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -2512,11 +2522,53 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     -- corresponding fresh TVs.  This lets solve_bound evaluate the bound once the fresh TV
     -- is bound to a concrete type, without needing to retain the original inst_mapping.
     if next(ctx._forall_bounds) and next(inst_mapping) then
+        -- Build a map: fresh_tv -> bound_alias_tid for HKT decomposition. A
+        -- fresh TV is eligible if its origin had a generic-alias bound
+        -- (TAG_NAMED whose name resolves to an alias with >=1 type param).
+        -- These are the F in `<F: Maybe>` patterns.
+        local hkt_fresh_to_bound = nil
         for orig_tv, fresh_tv in pairs(inst_mapping) do
             local bound = ctx._forall_bounds[orig_tv]
             if bound then
                 local inst_bound = env_mod.instantiate(ctx, bound, ctx.scope.level, inst_mapping)
                 emit(ctx, { C_BOUND, fresh_tv, inst_bound, n.line, n.col })
+                local bt = ctx.types:get(types_mod.find(ctx, inst_bound))
+                if bt.tag == defs.TAG_NAMED and bt.data[2] == 0 then
+                    local alias = env_mod.lookup_type(ctx.scope, bt.data[0])
+                    if alias and alias.params and #alias.params >= 1 then
+                        hkt_fresh_to_bound = hkt_fresh_to_bound or {}
+                        hkt_fresh_to_bound[fresh_tv] = inst_bound
+                    end
+                end
+            end
+        end
+
+        -- HKT decomposition: walk the instantiated callee's parameter slots
+        -- and emit C_HKT_DECOMPOSE for each top-level TAG_TYPE_CALL whose
+        -- callee is one of the HKT-bounded fresh TVs.
+        if hkt_fresh_to_bound and arg_tids then
+            local ic = ctx.types:get(inst_callee)
+            if ic.tag == TAG_FUNCTION then
+                local p_start, p_len = ic.data[0], ic.data[1]
+                for i = 0, p_len - 1 do
+                    local slot_tid = ctx.lists:get(p_start + i)
+                    local slot = ctx.types:get(types_mod.find(ctx, slot_tid))
+                    if slot.tag == defs.TAG_TYPE_CALL then
+                        local callee2 = types_mod.find(ctx, slot.data[0])
+                        local bound_alias = hkt_fresh_to_bound[callee2]
+                        if bound_alias then
+                            local args_list = {}
+                            for j = slot.data[1], slot.data[1] + slot.data[2] - 1 do
+                                args_list[#args_list + 1] = ctx.lists:get(j)
+                            end
+                            local actual_arg = arg_tids[i + 1]
+                            if actual_arg then
+                                emit(ctx, { C_HKT_DECOMPOSE, callee2, args_list,
+                                            bound_alias, actual_arg, n.line, n.col })
+                            end
+                        end
+                    end
+                end
             end
         end
         -- HM Phase 2: re-emit recorded body ops with operand TVs mapped to
