@@ -1428,7 +1428,7 @@ function M.types_overlap(ctx, a, b)
             local afe = types_mod.table_field(ctx, tbl_tid, bfe.name_id)
             if afe then
                 -- Same field in both: types must overlap (no conflict).
-                local at = find(ctx, (afe --[[:! FieldEntry]]).type_id)
+                local at = find(ctx, afe.type_id)
                 local bt = find(ctx, bfe.type_id)
                 if not M.try_unify(ctx, at, bt) and not M.try_unify(ctx, bt, at) then
                     return false  -- field type conflict: cannot have common witness

@@ -414,14 +414,14 @@ local ARITH_OPS_SET = {
 local function field_via_index_chain(ctx, tbl_tid, name_id, depth)
     if depth > 8 then return nil, nil end
     local fe = types_mod.table_field(ctx, tbl_tid, name_id)
-    if fe then return find(ctx, (fe.type_id --[[:! integer]])), (fe.flags --[[:! integer]]) end
+    if fe then return find(ctx, fe.type_id), fe.flags end
     local idx_name_id = intern_mod.intern(ctx.pool, "__index")
     -- Check #__index meta-slot first (explicit annotation), then __index named field
     -- (common runtime pattern: Proto.__index = Proto).
     local idx_fe = types_mod.table_meta_field(ctx, tbl_tid, idx_name_id)
     if not idx_fe then idx_fe = types_mod.table_field(ctx, tbl_tid, idx_name_id) end
     if not idx_fe then return nil, nil end
-    local idx_tid = find(ctx, (idx_fe.type_id --[[:! integer]]))
+    local idx_tid = find(ctx, idx_fe.type_id)
     local idx_t = ctx.types:get(idx_tid)
     if idx_t.tag == TAG_TABLE then
         return field_via_index_chain(ctx, idx_tid, name_id, depth + 1)
@@ -2235,7 +2235,7 @@ local function solve_callable(ctx, c)
                     local act_tid = arg_tids[ei + 1]
                     local ok, err = unify_mod.unify(ctx, widen_literal(ctx, act_tid), exp_slot)
                     if not ok then
-                        local err_s = err --[[:! string | nil]]
+                        local err_s = err
                         add_error(ctx, line, col,
                             "argument " .. (ei + 1) .. ": cannot pass `"
                             .. types_mod.display_short(ctx, act_tid)
@@ -2968,7 +2968,7 @@ local function solve_check_args(ctx, c)
                     local act_tid = arg_tids[ei + 1]
                     local ok, err = unify_mod.unify(ctx, widen_literal(ctx, act_tid), exp_slot)
                     if not ok then
-                        local err_s = err --[[:! string | nil]]
+                        local err_s = err
                         add_error(ctx, line, col,
                             "argument " .. (ei + 1) .. ": cannot pass `"
                             .. types_mod.display_short(ctx, act_tid)
