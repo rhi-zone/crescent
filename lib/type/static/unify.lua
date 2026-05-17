@@ -40,19 +40,20 @@ local TAG_TYPE_CALL    = defs.TAG_TYPE_CALL
 local function normalize_type_call(ctx, tid)
     local t = ctx.types:get(tid)
     if t.tag ~= TAG_TYPE_CALL then return tid end
-    local callee_tid = types_mod.find(ctx, t.data[0])
+    local callee_tid = types_mod.find(ctx, types_mod.tycall_callee(t))
     local ct = ctx.types:get(callee_tid)
     if ct.tag ~= TAG_NAMED then return tid end
     -- Collect args; bail if any is still a free TV.
     local args = {}
-    for i = t.data[1], t.data[1] + t.data[2] - 1 do
+    local as, al = types_mod.tycall_args_start(t), types_mod.tycall_args_len(t)
+    for i = as, as + al - 1 do
         local a_tid = types_mod.find(ctx, ctx.lists:get(i))
         local at = ctx.types:get(a_tid)
         if at.tag == TAG_VAR or at.tag == TAG_ROWVAR then return tid end
         args[#args + 1] = a_tid
     end
     local env_mod = require("lib.type.static.env")
-    local resolved = env_mod.resolve_named_type(ctx, ctx.scope, ct.data[0], args)
+    local resolved = env_mod.resolve_named_type(ctx, ctx.scope, types_mod.named_name_id(ct), args)
     if resolved then return resolved end
     return tid
 end
@@ -86,29 +87,34 @@ local function occurs(ctx, var_tid, tid, seen)
 
     if tag == TAG_FUNCTION then
         seen = seen or {}; seen[tid] = true
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ps, pl = types_mod.fn_params_start(t), types_mod.fn_params_len(t)
+        for i = ps, ps + pl - 1 do
             if occurs(ctx, var_tid, ctx.lists:get(i), seen) then return true end
         end
-        for i = t.data[2], t.data[2] + t.data[3] - 1 do
+        local rs, rl = types_mod.fn_returns_start(t), types_mod.fn_returns_len(t)
+        for i = rs, rs + rl - 1 do
             if occurs(ctx, var_tid, ctx.lists:get(i), seen) then return true end
         end
-        if t.data[4] >= 0 then
-            if occurs(ctx, var_tid, t.data[4], seen) then return true end
+        local va = types_mod.fn_vararg(t)
+        if va >= 0 then
+            if occurs(ctx, var_tid, va, seen) then return true end
         end
         return false
     end
 
     if tag == TAG_TABLE then
         seen = seen or {}; seen[tid] = true
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local fs, fl = types_mod.tbl_fields_start(t), types_mod.tbl_fields_len(t)
+        for i = fs, fs + fl - 1 do
             local fe = ctx.fields:get(ctx.lists:get(i))
             if occurs(ctx, var_tid, fe.type_id, seen) then return true end
         end
-        local is, il = t.data[2], t.data[3]
+        local is, il = types_mod.tbl_indexers_start(t), types_mod.tbl_indexers_len(t)
         for i = is, is + il - 1 do
             if occurs(ctx, var_tid, ctx.lists:get(i), seen) then return true end
         end
-        for i = t.data[5], t.data[5] + t.data[6] - 1 do
+        local ms, ml = types_mod.tbl_meta_start(t), types_mod.tbl_meta_len(t)
+        for i = ms, ms + ml - 1 do
             local fe = ctx.fields:get(ctx.lists:get(i))
             if occurs(ctx, var_tid, fe.type_id, seen) then return true end
         end
@@ -117,14 +123,15 @@ local function occurs(ctx, var_tid, tid, seen)
 
     if tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
         seen = seen or {}; seen[tid] = true
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ms, ml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
+        for i = ms, ms + ml - 1 do
             if occurs(ctx, var_tid, ctx.lists:get(i), seen) then return true end
         end
         return false
     end
 
     if tag == TAG_SPREAD then
-        return occurs(ctx, var_tid, t.data[0], seen or {})
+        return occurs(ctx, var_tid, types_mod.spread_inner(t), seen or {})
     end
 
     return false
@@ -139,6 +146,7 @@ local function adjust_levels(ctx, tid, max_level, seen)
     local tag = t.tag
 
     if tag == TAG_VAR or tag == TAG_ROWVAR then
+        -- Write to data[1] (var_level); no setter exists, write direct.
         if t.data[1] > max_level then t.data[1] = max_level end
         return
     end
@@ -147,28 +155,33 @@ local function adjust_levels(ctx, tid, max_level, seen)
     seen[tid] = true
 
     if tag == TAG_FUNCTION then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ps, pl = types_mod.fn_params_start(t), types_mod.fn_params_len(t)
+        for i = ps, ps + pl - 1 do
             adjust_levels(ctx, ctx.lists:get(i), max_level, seen)
         end
-        for i = t.data[2], t.data[2] + t.data[3] - 1 do
+        local rs, rl = types_mod.fn_returns_start(t), types_mod.fn_returns_len(t)
+        for i = rs, rs + rl - 1 do
             adjust_levels(ctx, ctx.lists:get(i), max_level, seen)
         end
-        if t.data[4] >= 0 then
-            adjust_levels(ctx, t.data[4], max_level, seen)
+        local va = types_mod.fn_vararg(t)
+        if va >= 0 then
+            adjust_levels(ctx, va, max_level, seen)
         end
         return
     end
 
     if tag == TAG_TABLE then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local fs, fl = types_mod.tbl_fields_start(t), types_mod.tbl_fields_len(t)
+        for i = fs, fs + fl - 1 do
             local fe = ctx.fields:get(ctx.lists:get(i))
             adjust_levels(ctx, fe.type_id, max_level, seen)
         end
-        local is, il = t.data[2], t.data[3]
+        local is, il = types_mod.tbl_indexers_start(t), types_mod.tbl_indexers_len(t)
         for i = is, is + il - 1 do
             adjust_levels(ctx, ctx.lists:get(i), max_level, seen)
         end
-        for i = t.data[5], t.data[5] + t.data[6] - 1 do
+        local ms, ml = types_mod.tbl_meta_start(t), types_mod.tbl_meta_len(t)
+        for i = ms, ms + ml - 1 do
             local fe = ctx.fields:get(ctx.lists:get(i))
             adjust_levels(ctx, fe.type_id, max_level, seen)
         end
@@ -176,7 +189,8 @@ local function adjust_levels(ctx, tid, max_level, seen)
     end
 
     if tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ms, ml = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
+        for i = ms, ms + ml - 1 do
             adjust_levels(ctx, ctx.lists:get(i), max_level, seen)
         end
         return
@@ -193,7 +207,10 @@ local function bind_var(ctx, var_tid, target_tid)
     local vt_check = ctx.types:get(var_tid)
     if band(vt_check.flags, FLAG_SKOLEM) ~= 0 then
         local intern_mod2 = require("lib.type.static.intern")
-        local var_name = intern_mod2.get(ctx.pool, vt_check.data[3]) or ("$sk" .. tostring(vt_check.data[0]))
+        -- vt_check.data[3]: skolem name_id — undocumented TAG_VAR slot (only
+        -- set for skolems); keep direct, same pattern as TAG_TYPE_CALL.data[3]
+        -- noted in d17cf651 (C7).
+        local var_name = intern_mod2.get(ctx.pool, vt_check.data[3]) or ("$sk" .. tostring(types_mod.var_id(vt_check)))
         local target_str = types_mod.display(ctx, target_tid)
         return false, "type parameter `" .. var_name .. "` is abstract (skolem) — body produces `" .. target_str .. "` which cannot unify with an abstract type parameter"
     end
@@ -206,13 +223,14 @@ local function bind_var(ctx, var_tid, target_tid)
         if tt.tag == TAG_UNION then
             --: { [integer]: integer, ... }
             local filtered = {}
-            for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+            local ms, ml = types_mod.agg_members_start(tt), types_mod.agg_members_len(tt)
+            for i = ms, ms + ml - 1 do
                 local mid = find(ctx, ctx.lists:get(i))
                 if mid ~= var_tid then
                     filtered[#filtered + 1] = mid
                 end
             end
-            if #filtered < tt.data[1] then
+            if #filtered < ml then
                 local new_ty = 0 --: integer
                 if #filtered == 0 then
                     new_ty = ctx.T_NEVER
@@ -222,7 +240,8 @@ local function bind_var(ctx, var_tid, target_tid)
                     new_ty = types_mod.make_union(ctx, filtered)
                 end
                 if not occurs(ctx, var_tid, new_ty) then
-                    adjust_levels(ctx, new_ty, ctx.types:get(var_tid).data[1])
+                    adjust_levels(ctx, new_ty, types_mod.var_level(ctx.types:get(var_tid)))
+                    -- Write to data[2] (var parent): union-find bind, no setter.
                     ctx.types:get(var_tid).data[2] = new_ty
                     return true
                 end
@@ -231,7 +250,8 @@ local function bind_var(ctx, var_tid, target_tid)
         return false, "recursive type"
     end
     local vt = ctx.types:get(var_tid)
-    adjust_levels(ctx, target_tid, vt.data[1])
+    adjust_levels(ctx, target_tid, types_mod.var_level(vt))
+    -- Write to data[2] (var parent): union-find bind, no setter.
     vt.data[2] = target_tid
     return true
 end
@@ -372,17 +392,17 @@ function M.unify(ctx, a, b, seen)
 
     -- Nominal types: identity-based
     if ta.tag == TAG_NOMINAL and tb.tag == TAG_NOMINAL then
-        if ta.data[1] == tb.data[1] then return true end
-        local na = intern_mod.get(ctx.pool, ta.data[0]) or "?"
-        local nb = intern_mod.get(ctx.pool, tb.data[0]) or "?"
+        if types_mod.nom_identity(ta) == types_mod.nom_identity(tb) then return true end
+        local na = intern_mod.get(ctx.pool, types_mod.nom_name_id(ta)) or "?"
+        local nb = intern_mod.get(ctx.pool, types_mod.nom_name_id(tb)) or "?"
         return false, "nominal type `" .. na .. "` is not `" .. nb .. "`", nil
     end
     if ta.tag == TAG_NOMINAL then
-        local na = intern_mod.get(ctx.pool, ta.data[0]) or "?"
+        local na = intern_mod.get(ctx.pool, types_mod.nom_name_id(ta)) or "?"
         return false, "nominal type `" .. na .. "` is not assignable to `" .. types_mod.display(ctx, b) .. "`", nil
     end
     if tb.tag == TAG_NOMINAL then
-        local nb = intern_mod.get(ctx.pool, tb.data[0]) or "?"
+        local nb = intern_mod.get(ctx.pool, types_mod.nom_name_id(tb)) or "?"
         return false, "`" .. types_mod.display(ctx, a) .. "` is not assignable to nominal type `" .. nb .. "`", nil
     end
 
@@ -393,18 +413,22 @@ function M.unify(ctx, a, b, seen)
     if ta.tag == TAG_ENUM_MEMBER then
         -- same enum + same member = equal
         if tb.tag == TAG_ENUM_MEMBER then
-            if ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1] then return true end
+            if types_mod.enum_name_id(ta) == types_mod.enum_name_id(tb)
+                and types_mod.enum_member_id(ta) == types_mod.enum_member_id(tb) then return true end
             return false, types_mod.display(ctx, a) .. " is not " .. types_mod.display(ctx, b), nil
         end
         -- enum member <: its base primitive type
-        local kind = ta.data[2]
+        local kind = types_mod.enum_lit_kind(ta)
         if kind == LIT_INTEGER then
             if tb.tag == TAG_INTEGER then return true end
             if tb.tag == TAG_NUMBER  then return true end
         end
         if kind == LIT_STRING and tb.tag == TAG_STRING then return true end
         -- enum member <: matching literal (same kind and value)
-        if tb.tag == TAG_LITERAL and tb.data[0] == kind and tb.data[1] == ta.data[3] then
+        if tb.tag == TAG_LITERAL and types_mod.lit_kind(tb) == kind
+            and tb.data[1] == types_mod.enum_value(ta) then
+            -- tb.data[1]: for LIT_STRING this is lit_str_id, for LIT_INTEGER it's lit_num_lo.
+            -- The cross-kind raw-slot compare is intentional (kinds already matched above).
             return true
         end
     end
@@ -412,11 +436,13 @@ function M.unify(ctx, a, b, seen)
     -- Literal <: base type
     if ta.tag == TAG_LITERAL then
         if tb.tag == TAG_LITERAL then
-            if ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1]
-              and (ta.data[0] ~= LIT_NUMBER or ta.data[2] == tb.data[2]) then return true end
+            if types_mod.lit_kind(ta) == types_mod.lit_kind(tb) and ta.data[1] == tb.data[1]
+              and (types_mod.lit_kind(ta) ~= LIT_NUMBER or types_mod.lit_num_hi(ta) == types_mod.lit_num_hi(tb)) then return true end
+            -- ta.data[1] / tb.data[1] is kind-polymorphic (lit_str_id | lit_bool | lit_num_lo);
+            -- the kind equality guard above makes the raw-slot compare well-defined.
             return false, "`" .. types_mod.display(ctx, a) .. "` is not `" .. types_mod.display(ctx, b) .. "`", nil
         end
-        local kind = ta.data[0]
+        local kind = types_mod.lit_kind(ta)
         if (kind == LIT_STRING  and tb.tag == TAG_STRING)  then return true end
         if (kind == LIT_NUMBER  and tb.tag == TAG_NUMBER)  then return true end
         if (kind == LIT_BOOLEAN and tb.tag == TAG_BOOLEAN) then return true end
@@ -431,7 +457,8 @@ function M.unify(ctx, a, b, seen)
 
     -- Union on LHS: each member must be assignable to RHS
     if ta.tag == TAG_UNION then
-        for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+        local ams, aml = types_mod.agg_members_start(ta), types_mod.agg_members_len(ta)
+        for i = ams, ams + aml - 1 do
             local mid = find(ctx, ctx.lists:get(i))
             local ok, err = M.unify(ctx, mid, b, seen)
             if not ok then
@@ -446,9 +473,10 @@ function M.unify(ctx, a, b, seen)
     -- checks below only fire when ta is NOT an intersection.
     -- Use copy_seen for each alternative.
     if ta.tag == TAG_INTERSECTION then
+        local ams, aml = types_mod.agg_members_start(ta), types_mod.agg_members_len(ta)
         -- Step 1: any single member of the intersection satisfies b?
         -- This correctly handles (A & (B|C)) <: (B|C) by checking (B|C) member against union b.
-        for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+        for i = ams, ams + aml - 1 do
             local ok = M.unify(ctx, ctx.lists:get(i), b, copy_seen(seen))
             if ok then return true end
         end
@@ -456,7 +484,8 @@ function M.unify(ctx, a, b, seen)
         if tb.tag == TAG_UNION then
             -- Try the full intersection against each union member (e.g. merged-fields vs TABLE member).
             local best_detail, best_depth = nil, -1
-            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+            local bms, bml = types_mod.agg_members_start(tb), types_mod.agg_members_len(tb)
+            for i = bms, bms + bml - 1 do
                 local mid = find(ctx, ctx.lists:get(i))
                 local ok2, _, detail = M.unify(ctx, a, mid, copy_seen(seen))
                 if ok2 then return true end
@@ -475,7 +504,8 @@ function M.unify(ctx, a, b, seen)
         end
         if tb.tag == TAG_INTERSECTION then
             -- LHS must satisfy ALL RHS members (conjunction).
-            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+            local bms, bml = types_mod.agg_members_start(tb), types_mod.agg_members_len(tb)
+            for i = bms, bms + bml - 1 do
                 local ok2, err = M.unify(ctx, a, ctx.lists:get(i), seen)
                 if not ok2 then return false, err, nil end
             end
@@ -485,11 +515,12 @@ function M.unify(ctx, a, b, seen)
         -- For each required field in b, at least one intersection member must cover it.
         if tb.tag == TAG_TABLE then
             local all_covered = true
-            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+            local bfs, bfl = types_mod.tbl_fields_start(tb), types_mod.tbl_fields_len(tb)
+            for i = bfs, bfs + bfl - 1 do
                 local bfe = ctx.fields:get(ctx.lists:get(i))
                 if band(bfe.flags, FLAG_OPTIONAL) == 0 then
                     local found = false
-                    for j = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+                    for j = ams, ams + aml - 1 do
                         local mid = find(ctx, ctx.lists:get(j))
                         local mfe = types_mod.table_field(ctx, mid, bfe.name_id)
                         if mfe then
@@ -510,7 +541,8 @@ function M.unify(ctx, a, b, seen)
     -- Use copy_seen for each alternative: failed branches must not contaminate siblings.
     if tb.tag == TAG_UNION then
         local best_detail, best_depth = nil, -1
-        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+        local bms, bml = types_mod.agg_members_start(tb), types_mod.agg_members_len(tb)
+        for i = bms, bms + bml - 1 do
             local mid = find(ctx, ctx.lists:get(i))
             local ok, _, detail = M.unify(ctx, a, mid, copy_seen(seen))
             if ok then return true end
@@ -531,7 +563,8 @@ function M.unify(ctx, a, b, seen)
     -- Intersection on RHS: LHS must satisfy all members.
     -- (Only reached when ta is NOT an intersection.)
     if tb.tag == TAG_INTERSECTION then
-        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+        local bms, bml = types_mod.agg_members_start(tb), types_mod.agg_members_len(tb)
+        for i = bms, bms + bml - 1 do
             local ok, err = M.unify(ctx, a, ctx.lists:get(i), seen)
             if not ok then return false, err, nil end
         end
@@ -540,15 +573,20 @@ function M.unify(ctx, a, b, seen)
 
     -- Function types: contravariant params, covariant returns
     if ta.tag == TAG_FUNCTION and tb.tag == TAG_FUNCTION then
-        local apl, bpl = ta.data[1], tb.data[1]
-        -- data[4] >= 0: function has a variadic param (...T); data[4] is the type of T.
-        local a_vararg = ta.data[4] >= 0 and find(ctx, ta.data[4]) or nil
-        local b_vararg = tb.data[4] >= 0 and find(ctx, tb.data[4]) or nil
-        local max_params = apl > bpl and apl or bpl
+        local aps = types_mod.fn_params_start(ta)
+        local apl = types_mod.fn_params_len(ta)
+        local bps = types_mod.fn_params_start(tb)
+        local bpl = types_mod.fn_params_len(tb)
+        -- fn_vararg >= 0: function has a variadic param (...T); value is the type of T.
+        local a_va_id = types_mod.fn_vararg(ta)
+        local b_va_id = types_mod.fn_vararg(tb)
+        local a_vararg = a_va_id >= 0 and find(ctx, a_va_id) or nil
+        local b_vararg = b_va_id >= 0 and find(ctx, b_va_id) or nil
+        local max_params = apl > bpl and apl or bpl --: integer
         for i = 0, max_params - 1 do
-            local ap_id = i < apl and find(ctx, ctx.lists:get(ta.data[0] + i))
+            local ap_id = i < apl and find(ctx, ctx.lists:get(aps + i))
                        or (a_vararg or ctx.T_NIL)
-            local bp_id = i < bpl and find(ctx, ctx.lists:get(tb.data[0] + i))
+            local bp_id = i < bpl and find(ctx, ctx.lists:get(bps + i))
                        or (b_vararg or ctx.T_NIL)
             -- Contravariant: b's param assignable to a's param
             local ok, err = M.unify(ctx, bp_id, ap_id, seen)
@@ -556,13 +594,14 @@ function M.unify(ctx, a, b, seen)
                 return false, "parameter " .. (i + 1) .. ": " .. (err or "type mismatch"), nil
             end
         end
-        local arl, brl = ta.data[3], tb.data[3]
+        local ars, arl = types_mod.fn_returns_start(ta), types_mod.fn_returns_len(ta)
+        local brs, brl = types_mod.fn_returns_start(tb), types_mod.fn_returns_len(tb)
         -- For returns: actual returning MORE values than expected is fine in Lua
         -- (callers ignore extra returns). Only check up to expected's declared count.
         -- When actual returns FEWER than expected, the missing slots are nil.
         for i = 0, brl - 1 do
-            local ar_id = i < arl and find(ctx, ctx.lists:get(ta.data[2] + i)) or ctx.T_NIL
-            local br_id = find(ctx, ctx.lists:get(tb.data[2] + i))
+            local ar_id = i < arl and find(ctx, ctx.lists:get(ars + i)) or ctx.T_NIL
+            local br_id = find(ctx, ctx.lists:get(brs + i))
             local ok, err = M.unify(ctx, ar_id, br_id, seen)
             if not ok then
                 return false, "return " .. (i + 1) .. ": " .. (err or "type mismatch"), nil
@@ -573,12 +612,14 @@ function M.unify(ctx, a, b, seen)
 
     -- Primitives satisfy meta-only table constraints (e.g. number satisfies { #__add: fn }).
     -- Look up the primitive's declared meta type from ctx.prim_meta (keyed by base TAG_*).
-    if tb.tag == TAG_TABLE and tb.data[1] == 0 and tb.data[3] == 0 and tb.data[6] > 0 then
+    if tb.tag == TAG_TABLE and types_mod.tbl_fields_len(tb) == 0
+        and types_mod.tbl_indexers_len(tb) == 0 and types_mod.tbl_meta_len(tb) > 0 then
         local ptag = ta.tag
         if ptag == TAG_LITERAL then
-            if ta.data[0] == LIT_NUMBER   then ptag = TAG_NUMBER
-            elseif ta.data[0] == LIT_INTEGER then ptag = TAG_INTEGER
-            elseif ta.data[0] == LIT_STRING  then ptag = TAG_STRING
+            local lk = types_mod.lit_kind(ta)
+            if lk == LIT_NUMBER   then ptag = TAG_NUMBER
+            elseif lk == LIT_INTEGER then ptag = TAG_INTEGER
+            elseif lk == LIT_STRING  then ptag = TAG_STRING
             else ptag = nil
             end
         elseif ptag ~= TAG_NUMBER and ptag ~= TAG_INTEGER and ptag ~= TAG_STRING then
@@ -586,7 +627,8 @@ function M.unify(ctx, a, b, seen)
         end
         local prim_meta_tid = ptag and ctx.prim_meta[ptag]
         if prim_meta_tid then
-            for i = tb.data[5], tb.data[5] + tb.data[6] - 1 do
+            local ms, ml = types_mod.tbl_meta_start(tb), types_mod.tbl_meta_len(tb)
+            for i = ms, ms + ml - 1 do
                 local fe  = ctx.fields:get(ctx.lists:get(i))
                 local amf = types_mod.table_meta_field(ctx, prim_meta_tid, fe.name_id)
                 if not amf then
@@ -602,12 +644,13 @@ function M.unify(ctx, a, b, seen)
     -- E.g. string <: { sub: _ } works because ctx.prim_index[TAG_STRING] is the user-declared
     -- `string` table in stdlib_types.lua, which has a `sub` field. User-configurable: changing
     -- the `string` declaration in stdlib_types.lua changes what fields `string` structurally exposes.
-    if ta.tag ~= TAG_TABLE and tb.tag == TAG_TABLE and tb.data[1] > 0 then
+    if ta.tag ~= TAG_TABLE and tb.tag == TAG_TABLE and types_mod.tbl_fields_len(tb) > 0 then
         local ptag = ta.tag
         if ptag == TAG_LITERAL then
-            if ta.data[0] == LIT_NUMBER   then ptag = TAG_NUMBER
-            elseif ta.data[0] == LIT_INTEGER then ptag = TAG_INTEGER
-            elseif ta.data[0] == LIT_STRING  then ptag = TAG_STRING
+            local lk = types_mod.lit_kind(ta)
+            if lk == LIT_NUMBER   then ptag = TAG_NUMBER
+            elseif lk == LIT_INTEGER then ptag = TAG_INTEGER
+            elseif lk == LIT_STRING  then ptag = TAG_STRING
             else ptag = nil
             end
         elseif ptag ~= TAG_NUMBER and ptag ~= TAG_INTEGER and ptag ~= TAG_STRING then
@@ -615,7 +658,8 @@ function M.unify(ctx, a, b, seen)
         end
         local idx_tid = ptag and ctx.prim_index and ctx.prim_index[ptag]
         if idx_tid then
-            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+            local bfs, bfl = types_mod.tbl_fields_start(tb), types_mod.tbl_fields_len(tb)
+            for i = bfs, bfs + bfl - 1 do
                 local bfid = ctx.lists:get(i)
                 local bfe  = ctx.fields:get(bfid)
                 if band(bfe.flags, FLAG_OPTIONAL) ~= 0 then goto prim_named_next end
@@ -637,8 +681,9 @@ function M.unify(ctx, a, b, seen)
 
     -- Table types: structural subtyping
     if ta.tag == TAG_TABLE and tb.tag == TAG_TABLE then
+        local bfs0, bfl0 = types_mod.tbl_fields_start(tb), types_mod.tbl_fields_len(tb)
         -- Every required field in b must exist in a
-        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+        for i = bfs0, bfs0 + bfl0 - 1 do
             local bfid = ctx.lists:get(i)
             local bfe = ctx.fields:get(bfid)
             local bft = find(ctx, bfe.type_id)
@@ -647,10 +692,11 @@ function M.unify(ctx, a, b, seen)
             if bfe.name_id == -1 then
                 local spread_t = ctx.types:get(bft)
                 if spread_t.tag == TAG_SPREAD then
-                    local inner_tid = find(ctx, spread_t.data[0])
+                    local inner_tid = find(ctx, types_mod.spread_inner(spread_t))
                     local inner_t = ctx.types:get(inner_tid)
                     if inner_t.tag == TAG_TABLE then
-                        for j = inner_t.data[0], inner_t.data[0] + inner_t.data[1] - 1 do
+                        local ifs, ifl = types_mod.tbl_fields_start(inner_t), types_mod.tbl_fields_len(inner_t)
+                        for j = ifs, ifs + ifl - 1 do
                             local jfid = ctx.lists:get(j)
                             local jfe  = ctx.fields:get(jfid)
                             if jfe.name_id == -1 then goto spread_next end
@@ -658,7 +704,7 @@ function M.unify(ctx, a, b, seen)
                             local afe2 = types_mod.table_field(ctx, a, jfe.name_id)
                             if not afe2 then
                                 if band(jfe.flags, FLAG_OPTIONAL) == 0 then
-                                    local ais, ail = ta.data[2], ta.data[3]
+                                    local ais, ail = types_mod.tbl_indexers_start(ta), types_mod.tbl_indexers_len(ta)
                                     local found = false
                                     local k = ais
                                     while k < ais + ail - 1 do
@@ -671,7 +717,7 @@ function M.unify(ctx, a, b, seen)
                                         end
                                         k = k + 2
                                     end
-                                    if not found and ta.data[4] >= 0 then found = true end
+                                    if not found and types_mod.tbl_row_var(ta) >= 0 then found = true end
                                     if not found then
                                         local fname = intern_mod.get(ctx.pool, jfe.name_id) or "?"
                                         return false,
@@ -700,7 +746,7 @@ function M.unify(ctx, a, b, seen)
                 if band(bfe.flags, FLAG_OPTIONAL) == 0 then
                     -- Check a's indexers with string key
                     local found = false
-                    local ais, ail = ta.data[2], ta.data[3]
+                    local ais, ail = types_mod.tbl_indexers_start(ta), types_mod.tbl_indexers_len(ta)
                     local j = ais
                     while j < ais + ail - 1 do
                         local kt = find(ctx, ctx.lists:get(j))
@@ -712,7 +758,7 @@ function M.unify(ctx, a, b, seen)
                         j = j + 2
                     end
                     -- Open table (row var) may absorb extra fields
-                    if not found and ta.data[4] >= 0 then found = true end
+                    if not found and types_mod.tbl_row_var(ta) >= 0 then found = true end
                     if not found then
                         local fname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
                         return false, "missing field '" .. fname .. "'",
@@ -748,11 +794,12 @@ function M.unify(ctx, a, b, seen)
         end
 
         -- Unify indexers
-        for i = tb.data[2], tb.data[2] + tb.data[3] - 1, 2 do
+        local bis0, bil0 = types_mod.tbl_indexers_start(tb), types_mod.tbl_indexers_len(tb)
+        for i = bis0, bis0 + bil0 - 1, 2 do
             local bk = find(ctx, ctx.lists:get(i))
             local bv = find(ctx, ctx.lists:get(i + 1))
             local matched = false
-            local ais, ail = ta.data[2], ta.data[3]
+            local ais, ail = types_mod.tbl_indexers_start(ta), types_mod.tbl_indexers_len(ta)
             local j = ais
             while j < ais + ail - 1 do
                 local ak = find(ctx, ctx.lists:get(j))
@@ -768,7 +815,7 @@ function M.unify(ctx, a, b, seen)
                 j = j + 2
             end
             if not matched then
-                if ta.data[1] == 0 and ta.data[3] == 0 then
+                if types_mod.tbl_fields_len(ta) == 0 and types_mod.tbl_indexers_len(ta) == 0 then
                     -- Empty table absorbs indexers
                     -- Can't add to immutable arena; treat as ok for empty tables
                     matched = true
@@ -779,7 +826,8 @@ function M.unify(ctx, a, b, seen)
                     -- value type instead of reporting "missing indexer".
                     local bkt = ctx.types:get(bk)
                     if bkt.tag == TAG_NUMBER or bkt.tag == TAG_INTEGER then
-                        for fi = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+                        local afs, afl = types_mod.tbl_fields_start(ta), types_mod.tbl_fields_len(ta)
+                        for fi = afs, afs + afl - 1 do
                             local afe = ctx.fields:get(ctx.lists:get(fi))
                             local fname = intern_mod.get(ctx.pool, afe.name_id)
                             if fname and fname:match("^%d+$") then
@@ -793,7 +841,7 @@ function M.unify(ctx, a, b, seen)
                         end
                     end
                     if not matched and bkt.tag ~= TAG_STRING then
-                        if ta.data[4] < 0 then  -- no row var
+                        if types_mod.tbl_row_var(ta) < 0 then  -- no row var
                             return false, "missing indexer for " .. types_mod.display(ctx, bk), nil
                         end
                     end
@@ -802,7 +850,8 @@ function M.unify(ctx, a, b, seen)
         end
 
         -- Check meta fields
-        for i = tb.data[5], tb.data[5] + tb.data[6] - 1 do
+        local bms0, bml0 = types_mod.tbl_meta_start(tb), types_mod.tbl_meta_len(tb)
+        for i = bms0, bms0 + bml0 - 1 do
             local bfid = ctx.lists:get(i)
             local bfe = ctx.fields:get(bfid)
             local amf = types_mod.table_meta_field(ctx, a, bfe.name_id)
@@ -828,8 +877,8 @@ function M.unify(ctx, a, b, seen)
         -- `{ [number]: string }` — both positional entries become indexers
         -- with LIT_INTEGER keys, and the b-driven loop above only finds the
         -- first matching a-entry per target indexer).
-        if tb.data[4] < 0 and ta.data[4] < 0 then
-            local ais, ail = ta.data[2], ta.data[3]
+        if types_mod.tbl_row_var(tb) < 0 and types_mod.tbl_row_var(ta) < 0 then
+            local ais, ail = types_mod.tbl_indexers_start(ta), types_mod.tbl_indexers_len(ta)
             local j = ais
             while j < ais + ail - 1 do
                 local ak = find(ctx, ctx.lists:get(j))
@@ -843,7 +892,7 @@ function M.unify(ctx, a, b, seen)
                 if akt.tag == TAG_VAR or akt.tag == defs.TAG_ROWVAR then
                     covered = true
                 end
-                local bis, bil = tb.data[2], tb.data[3]
+                local bis, bil = types_mod.tbl_indexers_start(tb), types_mod.tbl_indexers_len(tb)
                 local k = bis
                 while not covered and k < bis + bil - 1 do
                     local bk = find(ctx, ctx.lists:get(k))
@@ -873,8 +922,9 @@ function M.unify(ctx, a, b, seen)
         -- Excess-field check: if the target is closed (no row var) and the source
         -- is also closed, every field in the source must exist in the target.
         -- Width subtyping ({x,y} <: {x}) only holds when the target is open ({x,...}).
-        if tb.data[4] < 0 and ta.data[4] < 0 then
-            for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+        if types_mod.tbl_row_var(tb) < 0 and types_mod.tbl_row_var(ta) < 0 then
+            local afs1, afl1 = types_mod.tbl_fields_start(ta), types_mod.tbl_fields_len(ta)
+            for i = afs1, afs1 + afl1 - 1 do
                 local afid = ctx.lists:get(i)
                 local afe  = ctx.fields:get(afid)
                 if band(afe.flags, FLAG_OPAQUE_KEY) == 0 then
@@ -886,7 +936,7 @@ function M.unify(ctx, a, b, seen)
                         -- by a string indexer. Also verify the value type is assignable.
                         local fname = intern_mod.get(ctx.pool, afe.name_id) or "?"
                         local covered = false
-                        local bis, bil = tb.data[2], tb.data[3]
+                        local bis, bil = types_mod.tbl_indexers_start(tb), types_mod.tbl_indexers_len(tb)
                         local j = bis
                         while j < bis + bil - 1 do
                             local bkt = ctx.types:get(find(ctx, ctx.lists:get(j)))
@@ -922,12 +972,15 @@ function M.unify(ctx, a, b, seen)
 
     -- Tuple types
     if ta.tag == TAG_TUPLE and tb.tag == TAG_TUPLE then
-        if ta.data[1] ~= tb.data[1] then
-            return false, "tuple length mismatch: " .. ta.data[1] .. " vs " .. tb.data[1], nil
+        local aml = types_mod.agg_members_len(ta)
+        local bml = types_mod.agg_members_len(tb)
+        if aml ~= bml then
+            return false, "tuple length mismatch: " .. aml .. " vs " .. bml, nil
         end
-        for i = 0, ta.data[1] - 1 do
-            local ae = find(ctx, ctx.lists:get(ta.data[0] + i))
-            local be = find(ctx, ctx.lists:get(tb.data[0] + i))
+        local ams, bms = types_mod.agg_members_start(ta), types_mod.agg_members_start(tb)
+        for i = 0, aml - 1 do
+            local ae = find(ctx, ctx.lists:get(ams + i))
+            local be = find(ctx, ctx.lists:get(bms + i))
             local ok, err = M.unify(ctx, ae, be, seen)
             if not ok then
                 return false, "tuple element " .. (i + 1) .. ": " .. (err or "type mismatch"), nil
@@ -988,23 +1041,25 @@ function M.try_unify(ctx, a, b, seen)
     -- TAG_NAMED oracle: when both sides are named aliases, check declared_subtypes
     -- before falling back to structural comparison (which would just return true).
     if ta.tag == TAG_NAMED and tb.tag == TAG_NAMED then
-        local a_name = ta.data[0]
-        local b_name = tb.data[0]
+        local a_name = types_mod.named_name_id(ta)
+        local b_name = types_mod.named_name_id(tb)
         -- Same alias: trivially subtype.
         if a_name == b_name then return true end
         -- Oracle lookup: is (a_name, b_name) a declared subtype pair?
         local ds = ctx.declared_subtypes
         if ds and ds[a_name] == b_name then
             -- Args check: if actual and expected both have args, each must unify.
-            local a_al = ta.data[2]  -- args len (0 for non-generic checker-arena nodes)
-            local b_al = tb.data[2]
+            local a_al = types_mod.named_args_len(ta)  -- args len (0 for non-generic checker-arena nodes)
+            local b_al = types_mod.named_args_len(tb)
             if a_al == 0 and b_al == 0 then
                 return true  -- non-generic oracle hit
             end
             if a_al == b_al then
+                local a_as = types_mod.named_args_start(ta)
+                local b_as = types_mod.named_args_start(tb)
                 for i = 0, a_al - 1 do
-                    local aa = ctx.lists:get(ta.data[1] + i)
-                    local ba = ctx.lists:get(tb.data[1] + i)
+                    local aa = ctx.lists:get(a_as + i)
+                    local ba = ctx.lists:get(b_as + i)
                     if not M.try_unify(ctx, aa, ba, seen) then return false end
                 end
                 return true
@@ -1018,7 +1073,8 @@ function M.try_unify(ctx, a, b, seen)
 
     -- Union LHS: all members must be assignable to b.
     if ta.tag == TAG_UNION then
-        for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+        local ams, aml = types_mod.agg_members_start(ta), types_mod.agg_members_len(ta)
+        for i = ams, ams + aml - 1 do
             if not M.try_unify(ctx, ctx.lists:get(i), b, seen) then return false end
         end
         return true
@@ -1030,27 +1086,32 @@ function M.try_unify(ctx, a, b, seen)
 
     if ta.tag == TAG_ENUM_MEMBER then
         if tb.tag == TAG_ENUM_MEMBER then
-            if ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1] then return true end
+            if types_mod.enum_name_id(ta) == types_mod.enum_name_id(tb)
+                and types_mod.enum_member_id(ta) == types_mod.enum_member_id(tb) then return true end
             return false
         end
-        local kind = ta.data[2]
+        local kind = types_mod.enum_lit_kind(ta)
         if kind == LIT_INTEGER then
             if tb.tag == TAG_INTEGER then return true end
             if tb.tag == TAG_NUMBER  then return true end
         end
         if kind == LIT_STRING and tb.tag == TAG_STRING then return true end
-        if tb.tag == TAG_LITERAL and tb.data[0] == kind and tb.data[1] == ta.data[3] then
+        if tb.tag == TAG_LITERAL and types_mod.lit_kind(tb) == kind
+            and tb.data[1] == types_mod.enum_value(ta) then
+            -- See M.unify enum branch: cross-kind raw-slot compare is guarded by kind equality.
             return true
         end
         return false
     end
 
     if ta.tag == TAG_LITERAL then
-        if tb.tag == TAG_LITERAL and ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1]
-          and (ta.data[0] ~= LIT_NUMBER or ta.data[2] == tb.data[2]) then
+        if tb.tag == TAG_LITERAL and types_mod.lit_kind(ta) == types_mod.lit_kind(tb)
+          and ta.data[1] == tb.data[1]
+          and (types_mod.lit_kind(ta) ~= LIT_NUMBER or types_mod.lit_num_hi(ta) == types_mod.lit_num_hi(tb)) then
+            -- data[1] raw compare is kind-polymorphic; well-defined under the kind equality guard.
             return true
         end
-        local kind = ta.data[0]
+        local kind = types_mod.lit_kind(ta)
         if kind == LIT_STRING  and tb.tag == TAG_STRING  then return true end
         if kind == LIT_NUMBER  and tb.tag == TAG_NUMBER  then return true end
         if kind == LIT_BOOLEAN and tb.tag == TAG_BOOLEAN then return true end
@@ -1064,22 +1125,25 @@ function M.try_unify(ctx, a, b, seen)
     -- This block handles all composite RHS cases too, so the standalone union/intersection-on-RHS
     -- checks below only fire when ta is NOT an intersection.
     if ta.tag == TAG_INTERSECTION then
+        local ams, aml = types_mod.agg_members_start(ta), types_mod.agg_members_len(ta)
         -- Step 1: any single member of the intersection satisfies b?
         -- This correctly handles (A & (B|C)) <: (B|C) by checking (B|C) member against union b.
-        for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+        for i = ams, ams + aml - 1 do
             if M.try_unify(ctx, ctx.lists:get(i), b, copy_seen(seen)) then return true end
         end
         -- Step 2: dispatch on b's structure for cases no single member covers.
         if tb.tag == TAG_UNION then
             -- Try the full intersection against each union member (e.g. merged-fields vs TABLE member).
-            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+            local bms, bml = types_mod.agg_members_start(tb), types_mod.agg_members_len(tb)
+            for i = bms, bms + bml - 1 do
                 if M.try_unify(ctx, a, ctx.lists:get(i), copy_seen(seen)) then return true end
             end
             return false
         end
         if tb.tag == TAG_INTERSECTION then
             -- LHS must satisfy ALL RHS members (conjunction).
-            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+            local bms, bml = types_mod.agg_members_start(tb), types_mod.agg_members_len(tb)
+            for i = bms, bms + bml - 1 do
                 if not M.try_unify(ctx, a, ctx.lists:get(i), seen) then return false end
             end
             return true
@@ -1087,11 +1151,12 @@ function M.try_unify(ctx, a, b, seen)
         -- Merged-fields fallback: {f:T} & {g:U} <: {f:T, g:U}
         if tb.tag == TAG_TABLE then
             local all_covered = true
-            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+            local bfs, bfl = types_mod.tbl_fields_start(tb), types_mod.tbl_fields_len(tb)
+            for i = bfs, bfs + bfl - 1 do
                 local bfe = ctx.fields:get(ctx.lists:get(i))
                 if band(bfe.flags, FLAG_OPTIONAL) == 0 then
                     local found = false
-                    for j = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+                    for j = ams, ams + aml - 1 do
                         local mid = find(ctx, ctx.lists:get(j))
                         local mfe = types_mod.table_field(ctx, mid, bfe.name_id)
                         if mfe then
@@ -1111,7 +1176,8 @@ function M.try_unify(ctx, a, b, seen)
     -- Disjunctive: use copy_seen so failed alternatives don't contaminate siblings.
     -- (Only reached when ta is NOT an intersection.)
     if tb.tag == TAG_UNION then
-        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+        local bms, bml = types_mod.agg_members_start(tb), types_mod.agg_members_len(tb)
+        for i = bms, bms + bml - 1 do
             if M.try_unify(ctx, a, ctx.lists:get(i), copy_seen(seen)) then return true end
         end
         return false
@@ -1120,32 +1186,39 @@ function M.try_unify(ctx, a, b, seen)
     -- Intersection on RHS: a must satisfy ALL members (conjunctive — shared seen is fine).
     -- (Only reached when ta is NOT an intersection.)
     if tb.tag == TAG_INTERSECTION then
-        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+        local bms, bml = types_mod.agg_members_start(tb), types_mod.agg_members_len(tb)
+        for i = bms, bms + bml - 1 do
             if not M.try_unify(ctx, a, ctx.lists:get(i), seen) then return false end
         end
         return true
     end
 
     if ta.tag == TAG_FUNCTION and tb.tag == TAG_FUNCTION then
-        local apl, bpl = ta.data[1], tb.data[1]
-        local a_va = ta.data[4] >= 0 and find(ctx, ta.data[4]) or nil
-        local b_va = tb.data[4] >= 0 and find(ctx, tb.data[4]) or nil
-        local max_p = apl > bpl and apl or bpl
+        local aps = types_mod.fn_params_start(ta)
+        local apl = types_mod.fn_params_len(ta)
+        local bps = types_mod.fn_params_start(tb)
+        local bpl = types_mod.fn_params_len(tb)
+        local a_va_id = types_mod.fn_vararg(ta)
+        local b_va_id = types_mod.fn_vararg(tb)
+        local a_va = a_va_id >= 0 and find(ctx, a_va_id) or nil
+        local b_va = b_va_id >= 0 and find(ctx, b_va_id) or nil
+        local max_p = apl > bpl and apl or bpl --: integer
         for i = 0, max_p - 1 do
-            local ap = i < apl and find(ctx, ctx.lists:get(ta.data[0] + i)) or (a_va or ctx.T_NIL)
-            local bp = i < bpl and find(ctx, ctx.lists:get(tb.data[0] + i)) or (b_va or ctx.T_NIL)
+            local ap = i < apl and find(ctx, ctx.lists:get(aps + i)) or (a_va or ctx.T_NIL)
+            local bp = i < bpl and find(ctx, ctx.lists:get(bps + i)) or (b_va or ctx.T_NIL)
             if not M.try_unify(ctx, bp, ap, seen) then return false end
         end
         return true
     end
 
     -- Same prim_index check for try_unify (non-destructive — no TV binding involved for primitives).
-    if ta.tag ~= TAG_TABLE and tb.tag == TAG_TABLE and tb.data[1] > 0 then
+    if ta.tag ~= TAG_TABLE and tb.tag == TAG_TABLE and types_mod.tbl_fields_len(tb) > 0 then
         local ptag = ta.tag
         if ptag == TAG_LITERAL then
-            if ta.data[0] == LIT_NUMBER   then ptag = TAG_NUMBER
-            elseif ta.data[0] == LIT_INTEGER then ptag = TAG_INTEGER
-            elseif ta.data[0] == LIT_STRING  then ptag = TAG_STRING
+            local lk = types_mod.lit_kind(ta)
+            if lk == LIT_NUMBER   then ptag = TAG_NUMBER
+            elseif lk == LIT_INTEGER then ptag = TAG_INTEGER
+            elseif lk == LIT_STRING  then ptag = TAG_STRING
             else ptag = nil
             end
         elseif ptag ~= TAG_NUMBER and ptag ~= TAG_INTEGER and ptag ~= TAG_STRING then
@@ -1153,7 +1226,8 @@ function M.try_unify(ctx, a, b, seen)
         end
         local idx_tid = ptag and ctx.prim_index and ctx.prim_index[ptag]
         if idx_tid then
-            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+            local bfs, bfl = types_mod.tbl_fields_start(tb), types_mod.tbl_fields_len(tb)
+            for i = bfs, bfs + bfl - 1 do
                 local bfe = ctx.fields:get(ctx.lists:get(i))
                 if band(bfe.flags, FLAG_OPTIONAL) ~= 0 then goto try_prim_named_next end
                 local afe = types_mod.table_field(ctx, idx_tid, bfe.name_id)
@@ -1168,7 +1242,8 @@ function M.try_unify(ctx, a, b, seen)
     end
 
     if ta.tag == TAG_TABLE and tb.tag == TAG_TABLE then
-        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+        local bfs, bfl = types_mod.tbl_fields_start(tb), types_mod.tbl_fields_len(tb)
+        for i = bfs, bfs + bfl - 1 do
             local bfe = ctx.fields:get(ctx.lists:get(i))
             local afe = types_mod.table_field(ctx, a, bfe.name_id)
             if not afe and band(bfe.flags, FLAG_OPTIONAL) == 0 then return false end
@@ -1183,7 +1258,8 @@ function M.try_unify(ctx, a, b, seen)
             end
         end
         -- Check meta fields: each required meta field in tb must exist in ta with compatible type
-        for i = tb.data[5], tb.data[5] + tb.data[6] - 1 do
+        local bms, bml = types_mod.tbl_meta_start(tb), types_mod.tbl_meta_len(tb)
+        for i = bms, bms + bml - 1 do
             local bfe = ctx.fields:get(ctx.lists:get(i))
             local amf = types_mod.table_meta_field(ctx, a, bfe.name_id)
             if not amf and band(bfe.flags, FLAG_OPTIONAL) == 0 then return false end
@@ -1200,7 +1276,7 @@ function M.try_unify(ctx, a, b, seen)
     end
 
     if ta.tag == TAG_NOMINAL and tb.tag == TAG_NOMINAL then
-        return ta.data[1] == tb.data[1]
+        return types_mod.nom_identity(ta) == types_mod.nom_identity(tb)
     end
 
     if ta.tag == TAG_CDATA or tb.tag == TAG_CDATA then return true end
@@ -1240,8 +1316,9 @@ function M.is_subtype(ctx, actual, expected)
     -- indexer on `expected`). Otherwise the cast is removing a field — not
     -- redundant.
     if ta.tag == TAG_TABLE and tb.tag == TAG_TABLE
-        and tb.data[4] < 0 and ta.data[4] < 0 then
-        for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+        and types_mod.tbl_row_var(tb) < 0 and types_mod.tbl_row_var(ta) < 0 then
+        local afs, afl = types_mod.tbl_fields_start(ta), types_mod.tbl_fields_len(ta)
+        for i = afs, afs + afl - 1 do
             local afid = ctx.lists:get(i)
             local afe  = ctx.fields:get(afid)
             if band(afe.flags, FLAG_OPAQUE_KEY) == 0 then
@@ -1250,7 +1327,7 @@ function M.is_subtype(ctx, actual, expected)
                     -- Indexer cover check (mirrors unify's logic at line 776+).
                     local fname = intern_mod.get(ctx.pool, afe.name_id) or "?"
                     local covered = false
-                    local bis, bil = tb.data[2], tb.data[3]
+                    local bis, bil = types_mod.tbl_indexers_start(tb), types_mod.tbl_indexers_len(tb)
                     local j = bis
                     while j < bis + bil - 1 do
                         local bkt = ctx.types:get(find(ctx, ctx.lists:get(j)))
@@ -1314,13 +1391,15 @@ function M.types_overlap(ctx, a, b)
     if M.try_unify(ctx, b, a) then return true end
     -- Union: any member overlapping suffices.
     if ta.tag == TAG_UNION then
-        for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+        local ams, aml = types_mod.agg_members_start(ta), types_mod.agg_members_len(ta)
+        for i = ams, ams + aml - 1 do
             if M.types_overlap(ctx, ctx.lists:get(i), b) then return true end
         end
         return false
     end
     if tb.tag == TAG_UNION then
-        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+        local bms, bml = types_mod.agg_members_start(tb), types_mod.agg_members_len(tb)
+        for i = bms, bms + bml - 1 do
             if M.types_overlap(ctx, a, ctx.lists:get(i)) then return true end
         end
         return false
@@ -1342,7 +1421,8 @@ function M.types_overlap(ctx, a, b)
         -- For each required named field in `other_tid` (a TAG_TABLE), check
         -- if `tbl_tid` (also a TAG_TABLE) has a conflicting declaration.
         local other_t = ctx.types:get(other_tid)
-        for i = other_t.data[0], other_t.data[0] + other_t.data[1] - 1 do
+        local ofs, ofl = types_mod.tbl_fields_start(other_t), types_mod.tbl_fields_len(other_t)
+        for i = ofs, ofs + ofl - 1 do
             local bfe = ctx.fields:get(ctx.lists:get(i))
             if band(bfe.flags, FLAG_OPTIONAL) ~= 0 then goto compat_next end
             local afe = types_mod.table_field(ctx, tbl_tid, bfe.name_id)
@@ -1365,7 +1445,8 @@ function M.types_overlap(ctx, a, b)
         -- Check each TABLE member against b for field conflicts.
         -- If NO member conflicts, the intersection overlaps with b.
         local any_conflict = false
-        for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+        local ams, aml = types_mod.agg_members_start(ta), types_mod.agg_members_len(ta)
+        for i = ams, ams + aml - 1 do
             local mid = find(ctx, ctx.lists:get(i))
             local mt = ctx.types:get(mid)
             if mt.tag == TAG_TABLE then
@@ -1379,7 +1460,8 @@ function M.types_overlap(ctx, a, b)
     if tb.tag == TAG_INTERSECTION then
         -- Symmetric: check each TABLE member of tb against a.
         local any_conflict = false
-        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+        local bms, bml = types_mod.agg_members_start(tb), types_mod.agg_members_len(tb)
+        for i = bms, bms + bml - 1 do
             local mid = find(ctx, ctx.lists:get(i))
             local mt = ctx.types:get(mid)
             if mt.tag == TAG_TABLE then
