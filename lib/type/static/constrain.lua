@@ -156,6 +156,19 @@ local C_NARROW_NIL    = 14  -- {C_NARROW_NIL,    input_tid, result_tid, keep_nil
 -- loop variables that depend on deferred C_BIND_GENERICS / C_INDEX).  Without
 -- this, narrowing on an unresolved TAG_VAR is a silent no-op.
 
+local C_INSTANTIATE_AT_CALL = 17  -- {C_INSTANTIATE_AT_CALL, callee_tid, arg_tids_list, ret_tid, line, col}
+-- High-level deferred per-call instantiation. Carries the raw callee TV, the
+-- argument TVs, and the call's ret TV. The solver fires it after the callee
+-- has been resolved by C_INDEX (etc.) and performs instantiation, rank-N
+-- skolemization, HKT decomposition, eager-bind, and emits C_BIND_GENERICS /
+-- C_CHECK_ARGS. See docs/typechecker-h2-correct-design-v2.md (option X).
+--
+-- Phase 1 (current): constraint is emitted alongside the existing gen-time
+-- instantiation machinery; the solver handler is a no-op. The constraint
+-- exists as a code-motion landing zone for later phases (Phase 2 moves
+-- env.instantiate into the solver; Phase 3 moves rank-N skolemization;
+-- Phase 4 moves HKT decomposition).
+
 local C_HKT_DECOMPOSE = 16  -- {C_HKT_DECOMPOSE, f_fresh_tid, args_fresh_list, bound_alias_tid, actual_arg_tid, line, col}
 -- Higher-kinded type decomposition at a call site. Emitted when a call-site
 -- parameter slot is TAG_TYPE_CALL(F_fresh, A_fresh) and F_fresh is a fresh TV
@@ -189,6 +202,7 @@ M.C_OVERLAP       = C_OVERLAP
 M.C_NARROW_NIL    = C_NARROW_NIL
 M.C_ESCAPE_CHECK  = C_ESCAPE_CHECK
 M.C_HKT_DECOMPOSE = C_HKT_DECOMPOSE
+M.C_INSTANTIATE_AT_CALL = C_INSTANTIATE_AT_CALL
 
 -- Typed per-C_TAG payload aliases. Constructors and accessors land in C4-C5.
 -- Each tuple's first slot is the C_TAG discriminant (an integer literal);
@@ -211,6 +225,7 @@ M.C_HKT_DECOMPOSE = C_HKT_DECOMPOSE
 --:: ConstraintOverlap      = { integer, integer, integer, integer, integer }
 --:: ConstraintNarrowNil    = { integer, integer, integer, boolean, integer, integer }
 --:: ConstraintEscapeCheck  = { integer, integer, integer, integer, integer }
+--:: ConstraintInstantiateAtCall = { integer, integer, { [integer]: integer, ... }, integer, integer, integer }
 
 -- Typed per-payload reader accessors. One per slot per C_TAG.
 -- Exported as `function M.<name>` (not local) because constrain.lua is near
@@ -360,6 +375,17 @@ function M.escape_line(c) return c[4] end
 --: (ConstraintEscapeCheck) -> integer
 function M.escape_col(c) return c[5] end
 
+--: (ConstraintInstantiateAtCall) -> integer
+function M.instcall_callee(c) return c[2] end
+--: (ConstraintInstantiateAtCall) -> { [integer]: integer, ... }
+function M.instcall_args(c) return c[3] end
+--: (ConstraintInstantiateAtCall) -> integer
+function M.instcall_ret(c) return c[4] end
+--: (ConstraintInstantiateAtCall) -> integer
+function M.instcall_line(c) return c[5] end
+--: (ConstraintInstantiateAtCall) -> integer
+function M.instcall_col(c) return c[6] end
+
 -- Typed per-C_TAG constructors. One per alias. Each produces the matching
 -- Constraint* tuple with the C_TAG discriminant already in slot 1, so call
 -- sites never write the raw `{ C_TAG, ... }` literal.
@@ -422,6 +448,11 @@ end
 --: (integer, integer, integer, integer) -> ConstraintEscapeCheck
 function M.make_escape(ret, call_id, line, col)
     return { C_ESCAPE_CHECK, ret, call_id, line, col }
+end
+
+--: (integer, { [integer]: integer, ... }, integer, integer, integer) -> ConstraintInstantiateAtCall
+function M.make_instantiate_at_call(callee, args, ret, line, col)
+    return { C_INSTANTIATE_AT_CALL, callee, args, ret, line, col }
 end
 
 -- ---------------------------------------------------------------------------
@@ -2962,6 +2993,11 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     end
 
     local ret = fresh_var(ctx)
+    -- Phase 1 landing zone: emit C_INSTANTIATE_AT_CALL alongside the existing
+    -- gen-time machinery. The solver handler is a no-op today. In later phases
+    -- the gen-time instantiation/skolemization/HKT work moves into this
+    -- constraint's handler. See docs/typechecker-h2-correct-design-v2.md (X).
+    emit(ctx, M.make_instantiate_at_call(callee_tid, arg_tids, ret, n.line, n.col))
     emit(ctx, M.make_bindgen(inst_callee, arg_tids, ret, n.line, n.col))
     emit(ctx, M.make_checkargs(inst_callee, arg_tids, ret, n.line, n.col))
     if has_rank_n then

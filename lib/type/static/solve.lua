@@ -64,6 +64,7 @@ local C_OVERLAP       = constrain.C_OVERLAP
 local C_NARROW_NIL    = constrain.C_NARROW_NIL
 local C_ESCAPE_CHECK  = constrain.C_ESCAPE_CHECK
 local C_HKT_DECOMPOSE = constrain.C_HKT_DECOMPOSE
+local C_INSTANTIATE_AT_CALL = constrain.C_INSTANTIATE_AT_CALL
 
 local find = types_mod.find
 
@@ -2687,6 +2688,24 @@ local function solve_return(ctx, c)
     return true
 end
 
+-- C_INSTANTIATE_AT_CALL stub (Phase 1).
+--
+-- High-level deferred per-call instantiation. Today this is a no-op: the
+-- gen-time machinery in constrain.lua's NODE_CALL_EXPR handler still does
+-- instantiation, rank-N skolemization, HKT decomposition, eager-bind, and
+-- emits C_BIND_GENERICS / C_CHECK_ARGS directly.
+--
+-- The constraint is emitted as a code-motion landing zone. Subsequent phases
+-- move the gen-time work into this handler piece by piece, eventually
+-- deleting the gen-time machinery entirely. See
+-- docs/typechecker-h2-correct-design-v2.md (option X) for the full design.
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
+local function solve_instantiate_at_call(ctx, c)
+    -- Suppress unused-variable warnings; the stub deliberately does nothing.
+    local _, _ = ctx, c
+    return true
+end
+
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 -- Binds free type variables in the callee's param slots from call arguments.
 -- Runs before C_CHECK_ARGS so that C_BOUND can fire and back-propagate named-param
@@ -3780,6 +3799,7 @@ local function get_handlers()
         [C_NARROW_NIL]    = solve_narrow_nil,
         [C_ESCAPE_CHECK]  = solve_escape_check,
         [C_HKT_DECOMPOSE] = solve_hkt_decompose,
+        [C_INSTANTIATE_AT_CALL] = solve_instantiate_at_call,
     }
     return _handlers
 end
