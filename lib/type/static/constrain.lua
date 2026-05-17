@@ -1776,7 +1776,7 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
         elseif ot.tag == TAG_BOOLEAN then
             no_fields = true
         elseif ot.tag == TAG_LITERAL then
-            local lk = ot.data[0]
+            local lk = types_mod.lit_kind(ot)
             -- LIT_BOOLEAN and number literals (LIT_NUMBER, LIT_INTEGER) cannot have fields.
             -- LIT_STRING is OK — strings have a metatable with methods in Lua.
             if lk == LIT_BOOLEAN or lk == LIT_NUMBER or lk == LIT_INTEGER then
@@ -1847,9 +1847,9 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
     -- String literal key → treat as named field
     local key_r = types_mod.find(ctx, key_tid)
     local kt_t = ctx.types:get(key_r)
-    if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_STRING then
+    if kt_t.tag == TAG_LITERAL and types_mod.lit_kind(kt_t) == LIT_STRING then
         local res = fresh_var(ctx)
-        emit(ctx, M.make_index(obj_tid, types_mod.make_literal(ctx, LIT_STRING, kt_t.data[1]), res, n.line, n.col))
+        emit(ctx, M.make_index(obj_tid, types_mod.make_literal(ctx, LIT_STRING, types_mod.lit_str_id(kt_t)), res, n.line, n.col))
         return res
     end
 
@@ -1861,20 +1861,20 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
     -- indexer-value type. For concrete obj types (tuple/table/etc.) the
     -- existing "Generic index" branch below handles the lookup directly,
     -- preserving the long-standing C_INDEX-free fast path for those cases.
-    if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_INTEGER
+    if kt_t.tag == TAG_LITERAL and types_mod.lit_kind(kt_t) == LIT_INTEGER
         and (obj_t.tag == TAG_VAR or obj_t.tag == TAG_TABLE) then
         -- TAG_VAR: defer to solve_index's HM branch for indexer-bound inference.
         -- TAG_TABLE: defer so solve_index narrows positional brace-tuple slots
         -- (`{ A, B, C }[N]` → slot N's type) instead of the legacy
         -- "first indexer value wins" shortcut below.
         local res = fresh_var(ctx)
-        emit(ctx, M.make_index(obj_tid, types_mod.make_literal(ctx, LIT_INTEGER, kt_t.data[1]), res, n.line, n.col))
+        emit(ctx, M.make_index(obj_tid, types_mod.make_literal(ctx, LIT_INTEGER, types_mod.lit_str_id(kt_t)), res, n.line, n.col))
         return res
     end
 
     -- Generic index
     if obj_t.tag == TAG_TABLE then
-        local is, il = obj_t.data[2], obj_t.data[3]
+        local is, il = types_mod.tbl_indexers_start(obj_t), types_mod.tbl_indexers_len(obj_t)
         local i = is
         while i < is + il - 1 do
             return types_mod.find(ctx, ctx.lists:get(i + 1))
@@ -1939,7 +1939,8 @@ local function skolemize_fn(ctx, ann_fn_tid)
     -- the body check (the body must be able to instantiate a rank-N param's
     -- `<T>` per call to use the function polymorphically).
     local has_generic = false
-    for i = aft.data[0], aft.data[0] + aft.data[1] - 1 do
+    local aft_ps, aft_pl = types_mod.fn_params_start(aft), types_mod.fn_params_len(aft)
+    for i = aft_ps, aft_ps + aft_pl - 1 do
         local pt = ctx.types:get(types_mod.find(ctx, ctx.lists:get(i)))
         if pt.tag == TAG_VAR and pt.flags == defs.FLAG_GENERIC then
             has_generic = true
@@ -1947,7 +1948,8 @@ local function skolemize_fn(ctx, ann_fn_tid)
         end
     end
     if not has_generic then
-        for i = aft.data[2], aft.data[2] + aft.data[3] - 1 do
+        local aft_rs, aft_rl = types_mod.fn_returns_start(aft), types_mod.fn_returns_len(aft)
+        for i = aft_rs, aft_rs + aft_rl - 1 do
             local rt = ctx.types:get(types_mod.find(ctx, ctx.lists:get(i)))
             if rt.tag == TAG_VAR and rt.flags == defs.FLAG_GENERIC then
                 has_generic = true
@@ -2034,20 +2036,22 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
             -- Use body_ann_fn_tid (skolemized) for fn_scope bindings (what the
             -- body sees — skolem vars that cannot be bound by the solver).
             local aft_orig = ann_fn_tid and ctx.types:get(ann_fn_tid)
+            local aftb_ps, aftb_pl = types_mod.fn_params_start(aft_body), types_mod.fn_params_len(aft_body)
             for i = 0, pl - 1 do
                 local name_id = ctx.ast_lists:get(ps + i)
                 -- Body binding uses skolemized param (or fresh var if no annotation slot)
                 local body_pt_id
-                if i < aft_body.data[1] then
-                    body_pt_id = types_mod.find(ctx, ctx.lists:get(aft_body.data[0] + i))
+                if i < aftb_pl then
+                    body_pt_id = types_mod.find(ctx, ctx.lists:get(aftb_ps + i))
                 else
                     body_pt_id = types_mod.make_var(ctx, fn_scope.level)
                 end
                 env_mod.bind(fn_scope, name_id, body_pt_id)
                 -- fn_tid param uses original annotation (FLAG_GENERIC for generic fns)
                 local fn_pt_id
-                if aft_orig and aft_orig.tag == TAG_FUNCTION and i < aft_orig.data[1] then
-                    fn_pt_id = types_mod.find(ctx, ctx.lists:get(aft_orig.data[0] + i))
+                if aft_orig and aft_orig.tag == TAG_FUNCTION
+                  and i < types_mod.fn_params_len(aft_orig) then
+                    fn_pt_id = types_mod.find(ctx, ctx.lists:get(types_mod.fn_params_start(aft_orig) + i))
                 else
                     fn_pt_id = body_pt_id
                 end
@@ -2055,7 +2059,8 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
             end
             if has_vararg then
                 local dots_id = intern_mod.intern(ctx.pool, "...")
-                local vt = aft_body.data[4] >= 0 and aft_body.data[4] or ctx.T_UNKNOWN
+                local va = types_mod.fn_vararg(aft_body)
+                local vt = va >= 0 and va or ctx.T_UNKNOWN
                 env_mod.bind(fn_scope, dots_id, vt)
             end
         else
@@ -2103,8 +2108,8 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
     local push_ret_id = ret_var
     if has_ann_fn and body_ann_fn_tid then
         local aft = ctx.types:get(body_ann_fn_tid)
-        if aft and aft.tag == TAG_FUNCTION and aft.data[3] > 0 then
-            local ann_ret = types_mod.find(ctx, ctx.lists:get(aft.data[2]))
+        if aft and aft.tag == TAG_FUNCTION and types_mod.fn_returns_len(aft) > 0 then
+            local ann_ret = types_mod.find(ctx, ctx.lists:get(types_mod.fn_returns_start(aft)))
             local ann_ret_t = ctx.types:get(ann_ret)
             -- Use the annotated return type for body checking if it is either:
             --   (a) a concrete (non-var) type, or
@@ -2119,7 +2124,7 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
                 is_concrete_or_skolem = true
             end
             if is_concrete_or_skolem then
-                if aft.data[3] == 1 then
+                if types_mod.fn_returns_len(aft) == 1 then
                     -- Single return slot: use it directly.
                     push_ret_id = ann_ret
                     -- Rank-N in return position: if the return slot carries a
@@ -2138,7 +2143,8 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
                     -- only slot 0 is used — the normal `return a, b` path).
                     local slot_ids = {}
                     local all_usable = true
-                    for si = aft.data[2], aft.data[2] + aft.data[3] - 1 do
+                    local aftrs, aftrl = types_mod.fn_returns_start(aft), types_mod.fn_returns_len(aft)
+                    for si = aftrs, aftrs + aftrl - 1 do
                         local slot_tid = types_mod.find(ctx, ctx.lists:get(si))
                         local slot_t = ctx.types:get(slot_tid)
                         local slot_ok = slot_t.tag ~= TAG_VAR and slot_t.tag ~= TAG_ROWVAR
@@ -2214,7 +2220,8 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
         local aft = ctx.types:get(ann_fn_tid)
         if aft and aft.tag == TAG_FUNCTION then
             returns = {}
-            for i = aft.data[2], aft.data[2] + aft.data[3] - 1 do
+            local arts, artl = types_mod.fn_returns_start(aft), types_mod.fn_returns_len(aft)
+            for i = arts, arts + artl - 1 do
                 returns[#returns + 1] = types_mod.find(ctx, ctx.lists:get(i))
             end
         end
@@ -2291,7 +2298,8 @@ local function check_body_against_intersection(ctx, ps, pl, bs, bl, has_vararg,
     local it = ctx.types:get(intersection_tid)
     -- Collect TAG_FUNCTION members
     local members = {}
-    for i = it.data[0], it.data[0] + it.data[1] - 1 do
+    local it_ms, it_ml = types_mod.agg_members_start(it), types_mod.agg_members_len(it)
+    for i = it_ms, it_ms + it_ml - 1 do
         local mid = types_mod.find(ctx, ctx.lists:get(i))
         local mt = ctx.types:get(mid)
         if mt.tag == TAG_FUNCTION then
@@ -2299,7 +2307,7 @@ local function check_body_against_intersection(ctx, ps, pl, bs, bl, has_vararg,
         end
     end
     -- If not all members are functions, fall back to no body check
-    if #members ~= it.data[1] then
+    if #members ~= it_ml then
         return intersection_tid
     end
 
@@ -2460,26 +2468,27 @@ end
 --: (Ctx, integer, { [integer]: integer, ... }, integer, integer) -> integer | nil
 local function try_eager_intrinsic_return(ctx, inst_callee_tid, arg_tids, args_es, args_el)
     local callee_t = ctx.types:get(types_mod.find(ctx, inst_callee_tid))
-    if callee_t.tag ~= TAG_FUNCTION or callee_t.data[3] ~= 1 then return nil end
-    local ret_slot = types_mod.find(ctx, ctx.lists:get(callee_t.data[2]))
+    if callee_t.tag ~= TAG_FUNCTION or types_mod.fn_returns_len(callee_t) ~= 1 then return nil end
+    local ret_slot = types_mod.find(ctx, ctx.lists:get(types_mod.fn_returns_start(callee_t)))
     local ret_t = ctx.types:get(ret_slot)
     -- Must be TAG_SPREAD wrapping a TAG_TYPE_CALL(TAG_INTRINSIC, ...) or TAG_MATCH_TYPE
     if ret_t.tag ~= defs.TAG_SPREAD then return nil end
-    local inner = types_mod.find(ctx, ret_t.data[0])
+    local inner = types_mod.find(ctx, types_mod.spread_inner(ret_t))
     local inner_t = ctx.types:get(inner)
 
     -- TAG_MATCH_TYPE in return spread: evaluate eagerly if match param is concrete.
     -- This handles match-alias equivalents of $PcallReturn (e.g. PcallReturn<F>).
     if inner_t.tag == defs.TAG_MATCH_TYPE then
-        local match_param = types_mod.find(ctx, inner_t.data[0])
+        local match_param = types_mod.find(ctx, types_mod.match_param(inner_t))
         local mpt = ctx.types:get(match_param)
         if mpt.tag == TAG_VAR then
             -- Find the function parameter this generic TV corresponds to and resolve
             -- it to the actual argument type.
-            local params_len = callee_t.data[1]
+            local params_len = types_mod.fn_params_len(callee_t)
+            local params_start = types_mod.fn_params_start(callee_t)
             local concrete_arg = nil
             for pi = 0, params_len - 1 do
-                local param = types_mod.find(ctx, ctx.lists:get(callee_t.data[0] + pi))
+                local param = types_mod.find(ctx, ctx.lists:get(params_start + pi))
                 if param == match_param then
                     if arg_tids[pi + 1] then
                         concrete_arg = types_mod.find(ctx, arg_tids[pi + 1])
@@ -2502,8 +2511,8 @@ local function try_eager_intrinsic_return(ctx, inst_callee_tid, arg_tids, args_e
                 local new_mt = types_mod.alloc_type(ctx, defs.TAG_MATCH_TYPE)
                 local mtt = ctx.types:get(new_mt)
                 mtt.data[0] = concrete_arg
-                mtt.data[1] = inner_t.data[1]
-                mtt.data[2] = inner_t.data[2]
+                mtt.data[1] = types_mod.match_arms_start(inner_t)
+                mtt.data[2] = types_mod.match_arms_len(inner_t)
                 local match_mod = require("lib.type.static.match")
                 return match_mod.evaluate(ctx, new_mt, {})
             end
@@ -2573,13 +2582,15 @@ local function peek_callee_ret_union(ctx, callee_n)
     -- Skip generic functions: their return type contains FLAG_GENERIC vars that won't be
     -- bound in the solver (only the instantiated fresh vars get bound at call sites).
     -- Peeking at the generic template would bind the local to the wrong (generic) type.
-    for pi = fn_t.data[0], fn_t.data[0] + fn_t.data[1] - 1 do
+    local fn_ps, fn_pl = types_mod.fn_params_start(fn_t), types_mod.fn_params_len(fn_t)
+    for pi = fn_ps, fn_ps + fn_pl - 1 do
         local ptid = types_mod.find(ctx, ctx.lists:get(pi))
         if ctx.types:get(ptid).flags == defs.FLAG_GENERIC then return nil end
     end
-    local returns_len = fn_t.data[3]
+    local fn_rs = types_mod.fn_returns_start(fn_t)
+    local returns_len = types_mod.fn_returns_len(fn_t)
     if returns_len == 1 then
-        local ret_slot = types_mod.find(ctx, ctx.lists:get(fn_t.data[2]))
+        local ret_slot = types_mod.find(ctx, ctx.lists:get(fn_rs))
         local ret_t = ctx.types:get(ret_slot)
         -- Reject unresolved types; accept anything concrete.
         -- Callers use eager_slot for TAG_TUPLE/union-of-tuples (multi-return)
@@ -2592,7 +2603,7 @@ local function peek_callee_ret_union(ctx, callee_n)
         -- Explicit multi-return: TAG_SPREAD in return position wraps the tuple/union-of-tuples.
         -- Unwrap and return the inner type directly — eager_slot handles it.
         if ret_t.tag == defs.TAG_SPREAD then
-            return types_mod.find(ctx, ret_t.data[0])
+            return types_mod.find(ctx, types_mod.spread_inner(ret_t))
         end
         -- Single-value return (no spread): always wrap in a 1-tuple.
         return types_mod.make_tuple(ctx, { ret_slot })
@@ -2600,7 +2611,7 @@ local function peek_callee_ret_union(ctx, callee_n)
         -- Multi-return function: collect all return slots and wrap into a TAG_TUPLE.
         local slots = {}
         for i = 0, returns_len - 1 do
-            local slot = types_mod.find(ctx, ctx.lists:get(fn_t.data[2] + i))
+            local slot = types_mod.find(ctx, ctx.lists:get(fn_rs + i))
             local st = ctx.types:get(slot)
             -- Bail if any slot is unresolved or deferred.
             if st.tag == TAG_VAR or st.tag == TAG_ROWVAR then return nil end
@@ -2628,29 +2639,32 @@ local function eager_slot(ctx, tid, slot)
     local function unwrap_spread(elem_id)
         local et = ctx.types:get(elem_id)
         if et.tag == defs.TAG_SPREAD then
-            return types_mod.find(ctx, et.data[0])
+            return types_mod.find(ctx, types_mod.spread_inner(et))
         end
         return elem_id
     end
     -- A raw vararg spread (e.g. string.match returns ...(string | nil)):
     -- each slot extracts the inner element type.
     if t.tag == defs.TAG_SPREAD then
-        return types_mod.find(ctx, t.data[0])
+        return types_mod.find(ctx, types_mod.spread_inner(t))
     end
     if t.tag == defs.TAG_TUPLE then
-        if slot < t.data[1] then
-            return unwrap_spread(types_mod.find(ctx, ctx.lists:get(t.data[0] + slot)))
+        local tp_s, tp_l = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
+        if slot < tp_l then
+            return unwrap_spread(types_mod.find(ctx, ctx.lists:get(tp_s + slot)))
         end
         return ctx.T_NIL
     end
     if t.tag == TAG_UNION then
         local parts = {} --: { [integer]: integer, ... }
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local u_s, u_l = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
+        for i = u_s, u_s + u_l - 1 do
             local arm = types_mod.find(ctx, ctx.lists:get(i))
             local arm_t = ctx.types:get(arm)
             if arm_t.tag ~= defs.TAG_TUPLE then return nil end
-            if slot < arm_t.data[1] then
-                parts[#parts + 1] = unwrap_spread(types_mod.find(ctx, ctx.lists:get(arm_t.data[0] + slot)))
+            local arm_s, arm_l = types_mod.agg_members_start(arm_t), types_mod.agg_members_len(arm_t)
+            if slot < arm_l then
+                parts[#parts + 1] = unwrap_spread(types_mod.find(ctx, ctx.lists:get(arm_s + slot)))
             else
                 parts[#parts + 1] = ctx.T_NIL
             end
@@ -2738,16 +2752,17 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
         local call_fn_t = ctx.types:get(call_fn_tid)
         local ret = fresh_var(ctx)
         if call_fn_t.tag == TAG_FUNCTION then
-            local rl = call_fn_t.data[3]
+            local rl = types_mod.fn_returns_len(call_fn_t)
+            local cfn_rs = types_mod.fn_returns_start(call_fn_t)
             if rl == 0 then
                 emit(ctx, M.make_unify(ret, ctx.T_NIL, n.line, n.col))
             elseif rl == 1 then
-                local first_ret = types_mod.find(ctx, ctx.lists:get(call_fn_t.data[2]))
+                local first_ret = types_mod.find(ctx, ctx.lists:get(cfn_rs))
                 emit(ctx, M.make_unify(ret, first_ret, n.line, n.col))
             else
                 local slots = {}
                 for ri = 0, rl - 1 do
-                    slots[ri + 1] = types_mod.find(ctx, ctx.lists:get(call_fn_t.data[2] + ri))
+                    slots[ri + 1] = types_mod.find(ctx, ctx.lists:get(cfn_rs + ri))
                 end
                 emit(ctx, M.make_unify(ret, types_mod.make_tuple(ctx, slots), n.line, n.col))
             end
@@ -2808,8 +2823,8 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                 emit(ctx, M.make_bound(fresh_tv, inst_bound, n.line, n.col))
                 local resolved_bound = types_mod.find(ctx, inst_bound)
                 local bt = ctx.types:get(resolved_bound)
-                if bt.tag == defs.TAG_NAMED and bt.data[2] == 0 then
-                    local alias = env_mod.lookup_type(ctx.scope, bt.data[0])
+                if bt.tag == defs.TAG_NAMED and types_mod.named_args_len(bt) == 0 then
+                    local alias = env_mod.lookup_type(ctx.scope, types_mod.named_name_id(bt))
                     if alias and alias.params and #alias.params >= 1 then
                         hkt_fresh_to_bound = hkt_fresh_to_bound or {}
                         hkt_fresh_to_bound[fresh_tv] = resolved_bound
@@ -2834,17 +2849,19 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
             local appears_in_return_as_callee = {}
             local ic = ctx.types:get(inst_callee)
             if ic.tag == TAG_FUNCTION then
-                local p_start, p_len = ic.data[0], ic.data[1]
+                local p_start, p_len = types_mod.fn_params_start(ic), types_mod.fn_params_len(ic)
                 for i = 0, p_len - 1 do
                     local slot_tid = ctx.lists:get(p_start + i)
                     local slot_root = types_mod.find(ctx, slot_tid)
                     local slot = ctx.types:get(slot_root)
                     if slot.tag == defs.TAG_TYPE_CALL then
-                        local callee2 = types_mod.find(ctx, slot.data[0])
+                        local callee2 = types_mod.find(ctx, types_mod.tycall_callee(slot))
                         local bound_alias = hkt_fresh_to_bound[callee2]
                         if bound_alias then
                             decomposed[callee2] = true
                             local args_list = {}
+                            -- TODO(C14): direct reads here; tycall accessors trigger
+                            -- spurious cascading errors elsewhere.
                             for j = slot.data[1], slot.data[1] + slot.data[2] - 1 do
                                 args_list[#args_list + 1] = ctx.lists:get(j)
                             end
@@ -2868,11 +2885,11 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                         appears_bare_in_param[slot_root] = true
                     end
                 end
-                local r_start, r_len = ic.data[2], ic.data[3]
+                local r_start, r_len = types_mod.fn_returns_start(ic), types_mod.fn_returns_len(ic)
                 for i = 0, r_len - 1 do
                     local rslot = ctx.types:get(types_mod.find(ctx, ctx.lists:get(r_start + i)))
                     if rslot.tag == defs.TAG_TYPE_CALL then
-                        local rcallee = types_mod.find(ctx, rslot.data[0])
+                        local rcallee = types_mod.find(ctx, types_mod.tycall_callee(rslot))
                         if hkt_fresh_to_bound[rcallee] then
                             appears_in_return_as_callee[rcallee] = true
                         end
@@ -3016,23 +3033,24 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
     if fe then
         local mth_fn_tid = types_mod.find(ctx, fe.type_id)
         local mth_fn_t = ctx.types:get(mth_fn_tid)
-        if mth_fn_t.tag == TAG_FUNCTION and mth_fn_t.data[3] == 1 then
+        if mth_fn_t.tag == TAG_FUNCTION and types_mod.fn_returns_len(mth_fn_t) == 1 then
             -- Check it's not generic
             local is_generic = false
-            for pi = mth_fn_t.data[0], mth_fn_t.data[0] + mth_fn_t.data[1] - 1 do
+            local mps, mpl = types_mod.fn_params_start(mth_fn_t), types_mod.fn_params_len(mth_fn_t)
+            for pi = mps, mps + mpl - 1 do
                 local ptid = types_mod.find(ctx, ctx.lists:get(pi))
                 if ctx.types:get(ptid).flags == defs.FLAG_GENERIC then
                     is_generic = true; break
                 end
             end
             if not is_generic then
-                local ret_slot = types_mod.find(ctx, ctx.lists:get(mth_fn_t.data[2]))
+                local ret_slot = types_mod.find(ctx, ctx.lists:get(types_mod.fn_returns_start(mth_fn_t)))
                 local ret_t = ctx.types:get(ret_slot)
                 if ret_t.tag ~= TAG_VAR and ret_t.tag ~= TAG_ROWVAR
                     and ret_t.tag ~= defs.TAG_TYPE_CALL then
                     local override
                     if ret_t.tag == defs.TAG_SPREAD then
-                        override = types_mod.find(ctx, ret_t.data[0])
+                        override = types_mod.find(ctx, types_mod.spread_inner(ret_t))
                     else
                         override = types_mod.make_tuple(ctx, { ret_slot })
                     end
@@ -3106,9 +3124,9 @@ local function fn_returns_never(ctx, fn_tid)
     fn_tid = types_mod.find(ctx, fn_tid)
     local ft = ctx.types:get(fn_tid)
     if not ft or ft.tag ~= TAG_FUNCTION then return false end
-    -- Check first return type is T_NEVER (data[3] = ret count, data[2] = ret list start).
-    if ft.data[3] < 1 then return false end
-    local ret0 = types_mod.find(ctx, ctx.lists:get(ft.data[2]))
+    -- Check first return type is T_NEVER.
+    if types_mod.fn_returns_len(ft) < 1 then return false end
+    local ret0 = types_mod.find(ctx, ctx.lists:get(types_mod.fn_returns_start(ft)))
     return ret0 == ctx.T_NEVER
 end
 
@@ -3264,11 +3282,11 @@ local function apply_unseals_before(ctx, before_line)
                     if nt.tag ~= TAG_NOMINAL then
                         errors_mod.error(ctx.err, ctx.filename, line, 1,
                             "unseal: `" .. vname .. "` is not an opaque type")
-                    elseif not (ctx._opaque_nominals and ctx._opaque_nominals[nt.data[1]]) then
+                    elseif not (ctx._opaque_nominals and ctx._opaque_nominals[types_mod.nom_identity(nt)]) then
                         errors_mod.error(ctx.err, ctx.filename, line, 1,
                             "unseal: `" .. vname .. "` is a newtype, not an opaque type — unseal only works with $Opaque<T>")
                     else
-                        local inner_tid = types_mod.find(ctx, nt.data[2])
+                        local inner_tid = types_mod.find(ctx, types_mod.nom_underlying(nt))
                         env_mod.bind(ctx.scope, name_id, inner_tid)
                     end
                 end
@@ -3298,7 +3316,7 @@ end
 local function try_promote_enum(ctx, tbl_tid, enum_name_id)
     local ot = ctx.types:get(types_mod.find(ctx, tbl_tid))
     if ot.tag ~= TAG_TABLE then return end
-    local fs, fl = ot.data[0], ot.data[1]
+    local fs, fl = types_mod.tbl_fields_start(ot), types_mod.tbl_fields_len(ot)
     if fl == 0 then return end
     local lit_kind = nil
     local entries = {} --: { [integer]: { feid: integer, member_name_id: integer, lit_kind: integer, value: integer, ... }, ... }
@@ -3306,12 +3324,12 @@ local function try_promote_enum(ctx, tbl_tid, enum_name_id)
         local fe = ctx.fields:get(ctx.lists:get(i))
         local vt = ctx.types:get(types_mod.find(ctx, fe.type_id))
         if vt.tag ~= TAG_LITERAL then return end
-        local k = vt.data[0]
+        local k = types_mod.lit_kind(vt)
         if k ~= LIT_INTEGER and k ~= LIT_STRING then return end  -- booleans/nil: skip
         if lit_kind == nil then lit_kind = k
         elseif lit_kind ~= k then return end  -- mixed kinds: not an enum
         entries[#entries + 1] = { feid = ctx.lists:get(i), member_name_id = fe.name_id,
-                                  lit_kind = k, value = vt.data[1] }
+                                  lit_kind = k, value = types_mod.lit_str_id(vt) }
     end
     for _, info in ipairs(entries) do
         local mem_tid = types_mod.make_enum_member(ctx, enum_name_id,
