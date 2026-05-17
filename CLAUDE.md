@@ -71,7 +71,7 @@ nix develop                  # Dev shell for contributors (bun, etc.)
 
 Context is poisoned the moment you confidently state something wrong. Retraction does not fully undo it; downstream reasoning is already shaped by the bad claim. Prevention is the only real mitigation — rules that fire after the assertion cannot recover it.
 
-**Write things down immediately.** Problems and tech debt → TODO.md. Design decisions → docs/. Completed items → mark `[x]` in TODO.md in the same commit. Conversation evaporates — if it matters to a future session, write it now. Never delete unchecked TODO items.
+**Write things down immediately.** Problems and tech debt → TODO.md. Design decisions → docs/. Completed items → mark `[x]` in TODO.md in the same commit. Conversation evaporates — if it matters to a future session, write it now. Never delete unchecked TODO items. Docs change in the same commit as the code that motivates them — no follow-up docs commits.
 
 **`docs/batteries.md` is the definitive ecosystem scope document.** Read it before discussing future libraries or roadmap.
 
@@ -179,6 +179,8 @@ Never silently work around a hang (skip the file, longer timeout, batch differen
 Every byte that enters the main session stays in the main session for its entire lifetime. File contents, command output, search results, page text — once read, it lingers in cache and shapes every downstream token. There is no "just looking." Renaming the activity ("quick check", "spot read") does not change what it is.
 
 **Delegation criterion: poison risk, not uncertainty.** The question before spawning a subagent is "will doing this in the main thread flood my context with material I don't need to retain?" — not "am I unsure how to do this?" Exploration (broad search, reading many files to find something, scanning logs) almost always delegates: the byproduct is context noise regardless of how confident you are in the search. Uncertain *implementation* work does the opposite — it stays with the orchestrator until the spec is solid, because a delegated agent inherits the prompt as ground truth and burns quota proving wrong premises. If you don't know what to build, talk to the user; don't launder the uncertainty into a subagent prompt.
+
+**Subagent model tiers.** Opus for design, architecture, and any subagent that itself spawns subagents. Sonnet for implementation, mechanical multi-file work, and default exploration. Use Opus for exploration only when the search requires architectural judgment, not lookup.
 
 **Subagent prompts must have a hard scope.** Every delegation prompt must specify exactly what the agent should do and when to stop — not "fix what you can" but "fix these N files, then stop." Open-ended prompts ("fix the clearly quick ones", "clean up what you find") produce agents that run for hours burning quota. If the scope is genuinely open-ended, break it into explicit batches before delegating.
 
