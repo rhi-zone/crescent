@@ -13,6 +13,20 @@ result is "my repro is wrong" or "this is a typechecker bug" — not
 For design rationale (why the system is shaped this way) see
 `docs/type-system.md`. For the soundness audit see `docs/soundness-audit.md`.
 
+## Soundness status
+
+As of 2026-05-17: no known open soundness gaps. All items identified in
+`docs/soundness-audit.md` are either closed, by-design-acceptable, or
+reclassified as expressiveness rather than soundness (see commits `275f7ef5`,
+`cb054b83`). `docs/soundness-audit.md` is the authoritative source — if you
+suspect a soundness issue, check there first, then write a 5-line repro.
+
+Open expressiveness gaps (not soundness): variance annotations
+(`docs/typechecker-variance.md`), impredicativity, HKT through
+record-of-generic-functions dispatch (see HKT section below). These do not
+admit unsound programs; they reject programs that would type in a more
+expressive system.
+
 ## Annotation syntax
 
 ```lua
@@ -90,6 +104,15 @@ Literal types are subtypes of their base type: `42 <: integer <: number`.
 
 `...` and `{ [K]: V }` are distinct. `{ name: string, ... }` does NOT mean any string key maps to any type — that is `{ [string]: unknown }`.
 
+**Brace-tuple positional slots:** `{ A, B, C }` is a tuple-shaped table type
+whose slots are positional. `c[N]` for integer-literal `N` narrows to slot N's
+type (parser fix `58d10766`, expression-side `0c2939d2`). Excess-indexer
+checking now catches `{ "a", 2 }` declared as `{ [number]: string }` — slots
+beyond the declared indexer type are rejected.
+
+**FFI fixed-size arrays:** `cdata_struct.array_field[index]` correctly narrows
+to the element type of the fixed-size array (commit `bb930ab5`).
+
 ## Function types
 
 ```lua
@@ -136,7 +159,42 @@ Field access on intersection: a field present in ANY member is accessible.
 --:: MyAlias<T: Bound, U = string> = { key: T, val: U }
 ```
 
-Type params are instantiated independently per call site. No explicit instantiation syntax — the checker infers from arguments.
+Type params are instantiated independently per call site. No explicit instantiation syntax — the checker infers from arguments (see `ANN_TYPE_ARGS` below for the escape hatch).
+
+**Status (rank-1 let-polymorphism):** sound and complete. Body operations on a
+generic parameter constrain call-site arguments correctly (HM Phase 1 + Phase 2,
+landed pre-session in the `52873f05` series).
+
+**Status (rank-N call-site subsumption):** sound. Forall-typed function
+parameters are checked via skolemization with a per-call escape check (commit
+`289bc54d`; tests in `lib/type/static/type_soundness_test.lua` under
+"soundness: rank-N polymorphism call-site"). Higher-rank values that are not
+themselves call-site parameters (impredicative use, e.g. `Maybe (∀a. a -> a)`
+as a stored value) are not yet first-class — this is an expressiveness gap, not
+a soundness gap.
+
+## Higher-kinded types (HKT)
+
+```lua
+--:: Functor<F> = { map: <A, B>(F<A>, (A) -> B) -> F<B> }
+--:: Maybe<T>   = T | nil
+```
+
+**Status (direct-call composition):** working. `fmap`, `pure`, monad-bind
+shapes typecheck. `Functor<F>` record-shaped constraints resolve correctly
+(commits `d1fa020e` through `4f453fbb`; constraint resolution at `d4684ac2`).
+
+**Known gap (H2 — record-of-generic-functions dispatch):** calls of the form
+`Functor<Maybe>.map(value, f)` — where the dispatch goes through a record
+field whose value is itself a forall with `TAG_TYPE_CALL` slots — do not emit
+`C_HKT_DECOMPOSE` for the inner forall and fail to unify. The direct-call
+path works; only the record-field-access call-site path is affected. Design
+notes in `docs/generic-params-spec.md` and `docs/typechecker-hkt-broader.md`.
+This is expressiveness, not soundness — affected calls are rejected, not
+miscompiled.
+
+`TAG_PARTIAL_APP` works inside `$EachField` contexts (commit `22f1e8fa`) and
+not in arbitrary annotation positions. This is an expressiveness limitation.
 
 ## Casts
 
