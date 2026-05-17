@@ -3872,10 +3872,12 @@ local y = fmap(x, function(a) return tostring(a) end)
 ]])
     end)
 
-    -- H2: Functor<Maybe> record instantiation, then call .map. Today: F
-    -- substitutes to TAG_NAMED(Maybe) but the inner `<A,B>` forall keeps
-    -- TAG_TYPE_CALL(Maybe, A) un-re-resolved at call time.
-    assert.it("H2: Functor<Maybe>.map — currently errors with Maybe(_)", function()
+    -- H2: Functor<Maybe> record instantiation, then call .map. F substitutes
+    -- to TAG_NAMED(Maybe), but the inner `<A,B>` forall keeps
+    -- TAG_TYPE_CALL(Maybe, A) un-re-resolved at the method-call site —
+    -- the method-dispatch path does not emit C_HKT_DECOMPOSE for the inner
+    -- forall's params. Remaining gap; tracked as a known limitation.
+    assert.it("H2 (KNOWN GAP): Functor<Maybe>.map — still errors with Maybe(_) at method dispatch", function()
         has_error([[
 --:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
 --:: Functor<F: Maybe> = { map: <A, B>(F<A>, (A) -> B) -> F<B> }
@@ -3936,13 +3938,13 @@ local y = fmap_int_str(x, function(a) return tostring(a) end)
     -- Pinned at today's silent-ish behavior (errors via unify) — after the
     -- decomposition path lands and detects TAG_MATCH_TYPE bodies, this
     -- assertion gets updated to look for the explicit error string.
-    assert.it("H6: match-typed alias body as HKT bound — currently errors at unify, target is explicit non-invertible error", function()
+    assert.it("H6: match-typed alias body as HKT bound — emits explicit non-invertible error", function()
         has_error([[
 --:: NotInvertible<X> = match X { integer => string, _ => boolean }
 --:: declare bad = <F: NotInvertible, A>(fa: F<A>) -> nil
 local x = "hi" --: string
 bad(x)
-]])
+]], "non%-invertible alias body")
     end)
 end)
 
