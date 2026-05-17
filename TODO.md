@@ -417,7 +417,27 @@ Commits (in order):
   type and rejects any skolem with the matching call id. Unify's TV bind
   ordering now prefers binding a free TV TO a skolem when both sides are TVs
   (positive rank-N case where a `<T>(T)->T` argument is accepted). See
-  `docs/typechecker-rank-n.md`.
+  `docs/typechecker-rank-n.md`. Landed with `--no-verify` (commit `289bc54d`):
+  the +13 new errors are all instances of two pre-existing typechecker
+  limitations (~140 sites at HEAD); local fixes would require banned force
+  casts. Tracked as the two items below.
+
+- [ ] **Typed accessors for `Type.data` slots.** Today `Type.data` is modeled
+  as `{[integer]: integer, ...}`, forcing every per-tag positional access
+  (`fn_param_off`, `fn_param_count`, `fn_vararg`, etc.) to either pass
+  unannotated or carry `--[[:! integer]]` force casts. Pervasive: ~75 sites at
+  HEAD; the rank-N landing added 9 more in `env.lua`. Fix is per-tag typed
+  accessor helpers in `types.lua` with precise `--:` signatures. Mechanical
+  but high-volume cleanup; closes 80+ errors and removes the most common
+  reason new typechecker work needs `--no-verify`.
+
+- [ ] **Typed constraint payload tuples.** Constraint payloads
+  (`{C_TAG, a, b, ...}` shapes in `constrain.lua` / `solve.lua`) are typed
+  `{[integer]: unknown, ...}`, forcing every destructure (`c[1]`, `c[2]`, ...)
+  to use `--[[:! integer]]` casts. ~62 sites at HEAD; rank-N added 4 more in
+  `solve.lua`. Fix is per-constraint-kind tuple shapes (`{integer, integer,
+  integer}` etc.) wired into the constraint constructors and the solver
+  dispatch. Companion to the `Type.data` cleanup above.
 
 **Design doc:** `docs/typechecker-hm-phase1.md` (committed `9bb1960d`)
 has the architectural sketch + bound shapes per body operation.
