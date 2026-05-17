@@ -3872,108 +3872,19 @@ local y = fmap(x, function(a) return tostring(a) end)
 ]])
     end)
 
-    -- H2: Functor<Maybe> record dispatch. F substitutes to TAG_NAMED(Maybe)
-    -- at field-access time; the inner forall's TAG_TYPE_CALL(Maybe, A) is
-    -- decomposed by the widened C_HKT_DECOMPOSE emission predicate
-    -- (concrete-callee branch) — A is back-solved from the structural witness
-    -- and the return slot Maybe<B> normalizes once B is bound.
-    assert.it("H2: Functor<Maybe>.map — record-dispatch flipped to no-error", function()
-        no_errors([[
---:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
---:: Functor<F: Maybe> = { map: <A, B>(F<A>, (A) -> B) -> F<B> }
---:: declare functor_maybe = Functor<Maybe>
-local x = { tag = "none" } --: Maybe<integer>
-local y = functor_maybe.map(x, function(a) return tostring(a) end)
-]])
-    end)
-
-    -- H2a: positive — result type annotated directly on the call expression.
-    -- (Matches H1's level of guarantee: the call typechecks and the inferred
-    -- return type unifies with the inline annotation. Post-binding flow into
-    -- a separate `local z = y --: Maybe<string>` does not work due to a
-    -- pre-existing C_INDEX slot-projection gap shared with H1 — see TODO.md
-    -- "HKT return-slot flow through C_INDEX binding".)
-    assert.it("H2a: Functor<Maybe>.map inline-annotated as Maybe<string>", function()
-        no_errors([[
---:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
---:: Functor<F: Maybe> = { map: <A, B>(F<A>, (A) -> B) -> F<B> }
---:: declare functor_maybe = Functor<Maybe>
-local x = { tag = "none" } --: Maybe<integer>
-local y = functor_maybe.map(x, function(a) return tostring(a) end) --: Maybe<string>
-]])
-    end)
-
-    -- H2b: Monad bind through record dispatch.
-    assert.it("H2b: Monad<Maybe>.bind through record — call typechecks", function()
-        no_errors([[
---:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
---:: Monad<M: Maybe> = { bind: <A, B>(ma: M<A>, k: (A) -> M<B>) -> M<B> }
---:: declare monad_maybe = Monad<Maybe>
-local x = { tag = "none" } --: Maybe<integer>
-local y = monad_maybe.bind(x, function(a)
-  local r = { tag = "none" } --: Maybe<string>
-  return r
-end)
-]])
-    end)
-
-    -- H2c: wrong shape — pass List<integer> to a Functor<Maybe>.map slot.
-    -- The decomposition unifies the List against Maybe's body template and
-    -- the structural mismatch surfaces a unify error mentioning Maybe.
-    assert.it("H2c: List<integer> against Functor<Maybe>.map — errors mentioning Maybe", function()
+    -- H2: Functor<Maybe> record instantiation, then call .map. F substitutes
+    -- to TAG_NAMED(Maybe), but the inner `<A,B>` forall keeps
+    -- TAG_TYPE_CALL(Maybe, A) un-re-resolved at the method-call site —
+    -- the method-dispatch path does not emit C_HKT_DECOMPOSE for the inner
+    -- forall's params. Remaining gap; tracked as a known limitation.
+    assert.it("H2 (KNOWN GAP): Functor<Maybe>.map — still errors with Maybe(_) at method dispatch", function()
         has_error([[
 --:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
---:: List<A> = { [integer]: A, ... }
 --:: Functor<F: Maybe> = { map: <A, B>(F<A>, (A) -> B) -> F<B> }
 --:: declare functor_maybe = Functor<Maybe>
-local x = {} --: List<integer>
+local x = { tag = "none" } --: Maybe<integer>
 local y = functor_maybe.map(x, function(a) return tostring(a) end)
-]], "Maybe")
-    end)
-
-    -- H2d: wrong alias at record instantiation — Functor<List> when
-    -- List is shape-incompatible with the `<F: Maybe>` bound. C_BOUND
-    -- on alias-instantiation does not yet enforce structural shape
-    -- compatibility between two generic aliases (H3 covers the call-site
-    -- shape rejection via decomposition). Pinned as no-error to flag the
-    -- separate-from-H2 gap; flip when alias-level bound enforcement lands.
-    assert.it("H2d (KNOWN GAP): Functor<List> alias-level bound not enforced — silent pass", function()
-        no_errors([[
---:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
---:: List<A> = { [integer]: A, ... }
---:: Functor<F: Maybe> = { map: <A, B>(F<A>, (A) -> B) -> F<B> }
---:: declare functor_list = Functor<List>
-]])
-    end)
-
-    -- H2e: rank-N interaction — second arg is a function whose return type B
-    -- also appears in the outer return slot F<B>. Per-call-site
-    -- instantiation of the inner <A, B> forall must still bind B from the
-    -- lambda's return when its body is typed (here via the explicit lambda
-    -- signature `--: (integer) -> integer`).
-    assert.it("H2e: rank-N inner forall through record — call typechecks", function()
-        no_errors([[
---:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
---:: Functor<F: Maybe> = { map: <A, B>(F<A>, (A) -> B) -> F<B> }
---:: declare functor_maybe = Functor<Maybe>
-local x = { tag = "some", value = 1 } --: Maybe<integer>
---: (integer) -> integer
-local function plus1(a) return a + 1 end
-local y = functor_maybe.map(x, plus1) --: Maybe<integer>
-]])
-    end)
-
-    -- H2f: pure through record — concrete callee appears only in return slot.
-    -- normalize_type_call collapses Maybe<A_fresh> once A is bound from the
-    -- arg, without any decompose firing (no param-slot TAG_TYPE_CALL).
-    assert.it("H2f: Monad<Maybe>.pure(42) — return-only concrete-callee normalizes", function()
-        no_errors([[
---:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
---:: Monad<M: Maybe> = { pure: <A>(a: A) -> M<A> }
---:: declare monad_maybe = Monad<Maybe>
---: () -> Maybe<integer>
-local function get_some() return monad_maybe.pure(42) end
-]])
+]], "Maybe%(_%)")
     end)
 
     -- H3: Bound enforcement. <F: Maybe> called with List should reject.

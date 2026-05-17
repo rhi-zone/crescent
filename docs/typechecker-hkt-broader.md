@@ -1,19 +1,13 @@
 # Typechecker — Broader HKT (F<A> Composition)
 
-Design for B1 in the typechecker roadmap. **H1, H3, H4, H5, H6 landed.**
-**H2 (record-of-generic-functions dispatch) landed** via Approach (B)
-predicate widening plus a NODE_CALL_EXPR field-callee resolution step that
-substitutes the field's actual function type for the C_INDEX result TV
-before per-call-site instantiation. See `docs/typechecker-hkt-h2.md` for the
-H2 design and `lib/type/static/type_soundness_test.lua` for the pinned tests
-(H2, H2a-H2f).
-
-Residual gap (not H2-specific): `local y = call(...)` binds `y` via C_INDEX
-slot projection. When the call's return slot is `TAG_TYPE_CALL(NAMED:Maybe,
-B)` and B is bound after the slot binding, the post-binding type-flow into
-`y` does not re-normalize the TAG_TYPE_CALL on later uses of `y` (e.g.
-`local z = y --: Maybe<string>`). This affects H1 and H2 equally and is
-tracked separately as a return-slot normalization gap in TODO.md.
+Design for B1 in the typechecker roadmap. **H1, H3, H4, H5, H6 landed.** **H2
+(record-of-generic-functions dispatch) was attempted, reverted, and is now
+pending the (X) redesign** — see `docs/typechecker-h2-correct-design-v2.md`
+for the v2 recommendation. The original H2 commit (`213d8516`) shipped
+Approach (B) (predicate widening + a NODE_CALL_EXPR callee override) but the
+override was unsound; per v2, predicate widening alone is sound-but-useless
+and the full commit was reverted in favour of deferred instantiation as a
+first-class solver constraint (option X), to be designed in a future session.
 
 ## The gap
 
