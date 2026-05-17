@@ -168,7 +168,31 @@ see `docs/typechecker-variance.md` for the full design and demotion rationale.
 
 ---
 
-## Gap 4 — Recursive types: well-handled, mostly not a gap
+## Gap 4 — Recursive types: VERIFIED ACCEPTABLE
+
+**Status:** Verified acceptable (this session). The originally-documented
+"remaining edge case" is by-design-acceptable given the "Very low" severity
+of this gap; the load-bearing protections are all in place.
+
+**Resolution.** The occurs check is active in `bind_var` at
+`lib/type/static/unify.lua:173`. Additional cycle guards landed across three
+commits since the original audit:
+
+- `32b7d5a1` (2026-05-08) — display/widen cycle guards (table `seen`-style
+  protection on the rendering and widening paths).
+- `d1bb4b92` — multi-child recursive generic cycle detection (handles cycles
+  threaded through type-constructor arguments, not just direct self-reference).
+- `3d076116` — coinductive cycle detection in `unify` itself (so recursive
+  table types unify productively instead of looping).
+
+Mutual recursion via non-table types (e.g. two function types pointing to
+each other through a chain that never touches a table) remains uncovered by
+the table-keyed `seen` guards. Per this gap's own "Very low" severity and
+the rarity of such constructions in the Lua patterns the checker targets,
+this is accepted as by-design rather than tracked as open work. No fix is
+planned.
+
+**Original analysis (kept for archaeology):**
 
 **File:** `unify.lua:43–100` (`occurs`), `unify.lua:146–190` (`bind_var`), `types.lua:660–699`
 **Severity:** Very low
@@ -183,7 +207,16 @@ checker handles; this is not a priority.
 
 ---
 
-## Gap 5 — `make_intersection` does not deduplicate members
+## Gap 5 — `make_intersection` does not deduplicate members — FIXED
+
+**Status:** Fixed in commit `0cd1ab15` (2026-03-15).
+`lib/type/static/types.lua:530-556` now threads a `seen` table through both
+the intersection-flattening loop and the new-member append path, mirroring
+the dedup pattern already used by `make_union`. Duplicate members no longer
+accumulate; arena size and structural-equality behaviour now match the union
+side.
+
+**Original analysis (kept for archaeology):**
 
 **File:** `types.lua:384–408`
 **Severity:** Low (correctness, not soundness)
@@ -418,7 +451,19 @@ runs).
 
 ---
 
-## Gap 10 — Parser silently accepts invalid syntax in `--:` annotations
+## Gap 10 — Parser silently accepts invalid syntax in `--:` annotations — FIXED
+
+**Status:** Fixed in commit `4d711afa` (2026-04-29). The annotation parser is
+now total: after `parse_type` consumes the leading type, any non-whitespace
+remainder triggers a parse error of the form `` `<garbage>` is not part of a
+type annotation ``, pointing at the first unexpected token. A repro of the
+historical buggy forms (`--: integer = "string literal"`, `--: integer ! ! !
+garbage`, `--: integer = totally_undefined`) now errors instead of silently
+discarding the trailing content. This in turn unblocked the Gap 8 / Gap 9
+resolutions documented above (the misleading `local y --: T = x` form no
+longer parses, so the no-initializer footgun cannot be reached through it).
+
+**Original analysis (kept for archaeology):**
 
 **File:** `ann.lua:1153–1155` (the `ANN_TYPE` branch returns immediately after
 `parse_type(s)` without checking for end-of-input).
@@ -592,20 +637,19 @@ replaced by full structural checking once resolution completes.
 | 1 | TAG_VAR in try_unify | ~~Critical~~ **FIXED** | Union/intersection function dispatch silently passes wrong types |
 | 2 | Unannotated params | High | By design; mitigated by implicit-any warnings |
 | 3 | Generic variance annotations | ~~High~~ **Low (demoted)** | Expressiveness only — soundness cases already prevented by structural invariance + function contravariance + FLAG_SKOLEM. See `docs/typechecker-variance.md`. |
-| 4 | Recursive types | Medium | Self-referential types may cause display loops |
-| 5 | Intersection dedup | Low | Arena bloat, no soundness impact |
+| 4 | Recursive types | ~~Medium~~ **Very low (verified acceptable)** | Occurs check active in `unify.lua:173`; display/widen/coinductive cycle guards added in `32b7d5a1`, `d1bb4b92`, `3d076116`. Mutual recursion via non-table types is uncovered and accepted as by-design. |
+| 5 | Intersection dedup | ~~Low~~ **FIXED** | Resolved in commit `0cd1ab15`: `types.lua:530-556` threads a `seen` table through `make_intersection`, matching `make_union`. |
 | 6 | Function arity nil-padding | Low | Correct for Lua semantics |
 | 7 | LIT_INTEGER cross-file | Low | Edge case, deferred |
 | 8 | `local x --: T = expr_of_unknown` | ~~High~~ **FIXED** | Resolved as side-effect of Gap 10 parser totality (commit `4d711af`); regression tests in `type_soundness_test.lua` |
 | 9 | `local x --: T` (no initializer) | ~~High~~ **FIXED** | TS-style rule: declaration rejected when `nil </: T` and there is no initializer. Diagnostic `E.LOCAL_NEEDS_INIT`. Regression tests under `"Gap 9: annotated local without initializer requires nil ∈ T"` in `type_soundness_test.lua`. |
-| 10 | Parser accepts invalid `--:` syntax | High | `--: integer = x` is not a valid type but parser silently accepts the `integer` prefix and drops the rest; enables the Gap 9 footgun |
+| 10 | Parser accepts invalid `--:` syntax | ~~High~~ **FIXED** | Resolved in commit `4d711afa`: parser now errors `` `<garbage>` is not part of a type annotation `` on trailing content after the type. |
 | 11 | `--[[: any]] expr` launders `unknown` | ~~High~~ **FIXED** | Closed by Phase D3 (2026-04-30): `unify.lua` rejects `unknown <: any` in both `M.unify` and `M.try_unify`; covers cast, param, return, and annotation paths. Force cast `--[[:! T]]` is the documented escape. |
 
-**Recommended fix order:**
-1. Gap 5 (trivial: add `seen` table to `make_intersection`)
-2. Gap 10 (small, ann.lua: reject when scanner has unconsumed content after parse_type) — must precede or accompany Gap 9
-3. Gap 9 (TS-style "no initializer + nil ∉ T → reject" rule in constrain.lua)
-4. Gap 11 (small, unify.lua: reject `unknown <: any`)
-5. Gap 1 (requires distinguishing constrained vs. unconstrained TAG_VAR in try_unify)
-6. Gap 4 (occurs check in bind_var)
-7. Gap 3 (variance annotations — expressiveness only, not a soundness fix; design in `docs/typechecker-variance.md`)
+**Recommended fix order (remaining):**
+1. Gap 2 (unannotated parameter inference — by design; mitigated by `implicit-any` warning)
+2. Gap 3 (variance annotations — expressiveness only, not a soundness fix; design in `docs/typechecker-variance.md`)
+3. Gap 6 (function arity nil-padding — correct for Lua semantics)
+4. Gap 7 (LIT_INTEGER cross-file — edge case, deferred)
+
+Already resolved: Gaps 1 (FIXED), 4 (verified acceptable), 5 (FIXED), 8 (FIXED), 9 (FIXED), 10 (FIXED), 11 (FIXED).
