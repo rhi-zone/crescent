@@ -358,7 +358,7 @@ function M.find(ctx, tid)
     while true do
         local t = types:get(root)
         if t.tag ~= TAG_VAR and t.tag ~= TAG_ROWVAR then break end
-        local parent = t.data[2]
+        local parent = M.var_parent(t)
         if parent == -1 then break end  -- unbound root
         if parent == root then break end  -- self-loop: treat as unbound root (defensive)
         root = parent
@@ -368,10 +368,10 @@ function M.find(ctx, tid)
     while cur ~= root do
         local t = types:get(cur)
         if t.tag ~= TAG_VAR and t.tag ~= TAG_ROWVAR then break end
-        local parent = t.data[2]
+        local parent = M.var_parent(t)
         if parent == -1 then break end
         if parent == cur then break end  -- self-loop guard
-        t.data[2] = root
+        t.data[2] = root  -- write (union-find link)
         cur = parent
     end
     return root
@@ -578,7 +578,7 @@ local primitive_lit_kind = {
 local function lit_subsumed_by_prim(ctx, tid, prim_tag)
     local t = ctx.types:get(tid)
     if t.tag ~= TAG_LITERAL then return false end
-    return lit_primitive[t.data[0]] == prim_tag
+    return lit_primitive[M.lit_kind(t)] == prim_tag
 end
 
 -- Return true if flat already contains a type that subsumes tid.
@@ -588,13 +588,14 @@ local function flat_has_supertype(ctx, flat, tid)
     local t = ctx.types:get(tid)
     -- Literal subsumed by its primitive
     if t.tag == TAG_LITERAL then
-        local prim = lit_primitive[t.data[0]]
+        local kind = M.lit_kind(t)
+        local prim = lit_primitive[kind]
         if prim then
             for i = 1, #flat do
                 local ft = ctx.types:get(flat[i])
                 if ft.tag == prim then return true end
                 -- integer literal also subsumed by number
-                if t.data[0] == LIT_INTEGER and ft.tag == TAG_NUMBER then return true end
+                if kind == LIT_INTEGER and ft.tag == TAG_NUMBER then return true end
             end
         end
         return false
@@ -618,10 +619,11 @@ local function remove_subsumed(ctx, flat, new_tag)
         local remove = false
         -- Remove literals subsumed by this primitive
         if ft.tag == TAG_LITERAL then
-            local fprim = lit_primitive[ft.data[0]]
+            local fkind = M.lit_kind(ft)
+            local fprim = lit_primitive[fkind]
             if fprim == new_tag then remove = true end
             -- integer literal subsumed by number
-            if new_tag == TAG_NUMBER and ft.data[0] == LIT_INTEGER then remove = true end
+            if new_tag == TAG_NUMBER and fkind == LIT_INTEGER then remove = true end
         end
         -- Remove integer when adding number
         if new_tag == TAG_NUMBER and ft.tag == TAG_INTEGER then remove = true end
@@ -639,7 +641,7 @@ function M.make_union(ctx, member_ids)
         if t.tag == TAG_ANY     then return ctx.T_ANY end
         if t.tag == TAG_UNKNOWN then return ctx.T_UNKNOWN end
         if t.tag == TAG_UNION then
-            local s, l = t.data[0], t.data[1]
+            local s, l = M.agg_members_start(t), M.agg_members_len(t)
             for j = s, s + l - 1 do
                 local mid = M.find(ctx, ctx.lists:get(j))
                 local mt = ctx.types:get(mid)
@@ -678,7 +680,7 @@ function M.make_intersection(ctx, member_ids)
         local rtid = M.find(ctx, member_ids[i])
         local t = ctx.types:get(rtid)
         if t.tag == TAG_INTERSECTION then
-            local s, l = t.data[0], t.data[1]
+            local s, l = M.agg_members_start(t), M.agg_members_len(t)
             for j = s, s + l - 1 do
                 local mid = M.find(ctx, ctx.lists:get(j))
                 if not seen[mid] then seen[mid] = true; flat[#flat + 1] = mid end
@@ -720,11 +722,12 @@ function M.filter_tuple_union_arms(ctx, union_tid, slot_index, predicate_fn)
     local u = ctx.types:get(root)
     if u.tag ~= TAG_UNION then return nil end
     local surviving = {}
-    for i = u.data[0], u.data[0] + u.data[1] - 1 do
+    local us, ul = M.agg_members_start(u), M.agg_members_len(u)
+    for i = us, us + ul - 1 do
         local arm = M.find(ctx, ctx.lists:get(i))
         local arm_t = ctx.types:get(arm)
-        if arm_t.tag == TAG_TUPLE and arm_t.data[1] > slot_index then
-            local slot_tid = M.find(ctx, ctx.lists:get(arm_t.data[0] + slot_index))
+        if arm_t.tag == TAG_TUPLE and M.agg_members_len(arm_t) > slot_index then
+            local slot_tid = M.find(ctx, ctx.lists:get(M.agg_members_start(arm_t) + slot_index))
             if predicate_fn(slot_tid) then
                 surviving[#surviving + 1] = arm
             end
@@ -759,7 +762,7 @@ function M.widen(ctx, tid, seen)
     tid = M.find(ctx, tid)
     local t = ctx.types:get(tid)
     if t.tag == TAG_LITERAL then
-        local kind = t.data[0]
+        local kind = M.lit_kind(t)
         if kind == LIT_STRING  then return ctx.T_STRING end
         if kind == LIT_NUMBER  then return ctx.T_NUMBER end
         if kind == LIT_BOOLEAN then return ctx.T_BOOLEAN end
@@ -767,15 +770,17 @@ function M.widen(ctx, tid, seen)
         if kind == LIT_INTEGER then return ctx.T_INTEGER end
     end
     if t.tag == TAG_ENUM_MEMBER then
-        if t.data[2] == LIT_INTEGER then return ctx.T_INTEGER end
-        if t.data[2] == LIT_STRING  then return ctx.T_STRING end
+        local ek = M.enum_lit_kind(t)
+        if ek == LIT_INTEGER then return ctx.T_INTEGER end
+        if ek == LIT_STRING  then return ctx.T_STRING end
     end
     if t.tag == TAG_UNION then
         if seen and seen[tid] then return tid end
         seen = seen or {}
         seen[tid] = true
         local members = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local us, ul = M.agg_members_start(t), M.agg_members_len(t)
+        for i = us, us + ul - 1 do
             members[#members + 1] = M.widen(ctx, ctx.lists:get(i), seen)
         end
         seen[tid] = nil
@@ -801,17 +806,21 @@ local function struct_equal(ctx, a, b, seen)
         return true
     end
     if tag == TAG_LITERAL then
-        if ta.data[0] ~= tb.data[0] then return false end
-        if ta.data[0] == LIT_NUMBER then
-            return ta.data[1] == tb.data[1] and ta.data[2] == tb.data[2]
+        local ka, kb = M.lit_kind(ta), M.lit_kind(tb)
+        if ka ~= kb then return false end
+        if ka == LIT_NUMBER then
+            return M.lit_num_lo(ta) == M.lit_num_lo(tb)
+               and M.lit_num_hi(ta) == M.lit_num_hi(tb)
         end
+        -- Shared data[1] payload for string/boolean/integer (lit_str_id / lit_bool / lit_num_lo).
         return ta.data[1] == tb.data[1]
     end
     if tag == TAG_ENUM_MEMBER then
-        return ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1]
+        return M.enum_name_id(ta)   == M.enum_name_id(tb)
+           and M.enum_member_id(ta) == M.enum_member_id(tb)
     end
     if tag == TAG_NOMINAL then
-        return ta.data[1] == tb.data[1]
+        return M.nom_identity(ta) == M.nom_identity(tb)
     end
     -- TAG_CDATA and TAG_FFIC are singletons per compilation unit:
     -- any two nodes with the same tag are structurally equal.
@@ -823,21 +832,25 @@ local function struct_equal(ctx, a, b, seen)
     if seen[key] then return true end  -- assume equal under recursion
     seen[key] = true
     if tag == TAG_UNION or tag == TAG_INTERSECTION then
-        if ta.data[1] ~= tb.data[1] then seen[key] = nil; return false end
-        for i = 0, ta.data[1] - 1 do
-            local ma = M.find(ctx, ctx.lists:get(ta.data[0] + i))
-            local mb = M.find(ctx, ctx.lists:get(tb.data[0] + i))
+        local la, lb = M.agg_members_len(ta), M.agg_members_len(tb)
+        if la ~= lb then seen[key] = nil; return false end
+        local sa, sb = M.agg_members_start(ta), M.agg_members_start(tb)
+        for i = 0, la - 1 do
+            local ma = M.find(ctx, ctx.lists:get(sa + i))
+            local mb = M.find(ctx, ctx.lists:get(sb + i))
             if not struct_equal(ctx, ma, mb, seen) then seen[key] = nil; return false end
         end
         seen[key] = nil; return true
     end
     if tag == TAG_TABLE then
         -- Compare field counts.
-        if ta.data[1] ~= tb.data[1] then seen[key] = nil; return false end
+        local fla, flb = M.tbl_fields_len(ta), M.tbl_fields_len(tb)
+        if fla ~= flb then seen[key] = nil; return false end
+        local fsa, fsb = M.tbl_fields_start(ta), M.tbl_fields_start(tb)
         -- Compare fields pairwise (order-sensitive; both come from same annotation structure).
-        for i = 0, ta.data[1] - 1 do
-            local fa = ctx.fields:get(ctx.lists:get(ta.data[0] + i))
-            local fb = ctx.fields:get(ctx.lists:get(tb.data[0] + i))
+        for i = 0, fla - 1 do
+            local fa = ctx.fields:get(ctx.lists:get(fsa + i))
+            local fb = ctx.fields:get(ctx.lists:get(fsb + i))
             if fa.name_id ~= fb.name_id then seen[key] = nil; return false end
             if fa.flags   ~= fb.flags   then seen[key] = nil; return false end
             if not struct_equal(ctx, fa.type_id, fb.type_id, seen) then
@@ -845,29 +858,35 @@ local function struct_equal(ctx, a, b, seen)
             end
         end
         -- Compare indexer counts and types.
-        if ta.data[3] ~= tb.data[3] then seen[key] = nil; return false end
-        for i = 0, ta.data[3] - 1 do
-            local ka = M.find(ctx, ctx.lists:get(ta.data[2] + i))
-            local kb = M.find(ctx, ctx.lists:get(tb.data[2] + i))
+        local ila, ilb = M.tbl_indexers_len(ta), M.tbl_indexers_len(tb)
+        if ila ~= ilb then seen[key] = nil; return false end
+        local isa, isb = M.tbl_indexers_start(ta), M.tbl_indexers_start(tb)
+        for i = 0, ila - 1 do
+            local ka = M.find(ctx, ctx.lists:get(isa + i))
+            local kb = M.find(ctx, ctx.lists:get(isb + i))
             if not struct_equal(ctx, ka, kb, seen) then seen[key] = nil; return false end
         end
         seen[key] = nil; return true
     end
     if tag == TAG_FUNCTION then
-        if ta.data[1] ~= tb.data[1] or ta.data[3] ~= tb.data[3] then
+        local pla, plb = M.fn_params_len(ta), M.fn_params_len(tb)
+        local rla, rlb = M.fn_returns_len(ta), M.fn_returns_len(tb)
+        if pla ~= plb or rla ~= rlb then
             seen[key] = nil; return false
         end
-        for i = 0, ta.data[1] - 1 do
+        local psa, psb = M.fn_params_start(ta), M.fn_params_start(tb)
+        for i = 0, pla - 1 do
             if not struct_equal(ctx,
-                M.find(ctx, ctx.lists:get(ta.data[0] + i)),
-                M.find(ctx, ctx.lists:get(tb.data[0] + i)), seen) then
+                M.find(ctx, ctx.lists:get(psa + i)),
+                M.find(ctx, ctx.lists:get(psb + i)), seen) then
                 seen[key] = nil; return false
             end
         end
-        for i = 0, ta.data[3] - 1 do
+        local rsa, rsb = M.fn_returns_start(ta), M.fn_returns_start(tb)
+        for i = 0, rla - 1 do
             if not struct_equal(ctx,
-                M.find(ctx, ctx.lists:get(ta.data[2] + i)),
-                M.find(ctx, ctx.lists:get(tb.data[2] + i)), seen) then
+                M.find(ctx, ctx.lists:get(rsa + i)),
+                M.find(ctx, ctx.lists:get(rsb + i)), seen) then
                 seen[key] = nil; return false
             end
         end
@@ -923,9 +942,9 @@ function M.normalize_unions(ctx)
         local ut = ctx.types:get(uid)
         if ut.tag == TAG_UNION then
             --: integer
-            local us = ut.data[0]
+            local us = M.agg_members_start(ut)
             --: integer
-            local ul = ut.data[1]
+            local ul = M.agg_members_len(ut)
             -- Build a deduplicated flat list using resolved member IDs.
             --: { [integer]: integer, ... }
             local flat = {}
@@ -973,7 +992,8 @@ end
 function M.table_field(ctx, tbl_tid, name_id)
     local t = ctx.types:get(tbl_tid)  -- caller must have called find()
     if t.tag ~= TAG_TABLE then return nil end
-    for i = t.data[0], t.data[0] + t.data[1] - 1 do
+    local fs, fl = M.tbl_fields_start(t), M.tbl_fields_len(t)
+    for i = fs, fs + fl - 1 do
         local fid = ctx.lists:get(i)
         local fe = ctx.fields:get(fid)
         if fe.name_id == name_id and band(fe.flags, FLAG_OPAQUE_KEY) == 0 then
@@ -990,7 +1010,8 @@ end
 function M.table_opaque_field(ctx, tbl_tid, key_name_id)
     local t = ctx.types:get(tbl_tid)
     if t.tag ~= TAG_TABLE then return nil end
-    for i = t.data[0], t.data[0] + t.data[1] - 1 do
+    local fs, fl = M.tbl_fields_start(t), M.tbl_fields_len(t)
+    for i = fs, fs + fl - 1 do
         local fid = ctx.lists:get(i)
         local fe = ctx.fields:get(fid)
         if band(fe.flags, FLAG_OPAQUE_KEY) ~= 0 and fe.name_id == key_name_id then
@@ -1006,7 +1027,8 @@ end
 function M.table_meta_field(ctx, tbl_tid, name_id)
     local t = ctx.types:get(tbl_tid)
     if t.tag ~= TAG_TABLE then return nil end
-    for i = t.data[5], t.data[5] + t.data[6] - 1 do
+    local ms, ml = M.tbl_meta_start(t), M.tbl_meta_len(t)
+    for i = ms, ms + ml - 1 do
         local fid = ctx.lists:get(i)
         --: FieldEntry
         local fe = ctx.fields:get(fid) --[[:! FieldEntry]]
@@ -1016,7 +1038,7 @@ function M.table_meta_field(ctx, tbl_tid, name_id)
             --: TypeSlot
             local sp_t  = ctx.types:get(M.find(ctx, fe.type_id)) --[[:! TypeSlot]]
             if sp_t.tag == TAG_SPREAD then
-                local inner_tid = M.find(ctx, sp_t.data[0])
+                local inner_tid = M.find(ctx, M.spread_inner(sp_t))
                 --: TypeSlot
                 local inner_t   = ctx.types:get(inner_tid) --[[:! TypeSlot]]
                 if inner_t.tag == TAG_TABLE then
@@ -1041,7 +1063,8 @@ function M.subtract(ctx, tid, exclude_tid)
     end
     --: { [integer]: integer, ... }
     local remaining = {}
-    for i = t.data[0], t.data[0] + t.data[1] - 1 do
+    local us, ul = M.agg_members_start(t), M.agg_members_len(t)
+    for i = us, us + ul - 1 do
         local mid = M.find(ctx, ctx.lists:get(i))
         if not M.types_equal(ctx, mid, exclude_tid) then
             remaining[#remaining + 1] = mid
@@ -1068,7 +1091,8 @@ function M.filter_union(ctx, tid, ref_tid)
     end
     --: { [integer]: integer, ... }
     local kept = {}
-    for i = t.data[0], t.data[0] + t.data[1] - 1 do
+    local us, ul = M.agg_members_start(t), M.agg_members_len(t)
+    for i = us, us + ul - 1 do
         local mid = M.find(ctx, ctx.lists:get(i))
         -- mid is in ref_tid iff subtract(ref_tid, mid) != ref_tid
         local after = M.find(ctx, M.subtract(ctx, ref_tid, mid))
@@ -1099,12 +1123,13 @@ function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit
                 local frt = M.find(ctx, fe.type_id or 0)
                 local ft = ctx.types:get(frt)
                 if ft.tag == TAG_LITERAL then
+                    local fk = M.lit_kind(ft)
                     local definite = false
-                    if ft.data[0] == lit_kind then
-                        definite = (ft.data[1] == lit_intern_id)
-                    elseif ft.data[0] == LIT_NUMBER and lit_kind == LIT_INTEGER then
+                    if fk == lit_kind then
+                        definite = (M.lit_str_id(ft) == lit_intern_id)
+                    elseif fk == LIT_NUMBER and lit_kind == LIT_INTEGER then
                         -- Field is LIT_NUMBER; discriminant was promoted to LIT_INTEGER.
-                        local fnum = i32x2_to_double(ft.data[1], ft.data[2])
+                        local fnum = i32x2_to_double(M.lit_num_lo(ft), M.lit_num_hi(ft))
                         if fnum % 1 == 0 and fnum >= -(2^31) and fnum <= 2^31 - 1 then
                             definite = (math.floor(fnum) == lit_intern_id)
                         end
@@ -1118,7 +1143,8 @@ function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit
     end
     --: { [integer]: integer, ... }
     local result = {}
-    for i = t.data[0], t.data[0] + t.data[1] - 1 do
+    local us, ul = M.agg_members_start(t), M.agg_members_len(t)
+    for i = us, us + ul - 1 do
         local mid = M.find(ctx, ctx.lists:get(i))
         local mt = ctx.types:get(mid)
         local definite_match = false
@@ -1129,12 +1155,13 @@ function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit
                 local frt = M.find(ctx, fe.type_id or 0)
                 local ft = ctx.types:get(frt)
                 if ft.tag == TAG_LITERAL then
-                    if ft.data[0] == lit_kind then
-                        definite_match = (ft.data[1] == lit_intern_id)
-                    elseif ft.data[0] == LIT_NUMBER and lit_kind == LIT_INTEGER then
+                    local fk = M.lit_kind(ft)
+                    if fk == lit_kind then
+                        definite_match = (M.lit_str_id(ft) == lit_intern_id)
+                    elseif fk == LIT_NUMBER and lit_kind == LIT_INTEGER then
                         -- Field is LIT_NUMBER; discriminant was promoted to LIT_INTEGER.
                         -- Promote the field value for comparison.
-                        local fnum = i32x2_to_double(ft.data[1], ft.data[2])
+                        local fnum = i32x2_to_double(M.lit_num_lo(ft), M.lit_num_hi(ft))
                         if fnum % 1 == 0 and fnum >= -(2^31) and fnum <= 2^31 - 1 then
                             definite_match = (math.floor(fnum) == lit_intern_id)
                         end
@@ -1177,8 +1204,8 @@ local function display_inner(ctx, tid, seen)
     if tag == TAG_INTEGER  then return "integer" end
     if tag == TAG_CDATA    then return "cdata" end
     if tag == TAG_ENUM_MEMBER then
-        local en = intern_mod.get(ctx.pool, t.data[0]) or "?"
-        local mn = intern_mod.get(ctx.pool, t.data[1]) or "?"
+        local en = intern_mod.get(ctx.pool, M.enum_name_id(t)) or "?"
+        local mn = intern_mod.get(ctx.pool, M.enum_member_id(t)) or "?"
         return en .. "." .. mn
     end
 
@@ -1192,18 +1219,18 @@ local function display_inner(ctx, tid, seen)
     end
 
     if tag == TAG_LITERAL then
-        local kind = t.data[0]
+        local kind = M.lit_kind(t)
         if kind == LIT_NIL     then return "nil" end
-        if kind == LIT_BOOLEAN then return t.data[1] == 1 and "true" or "false" end
+        if kind == LIT_BOOLEAN then return M.lit_bool(t) == 1 and "true" or "false" end
         if kind == LIT_STRING  then
-            local s = intern_mod.get(ctx.pool, t.data[1])
+            local s = intern_mod.get(ctx.pool, M.lit_str_id(t))
             if type(s) == "string" then return '"' .. s .. '"' end
             return '"?"'
         end
         if kind == LIT_NUMBER  then
-            return tostring(i32x2_to_double(t.data[1], t.data[2]))
+            return tostring(i32x2_to_double(M.lit_num_lo(t), M.lit_num_hi(t)))
         end
-        if kind == LIT_INTEGER then return tostring(t.data[1]) end
+        if kind == LIT_INTEGER then return tostring(M.lit_num_lo(t)) end
     end
 
     if tag == TAG_FUNCTION then
@@ -1211,21 +1238,23 @@ local function display_inner(ctx, tid, seen)
         seen[tid] = true
         seen[0] = (seen[0] or 0) + 1
         local parts = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ps, pl = M.fn_params_start(t), M.fn_params_len(t)
+        for i = ps, ps + pl - 1 do
             parts[#parts + 1] = M.display(ctx, ctx.lists:get(i), seen)
         end
-        if t.data[4] >= 0 then
-            parts[#parts + 1] = "..." .. M.display(ctx, t.data[4], seen)
+        local va = M.fn_vararg(t)
+        if va >= 0 then
+            parts[#parts + 1] = "..." .. M.display(ctx, va, seen)
         end
-        local rl = t.data[3]
+        local rs0, rl = M.fn_returns_start(t), M.fn_returns_len(t)
         local ret
         if rl == 0 then
             ret = "()"
         elseif rl == 1 then
-            ret = M.display(ctx, ctx.lists:get(t.data[2]), seen)
+            ret = M.display(ctx, ctx.lists:get(rs0), seen)
         else
             local rs = {}
-            for i = t.data[2], t.data[2] + rl - 1 do
+            for i = rs0, rs0 + rl - 1 do
                 rs[#rs + 1] = M.display(ctx, ctx.lists:get(i), seen)
             end
             ret = "(" .. table.concat(rs, ", ") .. ")"
@@ -1242,7 +1271,8 @@ local function display_inner(ctx, tid, seen)
         local parts = {} --: { [integer]: string, ... }
         -- fields
         local field_names = {} --: { [integer]: { name: string, fe: FieldEntry }, ... }
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local fs0, fl0 = M.tbl_fields_start(t), M.tbl_fields_len(t)
+        for i = fs0, fs0 + fl0 - 1 do
             local fid = ctx.lists:get(i)
             local fe = ctx.fields:get(fid)
             local name = intern_mod.get(ctx.pool, fe.name_id) or "?"
@@ -1260,7 +1290,7 @@ local function display_inner(ctx, tid, seen)
             end
         end
         -- indexers
-        local is, il = t.data[2], t.data[3]
+        local is, il = M.tbl_indexers_start(t), M.tbl_indexers_len(t)
         local i = is
         while i < is + il - 1 do
             local kt = M.display(ctx, ctx.lists:get(i), seen)
@@ -1270,7 +1300,8 @@ local function display_inner(ctx, tid, seen)
         end
         -- meta
         local meta_names = {} --: { [integer]: { name: string, fe: FieldEntry }, ... }
-        for j = t.data[5], t.data[5] + t.data[6] - 1 do
+        local ms0, ml0 = M.tbl_meta_start(t), M.tbl_meta_len(t)
+        for j = ms0, ms0 + ml0 - 1 do
             local fid = ctx.lists:get(j)
             local fe = ctx.fields:get(fid)
             local name = intern_mod.get(ctx.pool, fe.name_id) or "?"
@@ -1294,7 +1325,8 @@ local function display_inner(ctx, tid, seen)
         local parts = {}
         --: { [string]: boolean, ... }
         local dedup = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local us, ul = M.agg_members_start(t), M.agg_members_len(t)
+        for i = us, us + ul - 1 do
             local s = M.display(ctx, ctx.lists:get(i), seen)
             if not dedup[s] then dedup[s] = true; parts[#parts + 1] = s end
         end
@@ -1308,7 +1340,8 @@ local function display_inner(ctx, tid, seen)
         seen[tid] = true
         seen[0] = (seen[0] or 0) + 1
         local parts = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local is2, il2 = M.agg_members_start(t), M.agg_members_len(t)
+        for i = is2, is2 + il2 - 1 do
             parts[#parts + 1] = M.display(ctx, ctx.lists:get(i), seen)
         end
         seen[tid] = nil
@@ -1321,7 +1354,8 @@ local function display_inner(ctx, tid, seen)
         seen[tid] = true
         seen[0] = (seen[0] or 0) + 1
         local parts = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ts, tl = M.agg_members_start(t), M.agg_members_len(t)
+        for i = ts, ts + tl - 1 do
             parts[#parts + 1] = M.display(ctx, ctx.lists:get(i), seen)
         end
         seen[tid] = nil
@@ -1333,22 +1367,22 @@ local function display_inner(ctx, tid, seen)
         if seen[tid] then return "..." end
         seen[tid] = true
         seen[0] = (seen[0] or 0) + 1
-        local r = "..." .. M.display(ctx, t.data[0], seen)
+        local r = "..." .. M.display(ctx, M.spread_inner(t), seen)
         seen[tid] = nil
         seen[0] = (seen[0] --[[:! integer]]) - 1
         return r
     end
 
     if tag == TAG_NOMINAL then
-        return intern_mod.get(ctx.pool, t.data[0]) or "nominal"
+        return intern_mod.get(ctx.pool, M.nom_name_id(t)) or "nominal"
     end
 
     if tag == TAG_NAMED then
-        local name = intern_mod.get(ctx.pool, t.data[0]) or "?"
-        local al = t.data[2]
+        local name = intern_mod.get(ctx.pool, M.named_name_id(t)) or "?"
+        local as, al = M.named_args_start(t), M.named_args_len(t)
         if al > 0 then
             local parts = {}
-            for i = t.data[1], t.data[1] + al - 1 do
+            for i = as, as + al - 1 do
                 parts[#parts + 1] = M.display(ctx, ctx.lists:get(i), seen)
             end
             return name .. "<" .. table.concat(parts, ", ") .. ">"
@@ -1361,23 +1395,25 @@ local function display_inner(ctx, tid, seen)
     end
 
     if tag == TAG_INTRINSIC then
-        return "$" .. (intern_mod.get(ctx.pool, t.data[0]) or "?")
+        return "$" .. (intern_mod.get(ctx.pool, M.intrinsic_name_id(t)) or "?")
     end
 
     if tag == TAG_TYPE_CALL then
         local parts = {}
-        for i = t.data[1], t.data[1] + t.data[2] - 1 do
+        local as, al = M.tycall_args_start(t), M.tycall_args_len(t)
+        for i = as, as + al - 1 do
             parts[#parts + 1] = M.display(ctx, ctx.lists:get(i), seen)
         end
-        return M.display(ctx, t.data[0], seen) .. "(" .. table.concat(parts, ", ") .. ")"
+        return M.display(ctx, M.tycall_callee(t), seen) .. "(" .. table.concat(parts, ", ") .. ")"
     end
 
     if tag == TAG_FORALL then
         local parts = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ps, pl = M.forall_params_start(t), M.forall_params_len(t)
+        for i = ps, ps + pl - 1 do
             parts[#parts + 1] = intern_mod.get(ctx.pool, ctx.lists:get(i)) or "?"
         end
-        return "<" .. table.concat(parts, ", ") .. "> " .. M.display(ctx, t.data[2], seen)
+        return "<" .. table.concat(parts, ", ") .. "> " .. M.display(ctx, M.forall_body(t), seen)
     end
 
     return "?"
@@ -1452,10 +1488,10 @@ end
 --: (Ctx, integer) -> ({ [integer]: integer, ... }, { [integer]: integer, ... }, integer, { [integer]: integer, ... })
 function M.snapshot_table(ctx, obj_tid)
     local ot = ctx.types:get(obj_tid)
-    local fs, fl = ot.data[0], ot.data[1]
-    local is2, il2 = ot.data[2], ot.data[3]
-    local rv = ot.data[4]
-    local ms, ml = ot.data[5], ot.data[6]
+    local fs, fl = M.tbl_fields_start(ot), M.tbl_fields_len(ot)
+    local is2, il2 = M.tbl_indexers_start(ot), M.tbl_indexers_len(ot)
+    local rv = M.tbl_row_var(ot)
+    local ms, ml = M.tbl_meta_start(ot), M.tbl_meta_len(ot)
     local fields = {}
     for i = fs, fs + fl - 1 do fields[#fields + 1] = ctx.lists:get(i) end
     local indexers = {}
@@ -1474,6 +1510,8 @@ function M.patch_table(ctx, obj_tid, fields, indexers, rv, meta)
     local new_tbl = M.make_table(ctx, fields, indexers, rv, meta)
     local ot = ctx.types:get(obj_tid)
     local new_t = ctx.types:get(new_tbl)
+    -- Polymorphic clone: raw copy across all 7 TAG_TABLE slots. Not a per-tag
+    -- access; kept direct per the data-accessor cleanup plan §6 risk #1.
     for k = 0, 6 do ot.data[k] = new_t.data[k] end
 end
 
