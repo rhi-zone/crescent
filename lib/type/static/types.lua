@@ -203,6 +203,150 @@ function M.alloc_type(ctx, tag)
     return alloc_zero(ctx.types, tag)
 end
 
+-- Typed Type.data accessors. One per slot per tag. LuaJIT inlines.
+-- Reader form only — writers continue with direct `t.data[N] = v`.
+-- See the layout comment above (lines 55-123) for slot semantics.
+
+-- VAR / ROWVAR (shared body)
+--: (TypeSlot) -> integer
+function M.var_id(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.var_level(t) return t.data[1] end
+--: (TypeSlot) -> integer
+function M.var_parent(t) return t.data[2] end
+
+-- LITERAL
+--: (TypeSlot) -> integer
+function M.lit_kind(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.lit_str_id(t) return t.data[1] end
+--: (TypeSlot) -> integer
+function M.lit_bool(t) return t.data[1] end
+--: (TypeSlot) -> integer
+function M.lit_num_lo(t) return t.data[1] end
+--: (TypeSlot) -> integer
+function M.lit_num_hi(t) return t.data[2] end
+
+-- FUNCTION
+--: (TypeSlot) -> integer
+function M.fn_params_start(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.fn_params_len(t) return t.data[1] end
+--: (TypeSlot) -> integer
+function M.fn_returns_start(t) return t.data[2] end
+--: (TypeSlot) -> integer
+function M.fn_returns_len(t) return t.data[3] end
+--: (TypeSlot) -> integer
+function M.fn_vararg(t) return t.data[4] end
+--: (TypeSlot) -> integer
+function M.fn_param_names_start(t) return t.data[5] end
+--: (TypeSlot) -> integer
+function M.fn_param_names_len(t) return t.data[6] end
+
+-- TABLE
+--: (TypeSlot) -> integer
+function M.tbl_fields_start(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.tbl_fields_len(t) return t.data[1] end
+--: (TypeSlot) -> integer
+function M.tbl_indexers_start(t) return t.data[2] end
+--: (TypeSlot) -> integer
+function M.tbl_indexers_len(t) return t.data[3] end
+--: (TypeSlot) -> integer
+function M.tbl_row_var(t) return t.data[4] end
+--: (TypeSlot) -> integer
+function M.tbl_meta_start(t) return t.data[5] end
+--: (TypeSlot) -> integer
+function M.tbl_meta_len(t) return t.data[6] end
+
+-- UNION / INTERSECTION / TUPLE (shared)
+--: (TypeSlot) -> integer
+function M.agg_members_start(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.agg_members_len(t) return t.data[1] end
+
+-- NOMINAL
+--: (TypeSlot) -> integer
+function M.nom_name_id(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.nom_identity(t) return t.data[1] end
+--: (TypeSlot) -> integer
+function M.nom_underlying(t) return t.data[2] end
+
+-- NAMED
+--: (TypeSlot) -> integer
+function M.named_name_id(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.named_args_start(t) return t.data[1] end
+--: (TypeSlot) -> integer
+function M.named_args_len(t) return t.data[2] end
+
+-- MATCH_TYPE
+--: (TypeSlot) -> integer
+function M.match_param(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.match_arms_start(t) return t.data[1] end
+--: (TypeSlot) -> integer
+function M.match_arms_len(t) return t.data[2] end
+
+-- FORALL
+--: (TypeSlot) -> integer
+function M.forall_params_start(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.forall_params_len(t) return t.data[1] end
+--: (TypeSlot) -> integer
+function M.forall_body(t) return t.data[2] end
+
+-- SPREAD
+--: (TypeSlot) -> integer
+function M.spread_inner(t) return t.data[0] end
+
+-- INTRINSIC
+--: (TypeSlot) -> integer
+function M.intrinsic_name_id(t) return t.data[0] end
+
+-- TYPE_CALL
+--: (TypeSlot) -> integer
+function M.tycall_callee(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.tycall_args_start(t) return t.data[1] end
+--: (TypeSlot) -> integer
+function M.tycall_args_len(t) return t.data[2] end
+
+-- ENUM_MEMBER
+--: (TypeSlot) -> integer
+function M.enum_name_id(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.enum_member_id(t) return t.data[1] end
+--: (TypeSlot) -> integer
+function M.enum_lit_kind(t) return t.data[2] end
+--: (TypeSlot) -> integer
+function M.enum_value(t) return t.data[3] end
+
+-- TYPEOF / CAPTURE / PARTIAL_APP / pat_* / INDEX_TYPE
+--: (TypeSlot) -> integer
+function M.typeof_name_id(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.capture_name_id(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.pat_all_k_id(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.pat_all_v_id(t) return t.data[1] end
+--: (TypeSlot) -> integer
+function M.pat_rest_name_id(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.pat_meta_name_id(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.partial_name_id(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.partial_args_start(t) return t.data[1] end
+--: (TypeSlot) -> integer
+function M.partial_args_len(t) return t.data[2] end
+--: (TypeSlot) -> integer
+function M.index_subject(t) return t.data[0] end
+--: (TypeSlot) -> integer
+function M.index_key(t) return t.data[1] end
+
 -- Union-find with path compression.
 -- For TAG_VAR / TAG_ROWVAR: follow data[2] chain until root.
 -- For all other tags: return tid directly.
