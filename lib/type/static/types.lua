@@ -611,6 +611,7 @@ end
 -- Return true if flat already contains a type that subsumes tid.
 -- Handles: TAG_LITERAL(k) subsumed by TAG_INTEGER/NUMBER/STRING/BOOLEAN,
 -- and TAG_INTEGER subsumed by TAG_NUMBER.
+--: (Ctx, { [integer]: integer, ... }, integer) -> boolean
 local function flat_has_supertype(ctx, flat, tid)
     local t = ctx.types:get(tid)
     -- Literal subsumed by its primitive
@@ -638,6 +639,7 @@ end
 
 -- Remove from flat any types subsumed by the new primitive tag.
 -- Handles: literals when adding their primitive; TAG_INTEGER when adding TAG_NUMBER.
+--: (Ctx, { [integer]: integer, ... }, integer) -> ()
 local function remove_subsumed(ctx, flat, new_tag)
     local lk = primitive_lit_kind[new_tag]
     local i = 1
@@ -928,6 +930,7 @@ function M.types_equal(ctx, a, b)
     return struct_equal(ctx, a, b, nil)
 end
 
+--: (Ctx, { [integer]: integer, ... }, integer) -> boolean
 union_has = function(ctx, flat, tid)
     for i = 1, #flat do
         if struct_equal(ctx, flat[i], tid, nil) then return true end
