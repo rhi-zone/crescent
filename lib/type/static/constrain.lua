@@ -212,6 +212,154 @@ M.C_HKT_DECOMPOSE = C_HKT_DECOMPOSE
 --:: ConstraintNarrowNil    = { integer, integer, integer, boolean, integer, integer }
 --:: ConstraintEscapeCheck  = { integer, integer, integer, integer, integer }
 
+-- Typed per-payload reader accessors. One per slot per C_TAG.
+-- Exported as `function M.<name>` (not local) because constrain.lua is near
+-- LuaJIT's 200-locals-per-chunk limit. Bodies are one-line; LuaJIT inlines.
+
+--: (ConstraintUnify) -> integer
+function M.unify_lhs(c) return c[2] end
+--: (ConstraintUnify) -> integer
+function M.unify_rhs(c) return c[3] end
+--: (ConstraintUnify) -> integer
+function M.unify_line(c) return c[4] end
+--: (ConstraintUnify) -> integer
+function M.unify_col(c) return c[5] end
+
+--: (ConstraintSub) -> integer
+function M.sub_actual(c) return c[2] end
+--: (ConstraintSub) -> integer
+function M.sub_expected(c) return c[3] end
+--: (ConstraintSub) -> integer
+function M.sub_line(c) return c[4] end
+--: (ConstraintSub) -> integer
+function M.sub_col(c) return c[5] end
+--: (ConstraintSub) -> boolean
+function M.sub_is_cast(c) return c[6] end
+
+--: (ConstraintCallable) -> integer
+function M.callable_callee(c) return c[2] end
+--: (ConstraintCallable) -> { [integer]: integer, ... }
+function M.callable_args_list(c) return c[3] end
+--: (ConstraintCallable) -> integer
+function M.callable_ret(c) return c[4] end
+--: (ConstraintCallable) -> integer
+function M.callable_line(c) return c[5] end
+--: (ConstraintCallable) -> integer
+function M.callable_col(c) return c[6] end
+
+--: (ConstraintArith) -> string
+function M.arith_op(c) return c[2] end
+--: (ConstraintArith) -> integer
+function M.arith_lhs(c) return c[3] end
+--: (ConstraintArith) -> integer
+function M.arith_rhs(c) return c[4] end
+--: (ConstraintArith) -> integer
+function M.arith_result(c) return c[5] end
+--: (ConstraintArith) -> integer
+function M.arith_line(c) return c[6] end
+--: (ConstraintArith) -> integer
+function M.arith_col(c) return c[7] end
+
+--: (ConstraintReturn) -> integer
+function M.return_val(c) return c[2] end
+--: (ConstraintReturn) -> integer
+function M.return_expected(c) return c[3] end
+--: (ConstraintReturn) -> integer
+function M.return_line(c) return c[4] end
+--: (ConstraintReturn) -> integer
+function M.return_col(c) return c[5] end
+
+--: (ConstraintCompare) -> integer
+function M.compare_lhs(c) return c[2] end
+--: (ConstraintCompare) -> integer
+function M.compare_rhs(c) return c[3] end
+--: (ConstraintCompare) -> integer
+function M.compare_line(c) return c[4] end
+--: (ConstraintCompare) -> integer
+function M.compare_col(c) return c[5] end
+
+--: (ConstraintIndex) -> integer
+function M.index_obj(c) return c[2] end
+--: (ConstraintIndex) -> integer
+function M.index_key(c) return c[3] end
+--: (ConstraintIndex) -> integer
+function M.index_result(c) return c[4] end
+--: (ConstraintIndex) -> integer
+function M.index_line(c) return c[5] end
+--: (ConstraintIndex) -> integer
+function M.index_col(c) return c[6] end
+
+--: (ConstraintBound) -> integer
+function M.bound_tv(c) return c[2] end
+--: (ConstraintBound) -> integer
+function M.bound_type(c) return c[3] end
+--: (ConstraintBound) -> integer
+function M.bound_line(c) return c[4] end
+--: (ConstraintBound) -> integer
+function M.bound_col(c) return c[5] end
+
+--: (ConstraintOr) -> integer
+function M.or_left(c) return c[2] end
+--: (ConstraintOr) -> integer
+function M.or_right(c) return c[3] end
+--: (ConstraintOr) -> integer
+function M.or_result(c) return c[4] end
+--: (ConstraintOr) -> integer
+function M.or_line(c) return c[5] end
+--: (ConstraintOr) -> integer
+function M.or_col(c) return c[6] end
+
+--: (ConstraintBindGenerics) -> integer
+function M.bindgen_callee(c) return c[2] end
+--: (ConstraintBindGenerics) -> { [integer]: integer, ... }
+function M.bindgen_args(c) return c[3] end
+--: (ConstraintBindGenerics) -> integer
+function M.bindgen_ret(c) return c[4] end
+--: (ConstraintBindGenerics) -> integer
+function M.bindgen_line(c) return c[5] end
+--: (ConstraintBindGenerics) -> integer
+function M.bindgen_col(c) return c[6] end
+
+--: (ConstraintCheckArgs) -> integer
+function M.checkargs_callee(c) return c[2] end
+--: (ConstraintCheckArgs) -> { [integer]: integer, ... }
+function M.checkargs_args(c) return c[3] end
+--: (ConstraintCheckArgs) -> integer
+function M.checkargs_ret(c) return c[4] end
+--: (ConstraintCheckArgs) -> integer
+function M.checkargs_line(c) return c[5] end
+--: (ConstraintCheckArgs) -> integer
+function M.checkargs_col(c) return c[6] end
+
+--: (ConstraintOverlap) -> integer
+function M.overlap_actual(c) return c[2] end
+--: (ConstraintOverlap) -> integer
+function M.overlap_expected(c) return c[3] end
+--: (ConstraintOverlap) -> integer
+function M.overlap_line(c) return c[4] end
+--: (ConstraintOverlap) -> integer
+function M.overlap_col(c) return c[5] end
+
+--: (ConstraintNarrowNil) -> integer
+function M.narrowNil_input(c) return c[2] end
+--: (ConstraintNarrowNil) -> integer
+function M.narrowNil_result(c) return c[3] end
+--: (ConstraintNarrowNil) -> boolean
+function M.narrowNil_keep(c) return c[4] end
+--: (ConstraintNarrowNil) -> integer
+function M.narrowNil_line(c) return c[5] end
+--: (ConstraintNarrowNil) -> integer
+function M.narrowNil_col(c) return c[6] end
+
+--: (ConstraintEscapeCheck) -> integer
+function M.escape_ret(c) return c[2] end
+--: (ConstraintEscapeCheck) -> integer
+function M.escape_call_id(c) return c[3] end
+--: (ConstraintEscapeCheck) -> integer
+function M.escape_line(c) return c[4] end
+--: (ConstraintEscapeCheck) -> integer
+function M.escape_col(c) return c[5] end
+
 -- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
