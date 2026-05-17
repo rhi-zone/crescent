@@ -665,7 +665,7 @@ function M.unify(ctx, a, b, seen)
                     local fname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
                     return false, types_mod.display(ctx, a) .. " has no field `" .. fname .. "`", nil
                 end
-                local ok, err = M.unify(ctx, find(ctx, afe.type_id), find(ctx, bfe.type_id))
+                local ok, err = M.unify(ctx, find(ctx, afe.type_id), find(ctx, bfe.type_id), seen)
                 if not ok then
                     local fname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
                     return false, "field `" .. fname .. "`: " .. (err or "type mismatch"), nil
