@@ -1281,6 +1281,40 @@ function M.try_unify(ctx, a, b, seen)
     return false
 end
 
+-- Strict variant of `try_unify`: same lattice, but never silently accepts a
+-- free type variable on either side.
+--
+-- `try_unify` returns `true` when the RHS is TAG_VAR / TAG_ROWVAR or the LHS
+-- is TAG_ROWVAR, *without* binding. This is correct for the read-only check
+-- it advertises, but callers that consumed the `true` then proceeded as if
+-- the operation had succeeded — silently losing the obligation that the TV
+-- still needs to be resolved (see docs/typechecker-solver-architecture-v2.md
+-- (β) and Phase A). The strict variant exposes that case to the caller.
+--
+-- Returns:
+--   true                    — concrete unification succeeded.
+--   false                   — definite concrete mismatch.
+--   "needs", tv_id          — a free TV/row-var would have to be touched at
+--                              the top level; caller must defer or take the
+--                              slow path that binds eagerly.
+--
+-- Only top-level TV detection is reported. Free TVs buried inside the
+-- structure (e.g. a TAG_VAR inside a union member) still flow through the
+-- ordinary recursive `try_unify` semantics; they are out of scope for the
+-- Phase A channel.
+--: (ctx: Ctx, a: integer, b: integer, seen: { [integer]: { [integer]: boolean } | nil } | nil) -> (boolean | string, integer | nil)
+function M.try_unify_strict(ctx, a, b, seen)
+    local ar = find(ctx, a)
+    local br = find(ctx, b)
+    if ar ~= br then
+        local ta = ctx.types:get(ar)
+        local tb = ctx.types:get(br)
+        if tb.tag == TAG_VAR or tb.tag == TAG_ROWVAR then return "needs", br end
+        if ta.tag == TAG_ROWVAR then return "needs", ar end
+    end
+    return M.try_unify(ctx, a, b, seen)
+end
+
 -- Expose the private is_primitive_tag for external use.
 function M.is_primitive_tag(tag)
     return tag == TAG_NIL or tag == TAG_BOOLEAN or tag == TAG_NUMBER

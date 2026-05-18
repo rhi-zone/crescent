@@ -589,9 +589,14 @@ local function solve_sub(ctx, c)
         local et = ctx.types:get(expected)
         local is_closed_table = et.tag == TAG_TABLE and types_mod.tbl_row_var(et) < 0
         if not is_closed_table and et.tag ~= TAG_VAR and et.tag ~= TAG_ROWVAR then
-            if unify_mod.try_unify(ctx, actual, expected) then
-                return true
-            end
+            -- Use the strict variant so a free TV at the top level falls
+            -- through to the unify slow path (which binds eagerly today;
+            -- Phase E will route it through `await`). See
+            -- docs/typechecker-solver-architecture-v2.md Phase A.
+            local r = unify_mod.try_unify_strict(ctx, actual, expected)
+            if r == true then return true end
+            -- r == false  → fall through to slow path for the proper error.
+            -- r == "needs" → fall through; slow path binds the TV.
         end
     end
 
