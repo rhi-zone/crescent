@@ -1310,7 +1310,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen, allow_unapplied, in_match
         end
         -- Resolve bounds (in param_scope so the bound can reference other type params)
         -- and record them in ctx._forall_bounds keyed by generic tv_id.
-        -- Use _allow_unapplied_constructors so that unapplied kind-bounds like
+        -- Pass allow_unapplied=true so unapplied kind-bounds like
         -- <F: T1> (where T1<X> = ...) are accepted as TAG_NAMED rather than erroring.
         -- solve_bound will skip TAG_NAMED bounds (kind constraints not yet enforced).
         if has_bounds then
