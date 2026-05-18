@@ -73,6 +73,8 @@ nix develop                  # Dev shell for contributors (bun, etc.)
 
 Context is poisoned the moment you confidently state something wrong. Retraction does not fully undo it; downstream reasoning is already shaped by the bad claim. Prevention is the only real mitigation — rules that fire after the assertion cannot recover it.
 
+**Tactical-vs-strategic discipline.** When the user states an architectural problem ("X is broken", "Y is wrong"), the first move is to sit with the critique, not to produce motion. Dispatching agents, applying fixes, proposing polish loops, splitting a constraint — these *feel* like progress and aren't, if the framing is wrong. Before any work, state in one sentence: (1) the architectural failure being described, (2) what the correct architecture would look like (correctness optional; *naming* is mandatory), (3) whether your proposed work operates at that level. If (3) is no, you are doing tactical fixes on a strategic problem — surface this explicitly to the user before continuing. The failure modes this catches: **reactivity** (producing motion in response to critique rather than thought) and **laziness** (defaulting to smaller scope because larger scope is more work). Neither is caught by "ad-hoc forbidden," which fires on solutions, not framings.
+
 **Write things down immediately.** Problems and tech debt → TODO.md. Design decisions → docs/. Completed items → mark `[x]` in TODO.md in the same commit. Conversation evaporates — if it matters to a future session, write it now. Never delete unchecked TODO items. Docs change in the same commit as the code that motivates them — no follow-up docs commits.
 
 **`docs/batteries.md` is the definitive ecosystem scope document.** Read it before discussing future libraries or roadmap.
@@ -230,37 +232,7 @@ When doing performance optimization:
 
 ## Lua Gotchas
 
-**LuaJIT is Lua 5.1 + extensions.** Use `unpack(t)`, not `table.unpack(t)`. Do not shadow the built-in `assert` — in test files, bind the assertion library to a local (e.g. `local T = require("lib.test.assert")`).
-
-**Table construction: all data fields go in the literal, methods go on a prototype.**
-
-LuaJIT shapes tables at construction time. Fields present in the literal become part of the hidden class; adding fields afterward transitions to a new hidden class and breaks JIT monomorphic dispatch. The correct pattern:
-
-```lua
--- data fields inline — JIT sees the full shape at construction
-local obj = { insns = {}, args = {}, next_id = 0 }
--- methods on a shared prototype, not on the instance
-setmetatable(obj, { __index = Proto })
-```
-
-All shape-defining fields belong in the literal. Post-construction field assignment (`obj.field = value` for initialization) defeats the hidden-class optimization and puts the field outside the typechecker's view.
-
-**`local x = expr` — `x` is NOT in scope inside `expr`.**
-
-In Lua, a local variable is not in scope within its own initializer expression. A closure created inside `expr` that references `x` will see a global (or nil), not the local being declared.
-
-This matters whenever you want a callback/executor to reference the object being created:
-
-```lua
--- WRONG: rt is a global lookup inside the executor (nil if no global)
-local rt = N.runtime({ executors = { foo = function() rt:bar() end } })
-
--- CORRECT: pre-declare rt so the closure captures the local variable slot
-local rt
-rt = N.runtime({ executors = { foo = function() rt:bar() end } })
-```
-
-The same applies to test code that passes executors inline to a constructor. Always pre-declare the variable, then assign.
+See `docs/lua-gotchas.md` — LuaJIT 5.1 quirks (unpack vs table.unpack, hidden-class table construction, `local x = expr` scope).
 
 ## Pause before guessing
 
