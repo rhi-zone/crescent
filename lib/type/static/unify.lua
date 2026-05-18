@@ -204,11 +204,34 @@ end
 -- (2) re-enqueue each waiter onto ctx._worklist so the active solver drain
 -- re-runs it. The bind generation counter is bumped so solve_range's outer
 -- loop can detect quiescence (no binds since the last full drain).
+--
+-- Givens-before-wanteds discipline (item 2 of first-principles rework, see
+-- docs/typechecker-solver-bind-ordering.md §4). When the bind that just fired
+-- was issued by a WANTED constraint (ctx._current_tier == TIER_WANTED) and
+-- at least one waiter on the same TV is a GIVEN, set ctx._bind_woke_given.
+-- The WANTED handler observes the flag after the call and defers its
+-- remaining work so the woken GIVEN gets to run first and rewrite the inert
+-- set. This replaces the ad-hoc C_BOUND peek scans that previously lived in
+-- solve_callable / solve_bind_generics — the dispatch is now uniform across
+-- every WANTED handler that performs a bind. TIER_GIVEN is defined in
+-- constrain.lua; the int literal here avoids a circular require.
 --: (ctx: Ctx, var_tid: integer) -> ()
 local function wake_waiters(ctx, var_tid)
     ctx._bind_generation = (ctx._bind_generation or 0) + 1
     local waiters = ctx.tv_waiters[var_tid]
     if not waiters then return end
+    -- TIER_WANTED = 1. ctx._current_tier is set by solve_range.run_one before
+    -- invoking each handler; unset (nil) is treated as wanted (the safe
+    -- default — bind-discipline applies to anything not explicitly given).
+    if (ctx._current_tier or 1) == 1 then
+        for i = 1, #waiters do
+            -- TIER_GIVEN = 0.
+            if waiters[i]._tier == 0 then
+                ctx._bind_woke_given = true
+                break
+            end
+        end
+    end
     ctx.tv_waiters[var_tid] = nil
     local wl = ctx._worklist
     for i = 1, #waiters do

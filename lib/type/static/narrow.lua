@@ -360,10 +360,10 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
         if tt_pre.tag == TAG_VAR or tt_pre.tag == TAG_ROWVAR then
             local constrain_mod = require("lib.type.static.constrain")
             local result_tid = types_mod.make_var(ctx, ctx.scope.level)
-            ctx.constraints[#ctx.constraints + 1] = {
+            ctx.constraints[#ctx.constraints + 1] = constrain_mod.tag_tier({
                 constrain_mod.C_NARROW_NIL, t, result_tid, not should_remove_nil,
                 0, 0,
-            }
+            })
             return result_tid
         end
         if should_remove_nil then

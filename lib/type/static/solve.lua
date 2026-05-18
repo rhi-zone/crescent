@@ -2110,46 +2110,17 @@ local function solve_callable(ctx, c)
         -- and must NOT be deferred — body constraints (C_ARITH etc.) are emitted before
         -- C_CALLABLE in constraint order; if C_CALLABLE defers without binding all params,
         -- those body constraints see unbound TVs on the final error pass and silently skip.
-        do
-            local ps = types_mod.fn_params_start(callee_t)
-            local exp0_t = ctx.types:get(find(ctx, ctx.lists:get(ps)))
-            -- Param 0 must itself be a free TV (F_fresh) for the deferral to apply.
-            if pl > 1 and (exp0_t.tag == TAG_VAR or exp0_t.tag == TAG_ROWVAR) then
-                local has_unbound_named_param = false
-                for si = 1, pl - 1 do
-                    local st = ctx.types:get(find(ctx, ctx.lists:get(ps + si)))
-                    if st.tag == TAG_VAR or st.tag == TAG_ROWVAR then
-                        has_unbound_named_param = true
-                        break
-                    end
-                end
-                if has_unbound_named_param then
-                    -- Defer if param 0's TV has a pending C_BOUND constraint.
-                    -- C_BOUND will back-propagate concrete types from the bound once param 0
-                    -- is bound. This generalises the old TAG_FUNCTION check: any compound bound
-                    -- (function, table, etc.) will have a C_BOUND; checking the tag directly
-                    -- would miss non-function bounds like <T: { x: A, y: B }, A, B>.
-                    local param0_tv = find(ctx, ctx.lists:get(ps))
-                    local has_pending_bound = false
-                    if ctx._constraints then
-                        for _, bc in ipairs(ctx._constraints) do
-                            if bc[1] == C_BOUND and find(ctx, constrain.bound_tv(bc)) == param0_tv then
-                                has_pending_bound = true
-                                break
-                            end
-                        end
-                    end
-                    if has_pending_bound then
-                        local act0 = arg_tids[1]
-                        if act0 then
-                            -- Bind param 0 from arg 0, then defer A/B checking until C_BOUND fires.
-                            unify_mod.unify(ctx, widen_literal(ctx, act0), find(ctx, ctx.lists:get(ps)))
-                        end
-                        return false
-                    end
-                end
-            end
-        end
+        -- Givens-before-wanteds (item 2): the per-param bind loop below runs
+        -- unify on each (arg, param) pair; when one of those binds wakes a
+        -- GIVEN waiter (typically a C_BOUND on the param TV carrying the
+        -- rank-N kind signature `<F: (A,B)->R>`), unify.bind_var_to_type sets
+        -- ctx._bind_woke_given. We then defer the rest of the loop so the
+        -- woken GIVEN gets to back-propagate A/B/R into still-free params
+        -- before we attempt to unify them with raw arg types — without that
+        -- ordering, the wanted bind would absorb the wrong A/B values and
+        -- silently mask call-site mismatches. Replaces the prior ad-hoc
+        -- C_BOUND peek scan: the discipline is now uniform across every
+        -- WANTED bind, dispatched at the union-find chokepoint.
         local ps_main = types_mod.fn_params_start(callee_t)
         for i = 0, pl - 1 do
             local raw_param_tid = ctx.lists:get(ps_main + i)
@@ -2237,6 +2208,14 @@ local function solve_callable(ctx, c)
                         "missing argument " .. (i + 1) .. " (expected `"
                         .. types_mod.display_short(ctx, exp_tid) .. "`)")
                 end
+            end
+            -- Givens-before-wanteds: if the bind that just fired woke a
+            -- GIVEN waiter (e.g. C_BOUND back-propagating from a rank-N
+            -- kind signature), defer the rest of the param loop. The GIVEN
+            -- will re-fire on this round, rewrite still-free params with
+            -- their declared types, and re-wake this constraint to retry.
+            if ctx._bind_woke_given then
+                return false
             end
         end
         -- Handle extra args against the function's vararg slot.
@@ -2775,54 +2754,20 @@ local function solve_bind_generics(ctx, c)
     local pl = types_mod.fn_params_len(callee_t)
     local ps = types_mod.fn_params_start(callee_t)
 
-    -- Named-param generic deferral: when param 0 is a free TV (F) and some later param
-    -- is also a free TV (A, B, R), and the first argument is a function type:
-    -- bind ONLY param 0 from arg 0, then defer.  C_BOUND will back-propagate the
-    -- concrete A/B/R types from F's function type into those free TVs.
-    -- Without this, C_BIND_GENERICS would eagerly bind A/B from the raw args
-    -- (potentially wrong types), blocking C_BOUND and silently hiding mismatches.
-    do
-        local exp0_t = ctx.types:get(find(ctx, ctx.lists:get(ps)))
-        if pl > 1 and (exp0_t.tag == TAG_VAR or exp0_t.tag == TAG_ROWVAR) then
-            local has_free_later_param = false
-            for si = 1, pl - 1 do
-                local st = ctx.types:get(find(ctx, ctx.lists:get(ps + si)))
-                if st.tag == TAG_VAR or st.tag == TAG_ROWVAR then
-                    has_free_later_param = true
-                    break
-                end
-            end
-            if has_free_later_param then
-                -- Defer if param 0's TV has a pending C_BOUND constraint.
-                -- C_BOUND will back-propagate concrete types (A, B, R, ...) from the bound
-                -- into the free later params once param 0 is bound to a concrete type.
-                -- This generalises the old TAG_FUNCTION check: any compound bound
-                -- (function, table, etc.) will have a C_BOUND; checking the tag directly
-                -- would miss non-function bounds like <T: { x: A, y: B }, A, B>.
-                local param0_tv = find(ctx, ctx.lists:get(ps))
-                local has_pending_bound = false
-                if ctx._constraints then
-                    for _, bc in ipairs(ctx._constraints) do
-                        if bc[1] == C_BOUND and find(ctx, constrain.bound_tv(bc)) == param0_tv then
-                            has_pending_bound = true
-                            break
-                        end
-                    end
-                end
-                if has_pending_bound then
-                    local act0 = arg_tids[1]
-                    if act0 then
-                        -- Bind param 0 (F_fresh / T_fresh) from arg 0, then defer.
-                        -- C_BOUND fires next pass to back-propagate A, B, R from the bound type.
-                        unify_mod.unify(ctx, widen_literal(ctx, act0),
-                            find(ctx, ctx.lists:get(ps)))
-                    end
-                    return false
-                end
-            end
-        end
-    end
-
+    -- Givens-before-wanteds (item 2): the per-param bind loop below issues
+    -- WANTED-tier unify calls (this handler is wanted: it reads call-site
+    -- argument types and writes them into generic param TVs). When such a
+    -- bind wakes a GIVEN waiter — typically C_BOUND on the F-fresh TV in
+    -- `<F: (A,B)->R, A, B, R>(f: F, a: A, b: B) -> R` waiting to
+    -- back-propagate the kind signature into A/B/R — we defer the rest of
+    -- the loop. The GIVEN re-fires in the same drain, rewrites the
+    -- still-free A/B/R with their declared types, and re-wakes this
+    -- C_BIND_GENERICS; the second run binds A/B/R to the (now-declared)
+    -- types and any later-arg mismatch surfaces as the call-site error
+    -- rather than being absorbed into A/B by the wanted bind.
+    --
+    -- Replaces the prior ad-hoc C_BOUND peek scan: discipline is uniform
+    -- across every WANTED bind, dispatched at unify.bind_var_to_type.
     for i = 0, pl - 1 do
         local exp_tid = find(ctx, ctx.lists:get(ps + i))
         local et      = ctx.types:get(exp_tid)
@@ -2841,6 +2786,9 @@ local function solve_bind_generics(ctx, c)
                     and widen_literal(ctx, act_tid)
                     or  widen_for_sub(ctx, act_tid)
                 unify_mod.unify(ctx, widened, exp_tid)
+                if ctx._bind_woke_given then
+                    return false
+                end
             end
         end
     end
@@ -3932,7 +3880,20 @@ local function solve_range(ctx, constraints, lo, hi)
         local kind = c[1]
         local handler = handlers[kind]
         if not handler then c._solved = true; return end
+        -- Givens-before-wanteds (item 2): publish the current constraint's
+        -- tier so unify.bind_var_to_type → wake_waiters can see whether the
+        -- in-flight bind was issued by a WANTED, and reset _bind_woke_given
+        -- so the handler can detect a wake-up that happened during its run.
+        -- Saved/restored so nested handler invocations (e.g. unify recursing
+        -- through normalize_type_call) inherit the outer tier without
+        -- leaking it on exit.
+        local saved_tier = ctx._current_tier
+        local saved_wake = ctx._bind_woke_given
+        ctx._current_tier = c._tier or 1  -- TIER_WANTED default
+        ctx._bind_woke_given = false
         local result = handler(ctx, c)
+        ctx._current_tier = saved_tier
+        ctx._bind_woke_given = saved_wake
         if type(result) == "boolean" then
             if result == false then
                 c._deferred = true
@@ -3944,14 +3905,18 @@ local function solve_range(ctx, constraints, lo, hi)
         -- Structured form: { solved: boolean, emit?, await? }. The await
         -- field is informational; registration is performed inside
         -- solve.await at call time. emit appends children to the constraint
-        -- list AND pushes them onto the active worklist.
+        -- list AND pushes them onto the active worklist. Emitted children
+        -- inherit the parent's tier if untagged (per P1.5 + bind-ordering
+        -- doc §4 #5 — default-inherit is safer than re-declaring per site).
         if result.solved == false then
             c._deferred = true
         else
             c._solved = true
         end
         if result.emit then
+            local parent_tier = c._tier or 1
             for _, nc in ipairs(result.emit) do
+                if nc._tier == nil then nc._tier = parent_tier end
                 constraints[#constraints + 1] = nc
                 nc._deferred = false
                 worklist[#worklist + 1] = nc
@@ -4023,10 +3988,7 @@ end
 M.solve_range = solve_range
 
 function M.solve(ctx, constraints)
-    -- Expose the constraint list on ctx so handlers can scan for pending C_BOUND constraints.
-    ctx._constraints = constraints
     solve_range(ctx, constraints, 1, #constraints)
-    rawset(ctx, "_constraints", nil)  -- rawset: field type doesn't accept nil directly
 
     -- Post-pass: MISSING_FUNCTION_SIGNATURE (error). Every function-def site
     -- without a `--:` annotation gets reported at the function-def line.

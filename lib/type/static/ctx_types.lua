@@ -216,7 +216,15 @@ Ctx = {
   _forall_bounds:  { [integer]: integer, ... },
   _hkt_payloads?:  { [integer]: { f_fresh: integer, args_fresh: { [integer]: integer, ... }, bound_alias: integer, actual_arg: integer, line: integer | nil, col: integer | nil }, ... },
   lit_cache:       { [integer]: integer, ... },
-  _constraints?:   { [integer]: { [integer]: unknown, ... }, ... },
+  -- Item 2 of the first-principles rework: givens-before-wanteds discipline.
+  -- _current_tier is set by solve_range.run_one to c._tier or TIER_WANTED
+  -- before invoking each handler, and restored on exit. wake_waiters reads
+  -- it to decide whether a successful bind issued by a WANTED woke a GIVEN
+  -- waiter and, if so, sets _bind_woke_given. Wanted handlers check the
+  -- flag after each bind and defer the rest of their work so the woken
+  -- given gets to rewrite the inert set before the wanted re-runs.
+  _current_tier?:    integer,
+  _bind_woke_given?: boolean,
   -- Solver-architecture-v2 (β) resolution-barrier map. Maps tv_id (union-find
   -- root id at registration time) to a list of constraints awaiting that TV.
   -- Drained by unify.bind_var_to_type on successful bind: each waiter has

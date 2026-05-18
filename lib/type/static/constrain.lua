@@ -204,6 +204,79 @@ M.C_ESCAPE_CHECK  = C_ESCAPE_CHECK
 M.C_HKT_DECOMPOSE = C_HKT_DECOMPOSE
 M.C_INSTANTIATE_AT_CALL = C_INSTANTIATE_AT_CALL
 
+-- ---------------------------------------------------------------------------
+-- Constraint provenance tier (item 2 of the first-principles solver rework,
+-- see docs/typechecker-architecture-from-first-principles.md §4 and
+-- docs/typechecker-solver-bind-ordering.md). Adapts GHC's OutsideIn(X)
+-- "givens before wanteds" discipline to crescent's worklist solver. The tier
+-- is consumed by unify.bind_var_to_type at the union-find chokepoint: a
+-- WANTED bind that would wake a GIVEN waiter on the same TV sets
+-- ctx._bind_woke_given so the WANTED handler can defer its remaining work
+-- and let the GIVEN re-fire. Replaces the ad-hoc C_BOUND peek scans that
+-- previously implemented this in solve_callable / solve_bind_generics.
+-- ---------------------------------------------------------------------------
+
+local TIER_GIVEN  = 0
+local TIER_WANTED = 1
+M.TIER_GIVEN  = TIER_GIVEN
+M.TIER_WANTED = TIER_WANTED
+
+-- Tier assignment table. Keyed by constraint kind constant; each entry is
+-- the tier of every constraint built from that kind's `make_*` constructor.
+-- The tier reflects the *kind of work the constraint performs*, not the
+-- syntactic source — that's the only classification that drives the
+-- bind-ordering rule correctly (the doc's "C_BIND_GENERICS when sourced
+-- from annotation" was reasoned about source, but the binding action
+-- itself reads call-site argument types into generic params, which is a
+-- wanted-like action; classifying it as given would prevent the WANTED
+-- bind discipline from firing at the very site that needs it).
+--   * C_BOUND  — pure derivation from a declared rank-N kind signature
+--                (back-propagates A/B/R from F's bound). Given.
+--   * everything else — sources at least one argument from a use-site
+--                       expression (call arg, return value, assignment
+--                       RHS, narrow input, …). Wanted.
+-- Audited against every `make_*` call site in this file plus narrow.lua's
+-- inline C_NARROW_NIL construction and constrain.lua's inline
+-- C_HKT_DECOMPOSE construction; no per-call-site overrides exist.
+local CONSTRAINT_TIER = {
+    [C_UNIFY]               = TIER_WANTED,
+    [C_SUB]                 = TIER_WANTED,
+    [C_CALLABLE]            = TIER_WANTED,
+    [C_ARITH]               = TIER_WANTED,
+    [C_RETURN]              = TIER_WANTED,
+    [C_COMPARE]             = TIER_WANTED,
+    [C_INDEX]               = TIER_WANTED,
+    [C_BOUND]               = TIER_GIVEN,
+    [C_OR]                  = TIER_WANTED,
+    [C_BIND_GENERICS]       = TIER_WANTED,
+    [C_CHECK_ARGS]          = TIER_WANTED,
+    [C_OVERLAP]             = TIER_WANTED,
+    [C_NARROW_NIL]          = TIER_WANTED,
+    [C_ESCAPE_CHECK]        = TIER_WANTED,
+    [C_HKT_DECOMPOSE]       = TIER_WANTED,
+    [C_INSTANTIATE_AT_CALL] = TIER_WANTED,
+}
+M.CONSTRAINT_TIER = CONSTRAINT_TIER
+
+-- Tag a freshly-built constraint with its kind's default tier. Centralised
+-- so every constructor below funnels through the same point; tier-by-call-
+-- site would be an ad-hoc carve-out (forbidden per CLAUDE.md). Returns the
+-- input table for fluent use in the existing `return { ... }` constructor
+-- bodies. The parameter is the open-record shape of every constraint
+-- literal (integer-indexed payload with the C_TAG in slot 1); the
+-- per-kind typed aliases (ConstraintUnify, etc.) all conform to it.
+--: ({ _tier?: integer, [integer]: unknown, ... }) -> { _tier?: integer, [integer]: unknown, ... }
+local function tag_tier(c)
+    local tag = c[1]
+    if type(tag) == "number" then
+        c._tier = CONSTRAINT_TIER[tag] or TIER_WANTED
+    else
+        c._tier = TIER_WANTED
+    end
+    return c
+end
+M.tag_tier = tag_tier
+
 -- Typed per-C_TAG payload aliases. Constructors and accessors land in C4-C5.
 -- Each tuple's first slot is the C_TAG discriminant (an integer literal);
 -- remaining slots match the constructor call sites in this file. Slot types
@@ -392,67 +465,67 @@ function M.instcall_col(c) return c[6] end
 
 --: (integer, integer, integer, integer) -> ConstraintUnify
 function M.make_unify(t1, t2, line, col)
-    return { C_UNIFY, t1, t2, line, col }
+    return tag_tier({ C_UNIFY, t1, t2, line, col })
 end
 
 --: (integer, integer, integer, integer, boolean) -> ConstraintSub
 function M.make_sub(actual, expected, line, col, is_cast)
-    return { C_SUB, actual, expected, line, col, is_cast }
+    return tag_tier({ C_SUB, actual, expected, line, col, is_cast })
 end
 
 --: (string, integer, integer, integer, integer, integer) -> ConstraintArith
 function M.make_arith(op, lhs, rhs, result, line, col)
-    return { C_ARITH, op, lhs, rhs, result, line, col }
+    return tag_tier({ C_ARITH, op, lhs, rhs, result, line, col })
 end
 
 --: (integer, integer, integer, integer) -> ConstraintReturn
 function M.make_return(val, expected, line, col)
-    return { C_RETURN, val, expected, line, col }
+    return tag_tier({ C_RETURN, val, expected, line, col })
 end
 
 --: (integer, integer, integer, integer) -> ConstraintCompare
 function M.make_compare(lhs, rhs, line, col)
-    return { C_COMPARE, lhs, rhs, line, col }
+    return tag_tier({ C_COMPARE, lhs, rhs, line, col })
 end
 
 --: (integer, integer, integer, integer, integer) -> ConstraintIndex
 function M.make_index(obj, key, result, line, col)
-    return { C_INDEX, obj, key, result, line, col }
+    return tag_tier({ C_INDEX, obj, key, result, line, col })
 end
 
 --: (integer, integer, integer, integer) -> ConstraintBound
 function M.make_bound(tv, bound_type, line, col)
-    return { C_BOUND, tv, bound_type, line, col }
+    return tag_tier({ C_BOUND, tv, bound_type, line, col })
 end
 
 --: (integer, integer, integer, integer, integer) -> ConstraintOr
 function M.make_or(left, right, result, line, col)
-    return { C_OR, left, right, result, line, col }
+    return tag_tier({ C_OR, left, right, result, line, col })
 end
 
 --: (integer, { [integer]: integer, ... }, integer, integer, integer) -> ConstraintBindGenerics
 function M.make_bindgen(callee, args, ret, line, col)
-    return { C_BIND_GENERICS, callee, args, ret, line, col }
+    return tag_tier({ C_BIND_GENERICS, callee, args, ret, line, col })
 end
 
 --: (integer, { [integer]: integer, ... }, integer, integer, integer) -> ConstraintCheckArgs
 function M.make_checkargs(callee, args, ret, line, col)
-    return { C_CHECK_ARGS, callee, args, ret, line, col }
+    return tag_tier({ C_CHECK_ARGS, callee, args, ret, line, col })
 end
 
 --: (integer, integer, integer, integer) -> ConstraintOverlap
 function M.make_overlap(actual, expected, line, col)
-    return { C_OVERLAP, actual, expected, line, col }
+    return tag_tier({ C_OVERLAP, actual, expected, line, col })
 end
 
 --: (integer, integer, integer, integer) -> ConstraintEscapeCheck
 function M.make_escape(ret, call_id, line, col)
-    return { C_ESCAPE_CHECK, ret, call_id, line, col }
+    return tag_tier({ C_ESCAPE_CHECK, ret, call_id, line, col })
 end
 
 --: (integer, { [integer]: integer, ... }, integer, integer, integer) -> ConstraintInstantiateAtCall
 function M.make_instantiate_at_call(callee, args, ret, line, col)
-    return { C_INSTANTIATE_AT_CALL, callee, args, ret, line, col }
+    return tag_tier({ C_INSTANTIATE_AT_CALL, callee, args, ret, line, col })
 end
 
 -- ---------------------------------------------------------------------------
@@ -2913,7 +2986,7 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                                     col = n.col,
                                 }
                                 ctx._hkt_payloads = payloads
-                                emit(ctx, { C_HKT_DECOMPOSE, pid, n.line, n.col })
+                                emit(ctx, tag_tier({ C_HKT_DECOMPOSE, pid, n.line, n.col }))
                             end
                         end
                     elseif hkt_fresh_to_bound[slot_root] then
