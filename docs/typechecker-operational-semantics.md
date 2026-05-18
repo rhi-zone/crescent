@@ -17,7 +17,31 @@ Inputs that shape this spec: the handler-shape audit
 (`docs/typechecker-handler-shape-audit.md`) and the six solver fundamentals
 (`docs/typechecker-solver-fundamentals.md`).
 
-**Paradigm.** Crescent uses **local type inference with bidirectional propagation**. It is not OutsideIn/X. It is not full Hindley-Milner. Where vocabulary overlaps with those systems (e.g. "given" / "wanted", "implication"), the meaning is crescent's — typically a priority annotation or a structural marker, not a logical axiom or scope. Polymorphism is introduced only by explicit `<T>` annotations parsed as `TAG_FORALL`; crescent does not perform implicit let-generalization. Where this spec borrows literature notation, it does so for legibility; the operational meaning is grounded in `lib/type/static/`, not in the cited paper.
+**Paradigm.** Crescent uses **local type inference with bidirectional propagation**. It is not OutsideIn/X. It is not full Hindley-Milner. Where vocabulary overlaps with those systems (e.g. "given" / "wanted", "implication"), the meaning is crescent's — typically a priority annotation or a structural marker, not a logical axiom or scope. Polymorphism is introduced two ways: (1) explicit `<T>` annotations parsed as `TAG_FORALL`, and (2) implicit Hindley-Milner generalization at unannotated function definitions (HM Phase 1b; `constrain.lua:2372–2378` calls `env_mod.generalize`, with `record_polymorphic_ops_post` capturing nested bound TVs per `docs/typechecker-hm-phase2.md`). What crescent does NOT do is let-generalization on arbitrary `local x = e` bindings — those remain monomorphic unless `e` is itself a function definition that triggers (2). Where this spec borrows literature notation, it does so for legibility; the operational meaning is grounded in `lib/type/static/`, not in the cited paper.
+
+## 0.1 Gen-time invariants (constraint generation phase)
+
+The spec describes the solver's transitions on a constraint stream already
+produced by `lib/type/static/constrain.lua`. Several operations run at
+*generation time* and are inputs to the solver, not solver primitives:
+
+- **`skolemize_fn`** (`constrain.lua:2048`) — when a function body whose
+  signature has explicit `<T>` quantifiers is generated, the body sees
+  skolem TVs in place of the quantifiers. The spec's `skolemize` primitive
+  (§2) is the same operation invoked from a solve-time site
+  (`env.skolemize_return_for_rank_n`); both write into `T` with
+  `FLAG_SKOLEM` set, and both rely on invariant 6 to prevent binding.
+- **`env_mod.generalize`** (called from `constrain.lua:2372`) — implicit
+  HM generalization at unannotated function definitions. The output is
+  a `TAG_FORALL` type that flows into the solver via the function's
+  binding in `Env`.
+- **`record_polymorphic_ops_post`** (HM Phase 2) — records template-rooted
+  operations on inferred generic functions for later re-solve, populating
+  `_forall_bounds` / `_forall_ops` (see `docs/typechecker-hm-phase2.md`).
+
+The solver receives the post-generation `W`, `Env`, and `T` and operates
+on them per §1–§3. Generation-time code is referenced where rules depend
+on its output, but its semantics are not part of this spec.
 
 ## 1. Configuration
 
@@ -72,14 +96,14 @@ Every constraint `c` carries hidden bookkeeping the dispatcher manages:
    reaches `E` at most once per constraint.
 6. **Scope and skolem.** Skolems (`FLAG_SKOLEM`) are never bound. Any attempt
    is a terminal error from `bind_var` (`unify.lua:258-263`).
-7. **Sub-solve param marker (`FLAG_SUB_SOLVE_PARAM`).** A TV with this flag is a function-body parameter being inferred during a sub-solve pass (HM Phase 1c, `docs/typechecker-hm-phase2.md`). When a constraint encounters such a TV in a position where it would normally `defer` waiting for resolution, it MUST instead emit `merge_inferred_bound(v, shape)` to record the inferred bound, then retire. This is the contract that distinguishes "this TV is being inferred by another sub-solve and we should contribute a bound" from "this TV is unresolved and we should park." Sites: `solve.lua:2163, 2524, 2615, 2944`.
+7. **Sub-solve param marker (`FLAG_SUB_SOLVE_PARAM`).** A TV with this flag is a function-body parameter being inferred during a sub-solve pass (HM Phase 1c, `docs/typechecker-hm-phase2.md`). When a constraint encounters such a TV in a position where it would normally `defer` waiting for resolution, it MUST instead emit `merge_inferred_bound(v, shape)` to record the inferred bound, then retire. This is the contract that distinguishes "this TV is being inferred by another sub-solve and we should contribute a bound" from "this TV is unresolved and we should park." Sites include `solve.lua:1538, 1654, 2163, 2524, 2615, 2944` (consult sites for `FLAG_SUB_SOLVE_PARAM`).
 
 ## 2. Primitives
 
 Each primitive is invoked synchronously by a rule. Side effects on `Σ` are
 listed; anything not listed is preserved.
 
-Not every primitive is rule-callable from multiple sites: `try_each` is invoked only by C_CALLABLE's TAG_INTERSECTION branch; `release` is invoked only by the bind chokepoint (and is therefore moved to the Discipline section at the end of §2). Singletons are honest when the primitive's contract genuinely applies to one situation only.
+Not every primitive is rule-callable from multiple sites: `try_each` is invoked only by C_RESOLVE_OVERLOAD; `release` is invoked only by the bind chokepoint (and is therefore moved to the Discipline section at the end of §2). Singletons are honest when the primitive's contract genuinely applies to one situation only.
 
 ### `emit(c) : Constraint → ()`
 Appends `c` to the parent's constraint list and to `W`. `c._tier` defaults
@@ -157,7 +181,9 @@ Appends to `IB[find(v)]`. Used by sub-solve param paths (per invariant 7). `solv
 Type-level indexing. Multi-tag dispatch (TAG_TABLE field, TAG_NOMINAL meta-__index, TAG_UNION distributed, TAG_INTERSECTION joined). Implementation across `solve_index` body (`solve.lua:1457+`).
 
 ### `escape_check(t, call_id) : (TypeId, ℕ) → bool`
-Graph walk from `find(t)` checking for any reachable TV bearing the matching call-id skolem mark. Used by C_ESCAPE_CHECK. `solve.lua:799`.
+Graph walk from `find(t)` AND the call frame's outer `Env` bindings
+checking for any reachable TV bearing the matching call-id skolem mark.
+Used by C_ESCAPE_CHECK and by `subsume` cases 1–3. `solve.lua:799`.
 
 ### `env_instantiate(σ, level) : (TypeId, ℕ) → TypeId`
 Fresh-instantiate a polytype's outer binders with new unification vars at the given level. Distinct from skolemization. `env.lua:547`.
@@ -166,13 +192,55 @@ Fresh-instantiate a polytype's outer binders with new unification vars at the gi
 Introduce per-quantifier skolem TVs for `σ`'s outer binders; returns the body and the skolem list. Skolems have `FLAG_SKOLEM` set; `bind` on them is a terminal error per invariant 6. Sites: `env.skolemize_return_for_rank_n` (`env.lua:631`), `constrain.skolemize_fn` (`constrain.lua:2048`).
 
 ### `subsume(σ_actual, σ_expected) : (TypeId, TypeId) → (ok, err?)`
-Polytype-vs-polytype subsumption (rank-N). Deep-skolemizes `σ_expected`, instantiates `σ_actual`, then unifies. Required for any C_SUB or param-position involving `TAG_FORALL` on either side (per `docs/typechecker-rank-n.md`). Today implemented inline in `solve_check_args`.
+Polytype-vs-polytype subsumption (rank-N). Enumerates four cases per the
+canonical rule in `docs/typechecker-rank-n.md`:
+
+1. **Both `TAG_FORALL`**: deep-skolemize `σ_expected` to get `(ρ_e, skolems)`;
+   fresh-instantiate `σ_actual` via `env_instantiate` to get `ρ_a`; recurse
+   on `subsume(ρ_a, ρ_e)`. The skolems must not escape (enforce via
+   `escape_check`).
+2. **RHS-only `TAG_FORALL`** (`σ_expected` is `∀a. τ`): deep-skolemize
+   `σ_expected` to get `(τ, skolems)`; recurse on `subsume(σ_actual, τ)`.
+3. **LHS-only `TAG_FORALL`** (`σ_actual` is `∀a. τ`): fresh-instantiate
+   `σ_actual` via `env_instantiate` to get `τ'`; recurse on
+   `subsume(τ', σ_expected)`.
+4. **Neither `TAG_FORALL`**: structural fallback — `unify(σ_actual,
+   σ_expected)` (the rule degenerates to monotype unification).
+
+Cases 1–3 escape-check the introduced skolems against the call-site outer
+bindings before retiring (per §3 C_ESCAPE_CHECK semantics).
 
 ### `eval_match_type(tid) : TypeId → TypeId`
 Type-level evaluation of `TAG_MATCH_TYPE` (conditional types). Delegates to env/match.lua. Used by C_BOUND.
 
+### `propagate_function_bound(v, fn_shape) : (TVId, FnShape) → ()`
+Specialises a function-shape inferred bound through to the TV's eventual
+binding. 53-line operation at `solve.lua:1119`. Used by C_BOUND when the
+bound's representation is a function type.
+
+### `propagate_meta_bound(v, meta_shape) : (TVId, MetaShape) → ()`
+Specialises a metamethod-shape inferred bound. 168-line operation at
+`solve.lua:950`. Used by C_BOUND when the bound is a metamethod
+requirement (e.g. arithmetic operand inference).
+
+### `check_kind_arity(v, expected_arity) : (TVId, ℕ) → (ok, err?)`
+Verifies that a TV's bound matches the expected type-constructor arity
+(for HKT-style bounds). Inline in `solve_bound`; named here for spec
+closure.
+
+### `substitute(template, params, args) : (TypeId, [TVId], [TypeId]) → TypeId`
+Type-level capture-avoiding substitution: replaces each `params[i]` with
+`args[i]` throughout `template`. Used by C_HKT_DECOMPOSE to construct
+the unification template from a `bound_alias` body. Implementation in
+`env_mod`.
+
+### `overlap_check(a, b) : (TypeId, TypeId) → bool`
+Bidirectional overlap test: returns true iff `is_subtype(a, b) ∨
+is_subtype(b, a)`. Used by C_OVERLAP and C_COMPARE. Not the same as
+`unify` — it never binds.
+
 ### `instantiate_at_use(callee, args, ret) : (TypeId, [TypeId], TVId) → ()`
-Composite primitive — calls `env_instantiate` for the LHS forall (fresh unification vars), `skolemize` for any RHS forall introduced by rank-N param positions, emits HKT decomposition children for `TAG_TYPE_CALL` param slots, then emits `C_BIND_GENERICS` and `C_CHECK_ARGS` against the freshened callee. Composes the simpler primitives above; named separately because the composition is the call-site instantiation contract from `docs/typechecker-solver-fundamentals.md` fundamental 6.
+Composite primitive — calls `env_instantiate` for the LHS forall (fresh unification vars), `skolemize` for any RHS forall introduced by rank-N param positions, emits HKT decomposition children for `TAG_TYPE_CALL` param slots, then emits `C_BIND_GENERICS` and `C_CHECK_ARGS` against the freshened callee. Composes the simpler primitives above; named separately because the composition is the call-site instantiation contract from `docs/typechecker-solver-fundamentals.md` fundamental 6. **Status:** the spec describes the target composition. The current handler at `solve.lua:2809` is a 10-line stub that only calls `claim(ret, c)`. Phase 3 implements the full composition by routing through the three split rules above (C_CALL_FUNCTION's TAG_FUNCTION branch, plus the inline `env_instantiate` + `skolemize` calls), retiring the C_INSTANTIATE_AT_CALL routing kind once the split lands.
 
 ### `try_each(candidates, attempt, on_all_fail) : ([Cand], Cand → bool, () → ()) → ()`
 **Search primitive** — see §6. Iterates candidates left-to-right; each
@@ -196,7 +264,7 @@ the spec gives it a name; see §7.
 
 ## 3. Constraint kinds and rule schemas
 
-One rule per kind from `constrain.lua:127-183` (16 kinds; spec adds C_DISTRIBUTE_OVER_UNION for 17). Schema:
+One rule per kind. Constrain.lua:127-183 today emits 16 kinds including C_CALLABLE; the spec retires C_CALLABLE and adds C_CALL_FUNCTION / C_RESOLVE_OVERLOAD / C_INFER_CALLABLE_BOUND / C_DISTRIBUTE_OVER_UNION, for 19 rules total in §3. Schema:
 
 ```
 RULE C_<KIND>(payload)
@@ -225,35 +293,67 @@ RULE C_<KIND>(payload)
 - **premises.** If `obj` is `Unbound v`: if `is_owned(v)` or otherwise not
   yet shaped, `park(c, v)`. If `result` is `Unbound v` and `is_owned(v)` and
   the index would commit eagerly, `park(c, result)`.
-- **conclusion.** Project `obj[key]` per the type algebra (field, indexer,
-  meta `__index`, etc.), `unify(result, projected)`, `retire`. Failures
+- **conclusion.** `unify(result, project(obj, key))` (the `project` primitive dispatches on `obj.tag` per its §2 definition), `retire`. Failures
   `fail`.
 - **handler.** `solve_index` (`solve.lua:1457`).
 
-### RULE C_CALLABLE {callee, args, ret, line, col}
+### RULE C_CALL_FUNCTION {callee, args, ret, line, col}
+- **premises.** `claim(ret, c)`. If `find(callee)` is `Unbound v`,
+  `park(c, v)` (was a silent T_ANY bind bug at `solve.lua:2157+` in the
+  pre-split handler). If `find(callee).tag == TAG_INTERSECTION`,
+  TAG_UNION, or `TAG_VAR` with `FLAG_SUB_SOLVE_PARAM`, this rule is the
+  wrong kind — emission site should have routed to C_RESOLVE_OVERLOAD,
+  C_DISTRIBUTE_OVER_UNION, or C_INFER_CALLABLE_BOUND respectively;
+  `fail(c, "internal: wrong constraint kind for callee tag")`.
+- **conclusion.** Per `find(callee).tag`:
+  - `TAG_FUNCTION` → `instantiate_at_use(callee, args, ret)` if callee
+    was a free TV at gen time; iterate params, calling `unify` per pair
+    when both sides are monomorphic and `subsume` when either side is
+    `TAG_FORALL`. If a bind set `_bind_woke_given`, `resume_iter(c, _)`.
+    Otherwise `unify(ret, first_ret)` and `retire`.
+  - `TAG_NOMINAL` → unwrap to the representation type; recursively
+    dispatch this rule on the unwrapped form (one level of normalization,
+    same as `find()` for type-level aliases).
+  - `TAG_ANY` → `bind(ret, T_ANY)`, `retire`.
+  - `TAG_UNKNOWN` → `fail(c, "call on unknown")`.
+  - `TAG_NEVER` → `bind(ret, T_NEVER)`, `retire`.
+  - Anything else → `fail(c, "not callable")`.
+- **side cond.** ownership owed on every terminal path.
+- **handler.** `solve_call_function` (Phase 3; replaces the TAG_FUNCTION /
+  nominal / lattice / error branches of `solve_callable` at `solve.lua:2123`).
 
-**Structural note** *(Phase 3 design decision)*. This rule's per-tag dispatch invokes different primitives across branches: TAG_FUNCTION uses `instantiate_at_use` + per-param `unify`/`subsume`; TAG_INTERSECTION uses `try_each` (search); TAG_UNION uses `C_DISTRIBUTE_OVER_UNION` (emission); TAG_VAR with `FLAG_SUB_SOLVE_PARAM` uses `merge_inferred_bound` (bound inference). This is four rules collapsed under one constraint kind. The audit (`docs/typechecker-handler-shape-audit.md`) carved out the union case; the others remain pending. Splitting into `C_CALL_FUNCTION` / `C_RESOLVE_OVERLOAD` / `C_DISTRIBUTE_OVER_UNION` / `C_INFER_CALLABLE_BOUND` is a known Round-2 target.
+### RULE C_RESOLVE_OVERLOAD {callee, args, ret, line, col}
+- **premises.** `claim(ret, c)`. `find(callee)` must be `TAG_INTERSECTION`
+  (else internal-error `fail`).
+- **conclusion.** `try_each(member_functions, attempt_member,
+  fail_with_candidates)`. On success, the chosen `attempt_member` commits
+  via `bind(ret, chosen_ret)`, `retire`. On exhaustion,
+  `fail_with_candidates` emits the multi-candidate diagnostic and
+  `bind(ret, T_ANY)`, `retire`.
+- **side cond.** ownership owed.
+- **handler.** `solve_resolve_overload` (Phase 3; replaces the
+  TAG_INTERSECTION branch of `solve_callable` at `solve.lua:2377+`).
 
-- **premises.** Run `claim(ret, c)` on entry.
-- **conclusion.** Dispatch on `find(callee).tag`:
-  - `TAG_FUNCTION` → `instantiate_at_use(callee, args, ret)` if callee was a
-    free TV at gen time; iterate params calling `unify` per pair when both sides are monomorphic; if either side is `TAG_FORALL` at the param or return slot, invoke `subsume` instead (rank-N subsumption per `docs/typechecker-rank-n.md`). If a bind
-    set `_bind_woke_given`, `resume_iter(c, _)` (`return false`). Otherwise
-    `unify(ret, first_ret)` and `retire`.
-  - `TAG_INTERSECTION` → `try_each(member_functions, attempt_member,
-    fail_with_candidates)`; commit chosen via `bind(ret, chosen_ret)`.
-  - `TAG_UNION` → see C_DISTRIBUTE_OVER_UNION below; rule body retires after
-    delegating.
-  - `TAG_VAR` (non-sub-solve-param): `park(c, callee)`. *(Today's handler at `solve.lua:2157+` silently binds ret to T_ANY here, which is a known bug — see `POLISH.md` Round 1 Lens B.)*
-  - `TAG_ANY/UNKNOWN/NEVER/NOMINAL` → fixed dispatch per `solve.lua`.
-- **side cond.** ownership is owed by every terminal path.
-- **handler.** `solve_callable` (`solve.lua:2123`).
+### RULE C_INFER_CALLABLE_BOUND {callee, args, ret, line, col}
+- **premises.** `find(callee)` must be `Unbound v` with
+  `FLAG_SUB_SOLVE_PARAM` set (else internal-error `fail`; see invariant 7).
+- **conclusion.** `merge_inferred_bound(v, callable_shape(args, ret))`,
+  `retire`. The callable-shape bound is recorded on `v` so that when `v`
+  later binds via sub-solve, the inferred callable signature constrains
+  the binding. `ret` is bound transitively when `v` binds and the
+  callable shape's return slot resolves.
+- **side cond.** emits no direct `ret` binding; ownership convention is
+  that `claim(ret, c)` is NOT taken here because the binding is deferred
+  to sub-solve completion.
+- **handler.** `solve_infer_callable_bound` (Phase 3; replaces the
+  TAG_VAR-with-FLAG_SUB_SOLVE_PARAM branch of `solve_callable` at
+  `solve.lua:2163+`).
 
 ### RULE C_ARITH {op, lhs, rhs, result, line, col}
 - **premises.** If either operand is `Unbound v` of a sub-solve param,
   emit metamethod-shape bound (`merge_inferred_bound`) and retire. Else if
   operand still `Unbound`, `defer(c)`.
-- **conclusion.** Look up `__<op>` via `meta_op_ret_impl`, `unify(result,
+- **conclusion.** Look up `__<op>` via `meta_op_ret`, `unify(result,
   ret_ty)`, `retire`.
 - **handler.** `solve_arith` (`solve.lua:2507`).
 
@@ -263,16 +363,19 @@ RULE C_<KIND>(payload)
 - **handler.** `solve_return` (`solve.lua:2724`).
 
 ### RULE C_COMPARE {lhs, rhs, line, col}
-- **conclusion.** `unify(lhs, rhs)` per `==`/`<` semantics (overlap-required),
-  `retire`. Diagnostic on disjoint.
+- **conclusion.** Invoke `meta_op_ret(op, lhs)` and `meta_op_ret(op, rhs)`; require either `is_subtype(lhs, rhs) ∨ is_subtype(rhs, lhs)` via `overlap_check` (§2). On disjoint, emit diagnostic; `retire`.
 - **handler.** `solve_compare` (`solve.lua:2599`).
 
 ### RULE C_BOUND {fresh_tv, bound, line, col}  (tier: GIVEN at emit)
 - **premises.** If `find(fresh_tv)` is `Unbound`, `park(c, fresh_tv)`. If
   the resolved bound itself contains a free TV, `park(c, bound)`.
-- **conclusion.** Per bound shape: `propagate_function_bound`,
-  `propagate_meta_bound`, kind-arity check, or `TAG_MATCH_TYPE` evaluation.
-  `retire`.
+- **conclusion.** Per bound shape:
+  - function shape → `propagate_function_bound(v, bound)`, `retire`.
+  - metamethod shape → `propagate_meta_bound(v, bound)`, `retire`.
+  - kind-arity bound → `check_kind_arity(v, arity)`; on mismatch `fail`,
+    else `retire`.
+  - `TAG_MATCH_TYPE` bound → `eval_match_type(bound)` and `unify(v,
+    evaluated)`, `retire`.
 - **side cond.** Emitted as GIVEN so back-propagation runs before any wanted
   binds the same TVs (fundamental 4).
 - **handler.** `solve_bound` (`solve.lua:1182`).
@@ -312,12 +415,23 @@ RULE C_<KIND>(payload)
 
 ### RULE C_ESCAPE_CHECK {ret, call_id, line, col}
 - **premises.** If `find(ret)` is a non-skolem `Unbound v`, `defer(c)`.
-- **conclusion.** Walk reachable TVs from `find(ret)`; if any has the
-  matching `call_id` skolem mark, `fail`. Else `retire`.
-- **handler.** `solve_escape_check` (`solve.lua:799`).
+- **conclusion.** Invoke `escape_check(ret, call_id)`. The primitive walks
+  TVs reachable from BOTH (a) `find(ret)` AND (b) the call frame's outer
+  bindings (i.e. any `Env` entry whose value is bound at a scope outside
+  the call). If any reachable TV bears the matching `call_id` skolem
+  mark, `fail`. Else `retire`.
+- **handler.** `solve_escape_check` (`solve.lua:799`). Note: today's
+  handler walks (a) only; covering (b) per `docs/typechecker-rank-n.md`
+  is a Phase-3 reconciliation item (see §11 Gap D below).
 
 ### RULE C_HKT_DECOMPOSE {f_fresh, args_fresh, bound_alias, actual_arg, line, col}
-- **conclusion.** Substitute `bound_alias`'s structural body with `args_fresh` as the parameter list to produce `template`. Invoke `unify(template, actual_arg)` — successful unification binds the entries of `args_fresh` to the recovered arguments as a side effect of `unify` reaching their leaf positions. `bind(f_fresh, bound_alias)` records the recovered head. `retire` always (failure produces a diagnostic but does not block the rest of the worklist).
+- **conclusion.** Let `template = substitute(bound_alias.body,
+  bound_alias.params, args_fresh)`. Invoke `unify(template, actual_arg)`;
+  successful unification binds the entries of `args_fresh` to the
+  recovered arguments as a side effect of `unify` reaching their leaf
+  positions. `bind(f_fresh, bound_alias)` records the recovered head.
+  `retire` always (failure produces a diagnostic but does not block the
+  rest of the worklist).
 - **handler.** `solve_hkt_decompose` (`solve.lua:3852`, impl at 3771).
 
 ### RULE C_INSTANTIATE_AT_CALL {callee, args, ret, line, col}
@@ -490,7 +604,9 @@ is `Σ`.
 | `solve_unify`                 | solve.lua:596      | C_UNIFY                    |
 | `solve_sub`                   | solve.lua:613      | C_SUB                      |
 | `solve_index`                 | solve.lua:1457     | C_INDEX                    |
-| `solve_callable`              | solve.lua:2123     | C_CALLABLE *(+ delegates to C_DISTRIBUTE_OVER_UNION on TAG_UNION; Phase 3)* |
+| `solve_call_function`         | *(Phase 3; today's branches of `solve_callable` at solve.lua:2123)* | C_CALL_FUNCTION            |
+| `solve_resolve_overload`      | *(Phase 3; today's branches of `solve_callable` at solve.lua:2123)* | C_RESOLVE_OVERLOAD         |
+| `solve_infer_callable_bound`  | *(Phase 3; today's branches of `solve_callable` at solve.lua:2123)* | C_INFER_CALLABLE_BOUND     |
 | `solve_arith`                 | solve.lua:2507     | C_ARITH                    |
 | `solve_compare`               | solve.lua:2599     | C_COMPARE                  |
 | `solve_return`                | solve.lua:2724     | C_RETURN                   |
@@ -505,12 +621,7 @@ is `Σ`.
 | `solve_instantiate_at_call`   | solve.lua:2809     | C_INSTANTIATE_AT_CALL *(stub today; spec calls `instantiate_at_use`)* |
 | *(not yet implemented)*       | —                  | C_DISTRIBUTE_OVER_UNION    |
 
-16 existing handlers, 17 rules. The mapping is 1-1 modulo two Phase-3
-items (both flagged in the table): the new `C_DISTRIBUTE_OVER_UNION` kind
-must land, and `solve_callable` / `solve_check_args` must lose their
-inline TAG_UNION branches in favour of emitting the new kind. The stub
-`solve_instantiate_at_call` is filled in by Phase 3 using the
-`instantiate_at_use` primitive (§2).
+16 existing handlers in solve.lua's dispatch table. Spec defines 19 rules (the 16 existing + C_DISTRIBUTE_OVER_UNION + C_CALL_FUNCTION + C_RESOLVE_OVERLOAD + C_INFER_CALLABLE_BOUND minus the retired C_CALLABLE). Phase 3 splits `solve_callable` into three handlers per the new rules; C_CALLABLE constraint emission is removed in favour of emitting the specific kind based on callee tag at constraint-generation time.
 
 ## 10. solve2.lua disposition
 
@@ -587,11 +698,28 @@ path. Tagged **NON-BLOCKER for cross-statement C_SUB ordering**: every TAG_FUNCT
 
 ### Gap C: H2 record-of-generics dispatch (BLOCKER)
 
+*Relation to Gap B.* Gap B addresses the *general* producer/consumer ordering invariant (cross-statement `C_SUB(call_ret_TV, ann)` parks on the owned ret_TV until the producer terminal-succeeds). Gap C addresses the *specific motivating workload* — H2 record-of-generics — that requires dispatch through a polytype field accessed via `TAG_INDEX`. Resolving Gap B alone does not resolve H2; the dispatch step itself must extend to park-on-callee.
+
 The actual Phase F blocker per `docs/typechecker-phase-f-blocker.md` and `docs/typechecker-solver-fundamentals.md` §6 is the pattern `record.field(x)` where `record.field` resolves to a polytype field `<T>(T) → T`. Instantiation must happen when the field-read resolves, not at parse time, because the callee is a free TV at gen time. Test pins in `lib/type/static/type_soundness_test.lua` lines ~3875-3990 (H2, H2a, H2b, H2e) currently assert `has_error("Maybe%(_%)")` — that is the regression-pin protecting against incorrect dispatch.
 
-Spec gap: `C_INSTANTIATE_AT_CALL` and `C_CALLABLE` premises do not cover the case where `find(callee)` is `Unbound` but will resolve to a `TAG_FORALL` via a TAG_INDEX projection on a polytype-bearing record. The current spec only addresses cross-statement ordering (Gap B). H2 is a different problem.
+Spec gap: `C_INSTANTIATE_AT_CALL` and `C_CALL_FUNCTION` premises do not cover the case where `find(callee)` is `Unbound` but will resolve to a `TAG_FORALL` via a TAG_INDEX projection on a polytype-bearing record (C_CALL_FUNCTION's premise parks on Unbound callee, but does not chain through TAG_INDEX resolution that yields a polytype). The current spec only addresses cross-statement ordering (Gap B). H2 is a different problem.
 
 Tagged **BLOCKER**: Phase 3 cannot land H2 dispatch until either (a) the spec extends `C_INSTANTIATE_AT_CALL` to park-on-callee when callee is Unbound and re-dispatch through `instantiate_at_use` on resolution, OR (b) H2 is explicitly documented as a known-bad case with the test pins preserved as the regression boundary.
+
+### Gap D: C_ESCAPE_CHECK covers only one reachability root (NON-BLOCKER)
+
+`docs/typechecker-rank-n.md` §"The escape check" specifies walking both
+(a) the inferred return type and (b) any outer binding's type for skolems
+at the call-site level. `solve.lua:799`'s implementation today walks
+(a) only. Test pins N7 (forall-in-return) and N8 (rank-3 nested) currently
+pass because the test fixtures don't exercise leakage through outer
+bindings.
+
+Tagged **NON-BLOCKER**: the spec rule (§3 C_ESCAPE_CHECK, post-Round-2)
+prescribes both walks; Phase 3 reconciles the handler. Until then, a
+test that captures a skolem in a closure variable and returns the
+closure could leak. Add such a test in Phase 3 to demonstrate the gap
+before reconciliation, then fix the handler to match the spec.
 
 ### Net §11 verdict
 
