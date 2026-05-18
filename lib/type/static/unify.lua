@@ -5,6 +5,12 @@
 local defs = require("lib.type.static.defs")
 local types_mod = require("lib.type.static.types")
 local intern_mod = require("lib.type.static.intern")
+-- solve2.wake_ctx is the Outside-In/X peer to wake_waiters at the
+-- bind_var_to_type chokepoint (P2 of docs/typechecker-solver-rewrite.md,
+-- commits 710a8084 + 4eebb1de). solve2 has no top-level dependency on
+-- unify, so this require introduces no cycle. The call is a no-op when
+-- no implications are live (legacy code path).
+local solve2 = require("lib.type.static.solve2")
 
 local TAG_NIL          = defs.TAG_NIL
 local TAG_BOOLEAN      = defs.TAG_BOOLEAN
@@ -332,7 +338,13 @@ end
 -- TAG_NAMED to true without binding.
 --: (Ctx, integer, integer) -> (boolean, string | nil, { kind: string, path: { [integer]: unknown } | nil, expected?: unknown, got?: unknown, field?: string } | nil)
 function M.bind_var_to_type(ctx, var_tid, target_tid)
-    local ok, msg, info = bind_var(ctx, find(ctx, var_tid), target_tid)
+    local root = find(ctx, var_tid)
+    local ok, msg, info = bind_var(ctx, root, target_tid)
+    -- Wake any solve2 wanted parked on this TV. Co-resident with the
+    -- wake_waiters call inside bind_var: legacy kinds re-enter via
+    -- ctx._worklist, ported kinds (C_UNIFY/C_SUB in P2; more in P3+)
+    -- flip from parked→active inside their owning implication.
+    if ok then solve2.wake_ctx(ctx, root) end
     return ok, msg, info
 end
 

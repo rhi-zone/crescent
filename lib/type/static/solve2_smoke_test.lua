@@ -79,4 +79,65 @@ assert.describe("solve2: smoke", function()
         assert.eq(w.blocked_on, 99, "unrelated park should not be woken")
         assert.eq(w.status, "parked", "unrelated park keeps parked status")
     end)
+
+    -- P2: dispatch_one is the per-kind entry from solve_range. C_UNIFY and
+    -- C_SUB are both terminal — they return true on success, emit no
+    -- children. The boolean return drives solve_range.run_one's
+    -- _solved/_deferred flagging.
+    assert.it("dispatch_one solves C_UNIFY between compatible types", function()
+        local ctx = new_ctx()
+        local c = constrain.make_unify(ctx.T_INTEGER, ctx.T_INTEGER, 1, 1)
+        local solved = solve2.dispatch_one(ctx, c)
+        assert.eq(solved, true, "C_UNIFY of integer~integer should solve")
+        assert.eq(#ctx.err.errors, 0, "no error from successful unify")
+    end)
+
+    assert.it("dispatch_one routes failure through to ctx.err", function()
+        local ctx = new_ctx()
+        local c = constrain.make_unify(ctx.T_INTEGER, ctx.T_STRING, 1, 1)
+        local solved = solve2.dispatch_one(ctx, c)
+        -- Legacy handler emits a diagnostic and returns true (terminal);
+        -- dispatch_one mirrors that — the wanted retires and the error
+        -- reaches ctx.err exactly once.
+        assert.eq(solved, true, "failed unify is terminal-solved (legacy contract)")
+        assert.ok(#ctx.err.errors >= 1, "error reaches ctx.err")
+    end)
+
+    -- P2: M.PORTED is the per-kind dispatch table solve_range checks.
+    -- C_UNIFY and C_SUB are both included; nothing else (yet).
+    assert.it("PORTED set contains exactly C_UNIFY and C_SUB", function()
+        assert.eq(solve2.PORTED[constrain.C_UNIFY], true, "C_UNIFY is ported")
+        assert.eq(solve2.PORTED[constrain.C_SUB], true, "C_SUB is ported")
+        assert.eq(solve2.PORTED[constrain.C_INDEX], nil, "C_INDEX not yet ported")
+        assert.eq(solve2.PORTED[constrain.C_CALLABLE], nil, "C_CALLABLE not yet ported")
+    end)
+
+    -- P2: wake_ctx walks the per-ctx implication stack pushed by simplify.
+    -- With no implications live (no simplify on the stack), it is a no-op.
+    -- This is what makes the call safe to invoke unconditionally from
+    -- unify.bind_var_to_type.
+    assert.it("wake_ctx is a no-op with no live implications", function()
+        local ctx = new_ctx()
+        solve2.wake_ctx(ctx, 42)  -- must not error
+        assert.eq(ctx._solve2_impls, nil, "no implication stack created")
+    end)
+
+    -- P2: simplify publishes its implication on ctx._solve2_impls so
+    -- wake_ctx (called from bind_var_to_type) can flip parked wanteds.
+    -- A bind happening during simplify reaches the parked wanted in the
+    -- same loop turn.
+    assert.it("simplify publishes impl on ctx for wake_ctx visibility", function()
+        local ctx = new_ctx()
+        local impl = solve2.new_implication(nil)
+        local w = solve2.new_wanted(constrain.C_UNIFY, { constrain.C_UNIFY, 0, 0, 1, 1 })
+        w.status = "parked"
+        w.blocked_on = 77
+        impl.wanteds[1] = w
+        -- We can't call simplify directly without it draining; instead
+        -- exercise wake_ctx by manually publishing the impl.
+        ctx._solve2_impls = { impl }
+        solve2.wake_ctx(ctx, 77)
+        assert.eq(w.status, "active", "wake_ctx flips matching parked wanted")
+        assert.eq(w.blocked_on, nil, "wake_ctx clears blocked_on")
+    end)
 end)

@@ -146,13 +146,19 @@ local function run_handler(ctx, impl, w)
         end
         local solved_field = res.solved
         if solved_field == false then
-            -- The handler may have registered itself on ctx.tv_waiters via
-            -- solve.await. In P1 we mirror parked-state without recording
-            -- the TV id on the Wanted: the legacy wake_waiters path will
-            -- continue to clear ctx.tv_waiters; M.wake is only invoked by
-            -- the smoke test and operates on the explicit blocked_on field
-            -- set by callers. P2 routes await through this dispatch and
-            -- captures the TV id directly.
+            -- The handler also registered the legacy constraint on
+            -- ctx.tv_waiters via solve.await (see solve.lua's `await`),
+            -- so wake_waiters continues to drive re-runs through the
+            -- legacy worklist when the TV binds. P2 doesn't capture the
+            -- await TV id into blocked_on because the P2 ported kinds
+            -- (C_UNIFY, C_SUB) are terminal — they never park — so the
+            -- capture would be dead code. The handler dispatch table
+            -- also erases the per-kind return shape (result arrives as
+            -- `unknown`), and the legacy await contract states integer
+            -- but the typechecker can only narrow to `number` via
+            -- `type(x) == "number"`. P3 ports await-emitting kinds and
+            -- types the handler return shape, at which point blocked_on
+            -- capture lands without a force cast.
             return "parked"
         end
         return "solved"
@@ -171,6 +177,15 @@ end
 
 --: (Ctx, { skolems: { [integer]: integer, ... }, givens: { [integer]: { kind: unknown, payload: { [integer]: unknown, ... }, status: string, blocked_on: integer | nil, evidence: unknown | nil }, ... }, wanteds: { [integer]: { kind: unknown, payload: { [integer]: unknown, ... }, status: string, blocked_on: integer | nil, evidence: unknown | nil }, ... }, parent: unknown | nil }) -> { skolems: { [integer]: integer, ... }, givens: { [integer]: { kind: unknown, payload: { [integer]: unknown, ... }, status: string, blocked_on: integer | nil, evidence: unknown | nil }, ... }, wanteds: { [integer]: { kind: unknown, payload: { [integer]: unknown, ... }, status: string, blocked_on: integer | nil, evidence: unknown | nil }, ... }, parent: unknown | nil }
 function M.simplify(ctx, impl)
+    -- Publish the implication so unify.bind_var_to_type → M.wake_ctx can
+    -- transfer any wanted parked on a newly-bound TV back to "active" in
+    -- the same loop turn. Stack-allocated so nested simplify (P3+
+    -- sub-solve) inherits and restores ordering.
+    --: { [integer]: { skolems: { [integer]: integer, ... }, givens: { [integer]: { kind: unknown, payload: { [integer]: unknown, ... }, status: string, blocked_on: integer | nil, evidence: unknown | nil }, ... }, wanteds: { [integer]: { kind: unknown, payload: { [integer]: unknown, ... }, status: string, blocked_on: integer | nil, evidence: unknown | nil }, ... }, parent: unknown | nil }, ... }
+    local stack = ctx._solve2_impls --[[: { [integer]: { skolems: { [integer]: integer, ... }, givens: { [integer]: { kind: unknown, payload: { [integer]: unknown, ... }, status: string, blocked_on: integer | nil, evidence: unknown | nil }, ... }, wanteds: { [integer]: { kind: unknown, payload: { [integer]: unknown, ... }, status: string, blocked_on: integer | nil, evidence: unknown | nil }, ... }, parent: unknown | nil }, ... } | nil]] or {}
+    ctx._solve2_impls = stack
+    stack[#stack + 1] = impl
+
     -- Givens-first (fundamental #4). Run every given to fixpoint before
     -- any wanted gets a turn. In P1 nothing populates givens, but the
     -- loop is present so P2+ inherits the correct order of operations.
@@ -214,6 +229,9 @@ function M.simplify(ctx, impl)
         end
     end
 
+    -- Pop the implication. rawset to bypass index-signature nil rejection
+    -- on the trailing slot.
+    rawset(stack, #stack, nil)
     return impl
 end
 
@@ -242,6 +260,20 @@ function M.wake(ctx, impl, tv_id)
     end
 end
 
+-- Ctx-level wake (peer of unify.wake_waiters at the bind_var_to_type
+-- chokepoint, per P2 of docs/typechecker-solver-rewrite.md). Iterates
+-- every active implication on the stack and flips parked wanteds whose
+-- blocked_on matches the bound TV. No-op if no implications are live —
+-- this is what makes the call safe on the legacy code path.
+--: (Ctx, integer) -> ()
+function M.wake_ctx(ctx, tv_id)
+    local stack = ctx._solve2_impls
+    if not stack then return end
+    for i = 1, #stack do
+        M.wake(ctx, stack[i], tv_id)
+    end
+end
+
 -- ---------------------------------------------------------------------------
 -- solve_one (test entry)
 -- ---------------------------------------------------------------------------
@@ -256,6 +288,33 @@ function M.solve_one(ctx, c)
     local impl = new_implication(nil)
     impl.wanteds[1] = new_wanted(c[1], c)
     return M.simplify(ctx, impl)
+end
+
+-- ---------------------------------------------------------------------------
+-- dispatch_one (per-kind dispatch entry from solve_range, P2)
+-- ---------------------------------------------------------------------------
+--
+-- Routes a single legacy constraint through `simplify` and reports the
+-- outcome to solve_range. The fresh implication is short-lived: every
+-- ported kind currently in P2 (C_UNIFY, C_SUB) is terminal and never
+-- emits children — so the wanted retires or parks in one round and
+-- `simplify` exits at quiescence. When P3+ ports kinds that emit, they
+-- emit ported kinds only, which are absorbed inside the same simplify
+-- drain; legacy never sees them.
+--
+-- Returns true if the wanted retired (caller marks c._solved), false if
+-- parked (caller marks c._deferred). The handler's call into solve.await
+-- has already registered c on ctx.tv_waiters, so wake_waiters drives the
+-- legacy worklist re-run when the awaited TV binds — same channel the
+-- pre-P2 path uses. The new Outside-In/X wake (M.wake_ctx) is structural
+-- in P2: no P2-ported kind parks, so there is nothing for it to flip.
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
+function M.dispatch_one(ctx, c)
+    local impl = new_implication(nil)
+    local w = new_wanted(c[1], c)
+    impl.wanteds[1] = w
+    M.simplify(ctx, impl)
+    return w.status == "retired"
 end
 
 -- Convenience predicates for tests / future inert-set work.
@@ -273,5 +332,17 @@ end
 -- Expose constraint kind constants so smoke / unit tests don't need to
 -- pull constrain.lua separately.
 M.C_UNIFY = constrain.C_UNIFY
+M.C_SUB   = constrain.C_SUB
+
+-- Set of constraint kinds that solve_range routes through `dispatch_one`
+-- instead of the legacy handler dispatch. Expanded one kind at a time
+-- per the rewrite phases (P3 adds C_BOUND/C_NARROW_NIL/C_ESCAPE_CHECK/C_OR;
+-- P4 the call-path family; P5 the rest). Uniform predicate — no
+-- per-kind carve-outs in solve_range.
+--: { [integer]: boolean, ... }
+M.PORTED = {
+    [constrain.C_UNIFY] = true,
+    [constrain.C_SUB]   = true,
+}
 
 return M

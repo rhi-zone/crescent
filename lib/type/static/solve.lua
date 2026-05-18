@@ -13,7 +13,7 @@ local constrain  = require("lib.type.static.constrain")
 -- Coexists with this file; M.solve still dispatches the legacy path in P1.
 -- Required here so solve2 can lazy-require solve back without a cycle on
 -- first use of legacy_handlers.
-require("lib.type.static.solve2")
+local solve2 = require("lib.type.static.solve2")
 
 local TAG_ANY          = defs.TAG_ANY
 local TAG_UNKNOWN      = defs.TAG_UNKNOWN
@@ -3857,6 +3857,12 @@ local function solve_range(ctx, constraints, lo, hi)
     --: ({ [integer]: unknown, ... }) -> ()
     local function run_one(c)
         local kind = c[1]
+        -- Per-kind dispatch (P2 of docs/typechecker-solver-rewrite.md):
+        -- kinds listed in solve2.PORTED run through the Outside-In/X
+        -- simplify loop instead of the legacy handler directly. The
+        -- handler implementations are reused — what changes is the
+        -- scheduling context. Currently: C_UNIFY, C_SUB. Uniform
+        -- predicate, no per-kind carve-outs (CLAUDE.md ad-hoc ban).
         local handler = handlers[kind]
         if not handler then c._solved = true; return end
         -- Givens-before-wanteds (item 2): publish the current constraint's
@@ -3870,7 +3876,12 @@ local function solve_range(ctx, constraints, lo, hi)
         local saved_wake = ctx._bind_woke_given
         ctx._current_tier = c._tier or 1  -- TIER_WANTED default
         ctx._bind_woke_given = false
-        local result = handler(ctx, c)
+        local result
+        if solve2.PORTED[kind] then
+            result = solve2.dispatch_one(ctx, c)
+        else
+            result = handler(ctx, c)
+        end
         ctx._current_tier = saved_tier
         ctx._bind_woke_given = saved_wake
         if type(result) == "boolean" then
