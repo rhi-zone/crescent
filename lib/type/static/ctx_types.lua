@@ -80,6 +80,7 @@ DefsModule = {
   ANN_TYPE: integer, ANN_DECL: integer, ANN_TYPE_ARGS: integer,
   FLAG_VARARG: integer, FLAG_LOCAL: integer, FLAG_COMPUTED: integer,
   FLAG_GENERIC: integer, FLAG_RECURSIVE: integer,
+  FLAG_SKOLEM: integer, FLAG_ROWVAR_INFER: integer, FLAG_SUB_SOLVE_PARAM: integer,
   FLAG_READONLY: integer, FLAG_OPTIONAL: integer, FLAG_PRIVATE: integer,
   TAG_NIL: integer, TAG_BOOLEAN: integer, TAG_NUMBER: integer,
   TAG_STRING: integer, TAG_ANY: integer, TAG_NEVER: integer,

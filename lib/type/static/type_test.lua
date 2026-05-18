@@ -4759,7 +4759,7 @@ local y = x
     -- re-emitted at call sites with operands mapped to per-call fresh
     -- instances, so caller field types flow into the callability check.
     -- Required companion change: solve_check_args must defer (not silently
-    -- bind T_ANY) when the callee is a free TV outside _sub_solve_params,
+    -- bind T_ANY) when the callee is a free TV without FLAG_SUB_SOLVE_PARAM,
     -- so the C_BOUND propagation has a chance to bind it before checking.
     assert.it("HM Phase 2: t.x() rejects {x=42} (integer not callable)", function()
         v3_has_error("local function f(t) return t.x() end\nlocal _ = f({x=42})\n", "cannot call value")

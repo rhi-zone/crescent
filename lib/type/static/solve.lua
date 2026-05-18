@@ -46,6 +46,7 @@ local FLAG_OPAQUE_KEY    = defs.FLAG_OPAQUE_KEY
 local FLAG_SKOLEM        = defs.FLAG_SKOLEM
 local FLAG_ROWVAR_INFER  = defs.FLAG_ROWVAR_INFER
 local FLAG_GENERIC       = defs.FLAG_GENERIC
+local FLAG_SUB_SOLVE_PARAM = defs.FLAG_SUB_SOLVE_PARAM
 local band               = require("bit").band
 local bor                = require("bit").bor
 
@@ -1444,8 +1445,7 @@ local function solve_index(ctx, c)
         -- has integer-keyed indexer access"; specific tuple-slot semantics
         -- (slot < tuple length) are deferred until the actual is resolved
         -- at the call site. For now use ctx.T_INTEGER as the bound's key.
-        if ctx._sub_solve_params and ctx._sub_solve_params[obj_tid_raw]
-            and obj_t.tag == TAG_VAR then
+        if obj_t.tag == TAG_VAR and band(obj_t.flags, FLAG_SUB_SOLVE_PARAM) ~= 0 then
             emit_indexer_bound(ctx, obj_tid, ctx.T_INTEGER, res_tid)
             return true
         end
@@ -1561,8 +1561,7 @@ local function solve_index(ctx, c)
     -- the actual has the field via prim_index for primitives or table_field
     -- for tables. res_tid is the bound's field type — at call site it gets
     -- unified with the actual's field type, propagating downstream.
-    if ctx._sub_solve_params and ctx._sub_solve_params[obj_tid_raw]
-        and obj_t.tag == TAG_VAR then
+    if obj_t.tag == TAG_VAR and band(obj_t.flags, FLAG_SUB_SOLVE_PARAM) ~= 0 then
         emit_field_bound(ctx, obj_tid, name_id, res_tid)
         return true
     end
@@ -2065,7 +2064,7 @@ local function solve_callable(ctx, c)
         -- ctx._forall_bounds. At call site, propagate_function_bound (in
         -- solve_bound) decomposes the actual function's signature into the
         -- bound's free TVs.
-        if ctx._sub_solve_params and ctx._sub_solve_params[callee_raw] then
+        if callee_t.tag == TAG_VAR and band(callee_t.flags, FLAG_SUB_SOLVE_PARAM) ~= 0 then
             local var_t = ctx.types:get(callee_tid)
             local var_level = types_mod.var_level(var_t)
             local r_var = types_mod.make_var(ctx, var_level)
@@ -2425,13 +2424,13 @@ local function solve_arith(ctx, c)
     -- bound is checked via solve_bound's propagate_meta_bound (Phase 1a).
     local lhs_t = ctx.types:get(lhs_tid)
     local rhs_t = ctx.types:get(rhs_tid)
-    if ctx._sub_solve_params then
-        local lhs_is_param = lhs_t.tag == TAG_VAR and ctx._sub_solve_params[lhs_raw]
-        local rhs_is_param = rhs_t.tag == TAG_VAR and ctx._sub_solve_params[rhs_raw]
+    do
+        local lhs_is_param = lhs_t.tag == TAG_VAR and band(lhs_t.flags, FLAG_SUB_SOLVE_PARAM) ~= 0
+        local rhs_is_param = rhs_t.tag == TAG_VAR and band(rhs_t.flags, FLAG_SUB_SOLVE_PARAM) ~= 0
         if lhs_is_param then
             emit_meta_bound(ctx, lhs_tid, op_name, rhs_tid, res_tid)
         end
-        if rhs_is_param and lhs_raw ~= rhs_raw then
+        if rhs_is_param and lhs_tid ~= rhs_tid then
             -- Symmetric bound on rhs (skip if same tid as lhs to avoid duplicate).
             emit_meta_bound(ctx, rhs_tid, op_name, lhs_tid, res_tid)
         end
@@ -2516,14 +2515,14 @@ local function solve_compare(ctx, c)
     -- needs to find `__lt` on the actual.
     local lhs_t = ctx.types:get(lhs_tid)
     local rhs_t = ctx.types:get(rhs_tid)
-    if ctx._sub_solve_params then
-        local lhs_is_param = lhs_t.tag == TAG_VAR and ctx._sub_solve_params[lhs_raw]
-        local rhs_is_param = rhs_t.tag == TAG_VAR and ctx._sub_solve_params[rhs_raw]
+    do
+        local lhs_is_param = lhs_t.tag == TAG_VAR and band(lhs_t.flags, FLAG_SUB_SOLVE_PARAM) ~= 0
+        local rhs_is_param = rhs_t.tag == TAG_VAR and band(rhs_t.flags, FLAG_SUB_SOLVE_PARAM) ~= 0
         if lhs_is_param then
             local r_discard = types_mod.make_var(ctx, types_mod.var_level(lhs_t))
             emit_meta_bound(ctx, lhs_tid, "__lt", rhs_tid, r_discard)
         end
-        if rhs_is_param and lhs_raw ~= rhs_raw then
+        if rhs_is_param and lhs_tid ~= rhs_tid then
             local r_discard = types_mod.make_var(ctx, types_mod.var_level(rhs_t))
             emit_meta_bound(ctx, rhs_tid, "__lt", lhs_tid, r_discard)
         end
@@ -2835,7 +2834,7 @@ local function solve_check_args(ctx, c)
         -- C_CHECK_ARGS, not C_CALLABLE — so the bound emission must live here
         -- too, or HM's higher-order inference is silently broken (callee
         -- silently binds to T_ANY, no contravariance check fires).
-        if ctx._sub_solve_params and ctx._sub_solve_params[callee_raw] then
+        if callee_t.tag == TAG_VAR and band(callee_t.flags, FLAG_SUB_SOLVE_PARAM) ~= 0 then
             local var_t = ctx.types:get(callee_tid)
             local var_level = types_mod.var_level(var_t)
             local r_var = types_mod.make_var(ctx, var_level)

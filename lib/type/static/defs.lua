@@ -240,6 +240,7 @@ M.FLAG_GENERIC          = 1
 M.FLAG_RECURSIVE        = 2
 M.FLAG_SKOLEM           = 4   -- type variable that must never be bound (used for generic body checking)
 M.FLAG_ROWVAR_INFER     = 8   -- row variable created for type inference (vs. declared open record's `...`)
+M.FLAG_SUB_SOLVE_PARAM  = 16  -- TAG_VAR is a param of the function currently being sub-solved (HM Phase 1c)
 
 -- Flag bits (field entries)
 M.FLAG_OPTIONAL         = 0x01  -- field may be absent; access returns T|nil

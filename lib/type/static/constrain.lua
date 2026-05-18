@@ -72,8 +72,10 @@ local FLAG_READONLY   = defs.FLAG_READONLY
 local FLAG_OPTIONAL   = defs.FLAG_OPTIONAL
 local FLAG_PRIVATE    = defs.FLAG_PRIVATE
 local FLAG_OPAQUE_KEY = defs.FLAG_OPAQUE_KEY
+local FLAG_SUB_SOLVE_PARAM = defs.FLAG_SUB_SOLVE_PARAM
 local band            = require("bit").band
 local bor             = require("bit").bor
+local bnot            = require("bit").bnot
 
 -- Compute field flags from base_flags (boolean shorthand for FLAG_OPTIONAL is accepted).
 --: (Ctx, integer, integer | nil) -> integer
@@ -2314,20 +2316,24 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
     -- early so ret_var binding settles before call-site instantiation).
     -- Skipped for annotated functions (params are already concrete).
     --
-    -- ctx._sub_solve_params marks this function's param tids so future
-    -- Phase 1c body-solver hooks know which free vars to emit bounds on
-    -- instead of deferring. Empty for now (Phase 1b is plumbing only).
+    -- FLAG_SUB_SOLVE_PARAM marks this function's param TVs so future Phase 1c
+    -- body-solver hooks know which free vars to emit bounds on instead of
+    -- deferring. The flag lives on the TV itself (mirroring FLAG_SKOLEM), so
+    -- nested sub-solves compose naturally: each level sets/clears only its own
+    -- params' flags, and outer params keep their flag during inner solves.
     if not has_ann_fn then
         local body_end = #ctx.constraints
         if body_end > body_start then
             local solve_mod = require("lib.type.static.solve")
-            local saved_sub_params = ctx._sub_solve_params
-            ctx._sub_solve_params = {}
             for _, ptid in ipairs(param_tids) do
-                ctx._sub_solve_params[ptid] = true
+                local pt = ctx.types:get(ptid)
+                pt.flags = bor(pt.flags, FLAG_SUB_SOLVE_PARAM)
             end
             solve_mod.solve_range(ctx, ctx.constraints, body_start + 1, body_end)
-            ctx._sub_solve_params = saved_sub_params
+            for _, ptid in ipairs(param_tids) do
+                local pt = ctx.types:get(ptid)
+                pt.flags = band(pt.flags, bnot(FLAG_SUB_SOLVE_PARAM))
+            end
         end
     end
     local hm_body_end = #ctx.constraints
