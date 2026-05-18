@@ -128,7 +128,7 @@ assert.describe("solve2: smoke", function()
 
     -- P2: M.PORTED is the per-kind dispatch table solve_range checks.
     -- C_UNIFY and C_SUB are both included; nothing else (yet).
-    assert.it("PORTED set contains the P2 + P3 ported kinds", function()
+    assert.it("PORTED set contains the P2 + P3 + P4 ported kinds", function()
         -- P2: terminal kinds.
         assert.eq(solve2.PORTED[constrain.C_UNIFY], true, "C_UNIFY is ported")
         assert.eq(solve2.PORTED[constrain.C_SUB], true, "C_SUB is ported")
@@ -137,9 +137,13 @@ assert.describe("solve2: smoke", function()
         assert.eq(solve2.PORTED[constrain.C_NARROW_NIL], true, "C_NARROW_NIL is ported")
         assert.eq(solve2.PORTED[constrain.C_ESCAPE_CHECK], true, "C_ESCAPE_CHECK is ported")
         assert.eq(solve2.PORTED[constrain.C_OR], true, "C_OR is ported")
-        -- P4 candidates: not yet ported.
+        -- P4: call-path family routed through simplify with TV ownership.
+        assert.eq(solve2.PORTED[constrain.C_CALLABLE], true, "C_CALLABLE is ported")
+        assert.eq(solve2.PORTED[constrain.C_CHECK_ARGS], true, "C_CHECK_ARGS is ported")
+        assert.eq(solve2.PORTED[constrain.C_INSTANTIATE_AT_CALL], true, "C_INSTANTIATE_AT_CALL is ported")
+        assert.eq(solve2.PORTED[constrain.C_BIND_GENERICS], true, "C_BIND_GENERICS is ported")
+        -- P5 candidates: not yet ported.
         assert.eq(solve2.PORTED[constrain.C_INDEX], nil, "C_INDEX not yet ported")
-        assert.eq(solve2.PORTED[constrain.C_CALLABLE], nil, "C_CALLABLE not yet ported")
     end)
 
     -- P2: wake_ctx walks the per-ctx implication stack pushed by simplify.

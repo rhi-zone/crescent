@@ -347,12 +347,16 @@ M.C_OR           = constrain.C_OR
 -- per-kind carve-outs in solve_range.
 --: { [integer]: boolean, ... }
 M.PORTED = {
-    [constrain.C_UNIFY]        = true,
-    [constrain.C_SUB]          = true,
-    [constrain.C_BOUND]        = true,
-    [constrain.C_NARROW_NIL]   = true,
-    [constrain.C_ESCAPE_CHECK] = true,
-    [constrain.C_OR]           = true,
+    [constrain.C_UNIFY]             = true,
+    [constrain.C_SUB]               = true,
+    [constrain.C_BOUND]             = true,
+    [constrain.C_NARROW_NIL]        = true,
+    [constrain.C_ESCAPE_CHECK]      = true,
+    [constrain.C_OR]                = true,
+    [constrain.C_CALLABLE]          = true,
+    [constrain.C_CHECK_ARGS]        = true,
+    [constrain.C_INSTANTIATE_AT_CALL] = true,
+    [constrain.C_BIND_GENERICS]     = true,
 }
 
 return M
