@@ -18,20 +18,6 @@ local xdg = require("lib.platform.xdg")
 
 local M = {}
 
-local _migration_warned = false
-local function maybe_warn_legacy()
-	if _migration_warned then return end
-	_migration_warned = true
-	local home = os.getenv("HOME")
-	if not home or home == "" then return end
-	local legacy = home .. "/.crescent/config.lua"
-	local f = io.open(legacy, "r")
-	if not f then return end
-	f:close()
-	io.stderr:write("note: legacy " .. legacy .. " detected; pkg config now expected at "
-		.. xdg.config_home() .. "/config.lua (no automatic migration)\n")
-end
-
 local function load_from_path(path)
 	local fn, _err = loadfile(path)
 	if not fn then return { registries = {}, auth = {} } end
@@ -45,7 +31,6 @@ end
 
 -- Returns { registries=[...], auth={...} }
 function M.load()
-	maybe_warn_legacy()
 	local path = xdg.config_home() .. "/config.lua"
 	return load_from_path(path)
 end
