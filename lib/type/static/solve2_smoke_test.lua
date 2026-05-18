@@ -219,6 +219,34 @@ assert.describe("solve2: smoke", function()
             "ret_TV unmodified — the producer's later bind is what writes it")
     end)
 
+    -- Reader-side parity with solve_sub: solve_index has the same eager
+    -- fast-paths that bind res_tid unconditionally. An owned res_tid must
+    -- defer until the producer releases.
+    assert.it("solve_index defers on a claimed res_TV instead of eager binding", function()
+        local ctx = new_ctx()
+        ctx.tv_waiters = ctx.tv_waiters or {}
+        local res_tv = types_mod.make_var(ctx, 0)
+        local pending_call = { constrain.C_CALLABLE } --: { [integer]: unknown, ... }
+        solve_mod.claim(ctx, res_tv, pending_call)
+        -- C_INDEX(obj, key=lit_int(0), res_tv): a tuple-slot projection of a
+        -- still-pending call's return. Without the guard, solve_index would
+        -- walk into the integer-key fast-paths and bind res_tv.
+        local obj_tv = types_mod.make_var(ctx, 0)
+        local key_tid = types_mod.make_literal(ctx, defs.LIT_INTEGER, 0)
+        local idx_c = constrain.make_index(obj_tv, key_tid, res_tv, 1, 1)
+        local handlers = solve_mod.get_handlers()
+        local result = handlers[constrain.C_INDEX](ctx, idx_c)
+        assert.eq(type(result), "table",
+            "owned res_TV must defer (not boolean retire)")
+        local r = result --[[: { solved: boolean, await: integer | nil, emit: { [integer]: { [integer]: unknown, ... }, ... } | nil }]]
+        assert.eq(r.solved, false, "deferral signaled via solved=false")
+        assert.eq(r.await, res_tv,
+            "await targets the owned res_TV — solve_index did NOT bind it")
+        local rt = ctx.types:get(res_tv)
+        assert.eq(rt.tag == defs.TAG_VAR, true,
+            "res_TV unmodified — the producer's later bind is what writes it")
+    end)
+
     assert.it("simplify publishes impl on ctx for wake_ctx visibility", function()
         local ctx = new_ctx()
         local impl = solve2.new_implication(nil)

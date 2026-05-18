@@ -1460,6 +1460,14 @@ local function solve_index(ctx, c)
     local res_tid  = constrain.index_result(c)
     local line, col = constrain.index_line(c), constrain.index_col(c)
 
+    -- If a producer (solve_check_args, solve_instantiate_at_call, ...) has
+    -- claimed res_tid for a future write, defer: every eager fast-path below
+    -- binds res_tid unconditionally, which would race the producer. Same
+    -- shape as solve_sub's reader-side guard (commit 63c55f18).
+    if is_owned(ctx, res_tid) then
+        return await(ctx, c, res_tid)
+    end
+
     local key_t = ctx.types:get(key_tid)
     if key_t.tag ~= TAG_LITERAL then
         add_warning_code(ctx, line, col, defs.E.IMPLICIT_ANY)
