@@ -3812,16 +3812,9 @@ end
 -- outer solver later binds the TV, wake_waiters re-enqueues them on the
 -- (then-active) outer worklist. No explicit transfer is needed.
 --
--- Error dedup. Many handlers emit an error then `return false` (waiting for a
--- TV they don't know how to express as an await), which causes them to re-fire
--- on every round and re-emit the same error. The architecture doc's D12 marks
--- "errors append to ctx.errors during solving" as accidental — a proper fix
--- would convert errors to failed-constraint records — but that is out of scope
--- for item 1. Until D12 is addressed, solve_range redirects ctx.err to a local
--- buffer during the drain and flushes deduplicated by (filename, line, col,
--- msg) to the real err on exit. This is the same uniform mechanism the
--- previous 4-pass loop used (silent_err / seen_warnings / seen_rule_errors);
--- it is not a per-kind carve-out and does not encode scheduling.
+-- Errors are terminal (item 1.5a). Every handler that emits a diagnostic
+-- returns true on the same turn — the constraint is retired, never retried,
+-- so each error reaches ctx.err at most once. No dedup buffer is needed.
 --: (Ctx, { [integer]: { [integer]: unknown, ... }, ... }, integer, integer) -> ()
 local function solve_range(ctx, constraints, lo, hi)
     local handlers = get_handlers()
@@ -3834,33 +3827,6 @@ local function solve_range(ctx, constraints, lo, hi)
     --: { [integer]: { [integer]: unknown, ... }, ... }
     local worklist = {}
     ctx._worklist = worklist
-
-    -- Per-invocation silent-err redirect; see docstring on error dedup.
-    local real_err = ctx.err
-    --: ErrCtx
-    local silent_err = { errors = {}, warnings = {}, source_lines = real_err.source_lines }
-    ctx.err = silent_err
-    --: { [string]: boolean }
-    local seen = {}
-    --: () -> ()
-    local function flush()
-        for _, w in ipairs(silent_err.warnings) do
-            local key = "w\0" .. w.filename .. "\0" .. w.line .. "\0" .. w.col .. "\0" .. w.msg
-            if not seen[key] then
-                seen[key] = true
-                real_err.warnings[#real_err.warnings + 1] = w
-            end
-        end
-        silent_err.warnings = {}
-        for _, e in ipairs(silent_err.errors) do
-            local key = "e\0" .. e.filename .. "\0" .. e.line .. "\0" .. e.col .. "\0" .. e.msg
-            if not seen[key] then
-                seen[key] = true
-                real_err.errors[#real_err.errors + 1] = e
-            end
-        end
-        silent_err.errors = {}
-    end
 
     --: () -> ()
     local function seed()
@@ -3968,14 +3934,12 @@ local function solve_range(ctx, constraints, lo, hi)
         end
         -- Progress happened; re-seed. Constraints emitted via wake/emit are
         -- already on the worklist (or were drained), but a TV bound during
-        -- the round may also have unblocked constraints that didn't park on
-        -- it (return-false handlers without an await). Re-seed catches them
-        -- uniformly without per-kind carve-outs.
+        -- the round may also have unblocked constraints that deferred without
+        -- registering an await. Re-seed catches them uniformly without
+        -- per-kind carve-outs.
         seed()
     end
 
-    flush()
-    ctx.err = real_err
     if saved_worklist then
         ctx._worklist = saved_worklist
     else
@@ -4017,7 +3981,7 @@ function M.solve(ctx, constraints)
             -- to T_STRING via different paths. The post-solve normalization
             -- in check.lua runs AFTER us, so invoke it here too.
             types_mod.normalize_unions(ctx)
-            -- ctx.err was restored to real_err by solve_range on exit.
+            -- ctx.err is the real error sink; solve_range writes directly.
             emit_missing_function_signature(ctx, ctx.err, sev)
         end
     end
