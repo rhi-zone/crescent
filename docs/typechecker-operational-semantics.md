@@ -210,6 +210,8 @@ canonical rule in `docs/typechecker-rank-n.md`:
 Cases 1–3 escape-check the introduced skolems against the call-site outer
 bindings before retiring (per §3 C_ESCAPE_CHECK semantics).
 
+The four-case enumeration is a semantic-preserving expansion of `docs/typechecker-rank-n.md`'s three-case form: rank-n.md fuses cases 1+2 (both-forall) into a single composed rule; this spec splits them for handler clarity. Soundness is equivalent.
+
 ### `eval_match_type(tid) : TypeId → TypeId`
 Type-level evaluation of `TAG_MATCH_TYPE` (conditional types). Delegates to env/match.lua. Used by C_BOUND.
 
@@ -222,6 +224,22 @@ bound's representation is a function type.
 Specialises a metamethod-shape inferred bound. 168-line operation at
 `solve.lua:950`. Used by C_BOUND when the bound is a metamethod
 requirement (e.g. arithmetic operand inference).
+
+### `dispatch_param(actual, formal) : (TypeId, TypeId) → ()`
+Per-parameter dispatcher used by C_CALL_FUNCTION's TAG_FUNCTION branch
+and C_CHECK_ARGS: if `find(formal)` or `find(actual)` is `TAG_FORALL`,
+invoke `subsume(actual, formal)`; otherwise `unify(actual, formal)`.
+Returns nothing; failures propagate as the called primitive's failure.
+This is the explicit rank-N vs monomorphic discriminator.
+
+### `callable_shape(args, ret) : ([TypeId], TVId) → InferredBound`
+Constructs a function-shape inferred bound from a list of argument
+TypeIds and a return TVId. Used by C_INFER_CALLABLE_BOUND to construct
+the bound passed to `merge_inferred_bound`. The construction is a record
+literal of the form `{ kind = "callable", params = args, ret = ret }`;
+no freshening, no wrapping in `TAG_FUNCTION`. The resulting bound is
+matched against `v`'s eventual binding when `v` resolves through
+sub-solve.
 
 ### `check_kind_arity(v, expected_arity) : (TVId, ℕ) → (ok, err?)`
 Verifies that a TV's bound matches the expected type-constructor arity
@@ -307,9 +325,9 @@ RULE C_<KIND>(payload)
   `fail(c, "internal: wrong constraint kind for callee tag")`.
 - **conclusion.** Per `find(callee).tag`:
   - `TAG_FUNCTION` → `instantiate_at_use(callee, args, ret)` if callee
-    was a free TV at gen time; iterate params, calling `unify` per pair
-    when both sides are monomorphic and `subsume` when either side is
-    `TAG_FORALL`. If a bind set `_bind_woke_given`, `resume_iter(c, _)`.
+    was a free TV at gen time; iterate params, calling
+    `dispatch_param(actual_i, formal_i)` per pair. If a bind set
+    `_bind_woke_given`, `resume_iter(c, _)`.
     Otherwise `unify(ret, first_ret)` and `retire`.
   - `TAG_NOMINAL` → unwrap to the representation type; recursively
     dispatch this rule on the unwrapped form (one level of normalization,
@@ -325,11 +343,14 @@ RULE C_<KIND>(payload)
 ### RULE C_RESOLVE_OVERLOAD {callee, args, ret, line, col}
 - **premises.** `claim(ret, c)`. `find(callee)` must be `TAG_INTERSECTION`
   (else internal-error `fail`).
-- **conclusion.** `try_each(member_functions, attempt_member,
-  fail_with_candidates)`. On success, the chosen `attempt_member` commits
-  via `bind(ret, chosen_ret)`, `retire`. On exhaustion,
-  `fail_with_candidates` emits the multi-candidate diagnostic and
-  `bind(ret, T_ANY)`, `retire`.
+- **conclusion.** `try_each(members, attempt, fail)`, where `members` is
+  `find(callee).members` (each a `TAG_FUNCTION`),
+  `attempt(m) := try_unify_strict_args(args, m.params)` (returns true iff
+  every argument unifies with the corresponding member parameter without
+  binding), and `fail` is the exhaustion handler that emits a
+  multi-candidate diagnostic citing all member signatures and calls
+  `bind(ret, T_ANY)`. On `attempt`'s first true, the chosen member
+  commits via `bind(ret, chosen.ret)`. `retire` in both cases.
 - **side cond.** ownership owed.
 - **handler.** `solve_resolve_overload` (Phase 3; replaces the
   TAG_INTERSECTION branch of `solve_callable` at `solve.lua:2377+`).
@@ -371,7 +392,7 @@ RULE C_<KIND>(payload)
   the resolved bound itself contains a free TV, `park(c, bound)`.
 - **conclusion.** Per bound shape:
   - function shape → `propagate_function_bound(v, bound)`, `retire`.
-  - metamethod shape → `propagate_meta_bound(v, bound)`, `retire`.
+  - metamethod shape → `propagate_meta_bound(v, bound)`, `retire`. **(Phase 3.** `propagate_meta_bound` exists as a primitive at `solve.lua:950` but `solve_bound` does not currently dispatch to it; metamethod-shape bounds are inferred elsewhere today. Phase 3 lands the dispatch here so C_BOUND owns all bound-shape propagation.)
   - kind-arity bound → `check_kind_arity(v, arity)`; on mismatch `fail`,
     else `retire`.
   - `TAG_MATCH_TYPE` bound → `eval_match_type(bound)` and `unify(v,
@@ -397,7 +418,7 @@ RULE C_<KIND>(payload)
 - **premises.** `claim(ret, c)`. If any param slot is still `Unbound`,
   `defer(c)`. If callee is a sub-solve param TV, emit
   `merge_inferred_bound` and retire.
-- **conclusion.** Per-param `unify` when both sides are monomorphic; `subsume` when either is `TAG_FORALL`, then `unify(ret, first_ret)`. On
+- **conclusion.** Per-param `dispatch_param(actual_i, formal_i)`, then `unify(ret, first_ret)`. On
   arg-count mismatch / per-arg failure, `fail(c, …)` (terminal).
 - **handler.** `solve_check_args` (`solve.lua:2906`).
 
