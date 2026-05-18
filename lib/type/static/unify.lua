@@ -197,18 +197,24 @@ local function adjust_levels(ctx, tid, max_level, seen)
     end
 end
 
--- Wake-up hook: solver-architecture-v2 (β) resolution barrier. Centralized at
--- the union-find bind chokepoint so every successful TV bind drains the
--- waiter list — no per-call-site bookkeeping. Called only on the success
--- paths of bind_var; the only operation is "clear _deferred for each
--- waiter," uniform across constraint kinds.
+-- Wake-up hook: worklist-to-quiescence solver (item 1 of first-principles
+-- rework). Centralized at the union-find bind chokepoint so every successful
+-- TV bind drains the waiter list — no per-call-site bookkeeping. Two effects,
+-- uniform across constraint kinds: (1) clear _deferred for each waiter, and
+-- (2) re-enqueue each waiter onto ctx._worklist so the active solver drain
+-- re-runs it. The bind generation counter is bumped so solve_range's outer
+-- loop can detect quiescence (no binds since the last full drain).
 --: (ctx: Ctx, var_tid: integer) -> ()
 local function wake_waiters(ctx, var_tid)
+    ctx._bind_generation = (ctx._bind_generation or 0) + 1
     local waiters = ctx.tv_waiters[var_tid]
     if not waiters then return end
     ctx.tv_waiters[var_tid] = nil
+    local wl = ctx._worklist
     for i = 1, #waiters do
-        waiters[i]._deferred = false
+        local w = waiters[i]
+        w._deferred = false
+        if wl then wl[#wl + 1] = w end
     end
 end
 

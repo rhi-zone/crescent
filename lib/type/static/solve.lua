@@ -3835,175 +3835,184 @@ local function get_handlers()
     return _handlers
 end
 
--- Run the dependency-aware fixpoint solver over a slice [lo, hi] of the
--- constraint list. Behavior over the full range [1, #constraints] is
--- identical to the pre-extraction M.solve. The slice form exists so
--- per-function HM sub-solves (Phase 2) can resolve a function's body
--- constraints before the function type gets generalized.
+-- Worklist-to-quiescence solver (item 1 of the first-principles rework, see
+-- docs/typechecker-architecture-from-first-principles.md §4). Replaces the
+-- prior 4-pass fixpoint over the slice [lo, hi].
 --
--- Each call has its own silent_err / dedup tables. When called multiple
--- times against the same constraint list (sub-solve then global solve),
--- each call's dedup is independent — duplicate warnings across calls
--- are possible but rare in practice (a body constraint solved during
--- sub-solve typically completes there and is a no-op when re-visited).
+-- Mechanism. A worklist of ready constraint refs is drained in rounds:
+--   * Round = drain the worklist to empty. Each dequeue runs the handler.
+--     Successful solve marks _solved. Emitted children are appended to
+--     ctx.constraints AND pushed onto the worklist. A handler that parks
+--     (returns false, or { solved = false }) marks the constraint _deferred;
+--     parking is normally paired with solve.await(ctx, c, tv) which puts c
+--     on ctx.tv_waiters[tv]. When unify.bind_var_to_type binds that root,
+--     wake_waiters clears _deferred AND pushes the waiter onto ctx._worklist,
+--     so wakes that arrive mid-drain are picked up in the same round.
+--   * Quiescence = the round retired no constraints AND no TV was bound
+--     during it. Otherwise re-seed the worklist from the in-range
+--     not-_solved constraints (newly emitted entries past the original hi
+--     included) and run another round. This is the structural replacement
+--     for the 4-pass cap: termination is observed, not budgeted.
+--
+-- Sub-solve composition. gen_function calls solve_range on a body slice with
+-- the function's param TVs still free. Constraints awaiting one of those TVs
+-- park in tv_waiters and stay _deferred when sub-solve exits — they remain
+-- in ctx.constraints, and the outer solve_range will re-seed them. If the
+-- outer solver later binds the TV, wake_waiters re-enqueues them on the
+-- (then-active) outer worklist. No explicit transfer is needed.
+--
+-- Error dedup. Many handlers emit an error then `return false` (waiting for a
+-- TV they don't know how to express as an await), which causes them to re-fire
+-- on every round and re-emit the same error. The architecture doc's D12 marks
+-- "errors append to ctx.errors during solving" as accidental — a proper fix
+-- would convert errors to failed-constraint records — but that is out of scope
+-- for item 1. Until D12 is addressed, solve_range redirects ctx.err to a local
+-- buffer during the drain and flushes deduplicated by (filename, line, col,
+-- msg) to the real err on exit. This is the same uniform mechanism the
+-- previous 4-pass loop used (silent_err / seen_warnings / seen_rule_errors);
+-- it is not a per-kind carve-out and does not encode scheduling.
 --: (Ctx, { [integer]: { [integer]: unknown, ... }, ... }, integer, integer) -> ()
 local function solve_range(ctx, constraints, lo, hi)
     local handlers = get_handlers()
     if hi < lo then return end
 
-    -- Suppress error emission on all but the final pass to avoid duplicates.
+    -- Save and install the active worklist. Nested solve_range (sub-solve
+    -- inside the outer solve) restores the parent worklist on exit, so
+    -- wake_waiters writes to the innermost active drain.
+    local saved_worklist = ctx._worklist
+    --: { [integer]: { [integer]: unknown, ... }, ... }
+    local worklist = {}
+    ctx._worklist = worklist
+
+    -- Per-invocation silent-err redirect; see docstring on error dedup.
     local real_err = ctx.err
     --: ErrCtx
-    local silent_err = { errors = {}, warnings = {}, source_lines = {} }
-    -- Track warnings already flushed to real_err to avoid duplicates across passes.
+    local silent_err = { errors = {}, warnings = {}, source_lines = real_err.source_lines }
+    ctx.err = silent_err
     --: { [string]: boolean }
-    local seen_warnings = {}
-    -- Track rule-upgraded errors (from add_warning_code) flushed to real_err.
-    --: { [string]: boolean }
-    local seen_rule_errors = {}
-
+    local seen = {}
     --: () -> ()
-    local function flush_warnings()
+    local function flush()
         for _, w in ipairs(silent_err.warnings) do
-            local key = w.filename .. "\0" .. w.line .. "\0" .. w.col .. "\0" .. w.msg
-            if not seen_warnings[key] then
-                seen_warnings[key] = true
+            local key = "w\0" .. w.filename .. "\0" .. w.line .. "\0" .. w.col .. "\0" .. w.msg
+            if not seen[key] then
+                seen[key] = true
                 real_err.warnings[#real_err.warnings + 1] = w
             end
         end
         silent_err.warnings = {}
         for _, e in ipairs(silent_err.errors) do
-            local key = e.filename .. "\0" .. e.line .. "\0" .. e.col .. "\0" .. e.msg
-            if not seen_rule_errors[key] then
-                seen_rule_errors[key] = true
+            local key = "e\0" .. e.filename .. "\0" .. e.line .. "\0" .. e.col .. "\0" .. e.msg
+            if not seen[key] then
+                seen[key] = true
                 real_err.errors[#real_err.errors + 1] = e
             end
         end
         silent_err.errors = {}
     end
 
-    -- Initialize deferred flags on the slice. _solved is preserved across
-    -- solve_range invocations: a constraint successfully handled during a
-    -- per-function sub-solve must not re-fire in the outer global solve
-    -- (HM Phase 1c: body emitters like emit_field_bound succeed during
-    -- sub-solve while obj is still a free param TAG_VAR with
-    -- _sub_solve_params set; on outer solve _sub_solve_params is empty so
-    -- the same C_INDEX would fall through to structural extension and bind
-    -- the now-FLAG_GENERIC param var, destroying generalization).
-    for i = lo, hi do
-        constraints[i]._deferred = false
-    end
-
-    for pass = 1, 4 do
-        -- (η) emit-during-solve: rebind hi each pass so handlers that emit
-        -- child constraints (returning { solved, emit }) see them solved in
-        -- the same range. See docs/typechecker-solver-emit-during-solve.md.
-        hi = #constraints
-        local changed = false
-        local n_deferred = 0
-        ctx.err = silent_err
-        silent_err.errors = {}
-        silent_err.warnings = {}
-
-        for i = lo, hi do
+    --: () -> ()
+    local function seed()
+        local n = #constraints
+        if hi > n then hi = n end
+        for i = lo, n do
             local c = constraints[i]
-            local kind = c[1]
-            local handler = handlers[kind]
-            if handler and not c._solved then
-                if c._deferred then
-                    n_deferred = n_deferred + 1
-                else
-                    -- Track var state before for progress detection.
-                    -- C_ARITH has op_name (string) at c[2]; use lhs_tid at c[3] instead.
-                    local probe = kind ~= constrain.C_ARITH and c[2] or c[3]
-                    local t_before = ctx.types:get(find(ctx, probe))
-                    local tag_before = t_before.tag
-                    local result = handler(ctx, c)
-                    if type(result) == "boolean" then
-                        if result == false then
-                            c._deferred = true
-                            n_deferred = n_deferred + 1
-                        else
-                            c._solved = true
-                        end
-                    else
-                        -- Structured form:
-                        --   { solved: boolean, emit?: { Constraint... }, await?: integer }
-                        -- solved=false defers; emit appends children (P1.5);
-                        -- await is informational — solver-architecture-v2 (β)
-                        -- registration is performed inside await() at call time,
-                        -- so no work is needed here. The field is acknowledged so
-                        -- the protocol shape is documented at the dispatch site.
-                        if result.solved == false then
-                            c._deferred = true
-                            n_deferred = n_deferred + 1
-                        else
-                            c._solved = true
-                        end
-                        if result.emit then
-                            for _, nc in ipairs(result.emit) do
-                                constraints[#constraints + 1] = nc
-                                nc._deferred = false
-                            end
-                            changed = true
-                        end
-                        local _ = result.await  -- protocol ack; see solve.await
-                    end
-                    local t_after = ctx.types:get(find(ctx, probe))
-                    if t_after.tag ~= tag_before then changed = true end
+            if not c._solved then
+                c._deferred = false
+                worklist[#worklist + 1] = c
+            end
+        end
+        -- The slice may have grown via emit; bump hi so the next seed round
+        -- considers freshly-emitted constraints too.
+        hi = n
+    end
+
+    --: ({ [integer]: unknown, ... }) -> ()
+    local function run_one(c)
+        local kind = c[1]
+        local handler = handlers[kind]
+        if not handler then c._solved = true; return end
+        local result = handler(ctx, c)
+        if type(result) == "boolean" then
+            if result == false then
+                c._deferred = true
+            else
+                c._solved = true
+            end
+            return
+        end
+        -- Structured form: { solved: boolean, emit?, await? }. The await
+        -- field is informational; registration is performed inside
+        -- solve.await at call time. emit appends children to the constraint
+        -- list AND pushes them onto the active worklist.
+        if result.solved == false then
+            c._deferred = true
+        else
+            c._solved = true
+        end
+        if result.emit then
+            for _, nc in ipairs(result.emit) do
+                constraints[#constraints + 1] = nc
+                nc._deferred = false
+                worklist[#worklist + 1] = nc
+            end
+        end
+        local _ = result.await
+    end
+
+    seed()
+    while true do
+        local gen_before = ctx._bind_generation or 0
+        local solved_this_round = false
+        -- FIFO drain by head index: handlers were authored against in-order
+        -- [lo..hi] traversal, and dependency chains (e.g. C_BIND_GENERICS
+        -- feeding C_CHECK_ARGS) need that emission order preserved. A LIFO
+        -- stack inverts these chains and silently mis-orders them.
+        local head = 1
+        while head <= #worklist do
+            local c = worklist[head]
+            head = head + 1
+            -- Skip already-retired constraints and ones parked in this
+            -- round. _deferred is cleared by (a) wake_waiters on a TV bind
+            -- the constraint was awaiting, which also re-enqueues it for
+            -- this same drain, and (b) the round-boundary re-seed below
+            -- when any progress (solve or bind) was observed.
+            if not c._solved and not c._deferred then
+                run_one(c)
+                if c._solved then
+                    solved_this_round = true
                 end
             end
         end
-
-        flush_warnings()
-        if pass == 4 then
-            for _, e in ipairs(silent_err.errors) do
-                real_err.errors[#real_err.errors + 1] = e
-            end
-        end
-
-        if changed then
-            for i = lo, hi do
-                constraints[i]._deferred = false
-            end
-        end
-
-        if not changed then
-            if pass < 4 then
-                for i = lo, hi do
-                    constraints[i]._deferred = false
-                end
-                hi = #constraints
-                for i = lo, hi do
-                    local c = constraints[i]
-                    if not c._solved then
-                        local handler = handlers[c[1]]
-                        if handler then
-                            local result = handler(ctx, c)
-                            if type(result) == "boolean" then
-                                if result ~= false then c._solved = true end
-                            else
-                                if result.solved ~= false then c._solved = true end
-                                if result.emit then
-                                    for _, nc in ipairs(result.emit) do
-                                        constraints[#constraints + 1] = nc
-                                        nc._deferred = false
-                                    end
-                                end
-                                local _ = result.await  -- protocol ack
-                            end
-                        end
-                    end
-                end
-                flush_warnings()
-                for _, e in ipairs(silent_err.errors) do
-                    real_err.errors[#real_err.errors + 1] = e
-                end
-            end
+        -- Truncate the consumed entries so the next round starts from a
+        -- length-0 worklist (and wake_waiters pushes into a clean queue).
+        -- rawset to bypass the index-signature type which forbids nil.
+        for i = 1, #worklist do rawset(worklist, i, nil) end
+        local gen_after = ctx._bind_generation or 0
+        if not solved_this_round and gen_after == gen_before then
+            -- Quiescent: no constraint retired and no TV bound during the
+            -- round. Either every remaining constraint is solved, or the
+            -- remaining ones are deadlocked awaiting TVs that nothing in
+            -- this range will bind. In the sub-solve case the latter is
+            -- expected — the outer solver picks them up via re-seed when it
+            -- runs over [1, #constraints].
             break
         end
+        -- Progress happened; re-seed. Constraints emitted via wake/emit are
+        -- already on the worklist (or were drained), but a TV bound during
+        -- the round may also have unblocked constraints that didn't park on
+        -- it (return-false handlers without an await). Re-seed catches them
+        -- uniformly without per-kind carve-outs.
+        seed()
     end
+
+    flush()
     ctx.err = real_err
+    if saved_worklist then
+        ctx._worklist = saved_worklist
+    else
+        rawset(ctx, "_worklist", nil)
+    end
 end
 
 -- any: constraints is a list of heterogeneous arrays — see solve_unify comment.

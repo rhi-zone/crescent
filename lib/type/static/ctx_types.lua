@@ -222,6 +222,13 @@ Ctx = {
   -- Drained by unify.bind_var_to_type on successful bind: each waiter has
   -- _deferred cleared so the next solver pass re-runs it.
   tv_waiters:      { [integer]: { [integer]: { [integer]: unknown, ... }, ... }, ... },
+  -- Worklist-to-quiescence solver (item 1 of first-principles rework). The
+  -- active drain's ready queue: handler dispatch pops from here, wake_waiters
+  -- pushes onto here. Present only while solve_range is on the stack.
+  _worklist?:       { [integer]: { [integer]: unknown, ... }, ... },
+  -- Monotonic counter bumped on every successful TV bind. solve_range's outer
+  -- loop reads this delta across a full drain to detect quiescence.
+  _bind_generation?: integer,
   ...
 }
 ]]
