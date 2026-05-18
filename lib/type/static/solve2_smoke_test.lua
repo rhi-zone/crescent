@@ -103,11 +103,39 @@ assert.describe("solve2: smoke", function()
         assert.ok(#ctx.err.errors >= 1, "error reaches ctx.err")
     end)
 
+    -- P3: a deferring handler returns `{ solved=false, await=tv }`, and
+    -- the new dispatcher captures the awaited TV into `Wanted.blocked_on`
+    -- so wake_ctx can flip the wanted back to active without consulting
+    -- the legacy tv_waiters channel. We exercise C_BOUND because it goes
+    -- through `await(ctx, c, actual)` whenever the bounded TV is still
+    -- free — a deterministic park.
+    assert.it("blocked_on is captured when a handler awaits a free TV", function()
+        local ctx = new_ctx()
+        -- Free TV (the "actual" type being bound-checked) and a concrete
+        -- bound type that doesn't matter because the handler defers on
+        -- the free actual TV first.
+        local free_tv = types_mod.make_var(ctx, 0)
+        local c = constrain.make_bound(free_tv, ctx.T_INTEGER, 1, 1)
+        local impl = solve2.new_implication(nil)
+        local w = solve2.new_wanted(c[1], c)
+        impl.wanteds[1] = w
+        solve2.simplify(ctx, impl)
+        assert.eq(w.status, "parked", "C_BOUND on free TV must park")
+        assert.eq(w.blocked_on, free_tv, "blocked_on captured from await()")
+    end)
+
     -- P2: M.PORTED is the per-kind dispatch table solve_range checks.
     -- C_UNIFY and C_SUB are both included; nothing else (yet).
-    assert.it("PORTED set contains exactly C_UNIFY and C_SUB", function()
+    assert.it("PORTED set contains the P2 + P3 ported kinds", function()
+        -- P2: terminal kinds.
         assert.eq(solve2.PORTED[constrain.C_UNIFY], true, "C_UNIFY is ported")
         assert.eq(solve2.PORTED[constrain.C_SUB], true, "C_SUB is ported")
+        -- P3: deferring kinds (use blocked_on capture).
+        assert.eq(solve2.PORTED[constrain.C_BOUND], true, "C_BOUND is ported")
+        assert.eq(solve2.PORTED[constrain.C_NARROW_NIL], true, "C_NARROW_NIL is ported")
+        assert.eq(solve2.PORTED[constrain.C_ESCAPE_CHECK], true, "C_ESCAPE_CHECK is ported")
+        assert.eq(solve2.PORTED[constrain.C_OR], true, "C_OR is ported")
+        -- P4 candidates: not yet ported.
         assert.eq(solve2.PORTED[constrain.C_INDEX], nil, "C_INDEX not yet ported")
         assert.eq(solve2.PORTED[constrain.C_CALLABLE], nil, "C_CALLABLE not yet ported")
     end)

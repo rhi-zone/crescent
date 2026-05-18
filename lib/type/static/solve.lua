@@ -3767,7 +3767,13 @@ end
 
 -- Dispatch table by constraint kind. Module-level so both M.solve and the
 -- per-function sub-solve (Phase 2 of HM-for-unannotated-params) share it.
-local _handlers --: { [integer]: ((Ctx, { [integer]: unknown, ... }) -> boolean | nil) | nil }
+-- Handler return shape: boolean for simple solved/parked, or a structured
+-- table { solved, await?, emit? }. Typed verbatim so solve2.lua's dispatcher
+-- can narrow `type(result) == "table"` to the structured shape without a
+-- force cast (the structured-table fields are the contract from solve.await
+-- and the few handlers that emit children).
+--: { [integer]: ((Ctx, { [integer]: unknown, ... }) -> boolean | { solved: boolean, await: integer | nil, emit: { [integer]: { [integer]: unknown, ... }, ... } | nil } | nil) | nil }
+local _handlers
 local function get_handlers()
     if _handlers then return _handlers end
     _handlers = {

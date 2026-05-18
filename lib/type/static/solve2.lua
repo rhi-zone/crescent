@@ -49,9 +49,14 @@ local find = types_mod.find
 -- this file at its top so P2's per-kind dispatch can route into it). The
 -- legacy handler table is materialised on first use, after both modules
 -- have finished loading.
---: () -> { [integer]: ((Ctx, { [integer]: unknown, ... }) -> unknown) | nil, ... }
+--
+-- Handler return shape (mirrored from solve.lua): boolean for simple
+-- solved/parked, or `{ solved, await?, emit? }` for the structured form.
+-- Typed verbatim so the dispatcher below can narrow with `type(result) ==
+-- "table"` and read `await` / `emit` without a force cast.
+--: () -> { [integer]: ((Ctx, { [integer]: unknown, ... }) -> boolean | { solved: boolean, await: integer | nil, emit: { [integer]: { [integer]: unknown, ... }, ... } | nil } | nil) | nil, ... }
 local function legacy_handlers()
-    local solve = require("lib.type.static.solve") --[[: { get_handlers: () -> { [integer]: ((Ctx, { [integer]: unknown, ... }) -> unknown) | nil, ... }, ... } ]]
+    local solve = require("lib.type.static.solve") --[[: { get_handlers: () -> { [integer]: ((Ctx, { [integer]: unknown, ... }) -> boolean | { solved: boolean, await: integer | nil, emit: { [integer]: { [integer]: unknown, ... }, ... } | nil } | nil) | nil, ... }, ... } ]]
     return solve.get_handlers()
 end
 
@@ -131,34 +136,28 @@ local function run_handler(ctx, impl, w)
     if type(result) == "boolean" then
         if result then return "solved" else return "parked" end
     end
-    -- Structured form. The legacy handler return shape from solve.M.await
-    -- is `{ solved: boolean, emit?, await? }`. Narrow via type guard, not
-    -- a force cast: the typechecker can prove `result` is a table here.
+    -- Structured form: { solved, await?, emit? }. The handler-table type
+    -- alias declares this verbatim, so `type(result) == "table"` narrows
+    -- to the typed shape — no force cast needed (Fix the producer rule,
+    -- CLAUDE.md). `emit` is appended as fresh wanteds; `await` is captured
+    -- into blocked_on so wake_ctx can flip the wanted back to active when
+    -- the bind fires. The legacy tv_waiters channel also still drives the
+    -- outer worklist (solve.await registers c there at call time); both
+    -- channels are kept consistent during the P2-P5 cohabitation window.
     if type(result) == "table" then
         local res = result
         local emit_field = res.emit
-        if type(emit_field) == "table" then
+        if emit_field ~= nil then
             for _, nc in ipairs(emit_field) do
-                if type(nc) == "table" then
-                    impl.wanteds[#impl.wanteds + 1] = new_wanted(nc[1], nc)
-                end
+                impl.wanteds[#impl.wanteds + 1] = new_wanted(nc[1], nc)
             end
         end
         local solved_field = res.solved
         if solved_field == false then
-            -- The handler also registered the legacy constraint on
-            -- ctx.tv_waiters via solve.await (see solve.lua's `await`),
-            -- so wake_waiters continues to drive re-runs through the
-            -- legacy worklist when the TV binds. P2 doesn't capture the
-            -- await TV id into blocked_on because the P2 ported kinds
-            -- (C_UNIFY, C_SUB) are terminal — they never park — so the
-            -- capture would be dead code. The handler dispatch table
-            -- also erases the per-kind return shape (result arrives as
-            -- `unknown`), and the legacy await contract states integer
-            -- but the typechecker can only narrow to `number` via
-            -- `type(x) == "number"`. P3 ports await-emitting kinds and
-            -- types the handler return shape, at which point blocked_on
-            -- capture lands without a force cast.
+            local await_field = res.await
+            if await_field ~= nil then
+                w.blocked_on = await_field
+            end
             return "parked"
         end
         return "solved"
@@ -331,18 +330,29 @@ end
 
 -- Expose constraint kind constants so smoke / unit tests don't need to
 -- pull constrain.lua separately.
-M.C_UNIFY = constrain.C_UNIFY
-M.C_SUB   = constrain.C_SUB
+M.C_UNIFY        = constrain.C_UNIFY
+M.C_SUB          = constrain.C_SUB
+M.C_BOUND        = constrain.C_BOUND
+M.C_NARROW_NIL   = constrain.C_NARROW_NIL
+M.C_ESCAPE_CHECK = constrain.C_ESCAPE_CHECK
+M.C_OR           = constrain.C_OR
 
 -- Set of constraint kinds that solve_range routes through `dispatch_one`
 -- instead of the legacy handler dispatch. Expanded one kind at a time
--- per the rewrite phases (P3 adds C_BOUND/C_NARROW_NIL/C_ESCAPE_CHECK/C_OR;
--- P4 the call-path family; P5 the rest). Uniform predicate — no
+-- per the rewrite phases. P3: C_BOUND (GIVEN-priority canary — its tier
+-- discipline rides ctx._current_tier set by solve_range.run_one, which
+-- saves/restores around dispatch_one too, so the wake-up-order property
+-- is preserved by construction), plus C_NARROW_NIL / C_ESCAPE_CHECK /
+-- C_OR. P4: the call-path family. P5: the rest. Uniform predicate — no
 -- per-kind carve-outs in solve_range.
 --: { [integer]: boolean, ... }
 M.PORTED = {
-    [constrain.C_UNIFY] = true,
-    [constrain.C_SUB]   = true,
+    [constrain.C_UNIFY]        = true,
+    [constrain.C_SUB]          = true,
+    [constrain.C_BOUND]        = true,
+    [constrain.C_NARROW_NIL]   = true,
+    [constrain.C_ESCAPE_CHECK] = true,
+    [constrain.C_OR]           = true,
 }
 
 return M
