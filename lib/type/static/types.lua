@@ -213,6 +213,25 @@ function M.new_ctx(pool)
         -- after binding may follow the parent link, so writers must wake by the
         -- pre-bind root, not the post-bind chase.
         tv_waiters = {},
+        -- tv_owners: cross-constraint dependency tracking (TV ownership).
+        -- [tv_id] -> owner_constraint. Set by a producer constraint that has
+        -- committed to writing `tv_id` in the future (e.g. solve_callable
+        -- pending its argument unification; solve_check_args pending its
+        -- per-param checks; solve_instantiate_at_call pending its emitted
+        -- children). Readers (solve_sub's fast-path most importantly) check
+        -- via `M.is_owned` before falling through to eager unify on a free
+        -- TV; when owned, the reader defers via `await(actual_tv)` instead
+        -- so the producer's later bind sets the right type and any
+        -- subsequent C_SUB observes the bound result rather than racing
+        -- ahead. Cleared automatically when `bind_var_to_type` / `bind_to`
+        -- successfully bind the TV — symmetry holds by construction
+        -- because every producer's terminal-success path binds ret_tid.
+        -- Cross-statement counterpart to the intra-implication `blocked_on`
+        -- field on solve2 Wanted records: that handles deps inside one
+        -- implication; this handles deps across them. See
+        -- docs/typechecker-phase-f-blocker.md and
+        -- docs/typechecker-solver-rewrite.md for the design rationale.
+        tv_owners = {},
     }
     return ((ctx --[[: unknown]]) --[[:! Ctx]])
 end

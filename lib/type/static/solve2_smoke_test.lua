@@ -13,6 +13,8 @@ local env_mod     = require("lib.type.static.env")
 local errors_mod  = require("lib.type.static.errors")
 local constrain   = require("lib.type.static.constrain")
 local solve2      = require("lib.type.static.solve2")
+local solve_mod   = require("lib.type.static.solve")
+local unify_mod   = require("lib.type.static.unify")
 local defs        = require("lib.type.static.defs")
 
 -- Minimal ctx factory. Mirrors cdef_test.lua's new_ctx but also wires the
@@ -154,6 +156,65 @@ assert.describe("solve2: smoke", function()
     -- wake_ctx (called from bind_var_to_type) can flip parked wanteds.
     -- A bind happening during simplify reaches the parked wanted in the
     -- same loop turn.
+    -- TV ownership (cross-constraint dependency tracking — Phase F-blocker fix).
+    --
+    -- claim/is_owned/release are the primitive trio. A producer that has
+    -- committed to writing a TV later calls `claim`; readers check
+    -- `is_owned` before falling through to eager unify; the bind
+    -- chokepoints (unify.bind_var_to_type, solve.bind_to) call `release`
+    -- so the ownership clears in lockstep with the actual bind.
+    assert.it("claim/is_owned/release form a coherent trio", function()
+        local ctx = new_ctx()
+        local tv = types_mod.make_var(ctx, 0)
+        assert.eq(solve_mod.is_owned(ctx, tv), false, "fresh TV starts unowned")
+        local owner = { constrain.C_CALLABLE } --: { [integer]: unknown, ... }
+        solve_mod.claim(ctx, tv, owner)
+        assert.eq(solve_mod.is_owned(ctx, tv), true, "is_owned reflects the claim")
+        solve_mod.release(ctx, tv)
+        assert.eq(solve_mod.is_owned(ctx, tv), false, "release clears ownership")
+    end)
+
+    -- The Phase F-blocker check: bind_var_to_type must clear ownership.
+    -- Without this, a producer that completes its commitment would leave
+    -- a stale claim behind, parking any subsequent reader forever.
+    assert.it("bind_var_to_type releases TV ownership at the chokepoint", function()
+        local ctx = new_ctx()
+        local tv = types_mod.make_var(ctx, 0)
+        local owner = { constrain.C_CALLABLE } --: { [integer]: unknown, ... }
+        solve_mod.claim(ctx, tv, owner)
+        assert.eq(solve_mod.is_owned(ctx, tv), true, "TV claimed before bind")
+        unify_mod.bind_var_to_type(ctx, tv, ctx.T_INTEGER)
+        assert.eq(solve_mod.is_owned(ctx, tv), false,
+            "bind_var_to_type clears the claim — Phase F-blocker invariant")
+    end)
+
+    -- A cross-statement C_SUB whose `actual` is a still-pending call's
+    -- ret_TV must defer (not eagerly unify). With ownership in place,
+    -- solve_sub returns { solved=false, await=<root> } instead of
+    -- binding ret_TV to whatever the next statement annotated.
+    assert.it("solve_sub defers on a claimed ret_TV instead of eager binding", function()
+        local ctx = new_ctx()
+        ctx.tv_waiters = ctx.tv_waiters or {}
+        local ret_tv = types_mod.make_var(ctx, 0)
+        local pending_call = { constrain.C_CALLABLE } --: { [integer]: unknown, ... }
+        solve_mod.claim(ctx, ret_tv, pending_call)
+        -- C_SUB(ret_tv <: string): the reader pattern the blocker doc names.
+        local sub_c = constrain.make_sub(ret_tv, ctx.T_STRING, 1, 1, false)
+        local handlers = solve_mod.get_handlers()
+        local result = handlers[constrain.C_SUB](ctx, sub_c)
+        -- The handler returns the await record; the reader has parked.
+        assert.eq(type(result), "table",
+            "owned ret_TV must defer (not boolean retire)")
+        local r = result --[[: { solved: boolean, await: integer | nil, emit: { [integer]: { [integer]: unknown, ... }, ... } | nil }]]
+        assert.eq(r.solved, false, "deferral signaled via solved=false")
+        assert.eq(r.await, ret_tv,
+            "await targets the owned ret_TV — solve_sub did NOT bind it")
+        -- And: ret_TV is still free (not bound to string).
+        local rt = ctx.types:get(ret_tv)
+        assert.eq(rt.tag == defs.TAG_VAR, true,
+            "ret_TV unmodified — the producer's later bind is what writes it")
+    end)
+
     assert.it("simplify publishes impl on ctx for wake_ctx visibility", function()
         local ctx = new_ctx()
         local impl = solve2.new_implication(nil)

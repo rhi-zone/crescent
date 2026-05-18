@@ -344,7 +344,16 @@ function M.bind_var_to_type(ctx, var_tid, target_tid)
     -- wake_waiters call inside bind_var: legacy kinds re-enter via
     -- ctx._worklist, ported kinds (C_UNIFY/C_SUB in P2; more in P3+)
     -- flip from parked→active inside their owning implication.
-    if ok then solve2.wake_ctx(ctx, root) end
+    if ok then
+        solve2.wake_ctx(ctx, root)
+        -- TV ownership release at the union-find chokepoint. A producer
+        -- that claimed this TV in advance (solve_callable / solve_check_args
+        -- / solve_instantiate_at_call) just completed its commitment; the
+        -- claim is now redundant and must be cleared so any future reader
+        -- that finds the TV bound proceeds via the normal fast path rather
+        -- than awaiting on a stale ownership entry.
+        ctx.tv_owners[root] = nil
+    end
     return ok, msg, info
 end
 

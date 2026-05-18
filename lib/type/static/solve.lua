@@ -103,6 +103,54 @@ end
 M.await = await
 
 -- ---------------------------------------------------------------------------
+-- TV ownership (cross-constraint dependency tracking)
+-- ---------------------------------------------------------------------------
+-- Complement to `await` and to solve2's `blocked_on`. Where `await` makes a
+-- reader sleep on a TV that some past constraint already advertised, and
+-- `blocked_on` records intra-implication dependencies, `tv_owners` records
+-- a *future* writer commitment that crosses constraint boundaries.
+--
+-- A producer that has committed to binding TV X — but cannot do so yet
+-- (e.g. solve_callable is waiting for one of its arg unifications to
+-- settle; the to-be-ported solve_instantiate_at_call will emit children
+-- that bind X) — calls `claim(ctx, X, self)`. From that point on every
+-- reader that would otherwise fall through to an eager `unify` on free X
+-- consults `is_owned(ctx, X)` first and, when owned, parks itself via
+-- `await(c, X)` instead. The producer's eventual bind goes through the
+-- union-find chokepoints (`bind_var_to_type` in unify.lua, `bind_to` in
+-- this file) which call `release` and wake everyone parked on X — the
+-- parked readers re-run with X bound to the producer's chosen type and
+-- compare against it rather than racing to a different binding.
+--
+-- This is the Phase F-blocker fix
+-- (docs/typechecker-phase-f-blocker.md): the cross-statement bug where
+-- a next statement's `C_SUB(call_ret_TV, ann_T)` eagerly unified the
+-- ret_TV before the call's own constraints had committed it.
+--
+-- claim/release symmetry: every terminal-success path of every producer
+-- goes through `bind_var_to_type` or `bind_to` on the claimed TV, so the
+-- release is automatic at the chokepoint. Claim is idempotent — the same
+-- producer re-running across deferral simply overwrites the slot with
+-- itself.
+--: (Ctx, integer, { [integer]: unknown, ... }) -> ()
+local function claim(ctx, tv_id, owner)
+    ctx.tv_owners[find(ctx, tv_id)] = owner
+end
+M.claim = claim
+
+--: (Ctx, integer) -> ()
+local function release(ctx, tv_id)
+    ctx.tv_owners[tv_id] = nil
+end
+M.release = release
+
+--: (Ctx, integer) -> boolean
+local function is_owned(ctx, tv_id)
+    return ctx.tv_owners[find(ctx, tv_id)] ~= nil
+end
+M.is_owned = is_owned
+
+-- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
 
@@ -427,6 +475,11 @@ local function bind_to(ctx, tid, target)
         local target_root = find(ctx, target)
         if target_root == root then return end  -- would create a self-loop
         t.data[2] = target
+        -- Release TV ownership at the union-find chokepoint. Paired with
+        -- the same call inside unify.bind_var_to_type; both bind paths
+        -- must clear ownership so claim/release symmetry holds regardless
+        -- of which chokepoint the producer's terminal bind goes through.
+        release(ctx, root)
     end
 end
 
@@ -556,7 +609,7 @@ local function solve_unify(ctx, c)
 end
 
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
---: (Ctx, { [integer]: unknown, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean | { solved: boolean, await: integer }
 local function solve_sub(ctx, c)
     local actual   = find(ctx, constrain.sub_actual(c))
     local expected = find(ctx, constrain.sub_expected(c))
@@ -623,6 +676,21 @@ local function solve_sub(ctx, c)
         local et = ctx.types:get(expected)
         local is_closed_table = et.tag == TAG_TABLE and types_mod.tbl_row_var(et) < 0
         if not is_closed_table and et.tag ~= TAG_VAR and et.tag ~= TAG_ROWVAR then
+            -- TV ownership check (cross-constraint dependency tracking).
+            -- If `actual` is a free TV that some producer has committed to
+            -- writing in the future, the slow path's `unify` below would
+            -- otherwise bind the TV to `expected` itself — eating the
+            -- error that the producer's eventual bind would have surfaced.
+            -- Park on the producer's TV; wake when its bind fires, then
+            -- re-run this C_SUB against the actually-produced type.
+            -- This is the Phase F-blocker fix
+            -- (docs/typechecker-phase-f-blocker.md): the cross-statement
+            -- C_SUB(call_ret_TV, ann_T) bug.
+            local at = ctx.types:get(actual)
+            if (at.tag == TAG_VAR or at.tag == TAG_ROWVAR)
+                and is_owned(ctx, actual) then
+                return await(ctx, c, actual)
+            end
             -- Use the strict variant so a free TV at the top level falls
             -- through to the unify slow path (which binds eagerly today;
             -- Phase E will route it through `await`). See
@@ -2051,6 +2119,12 @@ local function solve_callable(ctx, c)
     local ret_tid    = constrain.callable_ret(c)
     local line, col  = constrain.callable_line(c), constrain.callable_col(c)
     local callee_t   = ctx.types:get(callee_tid)
+    -- Claim ret_tid: this handler commits to binding it before returning
+    -- (every terminal-success path below ends with bind_to/unify on
+    -- ret_tid). Until that bind fires, any cross-statement C_SUB whose
+    -- actual side is this ret_TV must defer instead of racing ahead with
+    -- an eager unify. See docs/typechecker-phase-f-blocker.md.
+    claim(ctx, ret_tid, c)
 
     if callee_t.tag == TAG_ANY then
         bind_to(ctx, ret_tid, ctx.T_ANY)
@@ -2725,8 +2799,14 @@ end
 -- docs/typechecker-h2-correct-design-v2.md (option X) for the full design.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_instantiate_at_call(ctx, c)
-    -- Suppress unused-variable warnings; the stub deliberately does nothing.
-    local _, _ = ctx, c
+    -- P4 will turn this into the unified `instantiate_at_use` entry that
+    -- emits C_BIND_GENERICS / C_CHECK_ARGS children at solve-time. Until
+    -- then it is a no-op — the eager gen-time emission in constrain.lua
+    -- already covers the actual work. We still claim ret_tid: when the
+    -- P4 port lands, the claim is what keeps cross-statement C_SUB from
+    -- racing the deferred children to bind the ret_TV (the exact failure
+    -- mode docs/typechecker-phase-f-blocker.md describes).
+    claim(ctx, constrain.instcall_ret(c), c)
     return true
 end
 
@@ -2822,6 +2902,10 @@ local function solve_check_args(ctx, c)
     local ret_tid    = constrain.checkargs_ret(c)
     local line, col  = constrain.checkargs_line(c), constrain.checkargs_col(c)
     local callee_t   = ctx.types:get(callee_tid)
+    -- Claim ret_tid: same discipline as solve_callable. The constraint
+    -- commits to binding it via bind_to / unify on every terminal-success
+    -- path; readers (cross-statement C_SUB) must defer until that fires.
+    claim(ctx, ret_tid, c)
 
     if callee_t.tag == TAG_ANY then
         bind_to(ctx, ret_tid, ctx.T_ANY)

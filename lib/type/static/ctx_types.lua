@@ -240,6 +240,12 @@ Ctx = {
   -- Drained by unify.bind_var_to_type on successful bind: each waiter has
   -- _deferred cleared so the next solver pass re-runs it.
   tv_waiters:      { [integer]: { [integer]: { [integer]: unknown, ... }, ... }, ... },
+  -- TV ownership (cross-constraint dependency tracking). [tv_id] -> the
+  -- constraint that has committed to writing this TV in the future.
+  -- Readers consult `solve.is_owned` before binding a free TV; when owned,
+  -- they defer via `await(tv)` so the producer's later bind is what sets
+  -- the type. Cleared automatically when the bind chokepoints fire.
+  tv_owners:       { [integer]: { [integer]: unknown, ... } | nil, ... },
   -- Worklist-to-quiescence solver (item 1 of first-principles rework). The
   -- active drain's ready queue: handler dispatch pops from here, wake_waiters
   -- pushes onto here. Present only while solve_range is on the stack.
