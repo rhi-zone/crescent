@@ -3876,7 +3876,10 @@ local y = fmap(x, function(a) return tostring(a) end)
     -- to TAG_NAMED(Maybe), but the inner `<A,B>` forall keeps
     -- TAG_TYPE_CALL(Maybe, A) un-re-resolved at the method-call site —
     -- the method-dispatch path does not emit C_HKT_DECOMPOSE for the inner
-    -- forall's params. Remaining gap; tracked as a known limitation.
+    -- forall's params. Phase F (re-land via C_INSTANTIATE_AT_CALL solver
+    -- handler + predicate widening) will flip H2/H2a/H2b/H2c/H2e to no-error
+    -- (H2c to has_error mentioning Maybe). Pinned at current behavior so the
+    -- flip is visible commit-by-commit. See docs/typechecker-h2-correct-design-v3.md.
     assert.it("H2 (KNOWN GAP): Functor<Maybe>.map — still errors with Maybe(_) at method dispatch", function()
         has_error([[
 --:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
@@ -3885,6 +3888,96 @@ local y = fmap(x, function(a) return tostring(a) end)
 local x = { tag = "none" } --: Maybe<integer>
 local y = functor_maybe.map(x, function(a) return tostring(a) end)
 ]], "Maybe%(_%)")
+    end)
+
+    -- H2a (KNOWN GAP): result type annotated directly on the call expression.
+    -- Phase F will flip to no_errors.
+    assert.it("H2a (KNOWN GAP): Functor<Maybe>.map inline-annotated as Maybe<string>", function()
+        has_error([[
+--:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
+--:: Functor<F: Maybe> = { map: <A, B>(F<A>, (A) -> B) -> F<B> }
+--:: declare functor_maybe = Functor<Maybe>
+local x = { tag = "none" } --: Maybe<integer>
+local y = functor_maybe.map(x, function(a) return tostring(a) end) --: Maybe<string>
+]], "Maybe%(_%)")
+    end)
+
+    -- H2b (KNOWN GAP): Monad bind through record dispatch.
+    -- Phase F will flip to no_errors.
+    assert.it("H2b (KNOWN GAP): Monad<Maybe>.bind through record — call typechecks", function()
+        has_error([[
+--:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
+--:: Monad<M: Maybe> = { bind: <A, B>(ma: M<A>, k: (A) -> M<B>) -> M<B> }
+--:: declare monad_maybe = Monad<Maybe>
+local x = { tag = "none" } --: Maybe<integer>
+local y = monad_maybe.bind(x, function(a)
+  local r = { tag = "none" } --: Maybe<string>
+  return r
+end)
+]], "Maybe%(_%)")
+    end)
+
+    -- H2c: wrong shape — pass List<integer> to a Functor<Maybe>.map slot.
+    -- Currently rejected with `Maybe(_)` (decomposition does not run, so the
+    -- error surfaces from the outer unify rather than the structural check).
+    -- Phase F will keep this rejected — the error string will mention Maybe
+    -- either way; the assertion (matches "Maybe") is stable across the flip.
+    assert.it("H2c: List<integer> against Functor<Maybe>.map — errors mentioning Maybe", function()
+        has_error([[
+--:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
+--:: List<A> = { [integer]: A, ... }
+--:: Functor<F: Maybe> = { map: <A, B>(F<A>, (A) -> B) -> F<B> }
+--:: declare functor_maybe = Functor<Maybe>
+local x = {} --: List<integer>
+local y = functor_maybe.map(x, function(a) return tostring(a) end)
+]], "Maybe")
+    end)
+
+    -- H2d (KNOWN GAP): wrong alias at record instantiation — Functor<List>
+    -- when List is shape-incompatible with the `<F: Maybe>` bound. C_BOUND
+    -- on alias-instantiation does not yet enforce structural shape
+    -- compatibility between two generic aliases. Separate from H2 itself;
+    -- pinned as no_errors to flag the gap. Flip when alias-level bound
+    -- enforcement lands (not part of Phase F).
+    assert.it("H2d (KNOWN GAP): Functor<List> alias-level bound not enforced — silent pass", function()
+        no_errors([[
+--:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
+--:: List<A> = { [integer]: A, ... }
+--:: Functor<F: Maybe> = { map: <A, B>(F<A>, (A) -> B) -> F<B> }
+--:: declare functor_list = Functor<List>
+]])
+    end)
+
+    -- H2e (KNOWN GAP): rank-N interaction — second arg is a function whose
+    -- return type B also appears in the outer return slot F<B>. Per-call-site
+    -- instantiation of the inner <A, B> forall must still bind B from the
+    -- lambda's return when its body is typed via explicit signature.
+    -- Phase F will flip to no_errors.
+    assert.it("H2e (KNOWN GAP): rank-N inner forall through record — call typechecks", function()
+        has_error([[
+--:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
+--:: Functor<F: Maybe> = { map: <A, B>(F<A>, (A) -> B) -> F<B> }
+--:: declare functor_maybe = Functor<Maybe>
+local x = { tag = "some", value = 1 } --: Maybe<integer>
+--: (integer) -> integer
+local function plus1(a) return a + 1 end
+local y = functor_maybe.map(x, plus1) --: Maybe<integer>
+]], "Maybe%(_%)")
+    end)
+
+    -- H2f: pure through record — concrete callee appears only in return slot.
+    -- normalize_type_call already collapses Maybe<A_fresh> once A is bound
+    -- from the arg, without any decompose firing (no param-slot TAG_TYPE_CALL),
+    -- so this already passes pre-Phase-F. Pinned as a regression canary:
+    -- the Phase F migration must NOT break this case.
+    assert.it("H2f: Monad<Maybe>.pure(42) — return-only concrete-callee normalizes", function()
+        no_errors([[
+--:: Maybe<A> = { tag: "some", value: A } | { tag: "none" }
+--:: Monad<M: Maybe> = { pure: <A>(a: A) -> M<A> }
+--:: declare monad_maybe = Monad<Maybe>
+--: () -> Maybe<integer>
+local function get_some() return monad_maybe.pure(42) end
+]])
     end)
 
     -- H3: Bound enforcement. <F: Maybe> called with List should reject.
