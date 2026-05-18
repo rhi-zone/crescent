@@ -169,7 +169,7 @@ local C_INSTANTIATE_AT_CALL = 17  -- {C_INSTANTIATE_AT_CALL, callee_tid, arg_tid
 -- env.instantiate into the solver; Phase 3 moves rank-N skolemization;
 -- Phase 4 moves HKT decomposition).
 
-local C_HKT_DECOMPOSE = 16  -- {C_HKT_DECOMPOSE, f_fresh_tid, args_fresh_list, bound_alias_tid, actual_arg_tid, line, col}
+local C_HKT_DECOMPOSE = 16  -- {C_HKT_DECOMPOSE, f_fresh_tid, args_fresh_list, bound_alias_tid, actual_arg_tid, line | nil, col | nil}
 -- Higher-kinded type decomposition at a call site. Emitted when a call-site
 -- parameter slot is TAG_TYPE_CALL(F_fresh, A_fresh) and F_fresh is a fresh TV
 -- with a generic-alias bound (e.g. <F: Maybe>). Bidirectional propagation:
@@ -299,6 +299,7 @@ M.tag_tier = tag_tier
 --:: ConstraintNarrowNil    = { integer, integer, integer, boolean, integer, integer }
 --:: ConstraintEscapeCheck  = { integer, integer, integer, integer, integer }
 --:: ConstraintInstantiateAtCall = { integer, integer, { [integer]: integer, ... }, integer, integer, integer }
+--:: ConstraintHktDecompose = { integer, integer, { [integer]: integer, ... }, integer, integer, integer, integer }
 
 -- Typed per-payload reader accessors. One per slot per C_TAG.
 -- Exported as `function M.<name>` (not local) because constrain.lua is near
@@ -458,6 +459,19 @@ function M.instcall_ret(c) return c[4] end
 function M.instcall_line(c) return c[5] end
 --: (ConstraintInstantiateAtCall) -> integer
 function M.instcall_col(c) return c[6] end
+
+--: (ConstraintHktDecompose) -> integer
+function M.hkt_f_fresh(c) return c[2] end
+--: (ConstraintHktDecompose) -> { [integer]: integer, ... }
+function M.hkt_args_fresh(c) return c[3] end
+--: (ConstraintHktDecompose) -> integer
+function M.hkt_bound_alias(c) return c[4] end
+--: (ConstraintHktDecompose) -> integer
+function M.hkt_actual_arg(c) return c[5] end
+--: (ConstraintHktDecompose) -> integer
+function M.hkt_line(c) return c[6] end
+--: (ConstraintHktDecompose) -> integer
+function M.hkt_col(c) return c[7] end
 
 -- Typed per-C_TAG constructors. One per alias. Each produces the matching
 -- Constraint* tuple with the C_TAG discriminant already in slot 1, so call
@@ -2975,18 +2989,9 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                             end
                             local actual_arg = arg_tids[i + 1]
                             if actual_arg then
-                                local payloads = ctx._hkt_payloads or {}
-                                local pid = #payloads + 1
-                                payloads[pid] = {
-                                    f_fresh = callee2,
-                                    args_fresh = args_list,
-                                    bound_alias = bound_alias,
-                                    actual_arg = actual_arg,
-                                    line = n.line,
-                                    col = n.col,
-                                }
-                                ctx._hkt_payloads = payloads
-                                emit(ctx, tag_tier({ C_HKT_DECOMPOSE, pid, n.line, n.col }))
+                                emit(ctx, tag_tier({ C_HKT_DECOMPOSE,
+                                    callee2, args_list, bound_alias, actual_arg,
+                                    n.line, n.col }))
                             end
                         end
                     elseif hkt_fresh_to_bound[slot_root] then

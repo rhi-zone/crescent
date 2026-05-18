@@ -3659,10 +3659,8 @@ local function emit_missing_function_signature(ctx, real_err, sev)
 end
 
 
--- Strongly-typed inner solver — payload comes from ctx._hkt_payloads to keep
--- the dispatch shim's force-cast surface to a single integer payload id (the
--- alternative would be ~6 `c[N] --[[:! T]]` destructures, multiplying the
--- existing force-cast count in this file).
+-- Strongly-typed inner solver. Payload is carried directly on the constraint
+-- record (item 3a of the first-principles solver rework).
 --: (Ctx, integer, { [integer]: integer, ... }, integer, integer, integer | nil, integer | nil) -> boolean
 local function solve_hkt_decompose_impl(ctx, f_fresh, args_fresh, bound_alias_id, actual_id, line, col)
     -- Defer while the actual argument is still a free TV — we can't pattern
@@ -3739,21 +3737,17 @@ local function solve_hkt_decompose_impl(ctx, f_fresh, args_fresh, bound_alias_id
     return true
 end
 
--- Solve C_HKT_DECOMPOSE = { C_HKT_DECOMPOSE, payload_id }
--- payload_id indexes ctx._hkt_payloads (populated by constrain.lua at emission time).
--- Each payload is { f_fresh, args_fresh, bound_alias, actual_arg, line, col } —
--- typed, no destructure casts needed once retrieved.
+-- Solve C_HKT_DECOMPOSE = { C_HKT_DECOMPOSE, f_fresh, args_fresh_list,
+--                            bound_alias, actual_arg, line, col }
+-- Payload travels on the constraint record (item 3a of the first-principles
+-- rework). No ctx side-channel.
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: unknown, ... }) -> boolean
 local function solve_hkt_decompose(ctx, c)
-    local v = c[2]
-    if type(v) ~= "number" then return true end
-    local payloads = ctx._hkt_payloads
-    if not payloads then return true end
-    local p = payloads[v]
-    if not p then return true end
-    return solve_hkt_decompose_impl(ctx, p.f_fresh, p.args_fresh,
-        p.bound_alias, p.actual_arg, p.line, p.col)
+    return solve_hkt_decompose_impl(ctx,
+        constrain.hkt_f_fresh(c), constrain.hkt_args_fresh(c),
+        constrain.hkt_bound_alias(c), constrain.hkt_actual_arg(c),
+        constrain.hkt_line(c), constrain.hkt_col(c))
 end
 
 

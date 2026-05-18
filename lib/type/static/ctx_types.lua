@@ -214,7 +214,6 @@ Ctx = {
   _in_match_arm:             boolean | nil,
   _allow_unapplied_constructors: boolean | nil,
   _forall_bounds:  { [integer]: integer, ... },
-  _hkt_payloads?:  { [integer]: { f_fresh: integer, args_fresh: { [integer]: integer, ... }, bound_alias: integer, actual_arg: integer, line: integer | nil, col: integer | nil }, ... },
   lit_cache:       { [integer]: integer, ... },
   -- Item 2 of the first-principles rework: givens-before-wanteds discipline.
   -- _current_tier is set by solve_range.run_one to c._tier or TIER_WANTED
