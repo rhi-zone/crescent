@@ -18,6 +18,7 @@ local check_mod    = require("lib.type.static.check")
 local sha256_mod   = require("lib.type.static.sha256")
 local cri_write    = require("lib.type.static.cri_write")
 local cri_read     = require("lib.type.static.cri_read")
+local solve_mod    = require("lib.type.static.solve")
 
 ---------------------------------------------------------------------------
 -- sha256.lua
@@ -11255,4 +11256,74 @@ local _ = f(42)
 ]], "cannot pass")
     end)
 
+end)
+
+---------------------------------------------------------------------------
+-- solver-architecture-v2 (β): tv_waiters + await primitive (Phase B)
+-- Stub regression test — no handler yet uses await; this exercises the
+-- infrastructure directly so a regression is caught the moment any future
+-- phase wires the channel up incorrectly.
+---------------------------------------------------------------------------
+
+assert.describe("solver: tv_waiters + await infrastructure (Phase B)", function()
+    assert.it("await registers c on tv_waiters; bind drains and clears _deferred", function()
+        local pool = intern.new()
+        local ctx = types_mod.new_ctx(pool)
+        assert.eq(type(ctx.tv_waiters), "table")  -- ctx slot present
+        local tv = types_mod.make_var(ctx, 0)
+        -- Synthetic constraint (kind = stub, no handler). _deferred goes in
+        -- the literal per LuaJIT hidden-class rule (CLAUDE.md).
+        -- _deferred = true simulates solve_range's effect on the constraint
+        -- after a handler returns { solved=false, await=tv }.
+        --: { [integer]: unknown, _deferred: boolean, ... }
+        local c = { 9999, tv, _deferred = true }
+        local result = solve_mod.await(ctx, c, tv)
+        assert.eq(result.solved, false)
+        assert.eq(result.await, tv)
+        assert.ok(ctx.tv_waiters[tv] ~= nil, "waiter list created")
+        assert.eq(#ctx.tv_waiters[tv], 1)
+        -- Bind the TV via the centralized chokepoint.
+        local ok = unify_mod.bind_var_to_type(ctx, tv, ctx.T_INTEGER)
+        assert.ok(ok)
+        -- Wake-up hook must have drained the waiter list and cleared _deferred.
+        assert.eq(ctx.tv_waiters[tv], nil)
+        assert.eq(c._deferred, false)
+    end)
+
+    assert.it("multiple waiters on same TV all wake on bind", function()
+        local pool = intern.new()
+        local ctx = types_mod.new_ctx(pool)
+        local tv = types_mod.make_var(ctx, 0)
+        --: { [integer]: unknown, _deferred: boolean, ... }
+        local c1 = { 9999, tv, _deferred = true }
+        --: { [integer]: unknown, _deferred: boolean, ... }
+        local c2 = { 9999, tv, _deferred = true }
+        solve_mod.await(ctx, c1, tv)
+        solve_mod.await(ctx, c2, tv)
+        assert.eq(#ctx.tv_waiters[tv], 2)
+        unify_mod.bind_var_to_type(ctx, tv, ctx.T_STRING)
+        assert.eq(ctx.tv_waiters[tv], nil)
+        assert.eq(c1._deferred, false)
+        assert.eq(c2._deferred, false)
+    end)
+
+    assert.it("await keys by union-find root, not raw id", function()
+        -- If two TVs are unified before await, registering on either should
+        -- target the shared root so the eventual bind wakes the waiter.
+        local pool = intern.new()
+        local ctx = types_mod.new_ctx(pool)
+        local tv_a = types_mod.make_var(ctx, 0)
+        local tv_b = types_mod.make_var(ctx, 0)
+        -- Bind a -> b so find(a) == b.
+        unify_mod.bind_var_to_type(ctx, tv_a, tv_b)
+        --: { [integer]: unknown, _deferred: boolean, ... }
+        local c = { 9999, tv_a, _deferred = true }
+        local result = solve_mod.await(ctx, c, tv_a)
+        -- Waiter is stored under the root (tv_b), not tv_a.
+        assert.eq(result.await, tv_b)
+        assert.ok(ctx.tv_waiters[tv_b] ~= nil)
+        assert.eq(ctx.tv_waiters[tv_a], nil)
+        unify_mod.bind_var_to_type(ctx, tv_b, ctx.T_BOOLEAN)
+        assert.eq(c._deferred, false)
+    end)
 end)

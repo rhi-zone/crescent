@@ -71,6 +71,32 @@ local find = types_mod.find
 local M = {}
 
 -- ---------------------------------------------------------------------------
+-- Solver-architecture-v2 (β): await primitive
+-- ---------------------------------------------------------------------------
+-- Register `c` as a waiter on the union-find root of `tv_id`. The handler
+-- should return the value produced here; solve_range sees `result.solved ==
+-- false` and marks the constraint deferred. When unify.bind_var_to_type
+-- (centralized chokepoint) binds the root, wake_waiters drains the list and
+-- clears _deferred on each subscriber so the next solver pass re-runs them.
+--
+-- Symmetric to P1.5's emit channel. The await field on the return is
+-- informational — registration is done here, not by solve_range — but kept
+-- in the protocol so handler intent is grep-able and the solver can later
+-- adopt a worklist that consumes the channel directly.
+--: (Ctx, { [integer]: unknown, ... }, integer) -> { solved: boolean, await: integer }
+local function await(ctx, c, tv_id)
+    local root = find(ctx, tv_id)
+    local list = ctx.tv_waiters[root]
+    if not list then
+        list = {}
+        ctx.tv_waiters[root] = list
+    end
+    list[#list + 1] = c
+    return { solved = false, await = root }
+end
+M.await = await
+
+-- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
 
@@ -3901,7 +3927,13 @@ local function solve_range(ctx, constraints, lo, hi)
                             c._solved = true
                         end
                     else
-                        -- Structured form: { solved: boolean, emit?: { Constraint... } }
+                        -- Structured form:
+                        --   { solved: boolean, emit?: { Constraint... }, await?: integer }
+                        -- solved=false defers; emit appends children (P1.5);
+                        -- await is informational — solver-architecture-v2 (β)
+                        -- registration is performed inside await() at call time,
+                        -- so no work is needed here. The field is acknowledged so
+                        -- the protocol shape is documented at the dispatch site.
                         if result.solved == false then
                             c._deferred = true
                             n_deferred = n_deferred + 1
@@ -3915,6 +3947,7 @@ local function solve_range(ctx, constraints, lo, hi)
                             end
                             changed = true
                         end
+                        local _ = result.await  -- protocol ack; see solve.await
                     end
                     local t_after = ctx.types:get(find(ctx, probe))
                     if t_after.tag ~= tag_before then changed = true end
@@ -3957,6 +3990,7 @@ local function solve_range(ctx, constraints, lo, hi)
                                         nc._deferred = false
                                     end
                                 end
+                                local _ = result.await  -- protocol ack
                             end
                         end
                     end

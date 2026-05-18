@@ -204,6 +204,15 @@ function M.new_ctx(pool)
         -- to emit E.EXPLICIT_ANY when `any` appears in a user-written annotation.
         _ann_warn_line = 0,
         _ann_consumed  = {},
+        -- tv_waiters: solver-architecture-v2 (β) resolution-barrier map.
+        -- [tv_id] -> { Constraint... }. Handlers that detect a free TV they cannot
+        -- proceed without may call solve.await(ctx, c, tv_id) to register c as a
+        -- subscriber; when bind_var_to_type binds tv_id, all waiters have their
+        -- _deferred flag cleared so the next solver pass re-runs them. The key is
+        -- the union-find root id at registration time; find() of the same var
+        -- after binding may follow the parent link, so writers must wake by the
+        -- pre-bind root, not the post-bind chase.
+        tv_waiters = {},
     }
     return ((ctx --[[: unknown]]) --[[:! Ctx]])
 end

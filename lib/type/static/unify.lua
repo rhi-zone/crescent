@@ -197,6 +197,21 @@ local function adjust_levels(ctx, tid, max_level, seen)
     end
 end
 
+-- Wake-up hook: solver-architecture-v2 (β) resolution barrier. Centralized at
+-- the union-find bind chokepoint so every successful TV bind drains the
+-- waiter list — no per-call-site bookkeeping. Called only on the success
+-- paths of bind_var; the only operation is "clear _deferred for each
+-- waiter," uniform across constraint kinds.
+--: (ctx: Ctx, var_tid: integer) -> ()
+local function wake_waiters(ctx, var_tid)
+    local waiters = ctx.tv_waiters[var_tid]
+    if not waiters then return end
+    ctx.tv_waiters[var_tid] = nil
+    for i = 1, #waiters do
+        waiters[i]._deferred = false
+    end
+end
+
 -- Bind a type variable to a type.
 -- Returns true, or false + error message.
 --: (ctx: Ctx, var_tid: integer, target_tid: integer) -> (boolean, string | nil)
@@ -240,6 +255,7 @@ local function bind_var(ctx, var_tid, target_tid)
                     adjust_levels(ctx, new_ty, types_mod.var_level(ctx.types:get(var_tid)))
                     -- Write to data[2] (var parent): union-find bind, no setter.
                     ctx.types:get(var_tid).data[2] = new_ty
+                    wake_waiters(ctx, var_tid)
                     return true
                 end
             end
@@ -250,6 +266,7 @@ local function bind_var(ctx, var_tid, target_tid)
     adjust_levels(ctx, target_tid, types_mod.var_level(vt))
     -- Write to data[2] (var parent): union-find bind, no setter.
     vt.data[2] = target_tid
+    wake_waiters(ctx, var_tid)
     return true
 end
 

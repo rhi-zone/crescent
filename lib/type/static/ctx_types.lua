@@ -217,6 +217,11 @@ Ctx = {
   _hkt_payloads?:  { [integer]: { f_fresh: integer, args_fresh: { [integer]: integer, ... }, bound_alias: integer, actual_arg: integer, line: integer | nil, col: integer | nil }, ... },
   lit_cache:       { [integer]: integer, ... },
   _constraints?:   { [integer]: { [integer]: unknown, ... }, ... },
+  -- Solver-architecture-v2 (β) resolution-barrier map. Maps tv_id (union-find
+  -- root id at registration time) to a list of constraints awaiting that TV.
+  -- Drained by unify.bind_var_to_type on successful bind: each waiter has
+  -- _deferred cleared so the next solver pass re-runs it.
+  tv_waiters:      { [integer]: { [integer]: { [integer]: unknown, ... }, ... }, ... },
   ...
 }
 ]]
