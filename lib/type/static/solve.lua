@@ -9,6 +9,11 @@ local errors_mod = require("lib.type.static.errors")
 local intern_mod = require("lib.type.static.intern")
 local env_mod    = require("lib.type.static.env")
 local constrain  = require("lib.type.static.constrain")
+-- Outside-In/X solver core (P1 of the rewrite, docs/typechecker-solver-rewrite.md).
+-- Coexists with this file; M.solve still dispatches the legacy path in P1.
+-- Required here so solve2 can lazy-require solve back without a cycle on
+-- first use of legacy_handlers.
+require("lib.type.static.solve2")
 
 local TAG_ANY          = defs.TAG_ANY
 local TAG_UNKNOWN      = defs.TAG_UNKNOWN
@@ -3785,6 +3790,11 @@ local function get_handlers()
     }
     return _handlers
 end
+
+-- Exposed for solve2.lua (P1 of docs/typechecker-solver-rewrite.md) so the
+-- new Outside-In/X core can route ported kinds through the existing handler
+-- dispatch table. Will be inlined when the old solver is deleted in P6.
+M.get_handlers = get_handlers
 
 -- Worklist-to-quiescence solver (item 1 of the first-principles rework, see
 -- docs/typechecker-architecture-from-first-principles.md §4). Replaces the
