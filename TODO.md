@@ -244,6 +244,79 @@ to that endpoint.
 
 ## HIGH PRIORITY
 
+### Typechecker solver rewrite — direction unresolved
+
+*Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
+
+After 15+ iterations across one session, the rewrite path is unresolved.
+`docs/typechecker-session-handoff.md` (commit `a55871da`) is the
+authoritative briefing — read it before any further rework work. Three
+honest directions on the table:
+
+- **(A) Accept the current architecture as the structural shape.** Stop
+  trying to paradigm-shift; focus on documenting the synchronous
+  semantics that exist (e.g., why `solve_callable` is
+  synchronous-by-necessity per the paradigm-fit finding in caveat 3) and
+  consolidating fundamental 6 (fresh instantiation at use site) as a
+  small refactor that replaces the three current call paths with one
+  `instantiate_at_use` primitive.
+- **(B) Pick a different paradigm than OutsideIn/X.** Late-session
+  finding: OutsideIn/X emit-shape doesn't fit handlers needing
+  backtracking (overload resolution), aggregation (union callable), or
+  synchronous mid-iteration deferral (rank-N param loop).
+  Continuation-passing or staged solving may fit better.
+- **(C) Refactor `unify_mod.unify`** as the actual rewrite target
+  (~700 LOC of synchronous structural recursion used by `try_unify`,
+  `is_subtype`, `types_overlap`, `widen_deep`). Multi-thousand-LOC
+  foundational change.
+
+Personal lean from that session: (A). Convergence happened at the
+mechanism level (items 1-5+1.5 + TV ownership), not the paradigm-shift
+level.
+
+#### H2 record-of-generics dispatch — still pinned as known gap
+
+H2/H2a/H2b/H2e pinned at `has_error("Maybe%(_%)")` in
+`lib/type/static/type_soundness_test.lua` ~lines 3875-3990 since the H2
+revert (`9f025732`). Re-landing needs either:
+
+- The Outside-In/X rewrite to actually shift handlers (caveat 3 in the
+  handoff briefing — partial fit only).
+- Or fundamental 6's consolidation (single `instantiate_at_use`
+  primitive replacing the three current call paths). The previous
+  Phase F-impl attempt revealed producer→consumer ordering issues; TV
+  ownership (`63c55f18` + `8b8c6bc4`) partially addresses but the audit
+  was incomplete — `solve_check_args` / `solve_bind_generics` also read
+  potentially-owned ret_TVs through inner unify calls.
+
+#### solve2.lua infrastructure — landed but not exercised meaningfully
+
+P1-P4a (commits `4eebb1de`, `c3f59312`, `f2686228`, `e2762912`) added
+the solve2 core, blocked_on capture, per-kind dispatch, and ported 6
+kinds via routing (not rewriting). The infrastructure supports an
+Outside-In/X rewrite but doesn't BE one. If direction (A) is chosen,
+this code may become orphaned — consider whether to remove it or keep
+it as scaffolding for future use.
+
+#### Caveats that should not be lost
+
+- **Every audit count came back inflated** (105→90, 18→30, 51→6, 5→1).
+  Skeptically verify before acting on any future audit.
+- **`docs/typechecker-solver-rewrite.md` is incomplete** — it specifies
+  routing-not-rewriting; the design's premise that
+  "port == paradigm shift" is wrong.
+- **`docs/typechecker-solver-invariant-inventory.md` overstates** —
+  distilled to 6 fundamentals in `-fundamentals.md`.
+- **CLAUDE.md addition** (commit `c3b287e2`): "Ad-hoc conditions are
+  strictly forbidden." Holds.
+
+#### Cleanup state at end of session
+
+The accessor cleanup landed (`a644d0aa` through `69b9bd80`). The FFI
+fixed-size-array typing fix (`bb930ab5`) closed >1300 errors. Per-file
+error counts: types 12, env 2, constrain 31, solve 35, unify 0. Further
+reductions are possible but no longer load-bearing.
+
 ### Polymorphic recursion (future, optional)
 
 Standard HM (Damas-Milner) is **monomorphic-recursive**: inside a function's
