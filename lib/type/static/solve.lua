@@ -1314,15 +1314,15 @@ end
 -- reference them; bodies execute at runtime but the names need to be in
 -- lexical scope at the call sites).
 
--- Merge a structural bound into ctx._forall_bounds[var_tid]. Multi-usage
+-- Merge a structural bound into ctx.tv_bounds[var_tid]. Multi-usage
 -- bodies (e.g. `a + b` and `a.x`) compose via make_intersection.
 --: (Ctx, integer, integer) -> ()
 local function merge_inferred_bound(ctx, var_tid, bound_tid)
-    local existing = ctx._forall_bounds[var_tid]
+    local existing = ctx.tv_bounds[var_tid]
     if existing then
-        ctx._forall_bounds[var_tid] = types_mod.make_intersection(ctx, { existing, bound_tid })
+        ctx.tv_bounds[var_tid] = types_mod.make_intersection(ctx, { existing, bound_tid })
     else
-        ctx._forall_bounds[var_tid] = bound_tid
+        ctx.tv_bounds[var_tid] = bound_tid
     end
 end
 
@@ -1557,7 +1557,7 @@ local function solve_index(ctx, c)
 
     -- HM Phase 1c: free param + field access → emit `{ field: res, ... }` bound.
     -- Body usage `t.x` constrains `t` to be a record with field `x`. The bound
-    -- is merged into _forall_bounds; at call site, propagate_meta_bound checks
+    -- is merged into tv_bounds; at call site, propagate_meta_bound checks
     -- the actual has the field via prim_index for primitives or table_field
     -- for tables. res_tid is the bound's field type — at call site it gets
     -- unified with the actual's field type, propagating downstream.
@@ -2061,7 +2061,7 @@ local function solve_callable(ctx, c)
     if callee_t.tag == TAG_VAR or callee_t.tag == TAG_ROWVAR then
         -- HM Phase 1c step 2: free callee that is a sub-solve param emits a
         -- function-shape bound `(arg_types...) -> R`, registered into
-        -- ctx._forall_bounds. At call site, propagate_function_bound (in
+        -- ctx.tv_bounds. At call site, propagate_function_bound (in
         -- solve_bound) decomposes the actual function's signature into the
         -- bound's free TVs.
         if callee_t.tag == TAG_VAR and band(callee_t.flags, FLAG_SUB_SOLVE_PARAM) ~= 0 then
@@ -3280,7 +3280,7 @@ end
 -- HM-aware annotation renderer (Phase 1 follow-up). Walks a function tid
 -- collecting FLAG_GENERIC vars, assigns names (T, U, V, W, X, Y, Z, T1+),
 -- and renders the function as `<T[: bound], U[: bound], ...>(params) -> ret`
--- with var occurrences substituted. Bounds come from ctx._forall_bounds.
+-- with var occurrences substituted. Bounds come from ctx.tv_bounds.
 --
 -- The standard display() renders FLAG_GENERIC vars as `_` — indistinguishable
 -- from each other and unparseable as annotation source. This renderer needs
@@ -3539,7 +3539,7 @@ local function render_hm_signature(ctx, fn_tid)
         local gparts = {} --: { [integer]: string, ... }
         for _, vtid in ipairs(var_order) do
             local name = var_names[vtid]
-            local bound = ctx._forall_bounds and ctx._forall_bounds[vtid]
+            local bound = ctx.tv_bounds and ctx.tv_bounds[vtid]
             if bound then
                 local bs = render(bound, {})
                 if bs then
@@ -3629,7 +3629,7 @@ local function emit_missing_function_signature(ctx, real_err, sev)
                     end
                     if not already_annotated then
                         -- Prefer the HM-aware renderer (handles FLAG_GENERIC
-                        -- vars + bounds via _forall_bounds). Falls back to the
+                        -- vars + bounds via tv_bounds). Falls back to the
                         -- callsite-aggregating renderer for cases without HM
                         -- generalization (e.g. annotated functions that
                         -- somehow trigger the warning).

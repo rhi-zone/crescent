@@ -596,7 +596,7 @@ local function expand_require(ctx, arg_ids)
         if module_name then
             -- Side effect: record module name so NODE_LOCAL_STMT can populate
             -- ctx.require_sources (used by LSP go-to-def).
-            ctx._last_require_mod = module_name
+            ctx.pending_require_mod = module_name
             -- module_types: declared via --:: module "name": T (prelude or user file).
             -- Checked before cri_loader so explicit declarations always win.
             if ctx.module_types then
@@ -607,7 +607,7 @@ local function expand_require(ctx, arg_ids)
             if ctx.cri_loader then
                 local exports, aliases = ctx.cri_loader(ctx, module_name or "")
                 if exports then
-                    ctx._last_require_aliases = aliases
+                    ctx.pending_require_aliases = aliases
                     return exports
                 end
                 -- cri_loader present but unresolvable: T_UNKNOWN forces narrowing

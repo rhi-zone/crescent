@@ -4734,7 +4734,7 @@ local y = x
     -- per-call fresh instances, so caller field types flow into the compare.
     -- C_INDEX and C_CALLABLE recording are intentionally NOT extended:
     --   * C_INDEX: emit_field_bound / emit_indexer_bound already merge field
-    --     bounds into _forall_bounds and call-site C_BOUND propagates field
+    --     bounds into tv_bounds and call-site C_BOUND propagates field
     --     types into the inst-mapped nested TVs. Re-emitting body C_INDEX
     --     creates duplicate field bounds and breaks the merged-bound shape.
     --   * C_CALLABLE: body-level call exprs emit C_BIND_GENERICS/C_CHECK_ARGS
@@ -11154,7 +11154,7 @@ local y = x
     -- HM-aware autofix renderer (commit 748a67a9 + the three follow-up
     -- bugfixes): for unannotated function definitions the renderer walks
     -- the generalized fn_tid, names FLAG_GENERIC vars (T, U, V, ...), and
-    -- substitutes _forall_bounds entries as `<Var: bound, ...>` prefixes.
+    -- substitutes tv_bounds entries as `<Var: bound, ...>` prefixes.
     -- The expected outputs below are the polymorphic forms, not the
     -- pre-HM modal/union aggregation of callsite arg types: with HM the
     -- function type itself is polymorphic, so the rendered annotation is

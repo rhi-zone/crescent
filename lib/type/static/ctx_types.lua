@@ -180,8 +180,18 @@ Ctx = {
   module_return_tids: { [integer]: { [integer]: integer, ... }, ... } | nil,
   cri_loader:   ((unknown, string) -> (integer | nil, { [integer]: unknown, ... } | nil)) | nil,
   ffi_hooks:    { process: (unknown, string) -> (), init: (unknown) -> (), ... } | nil,
-  _last_multi_return:          { [integer]: integer, ... } | nil,
-  _last_multi_return_override: integer | nil,
+  -- Gen-pass statement-boundary scratch: call-site gen writes these; the
+  -- next LOCAL_STMT / ASSIGN_STMT / RETURN_STMT reads and clears them.
+  -- Not channels — single-pass linear flow between adjacent gen functions.
+  pending_multi_return:          { [integer]: integer, ... } | nil,
+  pending_multi_return_override: integer | nil,
+  pending_require_mod:          string | nil,
+  pending_require_aliases:      { [integer]: { [integer]: integer, ... }, ... } | nil,
+  pending_require_exports:      integer | nil,
+  -- Gen-pass accumulators / TV metadata side-tables (not channels).
+  template_fns:    { [integer]: { [integer]: unknown, ... }, ... } | nil,
+  require_exports: { [integer]: integer, ... } | nil,  -- var_name_id -> exports_tid
+  var_origin:      { [integer]: { [integer]: integer, ... }, ... },  -- var_tid -> {obj_tid, field_name_id}
   _multi_ret:      { [integer]: MultiRetEntry, ... },
   _ann_warn_line:  integer,
   _ann_consumed:   { [integer]: boolean, ... } | nil,
@@ -211,7 +221,10 @@ Ctx = {
   def_sites:       { [integer]: { line: integer, col: integer, ... }, ... },
   require_sources: { [integer]: string, ... },
   type_origins:    { [integer]: string, ... },
-  _forall_bounds:  { [integer]: integer, ... },
+  -- TV metadata side-table: generic_tv_id -> resolved bound type id.
+  -- Populated by sub_solve when constraints accumulate bounds on a forall-bound TV;
+  -- read at instantiation sites (solve.lua) and the HM Phase 2 post-pass (constrain.lua).
+  tv_bounds:       { [integer]: integer, ... },
   lit_cache:       { [integer]: integer, ... },
   -- Item 2 of the first-principles rework: givens-before-wanteds discipline.
   -- _current_tier is set by solve_range.run_one to c._tier or TIER_WANTED

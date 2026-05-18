@@ -585,7 +585,7 @@ end
 
 -- HM Phase 2: record polymorphic-rooted body ops keyed by template TV.
 -- Inline record at op-emit time is a no-op for HM-inferred params: at body
--- emission time `_forall_bounds` is empty (bounds populated by sub_solve via
+-- emission time `tv_bounds` is empty (bounds populated by sub_solve via
 -- emit_field_bound / emit_meta_bound). The real recording runs in
 -- record_polymorphic_ops_post (called after sub_solve), which scans the body
 -- constraint range and walks each operand TV back to its root template TV via
@@ -598,7 +598,7 @@ local function record_polymorphic_op(ctx, c)
 end
 
 -- Walk a type's structure collecting every TAG_VAR / TAG_ROWVAR id reachable
--- inside it. Used to (1) generalize TVs hiding inside _forall_bounds[T] so
+-- inside it. Used to (1) generalize TVs hiding inside tv_bounds[T] so
 -- env.instantiate mints fresh copies for them at call sites, and (2) build
 -- the operand→root_T reverse index for record_polymorphic_ops_post.
 --
@@ -679,14 +679,14 @@ local function collect_bound_tvs(ctx, tid, out, seen)
     end
 end
 
--- HM Phase 2 post-pass: after sub_solve has populated `_forall_bounds` for
+-- HM Phase 2 post-pass: after sub_solve has populated `tv_bounds` for
 -- the function's generalized params, walk body constraints in [body_start+1,
 -- body_end] and record each polymorphic-rooted op into `_forall_ops[T]` for
 -- the root template TV T whose bound contains the operand. Also generalizes
 -- TVs hiding inside each bound so call-site instantiation refreshes them.
 --: (Ctx, { [integer]: integer, ... }, integer, integer) -> ()
 local function record_polymorphic_ops_post(ctx, param_tids, body_start, body_end)
-    local fb = ctx._forall_bounds
+    local fb = ctx.tv_bounds
     if not fb then return end
     -- Collect TVs of each generalized param's bound and reverse-index
     -- bound_tv → root_template_tv. Also generalize collected TVs so
@@ -731,7 +731,7 @@ local function record_polymorphic_ops_post(ctx, param_tids, body_start, body_end
         [C_CHECK_ARGS]    = { 2, 4 },
         -- C_INDEX intentionally omitted: emit_field_bound/emit_indexer_bound
         -- in solve.lua already merge open-record/indexer bounds into
-        -- _forall_bounds, and call-site C_BOUND propagates field types into
+        -- tv_bounds, and call-site C_BOUND propagates field types into
         -- the inst-mapped nested TVs. Re-emitting body C_INDEX at call sites
         -- creates duplicate field bounds and breaks the merged-bound shape.
         --
@@ -1311,7 +1311,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen, allow_unapplied, in_match
             param_tvs[#param_tvs + 1] = tv
         end
         -- Resolve bounds (in param_scope so the bound can reference other type params)
-        -- and record them in ctx._forall_bounds keyed by generic tv_id.
+        -- and record them in ctx.tv_bounds keyed by generic tv_id.
         -- Pass allow_unapplied=true so unapplied kind-bounds like
         -- <F: T1> (where T1<X> = ...) are accepted as TAG_NAMED rather than erroring.
         -- solve_bound will skip TAG_NAMED bounds (kind constraints not yet enforced).
@@ -1322,7 +1322,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen, allow_unapplied, in_match
                 local bound_ann_id = ctx.ann.lists:get(bounds_start + idx - 1)
                 if bound_ann_id ~= -1 then
                     local resolved_bound = resolve_annotation_type(ctx, bound_ann_id, seen, true, in_match_arm, in_func_ann)
-                    ctx._forall_bounds[param_tvs[idx]] = resolved_bound
+                    ctx.tv_bounds[param_tvs[idx]] = resolved_bound
                 end
             end
             ctx.scope = saved_for_bounds
@@ -1735,8 +1735,8 @@ local function gen_expr_multi(ctx, nid)
         local rule = ExprRule[n.kind]
         if rule then
             local primary = rule(ctx, nid)
-            local mr = ctx._last_multi_return
-            ctx._last_multi_return = nil
+            local mr = ctx.pending_multi_return
+            ctx.pending_multi_return = nil
             --: { [integer]: integer, ... }
             local fallback = { primary }
             return mr or fallback
@@ -1910,7 +1910,7 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     emit(ctx, M.make_index(obj_tid, types_mod.make_literal(ctx, LIT_STRING, fname_id), res, n.line, n.col))
     -- Record the field-access origin so peek_callee_ret_union can trace local aliases
     -- like `local find = string.find` back to the concrete function type.
-    ctx._var_origin[res] = { obj_tid, fname_id }
+    ctx.var_origin[res] = { obj_tid, fname_id }
     -- Track field access for LSP go-to-def (only for simple identifier objects)
     local obj_n = ctx.nodes:get(obj_nid)
     if obj_n.kind == NODE_IDENTIFIER then
@@ -2312,7 +2312,7 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, fn_def_line
     -- HM Phase 1b: per-function sub-solve. Resolve body constraints against
     -- still-free param vars before generalization, so body usages refine the
     -- param shapes (Phase 1c body-solver hooks will emit metamethod-shape
-    -- bounds via _forall_bounds; for now this just runs body constraints
+    -- bounds via tv_bounds; for now this just runs body constraints
     -- early so ret_var binding settles before call-site instantiation).
     -- Skipped for annotated functions (params are already concrete).
     --
@@ -2485,8 +2485,8 @@ ExprRule[NODE_FUNC_EXPR] = function(ctx, nid)
         -- Body will be re-checked at each call site with concrete argument types.
         -- Store ps/pl/bs/bl from NODE_FUNC_EXPR layout: data[0]=ps, [1]=pl, [2]=bs, [3]=bl.
         local fn_tid = gen_function_skip_body(ctx, n.data[0], n.data[1], has_vararg)
-        if not ctx._template_fns then ctx._template_fns = {} end
-        ctx._template_fns[fn_tid] = {
+        if not ctx.template_fns then ctx.template_fns = {} end
+        ctx.template_fns[fn_tid] = {
             ps = n.data[0], pl = n.data[1], bs = n.data[2], bl = n.data[3],
             has_vararg = has_vararg,
         }
@@ -2532,7 +2532,7 @@ end
 
 -- Recover a concrete type for an argument AST node when its constraint-gen
 -- type is still an unresolved TAG_VAR.  Mirrors `peek_callee_ret_union`'s
--- callee-shape inspection: identifiers via scope lookup (with _var_origin
+-- callee-shape inspection: identifiers via scope lookup (with var_origin
 -- fallback through field-access bindings), and field expressions via direct
 -- table_field lookup on the receiver.  Returns nil if not statically resolvable.
 --: (Ctx, ASTNode) -> integer | nil
@@ -2543,7 +2543,7 @@ local function peek_arg_type(ctx, arg_n)
             local rtid = types_mod.find(ctx, tid)
             local t = ctx.types:get(rtid)
             if t.tag == TAG_VAR then
-                local origin = ctx._var_origin[rtid]
+                local origin = ctx.var_origin[rtid]
                 if origin then
                     local src_obj = types_mod.find(ctx, origin[1])
                     local fe = types_mod.table_field(ctx, src_obj, origin[2])
@@ -2565,8 +2565,8 @@ local function peek_arg_type(ctx, arg_n)
             -- Fallback: obj is a require()'d local whose type has not yet been
             -- resolved by the solver (still TAG_VAR awaiting $Require<T>).  Look up
             -- the cached exports tid recorded at gen time.
-            if ctx._require_exports then
-                local exp_tid = ctx._require_exports[obj_n.data[0]]
+            if ctx.require_exports then
+                local exp_tid = ctx.require_exports[obj_n.data[0]]
                 if exp_tid then
                     local exp_resolved = types_mod.find(ctx, exp_tid)
                     local exp_fe = types_mod.table_field(ctx, exp_resolved, arg_n.data[1])
@@ -2582,7 +2582,7 @@ end
 -- When an instantiated callee has `-> ...$SomeIntrinsic<F>` as its return type,
 -- the intrinsic args (which are fresh TVs from let-polymorphism instantiation)
 -- can often be resolved immediately from the actual call-site arg types.  This
--- lets _last_multi_return_override be set eagerly so that if-guard narrowing
+-- lets pending_multi_return_override be set eagerly so that if-guard narrowing
 -- (e.g. `if ok then`) can filter union arms at constraint-gen time rather than
 -- waiting until the solver runs.
 --
@@ -2658,11 +2658,11 @@ local function peek_callee_ret_union(ctx, callee_n)
         if tid then
             fn_tid = types_mod.find(ctx, tid)
             -- If fn_tid is still an unresolved TAG_VAR (e.g. `local find = string.find`
-            -- where the field access result is a fresh var), trace through _var_origin
+            -- where the field access result is a fresh var), trace through var_origin
             -- to find the concrete function type one level up.
             local ft = ctx.types:get(fn_tid)
             if ft.tag == TAG_VAR then
-                local origin = ctx._var_origin[fn_tid]
+                local origin = ctx.var_origin[fn_tid]
                 if origin then
                     local src_obj = types_mod.find(ctx, origin[1])
                     local fe = types_mod.table_field(ctx, src_obj, origin[2])
@@ -2819,25 +2819,25 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
             local arg0_n = ctx.nodes:get(arg0_nid)
             if arg0_n and arg0_n.kind == NODE_LITERAL and arg0_n.data[2] == LIT_STRING then
                 local mod_name = intern_mod.get(ctx.pool, arg0_n.data[1]) or ""
-                ctx._last_require_mod = mod_name
+                ctx.pending_require_mod = mod_name
                 -- Invoke cri_loader at gen time to get type aliases for injection.
                 -- The returned exports type is ignored here (resolved later by $Require<T>
                 -- via the solver); we only care about aliases for scope injection.
                 if ctx.cri_loader then
                     local exports_tid, aliases = ctx.cri_loader(ctx, mod_name)
                     if aliases then
-                        ctx._last_require_aliases = aliases
+                        ctx.pending_require_aliases = aliases
                     end
                     if exports_tid then
-                        ctx._last_require_exports = exports_tid
+                        ctx.pending_require_exports = exports_tid
                     end
                 end
                 -- Fallback to declared module type (--:: module "name": T) so
                 -- field-access on the require'd local can be resolved eagerly at
                 -- gen time (used by try_eager_intrinsic_return for pcall).
-                if not ctx._last_require_exports and ctx.module_types
+                if not ctx.pending_require_exports and ctx.module_types
                     and ctx.module_types[mod_name] then
-                    ctx._last_require_exports = ctx.module_types[mod_name]
+                    ctx.pending_require_exports = ctx.module_types[mod_name]
                 end
             end
         end
@@ -2867,8 +2867,8 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     -- re-run the body with the concrete argument types to check it and infer
     -- the return type for this specific call site.
     local resolved_callee = types_mod.find(ctx, callee_tid)
-    if ctx._template_fns and ctx._template_fns[resolved_callee] then
-        local tinfo = ctx._template_fns[resolved_callee]
+    if ctx.template_fns and ctx.template_fns[resolved_callee] then
+        local tinfo = ctx.template_fns[resolved_callee]
         local call_fn_tid = gen_function_for_template(ctx, tinfo.ps, tinfo.pl, tinfo.bs, tinfo.bl,
             tinfo.has_vararg, arg_tids)
         -- Extract the return type from the template instantiation and bind the call's ret.
@@ -2892,7 +2892,7 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
         else
             emit(ctx, M.make_unify(ret, ctx.T_ANY, n.line, n.col))
         end
-        ctx._last_multi_return = { ret }
+        ctx.pending_multi_return = { ret }
         return ret
     end
 
@@ -2934,14 +2934,14 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     -- subject of a TAG_MATCH_TYPE or a TV used as a <T: F> bound) are replaced by the
     -- corresponding fresh TVs.  This lets solve_bound evaluate the bound once the fresh TV
     -- is bound to a concrete type, without needing to retain the original inst_mapping.
-    if next(ctx._forall_bounds) and next(inst_mapping) then
+    if next(ctx.tv_bounds) and next(inst_mapping) then
         -- Build a map: fresh_tv -> bound_alias_tid for HKT decomposition. A
         -- fresh TV is eligible if its origin had a generic-alias bound
         -- (TAG_NAMED whose name resolves to an alias with >=1 type param).
         -- These are the F in `<F: Maybe>` patterns.
         local hkt_fresh_to_bound = nil
         for orig_tv, fresh_tv in pairs(inst_mapping) do
-            local bound = ctx._forall_bounds[orig_tv]
+            local bound = ctx.tv_bounds[orig_tv]
             if bound then
                 local inst_bound = env_mod.instantiate(ctx, bound, ctx.scope.level, inst_mapping)
                 emit(ctx, M.make_bound(fresh_tv, inst_bound, n.line, n.col))
@@ -3085,26 +3085,26 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
         -- the inferred return type. See docs/typechecker-rank-n.md.
         emit(ctx, M.make_escape(ret, rank_n_call_id, n.line, n.col))
     end
-    ctx._last_multi_return = { ret }
+    ctx.pending_multi_return = { ret }
 
     -- Eagerly evaluate $PcallReturn<F> at constraint-gen time so that
-    -- _last_multi_return_override is available for if-guard narrowing.
+    -- pending_multi_return_override is available for if-guard narrowing.
     -- This replaces the former name-based pcall/xpcall special case.
     -- Only applies to $PcallReturn (union-of-tuples needing correlated narrowing);
     -- other intrinsics ($IpairsReturn, $PairsReturn, $Require, ...) are resolved
     -- by resolve_deferred_intrinsic in the solver after parameter unification.
     local eager = try_eager_intrinsic_return(ctx, inst_callee, arg_tids, n.data[1], n.data[2])
     if eager then
-        ctx._last_multi_return_override = eager
+        ctx.pending_multi_return_override = eager
     end
 
     -- General union-of-tuples override: any callee declared to return a
     -- union-of-tuples (e.g. string.find, io.open) gets the concrete union as
     -- call_ret_tid so LOCAL_STMT can correlate bindings at narrowing time.
-    if not ctx._last_multi_return_override then
+    if not ctx.pending_multi_return_override then
         local ret_union = peek_callee_ret_union(ctx, callee_n)
         if ret_union then
-            ctx._last_multi_return_override = ret_union
+            ctx.pending_multi_return_override = ret_union
         end
     end
 
@@ -3130,9 +3130,9 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
 
     -- Emit deferred bound checks for each instantiated generic TV that has a bound.
     -- Instantiate the bound using meth_mapping so generic TVs inside it are replaced.
-    if next(ctx._forall_bounds) and next(meth_mapping) then
+    if next(ctx.tv_bounds) and next(meth_mapping) then
         for orig_tv, fresh_tv in pairs(meth_mapping) do
-            local bound = ctx._forall_bounds[orig_tv]
+            local bound = ctx.tv_bounds[orig_tv]
             if bound then
                 local inst_bound = env_mod.instantiate(ctx, bound, ctx.scope.level, meth_mapping)
                 emit(ctx, M.make_bound(fresh_tv, inst_bound, n.line, n.col))
@@ -3143,7 +3143,7 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
     local ret = fresh_var(ctx)
     emit(ctx, M.make_bindgen(inst_method, arg_tids, ret, n.line, n.col))
     emit(ctx, M.make_checkargs(inst_method, arg_tids, ret, n.line, n.col))
-    ctx._last_multi_return = { ret }
+    ctx.pending_multi_return = { ret }
 
     -- Eagerly peek the method's return type so LOCAL_STMT can extract slots at
     -- constraint-gen time (enabling narrowing of e.g. `local a, b = str:match(...)`).
@@ -3174,7 +3174,7 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
                     else
                         override = types_mod.make_tuple(ctx, { ret_slot })
                     end
-                    ctx._last_multi_return_override = override
+                    ctx.pending_multi_return_override = override
                 end
             end
         end
@@ -3534,16 +3534,16 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
     local ns, nl = n.data[0], n.data[1]
     local es, el = n.data[2], n.data[3]
 
-    ctx._last_require_mod = nil
-    ctx._last_require_aliases = nil
-    ctx._last_multi_return_override = nil  -- clear before gen so stale values don't persist
+    ctx.pending_require_mod = nil
+    ctx.pending_require_aliases = nil
+    ctx.pending_multi_return_override = nil  -- clear before gen so stale values don't persist
     local rhs_types = el > 0 and gen_expr_list(ctx, es, el) or {}
-    local stmt_require_mod = ctx._last_require_mod
-    local stmt_require_aliases = ctx._last_require_aliases
-    local stmt_require_exports = ctx._last_require_exports
-    ctx._last_require_mod = nil
-    ctx._last_require_aliases = nil
-    ctx._last_require_exports = nil
+    local stmt_require_mod = ctx.pending_require_mod
+    local stmt_require_aliases = ctx.pending_require_aliases
+    local stmt_require_exports = ctx.pending_require_exports
+    ctx.pending_require_mod = nil
+    ctx.pending_require_aliases = nil
+    ctx.pending_require_exports = nil
 
     local last_rhs_is_call = false
     if el > 0 then
@@ -3556,8 +3556,8 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
     -- call_ret_tid: the multi-return source (pcall intrinsic union, or last RHS ret var).
     local call_ret_tid = nil
     if last_rhs_is_call then
-        local override = ctx._last_multi_return_override
-        ctx._last_multi_return_override = nil
+        local override = ctx.pending_multi_return_override
+        ctx.pending_multi_return_override = nil
         if override then
             call_ret_tid = override
         else
@@ -3614,8 +3614,8 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             if stmt_require_mod and i == 0 and el == 1 then
                 ctx.require_sources[name_id] = stmt_require_mod
                 if stmt_require_exports then
-                    if not ctx._require_exports then ctx._require_exports = {} end
-                    ctx._require_exports[name_id] = stmt_require_exports
+                    if not ctx.require_exports then ctx.require_exports = {} end
+                    ctx.require_exports[name_id] = stmt_require_exports
                 end
             end
         elseif prescanned then
@@ -3664,8 +3664,8 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             if stmt_require_mod and i == 0 and el == 1 then
                 ctx.require_sources[name_id] = stmt_require_mod
                 if stmt_require_exports then
-                    if not ctx._require_exports then ctx._require_exports = {} end
-                    ctx._require_exports[name_id] = stmt_require_exports
+                    if not ctx.require_exports then ctx.require_exports = {} end
+                    ctx.require_exports[name_id] = stmt_require_exports
                 end
             end
             -- After binding a single-name table literal with no annotation, try to promote
@@ -3691,7 +3691,7 @@ end
 StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local rhs_count = n.data[3]
-    ctx._last_multi_return_override = nil  -- clear before gen so stale values don't persist
+    ctx.pending_multi_return_override = nil  -- clear before gen so stale values don't persist
     local rhs_types = gen_expr_list(ctx, n.data[2], rhs_count)
     -- Consume any preceding --: annotation so it doesn't spill to the next statement.
     -- We read it first so we can use it for NODE_FIELD_EXPR targets below.
@@ -3705,11 +3705,11 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
     end
 
     -- For call-derived bindings with correlated multi-return (like string.find),
-    -- use _last_multi_return_override to slot-extract each target, mirroring LOCAL_STMT.
+    -- use pending_multi_return_override to slot-extract each target, mirroring LOCAL_STMT.
     local assign_call_ret_tid = nil
     if last_rhs_is_call then
-        local override = ctx._last_multi_return_override
-        ctx._last_multi_return_override = nil
+        local override = ctx.pending_multi_return_override
+        ctx.pending_multi_return_override = nil
         if override then
             assign_call_ret_tid = override
         else
@@ -4360,7 +4360,7 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
     if ctx._template_lines and ctx._template_lines[n.line - 1] then
         -- NODE_FUNC_DECL layout: data[1]=ps, data[2]=pl, data[3]=bs, data[4]=bl.
         local fn_tid = gen_function_skip_body(ctx, n.data[1], n.data[2], has_vararg)
-        if not ctx._template_fns then ctx._template_fns = {} end
+        if not ctx.template_fns then ctx.template_fns = {} end
         local tinfo = {
             ps = n.data[1], pl = n.data[2], bs = n.data[3], bl = n.data[4],
             has_vararg = has_vararg,
@@ -4383,9 +4383,9 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
             env_mod.bind(ctx.scope, name_id, fn_tid)
             ctx.def_sites[name_id] = { line = n.line, col = n.col }
         end
-        ctx._template_fns[stable_tid] = tinfo
+        ctx.template_fns[stable_tid] = tinfo
         if stable_tid ~= fn_tid then
-            ctx._template_fns[fn_tid] = tinfo
+            ctx.template_fns[fn_tid] = tinfo
         end
         return
     end
@@ -5126,11 +5126,11 @@ function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
     ctx.module_return_tids = nil
     ctx.cri_loader         = nil
     ctx.ffi_hooks          = nil
-    ctx._last_multi_return          = nil
-    ctx._last_multi_return_override = nil
-    ctx._last_require_mod           = nil
+    ctx.pending_multi_return          = nil
+    ctx.pending_multi_return_override = nil
+    ctx.pending_require_mod           = nil
     ctx._multi_ret                  = {}
-    ctx._var_origin        = {}   -- [var_id] -> {obj_tid, field_name_id}: field-access origin for TAG_VAR results
+    ctx.var_origin        = {}   -- [var_id] -> {obj_tid, field_name_id}: field-access origin for TAG_VAR results
     ctx.nominal_id         = 0
     ctx.catch_mode         = false   -- true while inside $Catch<T, ...> first-arg resolution
     ctx.catch_threw        = false   -- set to true by $Throw when catch_mode is active
@@ -5143,7 +5143,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
     ctx.declared_subtypes  = {}   -- [alias_name_id] = constraint_name_id; populated by interface declarations
     ctx.type_origins       = {}   -- [type_id] -> filename; populated for cross-file types
     ctx.constraints        = {}   -- v3: emitted constraints
-    ctx._forall_bounds     = {}   -- [generic_tv_id] -> resolved_bound_type_id
+    ctx.tv_bounds     = {}   -- [generic_tv_id] -> resolved_bound_type_id
     ctx._forall_ops = {}   -- [generic_tv_id] -> { op_descriptor, ... } (HM Phase 2)
     ctx.lit_cache          = {}   -- literal type interning: (kind<<32|val) → type_id
 
