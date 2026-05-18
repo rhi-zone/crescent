@@ -667,7 +667,7 @@ end
 -- and unifies with result_tid. Used by narrow.lua when narrowing operates on a TAG_VAR
 -- that hasn't been resolved yet (e.g. for-in loop variables).
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
---: (Ctx, { [integer]: unknown, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean | { solved: boolean, await: integer }
 local function solve_narrow_nil(ctx, c)
     local input_tid  = constrain.narrowNil_input(c)
     local result_tid = constrain.narrowNil_result(c)
@@ -676,7 +676,7 @@ local function solve_narrow_nil(ctx, c)
     local input = find(ctx, input_tid)
     local it = ctx.types:get(input)
     if it.tag == TAG_VAR or it.tag == TAG_ROWVAR then
-        return false  -- defer
+        return await(ctx, c, input)
     end
 
     local resolved = ctx.T_NEVER
@@ -1101,7 +1101,7 @@ end
 --   - For other bounds: check try_unify(widen(actual), bound).
 -- Skips enforcement when the bound is TAG_NAMED (unapplied kind constraint).
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
---: (Ctx, { [integer]: unknown, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean | { solved: boolean, await: integer }
 local function solve_bound(ctx, c)
     local tv_id    = constrain.bound_tv(c)
     local bound_id = constrain.bound_type(c)
@@ -1111,7 +1111,7 @@ local function solve_bound(ctx, c)
     local at = ctx.types:get(actual)
     -- Defer: TV not yet bound to a concrete type at the call site.
     if at.tag == TAG_VAR or at.tag == TAG_ROWVAR then
-        return false
+        return await(ctx, c, actual)
     end
 
     local resolved_bound = find(ctx, bound_id)
@@ -1121,7 +1121,7 @@ local function solve_bound(ctx, c)
     -- TV has not yet been unified with a concrete type by the C_CALLABLE solver.
     -- Once F is resolved, the next solver pass re-evaluates this constraint.
     if bt.tag == TAG_VAR or bt.tag == TAG_ROWVAR then
-        return false
+        return await(ctx, c, resolved_bound)
     end
 
     -- Skip unenforced bound forms:
@@ -1370,7 +1370,7 @@ end
 -- Solve a slot/field index: C_INDEX = { C_INDEX, obj_tid, key_tid, res_tid, line, col }
 -- key_tid: TAG_LITERAL(LIT_STRING, name_id) for named field; TAG_LITERAL(LIT_INTEGER, slot) for tuple slot.
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
---: (Ctx, { [integer]: unknown, ... }) -> boolean
+--: (Ctx, { [integer]: unknown, ... }) -> boolean | { solved: boolean, await: integer }
 local function solve_index(ctx, c)
     local obj_tid_raw = find(ctx, constrain.index_obj(c))
     local key_tid  = find(ctx, constrain.index_key(c))
@@ -1404,7 +1404,7 @@ local function solve_index(ctx, c)
             return true
         end
         if obj_t.tag == TAG_VAR or obj_t.tag == TAG_ROWVAR then
-            return false  -- defer
+            return await(ctx, c, obj_tid)
         end
         if obj_t.tag == TAG_TABLE then
             local fe = types_mod.table_opaque_field(ctx, obj_tid, key_name_id)
@@ -1450,7 +1450,7 @@ local function solve_index(ctx, c)
             return true
         end
         if obj_t.tag == TAG_VAR or obj_t.tag == TAG_ROWVAR then
-            return false  -- defer until obj is resolved
+            return await(ctx, c, obj_tid)
         end
         if obj_t.tag == TAG_TUPLE then
             if slot < types_mod.agg_members_len(obj_t) then
