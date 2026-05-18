@@ -311,7 +311,7 @@ T.describe("cr diff (no-output on unmodified package)", function()
 		local home_override = tmp .. "/home"
 		os.execute(("mkdir -p %q"):format(home_override))
 
-		-- Override HOME so cache_root points to tmp/home/.crescent/cache
+		-- Override HOME so cache_root points to tmp/home/.cache/crescent/pkg
 		local old_home = os.getenv("HOME")
 		-- We cannot override os.getenv in LuaJIT without environment tricks.
 		-- Instead, test diff directly via shell.

@@ -162,7 +162,7 @@ The tree hash in the lockfile lets `cr install` detect modifications to
 Additional commands for working with modified vendored code:
 
 ```bash
-cr diff foo      # diff lib/foo/ against ~/.crescent/cache/foo@<version>/
+cr diff foo      # diff lib/foo/ against ~/.cache/crescent/pkg/foo@<version>/
                  # no network required — the cache is already present from install
 cr eject foo     # remove foo from crescent.lock entirely; the package manager
                  # never touches lib/foo/ again. Explicit primitive for "I own this."
@@ -184,8 +184,8 @@ is the right tool when the intent is to track upstream while keeping local fixes
 ## Global cache
 
 ```
-~/.crescent/cache/<name>@<version>/   extracted package tree
-~/.crescent/cache/<hash>.meta         binary-encoded registry metadata per package name
+~/.cache/crescent/pkg/<name>@<version>/   extracted package tree
+~/.cache/crescent/pkg/<hash>.meta         binary-encoded registry metadata per package name
 ```
 
 Install links (hardlink on Linux, clonefile/CoW on macOS, copy fallback) from
@@ -213,7 +213,7 @@ extraction to cache.
      - If match: skip (same as bun's early-exit JSON check)
      - If mismatch: warn "lib/<name>/ has been modified" and stop unless --force
 5. Fetch missing packages (parallel, default --jobs=N where N=CPU count):
-     - Check global cache first (~/.crescent/cache/name@version/)
+     - Check global cache first (~/.cache/crescent/pkg/name@version/)
      - Download tarball if not cached; verify tarball hash
 6. Link: hardlink (or copy) from global cache into lib/<name>/,
      applying the include glob union from step 3
@@ -286,7 +286,7 @@ tarball with a `v<N>/` subdirectory (the standard practice for versioned
 packages), the extracted result is `lib/<name>/v<N>/`. The package manager
 imposes no directory structure — it extracts and that's it.
 
-Registry metadata responses cached in `~/.crescent/cache/<hash>.meta`
+Registry metadata responses cached in `~/.cache/crescent/pkg/<hash>.meta`
 (binary-encoded for fast repeated reads, same principle as bun's `.npm` cache).
 
 The registry format is simple enough that GitHub Releases can serve as a
