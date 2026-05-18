@@ -210,9 +210,6 @@ Ctx = {
   def_sites:       { [integer]: { line: integer, col: integer, ... }, ... },
   require_sources: { [integer]: string, ... },
   type_origins:    { [integer]: string, ... },
-  _resolving_func_ann_scope: boolean | nil,
-  _in_match_arm:             boolean | nil,
-  _allow_unapplied_constructors: boolean | nil,
   _forall_bounds:  { [integer]: integer, ... },
   lit_cache:       { [integer]: integer, ... },
   -- Item 2 of the first-principles rework: givens-before-wanteds discipline.

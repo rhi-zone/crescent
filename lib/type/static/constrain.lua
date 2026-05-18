@@ -797,8 +797,13 @@ end
 
 local resolve_annotation_type
 
---: (Ctx, integer, { [integer]: boolean, ... } | nil) -> integer
-resolve_annotation_type = function(ctx, ann_tid, seen)
+-- allow_unapplied, in_match_arm, in_func_ann are explicit per-call flags that
+-- replace the former ctx._allow_unapplied_constructors / ctx._in_match_arm /
+-- ctx._resolving_func_ann_scope channel fields (item 4a/4b/4c). They are
+-- threaded through recursive calls; flip sites just pass the modified value
+-- to the recursive call instead of saving/restoring on ctx.
+--: (Ctx, integer, { [integer]: boolean, ... } | nil, boolean | nil, boolean | nil, boolean | nil) -> integer
+resolve_annotation_type = function(ctx, ann_tid, seen, allow_unapplied, in_match_arm, in_func_ann)
     if not ctx.ann then return ctx.T_ANY end
     seen = seen or {}
     if seen[ann_tid] then return ctx.T_ANY end
@@ -866,7 +871,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             -- it will be bound to the concrete annotation type by the caller.
             -- Outside that context (unannotated param at a call site), return T_UNKNOWN
             -- to avoid capturing an unstable free variable.
-            if ctx._resolving_func_ann_scope then
+            if in_func_ann then
                 return resolved
             end
             return ctx.T_UNKNOWN
@@ -883,13 +888,10 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             seen[ann_tid] = true
             arg_ids = {}
             -- Allow unapplied type constructors as HKT arguments (e.g. Maybe in map<Maybe, A, B>).
-            local prev_allow = ctx._allow_unapplied_constructors
-            ctx._allow_unapplied_constructors = true
             local args_start = types_mod.named_args_start(at)
             for i = args_start, args_start + args_len - 1 do
-                arg_ids[#arg_ids + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+                arg_ids[#arg_ids + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen, true, in_match_arm, in_func_ann)
             end
-            ctx._allow_unapplied_constructors = prev_allow
             seen[ann_tid] = nil
         end
         -- Literal boolean types: `true` / `false` are valid type-level names.
@@ -904,7 +906,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             -- Inside a match arm pattern/body, bare names that are not in scope
             -- are pattern capture variables (e.g. `A` in `{ value: A } => A`).
             -- Return a TAG_NAMED placeholder; match.evaluate will bind and substitute.
-            if ctx._in_match_arm then
+            if in_match_arm then
                 local id = types_mod.alloc_type(ctx, TAG_NAMED)
                 ctx.types:get(id).data[0] = name_id
                 return id
@@ -919,7 +921,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         -- (e.g. when resolving args for a TAG_INTRINSIC type-call like $EachUnion).
         -- In all other contexts (value types, alias bodies) emit the arity error.
         if not arg_ids and alias.params and #alias.params > 0
-          and ctx._allow_unapplied_constructors then
+          and allow_unapplied then
             local id = types_mod.alloc_type(ctx, TAG_NAMED)
             ctx.types:get(id).data[0] = name_id
             return id
@@ -932,7 +934,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             -- emit an arity error. TAG_PARTIAL_APP in a concrete-type position
             -- is a usage error: the alias needs more type arguments.
             local rt = ctx.types:get(resolved)
-            if rt.tag == defs.TAG_PARTIAL_APP and not ctx._allow_unapplied_constructors then
+            if rt.tag == defs.TAG_PARTIAL_APP and not allow_unapplied then
                 local param_count = alias.params and #alias.params or 0
                 local required_count = param_count
                 if alias.resolved_defaults then
@@ -1008,7 +1010,9 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         local ann_scope = nil
         local ann_vars  = nil   -- parallel to param_name_ids: the fresh TAG_VAR ids
         local saved_scope = ctx.scope
-        local saved_flag  = ctx._resolving_func_ann_scope
+        -- in_func_ann is local; nested resolves use the value `true` when
+        -- param_name_ids is non-nil (i.e. we built the ann_scope).
+        local inner_in_func_ann = in_func_ann
         if param_name_ids then
             ann_scope = env_mod.child(ctx.scope)
             ann_vars  = {}
@@ -1018,12 +1022,12 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
                 ann_vars[#ann_vars + 1] = tv
             end
             ctx.scope = ann_scope
-            ctx._resolving_func_ann_scope = true
+            inner_in_func_ann = true
         end
         local params = {} --: { [integer]: integer }
         local ps_ann, pl_ann = types_mod.fn_params_start(at), types_mod.fn_params_len(at)
         for i = ps_ann, ps_ann + pl_ann - 1 do
-            local pt = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            local pt = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen, allow_unapplied, in_match_arm, inner_in_func_ann)
             if pt == ctx.T_ANY and func_ann_line ~= 0 then
                 warn(ctx, func_ann_line, 0, E.ANY_IN_TYPE, {})
             end
@@ -1050,7 +1054,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         local returns = {}
         local rs_ann, rl_ann = types_mod.fn_returns_start(at), types_mod.fn_returns_len(at)
         for i = rs_ann, rs_ann + rl_ann - 1 do
-            local rt = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            local rt = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen, allow_unapplied, in_match_arm, inner_in_func_ann)
             if rt == ctx.T_ANY and func_ann_line ~= 0 then
                 warn(ctx, func_ann_line, 0, E.ANY_IN_TYPE, {})
             end
@@ -1059,14 +1063,13 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         local vararg_id = -1
         local va_ann = types_mod.fn_vararg(at)
         if va_ann >= 0 then
-            vararg_id = resolve_annotation_type(ctx, va_ann, seen)
+            vararg_id = resolve_annotation_type(ctx, va_ann, seen, allow_unapplied, in_match_arm, inner_in_func_ann)
             if vararg_id == ctx.T_ANY and func_ann_line ~= 0 then
                 warn(ctx, func_ann_line, 0, E.ANY_IN_TYPE, {})
             end
         end
         if ann_scope then
             ctx.scope = saved_scope
-            ctx._resolving_func_ann_scope = saved_flag
         end
         seen[ann_tid] = nil
         local resolved_fn = types_mod.make_func(ctx, params, returns, vararg_id, param_name_ids)
@@ -1078,14 +1081,14 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             local raw = ctx.pool._type_predicates[ann_tid]
             ctx.pool._type_predicates[resolved_fn] = {
                 param_idx = raw.param_idx,
-                type_id   = resolve_annotation_type(ctx, raw.type_id, seen),
+                type_id   = resolve_annotation_type(ctx, raw.type_id, seen, allow_unapplied, in_match_arm, in_func_ann),
             }
         end
         if ctx.pool._assert_predicates and ctx.pool._assert_predicates[ann_tid] then
             local raw = ctx.pool._assert_predicates[ann_tid]
             ctx.pool._assert_predicates[resolved_fn] = {
                 param_idx = raw.param_idx,
-                type_id   = resolve_annotation_type(ctx, raw.type_id, seen),
+                type_id   = resolve_annotation_type(ctx, raw.type_id, seen, allow_unapplied, in_match_arm, in_func_ann),
             }
         end
         return resolved_fn
@@ -1120,7 +1123,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
                 -- Spread entry: { ...T, ... }
                 -- fe.type_id is a TAG_SPREAD annotation node; .data[0] is the inner ann type.
                 local spread_at = ctx.ann.types:get(fe.type_id)
-                local inner_tid = resolve_annotation_type(ctx, types_mod.spread_inner(spread_at), seen)
+                local inner_tid = resolve_annotation_type(ctx, types_mod.spread_inner(spread_at), seen, allow_unapplied, in_match_arm, in_func_ann)
                 inner_tid = types_mod.find(ctx, inner_tid)
                 local inner_t = ctx.types:get(inner_tid)
                 if inner_t.tag == TAG_TABLE then
@@ -1139,7 +1142,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
                 ctx.types:get(sp).data[0] = inner_tid
                 field_ids[#field_ids + 1] = types_mod.make_field(ctx, -1, sp, 0)
             else
-                local ft = resolve_annotation_type(ctx, fe.type_id, seen)
+                local ft = resolve_annotation_type(ctx, fe.type_id, seen, allow_unapplied, in_match_arm, in_func_ann)
                 if ft == ctx.T_ANY and tbl_ann_line ~= 0 then
                     warn(ctx, tbl_ann_line, 0, E.ANY_IN_TYPE, {})
                 end
@@ -1150,8 +1153,8 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         local is, il = types_mod.tbl_indexers_start(at), types_mod.tbl_indexers_len(at)
         local i = is
         while i < is + il - 1 do
-            local kt = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
-            local vt = resolve_annotation_type(ctx, ctx.ann.lists:get(i + 1), seen)
+            local kt = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen, allow_unapplied, in_match_arm, in_func_ann)
+            local vt = resolve_annotation_type(ctx, ctx.ann.lists:get(i + 1), seen, allow_unapplied, in_match_arm, in_func_ann)
             if (kt == ctx.T_ANY or vt == ctx.T_ANY) and tbl_ann_line ~= 0 then
                 warn(ctx, tbl_ann_line, 0, E.ANY_IN_TYPE, {})
             end
@@ -1162,7 +1165,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         local row_var = -1
         local at_rv = types_mod.tbl_row_var(at)
         if at_rv >= 0 then
-            row_var = resolve_annotation_type(ctx, at_rv, seen)
+            row_var = resolve_annotation_type(ctx, at_rv, seen, allow_unapplied, in_match_arm, in_func_ann)
         end
         local meta_ids = {}
         local ms_ann, ml_ann = types_mod.tbl_meta_start(at), types_mod.tbl_meta_len(at)
@@ -1181,7 +1184,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
                 -- Meta-spread entry: #...T — spreads all meta slots from T into this table.
                 -- fe.type_id is a TAG_SPREAD annotation node; .data[0] is the inner ann type.
                 local spread_at = ctx.ann.types:get(fe.type_id)
-                local inner_tid = resolve_annotation_type(ctx, types_mod.spread_inner(spread_at), seen)
+                local inner_tid = resolve_annotation_type(ctx, types_mod.spread_inner(spread_at), seen, allow_unapplied, in_match_arm, in_func_ann)
                 inner_tid = types_mod.find(ctx, inner_tid)
                 local inner_t = ctx.types:get(inner_tid)
                 if inner_t.tag == TAG_TABLE then
@@ -1199,7 +1202,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
                 ctx.types:get(sp).data[0] = inner_tid
                 meta_ids[#meta_ids + 1] = types_mod.make_field(ctx, -1, sp, 0)
             else
-                local ft  = resolve_annotation_type(ctx, fe.type_id, seen)
+                local ft  = resolve_annotation_type(ctx, fe.type_id, seen, allow_unapplied, in_match_arm, in_func_ann)
                 meta_ids[#meta_ids + 1] = types_mod.make_field(ctx, fe.name_id, ft, fe.flags)
             end
         end
@@ -1213,7 +1216,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         local members = {} --: { [integer]: integer }
         local u_s, u_l = types_mod.agg_members_start(at), types_mod.agg_members_len(at)
         for i = u_s, u_s + u_l - 1 do
-            local mt = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            local mt = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen, allow_unapplied, in_match_arm, in_func_ann)
             if mt == ctx.T_ANY and union_ann_line ~= 0 then
                 warn(ctx, union_ann_line, 0, E.ANY_IN_TYPE, {})
             end
@@ -1229,7 +1232,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         local members = {} --: { [integer]: integer }
         local in_s, in_l = types_mod.agg_members_start(at), types_mod.agg_members_len(at)
         for i = in_s, in_s + in_l - 1 do
-            local mt = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            local mt = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen, allow_unapplied, in_match_arm, in_func_ann)
             if mt == ctx.T_ANY and isect_ann_line ~= 0 then
                 warn(ctx, isect_ann_line, 0, E.ANY_IN_TYPE, {})
             end
@@ -1280,7 +1283,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         local elems = {}
         local tp_s, tp_l = types_mod.agg_members_start(at), types_mod.agg_members_len(at)
         for i = tp_s, tp_s + tp_l - 1 do
-            elems[#elems + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            elems[#elems + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen, allow_unapplied, in_match_arm, in_func_ann)
         end
         seen[ann_tid] = nil
         return types_mod.make_tuple(ctx, elems)
@@ -1313,21 +1316,18 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         if has_bounds then
             local saved_for_bounds = ctx.scope
             ctx.scope = param_scope
-            local prev_allow = ctx._allow_unapplied_constructors
-            ctx._allow_unapplied_constructors = true
             for idx = 1, #param_tvs do
                 local bound_ann_id = ctx.ann.lists:get(bounds_start + idx - 1)
                 if bound_ann_id ~= -1 then
-                    local resolved_bound = resolve_annotation_type(ctx, bound_ann_id, seen)
+                    local resolved_bound = resolve_annotation_type(ctx, bound_ann_id, seen, true, in_match_arm, in_func_ann)
                     ctx._forall_bounds[param_tvs[idx]] = resolved_bound
                 end
             end
-            ctx._allow_unapplied_constructors = prev_allow
             ctx.scope = saved_for_bounds
         end
         local saved_scope = ctx.scope
         ctx.scope = param_scope
-        local body = resolve_annotation_type(ctx, types_mod.forall_body(at), seen)
+        local body = resolve_annotation_type(ctx, types_mod.forall_body(at), seen, allow_unapplied, in_match_arm, in_func_ann)
         ctx.scope = saved_scope
         seen[ann_tid] = nil
         return body
@@ -1335,14 +1335,14 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
 
     if tag == defs.TAG_NOMINAL then
         seen[ann_tid] = true
-        local underlying = resolve_annotation_type(ctx, types_mod.nom_underlying(at), seen)
+        local underlying = resolve_annotation_type(ctx, types_mod.nom_underlying(at), seen, allow_unapplied, in_match_arm, in_func_ann)
         seen[ann_tid] = nil
         return types_mod.make_nominal(ctx, types_mod.nom_name_id(at), types_mod.nom_identity(at), underlying)
     end
 
     if tag == defs.TAG_SPREAD then
         seen[ann_tid] = true
-        local inner = resolve_annotation_type(ctx, types_mod.spread_inner(at), seen)
+        local inner = resolve_annotation_type(ctx, types_mod.spread_inner(at), seen, allow_unapplied, in_match_arm, in_func_ann)
         seen[ann_tid] = nil
         local id = types_mod.alloc_type(ctx, defs.TAG_SPREAD)
         ctx.types:get(id).data[0] = inner
@@ -1395,7 +1395,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         local pa_s, pa_l = types_mod.partial_args_start(at), types_mod.partial_args_len(at)
         for i = pa_s, pa_s + pa_l - 1 do
             -- Each list entry is an annotation type_id; resolve it first.
-            ctx.lists:push(resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen))
+            ctx.lists:push(resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen, allow_unapplied, in_match_arm, in_func_ann))
         end
         local ls, ll = ctx.lists:since(mk)
         local id = types_mod.alloc_type(ctx, defs.TAG_PARTIAL_APP)
@@ -1422,21 +1422,18 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
 
     if tag == defs.TAG_MATCH_TYPE then
         seen[ann_tid] = true
-        local param = resolve_annotation_type(ctx, types_mod.match_param(at), seen)
+        local param = resolve_annotation_type(ctx, types_mod.match_param(at), seen, allow_unapplied, in_match_arm, in_func_ann)
         local arms = {} --: { [integer]: integer, ... }
         local as, al = types_mod.match_arms_start(at), types_mod.match_arms_len(at)
         -- Arm patterns and bodies may contain free names (e.g. `A` in `{ value: A } => A`).
-        -- These are pattern-capture variables, not errors. Set _in_match_arm so that
+        -- These are pattern-capture variables, not errors. Pass in_match_arm=true so
         -- unresolved TAG_NAMED references are kept as placeholders instead of erroring.
-        local prev_in_match_arm = ctx._in_match_arm
-        ctx._in_match_arm = true
         local i = as
         while i < as + al - 1 do
-            arms[#arms + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
-            arms[#arms + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i + 1), seen)
+            arms[#arms + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i),     seen, allow_unapplied, true, in_func_ann)
+            arms[#arms + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i + 1), seen, allow_unapplied, true, in_func_ann)
             i = i + 2
         end
-        ctx._in_match_arm = prev_in_match_arm
         local mk = ctx.lists:mark()
         for _, aid in ipairs(arms) do ctx.lists:push(aid) end
         local ms, ml = ctx.lists:since(mk)
@@ -1460,8 +1457,8 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
 
     if tag == defs.TAG_INDEX_TYPE then
         seen[ann_tid] = true
-        local subject = resolve_annotation_type(ctx, types_mod.index_subject(at), seen)
-        local key     = resolve_annotation_type(ctx, types_mod.index_key(at), seen)
+        local subject = resolve_annotation_type(ctx, types_mod.index_subject(at), seen, allow_unapplied, in_match_arm, in_func_ann)
+        local key     = resolve_annotation_type(ctx, types_mod.index_key(at), seen, allow_unapplied, in_match_arm, in_func_ann)
         seen[ann_tid] = nil
         local pt = ctx.types:get(types_mod.find(ctx, subject))
         local kt = ctx.types:get(types_mod.find(ctx, key))
@@ -1489,13 +1486,13 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
 
     if tag == defs.TAG_TYPE_CALL then
         seen[ann_tid] = true
-        local callee = resolve_annotation_type(ctx, types_mod.tycall_callee(at), seen)
+        local callee = resolve_annotation_type(ctx, types_mod.tycall_callee(at), seen, allow_unapplied, in_match_arm, in_func_ann)
         local ct = ctx.types:get(callee)
         -- When the callee is a TAG_INTRINSIC, allow unapplied generic aliases
         -- as type constructor arguments (e.g. $EachUnion<T, ToString>).
-        local prev_allow = ctx._allow_unapplied_constructors
+        local args_allow_unapplied = allow_unapplied
         if ct.tag == defs.TAG_INTRINSIC then
-            ctx._allow_unapplied_constructors = true
+            args_allow_unapplied = true
         end
         local arg_ids = {} --: { [integer]: integer, ... }
         -- $Catch<T, Default?> must intercept $Throw inside T.
@@ -1517,13 +1514,12 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             if is_catch_intrinsic and i == ann_arg_start + 1 then
                 ctx.catch_mode = false
             end
-            arg_ids[#arg_ids + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            arg_ids[#arg_ids + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen, args_allow_unapplied, in_match_arm, in_func_ann)
         end
         if is_catch_intrinsic then
             ctx.catch_mode = false
         end
-        local in_hkt_context = ctx._allow_unapplied_constructors
-        ctx._allow_unapplied_constructors = prev_allow
+        local in_hkt_context = args_allow_unapplied
         seen[ann_tid] = nil
         if ct.tag == TAG_NAMED then
             local ct_name = types_mod.named_name_id(ct)
@@ -4838,17 +4834,14 @@ process_type_decls = function(ctx)
                         -- Allow unapplied type constructors as HKT bounds (e.g.
                         -- `<F: Functor>` where Functor is a generic alias). Mirrors
                         -- the argument-resolution site at lines 514-519.
-                        local prev_allow = ctx._allow_unapplied_constructors
-                        ctx._allow_unapplied_constructors = true
                         for _, raw_id in ipairs(rb) do
                             if raw_id == -1 then
                                 alias.resolved_bounds[#alias.resolved_bounds + 1] = nil
                             else
                                 alias.resolved_bounds[#alias.resolved_bounds + 1] =
-                                    resolve_annotation_type(ctx, raw_id)
+                                    resolve_annotation_type(ctx, raw_id, nil, true, nil, nil)
                             end
                         end
-                        ctx._allow_unapplied_constructors = prev_allow
                     end
 
                     -- Resolve raw_defaults (annotation-arena IDs) into checker-context type IDs.
@@ -5135,7 +5128,6 @@ function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
     ctx.nominal_id         = 0
     ctx.catch_mode         = false   -- true while inside $Catch<T, ...> first-arg resolution
     ctx.catch_threw        = false   -- set to true by $Throw when catch_mode is active
-    ctx._in_match_arm_subst = false  -- true during match arm result substitution (defers $Throw)
     ctx.rules_config       = opts and opts.rules_config or nil
     ctx.type_at            = {}
     ctx.name_at            = {}
