@@ -545,7 +545,9 @@ local function solve_unify(ctx, c)
             .. "` with `" .. types_mod.display_short(ctx, t2) .. "`"
             .. (err and (": " .. err) or ""))
     end
-    return ok
+    -- Terminal either way: success solves; failure emitted the error.
+    -- Retrying after a TV bind would re-emit the same error.
+    return true
 end
 
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
@@ -651,7 +653,7 @@ local function solve_sub(ctx, c)
                     "expects `" .. types_mod.display_short(ctx, expected)
                     .. "`, but argument might also be `"
                     .. types_mod.display_short(ctx, fail_tid) .. "`")
-                return false
+                return true  -- terminal: error emitted, retry would duplicate.
             end
         end
         add_error(ctx, line, col,
@@ -659,7 +661,8 @@ local function solve_sub(ctx, c)
             .. "` to `" .. types_mod.display_short(ctx, expected) .. "`"
             .. (err and (": " .. err) or ""))
     end
-    return ok
+    -- Terminal either way: success solves; failure emitted the error above.
+    return true
 end
 
 -- Solve a deferred nil-narrowing: C_NARROW_NIL = { _, input_tid, result_tid, keep_nil, line, col }
@@ -1154,7 +1157,7 @@ local function solve_bound(ctx, c)
                     .. "` has kind *, expected kind " .. kind_arrows
                     .. " (bound `" .. bound_name .. "` requires arity "
                     .. bound_arity .. ")")
-                return false
+                return true  -- terminal: kind mismatch will not flip on retry.
             end
         end
         return true
@@ -1180,7 +1183,7 @@ local function solve_bound(ctx, c)
                 "type argument `" .. types_mod.display_short(ctx, actual)
                 .. "` does not satisfy constraint `"
                 .. types_mod.display_short(ctx, find(ctx, bound_id)) .. "`")
-            return false
+            return true  -- terminal: match-bound failure won't recover on retry.
         end
         return true
     end
@@ -1205,7 +1208,7 @@ local function solve_bound(ctx, c)
                 .. "` does not satisfy constraint `"
                 .. (contains_free_var(ctx, resolved_bound) and
                     types_mod.display_short(ctx, find(ctx, bound_id)) or "function") .. "`")
-            return false
+            return true  -- terminal: non-function actual won't become a function.
         end
         -- Sub-case (b): back-propagate concrete param/return types into bound's free TVs.
         if wa_tag == TAG_FUNCTION and contains_free_var(ctx, resolved_bound) then
@@ -1244,7 +1247,7 @@ local function solve_bound(ctx, c)
                     .. types_mod.display_short(ctx, find(ctx, bound_id)) .. "`"
                 if type(err) == "string" and #err > 0 then msg = msg .. ": " .. err end
                 add_error(ctx, line, col, msg)
-                return false
+                return true  -- terminal: signature mismatch is definite.
             end
         end
         return true
@@ -1259,6 +1262,10 @@ local function solve_bound(ctx, c)
     --
     -- TAG_INTERSECTION bounds (composed via make_intersection during body
     -- usage merging) recurse into each member.
+    -- Returns nil (not a meta bound → fall through), true (meta-bound
+    -- satisfied), or "error" (meta-bound rejected, error already emitted).
+    -- "error" is terminal for solve_bound: the failure is definite and a
+    -- retry would just re-emit the same diagnostic.
     local function check_meta(actual_check_tid, bound_check_tid)
         local result = propagate_meta_bound(ctx, actual_check_tid, bound_check_tid)
         if result == "not_meta_bound" then return nil end  -- defer to fallback
@@ -1267,11 +1274,12 @@ local function solve_bound(ctx, c)
             "type argument `" .. types_mod.display_short(ctx, actual_check_tid)
             .. "` does not satisfy constraint `"
             .. types_mod.display_short(ctx, bound_check_tid) .. "`: " .. result)
-        return false
+        return "error"
     end
     if bt.tag == TAG_TABLE and types_mod.tbl_row_var(bt) >= 0 then
         local r = check_meta(actual, resolved_bound)
-        if r ~= nil then return r end
+        -- nil → fall through; true → solved; "error" → terminal-after-error.
+        if r ~= nil then return true end
     end
     if bt.tag == TAG_INTERSECTION then
         local all_meta = true
@@ -1287,8 +1295,9 @@ local function solve_bound(ctx, c)
         if all_meta then
             for i = bms, bms + bml - 1 do
                 local mid = find(ctx, ctx.lists:get(i))
-                local r = check_meta(actual, mid)
-                if r == false then return false end
+                check_meta(actual, mid)
+                -- Errors (if any) emitted inside check_meta; we still consider
+                -- all members so the user sees every failing bound. Terminal.
             end
             return true
         end
@@ -1305,7 +1314,7 @@ local function solve_bound(ctx, c)
             "type argument `" .. types_mod.display_short(ctx, actual)
             .. "` does not satisfy constraint `"
             .. types_mod.display_short(ctx, resolved_bound) .. "`")
-        return false
+        return true  -- terminal: bound check failed.
     end
     return true
 end
@@ -1606,14 +1615,14 @@ local function solve_index(ctx, c)
                     add_error(ctx, line, col,
                         "field `" .. fname .. "` is not exposed by opaque type — use unseal")
                     bind_to(ctx, res_tid, ctx.T_ANY)
-                    return false
+                    return true  -- terminal: result bound to any.
                 end
             else
                 -- One-arg $Opaque<T>: no field access.
                 add_error(ctx, line, col,
                     "cannot access fields of opaque type — use unseal to recover inner type")
                 bind_to(ctx, res_tid, ctx.T_ANY)
-                return false
+                return true  -- terminal: result bound to any.
             end
         end
         obj_tid = find(ctx, types_mod.nom_underlying(obj_t))
@@ -1650,7 +1659,7 @@ local function solve_index(ctx, c)
             local fname = intern_mod.get(ctx.pool, name_id) or "?"
             add_error(ctx, line, col, "no method `" .. fname .. "` on this type")
             bind_to(ctx, res_tid, ctx.T_ANY)
-            return false
+            return true  -- terminal: result bound to any.
         end
     end
 
@@ -1665,7 +1674,7 @@ local function solve_index(ctx, c)
                     add_error(ctx, line, col,
                         "field `" .. fname .. "` is private to `" .. origin .. "`")
                     bind_to(ctx, res_tid, ctx.T_ANY)
-                    return false
+                    return true  -- terminal: result bound to any.
                 end
             end
             local ft = find(ctx, fe.type_id)
@@ -1811,7 +1820,7 @@ local function solve_index(ctx, c)
         local fname = intern_mod.get(ctx.pool, name_id) or "?"
         add_error(ctx, line, col, "field `" .. fname .. "` doesn't exist")
         bind_to(ctx, res_tid, ctx.T_ANY)
-        return false
+        return true  -- terminal: result bound to any.
     end
 
     if obj_t.tag == TAG_VAR or obj_t.tag == TAG_ROWVAR then
@@ -1965,7 +1974,7 @@ local function solve_index(ctx, c)
         -- (the type of expressions that cannot produce a value). Returning `any` here
         -- would let downstream constraints succeed silently on the stripped type.
         bind_to(ctx, res_tid, ctx.T_NEVER)
-        return false
+        return true  -- terminal: result bound to never.
     end
 
     if obj_t.tag == TAG_INTERSECTION then
@@ -2012,7 +2021,7 @@ local function solve_index(ctx, c)
             add_error(ctx, line, col, "field `" .. fname .. "` doesn't exist")
             -- Field exists in no intersection member: dead code; result is never.
             bind_to(ctx, res_tid, ctx.T_NEVER)
-            return false
+            return true  -- terminal: result bound to never.
         end
         if any_open then field_types[#field_types + 1] = ctx.T_UNKNOWN end
         local result = #field_types == 0 and ctx.T_UNKNOWN
@@ -2292,7 +2301,7 @@ local function solve_callable(ctx, c)
             add_error(ctx, line, col,
                 "cannot call value of type `" .. types_mod.display_short(ctx, callee_tid) .. "`")
             bind_to(ctx, ret_tid, ctx.T_ANY)
-            return false
+            return true  -- terminal: result bound to any after error.
         end
         -- Try each overload; first whose params all accept returns immediately.
         for _, m in ipairs(members) do
@@ -2349,7 +2358,7 @@ local function solve_callable(ctx, c)
             .. types_mod.display_short(ctx, callee_tid) .. "`:\n  "
             .. table.concat(cands, "\n  "))
         bind_to(ctx, ret_tid, ctx.T_ANY)
-        return false
+        return true  -- terminal: result bound to any after error.
     end
 
     -- Union: ALL members must accept the argument (sound — we don't know which branch is live).
@@ -2390,7 +2399,7 @@ local function solve_callable(ctx, c)
         if #fail_msgs > 0 then
             add_error(ctx, line, col, fail_msgs[1])
             bind_to(ctx, ret_tid, ctx.T_ANY)
-            return false
+            return true  -- terminal: result bound to any after error.
         end
         local ret = #ret_types == 1 and ret_types[1]
             or types_mod.make_union(ctx, ret_types)
@@ -2402,7 +2411,7 @@ local function solve_callable(ctx, c)
     add_error(ctx, line, col,
         "cannot call value of type `" .. types_mod.display_short(ctx, callee_tid) .. "`")
     bind_to(ctx, ret_tid, ctx.T_ANY)
-    return false
+    return true  -- terminal: result bound to any after error.
 end
 
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
@@ -2486,7 +2495,7 @@ local function solve_arith(ctx, c)
                 "cannot perform arithmetic on `" .. types_mod.display_short(ctx, bad_tid) .. "`")
             unify_mod.unify(ctx, res_tid, ctx.T_NUMBER)
         end
-        return false
+        return true  -- terminal: result bound to a primitive after error.
     end
 
     -- Both sides support the op. Union results: T_ANY wins, else make_union for widening.
@@ -2556,12 +2565,12 @@ local function solve_compare(ctx, c)
     if lr == nil then
         add_error(ctx, line, col,
             "cannot compare `" .. types_mod.display_short(ctx, lhs_tid) .. "` with `<`")
-        return false
+        return true  -- terminal: no comparison metamethod on lhs.
     end
     if rr == nil then
         add_error(ctx, line, col,
             "cannot compare `" .. types_mod.display_short(ctx, rhs_tid) .. "` with `<`")
-        return false
+        return true  -- terminal: no comparison metamethod on rhs.
     end
 
     -- Cross-type check: verify the rhs is assignable to the second parameter of
@@ -2618,7 +2627,7 @@ local function solve_compare(ctx, c)
         add_error(ctx, line, col,
             "cannot compare `" .. types_mod.display_short(ctx, lhs_tid)
             .. "` with `" .. types_mod.display_short(ctx, rhs_tid) .. "`")
-        return false
+        return true  -- terminal: cross-type comparison check failed.
     end
     return true
 end
@@ -2671,7 +2680,8 @@ local function solve_return(ctx, c)
                 .. types_mod.display_short(ctx, val_tid)
                 .. "`: " .. (err or "type mismatch"))
         end
-        return ok
+        -- Terminal: success solves; failure emitted the error.
+        return true
     end
 
     -- Operate on ret_var_id.data[2] directly — never on find(ret_var_id).
@@ -3007,7 +3017,7 @@ local function solve_check_args(ctx, c)
             add_error(ctx, line, col,
                 "cannot call value of type `" .. types_mod.display_short(ctx, callee_tid) .. "`")
             bind_to(ctx, ret_tid, ctx.T_ANY)
-            return false
+            return true  -- terminal: result bound to any after error.
         end
         for _, m in ipairs(members) do
             local ft = m.t
@@ -3076,7 +3086,7 @@ local function solve_check_args(ctx, c)
             .. types_mod.display_short(ctx, callee_tid) .. "`:\n  "
             .. table.concat(cands, "\n  "))
         bind_to(ctx, ret_tid, ctx.T_ANY)
-        return false
+        return true  -- terminal: result bound to any after error.
     end
 
     -- Union: ALL members must accept the argument.
@@ -3117,7 +3127,7 @@ local function solve_check_args(ctx, c)
         if #fail_msgs > 0 then
             add_error(ctx, line, col, fail_msgs[1])
             bind_to(ctx, ret_tid, ctx.T_ANY)
-            return false
+            return true  -- terminal: result bound to any after error.
         end
         local ret = #ret_types == 1 and ret_types[1]
             or types_mod.make_union(ctx, ret_types)
@@ -3129,7 +3139,7 @@ local function solve_check_args(ctx, c)
     add_error(ctx, line, col,
         "cannot call value of type `" .. types_mod.display_short(ctx, callee_tid) .. "`")
     bind_to(ctx, ret_tid, ctx.T_ANY)
-    return false
+    return true  -- terminal: result bound to any after error.
 end
 
 -- Overlap-checked force cast: `--[[:! T]] expr`.
@@ -3695,7 +3705,7 @@ local function solve_hkt_decompose_impl(ctx, f_fresh, args_fresh, bound_alias_id
             .. "` against `" .. alias_name .. "<...>`. "
             .. "Approach 2 HKT requires plain structural alias bodies "
             .. "(union, table, tuple).")
-        return false
+        return true  -- terminal: non-invertible alias body.
     end
 
     -- Build mapping: alias.params[i] (name_id) -> args_fresh[i] (tid). This
@@ -3710,7 +3720,7 @@ local function solve_hkt_decompose_impl(ctx, f_fresh, args_fresh, bound_alias_id
             .. " but bound alias `"
             .. (intern_mod.get(ctx.pool, types_mod.named_name_id(bt)) or "?")
             .. "` has arity " .. #alias.params)
-        return false
+        return true  -- terminal: arity mismatch is definite.
     end
     local mapping = {}
     for i = 1, #alias.params do
