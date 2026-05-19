@@ -1,4 +1,4 @@
-# static-v4 — typechecker foundation (Phases 4a–4f)
+# static-v4 — typechecker foundation (Phases 4a–4g)
 
 Greenfield typechecker, derived from `docs/typechecker-rewrite-design.md`
 (itself derived from simple-sub and MLstruct).
@@ -28,8 +28,18 @@ This directory currently implements:
   so pure functions subsume into any effect-bearing supertype with the same
   params/ret. Effects ride on the arrow as an additional structurally
   compared component — no row-of-effects calculus, no effect variables.
+- **Phase 4g** — content-addressed cache primitives. Serialize/deserialize
+  V4Type values to a deterministic binary stream; SHA-256 the bytes for
+  content addressing; a manifest schema mapping source-content-hash to
+  (cri-content-hash, deps-list) for cascade invalidation; `cache_lookup` /
+  `cache_store` primitives over an injected `io_caps` capability (no
+  global `os`/`io` access). Cyclic μ types are preserved by table identity
+  via a serialization-local index/back-reference scheme. Rewrite design
+  §10 commits to the pattern; 4g supplies the primitives so a later phase
+  (AST walker, `require` resolution) can wire them in.
 
-Still out of scope: the AST walker, CLI integration, cache (`.cri`).
+Still out of scope: the AST walker, CLI integration, cross-file alias
+resolution at constraint-generation time, concurrency / file locking.
 
 ## Layout
 
@@ -589,7 +599,101 @@ yielding — inner arrows).
 - Async/await as a separate effect (could be added later by extending the
   enumeration).
 - Effect inference from a Lua source AST (waits on the AST walker).
-- Cache integration (4g).
+
+## Phase 4g — content-addressed cache primitives
+
+`cache.lua` adds serialization, content hashing, manifest schema, and
+filesystem cache primitives keyed by source-content-hash.
+
+### API
+
+- `M.serialize(type)             -> bytes`
+- `M.deserialize(bytes)          -> V4Type | nil, errmsg | nil`
+- `M.content_hash(bytes)         -> sha256-hex`
+- `M.serialize_manifest(m)       -> bytes`
+- `M.deserialize_manifest(bytes) -> Manifest | nil, errmsg | nil`
+- `M.cache_lookup(caps, dir, source_hash) -> bytes | nil`
+- `M.cache_store(caps, dir, source_hash, type, deps?)`
+
+### Format choice: custom binary
+
+Lua-syntax (eval-able via `load()` against an empty env) was the obvious
+alternative — compact, human-readable. It was rejected because the
+discipline required to make `string.format("%q", ...)`, numeric printing,
+and table-iteration order produce a stable hash is identical to what a
+hand-written binary writer already enforces, but with extra debugging
+surface when something drifts. JSON was rejected as verbose and requiring
+an extra serialization dependency.
+
+The binary protocol uses 1-byte tags + u32-LE length prefixes. A `CRI4`
+magic + version word fronts each stream; `CRM4` fronts a manifest. Lua
+numbers use `%.17g` decimal text inside a length-prefixed string, the
+standard exact round-trip for IEEE-754 doubles. Strings are length-
+prefixed and embed NULs cleanly.
+
+### Determinism
+
+Hash determinism is enforced at the serializer:
+
+- Record fields are emitted in sorted key order.
+- Effect set names are sorted lexicographically.
+- Manifest entries are emitted with sorted source-hash keys; each entry's
+  `deps` map is sorted by path.
+- Union/intersection member order IS part of the type (`A|B` vs `B|A`
+  round-trip independently). Canonicalization is a coalescing concern,
+  not a cache concern.
+
+### μ types and shared vars
+
+`μX. T(X)` is a cyclic Lua table. The serializer registers each μ-node a
+serialization-local index on first encounter (emit `MU_DEF idx body`);
+subsequent visits to the same node emit `MU_REF idx`. The deserializer
+allocates a placeholder μ-node before recursing into the body so the
+back-reference resolves to the correct table; on return the placeholder's
+`body` is overwritten. Identity is preserved by construction.
+
+V4Vars use the same index/back-reference protocol. A var that appears in
+its own bound list (transitive closure) round-trips with the cycle intact.
+
+### I/O capability injection
+
+`cache_lookup` and `cache_store` require an `io_caps` parameter:
+
+```lua
+--:: V4IoCaps = {
+--::   read_file:   (path: string) -> (string | nil, string | nil),
+--::   write_file:  (path: string, bytes: string) -> (boolean, string | nil),
+--::   mkdir:       (path: string) -> (boolean, string | nil),
+--::   file_exists: (path: string) -> boolean,
+--:: }
+```
+
+All four are required. The module does NOT default to `io.*` / `os.*`
+globals on absence — per CLAUDE.md "Caps-first, everywhere", `opts.foo
+or io.foo` is a violation just as much as direct `io.foo`. A missing cap
+errors loudly. Tests use an in-memory fake-fs to exercise the round-trip
+without touching disk.
+
+### Cache layout
+
+```
+<dir>/manifest.crm        ← manifest (binary)
+<dir>/<sha256hex>.cri     ← serialized V4Type bytes
+```
+
+The unit of caching is the **inferred export interface type**, not the
+constraint graph or unsimplified internal types. Coupling the cache to
+internal solver state would make every solver change invalidate every
+cached file; cached interfaces are stable across solver internal evolution
+as long as the lattice itself doesn't change shape.
+
+### What 4g does NOT do
+
+- AST walker / constraint generation from Lua source.
+- Integration with `require` resolution (waits on the walker).
+- Cross-file alias resolution at constraint-generation time.
+- Concurrency / file locking (the cache is single-process).
+- Compaction / GC of unreferenced `.cri` files.
 
 ## Running
 
@@ -601,6 +705,7 @@ timeout 30 bin/cr check lib/type/static-v4/types.lua \
                        lib/type/static-v4/index.lua \
                        lib/type/static-v4/match.lua \
                        lib/type/static-v4/forall.lua \
+                       lib/type/static-v4/cache.lua \
                        lib/type/static-v4/init.lua \
                        lib/type/static-v4/static_v4_test.lua
 ```

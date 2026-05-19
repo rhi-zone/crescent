@@ -12,6 +12,7 @@ local ST = require("lib.type.static-v4.subtype")
 local IX = require("lib.type.static-v4.index")
 local MA = require("lib.type.static-v4.match")
 local FA = require("lib.type.static-v4.forall")
+local CA = require("lib.type.static-v4.cache")
 
 local M = {}
 
@@ -63,6 +64,15 @@ M.match            = MA.match
 M.match_forward    = MA.forward
 M.match_backward   = MA.backward
 M.arm              = MA.arm
+
+-- Cache primitives (Phase 4g).
+M.serialize             = CA.serialize
+M.deserialize           = CA.deserialize
+M.content_hash          = CA.content_hash
+M.serialize_manifest    = CA.serialize_manifest
+M.deserialize_manifest  = CA.deserialize_manifest
+M.cache_lookup          = CA.cache_lookup
+M.cache_store           = CA.cache_store
 
 -- Test affordances.
 M._reset_var_ids = T._reset_var_ids

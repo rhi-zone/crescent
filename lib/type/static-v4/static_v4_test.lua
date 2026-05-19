@@ -1385,4 +1385,440 @@ T.describe("effects — pretty print", function()
 	end)
 end)
 
+-- ── Phase 4g: content-addressed cache ────────────────────────────────────
+
+-- Structural equality predicate. Round-trip equality cannot use the subtype
+-- predicate as a witness: v4's solver has known limitations around prim/skolem
+-- comparisons across distinct table instances, and a deserialized type is by
+-- construction a new tree. Structural eq compares trees up to:
+--   - vars/μ-nodes by serialization-position correspondence (a bijection
+--     `seen` mapping LHS-id → RHS-id, built up as we walk);
+--   - skolems by their (locally minted) id correspondence;
+--   - everything else by tag + same-shape recursion.
+--: (V4Type, V4Type, { var_map: { [integer]: integer }, mu_map: { [integer]: integer }, sk_map: { [integer]: integer } }) -> boolean
+local function streq_inner(a, b, ctx)
+	-- Chained if/elseif on `a.tag` so the typechecker sees exhaustive
+	-- narrowing on `a`. `b`'s tag is re-tested in each arm so that `b`'s
+	-- structural access typechecks (an unrelated b.tag would imply the
+	-- types are not structurally equal — return false).
+	if a.tag == "top" then return b.tag == "top"
+	elseif a.tag == "bot" then return b.tag == "bot"
+	elseif a.tag == "prim" then
+		if b.tag == "prim" then return a.name == b.name else return false end
+	elseif a.tag == "literal" then
+		if b.tag == "literal" then
+			if a.base ~= b.base then return false end
+			return a.value == b.value
+		else return false end
+	elseif a.tag == "fn" then
+		if b.tag == "fn" then
+			if #a.params ~= #b.params then return false end
+			for i = 1, #a.params do
+				local ap = a.params[i]; local bp = b.params[i]
+				if ap == nil or bp == nil then return false end
+				if not streq_inner(ap, bp, ctx) then return false end
+			end
+			if not streq_inner(a.ret, b.ret, ctx) then return false end
+			for k in pairs(a.effects) do if not b.effects[k] then return false end end
+			for k in pairs(b.effects) do if not a.effects[k] then return false end end
+			return true
+		else return false end
+	elseif a.tag == "rec" then
+		if b.tag == "rec" then
+			if a.open ~= b.open then return false end
+			for k, v in pairs(a.fields) do
+				local bv = b.fields[k]
+				if v == nil or bv == nil then return false end
+				if not streq_inner(v, bv, ctx) then return false end
+			end
+			for k in pairs(b.fields) do
+				if a.fields[k] == nil then return false end
+			end
+			local ai, bi = a.indexer, b.indexer
+			if (ai == nil) ~= (bi == nil) then return false end
+			if ai ~= nil and bi ~= nil then
+				if not streq_inner(ai.key, bi.key, ctx) then return false end
+				if not streq_inner(ai.value, bi.value, ctx) then return false end
+			end
+			return true
+		else return false end
+	elseif a.tag == "union" then
+		if b.tag == "union" then
+			if #a.members ~= #b.members then return false end
+			for i = 1, #a.members do
+				local am = a.members[i]; local bm = b.members[i]
+				if am == nil or bm == nil then return false end
+				if not streq_inner(am, bm, ctx) then return false end
+			end
+			return true
+		else return false end
+	elseif a.tag == "inter" then
+		if b.tag == "inter" then
+			if #a.members ~= #b.members then return false end
+			for i = 1, #a.members do
+				local am = a.members[i]; local bm = b.members[i]
+				if am == nil or bm == nil then return false end
+				if not streq_inner(am, bm, ctx) then return false end
+			end
+			return true
+		else return false end
+	elseif a.tag == "neg" then
+		if b.tag == "neg" then return streq_inner(a.body, b.body, ctx) else return false end
+	elseif a.tag == "mu" then
+		if b.tag == "mu" then
+			local existing = ctx.mu_map[a.id]
+			if existing ~= nil then return existing == b.id end
+			ctx.mu_map[a.id] = b.id
+			return streq_inner(a.body, b.body, ctx)
+		else return false end
+	elseif a.tag == "var" then
+		if b.tag == "var" then
+			local existing = ctx.var_map[a.id]
+			if existing ~= nil then return existing == b.id end
+			ctx.var_map[a.id] = b.id
+			if #a.lower ~= #b.lower then return false end
+			if #a.upper ~= #b.upper then return false end
+			for i = 1, #a.lower do
+				local av = a.lower[i]; local bv = b.lower[i]
+				if av == nil or bv == nil then return false end
+				if not streq_inner(av, bv, ctx) then return false end
+			end
+			for i = 1, #a.upper do
+				local av = a.upper[i]; local bv = b.upper[i]
+				if av == nil or bv == nil then return false end
+				if not streq_inner(av, bv, ctx) then return false end
+			end
+			return true
+		else return false end
+	elseif a.tag == "forall" then
+		if b.tag == "forall" then
+			if #a.vars ~= #b.vars then return false end
+			for i = 1, #a.vars do
+				local av = a.vars[i]; local bv = b.vars[i]
+				if av == nil or bv == nil then return false end
+				if not streq_inner(av, bv, ctx) then return false end
+			end
+			return streq_inner(a.body, b.body, ctx)
+		else return false end
+	else  -- a.tag == "skolem"
+		if b.tag == "skolem" then
+			local existing = ctx.sk_map[a.id]
+			if existing ~= nil then return existing == b.id end
+			ctx.sk_map[a.id] = b.id
+			return a.name == b.name
+		else return false end
+	end
+end
+
+--: (V4Type, V4Type) -> boolean
+local function streq(a, b)
+	return streq_inner(a, b, {
+		var_map = {} --[[: { [integer]: integer } ]],
+		mu_map  = {} --[[: { [integer]: integer } ]],
+		sk_map  = {} --[[: { [integer]: integer } ]],
+	})
+end
+
+--: (V4Type) -> nil
+local function roundtrip(t)
+	local bytes = V.serialize(t)
+	local got, err = V.deserialize(bytes)
+	T.eq(err, nil)
+	T.ok(got ~= nil, "deserialize returned nil")
+	if got == nil then return end
+	T.ok(streq(t, got --[[: V4Type]]), "round-trip not structurally equal: " ..
+		V.show(t) .. " vs " .. V.show(got --[[: V4Type]]))
+end
+
+T.describe("4g — serialization round-trip", function()
+	T.it("top, bot", function()
+		roundtrip(V.top())
+		roundtrip(V.bot())
+	end)
+	T.it("primitives", function()
+		roundtrip(V.number); roundtrip(V.integer); roundtrip(V.string_)
+		roundtrip(V.boolean); roundtrip(V.nil_); roundtrip(V.cdata)
+	end)
+	T.it("literals: nil, boolean, integer, number, string", function()
+		roundtrip(V.literal("nil", nil))
+		roundtrip(V.literal("boolean", true))
+		roundtrip(V.literal("boolean", false))
+		roundtrip(V.literal("integer", 42))
+		roundtrip(V.literal("number", 3.14))
+		roundtrip(V.literal("string", "hi"))
+		-- Edge values that the %.17g round-trip must preserve.
+		roundtrip(V.literal("number", -0.0))
+		roundtrip(V.literal("number", 1e308))
+		-- Embedded NUL — confirms length-prefixed strings don't terminate.
+		roundtrip(V.literal("string", "a\0b\0c"))
+	end)
+	T.it("functions: pure and effectful", function()
+		roundtrip(V.fn({V.integer}, V.string_))
+		roundtrip(V.fn({V.integer, V.string_}, V.boolean, {"yield"}))
+		roundtrip(V.fn({}, V.bot(), {"throw", "yield"}))
+	end)
+	T.it("records: closed, open, with indexer", function()
+		roundtrip(V.rec({ x = V.integer, y = V.string_ }, false))
+		roundtrip(V.rec({ a = V.number }, true))
+		roundtrip(V.rec({}, false, V.indexer(V.string_, V.boolean)))
+		roundtrip(V.rec({ tag = V.literal("string", "a") }, false,
+			V.indexer(V.string_, V.integer)))
+	end)
+	T.it("union, inter", function()
+		roundtrip(V.union({V.integer, V.string_}))
+		roundtrip(V.inter({V.rec({ x = V.integer }, true),
+		                   V.rec({ y = V.string_ }, true)}))
+	end)
+	T.it("negation", function()
+		roundtrip(V.neg(V.integer))
+		roundtrip(V.neg(V.union({V.integer, V.string_})))
+	end)
+	T.it("μ types preserve cyclic structure", function()
+		-- μX. { value: integer, next: X }
+		local list = V.fix(function(self)
+			return V.rec({ value = V.integer, next = self }, false)
+		end)
+		local bytes = V.serialize(list)
+		local got, err = V.deserialize(bytes)
+		T.eq(err, nil)
+		T.ok(got ~= nil)
+		if got == nil then return end
+		-- Identity-share check: the μ's body's `next` field must be the same
+		-- table as the μ node itself, not a fresh copy. The cycle MUST be
+		-- preserved by table identity, or the resulting structure has
+		-- infinite depth.
+		T.ok(got.tag == "mu", "outer is μ")
+		if got.tag == "mu" then
+			local body = got.body
+			T.ok(body.tag == "rec")
+			if body.tag == "rec" then
+				T.ok(body.fields["next"] == got, "cycle preserved by identity")
+			end
+		end
+		-- Structural round-trip.
+		T.ok(streq(list, got --[[: V4Type]]))
+	end)
+	T.it("var with bounds", function()
+		local a = V.var("α")
+		a.lower[1] = V.integer
+		a.upper[1] = V.number
+		roundtrip(a)
+	end)
+	T.it("var with self-referencing bound (cycle in var bound list)", function()
+		-- A var that appears in its own bounds (transitive closure step).
+		local a = V.var("α")
+		a.lower[1] = V.union({V.integer, a})
+		roundtrip(a)
+	end)
+	T.it("forall (rank-1)", function()
+		-- ∀X. X → X
+		local f = V.forall({"X"}, function(vars)
+			return V.fn({vars[1]}, vars[1])
+		end)
+		roundtrip(f)
+	end)
+	T.it("forall (rank-2 / impredicative)", function()
+		-- (∀X. X → X) → string
+		local inner = V.forall({"X"}, function(vars)
+			return V.fn({vars[1]}, vars[1])
+		end)
+		roundtrip(V.fn({inner}, V.string_))
+	end)
+	T.it("skolem", function()
+		local sk = V.skolem("S")
+		roundtrip(sk)
+	end)
+	T.it("match-via-neg: complement of a union", function()
+		roundtrip(V.neg(V.union({V.literal("string", "a"),
+		                         V.literal("string", "b")})))
+	end)
+	T.it("nested: forall of fn returning union of records", function()
+		local t = V.forall({"X"}, function(vars)
+			return V.fn({vars[1]}, V.union({
+				V.rec({ tag = V.literal("string", "ok"), value = vars[1] }, false),
+				V.rec({ tag = V.literal("string", "err"), message = V.string_ }, false),
+			}))
+		end)
+		roundtrip(t)
+	end)
+end)
+
+T.describe("4g — content hash determinism", function()
+	T.it("same type → same hash regardless of field-insertion order", function()
+		-- Two record literals with the same fields in different orders. v4's
+		-- `rec` doesn't care about insertion order, but `pairs(t.fields)`
+		-- *does* iterate in hash-bucket order. The serializer sorts keys
+		-- before emitting, so both hashes must match.
+		local a = V.rec({ x = V.integer, y = V.string_, z = V.boolean }, false)
+		local b = V.rec({ z = V.boolean, y = V.string_, x = V.integer }, false)
+		T.eq(V.content_hash(V.serialize(a)), V.content_hash(V.serialize(b)))
+	end)
+	T.it("same effect set → same hash regardless of order", function()
+		local a = V.fn({V.integer}, V.string_, {"yield", "throw"})
+		local b = V.fn({V.integer}, V.string_, {"throw", "yield"})
+		T.eq(V.content_hash(V.serialize(a)), V.content_hash(V.serialize(b)))
+	end)
+	T.it("hash is 64 lowercase-hex chars", function()
+		local h = V.content_hash(V.serialize(V.integer))
+		T.eq(#h, 64)
+		T.ok(h:match("^[0-9a-f]+$") ~= nil)
+	end)
+end)
+
+T.describe("4g — hash distinguishes structurally different types", function()
+	T.it("integer vs string", function()
+		local a = V.content_hash(V.serialize(V.integer))
+		local b = V.content_hash(V.serialize(V.string_))
+		T.neq(a, b)
+	end)
+	T.it("fn with vs without effects", function()
+		local a = V.content_hash(V.serialize(V.fn({V.integer}, V.string_)))
+		local b = V.content_hash(V.serialize(V.fn({V.integer}, V.string_, {"yield"})))
+		T.neq(a, b)
+	end)
+	T.it("open vs closed record with same fields", function()
+		local a = V.content_hash(V.serialize(V.rec({ x = V.integer }, false)))
+		local b = V.content_hash(V.serialize(V.rec({ x = V.integer }, true)))
+		T.neq(a, b)
+	end)
+	T.it("literal value distinguishes", function()
+		local a = V.content_hash(V.serialize(V.literal("integer", 1)))
+		local b = V.content_hash(V.serialize(V.literal("integer", 2)))
+		T.neq(a, b)
+	end)
+end)
+
+T.describe("4g — manifest round-trip", function()
+	T.it("empty manifest", function()
+		local m = { entries = {} --[[: { [string]: V4CacheEntry } ]] }
+		local bytes = V.serialize_manifest(m)
+		local got, err = V.deserialize_manifest(bytes)
+		T.eq(err, nil)
+		T.ok(got ~= nil)
+	end)
+	T.it("manifest with entries and deps round-trips", function()
+		local m = {
+			entries = {
+				["abc123"] = { cri_hash = "deadbeef", deps = {
+					["lib/foo.lua"] = "hash1",
+					["lib/bar.lua"] = "hash2",
+				} },
+				["def456"] = { cri_hash = "cafef00d", deps = {} --[[: { [string]: string } ]] },
+			} --[[: { [string]: V4CacheEntry } ]],
+		}
+		local bytes = V.serialize_manifest(m)
+		local got, err = V.deserialize_manifest(bytes)
+		T.eq(err, nil)
+		T.ok(got ~= nil)
+		if got == nil then return end
+		T.eq(got.entries["abc123"].cri_hash, "deadbeef")
+		T.eq(got.entries["abc123"].deps["lib/foo.lua"], "hash1")
+		T.eq(got.entries["abc123"].deps["lib/bar.lua"], "hash2")
+		T.eq(got.entries["def456"].cri_hash, "cafef00d")
+	end)
+	T.it("manifest serialization is deterministic across insertion order", function()
+		local m1 = { entries = {
+			["a"] = { cri_hash = "h1", deps = {} --[[: { [string]: string } ]] },
+			["b"] = { cri_hash = "h2", deps = {} --[[: { [string]: string } ]] },
+		} --[[: { [string]: V4CacheEntry } ]] }
+		local m2 = { entries = {} --[[: { [string]: V4CacheEntry } ]] }
+		m2.entries["b"] = { cri_hash = "h2", deps = {} }
+		m2.entries["a"] = { cri_hash = "h1", deps = {} }
+		T.eq(V.serialize_manifest(m1), V.serialize_manifest(m2))
+	end)
+end)
+
+-- In-memory I/O caps for testing cache_lookup/cache_store. Each test gets a
+-- fresh filesystem; no on-disk artifacts.
+--: () -> { files: { [string]: string }, dirs: { [string]: boolean }, caps: unknown }
+local function fake_caps()
+	local files = {} --[[: { [string]: string } ]]
+	local dirs  = {} --[[: { [string]: boolean } ]]
+	local caps = {
+		--: (string) -> (string | nil, string | nil)
+		read_file = function(p)
+			local v = files[p]
+			if v == nil then return nil, "not found: " .. p end
+			return v, nil
+		end,
+		--: (string, string) -> (boolean, string | nil)
+		write_file = function(p, b)
+			files[p] = b
+			return true, nil
+		end,
+		--: (string) -> (boolean, string | nil)
+		mkdir = function(p)
+			dirs[p] = true
+			return true, nil
+		end,
+		--: (string) -> boolean
+		file_exists = function(p)
+			return files[p] ~= nil
+		end,
+	}
+	return { files = files, dirs = dirs, caps = caps }
+end
+
+T.describe("4g — cache primitives", function()
+	T.it("cache_lookup of non-existent key returns nil", function()
+		local fc = fake_caps()
+		local got = V.cache_lookup(fc.caps, ".cache", "nonexistent")
+		T.eq(got, nil)
+	end)
+	T.it("cache_store + lookup round-trips a type", function()
+		local fc = fake_caps()
+		local t = V.fn({V.integer}, V.string_, {"yield"})
+		V.cache_store(fc.caps, ".cache", "src_hash_1", t, nil)
+		local bytes = V.cache_lookup(fc.caps, ".cache", "src_hash_1")
+		T.ok(bytes ~= nil)
+		if bytes == nil then return end
+		local got, err = V.deserialize(bytes)
+		T.eq(err, nil)
+		T.ok(got ~= nil)
+		if got ~= nil then
+			T.ok(streq(t, got --[[: V4Type]]))
+		end
+	end)
+	T.it("cache_store preserves deps in manifest", function()
+		local fc = fake_caps()
+		local t = V.integer
+		V.cache_store(fc.caps, ".cache", "src1", t,
+			{ ["lib/dep.lua"] = "dep_hash" })
+		-- Read manifest directly.
+		local mbytes = fc.files[".cache/manifest.crm"]
+		T.ok(mbytes ~= nil)
+		if mbytes == nil then return end
+		local m, err = V.deserialize_manifest(mbytes)
+		T.eq(err, nil)
+		T.ok(m ~= nil)
+		if m == nil then return end
+		T.eq(m.entries["src1"].deps["lib/dep.lua"], "dep_hash")
+	end)
+	T.it("cache_store is content-addressed (same type → same cri file)", function()
+		local fc = fake_caps()
+		V.cache_store(fc.caps, ".cache", "srcA", V.integer, nil)
+		V.cache_store(fc.caps, ".cache", "srcB", V.integer, nil)
+		-- Only one .cri file (plus manifest) should exist.
+		local count = 0
+		for path in pairs(fc.files) do
+			if path:sub(-4) == ".cri" then count = count + 1 end
+		end
+		T.eq(count, 1)
+	end)
+	T.it("cache_lookup returns nil when cri file is missing (torn write)", function()
+		local fc = fake_caps()
+		V.cache_store(fc.caps, ".cache", "src1", V.integer, nil)
+		-- Delete the cri file but leave the manifest.
+		for path in pairs(fc.files) do
+			if path:sub(-4) == ".cri" then fc.files[path] = nil end
+		end
+		local got = V.cache_lookup(fc.caps, ".cache", "src1")
+		T.eq(got, nil)
+	end)
+	T.it("missing caps error loudly (no global fallback)", function()
+		T.throws(function() V.cache_lookup(nil, ".cache", "x") end)
+		T.throws(function() V.cache_lookup({}, ".cache", "x") end)
+	end)
+end)
+
 return T._summary()
