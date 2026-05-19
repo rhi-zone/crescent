@@ -2745,8 +2745,46 @@ local function solve_return(ctx, c)
         local expected_tid = find(ctx, ret_var_id)
         local et = ctx.types:get(expected_tid)
         if et.tag == TAG_SPREAD then
-            expected_tid = find(ctx, types_mod.spread_inner(et))
-            et = ctx.types:get(expected_tid)
+            local inner_tid = find(ctx, types_mod.spread_inner(et))
+            -- Variadic return `() -> ...(T)` accepts zero or more T-typed values.
+            -- Actual cases:
+            --   `return` (empty)         → widened = nil → accepted (zero values)
+            --   `return a`               → widened = scalar → check scalar <: T
+            --   `return a, b, c`         → widened = TAG_TUPLE → each slot <: T
+            local wt = ctx.types:get(widened)
+            if wt.tag == TAG_NIL then
+                return true
+            end
+            if wt.tag == TAG_TUPLE then
+                local ws = types_mod.agg_members_start(wt)
+                local wl = types_mod.agg_members_len(wt)
+                for i = 0, wl - 1 do
+                    local slot_tid = find(ctx, ctx.lists:get(ws + i))
+                    local ok, err = unify_mod.unify(ctx, slot_tid, inner_tid)
+                    if not ok then
+                        add_error(ctx, line, col,
+                            "return type mismatch: cannot return `"
+                            .. types_mod.display_short(ctx, val_tid)
+                            .. "` against variadic `..."
+                            .. types_mod.display_short(ctx, inner_tid)
+                            .. "` (slot " .. (i + 1) .. "): "
+                            .. (err or "type mismatch"))
+                        return true
+                    end
+                end
+                return true
+            end
+            -- Scalar actual: check against inner.
+            local ok, err = unify_mod.unify(ctx, widened, inner_tid)
+            if not ok then
+                add_error(ctx, line, col,
+                    "return type mismatch: cannot return `"
+                    .. types_mod.display_short(ctx, val_tid)
+                    .. "` against variadic `..."
+                    .. types_mod.display_short(ctx, inner_tid)
+                    .. "`: " .. (err or "type mismatch"))
+            end
+            return true
         end
         -- When the annotated return is a TAG_TUPLE (multi-return packed as tuple)
         -- and the actual value is also a TAG_TUPLE, unify them directly — this
@@ -2791,6 +2829,58 @@ local function solve_return(ctx, c)
                 end
             end
             return true
+        end
+        -- Mixed multi-return with trailing variadic: `(A, B, ...(C))`.
+        -- Expected TAG_TUPLE whose last slot is TAG_SPREAD(C). Concrete prefix
+        -- slots check pairwise; remaining actual slots must each be <: C; the
+        -- actual tuple may also be shorter than the concrete prefix (trailing
+        -- nils per Lua semantics) when the missing slots accept nil.
+        if et.tag == TAG_TUPLE and ctx.types:get(widened).tag == TAG_TUPLE then
+            local e_start = types_mod.agg_members_start(et)
+            local e_len = types_mod.agg_members_len(et)
+            local last_slot_tid = e_len > 0
+                and find(ctx, ctx.lists:get(e_start + e_len - 1))
+                or 0
+            local last_slot_t = e_len > 0 and ctx.types:get(last_slot_tid) or nil
+            if last_slot_t and last_slot_t.tag == TAG_SPREAD then
+                local prefix_len = e_len - 1
+                local spread_inner = find(ctx, types_mod.spread_inner(last_slot_t))
+                local wt = ctx.types:get(widened)
+                local w_start = types_mod.agg_members_start(wt)
+                local w_len = types_mod.agg_members_len(wt)
+                -- Pairwise check the concrete prefix.
+                for i = 0, prefix_len - 1 do
+                    local exp_i = find(ctx, ctx.lists:get(e_start + i))
+                    local act_i = i < w_len
+                        and find(ctx, ctx.lists:get(w_start + i))
+                        or ctx.T_NIL
+                    local ok, err = unify_mod.unify(ctx, act_i, exp_i)
+                    if not ok then
+                        add_error(ctx, line, col,
+                            "return type mismatch: cannot return `"
+                            .. types_mod.display_short(ctx, val_tid)
+                            .. "` (slot " .. (i + 1) .. "): "
+                            .. (err or "type mismatch"))
+                        return true
+                    end
+                end
+                -- Remaining actual slots match against the spread inner.
+                for i = prefix_len, w_len - 1 do
+                    local act_i = find(ctx, ctx.lists:get(w_start + i))
+                    local ok, err = unify_mod.unify(ctx, act_i, spread_inner)
+                    if not ok then
+                        add_error(ctx, line, col,
+                            "return type mismatch: cannot return `"
+                            .. types_mod.display_short(ctx, val_tid)
+                            .. "` against variadic `..."
+                            .. types_mod.display_short(ctx, spread_inner)
+                            .. "` (slot " .. (i + 1) .. "): "
+                            .. (err or "type mismatch"))
+                        return true
+                    end
+                end
+                return true
+            end
         end
         local ok, err = unify_mod.unify(ctx, widened, expected_tid)
         if not ok then
