@@ -222,19 +222,56 @@ types. Different constructor shapes are disjoint by design (function values
 are not records), and same-shape obligations reduce by structural
 decomposition.
 
-A critical asymmetry of MLstruct vs. semantic subtyping: **negations on
-function and record types are purely algebraic**, not set-theoretic (§2.2.5,
-footnote 10). `¬{ x : τ }` and `¬(τ₁ → τ₂)` are essentially uninhabited;
-they exist only to make the lattice a Boolean algebra. Only **negations on
-nominal tags `¬#C`** have the intuitive "all values not of tag C" reading.
-Crescent's `~T` operator therefore inherits MLstruct's algebraic, not
-set-theoretic, semantics. For narrowing (§7) and match-type `_`-as-complement
-(§5) this is sufficient because the operations that observe `~T` are
-exhaustiveness and emptiness, not value-set membership.
+**Naked vs. operational negation.** MLstruct (Parreaux & Chau, OOPSLA 2022,
+v8.0, §2.2.5 footnote 10) observes that **naked** negation of a function or
+record type — `¬(τ₁ → τ₂)` or `¬{ x : τ }` considered as a standalone type
+representing "everything in the universe that isn't this function/record" —
+is a peculiar object: algebraically well-defined as the Boolean complement,
+but with a value-domain extension that is large, unenumerable, and not
+something a user would write down by choice. Only **negation on nominal
+tags `¬#C`** has the intuitive "all values not of tag C" reading as a
+free-standing type. The CDuce/Frisch/Castagna/Benzaken line takes the
+opposite trade: fully set-theoretic negation at the cost of giving up
+principal type inference. We follow MLstruct.
 
-The CDuce/Frisch/Castagna/Benzaken line takes the opposite trade: fully
-set-theoretic negation at the cost of giving up principal type inference.
-We follow MLstruct.
+This is a caveat about how to *think* about naked `~T`, not a constraint on
+what crescent supports. In crescent's actual uses of negation — narrowing,
+match-type wildcards, discriminated-union dispatch — negation never appears
+naked. It always appears in intersection with a positive type, where it
+does the useful work of removing one alternative from a known union. Worked
+example:
+
+```
+(A | B | (A → B)) ∩ ¬(A → B)
+  = (A ∩ ¬(A → B)) | (B ∩ ¬(A → B)) | ((A → B) ∩ ¬(A → B))    -- distrib.
+  = A | B | ⊥                                                  -- T ∩ ¬T = ⊥;
+                                                                  cross-shape
+                                                                  disjointness
+  = A | B
+```
+
+The same derivation handles discriminated-union narrowing structurally:
+`({ kind: "foo", ... } | { kind: "bar", ... }) ∩ ¬{ kind: "foo", ... }`
+reduces to `{ kind: "bar", ... }` by distribution and self-cancellation of
+the matching disjunct.
+
+**Implementation discipline.** The simplifier MUST distribute intersection
+over union and MUST recognize `T ∩ ¬T = ⊥` (the latter is already part of
+RDNF reduction in §5.2). With those two rules, the simplifier collapses
+`(... | T | ...) ∩ ¬T` to `(... | ...)` automatically, and the "essentially
+uninhabited" worry of the naked frame does not arise in practice because
+naked negation does not survive simplification when a positive context is
+present. No surface-syntax restriction on `~T` is necessary or appropriate:
+users may write `~T` for `T` of any shape (function, record, nominal,
+union, intersection), and the simplifier handles it uniformly.
+
+For match-type wildcards over record/function patterns — e.g.
+`MetaOf<T> = match T { { #...%M } => M, _ => nil }` where the `_` arm
+desugars to `~{ #...%M }` — the dispatch decision is a disjointness check
+on `T` against the pattern, not an inhabitation check on `~{ #...%M }`. The
+"essentially uninhabited" concern is therefore structurally irrelevant to
+match-type semantics: the wildcard's complement type is never asked "what
+values are you?", only "is the scrutinee disjoint from the other arms?".
 
 #### Coalescing (user-facing recovery)
 
