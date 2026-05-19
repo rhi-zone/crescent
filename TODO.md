@@ -289,6 +289,19 @@ revert (`9f025732`). Re-landing needs either:
   was incomplete — `solve_check_args` / `solve_bind_generics` also read
   potentially-owned ret_TVs through inner unify calls.
 
+#### BMT1 pin — match-type call-site forward-reduction broken
+
+`lib/type/static/type_soundness_test.lua` (BMT block immediately after H6,
+search for `BMT1 (KNOWN GAP)`). Generic functions returning a match type
+keep the return as an unreduced `match ... { ... }` at the call site when
+the type parameter is bound from a concrete arg. Direct instantiation
+(e.g. `Discrim<number>` as a literal) reduces correctly; the gap is
+specifically that call-site binding does not trigger re-evaluation of
+containing match types. Pinned at `has_error("cannot assign \`match.* to")`.
+Flip to `no_errors` once call-site forward-reduction through match types
+is correct (rewrite work — see commit `b4bb9667` for the set-theoretic
+foundation context).
+
 #### solve2.lua infrastructure — landed but not exercised meaningfully
 
 P1-P4a (commits `4eebb1de`, `c3f59312`, `f2686228`, `e2762912`) added

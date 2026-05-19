@@ -4042,6 +4042,36 @@ bad(x)
 end)
 
 -- ---------------------------------------------------------------------------
+-- Broken Match Type (BMT) pins — match-type call-site forward-reduction
+-- These tests pin CURRENT BROKEN BEHAVIOR. When a generic function returns a
+-- match type and is called with a concrete argument that binds the type
+-- parameter, the return type should reduce through the match — but today it
+-- stays as an unreduced `match ... { ... }` node. Direct alias instantiation
+-- (e.g. `Discrim<number>` as a literal type) DOES reduce; the gap is
+-- specifically that call-site binding of the type parameter does not trigger
+-- re-evaluation of containing match types.
+--
+-- After the typechecker rewrite makes call-site forward-reduction through
+-- match types correct, the `has_error` assertions below must be FLIPPED to
+-- `no_errors` (the annotated literal slots `"num"` / `"other"` will then
+-- match the reduced return type). See commit b4bb9667 (set-theoretic
+-- foundation) for design context, and TODO.md for the flip obligation.
+-- ---------------------------------------------------------------------------
+assert.describe("BMT: match-type call-site forward-reduction (PINNED BROKEN)", function()
+    -- BMT1: classify(42) should reduce Discrim<T> with T:=integer to "num".
+    -- Today the return type stays as the unreduced match node, so the
+    -- assignment to a `"num"`-annotated local errors.
+    assert.it("BMT1 (KNOWN GAP): generic returning match type — call site does not reduce", function()
+        has_error([[
+--:: Discrim<T> = match T { number => "num", _ => "other" }
+--:: declare classify = <T>(T) -> Discrim<T>
+local r1 = classify(42)       --: "num"
+local r2 = classify("hello")  --: "other"
+]], "cannot assign `match.* to")
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Phi-join union normalization (integer|integer should not cause errors)
 -- ---------------------------------------------------------------------------
 assert.describe("phi-join: branch merge produces correct types", function()
