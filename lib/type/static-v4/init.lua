@@ -23,6 +23,7 @@ M.rec     = T.rec
 M.indexer = T.indexer
 M.union   = T.union
 M.inter   = T.inter
+M.neg     = T.neg
 M.var     = T.var
 M.fix     = T.fix
 M.mu      = T.mu

@@ -18,6 +18,7 @@
 -- coalescing. Each lands in a later phase.
 
 local T = require("lib.type.static-v4.types")
+local E = require("lib.type.static-v4.empty")
 
 -- V4Type and its variant aliases (V4Var, V4Top, V4Prim, ...) are imported
 -- transitively from types.lua via the require above — the crescent typechecker
@@ -161,21 +162,39 @@ local function decompose(s, a, b)
 		return true
 	end
 
-	-- A <: B | C and A & B <: C: the principled rule is MLstruct's
-	-- negation-based rewrite (`A ∧ ¬B <: C` iff `A <: B | C`), which
-	-- requires complement (`~T`) in the lattice. Phase 4a does not yet have
-	-- complement — that lands in Phase 4c. A "try each disjunct with cache
-	-- rollback" stopgap was rejected: it is sound only on ground inputs and
-	-- silently loses principal types when variables appear, exactly the
-	-- shape of bug future sessions would pattern-match as the intended
-	-- design (CLAUDE.md's "temporary measures are context poisoning"). The
-	-- correct move until 4c lands is to fail loudly so the missing
-	-- mechanism is visible at the call site.
-	if b.tag == "union" then
-		return mismatch(s, a, b, "union on the right requires complement (Phase 4c); unsupported in 4a")
+	-- A <: B | C and A & B <: C: MLstruct's negation-based reduction
+	-- (rewrite design §2.4, §3.3 of the MLstruct paper). With complement now
+	-- in the lattice (Phase 4c), the obligation reduces to an emptiness
+	-- check: `A <: B  ⇔  A ∩ ¬B = ⊥`. We use the DNF-based emptiness
+	-- decision procedure in `empty.lua`, which normalizes (push ¬ inward,
+	-- distribute ∩ over ∪) and checks each disjunct for self-cancellation,
+	-- cross-kind disjointness, and positive-covered-by-negative.
+	--
+	-- The rewrite supersedes the 4a "deferred until 4c" rejection. The
+	-- emptiness check is invoked lazily here — and ONLY here — per the
+	-- design's "deferred until forced" discipline (§2.2). It does not fire
+	-- on every constraint, only on the union-RHS / intersection-LHS shapes
+	-- that genuinely require it.
+	if b.tag == "union" or a.tag == "inter" then
+		local members = { a, T.neg(b) } --[[: V4Type[] ]]
+		if E.is_empty(T.inter(members), s) then return true end
+		return mismatch(s, a, b)
 	end
-	if a.tag == "inter" then
-		return mismatch(s, a, b, "intersection on the left requires complement (Phase 4c); unsupported in 4a")
+
+	-- Complement on the right: `A <: ¬B` ⇔ `A ∩ B = ⊥` (A and B are
+	-- disjoint sets).
+	if b.tag == "neg" then
+		local members = { a, b.body } --[[: V4Type[] ]]
+		if E.is_empty(T.inter(members), s) then return true end
+		return mismatch(s, a, b)
+	end
+
+	-- Complement on the left: `¬A <: B` ⇔ `¬A ∩ ¬B = ⊥` ⇔ `¬(A ∪ B) = ⊥`
+	-- (everything is in A ∪ B). Decided by the same DNF emptiness routine.
+	if a.tag == "neg" then
+		local members = { a, T.neg(b) } --[[: V4Type[] ]]
+		if E.is_empty(T.inter(members), s) then return true end
+		return mismatch(s, a, b)
 	end
 
 	-- ── Same-shape constructor rules ─────────────────────────────────
@@ -347,6 +366,11 @@ constrain = function(s, a, b)
 end
 
 M.constrain = constrain
+
+-- Wire emptiness ↔ subtype recursion. `empty.lua` uses this to discharge
+-- positive-covered-by-negative checks inside DNF disjuncts. Decoupled to
+-- avoid a require cycle between the two modules.
+E._set_subtype(constrain)
 
 -- Convenience top-level predicate: does A <: B hold on a fresh solver?
 -- Returns (ok, errmsg). The solver is discarded; bounds added to variables

@@ -31,7 +31,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 
 - `lib/type/` — runtime schema typechecker (separate from static).
   - `lib/type/static/` — full static typechecker. v2/v3 design (see `docs/typechecker-v2.md`). Includes `cli.lua`, `lsp.lua`, parser, constrain, narrow, unify, prelude, cdef parser, fuzzers. Status: stable.
-  - `lib/type/static-v4/` — greenfield typechecker rewrite, foundation only (Phase 4a). Type representation + simple-sub-style subtyping algorithm. No AST walker, no CLI, no recursion/complement/quantifiers yet. See `docs/typechecker-rewrite-design.md` and the directory README. Status: wip.
+  - `lib/type/static-v4/` — greenfield typechecker rewrite, foundation (Phases 4a–4c). Type representation + simple-sub-style subtyping algorithm; equi-recursive μ types; indexed access `T[K]`; complement `~T` with DNF-based emptiness checking and the MLstruct negation rewrite that supersedes the 4a union-on-RHS / intersection-on-LHS rejection. No AST walker, no CLI, no match types or quantifiers yet. See `docs/typechecker-rewrite-design.md` and the directory README. Status: wip.
   - `lib/type/search/` — Hoogle-style type search over the registry. Status: wip.
 - `lib/lua2ts/` — Lua → TypeScript transpiler over the crescent AST. Status: wip.
 - `lib/doc/` — docgen (extract typed API docs from Lua source via the typechecker). Status: wip.

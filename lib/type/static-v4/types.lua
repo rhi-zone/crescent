@@ -34,7 +34,14 @@ local M = {}
 --:: V4Inter   = { tag: "inter", members: V4Type[] }
 --:: V4Var     = { tag: "var", id: integer, name: string, lower: V4Type[], upper: V4Type[], lower_vars: { [integer]: V4Type }, upper_vars: { [integer]: V4Type } }
 --:: V4Mu      = { tag: "mu", id: integer, body: V4Type }
---:: V4Type    = V4Top | V4Bot | V4Prim | V4Literal | V4Fn | V4Rec | V4Union | V4Inter | V4Var | V4Mu
+--:: V4Neg     = { tag: "neg", body: V4Type }
+--:: V4Type    = V4Top | V4Bot | V4Prim | V4Literal | V4Fn | V4Rec | V4Union | V4Inter | V4Var | V4Mu | V4Neg
+
+-- Working types used by empty.lua. Declared here because cross-file `--::`
+-- aliases referencing V4Type don't currently resolve through transitive
+-- requires — keeping the DNF shape next to V4Type itself sidesteps that.
+--:: DnfDisjunct = { pos: V4Type[], neg: V4Type[] }
+--:: Dnf         = { [integer]: DnfDisjunct }
 
 -- ── Tags ──────────────────────────────────────────────────────────────────
 
@@ -68,6 +75,15 @@ M.TAG_INTER     = "inter"
 -- MLstruct §3.2 for the cache discipline shared with cyclic variable bounds).
 -- We give each `mu` a unique id for deterministic display naming.
 M.TAG_MU        = "mu"
+
+-- Complement / negation. `body` is the type being complemented. Boolean
+-- combinator alongside union and intersection; `~T` denotes the set of all
+-- runtime values not in T (rewrite design §1.2). Involutive (`~~T = T`),
+-- De Morgan dualizes ∨/∧, `~⊥ = ⊤` and `~⊤ = ⊥`. The constructor performs
+-- these three short-circuits at construction time; the simplifier in
+-- subtype.lua / empty.lua applies the rest of the boolean-algebra laws on
+-- demand (De Morgan push-down, distribution, self-cancellation `T ∩ ¬T = ⊥`).
+M.TAG_NEG       = "neg"
 
 -- Inference variable. lower/upper bounds accumulate during constraint solving.
 -- Per simple-sub (Parreaux 2020) / MLstruct §3.2: each variable carries a
@@ -233,6 +249,25 @@ end
 
 function M._reset_mu_ids() _next_mu_id = 0 end
 
+-- Complement constructor. Three short-circuits per design §1.2:
+--   ~⊤ = ⊥, ~⊥ = ⊤, ~~T = T.
+-- No further simplification (e.g. De Morgan push-down) happens here — that's
+-- the simplifier's job in empty.lua. Per CLAUDE.md the constructor performs
+-- only the cheap, semantics-preserving rewrites that every caller would
+-- otherwise reimplement.
+--: (V4Type) -> V4Type
+function M.neg(body)
+	if body.tag == "top" then
+		return BOT
+	elseif body.tag == "bot" then
+		return TOP
+	elseif body.tag == "neg" then
+		return body.body
+	else
+		return { tag = M.TAG_NEG, body = body }
+	end
+end
+
 -- ── Display ───────────────────────────────────────────────────────────────
 -- A minimal pretty-printer for error messages and test diagnostics. Does NOT
 -- coalesce bounds into a compact type — that's a later-phase concern.
@@ -285,6 +320,9 @@ local function show(t, seen)
 		local ps = {}
 		for i, m in ipairs(t.members) do ps[i] = show(m, seen) end
 		return "(" .. table.concat(ps, " & ") .. ")"
+	end
+	if t.tag == "neg" then
+		return "~" .. show(t.body, seen)
 	end
 	if t.tag == "mu" then
 		-- Re-encountering the same mu node: emit the bound name only.

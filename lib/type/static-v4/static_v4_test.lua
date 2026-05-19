@@ -131,14 +131,17 @@ T.describe("union", function()
 		T.ok(st(V.union({V.integer, V.literal("integer", 42)}), V.number))
 	end)
 
-	-- Union-on-RHS (`A <: B | C`) is deferred to Phase 4c when complement
-	-- lands and the MLstruct negation rewrite (`A ∧ ¬B <: C`) becomes
-	-- expressible. 4a rejects the obligation loudly rather than guessing a
-	-- disjunct (see subtype.lua and README for rationale).
-	T.it("A <: A | B is deferred until Phase 4c (no complement yet)", function()
-		local ok, err = st(V.integer, V.union({V.integer, V.string_}))
-		T.fail(ok)
-		T.ok(err and err:find("Phase 4c", 1, true) ~= nil)
+	-- Union-on-RHS (`A <: B | C`) was deferred in 4a; Phase 4c lifted the
+	-- rejection by adding complement and the MLstruct negation rewrite
+	-- (`A ∧ ¬B <: C`). The obligation now reduces to a DNF emptiness check
+	-- (see subtype.lua, empty.lua).
+	T.it("A <: A | B holds (resolved in Phase 4c via negation rewrite)", function()
+		T.ok(st(V.integer, V.union({V.integer, V.string_})))
+	end)
+	T.it("A <: B | C rejects when no disjunct fits", function()
+		-- integer is not a subtype of (string | boolean) — no disjunct
+		-- covers it, and integer ∩ ¬string ∩ ¬boolean = integer ≠ ⊥.
+		T.fail(st(V.integer, V.union({V.string_, V.boolean})))
 	end)
 end)
 
@@ -155,12 +158,14 @@ T.describe("intersection", function()
 		T.fail(st(V.integer, V.inter({V.integer, V.string_})))
 	end)
 
-	-- Intersection-on-LHS (`A & B <: C`) is the dual of union-on-RHS and is
-	-- likewise deferred to Phase 4c.
-	T.it("A & B <: A is deferred until Phase 4c (no complement yet)", function()
-		local ok, err = st(V.inter({V.integer, V.string_}), V.integer)
-		T.fail(ok)
-		T.ok(err and err:find("Phase 4c", 1, true) ~= nil)
+	-- Intersection-on-LHS (`A & B <: C`) — dual of union-on-RHS. Phase 4c
+	-- resolves both via the same DNF emptiness machinery. The case below is
+	-- vacuously true because `integer ∩ string = ⊥`.
+	T.it("A & B <: A holds (resolved in Phase 4c via emptiness)", function()
+		T.ok(st(V.inter({V.integer, V.string_}), V.integer))
+	end)
+	T.it("integer & number <: integer (non-empty inter, holds)", function()
+		T.ok(st(V.inter({V.integer, V.number}), V.integer))
 	end)
 end)
 
@@ -531,6 +536,140 @@ T.describe("indexed access — subtyping with indexers", function()
 		local a = V.rec({ x = V.string_ }, false)
 		local b = V.rec({}, false, V.indexer(V.string_, V.number))
 		T.fail(st(a, b))
+	end)
+end)
+
+-- ── Phase 4c: negation / complement ──────────────────────────────────────
+
+T.describe("negation — construction and short-circuits", function()
+	T.it("~unknown = never", function()
+		local n = V.neg(V.top())
+		T.eq(n.tag, "bot")
+	end)
+	T.it("~never = unknown", function()
+		local n = V.neg(V.bot())
+		T.eq(n.tag, "top")
+	end)
+	T.it("~~T = T (involution)", function()
+		local int_neg = V.neg(V.neg(V.integer))
+		T.eq(int_neg, V.integer)
+	end)
+	T.it("~~~T = ~T", function()
+		-- Three negations involute to one.
+		local t = V.neg(V.neg(V.neg(V.integer)))
+		T.eq(t.tag, "neg")
+		T.eq(t.body, V.integer)
+	end)
+end)
+
+T.describe("negation — basic subtype queries", function()
+	T.it("A <: ~B for disjoint A, B (integer <: ~string)", function()
+		T.ok(st(V.integer, V.neg(V.string_)))
+	end)
+	T.it("A </: ~B for overlapping A, B (integer </: ~integer)", function()
+		T.fail(st(V.integer, V.neg(V.integer)))
+	end)
+	T.it("A </: ~B for A inside B (integer </: ~number)", function()
+		-- integer <: number, so integer is NOT in ¬number.
+		T.fail(st(V.integer, V.neg(V.number)))
+	end)
+	T.it("never <: ~T for any T", function()
+		T.ok(st(V.bot(), V.neg(V.integer)))
+		T.ok(st(V.bot(), V.neg(V.top())))
+	end)
+	T.it("~T <: unknown for any T", function()
+		T.ok(st(V.neg(V.integer), V.top()))
+	end)
+end)
+
+T.describe("negation — De Morgan and lattice laws", function()
+	T.it("excluded middle: T <: T | ~T", function()
+		-- 42 <: integer | ~integer (lattice covers everything).
+		T.ok(st(V.literal("integer", 42), V.union({V.integer, V.neg(V.integer)})))
+		-- Also for an unrelated value.
+		T.ok(st(V.string_, V.union({V.integer, V.neg(V.integer)})))
+	end)
+	T.it("self-cancellation in intersection: T & ~T = never", function()
+		-- (T & ~T) <: C for any C — even an impossible C like never.
+		T.ok(st(V.inter({V.integer, V.neg(V.integer)}), V.bot()))
+		-- Symmetric: never <: T & ~T.
+		T.ok(st(V.bot(), V.inter({V.integer, V.neg(V.integer)})))
+	end)
+	T.it("De Morgan: ~(A | B) <: ~A (component on the right)", function()
+		-- ¬(A ∨ B) = ¬A ∧ ¬B  <:  ¬A. Decomposed by the solver's
+		-- emptiness check after De Morgan rewrites.
+		T.ok(st(V.neg(V.union({V.integer, V.string_})), V.neg(V.integer)))
+	end)
+	T.it("De Morgan: ~A & ~B <: ~(A | B)", function()
+		T.ok(st(
+			V.inter({ V.neg(V.integer), V.neg(V.string_) }),
+			V.neg(V.union({V.integer, V.string_}))
+		))
+	end)
+end)
+
+T.describe("negation — distribution and combinator interactions", function()
+	T.it("worked example: (A | B | (A->B)) & ~(A->B) <: A | B", function()
+		-- Design doc §2.2 worked example. Reduces by distribution and
+		-- self-cancellation to (A & ~(A->B)) | (B & ~(A->B)) | ⊥. The
+		-- A & ¬(A→B) and B & ¬(A→B) parts hold because A, B are not
+		-- function-shaped → cross-kind disjoint with (A→B) under
+		-- intersection with its negation.
+		local A, B = V.integer, V.string_
+		local fab = V.fn({A}, B)
+		local lhs = V.inter({ V.union({A, B, fab}), V.neg(fab) })
+		local rhs = V.union({A, B})
+		T.ok(st(lhs, rhs))
+	end)
+	T.it("discriminated-union narrowing structurally", function()
+		-- ({tag:\"a\"} | {tag:\"b\"}) & ~{tag:\"a\"} <: {tag:\"b\"}.
+		-- The first disjunct cancels with its negation; the second survives.
+		local ka = V.literal("string", "a")
+		local kb = V.literal("string", "b")
+		local ra = V.rec({ tag = ka }, false)
+		local rb = V.rec({ tag = kb }, false)
+		T.ok(st(V.inter({ V.union({ra, rb}), V.neg(ra) }), rb))
+	end)
+end)
+
+T.describe("negation — recursive types (μ)", function()
+	T.it("~(μX. F(X)) is constructible and never <: that", function()
+		-- We do not push ¬ inside μ; μ stays an atom. Sanity: never <: ¬μ,
+		-- and μ </: ¬μ (a value of type μ is not in the complement of μ).
+		local list = V.fix(function(self)
+			return V.rec({ value = V.integer, next = self }, false)
+		end)
+		local nlist = V.neg(list)
+		T.ok(st(V.bot(), nlist))
+		T.fail(st(list, nlist))
+	end)
+end)
+
+T.describe("negation — indexed-access interaction", function()
+	-- Negated key on indexed access is admitted by the design (§1.1) but
+	-- the index reducer does not yet handle ~K (deferred to a later phase
+	-- where match-type wildcards force it in). The negation infrastructure
+	-- itself is exercised via the subtype path on already-indexed types.
+	T.it("indexed access result interacts with ~T at the type level", function()
+		-- T = { x: integer }; T[\"x\"] = integer; integer <: ~string.
+		local r = V.rec({ x = V.integer }, false)
+		local got, err = V.index(r, V.literal("string", "x"))
+		T.eq(err, nil)
+		T.ok(st(got, V.neg(V.string_)))
+	end)
+end)
+
+T.describe("negation — DNF normalization (worst-case structural)", function()
+	T.it("nested negation/union does not loop", function()
+		-- ~((A & ~B) | (C & ~D)) is reduced to (~A | B) & (~C | D) by De
+		-- Morgan, then to a (4-way) DNF for emptiness checks. We don't
+		-- assert the shape — only that subtype queries on such inputs
+		-- terminate in finite time and produce correct answers.
+		local A, B, C, D = V.integer, V.string_, V.number, V.boolean
+		local lhs = V.neg(V.union({ V.inter({A, V.neg(B)}), V.inter({C, V.neg(D)}) }))
+		-- This type is huge but still satisfies trivial bounds:
+		T.ok(st(V.bot(), lhs))
+		T.ok(st(lhs, V.top()))
 	end)
 end)
 

@@ -1,4 +1,4 @@
-# static-v4 — typechecker foundation (Phases 4a–4b.2)
+# static-v4 — typechecker foundation (Phases 4a–4c)
 
 Greenfield typechecker, derived from `docs/typechecker-rewrite-design.md`
 (itself derived from simple-sub and MLstruct).
@@ -8,10 +8,12 @@ This directory currently implements:
 - **Phase 4b.1** — equi-recursive μ types.
 - **Phase 4b.2** — indexed access types `T[K]`, with record indexers
   (`{ [K]: V }`) added to the record constructor.
+- **Phase 4c** — complement `~T`, DNF-based emptiness checking, and the
+  MLstruct negation rewrite that lifts the 4a union-on-RHS / intersection-
+  on-LHS rejection (see "Phase 4c" section below).
 
 Still out of scope: the AST walker, CLI integration, cache (`.cri`),
-complement `~T` (4c), match types (4d), quantifiers / rank-N (4e),
-effects (4f).
+match types (4d), quantifiers / rank-N (4e), effects (4f).
 
 ## Layout
 
@@ -218,12 +220,95 @@ for `key.tag == "neg"`.
   enough to see that `r.fields` values are non-nil; the implementation
   uses an explicit guard rather than a force cast.
 
+## Phase 4c — complement and DNF emptiness
+
+Phase 4c adds the complement constructor `~T` and the lattice machinery that
+closes the Boolean algebra: De Morgan, distribution, self-cancellation,
+excluded middle. The 4a "deferred until 4c" rejections for union-on-RHS
+(`A <: B | C`) and intersection-on-LHS (`A & B <: C`) are now **resolved**
+in `subtype.lua` via the MLstruct negation rewrite — they reduce to an
+emptiness check on `A ∩ ¬B`.
+
+### API
+
+- `M.neg(T)` — complement constructor. Short-circuits at construction:
+  `~⊤ = ⊥`, `~⊥ = ⊤`, `~~T = T`. No further simplification at construction
+  (that's `empty.lua`'s job, applied on demand).
+- New tag `"neg"`, new variant `V4Neg = { tag: "neg", body: V4Type }`.
+
+### `empty.lua`
+
+The emptiness primitive — `is_empty(T, solver)` — converts `T` to DNF (push
+`¬` inward via De Morgan, distribute `∩` over `∪`, eliminate `~~T`) and
+checks each disjunct (a conjunction of positive and negated atoms) for
+emptiness via:
+
+1. `⊥` in positives or `⊤` in negatives → empty.
+2. Self-cancellation: `P == N` by identity (cheap path).
+3. Cross-kind disjointness: two positives of structurally disjoint kinds
+   (e.g. `integer ∩ {x: int}`) → empty.
+4. Same-kind primitive/literal collisions (`integer ∩ string`, two
+   distinct same-base literals) → empty.
+5. Positive-covers-by-negative via the solver's structural subtype check:
+   if any positive `P` is `<:` any negative `N`, then `P ∩ ¬N = ⊥`.
+
+The check recurses into `constrain` (subtype.lua) for rule (5); termination
+follows because each recursive call operates on a strict subterm of the
+original input, the solver shares its identity-keyed cache across recursion,
+and μ types are treated as atoms (their bodies unfold lazily via the cache).
+
+### Decision-point invocation (deferred until forced)
+
+Per design doc §2.2 — "DNF emptiness checking is deferred until forced,
+not universal" — `is_empty` fires only at three decision points in
+`subtype.lua`:
+
+1. Union on the right: `A <: B | C` reduces to `is_empty(A ∩ ¬(B | C))`.
+2. Intersection on the left: `A & B <: C` reduces to
+   `is_empty((A & B) ∩ ¬C)`.
+3. Explicit `~T`: `A <: ¬B` ⇔ `is_empty(A ∩ B)`; `¬A <: B` ⇔
+   `is_empty(¬A ∩ ¬B) = is_empty(¬(A ∪ B))`.
+
+The constraint solver does NOT call `is_empty` on every constraint —
+ground primitive subtyping, function/record decomposition, μ unfolding,
+and variable bound graphs all stay in the original simple-sub path. Only
+the negation-or-union-RHS shapes invoke DNF.
+
+### Worst case and complexity
+
+DNF normalization is worst-case exponential in the number of conjuncts
+under unions. For typical crescent types (small unions, modest nesting),
+the blowup is bounded. Pathological cases manifest as long-but-finite
+typechecks; per design §2.2 the answer is timeouts at the call site, not
+a restricted algebra.
+
+The `pure_subtype` helper inside `empty.lua` refuses to discharge subtype
+checks involving type variables on either side, to avoid mutating variable
+bounds as a side effect of an emptiness query. Variables in DNF disjuncts
+are treated as opaque atoms (their inhabitation is undetermined for the
+purposes of the disjunct, which keeps the routine sound — never spuriously
+concluding empty — at the cost of incompleteness for queries like
+`α ∩ ¬α = ⊥` when `α` is bare. The constraint solver already records `¬T`
+as an upper bound on `α` and propagates, so this rarely matters in
+practice.)
+
+### Indexed access on negated keys
+
+Not yet implemented in `index.lua`. The design (§1.1 "negated keys are
+accepted") admits `T[~"x"]`; realizing it requires subtracting the negated
+literal from the contributing key set inside the index reducer. Tracked
+for Phase 4d when match-type wildcards force the feature in. Negation
+itself is still constructible — only the index reducer's handling of it
+is pending.
+
 ## Running
 
 ```
 timeout 60 bin/cr test lib/type/static-v4/
 timeout 30 bin/cr check lib/type/static-v4/types.lua \
                        lib/type/static-v4/subtype.lua \
+                       lib/type/static-v4/empty.lua \
+                       lib/type/static-v4/index.lua \
                        lib/type/static-v4/init.lua \
                        lib/type/static-v4/static_v4_test.lua
 ```
