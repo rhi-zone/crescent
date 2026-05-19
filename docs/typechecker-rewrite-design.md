@@ -721,3 +721,34 @@ constructor set.
 
 Of the original eight §9 questions, **eight are RESOLVED** (§9.2.1–7,
 §9.3.8) and **zero remain open**.
+
+## 10. Cross-file resolution
+
+**Cross-file resolution: content-addressed cached interface (`.cri` pattern).**
+
+When the typechecker encounters `require("path")`, it does NOT recursively
+re-typecheck the imported module on every call site. Instead, each module's
+inferred export interface is serialized into a content-addressed cache
+(analogous to Haskell's `.hi`, OCaml's `.cmi`, crescent's existing `.cri`),
+keyed by SHA-256 of the source. Subsequent typechecks of the importing file
+resolve the require to a fast cache lookup of the cached interface;
+deserialize the export type; bind it to the local variable. Per-file
+dependency tracking in the cache manifest enables correct invalidation when
+a transitively-imported source changes.
+
+The current `.cri` format implemented in `lib/type/static/cache.lua` is the
+reference for *the pattern*, NOT for *the serialization format*. The rewrite
+may need to evolve the format — for example, to encode the new lattice
+operations (`~T` complement, set-theoretic constructors, effect annotations)
+that did not exist in the pre-foundation design. The architectural commitment
+is:
+
+1. Content-addressed cache keyed by source content hash.
+2. Manifest tracking per-file dependency hashes for invalidation.
+3. Cached unit is the **inferred export interface type**, not the full
+   constraint graph or unsimplified internal types.
+4. Lookup-on-require is the default path; recursive typecheck only fires on
+   cache miss.
+
+The current `.cri` format is a working instance of this pattern. The rewrite
+may diverge as needed.
