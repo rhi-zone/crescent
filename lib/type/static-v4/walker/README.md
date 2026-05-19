@@ -5,9 +5,10 @@ into v4 type-system constraints. See
 `docs/typechecker-ast-walker-design.md` for the full design.
 
 This directory is being built incrementally across sub-phases A–J (design
-doc §13). **Current state: sub-phase C complete** — function definitions,
-function calls, method calls, returns, and rank-N polymorphism handling on
-top of A (env/dispatch) and B (literals, identifiers, varargs).
+doc §13). **Current state: sub-phase D complete** — control-flow
+statements (`if`, `while`, `repeat`, numeric/generic `for`, `do`-blocks,
+`break`) and the flow-sensitive narrowing engine on top of A (env/dispatch),
+B (literals, identifiers, varargs) and C (functions, calls, returns).
 
 ## Sub-phase A — what's here
 
@@ -177,6 +178,90 @@ verbatim and the per-field annotations (`params[i].ann`, `ret_ann`,
 from those fields and from fresh vars. Wiring the annotation parser to
 populate the `annotation` field is design Phase C (the "annotations and
 casts" deliverable); walker sub-phase C consumes the field opaquely.
+
+## Sub-phase D — what's here
+
+- **`control_flow.lua`** — SYNTHESIZE handlers for the seven control-flow
+  statements plus the centralised guard-pattern analyzer driving §5
+  narrowing.
+
+  Handlers registered:
+  - `NODE_IF_STMT` (§3.12, §5) — folds `if`/`elseif`/`else` chains into
+    nested two-branch joins. Guard analysis produces a positive and a
+    negative narrowing map; the then-branch overlays positive, the
+    else-recursion overlays negative. Branches that terminate (via
+    `return` / `break`) drop out of the join. The post-`if` env has
+    only narrowings the join produced; bindings introduced inside a
+    branch are scoped out (block-scope discipline).
+  - `NODE_WHILE_STMT` — body sees the guard's positive narrowing; after
+    the loop, the negative narrowing applies (the loop exited because
+    the guard became false).
+  - `NODE_REPEAT_STMT` — body runs once with no incoming narrowing
+    (Lua semantics: cond is at the END); the cond's positive narrowing
+    flows past the loop into the surrounding scope.
+  - `NODE_FOR_NUM` — synthesises init / stop / step; binds the loop var
+    as `integer` if all three are integer-typed, else `number`. The
+    loop-var binding is block-scoped to the body.
+  - `NODE_FOR_IN` — synthesises the iterator expression; if it's a
+    `forall`, instantiates it. Extracts the return-tuple positions
+    (`V.rec` with string-indexed slots `"1"`, `"2"`, ...) and binds the
+    loop names; a scalar return binds to the single name.
+  - `NODE_DO_STMT` — walks the body with block-scope discipline.
+  - `NODE_BREAK_STMT` — termination signal; `walk_statements` short-
+    circuits the remaining statements in the same block on a break,
+    and the surrounding loop/if-join treats the branch as terminated.
+
+### Narrowing model (per design §5)
+
+Both `atoms_pos` and `atoms_neg` carry **directly-applied** atoms —
+the framework does NOT implicitly `V.neg` the falsy atom. The recogniser
+encodes the complement explicitly when the guard form demands it. This
+symmetry is essential for `not p` to be a literal pos↔neg swap and for
+`and`/`or` to compose via per-map ops.
+
+| Guard                              | atoms_pos                                  | atoms_neg                                  |
+|------------------------------------|--------------------------------------------|--------------------------------------------|
+| `if x then`                        | `~(nil \| false_lit)`                      | `nil \| false_lit`                         |
+| `if x == lit` / `x ~= lit`         | `V.literal(...)` / `V.neg(...)`            | `V.neg(...)` / `V.literal(...)`            |
+| `if x == nil` / `x ~= nil`         | `V.prim("nil")` / `V.neg(nil)`             | `V.neg(nil)` / `V.prim("nil")`             |
+| `if type(x) == "kind"` / `~= ...`  | `V.prim("kind")` / `V.neg(prim)`           | `V.neg(prim)` / `V.prim("kind")`           |
+| `if x.k == lit`                    | `V.rec({k=lit}, true)`                     | `V.neg(...)`                               |
+
+Composites:
+- `if a and b` — pos = pos(a) ⊓ pos(b) (per-var V.inter); neg = `{}`
+  (a false `and` could be either side — no per-var info is safe).
+- `if a or b`  — pos = pos(a) ⊔ pos(b) (per-var V.union, names in
+  ONLY one side dropped — that side gives no info about a name the
+  other doesn't constrain); neg = neg(a) ⊓ neg(b) (both must be false).
+- `if not p`   — pos := neg(p); neg := pos(p).
+
+Unrecognised guard form: walked for synth side-effects (so undefined
+names / arity errors surface), no narrowing applied. This is **not**
+deferred — it is the principled position. A guard form the recogniser
+doesn't decode legitimately carries no information about variable
+types and must not narrow.
+
+### Decoded node shapes added in D
+
+| Node              | Fields                                                                |
+|-------------------|-----------------------------------------------------------------------|
+| NODE_IF_STMT      | `{ tag, line, col, clauses: {{cond,body}}, else_body: Node[] \| nil }`|
+| NODE_WHILE_STMT   | `{ tag, line, col, cond, body }`                                      |
+| NODE_REPEAT_STMT  | `{ tag, line, col, body, cond }`                                      |
+| NODE_FOR_NUM      | `{ tag, line, col, name, init, stop, step \| nil, body }`             |
+| NODE_FOR_IN       | `{ tag, line, col, names: string[], exprs: Node[], body }`            |
+| NODE_DO_STMT      | `{ tag, line, col, body }`                                            |
+| NODE_BREAK_STMT   | `{ tag, line, col }`                                                  |
+| NODE_BINARY_EXPR  | `{ tag, line, col, op: string, lhs, rhs }` (recognised by guard analyzer only — full handler in sub-phase E) |
+| NODE_UNARY_EXPR   | `{ tag, line, col, op: string, operand }` (ditto) |
+| NODE_FIELD_EXPR   | `{ tag, line, col, target, key: string }` (recognised by guard analyzer for discriminant narrowing only — full handler in sub-phase F) |
+
+The guard analyzer pattern-matches `NODE_BINARY_EXPR`, `NODE_UNARY_EXPR`,
+and `NODE_FIELD_EXPR` SHAPES without invoking synth handlers for them —
+synth handlers for these nodes belong to sub-phases E/F. Pattern-matching
+the shape from a control-flow context is **not** an indexed-callee /
+binary-expr handler; it is the design's §5 recogniser reading the AST
+directly.
 
 ## Sub-phase A does NOT include
 

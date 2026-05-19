@@ -308,9 +308,17 @@ T.describe("walker: dispatch shell", function()
 		T.ok(W.has_synth(defs.NODE_METHOD_CALL))
 		T.ok(W.has_synth(defs.NODE_RETURN_STMT))
 		T.ok(W.has_synth(defs.NODE_EXPR_STMT))
+		-- Sub-phase D adds control-flow + loop family.
+		T.ok(W.has_synth(defs.NODE_IF_STMT))
+		T.ok(W.has_synth(defs.NODE_WHILE_STMT))
+		T.ok(W.has_synth(defs.NODE_REPEAT_STMT))
+		T.ok(W.has_synth(defs.NODE_FOR_NUM))
+		T.ok(W.has_synth(defs.NODE_FOR_IN))
+		T.ok(W.has_synth(defs.NODE_DO_STMT))
+		T.ok(W.has_synth(defs.NODE_BREAK_STMT))
 		for _, tag in pairs({
 			defs.NODE_LOCAL_STMT,
-			defs.NODE_IF_STMT, defs.NODE_CHUNK,
+			defs.NODE_CHUNK,
 		}) do
 			T.fail(W.has_synth(tag))
 			T.fail(W.has_check(tag))
@@ -793,5 +801,366 @@ T.describe("walker sub-phase C: effect accumulation", function()
 		local _ty, _env, err = W.walk_synth(node, env, s)
 		T.ok(err ~= nil)
 		T.ok(err:find("yield", 1, true) ~= nil)
+	end)
+end)
+
+-- ── sub-phase D: control flow + narrowing ────────────────────────────────
+
+-- Builders for control-flow node shapes. Match the decoded shapes
+-- declared in walker/control_flow.lua.
+local function lit_nil()
+	return { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_NIL }
+end
+local function lit_bool(b)
+	return { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_BOOLEAN, value = b }
+end
+local function binop(op, lhs, rhs)
+	return { tag = defs.NODE_BINARY_EXPR, op = op, lhs = lhs, rhs = rhs }
+end
+local function unop(op, operand)
+	return { tag = defs.NODE_UNARY_EXPR, op = op, operand = operand }
+end
+local function field(target, key)
+	return { tag = defs.NODE_FIELD_EXPR, target = target, key = key }
+end
+local function if_stmt(clauses, else_body)
+	return { tag = defs.NODE_IF_STMT, clauses = clauses, else_body = else_body }
+end
+local function clause(cond, body)
+	return { cond = cond, body = body or {} }
+end
+local function while_stmt(cond, body)
+	return { tag = defs.NODE_WHILE_STMT, cond = cond, body = body or {} }
+end
+local function repeat_stmt(body, cond)
+	return { tag = defs.NODE_REPEAT_STMT, body = body or {}, cond = cond }
+end
+local function for_num(name, init, stop, step, body)
+	return { tag = defs.NODE_FOR_NUM, name = name, init = init,
+		stop = stop, step = step, body = body or {} }
+end
+local function for_in(names, exprs, body)
+	return { tag = defs.NODE_FOR_IN, names = names, exprs = exprs, body = body or {} }
+end
+local function do_stmt(body)
+	return { tag = defs.NODE_DO_STMT, body = body or {} }
+end
+local function break_stmt()
+	return { tag = defs.NODE_BREAK_STMT }
+end
+
+-- A "probe" statement that synthesizes its expr and asserts it has
+-- a specific type — used to inspect the narrowed view of an identifier
+-- inside a branch. The probe is expressed as an expr-stmt wrapping a
+-- call to a sentinel function `assert_ty_<i>`; the sentinel is bound
+-- in env to a function with parameter T_i, so a subtype mismatch
+-- between the narrowed identifier and T_i becomes a solver error.
+
+T.describe("walker sub-phase D: if/narrowing — type(x) == 'string'", function()
+	T.it("narrows x to string in the then-branch", function()
+		local s = V.new_solver()
+		-- assert_string expects a string param. If x has narrowed to
+		-- string, the call inside the then-branch typechecks.
+		local assert_string = V.fn({ V.string_ }, V.nil_, nil)
+		local x_ty = V.union({ V.string_, V.integer })
+		local env = E.bind(E.bind(E.new(), "x", x_ty), "assert_string", assert_string)
+		local guard = binop("==",
+			{ tag = defs.NODE_CALL_EXPR, callee = id("type"), args = { id("x") } },
+			lit_str("string"))
+		local body = { expr_stmt(call(id("assert_string"), id("x"))) }
+		local node = if_stmt({ clause(guard, body) }, nil)
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+
+	T.it("does not narrow x in the else branch (type(x) != 'string')", function()
+		local s = V.new_solver()
+		-- If else-branch's narrowing were wrong (still string-typed),
+		-- a call to assert_int(x) would succeed, which is incorrect.
+		-- We probe the negative narrowing: x must be NON-string there.
+		-- We construct an `assert_non_string` taking integer | nil | boolean
+		-- | number — any non-string narrowing should satisfy it.
+		local assert_int = V.fn({ V.integer }, V.nil_, nil)
+		local x_ty = V.union({ V.string_, V.integer })
+		local env = E.bind(E.bind(E.new(), "x", x_ty), "assert_int", assert_int)
+		local guard = binop("==",
+			{ tag = defs.NODE_CALL_EXPR, callee = id("type"), args = { id("x") } },
+			lit_str("string"))
+		-- else-branch calls assert_int(x): x should narrow to integer
+		-- here because it's known not-string.
+		local node = if_stmt({ clause(guard, {}) },
+			{ expr_stmt(call(id("assert_int"), id("x"))) })
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase D: if/narrowing — x ~= nil", function()
+	T.it("narrows x to non-nil in then-branch", function()
+		local s = V.new_solver()
+		local non_nil = V.fn({ V.integer }, V.nil_, nil)
+		local x_ty = V.union({ V.integer, V.nil_ })
+		local env = E.bind(E.bind(E.new(), "x", x_ty), "f", non_nil)
+		local guard = binop("~=", id("x"), lit_nil())
+		local body = { expr_stmt(call(id("f"), id("x"))) }
+		local node = if_stmt({ clause(guard, body) }, nil)
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase D: if/narrowing — field discriminant", function()
+	T.it("x.kind == 'foo' narrows x to record with that field", function()
+		local s = V.new_solver()
+		-- Take_foo accepts { kind: "foo", ... } (open record with
+		-- kind discriminant). x starts as union { kind: "foo" } | { kind: "bar" }.
+		local foo_rec = V.rec({ kind = V.literal("string", "foo") }, true, nil)
+		local take_foo = V.fn({ foo_rec }, V.nil_, nil)
+		local foo_ty = V.rec({ kind = V.literal("string", "foo") }, false, nil)
+		local bar_ty = V.rec({ kind = V.literal("string", "bar") }, false, nil)
+		local x_ty = V.union({ foo_ty, bar_ty })
+		local env = E.bind(E.bind(E.new(), "x", x_ty), "take_foo", take_foo)
+		local guard = binop("==", field(id("x"), "kind"), lit_str("foo"))
+		local body = { expr_stmt(call(id("take_foo"), id("x"))) }
+		local node = if_stmt({ clause(guard, body) }, nil)
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase D: if/narrowing — truthy/falsy", function()
+	T.it("`if x then` narrows x to non-(nil | false)", function()
+		local s = V.new_solver()
+		-- f expects integer. x : integer | nil — inside `if x then`
+		-- x should narrow to integer (which is part of truthy).
+		local f = V.fn({ V.integer }, V.nil_, nil)
+		local env = E.bind(E.bind(E.new(), "x", V.union({ V.integer, V.nil_ })),
+			"f", f)
+		local node = if_stmt({
+			clause(id("x"), { expr_stmt(call(id("f"), id("x"))) }),
+		}, nil)
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase D: if/narrowing — `not` swaps polarity", function()
+	T.it("`if not (x == nil)` narrows x to non-nil in then-branch", function()
+		local s = V.new_solver()
+		local non_nil = V.fn({ V.integer }, V.nil_, nil)
+		local x_ty = V.union({ V.integer, V.nil_ })
+		local env = E.bind(E.bind(E.new(), "x", x_ty), "f", non_nil)
+		local guard = unop("not", binop("==", id("x"), lit_nil()))
+		local node = if_stmt({
+			clause(guard, { expr_stmt(call(id("f"), id("x"))) }),
+		}, nil)
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase D: if/narrowing — `and` intersects", function()
+	T.it("type(x)=='string' and type(y)=='integer' narrows both", function()
+		local s = V.new_solver()
+		local f = V.fn({ V.string_, V.integer }, V.nil_, nil)
+		local x_ty = V.union({ V.string_, V.integer })
+		local y_ty = V.union({ V.string_, V.integer })
+		local env = E.bind(E.bind(E.bind(E.new(), "x", x_ty), "y", y_ty), "f", f)
+		local gx = binop("==",
+			{ tag = defs.NODE_CALL_EXPR, callee = id("type"), args = { id("x") } },
+			lit_str("string"))
+		local gy = binop("==",
+			{ tag = defs.NODE_CALL_EXPR, callee = id("type"), args = { id("y") } },
+			lit_str("number"))
+		-- type(y) == "number" narrows y to V.prim("number"); integer is
+		-- subtype-of number per v4 prim subtyping, so the call typechecks
+		-- only if the narrowed type covers integer. We use "integer" instead
+		-- to keep the subtype simple.
+		gy = binop("==",
+			{ tag = defs.NODE_CALL_EXPR, callee = id("type"), args = { id("y") } },
+			lit_str("integer"))
+		local guard = binop("and", gx, gy)
+		local node = if_stmt({
+			clause(guard, { expr_stmt(call(id("f"), id("x"), id("y"))) }),
+		}, nil)
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase D: if/narrowing — `or` unions", function()
+	T.it("type(x)=='string' or type(x)=='integer' narrows x to that union", function()
+		local s = V.new_solver()
+		-- f accepts string | integer.
+		local f = V.fn({ V.union({ V.string_, V.integer }) }, V.nil_, nil)
+		local x_ty = V.union({ V.string_, V.integer, V.boolean })
+		local env = E.bind(E.bind(E.new(), "x", x_ty), "f", f)
+		local gx_s = binop("==",
+			{ tag = defs.NODE_CALL_EXPR, callee = id("type"), args = { id("x") } },
+			lit_str("string"))
+		local gx_i = binop("==",
+			{ tag = defs.NODE_CALL_EXPR, callee = id("type"), args = { id("x") } },
+			lit_str("integer"))
+		local guard = binop("or", gx_s, gx_i)
+		local node = if_stmt({
+			clause(guard, { expr_stmt(call(id("f"), id("x"))) }),
+		}, nil)
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase D: if/join — variable narrowed in only one branch reverts", function()
+	T.it("post-if uses original (unnarrowed) type", function()
+		local s = V.new_solver()
+		local f_union = V.fn({ V.union({ V.integer, V.string_ }) }, V.nil_, nil)
+		local x_ty = V.union({ V.integer, V.string_ })
+		local env = E.bind(E.bind(E.new(), "x", x_ty), "f", f_union)
+		local guard = binop("==",
+			{ tag = defs.NODE_CALL_EXPR, callee = id("type"), args = { id("x") } },
+			lit_str("string"))
+		local if_node = if_stmt({ clause(guard, {}) }, nil)
+		-- After the if, x should be back to int|string. We construct an
+		-- expr_stmt(call(f, x)) in the same body sequence by walking
+		-- them via a do-stmt wrapping.
+		local node = do_stmt({
+			if_node,
+			expr_stmt(call(id("f"), id("x"))),
+		})
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase D: nested narrowing", function()
+	T.it("`if x then if type(x) == 'string' then ... end end`", function()
+		local s = V.new_solver()
+		local take_string = V.fn({ V.string_ }, V.nil_, nil)
+		local x_ty = V.union({ V.string_, V.integer, V.nil_ })
+		local env = E.bind(E.bind(E.new(), "x", x_ty), "f", take_string)
+		local inner_guard = binop("==",
+			{ tag = defs.NODE_CALL_EXPR, callee = id("type"), args = { id("x") } },
+			lit_str("string"))
+		local inner = if_stmt({
+			clause(inner_guard, { expr_stmt(call(id("f"), id("x"))) }),
+		}, nil)
+		local outer = if_stmt({ clause(id("x"), { inner }) }, nil)
+		local _ty, _env, err = W.walk_synth(outer, env, s)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase D: numeric for", function()
+	T.it("integer init/stop binds loop var as integer", function()
+		local s = V.new_solver()
+		local f = V.fn({ V.integer }, V.nil_, nil)
+		local env = E.bind(E.new(), "f", f)
+		local body = { expr_stmt(call(id("f"), id("i"))) }
+		local node = for_num("i", lit_int(1), lit_int(10), nil, body)
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+
+	T.it("loop var is dropped after the loop", function()
+		local s = V.new_solver()
+		local f = V.fn({ V.integer }, V.nil_, nil)
+		local env = E.bind(E.new(), "f", f)
+		local node = do_stmt({
+			for_num("i", lit_int(1), lit_int(10), nil, {}),
+			expr_stmt(call(id("f"), id("i"))),  -- 'i' should be undefined here
+		})
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+		T.ok(err:find("undefined name", 1, true) ~= nil)
+	end)
+end)
+
+T.describe("walker sub-phase D: generic for", function()
+	T.it("iter returning (K, V) tuple binds two names correctly", function()
+		local s = V.new_solver()
+		-- iter: () -> { ["1"]: string, ["2"]: integer }
+		local iter_ret = V.rec({ ["1"] = V.string_, ["2"] = V.integer }, false, nil)
+		local iter = V.fn({}, iter_ret, nil)
+		local take_pair = V.fn({ V.string_, V.integer }, V.nil_, nil)
+		local env = E.bind(E.bind(E.new(), "iter", iter), "take", take_pair)
+		local body = { expr_stmt(call(id("take"), id("k"), id("v"))) }
+		local node = for_in({ "k", "v" }, { id("iter") }, body)
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase D: while loop", function()
+	T.it("guard narrows for body", function()
+		local s = V.new_solver()
+		local take_int = V.fn({ V.integer }, V.nil_, nil)
+		local x_ty = V.union({ V.integer, V.nil_ })
+		local env = E.bind(E.bind(E.new(), "x", x_ty), "f", take_int)
+		local node = while_stmt(
+			binop("~=", id("x"), lit_nil()),
+			{ expr_stmt(call(id("f"), id("x"))) })
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase D: repeat loop", function()
+	T.it("body runs with no incoming narrowing; guard narrows AFTER", function()
+		local s = V.new_solver()
+		local take_int = V.fn({ V.integer }, V.nil_, nil)
+		local x_ty = V.union({ V.integer, V.nil_ })
+		local env = E.bind(E.bind(E.new(), "x", x_ty), "f", take_int)
+		-- Inside the repeat body, x is still int|nil — calling f(x) would
+		-- fail. We test that the body does NOT see the narrowing.
+		local node = repeat_stmt(
+			{ expr_stmt(call(id("f"), id("x"))) },  -- should fail (x: int|nil)
+			binop("~=", id("x"), lit_nil()))
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+	end)
+
+	T.it("post-repeat sees the positive guard narrowing", function()
+		local s = V.new_solver()
+		local take_int = V.fn({ V.integer }, V.nil_, nil)
+		local x_ty = V.union({ V.integer, V.nil_ })
+		local env = E.bind(E.bind(E.new(), "x", x_ty), "f", take_int)
+		local node = do_stmt({
+			repeat_stmt({}, binop("~=", id("x"), lit_nil())),
+			expr_stmt(call(id("f"), id("x"))),  -- x is narrowed to non-nil here
+		})
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase D: do-block", function()
+	T.it("body locals do not escape the block (narrowing on outer name does)", function()
+		local s = V.new_solver()
+		local take_int = V.fn({ V.integer }, V.nil_, nil)
+		local x_ty = V.union({ V.integer, V.string_ })
+		local env = E.bind(E.bind(E.new(), "x", x_ty), "f", take_int)
+		-- do ... if type(x) == "integer" then ... end ... end
+		-- The narrowing inside the if doesn't escape the do, but the do
+		-- itself doesn't bind new names.
+		local guard = binop("==",
+			{ tag = defs.NODE_CALL_EXPR, callee = id("type"), args = { id("x") } },
+			lit_str("integer"))
+		local node = do_stmt({
+			if_stmt({
+				clause(guard, { expr_stmt(call(id("f"), id("x"))) }),
+			}, nil),
+		})
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase D: break", function()
+	T.it("break inside a body returns cleanly", function()
+		local s = V.new_solver()
+		local env = E.new()
+		local node = while_stmt(lit_bool(true), { break_stmt() })
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
 	end)
 end)

@@ -192,13 +192,15 @@ end
 -- composes them at load time. After `M._reset_handlers()` a test can call
 -- `M._register_builtins()` to restore the standard set.
 
-local literals  = require("lib.type.static-v4.walker.literals")
-local functions = require("lib.type.static-v4.walker.functions")
+local literals     = require("lib.type.static-v4.walker.literals")
+local functions    = require("lib.type.static-v4.walker.functions")
+local control_flow = require("lib.type.static-v4.walker.control_flow")
 
 --: () -> nil
 function M._register_builtins()
 	literals.register(M)
 	functions.register(M)
+	control_flow.register(M)
 end
 
 M._register_builtins()
