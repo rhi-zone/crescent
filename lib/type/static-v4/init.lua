@@ -11,6 +11,7 @@ local T  = require("lib.type.static-v4.types")
 local ST = require("lib.type.static-v4.subtype")
 local IX = require("lib.type.static-v4.index")
 local MA = require("lib.type.static-v4.match")
+local FA = require("lib.type.static-v4.forall")
 
 local M = {}
 
@@ -28,7 +29,15 @@ M.neg     = T.neg
 M.var     = T.var
 M.fix     = T.fix
 M.mu      = T.mu
+M.forall  = T.forall
+M.forall_raw = T.forall_raw
+M.skolem  = T.skolem
 M.show    = T.show
+
+-- Rank-N operations (Phase 4e).
+M.instantiate = FA.instantiate
+M.skolemize   = FA.skolemize
+M.substitute  = FA.substitute
 
 -- Convenience primitive shortcuts (so tests don't all say M.prim("number")).
 M.number  = T.prim("number")
@@ -55,5 +64,6 @@ M.arm              = MA.arm
 -- Test affordances.
 M._reset_var_ids = T._reset_var_ids
 M._reset_mu_ids  = T._reset_mu_ids
+M._reset_skolem_ids = T._reset_skolem_ids
 
 return M

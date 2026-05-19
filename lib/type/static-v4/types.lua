@@ -35,7 +35,9 @@ local M = {}
 --:: V4Var     = { tag: "var", id: integer, name: string, lower: V4Type[], upper: V4Type[], lower_vars: { [integer]: V4Type }, upper_vars: { [integer]: V4Type } }
 --:: V4Mu      = { tag: "mu", id: integer, body: V4Type }
 --:: V4Neg     = { tag: "neg", body: V4Type }
---:: V4Type    = V4Top | V4Bot | V4Prim | V4Literal | V4Fn | V4Rec | V4Union | V4Inter | V4Var | V4Mu | V4Neg
+--:: V4Forall  = { tag: "forall", vars: V4Type[], body: V4Type }
+--:: V4Skolem  = { tag: "skolem", id: integer, name: string }
+--:: V4Type    = V4Top | V4Bot | V4Prim | V4Literal | V4Fn | V4Rec | V4Union | V4Inter | V4Var | V4Mu | V4Neg | V4Forall | V4Skolem
 
 -- Working types used by empty.lua. Declared here because cross-file `--::`
 -- aliases referencing V4Type don't currently resolve through transitive
@@ -92,6 +94,22 @@ M.TAG_MU        = "mu"
 -- subtype.lua / empty.lua applies the rest of the boolean-algebra laws on
 -- demand (De Morgan push-down, distribution, self-cancellation `T ∩ ¬T = ⊥`).
 M.TAG_NEG       = "neg"
+
+-- Universal quantification `∀X1...Xn. body`. The `vars` list holds the bound
+-- type-variable placeholders (V4Var nodes used as templates — never solved
+-- against directly; they are substituted out at instantiate/skolemize time).
+-- See rank-N polymorphism, design §6: Peyton-Jones et al. 2007 deep-
+-- skolemization at subsumption. Foralls are first-class types and can appear
+-- inside other constructors (function params for higher-rank).
+M.TAG_FORALL    = "forall"
+
+-- Skolem constants: opaque rigid nominal tags introduced when subsumption
+-- skolemizes the RHS of `T <: ∀X. U`. MLstruct §3.4's `#F` flexible nominal
+-- tags. Each skolem is a distinct atomic constructor in the lattice; subtype
+-- holds only by reflexivity (skolem <: itself, skolem <: top, bot <: skolem).
+-- Two distinct skolems are not <: each other but also not provably disjoint
+-- (they "coexist" — their intersection is not ⊥ per the paper).
+M.TAG_SKOLEM    = "skolem"
 
 -- Inference variable. lower/upper bounds accumulate during constraint solving.
 -- Per simple-sub (Parreaux 2020) / MLstruct §3.2: each variable carries a
@@ -276,6 +294,40 @@ function M.neg(body)
 	end
 end
 
+-- Forall constructor. `f` is invoked with a list of fresh "bound" V4Vars (one
+-- per name) and must return the body type. The vars are ordinary V4Vars (we
+-- don't introduce a separate "bound var" tag — substitution distinguishes
+-- "bound here" from "free" by membership in the forall's `vars` list at
+-- instantiate/skolemize time). The bound vars MUST NOT receive bounds during
+-- solving; the instantiation/skolemization step substitutes them out before
+-- any constraint is added to either side.
+--: (string[], (V4Type[]) -> V4Type) -> V4Type
+function M.forall(names, f)
+	local vars = {} --[[: V4Type[] ]]
+	for i, n in ipairs(names) do vars[i] = M.var(n) end
+	local body = f(vars)
+	return { tag = M.TAG_FORALL, vars = vars, body = body }
+end
+
+-- Lower-level forall constructor for callers building the body manually
+-- (e.g. test fixtures that already have the bound-var handles).
+--: (V4Type[], V4Type) -> V4Type
+function M.forall_raw(vars, body)
+	return { tag = M.TAG_FORALL, vars = vars, body = body }
+end
+
+-- Fresh skolem constant. Each skolem gets a unique id; equality (and hence
+-- subtype reflexivity) is by identity. Skolems are not user-facing — they
+-- arise only as a byproduct of subsumption against a forall on the right.
+local _next_skolem_id = 0
+--: (string | nil) -> V4Type
+function M.skolem(name)
+	_next_skolem_id = _next_skolem_id + 1
+	return { tag = M.TAG_SKOLEM, id = _next_skolem_id, name = name or ("σ" .. _next_skolem_id) }
+end
+
+function M._reset_skolem_ids() _next_skolem_id = 0 end
+
 -- ── Display ───────────────────────────────────────────────────────────────
 -- A minimal pretty-printer for error messages and test diagnostics. Does NOT
 -- coalesce bounds into a compact type — that's a later-phase concern.
@@ -364,6 +416,14 @@ local function show(t, seen)
 		seen.vars[t.id] = nil
 		return table.concat(parts, " ")
 	end
+	if t.tag == "forall" then
+		local names = {} --[[: { [integer]: string } ]]
+		for i, v in ipairs(t.vars) do
+			if v.tag == "var" then names[i] = v.name else names[i] = "?" end
+		end
+		return "(∀ " .. table.concat(names, " ") .. ". " .. show(t.body, seen) .. ")"
+	end
+	if t.tag == "skolem" then return "#" .. t.name end
 	return "?<" .. tostring(t.tag) .. ">"
 end
 

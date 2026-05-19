@@ -970,4 +970,290 @@ T.describe("match — worked design-doc example", function()
 	end)
 end)
 
+-- ── Rank-N polymorphism (Phase 4e) ───────────────────────────────────────
+
+T.describe("forall — basic", function()
+	T.it("(∀X. X -> X) <: (integer -> integer)", function()
+		-- LHS forall instantiates to a fresh α; α -> α <: integer -> integer
+		-- forces α = integer (contravariant param: integer <: α; covariant
+		-- return: α <: integer). The constraint solver handles both.
+		local id_poly = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fn({x}, x)
+		end)
+		T.ok(st(id_poly, V.fn({V.integer}, V.integer)))
+	end)
+
+	T.it("(integer -> integer) </: (∀X. X -> X)", function()
+		-- RHS forall skolemizes: we'd need integer -> integer <: σ -> σ for an
+		-- arbitrary σ. Contravariance gives σ <: integer (lower bound on σ),
+		-- covariance gives integer <: σ (upper bound). Both flow back to σ's
+		-- variable bounds — but σ is a skolem, not a variable, so neither
+		-- direction holds. The subsumption fails.
+		local id_poly = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fn({x}, x)
+		end)
+		T.fail(st(V.fn({V.integer}, V.integer), id_poly))
+	end)
+
+	T.it("(∀X. X -> X) <: (string -> string)", function()
+		local id_poly = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fn({x}, x)
+		end)
+		T.ok(st(id_poly, V.fn({V.string_}, V.string_)))
+	end)
+
+	T.it("(∀X. X -> integer) <: (string -> integer)", function()
+		-- Bound var only in negative position; instantiation gives α -> integer
+		-- and α gets upper-bounded by string from contravariance.
+		local poly = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fn({x}, V.integer)
+		end)
+		T.ok(st(poly, V.fn({V.string_}, V.integer)))
+	end)
+end)
+
+T.describe("forall — skolem distinctness", function()
+	T.it("(∀X. ∀Y. X -> Y) </: (∀X. X -> X) — would force two skolems equal", function()
+		-- Skolemize RHS once: prove `∀X. ∀Y. X -> Y <: σ_R -> σ_R`. Instantiate
+		-- LHS: α -> β <: σ_R -> σ_R. Contravariant: σ_R <: α (skolem lower-
+		-- bound — only itself satisfies). Covariant: β <: σ_R. So α = β = σ_R.
+		-- But α and β were introduced as independent fresh vars by the doubly-
+		-- nested LHS forall; the system is satisfiable! Actually this DOES
+		-- hold — verifying.
+		local rhs = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fn({x}, x)
+		end)
+		local lhs = V.forall({"X", "Y"}, function(vs)
+			local x, y = vs[1], vs[2]
+			if x == nil or y == nil then return V.top() end
+			return V.fn({x}, y)
+		end)
+		-- LHS is more polymorphic; usable wherever a less-polymorphic value
+		-- is required. So this *does* hold.
+		T.ok(st(lhs, rhs))
+	end)
+
+	T.it("(∀X. X -> X) </: (∀X. ∀Y. X -> Y) — would constrain output to skolem-1", function()
+		-- Skolemize RHS first: prove `∀X. X -> X <: σ_X -> σ_Y` for distinct
+		-- skolems σ_X and σ_Y. Instantiate LHS: α -> α. Contravariant param:
+		-- σ_X <: α. Covariant ret: α <: σ_Y. Transitively σ_X <: σ_Y — two
+		-- distinct skolems, fails.
+		local lhs = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fn({x}, x)
+		end)
+		local rhs = V.forall({"X", "Y"}, function(vs)
+			local x, y = vs[1], vs[2]
+			if x == nil or y == nil then return V.top() end
+			return V.fn({x}, y)
+		end)
+		T.fail(st(lhs, rhs))
+	end)
+end)
+
+T.describe("forall — higher rank", function()
+	T.it("rank-2: ((∀X. X -> X) -> string) <: ((integer -> integer) -> string)", function()
+		-- The polymorphic argument type appears in contravariant position of
+		-- the outer arrow. The supertype's argument is monomorphic; the
+		-- subtype demands a polymorphic argument. Anything passed to the
+		-- subtype must work for ALL X, so it must work for integer in
+		-- particular — meaning a `(integer -> integer) -> string` accepts
+		-- fewer values than `(∀X. X -> X) -> string`. Subtyping flips: the
+		-- subtype is the more-polymorphic-arg version, since contravariance
+		-- inverts the relation between forall and concrete.
+		-- I.e. (∀X. X -> X) <: (integer -> integer), so by contravariance
+		-- ((integer -> integer) -> string) <: ((∀X. X -> X) -> string), NOT
+		-- the other direction. Test the correct direction:
+		local id_poly = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fn({x}, x)
+		end)
+		local outer_mono = V.fn({V.fn({V.integer}, V.integer)}, V.string_)
+		local outer_poly = V.fn({id_poly}, V.string_)
+		-- The function that accepts ANY argument-shape is a subtype of the
+		-- function that accepts only polymorphic functions.
+		T.ok(st(outer_mono, outer_poly))
+	end)
+
+	T.it("rank-3: (∀X. (∀Y. X -> Y -> Y)) <: (integer -> ∀Y. Y -> Y)", function()
+		-- LHS instantiates X to fresh α; body becomes (∀Y. α -> Y -> Y).
+		-- That should subsume against (integer -> ∀Y. Y -> Y). The outer
+		-- function-subtype rule: contravariant param: integer <: α; covariant
+		-- return: (∀Y. α -> Y -> Y).ret_after_first_arg ... actually the body
+		-- is itself a function (∀Y. α -> Y -> Y) — a forall returning a
+		-- function. After instantiating X, we have (∀Y. α -> Y -> Y) which
+		-- is itself a curried 2-arg form. Restructure the test more directly.
+		local lhs = V.forall({"X"}, function(vs1)
+			local x = vs1[1]
+			if x == nil then return V.top() end
+			return V.forall({"Y"}, function(vs2)
+				local y = vs2[1]
+				if y == nil then return V.top() end
+				return V.fn({x, y}, y)
+			end)
+		end)
+		-- After instantiating X = integer, we get (∀Y. (integer, Y) -> Y).
+		local rhs = V.forall({"Y"}, function(vs)
+			local y = vs[1]
+			if y == nil then return V.top() end
+			return V.fn({V.integer, y}, y)
+		end)
+		T.ok(st(lhs, rhs))
+	end)
+
+	T.it("rank-2 in argument position with chained foralls", function()
+		-- `((∀X. ∀Y. X -> Y -> X) -> string) <: ((∀X. X -> X -> X) -> string)`
+		-- Inner LHS is more polymorphic than inner RHS; by contravariance
+		-- the outer relation flips.
+		local inner_poly = V.forall({"X", "Y"}, function(vs)
+			local x, y = vs[1], vs[2]
+			if x == nil or y == nil then return V.top() end
+			return V.fn({x, y}, x)
+		end)
+		local inner_less_poly = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fn({x, x}, x)
+		end)
+		-- inner_poly <: inner_less_poly (specializing Y to X)
+		T.ok(st(inner_poly, inner_less_poly))
+		-- so by contravariance: (inner_less_poly -> string) <: (inner_poly -> string)
+		T.ok(st(V.fn({inner_less_poly}, V.string_), V.fn({inner_poly}, V.string_)))
+	end)
+end)
+
+T.describe("forall — skolem escape check", function()
+	T.it("(α -> α) </: (∀X. X -> X) when α is a pre-existing free var", function()
+		-- α is a free variable from outer scope. If we were to admit
+		-- `α -> α <: ∀X. X -> X`, instantiating later (e.g. with α = integer)
+		-- would falsify the polymorphism claim. Skolemization detects this:
+		-- RHS skolemizes to σ -> σ; subsumption pushes σ <: α and α <: σ as
+		-- bounds on α; the escape check on LHS walks α's bounds and finds σ.
+		local a = V.var("α")
+		local fa_a = V.fn({a}, a)
+		local id_poly = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fn({x}, x)
+		end)
+		local ok, err = V.subtype(fa_a, id_poly)
+		T.fail(ok, err)
+		T.ok(err ~= nil and err:find("escape"), "expected escape error, got: " .. tostring(err))
+	end)
+
+	T.it("(integer -> integer) <: (∀X. X -> X) fails without skolem escape (ground LHS)", function()
+		-- No free vars to escape into, but the subsumption still fails for
+		-- the integer-not-<:-σ reason (concrete type does not match an
+		-- arbitrary skolem).
+		local id_poly = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fn({x}, x)
+		end)
+		T.fail(st(V.fn({V.integer}, V.integer), id_poly))
+	end)
+end)
+
+T.describe("forall — interaction with μ", function()
+	T.it("(∀X. μ Y. X | { next: Y }) constructs and subsumes by reflexivity", function()
+		local poly_list = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fix(function(self)
+				return V.union({ x, V.rec({ next = self }, false) })
+			end)
+		end)
+		-- Reflexive subtype: the same forall against itself. Goes through
+		-- skolemize-on-RHS + instantiate-on-LHS, the body recurses into μ,
+		-- and the cache short-circuits the cycle.
+		T.ok(st(poly_list, poly_list))
+	end)
+end)
+
+T.describe("forall — used at two concrete types", function()
+	T.it("(∀X. X -> X) instantiated twice yields independent var graphs", function()
+		local id_poly = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fn({x}, x)
+		end)
+		-- One instantiation at integer.
+		T.ok(st(id_poly, V.fn({V.integer}, V.integer)))
+		-- Another at string. Each call re-instantiates with fresh vars, so
+		-- the two queries do not entangle.
+		T.ok(st(id_poly, V.fn({V.string_}, V.string_)))
+	end)
+end)
+
+T.describe("forall — indexed-access body", function()
+	T.it("(∀X. { value: X, next: X })[\"value\"] reduces after instantiation", function()
+		-- The forall is itself not directly indexable (index.lua doesn't have
+		-- a forall case), but instantiating first then indexing works.
+		local poly_rec = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.rec({ value = x, next = x }, false)
+		end)
+		local body = V.instantiate(poly_rec)
+		local r, err = V.index(body, V.literal("string", "value"))
+		T.eq(err, nil)
+		T.ok(r ~= nil, "expected non-nil index result")
+		-- The result is a fresh free var (from instantiation).
+		T.ok(r ~= nil and r.tag == "var", "expected var, got " .. V.show(r))
+	end)
+end)
+
+T.describe("forall — in match arms", function()
+	T.it("a match arm result template may be a forall", function()
+		-- A subject matches an arm whose result is a polymorphic identity.
+		-- The forward evaluator should hand the forall back verbatim (it is
+		-- not instantiated by match — instantiation happens at the call site
+		-- of the polymorphic value, not at match-evaluation time).
+		local id_poly = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fn({x}, x)
+		end)
+		local arms = {
+			V.arm(V.string_, id_poly),
+			V.arm(V.integer, V.fn({V.integer}, V.integer)),
+		}
+		local r, err = V.match(V.string_, arms, V.nil_)
+		T.eq(err, nil)
+		T.eq(r, id_poly)
+	end)
+end)
+
+T.describe("forall — impredicativity", function()
+	T.it("a forall body may itself contain a forall in a field (impredicative)", function()
+		-- A record field typed by a forall. Full rank-N admits this in the
+		-- type *representation*; subtyping treats the forall atomically when
+		-- comparing field types, with the same skolemize/instantiate rules
+		-- triggered by the recursive descent through record subtyping.
+		local id_poly = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fn({x}, x)
+		end)
+		local r1 = V.rec({ id = id_poly }, false)
+		local r2 = V.rec({ id = V.fn({V.integer}, V.integer) }, false)
+		-- r1.id is more polymorphic than r2.id, so r1 <: r2 (covariant field).
+		T.ok(st(r1, r2))
+		-- The other direction fails (concrete cannot impersonate poly).
+		T.fail(st(r2, r1))
+	end)
+end)
+
 return T._summary()

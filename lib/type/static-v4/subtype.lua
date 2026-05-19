@@ -19,6 +19,7 @@
 
 local T = require("lib.type.static-v4.types")
 local E = require("lib.type.static-v4.empty")
+local F = require("lib.type.static-v4.forall")
 
 -- V4Type and its variant aliases (V4Var, V4Top, V4Prim, ...) are imported
 -- transitively from types.lua via the require above — the crescent typechecker
@@ -324,6 +325,40 @@ constrain = function(s, a, b)
 	local k = cache_key(a, b)
 	if s.cache[k] then return true end
 	s.cache[k] = true
+
+	-- ── Rank-N polymorphism (Phase 4e) ──────────────────────────────────
+	-- A forall on the RHS is skolemized: prove `a <: body[skolems/X]`, then
+	-- verify the skolems do not escape into a (or its free vars' bounds).
+	-- A forall on the LHS is instantiated: prove `body[fresh/X] <: b`.
+	-- When both sides are foralls we skolemize the RHS first (introducing the
+	-- rigid tags) and then instantiate the LHS — the fresh LHS vars may then
+	-- legitimately receive the skolems as bounds, while the escape check
+	-- afterwards confirms the skolems did not leak past `a`.
+	-- Peyton-Jones, Vytiniotis, Weirich, Shields (JFP 2007) is the canonical
+	-- reference; MLstruct §3.4 is the structural-subtyping analogue.
+	if b.tag == "forall" then
+		local body, skolems = F.skolemize(b)
+		if not constrain(s, a, body) then return false end
+		local esc = F.find_escape(a, skolems)
+		if esc ~= nil then
+			return fail(s, "rank-N: skolem " .. T.show(esc)
+				.. " escapes into " .. T.show(a)
+				.. " when subsuming against " .. T.show(b))
+		end
+		return true
+	end
+	if a.tag == "forall" then
+		local body = F.instantiate(a)
+		return constrain(s, body, b)
+	end
+
+	-- Skolem rules. Skolems are nominal opaque atoms; subtype holds by
+	-- reflexivity only (modulo top/bot, handled in decompose). Two distinct
+	-- skolems are not <: each other.
+	if a.tag == "skolem" and b.tag == "skolem" then
+		if a.id == b.id then return true end
+		return mismatch(s, a, b, "distinct skolems")
+	end
 
 	-- Equi-recursive types: unfold one step. The cache entry above guarantees
 	-- termination — when the unfolded body reaches the same (mu, other) pair,

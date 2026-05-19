@@ -1,4 +1,4 @@
-# static-v4 — typechecker foundation (Phases 4a–4d)
+# static-v4 — typechecker foundation (Phases 4a–4e)
 
 Greenfield typechecker, derived from `docs/typechecker-rewrite-design.md`
 (itself derived from simple-sub and MLstruct).
@@ -16,9 +16,15 @@ This directory currently implements:
   same arm-matching primitive. The wildcard `_` desugars to the v4
   complement type `~(union of other arms' patterns)` — real type, not
   syntactic special-casing.
+- **Phase 4e** — full rank-N polymorphism. `∀X. T(X)` is a first-class type
+  with deep-skolemization at subsumption (Peyton-Jones, Vytiniotis, Weirich,
+  Shields, JFP 2007). Skolems are nominal opaque rigid tags (MLstruct §3.4
+  `#F`). The escape check fires after subsumption against a RHS forall,
+  walking the LHS and every reachable variable bound to ensure no introduced
+  skolem leaked.
 
 Still out of scope: the AST walker, CLI integration, cache (`.cri`),
-quantifiers / rank-N (4e), effects (4f).
+effects (4f).
 
 ## Layout
 
@@ -433,6 +439,104 @@ negation that participates in subtype/emptiness — they do NOT generate
 phase that has a real caller; the implementation is one analyze_key case
 when needed (see `empty.lua` EXCEPTIONS note 3).
 
+## Phase 4e — full rank-N polymorphism
+
+Phase 4e adds universal quantification `∀X. T(X)` as a first-class type
+constructor. The design surface is rewrite-design §6 (full rank-N, not
+predicative-only); the implementation follows Peyton-Jones et al. 2007
+("Practical Type Inference for Arbitrary-Rank Types") with MLstruct §3.4's
+`#F` flexible nominal tags as the skolem representation.
+
+### API
+
+- `M.forall(names, body_fn)` — construct `∀ names. body_fn(vars)` where the
+  body function is invoked with fresh bound `V4Var`s, one per name. Capture-
+  avoiding by construction: those vars are templates, never solved against.
+- `M.forall_raw(vars, body)` — low-level constructor for callers with an
+  already-built body referencing pre-existing var handles.
+- `M.skolem(name?)` — fresh skolem constant. Skolems normally arise from
+  `skolemize`; the constructor is exposed for tests.
+- `M.instantiate(forall)` — replace each bound var with a fresh free var;
+  return the substituted body. Each call uses independent fresh vars so
+  two instantiations of the same forall do not entangle.
+- `M.skolemize(forall)` — replace each bound var with a fresh skolem;
+  return `(body, skolems)` for use by the escape check.
+- `M.substitute(t, subst)` — pure id-keyed substitution. Capture-avoiding:
+  an inner forall's bound names shadow the outer substitution.
+- New tags: `"forall"` (variant `V4Forall = { vars, body }`) and `"skolem"`
+  (variant `V4Skolem = { id, name }`).
+
+### Subsumption rules
+
+The standard rank-N subsumption schema, factored as two `constrain` rules:
+
+- **RHS forall** — `a <: ∀X. b`: skolemize the RHS, prove `a <: b[skolems/X]`,
+  then run `find_escape(a, skolems)`. If any introduced skolem appears in
+  `a` directly OR in any free variable's transitive bound list, the
+  subsumption fails with an escape error.
+- **LHS forall** — `∀X. a <: b`: instantiate the LHS with fresh vars, prove
+  `a[fresh/X] <: b`. The fresh vars become ordinary inference variables.
+
+When both sides are foralls, ordering matters: the RHS rule fires first
+(introducing skolems), then the LHS rule (instantiating against an already-
+skolemized goal). This is the standard "skolemize-then-instantiate"
+discipline from Peyton-Jones et al.
+
+### Skolems in the lattice
+
+A skolem is a rigid opaque atom. Subtyping holds only by:
+- `sk <: sk` (reflexivity by id);
+- `sk <: ⊤`, `⊥ <: sk` (universal lattice rules);
+- via `<: var` / `var <:` link rules when an inference variable is on the
+  other side (the bound graph absorbs the skolem).
+
+Two distinct skolems are NOT <: each other and NOT provably disjoint
+(MLstruct §3.4 "coexist with unrelated tags without reducing to ⊥").
+Emptiness treats skolems as opaque — no `atom_kind`, no kind-disjointness.
+
+### Escape check
+
+After subsuming against a RHS forall, `forall.lua`'s `find_escape` walks the
+LHS and every reachable free variable's bound graph (lower, upper,
+lower_vars, upper_vars). The walk is identity-keyed on visited variables;
+cycles in the bound graph terminate. `mu` bodies and `forall` bodies are
+descended (skolems can be reachable through both, particularly when
+subsumption builds a `μ` over a fresh capture). If the walk finds a skolem
+in the id-set, the subsumption fails with `"rank-N: skolem #X escapes..."`.
+
+The check is non-negotiable for soundness. Admitting an escaping skolem
+would witness `T <: ∀X. U` by appealing to a specific instantiation of X —
+contradicting universality. The implementation rejects loudly; there is no
+"escape repair" or "wider context" fallback.
+
+### Impredicativity
+
+Foralls are first-class: a forall body may contain another forall (rank-N),
+and a record/function field may be typed by a forall (impredicative). The
+representation is uniform — no separate "boxed" form — and subtype rules
+trigger recursively through normal constructor descent. Tests:
+
+- Rank-2: `(∀X. X → X) → string` flowing through fn-subtype with the inner
+  forall in contravariant position.
+- Rank-3: `(∀X. (∀Y. X → Y → Y))` instantiated and subsumed.
+- Impredicative record field: `{ id: ∀X. X → X } <: { id: integer → integer }`
+  holds because the record field is covariant and the more-polymorphic
+  forall subsumes the monomorphic field type.
+
+The design doc notes (§6) that full impredicative *inference* is the
+unsolved part — Quick Look (Serrano et al. 2020) is the indicated future
+discipline. Phase 4e requires the user to provide the forall explicitly
+(no inference of `∀` from usage), consistent with crescent's "no implicit
+let-generalization" stance.
+
+### Substitution
+
+Phase 4e introduces a single substitution implementation in `forall.lua`,
+covering every tag in the lattice including `forall` (capture-avoiding) and
+`skolem` (atomic). The duplicate substitution previously local to
+`match.lua` could be retired in a follow-up; for 4e it remains so the diff
+stays focused.
+
 ## Running
 
 ```
@@ -442,6 +546,7 @@ timeout 30 bin/cr check lib/type/static-v4/types.lua \
                        lib/type/static-v4/empty.lua \
                        lib/type/static-v4/index.lua \
                        lib/type/static-v4/match.lua \
+                       lib/type/static-v4/forall.lua \
                        lib/type/static-v4/init.lua \
                        lib/type/static-v4/static_v4_test.lua
 ```

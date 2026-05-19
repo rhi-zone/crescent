@@ -252,6 +252,8 @@ local function pure_subtype(s, a, b)
 			return false
 		end
 		if t.tag == "neg" then return mentions_var(t.body) end
+		if t.tag == "forall" then return mentions_var(t.body) end
+		-- skolem: rigid opaque atom, no inner vars.
 		-- mu intentionally NOT descended: it is opaque to emptiness, treated
 		-- as an atom whose body can be unfolded by the structural subtype
 		-- check via its own cache (see subtype.lua mu handling).
