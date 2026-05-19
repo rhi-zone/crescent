@@ -5,8 +5,10 @@ into v4 type-system constraints. See
 `docs/typechecker-ast-walker-design.md` for the full design.
 
 This directory is being built incrementally across sub-phases A–J (design
-doc §13). **This is sub-phase A**: the environment record and the dispatch
-shell only. No per-node constraint generation yet.
+doc §13). **Current state: sub-phase B complete** — the env/dispatch
+scaffolding from A plus SYNTHESIZE handlers for literals, identifiers,
+and varargs. CHECK mode now actually emits constraints via the default
+synth-and-subtype rule (§2.1).
 
 ## Sub-phase A — what's here
 
@@ -68,6 +70,57 @@ without a lazy `unknown` widening (CLAUDE.md "Don't add type aliases that
 legitimize laziness"). This is verbose; if the limitation is fixed
 upstream, the shape can be consolidated to one alias.
 
+## Sub-phase B — what's here
+
+- **`literals.lua`** — SYNTHESIZE handlers for the three node kinds whose
+  semantics map one-to-one to a v4 constructor with no subtyping, call,
+  narrowing, or scope manipulation:
+  - `NODE_LITERAL` (§3.1) — `lit_kind` selects the constructor:
+    - `LIT_NIL` → `V.prim("nil")` (the canonical interned singleton; the
+      design doc admits either prim or `V.literal("nil", nil)` — prim is
+      preferred because a `nil` literal carries no useful precision).
+    - `LIT_BOOLEAN` → `V.literal("boolean", v)`.
+    - `LIT_INTEGER` → `V.literal("integer", v)` (the lexer distinguishes
+      integer vs number; the walker trusts that).
+    - `LIT_NUMBER` → `V.literal("number", v)`.
+    - `LIT_STRING` → `V.literal("string", v)`.
+  - `NODE_IDENTIFIER` (§3.2) — `E.lookup` (narrowing overlay takes
+    precedence over the underlying binding). An unbound name errors
+    `"undefined name X"`; crescent disallows ambient globals, so silently
+    widening to `unknown` is forbidden.
+  - `NODE_VARARG_EXPR` (§3.3) — synthesizes `env.vararg`; errors
+    `"varargs not in scope"` when no enclosing function bears one. The
+    tuple-spread semantics from §3.3 ("last expression of a call argument
+    list / return / table constructor") is a property of the *enclosing*
+    node, deferred to sub-phase D.
+
+- **`walker.lua`** — the CHECK default rule (§2.1 "if in doubt, synthesize
+  and subtype") now actually emits `V.constrain` and surfaces
+  `solver.error`. Sub-phase A had the rule plumbed but deferred the
+  constrain call until synth handlers existed; B is where that landed.
+  `M._register_builtins()` composes the per-sub-phase handler modules
+  on load (currently just `literals`); future sub-phases extend the list.
+
+### Decoded node shape
+
+Handlers consume a Lua-table view of each node, intentionally divorced
+from the parser's FFI ASTNode struct so handlers stay portable to
+non-parser callers (tests, REPL eval, future cdef integration). The
+FFI→walker bridge is part of sub-phase J. The shapes:
+
+| Node               | Fields                                                       |
+|--------------------|--------------------------------------------------------------|
+| NODE_LITERAL       | `{ tag, line, col, lit_kind, value }`                        |
+| NODE_IDENTIFIER    | `{ tag, line, col, name }`                                   |
+| NODE_VARARG_EXPR   | `{ tag, line, col }`                                         |
+
+`lit_kind` is one of `defs.LIT_NIL`, `LIT_BOOLEAN`, `LIT_INTEGER`,
+`LIT_NUMBER`, `LIT_STRING`. `value` is the Lua-typed payload (no payload
+for `LIT_NIL`).
+
+The Lua AST has no `NODE_PAREN_EXPR`: the parser unwraps parentheses
+inline (`(x)` parses to the same node as `x`), so no handler is needed.
+
 ## Sub-phase A does NOT include
 
 - Per-node handlers — every `node.tag` dispatches to a stub.
@@ -80,7 +133,6 @@ upstream, the shape can be consolidated to one alias.
 
 ## What comes next (design doc §13)
 
-- **Phase B** — SYNTHESIZE for literals, identifiers, vararg.
 - **Phase C** — annotations and casts (parallel with D).
 - **Phase D** — expressions, calls, indexing (parallel with C).
 - **Phase E** — statements and control-flow scaffolding (no narrowing).

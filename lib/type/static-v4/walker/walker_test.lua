@@ -197,21 +197,25 @@ T.describe("walker: dispatch shell", function()
 	T.it("synth on a node with no registered handler returns a clean error", function()
 		W._reset_handlers()
 		local s = V.new_solver()
-		local node = { tag = defs.NODE_LITERAL, line = 1, col = 1 }
+		-- Use a tag with no builtin handler. NODE_CHUNK is sub-phase J;
+		-- nothing registers it yet.
+		local node = { tag = defs.NODE_CHUNK, line = 1, col = 1 }
 		local ty, _env, err = W.walk_synth(node, E.new(), s)
 		T.eq(ty, nil)
 		T.ok(err ~= nil)
-		T.ok(err:find("NODE_LITERAL", 1, true) ~= nil)
-		T.ok(err:find("sub-phase A", 1, true) ~= nil)
+		T.ok(err:find("NODE_CHUNK", 1, true) ~= nil)
+		T.ok(err:find("not yet implemented", 1, true) ~= nil)
+		W._register_builtins()
 	end)
 
 	T.it("walk_check on an unregistered node falls through to synth and surfaces synth's error", function()
 		W._reset_handlers()
 		local s = V.new_solver()
-		local node = { tag = defs.NODE_LITERAL, line = 1, col = 1 }
+		local node = { tag = defs.NODE_CHUNK, line = 1, col = 1 }
 		local _env, err = W.walk_check(node, E.new(), s, V.integer)
 		T.ok(err ~= nil)
-		T.ok(err:find("NODE_LITERAL", 1, true) ~= nil)
+		T.ok(err:find("NODE_CHUNK", 1, true) ~= nil)
+		W._register_builtins()
 	end)
 
 	T.it("register_synth wires a handler that fires", function()
@@ -227,7 +231,7 @@ T.describe("walker: dispatch shell", function()
 		T.ok(called)
 		T.eq(err, nil)
 		T.eq(ty, V.integer)
-		W._reset_handlers()
+		W._reset_handlers(); W._register_builtins()
 	end)
 
 	T.it("register_check wires a handler that fires", function()
@@ -242,7 +246,7 @@ T.describe("walker: dispatch shell", function()
 		local _env, err = W.walk_check({ tag = defs.NODE_LITERAL }, E.new(), s, V.integer)
 		T.eq(err, nil)
 		T.eq(got_expected, V.integer)
-		W._reset_handlers()
+		W._reset_handlers(); W._register_builtins()
 	end)
 
 	T.it("walk routes to CHECK when env.expected is set", function()
@@ -258,7 +262,7 @@ T.describe("walker: dispatch shell", function()
 		T.eq(err, nil)
 		T.ok(check_fired)
 		T.eq(ty, V.integer)
-		W._reset_handlers()
+		W._reset_handlers(); W._register_builtins()
 	end)
 
 	T.it("walk routes to SYNTHESIZE when env.expected is nil", function()
@@ -270,7 +274,7 @@ T.describe("walker: dispatch shell", function()
 		local ty, _env, err = W.walk({ tag = defs.NODE_LITERAL }, E.new(), s)
 		T.eq(err, nil)
 		T.eq(ty, V.string_)
-		W._reset_handlers()
+		W._reset_handlers(); W._register_builtins()
 	end)
 
 	T.it("position is threaded into env from node line/col", function()
@@ -287,17 +291,173 @@ T.describe("walker: dispatch shell", function()
 		T.eq(err, nil)
 		T.eq(seen_line, 17)
 		T.eq(seen_col, 4)
-		W._reset_handlers()
+		W._reset_handlers(); W._register_builtins()
 	end)
 
-	T.it("sub-phase A registers no handlers by default", function()
-		W._reset_handlers()
+	T.it("only sub-phase B handlers are registered by default", function()
+		-- Sub-phase B installs SYNTHESIZE handlers for literals, identifiers,
+		-- and varargs at module load time. Tags for later sub-phases must
+		-- remain unregistered.
+		T.ok(W.has_synth(defs.NODE_LITERAL))
+		T.ok(W.has_synth(defs.NODE_IDENTIFIER))
+		T.ok(W.has_synth(defs.NODE_VARARG_EXPR))
 		for _, tag in pairs({
-			defs.NODE_LITERAL, defs.NODE_IDENTIFIER, defs.NODE_CALL_EXPR,
-			defs.NODE_LOCAL_STMT, defs.NODE_IF_STMT, defs.NODE_CHUNK,
+			defs.NODE_CALL_EXPR, defs.NODE_LOCAL_STMT,
+			defs.NODE_IF_STMT, defs.NODE_CHUNK,
 		}) do
 			T.fail(W.has_synth(tag))
 			T.fail(W.has_check(tag))
 		end
+		-- No CHECK handlers registered yet — every CHECK goes through the
+		-- default synth+constrain rule in sub-phase B.
+		T.fail(W.has_check(defs.NODE_LITERAL))
+		T.fail(W.has_check(defs.NODE_IDENTIFIER))
+		T.fail(W.has_check(defs.NODE_VARARG_EXPR))
+	end)
+end)
+
+-- ── sub-phase B: literals ─────────────────────────────────────────────────
+
+T.describe("walker sub-phase B: NODE_LITERAL", function()
+	T.it("nil literal synthesizes V.prim('nil')", function()
+		local s = V.new_solver()
+		local node = { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_NIL }
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty, V.prim("nil"))
+	end)
+
+	T.it("boolean literal synthesizes V.literal('boolean', v)", function()
+		local s = V.new_solver()
+		local t_node = { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_BOOLEAN, value = true }
+		local ty_t, _e1, e1 = W.walk_synth(t_node, E.new(), s)
+		T.eq(e1, nil)
+		T.eq(ty_t, V.literal("boolean", true))
+		local f_node = { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_BOOLEAN, value = false }
+		local ty_f, _e2, e2 = W.walk_synth(f_node, E.new(), s)
+		T.eq(e2, nil)
+		T.eq(ty_f, V.literal("boolean", false))
+	end)
+
+	T.it("integer literal synthesizes V.literal('integer', v)", function()
+		local s = V.new_solver()
+		local node = { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_INTEGER, value = 42 }
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty, V.literal("integer", 42))
+	end)
+
+	T.it("number literal synthesizes V.literal('number', v)", function()
+		local s = V.new_solver()
+		local node = { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_NUMBER, value = 3.14 }
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty, V.literal("number", 3.14))
+	end)
+
+	T.it("string literal synthesizes V.literal('string', v)", function()
+		local s = V.new_solver()
+		local node = { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_STRING, value = "hi" }
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty, V.literal("string", "hi"))
+	end)
+
+	T.it("unknown lit_kind produces a clean error", function()
+		local s = V.new_solver()
+		local node = { tag = defs.NODE_LITERAL, lit_kind = 999 }
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(ty, nil)
+		T.ok(err ~= nil)
+		T.ok(err:find("unknown lit_kind", 1, true) ~= nil)
+	end)
+
+	T.it("CHECK mode: literal subtypes its primitive base", function()
+		local s = V.new_solver()
+		local node = { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_INTEGER, value = 7 }
+		local _env, err = W.walk_check(node, E.new(), s, V.integer)
+		T.eq(err, nil)
+	end)
+
+	T.it("CHECK mode: string literal vs integer expected fails", function()
+		local s = V.new_solver()
+		local node = { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_STRING, value = "x" }
+		local _env, err = W.walk_check(node, E.new(), s, V.integer)
+		T.ok(err ~= nil)
+	end)
+end)
+
+T.describe("walker sub-phase B: NODE_IDENTIFIER", function()
+	T.it("synthesizes the bound type", function()
+		local s = V.new_solver()
+		local env = E.bind(E.new(), "x", V.integer)
+		local node = { tag = defs.NODE_IDENTIFIER, name = "x" }
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.integer)
+	end)
+
+	T.it("undefined name errors (no ambient globals)", function()
+		local s = V.new_solver()
+		local node = { tag = defs.NODE_IDENTIFIER, name = "nope" }
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(ty, nil)
+		T.ok(err ~= nil)
+		T.ok(err:find("undefined name", 1, true) ~= nil)
+		T.ok(err:find("nope", 1, true) ~= nil)
+	end)
+
+	T.it("narrowed overlay takes precedence over binding", function()
+		local s = V.new_solver()
+		local env = E.bind(E.new(), "x", V.union({ V.integer, V.string_ }))
+		env = E.narrow(env, "x", V.integer)
+		local node = { tag = defs.NODE_IDENTIFIER, name = "x" }
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.integer)
+	end)
+
+	T.it("CHECK mode: bound type subtypes expected", function()
+		local s = V.new_solver()
+		local env = E.bind(E.new(), "x", V.integer)
+		local node = { tag = defs.NODE_IDENTIFIER, name = "x" }
+		local _env, err = W.walk_check(node, env, s, V.integer)
+		T.eq(err, nil)
+	end)
+
+	T.it("CHECK mode: undefined name still errors before subtyping", function()
+		local s = V.new_solver()
+		local node = { tag = defs.NODE_IDENTIFIER, name = "nope" }
+		local _env, err = W.walk_check(node, E.new(), s, V.integer)
+		T.ok(err ~= nil)
+		T.ok(err:find("undefined name", 1, true) ~= nil)
+	end)
+end)
+
+T.describe("walker sub-phase B: NODE_VARARG_EXPR", function()
+	T.it("synthesizes env.vararg when in scope", function()
+		local s = V.new_solver()
+		local env = E.enter_function(E.new(), V.string_, V.integer)
+		local node = { tag = defs.NODE_VARARG_EXPR }
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.integer)
+	end)
+
+	T.it("errors when no enclosing vararg function", function()
+		local s = V.new_solver()
+		local node = { tag = defs.NODE_VARARG_EXPR }
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(ty, nil)
+		T.ok(err ~= nil)
+		T.ok(err:find("varargs not in scope", 1, true) ~= nil)
+	end)
+
+	T.it("CHECK mode: vararg type subtypes expected", function()
+		local s = V.new_solver()
+		local env = E.enter_function(E.new(), V.string_, V.integer)
+		local node = { tag = defs.NODE_VARARG_EXPR }
+		local _env, err = W.walk_check(node, env, s, V.integer)
+		T.eq(err, nil)
 	end)
 end)

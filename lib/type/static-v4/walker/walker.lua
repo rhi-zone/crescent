@@ -96,7 +96,9 @@ function M.has_synth(tag) return synth_handlers[tag] ~= nil end
 function M.has_check(tag) return check_handlers[tag] ~= nil end
 
 -- Clear all registered handlers. Test-only; production callers should
--- register-then-walk in a single setup.
+-- register-then-walk in a single setup. Sub-phase B (and beyond) install
+-- their built-in handlers at module load; after `_reset_handlers` a test
+-- that wants the built-ins back must call `_register_builtins`.
 --: () -> nil
 function M._reset_handlers()
 	synth_handlers = {} --[[: { [integer]: (node: Node, env: { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }, solver: V4Solver) -> (V4Type | nil, { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }, string | nil) } ]]
@@ -124,7 +126,7 @@ function M.walk_synth(node, env, solver)
 	local h = synth_handlers[tag]
 	if h == nil then
 		return nil, env,
-			"walker: " .. tag_name(tag) .. " not yet implemented in sub-phase A"
+			"walker: " .. tag_name(tag) .. " not yet implemented"
 	end
 	return h(node, env, solver)
 end
@@ -134,13 +136,14 @@ end
 -- Default rule (§2.1 "if in doubt, synthesize and subtype"): synthesize the
 -- node's type, then constrain it against `expected`. Direct CHECK rules
 -- (registered via `register_check`) override this for nodes where
--- bidirectional checking pays off.
+-- bidirectional checking pays off (table literals, function literals,
+-- generic calls — sub-phases D and G).
 --
--- The default rule needs a `solver` to emit constraints. We accept `solver`
--- as a parameter but defer the actual constrain-call: sub-phase A registers
--- no synth handlers either, so the synth call will return an error and the
--- default rule will short-circuit on that error before reaching constrain.
--- Sub-phase B / D wire constrain in when synth produces real types.
+-- The default is wired in sub-phase B now that synth handlers produce
+-- real types. On constrain failure, `solver.error` carries the diagnostic
+-- and we surface it as the err return.
+
+local subtype_mod = require("lib.type.static-v4.subtype")
 
 --: (node: Node, env: { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }, solver: V4Solver, expected: V4Type) -> ({ bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }, string | nil)
 function M.walk_check(node, env, solver, expected)
@@ -152,11 +155,19 @@ function M.walk_check(node, env, solver, expected)
 	end
 	-- Default: synthesize, then constrain.
 	local env2 = E.with_expected(env, expected)
-	local _ty, env3, err = M.walk_synth(node, env2, solver)
+	local ty, env3, err = M.walk_synth(node, env2, solver)
 	if err ~= nil then return env3, err end
-	-- Sub-phase A has no synth handlers so we never reach here; the
-	-- constrain-call lands in a later sub-phase once synthesis can return a
-	-- non-nil type. Documented as a fall-through so the shape is fixed.
+	if ty == nil then
+		-- Statement nodes synthesize to nil. CHECK against a non-statement
+		-- node is the caller's contract; receiving nil here means the caller
+		-- asked CHECK on a statement, which is a bug.
+		return env3, "walker: CHECK invoked on a statement node (" ..
+			tag_name(tag) .. ")"
+	end
+	subtype_mod.constrain(solver, ty, expected)
+	if solver.error ~= nil then
+		return env3, solver.error
+	end
 	return env3, nil
 end
 
@@ -174,5 +185,20 @@ function M.walk(node, env, solver)
 	end
 	return M.walk_synth(node, env, solver)
 end
+
+-- ── Built-in handler registration ─────────────────────────────────────────
+--
+-- Each sub-phase contributes a module that exports `register(W)`. The walker
+-- composes them at load time. After `M._reset_handlers()` a test can call
+-- `M._register_builtins()` to restore the standard set.
+
+local literals = require("lib.type.static-v4.walker.literals")
+
+--: () -> nil
+function M._register_builtins()
+	literals.register(M)
+end
+
+M._register_builtins()
 
 return M
