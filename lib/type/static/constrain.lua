@@ -4019,6 +4019,8 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
     local pass_through_neg = {}  -- negated narrowings for the implicit pass-through path
     local has_else         = false
     local disc_names       = {}  -- name_ids narrowed via field_disc in an exiting arm
+    --: { [integer]: integer }
+    local disc_arm_counts  = {}  -- name_id -> count of exiting arms that field_disc'd it
 
     for i = n.data[0], n.data[0] + n.data[1] - 1 do
         local cn          = ctx.nodes:get(ctx.ast_lists:get(i))
@@ -4106,6 +4108,7 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
                 -- Track name_ids discriminated via field_disc for exhaustiveness checking.
                 if arm_info and arm_info.kind == "field_disc" then
                     disc_names[arm_info.name_id] = true
+                    disc_arm_counts[arm_info.name_id] = (disc_arm_counts[arm_info.name_id] or 0) + 1
                 end
                 for name_id, type_id in pairs(neg) do
                     if guard_narrowings[name_id] == nil then
@@ -4140,6 +4143,19 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
     -- Exhaustiveness check: warn when a discriminated union if-chain has no else
     -- and all branches exit (Cat E only) but the continuation type is not never.
     -- Only fires for field_disc narrowing (tagged union dispatch), not nil-checks.
+    --
+    -- A *single*-arm exit (`if x.tag == "Y" then return end` or `if x.tag ~= "Y" then return end`)
+    -- is a precondition guard, not an attempted exhaustive dispatch — the function
+    -- body after the if-statement uses the residual under its narrowed type, which
+    -- is the intended behavior. For single-arm guards we suppress the generic
+    -- NON_EXHAUSTIVE warning entirely, but still emit MATCH_CONTAINS_ANY when the
+    -- residual contains `any` because that *is* a soundness signal regardless of
+    -- arm count (the typechecker genuinely cannot verify exhaustiveness when `any`
+    -- absorbs the residual).
+    --
+    -- For ≥2-arm chains (`if t.tag == "a" then return; elseif t.tag == "b" then return; end`)
+    -- the chain itself reads as an attempted exhaustive match — preserve both
+    -- warnings.
     if not has_else and #branch_ends == 0 and next(disc_names) then
         for name_id in pairs(disc_names) do
             local cont_tid = guard_narrowings[name_id]
@@ -4147,6 +4163,7 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
                 cont_tid = types_mod.find(ctx, cont_tid)
                 if cont_tid ~= ctx.T_NEVER then
                     local var_name = intern_mod.get(ctx.pool, name_id) or "?"
+                    local is_single_arm = (disc_arm_counts[name_id] or 0) < 2
                     -- Check whether the remaining type contains `any`. If so, emit a
                     -- specific warning instead of the generic non-exhaustive one for
                     -- the `any` member: `any` makes exhaustiveness unverifiable, so
@@ -4170,8 +4187,9 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
                     if has_any then
                         warn(ctx, n.line, n.col, E.MATCH_CONTAINS_ANY, {})
                         -- If there are also non-any unhandled members, still emit
-                        -- the generic non-exhaustive warning for those.
-                        if #non_any_members > 0 then
+                        -- the generic non-exhaustive warning for those — but only
+                        -- when the chain has ≥2 arms (i.e. is an attempted match).
+                        if #non_any_members > 0 and not is_single_arm then
                             local remaining_parts = {}
                             for _, m_tid in ipairs(non_any_members) do
                                 remaining_parts[#remaining_parts + 1] =
@@ -4181,7 +4199,7 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
                             warn(ctx, n.line, n.col, E.NON_EXHAUSTIVE,
                                 { name = var_name, remaining = "case(s): " .. remaining })
                         end
-                    else
+                    elseif not is_single_arm then
                         local remaining = types_mod.display(ctx, cont_tid)
                         warn(ctx, n.line, n.col, E.NON_EXHAUSTIVE,
                             { name = var_name, remaining = "case(s): " .. remaining })
