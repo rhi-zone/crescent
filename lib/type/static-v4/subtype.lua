@@ -19,21 +19,10 @@
 
 local T = require("lib.type.static-v4.types")
 
--- Re-declare aliases used in this module. `V4Type` is the discriminated union
--- defined in types.lua; we redeclare here because each Lua file is a
--- compilation unit. `V4Var` is the variable shape, used to type the bound-
--- manipulating helpers below — the typechecker can narrow V4Type to V4Var on
--- a `t.tag == "var"` check, but only inside that branch.
---:: V4Var    = { tag: "var", id: integer, name: string, lower: V4Type[], upper: V4Type[], lower_vars: { [integer]: V4Type }, upper_vars: { [integer]: V4Type } }
---:: V4Top     = { tag: "top" }
---:: V4Bot     = { tag: "bot" }
---:: V4Prim    = { tag: "prim", name: string }
---:: V4Literal = { tag: "literal", base: string, value: unknown }
---:: V4Fn      = { tag: "fn", params: V4Type[], ret: V4Type }
---:: V4Rec     = { tag: "rec", fields: { [string]: V4Type }, open: boolean }
---:: V4Union   = { tag: "union", members: V4Type[] }
---:: V4Inter   = { tag: "inter", members: V4Type[] }
---:: V4Type    = V4Top | V4Bot | V4Prim | V4Literal | V4Fn | V4Rec | V4Union | V4Inter | V4Var
+-- V4Type and its variant aliases (V4Var, V4Top, V4Prim, ...) are imported
+-- transitively from types.lua via the require above — the crescent typechecker
+-- resolves `--::` aliases across files following the require graph. Solver
+-- state is local to this module.
 --:: V4Solver  = { cache: { [string]: boolean }, error: string | nil }
 
 local M = {}
