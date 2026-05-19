@@ -595,3 +595,64 @@ last because the type system itself is the testbed.
 - [x] `lib/bayesian_filter/init.lua` (was 13 → now 0, commit 7044dcb) — ClfCat/Classifier/ClfSerial type aliases; tokenize annotation; inline field init in constructor; softmax sum cast to number
 - [x] `lib/ansi/init.lua` (was 1 → now 0, commit d386cff) — boolean coercion via `and true or false`
 - [x] `lib/benford/init.lua` (was 12 → now 0, commit 4069309) — annotated lower_reg_gamma/leading_two_digits; typed observed accumulators; log_gamma c-table typed array; nil-safe leading digit extraction
+
+---
+
+# Typechecker v4 Walker (AST walker rework)
+
+Tracks the in-flight rewrite per `docs/typechecker-ast-walker-design.md`. Separate from
+the per-file error cleanup queue above — this section is the v4 implementation work itself.
+
+## Walker sub-phases (sequential, per design doc §13)
+
+- [x] **Phase A** — env + dispatch scaffolding (commit `84c49929`).
+- [ ] **Phase B** — literals + primitive expressions (next).
+- [ ] **Phase C** — function defs + calls + rank-N.
+- [ ] **Phase D** — control flow + narrowing.
+- [ ] **Phase E** — match expressions.
+- [ ] **Phase F** — indexed access + varargs + multi-return.
+- [ ] **Phase G** — FFI cdef integration.
+- [ ] **Phase H** — effects.
+- [ ] **Phase I** — cross-file resolution + cache integration.
+- [ ] **Phase J** — diagnostics + source positions.
+
+## Legacy typechecker bugs (D-series)
+
+- [x] **D1** — scalar return against tuple expected (commit `7b8b6b9d`).
+- [ ] **D2** — multi-return spread into last-position call args is unimplemented.
+- [ ] **D3** — non-last call expression in multi-assign is not truncated to slot 0.
+- [ ] **D4** — `...A` annotation in return position documented in typechecker-reference but rejected by impl.
+- [ ] **D1 follow-up flow-sensitivity quirk** — original D1 repro (`local _, s = f(); --: string\nlocal s_str = s`) doesn't error at top level even though simpler variants do. Function-body error fires correctly; downstream flow check is suspect. Audit when convenient.
+- [ ] **Third cross-file `--::` resolution gap** — top-level `--::` alias bodies referencing imported types still fail (different from the lazy case fixed by `1a0d4bea` and the prescan `--:: require` case which works). Surfaced in walker sub-phase A.
+
+## Big architectural pieces (after walker)
+
+- [ ] **Error reporting / diagnostic UX** — structured per-error metadata at construction; group-by in `--summary` mode rather than post-hoc regex.
+- [ ] **CLI integration** — `bin/cr check` dispatches to v4 (flag-gated first, then default).
+- [ ] **Test corpus migration** — port `type_test.lua`, `type_soundness_test.lua`, etc. to v4.
+- [ ] **Parity testing** — v4 vs existing typechecker on representative corpus; named divergences.
+- [ ] **Migration cutover** — `lib/type/static-v4/` becomes `lib/type/static/`; old impl retired.
+
+## Open design questions (from design doc §14) — all resolved
+
+- [x] **OQ #1** (module pattern) — Option D: lower-bound `V.var()` with field accumulation. Commit `529b55f2`.
+- [x] **OQ #2** (multi-return tuple subtype) — design fresh; D1 fixed, D2/D3/D4 pending. Commit `053dc5ed`.
+- [x] **OQ #3** (effect attribution under skolemization) — body arrow; outer-forall placement isn't meaningful. Resolved in conversation.
+- [x] **OQ #4** (inline param annotations) — unsupported (block-comment form silently ignored). Commit `509282fd`.
+- [x] **OQ #5** (typeof mutual equality) — union-find via v4 bound graphs (pre-bind every scope-introduced name). Commit `5c72d38f`.
+- [x] **OQ #6** (`$Require` redundancy) — NOT redundant; foundational. Resolved this session.
+- [x] **OQ #7** (`--summary` root-cause grouping) — existing is ad-hoc; walker emits structured diagnostics. Commit `835acc0c`.
+
+## Resolved this session (for completeness)
+
+- [x] V4Type duplication — dedup via cross-file import.
+- [x] Cross-file `--::` lazy-case bug — commit `1a0d4bea`.
+- [x] lib/ai dedup — commit `8e0bfb9b`.
+- [x] CLAUDE.md temp-measures rule — commit `13e6885f`.
+- [x] V4 atom identity — commit `8fcd5a61`.
+- [x] Legacy narrowing-warning bug — commit `a5d3e329`.
+- [x] `ai_http_response` canonicalization — commit `8b41c1ad`.
+- [x] V4 substitute consolidation — commit `5c9c28d8`.
+- [x] Cross-file prescan `--:: require` case — false alarm; resolved by using the syntax (commit `b72ffa49`).
+- [x] openai_compat `__len` doubling — commit `83099525`.
+- [x] CLAUDE.md no-ambient-globals — commit `2d055e10`.
