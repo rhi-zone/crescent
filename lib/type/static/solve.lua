@@ -2755,10 +2755,42 @@ local function solve_return(ctx, c)
         -- only the first expression is emitted via C_RETURN), use slot 0 of the
         -- expected tuple for the per-slot check.
         if et.tag == TAG_TUPLE and ctx.types:get(widened).tag ~= TAG_TUPLE then
-            -- Normal multi-return: `return a, b` — ret_tids[1] = a, check against slot 0.
-            if types_mod.agg_members_len(et) > 0 then
-                expected_tid = find(ctx, ctx.lists:get(types_mod.agg_members_start(et)))
+            -- Scalar actual vs multi-slot expected: `return a` against `(A, B, ...)`.
+            -- Per Lua semantics, missing return values are `nil` at the call site
+            -- (`local x, y = f()` yields y = nil). So treat the actual as
+            -- (actual, nil, nil, ...) padded to expected's arity and check each slot.
+            -- This is sound: it rejects iff a missing slot's `nil` is not a subtype
+            -- of the corresponding expected slot (e.g. `return 1` against
+            -- `(integer, string)` fails because nil </: string), but accepts when
+            -- the trailing slots are nilable (e.g. `(integer, string?)`).
+            local e_len = types_mod.agg_members_len(et)
+            local e_start = types_mod.agg_members_start(et)
+            if e_len > 0 then
+                expected_tid = find(ctx, ctx.lists:get(e_start))
             end
+            local ok, err = unify_mod.unify(ctx, widened, expected_tid)
+            if not ok then
+                add_error(ctx, line, col,
+                    "return type mismatch: cannot return `"
+                    .. types_mod.display_short(ctx, val_tid)
+                    .. "`: " .. (err or "type mismatch"))
+                return true
+            end
+            -- Check the remaining slots against `nil`.
+            for i = 1, e_len - 1 do
+                local slot_tid = find(ctx, ctx.lists:get(e_start + i))
+                local ok2, err2 = unify_mod.unify(ctx, ctx.T_NIL, slot_tid)
+                if not ok2 then
+                    add_error(ctx, line, col,
+                        "return type mismatch: function declared to return "
+                        .. e_len .. " values but only 1 returned (slot "
+                        .. (i + 1) .. " `"
+                        .. types_mod.display_short(ctx, slot_tid)
+                        .. "` does not accept nil): " .. (err2 or "type mismatch"))
+                    return true
+                end
+            end
+            return true
         end
         local ok, err = unify_mod.unify(ctx, widened, expected_tid)
         if not ok then
