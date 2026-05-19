@@ -2164,3 +2164,341 @@ T.describe("walker sub-phase H: handler registration", function()
 	end)
 end)
 
+-- ── Sub-phase I — cross-file resolution + cache integration ────────────────
+--
+-- The require resolver uses injected I/O capabilities to read source files,
+-- hash them via SHA-256, look up the v4 .cri cache, and bind the imported
+-- file's exports + aliases into the requiring file's scope. Cache hits
+-- succeed; cache misses reject loudly (sub-phase I defers recursive walk
+-- to sub-phase J). Cycles are broken via env.require_chain.
+
+local require_resolve = require("lib.type.static-v4.walker.require_resolve")
+
+-- In-memory file system simulator used by sub-phase I tests. Provides the
+-- four caps cache.lua / require_resolve.lua expect: read_file, write_file,
+-- mkdir, file_exists. File paths are strings; directories are tracked
+-- separately so mkdir succeeds even when no file lives under the path yet.
+local function fake_fs(initial_files)
+	local files = {}
+	for k, v in pairs(initial_files or {}) do files[k] = v end
+	local dirs = {}
+	return {
+		_files = files,
+		_dirs  = dirs,
+		read_file = function(path)
+			local v = files[path]
+			if v == nil then return nil, "ENOENT: " .. path end
+			return v, nil
+		end,
+		write_file = function(path, bytes)
+			files[path] = bytes
+			return true, nil
+		end,
+		mkdir = function(path)
+			dirs[path] = true
+			return true, nil
+		end,
+		file_exists = function(path)
+			return files[path] ~= nil
+		end,
+	}
+end
+
+T.describe("walker sub-phase I: handler registration", function()
+	T.it("require_resolve.synth_call is registered for NODE_CALL_EXPR", function()
+		T.ok(W.has_synth(defs.NODE_CALL_EXPR))
+	end)
+
+	T.it("effects.synth_call_for_subphase_i is exposed", function()
+		local H = require("lib.type.static-v4.walker.effects")
+		T.ok(H.synth_call_for_subphase_i ~= nil)
+	end)
+
+	T.it("non-require calls still go through the captured handler chain", function()
+		-- A normal call (no `require` callee) must dispatch normally. This
+		-- exercises the fall-through path: I → H → G → F → C.
+		local s = V.new_solver()
+		local f_ty = V.fn({ V.integer }, V.string_, nil)
+		local env = E.bind(E.new(), "f", f_ty)
+		local node = call(id("f"), lit_int(7))
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.string_)
+	end)
+end)
+
+T.describe("walker sub-phase I: path resolution", function()
+	T.it("lib.foo.bar resolves to lib/foo/bar.lua when present", function()
+		local fs = fake_fs({ ["lib/foo/bar.lua"] = "return 1" })
+		local path, err = require_resolve.resolve_module_path(fs, "lib.foo.bar")
+		T.eq(err, nil)
+		T.eq(path, "lib/foo/bar.lua")
+	end)
+
+	T.it("lib.foo.bar falls back to lib/foo/bar/init.lua", function()
+		local fs = fake_fs({ ["lib/foo/bar/init.lua"] = "return 1" })
+		local path, err = require_resolve.resolve_module_path(fs, "lib.foo.bar")
+		T.eq(err, nil)
+		T.eq(path, "lib/foo/bar/init.lua")
+	end)
+
+	T.it("prefers .lua over init.lua when both exist", function()
+		local fs = fake_fs({
+			["lib/foo/bar.lua"]      = "return 1",
+			["lib/foo/bar/init.lua"] = "return 2",
+		})
+		local path, err = require_resolve.resolve_module_path(fs, "lib.foo.bar")
+		T.eq(err, nil)
+		T.eq(path, "lib/foo/bar.lua")
+	end)
+
+	T.it("returns an error when neither exists", function()
+		local fs = fake_fs({})
+		local path, err = require_resolve.resolve_module_path(fs, "lib.foo.bar")
+		T.eq(path, nil)
+		T.ok(err ~= nil)
+		T.ok(err:find("not found", 1, true) ~= nil)
+	end)
+end)
+
+T.describe("walker sub-phase I: artifact pack/unpack", function()
+	T.it("pack/unpack round-trips an exports + alias map", function()
+		local exports = V.fn({}, V.integer, nil)
+		local aliases = { Foo = V.integer, Bar = V.string_ }
+		local artifact = require_resolve.pack_artifact(exports, aliases)
+		local e, a, err = require_resolve.unpack_artifact(artifact)
+		T.eq(err, nil)
+		T.eq(e, exports)
+		T.eq(a.Foo, V.integer)
+		T.eq(a.Bar, V.string_)
+	end)
+
+	T.it("pack with nil aliases gives an empty alias map", function()
+		local artifact = require_resolve.pack_artifact(V.integer, nil)
+		local _e, a, err = require_resolve.unpack_artifact(artifact)
+		T.eq(err, nil)
+		T.eq(next(a), nil)
+	end)
+
+	T.it("unpack errors on a non-record artifact", function()
+		local _e, _a, err = require_resolve.unpack_artifact(V.integer)
+		T.ok(err ~= nil)
+	end)
+
+	T.it("artifact serialise/deserialise through V.serialize round-trips", function()
+		local exports = V.fn({}, V.integer, nil)
+		local aliases = { Foo = V.string_ }
+		local artifact = require_resolve.pack_artifact(exports, aliases)
+		local bytes = V.serialize(artifact)
+		local artifact2, derr = V.deserialize(bytes)
+		T.eq(derr, nil)
+		T.ok(artifact2 ~= nil)
+		local _e, a, err = require_resolve.unpack_artifact(artifact2)
+		T.eq(err, nil)
+		T.ok(a.Foo ~= nil)
+	end)
+end)
+
+T.describe("walker sub-phase I: cache hit", function()
+	T.it("require returns the cached export type", function()
+		-- Populate cache: write a source file, hash it, store an artifact
+		-- under that source hash, then walk a require call.
+		local source = "return function() return 42 end"
+		local fs = fake_fs({ ["lib/foo.lua"] = source })
+		local sha256_mod = require("lib.hash.sha256")
+		local source_hash = sha256_mod.sha256(source)
+		local exports = V.fn({}, V.integer, nil)
+		local artifact = require_resolve.pack_artifact(exports, nil)
+		V.cache_store(fs, ".cache", source_hash, artifact, nil)
+
+		local env = E.with_cache_dir(E.with_io_caps(E.new(), fs), ".cache")
+		local node = call(id("require"), lit_str("lib.foo"))
+		local s = V.new_solver()
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		-- The deserialised exports is structurally identical to `exports`
+		-- but a fresh table — compare on tag + ret rather than identity.
+		T.ok(ty ~= nil)
+		T.eq(ty.tag, "fn")
+		T.eq(ty.ret.tag, "prim")
+		T.eq(ty.ret.name, "integer")
+	end)
+
+	T.it("require merges imported file's aliases into the env", function()
+		local source = "return 0"
+		local fs = fake_fs({ ["lib/has_aliases.lua"] = source })
+		local sha256_mod = require("lib.hash.sha256")
+		local source_hash = sha256_mod.sha256(source)
+		local exports = V.integer
+		local aliases = { Foo = V.string_, Bar = V.boolean }
+		local artifact = require_resolve.pack_artifact(exports, aliases)
+		V.cache_store(fs, ".cache", source_hash, artifact, nil)
+
+		local env = E.with_cache_dir(E.with_io_caps(E.new(), fs), ".cache")
+		local node = call(id("require"), lit_str("lib.has_aliases"))
+		local s = V.new_solver()
+		local _ty, env_out, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		local foo = E.lookup_alias(env_out, "Foo")
+		T.ok(foo ~= nil)
+		T.eq(foo.tag, "prim")
+		T.eq(foo.name, "string")
+		local bar = E.lookup_alias(env_out, "Bar")
+		T.ok(bar ~= nil)
+		T.eq(bar.tag, "prim")
+		T.eq(bar.name, "boolean")
+	end)
+end)
+
+T.describe("walker sub-phase I: cache miss", function()
+	T.it("rejects loudly with a deferred-walk message", function()
+		local fs = fake_fs({ ["lib/uncached.lua"] = "return 1" })
+		local env = E.with_cache_dir(E.with_io_caps(E.new(), fs), ".cache")
+		local node = call(id("require"), lit_str("lib.uncached"))
+		local s = V.new_solver()
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+		T.ok(err:find("cache miss", 1, true) ~= nil)
+		T.ok(err:find("sub-phase", 1, true) ~= nil)
+	end)
+
+	T.it("missing source file errors at path resolution", function()
+		local fs = fake_fs({})
+		local env = E.with_cache_dir(E.with_io_caps(E.new(), fs), ".cache")
+		local node = call(id("require"), lit_str("lib.no_such"))
+		local s = V.new_solver()
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+		T.ok(err:find("not found", 1, true) ~= nil)
+	end)
+end)
+
+T.describe("walker sub-phase I: I/O capability injection", function()
+	T.it("require without io_caps errors loudly", function()
+		local env = E.new()
+		local node = call(id("require"), lit_str("lib.anything"))
+		local s = V.new_solver()
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+		T.ok(err:find("io_caps", 1, true) ~= nil)
+	end)
+
+	T.it("require without cache_dir errors loudly", function()
+		local fs = fake_fs({})
+		local env = E.with_io_caps(E.new(), fs)
+		local node = call(id("require"), lit_str("lib.anything"))
+		local s = V.new_solver()
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+		T.ok(err:find("cache_dir", 1, true) ~= nil)
+	end)
+
+	T.it("non-require calls do not need io_caps", function()
+		-- Pure regression: a normal call with no caps in the env must
+		-- continue to work. (Sub-phase I gates ONLY require dispatch.)
+		local s = V.new_solver()
+		local f_ty = V.fn({}, V.integer, nil)
+		local env = E.bind(E.new(), "f", f_ty)
+		local node = call(id("f"))
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.integer)
+	end)
+end)
+
+T.describe("walker sub-phase I: cycle detection", function()
+	T.it("re-entrant require returns the in-progress placeholder", function()
+		-- Push `A` onto the chain with a concrete placeholder, then walk a
+		-- require("A") call. The inner call must return the placeholder
+		-- without touching the cache (no file in fs — would otherwise fail
+		-- at path resolution).
+		local fs = fake_fs({})
+		local placeholder = V.var("placeholder:A")
+		local env = E.push_require(
+			E.with_cache_dir(E.with_io_caps(E.new(), fs), ".cache"),
+			"a", placeholder)
+		local node = call(id("require"), lit_str("a"))
+		local s = V.new_solver()
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, placeholder)
+	end)
+
+	T.it("re-entrant require with `true` sentinel mints a fresh var", function()
+		local fs = fake_fs({})
+		local env = E.push_require(
+			E.with_cache_dir(E.with_io_caps(E.new(), fs), ".cache"),
+			"a", true)
+		local node = call(id("require"), lit_str("a"))
+		local s = V.new_solver()
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.ok(ty ~= nil)
+		T.eq(ty.tag, "var")
+	end)
+
+	T.it("require_chain is unwound on the way out of a cache hit", function()
+		-- After a successful require, the mod_name should not remain on
+		-- the chain (so a sibling require() in the same scope isn't
+		-- mistakenly diverted to the placeholder branch).
+		local source = "return 0"
+		local fs = fake_fs({ ["lib/m.lua"] = source })
+		local sha256_mod = require("lib.hash.sha256")
+		local source_hash = sha256_mod.sha256(source)
+		local artifact = require_resolve.pack_artifact(V.integer, nil)
+		V.cache_store(fs, ".cache", source_hash, artifact, nil)
+
+		local env = E.with_cache_dir(E.with_io_caps(E.new(), fs), ".cache")
+		local node = call(id("require"), lit_str("lib.m"))
+		local s = V.new_solver()
+		local _ty, env_out, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(E.lookup_require(env_out, "lib.m"), nil)
+	end)
+end)
+
+T.describe("walker sub-phase I: env helpers", function()
+	T.it("bind_alias / lookup_alias round-trip", function()
+		local e = E.bind_alias(E.new(), "Foo", V.integer)
+		T.eq(E.lookup_alias(e, "Foo"), V.integer)
+		T.eq(E.lookup_alias(e, "Bar"), nil)
+	end)
+
+	T.it("bind_alias is functional", function()
+		local e0 = E.new()
+		local e1 = E.bind_alias(e0, "Foo", V.integer)
+		T.eq(E.lookup_alias(e0, "Foo"), nil)
+		T.eq(E.lookup_alias(e1, "Foo"), V.integer)
+	end)
+
+	T.it("with_io_caps / with_cache_dir update the slots", function()
+		local fs = fake_fs({})
+		local e = E.with_cache_dir(E.with_io_caps(E.new(), fs), ".cache")
+		T.eq(e.io_caps, fs)
+		T.eq(e.cache_dir, ".cache")
+	end)
+
+	T.it("push_require / pop_require / lookup_require round-trip", function()
+		local p = V.var("p")
+		local e = E.push_require(E.new(), "m", p)
+		T.eq(E.lookup_require(e, "m"), p)
+		local e2 = E.pop_require(e, "m")
+		T.eq(E.lookup_require(e2, "m"), nil)
+	end)
+
+	T.it("enter_function preserves aliases, io_caps, cache_dir, require_chain", function()
+		-- File-scope slots must survive crossing a function boundary; only
+		-- function-frame slots (return_ty, vararg, effects, narrowed) reset.
+		local fs = fake_fs({})
+		local e0 = E.bind_alias(E.new(), "Foo", V.integer)
+		e0 = E.with_io_caps(e0, fs)
+		e0 = E.with_cache_dir(e0, ".cache")
+		e0 = E.push_require(e0, "a", true)
+		local e1 = E.enter_function(e0, V.bot(), nil)
+		T.eq(E.lookup_alias(e1, "Foo"), V.integer)
+		T.eq(e1.io_caps, fs)
+		T.eq(e1.cache_dir, ".cache")
+		T.eq(E.lookup_require(e1, "a"), true)
+	end)
+end)
+

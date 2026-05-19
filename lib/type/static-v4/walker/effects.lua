@@ -351,6 +351,14 @@ function M.register(W)
 	W.register_synth(defs.NODE_CALL_EXPR, synth_call)
 end
 
+-- Exposed for sub-phase I (require_resolve.lua) to wrap as a fallback.
+-- Sub-phase I layers cross-file `require()` resolution on top of the
+-- effect-aware handler; non-require calls fall through to H's intrinsic
+-- recognisers (error/pcall/xpcall), which themselves fall through to G's
+-- ffi.cdef handler, and so on down the chain. Same convention as
+-- ffi_cdef.lua's `synth_call_for_subphase_h`.
+M.synth_call_for_subphase_i = synth_call
+
 -- Test hooks.
 M.pcall_return_type = pcall_return_type
 M.is_named_identifier = is_named_identifier

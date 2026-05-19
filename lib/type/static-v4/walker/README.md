@@ -5,12 +5,12 @@ into v4 type-system constraints. See
 `docs/typechecker-ast-walker-design.md` for the full design.
 
 This directory is being built incrementally across sub-phases A–J (design
-doc §13). **Current state: sub-phase H complete** — effect plumbing
-(yield, throw, pcall) layered on top of the FFI-aware CALL_EXPR handler.
-Stacks on top of A (env/dispatch), B (literals, identifiers, varargs),
-C (functions, calls, returns), D (control-flow + flow-sensitive
-narrowing), E (local/assign + match), F (indexed access, module pattern,
-varargs polish), and G (FFI cdef integration).
+doc §13). **Current state: sub-phase I complete** — cross-file `require`
+resolution + `.cri` cache integration layered on top of the effect-aware
+CALL_EXPR handler. Stacks on top of A (env/dispatch), B (literals,
+identifiers, varargs), C (functions, calls, returns), D (control-flow +
+flow-sensitive narrowing), E (local/assign + match), F (indexed access,
+module pattern, varargs polish), G (FFI cdef integration), and H (effects).
 
 ## Sub-phase H — effects
 
@@ -44,6 +44,139 @@ Effect annotation surface syntax (`(A) -[yield]-> B`) has no consumer in
 v4 yet — the bridge from legacy `ann.lua` to V4Type is sub-phase J. The
 walker accepts pre-resolved `V.fn(params, ret, effects)` annotations on
 AST nodes; that is the de-facto spec for now.
+
+## Sub-phase I — cross-file resolution
+
+`require_resolve.lua` is the final CALL_EXPR-handler layer in the override
+chain (B → C → F → G → H → I). It recognises the call-site shape
+`require("modname")` (bare-identifier `require` callee, single string-
+literal argument) and resolves it through the v4 `.cri` content-addressed
+cache. Non-require calls fall through to H unchanged.
+
+### Pipeline
+
+1. **Module-name → path resolution.** `lib.foo.bar` resolves to
+   `lib/foo/bar.lua` if that file exists, otherwise
+   `lib/foo/bar/init.lua`. This mirrors Lua's standard `package.path`
+   with crescent's `?/init.lua` convention. File existence is queried via
+   the injected `io_caps.file_exists`.
+2. **Content hash.** The imported source file's raw bytes are SHA-256
+   hashed via `lib.hash.sha256`. The hash is the cache lookup key.
+3. **Cache lookup.** `V.cache_lookup(io_caps, cache_dir, source_hash)`
+   returns serialised `.cri` bytes or nil.
+4. **Cache hit.** `V.deserialize(bytes)` produces an *artifact* V4Type
+   (see "Artifact encoding" below). The walker unpacks it into
+   `(exports, aliases)`, binds the exports as the call expression's
+   synthesised result, and merges the imported file's `--::` aliases into
+   the requiring file's alias scope via `E.bind_alias`.
+5. **Cache miss.** REJECT LOUDLY. Sub-phase I does not include the
+   recursive walk — that requires an AST/source-parse pipeline which has
+   no v4 bridge yet (sub-phase J). The miss diagnostic names the
+   limitation honestly. Populating the cache out-of-band remains a
+   supported workflow (the `cache_store` API is unchanged).
+
+### Cycle detection
+
+`env.require_chain` is a `{ [string]: V4Type | boolean }` map populated
+while a `require` is in progress. Before resolving `require("A")`, the
+chain entry `"A"` is pushed; a recursive `require("A")` inside A's body
+sees the entry and returns the placeholder (Lua runtime semantics: the
+inner require sees the in-progress module). The chain is unwound on the
+way out so a sibling `require("A")` in the same scope re-resolves
+through the cache. A genuine module-level cycle (A requires B requires A)
+remains diagnosable: the second visit to A returns the placeholder var,
+and downstream type unification surfaces any cycle-introduced
+contradictions at use sites.
+
+### Artifact encoding (export + aliases)
+
+v4 `cache.lua` serialises a single V4Type. A file's import surface is two
+things: the runtime exports type AND the file-scope `--::` aliases the
+file declared. Sub-phase I packs both into one cacheable V4Type using a
+closed-record wrapper:
+
+```
+V.rec({
+  exports = <export V4Type>,
+  aliases = V.rec({ Foo = <T>, Bar = <U>, ... }, false, nil),
+}, false, nil)
+```
+
+The wrapper is opaque to `cache.lua` (one V4Type in, one V4Type out)
+and the walker unpacks it on the read side via
+`require_resolve.unpack_artifact`. This sidesteps any extension to the
+cache wire format — the artifact-vs-bare-type distinction lives in the
+walker, where the import-surface concept exists. Files written to the
+cache from outside the walker must use the same wrapper shape;
+`require_resolve.pack_artifact` is the canonical builder.
+
+### I/O capability injection
+
+The require resolver does NOT reach for `io` / `os` directly. The
+walker's env carries:
+
+- `env.io_caps` — `{ read_file, write_file, mkdir, file_exists }` for all
+  file operations. Required for `require`; absence + an attempted
+  `require` errors loudly (no fallback to globals, per CLAUDE.md
+  "Caps-first, everywhere").
+- `env.cache_dir` — base directory for the `.cri` cache. Required
+  alongside io_caps.
+
+Helpers: `E.with_io_caps`, `E.with_cache_dir`. These are file-scope
+slots: `E.enter_function` preserves them across function boundaries (a
+nested function body still resolves `require` against the file's
+configured caps).
+
+### Cross-file `--::` aliases
+
+A file declaring `--:: Foo = ...` populates its own `env.aliases` map.
+When that file is `require`d, the cached artifact's alias map is merged
+into the requiring file's `env.aliases` (the v4 equivalent of legacy
+Pass -1 alias propagation). Annotation resolution in the requiring file
+then sees `Foo` as if it had been declared locally. The mechanism is
+load-bearing for `--::` aliases that reference other files' types — the
+walker does not improvise alias resolution from first principles.
+
+The `--::` declaration walker that POPULATES `env.aliases` from in-file
+`--::` lines is sub-phase J's responsibility (the annotation-parser
+bridge); sub-phase I delivers the cross-file *plumbing*. Tests in I drive
+the alias-map injection directly to verify the merge path.
+
+### Decoded node shape — synthetic for sub-phase I
+
+The require resolver consumes the existing `NODE_CALL_EXPR` shape (from
+sub-phase C). No new decoded shapes.
+
+### Env slots added in I
+
+| Slot            | Type                                      | Purpose                                       |
+|-----------------|-------------------------------------------|-----------------------------------------------|
+| `aliases`       | `{ [string]: V4Type }`                    | File-scope `--::` alias names                 |
+| `io_caps`       | `V4IoCaps \| nil`                         | Injected file I/O caps (read/write/mkdir/exists) |
+| `cache_dir`     | `string \| nil`                           | Base directory for the `.cri` cache          |
+| `require_chain` | `{ [string]: V4Type \| boolean }`         | Cycle-detection in-progress map               |
+
+Helpers: `E.bind_alias`, `E.lookup_alias`, `E.with_io_caps`,
+`E.with_cache_dir`, `E.push_require`, `E.pop_require`,
+`E.lookup_require`. All are functional (return new env; original
+untouched). `E.enter_function` preserves all four slots (file-scope, not
+function-scope).
+
+These four fields are intentionally NOT in the env.lua `--::` WalkerEnv
+alias body (extending it triggers more of the documented cross-module
+alias-resolution cascades). They are runtime-only extensions; helper
+function signatures inline them at each use site.
+
+### Cache miss — why "loud rejection" is principled here
+
+Per CLAUDE.md "no half-measures with a TODO" — a cache miss path that
+silently widens the requiring file's binding to `unknown` would poison
+context for every future session: downstream code would see the wrong
+type and reason from a broken premise. The loud rejection ensures the
+miss is visible. The recursive-walk path is non-trivial because v4 has
+no AST-source pipeline yet; the bridge (parse.lua → walker AST →
+constraint generation → cache store) is sub-phase J's deliverable.
+Until then, the cache miss is the signal, and the diagnostic names that.
 
 ## Sub-phase A — what's here
 
@@ -594,9 +727,5 @@ shape.
 - **Phase C** — annotations and casts (parallel with D).
 - **Phase D** — expressions, calls, indexing (parallel with C).
 - **Phase E** — statements and control-flow scaffolding (no narrowing).
-- **Phase F** — narrowing.
-- **Phase G** — forall annotations / rank-N (parallel with F).
-- **Phase H** — match types.
-- **Phase I** — FFI cdef integration.
-- **Phase J** — effects + cross-file `require` cache + diagnostics
-  (integration phase).
+- **Phase J** — diagnostics polish, annotation-parser bridge, recursive-
+  walk for cache miss, CLI integration, test corpus migration.
