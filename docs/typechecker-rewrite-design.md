@@ -45,15 +45,27 @@ on types are the boolean-algebra operations on those sets.
   spread parameter.
 - **Fixed points.** Equi-recursive types with lazy expansion. The lattice
   closes under recursion via a `μX. T` constructor.
-- **Universal quantification.** `<T>(...)`. Rank-N supported at call-site
-  subsumption (skolemize, check escape). Bounds `<T: U>` are structural
-  subtyping constraints.
+- **Universal quantification.** `<T>(...)`. Full rank-N supported at call-site
+  subsumption (skolemize, check escape, deep-skolemize at subsumption per
+  Peyton Jones et al. 2007). Bounds `<T: U>` are structural subtyping
+  constraints.
 - **Type-level functions.** Generic aliases `Foo<T, U> = ...` and match-type
   evaluators `match X { P1 => R1 | P2 => R2 }`.
 - **Nominal opaqueness.** `newtype`, `opaque`, `private` — identity wrappers
   whose denotation is the underlying set tagged with a fresh nominal token,
   so structural equivalence does not unify them.
 - **Indexed access.** `T["k"]`, `T[K]` — projection on a type expression.
+  First-class lattice operation with distribution rules: `T[K1 | K2] =
+  T[K1] | T[K2]`. Negated keys are accepted: `T[~"x"]` is the type of
+  fields whose key isn't `"x"`. Against an unbound key-type-variable,
+  indexed access becomes a deferred constraint (resolved when the variable
+  is bound), analogous to suspended match-type evaluation. Expected
+  semantics on the three record shapes:
+  - Closed record `{ "x": A, "y": B }`: `T[~"x"] = T["y"] = B`.
+  - Open record `{ "x": A, ... }`: `T[~"x"]` includes the row-variable's
+    unknown keys, so the result may be wider than the user expects
+    (e.g. `A_other_fields | unknown`). Not unsound; honest.
+  - Indexer-typed record `{ [string]: V }`: `T[~"x"] = V`.
 
 ### 1.2 Boolean operations
 
@@ -265,6 +277,18 @@ present. No surface-syntax restriction on `~T` is necessary or appropriate:
 users may write `~T` for `T` of any shape (function, record, nominal,
 union, intersection), and the simplifier handles it uniformly.
 
+**DNF emptiness checking is deferred until forced, not universal.** DNF
+emptiness is worst-case exponential in the number of conjuncts, but it
+does not need to be run on every constraint. Emptiness checks only fire at
+specific decision points: subtype queries involving non-trivial negation,
+match-arm dispatch against negated atoms, and narrowing-simplification of
+complex inputs. The solver therefore (a) defers emptiness checks until a
+decision point forces one, (b) caches results keyed on the post-
+simplification form, and (c) times out on pathological cases with a
+diagnostic pointing at the originating expression. The "competitive with
+tsgo" bar is met by avoiding gratuitous checks, not by adopting a more
+restricted boolean algebra.
+
 For match-type wildcards over record/function patterns — e.g.
 `MetaOf<T> = match T { { #...%M } => M, _ => nil }` where the `_` arm
 desugars to `~{ #...%M }` — the dispatch decision is a disjointness check
@@ -340,6 +364,24 @@ case to the solver") are upheld by construction: the algorithm has nowhere
 to put a new predicate.
 
 The closed set of constraints is `{ <: }`, full stop.
+
+### 3.1 Effect tracking
+
+Crescent commits to effect tracking when language features require it.
+Coroutines need it (yield as a typed effect). `pcall`/`error` likely needs
+it (throw as a typed effect). Async/await, if added, needs it (await as an
+effect). The scope is: track which effects appear, infer them on function
+types, allow user annotation.
+
+The initial effect set is small and extensible per-feature: `yield` and
+`throw` to start, with new effects added as features land. Crescent
+deliberately does **not** design a full Koka/Eff row-of-effects calculus
+upfront — the row-of-effects machinery is heavy, and committing to it
+before more than two effects exist would over-engineer the surface. The
+constraint vocabulary therefore stays `{ <: }`: effects ride on function
+arrow types as an additional, structurally compared component, and effect
+subtyping reduces to subset constraints on effect labels, which is itself
+a `<:` query.
 
 ## 4. Type representation
 
@@ -485,10 +527,14 @@ Use sites split into two cases:
   an *escape check*: no skolem may appear in the principal type of any
   context that outlives the call.
 
-This is standard rank-N treatment (Peyton Jones et al., "Practical type
-inference for arbitrary-rank types," 2007). With set-theoretic types, the
-skolem appears as an opaque atomic constructor in the lattice; emptiness and
-subtyping treat it the same way they treat any nominal opaque type.
+Crescent commits to **full rank-N polymorphism**, not predicative-only.
+The foundation is simple-sub's level-based generalization plus MLstruct's
+`#F` flexible nominal tags as skolems; lifting to full rank-N requires
+deep-skolemization at subsumption points per Peyton Jones et al.,
+"Practical type inference for arbitrary-rank types" (2007). This is
+non-trivial but well-trodden. With set-theoretic types, the skolem appears
+as an opaque atomic constructor in the lattice; emptiness and subtyping
+treat it the same way they treat any nominal opaque type.
 
 **Relation to MLstruct.** MLstruct itself is rank-1: polymorphism in λ¬ is
 attached solely to top-level `def` bindings (§4.1.1), and local `let` is
@@ -516,14 +562,14 @@ when to generalize, where to run escape checks), not the *subtyping
 algorithm*.
 
 Impredicativity (forall-typed values stored inside record fields, used in
-HKT dispatch through record-of-generic-functions) is acknowledged as an
-expressiveness gap in `typechecker-reference.md` §HKT. The clean rewrite
-should *not* attempt full impredicativity by default; the design space there
-is genuinely unsolved in the surrounding research and crescent is not the
-place to solve it. If the rewrite is to support it, it should pick a
-specific predicativity discipline (boxed impredicative polymorphism per Quick
-Look, Serrano et al. 2020) and commit to it; this is an open question for the
-user (see §9).
+HKT dispatch through record-of-generic-functions) is a separate axis from
+rank-N depth. Crescent commits to full rank-N; impredicativity is not part
+of that commitment. The design space for impredicativity is genuinely
+unsolved in the surrounding research, and the rank-N commitment above does
+not pin a choice. If impredicativity is later wanted, Quick Look boxed
+impredicative polymorphism (Serrano et al. 2020) is the indicated
+discipline. Until then, HKT dispatch through records of generic functions
+remains an expressiveness gap per `typechecker-reference.md` §HKT.
 
 ## 7. Narrowing
 
@@ -601,83 +647,71 @@ constructor set.
 - Type-level functions via match-type evaluation.
 - Recursive types via equi-recursive μ.
 
-### 9.2 Acknowledged gaps requiring further design
+### 9.2 Resolved design questions
 
-The following are referenced by the canonical docs but not fully resolved by
-this design. Each is a question the user needs to decide before
-implementation can start, or a topic that needs its own dedicated design
-document.
+1. **RESOLVED: Rank-N polymorphism.** Crescent commits to full rank-N, not
+   predicative-only. Foundation: simple-sub's level-based generalization
+   plus MLstruct's `#F` flexible nominal tags as skolems; lift to full
+   rank-N via deep-skolemization at subsumption per Peyton Jones et al.
+   2007. Commitment lives in §1.1 and §6. Impredicativity remains a
+   separate, unresolved axis and is not part of this commitment.
 
-1. **HKT dispatch through records of generic functions.**
-   `typechecker-reference.md` §HKT calls out the H2 gap: calls of the form
-   `Functor<Maybe>.map(value, f)` where the dispatched field's value is
-   itself a forall with type-call slots. This is the impredicativity
-   question (§6). The user must choose between (a) accept the gap and treat
-   it as expressiveness, (b) commit to Quick Look boxed impredicativity, or
-   (c) restrict HKT to the direct-call shape syntactically. I cannot resolve
-   this from the references alone.
+2. **RESOLVED: Variance.** Inferred from structural position; no user
+   annotation syntax. For structural types (functions, records, unions,
+   intersections), variance falls out of structural subtyping rules
+   automatically. For named generics defined via type aliases, variance is
+   inferred from how the type variable appears in the definition:
+   covariant in positive positions, contravariant in negative positions,
+   invariant if both. Reference: OCaml's variance-inference discipline.
 
-2. **Variance.** `type-system.md` Decisions §"Variance" plans inference of
-   variance from usage. Set-theoretic subtyping under generic application
-   requires variance information to be sound. The rewrite must commit to a
-   variance discipline. Options: invariant-by-default with explicit
-   `out`/`in` markers, inferred from constructor body, or per-application
-   structural variance (treat `Foo<T>` as a record and recurse). I would
-   need to read the references on variance inference in the simple-sub line
-   to recommend confidently.
+3. **RESOLVED: `$EachField` and `$`-prefixed intrinsics.** Kept as
+   intrinsics; not integrated with match types. TypeScript's mapped types
+   + `keyof` + conditional types + `infer` became a Turing-complete
+   sub-language at the type level. Crescent's `$EachField`, `$Require`,
+   `$Throw`, etc. as `$`-prefixed intrinsics are honest — opaque-to-user
+   mechanisms with specific purposes, not a sublanguage. Match types are
+   not extended to subsume them.
 
-3. **`$EachField` and field attributes.** `type-system.md` Decisions
-   §"Field modifiers: attributes, not keywords" sketches the open attribute
-   syntax. The match-type system in §5 above does not yet specify how field
-   attributes are inspected and rewritten. Either match patterns gain
-   attribute pattern syntax, or `$EachField` survives as a permanent
-   intrinsic that exposes the field descriptor. The canonical doc currently
-   keeps `$EachField` as permanent; this design accepts that but does not
-   integrate it cleanly into the match calculus.
+4. **RESOLVED: FFI cdef integration.** Not architectural. The cdef parser
+   produces types in crescent's lattice; the typechecker consumes them as
+   `(name, type)` bindings in the environment. The pipeline belongs in a
+   separate "cdef-to-type pipeline" document when implementation reaches
+   that point. Out of scope for this architectural design.
 
-4. **FFI cdef integration.** `$FfiC` and `$GlobalScope` are built from
-   side-channel inputs (cdef call sites, `declare` declarations). This
-   design has nothing to say about *how* the typechecker harvests those —
-   it treats the resulting types as ordinary structural records. The harness
-   that runs cparser and synthesizes the `$FfiC` table is separate
-   plumbing not covered here.
+5. **RESOLVED: Indexed access and `$Require`.** Indexed access `T[K]` is a
+   first-class lattice operation with distribution rules; negated keys are
+   accepted. Detailed semantics in §1.1. With this resolution, `$Require`
+   plumbing reduces to ordinary indexed access on a module table whose
+   keys are string-literal singletons; no additional design surface is
+   required at the lattice level.
 
-5. **Module resolution and `$Require`.** Per
-   `docs/require-intrinsic-spec.md` (referenced by `type-system.md`),
-   `$Require<T>` needs literal-type propagation through generics so that the
-   return type of `require("foo")` is the static type of foo's module
-   export. This is a literal-singleton-as-type-index problem; it interacts
-   with whether the lattice has indexed access on string-literal singletons.
-   The current design accepts indexed access in §1.1 but does not specify
-   how cross-file type lookup is plumbed.
+6. **RESOLVED: Coroutine effects.** Effect tracking is in scope when
+   features require it. Coroutines need it (yield as an effect);
+   `pcall`/`error` likely needs it (throw as an effect); async/await
+   would need it (await as an effect). Start with a small effect set
+   (`yield`, `throw`), extensible per-feature; do not design a full
+   Koka/Eff row-of-effects calculus upfront. Commitment lives in §3.1.
 
-6. **Coroutine effects.** `type-system.md` Open Questions §"Coroutine
-   effects" is unresolved. This design does not address effect tracking for
-   yield/resume. If coroutines are typed via a yield/resume effect, the
-   lattice gains a third dimension (effects) that the present design does
-   not model. The user must decide whether effects are in scope for the
-   rewrite or whether yield/resume continues to be typed approximately.
+7. **RESOLVED: DNF emptiness performance.** Emptiness checking is
+   deferred until forced by a specific decision point (subtype queries
+   involving non-trivial negation, match-arm dispatch with negated atoms,
+   narrowing-simplification of complex inputs), results are cached, and
+   pathological cases time out with a diagnostic. The worst-case
+   exponential is real but not gratuitously triggered. Implementation
+   discipline lives in §2.2 (Complement decomposition). The fallback of
+   restricting the boolean algebra is rejected.
 
-7. **Performance budget for the boolean-algebra solver.** DNF-based emptiness
-   checking is worst-case exponential in the number of conjuncts. MLstruct
-   describes practical heuristics; whether those heuristics hit the
-   "competitive with tsgo" bar in `lib/type/static/CLAUDE.md` is unknown
-   without measurement. The design assumes it can; if it cannot, the
-   rewrite has to consider either a more restricted boolean algebra
-   (forbid negation under certain constructors) or a Rust hot path for the
-   emptiness check.
+### 9.3 Still open
 
-8. **Annotation soundness for `--[[: T]]` casts on `unknown` actuals.**
+1. **Annotation soundness for `--[[: T]]` casts on `unknown` actuals.**
    `type-system.md` Principle 4 footnote flags this. Under the
    set-theoretic lattice, the cast `--[[: T]] x` where `x: unknown` should
    require `unknown <: T`, which is false unless `T = unknown`. The current
-   tolerated behavior contradicts this. The rewrite should pick one — either
+   tolerated behavior contradicts this. The rewrite must pick one — either
    tighten the rule (and accept the migration cost) or specify a separate,
-   visible "narrowing cast" form. The user's call.
+   visible "narrowing cast" form. Awaiting user decision.
 
-I would need to read more of the canonical docs referenced from
-`type-system.md` (`access-control.md`, `effects.md`, `semantics.md`,
-`generic-params-spec.md`, `require-intrinsic-spec.md`, the spec files for
-each-field, partial-application, capture-sigil) to resolve any of the above
-with confidence. I have not read them in this session; doing so was out of
-scope. They are the next reading queue when implementation starts.
+### 9.4 Tally
+
+Of the original eight §9 questions, **seven are RESOLVED** (§9.2.1–7) and
+**one remains open** (§9.3.1, the cast-on-`unknown` soundness question).
