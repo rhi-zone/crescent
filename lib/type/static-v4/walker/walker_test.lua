@@ -294,25 +294,34 @@ T.describe("walker: dispatch shell", function()
 		W._reset_handlers(); W._register_builtins()
 	end)
 
-	T.it("only sub-phase B handlers are registered by default", function()
+	T.it("sub-phase B+C handlers are registered by default", function()
 		-- Sub-phase B installs SYNTHESIZE handlers for literals, identifiers,
-		-- and varargs at module load time. Tags for later sub-phases must
-		-- remain unregistered.
+		-- varargs. Sub-phase C adds function defs, calls, method calls,
+		-- returns, and (minimally) expression statements. Tags for later
+		-- sub-phases must remain unregistered.
 		T.ok(W.has_synth(defs.NODE_LITERAL))
 		T.ok(W.has_synth(defs.NODE_IDENTIFIER))
 		T.ok(W.has_synth(defs.NODE_VARARG_EXPR))
+		T.ok(W.has_synth(defs.NODE_FUNC_EXPR))
+		T.ok(W.has_synth(defs.NODE_FUNC_DECL))
+		T.ok(W.has_synth(defs.NODE_CALL_EXPR))
+		T.ok(W.has_synth(defs.NODE_METHOD_CALL))
+		T.ok(W.has_synth(defs.NODE_RETURN_STMT))
+		T.ok(W.has_synth(defs.NODE_EXPR_STMT))
 		for _, tag in pairs({
-			defs.NODE_CALL_EXPR, defs.NODE_LOCAL_STMT,
+			defs.NODE_LOCAL_STMT,
 			defs.NODE_IF_STMT, defs.NODE_CHUNK,
 		}) do
 			T.fail(W.has_synth(tag))
 			T.fail(W.has_check(tag))
 		end
 		-- No CHECK handlers registered yet — every CHECK goes through the
-		-- default synth+constrain rule in sub-phase B.
+		-- default synth+constrain rule.
 		T.fail(W.has_check(defs.NODE_LITERAL))
 		T.fail(W.has_check(defs.NODE_IDENTIFIER))
 		T.fail(W.has_check(defs.NODE_VARARG_EXPR))
+		T.fail(W.has_check(defs.NODE_FUNC_EXPR))
+		T.fail(W.has_check(defs.NODE_CALL_EXPR))
 	end)
 end)
 
@@ -459,5 +468,330 @@ T.describe("walker sub-phase B: NODE_VARARG_EXPR", function()
 		local node = { tag = defs.NODE_VARARG_EXPR }
 		local _env, err = W.walk_check(node, env, s, V.integer)
 		T.eq(err, nil)
+	end)
+end)
+
+-- ── sub-phase C: function defs, calls, returns ────────────────────────────
+--
+-- Builders that produce decoded-Lua-table AST nodes mirroring the shapes
+-- declared in `lib/type/static-v4/walker/functions.lua`. Tests below
+-- construct AST trees directly; the parser→walker bridge is sub-phase J.
+
+-- AST-builder helpers. Intentionally unannotated to match the no-annotation
+-- style of the rest of this test file (HEAD walker_test.lua has zero `--:`
+-- annotations). Adding annotations in tandem with requiring the walker.env
+-- module surfaces env.lua's documented cross-module alias-resolution
+-- limitation as a wave of latent diagnostics; staying unannotated avoids
+-- that pre-existing trap without weakening assertions (each helper is a
+-- one-liner table constructor and reads obviously).
+local function lit_int(n)
+	return { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_INTEGER, value = n }
+end
+local function lit_str(s)
+	return { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_STRING, value = s }
+end
+local function id(name)
+	return { tag = defs.NODE_IDENTIFIER, name = name }
+end
+local function ret(...)
+	return { tag = defs.NODE_RETURN_STMT, exprs = { ... } }
+end
+local function call(callee, ...)
+	return { tag = defs.NODE_CALL_EXPR, callee = callee, args = { ... } }
+end
+local function mcall(recv, name, ...)
+	return { tag = defs.NODE_METHOD_CALL,
+		receiver = recv, method = name, args = { ... } }
+end
+local function expr_stmt(e)
+	return { tag = defs.NODE_EXPR_STMT, expr = e }
+end
+-- Positional builder: `func(params, body, annotation)`. The positional
+-- shape sidesteps the structural-record inference that would happen if we
+-- accepted an `opts` record (callers would have to supply every field the
+-- helper accesses, even unused ones). Optional positions: pass nil.
+local function func(params, body, annotation)
+	return {
+		tag        = defs.NODE_FUNC_EXPR,
+		params     = params or {},
+		vararg     = false,
+		vararg_ann = nil,
+		ret_ann    = nil,
+		annotation = annotation,
+		generic    = nil,
+		body       = body or {},
+	}
+end
+
+T.describe("walker sub-phase C: NODE_FUNC_EXPR (unannotated)", function()
+	T.it("empty body synthesizes a function arrow with fresh vars", function()
+		local s = V.new_solver()
+		local node = func({ { name = "x" } }, {})
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.ok(ty ~= nil)
+		T.eq(ty.tag, "fn")
+		T.eq(#ty.params, 1)
+		T.eq(ty.params[1].tag, "var")
+	end)
+
+	T.it("return inside body constrains the return var", function()
+		local s = V.new_solver()
+		-- function(x) return x end  — identity-like at the fresh-var level.
+		local node = func({ { name = "x" } }, { ret(id("x")) })
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty.tag, "fn")
+		-- The param var was bound as x; the return var received it as a
+		-- lower bound via constrain. We assert that the solver did not error.
+		T.eq(s.error, nil)
+	end)
+end)
+
+T.describe("walker sub-phase C: NODE_FUNC_EXPR (annotated)", function()
+	T.it("full annotation produces the annotated type", function()
+		local s = V.new_solver()
+		local ann = V.fn({ V.integer }, V.string_, nil)
+		local node = func(
+			{ { name = "x", ann = V.integer } },
+			{ ret(lit_str("hi")) },
+			ann)
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty, ann)
+	end)
+
+	T.it("body return-type mismatch fails", function()
+		local s = V.new_solver()
+		local ann = V.fn({ V.integer }, V.string_, nil)
+		local node = func(
+			{ { name = "x", ann = V.integer } },
+			{ ret(lit_int(42)) },  -- integer vs expected string
+			ann)
+		local _ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.ok(err ~= nil)
+	end)
+
+	T.it("annotation arity mismatch errors", function()
+		local s = V.new_solver()
+		local ann = V.fn({ V.integer, V.string_ }, V.string_, nil)
+		local node = func({ { name = "x" } }, {}, ann)
+		local _ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.ok(err ~= nil)
+		T.ok(err:find("arity", 1, true) ~= nil)
+	end)
+end)
+
+T.describe("walker sub-phase C: rank-N skolemization", function()
+	T.it("generic identity annotation is preserved verbatim", function()
+		local s = V.new_solver()
+		-- ∀T. (T) -> T
+		local ann = V.forall({ "T" }, function(vs)
+			return V.fn({ vs[1] }, vs[1], nil)
+		end)
+		local node = func(
+			{ { name = "x" } },  -- ann picked up from forall body
+			{ ret(id("x")) },
+			ann)
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty, ann)
+	end)
+
+	T.it("body sees a skolem for the bound type variable", function()
+		-- We confirm skolemization by exploiting subtyping at the call
+		-- site: if `x` were the (still-free) bound var, returning a
+		-- concrete `integer` from a `(T)->T` body would constrain T's
+		-- lower to integer and succeed. Skolemizing turns T into a rigid
+		-- opaque tag — `integer <: #T` is mismatched constructors, so the
+		-- body fails. This is a one-shot check that the body's `T` is a
+		-- skolem (not a free var).
+		local s = V.new_solver()
+		local ann = V.forall({ "T" }, function(vs)
+			return V.fn({ vs[1] }, vs[1], nil)
+		end)
+		local node = func(
+			{ { name = "x" } },
+			{ ret(lit_int(42)) },  -- integer <: skolem #T should fail
+			ann)
+		local _ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.ok(err ~= nil)
+	end)
+end)
+
+T.describe("walker sub-phase C: NODE_CALL_EXPR", function()
+	T.it("monomorphic arrow + matching args synthesizes the return", function()
+		local s = V.new_solver()
+		local f_ty = V.fn({ V.integer }, V.string_, nil)
+		local env = E.bind(E.new(), "f", f_ty)
+		local node = call(id("f"), lit_int(7))
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.string_)
+	end)
+
+	T.it("argument type mismatch errors", function()
+		local s = V.new_solver()
+		local f_ty = V.fn({ V.integer }, V.string_, nil)
+		local env = E.bind(E.new(), "f", f_ty)
+		local node = call(id("f"), lit_str("nope"))
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+	end)
+
+	T.it("arity mismatch errors", function()
+		local s = V.new_solver()
+		local f_ty = V.fn({ V.integer, V.string_ }, V.string_, nil)
+		local env = E.bind(E.new(), "f", f_ty)
+		local node = call(id("f"), lit_int(1))
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+		T.ok(err:find("arity", 1, true) ~= nil)
+	end)
+
+	T.it("generic arrow + concrete args instantiates", function()
+		local s = V.new_solver()
+		-- ∀T. (T) -> T — applied at integer.
+		local f_ty = V.forall({ "T" }, function(vs)
+			return V.fn({ vs[1] }, vs[1], nil)
+		end)
+		local env = E.bind(E.new(), "f", f_ty)
+		local node = call(id("f"), lit_int(42))
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		-- The result should be an inference var (instantiate produced fresh
+		-- T, the arg type lit_int(42) was constrained as a lower bound on T,
+		-- and the return is that same fresh var).
+		T.eq(ty.tag, "var")
+	end)
+
+	T.it("subtyping at call site: int into int|string param accepted", function()
+		local s = V.new_solver()
+		local f_ty = V.fn({ V.union({ V.integer, V.string_ }) }, V.string_, nil)
+		local env = E.bind(E.new(), "f", f_ty)
+		local node = call(id("f"), lit_int(1))
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.string_)
+	end)
+
+	T.it("indexed callee is rejected loudly (sub-phase F territory)", function()
+		local s = V.new_solver()
+		local env = E.bind(E.new(), "t", V.rec({ f = V.fn({}, V.integer, nil) }, false, nil))
+		local node = call({
+			tag = defs.NODE_FIELD_EXPR, target = id("t"), key = "f",
+		})
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+		T.ok(err:find("indexed callee", 1, true) ~= nil)
+		T.ok(err:find("sub-phase", 1, true) ~= nil)
+	end)
+end)
+
+T.describe("walker sub-phase C: NODE_METHOD_CALL", function()
+	T.it("method on a closed rec dispatches to the field's arrow", function()
+		local s = V.new_solver()
+		-- obj = { greet: (self, name: string) -> string }
+		local self_ty = V.var("self")
+		local method_ty = V.fn({ self_ty, V.string_ }, V.string_, nil)
+		local obj_ty = V.rec({ greet = method_ty }, false, nil)
+		local env = E.bind(E.new(), "obj", obj_ty)
+		local node = mcall(id("obj"), "greet", lit_str("hi"))
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.string_)
+	end)
+
+	T.it("missing method errors", function()
+		local s = V.new_solver()
+		local obj_ty = V.rec({}, false, nil)
+		local env = E.bind(E.new(), "obj", obj_ty)
+		local node = mcall(id("obj"), "nope")
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+		T.ok(err:find("no method", 1, true) ~= nil)
+	end)
+end)
+
+T.describe("walker sub-phase C: NODE_RETURN_STMT", function()
+	T.it("zero-expr return constrains nil <: return_ty", function()
+		local s = V.new_solver()
+		local env = E.enter_function(E.new(), V.nil_, nil)
+		local node = ret()
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+
+	T.it("zero-expr return against non-nil fails", function()
+		local s = V.new_solver()
+		local env = E.enter_function(E.new(), V.integer, nil)
+		local node = ret()
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+	end)
+
+	T.it("single return wrong type fails", function()
+		local s = V.new_solver()
+		local env = E.enter_function(E.new(), V.string_, nil)
+		local node = ret(lit_int(1))
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+	end)
+
+	T.it("multi-return matches against a tuple record", function()
+		local s = V.new_solver()
+		-- Expected: { ["1"]: integer, ["2"]: string } closed
+		local tuple = V.rec({ ["1"] = V.integer, ["2"] = V.string_ }, false, nil)
+		local env = E.enter_function(E.new(), tuple, nil)
+		local node = ret(lit_int(1), lit_str("hi"))
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+
+	T.it("multi-return wrong slot type fails", function()
+		local s = V.new_solver()
+		local tuple = V.rec({ ["1"] = V.integer, ["2"] = V.string_ }, false, nil)
+		local env = E.enter_function(E.new(), tuple, nil)
+		local node = ret(lit_str("oops"), lit_str("hi"))
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+	end)
+
+	T.it("return outside a function body errors", function()
+		local s = V.new_solver()
+		local node = ret(lit_int(1))
+		local _ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.ok(err ~= nil)
+		T.ok(err:find("outside function body", 1, true) ~= nil)
+	end)
+end)
+
+T.describe("walker sub-phase C: effect accumulation", function()
+	T.it("a call to a yield-effected function accumulates yield", function()
+		local s = V.new_solver()
+		-- yield: () -> nil with effects = { yield }
+		local yield_fn = V.fn({}, V.nil_, { yield = true })
+		-- The body is a single expr-stmt invoking yield. We synthesize the
+		-- function literal in unannotated mode and confirm its arrow has
+		-- yield in its effects.
+		local node = func({}, { expr_stmt(call(id("yield"))) })
+		-- yield is bound in the outer env (function bodies inherit bindings).
+		local env = E.bind(E.new(), "yield", yield_fn)
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty.tag, "fn")
+		T.eq(ty.effects.yield, true)
+	end)
+
+	T.it("annotated function whose body performs an undeclared effect errors", function()
+		local s = V.new_solver()
+		local yield_fn = V.fn({}, V.nil_, { yield = true })
+		-- annotation has no effects; body yields.
+		local ann = V.fn({}, V.nil_, nil)
+		local node = func({}, { expr_stmt(call(id("yield"))) }, ann)
+		local env = E.bind(E.new(), "yield", yield_fn)
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+		T.ok(err:find("yield", 1, true) ~= nil)
 	end)
 end)

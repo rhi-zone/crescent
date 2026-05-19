@@ -5,10 +5,9 @@ into v4 type-system constraints. See
 `docs/typechecker-ast-walker-design.md` for the full design.
 
 This directory is being built incrementally across sub-phases A–J (design
-doc §13). **Current state: sub-phase B complete** — the env/dispatch
-scaffolding from A plus SYNTHESIZE handlers for literals, identifiers,
-and varargs. CHECK mode now actually emits constraints via the default
-synth-and-subtype rule (§2.1).
+doc §13). **Current state: sub-phase C complete** — function definitions,
+function calls, method calls, returns, and rank-N polymorphism handling on
+top of A (env/dispatch) and B (literals, identifiers, varargs).
 
 ## Sub-phase A — what's here
 
@@ -120,6 +119,64 @@ for `LIT_NIL`).
 
 The Lua AST has no `NODE_PAREN_EXPR`: the parser unwraps parentheses
 inline (`(x)` parses to the same node as `x`), so no handler is needed.
+
+## Sub-phase C — what's here
+
+- **`functions.lua`** — SYNTHESIZE handlers for the function/call surface:
+  - `NODE_FUNC_EXPR` / `NODE_FUNC_DECL` (§3.9, §6.1): annotated path
+    skolemizes a `V.forall` at body entry, binds parameters to the
+    skolemized arrow's param types, walks the body in a fresh function
+    frame, then runs the v4 escape check (`forall.find_escape`) on the
+    return type. An annotated body whose effects exceed the annotation's
+    declared effects is rejected. Unannotated path allocates fresh
+    `V.var()` per param and a fresh return var, synthesizes the body
+    (return statements constrain the ret var), and yields a `V.fn(...)`
+    whose `effects` are the accumulated body effects. **No implicit
+    let-generalization** — §6.3.
+  - `NODE_CALL_EXPR` (§3.7): SYNTHESIZE callee → `forall.instantiate` if
+    needed → SYNTHESIZE each argument → arity-check → constrain each
+    arg against the corresponding param → accumulate the arrow's effects
+    into `env.effects` → return the arrow's `ret`. Calls whose callee is
+    `NODE_FIELD_EXPR` / `NODE_INDEX_EXPR` are **rejected loudly** with a
+    "sub-phase F" message, per the hard rule (no temp-measure
+    placeholders for indexed access).
+  - `NODE_METHOD_CALL` (§3.8): SYNTHESIZE receiver → look up `method` on
+    the receiver's `V.rec` fields → call-apply with the receiver
+    prepended as the `self` argument. Receivers outside closed `V.rec`
+    error cleanly — full union/μ distribution is in `V.index` and
+    arrives in sub-phase F.
+  - `NODE_RETURN_STMT` (§3.12, §8.3): zero-expr emits
+    `V.nil_ <: return_ty`; single-expr collapses to scalar subtyping;
+    multi-expr packs into a string-keyed `V.rec({["1"]=T1, ...}, false)`
+    per the design's tuple convention (V4Rec.fields is typed
+    `{ [string]: V4Type }`; the legacy D1/D2/D3/D4 tuple-spread fixes
+    live in the multi-return-via-tuple representation, not in the v4
+    tuple shape itself — the v4 subtype rule surfaces a scalar-vs-tuple
+    mismatch directly).
+  - `NODE_EXPR_STMT`: minimal expression-as-statement form needed so a
+    function body can contain a bare call (the effect-accumulation tests
+    rely on it). The full statement set lands in sub-phase E; only this
+    one statement form is registered here because skipping it would
+    leave sub-phase C's effect-accumulation tests inexpressible.
+
+### Decoded node shapes added in C
+
+| Node              | Fields                                                        |
+|-------------------|---------------------------------------------------------------|
+| NODE_FUNC_EXPR    | `{ tag, line, col, params: {{name, ann?}}, vararg, vararg_ann?, ret_ann?, generic?, annotation: V4Type?, body: Node[] }` |
+| NODE_FUNC_DECL    | same as NODE_FUNC_EXPR (the decl-vs-expr distinction lives in the surrounding statement, which is sub-phase E) |
+| NODE_CALL_EXPR    | `{ tag, line, col, callee: Node, args: Node[] }`              |
+| NODE_METHOD_CALL  | `{ tag, line, col, receiver: Node, method: string, args: Node[] }` |
+| NODE_RETURN_STMT  | `{ tag, line, col, exprs: Node[] }`                           |
+| NODE_EXPR_STMT    | `{ tag, line, col, expr: Node }`                              |
+
+`annotation` (on a function node) is the pre-resolved full function type
+— a `V.fn` or `V.forall(.., V.fn)`. When present, the walker uses it
+verbatim and the per-field annotations (`params[i].ann`, `ret_ann`,
+`vararg_ann`) are ignored. When absent, the walker assembles the arrow
+from those fields and from fresh vars. Wiring the annotation parser to
+populate the `annotation` field is design Phase C (the "annotations and
+casts" deliverable); walker sub-phase C consumes the field opaquely.
 
 ## Sub-phase A does NOT include
 
