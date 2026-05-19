@@ -2940,7 +2940,18 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
         -- (TAG_NAMED whose name resolves to an alias with >=1 type param).
         -- These are the F in `<F: Maybe>` patterns.
         local hkt_fresh_to_bound = nil
+        -- Snapshot the (orig_tv, fresh_tv) pairs before the loop. The bound
+        -- instantiation below mutates `inst_mapping` (it threads the same
+        -- mapping so generic TVs nested inside the bound get the same fresh
+        -- images as the callee's). Iterating `pairs(inst_mapping)` while it
+        -- grows is undefined in Lua and can re-yield previously-visited keys,
+        -- causing duplicate C_BOUND emissions (and duplicate diagnostics).
+        local snapshot = {} --: { [integer]: { [integer]: integer, ... }, ... }
         for orig_tv, fresh_tv in pairs(inst_mapping) do
+            snapshot[#snapshot + 1] = { orig_tv, fresh_tv }
+        end
+        for _, pair in ipairs(snapshot) do
+            local orig_tv, fresh_tv = pair[1], pair[2]
             local bound = ctx.tv_bounds[orig_tv]
             if bound then
                 local inst_bound = env_mod.instantiate(ctx, bound, ctx.scope.level, inst_mapping)
@@ -3130,8 +3141,16 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
 
     -- Emit deferred bound checks for each instantiated generic TV that has a bound.
     -- Instantiate the bound using meth_mapping so generic TVs inside it are replaced.
+    -- Snapshot before iterating: the bound instantiation below mutates meth_mapping
+    -- and `pairs` over a growing table is undefined (can re-yield keys, producing
+    -- duplicate diagnostics). Same fix as NODE_CALL_EXPR above.
     if next(ctx.tv_bounds) and next(meth_mapping) then
+        local snapshot = {} --: { [integer]: { [integer]: integer, ... }, ... }
         for orig_tv, fresh_tv in pairs(meth_mapping) do
+            snapshot[#snapshot + 1] = { orig_tv, fresh_tv }
+        end
+        for _, pair in ipairs(snapshot) do
+            local orig_tv, fresh_tv = pair[1], pair[2]
             local bound = ctx.tv_bounds[orig_tv]
             if bound then
                 local inst_bound = env_mod.instantiate(ctx, bound, ctx.scope.level, meth_mapping)
