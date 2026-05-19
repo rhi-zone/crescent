@@ -159,9 +159,24 @@ Types are semantic entities; source positions are syntactic. Do not store line/c
 --:: Method = "GET" | "POST" | "PUT" | "DELETE"
 ```
 
-### Union and intersection
+### Union, intersection, and complement
 
-`A | B` means "A or B." `A & B` means "A and B." Unions are for values that could be several types. Intersections are for values that satisfy multiple constraints (overloaded functions, mixin types).
+Crescent's type lattice is **set-theoretic**: union (`|`), intersection (`&`), and complement (`~`) are first-class type constructors. Subtyping, narrowing, match-types, and overload resolution all operate under this algebraic structure.
+
+- `A | B` — "A or B." Unions are for values that could be several types.
+- `A & B` — "A and B." Intersections are for values that satisfy multiple constraints (overloaded functions, mixin types).
+- `~T` — "any type that is not a subtype of T." Complement is the unary prefix operator.
+
+Complement uses `~` rather than `!` because `!` is reserved by the force-cast syntax `--[[:! T]]`; reusing it for negation would create two meanings of the same token.
+
+```lua
+--: ~string                 -- any type that is not a subtype of string
+--: ~(string | number)      -- neither a string nor a number
+--: T & ~nil                -- narrowing T to exclude nil
+--: ~~T                     -- equivalent to T (complement is involutive)
+```
+
+The complement operator is what makes the `_` arm in match types well-defined: `_` desugars to `~(P1 | P2 | ...)` over the other arms' patterns (see [typechecker-reference.md](typechecker-reference.md) match types).
 
 ### Functions
 
@@ -202,6 +217,18 @@ Optionality is expressed as `T | nil` — no dedicated postfix syntax.
 - **TypeScript compatibility.** EmmyLua and LuaLS exist. Crescent's annotation syntax is purpose-built.
 - **Completeness.** The checker will have gaps. Better to be correct on 90% of code than hand-wavy on 100%.
 - **Runtime overhead.** The checker is purely static. Zero runtime cost. The runtime schema validator (`lib/type/check.lua`) is a separate, complementary tool.
+
+### Out of scope: type-system features crescent will not adopt
+
+The set-theoretic foundation (union, intersection, complement) plus crescent's existing constructors (product, function, fixed point, universal quantification, type-level functions / match types, nominal opaqueness) covers the closure of useful operations for crescent's domain. The following are explicitly out of scope. If a feature request lands in this list, the answer is "not in scope" — not silent extension of the type system.
+
+- **Dependent types** (types parameterized by runtime values, not just types). Massive implementation complexity, decidability concerns, low payoff for crescent's use cases. Crescent's literal types provide a weak proxy.
+- **Linear / affine types** (track usage of values). Resource-management feature; not part of crescent's design intent.
+- **Effect types** (track side effects in the type). Not in crescent's design intent.
+- **Refinement types beyond narrowing** (types as `{x : A | P(x)}` for arbitrary predicates P). Requires attaching logical predicates to types and SMT-style checking. Crescent's flow-sensitive narrowing covers the practical cases.
+- **Quotient types** (`A / ~`). Rare in mainstream type systems; not in crescent's design intent.
+- **Coinductive types** beyond what structural records already express. Structural records handle some forms; full co-recursion as a primary feature is out of scope.
+- **Higher-rank kind polymorphism beyond HKT decomposition.** Crescent has HKT; full System Fω-style kind polymorphism is not needed.
 
 ## Decisions
 

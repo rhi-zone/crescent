@@ -129,13 +129,19 @@ to the element type of the fixed-size array (commit `bb930ab5`).
 
 Multi-return union: `(A) -> B | (C) -> D` parses as `(A) -> (B | (C) -> D)`. Wrap: `((A) -> B) | ((C) -> D)`.
 
-## Union and intersection
+## Union, intersection, and complement
 
 ```lua
 --: string | nil          -- union (|)
 --: A & B                 -- intersection (&): must satisfy both
 --: (A -> nil) & (B -> nil)  -- overloaded function (intersection of functions)
+--: ~string               -- complement (~): any type that is not a subtype of string
+--: ~(string | number)    -- complement of a union
+--: T & ~nil              -- exclude nil from T
+--: ~~T                   -- equivalent to T (complement is involutive)
 ```
+
+Crescent's type lattice is set-theoretic: union, intersection, and complement are first-class type constructors. Complement uses `~` (not `!`) because `!` is reserved by the force-cast syntax `--[[:! T]]`.
 
 Field access on union: only fields present in ALL members are accessible without narrowing.
 Field access on intersection: a field present in ANY member is accessible.
@@ -264,11 +270,18 @@ end
 --:: IsString<T>    = match T { string => true, _ => false }
 
 -- Pattern captures use %Name in pattern position, bare Name in result position
--- _ is a wildcard (always matches, no binding)
 -- Bare names in pattern position are concrete type lookups (error if not in scope)
 ```
 
-`match` arm patterns: primitives, unions, intersections, function types `() -> %R`, `(...%P) -> T`, `(A, ...%P) -> T`, table types `{ field: T }`, `{ [K]: %V }`, `{ ...[%K]: %V }`, `{ field: T, ...%Rest }`, `{ #...%M }`.
+`_` in an arm position is **sugar for `~(P1 | P2 | ...)`** — the complement of the union of the other arms' patterns. It is not a special syntactic catch-all; it is literally the complement operator (see union/intersection/complement section above).
+
+Consequences:
+
+- Match arms are a **disjoint partition** of the input type. Non-`_` arms must be syntactically disjoint from each other; `_` is disjoint from every other arm by construction.
+- **At most one `_` per match expression.**
+- **Match arms have no declaration ordering semantics.** There is no first-match-wins; arms are an unordered partition.
+
+`match` arm patterns: primitives, unions, intersections, complements, function types `() -> %R`, `(...%P) -> T`, `(A, ...%P) -> T`, table types `{ field: T }`, `{ [K]: %V }`, `{ ...[%K]: %V }`, `{ field: T, ...%Rest }`, `{ #...%M }`.
 
 ## Tuple and spread types
 
