@@ -3502,7 +3502,19 @@ end
 StmtRule[NODE_EXPR_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local expr_nid = n.data[0]
+    ctx.pending_require_mod = nil
+    ctx.pending_require_aliases = nil
+    ctx.pending_require_exports = nil
     gen_expr(ctx, expr_nid)
+    -- A bare `require("mod")` expression statement still imports the module's
+    -- `--::` type aliases into scope, even without a binding on the LHS.
+    local stmt_require_aliases = ctx.pending_require_aliases
+    ctx.pending_require_mod = nil
+    ctx.pending_require_aliases = nil
+    ctx.pending_require_exports = nil
+    if stmt_require_aliases then
+        inject_imported_aliases(ctx, stmt_require_aliases)
+    end
     -- After the call, check if the callee is an assertion predicate.
     -- If so, narrow the argument in the current scope (continuation narrowing).
     local en = ctx.nodes:get(expr_nid)
