@@ -89,60 +89,18 @@
 local T = require("lib.type.static-v4.types")
 local ST = require("lib.type.static-v4.subtype")
 local E = require("lib.type.static-v4.empty")
+local F = require("lib.type.static-v4.forall")
 
 local M = {}
 
 -- ── Substitution ──────────────────────────────────────────────────────────
--- Pure substitution of variables by id. Used to freshen capture vars per
--- evaluation. Does NOT descend into μ (μ bodies are cyclic in the Lua-table
--- sense; substituting blindly would unfold them); capture vars in 4d are
--- declared by the caller as plain fresh `V.var()`s, and are never expected
--- to lie inside a μ. If a future API places a capture inside a μ, this
--- function will need a μ-aware variant — surface the case rather than
--- silently mishandle it.
-
-local substitute --[[: (V4Type, { [integer]: V4Type }) -> V4Type ]]
---: (V4Type, { [integer]: V4Type }) -> V4Type
-substitute = function(t, subst)
-	if t.tag == "var" then
-		local v = subst[t.id]
-		if v ~= nil then return v end
-		return t
-	elseif t.tag == "top" or t.tag == "bot" or t.tag == "prim" or t.tag == "literal" then
-		return t
-	elseif t.tag == "fn" then
-		local ps = {} --[[: V4Type[] ]]
-		for _, p in ipairs(t.params) do ps[#ps + 1] = substitute(p, subst) end
-		return T.fn(ps, substitute(t.ret, subst), t.effects)
-	elseif t.tag == "rec" then
-		local fs = {} --[[: { [string]: V4Type } ]]
-		for k, v in pairs(t.fields) do
-			if v ~= nil then fs[k] = substitute(v, subst) end
-		end
-		local ix = t.indexer
-		local new_ix = nil --[[: V4Indexer | nil ]]
-		if ix ~= nil then
-			new_ix = T.indexer(substitute(ix.key, subst), substitute(ix.value, subst))
-		end
-		return T.rec(fs, t.open, new_ix)
-	elseif t.tag == "union" then
-		local ms = {} --[[: V4Type[] ]]
-		for _, m in ipairs(t.members) do ms[#ms + 1] = substitute(m, subst) end
-		return T.union(ms)
-	elseif t.tag == "inter" then
-		local ms = {} --[[: V4Type[] ]]
-		for _, m in ipairs(t.members) do ms[#ms + 1] = substitute(m, subst) end
-		return T.inter(ms)
-	elseif t.tag == "neg" then
-		return T.neg(substitute(t.body, subst))
-	else
-		-- t.tag == "mu". μ bodies are cyclic Lua tables; treated as atoms for
-		-- substitution. A capture inside a μ would require a deeper rewrite —
-		-- not in 4d's scope. Returning the mu node verbatim is sound when no
-		-- capture appears inside (the common case in 4d's tests).
-		return t
-	end
-end
+-- Pure substitution of variables by id. Shared with `forall.lua` — that
+-- module owns the canonical implementation, which handles every lattice tag
+-- including `forall` (capture-avoiding) and `skolem`. Match-type capture
+-- freshening and rank-N instantiate/skolemize both delegate to it; the
+-- explicit annotation preserves call-site return-type inference (the
+-- `M.substitute` reference is annotated as `function` upstream).
+local substitute --[[: (V4Type, { [integer]: V4Type }) -> V4Type ]] = F.substitute
 
 -- Detect whether a type expression references any *non-capture* type variable.
 -- Captures (the pattern's freshened vars) are expected to receive bounds

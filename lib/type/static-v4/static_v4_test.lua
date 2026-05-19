@@ -850,6 +850,57 @@ T.describe("match — captures", function()
 	end)
 end)
 
+T.describe("match — forall in arm shape (regression: substitute through forall)", function()
+	T.it("capture inside an arm-result forall body is freshened", function()
+		-- Regression: match.lua used to ship its own local substitute that did
+		-- not handle the `forall` tag — it returned the forall verbatim,
+		-- silently dropping substitutions on outer-scope vars (captures) that
+		-- appear inside the forall body. This was latent in 4d (no test
+		-- exercised it) but reachable via the API and increasingly likely
+		-- with 4e's rank-N in. match.lua now delegates to forall.lua's
+		-- canonical substitute, which descends into forall bodies
+		-- (capture-avoidingly).
+		--
+		-- Arm: { value: %V } => (∀Y. Y -> %V), captures = { %V }.
+		-- Subject: { value: integer }. The arm fires; the freshened result
+		-- must be (∀Y. Y -> fresh_V) where fresh_V has integer as a lower
+		-- bound. Under the OLD broken substitute, the returned forall's body
+		-- would still reference the ORIGINAL template `cap` var (which never
+		-- gets a bound flow at evaluation time) — a definite, observable bug.
+		local cap = V.var("V")
+		local arm_result = V.forall({"Y"}, function(vs)
+			local y = vs[1]
+			if y == nil then return V.top() end
+			return V.fn({y}, cap)
+		end)
+		local arms = { V.arm(V.rec({ value = cap }, false), arm_result, { cap }) }
+		local subj = V.rec({ value = V.integer }, false)
+		local r, err = V.match(subj, arms, V.nil_)
+		T.eq(err, nil)
+		if r == nil then T.ok(false, "expected non-nil result"); return end
+		if r.tag ~= "forall" then
+			T.ok(false, "expected forall result, got: " .. V.show(r)); return
+		end
+		-- Inspect the body: should be fn(Y) -> fresh_V with fresh_V ≠ cap and
+		-- with integer as a lower bound (capture flowed through substitute).
+		local body = r.body
+		if body.tag ~= "fn" then
+			T.ok(false, "expected fn body inside forall, got: " .. V.show(body)); return
+		end
+		local ret = body.ret
+		if ret.tag ~= "var" then
+			T.ok(false, "expected var return, got: " .. V.show(ret)); return
+		end
+		-- The crucial assertion: the return var must NOT be the original
+		-- template `cap` (that's what the old broken substitute returned).
+		T.ok(ret ~= cap, "regression: substitute did not descend into forall — "
+			.. "the arm-result's bound capture reference is still the template var")
+		-- And it must carry the integer lower bound from the firing constrain.
+		T.eq(#ret.lower, 1)
+		T.eq(ret.lower[1], V.integer)
+	end)
+end)
+
 T.describe("match — recursive patterns and subjects", function()
 	T.it("μ subject matches an open-record pattern", function()
 		-- list = μX. { value: integer, next: X }. Match against pattern
