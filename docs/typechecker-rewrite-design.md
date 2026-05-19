@@ -701,17 +701,23 @@ constructor set.
    discipline lives in §2.2 (Complement decomposition). The fallback of
    restricting the boolean algebra is rejected.
 
-### 9.3 Still open
+### 9.3 Resolved (final)
 
-1. **Annotation soundness for `--[[: T]]` casts on `unknown` actuals.**
-   `type-system.md` Principle 4 footnote flags this. Under the
-   set-theoretic lattice, the cast `--[[: T]] x` where `x: unknown` should
-   require `unknown <: T`, which is false unless `T = unknown`. The current
-   tolerated behavior contradicts this. The rewrite must pick one — either
-   tighten the rule (and accept the migration cost) or specify a separate,
-   visible "narrowing cast" form. Awaiting user decision.
+8. **RESOLVED: Annotation soundness for `--[[: T]]` casts on `unknown`
+   actuals.** The checked cast `--[[: T]] x` requires full subtyping. When
+   `x: unknown` and `T` is narrower than `unknown`, `unknown <: T` is false,
+   so the cast fails the check and the typechecker emits an error. No
+   special case, no permissive variant. Rationale: (a) `--[[: T]]` is
+   *defined* as the checked cast — permissive behavior on `unknown` would
+   contradict the definition; (b) `unknown` exists specifically to mark
+   "the producer refuses to commit; the caller must narrow," and a
+   permissive cast through `unknown` defeats that purpose entirely;
+   (c) the existing pathway for "I know better than the inferred type" is
+   the force cast `--[[:! T]]`, which CLAUDE.md already brands as almost
+   never correct — the right move is to narrow via a `type()` guard or fix
+   the producer's annotation.
 
 ### 9.4 Tally
 
-Of the original eight §9 questions, **seven are RESOLVED** (§9.2.1–7) and
-**one remains open** (§9.3.1, the cast-on-`unknown` soundness question).
+Of the original eight §9 questions, **eight are RESOLVED** (§9.2.1–7,
+§9.3.8) and **zero remain open**.
