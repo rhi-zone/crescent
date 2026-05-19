@@ -938,3 +938,169 @@ with a finite, enumerable set of answers, not an open-ended heuristic.
 The v3 implementation should remain unchanged until v4 ships a
 replacement; it works well enough on the common single-unresolved-require
 case and we have no second consumer to break.
+
+## Multi-return audit findings
+
+Audit performed 2026-05-20 against `lib/type/static/` (the existing
+solve+constrain implementation). Goal: decide whether the v4 AST walker
+should mirror the existing multi-return story or design fresh.
+
+### 1. Existing representation
+
+Multi-return is represented as a **`TAG_TUPLE`** of slot type IDs. Three
+sites synthesise the tuple:
+
+- `constrain.lua:4380-4396` (`NODE_RETURN_STMT`): when `#ret_tids > 1`,
+  packs the per-expression types into `types_mod.make_tuple(ctx, ret_tids)`
+  and emits a single `C_RETURN(tuple, ret_var)`. Single returns stay
+  scalar.
+- `constrain.lua:2257-2282` (annotated function body push): when an
+  annotation declares `() -> (A, B, C)`, the body's `ret_var` is bound to
+  `TAG_TUPLE(A, B, C)` so the body's return is checked slot-wise.
+- `constrain.lua:2366-2371` (call return assembly for unannotated callee):
+  multiple return slots are collected into a `TAG_TUPLE` so `C_INDEX` can
+  project per-slot at the call site.
+
+In addition, `TAG_SPREAD` is used in two related roles: (a) `...(T)` in an
+annotated return position (`solve.lua:2743-2749` unwraps it); (b)
+`(true, ...R)` splice in `match`-typed result expressions.
+
+### 2. Subtyping / assignment rules
+
+- **`C_RETURN` against an annotated tuple** (`solve.lua:2724-2772`):
+  - If actual is `TAG_TUPLE` and expected is `TAG_TUPLE`: unify directly.
+  - If actual is *not* tuple but expected is `TAG_TUPLE`: take slot 0 of
+    expected and unify against the scalar actual. This is the "only the
+    first `return` expr was emitted as the C_RETURN value" path — note it
+    silently ignores any annotation slots beyond slot 0.
+  - If expected is `TAG_SPREAD(T)`: unwrap to `T` and unify scalar against
+    `T`.
+
+- **Multi-assign slot extraction** (`constrain.lua:3563-3719` for
+  `NODE_LOCAL_STMT`, `3722-...` for `NODE_ASSIGN_STMT`):
+  - Only when the *last* RHS expression is a `NODE_CALL_EXPR /
+    NODE_METHOD_CALL` does slot extraction run. The `call_slot = i -
+    (el - 1)` formula projects per-target via either `eager_slot` (concrete
+    tuple) or `C_INDEX` (deferred).
+  - Targets to the *left* of the call expression simply pick `rhs_types[i +
+    1]` — the i-th RHS expression's whole type. There is **no truncation
+    pass** for non-last call expressions.
+
+- **`gen_call` arg packing**: `gen_expr_list` is called on the arg list as
+  if each arg-expr produced exactly one slot. Multi-return spread of `f()`
+  into call args is not implemented; tuple-typed args are matched
+  positionally against single param slots, which fails.
+
+### 3. Edge cases — what works, what doesn't
+
+Probed via small repros under `bin/cr check`; outcomes 2026-05-20:
+
+| # | Case | Behavior | Sound? |
+|---|------|----------|--------|
+| W1 | `local function f() return 1,"x" end; local a,b = f()` | `a:integer, b:string` | yes (matches `type_soundness_test.lua:1129-1146`) |
+| W2 | `--: () -> (integer,string) ... return 1,"x"` annotated 2-and-2 | typechecks | yes |
+| W3 | `return 1,"x",true` against `(integer,string)` | error: tuple length 3 vs 2 | yes |
+| W4 | `--: () -> (integer,string)` body `return 1` (missing slot) | **accepted, 0 errors** | **NO — slot 1 should require nil ∈ string** |
+| B1 | `g(f())` where `g: (integer,string)->nil`, `f: ()->(integer,string)` | rejected: "cannot pass (integer,string) where integer expected" | **NO — Lua spreads when call is last in arg list** |
+| B2 | `g(f(), "y")` with `f` returning 2 values | rejected with same message | **NO — first arg should truncate to first slot** |
+| B3 | `local a,b = f(), 99` with `f:()->(integer,string)` | `a` typed as full tuple `(integer,string)`, NOT truncated to integer | **NO — non-last call expr must truncate to slot 0** |
+| B4 | `--: () -> ...(integer); return 1,2,3` | error: cannot assign `(1,2,3)` to integer; subsequent locals `b,c` typed as nil | **NO — `...(T)` should accept N integer returns AND give `b,c: integer`** |
+| K1 | "io.open multi-return narrowing" (known gap, `type_test.lua:7045`) | comment says nil-narrowing only works on direct annotation, not multi-return | known gap |
+
+Repros: `/tmp/mraudit/r{1..10}*.lua`.
+
+### 4. Verdict — has-defects
+
+The existing implementation is **partially sound**. It correctly:
+
+- Synthesises multi-return as `TAG_TUPLE`.
+- Slot-projects when call is the last RHS of a multi-local.
+- Catches over-arity returns against annotation (W3).
+- Handles correlated multi-return for stdlib intrinsics (`pcall`,
+  `io.open`, `string.find`) via `pending_multi_return_override` and
+  `peek_callee_ret_union`.
+
+It has the following defects (in increasing order of severity):
+
+- **D1 (soundness — W4).** A `return N` body whose annotation declares
+  more than N return slots is silently accepted. `solve_return` uses
+  *only slot 0* of the expected tuple when the actual is scalar
+  (`solve.lua:2757-2761`). Slot 1+ are never checked. This is the precise
+  failure mode the comment at `solve.lua:2754-2756` describes — and the
+  comment normalises it ("only the first expression is emitted via
+  C_RETURN") rather than fixing it. The constraint emitter at
+  `constrain.lua:4380-4396` packs a tuple **only when `#ret_tids > 1`**,
+  so `return 1` against `() -> (integer, string)` emits a scalar
+  C_RETURN; solve falls into the slot-0-only branch and slot 1 (`string`)
+  is never compared against the implicit `nil` that Lua would actually
+  produce at runtime.
+- **D2 (Lua-semantics — B1, B2).** Multi-return spread into call
+  arguments is unimplemented. Per Lua, if `f` is the last expression in
+  an argument list `g(..., f())`, `f`'s return values spread positionally
+  to fill remaining params; if `f` is in any other position, it truncates
+  to its first return. The existing code calls `gen_expr_list` which
+  produces one type per arg-expr, so a tuple-typed last arg is matched
+  against a single param.
+- **D3 (Lua-semantics — B3).** Non-last call expressions in a multi-LHS
+  binding do not truncate. The target left of the call gets the full
+  tuple type, not slot 0. `NODE_LOCAL_STMT`'s loop sets `bind_tid =
+  rhs_tid` (the whole `gen_expr_list` result) for non-call slots, with
+  no truncation pass for any RHS expression that happens to be a call.
+- **D4 (annotation expressivity — B4).** `() -> ...(T)` (spread return)
+  is documented in `typechecker-reference.md:125` as "multi-return
+  spread (T may be a tuple type alias)" but the implementation treats it
+  as a scalar single-return `T` for body-checking (so `return 1, 2, 3`
+  is rejected because the body emits a tuple actual against scalar
+  expected) and does not propagate `T` to per-slot inference at the
+  multi-LHS call site. The `TAG_SPREAD` unwrap in `solve_return`
+  produces `T`, not "zero-or-more T", so neither end works.
+- **D5 (assignment).** Excess LHS slots beyond function arity are not
+  pinned in tests. Per Lua semantics they must be `nil`. The current
+  code path (`NODE_LOCAL_STMT` else-branch, `bind_tid = ctx.T_NIL`)
+  appears to handle the no-call-expr case but the call-expr branch
+  emits `C_INDEX` with the literal slot index against the tuple, and
+  the slot extraction in `solve_index` for out-of-bounds slots returns
+  nil only when the tuple is concrete — for deferred (free TV) cases
+  the behavior is untested and unverified by this audit.
+
+None of the defects are silent miscompiles in the sense of allowing
+genuinely wrong runtime values through. D1 is the dangerous one: it
+masks missing return values. D2/D3 are *false rejections* of valid Lua
+(the typechecker is too strict — sound-by-rejection). D4 is an
+expressivity gap. D5 is unverified.
+
+### 5. V4 walker recommendation — design fresh
+
+Mirroring the existing approach inherits D1-D4. The right shape:
+
+**Representation.** Multi-return is always a tuple `T_tup = (T_1, ...,
+T_n)` carrying an explicit "spreadable" flag (or last slot tagged as
+spread `...T`). Single-return is `(T_1)` — a 1-tuple, not a scalar.
+This eliminates the "scalar actual vs tuple expected" special case
+that produces D1.
+
+**Subtype rule against `(A_1, ..., A_n)` annotated return.** Pad the
+actual tuple with `nil` to length n (right-pad — Lua's discard-extras /
+fill-missing-with-nil semantics), then unify slot-wise. Reject if
+actual length > n (already caught — W3) OR if `nil </: A_i` for any
+padded slot (catches D1). For `...A_last` annotation, the tail
+absorbs all remaining slots, each subtyped against `A_last`.
+
+**Spread at call sites.** The walker must classify each argument-list
+position by Lua's rule: a call expression in the **last** position
+contributes its full tuple, expanded into the remaining parameter
+slots; in any **other** position it contributes only slot 0. Same rule
+governs `return f()` (last-position spread) and multi-assignment RHS
+(last-position spread, others truncate). One classification pass on
+the argument/RHS list — not three independent implementations.
+
+**Match interaction.** `(...%P) -> %R` already binds `R` to a tuple
+for multi-return; preserve that. The walker's call-site rule above
+makes `R` directly substitutable wherever a multi-return is required
+(arg spread, return spread, multi-LHS).
+
+**Test obligation.** Phase-J walker must ship with explicit tests for
+W1-W4, B1-B4, plus excess-LHS-padded-with-nil. The existing
+`type_soundness_test.lua:1129-1146` coverage is too thin — it tests
+W1 only and would have passed even with D1-D4 present.
+
