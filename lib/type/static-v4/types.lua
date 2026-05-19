@@ -27,7 +27,9 @@ local M = {}
 --:: V4Bot     = { tag: "bot" }
 --:: V4Prim    = { tag: "prim", name: string }
 --:: V4Literal = { tag: "literal", base: string, value: unknown }
---:: V4Fn      = { tag: "fn", params: V4Type[], ret: V4Type }
+--:: EffectAtom = "yield" | "throw"
+--:: EffectSet  = { [string]: boolean }
+--:: V4Fn      = { tag: "fn", params: V4Type[], ret: V4Type, effects: EffectSet }
 --:: V4Indexer = { key: V4Type, value: V4Type }
 --:: V4Rec     = { tag: "rec", fields: { [string]: V4Type }, open: boolean, indexer: V4Indexer | nil }
 --:: V4Union   = { tag: "union", members: V4Type[] }
@@ -173,13 +175,54 @@ function M.literal(base, value)
 	return { tag = M.TAG_LITERAL, base = base, value = value }
 end
 
+-- Known effect atoms. A small finite enumeration (design §3.1 commits to a
+-- finite set, not a row-of-effects calculus). Extensible per-feature: adding a
+-- new effect requires only adding a key here.
+local KNOWN_EFFECTS = {
+	yield = true,
+	throw = true,
+}
+
+M.EFFECT_YIELD = "yield"
+M.EFFECT_THROW = "throw"
+
+-- Effect-set constructor. Accepts either a set ({ yield = true }) or a list
+-- ({ "yield", "throw" }) and produces the canonical set representation.
+-- Unknown effect atoms are rejected at construction (design: no silent
+-- mis-spellings; effects are a small enumeration).
+--: ({ [string]: boolean } | string[] | nil) -> EffectSet
+function M.effects(e)
+	if e == nil then return {} end
+	local out = {} --[[: { [string]: boolean } ]]
+	-- Disambiguate list vs set. We can't sniff `#e` on a set (Lua hash-part
+	-- length is unspecified), so we always iterate `pairs` and accept both
+	-- shapes: integer key with string value (list form), or string key with
+	-- truthy value (set form).
+	for k, v in pairs(e) do
+		local name --[[: string]]
+		if type(k) == "number" and type(v) == "string" then
+			name = v --[[: string]]
+		elseif type(k) == "string" and v then
+			name = k --[[: string]]
+		else
+			error("invalid effects argument: key " .. tostring(k) .. " value " .. tostring(v), 2)
+		end
+		if not KNOWN_EFFECTS[name] then
+			error("unknown effect: " .. tostring(name), 2)
+		end
+		out[name] = true
+	end
+	return out
+end
+
 -- Function type. params is a list of types; ret is a single type. Multi-return
 -- is represented as ret being a tuple (record with positional keys) — out of
 -- scope for 4a as a tested feature, but the representation does not preclude
--- it.
---: (V4Type[], V4Type) -> V4Type
-function M.fn(params, ret)
-	return { tag = M.TAG_FN, params = params, ret = ret }
+-- it. `effects` is an optional effect set; the empty set marks a pure
+-- function (the default).
+--: (V4Type[], V4Type, { [string]: boolean } | string[] | nil) -> V4Type
+function M.fn(params, ret, effects)
+	return { tag = M.TAG_FN, params = params, ret = ret, effects = M.effects(effects) }
 end
 
 -- Record type. `fields` is a name → type map. `open` true means an open row
@@ -350,7 +393,15 @@ local function show(t, seen)
 	if t.tag == "fn" then
 		local ps = {}
 		for i, p in ipairs(t.params) do ps[i] = show(p, seen) end
-		return "(" .. table.concat(ps, ", ") .. ") -> " .. show(t.ret, seen)
+		-- Pure arrows render without effect annotation (no clutter). Effect-
+		-- bearing arrows use the `-[e1, e2]->` syntax with deterministic order.
+		local effect_names = {} --[[: { [integer]: string } ]]
+		for name in pairs(t.effects) do effect_names[#effect_names + 1] = name end
+		if #effect_names == 0 then
+			return "(" .. table.concat(ps, ", ") .. ") -> " .. show(t.ret, seen)
+		end
+		table.sort(effect_names)
+		return "(" .. table.concat(ps, ", ") .. ") -[" .. table.concat(effect_names, ", ") .. "]-> " .. show(t.ret, seen)
 	end
 	if t.tag == "rec" then
 		local parts = {} --[[: { [integer]: string } ]]

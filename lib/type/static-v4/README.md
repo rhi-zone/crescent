@@ -1,4 +1,4 @@
-# static-v4 — typechecker foundation (Phases 4a–4e)
+# static-v4 — typechecker foundation (Phases 4a–4f)
 
 Greenfield typechecker, derived from `docs/typechecker-rewrite-design.md`
 (itself derived from simple-sub and MLstruct).
@@ -22,9 +22,14 @@ This directory currently implements:
   `#F`). The escape check fires after subsumption against a RHS forall,
   walking the LHS and every reachable variable bound to ensure no introduced
   skolem leaked.
+- **Phase 4f** — effects on function arrows. Function types carry an
+  effect set (a finite enumeration of named atoms — currently `yield` and
+  `throw`). Subtyping is covariant in the effect set (`a.effects ⊆ b.effects`),
+  so pure functions subsume into any effect-bearing supertype with the same
+  params/ret. Effects ride on the arrow as an additional structurally
+  compared component — no row-of-effects calculus, no effect variables.
 
-Still out of scope: the AST walker, CLI integration, cache (`.cri`),
-effects (4f).
+Still out of scope: the AST walker, CLI integration, cache (`.cri`).
 
 ## Layout
 
@@ -536,6 +541,55 @@ covering every tag in the lattice including `forall` (capture-avoiding) and
 `skolem` (atomic). The duplicate substitution previously local to
 `match.lua` could be retired in a follow-up; for 4e it remains so the diff
 stays focused.
+
+## Phase 4f — effects
+
+Function arrows now carry an effect set. The constructor signature is
+`M.fn(params, ret, effects?)` where `effects` is either a list of names
+(`{ "yield", "throw" }`) or a set (`{ yield = true }`) and defaults to the
+empty set (pure function).
+
+### Design commitments (rewrite design §3.1)
+
+- **Finite enumeration, not rows.** Effects are a small extensible set of
+  named atoms (`yield`, `throw` initially). Adding an effect = one entry in
+  the `KNOWN_EFFECTS` table in `types.lua`. No `Koka`/`Eff` row-of-effects
+  machinery; no effect variables.
+- **Concrete sets only.** No effect polymorphism (`∀E. (...) -[E]-> ...`).
+  A polymorphic function may have an effect set in its body, but the
+  effects themselves are concrete atoms — they are not bindable by a forall.
+
+### Subtype rule (one line)
+
+`(A) -[e1]-> B <: (A') -[e2]-> B'` requires `A' <: A` (contravariant
+params), `B <: B'` (covariant ret), and **`e1 ⊆ e2`** (covariant in
+effects). A function that performs FEWER effects is acceptable wherever
+one with MORE effects is expected; the supertype's caller has already
+prepared to handle the wider set.
+
+### Pretty-printing
+
+Pure arrows render as `(A) -> B`. Effect-bearing arrows render as
+`(A) -[e1, e2]-> B` with effect names sorted lexicographically for
+deterministic output.
+
+### Effects in higher-order positions
+
+In a higher-order arrow `((A) -[e1]-> B) -> C`, the inner arrow's effect
+set is part of its type and participates in standard contravariance — so
+`((A) -[yield]-> B) -> C  <:  ((A) -> B) -> C` (the supertype demands the
+inner arrow be pure, the subtype accepts strictly more — including
+yielding — inner arrows).
+
+### What 4f does NOT do
+
+- Effect polymorphism / row variables (concretely committed against in
+  the design; not "deferred").
+- Effect rows or labels beyond the two atoms.
+- Async/await as a separate effect (could be added later by extending the
+  enumeration).
+- Effect inference from a Lua source AST (waits on the AST walker).
+- Cache integration (4g).
 
 ## Running
 

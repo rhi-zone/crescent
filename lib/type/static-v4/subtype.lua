@@ -234,7 +234,19 @@ local function decompose(s, a, b)
 				if not constrain(s, bp, ap) then return false end
 			end
 		end
-		return constrain(s, a.ret, b.ret)
+		if not constrain(s, a.ret, b.ret) then return false end
+		-- Effects: covariant in the effect set (a-effects ⊆ b-effects). A
+		-- function that performs FEWER effects is acceptable wherever one with
+		-- MORE effects is expected — the caller has already prepared to handle
+		-- the wider set. Pure functions (empty set) satisfy any RHS by
+		-- vacuous subset. Effects are a finite enumeration so subset is
+		-- O(|a.effects|).
+		for name in pairs(a.effects) do
+			if not b.effects[name] then
+				return mismatch(s, a, b, "effect '" .. name .. "' not permitted by supertype")
+			end
+		end
+		return true
 	end
 
 	if a.tag == "rec" and b.tag == "rec" then

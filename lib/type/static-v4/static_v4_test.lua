@@ -1256,4 +1256,133 @@ T.describe("forall — impredicativity", function()
 	end)
 end)
 
+-- ── Phase 4f: effects ─────────────────────────────────────────────────────
+
+T.describe("effects — constructor", function()
+	T.it("pure function has empty effect set", function()
+		local f = V.fn({V.integer}, V.integer)
+		T.eq(next(f.effects), nil)
+	end)
+	T.it("effect-bearing function records the effects", function()
+		local f = V.fn({V.integer}, V.integer, {"yield"})
+		T.eq(f.effects.yield, true)
+		T.eq(f.effects.throw, nil)
+	end)
+	T.it("effects can be passed as a set or a list", function()
+		local f1 = V.fn({}, V.nil_, { yield = true, throw = true })
+		local f2 = V.fn({}, V.nil_, { "yield", "throw" })
+		T.eq(f1.effects.yield, true)
+		T.eq(f1.effects.throw, true)
+		T.eq(f2.effects.yield, true)
+		T.eq(f2.effects.throw, true)
+	end)
+	T.it("unknown effect rejected at construction", function()
+		local ok = pcall(V.fn, {}, V.nil_, { "boom" })
+		T.fail(ok)
+	end)
+end)
+
+T.describe("effects — subtype", function()
+	T.it("pure <: effect-bearing (same params/ret)", function()
+		local pure = V.fn({V.integer}, V.integer)
+		local yfn  = V.fn({V.integer}, V.integer, {"yield"})
+		T.ok(st(pure, yfn))
+	end)
+	T.it("effect-bearing NOT <: pure", function()
+		local pure = V.fn({V.integer}, V.integer)
+		local yfn  = V.fn({V.integer}, V.integer, {"yield"})
+		T.fail(st(yfn, pure))
+	end)
+	T.it("yield-only <: {yield, throw}", function()
+		local a = V.fn({V.integer}, V.integer, {"yield"})
+		local b = V.fn({V.integer}, V.integer, {"yield", "throw"})
+		T.ok(st(a, b))
+	end)
+	T.it("{yield, throw} NOT <: yield-only", function()
+		local a = V.fn({V.integer}, V.integer, {"yield", "throw"})
+		local b = V.fn({V.integer}, V.integer, {"yield"})
+		T.fail(st(a, b))
+	end)
+	T.it("same effect set: reflexive", function()
+		local a = V.fn({V.integer}, V.integer, {"yield"})
+		local b = V.fn({V.integer}, V.integer, {"yield"})
+		T.ok(st(a, b))
+		T.ok(st(b, a))
+	end)
+end)
+
+T.describe("effects — higher-order contravariance", function()
+	T.it("contravariance flips the effect-set subtype direction", function()
+		-- Inner: a-effect <: b-effect means a-fn <: b-fn (covariant in effects).
+		-- Outer (the inner sits in contravariant position): the relation flips.
+		-- Concretely: ((A -[yield]-> B) -> C) <: ((A -[]-> B) -> C) because the
+		-- subtype's argument accepts a STRICTLY WIDER class of inputs (it can
+		-- consume yielding functions too) than the supertype's argument needs.
+		local inner_pure  = V.fn({V.integer}, V.integer)
+		local inner_yield = V.fn({V.integer}, V.integer, {"yield"})
+		-- inner_pure <: inner_yield is the covariant direction.
+		T.ok(st(inner_pure, inner_yield))
+		-- So by contravariance:
+		--   (inner_yield -> string) <: (inner_pure -> string)
+		T.ok(st(V.fn({inner_yield}, V.string_), V.fn({inner_pure}, V.string_)))
+		-- And the reverse direction fails.
+		T.fail(st(V.fn({inner_pure}, V.string_), V.fn({inner_yield}, V.string_)))
+	end)
+end)
+
+T.describe("effects — inside other type constructors", function()
+	T.it("effect-bearing arrow inside a forall", function()
+		-- (∀X. X -[yield]-> X) <: (integer -[yield]-> integer)
+		local poly = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fn({x}, x, {"yield"})
+		end)
+		T.ok(st(poly, V.fn({V.integer}, V.integer, {"yield"})))
+		-- And the same forall is NOT <: a pure arrow at the same shape.
+		T.fail(st(poly, V.fn({V.integer}, V.integer)))
+		-- A pure forall IS <: an effect-bearing concrete instance.
+		local pure_poly = V.forall({"X"}, function(vs)
+			local x = vs[1]
+			if x == nil then return V.top() end
+			return V.fn({x}, x)
+		end)
+		T.ok(st(pure_poly, V.fn({V.integer}, V.integer, {"yield"})))
+	end)
+	T.it("effect-bearing arrow inside a record (covariant field)", function()
+		local yfn  = V.fn({V.integer}, V.integer, {"yield"})
+		local pure = V.fn({V.integer}, V.integer)
+		local r1 = V.rec({ f = pure }, false)
+		local r2 = V.rec({ f = yfn  }, false)
+		-- r1.f (pure) <: r2.f (yield-bearing) by effect covariance.
+		T.ok(st(r1, r2))
+		T.fail(st(r2, r1))
+	end)
+	T.it("effect-bearing arrow inside a union", function()
+		-- (integer -[yield]-> integer) <: (integer -[yield, throw]-> integer)
+		--   | string. Holds because the LHS satisfies the first disjunct.
+		local lhs = V.fn({V.integer}, V.integer, {"yield"})
+		local rhs = V.union({
+			V.fn({V.integer}, V.integer, {"yield", "throw"}),
+			V.string_,
+		})
+		T.ok(st(lhs, rhs))
+	end)
+end)
+
+T.describe("effects — pretty print", function()
+	T.it("pure arrow renders without effect annotation", function()
+		local s = V.show(V.fn({V.integer}, V.string_))
+		T.eq(s, "(integer) -> string")
+	end)
+	T.it("yield arrow renders with -[yield]->", function()
+		local s = V.show(V.fn({V.integer}, V.string_, {"yield"}))
+		T.eq(s, "(integer) -[yield]-> string")
+	end)
+	T.it("multi-effect arrow renders deterministically (sorted)", function()
+		local s = V.show(V.fn({V.integer}, V.string_, {"throw", "yield"}))
+		T.eq(s, "(integer) -[throw, yield]-> string")
+	end)
+end)
+
 return T._summary()

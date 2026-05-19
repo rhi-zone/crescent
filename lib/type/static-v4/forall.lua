@@ -48,7 +48,7 @@ substitute = function(t, subst)
 	elseif t.tag == "fn" then
 		local ps = {} --[[: V4Type[] ]]
 		for i, p in ipairs(t.params) do ps[i] = substitute(p, subst) end
-		return T.fn(ps, substitute(t.ret, subst))
+		return T.fn(ps, substitute(t.ret, subst), t.effects)
 	elseif t.tag == "rec" then
 		local fs = {} --[[: { [string]: V4Type } ]]
 		for k, v in pairs(t.fields) do
