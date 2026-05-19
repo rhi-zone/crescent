@@ -761,4 +761,180 @@ These are genuinely unresolved from the canonical docs alone:
 7. **Diagnostic root-cause grouping algorithm.** Section 12 mentions an
    "origin chain" used by `bin/cr check --summary`. The exact grouping
    discipline (what makes two errors share a root cause?) is not specified
-   in any read source; design needed before Phase J.
+   in any read source; design needed before Phase J. See "Root-cause error
+   grouping (`--summary`)" below — audit of the existing implementation
+   resolves what the walker must emit.
+
+## Root-cause error grouping (`--summary`)
+
+Audit of the current implementation, conducted to determine what the v4 AST
+walker must emit so the `--summary` mode is reproducible (or what should be
+replaced). Sources read: `lib/type/static/cli.lua` lines 610-870 (the entire
+`-- ── Summary mode ──` section), the dispatch at line 902 (`--summary`
+flag), and the per-file accumulation at lines 1107, 1145-1146, 1197-1198.
+The mode is **not** documented in `docs/typechecker-reference.md`.
+
+### What `--summary` does
+
+It re-formats the same per-error list that the normal printer emits, but
+collapses it into:
+
+1. A total error count per file.
+2. A "Root causes" section listing **unresolved `require()` calls** and the
+   number of `unknown`-cascade errors attributed to each.
+3. A "Remaining" section bucketing every non-cascade error by a coarse label
+   (`type mismatch / assignment`, `field doesn't exist`, `call / overload
+   mismatch`, `operator on wrong type`, `missing required argument`,
+   `unknown identifier`, `other`).
+4. An "Unresolved requires (no cascade errors attributed)" section listing
+   unresolved modules that had no `unknown`-cascade errors blamed on them
+   (so the user still sees them as suspect root causes).
+
+Example. The file `/tmp/cascade_big.lua` (5 lines accessing a missing
+require, plus one unrelated return-type mismatch) produces:
+
+Default printer (4 separate, equal-weight errors):
+
+```
+/tmp/cascade_big.lua:3:14: error: value of type `unknown` must be narrowed before indexing
+/tmp/cascade_big.lua:4:14: error: value of type `unknown` must be narrowed before indexing
+/tmp/cascade_big.lua:5:14: error: value of type `unknown` must be narrowed before indexing
+/tmp/cascade_big.lua:11:3: error: return type mismatch: cannot return `42`: ...
+Checked 1 file(s): 4 error(s), 0 warning(s)
+```
+
+`--summary` (root-cause-grouped):
+
+```
+/tmp/cascade_big.lua: 4 errors
+  Root causes:
+    require("nonexistent.mod") → unknown (module not found): 3 downstream errors
+  Remaining (no cascade root):
+      1  type mismatch / assignment
+```
+
+The user immediately sees that 3 of the 4 errors are caused by one missing
+module, and that there is exactly one independent error to investigate.
+
+### The existing grouping mechanism
+
+**Verdict: ad-hoc.** The grouping is not derived from any structured
+metadata attached to errors. It is a post-hoc heuristic computed at output
+time by `print_summary` (cli.lua:673) over the same flat `err_ctx.errors`
+list the default printer consumes. Concretely:
+
+- **Bucket labels** are assigned by `bucket_label(msg)` (cli.lua:642-668) by
+  `string.find` substring-matching the rendered error message text:
+  `"of type \`unknown\`"`, `"doesn't exist"`, `"cannot call"`, `"cannot
+  perform arithmetic"`, etc. The taxonomy lives entirely in this function
+  as a hand-written if/elseif chain.
+- **Unresolved requires** are discovered by **re-reading the source file
+  from disk** (cli.lua:696-697), running a regex
+  (`require%s*%(%s*["']([^"']+)["']%s*%)`) over a comment-stripped copy
+  (cli.lua:633), and probing the filesystem with `io.open` to decide
+  whether each module resolves (`resolve_mod_path`, cli.lua:614-625). The
+  typechecker's own module-resolution state is not consulted; the summary
+  re-derives it from scratch.
+- **Cascade attribution** (which `unknown` error belongs to which missing
+  require) is a **source-line proximity heuristic** (cli.lua:749-805):
+  scan the source line-by-line for `require(...)` calls, record their line
+  numbers, then for each `unknown`-cascade error, attribute it to whichever
+  unresolved require's line number most recently precedes the error's
+  line. There is no dataflow link from the error's offending value back to
+  the require expression that produced it. The single-unresolved fast path
+  (cli.lua:739-740) just blames the first one unconditionally.
+- **No structured fields exist on errors for any of this.** The walker
+  emits `{ msg, line, ... }` records (cli.lua:672 type annotation) and the
+  summary recovers everything else by string-matching `msg`.
+
+Consequences observed during this audit:
+
+- With two unresolved requires and cascades reachable from only one of
+  them, attribution can misroute errors to whichever require's line number
+  happens to be closer — see the `/tmp/cascade_demo.lua` run, where two
+  cascade errors derived from `foo` (line 1) and `bar` (line 2) were both
+  attributed to `bar` because of "most recent preceding require" logic
+  (cli.lua:786-797). The wrongly-blamed require gets printed as
+  "Unresolved requires (no cascade errors attributed)" — visible but
+  misclassified.
+- Localised error rephrasing changes the bucket. If `errors.lua` ever
+  rewrites `"cannot perform arithmetic"` to `"arithmetic operator
+  requires"`, the `operator on wrong type` bucket silently goes empty and
+  every such error reclassifies as `other`. The taxonomy is coupled to
+  message wording by string equality of substrings.
+- The summary cannot represent transitive cascades (error B caused by
+  error A which is itself a cascade) because errors carry no parent
+  pointer. Only the top-level "unresolved require → unknown" link is
+  modelled, and only by source-position proximity.
+
+### What the v4 walker must emit per error
+
+To make the same grouping reproducible **without re-parsing the source and
+without substring-matching messages**, each diagnostic emitted by the
+walker should carry structured fields:
+
+1. **`code`** — a stable machine identifier for the error class (e.g.
+   `E_UNKNOWN_NOT_NARROWED`, `E_FIELD_MISSING`, `E_ASSIGN_MISMATCH`,
+   `E_CALL_ARITY`, `E_CALL_NO_OVERLOAD`, `E_OP_TYPE`, `E_ARG_MISSING`,
+   `E_IDENT_UNKNOWN`, `E_REQUIRE_UNRESOLVED`). This replaces
+   `bucket_label`'s substring matching with direct lookup. The taxonomy
+   becomes data, not parser logic.
+2. **`pos`** — source span (start/end line+col) of the offending node, not
+   just `line`. The current `line`-only field is what forces the
+   proximity heuristic; with an exact span, a cascade error can point at
+   the *variable* whose unknown type was indexed, which is a real symbol
+   the walker already knows about.
+3. **`origin`** — a structured reference to the producing diagnostic or
+   producing node, when one exists. For `E_UNKNOWN_NOT_NARROWED`, this is
+   the upstream node (or upstream diagnostic ID) that *gave* the value its
+   `unknown` type — typically the `require()` call whose target failed to
+   resolve, or the `--: unknown` annotation site, or the variable
+   declaration that inherited `unknown` from an unresolved import. The
+   walker has this information at the point of failure (it constructed
+   the `unknown` type variable); persisting it onto the diagnostic
+   replaces the proximity heuristic with a real edge.
+4. **`origin_kind`** — discriminant on `origin` so the summary printer
+   can group: `require_unresolved`, `annotation_unknown`,
+   `propagated_unknown`, `no_origin`. With this, the "unresolved require
+   → N downstream errors" line becomes a direct group-by on
+   `origin_kind == require_unresolved`, no source re-parse needed.
+5. **`module`** — for `E_REQUIRE_UNRESOLVED` specifically, the literal
+   module name string. The walker knows this; storing it removes the
+   regex scan over source.
+6. **`severity`** — already implicit; keep as a first-class field so
+   future modes (e.g. "warnings only") don't add another substring
+   matcher.
+
+With (1)-(5) the entire 200-line summary implementation collapses to a
+`group_by(code, origin_kind, origin)` over the diagnostics list, plus a
+join from `E_REQUIRE_UNRESOLVED` diagnostics to the `unknown`-cascade
+diagnostics whose `origin` points at them. No source re-read. No regex.
+No "most recent preceding require" heuristic. Attribution is exact
+because the walker recorded the actual dataflow edge.
+
+### Recommendation
+
+**Do not preserve the existing grouping verbatim.** The current
+implementation is a self-contained post-processor over rendered messages
+and re-parsed source; reproducing it in v4 would mean carrying forward
+the misattribution bugs above and freezing the bucket taxonomy to the
+exact wording of v3's error strings.
+
+Instead: in v4 the walker emits diagnostics with the structured fields
+above (`code`, `pos`, `origin`, `origin_kind`, `module`). The `--summary`
+printer becomes a thin transform that group-bys on those fields. The
+existing v3 output format (the textual layout — "Root causes:" /
+"Remaining:" / "Unresolved requires:" headings) is fine to keep as the
+default presentation; only the data path underneath changes.
+
+This shifts root-cause discipline from a fragile output-time heuristic
+into a walker invariant: **every diagnostic whose `code` indicates
+"derived from an `unknown`" must carry an `origin` pointing at the
+producing diagnostic or producing node, or the walker has a bug.** Phase
+J becomes a checklist of "for each error site that constructs an
+`unknown`-propagation diagnostic, what is its `origin`?" — a question
+with a finite, enumerable set of answers, not an open-ended heuristic.
+
+The v3 implementation should remain unchanged until v4 ships a
+replacement; it works well enough on the common single-unresolved-require
+case and we have no second consumer to break.
