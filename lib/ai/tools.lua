@@ -6,16 +6,9 @@ local ai = require("lib.ai")
 
 local mod = {}
 
--- Type declarations (mirror lib/ai/types.lua; redeclared because the typechecker has no cross-module type import).
---:: ai_message = { role: "system" | "user" | "assistant" | "tool", content: string, tool_call_id?: string, name?: string }
---:: ai_tool = { name: string, description: string, parameters: { [string]: unknown } }
---:: ai_tool_call = { id: string, name: string, arguments: { [string]: unknown } }
---:: ai_http_client = { request: (req: unknown) -> (unknown, string | nil), stream: (req: unknown) -> ((() -> string | nil, string | nil) | nil, (() -> nil) | string | nil) }
---:: ai_request = { model: string, messages: ai_message[], max_tokens?: integer, temperature?: number, tools?: ai_tool[], stream?: boolean, provider?: ai_provider, http_client?: ai_http_client, api_key?: string }
+--:: require "lib.ai.types"
+-- Local helper alias (not in types.lua).
 --:: ai_tool_call_list = { [integer]: ai_tool_call }
---:: ai_response = { text: string | nil, tool_calls: ai_tool_call[] | nil, finish_reason: string, usage: { input_tokens: integer, output_tokens: integer } | nil }
---:: ai_delta = { text: string | nil, tool_call: ai_tool_call | nil, finish_reason: string | nil, usage: { input_tokens: integer, output_tokens: integer } | nil }
---:: ai_provider = { generate: (req: ai_request) -> (ai_response | nil, string | nil), stream: (req: ai_request) -> ((() -> ai_delta | nil) | nil, string | nil) }
 
 --- Run an agentic tool loop.
 -- Calls ai.generate in a loop, executes tool calls via handlers,

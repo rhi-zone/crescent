@@ -10,14 +10,17 @@ local stream_mod = require("lib.http.stream")
 
 local mod = {}
 
--- Type declarations (mirror lib/ai/types.lua; redeclared because the typechecker has no cross-module type import).
---:: ai_message = { role: "system" | "user" | "assistant" | "tool", content: string, tool_call_id?: string, name?: string }
---:: ai_tool = { name: string, description: string, parameters: { [string]: unknown } }
---:: ai_tool_call = { id: string, name: string, arguments: { [string]: unknown } }
+--:: require "lib.ai.types"
+-- Local forks (intentionally differ from canonical):
+--   ai_http_response: not in types.lua; provider accesses res.status/res.body directly.
+--   ai_http_client: returns typed ai_http_response instead of unknown so res.status/res.body are visible without a cast.
+--   ai_request / ai_embed_request / ai_embed_many_request: rebound so their http_client? field references the local ai_http_client above.
+--   ai_delta: stream emits partial deltas (only one field at a time), so all fields are optional (?:) rather than T | nil.
 --:: ai_http_response = { status: integer | nil, body: string | nil, headers?: { [string]: { string } } }
 --:: ai_http_client = { request: (req: unknown) -> (ai_http_response | nil, string | nil), stream: (req: unknown) -> ((() -> string | nil, string | nil) | nil, (() -> nil) | string | nil) }
---:: ai_request = { model: string, messages: ai_message[], max_tokens?: integer, temperature?: number, tools?: ai_tool[], stream?: boolean, http_client?: ai_http_client, api_key?: string }
---:: ai_response = { text: string | nil, tool_calls: ai_tool_call[] | nil, finish_reason: string, usage: { input_tokens: integer, output_tokens: integer } | nil }
+--:: ai_request = { model: string, messages: ai_message[], max_tokens?: integer, temperature?: number, tools?: ai_tool[], stream?: boolean, provider?: ai_provider, http_client?: ai_http_client, api_key?: string }
+--:: ai_embed_request = { model: string, value: string, provider?: ai_provider, http_client?: ai_http_client, api_key?: string }
+--:: ai_embed_many_request = { model: string, values: string[], provider?: ai_provider, http_client?: ai_http_client, api_key?: string }
 --:: ai_delta = { text?: string | nil, tool_call?: ai_tool_call | nil, finish_reason?: string | nil, usage?: { input_tokens: integer, output_tokens: integer } | nil }
 --:: google_part = { text?: string, functionCall?: { name?: string, args?: { [string]: unknown } } }
 --:: google_candidate = { content?: { parts?: Arr<google_part> }, finishReason?: string }
@@ -26,10 +29,6 @@ local mod = {}
 --:: google_embed_response = { error?: { message?: string }, embedding?: google_embedding }
 --:: google_embed_many_response = { error?: { message?: string }, embeddings?: Arr<google_embedding> }
 --:: http_stream_t = { read_headers: (self: unknown) -> (unknown, string | nil), status: (self: unknown) -> integer | nil, read_body: (self: unknown) -> (string | nil, string | nil), events: (self: unknown) -> () -> { event: string | nil, data: string, id: string | nil } | nil }
---:: ai_embed_request = { model: string, value: string, http_client?: ai_http_client, api_key?: string }
---:: ai_embed_many_request = { model: string, values: string[], http_client?: ai_http_client, api_key?: string }
---:: ai_embed_response = { embedding: number[], usage: { input_tokens: integer } | nil }
---:: ai_embed_many_response = { embeddings: number[][], usage: { input_tokens: integer } | nil }
 
 local API_HOST = "generativelanguage.googleapis.com"
 
