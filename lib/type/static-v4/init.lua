@@ -22,6 +22,8 @@ M.rec     = T.rec
 M.union   = T.union
 M.inter   = T.inter
 M.var     = T.var
+M.fix     = T.fix
+M.mu      = T.mu
 M.show    = T.show
 
 -- Convenience primitive shortcuts (so tests don't all say M.prim("number")).
@@ -39,5 +41,6 @@ M.subtype    = ST.subtype
 
 -- Test affordances.
 M._reset_var_ids = T._reset_var_ids
+M._reset_mu_ids  = T._reset_mu_ids
 
 return M

@@ -273,6 +273,25 @@ constrain = function(s, a, b)
 	if s.cache[k] then return true end
 	s.cache[k] = true
 
+	-- Equi-recursive types: unfold one step. The cache entry above guarantees
+	-- termination — when the unfolded body reaches the same (mu, other) pair,
+	-- we short-circuit. This is the Amadio-Cardelli (1993) equi-recursive
+	-- algorithm: μX.T <: U iff T[μX.T/X] <: U, with cycle detection on the
+	-- subtype obligation, not on the structural depth.
+	--
+	-- We unfold mu BEFORE the variable rules: if both sides are mus we want
+	-- the cache to short-circuit on the (mu, mu) identity check above; if
+	-- only one side is mu, unfolding exposes the structure the other side
+	-- needs to match. The body of a mu is the type itself with self-refs
+	-- pointing back; in Lua the cyclic table means we never substitute
+	-- explicitly — reading `mu.body` already gives the unfolded form.
+	if a.tag == "mu" then
+		return constrain(s, a.body, b)
+	end
+	if b.tag == "mu" then
+		return constrain(s, a, b.body)
+	end
+
 	-- Variable on the right.
 	if b.tag == "var" then
 		if a.tag == "var" then

@@ -1,13 +1,15 @@
-# static-v4 — typechecker foundation (Phase 4a)
+# static-v4 — typechecker foundation (Phases 4a–4b.1)
 
 Greenfield typechecker, derived from `docs/typechecker-rewrite-design.md`
 (itself derived from simple-sub and MLstruct).
 
-This directory implements **only Phase 4a**: type representation and the
-subtyping algorithm core. The AST walker, CLI integration, cache (`.cri`),
-recursion (`mu`), complement (`~T`), quantifiers (`forall`), match types,
-indexed access, and effects are all out of scope and will land in later
-phases.
+This directory currently implements:
+- **Phase 4a** — type representation and the subtyping algorithm core.
+- **Phase 4b.1** — equi-recursive μ types.
+
+Still out of scope: the AST walker, CLI integration, cache (`.cri`),
+indexed access (4b.2), complement `~T` (4c), match types (4d),
+quantifiers / rank-N (4e), effects (4f).
 
 ## Layout
 
@@ -64,14 +66,68 @@ phases.
   (CLAUDE.md's "temporary measures are context poisoning"). Union-on-LHS
   and intersection-on-RHS decompose without backtracking and are
   supported in full.
-- No recursive types (`mu`). The cache prevents infinite descent on
-  cyclic variable links, which is the termination concern shared with
-  recursive types, but `mu X. F(X)` as a constructor is not yet defined.
 - No quantifiers (`forall`), no skolemization, no escape check.
 - No coalescing / display-form simplification. `M.show` is a debug
   printer; user-facing principal type recovery is a later phase.
 - No source positions. Per type-system.md Principle 13, locations are
   not part of the type representation.
+
+## Phase 4b.1 — equi-recursive μ types
+
+Recursive types are introduced as a dedicated `mu` constructor (design doc
+§4.1 `Mu(X, T)`). The user-facing API is `M.fix(f)` where `f` receives a
+self-reference handle that *is* the resulting `mu` node — any reference to
+the handle inside the returned body produces a cyclic Lua table.
+
+```lua
+local list = V.fix(function(self)
+    return V.rec({ value = V.integer, next = self }, false)
+end)
+-- list denotes  μX. { value: integer, next: X }
+```
+
+`M.mu(body)` is a lower-level alternative for callers that built the cycle
+manually; `fix` is the recommended path.
+
+### Subtyping
+
+A single rule, placed before the variable rules in `constrain`:
+
+- `μX. T <: U`  ⇔  `T[μX.T/X] <: U`  (lazy unfold; "substitution" is
+  trivial because the cycle is represented by table identity, so reading
+  `mu.body` is already the substituted form).
+- Symmetric for the right-hand side.
+
+Termination is guaranteed by the existing identity-keyed cache: every
+constraint `(a, b)` is admitted to the cache before recursion, so when the
+unfolded body's traversal lands on the same `(μ, other)` pair a second
+time, the cache short-circuits with success. This is the canonical
+Amadio-Cardelli (1993) equi-recursive subtyping discipline; the rule lives
+*above* the variable handling because it is purely structural and never
+introduces or links variables.
+
+### Interaction with deferred features
+
+Equi-recursive subtyping reduces a `μ` obligation to a structural one on
+the body. If the body decomposes to a constraint shape that 4a defers —
+union on the right or intersection on the left — that constraint is
+rejected with the same Phase 4c message as a non-recursive obligation
+would be. Example: `μX. {tag: "leaf"} | {tag: "node", child: X}` is
+constructible in 4b.1, and subtyping it against itself by identity
+succeeds, but subtyping it against a *structurally equivalent* but
+distinct μ would unfold to `union(...) <: union(...)` and then decompose
+to `member <: union(...)`, hitting the 4c block. This is the right
+behavior: the principled cross-disjunct case requires complement, and
+patching it ad hoc here would replicate the disjunct-try backtracking
+already rejected for 4a.
+
+### Pretty-printing
+
+`M.show` displays a μ type as `(μ X<id>. body)` and uses the same id-tagged
+binding for back-references within the body, terminating on cycles. The id
+makes nested μ types distinguishable (`(μ X1. ... (μ X2. ...) ...)`).
+MLstruct §3.5 / simple-sub §4 use the same μ-form for coalesced recursive
+types; that's the user-facing target whenever full coalescing lands.
 
 ## Running
 

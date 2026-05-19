@@ -32,7 +32,8 @@ local M = {}
 --:: V4Union   = { tag: "union", members: V4Type[] }
 --:: V4Inter   = { tag: "inter", members: V4Type[] }
 --:: V4Var     = { tag: "var", id: integer, name: string, lower: V4Type[], upper: V4Type[], lower_vars: { [integer]: V4Type }, upper_vars: { [integer]: V4Type } }
---:: V4Type    = V4Top | V4Bot | V4Prim | V4Literal | V4Fn | V4Rec | V4Union | V4Inter | V4Var
+--:: V4Mu      = { tag: "mu", id: integer, body: V4Type }
+--:: V4Type    = V4Top | V4Bot | V4Prim | V4Literal | V4Fn | V4Rec | V4Union | V4Inter | V4Var | V4Mu
 
 -- ── Tags ──────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,14 @@ M.TAG_REC       = "rec"
 -- Boolean combinators.
 M.TAG_UNION     = "union"
 M.TAG_INTER     = "inter"
+
+-- Equi-recursive type. The `body` typically contains a reference back to the
+-- enclosing `mu` table (a cyclic Lua structure), expressing `μX. body[X]`.
+-- Subtyping unfolds one step on demand and relies on the solver's cache to
+-- terminate when the same (mu, other) pair recurs (Amadio-Cardelli 1993; see
+-- MLstruct §3.2 for the cache discipline shared with cyclic variable bounds).
+-- We give each `mu` a unique id for deterministic display naming.
+M.TAG_MU        = "mu"
 
 -- Inference variable. lower/upper bounds accumulate during constraint solving.
 -- Per simple-sub (Parreaux 2020) / MLstruct §3.2: each variable carries a
@@ -176,11 +185,53 @@ end
 -- automatic because some tests interleave fresh-var creation across cases.
 function M._reset_var_ids() _next_var_id = 0 end
 
+-- Equi-recursive type. The user-facing constructor is `fix`: it takes a
+-- function that, given a self-reference handle, returns the body. The handle
+-- IS the `mu` node — so any occurrence of `self` inside `body` shares the
+-- same Lua table, producing a cyclic structure. Termination during subtyping
+-- relies on the solver's identity-keyed cache (subtype.lua): the same
+-- (mu, other) pair encountered a second time is admitted as proved.
+--
+-- The body is filled in after construction (two-step build) so the closure
+-- can refer to the mu node. CLAUDE.md's "all shape-defining fields in the
+-- literal" rule still applies — `body` is present at construction, just
+-- initially set to a placeholder that we overwrite immediately. We do not
+-- expose the mu node before the body is set.
+local _next_mu_id = 0
+--: ((V4Type) -> V4Type) -> V4Type
+function M.fix(f)
+	_next_mu_id = _next_mu_id + 1
+	local node = {
+		tag  = M.TAG_MU,
+		id   = _next_mu_id,
+		body = TOP --[[: V4Type]], -- placeholder; overwritten before the function returns
+	}
+	node.body = f(node)
+	return node
+end
+
+-- Direct `mu` constructor for callers that already have a body referring to
+-- the node by table identity (e.g. test fixtures that built the cycle
+-- manually). Prefer `fix` — this exists for parity with the type union.
+--: (V4Type) -> V4Type
+function M.mu(body)
+	_next_mu_id = _next_mu_id + 1
+	return { tag = M.TAG_MU, id = _next_mu_id, body = body }
+end
+
+function M._reset_mu_ids() _next_mu_id = 0 end
+
 -- ── Display ───────────────────────────────────────────────────────────────
 -- A minimal pretty-printer for error messages and test diagnostics. Does NOT
 -- coalesce bounds into a compact type — that's a later-phase concern.
 
---: (V4Type, { [integer]: boolean } | nil) -> string
+-- Cycle protection during display uses two seen-sets keyed by id:
+--   `seen_var[var_id] = true` while we're inside a variable's bound expansion
+--   `seen_mu[mu_id]   = name`  while we're inside a mu node — the value is
+--     the bound name (`X1`, `X2`, ...) used for back-references.
+--:: ShowSeen = { vars: { [integer]: boolean }, mus: { [integer]: string } }
+
+--: (V4Type, ShowSeen) -> string
 local function show(t, seen)
 	if t.tag == "top" then return "unknown" end
 	if t.tag == "bot" then return "never" end
@@ -219,13 +270,27 @@ local function show(t, seen)
 		for i, m in ipairs(t.members) do ps[i] = show(m, seen) end
 		return "(" .. table.concat(ps, " & ") .. ")"
 	end
+	if t.tag == "mu" then
+		-- Re-encountering the same mu node: emit the bound name only.
+		local existing = seen.mus[t.id]
+		if existing ~= nil then return existing end
+		-- First visit: assign a bound name and recurse into the body. The
+		-- name is `X<id>` rather than a count-of-active-mus because nested
+		-- mus need distinct names and we want stability across runs.
+		local name = "X" .. t.id
+		seen.mus[t.id] = name
+		local body_str = show(t.body, seen)
+		seen.mus[t.id] = nil
+		-- MLstruct §3.5 / simple-sub §4 coalescing form: `μ X. body`.
+		return "(μ " .. name .. ". " .. body_str .. ")"
+	end
 	if t.tag == "var" then
 		-- Cycle protection: a variable may transitively bound itself. Keyed
 		-- by var id so the typechecker can express the seen-set as a map.
-		seen = seen or {}
-		if seen[t.id] then return t.name end
-		seen[t.id] = true
+		if seen.vars[t.id] then return t.name end
+		seen.vars[t.id] = true
 		if #t.lower == 0 and #t.upper == 0 then
+			seen.vars[t.id] = nil
 			return t.name
 		end
 		local lows, ups = {}, {}
@@ -234,13 +299,13 @@ local function show(t, seen)
 		local parts = { t.name }
 		if #lows > 0 then parts[#parts + 1] = "[>: " .. table.concat(lows, ", ") .. "]" end
 		if #ups > 0 then parts[#parts + 1] = "[<: " .. table.concat(ups, ", ") .. "]" end
-		seen[t.id] = nil
+		seen.vars[t.id] = nil
 		return table.concat(parts, " ")
 	end
 	return "?<" .. tostring(t.tag) .. ">"
 end
 
 --: (V4Type) -> string
-function M.show(t) return show(t, nil) end
+function M.show(t) return show(t, { vars = {}, mus = {} }) end
 
 return M

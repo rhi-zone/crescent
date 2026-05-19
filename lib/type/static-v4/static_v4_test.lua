@@ -209,6 +209,108 @@ T.describe("variables — bound accumulation", function()
 	end)
 end)
 
+T.describe("recursive types — equi-recursive μ", function()
+	T.it("μX. {value: int, next: X} <: itself (identity short-circuit)", function()
+		-- Same node on both sides: identity check fires before unfolding.
+		local list = V.fix(function(self)
+			return V.rec({ value = V.integer, next = self }, false)
+		end)
+		T.ok(st(list, list))
+	end)
+
+	T.it("μX. () -> X <: μY. () -> Y (covariant return, two distinct mus)", function()
+		-- Distinct μ nodes that should be structurally equivalent. Subtyping
+		-- unfolds both, lands on a (μX, μY) pair, caches it, decomposes the
+		-- arrows, and when the bodies recurse to (μX, μY) again the cache
+		-- short-circuits — the canonical termination property for recursive
+		-- subtyping (Amadio-Cardelli 1993, Pierce TAPL §21).
+		local f1 = V.fix(function(self) return V.fn({}, self) end)
+		local f2 = V.fix(function(self) return V.fn({}, self) end)
+		T.ok(st(f1, f2))
+		T.ok(st(f2, f1))
+	end)
+
+	T.it("μX. (X) -> integer <: μY. (Y) -> integer (contravariant param)", function()
+		-- Parameter is contravariant: comparing the bodies requires Y <: X,
+		-- which is the *reverse* of the outer obligation. Without cycle
+		-- caching this would diverge or fail; with it, the cache admits the
+		-- swapped pair on second visit.
+		local g1 = V.fix(function(self) return V.fn({ self }, V.integer) end)
+		local g2 = V.fix(function(self) return V.fn({ self }, V.integer) end)
+		T.ok(st(g1, g2))
+	end)
+
+	T.it("μX. () -> X <: μY. () -> integer (rejects when bodies diverge)", function()
+		-- Recursive on LHS, non-recursive on RHS. Unfold LHS to (() -> μX),
+		-- decompose, return covariant: μX <: integer. Unfold LHS again:
+		-- (() -> μX) <: integer — function does not fit primitive, error.
+		local rec = V.fix(function(self) return V.fn({}, self) end)
+		local nonrec = V.fn({}, V.integer)
+		T.fail(st(rec, nonrec))
+	end)
+
+	T.it("cycle cache fires: μX. () -> X compared with itself terminates", function()
+		-- Self-comparison via identity is too easy. Construct two distinct
+		-- μ nodes whose bodies' subtype obligation traverses the cycle, and
+		-- verify termination relies on the cache (timing out would mean
+		-- divergence). We use a wall-clock-free witness: the call returns.
+		local m1 = V.fix(function(self) return V.fn({}, self) end)
+		local m2 = V.fix(function(self) return V.fn({}, self) end)
+		local s = V.new_solver()
+		T.ok(V.constrain(s, m1, m2))
+		-- The cache must contain the (m1, m2) pair (under unfold the body
+		-- recurses to that same pair, hits the cache, returns).
+		local k = tostring(m1) .. "<:" .. tostring(m2)
+		T.ok(s.cache[k])
+	end)
+
+	T.it("recursive type with a type-variable parameter", function()
+		-- Models `List<α>` (non-empty cons list) by leaving the head's type
+		-- as a free variable. Subtyping List<α> <: List<α> (same instance)
+		-- succeeds by identity; depositing bounds on α via a separate
+		-- constraint then visibly affects the recursive structure.
+		local alpha = V.var("α")
+		local list_alpha = V.fix(function(self)
+			return V.rec({ head = alpha, tail = self }, false)
+		end)
+		T.ok(st(list_alpha, list_alpha))
+		-- The body still mentions α — constraining α propagates through.
+		T.ok(V.subtype(V.integer, alpha))
+		T.eq(#alpha.lower, 1)
+		T.eq(alpha.lower[1], V.integer)
+	end)
+
+	T.it("μX. {value: int, next: X} <: μY. {value: int, next: Y} (record cycle)", function()
+		-- Same shape, distinct μ nodes. Field-by-field decomposition runs
+		-- into the recursive `next` pair on both sides; cache short-circuits.
+		local l1 = V.fix(function(self) return V.rec({ value = V.integer, next = self }, false) end)
+		local l2 = V.fix(function(self) return V.rec({ value = V.integer, next = self }, false) end)
+		T.ok(st(l1, l2))
+	end)
+
+	T.it("pretty-printing terminates and emits μ form", function()
+		local l = V.fix(function(self) return V.rec({ value = V.integer, next = self }, false) end)
+		local str = V.show(l)
+		T.ok(string.find(str, "μ", 1, true) ~= nil, "expected μ in output: " .. str)
+		-- The back-reference should appear: the body mentions the bound
+		-- name (X<id>) where `next: self` recurses.
+		T.ok(string.find(str, "X", 1, true) ~= nil, "expected bound name in output: " .. str)
+		-- And it must be a finite string (termination — vacuously true if
+		-- we got this far, but assert non-empty for the record).
+		T.neq(#str, 0)
+	end)
+
+	T.it("pretty-printing nested μ types uses distinct bound names", function()
+		local inner = V.fix(function(self) return V.fn({}, self) end)
+		local outer = V.fix(function(self) return V.rec({ inner = inner, outer = self }, false) end)
+		local str = V.show(outer)
+		-- Two distinct μ nodes produced two distinct bound names; the
+		-- output must mention both ids.
+		T.ok(string.find(str, "X" .. inner.id, 1, true) ~= nil, "missing inner mu name in: " .. str)
+		T.ok(string.find(str, "X" .. outer.id, 1, true) ~= nil, "missing outer mu name in: " .. str)
+	end)
+end)
+
 T.describe("variables — termination on cycles", function()
 	T.it("self-referential constraint does not loop", function()
 		-- α <: α should succeed trivially via identity. We additionally check
