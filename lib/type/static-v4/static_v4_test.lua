@@ -328,4 +328,210 @@ T.describe("variables — termination on cycles", function()
 	end)
 end)
 
+-- ── Phase 4b.2: indexed access types ─────────────────────────────────────
+
+-- Shorthand: literal string key.
+local function ks(s) return V.literal("string", s) end
+
+T.describe("indexed access — closed record", function()
+	T.it("closed record + literal key in record → field type", function()
+		local r = V.rec({ x = V.integer, y = V.string_ }, false)
+		local got, err = V.index(r, ks("x"))
+		T.eq(err, nil)
+		T.eq(got, V.integer)
+	end)
+
+	T.it("closed record + literal key NOT in record → error", function()
+		-- Decision: error, not `never`. Rationale: a missing-key indexed
+		-- access is almost always a user typo, and silently producing `never`
+		-- propagates an inhabited-by-nothing type into downstream constraints
+		-- where it shows up as a confusing subtype failure. Surfacing the
+		-- bug at the operation site itself is the principled response.
+		local r = V.rec({ x = V.integer, y = V.string_ }, false)
+		local got, err = V.index(r, ks("nope"))
+		T.eq(got, nil)
+		T.ok(err and err:find("nope", 1, true) ~= nil, "error should mention the missing key, got: " .. tostring(err))
+	end)
+
+	T.it("closed record + union of literal keys → distributed union", function()
+		-- T["x" | "y"] = T["x"] | T["y"] = integer | string.
+		local r = V.rec({ x = V.integer, y = V.string_ }, false)
+		local got, err = V.index(r, V.union({ ks("x"), ks("y") }))
+		T.eq(err, nil)
+		-- T["x"] <: result and T["y"] <: result; result is { integer, string }
+		-- in some order — assert via subtype rather than identity.
+		T.ok(got ~= nil and got.tag == "union", "expected union, got: " .. V.show(got))
+		-- Validate members structurally — `A <: B | C` is deferred to Phase
+		-- 4c (no complement yet), so we cannot use `subtype` directly.
+		local saw_int, saw_str = false, false
+		for _, m in ipairs(got.members) do
+			if m == V.integer then saw_int = true end
+			if m == V.string_ then saw_str = true end
+		end
+		T.ok(saw_int, "missing integer member: " .. V.show(got))
+		T.ok(saw_str, "missing string member: " .. V.show(got))
+	end)
+
+	T.it("closed record + string primitive key → union of all field types", function()
+		local r = V.rec({ x = V.integer, y = V.string_ }, false)
+		local got, err = V.index(r, V.string_)
+		T.eq(err, nil)
+		T.ok(got ~= nil and got.tag == "union", "expected union, got: " .. V.show(got))
+		local saw_int, saw_str = false, false
+		for _, m in ipairs(got.members) do
+			if m == V.integer then saw_int = true end
+			if m == V.string_ then saw_str = true end
+		end
+		T.ok(saw_int)
+		T.ok(saw_str)
+	end)
+end)
+
+T.describe("indexed access — indexer-typed record", function()
+	T.it("{ [string]: V } + literal key → V", function()
+		local v = V.prim("boolean")
+		local r = V.rec({}, false, V.indexer(V.string_, v))
+		local got, err = V.index(r, ks("anything"))
+		T.eq(err, nil)
+		T.eq(got, v)
+	end)
+
+	T.it("mixed: named field wins over indexer at the named key", function()
+		-- { x: integer, [string]: boolean }[\"x\"] = integer (not boolean).
+		-- Named fields shadow the indexer at their key.
+		local r = V.rec({ x = V.integer }, false, V.indexer(V.string_, V.boolean))
+		local got, err = V.index(r, ks("x"))
+		T.eq(err, nil)
+		T.eq(got, V.integer)
+	end)
+
+	T.it("mixed: extra key falls through to indexer", function()
+		local r = V.rec({ x = V.integer }, false, V.indexer(V.string_, V.boolean))
+		local got, err = V.index(r, ks("other"))
+		T.eq(err, nil)
+		T.eq(got, V.boolean)
+	end)
+end)
+
+T.describe("indexed access — open record", function()
+	T.it("open record + literal key in closed prefix → field type", function()
+		local r = V.rec({ x = V.integer }, true)
+		local got, err = V.index(r, ks("x"))
+		T.eq(err, nil)
+		T.eq(got, V.integer)
+	end)
+
+	T.it("open record + literal key NOT in closed prefix → unknown (row var contribution)", function()
+		-- Per the rewrite design §1.1: an open record's row variable contributes
+		-- the result. Under 4b.2's scope (no proper row polymorphism yet) the
+		-- row's contribution is `unknown`. Documented in index.lua.
+		local r = V.rec({ x = V.integer }, true)
+		local got, err = V.index(r, ks("other"))
+		T.eq(err, nil)
+		T.ok(got ~= nil and got.tag == "top", "expected unknown, got: " .. V.show(got))
+	end)
+end)
+
+T.describe("indexed access — distribution", function()
+	T.it("union of records + literal key → distributed", function()
+		-- (R1 | R2)[\"x\"] = R1[\"x\"] | R2[\"x\"] = integer | string.
+		local r1 = V.rec({ x = V.integer }, false)
+		local r2 = V.rec({ x = V.string_ }, false)
+		local got, err = V.index(V.union({ r1, r2 }), ks("x"))
+		T.eq(err, nil)
+		T.ok(got ~= nil and got.tag == "union", "expected union, got: " .. V.show(got))
+		local saw_int, saw_str = false, false
+		for _, m in ipairs(got.members) do
+			if m == V.integer then saw_int = true end
+			if m == V.string_ then saw_str = true end
+		end
+		T.ok(saw_int)
+		T.ok(saw_str)
+	end)
+
+	T.it("union of records + literal key missing in one → error (closed)", function()
+		local r1 = V.rec({ x = V.integer }, false)
+		local r2 = V.rec({ y = V.string_ }, false)
+		local got, err = V.index(V.union({ r1, r2 }), ks("x"))
+		T.eq(got, nil)
+		T.neq(err, nil)
+	end)
+end)
+
+T.describe("indexed access — deferred / rejected cases", function()
+	T.it("type-variable key on a concrete record → rejected (no deferred queue in 4b.2)", function()
+		-- Decision: REJECT, not defer. Phase 4a's solver has only the `<:`
+		-- primitive with eager bound propagation; no deferred-constraint
+		-- queue exists. CLAUDE.md "Temporary measures are context poisoning"
+		-- prohibits bolting on a one-off queue for indexed access alone. The
+		-- principled choice is to error loudly until the general suspension
+		-- mechanism lands (alongside match-type suspension).
+		local r = V.rec({ x = V.integer }, false)
+		local key = V.var("k")
+		local got, err = V.index(r, key)
+		T.eq(got, nil)
+		T.ok(err and err:find("deferred", 1, true) ~= nil, "expected deferred error, got: " .. tostring(err))
+	end)
+
+	T.it("indexed access on a type variable target → rejected", function()
+		local obj = V.var("o")
+		local got, err = V.index(obj, ks("x"))
+		T.eq(got, nil)
+		T.ok(err and err:find("deferred", 1, true) ~= nil, "expected deferred error, got: " .. tostring(err))
+	end)
+
+	T.it("non-record target → error", function()
+		local got, err = V.index(V.integer, ks("x"))
+		T.eq(got, nil)
+		T.ok(err and err:find("record", 1, true) ~= nil, "expected record-shape error, got: " .. tostring(err))
+	end)
+
+	T.it("non-string-typed key → error", function()
+		local r = V.rec({ x = V.integer }, false)
+		local got, err = V.index(r, V.integer)
+		T.eq(got, nil)
+		T.neq(err, nil)
+	end)
+end)
+
+T.describe("indexed access — recursive (μ) types", function()
+	T.it("indexed access on μ unfolds and terminates", function()
+		-- μX. { value: integer, next: X }. Reading ["value"] yields integer;
+		-- reading ["next"] yields the μ node itself (the cyclic table). Both
+		-- must terminate in finite steps.
+		local list = V.fix(function(self)
+			return V.rec({ value = V.integer, next = self }, false)
+		end)
+		local v, ev = V.index(list, ks("value"))
+		T.eq(ev, nil)
+		T.eq(v, V.integer)
+		local n, en = V.index(list, ks("next"))
+		T.eq(en, nil)
+		-- `next` field projects to the μ node itself (identity).
+		T.eq(n, list)
+	end)
+end)
+
+T.describe("indexed access — subtyping with indexers", function()
+	-- These tests exercise the new V4Rec.indexer field in subtype.lua to
+	-- verify 4b.2 didn't regress the existing record subtyping path.
+	T.it("{ [string]: integer } <: { [string]: number } (covariant value)", function()
+		local a = V.rec({}, false, V.indexer(V.string_, V.integer))
+		local b = V.rec({}, false, V.indexer(V.string_, V.number))
+		T.ok(st(a, b))
+	end)
+
+	T.it("{ x: integer } <: { [string]: number } (named field flows into indexer)", function()
+		local a = V.rec({ x = V.integer }, false)
+		local b = V.rec({}, false, V.indexer(V.string_, V.number))
+		T.ok(st(a, b))
+	end)
+
+	T.it("{ x: string } </: { [string]: number } (named field violates indexer value)", function()
+		local a = V.rec({ x = V.string_ }, false)
+		local b = V.rec({}, false, V.indexer(V.string_, V.number))
+		T.fail(st(a, b))
+	end)
+end)
+
 return T._summary()

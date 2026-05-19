@@ -1,4 +1,4 @@
-# static-v4 — typechecker foundation (Phases 4a–4b.1)
+# static-v4 — typechecker foundation (Phases 4a–4b.2)
 
 Greenfield typechecker, derived from `docs/typechecker-rewrite-design.md`
 (itself derived from simple-sub and MLstruct).
@@ -6,10 +6,12 @@ Greenfield typechecker, derived from `docs/typechecker-rewrite-design.md`
 This directory currently implements:
 - **Phase 4a** — type representation and the subtyping algorithm core.
 - **Phase 4b.1** — equi-recursive μ types.
+- **Phase 4b.2** — indexed access types `T[K]`, with record indexers
+  (`{ [K]: V }`) added to the record constructor.
 
 Still out of scope: the AST walker, CLI integration, cache (`.cri`),
-indexed access (4b.2), complement `~T` (4c), match types (4d),
-quantifiers / rank-N (4e), effects (4f).
+complement `~T` (4c), match types (4d), quantifiers / rank-N (4e),
+effects (4f).
 
 ## Layout
 
@@ -128,6 +130,93 @@ binding for back-references within the body, terminating on cycles. The id
 makes nested μ types distinguishable (`(μ X1. ... (μ X2. ...) ...)`).
 MLstruct §3.5 / simple-sub §4 use the same μ-form for coalesced recursive
 types; that's the user-facing target whenever full coalescing lands.
+
+## Phase 4b.2 — indexed access types
+
+`T[K]` is a first-class lattice operation (design doc §1.1, §9.2.5). The API
+is `M.index(obj, key)`, which returns `(type, nil)` on success or
+`(nil, errmsg)` on failure. Pure: no mutation of `obj`, `key`, or solver
+state.
+
+### Record indexers
+
+The record constructor gained an optional third argument:
+
+```lua
+V.rec({},               false, V.indexer(V.string_, V.boolean))  -- { [string]: boolean }
+V.rec({ x = V.integer}, false, V.indexer(V.string_, V.boolean))  -- { x: integer, [string]: boolean }
+```
+
+Per the type-system reference, `...` (row extension) and `{ [K]: V }`
+(indexer) are distinct. The third arg encodes the latter; `open` (second
+arg) encodes the former.
+
+Subtype rules added in 4b.2:
+- `{ [K]: V } <: { [K']: V' }` — `K' <: K` (contravariant key), `V <: V'`
+  (covariant value).
+- Named LHS field flowing into an indexer-typed RHS: the field's literal
+  key must lie in `K` and its value must satisfy `V`.
+- A closed-no-indexer RHS still rejects extras on the LHS (including an
+  LHS indexer); only an open or indexer-typed RHS admits them.
+
+### Reduction rules
+
+| Target shape                         | Key                                | Result                  |
+|--------------------------------------|------------------------------------|-------------------------|
+| Closed `{ x: A, y: B }`              | literal `"x"`                       | `A`                     |
+| Closed `{ x: A, y: B }`              | literal `"z"` (absent)              | **error**               |
+| Closed `{ x: A, y: B }`              | union `"x" \| "y"`                  | `A \| B`                |
+| Closed `{ x: A, y: B }`              | primitive `string`                  | `A \| B`                |
+| Open   `{ x: A, ... }`               | literal `"x"`                       | `A`                     |
+| Open   `{ x: A, ... }`               | literal `"z"` (absent)              | `unknown` (row var)     |
+| Indexer `{ [string]: V }`            | any string-typed key                | `V`                     |
+| Mixed `{ x: A, [string]: V }`        | literal `"x"`                       | `A` (named wins)        |
+| Mixed `{ x: A, [string]: V }`        | literal `"other"`                   | `V` (falls through)     |
+| `(R1 \| R2)[K]`                      | any                                 | `R1[K] \| R2[K]`        |
+| `(μX. body)[K]`                      | any                                 | `body[K]` (lazy unfold) |
+
+### Decisions and their rationale
+
+**Missing literal key on a closed record: error, not `never`.** The
+lattice answer is `never` (no inhabitant carries that field), but
+producing `never` silently degrades downstream into "X is not a subtype
+of never" errors that point nowhere near the typo that caused them.
+Surfacing the bug at the indexed-access site itself is the principled
+response.
+
+**Type-variable key (or target): rejected, not deferred.** The design
+doc (§1.1 last paragraph) calls for deferred resolution against unbound
+key variables. Phase 4a's solver does not yet expose a
+deferred-constraint queue — it has only the `<:` primitive with eager
+bound propagation. Per CLAUDE.md's "Temporary measures are context
+poisoning" and "Ad-hoc conditions are strictly forbidden," 4b.2 does NOT
+bolt a one-off pending-index queue on the side just for this feature.
+The principled response is to reject loudly until the general
+suspension mechanism lands (which also serves match-type evaluation per
+design §5.3). The error message names this explicitly so a future
+session writing the queue knows where the call sites are.
+
+**Negated keys: not constructible.** Per design §1.1, `T[~"x"]` is
+accepted in principle. But `~T` (complement) is Phase 4c — 4b.2's
+lattice has no `neg` constructor. Negated keys are therefore literally
+inexpressible at this phase, and no API surface is reserved for them.
+When 4c lands, it adds complement first; `index.lua` then gains a case
+for `key.tag == "neg"`.
+
+### Implementation notes
+
+- Key analysis (string-literal or union-of-literals or the `string`
+  primitive) and target shape both have to be locally decidable. The
+  module deliberately does NOT call into the solver to discharge
+  obligations during indexed access, because indexed access is a pure
+  type-level operation and must not mutate variable bounds as a side
+  effect.
+- Distribution over `union` and unfolding of `mu` are recursive but
+  finite: keys cannot contain `mu` (they are restricted to literals,
+  primitives, and unions), so the unfold-then-project pipeline halts.
+- The `pairs(t)` value-type narrowing in the typechecker isn't strong
+  enough to see that `r.fields` values are non-nil; the implementation
+  uses an explicit guard rather than a force cast.
 
 ## Running
 

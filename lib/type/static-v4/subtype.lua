@@ -240,9 +240,10 @@ local function decompose(s, a, b)
 			-- Depth subtyping: field types are covariant.
 			if not constrain(s, at, bt) then return false end
 		end
-		-- Width check on the supertype side: if B is closed, A must not have
-		-- extra fields. Open B accepts extras.
-		if not b.open then
+		-- Width check on the supertype side: if B is closed AND has no
+		-- indexer, A must not have extra fields. Open B (row-extensible) or
+		-- B-with-indexer accepts extras (the indexer governs them).
+		if not b.open and b.indexer == nil then
 			for k in pairs(a.fields) do
 				if b.fields[k] == nil then
 					return mismatch(s, a, b, "extra field '" .. k .. "' on a closed record")
@@ -252,6 +253,38 @@ local function decompose(s, a, b)
 			-- carry unknown extras that B forbids.
 			if a.open then
 				return mismatch(s, a, b, "open record cannot flow into closed record")
+			end
+			-- An A with an indexer flowing into a closed-no-indexer B is
+			-- rejected for the same reason: the indexer admits unknown extras
+			-- that B forbids.
+			if a.indexer ~= nil then
+				return mismatch(s, a, b, "indexer-typed record cannot flow into closed record without indexer")
+			end
+		end
+		-- Indexer-on-RHS: B's indexer must accept any extra-key value A could
+		-- supply. (1) For each LHS named field NOT covered by an RHS named
+		-- field, that field's value must be <: B.indexer.value and its key
+		-- (string literal) must be <: B.indexer.key. (2) If A has its own
+		-- indexer, A.indexer.value <: B.indexer.value and B.indexer.key <:
+		-- A.indexer.key (contravariant key).
+		if b.indexer ~= nil then
+			local bi = b.indexer
+			for k, at in pairs(a.fields) do
+				if b.fields[k] == nil then
+					-- The literal-string key must lie inside B.indexer.key.
+					if not constrain(s, T.literal("string", k), bi.key) then return false end
+					if not constrain(s, at, bi.value) then return false end
+				end
+			end
+			if a.indexer ~= nil then
+				-- Key contravariant, value covariant.
+				if not constrain(s, bi.key, a.indexer.key) then return false end
+				if not constrain(s, a.indexer.value, bi.value) then return false end
+			elseif a.open then
+				-- A's open row admits unknown extras with unknown values;
+				-- those must satisfy B's indexer value, which they cannot in
+				-- general (unknown is not <: most types). Reject.
+				return mismatch(s, a, b, "open record cannot flow into indexer-typed record (unknown row values)")
 			end
 		end
 		return true

@@ -28,7 +28,8 @@ local M = {}
 --:: V4Prim    = { tag: "prim", name: string }
 --:: V4Literal = { tag: "literal", base: string, value: unknown }
 --:: V4Fn      = { tag: "fn", params: V4Type[], ret: V4Type }
---:: V4Rec     = { tag: "rec", fields: { [string]: V4Type }, open: boolean }
+--:: V4Indexer = { key: V4Type, value: V4Type }
+--:: V4Rec     = { tag: "rec", fields: { [string]: V4Type }, open: boolean, indexer: V4Indexer | nil }
 --:: V4Union   = { tag: "union", members: V4Type[] }
 --:: V4Inter   = { tag: "inter", members: V4Type[] }
 --:: V4Var     = { tag: "var", id: integer, name: string, lower: V4Type[], upper: V4Type[], lower_vars: { [integer]: V4Type }, upper_vars: { [integer]: V4Type } }
@@ -141,12 +142,23 @@ end
 
 -- Record type. `fields` is a name → type map. `open` true means an open row
 -- (extra fields permitted); false means closed (exact field set). This is the
--- structural-subtyping width control.
---: ({ [string]: V4Type }, boolean) -> V4Type
-function M.rec(fields, open)
+-- structural-subtyping width control. `indexer`, if non-nil, is the
+-- `{ [K]: V }` index signature — any key of type `K` (additionally to the
+-- named fields, if any) maps to `V`. An indexer-typed record is necessarily
+-- "open" in the sense of width, but `open` (the row-extension flag) and
+-- `indexer` (a typed index signature) are *distinct* per the type-system
+-- reference: `{ name: string, ... }` is open with no indexer (excess fields
+-- have type `unknown`), `{ [string]: integer }` has an indexer and no named
+-- fields, and the two can be combined.
+--: ({ [string]: V4Type }, boolean, V4Indexer | nil) -> V4Type
+function M.rec(fields, open, indexer)
 	if open == nil then open = false end
-	return { tag = M.TAG_REC, fields = fields, open = open }
+	return { tag = M.TAG_REC, fields = fields, open = open, indexer = indexer }
 end
+
+-- Indexer constructor. Sugar for `{ key = k, value = v }`.
+--: (V4Type, V4Type) -> V4Indexer
+function M.indexer(k, v) return { key = k, value = v } end
 
 -- Union and intersection. Members list is preserved verbatim; flattening and
 -- absorption are done by the simplifier in subtype.lua when needed for
@@ -256,6 +268,10 @@ local function show(t, seen)
 			if v ~= nil then
 				parts[#parts + 1] = k .. ": " .. show(v, seen)
 			end
+		end
+		local ix = t.indexer
+		if ix ~= nil then
+			parts[#parts + 1] = "[" .. show(ix.key, seen) .. "]: " .. show(ix.value, seen)
 		end
 		if t.open then parts[#parts + 1] = "..." end
 		return "{ " .. table.concat(parts, ", ") .. " }"

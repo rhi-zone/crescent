@@ -9,6 +9,7 @@ end
 
 local T  = require("lib.type.static-v4.types")
 local ST = require("lib.type.static-v4.subtype")
+local IX = require("lib.type.static-v4.index")
 
 local M = {}
 
@@ -19,6 +20,7 @@ M.prim    = T.prim
 M.literal = T.literal
 M.fn      = T.fn
 M.rec     = T.rec
+M.indexer = T.indexer
 M.union   = T.union
 M.inter   = T.inter
 M.var     = T.var
@@ -38,6 +40,9 @@ M.cdata   = T.prim("cdata")
 M.new_solver = ST.new_solver
 M.constrain  = ST.constrain
 M.subtype    = ST.subtype
+
+-- Indexed access (Phase 4b.2).
+M.index   = IX.index
 
 -- Test affordances.
 M._reset_var_ids = T._reset_var_ids
