@@ -59,6 +59,14 @@ M.NODE_EXPR_STMT        = 25
 M.NODE_FUNC_DECL        = 26
 M.NODE_CHUNK            = 27
 M.NODE_CAST_EXPR        = 28
+-- v4 walker-only synthetic node kinds (not produced by the parser, used
+-- by static-v4/walker tests and call-sites that build match-on-value
+-- shapes from annotation-level match types). Per design §7, the surface
+-- has no value-level match, but the walker may receive nodes built by
+-- code that lowers annotation-side matches to walker form (or by tests
+-- that exercise the construction path directly). Keep the IDs outside
+-- the parser's allocated range so the parser arena never aliases them.
+M.NODE_MATCH_EXPR       = 29
 
 -- Type tags
 M.TAG_NIL               = 0

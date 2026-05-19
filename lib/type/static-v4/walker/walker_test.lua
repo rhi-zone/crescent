@@ -317,7 +317,6 @@ T.describe("walker: dispatch shell", function()
 		T.ok(W.has_synth(defs.NODE_DO_STMT))
 		T.ok(W.has_synth(defs.NODE_BREAK_STMT))
 		for _, tag in pairs({
-			defs.NODE_LOCAL_STMT,
 			defs.NODE_CHUNK,
 		}) do
 			T.fail(W.has_synth(tag))
@@ -1162,5 +1161,296 @@ T.describe("walker sub-phase D: break", function()
 		local node = while_stmt(lit_bool(true), { break_stmt() })
 		local _ty, _env, err = W.walk_synth(node, env, s)
 		T.eq(err, nil)
+	end)
+end)
+
+-- ── sub-phase E: local/assign + match expressions ─────────────────────────
+--
+-- Builders for sub-phase E nodes. Match the decoded shapes declared in
+-- walker/statements.lua.
+
+local function local_stmt(names, exprs)
+	return { tag = defs.NODE_LOCAL_STMT, names = names, exprs = exprs or {} }
+end
+local function assign_stmt(targets, exprs)
+	return { tag = defs.NODE_ASSIGN_STMT,
+		targets = targets, exprs = exprs or {} }
+end
+local function match_expr(subject, arms, wildcard_result)
+	return { tag = defs.NODE_MATCH_EXPR,
+		subject = subject, arms = arms,
+		wildcard_result = wildcard_result }
+end
+
+T.describe("walker sub-phase E: handlers registered", function()
+	T.it("E adds local/assign/match", function()
+		T.ok(W.has_synth(defs.NODE_LOCAL_STMT))
+		T.ok(W.has_synth(defs.NODE_ASSIGN_STMT))
+		T.ok(W.has_synth(defs.NODE_MATCH_EXPR))
+		T.ok(W.has_check(defs.NODE_MATCH_EXPR))
+	end)
+end)
+
+T.describe("walker sub-phase E: NODE_LOCAL_STMT", function()
+	T.it("single binding without annotation binds synth(init)", function()
+		local s = V.new_solver()
+		local node = local_stmt({ { name = "x" } }, { lit_int(42) })
+		local _ty, env2, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(E.lookup(env2, "x"), V.literal("integer", 42))
+	end)
+
+	T.it("single binding with annotation: binding type is the annotation", function()
+		local s = V.new_solver()
+		local node = local_stmt({ { name = "x", ann = V.integer } }, { lit_int(7) })
+		local _ty, env2, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(E.lookup(env2, "x"), V.integer)
+	end)
+
+	T.it("annotation mismatch errors", function()
+		local s = V.new_solver()
+		local node = local_stmt({ { name = "x", ann = V.string_ } }, { lit_int(7) })
+		local _ty, _env2, err = W.walk_synth(node, E.new(), s)
+		T.ok(err ~= nil)
+	end)
+
+	T.it("binding without init binds a fresh var", function()
+		local s = V.new_solver()
+		local node = local_stmt({ { name = "x" } }, {})
+		local _ty, env2, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		local ty = E.lookup(env2, "x")
+		T.ok(ty ~= nil)
+		T.eq(ty.tag, "var")
+	end)
+
+	T.it("binding with annotation only binds the annotation", function()
+		local s = V.new_solver()
+		local node = local_stmt({ { name = "x", ann = V.integer } }, {})
+		local _ty, env2, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(E.lookup(env2, "x"), V.integer)
+	end)
+
+	T.it("multi-binding: each name receives its scalar RHS", function()
+		local s = V.new_solver()
+		local node = local_stmt(
+			{ { name = "x" }, { name = "y" } },
+			{ lit_int(1), lit_str("hi") })
+		local _ty, env2, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(E.lookup(env2, "x"), V.literal("integer", 1))
+		T.eq(E.lookup(env2, "y"), V.literal("string", "hi"))
+	end)
+
+	T.it("missing RHS slots bind nil (Lua semantics)", function()
+		local s = V.new_solver()
+		local node = local_stmt(
+			{ { name = "x" }, { name = "y" } },
+			{ lit_int(1) })
+		local _ty, env2, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(E.lookup(env2, "y"), V.nil_)
+	end)
+
+	T.it("last RHS spreads when it is a multi-return", function()
+		local s = V.new_solver()
+		-- f: () -> { ["1"]: integer, ["2"]: string }
+		local ret = V.rec({ ["1"] = V.integer, ["2"] = V.string_ }, false, nil)
+		local f = V.fn({}, ret, nil)
+		local env = E.bind(E.new(), "f", f)
+		local node = local_stmt(
+			{ { name = "a" }, { name = "b" } },
+			{ call(id("f")) })
+		local _ty, env2, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(E.lookup(env2, "a"), V.integer)
+		T.eq(E.lookup(env2, "b"), V.string_)
+	end)
+
+	T.it("non-last RHS truncates to slot 1 even when multi-return", function()
+		local s = V.new_solver()
+		local ret = V.rec({ ["1"] = V.integer, ["2"] = V.string_ }, false, nil)
+		local f = V.fn({}, ret, nil)
+		local env = E.bind(E.new(), "f", f)
+		local node = local_stmt(
+			{ { name = "a" }, { name = "b" } },
+			{ call(id("f")), lit_str("tail") })
+		local _ty, env2, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		-- a should be the truncated first slot (integer), b the literal "tail".
+		T.eq(E.lookup(env2, "a"), V.integer)
+		T.eq(E.lookup(env2, "b"), V.literal("string", "tail"))
+	end)
+
+	T.it("local with match RHS binds the match result", function()
+		local s = V.new_solver()
+		-- IsString<T> = match T { string => true, _ => false }
+		local arms = { V.arm(V.string_, V.literal("boolean", true), {}) }
+		local m = match_expr(lit_str("hi"), arms, V.literal("boolean", false))
+		local node = local_stmt({ { name = "r" } }, { m })
+		local _ty, env2, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(E.lookup(env2, "r"), V.literal("boolean", true))
+	end)
+end)
+
+T.describe("walker sub-phase E: NODE_ASSIGN_STMT", function()
+	T.it("simple local-var assignment with matching type succeeds", function()
+		local s = V.new_solver()
+		local env = E.bind(E.new(), "x", V.integer)
+		local node = assign_stmt({ id("x") }, { lit_int(42) })
+		local _ty, _env2, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+
+	T.it("assignment of wrong type fails", function()
+		local s = V.new_solver()
+		local env = E.bind(E.new(), "x", V.integer)
+		local node = assign_stmt({ id("x") }, { lit_str("nope") })
+		local _ty, _env2, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+	end)
+
+	T.it("assignment to undefined name errors", function()
+		local s = V.new_solver()
+		local node = assign_stmt({ id("missing") }, { lit_int(1) })
+		local _ty, _env2, err = W.walk_synth(node, E.new(), s)
+		T.ok(err ~= nil)
+		T.ok(err:find("undefined", 1, true) ~= nil)
+	end)
+
+	T.it("field assignment is rejected loudly (sub-phase F territory)", function()
+		local s = V.new_solver()
+		local env = E.bind(E.new(), "M",
+			V.rec({ x = V.integer }, false, nil))
+		local node = assign_stmt(
+			{ { tag = defs.NODE_FIELD_EXPR, target = id("M"), key = "x" } },
+			{ lit_int(1) })
+		local _ty, _env2, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+		T.ok(err:find("sub-phase F", 1, true) ~= nil)
+	end)
+
+	T.it("multi-assign: last RHS spreads", function()
+		local s = V.new_solver()
+		local ret = V.rec({ ["1"] = V.integer, ["2"] = V.string_ }, false, nil)
+		local f = V.fn({}, ret, nil)
+		local env = E.bind(
+			E.bind(E.bind(E.new(), "a", V.integer), "b", V.string_),
+			"f", f)
+		local node = assign_stmt({ id("a"), id("b") }, { call(id("f")) })
+		local _ty, _env2, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+
+	T.it("multi-assign: non-last truncates to scalar", function()
+		local s = V.new_solver()
+		local ret = V.rec({ ["1"] = V.integer, ["2"] = V.string_ }, false, nil)
+		local f = V.fn({}, ret, nil)
+		local env = E.bind(
+			E.bind(E.bind(E.new(), "a", V.integer), "b", V.string_),
+			"f", f)
+		-- a, b = f(), "tail" — a takes integer (truncated), b takes "tail" lit.
+		local node = assign_stmt(
+			{ id("a"), id("b") },
+			{ call(id("f")), lit_str("tail") })
+		local _ty, _env2, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase E: NODE_MATCH_EXPR — forward", function()
+	T.it("ground subject fires the matching arm", function()
+		local s = V.new_solver()
+		local arms = { V.arm(V.string_, V.literal("boolean", true), {}) }
+		local node = match_expr(lit_str("hi"), arms,
+			V.literal("boolean", false))
+		local ty, _env2, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty, V.literal("boolean", true))
+	end)
+
+	T.it("subject not matching any arm fires the wildcard", function()
+		local s = V.new_solver()
+		local arms = { V.arm(V.string_, V.literal("boolean", true), {}) }
+		local node = match_expr(lit_int(42), arms,
+			V.literal("boolean", false))
+		local ty, _env2, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty, V.literal("boolean", false))
+	end)
+
+	T.it("capture %X binds to recovered type; result substitutes", function()
+		local s = V.new_solver()
+		-- match T { { value: %X } => %X, _ => nil }
+		local capX = V.var("X")
+		local pattern = V.rec({ value = capX }, true, nil)
+		local arms = { V.arm(pattern, capX, { capX }) }
+		-- Subject: { value: integer } — capture X binds to integer; result is X.
+		local subject_ty = V.rec({ value = V.integer }, false, nil)
+		local env = E.bind(E.new(), "subj", subject_ty)
+		local node = match_expr(id("subj"), arms, V.nil_)
+		local ty, _env2, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.ok(ty ~= nil)
+		-- The result is a fresh capture var whose bound flows from the subtype
+		-- subject <: pattern. The walker returns the freshened var directly.
+		T.eq(ty.tag, "var")
+	end)
+
+	T.it("disjointness violation reported at evaluation", function()
+		local s = V.new_solver()
+		-- Two arms whose patterns overlap (both match the integer 1).
+		local arms = {
+			V.arm(V.number, V.literal("integer", 1), {}),
+			V.arm(V.integer, V.literal("integer", 2), {}),
+		}
+		local node = match_expr(lit_int(1), arms, nil)
+		local _ty, _env2, err = W.walk_synth(node, E.new(), s)
+		T.ok(err ~= nil)
+		T.ok(err:find("disjoint", 1, true) ~= nil)
+	end)
+
+	T.it("non-exhaustive (no wildcard, no arm fires) errors", function()
+		local s = V.new_solver()
+		local arms = { V.arm(V.string_, V.literal("boolean", true), {}) }
+		local node = match_expr(lit_int(42), arms, nil)
+		local _ty, _env2, err = W.walk_synth(node, E.new(), s)
+		T.ok(err ~= nil)
+	end)
+end)
+
+T.describe("walker sub-phase E: NODE_MATCH_EXPR — backward", function()
+	T.it("known result constrains the subject via match_backward", function()
+		local s = V.new_solver()
+		-- arms: { string => "S", integer => "I" }, no wildcard.
+		local L_S = V.literal("string", "S")
+		local L_I = V.literal("string", "I")
+		local arms = {
+			V.arm(V.string_, L_S, {}),
+			V.arm(V.integer, L_I, {}),
+		}
+		-- Expected result = L_S. Backward says subject must be string.
+		-- A subject of "hi" (a string literal) satisfies the constraint.
+		local node = match_expr(lit_str("hi"), arms, nil)
+		local _env2, err = W.walk_check(node, E.new(), s, L_S)
+		T.eq(err, nil)
+	end)
+
+	T.it("expected result unreachable from any arm errors", function()
+		local s = V.new_solver()
+		local L_S = V.literal("string", "S")
+		local L_I = V.literal("string", "I")
+		local arms = {
+			V.arm(V.string_, L_S, {}),
+			V.arm(V.integer, L_I, {}),
+		}
+		-- Expected is "X" — no arm can produce it.
+		local node = match_expr(lit_str("hi"), arms, nil)
+		local _env2, err = W.walk_check(node, E.new(), s,
+			V.literal("string", "X"))
+		T.ok(err ~= nil)
 	end)
 end)

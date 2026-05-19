@@ -195,12 +195,14 @@ end
 local literals     = require("lib.type.static-v4.walker.literals")
 local functions    = require("lib.type.static-v4.walker.functions")
 local control_flow = require("lib.type.static-v4.walker.control_flow")
+local statements   = require("lib.type.static-v4.walker.statements")
 
 --: () -> nil
 function M._register_builtins()
 	literals.register(M)
 	functions.register(M)
 	control_flow.register(M)
+	statements.register(M)
 end
 
 M._register_builtins()

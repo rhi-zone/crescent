@@ -5,10 +5,12 @@ into v4 type-system constraints. See
 `docs/typechecker-ast-walker-design.md` for the full design.
 
 This directory is being built incrementally across sub-phases A–J (design
-doc §13). **Current state: sub-phase D complete** — control-flow
-statements (`if`, `while`, `repeat`, numeric/generic `for`, `do`-blocks,
-`break`) and the flow-sensitive narrowing engine on top of A (env/dispatch),
-B (literals, identifiers, varargs) and C (functions, calls, returns).
+doc §13). **Current state: sub-phase E complete** — local/assign
+statements with multi-return spread/truncate semantics and value-level
+match expressions (forward + backward via `V.match` / `V.match_backward`)
+on top of A (env/dispatch), B (literals, identifiers, varargs), C
+(functions, calls, returns), and D (control-flow + flow-sensitive
+narrowing).
 
 ## Sub-phase A — what's here
 
@@ -262,6 +264,84 @@ synth handlers for these nodes belong to sub-phases E/F. Pattern-matching
 the shape from a control-flow context is **not** an indexed-callee /
 binary-expr handler; it is the design's §5 recogniser reading the AST
 directly.
+
+## Sub-phase E — what's here
+
+- **`statements.lua`** — SYNTHESIZE/CHECK handlers for local/assign
+  statements and value-level match expressions.
+
+  Handlers registered:
+  - `NODE_LOCAL_STMT` (§3.11) — per-slot binding rules:
+    - `(ann, init)` → CHECK `init` against `ann`; bind `ann`.
+    - `(ann, _)`    → bind `ann`.
+    - `(_,   init)` → bind `synth(init)`.
+    - `(_,   _)`    → bind a fresh `V.var()`.
+    Multi-binding uses last-spreads / non-last-truncates RHS distribution.
+    Single-expr + single-annotated-name takes the bidirectional CHECK
+    fast path (the common `local x --: T = expr` case).
+  - `NODE_ASSIGN_STMT` (§3.11) — simple local-var assignment:
+    `synth(rhs) <: typeof(lhs)`. LHS must be `NODE_IDENTIFIER` and the
+    name must be bound. `NODE_FIELD_EXPR` / `NODE_INDEX_EXPR` targets are
+    **rejected loudly** with a sub-phase-F message (no temp-measure for
+    indexed writes). Multi-assign uses the same last-spreads /
+    non-last-truncates distribution as local. Re-assignment does not
+    refine the declared binding type — narrowing (a read-side overlay)
+    is the only mechanism that refines a name's view.
+  - `NODE_MATCH_EXPR` (§7) — value-level match-on-type:
+    - SYNTHESIZE: synth the subject, dispatch to `V.match(subj_ty,
+      arms, wildcard_result)`. Disjointness / non-exhaustive /
+      suspension errors are surfaced verbatim.
+    - CHECK: dispatch to `V.match_backward(arms, wildcard, expected)`
+      to derive a subject constraint, then CHECK the subject against it.
+    Captures (`%X`) are not manufactured by the walker — they're
+    `V.var()`s shared between pattern and result, listed in
+    `arm.captures`, allocated by the lowering / annotation-parser site
+    that builds the node. Per `match.lua`, v4 freshens these on each
+    evaluation, so the same node may be matched repeatedly without
+    cross-contamination.
+
+  **Module-pattern accumulation deferred.** The design doc §3.11 +
+  §13.5 calls for tracking lower-bound field accumulation on a
+  module-pattern accumulator (`local M = {}; M.foo = ...`). That
+  requires indexed-access machinery, which is sub-phase F. The
+  `module` slot in `env.lua` is already plumbed; once `V.index`-based
+  field writes arrive in F, the accumulator wiring is mechanical. Per
+  CLAUDE.md's no-temp-measure rule, field assignment in sub-phase E
+  rejects loudly rather than half-implementing the accumulator.
+
+### Multi-return distribution (Lua semantics)
+
+For both `local` and `assign` with N targets and M RHS expressions:
+
+  - If `M == 0`: every target binds `nil` (local) or is a no-op (assign).
+  - For non-last RHS positions `i < M`: if `synth(rhs[i])` is a multi-
+    return tuple (`V.rec({["1"]=...,...}, false)` with at least two
+    string-keyed slots), truncate to slot `"1"`. Otherwise pass through.
+  - For the last RHS position `M`: if multi-return, spread across the
+    remaining LHS positions starting at `M`. Otherwise it fills slot `M`
+    only.
+  - LHS positions beyond what the RHS covers (after spreading) bind
+    `V.nil_` for `local`. For `assign`, an uncovered position elides
+    its constraint (matching Lua's runtime, which leaves the variable
+    unchanged — modelled here by no-op rather than nil assignment).
+
+This matches the legacy D2/D3/D4 multi-return fixes via v4's tuple
+representation, not by porting the legacy code.
+
+### Decoded node shapes added in E
+
+| Node              | Fields                                                              |
+|-------------------|---------------------------------------------------------------------|
+| NODE_LOCAL_STMT   | `{ tag, line, col, names: {{ name, ann?: V4Type }}, exprs: Node[]? }` |
+| NODE_ASSIGN_STMT  | `{ tag, line, col, targets: Node[], exprs: Node[] }`                |
+| NODE_MATCH_EXPR   | `{ tag, line, col, subject: Node, arms: V4Arm[], wildcard_result: V4Type? }` |
+
+`NODE_MATCH_EXPR` is a walker-only synthetic tag (defs.lua = 29). The
+Lua parser does not emit it — there is no surface value-level match
+construct. Tests and future lowering passes that lower annotation-side
+`match X { ... }` types onto value-level matches construct the node
+directly. Arms are records `{ pattern, result, captures }` consumable
+by `V.match` / `V.match_backward` without further transformation.
 
 ## Sub-phase A does NOT include
 
