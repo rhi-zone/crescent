@@ -1271,9 +1271,9 @@ Probed via small repros under `bin/cr check`; outcomes 2026-05-20:
 | W2 | `--: () -> (integer,string) ... return 1,"x"` annotated 2-and-2 | typechecks | yes |
 | W3 | `return 1,"x",true` against `(integer,string)` | error: tuple length 3 vs 2 | yes |
 | W4 | `--: () -> (integer,string)` body `return 1` (missing slot) | **accepted, 0 errors** | **NO — slot 1 should require nil ∈ string** |
-| B1 | `g(f())` where `g: (integer,string)->nil`, `f: ()->(integer,string)` | rejected: "cannot pass (integer,string) where integer expected" | **NO — Lua spreads when call is last in arg list** |
-| B2 | `g(f(), "y")` with `f` returning 2 values | rejected with same message | **NO — first arg should truncate to first slot** |
-| B3 | `local a,b = f(), 99` with `f:()->(integer,string)` | `a` typed as full tuple `(integer,string)`, NOT truncated to integer | **NO — non-last call expr must truncate to slot 0** |
+| B1 | `g(f())` where `g: (integer,string)->nil`, `f: ()->(integer,string)` | accepted (D2 fix: spread) | yes |
+| B2 | `g(f(), "y")` with `f` returning 2 values | first arg truncates to slot 0; slot-wise param check (D2 + D3) | yes |
+| B3 | `local a,b = f(), 99` with `f:()->(integer,string)` | `a: integer`, `b: integer` (D3 fix: non-last truncate) | yes |
 | B4 | `--: () -> ...(integer); return 1,2,3` | error: cannot assign `(1,2,3)` to integer; subsequent locals `b,c` typed as nil | **NO — `...(T)` should accept N integer returns AND give `b,c: integer`** |
 | K1 | "io.open multi-return narrowing" (known gap, `type_test.lua:7045`) | comment says nil-narrowing only works on direct annotation, not multi-return | known gap |
 
@@ -1304,18 +1304,22 @@ It has the following defects (in increasing order of severity):
   C_RETURN; solve falls into the slot-0-only branch and slot 1 (`string`)
   is never compared against the implicit `nil` that Lua would actually
   produce at runtime.
-- **D2 (Lua-semantics — B1, B2).** Multi-return spread into call
-  arguments is unimplemented. Per Lua, if `f` is the last expression in
-  an argument list `g(..., f())`, `f`'s return values spread positionally
-  to fill remaining params; if `f` is in any other position, it truncates
-  to its first return. The existing code calls `gen_expr_list` which
-  produces one type per arg-expr, so a tuple-typed last arg is matched
-  against a single param.
-- **D3 (Lua-semantics — B3).** Non-last call expressions in a multi-LHS
-  binding do not truncate. The target left of the call gets the full
-  tuple type, not slot 0. `NODE_LOCAL_STMT`'s loop sets `bind_tid =
-  rhs_tid` (the whole `gen_expr_list` result) for non-call slots, with
-  no truncation pass for any RHS expression that happens to be a call.
+- **D2 (Lua-semantics — B1, B2).** ~~Multi-return spread into call
+  arguments is unimplemented.~~ **FIXED.** Last-position call args are
+  now spread via `spread_last_call_arg` (`constrain.lua`), which consults
+  `pending_multi_return_override` for the callee's concrete tuple return
+  and expands `arg_tids` slot-by-slot. Non-last call args are truncated
+  by the D3 fix below. Verified: B1 `g(f())` and B2 `g(f(), "y")` both
+  typecheck correctly (slot-wise param matching, individual diagnostics
+  per mismatched slot).
+- **D3 (Lua-semantics — B3).** ~~Non-last call expressions in a multi-LHS
+  binding do not truncate.~~ **FIXED.** `gen_expr_list` now detects
+  call/method-call expressions in non-last positions and calls
+  `truncate_call_to_slot0`, which uses `eager_slot(override, 0)` when the
+  callee's return is concrete and otherwise emits a deferred `C_INDEX`
+  for slot 0. Same helper covers args via D2's spread path (any
+  non-last position in a multi-value context). Verified: B3
+  `local a, b = f(), 99` now types `a: integer, b: integer`.
 - **D4 (annotation expressivity — B4).** `() -> ...(T)` (spread return)
   is documented in `typechecker-reference.md:125` as "multi-return
   spread (T may be a tuple type alias)" but the implementation treats it
