@@ -91,6 +91,15 @@ local ST = require("lib.type.static-v4.subtype")
 local E = require("lib.type.static-v4.empty")
 local F = require("lib.type.static-v4.forall")
 
+--:: require "lib.type.static-v4.types"
+
+-- A match arm is a pattern, a result template, and the list of capture
+-- variables shared between them. The arm's wildcard sibling is NOT
+-- represented here — wildcards are passed as a side `wildcard_result`
+-- argument to the match API because their pattern is synthesized from the
+-- union of the other arms.
+--:: V4Arm = { pattern: V4Type, result: V4Type, captures: V4Type[] }
+
 local M = {}
 
 -- ── Substitution ──────────────────────────────────────────────────────────
@@ -204,9 +213,6 @@ end
 -- Returns the v4 type of the match expression (the firing arm's result with
 -- captures bound), or (nil, errmsg) on suspension / disjointness violation /
 -- non-exhaustiveness.
-
--- V4Arm is declared in types.lua (alongside V4Type) so its cross-file
--- references resolve. See the comment there for the workaround rationale.
 
 -- Build the wildcard pattern: ~(union of arm patterns). If there are no
 -- non-wildcard arms, the wildcard pattern is ~⊥ = ⊤ — covers everything.

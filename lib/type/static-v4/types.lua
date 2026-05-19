@@ -41,20 +41,6 @@ local M = {}
 --:: V4Skolem  = { tag: "skolem", id: integer, name: string }
 --:: V4Type    = V4Top | V4Bot | V4Prim | V4Literal | V4Fn | V4Rec | V4Union | V4Inter | V4Var | V4Mu | V4Neg | V4Forall | V4Skolem
 
--- Working types used by empty.lua. Declared here because cross-file `--::`
--- aliases referencing V4Type don't currently resolve through transitive
--- requires — keeping the DNF shape next to V4Type itself sidesteps that.
---:: DnfDisjunct = { pos: V4Type[], neg: V4Type[] }
---:: Dnf         = { [integer]: DnfDisjunct }
-
--- Working type used by match.lua. Same cross-file-alias workaround: declared
--- here so V4Arm's V4Type references resolve. A match arm is a pattern, a
--- result template, and the list of capture variables shared between them.
--- The arm's wildcard sibling is NOT represented here — wildcards are passed
--- as a side `wildcard_result` argument to the match API because their
--- pattern is synthesized from the union of the other arms.
---:: V4Arm = { pattern: V4Type, result: V4Type, captures: V4Type[] }
-
 -- ── Tags ──────────────────────────────────────────────────────────────────
 
 -- Tag string constants are exposed for callers wanting to switch on tag.

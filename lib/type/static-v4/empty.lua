@@ -35,12 +35,16 @@
 
 local T = require("lib.type.static-v4.types")
 
+--:: require "lib.type.static-v4.types"
+
 -- V4Type and its variant aliases come transitively from `types.lua`. We
 -- redeclare V4Solver here (rather than depending on subtype.lua's copy) so
 -- that empty.lua and subtype.lua share the same shape without a require
 -- cycle. The shape is also load-bearing — emptiness reads `s.cache` to share
 -- proof-in-progress entries with the constrain pipeline.
 --:: V4Solver  = { cache: { [string]: boolean }, error: string | nil }
+--:: DnfDisjunct = { pos: V4Type[], neg: V4Type[] }
+--:: Dnf         = { [integer]: DnfDisjunct }
 
 local M = {}
 
@@ -56,11 +60,9 @@ local is_empty -- (V4Type, V4Solver) -> boolean
 -- *atom* — primitive, literal, fn, rec, var, mu, top, bot. No unions,
 -- intersections, or negations remain inside.
 
--- DnfDisjunct and Dnf are local working types: a disjunct holds two lists of
--- atoms (`pos` is required, `neg` is required-to-be-absent) and Dnf is a list
--- of disjuncts. We do not declare these as `--::` aliases because cross-file
--- aliases referencing V4Type don't currently resolve in the typechecker; the
--- shapes are inlined where used via `--[[: ...]]`.
+-- DnfDisjunct and Dnf are local working types declared at the top of this
+-- file: a disjunct holds two lists of atoms (`pos` is required, `neg` is
+-- required-to-be-absent) and Dnf is a list of disjuncts.
 
 -- Combine two DNFs by intersection: each disjunct of A is intersected with
 -- each disjunct of B (Cartesian product). Worst-case |A|*|B| disjuncts.
