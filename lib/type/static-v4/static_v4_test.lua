@@ -29,6 +29,31 @@ T.describe("primitives", function()
 	T.it("unrelated primitives reject: string </: number", function()
 		T.fail(st(V.string_, V.number))
 	end)
+
+	-- Regression: prior to atom interning, `T.prim("string")` returned a
+	-- fresh table on each call. The solver's identity-keyed fast paths
+	-- (empty.lua rule (c) `p == n`, bound dedup) treated structurally-equal-
+	-- but-distinct atoms as distinct, so subtype results were inconsistent
+	-- between identical-table and structurally-equal inputs. After interning,
+	-- both forms behave the same.
+	T.it("atom interning: structurally equal prims are identity-equal", function()
+		T.ok(V.prim("string") == V.prim("string"))
+		T.ok(V.prim("integer") == V.integer)
+		T.ok(V.literal("string", "foo") == V.literal("string", "foo"))
+		T.ok(V.literal("integer", 42) == V.literal("integer", 42))
+		-- Distinct values intern distinctly.
+		T.ok(V.prim("string") ~= V.prim("integer"))
+		T.ok(V.literal("string", "a") ~= V.literal("string", "b"))
+		-- The bug surface: A <: (B | A) failed when A's two occurrences
+		-- were distinct tables (empty.lua's `p == n` identity check missed).
+		T.ok(st(V.prim("string"), V.union({V.prim("integer"), V.prim("string")})))
+		T.ok(st(
+			V.literal("string", "foo"),
+			V.union({V.prim("integer"), V.literal("string", "foo")})
+		))
+		-- A ∩ ¬(B | A) = ⊥: same shape via complement reduction.
+		T.ok(st(V.prim("string"), V.neg(V.prim("integer"))))
+	end)
 end)
 
 T.describe("top and bottom", function()
@@ -856,8 +881,9 @@ T.describe("match — union distribution", function()
 			if m == V.literal("boolean", true)  then saw_t = true end
 			if m == V.literal("boolean", false) then saw_f = true end
 		end
-		-- Identity equality won't fire (literals are fresh tables). Check by
-		-- structural inspection.
+		-- Atoms are interned, so identity equality coincides with structural
+		-- equality — but we still check structurally for clarity and to
+		-- remain robust against potential representation changes.
 		saw_t, saw_f = false, false
 		for _, m in ipairs(r.members) do
 			if m.tag == "literal" and m.base == "boolean" and m.value == true  then saw_t = true end

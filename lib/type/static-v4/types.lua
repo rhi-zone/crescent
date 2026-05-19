@@ -156,23 +156,56 @@ local BOT = { tag = M.TAG_BOT }
 function M.top() return TOP end
 function M.bot() return BOT end
 
+-- Atoms (top, bot, prim, literal) are interned: each distinct atom value has
+-- exactly one representative table. This makes identity equality coincide with
+-- structural equality for atoms, which the solver's identity-keyed fast paths
+-- (empty.lua rule (c) `p == n`, subtype.lua's bound-deduplication and cache
+-- key) rely on for soundness. Without interning, two structurally-equal
+-- `prim("string")` calls produce distinct tables and `subtype` results can
+-- differ between identical-table inputs and structurally-equal-but-distinct-
+-- table inputs (e.g. `string <: (integer | string)` fails when the union's
+-- `string` is a different table than the LHS).
+
+local PRIM_CACHE = {} --[[: { [string]: V4Type } ]]
+
 --: (string) -> V4Type
 function M.prim(name)
 	if not KNOWN_PRIMS[name] then
 		error("unknown primitive: " .. tostring(name), 2)
 	end
-	return { tag = M.TAG_PRIM, name = name }
+	local cached = PRIM_CACHE[name]
+	if cached ~= nil then return cached end
+	local t = { tag = M.TAG_PRIM, name = name }
+	PRIM_CACHE[name] = t
+	return t
 end
 
 -- Literal type. `value` is the Lua value; `base` is the primitive name it
 -- belongs to. We don't infer the base from the value to keep the constructor
 -- explicit (and to allow `integer` vs `number` distinction on numeric values).
+--
+-- Interned per (base, value). `nil` values are stored under a sentinel so the
+-- two-level table works (Lua tables cannot have nil keys/values).
+local LITERAL_CACHE = {} --[[: { [string]: { [unknown]: V4Type } } ]]
+local LITERAL_NIL_SENTINEL = {}
+
 --: (string, unknown) -> V4Type
 function M.literal(base, value)
 	if not KNOWN_PRIMS[base] then
 		error("unknown literal base: " .. tostring(base), 2)
 	end
-	return { tag = M.TAG_LITERAL, base = base, value = value }
+	local sub = LITERAL_CACHE[base]
+	if sub == nil then
+		sub = {}
+		LITERAL_CACHE[base] = sub
+	end
+	local key = value
+	if key == nil then key = LITERAL_NIL_SENTINEL end
+	local cached = sub[key]
+	if cached ~= nil then return cached end
+	local t = { tag = M.TAG_LITERAL, base = base, value = value }
+	sub[key] = t
+	return t
 end
 
 -- Known effect atoms. A small finite enumeration (design §3.1 commits to a
