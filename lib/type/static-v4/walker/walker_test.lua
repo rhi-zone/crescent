@@ -203,8 +203,8 @@ T.describe("walker: dispatch shell", function()
 		local ty, _env, err = W.walk_synth(node, E.new(), s)
 		T.eq(ty, nil)
 		T.ok(err ~= nil)
-		T.ok(err:find("NODE_CHUNK", 1, true) ~= nil)
-		T.ok(err:find("not yet implemented", 1, true) ~= nil)
+		T.ok(tostring(err):find("NODE_CHUNK", 1, true) ~= nil)
+		T.ok(tostring(err):find("not yet implemented", 1, true) ~= nil)
 		W._register_builtins()
 	end)
 
@@ -214,7 +214,7 @@ T.describe("walker: dispatch shell", function()
 		local node = { tag = defs.NODE_CHUNK, line = 1, col = 1 }
 		local _env, err = W.walk_check(node, E.new(), s, V.integer)
 		T.ok(err ~= nil)
-		T.ok(err:find("NODE_CHUNK", 1, true) ~= nil)
+		T.ok(tostring(err):find("NODE_CHUNK", 1, true) ~= nil)
 		W._register_builtins()
 	end)
 
@@ -389,7 +389,7 @@ T.describe("walker sub-phase B: NODE_LITERAL", function()
 		local ty, _env, err = W.walk_synth(node, E.new(), s)
 		T.eq(ty, nil)
 		T.ok(err ~= nil)
-		T.ok(err:find("unknown lit_kind", 1, true) ~= nil)
+		T.ok(tostring(err):find("unknown lit_kind", 1, true) ~= nil)
 	end)
 
 	T.it("CHECK mode: literal subtypes its primitive base", function()
@@ -423,8 +423,8 @@ T.describe("walker sub-phase B: NODE_IDENTIFIER", function()
 		local ty, _env, err = W.walk_synth(node, E.new(), s)
 		T.eq(ty, nil)
 		T.ok(err ~= nil)
-		T.ok(err:find("undefined name", 1, true) ~= nil)
-		T.ok(err:find("nope", 1, true) ~= nil)
+		T.ok(tostring(err):find("undefined name", 1, true) ~= nil)
+		T.ok(tostring(err):find("nope", 1, true) ~= nil)
 	end)
 
 	T.it("narrowed overlay takes precedence over binding", function()
@@ -450,7 +450,7 @@ T.describe("walker sub-phase B: NODE_IDENTIFIER", function()
 		local node = { tag = defs.NODE_IDENTIFIER, name = "nope" }
 		local _env, err = W.walk_check(node, E.new(), s, V.integer)
 		T.ok(err ~= nil)
-		T.ok(err:find("undefined name", 1, true) ~= nil)
+		T.ok(tostring(err):find("undefined name", 1, true) ~= nil)
 	end)
 end)
 
@@ -470,7 +470,7 @@ T.describe("walker sub-phase B: NODE_VARARG_EXPR", function()
 		local ty, _env, err = W.walk_synth(node, E.new(), s)
 		T.eq(ty, nil)
 		T.ok(err ~= nil)
-		T.ok(err:find("varargs not in scope", 1, true) ~= nil)
+		T.ok(tostring(err):find("varargs not in scope", 1, true) ~= nil)
 	end)
 
 	T.it("CHECK mode: vararg type subtypes expected", function()
@@ -589,7 +589,7 @@ T.describe("walker sub-phase C: NODE_FUNC_EXPR (annotated)", function()
 		local node = func({ { name = "x" } }, {}, ann)
 		local _ty, _env, err = W.walk_synth(node, E.new(), s)
 		T.ok(err ~= nil)
-		T.ok(err:find("arity", 1, true) ~= nil)
+		T.ok(tostring(err):find("arity", 1, true) ~= nil)
 	end)
 end)
 
@@ -657,7 +657,7 @@ T.describe("walker sub-phase C: NODE_CALL_EXPR", function()
 		local node = call(id("f"), lit_int(1))
 		local _ty, _env, err = W.walk_synth(node, env, s)
 		T.ok(err ~= nil)
-		T.ok(err:find("arity", 1, true) ~= nil)
+		T.ok(tostring(err):find("arity", 1, true) ~= nil)
 	end)
 
 	T.it("generic arrow + concrete args instantiates", function()
@@ -719,7 +719,7 @@ T.describe("walker sub-phase C: NODE_METHOD_CALL", function()
 		local node = mcall(id("obj"), "nope")
 		local _ty, _env, err = W.walk_synth(node, env, s)
 		T.ok(err ~= nil)
-		T.ok(err:find("no method", 1, true) ~= nil)
+		T.ok(tostring(err):find("no method", 1, true) ~= nil)
 	end)
 end)
 
@@ -772,7 +772,7 @@ T.describe("walker sub-phase C: NODE_RETURN_STMT", function()
 		local node = ret(lit_int(1))
 		local _ty, _env, err = W.walk_synth(node, E.new(), s)
 		T.ok(err ~= nil)
-		T.ok(err:find("outside function body", 1, true) ~= nil)
+		T.ok(tostring(err):find("outside function body", 1, true) ~= nil)
 	end)
 end)
 
@@ -802,7 +802,7 @@ T.describe("walker sub-phase C: effect accumulation", function()
 		local env = E.bind(E.new(), "yield", yield_fn)
 		local _ty, _env, err = W.walk_synth(node, env, s)
 		T.ok(err ~= nil)
-		T.ok(err:find("yield", 1, true) ~= nil)
+		T.ok(tostring(err):find("yield", 1, true) ~= nil)
 	end)
 end)
 
@@ -1073,7 +1073,7 @@ T.describe("walker sub-phase D: numeric for", function()
 		})
 		local _ty, _env, err = W.walk_synth(node, env, s)
 		T.ok(err ~= nil)
-		T.ok(err:find("undefined name", 1, true) ~= nil)
+		T.ok(tostring(err):find("undefined name", 1, true) ~= nil)
 	end)
 end)
 
@@ -1321,7 +1321,7 @@ T.describe("walker sub-phase E: NODE_ASSIGN_STMT", function()
 		local node = assign_stmt({ id("missing") }, { lit_int(1) })
 		local _ty, _env2, err = W.walk_synth(node, E.new(), s)
 		T.ok(err ~= nil)
-		T.ok(err:find("undefined", 1, true) ~= nil)
+		T.ok(tostring(err):find("undefined", 1, true) ~= nil)
 	end)
 
 	T.it("field assignment on a concrete-typed record checks via V.index (sub-phase F)", function()
@@ -1412,7 +1412,7 @@ T.describe("walker sub-phase E: NODE_MATCH_EXPR — forward", function()
 		local node = match_expr(lit_int(1), arms, nil)
 		local _ty, _env2, err = W.walk_synth(node, E.new(), s)
 		T.ok(err ~= nil)
-		T.ok(err:find("disjoint", 1, true) ~= nil)
+		T.ok(tostring(err):find("disjoint", 1, true) ~= nil)
 	end)
 
 	T.it("non-exhaustive (no wildcard, no arm fires) errors", function()
@@ -1492,7 +1492,7 @@ T.describe("walker sub-phase F: NODE_FIELD_EXPR", function()
 		local node = field_expr(id("obj"), "missing")
 		local _ty, _env, err = W.walk_synth(node, env, s)
 		T.ok(err ~= nil)
-		T.ok(err:find("missing", 1, true) ~= nil)
+		T.ok(tostring(err):find("missing", 1, true) ~= nil)
 	end)
 
 	T.it("field access on a union of records distributes", function()
@@ -1536,7 +1536,7 @@ T.describe("walker sub-phase F: NODE_INDEX_EXPR", function()
 		local node = index_expr(id("obj"), id("k"))
 		local _ty, _env, err = W.walk_synth(node, env, s)
 		T.ok(err ~= nil)
-		T.ok(err:find("deferred", 1, true) ~= nil)
+		T.ok(tostring(err):find("deferred", 1, true) ~= nil)
 	end)
 
 	T.it("bracket access against indexer record", function()
@@ -1836,7 +1836,7 @@ T.describe("walker sub-phase G: cdef accumulation into ffi.C", function()
 		local miss = field_expr(field_expr(id("ffi"), "C"), "undeclared_xyz")
 		local _miss_ty, _env_m, err_m = W.walk_synth(miss, env2, s)
 		T.ok(err_m ~= nil)
-		T.ok(err_m:find("undeclared_xyz", 1, true) ~= nil)
+		T.ok(tostring(err_m):find("undeclared_xyz", 1, true) ~= nil)
 	end)
 
 	T.it("multiple cdef blocks accumulate", function()
@@ -1861,7 +1861,7 @@ T.describe("walker sub-phase G: cdef accumulation into ffi.C", function()
 		local node = call(field_expr(id("ffi"), "cdef"), id("src"))
 		local _ty, _env, err = W.walk_synth(node, env, s)
 		T.ok(err ~= nil)
-		T.ok(err:find("string literal", 1, true) ~= nil)
+		T.ok(tostring(err):find("string literal", 1, true) ~= nil)
 	end)
 
 	T.it("wrong arity (0 or 2+ args) is rejected", function()
@@ -1870,12 +1870,12 @@ T.describe("walker sub-phase G: cdef accumulation into ffi.C", function()
 		local none = call(field_expr(id("ffi"), "cdef"))
 		local _t1, _e1, err1 = W.walk_synth(none, env, s)
 		T.ok(err1 ~= nil)
-		T.ok(err1:find("exactly one", 1, true) ~= nil)
+		T.ok(tostring(err1):find("exactly one", 1, true) ~= nil)
 		local two = call(field_expr(id("ffi"), "cdef"),
 			lit_str("int x;"), lit_str("int y;"))
 		local _t2, _e2, err2 = W.walk_synth(two, env, s)
 		T.ok(err2 ~= nil)
-		T.ok(err2:find("exactly one", 1, true) ~= nil)
+		T.ok(tostring(err2):find("exactly one", 1, true) ~= nil)
 	end)
 
 	T.it("ffi.cdef without ffi in scope errors", function()
@@ -2030,7 +2030,7 @@ T.describe("walker sub-phase H: error()", function()
 		local node = func({}, { expr_stmt(call(id("error"), lit_str("x"))) }, ann)
 		local _ty, _env, err = W.walk_synth(node, E.new(), s)
 		T.ok(err ~= nil)
-		T.ok(err:find("throw", 1, true) ~= nil)
+		T.ok(tostring(err):find("throw", 1, true) ~= nil)
 	end)
 end)
 
@@ -2098,7 +2098,7 @@ T.describe("walker sub-phase H: pcall", function()
 		local node = call(id("pcall"))
 		local _ty, _env, err = W.walk_synth(node, env, s)
 		T.ok(err ~= nil)
-		T.ok(err:find("at least one", 1, true) ~= nil)
+		T.ok(tostring(err):find("at least one", 1, true) ~= nil)
 	end)
 end)
 
@@ -2257,7 +2257,7 @@ T.describe("walker sub-phase I: path resolution", function()
 		local path, err = require_resolve.resolve_module_path(fs, "lib.foo.bar")
 		T.eq(path, nil)
 		T.ok(err ~= nil)
-		T.ok(err:find("not found", 1, true) ~= nil)
+		T.ok(tostring(err):find("not found", 1, true) ~= nil)
 	end)
 end)
 
@@ -2358,8 +2358,8 @@ T.describe("walker sub-phase I: cache miss", function()
 		local s = V.new_solver()
 		local _ty, _env, err = W.walk_synth(node, env, s)
 		T.ok(err ~= nil)
-		T.ok(err:find("cache miss", 1, true) ~= nil)
-		T.ok(err:find("sub-phase", 1, true) ~= nil)
+		T.ok(tostring(err):find("cache miss", 1, true) ~= nil)
+		T.ok(tostring(err):find("sub-phase", 1, true) ~= nil)
 	end)
 
 	T.it("missing source file errors at path resolution", function()
@@ -2369,7 +2369,7 @@ T.describe("walker sub-phase I: cache miss", function()
 		local s = V.new_solver()
 		local _ty, _env, err = W.walk_synth(node, env, s)
 		T.ok(err ~= nil)
-		T.ok(err:find("not found", 1, true) ~= nil)
+		T.ok(tostring(err):find("not found", 1, true) ~= nil)
 	end)
 end)
 
@@ -2380,7 +2380,7 @@ T.describe("walker sub-phase I: I/O capability injection", function()
 		local s = V.new_solver()
 		local _ty, _env, err = W.walk_synth(node, env, s)
 		T.ok(err ~= nil)
-		T.ok(err:find("io_caps", 1, true) ~= nil)
+		T.ok(tostring(err):find("io_caps", 1, true) ~= nil)
 	end)
 
 	T.it("require without cache_dir errors loudly", function()
@@ -2390,7 +2390,7 @@ T.describe("walker sub-phase I: I/O capability injection", function()
 		local s = V.new_solver()
 		local _ty, _env, err = W.walk_synth(node, env, s)
 		T.ok(err ~= nil)
-		T.ok(err:find("cache_dir", 1, true) ~= nil)
+		T.ok(tostring(err):find("cache_dir", 1, true) ~= nil)
 	end)
 
 	T.it("non-require calls do not need io_caps", function()
@@ -2499,6 +2499,208 @@ T.describe("walker sub-phase I: env helpers", function()
 		T.eq(e1.io_caps, fs)
 		T.eq(e1.cache_dir, ".cache")
 		T.eq(E.lookup_require(e1, "a"), true)
+	end)
+end)
+
+-- ── Sub-phase J — diagnostics + origin tracking ───────────────────────────
+
+local D = W.diag
+local O = W.origin
+
+T.describe("walker sub-phase J: diagnostic structure", function()
+	T.it("emit returns a structured table with code/pos/msg/severity", function()
+		local env = E.with_source(E.new(), { file = "x.lua", line = 5, col = 3 })
+		local d = D.emit(env, D.E_UNDEFINED_NAME, "undefined name foo")
+		T.eq(D.is_diagnostic(d), true)
+		T.eq(d.code, D.E_UNDEFINED_NAME)
+		T.eq(d.msg, "undefined name foo")
+		T.eq(d.severity, "error")
+		T.eq(d.pos.file, "x.lua")
+		T.eq(d.pos.line, 5)
+		T.eq(d.pos.col, 3)
+	end)
+
+	T.it("__tostring renders file:line:col: severity: msg", function()
+		local env = E.with_source(E.new(), { file = "x.lua", line = 5, col = 3 })
+		local d = D.emit(env, D.E_UNDEFINED_NAME, "missing")
+		T.eq(tostring(d), "x.lua:5:3: error: missing")
+	end)
+
+	T.it("__concat lets diagnostics participate in string concatenation", function()
+		local env = E.with_source(E.new(), { file = "x.lua", line = 1, col = 1 })
+		local d = D.emit(env, D.E_INTERNAL, "foo")
+		local s = "prefix: " .. d
+		T.ok(s:find("foo", 1, true) ~= nil)
+		T.ok(s:find("prefix:", 1, true) ~= nil)
+	end)
+
+	T.it("unknown code raises", function()
+		local env = E.new()
+		local ok, perr = pcall(D.emit, env, "made-up-code", "x")
+		T.fail(ok)
+		T.ok(tostring(perr):find("unrecognised code", 1, true) ~= nil)
+	end)
+
+	T.it("CODES set lists every registered code", function()
+		for _, name in ipairs({ "E_UNDEFINED_NAME", "E_TYPE_MISMATCH",
+			"E_FIELD_MISSING", "E_CALL_ARITY", "E_CALL_NON_FN",
+			"E_REQUIRE_UNRESOLVED", "E_REQUIRE_IO",
+			"E_VARARG_OUT_OF_SCOPE", "E_RETURN_OUTSIDE_FN",
+			"E_INTERNAL", "E_UNSUPPORTED_NODE", "E_MATCH",
+			"E_FFI_CDEF", "E_EFFECT_UNDECLARED" }) do
+			local code = D[name]
+			T.ok(code ~= nil)
+			T.eq(D.CODES[code], true)
+		end
+	end)
+end)
+
+T.describe("walker sub-phase J: source-position threading", function()
+	T.it("undefined-name diagnostic carries the identifier's position", function()
+		local env = E.with_source(E.new(), { file = "f.lua", line = 0, col = 0 })
+		local node = { tag = defs.NODE_IDENTIFIER, line = 7, col = 4, name = "ghost" }
+		local _ty, _env2, err = W.walk_synth(node, env, V.new_solver())
+		T.ok(D.is_diagnostic(err))
+		T.eq(err.code, D.E_UNDEFINED_NAME)
+		T.eq(err.pos.line, 7)
+		T.eq(err.pos.col, 4)
+		T.eq(err.pos.file, "f.lua")
+	end)
+
+	T.it("vararg-out-of-scope carries its position", function()
+		local env = E.with_source(E.new(), { file = "g.lua", line = 1, col = 1 })
+		local node = { tag = defs.NODE_VARARG_EXPR, line = 12, col = 9 }
+		local _ty, _env2, err = W.walk_synth(node, env, V.new_solver())
+		T.ok(D.is_diagnostic(err))
+		T.eq(err.code, D.E_VARARG_OUT_OF_SCOPE)
+		T.eq(err.pos.line, 12)
+		T.eq(err.pos.col, 9)
+	end)
+
+	T.it("subtype-failure (assign) diagnostic carries LHS position", function()
+		local env = E.with_source(E.new(), { file = "h.lua", line = 1, col = 1 })
+		env = E.bind(env, "x", V.integer)
+		local lhs = { tag = defs.NODE_IDENTIFIER, name = "x", line = 3, col = 1 }
+		local rhs = { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_STRING,
+			value = "oops", line = 3, col = 5 }
+		local stmt = { tag = defs.NODE_ASSIGN_STMT, line = 3, col = 1,
+			targets = { lhs }, exprs = { rhs } }
+		local _ty, _env2, err = W.walk_synth(stmt, env, V.new_solver())
+		T.ok(D.is_diagnostic(err))
+		T.eq(err.code, D.E_TYPE_MISMATCH)
+		T.eq(err.pos.file, "h.lua")
+	end)
+end)
+
+T.describe("walker sub-phase J: origin tracking", function()
+	T.it("origin map starts empty after reset", function()
+		O.reset()
+		T.eq(O._count(), 0)
+	end)
+
+	T.it("record + get round-trips an origin for a V4Type", function()
+		O.reset()
+		local ty = V.var("a")
+		O.record(ty, { kind = D.O_FROM_REQUIRE, module = "x" })
+		local rec = O.get(ty)
+		T.ok(rec ~= nil)
+		T.eq(rec.kind, D.O_FROM_REQUIRE)
+		T.eq(rec.module, "x")
+	end)
+
+	T.it("from_env builds an origin from env.source", function()
+		local env = E.with_source(E.new(), { file = "z.lua", line = 4, col = 2 })
+		local rec = O.from_env(env, D.O_FROM_REQUIRE, { module = "foo" })
+		T.eq(rec.kind, D.O_FROM_REQUIRE)
+		T.eq(rec.module, "foo")
+		T.eq(rec.pos.file, "z.lua")
+		T.eq(rec.pos.line, 4)
+	end)
+
+	T.it("from_solver populates origin from a V4Type with a recorded origin", function()
+		O.reset()
+		local env = E.with_source(E.new(), { file = "h.lua", line = 9, col = 3 })
+		-- Pretend `arg_ty` came from a `require("mymod")` call.
+		local arg_ty = V.literal("string", "x")
+		O.record(arg_ty, O.from_env(env, D.O_FROM_REQUIRE,
+			{ module = "mymod", msg = "require(mymod)" }))
+		-- Stage a solver in error state to exercise from_solver.
+		local solver = V.new_solver()
+		solver.error = "type error: simulated mismatch"
+		local d = D.from_solver(env, D.E_TYPE_MISMATCH,
+			"test: argument mismatch", solver, arg_ty, V.integer)
+		T.eq(d.code, D.E_TYPE_MISMATCH)
+		T.eq(d.origin_kind, D.O_FROM_REQUIRE)
+		T.eq(d.module, "mymod")
+		T.ok(d.origin ~= nil)
+		T.eq(solver.error, nil) -- from_solver clears the solver
+	end)
+
+	T.it("chain wraps an inner diagnostic with O_PROPAGATED", function()
+		local env = E.with_source(E.new(), { file = "k.lua", line = 1, col = 1 })
+		local inner = D.emit(env, D.E_UNDEFINED_NAME, "inner")
+		local outer = D.chain(env, D.E_INTERNAL, "outer", inner)
+		T.eq(outer.code, D.E_INTERNAL)
+		T.eq(outer.origin_kind, D.O_PROPAGATED)
+		T.eq(outer.origin, inner)
+	end)
+
+	T.it("require result carries from-require origin", function()
+		O.reset()
+		-- Drive require_resolve end-to-end with a fake cache.
+		local require_resolve = require("lib.type.static-v4.walker.require_resolve")
+		local exports_in = V.rec({ foo = V.integer }, false, nil)
+		local artifact = require_resolve.pack_artifact(exports_in, {})
+		local source_text = "return {}"
+		local source_hash = require("lib.hash.sha256").sha256(source_text)
+		local fs = { files = { ["mymod.lua"] = source_text } }
+		fs.read_file = function(path)
+			local b = fs.files[path]
+			if b == nil then return nil, "no such file" end
+			return b, nil
+		end
+		fs.write_file = function(path, bytes) fs.files[path] = bytes; return true, nil end
+		fs.mkdir = function(_path) return true, nil end
+		fs.file_exists = function(path) return fs.files[path] ~= nil end
+		-- Populate the cache with the artifact under the source hash.
+		V.cache_store(fs, ".cache", source_hash, artifact, nil)
+		local env = E.with_source(E.new(), { file = "caller.lua", line = 1, col = 1 })
+		env = E.with_io_caps(env, fs)
+		env = E.with_cache_dir(env, ".cache")
+		local call_node = {
+			tag = defs.NODE_CALL_EXPR, line = 2, col = 1,
+			callee = { tag = defs.NODE_IDENTIFIER, name = "require",
+				line = 2, col = 1 },
+			args = { { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_STRING,
+				value = "mymod", line = 2, col = 9 } },
+		}
+		local exports_out, _env2, err = W.walk_synth(call_node, env, V.new_solver())
+		T.eq(err, nil)
+		T.ok(exports_out ~= nil)
+		local rec = O.get(exports_out)
+		T.ok(rec ~= nil)
+		T.eq(rec.kind, D.O_FROM_REQUIRE)
+		T.eq(rec.module, "mymod")
+	end)
+end)
+
+T.describe("walker sub-phase J: complete-walk diagnostic structure", function()
+	T.it("a walked program with a mismatch produces a structured diagnostic", function()
+		-- local x --: integer = "oops"
+		local env = E.with_source(E.new(), { file = "p.lua", line = 1, col = 1 })
+		local stmt = {
+			tag = defs.NODE_LOCAL_STMT, line = 4, col = 1,
+			names = { { name = "x", ann = V.integer } },
+			exprs = { { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_STRING,
+				value = "oops", line = 4, col = 16 } },
+		}
+		local _ty, _env2, err = W.walk_synth(stmt, env, V.new_solver())
+		T.ok(D.is_diagnostic(err))
+		T.eq(err.code, D.E_TYPE_MISMATCH)
+		T.eq(err.severity, "error")
+		T.ok(err.pos.file == "p.lua")
+		T.ok(tostring(err):find("p.lua", 1, true) ~= nil)
+		T.ok(tostring(err):find("error:", 1, true) ~= nil)
 	end)
 end)
 

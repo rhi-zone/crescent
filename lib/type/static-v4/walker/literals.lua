@@ -44,6 +44,7 @@ end
 
 local V    = require("lib.type.static-v4")
 local E    = require("lib.type.static-v4.walker.env")
+local D    = require("lib.type.static-v4.walker.diag")
 local defs = require("lib.type.static.defs")
 
 -- Pull V4Type into alias scope.
@@ -84,8 +85,8 @@ local function synth_literal(node, env, _solver)
 	elseif k == defs.LIT_STRING then
 		return V.literal("string", node.value), env, nil
 	end
-	return nil, env,
-		"walker: NODE_LITERAL with unknown lit_kind " .. tostring(k)
+	return nil, env, D.emit(env, D.E_INTERNAL,
+		"walker: NODE_LITERAL with unknown lit_kind " .. tostring(k))
 end
 
 -- ── NODE_IDENTIFIER ───────────────────────────────────────────────────────
@@ -105,7 +106,8 @@ local function synth_identifier(node, env, _solver)
 	local name = node.name
 	local ty = E.lookup(env, name)
 	if ty == nil then
-		return nil, env, "undefined name " .. tostring(name)
+		return nil, env, D.emit(env, D.E_UNDEFINED_NAME,
+			"undefined name " .. tostring(name))
 	end
 	return ty, env, nil
 end
@@ -125,7 +127,8 @@ end
 local function synth_vararg(_node, env, _solver)
 	local vararg = env.vararg
 	if vararg == nil then
-		return nil, env, "varargs not in scope"
+		return nil, env, D.emit(env, D.E_VARARG_OUT_OF_SCOPE,
+			"varargs not in scope")
 	end
 	return vararg, env, nil
 end

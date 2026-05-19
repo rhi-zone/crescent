@@ -68,6 +68,7 @@ end
 
 local V       = require("lib.type.static-v4")
 local E       = require("lib.type.static-v4.walker.env")
+local D       = require("lib.type.static-v4.walker.diag")
 local defs    = require("lib.type.static.defs")
 local subtype_mod = require("lib.type.static-v4.subtype")
 local forall_mod  = require("lib.type.static-v4.forall")
@@ -149,8 +150,8 @@ local function synth_error(node, env, solver)
 		local _ty, env2, err = W.walk_synth(a, env, solver)
 		env = env2
 		if err ~= nil then
-			return nil, env,
-				"error: argument " .. tostring(i) .. ": " .. err
+			return nil, env, D.chain(env, D.E_INTERNAL,
+				"error: argument " .. tostring(i), err)
 		end
 	end
 	env = E.add_effect(env, V.EFFECT_THROW)
@@ -174,19 +175,21 @@ local function synth_pcall(node, env, solver)
 	local W = walker_mod()
 	local args = node.args or {}
 	if #args == 0 then
-		return nil, env,
-			"pcall: expected at least one argument (the function to call)"
+		return nil, env, D.emit(env, D.E_CALL_ARITY,
+			"pcall: expected at least one argument (the function to call)")
 	end
 	local f_ty, env2, ferr = W.walk_synth(args[1], env, solver)
 	if ferr ~= nil then return nil, env2, ferr end
 	if f_ty == nil then
-		return nil, env2, "pcall: first argument has no synthesized type"
+		return nil, env2, D.emit(env2, D.E_INTERNAL,
+			"pcall: first argument has no synthesized type")
 	end
 	local raw0 = f_ty
 	if raw0.tag == "forall" then raw0 = forall_mod.instantiate(raw0) end
 	if raw0.tag ~= "fn" then
-		return nil, env2,
-			"pcall: first argument has non-function type " .. V.show(f_ty)
+		return nil, env2, D.emit(env2, D.E_CALL_NON_FN,
+			"pcall: first argument has non-function type " .. V.show(f_ty),
+			{ origin_type = f_ty })
 	end
 	-- Fresh local binds the fn-narrowed shape so field accesses resolve to
 	-- V4Fn's fields, not the V4Type union view.
@@ -202,25 +205,27 @@ local function synth_pcall(node, env, solver)
 		env2 = env3
 		if aerr ~= nil then return nil, env2, aerr end
 		if ty == nil then
-			return nil, env2,
-				"pcall: argument " .. tostring(i) .. " has no synthesized type"
+			return nil, env2, D.emit(env2, D.E_INTERNAL,
+				"pcall: argument " .. tostring(i) .. " has no synthesized type")
 		end
 		supplied = supplied + 1
 		local slot = params[supplied]
 		if slot == nil then
-			return nil, env2,
+			return nil, env2, D.emit(env2, D.E_CALL_ARITY,
 				"pcall: too many arguments for inner arrow (expected " ..
-				tostring(n_params) .. ", got " .. tostring(#args - 1) .. ")"
+				tostring(n_params) .. ", got " .. tostring(#args - 1) .. ")")
 		end
 		subtype_mod.constrain(solver, ty, slot)
 		if solver.error ~= nil then
-			return nil, env2, solver.error
+			return nil, env2, D.from_solver(env2, D.E_TYPE_MISMATCH,
+				"pcall: argument " .. tostring(i) .. " type mismatch",
+				solver, ty, slot)
 		end
 	end
 	if supplied < n_params then
-		return nil, env2,
+		return nil, env2, D.emit(env2, D.E_CALL_ARITY,
 			"pcall: too few arguments for inner arrow (expected " ..
-			tostring(n_params) .. ", got " .. tostring(supplied) .. ")"
+			tostring(n_params) .. ", got " .. tostring(supplied) .. ")")
 	end
 	-- Effect masking: throw is consumed; other effects ride through.
 	for name in pairs(effects) do
@@ -241,19 +246,21 @@ local function synth_xpcall(node, env, solver)
 	local W = walker_mod()
 	local args = node.args or {}
 	if #args < 2 then
-		return nil, env,
-			"xpcall: expected at least two arguments (the function and a message handler)"
+		return nil, env, D.emit(env, D.E_CALL_ARITY,
+			"xpcall: expected at least two arguments (the function and a message handler)")
 	end
 	local f_ty, env2, ferr = W.walk_synth(args[1], env, solver)
 	if ferr ~= nil then return nil, env2, ferr end
 	if f_ty == nil then
-		return nil, env2, "xpcall: first argument has no synthesized type"
+		return nil, env2, D.emit(env2, D.E_INTERNAL,
+			"xpcall: first argument has no synthesized type")
 	end
 	local raw0 = f_ty
 	if raw0.tag == "forall" then raw0 = forall_mod.instantiate(raw0) end
 	if raw0.tag ~= "fn" then
-		return nil, env2,
-			"xpcall: first argument has non-function type " .. V.show(f_ty)
+		return nil, env2, D.emit(env2, D.E_CALL_NON_FN,
+			"xpcall: first argument has non-function type " .. V.show(f_ty),
+			{ origin_type = f_ty })
 	end
 	local raw = raw0
 	local params = raw.params or {}
@@ -263,13 +270,15 @@ local function synth_xpcall(node, env, solver)
 	local msgh_ty, env3, merr = W.walk_synth(args[2], env2, solver)
 	if merr ~= nil then return nil, env3, merr end
 	if msgh_ty == nil then
-		return nil, env3, "xpcall: message-handler argument has no synthesized type"
+		return nil, env3, D.emit(env3, D.E_INTERNAL,
+			"xpcall: message-handler argument has no synthesized type")
 	end
 	local msgh_raw0 = msgh_ty
 	if msgh_raw0.tag == "forall" then msgh_raw0 = forall_mod.instantiate(msgh_raw0) end
 	if msgh_raw0.tag ~= "fn" then
-		return nil, env3,
-			"xpcall: message-handler argument has non-function type " .. V.show(msgh_ty)
+		return nil, env3, D.emit(env3, D.E_CALL_NON_FN,
+			"xpcall: message-handler argument has non-function type " .. V.show(msgh_ty),
+			{ origin_type = msgh_ty })
 	end
 	local msgh_raw = msgh_raw0
 	local msgh_effects = msgh_raw.effects or {}
@@ -280,25 +289,27 @@ local function synth_xpcall(node, env, solver)
 		env3 = env4
 		if aerr ~= nil then return nil, env3, aerr end
 		if ty == nil then
-			return nil, env3,
-				"xpcall: argument " .. tostring(i) .. " has no synthesized type"
+			return nil, env3, D.emit(env3, D.E_INTERNAL,
+				"xpcall: argument " .. tostring(i) .. " has no synthesized type")
 		end
 		supplied = supplied + 1
 		local slot = params[supplied]
 		if slot == nil then
-			return nil, env3,
+			return nil, env3, D.emit(env3, D.E_CALL_ARITY,
 				"xpcall: too many arguments for inner arrow (expected " ..
-				tostring(n_params) .. ", got " .. tostring(#args - 2) .. ")"
+				tostring(n_params) .. ", got " .. tostring(#args - 2) .. ")")
 		end
 		subtype_mod.constrain(solver, ty, slot)
 		if solver.error ~= nil then
-			return nil, env3, solver.error
+			return nil, env3, D.from_solver(env3, D.E_TYPE_MISMATCH,
+				"xpcall: argument " .. tostring(i) .. " type mismatch",
+				solver, ty, slot)
 		end
 	end
 	if supplied < n_params then
-		return nil, env3,
+		return nil, env3, D.emit(env3, D.E_CALL_ARITY,
 			"xpcall: too few arguments for inner arrow (expected " ..
-			tostring(n_params) .. ", got " .. tostring(supplied) .. ")"
+			tostring(n_params) .. ", got " .. tostring(supplied) .. ")")
 	end
 	for name in pairs(effects) do
 		if name ~= V.EFFECT_THROW and type(name) == "string" then

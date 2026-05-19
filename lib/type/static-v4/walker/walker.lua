@@ -37,6 +37,7 @@ end
 
 local V = require("lib.type.static-v4")
 local E = require("lib.type.static-v4.walker.env")
+local D = require("lib.type.static-v4.walker.diag")
 
 local M = {}
 
@@ -125,8 +126,8 @@ function M.walk_synth(node, env, solver)
 	local tag = node.tag
 	local h = synth_handlers[tag]
 	if h == nil then
-		return nil, env,
-			"walker: " .. tag_name(tag) .. " not yet implemented"
+		return nil, env, D.emit(env, D.E_UNSUPPORTED_NODE,
+			"walker: " .. tag_name(tag) .. " not yet implemented")
 	end
 	return h(node, env, solver)
 end
@@ -161,12 +162,14 @@ function M.walk_check(node, env, solver, expected)
 		-- Statement nodes synthesize to nil. CHECK against a non-statement
 		-- node is the caller's contract; receiving nil here means the caller
 		-- asked CHECK on a statement, which is a bug.
-		return env3, "walker: CHECK invoked on a statement node (" ..
-			tag_name(tag) .. ")"
+		return env3, D.emit(env3, D.E_INTERNAL,
+			"walker: CHECK invoked on a statement node (" .. tag_name(tag) .. ")")
 	end
 	subtype_mod.constrain(solver, ty, expected)
 	if solver.error ~= nil then
-		return env3, solver.error
+		return env3, D.from_solver(env3, D.E_TYPE_MISMATCH,
+			"check: value does not satisfy expected type",
+			solver, ty, expected)
 	end
 	return env3, nil
 end
@@ -226,5 +229,11 @@ function M._register_builtins()
 end
 
 M._register_builtins()
+
+-- Diagnostic / origin module re-exports (sub-phase J). Tests and external
+-- consumers access the structured diagnostic API via the walker module so
+-- they need only one entry point.
+M.diag   = D
+M.origin = require("lib.type.static-v4.walker.origin")
 
 return M

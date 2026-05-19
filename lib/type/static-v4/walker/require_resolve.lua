@@ -56,6 +56,8 @@ end
 
 local V          = require("lib.type.static-v4")
 local E          = require("lib.type.static-v4.walker.env")
+local D          = require("lib.type.static-v4.walker.diag")
+local O          = require("lib.type.static-v4.walker.origin")
 local defs       = require("lib.type.static.defs")
 local sha256_mod = require("lib.hash.sha256")
 
@@ -223,8 +225,8 @@ local function synth_call(node, env, solver)
 	local arg = node.args[1]
 	local mod_name = arg.value
 	if type(mod_name) ~= "string" then
-		return nil, env,
-			"require: string-literal argument has non-string value"
+		return nil, env, D.emit(env, D.E_REQUIRE_UNRESOLVED,
+			"require: string-literal argument has non-string value")
 	end
 
 	-- Cycle break: if mod_name is already on the require chain, return its
@@ -238,7 +240,10 @@ local function synth_call(node, env, solver)
 	local in_progress = E.lookup_require(env, mod_name)
 	if in_progress ~= nil then
 		if in_progress == true then
-			return V.var("require:" .. mod_name), env, nil
+			local placeholder = V.var("require:" .. mod_name)
+			O.record(placeholder, O.from_env(env, D.O_FROM_REQUIRE,
+				{ module = mod_name, msg = "require placeholder (cycle break)" }))
+			return placeholder, env, nil
 		end
 		return in_progress, env, nil
 	end
@@ -246,20 +251,23 @@ local function synth_call(node, env, solver)
 	-- Caps gate. Per CLAUDE.md "Caps-first, everywhere": no fallback.
 	local caps = env.io_caps
 	if caps == nil then
-		return nil, env,
+		return nil, env, D.emit(env, D.E_REQUIRE_IO,
 			"require: io_caps not installed on env (call E.with_io_caps " ..
-			"before walking a file that uses require)"
+			"before walking a file that uses require)",
+			{ module = mod_name })
 	end
 	local cache_dir = env.cache_dir
 	if cache_dir == nil then
-		return nil, env,
+		return nil, env, D.emit(env, D.E_REQUIRE_IO,
 			"require: cache_dir not installed on env (call E.with_cache_dir " ..
-			"before walking a file that uses require)"
+			"before walking a file that uses require)",
+			{ module = mod_name })
 	end
 
 	local source_path, perr = resolve_module_path(caps, mod_name)
 	if source_path == nil then
-		return nil, env, perr
+		return nil, env, D.emit(env, D.E_REQUIRE_UNRESOLVED,
+			tostring(perr), { module = mod_name })
 	end
 
 	-- Mark in-progress with `true` so any inner `require(mod_name)` fires
@@ -267,7 +275,10 @@ local function synth_call(node, env, solver)
 	local env_in = E.push_require(env, mod_name, true)
 	local exports, aliases, err = resolve_via_cache(caps, cache_dir, source_path)
 	env_in = E.pop_require(env_in, mod_name)
-	if err ~= nil then return nil, env_in, err end
+	if err ~= nil then
+		return nil, env_in, D.emit(env_in, D.E_REQUIRE_UNRESOLVED,
+			tostring(err), { module = mod_name })
+	end
 
 	-- Merge the imported file's --:: aliases into the requiring file's
 	-- alias scope. This is the v4 equivalent of legacy Pass -1 alias
@@ -278,6 +289,16 @@ local function synth_call(node, env, solver)
 		for name, ty in pairs(aliases) do
 			env_out = E.bind_alias(env_out, name, ty)
 		end
+	end
+	-- Origin tagging (sub-phase J): the export type came from a require
+	-- call. Downstream subtype failures whose LHS or RHS traces back to
+	-- this type will surface the require as the origin in their diagnostic
+	-- chain — this is the data-level edge that replaces the legacy
+	-- "most recent preceding require" proximity heuristic.
+	if exports ~= nil then
+		O.record(exports, O.from_env(env, D.O_FROM_REQUIRE,
+			{ module = mod_name,
+			  msg = "require(\"" .. mod_name .. "\")" }))
 	end
 	return exports, env_out, nil
 end

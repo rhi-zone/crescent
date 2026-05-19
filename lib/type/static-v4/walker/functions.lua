@@ -86,6 +86,7 @@ end
 
 local V       = require("lib.type.static-v4")
 local E       = require("lib.type.static-v4.walker.env")
+local D       = require("lib.type.static-v4.walker.diag")
 local defs    = require("lib.type.static.defs")
 local subtype = require("lib.type.static-v4.subtype")
 local forall  = require("lib.type.static-v4.forall")
@@ -175,23 +176,33 @@ end
 local function synth_return(node, env, solver)
 	local return_ty = env.return_ty
 	if return_ty == nil then
-		return nil, env, "return outside function body"
+		return nil, env, D.emit(env, D.E_RETURN_OUTSIDE_FN,
+			"return outside function body")
 	end
 	local exprs = node.exprs
 	local n = #exprs
 	if n == 0 then
 		subtype.constrain(solver, NIL_TYPE, return_ty)
-		if solver.error ~= nil then return nil, env, solver.error end
+		if solver.error ~= nil then
+			return nil, env, D.from_solver(env, D.E_TYPE_MISMATCH,
+				"return: nil does not satisfy return type",
+				solver, NIL_TYPE, return_ty)
+		end
 		return nil, env, nil
 	end
 	if n == 1 then
 		local ty, env2, err = require("lib.type.static-v4.walker.walker").walk_synth(exprs[1], env, solver)
 		if err ~= nil then return nil, env2, err end
 		if ty == nil then
-			return nil, env2, "return: expression has no synthesized type"
+			return nil, env2, D.emit(env2, D.E_INTERNAL,
+				"return: expression has no synthesized type")
 		end
 		subtype.constrain(solver, ty, return_ty)
-		if solver.error ~= nil then return nil, env2, solver.error end
+		if solver.error ~= nil then
+			return nil, env2, D.from_solver(env2, D.E_TYPE_MISMATCH,
+				"return: value does not satisfy return type",
+				solver, ty, return_ty)
+		end
 		return nil, env2, nil
 	end
 	-- Multi-return. Synthesize each in left-to-right order; an early error
@@ -202,8 +213,8 @@ local function synth_return(node, env, solver)
 		env = env2
 		if err ~= nil then return nil, env, err end
 		if ty == nil then
-			return nil, env,
-				"return: expression " .. tostring(i) .. " has no synthesized type"
+			return nil, env, D.emit(env, D.E_INTERNAL,
+				"return: expression " .. tostring(i) .. " has no synthesized type")
 		end
 		types[i] = ty
 	end
@@ -211,10 +222,15 @@ local function synth_return(node, env, solver)
 	if tup == nil then
 		-- Unreachable: tuple_of constructs a non-nil V4Type on every path.
 		-- The explicit guard exists to narrow the local for the typechecker.
-		return nil, env, "return: internal — tuple_of returned nil"
+		return nil, env, D.emit(env, D.E_INTERNAL,
+			"return: internal — tuple_of returned nil")
 	end
 	subtype.constrain(solver, tup, return_ty)
-	if solver.error ~= nil then return nil, env, solver.error end
+	if solver.error ~= nil then
+		return nil, env, D.from_solver(env, D.E_TYPE_MISMATCH,
+			"return: tuple does not satisfy return type",
+			solver, tup, return_ty)
+	end
 	return nil, env, nil
 end
 
@@ -270,8 +286,9 @@ local function apply_arrow(callee_ty, arg_types, arg_count, env, solver)
 	-- Instantiate at the call site (rank-N: §6.2).
 	local arrow = maybe_instantiate(callee_ty)
 	if arrow.tag ~= "fn" then
-		return nil, env,
-			"call: callee has non-function type " .. V.show(callee_ty)
+		return nil, env, D.emit(env, D.E_CALL_NON_FN,
+			"call: callee has non-function type " .. V.show(callee_ty),
+			{ origin_type = callee_ty })
 	end
 	-- Narrowing: from here on arrow has tag "fn" — params/ret/effects are
 	-- the concrete fields.
@@ -279,14 +296,16 @@ local function apply_arrow(callee_ty, arg_types, arg_count, env, solver)
 	local param_count = 0
 	for _ in pairs(params) do param_count = param_count + 1 end
 	if param_count ~= arg_count then
-		return nil, env,
+		return nil, env, D.emit(env, D.E_CALL_ARITY,
 			"call: arity mismatch — expected " .. tostring(param_count) ..
-			" argument(s), got " .. tostring(arg_count)
+			" argument(s), got " .. tostring(arg_count))
 	end
 	for i = 1, param_count do
 		subtype.constrain(solver, arg_types[i], params[i])
 		if solver.error ~= nil then
-			return nil, env, solver.error
+			return nil, env, D.from_solver(env, D.E_TYPE_MISMATCH,
+				"call: argument " .. tostring(i) .. " type mismatch",
+				solver, arg_types[i], params[i])
 		end
 	end
 	-- Effect accumulation: the call performs whatever effects the arrow
@@ -301,14 +320,15 @@ local function synth_call(node, env, solver)
 	local callee_tag = node.callee.tag
 	local forbidden = INDEXED_CALLEE_TAGS[callee_tag]
 	if forbidden ~= nil then
-		return nil, env,
+		return nil, env, D.emit(env, D.E_UNSUPPORTED_NODE,
 			"call: indexed callee (" .. forbidden ..
-			") not in sub-phase C scope — lands in sub-phase F"
+			") not in sub-phase C scope — lands in sub-phase F")
 	end
 	local callee_ty, env2, err = require("lib.type.static-v4.walker.walker").walk_synth(node.callee, env, solver)
 	if err ~= nil then return nil, env2, err end
 	if callee_ty == nil then
-		return nil, env2, "call: callee has no synthesized type"
+		return nil, env2, D.emit(env2, D.E_INTERNAL,
+			"call: callee has no synthesized type")
 	end
 	local arg_types = {}
 	local arg_count = 0
@@ -317,8 +337,8 @@ local function synth_call(node, env, solver)
 		env2 = env3
 		if aerr ~= nil then return nil, env2, aerr end
 		if ty == nil then
-			return nil, env2,
-				"call: argument " .. tostring(i) .. " has no synthesized type"
+			return nil, env2, D.emit(env2, D.E_INTERNAL,
+				"call: argument " .. tostring(i) .. " has no synthesized type")
 		end
 		arg_types[i] = ty
 		arg_count = i
@@ -345,17 +365,20 @@ local function synth_method_call(node, env, solver)
 	local recv_ty, env2, err = require("lib.type.static-v4.walker.walker").walk_synth(node.receiver, env, solver)
 	if err ~= nil then return nil, env2, err end
 	if recv_ty == nil then
-		return nil, env2, "method call: receiver has no synthesized type"
+		return nil, env2, D.emit(env2, D.E_INTERNAL,
+			"method call: receiver has no synthesized type")
 	end
 	if recv_ty.tag ~= "rec" then
-		return nil, env2,
+		return nil, env2, D.emit(env2, D.E_CALL_NON_FN,
 			"method call: receiver has non-record type " .. V.show(recv_ty) ..
-			" (full method dispatch lands in sub-phase F)"
+			" (full method dispatch lands in sub-phase F)",
+			{ origin_type = recv_ty })
 	end
 	local method_ty = recv_ty.fields[node.method]
 	if method_ty == nil then
-		return nil, env2,
-			"method call: receiver has no method '" .. node.method .. "'"
+		return nil, env2, D.emit(env2, D.E_FIELD_MISSING,
+			"method call: receiver has no method '" .. node.method .. "'",
+			{ origin_type = recv_ty })
 	end
 	local arg_types = {}
 	arg_types[1] = recv_ty -- the `self` argument
@@ -365,9 +388,9 @@ local function synth_method_call(node, env, solver)
 		env2 = env3
 		if aerr ~= nil then return nil, env2, aerr end
 		if ty == nil then
-			return nil, env2,
+			return nil, env2, D.emit(env2, D.E_INTERNAL,
 				"method call: argument " .. tostring(i) ..
-				" has no synthesized type"
+				" has no synthesized type")
 		end
 		arg_types[i + 1] = ty
 		arg_count = i + 1
@@ -468,15 +491,15 @@ local function synth_func(node, env, solver)
 		-- CHECK body against the annotated return type.
 		local body_ty, skolems = maybe_skolemize(annotation)
 		if body_ty.tag ~= "fn" then
-			return nil, env,
-				"function: annotation is not a function type: " .. V.show(annotation)
+			return nil, env, D.emit(env, D.E_TYPE_MISMATCH,
+				"function: annotation is not a function type: " .. V.show(annotation))
 		end
 		-- Narrowing: body_ty.tag == "fn"
 		local arrow = body_ty
 		if #arrow.params ~= #node.params then
-			return nil, env,
+			return nil, env, D.emit(env, D.E_CALL_ARITY,
 				"function: annotation arity (" .. tostring(#arrow.params) ..
-				") disagrees with parameter list (" .. tostring(#node.params) .. ")"
+				") disagrees with parameter list (" .. tostring(#node.params) .. ")")
 		end
 		local vararg_ty = nil
 		if node.vararg then
@@ -500,9 +523,9 @@ local function synth_func(node, env, solver)
 		-- effects means "no effects allowed" — body that yields fails.
 		for name in pairs(body_env2.effects) do
 			if not arrow.effects[name] then
-				return nil, env,
+				return nil, env, D.emit(env, D.E_EFFECT_UNDECLARED,
 					"function: body performs effect '" .. name ..
-					"' not declared in the annotation"
+					"' not declared in the annotation")
 			end
 		end
 		-- The user wrote the type; return it verbatim.

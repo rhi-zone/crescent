@@ -94,6 +94,7 @@ end
 
 local V       = require("lib.type.static-v4")
 local E       = require("lib.type.static-v4.walker.env")
+local D       = require("lib.type.static-v4.walker.diag")
 local defs    = require("lib.type.static.defs")
 local subtype = require("lib.type.static-v4.subtype")
 local index_mod = require("lib.type.static-v4.index")
@@ -146,15 +147,19 @@ local function synth_field(node, env, solver)
 	local target_ty, env2, err = W.walk_synth(node.target, env, solver)
 	if err ~= nil then return nil, env2, err end
 	if target_ty == nil then
-		return nil, env2, "field: target has no synthesized type"
+		return nil, env2, D.emit(env2, D.E_INTERNAL,
+			"field: target has no synthesized type")
 	end
 	local key = node.key
 	if type(key) ~= "string" then
-		return nil, env2,
-			"field: key must be a string (got " .. type(key) .. ")"
+		return nil, env2, D.emit(env2, D.E_INTERNAL,
+			"field: key must be a string (got " .. type(key) .. ")")
 	end
 	local result, ierr = index_mod.index(target_ty, V.literal("string", key))
-	if ierr ~= nil then return nil, env2, "field: " .. ierr end
+	if ierr ~= nil then
+		return nil, env2, D.emit(env2, D.E_FIELD_MISSING,
+			"field: " .. ierr, { origin_type = target_ty })
+	end
 	return result, env2, nil
 end
 
@@ -170,15 +175,20 @@ local function synth_index(node, env, solver)
 	local target_ty, env2, err = W.walk_synth(node.target, env, solver)
 	if err ~= nil then return nil, env2, err end
 	if target_ty == nil then
-		return nil, env2, "index: target has no synthesized type"
+		return nil, env2, D.emit(env2, D.E_INTERNAL,
+			"index: target has no synthesized type")
 	end
 	local key_ty, env3, kerr = W.walk_synth(node.key, env2, solver)
 	if kerr ~= nil then return nil, env3, kerr end
 	if key_ty == nil then
-		return nil, env3, "index: key has no synthesized type"
+		return nil, env3, D.emit(env3, D.E_INTERNAL,
+			"index: key has no synthesized type")
 	end
 	local result, ierr = index_mod.index(target_ty, key_ty)
-	if ierr ~= nil then return nil, env3, "index: " .. ierr end
+	if ierr ~= nil then
+		return nil, env3, D.emit(env3, D.E_FIELD_MISSING,
+			"index: " .. ierr, { origin_type = target_ty })
+	end
 	return result, env3, nil
 end
 
@@ -199,8 +209,8 @@ local function synth_table(node, _env, _solver)
 	if fields == nil or #fields == 0 then
 		return V.rec({}, false, nil), _env, nil
 	end
-	return nil, _env,
-		"table: non-empty table literals land in a later sub-phase (sub-phase F handles `{}` only; full table-literal CHECK/SYNTHESIZE per §3.10 follows)"
+	return nil, _env, D.emit(_env, D.E_UNSUPPORTED_NODE,
+		"table: non-empty table literals land in a later sub-phase (sub-phase F handles `{}` only; full table-literal CHECK/SYNTHESIZE per §3.10 follows)")
 end
 
 -- ── shared call-application logic ─────────────────────────────────────────
@@ -226,21 +236,24 @@ end
 local function apply_arrow(callee_ty, arg_types, arg_count, env, solver)
 	local arrow = maybe_instantiate(callee_ty)
 	if arrow.tag ~= "fn" then
-		return nil, env,
-			"call: callee has non-function type " .. V.show(callee_ty)
+		return nil, env, D.emit(env, D.E_CALL_NON_FN,
+			"call: callee has non-function type " .. V.show(callee_ty),
+			{ origin_type = callee_ty })
 	end
 	local params = arrow.params
 	local param_count = 0
 	for _ in pairs(params) do param_count = param_count + 1 end
 	if param_count ~= arg_count then
-		return nil, env,
+		return nil, env, D.emit(env, D.E_CALL_ARITY,
 			"call: arity mismatch — expected " .. tostring(param_count) ..
-			" argument(s), got " .. tostring(arg_count)
+			" argument(s), got " .. tostring(arg_count))
 	end
 	for i = 1, param_count do
 		subtype.constrain(solver, arg_types[i], params[i])
 		if solver.error ~= nil then
-			return nil, env, solver.error
+			return nil, env, D.from_solver(env, D.E_TYPE_MISMATCH,
+				"call: argument " .. tostring(i) .. " type mismatch",
+				solver, arg_types[i], params[i])
 		end
 	end
 	env = add_effects(env, arrow.effects)
@@ -266,7 +279,8 @@ local function synth_call(node, env, solver)
 	local callee_ty, env2, err = W.walk_synth(node.callee, env, solver)
 	if err ~= nil then return nil, env2, err end
 	if callee_ty == nil then
-		return nil, env2, "call: callee has no synthesized type"
+		return nil, env2, D.emit(env2, D.E_INTERNAL,
+			"call: callee has no synthesized type")
 	end
 	local args = node.args or ({})
 	local n_args = #args
@@ -280,8 +294,8 @@ local function synth_call(node, env, solver)
 		env2 = env3
 		if aerr ~= nil then return nil, env2, aerr end
 		if ty == nil then
-			return nil, env2,
-				"call: argument " .. tostring(i) .. " has no synthesized type"
+			return nil, env2, D.emit(env2, D.E_INTERNAL,
+				"call: argument " .. tostring(i) .. " has no synthesized type")
 		end
 		if is_vararg and is_last then
 			-- Spread: if env.vararg is a tuple-shaped rec, spread its
@@ -374,10 +388,9 @@ local function synth_local_with_module(node, env, solver)
 	-- against α see at least an empty record's worth of shape.
 	subtype.constrain(solver, V.rec({}, false, nil), alpha)
 	if solver.error ~= nil then
-		local err = solver.error or "<no error>"
-		solver.error = nil
-		return nil, env,
-			"local (module pattern): baseline constraint failed: " .. err
+		return nil, env, D.from_solver(env, D.E_TYPE_MISMATCH,
+			"local (module pattern): baseline constraint failed",
+			solver, V.rec({}, false, nil), alpha)
 	end
 	local env2 = E.bind(env, name, alpha)
 	return nil, env2, nil
@@ -424,8 +437,8 @@ local function synth_assign_with_field(node, env, solver)
 		env = env2
 		if err ~= nil then return nil, env, err end
 		if ty == nil then
-			return nil, env,
-				"assign: RHS expression " .. tostring(i) .. " has no synthesized type"
+			return nil, env, D.emit(env, D.E_INTERNAL,
+				"assign: RHS expression " .. tostring(i) .. " has no synthesized type")
 		end
 		rhs_types[i] = ty
 	end
@@ -471,13 +484,14 @@ local function synth_assign_with_field(node, env, solver)
 			-- check) are selected by the binding's tag.
 			local base = t.target
 			if base == nil or base.tag ~= defs.NODE_IDENTIFIER then
-				return nil, env,
+				return nil, env, D.emit(env, D.E_UNSUPPORTED_NODE,
 					"assign: indexed LHS root must be a simple identifier " ..
-					"(chained or computed paths land as a separate contribution if needed)"
+					"(chained or computed paths land as a separate contribution if needed)")
 			end
 			local lhs_name = base.name
 			if not E.has(env, lhs_name) then
-				return nil, env, "assign: undefined name '" .. lhs_name .. "'"
+				return nil, env, D.emit(env, D.E_UNDEFINED_NAME,
+					"assign: undefined name '" .. lhs_name .. "'")
 			end
 			-- Compute the key type. For NODE_FIELD_EXPR the key is a bare
 			-- string; for NODE_INDEX_EXPR we synthesize the key expression.
@@ -487,12 +501,13 @@ local function synth_assign_with_field(node, env, solver)
 			if t.tag == defs.NODE_FIELD_EXPR then
 				local key = t.key
 				if type(key) ~= "string" then
-					return nil, env,
-						"assign: field LHS key must be a string (got " .. type(key) .. ")"
+					return nil, env, D.emit(env, D.E_INTERNAL,
+						"assign: field LHS key must be a string (got " .. type(key) .. ")")
 				end
 				local lit = V.literal("string", key)
 				if lit == nil then
-					return nil, env, "assign: V.literal returned nil"
+					return nil, env, D.emit(env, D.E_INTERNAL,
+						"assign: V.literal returned nil")
 				end
 				key_ty = lit
 			else
@@ -500,15 +515,16 @@ local function synth_assign_with_field(node, env, solver)
 				env = env_k
 				if kerr ~= nil then return nil, env, kerr end
 				if kty == nil then
-					return nil, env, "assign: index LHS key has no synthesized type"
+					return nil, env, D.emit(env, D.E_INTERNAL,
+						"assign: index LHS key has no synthesized type")
 				end
 				key_ty = kty
 			end
 			-- Apply the per-regime constraint.
 			local binding = env.bindings[lhs_name]
 			if binding == nil then
-				return nil, env,
-					"assign: internal — binding '" .. lhs_name .. "' disappeared"
+				return nil, env, D.emit(env, D.E_INTERNAL,
+					"assign: internal — binding '" .. lhs_name .. "' disappeared")
 			end
 			if binding.tag == "var" then
 				-- Module-pattern accumulation: build a singleton-field open
@@ -519,8 +535,8 @@ local function synth_assign_with_field(node, env, solver)
 				if key_ty.tag == "literal" and key_ty.base == "string" then
 					local kv = key_ty.value
 					if type(kv) ~= "string" then
-						return nil, env,
-							"assign: module-pattern key literal is malformed"
+						return nil, env, D.emit(env, D.E_INTERNAL,
+							"assign: module-pattern key literal is malformed")
 					end
 					contribution = V.rec({ [kv] = rhs_slot }, true, nil)
 				else
@@ -530,25 +546,27 @@ local function synth_assign_with_field(node, env, solver)
 				end
 				subtype.constrain(solver, contribution, binding)
 				if solver.error ~= nil then
-					local err = solver.error or "<no error>"
-					solver.error = nil
-					return nil, env, "assign (module pattern): " .. err
+					return nil, env, D.from_solver(env, D.E_TYPE_MISMATCH,
+						"assign (module pattern)", solver, contribution, binding)
 				end
 			else
 				-- Concrete-typed LHS: query v4's index reducer. For closed
 				-- records lacking the field, V.index errors directly —
 				-- that surfaces write-of-absent-field cleanly.
 				local field_ty, ierr = index_mod.index(binding, key_ty)
-				if ierr ~= nil then return nil, env, "assign: " .. ierr end
+				if ierr ~= nil then
+					return nil, env, D.emit(env, D.E_FIELD_MISSING,
+						"assign: " .. ierr, { origin_type = binding })
+				end
 				if field_ty == nil then
-					return nil, env, "assign: V.index returned nil field type"
+					return nil, env, D.emit(env, D.E_INTERNAL,
+						"assign: V.index returned nil field type")
 				end
 				subtype.constrain(solver, rhs_slot, field_ty)
 				if solver.error ~= nil then
-					local err = solver.error or "<no error>"
-					solver.error = nil
-					return nil, env,
-						"assign: RHS does not satisfy field type: " .. err
+					return nil, env, D.from_solver(env, D.E_TYPE_MISMATCH,
+						"assign: RHS does not satisfy field type",
+						solver, rhs_slot, field_ty)
 				end
 			end
 		elseif t.tag == defs.NODE_IDENTIFIER then
@@ -556,25 +574,23 @@ local function synth_assign_with_field(node, env, solver)
 			-- the constraint. (Re-dispatching to the E handler would re-
 			-- synthesize RHS expressions; we already have rhs_types.)
 			if not E.has(env, t.name) then
-				return nil, env,
-					"assign: undefined name '" .. t.name .. "'"
+				return nil, env, D.emit(env, D.E_UNDEFINED_NAME,
+					"assign: undefined name '" .. t.name .. "'")
 			end
 			local lhs_ty = env.bindings[t.name]
 			if lhs_ty == nil then
-				return nil, env,
-					"assign: internal — binding '" .. t.name .. "' disappeared"
+				return nil, env, D.emit(env, D.E_INTERNAL,
+					"assign: internal — binding '" .. t.name .. "' disappeared")
 			end
 			subtype.constrain(solver, rhs_slot, lhs_ty)
 			if solver.error ~= nil then
-				local err = solver.error or "<no error>"
-				solver.error = nil
-				return nil, env,
-					"assign: RHS for '" .. t.name ..
-					"' does not satisfy LHS type: " .. err
+				return nil, env, D.from_solver(env, D.E_TYPE_MISMATCH,
+					"assign: RHS for '" .. t.name .. "' does not satisfy LHS type",
+					solver, rhs_slot, lhs_ty)
 			end
 		else
-			return nil, env,
-				"assign: unsupported LHS shape on target #" .. tostring(i)
+			return nil, env, D.emit(env, D.E_UNSUPPORTED_NODE,
+				"assign: unsupported LHS shape on target #" .. tostring(i))
 		end
 	end
 	return nil, env, nil

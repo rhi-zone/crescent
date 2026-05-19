@@ -103,6 +103,7 @@ end
 
 local V       = require("lib.type.static-v4")
 local E       = require("lib.type.static-v4.walker.env")
+local D       = require("lib.type.static-v4.walker.diag")
 local defs    = require("lib.type.static.defs")
 
 local _types  = require("lib.type.static-v4.types")
@@ -516,7 +517,8 @@ local function synth_if(node, env, solver)
 			-- non-error path; this branch is a typechecker-narrowing
 			-- aid (the multi-return tuple can't be correlated with gerr
 			-- by the inferrer alone).
-			return current_env, "control_flow: analyze_guard returned nil env on no-error path", false
+			return current_env, D.emit(current_env, D.E_INTERNAL,
+				"control_flow: analyze_guard returned nil env on no-error path"), false
 		end
 		-- THEN branch: apply positive narrowing.
 		local then_env = apply_narrowing(env_after_guard, atoms_pos)
@@ -600,7 +602,8 @@ local function synth_while(node, env, solver)
 		analyze_guard(node.cond, env, solver)
 	if gerr ~= nil then return nil, env_after_guard, gerr end
 	if env_after_guard == nil then
-		return nil, env, "control_flow: analyze_guard returned nil env on no-error path"
+		return nil, env, D.emit(env, D.E_INTERNAL,
+			"control_flow: analyze_guard returned nil env on no-error path")
 	end
 	-- Body sees positive narrowing.
 	local body_env = apply_narrowing(env_after_guard, atoms_pos)
@@ -697,7 +700,8 @@ local function synth_for_in(node, env, solver)
 	local iter_ty, env1, err = W.walk_synth(node.exprs[1], env, solver)
 	if err ~= nil then return nil, env1, err end
 	if iter_ty == nil then
-		return nil, env1, "for-in: iterator has no synthesized type"
+		return nil, env1, D.emit(env1, D.E_INTERNAL,
+			"for-in: iterator has no synthesized type")
 	end
 	-- Walk any remaining exprs for side-effects (state, ctrl).
 	for i = 2, #node.exprs do

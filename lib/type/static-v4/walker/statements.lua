@@ -76,6 +76,7 @@ end
 
 local V       = require("lib.type.static-v4")
 local E       = require("lib.type.static-v4.walker.env")
+local D       = require("lib.type.static-v4.walker.diag")
 local defs    = require("lib.type.static.defs")
 local subtype = require("lib.type.static-v4.subtype")
 
@@ -253,11 +254,10 @@ local function synth_local(node, env, solver)
 			if rhs_count > 0 and init_ty ~= nil then
 				subtype.constrain(solver, init_ty, ann)
 				if solver.error ~= nil then
-					local err = solver.error or "<no error>"
-					solver.error = nil
-					return nil, env,
+					return nil, env, D.from_solver(env, D.E_TYPE_MISMATCH,
 						"local: initializer for '" .. nm.name ..
-						"' does not satisfy annotation: " .. err
+						"' does not satisfy annotation",
+						solver, init_ty, ann)
 				end
 			end
 			bind_ty = ann
@@ -305,19 +305,19 @@ local function synth_assign(node, env, solver)
 	for i, t in ipairs(targets) do
 		local forbidden = FORBIDDEN_LHS_TAGS[t.tag]
 		if forbidden ~= nil then
-			return nil, env,
+			return nil, env, D.emit(env, D.E_UNSUPPORTED_NODE,
 				"assign: indexed LHS (" .. forbidden ..
 				") not in sub-phase E scope — lands in sub-phase F " ..
-				"(target #" .. tostring(i) .. ")"
+				"(target #" .. tostring(i) .. ")")
 		end
 		if t.tag ~= defs.NODE_IDENTIFIER then
-			return nil, env,
-				"assign: unsupported LHS shape on target #" .. tostring(i)
+			return nil, env, D.emit(env, D.E_UNSUPPORTED_NODE,
+				"assign: unsupported LHS shape on target #" .. tostring(i))
 		end
 		if not E.has(env, t.name) then
-			return nil, env,
+			return nil, env, D.emit(env, D.E_UNDEFINED_NAME,
 				"assign: undefined name '" .. t.name .. "' on target #" ..
-				tostring(i)
+				tostring(i))
 		end
 	end
 
@@ -329,9 +329,9 @@ local function synth_assign(node, env, solver)
 			env = env2
 			if err ~= nil then return nil, env, err end
 			if ty == nil then
-				return nil, env,
+				return nil, env, D.emit(env, D.E_INTERNAL,
 					"assign: RHS expression " .. tostring(i) ..
-					" has no synthesised type"
+					" has no synthesised type")
 			end
 			rhs_types[i] = ty
 		end
@@ -347,19 +347,17 @@ local function synth_assign(node, env, solver)
 	for i, t in ipairs(targets) do
 		local lhs_ty = env.bindings[t.name]
 		if lhs_ty == nil then
-			return nil, env,
+			return nil, env, D.emit(env, D.E_INTERNAL,
 				"assign: internal — binding '" .. t.name ..
-				"' disappeared between validation and constraint"
+				"' disappeared between validation and constraint")
 		end
 		local rhs_slot = distributed[i]
 		if rhs_slot ~= nil then
 			subtype.constrain(solver, rhs_slot, lhs_ty)
 			if solver.error ~= nil then
-				local err = solver.error or "<no error>"
-				solver.error = nil
-				return nil, env,
-					"assign: RHS for '" .. t.name ..
-					"' does not satisfy LHS type: " .. err
+				return nil, env, D.from_solver(env, D.E_TYPE_MISMATCH,
+					"assign: RHS for '" .. t.name .. "' does not satisfy LHS type",
+					solver, rhs_slot, lhs_ty)
 			end
 		end
 	end
@@ -397,11 +395,14 @@ local function synth_match(node, env, solver)
 		W.walk_synth(node.subject, env, solver)
 	if err ~= nil then return nil, env2, err end
 	if subject_ty == nil then
-		return nil, env2, "match: subject has no synthesised type"
+		return nil, env2, D.emit(env2, D.E_INTERNAL,
+			"match: subject has no synthesised type")
 	end
 	local arms = build_arms(node.arms or ({}))
 	local result, merr = V.match(subject_ty, arms, node.wildcard_result)
-	if merr ~= nil then return nil, env2, "match: " .. merr end
+	if merr ~= nil then
+		return nil, env2, D.emit(env2, D.E_MATCH, "match: " .. merr)
+	end
 	return result, env2, nil
 end
 
@@ -410,7 +411,9 @@ local function check_match(node, env, solver, expected)
 	local arms = build_arms(node.arms or ({}))
 	local subj_constraint, berr =
 		V.match_backward(arms, node.wildcard_result, expected)
-	if berr ~= nil then return env, "match (backward): " .. berr end
+	if berr ~= nil then
+		return env, D.emit(env, D.E_MATCH, "match (backward): " .. berr)
+	end
 	-- CHECK the subject against the backward-derived constraint.
 	local env2, serr = W.walk_check(node.subject, env, solver, subj_constraint)
 	if serr ~= nil then return env2, serr end

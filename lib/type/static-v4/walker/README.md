@@ -5,12 +5,155 @@ into v4 type-system constraints. See
 `docs/typechecker-ast-walker-design.md` for the full design.
 
 This directory is being built incrementally across sub-phases A–J (design
-doc §13). **Current state: sub-phase I complete** — cross-file `require`
-resolution + `.cri` cache integration layered on top of the effect-aware
-CALL_EXPR handler. Stacks on top of A (env/dispatch), B (literals,
-identifiers, varargs), C (functions, calls, returns), D (control-flow +
-flow-sensitive narrowing), E (local/assign + match), F (indexed access,
-module pattern, varargs polish), G (FFI cdef integration), and H (effects).
+doc §13). **Current state: sub-phase J in progress** — structured
+diagnostics, source-position threading, and origin metadata are in place
+(`diag.lua` / `origin.lua`). The recursive-walk-on-miss pipeline (parser →
+walker → cache store) and `--summary` CLI rendering remain to land.
+
+Stacks on top of A (env/dispatch), B (literals, identifiers, varargs),
+C (functions, calls, returns), D (control-flow + flow-sensitive narrowing),
+E (local/assign + match), F (indexed access, module pattern, varargs
+polish), G (FFI cdef integration), H (effects), and I (cross-file require
+resolution + `.cri` cache integration).
+
+## Sub-phase J — structured diagnostics (this phase)
+
+Per the design doc's `--summary` audit (the "Root-cause error grouping"
+section): every walker-emitted diagnostic is now a **structured record**,
+not a bare string. The audit's mandate is "taxonomy as data" — the
+`--summary` grouping (whose default printer becomes a thin transform later)
+must group_by `code` / `origin_kind` / `origin`, never by regex over
+rendered messages.
+
+### Diagnostic shape
+
+```
+{
+  code:        string,        -- one of D.CODES (closed set)
+  pos:         { file, line, col, end_line?, end_col? },
+  msg:         string,        -- rendered human message
+  origin:      Diagnostic | Origin | nil,
+  origin_kind: string | nil,  -- "from-require", "from-cast", "propagated", ...
+  module:      string | nil,  -- module name (E_REQUIRE_UNRESOLVED)
+  severity:    string,        -- "error" | "warning"
+  origin_rhs:  Origin | nil,  -- RHS-end of a subtype-failure chain
+}
+```
+
+A `__tostring` metamethod renders to the legacy `file:line:col: severity:
+msg` format; a `__concat` metamethod preserves the existing `"prefix: " ..
+err` patterns at error-propagation sites. Error handlers thus return a
+diagnostic record where they used to return a string, and existing string-
+concatenating call sites continue to compile.
+
+### Codes (closed set)
+
+The taxonomy lives in `diag.lua`:
+
+| Code                       | Meaning                                              |
+|----------------------------|------------------------------------------------------|
+| `E_UNDEFINED_NAME`         | Unbound identifier (no ambient globals)              |
+| `E_TYPE_MISMATCH`          | Subtype failure (assign / call arg / return / check) |
+| `E_FIELD_MISSING`          | Field access on a record without that field          |
+| `E_CALL_ARITY`             | Arity mismatch on a call or annotation               |
+| `E_CALL_NON_FN`            | Callee is not a function type                        |
+| `E_OP_TYPE`                | Operator applied to wrong type                       |
+| `E_ARG_MISSING`            | Missing required argument                            |
+| `E_REQUIRE_UNRESOLVED`     | `require("mod")` failed to resolve                   |
+| `E_REQUIRE_IO`             | `require` had no I/O caps / cache_dir                |
+| `E_VARARG_OUT_OF_SCOPE`    | `...` used outside a vararg function                 |
+| `E_RETURN_OUTSIDE_FN`      | `return` outside a function body                     |
+| `E_EFFECT_UNDECLARED`      | Body performs an effect not in the annotation        |
+| `E_FFI_CDEF`               | `ffi.cdef` shape / parse failure                     |
+| `E_NOT_NARROWED`           | Value of type `unknown` must be narrowed             |
+| `E_UNSUPPORTED_NODE`       | Walker has no handler yet for this node shape        |
+| `E_INTERNAL`               | Walker invariant violated (bug)                      |
+| `E_MATCH`                  | Match-type evaluation error                          |
+| `E_CAST`                   | Cast failed (forced cast, etc.)                      |
+
+Emitting an unrecognised code is a hard error (a typo in a walker handler
+is a bug, not a runtime fallback): `D.emit` raises immediately if `code` is
+not in `D.CODES`. New codes go in `diag.lua` deliberately.
+
+### Origin metadata (parallel map, not on V4Type)
+
+v4 itself does NOT store source positions on type values
+(`type-system.md` Principle 13: "source locations do not belong in the
+type system"). Origins live in `origin.lua` — a module-level parallel map
+keyed by V4Type table identity. The lower-risk alternative was chosen over
+retrofitting origins onto `types.lua`: v4 core stays untouched and the
+origin policy lives in the walker, where the import-surface / cast /
+narrowing concepts exist.
+
+`O.record(ty, origin)` and `O.get(ty)` are the primitives. An origin
+record carries:
+
+```
+{ kind: string, pos: { file, line, col, ... } | nil,
+  module: string | nil, msg: string | nil, parent: Origin | nil }
+```
+
+`O.from_env(env, kind, opts)` builds one from `env.source`. `O.reset()` is
+test-only / between-walks.
+
+### Where origins are recorded
+
+| Site                                 | Kind              | Carries                |
+|--------------------------------------|-------------------|------------------------|
+| `require("mod")` success (export ty) | `from-require`    | module name + pos      |
+| `require("mod")` cycle placeholder   | `from-require`    | module name + pos      |
+| Future: `--[[: T]]` cast result      | `from-cast`       | cast-site pos          |
+| Future: `--: T` annotation binding   | `from-annotation` | annotation-site pos    |
+| Wrapped propagation                  | `propagated`      | inner diagnostic       |
+
+Subsequent sub-phases will extend the recording sites; the load-bearing
+one for the `--summary` use-case (a `require` whose downstream uses fail)
+is already in place.
+
+### Diagnostic emission API
+
+| API                                          | Use                                          |
+|----------------------------------------------|----------------------------------------------|
+| `D.emit(env, code, msg, opts?)`              | Standard emission                            |
+| `D.from_solver(env, code, msg, solver, A, B)`| Subtype failure — consumes `solver.error`, populates origin from A's recorded origin |
+| `D.chain(env, code, msg, inner)`             | Wrap an inner diagnostic with new context, marking the wrap as `propagated` |
+| `D.lift(env, code, err)`                     | Normalise a possibly-raw error to a Diagnostic |
+| `D.is_diagnostic(d)`                         | Predicate                                    |
+| `D.position_from(env, opts)`                 | Resolve a pos table from env / opts          |
+
+Opts on `D.emit`:
+
+- `pos` — explicit position override (a sub-expression's pos beats env's).
+- `origin` — explicit origin (a Diagnostic or an Origin record).
+- `origin_type` — a V4Type; its recorded origin (if any) becomes the
+  diagnostic's origin / origin_kind / module. This is the load-bearing
+  piece: subtype failures automatically pull origin metadata from the
+  participating types.
+- `origin_kind`, `module`, `severity` — explicit overrides.
+
+### Source-position threading
+
+`env.source` is the canonical "where am I" reference, threaded through
+every visit by `walker.lua`'s `position()` helper (sub-phase A). Every
+walker error site reads from `env.source` via `D.position_from`. Nodes
+that carry their own `line`/`col` (most do) override the threaded value
+at visit-entry — `position()` calls `E.with_position(env, line, col)`
+before dispatch. The end result: every emitted diagnostic carries a pos
+that names the source location of the offending sub-expression, not just
+the enclosing statement.
+
+### What sub-phase J does NOT do (yet)
+
+- Recursive walk on cache miss (parser → walker → cache store) — bigger
+  structural work, lands later.
+- `--summary` rendering itself — sub-phase J makes the structured data
+  available; the CLI conversion comes next.
+- Cast/annotation origin recording — the plumbing is in place
+  (`O.O_FROM_CAST`, `O.O_FROM_ANNOTATION` constants exist) but no walker
+  site currently produces these. They land when the annotation-parser
+  bridge / cast handler lands.
+
+## Earlier sub-phases (A–I)
 
 ## Sub-phase H — effects
 
@@ -712,20 +855,12 @@ beyond `k` depend on `k` (`to` for `ptr`, `of` for `arr`,
 See `lib/type/static/cdef.lua` and `cdecl_parse.lua` for the authoritative
 shape.
 
-## Sub-phase A does NOT include
-
-- Per-node handlers — every `node.tag` dispatches to a stub.
-- Constraint emission via `V.constrain`.
-- Narrowing logic (just the data structure for it).
-- Effect inference (just the `effects` slot).
-- Module-pattern handling (just the `module` slot).
-- Diagnostic / origin-map machinery beyond `with_position`.
-- CLI integration.
-
 ## What comes next (design doc §13)
 
-- **Phase C** — annotations and casts (parallel with D).
-- **Phase D** — expressions, calls, indexing (parallel with C).
-- **Phase E** — statements and control-flow scaffolding (no narrowing).
-- **Phase J** — diagnostics polish, annotation-parser bridge, recursive-
-  walk for cache miss, CLI integration, test corpus migration.
+Sub-phase J remaining work:
+
+- Recursive walk on cache miss (parser → walker → cache store pipeline).
+- `--summary` CLI rendering (`bin/cr check --summary <file>`) as a
+  thin transform over the structured diagnostic stream.
+- Cast (`--[[: T]]`) and annotation (`--: T`) origin recording.
+- Test corpus migration from `lib/type/static/` once parity is reached.

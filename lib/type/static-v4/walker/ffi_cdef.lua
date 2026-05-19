@@ -43,6 +43,7 @@ end
 
 local V       = require("lib.type.static-v4")
 local E       = require("lib.type.static-v4.walker.env")
+local D       = require("lib.type.static-v4.walker.diag")
 local defs    = require("lib.type.static.defs")
 local cdecl_parse = require("lib.type.static.cdecl_parse")
 local intern_mod  = require("lib.type.static.intern")
@@ -388,23 +389,25 @@ local function synth_call(node, env, solver)
 	if is_ffi_cdef_callee(node.callee) then
 		local args = node.args or ({})
 		if #args ~= 1 then
-			return nil, env,
+			return nil, env, D.emit(env, D.E_FFI_CDEF,
 				"ffi.cdef: expected exactly one argument (a string literal), got " ..
-				tostring(#args)
+				tostring(#args))
 		end
 		local arg = args[1]
 		if arg.tag ~= defs.NODE_LITERAL or arg.lit_kind ~= defs.LIT_STRING then
-			return nil, env,
+			return nil, env, D.emit(env, D.E_FFI_CDEF,
 				"ffi.cdef: argument must be a string literal " ..
-				"(dynamic cdef strings cannot be statically analysed)"
+				"(dynamic cdef strings cannot be statically analysed)")
 		end
 		local source = arg.value
 		if type(source) ~= "string" then
-			return nil, env,
-				"ffi.cdef: string literal has non-string value " .. type(source)
+			return nil, env, D.emit(env, D.E_FFI_CDEF,
+				"ffi.cdef: string literal has non-string value " .. type(source))
 		end
 		local new_env, err = process_cdef_string(env, source)
-		if err ~= nil then return nil, new_env, err end
+		if err ~= nil then
+			return nil, new_env, D.emit(new_env, D.E_FFI_CDEF, tostring(err))
+		end
 		-- `ffi.cdef` returns nothing; produce nil to indicate a statement-
 		-- shaped call. The caller (NODE_EXPR_STMT in the usual case) drops
 		-- the synthesized type.
