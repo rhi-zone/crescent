@@ -139,23 +139,6 @@ end
 
 -- ── Structural decomposition ──────────────────────────────────────────────
 
--- Try a constraint with cache+error rollback on failure. Used by the
--- union-on-RHS and intersection-on-LHS branches, which probe alternatives.
---: (V4Solver, V4Type, V4Type) -> boolean
-local function try_constrain(s, a, b)
-	local saved_err = s.error
-	local cache_keys = {} --[[: { [integer]: string } ]]
-	for k in pairs(s.cache) do cache_keys[#cache_keys + 1] = k end
-	if constrain(s, a, b) then return true end
-	s.error = saved_err
-	local restore = {} --[[: { [string]: boolean } ]]
-	for _, k in ipairs(cache_keys) do restore[k] = true end
-	for k in pairs(s.cache) do
-		if not restore[k] then s.cache[k] = nil end
-	end
-	return false
-end
-
 -- All decomposition rules. Called only when both sides are non-variable.
 --: (V4Solver, V4Type, V4Type) -> boolean
 local function decompose(s, a, b)
@@ -178,26 +161,21 @@ local function decompose(s, a, b)
 		return true
 	end
 
-	-- A <: B | C — without complement (Phase 4a), the principled rule is
-	-- "try each disjunct". This is sound but loses principal types in the
-	-- presence of variables; MLstruct's negation-based fix lands in a later
-	-- phase (see design doc §2.4). For 4a, restricted to ground types, this
-	-- is fine: we try each member and succeed on the first hit. Each attempt
-	-- gets a cache+error rollback so a failed attempt does not pollute the
-	-- main state.
+	-- A <: B | C and A & B <: C: the principled rule is MLstruct's
+	-- negation-based rewrite (`A ∧ ¬B <: C` iff `A <: B | C`), which
+	-- requires complement (`~T`) in the lattice. Phase 4a does not yet have
+	-- complement — that lands in Phase 4c. A "try each disjunct with cache
+	-- rollback" stopgap was rejected: it is sound only on ground inputs and
+	-- silently loses principal types when variables appear, exactly the
+	-- shape of bug future sessions would pattern-match as the intended
+	-- design (CLAUDE.md's "temporary measures are context poisoning"). The
+	-- correct move until 4c lands is to fail loudly so the missing
+	-- mechanism is visible at the call site.
 	if b.tag == "union" then
-		for _, m in ipairs(b.members) do
-			if try_constrain(s, a, m) then return true end
-		end
-		return mismatch(s, a, b, "no union member matches")
+		return mismatch(s, a, b, "union on the right requires complement (Phase 4c); unsupported in 4a")
 	end
-
-	-- A & B <: C — symmetrically, succeed if any conjunct alone suffices.
 	if a.tag == "inter" then
-		for _, m in ipairs(a.members) do
-			if try_constrain(s, m, b) then return true end
-		end
-		return mismatch(s, a, b, "no intersection member satisfies the obligation")
+		return mismatch(s, a, b, "intersection on the left requires complement (Phase 4c); unsupported in 4a")
 	end
 
 	-- ── Same-shape constructor rules ─────────────────────────────────

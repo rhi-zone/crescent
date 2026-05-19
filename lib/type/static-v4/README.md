@@ -54,10 +54,16 @@ phases.
 - No AST walker, no parser, no CLI. Tests construct types directly via
   the constructor functions.
 - No complement (`~T`), no MLstruct-style RDNF, no DNF emptiness check.
-  4a's `A <: B | C` rule tries each disjunct in sequence with a cache
-  rollback on failure — sound for ground types, but it loses principal
-  types when variables are involved on either side. Negation lands in a
-  later phase and supersedes this rule.
+  Without complement, the principled handling of `A <: B | C` (the
+  MLstruct rewrite `A ∧ ¬B <: C`) is not expressible, so 4a rejects both
+  union-on-RHS and intersection-on-LHS obligations outright with an
+  error pointing at Phase 4c. A "try each disjunct with cache rollback"
+  stopgap was considered and rejected: it is sound only on ground inputs
+  and silently loses principal types when variables appear, exactly the
+  shape future sessions would pattern-match as the intended design
+  (CLAUDE.md's "temporary measures are context poisoning"). Union-on-LHS
+  and intersection-on-RHS decompose without backtracking and are
+  supported in full.
 - No recursive types (`mu`). The cache prevents infinite descent on
   cyclic variable links, which is the termination concern shared with
   recursive types, but `mu X. F(X)` as a constructor is not yet defined.

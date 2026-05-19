@@ -122,25 +122,29 @@ T.describe("records — depth", function()
 end)
 
 T.describe("union", function()
-	T.it("A <: A | B (right-introduction)", function()
-		T.ok(st(V.integer, V.union({V.integer, V.string_})))
-	end)
-	T.it("B <: A | B", function()
-		T.ok(st(V.string_, V.union({V.integer, V.string_})))
-	end)
+	-- Union-on-LHS decomposes without backtracking: every member must hold.
+	-- This is supported in 4a.
 	T.it("A | B <: C requires A <: C AND B <: C", function()
 		-- integer | string is not <: number (string fails).
 		T.fail(st(V.union({V.integer, V.string_}), V.number))
 		-- integer | 42 IS <: number (both members are).
 		T.ok(st(V.union({V.integer, V.literal("integer", 42)}), V.number))
 	end)
+
+	-- Union-on-RHS (`A <: B | C`) is deferred to Phase 4c when complement
+	-- lands and the MLstruct negation rewrite (`A ∧ ¬B <: C`) becomes
+	-- expressible. 4a rejects the obligation loudly rather than guessing a
+	-- disjunct (see subtype.lua and README for rationale).
+	T.it("A <: A | B is deferred until Phase 4c (no complement yet)", function()
+		local ok, err = st(V.integer, V.union({V.integer, V.string_}))
+		T.fail(ok)
+		T.ok(err and err:find("Phase 4c", 1, true) ~= nil)
+	end)
 end)
 
 T.describe("intersection", function()
-	T.it("A & B <: A (left-projection)", function()
-		T.ok(st(V.inter({V.integer, V.string_}), V.integer))
-		T.ok(st(V.inter({V.integer, V.string_}), V.string_))
-	end)
+	-- Intersection-on-RHS decomposes without backtracking: every member
+	-- must hold. This is supported in 4a.
 	T.it("C <: A & B requires C <: A AND C <: B", function()
 		-- 42 <: integer AND 42 <: number, so 42 <: integer & number.
 		T.ok(st(
@@ -149,6 +153,14 @@ T.describe("intersection", function()
 		))
 		-- integer is not <: string, so integer is not <: integer & string.
 		T.fail(st(V.integer, V.inter({V.integer, V.string_})))
+	end)
+
+	-- Intersection-on-LHS (`A & B <: C`) is the dual of union-on-RHS and is
+	-- likewise deferred to Phase 4c.
+	T.it("A & B <: A is deferred until Phase 4c (no complement yet)", function()
+		local ok, err = st(V.inter({V.integer, V.string_}), V.integer)
+		T.fail(ok)
+		T.ok(err and err:find("Phase 4c", 1, true) ~= nil)
 	end)
 end)
 
