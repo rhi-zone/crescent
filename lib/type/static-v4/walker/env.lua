@@ -42,28 +42,36 @@
 --     source:    { file: string, line: integer, col: integer },
 --   }
 --
--- The shape is inlined at each function signature rather than abstracted
--- as a top-level `--::` alias because the crescent typechecker does NOT
--- resolve cross-module aliases (`V4Type`) inside top-level `--::` alias
--- bodies — only `--:` function annotations and `--[[: T]]` casts honor the
--- require graph. Repeating the shape 13× is uglier than one alias would
--- be, but no `unknown` widening is needed to make it work. See the
--- walker/README.md for the design choice.
+-- The shape is captured as a `--:: WalkerEnv` alias and reused across
+-- function signatures. (Cross-module `--::` alias resolution now works:
+-- top-level `require()` calls populate the alias scope before this file's
+-- `--::` bodies are resolved.)
 
 if not package.path:find("?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
--- Bring V4Type into alias scope (visible to function annotations below).
+-- Bring V4Type into alias scope (visible to the WalkerEnv alias below).
 local _types = require("lib.type.static-v4.types")
 local _ = _types
+
+--:: WalkerEnv = {
+--::   bindings:  { [string]: V4Type },
+--::   narrowed:  { [string]: V4Type },
+--::   return_ty: V4Type | nil,
+--::   vararg:    V4Type | nil,
+--::   effects:   { [string]: boolean },
+--::   module:    V4Type | nil,
+--::   expected:  V4Type | nil,
+--::   source:    { file: string, line: integer, col: integer },
+--:: }
 
 local M = {}
 
 local EMPTY_SOURCE = { file = "?", line = 0, col = 0 }
 
 -- Shallow-copy primitive (one helper, not duplicated per field).
---: (e: { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }) -> { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }
+--: (e: WalkerEnv) -> WalkerEnv
 local function clone(e)
 	return {
 		bindings  = e.bindings,
@@ -77,7 +85,7 @@ local function clone(e)
 	}
 end
 
---: () -> { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }
+--: () -> WalkerEnv
 function M.new()
 	return {
 		bindings  = {},
@@ -93,7 +101,7 @@ end
 
 -- Bind a name to a type. Returns a new env; the original is untouched.
 -- A fresh `bindings` table is allocated on edit (shared otherwise).
---: (env: { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }, name: string, ty: V4Type) -> { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }
+--: (env: WalkerEnv, name: string, ty: V4Type) -> WalkerEnv
 function M.bind(env, name, ty)
 	local new_bindings = {}
 	for k, v in pairs(env.bindings) do new_bindings[k] = v end
@@ -114,7 +122,7 @@ end
 
 -- Resolve a name. Narrowing overlay takes precedence over the underlying
 -- binding. Returns nil if the name is unbound.
---: (env: { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }, name: string) -> V4Type | nil
+--: (env: WalkerEnv, name: string) -> V4Type | nil
 function M.lookup(env, name)
 	local n = env.narrowed[name]
 	if n ~= nil then return n end
@@ -122,14 +130,14 @@ function M.lookup(env, name)
 end
 
 -- Whether a name has an underlying binding (ignoring narrowing).
---: (env: { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }, name: string) -> boolean
+--: (env: WalkerEnv, name: string) -> boolean
 function M.has(env, name)
 	return env.bindings[name] ~= nil
 end
 
 -- Add a narrowing overlay for `name`. The underlying binding is unchanged;
 -- only the narrowed view is updated. Returns a new env.
---: (env: { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }, name: string, ty: V4Type) -> { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }
+--: (env: WalkerEnv, name: string, ty: V4Type) -> WalkerEnv
 function M.narrow(env, name, ty)
 	local new_narrowed = {}
 	for k, v in pairs(env.narrowed) do new_narrowed[k] = v end
@@ -140,7 +148,7 @@ function M.narrow(env, name, ty)
 end
 
 -- Drop any narrowing on `name`, reverting lookup to the underlying binding.
---: (env: { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }, name: string) -> { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }
+--: (env: WalkerEnv, name: string) -> WalkerEnv
 function M.unnarrow(env, name)
 	if env.narrowed[name] == nil then return env end
 	local new_narrowed = {}
@@ -154,7 +162,7 @@ end
 
 -- Drop all narrowing overlays. Used on function-boundary frames: a narrowing
 -- in the enclosing scope does not survive into a nested function body.
---: (env: { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }) -> { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }
+--: (env: WalkerEnv) -> WalkerEnv
 function M.clear_narrowed(env)
 	if next(env.narrowed) == nil then return env end
 	local e = clone(env)
@@ -164,7 +172,7 @@ end
 
 -- Set the CHECK target. Returns a new env; the original is untouched. Passing
 -- `nil` clears the expectation (the caller is returning to SYNTHESIZE mode).
---: (env: { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }, ty: V4Type | nil) -> { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }
+--: (env: WalkerEnv, ty: V4Type | nil) -> WalkerEnv
 function M.with_expected(env, ty)
 	local e = clone(env)
 	e.expected = ty
@@ -174,7 +182,7 @@ end
 -- Update the current source position. Used by the walker to thread parser
 -- positions through to diagnostics. The position is the active AST node's
 -- (line, col); `file` is the chunk-level file path.
---: (env: { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }, line: integer, col: integer) -> { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }
+--: (env: WalkerEnv, line: integer, col: integer) -> WalkerEnv
 function M.with_position(env, line, col)
 	local e = clone(env)
 	e.source = { file = env.source.file, line = line, col = col }
@@ -182,7 +190,7 @@ function M.with_position(env, line, col)
 end
 
 -- Replace the entire source position (used on chunk entry).
---: (env: { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }, src: { file: string, line: integer, col: integer }) -> { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }
+--: (env: WalkerEnv, src: { file: string, line: integer, col: integer }) -> WalkerEnv
 function M.with_source(env, src)
 	local e = clone(env)
 	e.source = src
@@ -195,7 +203,7 @@ end
 -- cross function boundaries). Bindings are inherited (closures see the outer
 -- scope). Caller is responsible for binding parameter names afterward via
 -- `E.bind`.
---: (env: { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }, return_ty: V4Type | nil, vararg: V4Type | nil) -> { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }
+--: (env: WalkerEnv, return_ty: V4Type | nil, vararg: V4Type | nil) -> WalkerEnv
 function M.enter_function(env, return_ty, vararg)
 	local e = clone(env)
 	e.narrowed  = {}
@@ -208,7 +216,7 @@ function M.enter_function(env, return_ty, vararg)
 end
 
 -- Record an effect on the current function-body's effect set.
---: (env: { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }, eff: string) -> { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }
+--: (env: WalkerEnv, eff: string) -> WalkerEnv
 function M.add_effect(env, eff)
 	if env.effects[eff] then return env end
 	local new_effects = {}
@@ -221,7 +229,7 @@ end
 
 -- Install (or replace) the module-pattern accumulator. The slot is plumbed
 -- here for downstream phases; sub-phase A does not interpret it.
---: (env: { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }, ty: V4Type | nil) -> { bindings: { [string]: V4Type }, narrowed: { [string]: V4Type }, return_ty: V4Type | nil, vararg: V4Type | nil, effects: { [string]: boolean }, module: V4Type | nil, expected: V4Type | nil, source: { file: string, line: integer, col: integer } }
+--: (env: WalkerEnv, ty: V4Type | nil) -> WalkerEnv
 function M.with_module(env, ty)
 	local e = clone(env)
 	e.module = ty

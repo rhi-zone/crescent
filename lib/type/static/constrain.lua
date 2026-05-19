@@ -1699,6 +1699,11 @@ end
 
 local gen_expr, gen_stmt, gen_block, gen_function, gen_prescan_block, gen_function_for_template
 local block_has_return_stmt
+-- Forward-declared (defined ~line 2753). Used by gen_expr_list for non-last
+-- call truncation (D3) and by call-arg spread (D2). Lua semantics: only a
+-- call in the LAST position of a multi-value context spreads; elsewhere it
+-- truncates to its first return value.
+local eager_slot
 
 -- ---------------------------------------------------------------------------
 -- Expression constraint generation
@@ -1745,12 +1750,81 @@ local function gen_expr_multi(ctx, nid)
     return { gen_expr(ctx, nid) }
 end
 
+-- Truncate a call expression's result to its first return value (Lua semantics
+-- for a call in a non-last multi-value position). The call's `gen_expr` result
+-- `ret_tid` is bound to a TAG_TUPLE by the solver for multi-return functions;
+-- here we slot-extract index 0. Uses the eagerly-computed override if present;
+-- otherwise emits a deferred C_INDEX so the solver projects once `ret_tid` is
+-- bound. For single-return callees the override is a 1-tuple wrapping the
+-- return type, so eager_slot still produces the correct scalar.
+--: (Ctx, integer, integer | nil, integer, integer) -> integer
+local function truncate_call_to_slot0(ctx, ret_tid, override, line, col)
+    if override then
+        local s = eager_slot(ctx, override, 0)
+        if s then return s end
+    end
+    local slot_var = fresh_var(ctx)
+    emit(ctx, M.make_index(ret_tid,
+        types_mod.make_literal(ctx, LIT_INTEGER, 0), slot_var, line, col))
+    return slot_var
+end
+
+-- Spread the last argument's multi-return into individual slot tids when the
+-- last AST argument is a call expression with a concrete tuple return.
+-- Lua semantics: a call in the LAST argument position contributes all its
+-- return values. Used by NODE_CALL_EXPR and NODE_METHOD_CALL after their
+-- gen_expr_list arg construction (D2). When the override is not a concrete
+-- tuple (deferred / non-multi-return / unknown arity), arg_tids is left
+-- unchanged — the existing 1-slot fallback applies.
+--: (Ctx, { [integer]: integer, ... }, integer, integer) -> { [integer]: integer, ... }
+local function spread_last_call_arg(ctx, arg_tids, es, el)
+    if el == 0 then return arg_tids end
+    local last_nid = ctx.ast_lists:get(es + el - 1)
+    local last_n = ctx.nodes:get(last_nid)
+    if last_n.kind ~= NODE_CALL_EXPR and last_n.kind ~= NODE_METHOD_CALL then
+        return arg_tids
+    end
+    local override = ctx.pending_multi_return_override
+    if not override then return arg_tids end
+    local ot = ctx.types:get(types_mod.find(ctx, override))
+    if ot.tag ~= TAG_TUPLE then return arg_tids end
+    local n_slots = types_mod.agg_members_len(ot)
+    if n_slots <= 1 then return arg_tids end
+    -- Replace the last entry (currently 1 tid wrapping the whole tuple) with
+    -- per-slot tids extracted from the concrete override tuple.
+    local out = {}
+    for i = 1, #arg_tids - 1 do out[i] = arg_tids[i] end
+    for s = 0, n_slots - 1 do
+        local slot_tid = eager_slot(ctx, override, s)
+        if not slot_tid then return arg_tids end  -- bail out on extraction failure
+        out[#out + 1] = slot_tid
+    end
+    -- The override was the last call's. Consuming it here is correct: caller
+    -- (NODE_CALL_EXPR / NODE_METHOD_CALL) does not need correlated narrowing.
+    ctx.pending_multi_return_override = nil
+    return out
+end
+
 --: (Ctx, integer, integer) -> { [integer]: integer, ... }
 local function gen_expr_list(ctx, es, el)
     if el == 0 then return {} end
     local result = {}
     for i = es, es + el - 2 do
-        result[#result + 1] = gen_expr(ctx, ctx.ast_lists:get(i))
+        local nid = ctx.ast_lists:get(i)
+        local n = ctx.nodes:get(nid)
+        if n.kind == NODE_CALL_EXPR or n.kind == NODE_METHOD_CALL then
+            -- D3: non-last call expression contributes only its first return.
+            local ret_tid = gen_expr(ctx, nid)
+            local override = ctx.pending_multi_return_override
+            -- Clear so an override set by this non-last call does not leak
+            -- to LOCAL_STMT / ASSIGN_STMT, which only correlate the LAST
+            -- RHS's call. (The last call's override is set below.)
+            ctx.pending_multi_return_override = nil
+            ctx.pending_multi_return = nil
+            result[#result + 1] = truncate_call_to_slot0(ctx, ret_tid, override, n.line, n.col)
+        else
+            result[#result + 1] = gen_expr(ctx, nid)
+        end
     end
     local last_nid = ctx.ast_lists:get(es + el - 1)
     local multi = gen_expr_multi(ctx, last_nid)
@@ -2723,10 +2797,11 @@ local function peek_callee_ret_union(ctx, callee_n)
         -- The return type is not concrete yet — the solver resolves it after argument binding
         -- (via resolve_deferred_intrinsic).  Do not peek; let the C_INDEX/slot path handle it.
         if ret_t.tag == defs.TAG_TYPE_CALL then return nil end
-        -- Explicit multi-return: TAG_SPREAD in return position wraps the tuple/union-of-tuples.
-        -- Unwrap and return the inner type directly — eager_slot handles it.
+        -- Explicit multi-return: TAG_SPREAD in return position represents a
+        -- variadic return `...(T)` (zero or more T-typed slots). Return the
+        -- SPREAD tid directly — eager_slot extracts the inner type per slot.
         if ret_t.tag == defs.TAG_SPREAD then
-            return types_mod.find(ctx, types_mod.spread_inner(ret_t))
+            return ret_slot
         end
         -- Single-value return (no spread): always wrap in a 1-tuple.
         return types_mod.make_tuple(ctx, { ret_slot })
@@ -2750,7 +2825,7 @@ end
 -- Extract the type at slot N from a TAG_TUPLE or union-of-TAG_TUPLEs at constraint-gen time.
 -- Returns nil when tid is TAG_VAR, nil, or not a tuple/union-of-tuples.
 --: (Ctx, integer | nil, integer) -> integer | nil
-local function eager_slot(ctx, tid, slot)
+function eager_slot(ctx, tid, slot)
     if not tid then return nil end
     local t = ctx.types:get(tid)
     if t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return nil end
@@ -2775,6 +2850,16 @@ local function eager_slot(ctx, tid, slot)
         local tp_s, tp_l = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
         if slot < tp_l then
             return unwrap_spread(types_mod.find(ctx, ctx.lists:get(tp_s + slot)))
+        end
+        -- Overflow slot: when the trailing tuple slot is TAG_SPREAD (variadic
+        -- return tail, e.g. `(A, ...(B))`), all subsequent slots have the
+        -- spread's inner type.
+        if tp_l > 0 then
+            local last_id = types_mod.find(ctx, ctx.lists:get(tp_s + tp_l - 1))
+            local last = ctx.types:get(last_id)
+            if last.tag == defs.TAG_SPREAD then
+                return types_mod.find(ctx, types_mod.spread_inner(last))
+            end
         end
         return ctx.T_NIL
     end
@@ -2805,6 +2890,9 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     local callee_nid = n.data[0]
     local callee_tid = gen_expr(ctx, callee_nid)
     local arg_tids = gen_expr_list(ctx, n.data[1], n.data[2])
+    -- D2: if the last arg is a multi-return call with concrete tuple return,
+    -- spread its slots into individual args. Lua spread-in-last semantics.
+    arg_tids = spread_last_call_arg(ctx, arg_tids, n.data[1], n.data[2])
 
     -- require() side-effect tracking: record module name for require_sources and
     -- invoke cri_loader for type alias injection.  Type resolution is handled by
@@ -3133,6 +3221,8 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
     emit(ctx, M.make_index(recv_tid, types_mod.make_literal(ctx, LIT_STRING, method_name_id), method_var, n.line, n.col))
 
     local extra = gen_expr_list(ctx, n.data[2], n.data[3])
+    -- D2: spread last call arg if it has a concrete multi-return.
+    extra = spread_last_call_arg(ctx, extra, n.data[2], n.data[3])
     local arg_tids = { recv_tid }
     for _, a in ipairs(extra) do arg_tids[#arg_tids + 1] = a end
 
@@ -4682,7 +4772,10 @@ local function load_decl_file(ctx, mod_name)
     local saved_filename = ctx.filename
     ctx.ann      = ar --[[:! AnnResult]]
     ctx.filename = rel_path
-    process_type_decls(ctx)
+    -- Pass nil for chunk_root: we do NOT want to walk the loaded module's AST
+    -- for top-level require()s here. The module's --:: aliases are what we
+    -- need; transitively walking its requires would balloon work and recurse.
+    process_type_decls(ctx, nil)
     ctx.ann      = saved_ann
     ctx.filename = saved_filename
 end
@@ -4691,8 +4784,11 @@ end
 -- Type declaration processing
 -- ---------------------------------------------------------------------------
 
---: (Ctx) -> { [integer]: { r: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, ... }, line: integer, ... }, ... } | nil
-process_type_decls = function(ctx)
+-- chunk_root: root node id of the file's chunk, OR nil when re-entered from
+-- load_decl_file (loaded modules' decls don't need their own require scan;
+-- they are only loaded for their --:: aliases, which they declare directly).
+--: (Ctx, integer | nil) -> { [integer]: { r: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, ... }, line: integer, ... }, ... } | nil
+process_type_decls = function(ctx, chunk_root)
     if not ctx.ann then return nil end
     -- After this guard, ctx.ann is narrowed to AnnResult (field_presence narrowing on ctx).
     local ann = ctx.ann
@@ -4755,6 +4851,69 @@ process_type_decls = function(ctx)
     -- in scope when Pass 0–2b resolve the current file's type aliases and variables.
     for _, r in ipairs(require_decls) do
         load_decl_file(ctx, r.mod_name)
+    end
+
+    -- Pass -1b: load --:: aliases from modules imported via top-level `require()`
+    -- calls in source (without `--:: require` syntax). At gen-time, NODE_LOCAL_STMT
+    -- and NODE_EXPR_STMT inject aliases lazily via inject_imported_aliases, but
+    -- that happens AFTER process_type_decls — so `--:: Bar = { foo: Foo }` where
+    -- Foo comes from a require'd module would fail with "undefined type Foo"
+    -- unless `--:: require "mod"` was also written. Scan the chunk's top-level
+    -- statements for `require("modname")` calls and pre-load their decls here.
+    -- Nested calls (load_decl_file → process_type_decls) pass nil so the
+    -- loaded module's --:: decls are processed without scanning the outer
+    -- file's AST again under the wrong filename — which would re-trigger
+    -- the same require lookups and recurse indefinitely.
+    if chunk_root then
+        local chunk = ctx.nodes:get(chunk_root)
+        local bs, bl = chunk.data[0], chunk.data[1]
+        for i = bs, bs + bl - 1 do
+            local sid = ctx.ast_lists:get(i)
+            local sn = ctx.nodes:get(sid)
+            -- Extract the candidate call node (LOCAL_STMT's last RHS, or EXPR_STMT's expr).
+            local call_nid = nil
+            if sn.kind == NODE_LOCAL_STMT then
+                local es, el = sn.data[2], sn.data[3]
+                if el >= 1 then
+                    -- Inspect every RHS expression; multiple requires per stmt are legal.
+                    for ei = 0, el - 1 do
+                        local nid = ctx.ast_lists:get(es + ei)
+                        local nn = ctx.nodes:get(nid)
+                        if nn.kind == NODE_CALL_EXPR then
+                            local callee_n = ctx.nodes:get(nn.data[0])
+                            if callee_n.kind == NODE_IDENTIFIER and nn.data[2] >= 1 then
+                                local fname = intern_mod.get(ctx.pool, callee_n.data[0]) or ""
+                                if fname == "require" then
+                                    local arg0_nid = ctx.ast_lists:get(nn.data[1])
+                                    local arg0_n = ctx.nodes:get(arg0_nid)
+                                    if arg0_n.kind == NODE_LITERAL and arg0_n.data[2] == LIT_STRING then
+                                        local mod_name = intern_mod.get(ctx.pool, arg0_n.data[1]) or ""
+                                        if mod_name ~= "" then load_decl_file(ctx, mod_name) end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            elseif sn.kind == NODE_EXPR_STMT then
+                call_nid = sn.data[0]
+                local nn = ctx.nodes:get(call_nid)
+                if nn.kind == NODE_CALL_EXPR then
+                    local callee_n = ctx.nodes:get(nn.data[0])
+                    if callee_n.kind == NODE_IDENTIFIER and nn.data[2] >= 1 then
+                        local fname = intern_mod.get(ctx.pool, callee_n.data[0]) or ""
+                        if fname == "require" then
+                            local arg0_nid = ctx.ast_lists:get(nn.data[1])
+                            local arg0_n = ctx.nodes:get(arg0_nid)
+                            if arg0_n.kind == NODE_LITERAL and arg0_n.data[2] == LIT_STRING then
+                                local mod_name = intern_mod.get(ctx.pool, arg0_n.data[1]) or ""
+                                if mod_name ~= "" then load_decl_file(ctx, mod_name) end
+                            end
+                        end
+                    end
+                end
+            end
+        end
     end
 
     -- Pass 0: preliminary module_types population (before alias bodies are resolved).
@@ -5258,7 +5417,9 @@ function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
         fh.init(ctx)
     end
 
-    local typeof_decls = process_type_decls(ctx)
+    -- Pass root so process_type_decls can scan top-level require() calls
+    -- and load their --:: aliases before resolving this file's alias bodies.
+    local typeof_decls = process_type_decls(ctx, pr_root)
 
     local chunk = pr_root and ctx.nodes:get(pr_root)
     if chunk then
