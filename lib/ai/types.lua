@@ -10,9 +10,13 @@
 
 --:: ai_tool_call = { id: string, name: string, arguments: { [string]: unknown } }
 
+--- HTTP response shape returned by ai_http_client.request — caller-injected,
+-- matches the response shape produced by lib.https.client.
+--:: ai_http_response = { status: integer | nil, body: string | nil, headers?: { [string]: { string } } }
+
 --- HTTP client capability — caller-injected, matches lib.https.client shape.
 --:: ai_http_client = {
---::   request: (req: unknown) -> (unknown, string | nil),
+--::   request: (req: unknown) -> (ai_http_response | nil, string | nil),
 --::   stream: (req: unknown) -> ((() -> string | nil, string | nil) | nil, (() -> nil) | string | nil),
 --:: }
 
@@ -35,11 +39,13 @@
 --::   usage: { input_tokens: integer, output_tokens: integer } | nil,
 --:: }
 
+--- Streamed partial response. Each delta typically carries one field at a time
+-- (text chunk, tool call, finish reason, or usage), so fields are optional.
 --:: ai_delta = {
---::   text: string | nil,
---::   tool_call: ai_tool_call | nil,
---::   finish_reason: string | nil,
---::   usage: { input_tokens: integer, output_tokens: integer } | nil,
+--::   text?: string | nil,
+--::   tool_call?: ai_tool_call | nil,
+--::   finish_reason?: string | nil,
+--::   usage?: { input_tokens: integer, output_tokens: integer } | nil,
 --:: }
 
 -- ── Embeddings ──────────────────────────────────────────────────────────────────

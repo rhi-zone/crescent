@@ -11,15 +11,7 @@ local stream_mod = require("lib.http.stream")
 
 local mod = {}
 
--- Type declarations (mirror lib/ai/types.lua; redeclared because the typechecker has no cross-module type import).
---:: ai_message = { role: "system" | "user" | "assistant" | "tool", content: string, tool_call_id?: string, name?: string }
---:: ai_tool = { name: string, description: string, parameters: { [string]: unknown } }
---:: ai_tool_call = { id: string, name: string, arguments: { [string]: unknown } }
---:: ai_http_response = { status: integer | nil, body: string | nil, headers?: { [string]: { string } } }
---:: ai_http_client = { request: (req: unknown) -> (ai_http_response | nil, string | nil), stream: (req: unknown) -> ((() -> string | nil, string | nil) | nil, (() -> nil) | string | nil) }
---:: ai_request = { model: string, messages: ai_message[], max_tokens?: integer, temperature?: number, tools?: ai_tool[], stream?: boolean, provider?: ai_provider, http_client?: ai_http_client, api_key?: string }
---:: ai_response = { text: string | nil, tool_calls: ai_tool_call[] | nil, finish_reason: string, usage: { input_tokens: integer, output_tokens: integer } | nil }
---:: ai_delta = { text?: string | nil, tool_call?: ai_tool_call | nil, finish_reason?: string | nil, usage?: { input_tokens: integer, output_tokens: integer } | nil }
+--:: require "lib.ai.types"
 --:: openai_tool_call_in = { id?: string, function?: { name?: string, arguments?: string } }
 --:: openai_message_in = { content?: string, tool_calls?: Arr<openai_tool_call_in> }
 --:: openai_choice_in = { message?: openai_message_in, finish_reason?: string }
@@ -32,14 +24,6 @@ local mod = {}
 --:: openai_image_item = { url?: string, b64_json?: string }
 --:: openai_image_response = { error?: { message?: string }, data?: Arr<openai_image_item> }
 --:: http_stream_t = { read_headers: (self: unknown) -> (unknown, string | nil), status: (self: unknown) -> integer | nil, read_body: (self: unknown) -> (string | nil, string | nil), events: (self: unknown) -> () -> { event: string | nil, data: string, id: string | nil } | nil }
---:: ai_embed_request = { model: string, value: string, provider?: ai_provider, http_client?: ai_http_client, api_key?: string }
---:: ai_embed_many_request = { model: string, values: string[], provider?: ai_provider, http_client?: ai_http_client, api_key?: string }
---:: ai_embed_response = { embedding: number[], usage: { input_tokens: integer } | nil }
---:: ai_embed_many_response = { embeddings: number[][], usage: { input_tokens: integer } | nil }
---:: ai_image_request = { model: string, prompt: string, n?: integer, size?: string, provider?: ai_provider, http_client?: ai_http_client, api_key?: string }
---:: ai_image = { url?: string, b64_json?: string }
---:: ai_image_response = { images: ai_image[] }
---:: ai_provider = { generate: (req: ai_request) -> (ai_response | nil, string | nil), stream: (req: ai_request) -> ((() -> ai_delta | nil) | nil, string | nil), embed?: (req: ai_embed_request) -> (ai_embed_response | nil, string | nil), embed_many?: (req: ai_embed_many_request) -> (ai_embed_many_response | nil, string | nil), generate_image?: (req: ai_image_request) -> (ai_image_response | nil, string | nil) }
 
 --- Convert neutral ai_message list to OpenAI format.
 local function convert_messages(messages)
