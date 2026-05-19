@@ -145,6 +145,25 @@ When designing how a new type construct should work, ask: "what does full unific
 
 Types are semantic entities; source positions are syntactic. Do not store line/col in type arena entries — errors are exceptional, so paying a per-entry cost for rare diagnostics is the wrong trade-off. Reparse the source on the error path instead.
 
+### 14. No ambient globals — the stdlib is declared, not assumed
+
+Crescent typechecks every file under the assumption that **no global names are ambient**. There is no preloaded `_G` shape, no built-in "Lua stdlib" the checker silently consults. Every name a file references must be brought into scope explicitly — as a local, via a `require`, or as an `--:: declare ...` line in a stdlib type file.
+
+**Why:** ambient globals are the foundation of two failure modes crescent rejects.
+
+1. **Capability erosion.** If `os`, `io`, `print`, `require` are ambient, every library implicitly has every capability. Capability-based I/O (see Library Conventions) is then unenforceable at the type level — a library that reads `os.time()` looks identical to one that doesn't. Making the stdlib a set of explicit declarations means the checker can see, per-file, which capabilities are actually claimed.
+2. **Silent widening.** An ambient-global system has to decide what an undeclared name resolves to. The two options are "error" and "widen to some top type." Real-world ambient typecheckers pick widening, because erroring on every typo is too noisy when the stdlib is implicit. That choice then leaks: undeclared names become a soft escape hatch from soundness. Crescent picks the other branch — no ambient stdlib means undeclared names are unambiguously errors, with no widening fallback to soften them.
+
+**Mechanism.** The Lua standard library (`require`, `tostring`, `pairs`, `error`, `pcall`, `string.*`, `table.*`, ...) is supplied by `--:: declare ...` lines in stdlib type files that the checker loads as ordinary input. Nothing about the stdlib is special-cased into the checker core.
+
+For declarations that need expressive power the value-level language can't provide, the checker exposes **type-level intrinsics** — `$Require<T>`, `$Keys<T>`, `$EachField<T, F>`, etc. These exist precisely so that stdlib declarations can be written without dependent types. The canonical example:
+
+```lua
+--:: declare require: <T: string>(module: T) -> $Require<T>
+```
+
+`$Require<T>` is the mechanism that lets the *return type* of `require` depend on the *literal value* of its string argument — a piece of type-level computation Lua's value language cannot express on its own. It is **not** a redundant alias for "the type of `require(T)`": that direction of the equivalence runs backwards. `typeof require(T)` only has a meaningful answer *because* the stdlib declaration types `require`'s return as `$Require<T>`. The intrinsic is foundational; the value-level expression decays to it via the declaration. Treating intrinsics like `$Require<T>` as removable (because "indexed access can express the same thing") confuses cause and effect — without the intrinsic, the stdlib declaration that gives `require` its type cannot be written, and every downstream `typeof require(...)` becomes meaningless.
+
 ## Types
 
 ### Primitives

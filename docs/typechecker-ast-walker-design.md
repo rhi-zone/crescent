@@ -1015,12 +1015,18 @@ module-pattern question previously listed here is resolved in §13.5.
    resolve-each).
 
 5. **Module re-export through `$Require`.** The `$Require<T>` intrinsic in
-   `typechecker-reference.md` §"Permanent intrinsics" hints at literal-type
-   propagation through generics. With v4's indexed access, a `require`
-   could be modeled as `V.index(module_table, V.literal("string", "path"))`,
-   sidestepping `$Require` entirely. Whether to retain `$Require` as a
-   named intrinsic or remove it in favor of indexed-access is a design
-   choice the rewrite-design §9.2.5 footnotes but does not resolve.
+   `typechecker-reference.md` §"Permanent intrinsics" is the mechanism by
+   which the stdlib declaration `require: <T: string>(m: T) -> $Require<T>`
+   can express that `require`'s return type depends on the literal value of
+   its string argument. Crescent has no ambient `_G` — `require` only has a
+   type because that declaration exists, and the declaration is only
+   expressible because `$Require<T>` exists (see type-system.md §14). It is
+   therefore **not** redundant with `typeof require(path)` or with an
+   `V.index(module_table, V.literal(...))` reformulation — those decay to
+   `$Require<T>` via the declaration, not the reverse. The open question for
+   the walker is implementation strategy (when `$Require<T>` is reduced,
+   how it interacts with argument-literal widening), not whether to retain
+   the intrinsic.
 
 6. **Diagnostic root-cause grouping algorithm.** Section 12 mentions an
    "origin chain" used by `bin/cr check --summary`. The exact grouping
