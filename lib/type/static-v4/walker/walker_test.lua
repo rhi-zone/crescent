@@ -316,6 +316,10 @@ T.describe("walker: dispatch shell", function()
 		T.ok(W.has_synth(defs.NODE_FOR_IN))
 		T.ok(W.has_synth(defs.NODE_DO_STMT))
 		T.ok(W.has_synth(defs.NODE_BREAK_STMT))
+		-- Sub-phase F adds indexed access + table literal.
+		T.ok(W.has_synth(defs.NODE_FIELD_EXPR))
+		T.ok(W.has_synth(defs.NODE_INDEX_EXPR))
+		T.ok(W.has_synth(defs.NODE_TABLE_EXPR))
 		for _, tag in pairs({
 			defs.NODE_CHUNK,
 		}) do
@@ -682,16 +686,15 @@ T.describe("walker sub-phase C: NODE_CALL_EXPR", function()
 		T.eq(ty, V.string_)
 	end)
 
-	T.it("indexed callee is rejected loudly (sub-phase F territory)", function()
+	T.it("indexed callee resolves via field synthesis (sub-phase F)", function()
 		local s = V.new_solver()
 		local env = E.bind(E.new(), "t", V.rec({ f = V.fn({}, V.integer, nil) }, false, nil))
 		local node = call({
 			tag = defs.NODE_FIELD_EXPR, target = id("t"), key = "f",
 		})
-		local _ty, _env, err = W.walk_synth(node, env, s)
-		T.ok(err ~= nil)
-		T.ok(err:find("indexed callee", 1, true) ~= nil)
-		T.ok(err:find("sub-phase", 1, true) ~= nil)
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.integer)
 	end)
 end)
 
@@ -1321,7 +1324,7 @@ T.describe("walker sub-phase E: NODE_ASSIGN_STMT", function()
 		T.ok(err:find("undefined", 1, true) ~= nil)
 	end)
 
-	T.it("field assignment is rejected loudly (sub-phase F territory)", function()
+	T.it("field assignment on a concrete-typed record checks via V.index (sub-phase F)", function()
 		local s = V.new_solver()
 		local env = E.bind(E.new(), "M",
 			V.rec({ x = V.integer }, false, nil))
@@ -1329,8 +1332,7 @@ T.describe("walker sub-phase E: NODE_ASSIGN_STMT", function()
 			{ { tag = defs.NODE_FIELD_EXPR, target = id("M"), key = "x" } },
 			{ lit_int(1) })
 		local _ty, _env2, err = W.walk_synth(node, env, s)
-		T.ok(err ~= nil)
-		T.ok(err:find("sub-phase F", 1, true) ~= nil)
+		T.eq(err, nil)
 	end)
 
 	T.it("multi-assign: last RHS spreads", function()
@@ -1452,5 +1454,286 @@ T.describe("walker sub-phase E: NODE_MATCH_EXPR — backward", function()
 		local _env2, err = W.walk_check(node, E.new(), s,
 			V.literal("string", "X"))
 		T.ok(err ~= nil)
+	end)
+end)
+
+-- ── sub-phase F: indexed access + module pattern + varargs polish ────────
+--
+-- Builders for sub-phase F nodes.
+
+local function table_expr(fields)
+	return { tag = defs.NODE_TABLE_EXPR, fields = fields or {} }
+end
+local function index_expr(target, key)
+	return { tag = defs.NODE_INDEX_EXPR, target = target, key = key }
+end
+local function field_expr(target, key)
+	return { tag = defs.NODE_FIELD_EXPR, target = target, key = key }
+end
+local function vararg_expr()
+	return { tag = defs.NODE_VARARG_EXPR }
+end
+
+T.describe("walker sub-phase F: NODE_FIELD_EXPR", function()
+	T.it("field access on a closed record synthesizes the field type", function()
+		local s = V.new_solver()
+		local obj = V.rec({ name = V.string_, age = V.integer }, false, nil)
+		local env = E.bind(E.new(), "obj", obj)
+		local node = field_expr(id("obj"), "name")
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.string_)
+	end)
+
+	T.it("missing field on a closed record errors", function()
+		local s = V.new_solver()
+		local obj = V.rec({ name = V.string_ }, false, nil)
+		local env = E.bind(E.new(), "obj", obj)
+		local node = field_expr(id("obj"), "missing")
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+		T.ok(err:find("missing", 1, true) ~= nil)
+	end)
+
+	T.it("field access on a union of records distributes", function()
+		local s = V.new_solver()
+		local R1 = V.rec({ k = V.integer }, false, nil)
+		local R2 = V.rec({ k = V.string_ }, false, nil)
+		local env = E.bind(E.new(), "u", V.union({ R1, R2 }))
+		local node = field_expr(id("u"), "k")
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.ok(ty ~= nil)
+		-- Distribution yields union of integer + string.
+		T.eq(ty.tag, "union")
+	end)
+
+	T.it("CHECK mode: field type subtypes expected", function()
+		local s = V.new_solver()
+		local obj = V.rec({ k = V.literal("integer", 7) }, false, nil)
+		local env = E.bind(E.new(), "obj", obj)
+		local node = field_expr(id("obj"), "k")
+		local _env, err = W.walk_check(node, env, s, V.integer)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase F: NODE_INDEX_EXPR", function()
+	T.it("bracket access with string literal key", function()
+		local s = V.new_solver()
+		local obj = V.rec({ name = V.string_ }, false, nil)
+		local env = E.bind(E.new(), "obj", obj)
+		local node = index_expr(id("obj"), lit_str("name"))
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.string_)
+	end)
+
+	T.it("bracket access with type-variable key is rejected (v4 limitation)", function()
+		local s = V.new_solver()
+		local obj = V.rec({ name = V.string_ }, false, nil)
+		local env = E.bind(E.bind(E.new(), "obj", obj), "k", V.var("k"))
+		local node = index_expr(id("obj"), id("k"))
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+		T.ok(err:find("deferred", 1, true) ~= nil)
+	end)
+
+	T.it("bracket access against indexer record", function()
+		local s = V.new_solver()
+		-- { [string]: integer }
+		local obj = V.rec({}, false, V.indexer(V.string_, V.integer))
+		local env = E.bind(E.new(), "obj", obj)
+		local node = index_expr(id("obj"), lit_str("anything"))
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.integer)
+	end)
+end)
+
+T.describe("walker sub-phase F: NODE_TABLE_EXPR (empty)", function()
+	T.it("empty table literal synthesizes an empty closed record", function()
+		local s = V.new_solver()
+		local node = table_expr({})
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.ok(ty ~= nil)
+		T.eq(ty.tag, "rec")
+		T.eq(ty.open, false)
+		T.eq(next(ty.fields), nil)
+	end)
+
+	T.it("non-empty table literal rejects (later sub-phase)", function()
+		local s = V.new_solver()
+		local node = table_expr({ { key = "x", value = lit_int(1) } })
+		local _ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.ok(err ~= nil)
+	end)
+end)
+
+T.describe("walker sub-phase F: module pattern (Option D)", function()
+	T.it("`local M = {}` binds M to a V.var (accumulator)", function()
+		local s = V.new_solver()
+		local node = local_stmt({ { name = "M" } }, { table_expr({}) })
+		local _ty, env2, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		local m_ty = E.lookup(env2, "M")
+		T.ok(m_ty ~= nil)
+		T.eq(m_ty.tag, "var")
+	end)
+
+	T.it("`local M --: T = {}` (annotated) binds M to T (no accumulator)", function()
+		local s = V.new_solver()
+		local T_ann = V.rec({ x = V.integer }, false, nil)
+		local node = local_stmt({ { name = "M", ann = T_ann } },
+			{ table_expr({}) })
+		local _ty, env2, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(E.lookup(env2, "M"), T_ann)
+	end)
+
+	T.it("M.foo = expr accumulates a singleton record as lower bound", function()
+		local s = V.new_solver()
+		local node = do_stmt({
+			local_stmt({ { name = "M" } }, { table_expr({}) }),
+			assign_stmt({ field_expr(id("M"), "foo") }, { lit_int(1) }),
+		})
+		local _ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+	end)
+
+	T.it("multiple field assignments accumulate as lower bounds on α_M", function()
+		-- v4 4a has no row polymorphism: a singleton-open `{foo, ...}`
+		-- does NOT directly subtype a multi-field expected record
+		-- (design §13.5.5 open subquestion 5 — coalescing / row-poly lands
+		-- later). The principled assertion at this phase is that each
+		-- assignment adds the right lower-bound shape; whole-M against a
+		-- multi-field record is not provable yet.
+		local s = V.new_solver()
+		local seq = {
+			local_stmt({ { name = "M" } }, { table_expr({}) }),
+			assign_stmt({ field_expr(id("M"), "foo") }, { lit_int(1) }),
+			assign_stmt({ field_expr(id("M"), "bar") }, { lit_str("x") }),
+		}
+		local env_acc = E.new()
+		for _, stmt in ipairs(seq) do
+			local _t, e2, e_err = W.walk_synth(stmt, env_acc, s)
+			env_acc = e2
+			T.eq(e_err, nil)
+		end
+		local alpha = E.lookup(env_acc, "M")
+		T.ok(alpha ~= nil)
+		T.eq(alpha.tag, "var")
+		-- Collect the field names present across all lower-bound records.
+		local seen_fields = {}
+		for _, lb in ipairs(alpha.lower) do
+			if lb.tag == "rec" then
+				for k in pairs(lb.fields) do
+					seen_fields[k] = true
+				end
+			end
+		end
+		T.ok(seen_fields["foo"])
+		T.ok(seen_fields["bar"])
+	end)
+
+	T.it("M.foo = wrong-type fails against annotated module shape", function()
+		local s = V.new_solver()
+		local T_ann = V.rec({ x = V.integer }, false, nil)
+		local node = do_stmt({
+			local_stmt({ { name = "M", ann = T_ann } }, { table_expr({}) }),
+			-- Writing a string to a field declared integer fails.
+			assign_stmt({ field_expr(id("M"), "x") }, { lit_str("nope") }),
+		})
+		local _ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.ok(err ~= nil)
+	end)
+
+	T.it("M.bogus = ... on closed annotated record errors (write of absent field)", function()
+		local s = V.new_solver()
+		local T_ann = V.rec({ x = V.integer }, false, nil)
+		local node = do_stmt({
+			local_stmt({ { name = "M", ann = T_ann } }, { table_expr({}) }),
+			assign_stmt({ field_expr(id("M"), "bogus") }, { lit_int(1) }),
+		})
+		local _ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.ok(err ~= nil)
+	end)
+
+	T.it("`return M` from a function flows α_M into the return slot", function()
+		local s = V.new_solver()
+		-- function() local M = {}; M.foo = 1; return M end
+		-- The unannotated function's ret_var captures α_M's lowers.
+		local body = {
+			local_stmt({ { name = "M" } }, { table_expr({}) }),
+			assign_stmt({ field_expr(id("M"), "foo") }, { lit_int(1) }),
+			ret(id("M")),
+		}
+		local fn_node = func({}, body)
+		local ty, _env, err = W.walk_synth(fn_node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty.tag, "fn")
+		-- The return var is a V.var carrying the accumulated lower.
+		T.eq(ty.ret.tag, "var")
+	end)
+end)
+
+T.describe("walker sub-phase F: indexed callees", function()
+	T.it("obj.method(arg) typechecks via synthesized field", function()
+		local s = V.new_solver()
+		local greet = V.fn({ V.string_ }, V.string_, nil)
+		local env = E.bind(E.new(), "obj",
+			V.rec({ greet = greet }, false, nil))
+		local node = call(field_expr(id("obj"), "greet"), lit_str("hi"))
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.string_)
+	end)
+
+	T.it("tbl[k](arg) typechecks via synthesized index", function()
+		local s = V.new_solver()
+		local greet = V.fn({ V.string_ }, V.string_, nil)
+		local env = E.bind(E.new(), "tbl",
+			V.rec({ greet = greet }, false, nil))
+		local node = call(index_expr(id("tbl"), lit_str("greet")), lit_str("hi"))
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.string_)
+	end)
+end)
+
+T.describe("walker sub-phase F: varargs spread/non-spread", function()
+	T.it("last-position vararg spreads tuple-typed env.vararg into call args", function()
+		local s = V.new_solver()
+		-- env.vararg = (integer, string) tuple; f expects (integer, string).
+		local vararg_ty = V.rec({ ["1"] = V.integer, ["2"] = V.string_ }, false, nil)
+		local f = V.fn({ V.integer, V.string_ }, V.nil_, nil)
+		local env = E.bind(E.enter_function(E.new(), V.nil_, vararg_ty),
+			"f", f)
+		local node = call(id("f"), vararg_expr())
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+
+	T.it("scalar vararg in last position contributes a single arg", function()
+		local s = V.new_solver()
+		local f = V.fn({ V.integer }, V.nil_, nil)
+		local env = E.bind(E.enter_function(E.new(), V.nil_, V.integer),
+			"f", f)
+		local node = call(id("f"), vararg_expr())
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+
+	T.it("vararg in non-last position collapses to scalar (first slot)", function()
+		local s = V.new_solver()
+		local vararg_ty = V.rec({ ["1"] = V.integer, ["2"] = V.string_ }, false, nil)
+		-- f expects (integer, integer) — non-last vararg gives just slot 1.
+		local f = V.fn({ V.integer, V.integer }, V.nil_, nil)
+		local env = E.bind(E.enter_function(E.new(), V.nil_, vararg_ty),
+			"f", f)
+		local node = call(id("f"), vararg_expr(), lit_int(2))
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
 	end)
 end)

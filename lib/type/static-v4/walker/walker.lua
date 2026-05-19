@@ -192,10 +192,11 @@ end
 -- composes them at load time. After `M._reset_handlers()` a test can call
 -- `M._register_builtins()` to restore the standard set.
 
-local literals     = require("lib.type.static-v4.walker.literals")
-local functions    = require("lib.type.static-v4.walker.functions")
-local control_flow = require("lib.type.static-v4.walker.control_flow")
-local statements   = require("lib.type.static-v4.walker.statements")
+local literals       = require("lib.type.static-v4.walker.literals")
+local functions      = require("lib.type.static-v4.walker.functions")
+local control_flow   = require("lib.type.static-v4.walker.control_flow")
+local statements     = require("lib.type.static-v4.walker.statements")
+local indexed_access = require("lib.type.static-v4.walker.indexed_access")
 
 --: () -> nil
 function M._register_builtins()
@@ -203,6 +204,11 @@ function M._register_builtins()
 	functions.register(M)
 	control_flow.register(M)
 	statements.register(M)
+	-- indexed_access MUST register after statements so it can capture the
+	-- existing LOCAL_STMT/ASSIGN_STMT handlers as fallbacks before
+	-- replacing them with the module-pattern variants. It also overrides
+	-- C's NODE_CALL_EXPR with the indexed-callee-aware version.
+	indexed_access.register(M)
 end
 
 M._register_builtins()

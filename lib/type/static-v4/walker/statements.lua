@@ -426,4 +426,11 @@ function M.register(W)
 	W.register_check(defs.NODE_MATCH_EXPR,  check_match)
 end
 
+-- Exported for sub-phase F's overrides. F's NODE_LOCAL_STMT /
+-- NODE_ASSIGN_STMT wrappers dispatch to these for the non-module-pattern,
+-- non-indexed-LHS paths. Names carry the sub-phase explicitly to discourage
+-- generic re-export ("see, this is a fallback hook, not a public API").
+M.synth_local_for_subphase_f  = synth_local
+M.synth_assign_for_subphase_f = synth_assign
+
 return M

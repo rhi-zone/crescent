@@ -5,12 +5,14 @@ into v4 type-system constraints. See
 `docs/typechecker-ast-walker-design.md` for the full design.
 
 This directory is being built incrementally across sub-phases A–J (design
-doc §13). **Current state: sub-phase E complete** — local/assign
-statements with multi-return spread/truncate semantics and value-level
-match expressions (forward + backward via `V.match` / `V.match_backward`)
-on top of A (env/dispatch), B (literals, identifiers, varargs), C
-(functions, calls, returns), and D (control-flow + flow-sensitive
-narrowing).
+doc §13). **Current state: sub-phase F complete** — indexed access
+expressions (`obj.k` / `obj[k]`), the empty-table literal, module-pattern
+accumulation via Option D (§13.5), indexed callees (now resolved through
+the standard SYNTHESIZE recursion), indexed-LHS writes (regime-split
+between module accumulation and v4 index-reducer checks), and varargs
+spread/non-spread polish on call sites. Stacks on top of A (env/dispatch),
+B (literals, identifiers, varargs), C (functions, calls, returns), D
+(control-flow + flow-sensitive narrowing), and E (local/assign + match).
 
 ## Sub-phase A — what's here
 
@@ -342,6 +344,108 @@ construct. Tests and future lowering passes that lower annotation-side
 `match X { ... }` types onto value-level matches construct the node
 directly. Arms are records `{ pattern, result, captures }` consumable
 by `V.match` / `V.match_backward` without further transformation.
+
+## Sub-phase F — what's here
+
+- **`indexed_access.lua`** — SYNTHESIZE handlers for indexed access plus
+  the OVERRIDES for sub-phase C's `NODE_CALL_EXPR` (indexed callees) and
+  sub-phase E's `NODE_LOCAL_STMT` / `NODE_ASSIGN_STMT` (module pattern
+  + indexed-LHS writes).
+
+  Handlers registered/overridden:
+  - `NODE_FIELD_EXPR` (§3.6) — `obj.k` synthesizes the target, then
+    `V.index(target, V.literal("string", k))`. Failures from `V.index`
+    (closed-record missing field, unbound-variable target, indexer-key
+    not locally discharge-able) become walker diagnostics verbatim.
+  - `NODE_INDEX_EXPR` (§3.6) — `obj[key]` synthesizes both target AND
+    key, then `V.index(target, key_ty)`. v4's index reducer handles
+    the supported key shapes (literal string, primitive string, union
+    thereof) and rejects unbound-variable keys per its own contract —
+    the walker passes the rejection through without elaboration.
+  - `NODE_TABLE_EXPR` (§3.10, partial) — the EMPTY case only. `{}`
+    synthesizes to `V.rec({}, /*open=*/false, nil)`. Non-empty literals
+    reject loudly with a "later sub-phase" message; the full table-literal
+    CHECK/SYNTHESIZE pair is mechanical but isn't required by F (only the
+    empty case feeds the module-pattern trigger).
+  - `NODE_CALL_EXPR` (OVERRIDE; was rejected in C) — indexed callees
+    (`obj.method(args)`, `tbl[k](args)`) now synthesize through the
+    standard recursion (`W.walk_synth(node.callee, ...)` reaches the F
+    field/index handlers) and continue with the function-call logic
+    from C. The override also adds vararg spread on last-position
+    arguments per §8.2 (see below).
+  - `NODE_LOCAL_STMT` (OVERRIDE; module-pattern trigger) — the syntactic
+    shape `local M [--: T] = {}` is detected:
+    - With annotation: bind M to T directly. The empty-table init is
+      treated as "M starts as the declared T"; subsequent field-writes
+      are checked against T. Per design §13.5.3, the init expression's
+      type is NOT checked against the annotation — `{}` is the canonical
+      "I will fill this in" idiom.
+    - Without annotation: allocate α_M = `V.var(name)`. Constrain
+      `V.rec({}, false, nil) <: α_M` as a baseline lower bound. Bind
+      M to α_M.
+    All other LOCAL_STMT shapes defer to E's existing handler.
+  - `NODE_ASSIGN_STMT` (OVERRIDE; indexed-LHS + module accumulation) —
+    targets with `NODE_FIELD_EXPR` / `NODE_INDEX_EXPR` shape are
+    resolved per Option D's two regimes:
+    - **Variable-bound base** (the module-pattern case): build a
+      singleton-field open record and constrain it as a lower bound:
+      `V.rec({k = synth(rhs)}, /*open=*/true) <: α`. The `open=true`
+      flag is load-bearing — it lets the singleton subtype any record
+      containing `k`. Non-literal keys on a var-bound base fall back to
+      indexer accumulation: `V.rec({}, true, V.indexer(key_ty, rhs_ty))`.
+    - **Concrete-typed base** (the annotated case): query v4's index
+      reducer for the field's type, then constrain `rhs <: field_ty`.
+      `V.index` errors at write-of-absent-field-on-closed-record cleanly,
+      surfacing the diagnostic at the assign site.
+    Chained paths (`a.b.c = ...`) and computed-base shapes
+    (`f(x).k = ...`) reject loudly with a clear message — they require
+    field-path-root tracking that is not in F's scope.
+    Plain `NODE_IDENTIFIER` targets fall through to E's logic
+    (inlined here so the already-synthesized RHS types aren't re-walked).
+
+### Module-pattern accumulation: design §13.5 (Option D)
+
+The contract: a `V.var()` accumulator is the binding's type. Each
+field-write adds a singleton-record lower bound. Reads via `V.index(α,
+"k")` are deferred per v4 4b.2's no-deferred-queue rule until v4
+gains the suspension queue (design §13.5.5 open subquestion 2). `return
+M` flows α directly into the enclosing return slot; the var's
+accumulated lowers travel along the bound graph into the receiving slot.
+
+Whole-M against a multi-field expected record is NOT yet provable: v4
+4a has no row polymorphism, so the open singleton `{foo, ...}` does
+not subtype `{foo: integer, bar: string, ...}`. Per design §13.5.5
+open subquestion 5, this lands when coalescing / row-polymorphism
+arrives in a later v4 phase. The current implementation is principled:
+each lower bound is structurally correct; the downstream observation
+(individual M.foo lookups, or annotated module exports) is what waits.
+
+### Varargs spread/non-spread (§8.2)
+
+The vararg node itself (`NODE_VARARG_EXPR`, sub-phase B handler) still
+synthesizes to `env.vararg` — a single value type or tuple. Sub-phase F
+adds the enclosing-context discipline in `NODE_CALL_EXPR`:
+
+- **Last-position vararg argument**: if env.vararg is a tuple-shaped
+  `V.rec` (positional `"1"` / `"2"` / ... slots), spread its slots
+  into the argument list. Otherwise the vararg contributes one
+  scalar argument.
+- **Non-last vararg argument**: collapse to the first positional slot
+  (Lua semantics: `f(..., y)` evaluates `...` to its first value).
+
+The same discipline belongs in `NODE_RETURN_STMT` and the (future)
+non-empty table literal handler. F doesn't touch RETURN_STMT — the
+existing single-expr collapse + multi-expr tuple-pack covers the
+non-vararg cases; vararg-in-return-position is a later contribution
+together with the full table-literal pass.
+
+### Decoded node shapes added in F
+
+| Node              | Fields                                                       |
+|-------------------|--------------------------------------------------------------|
+| NODE_FIELD_EXPR   | `{ tag, line, col, target: Node, key: string }`              |
+| NODE_INDEX_EXPR   | `{ tag, line, col, target: Node, key: Node }`                |
+| NODE_TABLE_EXPR   | `{ tag, line, col, fields: TableField[] }` (only `#fields == 0` accepted in F) |
 
 ## Sub-phase A does NOT include
 
