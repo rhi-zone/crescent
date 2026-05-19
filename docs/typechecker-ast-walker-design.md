@@ -1104,3 +1104,323 @@ W1-W4, B1-B4, plus excess-LHS-padded-with-nil. The existing
 `type_soundness_test.lua:1129-1146` coverage is too thin — it tests
 W1 only and would have passed even with D1-D4 present.
 
+
+## 15. `typeof` mutual equality — design
+
+### 15.1 The problem
+
+`typeof x` in a type position denotes "the inferred type of the binding
+`x`". The reference (`docs/typechecker-reference.md` §`typeof`) admits it
+in any type-annotation position; the system invariant (`docs/type-system.md`
+§"typeof in function signatures: mutual equality constraints") commits to
+**backward refs, forward refs, AND mutual/circular refs all working**, with
+the mutual case `(a: typeof b, b: typeof a)` being semantically equivalent
+to `<T>(a: T, b: T)`.
+
+The difficulty is that constraint generation is a tree walk, but the
+referent of a `typeof` need not appear before it textually, and the value
+the referent has need not be known at the moment its name is bound. Three
+representative shapes:
+
+**Example A — forward reference inside one signature.**
+
+```lua
+--: (a: typeof b, b: integer) -> typeof a
+local function f(a, b) return a end
+```
+
+When the walker reaches the annotation on `a`, the binding `b` has not yet
+been introduced into `E`, but the param list is being assembled as one
+unit. The walker cannot "ask `b`'s type" because `b` has no type yet.
+
+**Example B — mutual equality.**
+
+```lua
+--: (a: typeof b, b: typeof a) -> typeof a
+local function f(a, b) return a end
+```
+
+Neither `a` nor `b` has a concrete type. Each refers to the other. There
+is no fixed "value" to substitute; the two names share an unknown that
+behaves like a fresh generic.
+
+**Example C — mutually-recursive bodies via `typeof` on the binding.**
+
+```lua
+local function f(x) return g(x) end
+--:: TyG = typeof g
+local function g(x) return f(x) end
+```
+
+`TyG = typeof g` is evaluated at module top level; `g` has been parsed but
+its body — which depends on `f`, whose body depends on `g` — has not been
+solved. The "current type of `g`" is a partially-built variable; the
+correct outcome is for `TyG` to denote whatever the solver eventually
+resolves `g`'s principal type to, **including** the constraints discovered
+during `g`'s body walk after the alias was emitted.
+
+### 15.2 Candidate approaches
+
+#### A. Two-pass param resolution
+
+*Mechanism.* On entering a function header, first pass over the params
+records every `typeof X` reference and every "concrete" annotation; second
+pass resolves `typeof` references by lookup, in dependency order or just
+in source order. Mutual references fail.
+
+*Pros.* Simple to implement at the header level. No solver changes.
+
+*Cons.* Solves only the param-list slice of the problem. Doesn't help
+`typeof` referring to module-level bindings (Example C), `typeof` inside
+function bodies, `typeof` in `--::` aliases at top level, or any case
+where the referent's type evolves *after* the alias is read. Rejects
+Example B outright — but the system's stated invariant requires it to
+succeed. Per CLAUDE.md ("no half-measures with a TODO"), shipping a
+walker that rejects Example B and plans to "fix mutual later" poisons
+context.
+
+*Crescent fit.* Poor. Local fix to a globally-shaped problem.
+
+#### B. Topological sort of `typeof` dependencies
+
+*Mechanism.* Build a graph of `typeof X` edges, sort topologically,
+resolve in order. Cycles → reject with named members.
+
+*Pros.* Cleaner statement than (A); generalizes beyond param lists.
+Diagnoses cycles instead of failing on first cycle encountered.
+
+*Cons.* Same fatal limitation as (A) for the mutual case (still rejects
+Example B by definition — toposort exists only on a DAG). And forcing a
+global ordering pass adds a phase the walker would otherwise not need:
+v4's solver is on-the-fly. Adding a pre-pass to compute a topological
+order, then a constraint-emission pass that consults it, fights the
+walker's single-pass shape and concentrates `typeof` handling in a special
+phase outside the main visitor.
+
+*Crescent fit.* Poor. Same defect as (A), with extra machinery.
+
+#### C. Lazy / on-demand resolution with cycle detection
+
+*Mechanism.* `typeof x` produces a thunk; force when consumed. A
+`visited` set on the force stack detects cycles; on hit, either fail or
+produce a recursive type via `V.fix`.
+
+*Pros.* Generalizes to all positions (params, aliases, body-internal).
+The "produce a recursive type on cycle" branch matches Example B's
+intuition (the two share an equation, which is what `μX. ...` expresses
+structurally).
+
+*Cons.* Thunks are an ad-hoc deferral primitive. v4 has exactly one
+primitive (`<:`) and **does not have a suspended-constraint queue** —
+sections "Phase 4b.2" and "Phase 4d" of the v4 README both explicitly
+reject one-off pending queues as architectural carve-outs. Adding a
+parallel deferral mechanism for `typeof` alone would replay that mistake.
+Also, the "produce a μ on cycle" branch is wrong for Example B: `(a:
+typeof b, b: typeof a)` is not a recursive type, it's a *shared* type —
+`a` and `b` denote the same value, not a value whose structure contains
+itself. Treating the cycle as `μ` would type both params as `μX. X` (=
+⊤/⊥ degenerate), losing the equality.
+
+*Crescent fit.* Poor. Conflates "deferral" with "equality" and reaches
+for a deferral primitive v4 deliberately doesn't have.
+
+#### D. Union-find / shared-variable resolution (via v4 bound graphs)
+
+*Mechanism.* Before resolving any annotations in a region (param list,
+top-level alias block, or — in the most general framing — *any* block
+introducing names that may be referenced via `typeof`), pre-bind each
+introduced name to a fresh `V.var()`. When an annotation `typeof x` is
+later resolved, look up `x`'s binding and **return that same var
+identity**. Subsequent concrete annotations (`b: integer`) attach via
+`V.constrain(var_b, V.integer)` and the var's bound graph absorbs the
+constraint. Mutual references work for free: `typeof b` is `var_b`,
+`typeof a` is `var_a`, and any subsequent `var_a <: T` or `var_b <: T`
+propagates through the bound graph the solver already maintains.
+
+This is union-find *in spirit* — names refer to the same canonical
+representative — but v4 implements it as **MLstruct-style bound graphs
+with explicit transitive closure** (simple-sub §3.2; v4 README "Why this
+shape"). The result is the same: `typeof b` and the binding `b` reference
+*the same variable object*, so any constraint on either is a constraint
+on both. No union-find data structure is added; the existing variable
+graph is the equivalence mechanism.
+
+*Pros.* (1) Reuses the *one* primitive v4 commits to (`<:`) with no new
+deferral mechanism, queue, or pass. (2) Naturally handles forward refs
+(Example A), mutual refs (Example B), and body-internal `typeof`
+(Example C) by the same mechanism. (3) Matches the explicit guidance in
+`type-system.md` §"typeof in function signatures: mutual equality
+constraints" — that doc already commits to this approach. (4) The
+walker remains single-pass: pre-binding names happens at scope-entry as
+part of the existing scope opening; resolution is just a lookup. (5)
+Cycle handling is trivial because there is no cycle at the type level —
+two variables sharing constraints is the normal solver state.
+
+*Cons.* Requires the walker to identify, *at scope entry*, all names
+that will be introduced in the scope so that any `typeof` reference
+encountered during annotation resolution can be answered. For a function
+header this is the param list — trivially scannable. For a `do/end`
+block, it's the `local` declarations — also scannable in one pre-walk of
+direct children (no recursion into expressions needed; we only need
+names, not their types). For a chunk, it's the top-level `local`s and
+`function NAME`s. This is the "pre-binding" step the existing open
+question #5 names. It is a small, well-scoped piece of bookkeeping, not
+a parallel pass over the whole tree.
+
+A subtler con: the synthesized type for a binding has to be subtyped
+*into* the pre-bound var (rather than installed as the binding's type
+directly), because the var is what `typeof` references point at. In
+practice this is one extra `V.constrain(var_x, synth_ty)` per
+declaration. Bound-graph propagation makes this transparent to callers.
+
+*Crescent fit.* Strong. This is the approach v4's lattice was designed
+around; the rewrite-design's "everything is `<:`" principle covers it
+exactly. The bound graph is the equivalence machinery — no new
+constructor, no new constraint kind, no new pass.
+
+#### E. Fixed-point iteration
+
+*Mechanism.* Treat `typeof` references as a system of equations; iterate
+walker/solver until a fixed point is reached.
+
+*Pros.* Theoretically clean for mutual recursion.
+
+*Cons.* Fixed-point iteration **is already what v4's bound-graph solver
+does** — every `<:` constraint propagates until quiescent. Re-running
+the walker is iterating one level too high. A walker that iterates
+explicitly would re-emit the same constraints repeatedly, fight the
+solver's cache, and lose source positions. Termination would need its
+own argument. The right place for fixed-point reasoning is inside
+`constrain` (which already has it via the identity-keyed cache); the
+walker should emit each constraint exactly once.
+
+*Crescent fit.* Poor at the walker layer. Already-implemented at the
+solver layer. Conflating the two is a layering violation.
+
+#### F. Eager / synchronous
+
+*Mechanism.* `typeof x` resolves immediately by reading `x`'s current
+binding type. If `x` is unbound or its type is incomplete, error.
+
+*Pros.* Trivial to implement; matches a naive reading of the syntax.
+
+*Cons.* Fails Example A, Example B, and Example C. Forces source-order
+restrictions the language reference explicitly disclaims. Would silently
+change the meaning of `typeof` from "the inferred type" to "the type so
+far inferred at this point", which is a different feature.
+
+*Crescent fit.* Rejected by the reference: `typeof` is defined as the
+*inferred type*, not the *currently-known type*.
+
+### 15.3 Recommendation
+
+**Approach D (union-find via v4 bound graphs).** The walker pre-binds
+every name a scope introduces — for a function header, every param;
+for a block, every `local` and `function NAME`; for a chunk, every
+top-level binding — to a fresh `V.var()` *before* resolving any
+annotation in that scope. `typeof x` resolves by environment lookup and
+returns the same var. Concrete annotations and synthesized binding types
+attach to the var via `V.constrain`. The MLstruct bound graph carries
+the equality across the solve.
+
+*Why this is principled, not ad-hoc.* The recommendation does not add a
+new constraint kind, a deferred-constraint queue, a new pass, or a
+special case in any v4 module. It is a single, regular use of the
+existing `<:` primitive plus a small piece of well-scoped walker
+bookkeeping (pre-binding names at scope entry). It is the natural
+consequence of two existing v4 commitments — "everything reduces to
+`<:`" and "variables carry mutable bound lists with explicit transitive
+closure" — applied to the question "what does a textual name denote?".
+Every other approach either adds a parallel mechanism (B, C), iterates
+at the wrong layer (E), or rejects shapes the reference admits (A, F).
+
+The system invariant doc (`docs/type-system.md` §"typeof in function
+signatures: mutual equality constraints") already names this discipline:
+"Implementation requires pre-binding all param names as `TAG_VAR`
+placeholders before resolving annotations." This section discharges
+open question #5 in `§14` by extending that same discipline beyond the
+param list to every scope that introduces names.
+
+### 15.4 Edge cases handled
+
+- **Forward reference in a param list.** Pre-binding makes `b` available
+  as a var when `typeof b` is read; the var is later constrained by `b:
+  integer`. Result: `a` and `b` both flow `integer`.
+- **Mutual equality.** Both `var_a` and `var_b` are pre-bound; `typeof
+  b = var_b`, `typeof a = var_a`. After the param list resolves, the two
+  vars are linked via the annotations (each is the other's bound). At
+  the call site, instantiation produces fresh linked vars — equivalent
+  to instantiating `<T>(a: T, b: T)`.
+- **`typeof` of a top-level binding from a later top-level alias.**
+  Top-level `local f = ...` and `function f(...)` are pre-bound during
+  chunk-entry name collection; `typeof f` resolved later returns the
+  pre-bound var, which has accumulated constraints from `f`'s body.
+- **`typeof` inside a function body referring to an outer param.** The
+  outer param's var is in the environment; lookup returns it.
+- **`typeof` of a `--::` alias.** Aliases are walker-time substitutions
+  (no runtime binding); `typeof Alias` is not meaningful and is a parse
+  error (or a walker-level error if it reaches there). `typeof` requires
+  a value-level binding, not a type-level name.
+- **Recursive function via `typeof`.** `--:: TyF = typeof f` followed by
+  `local function f() ... end` where the body uses `TyF`: pre-binding
+  gives `f` a var visible at alias time; constraints from the body
+  accumulate on that var; `TyF` denotes the var; type-position uses of
+  `TyF` see the eventual solved form. No `μ` needed unless the *body's
+  inferred type* is itself recursive, in which case `V.fix` handles it
+  at the constructor level.
+
+### 15.5 Edge cases NOT handled
+
+- **`typeof` of an expression, not a binding.** `typeof (f(x))` is out
+  of scope of this section. The reference's `typeof` syntax takes a
+  binding name, not an expression. If a future extension admits
+  expression-typeof, it interacts with effect ordering and re-emission
+  (Section 5.4's open problem) and needs its own design.
+- **`typeof` across module boundaries before the imported module has
+  been solved.** This collapses to cross-file resolution (Section 11)
+  and the cache. Within a single solver run, the pre-binding discipline
+  applies per file; cross-file `typeof` reads the cached interface,
+  which is by definition already solved.
+- **Mutual `typeof` whose linked annotations force the shared var to a
+  contradiction.** E.g. `(a: typeof b, b: typeof a, c: integer)` with a
+  call passing `string` for `a` and `integer` for `b`. The bound graph
+  reports the conflict at the conflicting `<:`, not at the `typeof`
+  itself. The diagnostic origin (Section 12) needs to attribute the
+  error to the call site's type mismatch, not to the `typeof`
+  annotation. That attribution discipline is part of the origin-chain
+  design (Section 12 / open question #7), not this section.
+
+### 15.6 Open subquestions
+
+1. **Pre-binding granularity for nested scopes.** For a `do/end` block
+   nested inside a function, do we pre-bind the block's `local`s before
+   walking its statements, or only the function's params? The principle
+   ("any name a scope introduces, pre-bind before resolving annotations
+   in that scope") suggests yes-pre-bind-locals, but no current example
+   exercises `typeof` of a sibling block-local from inside the same
+   block. The pre-binding cost is small; the question is whether it's
+   *required* for any well-formed shape, or merely conservative.
+
+2. **Pre-binding interaction with `--::` alias positioning.** Aliases
+   are processed at the position they appear. If `--:: T = typeof x`
+   appears before `local x`, the lookup must still find `x`'s pre-bound
+   var — which requires chunk-level (or enclosing-scope-level) name
+   collection to happen before *any* annotation in the chunk is
+   resolved. This is a stronger pre-binding than "pre-bind a scope's
+   names at scope entry": it requires a pre-pass collecting names.
+   Whether that pre-pass is acceptable depends on whether we accept
+   `typeof` of a textually-later binding as a supported shape. The
+   reference does not forbid it; if we admit it, the pre-pass is
+   forced. (This is a real walker-shape question; flagging it here for
+   resolution before Phase B implementation.)
+
+3. **`typeof` on a binding shadowed in an inner scope.** When `x` is
+   re-declared in an inner block, `typeof x` from inside that block
+   refers to the inner var, not the outer one. The environment's
+   functional-with-overlays shape (Section 4) handles this naturally,
+   but the pre-binding step must populate the *inner* scope's binding
+   map, not the outer one. Spelling out the discipline: pre-binding is
+   per-scope, mirrors the lexical scope tree exactly, and shadowing
+   works because lookup walks scopes outward starting from the
+   innermost.
+
