@@ -311,6 +311,40 @@ local function disjunct_is_empty(s, d)
 		end
 	end
 
+	-- (e') Same-kind record collisions on positives. Two positive records
+	-- whose values at a shared field have disjoint types are themselves
+	-- disjoint: `{ tag: "a", ... } ∩ { tag: "b", ... } = ⊥` because no
+	-- inhabitant can have `tag = "a"` and `tag = "b"` simultaneously. We
+	-- check by walking each pair, intersecting the same-named field types,
+	-- and recursing into `is_empty` on the intersection. This is the
+	-- record-level dual of (e); the rewrite design §2.2 worked example
+	-- ("({ kind: "foo", ... } | { kind: "bar", ... }) ∩ ¬{ kind: "foo", ... }
+	-- reduces to { kind: "bar", ... }") relies on it being recognized.
+	for i = 1, #d.pos do
+		local pi = d.pos[i]
+		if pi ~= nil and pi.tag == "rec" then
+			for j = i + 1, #d.pos do
+				local pj = d.pos[j]
+				if pj ~= nil and pj.tag == "rec" then
+					-- For each field present in both records, intersect the
+					-- field types and check emptiness. We use the same solver
+					-- `s` so the cache and proof-in-progress entries are
+					-- shared. Termination: each recursive call's input is a
+					-- strict subterm of the originals (a field's type, not
+					-- the whole record), so the descent measure shrinks.
+					for k in pairs(pi.fields) do
+						local vi = pi.fields[k]
+						local vj = pj.fields[k]
+						if vi ~= nil and vj ~= nil then
+							local members = { vi, vj } --[[: V4Type[] ]]
+							if is_empty(T.inter(members), s) then return true end
+						end
+					end
+				end
+			end
+		end
+	end
+
 	-- (f) Positive-covers-by-negative via structural subtyping. If any
 	-- positive atom P is <: some negative atom N, then P ∩ ¬N = ⊥ and the
 	-- whole conjunction is empty. We call into the solver's subtype check;

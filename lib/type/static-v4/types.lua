@@ -43,6 +43,14 @@ local M = {}
 --:: DnfDisjunct = { pos: V4Type[], neg: V4Type[] }
 --:: Dnf         = { [integer]: DnfDisjunct }
 
+-- Working type used by match.lua. Same cross-file-alias workaround: declared
+-- here so V4Arm's V4Type references resolve. A match arm is a pattern, a
+-- result template, and the list of capture variables shared between them.
+-- The arm's wildcard sibling is NOT represented here — wildcards are passed
+-- as a side `wildcard_result` argument to the match API because their
+-- pattern is synthesized from the union of the other arms.
+--:: V4Arm = { pattern: V4Type, result: V4Type, captures: V4Type[] }
+
 -- ── Tags ──────────────────────────────────────────────────────────────────
 
 -- Tag string constants are exposed for callers wanting to switch on tag.

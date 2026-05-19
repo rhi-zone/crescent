@@ -1,4 +1,4 @@
-# static-v4 — typechecker foundation (Phases 4a–4c)
+# static-v4 — typechecker foundation (Phases 4a–4d)
 
 Greenfield typechecker, derived from `docs/typechecker-rewrite-design.md`
 (itself derived from simple-sub and MLstruct).
@@ -11,9 +11,14 @@ This directory currently implements:
 - **Phase 4c** — complement `~T`, DNF-based emptiness checking, and the
   MLstruct negation rewrite that lifts the 4a union-on-RHS / intersection-
   on-LHS rejection (see "Phase 4c" section below).
+- **Phase 4d** — match types as bidirectional pattern destructors. Forward
+  (subject → result) and backward (result → subject constraint) share the
+  same arm-matching primitive. The wildcard `_` desugars to the v4
+  complement type `~(union of other arms' patterns)` — real type, not
+  syntactic special-casing.
 
 Still out of scope: the AST walker, CLI integration, cache (`.cri`),
-match types (4d), quantifiers / rank-N (4e), effects (4f).
+quantifiers / rank-N (4e), effects (4f).
 
 ## Layout
 
@@ -301,6 +306,133 @@ for Phase 4d when match-type wildcards force the feature in. Negation
 itself is still constructible — only the index reducer's handling of it
 is pending.
 
+## Phase 4d — match types
+
+`match X { P1 => R1 | ... | _ => Rn }` is a type-level function from the
+lattice to itself (rewrite design §5). Implemented in `match.lua`.
+
+### API
+
+- `M.arm(pattern, result, captures?)` — build a single arm. `captures` is a
+  list of fresh `V.var()`s shared between `pattern` and `result`.
+- `M.match(subject, arms, wildcard_result?)` — forward evaluation. Returns
+  `(reduced_type, nil)` on success, `(nil, errmsg)` on suspension /
+  disjointness failure / non-exhaustiveness.
+- `M.match_backward(arms, wildcard_result?, expected_result)` — backward
+  evaluation. Returns the union of arm patterns whose result is compatible
+  with `expected_result`. The wildcard, when compatible, contributes
+  `~(union of patterns)`.
+- `M.match_forward` is an alias for `M.match`.
+
+### Wildcard desugaring
+
+`_` is **sugar for `~(P1 ∪ ... ∪ Pn)`**, not a special syntactic gadget.
+The complement is constructed via 4c's `T.neg` and participates in the
+generic subtype / emptiness path. Nothing in `match.lua` special-cases the
+wildcard pattern — it flows through the same `arm_outcome` primitive every
+other arm uses. `wildcard_pattern(arms)` is a one-liner that builds
+`~(union)` from the explicit arms.
+
+### Same primitive forward and backward
+
+Both directions call `arm_outcome(test_type, pattern, allow_vars)` (see
+`match.lua` near line 195). The function returns `"fires"` /
+`"never"` / `"suspended"` based on:
+
+1. `test_type <: pattern` via the solver (purity-guarded against free vars).
+2. `test_type ∩ pattern = ⊥` via the emptiness primitive.
+
+Forward passes `(subject, arm.pattern, captures)`; backward passes
+`(expected_result, arm.result, captures)`. The shape is symmetric — only
+the inputs swap.
+
+### Disjointness check at construction
+
+`check_disjointness(arms)` (in `match.lua`) walks each pair of non-wildcard
+arms and asserts `is_empty(P_i ∩ P_j)` via 4c's emptiness primitive.
+Overlap is rejected. This **IS** the load-bearing principle: match arms
+partition the subject's universe. Without disjointness, "the arm that
+fires" is not well-defined. Examples that pass:
+
+- Two arms over disjoint primitives (`string`, `integer`) → kind-disjoint.
+- Two arms over records with disjoint literal discriminants
+  (`{ tag: "a" }`, `{ tag: "b" }`) → recognized by `empty.lua`'s extended
+  same-kind record collision rule (added in 4d, §below).
+
+Examples that fail:
+
+- Two arms over overlapping primitives (`number`, `integer`).
+- Two arms over records sharing a field type (`{ x: number }`,
+  `{ x: integer }`).
+
+### Captures
+
+A capture is an explicit fresh `V4Var` shared between an arm's pattern and
+result. The user constructs the var once and threads it through both:
+
+```lua
+local cap = V.var("V")
+local pat = V.rec({ value = cap }, false)
+local arms = { V.arm(pat, cap, { cap }) }
+-- match T { { value: %V } => %V, _ => nil }
+```
+
+Each evaluation **freshens** the captures (substitutes fresh vars into
+both pattern and result via `freshen_captures`) so multiple invocations
+produce independent constraint graphs. Forward: solve `X <: P[%V := α]`
+and return `R[%V := α]`. Backward: solve `R <: result[%V := α]` and
+return `pattern[%V := α]` as the subject contribution.
+
+### Suspension: option 1 (reject loudly)
+
+If the subject (or expected result, in backward) mentions an unbound
+non-capture type variable, `arm_outcome` reports `"suspended"` rather
+than risk mutating the variable's bounds during a probe. The principled
+fix (design §5.3) is a general suspension queue shared with deferred
+indexed access (4b.2 has the same issue). 4d does **not** implement the
+queue; it rejects loudly with an error that names the missing mechanism.
+
+Rationale: per CLAUDE.md "Ad-hoc conditions are strictly forbidden", a
+one-off pending-match queue is exactly the kind of carve-out future
+sessions would pattern-match as the intended design. The principled
+suspension queue serves match types AND indexed access AND future
+features; it is a separate, larger piece of work and lives in a later
+phase.
+
+### Union subject distribution
+
+A union subject `(A | B)` distributes:
+`match (A | B) { ... } = match A { ... } ∪ match B { ... }`. Each member
+hits its appropriate arm; the result is the union. Without this, a union
+subject would suspend (the union doesn't subtype any single arm). The
+forward path handles this at the top of `M.forward` (subject.tag ==
+"union" → recurse member-wise).
+
+### Same-kind record disjointness — addition to `empty.lua`
+
+4d extended `empty.lua` to recognize that two positive records sharing a
+field with disjoint types are themselves disjoint:
+`{ tag: "a", ... } ∩ { tag: "b", ... } = ⊥`. The check is the record-level
+dual of the same-kind primitive/literal collision rule already present;
+it recurses into `is_empty` on the intersection of the shared field types,
+descending strictly to a subterm of the originals. Termination is by
+that descent measure.
+
+This was a real gap in 4c's emptiness, surfaced by match types over
+discriminated-union patterns. Per CLAUDE.md "Fix the specific problem,
+don't abandon the approach": rather than working around the gap in
+`match.lua`, the principled fix is to make emptiness see what it should
+already have seen.
+
+### Indexed access on negated keys
+
+Still deferred. 4d's match-type wildcards desugar to record/primitive-level
+negation that participates in subtype/emptiness — they do NOT generate
+`T[~"x"]` indexed-access expressions. So the negated-key handling in
+`index.lua` is not forced by 4d. Documented status: tracked for a later
+phase that has a real caller; the implementation is one analyze_key case
+when needed (see `empty.lua` EXCEPTIONS note 3).
+
 ## Running
 
 ```
@@ -309,6 +441,7 @@ timeout 30 bin/cr check lib/type/static-v4/types.lua \
                        lib/type/static-v4/subtype.lua \
                        lib/type/static-v4/empty.lua \
                        lib/type/static-v4/index.lua \
+                       lib/type/static-v4/match.lua \
                        lib/type/static-v4/init.lua \
                        lib/type/static-v4/static_v4_test.lua
 ```

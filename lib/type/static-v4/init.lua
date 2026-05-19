@@ -10,6 +10,7 @@ end
 local T  = require("lib.type.static-v4.types")
 local ST = require("lib.type.static-v4.subtype")
 local IX = require("lib.type.static-v4.index")
+local MA = require("lib.type.static-v4.match")
 
 local M = {}
 
@@ -44,6 +45,12 @@ M.subtype    = ST.subtype
 
 -- Indexed access (Phase 4b.2).
 M.index   = IX.index
+
+-- Match types (Phase 4d).
+M.match            = MA.match
+M.match_forward    = MA.forward
+M.match_backward   = MA.backward
+M.arm              = MA.arm
 
 -- Test affordances.
 M._reset_var_ids = T._reset_var_ids

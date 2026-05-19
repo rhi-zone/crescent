@@ -673,4 +673,301 @@ T.describe("negation — DNF normalization (worst-case structural)", function()
 	end)
 end)
 
+-- ── Phase 4d: match types ─────────────────────────────────────────────────
+
+T.describe("match — forward evaluation", function()
+	-- Shared literal instances so identity comparisons in tests succeed
+	-- (V.literal builds a fresh table per call).
+	local L_TRUE  = V.literal("boolean", true)
+	local L_FALSE = V.literal("boolean", false)
+
+	T.it("ground subject hits exactly one arm (IsString<string>)", function()
+		-- IsString<T> = match T { string => true, _ => false }
+		local arms = { V.arm(V.string_, L_TRUE) }
+		local r, err = V.match(V.string_, arms, L_FALSE)
+		T.eq(err, nil)
+		T.eq(r, L_TRUE)
+	end)
+
+	T.it("ground subject hits the wildcard (IsString<integer>)", function()
+		local arms = { V.arm(V.string_, L_TRUE) }
+		local r, err = V.match(V.integer, arms, L_FALSE)
+		T.eq(err, nil)
+		T.eq(r, L_FALSE)
+	end)
+
+	T.it("literal subject fires the primitive-typed arm (\"x\" <: string)", function()
+		local arms = { V.arm(V.string_, L_TRUE) }
+		local r, err = V.match(V.literal("string", "x"), arms, L_FALSE)
+		T.eq(err, nil)
+		T.eq(r, L_TRUE)
+	end)
+end)
+
+T.describe("match — disjointness check", function()
+	T.it("overlapping non-wildcard arms rejected at construction", function()
+		-- number and integer overlap (integer <: number), so they are NOT
+		-- disjoint.
+		local arms = {
+			V.arm(V.number, V.literal("integer", 1)),
+			V.arm(V.integer, V.literal("integer", 2)),
+		}
+		local r, err = V.match(V.integer, arms, nil)
+		T.eq(r, nil)
+		T.ok(err and err:find("not disjoint", 1, true) ~= nil,
+			"expected disjointness error, got: " .. tostring(err))
+	end)
+
+	T.it("disjoint arms pass the check", function()
+		-- string and integer are disjoint (different primitive kinds).
+		local L1, L2 = V.literal("integer", 1), V.literal("integer", 2)
+		local arms = {
+			V.arm(V.string_, L1),
+			V.arm(V.integer, L2),
+		}
+		local r, err = V.match(V.integer, arms, nil)
+		T.eq(err, nil)
+		T.eq(r, L2)
+	end)
+end)
+
+T.describe("match — multiple arms + wildcard", function()
+	-- Three pairwise-disjoint arms covering string, integer, and boolean, with
+	-- a wildcard for the rest. Shared literal instances so tests can compare
+	-- by identity.
+	local L_S = V.literal("string", "s")
+	local L_I = V.literal("string", "i")
+	local L_B = V.literal("string", "b")
+	local L_O = V.literal("string", "other")
+	local arms = {
+		V.arm(V.string_, L_S),
+		V.arm(V.integer, L_I),
+		V.arm(V.boolean, L_B),
+	}
+
+	T.it("each arm fires independently", function()
+		local r1 = ({V.match(V.string_, arms, L_O)})[1]
+		local r2 = ({V.match(V.integer, arms, L_O)})[1]
+		local r3 = ({V.match(V.boolean, arms, L_O)})[1]
+		T.eq(r1, L_S)
+		T.eq(r2, L_I)
+		T.eq(r3, L_B)
+	end)
+
+	T.it("subject in none of the arms hits the wildcard", function()
+		-- nil is not in string, integer, or boolean → wildcard.
+		local r, err = V.match(V.nil_, arms, L_O)
+		T.eq(err, nil)
+		T.eq(r, L_O)
+	end)
+end)
+
+T.describe("match — backward evaluation", function()
+	T.it("known result picks the firing arm's pattern", function()
+		-- IsString<T> = match T { string => true, _ => false }
+		-- backward(true) = string. backward(false) = ~string.
+		local L_T = V.literal("boolean", true)
+		local L_F = V.literal("boolean", false)
+		local arms = { V.arm(V.string_, L_T) }
+		local wild = L_F
+		local rt, et = V.match_backward(arms, wild, L_T)
+		T.eq(et, nil)
+		T.eq(rt, V.string_)
+		local rf, ef = V.match_backward(arms, wild, L_F)
+		T.eq(ef, nil)
+		-- The wildcard pattern is ~(string). Single contribution → that pattern.
+		T.ok(rf ~= nil and rf.tag == "neg",
+			"expected ~string, got: " .. V.show(rf))
+		T.eq(rf and rf.body, V.string_)
+	end)
+
+	T.it("incompatible expected result yields the empty contribution error", function()
+		-- arms produce only "s" or "i"; expected "z" matches neither.
+		local arms = {
+			V.arm(V.string_, V.literal("string", "s")),
+			V.arm(V.integer, V.literal("string", "i")),
+		}
+		local r, err = V.match_backward(arms, nil, V.literal("string", "z"))
+		T.eq(r, nil)
+		T.neq(err, nil)
+	end)
+end)
+
+T.describe("match — captures", function()
+	T.it("forward capture witnesses the structural fragment", function()
+		-- match T { { value: %V } => %V, _ => nil }
+		local cap = V.var("V")
+		local arms = { V.arm(V.rec({ value = cap }, false), cap, { cap }) }
+		local subj = V.rec({ value = V.integer }, false)
+		local r, err = V.match(subj, arms, V.nil_)
+		T.eq(err, nil)
+		-- Result is a freshened capture var with integer as a lower bound.
+		T.ok(r ~= nil and r.tag == "var", "expected fresh var, got: " .. V.show(r))
+		T.eq(#r.lower, 1)
+		T.eq(r.lower[1], V.integer)
+	end)
+
+	T.it("backward capture constrains the subject", function()
+		-- match T { { value: %V } => %V, _ => nil }
+		-- backward(integer) should yield { value: integer } (capture flows).
+		local cap = V.var("V")
+		local arms = { V.arm(V.rec({ value = cap }, false), cap, { cap }) }
+		local r, err = V.match_backward(arms, V.nil_, V.integer)
+		T.eq(err, nil)
+		-- Expected result <: nil is "never"; expected <: %V is "fires" (V
+		-- gets a lower bound of integer). The contribution is the pattern
+		-- { value: %V } with V bound to integer.
+		T.ok(r ~= nil, "expected non-nil result")
+		-- Should be the pattern (no union with the wildcard since wildcard
+		-- result nil is disjoint from integer).
+		T.ok(r ~= nil and r.tag == "rec",
+			"expected record pattern, got: " .. V.show(r))
+	end)
+end)
+
+T.describe("match — recursive patterns and subjects", function()
+	T.it("μ subject matches an open-record pattern", function()
+		-- list = μX. { value: integer, next: X }. Match against pattern
+		-- { value: integer, ... } — fires; otherwise → "other".
+		local L_L = V.literal("string", "list")
+		local L_O = V.literal("string", "other")
+		local list = V.fix(function(self)
+			return V.rec({ value = V.integer, next = self }, false)
+		end)
+		local arms = { V.arm(V.rec({ value = V.integer }, true), L_L) }
+		local r, err = V.match(list, arms, L_O)
+		T.eq(err, nil)
+		T.eq(r, L_L)
+	end)
+end)
+
+T.describe("match — union distribution", function()
+	T.it("union subject distributes member-wise", function()
+		-- IsString<integer | string> = match (integer | string) { ... }
+		-- = IsString<integer> | IsString<string> = false | true.
+		local arms = { V.arm(V.string_, V.literal("boolean", true)) }
+		local wild = V.literal("boolean", false)
+		local r, err = V.match(V.union({ V.integer, V.string_ }), arms, wild)
+		T.eq(err, nil)
+		T.ok(r ~= nil and r.tag == "union",
+			"expected union, got: " .. V.show(r))
+		local saw_t, saw_f = false, false
+		for _, m in ipairs(r.members) do
+			if m == V.literal("boolean", true)  then saw_t = true end
+			if m == V.literal("boolean", false) then saw_f = true end
+		end
+		-- Identity equality won't fire (literals are fresh tables). Check by
+		-- structural inspection.
+		saw_t, saw_f = false, false
+		for _, m in ipairs(r.members) do
+			if m.tag == "literal" and m.base == "boolean" and m.value == true  then saw_t = true end
+			if m.tag == "literal" and m.base == "boolean" and m.value == false then saw_f = true end
+		end
+		T.ok(saw_t, "missing true member: " .. V.show(r))
+		T.ok(saw_f, "missing false member: " .. V.show(r))
+	end)
+end)
+
+T.describe("match — suspension", function()
+	T.it("unbound variable subject rejects loudly (no suspension queue)", function()
+		-- Per design §5.3, the principled handling is suspension. 4d does not
+		-- expose the general suspension mechanism (it is shared with deferred
+		-- indexed access, 4b.2). The principled fallback is reject-loudly —
+		-- not a one-off pending-match queue. See CLAUDE.md
+		-- "Ad-hoc conditions are strictly forbidden".
+		local v = V.var("x")
+		local arms = { V.arm(V.string_, V.literal("boolean", true)) }
+		local r, err = V.match(v, arms, V.literal("boolean", false))
+		T.eq(r, nil)
+		T.ok(err and err:find("suspended", 1, true) ~= nil
+		      or err and err:find("deferred", 1, true) ~= nil,
+			"expected deferred/suspended error, got: " .. tostring(err))
+	end)
+end)
+
+T.describe("match — _ as sugar for complement", function()
+	T.it("wildcard reaches the negated-union backward", function()
+		-- Two-arm match: string → "s", integer → "i", _ → "other".
+		-- backward("other") should produce ~(string | integer).
+		local arms = {
+			V.arm(V.string_, V.literal("string", "s")),
+			V.arm(V.integer, V.literal("string", "i")),
+		}
+		local r, err = V.match_backward(arms, V.literal("string", "other"), V.literal("string", "other"))
+		T.eq(err, nil)
+		-- The result should be ~(string | integer) (i.e. a neg of a union).
+		T.ok(r ~= nil and r.tag == "neg",
+			"expected ~union, got: " .. V.show(r))
+		T.ok(r ~= nil and r.body.tag == "union",
+			"expected ~(union), got: " .. V.show(r))
+	end)
+
+	T.it("wildcard arm dispatches via emptiness, not by special-casing", function()
+		-- A subject disjoint from all explicit arms hits the wildcard. The
+		-- wildcard's pattern is the v4 type ~(union of arms) — handled by the
+		-- generic subtype path, not by any special wildcard branch. With three
+		-- primitive-typed arms (string, integer, boolean) the wildcard pattern
+		-- is ~(string ∪ integer ∪ boolean), and a subject of nil hits the
+		-- wildcard via the same arm_outcome primitive used for the explicit
+		-- arms — observable as the correct result with no special-case code
+		-- path in match.lua.
+		local L_S = V.literal("integer", 1)
+		local L_I = V.literal("integer", 2)
+		local L_B = V.literal("integer", 3)
+		local L_O = V.literal("integer", 0)
+		local arms = {
+			V.arm(V.string_, L_S),
+			V.arm(V.integer, L_I),
+			V.arm(V.boolean, L_B),
+		}
+		local r, err = V.match(V.nil_, arms, L_O)
+		T.eq(err, nil)
+		T.eq(r, L_O)
+	end)
+end)
+
+T.describe("match — discriminated-record dispatch", function()
+	T.it("records with disjoint literal discriminants are disjoint arms", function()
+		-- { tag: "a" } ∩ { tag: "b" } = ⊥ because no inhabitant can have
+		-- tag = "a" and tag = "b" simultaneously. The same-kind record
+		-- collision rule in empty.lua recognizes this; match-arm construction
+		-- on two such patterns must therefore pass the disjointness check
+		-- and forward-fire on the appropriate record.
+		local L1 = V.literal("integer", 1)
+		local L2 = V.literal("integer", 2)
+		local L0 = V.literal("integer", 0)
+		local arms = {
+			V.arm(V.rec({ tag = V.literal("string", "a") }, false), L1),
+			V.arm(V.rec({ tag = V.literal("string", "b") }, false), L2),
+		}
+		-- Subject `{ tag: "a" }` fires the first arm.
+		local subj = V.rec({ tag = V.literal("string", "a") }, false)
+		local r, err = V.match(subj, arms, L0)
+		T.eq(err, nil)
+		T.eq(r, L1)
+		-- Subject `{ tag: "b" }` fires the second.
+		local subj2 = V.rec({ tag = V.literal("string", "b") }, false)
+		local r2, err2 = V.match(subj2, arms, L0)
+		T.eq(err2, nil)
+		T.eq(r2, L2)
+	end)
+end)
+
+T.describe("match — worked design-doc example", function()
+	T.it("(A | B | (A->B)) ∩ ~(A->B) <: A | B", function()
+		-- This is the design doc §2.2 worked example, not literally a match
+		-- expression but the kind of simplification a match arm's backward
+		-- step relies on. It exercises the same machinery: distribution of
+		-- intersection over union and self-cancellation of a function-shaped
+		-- conjunct with its negation. The test already exists for the
+		-- subtype path; reasserting here serves as the "match types rely on
+		-- this" anchor.
+		local A, B = V.integer, V.string_
+		local fab = V.fn({A}, B)
+		local lhs = V.inter({ V.union({A, B, fab}), V.neg(fab) })
+		local rhs = V.union({A, B})
+		T.ok(st(lhs, rhs))
+	end)
+end)
+
 return T._summary()
