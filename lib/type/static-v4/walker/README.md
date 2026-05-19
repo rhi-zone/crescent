@@ -5,14 +5,12 @@ into v4 type-system constraints. See
 `docs/typechecker-ast-walker-design.md` for the full design.
 
 This directory is being built incrementally across sub-phases A–J (design
-doc §13). **Current state: sub-phase F complete** — indexed access
-expressions (`obj.k` / `obj[k]`), the empty-table literal, module-pattern
-accumulation via Option D (§13.5), indexed callees (now resolved through
-the standard SYNTHESIZE recursion), indexed-LHS writes (regime-split
-between module accumulation and v4 index-reducer checks), and varargs
-spread/non-spread polish on call sites. Stacks on top of A (env/dispatch),
-B (literals, identifiers, varargs), C (functions, calls, returns), D
-(control-flow + flow-sensitive narrowing), and E (local/assign + match).
+doc §13). **Current state: sub-phase G complete** — FFI cdef integration
+recognises `ffi.cdef[[ ... ]]` call sites and populates the `$FfiC`
+intrinsic table (the closed record bound to `ffi.C`). Stacks on top of A
+(env/dispatch), B (literals, identifiers, varargs), C (functions, calls,
+returns), D (control-flow + flow-sensitive narrowing), E (local/assign +
+match), and F (indexed access, module pattern, varargs polish).
 
 ## Sub-phase A — what's here
 
@@ -446,6 +444,107 @@ together with the full table-literal pass.
 | NODE_FIELD_EXPR   | `{ tag, line, col, target: Node, key: string }`              |
 | NODE_INDEX_EXPR   | `{ tag, line, col, target: Node, key: Node }`                |
 | NODE_TABLE_EXPR   | `{ tag, line, col, fields: TableField[] }` (only `#fields == 0` accepted in F) |
+
+## Sub-phase G — what's here
+
+- **`ffi_cdef.lua`** — call-site recognition for `ffi.cdef[[ ... ]]`,
+  invocation of the existing cdef parser
+  (`lib/type/static/cdecl_parse.lua`), CTypeDesc → V4Type translation,
+  and `$FfiC` accumulation via re-binding of the `ffi` env entry.
+
+  Handlers registered/overridden:
+  - `NODE_CALL_EXPR` (OVERRIDE; was sub-phase F's indexed-callee variant)
+    — wraps F's handler. On a callee that matches `ffi.cdef` /
+    `ffi["cdef"]` with exactly one string-literal argument, the cdef
+    string is parsed via `cdecl_parse.parse(source, pool)` (the **existing**
+    parser; we DO NOT reimplement). Each declaration is translated to a
+    V4Type per design §9, and `ffi.C` is rebound to a new closed record
+    carrying the merged field set. Non-cdef calls defer to F's handler
+    unchanged.
+
+  Detection contract:
+  - `ffi.cdef` (NODE_FIELD_EXPR over identifier `ffi`, key `"cdef"`).
+  - `ffi["cdef"]` (NODE_INDEX_EXPR with string-literal key `"cdef"`).
+  - Any other callee shape is ignored (the call falls through to F).
+  - Argument list must be exactly one NODE_LITERAL of LIT_STRING. A
+    non-literal argument is rejected — static cdef analysis requires
+    the literal text. Wrong arity is also rejected.
+
+  $FfiC representation:
+  - `ffi` is in env.bindings as a closed record `{ cdef: (string)->nil,
+    C: V.rec({...}, /*open=*/false, nil) }`. The `C` field is the
+    `$FfiC` accumulator.
+  - Each cdef call rebuilds the `ffi` record with `C` replaced by a new
+    closed record carrying the union of previous and new declarations.
+    Closed-record discipline gives undeclared-symbol errors for free
+    via v4's index reducer: `ffi.C.undeclared_xyz` resolves through
+    the standard NODE_FIELD_EXPR path and errors at the missing field.
+    No special case in the walker.
+
+  CTypeDesc → V4Type table (design §9):
+  - `void` → `V.prim("nil")`.
+  - `bool` → `V.prim("boolean")`.
+  - `int` / `char` / `enum` / typedef'd int kinds → `V.prim("integer")`.
+  - `float` / `double` → `V.prim("number")`.
+  - `char*` → `V.prim("string")` (C strings).
+  - `void*` → `V.top()` (opaque).
+  - struct → closed `V.rec` with named fields recursively translated.
+  - `struct T *` → `V.rec({}, /*open=*/true, V.indexer(literal(0), inner))`
+    — the open-record-with-zero-indexer encodes both pointer
+    dereference (`ptr[0]`) and the structurally-implied field reads.
+  - function / function pointer → `V.fn(params, ret, {})`. Variadic C
+    functions get a trailing `V.top()` param as the principled fallback
+    until v4 grows native variadic-fn support.
+  - union / unresolved typedef name → `V.top()` (not safely representable
+    as a closed rec; matches the v3 translator's choice).
+
+  Translator parallel to `lib/type/static/cdef.lua`:
+  The v3 translator writes into arena-backed type IDs; v4 uses value
+  records. The translation table is the same (per design §9) but the
+  output representation differs, so we re-derive the mapping in v4's
+  constructors rather than wrapping the v3 translator. Per CLAUDE.md
+  "Multiple implementations of the same spec" applies — both are real
+  implementations of design §9, not one wrapping the other.
+
+  Typedef and struct-declaration handling:
+  - `typedef int my_int_t;` — the cdef parser tracks the typedef in its
+    own typedef table; subsequent decls in the same call resolve `my_int_t`
+    to `int`. The walker does NOT bind type aliases on the env (the
+    walker env has no type-alias slot in 4a; this is a v4 limitation,
+    not a sub-phase G punt). The integration is sufficient for the
+    common case where typedefs are used to inform the same cdef block's
+    function signatures.
+  - `struct foo { int x; };` — defines a type but does not register a
+    symbol on `ffi.C`. Field-write to `ffi.C` accepts only `func` /
+    `var` / `enum_val` decl kinds per the parser's classification.
+
+### Annotation-free, parallel to functions.lua / indexed_access.lua
+
+`ffi_cdef.lua` follows the now-canonical annotation-free convention. The
+cross-module `--::` alias-resolution limitation in env.lua's
+`--:: WalkerEnv` declaration would re-trigger env.lua diagnostics if this
+file carried `--:` annotations or `--::` aliases referencing V4Type. The
+file is intentionally bare; structural narrowing uses `type()` guards
+where field shape needs to be confirmed.
+
+To work around per-branch narrowing of `ctype` to the literal type
+checked at the dispatch site (`{k: "func"}` etc.) which would otherwise
+make recursive sub-calls fail with "missing field" diagnostics, the
+struct and function helpers (`struct_fields_to_v4`, `func_parts_to_v4`)
+accept the raw inner fields rather than the parent descriptor. The
+calling site indexes the fields out of the descriptor (`ctype.fields`,
+`ctype.params`, etc.) before invoking the helper — this keeps the
+helper's inferred signature independent of the dispatch branch.
+
+### Decoded shapes added in G
+
+The CTypeDesc shape comes from `lib/type/static/cdecl_parse.lua`. It is a
+recursive open record with a `k` discriminant: `void`/`bool`/`int`/
+`char`/`float`/`enum`/`ptr`/`arr`/`struct`/`union`/`func`/`name`. Fields
+beyond `k` depend on `k` (`to` for `ptr`, `of` for `arr`,
+`fields`/`members` for `struct`, `params`/`ret`/`vararg` for `func`).
+See `lib/type/static/cdef.lua` and `cdecl_parse.lua` for the authoritative
+shape.
 
 ## Sub-phase A does NOT include
 

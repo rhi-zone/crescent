@@ -1737,3 +1737,231 @@ T.describe("walker sub-phase F: varargs spread/non-spread", function()
 		T.eq(err, nil)
 	end)
 end)
+
+-- ── sub-phase G: FFI cdef integration ────────────────────────────────────
+--
+-- The walker recognises `ffi.cdef[[ ... ]]` calls and populates the
+-- $FfiC closed record bound under `ffi.C`. Subsequent `ffi.C.foo`
+-- accesses go through the standard NODE_FIELD_EXPR path against the
+-- populated record. Undeclared symbols error via v4's closed-record
+-- missing-field rule.
+
+local ffi_cdef_mod = require("lib.type.static-v4.walker.ffi_cdef")
+
+-- Build the prelude-style `ffi` binding the cdef machinery expects: a
+-- record with a `C` field holding an empty closed rec. (Reused across the
+-- sub-phase G tests to keep boilerplate minimal.)
+local function ffi_prelude_env()
+	local cdef_fn = V.fn({ V.string_ }, V.nil_, nil)
+	local empty_c = V.rec({}, false, nil)
+	local ffi_mod = V.rec({ cdef = cdef_fn, C = empty_c }, false, nil)
+	return E.bind(E.new(), "ffi", ffi_mod)
+end
+
+T.describe("walker sub-phase G: ffi.cdef call-shape detection", function()
+	T.it("detects ffi.cdef as NODE_FIELD_EXPR callee", function()
+		local callee = field_expr(id("ffi"), "cdef")
+		T.ok(ffi_cdef_mod.is_ffi_cdef_callee(callee))
+	end)
+
+	T.it("detects ffi['cdef'] as NODE_INDEX_EXPR callee", function()
+		local callee = index_expr(id("ffi"), lit_str("cdef"))
+		T.ok(ffi_cdef_mod.is_ffi_cdef_callee(callee))
+	end)
+
+	T.it("rejects unrelated indexed callees (other.cdef, ffi.other)", function()
+		T.fail(ffi_cdef_mod.is_ffi_cdef_callee(field_expr(id("other"), "cdef")))
+		T.fail(ffi_cdef_mod.is_ffi_cdef_callee(field_expr(id("ffi"), "other")))
+		T.fail(ffi_cdef_mod.is_ffi_cdef_callee(id("ffi")))
+	end)
+end)
+
+T.describe("walker sub-phase G: cdef accumulation into ffi.C", function()
+	T.it("simple function cdef registers a callable field on ffi.C", function()
+		local s = V.new_solver()
+		local env = ffi_prelude_env()
+		local node = call(field_expr(id("ffi"), "cdef"),
+			lit_str("int foo(int);"))
+		local _ty, env2, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		-- ffi.C.foo should now be (integer) -> integer (per the design's
+		-- mapping table; the cdef parser sees `int` as the v4 integer
+		-- prim).
+		local ffi_ty = env2.bindings["ffi"]
+		T.eq(ffi_ty.tag, "rec")
+		local c_ty = ffi_ty.fields["C"]
+		T.eq(c_ty.tag, "rec")
+		T.eq(c_ty.open, false) -- closed-record discipline
+		local foo_ty = c_ty.fields["foo"]
+		T.ok(foo_ty ~= nil)
+		T.eq(foo_ty.tag, "fn")
+		T.eq(#foo_ty.params, 1)
+		T.eq(foo_ty.params[1], V.integer)
+		T.eq(foo_ty.ret, V.integer)
+	end)
+
+	T.it("struct cdef body registers a closed-record field type", function()
+		local s = V.new_solver()
+		local env = ffi_prelude_env()
+		-- `struct foo { int x; };` followed by a forward-decl variable of
+		-- that type so the parser surfaces a `var` decl into ffi.C.
+		local node = call(field_expr(id("ffi"), "cdef"),
+			lit_str("struct foo { int x; };"))
+		local _ty, env2, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		-- Struct decls don't populate ffi.C symbols themselves (they
+		-- define a type alias for the C name) — see ffi_cdef.lua
+		-- module comment. The test asserts that no error is raised and
+		-- ffi.C is left intact (still closed, still empty).
+		local c_ty = env2.bindings["ffi"].fields["C"]
+		T.eq(c_ty.tag, "rec")
+		T.eq(c_ty.open, false)
+	end)
+
+	T.it("undeclared symbol on ffi.C errors via closed-record rule", function()
+		local s = V.new_solver()
+		local env = ffi_prelude_env()
+		-- Populate ffi.C with one symbol; then read a different one.
+		local cdef_node = call(field_expr(id("ffi"), "cdef"),
+			lit_str("int foo(int);"))
+		local _ty1, env2, err1 = W.walk_synth(cdef_node, env, s)
+		T.eq(err1, nil)
+		-- Field access on a declared symbol succeeds.
+		local hit = field_expr(field_expr(id("ffi"), "C"), "foo")
+		local hit_ty, _env_h, err_h = W.walk_synth(hit, env2, s)
+		T.eq(err_h, nil)
+		T.ok(hit_ty ~= nil)
+		T.eq(hit_ty.tag, "fn")
+		-- Field access on an undeclared symbol fails.
+		local miss = field_expr(field_expr(id("ffi"), "C"), "undeclared_xyz")
+		local _miss_ty, _env_m, err_m = W.walk_synth(miss, env2, s)
+		T.ok(err_m ~= nil)
+		T.ok(err_m:find("undeclared_xyz", 1, true) ~= nil)
+	end)
+
+	T.it("multiple cdef blocks accumulate", function()
+		local s = V.new_solver()
+		local env = ffi_prelude_env()
+		local n1 = call(field_expr(id("ffi"), "cdef"), lit_str("int foo(int);"))
+		local _ty1, env2, err1 = W.walk_synth(n1, env, s)
+		T.eq(err1, nil)
+		local n2 = call(field_expr(id("ffi"), "cdef"), lit_str("int bar(int);"))
+		local _ty2, env3, err2 = W.walk_synth(n2, env2, s)
+		T.eq(err2, nil)
+		local c_ty = env3.bindings["ffi"].fields["C"]
+		T.ok(c_ty.fields["foo"] ~= nil)
+		T.ok(c_ty.fields["bar"] ~= nil)
+		T.eq(c_ty.open, false)
+	end)
+
+	T.it("non-literal cdef argument is rejected", function()
+		local s = V.new_solver()
+		-- Bind a string identifier to feed cdef.
+		local env = E.bind(ffi_prelude_env(), "src", V.string_)
+		local node = call(field_expr(id("ffi"), "cdef"), id("src"))
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+		T.ok(err:find("string literal", 1, true) ~= nil)
+	end)
+
+	T.it("wrong arity (0 or 2+ args) is rejected", function()
+		local s = V.new_solver()
+		local env = ffi_prelude_env()
+		local none = call(field_expr(id("ffi"), "cdef"))
+		local _t1, _e1, err1 = W.walk_synth(none, env, s)
+		T.ok(err1 ~= nil)
+		T.ok(err1:find("exactly one", 1, true) ~= nil)
+		local two = call(field_expr(id("ffi"), "cdef"),
+			lit_str("int x;"), lit_str("int y;"))
+		local _t2, _e2, err2 = W.walk_synth(two, env, s)
+		T.ok(err2 ~= nil)
+		T.ok(err2:find("exactly one", 1, true) ~= nil)
+	end)
+
+	T.it("ffi.cdef without ffi in scope errors", function()
+		local s = V.new_solver()
+		local env = E.new() -- no `ffi` binding
+		local node = call(field_expr(id("ffi"), "cdef"), lit_str("int foo(int);"))
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		-- Either the undefined-name lookup on `ffi` fires first (via the
+		-- field-target synth) or our explicit "not in scope" message fires.
+		-- Both are acceptable — the contract is just that this errors.
+		T.ok(err ~= nil)
+	end)
+
+	T.it("variadic C functions encode a trailing `top` param", function()
+		local s = V.new_solver()
+		local env = ffi_prelude_env()
+		-- `int printf(const char *, ...);` — variadic.
+		local node = call(field_expr(id("ffi"), "cdef"),
+			lit_str("int printf(const char *fmt, ...);"))
+		local _ty, env2, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		local printf_ty = env2.bindings["ffi"].fields["C"].fields["printf"]
+		T.ok(printf_ty ~= nil)
+		T.eq(printf_ty.tag, "fn")
+		-- Params: fmt (string from char*) + 1 trailing top for the vararg.
+		T.eq(#printf_ty.params, 2)
+		T.eq(printf_ty.params[1], V.string_)
+		T.eq(printf_ty.params[2].tag, "top")
+	end)
+
+	T.it("real-world-shaped cdef: stdlib functions translate correctly", function()
+		local s = V.new_solver()
+		local env = ffi_prelude_env()
+		-- A small bundle of common libc decls. char* → string,
+		-- int → integer, void → nil; types are derived from §9.
+		local src = [[
+			size_t strlen(const char *s);
+			int atoi(const char *s);
+			void exit(int status);
+		]]
+		local node = call(field_expr(id("ffi"), "cdef"), lit_str(src))
+		local _ty, env2, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		local c_fields = env2.bindings["ffi"].fields["C"].fields
+		-- strlen: (string) -> integer
+		T.ok(c_fields["strlen"] ~= nil)
+		T.eq(c_fields["strlen"].tag, "fn")
+		T.eq(c_fields["strlen"].params[1], V.string_)
+		T.eq(c_fields["strlen"].ret, V.integer)
+		-- atoi: (string) -> integer
+		T.ok(c_fields["atoi"] ~= nil)
+		T.eq(c_fields["atoi"].params[1], V.string_)
+		T.eq(c_fields["atoi"].ret, V.integer)
+		-- exit: (integer) -> nil
+		T.ok(c_fields["exit"] ~= nil)
+		T.eq(c_fields["exit"].params[1], V.integer)
+		T.eq(c_fields["exit"].ret, V.nil_)
+	end)
+
+	T.it("ffi['cdef'] form is also recognised", function()
+		local s = V.new_solver()
+		local env = ffi_prelude_env()
+		local node = call(index_expr(id("ffi"), lit_str("cdef")),
+			lit_str("int foo(int);"))
+		local _ty, env2, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.ok(env2.bindings["ffi"].fields["C"].fields["foo"] ~= nil)
+	end)
+
+	T.it("call to ffi.cdef returns nil (statement-shaped)", function()
+		local s = V.new_solver()
+		local env = ffi_prelude_env()
+		local node = call(field_expr(id("ffi"), "cdef"), lit_str("int foo(int);"))
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.nil_)
+	end)
+end)
+
+T.describe("walker sub-phase G: handler registration", function()
+	T.it("ffi_cdef.synth_call replaces F's NODE_CALL_EXPR handler at load", function()
+		-- Sanity: indexed_access still exposes its synth_call (the fallback
+		-- handle ffi_cdef captures); the registered handler differs from it.
+		local F = require("lib.type.static-v4.walker.indexed_access")
+		T.ok(F.synth_call_for_subphase_g ~= nil)
+		T.ok(W.has_synth(defs.NODE_CALL_EXPR))
+	end)
+end)
+

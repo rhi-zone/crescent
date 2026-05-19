@@ -582,6 +582,13 @@ end
 
 -- ── registration ─────────────────────────────────────────────────────────
 
+-- Exposed for sub-phase G (ffi_cdef.lua) to wrap as a fallback. The
+-- override pattern relies on capturing the prior handler at register-time;
+-- sub-phase G layers on top of F's CALL_EXPR handler the same way F layered
+-- on C's. Naming convention mirrors statements.lua's
+-- `synth_local_for_subphase_f` / `synth_assign_for_subphase_f`.
+M.synth_call_for_subphase_g = synth_call
+
 function M.register(W)
 	-- New handlers introduced by F.
 	W.register_synth(defs.NODE_FIELD_EXPR, synth_field)

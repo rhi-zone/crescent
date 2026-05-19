@@ -197,6 +197,7 @@ local functions      = require("lib.type.static-v4.walker.functions")
 local control_flow   = require("lib.type.static-v4.walker.control_flow")
 local statements     = require("lib.type.static-v4.walker.statements")
 local indexed_access = require("lib.type.static-v4.walker.indexed_access")
+local ffi_cdef       = require("lib.type.static-v4.walker.ffi_cdef")
 
 --: () -> nil
 function M._register_builtins()
@@ -209,6 +210,9 @@ function M._register_builtins()
 	-- replacing them with the module-pattern variants. It also overrides
 	-- C's NODE_CALL_EXPR with the indexed-callee-aware version.
 	indexed_access.register(M)
+	-- ffi_cdef registers after indexed_access so it can capture F's
+	-- NODE_CALL_EXPR handler as the fallback for non-cdef calls.
+	ffi_cdef.register(M)
 end
 
 M._register_builtins()
