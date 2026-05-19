@@ -674,21 +674,285 @@ H requires both C (annotations parse match syntax) and G (forall is
 present in v4-bridge layer). Phase J is the integration phase and runs
 last.
 
+## 13.5. Module pattern / expando objects
+
+The Lua module pattern — `local M = {}; M.foo = ...; function M.bar() end;
+return M` — is the canonical case of an expando object: a value whose
+record shape grows as the surrounding scope executes. §3.11 sketches
+"open accumulation on `M`'s record"; this section makes the discipline
+explicit and bounds it against alternatives. It applies equally to any
+local table built up field-by-field, not just top-level `M`.
+
+The hard constraint: v4's `V.rec(...)` is a pure constructor that fixes
+field set and closedness at construction time. v4 has no `rec_extend` and
+no in-place row mutation. Whatever the walker does, it must reduce to
+constraint-emission against `V.var()`s and freshly-constructed `V.rec`
+literals — no mutation of existing record nodes (v4 README "purity").
+
+### 13.5.1 Prior art: TypeScript
+
+TypeScript supports two distinct expando-shaped phenomena, with markedly
+different design rigor.
+
+**(a) Expando function/namespace properties.** Documented in the TS
+handbook under "Declaration Merging" and informally in the JS-support
+docs as "expando properties on functions". Pattern:
+
+```ts
+function f() {}
+f.cached = 0;             // OK — f's type widens to include `cached`
+f.invalidate = () => {};
+```
+
+For *functions* (and only functions, plus classes / namespaces /
+interfaces in their respective merging modes), TS performs a control-flow
+analysis pass that collects assignments of the shape `f.prop = expr` in
+the immediately enclosing scope and synthesizes a merged type
+`typeof f & { cached: number, invalidate: () => void }`. References:
+microsoft/TypeScript#26368 ("Allow `expando` properties on functions"),
+PR microsoft/TypeScript#26368, and the handbook page "Type Checking
+JavaScript Files" ("constructor functions can have properties added
+later").
+
+**(b) Plain object expandos.** For `const m = {}`, TS does NOT expand the
+inferred shape on subsequent `m.foo = 1`. The handbook ("Object Types →
+Excess Property Checks", "Object literal may only specify known
+properties") explicitly forbids this:
+
+```ts
+const m = {};
+m.foo = 1;     // error TS2339: Property 'foo' does not exist on type '{}'
+```
+
+The user is expected to write the shape upfront (`const m: { foo?: number
+} = {}`) or use a const-assertion (`{ foo: 1 } as const`) on a fully
+constructed literal. Flow-typing does *not* widen object types
+field-by-field.
+
+**Verdict: ad-hoc.** The expando-function feature is openly a
+JavaScript-compatibility carve-out, not a derived consequence of TS's
+type theory. It fires only on a syntactically-recognized set of
+declarations (function, class, namespace) and only in the *same scope* as
+the declaration; cross-scope or cross-file mutation is rejected. The
+plain-object case is excluded by deliberate inconsistency — the same
+control-flow analysis that would track `f.foo = ...` for a function is
+not run for a `const m = {}`. The TypeScript team has consistently
+treated (a) as a pragmatic concession to existing JS idiom rather than
+a principled feature; microsoft/TypeScript issues #25895, #28030, and
+#33235 all push back on extending it ("expando is a special case we'd
+rather not generalize"). For crescent's no-ad-hoc discipline this is
+exactly the wrong shape: a syntactically-gated carve-out that future
+sessions would extend by adding more syntactic gates.
+
+Pyright handles the same problem more principledly: a "narrowing
+assignment" form where each assignment refines a flow-sensitive binding,
+but the *declared* type — if any — is the ground truth. Without a
+declaration, attribute assignments outside `__init__` are reported.
+This is closer to "make the user declare the shape" than to "infer it
+from the assignment chain".
+
+### 13.5.2 v4 options
+
+**Option A — Lower-bound accumulating variable.** Bind `M` to a fresh
+`α = V.var("M")`. Each `M.k = expr` emits
+`V.constrain(S, V.rec({k = synth(expr)}, /*open=*/true), α)` — a lower
+bound contributing one field. At scope exit (or at `return M`), `α`'s
+final inferred lower bound is the join of all contributing singleton
+records. v4's bound graph already handles "union of lower bounds"
+(README "Variables carry mutable bound lists"); a union of open
+singleton-field records is structurally a record with each contributed
+field, which any downstream `V.index(α, "k")` resolves correctly.
+
+Pros:
+- Single mechanism (lower-bound accumulation) shared with every other v4
+  variable. No new walker primitive.
+- Works uniformly for `M = {}`, for tables built inside a function body,
+  and for tables passed through closures — no "scope of accumulation"
+  rule to engineer.
+- `return M` at scope exit naturally flows the accumulated `α` into the
+  enclosing return slot, where it participates in standard subsumption
+  against an annotated module signature.
+
+Cons:
+- Field-write *order* is invisible to the constraint solver. `M.foo = 1;
+  M.foo = "x"` accumulates `{foo: integer} | {foo: string}` as the
+  contribution, which v4 will coalesce to `{foo: integer | string}` on
+  index. This matches Lua semantics (the field is observable as either
+  value at runtime if reflection is allowed) but is laxer than "the
+  second assignment shadows the first".
+- Reading `M.foo` *before* `M.foo` has been assigned is not flagged.
+  `α` is a free variable whose lower bound is empty at that program
+  point; `V.index(α, "foo")` against an unconstrained var either suspends
+  (per Phase 4b.2 deferred-index rejection) or produces `unknown` once
+  the suspension queue lands.
+
+**Option B — Sequential record rebinding (flow-typing).** `M` starts
+bound to `V.rec({}, /*open=*/false)`. After each `M.k = expr`, the walker
+*re-binds* the local `M` in the current environment overlay to
+`V.rec({...prev_fields, k = synth(expr)}, false)`. The binding evolves
+through the body the same way a narrowing overlay would.
+
+Pros:
+- Field-write order is reflected in the binding's type at each program
+  point. Re-assignment shadows.
+- Reading `M.foo` before it is assigned is a hard error at the read site,
+  because the binding's type at that point lacks `foo`.
+
+Cons:
+- Conceptually clean but operationally adversarial to closures: a
+  function literal `function() return M.foo end` declared *before* the
+  assignment to `foo` captures the binding's *then-current* shape; the
+  later assignment is invisible to it. Lua semantics is the opposite —
+  the closure reads the live table at call time and sees whatever has
+  been assigned by then. Reconciling this requires either capturing `M`
+  as a forward reference (which is what Option A's variable already is)
+  or rejecting the closure pattern (which forbids idiomatic module
+  layouts like `function M.foo() M.bar() end` where `bar` is defined
+  later).
+- Rebinding is *control-flow-sensitive*. The two arms of an `if` that
+  each assign different fields must reconverge at the join — the join
+  is a union of differently-shaped records, which then has to be the
+  "binding type" of `M` after the `if`. v4 supports this (it's a
+  `V.union` of records), but the walker now has to thread the binding
+  *as a flow value* through every statement, not just narrowings.
+- The "scope of rebinding" question becomes load-bearing: does an
+  assignment in a called function propagate back to the caller's view
+  of `M`? Runtime: yes. Static flow-typing: no. The mismatch becomes
+  unsoundness or unprincipled exclusion.
+
+**Option C — Require user declaration (Pyright-style).** Reject
+`local M = {}` followed by `M.foo = ...` unless `M` carries an
+annotation `--: { foo: T, bar: U, ... }` declaring the full shape
+upfront. Each assignment is checked against the declared shape.
+
+Pros: zero inference, zero ambiguity, soundness is trivial.
+Cons: breaks every existing Lua module in the codebase. Non-starter for
+a language whose canonical module pattern is exactly this idiom.
+
+**Option D — Hybrid: variable + declaration-overrides-inference.**
+Default to Option A. If the user wrote an explicit annotation on the
+initializer (`local M --: { foo: integer, bar: string } = {}`), bind `M`
+to the annotation directly and *check* each assignment against it
+(Option C's discipline). The annotation is the ground truth when present;
+the accumulating variable is the fallback when absent.
+
+This is the same shape as v4's already-stated convention: annotations
+constrain, inference fills in the rest.
+
+### 13.5.3 Recommendation: Option D (Option A with annotation override)
+
+Option A is the *only* option that maps to v4's existing primitives
+without new walker machinery, gracefully handles forward references via
+v4's variable-binding semantics, and uniformly applies to non-module
+expando tables (callbacks built in a function, options tables, etc.).
+Its laxness on write order is a real cost but a defensible one: the
+runtime semantics admits exactly this laxness (Lua tables are mutable;
+nothing prevents a later write from changing a field), and tightening it
+would import Option B's closure-vs-flow incoherence.
+
+Option D layers Option C's discipline on top, so users who *want*
+strictness can opt in by writing the declaration. This matches every
+other annotation form in crescent (annotations narrow, code synthesizes)
+and avoids the carve-out shape that TypeScript's expando feature
+exhibits — there is no syntactic gate ("must be a function"; "must be
+top-level"); the rule is uniform across all bindings.
+
+Concrete walker contract:
+
+- LOCAL_STMT for `local M = {}` (no annotation): allocate
+  `α_M = V.var("M_<line>")`; emit `V.constrain(S, V.rec({}, false), α_M)`
+  as a baseline lower bound (so reads see an empty record at minimum);
+  bind `M` in `E.bindings` to `α_M`.
+- LOCAL_STMT with annotation `--: T` on a `{}` initializer: bind `M` to
+  `T` directly. No `α_M`. Subsequent assignments are checked.
+- ASSIGN_STMT `M.k = rhs` where `E.bindings[M]` is a `V.var` (the
+  accumulating case): emit
+  `V.constrain(S, V.rec({k = synth(rhs)}, true), α_M)`. The
+  `open=true` flag here matters: it makes the singleton-field record a
+  subtype of any record that contains `k`, which is correct as a lower
+  bound contribution.
+- ASSIGN_STMT `M.k = rhs` where `E.bindings[M]` is a non-variable type
+  (annotated case): emit `V.constrain(S, synth(rhs), V.index(T, "k"))`.
+  v4's index reducer already errors at write-of-absent-field-on-closed-
+  record (Phase 4b.2 reduction table).
+- RETURN_STMT `return M`: synthesize `M` as `α_M` (or the annotated `T`)
+  and flow into the enclosing return slot. No special "freeze"
+  operation — the variable is what it is; downstream subsumption against
+  an expected export type is the ground truth.
+
+### 13.5.4 Why this is not Option-A-plus-ad-hoc
+
+The §3.11 phrase "open accumulation on `M`'s record" could be read as
+"`M` is bound to a `V.rec` that the walker mutates". That reading is
+rejected: it would (a) violate v4's purity, (b) introduce a new walker
+primitive (mutation of a constructor result) that has no analogue
+elsewhere in the design, and (c) be exactly the syntactically-gated
+carve-out TypeScript chose and we are rejecting.
+
+The variable-accumulation reading uses *only* what v4 already provides:
+fresh `V.var()`, lower-bound emission via `V.constrain` with a freshly-
+constructed `V.rec` on the LHS. The walker does no mutation; the solver
+does what it already does for every other variable.
+
+### 13.5.5 Open subquestions before implementation
+
+1. **`function M.foo() end` (function declaration form).** §3.11 already
+   says this is "tracked as an open accumulation". Confirming the
+   walker's NODE_FUNC_DECL path for `name = {M, "foo"}` emits the same
+   `V.rec({foo = <fn ty>}, true) <: α_M` constraint as the equivalent
+   `M.foo = function() end` is a parity test. Should be true by
+   construction; needs an explicit case so a future session does not
+   special-case it.
+
+2. **Closures captured before assignment.** `local M = {}; local g =
+   function() return M.foo end; M.foo = 1`. Under Option D, `g`'s body
+   synthesizes `V.index(α_M, "foo")`. At the time of synthesis `α_M`
+   has no lower bound containing `foo`; v4 will treat the index as
+   either suspended or `unknown`. The later `M.foo = 1` adds `foo:
+   integer` to `α_M`'s lower bound — but the constraint emitted *inside*
+   `g`'s body was `V.index(α_M, "foo") <: <ret slot>`, which is now
+   reducible. Whether v4 re-fires the deferred index when new bounds
+   arrive on `α_M` is the load-bearing question. If yes, Option D is
+   sound for this case. If no, a `g`-body re-emission pass is required.
+   Verifying which is needed is a 10-line repro in `static_v4_test.lua`.
+
+3. **`setmetatable(M, mt)` interaction.** The metatable's `__index`
+   contributes inherited fields. Whether the walker's setmetatable
+   recognizer constrains `α_M`'s lower bound *or* the bound's
+   intersection with the metatable's `__index` shape is a design point.
+   Probably: emit `V.rec({}, true, V.indexer(string, V.index(mt.__index)))
+   <: α_M`. Needs a separate worked example to confirm v4's indexer
+   participation in lower-bound accumulation works.
+
+4. **Multiple bindings to the same table.** `local M = {}; local M2 = M;
+   M2.foo = 1`. Lua semantics: this assigns to the same table; reads of
+   `M.foo` see `1`. Under Option D, `M2` is bound to `α_M` (the LOCAL_STMT
+   for `local M2 = M` reduces to identifier lookup; both names share the
+   variable). The assignment through `M2` accumulates into `α_M` as
+   desired. Works by construction; the open question is whether any
+   walker pass *copies* a variable's identity (which would break the
+   aliasing). It should not, but the rule must be stated explicitly:
+   bindings are by-reference to the v4 variable handle, never cloned.
+
+5. **Freezing at `return M`.** Should `return M` cause `α_M` to be
+   coalesced (lower bound projected into a concrete `V.rec`) before
+   flowing into the return slot, or should the bound graph travel with
+   the export type? The cache (Phase 4g) serializes whatever the
+   inferred export is; bound graphs serialize fine, but a downstream
+   importer instantiates against the imported type and would prefer a
+   concrete record over an open variable. v4 has no coalescing pass yet
+   (`subtype.lua` README "No coalescing / display-form simplification");
+   the right answer depends on when coalescing lands. Until then,
+   exporting the raw `α_M` and letting downstream `V.index` reductions
+   handle accesses works — but is a known correctness/ergonomics
+   pressure point.
+
 ## 14. Open questions
 
-These are genuinely unresolved from the canonical docs alone:
+These are genuinely unresolved from the canonical docs alone. The
+module-pattern question previously listed here is resolved in §13.5.
 
-1. **Module-pattern accumulation semantics.** `local M = {}; function M.foo(...)`
-   — is `M` typed as a record with a *lower bound* growing across the file, or
-   as an *open record* whose closedness is fixed at `return M`? The v4
-   constructor `V.rec` takes a closedness boolean at construction; growing a
-   record post-hoc requires either a variable-bound accumulation (lower bounds
-   contributing fields) or mutation (which v4 does not support on rec nodes).
-   The principled answer is likely "bind `M` to a `V.var`, accumulate
-   contributing record types as lower bounds, freeze at scope exit," but this
-   needs a worked example to confirm v4 handles it.
-
-2. **Multi-return and the tuple representation.** `typechecker-reference.md`
+1. **Multi-return and the tuple representation.** `typechecker-reference.md`
    describes brace-tuple positional slots (`{ A, B, C }`) as the multi-return
    form. v4's `V.rec` allows arbitrary field names, including integer keys.
    But the AST `return a, b` does not produce a node tagged "tuple" — it
@@ -697,7 +961,7 @@ These are genuinely unresolved from the canonical docs alone:
    in subtype against an annotated `(A, B, C)` return type is a small
    round-trip test that this design assumes works but hasn't verified.
 
-3. **Effect inference inside a forall body.** When a generic function body
+2. **Effect inference inside a forall body.** When a generic function body
    contains `coroutine.yield`, does the resulting type quantify over the
    effect set (it can't — design §3.1 says no effect polymorphism) or
    commit to the concrete effect at the forall? The answer is "commit to
@@ -706,7 +970,7 @@ These are genuinely unresolved from the canonical docs alone:
    forall's body arrow. Almost certainly yes, but the v4 docs do not
    explicitly cover effect attribution under skolemization.
 
-4. **Where do annotations on `function(x --:: T)` go?** The reference notes
+3. **Where do annotations on `function(x --:: T)` go?** The reference notes
    that inline param annotations are unsupported syntax. The walker only
    needs to handle preceding-line function-type annotations. Confirming
    no surface form requires per-param inline annotation is a one-grep
@@ -742,7 +1006,7 @@ These are genuinely unresolved from the canonical docs alone:
    writes one, the existing `no signature` warning is the correct
    diagnostic.
 
-5. **Generic `typeof` resolution order.** `(a: typeof b, b: typeof a)` —
+4. **Generic `typeof` resolution order.** `(a: typeof b, b: typeof a)` —
    the design doc says union-find equivalence. v4 has no union-find — it
    uses MLstruct bound graphs. The walker must implement `typeof` by
    pre-binding param names as `V.var()`s before resolving annotations, and
@@ -750,7 +1014,7 @@ These are genuinely unresolved from the canonical docs alone:
    walker to traverse param annotations in two passes (declare-all, then
    resolve-each).
 
-6. **Module re-export through `$Require`.** The `$Require<T>` intrinsic in
+5. **Module re-export through `$Require`.** The `$Require<T>` intrinsic in
    `typechecker-reference.md` §"Permanent intrinsics" hints at literal-type
    propagation through generics. With v4's indexed access, a `require`
    could be modeled as `V.index(module_table, V.literal("string", "path"))`,
@@ -758,7 +1022,7 @@ These are genuinely unresolved from the canonical docs alone:
    named intrinsic or remove it in favor of indexed-access is a design
    choice the rewrite-design §9.2.5 footnotes but does not resolve.
 
-7. **Diagnostic root-cause grouping algorithm.** Section 12 mentions an
+6. **Diagnostic root-cause grouping algorithm.** Section 12 mentions an
    "origin chain" used by `bin/cr check --summary`. The exact grouping
    discipline (what makes two errors share a root cause?) is not specified
    in any read source; design needed before Phase J. See "Root-cause error
