@@ -7,7 +7,7 @@ the set-theoretic foundation committed to in `docs/type-system.md` (commit
 b4bb9667) and the feature surface in `docs/typechecker-reference.md`, checked
 against published external references on constraint-based subtyping and
 set-theoretic types. The reference points are Parreaux's *simple-sub* (ICFP
-2020), its negation-aware extension *MLstruct* (Parreaux & Boruch-Gruszecki,
+2020), its negation-aware extension *MLstruct* (Parreaux & Chau,
 OOPSLA 2022), and the *semantic subtyping* line of work by Frisch, Castagna,
 and Benzaken (LICS 2002; JACM; PPDP/ICALP 2005). The design is meant to be
 implementable from those references plus the canonical crescent docs alone.
@@ -95,9 +95,15 @@ support to handle `~T` annotations.
 
 ### 2.1 Choice of algorithm: MLstruct-style constraint solving
 
-The chosen algorithm is *constraint generation plus bisubstitution with polar
-type variables*, in the lineage of MLsub → simple-sub (Parreaux 2020) →
-MLstruct (Parreaux & Boruch-Gruszecki 2022).
+The chosen algorithm is *constraint generation plus per-variable lower/upper
+bound propagation*, in the lineage of MLsub → simple-sub (Parreaux 2020) →
+MLstruct (Parreaux & Chau 2022). "Bisubstitution" is MLsub's
+(Dolan 2017) framing; simple-sub and MLstruct deliberately replace it with
+the explicit bounds-on-variables construction (§3.2 of the MLstruct paper):
+"the constraint solver attaches a set of lower and upper bounds to each type
+variable, and maintain[s] the transitive closure of these constraints." We
+use that construction; we keep the word "bisubstitution" only as a pointer
+to the MLsub lineage, not as the operation performed.
 
 This is one of two viable algorithmic families for a set-theoretic lattice:
 
@@ -115,8 +121,12 @@ This is one of two viable algorithmic families for a set-theoretic lattice:
    originally lacked negation.
 
 MLstruct is the synthesis: it extends simple-sub's constraint-based inference
-with structural negation, putting bounds in DNF and using the boolean-algebra
-laws to decide subtyping at constraint-solve time. This is the design
+with structural negation, putting constraints in *reduced disjunctive normal
+form* (RDNF, §5.2 of the paper — a DNF in which incompatible intersections
+and unions are reduced to ⊥ and ⊤) and using the boolean-algebra laws to
+decide subtyping at constraint-solve time. RDNF is indexed by a level: level-0
+RDNF does not contain class or alias types at the top level (they have been
+expanded); level-1 RDNF retains them. This is the design
 crescent should target because:
 
 - Crescent's commitment to "infer aggressively, widen reluctantly" (Principle 1
@@ -152,23 +162,29 @@ For an annotation `--: T` on `expr`:
   equality on local bindings — see `type-system.md` §"typeof in function
   signatures").
 
-#### Bisubstitution and bound propagation
+#### Bound propagation
 
-When `A <: B` is solved with at least one variable on either side:
+When `A <: B` is solved with at least one variable on either side (MLstruct
+§3.2):
 
 - If `α <: T` and `T` is a non-variable type, add `T` to `α`'s *upper bound*.
   Then for every existing lower bound `L` of `α`, emit `L <: T` to maintain
-  consistency.
+  the transitive closure (the invariant: union of lower bounds always remains
+  a subtype of the intersection of upper bounds).
 - If `T <: α`, add `T` to `α`'s *lower bound*. For every existing upper bound
   `U` of `α`, emit `T <: U`.
 - If `α <: β`, link the two variables: `β`'s lower bounds flow into `α`'s
   lower bounds, `α`'s upper bounds flow into `β`'s upper bounds.
 
-The crucial property (from MLsub): a type variable has at most one *positive*
-occurrence summary (a union of its lower bounds) and one *negative*
-occurrence summary (an intersection of its upper bounds). Inference never
-needs to commit to a single representative; it accumulates both extremes and
-defers the choice until coalescing.
+A cache of in-progress subtyping relationships is mandatory: type-variable
+bound graphs may contain cycles, and since types are regular the cache
+guarantees termination — when a constraint already in the cache is
+re-encountered, it is assumed to hold and the recursion stops (MLstruct §3.2).
+
+The property carried over from MLsub: a type variable accumulates a union of
+lower bounds and an intersection of upper bounds. Inference never needs to
+commit to a single representative; it accumulates both extremes and defers
+the choice until coalescing.
 
 #### Non-variable decomposition
 
@@ -186,24 +202,39 @@ When both sides of a constraint are non-variable, decompose by structure:
 
 #### Complement decomposition
 
-This is the MLstruct contribution. With `~T` in the language, constraints
-like `A <: ~B` and `~A <: B` arise. They are handled by the identity
-`A <: ~B` iff `A & B <: never`. The right-hand side is an *emptiness check*
-that the solver discharges by putting `A & B` into DNF and verifying every
-disjunct contains contradictory atoms.
+This is the MLstruct contribution (§3.3, §5.2). With `~T` in the language,
+constraints like `A <: ~B` and `~A <: B` arise. The solver does *not* in
+general treat them as a generic "emptiness check": MLstruct's actual
+algorithm is to merge `A` and `¬B` into a single normal form and reduce a
+constraint `A <: B` to deciding `dnf₀(A ∧ ¬B) <: ⊥` against a structured
+shape (§5.3, rule referencing `dnf₀(τ₁ ∧ ¬τ₂)`). Constraints are normalized
+to the shape `τ_con <: τ_dis` where (§3.3.2):
 
-DNF for the set-theoretic lattice: a type is normalized to
-`⋁_i ( atoms_i & ¬atoms_i )` where each atom is a constructor application
-(primitive, function, record, etc.) or a type variable. Emptiness of a
-single conjunct `c1 & ... & ~d1 & ...` reduces to: for each constructor
-shape, the positive atoms of that shape must satisfy at least one of the
-negative atoms of that shape (per-shape complement). Different shapes are
-trivially disjoint (a function value is never a record), so they cancel each
-other.
+- `τ_con` is `⊤`, `⊥`, or an intersection of a non-empty subset of
+  `{ #C, τ₁ → τ₂, { x : τ } }` (one nominal tag, one function shape, one
+  record-field shape — at most one of each).
+- `τ_dis` is `⊤`, `⊥`, `(τ₁ → τ₂) ∨ #C`, `{ x : τ } ∨ #C`, or `#C ∨ #C'`.
 
-This is exactly the algorithm sketched in Frisch/Castagna/Benzaken; MLstruct
-adapts it to operate on the bounds-carrying variables of simple-sub instead
-of on fully-resolved syntactic types.
+Reaching this shape always leaves at most one matching pair across the two
+sides, so the constraint reduces to a single smaller subtype obligation on
+matching constructors — preserving losslessness and therefore principal
+types. Different constructor shapes are disjoint by design (function values
+are not records), and same-shape obligations reduce by structural
+decomposition.
+
+A critical asymmetry of MLstruct vs. semantic subtyping: **negations on
+function and record types are purely algebraic**, not set-theoretic (§2.2.5,
+footnote 10). `¬{ x : τ }` and `¬(τ₁ → τ₂)` are essentially uninhabited;
+they exist only to make the lattice a Boolean algebra. Only **negations on
+nominal tags `¬#C`** have the intuitive "all values not of tag C" reading.
+Crescent's `~T` operator therefore inherits MLstruct's algebraic, not
+set-theoretic, semantics. For narrowing (§7) and match-type `_`-as-complement
+(§5) this is sufficient because the operations that observe `~T` are
+exhaustiveness and emptiness, not value-set membership.
+
+The CDuce/Frisch/Castagna/Benzaken line takes the opposite trade: fully
+set-theoretic negation at the cost of giving up principal type inference.
+We follow MLstruct.
 
 #### Coalescing (user-facing recovery)
 
@@ -228,14 +259,20 @@ rules plus an emptiness check; new type constructors plug in by defining
 their decomposition rule and their behavior under boolean operations, not by
 adding cases to a giant matrix.
 
-### 2.4 Heuristics for indefinite cases
+### 2.4 Constraints with unions/intersections and a variable
 
-Some constraints (`A <: B | C` where `A` is a type variable) do not have a
-single solution. The solver must either delay them, split them (try `A <: B`
-first, fall back to `A <: C`), or refuse them. MLstruct opts for refusal at
-the constraint-decomposition layer and resolves these via the boolean-algebra
-identity `A <: B | C` iff `A & ~B & ~C <: never`, which avoids splitting and
-reuses the emptiness check.
+Constraints of the shape `τ₁ <: τ₂ ∨ α` or `α ∧ τ₁ <: τ₂` cannot be
+decomposed by structural recursion alone without losing information or
+backtracking. MLstruct (§3.3.1) resolves this by *moving the non-variable
+part to the other side using negation*:
+
+- `τ₁ <: τ₂ ∨ α` is rewritten to `τ₁ ∧ ¬τ₂ <: α` (a new lower bound for `α`).
+- `α ∧ τ₁ <: τ₂` is rewritten to `α <: τ₂ ∨ ¬τ₁` (a new upper bound for `α`).
+
+When both transformations apply, either choice is sound. This is the central
+use of negation in the solver: it is what lets union/intersection constraints
+involving variables make progress without backtracking, preserving principal
+types. For the variable-free case, see §2.2 above (RDNF normalization).
 
 ## 3. Constraint vocabulary
 
@@ -293,23 +330,42 @@ This is critical for performance: eagerly normalizing every intermediate
 constraint to DNF would blow up exponentially on union/intersection-heavy
 programs.
 
-### 4.2 Compact types — the coalesced representation
+### 4.2 RDNF — the normal form used by the solver and by display
 
-A *compact type* is in DNF:
+MLstruct uses *reduced disjunctive normal form* (RDNF, §5.2). A type in
+RDNF has the shape:
 
 ```
-⋁_i  (  P_i_prim  ∧  P_i_fn  ∧  P_i_rec  ∧  ⋀_j ¬N_ij  )
+⋁_i  (  P_i_fn?  ∧  P_i_rec?  ∧  P_i_tag?  ∧  ⋀_j ¬N_ij  )
 ```
 
-where each conjunct partitions atoms by constructor shape (one positive
-primitive, one positive function shape, one positive record shape, etc.,
-plus a bag of negated atoms of any shape). This is the form on which the
-emptiness check operates per-shape.
+where each disjunct contains **at most one positive function-arrow shape,
+at most one positive record-field shape, at most one positive nominal tag**,
+plus a set of negated atoms. Incompatible intersections (two unrelated
+nominal tags, distinct top-level constructors of the same kind) reduce to
+⊥; identifications such as `{x:τ} ∨ (π₁ → π₂) ≡ ⊤` reduce to ⊤. RDNF is
+indexed by level: level-0 has all class/alias types expanded; level-1
+retains them.
 
-The compact representation is what users see in error messages and what
-caching keys are derived from. Hash-consing on compact types yields
-structural equality, which the rest of the system (subtyping cache, match
-arm dispatch, IDE hover) can rely on.
+The "compact type" terminology is from simple-sub (Parreaux 2020) and refers
+to the coalesced display form. In MLstruct, the same display form is
+recovered by running the simplification pipeline (§3.5: removing polar
+occurrences of variables, removing variables sandwiched between identical
+bounds, hash-consing recursive types, plus Boolean-algebra simplifications
+on unions/intersections/negations such as distributivity and factorization).
+Concretely: RDNF is the solver-internal normal form; the user-facing
+"compact type" is RDNF plus those simplifications.
+
+Hash-consing on the post-simplification form yields structural equality,
+which the rest of the system (subtyping cache, match arm dispatch, IDE
+hover) can rely on.
+
+**Practical note (MLstruct §3.3.2 last paragraph, footnote 25):** the
+implementation does not always put the *entire* constraint into RDNF when
+that would do needless work. On-the-fly decomposition (as sketched in §2
+above) is used where it suffices; full RDNF normalization is invoked when
+the constraint's shape requires it. This is a performance, not soundness,
+distinction.
 
 ### 4.3 Why design from scratch
 
@@ -397,6 +453,31 @@ inference for arbitrary-rank types," 2007). With set-theoretic types, the
 skolem appears as an opaque atomic constructor in the lattice; emptiness and
 subtyping treat it the same way they treat any nominal opaque type.
 
+**Relation to MLstruct.** MLstruct itself is rank-1: polymorphism in λ¬ is
+attached solely to top-level `def` bindings (§4.1.1), and local `let` is
+desugared to immediately-applied λ (i.e., monomorphic). Let-polymorphism is
+explicitly described as "orthogonal to the features presented in this paper,
+and can be handled by using a level-based algorithm [Parreaux 2020] on top
+of the core algorithm." Rank-N is therefore **not** a feature of the MLstruct
+paper.
+
+However, MLstruct's subsumption check (§3.4, `≤@`) already contains the
+machinery rank-N needs: to decide `∀Ξ₁. τ₁ ≤@ ∀Ξ₂. τ₂`, it instantiates
+the LHS quantifier with fresh flexible variables and turns the RHS
+quantifier's variables into rigid "flexible nominal tags" `#F` — skolems by
+another name — which coexist with unrelated tags without reducing to ⊥.
+The constraint solver then runs unchanged. Lifting this from a once-at-
+declaration check to a recursive, at-each-quantifier check is a non-trivial
+extension (it requires escape checking, level-correct generalization at
+nested binders, and predicativity discipline for storing forall-typed
+values in records) but it is *consistent with* the MLstruct subtyping
+algorithm: the algorithm itself never needs to change, only the points at
+which skolems are introduced and the escape check is run.
+
+The non-trivial part is therefore the *architecture* (when to skolemize,
+when to generalize, where to run escape checks), not the *subtyping
+algorithm*.
+
 Impredicativity (forall-typed values stored inside record fields, used in
 HKT dispatch through record-of-generic-functions) is acknowledged as an
 expressiveness gap in `typechecker-reference.md` §HKT. The clean rewrite
@@ -444,10 +525,10 @@ flow-typed environment, not the raw inference environment.
 
 **Closest external implementation: MLstruct.**
 
-The rewrite session should use the MLstruct paper (Parreaux & Boruch-Gruszecki,
+The rewrite session should use the MLstruct paper (Parreaux & Chau,
 OOPSLA 2022, *MLstruct: Principal Type Inference in a Boolean Algebra of
-Structural Types*) and the simple-sub source (LPTK/simple-sub on GitHub) as
-guides:
+Structural Types* — extended v8.0 PDF on lptk.github.io) and the simple-sub
+source (LPTK/simple-sub on GitHub) as guides:
 
 - *simple-sub* gives the cleanest implementation of polar bounds,
   bisubstitution, level-based generalization, recursive type detection via
