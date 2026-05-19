@@ -712,6 +712,36 @@ These are genuinely unresolved from the canonical docs alone:
    no surface form requires per-param inline annotation is a one-grep
    verification this design assumes was done.
 
+   **Inline param annotations — verified (2026-05-20).** `typechecker-reference.md`
+   §"Annotation syntax" states: *"To annotate params: use preceding-line
+   function type (only supported form). WARNING: `function(x --: string)` is
+   INVALID — `--` starts a line comment, eating `)` and beyond. WARNING:
+   `function(x --[[: string]])` is also INVALID — block comment form is
+   parsed as a cast, not a param annotation; silently ignored in param
+   position."* Grep of `lib/` finds zero inline-param-annotation call sites
+   (`function.*\(.*--:`); every annotated function uses preceding-line `--:
+   (...) -> ...` or trailing same-line `--: (...) -> ...` attached to a
+   `local function f()` or `function() ... end` expression. Repros confirm:
+   (A) `function f(x --: string, y --: integer)` is a Lua parse error
+   (`expected ')', got 'return'`) because `--:` is a line comment; (B)
+   preceding-line `--: (string, integer) -> string` typechecks cleanly and
+   enforces argument types (mismatched call rejected with `cannot pass
+   integer where string expected`); (C) block-comment form `function(x
+   --[[: string]], y --[[: integer]])` parses but the typechecker emits a
+   `no signature` warning — the block comments are silently ignored, exactly
+   as the reference warns. **Walker action:** parse only preceding-line and
+   trailing same-line `--:` function-type annotations on `local function`,
+   `function NAME`, and `M.x = function(...)` forms. Param names come from
+   the AST function-def node; param *types* come from positionally zipping
+   the annotation's arrow-arg list against those names. Do not attempt to
+   recognize inline `(x --: T)` — it can never reach the walker (Lua parser
+   rejects it first). Do not attempt to recognize `(x --[[: T]])` as a param
+   annotation; the cast-syntax form is reserved for value casts and treating
+   it as a param annotation would silently change semantics for any caller
+   who wrote one expecting the existing (ignored) behavior. If the user
+   writes one, the existing `no signature` warning is the correct
+   diagnostic.
+
 5. **Generic `typeof` resolution order.** `(a: typeof b, b: typeof a)` —
    the design doc says union-find equivalence. v4 has no union-find — it
    uses MLstruct bound graphs. The walker must implement `typeof` by
