@@ -1965,3 +1965,202 @@ T.describe("walker sub-phase G: handler registration", function()
 	end)
 end)
 
+-- ── sub-phase H: effects (yield, throw, pcall) ───────────────────────────
+--
+-- The intrinsics `error`, `pcall`, `xpcall` are call-site-shape-matched;
+-- `coroutine.yield` rides on the ordinary binding-driven effect-
+-- accumulation path established in sub-phase C.
+
+T.describe("walker sub-phase H: coroutine.yield", function()
+	T.it("coroutine.yield() accumulates yield via field-call path", function()
+		local s = V.new_solver()
+		-- coroutine = { yield: () -> nil with effects = {yield} }
+		local yield_fn = V.fn({}, V.nil_, { yield = true })
+		local coroutine_ty = V.rec({ yield = yield_fn }, false, nil)
+		-- function() coroutine.yield() end
+		local node = func({}, { expr_stmt(call(field_expr(id("coroutine"), "yield"))) })
+		local env = E.bind(E.new(), "coroutine", coroutine_ty)
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty.tag, "fn")
+		T.eq(ty.effects.yield, true)
+	end)
+end)
+
+T.describe("walker sub-phase H: error()", function()
+	T.it("error(msg) accumulates throw and synthesizes to bot", function()
+		local s = V.new_solver()
+		-- function() error("boom") end — body's effect set must include throw.
+		local node = func({}, { expr_stmt(call(id("error"), lit_str("boom"))) })
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty.tag, "fn")
+		T.eq(ty.effects.throw, true)
+	end)
+
+	T.it("bare error call (synthesized directly) returns bot", function()
+		local s = V.new_solver()
+		-- Need a function frame to host the effect, but inspect the call's
+		-- synthesized type. We do this by wrapping the call as the body of a
+		-- function that simply returns the call's result.
+		local effects_mod = require("lib.type.static-v4.walker.effects")
+		T.ok(effects_mod.is_named_identifier(id("error"), "error"))
+		-- Direct synth, fresh fn-frame env with throw allowed.
+		local env = E.enter_function(E.new(), V.bot(), nil)
+		local node = call(id("error"), lit_str("boom"))
+		local ty, env2, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty.tag, "bot")
+		T.eq(env2.effects.throw, true)
+	end)
+
+	T.it("annotated as -[throw]-> never accepts a throwing body", function()
+		local s = V.new_solver()
+		-- annotation: () -> never with effects = { throw }
+		local ann = V.fn({}, V.bot(), { throw = true })
+		local node = func({}, { expr_stmt(call(id("error"), lit_str("x"))) }, ann)
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty, ann)
+	end)
+
+	T.it("annotated as pure rejects a throwing body", function()
+		local s = V.new_solver()
+		local ann = V.fn({}, V.nil_, nil) -- no effects
+		local node = func({}, { expr_stmt(call(id("error"), lit_str("x"))) }, ann)
+		local _ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.ok(err ~= nil)
+		T.ok(err:find("throw", 1, true) ~= nil)
+	end)
+end)
+
+T.describe("walker sub-phase H: pcall", function()
+	T.it("pcall on a throwing function masks throw from the outer frame", function()
+		local s = V.new_solver()
+		-- f : () -> integer with effects = { throw }
+		local f_ty = V.fn({}, V.integer, { throw = true })
+		-- function() pcall(f) end — body must NOT accumulate throw.
+		local node = func({}, { expr_stmt(call(id("pcall"), id("f"))) })
+		local env = E.bind(E.new(), "f", f_ty)
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty.tag, "fn")
+		T.eq(ty.effects.throw, nil)
+	end)
+
+	T.it("pcall returns (true, R) | (false, string)", function()
+		local s = V.new_solver()
+		local f_ty = V.fn({}, V.integer, { throw = true })
+		local env = E.bind(E.new(), "f", f_ty)
+		env = E.enter_function(env, V.bot(), nil) -- so outer-effect surface is benign
+		local node = call(id("pcall"), id("f"))
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.ok(ty ~= nil)
+		T.eq(ty.tag, "union")
+		-- Success branch first, then failure branch.
+		local succ, fail = ty.members[1], ty.members[2]
+		T.eq(succ.tag, "rec")
+		T.eq(succ.fields["1"].tag, "literal")
+		T.eq(succ.fields["1"].value, true)
+		T.eq(succ.fields["2"], V.integer)
+		T.eq(fail.tag, "rec")
+		T.eq(fail.fields["1"].value, false)
+		T.eq(fail.fields["2"], V.string_)
+	end)
+
+	T.it("pcall on a non-throwing function still produces the union shape", function()
+		local s = V.new_solver()
+		local f_ty = V.fn({}, V.integer, nil)
+		local env = E.bind(E.new(), "f", f_ty)
+		env = E.enter_function(env, V.bot(), nil)
+		local node = call(id("pcall"), id("f"))
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty.tag, "union")
+	end)
+
+	T.it("pcall passes yield through (does not mask it)", function()
+		local s = V.new_solver()
+		-- f : () -> integer with effects = { yield, throw }
+		local f_ty = V.fn({}, V.integer, { yield = true, throw = true })
+		local node = func({}, { expr_stmt(call(id("pcall"), id("f"))) })
+		local env = E.bind(E.new(), "f", f_ty)
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty.effects.yield, true)
+		T.eq(ty.effects.throw, nil)
+	end)
+
+	T.it("pcall with no arguments errors", function()
+		local s = V.new_solver()
+		local env = E.enter_function(E.new(), V.bot(), nil)
+		local node = call(id("pcall"))
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+		T.ok(err:find("at least one", 1, true) ~= nil)
+	end)
+end)
+
+T.describe("walker sub-phase H: xpcall", function()
+	T.it("xpcall masks throw on inner function but propagates msgh effects", function()
+		local s = V.new_solver()
+		local f_ty = V.fn({}, V.integer, { throw = true })
+		-- msgh: (string) -> string with no effects (the message handler)
+		local msgh_ty = V.fn({ V.string_ }, V.string_, nil)
+		local node = func({}, { expr_stmt(call(id("xpcall"), id("f"), id("msgh"))) })
+		local env = E.bind(E.bind(E.new(), "f", f_ty), "msgh", msgh_ty)
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty.effects.throw, nil)
+	end)
+end)
+
+T.describe("walker sub-phase H: effect mismatch at call site", function()
+	T.it("passing a yield-effect fn where a pure-fn arg expected fails subtyping", function()
+		local s = V.new_solver()
+		-- f : (() -> nil) -> nil — the parameter slot is a PURE arrow.
+		local pure_arrow = V.fn({}, V.nil_, nil)
+		local f_ty = V.fn({ pure_arrow }, V.nil_, nil)
+		-- The argument is a yield-effected function.
+		local yield_arrow = V.fn({}, V.nil_, { yield = true })
+		local env = E.bind(E.bind(E.new(), "f", f_ty), "g", yield_arrow)
+		local node = call(id("f"), id("g"))
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+	end)
+
+	T.it("passing a pure fn where a yield-effected slot expected succeeds (covariant)", function()
+		local s = V.new_solver()
+		-- f : (() -[yield]-> nil) -> nil — accepts any arrow up to yield.
+		local yield_arrow = V.fn({}, V.nil_, { yield = true })
+		local f_ty = V.fn({ yield_arrow }, V.nil_, nil)
+		-- Argument is a pure arrow — its effect set ({} ⊆ {yield}) is fine.
+		local pure_arrow = V.fn({}, V.nil_, nil)
+		local env = E.bind(E.bind(E.new(), "f", f_ty), "g", pure_arrow)
+		local node = call(id("f"), id("g"))
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+	end)
+end)
+
+T.describe("walker sub-phase H: handler registration", function()
+	T.it("effects.synth_call replaces G's NODE_CALL_EXPR handler at load", function()
+		local G = require("lib.type.static-v4.walker.ffi_cdef")
+		T.ok(G.synth_call_for_subphase_h ~= nil)
+		T.ok(W.has_synth(defs.NODE_CALL_EXPR))
+	end)
+
+	T.it("non-intrinsic calls still go through the captured handler", function()
+		local s = V.new_solver()
+		-- An ordinary call to a user function (no special intrinsic name) must
+		-- still dispatch normally — H's wrapper falls through.
+		local f_ty = V.fn({ V.integer }, V.string_, nil)
+		local env = E.bind(E.new(), "f", f_ty)
+		local node = call(id("f"), lit_int(7))
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.string_)
+	end)
+end)
+

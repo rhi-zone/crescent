@@ -5,12 +5,45 @@ into v4 type-system constraints. See
 `docs/typechecker-ast-walker-design.md` for the full design.
 
 This directory is being built incrementally across sub-phases A–J (design
-doc §13). **Current state: sub-phase G complete** — FFI cdef integration
-recognises `ffi.cdef[[ ... ]]` call sites and populates the `$FfiC`
-intrinsic table (the closed record bound to `ffi.C`). Stacks on top of A
-(env/dispatch), B (literals, identifiers, varargs), C (functions, calls,
-returns), D (control-flow + flow-sensitive narrowing), E (local/assign +
-match), and F (indexed access, module pattern, varargs polish).
+doc §13). **Current state: sub-phase H complete** — effect plumbing
+(yield, throw, pcall) layered on top of the FFI-aware CALL_EXPR handler.
+Stacks on top of A (env/dispatch), B (literals, identifiers, varargs),
+C (functions, calls, returns), D (control-flow + flow-sensitive
+narrowing), E (local/assign + match), F (indexed access, module pattern,
+varargs polish), and G (FFI cdef integration).
+
+## Sub-phase H — effects
+
+`effects.lua` is the final CALL_EXPR-handler layer in the override chain
+(B → C → F → G → H). It special-cases three intrinsic call shapes whose
+semantics ordinary call-application cannot express:
+
+- **`error(msg, ...)`** — adds `throw` to `env.effects` and synthesises
+  to `V.bot()` (the call does not return).
+- **`pcall(f, args...)`** — calls `f` in a throw-consuming context.
+  Non-throw effects from `f` propagate to the outer frame; `throw` is
+  masked. Returns `(true, R) | (false, string)` as a union of two closed
+  records, matching `PcallReturn<F>` in `typechecker-reference.md` modulo
+  the match-type sugar (a later sub-phase can swap in a `V.match` form).
+- **`xpcall(f, msgh, args...)`** — same throw-mask, plus the message
+  handler's effects propagate (a throw inside `msgh` is not masked —
+  the protocol re-raises).
+
+`coroutine.yield(...)` is **not** special-cased. The ordinary
+binding-driven call-application path (sub-phase C's `apply_arrow`)
+accumulates the `yield` effect automatically when `coroutine` is bound
+to a record carrying `yield: () -[yield]-> nil`. The prelude is
+responsible for providing that binding; the walker just walks.
+
+Body-vs-annotation effect checking already lives in sub-phase C's
+function handler (`functions.lua` lines 501-507): the body's accumulated
+effect set must be a subset of the annotation's declared effects.
+Sub-phase H provides the accumulation; sub-phase C provides the check.
+
+Effect annotation surface syntax (`(A) -[yield]-> B`) has no consumer in
+v4 yet — the bridge from legacy `ann.lua` to V4Type is sub-phase J. The
+walker accepts pre-resolved `V.fn(params, ret, effects)` annotations on
+AST nodes; that is the de-facto spec for now.
 
 ## Sub-phase A — what's here
 

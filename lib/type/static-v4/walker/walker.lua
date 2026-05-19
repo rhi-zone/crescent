@@ -198,6 +198,7 @@ local control_flow   = require("lib.type.static-v4.walker.control_flow")
 local statements     = require("lib.type.static-v4.walker.statements")
 local indexed_access = require("lib.type.static-v4.walker.indexed_access")
 local ffi_cdef       = require("lib.type.static-v4.walker.ffi_cdef")
+local effects        = require("lib.type.static-v4.walker.effects")
 
 --: () -> nil
 function M._register_builtins()
@@ -213,6 +214,10 @@ function M._register_builtins()
 	-- ffi_cdef registers after indexed_access so it can capture F's
 	-- NODE_CALL_EXPR handler as the fallback for non-cdef calls.
 	ffi_cdef.register(M)
+	-- effects (sub-phase H) registers last so it can capture G's
+	-- NODE_CALL_EXPR handler. Intrinsic-call recognition (error/pcall/
+	-- xpcall) wraps the FFI-aware handler with the effect-aware layer.
+	effects.register(M)
 end
 
 M._register_builtins()

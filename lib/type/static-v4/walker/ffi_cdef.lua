@@ -428,6 +428,13 @@ function M.register(W)
 	W.register_synth(defs.NODE_CALL_EXPR, synth_call)
 end
 
+-- Exposed for sub-phase H (effects.lua) to wrap as a fallback. Sub-phase H
+-- layers its intrinsic-call recognisers (error/pcall/xpcall) on top of
+-- the FFI-aware handler; non-intrinsic, non-cdef calls fall through to
+-- the captured handler. Same convention as indexed_access.lua's
+-- `synth_call_for_subphase_g`.
+M.synth_call_for_subphase_h = synth_call
+
 -- Test hooks — exposed so the test suite can exercise the translator and
 -- the call-shape recogniser directly without round-tripping through a full
 -- walk.
