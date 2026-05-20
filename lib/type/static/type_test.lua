@@ -972,14 +972,15 @@ assert.describe("parse: control flow", function()
         local stmt = first_stmt(r)
         assert.eq(stmt.kind, defs.NODE_FOR_NUM)
         assert.eq(stmt.data[5], 1)  -- 1 body stmt
-        -- step is a node (not -1)
+        -- step present: FLAG_HAS_STEP set and data[3] holds the step node id.
+        assert.eq(bit.band(stmt.flags, defs.FLAG_HAS_STEP), defs.FLAG_HAS_STEP)
         assert.ok(stmt.data[3] >= 0, "step should be a node id")
     end)
     assert.it("numeric for without step", function()
         local r = p("for i = 1, 10 do end")
         local stmt = first_stmt(r)
         assert.eq(stmt.kind, defs.NODE_FOR_NUM)
-        assert.eq(stmt.data[3], -1)  -- no step
+        assert.eq(bit.band(stmt.flags, defs.FLAG_HAS_STEP), 0)
     end)
     assert.it("generic for", function()
         local r = p("for k, v in pairs(t) do print(k, v) end")

@@ -356,10 +356,11 @@ local function decode_for_num(ctx, n, out)
 	out.name = pool_string(ctx.pool, n.data[0])
 	out.init = decode_node(ctx, n.data[1])
 	out.stop = decode_node(ctx, n.data[2])
-	if n.data[3] == -1 then
-		out.step = nil
-	else
+	-- Step is present iff FLAG_HAS_STEP is set on the node flags.
+	if (n.flags % (defs.FLAG_HAS_STEP * 2)) >= defs.FLAG_HAS_STEP then
 		out.step = decode_node(ctx, n.data[3])
+	else
+		out.step = nil
 	end
 	out.body = decode_node_list(ctx, n.data[4], n.data[5])
 	return out

@@ -526,9 +526,10 @@ function M.parse(source, filename, pool)
             local init = parse_expr(0)
             L:expect(defs.TK_COMMA)
             local limit = parse_expr(0)
-            local step = -1
+            local step, has_step = -1, false
             if L:opt(defs.TK_COMMA) then
                 step = parse_expr(0)
+                has_step = true
             end
             L:expect(defs.TK_DO)
             local bs, bl = parse_block()
@@ -541,6 +542,7 @@ function M.parse(source, filename, pool)
             nd.data[3] = step
             nd.data[4] = bs
             nd.data[5] = bl
+            if has_step then nd.flags = defs.FLAG_HAS_STEP end
             return n
         else
             -- Generic for: for name1, name2, ... in exprlist do ... end

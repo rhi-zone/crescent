@@ -1023,7 +1023,8 @@ emit_stmt = function(ctx, nid)
         local var_id = d[1]
         local init_id = d[2]
         local limit_id = d[3]
-        local step_id = d[4]  -- -1 if no step
+        local has_step = (n.flags % (defs.FLAG_HAS_STEP * 2)) >= defs.FLAG_HAS_STEP
+        local step_id = has_step and d[4] or nil
         local bs = d[5]
         local bl = d[6]
         local vname = ctx:name(var_id)
@@ -1042,7 +1043,7 @@ emit_stmt = function(ctx, nid)
             adjusted_init = "(" .. init_s .. ") - 1"
         end
         local step_s
-        if step_id == -1 then
+        if step_id == nil then
             step_s = "1"
         else
             step_s = emit_expr(ctx, step_id, 0)

@@ -206,11 +206,11 @@ walk_stmt = function(nodes, ast_lists, refs, sid)
     end
 
     if k == NODE_FOR_NUM then
-        -- limit, step exprs: data[1], data[2], data[3] (start, limit, step node ids)
-        -- body: data[4]=body_start, data[5]=body_len
+        -- start, limit exprs: data[1], data[2]; step: data[3] only when FLAG_HAS_STEP.
+        -- body: data[4]=body_start, data[5]=body_len.
         walk_expr(nodes, ast_lists, refs, sn.data[1])
         walk_expr(nodes, ast_lists, refs, sn.data[2])
-        if sn.data[3] >= 0 then
+        if (sn.flags % (defs.FLAG_HAS_STEP * 2)) >= defs.FLAG_HAS_STEP then
             walk_expr(nodes, ast_lists, refs, sn.data[3])
         end
         walk_block(nodes, ast_lists, refs, sn.data[4], sn.data[5])

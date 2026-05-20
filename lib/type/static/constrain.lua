@@ -4421,7 +4421,9 @@ StmtRule[NODE_FOR_NUM] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     gen_expr(ctx, n.data[1])
     gen_expr(ctx, n.data[2])
-    if n.data[3] >= 0 then gen_expr(ctx, n.data[3]) end
+    if (n.flags % (defs.FLAG_HAS_STEP * 2)) >= defs.FLAG_HAS_STEP then
+        gen_expr(ctx, n.data[3])
+    end
     local saved = ctx.scope
     ctx.scope = env_mod.child(ctx.scope)
     env_mod.bind(ctx.scope, n.data[0], ctx.T_INTEGER)

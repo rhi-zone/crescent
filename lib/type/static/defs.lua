@@ -242,6 +242,7 @@ M.FLAG_VARARG           = 1
 M.FLAG_LOCAL            = 2
 M.FLAG_COMPUTED         = 4
 M.FLAG_HAS_ELSE         = 8   -- NODE_IF_STMT: an else block is present (data[2]/data[3] = else block start/len)
+M.FLAG_HAS_STEP         = 16  -- NODE_FOR_NUM: a step expression is present (data[3] = step node id)
 M.FLAG_FORCE_CAST       = 1   -- NODE_CAST_EXPR: --[[:! T]] overlap-checked force cast
 
 -- Flag bits (types)
