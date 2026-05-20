@@ -260,6 +260,70 @@ case.
   operands.** Not a soundness issue (Lua returns false / true at runtime),
   and the prompt called this out as an optional warning. Not implemented.
 
+## Sub-phase K6e — method dispatch completion
+
+`functions.lua`'s `synth_method_call` now resolves the method through the
+receiver's effective dispatch table, not just direct rec-field lookup. The
+K6 audit reported ~107 v4 errors of the form "method call: receiver has
+non-record type X (full method dispatch lands in sub-phase F)" — every
+file using `string:method`, `("literal"):method`, or values with `μ`-wrapped
+record shapes tripped on this.
+
+### Dispatch table
+
+| Receiver shape        | Lookup site                              |
+|-----------------------|-------------------------------------------|
+| `rec`                 | `recv.fields[method]` (unchanged)        |
+| `prim "string"` (etc) | `env.bindings[recv.name].fields[method]` |
+| `literal base="string"`| `env.bindings[recv.base].fields[method]`|
+| `mu`                  | Unfold once, retry against `recv.body`   |
+| `union`               | Per-member dispatch, join return types   |
+| `var`                 | Loud reject (TV receiver — see below)    |
+| `fn`/`forall`/`top`/… | Loud reject (not method-bearing)         |
+
+The primitive path mirrors Lua's runtime: `("abc"):sub(1)` dispatches via
+`string.sub("abc", 1)` because the string metatable's `__index` is the
+`string` library. v4 statically reads the library out of the env's
+stdlib-injected bindings.
+
+### Type-variable receivers — graceful degradation
+
+`function M.foo(s) return s:sub(1, 3) end` (unannotated `s`) gives `s`
+a fresh TV. There is no way to discharge `s:sub(...)` without either:
+
+  1. A deferred-constraint queue that records "var X must have method
+     `sub` with signature T" and replays when X is bound (K6f territory).
+  2. An ad-hoc carve-out assuming `s` is `string` because `sub` looks
+     string-y.
+
+(2) is rejected per CLAUDE.md's no-ad-hoc-conditions rule. (1) is the
+correct fix but is out of K6e scope. The walker therefore emits a
+structured `E_CALL_NON_FN` diagnostic naming the TV and pointing the user
+at the workaround (annotate the parameter). Once K6f lands the queue, the
+TV branch becomes a queue insertion instead.
+
+### Union dispatch
+
+For `recv :: A | B`, the call must succeed against every member; the
+result is the union of per-member returns. Each member's method-arrow is
+applied against the SAME arg type list (Lua dispatches one concrete value
+at runtime, so the args must satisfy every branch's signature). A member
+that does not carry the method (e.g. `string | { foo: ... }` looking up
+`:bar`) is rejected with the missing-member named.
+
+### What this fix does NOT cover
+
+- TV receivers (workaround documented above; queue lands in K6f).
+- Metatable `__index` chains on user records. Lua semantics allow
+  `setmetatable(t, { __index = parent })` to inherit `parent`'s methods.
+  v4 has no metatable model on user records yet; method lookup on an
+  inherited method fails with "no method 'X'". This is a separate
+  contribution.
+- Intersection-typed receivers (`A & B`). v4's `inter` is currently used
+  for stdlib overloads; user-level intersections aren't common. The
+  intersection case falls into the "not method-bearing" branch with a
+  clear error.
+
 ## Earlier sub-phases (A–I)
 
 ## Sub-phase H — effects

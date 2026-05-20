@@ -348,18 +348,37 @@ end
 
 -- ── NODE_METHOD_CALL ──────────────────────────────────────────────────────
 --
--- §3.8: `obj:m(args)` rewrites to `(synth(obj).m)(obj, args...)`. We do this
--- inline rather than re-using NODE_FIELD_EXPR (which is sub-phase F): the
--- receiver type is synthesized, its `method` field is looked up directly on
--- a rec shape, and a synthetic argument list with `obj` prepended is built.
--- The result is the same call-application machinery as NODE_CALL_EXPR.
+-- §3.8: `obj:m(args)` rewrites to `(synth(obj).m)(obj, args...)`. The
+-- receiver is synthesized, the method name is looked up against the
+-- receiver's effective method table, and the call is dispatched with the
+-- receiver prepended as `self`.
 --
--- Field lookup in sub-phase C is intentionally narrow — only on rec types,
--- without union distribution, μ unfolding, or open-record indexers. Those
--- behaviors live in `V.index` and arrive in sub-phase F; the sub-phase C
--- contract is "method call works when the receiver is a closed rec with
--- the method statically present". A receiver shape outside that set
--- errors cleanly, matching the indexed-callee rejection in NODE_CALL_EXPR.
+-- Method-table resolution (K6e):
+--
+--   * `recv.tag == "rec"` — direct field lookup. The original sub-phase C
+--     contract.
+--   * `recv.tag == "prim"` with a primitive that has a library binding
+--     (Lua: only `string`) — look up the method on the library record
+--     (`env.bindings.string`). Lua dispatches `("abc"):sub(...)` via
+--     `string.sub(...)` because the string metatable's `__index` is the
+--     `string` library; v4 mirrors that lookup statically.
+--   * `recv.tag == "literal"` with `base == "string"` — same as above; a
+--     string literal is a string at the value level.
+--   * `recv.tag == "mu"` — unfold once and recurse. Records under `μ`
+--     ultimately reach a `rec` per type-system invariants.
+--   * `recv.tag == "union"` — distribute. Every member must support the
+--     method; the result is the union of per-member return types. (Param
+--     constraints are checked per-member against the SAME arg types — Lua
+--     dispatches a single concrete value at runtime, so the args must
+--     satisfy every branch's signature.)
+--   * `recv.tag == "var"` — reject with the deferred-constraint-queue
+--     diagnostic. A TV receiver needs the queue to record "this var must
+--     have method `m`" and discharge it when the var is bound. The queue
+--     is K6f-and-beyond; carving out a TV-special-case here would set
+--     the wrong precedent (per CLAUDE.md "no ad-hoc conditions").
+--   * Other shapes (fn, forall, indexer-only, inter, top, never, ...) —
+--     not method-bearing in Lua; reject with the receiver shape spelled
+--     out so users see what their value actually typed as.
 
 local function synth_method_call(node, env, solver)
 	local recv_ty, env2, err = require("lib.type.static-v4.walker.walker").walk_synth(node.receiver, env, solver)
@@ -368,18 +387,13 @@ local function synth_method_call(node, env, solver)
 		return nil, env2, D.emit(env2, D.E_INTERNAL,
 			"method call: receiver has no synthesized type")
 	end
-	if recv_ty.tag ~= "rec" then
-		return nil, env2, D.emit(env2, D.E_CALL_NON_FN,
-			"method call: receiver has non-record type " .. V.show(recv_ty) ..
-			" (full method dispatch lands in sub-phase F)",
-			{ origin_type = recv_ty })
-	end
-	local method_ty = recv_ty.fields[node.method]
-	if method_ty == nil then
-		return nil, env2, D.emit(env2, D.E_FIELD_MISSING,
-			"method call: receiver has no method '" .. node.method .. "'",
-			{ origin_type = recv_ty })
-	end
+	-- Unfold μ once so the dispatch below sees the underlying shape.
+	-- A μ over a record bottoms out in one step per type-system invariants.
+	local r = recv_ty
+	if r.tag == "mu" then r = r.body end
+	-- Synthesize the arguments once — they are the same regardless of
+	-- which receiver branch we dispatch through (Lua passes one concrete
+	-- value at runtime).
 	local arg_types = {}
 	arg_types[1] = recv_ty -- the `self` argument
 	local arg_count = 1
@@ -395,7 +409,120 @@ local function synth_method_call(node, env, solver)
 		arg_types[i + 1] = ty
 		arg_count = i + 1
 	end
-	return apply_arrow(method_ty, arg_types, arg_count, env2, solver)
+	-- Direct rec dispatch.
+	if r.tag == "rec" then
+		local method_ty = r.fields[node.method]
+		if method_ty == nil then
+			return nil, env2, D.emit(env2, D.E_FIELD_MISSING,
+				"method call: receiver has no method '" .. node.method .. "'",
+				{ origin_type = recv_ty })
+		end
+		return apply_arrow(method_ty, arg_types, arg_count, env2, solver)
+	end
+	-- Primitive dispatch (Lua: `string` only) — look up the method on the
+	-- primitive's library record (e.g. `env.bindings.string`). This mirrors
+	-- Lua's runtime semantics: `("abc"):sub(...)` dispatches via the string
+	-- metatable's `__index`, which is the `string` library.
+	if r.tag == "prim" then
+		local prim_name = tostring(r.name)
+		local lib = env2.bindings[prim_name]
+		if lib == nil or lib.tag ~= "rec" then
+			return nil, env2, D.emit(env2, D.E_FIELD_MISSING,
+				"method call: receiver has primitive type '" .. prim_name ..
+				"' which has no method library in scope",
+				{ origin_type = recv_ty })
+		end
+		local method_ty = lib.fields[node.method]
+		if method_ty == nil then
+			return nil, env2, D.emit(env2, D.E_FIELD_MISSING,
+				"method call: primitive '" .. prim_name ..
+				"' has no method '" .. node.method .. "'",
+				{ origin_type = recv_ty })
+		end
+		return apply_arrow(method_ty, arg_types, arg_count, env2, solver)
+	end
+	-- Literal dispatch — same shape as primitive, looking up the base's
+	-- library.
+	if r.tag == "literal" then
+		local base_name = tostring(r.base)
+		local lib = env2.bindings[base_name]
+		if lib == nil or lib.tag ~= "rec" then
+			return nil, env2, D.emit(env2, D.E_FIELD_MISSING,
+				"method call: literal of base '" .. base_name ..
+				"' has no method library in scope",
+				{ origin_type = recv_ty })
+		end
+		local method_ty = lib.fields[node.method]
+		if method_ty == nil then
+			return nil, env2, D.emit(env2, D.E_FIELD_MISSING,
+				"method call: literal of base '" .. base_name ..
+				"' has no method '" .. node.method .. "'",
+				{ origin_type = recv_ty })
+		end
+		return apply_arrow(method_ty, arg_types, arg_count, env2, solver)
+	end
+	-- Type-variable receiver: the deferred-constraint queue would record
+	-- "var X must have method `m` with arg/ret shape T → U" and discharge
+	-- it when X is bound. The queue is a later K-phase contribution; here
+	-- we surface the gap explicitly so callers see WHY their code fails.
+	if r.tag == "var" then
+		return nil, env2, D.emit(env2, D.E_CALL_NON_FN,
+			"method call: receiver is unbound type variable '" ..
+			V.show(recv_ty) .. "'; annotate the receiver's type (the " ..
+			"deferred-constraint queue that would discharge this " ..
+			"automatically is not yet implemented)",
+			{ origin_type = recv_ty })
+	end
+	-- Union dispatch: every member must support the method. Apply each
+	-- member's method-arrow against the same args; join the return types.
+	if r.tag == "union" then
+		local result_parts = {}
+		for _, m in ipairs(r.members) do
+			local mr = m
+			if mr.tag == "mu" then mr = mr.body end
+			local m_method_ty = nil
+			if mr.tag == "rec" then
+				m_method_ty = mr.fields[node.method]
+			elseif mr.tag == "prim" then
+				local lib = env2.bindings[mr.name]
+				if lib ~= nil and lib.tag == "rec" then
+					m_method_ty = lib.fields[node.method]
+				end
+			elseif mr.tag == "literal" then
+				local lib = env2.bindings[mr.base]
+				if lib ~= nil and lib.tag == "rec" then
+					m_method_ty = lib.fields[node.method]
+				end
+			end
+			if m_method_ty == nil then
+				return nil, env2, D.emit(env2, D.E_FIELD_MISSING,
+					"method call: union member " .. V.show(m) ..
+					" has no method '" .. node.method .. "'",
+					{ origin_type = recv_ty })
+			end
+			local ret_ty, env3, aerr = apply_arrow(m_method_ty, arg_types,
+				arg_count, env2, solver)
+			env2 = env3
+			if aerr ~= nil then return nil, env2, aerr end
+			if ret_ty ~= nil then
+				result_parts[#result_parts + 1] = ret_ty
+			end
+		end
+		if #result_parts == 0 then
+			return nil, env2, D.emit(env2, D.E_INTERNAL,
+				"method call: union dispatch produced no return types")
+		end
+		if #result_parts == 1 then
+			return result_parts[1], env2, nil
+		end
+		return V.union(result_parts), env2, nil
+	end
+	-- Anything else: not method-bearing. Spell out what the receiver
+	-- actually is so the user can fix the upstream annotation.
+	return nil, env2, D.emit(env2, D.E_CALL_NON_FN,
+		"method call: receiver has non-method-bearing type " ..
+		V.show(recv_ty) .. " (tag: " .. tostring(r.tag) .. ")",
+		{ origin_type = recv_ty })
 end
 
 -- ── NODE_FUNC_EXPR / NODE_FUNC_DECL ───────────────────────────────────────
