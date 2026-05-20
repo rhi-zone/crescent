@@ -124,6 +124,51 @@ local FALSE_LIT = V.literal("boolean", false)
 local TRUTHY_ATOM = V.inter({ V.neg(V.nil_), V.neg(FALSE_LIT) })
 local FALSY_ATOM  = V.union({ V.nil_, FALSE_LIT })
 
+-- Map a Lua `type(x)` return-string literal to a v4 atom suitable for
+-- intersect-narrowing the variable x. Lua's `type()` returns exactly eight
+-- strings; we map each:
+--
+--   "nil"      → V.prim("nil")
+--   "boolean"  → V.prim("boolean")
+--   "number"   → V.prim("number")
+--   "string"   → V.prim("string")
+--   "cdata"    → V.prim("cdata")
+--   "table"    → V.rec({}, true, nil)  (the universal open empty record —
+--               structurally accepts any table)
+--   "function" → V.fn({}, V.top(), nil) (a function type with no specified
+--               params and a top return; in the v4 lattice this acts as the
+--               canonical "any function" tag for intersect-narrowing — the
+--               exact arity/variance shape doesn't matter for narrowing
+--               purposes because the intersection with x's current binding
+--               picks whichever concrete function type x already had)
+--   "thread", "userdata" → nil  (the v4 type system lacks atomic
+--               representations for these Lua type-returns. Returning nil
+--               signals "no atom available"; the caller treats the guard
+--               as recognised-but-non-narrowing rather than crashing.)
+--: (string) -> V4Type | nil
+local function atom_for_type_string(s)
+	-- "table" / "function" need structural representations because v4
+	-- has no `prim("table")` / `prim("function")` atoms (the type system
+	-- represents tables as records and functions as `fn` constructors).
+	if s == "table" then
+		return V.rec({}, true, nil)
+	end
+	if s == "function" then
+		return V.fn({}, V.top(), nil)
+	end
+	-- "thread" / "userdata" — no v4 representation at all. Returning nil
+	-- signals the caller to recognise the guard but apply no narrowing.
+	if s == "thread" or s == "userdata" then
+		return nil
+	end
+	-- Everything else (the standard primitives nil/boolean/number/string/
+	-- cdata, plus the synthetic "integer" the test corpus exercises) maps
+	-- directly to a primitive. V.prim errors loudly on unknown names, so
+	-- a typo in the source surfaces as a diagnostic rather than silently
+	-- accepted.
+	return V.prim(s)
+end
+
 -- Intersect two narrowing maps element-wise (the `and`-pos and `or`-neg
 -- combiner). Returns a fresh map; inputs untouched.
 local function map_inter(m1, m2)
@@ -266,7 +311,19 @@ local function recognise_type_eq(node, env, solver, inverted)
 	local x_node = { tag = defs.NODE_IDENTIFIER, name = x, line = node.line, col = node.col }
 	local env2, err = side_effect_walk(x_node, env, solver)
 	if err ~= nil then return nil, nil, env2, err end
-	local atom = V.prim(val)
+	local atom = atom_for_type_string(val)
+	if atom == nil then
+		-- Recognised guard shape but no v4 atom available for this Lua
+		-- type-return string ("thread"/"userdata"). Walk x for the
+		-- in-scope check (done above) and apply no narrowing. This is
+		-- conservative and sound: the truthy/falsy branches both see x
+		-- with its original type. Reporting it as recognised (returning
+		-- non-nil maps) prevents the caller from falling through to
+		-- side-effect-walking the whole `type(x) == "..."` expression,
+		-- which would attempt to walk `type` as a global and produce an
+		-- unrelated diagnostic.
+		return {}, {}, env2, nil
+	end
 	if inverted then
 		-- `~=`: truthy means NOT-atom; falsy means IS-atom.
 		return { [x] = V.neg(atom) }, { [x] = atom }, env2, nil
@@ -478,14 +535,23 @@ local function walk_block(stmts, env, solver)
 	-- replicate its private clone semantics here — a shallow shape-clone
 	-- with bindings/narrowed overridden.
 	local out = {
-		bindings  = pre_bindings,
-		narrowed  = out_narrowed,
-		return_ty = env2.return_ty,
-		vararg    = env2.vararg,
-		effects   = env2.effects,
-		module    = env2.module,
-		expected  = env2.expected,
-		source    = env2.source,
+		bindings      = pre_bindings,
+		narrowed      = out_narrowed,
+		return_ty     = env2.return_ty,
+		vararg        = env2.vararg,
+		effects       = env2.effects,
+		module        = env2.module,
+		expected      = env2.expected,
+		source        = env2.source,
+		-- Sub-phase I fields: must be carried through. Dropping them
+		-- leaves a partially-shaped env, and downstream code (e.g.
+		-- E.lookup_require) indexes `require_chain` unconditionally —
+		-- a nil here surfaces as a driver crash inside any `require()`
+		-- walked through a block-scoped statement.
+		aliases       = env2.aliases,
+		io_caps       = env2.io_caps,
+		cache_dir     = env2.cache_dir,
+		require_chain = env2.require_chain,
 	}
 	return out, nil, terminated
 end
@@ -572,17 +638,22 @@ local function synth_if(node, env, solver)
 			for k, v in pairs(current_env.narrowed) do joined_narrowed[k] = v end
 		end
 		local out = {
-			bindings  = current_env.bindings,
-			narrowed  = joined_narrowed,
-			return_ty = current_env.return_ty,
-			vararg    = current_env.vararg,
-			effects   = then_out.effects, -- effects accumulate monotonically;
+			bindings      = current_env.bindings,
+			narrowed      = joined_narrowed,
+			return_ty     = current_env.return_ty,
+			vararg        = current_env.vararg,
+			effects       = then_out.effects, -- effects accumulate monotonically;
 			-- (in practice both branches share the same effect set since
 			-- effects only grow per the function-body frame's monotonic
 			-- discipline)
-			module    = current_env.module,
-			expected  = current_env.expected,
-			source    = current_env.source,
+			module        = current_env.module,
+			expected      = current_env.expected,
+			source        = current_env.source,
+			-- Sub-phase I fields: see walk_block for the rationale.
+			aliases       = current_env.aliases,
+			io_caps       = current_env.io_caps,
+			cache_dir     = current_env.cache_dir,
+			require_chain = current_env.require_chain,
 		}
 		-- Merge any effects from the else branch too (a branch that
 		-- terminated still ran whatever effects it accumulated).
