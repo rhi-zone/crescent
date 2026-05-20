@@ -739,6 +739,44 @@ discriminated tail-typing is encoded as the wider intersection (design
 pending the `$PatternReturn` / `$FindReturn` walker hook (design §7 #3).
 Each degradation is flagged inline at its declaration site in the file.
 
+## Driver — `driver/`
+
+The driver glues parser → arena→POJO decoder → walker → cache (see
+`docs/typechecker-v4-driver-design.md` for the architectural framing).
+
+Modules:
+
+- `driver/driver.lua` (K1) — `M.drive(source_path, opts) -> (result, errmsg)`.
+  Runs the legacy parser via an injected `parse` cap, decodes the arena AST
+  into POJOs the walker consumes, walks the chunk, accumulates structured
+  diagnostics, and stores the inferred export type to the `.cri` cache on a
+  clean walk.
+- `driver/decoder.lua` (K2) — converts the parser's arena/intern encoding
+  into the field-named POJO shape the walker reads. Lazy per-handler
+  hydration to preserve arena memory locality.
+- `driver/summary.lua` (K4) — diagnostic rendering. Two surfaces:
+
+  ```
+  M.render_default(diagnostics) -> string  -- per-line, sorted by (file, line, col)
+  M.render_summary(diagnostics) -> string  -- root-cause-grouped summary
+  M.group(diagnostics)          -> { [category]: { [code]: Diag[] } }
+  ```
+
+  The grouping discipline is a **data-level group_by over structured
+  fields** (`origin_kind`, `code`, `module`) — never a regex over rendered
+  text. The category vocabulary is a closed set declared in `summary.lua`:
+  unresolved-requires, from-require-cascade, undefined-names,
+  type-mismatches, missing-fields, call-errors, operator-errors,
+  narrowing-errors, match-errors, cast-errors, effect-errors, scope-errors,
+  ffi-errors, require-io-errors, unsupported-node, internal-errors, plus
+  the from-cast / from-annotation / from-narrow cascades.
+
+  Root-cause discipline: a diagnostic whose own code is itself a root
+  (E_REQUIRE_UNRESOLVED, E_REQUIRE_IO) is categorised by its code even if
+  it carries a from-require origin_kind. All other diagnostics with an
+  `origin_kind` override land in the cascade category; the rest categorise
+  by their code.
+
 ## Running
 
 ```
