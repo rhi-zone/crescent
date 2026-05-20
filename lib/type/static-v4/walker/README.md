@@ -153,6 +153,113 @@ the enclosing statement.
   site currently produces these. They land when the annotation-parser
   bridge / cast handler lands.
 
+## Sub-phase K6c — operator and cast handlers
+
+`operators.lua` registers SYNTHESIZE handlers for the three node kinds the K6
+parity audit flagged as the largest sub-phase-deferred gap (~350 v4 errors
+combined):
+
+- **`NODE_BINARY_EXPR`** — arithmetic (`+ - * % / ^`), comparison
+  (`< <= > >=`), equality (`== ~=`), concat (`..`), logical (`and` / `or`).
+- **`NODE_UNARY_EXPR`** — unary minus (`-`), `not`, length (`#`).
+- **`NODE_CAST_EXPR`** — `--[[: T]]` (checked) and `--[[:! T]]` (force).
+
+### Binary semantics
+
+| Op family | Result | Operand rule |
+|---|---|---|
+| `+ - * %` | integer if both integer, else number | both numeric |
+| `/`       | number always | both numeric |
+| `^`       | number always | both numeric |
+| `< <= > >=` | boolean | both numeric OR both string |
+| `== ~=` | boolean | any (Lua permits cross-type comparison; runtime returns false / true) |
+| `..` | string | each operand string-or-number |
+| `and` / `or` | `V.union(lhs, rhs)` (conservative upper bound) | any |
+
+Logical `and` / `or` synthesise to `V.union(lhs, rhs)` — a sound upper bound
+on Lua's `if-truthy-then-rhs-else-lhs` semantics. Precise truthy/falsy
+splitting via `V.inter` with `V.neg(nil) / V.neg(false_literal)` is the
+theoretical-ideal result type per design §3.5, but the union form is the
+canonical conservative shape and lets callers narrow via subsequent guards.
+Control-flow narrowing on `and` / `or` is handled in `control_flow.lua`'s
+guard recognizer (sub-phase D); this handler concerns only the expression
+result type.
+
+### Unary semantics
+
+| Op | Result | Operand rule |
+|---|---|---|
+| `-` | integer if operand integer, else number | numeric |
+| `not` | boolean | any |
+| `#` | integer | string or record (`V.rec`) |
+
+### Cast semantics
+
+The checked and force variants share the same node shape; `node.force`
+discriminates:
+
+- **Checked `--[[: T]] expr`** (`force = false`): emit
+  `subtype.constrain(solver, synth(expr), T)`. Result type is `T`. Failure
+  routes through `D.from_solver` → `E_CAST`.
+- **Force `--[[:! T]] expr`** (`force = true`): bypass subtype, require
+  overlap. Compute `inter = V.inter(synth(expr), T)`; run
+  `empty.is_empty(inter, fresh_probe_solver)`. Empty intersection ⇒ reject
+  with `E_CAST`. Otherwise result is `T`, NO subtype constraint added.
+  The probe solver is fresh so emptiness queries do not pollute the
+  caller's constraint state.
+
+Per CLAUDE.md "Library Conventions", `--[[:! T]]` is "almost never correct"
+and the walker still implements it because the source surface allows it.
+
+### Annotation bridge
+
+`node.annotation` is a pre-resolved `V4Type`. When the field is `nil`
+but `node.annotation_id` is present (the decoder always stores the raw
+pool id), the cast handler emits `E_CAST` naming the missing
+annotation-parser bridge. This is the principled response — silently
+widening to `unknown` would mask the gap that the annotation parser
+(`--::` bridge, sub-phase J's deliverable) must close.
+
+### Operator probes (`is_integer` / `is_number` / `is_string`)
+
+The handler decides "integer vs number" for arithmetic results, and
+"numeric vs string vs both" for `..` and comparison, by running
+`V.subtype(t, V.integer)` etc. against a **fresh** solver per query. Bounds
+accrued during the probe persist on variable records (per `subtype.subtype`'s
+contract); for primitive operands this matches what a real `constrain` would
+have added, so the bookkeeping is benign.
+
+### Deferred-constraint queue (K6f) is NOT in this sub-phase
+
+The K6 audit calls out 468 errors blamed on the deferred-constraint
+queue. The operators sub-phase does NOT introduce a deferred queue: a
+type-variable operand to an arithmetic op currently flows through the
+subtype probe (which adds bounds via the standard variable-on-LHS rule)
+without an explicit deferral mechanism. This is sufficient for the
+concrete-operand cases that dominate the corpus but is provisional for
+operations whose result type genuinely depends on a variable's eventual
+binding. When the deferred-constraint queue lands, the arithmetic
+result-type computation will route through it for the unresolved-operand
+case.
+
+### What degrades gracefully
+
+- **Metamethod dispatch.** Lua semantics allow `__add` / `__concat` /
+  `__unm` / `__len` on tables and userdata. The walker currently does NOT
+  consult the metatable; an operand whose Lua type would dispatch via a
+  metamethod is rejected with `E_OP_TYPE`. Closed-record metamethod
+  support is a candidate follow-up — it requires the receiver-type to
+  carry an `__add`-typed field and a dispatch rule on operator handling.
+- **Floor division (`//`) and bitwise ops (`& | ~ << >>`).** The decoder
+  `OP_NAME` table does not currently list these — the parser does not
+  produce dedicated op codes for them. The walker's binary fall-through
+  rejects with `E_OP_TYPE` naming the unknown op string. If the parser
+  grows them, the operators handler adds the op-table entries.
+- **Bitwise unary (`~`).** Same status as the bitwise binaries.
+- **Constant-folding warnings on `==` / `~=` over provably-disjoint
+  operands.** Not a soundness issue (Lua returns false / true at runtime),
+  and the prompt called this out as an optional warning. Not implemented.
+
 ## Earlier sub-phases (A–I)
 
 ## Sub-phase H — effects

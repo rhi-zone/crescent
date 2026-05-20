@@ -203,6 +203,7 @@ local indexed_access  = require("lib.type.static-v4.walker.indexed_access")
 local ffi_cdef        = require("lib.type.static-v4.walker.ffi_cdef")
 local effects         = require("lib.type.static-v4.walker.effects")
 local require_resolve = require("lib.type.static-v4.walker.require_resolve")
+local operators       = require("lib.type.static-v4.walker.operators")
 
 --: () -> nil
 function M._register_builtins()
@@ -226,6 +227,13 @@ function M._register_builtins()
 	-- file `require("modname")` calls are recognised here; everything
 	-- else falls through to H's handler.
 	require_resolve.register(M)
+	-- operators (sub-phase K6c) registers SYNTHESIZE handlers for
+	-- NODE_BINARY_EXPR / NODE_UNARY_EXPR / NODE_CAST_EXPR. These node kinds
+	-- have no prior handler (control_flow.lua's guard recognizer
+	-- pattern-matches binary/unary shapes from a control-flow context but
+	-- does NOT register them on the walker dispatch table), so order
+	-- relative to the CALL_EXPR override chain is immaterial.
+	operators.register(M)
 end
 
 M._register_builtins()

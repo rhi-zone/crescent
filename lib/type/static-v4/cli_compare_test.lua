@@ -181,12 +181,14 @@ T.describe("v4 compare cli: end-to-end", function()
 	end)
 
 	T.it("diverge on decision: legacy accepts, v4 rejects → exit 1", function()
-		-- `local x = 1 + 1` — legacy is happy with the binary expression;
-		-- v4's walker stub for NODE_BINARY_EXPR rejects. This is a real
-		-- divergence the K6 corpus run will surface; it's a good
-		-- positive-control here because it's stable.
+		-- A non-empty table literal: legacy accepts it as a closed record;
+		-- v4's NODE_TABLE_EXPR handler currently rejects anything beyond
+		-- the empty case (sub-phase F item §3.10, "non-empty table
+		-- literals land in a later sub-phase"). This is a stable
+		-- divergence in K6c — once the full table-literal pass lands, this
+		-- test will need updating to a still-divergent shape.
 		local path = write_tmp("dec_div.lua",
-			"local zz_unique_compare_decision = 1 + 1\n" ..
+			"local zz_unique_compare_decision = { a = 1 }\n" ..
 			"return zz_unique_compare_decision\n")
 		local stdout, _stderr, code = run_cli(path)
 		T.eq(code, 1, "expected exit 1 for decision divergence; got " ..
