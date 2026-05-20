@@ -864,3 +864,15 @@ Sub-phase J remaining work:
   thin transform over the structured diagnostic stream.
 - Cast (`--[[: T]]`) and annotation (`--: T`) origin recording.
 - Test corpus migration from `lib/type/static/` once parity is reached.
+
+## Sibling: `../driver/` — the v4 driver
+
+The parser→walker pipeline integration lives in `lib/type/static-v4/driver/`
+(see `docs/typechecker-v4-driver-design.md`). The driver owns the
+`{ source path, io_caps, stdlib, ... } → (exports, diagnostics, deps)`
+contract. K2 of that work is the **arena → POJO decoder**
+(`driver/decoder.lua`): given the legacy parser's
+`{ nodes, lists, pool, root }` arena output, it produces the POJO
+node tables this walker reads. The walker contract (integer `node.tag`,
+`node.line/col`, per-kind fields from the "Decoded node shape" tables
+above) is the decoder's output contract. No walker change is needed.
