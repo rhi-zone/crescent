@@ -87,6 +87,12 @@ local _ = _types
 --     placeholder V4Type (or `true` if no placeholder is needed yet). A
 --     recursive `require("A")` returns the placeholder, breaking the
 --     cycle per Lua's runtime semantics.
+--   `prim_index: { [string]: V4Type }` — per-primitive-tag method-dispatch
+--     registry. Keyed by primitive base tag (`"string"`, ...), maps to the
+--     V4Type used as that primitive's `__index` table for method lookups.
+--     Populated by `inject_stdlib` from `stdlib.prim_index`. Lookups go
+--     through this map, NOT through `env.bindings[<name>]` — user
+--     shadowing the `string` global must not break `("x"):upper()`.
 --
 -- Helpers (`bind_alias`, `with_io_caps`, `with_cache_dir`, `push_require`,
 -- `lookup_require`, etc.) annotate these fields inline at each function
@@ -113,6 +119,7 @@ local function clone(e)
 		io_caps       = e.io_caps,
 		cache_dir     = e.cache_dir,
 		require_chain = e.require_chain,
+		prim_index    = e.prim_index,
 	}
 end
 
@@ -131,6 +138,7 @@ function M.new()
 		io_caps       = nil,
 		cache_dir     = nil,
 		require_chain = {} --[[: { [string]: V4Type | boolean } ]],
+		prim_index    = {} --[[: { [string]: V4Type } ]],
 	}
 end
 
@@ -308,6 +316,17 @@ end
 function M.with_cache_dir(env, dir)
 	local e = clone(env)
 	e.cache_dir = dir
+	return e
+end
+
+-- Install the per-primitive method-dispatch registry. Keyed by primitive
+-- base tag, maps to the V4Type used as that primitive's `__index` for
+-- `recv:method(...)` lookups. The driver wires this from `stdlib.prim_index`
+-- at env construction; tests may also set it directly for isolated cases.
+--: (env: WalkerEnv, registry: { [string]: V4Type }) -> WalkerEnv
+function M.with_prim_index(env, registry)
+	local e = clone(env)
+	e.prim_index = registry
 	return e
 end
 

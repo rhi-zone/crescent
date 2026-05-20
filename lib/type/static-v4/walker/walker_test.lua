@@ -721,6 +721,51 @@ T.describe("walker sub-phase C: NODE_METHOD_CALL", function()
 		T.ok(err ~= nil)
 		T.ok(tostring(err):find("no method", 1, true) ~= nil)
 	end)
+
+	-- prim_index-driven dispatch — the registry is keyed by primitive tag,
+	-- NOT by source-level binding name, so user shadowing of the `string`
+	-- global must not break `("x"):upper()`.
+
+	T.it("string literal dispatches via prim_index, not env.bindings", function()
+		local s = V.new_solver()
+		local upper = V.fn({ V.string_ }, V.string_, nil)
+		local string_lib = V.rec({ upper = upper }, false, nil)
+		local env = E.new()
+		env.prim_index = { string = string_lib }
+		-- NO `env.bindings.string` binding. The dispatch must succeed
+		-- through the registry alone.
+		local node = mcall(lit_str("hello"), "upper")
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.string_)
+	end)
+
+	T.it("user shadowing the `string` binding does NOT break method dispatch", function()
+		local s = V.new_solver()
+		local upper = V.fn({ V.string_ }, V.string_, nil)
+		local string_lib = V.rec({ upper = upper }, false, nil)
+		local env = E.new()
+		env.prim_index = { string = string_lib }
+		-- User wrote `local string = nil`. The binding is nil-typed, but
+		-- prim_index is untouched, so the dispatch still resolves.
+		env = E.bind(env, "string", V.nil_)
+		local node = mcall(lit_str("hello"), "upper")
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty, V.string_)
+	end)
+
+	T.it("primitive without a prim_index entry errors clearly", function()
+		local s = V.new_solver()
+		-- No prim_index entry for `integer` (legacy parity — number/int
+		-- have operator-meta tables, not method __index).
+		local env = E.new()
+		env.prim_index = {}  -- explicitly empty
+		local node = mcall({ tag = defs.NODE_LITERAL, lit_kind = defs.LIT_INTEGER, value = 42 }, "tostring")
+		local _ty, _env, err = W.walk_synth(node, env, s)
+		T.ok(err ~= nil)
+		T.ok(tostring(err):find("no method dispatch", 1, true) ~= nil)
+	end)
 end)
 
 T.describe("walker sub-phase C: NODE_RETURN_STMT", function()

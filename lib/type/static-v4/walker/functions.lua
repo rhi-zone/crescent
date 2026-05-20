@@ -353,17 +353,16 @@ end
 -- receiver's effective method table, and the call is dispatched with the
 -- receiver prepended as `self`.
 --
--- Method-table resolution (K6e):
+-- Method-table resolution (K6e + prim_index registry):
 --
 --   * `recv.tag == "rec"` — direct field lookup. The original sub-phase C
 --     contract.
---   * `recv.tag == "prim"` with a primitive that has a library binding
---     (Lua: only `string`) — look up the method on the library record
---     (`env.bindings.string`). Lua dispatches `("abc"):sub(...)` via
---     `string.sub(...)` because the string metatable's `__index` is the
---     `string` library; v4 mirrors that lookup statically.
---   * `recv.tag == "literal"` with `base == "string"` — same as above; a
---     string literal is a string at the value level.
+--   * `recv.tag == "prim"` / `recv.tag == "literal"` — read
+--     `env.prim_index[base_tag]` (legacy `ctx.prim_index` parity). The
+--     registry is keyed by primitive tag, NOT by source-level binding name,
+--     so a user `local string = nil` does not break `("x"):upper()`. A nil
+--     entry surfaces a clear "no method dispatch for primitive type X"
+--     diagnostic — no silent fallthrough.
 --   * `recv.tag == "mu"` — unfold once and recurse. Records under `μ`
 --     ultimately reach a `rec` per type-system invariants.
 --   * `recv.tag == "union"` — distribute. Every member must support the
@@ -419,43 +418,29 @@ local function synth_method_call(node, env, solver)
 		end
 		return apply_arrow(method_ty, arg_types, arg_count, env2, solver)
 	end
-	-- Primitive dispatch (Lua: `string` only) — look up the method on the
-	-- primitive's library record (e.g. `env.bindings.string`). This mirrors
-	-- Lua's runtime semantics: `("abc"):sub(...)` dispatches via the string
-	-- metatable's `__index`, which is the `string` library.
-	if r.tag == "prim" then
-		local prim_name = tostring(r.name)
-		local lib = env2.bindings[prim_name]
-		if lib == nil or lib.tag ~= "rec" then
+	-- Primitive / literal dispatch via the per-tag `prim_index` registry.
+	-- Keyed by base tag so user shadowing of the source-level binding name
+	-- (`local string = nil`) does not break `("x"):upper()` dispatch.
+	if r.tag == "prim" or r.tag == "literal" then
+		local base_tag = tostring(r.tag == "literal" and r.base or r.name)
+		local registry = env2.prim_index
+		local idx = registry and registry[base_tag] or nil
+		if idx == nil then
 			return nil, env2, D.emit(env2, D.E_FIELD_MISSING,
-				"method call: receiver has primitive type '" .. prim_name ..
-				"' which has no method library in scope",
+				"method call: no method dispatch for primitive type '" ..
+				base_tag .. "' (no prim_index entry)",
 				{ origin_type = recv_ty })
 		end
-		local method_ty = lib.fields[node.method]
+		if idx.tag ~= "rec" then
+			return nil, env2, D.emit(env2, D.E_INTERNAL,
+				"method call: prim_index entry for '" .. base_tag ..
+				"' is not a record (tag: " .. tostring(idx.tag) .. ")",
+				{ origin_type = recv_ty })
+		end
+		local method_ty = idx.fields[node.method]
 		if method_ty == nil then
 			return nil, env2, D.emit(env2, D.E_FIELD_MISSING,
-				"method call: primitive '" .. prim_name ..
-				"' has no method '" .. node.method .. "'",
-				{ origin_type = recv_ty })
-		end
-		return apply_arrow(method_ty, arg_types, arg_count, env2, solver)
-	end
-	-- Literal dispatch — same shape as primitive, looking up the base's
-	-- library.
-	if r.tag == "literal" then
-		local base_name = tostring(r.base)
-		local lib = env2.bindings[base_name]
-		if lib == nil or lib.tag ~= "rec" then
-			return nil, env2, D.emit(env2, D.E_FIELD_MISSING,
-				"method call: literal of base '" .. base_name ..
-				"' has no method library in scope",
-				{ origin_type = recv_ty })
-		end
-		local method_ty = lib.fields[node.method]
-		if method_ty == nil then
-			return nil, env2, D.emit(env2, D.E_FIELD_MISSING,
-				"method call: literal of base '" .. base_name ..
+				"method call: primitive '" .. base_tag ..
 				"' has no method '" .. node.method .. "'",
 				{ origin_type = recv_ty })
 		end
@@ -483,15 +468,12 @@ local function synth_method_call(node, env, solver)
 			local m_method_ty = nil
 			if mr.tag == "rec" then
 				m_method_ty = mr.fields[node.method]
-			elseif mr.tag == "prim" then
-				local lib = env2.bindings[mr.name]
-				if lib ~= nil and lib.tag == "rec" then
-					m_method_ty = lib.fields[node.method]
-				end
-			elseif mr.tag == "literal" then
-				local lib = env2.bindings[mr.base]
-				if lib ~= nil and lib.tag == "rec" then
-					m_method_ty = lib.fields[node.method]
+			elseif mr.tag == "prim" or mr.tag == "literal" then
+				local base_tag = tostring(mr.tag == "literal" and mr.base or mr.name)
+				local registry = env2.prim_index
+				local idx = registry and registry[base_tag] or nil
+				if idx ~= nil and idx.tag == "rec" then
+					m_method_ty = idx.fields[node.method]
 				end
 			end
 			if m_method_ty == nil then

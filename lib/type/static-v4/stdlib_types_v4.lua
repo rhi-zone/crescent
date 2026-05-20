@@ -549,6 +549,22 @@ local function build_global_scope()
 end
 bindings._G = build_global_scope()
 
+-- ── Per-primitive method-dispatch registry ──────────────────────────────
+-- Mirrors the legacy `ctx.prim_index` (per prelude.lua:299-323): maps a
+-- primitive's base tag to the V4Type used as that primitive's `__index`
+-- for method lookups (e.g. `("abc"):upper()` resolves through the entry
+-- under `"string"`). Keyed by tag, NOT by source-level binding name —
+-- user-shadowing the `string` global must not break `:upper()` dispatch.
+--
+-- Legacy registers exactly ONE entry: TAG_STRING → the `string` library.
+-- Number / integer / boolean have operator-meta tables (`prim_meta`,
+-- legacy: number_meta / integer_meta) but no method-dispatch `__index`,
+-- so they are intentionally absent here. Adding number/integer entries
+-- would lie about Lua semantics (`(42):floor()` is a runtime error).
+local prim_index = {
+	string = bindings.string,
+}
+
 -- ── Intrinsic markers (informational; consumers branch on `resolved_by`) ─
 intrinsics["$Require"]  = { kind = "walker-override",   resolved_by = "walker/require_resolve.lua" }
 intrinsics["$FfiC"]     = { kind = "walker-rewrite",    resolved_by = "walker/ffi_cdef.lua" }
@@ -564,6 +580,7 @@ local M = {
 	aliases            = aliases,
 	parametric_aliases = parametric_aliases,
 	intrinsics         = intrinsics,
+	prim_index         = prim_index,
 }
 
 return M

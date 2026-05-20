@@ -137,6 +137,11 @@ local function inject_stdlib(env, stdlib)
 		end
 	end
 	env.parametric_aliases = stdlib.parametric_aliases or {}
+	-- Per-primitive method-dispatch registry (legacy `ctx.prim_index`).
+	-- Keyed by primitive base tag; method calls on prim/literal receivers
+	-- look up here, not via `env.bindings[<name>]`. User-shadowing the
+	-- `string` global must not break `("x"):upper()` dispatch.
+	env = E.with_prim_index(env, stdlib.prim_index or {})
 	return env
 end
 
@@ -272,7 +277,7 @@ drive = function(source_path, opts)
 	-- local so later reads (`stdlib.aliases` in the result-packing
 	-- block) do not narrow opts.stdlib's inferred shape backwards into
 	-- this site.
-	local stdlib = opts.stdlib --[[: { bindings: unknown, aliases: unknown, parametric_aliases: unknown, ... }]]
+	local stdlib = opts.stdlib --[[: { bindings: unknown, aliases: unknown, parametric_aliases: unknown, prim_index: unknown, ... }]]
 	local env = E.new()
 	env = inject_stdlib(env, stdlib)
 	env = E.with_io_caps(env, opts.io_caps)
