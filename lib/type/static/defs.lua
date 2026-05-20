@@ -241,7 +241,8 @@ M.LIT_OPAQUE_KEY        = 5   -- opaque table-valued key; data[1] = intern ID of
 M.FLAG_VARARG           = 1
 M.FLAG_LOCAL            = 2
 M.FLAG_COMPUTED         = 4
-M.FLAG_FORCE_CAST       = 1  -- NODE_CAST_EXPR: --[[:! T]] overlap-checked force cast
+M.FLAG_HAS_ELSE         = 8   -- NODE_IF_STMT: an else block is present (data[2]/data[3] = else block start/len)
+M.FLAG_FORCE_CAST       = 1   -- NODE_CAST_EXPR: --[[:! T]] overlap-checked force cast
 
 -- Flag bits (types)
 M.FLAG_GENERIC          = 1

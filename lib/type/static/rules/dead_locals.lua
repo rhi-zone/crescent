@@ -198,8 +198,9 @@ walk_stmt = function(nodes, ast_lists, refs, sid)
                 walk_block(nodes, ast_lists, refs, clause.data[1], clause.data[2])
             end
         end
-        if sn.data[4] >= 0 then
-            walk_stmt(nodes, ast_lists, refs, sn.data[4])
+        -- Explicit else block (data[2]/data[3]) when FLAG_HAS_ELSE set.
+        if (sn.flags % (defs.FLAG_HAS_ELSE * 2)) >= defs.FLAG_HAS_ELSE then
+            walk_block(nodes, ast_lists, refs, sn.data[2], sn.data[3])
         end
         return
     end

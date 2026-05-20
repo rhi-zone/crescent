@@ -325,33 +325,30 @@ local function decode_repeat_stmt(ctx, n, out)
 end
 
 local function decode_if_clause(ctx, n, out)
-	local cond_slot = n.data[0]
-	if cond_slot == -1 then
-		out.cond = nil   -- else clause
-	else
-		out.cond = decode_node(ctx, cond_slot)
-	end
+	-- IF_CLAUSE always represents an IF or ELSEIF clause with a real test
+	-- expression; the parser stores the else block as an explicit field on
+	-- NODE_IF_STMT (see decode_if_stmt) so this branch no longer needs an
+	-- "absent test" sentinel.
+	out.cond = decode_node(ctx, n.data[0])
 	out.body = decode_node_list(ctx, n.data[1], n.data[2])
 	return out
 end
 
 local function decode_if_stmt(ctx, n, out)
-	-- The parser stores all clauses (if + elseif + else) as a single list
-	-- of NODE_IF_CLAUSE entries; the walker's NODE_IF_STMT handler expects
-	-- `{ clauses: {{ cond, body }}, else_body }`. Split the clauses list
-	-- into the leading conditional clauses and a trailing else-body.
+	-- IF + ELSEIF clauses live in (data[0], data[1]); the optional ELSE
+	-- block is stored explicitly in (data[2], data[3]) and signaled by
+	-- FLAG_HAS_ELSE on the node flags.
 	local raw = decode_node_list(ctx, n.data[0], n.data[1])
 	local clauses = {}
-	local else_body = nil
 	for _, c in ipairs(raw) do
-		if c.cond == nil then
-			else_body = c.body
-		else
-			clauses[#clauses + 1] = { cond = c.cond, body = c.body }
-		end
+		clauses[#clauses + 1] = { cond = c.cond, body = c.body }
 	end
 	out.clauses = clauses
-	out.else_body = else_body
+	if (n.flags % (defs.FLAG_HAS_ELSE * 2)) >= defs.FLAG_HAS_ELSE then
+		out.else_body = decode_node_list(ctx, n.data[2], n.data[3])
+	else
+		out.else_body = nil
+	end
 	return out
 end
 

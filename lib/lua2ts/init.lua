@@ -971,16 +971,20 @@ emit_stmt = function(ctx, nid)
             local test_id = cn.d[1]
             local bs = cn.d[2]
             local bl = cn.d[3]
-            if test_id == -1 then
-                -- else clause
-                ctx:emit("} else {")
-            elseif i == 1 then
+            if i == 1 then
                 ctx:emit("if (" .. emit_expr(ctx, test_id, 0) .. ") {")
             else
                 ctx:emit("} else if (" .. emit_expr(ctx, test_id, 0) .. ") {")
             end
             ctx.indent = ctx.indent + 1
             emit_block(ctx, bs, bl)
+            ctx.indent = ctx.indent - 1
+        end
+        -- Explicit else block: NODE_IF_STMT d[3]/d[4] when FLAG_HAS_ELSE set.
+        if (n.flags % (defs.FLAG_HAS_ELSE * 2)) >= defs.FLAG_HAS_ELSE then
+            ctx:emit("} else {")
+            ctx.indent = ctx.indent + 1
+            emit_block(ctx, d[3], d[4])
             ctx.indent = ctx.indent - 1
         end
         ctx:emit("}")

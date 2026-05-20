@@ -3425,6 +3425,12 @@ function block_has_return_stmt(ctx, bs, bl)
                     return true
                 end
             end
+            -- else block: explicit data[2]/data[3], present iff FLAG_HAS_ELSE.
+            if (sn.flags % (defs.FLAG_HAS_ELSE * 2)) >= defs.FLAG_HAS_ELSE then
+                if block_has_return_stmt(ctx, sn.data[2], sn.data[3]) then
+                    return true
+                end
+            end
         elseif sn.kind == NODE_WHILE_STMT or sn.kind == NODE_REPEAT_STMT then
             if block_has_return_stmt(ctx, sn.data[1], sn.data[2]) then return true end
         elseif sn.kind == NODE_FOR_NUM or sn.kind == NODE_FOR_IN then
@@ -3460,15 +3466,18 @@ local function is_definitely_returning(ctx, bs, bl)
             -- Last statement is an if: check all branches recursively.
             local clause_start = sn.data[0]
             local clause_count = sn.data[1]
-            local has_else     = false
+            local has_else     = (sn.flags % (defs.FLAG_HAS_ELSE * 2)) >= defs.FLAG_HAS_ELSE
             local all_exit     = true
             for j = clause_start, clause_start + clause_count - 1 do
                 local cn          = ctx.nodes:get(ctx.ast_lists:get(j))
-                local test_nid    = cn.data[0]
                 local block_start = cn.data[1]
                 local block_len   = cn.data[2]
-                if test_nid < 0 then has_else = true end
                 if not is_definitely_returning(ctx, block_start, block_len) then
+                    all_exit = false
+                end
+            end
+            if has_else then
+                if not is_definitely_returning(ctx, sn.data[2], sn.data[3]) then
                     all_exit = false
                 end
             end
@@ -4131,11 +4140,24 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
     --: { [integer]: integer }
     local disc_arm_counts  = {}  -- name_id -> count of exiting arms that field_disc'd it
 
-    for i = n.data[0], n.data[0] + n.data[1] - 1 do
-        local cn          = ctx.nodes:get(ctx.ast_lists:get(i))
-        local test_nid    = cn.data[0]
-        local block_start = cn.data[1]
-        local block_len   = cn.data[2]
+    -- Iterate IF + ELSEIF clauses; if FLAG_HAS_ELSE, append a synthetic
+    -- "else" pass at the end whose block comes from sn.data[2]/data[3].
+    local has_else_flag = (n.flags % (defs.FLAG_HAS_ELSE * 2)) >= defs.FLAG_HAS_ELSE
+    local conditional_count = n.data[1]
+    local total_passes = conditional_count + (has_else_flag and 1 or 0)
+    for pass_idx = 0, total_passes - 1 do
+        local test_nid, block_start, block_len
+        if pass_idx < conditional_count then
+            local cn = ctx.nodes:get(ctx.ast_lists:get(n.data[0] + pass_idx))
+            test_nid    = cn.data[0]
+            block_start = cn.data[1]
+            block_len   = cn.data[2]
+        else
+            -- explicit else branch
+            test_nid    = -1
+            block_start = n.data[2]
+            block_len   = n.data[3]
+        end
 
         local entry_narrowings  --: { [integer]: integer, ... } | nil
         if test_nid >= 0 then

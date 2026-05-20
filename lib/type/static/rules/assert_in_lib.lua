@@ -102,7 +102,7 @@ walk_stmt = function(ctx, sid, err_ctx, filepath, severity, errors_mod, assert_i
         end
 
     elseif sn.kind == NODE_IF_STMT then
-        -- data[0]=tests_start, data[1]=tests_len (parallel IF_CLAUSE list)
+        -- data[0]=tests_start, data[1]=tests_len (IF_CLAUSE list, IF + ELSEIF only)
         for j = sn.data[0], sn.data[0] + sn.data[1] - 1 do
             local clause_nid = ast_lists:get(j)
             local clause = nodes:get(clause_nid)
@@ -112,9 +112,9 @@ walk_stmt = function(ctx, sid, err_ctx, filepath, severity, errors_mod, assert_i
                 walk_block(ctx, clause.data[1], clause.data[2], err_ctx, filepath, severity, errors_mod, assert_id)
             end
         end
-        -- alternate else block: data[4] = node_id (-1 if none)
-        if sn.data[4] >= 0 then
-            walk_stmt(ctx, sn.data[4], err_ctx, filepath, severity, errors_mod, assert_id)
+        -- Explicit else block (data[2]/data[3]) when FLAG_HAS_ELSE set.
+        if (sn.flags % (defs.FLAG_HAS_ELSE * 2)) >= defs.FLAG_HAS_ELSE then
+            walk_block(ctx, sn.data[2], sn.data[3], err_ctx, filepath, severity, errors_mod, assert_id)
         end
 
     elseif sn.kind == NODE_DO_STMT then

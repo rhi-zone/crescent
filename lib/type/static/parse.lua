@@ -462,23 +462,25 @@ function M.parse(source, filename, pool)
             cnd.data[2] = bl
             clauses[#clauses + 1] = clause
         end
-        -- else clause
+        -- else block: stored as an explicit field on NODE_IF_STMT
+        -- (data[2]/data[3]) rather than as a synthetic NODE_IF_CLAUSE with a
+        -- -1 sentinel test. Presence is indicated by FLAG_HAS_ELSE.
+        local has_else_block = false
+        local else_bs, else_bl = 0, 0
         if L.tk == defs.TK_ELSE then
-            local eline, ecol = L._tk_line_out, L._tk_col_out
             L:next()
-            bs, bl = parse_block()
-            clause = mknode(defs.NODE_IF_CLAUSE, eline, ecol)
-            cnd = nodes:get(clause)
-            cnd.data[0] = -1
-            cnd.data[1] = bs
-            cnd.data[2] = bl
-            clauses[#clauses + 1] = clause
+            else_bs, else_bl = parse_block()
+            has_else_block = true
         end
         L:expect(defs.TK_END)
         local cs, cl = flush_list(clauses)
         local n = mknode(defs.NODE_IF_STMT, line, col)
-        nodes:get(n).data[0] = cs
-        nodes:get(n).data[1] = cl
+        local nnd = nodes:get(n)
+        nnd.data[0] = cs
+        nnd.data[1] = cl
+        nnd.data[2] = else_bs
+        nnd.data[3] = else_bl
+        if has_else_block then nnd.flags = defs.FLAG_HAS_ELSE end
         return n
     end
 
