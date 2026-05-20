@@ -695,6 +695,50 @@ as long as the lattice itself doesn't change shape.
 - Concurrency / file locking (the cache is single-process).
 - Compaction / GC of unreferenced `.cri` files.
 
+## Stdlib bindings — `stdlib_types_v4.lua`
+
+The K3 file (`stdlib_types_v4.lua`) exports the v4 stdlib symbol surface
+the driver injects into every walk. Per `docs/typechecker-v4-stdlib-design.md`
+and `docs/typechecker-v4-driver-design.md` §3 (Option B — dedicated v4
+declaration file), the module exports a single record:
+
+```
+{
+  bindings:           { [name]: V4Type },              -- global symbols
+  aliases:            { [name]: V4Type },              -- nullary aliases (e.g. `thread`)
+  parametric_aliases: { [name]: (V4Type, ...) -> V4Type },
+                                                       -- parametric aliases stored as Lua
+                                                       -- functions; v4 has no type-level
+                                                       -- lambda or deferred-match
+                                                       -- constructor.
+  intrinsics:         { [name]: { kind, resolved_by } },
+                                                       -- intrinsic markers (informational).
+}
+```
+
+The driver's `inject_stdlib(env, stdlib)` walks `bindings` calling
+`E.bind(env, name, ty)` and `aliases` calling `E.bind_alias`. The
+`parametric_aliases` table is consumed by the future annotation-parser
+bridge when it encounters `Arr<T>`, `Ptr<T>`, etc. — until that bridge
+exists, parametric aliases are unreferenced from the walker.
+
+The file is **pure data construction** — no I/O, no parsing — so it is
+loaded once per `bin/cr` invocation and re-used across every `drive`
+call (driver design §5).
+
+**Caps-first**: `io`, `os`, `debug`, `dofile`, `loadfile`, `loadstring`,
+`load`, `newproxy`, `collectgarbage`, `gcinfo` are deliberately NOT in
+the default stdlib (CLAUDE.md "Caps-first, everywhere"). A future
+`stdlib_types_v4_caps.lua` adds them for `--caps full` runs.
+
+**Known degradations**: spread function results (`unpack`, `coroutine.resume`,
+`string.byte`, `math.modf`, ...) degrade to `unknown` because v4 has no
+spread-result type constructor (design §7 #1). `select`'s literal-
+discriminated tail-typing is encoded as the wider intersection (design
+§7 #2). `string.match` / `gmatch` / `find` declare a fallback type
+pending the `$PatternReturn` / `$FindReturn` walker hook (design §7 #3).
+Each degradation is flagged inline at its declaration site in the file.
+
 ## Running
 
 ```
