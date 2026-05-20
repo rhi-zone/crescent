@@ -606,42 +606,107 @@ the per-file error cleanup queue above — this section is the v4 implementation
 ## Walker sub-phases (sequential, per design doc §13)
 
 - [x] **Phase A** — env + dispatch scaffolding (commit `84c49929`).
-- [ ] **Phase B** — literals + primitive expressions (next).
-- [ ] **Phase C** — function defs + calls + rank-N.
-- [ ] **Phase D** — control flow + narrowing.
-- [ ] **Phase E** — match expressions.
-- [ ] **Phase F** — indexed access + varargs + multi-return.
-- [ ] **Phase G** — FFI cdef integration.
-- [ ] **Phase H** — effects.
-- [ ] **Phase I** — cross-file resolution + cache integration.
-- [ ] **Phase J** — diagnostics + source positions.
+- [x] **Phase B** — literals + primitive expressions (commit `15f3faab`).
+- [x] **Phase C** — function defs + calls + rank-N (commit `505d4ee1`).
+- [x] **Phase D** — control flow + narrowing (commit `e23635d2`).
+- [x] **Phase E** — match expressions (commit `cd5dca94`).
+- [x] **Phase F** — indexed access + module pattern + varargs (commit `ed21b8aa`).
+- [x] **Phase G** — FFI cdef integration (commit `e9420891`).
+- [x] **Phase H** — effects (annotation, yield, throw, pcall) (commit `42da46a9`).
+- [x] **Phase I** — cross-file resolution + cache integration (commit `cad83784`).
+- [x] **Phase J** — diagnostics + source positions (commit `0c40836f`).
 
 ## Legacy typechecker bugs (D-series)
 
 - [x] **D1** — scalar return against tuple expected (commit `7b8b6b9d`).
-- [ ] **D2** — multi-return spread into last-position call args is unimplemented.
-- [ ] **D3** — non-last call expression in multi-assign is not truncated to slot 0.
-- [ ] **D4** — `...A` annotation in return position documented in typechecker-reference but rejected by impl.
-- [ ] **D1 follow-up flow-sensitivity quirk** — original D1 repro (`local _, s = f(); --: string\nlocal s_str = s`) doesn't error at top level even though simpler variants do. Function-body error fires correctly; downstream flow check is suspect. Audit when convenient.
-- [ ] **Third cross-file `--::` resolution gap** — top-level `--::` alias bodies referencing imported types still fail (different from the lazy case fixed by `1a0d4bea` and the prescan `--:: require` case which works). Surfaced in walker sub-phase A.
+- [x] **D2** — multi-return spread; truncate non-last call expressions (commit `eda0871c`).
+- [x] **D3** — non-last call expression in multi-assign truncated to slot 0 (commit `eda0871c`).
+- [x] **D4** — `...A` variadic return annotation (commit `efc7217d`).
+- [ ] **D1 follow-up flow-sensitivity quirk** — original D1 repro (`local _, s = f(); --: string\nlocal s_str = s`) doesn't error at top level even though simpler variants do. Function-body fix landed but downstream flow check is suspect. Audit when convenient.
+- [ ] **Third cross-file `--::` resolution gap** — top-level `--::` alias bodies referencing imported types still fail (different from the lazy case fixed by `1a0d4bea` and the prescan `--:: require` case which works). Surfaced in walker sub-phase A. Partly addressed by `4792e6c3` (cross-file `--::` alias bodies resolve aliases from top-level require). Verify remaining gap.
+- [ ] **Fourth cross-file `--::` resolution case** — env.lua **direct-consumer** trap discovered this session, distinct from the three already fixed. Locate and repro.
+- [ ] **TAG_SPREAD test revision** — `lib/type/static/type_test.lua:8240` (`y is nil` expectation) expects `y + 1` to error in `local x, y = f()` where `f: () -> ...(integer)`. With proper D4 SPREAD support, `y` types as integer and the test no longer applies. Revise.
+- [ ] **PRIM_CACHE / TV bound-graph interaction** — flagged in K3 design as a singleton interaction worth auditing.
 
-## Big architectural pieces (after walker)
+## v4 driver / CLI track (K-series)
 
-- [ ] **Error reporting / diagnostic UX** — structured per-error metadata at construction; group-by in `--summary` mode rather than post-hoc regex.
-- [ ] **CLI integration** — `bin/cr check` dispatches to v4 (flag-gated first, then default).
-- [ ] **Test corpus migration** — port `type_test.lua`, `type_soundness_test.lua`, etc. to v4.
-- [ ] **Parity testing** — v4 vs existing typechecker on representative corpus; named divergences.
-- [ ] **Migration cutover** — `lib/type/static-v4/` becomes `lib/type/static/`; old impl retired.
+- [x] **K1** — v4 driver (parse → decode → walk → cache) (commit `99d654ff`). Design: `df870399`.
+- [x] **K2** — arena → POJO decoder (commit `050fcec8`).
+- [x] **K3** — `stdlib_types_v4.lua` MVP (commit `dc84f2d4`). Design: `f270a076`.
+- [x] **K4** — `--summary` rendering for v4 structured diagnostics (commit `5305cb66`).
+- [x] **K5** — `bin/cr check --v4` CLI integration (commit `c5b41fa7`).
+- [ ] **K5b** — `--compare` mode: run legacy + v4 on the same file, report divergences. Foundation for K6.
+- [ ] **K6** — Parity discovery pass: run K5b across `lib/**/*.lua`; classify each divergence (fix v4, fix legacy, document intentional). Multi-step; per-case judgment.
+- [ ] **K7** — Migration cutover: when v4 reaches parity threshold (per driver design doc §10 gates), retire `lib/type/static/`.
+
+## Parser idiosyncrasy fixes (landed this session)
+
+- [x] **NODE_IF_STMT** — explicit `else_body` field instead of -1 sentinel (commit `e077ae18`).
+- [x] **NODE_FOR_NUM** — explicit step via `FLAG_HAS_STEP` (commit `7df7de27`).
+- [x] **NODE_TABLE_FIELD** — explicit `field_kind` tag (commit `b090e84d`).
+
+## Walker limitations surfaced (deferred but flagged)
+
+- [ ] **Annotation parser bridge** (`ann.lua` → V4Type) — walker H/J consumes pre-resolved V4Type; legacy `ann.lua` produces v3 types. Bridge missing for users writing `--:`/`--::` in source.
+- [ ] **Parametric aliases walker hook** — K3 stored `Arr<T>`, `Ptr<T>`, etc. as Lua functions in `parametric_aliases`. Walker has no hook to call them when users write `Arr<T>` in annotations. **Highest-value unblock for K6** — without it tests cannot use `Arr<T>`.
+- [ ] **`$PatternReturn<P>` / `$FindReturn<P>` walker hook** — intrinsic resolution for string-pattern returns; walker doesn't currently dispatch them.
+- [ ] **Spread-fn-result encoding gap** — V4Type has no `...V` result form. Affects `unpack`, `coroutine.resume`, `math.modf`, `string.byte`, `select`. Currently degrade to `...unknown`.
+- [ ] **Row polymorphism** — module-pattern accumulation produces lower bounds, but "freezing at return M" against a multi-field expected record can't be fully subsumed without row-poly.
+- [ ] **Multi-return tuple correlation** — v4 multi-return loses correlation between elements in `(p, n, env, err)` triples. Defensive nil checks added in walker D.
+- [ ] **Non-empty table literals** — walker F handles `{}` for module pattern; non-empty table literals reject loudly. Implement.
+- [ ] **Chained indexed-LHS** (`a.b.c = ...`) — rejects loudly in walker F.
+- [ ] **Vararg-in-return position** — rejects loudly in walker F.
+- [ ] **Effect-annotation parsing in `ann.lua`** — walker H consumes pre-resolved effect-bearing function types; legacy `ann.lua` doesn't currently parse `(A) -[yield]-> B` syntax.
+
+## V4 type-system limitations surfaced
+
+- [ ] **`V.intrinsic(name, args)` constructor** — K3 wanted this for `$Throw`, `$EachField`, etc.; not in v4 core.
+- [ ] **Eager match evaluation** — `V.match(V.var("T"), arms)` suspends on free vars rather than producing a parametric value.
+- [ ] **Skolem escape walk in 4e rank-N skolemize** — uses reachable-variable walk; design doc §6.1's literal reading was flagged as wrong. Audit.
+
+## Big architectural pieces
+
+- [x] **Error reporting / diagnostic UX** — structured per-error metadata at construction (commit `0c40836f`); group-by via `--summary` (commit `5305cb66`).
+- [x] **CLI integration** — `bin/cr check --v4` (commit `c5b41fa7`). Default-flip pending K6.
+- [ ] **Test corpus migration** — port `type_test.lua`, `type_soundness_test.lua`, etc. to v4. Bundled with K6.
+- [ ] **Parity testing** — K5b/K6 above.
+- [ ] **Migration cutover** — K7 above.
 
 ## Open design questions (from design doc §14) — all resolved
 
 - [x] **OQ #1** (module pattern) — Option D: lower-bound `V.var()` with field accumulation. Commit `529b55f2`.
-- [x] **OQ #2** (multi-return tuple subtype) — design fresh; D1 fixed, D2/D3/D4 pending. Commit `053dc5ed`.
+- [x] **OQ #2** (multi-return tuple subtype) — design fresh; D1/D2/D3/D4 all landed. Commit `053dc5ed`.
 - [x] **OQ #3** (effect attribution under skolemization) — body arrow; outer-forall placement isn't meaningful. Resolved in conversation.
 - [x] **OQ #4** (inline param annotations) — unsupported (block-comment form silently ignored). Commit `509282fd`.
 - [x] **OQ #5** (typeof mutual equality) — union-find via v4 bound graphs (pre-bind every scope-introduced name). Commit `5c72d38f`.
 - [x] **OQ #6** (`$Require` redundancy) — NOT redundant; foundational. Resolved this session.
 - [x] **OQ #7** (`--summary` root-cause grouping) — existing is ad-hoc; walker emits structured diagnostics. Commit `835acc0c`.
+
+## Open design questions (deferred, not lost)
+
+From driver design doc §11:
+- [ ] Chunk-level module-type declaration form.
+- [ ] Annotation-parser bridge (see "Walker limitations" above).
+- [x] Decoder laziness vs eagerness — decided eager (K2).
+- [ ] Streaming vs batched diagnostic delivery.
+- [ ] Parser-as-cap question.
+- [x] Solver lifecycle across recursive walks — verified fresh per recursion.
+- [x] Cache-dir default location — decided per-repo `.crescentcache`.
+- [ ] Diagnostic dedup when both inner walk and outer require fail.
+
+From K3 design doc §7:
+- [ ] Spread-fn-result encoding (see V4 limitations above).
+- [ ] `select` literal-discriminated tail typing.
+- [ ] `$PatternReturn<P>` walker hook (see walker limitations above).
+- [ ] Caps-secondary stdlib file structure.
+- [ ] `_G` (`$GlobalScope`) construction order.
+- [ ] `V.forall` bounds-parameter spelling.
+- [ ] `Ctype<T>` callable-record intersection.
+- [ ] `--:: augment` merge path.
+
+From AST walker design doc §14 (beyond OQ #1–#7):
+- [x] `$Require` walker override — Option B (commit context resolved in K1).
+- [x] `--summary` structured diagnostics — OQ #7.
 
 ## Resolved this session (for completeness)
 

@@ -1,157 +1,229 @@
 # Typechecker Roadmap
 
-A prioritized map of the work between today's typechecker and a system that
-honestly backs the CLAUDE.md claim ("safer than Rust and more powerful than
-Haskell"). Today the claim is overstated on several axes; this document is the
-plan to either back it up or narrow it.
+Two parallel tracks:
 
-## Status today (May 2026)
+1. **V4 cutover track (K-series)** — finishing the AST walker rework, reaching
+   parity with the legacy typechecker, and retiring `lib/type/static/`.
+2. **Type-system power track (A/B-series)** — closing the soundness and
+   expressiveness gaps that back (or narrow) the CLAUDE.md claim
+   ("safer than Rust and more powerful than Haskell").
 
-Audit performed this session against the major axes of type-system power.
-Summary:
+The two tracks interact at the edges (K6 parity work will surface power-track
+items as concrete bugs) but are otherwise independent. The V4 track is more
+urgent because every session that touches the typechecker is currently
+maintaining two implementations; collapsing that is high leverage.
 
-**Sound and working:** rank-1 let-polymorphism, row polymorphism, match types,
-discriminated union narrowing, bidirectional inference, type predicates,
-match-types-as-type-level-computation.
+See `TODO-typecheck.md` for the full per-item checklist with commit hashes.
+This document is the prioritization/ordering view.
 
-**Known unsoundness:** none currently identified. Rank-N landed 2026-05-17
-(commit `289bc54d`); HM Phase 2 field-value-type propagation landed
-2026-05-15 (commits `3c3cadaf` design through `52873f05` perf baseline);
-variance was demoted from soundness to expressiveness (Phase A.5). The
-session that wrote earlier versions of this roadmap incorrectly listed A2
-as open work based on a stale TODO.md entry — verifying against actual
-commits before designing future work is mandatory.
+---
 
-**Not implemented:** higher-kinded types, effect tracking, impredicativity,
-GADT-strength flow typing, refinement types, linear types.
+## Near future (next 1–2 sessions)
 
-**Wins vs. Haskell** (axes where crescent matches or exceeds): row
-polymorphism (Haskell has no native form), match types (Haskell approximates
-via closed type families with worse ergonomics), discriminated union narrowing
-(parity with TS).
+The V4 walker is feature-complete through sub-phases A–J. CLI integration
+(`bin/cr check --v4`) and `--summary` rendering are in place. Stdlib types
+are live (K3). What's blocking declaring parity is **knowing where the
+divergences are**.
 
-## Phase A — Soundness (mandatory)
+### N1. K5b — `--compare` mode
 
-Any "more powerful" claim presupposes the basics are sound. These items
-actively poison the repo today: future sessions will reach for features that
-appear to work and build on the unsoundness.
+Single flag that runs both legacy and v4 on the same file and reports
+divergences (missing errors, extra errors, different categories at the same
+source position). Output should be diff-shaped, not interleaved, so K6 can
+script over it.
 
-### A1. Rank-N subsumption at call sites — **DONE**
+This is small (a few hundred lines) and unblocks everything downstream.
 
-Landed 2026-05-17, commit `289bc54d`. Design: `docs/typechecker-rank-n.md`.
-Pinned tests in `lib/type/static/type_soundness_test.lua` (`soundness:
-rank-N polymorphism call-site`) all flip to `has_error`; body-check control
-N9 unchanged; variance probe confirms no variance dependency.
+### N2. Parametric aliases walker hook
 
-### A2. HM Phase 2 — field-value-type propagation — **DONE**
+K3 stored `Arr<T>`, `Ptr<T>`, etc. as Lua functions in `parametric_aliases`,
+but the walker has no hook to call them when users write `Arr<T>` in an
+annotation. Without this, the existing test corpus cannot run under v4 —
+many tests use `Arr<T>` syntax. Highest-leverage walker-limitation fix
+before K6.
 
-Landed 2026-05-15. Design: `docs/typechecker-hm-phase2.md`. Commits:
-`3c3cadaf` (design), `772fb7dd` (record `_forall_ops` on bound vars),
-`9260751e` (re-emit operations against instantiated arguments at call
-sites), `391bde98` (extend to `C_COMPARE`), `52873f05` (perf baseline),
-`92f866b2` (flip H3/H10 fuzz invariants), `169228eb` (xfail-comment
-sweep).
+### N3. K6 — Parity discovery pass
 
-Mechanism: generic parameters record field-projection and arithmetic
-operations performed on them inside the body as `_forall_ops`; at the
-call site, after argument types are known, those operations are re-emitted
-against the concrete argument types, so `f(t) return t.x + t.y end;
-f({x="a", y="b"})` now correctly errors with `cannot perform arithmetic
-on "a"` instead of silently passing.
+Once N1 + N2 land, run `bin/cr check --v4 --compare` across `lib/**/*.lua`.
+Expected outcomes per file:
 
-## Phase A.5 — Variance (expressiveness, optional)
+- **Identical** — no action.
+- **V4 has fewer errors** — usually means v4 is missing a check. Fix v4.
+- **V4 has more errors** — usually means v4 is correctly stricter (legacy
+  had a soundness gap). Document as intentional divergence.
+- **Different categories** — per-case judgment.
 
-Originally A3, demoted after the design pass (`docs/typechecker-variance.md`,
-2026-05-17). Probing showed structural invariance + function contravariance
-+ FLAG_SKOLEM rejection already prevent the bad cases the soundness audit
-worried about; A3 is purely an expressiveness gap (can't declare covariant /
-contravariant containers).
+This is multi-step and likely spans multiple sessions. **Decision point:
+the user must approve each "intentional divergence" classification** —
+these are the cases where v4 is intentionally stricter than legacy and
+existing user code will start failing on the cutover.
 
-Implement when a user writes the first heavily-generic library that wants
-`ReadOnlyMap`-style types. Until then, defer. Not blocking anything.
+---
 
-Estimated size: medium (400–650 lines). Design committed; implementation
-deferred.
+## Mid future (after parity is mostly met)
 
-## Phase B — Power (in priority order)
+### M1. K7 — Cutover
 
-### B1. Higher-kinded types
+When v4 reaches the parity threshold defined in the driver design doc §10
+gates, `lib/type/static-v4/` becomes `lib/type/static/` and the old impl is
+retired in the same commit. Cutover is conditional on K6 closure: do not
+attempt until the divergence list has been resolved or explicitly
+documented.
 
-The single biggest deficit vs. Haskell. Blocks every functor/monad/traversable-
-shaped abstraction. Audit found that `<F: SomeGeneric>` parses but does not
-compose: `F` is treated as a type variable, not a type constructor, so
+### M2. Walker-limitation cleanup (in K6 order)
 
-```lua
---: <F, A, B>(F<A>, (A)->B) -> F<B>
-```
+The "Walker limitations surfaced" list in `TODO-typecheck.md` orders these
+by parity impact, not by intrinsic difficulty. Likely order:
 
-does not work. Verification: probed this session, fails.
+- `$PatternReturn<P>` / `$FindReturn<P>` walker hook (blocks many stdlib
+  call-sites).
+- Non-empty table literals (currently rejects loudly).
+- Chained indexed-LHS `a.b.c = ...`.
+- Vararg-in-return position.
+- Annotation parser bridge for `ann.lua` → V4Type (so users can write
+  annotations against v4 directly).
+- Effect-annotation parsing in `ann.lua` (`(A) -[yield]-> B`).
+- Spread-fn-result encoding (`...V` result form) — currently degrades to
+  `...unknown`.
 
-Highest leverage because so many idiomatic abstractions assume it. If only one
-power axis is closed, this is the one.
+Each is sized small-to-medium. Order opportunistically by which one is
+blocking the next K6 file.
 
-### B2. Effect tracking
+### M3. Test corpus migration
 
-`docs/effects.md` exists as a design exploration, classified Level 0.5
-(defer). Async / coroutines are currently `any`. Finishing this would put
-crescent **ahead of mainstream Haskell**, which delegates effects to
-libraries with non-trivial ergonomics. Strong leverage for the "more powerful
-than Haskell" claim.
+Port `type_test.lua` and `type_soundness_test.lua` to v4. Bundled with K6 in
+practice — every divergence that's "fix v4" produces a pinned test in this
+corpus.
 
-### B3. Impredicativity
+### M4. D-series cleanup
 
-Instantiating a type variable with a polymorphic type (`Maybe (∀a. a -> a)`).
-Likely falls partially out of A1 done right (QuickLook-style impredicativity).
-Revisit after A1 lands rather than designing separately.
+- D1 follow-up flow-sensitivity audit (function-body fix landed; top-level
+  flow check still suspect).
+- Fourth cross-file `--::` resolution case (env.lua direct-consumer trap).
+- TAG_SPREAD test revision per D4 (test expected a now-incorrect error).
+- PRIM_CACHE / TV bound-graph interaction audit.
 
-### B4. GADT-strength flow typing
+These are not blocking K7 but should be cleared while the typechecker is
+still hot in context.
 
-Match types cover part of this. The gap is type-variable equations exposed by
-discriminant narrowing. Narrower use cases than B1/B2; defer until A and B1/B2
-are done.
+---
 
-### B5. Refinement types
+## Far future
 
-Predicate subtyping (`{x: number | x > 0}`). Biggest stretch — would put
-crescent in LiquidHaskell territory. Major design work. Only justified if the
-project explicitly wants that mantle.
+These items survive after V4 is the only implementation. They are the
+type-system *power* track and are independent of the cutover. They were
+previously the body of this roadmap (Phases A/B/C); A1/A2 landed, the rest
+remain.
 
-## Phase C — Documentation honesty
+### F1. Higher-kinded types (was B1)
 
-Parallel; can land any time.
+The single biggest deficit vs. Haskell. Blocks every functor/monad/
+traversable-shaped abstraction. `<F: SomeGeneric>` parses but does not
+compose — `F` is treated as a type variable, not a type constructor.
 
-- If Phase A is incomplete: narrow CLAUDE.md's boast to the wins
-  (row polymorphism, match types, discriminated unions). Do not claim
-  "more powerful than Haskell" while rank-N is unsound.
-- Once Phase A is done: restate the claim to be specific — "matching Haskell
-  on rank-N, exceeding on row polymorphism, match types, and effects (once
-  B2 lands)."
-- `docs/typechecker-reference.md` should document each axis's current state.
-  Today it presents features without flagging which ones have known
-  soundness gaps; that is itself a poison source.
+Highest power-track leverage; if only one power axis is closed, this is the
+one.
 
-## Order of work
+### F2. Effect tracking (was B2)
 
-Implementation order: **A1 → A3 (or jointly with A1) → A2 → B1 → B2 → B3 →
-C → B4 → B5**.
+`docs/effects.md` is a design exploration, currently Level 0.5 (deferred).
+Async / coroutines are `any` today. Finishing this would put crescent
+**ahead of mainstream Haskell** on a recognized axis. Walker H landed the
+yield/throw/pcall plumbing; the missing piece is the full effect-row
+inference.
 
-Rationale:
-- A1 is furthest along (designed) and unblocks the variance discussion at
-  depth.
-- A3 is small and interacts with A1; bundling reduces churn.
-- A2 needs its own design pass; sequencing after A1/A3 lets the design borrow
-  the rank-N skolem/level work.
-- B1 (HKT) is the headline power gap and should land before any expansion of
-  the "more powerful than Haskell" claim.
-- B2 puts crescent meaningfully ahead on a recognized axis.
-- C (doc honesty) gates expanding the boast; do it as each phase clears.
-- B4/B5 are stretch goals and not required for the core claim.
+### F3. V.intrinsic constructor
 
-## Non-goals
+K3 wanted `V.intrinsic(name, args)` for `$Throw`, `$EachField`, etc. Not in
+v4 core today. Surfaces as ad-hoc dispatch in the walker; consolidating
+into a first-class form would clean that up. Medium-sized refactor.
 
-- Linear / affine types: Lua's table semantics make linearity ill-fitting;
-  not on the roadmap.
-- Dependent types in the Idris/Lean sense: out of scope; refinement types
-  (B5) is the closest crescent will go.
-- Removing structural subtyping in favor of nominal: deliberately preserved;
-  structural is one of the wins.
+### F4. Lazy match evaluation
+
+`V.match(V.var("T"), arms)` evaluates eagerly and suspends on free vars
+instead of producing a parametric value. Blocks several pattern-driven
+designs.
+
+### F5. Performance work
+
+`docs/perf/log.md` is the system of record. Walker hot paths haven't been
+benchmarked end-to-end since K1 landed. After K7, baseline the full
+typecheck, then attack the dominant cost. Performance bar per CLAUDE.md is
+"tsgo for the typechecker" — currently far from it.
+
+### F6. Variance (was A.5)
+
+Demoted from soundness to expressiveness after the variance audit
+(`docs/typechecker-variance.md`). Implement when a user writes the first
+heavily-generic library that wants `ReadOnlyMap`-style types. Design
+committed; implementation deferred. Not blocking anything.
+
+### F7. Impredicativity (was B3)
+
+Instantiating a type variable with a polymorphic type. May fall partially
+out of A1 done right (QuickLook-style). Revisit after F1.
+
+### F8. GADT-strength flow typing (was B4)
+
+Match types cover part of this. The gap is type-variable equations exposed
+by discriminant narrowing. Narrower use cases than F1/F2.
+
+### F9. Refinement types (was B5)
+
+Predicate subtyping (`{x: number | x > 0}`). LiquidHaskell territory. Only
+justified if the project explicitly wants that mantle.
+
+### Non-goals
+
+- Linear / affine types — Lua table semantics make linearity ill-fitting.
+- Dependent types in the Idris/Lean sense — out of scope.
+- Removing structural subtyping in favor of nominal — structural is one of
+  the wins, deliberately preserved.
+
+---
+
+## Cross-cutting
+
+Items that aren't on either track but matter:
+
+- **`ann.lua` is its own thing.** Parser idiosyncrasies are done (commits
+  `e077ae18`, `7df7de27`, `b090e84d`); the next `ann.lua` work is the
+  annotation-parser bridge (mid-future M2) plus effect-annotation parsing.
+- **Per-file error cleanup queue.** Tracked in the body of
+  `TODO-typecheck.md`. Independent of the K-track; workers can pick from
+  the queue at any time. The cleanup queue does *not* gate K7 — cutover is
+  about implementation parity, not annotated-code error count.
+- **CLAUDE.md doc honesty.** The "safer than Rust and more powerful than
+  Haskell" claim is currently underwritten by A1/A2 (landed) plus row
+  polymorphism, match types, and discriminated unions. Until F1 (HKT)
+  lands, the claim is overstated on the power axis. Narrow or fund.
+
+---
+
+## Decision points
+
+Cases where the user needs to make calls (not session-internal):
+
+- **Each K6 divergence** — when v4 is intentionally stricter, the user
+  decides whether to accept the resulting downstream churn or relax v4.
+- **K7 cutover gate** — driver design doc §10 lists the gates; the user
+  signs off when they read as met.
+- **CLAUDE.md claim wording** — when to narrow vs. when to leave standing
+  pending F1.
+- **F1 (HKT) priority vs. M-track cleanup** — power vs. polish. Default is
+  polish first (M-track) so the cutover is clean; the user can flip this.
+
+---
+
+## Order of work (proposed)
+
+V4 track: **K5b → parametric aliases hook → K6 (multi-session) → M-track
+cleanup → K7 cutover.**
+
+Power track (runs independently, lower priority unless explicitly elevated):
+**F1 → F2 → F3 → F4 → F5 (perf) → F6 → F7 → F8 → F9.**
+
+Rationale: the V4 track collapses two-implementation maintenance, which
+compounds over every future session. Power-track items add capability but
+don't reduce the cost of every subsequent typechecker change the way K7
+does.
