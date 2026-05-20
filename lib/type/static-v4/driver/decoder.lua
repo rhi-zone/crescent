@@ -109,8 +109,9 @@ OP_NAME[defs.OP_LEN]    = "#"
 -- `cache[arena_index]` is the materialised POJO table for that arena row,
 -- or nil if not yet decoded.
 
--- Look up a string by intern ID, or return nil for `-1` (the parser's
--- "absent" sentinel for table-field positional keys and else-clauses).
+-- Look up a string by intern ID. Negative IDs are unused by the parser
+-- (legacy "absent" sentinels were eliminated in favor of explicit flags /
+-- field-kind tags); a negative input here indicates a caller bug.
 local function pool_string(pool, id)
 	if id == nil or id < 0 then return nil end
 	return intern_mod.get(pool, id)
@@ -266,19 +267,27 @@ local function decode_func_decl(ctx, n, out)
 end
 
 local function decode_table_field(ctx, n, out)
-	-- data[0]: -1 for positional, key_node for computed/named, key_id (intern
-	--          ID via NODE_LITERAL key_node — the parser ALWAYS wraps the
-	--          key in a NODE_LITERAL for `name=val` and `[expr]=val` forms.
-	-- data[1]: value node ID.
-	-- FLAG_COMPUTED set when key is `[expr]` (an expression).
-	local key_slot = n.data[0]
-	if key_slot == -1 then
-		out.key = nil      -- positional
-	else
-		out.key = decode_node(ctx, key_slot)
-	end
+	-- Field shape is an explicit kind tag in data[2]:
+	--   TFIELD_POSITIONAL — `val`           ; data[0] unused, data[1] = value nid
+	--   TFIELD_NAMED      — `name = val`    ; data[0] = field name intern id,
+	--                                          data[1] = value nid
+	--   TFIELD_COMPUTED   — `[expr] = val`  ; data[0] = key expr nid,
+	--                                          data[1] = value nid
+	local field_kind = n.data[2]
 	out.value = decode_node(ctx, n.data[1])
-	out.computed = (n.flags % (defs.FLAG_COMPUTED * 2) >= defs.FLAG_COMPUTED)
+	if field_kind == defs.TFIELD_POSITIONAL then
+		out.field_kind = "positional"
+		out.key = nil
+		out.computed = false
+	elseif field_kind == defs.TFIELD_NAMED then
+		out.field_kind = "named"
+		out.key = pool_string(ctx.pool, n.data[0])
+		out.computed = false
+	else
+		out.field_kind = "computed"
+		out.key = decode_node(ctx, n.data[0])
+		out.computed = true
+	end
 	return out
 end
 

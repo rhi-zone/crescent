@@ -633,11 +633,12 @@ emit_expr = function(ctx, nid, parent_prec)
         local fl = d[2]
         if fl == 0 then return "{}" end
         local fields = ctx:list(fs, fl)
-        -- Determine if array (all positional) or object (any keyed)
+        -- Determine if array (all positional) or object (any keyed).
+        -- Field kind tag lives in d[3] (== data[2]).
         local is_array = true
         for _, fid in ipairs(fields) do
             local fn = ctx:node(fid)
-            if fn.d[1] ~= -1 then  -- -1 = positional
+            if fn.d[3] ~= defs.TFIELD_POSITIONAL then
                 is_array = false
                 break
             end
@@ -652,23 +653,25 @@ emit_expr = function(ctx, nid, parent_prec)
         else
             for _, fid in ipairs(fields) do
                 local fn = ctx:node(fid)
-                local key_id = fn.d[1]
+                local field_kind = fn.d[3]
                 local val_id = fn.d[2]
-                if key_id == -1 then
-                    -- positional in a mixed table: use numeric key
+                if field_kind == defs.TFIELD_POSITIONAL then
                     parts[#parts + 1] = emit_expr(ctx, val_id, 0)
+                elseif field_kind == defs.TFIELD_NAMED then
+                    -- d[1] holds the field name intern id directly.
+                    local key_s = ctx:name(fn.d[1])
+                    local val_s = emit_expr(ctx, val_id, 0)
+                    if key_s:match("^[%a_][%w_]*$") then
+                        parts[#parts + 1] = key_s .. ": " .. val_s
+                    else
+                        parts[#parts + 1] = '["' .. escape_str(key_s) .. '"]: ' .. val_s
+                    end
                 else
+                    -- TFIELD_COMPUTED: d[1] is the key expression node id.
+                    local key_id = fn.d[1]
                     local key_n = ctx:node(key_id)
                     local val_s = emit_expr(ctx, val_id, 0)
-                    if key_n.kind == defs.NODE_LITERAL and key_n.d[1] == defs.LIT_STRING then
-                        local key_s = ctx:name(key_n.d[2])
-                        -- Use identifier syntax if valid, else quoted
-                        if key_s:match("^[%a_][%w_]*$") then
-                            parts[#parts + 1] = key_s .. ": " .. val_s
-                        else
-                            parts[#parts + 1] = '["' .. escape_str(key_s) .. '"]: ' .. val_s
-                        end
-                    elseif key_n.kind == defs.NODE_LITERAL and key_n.d[1] == defs.LIT_INTEGER then
+                    if key_n.kind == defs.NODE_LITERAL and key_n.d[1] == defs.LIT_INTEGER then
                         parts[#parts + 1] = "[" .. tostring(key_n.d[2]) .. "]: " .. val_s
                     else
                         local key_s = emit_expr(ctx, key_id, 0)
@@ -1218,11 +1221,9 @@ local function is_setmetatable_call(ctx, nid, proto_name)
     if mt_n.kind == defs.NODE_TABLE_EXPR and mt_n.d[2] == 1 then
         local fields = ctx:list(mt_n.d[1], 1)
         local fn = ctx:node(fields[1])
-        -- key must be __index
-        if fn.d[1] == -1 then return false end  -- positional field
-        local key_n = ctx:node(fn.d[1])
-        if key_n.kind ~= defs.NODE_LITERAL or key_n.d[1] ~= defs.LIT_STRING then return false end
-        if ctx:name(key_n.d[2]) ~= "__index" then return false end
+        -- key must be the named field "__index"; d[3] = field_kind.
+        if fn.d[3] ~= defs.TFIELD_NAMED then return false end
+        if ctx:name(fn.d[1]) ~= "__index" then return false end
         -- value must be proto_name
         local val_name = ident_name(ctx, fn.d[2])
         return val_name == proto_name

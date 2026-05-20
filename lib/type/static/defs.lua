@@ -240,10 +240,16 @@ M.LIT_OPAQUE_KEY        = 5   -- opaque table-valued key; data[1] = intern ID of
 -- Flag bits (nodes)
 M.FLAG_VARARG           = 1
 M.FLAG_LOCAL            = 2
-M.FLAG_COMPUTED         = 4
 M.FLAG_HAS_ELSE         = 8   -- NODE_IF_STMT: an else block is present (data[2]/data[3] = else block start/len)
 M.FLAG_HAS_STEP         = 16  -- NODE_FOR_NUM: a step expression is present (data[3] = step node id)
 M.FLAG_FORCE_CAST       = 1   -- NODE_CAST_EXPR: --[[:! T]] overlap-checked force cast
+
+-- NODE_TABLE_FIELD: explicit field-kind tag in data[2]. Replaces a
+-- combination of `data[0] == -1` (positional) + FLAG_COMPUTED (computed)
+-- + a NODE_LITERAL wrapping for `name = val`.
+M.TFIELD_POSITIONAL     = 0  -- value-only entry; data[1] = value_nid; data[0] unused
+M.TFIELD_NAMED          = 1  -- `name = value`; data[0] = name intern_id, data[1] = value_nid
+M.TFIELD_COMPUTED       = 2  -- `[expr] = value`; data[0] = key_nid, data[1] = value_nid
 
 -- Flag bits (types)
 M.FLAG_GENERIC          = 1

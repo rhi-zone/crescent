@@ -67,7 +67,6 @@ local OP_LEN    = defs.OP_LEN
 
 local FLAG_LOCAL      = defs.FLAG_LOCAL
 local FLAG_VARARG     = defs.FLAG_VARARG
-local FLAG_COMPUTED   = defs.FLAG_COMPUTED
 local FLAG_READONLY   = defs.FLAG_READONLY
 local FLAG_OPTIONAL   = defs.FLAG_OPTIONAL
 local FLAG_PRIVATE    = defs.FLAG_PRIVATE
@@ -2088,9 +2087,9 @@ ExprRule[NODE_TABLE_EXPR] = function(ctx, nid)
         local fld_nid = ctx.ast_lists:get(i)
         local fn = ctx.nodes:get(fld_nid)
         local val_tid = gen_expr(ctx, fn.data[1])
-        local key_nid = fn.data[0]
+        local field_kind = fn.data[2]
 
-        if key_nid == -1 then
+        if field_kind == defs.TFIELD_POSITIONAL then
             -- Positional entry — emit indexer with TAG_LITERAL(LIT_INTEGER, slot)
             -- key, mirroring the type-side shape produced by ann.lua. This is
             -- the expression-side companion to commit 58d10766.
@@ -2098,13 +2097,13 @@ ExprRule[NODE_TABLE_EXPR] = function(ctx, nid)
             indexers[#indexers + 1] = key_tid
             indexers[#indexers + 1] = val_tid
             pos_idx = pos_idx + 1
-        elseif (fn.flags % (FLAG_COMPUTED * 2)) >= FLAG_COMPUTED then
-            local key_tid = gen_expr(ctx, key_nid)
+        elseif field_kind == defs.TFIELD_COMPUTED then
+            local key_tid = gen_expr(ctx, fn.data[0])
             indexers[#indexers + 1] = key_tid
             indexers[#indexers + 1] = val_tid
         else
-            local kn = ctx.nodes:get(key_nid)
-            local name_id = kn.data[1]
+            -- TFIELD_NAMED: data[0] holds the field name intern id directly.
+            local name_id = fn.data[0]
             field_ids[#field_ids + 1] = types_mod.make_field(ctx, name_id, val_tid, field_flags(ctx, name_id))
         end
     end

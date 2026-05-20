@@ -178,7 +178,7 @@ function M.parse(source, filename, pool)
             local fline, fcol = L._tk_line_out, L._tk_col_out
             local fn
             if L.tk == defs.TK_LBRACKET then
-                -- [expr] = expr
+                -- [expr] = expr — computed field; data[0] = key expression nid.
                 L:next()
                 local key = parse_expr(0)
                 L:expect(defs.TK_RBRACKET)
@@ -188,25 +188,27 @@ function M.parse(source, filename, pool)
                 local fnd = nodes:get(fn)
                 fnd.data[0] = key
                 fnd.data[1] = val
-                fnd.flags = defs.FLAG_COMPUTED
+                fnd.data[2] = defs.TFIELD_COMPUTED
             elseif L.tk == defs.TK_NAME and L:lookahead() == defs.TK_ASSIGN then
-                -- name = expr
+                -- name = expr — named field; data[0] holds the intern id of
+                -- the field name directly (no synthetic NODE_LITERAL wrapper).
                 local key_id = L.val
                 L:next()  -- consume name
                 L:next()  -- consume '='
                 local val = parse_expr(0)
-                local key_node = mknode(defs.NODE_LITERAL, fline, fcol)
-                nodes:get(key_node).data[0] = defs.LIT_STRING
-                nodes:get(key_node).data[1] = key_id
                 fn = mknode(defs.NODE_TABLE_FIELD, fline, fcol)
-                nodes:get(fn).data[0] = key_node
-                nodes:get(fn).data[1] = val
+                local fnd = nodes:get(fn)
+                fnd.data[0] = key_id
+                fnd.data[1] = val
+                fnd.data[2] = defs.TFIELD_NAMED
             else
-                -- positional value
+                -- positional value — data[0] unused (kept 0); kind tags it.
                 local val = parse_expr(0)
                 fn = mknode(defs.NODE_TABLE_FIELD, fline, fcol)
-                nodes:get(fn).data[0] = -1
-                nodes:get(fn).data[1] = val
+                local fnd = nodes:get(fn)
+                fnd.data[0] = 0
+                fnd.data[1] = val
+                fnd.data[2] = defs.TFIELD_POSITIONAL
             end
             fields[#fields + 1] = fn
             if not (L:opt(defs.TK_COMMA) or L:opt(defs.TK_SEMICOLON)) then

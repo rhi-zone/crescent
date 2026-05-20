@@ -389,14 +389,16 @@ T.describe("decoder: NODE_TABLE_EXPR", function()
 		local chunk = decoder.decode(parse('local t = {1, foo = "bar", [k] = v}'))
 		local e = chunk.body[1].exprs[1]
 		T.eq(#e.fields, 3)
-		-- Positional field: key nil
+		-- Positional field: explicit field_kind, no key.
+		T.eq(e.fields[1].field_kind, "positional")
 		T.eq(e.fields[1].key, nil)
 		T.eq(e.fields[1].value.value, 1)
-		-- Named: key is a NODE_LITERAL string
-		T.eq(e.fields[2].key.tag, defs.NODE_LITERAL)
-		T.eq(e.fields[2].key.value, "foo")
+		-- Named: key is the bare field-name string (no NODE_LITERAL wrapper).
+		T.eq(e.fields[2].field_kind, "named")
+		T.eq(e.fields[2].key, "foo")
 		T.eq(e.fields[2].value.value, "bar")
-		-- Computed: key is an expression (NODE_IDENTIFIER here); FLAG_COMPUTED set
+		-- Computed: key is an expression node; field_kind tags it.
+		T.eq(e.fields[3].field_kind, "computed")
 		T.eq(e.fields[3].key.tag, defs.NODE_IDENTIFIER)
 		T.eq(e.fields[3].computed, true)
 	end)

@@ -78,8 +78,9 @@
 DefsModule = {
   E: DiagCodes,
   ANN_TYPE: integer, ANN_DECL: integer, ANN_TYPE_ARGS: integer,
-  FLAG_VARARG: integer, FLAG_LOCAL: integer, FLAG_COMPUTED: integer,
+  FLAG_VARARG: integer, FLAG_LOCAL: integer,
   FLAG_HAS_ELSE: integer, FLAG_HAS_STEP: integer,
+  TFIELD_POSITIONAL: integer, TFIELD_NAMED: integer, TFIELD_COMPUTED: integer,
   FLAG_GENERIC: integer, FLAG_RECURSIVE: integer,
   FLAG_SKOLEM: integer, FLAG_ROWVAR_INFER: integer, FLAG_SUB_SOLVE_PARAM: integer,
   FLAG_READONLY: integer, FLAG_OPTIONAL: integer, FLAG_PRIVATE: integer,

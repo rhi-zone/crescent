@@ -111,8 +111,9 @@ walk_expr = function(nodes, ast_lists, refs, nid)
         for j = n.data[0], n.data[0] + n.data[1] - 1 do
             local fn = nodes:get(ast_lists:get(j))
             if fn.kind == NODE_TABLE_FIELD then
-                -- data[0]=key_nid (-1 if array slot), data[1]=val_nid
-                if fn.data[0] >= 0 then
+                -- data[2]=field_kind; only TFIELD_COMPUTED stores a key node id
+                -- in data[0]. TFIELD_NAMED stores a bare intern id (no node).
+                if fn.data[2] == defs.TFIELD_COMPUTED then
                     walk_expr(nodes, ast_lists, refs, fn.data[0])
                 end
                 walk_expr(nodes, ast_lists, refs, fn.data[1])
