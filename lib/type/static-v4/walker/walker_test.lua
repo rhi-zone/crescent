@@ -1551,6 +1551,17 @@ T.describe("walker sub-phase F: NODE_INDEX_EXPR", function()
 	end)
 end)
 
+-- Table-field builders (K6d). Mirror decoder.lua's field_kind tagging.
+local function pf(value) -- positional
+	return { field_kind = "positional", value = value }
+end
+local function nf(key, value) -- named
+	return { field_kind = "named", key = key, value = value }
+end
+local function cf(key_node, value) -- computed
+	return { field_kind = "computed", key = key_node, value = value }
+end
+
 T.describe("walker sub-phase F: NODE_TABLE_EXPR (empty)", function()
 	T.it("empty table literal synthesizes an empty closed record", function()
 		local s = V.new_solver()
@@ -1562,12 +1573,122 @@ T.describe("walker sub-phase F: NODE_TABLE_EXPR (empty)", function()
 		T.eq(ty.open, false)
 		T.eq(next(ty.fields), nil)
 	end)
+end)
 
-	T.it("non-empty table literal rejects (later sub-phase)", function()
+T.describe("walker sub-phase K6d: NODE_TABLE_EXPR (non-empty)", function()
+	T.it("positional fields synthesize into string-keyed slots", function()
 		local s = V.new_solver()
-		local node = table_expr({ { key = "x", value = lit_int(1) } })
+		local node = table_expr({ pf(lit_int(1)), pf(lit_int(2)), pf(lit_int(3)) })
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.ok(ty ~= nil)
+		T.eq(ty.tag, "rec")
+		T.eq(ty.fields["1"], V.literal("integer", 1))
+		T.eq(ty.fields["2"], V.literal("integer", 2))
+		T.eq(ty.fields["3"], V.literal("integer", 3))
+		T.eq(ty.indexer, nil)
+	end)
+
+	T.it("named fields produce a closed record", function()
+		local s = V.new_solver()
+		local node = table_expr({
+			nf("a", lit_int(1)),
+			nf("b", lit_str("x")),
+		})
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty.tag, "rec")
+		T.eq(ty.open, false)
+		T.eq(ty.fields.a, V.literal("integer", 1))
+		T.eq(ty.fields.b, V.literal("string", "x"))
+	end)
+
+	T.it("computed integer-literal keys fold into positional slots", function()
+		local s = V.new_solver()
+		local node = table_expr({
+			cf(lit_int(2), lit_str("a")),
+			cf(lit_int(3), lit_str("b")),
+		})
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty.tag, "rec")
+		T.eq(ty.fields["2"], V.literal("string", "a"))
+		T.eq(ty.fields["3"], V.literal("string", "b"))
+		T.eq(ty.indexer, nil)
+	end)
+
+	T.it("computed non-literal keys produce an indexer-typed record", function()
+		local s = V.new_solver()
+		-- { [k] = "v" } where k is a string variable bound to V.string_.
+		local env = E.bind(E.new(), "k", V.string_)
+		local node = table_expr({ cf(id("k"), lit_str("v")) })
+		local ty, _env, err = W.walk_synth(node, env, s)
+		T.eq(err, nil)
+		T.eq(ty.tag, "rec")
+		T.ok(ty.indexer ~= nil)
+		T.eq(ty.indexer.key, V.string_)
+		T.eq(ty.indexer.value, V.literal("string", "v"))
+	end)
+
+	T.it("mixed positional + named in one literal", function()
+		local s = V.new_solver()
+		local node = table_expr({ pf(lit_int(1)), nf("a", lit_str("x")) })
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty.tag, "rec")
+		T.eq(ty.fields["1"], V.literal("integer", 1))
+		T.eq(ty.fields.a, V.literal("string", "x"))
+	end)
+
+	T.it("duplicate named keys: last wins (matches Lua runtime)", function()
+		local s = V.new_solver()
+		local node = table_expr({ nf("a", lit_int(1)), nf("a", lit_int(2)) })
+		local ty, _env, err = W.walk_synth(node, E.new(), s)
+		T.eq(err, nil)
+		T.eq(ty.fields.a, V.literal("integer", 2))
+	end)
+
+	T.it("computed key with nil literal type is rejected", function()
+		local s = V.new_solver()
+		local nil_lit = { tag = defs.NODE_LITERAL, lit_kind = defs.LIT_NIL }
+		local node = table_expr({ cf(nil_lit, lit_int(1)) })
 		local _ty, _env, err = W.walk_synth(node, E.new(), s)
 		T.ok(err ~= nil)
+		T.ok(tostring(err):find("nil", 1, true) ~= nil)
+	end)
+
+	T.it("CHECK against matching closed record succeeds", function()
+		local s = V.new_solver()
+		local expected = V.rec({ a = V.integer, b = V.string_ }, false, nil)
+		local node = table_expr({ nf("a", lit_int(1)), nf("b", lit_str("x")) })
+		local _env, err = W.walk_check(node, E.new(), s, expected)
+		T.eq(err, nil)
+	end)
+
+	T.it("CHECK against closed record with type mismatch fails", function()
+		local s = V.new_solver()
+		local expected = V.rec({ a = V.integer }, false, nil)
+		local node = table_expr({ nf("a", lit_str("nope")) })
+		local _env, err = W.walk_check(node, E.new(), s, expected)
+		T.ok(err ~= nil)
+	end)
+
+	T.it("CHECK rejects extra field absent from closed expected", function()
+		local s = V.new_solver()
+		local expected = V.rec({ a = V.integer }, false, nil)
+		local node = table_expr({ nf("a", lit_int(1)), nf("b", lit_int(2)) })
+		local _env, err = W.walk_check(node, E.new(), s, expected)
+		T.ok(err ~= nil)
+		T.ok(tostring(err):find("b", 1, true) ~= nil)
+	end)
+
+	T.it("CHECK rejects missing required field", function()
+		local s = V.new_solver()
+		local expected = V.rec({ a = V.integer, b = V.string_ }, false, nil)
+		local node = table_expr({ nf("a", lit_int(1)) })
+		local _env, err = W.walk_check(node, E.new(), s, expected)
+		T.ok(err ~= nil)
+		T.ok(tostring(err):find("missing", 1, true) ~= nil)
 	end)
 end)
 

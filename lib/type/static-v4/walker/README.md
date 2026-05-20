@@ -776,11 +776,35 @@ by `V.match` / `V.match_backward` without further transformation.
     the supported key shapes (literal string, primitive string, union
     thereof) and rejects unbound-variable keys per its own contract —
     the walker passes the rejection through without elaboration.
-  - `NODE_TABLE_EXPR` (§3.10, partial) — the EMPTY case only. `{}`
-    synthesizes to `V.rec({}, /*open=*/false, nil)`. Non-empty literals
-    reject loudly with a "later sub-phase" message; the full table-literal
-    CHECK/SYNTHESIZE pair is mechanical but isn't required by F (only the
-    empty case feeds the module-pattern trigger).
+  - `NODE_TABLE_EXPR` (§3.10) — full SYNTHESIZE + CHECK. SYNTHESIZE
+    assembles a closed `V.rec` from the literal's fields:
+    - **Positional fields** (`{1, 2, 3}`) → string-keyed positional slots
+      `"1"`, `"2"`, ... (v4's tuple convention, matching the multi-return
+      packing used elsewhere in the walker).
+    - **Named fields** (`{a = 1}`) → named entries in the closed record.
+    - **Computed fields with literal string key** → folded into a named
+      slot. With literal integer key → folded into a positional slot.
+      Other computed keys (variables, primitive types) join into an
+      `indexer(K, V)` where K and V are the unions of the contributing
+      key and value types.
+    - **Mixed shapes** are supported (positional + named + computed in
+      any order).
+    - **Duplicate keys**: last-wins (matches Lua runtime).
+    - **Last-position multi-return spread** on the trailing positional
+      value, mirroring call-arg spread.
+    - **Nil-key rejection**: a computed key whose type is `nil` (literal
+      or primitive, or a union including either) is rejected — Lua's
+      runtime would error.
+
+    CHECK against a closed `V.rec` with no indexer checks each value
+    against the corresponding expected field type directly. Extra
+    fields (literal has a key the expected record lacks) and missing
+    required fields (expected has a key the literal lacks) both reject.
+    Non-literal computed keys against a closed expected record fall
+    back to synth+constrain (the standard rule). Expected types that
+    are not "simple closed records" (open, indexer-typed, var, union,
+    …) fall back to synth+constrain so the standard subtype machinery
+    handles them.
   - `NODE_CALL_EXPR` (OVERRIDE; was rejected in C) — indexed callees
     (`obj.method(args)`, `tbl[k](args)`) now synthesize through the
     standard recursion (`W.walk_synth(node.callee, ...)` reaches the F

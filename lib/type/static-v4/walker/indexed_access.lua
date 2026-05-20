@@ -11,9 +11,15 @@
 --
 --   NODE_FIELD_EXPR     `obj.k`              — synthesize obj, V.index(obj, lit(k))
 --   NODE_INDEX_EXPR     `obj[k]`             — synthesize obj AND key, V.index(obj, k)
---   NODE_TABLE_EXPR     `{}`-and-friends     — empty literal at minimum, so the
---                                              module-pattern `local M = {}`
---                                              path has a synthesizable init.
+--   NODE_TABLE_EXPR     `{}`-and-friends     — empty + non-empty literals.
+--                                              §3.10 SYNTHESIZE assembles a
+--                                              closed V.rec from positional /
+--                                              named / computed fields;
+--                                              non-literal computed keys fold
+--                                              into an indexer. CHECK against a
+--                                              closed expected rec checks each
+--                                              value against the corresponding
+--                                              field type directly.
 --
 -- It also re-registers, OVERRIDING sub-phase C's stubs:
 --
@@ -194,23 +200,456 @@ end
 
 -- ── NODE_TABLE_EXPR ───────────────────────────────────────────────────────
 --
--- §3.10 SYNTHESIZE: build a closed rec from the literal's fields. Sub-phase
--- F handles the EMPTY case fully (needed by the module-pattern trigger);
--- non-empty literals are deferred to a later sub-phase. Per CLAUDE.md
--- no-temp-measures, non-empty table literals reject loudly with a clear
--- message rather than half-synthesizing.
+-- §3.10: build a `V.rec` from the literal's fields.
 --
--- Decoded shape: `{ tag, line, col, fields: TableField[] }`. A non-empty
--- `fields` list means the literal has at least one element.
+-- Field-kind cases (decoder emits one of three `field_kind` values):
+--
+--   * `"positional"` — `{1, 2, 3}` — each value goes into a string-keyed
+--     positional slot `"1"`, `"2"`, ... (matches v4's tuple convention used
+--     throughout the walker — see functions.lua's multi-return packing).
+--   * `"named"` — `{a = 1}` — bare-string `key`; closed-record named field.
+--   * `"computed"` — `{[expr] = v}` — `key` is itself a node. If the key
+--     synthesizes to a string-literal or integer-literal type, it folds
+--     into a named (string) or positional-by-key (integer) field. Otherwise
+--     all such fields are joined into an `indexer(K, V)` on the record.
+--
+-- Mixed shapes are supported: positional + named + computed in any order.
+-- Per Lua semantics, positional indices are derived from textual order of
+-- positional fields, NOT from the field's overall position in the literal
+-- (i.e. `{a = "x", 1, 2}` assigns 1 → "1" and 2 → "2").
+--
+-- Duplicate keys: take the last. Lua's runtime semantics: `{a = 1, a = 2}`
+-- yields `{a = 2}`. The walker mirrors this (deterministic, matches user
+-- intuition). Erroring would be a stricter discipline than Lua itself and
+-- the inputs are unambiguous, so the last-wins rule is principled.
+--
+-- Nil-key check: a computed key whose type is `nil` (or a literal nil) is
+-- a Lua runtime error. The walker rejects at typecheck time when the key
+-- is a literal nil / primitive nil. Unions that *include* nil are also
+-- rejected — Lua would only fail at runtime for the nil-valued branch but
+-- v4 is "safer than Lua at runtime"; surfacing the unsoundness at the
+-- literal site is the principled choice.
+--
+-- Multi-return spread: the trailing positional value, if it synthesizes
+-- to a tuple-shaped `V.rec` (positional slots `"1"`, `"2"`, ...), spreads
+-- its slots into successive positional indices. This mirrors call-arg
+-- spread (synth_call above) and Lua's last-position rule.
+--
+-- CHECK mode: if `expected` is a closed `V.rec` (no indexer), each named/
+-- computed-literal-string field CHECKs against the expected field's type;
+-- positional slots CHECK against the expected positional slot's type; extra
+-- fields error via closed-rec discipline. If `expected` has an indexer or
+-- is open, CHECK falls back to SYNTHESIZE-then-constrain (the walker.lua
+-- default rule already does this; the CHECK handler simply forwards in
+-- that case by returning nil so the walker dispatches synth+constrain).
 
-local function synth_table(node, _env, _solver)
-	local fields = node.fields
-	-- Empty literal (the canonical module-pattern initialiser).
-	if fields == nil or #fields == 0 then
-		return V.rec({}, false, nil), _env, nil
+-- Computed-key classification result. Returned as a single record (rather
+-- than five positional values) so the typechecker can carry per-kind
+-- presence guarantees through the `kind` discriminant — when `kind` is
+-- "string_literal" the caller knows `string_key` is present, etc. Each
+-- field is independently typed; callers branch on `kind` and dispatch.
+--
+-- Shape:
+--   { kind: "string_literal" | "integer_literal" | "indexer" | "error",
+--     string_key: string | nil,    -- present iff kind == "string_literal"
+--     integer_key: number | nil,   -- present iff kind == "integer_literal"
+--     key_ty: V4Type,              -- the synthesized key type
+--     env: WalkerEnv,              -- post-walk env
+--     err: Diagnostic | nil }      -- non-nil iff kind == "error"
+
+local function classify_computed_key(key_node, env, solver)
+	local W = walker_mod()
+	local kty, env2, kerr = W.walk_synth(key_node, env, solver)
+	local nil_kty = V.prim("nil")
+	if nil_kty == nil then nil_kty = NIL_TYPE end
+	if kerr ~= nil then
+		return { kind = "error", key_ty = nil_kty, env = env2, err = kerr }
 	end
-	return nil, _env, D.emit(_env, D.E_UNSUPPORTED_NODE,
-		"table: non-empty table literals land in a later sub-phase (sub-phase F handles `{}` only; full table-literal CHECK/SYNTHESIZE per §3.10 follows)")
+	if kty == nil then
+		return { kind = "error", key_ty = nil_kty, env = env2,
+			err = D.emit(env2, D.E_INTERNAL,
+				"table: computed key has no synthesized type") }
+	end
+	-- Nil-key check.
+	if kty.tag == "prim" and kty.name == "nil" then
+		return { kind = "error", key_ty = kty, env = env2,
+			err = D.emit(env2, D.E_TYPE_MISMATCH,
+				"table: computed key has type nil (Lua runtime error)",
+				{ origin_type = kty }) }
+	end
+	if kty.tag == "literal" and kty.base == "nil" then
+		return { kind = "error", key_ty = kty, env = env2,
+			err = D.emit(env2, D.E_TYPE_MISMATCH,
+				"table: computed key is literal nil (Lua runtime error)",
+				{ origin_type = kty }) }
+	end
+	if kty.tag == "union" then
+		for _, m in ipairs(kty.members) do
+			if (m.tag == "prim" and m.name == "nil")
+				or (m.tag == "literal" and m.base == "nil") then
+				return { kind = "error", key_ty = kty, env = env2,
+					err = D.emit(env2, D.E_TYPE_MISMATCH,
+						"table: computed key type includes nil",
+						{ origin_type = kty }) }
+			end
+		end
+	end
+	if kty.tag == "literal" and kty.base == "string"
+		and type(kty.value) == "string" then
+		return { kind = "string_literal", string_key = kty.value,
+			key_ty = kty, env = env2 }
+	end
+	if kty.tag == "literal" and kty.base == "integer"
+		and type(kty.value) == "number" then
+		return { kind = "integer_literal", integer_key = kty.value,
+			key_ty = kty, env = env2 }
+	end
+	return { kind = "indexer", key_ty = kty, env = env2 }
+end
+
+-- Build a union type, collapsing trivial cases. Single-member unions
+-- collapse to the bare type (v4 builds 1-element unions deliberately;
+-- a record's indexer should carry the underlying type, not a union
+-- wrapper, where possible — keeps downstream `V.index` predictable).
+local function join_types(types)
+	if #types == 0 then return nil end
+	if #types == 1 then return types[1] end
+	-- De-duplicate by table identity (literals are interned, prims are interned).
+	local seen, dedup = {}, {}
+	for _, t in ipairs(types) do
+		if not seen[t] then
+			seen[t] = true
+			dedup[#dedup + 1] = t
+		end
+	end
+	if #dedup == 1 then return dedup[1] end
+	return V.union(dedup)
+end
+
+-- Core SYNTHESIZE: walk fields, assemble (named_map, indexer_or_nil).
+-- Returns (rec_ty, env, err). `env` is the post-walk env (each value is
+-- synthesized, which may extend bindings via side-effects on the solver,
+-- though typical literal expressions do not modify the env).
+local function synth_table_impl(node, env, solver)
+	local W = walker_mod()
+	local fields = node.fields
+	if fields == nil or #fields == 0 then
+		return V.rec({}, false, nil), env, nil
+	end
+
+	-- Named slots accumulate by key (last-wins on duplicate).
+	local named = {} --[[: { [string]: V4Type } ]]
+	-- Positional slots accumulate by integer index, then projected to
+	-- string keys at the end (v4's tuple-rec convention).
+	local positional = {} --[[: { [integer]: V4Type } ]]
+	-- Computed-with-non-literal-key contributions accumulate as
+	-- (key_types, value_types) lists that fold into one indexer at the
+	-- end.
+	local ix_keys, ix_vals = {}, {}
+
+	local pos_index = 0
+	local n_fields = #fields
+	for i, f in ipairs(fields) do
+		local is_last = (i == n_fields)
+		local fk = f.field_kind
+		if fk == "positional" then
+			local vty, env2, verr = W.walk_synth(f.value, env, solver)
+			env = env2
+			if verr ~= nil then return nil, env, verr end
+			if vty == nil then
+				return nil, env, D.emit(env, D.E_INTERNAL,
+					"table: positional value has no synthesized type")
+			end
+			-- Last-position multi-return spread.
+			if is_last then
+				local tup = as_tuple(vty)
+				if tup ~= nil then
+					for _, slot in ipairs(tup) do
+						pos_index = pos_index + 1
+						positional[pos_index] = slot
+					end
+				else
+					pos_index = pos_index + 1
+					positional[pos_index] = vty
+				end
+			else
+				-- Non-last collapses multi-return to slot 1.
+				local tup = as_tuple(vty)
+				if tup ~= nil then
+					pos_index = pos_index + 1
+					positional[pos_index] = tup[1]
+				else
+					pos_index = pos_index + 1
+					positional[pos_index] = vty
+				end
+			end
+		elseif fk == "named" then
+			local key = f.key
+			if type(key) ~= "string" then
+				return nil, env, D.emit(env, D.E_INTERNAL,
+					"table: named field key must be a string (got " .. type(key) .. ")")
+			end
+			local vty, env2, verr = W.walk_synth(f.value, env, solver)
+			env = env2
+			if verr ~= nil then return nil, env, verr end
+			if vty == nil then
+				return nil, env, D.emit(env, D.E_INTERNAL,
+					"table: named value has no synthesized type")
+			end
+			-- Last-wins on duplicate (documented above).
+			named[key] = vty
+		elseif fk == "computed" then
+			local cls = classify_computed_key(f.key, env, solver)
+			env = cls.env
+			if cls.err ~= nil then return nil, env, cls.err end
+			local vty, env2, verr = W.walk_synth(f.value, env, solver)
+			env = env2
+			if verr ~= nil then return nil, env, verr end
+			if vty == nil then
+				return nil, env, D.emit(env, D.E_INTERNAL,
+					"table: computed value has no synthesized type")
+			end
+			local sk = cls.string_key
+			local ik = cls.integer_key
+			if cls.kind == "string_literal" and type(sk) == "string" then
+				named[sk] = vty
+			elseif cls.kind == "integer_literal" and type(ik) == "number" then
+				local idx = math.floor(ik)
+				if idx >= 1 then
+					positional[idx] = vty
+					if idx > pos_index then pos_index = idx end
+				else
+					-- Non-positive integer key — fold into the indexer.
+					ix_keys[#ix_keys + 1] = cls.key_ty
+					ix_vals[#ix_vals + 1] = vty
+				end
+			else
+				ix_keys[#ix_keys + 1] = cls.key_ty
+				ix_vals[#ix_vals + 1] = vty
+			end
+		else
+			return nil, env, D.emit(env, D.E_INTERNAL,
+				"table: unknown field_kind '" .. tostring(fk) .. "'")
+		end
+	end
+
+	-- Project positional indices into string-keyed slots, last-wins
+	-- against a same-key named entry. (E.g. `{[1]="a", "b"}` — the
+	-- positional "b" textually came second so it wins.)
+	for idx, vty in pairs(positional) do
+		named[tostring(idx)] = vty
+	end
+
+	local indexer = nil
+	if #ix_keys > 0 then
+		local k_union = join_types(ix_keys)
+		local v_union = join_types(ix_vals)
+		if k_union == nil or v_union == nil then
+			return nil, env, D.emit(env, D.E_INTERNAL,
+				"table: indexer accumulation produced empty type lists")
+		end
+		indexer = V.indexer(k_union, v_union)
+	end
+	-- A record carrying an indexer is structurally not "closed" in the
+	-- row-extension sense: any key matching the indexer is permitted.
+	-- The `open` flag stays false (closed for excess fields outside the
+	-- indexer's key type) — matches the type-system reference's
+	-- `{[K]: V}` shape, which has no extra-field row variable.
+	return V.rec(named, false, indexer), env, nil
+end
+
+local function synth_table(node, env, solver)
+	return synth_table_impl(node, env, solver)
+end
+
+-- ── NODE_TABLE_EXPR CHECK ─────────────────────────────────────────────────
+--
+-- §3.10 CHECK: if expected is a closed `V.rec` with no indexer, check each
+-- field's value against the expected field type directly (better
+-- diagnostics than synth-then-constrain, no row variable invented). Any
+-- field present in the literal but absent in expected fails via closed-rec
+-- discipline (a missing-field error pointing at the literal's field).
+-- Extra-strict cases (expected open, expected has an indexer, expected
+-- carries a non-rec shape such as a union or var) fall back to synth +
+-- constrain so the standard subtype machinery handles them.
+
+local function expected_is_simple_closed_rec(expected)
+	return expected ~= nil
+		and expected.tag == "rec"
+		and expected.open == false
+		and expected.indexer == nil
+end
+
+local function check_table(node, env, solver, expected)
+	local W = walker_mod()
+	if not expected_is_simple_closed_rec(expected) then
+		-- Default rule: synth then constrain. Replicated here rather than
+		-- delegated so the CHECK handler returns the right shape (env, err)
+		-- without re-entering walk_check (which would recurse into this
+		-- same handler).
+		local ty, env2, err = synth_table_impl(node, env, solver)
+		if err ~= nil then return env2, err end
+		if ty == nil then
+			return env2, D.emit(env2, D.E_INTERNAL,
+				"table: CHECK fallback got nil synthesized type")
+		end
+		subtype.constrain(solver, ty, expected)
+		if solver.error ~= nil then
+			return env2, D.from_solver(env2, D.E_TYPE_MISMATCH,
+				"table: literal does not satisfy expected record",
+				solver, ty, expected)
+		end
+		return env2, nil
+	end
+
+	-- Closed expected record. CHECK each field's value against the
+	-- corresponding expected field type. Extra fields in the literal that
+	-- are absent in expected are rejected. Missing required fields are
+	-- detected after walking.
+	local fields = node.fields or ({})
+	local exp_fields = expected.fields or ({})
+	local saw = {} --[[: { [string]: boolean } ]]
+
+	local pos_index = 0
+	local n_fields = #fields
+	for i, f in ipairs(fields) do
+		local fk = f.field_kind
+		local is_last = (i == n_fields)
+		-- Determine target key (string) or fall through to per-field synth
+		-- and constrain if the key doesn't fold to a known slot.
+		local target_keys --[[: string[] | nil ]] = nil
+
+		if fk == "positional" then
+			-- Spread on last: the value's tuple slots populate successive
+			-- positional indices. We handle the spread by re-synthesizing
+			-- the value then per-slot CHECKing — but the cleaner shape is
+			-- a single CHECK against the expected positional slot if the
+			-- value is non-tuple. For tuple-multi-return on the last
+			-- field, fall back to synth+constrain (the structural form is
+			-- already correct; constraining the full rec preserves the
+			-- spread semantics).
+			local vty, env2, verr = W.walk_synth(f.value, env, solver)
+			env = env2
+			if verr ~= nil then return env, verr end
+			if vty == nil then
+				return env, D.emit(env, D.E_INTERNAL,
+					"table CHECK: positional value has no synthesized type")
+			end
+			local tup = (is_last) and as_tuple(vty) or nil
+			if tup ~= nil then
+				for _, slot in ipairs(tup) do
+					pos_index = pos_index + 1
+					local k = tostring(pos_index)
+					local exp_ty = exp_fields[k]
+					if exp_ty == nil then
+						return env, D.emit(env, D.E_FIELD_MISSING,
+							"table CHECK: extra positional field '" .. k ..
+							"' not present in expected record",
+							{ origin_type = expected })
+					end
+					subtype.constrain(solver, slot, exp_ty)
+					if solver.error ~= nil then
+						return env, D.from_solver(env, D.E_TYPE_MISMATCH,
+							"table CHECK: positional field '" .. k .. "' type mismatch",
+							solver, slot, exp_ty)
+					end
+					saw[k] = true
+				end
+			else
+				-- Non-last tuple collapses to slot 1.
+				local slot_ty = vty
+				if not is_last then
+					local nlt = as_tuple(vty)
+					if nlt ~= nil then slot_ty = nlt[1] end
+				end
+				pos_index = pos_index + 1
+				local k = tostring(pos_index)
+				local exp_ty = exp_fields[k]
+				if exp_ty == nil then
+					return env, D.emit(env, D.E_FIELD_MISSING,
+						"table CHECK: extra positional field '" .. k ..
+						"' not present in expected record",
+						{ origin_type = expected })
+				end
+				subtype.constrain(solver, slot_ty, exp_ty)
+				if solver.error ~= nil then
+					return env, D.from_solver(env, D.E_TYPE_MISMATCH,
+						"table CHECK: positional field '" .. k .. "' type mismatch",
+						solver, slot_ty, exp_ty)
+				end
+				saw[k] = true
+			end
+			target_keys = nil -- already handled
+		elseif fk == "named" then
+			local key = f.key
+			if type(key) ~= "string" then
+				return env, D.emit(env, D.E_INTERNAL,
+					"table CHECK: named field key must be a string")
+			end
+			target_keys = { key }
+		elseif fk == "computed" then
+			local cls = classify_computed_key(f.key, env, solver)
+			env = cls.env
+			if cls.err ~= nil then return env, cls.err end
+			local sk = cls.string_key
+			local ik = cls.integer_key
+			if cls.kind == "string_literal" and type(sk) == "string" then
+				target_keys = { sk }
+			elseif cls.kind == "integer_literal" and type(ik) == "number" then
+				target_keys = { tostring(ik) }
+			else
+				-- Non-literal computed key against a closed-rec expected
+				-- with no indexer: cannot statically discharge. Fall back
+				-- to synth+constrain for the rest of the literal.
+				local ty, env2, err = synth_table_impl(node, env, solver)
+				if err ~= nil then return env2, err end
+				if ty == nil then
+					return env2, D.emit(env2, D.E_INTERNAL,
+						"table CHECK: fallback got nil ty")
+				end
+				subtype.constrain(solver, ty, expected)
+				if solver.error ~= nil then
+					return env2, D.from_solver(env2, D.E_TYPE_MISMATCH,
+						"table CHECK: literal does not satisfy expected record",
+						solver, ty, expected)
+				end
+				return env2, nil
+			end
+		else
+			return env, D.emit(env, D.E_INTERNAL,
+				"table CHECK: unknown field_kind '" .. tostring(fk) .. "'")
+		end
+
+		if target_keys ~= nil then
+			for _, k in ipairs(target_keys) do
+				local exp_ty = exp_fields[k]
+				if exp_ty == nil then
+					return env, D.emit(env, D.E_FIELD_MISSING,
+						"table CHECK: field '" .. k ..
+						"' not present in expected record",
+						{ origin_type = expected })
+				end
+				-- CHECK the value directly against the expected field type.
+				local env2, err = W.walk_check(f.value, env, solver, exp_ty)
+				env = env2
+				if err ~= nil then return env, err end
+				saw[k] = true
+			end
+		end
+	end
+
+	-- Missing-required-field check: every key in expected must have been
+	-- written. (Per design §3.10 closed-record CHECK semantics: the
+	-- literal must satisfy the closed shape exactly.)
+	for k in pairs(exp_fields) do
+		if not saw[k] then
+			return env, D.emit(env, D.E_FIELD_MISSING,
+				"table CHECK: missing required field '" .. k ..
+				"' for expected record",
+				{ origin_type = expected })
+		end
+	end
+	return env, nil
 end
 
 -- ── shared call-application logic ─────────────────────────────────────────
@@ -610,6 +1049,7 @@ function M.register(W)
 	W.register_synth(defs.NODE_FIELD_EXPR, synth_field)
 	W.register_synth(defs.NODE_INDEX_EXPR, synth_index)
 	W.register_synth(defs.NODE_TABLE_EXPR, synth_table)
+	W.register_check(defs.NODE_TABLE_EXPR, check_table)
 
 	-- Override sub-phase C's NODE_CALL_EXPR — F handles indexed callees
 	-- via the standard synth path.
