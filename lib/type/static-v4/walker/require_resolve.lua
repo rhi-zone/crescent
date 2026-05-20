@@ -173,7 +173,7 @@ M.is_require_call = is_require_call
 local function resolve_via_cache(caps, cache_dir, source_path)
 	local source, rerr = caps.read_file(source_path)
 	if source == nil then
-		return nil, nil,
+		return nil, nil, nil,
 			"require: cannot read " .. source_path .. ": " .. tostring(rerr)
 	end
 	-- Hash the source bytes. The same SHA-256 primitive cache.lua uses for
@@ -181,18 +181,19 @@ local function resolve_via_cache(caps, cache_dir, source_path)
 	local source_hash = sha256_mod.sha256(source)
 	local bytes = V.cache_lookup(caps, cache_dir, source_hash)
 	if bytes == nil then
-		return nil, nil,
+		return nil, nil, source_hash,
 			"require: cache miss for " .. source_path ..
 			" (recursive walk not in sub-phase I; populate cache out-of-band " ..
 			"or wait for sub-phase J)"
 	end
 	local artifact, derr = V.deserialize(bytes)
 	if artifact == nil then
-		return nil, nil,
+		return nil, nil, source_hash,
 			"require: deserialise failed for " .. source_path ..
 			": " .. tostring(derr)
 	end
-	return M.unpack_artifact(artifact)
+	local exports, aliases, uerr = M.unpack_artifact(artifact)
+	return exports, aliases, source_hash, uerr
 end
 
 M._resolve_via_cache = resolve_via_cache
@@ -200,6 +201,17 @@ M._resolve_via_cache = resolve_via_cache
 -- ── synth_call (overrides H) ──────────────────────────────────────────────
 
 local existing_call_handler -- captured at register-time
+
+-- K1 driver hooks (module-state, see header below for rationale).
+-- Declared here so synth_call's upvalues bind correctly; the setters /
+-- getters live further down for narrative grouping but the slot itself
+-- must exist before the closure that references it.
+-- Annotation-free per this file's convention (cross-module V4Type /
+-- WalkerEnv references do not resolve in the walker's annotation scope;
+-- see file header). The hooks' shapes are documented at the setter
+-- definition below.
+local current_drive_recursive = nil
+local current_deps_sink       = nil
 
 local function synth_call(node, env, solver)
 	-- Inline the require-call shape match. Splitting it into a sub-helper
@@ -273,11 +285,43 @@ local function synth_call(node, env, solver)
 	-- Mark in-progress with `true` so any inner `require(mod_name)` fires
 	-- the placeholder branch above. We unwind the chain on the way out.
 	local env_in = E.push_require(env, mod_name, true)
-	local exports, aliases, err = resolve_via_cache(caps, cache_dir, source_path)
+	local exports, aliases, cached_source_hash, err = resolve_via_cache(caps, cache_dir, source_path)
+	-- K1: on cache miss, attempt a recursive walk via env.drive_recursive
+	-- if the driver has installed the cap. The cap re-enters the driver
+	-- for the resolved source path, performs its own cache_store on
+	-- success, and we then loop back through cache_lookup to fetch the
+	-- newly-stored artifact. Without the cap installed (legacy callers
+	-- that walk in isolation, walker tests), we keep sub-phase I's
+	-- loud-rejection behaviour — the miss message is the honest answer
+	-- for that configuration.
+	local recursed_source_hash = nil
+	if err ~= nil and current_drive_recursive ~= nil then
+		local sub_exports, sub_aliases, sub_hash, sub_err =
+			current_drive_recursive(source_path, env_in)
+		if sub_err == nil and sub_exports ~= nil then
+			exports = sub_exports
+			aliases = sub_aliases
+			recursed_source_hash = sub_hash
+			err = nil
+		elseif sub_err ~= nil then
+			err = sub_err
+		end
+	end
 	env_in = E.pop_require(env_in, mod_name)
 	if err ~= nil then
 		return nil, env_in, D.emit(env_in, D.E_REQUIRE_UNRESOLVED,
 			tostring(err), { module = mod_name })
+	end
+	-- Record the dep so the outer driver's cache_store includes this
+	-- import in the manifest deps map (used for transitive invalidation).
+	-- On cache hit, resolve_via_cache returned the source bytes' hash
+	-- back through a fourth return slot (added below) so we don't
+	-- re-read the file.
+	if current_deps_sink ~= nil then
+		local hash = recursed_source_hash or cached_source_hash
+		if hash ~= nil then
+			current_deps_sink[source_path] = hash
+		end
 	end
 
 	-- Merge the imported file's --:: aliases into the requiring file's
@@ -304,6 +348,36 @@ local function synth_call(node, env, solver)
 end
 
 M.synth_call = synth_call
+
+-- ── K1 driver hooks ───────────────────────────────────────────────────────
+--
+-- The driver (lib/type/static-v4/driver/driver.lua) sets these two
+-- module-level slots once per drive() invocation and resets them on
+-- exit. The reason for module-state rather than env-state: WalkerEnv's
+-- clone() is the contract between sub-phases A–J and does not carry
+-- runtime-injected fields like a "drive recursively" cap. Threading
+-- those fields through clone() would expand the env shape every time a
+-- new driver hook lands; using module-state keeps the env shape stable
+-- and confines the K1 wiring to this file.
+--
+-- Single-driver-per-process is the invariant. The driver always pairs
+-- `_set_driver_hooks(fn, deps_table)` with `_clear_driver_hooks()` in
+-- the same call frame. Nested driver invocations (recursive walks) re-
+-- set the hooks on entry and re-set the parent's hooks on return — see
+-- driver.lua's drive() body for the save/restore pattern.
+
+function M._set_driver_hooks(drive_recursive_fn, deps_sink)
+	current_drive_recursive = drive_recursive_fn
+	current_deps_sink       = deps_sink
+end
+
+function M._clear_driver_hooks()
+	current_drive_recursive = nil
+	current_deps_sink       = nil
+end
+
+function M._current_drive_recursive() return current_drive_recursive end
+function M._current_deps_sink()       return current_deps_sink end
 
 -- ── registration ─────────────────────────────────────────────────────────
 

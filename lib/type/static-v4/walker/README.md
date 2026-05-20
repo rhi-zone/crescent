@@ -875,4 +875,23 @@ contract. K2 of that work is the **arena → POJO decoder**
 `{ nodes, lists, pool, root }` arena output, it produces the POJO
 node tables this walker reads. The walker contract (integer `node.tag`,
 `node.line/col`, per-kind fields from the "Decoded node shape" tables
-above) is the decoder's output contract. No walker change is needed.
+above) is the decoder's output contract.
+
+K1 is the **driver itself** (`driver/driver.lua`): reads the source via
+injected I/O caps, hashes it, parses through the injected parse cap,
+decodes via K2, walks each top-level statement (the driver owns the
+chunk-handler semantics rather than registering NODE_CHUNK on the
+walker — see the driver's header for the rationale), collects
+diagnostics, and on a clean walk calls `V.cache_store` with the
+exported V4Type artifact and the per-require dep map.
+
+Recursive-walk wiring on cache miss is the one place K1 touches the
+walker: `require_resolve.lua` reads two module-level hooks set by the
+driver before each walk —
+`require_resolve._set_driver_hooks(drive_recursive_fn, deps_sink)`. On
+a cache miss the resolver invokes the recursive driver, which performs
+its own walk + cache_store; the outer driver then loops back through
+cache_lookup naturally. Module-state rather than env-state because
+WalkerEnv's `clone()` is the contract between sub-phases and does not
+carry runtime-injected fields; threading the cap through `clone()`
+would expand the env shape every time a new driver hook lands.

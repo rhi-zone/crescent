@@ -43,20 +43,36 @@ trap 'rm -rf "$tmp_root"' EXIT
 
 # Run `bin/cr check` on a file and echo "<error_count>|<exit_code>" plus
 # write full output to $2. error_count is -1 on timeout or unparsable.
+#
+# We count errors whose diagnostic line begins with the staged file's
+# path (relative or absolute), not all errors in the typecheck output.
+# Rationale: `bin/cr check <file>` transitively typechecks the file's
+# imports, so dependency files with pre-existing errors (e.g. env.lua's
+# WalkerEnv cross-module alias issue) inflate the count for every
+# importer — including newly-added files that have nothing to do with
+# the dep. Counting only errors at the staged path keeps the hook
+# focused on the change actually under review.
 run_check() {
-  local target="$1" outfile="$2"
+  local target="$1" outfile="$2" rel_path="${3:-}"
   local rc=0
   timeout 30 bin/cr check "$target" >"$outfile" 2>&1 || rc=$?
   if [ "$rc" -eq 124 ]; then
     echo "-1|124"
     return
   fi
-  # Last "Checked N file(s): X error(s), Y warning(s)" line.
   local errs
-  errs="$(grep -oE 'Checked [0-9]+ file\(s\): [0-9]+ error\(s\)' "$outfile" \
-    | tail -n1 | grep -oE '[0-9]+ error' | grep -oE '[0-9]+' || true)"
+  if [ -n "$rel_path" ]; then
+    # Strip ANSI escapes, then count diagnostics whose path component
+    # matches either the absolute staged path or the relative repo path.
+    errs="$(sed 's/\x1b\[[0-9;]*m//g' "$outfile" \
+      | grep -cE "^($target|$rel_path):[0-9]+:[0-9]+: error:" \
+      || true)"
+  else
+    # Fallback: total error count from the summary line.
+    errs="$(grep -oE 'Checked [0-9]+ file\(s\): [0-9]+ error\(s\)' "$outfile" \
+      | tail -n1 | grep -oE '[0-9]+ error' | grep -oE '[0-9]+' || true)"
+  fi
   if [ -z "$errs" ]; then
-    # No summary line — treat as unparsable failure if rc != 0, else 0.
     if [ "$rc" -ne 0 ]; then
       echo "-1|$rc"
     else
@@ -89,7 +105,7 @@ for f in "${staged[@]}"; do
   fi
 
   staged_out="$tmp_root/staged.out"
-  staged_result="$(run_check "$staged_path" "$staged_out")"
+  staged_result="$(run_check "$staged_path" "$staged_out" "$f")"
   staged_errs="${staged_result%|*}"
   staged_rc="${staged_result#*|}"
 
@@ -117,7 +133,7 @@ for f in "${staged[@]}"; do
   fi
 
   head_out="$tmp_root/head.out"
-  head_result="$(run_check "$head_path" "$head_out")"
+  head_result="$(run_check "$head_path" "$head_out" "$f")"
   head_errs="${head_result%|*}"
   head_rc="${head_result#*|}"
 
