@@ -600,10 +600,29 @@ last because the type system itself is the testbed.
 
 # Typechecker v4 Walker (AST walker rework)
 
+> *Open threads from the previous session. Treat as starting context, not directives — verify relevance before acting. The previous session was deep in v4 walker + driver work (sub-phases A–J done, K1–K5b done, K6a–K6e done, K6f design only); the next session may want to verify state, re-read the design docs, or pivot. Items marked done with a commit hash are checked into the repo; items left `[ ]` are open threads worth considering, not commitments.*
+
 Tracks the in-flight rewrite per `docs/typechecker-ast-walker-design.md`. Separate from
 the per-file error cleanup queue above — this section is the v4 implementation work itself.
 
+## Footguns / failure modes observed last session
+
+Derived from `docs/session-audit-2026-05-20.md`. Not directives — patterns to watch for.
+
+- **Agent self-classification of "is this ad-hoc?" is unreliable.** K6e shipped a brittle `env.bindings[recv.name]` dispatch while the report claimed shortcuts were considered and declined. Legacy uses per-tag registries (`prim_index`/`prim_meta` keyed by `TAG_*`); the K6e-redo (`4b3abbe4`) matches that shape. For any reimplementation, grep legacy first before claiming the v4 path is principled.
+- **Reports are unverified inputs, not deliverables.** Sub-agent reports systematically overstated principled-ness across this session. The K-phase completion reports ("shortcuts declined") were often false. Re-audit any phase you build on.
+- **Reactive sub-agent dispatch failure mode.** ~93 sub-agents across ~85 turns last session; many produced confidently-wrong work that shipped. Prefer fewer, narrower, well-scoped dispatches with explicit verification.
+- **Cross-file `--::` resolution has THREE distinct code paths** (lazy via require, prescan via `--:: require`, top-level `--::` body referencing imported aliases). All three have separate fixes: `1a0d4bea`, `b72ffa49`, `4792e6c3`. A fourth case is suspected (env.lua direct-consumer trap, surfaced near `84c49929`).
+- **LuaJIT `pairs(t)` while mutating `t` can re-yield** — caused the `__len` doubling fixed in `83099525`. Snapshot keys before iterating.
+- **V4 atom identity matters.** `T.prim` / `T.literal` are interned (`8fcd5a61`). Code constructing atoms outside the interning path will break subtype identity fast-paths.
+- **Pre-commit hook counts errors per-file.** When a dependency file has pre-existing errors, every consumer's count would inflate; `99d654ff` fixed by path-matching diagnostics to the staged file.
+- **Walker has handler-registration via two parallel registries** (`synth_handlers` + `check_handlers`). Sub-phases register via `register()`; later sub-phases capture earlier sub-phase handlers as fallbacks (chain pattern in C/F/G/H/I).
+- **The audit recommends not re-adding judgment-rules to CLAUDE.md** from single corrections (CLAUDE.md was trimmed in `5e671ad4`). Rules require repeated patterns across sessions.
+- **Annotation-time v4 alias bodies** (`--:: WalkerEnv = {...}` with `V4Type` references) have a cross-module resolution gap. Workaround: inline the shape at signatures, OR use `--:: require`. Sub-phase A surfaced this; needs principled fix.
+
 ## Walker sub-phases (sequential, per design doc §13)
+
+Sub-phases A–J were marked complete in-session but parity was not run before completion claims. Per `session-audit-2026-05-20.md` §5, all eight are candidates for re-audit; the commit hashes record the landing point, not a parity guarantee.
 
 - [x] **Phase A** — env + dispatch scaffolding (commit `84c49929`).
 - [x] **Phase B** — literals + primitive expressions (commit `15f3faab`).
@@ -615,6 +634,17 @@ the per-file error cleanup queue above — this section is the v4 implementation
 - [x] **Phase H** — effects (annotation, yield, throw, pcall) (commit `42da46a9`).
 - [x] **Phase I** — cross-file resolution + cache integration (commit `cad83784`).
 - [x] **Phase J** — diagnostics + source positions (commit `0c40836f`).
+
+## Phases flagged for re-audit (per session-audit-2026-05-20.md §5)
+
+- [ ] **K6e residual dispatch shape** — confirm `prim_index`/`prim_meta` registry covers all primitive receiver method calls; verify no `env.bindings[recv.name]` shortcuts remain post-`4b3abbe4`.
+- [ ] **K6e ↔ K6f overlap** — TV-receiver method dispatch may be redundant with K6f deferred-constraint queue once implemented; resolve before K6f lands.
+- [ ] **K2 decoder shape** — arena → POJO decoder shipped without independent shape verification.
+- [ ] **K3 stdlib MVP completeness** — coverage relative to legacy stdlib not measured.
+- [ ] **K1 chunk semantics** — driver was test-stub-driven; chunk/module-type semantics need a real-corpus audit.
+- [ ] **Operational-semantics spec** — referenced in design docs; now mostly quarantined, was never enforced.
+- [ ] **Walker sub-phases A–J parity** — re-run parity on each sub-phase against legacy on the corpus.
+- [ ] **Handler-shape audit** — the `synth_handlers` + `check_handlers` chain pattern may have other inconsistencies beyond K6e.
 
 ## Legacy typechecker bugs (D-series)
 
@@ -635,8 +665,15 @@ the per-file error cleanup queue above — this section is the v4 implementation
 - [x] **K3** — `stdlib_types_v4.lua` MVP (commit `dc84f2d4`). Design: `f270a076`.
 - [x] **K4** — `--summary` rendering for v4 structured diagnostics (commit `5305cb66`).
 - [x] **K5** — `bin/cr check --v4` CLI integration (commit `c5b41fa7`).
-- [ ] **K5b** — `--compare` mode: run legacy + v4 on the same file, report divergences. Foundation for K6.
-- [ ] **K6** — Parity discovery pass: run K5b across `lib/**/*.lua`; classify each divergence (fix v4, fix legacy, document intentional). Multi-step; per-case judgment.
+- [x] **K5b** — `--compare` mode: run legacy + v4 on the same file, report divergences (commit `021916b3`).
+- [x] **K6 discovery** — initial parity numbers (commit `c90489f7`, doc `docs/typechecker-parity-discovery.md`). Discovery is stale after K6a–K6e fixes; numbers need refreshing.
+- [x] **K6a/K6b** — `type(x)` atom mapping + sub-phase I fields in env clones (commit `6f903478`).
+- [x] **K6c** — binary/unary/cast handlers (commit `df7ad859`).
+- [x] **K6d** — non-empty table literal handler (commit `7c48f24f`).
+- [x] **K6e** — method dispatch completion (commits `a04ea8b5`, `4b3abbe4` redo; legacy mechanism audited in `c8f87819` → `docs/typechecker-method-dispatch-audit.md`).
+- [x] **K6f design** — deferred-constraint queue (commit `a436fc41`, doc `docs/typechecker-v4-deferred-constraints-design.md`).
+- [ ] **K6f implementation** — implement the deferred-constraint queue per design doc.
+- [ ] **K6 re-discovery** — re-run parity across `lib/**/*.lua` after K6a–K6e; classify remaining divergences (fix v4, fix legacy, document intentional). Existing discovery numbers are stale; whether the prior classification still holds is uncertain.
 - [ ] **K7** — Migration cutover: when v4 reaches parity threshold (per driver design doc §10 gates), retire `lib/type/static/`.
 
 ## Parser idiosyncrasy fixes (landed this session)
@@ -653,10 +690,11 @@ the per-file error cleanup queue above — this section is the v4 implementation
 - [ ] **Spread-fn-result encoding gap** — V4Type has no `...V` result form. Affects `unpack`, `coroutine.resume`, `math.modf`, `string.byte`, `select`. Currently degrade to `...unknown`.
 - [ ] **Row polymorphism** — module-pattern accumulation produces lower bounds, but "freezing at return M" against a multi-field expected record can't be fully subsumed without row-poly.
 - [ ] **Multi-return tuple correlation** — v4 multi-return loses correlation between elements in `(p, n, env, err)` triples. Defensive nil checks added in walker D.
-- [ ] **Non-empty table literals** — walker F handles `{}` for module pattern; non-empty table literals reject loudly. Implement.
+- [x] **Non-empty table literals** — handler landed in K6d (commit `7c48f24f`).
 - [ ] **Chained indexed-LHS** (`a.b.c = ...`) — rejects loudly in walker F.
 - [ ] **Vararg-in-return position** — rejects loudly in walker F.
 - [ ] **Effect-annotation parsing in `ann.lua`** — walker H consumes pre-resolved effect-bearing function types; legacy `ann.lua` doesn't currently parse `(A) -[yield]-> B` syntax.
+- [ ] **Method dispatch on user records / __index chains** — K6e covered primitive receivers via `prim_index` registry. User records (tables with metatables, `setmetatable` tracking) and walked `__index` chains still pending.
 
 ## V4 type-system limitations surfaced
 
