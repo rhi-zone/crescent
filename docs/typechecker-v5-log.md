@@ -287,3 +287,44 @@ Also need to spec-patch (per soundness attacker):
 ### Next entry point
 
 Re-attack the revised architecture before op-sem writing. Adversarial round 2: same surfaces (composition, soundness, performance, corpus) against the new picks. If the revised picks survive, op-sem writing proceeds.
+
+---
+
+## 2026-05-22 — Adversarial round 2 (4 attackers): triage resolved corpus, opened 8 severe structural patches
+
+**Composition attacker** — 7 hits/8 vectors, 4 severe. Recommendation: re-open.
+**Soundness attacker** — 4 severe + 5 moderate + 2 spec-clarification. Recommendation: re-open.
+**Performance attacker** — architecture survives, 3 concrete spec gaps must close + prototype perf experiment required before op-sem.
+**Corpus re-survey** — 100% fit on 20% sample. **Decisively resolves the H4 corpus issue.** The revised construction-as-constraints model is sound for the corpus.
+
+### Severe items (must fix before op-sem)
+
+1. **Per-tvar `open|sealed` phase bit** — CSeal/CMethodCall race (composition V1). Bit on the tvar binding; CMethodCall canonicalisation blocks until phase=sealed.
+2. **Explicit `shift(level_delta, body)` + split solver-tvar identity from De Bruijn bound-var levels** (composition V3, soundness F4, perf A9). Solver-tvars are gensym IDs (never shift); lambda-bound vars use De Bruijn levels (shift under β). Lean's approach. The triage conflated them.
+3. **Module-level fixpoint expression** for circular `require` × MODULE-MT (composition V4). Per-module batched solve = dynamic stratum (different from gen-time strata that Fix 1 dropped).
+4. **Wait-graph SCC detection** for HOUnify mutual-wait (composition V7). The wait-graph is dynamic, smaller than the constraint-emission graph; the worklist maintains it.
+5. **`setmetatable(t, nil)` rule** (soundness F2). Monotone substitution can't model clearing; need a `CTableClearMt` variant or restriction to fresh-table contexts.
+6. **Rémy-level lowering ordering w.r.t. CImpl scope** (soundness F4). Specifies when level updates can happen relative to implication scope opening. Skolem escape if wrong.
+7. **Multi-return into row rule** (soundness F10). `t.x, t.y = f()` where `f` may return 1 or 2 values. Union semantics over runtime possibilities, not common-prefix.
+8. **Worklist discipline spec** (perf A2/A12). Tvar-indexed multimap + FIFO over ready set + starvation fairness. Without it, 10-100× perf cliff.
+
+### Moderate items (resolvable during op-sem)
+
+CTableSet ordering with multiple writes to same key; CTableSet on unannotated fn-arg; effect propagation through `__index`-as-function; module exports leaked tvar; `Open[R]` variance; HKT through CSeal's μ; provenance under De Bruijn rename; cyclic metatable chain; per-decl arena allocation.
+
+### Pattern observation
+
+The 4 severe ordering items (1, 2, 4, 8) likely consolidate into **one constraint ordering framework** — per-tvar phase tags + wait-graph SCC + module fixpoints + worklist discipline are all manifestations of "finer dynamic ordering than no-strata, coarser than per-constraint-edges." The triage's Fix 1 (drop strata) was directionally right but didn't replace strata with anything. The right answer is dynamic per-tvar phase tags that subsume what coarse strata did and more.
+
+The remaining 4 severe items are concrete language-coverage rules: De Bruijn shift, setmetatable-nil, Rémy+CImpl, multi-return.
+
+### Decision (orchestrator + user, 2026-05-22)
+
+**Don't dispatch round 3.** Diminishing returns; round 2 hit rate is in finer-grained surfaces. Next move:
+1. Orchestrator + user walk through each of the 8 severe items, picking resolution.
+2. Build the prototype perf experiment (500-line worklist core; measure on `lib/std/init.lua` + `lib/test/init.lua`).
+3. Then op-sem.
+
+### Next entry point
+
+Walkthrough item 1 / dependency root: representation question — De Bruijn shift discipline + split of solver-tvar identity from bound-var levels. Most other severe items reference levels; resolve representation first.
