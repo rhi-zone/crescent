@@ -125,3 +125,112 @@ The constraints catalog is at `~/.claude/plans/radiant-gathering-gray.md` — ou
 Each agent has a hard scope, word cap, and the F12 framing ("characterise on its own terms, no recommendations"). Results will be appended to this log + a research report at `docs/typechecker-v5-research-report.md` (to be written after all agents return).
 
 Status: agents running in background; this entry will be updated when synthesis is complete.
+
+---
+
+## 2026-05-22 — H2 closed: effects in scope for v5
+
+**Question.** Should effect tracking be in scope for v5?
+
+**Decision.** Yes. Effects in scope. — user this session.
+
+**Justification recorded.**
+1. Lua's `coroutine.yield`/`resume` *are* algebraic effects in disguise (Plotkin/Pretnar). Without effect tracking, calling a yielding function outside a coroutine context is a runtime error — a soundness gap A1 forbids.
+2. Two coexisting error conventions (`error()`+`pcall` and `(nil, errmsg)` returns) only compose as types via effect tracking.
+3. User's stated bar: "literally state of the art typechecker," "more powerful than Haskell." Haskell's effects are library-level (mtl/freer); first-class effects > library is exactly where Koka/Frank sit.
+4. Row polymorphism for records is already shipped (D15); the same row machinery powers Koka-style effect rows. Cost is payload extension, not new mechanism.
+
+**Acknowledged research risk (user accepts).** No published system combines first-class HKT + first-class effects + HM-style inference + full soundness. Koka has effects+rows but limited HKT; Haskell has HKT but library-level effects; Frank uses bidirectional checking instead of full inference. v5 is research-level work on this dimension. Closest published recipe: "Deciding not to Decide" (arXiv:2510.20532) — sound-and-complete effect inference for higher-rank polymorphic functions via deferred resolution. Worth a deep read before substrate-design lands.
+
+**Implication for adversarial design wave.** Each design candidate must demonstrate effect-integration story, not assume effects are a follow-on. Substrate and scheduler candidates in particular must accommodate `<eff>` row machinery alongside HKT.
+
+---
+
+## 2026-05-22 — Adversarial design wave dispatched (4 agents, opus)
+
+**Context.** Layer-3 of the next-steps plan: closed open questions where multiple candidate designs exist. Each agent generates 2–3 candidates for its question, evaluates each against v5 constraints, independently critiques the others, and recommends one (per F5).
+
+**Agents:**
+
+1. **H4 — sound model for `setmetatable`-post-construction.** Candidates: (a) Strom-Yemini typestate restricted to unique local tables; (b) Mezzo-style permission flow; (c) Linear-Haskell-style multiplicity on the table handle.
+
+2. **Substrate — reified vs mutable bounds vs hybrid.** Candidates: (a) OutsideIn(X)-style reified constraints with implication nesting; (b) simple-sub/MLstruct mutable bounds + cache; (c) hybrid (reified for HKT/effects/implications, mutable for simple unification). Must address effect-row integration explicitly.
+
+3. **Scheduler — worklist vs levels vs tabling.** Candidates: (a) Souffle-style stratified worklist-to-quiescence; (b) OCaml Rémy-levels; (c) Chalk-SLG tabling with delayed answers. Must address how the chosen scheduler interacts with deferred HKT instantiation (Option X from `typechecker-hkt-broader.md`).
+
+4. **HKT encoding — direct vs defunctionalised.** Candidates: (a) direct type lambdas (Scala 3 style) with higher-order pattern unification; (b) Yallop/White brands; (c) singletons-style empty data tags + Apply family. Must address interaction with effect rows.
+
+**No pre-loading per F12.** Each prompt frames the question + relevant research + v5 constraints; does NOT name a preferred candidate.
+
+Status: agents running in background; results appended below when complete.
+
+---
+
+## 2026-05-22 — Adversarial design wave returned (4/4)
+
+Full agent reports preserved in this session's task transcripts (transient /tmp paths); architectural picks consolidated here for durability.
+
+### H4 (setmetatable sound model): Candidate A — Strom-Yemini typestate over unique locals
+
+**Picked design.** `Table[φ, R, μ]` where φ ∈ {open, sealed}, R = field row, μ = metatable type. Flow-sensitive over local bindings; escape (assignment to non-fresh binding, capture by closure outliving block, store into another table, pass to function not annotated to accept `open`) forbidden in open state. Joins: two open tables → `Table[open, R₁ ∩ R₂, ⊥]`; open joined with sealed = error.
+
+**Trade explicitly accepted.** Helpers cannot participate in construction (e.g., `function build_client(t) t.x = ...; t.y = ... end`) without an `Open[R_in] → Open[R_out]` annotation. v5.0 will NOT provide such annotations. Per A1 framing — "if a library doesn't fit the model, refactor the library" — corpus refactors to inline construction at the call site. `lib/epoll/init.lua` and `lib/github/init.lua` already fit. Survey of rest of `lib/` is a pre-commit task; if >5% need helpers, revisit with `Open[R]` parameter types as v5.1 additive extension.
+
+**Rejected.** Mezzo permissions (no published combination with HKT; would force corpus-wide permission signatures, violating A11). Linear Haskell multiplicity (CPS-shaped construction; bad error messages; arrow space duplicates with effect rows).
+
+### Substrate: Candidate A — Reified constraints (OutsideIn-style)
+
+**Picked design.** `Constraint` ADT with 7 variants: `CEq`, `CSub`, `CInst` (= Option X), `CHKT`, `CEffect`, `CRow`, `CImpl` (implications for local givens). Every constraint carries `Provenance { range, kind: Declared|Inferred|Synthesized, origin, parent }`. `Flavour = Wanted | Given` flavour bit. Monotonic union-find substitution as single source of truth for tvar resolution. No bounds field on tvars — tvars are inert until a constraint mentions them.
+
+**Gen phase** is a pure fold `AST → ([Constraint], Type)`. No store, no ctx mutation. Local lets emit `CImpl { skolems, givens=[], wanted=[...] }` so binding-group generalisation is honest. B5/B7 enforced by data shape, not convention.
+
+**Solve phase** is canonicalize → interact → react worklist pump with kick-out on substitution extension. CInst (Option X) is just another constraint variant.
+
+**Trade explicitly accepted.** OutsideIn's principal-types limitation — the solver rejects some programs the spec admits. Where rejection bites in practice, require an annotation. Allocation overhead from reified constraints; mitigation: per-decl arena.
+
+**Rejected.** Mutable bounds (simple-sub/MLstruct): HKT decomposition and Option X have no natural home; would force ctx side-tables (B6 violation). Hybrid: "two stores, defined interface" reads cleanly in design but accretes into D6-shape coexistence under feature pressure.
+
+### Scheduler: Candidate A — Stratified worklist-to-quiescence (Souffle-style semi-naïve)
+
+**Picked design.** `ConstraintDB` = indexed multimap keyed by tvar (and by effect-var, type-fn). `Strata` = topological order over SCCs of constraint dependency graph, computed once after gen. Solver per stratum: `Δ = tvars bound by prior strata; repeat: sweep stratum, apply σ to each constraint, reduce, update Δ' with new bindings; until Δ' = ∅`. Quiescence is `Δ' = ∅` after a sweep — no retry heuristic, no depth counter.
+
+**Termination** by monotone semi-naïve over a finite lattice (tvars × {unbound, bound-to-τ}, τ finite trees mod canonicalisation). Non-monotone constructs (handler subsumption, GADT refinement) live in separate strata.
+
+**Option X** is unremarkable: `CHKT(F, A, R)` is indexed under both `F` and `A`; wakes on either binding. The solver doesn't know HKT is "special."
+
+**Trade explicitly accepted.** Implementation complexity (constraint DB, indexing, SCC computation, delta tracking) traded for uniformity. Throughput target: within constant factor of tsgo via indexed delta — each constraint fires `O(arity × tvars_bound)` times, not `O(passes × all_constraints)`.
+
+**Rejected.** Levels (OCaml Rémy): pure levels can't express HKT delay without bolting on a worklist (B1 violation). Tabling (Chalk-SLG): depth-overflow safety net is exactly the budgeted termination B3 forbids; canonicalisation cost; cycle-delay is retry-shaped.
+
+### HKT encoding: Candidate A — Direct type lambdas + Option X as principled HO escape
+
+**Picked design.** Extend type AST with `TLambda(Var, Kind, Type)` and generalise `TApp` to polykinded. `Kind ::= * | (Kind, Variance) → Kind | KVar`. Kinds inferred by first-order unification with kind variables. Declaration-site variance composes through type lambdas.
+
+**Unification strategy.** (1) Decompose when head is rigid on both sides. (2) Miller pattern fragment: equations `?F<a₁..aₙ> = T` with distinct rigid `aᵢ` and `T`'s freevars ⊆ {aᵢ} have unique most-general solution `?F := [a₁..aₙ] =>> T`. (3) Outside the pattern fragment: register `HOUnify` constraint and continue — this is Option X. Constraints surviving to generalisation with no progress become "ambiguous constructor variable" errors. We never commit a guessed solution; soundness is preserved by refusal-to-commit.
+
+**Migration from H1/H3–H6.** H1 syntax kept verbatim. H3 (kind checking) extends from fixed arity to inferred kind, mechanical. H4 (variance) adds lambda composition case. H5/H6 (instance resolution) β-normalises heads before matching. **H2 (record-of-generics, reverted) is subsumed** — type lambdas make the dispatched field's type itself a constructor variable, dispatched via Option X. No record-level cleverness needed.
+
+**Trade explicitly accepted.** Undecidability in the general case. Mitigated by: pattern fragment covers ≥95% of real code (Miller's empirical claim, borne out by Agda/Idris/Lean). Soundness preserved by refusing to commit unguessed HO solutions.
+
+**Rejected.** Yallop/White brands: inj/prj ceremony at every site contradicts SOTA bar; variance lost; alias problem unsolvable. Singletons + Apply family: symbol explosion (every n-ary constructor generates n+1 Sym tags and Apply rules); the hard part (HO unification on `Apply(?F, _)`) is *still there*, just behind a defunctionalisation layer.
+
+### Architecture coherence (orchestrator synthesis, marked as such)
+
+The four picks compose into one architecture without seams:
+
+1. Substrate ADT has `CHKT` and `CInst` as first-class variants — directly cited by HKT-encoding pick as the home for `HOUnify` / Option X obligations.
+2. Scheduler indexes by tvar/effect-var/type-fn — directly accepts the substrate's reified constraint shape and Option X "wait on head binding" semantics.
+3. HKT pick says "never commit guessed HO solutions" — substrate's monotone substitution + provenance and scheduler's quiescence-on-empty-delta enforce this mechanically.
+4. setmetatable typestate is a SEPARATE flow-sensitive pass over local bindings; it does not interact with the constraint solver. Composition: zero — and that's the right answer.
+
+There is no D6-shape "multiple coexisting mechanisms" trap because each of the four picks deliberately rejected its mechanism-multiplying alternatives.
+
+### Decisions still open
+
+- **H10**: `any` escape hatch for community release. Not addressed by SOTA bar.
+- **Constraints catalog relocation**: `~/.claude/plans/radiant-gathering-gray.md` → `docs/typechecker-v5-constraints.md`.
+- **Corpus survey for setmetatable typestate**: need to confirm <5% of construction sites need helpers across all of `lib/`.
+
+### Next entry point
+
+Operational-semantics writing (H7 closed: parallel impl + docs with parity tests). This is the gateway to mechanism implementation. The picks above define what op-sem must capture.
