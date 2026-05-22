@@ -234,3 +234,56 @@ There is no D6-shape "multiple coexisting mechanisms" trap because each of the f
 ### Next entry point
 
 Operational-semantics writing (H7 closed: parallel impl + docs with parity tests). This is the gateway to mechanism implementation. The picks above define what op-sem must capture.
+
+---
+
+## 2026-05-22 — Adversarial coherence wave (4 attackers): picks refuted, triaged
+
+**Context.** Per F12 (orchestrator coherence claim was synthesis-from-memory, not from evidence), dispatched 4 independent adversarial agents to attack the four design picks. The brief: attack, don't validate. Verdict was lopsided.
+
+### Findings
+
+**Composition attacker (opus) — 5 hits.** (a) Scheduler "SCC once after gen" contradicts HKT pick's Option X (fresh tvars during solve); (b) HKT β-reduction allocates fresh tvars under capture-avoidance, breaking substrate's tvar-keyed indexing; (c) H4 typestate IS NOT orthogonal — `lib/epoll/init.lua:99-110` (cited by H4 design as fitting) requires `μ = typeof(self)` to be a solver-pinned tvar; (d) provenance ownership ambiguous for HOUnify residue spawned via CImpl → CHKT chains; (e) H4 "sealed = no mutation" rejects `lib/github` inheritance pattern (`setmetatable({}, {__index=Container})` then `IntBag.__index = IntBag` is sealed-then-mutate). **Recommendation: re-open.**
+
+**Soundness attacker (opus) — 2 severe + 2 moderate.** (a) `setmetatable` post-seal unmodelled — concrete crash repro via switching metatables on a sealed binding; (b) unbound effect-row variables at quiescence have no defined disposition — concrete `coroutine.yield outside resume` crash; (c) HOUnify residue + downstream constraint ordering; (d) CImpl/CHKT/CInst nesting scope discipline. **All fixable inside picked architecture. Recommendation: patch spec before op-sem.**
+
+**Performance attacker (opus) — 8 vectors, 3 plausibly close the 30s budget.** Reified constraint allocation (~1.8 MB live heap on `type_test.lua` alone); SCC recomputation cost; delta-driven re-firing quadratic on binding chains; β-reduction exponential on nested HKTs; HOUnify constraints not properly indexed by head shape; typestate as separate pass × substitution stability undefined. **Recommendation: reconsider architecture before op-sem.**
+
+**Corpus survey (Explore) — H4 refuted empirically.** Across 700 non-excluded `setmetatable` sites in `lib/`: 60% FITS, 9% MODULE-MT, 6% HELPER, <1% ESCAPES, ~0% MUTATES-POST-SEAL, 24% OTHER. The H4 design's claimed-acceptable "5% refactor" exit is empirically a **40% refactor** — 8× off. `lib/epoll`, named by the H4 design as fitting, was independently found to not fit by the composition attacker.
+
+### Triage outcome (orchestrator + user, 2026-05-22)
+
+User clarified scope: "literal SOTA because the typechecker is load-bearing for an ecosystem that should last a century." Scope cuts off the table. The cross-pick contradictions are architectural and compound over decades — must be fixed at this stage, not papered over.
+
+Three fixes accepted to the four picks, resolving the cross-pick contradictions:
+
+**Fix 1 (Scheduler): drop precomputed SCCs entirely.** The scheduler design invented stratification as a performance optimization, then promoted it to a correctness mechanism. The user-binding constraints (B1, B2, B3) don't require strata — pure worklist-to-quiescence terminates by the same monotone-substitution argument. Strata can return later as a performance optimisation (incremental rechecking, LSP file granularity); they are not architectural.
+
+**Fix 2 (HKT encoding): De Bruijn levels internally.** Substrate's "monotonic union-find substitution as single source of truth" stays sound iff β doesn't allocate new tvars. De Bruijn levels (Lean/Coq style) make β a level-substitution, not a tvar allocation. Tvars get names for source/error reporting only; internally everything is De Bruijn. β is then pure with respect to the substitution. Cost of being wrong: error messages need a de-Bruijn-to-name post-pass — cheap.
+
+**Fix 3 (H4 + Substrate): construction-phase as constraint kinds in the substrate, not a separate pass.** Replace "H4 = separate flow-sensitive pass over unique locals" with: **construction-phase constraint variants** (`CTableOpen`, `CTableSet`, `CTableSeal`) that participate in the main worklist. Same open/sealed/row semantics expressed as constraints, not a parallel mechanism. This directly fixes the `lib/epoll` non-orthogonality — `μ = typeof(self)` becomes a `CSeal(obj, ?μ_self)` constraint that waits for `self` to be solved, exactly like any other constraint. For the corpus-coverage problem, the construction-phase constraint model admits:
+- **MODULE-MT (9%)**: module-top-level treated as one extended open-construction block; `return M` is the seal.
+- **Self-reference `__index = self`** (lib/github pattern): special-case rule — sealing with self-reference is sound iff the methods table is sealed first.
+- **HELPER (6%)**: `Open[R_in] → Open[R_out]` parameter annotations available in v5.0, not deferred.
+- **OTHER (24%)**: needs case-by-case audit. Some are MUTATES-POST-SEAL in disguise (unsoundness in current code, refactor); some are MODULE-MT subtypes; some may require additional model extensions.
+
+Alternative considered and parked: full Mezzo permissions. Previously rejected on "pervasive churn" + "unsolved research with HKT"; both reasons now suspect since the corpus survey shows churn was a wash and v5 is research-grade everywhere. Re-evaluate if construction-phase-as-constraints fails its own corpus survey (>10% non-fit).
+
+### Revised architecture (post-triage)
+
+| Layer | Pick | Revision |
+|---|---|---|
+| Substrate | Reified `Constraint` ADT with provenance + Wanted/Given + 3 construction-phase variants | unchanged + 3 variants added |
+| Scheduler | Worklist-to-quiescence, no precomputed strata | strata removed |
+| HKT encoding | Direct type lambdas, De Bruijn levels internally, HO pattern unification + HOUnify residue | named representation → De Bruijn |
+| Construction phase | Constraint kinds in substrate (CTableOpen / CTableSet / CTableSeal) | was: separate H4 typestate pass |
+
+Also need to spec-patch (per soundness attacker):
+- `setmetatable` post-seal rule (re-seal vs reject)
+- Unbound effect-row variable disposition at quiescence (error or default-and-recheck, decide per variant)
+- HOUnify residue head-rigidity wake-up (second index keyed by head shape)
+- CImpl scope discipline for solving wanteds in nested implications (transcribe from OutsideIn)
+
+### Next entry point
+
+Re-attack the revised architecture before op-sem writing. Adversarial round 2: same surfaces (composition, soundness, performance, corpus) against the new picks. If the revised picks survive, op-sem writing proceeds.
