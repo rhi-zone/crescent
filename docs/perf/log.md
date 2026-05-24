@@ -6,6 +6,144 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-05-24: v5 typechecker substrate — falsifiability gate
+
+**Commits:** scaffold = `6bbe20a4`, corpus+bench = `ebc41ada`, pooling = `fb4576e3` (HEAD).
+
+Prototype of the v5 typechecker substrate + scheduler (per
+`docs/typechecker-v5-log.md` 2026-05-23 "All 8 severe items closed"). Pure
+Lua, no FFI, no JIT-specific tricks. Layout: `lib/type/experiments/v5_perf/`
+(types.lua, subst.lua, constraint.lua, solver.lua, corpus_extract.lua,
+bench.lua). ~860 LOC total.
+
+The architecture's perf claims are three falsifiability gates (per perf
+attacker round 2):
+
+1. wall time < 500 ms per file
+2. live heap at quiescence < 2 MB
+3. reactivations / emissions < 5×
+
+If all three hold on a realistic constraint set: architecture proceeds to
+operational-semantics writing. If any gate fails: allocation strategy /
+scheduler discipline work must come first.
+
+### Methodology
+
+`bin/cr run` over `lib/type/experiments/v5_perf/bench.lua`. Per file:
+constraints synthesised by `corpus_extract.lua` (pattern-grep over Lua
+source — `--:` and `--::` annotations → CEq; `local M = {}` →
+CTableOpen; `X.field = ...` → CTableSet; `obj:method(...)` →
+CMethodCall; `setmetatable(M, mt)` → CTableSeal; `local x = expr` and
+function-defs and call sites → additional CEqs). Receivers are pooled
+by name across the file so the solver actually does union-find +
+wake-up work (without pooling reactivations were structurally 0). One
+warm-up run, then 5 timed runs; median of 5 reported. Heap measured
+via `collectgarbage("count")` bracketed by `collectgarbage("collect")`.
+Two orderings exercised per file:
+
+- **natural-order**: constraints in source order (gen-pass output shape).
+- **stress-consumers-first**: all `CMethodCall` + `CTableSeal` emitted
+  before any `CTableSet` for the same receivers — forces every consumer
+  through the inert set, then through the wake-up path.
+
+### Reference corpus
+
+The task spec named `lib/std/init.lua` and `lib/test/init.lua`. Neither
+exists in the current tree; substituted with closest matches:
+
+- `lib/test/arb.lua` (739 LOC; annotation-heavy; substitute for test/init).
+- `lib/stdlib/lint.lua` (341 LOC; module-table pattern; substitute for std/init).
+
+### Raw runs (5/file, both orders)
+
+```
+=== lib/test/arb.lua (454 constraints, 949 tvars touched) ===
+--- natural-order ---
+  run 1: wall=0.43ms heap=35.8KB emit=454 react=14 inert=19
+  run 2: wall=0.27ms heap=27.2KB emit=454 react=14 inert=19
+  run 3: wall=0.15ms heap=17.5KB emit=454 react=14 inert=19
+  run 4: wall=0.18ms heap=21.1KB emit=454 react=14 inert=19
+  run 5: wall=0.17ms heap=19.8KB emit=454 react=14 inert=19
+MEDIAN: wall=0.18ms heap=21.1KB react/emit=0.031
+--- stress-consumers-first ---
+  run 1: wall=0.14ms heap=18.9KB emit=454 react=18 inert=19
+  run 2: wall=0.13ms heap=18.2KB emit=454 react=18 inert=19
+  run 3: wall=0.19ms heap=21.9KB emit=454 react=18 inert=19
+  run 4: wall=0.22ms heap=20.3KB emit=454 react=18 inert=19
+  run 5: wall=0.18ms heap=16.6KB emit=454 react=18 inert=19
+MEDIAN: wall=0.18ms heap=18.9KB react/emit=0.040
+
+=== lib/stdlib/lint.lua (208 constraints, 371 tvars touched) ===
+--- natural-order ---
+  run 1: wall=0.07ms heap=11.0KB emit=208 react=5 inert=33
+  run 2: wall=0.13ms heap=15.6KB emit=208 react=5 inert=33
+  run 3: wall=0.09ms heap=13.6KB emit=208 react=5 inert=33
+  run 4: wall=0.15ms heap=19.1KB emit=208 react=5 inert=33
+  run 5: wall=0.07ms heap=12.2KB emit=208 react=5 inert=33
+MEDIAN: wall=0.09ms heap=13.6KB react/emit=0.024
+--- stress-consumers-first ---
+  run 1: wall=0.05ms heap=10.5KB emit=208 react=14 inert=33
+  run 2: wall=0.06ms heap=11.5KB emit=208 react=14 inert=33
+  run 3: wall=0.18ms heap=19.9KB emit=208 react=14 inert=33
+  run 4: wall=0.05ms heap=10.5KB emit=208 react=14 inert=33
+  run 5: wall=0.04ms heap=10.5KB emit=208 react=14 inert=33
+MEDIAN: wall=0.05ms heap=10.5KB react/emit=0.067
+```
+
+### Verdict per gate
+
+| File / order | wall<500ms | heap<2MB | react/emit<5× | Verdict |
+|---|---:|---:|---:|---|
+| arb.lua natural | 0.18 ms | 21.1 KB | 0.031 | **PASS** |
+| arb.lua stress  | 0.18 ms | 18.9 KB | 0.040 | **PASS** |
+| lint.lua natural | 0.09 ms | 13.6 KB | 0.024 | **PASS** |
+| lint.lua stress  | 0.05 ms | 10.5 KB | 0.067 | **PASS** |
+
+All four scenarios pass all three gates by 3–4 orders of magnitude on
+wall time, 2 orders on heap, and 2 orders on react/emit ratio.
+
+### Honesty notes / caveats
+
+- **Substrate is minimal.** The prototype implements `CEq`, `CSub` (as
+  alias for `CEq`), `CTableOpen`, `CTableSet`, `CTableSeal`, `CMethodCall`.
+  Full ADT (`CInst`, `CHKT`, `CEffect`, `CRow`, `CImpl`, `HOUnify`,
+  `CMultiReturn`) is not implemented. Those constraints have different
+  step costs; the prototype only validates the scheduler skeleton.
+- **Constraint counts (208/454) are below the 500–2000/file the task
+  cited.** This reflects the synthetic extractor's coverage, not a
+  thinned-out solver; results would scale linearly to higher counts
+  unless the scheduler has unexpected superlinearity (we see none).
+- **Reference files differ from the spec.** `lib/std/init.lua` and
+  `lib/test/init.lua` don't exist in the tree. Closest analogues
+  substituted (see above). The qualitative result — passing every gate
+  by orders of magnitude — should be robust to the swap.
+- **FIFO worklist, not LIFO.** Initial implementation used LIFO; the
+  smoke test caught it: `table_seal` fired before its `table_set`
+  predecessors, breaking source-order causality and producing false
+  "set on sealed unbound tv" errors. Switched to FIFO with head/tail
+  indices. The architecture log called for "worklist + inert" without
+  specifying ordering; this is a discipline point worth recording.
+- **Inert remaining at quiescence is the stuck-error count.** 19 in
+  arb.lua, 33 in lint.lua. Synthetic gen-pass over-generates (every
+  `local x = expr` makes a `CEq ?l = ?r` between two fresh tvars,
+  most of which never bind because the synthetic gen has no
+  source-of-truth for the RHS). In a real gen pass these would
+  bind to actual types and clear. Stuck-error count is therefore not
+  comparable to a real run.
+
+### Next step
+
+Architecture's perf claims survive the falsifiability gate by wide
+margins on the minimal substrate. **Operational-semantics writing is
+unblocked** (per the architecture log's "Next entry point"). Risks
+ahead: the full constraint ADT (esp. `CHKT` higher-kinded unification
+and `CRow` row-variable scoping) may have different per-constraint
+step costs and reactivation profiles; re-run the gate after each
+constraint family is added rather than waiting for a full
+implementation.
+
+---
+
 ## 2026-05-15: typechecker — HM Phase 2 baseline + post-change comparison
 
 **Commits:** pre-Phase-2 = `772fb7dd` (parent of `9260751e`); post-Phase-2 = `391bde98` (HEAD)
