@@ -115,6 +115,19 @@ local function one_run(base_constraints, receivers_n)
 			op_sem.emit(st, constraint_mod.eq(uf2, maybe_lambda,
 				constraint_mod.prov("synth-rigidify", k, "synthesized")))
 		end
+
+		-- (c) Variance-respecting CSub load: an Arrow CSub + a record-width
+		-- CSub.  Exercises T-CSub-Arrow + T-CSub-Const-Var + T-CSub-Record-
+		-- Width + T-CSub-Refl per receiver — typical CSub shapes a real gen
+		-- pass will emit.
+		local fn_a = types_mod.arrow({ int_ty }, { int_ty }) --[[: V5Type ]]
+		local fn_b = types_mod.arrow({ int_ty }, { int_ty }) --[[: V5Type ]]
+		op_sem.emit(st, constraint_mod.sub(fn_a, fn_b,
+			constraint_mod.prov("synth-csub-arrow", k, "synthesized")))
+		local rec_wide = types_mod.record({ x = int_ty, y = string_ty }) --[[: V5Type ]]
+		local rec_narrow = types_mod.record({ x = int_ty }) --[[: V5Type ]]
+		op_sem.emit(st, constraint_mod.sub(rec_wide, rec_narrow,
+			constraint_mod.prov("synth-csub-record", k, "synthesized")))
 	end
 
 	op_sem.run(st)

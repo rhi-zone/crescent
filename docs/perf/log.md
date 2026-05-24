@@ -6,6 +6,71 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-05-24: v5 typechecker — variance-respecting CSub re-gate
+
+**Commits:** variance sidecar = `0d58a06e`, docs op-sem = `d14b769e`, exec op-sem = `836985d1`, fixtures = `4ebc10ad`, bench extension = HEAD.
+
+Re-gate after the variance-respecting CSub family lands.  CSub previously
+routed to CEq (T-CSub-AsEq stub); now dispatches by shape into Refl /
+TVar / Arrow / Const-Var / App-Var (declaration-site variance) / App-
+Struct / Record-Width / Union-L / Union-R / Mismatch.
+
+The bench harness `bench_chkt.lua` was extended to emit two extra CSub
+constraints per receiver: an Arrow CSub (exercises T-CSub-Arrow + T-CSub-
+Refl on the body) and a record-width CSub (T-CSub-Record-Width + T-CSub-
+Refl).  These add a ~30% step count over the prior CHKT-only re-gate,
+keeping the gate honest about CSub overhead.
+
+### Gate verdict
+
+| File | wall median | heap median | react/emit | Verdict |
+|---|---|---|---|---|
+| `lib/test/arb.lua` (498 total constraints, 44 CHKT) | 1.88 ms | 201.8 KB | 0.027 | **PASS** |
+| `lib/stdlib/lint.lua` (228 total, 20 CHKT) | 0.63 ms | 104.1 KB | 0.044 | **PASS** |
+
+All three gates pass (<500 ms / <2 MB / <5×) with ~250× wall margin and
+~10× heap margin on both files.  Step count grew from 498→634 on arb.lua
+and 228→295 on lint.lua, reflecting the additional CSub-driven CEq
+subgoals (record-width emits per-common-field CEqs; arrow emits contra-
+arg + co-ret subgoals).
+
+### Raw runs
+
+```
+v5 CHKT+HOUnify re-gate (5 runs/file, op_sem solver)
+
+=== lib/test/arb.lua (CHKT+HOUnify re-gate) ===
+base constraints: 454 ; synth CHKT receivers: 22
+  run 1: wall=1.88ms heap=276.8KB step=634 react=17 err=44 chkt=44 total=498
+  run 2: wall=2.74ms heap=224.0KB step=634 react=17 err=44 chkt=44 total=498
+  run 3: wall=3.20ms heap=201.8KB step=634 react=17 err=44 chkt=44 total=498
+  run 4: wall=0.89ms heap=176.9KB step=634 react=17 err=44 chkt=44 total=498
+  run 5: wall=0.61ms heap=157.8KB step=634 react=17 err=44 chkt=44 total=498
+MEDIAN: wall=1.88ms heap=201.8KB step=634 react=17 ratio=0.027
+GATES: wall<500ms=true heap<2MB=true ratio<5x=true -- PASS
+
+=== lib/stdlib/lint.lua (CHKT+HOUnify re-gate) ===
+base constraints: 208 ; synth CHKT receivers: 10
+  run 1: wall=0.50ms heap=94.0KB step=295 err=46 ...  -- PASS
+  ...
+MEDIAN: wall=0.63ms heap=104.1KB step=295 react=13 ratio=0.044
+GATES: wall<500ms=true heap<2MB=true ratio<5x=true -- PASS
+```
+
+### Caveats (same as CHKT re-gate, plus CSub-specific)
+
+1. CSub load is synthetic: 2 CSubs per receiver, fixed Arrow + record-
+   width shapes.  Real gen-pass CSub frequency and shape distribution
+   are unknown until the gen pass actually emits CSub.
+2. Union backtracking (T-CSub-Union-R) is not in the synthetic load —
+   v5.0 admits exact-branch match only; the unbounded-cost path won't
+   surface in a bench until backtracking is added.
+3. The `err=44` and `err=46` counts include T-HOUnify-Stuck errors from
+   the synthetic CHKT-park half; CSub adds zero new errors (the Arrow
+   and record-width CSubs are reflexive, succeed cleanly).
+
+---
+
 ## 2026-05-24: v5 typechecker — CHKT+HOUnify re-gate
 
 **Commits:** substrate = `e9a06c3e`, docs op-sem = `b3259fd0`, exec op-sem = `0550959f`, parity fixtures = `0d8434e2`, bench = HEAD.
