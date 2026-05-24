@@ -26,7 +26,9 @@ local M = {}
 
 --:: V5Scheme       = { binders: integer, body: V5Type }
 --:: ConstraintInst = { id: integer, tag: "cinst", scheme: V5Scheme, target: V5Type, prov: Provenance }
---:: OpSemConstraint = V5Constraint | ConstraintInst
+--:: ConstraintHKT  = { id: integer, tag: "chkt", f: V5Type, args: V5Type[], result: V5Type, prov: Provenance }
+--:: ConstraintHO   = { id: integer, tag: "hounify", f: V5Type, args: V5Type[], result: V5Type, prov: Provenance }
+--:: OpSemConstraint = V5Constraint | ConstraintInst | ConstraintHKT | ConstraintHO
 
 local _next_id = 100000
 
@@ -45,6 +47,16 @@ end
 --: (V5Scheme, V5Type, Provenance) -> ConstraintInst
 function M.inst(sch, target, prov)
 	return { id = fresh_id(), tag = "cinst", scheme = sch, target = target, prov = prov }
+end
+
+--: (V5Type, V5Type[], V5Type, Provenance) -> ConstraintHKT
+function M.chkt(f, args, result, prov)
+	return { id = fresh_id(), tag = "chkt", f = f, args = args, result = result, prov = prov }
+end
+
+--: (V5Type, V5Type[], V5Type, Provenance) -> ConstraintHO
+function M.hounify(f, args, result, prov)
+	return { id = fresh_id(), tag = "hounify", f = f, args = args, result = result, prov = prov }
 end
 
 -- Re-export constructor pass-throughs.
@@ -117,6 +129,25 @@ local function wake(st, tvar_id)
 	end
 end
 
+-- S-Wake-Head.  Drain head-watchers when the tvar's binding's head becomes
+-- rigid.  Called after any binding event where head_is_rigid holds.
+--: (OpSemState, integer) -> nil
+local function wake_head(st, tvar_id)
+	if not subst_mod.head_is_rigid(st.subst, tvar_id) then return end
+	local hw = subst_mod.drain_head_watchers(st.subst, tvar_id)
+	if hw == nil then return end
+	for cid in pairs(hw) do
+		local c = st.inert[cid]
+		if c ~= nil then
+			st.inert[cid] = nil
+			local n = st.tail + 1
+			st.worklist[n] = c
+			st.tail = n
+			st.reactivations = st.reactivations + 1
+		end
+	end
+end
+
 --: (OpSemConstraint, Subst) -> { [integer]: boolean }
 local function blockers_of(c, s)
 	local acc = {} --[[: { [integer]: boolean } ]]
@@ -141,6 +172,22 @@ end
 --: (OpSemState, OpSemConstraint) -> nil
 local function park(st, c)
 	st.inert[c.id] = c
+	if c.tag == "hounify" then
+		-- HOUnify parks on head rigidity of f's underlying uvar.
+		local f = subst_mod.deref(st.subst, c.f) --[[: V5Type ]]
+		if f.tag == "uvar" then
+			subst_mod.watch_head(st.subst, f.id, c.id)
+		end
+		return
+	end
+	if c.tag == "chkt" then
+		-- CHKT parks on head rigidity of f's uvar (same wake condition as HOUnify).
+		local f = subst_mod.deref(st.subst, c.f) --[[: V5Type ]]
+		if f.tag == "uvar" then
+			subst_mod.watch_head(st.subst, f.id, c.id)
+		end
+		return
+	end
 	local b = blockers_of(c, st.subst)
 	for tv in pairs(b) do subst_mod.watch(st.subst, tv, c.id) end
 end
@@ -173,7 +220,10 @@ function M.rule_T_CEq_Bind_L(st, a, b, prov)
 		err(st, "T-CEq-Occurs", "occurs check failed")
 		return "error"
 	end
-	if subst_mod.bind(st.subst, a.id, b) then wake(st, a.id) end
+	if subst_mod.bind(st.subst, a.id, b) then
+		wake(st, a.id)
+		wake_head(st, a.id)
+	end
 	trace(st, "T-CEq-Bind-L", "bound")
 	return "done"
 end
@@ -297,7 +347,7 @@ function M.rule_T_CTOpen(st, tv, prov)
 		return "done"
 	end
 	local rec = types_mod.record({}) --[[: V5Type ]]
-	if subst_mod.bind(st.subst, r, rec) then wake(st, r) end
+	if subst_mod.bind(st.subst, r, rec) then wake(st, r); wake_head(st, r) end
 	trace(st, "T-CTOpen", "bound empty")
 	return "done"
 end
@@ -309,7 +359,7 @@ function M.rule_T_CTSet_Open_Fresh(st, tv, key, ty, prov)
 	local fields = {} --[[: { [string]: V5Type } ]]
 	fields[key] = ty
 	local rec = types_mod.record(fields) --[[: V5Type ]]
-	if subst_mod.bind(st.subst, r, rec) then wake(st, r) end
+	if subst_mod.bind(st.subst, r, rec) then wake(st, r); wake_head(st, r) end
 	trace(st, "T-CTSet-Open-Fresh", key)
 	return "done"
 end
@@ -474,6 +524,256 @@ local function step_cinst(st, c)
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
+-- CHKT / HOUnify (higher-kinded type application + HO unification residue)
+-- ────────────────────────────────────────────────────────────────────────────
+
+-- Collect free UVar ids in a type.
+--: (V5Type, { [integer]: boolean }) -> nil
+local function collect_free_uvars(t, acc)
+	types_mod.collect_uvars(t, acc)
+end
+
+-- v5.0 restricted Miller pattern fragment check.  Each arg must be a UVar
+-- or Const (deref'd); UVars must be pairwise distinct; T's free UVars must
+-- be a subset of the arg-UVars.  Returns the allowed-uvar set if in fragment,
+-- nil otherwise.
+--: (Subst, V5Type[], V5Type) -> { [integer]: boolean } | nil
+local function miller_check(s, args, result_walked)
+	local allowed = {} --[[: { [integer]: boolean } ]]
+	local seen_uvars = {} --[[: { [integer]: boolean } ]]
+	local seen_consts = {} --[[: { [string]: boolean } ]]
+	for i = 1, #args do
+		local a = args[i]
+		if a == nil then return nil end
+		local da = subst_mod.deref(s, a) --[[: V5Type ]]
+		if da.tag == "uvar" then
+			if seen_uvars[da.id] == true then return nil end
+			seen_uvars[da.id] = true
+			allowed[da.id] = true
+		elseif da.tag == "const" then
+			if seen_consts[da.name] == true then return nil end
+			seen_consts[da.name] = true
+			-- Const has no UVars; nothing to allow.
+		else
+			-- v5.0 restriction: only UVar or Const args admitted.
+			return nil
+		end
+	end
+	local fv = {} --[[: { [integer]: boolean } ]]
+	collect_free_uvars(result_walked, fv)
+	for id, _ in pairs(fv) do
+		if allowed[id] ~= true then return nil end
+	end
+	return allowed
+end
+
+-- Walker for abstract_body: replaces UVar(id) with Var(map[id]).
+-- Recursive; does NOT cross nested Lambdas (returns unchanged, since
+-- caller guards via contains_lambda).
+--: ({ [integer]: integer }, V5Type) -> V5Type
+local function abstract_sub(map, t)
+	if t.tag == "uvar" then
+		local idx = map[t.id]
+		if idx ~= nil then return types_mod.var(idx) end
+		return t
+	elseif t.tag == "const" or t.tag == "var" or t.tag == "lambda" then
+		return t
+	elseif t.tag == "app" then
+		local sf = abstract_sub(map, t.f) --[[: V5Type ]]
+		local sa = abstract_sub(map, t.a) --[[: V5Type ]]
+		return types_mod.app(sf, sa)
+	elseif t.tag == "record" then
+		local out = {} --[[: { [string]: V5Type } ]]
+		for fk, fv in pairs(t.fields) do
+			if fv ~= nil then local s2 = abstract_sub(map, fv) --[[: V5Type ]]; out[fk] = s2 end
+		end
+		return types_mod.record(out)
+	elseif t.tag == "arrow" then
+		local aargs = {} --[[: V5Type[] ]]
+		local arets = {} --[[: V5Type[] ]]
+		for i = 1, #t.args do
+			local v = t.args[i]
+			if v ~= nil then local s2 = abstract_sub(map, v) --[[: V5Type ]]; aargs[i] = s2 end
+		end
+		for i = 1, #t.rets do
+			local v = t.rets[i]
+			if v ~= nil then local s2 = abstract_sub(map, v) --[[: V5Type ]]; arets[i] = s2 end
+		end
+		return types_mod.arrow(aargs, arets)
+	elseif t.tag == "union" then
+		local xs = {} --[[: V5Type[] ]]
+		for i = 1, #t.xs do
+			local v = t.xs[i]
+			if v ~= nil then local s2 = abstract_sub(map, v) --[[: V5Type ]]; xs[i] = s2 end
+		end
+		return types_mod.union(xs)
+	end
+	return t
+end
+
+-- Abstract a body over a list of UVar-args, producing a nested Lambda chain.
+-- For args = [u1, u2, ..., un], produces  Lambda(_, Lambda(_, ... Lambda(_, body')))
+-- where body' has UVar(ui.id) replaced by Var(n - i)  (so u1 -> Var(n-1),
+-- u_n -> Var(0)).  v5.0 restriction: assumes body has no inner Lambdas
+-- (capture-avoiding shift over nested lambdas is a spec gap; caller must
+-- guard via contains_lambda).
+--: (V5Type, V5Type[]) -> V5Type
+local function abstract_body(body, args)
+	local n = #args
+	local map = {} --[[: { [integer]: integer } ]]
+	for i = 1, n do
+		local a = args[i]
+		if a ~= nil and a.tag == "uvar" then
+			map[a.id] = n - i  -- innermost binder = Var(0) = last arg.
+		end
+	end
+	local body2 = abstract_sub(map, body) --[[: V5Type ]]
+	local result = body2
+	for _i = 1, n do
+		result = types_mod.lambda("*", result) --[[: V5Type ]]
+	end
+	return result
+end
+
+-- Returns true if t contains a Lambda anywhere (used to guard the v5.0
+-- restricted abstract).
+--: (V5Type) -> boolean
+local function contains_lambda(t)
+	if t.tag == "lambda" then return true end
+	if t.tag == "app" then return contains_lambda(t.f) or contains_lambda(t.a) end
+	if t.tag == "record" then
+		for _, fv in pairs(t.fields) do if contains_lambda(fv) then return true end end
+		return false
+	end
+	if t.tag == "arrow" then
+		for i = 1, #t.args do if contains_lambda(t.args[i]) then return true end end
+		for i = 1, #t.rets do if contains_lambda(t.rets[i]) then return true end end
+		return false
+	end
+	if t.tag == "union" then
+		for i = 1, #t.xs do if contains_lambda(t.xs[i]) then return true end end
+		return false
+	end
+	return false
+end
+
+-- T-CHKT-Miller.  Returns "done" if Miller bound, "miss" if not in fragment.
+--: (OpSemState, V5Type, V5Type[], V5Type, Provenance) -> string
+function M.rule_T_CHKT_Miller(st, f, args, result, prov)
+	local df = subst_mod.deref(st.subst, f) --[[: V5Type ]]
+	if df.tag ~= "uvar" then return "miss" end
+	local rw = subst_mod.walk(st.subst, result) --[[: V5Type ]]
+	local allowed = miller_check(st.subst, args, rw)
+	if allowed == nil then return "miss" end
+	-- Occurs check: ?F itself must not appear in result.
+	if allowed[df.id] == true then
+		-- ?F appears among its own args' allowed set vacuously?  No;
+		-- allowed comes from args, and ?F binding is what we're computing.
+	end
+	-- Free-vars check already done in miller_check.
+	-- Spec-gap guard: refuse if body contains existing Lambda (v5.0
+	-- doesn't shift across nested binders).
+	if contains_lambda(rw) then return "miss" end
+	local body = abstract_body(rw, args)
+	if subst_mod.bind(st.subst, df.id, body) then
+		wake(st, df.id)
+		wake_head(st, df.id)
+	end
+	trace(st, "T-CHKT-Miller", "bound ?F id=" .. tostring(df.id))
+	return "done"
+end
+
+-- T-CHKT-Reduce.  ?F is bound to a (chain of) Lambda(s).  β-reduce and
+-- emit CEq(reduced, result).
+--: (OpSemState, V5Type, V5Type[], V5Type, Provenance) -> string
+function M.rule_T_CHKT_Reduce(st, f, args, result, prov)
+	local df = subst_mod.deref(st.subst, f) --[[: V5Type ]]
+	if df.tag ~= "lambda" then
+		err(st, "T-CHKT-Reduce", "precondition: f deref to lambda")
+		return "error"
+	end
+	local body = df --[[: V5Type ]]
+	for i = 1, #args do
+		if body.tag ~= "lambda" then
+			err(st, "T-CHKT-Reduce", "arity mismatch: not enough lambda binders for " .. tostring(#args) .. " args")
+			return "error"
+		end
+		local a = args[i]
+		if a == nil then
+			err(st, "T-CHKT-Reduce", "nil arg at " .. tostring(i))
+			return "error"
+		end
+		local lb = body.b --[[: V5Type ]]
+		body = types_mod.instantiate(lb, a, 0) --[[: V5Type ]]
+	end
+	M.emit(st, constraint_mod.eq(body, result, prov))
+	trace(st, "T-CHKT-Reduce", "reduced #args=" .. tostring(#args))
+	return "done"
+end
+
+-- T-CHKT-Rigid-Mismatch.
+--: (OpSemState, V5Type, V5Type[], V5Type, Provenance) -> string
+function M.rule_T_CHKT_Rigid_Mismatch(st, f, args, result, prov)
+	local df = subst_mod.deref(st.subst, f) --[[: V5Type ]]
+	err(st, "T-CHKT-Rigid-Mismatch", "HKT application on non-constructor: tag=" .. df.tag)
+	return "error"
+end
+
+-- T-CHKT-Park.  ?F unbound, Miller fragment doesn't apply: emit HOUnify
+-- (which will park on head_watchers in the next dispatch loop iteration).
+--: (OpSemState, V5Type, V5Type[], V5Type, Provenance) -> string
+function M.rule_T_CHKT_Park(st, f, args, result, prov)
+	M.emit(st, M.hounify(f, args, result, prov))
+	trace(st, "T-CHKT-Park", "emit HOUnify")
+	return "done"
+end
+
+-- T-HOUnify-Wake.  f is now rigid (head-watch fired); retry as CHKT.
+--: (OpSemState, V5Type, V5Type[], V5Type, Provenance) -> string
+function M.rule_T_HOUnify_Wake(st, f, args, result, prov)
+	M.emit(st, M.chkt(f, args, result, prov))
+	trace(st, "T-HOUnify-Wake", "re-emit CHKT")
+	return "done"
+end
+
+-- T-HOUnify-Stuck.  Reported at quiescence; helper used by the run loop.
+-- Takes OpSemConstraint to avoid narrowing-through-Map issues at call site.
+--: (OpSemState, OpSemConstraint) -> nil
+function M.rule_T_HOUnify_Stuck(st, c)
+	err(st, "T-HOUnify-Stuck",
+		"ambiguous constructor variable: head shape never rigidified")
+end
+
+-- CHKT dispatch.  Decides which CHKT rule applies.
+--: (OpSemState, ConstraintHKT) -> string
+local function step_chkt(st, c)
+	local df = subst_mod.deref(st.subst, c.f) --[[: V5Type ]]
+	if df.tag == "lambda" then
+		return M.rule_T_CHKT_Reduce(st, c.f, c.args, c.result, c.prov)
+	end
+	if df.tag ~= "uvar" then
+		return M.rule_T_CHKT_Rigid_Mismatch(st, c.f, c.args, c.result, c.prov)
+	end
+	-- ?F is uvar: try Miller, else park.
+	local status = M.rule_T_CHKT_Miller(st, c.f, c.args, c.result, c.prov)
+	if status == "miss" then
+		return M.rule_T_CHKT_Park(st, c.f, c.args, c.result, c.prov)
+	end
+	return status
+end
+
+-- HOUnify dispatch.  If f is now rigid, retry; else stuck (park).
+--: (OpSemState, ConstraintHO) -> string
+local function step_hounify(st, c)
+	local df = subst_mod.deref(st.subst, c.f) --[[: V5Type ]]
+	if df.tag ~= "uvar" then
+		return M.rule_T_HOUnify_Wake(st, c.f, c.args, c.result, c.prov)
+	end
+	trace(st, "T-HOUnify-Park", "stuck on head(?F)")
+	return "stuck"
+end
+
+-- ────────────────────────────────────────────────────────────────────────────
 -- Top-level dispatch + run
 -- ────────────────────────────────────────────────────────────────────────────
 
@@ -492,7 +792,9 @@ function M.step(st, c)
 	if c.tag == "tset"  then return step_tset(st, c) end
 	if c.tag == "tseal" then return M.rule_T_CTSeal(st, c.tv, c.mu, c.prov) end
 	if c.tag == "mcall" then return step_mcall(st, c) end
-	if c.tag == "cinst" then return step_cinst(st, c) end
+	if c.tag == "cinst"   then return step_cinst(st, c) end
+	if c.tag == "chkt"    then return step_chkt(st, c) end
+	if c.tag == "hounify" then return step_hounify(st, c) end
 	err(st, "step", "unknown constraint tag " .. tostring(c.tag))
 	return "error"
 end
@@ -515,8 +817,14 @@ function M.run(st)
 		end
 	end
 	-- S-Quiesce: report inert constraints as stuck errors.
+	-- HOUnify gets the dedicated T-HOUnify-Stuck rule (ambiguous
+	-- constructor variable); others get the generic S-Quiesce error.
 	for _cid, c in pairs(st.inert) do
-		err(st, "S-Quiesce", "stuck constraint (tag=" .. c.tag .. ")")
+		if c.tag == "hounify" then
+			M.rule_T_HOUnify_Stuck(st, c)
+		else
+			err(st, "S-Quiesce", "stuck constraint (tag=" .. c.tag .. ")")
+		end
 	end
 end
 
