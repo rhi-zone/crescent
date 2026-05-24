@@ -628,3 +628,116 @@ CInst (the closest extension already in this op-sem) forced these substrate deci
 Either:
 1. Begin CInst-related real codegen (gen pass emitting CInst from `local f = function...` source), or
 2. Land the next constraint family per the re-gate schedule (CHKT is the natural next step since it forces the head-shape watch-map).
+
+---
+
+## 2026-05-24 — Op-sem v5.0 CHKT + HOUnify extension: docs + executable + parity + perf re-gate
+
+Per the re-gate schedule, the next constraint family. Picks recorded in
+the H8/H9 walkthrough land here unchanged: direct type lambdas, Miller
+pattern fragment, **never commit guessed HO solutions** (soundness floor),
+park-on-head-rigidity for the non-pattern case.
+
+### Deliverables
+
+| File | Change | Commit |
+|---|---|---|
+| `lib/type/experiments/v5_perf/subst.lua` | +65 LOC: `head_watchers` map + `watch_head` / `drain_head_watchers` / `head_is_rigid`; union() migrates the new map | `e9a06c3e` |
+| `docs/typechecker-v5-operational-semantics.md` | +163 LOC: 6 new rules (T-CHKT-Miller / Reduce / Rigid-Mismatch / Park, T-HOUnify-Wake / Stuck) + S-Wake-Head + cross-reference + 5 named spec gaps | `b3259fd0` |
+| `lib/type/static-v5/op_sem.lua` | +314 LOC: CHKT/HOUnify constructors, 6 rule functions, head-watch park dispatch, miller_check, abstract_body | `0550959f` |
+| `lib/type/static-v5/op_sem_parity_test.lua` | +277 LOC: 5 new fixtures (9, 10, 11, 12, 12b, 13) — Functor<Maybe> reduce, Miller identity, compose-style ambiguity, head-rigidification wake, orphan ambiguity | `0d8434e2` |
+| `lib/type/experiments/v5_perf/bench_chkt.lua` | new (~165 LOC): perf re-gate harness layering synthetic CHKT/HOUnify on base corpus, running op_sem dispatcher | `04e73324` |
+| `docs/perf/log.md` | +83 LOC: re-gate verdict — PASS on all three gates | `04e73324` |
+
+### Test results
+
+```
+$ timeout 30 bin/cr test lib/type/static-v5/
+  pass  lib/type/static-v5/op_sem_parity_test.lua  (49 passed)
+1 passed, 0 failed, 1 total  (49 assertions)
+```
+
+49 assertions (was 31; +18 across 5 new fixtures). All pass.
+
+### Perf re-gate verdict
+
+| File | wall median | heap median | react/emit | Verdict |
+|---|---|---|---|---|
+| `lib/test/arb.lua` (498 constraints, 44 CHKT) | 0.81 ms | 159.9 KB | 0.030 | **PASS** |
+| `lib/stdlib/lint.lua` (228 constraints, 20 CHKT) | 0.36 ms | 89.7 KB | 0.049 | **PASS** |
+
+All three gates pass (<500 ms / <2 MB / <5×) with comfortable margins on both files. Heap grew ~8× from baseline due to `abstract_body` Lambda allocation + reified CHKT/HOUnify; wall time grew ~4×. See `docs/perf/log.md` for raw runs.
+
+### Spec gaps surfaced (per F12 — named, not silently filled)
+
+1. **Restricted Miller fragment.** v5.0 admits only `UVar` or `Const` as
+   pattern arguments. Full Miller fragment admits arbitrary rigid tree
+   args. Owed when corpus example forces it.
+2. **No kind inference.** `Type.Lambda.k` is a documentation tag, not a
+   kind. Arity mismatches surface as shape errors, not arity errors.
+   v5.x extension owed.
+3. **No eta-equivalence.** `λx. F x` not equated with `F` during Miller
+   check. Real-world impact unknown.
+4. **No shift-aware abstraction over nested lambdas.** `abstract_body`
+   bails (via `contains_lambda` guard) when result contains an inner
+   Lambda. Orchestrator decision owed: reject at abstraction time, or
+   support via De Bruijn shift through abstracted binders?
+5. **HOUnify residue provenance chaining.** A HOUnify born of a CHKT
+   born of a CImpl-nested wanted needs three-deep provenance for good
+   error messages. Substrate carries `prov` per-constraint but the
+   chaining helper isn't built. Owed when CImpl lands.
+
+### Risks for CEffect (the next natural constraint family)
+
+- **Effect rows are open records.** The substrate already has open
+  records (via phase=Open + row extension); effect rows reuse that
+  machinery. Risk: row extension during effect tracking interacts with
+  the head-watch parked-map differently than CHKT does — effects "rigidify"
+  via row-closure, not via constructor head binding. New variant of
+  S-Wake-Head likely needed (S-Wake-RowClosed?).
+- **Coroutine yield typing** per H2's effect-justification needs a way
+  to thread effect rows through arrows. The current `Arrow(args, rets)`
+  AST has no effect field; either extend the AST or encode effects as
+  an additional implicit arg/ret. Spec-design decision before
+  implementation.
+- **Effect subsumption is variance-sensitive.** Currently `CSub` is
+  routed to `CEq` (the variance-respecting form was already owed for
+  CHKT and is now doubly owed). CEffect cannot avoid this — handler
+  subsumption is meaningful only with directed subtyping.
+- **Soundness floor for unbound effect-row variables at quiescence.**
+  Per soundness attacker round-2 finding F2: "default-and-recheck OR
+  error" — orchestrator decision owed. The HOUnify pattern here
+  (default = error, "ambiguous constructor variable") is one model;
+  effects may want default = empty-row instead, with implications for
+  generalisation. Decide explicitly per F12, not by analogy.
+
+### Stronger-parity status — same caveat carries over
+
+The two paths in the new fixtures (EXEC vs DOCS) still go through the
+same `rule_T_*` functions, exactly as the prior op-sem entry noted.
+The forcing function still works (a wrong rule breaks both forms
+identically), but the source-vs-doc cross-reference is still the load-
+bearing parity check. Independent re-encoding of the rules (e.g. by a
+separate agent transcribing the docs into Lua without seeing op_sem.lua)
+is still owed before v5.0 is declared stable. **Backlog item carries
+forward — not closed by this extension.**
+
+### Test suite parity (A11)
+
+Full suite shows mild flakiness: baseline runs report 540 pass / 45 fail
+or 539 pass / 46 fail in successive runs even without any change (the
+test infrastructure has "no result from worker" failures from parallel
+runner timing). Pre- and post-CHKT runs on the same checkout show the
+same noise. No real regression introduced by this extension — but the
+test-runner flakiness should be flagged as a separate concern.
+
+### Next entry point
+
+Either:
+1. CEffect op-sem extension (the natural next per the re-gate schedule).
+2. CRow op-sem extension (interacts with CEffect via row mechanism reuse).
+3. CImpl op-sem extension (needed for HOUnify residue provenance chaining; needed before realistic gen-pass CHKT emission).
+
+The CEffect path is the larger commitment — pick first if open to a
+deeper-research-risk extension; otherwise CRow is the lower-risk
+incremental.
