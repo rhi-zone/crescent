@@ -6,6 +6,88 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-05-24: v5 typechecker — CHKT+HOUnify re-gate
+
+**Commits:** substrate = `e9a06c3e`, docs op-sem = `b3259fd0`, exec op-sem = `0550959f`, parity fixtures = `0d8434e2`, bench = HEAD.
+
+Re-gate after the second op-sem extension (CHKT + HOUnify) per the re-gate
+schedule. New harness at `lib/type/experiments/v5_perf/bench_chkt.lua`:
+extends the base bench by emitting a synthetic CHKT/HOUnify load on top of
+the base-corpus constraint stream — for each k receivers (scaled to
+constraints/20), one CHKT in Miller fragment (binds ?F_k) plus one CHKT
+outside the fragment (parks as HOUnify); half of the outside-fragment
+cases get a downstream rigidifying CEq that wakes the parked HOUnify.
+
+Runs against op_sem.lua's full dispatch (CEq / CSub / CTOpen / CTSet /
+CTSeal / CMethodCall / CInst / CHKT / HOUnify), not the legacy
+solver.lua (which doesn't know CHKT/HOUnify).
+
+### Gate verdict
+
+| File | wall median | heap median | react/emit | Verdict |
+|---|---|---|---|---|
+| `lib/test/arb.lua` (498 total constraints, 44 CHKT) | 0.81 ms | 159.9 KB | 0.030 | **PASS** |
+| `lib/stdlib/lint.lua` (228 total, 20 CHKT) | 0.36 ms | 89.7 KB | 0.049 | **PASS** |
+
+All three gates (<500ms wall, <2MB heap, <5x ratio) PASS on both files.
+
+### Raw runs
+
+```
+=== lib/test/arb.lua (CHKT+HOUnify re-gate) ===
+base constraints: 454 ; synth CHKT receivers: 22
+  run 1: wall=1.20ms heap=202.3KB step=568 react=17 err=44 chkt=44 total=498
+  run 2: wall=0.81ms heap=159.9KB step=568 react=17 err=44 chkt=44 total=498
+  run 3: wall=1.14ms heap=179.3KB step=568 react=17 err=44 chkt=44 total=498
+  run 4: wall=0.61ms heap=144.4KB step=568 react=17 err=44 chkt=44 total=498
+  run 5: wall=0.48ms heap=132.6KB step=568 react=17 err=44 chkt=44 total=498
+MEDIAN: wall=0.81ms heap=159.9KB step=568 react=17 ratio=0.030
+
+=== lib/stdlib/lint.lua (CHKT+HOUnify re-gate) ===
+base constraints: 208 ; synth CHKT receivers: 10
+  run 1: wall=0.44ms heap=98.7KB step=265 react=13 err=46 chkt=20 total=228
+  run 2: wall=0.35ms heap=88.7KB step=265 react=13 err=46 chkt=20 total=228
+  run 3: wall=0.36ms heap=89.7KB step=265 react=13 err=46 chkt=20 total=228
+  run 4: wall=0.40ms heap=94.1KB step=265 react=13 err=46 chkt=20 total=228
+  run 5: wall=0.34ms heap=89.3KB step=265 react=13 err=46 chkt=20 total=228
+MEDIAN: wall=0.36ms heap=89.7KB step=265 react=13 ratio=0.049
+```
+
+### Interpretation
+
+- Wall time grew from baseline (~0.18 ms median worst) to ~0.8 ms median
+  worst — about 4×. Within budget (~600× margin to gate).
+- Heap delta grew from ~21 KB baseline to ~160 KB worst — about 8×.
+  Within budget (~12× margin to gate). Driven by synthetic CHKT/HOUnify
+  reified constraints + abstract_body's allocation of fresh Lambda chains.
+- Reactivation ratio essentially unchanged (0.03–0.05) — the head-watch
+  parked-map fires only when a constructor variable rigidifies, not on
+  every binding event.
+
+### Caveats (same as the baseline re-gate, plus CHKT-specific)
+
+1. Synthetic CHKT load is workload-driven, not corpus-derived. Real
+   surface area depends on how often gen emits CHKT in practice — TBD
+   when the gen pass actually targets CHKT.
+2. Errors counted include the pre-existing inert constraints from base
+   corpus (now reported under op_sem rather than solver.lua) plus the
+   intentional T-HOUnify-Stuck "ambiguous constructor variable" errors
+   from the half-rigidified synthetic load.
+3. The op_sem path is roughly 2-4× slower than solver.lua on the same
+   base corpus, likely from extra trace/error bookkeeping. Acceptable
+   for the spec form; the production solver would inherit the substrate
+   pattern but not the trace overhead.
+4. Constraint counts (~500 max) are still 100-200× below the 10⁵
+   architecture target. Re-gate at realistic scale owed.
+
+### Spec gaps surfaced during the re-gate (per F12)
+
+None new vs the op-sem rule writing (which already named: restricted
+Miller fragment, no kind inference, no eta, no shift-aware abstract over
+nested lambdas, no HOUnify residue provenance chaining).
+
+---
+
 ## 2026-05-24: v5 typechecker substrate — falsifiability gate
 
 **Commits:** scaffold = `6bbe20a4`, corpus+bench = `ebc41ada`, pooling = `fb4576e3` (HEAD).
