@@ -741,3 +741,115 @@ Either:
 The CEffect path is the larger commitment — pick first if open to a
 deeper-research-risk extension; otherwise CRow is the lower-risk
 incremental.
+
+---
+
+## 2026-05-24 — Op-sem v5.0 CSub variance-respecting rewrite: debt half-discharged
+
+Per the CHKT-extension entry's open thread: "CSub variance-routed-to-CEq
+won't survive CEffect — the variance-respecting CSub form is now doubly
+owed." This entry discharges the v5.0 half of that debt.  Row variance
+remains owed for CEffect.
+
+### Deliverables
+
+| File | Change | Commit |
+|---|---|---|
+| `lib/type/experiments/v5_perf/variance.lua` | new (72 LOC): variance registry sidecar with declare / lookup / at / reset / flip | `0d58a06e` |
+| `docs/typechecker-v5-operational-semantics.md` | +165/-10 LOC: 10 new rules (T-CSub-Refl / TVar / Arrow / Const-Var / App-Var / App-Struct / Record-Width / Union-L / Union-R / Mismatch), 5 named spec gaps, cross-reference updated | `d14b769e` |
+| `lib/type/static-v5/op_sem.lua` | +246/-4 LOC: 10 rule functions + step_csub dispatcher + variance module re-export | `836985d1` |
+| `lib/type/static-v5/op_sem_parity_test.lua` | +294 LOC: 6 fixture blocks (14, 15a–c, 16a–c, 17a–b, 18) — Arrow decomposition, App-Var per declared variance, Record-Width with soundness-critical invariance check, contra-arg sound rejection, TVar routing | `4ebc10ad` |
+| `lib/type/experiments/v5_perf/bench_chkt.lua`, `docs/perf/log.md` | bench extended with synthetic CSub load (Arrow + record-width); re-gate PASS on all three gates with comfortable margins | `b29d5fdb` |
+
+### Test results
+
+```
+$ timeout 30 bin/cr test lib/type/static-v5/
+  pass  lib/type/static-v5/op_sem_parity_test.lua  (61 passed)
+1 passed, 0 failed, 1 total  (61 assertions)
+```
+
+61 assertions (was 49; +12 across 6 new fixture blocks).  All pass.
+
+Full suite A11 check: 540 pass / 45 fail / 10 skip — exact baseline
+match.  No regression.
+
+### Perf re-gate verdict
+
+| File | wall median | heap median | react/emit | Verdict |
+|---|---|---|---|---|
+| `lib/test/arb.lua` | 1.88 ms | 201.8 KB | 0.027 | **PASS** |
+| `lib/stdlib/lint.lua` | 0.63 ms | 104.1 KB | 0.044 | **PASS** |
+
+All three gates pass.  Wall grew ~2× from CHKT baseline due to added
+record-width CSubs emitting per-field CEqs; still ~250× wall margin and
+~10× heap margin.
+
+### Variance discipline summary
+
+| Type form | Variance | Rule | Soundness basis |
+|---|---|---|---|
+| Arrow args | contravariant | T-CSub-Arrow | substitutability: callee accepts wider, callers pass narrower |
+| Arrow rets | covariant | T-CSub-Arrow | substitutability: callee returns narrower, callers expect wider |
+| Named App args (declared) | per-position (co/contra/inv) | T-CSub-App-Var | declaration-site H4 |
+| Named App args (undeclared) | invariant (default) | T-CSub-App-Var | sound default (round-1 research §3) |
+| Record fields | invariant (always) | T-CSub-Record-Width | mutable fields (CTableSet model) — covariant on mutable is TypeScript-array unsoundness |
+| Record width | covariant (forget fields) | T-CSub-Record-Width | structural: wider <: narrower |
+| Union LHS | covariant (each branch) | T-CSub-Union-L | each branch must conform |
+| Union RHS | exact-branch only (v5.0) | T-CSub-Union-R | no backtracking; v5.x extension owed |
+| TVar | invariant (routes to CEq) | T-CSub-TVar | no per-tvar bounds in v5.0 (log item 2/6) |
+
+Citations: `docs/typechecker-v5-operational-semantics.md` § "Subtyping
+(variance-respecting)" + soundness sketch.
+
+### Spec gaps surfaced (per F12)
+
+1. **Bounded tvars.** T-CSub-TVar routes to CEq.  Real bounded substrate
+   (simple-sub / MLstruct) is a v5.x extension.
+2. **Variance under Lambda.** Registry covers named Consts only; type
+   lambdas don't yet carry variance.  Acceptable because CHKT β-reduces
+   lambdas before dispatch — orphan cases owed.
+3. **Union backtracking.** T-CSub-Union-R admits only exact-branch
+   match.  Backtracking search owed.
+4. **Effect-row variance.** When CEffect lands, handler subsumption
+   needs row-tail variance.  Out of v5.0 minimal-core scope.
+5. **Intersection types.** No intersection AST variant.  Algebraic
+   Subtyping admits intersection-as-contravariant-union.
+
+### CEffect impact
+
+This discharges the v5.0 half of the CSub variance debt.  CEffect's
+effect-row variance is a **separate** debt: row tails (open/closed)
+need their own variance discipline (Koka-style effect subsumption), and
+the row-machinery extension to T-CSub-Record-Width-like rules isn't
+written yet.
+
+What changes for CEffect work:
+- CEffect can now emit CSub on the value/effect arrow shape and trust
+  variance-respecting decomposition; it does NOT need to hand-roll
+  contra-arg + co-ret + co-effect-row decomposition into CEq.
+- The remaining CEffect-specific work is row-tail variance for the
+  effect row itself, not arrow-position variance.
+- Estimate: ~40% of the previously-bundled "CSub + CEffect variance"
+  surface is now done.  The 60% remaining is row-mechanism (which also
+  blocks CRow, so a shared CRow op-sem extension is the more efficient
+  path).
+
+### Stronger-parity status carried forward
+
+Same caveat as the prior op-sem entries.  The two paths in fixtures
+(EXEC vs DOCS) go through the same rule_T_* functions.  Independent re-
+encoding of the rules by a separate agent (without seeing op_sem.lua)
+is still owed before v5.0 is declared stable.  **Backlog item carries
+forward — not closed by this extension.**
+
+### Next entry point
+
+Either:
+1. CRow op-sem extension (the natural next; row mechanism is shared
+   between CRow and CEffect's row-tails).
+2. CImpl op-sem extension (needed for HOUnify residue provenance
+   chaining + realistic gen-pass CHKT emission).
+3. Begin gen-pass for the v5.0 minimal core (CEq / CSub / Construction-
+   phase / CInst / CHKT all landed now — enough surface for a non-
+   trivial fixture set against real Lua source).
