@@ -41,6 +41,33 @@ local function live_heap_kb()
 	return kb
 end
 
+-- Reorder constraints so that method_call and table_seal precede
+-- table_set/table_open for the same receiver, forcing the scheduler to
+-- park constraints in the inert set and wake them once table_sets fire.
+-- This is the WORST case for the architecture — naturally-ordered streams
+-- (gen-pass output) produce ~0 reactivations because forward refs are rare.
+--: (V5Constraint[]) -> V5Constraint[]
+local function stress_reorder(constraints)
+	local consumers = {} --[[: V5Constraint[] ]]
+	local producers = {} --[[: V5Constraint[] ]]
+	local mc, pc = 0, 0
+	for i = 1, #constraints do
+		local c = constraints[i]
+		if c ~= nil then
+			if c.tag == "mcall" or c.tag == "tseal" then
+				mc = mc + 1; consumers[mc] = c
+			else
+				pc = pc + 1; producers[pc] = c
+			end
+		end
+	end
+	local out = {} --[[: V5Constraint[] ]]
+	local oi = 0
+	for i = 1, #consumers do oi = oi + 1; out[oi] = consumers[i] end
+	for i = 1, #producers do oi = oi + 1; out[oi] = producers[i] end
+	return out
+end
+
 --: (V5Constraint[]) -> RunResult
 local function one_run(constraints)
 	-- Reset state before measuring
@@ -93,17 +120,10 @@ local function median(results, getter)
 	return (a + b) / 2
 end
 
---: (string) -> nil
-function M.bench_file(file)
-	io.write("\n=== " .. file .. " ===\n")
-	local extracted = corpus_mod.extract(file)
-	local constraints = extracted.constraints
-	io.write(string.format("constraints extracted: %d (tvars touched: %d)\n",
-		#constraints, extracted.tvar_counter))
-
-	-- JIT warm-up: one untimed run.
-	one_run(constraints)
-
+--: (string, V5Constraint[], string) -> nil
+local function run_and_report(file, constraints, label)
+	io.write("--- " .. label .. " ---\n")
+	one_run(constraints) -- JIT warm-up
 	local results = {} --[[: RunResult[] ]]
 	for i = 1, RUNS do
 		results[i] = one_run(constraints)
@@ -121,19 +141,29 @@ function M.bench_file(file)
 	local m_react = median(results, function(r) return r.reactivations end)
 	local ratio = m_emit > 0 and (m_react / m_emit) or 0
 
-	io.write(string.format("MEDIAN: wall=%.2fms heap=%.1fKB emit=%d react=%d ratio=%.3f\n",
-		m_wall, m_heap, m_emit, m_react, ratio))
+	io.write(string.format("MEDIAN(%s): wall=%.2fms heap=%.1fKB emit=%d react=%d ratio=%.3f\n",
+		label, m_wall, m_heap, m_emit, m_react, ratio))
 
 	local pass_wall  = m_wall < 500
 	local pass_heap  = m_heap < 2048
 	local pass_ratio = ratio < 5
-	io.write(string.format("GATES: wall<500ms=%s heap<2MB=%s ratio<5x=%s\n",
-		tostring(pass_wall), tostring(pass_heap), tostring(pass_ratio)))
-	if pass_wall and pass_heap and pass_ratio then
-		io.write("VERDICT: PASS\n")
-	else
-		io.write("VERDICT: FAIL\n")
-	end
+	io.write(string.format("GATES(%s): wall<500ms=%s heap<2MB=%s ratio<5x=%s -- %s\n",
+		label, tostring(pass_wall), tostring(pass_heap), tostring(pass_ratio),
+		(pass_wall and pass_heap and pass_ratio) and "PASS" or "FAIL"))
+	-- Discard locals not needed
+	local _ = file
+end
+
+--: (string) -> nil
+function M.bench_file(file)
+	io.write("\n=== " .. file .. " ===\n")
+	local extracted = corpus_mod.extract(file)
+	local constraints = extracted.constraints
+	io.write(string.format("constraints extracted: %d (tvars touched: %d)\n",
+		#constraints, extracted.tvar_counter))
+	run_and_report(file, constraints, "natural-order")
+	local stress = stress_reorder(constraints)
+	run_and_report(file, stress, "stress-consumers-first")
 end
 
 --: (string[]) -> nil

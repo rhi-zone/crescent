@@ -13,12 +13,25 @@ local constraint_mod = require("lib.type.experiments.v5_perf.constraint")
 
 local M = {}
 
---:: Allocator    = { n: integer }
+--:: Allocator    = { n: integer, by_name: { [string]: integer } }
 --:: ExtractResult = { constraints: V5Constraint[], tvar_counter: integer, file: string }
 
 --: (Allocator) -> integer
 local function alloc(a)
 	a.n = a.n + 1
+	return a.n
+end
+
+-- Lookup-or-allocate a tvar id keyed by name.  Cross-line/cross-constraint
+-- name reuse is what produces real wake-up activity in the solver: two
+-- CTableSet against the same name share a tvar root, so the second set
+-- forces the first to react if it was inert.
+--: (Allocator, string) -> integer
+local function alloc_named(a, name)
+	local existing = a.by_name[name]
+	if existing ~= nil then return existing end
+	a.n = a.n + 1
+	a.by_name[name] = a.n
 	return a.n
 end
 
@@ -84,40 +97,47 @@ local function process_line(line, lineno, out, a, file)
 	local mod_name = line:match("^%s*local%s+([%w_]+)%s*=%s*{%s*}%s*$")
 	if mod_name ~= nil then
 		local prov = constraint_mod.prov(file, lineno, "inferred")
-		local tv = alloc(a)
+		local tv = alloc_named(a, mod_name)
 		local co = constraint_mod.table_open(tv, prov) --[[: V5Constraint ]]
 		out[#out + 1] = co
 	end
-	-- 4. `X.field = ...` field assignment -> CTableSet.
-	for _recv, field in line:gmatch("([%w_]+)%.([%w_]+)%s*=") do
+	-- 4. `X.field = ...` field assignment -> CTableSet on receiver's tvar.
+	--    Receiver tvar pooled by name so all `M.x`, `M.y`, ... share root M.
+	for recv, field in line:gmatch("([%w_]+)%.([%w_]+)%s*=") do
 		local prov = constraint_mod.prov(file, lineno, "inferred")
-		local recv_tv = alloc(a)
+		local recv_tv = alloc_named(a, recv)
 		local val_tv  = types_mod.uvar(alloc(a)) --[[: V5Type ]]
 		local cs = constraint_mod.table_set(recv_tv, field, val_tv, prov) --[[: V5Constraint ]]
 		out[#out + 1] = cs
 	end
-	-- 5. `obj:method(...)` method calls -> CMethodCall.
-	for _recv, method in line:gmatch("([%w_]+):([%w_]+)%(") do
+	-- 5. `obj:method(...)` method calls -> CMethodCall on pooled receiver.
+	--    Method-call constraints are the prime source of REACTIVATIONS:
+	--    they go inert when the receiver is unbound, then wake when the
+	--    receiver's table gains the named field.
+	for recv, method in line:gmatch("([%w_]+):([%w_]+)%(") do
 		local prov = constraint_mod.prov(file, lineno, "synthesized")
-		local recv_tv = alloc(a)
+		local recv_tv = alloc_named(a, recv)
 		local ret_tv  = alloc(a)
 		local cm = constraint_mod.method_call(recv_tv, method, ret_tv, prov) --[[: V5Constraint ]]
 		out[#out + 1] = cm
 	end
-	-- 6. `setmetatable(M, mt)` -> CTableSeal.
+	-- 6. `setmetatable(M, mt)` -> CTableSeal on M's pooled tvar.
 	local seal_recv = line:match("setmetatable%s*%(%s*([%w_]+)%s*,")
 	if seal_recv ~= nil then
 		local prov = constraint_mod.prov(file, lineno, "declared")
-		local tv = alloc(a)
+		local tv = alloc_named(a, seal_recv)
 		local cz = constraint_mod.table_seal(tv, nil, prov) --[[: V5Constraint ]]
 		out[#out + 1] = cz
 	end
 	-- 7. `local x = expr` (with initializer) -> CEq between fresh lhs tvar
 	--    and a fresh rhs tvar (we don't actually parse the RHS — synthetic).
 	--    Captures the bulk of constraints in real Lua code.
-	for _name in line:gmatch("local%s+([%w_]+)%s*=") do
+	for name in line:gmatch("local%s+([%w_]+)%s*=") do
 		local prov = constraint_mod.prov(file, lineno, "inferred")
-		local lhs = types_mod.uvar(alloc(a)) --[[: V5Type ]]
+		-- Pool the lhs tvar by name so subsequent method calls / field
+		-- assignments on this local share the same root (forcing the
+		-- solver to actually do union-find + wake-up work).
+		local lhs = types_mod.uvar(alloc_named(a, name)) --[[: V5Type ]]
 		local rhs = types_mod.uvar(alloc(a)) --[[: V5Type ]]
 		local ce = constraint_mod.eq(lhs, rhs, prov) --[[: V5Constraint ]]
 		out[#out + 1] = ce
@@ -165,7 +185,7 @@ function M.extract(file, read_all)
 	end
 	if source == nil then error("corpus_extract: empty read for " .. file) end
 	local out = {} --[[: V5Constraint[] ]]
-	local a = { n = 0 } --[[: Allocator ]]
+	local a = { n = 0, by_name = {} --[[: { [string]: integer } ]] } --[[: Allocator ]]
 	local lineno = 0
 	for line in source:gmatch("([^\n]*)\n?") do
 		lineno = lineno + 1
