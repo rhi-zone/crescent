@@ -1,4 +1,4 @@
-# Typechecker v5 — Operational Semantics (v5.0 minimal core)
+# Typechecker v5 — Operational Semantics (v5.0 minimal core + CHKT)
 
 Per H7 (parallel impl + docs with parity tests). Per F2 (op-sem is a runnable
 test, not prose). This file is the **doc form**. The executable form is
@@ -370,6 +370,161 @@ Per F12 — explicit gaps, not silently filled:
    ships separately.
 5. **Effect rows**, **HKT**, **CImpl** (local givens). All deferred.
 
+### Higher-kinded type application (CHKT) + higher-order unification residue (HOUnify)
+
+**Added 2026-05-24.** Per the v5 re-gate schedule. Picks: direct type lambdas
+with De Bruijn levels for bound vars (per log item 2); Miller pattern
+fragment for HO unification; **never commit guessed HO solutions** (soundness
+floor) — outside the pattern fragment we emit `HOUnify` and park on head
+rigidity of the head constructor variable.
+
+Two new constraint variants:
+
+| Variant                       | Purpose                                        |
+|-------------------------------|------------------------------------------------|
+| `CHKT(?F, args, ?result)`     | assert `?F<args> = ?result` (HKT application)  |
+| `HOUnify(head, args, rhs)`    | residue when Miller pattern check fails        |
+
+`CHKT(?F, args, ?result)` asserts that applying the constructor variable `?F`
+to `args` (an ordered list of `V5Type`s) yields `?result`. The substrate
+representation of `?F<a₁..aₙ>` is the curried `App(...App(App(?F, a₁), a₂)..., aₙ)`.
+`CHKT` exists as a first-class constraint (rather than always emitting
+`CEq(App(...), ?result)`) so the solver can dispatch directly into the
+Miller-fragment check before falling back to ordinary unification.
+
+#### Miller pattern fragment check
+
+Equation `?F a₁ a₂ … aₙ ≐ T` is in the Miller pattern fragment when:
+1. `?F` (after deref) is an unbound `UVar`.
+2. Each `aᵢ` (after deref) is a **rigid** type — concrete (any non-uvar tag).
+3. The `aᵢ` are pairwise distinct as types (`types.equal`).
+4. Every `UVar` free in `T` is either `?F` itself (which would be an occurs
+   error and is rejected by side-condition) or appears among the `aᵢ`'s free
+   vars closure. **In practice for v5.0** we restrict the check further: each
+   `aᵢ` must itself be a single `UVar` (rigid name) or a `Const`; the body
+   `T`'s free `UVar`s must be a subset of `{ id(aᵢ) | aᵢ.tag == "uvar" }`.
+
+When in the fragment, the unique most-general solution is:
+
+    ?F := lambda a₁. lambda a₂. … lambda aₙ. T'
+
+where `T'` is `T` with each `UVar(aᵢ.id)` replaced by `Var(n - i)` (De Bruijn
+level abstraction, eager-shift discipline per the substrate).
+
+**Note on the v5.0 restriction.** The full Miller fragment admits any rigid
+distinct argument (e.g. arbitrary tree-shaped rigid types). v5.0 starts with
+the common case (`?F<?a>` or `?F<int>` style) because it covers Functor /
+Monad / Applicative dictionary instances and the H2 record-of-generics shape
+without forcing the more delicate occurs-check + alpha-equivalence engine.
+**Listed as a v5.0 spec gap below.**
+
+#### Rules
+
+**T-CHKT-Miller.** Miller pattern fragment applies.
+
+    ?F = uvar, unbound        each aᵢ rigid (non-uvar)
+    aᵢ pairwise distinct       FV(?result_walked) ⊆ allowed
+    body' = abstract(?result_walked, [a₁..aₙ])
+    ────────────────────────────────────────────────────────  T-CHKT-Miller
+    σ ⊢ CHKT(?F, [a₁..aₙ], ?result) ⇒ ⟨σ[?F ↦ λ…λ. body'], ε, done⟩
+
+After binding `?F`, the solver wakes both the binding-watchers and the
+head-watchers of `?F` (per substrate extension: head_watchers fire when
+`?F`'s binding's top-level tag becomes rigid; the bound λ-chain is rigid).
+
+**T-CHKT-Reduce.** `?F` is already bound to a `Lambda` (or chain of
+Lambdas). β-reduce and emit a `CEq` against `?result`.
+
+    deref(?F) = Lambda(k, body)    n = length(args)
+    reduced = iter-instantiate(Lambda...Lambda body, args)
+    ────────────────────────────────────────────────────────────────  T-CHKT-Reduce
+    σ ⊢ CHKT(?F, args, ?result) ⇒ ⟨σ, [CEq(reduced, ?result)], done⟩
+
+**T-CHKT-Rigid-Mismatch.** `?F` deref'd to a rigid non-lambda head (e.g.
+`Const("number")`). HKT application on a non-constructor: error.
+
+    deref(?F) = τ    τ.tag ≠ uvar    τ.tag ≠ lambda
+    ──────────────────────────────────────────────────────────  T-CHKT-Rigid-Mismatch
+    σ ⊢ CHKT(?F, args, ?result) ⇒ ⟨σ, ε, error("HKT app on non-constructor")⟩
+
+**T-CHKT-Park.** Miller fragment doesn't apply AND `?F` is still an unbound
+uvar. Emit a HOUnify residue and park on `?F`'s head-rigidity.
+
+    deref(?F) = UVar(f)    not in Miller pattern
+    ────────────────────────────────────────────────────────────  T-CHKT-Park
+    σ ⊢ CHKT(?F, args, ?result) ⇒ HOUnify(?F, args, ?result), stuck-on-head(?F)
+
+The HOUnify constraint goes into the inert set and is added to
+`head_watchers[?F]` (NOT `watchers[?F]`) — it must NOT wake on uvar↔uvar
+unions; only when `?F` itself becomes rigid (gets a non-uvar binding).
+
+**T-HOUnify-Wake.** Head of `?F` is now rigid. Retry as CHKT.
+
+    deref(?F) = τ    τ.tag ≠ uvar
+    ────────────────────────────────────────────────────────────  T-HOUnify-Wake
+    σ ⊢ HOUnify(?F, args, ?result) ⇒ [CHKT(?F, args, ?result)], done
+
+The wake itself is driven by S-Wake-Head (below): when a CHKT/CEq rule
+binds `?F`'s root to a non-uvar, drain head_watchers and re-enter.
+
+**T-HOUnify-Stuck.** At quiescence, any remaining HOUnify in inert is an
+"ambiguous constructor variable" error.
+
+    quiescent    HOUnify(?F, args, ?result) ∈ I
+    ────────────────────────────────────────────────────────────  T-HOUnify-Stuck
+    error("ambiguous constructor variable ?F: head shape never rigidified")
+
+**Soundness floor.** We never commit a guessed HO solution. `T-HOUnify-Stuck`
+is the only disposition when Miller fails and stays failing. This is the v5
+re-gate schedule's stated discipline.
+
+#### Solver loop additions
+
+**S-Wake-Head.** When σ is extended by a binding `?t ↦ τ` with `τ.tag ≠ uvar`
+(rigid head), drain `head_watchers[?t]` and re-enter each waker into W.
+Driven by the same hook as S-Wake but consulted only when the new binding
+contributes a rigid head shape.
+
+Implementation: every binding rule that extends σ now calls both
+`wake(?t)` (normal) AND, when the bound RHS has a rigid (non-uvar) head,
+`wake_head(?t)`. The two drain different maps; both are needed because a
+constraint may be parked on EITHER kind of event.
+
+#### Kind discipline (v5.0)
+
+`Type` already has `Lambda(k: string, b: Type)` in `types.lua`. v5.0 uses
+the `k` field as an opaque kind tag for documentation; full kind inference
+with kind variables is a v5.x extension. CHKT's correctness in v5.0 does
+NOT depend on kind-checking; arity is enforced by the lambda-chain length
+(reduce checks `length(args) ≤ depth(lambda chain)`).
+
+**Spec gap (v5.0, named per F12).** Kind inference is owed. Without it,
+`CHKT(?F, args, ?result)` where `?F` is bound to a `Lambda` of insufficient
+arity becomes a `T-CHKT-Reduce` step that produces a `CEq` between a still-
+abstracted lambda and `?result` — the resulting unification surfaces as a
+generic shape mismatch rather than an arity error. Acceptable for v5.0;
+flagged for kind-checking extension.
+
+#### Spec gaps surfaced (per F12; not silently filled)
+
+1. **Restricted Miller fragment.** v5.0 admits only `UVar` or `Const` as
+   pattern arguments; full fragment admits any rigid tree. Extend when a
+   real corpus example needs it.
+2. **Kind inference.** Lambda-arity is unchecked; mismatches surface as
+   shape errors rather than arity errors. Owed.
+3. **Eta-equivalence.** `λx. F x` vs `F` are not considered equal in the
+   Miller check. Real-world impact unknown; flag when corpus surfaces it.
+4. **Capture-avoiding abstraction during T-CHKT-Miller.** The `abstract`
+   step replaces `UVar(aᵢ.id)` with `Var(n - i)`. If `T` contains an inner
+   `Lambda`, the inner lambda's body uses fresh De Bruijn levels — the
+   abstraction must shift them. v5.0 implementation handles the
+   no-inner-lambda case; nested-lambda case is owed (orchestrator
+   decision: rejected at abstraction time, or supported via shift-aware
+   abstract?). Flagged.
+5. **HOUnify residue provenance.** A HOUnify that arose from a CHKT that
+   arose from a CImpl-nested wanted needs three-deep provenance. Substrate
+   carries `prov` per-constraint but the chaining helper isn't built yet.
+
 ## Cross-reference
 
 | Rule label              | Executable function (op_sem.lua) |
@@ -395,6 +550,13 @@ Per F12 — explicit gaps, not silently filled:
 | T-CMCall-Sealed-Missing | `rule_T_CMCall_Sealed_Missing`    |
 | T-CInst                 | `rule_T_CInst`                    |
 | T-CInst-Mono            | `rule_T_CInst_Mono`               |
+| T-CHKT-Miller           | `rule_T_CHKT_Miller`              |
+| T-CHKT-Reduce           | `rule_T_CHKT_Reduce`              |
+| T-CHKT-Rigid-Mismatch   | `rule_T_CHKT_Rigid_Mismatch`      |
+| T-CHKT-Park             | `rule_T_CHKT_Park`                |
+| T-HOUnify-Wake          | `rule_T_HOUnify_Wake`             |
+| T-HOUnify-Stuck         | `rule_T_HOUnify_Stuck`            |
+| S-Wake-Head             | `wake_head` (inside `run`)        |
 | S-Step / S-Park / S-Wake / S-Quiesce | `run`                |
 
 Parity test asserts: for each fixture, the executable spec's final
