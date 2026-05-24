@@ -26,6 +26,7 @@ function M.new()
 	return {
 		subst = subst_mod.new(),
 		worklist = {} --[[: V5Constraint[] ]],
+		worklist_head = 1,
 		worklist_n = 0,
 		inert = {} --[[: { [integer]: V5Constraint } ]],
 		stats = {
@@ -47,13 +48,19 @@ function M.emit(s, c)
 	s.worklist_n = n
 end
 
+-- FIFO pop: causality-preserving (sets-before-seal in source order).
 --: (Solver) -> V5Constraint | nil
 local function pop(s)
-	local n = s.worklist_n
-	if n == 0 then return nil end
-	local c = s.worklist[n]
-	s.worklist[n] = nil
-	s.worklist_n = n - 1
+	local h = s.worklist_head
+	if h > s.worklist_n then
+		-- Empty: reset head/tail to keep indices small.
+		s.worklist_head = 1
+		s.worklist_n = 0
+		return nil
+	end
+	local c = s.worklist[h]
+	s.worklist[h] = nil
+	s.worklist_head = h + 1
 	s.stats.popped = s.stats.popped + 1
 	return c
 end
