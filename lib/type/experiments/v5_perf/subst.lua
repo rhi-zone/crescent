@@ -21,16 +21,24 @@ M.SEALED = "sealed"
 
 --:: Phase    = string
 --:: WatchSet = { [integer]: boolean }
---:: Subst    = { parent: { [integer]: integer }, bind_type: { [integer]: V5Type }, bind_phase: { [integer]: Phase }, watchers: { [integer]: WatchSet }, next_id: integer }
+--:: Subst    = { parent: { [integer]: integer }, bind_type: { [integer]: V5Type }, bind_phase: { [integer]: Phase }, watchers: { [integer]: WatchSet }, head_watchers: { [integer]: WatchSet }, next_id: integer }
 
+-- head_watchers: separate parked-map keyed by tvar id, holding constraint ids
+-- that should be woken when the tvar's binding's HEAD (top-level constructor
+-- tag) becomes rigid (i.e. non-uvar).  Distinct from `watchers`, which fires
+-- when a tvar is bound at all (any binding, including uvar->uvar union).
+-- HOUnify (head-rigidity dependent) uses head_watchers; CEq/CSub/CMethodCall
+-- use watchers.  Per v5 severe item 4 closure: dynamic per-tvar phase, not
+-- precomputed strata.
 --: () -> Subst
 function M.new()
 	return {
-		parent     = {} --[[: { [integer]: integer } ]],
-		bind_type  = {} --[[: { [integer]: V5Type } ]],
-		bind_phase = {} --[[: { [integer]: Phase } ]],
-		watchers   = {} --[[: { [integer]: WatchSet } ]],
-		next_id    = 1,
+		parent        = {} --[[: { [integer]: integer } ]],
+		bind_type     = {} --[[: { [integer]: V5Type } ]],
+		bind_phase    = {} --[[: { [integer]: Phase } ]],
+		watchers      = {} --[[: { [integer]: WatchSet } ]],
+		head_watchers = {} --[[: { [integer]: WatchSet } ]],
+		next_id       = 1,
 	}
 end
 
@@ -101,6 +109,17 @@ function M.union(s, a, b)
 		end
 		s.watchers[loser] = nil
 	end
+	-- Migrate head-watchers from loser onto winner.
+	local lhw = s.head_watchers[loser]
+	if lhw ~= nil then
+		local whw = s.head_watchers[winner]
+		if whw == nil then
+			s.head_watchers[winner] = lhw
+		else
+			for cid in pairs(lhw) do whw[cid] = true end
+		end
+		s.head_watchers[loser] = nil
+	end
 	-- Phase: sealed dominates open.
 	if s.bind_phase[loser] == "sealed" then s.bind_phase[winner] = "sealed" end
 	s.bind_phase[loser] = nil
@@ -131,6 +150,46 @@ function M.drain_watchers(s, tvar_id)
 	local w = s.watchers[r]
 	s.watchers[r] = nil
 	return w
+end
+
+-- Add a constraint id to the HEAD-watch list of tvar id.  These fire only
+-- when the tvar's binding's TOP-LEVEL TAG becomes a non-uvar (i.e. the
+-- head constructor is rigid).  Used by HOUnify to wait for ?F's head shape.
+--: (Subst, integer, integer) -> nil
+function M.watch_head(s, tvar_id, cid)
+	local r = M.find(s, tvar_id)
+	local w = s.head_watchers[r]
+	if w == nil then w = {} --[[: WatchSet ]]; s.head_watchers[r] = w end
+	w[cid] = true
+end
+
+-- Drain head-watchers for tvar id.  Caller decides (based on the new
+-- binding's tag) whether to actually wake; this helper is shape-agnostic.
+--: (Subst, integer) -> WatchSet | nil
+function M.drain_head_watchers(s, tvar_id)
+	local r = M.find(s, tvar_id)
+	local w = s.head_watchers[r]
+	s.head_watchers[r] = nil
+	return w
+end
+
+-- Returns true if the tvar's current binding has a rigid head
+-- (non-uvar top-level tag, after deref).  Used by the head-rigidity wake.
+--: (Subst, integer) -> boolean
+function M.head_is_rigid(s, tvar_id)
+	local r = M.find(s, tvar_id)
+	local b = s.bind_type[r]
+	if b == nil then return false end
+	-- Deref nested uvar bindings (single step is enough because bind
+	-- chains are flattened through union-find).
+	local cur = b
+	while cur.tag == "uvar" do
+		local rr = M.find(s, cur.id)
+		local bb = s.bind_type[rr]
+		if bb == nil then return false end
+		cur = bb
+	end
+	return true
 end
 
 -- Walk: replace every UVar in t with its current binding (recursively).
