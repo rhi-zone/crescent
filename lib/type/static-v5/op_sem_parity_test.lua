@@ -344,6 +344,283 @@ T.describe("op_sem parity: fixture 7 — circular require (driver level)", funct
 	end)
 end)
 
+-- ═══════════════════════════════════════════════════════════════════════
+-- CHKT + HOUnify fixtures (2026-05-24 extension)
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- ─── Fixture 9: Functor<Maybe> instance + fmap(f, just(1)) (H2 case) ───
+-- Maybe is a known type constructor (bound as Lambda \alpha. Maybe alpha
+-- here; for the test we use Const("Maybe") composed as Lambda \alpha. Maybe-alpha
+-- represented structurally as a record { tag: "just"|"nothing", val: alpha }).
+-- We assert that CHKT(Maybe, [int], ?r) reduces (T-CHKT-Reduce) to
+-- the expected Maybe-of-int shape.
+
+T.describe("op_sem parity: fixture 9 — CHKT Reduce for Functor<Maybe>", function()
+	T.it("CHKT(Maybe, [int], ?r) reduces to Maybe-of-int", function()
+		-- Define Maybe := \alpha. Record{ tag: string, val: alpha }
+		local string_ty = types_mod.const("string") --[[: V5Type ]]
+		local var0 = types_mod.var(0) --[[: V5Type ]]
+		local maybe_body = types_mod.record({ tag = string_ty, val = var0 }) --[[: V5Type ]]
+		local maybe_lambda = types_mod.lambda("*", maybe_body) --[[: V5Type ]]
+		local int_ty = types_mod.const("number") --[[: V5Type ]]
+
+		-- EXEC: bind ?F to Maybe lambda, then CHKT(?F, [int], ?r).
+		local exec = op_sem.new_state()
+		local f = subst_mod.fresh(exec.subst, "open")
+		local r = subst_mod.fresh(exec.subst, "open")
+		local uf = types_mod.uvar(f) --[[: V5Type ]]
+		local ur = types_mod.uvar(r) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.eq(uf, maybe_lambda, prov("F=Maybe")))
+		op_sem.emit(exec, op_sem.chkt(uf, { int_ty }, ur, prov("fmap-apply")))
+		op_sem.run(exec)
+		local rr_exec = op_sem.resolve(exec, r)
+
+		-- DOCS: drive by hand. T-CEq-Bind-L binds ?F to lambda, then
+		-- step_chkt routes to T-CHKT-Reduce (since deref(?F) is lambda).
+		local docs = op_sem.new_state()
+		local f2 = subst_mod.fresh(docs.subst, "open")
+		local r2 = subst_mod.fresh(docs.subst, "open")
+		op_sem.rule_T_CEq_Bind_L(docs, types_mod.uvar(f2), maybe_lambda, prov("F=Maybe"))
+		op_sem.rule_T_CHKT_Reduce(docs, types_mod.uvar(f2), { int_ty }, types_mod.uvar(r2), prov("fmap-apply"))
+		-- Drain emitted CEq(reduced, ?r2).
+		while docs.head <= docs.tail do
+			local c = docs.worklist[docs.head]
+			docs.worklist[docs.head] = nil
+			docs.head = docs.head + 1
+			if c ~= nil then op_sem.step(docs, c) end
+		end
+		local rr_docs = op_sem.resolve(docs, r2)
+
+		-- The expected shape: Record{ tag: string, val: int }.
+		local expected = types_mod.record({ tag = string_ty, val = int_ty }) --[[: V5Type ]]
+		T.ok(walk_equal(rr_exec, expected), "exec r = Maybe<int>")
+		T.ok(walk_equal(rr_docs, expected), "docs r = Maybe<int>")
+		T.eq(op_sem.error_count(exec), 0, "exec no errors")
+		T.eq(op_sem.error_count(docs), 0, "docs no errors")
+	end)
+end)
+
+-- ─── Fixture 10: Miller pattern — CHKT(?F, [?a], result) ─────────────────
+-- ?F unbound; arg ?a is rigid (its own uvar treated as a distinct skolem-
+-- like name); result references ?a.  Miller fragment should bind ?F to
+-- (lambda. Var 0)-style identity-ish constructor.
+--
+-- We use UVar(a) as the "rigid" argument with the v5.0 restriction that
+-- args may be UVar or Const.
+
+T.describe("op_sem parity: fixture 10 — CHKT Miller pattern", function()
+	T.it("CHKT(?F, [?a], ?a) binds ?F to lambda x. x (identity constructor)", function()
+		local exec = op_sem.new_state()
+		local f = subst_mod.fresh(exec.subst, "open")
+		local a = subst_mod.fresh(exec.subst, "open")
+		local uf = types_mod.uvar(f) --[[: V5Type ]]
+		local ua = types_mod.uvar(a) --[[: V5Type ]]
+		-- result is the same uvar as the arg: ?F<?a> = ?a.
+		op_sem.emit(exec, op_sem.chkt(uf, { ua }, ua, prov("F-of-a=a")))
+		op_sem.run(exec)
+		-- ?F should be bound to lambda * (Var 0).
+		local rf = op_sem.resolve(exec, f)
+
+		local docs = op_sem.new_state()
+		local f2 = subst_mod.fresh(docs.subst, "open")
+		local a2 = subst_mod.fresh(docs.subst, "open")
+		local uf2 = types_mod.uvar(f2) --[[: V5Type ]]
+		local ua2 = types_mod.uvar(a2) --[[: V5Type ]]
+		op_sem.rule_T_CHKT_Miller(docs, uf2, { ua2 }, ua2, prov("F-of-a=a"))
+		local rf2 = op_sem.resolve(docs, f2)
+
+		local expected = types_mod.lambda("*", types_mod.var(0)) --[[: V5Type ]]
+		T.ok(walk_equal(rf, expected), "exec ?F = lambda x. x")
+		T.ok(walk_equal(rf2, expected), "docs ?F = lambda x. x")
+		T.eq(op_sem.error_count(exec), 0, "exec no errors")
+		T.eq(op_sem.error_count(docs), 0, "docs no errors")
+	end)
+end)
+
+-- ─── Fixture 11: HOUnify ambiguity (compose F G outside Miller) ─────────
+-- CHKT(?F, [?G(int)], ?r) where ?G is also unbound — args contain an App
+-- node, violating v5.0's restricted-Miller (UVar/Const only).  Should
+-- park as HOUnify and remain ambiguous at quiescence.
+
+T.describe("op_sem parity: fixture 11 — HOUnify ambiguity (compose)", function()
+	T.it("CHKT outside Miller fragment parks as HOUnify, errors at quiescence", function()
+		local int_ty = types_mod.const("number") --[[: V5Type ]]
+
+		local exec = op_sem.new_state()
+		local f = subst_mod.fresh(exec.subst, "open")
+		local g = subst_mod.fresh(exec.subst, "open")
+		local r = subst_mod.fresh(exec.subst, "open")
+		local uf = types_mod.uvar(f) --[[: V5Type ]]
+		local ug = types_mod.uvar(g) --[[: V5Type ]]
+		local ur = types_mod.uvar(r) --[[: V5Type ]]
+		-- Arg is App(?G, int) — neither uvar nor const at top level.
+		local app_arg = types_mod.app(ug, int_ty) --[[: V5Type ]]
+		op_sem.emit(exec, op_sem.chkt(uf, { app_arg }, ur, prov("compose")))
+		op_sem.run(exec)
+
+		local docs = op_sem.new_state()
+		local f2 = subst_mod.fresh(docs.subst, "open")
+		local g2 = subst_mod.fresh(docs.subst, "open")
+		local r2 = subst_mod.fresh(docs.subst, "open")
+		local uf2 = types_mod.uvar(f2) --[[: V5Type ]]
+		local ug2 = types_mod.uvar(g2) --[[: V5Type ]]
+		local ur2 = types_mod.uvar(r2) --[[: V5Type ]]
+		local app_arg2 = types_mod.app(ug2, int_ty) --[[: V5Type ]]
+		-- Miller miss -> Park (emit HOUnify), park-on-head(?F2).
+		local miller_status = op_sem.rule_T_CHKT_Miller(docs, uf2, { app_arg2 }, ur2, prov("compose"))
+		T.eq(miller_status, "miss", "miller does not apply")
+		op_sem.rule_T_CHKT_Park(docs, uf2, { app_arg2 }, ur2, prov("compose"))
+		-- The emitted HOUnify in docs.worklist needs to be parked manually.
+		-- Drain via op_sem.step which will park it (returns "stuck").
+		while docs.head <= docs.tail do
+			local c = docs.worklist[docs.head]
+			docs.worklist[docs.head] = nil
+			docs.head = docs.head + 1
+			if c ~= nil then
+				local status = op_sem.step(docs, c)
+				if status == "stuck" then
+					-- emulate park: insert into inert, T-HOUnify-Stuck at end.
+					docs.inert[c.id] = c
+				end
+			end
+		end
+		-- Simulate S-Quiesce for hounify in inert.
+		for _cid, c in pairs(docs.inert) do
+			if c.tag == "hounify" then op_sem.rule_T_HOUnify_Stuck(docs, c) end
+		end
+
+		-- Both should report exactly one HOUnify-Stuck error.
+		T.ok(op_sem.error_count(exec) >= 1, "exec has hounify error")
+		T.ok(op_sem.error_count(docs) >= 1, "docs has hounify error")
+		local found_exec = false
+		for i = 1, #exec.errors do
+			local e = exec.errors[i]
+			if e ~= nil and e.rule == "T-HOUnify-Stuck" then found_exec = true end
+		end
+		local found_docs = false
+		for i = 1, #docs.errors do
+			local e = docs.errors[i]
+			if e ~= nil and e.rule == "T-HOUnify-Stuck" then found_docs = true end
+		end
+		T.ok(found_exec, "exec error is T-HOUnify-Stuck")
+		T.ok(found_docs, "docs error is T-HOUnify-Stuck")
+	end)
+end)
+
+-- ─── Fixture 12: HOUnify wakes after downstream rigidifies head ─────────
+-- CHKT(?F, [App(?G, int)], ?r) parks; a downstream CEq(?F, Maybe-lambda)
+-- rigidifies ?F.  The HOUnify wakes, re-emits CHKT, which now T-CHKT-Reduces.
+
+T.describe("op_sem parity: fixture 12 — HOUnify wakes on head rigidification", function()
+	T.it("downstream CEq rigidifies ?F; HOUnify wakes and reduces", function()
+		local int_ty = types_mod.const("number") --[[: V5Type ]]
+		local string_ty = types_mod.const("string") --[[: V5Type ]]
+		local var0 = types_mod.var(0) --[[: V5Type ]]
+		-- Maybe := \alpha. Record{ tag: string, val: alpha }
+		local maybe_body = types_mod.record({ tag = string_ty, val = var0 }) --[[: V5Type ]]
+		local maybe_lambda = types_mod.lambda("*", maybe_body) --[[: V5Type ]]
+
+		-- EXEC.  CHKT first (with App arg → out of Miller, parks);
+		-- then CEq(?F, Maybe-lambda) rigidifies head; wake; reduce.
+		local exec = op_sem.new_state()
+		local f = subst_mod.fresh(exec.subst, "open")
+		local g = subst_mod.fresh(exec.subst, "open")
+		local r = subst_mod.fresh(exec.subst, "open")
+		local uf = types_mod.uvar(f) --[[: V5Type ]]
+		local ug = types_mod.uvar(g) --[[: V5Type ]]
+		local ur = types_mod.uvar(r) --[[: V5Type ]]
+		-- Use Const arg pattern (in Miller) then bind G later; simpler:
+		-- use a plain UVar arg (allowed in Miller) but emit CHKT BEFORE F
+		-- is rigid — wait, Miller succeeds when F is uvar and args are
+		-- uvar.  We want a case where Miller FAILS but downstream still
+		-- rigidifies F.  Use App arg.
+		local app_arg = types_mod.app(ug, int_ty) --[[: V5Type ]]
+		op_sem.emit(exec, op_sem.chkt(uf, { app_arg }, ur, prov("chkt-first")))
+		op_sem.emit(exec, constraint_mod.eq(uf, maybe_lambda, prov("F=Maybe-later")))
+		op_sem.run(exec)
+		-- After wake & reduce: ?r should be Record{tag:string, val: App(?G, int)}.
+		local rr_exec = op_sem.resolve(exec, r)
+		local expected = types_mod.record({ tag = string_ty,
+			val = types_mod.app(types_mod.uvar(g), int_ty) }) --[[: V5Type ]]
+
+		T.ok(op_sem.error_count(exec) == 0, "exec resolves cleanly after wake")
+		T.ok(walk_equal(rr_exec, expected), "exec ?r reduces to Maybe-of-App(?G,int)")
+		-- Reactivations may be 0 if HOUnify never made it to inert before
+		-- the rigidifying CEq fired (FIFO ordering matters); but the wake
+		-- path is exercised in fixture 12b below.
+	end)
+end)
+
+-- ─── Fixture 12b: HOUnify actually parks then wakes (interleaved) ──────
+-- Force the HOUnify into inert by interposing constraints that drain the
+-- worklist between the CHKT and the rigidifying CEq.
+
+T.describe("op_sem parity: fixture 12b — HOUnify parks then wakes", function()
+	T.it("HOUnify reaches inert; subsequent CEq rigidifies head; reactivation", function()
+		local int_ty = types_mod.const("number") --[[: V5Type ]]
+		local string_ty = types_mod.const("string") --[[: V5Type ]]
+		local var0 = types_mod.var(0) --[[: V5Type ]]
+		local maybe_body = types_mod.record({ tag = string_ty, val = var0 }) --[[: V5Type ]]
+		local maybe_lambda = types_mod.lambda("*", maybe_body) --[[: V5Type ]]
+
+		local exec = op_sem.new_state()
+		local f = subst_mod.fresh(exec.subst, "open")
+		local g = subst_mod.fresh(exec.subst, "open")
+		local r = subst_mod.fresh(exec.subst, "open")
+		local uf = types_mod.uvar(f) --[[: V5Type ]]
+		local ug = types_mod.uvar(g) --[[: V5Type ]]
+		local ur = types_mod.uvar(r) --[[: V5Type ]]
+		local app_arg = types_mod.app(ug, int_ty) --[[: V5Type ]]
+		-- Emit only the CHKT first; run to quiescence (HOUnify parks).
+		op_sem.emit(exec, op_sem.chkt(uf, { app_arg }, ur, prov("chkt-1")))
+		op_sem.run(exec)
+		-- Now HOUnify should be in inert + an error reported by S-Quiesce.
+		-- We continue: emit the rigidifying CEq, re-run.  The hounify is
+		-- inert; binding ?F via wake_head should reactivate it.
+		local errs_before = op_sem.error_count(exec)
+		op_sem.emit(exec, constraint_mod.eq(uf, maybe_lambda, prov("F=Maybe-later")))
+		op_sem.run(exec)
+		-- Reactivation count should now be at least 1 (HOUnify woken).
+		T.ok(exec.reactivations >= 1, "HOUnify reactivated after head rigidified")
+		-- ?r should resolve to the reduced shape.
+		local rr_exec = op_sem.resolve(exec, r)
+		local expected = types_mod.record({ tag = string_ty,
+			val = types_mod.app(types_mod.uvar(g), int_ty) }) --[[: V5Type ]]
+		T.ok(walk_equal(rr_exec, expected), "?r reduces to Maybe-of-App(?G,int) after wake")
+		-- Note: errs_before includes the T-HOUnify-Stuck from first
+		-- quiescence; the second run additionally re-runs hounify but it
+		-- now resolves cleanly (no extra error from the re-run path).
+		local _ = errs_before
+	end)
+end)
+
+-- ─── Fixture 13: HOUnify never resolves (ambiguous to quiescence) ──────
+-- A standalone CHKT with App arg and nothing ever rigidifies ?F.
+
+T.describe("op_sem parity: fixture 13 — HOUnify never resolves", function()
+	T.it("standalone CHKT outside Miller, ?F never rigidifies — ambiguous", function()
+		local int_ty = types_mod.const("number") --[[: V5Type ]]
+
+		local exec = op_sem.new_state()
+		local f = subst_mod.fresh(exec.subst, "open")
+		local g = subst_mod.fresh(exec.subst, "open")
+		local r = subst_mod.fresh(exec.subst, "open")
+		local uf = types_mod.uvar(f) --[[: V5Type ]]
+		local ug = types_mod.uvar(g) --[[: V5Type ]]
+		local ur = types_mod.uvar(r) --[[: V5Type ]]
+		local app_arg = types_mod.app(ug, int_ty) --[[: V5Type ]]
+		op_sem.emit(exec, op_sem.chkt(uf, { app_arg }, ur, prov("orphan-chkt")))
+		op_sem.run(exec)
+
+		local found = false
+		for i = 1, #exec.errors do
+			local e = exec.errors[i]
+			if e ~= nil and e.rule == "T-HOUnify-Stuck" then found = true end
+		end
+		T.ok(found, "exec reports T-HOUnify-Stuck at quiescence")
+	end)
+end)
+
 -- ─── Fixture 8 (optional): row variable narrowing suppression ──────────
 -- Per the task brief and log item 7's soundness floor: narrowing on a
 -- discriminant suppressed when a row variable affects the path.  Row
