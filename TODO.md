@@ -2,6 +2,14 @@
 
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
 
+## Typechecker v5 follow-ups
+
+- [ ] **Exhaustive prior-session mining.** Walk every JSONL in `~/.claude/projects/-home-me-git-rhizone-crescent/` for insights on typechecker decisions, mechanisms tried, frustrations, unwritten conclusions. Earlier session-history agent did a sampled pass (5 multi-session arcs identified, see `docs/typechecker-v5-research-report.md` §2); exhaustive pass is owed. Particular value: scheduler-shaped problems, mechanisms previous attempts found load-bearing vs accidental. **High prio.**
+- [ ] **Pre-stable: adversarial missed-generalisation eval** (v5 item 6 follow-up). Generate Lua snippets that the no-level-lowering discipline (Lean-style) rejects but OCaml/Rémy lowering would accept. Classify by idiomatic/rare/pathological. Revisit lowering as a perf opt if idiomatic patterns are common. Not blocking op-sem; checked before v5 declared stable.
+- [ ] **Pre-stable: lazy De Bruijn shift experiment** (v5 item 2 follow-up). After everything else stable, benchmark lazy-shift (Lean/Coq sliding-window cache) vs the v5.0 eager-shift baseline. Low prio.
+- [ ] **Pre-stable: circular `require` corpus check.** v5 rejects circular `require` at typecheck. Grep `lib/` for circular patterns. If any are load-bearing (not incidental), revisit before declaring v5 stable. Likely fine — circular require is an antipattern.
+- [ ] **Post-v5.0: investigate `setmetatable(t, nil)` support** (v5 item 5 backlog). Medium prio. Sandboxing is the strongest use case but is served by the fresh-table pattern (`local clean = {}; for k,v in pairs(env) do clean[k] = v end`). v5.x decision may be "document fresh-table as canonical sandboxing idiom and never support setmetatable(t, nil)." If supporting it: open question whether monotone substitution can be preserved.
+
 ## Platform isolation migration (mandatory, not eventual)
 
 Architectural reframing settled this session: capabilities are the

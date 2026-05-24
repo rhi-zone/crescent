@@ -328,3 +328,190 @@ The remaining 4 severe items are concrete language-coverage rules: De Bruijn shi
 ### Next entry point
 
 Walkthrough item 1 / dependency root: representation question — De Bruijn shift discipline + split of solver-tvar identity from bound-var levels. Most other severe items reference levels; resolve representation first.
+
+---
+
+## 2026-05-22 — Severe item 2 closed: De Bruijn shift + tvar identity split
+
+**Decision (user).**
+
+Type AST splits two distinct entities:
+- **`UVar(TVarId)`** — solver tvar; gensym ID, never shifts. Provenance attaches here (1:1 mapping UVar ↔ source name).
+- **`Var(LvlIdx)`** — De Bruijn bound var inside type lambdas; shifts under β.
+
+Operations: `shift(d, body)` walks `body` and increments every `Var(i)` by `d`. `instantiate(body, args)` substitutes `args[i]` for `Var(i)` while shifting nested binders. `UVar` is opaque to both.
+
+**Eager shift on bind** for v5.0 — keeps substitution table flat and reasoning simple. Lazy-shift (Lean/Coq sliding-window cache) deferred as a future low-priority experiment after everything's stable; revisit if benchmarks show shift cost is hot.
+
+Provenance for error rendering: free `UVar`s render via gensym↔name table; bound `Var(LvlIdx)`s render by walking back to the binder's introducer name via the rendering scope context.
+
+Mirrors Lean's metavariable + expression-with-bvars discipline. Cited as Lean's `instantiate` primitive — ~150 LOC in our shape.
+
+---
+
+## 2026-05-23 — Severe item 6 closed: tvars don't change level
+
+**Decision (user).** Option (C): each tvar gets its level at creation; the level never changes. Generalisation at scope-exit closes over tvars whose creation-scope is the current scope or deeper. Mirrors Lean's metavariable discipline.
+
+**Rejected alternatives.**
+- (A) OCaml/Rémy: level lowering on unification with bookkeeping to prevent skolem escape. Reactive; one failure mode is F4. Rejected on A1 (soundness floor).
+- (B) Defer level-lowering inside open CImpls. Postpones the bookkeeping but doesn't remove the failure mode.
+
+**Trade accepted.** Missed-generalisation in edge cases where a tvar legitimately could be generalised but its creation-scope was already outer. User must hoist or annotate. Per the analogous trade in item 2: revisit only if benchmarks show real cost.
+
+**Owed follow-up (commitment).** Before declaring v5 stable, run an adversarial corpus generation pass to find real-world missed-generalisation cases. Generate Lua snippets that the (C) discipline rejects but (A) would accept; classify by whether they're idiomatic, rare, or pathological. If idiomatic patterns are common, revisit (A) as an optimisation. Tracked as a follow-up item; not blocking op-sem.
+
+**Soundness gap F4 closed by construction.** No level-lowering ⇒ no skolem escape via level race. CImpl skolem invariants follow from tvar identity discipline (item 2's gensym IDs).
+
+---
+
+## 2026-05-23 — Severe item 8 closed: worklist discipline deferred to implementation
+
+**Decision (user).** Specific scheduler discipline (FIFO vs LIFO, exact head-rigidity wake-up semantics, fairness guard) is too speculative to settle on paper. **Defer to implementation; document the experience via experiment logs as the prototype reveals what's hard.**
+
+**Framework agreed** (no decision needed at this layer):
+- Tvar-indexed multimap of parked constraints. Wake on tvar binding.
+- Separate parked map for HOUnify-style "wake on head rigidity" (matches item 4).
+- Worklist core is ~500 LOC; the performance attacker's recommended prototype is the right falsifiability gate.
+
+**Open at implementation time**: FIFO vs LIFO over ready set; whether fairness needs an explicit guard; how to detect a wake-up bug (parked constraint whose watch-tvars are all bound but didn't fire); whether to add priority queueing as a perf opt later. Each gets a log entry under `docs/perf/log.md` or `docs/typechecker-v5-log.md` as the prototype shapes them.
+
+**Owed follow-up.** Exhaustive mining of prior session JSONLs in `~/.claude/projects/-home-me-git-rhizone-crescent/` for insights on scheduler-shaped problems and what mechanisms previous attempts found load-bearing. The session-history agent earlier this session did a sampled pass (5 arcs); exhaustive mining is a separate, longer task. Added to root `TODO.md` (high prio, permanent doc for everyone to read).
+
+---
+
+## 2026-05-23 — Severe item 1 closed: per-tvar phase bit as part of binding
+
+**Decision (user).** Yes — add `Phase = Open | Sealed` as part of the substitution's binding shape, not a side-channel.
+
+**Substitution shape.** `TVarId → (Type, Phase)`. A tvar bound to `Table[R]` with `Phase=Open` means the row R may still grow; `Phase=Sealed` means R is final and method dispatch is permitted.
+
+**Constraint rules.**
+- `CTableOpen(t)` introduces `t ↦ (Table[{}], Open)`.
+- `CTableSet(t, k, v)` requires `Phase=Open`; extends R; phase stays Open.
+- `CTableSeal(t, μ)` flips Phase to Sealed; binds metatable type.
+- `CMethodCall(t, m)` requires `Phase=Sealed`. Parks until the seal fires.
+- `CTableSet` on Sealed → A1 reject ("can't mutate sealed table").
+
+**Why this isn't a side-channel.** Phase is part of the binding itself — same data shape that's the substrate's single source of truth (per item 2). Not a parallel mechanism (no B5/B6 violation).
+
+**Open at implementation time.** Exact wake-up shape when Phase flips; whether CTableSet on Sealed is immediate reject or parked-error-at-quiescence; how to report.
+
+**Soundness gap V1 (composition attacker) closed.** Phase=Sealed precondition on CMethodCall is the ordering invariant the scheduler lacked.
+
+---
+
+## 2026-05-23 — Severe items 3, 4, 8 collapse: no cycle detection
+
+**Decision (user).** Drop cycle detection from the solver design. Items 3 (module-level fixpoint), 4 (wait-graph SCC for HOUnify mutual wait), 8 (worklist discipline as separately-specified ordering) collapse into a single simpler design.
+
+**Substrate semantics.**
+- Worklist of constraints + inert set + monotone union-find substitution. No parked-on-event map; no wait-graph; no SCC computation.
+- Pop a constraint from worklist. Try to make progress against current substitution. If progress: extend substitution, emit any new constraints to worklist, re-add affected inert constraints to worklist. If no progress: add to inert.
+- **Quiescence = worklist empty.** That's the whole termination rule.
+- At quiescence, every inert constraint is an error. Each reports its own stuck-ness.
+
+**Circular `require` is a typecheck-time error.** Modules typecheck in topological order; cycles are rejected with a "restructure your modules; consider factoring shared types into a third module" diagnostic. Lua allows circular require at runtime; v5 doesn't. Corpus impact: presumed small (circular require is an antipattern even in untyped Lua); confirm pre-stable via grep.
+
+**Trade explicitly accepted.**
+- Some programs that would have typechecked with a fixpoint-over-modules don't anymore. User restructures.
+- Mutually-ambiguous HOUnify constraints (e.g. `?F<?G<int>>` + `?G<?F<int>>`) produce two `ambiguous` errors instead of one `cycle` error. Mitigation in the error renderer: when emitting an ambiguous-inert error, name other inert constraints whose progress would have unstuck this one. Recovers ~80% of cycle diagnostic info without computing SCCs.
+
+**Wins.**
+- Termination story is one rule: worklist empty.
+- Spec shrinks. One named concept (`wait-graph SCC`) eliminated. The "two-tier quiescence" (module-group / CImpl / core) becomes "just quiescence."
+- Diagnostic for circular `require` is *better* without — "restructure" beats "here's an inferred fixpoint."
+
+**Aligns crescent's solver lineage with Lean's elaboration discipline** rather than GHC's wait-graph-style inert set. Both are SOTA; the Lean lineage favours simplicity over expressivity at the cycle margin.
+
+**Owed pre-stable check.** Grep `lib/` for circular `require` patterns. If any are load-bearing (vs incidental), revisit before declaring v5 stable. Added to root `TODO.md`.
+
+### Severe items remaining
+
+Items 5 (`setmetatable(t, nil)`), 7 (multi-return into row). Both concrete language rules, smaller surface than the ordering questions.
+
+---
+
+## 2026-05-23 — Severe item 5 closed: unconditionally disallow `setmetatable(t, nil)`
+
+**Decision (user).** Unconditional reject. No carve-out for Open-phase tables. The type of `setmetatable`'s second argument is `Table`, not `Table | nil`.
+
+**Mechanism.** Stdlib types declare `setmetatable : <T, M: Table>(T, M) -> Sealed<T, M>`. Pass `nil` → type error at the call site. Same shape any other type mismatch takes.
+
+**Diagnostic.** "cannot pass `nil` to `setmetatable`; v5.0 does not support metatable clearing. See backlog item."
+
+**Trade.** Stricter than necessary on Open-phase tables (clearing a non-existent metatable is sound) but simpler spec: one rule, no exceptions. Conforms to the v5 frame of "simpler invariants compound over decades."
+
+**Sandboxing power preserved via fresh-table pattern.** Sandboxing IS the strongest real use case for `setmetatable(t, nil)` (e.g., Scribunto, LuaSandbox patterns: build env inheriting trusted globals, then strip prototype before exposing to untrusted code). The fresh-table alternative serves it without `setmetatable(t, nil)`:
+```lua
+local clean = {}
+for k, v in pairs(env) do clean[k] = v end
+provide_to_untrusted(clean)
+```
+Arguably safer — no transient state where metatable is partially stripped. v5's rejection nudges sandbox code toward this pattern.
+
+**Backlog item (medium prio, bumped from low for sandboxing context).** Investigate whether `setmetatable(t, nil)` can be soundly supported in a future v5.x. Open: does it require breaking monotone substitution, treating each setmetatable call as creating a fresh table identity (contradicts Lua's "same `t` reference" semantics), or is there a third path? Note the fresh-table pattern is likely the actual answer — the v5.x decision may be "yes, document the fresh-table idiom as the canonical sandboxing pattern, never support setmetatable(t, nil)."
+
+**Soundness gap F2 (soundness attacker) closed by rejection.**
+
+---
+
+## 2026-05-23 — Severe item 7 closed: multi-return union semantics + strong-but-sound narrowing
+
+**Decision (user).** Union of branches for multi-return; strong narrowing for the resulting pseudo-discriminated-unions; **no narrowing when a row variable affects the narrowing path** (soundness floor).
+
+**Return-type unification rule.** A function with multiple return statements of varying arity has its return type unified as a max-length tuple where each component is the union of contributions across branches, with `nil` filling missing-arity branches. Concretely:
+- branches `return 1, 2` and `return 3` unify as `(int, int | nil)`.
+- branches `return ok, val` and `return nil, msg` unify as `(ok_type | nil, val_type | msg_type)`.
+
+**Multi-assignment rule.** `local x, y, z = f()` and `t.x, t.y = f()` types each LHS position from the corresponding tuple component. Missing positions bind `nil`.
+
+**Narrowing rule (strong-but-sound).** Flow-typing narrows aggressively on closed pseudo-discriminated-unions:
+- `if t.y then ... end` narrows `t.y : int | nil` to `int` in the branch. Standard A8/A2 discipline.
+- `if t.tag == "a" then ...` narrows a union of records discriminated by `tag` to the matching branch. Standard.
+- `assert(t.y)` narrows post-assert. Standard.
+
+**Soundness floor**: narrowing is suppressed when a **row variable** affects the narrowing path. Specifically: if the type being narrowed contains a row variable (an open row that may be extended), narrowing on a discriminant field does not commit the type narrower — because the same discriminant value might be inhabited by row extensions the typechecker can't see. The narrowed binding falls back to the original type.
+
+Concrete example of the soundness floor:
+```lua
+function f<R>(x: R extends {tag: "a"}) ...   -- R is open
+if x.tag == "a" then
+  -- x is NOT narrowed; x stays at type R extends {tag:"a"}.
+  -- (in a closed-row context, narrowing would commit; here it can't.)
+end
+```
+
+**Cost.** Some idioms that would narrow under row-polymorphism don't. Mitigation: users can close the row at the binding site (concrete record type) and narrowing fires normally.
+
+**Soundness gap F10 (soundness attacker) closed by union semantics.**
+
+---
+
+## 2026-05-23 — All 8 severe items closed
+
+Walkthrough complete. Items 1, 2, 3, 4, 5, 6, 7, 8 all resolved:
+
+| Item | Resolution |
+|---|---|
+| 1 | Per-tvar `Phase = Open \| Sealed` as part of substitution binding |
+| 2 | De Bruijn levels for bound vars + gensym `UVar` for solver tvars; eager shift |
+| 3, 4, 8 | Collapse: no cycle detection; worklist + inert set + monotone substitution; circular `require` rejected |
+| 5 | `setmetatable(t, nil)` unconditionally rejected; sandboxing served by fresh-table pattern |
+| 6 | Tvars don't change level (Lean discipline); no Rémy lowering |
+| 7 | Multi-return unified as tuple-of-unions with nil padding; narrowing strong but suppressed on row variables |
+
+**Architecture as it now stands:**
+
+- **Type AST** — `Type ::= UVar(TVarId) | Var(LvlIdx) | App | Lambda | ...` with `UVar` opaque to β.
+- **Substitution** — `TVarId → (Type, Phase)`, monotone, single source of truth.
+- **Constraints** — reified ADT with provenance, Wanted/Given flavour, including `CEq`, `CSub`, `CInst`, `CHKT`, `CEffect`, `CRow`, `CImpl`, `CTableOpen`, `CTableSet`, `CTableSeal`, `CMethodCall`, `HOUnify`, `CMultiReturn`.
+- **Scheduler** — worklist + inert set + substitution. Pop, try progress, extend substitution or add to inert, re-add affected inert to worklist. Quiescence = worklist empty. Inert at quiescence = errors.
+- **Narrowing** — strong flow-typing on closed unions; suppressed on row variables.
+- **Cross-module** — modules typecheck in topological order; circular `require` rejected.
+
+### Next entry point
+
+Prototype perf experiment. ~500 LOC worklist core. Feed synthetic constraints derived from `lib/std/init.lua` (record-heavy) and `lib/test/init.lua` (annotation-heavy). Measure: wall time, live heap at quiescence, constraint-reactivation count. Targets per perf attacker: <500ms wall on either file, <2 MB heap, <5× reactivations vs emissions. If those hold, the architecture's perf claims are real; if not, allocation strategy needs work before op-sem.
+
+After the prototype passes its gate: operational-semantics writing (H7: parallel impl + docs with parity tests).
