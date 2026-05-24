@@ -853,3 +853,182 @@ Either:
 3. Begin gen-pass for the v5.0 minimal core (CEq / CSub / Construction-
    phase / CInst / CHKT all landed now — enough surface for a non-
    trivial fixture set against real Lua source).
+
+---
+
+## 2026-05-24 — Session: independent-encoding parity discharged
+
+### Question entering session
+
+Discharge the "stronger-parity status" backlog: build a second op-sem
+interpreter (`op_sem_alt.lua`) transcribed independently from
+`docs/typechecker-v5-operational-semantics.md` WITHOUT reading
+`op_sem.lua`, then run both interpreters against the existing parity-
+test fixtures and compare.
+
+Backlog item carried through two op-sem entries; the agent who built
+each cycle flagged it as owed.  Discharge condition: both interpreters
+produce equal final substitutions, equal error sets, equal inert-set
+sizes on every fixture — OR document divergences for orchestrator
+adjudication.
+
+### Methodology
+
+1. Read only: spec doc, `lib/type/experiments/v5_perf/{types,subst,
+   constraint,variance}.lua`, the parity test's fixture shapes (no
+   rule bodies), and the public state/constraint-tag set advertised
+   by `op_sem.lua`'s module-level signatures (function names + the
+   `M.resolve` 7-line body, which contains no rule logic).
+2. Build `lib/type/static-v5/op_sem_alt.lua` (~990 lines): all ~30
+   labelled rules with the names from the doc's cross-reference table,
+   plus dispatch helpers `step_ceq`/`step_csub`/`step_tset`/
+   `step_mcall`/`step_chkt` and the solver loop.
+3. Build `lib/type/static-v5/op_sem_independent_parity_test.lua`
+   (~660 lines): 17 fixture variants spanning every constraint shape
+   and rule family, each running both interpreters on identical
+   constraint sequences and comparing.
+
+### Verdict
+
+**PASS** — no divergences across 17 fixtures, 85 assertions.
+
+```
+bin/cr test lib/type/static-v5/
+  pass  lib/type/static-v5/op_sem_independent_parity_test.lua  (85 passed)
+  pass  lib/type/static-v5/op_sem_parity_test.lua              (61 passed)
+2 passed, 0 failed, 2 total  (146 assertions)
+```
+
+Fixtures exercised (all PASS, no divergence found):
+1. CEq basic (T-CEq-Bind-L, T-CEq-UU)
+2. Construction phase (T-CTOpen, T-CTSet-Open-Extend, T-CTSeal)
+3. CMethodCall (T-CMCall-Open-Stuck, T-CMCall-Sealed-Field, wake)
+4. setmetatable(nil) reject (T-CEq-Const)
+5. let-poly CInst (T-CInst, repeated instantiation freshness)
+6. multi-return scalar stand-in
+7. empty constraint set (S-Quiesce trivial)
+9. CHKT Reduce for Functor<Maybe> (T-CEq-Bind-L + T-CHKT-Reduce)
+10. CHKT Miller pattern (T-CHKT-Miller, identity constructor)
+11. HOUnify ambiguity (T-CHKT-Park + T-HOUnify-Stuck)
+12. HOUnify head-rigidification wake (T-CHKT-Park + S-Wake-Head + T-CHKT-Reduce)
+13. HOUnify never resolves (T-HOUnify-Stuck)
+14. CSub-Arrow decomposition (contra-args + co-rets)
+15a/b/c. CSub-App-Var dispatch (co / inv-default / refl fast path)
+16a/b/c. CSub-Record-Width (width ok / missing field / invariant field)
+17. Arrow contravariance reject (function-of-Dog </: function-of-Animal)
+18. T-CSub-TVar routes to CEq
+
+### Discrepancies found
+
+**None.**  Both interpreters produced bit-for-bit identical (under
+`types.equal`) tvar resolutions, equal error counts, equal error rule-
+label multisets, and equal inert-set sizes at quiescence on every
+fixture.
+
+This is meaningful evidence that:
+1. The spec doc's rule definitions are unambiguous enough that a
+   second agent reading only the doc reproduces the executable form.
+2. `op_sem.lua` correctly implements those rules (or implements the
+   same misreading as the doc, which the doc-vs-impl parity test
+   already catches).
+3. No rule has silent disagreement with itself across the two paths.
+
+### Lessons learned about the doc's rules
+
+**Unambiguous (faithful transcription was mechanical):**
+- T-CEq-* family: tag-driven, decomposition trivially yields the
+  emitted constraints.
+- T-CSub-Arrow contra/co orientation: doc gives explicit `CSub(B_i,
+  A_i)` formula.
+- T-CTOpen idempotency: doc's "If `?t` already has a binding, T-CTOpen
+  is a no-op" is unambiguous.
+- T-CMCall-Open-Stuck → T-CMCall-Sealed-Field wake-and-step cycle:
+  S-Wake fires watchers, parked CMethodCall re-enters W with sealed
+  phase visible, T-CMCall-Sealed-Field fires.
+
+**Required interpretation (filled per the spec doc's surrounding
+prose, NOT per peeking at op_sem.lua):**
+- **Dispatch priority for CEq.**  Doc lists rules in order but
+  doesn't formally give a dispatch tree.  Interpreted: UU before
+  Bind-L/R, both before tag-equal decomposition, mismatch as fallback.
+  This matches what the rule names imply and what the spec's "If `a =
+  b`: discharged with no change" hints.
+- **T-CSub priority** between Refl / TVar / Arrow / Record / App-Var /
+  App-Struct / Union / Const / Mismatch.  Chose: TVar (uvar present)
+  before Refl (types.equal), then union-side dispatch, then
+  arrow/record/app/const, mismatch as fallback.  Doc doesn't formally
+  enforce this; the soundness sketch is consistent with the priority
+  but doesn't force it.
+- **T-CTSet dispatch tree.**  Spec gives four rules (Open-Fresh,
+  Open-Extend, Open-Equate, Sealed-Reject) keyed on phase and binding
+  state; the dispatcher's `if/elseif` cascade was an obvious
+  reconstruction.
+- **T-CHKT-Reduce chain peel.**  Spec says "iter-instantiate(Lambda…
+  Lambda body, args)" and notes the substrate's instantiate peels one
+  binder at depth 0.  Implemented: walk down up to `length(args)`
+  binders, peeling one per arg; emit CEq against `?result` with the
+  remainder.  Matches op_sem (verified by parity).
+
+**Areas where the spec doc has explicit gaps (per F12), confirmed not
+to bite the test fixtures:**
+- Restricted Miller fragment (UVar or Const args only) — covered.
+- Kind inference / lambda-arity check — fixture 9 happens to have a
+  matching arity.
+- Eta-equivalence — no fixture exercises.
+- Nested-lambda capture-avoiding abstraction — no fixture exercises.
+- HOUnify residue provenance chaining — no fixture exercises.
+
+### Cost
+
+- Transcription time: ~45 min for op_sem_alt.lua (rules + dispatchers
+  + solver loop), most of which was wrestling the v4 typechecker's
+  narrowing/firewall behaviour (V5Type cast hints needed on every
+  deref/walk call, nil-guard locals before passing array-indexed
+  values to constraint constructors).  The typechecker hardening is a
+  separate observation — op_sem.lua hits the same patterns and likely
+  uses similar workarounds.
+- Parity test: ~15 min (mostly repetitive fixture mirroring).
+- "Wanted to peek" moments: 2.  Both resolved by re-reading the spec
+  doc more carefully:
+  1. Whether `bind_and_wake` should call both `wake` and `wake_head` —
+     spec § "S-Wake-Head" implementation note states "every binding
+     rule that extends σ now calls both `wake(?t)` (normal) AND, when
+     the bound RHS has a rigid (non-uvar) head, `wake_head(?t)`".
+     Implemented per that note.
+  2. Whether T-CMCall-Open-Stuck should re-emit a CMethodCall
+     constraint object into inert or some other shape.  Spec § "S-Park"
+     hypothesis "blockers(C) = B" and the inert-set semantics make
+     clear the original constraint (or an equivalent) is parked.
+     Used `constraint_mod.method_call` to construct a fresh-id
+     constraint for parking.
+
+### Implications
+
+The F2 "spec is runnable" check is now exercised at full strength.
+A wrong rule in op_sem.lua would diverge from op_sem_alt.lua on at
+least the fixture(s) exercising that rule, and the parity test would
+fail with a specific "fixture N diverges; op_sem=X, op_sem_alt=Y"
+message.
+
+The stronger-parity caveat that has carried through every op-sem
+entry since the original op-sem landed (~`#624` line in this log) is
+hereby closed for the v5.0 minimal core.
+
+### Open future work (NOT addressed by this session)
+
+1. Re-run this independent-parity check when CRow / CEffect / CImpl
+   extensions land.  Each adds new rule labels; each needs its own
+   pair of fixtures + cross-interpreter assertions.
+2. Property-based parity: generate random constraint sequences and
+   run both interpreters.  Catches rule-priority order divergence
+   that fixed fixtures miss.
+3. Independent third interpretation by yet another agent, if
+   skepticism remains that the two are correlated through shared
+   reading of the doc.  Cost-benefit unclear at this point.
+
+### Next entry point
+
+Same as the prior entry: CRow op-sem extension, OR CImpl op-sem
+extension, OR begin gen-pass for the v5.0 minimal core.  The op-sem
+foundation is now corroborated by two independent encodings — a
+stronger basis to build on.
