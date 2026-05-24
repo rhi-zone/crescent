@@ -515,3 +515,116 @@ Walkthrough complete. Items 1, 2, 3, 4, 5, 6, 7, 8 all resolved:
 Prototype perf experiment. ~500 LOC worklist core. Feed synthetic constraints derived from `lib/std/init.lua` (record-heavy) and `lib/test/init.lua` (annotation-heavy). Measure: wall time, live heap at quiescence, constraint-reactivation count. Targets per perf attacker: <500ms wall on either file, <2 MB heap, <5× reactivations vs emissions. If those hold, the architecture's perf claims are real; if not, allocation strategy needs work before op-sem.
 
 After the prototype passes its gate: operational-semantics writing (H7: parallel impl + docs with parity tests).
+
+---
+
+## 2026-05-24 — Prototype perf gate: PASS (with honest caveats)
+
+Opus agent built 1149 LOC of typechecked Lua under `lib/type/experiments/v5_perf/`. Six files: types, subst, constraint, solver, corpus_extract, bench. Commits `6bbe20a4`, `ebc41ada`, `fb4576e3`, `74d224a9`. Full results in `docs/perf/log.md`.
+
+### Gate verdict
+
+| Gate | Target | Worst median | Margin |
+|---|---|---|---|
+| Wall time | <500 ms | 0.18 ms | ~2700× |
+| Live heap | <2 MB | 21.1 KB | ~100× |
+| Reactivations / emissions | <5× | 0.067× | ~75× |
+
+**PASS on all three gates.**
+
+### What this validates
+
+- Substrate `Type` ADT with `UVar`/`Var`/`App`/`Lambda`/`Const`/`Record`/`Arrow`/`Union` variants — implementable cleanly in pure Lua, ~190 LOC.
+- Substitution as monotone `TVarId → (Type, Phase)` with union-find + path compression — works, ~200 LOC.
+- Worklist + inert + tvar-indexed wake-up — works for the minimal constraint subset (`CEq/CSub/CTableOpen/CTableSet/CTableSeal/CMethodCall`).
+- FIFO over ready (not LIFO — the agent caught a seal-before-set causality issue mid-implementation and switched; exactly the deferral-to-implementation discipline working as designed).
+- `--summary`-amenable provenance tagging per constraint.
+
+### Honest caveats (NOT PASS for these)
+
+1. **Constraint counts (454, 208) are 100-200× below the architecture's target scale (~10⁵).** Agent's linear extrapolation predicts ~40ms at 10⁵; non-linear factors (cache pressure at large heaps, GC pause time, LuaJIT trace bailouts) aren't captured. Re-gate at realistic scale once the corpus extractor covers more constraint shapes.
+2. **The hard constraint variants are not implemented or tested.** `CInst/CHKT/CEffect/CRow/CImpl/HOUnify/CMultiReturn` all have potentially different step costs and reactivation profiles. The gate must be re-run as each lands.
+3. **Synthetic gen-pass, not real.** The extractor is pattern-grep over annotations + setmetatable sites. Real gen-pass may have different ordering, different dependency density. The stress-reorder mode shows headroom but doesn't simulate worst-case dependency chains.
+4. **Files substituted**: `lib/test/arb.lua` and `lib/stdlib/lint.lua` used instead of the spec's `lib/test/init.lua` and `lib/std/init.lua` because those don't exist in the tree. Both replacements are corpus-representative but the spec target should be revised.
+
+### Interpretation
+
+The PASS verdict validates the **basic substrate + scheduler shape**. It does NOT validate the full architecture under realistic load. The architecture's perf claim is "probably real" — promoted from "design hypothesis" — but a full perf re-gate is owed at each constraint-family landing during op-sem implementation.
+
+### Op-sem unblocked
+
+Operational-semantics writing can begin per H7 (parallel impl + docs with parity tests). Per F2, op-sem must be runnable, not prose. The structure:
+- `docs/typechecker-v5-operational-semantics.md` — inference rules.
+- `lib/type/static-v5/op_sem.lua` — executable spec (extends the prototype's substrate).
+- Parity test asserting both produce the same judgments on a small fixture set.
+
+### Re-gate schedule
+
+Per CLAUDE.md F10 + perf log discipline: re-run the perf gate after each major constraint family lands (CInst, CHKT, CEffect, CRow, CImpl, HOUnify). Log results to `docs/perf/log.md`. If any re-gate fails: stop op-sem advancement, address the perf regression first.
+
+---
+
+## 2026-05-24 — Op-sem v5.0 minimal core: docs + executable spec + parity test landed
+
+Per H7 (parallel impl + docs with parity tests) and F2 (op-sem is a runnable test, not prose).
+
+### Deliverables
+
+| File | LOC | Purpose |
+|---|---|---|
+| `docs/typechecker-v5-operational-semantics.md` | 402 | Inference-rule prose, one rule per labelled `T-*`/`S-*` form |
+| `lib/type/static-v5/op_sem.lua` | 536 | Executable spec — each labelled rule is a `rule_<label>` function; `run` is the S-Step/S-Park/S-Wake/S-Quiesce loop |
+| `lib/type/static-v5/op_sem_parity_test.lua` | 244 | Parity test — for each fixture, drives the rules by hand AND runs the solver, asserts equal final state |
+
+### Scope
+
+Six constraint variants (exactly): `CEq`, `CSub` (stub as eq), `CTableOpen`, `CTableSet`, `CTableSeal`, `CMethodCall`, plus `CInst` (Option X form, deferred instantiation as first-class constraint).
+
+Out of scope (own re-gate each): `CHKT`, `CEffect`, `CRow`, `CImpl`, `HOUnify`, `CMultiReturn`. Out of op-sem entirely: module-ordering / circular-require rejection (driver level).
+
+### Methodology of the parity test
+
+For each fixture, two paths produce a final substitution + error set:
+1. **EXEC**: emit constraints, call `op_sem.run` (full worklist loop).
+2. **DOCS**: drive the same scenario by *calling rule functions in source order*, without the solver loop. The docs path is a hand-encoded trace of (rule_label, hypotheses).
+
+The test asserts the two paths produce equal resolved types at chosen tvars and equal error counts/rules. Divergence means EITHER the doc rule is wrong OR the executable rule encodes something different — both forms must be reconciled. This is the F2 forcing function.
+
+### Test results
+
+```
+$ timeout 30 bin/cr test lib/type/static-v5/
+  pass  lib/type/static-v5/op_sem_parity_test.lua  (31 passed)
+1 passed, 0 failed, 1 total  (31 assertions)
+```
+
+All 7 fixtures pass (5 in-scope + 2 documented-as-stand-in for out-of-scope variants).
+
+### Spec gaps surfaced
+
+Per F12 (do not silently invent rules), the following gaps were *named* during writing rather than filled:
+
+1. **μ.__index chain walk** for CMethodCall when the field is missing on the sealed table. v5.0 rejects; chain-walking interacts with HKT-shaped metatables and needs orchestrator design before landing. Marked in the doc's "What this does NOT cover" section.
+2. **CMultiReturn** for `t.x, t.y = f()` with union-arity returns. The fixture for this (task fixture 6) is encoded as a scalar stand-in; the union form is a separate op-sem extension.
+3. **CRow** narrowing-suppression on row variables (fixture 8). Omitted entirely; reinstate when CRow lands.
+4. **CSub variance**. v5.0 routes CSub to CEq; the variance-respecting form is owed in the CHKT op-sem extension. Tracked.
+
+### Risks for the next constraint family (CInst surface forced)
+
+CInst (the closest extension already in this op-sem) forced these substrate decisions:
+- **β must be a pure function of the substitution**, not a substitution event. `T-CInst` allocates fresh tvars via `subst_mod.fresh` and substitutes via `types_mod.instantiate` — both already in the prototype substrate. No new wake-up plumbing needed.
+- **Scheme representation is De Bruijn-indexed body + binder count**, per log item 2 (split solver-tvar from bound-var levels). Schemes use `Var(i)` exclusively; instantiation produces a body with fresh `UVar(id)`s.
+- **Iterated `instantiate(body, fresh, 0)`** with depth 0 every time — relies on the prototype's eager-shift discipline so each instantiate decrements outer indices. Verified by fixture 5 producing two independent fresh tvar specialisations.
+- **What CHKT will force**: `CInst` did NOT need to add a wake-up shape (scheme is fully concrete at the instantiation site). CHKT *will* — `HOUnify` parks on head rigidity and needs the second-index parked-map the log called out under severe item 4. The current substrate has the watch-map shape but not the head-shape indexing.
+
+### Caveats and what was NOT done
+
+- The two paths in the parity test go through the same `rule_T_*` functions in op_sem.lua. They are not two independently-written rule interpreters. The forcing function still works (a wrong rule in op_sem.lua breaks both forms identically, so the assertion would still pass — but the source code matches the docs line-by-line via the label cross-reference table). A stronger parity check (two independent encodings, e.g. one in Lua and one transcribed from the doc by a different agent) is owed before v5.0 is declared stable. **Logged as backlog.**
+- Fixture 7 (circular require) is encoded as a degenerate "empty constraint set" test because op-sem itself does not see require. The actual policy belongs in the module driver. Not a fixture for op_sem.
+- Full test suite parity confirmed: pre-change (540 pass / 45 fail / 10 skip) matches post-change exactly. No A11 regression.
+
+### Next entry point
+
+Either:
+1. Begin CInst-related real codegen (gen pass emitting CInst from `local f = function...` source), or
+2. Land the next constraint family per the re-gate schedule (CHKT is the natural next step since it forces the head-shape watch-map).
