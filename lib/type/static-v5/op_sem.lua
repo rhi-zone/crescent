@@ -17,6 +17,7 @@
 local types_mod      = require("lib.type.experiments.v5_perf.types")
 local subst_mod      = require("lib.type.experiments.v5_perf.subst")
 local constraint_mod = require("lib.type.experiments.v5_perf.constraint")
+local variance_mod   = require("lib.type.experiments.v5_perf.variance")
 
 local M = {}
 
@@ -67,6 +68,7 @@ M.table_set   = constraint_mod.table_set
 M.table_seal  = constraint_mod.table_seal
 M.method_call = constraint_mod.method_call
 M.prov        = constraint_mod.prov
+M.variance    = variance_mod
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- State
@@ -326,12 +328,250 @@ local function step_ceq(st, ra, rb, prov)
 	return M.rule_T_CEq_Mismatch(st, ra, rb, prov)
 end
 
--- T-CSub-AsEq.
+-- ────────────────────────────────────────────────────────────────────────────
+-- T-CSub family (variance-respecting)
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- Per `docs/typechecker-v5-operational-semantics.md` § "Subtyping (variance-
+-- respecting)".  Declaration-site variance via `variance.lookup(name)`;
+-- default = invariant.  Soundness floor: record fields are invariant in
+-- v5.0 (CTableSet model — mutable fields can't be covariant).
+
+-- T-CSub-Refl.  Same type both sides under deref.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
-function M.rule_T_CSub_AsEq(st, a, b, prov)
-	M.emit(st, constraint_mod.eq(a, b, prov))
-	trace(st, "T-CSub-AsEq", "")
+function M.rule_T_CSub_Refl(st, a, b, prov)
+	if not types_mod.equal(a, b) then
+		err(st, "T-CSub-Refl", "precondition: types equal"); return "error"
+	end
+	trace(st, "T-CSub-Refl", "")
 	return "done"
+end
+
+-- T-CSub-TVar.  Either side is an unbound UVar — route to CEq.  v5.0
+-- discipline (no per-tvar bounds); v5.x will extend.
+--: (OpSemState, V5Type, V5Type, Provenance) -> string
+function M.rule_T_CSub_TVar(st, a, b, prov)
+	M.emit(st, constraint_mod.eq(a, b, prov))
+	trace(st, "T-CSub-TVar", "routed to CEq")
+	return "done"
+end
+
+-- T-CSub-Arrow.  Contra in args, co in rets.
+--: (OpSemState, V5Type, V5Type, Provenance) -> string
+function M.rule_T_CSub_Arrow(st, a, b, prov)
+	if a.tag ~= "arrow" or b.tag ~= "arrow" then
+		err(st, "T-CSub-Arrow", "precondition: both arrow"); return "error"
+	end
+	if #a.args ~= #b.args or #a.rets ~= #b.rets then
+		err(st, "T-CSub-Arrow", "arity mismatch"); return "error"
+	end
+	for i = 1, #a.args do
+		local av, bv = a.args[i], b.args[i]
+		if av ~= nil and bv ~= nil then
+			-- contravariant in args: B_i <: A_i.
+			M.emit(st, constraint_mod.sub(bv, av, prov))
+		end
+	end
+	for i = 1, #a.rets do
+		local av, bv = a.rets[i], b.rets[i]
+		if av ~= nil and bv ~= nil then
+			-- covariant in rets: A_i <: B_i (i.e. R_a <: R_b).
+			M.emit(st, constraint_mod.sub(av, bv, prov))
+		end
+	end
+	trace(st, "T-CSub-Arrow", "")
+	return "done"
+end
+
+-- T-CSub-Const-Var.  Two same-named Consts; degenerate (no params on AST).
+--: (OpSemState, V5Type, V5Type, Provenance) -> string
+function M.rule_T_CSub_Const_Var(st, a, b, prov)
+	if a.tag ~= "const" or b.tag ~= "const" then
+		err(st, "T-CSub-Const-Var", "precondition: both const"); return "error"
+	end
+	if a.name ~= b.name then
+		err(st, "T-CSub-Const-Var",
+			"const name mismatch: " .. a.name .. " vs " .. b.name)
+		return "error"
+	end
+	trace(st, "T-CSub-Const-Var", a.name)
+	return "done"
+end
+
+-- Walk a left-associated App chain to extract the head Const name and its
+-- argument list (innermost-first reversal — args in source order).
+-- Returns (head_name, args[]) where head_name is nil if the head is not
+-- a Const.  Using head name (string) instead of returning the Const itself
+-- sidesteps narrowing through the union return type.
+--: (V5Type) -> (string | nil, V5Type[])
+local function app_head_and_args(t)
+	local args = {} --[[: V5Type[] ]]
+	local cur = t
+	while cur.tag == "app" do
+		-- cur.f is the curried head; cur.a is the rightmost arg.
+		args[#args + 1] = cur.a
+		cur = cur.f
+	end
+	-- Reverse args so source-order matches (outermost App carries last arg).
+	local n = #args
+	local sorted = {} --[[: V5Type[] ]]
+	for i = 1, n do sorted[i] = args[n - i + 1] end
+	if cur.tag == "const" then return cur.name, sorted end
+	return nil, sorted
+end
+
+-- T-CSub-App-Var.  Two applications with matching named head — per-position
+-- variance dispatch.  Returns "miss" if heads aren't both Consts with the
+-- same name (caller falls to T-CSub-App-Struct).
+--: (OpSemState, V5Type, V5Type, Provenance) -> string
+function M.rule_T_CSub_App_Var(st, a, b, prov)
+	local ha, aa = app_head_and_args(a)
+	local hb, ab = app_head_and_args(b)
+	if ha == nil or hb == nil then return "miss" end
+	if ha ~= hb then
+		err(st, "T-CSub-App-Var",
+			"head mismatch: " .. ha .. " vs " .. hb)
+		return "error"
+	end
+	if #aa ~= #ab then
+		err(st, "T-CSub-App-Var",
+			"arity mismatch for " .. ha)
+		return "error"
+	end
+	for i = 1, #aa do
+		local xi, yi = aa[i], ab[i]
+		if xi ~= nil and yi ~= nil then
+			local v = variance_mod.at(ha, i)
+			if v == "co" then
+				M.emit(st, constraint_mod.sub(xi, yi, prov))
+			elseif v == "contra" then
+				M.emit(st, constraint_mod.sub(yi, xi, prov))
+			else
+				M.emit(st, constraint_mod.eq(xi, yi, prov))
+			end
+		end
+	end
+	trace(st, "T-CSub-App-Var", ha)
+	return "done"
+end
+
+-- T-CSub-App-Struct.  Non-Const head fallback: decompose under invariance.
+--: (OpSemState, V5Type, V5Type, Provenance) -> string
+function M.rule_T_CSub_App_Struct(st, a, b, prov)
+	if a.tag ~= "app" or b.tag ~= "app" then
+		err(st, "T-CSub-App-Struct", "precondition: both app"); return "error"
+	end
+	M.emit(st, constraint_mod.eq(a.f, b.f, prov))
+	M.emit(st, constraint_mod.eq(a.a, b.a, prov))
+	trace(st, "T-CSub-App-Struct", "")
+	return "done"
+end
+
+-- T-CSub-Record-Width.  Width subtyping with invariant fields.  Supertype
+-- (b) has fewer fields; each common field is required equal.
+--: (OpSemState, V5Type, V5Type, Provenance) -> string
+function M.rule_T_CSub_Record_Width(st, a, b, prov)
+	if a.tag ~= "record" or b.tag ~= "record" then
+		err(st, "T-CSub-Record-Width", "precondition: both record"); return "error"
+	end
+	for k, vb in pairs(b.fields) do
+		local va = a.fields[k]
+		if va == nil then
+			err(st, "T-CSub-Record-Width", "missing field " .. k)
+		elseif vb ~= nil then
+			-- Invariant: fields are mutable in v5.0 (per CTableSet model).
+			M.emit(st, constraint_mod.eq(va, vb, prov))
+		end
+	end
+	trace(st, "T-CSub-Record-Width", "")
+	return "done"
+end
+
+-- T-CSub-Union-L.  LHS is union: each branch subtypes RHS.
+--: (OpSemState, V5Type, V5Type, Provenance) -> string
+function M.rule_T_CSub_Union_L(st, a, b, prov)
+	if a.tag ~= "union" then
+		err(st, "T-CSub-Union-L", "precondition: a union"); return "error"
+	end
+	for i = 1, #a.xs do
+		local ai = a.xs[i]
+		if ai ~= nil then M.emit(st, constraint_mod.sub(ai, b, prov)) end
+	end
+	trace(st, "T-CSub-Union-L", "")
+	return "done"
+end
+
+-- T-CSub-Union-R.  RHS is union: LHS must exactly equal some branch.
+-- v5.0 simplification (no backtracking search).
+--: (OpSemState, V5Type, V5Type, Provenance) -> string
+function M.rule_T_CSub_Union_R(st, a, b, prov)
+	if b.tag ~= "union" then
+		err(st, "T-CSub-Union-R", "precondition: b union"); return "error"
+	end
+	for j = 1, #b.xs do
+		local bj = b.xs[j]
+		if bj ~= nil and types_mod.equal(a, bj) then
+			trace(st, "T-CSub-Union-R", "matched branch " .. tostring(j))
+			return "done"
+		end
+	end
+	err(st, "T-CSub-Union-R", "no branch matches LHS exactly (v5.0 limitation)")
+	return "error"
+end
+
+-- T-CSub-Mismatch.
+--: (OpSemState, V5Type, V5Type, Provenance) -> string
+function M.rule_T_CSub_Mismatch(st, a, b, prov)
+	err(st, "T-CSub-Mismatch", "sub kind mismatch: " .. a.tag .. " vs " .. b.tag)
+	return "error"
+end
+
+-- CSub dispatcher.  Order matters: Refl first (cheap fast path), then TVar
+-- (must precede shape dispatch — uvars masquerade as no tag here), then
+-- by tag.
+--: (OpSemState, V5Type, V5Type, Provenance) -> string
+local function step_csub(st, ra, rb, prov)
+	-- Refl fast path.
+	if types_mod.equal(ra, rb) then
+		return M.rule_T_CSub_Refl(st, ra, rb, prov)
+	end
+	-- TVar route.
+	if ra.tag == "uvar" or rb.tag == "uvar" then
+		return M.rule_T_CSub_TVar(st, ra, rb, prov)
+	end
+	-- Union dispatch (L takes priority over R; both can apply if both sides
+	-- are unions — emit per-branch sub from L, the recursive call will see
+	-- RHS-only-union on each branch).
+	if ra.tag == "union" then
+		return M.rule_T_CSub_Union_L(st, ra, rb, prov)
+	end
+	if rb.tag == "union" then
+		return M.rule_T_CSub_Union_R(st, ra, rb, prov)
+	end
+	-- Same-tag dispatch.
+	if ra.tag == rb.tag then
+		if ra.tag == "const" then
+			return M.rule_T_CSub_Const_Var(st, ra, rb, prov)
+		end
+		if ra.tag == "arrow" then
+			return M.rule_T_CSub_Arrow(st, ra, rb, prov)
+		end
+		if ra.tag == "record" then
+			return M.rule_T_CSub_Record_Width(st, ra, rb, prov)
+		end
+		if ra.tag == "app" then
+			local status = M.rule_T_CSub_App_Var(st, ra, rb, prov)
+			if status == "miss" then
+				return M.rule_T_CSub_App_Struct(st, ra, rb, prov)
+			end
+			return status
+		end
+		-- Var / lambda / etc.: fall back to equality.
+		M.emit(st, constraint_mod.eq(ra, rb, prov))
+		trace(st, "T-CSub-Struct", "fallback CEq for tag=" .. ra.tag)
+		return "done"
+	end
+	return M.rule_T_CSub_Mismatch(st, ra, rb, prov)
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -786,7 +1026,9 @@ function M.step(st, c)
 		return step_ceq(st, a, b, c.prov)
 	end
 	if c.tag == "csub" then
-		return M.rule_T_CSub_AsEq(st, c.a, c.b, c.prov)
+		local a = subst_mod.deref(st.subst, c.a) --[[: V5Type ]]
+		local b = subst_mod.deref(st.subst, c.b) --[[: V5Type ]]
+		return step_csub(st, a, b, c.prov)
 	end
 	if c.tag == "topen" then return M.rule_T_CTOpen(st, c.tv, c.prov) end
 	if c.tag == "tset"  then return step_tset(st, c) end
