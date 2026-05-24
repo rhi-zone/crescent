@@ -13,7 +13,7 @@ Six constraint variants, exactly:
 | Variant       | Purpose                                            |
 |---------------|----------------------------------------------------|
 | `CEq(a, b)`   | type equality (unification)                        |
-| `CSub(a, b)`  | subtyping (v5.0: routed to CEq; variance later)    |
+| `CSub(a, b)`  | subtyping (variance-respecting; see T-CSub-* family) |
 | `CTableOpen(?t)`              | introduce open empty record at ?t       |
 | `CTableSet(?t, k, v)`         | extend ?t's row with field k : v        |
 | `CTableSeal(?t, ?μ)`          | flip ?t to sealed, bind metatable ?μ    |
@@ -160,17 +160,163 @@ Domain mismatch (missing/extra field) ⇒ rejection.
     ──────────────────────────────────────────────  T-CEq-Occurs
        σ ⊢ CEq(τ_a, τ_b) ⇒ ⟨σ, ε, error("occurs")⟩
 
-### Subtyping
+### Subtyping (variance-respecting)
 
-**T-CSub-AsEq.** v5.0 stub: until variance lands (with CHKT), subtyping is
-equality.
+**Added 2026-05-24.** CSub was previously routed to CEq (T-CSub-AsEq), a
+documented stub.  This section replaces that stub with a variance-respecting
+dispatch.  The discipline is **declaration-site variance** (per H4 of the
+HKT picks): each named constructor carries a per-parameter variance list
+in the variance registry (`lib/type/experiments/v5_perf/variance.lua`),
+defaulting to **invariant** when undeclared (the sound default per the
+round-1 research report §3 — TypeScript-array unsoundness).
 
-    ───────────────────────────────────────────  T-CSub-AsEq
-    σ ⊢ CSub(a, b) ⇒ ⟨σ, [CEq(a, b)], done⟩
+Variance markers:
 
-(v5-specific. The variance-respecting form is owed in the CHKT op-sem
-extension; until then, CSub at the boundary degrades to CEq. Tracked as
-spec gap in the log.)
+| Marker   | Meaning                                                  |
+|----------|----------------------------------------------------------|
+| `co`     | covariant:     A <: B ⊢ F⟨A⟩ <: F⟨B⟩                     |
+| `contra` | contravariant: A <: B ⊢ F⟨B⟩ <: F⟨A⟩                     |
+| `inv`    | invariant:     F⟨A⟩ <: F⟨B⟩ iff A = B                    |
+
+**Soundness floor.** Record fields are **invariant** in v5.0.  Per item 1's
+construction-phase model, record fields are mutable (CTableSet); covariant
+field subtyping under mutability is the well-known TypeScript-array
+unsoundness.  Width subtyping is admitted (forgetting fields) but each
+common field's type is required equal.
+
+#### Rules
+
+**T-CSub-Refl.** Same type both sides (after deref + structural equality).
+
+    σ⟦τ_a⟧ = τ      σ⟦τ_b⟧ = τ'      types.equal(τ, τ')
+    ─────────────────────────────────────────────────────  T-CSub-Refl
+                σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, ε, done⟩
+
+**T-CSub-TVar.** Either side is an unbound `UVar`.  v5.0 discipline: route to
+`CEq` (no per-tvar bounds).  This trade matches the substrate decision in
+log item 6 (tvars don't change level) and item 2 (gensym ids with no bound
+field).  Bounded inference is a v5.x extension.
+
+    σ⟦τ_a⟧ = UVar(_)  ∨  σ⟦τ_b⟧ = UVar(_)
+    ──────────────────────────────────────────────────────  T-CSub-TVar
+              σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, [CEq(τ_a, τ_b)], done⟩
+
+**T-CSub-Arrow.** Decompose with arrow variance (fixed: contra args, co rets).
+
+    σ⟦τ_a⟧ = Arrow(A_1..A_n, R_1..R_m)
+    σ⟦τ_b⟧ = Arrow(B_1..B_n, S_1..S_m)
+    ─────────────────────────────────────────────────────────────  T-CSub-Arrow
+    σ ⊢ CSub(τ_a, τ_b) ⇒
+      ⟨σ, [CSub(B_i, A_i)]_i ++ [CSub(R_j, S_j)]_j, done⟩
+
+Arity mismatch is rejected.  Note arg sides are FLIPPED (contravariance):
+`A_i` is supertype of `B_i`.
+
+**T-CSub-Const-Var.** Two concrete `Const`s with the same head name and per-
+parameter variance lookup.  Currently `Const` is nullary in the AST (named
+type without parameters), so this rule is degenerate at the AST level — it
+falls into T-CSub-Refl after a name check.  Variance dispatch applies to
+**applications** (next rule).
+
+    σ⟦τ_a⟧ = Const(n)     σ⟦τ_b⟧ = Const(n)
+    ──────────────────────────────────────────  T-CSub-Const-Var
+        σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, ε, done⟩
+
+Name mismatch is rejected as a kind mismatch.
+
+**T-CSub-App-Var.** Two applications with matching head constructor; dispatch
+per-position variance from the head's registry entry.
+
+    σ⟦τ_a⟧ = App(... App(App(Const(n), x_1), x_2) ..., x_k)
+    σ⟦τ_b⟧ = App(... App(App(Const(n), y_1), y_2) ..., y_k)
+    vᵢ = variance.at(n, i)    for i = 1..k
+    ──────────────────────────────────────────────────────────────  T-CSub-App-Var
+    σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, [subgoal(vᵢ, xᵢ, yᵢ)]_i, done⟩
+
+where
+
+    subgoal("co",     x, y) = CSub(x, y)
+    subgoal("contra", x, y) = CSub(y, x)
+    subgoal("inv",    x, y) = CEq(x, y)
+
+If the head is not a named `Const` (e.g. a `Lambda` β-equivalent shape),
+this rule falls through to **T-CSub-App-Struct** below.
+
+**T-CSub-App-Struct.** Applications with non-Const heads (or mismatched
+named heads) — fall back to structural decomposition under invariance.
+
+    σ⟦τ_a⟧ = App(f_a, x_a)    σ⟦τ_b⟧ = App(f_b, x_b)
+    head(τ_a).tag ≠ "const"  ∨  head(τ_b).tag ≠ "const"
+    ─────────────────────────────────────────────────────────────  T-CSub-App-Struct
+    σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, [CEq(f_a, f_b), CEq(x_a, x_b)], done⟩
+
+**T-CSub-Record-Width.** Width subtyping with invariant fields.  The
+**supertype** has fewer fields; common-field types are required equal.
+
+    σ⟦τ_a⟧ = Record(F)    σ⟦τ_b⟧ = Record(G)    dom(G) ⊆ dom(F)
+    ──────────────────────────────────────────────────────────────  T-CSub-Record-Width
+        σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, [CEq(F[k], G[k])]_{k ∈ dom(G)}, done⟩
+
+When `dom(G) ⊄ dom(F)` (supertype demands a field the subtype lacks): reject.
+
+**T-CSub-Union-L.** Union subtype on the LHS: each branch must subtype the
+RHS (covariant in the union).
+
+    σ⟦τ_a⟧ = Union(A_1..A_n)
+    ─────────────────────────────────────────────────────────────  T-CSub-Union-L
+    σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, [CSub(A_i, τ_b)]_i, done⟩
+
+**T-CSub-Union-R.** Union supertype on the RHS: it suffices to subtype one
+branch.  v5.0 simplification: structural equality on the LHS against any
+single branch (no backtracking).  If none match exactly, reject.  Full
+backtracking search is a v5.x extension owed when the corpus demands it.
+
+    σ⟦τ_b⟧ = Union(B_1..B_n)    ∃j. types.equal(σ⟦τ_a⟧, B_j)
+    ─────────────────────────────────────────────────────────────  T-CSub-Union-R
+                  σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, ε, done⟩
+
+**T-CSub-Mismatch.** Two concrete types with mismatched head tags and no
+rule above applies.
+
+    σ⟦τ_a⟧ = τ_a'    σ⟦τ_b⟧ = τ_b'    τ_a'.tag ≠ τ_b'.tag    neither uvar
+    ────────────────────────────────────────────────────────────────────────  T-CSub-Mismatch
+                       σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, ε, error("sub kind mismatch")⟩
+
+#### Soundness sketch
+
+1. **T-CSub-Arrow** preserves substitutability: a function expecting a
+   wider arg can safely accept a narrower one (contra-args), and a producer
+   of a narrower result satisfies a consumer expecting a wider one
+   (co-rets).
+2. **T-CSub-App-Var** preserves substitutability for each parameter
+   position by definition of declaration-site variance.  The default
+   (invariant) is conservatively sound — equality always implies subtyping.
+3. **T-CSub-Record-Width** is sound under invariant field types: a wider
+   record can be supplied where a narrower is expected (forget the extras);
+   each common field's read AND write semantics agree because the types
+   are equal.  This explicitly rejects the unsound TypeScript-array
+   pattern (covariant field on a mutable position).
+4. **T-CSub-Union-L** is sound: every branch of the LHS must satisfy the
+   RHS.  **T-CSub-Union-R**'s v5.0 form is sound but incomplete (rejects
+   some valid programs); completeness deferred.
+
+#### Spec gaps surfaced (per F12 — named, not silently filled)
+
+1. **Bounded tvars** (no per-tvar lower/upper bound).  T-CSub-TVar routes
+   to CEq.  A real bounded substrate (simple-sub / MLstruct style) is a
+   v5.x extension.  Trade is recorded in log item 2/6.
+2. **Variance under Lambda** (HKT constructor-position variance).  The
+   registry covers named constructors only; type lambdas don't yet carry
+   variance.  Acceptable for v5.0 since CHKT already β-reduces lambdas to
+   structural shapes before dispatch.  Owed when a corpus example
+   exercises a non-trivial `Lambda` in a CSub LHS/RHS without prior β.
+3. **Union backtracking** (T-CSub-Union-R).  v5.0 admits only exact-branch
+   match.  Backtracking search owed when corpus demands it.
+4. **Effect-row variance** (CEffect).  When CEffect lands, handler
+   subsumption needs row-tail variance.  Out of v5.0 minimal-core scope;
+   tracked separately in the CEffect risk note.
+5. **Intersection types** (no intersection AST variant yet).  Algebraic
+   Subtyping admits intersection-as-contravariant-union; owed.
 
 ### Construction phase
 
@@ -538,7 +684,16 @@ flagged for kind-checking extension.
 | T-CEq-App               | `rule_T_CEq_App`                  |
 | T-CEq-Mismatch          | `rule_T_CEq_Mismatch`             |
 | T-CEq-Occurs            | `rule_T_CEq_Occurs`               |
-| T-CSub-AsEq             | `rule_T_CSub_AsEq`                |
+| T-CSub-Refl             | `rule_T_CSub_Refl`                |
+| T-CSub-TVar             | `rule_T_CSub_TVar`                |
+| T-CSub-Arrow            | `rule_T_CSub_Arrow`               |
+| T-CSub-Const-Var        | `rule_T_CSub_Const_Var`           |
+| T-CSub-App-Var          | `rule_T_CSub_App_Var`             |
+| T-CSub-App-Struct       | `rule_T_CSub_App_Struct`          |
+| T-CSub-Record-Width     | `rule_T_CSub_Record_Width`        |
+| T-CSub-Union-L          | `rule_T_CSub_Union_L`             |
+| T-CSub-Union-R          | `rule_T_CSub_Union_R`             |
+| T-CSub-Mismatch         | `rule_T_CSub_Mismatch`            |
 | T-CTOpen                | `rule_T_CTOpen`                   |
 | T-CTSet-Open-Fresh      | `rule_T_CTSet_Open_Fresh`         |
 | T-CTSet-Open-Extend     | `rule_T_CTSet_Open_Extend`        |
