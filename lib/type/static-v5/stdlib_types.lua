@@ -119,22 +119,28 @@ function M.decls()
     d["type"] = effectful_fn({ T_UNKNOWN }, T_STR, {})
 
     -- error(msg, level?) -> never  (raises !throw<string>)
+    -- Declared with 1 arg so T-CSub-Arrow arity check matches the common
+    -- 1-arg call site.  The optional level arg is variadic at runtime but
+    -- the v5 gen-pass does not model optional args.
     --: V5Type
     local eff_throw_str = eff_apply1("throw", T_STR)
-    d["error"] = effectful_fn({ T_UNKNOWN, T_INT }, T_NEVER, { eff_throw_str })
+    d["error"] = effectful_fn({ T_UNKNOWN }, T_NEVER, { eff_throw_str })
 
-    -- assert(val, ...) -> val  (raises !throw<string> on failure)
-    d["assert"] = effectful_fn({ T_UNKNOWN, T_UNKNOWN }, T_UNKNOWN, { eff_throw_str })
+    -- assert(val) -> val  (raises !throw<string> on failure)
+    d["assert"] = effectful_fn({ T_UNKNOWN }, T_UNKNOWN, { eff_throw_str })
 
     -- pcall(fn, ...) -> (true, result) | (false, string)
     -- Conservative: returns unknown (full discriminated-union requires 5.D).
     -- Syntactically special-cased in gen-pass to suppress !throw propagation.
+    -- Declared with 1 arg (the function) so the arity check in T-CSub-Arrow
+    -- matches single-arg call sites; extra args are passed through at runtime
+    -- but the v5 gen-pass does not model variadic function types.
     --: V5Type
     local pcall_ret = types_mod.union({ T_BOOL, T_UNKNOWN })
-    d["pcall"] = effectful_fn({ T_UNKNOWN, T_UNKNOWN }, pcall_ret, {})
+    d["pcall"] = effectful_fn({ T_UNKNOWN }, pcall_ret, {})
 
-    -- xpcall(fn, handler, ...) — same conservative return.
-    d["xpcall"] = effectful_fn({ T_UNKNOWN, T_UNKNOWN, T_UNKNOWN }, pcall_ret, {})
+    -- xpcall(fn, handler, ...) — same conservative return; 2 declared args.
+    d["xpcall"] = effectful_fn({ T_UNKNOWN, T_UNKNOWN }, pcall_ret, {})
 
     -- ── io library ─────────────────────────────────────────────────────────
 

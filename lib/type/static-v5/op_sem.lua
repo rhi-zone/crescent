@@ -31,6 +31,20 @@ local M = {}
 --:: ConstraintHO   = { id: integer, tag: "hounify", f: V5Type, args: V5Type[], result: V5Type, prov: Provenance }
 --:: OpSemConstraint = V5Constraint | ConstraintInst | ConstraintHKT | ConstraintHO
 
+-- Narrow an unknown value to V5Type (requires non-nil table with string .tag).
+-- Used when reading V5Type fields off unknown-typed constraint field accesses.
+--: (unknown) -> V5Type | nil
+local function as_v5type(v)
+	if type(v) ~= "table" then return nil end
+	--: { tag: unknown, ... }
+	local t = v
+	local tg = t.tag
+	if type(tg) ~= "string" then return nil end
+	--: V5Type
+	local ty = v
+	return ty
+end
+
 local _next_id = 100000
 
 --: () -> integer
@@ -446,10 +460,23 @@ function M.rule_T_CSub_Refl(st, a, b, prov)
 	return "done"
 end
 
--- T-CSub-TVar.  Either side is an unbound UVar — route to CEq.  v5.0
--- discipline (no per-tvar bounds); v5.x will extend.
+-- T-CSub-TVar.  Either side is an unbound UVar.
+--
+-- v5.0 discipline:
+--   (a) ra=uvar, rb=concrete → PARK watching ra.  When ra is later bound
+--       (e.g. by a CRowExtend-Lookup CEq), the sub is retried with the
+--       concrete type.  At S-Quiesce, any still-parked csub with unbound
+--       ra gets ra bound to rb (upper-bound assignment).
+--   (b) ra=concrete, rb=uvar → emit CEq to bind rb := ra (lower bound).
+--   (c) Both uvars           → emit CEq (symmetric).
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CSub_TVar(st, a, b, prov)
+	if a.tag == "uvar" and b.tag ~= "uvar" then
+		-- Park: wait for a to be bound, then retry sub(a_bound, b).
+		trace(st, "T-CSub-TVar", "ra=uvar → park watching ra=" .. tostring(a.id))
+		return "stuck"
+	end
+	-- rb=uvar (and ra concrete), or both uvars: route to CEq.
 	M.emit(st, constraint_mod.eq(a, b, prov))
 	trace(st, "T-CSub-TVar", "routed to CEq")
 	return "done"
@@ -646,9 +673,27 @@ function M.rule_T_CSub_Mismatch(st, a, b, prov)
 	return "error"
 end
 
+-- T-CSub-Top.  `unknown` is the top type: anything subtypes it.
+--: (OpSemState, V5Type, V5Type, Provenance) -> string
+function M.rule_T_CSub_Top(st, ra, rb, prov)
+	-- Precondition (caller checks): rb is const("unknown").
+	local _ = ra; local _ = prov  -- suppress unused warnings
+	trace(st, "T-CSub-Top", "sub const=unknown (top type)")
+	return "done"
+end
+
+-- T-CSub-Never.  `never` is the bottom type: it subtypes anything.
+--: (OpSemState, V5Type, V5Type, Provenance) -> string
+function M.rule_T_CSub_Never(st, ra, rb, prov)
+	-- Precondition (caller checks): ra is const("never").
+	local _ = rb; local _ = prov  -- suppress unused warnings
+	trace(st, "T-CSub-Never", "sub const=never (bottom type)")
+	return "done"
+end
+
 -- CSub dispatcher.  Order matters: Refl first (cheap fast path), then TVar
 -- (must precede shape dispatch — uvars masquerade as no tag here), then
--- by tag.
+-- top/bottom, then by tag.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 local function step_csub(st, ra, rb, prov)
 	-- Refl fast path.
@@ -658,6 +703,49 @@ local function step_csub(st, ra, rb, prov)
 	-- TVar route.
 	if ra.tag == "uvar" or rb.tag == "uvar" then
 		return M.rule_T_CSub_TVar(st, ra, rb, prov)
+	end
+	-- Top type: unknown is a supertype of everything.
+	if rb.tag == "const" and rb.name == "unknown" then
+		return M.rule_T_CSub_Top(st, ra, rb, prov)
+	end
+	-- Bottom type: never is a subtype of everything.
+	if ra.tag == "const" and ra.name == "never" then
+		return M.rule_T_CSub_Never(st, ra, rb, prov)
+	end
+	-- Literal widening: $Lit<S> <: string, $LitInt<N> <: integer | number,
+	-- $LitNum<N> <: number.  These rules let annotated function parameters
+	-- of type `string`/`number`/`integer` accept literal-typed call-site args.
+	if ra.tag == "app" and rb.tag == "const" then
+		local ra_f = ra.f
+		if ra_f ~= nil and ra_f.tag == "const" then
+			local fname = ra_f.name
+			if fname == "$Lit" and rb.name == "string" then
+				trace(st, "T-CSub-LitWiden", "$Lit<S> <: string")
+				return "done"
+			end
+			if fname == "$LitInt" and (rb.name == "integer" or rb.name == "number") then
+				trace(st, "T-CSub-LitWiden", "$LitInt<N> <: " .. rb.name)
+				return "done"
+			end
+			if fname == "$LitNum" and rb.name == "number" then
+				trace(st, "T-CSub-LitWiden", "$LitNum<N> <: number")
+				return "done"
+			end
+			-- true / false literals subtype boolean.
+			if (ra_f.name == "true" or ra_f.name == "false") and rb.name == "boolean" then
+				trace(st, "T-CSub-LitWiden", "bool literal <: boolean")
+				return "done"
+			end
+		end
+		-- const("true") / const("false") <: boolean handled below in same-const branch,
+		-- but for safety also handle TApp where head is "true"/"false" here.
+	end
+	-- Boolean literal constants: const("true") <: boolean, const("false") <: boolean.
+	if ra.tag == "const" and rb.tag == "const" then
+		if (ra.name == "true" or ra.name == "false") and rb.name == "boolean" then
+			trace(st, "T-CSub-LitWiden", "bool const <: boolean")
+			return "done"
+		end
 	end
 	-- Union dispatch (L takes priority over R; both can apply if both sides
 	-- are unions — emit per-branch sub from L, the recursive call will see
@@ -1479,6 +1567,9 @@ function M.run(st)
 	-- HOUnify gets the dedicated T-HOUnify-Stuck rule (ambiguous
 	-- constructor variable); CRowLacks still parked means the row var was
 	-- never closed — soundness floor violation; others get generic error.
+	-- CSub with ra=uvar still parked: no competing binding appeared; apply
+	-- upper-bound assignment (bind ra := rb) per the v5.0 defaulting rule,
+	-- matching the intent of the original T-CSub-TVar CEq route.
 	for _cid, c in pairs(st.inert) do
 		if c.tag == "hounify" then
 			M.rule_T_HOUnify_Stuck(st, c)
@@ -1491,8 +1582,53 @@ function M.run(st)
 			-- on a uvar that never got bound must error at quiescence.
 			err(st, "S-Quiesce-CIntersectionMember",
 				"CIntersectionMember stuck on unbound uvar (effect never inferred)")
+		elseif c.tag == "csub" then
+			-- Parked csub: ra=uvar was never bound by a competing constraint.
+			-- Apply upper-bound default: bind ra := rb (CEq route at quiescence).
+			-- Narrow to the concrete ConstraintSub fields via the constraint_mod
+			-- accessor (safer than a force cast).
+			local cc_a_raw = c.a  -- .a is V5Type on ConstraintSub
+			local cc_b_raw = c.b  -- .b is V5Type on ConstraintSub
+			local cc_p_raw = c.prov
+			--: V5Type | nil
+			local cc_a = as_v5type(cc_a_raw)
+			--: V5Type | nil
+			local cc_b = as_v5type(cc_b_raw)
+			if cc_a == nil or cc_b == nil or cc_p_raw == nil then
+				err(st, "S-Quiesce", "csub missing fields (tag=csub)")
+			else
+				local ra2 = subst_mod.deref(st.subst, cc_a) --[[: V5Type ]]
+				local rb2 = subst_mod.deref(st.subst, cc_b) --[[: V5Type ]]
+				--: Provenance
+				local prov2 = cc_p_raw
+				if ra2.tag == "uvar" then
+					-- Still unbound: bind to upper bound.
+					M.emit(st, constraint_mod.eq(ra2, rb2, prov2))
+					trace(st, "S-Quiesce-CSub-TVar", "defaulting uvar to upper bound")
+				else
+					-- ra was bound between park and quiescence (possible if multiple
+					-- passes are needed); retry the sub constraint.
+					local status = step_csub(st, ra2, rb2, prov2)
+					if status == "stuck" then
+						err(st, "S-Quiesce", "stuck constraint (tag=csub) after quiescence retry")
+					end
+				end
+			end
 		else
 			err(st, "S-Quiesce", "stuck constraint (tag=" .. c.tag .. ")")
+		end
+	end
+	-- Drain any CEq constraints emitted by S-Quiesce defaulting above.
+	while st.head <= st.tail do
+		local h = st.head
+		local c2 = st.worklist[h]
+		st.worklist[h] = nil
+		st.head = h + 1
+		if c2 ~= nil then
+			local status = M.step(st, c2)
+			if status == "stuck" then
+				err(st, "S-Quiesce-Drain", "constraint still stuck after quiescence drain (tag=" .. c2.tag .. ")")
+			end
 		end
 	end
 end
