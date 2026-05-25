@@ -16,9 +16,22 @@
 -- defs.ANN_TYPE (0) = --:   single-colon type annotation
 -- defs.ANN_DECL (1) = --::  double-colon declaration
 --
--- Residual gaps (to be addressed in 5.C / 5.D):
---   - Effect propagation
---   - pcall / coroutine special handling
+-- Effect propagation (5.C):
+--   - Effects are V5Type values whose head is a TConst named "!X"
+--     (e.g. !io, !throw<E>, !yield<Y,R>).
+--   - Each function scope maintains an effect accumulator (effect_stack).
+--   - At each call site we extract effects from the callee's known return type
+--     and propagate them into the enclosing function's accumulator.
+--   - Annotated functions: per-effect CIntersectionMember(ann_ret, E) constraints
+--     are emitted so S-Quiesce-CIntersectionMember surfaces missing effects (F2).
+--   - Unannotated functions: collected effects are folded into the inferred
+--     return type via TIntersection.
+--   - pcall and coroutine.create are recognised syntactically as effect consumers.
+--
+-- opts.decls: optional { [string]: V5Type } table to pre-seed scope (used by
+--   stdlib_types.lua to inject effectful stdlib signatures).
+--
+-- Residual gaps (to be addressed in 5.D and beyond):
 --   - Closures-as-values intricacies (deep closure capture)
 --   - Complex narrowing (discriminated unions, type guards)
 --   - Method dispatch edge cases beyond simple obj:method(...)
@@ -27,6 +40,7 @@
 --   - Generic function body checking (skolemization)
 --   - Type alias / require / module directives (noted but not scope-injected)
 --   - Multi-return tuple types (uses union as approximation)
+--   - Effect propagation from unknown callees (uvar callee — solved post-gen)
 
 local parse_mod   = require("lib.type.static.parse")
 local defs        = require("lib.type.static.defs")
@@ -97,6 +111,27 @@ local T_UNKNOWN = types_mod.const("unknown")
 
 --:: RawAnn = { kind: integer, content: string, col: integer, ... }
 
+-- Typed directive shapes used when processing --:: declare directives.
+-- .type is unknown in ann.lua's V5Directive (cross-file V5Type is unavailable
+-- there); we use unknown here too and extract V5Type via a narrowing helper.
+--:: DeclVarDir    = { kind: string, name: string, type: unknown, ... }
+--:: DeclEffDir    = { kind: string, name: string, arity: number, ... }
+
+-- Narrow an `unknown` value that is a V5Type at runtime (has a .tag field).
+-- Returns the value as V5Type if it is a non-nil table with a string .tag.
+-- This is the approved narrowing pattern for unknown -> concrete type.
+--: (unknown) -> V5Type | nil
+local function as_v5type(v)
+    if type(v) ~= "table" then return nil end
+    --: { tag: unknown, ... }
+    local t = v
+    local tg = t.tag
+    if type(tg) ~= "string" then return nil end
+    --: V5Type
+    local ty = v
+    return ty
+end
+
 -- ── State record ─────────────────────────────────────────────────────────────
 
 --:: V5Ctx = {
@@ -109,6 +144,8 @@ local T_UNKNOWN = types_mod.const("unknown")
 --::   scope: { [string]: V5Type },
 --::   scope_stack: { [string]: V5Type }[],
 --::   return_stack: V5Type[],
+--::   effect_stack: unknown[],
+--::   ann_ret_stack: unknown[],
 --::   annotations: { [integer]: RawAnn } | nil,
 --::   _next_uvar: integer,
 --:: }
@@ -139,6 +176,112 @@ end
 --: (V5Ctx, V5Constraint) -> nil
 local function emit(ctx, constraint)
     ctx.constraints[#ctx.constraints + 1] = constraint
+end
+
+-- ── Effect helpers ────────────────────────────────────────────────────────────
+
+-- extract_effects: given a V5Type (typically a callee's return type), return
+-- all effect components — parts of a TIntersection (or the type itself) that
+-- are effect-headed (TConst "!X" or TApp chain headed by one).
+--: (V5Type) -> V5Type[]
+local function extract_effects(ty)
+    local out = {} --[[: V5Type[] ]]
+    if ty.tag == "intersection" then
+        local parts = ty.parts
+        for i = 1, #parts do
+            local p = parts[i]
+            if p ~= nil and types_mod.is_effect(p) then
+                out[#out + 1] = p
+            end
+        end
+    elseif types_mod.is_effect(ty) then
+        out[1] = ty
+    end
+    return out
+end
+
+-- Return the first return type of an arrow (field "1" of its ret record), or nil.
+--: (V5Type) -> V5Type | nil
+local function arrow_ret1(ty)
+    if ty.tag ~= "arrow" then return nil end
+    local ret = ty.ret
+    if ret == nil then return nil end
+    if ret.tag ~= "record" then return nil end
+    return ret.fields["1"]
+end
+
+-- ── Effect scope helpers ──────────────────────────────────────────────────────
+
+-- Push a new (empty) effect accumulator and annotated-return slot.
+-- ann_ret is the annotated return type of the function being entered (nil if
+-- unannotated).
+--: (V5Ctx, V5Type | nil) -> nil
+local function push_effect_scope(ctx, ann_ret)
+    local es = ctx.effect_stack
+    es[#es + 1] = {} --[[: V5Type[] ]]
+    local ar = ctx.ann_ret_stack
+    ar[#ar + 1] = ann_ret
+end
+
+-- Pop the top effect accumulator and annotated-return slot.
+-- Returns (effects, ann_ret).
+--: (V5Ctx) -> (V5Type[], V5Type | nil)
+local function pop_effect_scope(ctx)
+    local es = ctx.effect_stack
+    local n = #es
+    --: V5Type[]
+    local effs = es[n] or {}
+    es[n] = nil
+    local ar = ctx.ann_ret_stack
+    --: V5Type | nil
+    local ann_ret = ar[n]
+    ar[n] = nil
+    return effs, ann_ret
+end
+
+-- Accumulate an effect into the current (innermost) function's effect scope.
+-- If the enclosing function is annotated: emit CIntersectionMember(ann_ret, eff)
+-- for F2 enforcement (S-Quiesce-CIntersectionMember surfaces missing effects).
+-- If unannotated: record effect in the accumulator for later intersection-folding.
+--: (V5Ctx, V5Type, integer) -> nil
+local function propagate_effect(ctx, eff, line)
+    local es = ctx.effect_stack
+    local depth = #es
+    if depth == 0 then return end
+    --: V5Type[]
+    local acc = es[depth]
+    if acc == nil then return end
+    local ar = ctx.ann_ret_stack
+    --: V5Type | nil
+    local ann_ret = ar[depth]
+    if ann_ret ~= nil then
+        -- Annotated: emit membership constraint (F2 enforcement).
+        emit(ctx, C.intersection_member(ann_ret, eff, prov_declared(ctx, line)))
+    else
+        -- Unannotated: accumulate, deduplicating by structural key.
+        local eff_key = C.key_of(eff)
+        local found = false
+        for i = 1, #acc do
+            local e = acc[i]
+            if e ~= nil and C.key_of(e) == eff_key then found = true; break end
+        end
+        if not found then acc[#acc + 1] = eff end
+    end
+end
+
+-- Propagate all effect components found in a callee's known return type into
+-- the current function scope.  If callee_ty is not an arrow (e.g. still a
+-- uvar), nothing can be extracted — this is the known residual gap for uvar
+-- callees (effects from unknown callees remain untracked until solve time).
+--: (V5Ctx, V5Type, integer) -> nil
+local function propagate_callee_effects(ctx, callee_ty, line)
+    local ret1 = arrow_ret1(callee_ty)
+    if ret1 == nil then return end
+    local effs = extract_effects(ret1)
+    for i = 1, #effs do
+        local e = effs[i]
+        if e ~= nil then propagate_effect(ctx, e, line) end
+    end
 end
 
 -- ── Scope helpers ─────────────────────────────────────────────────────────────
@@ -198,7 +341,7 @@ local function get_type_ann(ctx, line)
     return ty
 end
 
---: (V5Ctx, integer) -> { [string]: unknown } | nil
+--: (V5Ctx, integer) -> V5Directive | nil
 local function get_decl_ann(ctx, line)
     local r = get_raw_ann(ctx, line)
     if r == nil then return nil end
@@ -323,6 +466,7 @@ gen_expr = function(ctx, nid)
 
     -- ── Function call: f(...) ───────────────────────────────────────────────
     if kind == NODE_CALL_EXPR then
+        local callee_node = ctx.nodes:get(n.data[0])
         local callee_ty = gen_expr(ctx, n.data[0])
         local arg_types = {} --[[: V5Type[] ]]
         local es = n.data[1]
@@ -331,12 +475,51 @@ gen_expr = function(ctx, nid)
             local anid = ctx.lists:get(i)
             arg_types[#arg_types + 1] = gen_expr(ctx, anid)
         end
+
+        -- Detect syntactic special cases for effect handlers.
+        -- pcall(fn, ...) — consumes !throw<E> from fn's effects.
+        -- coroutine.create(fn) — consumes !yield from fn's effects.
+        local is_pcall          = false
+        local is_coro_create    = false
+        if callee_node.kind == NODE_IDENTIFIER then
+            local cname = intern_str(ctx, callee_node.data[0])
+            if cname == "pcall" then is_pcall = true end
+        elseif callee_node.kind == NODE_FIELD_EXPR then
+            local obj_node = ctx.nodes:get(callee_node.data[0])
+            if obj_node.kind == NODE_IDENTIFIER then
+                local oname = intern_str(ctx, obj_node.data[0])
+                local fname = intern_str(ctx, callee_node.data[1])
+                if oname == "coroutine" and fname == "create" then
+                    is_coro_create = true
+                end
+            end
+        end
+
         local ret = fresh_uvar(ctx)
         local rets_arr = {} --[[: V5Type[] ]]
         rets_arr[1] = ret
         --: V5Type
         local expected_fn = types_mod.arrow(arg_types, rets_arr)
         emit(ctx, C.sub(callee_ty, expected_fn, prov_inferred(ctx, n.line)))
+
+        -- Effect propagation.
+        if is_pcall then
+            -- pcall consumes !throw effects from its first argument function.
+            -- We do NOT propagate those effects outward; pcall handles them.
+            -- The return type carries (true, results | false, string) — represented
+            -- as a fresh uvar (full discriminated-union return requires TUnion +
+            -- positional records which the gen-pass does not yet elaborate; this
+            -- is noted in the commit message as a known gap for 5.D).
+        elseif is_coro_create then
+            -- coroutine.create consumes !yield from its argument function.
+            -- As with pcall, the full parameterized Coroutine<Y,S,R> type requires
+            -- more type elaboration than the gen-pass currently supports; the
+            -- return is left as a fresh uvar (gap noted for 5.D).
+        else
+            -- Normal call: propagate effects from callee's known return type.
+            propagate_callee_effects(ctx, callee_ty, n.line)
+        end
+
         return ret
     end
 
@@ -360,6 +543,8 @@ gen_expr = function(ctx, nid)
         --: V5Type
         local expected_fn = types_mod.arrow(arg_types, rets_arr)
         emit(ctx, C.sub(method_ty, expected_fn, prov_inferred(ctx, n.line)))
+        -- Propagate effects from method's known return type (if concrete).
+        propagate_callee_effects(ctx, method_ty, n.line)
         return ret
     end
 
@@ -453,6 +638,9 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_ty, line)
     local ann_ret  = extract_ann_ret(ann_ty)
 
     push_scope(ctx)
+    -- Push an effect accumulator for this function scope.
+    -- We pass ann_ret so propagate_effect can decide emit-vs-accumulate.
+    push_effect_scope(ctx, ann_ret)
 
     -- Bind parameters.
     for i = 0, pl - 1 do
@@ -484,6 +672,9 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_ty, line)
     local return_types = ctx.return_stack
     ctx.return_stack = saved_returns
 
+    -- Pop the effect accumulator.
+    local body_effects, _ = pop_effect_scope(ctx)
+
     pop_scope(ctx)
 
     -- Determine return type.
@@ -498,24 +689,64 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_ty, line)
                 emit(ctx, C.sub(rt, ann_ret, prov_declared(ctx, line)))
             end
         end
+        -- For annotated functions, CIntersectionMember constraints were already
+        -- emitted by propagate_effect inside the body walk.
         ret_ty = ann_ret
     elseif #return_types == 0 then
-        ret_ty = T_NIL
+        -- No explicit returns; incorporate any accumulated effects.
+        if #body_effects == 0 then
+            ret_ty = T_NIL
+        else
+            -- Build intersection of nil + effects.
+            local parts = {} --[[: V5Type[] ]]
+            parts[1] = T_NIL
+            for i = 1, #body_effects do
+                local e = body_effects[i]
+                if e ~= nil then parts[#parts + 1] = e end
+            end
+            --: V5Type
+            local ity0 = types_mod.intersection(parts)
+            ret_ty = ity0
+        end
     elseif #return_types == 1 then
         local rt0 = return_types[1]
-        if rt0 ~= nil then
-            ret_ty = rt0
+        --: V5Type
+        local base = rt0 or T_NIL
+        if #body_effects == 0 then
+            ret_ty = base
         else
-            ret_ty = T_NIL
+            local parts = {} --[[: V5Type[] ]]
+            parts[1] = base
+            for i = 1, #body_effects do
+                local e = body_effects[i]
+                if e ~= nil then parts[#parts + 1] = e end
+            end
+            --: V5Type
+            local ity1 = types_mod.intersection(parts)
+            ret_ty = ity1
         end
     else
         --: V5Type
         local union_ty = types_mod.union(return_types)
-        ret_ty = union_ty
+        if #body_effects == 0 then
+            ret_ty = union_ty
+        else
+            local parts = {} --[[: V5Type[] ]]
+            parts[1] = union_ty
+            for i = 1, #body_effects do
+                local e = body_effects[i]
+                if e ~= nil then parts[#parts + 1] = e end
+            end
+            --: V5Type
+            local ity2 = types_mod.intersection(parts)
+            ret_ty = ity2
+        end
     end
 
     local rets_arr = {} --[[: V5Type[] ]]
-    rets_arr[1]    = ret_ty
+    --: V5Type
+    local ret_ty_final = ret_ty
+    rets_arr[1]    = ret_ty_final
     --: V5Type
     local fn_ty = types_mod.arrow(param_tys, rets_arr)
     return fn_ty
@@ -746,18 +977,24 @@ end
 
 -- ── Entry point ───────────────────────────────────────────────────────────────
 
+-- Export extract_effects so tests can inspect it independently.
+M.extract_effects = extract_effects
+
 -- Generate v5 constraints from Lua source.
 --
 -- Parameters:
 --   source   — Lua source string.
 --   filename — filename for provenance (defaults to "?").
---   opts     — optional table { pool? }.
+--   opts     — optional table:
+--                pool?  — InternPool (performance hint; currently unused).
+--                decls? — { [string]: V5Type } pre-declared scope bindings
+--                         (used by stdlib_types.lua to inject effectful stdlib).
 --
 -- Returns:
 --   constraints — flat V5Constraint array.
 --   errors      — string array (parse errors, annotation errors).
 --
---: (string, string | nil, { pool?: InternPool, ... } | nil) -> (V5Constraint[], string[])
+--: (string, string | nil, { pool?: InternPool, decls?: { [string]: V5Type }, ... } | nil) -> (V5Constraint[], string[])
 function M.generate(source, filename, opts)
     filename = filename or "?"
     -- opts.pool is an optional performance hint (share an intern pool).
@@ -800,21 +1037,36 @@ function M.generate(source, filename, opts)
     -- Build the context.
     --: V5Ctx
     local ctx = {
-        filename     = filename,
-        nodes        = pr_nodes,
-        lists        = pr_lists,
-        pool         = pool,
-        constraints  = constraints,
-        errors       = errors,
-        scope        = {},
-        scope_stack  = {},
-        return_stack = {},
-        annotations  = raw_anns,
-        _next_uvar   = 1,
+        filename      = filename,
+        nodes         = pr_nodes,
+        lists         = pr_lists,
+        pool          = pool,
+        constraints   = constraints,
+        errors        = errors,
+        scope         = {},
+        scope_stack   = {},
+        return_stack  = {},
+        effect_stack  = {},
+        ann_ret_stack = {},
+        annotations   = raw_anns,
+        _next_uvar    = 1,
     }
 
     -- Seed scope_stack with the top-level scope.
     ctx.scope_stack[1] = ctx.scope
+
+    -- Inject pre-declared types from opts.decls (e.g. stdlib_types).
+    if opts ~= nil then
+        --: { [string]: V5Type } | nil
+        local decls = opts.decls
+        if decls ~= nil then
+            for dname, dty in pairs(decls) do
+                --: V5Type
+                local dtyv = dty
+                bind(ctx, dname, dtyv)
+            end
+        end
+    end
 
     -- Process top-level --:: declare directives to pre-populate scope.
     if raw_anns ~= nil then
@@ -827,12 +1079,28 @@ function M.generate(source, filename, opts)
                     errors[#errors + 1] = filename .. ":" .. tostring(line)
                         .. ": declaration parse error: " .. derr
                 elseif dir ~= nil then
-                    local dk = dir.kind
-                    -- declare_var / type_alias / etc. are residual gaps for 5.C.
-                    -- parse_declaration returns { [string]: unknown }; to bind
-                    -- declare_var values we would need ann.lua to return a typed
-                    -- directive struct (tracked as gap).
-                    _ = dk
+                    -- Access fields common to all V5Directive members directly.
+                    -- V5Directive is a union; .kind is string on all members.
+                    -- .name, .type, .arity are each only present on specific
+                    -- members, but reading them returns the field type or nil.
+                    if dir.kind == "declare_var" then
+                        -- All V5Directive union members have .name:string; the
+                        -- .type field is present only on declare_var members.
+                        local dv_name = dir.name
+                        local dv_type = as_v5type(dir.type)
+                        if dv_name ~= nil and dv_type ~= nil then
+                            bind(ctx, dv_name, dv_type)
+                        end
+                    elseif dir.kind == "declare_effect" then
+                        -- .name is string on all members; .arity is number on
+                        -- declare_effect only.
+                        local de_name  = dir.name
+                        local de_arity = dir.arity
+                        if de_name ~= nil and de_arity ~= nil then
+                            ann_mod.declare_effect(de_name, de_arity)
+                        end
+                    end
+                    -- Other kinds (type_alias, module, etc.) are residual gaps.
                 end
             end
         end

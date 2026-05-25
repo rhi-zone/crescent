@@ -18,6 +18,20 @@ local types_mod = require("lib.type.experiments.v5_perf.types")
 
 local M = {}
 
+-- ── Directive record type declarations ────────────────────────────────────────
+
+-- Note: the `type` fields carry V5Type values at runtime.  We declare them as
+-- `unknown` so that callers (e.g. constrain.lua) can access the `kind` and
+-- `name` / `arity` fields which have concrete types, while narrowing the `type`
+-- field themselves via checked casts in their own V5Type-aware scope.
+--:: DeclDirTypeAlias   = { kind: string, name: string, type: unknown, params: string[] | nil }
+--:: DeclDirDeclareVar  = { kind: string, name: string, type: unknown }
+--:: DeclDirDeclEffect  = { kind: string, name: string, arity: number }
+--:: DeclDirModule      = { kind: string, mod_name: string, type: unknown }
+--:: DeclDirRequire     = { kind: string, mod_name: string }
+--:: DeclDirTemplate    = { kind: string }
+--:: V5Directive = DeclDirTypeAlias | DeclDirDeclareVar | DeclDirDeclEffect | DeclDirModule | DeclDirRequire | DeclDirTemplate
+
 -- ── Byte constants ──────────────────────────────────────────────────────────
 
 local byte   = string.byte
@@ -673,7 +687,7 @@ end
 --   { kind = "require",     mod_name = string }
 --   { kind = "template" }
 --
---: (string) -> ({ [string]: unknown } | nil, string | nil)
+--: (string) -> (V5Directive | nil, string | nil)
 function M.parse_declaration(text)
     local s = new_scanner(text)
     local ok, result = pcall(function()
