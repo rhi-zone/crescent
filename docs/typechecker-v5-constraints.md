@@ -41,7 +41,7 @@ From `docs/typechecker-architecture-from-first-principles.md` §2. D6, D11, D14 
 ### From D11 (gen-time mutable side-channels)
 
 - **B5. All data needed to solve a constraint lives in the constraint record.** No ctx mutation between gen and solve. — D11.
-- **B6. The constraint record carries HKT decomposition payload, multi-return slot indices, rank-N bounds, forall ops — none of these as ctx fields.** — D11 enumerated examples.
+- **B6. The constraint record carries HKT decomposition payload, multi-return slot indices, rank-N bounds, forall ops — none of these as ctx fields.** — D11 enumerated examples. *(Note 2026-05-25: multi-return dissolved into positional Record on `Arrow.ret`; no separate CMultiReturn constraint form exists in v5. The D11 principle still holds — positional key indices, if any, belong on the Record type, not in ctx.)*
 - **B7. gen/solve separation is enforced by types/data shape, not by convention.** — D11.
 - **B8. 18 distinct ctx fields are a symptom, not 18 problems.** Acceptable ctx fields in v5: scope/env, worklist, union-find store. Anything else needs an explicit B5 justification. — `docs/typechecker-ad-hoc-inventory.md`.
 

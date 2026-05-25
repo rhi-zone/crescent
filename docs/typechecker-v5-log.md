@@ -1080,3 +1080,51 @@ Where does the v5 constraints catalog live durably?
 ### Next entry point
 
 Unchanged — op-sem follow-ups per the prior session's next-entry list.
+
+---
+
+## 2026-05-25 — G7 dissolved: CMultiReturn replaced by positional Record on Arrow.ret
+
+### Context and motivation
+
+The prior session's handoff named G7 (CMultiReturn union-arity) as a high-severity spec gap requiring its own constraint family. When this session opened, the user questioned the design: "what the fuck is cmultireturn" — pointing out that a dedicated constraint family for multi-return was unnecessary if the type system already had positional Records. This was not a new insight: v4 had used positional Records as a workaround for multi-return (integers as field keys), but the choice was unprincipled there — it was structural accident, not a design decision. In v5, making it a design decision eliminates the CMultiReturn family entirely. No four-rule design, no new constraint form.
+
+### What changed
+
+**Representation pivot**: `Arrow.ret` was changed from `(Type list)` to `(Type)`. Multi-return `(A, B, C)` is now a single type: a positional Record `{1: A, 2: B, 3: C}`. This is not a wrapper — it is the type. There is no CMultiReturn constraint. The load-bearing rule is T-CSub-Record's positional-key dispatch, which was already in place (Phase 3, variance work).
+
+**Covariant vs invariant**: positional Record keys (integer keys) are covariant because multi-return slots are caller-read-only — no write path exists. Named Record fields remain invariant because they are mutable (write soundness requires invariance for field types). This variance distinction is principled, not ad hoc: LSP / write-soundness is the load-bearing reason named fields are invariant; the absence of a write path for positional return slots is the load-bearing reason positional keys are covariant.
+
+**Nil-padding**: over-arity calls discard trailing slots; under-arity calls nil-pad. Both are standard Record subtyping under covariant positional dispatch. The gen-pass invariant: over-arity discard must happen at constraint-emission time (before CSub emission), not inside the solver. Emitting a positional Record with extra keys and letting CSub discard them would be wrong — the solver sees a width mismatch as a potential error. This invariant was surfaced during Phase 4 and must be preserved when gen-pass work begins.
+
+**Fixture 6 update**: fixture 6 was previously a scalar stand-in for multi-return (documented as such). It now uses a real positional Record and tests the full nil-pad shape.
+
+### Five-phase landing
+
+| Phase | Commit | Description |
+|---|---|---|
+| 1 — substrate | `2ce1e591` | Arrow.ret single type, multi-return as positional Record |
+| 2 — op-sem | `07afc26a` | positional Record dispatch with covariant subtyping and nil-pad |
+| 3 — collapse | `720a9f6c` | collapse Arrow rules to single ret recursion |
+| 4 — fixtures | `c9e018b9` | fixture 6 uses real positional Record; add nil-pad fixtures |
+| 5 — docs | this commit | dissolve G7 across handoff, log, constraints catalog, TODO.md |
+
+### Assertion count delta
+
+146 → 187 (+41 assertions). All pass. Both interpreters (`op_sem.lua`, `op_sem_alt.lua`) pass all 187.
+
+### Invariant surfaced (track for gen-pass)
+
+**Over-arity discard must happen before CSub emission.** When a call site returns more slots than the LHS expects, the positional Record emitted by gen-pass must contain only the expected slots. Emitting the full record and letting T-CSub-Record discard the surplus would give the solver a width mismatch on positional keys it cannot distinguish from a genuine type error. This is a gen-pass contract, not a solver fix.
+
+### Decisions closed
+
+- G7 (CMultiReturn, high-severity spec gap): dissolved. No new constraint family needed.
+
+### Decisions still open
+
+- G8 (CRow narrowing suppression), G12 (CEffect variance): still high-severity, unchanged.
+
+### Next entry point
+
+CRow + CEffect unified extension (G8 + G12) per Option A in the handoff next-session menu.

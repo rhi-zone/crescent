@@ -24,13 +24,13 @@ If you read only one file, read this. Then dive into the log when you need detai
 | Parity test (independent encoding) | `lib/type/static-v5/op_sem_independent_parity_test.lua` | ~700 | 85 assertions, all pass |
 | Backlog | `TODO.md` (root) | — | Pre-stable + post-stable items |
 
-**Combined parity: 146/146 assertions across 32 fixtures. Zero divergence between two independently-implemented interpreters.**
+**Combined parity: 187/187 assertions across 32 fixtures (up from 146 after Phase 5 multi-return work). Zero divergence between two independently-implemented interpreters.**
 
 ---
 
 ## 2. Architecture in one paragraph
 
-Reified constraint ADT with provenance + Wanted/Given flavour. Monotone union-find substitution `TVarId → (Type, Phase)` is the single source of truth — no side-channels. Worklist + inert set; pop, try progress under current substitution, extend or add to inert. **No cycle detection** — quiescence is worklist empty; inert constraints at quiescence are stuck errors. Circular `require` rejected at typecheck (topological module order). Type AST splits free unification tvars (`UVar(TVarId)`, gensym IDs, never shift) from De Bruijn bound vars (`Var(LvlIdx)`, shift under β). **Eager shift on bind.** Tvars never change level (Lean discipline; no Rémy lowering — soundness floor). Construction phase is constraint variants (`CTableOpen/Set/Seal/CMethodCall`); per-tvar `Phase = Open | Sealed` is part of the substitution binding. `setmetatable(t, nil)` unconditionally rejected. HKT via direct type lambdas + Miller pattern fragment + `HOUnify` residue (never commit guessed HO solutions). Record fields invariant (mutable in v5 → covariant would be TS-array unsoundness). Multi-return unified as tuple-of-unions with nil padding; narrowing strong on closed unions, **suppressed on row variables** (soundness floor).
+Reified constraint ADT with provenance + Wanted/Given flavour. Monotone union-find substitution `TVarId → (Type, Phase)` is the single source of truth — no side-channels. Worklist + inert set; pop, try progress under current substitution, extend or add to inert. **No cycle detection** — quiescence is worklist empty; inert constraints at quiescence are stuck errors. Circular `require` rejected at typecheck (topological module order). Type AST splits free unification tvars (`UVar(TVarId)`, gensym IDs, never shift) from De Bruijn bound vars (`Var(LvlIdx)`, shift under β). **Eager shift on bind.** Tvars never change level (Lean discipline; no Rémy lowering — soundness floor). Construction phase is constraint variants (`CTableOpen/Set/Seal/CMethodCall`); per-tvar `Phase = Open | Sealed` is part of the substitution binding. `setmetatable(t, nil)` unconditionally rejected. HKT via direct type lambdas + Miller pattern fragment + `HOUnify` residue (never commit guessed HO solutions). Record fields invariant (mutable in v5 → covariant would be TS-array unsoundness). Multi-return **dissolved into positional Record on `Arrow.ret`** — no separate CMultiReturn constraint family. `Arrow.ret` holds a single `Type`; multi-return `(A, B, C)` is a positional Record `{1: A, 2: B, 3: C}`. T-CSub-Record's positional-key dispatch (covariant) is the load-bearing rule; nil-padding at call sites is standard Record subtyping with nil-widening. Named Record fields remain invariant (mutable-field write soundness); positional keys are covariant because they are caller-read-only multi-return slots. Narrowing strong on closed unions, **suppressed on row variables** (soundness floor).
 
 ## 3. Key invariants (load-bearing)
 
@@ -59,7 +59,7 @@ Reified constraint ADT with provenance + Wanted/Given flavour. Monotone union-fi
 
 - **Realistic scale**: tested at 200-500 constraints; architecture targets ~10⁵. Linear extrapolation projects ~40ms at 10⁵; non-linear factors (GC pauses, cache pressure, LuaJIT trace bailouts) not captured.
 - **Gen-pass output ordering**: synthetic extractor uses pattern-grep; real gen may stress different paths.
-- **Hard constraint families not in scope yet**: CEffect, CRow, CImpl, CMultiReturn. Each needs its own perf re-gate.
+- **Hard constraint families not in scope yet**: CEffect, CRow, CImpl. Each needs its own perf re-gate. CMultiReturn dissolved — no separate family needed.
 
 ---
 
@@ -75,7 +75,7 @@ Per F12, these are gaps the agents flagged honestly rather than filling silently
 | G4 | No shift-aware abstraction over nested lambdas — `abstract_body` bails via guard | CHKT agent | Med | Future HKT extension |
 | G5 | HOUnify residue provenance chaining for CImpl→CHKT→HOUnify | CHKT agent | Med | CImpl landing |
 | G6 | μ.__index chain walk for missing field on sealed table; HKT-shaped metatables need orchestrator decision | op-sem core agent | Med | Future op-sem extension |
-| G7 | CMultiReturn union-arity not formalised (fixture 6 encoded as scalar stand-in) | op-sem core agent | High | CMultiReturn family |
+| G7 | ~~CMultiReturn union-arity not formalised (fixture 6 encoded as scalar stand-in)~~ **DISSOLVED 2026-05-25** — no CMultiReturn constraint family needed. Multi-return encoded as positional Record on `Arrow.ret`; T-CSub-Record's positional dispatch handles union-arity and nil-padding. Fixtures updated. Commits: `2ce1e591`, `07afc26a`, `720a9f6c`, `c9e018b9`. | op-sem core agent → resolved | ~~High~~ Closed | positional Record on Arrow.ret |
 | G8 | CRow narrowing suppression on row variables (item 7 soundness floor); not exercised by any fixture yet | op-sem core agent | High | CRow family |
 | G9 | Bounded tvars — T-CSub-TVar routes to CEq; full bounded substrate is v5.x | Variance agent | Med | v5.x bounds work |
 | G10 | Variance under Lambda — registry covers named Const only | Variance agent | Med | HKT variance polish |
@@ -86,7 +86,7 @@ Per F12, these are gaps the agents flagged honestly rather than filling silently
 | G15 | T-CTSet four-way cascade order not formally enforced | Independent-parity agent | Low | Doc clarification |
 | G16 | T-CHKT-Reduce chain peel depth not formally specified | Independent-parity agent | Low | Doc clarification |
 
-**G7, G8, G12 are high-severity** — they block specific constraint family landings.
+**G8, G12 are high-severity** — they block specific constraint family landings. G7 is closed (dissolved into positional Record).
 
 ---
 
@@ -161,12 +161,10 @@ Each option's prerequisites and rough cycle count.
 ### Option A: Continue extending op-sem (CRow + CEffect unified)
 **Prereqs**: nothing blocking; G8 + G12 will be addressed by this work.
 **Cycles**: 1-2. Builds substrate row machinery + constraint variants. Perf re-gate at end.
-**Next after**: CImpl, then CMultiReturn (G7), then minimal core complete.
+**Next after**: CImpl, then minimal core complete.
 
-### Option B: CMultiReturn (G7)
-**Prereqs**: nothing blocking. Smaller than CEffect.
-**Cycles**: 1. Builds union-arity rule + fixtures. Closes a high-severity gap.
-**Next after**: still need CRow/CEffect.
+### ~~Option B: CMultiReturn (G7)~~ — DISSOLVED 2026-05-25
+Multi-return is positional Record on `Arrow.ret`; no separate constraint family. G7 is closed. See commits `2ce1e591`, `07afc26a`, `720a9f6c`, `c9e018b9` and log entry 2026-05-25.
 
 ### Option C: Gen-pass — connect op-sem to real Lua AST
 **Prereqs**: substrate promotion from `experiments/` to `static-v5/` (a sub-cycle of its own).
@@ -183,8 +181,8 @@ Each option's prerequisites and rough cycle count.
 
 ### Recommended order (orchestrator suggestion, not binding)
 
-1. **E** (catalog relocation) — tiny, removes a durability risk
-2. **B** (CMultiReturn) — closes a high-severity gap, smallest cycle
+1. ~~**E** (catalog relocation)~~ — Done 2026-05-25
+2. ~~**B** (CMultiReturn)~~ — Dissolved 2026-05-25 into positional Record
 3. **A** (CRow + CEffect unified) — closes G8 + G12, largest unresolved family
 4. **D** (pre-stable follow-ups) — discharge before declaring stable
 5. **C** (gen-pass) — productionisation; bigger work, comes after architecture is settled
@@ -205,6 +203,7 @@ For chronological detail, the log has:
 - **2026-05-24**: variance-respecting CSub (6 commits, +12 assertions, perf re-gate PASS).
 - **2026-05-24**: independent-encoding parity (3 commits, 85 assertions, PASS, no divergences).
 - **2026-05-25**: this handoff entry.
+- **2026-05-25**: G7 dissolved — multi-return as positional Record on Arrow.ret (5 commits: `2ce1e591`, `07afc26a`, `720a9f6c`, `c9e018b9`, docs). Parity count 146 → 187.
 
 Commits this session (chronological):
 ```

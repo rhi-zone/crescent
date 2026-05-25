@@ -8,7 +8,8 @@
 
 ### High-severity open threads (constraint families)
 
-- **CMultiReturn (spec gap G7) might be next**, or might not — high-severity gap but smallest cycle. Multi-return like `t.x, t.y = f()` with variable-arity `f`. Decision was union-of-branches with nil-padding; rules not yet written. Open: how the rule interacts with row-extension when LHS is a table.
+- [x] **CMultiReturn (spec gap G7)** — DISSOLVED 2026-05-25. No separate constraint family. Multi-return is positional Record on `Arrow.ret`; T-CSub-Record's positional-key dispatch (covariant) handles union-arity and nil-padding. Commits: `2ce1e591`, `07afc26a`, `720a9f6c`, `c9e018b9`. Parity count 146 → 187.
+- [ ] **Gen-pass invariant: over-arity discard before CSub emission** — when a call site returns more slots than the LHS expects, gen-pass must emit a positional Record with only the expected slots. Emitting the full record and letting T-CSub-Record discard extras would present the solver with a width mismatch it cannot distinguish from a type error. Track when gen-pass work begins.
 - **CRow + CEffect unified extension (G8 + G12)** — row-tail variance for effect rows is shared with CRow's row mechanism; combined extension may be more efficient than CEffect alone. CSub variance is half-discharged; the other half is row-tail. Open: whether unifying is actually cleaner or forces premature coupling.
 - **CImpl (let-poly with implication wanteds)** — OutsideIn-style scope discipline. Op-sem has `CInst` but not `CImpl`. Open: do we need GADTs at all? Roadmap H5 closed "GADT-strength flow typing out of scope," suggesting CImpl can be lighter than OutsideIn's full version.
 
