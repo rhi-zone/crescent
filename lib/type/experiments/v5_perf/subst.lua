@@ -204,6 +204,9 @@ function M.walk(s, t)
 			return { tag = "uvar", id = r }
 		end
 		return M.walk(s, b)
+	elseif t.tag == "rowvar" then
+		-- Row variables are not in the uvar substitution map; return as-is.
+		return t
 	elseif t.tag == "app" then
 		local sf = M.walk(s, t.f) --[[: V5Type ]]
 		local sa = M.walk(s, t.a) --[[: V5Type ]]
@@ -216,7 +219,7 @@ function M.walk(s, t)
 		for fk, fv in pairs(t.fields) do
 			if fv ~= nil then local sh = M.walk(s, fv) --[[: V5Type ]]; out[fk] = sh end
 		end
-		return { tag = "record", fields = out }
+		return { tag = "record", fields = out, row = t.row }
 	elseif t.tag == "arrow" then
 		local args = {} --[[: V5Type[] ]]
 		for i = 1, #t.args do
@@ -232,6 +235,13 @@ function M.walk(s, t)
 			if v ~= nil then local sh = M.walk(s, v) --[[: V5Type ]]; xs[i] = sh end
 		end
 		return { tag = "union", xs = xs }
+	elseif t.tag == "intersection" then
+		local parts = {} --[[: V5Type[] ]]
+		for i = 1, #t.parts do
+			local v = t.parts[i]
+			if v ~= nil then local sh = M.walk(s, v) --[[: V5Type ]]; parts[i] = sh end
+		end
+		return { tag = "intersection", parts = parts }
 	end
 	return t
 end
