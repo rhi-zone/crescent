@@ -192,11 +192,46 @@ function M.rule_T_CEq_Arrow(st, a, b, prov)
 	emit(st, constraint_mod.eq(da.ret, db.ret, prov))
 end
 
+-- is_positional: true iff record fields are exactly the string keys "1".."n"
+-- for some n >= 0, contiguous with no gaps and no non-numeric keys.
+-- Independent encoding from op_sem.lua per the alternate-interpreter mandate.
+--: (V5Type) -> boolean
+local function is_positional(r)
+	if r.tag ~= "record" then return false end
+	local n = 0
+	for _ in pairs(r.fields) do n = n + 1 end
+	for i = 1, n do
+		if r.fields[tostring(i)] == nil then return false end
+	end
+	return true
+end
+
 --: (AltState, V5Type, V5Type, Provenance) -> nil
 function M.rule_T_CEq_Record(st, a, b, prov)
 	local da = subst_mod.deref(st.subst, a) --[[: V5Type ]]
 	local db = subst_mod.deref(st.subst, b) --[[: V5Type ]]
 	if da.tag ~= "record" or db.tag ~= "record" then return end
+	local a_pos = is_positional(da)
+	local b_pos = is_positional(db)
+	if a_pos and b_pos then
+		-- Positional branch: eq is strict on arity (no nil-pad for eq).
+		local na, nb = 0, 0
+		for _ in pairs(da.fields) do na = na + 1 end
+		for _ in pairs(db.fields) do nb = nb + 1 end
+		if na ~= nb then
+			record_error(st, "T-CEq-Record", "positional arity mismatch: " .. na .. " vs " .. nb)
+			return
+		end
+		for i = 1, na do
+			local va = da.fields[tostring(i)]
+			local vb = db.fields[tostring(i)]
+			if va ~= nil and vb ~= nil then
+				emit(st, constraint_mod.eq(va, vb, prov))
+			end
+		end
+		return
+	end
+	-- Mixed shapes (one positional, one named): fall through to named-key rule.
 	-- Domain check.
 	for k, _v in pairs(da.fields) do
 		if db.fields[k] == nil then
@@ -402,6 +437,25 @@ function M.rule_T_CSub_Record_Width(st, a, b, prov)
 	local da = subst_mod.deref(st.subst, a) --[[: V5Type ]]
 	local db = subst_mod.deref(st.subst, b) --[[: V5Type ]]
 	if da.tag ~= "record" or db.tag ~= "record" then return end
+	local a_pos = is_positional(da)
+	local b_pos = is_positional(db)
+	if a_pos and b_pos then
+		-- Positional covariant branch (Arrow returns).
+		-- Nil-pad policy: shorter side padded with Const("nil") so sub is
+		-- always valid regardless of which side is wider.
+		local na, nb = 0, 0
+		for _ in pairs(da.fields) do na = na + 1 end
+		for _ in pairs(db.fields) do nb = nb + 1 end
+		local n = na > nb and na or nb
+		local nil_type = types_mod.const("nil")
+		for i = 1, n do
+			local va = da.fields[tostring(i)] or nil_type
+			local vb = db.fields[tostring(i)] or nil_type
+			emit(st, constraint_mod.sub(va, vb, prov))
+		end
+		return
+	end
+	-- Mixed shapes (one positional, one named): fall through to named-key rule.
 	-- dom(G) ⊆ dom(F)  where da=F (sub), db=G (sup).
 	for k, _v in pairs(db.fields) do
 		if da.fields[k] == nil then

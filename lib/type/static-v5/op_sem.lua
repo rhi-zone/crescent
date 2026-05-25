@@ -268,12 +268,51 @@ function M.rule_T_CEq_Arrow(st, a, b, prov)
 	return "done"
 end
 
+-- is_positional: true iff record fields are exactly the string keys "1".."n"
+-- for some n >= 0, with no gaps and no non-numeric keys.
+-- Keys are stored as strings (tostring(i)) per the substrate in types.lua.
+--: (V5Type) -> boolean
+local function is_positional(r)
+	if r.tag ~= "record" then return false end
+	local n = 0
+	for _ in pairs(r.fields) do n = n + 1 end
+	for i = 1, n do
+		if r.fields[tostring(i)] == nil then return false end
+	end
+	return true
+end
+
 -- T-CEq-Record.
+-- Dispatch: both positional -> arity-check then per-field eq.
+--           named/mixed    -> existing invariant domain-equality check.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CEq_Record(st, a, b, prov)
 	if a.tag ~= "record" or b.tag ~= "record" then
 		err(st, "T-CEq-Record", "precondition: both record"); return "error"
 	end
+	local a_pos = is_positional(a)
+	local b_pos = is_positional(b)
+	if a_pos and b_pos then
+		-- Positional branch: eq is strict on arity (no nil-pad for eq).
+		local na, nb = 0, 0
+		for _ in pairs(a.fields) do na = na + 1 end
+		for _ in pairs(b.fields) do nb = nb + 1 end
+		if na ~= nb then
+			err(st, "T-CEq-Record", "positional arity mismatch: " .. na .. " vs " .. nb)
+			return "error"
+		end
+		for i = 1, na do
+			local va = a.fields[tostring(i)]
+			local vb = b.fields[tostring(i)]
+			if va ~= nil and vb ~= nil then
+				M.emit(st, constraint_mod.eq(va, vb, prov))
+			end
+		end
+		trace(st, "T-CEq-Record", "positional n=" .. na)
+		return "done"
+	end
+	-- Mixed shapes (one positional, one named): fall through to named-key rule.
+	-- Conservative choice: treat as named-key domain mismatch if keys differ.
 	for k, va in pairs(a.fields) do
 		local vb = b.fields[k]
 		if vb == nil then
@@ -469,11 +508,37 @@ end
 
 -- T-CSub-Record-Width.  Width subtyping with invariant fields.  Supertype
 -- (b) has fewer fields; each common field is required equal.
+-- Dispatch: both positional -> covariant per-field sub with nil-pad width
+--           policy; named/mixed -> existing invariant domain check.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CSub_Record_Width(st, a, b, prov)
 	if a.tag ~= "record" or b.tag ~= "record" then
 		err(st, "T-CSub-Record-Width", "precondition: both record"); return "error"
 	end
+	local a_pos = is_positional(a)
+	local b_pos = is_positional(b)
+	if a_pos and b_pos then
+		-- Positional covariant branch (Arrow returns).
+		-- Nil-pad policy: the shorter side gets Const("nil") for missing
+		-- positions so sub(va, vb) is always well-formed regardless of which
+		-- side is wider.
+		local na, nb = 0, 0
+		for _ in pairs(a.fields) do na = na + 1 end
+		for _ in pairs(b.fields) do nb = nb + 1 end
+		local n = na > nb and na or nb
+		local nil_type = types_mod.const("nil")
+		for i = 1, n do
+			local va = a.fields[tostring(i)] or nil_type
+			local vb = b.fields[tostring(i)] or nil_type
+			M.emit(st, constraint_mod.sub(va, vb, prov))
+		end
+		trace(st, "T-CSub-Record-Width", "positional covariant na=" .. na .. " nb=" .. nb)
+		return "done"
+	end
+	-- Mixed shapes (one positional, one named): fall through to named-key rule.
+	-- Conservative choice: treat as named-key subtyping; key-shape mismatch
+	-- surfaces as a missing-field error when the positional string keys ("1",
+	-- "2", ...) don't appear in the named record.
 	for k, vb in pairs(b.fields) do
 		local va = a.fields[k]
 		if va == nil then
