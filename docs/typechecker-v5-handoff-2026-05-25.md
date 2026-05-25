@@ -10,7 +10,7 @@ If you read only one file, read this. Then dive into the log when you need detai
 
 | Artifact | Path | LOC | Status |
 |---|---|---|---|
-| Constraints catalog | `~/.claude/plans/radiant-gathering-gray.md` | ~250 | **Outside repo — relocation owed** |
+| Constraints catalog | `docs/typechecker-v5-constraints.md` | ~250 | In-repo (relocated 2026-05-25) |
 | Decision log (append-only) | `docs/typechecker-v5-log.md` | 1034 | Current |
 | Discovery (unframed) | `docs/typechecker-v5-discovery-unframed.md` | ~700 | Reference |
 | Discovery (tainted, radioactive) | `docs/typechecker-v5-discovery-tainted.md` | ~300 | Do not cite |
@@ -97,7 +97,7 @@ Per F12, these are gaps the agents flagged honestly rather than filling silently
 - **Exhaustive prior-session mining**: sampled pass found 5 multi-session arcs; exhaustive pass owed. Particular value: scheduler-shaped problems, mechanisms previous attempts found load-bearing.
 - **Adversarial missed-generalisation eval** (item 6 follow-up): generate Lua snippets that the no-level-lowering discipline rejects but Rémy lowering would accept. Classify by idiomatic/rare/pathological. Revisit lowering if idiomatic patterns are common.
 - **Circular `require` corpus check**: grep `lib/` for circular patterns. If any are load-bearing (not incidental), revisit before declaring v5 stable.
-- **Constraints catalog relocation**: `~/.claude/plans/radiant-gathering-gray.md` → `docs/typechecker-v5-constraints.md`. Outside-repo location is durability risk.
+- ~~**Constraints catalog relocation**: `~/.claude/plans/radiant-gathering-gray.md` → `docs/typechecker-v5-constraints.md`. Outside-repo location is durability risk.~~ Done 2026-05-25.
 
 ### Post-stable (low/medium prio)
 
@@ -179,7 +179,7 @@ Each option's prerequisites and rough cycle count.
 
 ### Option E: Constraint catalog relocation
 **Prereqs**: nothing.
-**Cycles**: <1. Move `~/.claude/plans/radiant-gathering-gray.md` to `docs/typechecker-v5-constraints.md`. Update references in log + handoff. Small but durable.
+**Cycles**: <1. ~~Move `~/.claude/plans/radiant-gathering-gray.md` to `docs/typechecker-v5-constraints.md`. Update references in log + handoff. Small but durable.~~ Done 2026-05-25; catalog now at `docs/typechecker-v5-constraints.md`.
 
 ### Recommended order (orchestrator suggestion, not binding)
 

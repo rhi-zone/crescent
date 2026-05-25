@@ -17,7 +17,7 @@
 - **Realistic-scale perf is a hypothesis.** Architecture targets ~10⁵ constraints; tested at <500. Re-gate at scale during each constraint-family landing, or build a synthetic-load extrapolation harness explicitly.
 - **Gen-pass connection to real Lua AST not started.** Op-sem currently takes hand-emitted constraints. Bridging to the existing parser is its own multi-cycle phase. Open: build a fresh extractor or adapt the v4 walker?
 - **Substrate promotion from `lib/type/experiments/v5_perf/` to `lib/type/static-v5/`** is owed once op-sem hardens. Cleans the namespace.
-- **Constraints catalog at `~/.claude/plans/radiant-gathering-gray.md` is outside the repo.** Durability risk. Relocate to `docs/typechecker-v5-constraints.md` or similar. Tiny task.
+- [x] **Constraints catalog at `~/.claude/plans/radiant-gathering-gray.md` is outside the repo.** Durability risk. Relocate to `docs/typechecker-v5-constraints.md` or similar. Tiny task. — Landed in repo at `docs/typechecker-v5-constraints.md` (recovered from session transcript; original was overwritten in-place).
 
 ### Pre-stable follow-ups
 

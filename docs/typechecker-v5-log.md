@@ -3,7 +3,7 @@
 Append-only. One entry per session, decision, or experiment.
 
 **Companion files:**
-- Constraints catalog (the binding spec): `~/.claude/plans/radiant-gathering-gray.md` (not in repo — relocation TBD, see open thread below).
+- Constraints catalog (the binding spec): `docs/typechecker-v5-constraints.md` (relocated into repo 2026-05-25; originally lived at `~/.claude/plans/radiant-gathering-gray.md`).
 - Unframed architecture discovery: `docs/typechecker-v5-discovery-unframed.md`.
 - Tainted (pre-framed) discovery: `docs/typechecker-v5-discovery-tainted.md` — radioactive; do not cite as design evidence.
 
@@ -87,7 +87,7 @@ Three Explore agents earlier this session were prompted with "patterns relevant 
 
 ### Open thread: where the constraints catalog lives
 
-The constraints catalog is at `~/.claude/plans/radiant-gathering-gray.md` — outside the repo. For durability and reviewability, it likely belongs under `docs/typechecker-v5-constraints.md` or similar. Not relocated this session; flagged for next session.
+The constraints catalog is at `~/.claude/plans/radiant-gathering-gray.md` — outside the repo. For durability and reviewability, it likely belongs under `docs/typechecker-v5-constraints.md` or similar. Not relocated this session; flagged for next session. **Resolved 2026-05-25** — see entry below; catalog now at `docs/typechecker-v5-constraints.md`.
 
 ### Next entry point
 
@@ -228,7 +228,7 @@ There is no D6-shape "multiple coexisting mechanisms" trap because each of the f
 ### Decisions still open
 
 - **H10**: `any` escape hatch for community release. Not addressed by SOTA bar.
-- **Constraints catalog relocation**: `~/.claude/plans/radiant-gathering-gray.md` → `docs/typechecker-v5-constraints.md`.
+- ~~**Constraints catalog relocation**: `~/.claude/plans/radiant-gathering-gray.md` → `docs/typechecker-v5-constraints.md`.~~ Done 2026-05-25.
 - **Corpus survey for setmetatable typestate**: need to confirm <5% of construction sites need helpers across all of `lib/`.
 
 ### Next entry point
@@ -1050,3 +1050,33 @@ Major outstanding work named in the handoff (not done this session, not silently
 - 4 pre-stable backlog items: exhaustive session mining, missed-gen eval, circular require corpus check, catalog relocation
 
 No silent decisions. No abandoned threads.
+
+---
+
+## 2026-05-25 — Constraints catalog landed in repo
+
+### Question
+
+Where does the v5 constraints catalog live durably?
+
+### Evidence
+
+- Catalog lived at `~/.claude/plans/radiant-gathering-gray.md` (outside repo); flagged as durability risk in the 2026-05-22 session open thread and again in the 2026-05-25 handoff (Option E, cycles <1).
+- That on-disk file was overwritten in a later session with a 3,013-char handoff blurb, replacing the 16,643-char catalog. Confirmed durability risk was real.
+- Full original content recovered from session JSONL transcript and re-saved verbatim to `docs/typechecker-v5-constraints.md` (16,643 chars, sections A–I intact).
+
+### Decisions closed
+
+- Constraints catalog now lives at `docs/typechecker-v5-constraints.md`. References in `TODO.md`, `docs/typechecker-v5-handoff-2026-05-25.md`, and this log updated to point at the in-repo path. Stale handoff blurb at `~/.claude/plans/radiant-gathering-gray.md` left in place (no longer authoritative).
+
+### Decisions still open
+
+- None opened by this entry.
+
+### Tainted artifacts
+
+- None.
+
+### Next entry point
+
+Unchanged — op-sem follow-ups per the prior session's next-entry list.
