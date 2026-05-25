@@ -264,31 +264,163 @@ T.describe("indep parity: fixture 5 — let-poly CInst", function()
 end)
 
 -- ════════════════════════════════════════════════════════════════════
--- Fixture 6: multi-return scalar stand-in
+-- Fixture 6: multi-return positional Record CSub
 -- ════════════════════════════════════════════════════════════════════
-T.describe("indep parity: fixture 6 — multi-return scalar stand-in", function()
-	T.it("CTOpen + 2x CTSet agree", function()
+-- `local a, b = f()` where f : () -> (number, number).
+-- CSub(Record{1=number,2=number}, Record{1=?a,2=?b}) unifies a,b=number.
+-- (Spec gap closed: positional Record dispatch from Phase 3 handles this.)
+T.describe("indep parity: fixture 6 — multi-return positional Record CSub", function()
+	T.it("CSub(Record{1=number,2=number}, Record{1=?a,2=?b}) — both agree", function()
 		local number = types_mod.const("number") --[[: V5Type ]]
-		local nilty = types_mod.const("nil") --[[: V5Type ]]
 
 		local exec = fresh_state()
-		local t = subst_mod.fresh(exec.subst, "open")
-		op_sem.emit(exec, constraint_mod.table_open(t, prov("t={}")))
-		op_sem.emit(exec, constraint_mod.table_set(t, "x", number, prov("t.x")))
-		op_sem.emit(exec, constraint_mod.table_set(t, "y", nilty, prov("t.y")))
+		local a = subst_mod.fresh(exec.subst, "open")
+		local b = subst_mod.fresh(exec.subst, "open")
+		local prod = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
+		local dest = types_mod.record({ ["1"] = types_mod.uvar(a), ["2"] = types_mod.uvar(b) }) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.sub(prod, dest, prov("6-call")))
 		op_sem.run(exec)
 
 		local alt = fresh_state()
-		local t2 = subst_mod.fresh(alt.subst, "open")
-		op_sem.emit(alt, constraint_mod.table_open(t2, prov("t={}")))
-		op_sem.emit(alt, constraint_mod.table_set(t2, "x", number, prov("t.x")))
-		op_sem.emit(alt, constraint_mod.table_set(t2, "y", nilty, prov("t.y")))
+		local a2 = subst_mod.fresh(alt.subst, "open")
+		local b2 = subst_mod.fresh(alt.subst, "open")
+		local prod2 = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
+		local dest2 = types_mod.record({ ["1"] = types_mod.uvar(a2), ["2"] = types_mod.uvar(b2) }) --[[: V5Type ]]
+		op_sem.emit(alt, constraint_mod.sub(prod2, dest2, prov("6-call")))
 		op_sem_alt.run(alt)
 
-		local rex_fixture6_t = op_sem.resolve(exec, t) --[[: V5Type ]]
-		local ralt_fixture6_t = op_sem_alt.resolve(alt, t2) --[[: V5Type ]]
-		assert_resolve_eq("fixture6.t", rex_fixture6_t, ralt_fixture6_t)
+		local rex_fixture6_a = op_sem.resolve(exec, a) --[[: V5Type ]]
+		local ralt_fixture6_a = op_sem_alt.resolve(alt, a2) --[[: V5Type ]]
+		assert_resolve_eq("fixture6.a", rex_fixture6_a, ralt_fixture6_a)
+		local rex_fixture6_b = op_sem.resolve(exec, b) --[[: V5Type ]]
+		local ralt_fixture6_b = op_sem_alt.resolve(alt, b2) --[[: V5Type ]]
+		assert_resolve_eq("fixture6.b", rex_fixture6_b, ralt_fixture6_b)
 		assert_state_parity("fixture6", exec, alt)
+	end)
+end)
+
+-- ════════════════════════════════════════════════════════════════════
+-- Fixture 6a: nil-pad under-arity
+-- ════════════════════════════════════════════════════════════════════
+-- `local a, b, c = f()` where f returns 2 values.
+-- CSub(Record{1=number,2=number}, Record{1=?a,2=?b,3=?c})
+-- Position 3 on producer is absent → padded with Const("nil").
+-- Expect: a=number, b=number, c=nil; no errors.
+T.describe("indep parity: fixture 6a — nil-pad under-arity", function()
+	T.it("CSub(2-ret, 3-dest) nil-pads position 3 — both agree", function()
+		local number = types_mod.const("number") --[[: V5Type ]]
+		local nilty  = types_mod.const("nil") --[[: V5Type ]]
+
+		local exec = fresh_state()
+		local a = subst_mod.fresh(exec.subst, "open")
+		local b = subst_mod.fresh(exec.subst, "open")
+		local c = subst_mod.fresh(exec.subst, "open")
+		local prod2 = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
+		local dest3 = types_mod.record({ ["1"] = types_mod.uvar(a), ["2"] = types_mod.uvar(b), ["3"] = types_mod.uvar(c) }) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.sub(prod2, dest3, prov("6a-call")))
+		op_sem.run(exec)
+
+		local alt = fresh_state()
+		local a2 = subst_mod.fresh(alt.subst, "open")
+		local b2 = subst_mod.fresh(alt.subst, "open")
+		local c2 = subst_mod.fresh(alt.subst, "open")
+		local prod2a = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
+		local dest3a = types_mod.record({ ["1"] = types_mod.uvar(a2), ["2"] = types_mod.uvar(b2), ["3"] = types_mod.uvar(c2) }) --[[: V5Type ]]
+		op_sem.emit(alt, constraint_mod.sub(prod2a, dest3a, prov("6a-call")))
+		op_sem_alt.run(alt)
+
+		local rex_6a_a = op_sem.resolve(exec, a) --[[: V5Type ]]
+		local ralt_6a_a = op_sem_alt.resolve(alt, a2) --[[: V5Type ]]
+		assert_resolve_eq("fixture6a.a", rex_6a_a, ralt_6a_a)
+		local rex_6a_b = op_sem.resolve(exec, b) --[[: V5Type ]]
+		local ralt_6a_b = op_sem_alt.resolve(alt, b2) --[[: V5Type ]]
+		assert_resolve_eq("fixture6a.b", rex_6a_b, ralt_6a_b)
+		local rex_6a_c = op_sem.resolve(exec, c) --[[: V5Type ]]
+		local ralt_6a_c = op_sem_alt.resolve(alt, c2) --[[: V5Type ]]
+		assert_resolve_eq("fixture6a.c", rex_6a_c, ralt_6a_c)
+		T.ok(types_mod.equal(rex_6a_c, nilty), "exec c resolves to nil")
+		T.ok(types_mod.equal(ralt_6a_c, nilty), "alt c resolves to nil")
+		assert_state_parity("fixture6a", exec, alt)
+	end)
+end)
+
+-- ════════════════════════════════════════════════════════════════════
+-- Fixture 6b: over-arity (gen-truncated)
+-- ════════════════════════════════════════════════════════════════════
+-- `local a = f()` where f returns 2 values. Gen truncates ret to 1
+-- before emitting CSub, so op_sem sees CSub(Record{1=number}, Record{1=?a}).
+-- Expect: a=number; no errors.
+T.describe("indep parity: fixture 6b — over-arity gen-truncated", function()
+	T.it("CSub(1-ret, 1-dest) — both agree, no error", function()
+		local number = types_mod.const("number") --[[: V5Type ]]
+
+		local exec = fresh_state()
+		local a = subst_mod.fresh(exec.subst, "open")
+		local prod1 = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
+		local dest1 = types_mod.record({ ["1"] = types_mod.uvar(a) }) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.sub(prod1, dest1, prov("6b-call")))
+		op_sem.run(exec)
+
+		local alt = fresh_state()
+		local a2 = subst_mod.fresh(alt.subst, "open")
+		local prod1a = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
+		local dest1a = types_mod.record({ ["1"] = types_mod.uvar(a2) }) --[[: V5Type ]]
+		op_sem.emit(alt, constraint_mod.sub(prod1a, dest1a, prov("6b-call")))
+		op_sem_alt.run(alt)
+
+		local rex_6b_a = op_sem.resolve(exec, a) --[[: V5Type ]]
+		local ralt_6b_a = op_sem_alt.resolve(alt, a2) --[[: V5Type ]]
+		assert_resolve_eq("fixture6b.a", rex_6b_a, ralt_6b_a)
+		assert_state_parity("fixture6b", exec, alt)
+	end)
+end)
+
+-- ════════════════════════════════════════════════════════════════════
+-- Fixture 6c: empty record vacuous
+-- ════════════════════════════════════════════════════════════════════
+-- f : () -> () — both sides are Record{}.
+-- CSub(Record{}, Record{}) must succeed with 0 sub constraints emitted.
+T.describe("indep parity: fixture 6c — empty positional record", function()
+	T.it("CSub(Record{}, Record{}) — vacuous, both agree", function()
+		local exec = fresh_state()
+		op_sem.emit(exec, constraint_mod.sub(types_mod.record({}), types_mod.record({}), prov("6c")))
+		op_sem.run(exec)
+
+		local alt = fresh_state()
+		op_sem.emit(alt, constraint_mod.sub(types_mod.record({}), types_mod.record({}), prov("6c")))
+		op_sem_alt.run(alt)
+
+		assert_state_parity("fixture6c", exec, alt)
+	end)
+end)
+
+-- ════════════════════════════════════════════════════════════════════
+-- Fixture 6d: single-return Record CSub
+-- ════════════════════════════════════════════════════════════════════
+-- `local a = f()` where f : () -> int (one return).
+-- CSub(Record{1=number}, Record{1=?a}) → ?a = number.
+T.describe("indep parity: fixture 6d — single-return Record CSub", function()
+	T.it("CSub(Record{1=number}, Record{1=?a}) — both agree", function()
+		local number = types_mod.const("number") --[[: V5Type ]]
+
+		local exec = fresh_state()
+		local a = subst_mod.fresh(exec.subst, "open")
+		local prod = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
+		local dest = types_mod.record({ ["1"] = types_mod.uvar(a) }) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.sub(prod, dest, prov("6d-call")))
+		op_sem.run(exec)
+
+		local alt = fresh_state()
+		local a2 = subst_mod.fresh(alt.subst, "open")
+		local proda = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
+		local desta = types_mod.record({ ["1"] = types_mod.uvar(a2) }) --[[: V5Type ]]
+		op_sem.emit(alt, constraint_mod.sub(proda, desta, prov("6d-call")))
+		op_sem_alt.run(alt)
+
+		local rex_6d_a = op_sem.resolve(exec, a) --[[: V5Type ]]
+		local ralt_6d_a = op_sem_alt.resolve(alt, a2) --[[: V5Type ]]
+		assert_resolve_eq("fixture6d.a", rex_6d_a, ralt_6d_a)
+		assert_state_parity("fixture6d", exec, alt)
 	end)
 end)
 

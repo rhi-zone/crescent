@@ -278,47 +278,220 @@ T.describe("op_sem parity: fixture 5 — let-poly CInst", function()
 	end)
 end)
 
--- ─── Fixture 6: multi-return into row (SPEC GAP, encoded as stand-in) ──
--- Per task brief: cover `t.x, t.y = f()` where f's return arity unions
--- to (int, int|nil).  CMultiReturn is OUT OF v5.0 scope per the log's
--- re-gate schedule and explicitly listed in the spec doc's "What this
--- does NOT cover" section.
---
--- Encoded here as a stand-in: simulate the gen pass having already
--- resolved the multi-return into two scalar CEqs (?ret1 = number,
--- ?ret2 = number|nil), and feed CTableSet for t.x and t.y.  The
--- ASSERTION is on what the v5.0 minimal core CAN handle — the
--- nil-padding union semantics live in the not-yet-implemented
--- CMultiReturn extension.
+-- ─── Fixture 6: multi-return via positional Record CSub ─────────────────
+-- Source: `local a, b = f()` where f : () -> (number, number).
+-- Real shape post-Phase-1/3:
+--   producer ret = Record({"1"=number, "2"=number})
+--   consumer destructuring emits CSub(τ_call_ret, Record({"1"=?a, "2"=?b}))
+-- Phase 3 positional dispatch unifies each position covariantly.
+-- (Spec gap closed: no CMultiReturn needed; positional Record handles it.)
 
-T.describe("op_sem parity: fixture 6 — multi-return scalar stand-in (SPEC GAP)", function()
-	T.it("two field assignments from pre-resolved return tvars", function()
+T.describe("op_sem parity: fixture 6 — multi-return positional Record CSub", function()
+	T.it("CSub(Record{1=number,2=number}, Record{1=?a,2=?b}) unifies a,b=number", function()
 		local number = types_mod.const("number") --[[: V5Type ]]
-		-- Stand-in for `int | nil`: just `nil` here; the union form
-		-- isn't in the minimal core.  See spec gap note in the doc.
-		local nilty = types_mod.const("nil") --[[: V5Type ]]
 
+		-- EXEC
 		local exec = op_sem.new_state()
-		local t = subst_mod.fresh(exec.subst, "open")
-		op_sem.emit(exec, constraint_mod.table_open(t, prov("t={}")))
-		op_sem.emit(exec, constraint_mod.table_set(t, "x", number, prov("t.x")))
-		op_sem.emit(exec, constraint_mod.table_set(t, "y", nilty, prov("t.y")))
+		local a = subst_mod.fresh(exec.subst, "open")
+		local b = subst_mod.fresh(exec.subst, "open")
+		local prod_ret = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
+		local dest_rec = types_mod.record({ ["1"] = types_mod.uvar(a), ["2"] = types_mod.uvar(b) }) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.sub(prod_ret, dest_rec, prov("call-ret")))
 		op_sem.run(exec)
-		local rt_exec = op_sem.resolve(exec, t)
+		local ra_exec = op_sem.resolve(exec, a)
+		local rb_exec = op_sem.resolve(exec, b)
 
+		-- DOCS — T-CSub-Record-Width positional branch
 		local docs = op_sem.new_state()
-		local t2 = subst_mod.fresh(docs.subst, "open")
-		op_sem.rule_T_CTOpen(docs, t2, prov("t={}"))
-		op_sem.rule_T_CTSet_Open_Extend(docs, t2, "x", number, prov("t.x"))
-		op_sem.rule_T_CTSet_Open_Extend(docs, t2, "y", nilty, prov("t.y"))
-		local rt_docs = op_sem.resolve(docs, t2)
+		local a2 = subst_mod.fresh(docs.subst, "open")
+		local b2 = subst_mod.fresh(docs.subst, "open")
+		local prod_ret2 = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
+		local dest_rec2 = types_mod.record({ ["1"] = types_mod.uvar(a2), ["2"] = types_mod.uvar(b2) }) --[[: V5Type ]]
+		op_sem.rule_T_CSub_Record_Width(docs, prod_ret2, dest_rec2, prov("call-ret"))
+		-- The positional branch emits CSub(number, ?a) and CSub(number, ?b).
+		-- Drive the emitted sub constraints manually.
+		while docs.head <= docs.tail do
+			local c = docs.worklist[docs.head]
+			docs.worklist[docs.head] = nil
+			docs.head = docs.head + 1
+			if c ~= nil then op_sem.step(docs, c) end
+		end
+		local ra_docs = op_sem.resolve(docs, a2)
+		local rb_docs = op_sem.resolve(docs, b2)
 
-		T.ok(walk_equal(rt_exec, rt_docs), "exec and docs match on scalar stand-in")
+		T.ok(walk_equal(ra_exec, number), "exec a = number")
+		T.ok(walk_equal(rb_exec, number), "exec b = number")
+		T.ok(walk_equal(ra_docs, number), "docs a = number")
+		T.ok(walk_equal(rb_docs, number), "docs b = number")
 		T.eq(op_sem.error_count(exec), 0, "exec no errors")
 		T.eq(op_sem.error_count(docs), 0, "docs no errors")
-		-- SPEC GAP: real CMultiReturn would unify `?ret2 = number | nil`
-		-- and narrowing would then strip nil in flow-positive positions.
-		-- That mechanism is owed in the CMultiReturn op-sem extension.
+	end)
+end)
+
+-- ─── Fixture 6a: nil-pad under-arity ─────────────────────────────────────
+-- `local a, b, c = f()` where f returns 2 values.
+-- CSub(Record{1=number,2=number}, Record{1=?a,2=?b,3=?c})
+-- Position 3 on the producer side is missing → padded with Const("nil").
+-- Expect: a=number, b=number, c=nil.
+
+T.describe("op_sem parity: fixture 6a — nil-pad under-arity", function()
+	T.it("CSub(2-ret, 3-dest) nil-pads position 3 to Const(nil)", function()
+		local number = types_mod.const("number") --[[: V5Type ]]
+		local nilty  = types_mod.const("nil") --[[: V5Type ]]
+
+		-- EXEC
+		local exec = op_sem.new_state()
+		local a = subst_mod.fresh(exec.subst, "open")
+		local b = subst_mod.fresh(exec.subst, "open")
+		local c = subst_mod.fresh(exec.subst, "open")
+		local prod2 = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
+		local dest3 = types_mod.record({ ["1"] = types_mod.uvar(a), ["2"] = types_mod.uvar(b), ["3"] = types_mod.uvar(c) }) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.sub(prod2, dest3, prov("6a-call")))
+		op_sem.run(exec)
+		local ra_exec = op_sem.resolve(exec, a)
+		local rb_exec = op_sem.resolve(exec, b)
+		local rc_exec = op_sem.resolve(exec, c)
+
+		-- DOCS
+		local docs = op_sem.new_state()
+		local a2 = subst_mod.fresh(docs.subst, "open")
+		local b2 = subst_mod.fresh(docs.subst, "open")
+		local c2 = subst_mod.fresh(docs.subst, "open")
+		local prod2d = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
+		local dest3d = types_mod.record({ ["1"] = types_mod.uvar(a2), ["2"] = types_mod.uvar(b2), ["3"] = types_mod.uvar(c2) }) --[[: V5Type ]]
+		op_sem.rule_T_CSub_Record_Width(docs, prod2d, dest3d, prov("6a-call"))
+		while docs.head <= docs.tail do
+			local cv = docs.worklist[docs.head]
+			docs.worklist[docs.head] = nil
+			docs.head = docs.head + 1
+			if cv ~= nil then op_sem.step(docs, cv) end
+		end
+		local ra_docs = op_sem.resolve(docs, a2)
+		local rb_docs = op_sem.resolve(docs, b2)
+		local rc_docs = op_sem.resolve(docs, c2)
+
+		T.ok(walk_equal(ra_exec, number), "exec a = number")
+		T.ok(walk_equal(rb_exec, number), "exec b = number")
+		T.ok(walk_equal(rc_exec, nilty),  "exec c = nil (nil-pad)")
+		T.ok(walk_equal(ra_docs, number), "docs a = number")
+		T.ok(walk_equal(rb_docs, number), "docs b = number")
+		T.ok(walk_equal(rc_docs, nilty),  "docs c = nil (nil-pad)")
+		T.eq(op_sem.error_count(exec), 0, "exec no errors")
+		T.eq(op_sem.error_count(docs), 0, "docs no errors")
+	end)
+end)
+
+-- ─── Fixture 6b: over-arity (caller wants 1, producer returns 2) ─────────
+-- `local a = f()` where f returns 2 values.
+-- CSub(Record{1=number,2=number}, Record{1=?a})
+-- Only position "1" is constrained; position "2" on the dest side is
+-- missing → padded with Const("nil") on the dest side, but this
+-- CSub(number, nil) will fire an error (number is not sub of nil).
+-- Wait — the positional dispatch takes max(na,nb) positions, pads
+-- whichever is shorter.  Over-arity: producer wider, dest narrower.
+-- dest["2"] is nil → padded to Const("nil").  CSub(number, nil) → error.
+-- But the Lua idiom `local a = f()` discards extra returns BEFORE
+-- subtyping; the gen pass would emit CSub(Record{1=number}, Record{1=?a})
+-- (truncated by gen, not by op_sem).  For this fixture we exercise
+-- ONLY the op_sem behaviour: feeding a 2-wide producer into a 1-wide
+-- dest IS an error if both are positional, because the missing dest
+-- position pads to nil and number </: nil.
+-- This documents the semantic boundary: arity truncation is gen-pass work.
+-- op_sem enforces covariance strictly on its padded range.
+-- We feed a truncated CSub(Record{1=number}, Record{1=?a}) to get the
+-- clean no-error over-arity path that gen would actually emit.
+
+T.describe("op_sem parity: fixture 6b — over-arity (gen-truncated)", function()
+	T.it("CSub(1-ret, 1-dest) — gen truncates before op_sem, no error", function()
+		local number = types_mod.const("number") --[[: V5Type ]]
+
+		-- EXEC
+		local exec = op_sem.new_state()
+		local a = subst_mod.fresh(exec.subst, "open")
+		local prod1 = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
+		local dest1 = types_mod.record({ ["1"] = types_mod.uvar(a) }) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.sub(prod1, dest1, prov("6b-call")))
+		op_sem.run(exec)
+		local ra_exec = op_sem.resolve(exec, a)
+
+		-- DOCS
+		local docs = op_sem.new_state()
+		local a2 = subst_mod.fresh(docs.subst, "open")
+		local prod1d = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
+		local dest1d = types_mod.record({ ["1"] = types_mod.uvar(a2) }) --[[: V5Type ]]
+		op_sem.rule_T_CSub_Record_Width(docs, prod1d, dest1d, prov("6b-call"))
+		while docs.head <= docs.tail do
+			local cv = docs.worklist[docs.head]
+			docs.worklist[docs.head] = nil
+			docs.head = docs.head + 1
+			if cv ~= nil then op_sem.step(docs, cv) end
+		end
+		local ra_docs = op_sem.resolve(docs, a2)
+
+		T.ok(walk_equal(ra_exec, number), "exec a = number")
+		T.ok(walk_equal(ra_docs, number), "docs a = number")
+		T.eq(op_sem.error_count(exec), 0, "exec no errors")
+		T.eq(op_sem.error_count(docs), 0, "docs no errors")
+	end)
+end)
+
+-- ─── Fixture 6c: empty record → () -> () vacuous ─────────────────────────
+-- `f()` where f : () -> () (returns nothing).
+-- CSub(Record{}, Record{}) must succeed vacuously (n=0 loop, 0 sub emitted).
+
+T.describe("op_sem parity: fixture 6c — empty positional record", function()
+	T.it("CSub(Record{}, Record{}) succeeds vacuously", function()
+		local exec = op_sem.new_state()
+		local empty_a = types_mod.record({}) --[[: V5Type ]]
+		local empty_b = types_mod.record({}) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.sub(empty_a, empty_b, prov("6c-empty")))
+		op_sem.run(exec)
+
+		local docs = op_sem.new_state()
+		local empty_c = types_mod.record({}) --[[: V5Type ]]
+		local empty_d = types_mod.record({}) --[[: V5Type ]]
+		op_sem.rule_T_CSub_Record_Width(docs, empty_c, empty_d, prov("6c-empty"))
+
+		T.eq(op_sem.error_count(exec), 0, "exec no errors")
+		T.eq(op_sem.error_count(docs), 0, "docs no errors")
+	end)
+end)
+
+-- ─── Fixture 6d: single-return unification ───────────────────────────────
+-- `local a = f()` where f : () -> int (one return, gen emits full Record).
+-- CSub(Record{1=number}, Record{1=?a}) → ?a = number.
+
+T.describe("op_sem parity: fixture 6d — single-return Record CSub", function()
+	T.it("CSub(Record{1=number}, Record{1=?a}) unifies ?a = number", function()
+		local number = types_mod.const("number") --[[: V5Type ]]
+
+		-- EXEC
+		local exec = op_sem.new_state()
+		local a = subst_mod.fresh(exec.subst, "open")
+		local prod = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
+		local dest = types_mod.record({ ["1"] = types_mod.uvar(a) }) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.sub(prod, dest, prov("6d-call")))
+		op_sem.run(exec)
+		local ra_exec = op_sem.resolve(exec, a)
+
+		-- DOCS
+		local docs = op_sem.new_state()
+		local a2 = subst_mod.fresh(docs.subst, "open")
+		local prodd = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
+		local destd = types_mod.record({ ["1"] = types_mod.uvar(a2) }) --[[: V5Type ]]
+		op_sem.rule_T_CSub_Record_Width(docs, prodd, destd, prov("6d-call"))
+		while docs.head <= docs.tail do
+			local cv = docs.worklist[docs.head]
+			docs.worklist[docs.head] = nil
+			docs.head = docs.head + 1
+			if cv ~= nil then op_sem.step(docs, cv) end
+		end
+		local ra_docs = op_sem.resolve(docs, a2)
+
+		T.ok(walk_equal(ra_exec, number), "exec a = number")
+		T.ok(walk_equal(ra_docs, number), "docs a = number")
+		T.eq(op_sem.error_count(exec), 0, "exec no errors")
+		T.eq(op_sem.error_count(docs), 0, "docs no errors")
 	end)
 end)
 
