@@ -181,7 +181,7 @@ function M.rule_T_CEq_Arrow(st, a, b, prov)
 	local da = subst_mod.deref(st.subst, a) --[[: V5Type ]]
 	local db = subst_mod.deref(st.subst, b) --[[: V5Type ]]
 	if da.tag ~= "arrow" or db.tag ~= "arrow" then return end
-	if #da.args ~= #db.args or #da.rets ~= #db.rets then
+	if #da.args ~= #db.args then
 		record_error(st, "T-CEq-Arrow", "arrow arity mismatch")
 		return
 	end
@@ -189,10 +189,7 @@ function M.rule_T_CEq_Arrow(st, a, b, prov)
 		local xa = da.args[i]; local xb = db.args[i]
 		if xa ~= nil and xb ~= nil then emit(st, constraint_mod.eq(xa, xb, prov)) end
 	end
-	for i = 1, #da.rets do
-		local xa = da.rets[i]; local xb = db.rets[i]
-		if xa ~= nil and xb ~= nil then emit(st, constraint_mod.eq(xa, xb, prov)) end
-	end
+	emit(st, constraint_mod.eq(da.ret, db.ret, prov))
 end
 
 --: (AltState, V5Type, V5Type, Provenance) -> nil
@@ -331,7 +328,7 @@ function M.rule_T_CSub_Arrow(st, a, b, prov)
 	local da = subst_mod.deref(st.subst, a) --[[: V5Type ]]
 	local db = subst_mod.deref(st.subst, b) --[[: V5Type ]]
 	if da.tag ~= "arrow" or db.tag ~= "arrow" then return end
-	if #da.args ~= #db.args or #da.rets ~= #db.rets then
+	if #da.args ~= #db.args then
 		record_error(st, "T-CSub-Arrow", "arrow arity mismatch")
 		return
 	end
@@ -340,10 +337,12 @@ function M.rule_T_CSub_Arrow(st, a, b, prov)
 		local xa = da.args[i]; local xb = db.args[i]
 		if xa ~= nil and xb ~= nil then emit(st, constraint_mod.sub(xb, xa, prov)) end
 	end
-	-- Co rets: R_j subtype of S_j  ->  CSub(R_j, S_j).
-	for j = 1, #da.rets do
-		local ya = da.rets[j]; local yb = db.rets[j]
-		if ya ~= nil and yb ~= nil then emit(st, constraint_mod.sub(ya, yb, prov)) end
+	-- Co ret: iterate numeric keys and emit sub per position.
+	if da.ret.tag == "record" and db.ret.tag == "record" then
+		for k, va in pairs(da.ret.fields) do
+			local vb = db.ret.fields[k]
+			if vb ~= nil and va ~= nil then emit(st, constraint_mod.sub(va, vb, prov)) end
+		end
 	end
 end
 
@@ -616,7 +615,7 @@ function M.rule_T_CMCall_Sealed_Field(st, tv, key, ret, prov)
 		record_error(st, "T-CMCall-Sealed-Field", "field is not arrow: " .. key)
 		return
 	end
-	local first_ret = f.rets[1]
+	local first_ret = f.ret.fields["1"]
 	if first_ret == nil then
 		record_error(st, "T-CMCall-Sealed-Field", "arrow has no returns: " .. key)
 		return
@@ -785,7 +784,6 @@ local function abstract_body(st, t, derefs_args)
 			return types_mod.record(out)
 		elseif x.tag == "arrow" then
 			local a = {} --[[: V5Type[] ]]
-			local r = {} --[[: V5Type[] ]]
 			for i = 1, #x.args do
 				local v = x.args[i]
 				if v ~= nil then
@@ -793,14 +791,8 @@ local function abstract_body(st, t, derefs_args)
 					a[i] = rv
 				end
 			end
-			for i = 1, #x.rets do
-				local v = x.rets[i]
-				if v ~= nil then
-					local rv = rewrite(v) --[[: V5Type ]]
-					r[i] = rv
-				end
-			end
-			return types_mod.arrow(a, r)
+			local rret = rewrite(x.ret) --[[: V5Type ]]
+			return { tag = "arrow", args = a, ret = rret }
 		elseif x.tag == "union" then
 			local xs = {} --[[: V5Type[] ]]
 			for i = 1, #x.xs do

@@ -256,17 +256,14 @@ function M.rule_T_CEq_Arrow(st, a, b, prov)
 	if a.tag ~= "arrow" or b.tag ~= "arrow" then
 		err(st, "T-CEq-Arrow", "precondition: both arrow"); return "error"
 	end
-	if #a.args ~= #b.args or #a.rets ~= #b.rets then
+	if #a.args ~= #b.args then
 		err(st, "T-CEq-Arrow", "arity mismatch"); return "error"
 	end
 	for i = 1, #a.args do
 		local av, bv = a.args[i], b.args[i]
 		if av ~= nil and bv ~= nil then M.emit(st, constraint_mod.eq(av, bv, prov)) end
 	end
-	for i = 1, #a.rets do
-		local av, bv = a.rets[i], b.rets[i]
-		if av ~= nil and bv ~= nil then M.emit(st, constraint_mod.eq(av, bv, prov)) end
-	end
+	M.emit(st, constraint_mod.eq(a.ret, b.ret, prov))
 	trace(st, "T-CEq-Arrow", "")
 	return "done"
 end
@@ -362,7 +359,7 @@ function M.rule_T_CSub_Arrow(st, a, b, prov)
 	if a.tag ~= "arrow" or b.tag ~= "arrow" then
 		err(st, "T-CSub-Arrow", "precondition: both arrow"); return "error"
 	end
-	if #a.args ~= #b.args or #a.rets ~= #b.rets then
+	if #a.args ~= #b.args then
 		err(st, "T-CSub-Arrow", "arity mismatch"); return "error"
 	end
 	for i = 1, #a.args do
@@ -372,11 +369,14 @@ function M.rule_T_CSub_Arrow(st, a, b, prov)
 			M.emit(st, constraint_mod.sub(bv, av, prov))
 		end
 	end
-	for i = 1, #a.rets do
-		local av, bv = a.rets[i], b.rets[i]
-		if av ~= nil and bv ~= nil then
-			-- covariant in rets: A_i <: B_i (i.e. R_a <: R_b).
-			M.emit(st, constraint_mod.sub(av, bv, prov))
+	-- covariant in ret: iterate numeric keys and emit sub per position.
+	if a.ret.tag ~= "record" or b.ret.tag ~= "record" then
+		err(st, "T-CSub-Arrow", "ret is not a record"); return "error"
+	end
+	for k, va in pairs(a.ret.fields) do
+		local vb = b.ret.fields[k]
+		if vb ~= nil and va ~= nil then
+			M.emit(st, constraint_mod.sub(va, vb, prov))
 		end
 	end
 	trace(st, "T-CSub-Arrow", "")
@@ -694,9 +694,8 @@ function M.rule_T_CMCall_Sealed_Field(st, tv, key, ret, prov)
 	if mraw == nil then err(st, "T-CMCall-Sealed-Field", "precondition: field present"); return "error" end
 	local m = mraw --[[: V5Type ]]
 	if m.tag ~= "arrow" then err(st, "T-CMCall-Sealed-Field", "field is not callable"); return "error" end
-	if #m.rets == 0 then err(st, "T-CMCall-Sealed-Field", "arrow with zero rets"); return "error" end
-	local r1raw = m.rets[1]
-	if r1raw == nil then err(st, "T-CMCall-Sealed-Field", "ret[1] missing"); return "error" end
+	local r1raw = m.ret.fields["1"]
+	if r1raw == nil then err(st, "T-CMCall-Sealed-Field", "arrow with zero rets"); return "error" end
 	local r1 = r1raw --[[: V5Type ]]
 	local lhs = types_mod.uvar(ret) --[[: V5Type ]]
 	M.emit(st, constraint_mod.eq(lhs, r1, prov))
@@ -830,16 +829,12 @@ local function abstract_sub(map, t)
 		return types_mod.record(out)
 	elseif t.tag == "arrow" then
 		local aargs = {} --[[: V5Type[] ]]
-		local arets = {} --[[: V5Type[] ]]
 		for i = 1, #t.args do
 			local v = t.args[i]
 			if v ~= nil then local s2 = abstract_sub(map, v) --[[: V5Type ]]; aargs[i] = s2 end
 		end
-		for i = 1, #t.rets do
-			local v = t.rets[i]
-			if v ~= nil then local s2 = abstract_sub(map, v) --[[: V5Type ]]; arets[i] = s2 end
-		end
-		return types_mod.arrow(aargs, arets)
+		local aret = abstract_sub(map, t.ret) --[[: V5Type ]]
+		return { tag = "arrow", args = aargs, ret = aret }
 	elseif t.tag == "union" then
 		local xs = {} --[[: V5Type[] ]]
 		for i = 1, #t.xs do
@@ -887,8 +882,7 @@ local function contains_lambda(t)
 	end
 	if t.tag == "arrow" then
 		for i = 1, #t.args do if contains_lambda(t.args[i]) then return true end end
-		for i = 1, #t.rets do if contains_lambda(t.rets[i]) then return true end end
-		return false
+		return contains_lambda(t.ret)
 	end
 	if t.tag == "union" then
 		for i = 1, #t.xs do if contains_lambda(t.xs[i]) then return true end end

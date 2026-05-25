@@ -23,7 +23,7 @@ local M = {}
 --:: TLambda  = { tag: "lambda", k: string, b: V5Type }
 --:: TConst   = { tag: "const", name: string }
 --:: TRecord  = { tag: "record", fields: { [string]: V5Type } }
---:: TArrow   = { tag: "arrow", args: V5Type[], rets: V5Type[] }
+--:: TArrow   = { tag: "arrow", args: V5Type[], ret: V5Type }
 --:: TUnion   = { tag: "union", xs: V5Type[] }
 --:: V5Type   = TUVar | TVarBnd | TApp | TLambda | TConst | TRecord | TArrow | TUnion
 
@@ -40,7 +40,14 @@ function M.const(name) return { tag = "const", name = name } end
 --: ({ [string]: V5Type }) -> V5Type
 function M.record(fields) return { tag = "record", fields = fields } end
 --: (V5Type[], V5Type[]) -> V5Type
-function M.arrow(args, rets) return { tag = "arrow", args = args, rets = rets } end
+function M.arrow(args, rets_list)
+	local fields = {} --[[: { [string]: V5Type } ]]
+	for i = 1, #rets_list do
+		local v = rets_list[i]
+		if v ~= nil then fields[tostring(i)] = v end
+	end
+	return { tag = "arrow", args = args, ret = { tag = "record", fields = fields } }
+end
 --: (V5Type[]) -> V5Type
 function M.union(xs) return { tag = "union", xs = xs } end
 
@@ -68,16 +75,12 @@ function M.shift(t, d, cutoff)
 		return { tag = "record", fields = out }
 	elseif t.tag == "arrow" then
 		local args = {} --[[: V5Type[] ]]
-		local rets = {} --[[: V5Type[] ]]
 		for i = 1, #t.args do
 			local v = t.args[i]
 			if v ~= nil then local sh = M.shift(v, d, cutoff) --[[: V5Type ]]; args[i] = sh end
 		end
-		for i = 1, #t.rets do
-			local v = t.rets[i]
-			if v ~= nil then local sh = M.shift(v, d, cutoff) --[[: V5Type ]]; rets[i] = sh end
-		end
-		return { tag = "arrow", args = args, rets = rets }
+		local ret = M.shift(t.ret, d, cutoff) --[[: V5Type ]]
+		return { tag = "arrow", args = args, ret = ret }
 	elseif t.tag == "union" then
 		local xs = {} --[[: V5Type[] ]]
 		for i = 1, #t.xs do
@@ -111,16 +114,12 @@ function M.instantiate(body, arg, depth)
 		return { tag = "record", fields = out }
 	elseif body.tag == "arrow" then
 		local args = {} --[[: V5Type[] ]]
-		local rets = {} --[[: V5Type[] ]]
 		for i = 1, #body.args do
 			local v = body.args[i]
 			if v ~= nil then local sh = M.instantiate(v, arg, depth) --[[: V5Type ]]; args[i] = sh end
 		end
-		for i = 1, #body.rets do
-			local v = body.rets[i]
-			if v ~= nil then local sh = M.instantiate(v, arg, depth) --[[: V5Type ]]; rets[i] = sh end
-		end
-		return { tag = "arrow", args = args, rets = rets }
+		local ret = M.instantiate(body.ret, arg, depth) --[[: V5Type ]]
+		return { tag = "arrow", args = args, ret = ret }
 	elseif body.tag == "union" then
 		local xs = {} --[[: V5Type[] ]]
 		for i = 1, #body.xs do
@@ -158,10 +157,9 @@ function M.equal(a, b)
 		return true
 	end
 	if a.tag == "arrow" and b.tag == "arrow" then
-		if #a.args ~= #b.args or #a.rets ~= #b.rets then return false end
+		if #a.args ~= #b.args then return false end
 		for i = 1, #a.args do if not M.equal(a.args[i], b.args[i]) then return false end end
-		for i = 1, #a.rets do if not M.equal(a.rets[i], b.rets[i]) then return false end end
-		return true
+		return M.equal(a.ret, b.ret)
 	end
 	if a.tag == "union" and b.tag == "union" then
 		if #a.xs ~= #b.xs then return false end
@@ -182,7 +180,7 @@ function M.collect_uvars(t, acc)
 		for _, fv in pairs(t.fields) do M.collect_uvars(fv, acc) end
 	elseif t.tag == "arrow" then
 		for i = 1, #t.args do M.collect_uvars(t.args[i], acc) end
-		for i = 1, #t.rets do M.collect_uvars(t.rets[i], acc) end
+		M.collect_uvars(t.ret, acc)
 	elseif t.tag == "union" then
 		for i = 1, #t.xs do M.collect_uvars(t.xs[i], acc) end
 	end

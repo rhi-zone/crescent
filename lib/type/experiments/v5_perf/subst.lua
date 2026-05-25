@@ -219,16 +219,12 @@ function M.walk(s, t)
 		return { tag = "record", fields = out }
 	elseif t.tag == "arrow" then
 		local args = {} --[[: V5Type[] ]]
-		local rets = {} --[[: V5Type[] ]]
 		for i = 1, #t.args do
 			local v = t.args[i]
 			if v ~= nil then local sh = M.walk(s, v) --[[: V5Type ]]; args[i] = sh end
 		end
-		for i = 1, #t.rets do
-			local v = t.rets[i]
-			if v ~= nil then local sh = M.walk(s, v) --[[: V5Type ]]; rets[i] = sh end
-		end
-		return { tag = "arrow", args = args, rets = rets }
+		local ret = M.walk(s, t.ret) --[[: V5Type ]]
+		return { tag = "arrow", args = args, ret = ret }
 	elseif t.tag == "union" then
 		local xs = {} --[[: V5Type[] ]]
 		for i = 1, #t.xs do
