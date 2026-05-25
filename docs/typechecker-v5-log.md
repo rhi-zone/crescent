@@ -1032,3 +1032,21 @@ Same as the prior entry: CRow op-sem extension, OR CImpl op-sem
 extension, OR begin gen-pass for the v5.0 minimal core.  The op-sem
 foundation is now corroborated by two independent encodings — a
 stronger basis to build on.
+
+---
+
+## 2026-05-25 — Session close: comprehensive handoff written
+
+Multi-session arc of typechecker v5 work paused for a natural stopping point. State and orientation snapshot lives in **`docs/typechecker-v5-handoff-2026-05-25.md`** — single navigable file capturing all nuance: artifacts + LOC, architecture in one paragraph, load-bearing invariants, falsifiability gates passed (with the "what this does NOT verify" caveats explicit), all 16 named spec gaps sourced and severity-ranked, backlog (pre-stable + post-stable), open H-questions (only H10 remains, not blocking), 5 cross-cutting risks, methodology rules established this session (F9–F14, G12–G13), and a next-session menu with prerequisites + cycle counts + recommended order.
+
+Future session reads the handoff first; dives into this log for chronological detail.
+
+Major outstanding work named in the handoff (not done this session, not silently dropped):
+- High-severity spec gaps G7 (CMultiReturn), G8 (CRow narrowing), G12 (CEffect variance)
+- Realistic-scale perf untested (10⁵ target vs <500 tested)
+- Gen-pass connection to real Lua AST not started
+- Substrate promotion from `experiments/` to `static-v5/` owed
+- Cutover from legacy + v4 is the long tail
+- 4 pre-stable backlog items: exhaustive session mining, missed-gen eval, circular require corpus check, catalog relocation
+
+No silent decisions. No abandoned threads.
