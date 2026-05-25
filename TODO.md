@@ -4,11 +4,38 @@
 
 ## Typechecker v5 follow-ups
 
-- [ ] **Exhaustive prior-session mining.** Walk every JSONL in `~/.claude/projects/-home-me-git-rhizone-crescent/` for insights on typechecker decisions, mechanisms tried, frustrations, unwritten conclusions. Earlier session-history agent did a sampled pass (5 multi-session arcs identified, see `docs/typechecker-v5-research-report.md` §2); exhaustive pass is owed. Particular value: scheduler-shaped problems, mechanisms previous attempts found load-bearing vs accidental. **High prio.**
-- [ ] **Pre-stable: adversarial missed-generalisation eval** (v5 item 6 follow-up). Generate Lua snippets that the no-level-lowering discipline (Lean-style) rejects but OCaml/Rémy lowering would accept. Classify by idiomatic/rare/pathological. Revisit lowering as a perf opt if idiomatic patterns are common. Not blocking op-sem; checked before v5 declared stable.
-- [ ] **Pre-stable: lazy De Bruijn shift experiment** (v5 item 2 follow-up). After everything else stable, benchmark lazy-shift (Lean/Coq sliding-window cache) vs the v5.0 eager-shift baseline. Low prio.
-- [ ] **Pre-stable: circular `require` corpus check.** v5 rejects circular `require` at typecheck. Grep `lib/` for circular patterns. If any are load-bearing (not incidental), revisit before declaring v5 stable. Likely fine — circular require is an antipattern.
-- [ ] **Post-v5.0: investigate `setmetatable(t, nil)` support** (v5 item 5 backlog). Medium prio. Sandboxing is the strongest use case but is served by the fresh-table pattern (`local clean = {}; for k,v in pairs(env) do clean[k] = v end`). v5.x decision may be "document fresh-table as canonical sandboxing idiom and never support setmetatable(t, nil)." If supporting it: open question whether monotone substitution can be preserved.
+> **Comprehensive state snapshot lives at `docs/typechecker-v5-handoff-2026-05-25.md`** — read that first. It covers artifacts + LOC, architecture, load-bearing invariants, falsifiability gates passed, 16 named spec gaps with sources + severity, all open H-questions, cross-cutting risks, methodology rules. The threads below surface high-signal items as starting context but don't capture the full picture.
+
+### High-severity open threads (constraint families)
+
+- **CMultiReturn (spec gap G7) might be next**, or might not — high-severity gap but smallest cycle. Multi-return like `t.x, t.y = f()` with variable-arity `f`. Decision was union-of-branches with nil-padding; rules not yet written. Open: how the rule interacts with row-extension when LHS is a table.
+- **CRow + CEffect unified extension (G8 + G12)** — row-tail variance for effect rows is shared with CRow's row mechanism; combined extension may be more efficient than CEffect alone. CSub variance is half-discharged; the other half is row-tail. Open: whether unifying is actually cleaner or forces premature coupling.
+- **CImpl (let-poly with implication wanteds)** — OutsideIn-style scope discipline. Op-sem has `CInst` but not `CImpl`. Open: do we need GADTs at all? Roadmap H5 closed "GADT-strength flow typing out of scope," suggesting CImpl can be lighter than OutsideIn's full version.
+
+### High-severity open threads (productionisation)
+
+- **Realistic-scale perf is a hypothesis.** Architecture targets ~10⁵ constraints; tested at <500. Re-gate at scale during each constraint-family landing, or build a synthetic-load extrapolation harness explicitly.
+- **Gen-pass connection to real Lua AST not started.** Op-sem currently takes hand-emitted constraints. Bridging to the existing parser is its own multi-cycle phase. Open: build a fresh extractor or adapt the v4 walker?
+- **Substrate promotion from `lib/type/experiments/v5_perf/` to `lib/type/static-v5/`** is owed once op-sem hardens. Cleans the namespace.
+- **Constraints catalog at `~/.claude/plans/radiant-gathering-gray.md` is outside the repo.** Durability risk. Relocate to `docs/typechecker-v5-constraints.md` or similar. Tiny task.
+
+### Pre-stable follow-ups
+
+- [ ] **Exhaustive prior-session mining.** Sampled pass found 5 multi-session arcs (`docs/typechecker-v5-research-report.md` §2); exhaustive pass owed. Particular value: scheduler-shaped problems, mechanisms previous attempts found load-bearing vs accidental.
+- [ ] **Adversarial missed-generalisation eval** (v5 item 6 follow-up). Generate Lua snippets that the no-level-lowering discipline (Lean-style) rejects but Rémy lowering would accept. Classify idiomatic/rare/pathological. Revisit lowering as perf opt if idiomatic.
+- [ ] **Lazy De Bruijn shift experiment** (v5 item 2 follow-up). After everything stable, benchmark lazy (Lean/Coq sliding-window) vs eager-shift baseline. Low prio.
+- [ ] **Circular `require` corpus check.** v5 rejects circular `require` at typecheck. Grep `lib/` — if any are load-bearing, revisit before declaring v5 stable. Likely fine.
+- [ ] **Property-based parity** (independent-encoding parity follow-up). Generate random constraint sequences; run both interpreters; catches rule-priority divergence fixed fixtures miss.
+
+### Spec doc clarifications (low prio, surfaced by independent-parity agent)
+
+- T-CSub dispatch priority not formally enforced — chose TVar-before-Refl interpretation; doc could lock this in.
+- T-CTSet four-way cascade order not formally enforced — current dispatcher's if/elseif order is a reconstruction.
+- T-CHKT-Reduce chain peel depth not formally specified — implementation peels up to `length(args)` binders.
+
+### Post-stable
+
+- [ ] **Investigate `setmetatable(t, nil)` support** (v5 item 5 backlog). Medium prio. Sandboxing's strongest use case served by fresh-table pattern. v5.x decision may be "document fresh-table as canonical idiom; never support setmetatable(t, nil)." If supporting it: open question whether monotone substitution can be preserved.
 
 ## Platform isolation migration (mandatory, not eventual)
 
