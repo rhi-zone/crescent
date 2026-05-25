@@ -436,6 +436,61 @@ T.describe("indep parity: fixture 7 — empty constraint set", function()
 end)
 
 -- ════════════════════════════════════════════════════════════════════
+-- Fixture 8: CRow narrowing-suppression soundness floor (G8)
+-- Scenario A: open-row + CRowLacks, no close → S-Quiesce-CRowLacks in both.
+-- Scenario B: open-row + CRowLacks + CRowClose → resolves cleanly in both.
+-- ════════════════════════════════════════════════════════════════════
+T.describe("indep parity: fixture 8 — CRow narrowing suppression soundness floor", function()
+	T.it("Scenario A: unresolved CRowLacks at quiescence errors in both interpreters", function()
+		local rv1 = types_mod.rowvar(80) --[[: V5Type ]]
+		local rec1 = types_mod.record_open({}, rv1) --[[: V5Type ]]
+		local exec = fresh_state()
+		op_sem.emit(exec, constraint_mod.row_lacks(rec1, "tag", prov("lacks-tag-open")))
+		op_sem.run(exec)
+
+		local rv2 = types_mod.rowvar(81) --[[: V5Type ]]
+		local rec2 = types_mod.record_open({}, rv2) --[[: V5Type ]]
+		local alt = fresh_state()
+		op_sem.emit(alt, constraint_mod.row_lacks(rec2, "tag", prov("lacks-tag-open")))
+		op_sem_alt.run(alt)
+
+		assert_state_parity("fixture8-A", exec, alt)
+		local exec_found = false
+		for i = 1, #exec.errors do
+			local e = exec.errors[i]
+			if e ~= nil and e.rule == "S-Quiesce-CRowLacks" then exec_found = true end
+		end
+		local alt_found = false
+		for i = 1, #alt.errors do
+			local e = alt.errors[i]
+			if e ~= nil and e.rule == "S-Quiesce-CRowLacks" then alt_found = true end
+		end
+		T.ok(exec_found, "exec: S-Quiesce-CRowLacks fired (open-row unresolved at quiescence)")
+		T.ok(alt_found, "alt: S-Quiesce-CRowLacks fired (open-row unresolved at quiescence)")
+	end)
+
+	T.it("Scenario B: CRowClose before quiescence — no errors in both interpreters", function()
+		local rv1 = types_mod.rowvar(82) --[[: V5Type ]]
+		local rec1 = types_mod.record_open({}, rv1) --[[: V5Type ]]
+		local exec = fresh_state()
+		op_sem.emit(exec, constraint_mod.row_lacks(rec1, "tag", prov("lacks-tag-close")))
+		op_sem.emit(exec, constraint_mod.row_close(rec1, prov("close-row")))
+		op_sem.run(exec)
+
+		local rv2 = types_mod.rowvar(83) --[[: V5Type ]]
+		local rec2 = types_mod.record_open({}, rv2) --[[: V5Type ]]
+		local alt = fresh_state()
+		op_sem.emit(alt, constraint_mod.row_lacks(rec2, "tag", prov("lacks-tag-close")))
+		op_sem.emit(alt, constraint_mod.row_close(rec2, prov("close-row")))
+		op_sem_alt.run(alt)
+
+		assert_state_parity("fixture8-B", exec, alt)
+		T.eq(op_sem.error_count(exec), 0, "exec: CRowClose before quiescence — no errors")
+		T.eq(op_sem_alt.error_count(alt), 0, "alt: CRowClose before quiescence — no errors")
+	end)
+end)
+
+-- ════════════════════════════════════════════════════════════════════
 -- Fixture 9: CHKT Reduce for Functor<Maybe>
 -- ════════════════════════════════════════════════════════════════════
 T.describe("indep parity: fixture 9 — CHKT Reduce", function()

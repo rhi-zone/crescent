@@ -794,11 +794,44 @@ T.describe("op_sem parity: fixture 13 — HOUnify never resolves", function()
 	end)
 end)
 
--- ─── Fixture 8 (optional): row variable narrowing suppression ──────────
--- Per the task brief and log item 7's soundness floor: narrowing on a
--- discriminant suppressed when a row variable affects the path.  Row
--- machinery (CRow) is OUT OF v5.0 minimal scope per the doc.  Fixture
--- intentionally omitted; reinstate when the CRow op-sem extension lands.
+-- ─── Fixture 8: CRow narrowing-suppression soundness floor (G8) ────────
+-- Scenario A (suppressed narrowing → error): open-row record + CRowLacks
+-- with no CRowClose drives to quiescence with the constraint still parked.
+-- The solver must report S-Quiesce-CRowLacks — the row var was never closed,
+-- so narrowing is unsound and the constraint cannot be discharged.
+-- Scenario B (narrowing committed → success): same setup plus CRowClose
+-- before quiescence; the row closes without "tag", CRowLacks resolves to
+-- pass, no errors.
+
+T.describe("op_sem parity: fixture 8 — CRow narrowing suppression soundness floor", function()
+	T.it("Scenario A: unresolved CRowLacks at quiescence → S-Quiesce-CRowLacks error", function()
+		local exec = op_sem.new_state()
+		local rv = types_mod.rowvar(8) --[[: V5Type ]]
+		local rec = types_mod.record_open({}, rv) --[[: V5Type ]]
+		-- CRowLacks(rec, "tag") — parks on open row; no CRowClose follows.
+		op_sem.emit(exec, constraint_mod.row_lacks(rec, "tag", prov("lacks-tag-open")))
+		op_sem.run(exec)
+		-- Still-parked CRowLacks at quiescence is a soundness violation (G8).
+		local found = false
+		for i = 1, #exec.errors do
+			local e = exec.errors[i]
+			if e ~= nil and e.rule == "S-Quiesce-CRowLacks" then found = true end
+		end
+		T.ok(found, "open-row CRowLacks unresolved at quiescence: S-Quiesce-CRowLacks fired")
+	end)
+
+	T.it("Scenario B: CRowClose before quiescence → CRowLacks resolves, no errors", function()
+		local exec = op_sem.new_state()
+		local rv = types_mod.rowvar(9) --[[: V5Type ]]
+		local rec = types_mod.record_open({}, rv) --[[: V5Type ]]
+		-- CRowLacks parks, then CRowClose closes the row without "tag" → resolves.
+		op_sem.emit(exec, constraint_mod.row_lacks(rec, "tag", prov("lacks-tag-close")))
+		op_sem.emit(exec, constraint_mod.row_close(rec, prov("close-row")))
+		op_sem.run(exec)
+		T.eq(op_sem.error_count(exec), 0, "CRowClose before quiescence: CRowLacks resolves, no errors")
+		T.ok(rec.row == nil, "record row is nil (closed) after CRowClose")
+	end)
+end)
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- Variance-respecting CSub fixtures (2026-05-24 extension)
