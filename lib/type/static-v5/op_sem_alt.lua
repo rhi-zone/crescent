@@ -44,7 +44,7 @@ local M = {}
 --:: AltCHKT       = { id: integer, tag: "chkt", f: V5Type, args: V5Type[], result: V5Type, prov: Provenance }
 --:: AltHOUnify    = { id: integer, tag: "hounify", f: V5Type, args: V5Type[], result: V5Type, prov: Provenance }
 --:: AltConstraint = V5Constraint | AltCInst | AltCHKT | AltHOUnify
---:: AltState      = { subst: Subst, worklist: AltConstraint[], head: integer, tail: integer, inert: { [integer]: AltConstraint }, errors: OpSemError[], trace: OpSemTrace[], reactivations: integer, steps: integer }
+--:: AltState      = { subst: Subst, worklist: AltConstraint[], head: integer, tail: integer, inert: { [integer]: AltConstraint }, errors: OpSemError[], trace: OpSemTrace[], reactivations: integer, steps: integer, row_watchers: { [integer]: { [integer]: boolean } } }
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- Small helpers
@@ -636,6 +636,149 @@ function M.rule_T_CTSeal(st, tv, _mu, _prov)
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
+-- CRow rules (row-polymorphic records) — alt interpreter
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- Independent encoding of the same rules as op_sem.lua's CRow section.
+-- Row vars live on TRecord.row (a TRowVar or nil = closed).
+
+-- Deref record_ty through UVars; returns (record, is_stuck).
+--: (AltState, V5Type) -> (V5Type | nil, boolean)
+local function alt_deref_to_record(st, ty)
+	local t = subst_mod.deref(st.subst, ty) --[[: V5Type ]]
+	if t.tag == "uvar" then return nil, true end
+	if t.tag == "record" then return t, false end
+	return nil, false
+end
+
+-- Watch a constraint on a row-var id in the alt state's row_watchers map.
+--: (AltState, integer, integer) -> nil
+local function alt_watch_rowvar(st, rv_id, cid)
+	local w = st.row_watchers[rv_id]
+	if w == nil then w = {} --[[: { [integer]: boolean } ]]; st.row_watchers[rv_id] = w end
+	w[cid] = true
+end
+
+-- Drain row-var watchers and re-queue them (called by CRowClose).
+--: (AltState, integer) -> nil
+local function alt_wake_rowvar(st, rv_id)
+	local w = st.row_watchers[rv_id]
+	if w == nil then return end
+	st.row_watchers[rv_id] = nil
+	for cid in pairs(w) do
+		local c = st.inert[cid]
+		if c ~= nil then
+			st.inert[cid] = nil
+			emit(st, c)
+			st.reactivations = st.reactivations + 1
+		end
+	end
+end
+
+-- T-CRowExtend dispatch.
+-- Returns "done", "stuck", or records an error and returns "error".
+--: (AltState, V5Type, string, V5Type, Provenance) -> string
+function M.rule_T_CRowExtend(st, record_ty, key, field_ty, prov)
+	local rec, stuck = alt_deref_to_record(st, record_ty)
+	if stuck then return "stuck" end
+	if rec == nil then
+		local tag = subst_mod.deref(st.subst, record_ty).tag
+		record_error(st, "T-CRowExtend", "record_ty is not a record: tag=" .. tag)
+		return "error"
+	end
+	if rec.row ~= nil then
+		-- Open row.
+		if rec.fields[key] ~= nil then
+			-- Lookup: equate existing with field_ty.
+			local existing = rec.fields[key] --[[: V5Type ]]
+			emit(st, constraint_mod.eq(existing, field_ty, prov))
+			return "done"
+		end
+		-- Bind: extend the record's field table.
+		rec.fields[key] = field_ty
+		return "done"
+	end
+	-- Closed row.
+	if rec.fields[key] ~= nil then
+		-- Key already present: equate.
+		local existing = rec.fields[key] --[[: V5Type ]]
+		emit(st, constraint_mod.eq(existing, field_ty, prov))
+		return "done"
+	end
+	-- Closed and missing: error.
+	record_error(st, "T-CRowExtend-Closed", "closed record cannot extend: key=" .. key)
+	return "error"
+end
+
+-- T-CRowLacks dispatch.
+--: (AltState, V5Type, string, Provenance) -> string
+function M.rule_T_CRowLacks(st, record_ty, key, _prov)
+	local rec, stuck = alt_deref_to_record(st, record_ty)
+	if stuck then return "stuck" end
+	if rec == nil then
+		record_error(st, "T-CRowLacks", "record_ty is not a record")
+		return "error"
+	end
+	if rec.row ~= nil then
+		-- Open row: park.
+		return "stuck"
+	end
+	-- Closed row.
+	if rec.fields[key] ~= nil then
+		record_error(st, "T-CRowLacks-Closed-Fail", "row already contains key: " .. key)
+		return "error"
+	end
+	return "done"
+end
+
+-- T-CRowClose dispatch.
+--: (AltState, V5Type, Provenance) -> string
+function M.rule_T_CRowClose(st, record_ty, _prov)
+	local rec, stuck = alt_deref_to_record(st, record_ty)
+	if stuck then return "stuck" end
+	if rec == nil then
+		record_error(st, "T-CRowClose", "record_ty is not a record")
+		return "error"
+	end
+	local rrow = rec.row
+	if rrow == nil then
+		-- Already closed.
+		return "done"
+	end
+	local rv_id = rrow.id
+	rec.row = nil
+	-- Wake CRowLacks constraints parked on this row-var.
+	alt_wake_rowvar(st, rv_id)
+	return "done"
+end
+
+-- Alt park helper for CRow constraints.
+--: (AltState, AltConstraint) -> nil
+local function alt_park_crow(st, c)
+	st.inert[c.id] = c
+	if c.tag == "crow_lacks" then
+		local cl = c --[[: ConstraintRowLacks ]]
+		local rt = subst_mod.deref(st.subst, cl.record_ty)
+		if rt.tag == "uvar" then
+			subst_mod.watch(st.subst, rt.id, c.id)
+		elseif rt.tag == "record" then
+			local rrow = rt.row
+			if rrow ~= nil then
+				alt_watch_rowvar(st, rrow.id, c.id)
+			end
+		end
+	elseif c.tag == "crow_extend" then
+		local cr = c --[[: ConstraintRowExtend ]]
+		local rt = subst_mod.deref(st.subst, cr.record_ty)
+		if rt.tag == "uvar" then subst_mod.watch(st.subst, rt.id, c.id) end
+	elseif c.tag == "crow_close" then
+		local cc2 = c --[[: ConstraintRowClose ]]
+		local rt = subst_mod.deref(st.subst, cc2.record_ty)
+		if rt.tag == "uvar" then subst_mod.watch(st.subst, rt.id, c.id) end
+	end
+end
+
+-- ────────────────────────────────────────────────────────────────────────────
 -- Method dispatch
 -- ────────────────────────────────────────────────────────────────────────────
 
@@ -953,7 +1096,7 @@ end
 -- Solver step (S-Step dispatcher)
 -- ────────────────────────────────────────────────────────────────────────────
 
---: (AltState, AltConstraint) -> nil
+--: (AltState, AltConstraint) -> string
 function M.step(st, c)
 	st.steps = st.steps + 1
 	if c.tag == "ceq" then
@@ -967,6 +1110,7 @@ function M.step(st, c)
 	elseif c.tag == "tseal" then
 		M.rule_T_CTSeal(st, c.tv, c.mu, c.prov)
 	elseif c.tag == "mcall" then
+		-- step_mcall handles parking internally (rule_T_CMCall_Open_Stuck calls park).
 		step_mcall(st, c.tv, c.key, c.ret, c.prov)
 	elseif c.tag == "cinst" then
 		if c.scheme.binders == 0 then
@@ -980,7 +1124,17 @@ function M.step(st, c)
 		-- Already in inert by spec; if seen on the worklist via wake,
 		-- retry by treating as CHKT.
 		M.rule_T_HOUnify_Wake(st, c)
+	elseif c.tag == "crow_extend" then
+		local status = M.rule_T_CRowExtend(st, c.record_ty, c.key, c.field_ty, c.prov)
+		if status == "stuck" then return "stuck" end
+	elseif c.tag == "crow_lacks" then
+		local status = M.rule_T_CRowLacks(st, c.record_ty, c.key, c.prov)
+		if status == "stuck" then return "stuck" end
+	elseif c.tag == "crow_close" then
+		local status = M.rule_T_CRowClose(st, c.record_ty, c.prov)
+		if status == "stuck" then return "stuck" end
 	end
+	return "done"
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -993,12 +1147,24 @@ function M.run(st)
 		local c = st.worklist[st.head]
 		st.worklist[st.head] = nil
 		st.head = st.head + 1
-		if c ~= nil then M.step(st, c) end
+		if c ~= nil then
+			local status = M.step(st, c)
+			-- Park CRow constraints that returned "stuck".
+			if status == "stuck" and
+			   (c.tag == "crow_extend" or c.tag == "crow_lacks" or c.tag == "crow_close") then
+				alt_park_crow(st, c)
+			end
+		end
 	end
-	-- S-Quiesce: report any inert HOUnify as ambiguous.
+	-- S-Quiesce: report any inert HOUnify as ambiguous; CRowLacks still parked
+	-- at quiescence means row never closed — soundness floor violation.
 	for _cid, c in pairs(st.inert) do
 		if c.tag == "hounify" then
 			M.rule_T_HOUnify_Stuck(st, c)
+		elseif c.tag == "crow_lacks" then
+			local ckey = c.key or "?"
+			record_error(st, "S-Quiesce-CRowLacks",
+				"CRowLacks still unresolved at quiescence (row never closed): key=" .. ckey)
 		end
 	end
 end

@@ -6,6 +6,9 @@
 --   CTableSet(tv, key, ty)      - tv must have field key : ty
 --   CTableSeal(tv, mu)          - seal tv with metatable mu (mu may be nil)
 --   CMethodCall(tv, key, ret)   - tv:key(...) returns ret tvar (synthesised)
+--   CRowExtend(record_ty, key, field_ty) - record's row contains key with given field type
+--   CRowLacks(record_ty, key)   - record's row does NOT contain key
+--   CRowClose(record_ty)        - record's row variable becomes closed (no further extension)
 --
 -- Each constraint carries provenance: { file, line, kind } where kind is
 -- one of "declared" | "inferred" | "synthesized".  Cheap to construct,
@@ -23,7 +26,10 @@ local M = {}
 --:: ConstraintTableSet   = { id: integer, tag: "tset", tv: integer, key: string, ty: V5Type, prov: Provenance }
 --:: ConstraintTableSeal  = { id: integer, tag: "tseal", tv: integer, mu: integer | nil, prov: Provenance }
 --:: ConstraintMethodCall = { id: integer, tag: "mcall", tv: integer, key: string, ret: integer, prov: Provenance }
---:: V5Constraint = ConstraintEq | ConstraintSub | ConstraintTableOpen | ConstraintTableSet | ConstraintTableSeal | ConstraintMethodCall
+--:: ConstraintRowExtend  = { id: integer, tag: "crow_extend", record_ty: V5Type, key: string, field_ty: V5Type, prov: Provenance }
+--:: ConstraintRowLacks   = { id: integer, tag: "crow_lacks", record_ty: V5Type, key: string, prov: Provenance }
+--:: ConstraintRowClose   = { id: integer, tag: "crow_close", record_ty: V5Type, prov: Provenance }
+--:: V5Constraint = ConstraintEq | ConstraintSub | ConstraintTableOpen | ConstraintTableSet | ConstraintTableSeal | ConstraintMethodCall | ConstraintRowExtend | ConstraintRowLacks | ConstraintRowClose
 
 local _next_id = 1 --[[: integer ]]
 
@@ -61,6 +67,25 @@ end
 --: (integer, string, integer, Provenance) -> V5Constraint
 function M.method_call(tv, key, ret, prov)
 	return { id = fresh_id(), tag = "mcall", tv = tv, key = key, ret = ret, prov = prov }
+end
+
+-- CRowExtend: record's row contains key with given field type.
+--: (V5Type, string, V5Type, Provenance) -> V5Constraint
+function M.row_extend(record_ty, key, field_ty, prov)
+	return { id = fresh_id(), tag = "crow_extend", record_ty = record_ty, key = key, field_ty = field_ty, prov = prov }
+end
+
+-- CRowLacks: record's row does NOT contain key.
+-- Parks while row var is unbound; errors at quiescence if still unbound.
+--: (V5Type, string, Provenance) -> V5Constraint
+function M.row_lacks(record_ty, key, prov)
+	return { id = fresh_id(), tag = "crow_lacks", record_ty = record_ty, key = key, prov = prov }
+end
+
+-- CRowClose: record's row variable becomes closed (no further extension).
+--: (V5Type, Provenance) -> V5Constraint
+function M.row_close(record_ty, prov)
+	return { id = fresh_id(), tag = "crow_close", record_ty = record_ty, prov = prov }
 end
 
 --: (string, integer, string) -> Provenance

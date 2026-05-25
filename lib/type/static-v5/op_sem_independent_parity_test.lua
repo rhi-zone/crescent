@@ -790,4 +790,124 @@ T.describe("indep parity: fixture 18 — CSub-TVar routes to CEq", function()
 	end)
 end)
 
+-- ════════════════════════════════════════════════════════════════════
+-- Fixture 19: CRowExtend binds open-row record with new key
+-- ════════════════════════════════════════════════════════════════════
+T.describe("indep parity: fixture 19 — CRowExtend binds open row", function()
+	T.it("both interpreters add key to open-row record with no errors", function()
+		local int_ty = types_mod.const("int") --[[: V5Type ]]
+
+		local exec = fresh_state()
+		local rv1 = types_mod.rowvar(10) --[[: V5Type ]]
+		local rec1 = types_mod.record_open({}, rv1) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.row_extend(rec1, "x", int_ty, prov("extend-x")))
+		op_sem.run(exec)
+
+		local alt = fresh_state()
+		local rv2 = types_mod.rowvar(11) --[[: V5Type ]]
+		local rec2 = types_mod.record_open({}, rv2) --[[: V5Type ]]
+		op_sem.emit(alt, constraint_mod.row_extend(rec2, "x", int_ty, prov("extend-x")))
+		op_sem_alt.run(alt)
+
+		assert_state_parity("fixture19", exec, alt)
+		T.eq(op_sem.error_count(exec), 0, "exec: no errors on open-row extend")
+		T.eq(op_sem_alt.error_count(alt), 0, "alt: no errors on open-row extend")
+	end)
+end)
+
+-- ════════════════════════════════════════════════════════════════════
+-- Fixture 20: CRowExtend on closed record → ERROR
+-- ════════════════════════════════════════════════════════════════════
+T.describe("indep parity: fixture 20 — CRowExtend on closed record", function()
+	T.it("both interpreters error with T-CRowExtend-Closed", function()
+		local int_ty = types_mod.const("int") --[[: V5Type ]]
+		local str_ty = types_mod.const("str") --[[: V5Type ]]
+
+		local exec = fresh_state()
+		local rec1 = types_mod.record({ y = int_ty }) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.row_extend(rec1, "x", str_ty, prov("extend-closed")))
+		op_sem.run(exec)
+
+		local alt = fresh_state()
+		local rec2 = types_mod.record({ y = int_ty }) --[[: V5Type ]]
+		op_sem.emit(alt, constraint_mod.row_extend(rec2, "x", str_ty, prov("extend-closed")))
+		op_sem_alt.run(alt)
+
+		assert_state_parity("fixture20", exec, alt)
+		local exec_found = false
+		for i = 1, #exec.errors do
+			local e = exec.errors[i]
+			if e ~= nil and e.rule == "T-CRowExtend-Closed" then exec_found = true end
+		end
+		local alt_found = false
+		for i = 1, #alt.errors do
+			local e = alt.errors[i]
+			if e ~= nil and e.rule == "T-CRowExtend-Closed" then alt_found = true end
+		end
+		T.ok(exec_found, "exec: T-CRowExtend-Closed fired")
+		T.ok(alt_found, "alt: T-CRowExtend-Closed fired")
+	end)
+end)
+
+-- ════════════════════════════════════════════════════════════════════
+-- Fixture 21: CRowLacks parks while open, succeeds when closed via CRowClose
+-- ════════════════════════════════════════════════════════════════════
+T.describe("indep parity: fixture 21 — CRowLacks + CRowClose interaction", function()
+	T.it("CRowLacks parks on open row; CRowClose wakes it; succeeds with key absent", function()
+		local exec = fresh_state()
+		local rv1 = types_mod.rowvar(20) --[[: V5Type ]]
+		local rec1 = types_mod.record_open({}, rv1) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.row_lacks(rec1, "z", prov("lacks-z")))
+		op_sem.emit(exec, constraint_mod.row_close(rec1, prov("close")))
+		op_sem.run(exec)
+
+		local alt = fresh_state()
+		local rv2 = types_mod.rowvar(21) --[[: V5Type ]]
+		local rec2 = types_mod.record_open({}, rv2) --[[: V5Type ]]
+		op_sem.emit(alt, constraint_mod.row_lacks(rec2, "z", prov("lacks-z")))
+		op_sem.emit(alt, constraint_mod.row_close(rec2, prov("close")))
+		op_sem_alt.run(alt)
+
+		assert_state_parity("fixture21", exec, alt)
+		T.eq(op_sem.error_count(exec), 0, "exec: no errors — lacks succeeded after close")
+		T.eq(op_sem_alt.error_count(alt), 0, "alt: no errors — lacks succeeded after close")
+	end)
+end)
+
+-- ════════════════════════════════════════════════════════════════════
+-- Fixture 22 (risk): positional record + CRowExtend → closed-extend ERROR
+-- Positional records are closed by construction; must never grow row tails.
+-- ════════════════════════════════════════════════════════════════════
+T.describe("indep parity: fixture 22 — positional record stays closed", function()
+	T.it("CRowExtend on positional record errors in both interpreters", function()
+		local int_ty = types_mod.const("int") --[[: V5Type ]]
+		local str_ty = types_mod.const("str") --[[: V5Type ]]
+		local bool_ty = types_mod.const("bool") --[[: V5Type ]]
+
+		local exec = fresh_state()
+		local pos1 = types_mod.record({ ["1"] = int_ty, ["2"] = str_ty }) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.row_extend(pos1, "name", bool_ty, prov("pos-extend")))
+		op_sem.run(exec)
+
+		local alt = fresh_state()
+		local pos2 = types_mod.record({ ["1"] = int_ty, ["2"] = str_ty }) --[[: V5Type ]]
+		op_sem.emit(alt, constraint_mod.row_extend(pos2, "name", bool_ty, prov("pos-extend")))
+		op_sem_alt.run(alt)
+
+		assert_state_parity("fixture22", exec, alt)
+		local exec_found = false
+		for i = 1, #exec.errors do
+			local e = exec.errors[i]
+			if e ~= nil and e.rule == "T-CRowExtend-Closed" then exec_found = true end
+		end
+		local alt_found = false
+		for i = 1, #alt.errors do
+			local e = alt.errors[i]
+			if e ~= nil and e.rule == "T-CRowExtend-Closed" then alt_found = true end
+		end
+		T.ok(exec_found, "exec: positional record rejected CRowExtend (T-CRowExtend-Closed)")
+		T.ok(alt_found, "alt: positional record rejected CRowExtend (T-CRowExtend-Closed)")
+	end)
+end)
+
 return true

@@ -67,6 +67,9 @@ M.table_open  = constraint_mod.table_open
 M.table_set   = constraint_mod.table_set
 M.table_seal  = constraint_mod.table_seal
 M.method_call = constraint_mod.method_call
+M.row_extend  = constraint_mod.row_extend
+M.row_lacks   = constraint_mod.row_lacks
+M.row_close   = constraint_mod.row_close
 M.prov        = constraint_mod.prov
 M.variance    = variance_mod
 
@@ -76,7 +79,7 @@ M.variance    = variance_mod
 
 --:: OpSemError = { rule: string, msg: string }
 --:: OpSemTrace = { rule: string, msg: string }
---:: OpSemState = { subst: Subst, worklist: OpSemConstraint[], head: integer, tail: integer, inert: { [integer]: OpSemConstraint }, errors: OpSemError[], trace: OpSemTrace[], reactivations: integer, steps: integer }
+--:: OpSemState = { subst: Subst, worklist: OpSemConstraint[], head: integer, tail: integer, inert: { [integer]: OpSemConstraint }, errors: OpSemError[], trace: OpSemTrace[], reactivations: integer, steps: integer, row_watchers: { [integer]: { [integer]: boolean } } }
 
 --: () -> OpSemState
 function M.new_state()
@@ -90,6 +93,7 @@ function M.new_state()
 		trace         = {} --[[: OpSemTrace[] ]],
 		reactivations = 0,
 		steps         = 0,
+		row_watchers  = {} --[[: { [integer]: { [integer]: boolean } } ]],
 	}
 end
 
@@ -150,6 +154,34 @@ local function wake_head(st, tvar_id)
 	end
 end
 
+-- Row-var watcher helpers (needed by park, which is defined next).
+-- watch_rowvar/wake_rowvar are also referenced from the CRow rules below;
+-- declaring them here ensures they are in scope for both park and the rules.
+
+--: (OpSemState, integer, integer) -> nil
+local function watch_rowvar(st, rv_id, cid)
+	local w = st.row_watchers[rv_id]
+	if w == nil then w = {} --[[: { [integer]: boolean } ]]; st.row_watchers[rv_id] = w end
+	w[cid] = true
+end
+
+--: (OpSemState, integer) -> nil
+local function wake_rowvar(st, rv_id)
+	local w = st.row_watchers[rv_id]
+	if w == nil then return end
+	st.row_watchers[rv_id] = nil
+	for cid in pairs(w) do
+		local c = st.inert[cid]
+		if c ~= nil then
+			st.inert[cid] = nil
+			local n = st.tail + 1
+			st.worklist[n] = c
+			st.tail = n
+			st.reactivations = st.reactivations + 1
+		end
+	end
+end
+
 --: (OpSemConstraint, Subst) -> { [integer]: boolean }
 local function blockers_of(c, s)
 	local acc = {} --[[: { [integer]: boolean } ]]
@@ -167,6 +199,18 @@ local function blockers_of(c, s)
 	elseif c.tag == "tset"  then acc[c.tv] = true
 	elseif c.tag == "tseal" then acc[c.tv] = true
 	elseif c.tag == "mcall" then acc[c.tv] = true
+	elseif c.tag == "crow_extend" then
+		local cr = c --[[: ConstraintRowExtend ]]
+		local rt = subst_mod.deref(s, cr.record_ty)
+		if rt.tag == "uvar" then acc[rt.id] = true end
+	elseif c.tag == "crow_lacks" then
+		local cl = c --[[: ConstraintRowLacks ]]
+		local rt = subst_mod.deref(s, cl.record_ty)
+		if rt.tag == "uvar" then acc[rt.id] = true end
+	elseif c.tag == "crow_close" then
+		local cc2 = c --[[: ConstraintRowClose ]]
+		local rt = subst_mod.deref(s, cc2.record_ty)
+		if rt.tag == "uvar" then acc[rt.id] = true end
 	end
 	return acc
 end
@@ -187,6 +231,21 @@ local function park(st, c)
 		local f = subst_mod.deref(st.subst, c.f) --[[: V5Type ]]
 		if f.tag == "uvar" then
 			subst_mod.watch_head(st.subst, f.id, c.id)
+		end
+		return
+	end
+	if c.tag == "crow_lacks" then
+		-- CRowLacks parks on either the record_ty UVar (if not yet concrete) or
+		-- on the open row-var id (if record is already concrete with open row).
+		local cl = c --[[: ConstraintRowLacks ]]
+		local rt = subst_mod.deref(st.subst, cl.record_ty)
+		if rt.tag == "uvar" then
+			subst_mod.watch(st.subst, rt.id, c.id)
+		elseif rt.tag == "record" then
+			local rrow = rt.row --[[: TRowVar | nil ]]
+			if rrow ~= nil then
+				watch_rowvar(st, rrow.id, c.id)
+			end
 		end
 		return
 	end
@@ -785,6 +844,164 @@ local function step_mcall(st, c)
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
+-- CRow rules (row-polymorphic records)
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- Row variables live on TRecord.row (a TRowVar node or nil).
+-- nil means closed (no further extension allowed).
+-- A TRowVar with id means open (may grow).
+--
+-- CRow constraints operate on an entire TRecord type (not a tvar id) so the
+-- solver must first deref the record_ty argument to find the concrete record.
+-- If record_ty is still a UVar, the rule parks on that UVar.
+--
+-- Row-var ids are separate from UVar ids.  They are tracked in a simple
+-- counter; no union-find (row vars are either open or closed, never merged
+-- with other row vars directly — field CEqs handle structural sharing).
+
+-- Row-var ids are created by callers (e.g. tests) using types_mod.rowvar(id)
+-- and types_mod.record_open(fields, row).  The solver does not allocate new
+-- row vars in Phase 2; it only reads and closes them.
+
+-- Deref the record_ty through UVars; return the record or nil if still stuck.
+--: (OpSemState, V5Type) -> (V5Type | nil, boolean)
+-- Returns (record_type, is_stuck).  is_stuck=true means park on the uvar.
+local function deref_to_record(st, ty)
+	local t = subst_mod.deref(st.subst, ty) --[[: V5Type ]]
+	if t.tag == "uvar" then return nil, true end
+	if t.tag == "record" then return t, false end
+	return nil, false -- concrete non-record: error at caller
+end
+
+-- T-CRowExtend-Bind: record has an open row var → add key to fields and keep row open.
+--: (OpSemState, V5Type, V5Type, string, V5Type, Provenance) -> string
+function M.rule_T_CRowExtend_Bind(st, _rec_ty, rec, key, field_ty, _prov)
+	if rec.tag ~= "record" then err(st, "T-CRowExtend-Bind", "precondition: record"); return "error" end
+	if rec.row == nil then err(st, "T-CRowExtend-Bind", "precondition: open row"); return "error" end
+	-- Mutate field into the record (monotone extension — no overwrite).
+	rec.fields[key] = field_ty
+	trace(st, "T-CRowExtend-Bind", "bound " .. key)
+	return "done"
+end
+
+-- T-CRowExtend-Lookup: record already has the key → emit CEq(existing, field_ty).
+--: (OpSemState, V5Type, V5Type, string, V5Type, Provenance) -> string
+function M.rule_T_CRowExtend_Lookup(st, _rec_ty, rec, key, field_ty, prov)
+	if rec.tag ~= "record" then err(st, "T-CRowExtend-Lookup", "precondition: record"); return "error" end
+	local existing = rec.fields[key]
+	if existing == nil then err(st, "T-CRowExtend-Lookup", "precondition: key present"); return "error" end
+	M.emit(st, constraint_mod.eq(existing, field_ty, prov))
+	trace(st, "T-CRowExtend-Lookup", "equated " .. key)
+	return "done"
+end
+
+-- T-CRowExtend-Closed: closed record missing key → ERROR.
+--: (OpSemState, V5Type, V5Type, string, V5Type, Provenance) -> string
+function M.rule_T_CRowExtend_Closed(st, _rec_ty, rec, key, _field_ty, _prov)
+	if rec.tag ~= "record" then err(st, "T-CRowExtend-Closed", "precondition: record"); return "error" end
+	err(st, "T-CRowExtend-Closed", "closed record cannot extend: key=" .. key)
+	return "error"
+end
+
+--: (OpSemState, V5Type, string, V5Type, Provenance) -> string
+local function step_crow_extend(st, record_ty, key, field_ty, prov)
+	local rec, stuck = deref_to_record(st, record_ty)
+	if stuck then
+		-- record_ty is still a UVar; park (blockers_of picks up the watcher).
+		return "stuck"
+	end
+	if rec == nil then
+		local tag = subst_mod.deref(st.subst, record_ty).tag
+		err(st, "T-CRowExtend", "record_ty is not a record: tag=" .. tag)
+		return "error"
+	end
+	-- Dispatch on row state.
+	if rec.row ~= nil then
+		-- Open row.
+		if rec.fields[key] ~= nil then
+			return M.rule_T_CRowExtend_Lookup(st, record_ty, rec, key, field_ty, prov)
+		end
+		return M.rule_T_CRowExtend_Bind(st, record_ty, rec, key, field_ty, prov)
+	end
+	-- Closed row (row == nil).
+	if rec.fields[key] ~= nil then
+		return M.rule_T_CRowExtend_Lookup(st, record_ty, rec, key, field_ty, prov)
+	end
+	return M.rule_T_CRowExtend_Closed(st, record_ty, rec, key, field_ty, prov)
+end
+
+-- T-CRowLacks-Open: row is open → park watching the row-var id.
+--: (OpSemState, V5Type, V5Type, string, Provenance) -> string
+function M.rule_T_CRowLacks_Open(st, _rec_ty, rec, key, _prov)
+	local rrow = rec.row
+	if rrow == nil then err(st, "T-CRowLacks-Open", "precondition: open row"); return "error" end
+	trace(st, "T-CRowLacks-Open", "park on rowvar " .. rrow.id .. " key=" .. key)
+	return "stuck"
+end
+
+-- T-CRowLacks-Closed-Pass: closed and key absent → succeed.
+--: (OpSemState, V5Type, V5Type, string, Provenance) -> string
+function M.rule_T_CRowLacks_Closed_Pass(st, _rec_ty, _rec, key, _prov)
+	trace(st, "T-CRowLacks-Closed-Pass", "key absent: " .. key)
+	return "done"
+end
+
+-- T-CRowLacks-Closed-Fail: closed and key present → ERROR.
+--: (OpSemState, V5Type, V5Type, string, Provenance) -> string
+function M.rule_T_CRowLacks_Closed_Fail(st, _rec_ty, _rec, key, _prov)
+	err(st, "T-CRowLacks-Closed-Fail", "row already contains key: " .. key)
+	return "error"
+end
+
+--: (OpSemState, V5Type, string, Provenance) -> string
+local function step_crow_lacks(st, record_ty, key, prov)
+	local rec, stuck = deref_to_record(st, record_ty)
+	if stuck then return "stuck" end
+	if rec == nil then
+		err(st, "T-CRowLacks", "record_ty is not a record")
+		return "error"
+	end
+	if rec.row ~= nil then
+		-- Open row: park watching the row-var id so CRowClose can wake us.
+		return M.rule_T_CRowLacks_Open(st, record_ty, rec, key, prov)
+	end
+	-- Closed.
+	if rec.fields[key] ~= nil then
+		return M.rule_T_CRowLacks_Closed_Fail(st, record_ty, rec, key, prov)
+	end
+	return M.rule_T_CRowLacks_Closed_Pass(st, record_ty, rec, key, prov)
+end
+
+-- T-CRowClose-Bind: close the row var of a record (set row = nil).
+-- If already closed, no-op.
+--: (OpSemState, V5Type, Provenance) -> string
+function M.rule_T_CRowClose_Bind(st, record_ty, prov)
+	local rec, stuck = deref_to_record(st, record_ty)
+	if stuck then return "stuck" end
+	if rec == nil then
+		err(st, "T-CRowClose-Bind", "record_ty is not a record")
+		return "error"
+	end
+	-- Capture row-var id before closing (needed to wake watchers).
+	local rrow = rec.row
+	if rrow == nil then
+		-- Already closed (positional record or previously closed).
+		trace(st, "T-CRowClose-Bind", "already closed")
+		return "done"
+	end
+	local rv_id = rrow.id
+	-- Close: set row to nil.
+	rec.row = nil
+	trace(st, "T-CRowClose-Bind", "closed row rv=" .. rv_id)
+	-- Wake any CRowLacks constraints that were parked on this row-var.
+	wake_rowvar(st, rv_id)
+	return "done"
+end
+
+-- blockers_of extension: CRow constraints park on the record_ty's uvar.
+-- We override the park logic in M.step via a dedicated branch.
+
+-- ────────────────────────────────────────────────────────────────────────────
 -- Instantiation
 -- ────────────────────────────────────────────────────────────────────────────
 
@@ -1088,6 +1305,15 @@ function M.step(st, c)
 	if c.tag == "cinst"   then return step_cinst(st, c) end
 	if c.tag == "chkt"    then return step_chkt(st, c) end
 	if c.tag == "hounify" then return step_hounify(st, c) end
+	if c.tag == "crow_extend" then
+		return step_crow_extend(st, c.record_ty, c.key, c.field_ty, c.prov)
+	end
+	if c.tag == "crow_lacks" then
+		return step_crow_lacks(st, c.record_ty, c.key, c.prov)
+	end
+	if c.tag == "crow_close" then
+		return M.rule_T_CRowClose_Bind(st, c.record_ty, c.prov)
+	end
 	err(st, "step", "unknown constraint tag " .. tostring(c.tag))
 	return "error"
 end
@@ -1111,10 +1337,15 @@ function M.run(st)
 	end
 	-- S-Quiesce: report inert constraints as stuck errors.
 	-- HOUnify gets the dedicated T-HOUnify-Stuck rule (ambiguous
-	-- constructor variable); others get the generic S-Quiesce error.
+	-- constructor variable); CRowLacks still parked means the row var was
+	-- never closed — soundness floor violation; others get generic error.
 	for _cid, c in pairs(st.inert) do
 		if c.tag == "hounify" then
 			M.rule_T_HOUnify_Stuck(st, c)
+		elseif c.tag == "crow_lacks" then
+			local ckey = c.key or "?"
+			err(st, "S-Quiesce-CRowLacks",
+				"CRowLacks still unresolved at quiescence (row never closed): key=" .. ckey)
 		else
 			err(st, "S-Quiesce", "stuck constraint (tag=" .. c.tag .. ")")
 		end

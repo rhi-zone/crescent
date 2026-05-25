@@ -1094,4 +1094,120 @@ T.describe("op_sem variance: fixture 18 — T-CSub-TVar routes to CEq", function
 	end)
 end)
 
+-- ─── Fixture 19: CRowExtend binds open-row record with new key ───────────
+-- CRowExtend on an open-row record adds a new field.
+-- Rule fired: T-CRowExtend-Bind.
+
+T.describe("op_sem CRow: fixture 19 — CRowExtend binds open-row record", function()
+	T.it("CRowExtend adds key to open-row record", function()
+		local exec = op_sem.new_state()
+		local rv = types_mod.rowvar(1) --[[: V5Type ]]
+		local rec = types_mod.record_open({}, rv) --[[: V5Type ]]
+		local int_ty = types_mod.const("int") --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.row_extend(rec, "x", int_ty, prov("extend-x")))
+		op_sem.run(exec)
+		T.eq(op_sem.error_count(exec), 0, "CRowExtend on open row: no errors")
+		-- After extend, rec.fields["x"] should be int_ty.
+		T.ok(rec.fields["x"] ~= nil, "field x added to record")
+		T.ok(walk_equal(rec.fields["x"] or int_ty, int_ty), "field x = int")
+	end)
+
+	T.it("CRowExtend lookup equates existing field type", function()
+		-- Record already has x: int; CRowExtend with x: string → CEq(int, string) → error.
+		local exec = op_sem.new_state()
+		local rv = types_mod.rowvar(2) --[[: V5Type ]]
+		local int_ty = types_mod.const("int") --[[: V5Type ]]
+		local str_ty = types_mod.const("str") --[[: V5Type ]]
+		local rec = types_mod.record_open({ x = int_ty }, rv) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.row_extend(rec, "x", str_ty, prov("extend-x-lookup")))
+		op_sem.run(exec)
+		-- Should produce a CEq(int, str) mismatch.
+		local found = false
+		for i = 1, #exec.errors do
+			local e = exec.errors[i]
+			if e ~= nil and e.rule == "T-CEq-Const" then found = true end
+		end
+		T.ok(found, "field-type conflict surfaces as T-CEq-Const")
+	end)
+end)
+
+-- ─── Fixture 20: CRowExtend on closed record → ERROR ────────────────────
+-- Rule fired: T-CRowExtend-Closed.
+
+T.describe("op_sem CRow: fixture 20 — CRowExtend on closed record", function()
+	T.it("CRowExtend on closed record with missing key errors", function()
+		local exec = op_sem.new_state()
+		-- Closed record: row = nil (via types_mod.record).
+		local int_ty = types_mod.const("int") --[[: V5Type ]]
+		local rec = types_mod.record({ y = int_ty }) --[[: V5Type ]]
+		local str_ty = types_mod.const("str") --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.row_extend(rec, "x", str_ty, prov("extend-closed")))
+		op_sem.run(exec)
+		local found = false
+		for i = 1, #exec.errors do
+			local e = exec.errors[i]
+			if e ~= nil and e.rule == "T-CRowExtend-Closed" then found = true end
+		end
+		T.ok(found, "closed record extend error: T-CRowExtend-Closed")
+	end)
+end)
+
+-- ─── Fixture 21: CRowLacks parks then succeeds after CRowClose ───────────
+-- Rules fired: T-CRowLacks-Open (park), T-CRowClose-Bind (close), T-CRowLacks-Closed-Pass.
+
+T.describe("op_sem CRow: fixture 21 — CRowLacks parks while open, succeeds when closed", function()
+	T.it("CRowLacks on open row parks; CRowClose closes; lacks succeeds when key absent", function()
+		local exec = op_sem.new_state()
+		local rv = types_mod.rowvar(3) --[[: V5Type ]]
+		local rec = types_mod.record_open({}, rv) --[[: V5Type ]]
+		-- CRowLacks(rec, "z") — should park while row is open.
+		op_sem.emit(exec, constraint_mod.row_lacks(rec, "z", prov("lacks-z")))
+		-- CRowClose(rec) — closes the row, wakes the parked lacks.
+		op_sem.emit(exec, constraint_mod.row_close(rec, prov("close-row")))
+		op_sem.run(exec)
+		T.eq(op_sem.error_count(exec), 0, "CRowLacks parks then passes after CRowClose")
+		T.ok(rec.row == nil, "record row is closed after CRowClose")
+	end)
+
+	T.it("CRowLacks on closed record with key present errors", function()
+		local exec = op_sem.new_state()
+		local int_ty = types_mod.const("int") --[[: V5Type ]]
+		local rec = types_mod.record({ z = int_ty }) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.row_lacks(rec, "z", prov("lacks-z-fail")))
+		op_sem.run(exec)
+		local found = false
+		for i = 1, #exec.errors do
+			local e = exec.errors[i]
+			if e ~= nil and e.rule == "T-CRowLacks-Closed-Fail" then found = true end
+		end
+		T.ok(found, "key present in closed row: T-CRowLacks-Closed-Fail error")
+	end)
+end)
+
+-- ─── Fixture 22 (risk): positional record + CRowExtend → closed-extend ERROR ──
+-- Positional records are closed by construction (row = nil).
+-- CRowExtend on a positional record must ERROR with T-CRowExtend-Closed.
+-- This is the soundness floor: positional records NEVER grow row tails.
+
+T.describe("op_sem CRow: fixture 22 — positional record stays closed", function()
+	T.it("positional record + CRowExtend errors as T-CRowExtend-Closed", function()
+		local exec = op_sem.new_state()
+		-- Positional record: keys "1", "2" — closed by types_mod.arrow/record construction.
+		local int_ty = types_mod.const("int") --[[: V5Type ]]
+		local str_ty = types_mod.const("str") --[[: V5Type ]]
+		local pos_rec = types_mod.record({ ["1"] = int_ty, ["2"] = str_ty }) --[[: V5Type ]]
+		-- Attempt to add a new named key via CRowExtend.
+		local bool_ty = types_mod.const("bool") --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.row_extend(pos_rec, "name", bool_ty, prov("pos-extend")))
+		op_sem.run(exec)
+		local found = false
+		for i = 1, #exec.errors do
+			local e = exec.errors[i]
+			if e ~= nil and e.rule == "T-CRowExtend-Closed" then found = true end
+		end
+		T.ok(found, "positional record cannot extend: T-CRowExtend-Closed fired")
+		T.ok(pos_rec.row == nil, "positional record row remains nil (closed)")
+	end)
+end)
+
 return true
