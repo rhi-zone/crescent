@@ -671,6 +671,173 @@ flagged for kind-checking extension.
    arose from a CImpl-nested wanted needs three-deep provenance. Substrate
    carries `prov` per-constraint but the chaining helper isn't built yet.
 
+### Row polymorphism (CRow family)
+
+**Added 2026-05-26.** Substrate: `TRowVar(id)` is a row metavariable (unbound:
+open row; `nil` in substitution: closed row). `TRecord.row` is a `TRowVar` id or
+`nil` (closed). Row variables are NOT tvar/UVars — they are stored in a separate
+`row_bindings` table in the substitution, keyed by row-var id.
+
+Three constraint atoms:
+
+| Atom | Purpose |
+|---|---|
+| `CRowExtend(rec_ty, key, field_ty)` | Assert that `rec_ty`'s row contains `key` with type `field_ty` |
+| `CRowLacks(rec_ty, key)` | Assert that `rec_ty`'s row does NOT contain `key` |
+| `CRowClose(rec_ty)` | Close `rec_ty`'s row variable (seal the row) |
+
+#### Rules
+
+**T-CRowExtend-Bind.** Record has an open row var; key is absent. Extend the
+field set in place.
+
+    σ(rec_ty) = Record(F, ρ)    ρ is open    key ∉ dom(F)
+    ──────────────────────────────────────────────────────────────  T-CRowExtend-Bind
+    σ ⊢ CRowExtend(rec_ty, key, field_ty) ⇒ ⟨σ[F ∪ {key=field_ty}], ε, done⟩
+
+**T-CRowExtend-Lookup.** Key already present. Equate types.
+
+    σ(rec_ty) = Record(F, _)    F[key] = existing_ty
+    ──────────────────────────────────────────────────────────────  T-CRowExtend-Lookup
+    σ ⊢ CRowExtend(rec_ty, key, field_ty) ⇒ ⟨σ, [CEq(existing_ty, field_ty)], done⟩
+
+**T-CRowExtend-Closed.** Row is closed (`ρ = nil`), key absent. Error.
+
+    σ(rec_ty) = Record(F, nil)    key ∉ dom(F)
+    ──────────────────────────────────────────────────────────────  T-CRowExtend-Closed
+    σ ⊢ CRowExtend(rec_ty, key, field_ty) ⇒ ⟨σ, ε, error("extend on closed row: key absent")⟩
+
+**T-CRowLacks-Open.** Row is open. Park watching the row var id.
+
+    σ(rec_ty) = Record(F, ρ)    ρ ≠ nil (open row)
+    ──────────────────────────────────────────────────────────────  T-CRowLacks-Open
+    σ ⊢ CRowLacks(rec_ty, key) ⇒ ⟨σ, ε, stuck⟩
+
+Constraint moves to I, watching the row var id ρ. It wakes when `CRowClose`
+fires on the same record (closing ρ).
+
+**T-CRowLacks-Closed-Pass.** Row is closed, key absent. Succeed.
+
+    σ(rec_ty) = Record(F, nil)    key ∉ dom(F)
+    ──────────────────────────────────────────────────────────────  T-CRowLacks-Closed-Pass
+    σ ⊢ CRowLacks(rec_ty, key) ⇒ ⟨σ, ε, done⟩
+
+**T-CRowLacks-Closed-Fail.** Row is closed, key present. Error.
+
+    σ(rec_ty) = Record(F, nil)    key ∈ dom(F)
+    ──────────────────────────────────────────────────────────────  T-CRowLacks-Closed-Fail
+    σ ⊢ CRowLacks(rec_ty, key) ⇒ ⟨σ, ε, error("lacks violated: key present in closed row")⟩
+
+**T-CRowClose-Bind.** Close the row variable (set to `nil`). Wake rowvar watchers.
+
+    σ(rec_ty) = Record(F, ρ)    ρ ≠ nil
+    ──────────────────────────────────────────────────────────────  T-CRowClose-Bind
+    σ ⊢ CRowClose(rec_ty) ⇒ ⟨σ[row(ρ) := nil], ε, done⟩
+
+After closing, S-Wake drains the row-var watcher list for ρ and re-enters
+all parked `CRowLacks` constraints into W.
+
+**S-Quiesce-CRowLacks.** Soundness floor. Any `CRowLacks` still in I at
+quiescence is an error. An open row with no CRowClose issued means the
+narrowing "this field is absent" cannot be confirmed.
+
+    quiescent    CRowLacks(rec_ty, key) ∈ I
+    ──────────────────────────────────────────────────────────────  S-Quiesce-CRowLacks
+    error("row lacks constraint unresolved at quiescence: row var never closed")
+
+This is the G8 soundness floor: assuming absence on an unclosed row variable
+is unsound. The solver must see CRowClose before confirming CRowLacks.
+
+### Intersection types and effect composition (CIntersection family)
+
+**Added 2026-05-26.** Effects are types. `TConst` with a `"!"` prefix encodes
+effects (`!io`, `!throw`, `!yield`, `!os`). `TIntersection([t₁..tₙ])` composes
+types and effects without a parallel CEffect infrastructure. Canonical form is
+defined and enforced: flatten all nested TIntersections, sort parts by canonical
+key, deduplicate structurally equal parts. `constraint.flatten_parts(ty)` computes
+this shared by both interpreters.
+
+Three constraint atoms:
+
+| Atom | Purpose |
+|---|---|
+| `CIntersectionEq(ty, parts)` | Assert that `ty` equals the intersection of `parts` |
+| `CIntersectionSub(ty, parts)` | Assert that `ty` subtypes the intersection of `parts` (covariant sub into every part) |
+| `CIntersectionMember(ty, idx)` | Assert that the `idx`-th part of intersection `ty` is well-typed |
+
+#### Canonical form
+
+`canonical(parts)`: flatten all nested `TIntersection` sub-trees, sort the
+resulting flat list by `types.canonical_key(t)`, deduplicate structurally equal
+(via `types.equal`) consecutive entries.
+
+This is computed once at constraint creation and stored in the atom. Both
+interpreters share `constraint.flatten_parts`.
+
+#### Rules
+
+**T-CIntersection-Eq-Canonical.** Both sides reduce to the same canonical form.
+
+    canonical(σ⟦ty⟧) = canonical(parts)
+    ──────────────────────────────────────────────────────────────  T-CIntersection-Eq-Canonical
+    σ ⊢ CIntersectionEq(ty, parts) ⇒ ⟨σ, ε, done⟩
+
+If the canonical forms differ: emit per-position `CEq` pairs (index-matched
+after dedupe), or reject if the part count differs.
+
+**T-CIntersection-Sub-Decomp.** `ty` must subtype the intersection: decompose
+into one `CSub(ty, partᵢ)` per part (covariant: the concrete type must satisfy
+every part of the intersection).
+
+    parts = [p₁..pₙ]    n ≥ 1
+    ──────────────────────────────────────────────────────────────  T-CIntersection-Sub-Decomp
+    σ ⊢ CIntersectionSub(ty, parts) ⇒ ⟨σ, [CSub(ty, pᵢ)]ᵢ, done⟩
+
+**T-CIntersection-Sub-Conj.** `ty` is itself an intersection. Decompose LHS too:
+each LHS part must subtype each RHS part. (This is sound but may over-require;
+correct under the covariant intersection model where the type satisfies all parts.)
+
+    σ⟦ty⟧ = Intersection([q₁..qₘ])    parts = [p₁..pₙ]
+    ──────────────────────────────────────────────────────────────  T-CIntersection-Sub-Conj
+    σ ⊢ CIntersectionSub(ty, parts) ⇒ ⟨σ, [CSub(qⱼ, pᵢ)]ᵢⱼ, done⟩
+
+**T-CIntersection-Member-Direct.** `ty` is an intersection; the `idx`-th member
+exists and is extracted.
+
+    σ⟦ty⟧ = Intersection(parts)    parts[idx] = partᵢ
+    ──────────────────────────────────────────────────────────────  T-CIntersection-Member-Direct
+    σ ⊢ CIntersectionMember(ty, idx) ⇒ ⟨σ, ε, done⟩
+
+If `idx` out of bounds: error "member index out of bounds."
+
+**S-Quiesce-CIntersectionMember.** F2 enforcement. At quiescence, any
+`CIntersectionMember` still in I on an unbound uvar is an error.
+
+    quiescent    CIntersectionMember(ty, idx) ∈ I    σ⟦ty⟧ = UVar(_)
+    ──────────────────────────────────────────────────────────────  S-Quiesce-CIntersectionMember
+    error("intersection member constraint stuck: type never rigidified")
+
+#### Effect API
+
+Effects are constructed via:
+
+    types.effect(name)              → TConst("!name")
+    types.effect_apply(eff, arg)    → TApp(TConst("!name"), arg)
+
+The "!" prefix is the sole distinguisher — effects participate in ordinary
+type unification and subtyping without special-casing. An effect intersection
+`!io & !throw` is `TIntersection([TConst("!io"), TConst("!throw")])`.
+
+#### Soundness sketch
+
+1. Decomp (T-CIntersection-Sub-Decomp) is sound: a type satisfying a conjunction
+   of requirements satisfies each one individually.
+2. Conj (T-CIntersection-Sub-Conj) is sound under structural intersection: each
+   part of the LHS must satisfy each part of the RHS. Conservative (may reject
+   programs where a less-refined intersection model would accept), never unsound.
+3. Canonical form ensures deduplication is idempotent and rule matching is
+   deterministic regardless of constructor order.
+
 ## Cross-reference
 
 | Rule label              | Executable function (op_sem.lua) |
@@ -711,8 +878,21 @@ flagged for kind-checking extension.
 | T-CHKT-Park             | `rule_T_CHKT_Park`                |
 | T-HOUnify-Wake          | `rule_T_HOUnify_Wake`             |
 | T-HOUnify-Stuck         | `rule_T_HOUnify_Stuck`            |
-| S-Wake-Head             | `wake_head` (inside `run`)        |
-| S-Step / S-Park / S-Wake / S-Quiesce | `run`                |
+| S-Wake-Head                         | `wake_head` (inside `run`)            |
+| S-Step / S-Park / S-Wake / S-Quiesce | `run`                               |
+| T-CRowExtend-Bind                   | `rule_T_CRowExtend_Bind`              |
+| T-CRowExtend-Lookup                 | `rule_T_CRowExtend_Lookup`            |
+| T-CRowExtend-Closed                 | `rule_T_CRowExtend_Closed`            |
+| T-CRowLacks-Open                    | `rule_T_CRowLacks_Open`               |
+| T-CRowLacks-Closed-Pass             | `rule_T_CRowLacks_Closed_Pass`        |
+| T-CRowLacks-Closed-Fail             | `rule_T_CRowLacks_Closed_Fail`        |
+| T-CRowClose-Bind                    | `rule_T_CRowClose_Bind`               |
+| S-Quiesce-CRowLacks                 | `quiesce_errors` (inside `run`)       |
+| T-CIntersection-Eq-Canonical        | `rule_T_CIntersectionEq`              |
+| T-CIntersection-Sub-Decomp          | `rule_T_CIntersectionSub` (case 1)    |
+| T-CIntersection-Sub-Conj            | `rule_T_CIntersectionSub` (case 2)    |
+| T-CIntersection-Member-Direct       | `rule_T_CIntersectionMember`          |
+| S-Quiesce-CIntersectionMember       | `quiesce_errors` (inside `run`)       |
 
 Parity test asserts: for each fixture, the executable spec's final
 `⟨σ_final, errors⟩` equals the docs-encoded rule-by-rule trace's final

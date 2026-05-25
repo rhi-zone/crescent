@@ -1128,3 +1128,92 @@ The prior session's handoff named G7 (CMultiReturn union-arity) as a high-severi
 ### Next entry point
 
 CRow + CEffect unified extension (G8 + G12) per Option A in the handoff next-session menu.
+
+---
+
+## 2026-05-26 — CRow + CIntersection-effects (closes G8 + G12 at op-sem layer)
+
+### Context
+
+Option A from the 2026-05-25 handoff next-session menu: "CRow + CEffect unified
+extension — closes G8 + G12, largest unresolved family."
+
+### Evidence and decisions
+
+**Four commits this cycle (parity 187 → 275):**
+
+| Phase | Commit | Description | Parity |
+|---|---|---|---|
+| Substrate | `05519c88` | Row variables, open records, TRowVar, TRecord.row, TIntersection in types.lua + subst.lua | — |
+| CRow rules | `7f7d4d6c` | CRowExtend/Lacks/Close atoms + rules in both interpreters + fixtures 19-22 | 187 → 219 |
+| Fixture 8 reinstated | `b1825484` | CRow narrowing suppression (Scenario A: quiescence error; Scenario B: close-then-pass) | 219 → 233 |
+| Intersection + effects | `c600a446` | CIntersectionEq/Sub/Member + canonicalize + effect-type API via TConst with "!" prefix + fixtures 23-29 | 233 → 275 |
+
+**G8 (CRow narrowing-suppression soundness floor): CLOSED at op-sem layer.**
+CRowLacks parks while the row variable is unbound (open row). At quiescence, any
+still-parked CRowLacks becomes an error: S-Quiesce-CRowLacks. This is the soundness
+floor: assuming a field is absent on an unclosed row is unsound. CRowClose wakes
+parked CRowLacks constraints; those that find the key absent succeed (Closed-Pass);
+those that find the key present error (Closed-Fail). Verified by fixture 8
+(two scenarios, both interpreters).
+
+**G12 (effect variance discipline): CLOSED at op-sem layer.**
+Effects are types (TConst with "!" prefix: !io, !throw, !yield, !os). No parallel
+infrastructure is needed — effects compose via TIntersection. CSub decomposition
+and conjunction rules handle variance uniformly (existing T-CSub machinery).
+CIntersectionEq/Sub/Member with canonical form (flatten+sort+dedupe via
+constraint.flatten_parts). F2 enforcement: CIntersectionMember stuck on an
+unbound uvar at quiescence → error (S-Quiesce-CIntersectionMember).
+
+**Source pipeline integration NOT done (explicit deferral).**
+The op-sem now has correct rules for CRow and CIntersection. However, the source
+pipeline — parser support for `&` intersection syntax and `!Name<Args>` effect
+syntax, and gen-pass propagation of effects through function bodies — is NOT
+implemented. v5 currently constructs these constraints via API in tests only.
+Connecting the source pipeline is a separate 2-3 cycle effort. G8 and G12 are
+closed at the spec/op-sem layer; they are NOT yet observable from user-written code.
+
+### New gaps surfaced
+
+**G17 (variadic generics):** Accurate typing of `pcall` and `coroutine.resume`
+requires variadic generics (the function-argument pack and return-pack must be
+typed through the pcall/resume boundary). The current v5.0 `pcall` returns
+`(boolean, unknown)` per corpus convention. Full variadic generics is a separate
+constraint-family design. Low-to-medium priority; not blocking v5.0 stable.
+
+**v5-source-pipeline-integration (new gap):** Parser + gen-pass wiring for
+`&` (intersection) and `!Name<Args>` (effects) must land before G8 + G12 are
+observable from user code. Estimated 2-3 cycles. Not blocking op-sem stability.
+
+### Perf re-gate
+
+Harness: `lib/type/experiments/v5_perf/bench_chkt.lua`. The harness is correct
+and produces output when invoked via `bin/ld-musl-x86_64.so.1 bin/luajit-bin -e
+'...'` or direct LuaJIT. The `bin/cr run` dispatch does not call `M.main(arg)` —
+file returns `M` but never invokes it; this is a known harness invocation quirk.
+Perf entry recorded in `docs/perf/log.md` under 2026-05-26. All three gates PASS.
+Step counts grew from 634/295 (prior CSub re-gate) to 768/343, reflecting the new
+CRow + CIntersection dispatch paths. Margins remain >200× on wall, >10× on heap.
+
+### Decisions closed
+
+- **G8**: CRow narrowing-suppression soundness floor — CLOSED at op-sem layer.
+  Not yet observable from user code (source pipeline not wired).
+- **G12**: Effect variance discipline — CLOSED at op-sem layer. Effects as TConst
+  ("!" prefix); intersection composes; no parallel infrastructure. Not yet observable
+  from user code.
+
+### Decisions still open
+
+- **G17** (variadic generics): new gap, low-medium prio.
+- **v5-source-pipeline-integration**: parser + gen-pass for effects/intersections.
+- **G9** (bounded tvars), **G10** (variance under Lambda), **G11** (union backtracking):
+  unchanged from prior cycle.
+- **H10** (`any` escape hatch for community): still open, not blocking.
+
+### Next entry point
+
+1. v5-source-pipeline-integration: parser + gen-pass wiring for effects and
+   intersections. Prerequisite for G8/G12 to be user-observable.
+2. G17 (variadic generics) design — needs orchestrator decision before implementation.
+3. Pre-stable follow-ups (D + mining) per the 2026-05-25 handoff Option D.

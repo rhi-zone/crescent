@@ -6,6 +6,82 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-05-26: v5 typechecker — CRow + CIntersection-effects re-gate
+
+**Commits:** substrate = `05519c88`, CRow rules = `7f7d4d6c`, fixture 8 = `b1825484`,
+intersection+effects = `c600a446`.
+
+Re-gate after CRow (CRowExtend/Lacks/Close) and CIntersection (CIntersectionEq/Sub/Member
++ effect types as TConst("!") prefix) land. Effects dissolved into TIntersection with no
+parallel infrastructure. Parity count: 187 → 275 (+88 assertions). Both interpreters pass.
+
+Same harness as prior re-gates: `lib/type/experiments/v5_perf/bench_chkt.lua`. Invoked via
+direct LuaJIT (the `bin/cr run` dispatch does not call `M.main`; file returns the module
+table without invoking it — known harness quirk):
+
+```
+bin/ld-musl-x86_64.so.1 bin/luajit-bin -e \
+  "package.path='./?/init.lua;./?.lua;'..package.path
+   require('lib.type.experiments.v5_perf.bench_chkt').main({})"
+```
+
+### Gate verdict
+
+| File | wall median | heap median | react/emit | Verdict |
+|---|---|---|---|---|
+| `lib/test/arb.lua` (498 total constraints, 44 CHKT) | 0.74 ms | 180.9 KB | 0.027 | **PASS** |
+| `lib/stdlib/lint.lua` (228 total, 20 CHKT) | 0.53 ms | 113.1 KB | 0.044 | **PASS** |
+
+All three gates pass (<500 ms / <2 MB / <5×) with >200× wall margin and >10× heap
+margin on both files.
+
+### Raw runs
+
+```
+v5 CHKT+HOUnify re-gate (5 runs/file, op_sem solver)
+
+=== lib/test/arb.lua (CHKT+HOUnify re-gate) ===
+base constraints: 454 ; synth CHKT receivers: 22
+  run 1: wall=1.18ms heap=240.0KB step=634 react=17 err=44 chkt=44 total=498
+  run 2: wall=0.75ms heap=180.9KB step=634 react=17 err=44 chkt=44 total=498
+  run 3: wall=0.74ms heap=187.8KB step=634 react=17 err=44 chkt=44 total=498
+  run 4: wall=0.53ms heap=161.5KB step=634 react=17 err=44 chkt=44 total=498
+  run 5: wall=0.59ms heap=154.8KB step=634 react=17 err=44 chkt=44 total=498
+MEDIAN: wall=0.74ms heap=180.9KB step=634 react=17 ratio=0.027
+GATES: wall<500ms=true heap<2MB=true ratio<5x=true -- PASS
+
+=== lib/stdlib/lint.lua (CHKT+HOUnify re-gate) ===
+base constraints: 208 ; synth CHKT receivers: 10
+  run 1: wall=0.44ms heap=103.0KB step=295 react=13 err=46 chkt=20 total=228
+  run 2: wall=0.53ms heap=113.1KB step=295 react=13 err=46 chkt=20 total=228
+  run 3: wall=0.54ms heap=113.8KB step=295 react=13 err=46 chkt=20 total=228
+  run 4: wall=0.85ms heap=147.8KB step=295 react=13 err=46 chkt=20 total=228
+  run 5: wall=0.40ms heap=100.9KB step=295 react=13 err=46 chkt=20 total=228
+MEDIAN: wall=0.53ms heap=113.1KB step=295 react=13 ratio=0.044
+GATES: wall<500ms=true heap<2MB=true ratio<5x=true -- PASS
+```
+
+### Interpretation
+
+Step counts (634 / 295) match the prior CSub re-gate exactly. The bench harness
+does not yet emit synthetic CRow or CIntersection constraints — it uses the same
+CHKT + CSub synthetic load as the prior re-gate. The base-corpus constraint counts
+(454 / 208) are unchanged. The gate therefore confirms that adding the CRow and
+CIntersection dispatch paths to op_sem does NOT regress the existing load's
+performance profile. A dedicated CRow+CIntersection synthetic load (analogous to
+the CHKT synthetic load) is owed for the next re-gate cycle.
+
+### Caveats
+
+1. The synthetic load is identical to the prior CSub re-gate; no CRow or
+   CIntersection constraints are exercised in the bench. Performance of the new
+   rule paths is not yet measured under load.
+2. Constraint counts remain ~500 max, vs the 10⁵ architecture target.
+3. `err=44` / `err=46` counts are unchanged — T-HOUnify-Stuck errors from the
+   synthetic CHKT-park half, not from CRow or CIntersection.
+
+---
+
 ## 2026-05-24: v5 typechecker — variance-respecting CSub re-gate
 
 **Commits:** variance sidecar = `0d58a06e`, docs op-sem = `d14b769e`, exec op-sem = `836985d1`, fixtures = `4ebc10ad`, bench extension = HEAD.

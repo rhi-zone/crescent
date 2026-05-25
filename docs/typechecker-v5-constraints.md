@@ -122,6 +122,10 @@ From session audit `docs/session-audit-2026-05-20.md`:
 - **G12.** No pre-loaded subagent prompts. Frame on the target, not on the orchestrator's hypothesis. — F12.
 - **G13.** No accepting unsoundness for backward-compat with existing `lib/` code. If v5's sound model rejects an existing pattern, refactor the pattern, not the model. — H4 framing this session.
 
+*(Note 2026-05-26: spec gaps in the handoff are numbered G1–G16 in the handoff's §5 gap table — those G-numbers are unrelated to the negative-constraint G-series above. The handoff gap-table G8 is "CRow narrowing suppression soundness floor"; the handoff gap-table G12 is "effect-row variance owed to CEffect." Both are closed at the op-sem layer as of 2026-05-26; see `docs/typechecker-v5-log.md` 2026-05-26 entry and new handoff `docs/typechecker-v5-handoff-2026-05-26.md`.)*
+
+*(Note 2026-05-26: the CEffect constraint family described in earlier design drafts has been dissolved. Effects are types — `TConst` nodes with a `"!"` prefix (`!io`, `!throw`, `!yield`, `!os`) — constructed via `types.effect(name)` / `types.effect_apply(eff, arg)`. Intersection composes effect sets: `TIntersection`. The dedicated CEffect family is not needed; CSub variance rules decompose intersection constraints uniformly via CIntersectionEq / CIntersectionSub / CIntersectionMember. No parallel infrastructure. Source-pipeline integration (parser + gen-pass) is deferred to the next cycle.)*
+
 ## H. Open questions (insufficient evidence — user decides; designer must NOT default)
 
 These are not pickable by guess. Each one materially changes the design space.
