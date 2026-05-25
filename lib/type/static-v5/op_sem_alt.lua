@@ -372,13 +372,8 @@ function M.rule_T_CSub_Arrow(st, a, b, prov)
 		local xa = da.args[i]; local xb = db.args[i]
 		if xa ~= nil and xb ~= nil then emit(st, constraint_mod.sub(xb, xa, prov)) end
 	end
-	-- Co ret: iterate numeric keys and emit sub per position.
-	if da.ret.tag == "record" and db.ret.tag == "record" then
-		for k, va in pairs(da.ret.fields) do
-			local vb = db.ret.fields[k]
-			if vb ~= nil and va ~= nil then emit(st, constraint_mod.sub(va, vb, prov)) end
-		end
-	end
+	-- Co ret: delegate to positional Record rules (Phase 3).
+	emit(st, constraint_mod.sub(da.ret, db.ret, prov))
 end
 
 --: (AltState, V5Type, V5Type, Provenance) -> nil

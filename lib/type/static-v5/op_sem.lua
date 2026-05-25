@@ -408,16 +408,8 @@ function M.rule_T_CSub_Arrow(st, a, b, prov)
 			M.emit(st, constraint_mod.sub(bv, av, prov))
 		end
 	end
-	-- covariant in ret: iterate numeric keys and emit sub per position.
-	if a.ret.tag ~= "record" or b.ret.tag ~= "record" then
-		err(st, "T-CSub-Arrow", "ret is not a record"); return "error"
-	end
-	for k, va in pairs(a.ret.fields) do
-		local vb = b.ret.fields[k]
-		if vb ~= nil and va ~= nil then
-			M.emit(st, constraint_mod.sub(va, vb, prov))
-		end
-	end
+	-- covariant in ret: delegate to positional Record rules (Phase 3).
+	M.emit(st, constraint_mod.sub(a.ret, b.ret, prov))
 	trace(st, "T-CSub-Arrow", "")
 	return "done"
 end
