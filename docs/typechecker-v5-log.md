@@ -11,6 +11,95 @@ Append-only. One entry per session, decision, or experiment.
 
 ---
 
+## 2026-05-26 — Phase 5 (source pipeline): ann.lua, constrain.lua, cli.lua, --v5 flag
+
+### Question entering session
+
+Can the v5 op-sem be connected to real Lua source — parse → annotate → generate
+constraints → solve — so that `bin/cr check --v5 <file>` produces output?
+
+### Evidence
+
+**Four commits landed (parity 275/275 preserved throughout):**
+
+| Phase | Commit | Description | Assertions |
+|---|---|---|---|
+| 5.A ann.lua | `52fcae6f` | Annotation parser ported to v5 substrate: `--:` / `--::` / cast forms; effect-type syntax (`!Name<Args>`); intersection syntax (`&`); `$Require<T>` intrinsic; `declare` form. ann_test.lua added: 156 assertions. | 275 → 431 |
+| 5.B constrain.lua | `0ff434aa` | Gen-pass walker: traverses Lua AST, emits v5 constraints. Handles local decls, function bodies, call sites, return statements, record construction. constrain_test.lua added: 27 assertions across 12 fixtures. | 431 → 458 |
+| 5.C effect propagation | `6da6db59` | Effect propagation through call chains: callee effects propagate to caller via CIntersectionMember constraints. pcall/coroutine stubs in stdlib_types.lua. constrain_test extended: 28 new assertions. | 458 → 486 |
+| 5.D CLI + e2e | `317acc9b` | `bin/cr check --v5` flag wired end-to-end: parse.lua → ann.lua → constrain.lua → op_sem.lua. Solver fixes: T-CSub-Top/Never, T-CSub-LitWiden, T-CSub-TVar (uvar parking), S-Quiesce CEq drain. demo_effects.lua fixture. cli_e2e_test.lua: 18 assertions. | 486 → 504 |
+
+**Hand-run confirmation:** `timeout 30 bin/cr check --v5 lib/type/static-v5/fixtures/demo_effects.lua`
+exits 0. (v4 on same file: 5 warnings, exits 0, 32–43ms wall. v5 on same file: 9–10ms wall.)
+
+### Six honest gaps (open work, not landed work)
+
+These are gaps that exist in the Phase 5 source pipeline. They are NOT closed.
+A fresh reader should understand they represent material work remaining.
+
+**Gap P1 — Effect propagation from field-access callees is broken.**
+`io.write(...)` has a uvar callee at gen-pass time, so `!io` is never extracted
+into the propagation chain. Only direct-bound names (`print`, `error`) propagate
+effects. F2 enforcement does NOT actually fire for the common case of dotted stdlib
+calls (e.g., `io.write`, `os.execute`), even though the e2e test suite passes.
+The e2e tests only exercise direct-bound callees.
+
+**Gap P2 — pcall return type is flat `boolean | unknown`.**
+The correct type is a discriminated tuple-union `(true, R...) | (false, E)`.
+Implementing the discriminated form requires variadic generics (G17). Current
+stdlib_types.lua returns a flat `boolean | unknown` pair, which loses the
+success/failure type distinction entirely.
+
+**Gap P3 — `coroutine.create` returns `thread`, not `Coroutine<Y,S,R>`.**
+Full parameterisation of coroutine types (yield type, send type, return type) is
+deferred. Current stub returns the unparameterised `thread` constant.
+
+**Gap P4 — Arrow subtyping converts `sub(uvar, concrete)` to CEq at S-Quiesce.**
+Proper upper/lower bounds tracking ("bounded tvars", spec gap G9) is deferred to
+v5.x. At S-Quiesce, a still-unbound uvar under an Arrow CSub defaults via CEq, which
+is overly restrictive and may reject valid programs.
+
+**Gap P5 — Ann surface: surface syntax features not yet wired to gen-pass.**
+The 5.A ann.lua parser handles `&` intersection and `!Name<Args>` effect syntax in
+type positions. However, gen-pass (constrain.lua) does not yet request or emit
+constraints for: type predicates (`x is T`), match types, newtype declarations,
+augment declarations, pattern types. These syntactic forms are parsed but ignored
+at gen-pass time.
+
+**Gap P6 — Constrain surface: closure-as-value intricacies not handled.**
+Complex narrowing paths (e.g., closures as values, method dispatch edge cases,
+upvalue capture across scopes) are not modelled in constrain.lua. The gen-pass
+walker handles straight-line and basic function bodies; it does not handle
+closures stored in tables, `self`-style method dispatch via `:`, or upvalue
+capture narrowing.
+
+### Decisions closed
+
+- **v5-source-pipeline-integration**: parser + gen-pass + CLI wired. `bin/cr check --v5`
+  is runnable end-to-end. Closed with the six gaps above documented as open work.
+
+### Decisions still open
+
+- **G17** (variadic generics): low-medium prio, blocks accurate pcall/coroutine typing.
+- **Gap P1** (dotted callee effect propagation): broken; not a v5.0 blocker but visible.
+- **Gap P2** (pcall discriminated return): flat return is wrong but safe (not unsound).
+- **Gaps P3–P6**: deferred surface and constrain coverage.
+- **G9** (bounded tvars), **G10, G11**: unchanged.
+- **H10** (`any` escape hatch): still open, not blocking.
+
+### Tainted artifacts
+
+None.
+
+### Next entry point
+
+1. Fix Gap P1 (dotted callee effect propagation) — enables F2 enforcement for the
+   real `io.*`/`os.*` call patterns that dominate real code.
+2. G17 design (variadic generics) — prerequisite for Gap P2 fix.
+3. Pre-stable follow-ups (mining, missed-gen eval, circular require corpus check).
+
+---
+
 ## 2026-05-22 — Session 1: Frame, not build
 
 ### Question entering session

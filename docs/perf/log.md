@@ -6,6 +6,77 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-05-26: v5 source pipeline — `bin/cr check --v5` wall-time comparison
+
+**Commits:** ann.lua = `52fcae6f`, constrain.lua = `0ff434aa`, effect propagation = `6da6db59`,
+cli = `317acc9b`. HEAD = `317acc9b` (used for both --v4 and --v5 baselines; same tree).
+
+This entry measures end-to-end wall time for `bin/cr check --v5` vs `bin/cr check` (v4)
+on two files. The v5 CLI is newly wired (Phase 5.D); this is its first perf measurement.
+
+**Note on metrics:** The v5 CLI does not yet emit constraint count or step count to stdout.
+Wall time only. Error counts are included where visible in output. A per-run constraint
+count flag is owed as a future improvement.
+
+### demo_effects.lua (lib/type/static-v5/fixtures/demo_effects.lua)
+
+Small file (~50 LOC). Purpose: end-to-end demo for multi-effect propagation.
+
+| Checker | Run 1 | Run 2 | Run 3 | Median | Errors | Warnings |
+|---|---|---|---|---|---|---|
+| `bin/cr check` (v4) | 38ms | 35ms | 35ms | 35ms | 0 | 5 |
+| `bin/cr check --v5` | 10ms | 10ms | 9ms | 10ms | 0 | 0 |
+
+v5 is **~3.5× faster** on this file. Caveat: the files are different programs to the
+two checkers. v4 emits 5 warnings (unannotated functions); v5 emits 0 (no unannotated-
+function warning in v5 yet). The comparison measures end-to-end dispatch overhead, not
+solver work — both are well below any useful threshold on a 50-LOC file.
+
+**Constraint count:** not measured (v5 CLI does not expose). Gap: add `--stats` flag.
+
+### Raw output
+
+```
+# v4 (bin/cr check)
+Checked 1 file(s): 0 error(s), 5 warning(s)
+real 0m0.038s / 0m0.035s / 0m0.035s  →  median 35ms
+
+# v5 (bin/cr check --v5)
+[no output — exits 0]
+real 0m0.010s / 0m0.010s / 0m0.009s  →  median 10ms
+```
+
+### lib/stdlib/lint.lua (real production file, ~300 LOC)
+
+| Checker | Run 1 | Run 2 | Run 3 | Median | Errors |
+|---|---|---|---|---|---|
+| `bin/cr check` (v4) | 43ms | 36ms | 32ms | 36ms | 13 |
+| `bin/cr check --v5` | 18ms | 18ms | 18ms | 18ms | many (expected) |
+
+v5 wall time ~2× faster on this file. However, error counts are NOT comparable:
+v4 reports 13 type errors on known issues in lint.lua; v5 reports many constraint
+errors (CRowExtend mismatch, S-Quiesce stuck, CSub mismatch) reflecting that the
+gen-pass is not yet complete for this file's patterns (Gap P6: method dispatch,
+closed records not correctly modelled). v5 error output is diagnostic noise, not
+real type errors.
+
+**Constraint count:** not measured. Gap: same as above.
+
+### Interpretation
+
+v5 is consistently faster than v4 on wall time for both files (~2–3.5× faster).
+This is expected: v5 processes less of the AST (gen-pass coverage is incomplete)
+and the solver handles fewer constraints per file than the v4 solver does.
+The numbers are NOT evidence of algorithmic improvement — they reflect reduced
+coverage. A fair comparison requires v5 gen-pass coverage parity with v4,
+which is future work (Gaps P5 + P6). These measurements establish a baseline
+for tracking regression as coverage expands.
+
+**No catastrophic slowdown** (>10× v5 vs v4) observed. Stop condition from task
+spec not triggered; commit proceeds.
+
+---
+
 ## 2026-05-26: v5 typechecker — CRow + CIntersection-effects re-gate
 
 **Commits:** substrate = `05519c88`, CRow rules = `7f7d4d6c`, fixture 8 = `b1825484`,
