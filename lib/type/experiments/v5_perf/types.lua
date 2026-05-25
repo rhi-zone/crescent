@@ -59,6 +59,39 @@ end
 --: (V5Type[]) -> V5Type
 function M.union(xs) return { tag = "union", xs = xs } end
 
+-- Effect-type API.  Effects ARE types — represented as TConst with a "!"
+-- prefix so they fit the existing taxonomy without parallel infrastructure.
+-- `effect("io")` -> Const("!io"); higher-arity effects (`!throw<E>`,
+-- `!yield<Y,R>`) are built via App chains over the effect head Const.
+--: (string) -> V5Type
+function M.effect(name) return { tag = "const", name = "!" .. name } end
+--: (V5Type, V5Type[]) -> V5Type
+function M.effect_apply(eff, args)
+	local cur = eff
+	for i = 1, #args do
+		local a = args[i]
+		if a ~= nil then cur = { tag = "app", f = cur, a = a } end
+	end
+	return cur
+end
+-- Returns true iff t is an effect-type head (Const named "!...").
+--: (V5Type) -> boolean
+function M.is_effect_head(t)
+	if t.tag == "const" then
+		local n = t.name
+		return n:sub(1, 1) == "!"
+	end
+	return false
+end
+-- Returns true iff t is an effect-typed value: an effect head or an
+-- application chain ultimately headed by one.
+--: (V5Type) -> boolean
+function M.is_effect(t)
+	local cur = t
+	while cur.tag == "app" do cur = cur.f end
+	return M.is_effect_head(cur)
+end
+
 -- shift(t, d, cutoff): add d to every Var index >= cutoff. Used under binders
 -- when β-reducing. Eager shift on bind.
 --: (V5Type, integer, integer) -> V5Type

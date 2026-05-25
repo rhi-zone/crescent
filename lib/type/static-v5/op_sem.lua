@@ -211,6 +211,10 @@ local function blockers_of(c, s)
 		local cc2 = c --[[: ConstraintRowClose ]]
 		local rt = subst_mod.deref(s, cc2.record_ty)
 		if rt.tag == "uvar" then acc[rt.id] = true end
+	elseif c.tag == "cint_member" then
+		local cm = c --[[: ConstraintIntMember ]]
+		local ty = subst_mod.deref(s, cm.ty)
+		if ty.tag == "uvar" then acc[ty.id] = true end
 	end
 	return acc
 end
@@ -664,6 +668,14 @@ local function step_csub(st, ra, rb, prov)
 	if rb.tag == "union" then
 		return M.rule_T_CSub_Union_R(st, ra, rb, prov)
 	end
+	-- Intersection dispatch (LHS decomp first; if both sides are
+	-- intersections, the recursive call lands on RHS-only intersection).
+	if ra.tag == "intersection" then
+		return M.rule_T_CSub_Intersection_Decomp(st, ra.parts, rb, prov)
+	end
+	if rb.tag == "intersection" then
+		return M.rule_T_CSub_Intersection_Conj(st, ra, rb.parts, prov)
+	end
 	-- Same-tag dispatch.
 	if ra.tag == rb.tag then
 		if ra.tag == "const" then
@@ -688,6 +700,114 @@ local function step_csub(st, ra, rb, prov)
 		return "done"
 	end
 	return M.rule_T_CSub_Mismatch(st, ra, rb, prov)
+end
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Intersection rules (Phase 4)
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- Effects ARE types — `!io`, `!throw<E>`, `!yield<Y,R>` are TConst (with a
+-- "!" prefix) and TApp chains over them, handled uniformly with all other
+-- types under intersection.  Canonical form (flatten/sort/dedupe) lives in
+-- constraint_mod so both interpreters share a single source of truth.
+
+-- T-CIntersectionEq-Canonical.  Canonicalize both sides; if lengths differ
+-- after canonicalization → error.  Else emit pair-wise CEq.
+--: (OpSemState, V5Type[], V5Type[], Provenance) -> string
+function M.rule_T_CIntersectionEq_Canonical(st, parts_a, parts_b, prov)
+	local ca = constraint_mod.flatten_parts(parts_a)
+	local cb = constraint_mod.flatten_parts(parts_b)
+	if #ca ~= #cb then
+		err(st, "T-CIntersectionEq-Canonical",
+			"intersection arity mismatch after canonicalization: " ..
+			tostring(#ca) .. " vs " .. tostring(#cb))
+		return "error"
+	end
+	for i = 1, #ca do
+		local av, bv = ca[i], cb[i]
+		if av ~= nil and bv ~= nil then
+			M.emit(st, constraint_mod.eq(av, bv, prov))
+		end
+	end
+	trace(st, "T-CIntersectionEq-Canonical", "n=" .. tostring(#ca))
+	return "done"
+end
+
+-- T-CSub-Intersection-Decomp.  LHS intersection: (A & B) <: C if some part
+-- already proves it under types_mod.equal.  Eager fast path; v5.0 has no
+-- disjunctive constraint scheduler, so all parts being unresolved tvars
+-- yields a stuck error rather than a disjunction.
+--: (OpSemState, V5Type[], V5Type, Provenance) -> string
+function M.rule_T_CSub_Intersection_Decomp(st, parts_lhs, rhs, prov)
+	local canon = constraint_mod.flatten_parts(parts_lhs)
+	for i = 1, #canon do
+		local p = canon[i]
+		if p ~= nil and types_mod.equal(p, rhs) then
+			trace(st, "T-CSub-Intersection-Decomp",
+				"eager part-match at " .. tostring(i))
+			return "done"
+		end
+	end
+	-- No eager match — try emitting CSub on the first non-uvar part as the
+	-- best-effort progress.  If every part is a uvar, error (no disjunction).
+	for i = 1, #canon do
+		local p = canon[i]
+		if p ~= nil and p.tag ~= "uvar" then
+			M.emit(st, constraint_mod.sub(p, rhs, prov))
+			trace(st, "T-CSub-Intersection-Decomp", "delegated part " .. tostring(i))
+			return "done"
+		end
+	end
+	err(st, "T-CSub-Intersection-Decomp",
+		"all LHS intersection parts are uvars; no disjunctive scheduler in v5.0")
+	return "error"
+end
+
+-- T-CSub-Intersection-Conj.  RHS intersection: A <: (B & C) iff A <: B AND
+-- A <: C.  Emit a CSub per canonicalized RHS part.
+--: (OpSemState, V5Type, V5Type[], Provenance) -> string
+function M.rule_T_CSub_Intersection_Conj(st, lhs, parts_rhs, prov)
+	local canon = constraint_mod.flatten_parts(parts_rhs)
+	for i = 1, #canon do
+		local p = canon[i]
+		if p ~= nil then M.emit(st, constraint_mod.sub(lhs, p, prov)) end
+	end
+	trace(st, "T-CSub-Intersection-Conj", "n=" .. tostring(#canon))
+	return "done"
+end
+
+-- T-CIntersectionMember-Direct.  If `ty` (post-deref) is an intersection
+-- canonically containing `part`, succeed.  If unresolved uvars remain in
+-- ty, park (F2 enforcement at quiescence will surface the unresolved case).
+--: (OpSemState, V5Type, V5Type, Provenance) -> string
+function M.rule_T_CIntersectionMember_Direct(st, ty, part, prov)
+	local dty = subst_mod.deref(st.subst, ty) --[[: V5Type ]]
+	if dty.tag == "uvar" then
+		-- Park: when ty's uvar is bound we may decide.
+		return "stuck"
+	end
+	if dty.tag == "intersection" then
+		local canon = constraint_mod.flatten_parts(dty.parts)
+		for i = 1, #canon do
+			local p = canon[i]
+			if p ~= nil and types_mod.equal(p, part) then
+				trace(st, "T-CIntersectionMember-Direct",
+					"member match at " .. tostring(i))
+				return "done"
+			end
+		end
+		err(st, "T-CIntersectionMember-Direct",
+			"part not in intersection")
+		return "error"
+	end
+	-- Singleton case: ty IS the part itself.
+	if types_mod.equal(dty, part) then
+		trace(st, "T-CIntersectionMember-Direct", "singleton match")
+		return "done"
+	end
+	err(st, "T-CIntersectionMember-Direct",
+		"ty is neither intersection nor equal to part (tag=" .. dty.tag .. ")")
+	return "error"
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -1314,6 +1434,26 @@ function M.step(st, c)
 	if c.tag == "crow_close" then
 		return M.rule_T_CRowClose_Bind(st, c.record_ty, c.prov)
 	end
+	if c.tag == "cint_eq" then
+		return M.rule_T_CIntersectionEq_Canonical(st, c.parts_a, c.parts_b, c.prov)
+	end
+	if c.tag == "cint_sub" then
+		-- Set-direction subtyping reduces to RHS-conj (every super-part
+		-- must be matched by some sub-part), each emitted as a member query.
+		local canon_super = constraint_mod.flatten_parts(c.parts_super)
+		local lhs_ty = types_mod.intersection(constraint_mod.flatten_parts(c.parts_sub)) --[[: V5Type ]]
+		for i = 1, #canon_super do
+			local p = canon_super[i]
+			if p ~= nil then
+				M.emit(st, constraint_mod.intersection_member(lhs_ty, p, c.prov))
+			end
+		end
+		trace(st, "T-CIntersectionSub", "n=" .. tostring(#canon_super))
+		return "done"
+	end
+	if c.tag == "cint_member" then
+		return M.rule_T_CIntersectionMember_Direct(st, c.ty, c.part, c.prov)
+	end
 	err(st, "step", "unknown constraint tag " .. tostring(c.tag))
 	return "error"
 end
@@ -1346,6 +1486,11 @@ function M.run(st)
 			local ckey = c.key or "?"
 			err(st, "S-Quiesce-CRowLacks",
 				"CRowLacks still unresolved at quiescence (row never closed): key=" .. ckey)
+		elseif c.tag == "cint_member" then
+			-- F2 enforcement: stuck inferred effect — a CIntersectionMember
+			-- on a uvar that never got bound must error at quiescence.
+			err(st, "S-Quiesce-CIntersectionMember",
+				"CIntersectionMember stuck on unbound uvar (effect never inferred)")
 		else
 			err(st, "S-Quiesce", "stuck constraint (tag=" .. c.tag .. ")")
 		end

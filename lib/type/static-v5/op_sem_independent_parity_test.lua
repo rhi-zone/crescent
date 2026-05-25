@@ -965,4 +965,135 @@ T.describe("indep parity: fixture 22 — positional record stays closed", functi
 	end)
 end)
 
+-- ════════════════════════════════════════════════════════════════════
+-- Intersection + effect cross-interpreter fixtures (Phase 4)
+-- ════════════════════════════════════════════════════════════════════
+
+--: (string, V5Type[], V5Type[]) -> nil
+local function run_pair_eq(label, a_parts, b_parts)
+	local exec = fresh_state()
+	op_sem.emit(exec, constraint_mod.intersection_eq(a_parts, b_parts, prov(label)))
+	op_sem.run(exec)
+	local alt = fresh_state()
+	op_sem.emit(alt, constraint_mod.intersection_eq(a_parts, b_parts, prov(label)))
+	op_sem_alt.run(alt)
+	assert_state_parity(label, exec, alt)
+end
+
+-- Fixture 23: A & B ≡ B & A
+T.describe("indep parity: fixture 23 — intersection commutativity", function()
+	T.it("op_sem and op_sem_alt agree on canonical commutativity", function()
+		local io_e = types_mod.effect("io")
+		local os_e = types_mod.effect("os")
+		run_pair_eq("fixture23", { io_e, os_e }, { os_e, io_e })
+	end)
+end)
+
+-- Fixture 24: flatten A & (B & C) ≡ (A & B) & C
+T.describe("indep parity: fixture 24 — intersection flattening", function()
+	T.it("op_sem and op_sem_alt agree on nested flattening", function()
+		local a = types_mod.effect("io")
+		local b = types_mod.effect("os")
+		local c = types_mod.const("alpha")
+		run_pair_eq("fixture24",
+			{ a, types_mod.intersection({ b, c }) },
+			{ types_mod.intersection({ a, b }), c })
+	end)
+end)
+
+-- Fixture 25: dedupe A & A ≡ A
+T.describe("indep parity: fixture 25 — intersection dedupe", function()
+	T.it("op_sem and op_sem_alt agree on canonical dedupe", function()
+		local a = types_mod.effect("io")
+		run_pair_eq("fixture25", { a, a }, { a })
+	end)
+end)
+
+-- Fixture 26: int & !io <: int
+T.describe("indep parity: fixture 26 — intersection LHS decomp", function()
+	T.it("op_sem and op_sem_alt agree drop-effect direction succeeds", function()
+		local int_ty = types_mod.const("int")
+		local io_e = types_mod.effect("io")
+		local lhs = types_mod.intersection({ int_ty, io_e })
+
+		local exec = fresh_state()
+		op_sem.emit(exec, constraint_mod.sub(lhs, int_ty, prov("26")))
+		op_sem.run(exec)
+		local alt = fresh_state()
+		op_sem.emit(alt, constraint_mod.sub(lhs, int_ty, prov("26")))
+		op_sem_alt.run(alt)
+		assert_state_parity("fixture26", exec, alt)
+		T.eq(op_sem.error_count(exec), 0, "fixture26: exec no errors")
+		T.eq(op_sem_alt.error_count(alt), 0, "fixture26: alt no errors")
+	end)
+end)
+
+-- Fixture 27: int <: int & !io fails
+T.describe("indep parity: fixture 27 — intersection RHS conj fails", function()
+	T.it("op_sem and op_sem_alt both reject LHS missing effect", function()
+		local int_ty = types_mod.const("int")
+		local io_e = types_mod.effect("io")
+		local rhs = types_mod.intersection({ int_ty, io_e })
+
+		local exec = fresh_state()
+		op_sem.emit(exec, constraint_mod.sub(int_ty, rhs, prov("27")))
+		op_sem.run(exec)
+		local alt = fresh_state()
+		op_sem.emit(alt, constraint_mod.sub(int_ty, rhs, prov("27")))
+		op_sem_alt.run(alt)
+		assert_state_parity("fixture27", exec, alt)
+		T.ok(op_sem.error_count(exec) > 0, "fixture27: exec rejected")
+		T.ok(op_sem_alt.error_count(alt) > 0, "fixture27: alt rejected")
+	end)
+end)
+
+-- Fixture 28: direct member match on canonical intersection
+T.describe("indep parity: fixture 28 — intersection member direct", function()
+	T.it("op_sem and op_sem_alt agree direct member succeeds", function()
+		local int_ty = types_mod.const("int")
+		local io_e = types_mod.effect("io")
+		local os_e = types_mod.effect("os")
+		local inter = types_mod.intersection({ int_ty, io_e, os_e })
+
+		local exec = fresh_state()
+		op_sem.emit(exec, constraint_mod.intersection_member(inter, io_e, prov("28")))
+		op_sem.run(exec)
+		local alt = fresh_state()
+		op_sem.emit(alt, constraint_mod.intersection_member(inter, io_e, prov("28")))
+		op_sem_alt.run(alt)
+		assert_state_parity("fixture28", exec, alt)
+	end)
+end)
+
+-- Fixture 29: F2 enforcement — stuck member on uvar errors at quiescence
+T.describe("indep parity: fixture 29 — F2 enforcement on stuck member", function()
+	T.it("op_sem and op_sem_alt both surface S-Quiesce error", function()
+		local io_e = types_mod.effect("io")
+
+		local exec = fresh_state()
+		local u1 = subst_mod.fresh(exec.subst, "open")
+		op_sem.emit(exec, constraint_mod.intersection_member(types_mod.uvar(u1), io_e, prov("29")))
+		op_sem.run(exec)
+
+		local alt = fresh_state()
+		local u2 = subst_mod.fresh(alt.subst, "open")
+		op_sem.emit(alt, constraint_mod.intersection_member(types_mod.uvar(u2), io_e, prov("29")))
+		op_sem_alt.run(alt)
+
+		assert_state_parity("fixture29", exec, alt)
+		local exec_found = false
+		for i = 1, #exec.errors do
+			local e = exec.errors[i]
+			if e ~= nil and e.rule == "S-Quiesce-CIntersectionMember" then exec_found = true end
+		end
+		local alt_found = false
+		for i = 1, #alt.errors do
+			local e = alt.errors[i]
+			if e ~= nil and e.rule == "S-Quiesce-CIntersectionMember" then alt_found = true end
+		end
+		T.ok(exec_found, "fixture29: exec F2 enforcement fires")
+		T.ok(alt_found, "fixture29: alt F2 enforcement fires")
+	end)
+end)
+
 return true

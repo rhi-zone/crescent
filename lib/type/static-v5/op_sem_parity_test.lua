@@ -1243,4 +1243,120 @@ T.describe("op_sem CRow: fixture 22 — positional record stays closed", functio
 	end)
 end)
 
+-- ════════════════════════════════════════════════════════════════════════
+-- Intersection + effect fixtures (Phase 4)
+-- ════════════════════════════════════════════════════════════════════════
+
+-- Helper: search trace for a rule label.
+--: (OpSemState, string) -> boolean
+local function trace_has(st, rule)
+	for i = 1, #st.trace do
+		local e = st.trace[i]
+		if e ~= nil and e.rule == rule then return true end
+	end
+	return false
+end
+
+-- ─── Fixture 23: canonical form — A & B ≡ B & A (Risk 3) ───────────────
+T.describe("op_sem parity: fixture 23 — intersection canonical commutativity", function()
+	T.it("CIntersectionEq on swapped parts succeeds via canonicalization", function()
+		local exec = op_sem.new_state()
+		local io_e = types_mod.effect("io") --[[: V5Type ]]
+		local os_e = types_mod.effect("os") --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.intersection_eq({ io_e, os_e }, { os_e, io_e }, prov("23")))
+		op_sem.run(exec)
+		T.eq(op_sem.error_count(exec), 0, "23: commutative parts are equal under canonicalization")
+		T.ok(trace_has(exec, "T-CIntersectionEq-Canonical"), "23: rule fired")
+	end)
+end)
+
+-- ─── Fixture 24: flattening — A & (B & C) ≡ (A & B) & C ────────────────
+T.describe("op_sem parity: fixture 24 — intersection canonical flattening", function()
+	T.it("nested intersection flattens to the same canonical list", function()
+		local exec = op_sem.new_state()
+		local a = types_mod.effect("io")
+		local b = types_mod.effect("os")
+		local c = types_mod.const("alpha")
+		local lhs = { a, types_mod.intersection({ b, c }) } --[[: V5Type[] ]]
+		local rhs = { types_mod.intersection({ a, b }), c } --[[: V5Type[] ]]
+		op_sem.emit(exec, constraint_mod.intersection_eq(lhs, rhs, prov("24")))
+		op_sem.run(exec)
+		T.eq(op_sem.error_count(exec), 0, "24: nested intersection flattens equivalently")
+		T.ok(trace_has(exec, "T-CIntersectionEq-Canonical"), "24: rule fired")
+	end)
+end)
+
+-- ─── Fixture 25: dedupe — A & A ≡ A ────────────────────────────────────
+T.describe("op_sem parity: fixture 25 — intersection canonical dedupe", function()
+	T.it("duplicate parts collapse under canonicalization", function()
+		local exec = op_sem.new_state()
+		local a = types_mod.effect("io")
+		op_sem.emit(exec, constraint_mod.intersection_eq({ a, a }, { a }, prov("25")))
+		op_sem.run(exec)
+		T.eq(op_sem.error_count(exec), 0, "25: dedupe yields equal canonical lists")
+		T.ok(trace_has(exec, "T-CIntersectionEq-Canonical"), "25: rule fired")
+	end)
+end)
+
+-- ─── Fixture 26: CSub LHS-decomp — int & !io <: int ────────────────────
+T.describe("op_sem parity: fixture 26 — intersection LHS decomp drops effect", function()
+	T.it("(int & !io) <: int succeeds via eager part-match", function()
+		local exec = op_sem.new_state()
+		local int_ty = types_mod.const("int")
+		local io_e = types_mod.effect("io")
+		local lhs = types_mod.intersection({ int_ty, io_e }) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.sub(lhs, int_ty, prov("26")))
+		op_sem.run(exec)
+		T.eq(op_sem.error_count(exec), 0, "26: drop-effect direction succeeds")
+		T.ok(trace_has(exec, "T-CSub-Intersection-Decomp"), "26: LHS decomp rule fired")
+	end)
+end)
+
+-- ─── Fixture 27: CSub RHS-conj — int <: int & !io fails ────────────────
+T.describe("op_sem parity: fixture 27 — intersection RHS conj rejects missing part", function()
+	T.it("int <: (int & !io) fails because LHS lacks the effect part", function()
+		local exec = op_sem.new_state()
+		local int_ty = types_mod.const("int")
+		local io_e = types_mod.effect("io")
+		local rhs = types_mod.intersection({ int_ty, io_e }) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.sub(int_ty, rhs, prov("27")))
+		op_sem.run(exec)
+		T.ok(op_sem.error_count(exec) > 0, "27: RHS conj fails (LHS missing effect part)")
+		T.ok(trace_has(exec, "T-CSub-Intersection-Conj"), "27: RHS conj rule fired")
+	end)
+end)
+
+-- ─── Fixture 28: CIntersectionMember direct on canonical intersection ───
+T.describe("op_sem parity: fixture 28 — intersection member direct match", function()
+	T.it("member query on canonicalized intersection succeeds", function()
+		local exec = op_sem.new_state()
+		local int_ty = types_mod.const("int")
+		local io_e = types_mod.effect("io")
+		local os_e = types_mod.effect("os")
+		local inter = types_mod.intersection({ int_ty, io_e, os_e }) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.intersection_member(inter, io_e, prov("28")))
+		op_sem.run(exec)
+		T.eq(op_sem.error_count(exec), 0, "28: direct member match")
+		T.ok(trace_has(exec, "T-CIntersectionMember-Direct"), "28: rule fired")
+	end)
+end)
+
+-- ─── Fixture 29: F2 enforcement — stuck inferred effect ─────────────────
+T.describe("op_sem parity: fixture 29 — CIntersectionMember on unbound uvar errors at quiescence", function()
+	T.it("member query on never-bound uvar surfaces as S-Quiesce error", function()
+		local exec = op_sem.new_state()
+		local uid = subst_mod.fresh(exec.subst, "open")
+		local uvar_ty = types_mod.uvar(uid) --[[: V5Type ]]
+		local io_e = types_mod.effect("io")
+		op_sem.emit(exec, constraint_mod.intersection_member(uvar_ty, io_e, prov("29")))
+		op_sem.run(exec)
+		local found = false
+		for i = 1, #exec.errors do
+			local e = exec.errors[i]
+			if e ~= nil and e.rule == "S-Quiesce-CIntersectionMember" then found = true end
+		end
+		T.ok(found, "29: F2 enforcement — stuck cint_member surfaces at quiescence")
+	end)
+end)
+
 return true

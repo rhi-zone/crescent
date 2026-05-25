@@ -524,6 +524,13 @@ local function step_csub(st, a, b, prov)
 	-- Union dispatch before arrow/record because a union side dominates.
 	if da.tag == "union" then M.rule_T_CSub_Union_L(st, da, db, prov); return end
 	if db.tag == "union" then M.rule_T_CSub_Union_R(st, da, db, prov); return end
+	-- Intersection dispatch (LHS decomp before RHS conj).
+	if da.tag == "intersection" then
+		M.rule_T_CSub_Intersection_Decomp(st, da.parts, db, prov); return
+	end
+	if db.tag == "intersection" then
+		M.rule_T_CSub_Intersection_Conj(st, da, db.parts, prov); return
+	end
 	if da.tag == "arrow" and db.tag == "arrow" then
 		M.rule_T_CSub_Arrow(st, da, db, prov); return
 	end
@@ -542,6 +549,81 @@ local function step_csub(st, a, b, prov)
 		M.rule_T_CSub_Const_Var(st, da, db, prov); return
 	end
 	M.rule_T_CSub_Mismatch(st, da, db, prov)
+end
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Intersection rules (Phase 4) — alt interpreter
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- Effects are types (TConst with "!" prefix); uniform treatment under
+-- intersection.  Both interpreters call constraint_mod.flatten_parts so
+-- canonicalization is byte-for-byte identical.
+
+--: (AltState, V5Type[], V5Type[], Provenance) -> string
+function M.rule_T_CIntersectionEq_Canonical(st, parts_a, parts_b, prov)
+	local ca = constraint_mod.flatten_parts(parts_a)
+	local cb = constraint_mod.flatten_parts(parts_b)
+	if #ca ~= #cb then
+		record_error(st, "T-CIntersectionEq-Canonical",
+			"intersection arity mismatch after canonicalization: " ..
+			tostring(#ca) .. " vs " .. tostring(#cb))
+		return "error"
+	end
+	for i = 1, #ca do
+		local av, bv = ca[i], cb[i]
+		if av ~= nil and bv ~= nil then
+			emit(st, constraint_mod.eq(av, bv, prov))
+		end
+	end
+	return "done"
+end
+
+--: (AltState, V5Type[], V5Type, Provenance) -> string
+function M.rule_T_CSub_Intersection_Decomp(st, parts_lhs, rhs, prov)
+	local canon = constraint_mod.flatten_parts(parts_lhs)
+	for i = 1, #canon do
+		local p = canon[i]
+		if p ~= nil and types_mod.equal(p, rhs) then return "done" end
+	end
+	for i = 1, #canon do
+		local p = canon[i]
+		if p ~= nil and p.tag ~= "uvar" then
+			emit(st, constraint_mod.sub(p, rhs, prov))
+			return "done"
+		end
+	end
+	record_error(st, "T-CSub-Intersection-Decomp",
+		"all LHS intersection parts are uvars; no disjunctive scheduler in v5.0")
+	return "error"
+end
+
+--: (AltState, V5Type, V5Type[], Provenance) -> string
+function M.rule_T_CSub_Intersection_Conj(st, lhs, parts_rhs, prov)
+	local canon = constraint_mod.flatten_parts(parts_rhs)
+	for i = 1, #canon do
+		local p = canon[i]
+		if p ~= nil then emit(st, constraint_mod.sub(lhs, p, prov)) end
+	end
+	return "done"
+end
+
+--: (AltState, V5Type, V5Type, Provenance) -> string
+function M.rule_T_CIntersectionMember_Direct(st, ty, part, _prov)
+	local dty = subst_mod.deref(st.subst, ty) --[[: V5Type ]]
+	if dty.tag == "uvar" then return "stuck" end
+	if dty.tag == "intersection" then
+		local canon = constraint_mod.flatten_parts(dty.parts)
+		for i = 1, #canon do
+			local p = canon[i]
+			if p ~= nil and types_mod.equal(p, part) then return "done" end
+		end
+		record_error(st, "T-CIntersectionMember-Direct", "part not in intersection")
+		return "error"
+	end
+	if types_mod.equal(dty, part) then return "done" end
+	record_error(st, "T-CIntersectionMember-Direct",
+		"ty is neither intersection nor equal to part (tag=" .. dty.tag .. ")")
+	return "error"
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -1133,6 +1215,20 @@ function M.step(st, c)
 	elseif c.tag == "crow_close" then
 		local status = M.rule_T_CRowClose(st, c.record_ty, c.prov)
 		if status == "stuck" then return "stuck" end
+	elseif c.tag == "cint_eq" then
+		M.rule_T_CIntersectionEq_Canonical(st, c.parts_a, c.parts_b, c.prov)
+	elseif c.tag == "cint_sub" then
+		local canon_super = constraint_mod.flatten_parts(c.parts_super)
+		local lhs_ty = types_mod.intersection(constraint_mod.flatten_parts(c.parts_sub)) --[[: V5Type ]]
+		for i = 1, #canon_super do
+			local p = canon_super[i]
+			if p ~= nil then
+				emit(st, constraint_mod.intersection_member(lhs_ty, p, c.prov))
+			end
+		end
+	elseif c.tag == "cint_member" then
+		local status = M.rule_T_CIntersectionMember_Direct(st, c.ty, c.part, c.prov)
+		if status == "stuck" then return "stuck" end
 	end
 	return "done"
 end
@@ -1154,6 +1250,14 @@ function M.run(st)
 			   (c.tag == "crow_extend" or c.tag == "crow_lacks" or c.tag == "crow_close") then
 				alt_park_crow(st, c)
 			end
+			if status == "stuck" and c.tag == "cint_member" then
+				st.inert[c.id] = c
+				local cm = c --[[: ConstraintIntMember ]]
+				local dty = subst_mod.deref(st.subst, cm.ty)
+				if dty.tag == "uvar" then
+					subst_mod.watch(st.subst, dty.id, c.id)
+				end
+			end
 		end
 	end
 	-- S-Quiesce: report any inert HOUnify as ambiguous; CRowLacks still parked
@@ -1165,6 +1269,9 @@ function M.run(st)
 			local ckey = c.key or "?"
 			record_error(st, "S-Quiesce-CRowLacks",
 				"CRowLacks still unresolved at quiescence (row never closed): key=" .. ckey)
+		elseif c.tag == "cint_member" then
+			record_error(st, "S-Quiesce-CIntersectionMember",
+				"CIntersectionMember stuck on unbound uvar (effect never inferred)")
 		end
 	end
 end
