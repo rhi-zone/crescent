@@ -71,12 +71,13 @@ local function annotation_to_type(s, a)
 end
 
 -- Extract constraints from a single line of source.  Appends to `out`.
+-- TODO(G3): plumb col — process_line does text-only parsing with no column info; all prov col=0.
 --: (string, integer, V5Constraint[], Allocator, string) -> nil
 local function process_line(line, lineno, out, a, file)
 	-- 1. `--: T -> U` style annotation.
 	local sig = line:match("^%s*%-%-:%s*(.+)$")
 	if sig ~= nil and not sig:match("^:") then
-		local prov = constraint_mod.prov(file, lineno, "declared")
+		local prov = constraint_mod.prov(file, lineno, 0, "declared")
 		local tv = types_mod.uvar(alloc(a)) --[[: V5Type ]]
 		local sigty = annotation_to_type(sig, a) --[[: V5Type ]]
 		local ce = constraint_mod.eq(tv, sigty, prov) --[[: V5Constraint ]]
@@ -85,7 +86,7 @@ local function process_line(line, lineno, out, a, file)
 	-- 2. `--:: Name = T | U | ...` ADT declaration.  CEq per variant.
 	local adt = line:match("^%s*%-%-::%s*[%w_]+%s*=%s*(.+)$")
 	if adt ~= nil then
-		local prov = constraint_mod.prov(file, lineno, "declared")
+		local prov = constraint_mod.prov(file, lineno, 0, "declared")
 		for variant in (adt .. "|"):gmatch("([^|]+)|") do
 			local tv = types_mod.uvar(alloc(a)) --[[: V5Type ]]
 			local vty = annotation_to_type(variant, a) --[[: V5Type ]]
@@ -96,7 +97,7 @@ local function process_line(line, lineno, out, a, file)
 	-- 3. `local M = {}` start of a module: open the row.
 	local mod_name = line:match("^%s*local%s+([%w_]+)%s*=%s*{%s*}%s*$")
 	if mod_name ~= nil then
-		local prov = constraint_mod.prov(file, lineno, "inferred")
+		local prov = constraint_mod.prov(file, lineno, 0, "inferred")
 		local tv = alloc_named(a, mod_name)
 		local co = constraint_mod.table_open(tv, prov) --[[: V5Constraint ]]
 		out[#out + 1] = co
@@ -104,7 +105,7 @@ local function process_line(line, lineno, out, a, file)
 	-- 4. `X.field = ...` field assignment -> CTableSet on receiver's tvar.
 	--    Receiver tvar pooled by name so all `M.x`, `M.y`, ... share root M.
 	for recv, field in line:gmatch("([%w_]+)%.([%w_]+)%s*=") do
-		local prov = constraint_mod.prov(file, lineno, "inferred")
+		local prov = constraint_mod.prov(file, lineno, 0, "inferred")
 		local recv_tv = alloc_named(a, recv)
 		local val_tv  = types_mod.uvar(alloc(a)) --[[: V5Type ]]
 		local cs = constraint_mod.table_set(recv_tv, field, val_tv, prov) --[[: V5Constraint ]]
@@ -115,7 +116,7 @@ local function process_line(line, lineno, out, a, file)
 	--    they go inert when the receiver is unbound, then wake when the
 	--    receiver's table gains the named field.
 	for recv, method in line:gmatch("([%w_]+):([%w_]+)%(") do
-		local prov = constraint_mod.prov(file, lineno, "synthesized")
+		local prov = constraint_mod.prov(file, lineno, 0, "synthesized")
 		local recv_tv = alloc_named(a, recv)
 		local ret_tv  = alloc(a)
 		local cm = constraint_mod.method_call(recv_tv, method, ret_tv, prov) --[[: V5Constraint ]]
@@ -124,7 +125,7 @@ local function process_line(line, lineno, out, a, file)
 	-- 6. `setmetatable(M, mt)` -> CTableSeal on M's pooled tvar.
 	local seal_recv = line:match("setmetatable%s*%(%s*([%w_]+)%s*,")
 	if seal_recv ~= nil then
-		local prov = constraint_mod.prov(file, lineno, "declared")
+		local prov = constraint_mod.prov(file, lineno, 0, "declared")
 		local tv = alloc_named(a, seal_recv)
 		local cz = constraint_mod.table_seal(tv, nil, prov) --[[: V5Constraint ]]
 		out[#out + 1] = cz
@@ -133,7 +134,7 @@ local function process_line(line, lineno, out, a, file)
 	--    and a fresh rhs tvar (we don't actually parse the RHS — synthetic).
 	--    Captures the bulk of constraints in real Lua code.
 	for name in line:gmatch("local%s+([%w_]+)%s*=") do
-		local prov = constraint_mod.prov(file, lineno, "inferred")
+		local prov = constraint_mod.prov(file, lineno, 0, "inferred")
 		-- Pool the lhs tvar by name so subsequent method calls / field
 		-- assignments on this local share the same root (forcing the
 		-- solver to actually do union-find + wake-up work).
@@ -146,7 +147,7 @@ local function process_line(line, lineno, out, a, file)
 	--    (treat each parameter as a fresh tvar equated to a param tvar).
 	local fargs = line:match("function[^%(]*%(([^%)]*)%)")
 	if fargs ~= nil and type(fargs) == "string" and fargs ~= "" then
-		local prov = constraint_mod.prov(file, lineno, "declared")
+		local prov = constraint_mod.prov(file, lineno, 0, "declared")
 		for arg in fargs:gmatch("[%w_]+") do
 			local lhs = types_mod.uvar(alloc(a)) --[[: V5Type ]]
 			local rhs = types_mod.uvar(alloc(a)) --[[: V5Type ]]
@@ -160,7 +161,7 @@ local function process_line(line, lineno, out, a, file)
 	--    between the call's return tvar and a synthesized arrow result.
 	for _fn in line:gmatch("([%w_]+)%(") do
 		if _fn ~= "function" and _fn ~= "if" and _fn ~= "while" and _fn ~= "for" then
-			local prov = constraint_mod.prov(file, lineno, "synthesized")
+			local prov = constraint_mod.prov(file, lineno, 0, "synthesized")
 			local lhs = types_mod.uvar(alloc(a)) --[[: V5Type ]]
 			local rhs = types_mod.uvar(alloc(a)) --[[: V5Type ]]
 			local ce = constraint_mod.eq(lhs, rhs, prov) --[[: V5Constraint ]]

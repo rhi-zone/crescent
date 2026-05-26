@@ -169,14 +169,14 @@ end
 
 -- ── Provenance helpers ────────────────────────────────────────────────────────
 
---: (V5Ctx, integer) -> Provenance
-local function prov_inferred(ctx, line)
-    return C.prov(ctx.filename, line, "inferred")
+--: (V5Ctx, integer, integer) -> Provenance
+local function prov_inferred(ctx, line, col)
+    return C.prov(ctx.filename, line, col, "inferred")
 end
 
---: (V5Ctx, integer) -> Provenance
-local function prov_declared(ctx, line)
-    return C.prov(ctx.filename, line, "declared")
+--: (V5Ctx, integer, integer) -> Provenance
+local function prov_declared(ctx, line, col)
+    return C.prov(ctx.filename, line, col, "declared")
 end
 
 -- ── Emit helper ───────────────────────────────────────────────────────────────
@@ -537,8 +537,8 @@ end
 -- If the enclosing function is annotated: emit CIntersectionMember(ann_ret, eff)
 -- for F2 enforcement (S-Quiesce-CIntersectionMember surfaces missing effects).
 -- If unannotated: record effect in the accumulator for later intersection-folding.
---: (V5Ctx, V5Type, integer) -> nil
-local function propagate_effect(ctx, eff, line)
+--: (V5Ctx, V5Type, integer, integer) -> nil
+local function propagate_effect(ctx, eff, line, col)
     local es = ctx.effect_stack
     local depth = #es
     if depth == 0 then return end
@@ -550,7 +550,7 @@ local function propagate_effect(ctx, eff, line)
     local ann_ret = ar[depth]
     if ann_ret ~= nil then
         -- Annotated: emit membership constraint (F2 enforcement).
-        emit(ctx, C.intersection_member(ann_ret, eff, prov_declared(ctx, line)))
+        emit(ctx, C.intersection_member(ann_ret, eff, prov_declared(ctx, line, col)))
     else
         -- Unannotated: accumulate, deduplicating by structural key.
         local eff_key = C.key_of(eff)
@@ -567,14 +567,14 @@ end
 -- the current function scope.  If callee_ty is not an arrow (e.g. still a
 -- uvar), nothing can be extracted — this is the known residual gap for uvar
 -- callees (effects from unknown callees remain untracked until solve time).
---: (V5Ctx, V5Type, integer) -> nil
-local function propagate_callee_effects(ctx, callee_ty, line)
+--: (V5Ctx, V5Type, integer, integer) -> nil
+local function propagate_callee_effects(ctx, callee_ty, line, col)
     local ret1 = arrow_ret1(callee_ty)
     if ret1 == nil then return end
     local effs = extract_effects(ret1)
     for i = 1, #effs do
         local e = effs[i]
-        if e ~= nil then propagate_effect(ctx, e, line) end
+        if e ~= nil then propagate_effect(ctx, e, line, col) end
     end
 end
 
@@ -828,7 +828,7 @@ gen_expr = function(ctx, nid)
         local obj_ty  = gen_expr(ctx, n.data[0])
         local key_str = intern_str(ctx, n.data[1])
         local result  = fresh_uvar(ctx)
-        emit(ctx, C.row_extend(obj_ty, key_str, result, prov_inferred(ctx, n.line)))
+        emit(ctx, C.row_extend(obj_ty, key_str, result, prov_inferred(ctx, n.line, n.col)))
         return result
     end
 
@@ -896,7 +896,7 @@ gen_expr = function(ctx, nid)
             -- Propagate non-!throw effects (e.g. !io inside the pcall callback).
             for i = 1, #non_throw_effs do
                 local e = non_throw_effs[i]
-                if e ~= nil then propagate_effect(ctx, e, n.line) end
+                if e ~= nil then propagate_effect(ctx, e, n.line, n.col) end
             end
             return pcall_ret_ty
         end
@@ -917,7 +917,7 @@ gen_expr = function(ctx, nid)
             -- Propagate non-!yield effects from the coroutine body outward.
             for i = 1, #non_yield_effs do
                 local e = non_yield_effs[i]
-                if e ~= nil then propagate_effect(ctx, e, n.line) end
+                if e ~= nil then propagate_effect(ctx, e, n.line, n.col) end
             end
             return coro_ty
         end
@@ -946,7 +946,7 @@ gen_expr = function(ctx, nid)
                 local r_ty = co_ty.a
                 -- Subtype send value against S (resume sends to yield).
                 if send_ty ~= nil then
-                    emit(ctx, C.sub(send_ty, s_ty, prov_inferred(ctx, n.line)))
+                    emit(ctx, C.sub(send_ty, s_ty, prov_inferred(ctx, n.line, n.col)))
                 end
                 -- Build (true,Y) | (true,R) | (false,string).
                 local tf1 = {} --[[: { [string]: V5Type } ]]
@@ -998,10 +998,10 @@ gen_expr = function(ctx, nid)
             local y_ty, s_ty, _r_ty = extract_yield_from_scope(ctx)
             -- Subtype yielded value against Y.
             if yield_val_ty ~= nil then
-                emit(ctx, C.sub(yield_val_ty, y_ty, prov_inferred(ctx, n.line)))
+                emit(ctx, C.sub(yield_val_ty, y_ty, prov_inferred(ctx, n.line, n.col)))
             else
                 -- yield called with no argument — treat as nil yielded.
-                emit(ctx, C.sub(T_NIL, y_ty, prov_inferred(ctx, n.line)))
+                emit(ctx, C.sub(T_NIL, y_ty, prov_inferred(ctx, n.line, n.col)))
             end
             -- !yield propagates outward: this function is a yielding function.
             -- Reconstruct !yield<Y,R> to propagate (using _r_ty from scope).
@@ -1013,7 +1013,7 @@ gen_expr = function(ctx, nid)
             local yield_head = types_mod.effect("yield")
             --: V5Type
             local yield_eff = types_mod.effect_apply(yield_head, yield_args)
-            propagate_effect(ctx, yield_eff, n.line)
+            propagate_effect(ctx, yield_eff, n.line, n.col)
             -- Return type of coroutine.yield is S (what resume passes back).
             return s_ty
         end
@@ -1033,11 +1033,11 @@ gen_expr = function(ctx, nid)
         rets_arr[1] = ret
         --: V5Type
         local expected_fn = types_mod.arrow(arg_types, rets_arr)
-        emit(ctx, C.sub(callee_ty, expected_fn, prov_inferred(ctx, n.line)))
+        emit(ctx, C.sub(callee_ty, expected_fn, prov_inferred(ctx, n.line, n.col)))
 
         -- Effect propagation: normal call path (coroutine special cases have
         -- already returned above; is_coro_create/resume/yield never reach here).
-        propagate_callee_effects(ctx, callee_ty, n.line)
+        propagate_callee_effects(ctx, callee_ty, n.line, n.col)
 
         return ret
     end
@@ -1077,17 +1077,17 @@ gen_expr = function(ctx, nid)
         local method_ty = concrete_m ~= nil and concrete_m or fresh_uvar(ctx)
         if concrete_m == nil then
             -- Fallback: emit row_extend so the solver can resolve the method type.
-            emit(ctx, C.row_extend(recv_ty, method_str, method_ty, prov_inferred(ctx, n.line)))
+            emit(ctx, C.row_extend(recv_ty, method_str, method_ty, prov_inferred(ctx, n.line, n.col)))
         end
 
         local rets_arr = {} --[[: V5Type[] ]]
         rets_arr[1]    = ret
         --: V5Type
         local expected_fn = types_mod.arrow(arg_types, rets_arr)
-        emit(ctx, C.sub(method_ty, expected_fn, prov_inferred(ctx, n.line)))
+        emit(ctx, C.sub(method_ty, expected_fn, prov_inferred(ctx, n.line, n.col)))
         -- Propagate effects from method's known return type (if concrete).
         -- For eager-resolved methods this now sees the real arrow.
-        propagate_callee_effects(ctx, method_ty, n.line)
+        propagate_callee_effects(ctx, method_ty, n.line, n.col)
         return ret
     end
 
@@ -1095,7 +1095,7 @@ gen_expr = function(ctx, nid)
     if kind == NODE_FUNC_EXPR then
         local has_vararg = (n.flags % (FLAG_VARARG * 2)) >= FLAG_VARARG
         local fn_ty = gen_function(ctx, n.data[0], n.data[1], n.data[2], n.data[3],
-            has_vararg, nil, n.line)
+            has_vararg, nil, n.line, n.col)
         return fn_ty
     end
 
@@ -1171,8 +1171,8 @@ local function extract_ann_args(ann_ty)
     return nil
 end
 
---: (V5Ctx, integer, integer, integer, integer, boolean, V5Type | nil, integer) -> V5Type
-gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_ty, line)
+--: (V5Ctx, integer, integer, integer, integer, boolean, V5Type | nil, integer, integer) -> V5Type
+gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_ty, line, col)
     local param_tys = {} --[[: V5Type[] ]]
 
     -- Unpack annotation arrow via helpers (avoids nil-narrowing loss from
@@ -1229,7 +1229,7 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_ty, line)
         for ri = 1, #return_types do
             local rt = return_types[ri]
             if rt ~= nil then
-                emit(ctx, C.sub(rt, ann_ret, prov_declared(ctx, line)))
+                emit(ctx, C.sub(rt, ann_ret, prov_declared(ctx, line, col)))
             end
         end
         -- For annotated functions, CIntersectionMember constraints were already
@@ -1324,7 +1324,7 @@ gen_stmt = function(ctx, nid)
 
             if ann_ty ~= nil and i == 0 then
                 if rhs_ty ~= nil then
-                    emit(ctx, C.sub(rhs_ty, ann_ty, prov_declared(ctx, n.line)))
+                    emit(ctx, C.sub(rhs_ty, ann_ty, prov_declared(ctx, n.line, n.col)))
                 end
                 bind(ctx, name_str, ann_ty)
             elseif rhs_ty ~= nil then
@@ -1342,10 +1342,10 @@ gen_stmt = function(ctx, nid)
         local has_vararg = (n.flags % (FLAG_VARARG * 2)) >= FLAG_VARARG
         local ann_ty     = get_type_ann(ctx, n.line)
         local fn_ty      = gen_function(ctx, n.data[1], n.data[2], n.data[3], n.data[4],
-            has_vararg, ann_ty, n.line)
+            has_vararg, ann_ty, n.line, n.col)
 
         if ann_ty ~= nil then
-            emit(ctx, C.sub(fn_ty, ann_ty, prov_declared(ctx, n.line)))
+            emit(ctx, C.sub(fn_ty, ann_ty, prov_declared(ctx, n.line, n.col)))
         end
 
         local name_kind = name_n.kind
@@ -1355,7 +1355,7 @@ gen_stmt = function(ctx, nid)
         elseif name_kind == NODE_FIELD_EXPR then
             local obj_ty  = gen_expr(ctx, name_n.data[0])
             local key_str = intern_str(ctx, name_n.data[1])
-            emit(ctx, C.row_extend(obj_ty, key_str, fn_ty, prov_inferred(ctx, n.line)))
+            emit(ctx, C.row_extend(obj_ty, key_str, fn_ty, prov_inferred(ctx, n.line, n.col)))
         end
         return
     end
@@ -1383,14 +1383,14 @@ gen_stmt = function(ctx, nid)
                 local name_str = intern_str(ctx, tn.data[0])
                 local existing = lookup(ctx, name_str)
                 if existing ~= nil then
-                    emit(ctx, C.sub(rhs_ty, existing, prov_inferred(ctx, n.line)))
+                    emit(ctx, C.sub(rhs_ty, existing, prov_inferred(ctx, n.line, n.col)))
                 else
                     bind(ctx, name_str, rhs_ty)
                 end
             elseif tk == NODE_FIELD_EXPR then
                 local obj_ty  = gen_expr(ctx, tn.data[0])
                 local key_str = intern_str(ctx, tn.data[1])
-                emit(ctx, C.row_extend(obj_ty, key_str, rhs_ty, prov_inferred(ctx, n.line)))
+                emit(ctx, C.row_extend(obj_ty, key_str, rhs_ty, prov_inferred(ctx, n.line, n.col)))
             elseif tk == NODE_INDEX_EXPR then
                 gen_expr(ctx, tn.data[0])
                 gen_expr(ctx, tn.data[1])

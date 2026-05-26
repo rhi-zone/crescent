@@ -182,7 +182,7 @@ function M.parts_subset(sub, super)
 	return true
 end
 
---:: Provenance = { file: string, line: integer, kind: string }
+--:: Provenance = { file: string, line: integer, col: integer, kind: string }
 --:: ConstraintEq         = { id: integer, tag: "ceq", a: V5Type, b: V5Type, prov: Provenance }
 --:: ConstraintSub        = { id: integer, tag: "csub", a: V5Type, b: V5Type, prov: Provenance }
 --:: ConstraintTableOpen  = { id: integer, tag: "topen", tv: integer, prov: Provenance }
@@ -272,9 +272,9 @@ function M.intersection_member(ty, part, prov)
 	return { id = fresh_id(), tag = "cint_member", ty = ty, part = part, prov = prov }
 end
 
---: (string, integer, string) -> Provenance
-function M.prov(file, line, kind)
-	return { file = file, line = line, kind = kind }
+--: (string, integer, integer, string) -> Provenance
+function M.prov(file, line, col, kind)
+	return { file = file, line = line, col = col, kind = kind }
 end
 
 return M

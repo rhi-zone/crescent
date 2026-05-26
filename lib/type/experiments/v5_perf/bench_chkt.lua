@@ -88,6 +88,7 @@ local function one_run(base_constraints, receivers_n)
 	local maybe_body = types_mod.record({ tag = string_ty, val = var0 }) --[[: V5Type ]]
 	local maybe_lambda = types_mod.lambda("*", maybe_body) --[[: V5Type ]]
 	local chkt_count = 0
+	-- TODO(G3): plumb col — bench_chkt uses synthetic provenance with no source position; all prov col=0.
 	for k = 1, receivers_n do
 		-- (a) Miller-pattern CHKT: bind ?F_k via identity-like shape.
 		local f = subst_mod.fresh(st.subst, "open")
@@ -95,7 +96,7 @@ local function one_run(base_constraints, receivers_n)
 		local uf = types_mod.uvar(f) --[[: V5Type ]]
 		local ua = types_mod.uvar(a) --[[: V5Type ]]
 		op_sem.emit(st, op_sem.chkt(uf, { ua }, ua,
-			constraint_mod.prov("synth-chkt-miller", k, "synthesized")))
+			constraint_mod.prov("synth-chkt-miller", k, 0, "synthesized")))
 		chkt_count = chkt_count + 1
 
 		-- (b) Outside-Miller CHKT (App arg) → HOUnify.
@@ -107,13 +108,13 @@ local function one_run(base_constraints, receivers_n)
 		local ur = types_mod.uvar(r) --[[: V5Type ]]
 		local app_arg = types_mod.app(ug, int_ty) --[[: V5Type ]]
 		op_sem.emit(st, op_sem.chkt(uf2, { app_arg }, ur,
-			constraint_mod.prov("synth-chkt-park", k, "synthesized")))
+			constraint_mod.prov("synth-chkt-park", k, 0, "synthesized")))
 		chkt_count = chkt_count + 1
 
 		-- Half of the (b) cases get a rigidifying CEq later in worklist.
 		if (k % 2) == 0 then
 			op_sem.emit(st, constraint_mod.eq(uf2, maybe_lambda,
-				constraint_mod.prov("synth-rigidify", k, "synthesized")))
+				constraint_mod.prov("synth-rigidify", k, 0, "synthesized")))
 		end
 
 		-- (c) Variance-respecting CSub load: an Arrow CSub + a record-width
@@ -123,11 +124,11 @@ local function one_run(base_constraints, receivers_n)
 		local fn_a = types_mod.arrow({ int_ty }, { int_ty }) --[[: V5Type ]]
 		local fn_b = types_mod.arrow({ int_ty }, { int_ty }) --[[: V5Type ]]
 		op_sem.emit(st, constraint_mod.sub(fn_a, fn_b,
-			constraint_mod.prov("synth-csub-arrow", k, "synthesized")))
+			constraint_mod.prov("synth-csub-arrow", k, 0, "synthesized")))
 		local rec_wide = types_mod.record({ x = int_ty, y = string_ty }) --[[: V5Type ]]
 		local rec_narrow = types_mod.record({ x = int_ty }) --[[: V5Type ]]
 		op_sem.emit(st, constraint_mod.sub(rec_wide, rec_narrow,
-			constraint_mod.prov("synth-csub-record", k, "synthesized")))
+			constraint_mod.prov("synth-csub-record", k, 0, "synthesized")))
 	end
 
 	op_sem.run(st)
