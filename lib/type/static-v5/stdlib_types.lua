@@ -102,6 +102,14 @@ function M.decls()
     --: { [string]: V5Type, ... }
     local d = {} --[[: { [string]: V5Type, ... } ]]
 
+    -- ── pairs / ipairs ─────────────────────────────────────────────────────
+    -- pairs(t)  -> (iter_fn, state, init)  (conservative: returns unknown)
+    -- The gen-pass special-cases pairs/ipairs in for-in loops to derive (K, V)
+    -- from the table's index signature.  The stdlib declaration here is a
+    -- conservative fallback so the callee CSub in non-for-in contexts compiles.
+    d["pairs"]  = effectful_fn({ T_UNKNOWN }, T_UNKNOWN, {})
+    d["ipairs"] = effectful_fn({ T_UNKNOWN }, T_UNKNOWN, {})
+
     -- ── print / tostring / tonumber / type ─────────────────────────────────
 
     -- print(...) -> nil & !io  (produces I/O)

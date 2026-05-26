@@ -299,6 +299,97 @@ end
         T.eq(code, 0, "exit 0 — not true : boolean")
     end)
 
+    -- F1. for-num: loop var is number; body annotated :number typechecks.
+    T.it("for-num: local x: number = i inside body typechecks", function()
+        local src = table.concat({
+            "for i = 1, 10 do",
+            "  --: number",
+            "  local x = i",
+            "  local _ = x",
+            "end",
+        }, "\n")
+        local code, _out, _err = run(src, "for_num_ok.lua")
+        T.eq(code, 0, "exit 0 — i is number in for-num body")
+    end)
+
+    -- F2. for-num: body annotated :string errors (number not subtype of string).
+    T.it("for-num: local x: string = i inside body errors", function()
+        local src = table.concat({
+            "for i = 1, 10 do",
+            "  --: string",
+            "  local x = i",
+            "  local _ = x",
+            "end",
+        }, "\n")
+        local code, out, _err = run(src, "for_num_err.lua")
+        T.eq(code, 1, "exit 1 — number not assignable to string")
+        T.ok(out ~= "", "error output produced")
+    end)
+
+    -- F3. for-num: string bound errors (string not subtype of number).
+    T.it("for-num: string bound errors at bound site", function()
+        local src = 'for i = "a", 10 do local _ = i end'
+        local code, out, _err = run(src, "for_num_str_bound.lua")
+        T.eq(code, 1, "exit 1 — string bound not subtype of number")
+        T.ok(out ~= "", "error output produced")
+    end)
+
+    -- F4. for-in pairs: k=string, v=integer when t: { [string]: integer }.
+    -- Annotate t as a function parameter (avoids empty-record constraint issue).
+    T.it("for-in pairs(t): k:string, v:integer when t is { [string]: integer }", function()
+        local src = table.concat({
+            "--: ({ [string]: integer }) -> nil",
+            "local function f(t)",
+            "  for k, v in pairs(t) do",
+            "    --: string",
+            "    local _k = k",
+            "    --: integer",
+            "    local _v = v",
+            "    local _ = _k",
+            "    local __ = _v",
+            "  end",
+            "end",
+        }, "\n")
+        local code, _out, _err = run(src, "for_in_pairs_ok.lua")
+        T.eq(code, 0, "exit 0 — k:string, v:integer from pairs on { [string]: integer }")
+    end)
+
+    -- F5. for-in pairs: annotating v:string errors when table is { [string]: integer }.
+    T.it("for-in pairs(t): annotating v:string errors when v is integer", function()
+        local src = table.concat({
+            "--: ({ [string]: integer }) -> nil",
+            "local function f(t)",
+            "  for k, v in pairs(t) do",
+            "    --: string",
+            "    local _v = v",
+            "    local _ = _v",
+            "  end",
+            "end",
+        }, "\n")
+        local code, out, _err = run(src, "for_in_pairs_err.lua")
+        T.eq(code, 1, "exit 1 — integer not assignable to string")
+        T.ok(out ~= "", "error output produced")
+    end)
+
+    -- F6. for-in ipairs: k=integer, v=string when t: { [integer]: string }.
+    T.it("for-in ipairs(t): k:integer, v:string when t is { [integer]: string }", function()
+        local src = table.concat({
+            "--: ({ [integer]: string }) -> nil",
+            "local function f(t)",
+            "  for k, v in ipairs(t) do",
+            "    --: integer",
+            "    local _k = k",
+            "    --: string",
+            "    local _v = v",
+            "    local _ = _k",
+            "    local __ = _v",
+            "  end",
+            "end",
+        }, "\n")
+        local code, _out, _err = run(src, "for_in_ipairs_ok.lua")
+        T.eq(code, 0, "exit 0 — k:integer, v:string from ipairs on { [integer]: string }")
+    end)
+
     -- 10. expand_dotted helper: dotted keys become records.
     T.it("expand_dotted flattens dotted keys into records", function()
         local types_mod = require("lib.type.experiments.v5_perf.types")

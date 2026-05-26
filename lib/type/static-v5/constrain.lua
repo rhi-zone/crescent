@@ -36,7 +36,8 @@
 --   - Complex narrowing (discriminated unions, type guards)
 --   - Method dispatch edge cases beyond simple obj:method(...)
 --   - Binary / unary operator constraint emission (emits fresh uvar instead)
---   - for-in / for-num loop variable typing (binds unknown)
+--   - for-num: bounds emit CSub against number; loop var bound to number
+--   - for-in: loop vars bound from iterator return (pairs/ipairs special-cased)
 --   - Generic function body checking (skolemization)
 --   - Type alias / require / module directives (noted but not scope-injected)
 --   - Multi-return tuple types (uses union as approximation)
@@ -612,6 +613,12 @@ end
 
 --: (V5Ctx, string) -> V5Type | nil
 local function lookup(ctx, name)
+    -- Check the active scope first (not yet pushed to scope_stack).
+    local cur = ctx.scope
+    if cur ~= nil then
+        local cv = cur[name]
+        if cv ~= nil then return cv end
+    end
     local stack = ctx.scope_stack
     for i = #stack, 1, -1 do
         local s = stack[i]
@@ -1586,10 +1593,14 @@ gen_stmt = function(ctx, nid)
 
     -- ── for i = ... ─────────────────────────────────────────────────────────
     if kind == NODE_FOR_NUM then
-        gen_expr(ctx, n.data[1])
-        gen_expr(ctx, n.data[2])
+        local prov = prov_inferred(ctx, n.line, n.col)
+        local init_ty  = gen_expr(ctx, n.data[1])
+        local limit_ty = gen_expr(ctx, n.data[2])
+        emit(ctx, C.sub(init_ty,  T_NUMBER, prov))
+        emit(ctx, C.sub(limit_ty, T_NUMBER, prov))
         if (n.flags % (FLAG_HAS_STEP * 2)) >= FLAG_HAS_STEP then
-            gen_expr(ctx, n.data[3])
+            local step_ty = gen_expr(ctx, n.data[3])
+            emit(ctx, C.sub(step_ty, T_NUMBER, prov))
         end
         push_scope(ctx)
         local name_str = intern_str(ctx, n.data[0])
@@ -1603,15 +1614,130 @@ gen_stmt = function(ctx, nid)
     if kind == NODE_FOR_IN then
         local es = n.data[2]
         local el = n.data[3]
-        for i = es, es + el - 1 do
-            gen_expr(ctx, ctx.lists:get(i))
-        end
-        push_scope(ctx)
         local ns = n.data[0]
         local nl = n.data[1]
+
+        -- Attempt to derive loop-variable types from the iterator expression.
+        -- Special-case: single expr that is a call to `pairs(t)` or `ipairs(t)`.
+        -- For `pairs(t)`:  bind (var1, var2, ...) from t's index signature K, V.
+        -- For `ipairs(t)`: bind var1 = integer, var2 = V (array element type).
+        -- Fallback (unrecognised iterator): bind all vars to unknown.
+
+        --: V5Type[]
+        local loop_var_types = {}  -- parallel to vars 0..nl-1
+
+        --: () -> nil
+        local function fill_unknown()
+            for _ = 0, nl - 1 do
+                loop_var_types[#loop_var_types + 1] = T_UNKNOWN
+            end
+        end
+
+        -- Extract the first index-signature key/value from a record type.
+        -- Returns (key_ty, val_ty) or (nil, nil) if none found.
+        -- Index entries are stored as fields["$idx_N"] =
+        --   App(App(Const("$Idx"), key_ty), val_ty)  by ann.lua.
+        --: (V5Type) -> (V5Type | nil, V5Type | nil)
+        local function extract_idx(rec_ty)
+            if rec_ty == nil or rec_ty.tag ~= "record" then return nil, nil end
+            --: { [string]: V5Type }
+            local rf = rec_ty.fields
+            for fname2, v in pairs(rf) do
+                if fname2:sub(1, 5) == "$idx_" and v ~= nil and v.tag == "app" then
+                    -- v.f is the inner App; v.a is the value type V.
+                    --: V5Type | nil
+                    local inner = v.f
+                    if inner ~= nil and inner.tag == "app" then
+                        -- inner.f is the head Const("$Idx"); inner.a is the key type K.
+                        --: V5Type | nil
+                        local head = inner.f
+                        if head ~= nil and head.tag == "const" then
+                            if head.name == "$Idx" then
+                                return inner.a, v.a
+                            end
+                        end
+                    end
+                end
+            end
+            return nil, nil
+        end
+
+        local resolved = false
+        if el == 1 then
+            local call_nid = ctx.lists:get(es)
+            local call_n   = ctx.nodes:get(call_nid)
+            if call_n.kind == NODE_CALL_EXPR then
+                local callee_nid  = call_n.data[0]
+                local callee_n    = ctx.nodes:get(callee_nid)
+                local carg_es     = call_n.data[1]
+                local carg_el     = call_n.data[2]
+                if callee_n.kind == NODE_IDENTIFIER and carg_el == 1 then
+                    local fname = intern_str(ctx, callee_n.data[0])
+                    -- Evaluate the argument type (the iterable).
+                    local arg_nid = ctx.lists:get(carg_es)
+                    local arg_ty  = gen_expr(ctx, arg_nid)
+
+                    if fname == "pairs" then
+                        -- pairs(t): K, V from t's index signature.
+                        -- Emit the callee sub (conservative stdlib arrow fallback).
+                        local pairs_ty = lookup(ctx, "pairs")
+                        if pairs_ty ~= nil then
+                            local rets_arr = {} --[[: V5Type[] ]]
+                            rets_arr[1] = fresh_uvar(ctx)
+                            --: V5Type
+                            local expected_pairs_fn = types_mod.arrow({ arg_ty }, rets_arr)
+                            emit(ctx, C.sub(pairs_ty, expected_pairs_fn,
+                                prov_inferred(ctx, n.line, n.col)))
+                        end
+                        local key_ty, val_ty = extract_idx(arg_ty)
+                        if key_ty ~= nil and val_ty ~= nil then
+                            loop_var_types[1] = key_ty
+                            loop_var_types[2] = val_ty
+                            for _ = 3, nl do
+                                loop_var_types[#loop_var_types + 1] = T_UNKNOWN
+                            end
+                            resolved = true
+                        end
+
+                    elseif fname == "ipairs" then
+                        -- ipairs(t): integer key, V from array element type.
+                        local ipairs_ty = lookup(ctx, "ipairs")
+                        if ipairs_ty ~= nil then
+                            local rets_arr = {} --[[: V5Type[] ]]
+                            rets_arr[1] = fresh_uvar(ctx)
+                            --: V5Type
+                            local expected_ipairs_fn = types_mod.arrow({ arg_ty }, rets_arr)
+                            emit(ctx, C.sub(ipairs_ty, expected_ipairs_fn,
+                                prov_inferred(ctx, n.line, n.col)))
+                        end
+                        -- ipairs works on integer-keyed tables; extract element type.
+                        local _, val_ty = extract_idx(arg_ty)
+                        if val_ty == nil then val_ty = T_UNKNOWN end
+                        loop_var_types[1] = T_INTEGER
+                        loop_var_types[2] = val_ty
+                        for _ = 3, nl do
+                            loop_var_types[#loop_var_types + 1] = T_UNKNOWN
+                        end
+                        resolved = true
+                    end
+                end
+            end
+        end
+
+        -- Evaluate all expressions in the expr_list (except the ones already
+        -- evaluated for pairs/ipairs above — those had a single arg).
+        if not resolved then
+            for i = es, es + el - 1 do
+                gen_expr(ctx, ctx.lists:get(i))
+            end
+            fill_unknown()
+        end
+
+        push_scope(ctx)
         for i = 0, nl - 1 do
             local name_str = intern_str(ctx, ctx.lists:get(ns + i))
-            bind(ctx, name_str, T_UNKNOWN)
+            local ty = loop_var_types[i + 1] or T_UNKNOWN
+            bind(ctx, name_str, ty)
         end
         gen_block(ctx, n.data[4], n.data[5])
         pop_scope(ctx)
