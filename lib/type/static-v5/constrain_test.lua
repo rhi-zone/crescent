@@ -369,4 +369,48 @@ T.describe("v5 constrain — effect propagation", function()
         T.ok(count_tag(cs, "csub") >= 1, "csub for injected my_fn call")
     end)
 
+    -- 5.F1 fix: dotted callee (io.write) must emit cint_member for F2 enforcement
+    -- when the enclosing function is annotated pure (() -> nil).
+    -- Previously, NODE_FIELD_EXPR produced a uvar at gen time so
+    -- propagate_callee_effects extracted nothing and F2 was silent.
+    -- After the fix, resolve_callee_eager walks the TRecord from opts.decls
+    -- and returns the real arrow; propagate_callee_effects then sees !io.
+    T.it("5.F1: annotated () -> nil calling io.write via dotted callee emits cint_member", function()
+        local src = "--: () -> nil\nlocal function f() io.write('x') end"
+        local decls = stdlib_mod.decls()
+        -- expand_dotted mirrors what cli.lua does before calling generate.
+        local cli_mod = require("lib.type.static-v5.cli")
+        local expanded = cli_mod.expand_dotted(decls)
+        local cs, errs = constrain.generate(src, "test.lua", { decls = expanded })
+        T.eq(#errs, 0, "no parse/annotation errors")
+        -- Must emit at least one cint_member — that's the F2 enforcement constraint.
+        T.ok(count_tag(cs, "cint_member") >= 1,
+            "cint_member emitted: F2 fires on dotted callee io.write")
+        -- Verify the cint_member part is !io (not some other effect).
+        local found_io_member = any(cs, function(c)
+            if c.tag ~= "cint_member" then return false end
+            local p = c.part
+            return p ~= nil and p.tag == "const" and p.name == "!io"
+        end)
+        T.ok(found_io_member, "cint_member part is !io")
+    end)
+
+    -- Negative: annotated () -> nil & !io calling io.write — cint_member is still
+    -- emitted (the solver resolves it as satisfied) but no spurious rejection.
+    -- The important check here is just that no cint_member is ABSENT, meaning
+    -- the fix doesn't suppress effects when the annotation declares them.
+    T.it("5.F1: annotated () -> nil & !io calling io.write still emits cint_member (solver satisfies it)", function()
+        -- Build the annotated arrow type inline and inject via opts.decls
+        -- (the gen-pass reads the annotation from source).
+        local src = "--: () -> nil & !io\nlocal function f() io.write('x') end"
+        local decls = stdlib_mod.decls()
+        local cli_mod = require("lib.type.static-v5.cli")
+        local expanded = cli_mod.expand_dotted(decls)
+        local cs, errs = constrain.generate(src, "test.lua", { decls = expanded })
+        T.eq(#errs, 0, "no parse/annotation errors")
+        -- cint_member is emitted (membership check); the solver will satisfy it
+        -- because !io IS in the annotation intersection.
+        T.ok(count_tag(cs, "cint_member") >= 1, "cint_member emitted for !io membership check")
+    end)
+
 end)

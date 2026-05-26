@@ -372,6 +372,87 @@ local gen_block --[[: (V5Ctx, integer, integer) -> nil ]]
 local gen_function --[[: (V5Ctx, integer, integer, integer, integer, boolean, V5Type | nil, integer) -> V5Type ]]
 local gen_table_expr --[[: (V5Ctx, integer) -> V5Type ]]
 
+-- ── Eager dotted-callee resolution ────────────────────────────────────────────
+--
+-- For a callee expression that is a NODE_FIELD_EXPR chain (e.g. io.write,
+-- coroutine.create, a.b.c.fn), walk the chain via record-field lookups through
+-- ctx.scope.  If every step resolves to a concrete TRecord field and the final
+-- type is an arrow, return it directly so propagate_callee_effects can extract
+-- effects at gen time rather than post-solve.
+--
+-- Returns nil if:
+--   - the chain root is not a NODE_IDENTIFIER
+--   - the root name is not in scope
+--   - any intermediate or final lookup misses a field or hits an open row
+--   - the final resolved type is not an arrow
+--
+-- When a non-nil type is returned, the caller MUST NOT also call gen_expr on
+-- the callee node — that would double-emit row_extend constraints.  The caller
+-- is responsible for emitting the CSub against the resolved arrow instead.
+--
+--: (V5Ctx, integer) -> V5Type | nil
+local function resolve_callee_eager(ctx, nid)
+    -- Collect the field access chain: for io.write we get path = {"write"},
+    -- root_nid = <io identifier node>.
+    -- Walk the chain bottom-up: each NODE_FIELD_EXPR has data[0]=object, data[1]=field.
+    --: { [integer]: string }
+    local path = {}
+    local cur_nid = nid
+    while true do
+        local cur_n = ctx.nodes:get(cur_nid)
+        if cur_n.kind == NODE_IDENTIFIER then
+            -- Reached root.
+            break
+        elseif cur_n.kind == NODE_FIELD_EXPR then
+            -- Prepend field name (we walk inside-out, so reverse at end).
+            local field_str = intern_str(ctx, cur_n.data[1])
+            path[#path + 1] = field_str
+            cur_nid = cur_n.data[0]
+        else
+            -- Non-identifier, non-field node — can't eager-resolve.
+            return nil
+        end
+    end
+
+    -- cur_nid is now a NODE_IDENTIFIER.
+    local root_n = ctx.nodes:get(cur_nid)
+    local root_name = intern_str(ctx, root_n.data[0])
+    local root_ty = lookup(ctx, root_name)
+    if root_ty == nil then return nil end
+
+    -- Reverse path so index 1 is the outermost field (the one applied first).
+    -- path was accumulated inner-to-outer: io.write yields path = {"write"} with
+    -- root = "io".  Reversing gives {"write"} (single step, already correct for
+    -- one-level chains).  For a.b.c: accumulated as {"c","b"}, reversed to {"b","c"}.
+    local n = #path
+    for i = 1, math.floor(n / 2) do
+        local j = n - i + 1
+        local tmp = path[i]
+        path[i] = path[j]
+        path[j] = tmp
+    end
+
+    -- Walk the path through record fields.
+    --: V5Type
+    local ty = root_ty
+    for i = 1, n do
+        if ty.tag ~= "record" then return nil end
+        -- Open records (row ~= nil) have unknown extra fields — bail to be safe.
+        if ty.row ~= nil then return nil end
+        --: { [string]: V5Type }
+        local fields = ty.fields
+        local field_name = path[i]
+        if field_name == nil then return nil end
+        local next_ty = fields[field_name]
+        if next_ty == nil then return nil end
+        ty = next_ty
+    end
+
+    -- Final type must be a concrete arrow for effect extraction to work.
+    if ty.tag ~= "arrow" then return nil end
+    return ty
+end
+
 -- ── Expression constraint generation ─────────────────────────────────────────
 
 --: (V5Ctx, integer) -> V5Type
@@ -467,7 +548,6 @@ gen_expr = function(ctx, nid)
     -- ── Function call: f(...) ───────────────────────────────────────────────
     if kind == NODE_CALL_EXPR then
         local callee_node = ctx.nodes:get(n.data[0])
-        local callee_ty = gen_expr(ctx, n.data[0])
         local arg_types = {} --[[: V5Type[] ]]
         local es = n.data[1]
         local el = n.data[2]
@@ -495,6 +575,16 @@ gen_expr = function(ctx, nid)
             end
         end
 
+        -- Try eager resolution for dotted callees (e.g. io.write, os.exit).
+        -- If the chain resolves to a concrete arrow via record-field lookup,
+        -- use it directly so propagate_callee_effects can extract effects now
+        -- instead of after the solver runs.  When resolution succeeds we skip
+        -- gen_expr on the callee node to avoid double-emitting row_extend.
+        -- When it fails (nil returned) we fall through to gen_expr as before.
+        local eager_ty = resolve_callee_eager(ctx, n.data[0])
+        --: V5Type
+        local callee_ty = eager_ty ~= nil and eager_ty or gen_expr(ctx, n.data[0])
+
         local ret = fresh_uvar(ctx)
         local rets_arr = {} --[[: V5Type[] ]]
         rets_arr[1] = ret
@@ -517,6 +607,8 @@ gen_expr = function(ctx, nid)
             -- return is left as a fresh uvar (gap noted for 5.D).
         else
             -- Normal call: propagate effects from callee's known return type.
+            -- For eager-resolved dotted callees this now sees the real arrow,
+            -- so F2 enforcement fires correctly.
             propagate_callee_effects(ctx, callee_ty, n.line)
         end
 
@@ -535,15 +627,39 @@ gen_expr = function(ctx, nid)
             local anid = ctx.lists:get(i)
             arg_types[#arg_types + 1] = gen_expr(ctx, anid)
         end
-        local ret       = fresh_uvar(ctx)
-        local method_ty = fresh_uvar(ctx)
-        emit(ctx, C.row_extend(recv_ty, method_str, method_ty, prov_inferred(ctx, n.line)))
+        local ret = fresh_uvar(ctx)
+
+        -- Try eager resolution: look up method_str in the recv_ty record.
+        -- If recv_ty is a concrete closed TRecord, we can find the method arrow
+        -- directly instead of emitting a row_extend + uvar.
+        -- eager_method_ty returns non-nil only if recv_ty is a closed record with
+        -- a concrete arrow at method_str; nil falls back to row_extend + uvar.
+        --: (V5Type, string) -> V5Type | nil
+        local function eager_method_ty(rec, mstr)
+            if rec.tag ~= "record" then return nil end
+            if rec.row ~= nil then return nil end
+            --: { [string]: V5Type }
+            local rf = rec.fields
+            local cm = rf[mstr]
+            if cm == nil then return nil end
+            if cm.tag ~= "arrow" then return nil end
+            return cm
+        end
+        local concrete_m = eager_method_ty(recv_ty, method_str)
+        --: V5Type
+        local method_ty = concrete_m ~= nil and concrete_m or fresh_uvar(ctx)
+        if concrete_m == nil then
+            -- Fallback: emit row_extend so the solver can resolve the method type.
+            emit(ctx, C.row_extend(recv_ty, method_str, method_ty, prov_inferred(ctx, n.line)))
+        end
+
         local rets_arr = {} --[[: V5Type[] ]]
         rets_arr[1]    = ret
         --: V5Type
         local expected_fn = types_mod.arrow(arg_types, rets_arr)
         emit(ctx, C.sub(method_ty, expected_fn, prov_inferred(ctx, n.line)))
         -- Propagate effects from method's known return type (if concrete).
+        -- For eager-resolved methods this now sees the real arrow.
         propagate_callee_effects(ctx, method_ty, n.line)
         return ret
     end

@@ -72,8 +72,6 @@ T.describe("v5 cli e2e", function()
 
     -- 3. Annotated () -> nil body calls print (direct-bound !io) — !io NOT in annotation.
     --    This should surface an F2 error (CIntersectionMember stuck).
-    --    Note: field-access callees (io.write) are uvar at gen-pass time;
-    --    effect propagation from uvar callees is a known gap (5.E work).
     --    print is a direct stdlib binding and propagates !io immediately.
     T.it("annotated () -> nil calling print surfaces F2 error", function()
         local src = "--: () -> nil\nlocal function f() print('x') end"
@@ -81,6 +79,25 @@ T.describe("v5 cli e2e", function()
         T.eq(code, 1, "exit 1 (F2 violation)")
         -- The solver emits a CIntersectionMember error for missing !io.
         T.ok(out ~= "", "error output produced")
+    end)
+
+    -- 3b. 5.F1 fix: annotated () -> nil body calls io.write (dotted callee).
+    --     Previously silent (uvar at gen time); after fix, F2 fires.
+    T.it("5.F1: annotated () -> nil calling io.write (dotted) surfaces F2 error", function()
+        local src = "--: () -> nil\nlocal function f() io.write('x') end"
+        local code, out, _err = run(src, "f2_io_write.lua")
+        T.eq(code, 1, "exit 1 (F2 violation — dotted callee)")
+        T.ok(out ~= "", "error output produced for io.write F2")
+        -- The error message references CIntersectionMember (rule name in solver output).
+        T.ok(out:find("CIntersectionMember") ~= nil or out:find("cint") ~= nil or out:find("!io") ~= nil,
+            "error message references effect enforcement")
+    end)
+
+    -- 3c. 5.F1 negative: annotated () -> nil & !io calling io.write — should be clean.
+    T.it("5.F1: annotated () -> nil & !io calling io.write is clean", function()
+        local src = "--: () -> nil & !io\nlocal function f() io.write('x') end"
+        local code, _out, _err = run(src, "f2_io_write_ok.lua")
+        T.eq(code, 0, "exit 0 — !io in annotation satisfies F2")
     end)
 
     -- 4. Annotated function raises error() — !throw not in annotation.

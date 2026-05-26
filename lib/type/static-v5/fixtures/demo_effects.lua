@@ -3,7 +3,9 @@
 --
 -- Run:  bin/cr check --v5 lib/type/static-v5/fixtures/demo_effects.lua
 --
--- Expected output: clean (0 errors).
+-- Expected output (after 5.F1 fix): 1 error from section 7 (deliberate F2
+-- violation — annotated pure function calls io.write via dotted callee).
+-- All other sections are clean.
 --
 -- Each section exercises a distinct feature of the v5 effect system.
 
@@ -49,6 +51,15 @@ local function coro_demo()
     local _ = co
 end
 
+-- ── 7. Deliberate F2 violation: annotated pure function calls io.write ───────
+-- This function is annotated as pure (() -> nil) but calls io.write which
+-- carries the !io effect.  After Phase 5.F1, the dotted callee is resolved at
+-- gen time and the F2 constraint fires.  This SHOULD produce an error.
+--: () -> nil
+local function pure_but_writes()
+    io.write("this is an F2 violation\n")
+end
+
 -- Suppress unused warnings.
 local _ = pure_add(0)
 local _ = greet
@@ -56,3 +67,4 @@ local _ = greet_print
 local _ = safe_call
 local _ = mixed
 local _ = coro_demo
+local _ = pure_but_writes
