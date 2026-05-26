@@ -114,10 +114,11 @@ T.describe("v5 cli e2e", function()
         local src = [[
 --: () -> nil
 local function safe()
-    local ok, _ = pcall(function()
+    local ok, _err = pcall(function()
         error("boom")
     end)
-    _ = ok
+    local _a = ok
+    local _b = _err
 end
 ]]
         local code, _out, _err = run(src, "pcall_absorbs.lua")
@@ -388,6 +389,90 @@ end
         }, "\n")
         local code, _out, _err = run(src, "for_in_ipairs_ok.lua")
         T.eq(code, 0, "exit 0 — k:integer, v:string from ipairs on { [integer]: string }")
+    end)
+
+    -- ── Multi-return positional tuple e2e tests ───────────────────────────────
+
+    -- MR1. Basic: f returns 1, "x" — a and b get positional types.
+    T.it("multi-return: local a, b = f() binds positional types", function()
+        local src = table.concat({
+            "local function f() return 1, 'x' end",
+            "--: number",
+            "local a, b = f()",
+            "--: string",
+            "local _b = b",
+            "local _ = a",
+        }, "\n")
+        local code, _out, _err = run(src, "mr_basic.lua")
+        T.eq(code, 0, "exit 0 — a:number, b:string from multi-return f")
+    end)
+
+    -- MR2. Wrong type: annotating b as number errors (it's string).
+    T.it("multi-return: annotating b:number errors when f returns string in slot 2", function()
+        local src = table.concat({
+            "local function f() return 1, 'x' end",
+            "local a, b = f()",
+            "--: number",
+            "local _b = b",
+            "local _ = a",
+        }, "\n")
+        local code, out, _err = run(src, "mr_wrong_type.lua")
+        T.eq(code, 1, "exit 1 — b is string, not number")
+        T.ok(out ~= "", "error output produced")
+    end)
+
+    -- MR3. Extra LHS: local a, b, c = f() where f returns 2 values → c is nil.
+    T.it("multi-return: extra LHS slot is nil when f returns 2 values", function()
+        local src = table.concat({
+            "local function f() return 1, 'x' end",
+            "local a, b, c = f()",
+            "--: nil",
+            "local _c = c",
+            "local _ = a",
+            "local __ = b",
+        }, "\n")
+        local code, _out, _err = run(src, "mr_extra_lhs.lua")
+        T.eq(code, 0, "exit 0 — c:nil when f has only 2 returns")
+    end)
+
+    -- MR4. Truncation: local a = f() uses only first return.
+    T.it("multi-return: local a = f() binds only first return", function()
+        local src = table.concat({
+            "local function f() return 1, 'x' end",
+            "--: number",
+            "local a = f()",
+            "local _ = a",
+        }, "\n")
+        local code, _out, _err = run(src, "mr_truncate.lua")
+        T.eq(code, 0, "exit 0 — a:number (second return discarded)")
+    end)
+
+    -- MR5. Cross-function: inline IIFE with multi-return.
+    T.it("multi-return: inline IIFE local a, b = (function() return 1, 'x' end)()", function()
+        local src = table.concat({
+            "--: number",
+            "local a, b = (function() return 1, 'x' end)()",
+            "--: string",
+            "local _b = b",
+            "local _ = a",
+        }, "\n")
+        local code, _out, _err = run(src, "mr_iife.lua")
+        T.eq(code, 0, "exit 0 — IIFE multi-return binds positional types")
+    end)
+
+    -- MR6. Non-last position truncation: g() in non-last position of return drops extras.
+    T.it("multi-return: g() in non-last return position truncates to 1 value", function()
+        local src = table.concat({
+            "local function g() return 1, 2 end",
+            "local function f() return g(), 3 end",
+            "--: number",
+            "local a, b = f()",
+            "--: number",
+            "local _b = b",
+            "local _ = a",
+        }, "\n")
+        local code, _out, _err = run(src, "mr_nonlast_trunc.lua")
+        T.eq(code, 0, "exit 0 — g() in non-last position: a:number, b:number")
     end)
 
     -- 10. expand_dotted helper: dotted keys become records.

@@ -177,7 +177,7 @@ end
 --::   errors: string[],
 --::   scope: { [string]: V5Type },
 --::   scope_stack: { [string]: V5Type }[],
---::   return_stack: V5Type[],
+--::   return_stack: V5Type[][],
 --::   effect_stack: unknown[],
 --::   ann_ret_stack: unknown[],
 --::   annotations: { [integer]: RawAnn } | nil,
@@ -693,6 +693,7 @@ end
 -- ── Forward declarations ──────────────────────────────────────────────────────
 
 local gen_expr --[[: (V5Ctx, integer) -> V5Type ]]
+local gen_expr_multi --[[: (V5Ctx, integer, integer) -> V5Type[] ]]
 local gen_stmt --[[: (V5Ctx, integer) -> nil ]]
 local gen_block --[[: (V5Ctx, integer, integer) -> nil ]]
 local gen_function --[[: (V5Ctx, integer, integer, integer, integer, boolean, V5Type | nil, integer) -> V5Type ]]
@@ -1232,6 +1233,163 @@ gen_expr = function(ctx, nid)
     return fresh_uvar(ctx)
 end
 
+-- ── Multi-return expression helper ────────────────────────────────────────────
+--
+-- gen_expr_multi(ctx, nid, n_slots) — evaluate nid as an expression that may
+-- return multiple values, returning a V5Type[] of length n_slots.
+--
+-- For function call and method call nodes: emits n_slots fresh uvars as the
+-- expected return, so the solver binds each positional slot independently.
+-- The solver's T-CSub-Record-Width nil-pad rule fills extra slots with nil when
+-- the callee's actual return arity is smaller.
+--
+-- For all other expressions: calls gen_expr and pads with T_NIL.
+--
+-- This is used by LOCAL_STMT and ASSIGN_STMT when the number of LHS names
+-- exceeds the number of RHS expressions (last RHS spreads).
+--
+--: (V5Ctx, integer, integer) -> V5Type[]
+gen_expr_multi = function(ctx, nid, n_slots)
+    local n = ctx.nodes:get(nid)
+    local kind = n.kind
+    if kind == NODE_CALL_EXPR then
+        -- Detect special cases BEFORE gen'ing arguments, to avoid double-gen.
+        -- pcall / coroutine.{create,resume,yield} return positional records
+        -- already handled by gen_expr's special-case paths; delegate entirely.
+        local callee_node = ctx.nodes:get(n.data[0])
+        local is_special = false
+        if callee_node.kind == NODE_IDENTIFIER then
+            local cname = intern_str(ctx, callee_node.data[0])
+            if cname == "pcall" then is_special = true end
+        elseif callee_node.kind == NODE_FIELD_EXPR then
+            local obj_node = ctx.nodes:get(callee_node.data[0])
+            if obj_node.kind == NODE_IDENTIFIER then
+                local oname = intern_str(ctx, obj_node.data[0])
+                local fname = intern_str(ctx, callee_node.data[1])
+                if oname == "coroutine" and
+                    (fname == "create" or fname == "resume" or fname == "yield") then
+                    is_special = true
+                end
+            end
+        end
+        if is_special then
+            -- Delegate to gen_expr which returns the full positional-record type.
+            -- Spread its positional fields into slots 1..n_slots.
+            local ty = gen_expr(ctx, nid)
+            local out = {} --[[: V5Type[] ]]
+            -- Helper: extract field i from a positional record or union of records.
+            --: (V5Type, integer) -> V5Type
+            local function field_i(t, i)
+                local k = tostring(i)
+                if t.tag == "record" then
+                    return t.fields[k] or T_NIL
+                end
+                if t.tag == "union" then
+                    local parts = {} --[[: V5Type[] ]]
+                    for bi = 1, #t.xs do
+                        local br = t.xs[bi]
+                        if br ~= nil then
+                            if br.tag == "record" then
+                                local v = br.fields[k]
+                                if v ~= nil then
+                                    parts[#parts + 1] = v
+                                else
+                                    parts[#parts + 1] = T_NIL
+                                end
+                            else
+                                parts[#parts + 1] = T_NIL
+                            end
+                        end
+                    end
+                    if #parts == 0 then return T_NIL end
+                    if #parts == 1 then
+                        local p1 = parts[1]
+                        return p1 or T_NIL
+                    end
+                    --: V5Type
+                    local uv = types_mod.union(parts)
+                    return uv
+                end
+                -- Not a record or union: slot 1 = ty itself, others = nil.
+                if i == 1 then return t end
+                return T_NIL
+            end
+            for i = 1, n_slots do
+                out[i] = field_i(ty, i)
+            end
+            return out
+        end
+        -- Normal call: gen args once, then emit n_slots-wide expected arrow.
+        local arg_types = {} --[[: V5Type[] ]]
+        local es = n.data[1]
+        local el = n.data[2]
+        for i = es, es + el - 1 do
+            local anid = ctx.lists:get(i)
+            arg_types[#arg_types + 1] = gen_expr(ctx, anid)
+        end
+        -- Create n_slots fresh uvars and emit expected arrow.
+        local eager_ty = resolve_callee_eager(ctx, n.data[0])
+        --: V5Type
+        local callee_ty = eager_ty ~= nil and eager_ty or gen_expr(ctx, n.data[0])
+        local uvars = {} --[[: V5Type[] ]]
+        for i = 1, n_slots do
+            uvars[i] = fresh_uvar(ctx)
+        end
+        --: V5Type
+        local expected_fn = types_mod.arrow(arg_types, uvars)
+        emit(ctx, C.sub(callee_ty, expected_fn, prov_inferred(ctx, n.line, n.col)))
+        propagate_callee_effects(ctx, callee_ty, n.line, n.col)
+        return uvars
+    elseif kind == NODE_METHOD_CALL then
+        -- Method call: same multi-slot approach.
+        local recv_ty    = gen_expr(ctx, n.data[0])
+        local method_str = intern_str(ctx, n.data[1])
+        local arg_types  = {} --[[: V5Type[] ]]
+        arg_types[1]     = recv_ty
+        local mes = n.data[2]
+        local mel = n.data[3]
+        for i = mes, mes + mel - 1 do
+            local anid = ctx.lists:get(i)
+            arg_types[#arg_types + 1] = gen_expr(ctx, anid)
+        end
+        --: (V5Type, string) -> V5Type | nil
+        local function eager_method_ty_multi(rec, mstr)
+            if rec.tag ~= "record" then return nil end
+            if rec.row ~= nil then return nil end
+            --: { [string]: V5Type }
+            local rf = rec.fields
+            local cm = rf[mstr]
+            if cm == nil then return nil end
+            if cm.tag ~= "arrow" then return nil end
+            return cm
+        end
+        local concrete_m = eager_method_ty_multi(recv_ty, method_str)
+        --: V5Type
+        local method_ty = concrete_m ~= nil and concrete_m or fresh_uvar(ctx)
+        if concrete_m == nil then
+            emit(ctx, C.row_extend(recv_ty, method_str, method_ty, prov_inferred(ctx, n.line, n.col)))
+        end
+        local uvars = {} --[[: V5Type[] ]]
+        for i = 1, n_slots do
+            uvars[i] = fresh_uvar(ctx)
+        end
+        --: V5Type
+        local expected_fn = types_mod.arrow(arg_types, uvars)
+        emit(ctx, C.sub(method_ty, expected_fn, prov_inferred(ctx, n.line, n.col)))
+        propagate_callee_effects(ctx, method_ty, n.line, n.col)
+        return uvars
+    else
+        -- Non-call expression: single value; pad extra slots with T_NIL.
+        local ty = gen_expr(ctx, nid)
+        local out = {} --[[: V5Type[] ]]
+        out[1] = ty
+        for i = 2, n_slots do
+            out[i] = T_NIL
+        end
+        return out
+    end
+end
+
 -- ── Table constructor ─────────────────────────────────────────────────────────
 
 --: (V5Ctx, integer) -> V5Type
@@ -1341,15 +1499,62 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_ty, line, col)
     pop_scope(ctx)
 
     -- Determine return type.
+    -- return_types is now V5Type[][] — each element is a list of positional types
+    -- from one return statement. Build the positional rets_arr by:
+    --   1. Finding the maximum width (max #list across all return statements).
+    --   2. For each slot i: collect list[i] or T_NIL from each statement.
+    --   3. If only one statement contributes a non-nil type in slot i, use it
+    --      directly; otherwise union the contributors.
     -- ann_ret is V5Type | nil from extract_ann_ret (function-return narrowing works).
     -- Emit sub-constraints for annotated return; compute inferred return otherwise.
+    --
+    -- Helper: build rets_arr (V5Type[]) from return_types (V5Type[][]).
+    --: (V5Type[][]) -> V5Type[]
+    local function build_rets_arr(stmts)
+        if #stmts == 0 then
+            local r0 = {} --[[: V5Type[] ]]
+            r0[1] = T_NIL
+            return r0
+        end
+        -- Find max width.
+        local max_w = 0
+        for si = 1, #stmts do
+            local sl = stmts[si]
+            if sl ~= nil and #sl > max_w then max_w = #sl end
+        end
+        if max_w == 0 then max_w = 1 end
+        local rets = {} --[[: V5Type[] ]]
+        for slot = 1, max_w do
+            local contributors = {} --[[: V5Type[] ]]
+            for si = 1, #stmts do
+                local sl = stmts[si]
+                --: V5Type
+                local v = (sl ~= nil and sl[slot] ~= nil) and sl[slot] or T_NIL
+                contributors[#contributors + 1] = v
+            end
+            if #contributors == 1 then
+                local cv = contributors[1]
+                if cv ~= nil then rets[slot] = cv end
+            else
+                --: V5Type
+                local union_v = types_mod.union(contributors)
+                rets[slot] = union_v
+            end
+        end
+        return rets
+    end
+
     --: V5Type
     local ret_ty = T_NIL   -- default; overwritten below in every branch
     if ann_ret ~= nil then
         for ri = 1, #return_types do
-            local rt = return_types[ri]
-            if rt ~= nil then
-                emit(ctx, C.sub(rt, ann_ret, prov_declared(ctx, line, col)))
+            local rt_list = return_types[ri]
+            if rt_list ~= nil then
+                -- Check first positional slot against ann_ret.
+                local rt = rt_list[1]
+                if rt ~= nil then
+                    emit(ctx, C.sub(rt, ann_ret, prov_declared(ctx, line, col)))
+                end
             end
         end
         -- For annotated functions, CIntersectionMember constraints were already
@@ -1371,38 +1576,37 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_ty, line, col)
             local ity0 = types_mod.intersection(parts)
             ret_ty = ity0
         end
-    elseif #return_types == 1 then
-        local rt0 = return_types[1]
-        --: V5Type
-        local base = rt0 or T_NIL
-        if #body_effects == 0 then
-            ret_ty = base
-        else
-            local parts = {} --[[: V5Type[] ]]
-            parts[1] = base
-            for i = 1, #body_effects do
-                local e = body_effects[i]
-                if e ~= nil then parts[#parts + 1] = e end
-            end
-            --: V5Type
-            local ity1 = types_mod.intersection(parts)
-            ret_ty = ity1
-        end
     else
-        --: V5Type
-        local union_ty = types_mod.union(return_types)
+        -- Build positional rets_arr from all return statements.
+        local rets_from_stmts = build_rets_arr(return_types)
         if #body_effects == 0 then
-            ret_ty = union_ty
+            -- Pass rets_from_stmts directly to arrow; arrow wraps in positional record.
+            --: V5Type
+            local fn_ty_inner = types_mod.arrow(param_tys, rets_from_stmts)
+            return fn_ty_inner
         else
+            -- Incorporate effects: wrap first slot in intersection with effect list.
+            -- Effects belong to the return intersection, not the positional record.
+            -- Arrow ret field "1" carries the first value & effects intersection.
+            local base_ty = rets_from_stmts[1] or T_NIL
             local parts = {} --[[: V5Type[] ]]
-            parts[1] = union_ty
+            parts[1] = base_ty
             for i = 1, #body_effects do
                 local e = body_effects[i]
                 if e ~= nil then parts[#parts + 1] = e end
             end
             --: V5Type
-            local ity2 = types_mod.intersection(parts)
-            ret_ty = ity2
+            local ity_base = types_mod.intersection(parts)
+            -- Replace slot 1 with the effects-bearing intersection.
+            local rets_with_eff = {} --[[: V5Type[] ]]
+            rets_with_eff[1] = ity_base
+            for slot = 2, #rets_from_stmts do
+                local sv = rets_from_stmts[slot]
+                if sv ~= nil then rets_with_eff[slot] = sv end
+            end
+            --: V5Type
+            local fn_ty_inner = types_mod.arrow(param_tys, rets_with_eff)
+            return fn_ty_inner
         end
     end
 
@@ -1429,10 +1633,37 @@ gen_stmt = function(ctx, nid)
         local es = n.data[2]
         local el = n.data[3]
 
+        -- Build rhs_tys as a flat V5Type[] of length nl.
+        -- For each RHS expression except the last: take its single gen_expr value.
+        -- For the last RHS expression: use gen_expr_multi with the number of
+        -- remaining LHS slots so the solver binds all positional returns.
+        -- Lua semantics: only the last expression expands multi-return.
         local rhs_tys = {} --[[: V5Type[] ]]
-        for i = es, es + el - 1 do
-            local enid = ctx.lists:get(i)
-            rhs_tys[#rhs_tys + 1] = gen_expr(ctx, enid)
+        if el == 0 then
+            -- No RHS: all LHS vars get T_NIL (handled below).
+        elseif el == 1 then
+            -- Single RHS: use gen_expr_multi to spread into all nl LHS slots.
+            local enid = ctx.lists:get(es)
+            local spread = gen_expr_multi(ctx, enid, nl)
+            for si = 1, #spread do
+                rhs_tys[si] = spread[si]
+            end
+        else
+            -- Multiple RHS: gen_expr for all but last; gen_expr_multi for last
+            -- with the number of remaining LHS slots.
+            local used = el - 1  -- non-last exprs consume one LHS slot each
+            for i = es, es + el - 2 do
+                local enid = ctx.lists:get(i)
+                rhs_tys[#rhs_tys + 1] = gen_expr(ctx, enid)
+            end
+            -- Remaining LHS slots to fill from last RHS.
+            local remaining = nl - used
+            if remaining < 1 then remaining = 1 end
+            local last_enid = ctx.lists:get(es + el - 1)
+            local spread = gen_expr_multi(ctx, last_enid, remaining)
+            for si = 1, #spread do
+                rhs_tys[#rhs_tys + 1] = spread[si]
+            end
         end
 
         local ann_ty = get_type_ann(ctx, n.line)
@@ -1450,7 +1681,7 @@ gen_stmt = function(ctx, nid)
             elseif rhs_ty ~= nil then
                 bind(ctx, name_str, rhs_ty)
             else
-                bind(ctx, name_str, T_UNKNOWN)
+                bind(ctx, name_str, T_NIL)
             end
         end
         return
@@ -1487,10 +1718,29 @@ gen_stmt = function(ctx, nid)
         local es = n.data[2]
         local el = n.data[3]
 
+        -- Same multi-return spread logic as LOCAL_STMT.
         local rhs_tys = {} --[[: V5Type[] ]]
-        for i = es, es + el - 1 do
-            local enid = ctx.lists:get(i)
-            rhs_tys[#rhs_tys + 1] = gen_expr(ctx, enid)
+        if el == 0 then
+            -- No RHS (malformed AST, but handle gracefully).
+        elseif el == 1 then
+            local enid = ctx.lists:get(es)
+            local spread = gen_expr_multi(ctx, enid, tl)
+            for si = 1, #spread do
+                rhs_tys[si] = spread[si]
+            end
+        else
+            local used = el - 1
+            for i = es, es + el - 2 do
+                local enid = ctx.lists:get(i)
+                rhs_tys[#rhs_tys + 1] = gen_expr(ctx, enid)
+            end
+            local remaining = tl - used
+            if remaining < 1 then remaining = 1 end
+            local last_enid = ctx.lists:get(es + el - 1)
+            local spread = gen_expr_multi(ctx, last_enid, remaining)
+            for si = 1, #spread do
+                rhs_tys[#rhs_tys + 1] = spread[si]
+            end
         end
 
         for i = 0, tl - 1 do
@@ -1524,16 +1774,27 @@ gen_stmt = function(ctx, nid)
         local rs = n.data[0]
         local rl = n.data[1]
         if rl == 0 then
-            ctx.return_stack[#ctx.return_stack + 1] = T_NIL
+            -- Bare return → positional tuple with nil in slot 1.
+            local ret_list = {} --[[: V5Type[] ]]
+            ret_list[1] = T_NIL
+            ctx.return_stack[#ctx.return_stack + 1] = ret_list
         elseif rl == 1 then
+            -- Single expression: gen as-is; wrap in a list.
             local ret_ty = gen_expr(ctx, ctx.lists:get(rs))
-            ctx.return_stack[#ctx.return_stack + 1] = ret_ty
+            local ret_list = {} --[[: V5Type[] ]]
+            ret_list[1] = ret_ty
+            ctx.return_stack[#ctx.return_stack + 1] = ret_list
         else
-            local parts = {} --[[: V5Type[] ]]
+            -- Multiple expressions: collect types positionally.
+            -- Lua semantics: only the last expression may expand multi-return.
+            -- Approximation: the last expression is truncated to its first value
+            -- (gen_expr takes field "1" of a call return). Full last-position
+            -- expansion deferred — see docs/v5-gaps.md "return-last-spread".
+            local ret_list = {} --[[: V5Type[] ]]
             for i = rs, rs + rl - 1 do
-                parts[#parts + 1] = gen_expr(ctx, ctx.lists:get(i))
+                ret_list[#ret_list + 1] = gen_expr(ctx, ctx.lists:get(i))
             end
-            ctx.return_stack[#ctx.return_stack + 1] = types_mod.union(parts)
+            ctx.return_stack[#ctx.return_stack + 1] = ret_list
         end
         return
     end

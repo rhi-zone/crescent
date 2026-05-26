@@ -436,17 +436,22 @@ function M.rule_T_CSub_Record_Width(st, a, b, prov)
 	local b_pos = is_positional(db)
 	if a_pos and b_pos then
 		-- Positional covariant branch (Arrow returns).
-		-- Nil-pad policy: shorter side padded with Const("nil") so sub is
-		-- always valid regardless of which side is wider.
+		-- Nil-pad policy: only iterate up to nb (supertype's field count).
+		--   - Slots 1..min(na,nb): sub(a.fields[i], b.fields[i]) — covariant.
+		--   - Slots na+1..nb: a's missing slots nil-padded; sub(nil, b.fields[i]).
+		--   - Slots nb+1..na: truncation — b does not require them; skip.
+		-- This matches Lua multi-return semantics: extra callee returns are
+		-- silently discarded when fewer LHS slots are requested.
 		local na, nb = 0, 0
 		for _ in pairs(da.fields) do na = na + 1 end
 		for _ in pairs(db.fields) do nb = nb + 1 end
-		local n = na > nb and na or nb
 		local nil_type = types_mod.const("nil")
-		for i = 1, n do
+		for i = 1, nb do
 			local va = da.fields[tostring(i)] or nil_type
-			local vb = db.fields[tostring(i)] or nil_type
-			emit(st, constraint_mod.sub(va, vb, prov))
+			local vb = db.fields[tostring(i)]
+			if vb ~= nil then
+				emit(st, constraint_mod.sub(va, vb, prov))
+			end
 		end
 		return
 	end

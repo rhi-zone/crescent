@@ -158,6 +158,43 @@ T.describe("v5 constrain", function()
         T.ok(count_tag(cs, "csub") >= 1, "at least one csub")
     end)
 
+    -- ── Multi-return tuple tests ──────────────────────────────────────────────
+
+    T.it("multi-assign from call emits csub with 2-slot expected arrow", function()
+        -- local a, b = f() where f is a prior binding.
+        -- gen_expr_multi(f_call_nid, 2) emits arrow([], [u1, u2]) csub.
+        local src = "local f = nil; local a, b = f()"
+        local cs, errs = generate(src)
+        T.eq(#errs, 0, "no errors")
+        -- Expect at least one csub whose b (expected arrow) has 2-slot ret.
+        local found2 = any(cs, function(c)
+            if c.tag ~= "csub" then return false end
+            local b = c.b
+            if b == nil or b.tag ~= "arrow" then return false end
+            local ret = b.ret
+            if ret == nil or ret.tag ~= "record" then return false end
+            return ret.fields["2"] ~= nil
+        end)
+        T.ok(found2, "csub with 2-slot expected arrow ret found")
+    end)
+
+    T.it("single-assign from call emits csub with 1-slot expected arrow", function()
+        -- local a = f() — single LHS, single expected slot.
+        local src = "local f = nil; local a = f()"
+        local cs, errs = generate(src)
+        T.eq(#errs, 0, "no errors")
+        -- Expect a csub with a 1-slot expected arrow (no field "2").
+        local found1 = any(cs, function(c)
+            if c.tag ~= "csub" then return false end
+            local b = c.b
+            if b == nil or b.tag ~= "arrow" then return false end
+            local ret = b.ret
+            if ret == nil or ret.tag ~= "record" then return false end
+            return ret.fields["1"] ~= nil and ret.fields["2"] == nil
+        end)
+        T.ok(found1, "csub with 1-slot expected arrow ret found")
+    end)
+
 end)
 
 -- ── Effect propagation tests ──────────────────────────────────────────────────
