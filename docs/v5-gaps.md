@@ -22,7 +22,7 @@ or commit SHA where surfaced), category.
 
 ### High impact
 
-- [ ] **P6** `[gen-pass]` Binary and unary operators emit fresh uvar instead of arithmetic/logical constraints — lib/type/static-v5/constrain.lua:38
+- [x] **P6** `[gen-pass]` Binary and unary operators emit fresh uvar instead of arithmetic/logical constraints — lib/type/static-v5/constrain.lua:38 — closed 56af6204 (arithmetic/comparison/concat/logical/unary all constrain operands and return typed results; arithmetic approximated to number, integer refinement deferred)
 - [ ] **P6** `[gen-pass]` for-in and for-num loop variables bound to `unknown` — lib/type/static-v5/constrain.lua:39
 - [ ] **P6** `[gen-pass]` Multi-return tuple types use union as approximation instead of proper tuple constraints — lib/type/static-v5/constrain.lua:42
 - [ ] **P6** `[gen-pass]` Method dispatch edge cases beyond simple `obj:method(...)` not modelled — lib/type/static-v5/constrain.lua:37
