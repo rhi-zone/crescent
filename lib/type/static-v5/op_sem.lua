@@ -91,7 +91,7 @@ M.variance    = variance_mod
 -- State
 -- ────────────────────────────────────────────────────────────────────────────
 
---:: ErrorDetails = { tag: "const_mismatch", a_name: string, b_name: string } | { tag: "missing_field", field: string } | { tag: "extra_field", field: string } | { tag: "effect_not_permitted", effect: V5Type, container: V5Type | nil } | { tag: "kind_mismatch", a_tag: string, b_tag: string } | { tag: "no_matching_branch", value_ty: V5Type, union_ty: V5Type } | { tag: "arrow_arity_mismatch", expected: integer, got: integer } | { tag: "record_arity_mismatch", expected: integer, got: integer } | { tag: "head_mismatch", a_name: string, b_name: string } | { tag: "closed_extend", field: string } | { tag: "row_already_contains", field: string }
+--:: ErrorDetails = { tag: "const_mismatch", a_name: string, b_name: string } | { tag: "missing_field", field: string } | { tag: "extra_field", field: string } | { tag: "effect_not_permitted", effect: V5Type, container: V5Type | nil } | { tag: "kind_mismatch", a_tag: string, b_tag: string } | { tag: "no_matching_branch", value_ty: V5Type, union_ty: V5Type } | { tag: "arrow_arity_mismatch", expected: integer, got: integer } | { tag: "record_arity_mismatch", expected: integer, got: integer } | { tag: "head_mismatch", a_name: string, b_name: string } | { tag: "closed_extend", field: string } | { tag: "row_already_contains", field: string } | { tag: "occurs_check", a_name: string } | { tag: "intersection_arity_mismatch", expected: integer, got: integer } | { tag: "all_parts_unresolved" } | { tag: "sealed_field_set", field: string } | { tag: "missing_method", method: string } | { tag: "not_a_record", found_tag: string } | { tag: "ambiguous_constructor" } | { tag: "hkt_arity_mismatch", expected: integer, got: integer }
 --:: OpSemError = { rule: string, msg: string, prov: Provenance | nil, details: ErrorDetails | nil }
 --:: OpSemTrace = { rule: string, msg: string }
 --:: OpSemState = { subst: Subst, worklist: OpSemConstraint[], head: integer, tail: integer, inert: { [integer]: OpSemConstraint }, errors: OpSemError[], trace: OpSemTrace[], reactivations: integer, steps: integer, row_watchers: { [integer]: { [integer]: boolean } }, upper_bounds: { [integer]: V5Type[] }, lower_bounds: { [integer]: V5Type[] } }
@@ -310,7 +310,9 @@ end
 -- T-CEq-UU: both sides UVar.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CEq_UU(st, a, b, prov)
+	-- internal: dispatcher guarantees both are uvar; fires only on solver bug
 	if a.tag ~= "uvar" then err(st, "T-CEq-UU", "precondition a must be uvar"); return "error" end
+	-- internal: dispatcher guarantees both are uvar; fires only on solver bug
 	if b.tag ~= "uvar" then err(st, "T-CEq-UU", "precondition b must be uvar"); return "error" end
 	if a.id == b.id then trace(st, "T-CEq-UU", "refl"); return "done" end
 	local _w, loser = subst_mod.union(st.subst, a.id, b.id)
@@ -322,13 +324,16 @@ end
 -- T-CEq-Bind-L.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CEq_Bind_L(st, a, b, prov)
+	-- internal: dispatcher routes here only when a=uvar; fires only on solver bug
 	if a.tag ~= "uvar" then err(st, "T-CEq-Bind-L", "precondition a must be uvar"); return "error" end
+	-- internal: dispatcher routes here only when b is concrete; fires only on solver bug
 	if b.tag == "uvar" then err(st, "T-CEq-Bind-L", "precondition b must be concrete"); return "error" end
 	local seen = {} --[[: { [integer]: boolean } ]]
 	types_mod.collect_uvars(b, seen)
 	local root = subst_mod.find(st.subst, a.id)
 	if seen[root] == true then
-		err(st, "T-CEq-Occurs", "occurs check failed")
+		err(st, "T-CEq-Occurs", "occurs check failed",
+			prov, { tag = "occurs_check", a_name = tostring(a.id) })
 		return "error"
 	end
 	if subst_mod.bind(st.subst, a.id, b) then
@@ -348,6 +353,7 @@ end
 -- T-CEq-Const.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CEq_Const(st, a, b, prov)
+	-- internal: dispatcher routes here only when both are const; fires only on solver bug
 	if a.tag ~= "const" or b.tag ~= "const" then
 		err(st, "T-CEq-Const", "precondition: both const"); return "error"
 	end
@@ -363,6 +369,7 @@ end
 -- T-CEq-Arrow.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CEq_Arrow(st, a, b, prov)
+	-- internal: dispatcher routes here only when both are arrow; fires only on solver bug
 	if a.tag ~= "arrow" or b.tag ~= "arrow" then
 		err(st, "T-CEq-Arrow", "precondition: both arrow"); return "error"
 	end
@@ -399,6 +406,7 @@ end
 --           named/mixed    -> existing invariant domain-equality check.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CEq_Record(st, a, b, prov)
+	-- internal: dispatcher routes here only when both are record; fires only on solver bug
 	if a.tag ~= "record" or b.tag ~= "record" then
 		err(st, "T-CEq-Record", "precondition: both record"); return "error"
 	end
@@ -448,6 +456,7 @@ end
 -- T-CEq-App.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CEq_App(st, a, b, prov)
+	-- internal: dispatcher routes here only when both are app; fires only on solver bug
 	if a.tag ~= "app" then err(st, "T-CEq-App", "precondition: a app"); return "error" end
 	if b.tag ~= "app" then err(st, "T-CEq-App", "precondition: b app"); return "error" end
 	local af = a.f --[[: V5Type ]]
@@ -494,6 +503,7 @@ end
 -- T-CSub-Refl.  Same type both sides under deref.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CSub_Refl(st, a, b, prov)
+	-- internal: dispatcher calls this only after equal() returns true; fires only on solver bug
 	if not types_mod.equal(a, b) then
 		err(st, "T-CSub-Refl", "precondition: types equal"); return "error"
 	end
@@ -534,6 +544,7 @@ end
 -- T-CSub-Arrow.  Contra in args, co in rets.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CSub_Arrow(st, a, b, prov)
+	-- internal: dispatcher routes here only when both are arrow; fires only on solver bug
 	if a.tag ~= "arrow" or b.tag ~= "arrow" then
 		err(st, "T-CSub-Arrow", "precondition: both arrow"); return "error"
 	end
@@ -558,6 +569,7 @@ end
 -- T-CSub-Const-Var.  Two same-named Consts; degenerate (no params on AST).
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CSub_Const_Var(st, a, b, prov)
+	-- internal: dispatcher routes here only when both are const; fires only on solver bug
 	if a.tag ~= "const" or b.tag ~= "const" then
 		err(st, "T-CSub-Const-Var", "precondition: both const"); return "error"
 	end
@@ -633,6 +645,7 @@ end
 -- T-CSub-App-Struct.  Non-Const head fallback: decompose under invariance.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CSub_App_Struct(st, a, b, prov)
+	-- internal: dispatcher routes here only when both are app; fires only on solver bug
 	if a.tag ~= "app" or b.tag ~= "app" then
 		err(st, "T-CSub-App-Struct", "precondition: both app"); return "error"
 	end
@@ -648,6 +661,7 @@ end
 --           policy; named/mixed -> existing invariant domain check.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CSub_Record_Width(st, a, b, prov)
+	-- internal: dispatcher routes here only when both are record; fires only on solver bug
 	if a.tag ~= "record" or b.tag ~= "record" then
 		err(st, "T-CSub-Record-Width", "precondition: both record"); return "error"
 	end
@@ -692,6 +706,7 @@ end
 -- T-CSub-Union-L.  LHS is union: each branch subtypes RHS.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CSub_Union_L(st, a, b, prov)
+	-- internal: dispatcher routes here only when a=union; fires only on solver bug
 	if a.tag ~= "union" then
 		err(st, "T-CSub-Union-L", "precondition: a union"); return "error"
 	end
@@ -707,6 +722,7 @@ end
 -- v5.0 simplification (no backtracking search).
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CSub_Union_R(st, a, b, prov)
+	-- internal: dispatcher routes here only when b=union; fires only on solver bug
 	if b.tag ~= "union" then
 		err(st, "T-CSub-Union-R", "precondition: b union"); return "error"
 	end
@@ -865,7 +881,8 @@ function M.rule_T_CIntersectionEq_Canonical(st, parts_a, parts_b, prov)
 	if #ca ~= #cb then
 		err(st, "T-CIntersectionEq-Canonical",
 			"intersection arity mismatch after canonicalization: " ..
-			tostring(#ca) .. " vs " .. tostring(#cb))
+			tostring(#ca) .. " vs " .. tostring(#cb),
+			prov, { tag = "intersection_arity_mismatch", expected = #cb, got = #ca })
 		return "error"
 	end
 	for i = 1, #ca do
@@ -904,7 +921,8 @@ function M.rule_T_CSub_Intersection_Decomp(st, parts_lhs, rhs, prov)
 		end
 	end
 	err(st, "T-CSub-Intersection-Decomp",
-		"all LHS intersection parts are uvars; no disjunctive scheduler in v5.0")
+		"all LHS intersection parts are uvars; no disjunctive scheduler in v5.0",
+		prov, { tag = "all_parts_unresolved" })
 	return "error"
 end
 
@@ -992,9 +1010,11 @@ end
 function M.rule_T_CTSet_Open_Extend(st, tv, key, ty, prov)
 	local r = subst_mod.find(st.subst, tv)
 	local b = subst_mod.binding(st.subst, r)
+	-- internal: dispatcher routes here after confirming binding present; fires only on solver bug
 	if b == nil then
 		err(st, "T-CTSet-Open-Extend", "precondition: tv bound"); return "error"
 	end
+	-- internal: dispatcher routes here after confirming record type; fires only on solver bug
 	if b.tag ~= "record" then
 		err(st, "T-CTSet-Open-Extend", "precondition: tv bound to record"); return "error"
 	end
@@ -1009,9 +1029,12 @@ end
 function M.rule_T_CTSet_Open_Equate(st, tv, key, ty, prov)
 	local r = subst_mod.find(st.subst, tv)
 	local b = subst_mod.binding(st.subst, r)
+	-- internal: dispatcher routes here after confirming binding present; fires only on solver bug
 	if b == nil then err(st, "T-CTSet-Open-Equate", "precondition: tv bound"); return "error" end
+	-- internal: dispatcher routes here after confirming record type; fires only on solver bug
 	if b.tag ~= "record" then err(st, "T-CTSet-Open-Equate", "precondition: record"); return "error" end
 	local existing = b.fields[key]
+	-- internal: dispatcher routes here after confirming field present; fires only on solver bug
 	if existing == nil then err(st, "T-CTSet-Open-Equate", "precondition: field present"); return "error" end
 	M.emit(st, constraint_mod.eq(existing, ty, prov))
 	trace(st, "T-CTSet-Open-Equate", key)
@@ -1021,7 +1044,8 @@ end
 -- T-CTSet-Sealed-Reject.
 --: (OpSemState, integer, string, V5Type, Provenance) -> string
 function M.rule_T_CTSet_Sealed_Reject(st, tv, key, ty, prov)
-	err(st, "T-CTSet-Sealed-Reject", "set " .. key .. " on sealed table (tv=" .. tostring(tv) .. ")")
+	err(st, "T-CTSet-Sealed-Reject", "set " .. key .. " on sealed table (tv=" .. tostring(tv) .. ")",
+		prov, { tag = "sealed_field_set", field = key })
 	return "error"
 end
 
@@ -1037,6 +1061,7 @@ local function step_tset(st, c)
 	if b == nil then
 		return M.rule_T_CTSet_Open_Fresh(st, c.tv, c.key, c.ty, c.prov)
 	end
+	-- internal: binding is present but not a record; indicates a solver invariant violation
 	if b.tag ~= "record" then
 		err(st, "T-CTSet", "tv bound to non-record"); return "error"
 	end
@@ -1071,13 +1096,18 @@ end
 function M.rule_T_CMCall_Sealed_Field(st, tv, key, ret, prov)
 	local r = subst_mod.find(st.subst, tv)
 	local b = subst_mod.binding(st.subst, r)
+	-- internal: step_mcall routes here after confirming sealed+bound; fires only on solver bug
 	if b == nil then err(st, "T-CMCall-Sealed-Field", "precondition: bound"); return "error" end
+	-- internal: step_mcall routes here after confirming record; fires only on solver bug
 	if b.tag ~= "record" then err(st, "T-CMCall-Sealed-Field", "precondition: record"); return "error" end
 	local mraw = b.fields[key]
+	-- internal: step_mcall routes here after confirming field exists; fires only on solver bug
 	if mraw == nil then err(st, "T-CMCall-Sealed-Field", "precondition: field present"); return "error" end
 	local m = mraw --[[: V5Type ]]
+	-- internal: field found but is not callable (type inconsistency); fires only on solver bug
 	if m.tag ~= "arrow" then err(st, "T-CMCall-Sealed-Field", "field is not callable"); return "error" end
 	local r1raw = m.ret.fields["1"]
+	-- internal: arrow has no return slots; fires only on solver bug
 	if r1raw == nil then err(st, "T-CMCall-Sealed-Field", "arrow with zero rets"); return "error" end
 	local r1 = r1raw --[[: V5Type ]]
 	local lhs = types_mod.uvar(ret) --[[: V5Type ]]
@@ -1089,7 +1119,8 @@ end
 -- T-CMCall-Sealed-Missing.
 --: (OpSemState, integer, string, integer, Provenance) -> string
 function M.rule_T_CMCall_Sealed_Missing(st, tv, key, ret, prov)
-	err(st, "T-CMCall-Sealed-Missing", "no method " .. key)
+	err(st, "T-CMCall-Sealed-Missing", "no method " .. key,
+		prov, { tag = "missing_method", method = key })
 	return "error"
 end
 
@@ -1102,7 +1133,9 @@ local function step_mcall(st, c)
 		return M.rule_T_CMCall_Open_Stuck(st, c.tv, c.key, c.ret, c.prov)
 	end
 	local b = subst_mod.binding(st.subst, r)
+	-- internal: phase=sealed but tv has no binding; fires only on solver bug
 	if b == nil then err(st, "T-CMCall", "sealed tv unbound"); return "error" end
+	-- internal: binding is not a record; fires only on solver bug
 	if b.tag ~= "record" then err(st, "T-CMCall", "sealed tv not a record"); return "error" end
 	if b.fields[c.key] == nil then
 		return M.rule_T_CMCall_Sealed_Missing(st, c.tv, c.key, c.ret, c.prov)
@@ -1143,7 +1176,9 @@ end
 -- T-CRowExtend-Bind: record has an open row var → add key to fields and keep row open.
 --: (OpSemState, V5Type, V5Type, string, V5Type, Provenance) -> string
 function M.rule_T_CRowExtend_Bind(st, _rec_ty, rec, key, field_ty, _prov)
+	-- internal: caller deref_to_record already confirmed record; fires only on solver bug
 	if rec.tag ~= "record" then err(st, "T-CRowExtend-Bind", "precondition: record"); return "error" end
+	-- internal: dispatcher routes here only for open-row case; fires only on solver bug
 	if rec.row == nil then err(st, "T-CRowExtend-Bind", "precondition: open row"); return "error" end
 	-- Mutate field into the record (monotone extension — no overwrite).
 	rec.fields[key] = field_ty
@@ -1154,8 +1189,10 @@ end
 -- T-CRowExtend-Lookup: record already has the key → emit CEq(existing, field_ty).
 --: (OpSemState, V5Type, V5Type, string, V5Type, Provenance) -> string
 function M.rule_T_CRowExtend_Lookup(st, _rec_ty, rec, key, field_ty, prov)
+	-- internal: caller deref_to_record already confirmed record; fires only on solver bug
 	if rec.tag ~= "record" then err(st, "T-CRowExtend-Lookup", "precondition: record"); return "error" end
 	local existing = rec.fields[key]
+	-- internal: dispatcher routes here only when key already present; fires only on solver bug
 	if existing == nil then err(st, "T-CRowExtend-Lookup", "precondition: key present"); return "error" end
 	M.emit(st, constraint_mod.eq(existing, field_ty, prov))
 	trace(st, "T-CRowExtend-Lookup", "equated " .. key)
@@ -1165,6 +1202,7 @@ end
 -- T-CRowExtend-Closed: closed record missing key → ERROR.
 --: (OpSemState, V5Type, V5Type, string, V5Type, Provenance) -> string
 function M.rule_T_CRowExtend_Closed(st, _rec_ty, rec, key, _field_ty, prov)
+	-- internal: caller deref_to_record already confirmed record; fires only on solver bug
 	if rec.tag ~= "record" then err(st, "T-CRowExtend-Closed", "precondition: record"); return "error" end
 	err(st, "T-CRowExtend-Closed", "closed record cannot extend: key=" .. key,
 		prov, { tag = "closed_extend", field = key })
@@ -1180,7 +1218,8 @@ local function step_crow_extend(st, record_ty, key, field_ty, prov)
 	end
 	if rec == nil then
 		local tag = subst_mod.deref(st.subst, record_ty).tag
-		err(st, "T-CRowExtend", "record_ty is not a record: tag=" .. tag)
+		err(st, "T-CRowExtend", "record_ty is not a record: tag=" .. tag,
+			prov, { tag = "not_a_record", found_tag = tag })
 		return "error"
 	end
 	-- Dispatch on row state.
@@ -1202,6 +1241,7 @@ end
 --: (OpSemState, V5Type, V5Type, string, Provenance) -> string
 function M.rule_T_CRowLacks_Open(st, _rec_ty, rec, key, _prov)
 	local rrow = rec.row
+	-- internal: dispatcher routes here only when row is open; fires only on solver bug
 	if rrow == nil then err(st, "T-CRowLacks-Open", "precondition: open row"); return "error" end
 	trace(st, "T-CRowLacks-Open", "park on rowvar " .. rrow.id .. " key=" .. key)
 	return "stuck"
@@ -1227,7 +1267,9 @@ local function step_crow_lacks(st, record_ty, key, prov)
 	local rec, stuck = deref_to_record(st, record_ty)
 	if stuck then return "stuck" end
 	if rec == nil then
-		err(st, "T-CRowLacks", "record_ty is not a record")
+		local tag2 = subst_mod.deref(st.subst, record_ty).tag
+		err(st, "T-CRowLacks", "record_ty is not a record",
+			prov, { tag = "not_a_record", found_tag = tag2 })
 		return "error"
 	end
 	if rec.row ~= nil then
@@ -1248,7 +1290,9 @@ function M.rule_T_CRowClose_Bind(st, record_ty, prov)
 	local rec, stuck = deref_to_record(st, record_ty)
 	if stuck then return "stuck" end
 	if rec == nil then
-		err(st, "T-CRowClose-Bind", "record_ty is not a record")
+		local tag3 = subst_mod.deref(st.subst, record_ty).tag
+		err(st, "T-CRowClose-Bind", "record_ty is not a record",
+			prov, { tag = "not_a_record", found_tag = tag3 })
 		return "error"
 	end
 	-- Capture row-var id before closing (needed to wake watchers).
@@ -1465,17 +1509,20 @@ end
 --: (OpSemState, V5Type, V5Type[], V5Type, Provenance) -> string
 function M.rule_T_CHKT_Reduce(st, f, args, result, prov)
 	local df = subst_mod.deref(st.subst, f) --[[: V5Type ]]
+	-- internal: dispatcher routes here only when f deref to lambda; fires only on solver bug
 	if df.tag ~= "lambda" then
 		err(st, "T-CHKT-Reduce", "precondition: f deref to lambda")
 		return "error"
 	end
 	local body = df --[[: V5Type ]]
 	for i = 1, #args do
+		-- internal: lambda binder count must match arg count; fires only on solver bug
 		if body.tag ~= "lambda" then
 			err(st, "T-CHKT-Reduce", "arity mismatch: not enough lambda binders for " .. tostring(#args) .. " args")
 			return "error"
 		end
 		local a = args[i]
+		-- internal: args array contains nil; fires only on solver bug
 		if a == nil then
 			err(st, "T-CHKT-Reduce", "nil arg at " .. tostring(i))
 			return "error"
@@ -1492,7 +1539,8 @@ end
 --: (OpSemState, V5Type, V5Type[], V5Type, Provenance) -> string
 function M.rule_T_CHKT_Rigid_Mismatch(st, f, args, result, prov)
 	local df = subst_mod.deref(st.subst, f) --[[: V5Type ]]
-	err(st, "T-CHKT-Rigid-Mismatch", "HKT application on non-constructor: tag=" .. df.tag)
+	err(st, "T-CHKT-Rigid-Mismatch", "HKT application on non-constructor: tag=" .. df.tag,
+		prov, { tag = "not_a_record", found_tag = df.tag })
 	return "error"
 end
 
@@ -1518,7 +1566,8 @@ end
 --: (OpSemState, OpSemConstraint) -> nil
 function M.rule_T_HOUnify_Stuck(st, c)
 	err(st, "T-HOUnify-Stuck",
-		"ambiguous constructor variable: head shape never rigidified")
+		"ambiguous constructor variable: head shape never rigidified",
+		c.prov, { tag = "ambiguous_constructor" })
 end
 
 -- CHKT dispatch.  Decides which CHKT rule applies.
@@ -1603,6 +1652,7 @@ function M.step(st, c)
 	if c.tag == "cint_member" then
 		return M.rule_T_CIntersectionMember_Direct(st, c.ty, c.part, c.prov)
 	end
+	-- internal: constraint tag not recognized by dispatcher; fires only on solver bug
 	err(st, "step", "unknown constraint tag " .. tostring(c.tag))
 	return "error"
 end
@@ -1673,6 +1723,7 @@ function M.run(st)
 			--: V5Type | nil
 			local cc_b = as_v5type(cc_b_raw)
 			if cc_a == nil or cc_b == nil or cc_p_raw == nil then
+				-- internal: csub constraint missing required fields; fires only on solver bug
 				err(st, "S-Quiesce", "csub missing fields (tag=csub)")
 			else
 				local ra2 = subst_mod.deref(st.subst, cc_a) --[[: V5Type ]]
@@ -1723,11 +1774,13 @@ function M.run(st)
 					-- passes are needed); retry the sub constraint.
 					local status = step_csub(st, ra2, rb2, prov2)
 					if status == "stuck" then
-						err(st, "S-Quiesce", "stuck constraint (tag=csub) after quiescence retry")
+						-- internal: constraint still stuck after retry; fires only on solver bug
+					err(st, "S-Quiesce", "stuck constraint (tag=csub) after quiescence retry")
 					end
 				end
 			end
 		else
+			-- internal: unknown constraint tag still stuck at quiescence; fires only on solver bug
 			err(st, "S-Quiesce", "stuck constraint (tag=" .. c.tag .. ")")
 		end
 	end
@@ -1740,6 +1793,7 @@ function M.run(st)
 		if c2 ~= nil then
 			local status = M.step(st, c2)
 			if status == "stuck" then
+				-- internal: constraint emitted by S-Quiesce defaulting is still stuck; fires only on solver bug
 				err(st, "S-Quiesce-Drain", "constraint still stuck after quiescence drain (tag=" .. c2.tag .. ")")
 			end
 		end

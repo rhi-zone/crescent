@@ -1,0 +1,1 @@
+function annotated as pure cannot perform effect `!io`

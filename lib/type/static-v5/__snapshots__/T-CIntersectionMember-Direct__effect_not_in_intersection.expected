@@ -1,0 +1,3 @@
+f2_missing_throw.lua:2:25: error: function's annotation does not permit effect `!throw<string>`; annotation effects: `!io & nil`
+  2 | local function f() error('boom') end
+                              ^

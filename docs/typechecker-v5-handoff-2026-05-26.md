@@ -231,6 +231,14 @@ Mining, missed-gen eval, circular require corpus check, property-based parity.
 **Prereqs**: op-sem foundation hardened (now is the time).
 **Cycles**: 1-2.
 
+### Option E: Error quality Phase G (CLOSED 2026-05-26)
+
+G1 (71c56f56): column threading through Provenance.
+G2 (00d109e9): structured `details` ADT + `error_format.lua` delegating to v4's formatter; 14 user-facing rules converted.
+G3 (this commit): 21 snapshot fixtures committed; 10 additional rules converted; ~35 marked `-- internal:`; deterministic `show()` sort; unified `effect_not_permitted` prose.
+
+v5 errors now meet v4's minimum bar: `path:line:col: error: prose` + source snippet with caret + ANSI on TTY.
+
 ### Recommended order (orchestrator suggestion)
 
 1. **A** (Gap P5) — small wins; each surface form is independent

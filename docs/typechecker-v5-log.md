@@ -11,6 +11,58 @@ Append-only. One entry per session, decision, or experiment.
 
 ---
 
+## 2026-05-26 — Phase G: error message quality to v4 minimum bar
+
+### Question entering session
+
+v5 errors were raw rule-name + low-level detail: `file.lua: [T-CIntersectionMember-Direct] ty is neither intersection nor equal to part (tag=const)`. The user set the floor explicitly: v4-style messages are the minimum bar (path:line:col, prose, source snippet + caret, ANSI on TTY). G1–G3 deliver that.
+
+### Evidence
+
+**Three commits (G1–G3):**
+
+| Phase | Commit | Description |
+|---|---|---|
+| G1 — column threading | `71c56f56` | Thread `col` through `Provenance`; `prov_inferred`/`prov_declared` accept `n.col`. |
+| G2 — structured errors + formatter | `00d109e9` | `ErrorDetails` ADT on `OpSemError`; `error_format.lua` delegates to v4's `format_plain`/`format_ansi`; 14 user-facing rules converted. |
+| G3 — snapshots + classification | this commit | Snapshot test file with 21 fixtures; remaining rules classified: 10 newly user-facing converted, ~35 marked `-- internal:`. Deterministic `show()` ordering for union/intersection. Unified `effect_not_permitted` prose (no more `container: nil`). |
+
+**Before (G1–G2 baseline):**
+```
+demo_effects.lua: [T-CIntersectionMember-Direct] ty is neither intersection nor equal to part (tag=const)
+```
+
+**After (G3):**
+```
+f2_io_write.lua:2:28: error: function annotated as pure cannot perform effect `!io`
+  2 | local function f() io.write('x') end
+                                 ^
+```
+
+**v4 delegate decision:** `format_plain`/`format_ansi` in `lib/type/static/errors.lua` take plain Lua table shapes with no v4-FFI dependencies. Delegating costs ~5 lines; porting would duplicate ~150 lines. Delegate.
+
+**Test count:** 541 assertions (7 test files, all pass). Op-sem parity 275/275. 21 snapshot fixtures committed under `lib/type/static-v5/__snapshots__/`.
+
+### Decisions closed
+
+- **Error quality floor**: CLOSED. v5 errors now meet v4's minimum bar surface on user-facing rules.
+- **Snapshot regression surface**: CLOSED. Message changes are caught by CI from this commit forward.
+
+### Decisions still open
+
+- Error format for LSP/JSON output (out of scope for G-cycle).
+- Multi-error de-duplication / related-diagnostic notes (out of scope).
+
+### Tainted artifacts
+
+None.
+
+### Next entry point
+
+Option A (Gap P5: ann surface forms), Option B (Gap P6: closure/method dispatch) — see handoff doc §8.
+
+---
+
 ## 2026-05-26 — Phase 5.F: four gap closures, source pipeline genuinely enforces
 
 ### Question entering session

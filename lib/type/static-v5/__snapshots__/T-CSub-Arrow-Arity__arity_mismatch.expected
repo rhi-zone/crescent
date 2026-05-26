@@ -1,0 +1,3 @@
+arity_mismatch.lua:2:1: error: function expects 2 arguments, got 1
+  2 | local function f(x) return x end
+      ^^^^^

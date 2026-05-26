@@ -68,6 +68,7 @@ local function show(ty)
         if xs ~= nil then
             for i = 1, #xs do parts[i] = show(xs[i]) end
         end
+        table.sort(parts)
         return table.concat(parts, " | ")
     elseif tag == "intersection" then
         local pts = ty.parts
@@ -75,6 +76,7 @@ local function show(ty)
         if pts ~= nil then
             for i = 1, #pts do parts[i] = show(pts[i]) end
         end
+        table.sort(parts)
         return table.concat(parts, " & ")
     elseif tag == "app" then
         return show(ty.f) .. "<" .. show(ty.a) .. ">"
@@ -115,11 +117,18 @@ function M.render_prose(rule, details, fallback_msg)
         return "unexpected field `" .. tostring(details.field) .. "`"
     elseif t == "effect_not_permitted" then
         local eff = show(details.effect)
-        if details.container ~= nil then
-            return "function's annotated effects do not permit `" .. eff ..
-                "`; annotated effects: `" .. show(details.container) .. "`"
+        local cont = details.container
+        if cont == nil then
+            -- Quiescence path: function has no annotation to permit the effect.
+            return "effect `" .. eff .. "` escapes from function with no annotation to permit it"
+        elseif cont.tag == "intersection" then
+            -- Annotated with an intersection (e.g. () -> nil & !io): effect missing from set.
+            return "function's annotation does not permit effect `" .. eff ..
+                "`; annotation effects: `" .. show(cont) .. "`"
+        else
+            -- Annotated as a plain non-intersection type (pure): effect forbidden.
+            return "function annotated as pure cannot perform effect `" .. eff .. "`"
         end
-        return "function annotated as pure cannot perform effect `" .. eff .. "`"
     elseif t == "kind_mismatch" then
         return "cannot use " .. tag_label(tostring(details.a_tag)) ..
             " where " .. tag_label(tostring(details.b_tag)) .. " is required"
@@ -139,6 +148,24 @@ function M.render_prose(rule, details, fallback_msg)
         return "cannot add field `" .. tostring(details.field) .. "` to a closed record"
     elseif t == "row_already_contains" then
         return "record already contains field `" .. tostring(details.field) .. "`"
+    elseif t == "occurs_check" then
+        return "circular type: type variable appears in its own definition"
+    elseif t == "intersection_arity_mismatch" then
+        return "intersection expects " .. tostring(details.expected) ..
+            " parts, got " .. tostring(details.got)
+    elseif t == "all_parts_unresolved" then
+        return "cannot determine subtype: all intersection parts are still unresolved type variables"
+    elseif t == "sealed_field_set" then
+        return "cannot assign field `" .. tostring(details.field) .. "` on a sealed value"
+    elseif t == "missing_method" then
+        return "value has no method `" .. tostring(details.method) .. "`"
+    elseif t == "not_a_record" then
+        return "expected a record type, got " .. tag_label(tostring(details.found_tag))
+    elseif t == "ambiguous_constructor" then
+        return "ambiguous type constructor: could not determine its shape from context"
+    elseif t == "hkt_arity_mismatch" then
+        return "type constructor expects " .. tostring(details.expected) ..
+            " arguments, got " .. tostring(details.got)
     end
     return "[" .. rule .. "] " .. fallback_msg
 end
