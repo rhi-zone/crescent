@@ -88,7 +88,7 @@ local function one_run(base_constraints, receivers_n)
 	local maybe_body = types_mod.record({ tag = string_ty, val = var0 }) --[[: V5Type ]]
 	local maybe_lambda = types_mod.lambda("*", maybe_body) --[[: V5Type ]]
 	local chkt_count = 0
-	-- TODO(G3): plumb col — bench_chkt uses synthetic provenance with no source position; all prov col=0.
+	-- col=0: bench_chkt generates fully synthetic constraints; there is no source position to thread.
 	for k = 1, receivers_n do
 		-- (a) Miller-pattern CHKT: bind ?F_k via identity-like shape.
 		local f = subst_mod.fresh(st.subst, "open")

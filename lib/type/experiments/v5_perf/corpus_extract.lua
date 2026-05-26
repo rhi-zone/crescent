@@ -71,7 +71,8 @@ local function annotation_to_type(s, a)
 end
 
 -- Extract constraints from a single line of source.  Appends to `out`.
--- TODO(G3): plumb col — process_line does text-only parsing with no column info; all prov col=0.
+-- col=0: process_line is a heuristic pattern extractor, not a real parser; gmatch iterators yield
+-- no byte offsets and multiple patterns can match per line, so there is no column to thread.
 --: (string, integer, V5Constraint[], Allocator, string) -> nil
 local function process_line(line, lineno, out, a, file)
 	-- 1. `--: T -> U` style annotation.
