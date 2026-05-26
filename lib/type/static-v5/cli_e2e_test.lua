@@ -126,6 +126,45 @@ end
         T.eq(code, 0, "exit 0 — pcall absorbs !throw")
     end)
 
+    -- 5b. 5.F2: pcall on a throwing function — outer annotated pure fn is clean.
+    --     Verifies pcall consumes !throw; outer () -> nil annotation satisfied.
+    T.it("5.F2: pcall on throwing fn in annotated pure fn is clean", function()
+        local src = [[
+--: () -> nil
+local function safe_div()
+    local ok = pcall(function()
+        error("oops")
+    end)
+    local _ = ok
+end
+]]
+        local code, _out, _err = run(src, "pcall_f2.lua")
+        T.eq(code, 0, "exit 0 — pcall consumes !throw, outer annotation satisfied")
+    end)
+
+    -- 5c. 5.F2: pcall return type is a union — can be used as unknown without error.
+    --     Test via subtyping-via-annotation: annotate ok as unknown (should pass).
+    T.it("5.F2: pcall return annotated as unknown typechecks", function()
+        local src = [[
+local function f()
+    --: unknown
+    local ok = pcall(function() end)
+    local _ = ok
+end
+]]
+        local code, _out, _err = run(src, "pcall_ret_unknown.lua")
+        T.eq(code, 0, "exit 0 — pcall return is compatible with unknown")
+    end)
+
+    -- 5d. 5.F2: !throw NOT consumed without pcall — F2 fires as before.
+    --     Verify the negative: plain error() in annotated pure fn still errors.
+    T.it("5.F2 negative: error() in annotated pure fn still triggers F2", function()
+        local src = "--: () -> nil\nlocal function f() error('x') end"
+        local code, out, _err = run(src, "f2_throw_negative.lua")
+        T.eq(code, 1, "exit 1 — error() without pcall still triggers F2")
+        T.ok(out ~= "", "error output produced")
+    end)
+
     -- 6. Mixed !throw & !io on one annotated function — both effects in
     --    annotation — typechecks clean.
     --    We exercise this by calling both io.write and error() in the body,

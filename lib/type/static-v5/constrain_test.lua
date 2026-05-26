@@ -262,14 +262,51 @@ T.describe("v5 constrain — effect propagation", function()
     end)
 
     T.it("pcall call site does NOT propagate !throw outward", function()
-        -- pcall consumes !throw from its first argument.
-        -- After pcall, no !throw should reach the outer function.
+        -- 5.F2: pcall is fully special-cased at gen time (gap #2).
+        -- The callee_ty lookup and CSub are skipped; pcall returns the
+        -- discriminated union directly with no CSub constraint emitted.
+        -- No cint_member for !throw should reach the outer function.
         local src = "pcall(function() end)"
         local cs, errs = generate(src)
         T.eq(#errs, 0, "no errors")
-        -- pcall is not in scope (unannotated generate), so callee is a uvar.
-        -- The important thing: no crash and the call site emits a csub.
-        T.ok(count_tag(cs, "csub") >= 1, "csub emitted for pcall site")
+        -- No csub emitted (pcall path skips callee CSub).
+        T.eq(count_tag(cs, "csub"), 0, "no csub emitted for pcall site (special-cased)")
+        -- No cint_member for !throw reaching outer scope.
+        T.eq(count_tag(cs, "cint_member"), 0, "no cint_member: !throw consumed by pcall")
+    end)
+
+    -- 5.F2: pcall is fully short-circuited — emits no constraints at all.
+    -- The discriminated union is returned directly as the call-site type;
+    -- no ceq, no csub needed.  End-to-end correctness is verified in cli_e2e.
+    T.it("5.F2: pcall call site emits no constraints (fully special-cased)", function()
+        local src = "local ok = pcall(function() end)"
+        local cs, errs = generate(src)
+        T.eq(#errs, 0, "no errors")
+        -- pcall path returns the discriminated union directly with no constraints.
+        T.eq(#cs, 0, "no constraints emitted for pcall call site")
+    end)
+
+    -- 5.F2: pcall does not propagate !throw even when annotated outer function.
+    T.it("5.F2: pcall in annotated pure fn — no cint_member for !throw", function()
+        -- Outer function annotated as () -> nil.  Inner throws.  After 5.F2, pcall
+        -- consumes !throw so the outer annotation is satisfied (no cint_member).
+        local src = "--: () -> nil\nlocal function f() pcall(function() error('x') end) end"
+        local decls = stdlib_mod.decls()
+        local cli_mod = require("lib.type.static-v5.cli")
+        local expanded = cli_mod.expand_dotted(decls)
+        local cs, errs = constrain.generate(src, "test.lua", { decls = expanded })
+        T.eq(#errs, 0, "no parse/annotation errors")
+        -- !throw consumed by pcall → no cint_member for !throw.
+        local found_throw_member = any(cs, function(c)
+            if c.tag ~= "cint_member" then return false end
+            local p = c.part
+            if p == nil then return false end
+            -- Walk to the effect head.
+            local head = p
+            while head.tag == "app" do head = head.f end
+            return head.tag == "const" and head.name == "!throw"
+        end)
+        T.ok(not found_throw_member, "no cint_member for !throw after pcall consumed it")
     end)
 
     T.it("stdlib_types.decls() provides io.write with !io effect in return", function()

@@ -3,9 +3,10 @@
 --
 -- Run:  bin/cr check --v5 lib/type/static-v5/fixtures/demo_effects.lua
 --
--- Expected output (after 5.F1 fix): 1 error from section 7 (deliberate F2
+-- Expected output (after 5.F2 fix): 1 error from section 7 (deliberate F2
 -- violation — annotated pure function calls io.write via dotted callee).
--- All other sections are clean.
+-- All other sections are clean, including section 4 (pcall consumes !throw
+-- from error() so the outer () -> nil annotation is satisfied).
 --
 -- Each section exercises a distinct feature of the v5 effect system.
 
@@ -28,12 +29,24 @@ local function greet_print()
     print("hello")
 end
 
--- ── 4. pcall consumes !throw ─────────────────────────────────────────────────
+-- ── 4. pcall consumes !throw (5.F2) ─────────────────────────────────────────
 -- pcall wraps a function that throws; the throw is absorbed.
+-- The outer function is annotated pure (() -> nil); after 5.F2, the !throw
+-- from error() is consumed by pcall and the annotation is satisfied.
+--: () -> nil
 local function safe_call()
     local ok = pcall(function()
         error("boom")
     end)
+    local _ = ok
+end
+
+-- ── 4b. pcall return type is the discriminated union (5.F2) ─────────────────
+-- pcall returns (true, ...) | (false, string).  The return is unioned into
+-- the single binding 'ok'; annotating as unknown passes.
+local function pcall_ret_demo()
+    --: unknown
+    local ok = pcall(function() error("e") end)
     local _ = ok
 end
 
@@ -65,6 +78,7 @@ local _ = pure_add(0)
 local _ = greet
 local _ = greet_print
 local _ = safe_call
+local _ = pcall_ret_demo
 local _ = mixed
 local _ = coro_demo
 local _ = pure_but_writes

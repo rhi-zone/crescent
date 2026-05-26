@@ -108,6 +108,12 @@ local T_NIL = types_mod.const("nil")
 local T_NUMBER = types_mod.const("number")
 --: V5Type
 local T_UNKNOWN = types_mod.const("unknown")
+--: V5Type
+local T_STRING = types_mod.const("string")
+--: V5Type
+local T_LIT_TRUE = types_mod.const("true")
+--: V5Type
+local T_LIT_FALSE = types_mod.const("false")
 
 --:: RawAnn = { kind: integer, content: string, col: integer, ... }
 
@@ -208,6 +214,131 @@ local function arrow_ret1(ty)
     if ret == nil then return nil end
     if ret.tag ~= "record" then return nil end
     return ret.fields["1"]
+end
+
+-- ── pcall discriminated-union builder ────────────────────────────────────────
+--
+-- Gap #2 (5.F2): pcall returns (true, R...) | (false, E) where E is extracted
+-- from !throw<E> in the first argument's effect intersection.  This cannot be
+-- expressed declaratively in the v5 stdlib (no match types); the gen-pass
+-- special-cases it here.
+--
+-- Given the callee arrow type of pcall's first argument:
+--   - Harvest positional return fields "1", "2", ... from arrow.ret
+--   - Extract !throw<E> from arrow.ret's effect components; E defaults to string
+--   - Build: union([{ "1"=true, "2"=R1, ... }, { "1"=false, "2"=E }])
+--
+-- When fn_ty is nil (uvar callee — function passed in, not a literal), fall back
+-- to union([{ "1"=true }, { "1"=false, "2"=string }]) — loose but safe.
+--
+-- Returns: (pcall_ret_ty, non_throw_effects) so the caller can propagate non-!throw
+-- effects from the inner function (e.g. !io inside pcall still propagates).
+--: (V5Type | nil) -> (V5Type, V5Type[])
+local function build_pcall_ret(fn_ty)
+    --: V5Type
+    local T_LIT_T = T_LIT_TRUE
+    --: V5Type
+    local T_LIT_F = T_LIT_FALSE
+    --: V5Type
+    local T_STR   = T_STRING
+
+    -- Collect non-throw effects to propagate outward.
+    --: V5Type[]
+    local non_throw_effs = {}
+
+    -- Harvest positional returns + !throw<E> from the inner arrow.
+    --: V5Type[]
+    local inner_rets = {}    -- R1, R2, ... from arg arrow
+    --: V5Type
+    local throw_err_ty = T_STR  -- E in !throw<E>; default = string
+
+    if fn_ty ~= nil and fn_ty.tag == "arrow" then
+        -- Walk positional return fields.
+        local ret_rec = fn_ty.ret
+        if ret_rec ~= nil and ret_rec.tag == "record" then
+            local i = 1
+            while true do
+                local rv = ret_rec.fields[tostring(i)]
+                if rv == nil then break end
+                -- Extract non-effect return fields as positional returns.
+                if not types_mod.is_effect(rv) then
+                    inner_rets[#inner_rets + 1] = rv
+                else
+                    -- Effect in the return intersection — harvest !throw<E>.
+                    local head = rv
+                    while head.tag == "app" do head = head.f end
+                    if head.tag == "const" and head.name == "!throw" then
+                        -- E is the first App argument: App(!throw, E).a = E.
+                        if rv.tag == "app" then
+                            --: V5Type
+                            local ev = rv.a
+                            throw_err_ty = ev
+                        end
+                        -- !throw is consumed — do NOT add to non_throw_effs.
+                    else
+                        -- Non-!throw effect: propagate outward from pcall.
+                        non_throw_effs[#non_throw_effs + 1] = rv
+                    end
+                end
+                i = i + 1
+            end
+            -- Also scan a top-level intersection (arrow ret field "1" = nil & !throw & !io).
+            local ret1 = ret_rec.fields["1"]
+            if ret1 ~= nil and ret1.tag == "intersection" then
+                -- Re-run on intersection parts; clear inner_rets accumulated above.
+                inner_rets = {}
+                local parts = ret1.parts
+                for pi = 1, #parts do
+                    local p = parts[pi]
+                    if p ~= nil then
+                        if not types_mod.is_effect(p) then
+                            inner_rets[#inner_rets + 1] = p
+                        else
+                            local head = p
+                            while head.tag == "app" do head = head.f end
+                            if head.tag == "const" and head.name == "!throw" then
+                                if p.tag == "app" then
+                                    --: V5Type
+                                    local ev2 = p.a
+                                    throw_err_ty = ev2
+                                end
+                                -- consumed
+                            else
+                                non_throw_effs[#non_throw_effs + 1] = p
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Build true-branch record: { "1"=true, "2"=R1, "3"=R2, ... }
+    -- Use tostring(n) rather than literal "1"/"2" to avoid the typechecker
+    -- treating string-literal numeric keys as positional record fields.
+    local true_fields = {} --[[: { [string]: V5Type } ]]
+    true_fields[tostring(1)] = T_LIT_T
+    for i = 1, #inner_rets do
+        local r = inner_rets[i]
+        if r ~= nil then true_fields[tostring(i + 1)] = r end
+    end
+    --: V5Type
+    local true_branch = types_mod.record(true_fields)
+
+    -- Build false-branch record: { "1"=false, "2"=E }
+    local false_fields = {} --[[: { [string]: V5Type } ]]
+    false_fields[tostring(1)] = T_LIT_F
+    false_fields[tostring(2)] = throw_err_ty
+    --: V5Type
+    local false_branch = types_mod.record(false_fields)
+
+    --: V5Type[]
+    local branches = {}
+    branches[1] = true_branch
+    branches[2] = false_branch
+    --: V5Type
+    local union_ty = types_mod.union(branches)
+    return union_ty, non_throw_effs
 end
 
 -- ── Effect scope helpers ──────────────────────────────────────────────────────
@@ -575,6 +706,28 @@ gen_expr = function(ctx, nid)
             end
         end
 
+        -- 5.F2: pcall is special-cased entirely: we skip the normal callee_ty
+        -- lookup and CSub so the stdlib pcall arrow's return type does not
+        -- conflict with the discriminated union we build directly (gap #2).
+        if is_pcall then
+            -- Inspect first arg's arrow type to build (true,R...) | (false,E).
+            -- Fall back to loose union when the arg is a uvar (function passed in).
+            --: V5Type | nil
+            local first_arg_ty = arg_types[1]
+            --: V5Type | nil
+            local inner_arrow = nil
+            if first_arg_ty ~= nil and first_arg_ty.tag == "arrow" then
+                inner_arrow = first_arg_ty
+            end
+            local pcall_ret_ty, non_throw_effs = build_pcall_ret(inner_arrow)
+            -- Propagate non-!throw effects (e.g. !io inside the pcall callback).
+            for i = 1, #non_throw_effs do
+                local e = non_throw_effs[i]
+                if e ~= nil then propagate_effect(ctx, e, n.line) end
+            end
+            return pcall_ret_ty
+        end
+
         -- Try eager resolution for dotted callees (e.g. io.write, os.exit).
         -- If the chain resolves to a concrete arrow via record-field lookup,
         -- use it directly so propagate_callee_effects can extract effects now
@@ -593,14 +746,7 @@ gen_expr = function(ctx, nid)
         emit(ctx, C.sub(callee_ty, expected_fn, prov_inferred(ctx, n.line)))
 
         -- Effect propagation.
-        if is_pcall then
-            -- pcall consumes !throw effects from its first argument function.
-            -- We do NOT propagate those effects outward; pcall handles them.
-            -- The return type carries (true, results | false, string) — represented
-            -- as a fresh uvar (full discriminated-union return requires TUnion +
-            -- positional records which the gen-pass does not yet elaborate; this
-            -- is noted in the commit message as a known gap for 5.D).
-        elseif is_coro_create then
+        if is_coro_create then
             -- coroutine.create consumes !yield from its argument function.
             -- As with pcall, the full parameterized Coroutine<Y,S,R> type requires
             -- more type elaboration than the gen-pass currently supports; the

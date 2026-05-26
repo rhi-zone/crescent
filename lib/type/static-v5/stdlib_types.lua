@@ -129,12 +129,15 @@ function M.decls()
     -- assert(val) -> val  (raises !throw<string> on failure)
     d["assert"] = effectful_fn({ T_UNKNOWN }, T_UNKNOWN, { eff_throw_str })
 
-    -- pcall(fn, ...) -> (true, result) | (false, string)
-    -- Conservative: returns unknown (full discriminated-union requires 5.D).
-    -- Syntactically special-cased in gen-pass to suppress !throw propagation.
-    -- Declared with 1 arg (the function) so the arity check in T-CSub-Arrow
-    -- matches single-arg call sites; extra args are passed through at runtime
-    -- but the v5 gen-pass does not model variadic function types.
+    -- pcall(fn, ...) -> (true, R...) | (false, E)
+    -- The gen-pass special-cases pcall (5.F2): it builds the discriminated
+    -- tuple-union at the call site by inspecting the first argument's arrow
+    -- type, extracting !throw<E>, and constructing
+    --   union([{ "1"=true, "2"=R1, ... }, { "1"=false, "2"=E }]).
+    -- !throw<E> is consumed (not propagated to the enclosing function).
+    -- The stdlib declaration here uses a conservative return (boolean | unknown)
+    -- so the stdlib arrow itself is still a valid fallback; the gen-pass
+    -- overrides the return at each call site with the precise discriminated union.
     --: V5Type
     local pcall_ret = types_mod.union({ T_BOOL, T_UNKNOWN })
     d["pcall"] = effectful_fn({ T_UNKNOWN }, pcall_ret, {})
