@@ -53,7 +53,7 @@ or commit SHA where surfaced), category.
 - [ ] **G3** `[substrate]` No eta-equivalence in Miller check — docs/typechecker-v5-handoff-2026-05-26.md §6
 - [ ] **G11** `[solver-soundness]` Union backtracking admits exact-branch only; no disjunction fallback — docs/typechecker-v5-handoff-2026-05-26.md §6
 - [ ] **5.F3-residual** `[effect-propagation]` Resume-side `S` narrowing incomplete: `coroutine.resume(co, s)` does not bind `S` from the send argument — docs/typechecker-v5-log.md Phase 5.F; handoff §9
-- [x] **5.F4-residual** `[substrate]` Compatible-bound intersection reduction not implemented: `integer & number` does not reduce to `integer` at quiescence — docs/typechecker-v5-log.md Phase 5.F; handoff §9 — closed TBD (structurally_subtype + reduce_intersection at S-Quiesce meet site; T-CSub-Const-Var integer <: number lattice rule)
+- [x] **5.F4-residual** `[substrate]` Compatible-bound intersection reduction not implemented: `integer & number` does not reduce to `integer` at quiescence — docs/typechecker-v5-log.md Phase 5.F; handoff §9 — closed 5108ceae (structurally_subtype + reduce_intersection at S-Quiesce meet site; T-CSub-Const-Var integer <: number lattice rule)
 
 ---
 
