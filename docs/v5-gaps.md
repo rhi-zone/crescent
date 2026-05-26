@@ -59,9 +59,9 @@ or commit SHA where surfaced), category.
 
 ## Closed
 
-- [x] **G14** `[solver-soundness]` T-CSub dispatch priority not formally enforced — closed this commit (12-step priority order documented in docs/type-system.md §Operational Semantics Dispatch; cites step_csub op_sem.lua:771)
-- [x] **G15** `[substrate]` T-CTSet four-way cascade order not formally enforced — closed this commit (5-branch cascade documented in docs/type-system.md §Operational Semantics Dispatch; cites step_tset op_sem.lua:1053)
-- [x] **G16** `[substrate]` T-CHKT-Reduce chain peel depth not formally specified — closed this commit (exact `#args` peel depth + 3-way step_chkt dispatch documented in docs/type-system.md §Operational Semantics Dispatch; cites op_sem.lua:1510, 1575)
+- [x] **G14** `[solver-soundness]` T-CSub dispatch priority not formally enforced — closed bad931a6 (12-step priority order documented in docs/type-system.md §Operational Semantics Dispatch; cites step_csub op_sem.lua:771)
+- [x] **G15** `[substrate]` T-CTSet four-way cascade order not formally enforced — closed bad931a6 (5-branch cascade documented in docs/type-system.md §Operational Semantics Dispatch; cites step_tset op_sem.lua:1053)
+- [x] **G16** `[substrate]` T-CHKT-Reduce chain peel depth not formally specified — closed bad931a6 (exact `#args` peel depth + 3-way step_chkt dispatch documented in docs/type-system.md §Operational Semantics Dispatch; cites op_sem.lua:1510, 1575)
 - [x] **bench-col** `[tooling]` Column threading in bench_chkt.lua and corpus_extract.lua — closed c411c827 (bench_chkt: fully synthetic constraints, no source position exists; corpus_extract: heuristic gmatch extractor with no byte-offset tracking, col=0 is correct in both cases)
 - [x] **G8** `[soundness]` CRow narrowing soundness floor — closed 7f7d4d6c, b1825484 (S-Quiesce-CRowLacks prevents silent field-existence errors; CRowClose wakes parked CRowLacks; Scenario A quiescence error and Scenario B close-then-pass both verified)
 - [x] **G9-P4** `[substrate]` Arrow subtyping CSub→CEq fallback (uvar bounds substrate) — closed 5.F4 93311447 (uvar upper bounds tracked; meet of uppers at quiescence; no more silent CEq fallback). Note: G9 T-CSub-TVar dispatch gap remains open above; P4 was the quiescence-path specific fix.
