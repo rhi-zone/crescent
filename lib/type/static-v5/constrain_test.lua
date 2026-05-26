@@ -485,3 +485,71 @@ T.describe("v5 constrain — effect propagation", function()
     end)
 
 end)
+
+-- ── Operator constraint tests ─────────────────────────────────────────────────
+
+T.describe("v5 constrain — operators", function()
+
+    -- Arithmetic: local x = 1 + 2 emits two CSub against number.
+    T.it("arithmetic + emits csub for both operands against number", function()
+        local src = "local x = 1 + 2"
+        local cs, errs = generate(src)
+        T.eq(#errs, 0, "no errors")
+        -- Two CSub: left_ty <: number, right_ty <: number.
+        T.eq(count_tag(cs, "csub"), 2, "two csub constraints (both operands)")
+        -- All csub targets should be 'number'.
+        local all_number = true
+        for _, c in ipairs(cs) do
+            if c ~= nil and c.tag == "csub" then
+                local b = c.b
+                if b == nil or b.tag ~= "const" or b.name ~= "number" then
+                    all_number = false
+                end
+            end
+        end
+        T.ok(all_number, "all csub targets are 'number'")
+    end)
+
+    -- Concatenation: local x = "a" .. "b" returns string.
+    T.it("concat .. emits csub for both operands against string|number, result string", function()
+        local src = "local x = a .. b"
+        local cs, errs = generate(src)
+        T.eq(#errs, 0, "no errors")
+        -- Two CSub: left_ty <: string|number, right_ty <: string|number.
+        T.eq(count_tag(cs, "csub"), 2, "two csub constraints for concat operands")
+    end)
+
+    -- Unary not: local x = not true — returns boolean, no constraints.
+    T.it("unary not emits no constraints and returns boolean", function()
+        local src = "local x = not true"
+        local cs, errs = generate(src)
+        T.eq(#errs, 0, "no errors")
+        T.eq(#cs, 0, "no constraints emitted for 'not true'")
+    end)
+
+    -- Length operator: local x = #s where s is a string literal.
+    T.it("length # emits no csub for string operand (no constraint on operand yet)", function()
+        local src = 'local x = #"hello"'
+        local cs, errs = generate(src)
+        T.eq(#errs, 0, "no errors")
+        -- The result type is integer; no constraint on a literal string operand.
+        T.eq(count_tag(cs, "csub"), 0, "no csub emitted for string length")
+    end)
+
+    -- Comparison: local x = (a < b) emits two csub against number.
+    T.it("comparison < emits csub for both operands and returns boolean", function()
+        local src = "local x = a < b"
+        local cs, errs = generate(src)
+        T.eq(#errs, 0, "no errors")
+        T.eq(count_tag(cs, "csub"), 2, "two csub for comparison operands")
+    end)
+
+    -- Equality: == emits no constraints on operands.
+    T.it("equality == emits no csub constraints", function()
+        local src = "local x = a == b"
+        local cs, errs = generate(src)
+        T.eq(#errs, 0, "no errors")
+        T.eq(count_tag(cs, "csub"), 0, "no csub for equality operands")
+    end)
+
+end)

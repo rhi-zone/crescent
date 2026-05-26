@@ -99,6 +99,27 @@ local FLAG_HAS_STEP  = defs.FLAG_HAS_STEP
 
 local i32x2_to_double = defs.i32x2_to_double
 
+-- ── Operator constants (from defs) ───────────────────────────────────────────
+
+local OP_ADD    = defs.OP_ADD
+local OP_SUB    = defs.OP_SUB
+local OP_MUL    = defs.OP_MUL
+local OP_DIV    = defs.OP_DIV
+local OP_MOD    = defs.OP_MOD
+local OP_POW    = defs.OP_POW
+local OP_CONCAT = defs.OP_CONCAT
+local OP_EQ     = defs.OP_EQ
+local OP_NE     = defs.OP_NE
+local OP_LT     = defs.OP_LT
+local OP_LE     = defs.OP_LE
+local OP_GT     = defs.OP_GT
+local OP_GE     = defs.OP_GE
+local OP_AND    = defs.OP_AND
+local OP_OR     = defs.OP_OR
+local OP_UNM    = defs.OP_UNM
+local OP_NOT    = defs.OP_NOT
+local OP_LEN    = defs.OP_LEN
+
 -- ── Well-known types ──────────────────────────────────────────────────────────
 -- Annotated explicitly so the checker knows these are non-nil V5Type values.
 
@@ -106,6 +127,10 @@ local i32x2_to_double = defs.i32x2_to_double
 local T_NIL = types_mod.const("nil")
 --: V5Type
 local T_NUMBER = types_mod.const("number")
+--: V5Type
+local T_INTEGER = types_mod.const("integer")
+--: V5Type
+local T_BOOLEAN = types_mod.const("boolean")
 --: V5Type
 local T_UNKNOWN = types_mod.const("unknown")
 --: V5Type
@@ -812,15 +837,103 @@ gen_expr = function(ctx, nid)
 
     -- ── Unary expression ────────────────────────────────────────────────────
     if kind == NODE_UNARY_EXPR then
-        gen_expr(ctx, n.data[1])
+        local op      = n.data[0]
+        local prov    = prov_inferred(ctx, n.line, n.col)
+        local operand = gen_expr(ctx, n.data[1])
+
+        -- not: operand any type; result boolean.
+        if op == OP_NOT then
+            return T_BOOLEAN
+        end
+
+        -- unary minus: operand must be number-compatible; result number.
+        -- TODO: refine arithmetic result type via uvar+constraints (integer operand → integer)
+        if op == OP_UNM then
+            emit(ctx, C.sub(operand, T_NUMBER, prov))
+            return T_NUMBER
+        end
+
+        -- length: operand string or table-like; result integer.
+        if op == OP_LEN then
+            -- No constraint on operand for now (table-like is not expressible
+            -- as a single closed type without union; strings are covered by
+            -- the CSub below for string operands).
+            -- TODO: constrain operand to string | { [integer]: unknown } once
+            -- union operand constraints are supported.
+            return T_INTEGER
+        end
+
         return fresh_uvar(ctx)
     end
 
     -- ── Binary expression ───────────────────────────────────────────────────
     if kind == NODE_BINARY_EXPR then
-        gen_expr(ctx, n.data[1])
-        gen_expr(ctx, n.data[2])
-        return fresh_uvar(ctx)
+        local op   = n.data[0]
+        local prov = prov_inferred(ctx, n.line, n.col)
+
+        -- Logical operators: evaluate both operands; approximate result as
+        -- union of both operand types.
+        -- TODO: refine and/or to truthy(a)|b and falsy(a)|b once narrowing
+        -- is available at gen time.
+        if op == OP_AND then
+            local left  = gen_expr(ctx, n.data[1])
+            local right = gen_expr(ctx, n.data[2])
+            -- Approximate: result is left | right (safe over-approximation).
+            local parts = {} --[[: V5Type[] ]]
+            parts[1] = left
+            parts[2] = right
+            return types_mod.union(parts)
+        end
+
+        if op == OP_OR then
+            local left  = gen_expr(ctx, n.data[1])
+            local right = gen_expr(ctx, n.data[2])
+            -- Approximate: result is left | right (safe over-approximation).
+            local parts = {} --[[: V5Type[] ]]
+            parts[1] = left
+            parts[2] = right
+            return types_mod.union(parts)
+        end
+
+        -- Equality/inequality: operands unconstrained; result boolean.
+        if op == OP_EQ or op == OP_NE then
+            gen_expr(ctx, n.data[1])
+            gen_expr(ctx, n.data[2])
+            return T_BOOLEAN
+        end
+
+        -- Ordering comparisons: operands number-compatible; result boolean.
+        -- (Lua also allows both-string; we approximate to number for now.)
+        if op == OP_LT or op == OP_LE or op == OP_GT or op == OP_GE then
+            local left  = gen_expr(ctx, n.data[1])
+            local right = gen_expr(ctx, n.data[2])
+            emit(ctx, C.sub(left,  T_NUMBER, prov))
+            emit(ctx, C.sub(right, T_NUMBER, prov))
+            return T_BOOLEAN
+        end
+
+        -- Concatenation: operands string or number (coerced); result string.
+        if op == OP_CONCAT then
+            local left  = gen_expr(ctx, n.data[1])
+            local right = gen_expr(ctx, n.data[2])
+            -- Constraint: each operand <: string | number.
+            --: V5Type
+            local str_or_num = types_mod.union({ T_STRING, T_NUMBER })
+            emit(ctx, C.sub(left,  str_or_num, prov))
+            emit(ctx, C.sub(right, str_or_num, prov))
+            return T_STRING
+        end
+
+        -- Arithmetic: +, -, *, /, %, ^.
+        -- Operands must be number-compatible; result is number.
+        -- TODO: refine arithmetic result type via uvar+constraints:
+        --   +, -, * of two integers → integer; / and ^ always number.
+        --   For now, conservative approximation: result is always number.
+        local left  = gen_expr(ctx, n.data[1])
+        local right = gen_expr(ctx, n.data[2])
+        emit(ctx, C.sub(left,  T_NUMBER, prov))
+        emit(ctx, C.sub(right, T_NUMBER, prov))
+        return T_NUMBER
     end
 
     -- ── Field access: a.b ───────────────────────────────────────────────────

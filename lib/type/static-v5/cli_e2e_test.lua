@@ -250,6 +250,55 @@ end
         T.eq(code, 1, "exit 1 — file not found")
     end)
 
+    -- ── Operator e2e tests ──────────────────────────────────────────────────
+
+    -- O1. Arithmetic result is number (approximation); annotating as string errors.
+    T.it("op: local x: string = 1 + 2 errors (number not subtype of string)", function()
+        local src = "--: string\nlocal x = 1 + 2\nlocal _ = x"
+        local code, out, _err = run(src, "op_arith_string.lua")
+        T.eq(code, 1, "exit 1 — number not subtype of string")
+        T.ok(out ~= "", "error output produced")
+        T.ok(out:find("number") ~= nil or out:find("string") ~= nil,
+            "error mentions number or string")
+    end)
+
+    -- O2. Arithmetic result is number; annotating as number succeeds.
+    T.it("op: local x: number = 1 + 2 typechecks clean", function()
+        local src = "--: number\nlocal x = 1 + 2\nlocal _ = x"
+        local code, _out, _err = run(src, "op_arith_number.lua")
+        T.eq(code, 0, "exit 0 — 1 + 2 : number")
+    end)
+
+    -- O3. String operand in arithmetic errors (string literal not subtype of number).
+    T.it("op: local x = 'a' + 1 errors (string not subtype of number)", function()
+        local src = 'local x = "a" + 1\nlocal _ = x'
+        local code, out, _err = run(src, "op_str_arith.lua")
+        T.eq(code, 1, "exit 1 — string literal not subtype of number")
+        T.ok(out ~= "", "error output produced")
+    end)
+
+    -- O4. Length operator on string literal returns integer.
+    T.it("op: local x = #'hello' annotated as integer typechecks clean", function()
+        local src = '--: integer\nlocal x = #"hello"\nlocal _ = x'
+        local code, _out, _err = run(src, "op_len_integer.lua")
+        T.eq(code, 0, "exit 0 — #string : integer")
+    end)
+
+    -- O5. Concatenation result is string; annotating as number errors.
+    T.it("op: local x: number = 'a' .. 'b' errors", function()
+        local src = '--: number\nlocal x = "a" .. "b"\nlocal _ = x'
+        local code, out, _err = run(src, "op_concat_number.lua")
+        T.eq(code, 1, "exit 1 — string not subtype of number")
+        T.ok(out ~= "", "error output produced")
+    end)
+
+    -- O6. not operator returns boolean; annotating as boolean typechecks.
+    T.it("op: local x: boolean = not true typechecks clean", function()
+        local src = "--: boolean\nlocal x = not true\nlocal _ = x"
+        local code, _out, _err = run(src, "op_not_boolean.lua")
+        T.eq(code, 0, "exit 0 — not true : boolean")
+    end)
+
     -- 10. expand_dotted helper: dotted keys become records.
     T.it("expand_dotted flattens dotted keys into records", function()
         local types_mod = require("lib.type.experiments.v5_perf.types")
