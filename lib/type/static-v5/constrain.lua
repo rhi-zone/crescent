@@ -39,7 +39,8 @@
 --   - for-num: bounds emit CSub against number; loop var bound to number
 --   - for-in: loop vars bound from iterator return (pairs/ipairs special-cased)
 --   - Generic function body checking (skolemization)
---   - Type alias / require / module directives (noted but not scope-injected)
+--   - Type alias directives expand aliases eagerly in scope
+--   - require/template directives no-op by v4 parity (module loader not ported)
 --   - Multi-return tuple types (uses union as approximation)
 --   - Effect propagation from unknown callees (uvar callee — solved post-gen)
 
@@ -166,6 +167,138 @@ local function as_v5type(v)
     return ty
 end
 
+-- ── Type alias resolution ────────────────────────────────────────────────────
+--
+-- resolve_aliases: walk a parsed V5Type and substitute TConst nodes whose name
+-- matches a registered alias.  For parametric aliases the surrounding App spine
+-- is consumed to collect args; substitute each param name with the corresponding
+-- arg in the body.
+--
+-- Alias substitution is shallow-first: after expanding an alias the result is
+-- NOT recursively re-expanded (prevents infinite loops on self-referential
+-- aliases).  Alias bodies themselves are expanded when they are stored, so
+-- nested references that were in scope at registration time are already
+-- concrete.
+--
+-- alias_map: { [name: string]: { params: string[]|nil, body: V5Type } }
+-- subst_map:  { [param_name: string]: V5Type } (empty when not doing param subst)
+
+--:: AliasEntry = { params: { [number]: string } | nil, body: unknown }
+
+-- Forward declaration so the function body can call itself recursively.
+local resolve_aliases_impl --[[: (V5Type, { [string]: AliasEntry }, { [string]: V5Type }) -> V5Type ]]
+
+--: (V5Type, { [string]: AliasEntry }, { [string]: V5Type }) -> V5Type
+resolve_aliases_impl = function(t, aliases, subst)
+    if t.tag == "const" then
+        -- Check param substitution first (inner binder takes priority).
+        local sv = subst[t.name]
+        if sv ~= nil then return sv end
+        -- Then check alias map.
+        local entry = aliases[t.name]
+        if entry == nil then return t end
+        local body = as_v5type(entry.body)
+        if body == nil then return t end
+        --: { [number]: string } | nil
+        local params = entry.params
+        -- No params: direct substitution (body already pre-expanded on store).
+        if params == nil then return body end
+        if #params == 0 then return body end
+        -- Parametric alias with no args at this site: can't expand yet.
+        -- The app-spine path below handles the applied case.
+        return t
+    elseif t.tag == "app" then
+        -- Collect the App spine: App(App(f, a1), a2) → head=f, spine=[a1,a2]
+        local spine = {} --[[: V5Type[] ]]
+        local head = t --[[: V5Type ]]
+        while head.tag == "app" do
+            --: { tag: string, f: V5Type, a: V5Type, ... }
+            local app_node = head
+            table.insert(spine, 1, app_node.a)
+            head = app_node.f
+        end
+        -- Try alias expansion if the head is a known alias name.
+        if head.tag == "const" then
+            local sv = subst[head.name]
+            if sv == nil then
+                local entry = aliases[head.name]
+                if entry ~= nil then
+                    local body = as_v5type(entry.body)
+                    --: { [number]: string } | nil
+                    local params = entry.params
+                    if body ~= nil and params ~= nil and #params == #spine then
+                        -- Build new subst: param_name → resolved arg.
+                        local new_subst = {} --[[: { [string]: V5Type } ]]
+                        for k, _ in pairs(subst) do new_subst[k] = subst[k] end
+                        for i, pname in ipairs(params) do
+                            local arg = spine[i]
+                            if pname ~= nil and arg ~= nil then
+                                new_subst[pname] = resolve_aliases_impl(arg, aliases, subst)
+                            end
+                        end
+                        return resolve_aliases_impl(body, aliases, new_subst)
+                    end
+                end
+            end
+        end
+        -- No alias expansion: walk both sides.
+        -- t is in the app case (tag == "app"), so t.f and t.a are V5Type.
+        --: V5Type
+        local t_f = t.f
+        --: V5Type
+        local t_a = t.a
+        if t_f == nil or t_a == nil then return t end
+        local rf = resolve_aliases_impl(t_f, aliases, subst)
+        local ra = resolve_aliases_impl(t_a, aliases, subst)
+        return types_mod.app(rf, ra)
+    elseif t.tag == "record" then
+        --: { tag: string, fields: { [string]: V5Type }, row: { id: integer, tag: "rowvar" } | nil, ... }
+        local tr = t
+        local out = {} --[[: { [string]: V5Type } ]]
+        for fk, fv in pairs(tr.fields) do
+            if fv ~= nil then
+                out[fk] = resolve_aliases_impl(fv, aliases, subst)
+            end
+        end
+        --: { id: integer, tag: "rowvar" } | nil
+        local tr_row = tr.row
+        return { tag = "record", fields = out, row = tr_row }
+    elseif t.tag == "arrow" then
+        --: { tag: string, args: V5Type[], ret: V5Type }
+        local ta = t
+        local args = {} --[[: V5Type[] ]]
+        for i, v in ipairs(ta.args) do
+            if v ~= nil then args[i] = resolve_aliases_impl(v, aliases, subst) end
+        end
+        return { tag = "arrow", args = args, ret = resolve_aliases_impl(ta.ret, aliases, subst) }
+    elseif t.tag == "union" then
+        --: { tag: string, xs: V5Type[] }
+        local tu = t
+        local xs = {} --[[: V5Type[] ]]
+        for i, v in ipairs(tu.xs) do
+            if v ~= nil then xs[i] = resolve_aliases_impl(v, aliases, subst) end
+        end
+        return { tag = "union", xs = xs }
+    elseif t.tag == "intersection" then
+        --: { tag: string, parts: V5Type[] }
+        local ti = t
+        local parts = {} --[[: V5Type[] ]]
+        for i, v in ipairs(ti.parts) do
+            if v ~= nil then parts[i] = resolve_aliases_impl(v, aliases, subst) end
+        end
+        return { tag = "intersection", parts = parts }
+    else
+        -- uvar, var, lambda, rowvar — no alias names to expand.
+        return t
+    end
+end
+
+-- Convenience wrapper: no param substitution at the call site.
+--: (V5Type, { [string]: AliasEntry }) -> V5Type
+local function expand_aliases(t, aliases)
+    return resolve_aliases_impl(t, aliases, {})
+end
+
 -- ── State record ─────────────────────────────────────────────────────────────
 
 --:: V5Ctx = {
@@ -182,6 +315,8 @@ end
 --::   ann_ret_stack: unknown[],
 --::   annotations: { [integer]: RawAnn } | nil,
 --::   _next_uvar: integer,
+--::   type_aliases: { [string]: AliasEntry },
+--::   module_name: string | nil,
 --:: }
 
 -- ── Fresh unification variables ──────────────────────────────────────────────
@@ -663,6 +798,12 @@ local function get_type_ann(ctx, line)
     if ty == nil then
         ctx.errors[#ctx.errors + 1] = (ctx.filename .. ":" .. line
             .. ": annotation parse error: " .. (err or "?"))
+        return nil
+    end
+    -- Expand type aliases registered via --:: TypeName = ... directives.
+    local ta = ctx.type_aliases
+    if ta ~= nil and next(ta) ~= nil then
+        ty = expand_aliases(ty, ta)
     end
     return ty
 end
@@ -2093,6 +2234,8 @@ function M.generate(source, filename, opts)
         ann_ret_stack = {},
         annotations   = raw_anns,
         _next_uvar    = 1,
+        type_aliases  = {},
+        module_name   = nil,
     }
 
     -- Seed scope_stack with the top-level scope.
@@ -2127,23 +2270,57 @@ function M.generate(source, filename, opts)
                     -- .name, .type, .arity are each only present on specific
                     -- members, but reading them returns the field type or nil.
                     if dir.kind == "declare_var" then
-                        -- All V5Directive union members have .name:string; the
-                        -- .type field is present only on declare_var members.
+                        -- Bind the named variable to the declared type in scope.
                         local dv_name = dir.name
                         local dv_type = as_v5type(dir.type)
                         if dv_name ~= nil and dv_type ~= nil then
                             bind(ctx, dv_name, dv_type)
                         end
                     elseif dir.kind == "declare_effect" then
-                        -- .name is string on all members; .arity is number on
-                        -- declare_effect only.
+                        -- Register effect arity so !Name<...> annotations resolve.
                         local de_name  = dir.name
                         local de_arity = dir.arity
                         if de_name ~= nil and de_arity ~= nil then
                             ann_mod.declare_effect(de_name, de_arity)
                         end
+                    elseif dir.kind == "type_alias" then
+                        -- Register a type alias for use in subsequent annotations.
+                        -- The alias body may itself reference already-registered
+                        -- aliases; expand it now so lookups are O(1) at use time.
+                        local ta_name = dir.name
+                        local ta_body = as_v5type(dir.type)
+                        if ta_name ~= nil and ta_body ~= nil then
+                            -- Expand any aliases already known in the body.
+                            local ta_aliases = ctx.type_aliases
+                            if next(ta_aliases) ~= nil then
+                                ta_body = expand_aliases(ta_body, ta_aliases)
+                            end
+                            --: string[] | nil
+                            local ta_params = dir.params
+                            ta_aliases[ta_name] = { params = ta_params, body = ta_body }
+                        end
+                    elseif dir.kind == "module" then
+                        -- Record the module name on ctx.  Top-level bindings
+                        -- become this module's exports (post-pass concern;
+                        -- we just record the name here for now).
+                        local mn = dir.mod_name
+                        if mn ~= nil then
+                            ctx.module_name = mn
+                        end
+                    elseif dir.kind == "require" then
+                        -- v4 parity: --:: require "mod.path" loads a declaration
+                        -- file so its type aliases / declares are available here.
+                        -- v5 does not have a module loader yet; treat as no-op.
+                        -- No-op by design (v4 parity — v4's load_decl_file
+                        -- infrastructure not ported to v5).
+                    elseif dir.kind == "template" then
+                        -- v4 parity: --:: template marks a following function as
+                        -- a generic template; v4 records the line number.  In v5
+                        -- generic checking (skolemization) is a tracked open gap;
+                        -- template directives are no-op until that gap is closed.
+                        -- No-op by design (v4 parity — generic body checking
+                        -- deferred, see v5-gaps.md "Generic function body checking").
                     end
-                    -- Other kinds (type_alias, module, etc.) are residual gaps.
                 end
             end
         end

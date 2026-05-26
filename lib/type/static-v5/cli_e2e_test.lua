@@ -31,6 +31,7 @@ local function fake_caps(source)
         write_err = function(msg)
             err_buf[#err_buf + 1] = msg
         end,
+        is_tty = nil,
     }
     return {
         caps = caps,
@@ -246,6 +247,7 @@ end
             write_out = function(_m) end,
             --: (string) -> nil
             write_err = function(_m) end,
+            is_tty = nil,
         }
         local code = cli.run({ "missing.lua" }, caps)
         T.eq(code, 1, "exit 1 — file not found")
@@ -498,6 +500,99 @@ end
         end
         -- Dotted keys themselves should NOT appear.
         T.ok(expanded["io.write"] == nil, "dotted key absent from output")
+    end)
+
+end)
+
+-- ── Directive e2e tests ───────────────────────────────────────────────────────
+--
+-- End-to-end verification that each V5Directive variant runs through the full
+-- CLI pipeline without errors and with the expected constraint/error behavior.
+
+T.describe("v5 cli e2e — directives", function()
+
+    -- declare_var + annotation downstream resolves via binding.
+    T.it("declare_var: declared fn callable with no CLI error", function()
+        local src = table.concat({
+            "--:: declare greet = (string) -> nil",
+            "greet('hello')",
+        }, "\n")
+        local code, _out, err = run(src, "decl_var.lua")
+        T.eq(code, 0, "exit 0")
+        T.eq(err, "", "no errors on stderr")
+    end)
+
+    -- declare_effect + annotation using it passes through.
+    T.it("declare_effect: custom effect annotation parses cleanly", function()
+        local src = table.concat({
+            "--:: declare effect !db : 0",
+            "--: () -> nil & !db",
+            "local function query() end",
+        }, "\n")
+        local code, _out, err = run(src, "decl_effect.lua")
+        T.eq(code, 0, "exit 0")
+        T.eq(err, "", "no errors on stderr")
+    end)
+
+    -- type_alias non-parametric — resolves in annotation, no CLI error.
+    T.it("type_alias non-parametric: Str = string resolves in annotation", function()
+        local src = table.concat({
+            "--:: Str = string",
+            "--: Str",
+            "local s = 'hello'",
+        }, "\n")
+        local code, _out, err = run(src, "alias_simple.lua")
+        T.eq(code, 0, "exit 0")
+        T.eq(err, "", "no errors on stderr")
+    end)
+
+    -- type_alias parametric — Pair<A,B> applied to concrete types.
+    -- Verifies the alias expands: Pair<integer,string> → record with two fields.
+    -- Assigning nil (wrong type) should produce a record-mismatch error,
+    -- confirming the alias expanded to a record rather than staying as App(Pair,…).
+    T.it("type_alias parametric: Pair<integer,string> expands — nil rejected as record", function()
+        local src = table.concat({
+            "--:: Pair<A,B> = { first: A, second: B }",
+            "--: Pair<integer, string>",
+            "local p = nil",
+        }, "\n")
+        local code, out, _err = run(src, "alias_pair.lua")
+        -- The solver should reject nil where a record is required.
+        T.eq(code, 1, "exit 1: alias-expanded type catches nil")
+        T.ok(out:find("record") ~= nil, "error mentions record (alias fully expanded)")
+    end)
+
+    -- require directive — no-op by v4 parity, no error.
+    T.it("require directive: no error (no-op)", function()
+        local src = table.concat({
+            "--:: require \"lib.some.module\"",
+            "local x = 1",
+        }, "\n")
+        local code, _out, err = run(src, "decl_require.lua")
+        T.eq(code, 0, "exit 0")
+        T.eq(err, "", "no errors on stderr")
+    end)
+
+    -- module directive — no error.
+    T.it("module directive: no error", function()
+        local src = table.concat({
+            "--:: module \"mymod\": { x: integer }",
+            "local x = 1",
+        }, "\n")
+        local code, _out, err = run(src, "decl_module.lua")
+        T.eq(code, 0, "exit 0")
+        T.eq(err, "", "no errors on stderr")
+    end)
+
+    -- template directive — no-op, no error.
+    T.it("template directive: no error (no-op)", function()
+        local src = table.concat({
+            "--:: template",
+            "local function id(x) return x end",
+        }, "\n")
+        local code, _out, err = run(src, "decl_template.lua")
+        T.eq(code, 0, "exit 0")
+        T.eq(err, "", "no errors on stderr")
     end)
 
 end)

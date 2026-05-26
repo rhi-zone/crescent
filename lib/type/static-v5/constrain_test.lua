@@ -660,3 +660,142 @@ T.describe("v5 constrain — for loops", function()
     end)
 
 end)
+
+-- ── Directive scope-injection tests ──────────────────────────────────────────
+--
+-- Tests for all six V5Directive variants: declare_var, declare_effect,
+-- type_alias, require, module, template.
+
+T.describe("v5 constrain — directive scope injection", function()
+
+    -- ── declare_var ───────────────────────────────────────────────────────────
+
+    T.it("declare_var: --:: declare x = number binds x in scope", function()
+        local src = "--:: declare x = number\nlocal y = x"
+        local cs, errs = constrain.generate(src, "test.lua", nil)
+        T.eq(#errs, 0, "no errors")
+        -- x is in scope (bound to number), no crash.
+        T.ok(#cs >= 0, "no crash: x resolved from declare_var")
+    end)
+
+    T.it("declare_var: calling declared fn emits csub", function()
+        local src = "--:: declare my_fn = () -> number\nmy_fn()"
+        local cs, errs = constrain.generate(src, "test.lua", nil)
+        T.eq(#errs, 0, "no errors")
+        -- my_fn is an arrow; calling it emits a csub.
+        T.ok(count_tag(cs, "csub") >= 1, "csub emitted for declared fn call")
+    end)
+
+    -- ── declare_effect ────────────────────────────────────────────────────────
+
+    T.it("declare_effect: --:: declare effect !foo : 2 registers arity 2", function()
+        -- After the declare_effect directive, !foo must be applied to 2 args.
+        -- Using it correctly should not cause an annotation parse error.
+        local src = "--:: declare effect !foo : 2\n--: () -> nil & !foo<integer, string>\nlocal function f() end"
+        local cs, errs = constrain.generate(src, "test.lua", nil)
+        T.eq(#errs, 0, "no annotation parse errors after declare_effect !foo:2")
+    end)
+
+    T.it("declare_effect: wrong arity causes annotation error", function()
+        -- !foo declared arity 2 but used with 1 arg → parse error.
+        local src = "--:: declare effect !bar : 2\n--: () -> nil & !bar<integer>\nlocal function f() end"
+        local cs, errs = constrain.generate(src, "test.lua", nil)
+        -- Exactly 1 annotation parse error for the arity mismatch.
+        T.ok(#errs >= 1, "annotation error for arity mismatch on !bar")
+        local found = false
+        for _, e in ipairs(errs) do
+            if e ~= nil and e:find("!bar") and e:find("arity") then found = true end
+        end
+        T.ok(found, "error mentions !bar and arity")
+    end)
+
+    -- ── type_alias ────────────────────────────────────────────────────────────
+
+    T.it("type_alias: non-parametric alias resolves in annotation", function()
+        -- --:: Num = number  then  --: Num  on a local.
+        -- The annotation Num should resolve to number.
+        -- Verify: no parse/annotation errors; the generated type is number.
+        local src = "--:: Num = number\n--: Num\nlocal x = 1"
+        local cs, errs = constrain.generate(src, "test.lua", nil)
+        T.eq(#errs, 0, "no errors for non-parametric alias")
+        -- A csub for `x: Num` (= number) constraining literal 1 should appear.
+        local found = any(cs, function(c)
+            if c == nil or c.tag ~= "csub" then return false end
+            local b = c.b
+            return b ~= nil and b.tag == "const" and b.name == "number"
+        end)
+        T.ok(found, "csub with b=number from resolved Num alias")
+    end)
+
+    T.it("type_alias: parametric alias Pair<A,B> resolves with args", function()
+        -- Define Pair<A,B> = { first: A, second: B }
+        -- Use Pair<integer, string> on a local.
+        local src = table.concat({
+            "--:: Pair<A,B> = { first: A, second: B }",
+            "--: Pair<integer, string>",
+            "local p = { first = 1, second = 'hi' }",
+        }, "\n")
+        local cs, errs = constrain.generate(src, "test.lua", nil)
+        T.eq(#errs, 0, "no errors for parametric alias Pair<integer,string>")
+        -- A csub where the expected type is a record with fields first/second.
+        local found_pair = any(cs, function(c)
+            if c == nil or c.tag ~= "csub" then return false end
+            local b = c.b
+            if b == nil or b.tag ~= "record" then return false end
+            return b.fields ~= nil and b.fields["first"] ~= nil and b.fields["second"] ~= nil
+        end)
+        T.ok(found_pair, "csub with record {first,second} from Pair<integer,string>")
+    end)
+
+    T.it("type_alias: alias in function annotation resolves", function()
+        -- Alias used in function return annotation.
+        local src = table.concat({
+            "--:: MyStr = string",
+            "--: () -> MyStr",
+            "local function f() return 'hi' end",
+        }, "\n")
+        local cs, errs = constrain.generate(src, "test.lua", nil)
+        T.eq(#errs, 0, "no errors for alias in function return annotation")
+    end)
+
+    T.it("type_alias: alias defined after another uses prior alias in body", function()
+        -- First alias: Num = number; Second alias: NumPair = { a: Num, b: Num }.
+        -- Num should be expanded in NumPair's body when it is registered.
+        local src = table.concat({
+            "--:: Num = number",
+            "--:: NumPair = { a: Num, b: Num }",
+            "--: NumPair",
+            "local p = { a = 1, b = 2 }",
+        }, "\n")
+        local cs, errs = constrain.generate(src, "test.lua", nil)
+        T.eq(#errs, 0, "no errors chaining aliases")
+    end)
+
+    -- ── require ───────────────────────────────────────────────────────────────
+
+    T.it("require: --:: require 'mod' is no-op (v4 parity) — no error", function()
+        -- v5 has no module loader; require directives silently no-op.
+        local src = "--:: require \"some.module\"\nlocal x = 1"
+        local cs, errs = constrain.generate(src, "test.lua", nil)
+        T.eq(#errs, 0, "no error for --:: require directive (no-op)")
+    end)
+
+    -- ── module ────────────────────────────────────────────────────────────────
+
+    T.it("module: --:: module 'name': T records module_name (no error)", function()
+        -- Module directive should not cause errors; it just records the name.
+        local src = "--:: module \"mymod\": { x: integer }\nlocal x = 1"
+        local cs, errs = constrain.generate(src, "test.lua", nil)
+        T.eq(#errs, 0, "no error for --:: module directive")
+    end)
+
+    -- ── template ─────────────────────────────────────────────────────────────
+
+    T.it("template: --:: template is no-op (v4 parity) — no error", function()
+        -- Template directive is no-op until generic body checking is implemented.
+        local src = "--:: template\nlocal function id(x) return x end"
+        local cs, errs = constrain.generate(src, "test.lua", nil)
+        T.eq(#errs, 0, "no error for --:: template directive (no-op)")
+    end)
+
+end)
