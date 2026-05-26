@@ -17,6 +17,7 @@ end
 local constrain_mod = require("lib.type.static-v5.constrain")
 local op_sem        = require("lib.type.static-v5.op_sem")
 local stdlib_mod    = require("lib.type.static-v5.stdlib_types")
+local error_format  = require("lib.type.static-v5.error_format")
 
 local M = {}
 
@@ -124,13 +125,17 @@ end
 --
 -- Returns an integer exit code (0 = clean, 1 = errors, 2 = bad invocation).
 
---:: V5CliCaps = { read_file: (path: string) -> (string | nil, string | nil), write_out: (msg: string) -> nil, write_err: (msg: string) -> nil }
+--:: V5CliCaps = { read_file: (path: string) -> (string | nil, string | nil), write_out: (msg: string) -> nil, write_err: (msg: string) -> nil, is_tty: ((unknown) -> boolean) | nil }
 
---: (string, V5CliCaps) -> { errors: { rule: string, msg: string }[], gen_errors: string[] }
+--: (string, V5CliCaps) -> { errors: OpSemError[], gen_errors: string[], source: string | nil }
 local function check_one(path, caps)
     local source, ferr = caps.read_file(path)
     if source == nil then
-        return { errors = { { rule = "io", msg = "cannot read file: " .. (ferr or path) } }, gen_errors = {} }
+        return {
+            errors = { { rule = "io", msg = "cannot read file: " .. (ferr or path), prov = nil, details = nil } } --[[: OpSemError[] ]],
+            gen_errors = {} --[[: string[] ]],
+            source = nil,
+        }
     end
 
     -- Register stdlib effects before generating constraints.
@@ -151,14 +156,7 @@ local function check_one(path, caps)
     end
     op_sem.run(st)
 
-    return { errors = st.errors, gen_errors = gen_errors }
-end
-
--- ── Format a single error for display ───────────────────────────────────────
-
---: (string, { rule: string, msg: string }) -> string
-local function format_solver_error(path, e)
-    return path .. ": [" .. (e.rule or "?") .. "] " .. (e.msg or "?")
+    return { errors = st.errors, gen_errors = gen_errors, source = source }
 end
 
 -- ── Argv parsing ─────────────────────────────────────────────────────────────
@@ -204,9 +202,18 @@ function M.run(argv, caps)
 
     local any_error = false
     local lines = {} --[[: { [integer]: string } ]]
+    --: OpSemError[]
+    local all_solver = {}
+    --: { [string]: string }
+    local sources_by_path = {}
 
     for _, path in ipairs(opts.files) do
         local result = check_one(path, caps)
+
+        local src = result.source
+        if src ~= nil then
+            sources_by_path[path] = src
+        end
 
         -- Gen-pass errors (annotation parse, etc.) are always printed.
         for _, ge in ipairs(result.gen_errors) do
@@ -214,11 +221,24 @@ function M.run(argv, caps)
             any_error = true
         end
 
-        -- Solver errors.
+        -- Solver errors: collect into a single batch.  When an error's
+        -- provenance doesn't carry a file (e.g. io read failures), inject
+        -- a synthetic prov so the formatter knows which file to attribute.
         for _, se in ipairs(result.errors) do
-            lines[#lines + 1] = format_solver_error(path, se)
+            if se.prov == nil then
+                se.prov = { file = path, line = 0, col = 0, kind = "io" }
+            end
+            all_solver[#all_solver + 1] = se
             any_error = true
         end
+    end
+
+    if #all_solver > 0 then
+        local color = false
+        local tty_fn = caps.is_tty
+        if tty_fn ~= nil then color = tty_fn(1) end
+        local formatted = error_format.format(all_solver, sources_by_path, { color = color })
+        lines[#lines + 1] = formatted
     end
 
     if #lines > 0 then
@@ -247,6 +267,15 @@ function M.main(argv)
         write_out = function(msg) io.stdout:write(msg) end,
         --: (string) -> nil
         write_err = function(msg) io.stderr:write(msg) end,
+        --: (unknown) -> boolean
+        is_tty = function(_fd)
+            -- Best-effort TTY detection without an external dep: check the
+            -- standard environment variables.  Plain (no color) by default so
+            -- piped/test capture remains stable; respects FORCE_COLOR/NO_COLOR.
+            if os.getenv("NO_COLOR") ~= nil then return false end
+            if os.getenv("FORCE_COLOR") ~= nil then return true end
+            return false
+        end,
     }
     return M.run(argv, caps)
 end

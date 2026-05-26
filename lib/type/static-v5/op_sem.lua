@@ -91,7 +91,8 @@ M.variance    = variance_mod
 -- State
 -- ────────────────────────────────────────────────────────────────────────────
 
---:: OpSemError = { rule: string, msg: string }
+--:: ErrorDetails = { tag: "const_mismatch", a_name: string, b_name: string } | { tag: "missing_field", field: string } | { tag: "extra_field", field: string } | { tag: "effect_not_permitted", effect: V5Type, container: V5Type | nil } | { tag: "kind_mismatch", a_tag: string, b_tag: string } | { tag: "no_matching_branch", value_ty: V5Type, union_ty: V5Type } | { tag: "arrow_arity_mismatch", expected: integer, got: integer } | { tag: "record_arity_mismatch", expected: integer, got: integer } | { tag: "head_mismatch", a_name: string, b_name: string } | { tag: "closed_extend", field: string } | { tag: "row_already_contains", field: string }
+--:: OpSemError = { rule: string, msg: string, prov: Provenance | nil, details: ErrorDetails | nil }
 --:: OpSemTrace = { rule: string, msg: string }
 --:: OpSemState = { subst: Subst, worklist: OpSemConstraint[], head: integer, tail: integer, inert: { [integer]: OpSemConstraint }, errors: OpSemError[], trace: OpSemTrace[], reactivations: integer, steps: integer, row_watchers: { [integer]: { [integer]: boolean } }, upper_bounds: { [integer]: V5Type[] }, lower_bounds: { [integer]: V5Type[] } }
 
@@ -125,9 +126,9 @@ local function trace(st, rule, msg)
 	st.trace[#st.trace + 1] = { rule = rule, msg = msg }
 end
 
---: (OpSemState, string, string) -> nil
-local function err(st, rule, msg)
-	st.errors[#st.errors + 1] = { rule = rule, msg = msg }
+--: (OpSemState, string, string, Provenance | nil, ErrorDetails | nil) -> nil
+local function err(st, rule, msg, prov, details)
+	st.errors[#st.errors + 1] = { rule = rule, msg = msg, prov = prov, details = details }
 	trace(st, rule, msg)
 end
 
@@ -351,7 +352,8 @@ function M.rule_T_CEq_Const(st, a, b, prov)
 		err(st, "T-CEq-Const", "precondition: both const"); return "error"
 	end
 	if a.name ~= b.name then
-		err(st, "T-CEq-Const", "const mismatch: " .. a.name .. " vs " .. b.name)
+		err(st, "T-CEq-Const", "const mismatch: " .. a.name .. " vs " .. b.name,
+			prov, { tag = "const_mismatch", a_name = a.name, b_name = b.name })
 		return "error"
 	end
 	trace(st, "T-CEq-Const", a.name)
@@ -365,7 +367,9 @@ function M.rule_T_CEq_Arrow(st, a, b, prov)
 		err(st, "T-CEq-Arrow", "precondition: both arrow"); return "error"
 	end
 	if #a.args ~= #b.args then
-		err(st, "T-CEq-Arrow", "arity mismatch"); return "error"
+		err(st, "T-CEq-Arrow", "arity mismatch", prov,
+			{ tag = "arrow_arity_mismatch", expected = #b.args, got = #a.args })
+		return "error"
 	end
 	for i = 1, #a.args do
 		local av, bv = a.args[i], b.args[i]
@@ -406,7 +410,8 @@ function M.rule_T_CEq_Record(st, a, b, prov)
 		for _ in pairs(a.fields) do na = na + 1 end
 		for _ in pairs(b.fields) do nb = nb + 1 end
 		if na ~= nb then
-			err(st, "T-CEq-Record", "positional arity mismatch: " .. na .. " vs " .. nb)
+			err(st, "T-CEq-Record", "positional arity mismatch: " .. na .. " vs " .. nb,
+				prov, { tag = "record_arity_mismatch", expected = nb, got = na })
 			return "error"
 		end
 		for i = 1, na do
@@ -424,13 +429,17 @@ function M.rule_T_CEq_Record(st, a, b, prov)
 	for k, va in pairs(a.fields) do
 		local vb = b.fields[k]
 		if vb == nil then
-			err(st, "T-CEq-Record", "missing field " .. k)
+			err(st, "T-CEq-Record", "missing field " .. k, prov,
+				{ tag = "missing_field", field = k })
 		elseif va ~= nil then
 			M.emit(st, constraint_mod.eq(va, vb, prov))
 		end
 	end
 	for k, _ in pairs(b.fields) do
-		if a.fields[k] == nil then err(st, "T-CEq-Record", "extra field " .. k) end
+		if a.fields[k] == nil then
+			err(st, "T-CEq-Record", "extra field " .. k, prov,
+				{ tag = "extra_field", field = k })
+		end
 	end
 	trace(st, "T-CEq-Record", "")
 	return "done"
@@ -454,7 +463,8 @@ end
 -- T-CEq-Mismatch.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CEq_Mismatch(st, a, b, prov)
-	err(st, "T-CEq-Mismatch", "kind mismatch: " .. a.tag .. " vs " .. b.tag)
+	err(st, "T-CEq-Mismatch", "kind mismatch: " .. a.tag .. " vs " .. b.tag,
+		prov, { tag = "kind_mismatch", a_tag = a.tag, b_tag = b.tag })
 	return "error"
 end
 
@@ -528,7 +538,9 @@ function M.rule_T_CSub_Arrow(st, a, b, prov)
 		err(st, "T-CSub-Arrow", "precondition: both arrow"); return "error"
 	end
 	if #a.args ~= #b.args then
-		err(st, "T-CSub-Arrow", "arity mismatch"); return "error"
+		err(st, "T-CSub-Arrow", "arity mismatch", prov,
+			{ tag = "arrow_arity_mismatch", expected = #b.args, got = #a.args })
+		return "error"
 	end
 	for i = 1, #a.args do
 		local av, bv = a.args[i], b.args[i]
@@ -551,7 +563,8 @@ function M.rule_T_CSub_Const_Var(st, a, b, prov)
 	end
 	if a.name ~= b.name then
 		err(st, "T-CSub-Const-Var",
-			"const name mismatch: " .. a.name .. " vs " .. b.name)
+			"const name mismatch: " .. a.name .. " vs " .. b.name,
+			prov, { tag = "const_mismatch", a_name = a.name, b_name = b.name })
 		return "error"
 	end
 	trace(st, "T-CSub-Const-Var", a.name)
@@ -590,12 +603,14 @@ function M.rule_T_CSub_App_Var(st, a, b, prov)
 	if ha == nil or hb == nil then return "miss" end
 	if ha ~= hb then
 		err(st, "T-CSub-App-Var",
-			"head mismatch: " .. ha .. " vs " .. hb)
+			"head mismatch: " .. ha .. " vs " .. hb,
+			prov, { tag = "head_mismatch", a_name = ha, b_name = hb })
 		return "error"
 	end
 	if #aa ~= #ab then
 		err(st, "T-CSub-App-Var",
-			"arity mismatch for " .. ha)
+			"arity mismatch for " .. ha, prov,
+			{ tag = "arrow_arity_mismatch", expected = #ab, got = #aa })
 		return "error"
 	end
 	for i = 1, #aa do
@@ -663,7 +678,8 @@ function M.rule_T_CSub_Record_Width(st, a, b, prov)
 	for k, vb in pairs(b.fields) do
 		local va = a.fields[k]
 		if va == nil then
-			err(st, "T-CSub-Record-Width", "missing field " .. k)
+			err(st, "T-CSub-Record-Width", "missing field " .. k, prov,
+				{ tag = "missing_field", field = k })
 		elseif vb ~= nil then
 			-- Invariant: fields are mutable in v5.0 (per CTableSet model).
 			M.emit(st, constraint_mod.eq(va, vb, prov))
@@ -701,14 +717,16 @@ function M.rule_T_CSub_Union_R(st, a, b, prov)
 			return "done"
 		end
 	end
-	err(st, "T-CSub-Union-R", "no branch matches LHS exactly (v5.0 limitation)")
+	err(st, "T-CSub-Union-R", "no branch matches LHS exactly (v5.0 limitation)",
+		prov, { tag = "no_matching_branch", value_ty = a, union_ty = b })
 	return "error"
 end
 
 -- T-CSub-Mismatch.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CSub_Mismatch(st, a, b, prov)
-	err(st, "T-CSub-Mismatch", "sub kind mismatch: " .. a.tag .. " vs " .. b.tag)
+	err(st, "T-CSub-Mismatch", "sub kind mismatch: " .. a.tag .. " vs " .. b.tag,
+		prov, { tag = "kind_mismatch", a_tag = a.tag, b_tag = b.tag })
 	return "error"
 end
 
@@ -924,7 +942,8 @@ function M.rule_T_CIntersectionMember_Direct(st, ty, part, prov)
 			end
 		end
 		err(st, "T-CIntersectionMember-Direct",
-			"part not in intersection")
+			"part not in intersection",
+			prov, { tag = "effect_not_permitted", effect = part, container = dty })
 		return "error"
 	end
 	-- Singleton case: ty IS the part itself.
@@ -933,7 +952,8 @@ function M.rule_T_CIntersectionMember_Direct(st, ty, part, prov)
 		return "done"
 	end
 	err(st, "T-CIntersectionMember-Direct",
-		"ty is neither intersection nor equal to part (tag=" .. dty.tag .. ")")
+		"ty is neither intersection nor equal to part (tag=" .. dty.tag .. ")",
+		prov, { tag = "effect_not_permitted", effect = part, container = dty })
 	return "error"
 end
 
@@ -1144,9 +1164,10 @@ end
 
 -- T-CRowExtend-Closed: closed record missing key → ERROR.
 --: (OpSemState, V5Type, V5Type, string, V5Type, Provenance) -> string
-function M.rule_T_CRowExtend_Closed(st, _rec_ty, rec, key, _field_ty, _prov)
+function M.rule_T_CRowExtend_Closed(st, _rec_ty, rec, key, _field_ty, prov)
 	if rec.tag ~= "record" then err(st, "T-CRowExtend-Closed", "precondition: record"); return "error" end
-	err(st, "T-CRowExtend-Closed", "closed record cannot extend: key=" .. key)
+	err(st, "T-CRowExtend-Closed", "closed record cannot extend: key=" .. key,
+		prov, { tag = "closed_extend", field = key })
 	return "error"
 end
 
@@ -1195,8 +1216,9 @@ end
 
 -- T-CRowLacks-Closed-Fail: closed and key present → ERROR.
 --: (OpSemState, V5Type, V5Type, string, Provenance) -> string
-function M.rule_T_CRowLacks_Closed_Fail(st, _rec_ty, _rec, key, _prov)
-	err(st, "T-CRowLacks-Closed-Fail", "row already contains key: " .. key)
+function M.rule_T_CRowLacks_Closed_Fail(st, _rec_ty, _rec, key, prov)
+	err(st, "T-CRowLacks-Closed-Fail", "row already contains key: " .. key,
+		prov, { tag = "row_already_contains", field = key })
 	return "error"
 end
 
@@ -1615,12 +1637,25 @@ function M.run(st)
 		elseif c.tag == "crow_lacks" then
 			local ckey = c.key or "?"
 			err(st, "S-Quiesce-CRowLacks",
-				"CRowLacks still unresolved at quiescence (row never closed): key=" .. ckey)
+				"CRowLacks still unresolved at quiescence (row never closed): key=" .. ckey,
+				c.prov, { tag = "missing_field", field = ckey })
 		elseif c.tag == "cint_member" then
 			-- F2 enforcement: stuck inferred effect — a CIntersectionMember
 			-- on a uvar that never got bound must error at quiescence.
-			err(st, "S-Quiesce-CIntersectionMember",
-				"CIntersectionMember stuck on unbound uvar (effect never inferred)")
+			--: V5Type | nil
+			local container_nil = nil
+			local eff_ty = as_v5type(c.part)
+			if eff_ty ~= nil then
+				--: ErrorDetails
+				local det = { tag = "effect_not_permitted", effect = eff_ty, container = container_nil }
+				err(st, "S-Quiesce-CIntersectionMember",
+					"CIntersectionMember stuck on unbound uvar (effect never inferred)",
+					c.prov, det)
+			else
+				err(st, "S-Quiesce-CIntersectionMember",
+					"CIntersectionMember stuck on unbound uvar (effect never inferred)",
+					c.prov, nil)
+			end
 		elseif c.tag == "csub" then
 			-- Parked csub: ra=uvar was never bound by a competing constraint.
 			-- Materialize as the meet (intersection) of accumulated upper
