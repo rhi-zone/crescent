@@ -114,6 +114,8 @@ local T_STRING = types_mod.const("string")
 local T_LIT_TRUE = types_mod.const("true")
 --: V5Type
 local T_LIT_FALSE = types_mod.const("false")
+--: V5Type
+local T_COROUTINE = types_mod.const("Coroutine")
 
 --:: RawAnn = { kind: integer, content: string, col: integer, ... }
 
@@ -339,6 +341,167 @@ local function build_pcall_ret(fn_ty)
     --: V5Type
     local union_ty = types_mod.union(branches)
     return union_ty, non_throw_effs
+end
+
+-- ── coroutine.create Coroutine<Y,S,R> builder ────────────────────────────────
+--
+-- Gap #3 (5.F3): coroutine.create returns Coroutine<Y, S, R> where Y and R are
+-- extracted from !yield<Y, R> in the argument function's effect intersection.
+-- S is a fresh uvar because the argument function body cannot determine what
+-- coroutine.resume passes back.
+--
+-- !yield<Y, R> is encoded as App(App(Const("!yield"), Y), R):
+--   effect_apply(effect("yield"), {Y, R})
+--   = App(App(Const("!yield"), Y), R)
+-- Unwrap: eff.f.a = Y (inner App's argument), eff.a = R (outer App's argument).
+--
+-- When !yield is absent or fn_ty is non-arrow, fall back to
+-- App(App(App(Coroutine, unknown), unknown), unknown).
+--
+-- Returns: (coro_ty, non_yield_effects)
+--: (V5Ctx, V5Type | nil) -> (V5Type, V5Type[])
+local function build_coroutine_create_ret(ctx, fn_ty)
+    --: V5Type
+    local fallback_y = T_UNKNOWN
+    --: V5Type
+    local fallback_r = T_UNKNOWN
+    --: V5Type[]
+    local non_yield_effs = {}
+
+    --: V5Type
+    local yield_y = fallback_y
+    --: V5Type
+    local yield_r = fallback_r
+    local found_yield = false
+
+    if fn_ty ~= nil and fn_ty.tag == "arrow" then
+        local ret_rec = fn_ty.ret
+        if ret_rec ~= nil and ret_rec.tag == "record" then
+            -- Scan all positional return fields for effects.
+            local i = 1
+            while true do
+                local rv = ret_rec.fields[tostring(i)]
+                if rv == nil then break end
+                if types_mod.is_effect(rv) then
+                    -- Walk to the effect head.
+                    local head = rv
+                    while head.tag == "app" do head = head.f end
+                    if head.tag == "const" and head.name == "!yield" then
+                        -- !yield<Y,R> = App(App(Const("!yield"), Y), R)
+                        -- rv.f = App(Const("!yield"), Y), rv.a = R
+                        -- rv.f.a = Y
+                        if rv.tag == "app" and rv.f ~= nil and rv.f.tag == "app" then
+                            --: V5Type
+                            local y_ty = rv.f.a
+                            --: V5Type
+                            local r_ty = rv.a
+                            yield_y = y_ty
+                            yield_r = r_ty
+                            found_yield = true
+                        end
+                        -- !yield is consumed — do NOT add to non_yield_effs.
+                    else
+                        non_yield_effs[#non_yield_effs + 1] = rv
+                    end
+                end
+                i = i + 1
+            end
+            -- Also check a top-level intersection in field "1".
+            if not found_yield then
+                local ret1 = ret_rec.fields["1"]
+                if ret1 ~= nil and ret1.tag == "intersection" then
+                    local parts = ret1.parts
+                    non_yield_effs = {}
+                    for pi = 1, #parts do
+                        local p = parts[pi]
+                        if p ~= nil and types_mod.is_effect(p) then
+                            local head = p
+                            while head.tag == "app" do head = head.f end
+                            if head.tag == "const" and head.name == "!yield" then
+                                if p.tag == "app" and p.f ~= nil and p.f.tag == "app" then
+                                    --: V5Type
+                                    local y_ty2 = p.f.a
+                                    --: V5Type
+                                    local r_ty2 = p.a
+                                    yield_y = y_ty2
+                                    yield_r = r_ty2
+                                    found_yield = true
+                                end
+                            else
+                                non_yield_effs[#non_yield_effs + 1] = p
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- S is always a fresh uvar: the argument function body cannot determine
+    -- what coroutine.resume will pass back.
+    --: V5Type
+    local s_uvar = fresh_uvar(ctx)
+
+    -- Build App(App(App(Coroutine, Y), S), R) step by step to let the checker
+    -- track each intermediate V5Type without seeing nil from complex nesting.
+    --: V5Type
+    local app1 = types_mod.app(T_COROUTINE, yield_y)
+    --: V5Type
+    local app2 = types_mod.app(app1, s_uvar)
+    --: V5Type
+    local coro_ty = types_mod.app(app2, yield_r)
+    return coro_ty, non_yield_effs
+end
+
+-- ── extract_yield_from_ann_ret ─────────────────────────────────────────────────
+--
+-- Search the innermost annotated return types for a !yield<Y,R> component.
+-- ann_ret_stack entries are V5Type | nil; for an annotated function whose
+-- return is "nil & !yield<Y,R>", ann_ret = intersection([nil, App(App(!yield,Y),R)]).
+-- Returns (Y, S_fresh, R) if found; (unknown, fresh_uvar, unknown) as fallback.
+-- S is always a fresh uvar (not in the annotation; resume binds it).
+--: (V5Ctx) -> (V5Type, V5Type, V5Type)
+local function extract_yield_from_scope(ctx)
+    local ar = ctx.ann_ret_stack
+    -- Search from innermost outward.
+    for depth = #ar, 1, -1 do
+        --: unknown
+        local slot = ar[depth]
+        --: V5Type | nil
+        local ann_ret = as_v5type(slot)
+        if ann_ret ~= nil then
+            -- ann_ret may be an intersection containing !yield<Y,R>.
+            --: V5Type[]
+            local parts = {}
+            if ann_ret.tag == "intersection" then
+                parts = ann_ret.parts
+            else
+                parts[1] = ann_ret
+            end
+            for i = 1, #parts do
+                local p = parts[i]
+                if p ~= nil and types_mod.is_effect(p) then
+                    local head = p
+                    while head.tag == "app" do head = head.f end
+                    if head.tag == "const" and head.name == "!yield" then
+                        if p.tag == "app" and p.f ~= nil and p.f.tag == "app" then
+                            --: V5Type
+                            local y_ty = p.f.a
+                            --: V5Type
+                            local r_ty = p.a
+                            --: V5Type
+                            local s_uvar = fresh_uvar(ctx)
+                            return y_ty, s_uvar, r_ty
+                        end
+                    end
+                end
+            end
+        end
+    end
+    -- Not found: return unknowns + fresh uvar.
+    --: V5Type
+    local s_uvar = fresh_uvar(ctx)
+    return T_UNKNOWN, s_uvar, T_UNKNOWN
 end
 
 -- ── Effect scope helpers ──────────────────────────────────────────────────────
@@ -690,8 +853,12 @@ gen_expr = function(ctx, nid)
         -- Detect syntactic special cases for effect handlers.
         -- pcall(fn, ...) — consumes !throw<E> from fn's effects.
         -- coroutine.create(fn) — consumes !yield from fn's effects.
+        -- coroutine.resume(co, ...) — discriminated return from Coroutine<Y,S,R>.
+        -- coroutine.yield(...) — typechecks against enclosing !yield annotation.
         local is_pcall          = false
         local is_coro_create    = false
+        local is_coro_resume    = false
+        local is_coro_yield     = false
         if callee_node.kind == NODE_IDENTIFIER then
             local cname = intern_str(ctx, callee_node.data[0])
             if cname == "pcall" then is_pcall = true end
@@ -700,8 +867,14 @@ gen_expr = function(ctx, nid)
             if obj_node.kind == NODE_IDENTIFIER then
                 local oname = intern_str(ctx, obj_node.data[0])
                 local fname = intern_str(ctx, callee_node.data[1])
-                if oname == "coroutine" and fname == "create" then
-                    is_coro_create = true
+                if oname == "coroutine" then
+                    if fname == "create" then
+                        is_coro_create = true
+                    elseif fname == "resume" then
+                        is_coro_resume = true
+                    elseif fname == "yield" then
+                        is_coro_yield = true
+                    end
                 end
             end
         end
@@ -728,6 +901,123 @@ gen_expr = function(ctx, nid)
             return pcall_ret_ty
         end
 
+        -- 5.F3: coroutine.create is special-cased: skip the normal callee_ty
+        -- lookup and CSub so the stdlib coroutine.create arrow's return type
+        -- (flat thread) does not conflict with the Coroutine<Y,S,R> we build.
+        if is_coro_create then
+            -- Inspect first arg's arrow type to extract !yield<Y,R>.
+            --: V5Type | nil
+            local first_arg_ty = arg_types[1]
+            --: V5Type | nil
+            local inner_arrow = nil
+            if first_arg_ty ~= nil and first_arg_ty.tag == "arrow" then
+                inner_arrow = first_arg_ty
+            end
+            local coro_ty, non_yield_effs = build_coroutine_create_ret(ctx, inner_arrow)
+            -- Propagate non-!yield effects from the coroutine body outward.
+            for i = 1, #non_yield_effs do
+                local e = non_yield_effs[i]
+                if e ~= nil then propagate_effect(ctx, e, n.line) end
+            end
+            return coro_ty
+        end
+
+        -- 5.F3: coroutine.resume is special-cased: inspect co's type.
+        -- If co is Coroutine<Y,S,R>, return (true,Y) | (true,R) | (false,string).
+        -- S is subtyped against the second arg (resume sends it to yield).
+        if is_coro_resume then
+            --: V5Type | nil
+            local co_ty = arg_types[1]
+            --: V5Type | nil
+            local send_ty = arg_types[2]
+            -- Attempt to decompose App(App(App(Coroutine, Y), S), R).
+            if co_ty ~= nil and co_ty.tag == "app"
+                and co_ty.f ~= nil and co_ty.f.tag == "app"
+                and co_ty.f.f ~= nil and co_ty.f.f.tag == "app"
+                and co_ty.f.f.f ~= nil and co_ty.f.f.f.tag == "const"
+                and co_ty.f.f.f.name == "Coroutine" then
+                -- co_ty = App(App(App(Coroutine, Y), S), R)
+                -- co_ty.f.f.a = Y, co_ty.f.a = S, co_ty.a = R
+                --: V5Type
+                local y_ty = co_ty.f.f.a
+                --: V5Type
+                local s_ty = co_ty.f.a
+                --: V5Type
+                local r_ty = co_ty.a
+                -- Subtype send value against S (resume sends to yield).
+                if send_ty ~= nil then
+                    emit(ctx, C.sub(send_ty, s_ty, prov_inferred(ctx, n.line)))
+                end
+                -- Build (true,Y) | (true,R) | (false,string).
+                local tf1 = {} --[[: { [string]: V5Type } ]]
+                tf1[tostring(1)] = T_LIT_TRUE
+                tf1[tostring(2)] = y_ty
+                --: V5Type
+                local tb1 = types_mod.record(tf1)
+                local tf2 = {} --[[: { [string]: V5Type } ]]
+                tf2[tostring(1)] = T_LIT_TRUE
+                tf2[tostring(2)] = r_ty
+                --: V5Type
+                local tb2 = types_mod.record(tf2)
+                local ff  = {} --[[: { [string]: V5Type } ]]
+                ff[tostring(1)]  = T_LIT_FALSE
+                ff[tostring(2)]  = T_STRING
+                --: V5Type
+                local fb = types_mod.record(ff)
+                --: V5Type[]
+                local branches = {}
+                branches[1] = tb1
+                branches[2] = tb2
+                branches[3] = fb
+                return types_mod.union(branches)
+            else
+                -- Fallback: co is uvar or bare thread — return (boolean, unknown).
+                local tf = {} --[[: { [string]: V5Type } ]]
+                tf[tostring(1)] = T_LIT_TRUE
+                --: V5Type
+                local tbf = types_mod.record(tf)
+                local ff = {} --[[: { [string]: V5Type } ]]
+                ff[tostring(1)] = T_LIT_FALSE
+                ff[tostring(2)] = T_UNKNOWN
+                --: V5Type
+                local fbf = types_mod.record(ff)
+                --: V5Type[]
+                local branches = {}
+                branches[1] = tbf
+                branches[2] = fbf
+                return types_mod.union(branches)
+            end
+        end
+
+        -- 5.F3: coroutine.yield is special-cased: look up the enclosing
+        -- function's !yield<Y,R> annotation to typecheck the yielded value
+        -- and return S (the type resume sends back).
+        if is_coro_yield then
+            --: V5Type | nil
+            local yield_val_ty = arg_types[1]
+            local y_ty, s_ty, _r_ty = extract_yield_from_scope(ctx)
+            -- Subtype yielded value against Y.
+            if yield_val_ty ~= nil then
+                emit(ctx, C.sub(yield_val_ty, y_ty, prov_inferred(ctx, n.line)))
+            else
+                -- yield called with no argument — treat as nil yielded.
+                emit(ctx, C.sub(T_NIL, y_ty, prov_inferred(ctx, n.line)))
+            end
+            -- !yield propagates outward: this function is a yielding function.
+            -- Reconstruct !yield<Y,R> to propagate (using _r_ty from scope).
+            --: V5Type[]
+            local yield_args = {}
+            yield_args[1] = y_ty
+            yield_args[2] = _r_ty
+            --: V5Type
+            local yield_head = types_mod.effect("yield")
+            --: V5Type
+            local yield_eff = types_mod.effect_apply(yield_head, yield_args)
+            propagate_effect(ctx, yield_eff, n.line)
+            -- Return type of coroutine.yield is S (what resume passes back).
+            return s_ty
+        end
+
         -- Try eager resolution for dotted callees (e.g. io.write, os.exit).
         -- If the chain resolves to a concrete arrow via record-field lookup,
         -- use it directly so propagate_callee_effects can extract effects now
@@ -745,18 +1035,9 @@ gen_expr = function(ctx, nid)
         local expected_fn = types_mod.arrow(arg_types, rets_arr)
         emit(ctx, C.sub(callee_ty, expected_fn, prov_inferred(ctx, n.line)))
 
-        -- Effect propagation.
-        if is_coro_create then
-            -- coroutine.create consumes !yield from its argument function.
-            -- As with pcall, the full parameterized Coroutine<Y,S,R> type requires
-            -- more type elaboration than the gen-pass currently supports; the
-            -- return is left as a fresh uvar (gap noted for 5.D).
-        else
-            -- Normal call: propagate effects from callee's known return type.
-            -- For eager-resolved dotted callees this now sees the real arrow,
-            -- so F2 enforcement fires correctly.
-            propagate_callee_effects(ctx, callee_ty, n.line)
-        end
+        -- Effect propagation: normal call path (coroutine special cases have
+        -- already returned above; is_coro_create/resume/yield never reach here).
+        propagate_callee_effects(ctx, callee_ty, n.line)
 
         return ret
     end

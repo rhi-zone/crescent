@@ -450,4 +450,38 @@ T.describe("v5 constrain — effect propagation", function()
         T.ok(count_tag(cs, "cint_member") >= 1, "cint_member emitted for !io membership check")
     end)
 
+    -- 5.F3: coroutine.create emits NO constraints — fully special-cased.
+    T.it("5.F3: coroutine.create call site emits no constraints (special-cased)", function()
+        local src = "local co = coroutine.create(function() end)"
+        local decls = stdlib_mod.decls()
+        local cli_mod = require("lib.type.static-v5.cli")
+        local expanded = cli_mod.expand_dotted(decls)
+        local cs, errs = constrain.generate(src, "test.lua", { decls = expanded })
+        T.eq(#errs, 0, "no errors")
+        -- coroutine.create is fully special-cased; no csub emitted for it.
+        T.eq(count_tag(cs, "csub"), 0, "no csub emitted for coroutine.create (special-cased)")
+    end)
+
+    -- 5.F3: coroutine.create does NOT propagate !yield outward.
+    T.it("5.F3: coroutine.create in annotated pure fn — no cint_member for !yield", function()
+        -- Outer function annotated as () -> nil.  Inner yields.  After 5.F3,
+        -- coroutine.create consumes !yield so the outer annotation is satisfied.
+        local src = "--: () -> nil\nlocal function f() coroutine.create(function() coroutine.yield(1) end) end"
+        local decls = stdlib_mod.decls()
+        local cli_mod = require("lib.type.static-v5.cli")
+        local expanded = cli_mod.expand_dotted(decls)
+        local cs, errs = constrain.generate(src, "test.lua", { decls = expanded })
+        T.eq(#errs, 0, "no parse/annotation errors")
+        -- !yield consumed by coroutine.create → no cint_member for !yield.
+        local found_yield_member = any(cs, function(c)
+            if c.tag ~= "cint_member" then return false end
+            local p = c.part
+            if p == nil then return false end
+            local head = p
+            while head.tag == "app" do head = head.f end
+            return head.tag == "const" and head.name == "!yield"
+        end)
+        T.ok(not found_yield_member, "no cint_member for !yield after coroutine.create consumed it")
+    end)
+
 end)

@@ -180,6 +180,47 @@ end
         T.eq(code, 0, "exit 0 — unannotated mixed effects inferred")
     end)
 
+    -- 6b. 5.F3: coroutine.create in an annotated pure outer fn is clean.
+    --     !yield is consumed by coroutine.create; outer () -> nil annotation met.
+    T.it("5.F3: coroutine.create consumes !yield — pure outer fn is clean", function()
+        local src = [[
+--: () -> nil
+local function f()
+    local co = coroutine.create(function()
+        coroutine.yield(42)
+    end)
+    local _ = co
+end
+]]
+        local code, _out, _err = run(src, "coro_create_pure.lua")
+        T.eq(code, 0, "exit 0 — coroutine.create consumes !yield, outer annotation satisfied")
+    end)
+
+    -- 6c. 5.F3: coroutine.create annotated as unknown typechecks.
+    --     The return of coroutine.create is Coroutine<Y,S,R>; annotating as
+    --     unknown (supertype of all) should pass.
+    T.it("5.F3: coroutine.create return annotated as unknown typechecks", function()
+        local src = [[
+local function f()
+    --: unknown
+    local co = coroutine.create(function() coroutine.yield(1) end)
+    local _ = co
+end
+]]
+        local code, _out, _err = run(src, "coro_create_unknown.lua")
+        T.eq(code, 0, "exit 0 — coroutine.create return is compatible with unknown")
+    end)
+
+    -- 6d. 5.F3 negative: coroutine.yield outside !yield annotation fires F2.
+    --     An annotated pure function that calls coroutine.yield should error
+    --     because yield is not consumed (no coroutine.create wraps it).
+    T.it("5.F3 negative: coroutine.yield in annotated pure fn triggers F2", function()
+        local src = "--: () -> nil\nlocal function f() coroutine.yield(1) end"
+        local code, out, _err = run(src, "coro_yield_f2.lua")
+        T.eq(code, 1, "exit 1 — coroutine.yield without create still triggers F2")
+        T.ok(out ~= "", "error output produced")
+    end)
+
     -- 7. No files argument returns exit code 2.
     T.it("no files argument returns exit 2", function()
         local fc = fake_caps("")

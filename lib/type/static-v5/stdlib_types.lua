@@ -207,18 +207,27 @@ function M.decls()
     d["os"] = types_mod.record(os_fields)
 
     -- ── coroutine library ───────────────────────────────────────────────────
-    -- Conservative types: full !yield<Y,R> parameterisation requires 5.D.
-    -- coroutine.create(fn) -> thread  — syntactically special-cased in gen-pass.
+    -- 5.F3: coroutine.create/resume/yield are fully special-cased in the
+    -- gen-pass (constrain.lua build_coroutine_create_ret + is_coro_* paths).
+    -- The declarations here are conservative fallbacks used when coroutine
+    -- functions are passed as first-class values (not called directly).
+    --
+    -- coroutine.create(fn) -> Coroutine<Y,S,R>  — special-cased in gen-pass.
+    -- The conservative decl returns thread (arity-check still works).
     --: V5Type
     local T_THREAD = tc("thread")
     --: V5Type
+    local T_COROUTINE = tc("Coroutine")
+    --: V5Type
     local coro_create = effectful_fn({ T_UNKNOWN }, T_THREAD, {})
-    -- coroutine.resume(co, ...) -> (boolean, unknown) & !yield
+    -- coroutine.resume(co, ...) -> (true,Y)|(true,R)|(false,string) — special-cased.
+    -- Conservative decl: (boolean, unknown).
+    --: V5Type
+    local coro_resume = effectful_fn({ T_COROUTINE, T_UNKNOWN }, T_UNKNOWN, {})
+    -- coroutine.yield(...) -> S & !yield<Y,R>  — special-cased in gen-pass.
+    -- Conservative decl: unknown & !yield.
     --: V5Type
     local eff_yield = eff("yield")
-    --: V5Type
-    local coro_resume = effectful_fn({ T_THREAD, T_UNKNOWN }, T_UNKNOWN, { eff_yield })
-    -- coroutine.yield(...) -> unknown & !yield
     --: V5Type
     local coro_yield = effectful_fn({ T_UNKNOWN }, T_UNKNOWN, { eff_yield })
     -- coroutine.wrap(fn) -> function
