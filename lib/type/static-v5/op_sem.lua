@@ -93,7 +93,7 @@ M.variance    = variance_mod
 
 --:: OpSemError = { rule: string, msg: string }
 --:: OpSemTrace = { rule: string, msg: string }
---:: OpSemState = { subst: Subst, worklist: OpSemConstraint[], head: integer, tail: integer, inert: { [integer]: OpSemConstraint }, errors: OpSemError[], trace: OpSemTrace[], reactivations: integer, steps: integer, row_watchers: { [integer]: { [integer]: boolean } } }
+--:: OpSemState = { subst: Subst, worklist: OpSemConstraint[], head: integer, tail: integer, inert: { [integer]: OpSemConstraint }, errors: OpSemError[], trace: OpSemTrace[], reactivations: integer, steps: integer, row_watchers: { [integer]: { [integer]: boolean } }, upper_bounds: { [integer]: V5Type[] }, lower_bounds: { [integer]: V5Type[] } }
 
 --: () -> OpSemState
 function M.new_state()
@@ -108,6 +108,8 @@ function M.new_state()
 		reactivations = 0,
 		steps         = 0,
 		row_watchers  = {} --[[: { [integer]: { [integer]: boolean } } ]],
+		upper_bounds  = {} --[[: { [integer]: V5Type[] } ]],
+		lower_bounds  = {} --[[: { [integer]: V5Type[] } ]],
 	}
 end
 
@@ -194,6 +196,35 @@ local function wake_rowvar(st, rv_id)
 			st.reactivations = st.reactivations + 1
 		end
 	end
+end
+
+-- Bound-tracking helpers.  Bounds live in side tables on OpSemState keyed
+-- by the uvar's union-find root id (so unioned uvars share bounds).
+-- Dedupe is by types_mod.equal — concrete bounds usually appear in fixed
+-- shapes from a single annotation, so the O(n) scan is acceptable.
+--: (V5Type[], V5Type) -> boolean
+local function bounds_contains(xs, t)
+	for i = 1, #xs do
+		local v = xs[i]
+		if v ~= nil and types_mod.equal(v, t) then return true end
+	end
+	return false
+end
+
+--: (OpSemState, integer, V5Type) -> nil
+local function add_upper_bound(st, tv_id, ty)
+	local root = subst_mod.find(st.subst, tv_id)
+	local list = st.upper_bounds[root]
+	if list == nil then list = {} --[[: V5Type[] ]]; st.upper_bounds[root] = list end
+	if not bounds_contains(list, ty) then list[#list + 1] = ty end
+end
+
+--: (OpSemState, integer, V5Type) -> nil
+local function add_lower_bound(st, tv_id, ty)
+	local root = subst_mod.find(st.subst, tv_id)
+	local list = st.lower_bounds[root]
+	if list == nil then list = {} --[[: V5Type[] ]]; st.lower_bounds[root] = list end
+	if not bounds_contains(list, ty) then list[#list + 1] = ty end
 end
 
 --: (OpSemConstraint, Subst) -> { [integer]: boolean }
@@ -473,8 +504,16 @@ end
 function M.rule_T_CSub_TVar(st, a, b, prov)
 	if a.tag == "uvar" and b.tag ~= "uvar" then
 		-- Park: wait for a to be bound, then retry sub(a_bound, b).
+		-- Record `b` as an upper bound of a; at S-Quiesce the uvar binds to
+		-- the meet (intersection) of accumulated upper bounds.
+		add_upper_bound(st, a.id, b)
 		trace(st, "T-CSub-TVar", "ra=uvar → park watching ra=" .. tostring(a.id))
 		return "stuck"
+	end
+	if b.tag == "uvar" and a.tag ~= "uvar" then
+		-- Record `a` as a lower bound of b for later verification, then
+		-- fall through to the CEq route (preserves existing behavior).
+		add_lower_bound(st, b.id, a)
 	end
 	-- rb=uvar (and ra concrete), or both uvars: route to CEq.
 	M.emit(st, constraint_mod.eq(a, b, prov))
@@ -1584,9 +1623,13 @@ function M.run(st)
 				"CIntersectionMember stuck on unbound uvar (effect never inferred)")
 		elseif c.tag == "csub" then
 			-- Parked csub: ra=uvar was never bound by a competing constraint.
-			-- Apply upper-bound default: bind ra := rb (CEq route at quiescence).
-			-- Narrow to the concrete ConstraintSub fields via the constraint_mod
-			-- accessor (safer than a force cast).
+			-- Materialize as the meet (intersection) of accumulated upper
+			-- bounds — preserves principal-type semantics when multiple
+			-- CSub demands accumulated on the same uvar.  A single bound is
+			-- equivalent to the prior CEq(ra, rb) behavior.  Conflicting
+			-- bounds (e.g. integer & string) surface as real errors via
+			-- existing intersection-reduction rules.  Lower bounds are
+			-- verified against the resolved type after binding.
 			local cc_a_raw = c.a  -- .a is V5Type on ConstraintSub
 			local cc_b_raw = c.b  -- .b is V5Type on ConstraintSub
 			local cc_p_raw = c.prov
@@ -1602,9 +1645,44 @@ function M.run(st)
 				--: Provenance
 				local prov2 = cc_p_raw
 				if ra2.tag == "uvar" then
-					-- Still unbound: bind to upper bound.
-					M.emit(st, constraint_mod.eq(ra2, rb2, prov2))
-					trace(st, "S-Quiesce-CSub-TVar", "defaulting uvar to upper bound")
+					-- Still unbound: bind to meet of upper bounds.
+					local root = subst_mod.find(st.subst, ra2.id)
+					local uppers = st.upper_bounds[root]
+					if uppers == nil then
+						-- Bounds already drained by a prior parked-csub on the
+						-- same uvar; the meet has been emitted, nothing to do.
+						trace(st, "S-Quiesce-CSub-TVar", "bounds already drained for uvar=" .. tostring(root))
+					elseif #uppers == 0 then
+						-- Shouldn't happen (park populated bounds).
+						M.emit(st, constraint_mod.eq(ra2, rb2, prov2))
+						trace(st, "S-Quiesce-CSub-TVar", "defaulting uvar to upper bound (no bounds tracked)")
+						st.upper_bounds[root] = nil
+					elseif #uppers == 1 then
+						local u1 = uppers[1]
+						if u1 ~= nil then
+							M.emit(st, constraint_mod.eq(ra2, u1, prov2))
+							trace(st, "S-Quiesce-CSub-TVar", "single upper bound")
+						end
+						st.upper_bounds[root] = nil
+					else
+						-- Multiple upper bounds → meet via TIntersection.
+						local meet = types_mod.intersection(uppers) --[[: V5Type ]]
+						M.emit(st, constraint_mod.eq(ra2, meet, prov2))
+						trace(st, "S-Quiesce-CSub-TVar",
+							"meet of " .. tostring(#uppers) .. " upper bounds")
+						st.upper_bounds[root] = nil
+					end
+					-- Verify lower bounds against the (about-to-be) resolved type.
+					local lowers = st.lower_bounds[root]
+					if lowers ~= nil then
+						for i = 1, #lowers do
+							local lb = lowers[i]
+							if lb ~= nil then
+								M.emit(st, constraint_mod.sub(lb, ra2, prov2))
+							end
+						end
+						st.lower_bounds[root] = nil
+					end
 				else
 					-- ra was bound between park and quiescence (possible if multiple
 					-- passes are needed); retry the sub constraint.
