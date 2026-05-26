@@ -23,7 +23,7 @@ or commit SHA where surfaced), category.
 ### High impact
 
 - [x] **P6** `[gen-pass]` Binary and unary operators emit fresh uvar instead of arithmetic/logical constraints — lib/type/static-v5/constrain.lua:38 — closed 56af6204 (arithmetic/comparison/concat/logical/unary all constrain operands and return typed results; arithmetic approximated to number, integer refinement deferred)
-- [x] **P6** `[gen-pass]` for-in and for-num loop variables bound to `unknown` — lib/type/static-v5/constrain.lua:39 — closed HEAD (for-num bounds emit CSub against number; loop var bound to number; for-in pairs/ipairs special-cased to extract K/V from index signature; unknown fallback for unresolved iterators; also fixed lookup() to check active scope)
+- [x] **P6** `[gen-pass]` for-in and for-num loop variables bound to `unknown` — lib/type/static-v5/constrain.lua:39 — closed 2ed0dfe1 (for-num bounds emit CSub against number; loop var bound to number; for-in pairs/ipairs special-cased to extract K/V from index signature; unknown fallback for unresolved iterators; also fixed lookup() to check active scope)
 - [ ] **P6** `[gen-pass]` Arithmetic operators return number unconditionally; integer refinement deferred — lib/type/static-v5/constrain.lua (gen-pass #4 residual from 56af6204)
 - [ ] **P6** `[gen-pass]` Multi-return tuple types use union as approximation instead of proper tuple constraints — lib/type/static-v5/constrain.lua:42
 - [ ] **P6** `[gen-pass]` Method dispatch edge cases beyond simple `obj:method(...)` not modelled — lib/type/static-v5/constrain.lua:37
