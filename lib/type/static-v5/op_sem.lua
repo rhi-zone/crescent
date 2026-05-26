@@ -574,6 +574,11 @@ function M.rule_T_CSub_Const_Var(st, a, b, prov)
 		err(st, "T-CSub-Const-Var", "precondition: both const"); return "error"
 	end
 	if a.name ~= b.name then
+		-- Primitive lattice: integer <: number (integer ⊆ numbers).
+		if a.name == "integer" and b.name == "number" then
+			trace(st, "T-CSub-Const-Var", "integer <: number")
+			return "done"
+		end
 		err(st, "T-CSub-Const-Var",
 			"const name mismatch: " .. a.name .. " vs " .. b.name,
 			prov, { tag = "const_mismatch", a_name = a.name, b_name = b.name })
@@ -1657,6 +1662,107 @@ function M.step(st, c)
 	return "error"
 end
 
+-- ────────────────────────────────────────────────────────────────────────────
+-- Compatible-bound intersection reduction (Phase 5.F4 residual)
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- When S-Quiesce emits meet(upper_bounds) as a TIntersection, pairwise
+-- structural subtype checks drop subsumed elements so that `integer & number`
+-- collapses to `integer` before the CEq is emitted.
+--
+-- structurally_subtype(a, b) returns true iff `a <: b` can be decided by
+-- cheap structural inspection — no constraint emission, no op-sem state.
+-- It handles the common primitive lattice and depth-1 structural cases;
+-- it returns false (conservative) for any shape it cannot cheaply decide.
+--: (V5Type, V5Type) -> boolean
+local function structurally_subtype(a, b)
+	-- Reflexivity.
+	if types_mod.equal(a, b) then return true end
+	-- Top type: everything subtypes unknown.
+	if b.tag == "const" and b.name == "unknown" then return true end
+	-- Bottom type: never subtypes everything.
+	if a.tag == "const" and a.name == "never" then return true end
+	-- Primitive lattice: integer <: number.
+	if a.tag == "const" and b.tag == "const" then
+		if a.name == "integer" and b.name == "number" then return true end
+		-- Boolean literal consts subtype boolean.
+		if (a.name == "true" or a.name == "false") and b.name == "boolean" then return true end
+		return false
+	end
+	-- Literal widening: $LitInt<N> <: integer / number; $LitNum<N> <: number.
+	if a.tag == "app" and b.tag == "const" then
+		local af = a.f
+		if af ~= nil and af.tag == "const" then
+			local fn = af.name
+			if fn == "$LitInt" and (b.name == "integer" or b.name == "number") then return true end
+			if fn == "$LitNum" and b.name == "number" then return true end
+			if (fn == "true" or fn == "false") and b.name == "boolean" then return true end
+		end
+		return false
+	end
+	-- Record width: a <: b iff a has at least all fields of b and each shared
+	-- field satisfies structural subtyping.  Open row in b is conservative (punt).
+	if a.tag == "record" and b.tag == "record" then
+		if b.row ~= nil then return false end  -- open supertype: conservative
+		for k, bv in pairs(b.fields) do
+			local av = a.fields[k]
+			if av == nil then return false end
+			if not structurally_subtype(av, bv) then return false end
+		end
+		return true
+	end
+	-- Arrow: contravariant args, covariant ret.
+	if a.tag == "arrow" and b.tag == "arrow" then
+		if #a.args ~= #b.args then return false end
+		for i = 1, #a.args do
+			local ai, bi = a.args[i], b.args[i]
+			if ai == nil or bi == nil then return false end
+			-- contravariant: b_arg <: a_arg
+			if not structurally_subtype(bi, ai) then return false end
+		end
+		-- covariant ret (both are records)
+		return structurally_subtype(a.ret, b.ret)
+	end
+	return false
+end
+
+-- reduce_intersection(xs) takes a list of types (the raw upper bounds) and
+-- returns either the single surviving type or a TIntersection with subsumed
+-- elements removed.  An element e_j is dropped iff some other e_i satisfies
+-- structurally_subtype(e_i, e_j) — i.e., e_i is more specific.
+-- Ordering does not affect the result (pairwise, symmetric check).
+--: (V5Type[]) -> V5Type
+local function reduce_intersection(xs)
+	local n = #xs
+	local keep = {} --[[: boolean[] ]]
+	for i = 1, n do keep[i] = true end
+	for i = 1, n do
+		if keep[i] then
+			for j = 1, n do
+				if i ~= j and keep[j] then
+					-- xs[i] <: xs[j] → drop xs[j] (xs[i] is more specific).
+					local xi, xj = xs[i], xs[j]
+					if xi ~= nil and xj ~= nil and structurally_subtype(xi, xj) then
+						keep[j] = false
+					end
+				end
+			end
+		end
+	end
+	local reduced = {} --[[: V5Type[] ]]
+	for i = 1, n do
+		if keep[i] then
+			local v = xs[i]
+			if v ~= nil then reduced[#reduced + 1] = v end
+		end
+	end
+	if #reduced == 1 then
+		local r = reduced[1]
+		if r ~= nil then return r end
+	end
+	return types_mod.intersection(reduced)
+end
+
 -- S-Step / S-Park / S-Wake / S-Quiesce.
 --: (OpSemState) -> nil
 function M.run(st)
@@ -1751,11 +1857,12 @@ function M.run(st)
 						end
 						st.upper_bounds[root] = nil
 					else
-						-- Multiple upper bounds → meet via TIntersection.
-						local meet = types_mod.intersection(uppers) --[[: V5Type ]]
+						-- Multiple upper bounds → meet, with compatible-bound reduction
+						-- (e.g. integer & number collapses to integer).
+						local meet = reduce_intersection(uppers) --[[: V5Type ]]
 						M.emit(st, constraint_mod.eq(ra2, meet, prov2))
 						trace(st, "S-Quiesce-CSub-TVar",
-							"meet of " .. tostring(#uppers) .. " upper bounds")
+							"meet of " .. tostring(#uppers) .. " upper bounds (reduced to " .. tostring(meet.tag) .. ")")
 						st.upper_bounds[root] = nil
 					end
 					-- Verify lower bounds against the (about-to-be) resolved type.
