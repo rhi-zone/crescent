@@ -376,6 +376,67 @@ Syntax: `field?: T` for optional, `readonly field: T` for readonly. No table-lev
 
 Parameters can have mutually dependent bounds: `<T, K: $Keys<T>>(obj: T, key: K)`. For fully mutual bounds, the solver finds a fixed point by iterating until no bound changes.
 
+### Operational Semantics Dispatch — Formal Ordering Contracts
+
+The v5 solver (`lib/type/static-v5/op_sem.lua`) makes three dispatch/ordering
+decisions that are correct by construction but were not written down as formal
+contracts. This section records those contracts so a reader can determine the
+behavior without reading the implementation.
+
+#### G14 — T-CSub dispatcher priority order
+
+`step_csub` (op_sem.lua:771) routes a `CSub(a, b)` constraint to a sub-rule by
+inspecting the deref'd left/right type pair. The `if/elseif` chain order is
+the formal priority:
+
+1. **Refl** (line 773) — if `equal(ra, rb)` fires T-CSub-Refl and returns immediately. Fast path; structural decomposition is skipped entirely for identical types.
+2. **TVar** (line 777) — if either side is `uvar` fires T-CSub-TVar (park or equate). Must precede shape dispatch because unbound uvars carry no tag that would match any shape rule.
+3. **Top** (line 781) — if `rb` is `const("unknown")` fires T-CSub-Top. `unknown` is a supertype of everything; handled before tag-equality to avoid falling into T-CSub-Const-Var with a mismatched name.
+4. **Bottom** (line 785) — if `ra` is `const("never")` fires T-CSub-Never. Symmetric reason to Top.
+5. **LitWiden — App lhs** (line 791) — if `ra` is `app` and `rb` is `const`, checks `$Lit`/`$LitInt`/`$LitNum`/bool-literal heads and returns "done" if matched. Precedes same-tag dispatch so literal-app types don't fall to T-CSub-App-Var.
+6. **LitWiden — Const lhs** (line 817) — if both are `const`, checks `true`/`false` <: `boolean`. Precedes same-tag const dispatch for the same reason.
+7. **Union-L** (line 826) — if `ra` is `union` fires T-CSub-Union-L (each branch subtypes RHS). LHS takes priority; if both sides are unions, the recursive call sees RHS-only union on each branch.
+8. **Union-R** (line 829) — if `rb` is `union` fires T-CSub-Union-R (LHS must match exactly one branch).
+9. **Intersection-Decomp** (line 834) — if `ra` is `intersection` fires T-CSub-Intersection-Decomp (some part of LHS subtypes RHS). LHS decomposition precedes RHS conjunction for the same reason as Union-L vs Union-R.
+10. **Intersection-Conj** (line 837) — if `rb` is `intersection` fires T-CSub-Intersection-Conj (LHS subtypes every part of RHS).
+11. **Same-tag dispatch** (line 841) — both sides share a tag; dispatches to T-CSub-Const-Var, T-CSub-Arrow, T-CSub-Record-Width, or T-CSub-App-Var (with T-CSub-App-Struct fallback on "miss"). Tags not covered (lambda, var, etc.) fall through to a CEq emission.
+12. **Mismatch** (line 863) — different tags, not covered above; fires T-CSub-Mismatch and emits an error.
+
+**Why this order is sound.** Refl before TVar prevents a reflexive pair from being routed to equate (which would add a spurious constraint). TVar before shape dispatch ensures no unbound uvar is treated as a known tag. Top/Bottom before tag dispatch avoids the `unknown`/`never` constants being mis-routed to T-CSub-Const-Var as mismatched names. LitWiden before same-tag catches `$Lit<S> <: string` before the App-Var path demands identical heads.
+
+#### G15 — T-CTSet four-way cascade order
+
+`step_tset` (op_sem.lua:1053) resolves a `CTableSet(?t, k, v)` constraint by
+inspecting the phase and binding of `?t`. The cascade:
+
+1. **Sealed-Reject** (line 1057) — if the phase of `?t` is `"sealed"`, fires T-CTSet-Sealed-Reject regardless of any existing binding. Writing to a sealed table is always an error; no binding inspection needed.
+2. **Open-Fresh** (line 1061) — if `?t` is unbound (`binding == nil`), fires T-CTSet-Open-Fresh: creates a fresh single-field record `{ k = v }` and binds `?t` to it. This is the first-field case.
+3. **non-record guard** (line 1064) — if bound but not a record, emits an internal solver-invariant error. Not a user-facing case.
+4. **Open-Extend** (line 1068) — if `?t` is bound to a record and the key `k` is absent from its field map, fires T-CTSet-Open-Extend: adds the new field to the existing record in place.
+5. **Open-Equate** (line 1070) — if `?t` is bound to a record and the key `k` already exists, fires T-CTSet-Open-Equate: emits `CEq(existing_type, v)` to unify the existing field type with the new assignment.
+
+**Why this order is sound.** Sealed-first means a sealed table is rejected before any binding lookup, preventing a write from being accepted via the Open-Fresh path if the phase check were deferred. Bind-before-lookup (Fresh before Extend/Equate) ensures the first set operation establishes the record shape, so subsequent operations always see a record. Extend before Equate distinguishes new fields from re-assignments.
+
+#### G16 — T-CHKT-Reduce peel depth
+
+`step_chkt` (op_sem.lua:1575) routes a `CHKT(F, args, result)` constraint.
+`rule_T_CHKT_Reduce` (op_sem.lua:1510) handles the case where `F` is already
+bound to a lambda. The peel depth is **exactly `#args`**: the loop (lines 1518–1532)
+iterates once per element of the `args` array, unwrapping one `Lambda` binder
+per iteration. The invariant is one arg consumed per lambda layer; no recursion
+beyond that count. If fewer than `#args` lambda binders exist on the chain, the
+rule errors at line 1520.
+
+`step_chkt` itself (lines 1575–1589) dispatches as:
+
+1. **Lambda** (line 1577) — if `deref(F)` is `lambda`, fires T-CHKT-Reduce immediately. No Miller attempt.
+2. **Non-uvar, non-lambda** (line 1580) — if `deref(F)` is neither, fires T-CHKT-Rigid-Mismatch (error: HKT application on a rigid non-constructor).
+3. **Uvar + Miller** (line 1584) — if `deref(F)` is `uvar`, tries T-CHKT-Miller. If Miller returns "miss" (args outside the fragment, or result contains a nested lambda), falls to T-CHKT-Park (emit HOUnify).
+
+**Why this order is sound.** Lambda-first means a bound constructor is reduced immediately without wasting a Miller check. Miller before Park ensures the fast-path binding (abstract body over args) is attempted before deferring to HOUnify, which parks until the head becomes rigid via a head-watcher wake.
+
+*Implementation citations.* Dispatcher: `step_csub` op_sem.lua:771; cascade: `step_tset` op_sem.lua:1053; peel: `rule_T_CHKT_Reduce` op_sem.lua:1510, `step_chkt` op_sem.lua:1575.
+
 ## Open Questions
 
 Genuinely unresolved — needs dedicated design work:

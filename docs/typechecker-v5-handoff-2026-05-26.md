@@ -184,9 +184,9 @@ metavariables, `TRecord.row` field; `CRowExtend/Lacks/Close` constraint atoms;
 | G11 | Union backtracking — T-CSub-Union-R admits exact-branch only | Low | Open |
 | G12 | Effect-row variance / CEffect family | High | **CLOSED at op-sem layer 2026-05-26** |
 | G13 | Intersection types — ~~no AST variant~~ now TIntersection | Low | **CLOSED 2026-05-26** |
-| G14 | T-CSub dispatch priority not formally enforced | Low | Open |
-| G15 | T-CTSet four-way cascade order not formally enforced | Low | Open |
-| G16 | T-CHKT-Reduce chain peel depth not formally specified | Low | Open |
+| G14 | T-CSub dispatch priority not formally enforced | Low | **CLOSED** — 12-step priority documented in docs/type-system.md §Operational Semantics Dispatch |
+| G15 | T-CTSet four-way cascade order not formally enforced | Low | **CLOSED** — 5-branch cascade documented in docs/type-system.md §Operational Semantics Dispatch |
+| G16 | T-CHKT-Reduce chain peel depth not formally specified | Low | **CLOSED** — exact `#args` peel depth + 3-way dispatch documented in docs/type-system.md §Operational Semantics Dispatch |
 | G17 | Variadic generics (pcall/coroutine.resume accurate typing) | Med | **New 2026-05-26** |
 | P1 | Dotted callee effect propagation broken in gen-pass | High | **CLOSED 5.F1 a32b0a74** |
 | P2 | pcall return type flat `boolean \| unknown` (not discriminated) | Med | **CLOSED 5.F2 05fd0777** |

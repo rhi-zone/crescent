@@ -52,9 +52,6 @@ or commit SHA where surfaced), category.
 - [ ] **G1** `[substrate]` Miller pattern fragment restricted to UVar/Const args only; complex argument shapes not handled — docs/typechecker-v5-handoff-2026-05-26.md §6
 - [ ] **G3** `[substrate]` No eta-equivalence in Miller check — docs/typechecker-v5-handoff-2026-05-26.md §6
 - [ ] **G11** `[solver-soundness]` Union backtracking admits exact-branch only; no disjunction fallback — docs/typechecker-v5-handoff-2026-05-26.md §6
-- [ ] **G14** `[solver-soundness]` T-CSub dispatch priority not formally enforced (docs gap only) — docs/typechecker-v5-handoff-2026-05-26.md §6
-- [ ] **G15** `[substrate]` T-CTSet four-way cascade order not formally enforced (docs gap only) — docs/typechecker-v5-handoff-2026-05-26.md §6
-- [ ] **G16** `[substrate]` T-CHKT-Reduce chain peel depth not formally specified (docs gap only) — docs/typechecker-v5-handoff-2026-05-26.md §6
 - [ ] **5.F3-residual** `[effect-propagation]` Resume-side `S` narrowing incomplete: `coroutine.resume(co, s)` does not bind `S` from the send argument — docs/typechecker-v5-log.md Phase 5.F; handoff §9
 - [ ] **5.F4-residual** `[substrate]` Compatible-bound intersection reduction not implemented: `integer & number` does not reduce to `integer` at quiescence — docs/typechecker-v5-log.md Phase 5.F; handoff §9
 
@@ -62,6 +59,9 @@ or commit SHA where surfaced), category.
 
 ## Closed
 
+- [x] **G14** `[solver-soundness]` T-CSub dispatch priority not formally enforced — closed this commit (12-step priority order documented in docs/type-system.md §Operational Semantics Dispatch; cites step_csub op_sem.lua:771)
+- [x] **G15** `[substrate]` T-CTSet four-way cascade order not formally enforced — closed this commit (5-branch cascade documented in docs/type-system.md §Operational Semantics Dispatch; cites step_tset op_sem.lua:1053)
+- [x] **G16** `[substrate]` T-CHKT-Reduce chain peel depth not formally specified — closed this commit (exact `#args` peel depth + 3-way step_chkt dispatch documented in docs/type-system.md §Operational Semantics Dispatch; cites op_sem.lua:1510, 1575)
 - [x] **bench-col** `[tooling]` Column threading in bench_chkt.lua and corpus_extract.lua — closed c411c827 (bench_chkt: fully synthetic constraints, no source position exists; corpus_extract: heuristic gmatch extractor with no byte-offset tracking, col=0 is correct in both cases)
 - [x] **G8** `[soundness]` CRow narrowing soundness floor — closed 7f7d4d6c, b1825484 (S-Quiesce-CRowLacks prevents silent field-existence errors; CRowClose wakes parked CRowLacks; Scenario A quiescence error and Scenario B close-then-pass both verified)
 - [x] **G9-P4** `[substrate]` Arrow subtyping CSub→CEq fallback (uvar bounds substrate) — closed 5.F4 93311447 (uvar upper bounds tracked; meet of uppers at quiescence; no more silent CEq fallback). Note: G9 T-CSub-TVar dispatch gap remains open above; P4 was the quiescence-path specific fix.
