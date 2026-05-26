@@ -62,7 +62,7 @@ or commit SHA where surfaced), category.
 
 ## Closed
 
-- [x] **bench-col** `[tooling]` Column threading in bench_chkt.lua and corpus_extract.lua — closed PLACEHOLDER (bench_chkt: fully synthetic constraints, no source position exists; corpus_extract: heuristic gmatch extractor with no byte-offset tracking, col=0 is correct in both cases)
+- [x] **bench-col** `[tooling]` Column threading in bench_chkt.lua and corpus_extract.lua — closed c411c827 (bench_chkt: fully synthetic constraints, no source position exists; corpus_extract: heuristic gmatch extractor with no byte-offset tracking, col=0 is correct in both cases)
 - [x] **G8** `[soundness]` CRow narrowing soundness floor — closed 7f7d4d6c, b1825484 (S-Quiesce-CRowLacks prevents silent field-existence errors; CRowClose wakes parked CRowLacks; Scenario A quiescence error and Scenario B close-then-pass both verified)
 - [x] **G9-P4** `[substrate]` Arrow subtyping CSub→CEq fallback (uvar bounds substrate) — closed 5.F4 93311447 (uvar upper bounds tracked; meet of uppers at quiescence; no more silent CEq fallback). Note: G9 T-CSub-TVar dispatch gap remains open above; P4 was the quiescence-path specific fix.
 - [x] **G12** `[effect-propagation]` Effect-row variance / CEffect family — closed c600a446 (effects are TConst with "!" prefix; TIntersection composes; CIntersectionEq/Sub/Member with canonical form; S-Quiesce-CIntersectionMember enforces F2)
