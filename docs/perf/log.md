@@ -6,6 +6,71 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-05-26: v5 Phase 5.F — refreshed `bin/cr check --v5` wall-time comparison
+
+**Commits (5.F baseline):** 5.F1 = `a32b0a74`, 5.F2 = `05fd0777`, 5.F3 = `656c8596`,
+5.F4 = `93311447`. HEAD at time of measurement = `93311447`.
+
+This entry supersedes the earlier "v5 source pipeline" entry below. The prior measurement
+(v5 3.5× faster on demo_effects.lua) was incomplete-coverage fast: v5 was silently skipping
+the F2 enforcement check for dotted callees and returning flat `boolean | unknown` from pcall.
+After Phase 5.F all four gaps are closed. The demo now correctly errors on the deliberate
+F2 violation in section 7. These numbers reflect the honest, gap-closed state.
+
+### demo_effects.lua (lib/type/static-v5/fixtures/demo_effects.lua)
+
+100 LOC. Exercises multi-effect propagation, pcall `!throw` absorption, coroutine `!yield`
+consumption, and a deliberate F2 violation (section 7). v5 exits 1 (1 error, correct).
+v4 exits 0 (0 errors, 5 warnings — no effect enforcement in v4).
+
+| Checker | Run 1 | Run 2 | Run 3 | Median | Errors | Warnings |
+|---|---|---|---|---|---|---|
+| `bin/cr check` (v4) | 30ms | 25ms | 32ms | 30ms | 0 | 5 |
+| `bin/cr check --v5` | 10ms | 10ms | 11ms | 10ms | 1 | 0 |
+
+v5 is **~3×** faster on this file. Caveat: the two checkers produce different results —
+v4 misses the F2 violation entirely (not a regression, it's expected; v4 has no effect
+enforcement). Error counts are not comparable across checkers. Wall-time difference reflects
+dispatch overhead on a 100-LOC file; both are well below any useful threshold.
+
+**Raw output (one trial each):**
+
+```
+# v4 (bin/cr check)
+/tmp/crescent-precommit.*/staged/lib/type/static-v5/fixtures/demo_effects.lua:23:1: warning: `greet` has no signature — add a `--: (...) -> ...` annotation above the function definition
+... (5 warnings total)
+Checked 1 file(s): 0 error(s), 5 warning(s)
+real 0m0.030s
+
+# v5 (bin/cr check --v5)
+lib/type/static-v5/fixtures/demo_effects.lua: [T-CIntersectionMember-Direct] ty is neither intersection nor equal to part (tag=const)
+real 0m0.010s
+```
+
+### lib/stdlib/lint.lua (341 LOC, real production file)
+
+| Checker | Run 1 | Run 2 | Run 3 | Median | Errors |
+|---|---|---|---|---|---|
+| `bin/cr check` (v4) | 42ms | 30ms | 27ms | 30ms | 13 |
+| `bin/cr check --v5` | 16ms | 17ms | 27ms | 17ms | many |
+
+v5 wall time ~1.8× faster on this file. Error counts NOT comparable: v4 reports 13 known
+type errors; v5 reports many `[S-Quiesce] stuck constraint (tag=crow_extend)` diagnostics
+reflecting that gen-pass coverage for this file's patterns (Gap P6: method dispatch, closed
+records) is incomplete. v5 error output is diagnostic noise, not real type errors — same
+caveat as the prior entry.
+
+### Interpretation
+
+Prior "3.5×" number (from the entry below) was measured when v5 was silently skipping
+work. Post-5.F: v5 is ~3× faster on demo_effects.lua and ~1.8× faster on lint.lua.
+The speed advantage is still real but narrower than before — 5.F added genuine
+enforcement work (dotted-callee resolution, pcall special-casing, bounds accumulation).
+Both files remain well under 50ms for either checker. A fair comparison on solver work
+requires v5 gen-pass coverage parity with v4, which is future work (Gaps P5 + P6).
+
+---
+
 ## 2026-05-26: v5 source pipeline — `bin/cr check --v5` wall-time comparison
 
 **Commits:** ann.lua = `52fcae6f`, constrain.lua = `0ff434aa`, effect propagation = `6da6db59`,

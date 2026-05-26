@@ -6,7 +6,7 @@ If you read only one file, read this. For the prior session's full context, see 
 
 ---
 
-## What changed this cycle (2026-05-26) — two arcs
+## What changed this cycle (2026-05-26) — three arcs (updated: 5.F closure)
 
 ### Arc 1: CRow + CIntersection-effects (closes G8, G12 at op-sem layer)
 
@@ -19,7 +19,7 @@ Four commits landed. Parity: 187 → 275 (+88 assertions).
 | Fixture 8 reinstated | `b1825484` | CRow narrowing suppression (Scenario A: quiescence error; Scenario B: close-then-pass) | 219 → 233 |
 | Intersection + effects | `c600a446` | CIntersectionEq/Sub/Member + canonicalize + effect-type API + fixtures 23-29 | 233 → 275 |
 
-### Arc 2: Phase 5 source pipeline (v5-source-pipeline-integration CLOSED)
+### Arc 2: Phase 5 source pipeline (v5-source-pipeline-integration initially CLOSED, gaps #1–#4 still open at 5.E)
 
 Four commits landed. Total assertions: 275 → 504 (+229). Op-sem parity 275/275 preserved.
 
@@ -30,7 +30,31 @@ Four commits landed. Total assertions: 275 → 504 (+229). Op-sem parity 275/275
 | 5.C effect propagation | `6da6db59` | Effect propagation through call chains; pcall/coroutine stubs; +28 assertions | 458 → 486 |
 | 5.D CLI + e2e | `317acc9b` | `bin/cr check --v5` end-to-end; solver fixes; demo fixture; cli_e2e_test.lua 18 assertions | 486 → 504 |
 
-`bin/cr check --v5 lib/type/static-v5/fixtures/demo_effects.lua` exits 0 (hand-verified).
+`bin/cr check --v5 lib/type/static-v5/fixtures/demo_effects.lua` exits 0 (hand-verified by 5.D; after 5.F exits 1 — section 7 deliberate F2 violation now correctly fires).
+
+### Arc 3: Phase 5.F — four gap closures (source pipeline genuinely enforces)
+
+Four commits landed. Total assertions: 504 → 541 (+37). Op-sem parity 275/275 preserved throughout.
+
+| Phase | Commit | Description | Assertions |
+|---|---|---|---|
+| 5.F1 dotted callee | `a32b0a74` | Resolve field-expr callees at gen time; F2 fires on `io.write` | 504 → 516 |
+| 5.F2 pcall | `05fd0777` | pcall returns `(true, R...) \| (false, E)` discriminated union; consumes `!throw` | 516 → 526 |
+| 5.F3 coroutine | `656c8596` | `Coroutine<Y,S,R>` parameterisation; `coroutine.create` consumes `!yield` | 526 → 534 |
+| 5.F4 uvar bounds | `93311447` | Uvar bounds substrate; meet of uppers at quiescence (no more silent CEq fallback) | 534 → 541 |
+
+Note: the 5.E entry in `docs/typechecker-v5-log.md` claimed "v5 source pipeline landed" — that framing was overstated. Gaps #1–#4 were open and made F2 enforcement cosmetic for the common dotted-callee case, pcall imprecise, coroutines unparameterised, and uvar bounds unsound. 5.F is the honest closure.
+
+#### 5.F closure — per-gap fixture citations
+
+- **Gap P1** (closed `a32b0a74`): dotted callee resolution at gen time. F2 now fires on `io.write`. Demonstrated by fixture `"5.F1: annotated () -> nil calling io.write (dotted) surfaces F2 error"` in `cli_e2e_test.lua` and `"5.F1: annotated () -> nil calling io.write via dotted callee emits cint_member"` in `constrain_test.lua`.
+- **Gap P2** (closed `05fd0777`): pcall special-cased at gen time; returns discriminated `(true, R...) | (false, E)`; `!throw` consumed. Demonstrated by fixture `"5.F2: pcall on throwing fn in annotated pure fn is clean"` in `cli_e2e_test.lua` and `"5.F2: pcall call site emits no constraints (fully special-cased)"` in `constrain_test.lua`.
+- **Gap P3** (closed `656c8596`): `coroutine.create` special-cased; `!yield` consumed; outer pure annotation satisfied. Demonstrated by fixture `"5.F3: coroutine.create consumes !yield — pure outer fn is clean"` in `cli_e2e_test.lua` and `"5.F3: coroutine.create call site emits no constraints (special-cased)"` in `constrain_test.lua`.
+- **Gap P4** (closed `93311447`): uvar bounds substrate; meet of upper bounds at quiescence. Demonstrated by fixture `"5.F4: two distinct upper bounds — meet via intersection"` in `op_sem_bounds_test.lua`.
+
+Two residual sub-gaps tracked in TODO.md:
+- Resume-side `S` narrowing incomplete (5.F3): `coroutine.resume(co, s)` does not bind `S` from the send argument.
+- Compatible-bound intersection reduction not implemented (5.F4): `integer & number` does not reduce to `integer` at quiescence. Orthogonal substrate gap.
 
 ---
 
@@ -56,7 +80,9 @@ Four commits landed. Total assertions: 275 → 504 (+229). Op-sem parity 275/275
 | cli_e2e_test | `lib/type/static-v5/cli_e2e_test.lua` | 18 assertions, all pass |
 | Perf log | `docs/perf/log.md` | Updated 2026-05-26 (both arcs) |
 
-**Total: 504 assertions, 5 test files, all pass. Op-sem parity 275/275. Zero divergence.**
+**Total: 541 assertions, 6 test files, all pass. Op-sem parity 275/275. Zero divergence.**
+
+(Post-5.F: +37 assertions from 5.F1–5.F4. New test file: `op_sem_bounds_test.lua` (11 assertions).
 
 ---
 
@@ -90,33 +116,9 @@ that remain within the landed pipeline — they are open work, not landed work.
 
 ---
 
-## 3. Six open gaps within the Phase 5 source pipeline
+## 3. Open gaps within the Phase 5 source pipeline (post-5.F)
 
-These are open gaps in the code that landed. They are NOT closed. They represent
-material work remaining before the pipeline can be relied upon for real code.
-
-**Gap P1 — Effect propagation from field-access callees is broken.**
-`io.write(...)` has a uvar callee at gen-pass time, so `!io` is never extracted
-into the propagation chain. Only direct-bound names (`print`, `error`) propagate
-effects. F2 enforcement does NOT actually fire for dotted stdlib calls (e.g.,
-`io.write`, `os.execute`), even though the e2e test suite passes (the e2e tests
-exercise only direct-bound callees). This is the highest-priority source pipeline fix.
-
-**Gap P2 — pcall return type is flat `boolean | unknown`.**
-The correct type is a discriminated tuple-union `(true, R...) | (false, E)`.
-Current stdlib_types.lua returns `boolean | unknown`, losing the success/failure
-type distinction. Fixing this requires variadic generics (G17). Not unsound (flat
-is conservative), but loses precision that makes pcall narrowing useful.
-
-**Gap P3 — `coroutine.create` returns `thread`, not `Coroutine<Y,S,R>`.**
-Full parameterisation (yield type, send type, return type) is deferred. Current
-stub returns the unparameterised `thread` constant. Requires G17 or a specialised
-constraint family to parameterise.
-
-**Gap P4 — Arrow subtyping converts `sub(uvar, concrete)` to CEq at S-Quiesce.**
-Proper upper/lower bounds tracking (spec gap G9, "bounded tvars") is deferred.
-At S-Quiesce, a still-unbound uvar under an Arrow CSub defaults via CEq, which is
-overly restrictive and may reject valid programs.
+Gaps P1–P4 are **CLOSED** as of Phase 5.F (2026-05-26). See Arc 3 above for commit SHAs and fixture citations. Two open gaps remain:
 
 **Gap P5 — Ann surface: surface syntax features not wired to gen-pass.**
 ann.lua parses `&` intersection and `!Name<Args>` effect syntax in type positions.
@@ -130,11 +132,7 @@ across scopes) is not modelled in constrain.lua. The walker handles straight-lin
 code and basic function bodies. It does not handle closures stored in tables,
 `self`-style `:` method dispatch, or upvalue capture narrowing.
 
-**Next steps for each gap:**
-- P1: Fix dotted-callee effect extraction in constrain.lua before committing to
-  any gen-pass extension; it affects all real stdlib usage.
-- P2 + P3: Design G17 (variadic generics) first; then rewrite pcall/coroutine stubs.
-- P4: Design bounded-tvar substrate (G9) first; then revise S-Quiesce default-binding.
+**Next steps:**
 - P5: Extend constrain.lua to emit constraints for each skipped surface form, one at a time.
 - P6: Add method-call dispatch and closure-as-value handling to the gen-pass walker.
 
@@ -164,8 +162,8 @@ metavariables, `TRecord.row` field; `CRowExtend/Lacks/Close` constraint atoms;
 `S-Quiesce-CRowLacks` soundness floor. **Effects are types**: `TConst("!name")` prefix;
 `TIntersection` composes; `CIntersectionEq/Sub/Member` with canonical form (flatten+sort+dedupe);
 `S-Quiesce-CIntersectionMember` F2 enforcement. No dedicated CEffect family.
-**Source pipeline** (this cycle): parse.lua → ann.lua → constrain.lua → op_sem.lua;
-`bin/cr check --v5` wired end-to-end. Six open gaps in pipeline coverage (P1–P6 above).
+**Source pipeline**: parse.lua → ann.lua → constrain.lua → op_sem.lua;
+`bin/cr check --v5` wired end-to-end. Gaps P1–P4 closed by Phase 5.F; two open gaps remain (P5: ann surface forms, P6: closure/method dispatch). F2 enforcement fires correctly for dotted callees (`io.write`) and direct-bound callees. pcall returns discriminated `(true, R...) | (false, E)` and consumes `!throw`. `coroutine.create` consumes `!yield`. Uvar bounds tracked; meet of uppers at quiescence.
 
 ---
 
@@ -190,12 +188,12 @@ metavariables, `TRecord.row` field; `CRowExtend/Lacks/Close` constraint atoms;
 | G15 | T-CTSet four-way cascade order not formally enforced | Low | Open |
 | G16 | T-CHKT-Reduce chain peel depth not formally specified | Low | Open |
 | G17 | Variadic generics (pcall/coroutine.resume accurate typing) | Med | **New 2026-05-26** |
-| P1 | Dotted callee effect propagation broken in gen-pass | High | **New 2026-05-26** |
-| P2 | pcall return type flat `boolean | unknown` (not discriminated) | Med | **New 2026-05-26** |
-| P3 | coroutine.create returns unparameterised `thread` | Low | **New 2026-05-26** |
-| P4 | Arrow subtyping defaults uvar to CEq at S-Quiesce (no bounds) | Med | **New 2026-05-26** |
-| P5 | Ann surface forms not wired to gen-pass (type predicates, match, etc.) | Med | **New 2026-05-26** |
-| P6 | Closure-as-value and method dispatch not modelled in constrain.lua | Med | **New 2026-05-26** |
+| P1 | Dotted callee effect propagation broken in gen-pass | High | **CLOSED 5.F1 a32b0a74** |
+| P2 | pcall return type flat `boolean \| unknown` (not discriminated) | Med | **CLOSED 5.F2 05fd0777** |
+| P3 | coroutine.create returns unparameterised `thread` | Low | **CLOSED 5.F3 656c8596** |
+| P4 | Arrow subtyping defaults uvar to CEq at S-Quiesce (no bounds) | Med | **CLOSED 5.F4 93311447** |
+| P5 | Ann surface forms not wired to gen-pass (type predicates, match, etc.) | Med | Open |
+| P6 | Closure-as-value and method dispatch not modelled in constrain.lua | Med | Open |
 
 ---
 
@@ -208,30 +206,25 @@ All verifications from the 2026-05-25 handoff hold plus:
   (close-then-pass) verified in both interpreters (233 total).
 - **CIntersection fixtures 23-29**: both interpreters pass all assertions (275 total).
 - **CRow + CIntersection perf re-gate**: PASS (step counts 768/343, margins >200× wall, >10× heap).
-- **ann_test** (156 assertions): annotation parser handles all v5 type forms including
-  effect syntax and intersection. All pass.
-- **constrain_test** (55 assertions): gen-pass emits correct constraints for basic patterns.
-  All pass. Note: only exercises direct-bound callee patterns; Gap P1 not exercised.
-- **cli_e2e_test** (18 assertions): `bin/cr check --v5` exits correctly on fixtures
-  covering multi-effect propagation. All pass.
-- **demo_effects.lua**: `bin/cr check --v5` exits 0. Hand-verified.
+- **ann_test** (156 assertions): all pass.
+- **constrain_test** (69 assertions): all pass. Includes 5.F1 and 5.F2/5.F3 gen-pass fixtures.
+- **cli_e2e_test** (30 assertions): all pass. Includes 5.F1/5.F2/5.F3 e2e fixtures.
+- **op_sem_bounds_test** (11 assertions): all pass. Exercises 5.F4 bounds substrate.
+- **demo_effects.lua**: `bin/cr check --v5` exits 1 (section 7 deliberate F2 violation correctly fires). Hand-verified post-5.F.
 
 ---
 
 ## 8. Next-session menu
 
-### Option A: Fix Gap P1 (dotted callee effect propagation)
-**Prereqs**: none. Single file change in constrain.lua.
-**Cycles**: <1. Highest leverage: enables F2 enforcement for the real `io.*`/`os.*`
-call patterns that dominate real source code.
+### Option A: Fix Gap P5 (ann surface forms wired to gen-pass)
+**Prereqs**: none.
+**Cycles**: 1-2. High leverage: enables type predicate narrowing, newtype safety.
 
-### Option B: G17 design (variadic generics)
-**Prereqs**: orchestrator design decision before implementation.
-**Cycles**: 1-2 for design; implementation separate.
-**Unblocks**: Gap P2 (pcall discriminated return) and Gap P3 (coroutine typing).
+### Option B: Fix Gap P6 (closure-as-value + method dispatch in constrain.lua)
+**Prereqs**: none.
+**Cycles**: 1-2. Needed for real-code coverage of method-dispatch-heavy modules.
 
 ### Option C: Pre-stable follow-ups
-Same as 2026-05-25 handoff Option D. Unchanged prereqs and cycle estimates.
 Mining, missed-gen eval, circular require corpus check, property-based parity.
 
 ### Option D: CImpl (let-poly with implication wanteds)
@@ -240,17 +233,18 @@ Mining, missed-gen eval, circular require corpus check, property-based parity.
 
 ### Recommended order (orchestrator suggestion)
 
-1. **A** (Gap P1 fix) — one cycle, highest leverage for real-code coverage
-2. **B** (G17 design) — don't implement without a design; can overlap with A
+1. **A** (Gap P5) — small wins; each surface form is independent
+2. **B** (Gap P6) — needed before any real-code corpus validation
 3. **C** (pre-stable follow-ups) — discharge debts
 4. **D** (CImpl) — fills op-sem hole before gen-pass connection completes
 
 ---
 
-## 9. Cross-cutting risks (updated)
+## 9. Cross-cutting risks (updated post-5.F)
 
 1. **Realistic-scale perf** is still a hypothesis. Tested at <1000 constraints; target 10⁵.
-2. **Gap P1** is the most visible current hole: effect enforcement doesn't fire for dotted stdlib calls.
-3. **Gen-pass coverage** is incomplete (P5 + P6). The pipeline handles basic patterns only.
-4. **Substrate promotion** from `experiments/` to `static-v5/` is still owed.
-5. **Cutover from legacy + v4** is the long tail (all 2809 tests green under v5 alone).
+2. **Gen-pass coverage** is incomplete (P5 + P6). The pipeline handles basic patterns only.
+3. **Substrate promotion** from `experiments/` to `static-v5/` is still owed.
+4. **Cutover from legacy + v4** is the long tail (all 2809 tests green under v5 alone).
+5. **5.F3 resume-side S narrowing**: `coroutine.resume(co, s)` does not bind `S`; tracked in TODO.md.
+6. **5.F4 compatible-bound reduction**: `integer & number` does not reduce; tracked in TODO.md.

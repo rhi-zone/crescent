@@ -11,6 +11,71 @@ Append-only. One entry per session, decision, or experiment.
 
 ---
 
+## 2026-05-26 — Phase 5.F: four gap closures, source pipeline genuinely enforces
+
+### Question entering session
+
+Phase 5 (5.A–5.D, commit `317acc9b`) landed `bin/cr check --v5` end-to-end but left four gaps that made the headline claim ("multi-effect + pcall observable from source") false-by-construction. Can all four be closed with parity held throughout?
+
+### Evidence
+
+**Four commits landed (parity 275/275 preserved throughout):**
+
+| Phase | Commit | Description | Assertions |
+|---|---|---|---|
+| 5.F1 dotted callee | `a32b0a74` | Resolve `NODE_FIELD_EXPR` callees at gen time; F2 fires on `io.write` | 504 → 516 |
+| 5.F2 pcall | `05fd0777` | pcall special-cased at gen time; returns `(true, R...) \| (false, E)`; consumes `!throw` | 516 → 526 |
+| 5.F3 coroutine | `656c8596` | `Coroutine<Y,S,R>` parameterisation; `coroutine.create`/`yield` special-cased; `!yield` consumed | 526 → 534 |
+| 5.F4 uvar bounds | `93311447` | Uvar bounds substrate (`lower_bounds`/`upper_bounds`); meet of uppers at quiescence instead of silent CEq | 534 → 541 |
+
+Test count delta: 504 → 541 (+37). Op-sem parity 275/275 throughout.
+
+**Per-gap fixture citations:**
+
+- **Gap #1 closed (`a32b0a74`):** F2 fires on dotted callee `io.write`. See fixture `"5.F1: annotated () -> nil calling io.write (dotted) surfaces F2 error"` in `cli_e2e_test.lua` and `"5.F1: annotated () -> nil calling io.write via dotted callee emits cint_member"` in `constrain_test.lua`.
+- **Gap #2 closed (`05fd0777`):** pcall returns discriminated `(true, R...) | (false, E)` and consumes `!throw`. See fixture `"5.F2: pcall on throwing fn in annotated pure fn is clean"` in `cli_e2e_test.lua` and `"5.F2: pcall call site emits no constraints (fully special-cased)"` in `constrain_test.lua`.
+- **Gap #3 closed (`656c8596`):** `coroutine.create` consumes `!yield`; outer pure annotation satisfied. See fixture `"5.F3: coroutine.create consumes !yield — pure outer fn is clean"` in `cli_e2e_test.lua` and `"5.F3: coroutine.create call site emits no constraints (special-cased)"` in `constrain_test.lua`.
+- **Gap #4 closed (`93311447`):** uvar bounds substrate + meet of uppers at quiescence. Under-constrained uvars with >1 distinct upper bound demand now materialize as `TIntersection` nodes rather than silently unifying to the first bound. See fixture `"5.F4: two distinct upper bounds — meet via intersection"` in `op_sem_bounds_test.lua`.
+
+**Hand-run confirmation:** `bin/cr check --v5 lib/type/static-v5/fixtures/demo_effects.lua`
+```
+lib/type/static-v5/fixtures/demo_effects.lua: [T-CIntersectionMember-Direct] ty is neither intersection nor equal to part (tag=const)
+```
+Exit 1 — section 7 (deliberate F2 violation: annotated pure function calls `io.write`) correctly errors. All other sections clean.
+
+**Note on prior 5.E claim:** The entry below ("Phase 5 source pipeline") wrote "v5 source pipeline landed" — that framing was overstated. Gaps #1–#4 were open and made F2 enforcement cosmetic for dotted callees, pcall imprecise (flat `boolean | unknown`), coroutines unparameterised, and uvar bounds silent-unifying instead of sound. Phase 5.F is the honest closure.
+
+**Residual sub-gaps (not yet closed, tracked in TODO.md):**
+- Resume-side `S` narrowing (5.F3): `coroutine.resume(co, s)` does not bind `S` from the send argument's type. `Y` and `R` are correctly typed; `S` remains a free uvar.
+- Compatible-bound intersection reduction (5.F4): under-constrained uvars accumulate upper bounds as `TIntersection` nodes. Reduction of compatible bounds (e.g., `integer & number → integer`) is an orthogonal substrate gap not yet closed.
+
+### Decisions closed
+
+- **Gap P1** (dotted callee effect propagation): CLOSED.
+- **Gap P2** (pcall discriminated return): CLOSED.
+- **Gap P3** (coroutine parameterisation): CLOSED.
+- **Gap P4** (uvar bounds substrate): CLOSED.
+
+### Decisions still open
+
+- **Gap P5** (ann surface forms not wired to gen-pass): type predicates, match types, newtype, augment. Unchanged.
+- **Gap P6** (closure-as-value + method dispatch not modelled): unchanged.
+- **G17** (variadic generics): pcall/coroutine are now special-cased; G17 would generalise to user-defined variadic functions. Not needed for 5.F.
+- **G9** (bounded tvars): 5.F4 implements a meet-at-quiescence bounds substrate. The full G9 spec (lower-bound verification) is partially addressed; compatible-bound reduction is still open.
+- Resume-side S narrowing (5.F3 residual).
+
+### Tainted artifacts
+
+None.
+
+### Next entry point
+
+1. Fix Gap P5 (ann surface → gen-pass emission), one form at a time.
+2. Fix Gap P6 (closure-as-value, method dispatch).
+3. Pre-stable follow-ups (mining, missed-gen eval, circular require).
+
+---
+
 ## 2026-05-26 — Phase 5 (source pipeline): ann.lua, constrain.lua, cli.lua, --v5 flag
 
 ### Question entering session
