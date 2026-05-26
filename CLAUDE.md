@@ -114,38 +114,6 @@ Per-feature reference: `docs/typechecker-reference.md`. Design rationale: `docs/
 
 **Write things down.** Problems and tech debt → `TODO.md`. Design decisions → `docs/`. Mark `[x]` in `TODO.md` when done, same commit. Never delete unchecked TODO items.
 
-## Context Is The Only Scarce Resource
-
-Every byte that enters the main session stays in the main session for its entire lifetime. File contents, command output, search results, page text — once read, it lingers in cache and shapes every downstream token. There is no "just looking."
-
-**Delegation criterion: poison risk, not uncertainty.** "Will this flood my context with material I don't need to retain?" — not "am I unsure how to do this?" Exploration almost always delegates. Uncertain implementation work stays with the orchestrator until the spec is solid — a delegated agent inherits the prompt as ground truth and burns quota proving wrong premises. If you don't know what to build, talk to the user; don't launder the uncertainty into a subagent prompt.
-
-**Subagent model tiers.** Opus for design, architecture, and any subagent that spawns subagents. Sonnet for implementation, mechanical multi-file work, default exploration.
-
-**Subagent prompts must have a hard scope.** Specify exactly what the agent should do and when to stop — not "fix what you can" but "fix these N files, then stop."
-
-**Never pre-load the answer.** Don't write "verify that X works" — write "find out whether X works." Pre-baked hypotheses teach the agent to confirm, not investigate. If you have a hypothesis, name it as a hypothesis to attempt to falsify.
-
-**Subagent prompts for git work: clone locally, verify `git config user.name`/`user.email`, commit + push with git directly. Never `gh api` for commits — it bypasses git config and produces wrong authorship.**
-
-## Authenticity
-
-When asked to analyze X, read X. Don't synthesize from conversation memory, prior summaries, or what the file probably says. Claims correspond to evidence produced this session.
-
-**"X works" and "X doesn't work" are claims of equal weight. Both require runnable evidence.** A claim grounded in code-tracing without a paste-able command + output is a hypothesis, not a finding. The cost of running a 5-line repro is always lower than the cost of a wrong report.
-
-**The filesystem is ground truth**, not your memory or an agent's narrative. Before acting on "the agent must have…" / "the file should still be…": run `git status`, `git log`, re-Read, `git stash` and re-test.
-
-**Something unexpected is a signal.** Surprising output, anomalous numbers, a file containing what it shouldn't — stop and find out why. Don't accept the anomaly and proceed.
-
-## Discipline
-
-**Corrections are conversation, not file edits.** When the user corrects you, acknowledge and adjust in-thread — do not reach for CLAUDE.md. A single correction never warrants a rule. Rules encode patterns observed across multiple sessions; until then, the correction is feedback to act on now.
-
-**CLAUDE.md has a soft 300-line budget. New rules require a removal or a collapse.** The line count is a forcing function: the file must remain small enough to internalize in one read.
-
-**Don't announce, act.** No "I will now..." — just do.
-
 ## Commit Convention
 
 Conventional commits: `type(scope): message`. Types: `feat`, `fix`, `refactor`, `docs`, `chore`, `test`. Scope is the library or component (`feat(http): chunked encoding`).
@@ -164,3 +132,68 @@ Conventional commits: `type(scope): message`. Types: `feat`, `fix`, `refactor`, 
 - No `--no-verify` — fix the issue or fix the hook.
 - No assuming a tool is missing — check `nix develop`.
 - No dependencies that require a build step — pure Lua + FFI only.
+
+<!-- BEGIN ECOSYSTEM RULES -->
+
+## Delegation
+
+The main session is an orchestrator. Allowed actions: `Agent`/`Task*`/`AskUserQuestion`/plan-mode/`ScheduleWakeup`, and Bash limited to `git commit`, `git push`, `git status`, `git log --oneline`. Everything else delegates to a subagent. The hook is evidence of a prompting failure, not a behavioral guide. If a tool call hits the hook AT ALL, the prompt failed to prevent it. Delegate before the decision point, not after.
+
+### Triggers
+
+Before calling Read, Grep, Glob, or any Bash beyond the four git commands — stop. Dispatch an Agent instead.
+
+Before editing any file — stop. Dispatch an Agent. This includes plan files in `~/.claude/plans/`: in plan mode, dispatch a subagent to write to the plan file; do not Write it yourself. The plan file's content must not enter main context.
+
+When you need git context beyond status/log-oneline (a diff, a blame, a show) — dispatch an Agent.
+
+When a tool call is denied by the hook — do not retry, do not narrate. Dispatch the equivalent Agent and continue.
+
+When a code-modifying subagent returns — `git status`, then `git commit` before any user-facing reply.
+
+Before dispatching an Agent that modifies code — scan your prompt for "do not commit" or "based on your findings". Delete them.
+
+Before dispatching: if your prompt says "if you find", "based on your findings", or "as appropriate" — stop. Investigate first; dispatch with the decision made.
+
+When you can't verify something — do not speculate or guess at file locations, names, or contents. Dispatch a Read subagent or ask. Confabulation is failure.
+
+### Model Tiers
+
+- Sonnet — exploration, lookup, mechanical multi-file edits, implementation, default.
+- Opus — architectural judgment, design, subagents that themselves spawn subagents.
+
+Always set `subagent_type` and `model` explicitly.
+
+### Prompt Rules
+
+- Never tell a subagent "do not commit." Code-modifying subagents commit their own work.
+- Don't ask for a diff summary. After a code-modifying subagent, `git status` in main and dispatch a review Agent if you need to see the diff.
+- Don't re-explain CLAUDE.md. Subagents inherit it.
+- Cite locations by content ("the block that does X"), not line numbers — files shift between reads.
+- Name files explicitly; don't outsource the grep.
+- Match agent type to deliverable: `Explore` for lookup/search, `general-purpose` for reports and file-modifying work.
+- On unsatisfying output, change something before retrying. Same prompt + same tier = same result.
+- Dispatch independent subagents in parallel (multiple Agent blocks in one message).
+- Pair `isolation: worktree` with `run_in_background: true`.
+- Code-modifying subagents must verify their own changes before returning (re-read the diff, run tests, etc.). The orchestrator does not get a second pass with git diff — that's hook-blocked.
+
+## Hard Constraints
+
+- No Edit/Write/NotebookEdit in main. Plan files in `~/.claude/plans/` are written by subagents, not by main.
+- No Read/Grep/Glob/NotebookRead in main. Delegate.
+- No Bash in main beyond `git commit`, `git push`, `git status`, `git log --oneline`.
+- No `--no-verify`. Fix the issue or fix the hook.
+- No path dependencies in `Cargo.toml` — they couple repos and break independent publishing.
+- No interactive git (no `git rebase -i`, no `git add -i`, no `--no-edit` on rebase).
+- No suggesting project names. LLMs are bad at this; refine the conceptual space only.
+- No tracking cross-project issues in conversation — they go in TODO.md in the affected repo.
+- No ecosystem changes without checking all affected repos.
+- No assuming a tool is missing without checking `nix develop`.
+- Commit completed work in the same turn it finishes. Uncommitted work is lost work.
+
+## Meta
+
+- Something unexpected is a signal. Stop and find out why. Do not accept the anomaly and proceed.
+- Corrections from the user are conversation, not material for new rules. Rules are added when a failure mode is observed repeatedly.
+
+<!-- END ECOSYSTEM RULES -->
