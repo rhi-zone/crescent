@@ -57,6 +57,7 @@ or commit SHA where surfaced), category.
 - [ ] **G1** `[substrate]` Miller pattern fragment restricted to UVar/Const args only; complex argument shapes not handled — docs/typechecker-v5-handoff-2026-05-26.md §6
 - [ ] **G3** `[substrate]` No eta-equivalence in Miller check — docs/typechecker-v5-handoff-2026-05-26.md §6
 - [ ] **G11** `[solver-soundness]` Union backtracking admits exact-branch only; no disjunction fallback — docs/typechecker-v5-handoff-2026-05-26.md §6
+- [ ] **parser-int-float** `[surface]` v4 parser collapses integer and float literals (`1` vs `1.0`) into the same LIT_NUMBER node; v5 gen-pass promotes integer-valued floats to $LitInt, so `1 + 2.0` types as integer (incorrect — 2.0 is a float). Tracked in test file comments in commit df04ee9f — lib/type/static/parse.lua LIT_NUMBER handling
 - [ ] **5.F3-residual** `[effect-propagation]` Resume-side `S` narrowing incomplete: `coroutine.resume(co, s)` does not bind `S` from the send argument — docs/typechecker-v5-log.md Phase 5.F; handoff §9
 - [x] **5.F4-residual** `[substrate]` Compatible-bound intersection reduction not implemented: `integer & number` does not reduce to `integer` at quiescence — docs/typechecker-v5-log.md Phase 5.F; handoff §9 — closed 5108ceae (structurally_subtype + reduce_intersection at S-Quiesce meet site; T-CSub-Const-Var integer <: number lattice rule)
 
