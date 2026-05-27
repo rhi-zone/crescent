@@ -896,4 +896,69 @@ T.describe("v5 constrain — directive scope injection", function()
         T.eq(#errs, 0, "no error for --:: template directive (no-op)")
     end)
 
+    -- ── R5: resolve_aliases_impl cycle detection ──────────────────────────────
+
+    T.it("R5: cyclic aliases A=B, B=A halt without infinite loop", function()
+        -- Both A and B are defined as each other; the typechecker must not hang.
+        local src = table.concat({
+            "--:: A = B",
+            "--:: B = A",
+            "--: A",
+            "local x = 1",
+        }, "\n")
+        -- Must complete without hanging; errors are acceptable (cycle = unexpanded).
+        local _cs, _errs = constrain.generate(src, "test.lua", nil)
+        T.ok(true, "completed without infinite loop")
+    end)
+
+    T.it("R5: 33-deep alias chain halts at depth cap", function()
+        -- Build T1=T2, T2=T3, ..., T33=number; annotate with T1.
+        -- Must halt at depth 32 rather than looping to infinity.
+        local lines = {}
+        for i = 1, 32 do
+            lines[i] = "--:: T" .. tostring(i) .. " = T" .. tostring(i + 1)
+        end
+        lines[33] = "--:: T33 = number"
+        lines[34] = "--: T1"
+        lines[35] = "local x = 1"
+        local src = table.concat(lines, "\n")
+        local _cs, _errs = constrain.generate(src, "test.lua", nil)
+        T.ok(true, "completed without infinite loop for 33-deep chain")
+    end)
+
+    -- ── Y2: coroutine.yield outside !yield scope emits F2 error ──────────────
+
+    T.it("Y2: coroutine.yield at module top level emits error", function()
+        -- No enclosing function at all — extract_yield_from_scope returns nil.
+        local src = "coroutine.yield(1)"
+        local decls = stdlib_mod.decls()
+        local cli_mod = require("lib.type.static-v5.cli")
+        local expanded = cli_mod.expand_dotted(decls)
+        local _cs, errs = constrain.generate(src, "test.lua", { decls = expanded })
+        local found = false
+        for _, e in ipairs(errs) do
+            if e ~= nil and e:find("coroutine.yield") and e:find("!yield") then
+                found = true
+            end
+        end
+        T.ok(found, "error message mentions coroutine.yield and !yield")
+    end)
+
+    T.it("Y2: coroutine.yield inside enclosing function does not error at gen-pass", function()
+        -- Enclosing unannotated function: !yield propagates outward; solver handles F2.
+        -- extract_yield_from_scope returns permissive (stack non-empty), no gen-pass error.
+        local src = "local function f() coroutine.yield(1) end"
+        local decls = stdlib_mod.decls()
+        local cli_mod = require("lib.type.static-v5.cli")
+        local expanded = cli_mod.expand_dotted(decls)
+        local _cs, errs = constrain.generate(src, "test.lua", { decls = expanded })
+        local found_y2_err = false
+        for _, e in ipairs(errs) do
+            if e ~= nil and e:find("coroutine.yield") and e:find("!yield") then
+                found_y2_err = true
+            end
+        end
+        T.ok(not found_y2_err, "no gen-pass F2 error for yield inside enclosing fn")
+    end)
+
 end)

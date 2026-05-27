@@ -186,10 +186,14 @@ end
 --:: AliasEntry = { params: { [number]: string } | nil, body: unknown }
 
 -- Forward declaration so the function body can call itself recursively.
-local resolve_aliases_impl --[[: (V5Type, { [string]: AliasEntry }, { [string]: V5Type }) -> V5Type ]]
+-- visited: set of alias names currently being expanded (cycle detection).
+-- depth:   expansion depth (capped at 32 to halt infinite alias chains).
+local resolve_aliases_impl
 
---: (V5Type, { [string]: AliasEntry }, { [string]: V5Type }) -> V5Type
-resolve_aliases_impl = function(t, aliases, subst)
+--: (V5Type, { [string]: AliasEntry }, { [string]: V5Type }, { [string]: unknown }, integer) -> V5Type
+resolve_aliases_impl = function(t, aliases, subst, visited, depth)
+    -- Depth cap: stop expanding at 32 levels; return the type unexpanded.
+    if depth > 32 then return t end
     if t.tag == "const" then
         -- Check param substitution first (inner binder takes priority).
         local sv = subst[t.name]
@@ -202,8 +206,21 @@ resolve_aliases_impl = function(t, aliases, subst)
         --: { [number]: string } | nil
         local params = entry.params
         -- No params: direct substitution (body already pre-expanded on store).
-        if params == nil then return body end
-        if #params == 0 then return body end
+        if params == nil then
+            -- Cycle detection: if this alias is already being expanded, return t.
+            if visited[t.name] then return t end
+            visited[t.name] = true
+            local result = resolve_aliases_impl(body, aliases, subst, visited, depth + 1)
+            visited[t.name] = false
+            return result
+        end
+        if #params == 0 then
+            if visited[t.name] then return t end
+            visited[t.name] = true
+            local result = resolve_aliases_impl(body, aliases, subst, visited, depth + 1)
+            visited[t.name] = false
+            return result
+        end
         -- Parametric alias with no args at this site: can't expand yet.
         -- The app-spine path below handles the applied case.
         return t
@@ -227,16 +244,21 @@ resolve_aliases_impl = function(t, aliases, subst)
                     --: { [number]: string } | nil
                     local params = entry.params
                     if body ~= nil and params ~= nil and #params == #spine then
+                        -- Cycle detection for parametric alias head.
+                        if visited[head.name] then return t end
                         -- Build new subst: param_name → resolved arg.
                         local new_subst = {} --[[: { [string]: V5Type } ]]
                         for k, _ in pairs(subst) do new_subst[k] = subst[k] end
                         for i, pname in ipairs(params) do
                             local arg = spine[i]
                             if pname ~= nil and arg ~= nil then
-                                new_subst[pname] = resolve_aliases_impl(arg, aliases, subst)
+                                new_subst[pname] = resolve_aliases_impl(arg, aliases, subst, visited, depth + 1)
                             end
                         end
-                        return resolve_aliases_impl(body, aliases, new_subst)
+                        visited[head.name] = true
+                        local result = resolve_aliases_impl(body, aliases, new_subst, visited, depth + 1)
+                        visited[head.name] = false
+                        return result
                     end
                 end
             end
@@ -248,8 +270,8 @@ resolve_aliases_impl = function(t, aliases, subst)
         --: V5Type
         local t_a = t.a
         if t_f == nil or t_a == nil then return t end
-        local rf = resolve_aliases_impl(t_f, aliases, subst)
-        local ra = resolve_aliases_impl(t_a, aliases, subst)
+        local rf = resolve_aliases_impl(t_f, aliases, subst, visited, depth + 1)
+        local ra = resolve_aliases_impl(t_a, aliases, subst, visited, depth + 1)
         return types_mod.app(rf, ra)
     elseif t.tag == "record" then
         --: { tag: string, fields: { [string]: V5Type }, row: { id: integer, tag: "rowvar" } | nil, ... }
@@ -257,7 +279,7 @@ resolve_aliases_impl = function(t, aliases, subst)
         local out = {} --[[: { [string]: V5Type } ]]
         for fk, fv in pairs(tr.fields) do
             if fv ~= nil then
-                out[fk] = resolve_aliases_impl(fv, aliases, subst)
+                out[fk] = resolve_aliases_impl(fv, aliases, subst, visited, depth + 1)
             end
         end
         --: { id: integer, tag: "rowvar" } | nil
@@ -268,15 +290,15 @@ resolve_aliases_impl = function(t, aliases, subst)
         local ta = t
         local args = {} --[[: V5Type[] ]]
         for i, v in ipairs(ta.args) do
-            if v ~= nil then args[i] = resolve_aliases_impl(v, aliases, subst) end
+            if v ~= nil then args[i] = resolve_aliases_impl(v, aliases, subst, visited, depth + 1) end
         end
-        return { tag = "arrow", args = args, ret = resolve_aliases_impl(ta.ret, aliases, subst) }
+        return { tag = "arrow", args = args, ret = resolve_aliases_impl(ta.ret, aliases, subst, visited, depth + 1) }
     elseif t.tag == "union" then
         --: { tag: string, xs: V5Type[] }
         local tu = t
         local xs = {} --[[: V5Type[] ]]
         for i, v in ipairs(tu.xs) do
-            if v ~= nil then xs[i] = resolve_aliases_impl(v, aliases, subst) end
+            if v ~= nil then xs[i] = resolve_aliases_impl(v, aliases, subst, visited, depth + 1) end
         end
         return { tag = "union", xs = xs }
     elseif t.tag == "intersection" then
@@ -284,7 +306,7 @@ resolve_aliases_impl = function(t, aliases, subst)
         local ti = t
         local parts = {} --[[: V5Type[] ]]
         for i, v in ipairs(ti.parts) do
-            if v ~= nil then parts[i] = resolve_aliases_impl(v, aliases, subst) end
+            if v ~= nil then parts[i] = resolve_aliases_impl(v, aliases, subst, visited, depth + 1) end
         end
         return { tag = "intersection", parts = parts }
     else
@@ -296,7 +318,7 @@ end
 -- Convenience wrapper: no param substitution at the call site.
 --: (V5Type, { [string]: AliasEntry }) -> V5Type
 local function expand_aliases(t, aliases)
-    return resolve_aliases_impl(t, aliases, {})
+    return resolve_aliases_impl(t, aliases, {}, {}, 0)
 end
 
 -- ── State record ─────────────────────────────────────────────────────────────
@@ -621,11 +643,23 @@ end
 -- Search the innermost annotated return types for a !yield<Y,R> component.
 -- ann_ret_stack entries are V5Type | nil; for an annotated function whose
 -- return is "nil & !yield<Y,R>", ann_ret = intersection([nil, App(App(!yield,Y),R)]).
--- Returns (Y, S_fresh, R) if found; (unknown, fresh_uvar, unknown) as fallback.
+-- Returns:
+--   (Y, S_fresh, R)          if a !yield<Y,R> annotation is found in the stack.
+--   (unknown, uvar, unknown) if no !yield annotation is found but at least one
+--                             enclosing function exists (annotated or not) — the
+--                             !yield effect propagates outward via effect_stack
+--                             and the solver's F2 check handles mismatches.
+--   (nil, nil, nil)          if the stack is empty (top-level coroutine.yield
+--                             with no enclosing function) — caller emits F2.
 -- S is always a fresh uvar (not in the annotation; resume binds it).
---: (V5Ctx) -> (V5Type, V5Type, V5Type)
+--: (V5Ctx) -> (V5Type | nil, V5Type | nil, V5Type | nil)
 local function extract_yield_from_scope(ctx)
     local ar = ctx.ann_ret_stack
+    -- If the effect_stack is empty, coroutine.yield is at module top level
+    -- (no enclosing function of any kind) — error.
+    -- Note: ann_ret_stack is sparse — unannotated functions push nil which
+    -- Lua silently discards, so #ann_ret_stack < #effect_stack in general.
+    if #ctx.effect_stack == 0 then return nil, nil, nil end
     -- Search from innermost outward.
     for depth = #ar, 1, -1 do
         --: unknown
@@ -661,7 +695,8 @@ local function extract_yield_from_scope(ctx)
             end
         end
     end
-    -- Not found: return unknowns + fresh uvar.
+    -- Stack non-empty but no !yield found: return permissive unknowns.
+    -- The !yield effect propagates outward; solver's F2 check handles mismatches.
     --: V5Type
     local s_uvar = fresh_uvar(ctx)
     return T_UNKNOWN, s_uvar, T_UNKNOWN
@@ -903,12 +938,22 @@ local function resolve_callee_eager(ctx, nid)
     end
 
     -- Walk the path through record fields.
+    -- Depth cap: more than 8 steps mirrors v4's field_via_index_chain limit.
+    -- Visited set: tracks record object identity (via tostring) to detect cycles.
     --: V5Type
     local ty = root_ty
+    --: { [string]: boolean }
+    local visited_records = {}
     for i = 1, n do
+        -- Depth cap: bail if chain exceeds 8 steps.
+        if i > 8 then return nil end
         if ty.tag ~= "record" then return nil end
         -- Open records (row ~= nil) have unknown extra fields — bail to be safe.
         if ty.row ~= nil then return nil end
+        -- Cycle detection: if we've visited this record object before, bail.
+        local rec_id = tostring(ty)
+        if visited_records[rec_id] then return nil end
+        visited_records[rec_id] = true
         --: { [string]: V5Type }
         local fields = ty.fields
         local field_name = path[i]
@@ -1315,6 +1360,13 @@ gen_expr = function(ctx, nid)
             --: V5Type | nil
             local yield_val_ty = arg_types[1]
             local y_ty, s_ty, _r_ty = extract_yield_from_scope(ctx)
+            -- Y2: if no enclosing !yield scope was found, emit an F2 error.
+            if y_ty == nil or s_ty == nil or _r_ty == nil then
+                ctx.errors[#ctx.errors + 1] = (ctx.filename .. ":" .. tostring(n.line)
+                    .. ": coroutine.yield called outside a function annotated with !yield"
+                    .. " — wrap the enclosing function return type with & !yield<Y,R>")
+                return T_UNKNOWN
+            end
             -- Subtype yielded value against Y.
             if yield_val_ty ~= nil then
                 emit(ctx, C.sub(yield_val_ty, y_ty, prov_inferred(ctx, n.line, n.col)))

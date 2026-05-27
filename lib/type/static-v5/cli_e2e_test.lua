@@ -223,6 +223,37 @@ end
         T.ok(out ~= "", "error output produced")
     end)
 
+    -- Y2a. coroutine.yield at module top level → F2 error (no enclosing function).
+    T.it("Y2: coroutine.yield at top level exits 1 with !yield error", function()
+        local src = "coroutine.yield(1)"
+        local code, out, _err = run(src, "y2_toplevel.lua")
+        T.eq(code, 1, "exit 1 — coroutine.yield at top level is an error")
+        T.ok(out:find("coroutine.yield") ~= nil, "error mentions coroutine.yield")
+        T.ok(out:find("!yield") ~= nil, "error mentions !yield")
+    end)
+
+    -- Y2b. coroutine.yield inside function annotated () -> () (no !yield) → F2 error.
+    --      The error fires via the solver's cint_member F2 check (not gen-pass).
+    T.it("Y2: coroutine.yield in () -> () fn exits 1", function()
+        local src = "--: () -> ()\nlocal function f() coroutine.yield(1) end"
+        local code, out, _err = run(src, "y2_no_yield_ann.lua")
+        T.eq(code, 1, "exit 1 — coroutine.yield without !yield annotation")
+        T.ok(out ~= "", "error output produced")
+    end)
+
+    -- Y2c. coroutine.yield inside properly annotated !yield<integer,nil> → clean.
+    T.it("Y2: coroutine.yield inside !yield<integer,nil> fn typechecks clean", function()
+        local src = table.concat({
+            "--: () -> nil & !yield<integer, nil>",
+            "local function gen()",
+            "    coroutine.yield(1)",
+            "end",
+        }, "\n")
+        local code, _out, err = run(src, "y2_ok.lua")
+        T.eq(code, 0, "exit 0 — !yield annotation satisfies coroutine.yield")
+        T.eq(err, "", "no errors on stderr")
+    end)
+
     -- 7. No files argument returns exit code 2.
     T.it("no files argument returns exit 2", function()
         local fc = fake_caps("")
