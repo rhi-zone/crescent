@@ -53,6 +53,28 @@ function M.expand_dotted(decls)
     --: { [string]: { [integer]: V5Type } }
     local vals_by_prefix = {}
 
+    -- ── Validation pass ──────────────────────────────────────────────────────
+    -- Reject keys with empty segments: "", ".", ".foo", "foo.", "foo..bar".
+    -- An empty segment arises when any component produced by splitting on "."
+    -- is the empty string — i.e. the key starts/ends with "." or has "..".
+    -- Duplicate keys cannot occur in a Lua table (last write wins silently),
+    -- so we skip that guard; callers must not rely on key ordering.
+    for k in pairs(decls) do
+        -- Check for leading dot, trailing dot, or consecutive dots.
+        if k == "" then
+            error("expand_dotted: empty key \"\" is not allowed")
+        end
+        if k:sub(1, 1) == "." then
+            error("expand_dotted: key starts with '.': " .. k)
+        end
+        if k:sub(-1) == "." then
+            error("expand_dotted: key ends with '.': " .. k)
+        end
+        if k:find("..", 1, true) ~= nil then
+            error("expand_dotted: key contains '..': " .. k)
+        end
+    end
+
     for k, v in pairs(decls) do
         local dot = k:find(".", 1, true)
         if dot ~= nil then
