@@ -4,11 +4,9 @@
 -- Exports a single function:
 --   M.decls() -> { [string]: V5Type }
 --
--- The returned table maps (possibly dotted) names to V5Types and is passed to
--- M.generate via opts.decls.  Dotted names ("io.write") must be handled by
--- callers that wish to inject them into a record-based scope; the gen-pass
--- currently binds only the full dotted string as a flat name.  Phase 5.D will
--- elaborate this into proper record bindings.
+-- The returned table maps top-level names to V5Types and is passed to
+-- M.generate via opts.decls.  Namespaced libraries (io, os, coroutine) are
+-- emitted as TRecord values directly — no dotted keys.
 --
 -- Effect arities are registered in the ann module as a side effect of calling
 -- M.register_effects(), which must be called once before any parse_annotation
@@ -170,12 +168,6 @@ function M.decls()
     --: V5Type
     local io_open  = effectful_fn({ T_STR, T_STR }, T_UNKNOWN, { EFF_IO })
 
-    d["io.write"] = io_write
-    d["io.read"]  = io_read
-    d["io.lines"] = io_lines
-    d["io.open"]  = io_open
-
-    -- io table record (for field-access lookup "io")
     --: { [string]: V5Type }
     local io_fields = {
         write = io_write,
@@ -199,11 +191,6 @@ function M.decls()
     -- os.date([fmt, time?]) -> string & !os
     --: V5Type
     local os_date  = effectful_fn({ T_STR, T_INT }, T_STR, { EFF_OS })
-
-    d["os.exit"]  = os_exit
-    d["os.time"]  = os_time
-    d["os.clock"] = os_clock
-    d["os.date"]  = os_date
 
     --: { [string]: V5Type }
     local os_fields = {
@@ -244,12 +231,6 @@ function M.decls()
     -- coroutine.status(co) -> string
     --: V5Type
     local coro_status = effectful_fn({ T_THREAD }, T_STR, {})
-
-    d["coroutine.create"] = coro_create
-    d["coroutine.resume"] = coro_resume
-    d["coroutine.yield"]  = coro_yield
-    d["coroutine.wrap"]   = coro_wrap
-    d["coroutine.status"] = coro_status
 
     --: { [string]: V5Type }
     local coro_fields = {

@@ -5,8 +5,11 @@
 -- (bin/cr-check.lua dispatches here when `--v5` is present in argv).
 --
 -- Pipeline:
---   Read file -> parse.lua -> constrain.lua (opts.decls = stdlib decls)
+--   Read file -> parse.lua -> constrain.lua (opts.decls = stdlib.decls())
 --   -> op_sem.lua -> format errors -> exit code.
+--
+-- stdlib.decls() returns nested records directly (io, os, coroutine as TRecord).
+-- No expansion step is needed.
 --
 -- All I/O is via injected caps; no global io/os references in the library.
 
@@ -20,124 +23,6 @@ local stdlib_mod    = require("lib.type.static-v5.stdlib_types")
 local error_format  = require("lib.type.static-v5.error_format")
 
 local M = {}
-
--- ── Dotted-name expansion ────────────────────────────────────────────────────
---
--- Given { ["io.write"] = T1, ["io.read"] = T2, foo = T3 } produce
--- { io = TRecord{ write=T1, read=T2 }, foo = T3 }.
--- Flat dotted entries are removed; the synthesized records are injected.
--- If stdlib_types.lua already built an "io" record entry, the flat "io.write"
--- etc. keys are redundant; this function is idempotent w.r.t. those records.
--- Handles one level of dotting (a.b) — nested (a.b.c) follows the same logic.
---
--- Implementation: two parallel tables keyed by top-level name —
---   leaves:   { [string]: V5Type }    — plain (non-dotted) names
---   subtrees: { [string]: { [string]: V5Type } } — per-prefix field maps
--- After scanning, subtrees are converted to TRecord.
---
---: ({ [string]: V5Type }) -> { [string]: V5Type }
-function M.expand_dotted(decls)
-    local types_mod = require("lib.type.experiments.v5_perf.types")
-
-    -- dotted_prefixes: set of top-level names that have dotted children.
-    --   These keys should NOT be emitted as plain leaves even if present.
-    --: { [string]: boolean }
-    local dotted_prefixes = {}
-
-    -- subtree_fields: for each dotted prefix, the accumulated sub-map.
-    --   Stored as parallel string arrays to avoid index-signature type issues.
-    --   keys_by_prefix[prefix][i]   = field name
-    --   vals_by_prefix[prefix][i]   = V5Type
-    --: { [string]: { [integer]: string } }
-    local keys_by_prefix = {}
-    --: { [string]: { [integer]: V5Type } }
-    local vals_by_prefix = {}
-
-    -- ── Validation pass ──────────────────────────────────────────────────────
-    -- Reject keys with empty segments: "", ".", ".foo", "foo.", "foo..bar".
-    -- An empty segment arises when any component produced by splitting on "."
-    -- is the empty string — i.e. the key starts/ends with "." or has "..".
-    -- Duplicate keys cannot occur in a Lua table (last write wins silently),
-    -- so we skip that guard; callers must not rely on key ordering.
-    for k in pairs(decls) do
-        -- Check for leading dot, trailing dot, or consecutive dots.
-        if k == "" then
-            error("expand_dotted: empty key \"\" is not allowed")
-        end
-        if k:sub(1, 1) == "." then
-            error("expand_dotted: key starts with '.': " .. k)
-        end
-        if k:sub(-1) == "." then
-            error("expand_dotted: key ends with '.': " .. k)
-        end
-        if k:find("..", 1, true) ~= nil then
-            error("expand_dotted: key contains '..': " .. k)
-        end
-    end
-
-    for k, v in pairs(decls) do
-        local dot = k:find(".", 1, true)
-        if dot ~= nil then
-            local prefix = k:sub(1, dot - 1)
-            local rest   = k:sub(dot + 1)
-            dotted_prefixes[prefix] = true
-            --: { [integer]: string } | nil
-            local ks = keys_by_prefix[prefix]
-            --: { [integer]: V5Type } | nil
-            local vs = vals_by_prefix[prefix]
-            if ks == nil then
-                --: { [integer]: string }
-                local new_ks = {}
-                keys_by_prefix[prefix] = new_ks
-                ks = new_ks
-            end
-            if vs == nil then
-                --: { [integer]: V5Type }
-                local new_vs = {}
-                vals_by_prefix[prefix] = new_vs
-                vs = new_vs
-            end
-            local n = #ks + 1
-            ks[n] = rest
-            vs[n] = v
-        end
-    end
-
-    --: { [string]: V5Type }
-    local out = {}
-
-    -- Emit plain leaves (skip any that have dotted children — records win).
-    for k, v in pairs(decls) do
-        if k:find(".", 1, true) == nil and not dotted_prefixes[k] then
-            out[k] = v
-        end
-    end
-
-    -- Emit synthesized records for dotted prefixes (recursive for a.b.c).
-    for prefix, ks in pairs(keys_by_prefix) do
-        --: { [integer]: V5Type } | nil
-        local vs = vals_by_prefix[prefix]
-        if vs ~= nil then
-            -- Build a sub-decls map and recurse so a.b.c is handled.
-            --: { [string]: V5Type }
-            local sub_decls = {}
-            for i = 1, #ks do
-                local field_name = ks[i]
-                local field_ty   = vs[i]
-                if field_name ~= nil and field_ty ~= nil then
-                    sub_decls[field_name] = field_ty
-                end
-            end
-            --: { [string]: V5Type }
-            local expanded = M.expand_dotted(sub_decls)
-            --: V5Type
-            local rec = types_mod.record(expanded)
-            out[prefix] = rec
-        end
-    end
-
-    return out
-end
 
 -- ── Run one file through the v5 pipeline ────────────────────────────────────
 --
@@ -163,9 +48,8 @@ local function check_one(path, caps)
     -- Register stdlib effects before generating constraints.
     stdlib_mod.register_effects()
 
-    -- Expand dotted stdlib names into records.
-    local raw_decls = stdlib_mod.decls()
-    local decls = M.expand_dotted(raw_decls)
+    -- stdlib.decls() returns nested records directly.
+    local decls = stdlib_mod.decls()
 
     -- Generate constraints.
     local constraints, gen_errors = constrain_mod.generate(source, path, { decls = decls })

@@ -329,9 +329,7 @@ T.describe("v5 constrain — effect propagation", function()
         -- consumes !throw so the outer annotation is satisfied (no cint_member).
         local src = "--: () -> nil\nlocal function f() pcall(function() error('x') end) end"
         local decls = stdlib_mod.decls()
-        local cli_mod = require("lib.type.static-v5.cli")
-        local expanded = cli_mod.expand_dotted(decls)
-        local cs, errs = constrain.generate(src, "test.lua", { decls = expanded })
+        local cs, errs = constrain.generate(src, "test.lua", { decls = decls })
         T.eq(#errs, 0, "no parse/annotation errors")
         -- !throw consumed by pcall → no cint_member for !throw.
         local found_throw_member = any(cs, function(c)
@@ -349,8 +347,14 @@ T.describe("v5 constrain — effect propagation", function()
     T.it("stdlib_types.decls() provides io.write with !io effect in return", function()
         -- Verify that the stdlib_types module declares io.write as effectful.
         local decls = stdlib_mod.decls()
-        local io_write = decls["io.write"]
-        T.ok(io_write ~= nil, "io.write declared in stdlib")
+        local io_rec = decls["io"]
+        T.ok(io_rec ~= nil, "io record declared in stdlib")
+        --: V5Type | nil
+        local io_write = nil
+        if io_rec ~= nil and io_rec.tag == "record" then
+            io_write = io_rec.fields["write"]
+        end
+        T.ok(io_write ~= nil, "io.write field declared in stdlib")
         if io_write ~= nil then
             -- io.write is an arrow; its return should contain !io.
             T.ok(io_write.tag == "arrow", "io.write is an arrow type")
@@ -413,8 +417,14 @@ T.describe("v5 constrain — effect propagation", function()
 
     T.it("stdlib_types.decls() provides os.exit with !os effect", function()
         local decls = stdlib_mod.decls()
-        local os_exit = decls["os.exit"]
-        T.ok(os_exit ~= nil, "os.exit declared in stdlib")
+        local os_rec = decls["os"]
+        T.ok(os_rec ~= nil, "os record declared in stdlib")
+        --: V5Type | nil
+        local os_exit = nil
+        if os_rec ~= nil and os_rec.tag == "record" then
+            os_exit = os_rec.fields["exit"]
+        end
+        T.ok(os_exit ~= nil, "os.exit field declared in stdlib")
         if os_exit ~= nil then
             T.ok(os_exit.tag == "arrow", "os.exit is an arrow type")
         end
@@ -452,10 +462,7 @@ T.describe("v5 constrain — effect propagation", function()
     T.it("5.F1: annotated () -> nil calling io.write via dotted callee emits cint_member", function()
         local src = "--: () -> nil\nlocal function f() io.write('x') end"
         local decls = stdlib_mod.decls()
-        -- expand_dotted mirrors what cli.lua does before calling generate.
-        local cli_mod = require("lib.type.static-v5.cli")
-        local expanded = cli_mod.expand_dotted(decls)
-        local cs, errs = constrain.generate(src, "test.lua", { decls = expanded })
+        local cs, errs = constrain.generate(src, "test.lua", { decls = decls })
         T.eq(#errs, 0, "no parse/annotation errors")
         -- Must emit at least one cint_member — that's the F2 enforcement constraint.
         T.ok(count_tag(cs, "cint_member") >= 1,
@@ -478,9 +485,7 @@ T.describe("v5 constrain — effect propagation", function()
         -- (the gen-pass reads the annotation from source).
         local src = "--: () -> nil & !io\nlocal function f() io.write('x') end"
         local decls = stdlib_mod.decls()
-        local cli_mod = require("lib.type.static-v5.cli")
-        local expanded = cli_mod.expand_dotted(decls)
-        local cs, errs = constrain.generate(src, "test.lua", { decls = expanded })
+        local cs, errs = constrain.generate(src, "test.lua", { decls = decls })
         T.eq(#errs, 0, "no parse/annotation errors")
         -- cint_member is emitted (membership check); the solver will satisfy it
         -- because !io IS in the annotation intersection.
@@ -491,9 +496,7 @@ T.describe("v5 constrain — effect propagation", function()
     T.it("5.F3: coroutine.create call site emits no constraints (special-cased)", function()
         local src = "local co = coroutine.create(function() end)"
         local decls = stdlib_mod.decls()
-        local cli_mod = require("lib.type.static-v5.cli")
-        local expanded = cli_mod.expand_dotted(decls)
-        local cs, errs = constrain.generate(src, "test.lua", { decls = expanded })
+        local cs, errs = constrain.generate(src, "test.lua", { decls = decls })
         T.eq(#errs, 0, "no errors")
         -- coroutine.create is fully special-cased; no csub emitted for it.
         T.eq(count_tag(cs, "csub"), 0, "no csub emitted for coroutine.create (special-cased)")
@@ -505,9 +508,7 @@ T.describe("v5 constrain — effect propagation", function()
         -- coroutine.create consumes !yield so the outer annotation is satisfied.
         local src = "--: () -> nil\nlocal function f() coroutine.create(function() coroutine.yield(1) end) end"
         local decls = stdlib_mod.decls()
-        local cli_mod = require("lib.type.static-v5.cli")
-        local expanded = cli_mod.expand_dotted(decls)
-        local cs, errs = constrain.generate(src, "test.lua", { decls = expanded })
+        local cs, errs = constrain.generate(src, "test.lua", { decls = decls })
         T.eq(#errs, 0, "no parse/annotation errors")
         -- !yield consumed by coroutine.create → no cint_member for !yield.
         local found_yield_member = any(cs, function(c)
@@ -700,9 +701,7 @@ T.describe("v5 constrain — for loops", function()
             "end",
         }, "\n")
         local decls = stdlib_mod.decls()
-        local cli_mod = require("lib.type.static-v5.cli")
-        local expanded = cli_mod.expand_dotted(decls)
-        local cs, errs = constrain.generate(src, "test.lua", { decls = expanded })
+        local cs, errs = constrain.generate(src, "test.lua", { decls = decls })
         T.eq(#errs, 0, "no parse/annotation errors in for-in pairs test")
         -- At minimum, a csub for the pairs callee should be emitted.
         -- (The actual loop-var typing is verified end-to-end in cli_e2e_test.)
@@ -932,9 +931,7 @@ T.describe("v5 constrain — directive scope injection", function()
         -- No enclosing function at all — extract_yield_from_scope returns nil.
         local src = "coroutine.yield(1)"
         local decls = stdlib_mod.decls()
-        local cli_mod = require("lib.type.static-v5.cli")
-        local expanded = cli_mod.expand_dotted(decls)
-        local _cs, errs = constrain.generate(src, "test.lua", { decls = expanded })
+        local _cs, errs = constrain.generate(src, "test.lua", { decls = decls })
         local found = false
         for _, e in ipairs(errs) do
             if e ~= nil and e:find("coroutine.yield") and e:find("!yield") then
@@ -949,9 +946,7 @@ T.describe("v5 constrain — directive scope injection", function()
         -- extract_yield_from_scope returns permissive (stack non-empty), no gen-pass error.
         local src = "local function f() coroutine.yield(1) end"
         local decls = stdlib_mod.decls()
-        local cli_mod = require("lib.type.static-v5.cli")
-        local expanded = cli_mod.expand_dotted(decls)
-        local _cs, errs = constrain.generate(src, "test.lua", { decls = expanded })
+        local _cs, errs = constrain.generate(src, "test.lua", { decls = decls })
         local found_y2_err = false
         for _, e in ipairs(errs) do
             if e ~= nil and e:find("coroutine.yield") and e:find("!yield") then

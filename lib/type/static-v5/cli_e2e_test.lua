@@ -617,31 +617,6 @@ end
         T.eq(err, "", "no errors: " .. err)
     end)
 
-    -- 10. expand_dotted helper: dotted keys become records.
-    T.it("expand_dotted flattens dotted keys into records", function()
-        local types_mod = require("lib.type.experiments.v5_perf.types")
-        local T_STR = types_mod.const("string")
-        local T_NIL = types_mod.const("nil")
-        local raw = {
-            ["io.write"] = T_NIL,
-            ["io.read"]  = T_STR,
-            foo          = T_STR,
-        }
-        local expanded = cli.expand_dotted(raw)
-        T.ok(expanded["foo"] ~= nil, "plain key preserved")
-        local io_rec = expanded["io"]
-        T.ok(io_rec ~= nil, "io record synthesized")
-        if io_rec ~= nil then
-            T.eq(io_rec.tag, "record", "io is a record")
-            if io_rec.tag == "record" then
-                T.ok(io_rec.fields["write"] ~= nil, "io.write field present")
-                T.ok(io_rec.fields["read"] ~= nil, "io.read field present")
-            end
-        end
-        -- Dotted keys themselves should NOT appear.
-        T.ok(expanded["io.write"] == nil, "dotted key absent from output")
-    end)
-
 end)
 
 -- ── Directive e2e tests ───────────────────────────────────────────────────────
