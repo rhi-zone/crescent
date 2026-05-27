@@ -88,7 +88,7 @@ or commit SHA where surfaced), category.
 
 ## Closed
 
-- [x] **flatten-then-expand** `[architecture]` `stdlib_types.lua` emitted both flat dotted keys (`d["io.write"]` etc.) and pre-built records (`d["io"]` etc.); `cli.lua`'s `expand_dotted` walked the flat keys to synthesize a record structurally identical to the pre-built one and overwrote it. Round-trip serialization with no consumer; ripped out — closed PENDING_SHA (stdlib now writes nested records directly; `expand_dotted` removed; `cli_test.lua` expand_dotted tests removed).
+- [x] **flatten-then-expand** `[architecture]` `stdlib_types.lua` emitted both flat dotted keys (`d["io.write"]` etc.) and pre-built records (`d["io"]` etc.); `cli.lua`'s `expand_dotted` walked the flat keys to synthesize a record structurally identical to the pre-built one and overwrote it. Round-trip serialization with no consumer; ripped out — closed 5b65d7e5 (stdlib now writes nested records directly; `expand_dotted` removed; `cli_test.lua` expand_dotted tests removed).
 
 - [x] **G14** `[solver-soundness]` T-CSub dispatch priority not formally enforced — closed bad931a6 (12-step priority order documented in docs/type-system.md §Operational Semantics Dispatch; cites step_csub op_sem.lua:771)
 - [x] **G15** `[substrate]` T-CTSet four-way cascade order not formally enforced — closed bad931a6 (5-branch cascade documented in docs/type-system.md §Operational Semantics Dispatch; cites step_tset op_sem.lua:1053)
