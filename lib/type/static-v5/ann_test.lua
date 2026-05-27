@@ -70,6 +70,11 @@ T.describe("literals", function()
     T.it("string literal single-quote", function()
         assert_eq("'world'", app(con("$LitStr"), con("world")))
     end)
+    T.it("integer literal 0", function()
+        -- Sanity: scan_number_lit on "0" must yield $LitInt(0), not the
+        -- old silent fallback value of 0 from `tonumber(...) or 0`.
+        assert_eq("0", app(con("$LitInt"), con("0")))
+    end)
     T.it("integer literal 42", function()
         assert_eq("42", app(con("$LitInt"), con("42")))
     end)

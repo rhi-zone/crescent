@@ -207,7 +207,13 @@ local function scan_number_lit(s)
             s.pos = s.pos + 1
         end
     end
-    return tonumber(sub(s.src, start, s.pos - 1)) or 0
+    local raw = sub(s.src, start, s.pos - 1)
+    local n = tonumber(raw)
+    if n == nil then
+        -- Scanner advanced past digits but tonumber failed: real bug.
+        error("annotation: scan_number_lit: failed to parse numeric literal '" .. raw .. "' at col " .. tostring(start), 0)
+    end
+    return n
 end
 
 --: (AnnScanner) -> boolean

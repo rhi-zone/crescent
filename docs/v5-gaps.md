@@ -74,7 +74,7 @@ or commit SHA where surfaced), category.
 - [ ] **Y8** `[error-ux]` `render_prose` silent fallback for unknown ErrorDetails variants; new variants ship to users with generic prose, no compile warning — lib/type/static-v5/error_format.lua:170, audit 2026-05-27
 - [ ] **Y9** `[error-ux]` v4 error formatter coupling is interface-opaque; if v4's ErrCtx shape changes, v5 produces malformed structures with no compile-time safety — lib/type/static-v5/error_format.lua:12+180-200, audit 2026-05-27
 - [ ] **Y10** `[surface]` ann.lua parse_declaration missing `augment` and `unseal` directives that v4 has; silently misparses as type alias — lib/type/static-v5/ann.lua:691-792, audit 2026-05-27
-- [ ] **Y11** `[surface]` `scan_number_lit` returns 0 on `tonumber` failure; defensive degradation hides scanner bugs — lib/type/static-v5/ann.lua:197-211, audit 2026-05-27
+- [x] **Y11** `[surface]` `scan_number_lit` returns 0 on `tonumber` failure; defensive degradation hides scanner bugs — lib/type/static-v5/ann.lua:197-211, audit 2026-05-27 — closed PENDING_SHA (raises error() on tonumber failure; error path unreachable from correct scanner input; value is removing misleading fallback)
 - [ ] **Y12** `[cultural]` "v4 parity" justification used for `require` + `template` no-ops; normalizes silent ignoring of directives — lib/type/static-v5/constrain.lua:2493-2507, audit 2026-05-27
 - [ ] **G1** `[substrate]` Miller pattern fragment restricted to UVar/Const args only; complex argument shapes not handled — docs/typechecker-v5-handoff-2026-05-26.md §6
 - [ ] **G3** `[substrate]` No eta-equivalence in Miller check — docs/typechecker-v5-handoff-2026-05-26.md §6
