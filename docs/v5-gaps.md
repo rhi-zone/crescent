@@ -34,6 +34,11 @@ or commit SHA where surfaced), category.
 - [ ] **P5** `[gen-pass]` Newtype declarations parsed but not wired in gen-pass — lib/type/static-v5/ann.lua + constrain.lua; handoff §3
 - [ ] **P5** `[gen-pass]` Augment declarations parsed but not wired in gen-pass — lib/type/static-v5/ann.lua + constrain.lua; handoff §3
 - [ ] **P5** `[gen-pass]` Pattern types parsed but not wired in gen-pass — lib/type/static-v5/ann.lua + constrain.lua; handoff §3
+- [ ] **R1** `[architecture]` op_sem_alt.lua no longer implements the current spec: T-CSub-TVar (line 353-358) is pre-5.F4 simple version with no bounds accumulation; op_sem.lua has post-5.F4 bounds substrate. Parity tests pass because they don't exercise multi-bound cases (op_sem_bounds_test.lua tests op_sem only). The dual-interpreter "formal grounding" claim degrades as op_sem accrues fixes op_sem_alt doesn't. — lib/type/static-v5/op_sem_alt.lua:353-358, audit 2026-05-27
+- [ ] **R2** `[substrate]` T-CRowExtend-Bind mutates `rec.fields` in place; aliased records visible across constraints; monotone but not idempotent under park/wake; "record bound exactly once before any CRowExtend fires" invariant unstated and unverified — lib/type/static-v5/op_sem.lua:1187-1196, audit 2026-05-27
+- [ ] **R3** `[solver-soundness]` T-CSub-Union-R is exact-branch-only by design (`integer <: (integer | boolean)` fails). Comment admits "v5.0 limitation". Will produce false negatives on real code — lib/type/static-v5/op_sem.lua:745-747, audit 2026-05-27
+- [ ] **R4** `[gen-pass]` `resolve_callee_eager` has no depth bound or cycle detection; unbounded field-access chain walk; recursive records → infinite loop — lib/type/static-v5/constrain.lua:864-924, audit 2026-05-27
+- [ ] **R5** `[gen-pass]` `resolve_aliases_impl` has no cycle detection or memoization; cyclic aliases (A=B, B=A) infinite-loop — lib/type/static-v5/constrain.lua:189-294, audit 2026-05-27
 - [ ] **G6** `[substrate]` `μ.__index` chain walk missing: sealed-table missing-field lookup does not traverse `__index` chain — docs/typechecker-v5-handoff-2026-05-26.md §6
 - [ ] **G17** `[effect-propagation]` Variadic generics needed for accurate `pcall` and `coroutine.resume` arg-list/return-pack typing; current 5.F2 approximation correct for known-arity callees only — docs/typechecker-v5-handoff-2026-05-26.md §4
 
@@ -45,6 +50,9 @@ or commit SHA where surfaced), category.
 - [ ] **G9** `[solver-soundness]` Bounded tvars: T-CSub-TVar routes to CEq instead of respecting bounds — docs/typechecker-v5-handoff-2026-05-26.md §6
 - [ ] **G10** `[solver-soundness]` Variance under Lambda: registry covers named TConst only; anonymous lambdas default invariant — docs/typechecker-v5-handoff-2026-05-26.md §6
 - [ ] **record-width-invariance** `[solver-soundness]` T-CSub-Record-Width treats named fields as invariant (decomposes via CEq), blocking literal widening (`$LitInt(1) <: integer`) and other covariant cases through record subtyping. Module-export (commit 8a9bfc1e) works around this with per-field CSub; underlying limitation persists for every other record-subtyping path — lib/type/static-v5/op_sem.lua T-CSub-Record-Width rule
+- [ ] **R6** `[architecture]` cli.lua M.main reaches `io.open`, `io.stdout`, `io.stderr`, `os.getenv` directly despite module header claiming "All I/O via injected caps" — lib/type/static-v5/cli.lua:254-280, audit 2026-05-27
+- [ ] **R7** `[architecture]` ann.lua `_next_rowvar` is module-level mutable, never resets; two parses in the same process produce row-var ID collisions silently — lib/type/static-v5/ann.lua:225-232, audit 2026-05-27
+- [ ] **R8** `[architecture]` ann.lua `effect_arities` is module-level shared state; "idempotent" comment ≠ isolation across parsers — lib/type/static-v5/ann.lua:57-64, audit 2026-05-27
 - [ ] **P6** `[gen-pass]` Closure-as-value / upvalue capture narrowing across scopes not modelled — lib/type/static-v5/constrain.lua:35
 - [ ] **P6** `[gen-pass]` Complex narrowing (discriminated unions, type guards) not modelled in gen-pass — lib/type/static-v5/constrain.lua:36
 - [ ] **P6** `[gen-pass]` Effect propagation from unknown (uvar) callees not resolved at gen time; requires solver-time resolution — lib/type/static-v5/constrain.lua:43
@@ -56,6 +64,18 @@ or commit SHA where surfaced), category.
 
 ### Low / polish
 
+- [ ] **Y1** `[gen-pass]` Accumulating syntactic special-cases for pcall, coroutine.create, coroutine.resume, coroutine.yield in gen-pass — each inline `if name == "..."` branch, no registry — lib/type/static-v5/constrain.lua:1201-1338, audit 2026-05-27
+- [ ] **Y2** `[gen-pass]` `extract_yield_from_scope` returns `(unknown, fresh_uvar, unknown)` if scope stack is empty; top-level `coroutine.yield` silently typechecks against unknown — lib/type/static-v5/constrain.lua:627-668, audit 2026-05-27
+- [ ] **Y3** `[gen-pass]` `spread_last_expr` may treat arrow-with-uvar-return as single-value, diverging from gen_expr_multi's expectation — lib/type/static-v5/constrain.lua:1835-1909, audit 2026-05-27
+- [ ] **Y4** `[gen-pass]` Module export uses per-field CSub to dodge T-CSub-Record-Width's CEq invariance; substrate workaround in gen-pass — lib/type/static-v5/constrain.lua:2543-2580, audit 2026-05-27 (cross-ref: Y6, existing record-width-invariance item)
+- [ ] **Y5** `[substrate]` `structurally_subtype` makes pure structural decisions; silently misses cases the solver could refine — lib/type/static-v5/op_sem.lua:1670-1743, audit 2026-05-27
+- [ ] **Y6** `[solver-soundness]` T-CSub-Record-Width uses CEq for named fields based on "Invariant: fields are mutable in v5.0" comment the rule doesn't enforce or check — lib/type/static-v5/op_sem.lua:706+, audit 2026-05-27 (cross-ref: existing record-width-invariance item; this is the same root cause from the rule side)
+- [ ] **Y7** `[cli]` `expand_dotted` has no edge-case guards; `"."`, `".foo"` could collide silently — lib/type/static-v5/cli.lua:56-82, audit 2026-05-27
+- [ ] **Y8** `[error-ux]` `render_prose` silent fallback for unknown ErrorDetails variants; new variants ship to users with generic prose, no compile warning — lib/type/static-v5/error_format.lua:170, audit 2026-05-27
+- [ ] **Y9** `[error-ux]` v4 error formatter coupling is interface-opaque; if v4's ErrCtx shape changes, v5 produces malformed structures with no compile-time safety — lib/type/static-v5/error_format.lua:12+180-200, audit 2026-05-27
+- [ ] **Y10** `[surface]` ann.lua parse_declaration missing `augment` and `unseal` directives that v4 has; silently misparses as type alias — lib/type/static-v5/ann.lua:691-792, audit 2026-05-27
+- [ ] **Y11** `[surface]` `scan_number_lit` returns 0 on `tonumber` failure; defensive degradation hides scanner bugs — lib/type/static-v5/ann.lua:197-211, audit 2026-05-27
+- [ ] **Y12** `[cultural]` "v4 parity" justification used for `require` + `template` no-ops; normalizes silent ignoring of directives — lib/type/static-v5/constrain.lua:2493-2507, audit 2026-05-27
 - [ ] **G1** `[substrate]` Miller pattern fragment restricted to UVar/Const args only; complex argument shapes not handled — docs/typechecker-v5-handoff-2026-05-26.md §6
 - [ ] **G3** `[substrate]` No eta-equivalence in Miller check — docs/typechecker-v5-handoff-2026-05-26.md §6
 - [ ] **G11** `[solver-soundness]` Union backtracking admits exact-branch only; no disjunction fallback — docs/typechecker-v5-handoff-2026-05-26.md §6
