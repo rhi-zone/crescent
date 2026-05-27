@@ -958,6 +958,19 @@ gen_expr = function(ctx, nid)
         end
         if lit_kind == LIT_NUMBER  then
             local num = i32x2_to_double(n.data[1], n.data[2])
+            -- Integer-valued float literals (e.g. `1`, `42`, `0xFF`) are stored as
+            -- LIT_NUMBER by the v4 parser (it doesn't distinguish integer from float
+            -- syntax).  Promote to $LitInt<N> when the value is integer-valued and
+            -- fits in a safe integer range so that arithmetic refinement works.
+            if num == math.floor(num) and num >= -(2^53) and num <= 2^53 then
+                --: V5Type
+                local fi = types_mod.const("$LitInt")
+                --: V5Type
+                local ai = types_mod.const(tostring(math.floor(num)))
+                --: V5Type
+                local ri = types_mod.app(fi, ai)
+                return ri
+            end
             --: V5Type
             local f = types_mod.const("$LitNum")
             --: V5Type
@@ -1074,14 +1087,56 @@ gen_expr = function(ctx, nid)
         end
 
         -- Arithmetic: +, -, *, /, %, ^.
-        -- Operands must be number-compatible; result is number.
-        -- TODO: refine arithmetic result type via uvar+constraints:
-        --   +, -, * of two integers → integer; / and ^ always number.
-        --   For now, conservative approximation: result is always number.
+        -- Operands must be number-compatible.
+        -- Refinement: +, -, * of two integer-typed operands → integer.
+        --   /  and ^ always produce number (per Lua semantics).
+        --   % and // left as number for now (mixed semantics; see v5-gaps.md).
         local left  = gen_expr(ctx, n.data[1])
         local right = gen_expr(ctx, n.data[2])
         emit(ctx, C.sub(left,  T_NUMBER, prov))
         emit(ctx, C.sub(right, T_NUMBER, prov))
+        -- Local structural integer check: does t structurally subtype integer?
+        -- Handles: T_INTEGER itself, $LitInt<N> (app of $LitInt), and
+        -- intersection types where at least one part is integer.
+        -- Two-step declaration so the body can recurse on itself.
+        local is_integer_ty --[[: (V5Type) -> boolean ]]
+        --: (V5Type) -> boolean
+        is_integer_ty = function(t)
+            if t == nil then return false end
+            if t.tag == "const" and t.name == "integer" then return true end
+            -- $LitInt<N>: App(Const("$LitInt"), Const(N))
+            -- $LitNum<N> where N is integer-valued: parser emits all numeric
+            -- literals as $LitNum; distinguish integer-valued ones by checking
+            -- whether the string representation parses to an integer float.
+            if t.tag == "app" then
+                --: { tag: string, name: string, ... } | nil
+                local hd = t.f
+                if hd ~= nil and hd.tag == "const" then
+                    if hd.name == "$LitInt" then return true end
+                    if hd.name == "$LitNum" then
+                        -- Check if the stored value is integer-valued.
+                        local arg = t.a
+                        if arg ~= nil and arg.tag == "const" then
+                            local n = tonumber(arg.name)
+                            if n ~= nil and n == math.floor(n) then return true end
+                        end
+                    end
+                end
+            end
+            -- Intersection: any part being integer makes the whole integer.
+            if t.tag == "intersection" then
+                local ps = t.parts
+                for pi = 1, #ps do
+                    local p = ps[pi]
+                    if p ~= nil and is_integer_ty(p) then return true end
+                end
+            end
+            return false
+        end
+        if (op == OP_ADD or op == OP_SUB or op == OP_MUL)
+            and is_integer_ty(left) and is_integer_ty(right) then
+            return T_INTEGER
+        end
         return T_NUMBER
     end
 
@@ -1760,6 +1815,116 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_ty, line, col)
     return fn_ty
 end
 
+-- ── Return-last-position spread ──────────────────────────────────────────────
+--
+-- For `return e1, ..., eN`, if eN is a NODE_CALL_EXPR whose callee resolves to
+-- a known arrow at gen time, spread all positional ret fields into the rets
+-- list.  Otherwise return a single-element list with gen_expr's result.
+--
+-- Decision is made BEFORE gen'ing args to avoid double-gen: look up the callee
+-- in scope / via resolve_callee_eager first; if a multi-slot arrow is found,
+-- gen args and emit an N-wide expected arrow.  If callee is unknown, delegate
+-- entirely to gen_expr (single value, today's behaviour).
+--
+-- pcall / coroutine special cases are not spread here — they already return
+-- positional record types from gen_expr; delegating avoids double-gen.
+--
+--: (V5Ctx, integer) -> V5Type[]
+local function spread_last_expr(ctx, nid)
+    local n    = ctx.nodes:get(nid)
+    local kind = n.kind
+
+    if kind ~= NODE_CALL_EXPR then
+        -- Non-call: single value.
+        local ty = gen_expr(ctx, nid)
+        local out = {} --[[: V5Type[] ]]
+        out[1] = ty
+        return out
+    end
+
+    local callee_node = ctx.nodes:get(n.data[0])
+
+    -- Detect pcall / coroutine special cases — delegate to gen_expr.
+    if callee_node.kind == NODE_IDENTIFIER then
+        local cname = intern_str(ctx, callee_node.data[0])
+        if cname == "pcall" then
+            local ty = gen_expr(ctx, nid)
+            local out = {} --[[: V5Type[] ]]
+            out[1] = ty
+            return out
+        end
+    elseif callee_node.kind == NODE_FIELD_EXPR then
+        local obj_node = ctx.nodes:get(callee_node.data[0])
+        if obj_node.kind == NODE_IDENTIFIER then
+            local oname = intern_str(ctx, obj_node.data[0])
+            local fname = intern_str(ctx, callee_node.data[1])
+            if oname == "coroutine" and
+                (fname == "create" or fname == "resume" or fname == "yield") then
+                local ty = gen_expr(ctx, nid)
+                local out = {} --[[: V5Type[] ]]
+                out[1] = ty
+                return out
+            end
+        end
+    end
+
+    -- Peek at callee type: simple identifier → scope lookup, else eager resolve.
+    --: V5Type | nil
+    local callee_ty = nil
+    if callee_node.kind == NODE_IDENTIFIER then
+        local cname = intern_str(ctx, callee_node.data[0])
+        callee_ty = lookup(ctx, cname)
+    end
+    if callee_ty == nil then
+        callee_ty = resolve_callee_eager(ctx, n.data[0])
+    end
+
+    -- If callee is not a known arrow, fall back to single-value gen.
+    if callee_ty == nil or callee_ty.tag ~= "arrow" then
+        local ty = gen_expr(ctx, nid)
+        local out = {} --[[: V5Type[] ]]
+        out[1] = ty
+        return out
+    end
+
+    -- Count positional ret fields ("1", "2", ...) from the arrow's ret record.
+    local n_slots = 0
+    local ret_rec = callee_ty.ret
+    if ret_rec ~= nil and ret_rec.tag == "record" then
+        while ret_rec.fields[tostring(n_slots + 1)] ~= nil do
+            n_slots = n_slots + 1
+        end
+    end
+    if n_slots <= 1 then
+        -- Single or zero return slots: fall back to gen_expr (no spread needed).
+        local ty = gen_expr(ctx, nid)
+        local out = {} --[[: V5Type[] ]]
+        out[1] = ty
+        return out
+    end
+
+    -- Multi-slot known arrow: gen args then emit N-wide expected arrow.
+    -- MUST NOT call gen_expr on the callee node (resolve_callee_eager already
+    -- returned it; calling gen_expr would double-emit row_extend constraints).
+    local arg_types = {} --[[: V5Type[] ]]
+    local es = n.data[1]
+    local el = n.data[2]
+    for i = es, es + el - 1 do
+        local anid = ctx.lists:get(i)
+        arg_types[#arg_types + 1] = gen_expr(ctx, anid)
+    end
+    -- Create n_slots fresh uvars for the positional return slots.
+    local uvars = {} --[[: V5Type[] ]]
+    for si = 1, n_slots do
+        uvars[si] = fresh_uvar(ctx)
+    end
+    --: V5Type
+    local expected_fn = types_mod.arrow(arg_types, uvars)
+    emit(ctx, C.sub(callee_ty, expected_fn, prov_inferred(ctx, n.line, n.col)))
+    propagate_callee_effects(ctx, callee_ty, n.line, n.col)
+    return uvars
+end
+
 -- ── Statement constraint generation ──────────────────────────────────────────
 
 --: (V5Ctx, integer) -> nil
@@ -1928,12 +2093,18 @@ gen_stmt = function(ctx, nid)
         else
             -- Multiple expressions: collect types positionally.
             -- Lua semantics: only the last expression may expand multi-return.
-            -- Approximation: the last expression is truncated to its first value
-            -- (gen_expr takes field "1" of a call return). Full last-position
-            -- expansion deferred — see docs/v5-gaps.md "return-last-spread".
+            -- Non-last positions: truncate to first value (gen_expr).
+            -- Last position: spread all positional ret fields if callee is a
+            -- known arrow; otherwise take first value (fall-back).
             local ret_list = {} --[[: V5Type[] ]]
-            for i = rs, rs + rl - 1 do
+            local last_i = rs + rl - 1
+            for i = rs, last_i - 1 do
                 ret_list[#ret_list + 1] = gen_expr(ctx, ctx.lists:get(i))
+            end
+            -- Last expression: attempt return-last spread.
+            local spread = spread_last_expr(ctx, ctx.lists:get(last_i))
+            for si = 1, #spread do
+                ret_list[#ret_list + 1] = spread[si]
             end
             ctx.return_stack[#ctx.return_stack + 1] = ret_list
         end

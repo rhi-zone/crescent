@@ -589,6 +589,65 @@ T.describe("v5 constrain — operators", function()
         T.eq(count_tag(cs, "csub"), 0, "no csub for equality operands")
     end)
 
+    -- Integer refinement: 1 + 2 → integer.
+    -- When annotated --: integer the gen pass emits csub(integer <: integer)
+    -- rather than csub(number <: integer) — verifiable by checking that a
+    -- csub with b.name == "integer" exists.
+    T.it("arithmetic +: integer + integer result has csub against integer (annotation)", function()
+        local src = "--: integer\nlocal x = 1 + 2"
+        local cs, errs = generate(src)
+        T.eq(#errs, 0, "no gen errors")
+        -- The annotation emits csub(result_ty <: integer).
+        -- result_ty is T_INTEGER (both operands are $LitInt), so csub is integer<:integer.
+        local found_int = any(cs, function(c)
+            if c == nil or c.tag ~= "csub" then return false end
+            local b = c.b
+            return b ~= nil and b.tag == "const" and b.name == "integer"
+        end)
+        T.ok(found_int, "csub with b=integer present (annotation on integer+integer)")
+    end)
+
+    -- Float operands (1.5) fall back to number since 1.5 is NOT integer-valued.
+    -- NOTE: integer-valued float literals (e.g. 2.0) are indistinguishable from
+    -- integer literals (2) at the AST level in the v4 parser — both get $LitInt
+    -- treatment in the v5 gen pass.  Only truly fractional floats (1.5) can be
+    -- tested for number result at the constraint level.
+    T.it("arithmetic +: float + float (1.5+2.5) result has csub against number from annotation", function()
+        local src = "--: number\nlocal x = 1.5 + 2.5"
+        local cs, errs = generate(src)
+        T.eq(#errs, 0, "no gen errors")
+        -- 1.5 and 2.5 are $LitNum (non-integer floats), so result is number.
+        local found_num_ann = any(cs, function(c)
+            if c == nil or c.tag ~= "csub" then return false end
+            local a = c.a
+            local b = c.b
+            return b ~= nil and b.tag == "const" and b.name == "number"
+                and a ~= nil and a.tag == "const" and a.name == "number"
+        end)
+        T.ok(found_num_ann, "annotation csub is number<:number for float operands (1.5+2.5)")
+    end)
+
+    -- Division always returns number (not integer), even for integer operands.
+    T.it("arithmetic /: integer / integer result is number (not integer)", function()
+        local src = "--: number\nlocal x = 4 / 2"
+        local cs, errs = generate(src)
+        T.eq(#errs, 0, "no gen errors")
+        -- Division result is always number; annotation emits number <: number.
+        local found_num = any(cs, function(c)
+            if c == nil or c.tag ~= "csub" then return false end
+            local b = c.b
+            return b ~= nil and b.tag == "const" and b.name == "number"
+        end)
+        T.ok(found_num, "csub with b=number present for division result")
+        -- No csub where b is integer (division never refines to integer).
+        local found_int = any(cs, function(c)
+            if c == nil or c.tag ~= "csub" then return false end
+            local b = c.b
+            return b ~= nil and b.tag == "const" and b.name == "integer"
+        end)
+        T.ok(not found_int, "no csub with b=integer for division (always number)")
+    end)
+
 end)
 
 -- ── for-loop typing tests ─────────────────────────────────────────────────────

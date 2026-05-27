@@ -477,6 +477,115 @@ end
         T.eq(code, 0, "exit 0 — g() in non-last position: a:number, b:number")
     end)
 
+    -- MR7. Return-last-spread: h() returns 2, g() where g() returns (integer, string).
+    -- h's ret should be (integer, integer, string) — last position spreads g().
+    T.it("multi-return: return-last-spread — g() in last position expands into ret tuple", function()
+        local src = table.concat({
+            "local function g() return 1, 'x' end",
+            "local function h() return 2, g() end",
+            "local a, b, c = h()",
+            "--: integer",
+            "local _a = a",
+            "--: integer",
+            "local _b = b",
+            "--: string",
+            "local _c = c",
+            "local _ = _a",
+            "local __ = _b",
+            "local ___ = _c",
+        }, "\n")
+        local code, _out, err = run(src, "mr_last_spread.lua")
+        T.eq(code, 0, "exit 0 — return-last g() spread: a:integer, b:integer, c:string")
+        T.eq(err, "", "no errors: " .. err)
+    end)
+
+    -- MR8. Non-last truncation still applies: f() returns g(), 2 where g() is non-last.
+    T.it("multi-return: g() in non-last return truncates; 2nd slot is the literal 2", function()
+        local src = table.concat({
+            "local function g() return 1, 'x' end",
+            "local function f() return g(), 2 end",
+            "local a, b = f()",
+            "--: integer",
+            "local _a = a",
+            "--: integer",
+            "local _b = b",
+            "local _ = _a",
+            "local __ = _b",
+        }, "\n")
+        local code, _out, err = run(src, "mr_nonlast_trunc2.lua")
+        T.eq(code, 0, "exit 0 — g() non-last truncates; b=integer from literal 2")
+        T.eq(err, "", "no errors: " .. err)
+    end)
+
+    -- MR9. Negative: return-last-spread type mismatch.
+    -- If we annotate c as integer but g() returns string in slot 2 — error.
+    T.it("multi-return: return-last-spread annotating c:integer errors (c is string)", function()
+        local src = table.concat({
+            "local function g() return 1, 'x' end",
+            "local function h() return 2, g() end",
+            "local a, b, c = h()",
+            "--: integer",
+            "local _c = c",
+            "local _ = a",
+            "local __ = b",
+            "local ___ = _c",
+        }, "\n")
+        local code, out, _err = run(src, "mr_last_spread_neg.lua")
+        T.eq(code, 1, "exit 1 — c is string, not integer")
+        T.ok(out ~= "", "error output produced")
+    end)
+
+    -- INT1. Integer refinement: 1 + 2 annotated as integer passes.
+    T.it("integer refinement: 1 + 2 is integer", function()
+        local src = table.concat({
+            "--: integer",
+            "local x = 1 + 2",
+            "local _ = x",
+        }, "\n")
+        local code, _out, err = run(src, "int_refine_add.lua")
+        T.eq(code, 0, "exit 0 — 1 + 2 is integer")
+        T.eq(err, "", "no errors: " .. err)
+    end)
+
+    -- INT2. Float operands (1.5) fall back to number.
+    -- NOTE: integer-valued float literals (2.0) are indistinguishable from integer
+    -- literals (2) at the AST level in the v4 parser; both get $LitInt treatment.
+    -- Only fractional floats can be tested for number result end-to-end.
+    T.it("integer refinement: 1.5 + 2.5 is number (fractional float operands)", function()
+        local src = table.concat({
+            "--: number",
+            "local x = 1.5 + 2.5",
+            "local _ = x",
+        }, "\n")
+        local code, _out, err = run(src, "int_refine_float.lua")
+        T.eq(code, 0, "exit 0 — 1.5 + 2.5 is number")
+        T.eq(err, "", "no errors: " .. err)
+    end)
+
+    -- INT3. Integer annotated as integer after * refinement passes.
+    T.it("integer refinement: 3 * 4 is integer", function()
+        local src = table.concat({
+            "--: integer",
+            "local x = 3 * 4",
+            "local _ = x",
+        }, "\n")
+        local code, _out, err = run(src, "int_refine_mul.lua")
+        T.eq(code, 0, "exit 0 — 3 * 4 is integer")
+        T.eq(err, "", "no errors: " .. err)
+    end)
+
+    -- INT4. Division always number — annotating as integer should error.
+    T.it("integer refinement: 4 / 2 is number (division never integer)", function()
+        local src = table.concat({
+            "--: number",
+            "local x = 4 / 2",
+            "local _ = x",
+        }, "\n")
+        local code, _out, err = run(src, "int_refine_div.lua")
+        T.eq(code, 0, "exit 0 — 4 / 2 is number (no integer refinement for /)")
+        T.eq(err, "", "no errors: " .. err)
+    end)
+
     -- 10. expand_dotted helper: dotted keys become records.
     T.it("expand_dotted flattens dotted keys into records", function()
         local types_mod = require("lib.type.experiments.v5_perf.types")
