@@ -848,6 +848,45 @@ T.describe("v5 constrain — directive scope injection", function()
         T.eq(#errs, 0, "no error for --:: module directive")
     end)
 
+    T.it("module: matching top-level binding emits CSub per declared field", function()
+        -- { x: integer } declared; local x = 1 — CSub($LitInt(1), integer) emitted.
+        local src = "--:: module \"m\": { x: integer }\nlocal x = 1"
+        local cs, errs = constrain.generate(src, "test.lua", nil)
+        T.eq(#errs, 0, "no gen-pass errors for matching module")
+        -- At least one CSub should be emitted for the module export check.
+        local found = any(cs, function(c)
+            return c ~= nil and c.tag == "csub"
+        end)
+        T.ok(found, "CSub emitted for module export field check")
+    end)
+
+    T.it("module: missing binding emits error string with field name", function()
+        -- { x: integer } declared but no local x in the file.
+        local src = "--:: module \"m\": { x: integer }\nlocal y = 1"
+        local cs, errs = constrain.generate(src, "test.lua", nil)
+        T.ok(#errs >= 1, "gen-pass error for missing module export")
+        local found = false
+        for _, e in ipairs(errs) do
+            if e ~= nil and e:find("'x'") then found = true end
+        end
+        T.ok(found, "error message references missing field name 'x'")
+    end)
+
+    T.it("module: function binding emits CSub against declared arrow type", function()
+        -- { hello: () -> string } declared; matching top-level function defined.
+        local src = table.concat({
+            "--:: module \"m\": { hello: () -> string }",
+            "--: () -> string",
+            "local function hello() return 'hi' end",
+        }, "\n")
+        local cs, errs = constrain.generate(src, "test.lua", nil)
+        T.eq(#errs, 0, "no gen-pass errors for matching function export")
+        local found = any(cs, function(c)
+            return c ~= nil and c.tag == "csub"
+        end)
+        T.ok(found, "CSub emitted for function module export check")
+    end)
+
     -- ── template ─────────────────────────────────────────────────────────────
 
     T.it("template: --:: template is no-op (v4 parity) — no error", function()

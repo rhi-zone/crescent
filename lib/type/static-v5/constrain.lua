@@ -317,6 +317,8 @@ end
 --::   _next_uvar: integer,
 --::   type_aliases: { [string]: AliasEntry },
 --::   module_name: string | nil,
+--::   module_decl_ty: V5Type | nil,
+--::   module_decl_line: integer,
 --:: }
 
 -- ── Fresh unification variables ──────────────────────────────────────────────
@@ -2405,8 +2407,10 @@ function M.generate(source, filename, opts)
         ann_ret_stack = {},
         annotations   = raw_anns,
         _next_uvar    = 1,
-        type_aliases  = {},
-        module_name   = nil,
+        type_aliases      = {},
+        module_name       = nil,
+        module_decl_ty    = nil,
+        module_decl_line  = 0,
     }
 
     -- Seed scope_stack with the top-level scope.
@@ -2471,12 +2475,19 @@ function M.generate(source, filename, opts)
                             ta_aliases[ta_name] = { params = ta_params, body = ta_body }
                         end
                     elseif dir.kind == "module" then
-                        -- Record the module name on ctx.  Top-level bindings
-                        -- become this module's exports (post-pass concern;
-                        -- we just record the name here for now).
+                        -- Record the module name and declared type.  After the
+                        -- AST walk we collect top-level bindings into a record
+                        -- and emit CSub(actual, declared) to enforce the exports.
                         local mn = dir.mod_name
                         if mn ~= nil then
-                            ctx.module_name = mn
+                            ctx.module_name      = mn
+                            ctx.module_decl_line = line
+                            local mty = as_v5type(dir.type)
+                            -- Expand aliases already registered in this file.
+                            if mty ~= nil and next(ctx.type_aliases) ~= nil then
+                                mty = expand_aliases(mty, ctx.type_aliases)
+                            end
+                            ctx.module_decl_ty = mty
                         end
                     elseif dir.kind == "require" then
                         -- v4 parity: --:: require "mod.path" loads a declaration
@@ -2501,6 +2512,72 @@ function M.generate(source, filename, opts)
     if pr_root ~= nil then
         local chunk = pr_nodes:get(pr_root)
         gen_block(ctx, chunk.data[0], chunk.data[1])
+    end
+
+    -- Module export check: if --:: module "name": T was declared, verify
+    -- that the top-level scope provides every field declared in T with a
+    -- compatible type.
+    --
+    -- Strategy: emit one CSub(actual_field_ty, declared_field_ty) per field
+    -- declared in T, plus an explicit "missing field" error when the field
+    -- is absent from the top-level scope.  This is covariant (CSub) not
+    -- invariant (CEq), matching the semantic that module exports are read-only.
+    --
+    -- ctx.scope holds all top-level bindings after gen_block (the top-level
+    -- block does not push/pop scope — gen_block iterates statements directly).
+    -- opts.decls names are excluded because they were pre-seeded, not defined
+    -- in the file.
+    local mdecl_ty = ctx.module_decl_ty
+    if ctx.module_name ~= nil and mdecl_ty ~= nil then
+        local mprov = C.prov(filename, ctx.module_decl_line, 0, "declared")
+        -- Build exclusion set of pre-seeded names from opts.decls.
+        local decl_names = {} --[[: { [string]: boolean } ]]
+        if opts ~= nil then
+            local decls = opts.decls
+            if decls ~= nil then
+                for dn, _ in pairs(decls) do
+                    decl_names[dn] = true
+                end
+            end
+        end
+        -- Emit per-field CSub constraints for each field in the declared type.
+        -- Only record types have iterable fields; non-record declared types
+        -- fall through to a single top-level CSub.
+        --: V5Type
+        local mdecl_ty_nn = mdecl_ty
+        if mdecl_ty_nn.tag == "record" then
+            local decl_fields = mdecl_ty_nn.fields
+            for fname, fdecl_ty in pairs(decl_fields) do
+                local factual_ty = ctx.scope[fname]
+                if factual_ty == nil or decl_names[fname] then
+                    -- Field missing from top-level scope: emit error directly.
+                    errors[#errors + 1] = filename .. ":" .. tostring(ctx.module_decl_line)
+                        .. ": module export error: binding '" .. fname
+                        .. "' declared in module type but not defined at top level"
+                else
+                    -- Field present: emit covariant CSub.
+                    --: V5Type
+                    local fav = factual_ty
+                    --: V5Type
+                    local fdv = fdecl_ty
+                    emit(ctx, C.sub(fav, fdv, mprov))
+                end
+            end
+        else
+            -- Declared type is not a record: build actual record and emit
+            -- a single CSub — the solver's own record-width rule will handle it.
+            local actual_fields = {} --[[: { [string]: V5Type } ]]
+            for bname, bty in pairs(ctx.scope) do
+                if not decl_names[bname] then
+                    --: V5Type
+                    local btv = bty
+                    actual_fields[bname] = btv
+                end
+            end
+            --: V5Type
+            local actual_rec = types_mod.record(actual_fields)
+            emit(ctx, C.sub(actual_rec, mdecl_ty_nn, mprov))
+        end
     end
 
     return constraints, errors

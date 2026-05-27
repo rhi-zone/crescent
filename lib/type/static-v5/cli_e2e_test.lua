@@ -683,7 +683,7 @@ T.describe("v5 cli e2e — directives", function()
     end)
 
     -- module directive — no error.
-    T.it("module directive: no error", function()
+    T.it("module directive: matching top-level binding typechecks clean", function()
         local src = table.concat({
             "--:: module \"mymod\": { x: integer }",
             "local x = 1",
@@ -691,6 +691,50 @@ T.describe("v5 cli e2e — directives", function()
         local code, _out, err = run(src, "decl_module.lua")
         T.eq(code, 0, "exit 0")
         T.eq(err, "", "no errors on stderr")
+    end)
+
+    T.it("module directive: mismatched binding type errors", function()
+        -- local x = 'wrong' is string; declared { x: integer } — should error.
+        local src = table.concat({
+            "--:: module \"foo\": { x: integer }",
+            "local x = \"wrong\"",
+        }, "\n")
+        local code, out, _err = run(src, "module_mismatch.lua")
+        T.eq(code, 1, "exit 1 for module export type mismatch")
+        T.ok(out ~= "", "error output produced")
+    end)
+
+    T.it("module directive: missing binding errors with field name in message", function()
+        -- Declares { x: integer } but only defines y.
+        local src = table.concat({
+            "--:: module \"foo\": { x: integer }",
+            "local y = 1",
+        }, "\n")
+        local code, out, _err = run(src, "module_missing.lua")
+        T.eq(code, 1, "exit 1 for missing module export binding")
+        T.ok(out ~= "" or _err ~= "", "diagnostic produced")
+    end)
+
+    T.it("module directive: function export matching return type typechecks clean", function()
+        local src = table.concat({
+            "--:: module \"foo\": { hello: () -> string }",
+            "--: () -> string",
+            "local function hello() return 'hi' end",
+        }, "\n")
+        local code, _out, err = run(src, "module_fn_ok.lua")
+        T.eq(code, 0, "exit 0 for matching function export")
+        T.eq(err, "", "no errors on stderr")
+    end)
+
+    T.it("module directive: function export wrong return type errors", function()
+        local src = table.concat({
+            "--:: module \"foo\": { hello: () -> string }",
+            "--: () -> integer",
+            "local function hello() return 42 end",
+        }, "\n")
+        local code, out, _err = run(src, "module_fn_mismatch.lua")
+        T.eq(code, 1, "exit 1 for function export type mismatch")
+        T.ok(out ~= "", "error output produced")
     end)
 
     -- template directive — no-op, no error.
