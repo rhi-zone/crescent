@@ -44,6 +44,7 @@ or commit SHA where surfaced), category.
 - [ ] **G5** `[substrate]` HOUnify residue provenance: delayed instantiation residues lose source context for error messages — docs/typechecker-v5-handoff-2026-05-26.md §6
 - [ ] **G9** `[solver-soundness]` Bounded tvars: T-CSub-TVar routes to CEq instead of respecting bounds — docs/typechecker-v5-handoff-2026-05-26.md §6
 - [ ] **G10** `[solver-soundness]` Variance under Lambda: registry covers named TConst only; anonymous lambdas default invariant — docs/typechecker-v5-handoff-2026-05-26.md §6
+- [ ] **record-width-invariance** `[solver-soundness]` T-CSub-Record-Width treats named fields as invariant (decomposes via CEq), blocking literal widening (`$LitInt(1) <: integer`) and other covariant cases through record subtyping. Module-export (commit 8a9bfc1e) works around this with per-field CSub; underlying limitation persists for every other record-subtyping path — lib/type/static-v5/op_sem.lua T-CSub-Record-Width rule
 - [ ] **P6** `[gen-pass]` Closure-as-value / upvalue capture narrowing across scopes not modelled — lib/type/static-v5/constrain.lua:35
 - [ ] **P6** `[gen-pass]` Complex narrowing (discriminated unions, type guards) not modelled in gen-pass — lib/type/static-v5/constrain.lua:36
 - [ ] **P6** `[gen-pass]` Effect propagation from unknown (uvar) callees not resolved at gen time; requires solver-time resolution — lib/type/static-v5/constrain.lua:43
