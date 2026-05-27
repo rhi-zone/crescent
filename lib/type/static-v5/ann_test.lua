@@ -13,9 +13,11 @@ local ann       = require("lib.type.static-v5.ann")
 -- ── helpers ─────────────────────────────────────────────────────────────────
 
 -- Parse a type annotation string; fail test on error.
---: (string) -> V5Type
-local function pt(text)
-    local ty, err = ann.parse_annotation(text)
+-- Uses a fresh state unless one is supplied.
+--: (string, AnnState | nil) -> V5Type
+local function pt(text, state)
+    local st = state or ann.new_state()
+    local ty, err = ann.parse_annotation(st, text)
     if ty == nil then
         error("parse_annotation failed for `" .. text .. "`: " .. tostring(err), 2)
     end
@@ -23,17 +25,17 @@ local function pt(text)
 end
 
 -- Assert that a parsed type round-trips to the expected V5Type.
---: (string, V5Type) -> nil
-local function assert_eq(text, expected)
-    local got = pt(text)
+--: (string, V5Type, AnnState | nil) -> nil
+local function assert_eq(text, expected, state)
+    local got = pt(text, state)
     T.ok(types_mod.equal(got, expected),
         "parse `" .. text .. "`: mismatch (got tag=" .. got.tag .. ")")
 end
 
 -- Assert that a parsed type has a given tag.
---: (string, string) -> V5Type
-local function assert_tag(text, tag)
-    local got = pt(text)
+--: (string, string, AnnState | nil) -> V5Type
+local function assert_tag(text, tag, state)
+    local got = pt(text, state)
     T.eq(got.tag, tag, "parse `" .. text .. "`: expected tag " .. tag)
     return got
 end
@@ -359,7 +361,8 @@ end)
 
 T.describe("declare effect directive", function()
     T.it("declare effect !Io : 0 returns directive", function()
-        local dir, err = ann.parse_declaration("declare effect !Io : 0")
+        local st = ann.new_state()
+        local dir, err = ann.parse_declaration(st, "declare effect !Io : 0")
         T.ok(err == nil, "no error: " .. tostring(err))
         T.ok(dir ~= nil, "directive returned")
         if dir ~= nil then
@@ -369,7 +372,8 @@ T.describe("declare effect directive", function()
         end
     end)
     T.it("declare effect !Throw : 1 registers arity", function()
-        local dir, err = ann.parse_declaration("declare effect !Throw : 1")
+        local st = ann.new_state()
+        local dir, err = ann.parse_declaration(st, "declare effect !Throw : 1")
         T.ok(err == nil, "no error: " .. tostring(err))
         T.ok(dir ~= nil, "directive returned")
         if dir ~= nil then
@@ -379,32 +383,37 @@ T.describe("declare effect directive", function()
         end
     end)
     T.it("declare effect !Yield : 2 then use correctly", function()
-        ann.parse_declaration("declare effect !Yield : 2")
-        local ty, err = ann.parse_annotation("!Yield<number, string>")
+        local st = ann.new_state()
+        ann.parse_declaration(st, "declare effect !Yield : 2")
+        local ty, err = ann.parse_annotation(st, "!Yield<number, string>")
         T.ok(err == nil, "no error: " .. tostring(err))
         T.ok(ty ~= nil, "type returned")
     end)
     T.it("arity mismatch (arity=2, given 1) is an error", function()
-        ann.declare_effect("TestArityMismatch", 2)
-        local ty, err = ann.parse_annotation("!TestArityMismatch<string>")
+        local st = ann.new_state()
+        ann.declare_effect(st, "TestArityMismatch", 2)
+        local ty, err = ann.parse_annotation(st, "!TestArityMismatch<string>")
         T.ok(ty == nil, "nil type on arity mismatch")
         T.ok(err ~= nil, "error reported")
     end)
     T.it("bare use of arity-0 effect is ok", function()
-        ann.declare_effect("IoZero", 0)
-        local ty, err = ann.parse_annotation("!IoZero")
+        local st = ann.new_state()
+        ann.declare_effect(st, "IoZero", 0)
+        local ty, err = ann.parse_annotation(st, "!IoZero")
         T.ok(err == nil, "no error: " .. tostring(err))
         T.ok(ty ~= nil, "type returned")
     end)
     T.it("bare use of arity-1 effect is an error", function()
-        ann.declare_effect("Must1Arg", 1)
-        local ty, err = ann.parse_annotation("!Must1Arg")
+        local st = ann.new_state()
+        ann.declare_effect(st, "Must1Arg", 1)
+        local ty, err = ann.parse_annotation(st, "!Must1Arg")
         T.ok(ty == nil, "nil type on missing args")
         T.ok(err ~= nil, "error reported")
     end)
     T.it("declare_effect API registers arity", function()
-        ann.declare_effect("DirectAPI", 2)
-        local ty, err = ann.parse_annotation("!DirectAPI<string, number>")
+        local st = ann.new_state()
+        ann.declare_effect(st, "DirectAPI", 2)
+        local ty, err = ann.parse_annotation(st, "!DirectAPI<string, number>")
         T.ok(err == nil, "no error: " .. tostring(err))
         T.ok(ty ~= nil, "type returned")
     end)
@@ -414,7 +423,8 @@ end)
 
 T.describe("declarations", function()
     T.it("type alias MyType = string", function()
-        local dir, err = ann.parse_declaration("MyType = string")
+        local st = ann.new_state()
+        local dir, err = ann.parse_declaration(st, "MyType = string")
         T.ok(err == nil, "no error: " .. tostring(err))
         T.ok(dir ~= nil, "directive")
         if dir ~= nil then
@@ -423,7 +433,8 @@ T.describe("declarations", function()
         end
     end)
     T.it("type alias with params List<T> = { [integer]: T }", function()
-        local dir, err = ann.parse_declaration("List<T> = { [integer]: T }")
+        local st = ann.new_state()
+        local dir, err = ann.parse_declaration(st, "List<T> = { [integer]: T }")
         T.ok(err == nil, "no error: " .. tostring(err))
         T.ok(dir ~= nil, "directive")
         if dir ~= nil then
@@ -438,7 +449,8 @@ T.describe("declarations", function()
         end
     end)
     T.it("type alias two params Map<K, V>", function()
-        local dir, err = ann.parse_declaration("Map<K, V> = { [K]: V }")
+        local st = ann.new_state()
+        local dir, err = ann.parse_declaration(st, "Map<K, V> = { [K]: V }")
         T.ok(err == nil, "no error: " .. tostring(err))
         T.ok(dir ~= nil, "directive")
         if dir ~= nil then
@@ -449,7 +461,8 @@ T.describe("declarations", function()
         end
     end)
     T.it("declare var x = number", function()
-        local dir, err = ann.parse_declaration("declare x = number")
+        local st = ann.new_state()
+        local dir, err = ann.parse_declaration(st, "declare x = number")
         T.ok(err == nil, "no error: " .. tostring(err))
         T.ok(dir ~= nil, "directive")
         if dir ~= nil then
@@ -458,7 +471,8 @@ T.describe("declarations", function()
         end
     end)
     T.it("module directive", function()
-        local dir, err = ann.parse_declaration('module "foo.bar": string')
+        local st = ann.new_state()
+        local dir, err = ann.parse_declaration(st, 'module "foo.bar": string')
         T.ok(err == nil, "no error: " .. tostring(err))
         T.ok(dir ~= nil, "directive")
         if dir ~= nil then
@@ -467,7 +481,8 @@ T.describe("declarations", function()
         end
     end)
     T.it("require directive", function()
-        local dir, err = ann.parse_declaration('require "foo.bar"')
+        local st = ann.new_state()
+        local dir, err = ann.parse_declaration(st, 'require "foo.bar"')
         T.ok(err == nil, "no error: " .. tostring(err))
         T.ok(dir ~= nil, "directive")
         if dir ~= nil then
@@ -476,7 +491,8 @@ T.describe("declarations", function()
         end
     end)
     T.it("template directive", function()
-        local dir, err = ann.parse_declaration("template")
+        local st = ann.new_state()
+        local dir, err = ann.parse_declaration(st, "template")
         T.ok(err == nil, "no error: " .. tostring(err))
         T.ok(dir ~= nil, "directive")
         if dir ~= nil then
@@ -489,26 +505,31 @@ end)
 
 T.describe("error handling", function()
     T.it("empty annotation returns error", function()
-        local ty, err = ann.parse_annotation("")
+        local st = ann.new_state()
+        local ty, err = ann.parse_annotation(st, "")
         T.ok(ty == nil, "nil on empty")
         T.ok(err ~= nil, "error string")
     end)
     T.it("unclosed paren returns error", function()
-        local ty, err = ann.parse_annotation("(string")
+        local st = ann.new_state()
+        local ty, err = ann.parse_annotation(st, "(string")
         T.ok(ty == nil or err ~= nil, "error or nil")
     end)
     T.it("unknown char @ returns error", function()
-        local ty, err = ann.parse_annotation("@")
+        local st = ann.new_state()
+        local ty, err = ann.parse_annotation(st, "@")
         T.ok(ty == nil, "nil on '@'")
         T.ok(err ~= nil, "error string")
     end)
     T.it("bare ! with no name returns error", function()
-        local ty, err = ann.parse_annotation("!")
+        local st = ann.new_state()
+        local ty, err = ann.parse_annotation(st, "!")
         T.ok(ty == nil, "nil on bare '!'")
         T.ok(err ~= nil, "error string")
     end)
     T.it("empty declaration returns error", function()
-        local dir, err = ann.parse_declaration("")
+        local st = ann.new_state()
+        local dir, err = ann.parse_declaration(st, "")
         T.ok(dir == nil, "nil directive")
         T.ok(err ~= nil, "error string")
     end)
@@ -522,7 +543,8 @@ T.describe("postfix", function()
         T.eq(got.tag, "app", "app")
     end)
     T.it("T? is handled without crash", function()
-        local ty, _err = ann.parse_annotation("string?")
+        local st = ann.new_state()
+        local ty, _err = ann.parse_annotation(st, "string?")
         T.ok(ty ~= nil or _err ~= nil, "does not crash")
     end)
 end)
@@ -584,5 +606,72 @@ T.describe("typeof", function()
                 T.ok(types_mod.equal(h, con("$Typeof")), "$Typeof head")
             end
         end
+    end)
+end)
+
+-- ── State isolation regression test ──────────────────────────────────────────
+--
+-- Verifies R7: two independent parse sessions with separate AnnState objects
+-- must not share row-var IDs.  The first open-record type in state1 gets row-var
+-- id=1; the first open-record type in state2 must also get id=1, not id=2.
+--
+-- Also verifies R8: effect arities registered in state1 must not leak into
+-- state2.
+
+T.describe("state isolation (R7 + R8)", function()
+    T.it("row-var IDs restart in a fresh state", function()
+        local st1 = ann.new_state()
+        local st2 = ann.new_state()
+
+        -- Parse an open-record in st1; this consumes row-var id=1 in st1.
+        local ty1 = pt("{ x: number, ... }", st1)
+        T.ok(ty1.tag == "record", "st1: is record")
+        local row1 = ty1.row
+        T.ok(row1 ~= nil, "st1: has row variable")
+
+        -- Parse the same annotation in a fresh st2; it must also get id=1.
+        local ty2 = pt("{ x: number, ... }", st2)
+        T.ok(ty2.tag == "record", "st2: is record")
+        local row2 = ty2.row
+        T.ok(row2 ~= nil, "st2: has row variable")
+
+        -- Both should have gotten id=1 (fresh counter in each state).
+        if row1 ~= nil and row2 ~= nil then
+            T.eq(row1.id, 1, "st1 row-var id is 1")
+            T.eq(row2.id, 1, "st2 row-var id is 1 (restarted, not continued)")
+        end
+
+        -- Consume another row-var in st1; st1's counter is now at 3.
+        local ty1b = pt("{ y: string, ... }", st1)
+        T.ok(ty1b.row ~= nil, "st1 second open record has row")
+        if ty1b.row ~= nil then
+            T.eq(ty1b.row.id, 2, "st1 second row-var id is 2")
+        end
+
+        -- st2's counter should still be at 2 (only consumed one row-var).
+        local ty2b = pt("{ y: string, ... }", st2)
+        T.ok(ty2b.row ~= nil, "st2 second open record has row")
+        if ty2b.row ~= nil then
+            T.eq(ty2b.row.id, 2, "st2 second row-var id is 2 (independent from st1)")
+        end
+    end)
+
+    T.it("effect arities do not leak across states", function()
+        local st1 = ann.new_state()
+        local st2 = ann.new_state()
+
+        -- Register !MyFx with arity 1 in st1.
+        ann.declare_effect(st1, "MyFx", 1)
+
+        -- In st1, bare !MyFx (arity-1 effect) should be an error.
+        local ty1, err1 = ann.parse_annotation(st1, "!MyFx")
+        T.ok(ty1 == nil, "st1: bare !MyFx (arity 1) is error")
+        T.ok(err1 ~= nil, "st1: error reported for bare !MyFx")
+
+        -- In st2 (fresh, no arities registered), bare !MyFx should succeed
+        -- (treated as undeclared, arity 0 allowed).
+        local ty2, err2 = ann.parse_annotation(st2, "!MyFx")
+        T.ok(ty2 ~= nil, "st2: bare !MyFx succeeds (arity not registered in st2)")
+        T.ok(err2 == nil, "st2: no error for undeclared !MyFx")
     end)
 end)

@@ -5,9 +5,10 @@
 -- (Lua-table V5Type values from lib/type/experiments/v5_perf/types.lua).
 --
 -- Entry points:
---   M.parse_annotation(text)   -> V5Type, string|nil   (nil err = ok)
---   M.parse_declaration(text)  -> table, string|nil     (directive record)
---   M.declare_effect(name, n)  -> nil                   (register arity N for !Name)
+--   M.new_state()                  -> AnnState          (construct per-session state)
+--   M.parse_annotation(state, text)   -> V5Type, string|nil   (nil err = ok)
+--   M.parse_declaration(state, text)  -> table, string|nil     (directive record)
+--   M.declare_effect(state, name, n)  -> nil                   (register arity N for !Name)
 --
 -- Surface syntax mirrors v4 (lib/type/static/ann.lua) plus:
 --   !Name          effect-type head  (N=0 or declared arity)
@@ -32,6 +33,17 @@ local M = {}
 --:: DeclDirTemplate    = { kind: string }
 --:: V5Directive = DeclDirTypeAlias | DeclDirDeclareVar | DeclDirDeclEffect | DeclDirModule | DeclDirRequire | DeclDirTemplate
 
+-- ── Per-session state ────────────────────────────────────────────────────────
+
+--:: AnnState = { next_rowvar: integer, effect_arities: { [string]: integer } }
+
+-- Construct a fresh parser state.  One state per parse session; never share
+-- across concurrent or sequential independent parse calls.
+--: () -> AnnState
+function M.new_state()
+    return { next_rowvar = 1, effect_arities = {} }
+end
+
 -- ── Byte constants ──────────────────────────────────────────────────────────
 
 local byte   = string.byte
@@ -54,13 +66,10 @@ local B_DOLLAR = 36   -- '$'
 
 -- ── Effect arity registry ───────────────────────────────────────────────────
 
--- effect_arities[name] = arity N   (name excludes leading '!')
-local effect_arities = {} --[[: { [string]: number } ]]
-
--- Register a declared effect arity.
---: (string, number) -> nil
-function M.declare_effect(name, n)
-    effect_arities[name] = math.floor(n)
+-- Register a declared effect arity into per-session state.
+--: (AnnState, string, number) -> nil
+function M.declare_effect(state, name, n)
+    state.effect_arities[name] = math.floor(n)
 end
 
 -- ── Primitive type name → const name ───────────────────────────────────────
@@ -225,21 +234,19 @@ end
 -- ── Type expression parser ───────────────────────────────────────────────────
 
 -- Forward declaration
-local parse_type --[[: (AnnScanner) -> V5Type ]]
+local parse_type --[[: (AnnScanner, AnnState) -> V5Type ]]
 
--- Row-variable counter for fresh row variables.
-local _next_rowvar = 1
-
---: () -> integer
-local function fresh_rowvar_id()
-    local id = _next_rowvar
-    _next_rowvar = id + 1
+-- Fresh row-variable ID from per-session state.
+--: (AnnState) -> integer
+local function fresh_rowvar_id(state)
+    local id = state.next_rowvar
+    state.next_rowvar = id + 1
     return id
 end
 
 -- parse_primary: parses a single non-union, non-intersection type.
---: (AnnScanner) -> V5Type
-local function parse_primary(s)
+--: (AnnScanner, AnnState) -> V5Type
+local function parse_primary(s, state)
     s.depth = s.depth + 1
     if s.depth > MAX_DEPTH then
         s.depth_limit_hit = true
@@ -278,13 +285,13 @@ local function parse_primary(s)
         local result
         if peek(s) == byte("<") then
             advance(s)  -- skip '<'
-            local args = { parse_type(s) } --[[: V5Type[] ]]
+            local args = { parse_type(s, state) } --[[: V5Type[] ]]
             while opt_char(s, ",") do
-                args[#args + 1] = parse_type(s)
+                args[#args + 1] = parse_type(s, state)
             end
             expect_char(s, ">")
             -- Check arity if declared
-            local declared = effect_arities[name]
+            local declared = state.effect_arities[name]
             if declared ~= nil and declared ~= #args then
                 scan_error(s, "effect '!" .. name .. "' declared with arity " ..
                     declared .. " but applied to " .. #args .. " arg(s)")
@@ -292,7 +299,7 @@ local function parse_primary(s)
             result = types_mod.effect_apply(eff_head, args)
         else
             -- Bare !Name: allowed when arity == 0 or undeclared
-            local declared = effect_arities[name]
+            local declared = state.effect_arities[name]
             if declared ~= nil and declared ~= 0 then
                 scan_error(s, "effect '!" .. name .. "' requires " .. declared ..
                     " type argument(s)")
@@ -312,9 +319,9 @@ local function parse_primary(s)
         local result
         if peek(s) == byte("<") then
             advance(s)
-            local args = { parse_type(s) } --[[: V5Type[] ]]
+            local args = { parse_type(s, state) } --[[: V5Type[] ]]
             while opt_char(s, ",") do
-                args[#args + 1] = parse_type(s)
+                args[#args + 1] = parse_type(s, state)
             end
             expect_char(s, ">")
             -- Curried application: App(App(base, a1), a2) ...
@@ -340,7 +347,7 @@ local function parse_primary(s)
             skip_ws(s)
             if s.pos + 1 <= s.len and sub(s.src, s.pos, s.pos + 1) == "->" then
                 s.pos = s.pos + 2
-                local ret = parse_type(s)
+                local ret = parse_type(s, state)
                 s.depth = s.depth - 1
                 return types_mod.arrow({}, { ret })
             end
@@ -357,12 +364,12 @@ local function parse_primary(s)
             if word then
                 if peek(s) == byte(":") then
                     advance(s)
-                    return parse_type(s)
+                    return parse_type(s, state)
                 else
                     s.pos = save_pos
                 end
             end
-            return parse_type(s)
+            return parse_type(s, state)
         end
         items[1] = parse_one_param()
         while opt_char(s, ",") do
@@ -378,12 +385,12 @@ local function parse_primary(s)
             if s.pos + 2 <= s.len and sub(s.src, s.pos, s.pos + 2) == "..." then
                 s.pos = s.pos + 3
                 expect_char(s, "(")
-                local inner = parse_type(s)
+                local inner = parse_type(s, state)
                 expect_char(s, ")")
                 -- Spread return: represent as App($Spread, inner)
                 ret = types_mod.app(types_mod.const("$Spread"), inner)
             else
-                ret = parse_type(s)
+                ret = parse_type(s, state)
             end
             -- Unpack tuple return into multi-return list
             local rets = {} --[[: V5Type[] ]]
@@ -436,15 +443,15 @@ local function parse_primary(s)
                     if is_opaque and bracket_word then
                         advance(s)  -- consume ']'
                         expect_char(s, ":")
-                        local val_type = parse_type(s)
+                        local val_type = parse_type(s, state)
                         -- Opaque key: store as $opaque_KEY = val
                         fields["$opaque_" .. bracket_word] = val_type
                     else
                         s.pos = save_bracket
-                        local key_type = parse_type(s)
+                        local key_type = parse_type(s, state)
                         expect_char(s, "]")
                         expect_char(s, ":")
-                        local val_type = parse_type(s)
+                        local val_type = parse_type(s, state)
                         -- Store indexer by key type tag for Phase 5.B
                         idx_count = idx_count + 1
                         -- Pair key+val as an App node under a synthetic field name
@@ -457,11 +464,11 @@ local function parse_primary(s)
                     local nb = peek(s)
                     if nb == byte("}") or nb == byte(",") or nb == byte(";") or not nb then
                         -- Bare ...: open-table row variable
-                        row_id = fresh_rowvar_id()
+                        row_id = fresh_rowvar_id(state)
                         break
                     else
                         -- ...T: spread base type
-                        local inner = parse_type(s)
+                        local inner = parse_type(s, state)
                         -- Store as $spread_N field
                         idx_count = idx_count + 1
                         fields["$spread_" .. tostring(idx_count)] =
@@ -489,7 +496,7 @@ local function parse_primary(s)
                     if next_b == byte(":") or next_b == byte("?") then
                         local optional = opt_char(s, "?")
                         expect_char(s, ":")
-                        local ftype = parse_type(s)
+                        local ftype = parse_type(s, state)
                         -- Encode optional/readonly in field name for Phase 5.B
                         local key = fname or ""
                         if optional then key = "$opt_" .. key end
@@ -498,13 +505,13 @@ local function parse_primary(s)
                     else
                         -- Positional type entry
                         s.pos = save_pos
-                        local val_type = parse_type(s)
+                        local val_type = parse_type(s, state)
                         idx_count = idx_count + 1
                         fields["$pos_" .. tostring(idx_count)] = val_type
                     end
                 elseif fb and fb ~= byte("}") and fb ~= byte(",") and fb ~= byte(";") then
                     -- Positional type starting with non-ident char
-                    local val_type = parse_type(s)
+                    local val_type = parse_type(s, state)
                     idx_count = idx_count + 1
                     fields["$pos_" .. tostring(idx_count)] = val_type
                 else
@@ -526,7 +533,7 @@ local function parse_primary(s)
     -- Spread: ...T
     if b == B_DOT and s.pos + 2 <= s.len and sub(s.src, s.pos, s.pos + 2) == "..." then
         s.pos = s.pos + 3
-        local inner = parse_type(s)
+        local inner = parse_type(s, state)
         s.depth = s.depth - 1
         return types_mod.app(types_mod.const("$Spread"), inner)
     end
@@ -564,16 +571,16 @@ local function parse_primary(s)
         if word == "function" and peek(s) == byte("(") then
             s.depth = s.depth - 1
             -- parse_primary will increment and decrement depth itself
-            return parse_primary(s)
+            return parse_primary(s, state)
         end
 
         -- Named type with optional generic args: Name or Name<T, U>
         local base = types_mod.const(word)
         if peek(s) == byte("<") then
             advance(s)
-            local args = { parse_type(s) } --[[: V5Type[] ]]
+            local args = { parse_type(s, state) } --[[: V5Type[] ]]
             while opt_char(s, ",") do
-                args[#args + 1] = parse_type(s)
+                args[#args + 1] = parse_type(s, state)
             end
             expect_char(s, ">")
             -- Curried application
@@ -593,9 +600,9 @@ local function parse_primary(s)
 end
 
 -- parse_postfix: array sugar T[] and indexed access T[K]
---: (AnnScanner) -> V5Type
-local function parse_postfix(s)
-    local ty = parse_primary(s)
+--: (AnnScanner, AnnState) -> V5Type
+local function parse_postfix(s, state)
+    local ty = parse_primary(s, state)
     while true do
         if peek(s) == byte("[") then
             advance(s)
@@ -604,7 +611,7 @@ local function parse_postfix(s)
                 -- T[] → { [integer]: T }
                 ty = types_mod.app(types_mod.app(types_mod.const("$Idx"), types_mod.const("integer")), ty)
             else
-                local key = parse_type(s)
+                local key = parse_type(s, state)
                 expect_char(s, "]")
                 -- T[K] → $IndexAccess(T, K)
                 ty = types_mod.app(types_mod.app(types_mod.const("$IndexAccess"), ty), key)
@@ -620,24 +627,24 @@ local function parse_postfix(s)
 end
 
 -- parse_intersection: A & B
---: (AnnScanner) -> V5Type
-local function parse_intersection(s)
-    local left = parse_postfix(s)
+--: (AnnScanner, AnnState) -> V5Type
+local function parse_intersection(s, state)
+    local left = parse_postfix(s, state)
     if not opt_char(s, "&") then return left end
-    local parts = { left, parse_postfix(s) } --[[: V5Type[] ]]
+    local parts = { left, parse_postfix(s, state) } --[[: V5Type[] ]]
     while opt_char(s, "&") do
-        parts[#parts + 1] = parse_postfix(s)
+        parts[#parts + 1] = parse_postfix(s, state)
     end
     return types_mod.intersection(parts)
 end
 
 -- parse_type: union and top-level right-associative ->
-parse_type = function(s)
-    local left = parse_intersection(s)
+parse_type = function(s, state)
+    local left = parse_intersection(s, state)
     if opt_char(s, "|") then
-        local xs = { left, parse_intersection(s) } --[[: V5Type[] ]]
+        local xs = { left, parse_intersection(s, state) } --[[: V5Type[] ]]
         while opt_char(s, "|") do
-            xs[#xs + 1] = parse_intersection(s)
+            xs[#xs + 1] = parse_intersection(s, state)
         end
         left = types_mod.union(xs)
     end
@@ -650,11 +657,11 @@ parse_type = function(s)
         if s.pos + 2 <= s.len and sub(s.src, s.pos, s.pos + 2) == "..." then
             s.pos = s.pos + 3
             expect_char(s, "(")
-            local inner = parse_type(s)
+            local inner = parse_type(s, state)
             expect_char(s, ")")
             ret = types_mod.app(types_mod.const("$Spread"), inner)
         else
-            ret = parse_type(s)
+            ret = parse_type(s, state)
         end
         return types_mod.arrow({ left }, { ret })
     end
@@ -665,10 +672,10 @@ end
 
 -- parse_annotation: parse a type annotation string into a V5Type.
 -- Returns (V5Type, nil) on success, (nil, errmsg) on failure.
---: (string) -> (V5Type | nil, string | nil)
-function M.parse_annotation(text)
+--: (AnnState, string) -> (V5Type | nil, string | nil)
+function M.parse_annotation(state, text)
     local s = new_scanner(text)
-    local ok, result = pcall(parse_type, s)
+    local ok, result = pcall(parse_type, s, state)
     if not ok then
         return nil, tostring(result)
     end
@@ -693,8 +700,8 @@ end
 --   { kind = "require",     mod_name = string }
 --   { kind = "template" }
 --
---: (string) -> (V5Directive | nil, string | nil)
-function M.parse_declaration(text)
+--: (AnnState, string) -> (V5Directive | nil, string | nil)
+function M.parse_declaration(state, text)
     local s = new_scanner(text)
     local ok, result = pcall(function()
         local word = scan_word(s)
@@ -733,7 +740,7 @@ function M.parse_declaration(text)
                 end
                 if s.pos == start then scan_error(s, "expected integer arity after ':'") end
                 local arity = tonumber(sub(s.src, start, s.pos - 1)) or 0
-                M.declare_effect(eff_name, arity)
+                M.declare_effect(state, eff_name, arity)
                 return { kind = "declare_effect", name = eff_name, arity = arity }
             end
             -- Not 'effect': rewind and parse as declare var
@@ -741,7 +748,7 @@ function M.parse_declaration(text)
             local vname = scan_word(s)
             if not vname then scan_error(s, "expected name after 'declare'") end
             expect_char(s, "=")
-            local ty = parse_type(s)
+            local ty = parse_type(s, state)
             skip_ws(s)
             if s.pos <= s.len then
                 local rest = sub(s.src, s.pos, s.pos + 31)
@@ -754,7 +761,7 @@ function M.parse_declaration(text)
         if word == "module" then
             local mod_name = scan_string_lit(s)
             expect_char(s, ":")
-            local ty = parse_type(s)
+            local ty = parse_type(s, state)
             skip_ws(s)
             if s.pos <= s.len then
                 scan_error(s, "unexpected trailing tokens after module declaration")
@@ -789,7 +796,7 @@ function M.parse_declaration(text)
             expect_char(s, ">")
         end
         expect_char(s, "=")
-        local ty = parse_type(s)
+        local ty = parse_type(s, state)
         skip_ws(s)
         if s.pos <= s.len then
             local rest = sub(s.src, s.pos, s.pos + 31)
@@ -803,8 +810,8 @@ function M.parse_declaration(text)
     return result, nil
 end
 
--- Expose parse_type for testing (internal use).
-M._parse_type = parse_type
+-- Expose internals for testing (internal use only).
 M._new_scanner = new_scanner
+M._parse_type  = parse_type
 
 return M

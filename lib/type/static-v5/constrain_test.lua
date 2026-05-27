@@ -11,16 +11,24 @@ end
 local T           = require("lib.test.assert")
 local constrain   = require("lib.type.static-v5.constrain")
 local stdlib_mod  = require("lib.type.static-v5.stdlib_types")
+local ann_mod     = require("lib.type.static-v5.ann")
 local types_mod   = require("lib.type.experiments.v5_perf.types")
+
+-- Mirror of AnnState from ann.lua (per-parse-session annotation parser state).
+--:: AnnState = { next_rowvar: integer, effect_arities: { [string]: integer } }
 
 local function generate(src, filename)
     return constrain.generate(src, filename or "test.lua", nil)
 end
 
--- Generate with stdlib declarations pre-loaded.
+-- Generate with stdlib declarations pre-loaded and effects registered in a
+-- fresh per-call AnnState.  Use this everywhere stdlib effect types (!io,
+-- !throw, !yield) may appear in source annotations.
 local function generate_stdlib(src, filename)
+    local ann_state = ann_mod.new_state()
+    stdlib_mod.register_effects(ann_state)
     local decls = stdlib_mod.decls()
-    return constrain.generate(src, filename or "test.lua", { decls = decls })
+    return constrain.generate(src, filename or "test.lua", { decls = decls, ann_state = ann_state })
 end
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
@@ -328,8 +336,7 @@ T.describe("v5 constrain — effect propagation", function()
         -- Outer function annotated as () -> nil.  Inner throws.  After 5.F2, pcall
         -- consumes !throw so the outer annotation is satisfied (no cint_member).
         local src = "--: () -> nil\nlocal function f() pcall(function() error('x') end) end"
-        local decls = stdlib_mod.decls()
-        local cs, errs = constrain.generate(src, "test.lua", { decls = decls })
+        local cs, errs = generate_stdlib(src, "test.lua")
         T.eq(#errs, 0, "no parse/annotation errors")
         -- !throw consumed by pcall → no cint_member for !throw.
         local found_throw_member = any(cs, function(c)
@@ -461,8 +468,7 @@ T.describe("v5 constrain — effect propagation", function()
     -- and returns the real arrow; propagate_callee_effects then sees !io.
     T.it("5.F1: annotated () -> nil calling io.write via dotted callee emits cint_member", function()
         local src = "--: () -> nil\nlocal function f() io.write('x') end"
-        local decls = stdlib_mod.decls()
-        local cs, errs = constrain.generate(src, "test.lua", { decls = decls })
+        local cs, errs = generate_stdlib(src, "test.lua")
         T.eq(#errs, 0, "no parse/annotation errors")
         -- Must emit at least one cint_member — that's the F2 enforcement constraint.
         T.ok(count_tag(cs, "cint_member") >= 1,
@@ -484,8 +490,7 @@ T.describe("v5 constrain — effect propagation", function()
         -- Build the annotated arrow type inline and inject via opts.decls
         -- (the gen-pass reads the annotation from source).
         local src = "--: () -> nil & !io\nlocal function f() io.write('x') end"
-        local decls = stdlib_mod.decls()
-        local cs, errs = constrain.generate(src, "test.lua", { decls = decls })
+        local cs, errs = generate_stdlib(src, "test.lua")
         T.eq(#errs, 0, "no parse/annotation errors")
         -- cint_member is emitted (membership check); the solver will satisfy it
         -- because !io IS in the annotation intersection.
@@ -495,8 +500,7 @@ T.describe("v5 constrain — effect propagation", function()
     -- 5.F3: coroutine.create emits NO constraints — fully special-cased.
     T.it("5.F3: coroutine.create call site emits no constraints (special-cased)", function()
         local src = "local co = coroutine.create(function() end)"
-        local decls = stdlib_mod.decls()
-        local cs, errs = constrain.generate(src, "test.lua", { decls = decls })
+        local cs, errs = generate_stdlib(src, "test.lua")
         T.eq(#errs, 0, "no errors")
         -- coroutine.create is fully special-cased; no csub emitted for it.
         T.eq(count_tag(cs, "csub"), 0, "no csub emitted for coroutine.create (special-cased)")
@@ -507,8 +511,7 @@ T.describe("v5 constrain — effect propagation", function()
         -- Outer function annotated as () -> nil.  Inner yields.  After 5.F3,
         -- coroutine.create consumes !yield so the outer annotation is satisfied.
         local src = "--: () -> nil\nlocal function f() coroutine.create(function() coroutine.yield(1) end) end"
-        local decls = stdlib_mod.decls()
-        local cs, errs = constrain.generate(src, "test.lua", { decls = decls })
+        local cs, errs = generate_stdlib(src, "test.lua")
         T.eq(#errs, 0, "no parse/annotation errors")
         -- !yield consumed by coroutine.create → no cint_member for !yield.
         local found_yield_member = any(cs, function(c)
@@ -700,8 +703,7 @@ T.describe("v5 constrain — for loops", function()
             "  local _v = v",
             "end",
         }, "\n")
-        local decls = stdlib_mod.decls()
-        local cs, errs = constrain.generate(src, "test.lua", { decls = decls })
+        local cs, errs = generate_stdlib(src, "test.lua")
         T.eq(#errs, 0, "no parse/annotation errors in for-in pairs test")
         -- At minimum, a csub for the pairs callee should be emitted.
         -- (The actual loop-var typing is verified end-to-end in cli_e2e_test.)
@@ -930,8 +932,7 @@ T.describe("v5 constrain — directive scope injection", function()
     T.it("Y2: coroutine.yield at module top level emits error", function()
         -- No enclosing function at all — extract_yield_from_scope returns nil.
         local src = "coroutine.yield(1)"
-        local decls = stdlib_mod.decls()
-        local _cs, errs = constrain.generate(src, "test.lua", { decls = decls })
+        local _cs, errs = generate_stdlib(src, "test.lua")
         local found = false
         for _, e in ipairs(errs) do
             if e ~= nil and e:find("coroutine.yield") and e:find("!yield") then
@@ -945,8 +946,7 @@ T.describe("v5 constrain — directive scope injection", function()
         -- Enclosing unannotated function: !yield propagates outward; solver handles F2.
         -- extract_yield_from_scope returns permissive (stack non-empty), no gen-pass error.
         local src = "local function f() coroutine.yield(1) end"
-        local decls = stdlib_mod.decls()
-        local _cs, errs = constrain.generate(src, "test.lua", { decls = decls })
+        local _cs, errs = generate_stdlib(src, "test.lua")
         local found_y2_err = false
         for _, e in ipairs(errs) do
             if e ~= nil and e:find("coroutine.yield") and e:find("!yield") then

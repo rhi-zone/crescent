@@ -21,6 +21,7 @@ local constrain_mod = require("lib.type.static-v5.constrain")
 local op_sem        = require("lib.type.static-v5.op_sem")
 local stdlib_mod    = require("lib.type.static-v5.stdlib_types")
 local error_format  = require("lib.type.static-v5.error_format")
+local ann_mod       = require("lib.type.static-v5.ann")
 
 local M = {}
 
@@ -45,14 +46,18 @@ local function check_one(path, caps)
         }
     end
 
-    -- Register stdlib effects before generating constraints.
-    stdlib_mod.register_effects()
+    -- Create a fresh per-file annotation state and register stdlib effects into it.
+    -- This isolates row-var IDs and effect arities across multiple files checked
+    -- in the same process (fixes R7 + R8).
+    local ann_state = ann_mod.new_state()
+    stdlib_mod.register_effects(ann_state)
 
     -- stdlib.decls() returns nested records directly.
     local decls = stdlib_mod.decls()
 
-    -- Generate constraints.
-    local constraints, gen_errors = constrain_mod.generate(source, path, { decls = decls })
+    -- Generate constraints, threading the ann_state so all annotation parsing
+    -- within this file uses the same isolated state.
+    local constraints, gen_errors = constrain_mod.generate(source, path, { decls = decls, ann_state = ann_state })
 
     -- Solve.
     --: OpSemState

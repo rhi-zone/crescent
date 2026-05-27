@@ -8,9 +8,10 @@
 -- M.generate via opts.decls.  Namespaced libraries (io, os, coroutine) are
 -- emitted as TRecord values directly — no dotted keys.
 --
--- Effect arities are registered in the ann module as a side effect of calling
--- M.register_effects(), which must be called once before any parse_annotation
--- call that references effect types.
+-- Effect arities are registered into a per-session AnnState by calling
+-- M.register_effects(state) before any parse_annotation call that references
+-- effect types.  Callers are responsible for creating the AnnState, registering
+-- effects, and passing it to constrain.generate via opts.ann_state.
 --
 -- Implementation choice: syntactic special-case in the gen-pass for pcall and
 -- coroutine.create (not generic stdlib declarations), because the
@@ -27,13 +28,13 @@ local M = {}
 
 -- ── Effect arity registration ─────────────────────────────────────────────────
 
--- Register canonical effect arities once.  Idempotent.
---: () -> nil
-function M.register_effects()
-    ann_mod.declare_effect("io",    0)   -- !io     — I/O side effect (arity 0)
-    ann_mod.declare_effect("os",    0)   -- !os     — OS/process side effect
-    ann_mod.declare_effect("throw", 1)   -- !throw<E> — raises exception of type E
-    ann_mod.declare_effect("yield", 2)   -- !yield<Y,R> — yields Y, receives R
+-- Register canonical effect arities into a per-session AnnState.
+--: (AnnState) -> nil
+function M.register_effects(state)
+    ann_mod.declare_effect(state, "io",    0)   -- !io     — I/O side effect (arity 0)
+    ann_mod.declare_effect(state, "os",    0)   -- !os     — OS/process side effect
+    ann_mod.declare_effect(state, "throw", 1)   -- !throw<E> — raises exception of type E
+    ann_mod.declare_effect(state, "yield", 2)   -- !yield<Y,R> — yields Y, receives R
 end
 
 -- ── Type constructors ─────────────────────────────────────────────────────────
@@ -95,8 +96,6 @@ local EFF_OS  = eff("os")
 
 --: () -> { [string]: V5Type, ... }
 function M.decls()
-    M.register_effects()
-
     --: { [string]: V5Type, ... }
     local d = {} --[[: { [string]: V5Type, ... } ]]
 

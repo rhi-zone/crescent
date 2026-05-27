@@ -59,6 +59,8 @@ local M = {}
 --:: ASTNodeArena = { get: (ASTNodeArena, integer) -> ASTNode, alloc: (ASTNodeArena) -> integer, len: integer, ... }
 --:: ListPool = { get: (ListPool, integer) -> integer, len: integer, cap: integer, items: unknown, mark: (ListPool) -> integer, push: (ListPool, integer) -> (), since: (ListPool, integer) -> (integer, integer), grow: (ListPool) -> (), reset: (ListPool) -> (), ... }
 --:: InternPool = { ht_cap: integer, ht_mask: integer, ht_count: integer, next_id: integer, buf_count: integer, entries: { [integer]: unknown, ... }, bufs: { [integer]: unknown, ... }, rev: { [integer]: unknown, ... }, map: { [string]: integer, ... }, _anchors: { [integer]: string, ... }, _type_predicates: { [integer]: { param_idx: integer, type_id: integer }, ... } | nil, _assert_predicates: { [integer]: { param_idx: integer, type_id: integer }, ... } | nil, _pending_predicate: { param_idx: integer, type_id: integer, ... } | nil, _pending_assert_predicate: { param_idx: integer, type_id: integer, ... } | nil, ... }
+-- Mirror of AnnState from ann.lua (per-parse-session annotation parser state).
+--:: AnnState = { next_rowvar: integer, effect_arities: { [string]: integer } }
 
 -- ── AST node kind constants (from defs) ─────────────────────────────────────
 
@@ -341,6 +343,7 @@ end
 --::   module_name: string | nil,
 --::   module_decl_ty: V5Type | nil,
 --::   module_decl_line: integer,
+--::   ann_state: AnnState,
 --:: }
 
 -- ── Fresh unification variables ──────────────────────────────────────────────
@@ -831,7 +834,7 @@ local function get_type_ann(ctx, line)
     local r = get_raw_ann(ctx, line)
     if r == nil then return nil end
     if r.kind ~= ANN_TYPE then return nil end
-    local ty, err = ann_mod.parse_annotation(r.content)
+    local ty, err = ann_mod.parse_annotation(ctx.ann_state, r.content)
     if ty == nil then
         ctx.errors[#ctx.errors + 1] = (ctx.filename .. ":" .. line
             .. ": annotation parse error: " .. (err or "?"))
@@ -850,7 +853,7 @@ local function get_decl_ann(ctx, line)
     local r = get_raw_ann(ctx, line)
     if r == nil then return nil end
     if r.kind ~= ANN_DECL then return nil end
-    local dir, err = ann_mod.parse_declaration(r.content)
+    local dir, err = ann_mod.parse_declaration(ctx.ann_state, r.content)
     if dir == nil then
         ctx.errors[#ctx.errors + 1] = (ctx.filename .. ":" .. line
             .. ": declaration parse error: " .. (err or "?"))
@@ -2403,7 +2406,7 @@ M.extract_effects = extract_effects
 --   constraints — flat V5Constraint array.
 --   errors      — string array (parse errors, annotation errors).
 --
---: (string, string | nil, { pool?: InternPool, decls?: { [string]: V5Type }, ... } | nil) -> (V5Constraint[], string[])
+--: (string, string | nil, { pool?: InternPool, decls?: { [string]: V5Type }, ann_state?: AnnState, ... } | nil) -> (V5Constraint[], string[])
 function M.generate(source, filename, opts)
     filename = filename or "?"
     -- opts.pool is an optional performance hint (share an intern pool).
@@ -2411,7 +2414,19 @@ function M.generate(source, filename, opts)
     -- Sharing can be added in 5.C once opts types are better declared.
     --: InternPool
     local pool = intern_mod.new()
-    local _opts_unused = opts  -- suppress unused warning
+
+    -- Use caller-supplied ann_state (pre-populated with effects etc.) or create
+    -- a fresh one.  A fresh state guarantees row-var and effect-arity isolation
+    -- across independent parse sessions.
+    --: AnnState
+    local ann_state = ann_mod.new_state()
+    if opts ~= nil then
+        --: AnnState | nil
+        local supplied = opts.ann_state
+        if supplied ~= nil then
+            ann_state = supplied
+        end
+    end
 
     local errors      = {} --[[: string[] ]]
     local constraints = {} --[[: V5Constraint[] ]]
@@ -2463,6 +2478,7 @@ function M.generate(source, filename, opts)
         module_name       = nil,
         module_decl_ty    = nil,
         module_decl_line  = 0,
+        ann_state         = ann_state,
     }
 
     -- Seed scope_stack with the top-level scope.
@@ -2487,7 +2503,7 @@ function M.generate(source, filename, opts)
             --: RawAnn
             local rann = entry
             if rann.kind == ANN_DECL then
-                local dir, derr = ann_mod.parse_declaration(rann.content)
+                local dir, derr = ann_mod.parse_declaration(ctx.ann_state, rann.content)
                 if dir == nil and derr ~= nil then
                     errors[#errors + 1] = filename .. ":" .. tostring(line)
                         .. ": declaration parse error: " .. derr
@@ -2504,12 +2520,9 @@ function M.generate(source, filename, opts)
                             bind(ctx, dv_name, dv_type)
                         end
                     elseif dir.kind == "declare_effect" then
-                        -- Register effect arity so !Name<...> annotations resolve.
-                        local de_name  = dir.name
-                        local de_arity = dir.arity
-                        if de_name ~= nil and de_arity ~= nil then
-                            ann_mod.declare_effect(de_name, de_arity)
-                        end
+                        -- Effect arity already registered into ctx.ann_state by
+                        -- parse_declaration (via M.declare_effect inside ann.lua).
+                        -- Nothing additional needed here.
                     elseif dir.kind == "type_alias" then
                         -- Register a type alias for use in subsequent annotations.
                         -- The alias body may itself reference already-registered
