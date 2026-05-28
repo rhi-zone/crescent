@@ -159,36 +159,4 @@ function M.run(argv, caps)
     return any_error and 1 or 0
 end
 
--- ── Main entry (real I/O, for bin/cr-check.lua) ──────────────────────────────
-
---: (string[]) -> integer
-function M.main(argv)
-    --: V5CliCaps
-    local caps = {
-        --: (string) -> (string | nil, string | nil)
-        read_file = function(path)
-            local f, oerr = io.open(path, "rb")
-            if f == nil then return nil, tostring(oerr) end
-            local bytes = f:read("*a")
-            f:close()
-            if bytes == nil then return nil, "read failed: " .. path end
-            return bytes, nil
-        end,
-        --: (string) -> nil
-        write_out = function(msg) io.stdout:write(msg) end,
-        --: (string) -> nil
-        write_err = function(msg) io.stderr:write(msg) end,
-        --: (unknown) -> boolean
-        is_tty = function(_fd)
-            -- Best-effort TTY detection without an external dep: check the
-            -- standard environment variables.  Plain (no color) by default so
-            -- piped/test capture remains stable; respects FORCE_COLOR/NO_COLOR.
-            if os.getenv("NO_COLOR") ~= nil then return false end
-            if os.getenv("FORCE_COLOR") ~= nil then return true end
-            return false
-        end,
-    }
-    return M.run(argv, caps)
-end
-
 return M
