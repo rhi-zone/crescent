@@ -675,3 +675,57 @@ T.describe("state isolation (R7 + R8)", function()
         T.ok(err2 == nil, "st2: no error for undeclared !MyFx")
     end)
 end)
+
+-- ── Y10: augment / unseal explicit error (not silent misparse) ────────────────
+
+T.describe("parse_declaration unsupported v4 directives", function()
+    T.it("augment produces explicit unsupported error", function()
+        local state = ann.new_state()
+        local dir, err = ann.parse_declaration(state, "augment Foo { x: integer }")
+        T.ok(dir == nil, "augment: directive should be nil")
+        T.ok(err ~= nil, "augment: error should be non-nil")
+        if err ~= nil then
+            local errs = tostring(err)
+            T.ok(errs:find("augment") ~= nil,
+                "augment error mentions 'augment' (got: " .. errs .. ")")
+            T.ok(errs:find("not yet supported") ~= nil,
+                "augment error mentions 'not yet supported' (got: " .. errs .. ")")
+        end
+    end)
+
+    T.it("unseal produces explicit unsupported error", function()
+        local state = ann.new_state()
+        local dir, err = ann.parse_declaration(state, "unseal Foo")
+        T.ok(dir == nil, "unseal: directive should be nil")
+        T.ok(err ~= nil, "unseal: error should be non-nil")
+        if err ~= nil then
+            local errs = tostring(err)
+            T.ok(errs:find("unseal") ~= nil,
+                "unseal error mentions 'unseal' (got: " .. errs .. ")")
+            T.ok(errs:find("not yet supported") ~= nil,
+                "unseal error mentions 'not yet supported' (got: " .. errs .. ")")
+        end
+    end)
+
+    T.it("type_alias still parses fine after augment/unseal guards", function()
+        local state = ann.new_state()
+        local dir, err = ann.parse_declaration(state, "MyAlias = string")
+        T.ok(err == nil, "type_alias: no error (got: " .. tostring(err) .. ")")
+        T.ok(dir ~= nil, "type_alias: directive non-nil")
+        if dir ~= nil then
+            T.eq(dir.kind, "type_alias", "type_alias: kind is type_alias")
+            T.eq(dir.name, "MyAlias", "type_alias: name is MyAlias")
+        end
+    end)
+
+    T.it("declare still parses fine after augment/unseal guards", function()
+        local state = ann.new_state()
+        local dir, err = ann.parse_declaration(state, "declare myVar = integer")
+        T.ok(err == nil, "declare: no error (got: " .. tostring(err) .. ")")
+        T.ok(dir ~= nil, "declare: directive non-nil")
+        if dir ~= nil then
+            T.eq(dir.kind, "declare_var", "declare: kind is declare_var")
+            T.eq(dir.name, "myVar", "declare: name is myVar")
+        end
+    end)
+end)

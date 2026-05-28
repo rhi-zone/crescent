@@ -779,6 +779,16 @@ function M.parse_declaration(state, text)
             return { kind = "require", mod_name = mod_name }
         end
 
+        -- --:: augment Name { ... }  (v4 directive; not yet supported in v5)
+        if word == "augment" then
+            scan_error(s, "augment declarations are not yet supported in v5 (tracked gap)")
+        end
+
+        -- --:: unseal Name  (v4 directive; not yet supported in v5)
+        if word == "unseal" then
+            scan_error(s, "unseal declarations are not yet supported in v5 (tracked gap)")
+        end
+
         -- --:: Name<T...> = type  (type alias)
         local alias_name = word
         local params = nil --[[: string[] | nil ]]
