@@ -229,6 +229,34 @@ local v = { x = 1 }
         return ef.render_prose("T-CRowLacks-Closed-Fail", det, "row already contains") .. "\n"
     end)
 
+    -- ── Y8: unhandled ErrorDetails variant visibility ─────────────────────────
+
+    -- Case 2: details non-nil, tag matches no arm → tag name must appear in output.
+    T.it("prose-only__unhandled_variant__tag_visible", function()
+        -- Intentionally invalid tag: call render_prose through a runtime-typed
+        -- wrapper so the typechecker sees (string, unknown, string) -> string
+        -- while the actual value has a tag that matches no arm.
+        --: (string, unknown, string) -> string
+        local render_untyped = ef.render_prose
+        local out = render_untyped("T-Any", { tag = "__nonexistent_variant__" }, "fallback msg")
+        T.ok(out:find("__nonexistent_variant__", 1, true) ~= nil,
+            "expected output to contain the tag name, got: " .. tostring(out))
+    end)
+
+    -- Case 1: details == nil → plain [rule] msg format, unchanged.
+    T.it("prose-only__nil_details__plain_format", function()
+        local out = ef.render_prose("T-Any", nil, "raw message")
+        T.eq(out, "[T-Any] raw message")
+    end)
+
+    -- Sanity: an existing wired variant still renders proper prose.
+    T.it("prose-only__wired_variant__proper_prose", function()
+        --: ErrorDetails
+        local det = { tag = "missing_field", field = "name" }
+        local out = ef.render_prose("T-CSub-Record-Width", det, "fallback")
+        T.eq(out, "missing field `name`")
+    end)
+
     snap("prose-only__show_sort_union", function()
         -- Verify union rendering is lexically sorted (deterministic).
         local types_mod = require("lib.type.experiments.v5_perf.types")

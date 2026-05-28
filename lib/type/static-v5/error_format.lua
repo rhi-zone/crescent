@@ -167,7 +167,11 @@ function M.render_prose(rule, details, fallback_msg)
         return "type constructor expects " .. tostring(details.expected) ..
             " arguments, got " .. tostring(details.got)
     end
-    return "[" .. rule .. "] " .. fallback_msg
+    -- details is non-nil but no arm matched: a new ErrorDetails variant was added
+    -- to op_sem.lua without a corresponding case here.  Include the tag name so
+    -- the omission is visible in output rather than silently generic.
+    -- (details == nil falls through to the plain "[rule] msg" path above.)
+    return "[" .. rule .. ": " .. tostring(t) .. "] " .. fallback_msg
 end
 
 -- ── Main entry ──────────────────────────────────────────────────────────────
