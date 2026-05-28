@@ -2,6 +2,49 @@
 
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
 
+## v5 substrate program — Phase 2 implementation
+
+Phase 0 (CLAUDE.md guardrails) and Phase 1 (three normative specs) are committed to the repo. What follows are the Phase 2+ implementation threads.
+
+Specs in force:
+- **Spec A** (simple-sub bounds — faithful-flow + canonical + eager): `docs/typechecker-v5-operational-semantics.md`, commit `26ef57a8`.
+- **Spec B** (match types + TPack variadic packs): same doc, commit `c06b1ac6`.
+- **Spec C** (TLiteral + TRecord three-region shape, no `$`-string encodings): `docs/type-system.md` + op-sem doc, commit `7a627c26`.
+
+Lower-priority open gaps (G2/G4/G5/G10 substrate, G6 `__index`, P5 ann-surface features, eager-depth-limit, the two-positional-encodings smell, resume-side S narrowing) are tracked in `docs/v5-gaps.md` — read that file rather than relying on this section for exhaustiveness.
+
+### Thread 1: Implement Spec A bounds in op_sem.lua + op_sem_alt.lua (closes R1 + bounds-spec-gap)
+
+Spec A defines a faithful-flow bound-graph (subtyping is a directional edge; equality merges via union-find; multi-bound / transitive / polar / var-flow / cyclic-bound paths all specified). The dual-interpreter premise (op_sem.lua and op_sem_alt.lua are independent encodings of the same spec, never derived by copying between them) was vindicated by R1's finding that they had drifted. Both must be implemented from the spec independently.
+
+The prior ~80 fixtures never exercised multi-bound / transitive / polar / var-flow / cyclic paths — new parity fixtures covering those paths are part of the deliverable.
+
+Open question: the bound-graph coexists with union-find (equality merges, subtyping is directional). The spec defines it; implementation is unproven. Termination leans on a mandatory structural-hash cache. Verify termination properties empirically on the new fixture set, not just on the existing ones.
+
+### Thread 2: Implement Spec C encodings (closes prefix-scoping)
+
+TLiteral node + TRecord three-region shape (fields with optional/readonly attributes, `indexes[]`, `row`); delete every `$`-string-match and key-prefix-scan that substitutes for a proper node.
+
+Touches all record field-walkers: shift, instantiate, equal, collect_uvars, and subtype rules. Worth mapping all walkers before starting to avoid half-migrations.
+
+### Thread 3: Implement Spec B substrate (heaviest piece)
+
+match_type node + CMatchEval constraint + TPack + arrow variadic-pack redesign + effect-pattern matching. The arrow/TPack redesign is the heaviest sub-piece (every arrow producer and consumer changes). Spec B is the substrate that other features build on.
+
+### Thread 4: Re-express pcall/coroutine/pairs/ipairs as stdlib declarations; delete the handlers (closes adhoc-cluster + Y1; delivers G17)
+
+Targets: build_pcall_ret, build_coroutine_create_ret, coroutine.* branches, extract_idx, name-keyed dispatch, `!throw`/`!yield` string-matches. After the deletion, a re-run of the adversarial ad-hoc sweep must come back empty for the AD-HOC category, and a grep must show zero `name == "$X"` / name-keyed dispatch in constrain.lua/op_sem.lua. This is the payoff — the ad-hoc dies here.
+
+### Thread 5 (SEQUENCING FORK — unresolved): Phase ordering of Spec B vs Spec C
+
+The approved program plan listed P3 (Spec C) before P4 (Spec B), but Spec C's positional/tuple migration depends on Spec B's TPack. TPack must land before Spec C's positional work. The next session should re-plan Phase 2 ordering to respect substrate-before-consumers (a CLAUDE.md planning rule now). The fork: either (a) carve out a TPack-only slice of Spec B that lands first, or (b) fully complete Thread 3 before Thread 2. Both are valid; the choice has downstream ordering consequences that need to be mapped.
+
+### Verification discipline
+
+Op-sem parity must hold at every commit. After the handler deletion, the adversarial ad-hoc sweep must return empty for the AD-HOC category; a grep must show zero `name == "$X"` / name-keyed dispatch in constrain.lua/op_sem.lua.
+
+---
+
 ## Typechecker v5 follow-ups
 
 > **Comprehensive state snapshot lives at `docs/typechecker-v5-handoff-2026-05-25.md`** — read that first. It covers artifacts + LOC, architecture, load-bearing invariants, falsifiability gates passed, 16 named spec gaps with sources + severity, all open H-questions, cross-cutting risks, methodology rules. The threads below surface high-signal items as starting context but don't capture the full picture.
