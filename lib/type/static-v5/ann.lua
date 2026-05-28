@@ -544,10 +544,8 @@ local function parse_primary(s, state)
 
         -- typeof <ident>
         if word == "typeof" then
-            local ident = scan_word(s)
-            if not ident then scan_error(s, "expected identifier after 'typeof'") end
-            s.depth = s.depth - 1
-            return types_mod.app(types_mod.const("$Typeof"), types_mod.const(ident))
+            scan_word(s) -- consume the identifier even though we error
+            scan_error(s, "'typeof' is not yet supported in v5 annotations")
         end
 
         -- true / false literals
@@ -611,10 +609,8 @@ local function parse_postfix(s, state)
                 -- T[] → { [integer]: T }
                 ty = types_mod.app(types_mod.app(types_mod.const("$Idx"), types_mod.const("integer")), ty)
             else
-                local key = parse_type(s, state)
-                expect_char(s, "]")
-                -- T[K] → $IndexAccess(T, K)
-                ty = types_mod.app(types_mod.app(types_mod.const("$IndexAccess"), ty), key)
+                -- T[K] index-access is not yet supported in v5 annotations
+                scan_error(s, "'T[K]' index-access is not yet supported in v5 annotations")
             end
         elseif peek(s) == byte("?") then
             -- T? is not valid; skip and continue

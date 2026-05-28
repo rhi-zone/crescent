@@ -596,16 +596,11 @@ end)
 -- ── typeof ────────────────────────────────────────────────────────────────────
 
 T.describe("typeof", function()
-    T.it("typeof x parses as $Typeof app", function()
-        local got = pt("typeof x")
-        T.eq(got.tag, "app", "app")
-        if got.tag == "app" then
-            local h = got.f
-            T.ok(h ~= nil, "has head")
-            if h ~= nil then
-                T.ok(types_mod.equal(h, con("$Typeof")), "$Typeof head")
-            end
-        end
+    T.it("typeof x errors as unsupported in v5", function()
+        local st = ann.new_state()
+        local ty, err = ann.parse_annotation(st, "typeof x")
+        T.ok(ty == nil, "nil on typeof")
+        T.ok(err ~= nil, "error reported")
     end)
 end)
 
