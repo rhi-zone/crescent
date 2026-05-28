@@ -56,6 +56,8 @@ Per-feature reference: `docs/typechecker-reference.md`. Design rationale: `docs/
 
 **Don't add type aliases that legitimize laziness.** When N annotations fail because they used a vague type name (`table`, `function`), the fix is to correct each annotation — not to add a permissive alias. Reducing the error count is not the goal; accuracy is.
 
+**No special-casing in the typechecker.** See Hard Constraints.
+
 **Lua code must not regress typechecking before commit.** The `.githooks/pre-commit` hook enforces this — run `git config core.hooksPath .githooks` once per clone. For each staged `lib/**/*.lua` file it runs `timeout 30 bin/cr check <file>` on staged blob vs `HEAD` and rejects when staged has more errors. Timeouts always reject. Don't bypass with `--no-verify`.
 
 **No ambient globals by default.** Crescent typechecks under the assumption no global names are ambient — every name must be declared (as a local, via `require`, or via explicit stdlib declaration). The Lua standard library gets types from explicit `--:: declare ...` lines. Type-level intrinsics like `$Require<T>` exist to give explicit stdlib declarations enough power to type their returns; `typeof require(T)` decays to `$Require<T>` via the declaration, not the reverse.
@@ -132,6 +134,7 @@ Conventional commits: `type(scope): message`. Types: `feat`, `fix`, `refactor`, 
 - No `--no-verify` — fix the issue or fix the hook.
 - No assuming a tool is missing — check `nix develop`.
 - No dependencies that require a build step — pure Lua + FFI only.
+- No special-casing. If the type system cannot express a construct declaratively, that is a substrate gap — fill it or escalate, never work around it with name-keyed or hardcoded handling in the gen-pass or solver. Making a demo pass or lowering an error count never justifies ad-hoc behavior. (Ad-hoc accumulation is the documented root cause of v1→v4 failure; v5 exists to prevent it.)
 
 <!-- BEGIN ECOSYSTEM RULES -->
 
