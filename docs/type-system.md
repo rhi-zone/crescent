@@ -226,6 +226,17 @@ Optionality is expressed as `T | nil` — no dedicated postfix syntax.
 - A tuple is *not* assignable to an array.
 - `ipairs` over a tuple yields the union of element types at each position.
 
+**v5 representation (TPack).** In the v5 operational semantics, tuples,
+function multi-return, and variadic `(...%P)` captures are a single type-AST
+node — `TPack = { items, rest }` — with at most one optional open tail (`rest`).
+A tuple is a *closed* pack (`rest = nil`); multi-return is an arrow's `ret`
+pack; `(...%P)` is a pack whose `rest` is bound. The single-`rest` slot
+structurally enforces "at most one open pack per sequence" — two open segments
+are unrepresentable. This retires the prior positional `"1".."n"` record-key
+encoding of multi-return. Full normative spec:
+`docs/typechecker-v5-operational-semantics.md` §"Match types and variadic packs
+(CMatchEval + TPack)".
+
 ### `any` and `never`
 
 `any` is the top-and-bottom type for gradual typing. `never` is the true bottom — the type of expressions that never produce a value (`error("msg")`, exhausted narrowing). `never` is assignable to everything (vacuously). Nothing is assignable to `never`.

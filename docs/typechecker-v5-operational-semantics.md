@@ -1184,6 +1184,441 @@ type unification and subtyping without special-casing. An effect intersection
 3. Canonical form ensures deduplication is idempotent and rule matching is
    deterministic regardless of constructor order.
 
+### Match types and variadic packs (CMatchEval + TPack)
+
+**Added 2026-05-29 (Spec B of the spec-first program; DOCS-ONLY).** This section
+is the normative substrate that makes `pcall` / `coroutine.*` / `pairs` /
+`ipairs` and the `ReturnType` / `Parameters` / `Tail` family **declarable**
+(stdlib `--::` declarations consumed by ordinary constraint solving) rather than
+hardcoded handlers. It introduces:
+
+- a first-class **`match` type-AST node** with v4-faithful pattern evaluation
+  (oracle: `lib/type/static/match.lua`),
+- a **`CMatchEval` constraint** that reuses the CHKT park/wake-head plumbing
+  (`op_sem.lua` `wake_head`): park when the scrutinee's head is an unbound uvar,
+  reduce eagerly when it is rigid,
+- a first-class **`TPack` node** subsuming multi-return, `(...%P)` capture, and
+  tuple types — retiring the `is_positional` predicate and the `"1".."n"`
+  record-key encoding of arrow returns (`types.lua` `M.arrow`).
+
+The spec is written to be encodable **independently** by `op_sem.lua` and
+`op_sem_alt.lua` (the dual-interpreter premise). Where it cites current
+`types.lua` / `op_sem.lua` behavior, that is the **divergence removed in the
+implementation phase**, not the target.
+
+**Substrate-before-consumers.** No rule below is keyed by an effect name, a
+stdlib function name, or any specific `$`-intrinsic name. Effect extraction
+(`!throw`, `!yield`) is specified purely as the **App-spine / intersection
+cases of `match`** (§"Effect-pattern matching"). If a natural declaration of
+`pcall` / `coroutine` still required a name-keyed solver step after this spec,
+that would signal the substrate is insufficient; §"Substrate-sufficiency check"
+records that no such residue remains.
+
+#### TPack node (B owns this; Spec C consumes it)
+
+A new type-AST node represents an **ordered sequence of types with at most one
+open tail**:
+
+    TPack = { tag = "pack", items: V5Type[], rest: TPackVar | nil }
+    TPackVar = { tag = "packvar", id: integer }
+
+- `items` is the fixed positional prefix (possibly empty).
+- `rest` is a **single optional open-pack position** — `nil` (closed pack, exact
+  arity `#items`) or a `TPackVar` (open: matches `#items` positions followed by
+  zero or more further positions bound to the pack var).
+
+The single-`rest` slot **structurally enforces** the surface rule "at most one
+open pack per sequence." A sequence with two open segments
+(`(...%P, number, ...%Q)`) is **unrepresentable**: there is exactly one `rest`
+field and it is terminal. This is the intended consequence — the
+one-open-pack invariant is an invariant of the data type, not a parser check.
+
+`TPack` **subsumes** three previously-distinct encodings:
+
+1. **Multi-return.** `arrow.ret` becomes a `TPack`, not a positional `Record`
+   with `"1".."n"` keys. `(string) -> (number, string)` has
+   `ret = pack([number, string], nil)`.
+2. **`(...%P)` capture.** A pattern arg `(...%P)` is a `TPack` with empty
+   `items` and `rest` bound to the capture's pack var; the captured middle args
+   bind a pack (a `TPack`), not a v4 `TAG_TUPLE`.
+3. **Tuple types.** `{ number, string }` (tuple, per `type-system.md`
+   §Tuples) is `pack([number, string], nil)` — a closed pack. The bare
+   `"1".."n"` record-key encoding and the `is_positional` predicate
+   (`op_sem.lua`) are **retired**: positional sequences are no longer records.
+
+**Arrow representation change.**
+
+    TArrow = { tag = "arrow", args: TPack, ret: TPack }
+
+`args` is a `TPack` (its `rest`, when present, is the `(...%P)` / vararg tail);
+`ret` is a `TPack`. The fixed-arity `args: V5Type[]` and the `ret`-as-record
+shape in `types.lua` are replaced. `M.arrow(args_list, rets_list)` constructs
+`pack(args_list, nil)` and `pack(rets_list, nil)`; an explicit open form
+`M.arrow_open` supplies a `rest`.
+
+**Substrate operations on TPack** (mirroring `shift` / `instantiate` / `equal`
+/ `collect_uvars` in `types.lua`):
+
+- **`shift(pack, d, c)`**: shift each `items[i]` and (if present) the `rest`'s
+  bound contents under the same cutoff. `TPackVar` ids are gensym (like `UVar`):
+  never shifted. A `Var(i)` appearing inside an item shifts normally.
+- **`instantiate(pack, arg, depth)`**: instantiate each `items[i]` and the
+  `rest` contents. Capture bindings discovered by match (`%P`, `%R`) are
+  **pattern-local De Bruijn binders** (see §"Pattern captures") and are
+  substituted by `instantiate` under the arm's binder scope.
+- **`equal(p, q)`**: `#p.items = #q.items`, items pairwise `equal`, and `rest`
+  agreement — both `nil`, or both `TPackVar` with equal id (after deref).
+- **`collect_uvars(pack, acc)`**: union of `collect_uvars` over items and over
+  the `rest`'s bound contents (a `TPackVar` itself contributes no `UVar`; its
+  binding may).
+
+A `TPackVar` is a **pack metavariable**, stored in a separate `pack_bindings`
+map in the substitution (keyed by pack-var id), exactly as `TRowVar` is stored
+in `row_bindings` (per §"Row polymorphism"). It is **not** a `UVar`; `CEq` /
+`CSub` on packs (below) bind it. Unbound = open tail of unknown length; bound to
+a `TPack` = that tail spliced in.
+
+#### TPack CEq / CSub rules (arity-aware, length-polymorphic, splice)
+
+Let `deref_pack(p)` walk `p`, replacing a bound `rest` `TPackVar` by its binding
+and **flattening** (splicing) the binding's items into `p.items`, recursively,
+until `rest` is `nil` or an unbound `TPackVar`. This is the **substitution-time
+splice**: when a `TPackVar` resolving to a `TPack` appears as a `rest`, its
+items extend the positional slots (so `(true, ...R)` with `R ↦ pack([int,str])`
+becomes `pack([true, int, str], nil)`, and `R ↦ never` / empty pack becomes
+`pack([true], nil)` — the v4 `(true, ...R)` splice semantics, now first-class).
+
+**T-CEq-Pack-Closed.** Both packs closed, equal arity.
+
+    σ⟦p_a⟧ = pack(A_1..A_n, nil)    σ⟦p_b⟧ = pack(B_1..B_n, nil)
+    ─────────────────────────────────────────────────────────────────  T-CEq-Pack-Closed
+    σ ⊢ CEq(p_a, p_b) ⇒ ⟨σ, [CEq(A_i, B_i)]_i, done⟩
+
+Arity mismatch (`n ≠ m`, both closed) ⇒ rejection ("pack arity mismatch").
+
+**T-CEq-Pack-OpenL.** LHS has an unbound open `rest` `ρ`; RHS closed (or longer).
+Match the shared prefix positionally; bind `ρ` to the **remaining tail** of the
+RHS as a pack.
+
+    σ⟦p_a⟧ = pack(A_1..A_n, ρ)    ρ unbound TPackVar
+    σ⟦p_b⟧ = pack(B_1..B_m, nil)    m ≥ n
+    ───────────────────────────────────────────────────────────────────────────  T-CEq-Pack-OpenL
+    σ ⊢ CEq(p_a, p_b) ⇒
+      ⟨σ[ρ ↦ pack(B_{n+1}..B_m, nil)], [CEq(A_i, B_i)]_{i≤n}, done⟩
+
+If `m < n` ⇒ rejection (LHS demands more fixed positions than RHS supplies).
+
+**T-CEq-Pack-OpenR.** Mirror: RHS open, LHS closed/longer.
+
+**T-CEq-Pack-OpenBoth.** Both open. Equate the shared prefix; equate the two
+`rest` pack-vars (`CEq` on the `TPackVar`s — union in `pack_bindings`), after
+prefix-aligning by padding the shorter prefix's surplus into the other's tail.
+(Both interpreters align by `min(n,m)`; the surplus prefix items of the longer
+side are equated against fresh items prepended to the shorter side's `rest`
+binding. Stated precisely: bind the shorter `rest` to
+`pack(surplus_items, longer_rest)`.)
+
+**T-CSub-Pack.** Subtyping on packs is **positional and length-polymorphic**,
+with the variance of the *enclosing position* (arrow args are contravariant;
+arrow ret covariant — supplied by the caller via the arrow rule, not re-derived
+here). Given a target variance `v ∈ {co, contra}` carried from the arrow site:
+
+    σ⟦p_a⟧ = pack(A_1..A_n, ρ_a)    σ⟦p_b⟧ = pack(B_1..B_m, ρ_b)    k = min(n,m)
+    ──────────────────────────────────────────────────────────────────────────────  T-CSub-Pack
+    σ ⊢ CSub_v(p_a, p_b) ⇒ ⟨σ, [subgoal(v, A_i, B_i)]_{i≤k} ++ tail-obligations, done⟩
+
+where `subgoal(co, x, y) = CSub(x, y)`, `subgoal(contra, x, y) = CSub(y, x)`,
+and `tail-obligations` reconcile the surplus prefix and the `rest`s by the same
+prefix-alignment as **T-CEq-Pack-OpenBoth** but emitting `CSub_v` (not `CEq`)
+on aligned positions. A closed pack is a subtype of an open pack of no greater
+fixed arity (the open tail absorbs the surplus); a closed pack is **not** a
+subtype of a closed pack of different arity (rejection).
+
+**Arrow rules updated.** **T-CEq-Arrow** / **T-CSub-Arrow** now read `args` and
+`ret` as packs: emit `CEq`/`CSub_contra` on `args` packs and `CEq`/`CSub_co` on
+`ret` packs, via the pack rules above. The old positional `[CEq(A_i,B_i)]`
+enumeration is subsumed by **T-CEq-Pack-Closed**.
+
+**Interaction with Spec A (pack-typed bounds).** A generic `pcall`'s bound
+`<F: (...P) -> R>` is a constraint whose RHS is an arrow over packs. Spec A's
+bounds machinery (§"Simple-sub bounds") stores `B.upper[r] = (...P) -> R`
+unchanged — the bound value is just a type, and `CSub(L, U)` re-emission on a
+pack-typed upper bound dispatches to **T-CSub-Arrow** → **T-CSub-Pack**. No
+new bounds machinery is required; the atomic/structural rejection that closes
+the `∪lowers ⊆ ∩uppers` invariant (Spec A) now includes pack-arity rejection.
+The cache key (Spec A §"Bound-add with cache") extends to packs by hashing
+`head = ⟨"pack", #items, rest-id-or-nil⟩` plus the per-item head hashes.
+
+#### match type-AST node
+
+    TMatch = { tag = "match", param: V5Type, arms: Arm[] }
+    Arm    = { pattern: V5Type, result: V5Type }
+
+`param` is the scrutinee. Each `Arm` is tried **in order**; the first whose
+`pattern` matches `param` (under the evaluation semantics below) fires, and the
+match reduces to that arm's `result` with the arm's captures substituted.
+Fallthrough (no arm matches) reduces to **`Const("never")`** (v4
+`match.lua:evaluate` final `return T_NEVER`).
+
+**Substrate operations on TMatch** (mirroring `shift`/`instantiate`/`equal`/
+`collect_uvars`):
+
+- **`shift(m, d, c)`**: shift `param` at cutoff `c`; for each arm, shift its
+  `pattern` and `result` at cutoff `c + (arm binder count)` — because the arm's
+  pattern captures introduce a binder scope (next section).
+- **`instantiate(m, arg, depth)`**: instantiate `param`; instantiate each arm's
+  `pattern`/`result` at `depth + (arm binder count)`. (Evaluation, not
+  `instantiate`, performs capture binding; `instantiate` only relocates outer
+  De Bruijn references through the arm scope.)
+- **`equal(m, n)`**: `equal(m.param, n.param)`, same arm count, pairwise
+  `equal` on `pattern` and `result`.
+- **`collect_uvars(m, acc)`**: union over `param` and every arm's `pattern` and
+  `result`.
+
+#### Pattern captures as pattern-local De Bruijn binders
+
+A pattern capture (`%P`, `%R`, the `[%K]`/`%V` of `{ ...[%K]: %V }`, the
+`...%Rest` of `{ f: T, ...%Rest }`, the `#...%M` meta-spread) is a
+**pattern-local binder** scoped to its arm. Each arm introduces a binder scope;
+captures are represented as `Var(i)` De Bruijn indices into that scope,
+composing with v5's existing `shift`/`instantiate`. This replaces v4's
+name-keyed `bindings` map (`{ [name_id] -> type_id }`) at the *representation*
+level, while **preserving v4's evaluation behavior**: evaluation still discovers
+which input subterm binds each capture by **first-order pattern unification**,
+builds a bindings map, then substitutes.
+
+The two-phase port (faithful to `match.lua`):
+
+1. **Discovery (build the bindings map).** Run `match_pattern(param, pattern)`
+   (the v4 algorithm, §"Pattern evaluation"). On success it yields a map
+   `binder-index ↦ V5Type`: each arm-scope `Var(i)` is associated with the input
+   subterm that unified against capture position `i`.
+2. **Substitution.** `result` is evaluated with each `Var(i)` replaced by its
+   bound type — i.e. `instantiate` the arm's `result` with the discovered pack
+   of bindings (innermost binder first, eager shift). A capture bound to a
+   *pack* (e.g. `(...%P)` or a multi-return `%R`) substitutes a `TPack`;
+   `(true, ...R)` in a result splices it (§"TPack CEq/CSub").
+
+This is the **De Bruijn ⊕ match composition**: discovery is the v4 unification
+(producing values), De Bruijn scoping is how those values are *named and
+substituted* through `instantiate` — no separate name environment, no
+`name_id`-keyed substitution pass. Nested matches compose because each arm's
+scope shifts the outer scope by its binder count (the `shift` rule above).
+
+#### Pattern evaluation (`match_pattern`, ported from v4)
+
+`match_pattern(σ, ty, pat, seen)` returns `(fires?, bindings)`. Ported
+faithfully from `lib/type/static/match.lua` (`M.match_pattern`); the cases
+below are normative. All `ty` reads are after `deref`/`walk`.
+
+- **Wildcard / capture.** `pat = _` (the desugared complement arm) ⇒ fires, no
+  binding. `pat = %C` (a capture) ⇒ fires, binds capture `C`'s binder-index to
+  `ty`.
+- **Bare named pattern (no args).** Resolve in scope; fires iff
+  `ty <: resolved` (a `CSub` query, not equality — v4 uses `try_unify`). Not in
+  scope ⇒ arm fails (no implicit capture). `_` is the wildcard above.
+- **Primitive / literal.** Exact tag match for `nil`/`boolean`/`number`/
+  `integer`/`string`; literal equality for `TLiteral` (Spec C owns the literal
+  node — forward reference). **Subtype widening**: `integer` matches `number`
+  pattern; a literal matches its base atom's pattern (`"GET"` matches `string`).
+  These widening facts are the **`atomic_subtype` lattice** of Spec A
+  consulted abstractly — *not* re-implemented here and *not* string-matched on
+  `$Lit*` names.
+- **Table / record pattern.** Structural: every named pattern field must be
+  present in `ty` (recurse `match_pattern` on each field). `{ f: T, ...%Rest }`
+  binds `%Rest` to a **closed record of the unmatched fields**. `{ [K]: V }`
+  matches `ty`'s indexers positionally, binding `K`/`V`. `{ ...[%K]: %V }` is
+  **per-field distribution** (next bullet). `{ #...%M }` binds the meta slots.
+- **All-fields distribution `{ ...[%K]: %V }`.** This is the **sole iteration
+  mechanism** in match syntax (the `...` here means *iterate*, not *spread*).
+  For each field of `ty`: bind `K` to the key (string/integer literal) and `V`
+  to the **widened** value, evaluate `result`, and **union** the per-field
+  results. Empty closed table ⇒ `never`; `any`/`unknown` ⇒ one
+  `K=unknown,V=unknown` iteration; `never` ⇒ zero iterations. (v4
+  `evaluate` `TAG_PAT_ALL_FIELDS` block.)
+- **Function / arrow pattern.** `ty` must be an arrow. Match `args` pack against
+  the pattern's `args` pack and `ret` pack against the pattern's `ret` pack via
+  the **pack rules** — the `(...%P)` capture binds the middle positions as a
+  `TPackVar` (T-CEq-Pack-OpenL discovers the tail), and `() -> %R` binds `%R`
+  to the **ret pack** (single type if arity 1, a `TPack` if arity > 1, `never`
+  if arity 0). This is the v4 rest-capture-as-tuple logic, now
+  rest-capture-as-**pack**: the v4 `make_tuple` of the middle/return becomes a
+  `TPack`.
+- **Union scrutinee distribution.** If `param` is a `Union(M_1..M_k)`,
+  evaluate the match against each `M_i` independently and **union the per-member
+  results** (v4 `evaluate` union fast-path). Captures bind per-member; the union
+  is of the substituted results.
+- **Intersection scrutinee.** Coinductive field-merging structural match for
+  table patterns (look the field up in every member, intersect contributions;
+  a closed member lacking the field ⇒ fail; open member lacking it ⇒ neutral).
+  For non-table patterns, **intersection elimination**: `A & B <: A`, so the arm
+  fires if any member matches. This is the case effect-extraction relies on
+  (next section).
+- **Named / match scrutinee.** Expand a named alias one level (coinductively,
+  via `seen`) and retry; evaluate a nested `TMatch` scrutinee and retry. The
+  `seen` set is the coinductive cycle guard (next section).
+
+**Conflicting capture bindings** (a capture bound to two non-equal types across
+sub-positions) ⇒ the arm fails (v4 `merge_bindings` returns `nil`).
+
+#### CMatchEval constraint (reuses CHKT park/wake-head)
+
+A new constraint family drives match evaluation inside the solver:
+
+    CMatchEval = { tag = "cmatch", param, arms, result, prov }
+
+asserting `eval(match param { arms }) = result`. Reduction reuses the CHKT
+**head-watcher** plumbing (`op_sem.lua` `wake_head`) — the same machinery that
+parks `HOUnify` on `?F`'s head-rigidity:
+
+**T-CMatchEval-Park.** `param`'s head (after `walk`) is an unbound `UVar`.
+Park: the scrutinee is not yet rigid enough to decide which arm fires
+(per rewrite-design §5.3 "suspension preserves principal types"). The
+constraint moves to `I` on the **head-watcher** of `param`'s root (NOT the
+ordinary watcher — like `T-CHKT-Park`), so it wakes only when `param` gets a
+rigid head, not on a uvar↔uvar union.
+
+    walk(param) = UVar(α)
+    ─────────────────────────────────────────────────────  T-CMatchEval-Park
+    σ ⊢ CMatchEval(param, arms, result) ⇒ stuck-on-head(α)
+
+**T-CMatchEval-Reduce.** `param` is rigid (head is a non-uvar). Run
+`match_pattern` arm-by-arm (the evaluation above). Let `R` be the substituted
+result of the first firing arm (or `Const("never")` on fallthrough). Emit
+`CEq(R, result)`.
+
+    walk(param) = τ    τ.tag ≠ uvar    R = eval(match τ { arms })
+    ───────────────────────────────────────────────────────────────────  T-CMatchEval-Reduce
+    σ ⊢ CMatchEval(param, arms, result) ⇒ ⟨σ, [CEq(R, result)], done⟩
+
+**Constraint-always with an eager fast-path.** `CMatchEval` is the *general*
+form (constraints are always emitted for a `TMatch` node). When
+`walk(param)` is **already rigid** at emission time, the generator/solver may
+take the eager fast-path: run **T-CMatchEval-Reduce** immediately without ever
+placing the constraint on `I`. Both interpreters must agree on the observable
+result (the eager path is an optimization, not a different semantics).
+
+**T-CMatchEval-Wake.** `param`'s root rigidified (`S-Wake-Head` fired). Retry as
+`CMatchEval` (re-enter `W`); **T-CMatchEval-Reduce** now applies. (Mirror of
+`T-HOUnify-Wake`.)
+
+    walk(param) = τ    τ.tag ≠ uvar
+    ─────────────────────────────────────────────────────  T-CMatchEval-Wake
+    σ ⊢ CMatchEval(param, arms, result) ⇒ [CMatchEval(param, arms, result)], done
+
+**Coinductive seen-set for recursive match.** Evaluation threads a `seen` set
+keyed by `(deref param, match-node identity)` (v4 `match.lua:745` `evaluate`
+`seen[mt_id]`, and `match.lua:393/505/718` cycle-keys `ty_id .. ":" .. pat_id`).
+Re-entering an already-in-progress `(param, node)` pair returns the coinductive
+hypothesis: `never` for `evaluate` re-entry (v4 `match.lua:750`), "assume the
+arm matches with no new bindings" for `match_pattern` re-entry (v4
+`match.lua:396`). This bounds recursive match over recursive scrutinees.
+
+**T-CMatchEval-Stuck.** At quiescence, any `CMatchEval` still in `I` is an
+error: the scrutinee's head never rigidified.
+
+    quiescent    CMatchEval(param, arms, result) ∈ I    walk(param) = UVar(_)
+    ────────────────────────────────────────────────────────────────────────  T-CMatchEval-Stuck
+    error("match scrutinee never rigidified: cannot decide which arm fires")
+
+(Per rewrite-design §5.3, *splitting* — taking the union over all
+possibly-firing arms when a variable's bounds are sealed at a generalization
+boundary — is a permitted last resort. v5 defers splitting: the conservative
+disposition is the stuck error above. Flagged as a spec gap below.)
+
+#### Effect-pattern matching as match App/intersection cases
+
+Effect extraction is **not** a separate mechanism — it is the **App-spine and
+intersection cases of `match`** applied to effect-typed values. Per
+§"Intersection types and effect composition", an effect is a `Const("!name")`
+and a higher-arity effect (`!throw<E>`, `!yield<Y,R>`) is an App-chain over the
+effect head.
+
+- **Effect App-spine pattern.** A pattern `!yield<%Y, %R>` is an `App`-spine
+  whose head is the effect `Const("!yield")` and whose arguments are captures.
+  `match_pattern` matches it head-first against an input effect application
+  (the existing **T-CEq-App** / structural App decomposition): unify the head
+  `Const`s, then bind `%Y`, `%R` to the argument positions. No effect-name
+  string comparison beyond the ordinary `Const` name equality that **T-CEq-Const**
+  already performs.
+- **Effect in a return intersection.** A return type `nil & !throw<E>` is a
+  `TIntersection`. Destructuring it is the **intersection scrutinee** case: the
+  pattern `!throw<%E>` fires against the intersection by intersection
+  elimination (`A & B <: A`), binding `%E` from the `!throw` member. This is
+  exactly the v4 intersection-input handling in `match_pattern`.
+
+Because effect extraction is now just these match cases, the ad-hoc `!throw` /
+`!yield` **string-matches** (the adhoc-cluster) become deletable: their behavior
+is reproduced by stdlib `--::` declarations of `pcall` / `coroutine.*` /
+`error` written as `match` types over arrow/effect/intersection patterns. The
+deletion itself is a later consumer phase (Spec C and the intrinsic
+re-expression); this spec is the substrate that licenses it.
+
+#### Substrate-sufficiency check (handler ≠ closure)
+
+The planning rule "this spec must not describe any feature as a name-keyed
+handler" is satisfied by construction:
+
+- No rule dispatches on a stdlib function name. `pcall` / `coroutine` /
+  `pairs` are types built from `TMatch` + `TPack` + arrow + intersection, solved
+  by the rules above.
+- No rule dispatches on an effect name beyond `Const`-name equality (which is
+  the same generic mechanism every `Const` uses).
+- No new `$`-intrinsic is required by this spec. The `match` patterns named in
+  `lib/type/static/CLAUDE.md` (`() -> %R`, `(...%P) -> T`, `(true, ...R)`,
+  `{ ...[%K]: %V }`, `{ f: T, ...%Rest }`, `{ #...%M }`) are all expressed by
+  the pack + match cases above.
+
+No residual name-keyed step was found. (Were one found, it would be flagged here
+as evidence the substrate is insufficient — none is.)
+
+#### Termination argument (match reduction)
+
+1. **Parks until rigid.** `CMatchEval` over an unbound scrutinee is `stuck`, not
+   reduced. It re-enters `W` at most once per head-rigidification of `param`'s
+   root (S-Wake-Head), and σ is monotone (a root rigidifies at most once). So
+   the number of `CMatchEval` reactivations is bounded by the number of distinct
+   match nodes × the number of tvars — the same bound as the existing
+   reactivation argument.
+2. **Coinductive seen-set bounds recursive evaluation.** Within a single
+   `T-CMatchEval-Reduce`, `evaluate` / `match_pattern` recurse through nested
+   matches, named-alias expansions, and recursive scrutinees. Each recursive
+   descent is guarded by the `seen` set keyed by `(deref param, node identity)`
+   (and the per-`match_pattern` `(ty, pat)` cycle key). Because crescent types
+   are **regular** (finite under μ-folding) and the type/pattern arena is
+   finite, the set of distinct keys is finite; re-entry returns the coinductive
+   hypothesis (`never` / assume-match) instead of recursing. Total evaluation
+   work per reduction is therefore `O(K)` in the number of distinct
+   `(scrutinee, pattern)` subterm pairs — finite. This is the v4
+   `match.lua` cycle-key discipline transcribed to the op-sem.
+3. **Emitted constraints are not larger.** `T-CMatchEval-Reduce` emits a single
+   `CEq(R, result)`; `R` is a substituted subterm of the arms (or `never`), and
+   the pack rules emit `CEq`/`CSub` on strict positional subterms. The
+   decomposition lemma of the base termination argument extends unchanged.
+
+#### Spec gaps surfaced (per F12; not silently filled)
+
+1. **Match splitting at sealed bounds.** rewrite-design §5.3 permits splitting
+   (union of all possibly-firing arm results) when a scrutinee variable's bounds
+   are sealed at a generalization boundary. v5 defers this; the stuck-at-
+   quiescence error (**T-CMatchEval-Stuck**) is the conservative disposition.
+   Owed when a corpus example requires a match result through a still-polymorphic
+   scrutinee.
+2. **Pack subtyping under nested variance.** **T-CSub-Pack** carries the arrow's
+   variance into positions, but a pack nested inside another pack (a tuple of
+   tuples) re-derives variance per the enclosing position. The composition is
+   defined; an adversarial deeply-nested pack-in-pack-in-arrow case has not been
+   exercised. Flagged.
+3. **Open-pack alignment determinism.** **T-CEq-Pack-OpenBoth** /
+   **T-CSub-Pack** align surplus prefixes by `min(n,m)` and push surplus into the
+   shorter `rest`. Both interpreters must choose the *same* alignment; the rule
+   pins it (prefix-align by `min`, surplus → shorter rest), but a fuzz parity
+   test across the two encoders is owed to confirm no divergence.
+4. **Literal node ownership.** Literal patterns (`"GET"`, `42`) and the
+   widening lattice are consumed here but **owned by Spec C** (`TLiteral`,
+   `TRecord`). This spec references `atomic_subtype` (Spec A) abstractly and
+   does not pin the literal encoding — forward reference to Spec C.
+
 ## Cross-reference
 
 | Rule label              | Executable function (op_sem.lua) |
@@ -1246,6 +1681,13 @@ type unification and subtyping without special-casing. An effect intersection
 | T-CIntersection-Sub-Conj            | `rule_T_CIntersectionSub` (case 2)    |
 | T-CIntersection-Member-Direct       | `rule_T_CIntersectionMember`          |
 | S-Quiesce-CIntersectionMember       | `quiesce_errors` (inside `run`)       |
+| T-CEq-Pack-Closed                   | impl phase — `rule_T_CEq_Pack` (planned) |
+| T-CEq-Pack-OpenL / -OpenR / -OpenBoth | impl phase — `rule_T_CEq_Pack` (planned) |
+| T-CSub-Pack                         | impl phase — `rule_T_CSub_Pack` (planned) |
+| T-CMatchEval-Park                   | impl phase — `rule_T_CMatchEval` park (planned) |
+| T-CMatchEval-Reduce                 | impl phase — `rule_T_CMatchEval` reduce (planned) |
+| T-CMatchEval-Wake                   | impl phase — `wake_head` re-entry (planned) |
+| T-CMatchEval-Stuck                  | impl phase — `quiesce_errors` (planned) |
 
 Parity test asserts: for each fixture, the executable spec's final
 `⟨σ_final, errors⟩` equals the docs-encoded rule-by-rule trace's final
