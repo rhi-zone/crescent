@@ -677,7 +677,8 @@ T.describe("v5 cli e2e — directives", function()
         T.ok(out:find("record") ~= nil, "error mentions record (alias fully expanded)")
     end)
 
-    -- require directive — no-op by v4 parity, no error.
+    -- require directive — no-op (NOT v4 parity: v4 loads declaration files;
+    -- v5 module loader not yet implemented), no error.
     T.it("require directive: no error (no-op)", function()
         local src = table.concat({
             "--:: require \"lib.some.module\"",

@@ -833,8 +833,9 @@ T.describe("v5 constrain — directive scope injection", function()
 
     -- ── require ───────────────────────────────────────────────────────────────
 
-    T.it("require: --:: require 'mod' is no-op (v4 parity) — no error", function()
-        -- v5 has no module loader; require directives silently no-op.
+    T.it("require: --:: require 'mod' is no-op (not yet implemented — no error)", function()
+        -- NOT v4 parity: v4 loads the declaration file via load_decl_file.
+        -- v5 has no module loader yet; require directives silently no-op (gap).
         local src = "--:: require \"some.module\"\nlocal x = 1"
         local cs, errs = constrain.generate(src, "test.lua", nil)
         T.eq(#errs, 0, "no error for --:: require directive (no-op)")
@@ -890,8 +891,9 @@ T.describe("v5 constrain — directive scope injection", function()
 
     -- ── template ─────────────────────────────────────────────────────────────
 
-    T.it("template: --:: template is no-op (v4 parity) — no error", function()
-        -- Template directive is no-op until generic body checking is implemented.
+    T.it("template: --:: template is no-op (not yet implemented — no error)", function()
+        -- NOT v4 parity: v4 records template lines and stores function bodies for
+        -- skolemization. v5 has not ported generic body checking (gap).
         local src = "--:: template\nlocal function id(x) return x end"
         local cs, errs = constrain.generate(src, "test.lua", nil)
         T.eq(#errs, 0, "no error for --:: template directive (no-op)")

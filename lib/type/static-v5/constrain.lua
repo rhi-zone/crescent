@@ -40,7 +40,8 @@
 --   - for-in: loop vars bound from iterator return (pairs/ipairs special-cased)
 --   - Generic function body checking (skolemization)
 --   - Type alias directives expand aliases eagerly in scope
---   - require/template directives no-op by v4 parity (module loader not ported)
+--   - require/template directives are no-ops (NOT v4 parity — v4 implements both;
+--   these are unimplemented features in v5, tracked in v5-gaps.md)
 --   - Multi-return tuple types (uses union as approximation)
 --   - Effect propagation from unknown callees (uvar callee — solved post-gen)
 
@@ -2555,18 +2556,21 @@ function M.generate(source, filename, opts)
                             ctx.module_decl_ty = mty
                         end
                     elseif dir.kind == "require" then
-                        -- v4 parity: --:: require "mod.path" loads a declaration
-                        -- file so its type aliases / declares are available here.
-                        -- v5 does not have a module loader yet; treat as no-op.
-                        -- No-op by design (v4 parity — v4's load_decl_file
-                        -- infrastructure not ported to v5).
+                        -- NOT YET IMPLEMENTED in v5. NOT v4 parity: v4 runs
+                        -- load_decl_file (lib/type/static/constrain.lua:4769),
+                        -- which resolves the module, parses it, and injects its
+                        -- type aliases / declares into scope. v5 has not ported
+                        -- the module loader; this is a no-op (a gap, not a
+                        -- match). Tracked: v5-gaps.md require-directive item.
+                        -- Convention: do not justify an unimplemented no-op as
+                        -- "v4 parity". State it is unimplemented and cite the gap.
                     elseif dir.kind == "template" then
-                        -- v4 parity: --:: template marks a following function as
-                        -- a generic template; v4 records the line number.  In v5
-                        -- generic checking (skolemization) is a tracked open gap;
-                        -- template directives are no-op until that gap is closed.
-                        -- No-op by design (v4 parity — generic body checking
-                        -- deferred, see v5-gaps.md "Generic function body checking").
+                        -- NOT YET IMPLEMENTED in v5. NOT v4 parity: v4 records
+                        -- template lines and stores function bodies for
+                        -- skolemization (lib/type/static/constrain.lua:4854-4857,
+                        -- 3197-3206). v5 has not ported generic body checking;
+                        -- this is a no-op (a gap, not a match). Tracked:
+                        -- v5-gaps.md "Generic function body checking" item.
                     end
                 end
             end
