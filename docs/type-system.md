@@ -178,6 +178,18 @@ For declarations that need expressive power the value-level language can't provi
 --:: Method = "GET" | "POST" | "PUT" | "DELETE"
 ```
 
+**v5 representation (TLiteral).** A literal type is a first-class type-AST node
+`TLiteral = { tag = "literal", base, value }` where `base` is one of
+`"integer" | "number" | "string" | "boolean"` and `value` is the singleton
+inhabitant (a Lua integer, number, string, or boolean). This **retires** the
+`$Lit` / `$LitInt` / `$LitNum` / `$LitBool` magic-`Const`-name encoding and the
+boolean-literal-as-`Const("true")`/`Const("false")` hack — `true` becomes
+`{ tag = "literal", base = "boolean", value = true }`. Widening (`"GET" <: string`,
+`42 <: integer`, `42 <: number`) is **not** a string match on a `$`-name; it is a
+tag-dispatched edge of the single atomic-subtype lattice (Spec A). Full normative
+spec: `docs/typechecker-v5-operational-semantics.md` §"Principled literals and
+records (TLiteral + TRecord)".
+
 ### Union, intersection, and complement
 
 Crescent's type lattice is **set-theoretic**: union (`|`), intersection (`&`), and complement (`~`) are first-class type constructors. Subtyping, narrowing, match-types, and overload resolution all operate under this algebraic structure.
@@ -216,6 +228,22 @@ Tables are the universal compound type. A table type has:
 - **Row variable**: open vs. closed. Open tables accept extra fields. Closed tables don't.
 
 Optionality is expressed as `T | nil` — no dedicated postfix syntax.
+
+**v5 representation (TRecord).** A v5 record is
+`TRecord = { tag = "record", fields, indexes, row }` with three first-class
+regions: a `fields` map of named fields each carrying its own attributes
+(`TField = { type, optional, readonly }`), an `indexes` list of index signatures
+(`TIndex = { key, value }`), and the `row` variable (open vs. closed). Optionality
+and readonly-ness are **attributes on the field record**, not key-name prefixes:
+this retires the `$opt_x` / `$ro_x` / `$idx_N` / `$opaque_K` / `$computed_N`
+key-mangling encodings. Positional sequences (tuples, multi-return) are **not**
+records — they are `TPack` (see Tuples below). Field and index-signature variance
+follow one rule: `readonly` ⇒ covariant, mutable (the default) ⇒ invariant. Full
+normative spec: `docs/typechecker-v5-operational-semantics.md` §"Principled
+literals and records (TLiteral + TRecord)".
+
+`unit` (the empty tuple / void) is a real primitive `Const("unit")` with a lattice
+entry, not a magic `$Unit` name.
 
 ### Tuples
 

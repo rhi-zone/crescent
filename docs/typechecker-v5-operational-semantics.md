@@ -1619,6 +1619,382 @@ as evidence the substrate is insufficient — none is.)
    `TRecord`). This spec references `atomic_subtype` (Spec A) abstractly and
    does not pin the literal encoding — forward reference to Spec C.
 
+### Principled literals and records (TLiteral + TRecord)
+
+**Added 2026-05-29 (Spec C of the spec-first program; DOCS-ONLY).** This is the
+last of the spec-first trio (A: atomic_subtype bounds, B: TPack/match). It is the
+normative substrate that **eliminates every `$`-prefix string-match in the
+interpretation path**: the literal-encoding `Const`-names (`$Lit`, `$LitInt`,
+`$LitNum`, `$LitBool`) and the record key-mangling encodings (`$opt_`, `$ro_`,
+`$idx_N`, `$opaque_K`, `$computed_N`, `$pos_N`, `$spread_`) are replaced by two
+structured type-AST nodes — `TLiteral` and `TRecord` — whose attributes are
+**real fields**, dispatched on `tag`, never on a name prefix. This is the
+project's "No special-casing" hard constraint applied to the type representation
+itself.
+
+The spec is written to be encodable **independently** by `op_sem.lua` and
+`op_sem_alt.lua` (the dual-interpreter premise). Where it cites current
+`types.lua` / `op_sem.lua` behavior (the `$`-name dispatch in `step_csub`
+op_sem.lua ~:797–831, the `is_positional` record-key encoding, the
+`$idx`/`$opt`/`$ro` key-mangle), that is the **divergence removed in the
+implementation phase**, not the target. v4's mature record/literal/tuple
+representation (`lib/type/static/types.lua` `TAG_LITERAL`, `TAG_TABLE` with
+separate fields/indexers/row and per-field `FLAG_OPTIONAL`/`FLAG_READONLY`
+flags) is the **oracle for the principled shape** — but v4's table *subtyping* is
+itself ad-hoc (it routes table fields through `struct_equal`, i.e. invariant
+everywhere, with `readonly` carried as a flag that subtyping ignores; see
+`lib/type/static/unify.lua` and `types.lua` `struct_equal` TAG_TABLE arm). Spec C
+does **not** copy that: it makes `readonly` *mean* covariance.
+
+#### TLiteral node (retires `$Lit`/`$LitInt`/`$LitNum`/`$LitBool`)
+
+    TLiteral = { tag = "literal", base, value }
+      base  ∈ { "integer", "number", "string", "boolean" }
+      value : the singleton inhabitant (Lua integer / number / string / boolean)
+
+A `TLiteral` is a **leaf** type (a singleton atom), exactly like `Const`. The
+prior encoding — `App(Const("$LitInt"), …)`, `App(Const("$Lit"), …)`,
+`Const("true")`/`Const("false")` — is gone. `true` is
+`{ tag="literal", base="boolean", value=true }`; `42` is
+`{ tag="literal", base="integer", value=42 }`; `"GET"` is
+`{ tag="literal", base="string", value="GET" }`.
+
+**Walker treatment (leaf, like `const`).** In `types.lua`, `shift`,
+`instantiate`, `equal`, and `collect_uvars` treat `literal` exactly as they treat
+`const`:
+
+- **`shift(lit, d, c) = lit`** — a literal contains no `Var`, returns itself.
+- **`instantiate(lit, arg, depth) = lit`** — no bound vars to substitute.
+- **`equal(a, b)`** for two literals: `a.base == b.base ∧ a.value == b.value`
+  (value compared by Lua `==`; `number` vs `integer` base distinguishes
+  `1` the integer literal from `1.0` the number literal).
+- **`collect_uvars(lit, acc)`** — contributes nothing (a literal has no `UVar`).
+
+#### TLiteral widening as a tag-dispatched atomic_subtype edge (composes with Spec A)
+
+Spec A (§"atomic_subtype — the single primitive lattice") deliberately left the
+literal encoding as a **forward reference to Spec C** and required the lattice to
+expose literal-widening **abstractly**, "NOT by string-matching specific
+`$`-prefixed names." Spec C now pins that abstraction: literal widening is a
+**tag-dispatched** edge inside `atomic_subtype`, with **zero** `$`-name matching.
+
+`atomic_subtype(a, b)` gains exactly these literal edges (dispatched on
+`a.tag == "literal"` and/or `b.tag == "literal"`, never on any name):
+
+1. **literal <: literal** — holds iff `a.base == b.base ∧ a.value == b.value`
+   (same singleton). Otherwise the two distinct singletons are unrelated.
+2. **literal <: const** — `a` a literal, `b` a `Const(n)` base atom. Holds iff
+   `base_widens(a.base, n)`, where `base_widens` is the **same primitive widening
+   relation** Spec A already defines for the `integer <: number` edge:
+     - `base_widens(base, base)` — a literal widens to its own base atom
+       (`"GET" <: string`, `42 <: integer`, `true <: boolean`, `1.0 <: number`);
+     - `base_widens("integer", "number")` — reusing the `integer <: number`
+       lattice edge, so `42 <: number` holds transitively (an `integer`-based
+       literal widens to `number`).
+3. **const <: literal** — never (a base atom is not a singleton); falls to the
+   generic `¬atomic_subtype ⇒ error` disposition unless `a = never` /
+   `b = unknown` (the bottom/top edges Spec A already owns).
+
+The crucial point for the "no special-casing" criterion: rule (2) is
+`base_widens(a.base, b.name)` — it reads `a.base` (a structured field) and reuses
+the **integer<:number lattice edge** Spec A already has. It does **not** match
+`a.f.name == "$LitInt"`. The `step_csub` literal-widening block (op_sem.lua
+~:797–831) — the `$Lit`/`$LitInt`/`$LitNum`/`Const("true")` cascade — **collapses
+entirely** into this: that block is deleted in the implementation phase, and the
+`a, b atomic ⇒ atomic_subtype(a,b)` route (Spec A **T-CSub-Atomic**) decides
+literal widening with a literal pair or a literal/const pair as the atoms.
+
+The boolean-literal-as-`Const` hack folds in here: `Const("true") <: boolean`
+(op_sem.lua ~:826–831) becomes `literal(boolean,true) <: Const("boolean")` decided
+by `base_widens("boolean","boolean")` — same edge, no `name == "true"` check.
+
+**T-CEq-Literal.** Two concrete literals under `CEq`.
+
+    σ⟦τ_a⟧ = literal(base_a, val_a)    σ⟦τ_b⟧ = literal(base_b, val_b)
+    ──────────────────────────────────────────────────────────────────  T-CEq-Literal
+       σ ⊢ CEq(τ_a, τ_b) ⇒ ⟨σ, ε, done⟩   if base_a=base_b ∧ val_a=val_b
+                                            else error("literal mismatch")
+
+A literal vs a non-literal concrete head is **T-CEq-Mismatch** (the literal tag
+differs from `const`/`record`/etc.). Widening is a *subtyping* fact only; `CEq`
+between a literal and its base atom is a mismatch (a literal is not equal to its
+base — only a subtype of it), exactly as v4 `try_unify` admits `42 <: integer`
+but `unify` rejects `42 = integer`.
+
+#### TRecord node (retires `$idx_N`/`$opt_`/`$ro_`/`$opaque_K`/`$computed_N`)
+
+    TRecord = { tag = "record", fields, indexes, row }
+      fields  : { [string]: TField }        -- named fields, keyed by bare name
+      indexes : TIndex[]                     -- index signatures, first-class
+      row     : TRowVar | nil                -- open (row var) vs closed (nil)
+
+    TField  = { type, optional, readonly }   -- attributes are real booleans
+      type     : V5Type
+      optional : boolean                     -- was the `$opt_x` key prefix
+      readonly : boolean                     -- was the `$ro_x` key prefix
+
+    TIndex  = { key, value }                 -- was `$idx_N = $Idx(K)(V)`
+      key      : V5Type                      -- the index key type (e.g. string)
+      value    : V5Type                      -- the indexed value type
+
+The `fields` map is keyed by the **bare field name** — no `$opt_`/`$ro_` prefix.
+The optional/readonly attributes live on the `TField`. This is the v4 oracle's
+shape (named fields with per-field `FLAG_OPTIONAL`/`FLAG_READONLY`, separate
+indexer list, separate row var) lifted into the v5 AST, minus v4's flag-byte
+packing — booleans, because the v5 substrate is plain Lua tables, not arena
+slots.
+
+**Mapping each retired `$`-encoding into the principled shape.** The
+implementation phase rewrites the producer (`stdlib_types.lua` / the constraint
+generator) to emit this shape directly; the table below is the normative
+correspondence both interpreters must honor:
+
+| Retired encoding                | Principled location                                  |
+|---------------------------------|------------------------------------------------------|
+| `$opt_x` (key prefix)           | `fields.x.optional = true`                           |
+| `$ro_x` (key prefix)            | `fields.x.readonly = true`                           |
+| `$idx_N = $Idx(K)(V)`           | one `indexes[]` entry `{ key = K, value = V }`       |
+| `$opaque_K` (opaque-key field)  | an `indexes[]` entry with `key = Const(K)` (a single-key index signature; was v4 `FLAG_OPAQUE_KEY`) |
+| `$computed_N`                   | a named `fields` entry (literal-key) or an `indexes[]` entry — **no key-mangle**; the computed key's resolved type decides which region |
+| `$pos_N`, bare `"1".."n"` keys  | **NOT a record** → `TPack` (Spec B). Positional records are retired. |
+| `$spread_` (record spread)      | lowers to Spec B's `TPack` `rest` — see Spec B; not redefined here. |
+
+**Walker treatment.** `shift`/`instantiate`/`equal`/`collect_uvars` recurse into
+the three regions:
+
+- **`shift(rec, d, c)`**: shift every `fields[k].type` and every
+  `indexes[i].key`/`indexes[i].value` at cutoff `c` (attributes `optional`/
+  `readonly` are scalars — copied unchanged). `row` is a `TRowVar`, never shifted
+  (gensym id, like `UVar`). The current `types.lua` `shift` record arm
+  (which walks a flat `fields` map and copies `row`) extends to also walk
+  `indexes` and to descend through `TField.type` rather than the bare field
+  value.
+- **`instantiate(rec, arg, depth)`**: same recursion; substitute `Var(depth)` in
+  every field type and index key/value.
+- **`equal(a, b)`**: `dom(a.fields) = dom(b.fields)` and for each `k`,
+  `a.fields[k].optional = b.fields[k].optional`,
+  `a.fields[k].readonly = b.fields[k].readonly`, and
+  `equal(a.fields[k].type, b.fields[k].type)`; `#a.indexes = #b.indexes` with
+  index entries pairwise `equal` on `key` and `value`; `row` agreement (both
+  `nil`, or both `TRowVar` of equal id) — mirroring the current record `equal`
+  arm, extended with the attribute comparison and the index list. (v4's
+  `struct_equal` compares `fa.flags == fb.flags` for the same reason: attributes
+  are part of identity.)
+- **`collect_uvars(rec, acc)`**: union over every field type and every index
+  key/value. (`row` is a `TRowVar`, not a `UVar`; contributes nothing.)
+
+**Positional branches are dropped.** The `is_positional` predicate (op_sem.lua
+~:390–402) and the `"1".."n"` record-key encoding are **retired by Spec B**
+(TPack owns positional sequences). The field-walkers above carry **no positional
+branch**, and the record CEq/CSub rules below **delete** the `a_pos && b_pos`
+arms in `rule_T_CEq_Record` (op_sem.lua ~:413–434) and `rule_T_CSub_Record_Width`
+(op_sem.lua ~:673–696). A positional sequence reaching a record rule in the new
+substrate is a generator bug, not a record shape.
+
+#### Record CEq — attributes part of identity
+
+**T-CEq-Record (revised).** Two concrete records. The domains, the per-field
+attributes, the index lists, and the rows must all agree; field types and index
+key/value pairs are equated.
+
+    σ⟦τ_a⟧ = Record(F_a, X_a, ρ_a)    σ⟦τ_b⟧ = Record(F_b, X_b, ρ_b)
+    dom(F_a) = dom(F_b)
+    ∀k ∈ dom(F_a). F_a[k].optional = F_b[k].optional ∧ F_a[k].readonly = F_b[k].readonly
+    #X_a = #X_b    ρ-agreement(ρ_a, ρ_b)
+    ──────────────────────────────────────────────────────────────────────────────────  T-CEq-Record
+    σ ⊢ CEq(τ_a, τ_b) ⇒
+      ⟨σ, [CEq(F_a[k].type, F_b[k].type)]_k
+          ++ [CEq(X_a[i].key, X_b[i].key), CEq(X_a[i].value, X_b[i].value)]_i, done⟩
+
+Domain mismatch, attribute mismatch, index-count mismatch, or row disagreement ⇒
+rejection. (`ρ-agreement`: both `nil`, or both `TRowVar` with equal id, per the
+existing `equal` row check.)
+
+#### Record CSub — one variance rule for named fields AND index signatures
+
+The single discipline, applied **identically** to named fields and to index
+signatures (no special-casing the index sigs):
+
+> **`readonly` ⇒ COVARIANT** (emit `CSub(v_a, v_b)`); **mutable** (the default,
+> no modifier) **⇒ INVARIANT** (emit `CEq(v_a, v_b)`).
+
+This is the principled correction of v4 (which treats *all* table-field
+subtyping as invariant and ignores `readonly` in `struct_equal`). The soundness
+basis is Spec A's "soundness floor": a mutable (writable) field/index is a
+read-and-write position, so covariance is the TypeScript-array unsoundness;
+`readonly` opts out of writes, so it is safe to be covariant. Consequences pinned
+by the rule:
+
+- `{ [string]: integer }` is **NOT** `<: { [string]: number }` (mutable index,
+  invariant; would require `integer = number`, rejected).
+- `{ readonly [string]: integer }` **IS** `<: { readonly [string]: number }`
+  (readonly index, covariant; `CSub(integer, number)` holds).
+- `{ x: integer }` is **NOT** `<: { x: number }`; `{ readonly x: integer }`
+  **IS** `<: { readonly x: number }`. Same rule, named field.
+
+Define the per-position variance subgoal (shared by fields and indexes):
+
+    field_subgoal(fld_a, fld_b) =
+        fld_b.readonly ? CSub(fld_a.type, fld_b.type)   -- covariant
+                       : CEq (fld_a.type, fld_b.type)    -- invariant (mutable)
+
+The **supertype's** modifier governs (you may supply a `readonly`-or-mutable
+field where a `readonly` field is expected; you may **only** supply a mutable
+field where a mutable field is expected — a `readonly` subtype field cannot
+satisfy a mutable supertype field, because the supertype permits writes the
+subtype forbids). Formally: if `fld_b.readonly` then `fld_a` may be readonly or
+mutable; if `¬fld_b.readonly` then `fld_a` must be mutable (a readonly `fld_a`
+against a mutable `fld_b` is rejected). Mirror for indexes with the index's own
+`readonly` — Spec C does **not** carry a `readonly` flag on `TIndex` separately
+unless the surface admits `readonly [K]: V`; per `type-system.md` it does, so
+`TIndex` carries `readonly` as the same attribute. (If a producer never emits
+`readonly` index sigs, the field defaults to mutable/invariant.)
+
+**T-CSub-Record (revised T-CSub-Record-Width).** Width subtyping with the
+one variance rule, optional-presence, and index-signature subtyping.
+
+    σ⟦τ_a⟧ = Record(F_a, X_a, ρ_a)    σ⟦τ_b⟧ = Record(F_b, X_b, ρ_b)
+    ──────────────────────────────────────────────────────────────────────────────  T-CSub-Record
+    σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, named-obligations ++ index-obligations, done⟩
+
+where:
+
+**(1) Named-field obligations** (per supertype field `k`):
+
+- `k ∈ dom(F_a)` (present in subtype): emit `field_subgoal(F_a[k], F_b[k])`.
+  Additionally, if `F_b[k]` is required (`¬optional`) but `F_a[k]` is optional,
+  **reject** (a possibly-absent field cannot satisfy a required one).
+- `k ∉ dom(F_a)` (absent in subtype):
+  - `F_b[k].optional` ⇒ **OK** (a supertype optional field may be absent from
+    the subtype — the v4 `band(bfe.flags, FLAG_OPTIONAL) == 0` guard, inverted
+    into the present rule);
+  - `¬F_b[k].optional` ⇒ but the subtype has an index `X_a` whose `key` admits
+    the string-literal `k` (`CSub(literal(string,k), X_a[j].key)` holds) ⇒ emit
+    the field/index obligation against that index value (per (2) below);
+  - else ⇒ **reject** with `missing_field` (the v4 missing-field error,
+    op_sem.lua ~:703–705).
+
+Subtype-only fields (`k ∈ dom(F_a) ∖ dom(F_b)`) are **forgotten** (width
+subtyping: extra fields are fine), provided `ρ_b` is closed or absorbs them — see
+(3).
+
+**(2) Index-signature obligations** (per supertype index `X_b[i] = {key=K,value=V}`):
+every subtype **named field** whose name-type is `<: K` must have its value
+satisfy the index variance, and every subtype **index** must match the supertype
+index:
+
+- For each `k ∈ dom(F_a)` with `CSub(literal(string,k), K)` holding (the field's
+  name, as a string literal, is admitted by the index key): emit
+  `index_subgoal(X_b[i], F_a[k])` = `CSub(F_a[k].type, V)` if `X_b[i].readonly`
+  else `CEq(F_a[k].type, V)`. (Same variance rule, index value vs. field value —
+  no special-casing.)
+- For each subtype index `X_a[j]` with `CSub(X_a[j].key, K)` (or key-equal,
+  depending on key variance — keys are **contravariant** consumers of the lookup
+  argument, so `CSub(K, X_a[j].key)`): emit the value obligation
+  `CSub(X_a[j].value, V)` if `X_b[i].readonly` else `CEq(X_a[j].value, V)`.
+- If the supertype index is required to be covered and neither a named field nor
+  a subtype index covers `K`, the obligation is vacuously satisfied only when the
+  subtype is **open** on that key region; otherwise it is an index-coverage
+  rejection. (v5.0 conservative form: emit the obligations that *do* match; a
+  supertype index with no subtype witness and a closed subtype row is a
+  `missing_index` error. Backtracking over which witness covers which index is a
+  later extension, flagged below.)
+
+**(3) Row obligations.** If `ρ_b` is closed (`nil`), the subtype must not carry
+extra fields the supertype forbids — but width subtyping **admits** forgetting
+extra subtype fields, so a closed supertype row only constrains that every
+supertype-required field/index is covered by (1)/(2); extra subtype fields are
+dropped. If `ρ_b` is open (a `TRowVar`), it absorbs the surplus subtype fields
+(row unification, per §"Row polymorphism" — `CRowExtend`/`CRowClose` machinery,
+unchanged). Spec C adds no new row mechanism; it only routes the surplus through
+the existing row var.
+
+**Key contravariance note.** Index *keys* are consumer positions (the argument
+you index with): a subtype index may admit **more** keys (a wider key type), so
+keys are contravariant — `X_b[i].key <: X_a[j].key` is the obligation, matching
+arrow-arg contravariance. Index *values* follow the readonly/mutable variance
+rule above. Both interpreters must agree on this split (key contra, value per
+readonly).
+
+#### `unit` primitive (retires `$Unit`)
+
+`$Unit` (the empty tuple / void / "no value") becomes a **real primitive**
+`Const("unit")` with a lattice entry, not a magic `$`-name. It is added to the
+base lattice consulted by `atomic_subtype` (Spec A):
+
+- `never <: unit` (bottom subtypes it, by the generic bottom edge),
+- `unit <: unknown` (top, generic),
+- `unit <: unit` (reflexivity, generic),
+- `unit` is otherwise **unrelated** to other base atoms (it is not `nil`; `nil`
+  is a value, `unit` is the absence of a value / the empty return pack). A
+  zero-arity return is the empty `TPack` (Spec B) at the pack level; `unit` is the
+  *atom* a context demands when it wants "no value" as a first-class type. The
+  two coincide in meaning but live at different levels — `TPack([], nil)` for
+  arrow returns, `Const("unit")` where an atom is required. Both interpreters
+  treat `Const("unit")` as an ordinary nullary `Const` for CEq/CSub (it falls
+  into **T-CEq-Const** / **T-CSub-Const-Var** / **T-CSub-Atomic** with no special
+  case — the name is just `"unit"`, dispatched like any other `Const` name).
+
+The dead encodings `$Typeof` / `$IndexAccess` (removed, commit 2e69fee1) are
+**not** respecified here. `$Spread` / `$spread_` (record spread) lowers to Spec
+B's `TPack` `rest` — see Spec B; not redefined.
+
+#### Interaction map
+
+- **literal ↔ Spec A.** Literal widening is an `atomic_subtype` edge dispatched
+  on `tag == "literal"` (and the reused `integer<:number` `base_widens` edge),
+  not on a `$`-name. Spec A's forward reference to Spec C ("the lattice exposes
+  *is `a` a literal whose base is `b`* as a lattice operation") is discharged by
+  the `base_widens(a.base, b.name)` formulation above.
+- **tuple / spread ↔ Spec B.** Positional sequences (tuples, multi-return,
+  `(...%P)`, record spread) are `TPack` (Spec B), not records. Spec C references
+  TPack; it does not redefine it. The positional branches in the record
+  walkers/CEq/CSub are **deleted** (they moved to Spec B's pack rules). A literal
+  pattern (`"GET"`, `42`) in a `match` arm (Spec B) is a `TLiteral`, matched by
+  `match_pattern`'s primitive/literal case consulting `atomic_subtype` abstractly
+  — Spec B's §"Literal node ownership" gap (item 4) is closed by this section.
+
+#### No-`$`-string-match success criterion
+
+After Spec C is implemented (the producer rewrite + the rule revisions above), a
+search of the **interpretation path** (`op_sem.lua`, `op_sem_alt.lua`,
+`types.lua` walkers, and the subtype/equal dispatchers) must find **zero**
+occurrences of either:
+
+- a comparison `name == "$X"` for any literal/record/unit encoding name
+  (`$Lit`, `$LitInt`, `$LitNum`, `$LitBool`, `$idx*`, `$opt_*`, `$ro_*`,
+  `$opaque_*`, `$computed_*`, `$pos_*`, `$spread_*`, `$Unit`), nor
+- a prefix test `name:sub(1, n) == "$…"` for any of the above.
+
+The only surviving `$`-names are the **permanent type-level intrinsics** named in
+`lib/type/static/CLAUDE.md` (`$Require`, `$Opaque`, `$FfiC`, `$GlobalScope`,
+`$Throw`/`$Catch`, `$EachField`, `$PatternReturn`, `$FindReturn`), and even those
+are not part of the literal/record *interpretation* path — they are consumed by
+the annotation/intrinsic layer, not by `atomic_subtype` or the record CEq/CSub
+rules. A residual literal/record/unit `$`-match found after implementation is
+evidence the producer rewrite is incomplete, not a license to keep the match.
+
+#### Spec gaps surfaced (per F12; not silently filled)
+
+1. **Index-coverage backtracking.** **T-CSub-Record** (2) emits obligations for
+   the named fields / subtype indexes that *match* a supertype index; it does not
+   backtrack over which witness covers which supertype index when several could.
+   The conservative form (`missing_index` when no witness and closed row) is
+   sound but incomplete. Owed when a corpus example needs a record with multiple
+   overlapping index signatures.
+2. **`readonly` on `TIndex` surface.** Spec C carries `readonly` as a `TIndex`
+   attribute to keep the one-variance-rule uniform. If the surface syntax never
+   admits `readonly [K]: V`, the attribute defaults to `false` (mutable/invariant)
+   and the covariant index path is dead code until the surface adds it. Flagged,
+   not pre-built beyond the attribute slot.
+3. **`number`-vs-`integer` literal base.** `base = "number"` distinguishes a
+   `number` literal (`1.0`) from an `integer` literal (`1`). The `value`
+   comparison in `equal` uses Lua `==`, under which `1 == 1.0` is true in Lua
+   5.1 / LuaJIT — so two literals with **different bases** but equal numeric
+   value are kept distinct by the `base` comparison, not the value. Both
+   interpreters must compare `base` first. Flagged as the one place value
+   equality alone is insufficient.
+
 ## Cross-reference
 
 | Rule label              | Executable function (op_sem.lua) |
@@ -1688,6 +2064,10 @@ as evidence the substrate is insufficient — none is.)
 | T-CMatchEval-Reduce                 | impl phase — `rule_T_CMatchEval` reduce (planned) |
 | T-CMatchEval-Wake                   | impl phase — `wake_head` re-entry (planned) |
 | T-CMatchEval-Stuck                  | impl phase — `quiesce_errors` (planned) |
+| T-CEq-Literal                       | impl phase — `rule_T_CEq_Literal` (planned); folds into `step_csub`/`atomic_subtype` literal edge |
+| T-CEq-Record (revised)              | impl phase — `rule_T_CEq_Record` minus positional arm (planned) |
+| T-CSub-Record (revised)             | impl phase — `rule_T_CSub_Record_Width` → variance-respecting (planned) |
+| literal widening (atomic_subtype edge) | impl phase — `atomic_subtype` literal/`base_widens` edge, replaces `step_csub` `$`-cascade (planned) |
 
 Parity test asserts: for each fixture, the executable spec's final
 `⟨σ_final, errors⟩` equals the docs-encoded rule-by-rule trace's final
