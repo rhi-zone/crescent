@@ -136,6 +136,12 @@ Conventional commits: `type(scope): message`. Types: `feat`, `fix`, `refactor`, 
 - No dependencies that require a build step — pure Lua + FFI only.
 - No special-casing. If the type system cannot express a construct declaratively, that is a substrate gap — fill it or escalate, never work around it with name-keyed or hardcoded handling in the gen-pass or solver. Making a demo pass or lowering an error count never justifies ad-hoc behavior. (Ad-hoc accumulation is the documented root cause of v1→v4 failure; v5 exists to prevent it.)
 
+The following three rules are PLANNING-level — they bind the orchestrator and plan author, complementing the code-level no-special-casing rule above (which binds the implementer).
+
+- **Frame gaps as substrate, not results.** A gap whose principled fix requires unbuilt substrate must be recorded as the substrate need ("X requires <missing mechanism>"), never as a result deficit ("X produces the wrong value"). Closing it means building the substrate or explicitly escalating — never hardcoding the result. Framing a substrate gap as a result deficit manufactures ad-hoc by construction.
+- **A name-keyed or hardcoded handler is not a gap closure.** It is substrate moved, not removed. A plan may not count it as "done", and a passing fixture over a special-cased path ("works because it's hardcoded") is not evidence of closure.
+- **Substrate before consumers.** Schedule an enabling mechanism before the features that depend on it. Never defer foundational substrate behind the features that need it; that inversion is the structural origin of hardcoded workarounds.
+
 <!-- BEGIN ECOSYSTEM RULES -->
 
 ## Delegation
