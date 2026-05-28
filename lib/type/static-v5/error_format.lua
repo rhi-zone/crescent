@@ -9,6 +9,19 @@
 -- a plain Lua table shape (no v4-FFI dependencies in format_plain/format_ansi),
 -- so building an ErrCtx is a few lines.  Porting would duplicate ~150 lines.
 
+-- ── v4 errors.lua interface contract ────────────────────────────────────────
+-- Explicit type declarations for the v4 shapes v5 depends on.  If errors.lua
+-- renames a field or changes a function signature, bin/cr check on this file
+-- will surface a type error (loud) instead of silently producing malformed
+-- diagnostic tables at runtime.  v5-side only; v4 is untouched.
+--
+--:: V4DiagNote  = { filename: string, line: integer, col: integer, msg: string }
+--:: V4DiagFixEdit = { byte_start: integer, byte_end: integer, replacement: string }
+--:: V4DiagFix     = { edits: { [integer]: V4DiagFixEdit, ... }, kind: string, rule: string }
+--:: V4DiagEntry = { kind: string, filename: string, line: integer, col: integer, msg: string, notes: { [integer]: V4DiagNote, ... }, fix?: V4DiagFix }
+--:: V4ErrCtx    = { errors: { [integer]: V4DiagEntry, ... }, warnings: { [integer]: V4DiagEntry, ... }, source_lines: { [string]: { [integer]: string, ... }, ... } }
+--:: V4ErrorsIface = { new_ctx: () -> V4ErrCtx, set_source: (V4ErrCtx, string, string | nil) -> (), error: (V4ErrCtx, string, integer, integer, string) -> V4DiagEntry, format_plain: (V4ErrCtx) -> string, format_ansi: (V4ErrCtx) -> string }
+--: V4ErrorsIface
 local errors_v4 = require("lib.type.static.errors")
 -- The require pulls the typedefs (V5Type, Provenance, ErrorDetails, OpSemError)
 -- into scope; we don't use the modules' values directly here.
