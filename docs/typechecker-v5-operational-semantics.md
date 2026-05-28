@@ -192,14 +192,16 @@ common field's type is required equal.
     ─────────────────────────────────────────────────────  T-CSub-Refl
                 σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, ε, done⟩
 
-**T-CSub-TVar.** Either side is an unbound `UVar`.  v5.0 discipline: route to
-`CEq` (no per-tvar bounds).  This trade matches the substrate decision in
-log item 6 (tvars don't change level) and item 2 (gensym ids with no bound
-field).  Bounded inference is a v5.x extension.
-
-    σ⟦τ_a⟧ = UVar(_)  ∨  σ⟦τ_b⟧ = UVar(_)
-    ──────────────────────────────────────────────────────  T-CSub-TVar
-              σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, [CEq(τ_a, τ_b)], done⟩
+**T-CSub-TVar.** Either side is an unbound `UVar`.  **Superseded 2026-05-29
+(Spec A).** v5.0 routed this to `CEq` (no per-tvar bounds); the dual-interpreter
+review (R1) found that route loses all subtyping information through a variable
+and is the spec gap that makes faithful inference impossible.  The normative
+replacement is the **fuller simple-sub bounds system** defined in §"Simple-sub
+bounds (normative)" below — three cases (Upper, Lower, Flow), an eagerly-
+maintained transitive closure with a mandatory termination cache, and polar
+coalescing at quiescence.  This rule is retained here only as a forward
+pointer; the operational content lives in that section and **replaces** the
+route-to-CEq disposition entirely.
 
 **T-CSub-Arrow.** Decompose with arrow variance (fixed: contra args, co rets).
 
@@ -302,9 +304,13 @@ rule above applies.
 
 #### Spec gaps surfaced (per F12 — named, not silently filled)
 
-1. **Bounded tvars** (no per-tvar lower/upper bound).  T-CSub-TVar routes
-   to CEq.  A real bounded substrate (simple-sub / MLstruct style) is a
-   v5.x extension.  Trade is recorded in log item 2/6.
+1. **Bounded tvars.** ~~No per-tvar lower/upper bound; T-CSub-TVar routes
+   to CEq.~~ **CLOSED 2026-05-29 (Spec A).** The fuller simple-sub bounds
+   system is now normatively specified in §"Simple-sub bounds (normative)":
+   directional bound-graph for `α <: β`, canonical lower/upper sets keyed by
+   union-find root, eager transitive re-emission with a structural-hash cache,
+   and polar coalescing at S-Quiesce.  Implementation is phase P2 (op_sem.lua
+   + op_sem_alt.lua, dual encoders); this section is the spec half.
 2. **Variance under Lambda** (HKT constructor-position variance).  The
    registry covers named constructors only; type lambdas don't yet carry
    variance.  Acceptable for v5.0 since CHKT already β-reduces lambdas to
@@ -317,6 +323,327 @@ rule above applies.
    tracked separately in the CEffect risk note.
 5. **Intersection types** (no intersection AST variant yet).  Algebraic
    Subtyping admits intersection-as-contravariant-union; owed.
+
+### Simple-sub bounds (normative)
+
+**Added 2026-05-29 (Spec A of a spec-first program; DOCS-ONLY).** This section
+is the normative replacement for the v5.0 "route subtyping between variables to
+`CEq`" disposition (the old **T-CSub-TVar**).  It specifies the **fuller
+simple-sub bounds system** v5 adopts, derived from
+`docs/typechecker-rewrite-design.md` §2.2 ("Bound propagation"), which is in
+turn MLstruct §3.2 (Parreaux & Chau, OOPSLA 2022): *"the constraint solver
+attaches a set of lower and upper bounds to each type variable, and maintains
+the transitive closure of these constraints."*
+
+The spec is written to be encodable **independently** by two interpreters
+(`lib/type/static-v5/op_sem.lua` and `lib/type/static-v5/op_sem_alt.lua` — the
+dual-interpreter premise; R1 found the prior spec broken because it omitted
+bounds).  Where it cites current `op_sem.lua` behavior, that is the **divergence
+to be removed in phase P2**, not the target.
+
+#### The central coexistence: bound-graph (subtyping) vs union-find (equality)
+
+v5 keeps **two distinct relations on type variables**, with one shared
+addressing scheme:
+
+- **Equality** (`CEq`, binding `α := τ`) uses the **union-find substitution**
+  in `lib/type/experiments/v5_perf/subst.lua` unchanged.  `CEq(α, β)` merges
+  the two roots (**T-CEq-UU**); `α := τ` binds the root (**T-CEq-Bind-L/R**).
+  This is the existing monotone σ.
+- **Subtyping between two unbound variables** (`α <: β`) does **NOT** merge.
+  It records a **directional bound-graph edge** `α → β` ("α flows into β"):
+  β's lower bounds flow into α's lowers, α's upper bounds flow into β's uppers.
+  α and β stay **distinct**, and the relation is **asymmetric** — `α <: β`
+  without `β <: α` is a legal, representable state.  This is full simple-sub:
+  faithful flow, not union-find merge.  (This is the decided design; it is not
+  re-litigated here.)
+
+The two relations are reconciled by a single rule: **all bound storage and all
+bound-graph edges are keyed by the union-find root** (`subst.find(id)`), exactly
+as `op_sem.lua`'s `add_upper_bound` / `add_lower_bound` already key by
+`subst_mod.find` (op_sem.lua, the `add_upper_bound`/`add_lower_bound` helpers).
+Therefore a later `CEq(α, β)` that merges roots `r_α`, `r_β` automatically makes
+the surviving root inherit the other's bounds and edges — and the merge rule
+(**T-CEq-UU-Bounds** below) explicitly reconciles them and re-establishes the
+transitive closure across the newly-joined cross-pairs.  Equality is thus
+*stronger* than mutual subtyping: merging is allowed to discard the directional
+distinction precisely because `CEq` asserts both directions at once.
+
+This keys-by-root discipline is the mechanism by which "the bound-graph
+(subtyping edges) coexists with the union-find substitution (equality/binding)"
+required by the design.  There is exactly one source of truth.
+
+#### State (abstract machine extension)
+
+The solver state `⟨σ, W, I⟩` is extended to `⟨σ, W, I, B, C⟩` where:
+
+| Component | Meaning |
+|-----------|---------|
+| `B.lower : Root → Set<Type>` | per-root **lower-bound set** (`bind_lower`). `L ∈ B.lower[r]` means `L <: α` for every α with `find(α)=r`. |
+| `B.upper : Root → Set<Type>` | per-root **upper-bound set** (`bind_upper`). `U ∈ B.upper[r]` means `α <: U`. |
+| `B.edge_up : Root → Set<Root>`   | **bound-graph out-edges**: `r' ∈ B.edge_up[r]` iff edge `α → β` recorded (α∈r, β∈r'), i.e. `α <: β`. α's uppers flow to β; β's lowers flow to α. |
+| `C : Set<Hash>` | the **subtyping termination cache** (§"Bound-add with cache"). A hash is in `C` iff that `CSub(L,U)` obligation has been discharged-or-assumed. |
+
+All four are **canonical in `subst.lua`** (the decided design: `bind_lower` /
+`bind_upper` maps + the edge map live in the substitution), keyed by root, and
+**migrated on union alongside watchers** — `subst.union` already migrates
+`watchers` and `head_watchers` (subst.lua, the `union` function); `bind_lower`,
+`bind_upper`, and `edge_up`/`edge_down` migrate by the same loop (loser's sets
+unioned into winner's, loser's entry cleared).  `op_sem.lua` currently keeps
+`upper_bounds`/`lower_bounds` on `OpSemState` (op_sem.lua, the `OpSemState`
+record and `new_state`); **P2 migrates them into the substitution** so both
+interpreters read the same substrate.  `B` and `C` are part of state purely so
+the two encoders agree on what is observable; they impose no representation.
+
+Set membership and dedup are modulo `types.equal` after `deref` (as
+`bounds_contains` already does).  `B.edge_up` is a relation on roots; its
+reflexive-transitive closure is *materialized eagerly* (see below), so a query
+"does L flow to U" need not walk the graph at query time.
+
+Monotonicity: `B.lower`, `B.upper`, `B.edge_up`, and `C` only ever **grow**
+(modulo union, which merges entries — never a net loss of obligation).  This
+preserves the monotone-σ premise on which **S-Wake** and termination rest
+(see "Interaction with the watcher/wake machinery").
+
+#### T-CSub-TVar — three cases
+
+After deref, when at least one side is an unbound `UVar`, exactly one of three
+cases applies.  None are stuck-and-park: each is **done with re-emission**
+(possibly emitting transitive obligations, all cache-guarded).
+
+**T-CSub-TVar-Upper.** LHS is an unbound uvar, RHS is non-uvar (`α <: T`).
+Add `T` to α's root's upper set; for **every** existing lower `L`, re-emit
+`CSub(L, T)` (cache-guarded) to maintain the closure.
+
+    σ⟦τ_a⟧ = UVar(α)    r = find(α)    σ⟦τ_b⟧ = T    T.tag ≠ uvar
+    B' = B with T added to upper[r]
+    ──────────────────────────────────────────────────────────────  T-CSub-TVar-Upper
+    σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, [ CSub(L, T) | L ∈ B.lower[r] ]_cache, done⟩  with B := B'
+
+**T-CSub-TVar-Lower.** RHS is an unbound uvar, LHS is non-uvar (`T <: α`).
+Add `T` to α's root's lower set; for **every** existing upper `U`, re-emit
+`CSub(T, U)` (cache-guarded).
+
+    σ⟦τ_b⟧ = UVar(α)    r = find(α)    σ⟦τ_a⟧ = T    T.tag ≠ uvar
+    B' = B with T added to lower[r]
+    ──────────────────────────────────────────────────────────────  T-CSub-TVar-Lower
+    σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, [ CSub(T, U) | U ∈ B.upper[r] ]_cache, done⟩  with B := B'
+
+**T-CSub-TVar-Flow.** Both sides are unbound uvars with **distinct** roots
+(`α <: β`).  Record the directional edge `r_α → r_β`.  Flow β's lowers into
+α's lowers and α's uppers into β's uppers, and re-emit the cross-product
+obligations these create (cache-guarded), so the closure invariant holds
+across the new edge.  **Do not merge the roots** — that is reserved for `CEq`.
+
+    σ⟦τ_a⟧ = UVar(α)   σ⟦τ_b⟧ = UVar(β)   r_α = find(α)   r_β = find(β)   r_α ≠ r_β
+    B' = B with r_β added to edge_up[r_α],
+                 B.lower[r_β] ∪-added into lower[r_α],
+                 B.upper[r_α] ∪-added into upper[r_β]
+    emitted = [ CSub(L, U) | L ∈ B.lower[r_α]', U ∈ B.upper[r_β]' ]_cache
+    ─────────────────────────────────────────────────────────────────────────  T-CSub-TVar-Flow
+              σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, emitted, done⟩  with B := B'
+
+(If `r_α = r_β` the constraint is reflexive — discharged with no change,
+subsumed by **T-CSub-Refl**.)
+
+The flow in **T-CSub-TVar-Flow** is **transitive in one step only**; deeper
+transitivity is achieved because each flowed-in bound is itself re-emitted as a
+`CSub(L, T)` / `CSub(T, U)` against the *concrete* uppers/lowers via the Upper
+and Lower rules above, and because adding an edge into a node that already has
+out-edges flows along them (the eager-closure invariant: whenever an edge or a
+bound is added, the obligations its addition creates are re-emitted before the
+step completes).  Cyclic edge-graphs are made to terminate by the cache.
+
+**Polarity note.** Re-emitted obligations carry the **prov of the originating
+`CSub`** (per the doc's standing provenance convention), so a conflict surfaces
+at the originating constraint — precise blame (the decided design's "conflicts
+surface at the originating constraint").
+
+#### Bound-add with cache (the termination protocol)
+
+Every obligation re-emitted by the three T-CSub-TVar cases (and by
+**T-CEq-UU-Bounds**) is an ordinary `CSub(L, U)` that re-enters `W` — **but
+gated by the cache** `C`:
+
+**Cache key.** `key(L, U) = hash(⟨head(deref L), head(deref U)⟩)` where `head`
+is the top-level constructor tag **plus**, for a uvar leaf, its union-find root
+id (so two syntactically-distinct uvars that share a root collide, and a uvar
+vs a different root do not).  This is the "structural hash of (deref L, deref U)
+head+identity" of the decided design.  Two obligations with equal keys are
+treated as the same obligation.
+
+**Cache-check rule.** Before a re-emitted `CSub(L, U)` is processed:
+
+    k = key(L, U)    k ∈ C
+    ────────────────────────────────────  S-Sub-CacheHit
+    CSub(L, U) ⇒ ⟨σ, ε, done⟩            (assumed to hold; emit nothing)
+
+    k = key(L, U)    k ∉ C
+    ────────────────────────────────────  S-Sub-CacheMiss
+    CSub(L, U) ⇒ process normally, with C := C ∪ {k} recorded BEFORE recursion
+
+The "record before recursion" ordering is what cuts cycles: a regular type
+whose bound-graph forms a loop re-encounters its own key and discharges via
+**S-Sub-CacheHit** rather than re-emitting forever.  This is mandatory, not an
+optimization — without it transitive re-emission on a cyclic bound-graph
+diverges.  See "Re-emission termination" in §"Termination argument".
+
+**Coalescing-time note.** The `∪lowers ⊆ ∩uppers` invariant (union of lowers is
+a subtype of the intersection of uppers) is *maintained* by the eager
+re-emission above (every lower meets every upper through a `CSub`).  It is
+**not** separately checked.  A genuine violation (e.g. `integer <: α` and
+`α <: string`) surfaces as a `CSub(integer, string)` obligation that the
+atomic/structural rules reject — at the originating constraint's prov.
+
+#### T-CEq-Bind — verify bounds before binding
+
+Binding a variable to a concrete type must honor the bounds accumulated on its
+root.  **T-CEq-Bind-L** / **-R** are extended:
+
+    σ⟦τ_a⟧ = UVar(α)    r = find(α)    σ⟦τ_b⟧ = τ    τ.tag ≠ uvar    α ∉ FV(τ)
+    ─────────────────────────────────────────────────────────────────────────────  T-CEq-Bind-L-Bounds
+    σ ⊢ CEq(τ_a, τ_b) ⇒
+      ⟨σ[r ↦ τ @ Φ_r],
+       [ CSub(L, τ) | L ∈ B.lower[r] ]_cache ++ [ CSub(τ, U) | U ∈ B.upper[r] ]_cache,
+       done⟩
+
+That is: bind as before (occurs-check unchanged; failure routes to
+**T-CEq-Occurs**), then **verify** every accumulated lower `L <: τ` and upper
+`τ <: U` by emitting those `CSub`s (cache-guarded).  A bound that τ violates
+surfaces as a normal subtyping error.  After binding, the root's bound sets are
+retained (they remain valid facts about a now-concrete root; re-emission keys
+include the root identity so no rework loops).  `op_sem.lua` currently binds
+without re-checking bounds (op_sem.lua, `rule_T_CEq_Bind_L`) — P2 adds the
+verification emit.
+
+#### T-CEq-UU — merge reconciles bounds AND edges
+
+`CEq(α, β)` between two unbound uvars merges roots via union-find
+(**T-CEq-UU**, unchanged for the σ part: smaller id wins).  The extension
+reconciles `B`:
+
+    σ⟦τ_a⟧ = UVar(α)   σ⟦τ_b⟧ = UVar(β)   r_w = winner, r_l = loser (= find after union)
+    lower[r_w] := lower[r_w] ∪ lower[r_l]      upper[r_w] := upper[r_w] ∪ upper[r_l]
+    edge_up[r_w] := edge_up[r_w] ∪ edge_up[r_l]   (and dually edge_down)
+    -- re-establish closure on the newly-joined cross-pairs:
+    emitted = [ CSub(L, U) | L ∈ lower[r_w], U ∈ upper[r_w] ]_cache    -- (only the cross pairs are new)
+    ───────────────────────────────────────────────────────────────────────────────────  T-CEq-UU-Bounds
+    σ ⊢ CEq(τ_a, τ_b) ⇒ ⟨σ ∪ {α ↔ β}, emitted, done⟩
+
+The migration itself is the `subst.union` watcher-migration loop extended to the
+bound/edge maps (subst.lua, `union`).  Because merge collapses the directional
+distinction, any edge `r_l → r_w` or `r_w → r_l` that existed between the two
+becomes a self-loop on `r_w` and is **dropped** (a node trivially flows to
+itself).  The cross-pair re-emission is cache-guarded, so it cannot loop on a
+cyclic graph.  This is the "later CEq merge reconciles two variables'
+edges/bounds" requirement of the decided design.
+
+#### S-Quiesce — polar coalescing
+
+At quiescence (`W = ∅`), each root that is still **unbound** but carries bounds
+is coalesced into a user-facing / cache-facing type by **polarity**, replacing
+the v5.0 single "meet of upper bounds" (op_sem.lua, the `run` quiescence block
+that emits `reduce_intersection(uppers)` — this is the disposition P2 replaces):
+
+- A root occurring **positively** (as a value flowing *out* — produced)
+  coalesces to **`⋃ B.lower[r]`** (the union of its lower bounds).
+- A root occurring **negatively** (as a value flowing *in* — consumed)
+  coalesces to **`⋂ B.upper[r]`** (the intersection of its upper bounds).
+- A root occurring at **both** polarities coalesces to a variable retained in
+  the output (the simple-sub "compact type" keeps such variables), with both a
+  lower and upper face.
+- A **recursive bound** — `B.lower[r]` or `B.upper[r]` mentions `r` itself
+  (detected by **hash-consing** during the coalescing walk, per simple-sub
+  / `typechecker-rewrite-design.md` §2.2 "Coalescing") — is wrapped in a
+  **`μX. …`** binder, `X` standing for `r`.
+
+Polarity is the standard simple-sub assignment: a position is positive if it is
+reached through an even number of contravariant (function-argument) flips from a
+producing occurrence, negative otherwise.  An empty lower set coalesces to
+`never`; an empty upper set to `unknown` (the lattice top/bottom).
+
+**reduce_intersection / structurally_subtype is a coalescing-time simplifier
+only.** The dominated-bound drop (e.g. `integer & number → integer`,
+`string | "GET" → string` on the union side) is applied **only here, at
+coalescing**, never mid-solving.  It is the existing `reduce_intersection` /
+`structurally_subtype` pair (op_sem.lua, those two helpers) repurposed: P2 must
+ensure they are *not* invoked during constraint solving (where they would
+prematurely commit), only when materializing the coalesced form.  This matches
+the decided design (simplifier drops dominated bounds at coalescing time).
+
+#### atomic_subtype — the single primitive lattice
+
+The base-type subtyping facts — `never <: anything`, `anything <: unknown`,
+`integer <: number`, literal-widening — are currently **copied three times** in
+`op_sem.lua`: in the `step_csub` dispatcher's literal-widening block, in
+`rule_T_CSub_Const_Var`'s `integer <: number` special case, and inside
+`structurally_subtype` (op_sem.lua, those three sites).  Three hardcoded copies
+of one lattice is exactly the special-casing the project's "No special-casing"
+hard constraint forbids.
+
+Spec A specifies the lattice **once** as a relation consulted everywhere:
+
+    atomic_subtype(a, b) : the decidable base-lattice judgment, holds iff
+      • a = never                              (bottom subtypes all), or
+      • b = unknown                            (all subtype top), or
+      • a = b                                  (reflexivity on atoms), or
+      • a, b are atoms related by the primitive widening lattice
+        (integer <: number; each literal singleton <: its base atom).
+
+**T-CSub-Atomic.** When both sides deref to atoms (no decomposable structure),
+the relation is decided by one `atomic_subtype` call:
+
+    σ⟦τ_a⟧ = a    σ⟦τ_b⟧ = b    a, b atomic    atomic_subtype(a, b)
+    ──────────────────────────────────────────────────────────────────  T-CSub-Atomic
+                       σ ⊢ CSub(τ_a, τ_b) ⇒ ⟨σ, ε, done⟩
+
+    (¬atomic_subtype(a, b)) ⇒ ⟨σ, ε, error("not a subtype")⟩
+
+`rule_T_CSub_Const_Var`, the literal-widening dispatcher block, and
+`structurally_subtype`'s atom case must **all** delegate to this one
+`atomic_subtype` in P2 — no inline lattice facts remain.
+
+**Abstract lattice consultation (composes with Spec C).** `atomic_subtype` must
+consult the widening lattice **abstractly**, NOT by string-matching specific
+`$`-prefixed names (`$Lit`, `$LitInt`, `$LitNum`).  Those literal-encoding names
+are themselves being made **scoped** in Spec C; if `atomic_subtype` hardcoded
+`"$LitInt"` etc. it would re-introduce the very name-keyed special-casing this
+section removes, and would break under Spec C's renaming.  The normative
+requirement is therefore: the lattice exposes a predicate "is `a` a literal
+whose base is `b`" and "is `a` the integer atom, `b` the number atom" as
+**lattice operations**, and `atomic_subtype` calls those.  The concrete encoding
+of literals (whatever `$`-names survive) is a **forward reference — see Spec C**;
+this spec deliberately does not pin it.  Until Spec C lands, an implementation
+may back the predicate with the current `$Lit*` recognizer, but the *interface*
+`atomic_subtype` presents to the rest of the solver must be the abstract one.
+
+#### Interaction with the existing monotone-σ / watcher / S-Wake machinery
+
+The bound-graph is **not** a second wake substrate.  It reuses the existing
+machinery:
+
+- **Bounds and edges are monotone** (only grow / merge), so the monotone-σ
+  premise behind **S-Wake** and the termination order is preserved.  No bound
+  is ever retracted.
+- The three T-CSub-TVar cases are **`done`, not `stuck`** — they never park, so
+  they add nothing to `I` and create no new watcher class.  (This is the
+  decided design: "NOT stuck-and-park — done-with-re-emission."  It also removes
+  the v5.0 behavior where `op_sem.lua` parks an `α <: T` csub on `α` —
+  op_sem.lua, the `"stuck"` branch in `rule_T_CSub_TVar` — and the quiescence
+  drain that binds it to the meet.)
+- When `T-CEq-Bind` or `T-CEq-UU` later binds/merges a root, the **existing**
+  `S-Wake` fires for any constraints watching that root (e.g. a parked
+  `CMethodCall`), exactly as today.  Re-emitted `CSub`s from a bind are placed
+  directly on `W`; they do not depend on wake.
+
+**Flagged (no new sub-fork):** the bound-graph needs **no** wake/reactivation
+semantics of its own — its progress is driven entirely by *emission onto `W`*
+at the moment a bound or edge is added, gated by the cache, not by parking and
+later waking.  This is consistent with the seven decided points and introduces
+no eighth design fork.  The one place this must be honored by both encoders:
+re-emission happens **eagerly, in the same step** that adds the bound/edge
+(on-add invariant enforcement), so neither interpreter may defer it to
+quiescence.
 
 ### Construction phase
 
@@ -490,6 +817,25 @@ order:
   is again structurally smaller via the binder count decreasing to 0).
 - Reactivations (S-Wake) are bounded by `(# inert) × (# tvars)` since each
   tvar's bind/seal event happens at most once per tvar in a monotone σ.
+
+**Re-emission termination (Spec A extension).** The simple-sub bounds system
+(§"Simple-sub bounds (normative)") adds a source of `emitted` constraints that
+is *not* structurally smaller than its antecedent: on a bound-add, the solver
+re-emits `CSub(L, U)` for accumulated lower/upper pairs, and these `L`, `U` may
+be arbitrary (possibly cyclic via the bound-graph) types.  Decomposition alone
+does not bound this.  Termination is instead recovered by the **mandatory
+subtyping cache**: every re-emitted obligation is keyed by the structural hash
+of `(deref L, deref U)` (head tag + union-find identity of any uvar leaves);
+a cache hit discharges immediately (`⇒ ε`, the relation is *assumed* to hold),
+emitting nothing.  Because crescent types are **regular** (finite under the
+μ-folding the bound-graph induces) and σ allocates finitely many tvars, the set
+of distinct `(deref L, deref U)` keys reachable by re-emission is finite — its
+size is `O(K²)` where `K` is the number of distinct deref'd subterms of the
+constraint set.  Each key is processed (re-emitted from) at most once before its
+entry is in the cache, so the total re-emission work is `O(K²)`, finite.  This
+is the MLstruct §3.2 argument ("type-variable bound graphs may contain cycles,
+and since types are regular the cache guarantees termination") transcribed to
+the op-sem.  The cache is part of machine state (see §"Simple-sub bounds").
 
 This is the same argument as in the prototype solver
 (`lib/type/experiments/v5_perf/solver.lua`) and matches the perf-prototype's
@@ -852,7 +1198,14 @@ type unification and subtyping without special-casing. An effect intersection
 | T-CEq-Mismatch          | `rule_T_CEq_Mismatch`             |
 | T-CEq-Occurs            | `rule_T_CEq_Occurs`               |
 | T-CSub-Refl             | `rule_T_CSub_Refl`                |
-| T-CSub-TVar             | `rule_T_CSub_TVar`                |
+| T-CSub-TVar (forward ptr) | superseded — see T-CSub-TVar-{Upper,Lower,Flow} |
+| T-CSub-TVar-Upper       | P2 — `rule_T_CSub_TVar_Upper` (planned) |
+| T-CSub-TVar-Lower       | P2 — `rule_T_CSub_TVar_Lower` (planned) |
+| T-CSub-TVar-Flow        | P2 — `rule_T_CSub_TVar_Flow` (planned)  |
+| T-CSub-Atomic           | P2 — `atomic_subtype` + `rule_T_CSub_Atomic` (planned) |
+| S-Sub-CacheHit/Miss     | P2 — subtyping cache in `subst.lua` (planned) |
+| T-CEq-Bind-L-Bounds     | P2 — `rule_T_CEq_Bind_L` extension (planned) |
+| T-CEq-UU-Bounds         | P2 — `rule_T_CEq_UU` + `subst.union` extension (planned) |
 | T-CSub-Arrow            | `rule_T_CSub_Arrow`               |
 | T-CSub-Const-Var        | `rule_T_CSub_Const_Var`           |
 | T-CSub-App-Var          | `rule_T_CSub_App_Var`             |
