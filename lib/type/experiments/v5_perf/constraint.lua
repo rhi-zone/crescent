@@ -199,7 +199,8 @@ end
 --:: ConstraintIntEq      = { id: integer, tag: "cint_eq", parts_a: V5Type[], parts_b: V5Type[], prov: Provenance }
 --:: ConstraintIntSub     = { id: integer, tag: "cint_sub", parts_sub: V5Type[], parts_super: V5Type[], prov: Provenance }
 --:: ConstraintIntMember  = { id: integer, tag: "cint_member", ty: V5Type, part: V5Type, prov: Provenance }
---:: V5Constraint = ConstraintEq | ConstraintSub | ConstraintTableOpen | ConstraintTableSet | ConstraintTableSeal | ConstraintMethodCall | ConstraintRowExtend | ConstraintRowLacks | ConstraintRowClose | ConstraintIntEq | ConstraintIntSub | ConstraintIntMember
+--:: ConstraintMatchEval  = { id: integer, tag: "cmatch", param: V5Type, arms: TMatchArm[], result: V5Type, prov: Provenance }
+--:: V5Constraint = ConstraintEq | ConstraintSub | ConstraintTableOpen | ConstraintTableSet | ConstraintTableSeal | ConstraintMethodCall | ConstraintRowExtend | ConstraintRowLacks | ConstraintRowClose | ConstraintIntEq | ConstraintIntSub | ConstraintIntMember | ConstraintMatchEval
 
 local _next_id = 1 --[[: integer ]]
 
@@ -274,6 +275,15 @@ end
 --: (V5Type, V5Type, Provenance) -> V5Constraint
 function M.intersection_member(ty, part, prov)
 	return { id = fresh_id(), tag = "cint_member", ty = ty, part = part, prov = prov }
+end
+
+-- CMatchEval(param, arms, result): assert eval(match param { arms }) = result.
+-- Parks on the head-watcher of param's root while param's head is an unbound
+-- uvar (T-CMatchEval-Park); reduces by running match_pattern arm-by-arm once
+-- param is rigid (T-CMatchEval-Reduce), emitting CEq(R, result).  Spec B.
+--: (V5Type, TMatchArm[], V5Type, Provenance) -> V5Constraint
+function M.match_eval(param, arms, result, prov)
+	return { id = fresh_id(), tag = "cmatch", param = param, arms = arms, result = result, prov = prov }
 end
 
 --: (string, integer, integer, string) -> Provenance

@@ -32,7 +32,11 @@ local M = {}
 --:: TArrow        = { tag: "arrow", args: TPack, ret: TPack }
 --:: TUnion        = { tag: "union", xs: V5Type[] }
 --:: TIntersection = { tag: "intersection", parts: V5Type[] }
---:: V5Type        = TUVar | TVarBnd | TApp | TLambda | TConst | TLiteral | TRowVar | TRecord | TPackVar | TPack | TArrow | TUnion | TIntersection
+--:: TCapture      = { tag: "capture", idx: integer }
+--:: TPatAllFields = { tag: "patallfields", k: integer, v: integer }
+--:: TMatchArm     = { pattern: V5Type, result: V5Type }
+--:: TMatch        = { tag: "match", param: V5Type, arms: TMatchArm[] }
+--:: V5Type        = TUVar | TVarBnd | TApp | TLambda | TConst | TLiteral | TRowVar | TRecord | TPackVar | TPack | TArrow | TUnion | TIntersection | TMatch | TCapture | TPatAllFields
 
 --: (integer) -> V5Type
 function M.uvar(id) return { tag = "uvar", id = id } end
@@ -111,6 +115,26 @@ end
 --: (V5Type[]) -> V5Type
 function M.union(xs) return { tag = "union", xs = xs } end
 
+-- capture(idx): a pattern capture position (Spec B).  A pattern-local binder
+-- index scoped to its match arm — discovery (match_pattern) yields a map
+-- `idx -> V5Type`, and the arm's result is substituted by replacing each
+-- TCapture(idx) with its bound type (subst_match_result).  Like packvar/rowvar
+-- ids, capture idxs are NOT De Bruijn-relocated: shift/instantiate leave them
+-- unchanged (capture binding is an evaluation concern, not a relocation one).
+--: (integer) -> V5Type
+function M.capture(idx) return { tag = "capture", idx = idx } end
+-- patallfields(k, v): the all-fields distribution pattern `{ ...[%K]: %V }`.
+-- The `...` means ITERATE (not spread): evaluation binds K/V per field of the
+-- scrutinee, evaluates the arm result once per field, and unions the results.
+-- A leaf for the AST walkers (k/v are capture-binder idxs, not relocated).
+--: (integer, integer) -> V5Type
+function M.patallfields(k, v) return { tag = "patallfields", k = k, v = v } end
+-- match(param, arms): a first-class match type-AST node (Spec B).  `param` is
+-- the scrutinee; each arm `{ pattern, result }` is tried in order, the first
+-- whose pattern matches `param` fires.  Fallthrough reduces to Const("never").
+--: (V5Type, TMatchArm[]) -> V5Type
+function M.match(param, arms) return { tag = "match", param = param, arms = arms } end
+
 -- Effect-type API.  Effects ARE types — represented as TConst with a "!"
 -- prefix so they fit the existing taxonomy without parallel infrastructure.
 -- `effect("io")` -> Const("!io"); higher-arity effects (`!throw<E>`,
@@ -161,7 +185,7 @@ end
 -- when β-reducing. Eager shift on bind.
 --: (V5Type, integer, integer) -> V5Type
 function M.shift(t, d, cutoff)
-	if t.tag == "uvar" or t.tag == "const" or t.tag == "literal" or t.tag == "rowvar" or t.tag == "packvar" then
+	if t.tag == "uvar" or t.tag == "const" or t.tag == "literal" or t.tag == "rowvar" or t.tag == "packvar" or t.tag == "capture" or t.tag == "patallfields" then
 		return t
 	elseif t.tag == "var" then
 		if t.i >= cutoff then return { tag = "var", i = t.i + d } end
@@ -206,6 +230,18 @@ function M.shift(t, d, cutoff)
 			if v ~= nil then local sh = M.shift(v, d, cutoff) --[[: V5Type ]]; parts[i] = sh end
 		end
 		return { tag = "intersection", parts = parts }
+	elseif t.tag == "match" then
+		-- Shift the scrutinee and each arm's pattern/result.  Captures are
+		-- gensym-like leaves (not Var); only outer Var references inside the
+		-- arms relocate, at the same cutoff.
+		local arms = {} --[[: TMatchArm[] ]]
+		for i = 1, #t.arms do
+			local arm = t.arms[i]
+			if arm ~= nil then
+				arms[i] = { pattern = M.shift(arm.pattern, d, cutoff), result = M.shift(arm.result, d, cutoff) }
+			end
+		end
+		return { tag = "match", param = M.shift(t.param, d, cutoff), arms = arms }
 	end
 	error("shift: unreachable")
 end
@@ -227,7 +263,7 @@ end
 -- decrementing outer indices. Used by β.
 --: (V5Type, V5Type, integer) -> V5Type
 function M.instantiate(body, arg, depth)
-	if body.tag == "uvar" or body.tag == "const" or body.tag == "literal" or body.tag == "rowvar" or body.tag == "packvar" then
+	if body.tag == "uvar" or body.tag == "const" or body.tag == "literal" or body.tag == "rowvar" or body.tag == "packvar" or body.tag == "capture" or body.tag == "patallfields" then
 		return body
 	elseif body.tag == "var" then
 		if body.i == depth then return M.shift(arg, depth, 0) end
@@ -271,6 +307,18 @@ function M.instantiate(body, arg, depth)
 			if v ~= nil then local sh = M.instantiate(v, arg, depth) --[[: V5Type ]]; parts[i] = sh end
 		end
 		return { tag = "intersection", parts = parts }
+	elseif body.tag == "match" then
+		local arms = {} --[[: TMatchArm[] ]]
+		for i = 1, #body.arms do
+			local arm = body.arms[i]
+			if arm ~= nil then
+				arms[i] = {
+					pattern = M.instantiate(arm.pattern, arg, depth),
+					result = M.instantiate(arm.result, arg, depth),
+				}
+			end
+		end
+		return { tag = "match", param = M.instantiate(body.param, arg, depth), arms = arms }
 	end
 	error("instantiate: unreachable")
 end
@@ -348,6 +396,23 @@ function M.equal(a, b)
 		for i = 1, #a.parts do if not M.equal(a.parts[i], b.parts[i]) then return false end end
 		return true
 	end
+	if a.tag == "capture" and b.tag == "capture" then return a.idx == b.idx end
+	if a.tag == "patallfields" and b.tag == "patallfields" then
+		if a.k ~= b.k then return false end
+		if a.v ~= b.v then return false end
+		return true
+	end
+	if a.tag == "match" and b.tag == "match" then
+		if not M.equal(a.param, b.param) then return false end
+		if #a.arms ~= #b.arms then return false end
+		for i = 1, #a.arms do
+			local aa, bb = a.arms[i], b.arms[i]
+			if aa == nil or bb == nil then return false end
+			if not M.equal(aa.pattern, bb.pattern) then return false end
+			if not M.equal(aa.result, bb.result) then return false end
+		end
+		return true
+	end
 	return false
 end
 
@@ -377,7 +442,17 @@ function M.collect_uvars(t, acc)
 		for i = 1, #t.xs do M.collect_uvars(t.xs[i], acc) end
 	elseif t.tag == "intersection" then
 		for i = 1, #t.parts do M.collect_uvars(t.parts[i], acc) end
+	elseif t.tag == "match" then
+		M.collect_uvars(t.param, acc)
+		for i = 1, #t.arms do
+			local arm = t.arms[i]
+			if arm ~= nil then
+				M.collect_uvars(arm.pattern, acc)
+				M.collect_uvars(arm.result, acc)
+			end
+		end
 	end
+	-- capture: a pattern-local binder leaf — contributes no UVar.
 end
 
 -- deref_pack(p, pack_bindings): the substitution-time splice.  Walk `p`,

@@ -749,3 +749,99 @@ T.describe("parse_declaration unsupported v4 directives", function()
         end
     end)
 end)
+
+-- ── Match types (Spec B part 2: TMatch + captures + all-fields + rest) ─────────
+
+-- Parse a match annotation and return its arms (the parser guarantees a TMatch).
+--: (string) -> { pattern: V5Type, result: V5Type }[]
+local function parse_arms(text)
+    local ty = pt(text)
+    if ty.tag ~= "match" then error("expected a match type for `" .. text .. "`", 2) end
+    return ty.arms
+end
+
+T.describe("match types", function()
+    T.it("parses match with literal and wildcard arms", function()
+        local arms = parse_arms('match F { "GET" => integer, _ => string }')
+        T.eq(#arms, 2, "two arms")
+        local a1 = arms[1]
+        local a2 = arms[2]
+        if a1 ~= nil then
+            T.eq(a1.pattern.tag, "literal", "arm 1 pattern is a literal")
+            T.eq(a1.result.tag, "const", "arm 1 result is a const")
+        end
+        if a2 ~= nil then
+            local p2 = a2.pattern
+            T.eq(p2.tag, "capture", "arm 2 pattern is a capture (wildcard)")
+            if p2.tag == "capture" then T.eq(p2.idx, -1, "wildcard capture idx is -1") end
+        end
+    end)
+
+    T.it("a %Name capture in a pattern binds, and bare Name in result references it", function()
+        local arms = parse_arms("match T { { a: %X } => X }")
+        local a1 = arms[1]
+        if a1 ~= nil then
+            local pat = a1.pattern
+            T.eq(pat.tag, "record", "arm 1 pattern is a record")
+            local res = a1.result
+            T.eq(res.tag, "capture", "result X resolves to the capture")
+            if pat.tag == "record" and res.tag == "capture" then
+                local fa = pat.fields["a"]
+                T.ok(fa ~= nil and fa.type.tag == "capture", "field a is a capture")
+                if fa ~= nil and fa.type.tag == "capture" then
+                    T.eq(res.idx, fa.type.idx, "result idx matches pattern capture idx")
+                end
+            end
+        end
+    end)
+
+    T.it("all-fields distribution { ...[%K]: %V } lowers to patallfields", function()
+        local arms = parse_arms("match T { { ...[%K]: %V } => V }")
+        local a1 = arms[1]
+        if a1 ~= nil then
+            local pat = a1.pattern
+            local res = a1.result
+            T.eq(pat.tag, "patallfields", "pattern is patallfields")
+            T.eq(res.tag, "capture", "result references %V")
+            if pat.tag == "patallfields" and res.tag == "capture" then
+                T.eq(res.idx, pat.v, "result idx is the V binder")
+            end
+        end
+    end)
+
+    T.it("rest-field capture { f: T, ...%Rest } stores the '...' reserved field", function()
+        local arms = parse_arms("match T { { a: integer, ...%Rest } => Rest }")
+        local a1 = arms[1]
+        if a1 ~= nil then
+            local pat = a1.pattern
+            T.eq(pat.tag, "record", "pattern is a record")
+            if pat.tag == "record" then
+                local restf = pat.fields["..."]
+                T.ok(restf ~= nil and restf.type.tag == "capture", "rest capture stored under '...'")
+            end
+            T.eq(a1.result.tag, "capture", "result references Rest")
+        end
+    end)
+
+    T.it("() -> %R arrow pattern", function()
+        local arms = parse_arms("match F { () -> %R => R }")
+        local a1 = arms[1]
+        if a1 ~= nil then
+            local pat = a1.pattern
+            T.eq(pat.tag, "arrow", "pattern is an arrow")
+            if pat.tag == "arrow" then
+                local aitems = pat.args.items
+                if aitems ~= nil then T.eq(#aitems, 0, "args pack is empty (param wildcard)") end
+            end
+            T.eq(a1.result.tag, "capture", "result references %R")
+        end
+    end)
+
+    T.it("each arm has its own capture scope (indices reset per arm)", function()
+        local arms = parse_arms("match T { %A => A, %B => B }")
+        local a1 = arms[1]
+        local a2 = arms[2]
+        if a1 ~= nil and a1.pattern.tag == "capture" then T.eq(a1.pattern.idx, 0, "arm 1 capture idx is 0") end
+        if a2 ~= nil and a2.pattern.tag == "capture" then T.eq(a2.pattern.idx, 0, "arm 2 capture idx resets to 0") end
+    end)
+end)

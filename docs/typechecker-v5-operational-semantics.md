@@ -2100,10 +2100,11 @@ evidence the producer rewrite is incomplete, not a license to keep the match.
 | T-CEq-Pack-Closed                   | impl phase — `rule_T_CEq_Pack` (planned) |
 | T-CEq-Pack-OpenL / -OpenR / -OpenBoth | impl phase — `rule_T_CEq_Pack` (planned) |
 | T-CSub-Pack                         | impl phase — `rule_T_CSub_Pack` (planned) |
-| T-CMatchEval-Park                   | impl phase — `rule_T_CMatchEval` park (planned) |
-| T-CMatchEval-Reduce                 | impl phase — `rule_T_CMatchEval` reduce (planned) |
-| T-CMatchEval-Wake                   | impl phase — `wake_head` re-entry (planned) |
-| T-CMatchEval-Stuck                  | impl phase — `quiesce_errors` (planned) |
+| T-CMatchEval-Park                   | `step_cmatch` (uvar head) → `park` head-watcher on scrutinee root (Phase 2.4) |
+| T-CMatchEval-Reduce                 | `rule_T_CMatchEval_Reduce` → `eval_match` / `match_pattern` (Phase 2.4) |
+| T-CMatchEval-Wake                   | `wake_head` re-entry of the parked `cmatch` (Phase 2.4) |
+| T-CMatchEval-Stuck                  | `run` quiescence inert-loop `cmatch` branch (Phase 2.4) |
+| match_pattern (all cases)           | `match_pattern_impl` (op_sem) / `pat_match` (op_sem_alt), ported from v4 `lib/type/static/match.lua` (Phase 2.4) |
 | T-CEq-Literal                       | impl phase — `rule_T_CEq_Literal` (planned); folds into `step_csub`/`atomic_subtype` literal edge |
 | T-CEq-Record (revised)              | impl phase — `rule_T_CEq_Record` minus positional arm (planned) |
 | T-CSub-Record (revised)             | impl phase — `rule_T_CSub_Record_Width` → variance-respecting (planned) |

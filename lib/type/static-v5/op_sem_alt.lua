@@ -1613,6 +1613,466 @@ local function step_chkt(st, f, args, result, prov)
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
+-- Spec B — match types (independent encoding)
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- Independently transcribed from §"Pattern evaluation" + the v4 oracle
+-- `lib/type/static/match.lua`.  Captures are pattern-local binder indices
+-- (TCapture(idx)); discovery returns a `{ idx -> V5Type }` table and the arm
+-- result is rewritten by replacing TCapture with its binding.  The literal leaf
+-- defers to the atomic lattice (atomic_sub over real TLiteral) — no `$Lit` stub.
+
+--:: AltGuard = { [string]: (boolean | nil) }
+--:: AltBinds = { [integer]: V5Type }
+
+-- A literal value widens to its base atom under the all-fields distribution.
+--: (V5Type) -> V5Type
+local function value_widen(t)
+	if t.tag == "literal" then return types_mod.const(t.base) end
+	return t
+end
+
+-- Combine two capture-binding tables; nil signals a conflicting binding (the
+-- same idx forced to two non-equal types) which fails the arm.
+--: (AltBinds | nil, AltBinds | nil) -> (AltBinds | nil)
+local function combine_binds(x, y)
+	if x == nil then return y end
+	if y == nil then return x end
+	local r = {} --[[: AltBinds ]]
+	for i, v in pairs(x) do r[i] = v end
+	for i, v in pairs(y) do
+		local had = r[i]
+		if had ~= nil and not types_mod.equal(had, v) then return nil end
+		r[i] = v
+	end
+	return r
+end
+
+local rewrite_result
+local rewrite_pack
+
+-- rewrite_result(t, binds): produce a copy of `t` with each TCapture(idx)
+-- replaced by binds[idx] (unbound captures pass through), splicing a pack-bound
+-- capture that appears inside a pack.
+--: (V5Type, AltBinds) -> V5Type
+rewrite_result = function(t, binds)
+	if t.tag == "capture" then
+		local got = binds[t.idx] --[[: V5Type | nil ]]
+		if got ~= nil then local g = got --[[: V5Type ]]; return g end
+		return t
+	elseif t.tag == "app" then
+		return { tag = "app", f = rewrite_result(t.f, binds), a = rewrite_result(t.a, binds) }
+	elseif t.tag == "arrow" then
+		return { tag = "arrow", args = rewrite_pack(t.args, binds), ret = rewrite_pack(t.ret, binds) }
+	elseif t.tag == "pack" then
+		return rewrite_pack(t, binds)
+	elseif t.tag == "record" then
+		local fs = {} --[[: { [string]: TField } ]]
+		for k, fv in pairs(t.fields) do
+			if fv ~= nil then fs[k] = { type = rewrite_result(fv.type, binds), optional = fv.optional, readonly = fv.readonly } end
+		end
+		local ixs = {} --[[: TIndex[] ]]
+		for i = 1, #t.indexes do
+			local ix = t.indexes[i]
+			if ix ~= nil then ixs[#ixs + 1] = { key = rewrite_result(ix.key, binds), value = rewrite_result(ix.value, binds), readonly = ix.readonly } end
+		end
+		return { tag = "record", fields = fs, indexes = ixs, row = t.row }
+	elseif t.tag == "union" then
+		local xs = {} --[[: V5Type[] ]]
+		for i = 1, #t.xs do local v = t.xs[i]; if v ~= nil then xs[#xs + 1] = rewrite_result(v, binds) end end
+		return { tag = "union", xs = xs }
+	elseif t.tag == "intersection" then
+		local ps = {} --[[: V5Type[] ]]
+		for i = 1, #t.parts do local v = t.parts[i]; if v ~= nil then ps[#ps + 1] = rewrite_result(v, binds) end end
+		return { tag = "intersection", parts = ps }
+	end
+	return t
+end
+
+-- rewrite_pack(p, binds): rewrite captures inside a pack; a capture bound to a
+-- pack flattens (splices) into the positional items.
+--: (TPack, AltBinds) -> TPack
+rewrite_pack = function(p, binds)
+	local items = {} --[[: V5Type[] ]]
+	for i = 1, #p.items do
+		local it = p.items[i]
+		if it ~= nil then
+			if it.tag == "capture" then
+				local got = binds[it.idx] --[[: V5Type | nil ]]
+				if got ~= nil and got.tag == "pack" then
+					local gitems = got.items
+					for j = 1, #gitems do local gj = gitems[j]; if gj ~= nil then items[#items + 1] = gj end end
+				elseif got ~= nil then
+					local g = got --[[: V5Type ]]; items[#items + 1] = g
+				else
+					items[#items + 1] = it
+				end
+			else
+				items[#items + 1] = rewrite_result(it, binds)
+			end
+		end
+	end
+	return { tag = "pack", items = items, rest = p.rest }
+end
+
+local pat_match
+local eval_match
+local pat_match_pack
+local pat_match_record_intersection
+
+-- pat_match(st, ty, pat, guard): first-order pattern unification.  Returns
+-- (fires, binds | nil).  `guard` is the coinductive cycle set keyed by
+-- (derefed-ty identity, pattern identity).
+--: (AltState, V5Type, V5Type, AltGuard) -> (boolean, AltBinds | nil)
+pat_match = function(st, ty, pat, guard)
+	local vty = subst_mod.deref(st.subst, ty) --[[: V5Type ]]
+	local vpat = subst_mod.deref(st.subst, pat) --[[: V5Type ]]
+
+	-- A capture pattern binds (idx >= 0) or is the `_` wildcard (idx < 0).
+	if vpat.tag == "capture" then
+		if vpat.idx < 0 then return true, {} end
+		local r = {} --[[: AltBinds ]]
+		r[vpat.idx] = vty
+		return true, r
+	end
+
+	-- A match scrutinee is first evaluated, then re-matched.
+	if vty.tag == "match" then
+		local red = eval_match(st, vty.param, vty.arms, guard)
+		return pat_match(st, red, vpat, guard)
+	end
+
+	-- Atom leaf: const / literal.  Widening + literal equality is the atomic
+	-- lattice (atomic_sub), the same Spec A relation used by CSub — never stubbed.
+	if is_atom(vpat) and (is_atom(vty) or (vty.tag == "const" and vty.name == "never")) then
+		if atomic_sub(vty, vpat) then return true, {} end
+		return false, nil
+	end
+
+	-- Arrow pattern: scrutinee must be an arrow; match the arg + ret packs.  An
+	-- empty closed args pattern (`()` in `() -> %R`) is a param-count wildcard:
+	-- it matches any args (v4 `() -> %R` matches any function).
+	if vpat.tag == "arrow" then
+		if vty.tag ~= "arrow" then return false, nil end
+		local ba = {} --[[: AltBinds ]]
+		local pa = pack_resolve(st, vpat.args) --[[: V5Type ]]
+		local any_args = pa.tag == "pack" and #pa.items == 0 and pa.rest == nil
+		if not any_args then
+			local oka, sba = pat_match_pack(st, vty.args, vpat.args, guard)
+			if not oka then return false, nil end
+			ba = sba
+		end
+		local okr, br = pat_match_pack(st, vty.ret, vpat.ret, guard)
+		if not okr then return false, nil end
+		return true, combine_binds(ba, br)
+	end
+
+	-- Record pattern.
+	if vpat.tag == "record" then
+		if vty.tag == "intersection" then
+			return pat_match_record_intersection(st, vty, vpat, guard)
+		end
+		if vty.tag ~= "record" then return false, nil end
+		local gk = tostring(vty) .. "#" .. tostring(vpat)
+		if guard[gk] then return true, {} end  -- coinductive: assume match
+		guard[gk] = true
+		local acc = {} --[[: AltBinds | nil ]]
+		local seen_fields = {} --[[: { [string]: boolean } ]]
+		local rest_binder = nil --[[: integer | nil ]]
+		for fname, pfield in pairs(vpat.fields) do
+			if pfield ~= nil then
+				if fname == "..." then
+					if pfield.type.tag == "capture" then rest_binder = pfield.type.idx end
+				else
+					local sfield = vty.fields[fname]
+					if sfield == nil then guard[gk] = nil; return false, nil end
+					local ok, sub = pat_match(st, sfield.type, pfield.type, guard)
+					if not ok then guard[gk] = nil; return false, nil end
+					acc = combine_binds(acc, sub)
+					if acc == nil then guard[gk] = nil; return false, nil end
+					seen_fields[fname] = true
+				end
+			end
+		end
+		-- Indexers: match in order.
+		for i = 1, #vpat.indexes do
+			local pix = vpat.indexes[i]
+			local six = vty.indexes[i]
+			if pix ~= nil then
+				if six == nil then guard[gk] = nil; return false, nil end
+				local okk, subk = pat_match(st, six.key, pix.key, guard)
+				if not okk then guard[gk] = nil; return false, nil end
+				acc = combine_binds(acc, subk)
+				if acc == nil then guard[gk] = nil; return false, nil end
+				local okv, subv = pat_match(st, six.value, pix.value, guard)
+				if not okv then guard[gk] = nil; return false, nil end
+				acc = combine_binds(acc, subv)
+				if acc == nil then guard[gk] = nil; return false, nil end
+			end
+		end
+		-- Rest capture: a closed record of the not-yet-matched fields.
+		if rest_binder ~= nil then
+			local rb = rest_binder --[[: integer ]]
+			local leftover = {} --[[: { [string]: TField } ]]
+			for fname, sfield in pairs(vty.fields) do
+				if sfield ~= nil and not seen_fields[fname] then
+					leftover[fname] = { type = sfield.type, optional = sfield.optional, readonly = sfield.readonly }
+				end
+			end
+			local one = {} --[[: AltBinds ]]
+			local recval = types_mod.record(leftover) --[[: V5Type ]]
+			one[rb] = recval
+			acc = combine_binds(acc, one)
+			if acc == nil then guard[gk] = nil; return false, nil end
+		end
+		guard[gk] = nil
+		return true, acc
+	end
+
+	-- App-spine pattern (effect extraction): match head-first; an intersection
+	-- scrutinee uses intersection elimination (any member that matches fires).
+	if vpat.tag == "app" then
+		if vty.tag == "intersection" then
+			for i = 1, #vty.parts do
+				local m = vty.parts[i]
+				if m ~= nil then
+					local ok, sub = pat_match(st, m, vpat, guard)
+					if ok then return true, sub or {} end
+				end
+			end
+			return false, nil
+		end
+		if vty.tag ~= "app" then return false, nil end
+		local okf, bf = pat_match(st, vty.f, vpat.f, guard)
+		if not okf then return false, nil end
+		local oka, ba = pat_match(st, vty.a, vpat.a, guard)
+		if not oka then return false, nil end
+		return true, combine_binds(bf, ba)
+	end
+
+	-- Intersection scrutinee against any remaining pattern: intersection
+	-- elimination — fire if some member matches.
+	if vty.tag == "intersection" then
+		for i = 1, #vty.parts do
+			local m = vty.parts[i]
+			if m ~= nil then
+				local ok, sub = pat_match(st, m, vpat, guard)
+				if ok then return true, sub or {} end
+			end
+		end
+		return false, nil
+	end
+
+	-- Otherwise: structural equality decides.
+	if types_mod.equal(vty, vpat) then return true, {} end
+	return false, nil
+end
+
+-- pat_match_pack(st, sp, pp, guard): match a scrutinee pack `sp` against a
+-- pattern pack `pp`.  A pattern capture among the items acts as `(...%P)` /
+-- `() -> %R`: a single trailing capture binds the remaining tail (or, alone,
+-- the whole pack: arity-1 → single type, arity-n → a pack, arity-0 → never).
+--: (AltState, V5Type, V5Type, AltGuard) -> (boolean, AltBinds | nil)
+pat_match_pack = function(st, sp, pp, guard)
+	local s = pack_resolve(st, sp) --[[: V5Type ]]
+	local p = pack_resolve(st, pp) --[[: V5Type ]]
+	if s.tag ~= "pack" or p.tag ~= "pack" then return false, nil end
+	local sn = #s.items
+	local pn = #p.items
+	local acc = {} --[[: AltBinds | nil ]]
+
+	if p.rest ~= nil then
+		-- Open pattern pack: prefix matches, tail absorbed.
+		if sn < pn then return false, nil end
+		for i = 1, pn do
+			local ok, sub = pat_match(st, s.items[i], p.items[i], guard)
+			if not ok then return false, nil end
+			acc = combine_binds(acc, sub)
+			if acc == nil then return false, nil end
+		end
+		return true, acc
+	end
+
+	-- Closed pattern pack: look for a single capture position acting as `...%P`.
+	local cap_at = nil --[[: integer | nil ]]
+	for i = 1, pn do
+		local it = p.items[i]
+		if it ~= nil and it.tag == "capture" then cap_at = i; break end
+	end
+	if cap_at ~= nil then
+		local before = cap_at - 1
+		local after = pn - cap_at
+		if sn < before + after then return false, nil end
+		for i = 1, before do
+			local ok, sub = pat_match(st, s.items[i], p.items[i], guard)
+			if not ok then return false, nil end
+			acc = combine_binds(acc, sub); if acc == nil then return false, nil end
+		end
+		for j = 0, after - 1 do
+			local ok, sub = pat_match(st, s.items[sn - j], p.items[pn - j], guard)
+			if not ok then return false, nil end
+			acc = combine_binds(acc, sub); if acc == nil then return false, nil end
+		end
+		local cap = p.items[cap_at]
+		if cap ~= nil and cap.idx >= 0 then
+			-- Single capture as sole item over a 0/1/n scrutinee: () -> %R shape.
+			local bound = types_mod.const("never") --[[: V5Type ]]
+			local mid_count = sn - before - after
+			if pn == 1 and before == 0 and after == 0 then
+				if sn == 1 then local v = s.items[1]; if v ~= nil then bound = v end
+				elseif sn > 1 then local bp = types_mod.pack(s.items, nil) --[[: V5Type ]]; bound = bp
+				end
+			else
+				local mid = {} --[[: V5Type[] ]]
+				for i = before + 1, before + mid_count do local v = s.items[i]; if v ~= nil then mid[#mid + 1] = v end end
+				local bp2 = types_mod.pack(mid, nil) --[[: V5Type ]]; bound = bp2
+			end
+			local one = {} --[[: AltBinds ]]
+			local cidx = cap.idx --[[: integer ]]
+			one[cidx] = bound
+			acc = combine_binds(acc, one); if acc == nil then return false, nil end
+		end
+		return true, acc
+	end
+
+	-- No capture: exact positional arity.
+	if sn ~= pn then return false, nil end
+	for i = 1, pn do
+		local ok, sub = pat_match(st, s.items[i], p.items[i], guard)
+		if not ok then return false, nil end
+		acc = combine_binds(acc, sub); if acc == nil then return false, nil end
+	end
+	return true, acc
+end
+
+-- pat_match_record_intersection: field-merging structural match for an
+-- intersection scrutinee — each pattern field is looked up in every record
+-- member; a closed member missing it fails, an open member missing it is
+-- neutral (skipped).
+--: (AltState, V5Type, V5Type, AltGuard) -> (boolean, AltBinds | nil)
+pat_match_record_intersection = function(st, vty, vpat, guard)
+	-- internal: caller routes here only for intersection scrutinee + record pattern
+	if vty.tag ~= "intersection" or vpat.tag ~= "record" then return false, nil end
+	local members = vty.parts
+	local pfields = vpat.fields
+	local gk = tostring(vty) .. "#" .. tostring(vpat)
+	if guard[gk] then return true, {} end
+	guard[gk] = true
+	local acc = {} --[[: AltBinds | nil ]]
+	for fname, pfield in pairs(pfields) do
+		if pfield ~= nil and fname ~= "..." then
+			local found = nil --[[: V5Type | nil ]]
+			local forbidden = false
+			for i = 1, #members do
+				local m = subst_mod.deref(st.subst, members[i]) --[[: V5Type ]]
+				if m.tag == "record" then
+					local mf = m.fields[fname]
+					if mf ~= nil then found = mf.type
+					elseif m.row == nil then forbidden = true end
+				end
+			end
+			if forbidden then guard[gk] = nil; return false, nil end
+			if found == nil then guard[gk] = nil; return false, nil end
+			local fty = found --[[: V5Type ]]
+			local ok, sub = pat_match(st, fty, pfield.type, guard)
+			if not ok then guard[gk] = nil; return false, nil end
+			acc = combine_binds(acc, sub)
+			if acc == nil then guard[gk] = nil; return false, nil end
+		end
+	end
+	guard[gk] = nil
+	return true, acc
+end
+
+-- eval_match(st, param, arms, guard): evaluate `match param { arms }`.  A union
+-- scrutinee distributes (union of per-member evaluations).  Each arm is tried
+-- in order; an all-fields arm distributes per field.  Fallthrough → never.
+--: (AltState, V5Type, TMatchArm[], AltGuard) -> V5Type
+eval_match = function(st, param, arms, guard)
+	local vp = subst_mod.deref(st.subst, param) --[[: V5Type ]]
+	local never_t = types_mod.const("never") --[[: V5Type ]]
+
+	-- Coinductive evaluation guard: re-entry on an in-progress (param, arms)
+	-- node returns never.
+	local ek = "eval#" .. tostring(vp) .. "#" .. tostring(arms)
+	if guard[ek] then return never_t end
+	guard[ek] = true
+
+	if vp.tag == "union" then
+		local rs = {} --[[: V5Type[] ]]
+		for i = 1, #vp.xs do local m = vp.xs[i]; if m ~= nil then rs[#rs + 1] = eval_match(st, m, arms, guard) end end
+		guard[ek] = nil
+		if #rs == 0 then return never_t end
+		if #rs == 1 then local r = rs[1]; if r ~= nil then return r end end
+		return types_mod.union(rs)
+	end
+
+	for ai = 1, #arms do
+		local arm = arms[ai]
+		if arm ~= nil then
+			local vpat = subst_mod.deref(st.subst, arm.pattern) --[[: V5Type ]]
+			if vpat.tag == "patallfields" then
+				local kidx = vpat.k
+				local vidx = vpat.v
+				local res = {} --[[: V5Type[] ]]
+				local pairs_list = {} --[[: { key: V5Type, value: V5Type }[] ]]
+				if vp.tag == "const" and vp.name == "never" then
+					-- zero iterations
+				elseif vp.tag == "const" and (vp.name == "unknown" or vp.name == "any") then
+					pairs_list[#pairs_list + 1] = { key = types_mod.const("unknown"), value = types_mod.const("unknown") }
+				elseif vp.tag == "record" then
+					for fname, fv in pairs(vp.fields) do
+						if fv ~= nil and fname ~= "..." then
+							pairs_list[#pairs_list + 1] = { key = types_mod.literal("string", fname), value = value_widen(fv.type) }
+						end
+					end
+					for i = 1, #vp.indexes do
+						local ix = vp.indexes[i]
+						if ix ~= nil then pairs_list[#pairs_list + 1] = { key = ix.key, value = ix.value } end
+					end
+				else
+					pairs_list[#pairs_list + 1] = { key = types_mod.const("unknown"), value = types_mod.const("unknown") }
+				end
+				for pi = 1, #pairs_list do
+					local kv = pairs_list[pi]
+					if kv ~= nil then
+						local b = {} --[[: AltBinds ]]
+						b[kidx] = kv.key
+						b[vidx] = kv.value
+						res[#res + 1] = rewrite_result(arm.result, b)
+					end
+				end
+				guard[ek] = nil
+				if #res == 0 then return never_t end
+				if #res == 1 then local r = res[1]; if r ~= nil then return r end end
+				return types_mod.union(res)
+			end
+			local ok, binds = pat_match(st, vp, arm.pattern, guard)
+			if ok then
+				guard[ek] = nil
+				if binds ~= nil and next(binds) ~= nil then
+					return rewrite_result(arm.result, binds)
+				end
+				return arm.result
+			end
+		end
+	end
+	guard[ek] = nil
+	return never_t
+end
+
+M.pat_match  = pat_match
+M.eval_match = eval_match
+
+-- T-CMatchEval-Reduce: scrutinee rigid — evaluate and assert CEq(R, result).
+--: (AltState, V5Type, TMatchArm[], V5Type, Provenance) -> nil
+function M.rule_T_CMatchEval_Reduce(st, param, arms, result, prov)
+	local guard = {} --[[: AltGuard ]]
+	local r = eval_match(st, param, arms, guard)
+	emit(st, constraint_mod.eq(r, result, prov))
+end
+
+-- ────────────────────────────────────────────────────────────────────────────
 -- Solver step (S-Step dispatcher)
 -- ────────────────────────────────────────────────────────────────────────────
 
@@ -1667,6 +2127,12 @@ function M.step(st, c)
 	elseif c.tag == "cint_member" then
 		local status = M.rule_T_CIntersectionMember_Direct(st, c.ty, c.part, c.prov)
 		if status == "stuck" then return "stuck" end
+	elseif c.tag == "cmatch" then
+		-- T-CMatchEval-Park / -Reduce.  Park (stuck) on an unbound scrutinee head;
+		-- reduce once it is rigid.
+		local dp = subst_mod.deref(st.subst, c.param) --[[: V5Type ]]
+		if dp.tag == "uvar" then return "stuck" end
+		M.rule_T_CMatchEval_Reduce(st, c.param, c.arms, c.result, c.prov)
 	end
 	return "done"
 end
@@ -1801,6 +2267,13 @@ function M.run(st)
 					subst_mod.watch(st.subst, dty.id, c.id)
 				end
 			end
+			if status == "stuck" and c.tag == "cmatch" then
+				-- T-CMatchEval-Park: park on the head-watcher of the scrutinee uvar.
+				st.inert[c.id] = c
+				local cmm = c --[[: ConstraintMatchEval ]]
+				local dpm = subst_mod.deref(st.subst, cmm.param)
+				if dpm.tag == "uvar" then subst_mod.watch_head(st.subst, dpm.id, c.id) end
+			end
 		end
 	end
 	-- S-Quiesce polar coalescing (Spec A): materialize bounded unbound roots,
@@ -1819,6 +2292,12 @@ function M.run(st)
 			if status == "stuck" and cw.tag == "cint_member" then
 				st.inert[cw.id] = cw
 			end
+			if status == "stuck" and cw.tag == "cmatch" then
+				st.inert[cw.id] = cw
+				local cmm = cw --[[: ConstraintMatchEval ]]
+				local dpm = subst_mod.deref(st.subst, cmm.param)
+				if dpm.tag == "uvar" then subst_mod.watch_head(st.subst, dpm.id, cw.id) end
+			end
 		end
 	end
 	-- S-Quiesce: report any inert HOUnify as ambiguous; CRowLacks still parked
@@ -1833,6 +2312,12 @@ function M.run(st)
 		elseif c.tag == "cint_member" then
 			record_error(st, "S-Quiesce-CIntersectionMember",
 				"CIntersectionMember stuck on unbound uvar (effect never inferred)")
+		elseif c.tag == "cmatch" then
+			-- T-CMatchEval-Stuck: scrutinee head never rigidified.  (Match-splitting
+			-- at sealed bounds — doc gap #1 — is deferred; this conservative stuck
+			-- error is the disposition, NOT a partial split.)
+			record_error(st, "T-CMatchEval-Stuck",
+				"match scrutinee never rigidified: cannot decide which arm fires")
 		end
 	end
 end

@@ -63,6 +63,7 @@ local B_SQUOT  = 39
 local B_DOT    = 46
 local B_BANG   = 33   -- '!'
 local B_DOLLAR = 36   -- '$'
+local B_PCT    = 37   -- '%'
 
 -- ── Effect arity registry ───────────────────────────────────────────────────
 
@@ -87,7 +88,7 @@ local prim_names = {
 
 -- ── Scanner ─────────────────────────────────────────────────────────────────
 
---:: AnnScanner = { src: string, pos: integer, len: integer, depth: integer, depth_limit_hit?: boolean }
+--:: AnnScanner = { src: string, pos: integer, len: integer, depth: integer, depth_limit_hit?: boolean, caps?: { [string]: integer }, next_cap?: integer }
 
 --: (string) -> AnnScanner
 local function new_scanner(src)
@@ -235,6 +236,7 @@ end
 
 -- Forward declaration
 local parse_type --[[: (AnnScanner, AnnState) -> V5Type ]]
+local parse_match --[[: (AnnScanner, AnnState) -> V5Type ]]
 
 -- Fresh row-variable ID from per-session state.
 --: (AnnState) -> integer
@@ -242,6 +244,22 @@ local function fresh_rowvar_id(state)
     local id = state.next_rowvar
     state.next_rowvar = id + 1
     return id
+end
+
+-- cap_index(s, name): the arm-local binder index for capture `name`, allocating
+-- a fresh index on first sight within the current arm.  `s.caps` is the
+-- arm-local map (set up per arm by parse_match); when nil, captures are not in
+-- a match-arm scope and are treated as a parse error by the caller.
+--: (AnnScanner, string) -> integer
+local function cap_index(s, name)
+    local caps = s.caps
+    if caps == nil then caps = {} --[[: { [string]: integer } ]]; s.caps = caps end
+    local existing = caps[name]
+    if existing ~= nil then return existing end
+    local nxt = s.next_cap or 0
+    caps[name] = nxt
+    s.next_cap = nxt + 1
+    return nxt
 end
 
 -- parse_primary: parses a single non-union, non-intersection type.
@@ -273,6 +291,16 @@ local function parse_primary(s, state)
         else
             return types_mod.literal("number", num)
         end
+    end
+
+    -- Capture sigil: %Name (a match pattern capture) or %_ wildcard alias.
+    if b == B_PCT then
+        advance(s)
+        local name = scan_word(s)
+        if not name then scan_error(s, "expected capture name after '%'") end
+        s.depth = s.depth - 1
+        if name == "_" then return types_mod.capture(-1) end
+        return types_mod.capture(cap_index(s, name))
     end
 
     -- Effect type: !Name or !Name<Args>
@@ -458,7 +486,32 @@ local function parse_primary(s, state)
                     and sub(s.src, s.pos, s.pos + 2) == "..." then
                     s.pos = s.pos + 3
                     local nb = peek(s)
-                    if nb == byte("}") or nb == byte(",") or nb == byte(";") or not nb then
+                    if nb == byte("[") then
+                        -- All-fields distribution `{ ...[%K]: %V }` (Spec B match
+                        -- pattern): the `...` here means ITERATE per field.  K/V are
+                        -- captures; lower to a TPatAllFields holding their binder idxs.
+                        advance(s)  -- consume '['
+                        local kt = parse_type(s, state)
+                        expect_char(s, "]")
+                        expect_char(s, ":")
+                        local vt = parse_type(s, state)
+                        if kt.tag ~= "capture" or vt.tag ~= "capture" then
+                            scan_error(s, "'{ ...[%K]: %V }' requires capture key and value")
+                        end
+                        expect_char(s, "}")
+                        s.depth = s.depth - 1
+                        return types_mod.patallfields(kt.idx, vt.idx)
+                    elseif nb == byte("%") then
+                        -- Rest-field capture `{ f: T, ...%Rest }` (Spec B match
+                        -- pattern): bind the unmatched fields.  Stored as the reserved
+                        -- field "..." carrying the capture.
+                        local rest = parse_primary(s, state)
+                        if rest.tag ~= "capture" then
+                            scan_error(s, "'...%Rest' requires a capture name")
+                        end
+                        local rest_key = "..." --[[: string ]]
+                        fields[rest_key] = types_mod.field(rest, false, false)
+                    elseif nb == byte("}") or nb == byte(",") or nb == byte(";") or not nb then
                         -- Bare ...: open-table row variable.
                         row_id = fresh_rowvar_id(state)
                         break
@@ -543,6 +596,26 @@ local function parse_primary(s, state)
         if word == "typeof" then
             scan_word(s) -- consume the identifier even though we error
             scan_error(s, "'typeof' is not yet supported in v5 annotations")
+        end
+
+        -- match Scrutinee { Pat => Res, ... }  → TMatch (Spec B)
+        if word == "match" then
+            s.depth = s.depth - 1
+            return parse_match(s, state)
+        end
+
+        -- `_` wildcard pattern: always matches, no binding.
+        if word == "_" then
+            s.depth = s.depth - 1
+            return types_mod.capture(-1)
+        end
+
+        -- Bare ident bound as a capture in the current arm → capture reference.
+        if s.caps ~= nil and s.caps[word] ~= nil then
+            local cidx = s.caps[word]
+            s.depth = s.depth - 1
+            if cidx == nil then return types_mod.const(word) end
+            return types_mod.capture(cidx)
         end
 
         -- true / false literals → TLiteral (Spec C).
@@ -631,6 +704,49 @@ local function parse_intersection(s, state)
         parts[#parts + 1] = parse_postfix(s, state)
     end
     return types_mod.intersection(parts)
+end
+
+-- parse_match: `match` already consumed.  Parse the scrutinee, then a
+-- brace-delimited list of `Pattern => Result` arms separated by ',' or '|'.
+-- Each arm has its own capture scope (s.caps / s.next_cap reset per arm).
+parse_match = function(s, state)
+    skip_ws(s)
+    -- Scrutinee: parse at the intersection level (stops before the '{' arm block).
+    local saved_caps = s.caps
+    local saved_next = s.next_cap
+    s.caps = nil  -- scrutinee is not a pattern: no capture scope
+    s.next_cap = nil
+    local scrutinee = parse_intersection(s, state)
+    s.caps = saved_caps
+    s.next_cap = saved_next
+    skip_ws(s)
+    expect_char(s, "{")
+    local arms = {} --[[: TMatchArm[] ]]
+    skip_ws(s)
+    if peek(s) ~= byte("}") then
+        while true do
+            -- Fresh arm-local capture scope.
+            s.caps = {} --[[: { [string]: integer } ]]
+            s.next_cap = 0
+            local pattern = parse_intersection(s, state)
+            skip_ws(s)
+            if not (s.pos + 1 <= s.len and sub(s.src, s.pos, s.pos + 1) == "=>") then
+                scan_error(s, "expected '=>' in match arm")
+            end
+            s.pos = s.pos + 2
+            -- Result shares the arm's capture scope (bare names resolve to captures).
+            local result = parse_type(s, state)
+            arms[#arms + 1] = { pattern = pattern, result = result }
+            s.caps = nil
+            s.next_cap = nil
+            skip_ws(s)
+            if not (opt_char(s, ",") or opt_char(s, "|")) then break end
+            skip_ws(s)
+            if peek(s) == byte("}") then break end
+        end
+    end
+    expect_char(s, "}")
+    return types_mod.match(scrutinee, arms)
 end
 
 -- parse_type: union and top-level right-associative ->

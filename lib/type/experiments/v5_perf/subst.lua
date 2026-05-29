@@ -292,6 +292,17 @@ function M.walk(s, t)
 			if v ~= nil then local sh = M.walk(s, v) --[[: V5Type ]]; parts[i] = sh end
 		end
 		return { tag = "intersection", parts = parts }
+	elseif t.tag == "match" then
+		-- Spec B: walk the scrutinee and each arm's pattern/result for reporting.
+		-- Captures are leaves returned as-is by the fallthrough.
+		local arms = {} --[[: TMatchArm[] ]]
+		for i = 1, #t.arms do
+			local arm = t.arms[i]
+			if arm ~= nil then
+				arms[i] = { pattern = M.walk(s, arm.pattern), result = M.walk(s, arm.result) }
+			end
+		end
+		return { tag = "match", param = M.walk(s, t.param), arms = arms }
 	end
 	return t
 end

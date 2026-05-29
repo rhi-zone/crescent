@@ -337,8 +337,26 @@ resolve_aliases_impl = function(t, aliases, subst, visited, depth)
             if v ~= nil then parts[i] = resolve_aliases_impl(v, aliases, subst, visited, depth + 1) end
         end
         return { tag = "intersection", parts = parts }
+    elseif t.tag == "match" then
+        -- TMatch (Spec B): expand aliases in the scrutinee and each arm's
+        -- pattern/result.  Captures (TCapture) / TPatAllFields are leaves and
+        -- pass through; CMatchEval emission is the consumer's job, not here.
+        --: { tag: string, param: V5Type, arms: { pattern: V5Type, result: V5Type }[] }
+        local tm = t
+        local new_param = resolve_aliases_impl(tm.param, aliases, subst, visited, depth + 1)
+        local new_arms = {} --[[: { pattern: V5Type, result: V5Type }[] ]]
+        for i, arm in ipairs(tm.arms) do
+            if arm ~= nil then
+                new_arms[i] = {
+                    pattern = resolve_aliases_impl(arm.pattern, aliases, subst, visited, depth + 1),
+                    result  = resolve_aliases_impl(arm.result, aliases, subst, visited, depth + 1),
+                }
+            end
+        end
+        return { tag = "match", param = new_param, arms = new_arms }
     else
-        -- uvar, var, lambda, rowvar — no alias names to expand.
+        -- uvar, var, lambda, rowvar, capture, patallfields — no alias names to
+        -- expand (capture/patallfields are pattern-leaf nodes).
         return t
     end
 end
@@ -858,6 +876,35 @@ local function get_raw_ann(ctx, line)
     return anns[line - 1]
 end
 
+-- lower_matches(ctx, ty, line): replace every TMatch node in `ty` by a fresh
+-- result uvar and emit a CMatchEval constraint asserting the match reduces to
+-- that uvar (Spec B gen-pass).  The solver parks the CMatchEval until the
+-- scrutinee head is rigid, then reduces it (T-CMatchEval-Park/-Reduce).  This
+-- is the substrate hook; consumer re-expression of $-intrinsics is later work.
+local lower_matches
+--: (V5Ctx, V5Type, integer) -> V5Type
+lower_matches = function(ctx, ty, line)
+    if ty.tag == "match" then
+        --: { tag: string, param: V5Type, arms: { pattern: V5Type, result: V5Type }[] }
+        local tm = ty
+        local lparam = lower_matches(ctx, tm.param, line)
+        local r = fresh_uvar(ctx) --[[: V5Type ]]
+        emit(ctx, C.match_eval(lparam, tm.arms, r, prov_declared(ctx, line, 1)))
+        return r
+    elseif ty.tag == "app" then
+        return types_mod.app(lower_matches(ctx, ty.f, line), lower_matches(ctx, ty.a, line))
+    elseif ty.tag == "union" then
+        local xs = {} --[[: V5Type[] ]]
+        for i, v in ipairs(ty.xs) do if v ~= nil then xs[i] = lower_matches(ctx, v, line) end end
+        return types_mod.union(xs)
+    elseif ty.tag == "intersection" then
+        local parts = {} --[[: V5Type[] ]]
+        for i, v in ipairs(ty.parts) do if v ~= nil then parts[i] = lower_matches(ctx, v, line) end end
+        return types_mod.intersection(parts)
+    end
+    return ty
+end
+
 --: (V5Ctx, integer) -> V5Type | nil
 local function get_type_ann(ctx, line)
     local r = get_raw_ann(ctx, line)
@@ -874,6 +921,8 @@ local function get_type_ann(ctx, line)
     if ta ~= nil and next(ta) ~= nil then
         ty = expand_aliases(ty, ta)
     end
+    -- Lower any TMatch nodes to CMatchEval + result uvar (Spec B).
+    ty = lower_matches(ctx, ty, line)
     return ty
 end
 

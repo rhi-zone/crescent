@@ -1653,4 +1653,349 @@ T.describe("indep parity: F-C9 — no `$`-string-matches in interpretation path"
 	end)
 end)
 
+-- ════════════════════════════════════════════════════════════════════
+-- Spec B (part 2) — TMatch + CMatchEval + match_pattern parity (Phase 2.4)
+-- ════════════════════════════════════════════════════════════════════
+--
+-- Each match_pattern case across both independently-encoded interpreters:
+-- wildcard, capture, bare-named CSub, primitive, literal-equality, table/
+-- record, all-fields distribution, arrow/pack (() -> %R, (...%P)), union
+-- distribution, intersection elimination, named/match scrutinee, plus
+-- park-then-wake on a uvar param, eager-vs-parked equality, the MANDATORY
+-- coinductive recursive match, stuck-at-quiescence, and effect App-spine.
+
+--:: TMatchArm = { pattern: V5Type, result: V5Type }
+
+local function lit(base, v) return types_mod.literal(base, v) end
+local function cap(i) return types_mod.capture(i) end
+local function fld(t) return types_mod.field(t, false, false) end
+
+-- emit_match1 / emit_match2: seed a CMatchEval over a fresh result tvar with
+-- one or two `Pattern => Result` arms.  The arm list is built internally (a
+-- typed `TMatchArm[]` local) so the giant-union firewall stays contained.
+--: (AltState, V5Type, V5Type, V5Type, integer) -> nil
+local function emit_match1(st, scrut, pat, res, rtv)
+	local arms = {} --[[: TMatchArm[] ]]
+	arms[1] = { pattern = pat, result = res }
+	op_sem.emit(st, C.match_eval(scrut, arms, types_mod.uvar(rtv), prov("cmatch")))
+end
+--: (AltState, V5Type, V5Type, V5Type, V5Type, V5Type, integer) -> nil
+local function emit_match2(st, scrut, p1, r1, p2, r2, rtv)
+	local arms = {} --[[: TMatchArm[] ]]
+	arms[1] = { pattern = p1, result = r1 }
+	arms[2] = { pattern = p2, result = r2 }
+	op_sem.emit(st, C.match_eval(scrut, arms, types_mod.uvar(rtv), prov("cmatch")))
+end
+
+-- F-B2.1: wildcard arm fires, binds nothing.
+T.describe("indep parity: match — wildcard arm", function()
+	T.it("match string { _ => integer } reduces to integer", function()
+		run_both("match_wildcard", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			emit_match1(st, k("string"), cap(-1), k("integer"), r)
+			return { r }
+		end)
+	end)
+end)
+
+-- F-B2.2: capture arm binds the scrutinee.
+T.describe("indep parity: match — bare capture", function()
+	T.it("match number { %X => X } binds X = number", function()
+		run_both("match_capture", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			emit_match1(st, k("number"), cap(0), cap(0), r)
+			return { r }
+		end)
+	end)
+end)
+
+-- F-B2.3: bare-named pattern resolves via CSub (atomic widening).
+T.describe("indep parity: match — bare-named CSub (widening)", function()
+	T.it("match integer { number => true } fires (integer <: number)", function()
+		run_both("match_named_csub", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			emit_match1(st, k("integer"), k("number"), lit("boolean", true), r)
+			return { r }
+		end)
+	end)
+end)
+
+-- F-B2.4: primitive exact match.
+T.describe("indep parity: match — primitive exact", function()
+	T.it("match string { string => integer } fires", function()
+		run_both("match_prim", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			emit_match1(st, k("string"), k("string"), k("integer"), r)
+			return { r }
+		end)
+	end)
+end)
+
+-- F-B2.5: literal-equality leaf against the real TLiteral ("GET" / 42).
+T.describe("indep parity: match — literal-equality leaf", function()
+	T.it('match "GET" { "GET" => integer, "POST" => string } picks integer', function()
+		run_both("match_lit_str", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			emit_match2(st, lit("string", "GET"),
+				lit("string", "GET"), k("integer"),
+				lit("string", "POST"), k("string"), r)
+			return { r }
+		end)
+	end)
+	T.it("match 42 { 42 => true, 0 => false } picks true", function()
+		run_both("match_lit_int", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			emit_match2(st, lit("integer", 42),
+				lit("integer", 42), lit("boolean", true),
+				lit("integer", 0), lit("boolean", false), r)
+			return { r }
+		end)
+	end)
+	T.it("literal widens to base atom: match 42 { integer => string }", function()
+		run_both("match_lit_widen", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			emit_match1(st, lit("integer", 42), k("integer"), k("string"), r)
+			return { r }
+		end)
+	end)
+end)
+
+-- F-B2.6: table / record pattern with a field capture.
+T.describe("indep parity: match — record field capture", function()
+	T.it("match { a: number, b: string } { { a: %X } => X } binds X = number", function()
+		run_both("match_record", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			local scrut = types_mod.record({ a = fld(k("number")), b = fld(k("string")) })
+			local pat = types_mod.record({ a = fld(cap(0)) })
+			emit_match1(st, scrut, pat, cap(0), r)
+			return { r }
+		end)
+	end)
+end)
+
+-- F-B2.7: rest-field capture { f: T, ...%Rest }.
+T.describe("indep parity: match — record rest capture", function()
+	T.it("match { a: number, b: string } { { a: %X, ...%Rest } => Rest }", function()
+		run_both("match_rest", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			local scrut = types_mod.record({ a = fld(k("number")), b = fld(k("string")) })
+			local rest_fields = {} --[[: { [string]: TField } ]]
+			local restk = "..." --[[: string ]]
+			local ak = "a" --[[: string ]]
+			rest_fields[restk] = fld(cap(1))
+			rest_fields[ak] = fld(cap(0))
+			local pat = types_mod.record(rest_fields)
+			emit_match1(st, scrut, pat, cap(1), r)
+			return { r }
+		end)
+	end)
+end)
+
+-- F-B2.8: all-fields distribution { ...[%K]: %V } — Values<T>.
+T.describe("indep parity: match — all-fields distribution", function()
+	T.it("Values: match { a: number, b: string } { ...[%K]: %V => V }", function()
+		run_both("match_allfields", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			local scrut = types_mod.record({ a = fld(k("number")), b = fld(k("string")) })
+			emit_match1(st, scrut, types_mod.patallfields(0, 1), cap(1), r)
+			return { r }
+		end)
+	end)
+end)
+
+-- F-B2.9: arrow / pack — () -> %R binds the ret (single type).
+T.describe("indep parity: match — arrow () -> %R", function()
+	T.it("match (integer) -> number { () -> %R => R } binds R = number", function()
+		run_both("match_arrow_R", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			local scrut = types_mod.arrow({ k("integer") }, { k("number") })
+			local pat = types_mod.arrow({}, { cap(0) })
+			emit_match1(st, scrut, pat, cap(0), r)
+			return { r }
+		end)
+	end)
+	T.it("multi-ret () -> %R binds R = pack[number, string]", function()
+		run_both("match_arrow_R_multi", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			local scrut = types_mod.arrow({ k("integer") }, { k("number"), k("string") })
+			local pat = types_mod.arrow({}, { cap(0) })
+			emit_match1(st, scrut, pat, cap(0), r)
+			return { r }
+		end)
+	end)
+	T.it("(...%P) -> R binds P = pack of params, spliced via (...P)", function()
+		run_both("match_arrow_P", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			local scrut = types_mod.arrow({ k("integer"), k("string") }, { k("number") })
+			local pat = types_mod.arrow({ cap(0) }, { k("number") })
+			-- result (...P) -> number: splice P into the args pack.
+			local res = types_mod.arrow({}, { k("number") })
+			res = { tag = "arrow", args = types_mod.pack({ cap(0) }, nil), ret = res.ret }
+			emit_match1(st, scrut, pat, res, r)
+			return { r }
+		end)
+	end)
+end)
+
+-- F-B2.10: union distribution.
+T.describe("indep parity: match — union distribution", function()
+	T.it("match (integer | string) { integer => true, string => false }", function()
+		run_both("match_union", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			local scrut = types_mod.union({ k("integer"), k("string") })
+			emit_match2(st, scrut,
+				k("integer"), lit("boolean", true),
+				k("string"), lit("boolean", false), r)
+			return { r }
+		end)
+	end)
+end)
+
+-- F-B2.11: intersection elimination.
+T.describe("indep parity: match — intersection elimination", function()
+	T.it("match (integer & string) { integer => true }", function()
+		run_both("match_int_elim", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			local scrut = types_mod.intersection({ k("integer"), k("string") })
+			emit_match1(st, scrut, k("integer"), lit("boolean", true), r)
+			return { r }
+		end)
+	end)
+end)
+
+-- F-B2.12: named / match scrutinee — a nested TMatch as the scrutinee.
+T.describe("indep parity: match — nested match scrutinee", function()
+	T.it("match (match integer { integer => string }) { string => true }", function()
+		run_both("match_nested", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			local inner_arms = {} --[[: TMatchArm[] ]]
+			inner_arms[1] = { pattern = k("integer"), result = k("string") }
+			local inner = types_mod.match(k("integer"), inner_arms)
+			emit_match1(st, inner, k("string"), lit("boolean", true), r)
+			return { r }
+		end)
+	end)
+end)
+
+-- F-B2.13: Park-then-Wake on a uvar param.
+T.describe("indep parity: match — park-then-wake on uvar param", function()
+	T.it("match ?p { integer => string } parks; ?p = integer wakes → string", function()
+		run_both("match_park_wake", function(st)
+			local p = subst_mod.fresh(st.subst, "open")
+			local r = subst_mod.fresh(st.subst, "open")
+			local up = types_mod.uvar(p) --[[: V5Type ]]
+			local tint = types_mod.const("integer") --[[: V5Type ]]
+			emit_match1(st, up, tint, k("string"), r)
+			op_sem.emit(st, constraint_mod.eq(up, tint, prov("bind-p")))
+			return { r }
+		end)
+	end)
+end)
+
+-- F-B2.14: eager-vs-parked observable equality (rigid scrutinee = same result).
+T.describe("indep parity: match — eager vs parked equality", function()
+	T.it("rigid-at-emit and bound-after-emit give the same result", function()
+		local tint = types_mod.const("integer") --[[: V5Type ]]
+		local tstr = types_mod.const("string") --[[: V5Type ]]
+		-- Eager: scrutinee already rigid when CMatchEval is emitted.
+		local eager = fresh_state()
+		local re = subst_mod.fresh(eager.subst, "open")
+		emit_match1(eager, tint, tint, tstr, re)
+		op_sem.run(eager)
+		-- Parked: scrutinee bound after the CMatchEval.
+		local parked = fresh_state()
+		local pp = subst_mod.fresh(parked.subst, "open")
+		local rp = subst_mod.fresh(parked.subst, "open")
+		local upp = types_mod.uvar(pp) --[[: V5Type ]]
+		emit_match1(parked, upp, tint, tstr, rp)
+		op_sem.emit(parked, constraint_mod.eq(upp, tint, prov("late-bind")))
+		op_sem.run(parked)
+		local res_eager = op_sem.resolve(eager, re) --[[: V5Type ]]
+		local res_parked = op_sem.resolve(parked, rp) --[[: V5Type ]]
+		assert_resolve_eq("eager-vs-parked", res_eager, res_parked)
+	end)
+end)
+
+-- F-B2.15: MANDATORY coinductive recursive match.  A self-referential record
+-- scrutinee (a uvar bound to a record that contains itself) is matched by a
+-- field-capturing record pattern; the seen-set cycle guard bounds the descent.
+-- This is the highest-value check: v4's cycle-guard / conflicting-capture
+-- semantics diverge only on recursive scrutinees.
+T.describe("indep parity: match — coinductive recursive scrutinee", function()
+	T.it("match (μ R. { next: R, val: integer }) { { val: %V } => V } binds integer", function()
+		run_both("match_recursive", function(st)
+			local p = subst_mod.fresh(st.subst, "open")
+			local r = subst_mod.fresh(st.subst, "open")
+			-- Bind ?p to a record that references itself in `next` (a regular μ-type).
+			local rec = types_mod.record({ next = fld(types_mod.uvar(p)), val = fld(k("integer")) })
+			subst_mod.bind(st.subst, p, rec)
+			local pat = types_mod.record({ val = fld(cap(0)) })
+			emit_match1(st, types_mod.uvar(p), pat, cap(0), r)
+			return { r }
+		end)
+	end)
+	T.it("recursive scrutinee with a recursive field PATTERN hits the cycle guard", function()
+		run_both("match_recursive_pat", function(st)
+			local p = subst_mod.fresh(st.subst, "open")
+			local r = subst_mod.fresh(st.subst, "open")
+			local rec = types_mod.record({ next = fld(types_mod.uvar(p)), val = fld(k("integer")) })
+			subst_mod.bind(st.subst, p, rec)
+			-- Pattern { next: { next: ... }, val: %V } — a self-recursive pattern via
+			-- a uvar bound to itself; the coinductive (ty,pat) key bounds descent.
+			local pp = subst_mod.fresh(st.subst, "open")
+			local recpat = types_mod.record({ next = fld(types_mod.uvar(pp)), val = fld(cap(0)) })
+			subst_mod.bind(st.subst, pp, recpat)
+			emit_match1(st, types_mod.uvar(p), types_mod.uvar(pp), cap(0), r)
+			return { r }
+		end)
+	end)
+end)
+
+-- F-B2.16: Stuck-at-quiescence (T-CMatchEval-Stuck).
+T.describe("indep parity: match — stuck at quiescence", function()
+	T.it("match ?p { integer => string } with ?p never bound errors identically", function()
+		run_both("match_stuck", function(st)
+			local p = subst_mod.fresh(st.subst, "open")
+			local r = subst_mod.fresh(st.subst, "open")
+			emit_match1(st, types_mod.uvar(p), k("integer"), k("string"), r)
+			return {}
+		end)
+	end)
+end)
+
+-- F-B2.17: effect App-spine pattern !yield<%Y, %R>.
+T.describe("indep parity: match — effect App-spine !yield<%Y,%R>", function()
+	T.it("match (nil & !yield<number, string>) { !yield<%Y, %R> => Y } binds Y = number", function()
+		run_both("match_effect_yield", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			local yeff = types_mod.effect_apply(types_mod.effect("yield"), { k("number"), k("string") })
+			local scrut = types_mod.intersection({ k("nil"), yeff })
+			local pat = types_mod.effect_apply(types_mod.effect("yield"), { cap(0), cap(1) })
+			emit_match1(st, scrut, pat, cap(0), r)
+			return { r }
+		end)
+	end)
+	T.it("!yield<%Y,%R> binds R = string from the second arg", function()
+		run_both("match_effect_yield_R", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			local yeff = types_mod.effect_apply(types_mod.effect("yield"), { k("number"), k("string") })
+			local scrut = types_mod.intersection({ k("nil"), yeff })
+			local pat = types_mod.effect_apply(types_mod.effect("yield"), { cap(0), cap(1) })
+			emit_match1(st, scrut, pat, cap(1), r)
+			return { r }
+		end)
+	end)
+end)
+
+-- F-B2.18: fallthrough → never.
+T.describe("indep parity: match — fallthrough to never", function()
+	T.it("match boolean { integer => string } (no arm fires) → never", function()
+		run_both("match_fallthrough", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			emit_match1(st, k("boolean"), k("integer"), k("string"), r)
+			return { r }
+		end)
+	end)
+end)
+
 return true
