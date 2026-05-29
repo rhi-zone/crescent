@@ -1444,6 +1444,43 @@ gen_expr = function(ctx, nid)
         --: V5Type
         local callee_ty = eager_ty ~= nil and eager_ty or gen_expr(ctx, n.data[0])
 
+        -- Phase 2.4.5: call-site declared-return instantiation.  When the
+        -- callee's type is an arrow whose RETURN pack references its parameters
+        -- (a TParam leaf — shape test, never a name), substitute the actual
+        -- argument types into those parameter binders, lower any resulting
+        -- per-call-site TMatch nodes to CMatchEval, and use the precise return.
+        -- This is the enabling substrate that lets a stdlib declaration carry a
+        -- discriminated-union / decomposition return depending on its arguments,
+        -- with no name-keyed handler.  Shape-driven: triggered solely by a
+        -- TParam appearing in the declared return.
+        if callee_ty.tag == "arrow" and types_mod.has_param(callee_ty.ret) then
+            -- Substitute actual arg types into the declared args/ret packs.  Both
+            -- become TParam-free.  The return pack may still contain TMatch nodes
+            -- over the substituted argument types — lower each to a CMatchEval +
+            -- result uvar (Spec B) so the solver reduces it once the scrutinee
+            -- head is rigid.  Both the callee side and the expected side of the
+            -- CSub reference the SAME lowered items, so no raw TMatch ever reaches
+            -- step_csub (the solver only sees the result uvars).
+            local inst_args_pack = types_mod.subst_params_pack(callee_ty.args, arg_types) --[[: TPack ]]
+            local inst_ret_pack  = types_mod.subst_params_pack(callee_ty.ret, arg_types) --[[: TPack ]]
+            local lowered_items = {} --[[: V5Type[] ]]
+            for i = 1, #inst_ret_pack.items do
+                local v = inst_ret_pack.items[i]
+                if v ~= nil then lowered_items[i] = lower_matches(ctx, v, n.line) end
+            end
+            -- Rebuild the callee arrow with the lowered (match-free) return so the
+            -- argument positions are checked without any TMatch crossing a CSub.
+            --: V5Type
+            local lowered_callee = types_mod.arrow(inst_args_pack.items, lowered_items)
+            --: V5Type
+            local expected_inst = types_mod.arrow(arg_types, lowered_items)
+            emit(ctx, C.sub(lowered_callee, expected_inst, prov_inferred(ctx, n.line, n.col)))
+            propagate_callee_effects(ctx, lowered_callee, n.line, n.col)
+            -- Single-value call expression yields the first return position.
+            if lowered_items[1] ~= nil then return lowered_items[1] end
+            return T_NIL
+        end
+
         local ret = fresh_uvar(ctx)
         local rets_arr = {} --[[: V5Type[] ]]
         rets_arr[1] = ret
@@ -1623,6 +1660,36 @@ gen_expr_multi = function(ctx, nid, n_slots)
         local eager_ty = resolve_callee_eager(ctx, n.data[0])
         --: V5Type
         local callee_ty = eager_ty ~= nil and eager_ty or gen_expr(ctx, n.data[0])
+
+        -- Phase 2.4.5: call-site declared-return instantiation (multi-value
+        -- path).  Identical mechanism to the single-value gen_expr call path:
+        -- when the callee arrow's declared return references its parameters (a
+        -- TParam leaf — shape, not name), substitute the actual arg types, lower
+        -- any resulting per-call-site TMatch to CMatchEval, and spread the
+        -- lowered positional results into the n_slots.  No raw TMatch crosses the
+        -- CSub because both sides reference the lowered items.
+        if callee_ty.tag == "arrow" and types_mod.has_param(callee_ty.ret) then
+            local inst_args_pack = types_mod.subst_params_pack(callee_ty.args, arg_types) --[[: TPack ]]
+            local inst_ret_pack  = types_mod.subst_params_pack(callee_ty.ret, arg_types) --[[: TPack ]]
+            local lowered_items = {} --[[: V5Type[] ]]
+            for i = 1, #inst_ret_pack.items do
+                local v = inst_ret_pack.items[i]
+                if v ~= nil then lowered_items[i] = lower_matches(ctx, v, n.line) end
+            end
+            --: V5Type
+            local lowered_callee = types_mod.arrow(inst_args_pack.items, lowered_items)
+            --: V5Type
+            local expected_inst = types_mod.arrow(arg_types, lowered_items)
+            emit(ctx, C.sub(lowered_callee, expected_inst, prov_inferred(ctx, n.line, n.col)))
+            propagate_callee_effects(ctx, lowered_callee, n.line, n.col)
+            -- Spread lowered positional results into the requested slots.
+            local out = {} --[[: V5Type[] ]]
+            for i = 1, n_slots do
+                out[i] = lowered_items[i] or T_NIL
+            end
+            return out
+        end
+
         local uvars = {} --[[: V5Type[] ]]
         for i = 1, n_slots do
             uvars[i] = fresh_uvar(ctx)
@@ -2387,6 +2454,67 @@ gen_stmt = function(ctx, nid)
                         resolved = true
                     end
                 end
+            end
+        end
+
+        -- Phase 2.4.5: shape-driven for-in.  When the name special-cases above
+        -- did not resolve, derive loop-var types from the STRUCTURE of the
+        -- iterator, never from a callee name:
+        --   (1) a single iterator expression whose type is a record carrying an
+        --       index signature `{ [K]: V }` binds (var1=K, var2=V) — the
+        --       index-signature iteration protocol (what pairs over such a
+        --       table yields);
+        --   (2) a single iterator expression that is a CALL whose callee has a
+        --       declared return pack binds the loop vars positionally from that
+        --       return pack's items — the generic `(iter_fn, ...)` protocol read
+        --       off the declared return arity.
+        -- Both are keyed on shape (index signature / declared return arity),
+        -- not on the names pairs/ipairs.
+        if not resolved and el == 1 then
+            local it_nid = ctx.lists:get(es)
+            local it_node = ctx.nodes:get(it_nid)
+            if it_node.kind == NODE_CALL_EXPR then
+                -- (2): iterator is a call.  Look up the callee's declared return.
+                local it_callee_nid = it_node.data[0]
+                --: V5Type | nil
+                local it_callee = resolve_callee_eager(ctx, it_callee_nid)
+                if it_callee == nil then
+                    local cn = ctx.nodes:get(it_callee_nid)
+                    if cn.kind == NODE_IDENTIFIER then
+                        local it_name = intern_str(ctx, cn.data[0]) --[[: string ]]
+                        --: V5Type | nil
+                        local looked = lookup(ctx, it_name)
+                        it_callee = looked
+                    end
+                end
+                if it_callee ~= nil and it_callee.tag == "arrow"
+                    and it_callee.ret ~= nil and it_callee.ret.tag == "pack" then
+                    -- Evaluate the call once (binds arg types, emits effects).
+                    gen_expr(ctx, it_nid)
+                    local rp = it_callee.ret
+                    for vi = 0, nl - 1 do
+                        local item = rp.items[vi + 1]
+                        loop_var_types[vi + 1] = item or T_UNKNOWN
+                    end
+                    resolved = true
+                end
+            else
+                -- (1): iterator is a value expression; if it is a record with an
+                -- index signature, bind (key, value) from it.  Evaluated once
+                -- here; resolved is set true unconditionally so the fallback
+                -- below does not re-evaluate this single expression.
+                local it_ty = gen_expr(ctx, it_nid)
+                local k_ty, v_ty = extract_idx(it_ty)
+                if k_ty ~= nil and v_ty ~= nil then
+                    loop_var_types[1] = k_ty
+                    loop_var_types[2] = v_ty
+                    for _ = 3, nl do
+                        loop_var_types[#loop_var_types + 1] = T_UNKNOWN
+                    end
+                else
+                    fill_unknown()
+                end
+                resolved = true
             end
         end
 

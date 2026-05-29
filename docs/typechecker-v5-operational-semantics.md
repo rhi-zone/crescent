@@ -1659,6 +1659,128 @@ as evidence the substrate is insufficient — none is.)
    `TRecord`). This spec references `atomic_subtype` (Spec A) abstractly and
    does not pin the literal encoding — forward reference to Spec C.
 
+### Call-site declared-return instantiation (TParam + subst_params) — Phase 2.4.5
+
+**Added 2026-05-29 (Phase 2.4.5; implementation + doc in one commit).** This
+section is the **enabling substrate for Thread 4** (the deletion of the hardcoded
+`pcall` / `coroutine.*` / `pairs` handlers, which is the *later* consumer phase
+2.5). It is written down here because, although the user opted for no separate
+pre-spec, the design must be normative before it ships.
+
+#### The gap it closes
+
+The match-types section above (`CMatchEval`) gives the substrate to *reduce* a
+`TMatch` whose scrutinee head is rigid. But it is reached for real only at
+**annotation-parse time** (`get_type_ann` → `lower_matches`), over a *concrete*
+scrutinee. The generic call path emitted only
+`CSub(callee_ty, (arg_types) -> [fresh_ret])` — it **never instantiated the
+callee's declared return with the actual argument types**. So a stdlib
+declaration whose declared return *depends on its arguments* (a discriminated
+union, a `Coroutine<Y,S,R>` decomposition, an identity-of-argument return) could
+not be consumed: the dependence had to be hardcoded as a name-keyed gen-pass
+special case. 2.4.5 supplies the missing, **shape-driven, name-agnostic**
+mechanism.
+
+#### TParam leaf (parameter reference in a declared arrow)
+
+    TParam = { tag = "param", idx }     idx : 1-based positional parameter
+
+Within a declared arrow, `TParam(i)` refers to the *i*-th declared parameter. It
+appears only inside the arrow's **return** pack (and the match / index-signature
+/ App nodes therein). It is a **leaf** that — exactly like `TCapture`, and the
+`packvar` / `rowvar` gensym ids — is **NOT De Bruijn-relocated**: `shift` and
+`instantiate` return it unchanged (parameter binding is a *call-site
+substitution* concern, not a relocation one). Using a dedicated leaf (rather than
+reusing `Var`'s De Bruijn index) deliberately avoids collision with HKT lambda
+binders, which DO use `Var` and DO relocate. `equal` compares `idx`;
+`collect_uvars` contributes nothing. This mirrors the `TCapture` design 1-for-1.
+
+#### subst_params (the call-site substitution)
+
+    subst_params(t, args) : V5Type
+
+a single structural walk replacing every `TParam(i)` leaf by `args[i]`
+**simultaneously** (a flat substitution — TParam carries no binder depth, so
+there is no relocation and no decrement, unlike `instantiate`). A `TParam(i)`
+with `i` out of range (no actual argument supplied) is replaced by `Const("nil")`
+— the Lua semantics of a missing positional argument. Every other leaf (including
+`Var`/`lambda` HKT binders, captures, packvars) passes through untouched. **The
+result is `TParam`-free.** A companion `has_param(t)` predicate is the shape gate.
+
+**Invariant: `subst_params` MUST eliminate every `TParam` before any constraint
+reaches the solver.** The interpreters never observe a `TParam`; neither `step_csub`
+nor `step_ceq` has a `param` arm, by design.
+
+#### Gen-pass rule (T-CallInst) — both call paths
+
+The mechanism lives **entirely in the gen-pass** (`constrain.lua`), at the two
+call sites that resolve a known callee arrow: the single-value `NODE_CALL_EXPR`
+path and the multi-value `gen_expr_multi` path. Both are extended identically:
+
+> **T-CallInst.** At a call `f(e₁…eₙ)` where `walk(typeof f)` is an arrow whose
+> **return pack contains a `TParam`** (`has_param(callee.ret)`), let
+> `aᵢ = typeof eᵢ`. Then:
+> 1. `args′ = subst_params(callee.args, [a₁…aₙ])`,
+>    `ret′ = subst_params(callee.ret, [a₁…aₙ])` — both `TParam`-free.
+> 2. For each item of `ret′`, `lower_matches` it: a `TMatch` over the now-concrete
+>    substituted scrutinee becomes a `CMatchEval` + result uvar (the existing
+>    Spec B lowering). Call the lowered items `R₁…Rₘ`.
+> 3. Emit `CSub( (args′) -> [R₁…Rₘ] , (a₁…aₙ) -> [R₁…Rₘ] )` — the argument
+>    positions are checked, and **both sides reference the same lowered `Rⱼ`**, so
+>    **no raw `TMatch` ever crosses a `CSub`** (the solver only ever sees the
+>    result uvars).
+> 4. The call expression's value is `R₁` (single-value path) / `R₁…Rₘ` spread
+>    into the requested slots (multi-value path).
+
+This is **shape-gated**: the rule fires *iff* `has_param(callee.ret)` — never on
+the callee's name. A declared arrow with no `TParam` in its return takes the
+ordinary generic call path unchanged. The per-call-site `TMatch` is reduced by the
+**existing** `CMatchEval` Park/Reduce/Wake/Stuck machinery — 2.4.5 introduces **no
+new interpreter reduction rule**; it reuses the match substrate, which is why the
+mechanism is provably free of name-keyed dispatch and is encoded once in the
+gen-pass rather than twice across the interpreters.
+
+#### Shape-driven for-in (index signature / declared return arity)
+
+The for-in loop-var binding is likewise generalised to be shape-driven, beside
+the existing `pairs`/`ipairs` name special-cases (which 2.5 will delete):
+
+> **T-ForIn-Shape.** For `for v₁…vₖ in itr do … end` with a single iterator
+> expression `itr`, when the name special-cases do not resolve:
+> - if `itr` is a **call** whose callee resolves to an arrow with a declared
+>   **return pack** `(t₁…tⱼ)`, bind `vᵢ := tᵢ` positionally (the iterator
+>   protocol read off the declared return *arity*, not the callee name);
+> - else if `itr`'s type is a **record carrying an index signature** `{ [K]: V }`,
+>   bind `v₁ := K`, `v₂ := V` (the index-signature iteration protocol).
+>
+> Both are keyed on **structure** (declared return arity / `TIndexSignature`),
+> never on the names `pairs`/`ipairs`.
+
+#### Effects need no new substrate
+
+Effect extraction (`!throw<E>`, `!yield<Y,R>`) is already the `App`-spine +
+`Const`-name machinery (`effect("…")` → `Const("!…")`, `effect_apply` → App-chain)
+defined in §"Effect-pattern matching as match App/intersection cases". App + Const
+already suffice; 2.4.5 builds nothing here. The remaining work is purely the 2.5
+consumer step — replacing the gen-pass `"!throw"`/`"!yield"` *string-match sites*
+by stdlib declarations — and is out of scope for this phase.
+
+#### Termination
+
+`subst_params` and `has_param` are single bounded structural walks over a finite
+(regular) type — `O(size)`. The lowered `CMatchEval`s reduce under the unchanged
+match-reduction termination argument above. No new fixpoint is introduced.
+
+#### Parity
+
+No new *interpreter* rule means no new cross-interpreter reduction to diverge.
+The parity fixtures (`op_sem_independent_parity_test.lua`, the
+`indep parity: 2.4.5` block) nonetheless confirm that the **shape `subst_params`
+produces** — a `TMatch` whose scrutinee is a substituted concrete argument —
+reduces identically in both interpreters (disc-true → string, disc-false →
+integer, unrigid-scrutinee sticks identically, park-then-wake on a later-solved
+argument reduces identically).
+
 ### Principled literals and records (TLiteral + TRecord)
 
 **Added 2026-05-29 (Spec C of the spec-first program; DOCS-ONLY).** This is the

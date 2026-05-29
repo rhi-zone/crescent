@@ -1998,4 +1998,89 @@ T.describe("indep parity: match — fallthrough to never", function()
 	end)
 end)
 
+-- ════════════════════════════════════════════════════════════════════
+-- Phase 2.4.5 — call-site declared-return instantiation parity
+-- ════════════════════════════════════════════════════════════════════
+--
+-- The 2.4.5 substrate is gen-pass-side: subst_params substitutes actual arg
+-- types into a declared return's TParam binders, then lower_matches emits a
+-- CMatchEval over the (now-concrete) scrutinee.  No NEW interpreter reduction
+-- rule is introduced — the per-call-site match is reduced by the existing
+-- CMatchEval machinery.  These fixtures verify that the SHAPE subst_params
+-- produces (a TMatch whose scrutinee is a substituted concrete arg) reduces
+-- IDENTICALLY in both independently-encoded interpreters.  subst_params itself
+-- (a pure types-module walk) is exercised in the fixture body so the substrate
+-- composition — substitute then reduce — is checked across both.
+
+-- emit_disc(st, arg, rtv): the canonical 2.4.5 discriminated-return reduction.
+-- Build a TMatch over a TParam(1) ref — the way a stdlib
+-- `disc : (%1) -> match %1 { true => string, false => integer }` declares it —
+-- substitute `arg` into the param via subst_params (the gen-pass-side step),
+-- then emit the resulting CMatchEval (the lower_matches step).  The CMatchEval
+-- carries the now-concrete substituted scrutinee.
+--: (AltState, V5Type, integer) -> nil
+local function emit_disc(st, arg, rtv)
+	local arms = {} --[[: TMatchArm[] ]]
+	arms[1] = { pattern = lit("boolean", true),  result = k("string") }
+	arms[2] = { pattern = lit("boolean", false), result = k("integer") }
+	local scrut = types_mod.subst_params(types_mod.param(1), { arg }) --[[: V5Type ]]
+	op_sem.emit(st, C.match_eval(scrut, arms, types_mod.uvar(rtv), prov("inst-disc")))
+end
+
+T.describe("indep parity: 2.4.5 — disc(true) arm-1 reduction", function()
+	T.it("subst_params(true) then CMatchEval reduces to string in both", function()
+		run_both("inst_disc_true", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			emit_disc(st, lit("boolean", true), r)
+			return { r }
+		end)
+	end)
+end)
+
+T.describe("indep parity: 2.4.5 — disc(false) arm-2 reduction", function()
+	T.it("subst_params(false) then CMatchEval reduces to integer in both", function()
+		run_both("inst_disc_false", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			emit_disc(st, lit("boolean", false), r)
+			return { r }
+		end)
+	end)
+end)
+
+-- An UN-substituted param leaf, if it ever reached a CMatchEval, would have an
+-- un-rigid head and STICK.  This fixture confirms both interpreters agree that a
+-- match parked on a still-uvar scrutinee errors identically — the safety floor
+-- behind the "subst_params must eliminate every TParam before emission" rule
+-- (here the scrutinee is a bare unbound uvar standing in for an unsubstituted
+-- position).
+T.describe("indep parity: 2.4.5 — unrigid scrutinee sticks identically", function()
+	T.it("CMatchEval over an unbound uvar scrutinee is stuck in both", function()
+		run_both("inst_unrigid_stuck", function(st)
+			local s = subst_mod.fresh(st.subst, "open")
+			local r = subst_mod.fresh(st.subst, "open")
+			emit_match1(st, types_mod.uvar(s), lit("boolean", true), k("string"), r)
+			return { r }
+		end)
+	end)
+end)
+
+-- Parked-then-woken: the scrutinee uvar is later bound to a rigid literal via a
+-- CEq, which rigidifies the head and wakes the parked CMatchEval (T-CMatchEval-
+-- Wake) — modelling a call site whose argument type is solved AFTER the match is
+-- lowered.  Both interpreters must reduce to the same arm result.
+T.describe("indep parity: 2.4.5 — park-then-wake on solved arg", function()
+	T.it("scrutinee uvar bound to `true` later → reduces to string in both", function()
+		run_both("inst_park_wake", function(st)
+			local s = subst_mod.fresh(st.subst, "open")
+			local r = subst_mod.fresh(st.subst, "open")
+			local us = types_mod.uvar(s) --[[: V5Type ]]
+			local tru = lit("boolean", true) --[[: V5Type ]]
+			emit_match1(st, us, tru, k("string"), r)
+			-- Solve the scrutinee AFTER emitting the match (order-independent).
+			op_sem.emit(st, C.eq(us, tru, prov("solve-arg")))
+			return { r, s }
+		end)
+	end)
+end)
+
 return true

@@ -33,10 +33,11 @@ local M = {}
 --:: TUnion        = { tag: "union", xs: V5Type[] }
 --:: TIntersection = { tag: "intersection", parts: V5Type[] }
 --:: TCapture      = { tag: "capture", idx: integer }
+--:: TParam        = { tag: "param", idx: integer }
 --:: TPatAllFields = { tag: "patallfields", k: integer, v: integer }
 --:: TMatchArm     = { pattern: V5Type, result: V5Type }
 --:: TMatch        = { tag: "match", param: V5Type, arms: TMatchArm[] }
---:: V5Type        = TUVar | TVarBnd | TApp | TLambda | TConst | TLiteral | TRowVar | TRecord | TPackVar | TPack | TArrow | TUnion | TIntersection | TMatch | TCapture | TPatAllFields
+--:: V5Type        = TUVar | TVarBnd | TApp | TLambda | TConst | TLiteral | TRowVar | TRecord | TPackVar | TPack | TArrow | TUnion | TIntersection | TMatch | TCapture | TParam | TPatAllFields
 
 --: (integer) -> V5Type
 function M.uvar(id) return { tag = "uvar", id = id } end
@@ -123,6 +124,18 @@ function M.union(xs) return { tag = "union", xs = xs } end
 -- unchanged (capture binding is an evaluation concern, not a relocation one).
 --: (integer) -> V5Type
 function M.capture(idx) return { tag = "capture", idx = idx } end
+-- param(idx): a PARAMETER-reference leaf (Phase 2.4.5).  Within a declared
+-- arrow, `param(i)` (1-based positional) refers to the i-th declared
+-- parameter; it appears only inside the arrow's RETURN pack (and the match /
+-- index / App nodes therein).  Like TCapture and packvar/rowvar ids, a TParam
+-- is NOT De Bruijn-relocated: shift / instantiate leave it unchanged (parameter
+-- binding is a call-site substitution concern, performed once by subst_params,
+-- not a relocation one).  It is an inert leaf for every other walker
+-- (collect_uvars contributes nothing; equal compares idx).  subst_params MUST
+-- eliminate every TParam before any constraint reaches the solver — the
+-- interpreters never observe a TParam.
+--: (integer) -> V5Type
+function M.param(idx) return { tag = "param", idx = idx } end
 -- patallfields(k, v): the all-fields distribution pattern `{ ...[%K]: %V }`.
 -- The `...` means ITERATE (not spread): evaluation binds K/V per field of the
 -- scrutinee, evaluates the arm result once per field, and unions the results.
@@ -185,7 +198,7 @@ end
 -- when β-reducing. Eager shift on bind.
 --: (V5Type, integer, integer) -> V5Type
 function M.shift(t, d, cutoff)
-	if t.tag == "uvar" or t.tag == "const" or t.tag == "literal" or t.tag == "rowvar" or t.tag == "packvar" or t.tag == "capture" or t.tag == "patallfields" then
+	if t.tag == "uvar" or t.tag == "const" or t.tag == "literal" or t.tag == "rowvar" or t.tag == "packvar" or t.tag == "capture" or t.tag == "param" or t.tag == "patallfields" then
 		return t
 	elseif t.tag == "var" then
 		if t.i >= cutoff then return { tag = "var", i = t.i + d } end
@@ -263,7 +276,7 @@ end
 -- decrementing outer indices. Used by β.
 --: (V5Type, V5Type, integer) -> V5Type
 function M.instantiate(body, arg, depth)
-	if body.tag == "uvar" or body.tag == "const" or body.tag == "literal" or body.tag == "rowvar" or body.tag == "packvar" or body.tag == "capture" or body.tag == "patallfields" then
+	if body.tag == "uvar" or body.tag == "const" or body.tag == "literal" or body.tag == "rowvar" or body.tag == "packvar" or body.tag == "capture" or body.tag == "param" or body.tag == "patallfields" then
 		return body
 	elseif body.tag == "var" then
 		if body.i == depth then return M.shift(arg, depth, 0) end
@@ -321,6 +334,127 @@ function M.instantiate(body, arg, depth)
 		return { tag = "match", param = M.instantiate(body.param, arg, depth), arms = arms }
 	end
 	error("instantiate: unreachable")
+end
+
+-- subst_params(t, args): SIMULTANEOUS substitution of every TParam(i) leaf by
+-- args[i] (Phase 2.4.5 call-site instantiation).  `args` is the 1-based list of
+-- actual argument types at a call site.  A TParam(i) with i out of range
+-- (no actual arg supplied) is replaced by `Const("nil")` — the Lua semantics of
+-- a missing positional argument.  Unlike `instantiate`, this is a flat
+-- (non-nested) substitution: TParam carries no binder depth, so there is no
+-- relocation and no decrement — every TParam(i) maps directly to args[i].  All
+-- other leaves (including Var/lambda HKT binders, captures, packvars) pass
+-- through untouched.  The result is TParam-free.
+-- subst_params_pack(p, args): subst_params over each item of a TPack; the
+-- open `rest` TPackVar is preserved (parameter substitution is a leaf
+-- replacement, not a relocation).  Returns a TPack.
+--: (TPack, V5Type[]) -> TPack
+function M.subst_params_pack(p, args)
+	local items = {} --[[: V5Type[] ]]
+	for i = 1, #p.items do
+		local v = p.items[i]
+		if v ~= nil then local sub = M.subst_params(v, args) --[[: V5Type ]]; items[i] = sub end
+	end
+	return { tag = "pack", items = items, rest = p.rest }
+end
+
+--: (V5Type, V5Type[]) -> V5Type
+function M.subst_params(t, args)
+	if t.tag == "param" then
+		local a = args[t.idx]
+		if a ~= nil then return a end
+		return { tag = "const", name = "nil" }
+	elseif t.tag == "uvar" or t.tag == "var" or t.tag == "const" or t.tag == "literal" or t.tag == "rowvar" or t.tag == "packvar" or t.tag == "capture" or t.tag == "patallfields" then
+		return t
+	elseif t.tag == "app" then
+		return { tag = "app", f = M.subst_params(t.f, args), a = M.subst_params(t.a, args) }
+	elseif t.tag == "lambda" then
+		return { tag = "lambda", k = t.k, b = M.subst_params(t.b, args) }
+	elseif t.tag == "record" then
+		local out = {} --[[: { [string]: TField } ]]
+		for fk, fv in pairs(t.fields) do
+			if fv ~= nil then
+				local sub = M.subst_params(fv.type, args) --[[: V5Type ]]
+				out[fk] = { type = sub, optional = fv.optional, readonly = fv.readonly }
+			end
+		end
+		local idxs = {} --[[: TIndex[] ]]
+		for i = 1, #t.indexes do
+			local ix = t.indexes[i]
+			if ix ~= nil then
+				idxs[i] = { key = M.subst_params(ix.key, args), value = M.subst_params(ix.value, args), readonly = ix.readonly }
+			end
+		end
+		return { tag = "record", fields = out, indexes = idxs, row = t.row }
+	elseif t.tag == "pack" then
+		return M.subst_params_pack(t, args)
+	elseif t.tag == "arrow" then
+		return { tag = "arrow", args = M.subst_params_pack(t.args, args), ret = M.subst_params_pack(t.ret, args) }
+	elseif t.tag == "union" then
+		local xs = {} --[[: V5Type[] ]]
+		for i = 1, #t.xs do
+			local v = t.xs[i]
+			if v ~= nil then local sub = M.subst_params(v, args) --[[: V5Type ]]; xs[i] = sub end
+		end
+		return { tag = "union", xs = xs }
+	elseif t.tag == "intersection" then
+		local parts = {} --[[: V5Type[] ]]
+		for i = 1, #t.parts do
+			local v = t.parts[i]
+			if v ~= nil then local sub = M.subst_params(v, args) --[[: V5Type ]]; parts[i] = sub end
+		end
+		return { tag = "intersection", parts = parts }
+	elseif t.tag == "match" then
+		local arms = {} --[[: TMatchArm[] ]]
+		for i = 1, #t.arms do
+			local arm = t.arms[i]
+			if arm ~= nil then
+				arms[i] = {
+					pattern = M.subst_params(arm.pattern, args),
+					result = M.subst_params(arm.result, args),
+				}
+			end
+		end
+		return { tag = "match", param = M.subst_params(t.param, args), arms = arms }
+	end
+	error("subst_params: unreachable")
+end
+
+-- has_param(t): true iff `t` contains any TParam leaf (used by the gen-pass to
+-- decide whether a declared return needs call-site instantiation).  Shape test,
+-- no name involved.
+--: (V5Type) -> boolean
+function M.has_param(t)
+	if t.tag == "param" then return true
+	elseif t.tag == "app" then return M.has_param(t.f) or M.has_param(t.a)
+	elseif t.tag == "lambda" then return M.has_param(t.b)
+	elseif t.tag == "record" then
+		for _, fv in pairs(t.fields) do if M.has_param(fv.type) then return true end end
+		for i = 1, #t.indexes do
+			local ix = t.indexes[i]
+			if M.has_param(ix.key) or M.has_param(ix.value) then return true end
+		end
+		return false
+	elseif t.tag == "pack" then
+		for i = 1, #t.items do if M.has_param(t.items[i]) then return true end end
+		return false
+	elseif t.tag == "arrow" then
+		return M.has_param(t.args) or M.has_param(t.ret)
+	elseif t.tag == "union" then
+		for i = 1, #t.xs do if M.has_param(t.xs[i]) then return true end end
+		return false
+	elseif t.tag == "intersection" then
+		for i = 1, #t.parts do if M.has_param(t.parts[i]) then return true end end
+		return false
+	elseif t.tag == "match" then
+		if M.has_param(t.param) then return true end
+		for i = 1, #t.arms do
+			local arm = t.arms[i]
+			if arm ~= nil and (M.has_param(arm.pattern) or M.has_param(arm.result)) then return true end
+		end
+		return false
+	end
+	return false
 end
 
 -- Structural equality (used after substitution-walk to settle CEq).
@@ -397,6 +531,7 @@ function M.equal(a, b)
 		return true
 	end
 	if a.tag == "capture" and b.tag == "capture" then return a.idx == b.idx end
+	if a.tag == "param" and b.tag == "param" then return a.idx == b.idx end
 	if a.tag == "patallfields" and b.tag == "patallfields" then
 		if a.k ~= b.k then return false end
 		if a.v ~= b.v then return false end
