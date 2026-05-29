@@ -197,9 +197,15 @@ negation** (rewrite-design §2.4; MLstruct §3.3.1):
 - `τ₁ <: τ₂ ∨ α`  ⟹  `τ₁ ∧ ¬τ₂ <: α`   (a new **lower bound** for `α`)
 - `α ∧ τ₁ <: τ₂`  ⟹  `α <: τ₂ ∨ ¬τ₁`   (a new **upper bound** for `α`)
 
-When both apply, either choice is sound. **This is the central use of negation in
-the solver**: it lets union/intersection constraints involving variables make
-progress without backtracking, preserving principal types. It is also precisely
+When both apply, either choice is sound, but they build *different* bound-graph
+shapes (one adds a lower bound, the other an upper). **Deterministic tie-break
+(normative): prefer the lower-bound form** — i.e. apply the `τ₁ ∧ ¬τ₂ <: α`
+transform when both are applicable to the same constraint. This is mandated so
+that both interpreters (`op_sem.lua` and `op_sem_alt.lua`) build byte-identical
+bound graphs and the parity discipline holds; leaving the choice open would let
+the two diverge. **This is the central use of negation in the solver**: it lets
+union/intersection constraints involving variables make progress without
+backtracking, preserving principal types. It is also precisely
 what the v5 substrate could not do — `op_sem.lua`'s `T-CSub-Union-R` admits only
 exact branch equality and `T-CSub-Intersection-Decomp` errors when all parts are
 uvars (`all_parts_unresolved`), because it has no `¬` to move across. M1 replaces
@@ -259,12 +265,19 @@ procedure is therefore **deferred until forced, not universal** (rewrite-design
    normalized shape are O(1). This generalizes the v5 substrate's existing
    `subcache` (op_sem.lua) — which keys `CSub(L,U)` obligations by structural
    head hash — to also key emptiness results.
-3. **Times out on pathological cases.** A single emptiness decision is bounded.
-   On exceeding the bound it **does not loop or guess**: it emits a diagnostic
-   that **names the originating expression** (the source span carried on the
-   constraint's provenance — constraints §B11). The diagnostic class is
-   `emptiness_check_timed_out`, carrying the originating span and the
-   normalized shape (truncated) for the report.
+3. **Bounded by a deterministic step count (normative).** A single emptiness
+   decision is bounded by a **machine-independent, reproducible step budget** —
+   **not** wall-clock. The budget is a count of **RDNF conjuncts expanded /
+   normalization steps** taken during the one decision; **the default is
+   `4096`**. This count is **part of the normative semantics**: both interpreters
+   (`op_sem.lua` and `op_sem_alt.lua`) use the *identical* budget and therefore
+   bail at the *identical* point, so the parity discipline's byte-identical
+   results hold (a wall-clock bound would make the two interpreters' bail-out
+   points diverge — rejected). On exceeding the budget it **does not loop or
+   guess**: it emits a diagnostic that **names the originating expression** (the
+   source span carried on the constraint's provenance — constraints §B11). The
+   diagnostic class is `emptiness_check_timed_out`, carrying the originating span
+   and the normalized shape (truncated) for the report.
 4. **Conservative post-timeout disposition.** A timed-out **subtype query** is
    treated as **failed** (not a subtype) — the sound direction: it reports a type
    error at the originating expression rather than silently accepting an
@@ -285,7 +298,11 @@ boolean algebra is **rejected** (rewrite-design §9.2.7).
 > emptiness bail-out is finer-grained: it bounds a single emptiness decision so
 > the whole-file check terminates *within* §A14's ceiling and produces a
 > diagnostic, rather than running until the outer `timeout 30` kills the process
-> with no message. The bail-out exists **to keep §A14 satisfiable**, not to
+> with no message. Because the step budget is a deterministic count rather than a
+> wall-clock duration, it **tightens, never loosens**, the §A14 floor: a decision
+> that would exceed `4096` steps is cut short and reported regardless of machine
+> speed, so the whole-file `timeout 30` of v5-constraints §A14 stays satisfiable
+> on any host. The bail-out exists **to keep §A14 satisfiable**, not to
 > evade it. A program that trips many emptiness bail-outs is reporting a real
 > problem (pathological negation usage), surfaced precisely.
 
@@ -501,45 +518,44 @@ CLAUDE.md planning rules and the cross-walk discipline in `README.md`.
 
 ## 9. Open questions (for the reviewer — genuine forks not resolved unilaterally)
 
-1. **Emptiness timeout budget — shape and unit.** §3.4 mandates a *bounded*
-   single-decision emptiness check, but the budget's form is unspecified:
-   conjunct-count cap, normalization-step count, wall-clock under the outer
-   §A14 ceiling, or a hybrid. A step-count bound is reproducible across machines
-   (preferred for parity fixtures, §F2); wall-clock is simpler but
-   machine-dependent and would make the two interpreters' bail-out points
-   diverge. **Reviewer to pick the bound's unit and a default value.**
+1. **Emptiness timeout budget — shape and unit.** **RESOLVED** (folded into §3.4):
+   the budget is a deterministic **count of RDNF conjuncts expanded /
+   normalization steps**, **default `4096`**, **not** wall-clock. It is part of
+   the normative semantics — both interpreters use the identical count and bail at
+   the identical point, so parity fixtures (§F2) stay byte-identical. The
+   step-count form was preferred over wall-clock precisely because wall-clock would
+   make the two interpreters' bail-out points machine-dependently diverge.
 
-2. **Where exactly does RDNF level-0 expansion stop for match-type heads?** §2.2
-   says level-0 expands class/alias/match-type heads. A match-type head whose
-   scrutinee is an unresolved variable cannot be expanded (M8 suspends it). Does
-   level-0 RDNF treat an unexpandable match head as an **opaque atom** (so
-   emptiness reasons around it conservatively) or does reaching one **force the
-   whole emptiness query to suspend**? M1 leans opaque-atom (keeps emptiness
-   decidable; conservative), but this couples M1 to M8's suspension model and
-   should be confirmed jointly with M8.
+2. **Where exactly does RDNF level-0 expansion stop for match-type heads?**
+   **DEFERRED — confirm jointly at M8.** §2.2 says level-0 expands
+   class/alias/match-type heads. A match-type head whose scrutinee is an
+   unresolved variable cannot be expanded (M8 suspends it). Does level-0 RDNF
+   treat an unexpandable match head as an **opaque atom** (so emptiness reasons
+   around it conservatively) or does reaching one **force the whole emptiness
+   query to suspend**? M1 leans opaque-atom; that lean is **conservatively sound**
+   (it never admits an unproven `<:`), but it couples M1 to M8's suspension model,
+   so the final choice is confirmed jointly with M8.
 
-3. **Cache invalidation across `CEq` merges.** §5.1 keys the cache by structural
-   head hash including the union-find root id. When `CEq` merges roots, prior
-   cache entries keyed on the loser root are stale-but-harmless (they assume an
-   obligation that is now subsumed). M1 treats them as harmless (monotone:
-   assuming a now-stronger fact). **Reviewer: confirm staleness is harmless, or
-   require a merge-time cache rekey** (the latter costs a pass over `C` per merge;
-   M2 is the natural owner if required).
+3. **Cache invalidation across `CEq` merges.** **DEFERRED — to M2 if a rekey is
+   ever needed.** §5.1 keys the cache by structural head hash including the
+   union-find root id. When `CEq` merges roots, prior cache entries keyed on the
+   loser root are stale-but-harmless (they assume an obligation that is now
+   subsumed). M1 treats them as harmless: the monotonicity argument (assuming a
+   now-stronger fact) stands. Should a merge-time cache rekey ever prove necessary,
+   M2 is the natural owner (it costs a pass over `C` per merge); M1 does not
+   require it.
 
-4. **`Neg` in the user-facing display.** A coalesced type may legitimately
-   contain `~T` (e.g. a falsy-branch type `T & ~nil` that does not simplify
-   away). Should the display normalizer (§2.2) ever *eliminate* a surviving
-   `~T` by re-expressing it positively where the lattice is finite (e.g.
+4. **`Neg` in the user-facing display.** **DEFERRED — UX batch.** A coalesced type
+   may legitimately contain `~T` (e.g. a falsy-branch type `T & ~nil` that does
+   not simplify away). Should the display normalizer (§2.2) ever *eliminate* a
+   surviving `~T` by re-expressing it positively where the lattice is finite (e.g.
    `boolean & ~true` → `false`), or always render `~T` verbatim? This is a
-   display/UX fork with no soundness content; flagged so it is decided once
-   rather than per-error-message.
+   display/UX fork with **no soundness content**; deferred to the UX batch so it is
+   decided once rather than per-error-message.
 
 5. **Does the negation move-across rule (§3.2) need a determinism tie-break?**
-   When both `τ₁ <: τ₂ ∨ α` and `α ∧ τ₁ <: τ₂` shapes are simultaneously
-   applicable to the *same* constraint (both transforms sound), the result types
-   are equivalent but the *bound-graph shape* differs (one adds a lower, the
-   other an upper). For parity-fixture determinism (§F2) the two interpreters
-   must choose the same transform. M1 does not pin the tie-break. **Reviewer:
-   mandate a deterministic preference (e.g. "prefer the lower-bound form") so the
-   dual interpreters stay byte-for-byte equal**, or defer to M2 where coalescing
-   is specified.
+   **RESOLVED** (folded into §3.2): **yes — prefer the lower-bound form.** When
+   both `τ₁ <: τ₂ ∨ α` and `α ∧ τ₁ <: τ₂` shapes are simultaneously applicable to
+   the *same* constraint, both interpreters apply the `τ₁ ∧ ¬τ₂ <: α` (lower-bound)
+   transform, so they build byte-identical bound graphs and parity-fixture
+   determinism (§F2) holds.
