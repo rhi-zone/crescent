@@ -92,6 +92,10 @@ This table is seeded with the gaps **M1** closes; later modules extend it.
 | **H4** *(decided)* | `typechecker-v5-constraints.md` §H4 — sound model of `setmetatable`-post-construction (user-decides; soundness non-negotiable per A1) | **M6** | **Approach A (construction-phase / affine seal)**: `setmetatable` is the **seal** of the open→sealed lifecycle — a table is Open (mutable, off-lattice) during construction and `setmetatable` fixes its type + binds the metatable (M6 §4). The sealed type's observable fields are the own record plus the `__index`-reachable fields (walked lazily, M6 §2/§5). Generalizes the substrate's existing `Φ ∈ {Open, Sealed}` phase map — smallest blast radius; types the D10 corpus (`lib/epoll`) **without** its `--[[:! epoll]]` force cast. Phase discipline (substrate), not a `setmetatable`-shaped special case. **Surfaced for user confirmation** (M6 §11.1 — the alternative is (B) declared-metatable-up-front). |
 | **P6** *(interface)* | `v5-gaps.md` — method dispatch edge cases beyond simple `obj:method(...)` not modelled | **M6** (interface) → gen-pass (emission) | M6 fixes the **dispatch interface** (M6 §8): every method dispatch lowers to a §5 `CMetaIndex`/`CMethodCall` + M3 argument-pack subtyping + (for `:`) `self`-unification. The "edge cases" (`obj.method(...)`, field-read of a method, chained `a:b():c()`, union receiver) are **combinations** of these three mechanisms, not new dispatch rules. The closure proper is the gen-pass emission (`constrain.lua`) consuming the M6 interface — a mechanism, not a per-edge-case handler. |
 | **Y6** *(shape axis)* | `v5-gaps.md` — `T-CSub-Record-Width` uses `CEq` for named fields on a "fields mutable in v5.0" comment the rule doesn't enforce | **M6** (shape) + **M7** (field variance) | M6 splits the two mutabilities (M6 §6): **shape mutability** (add/remove fields) is **M6's, fully determined by phase and enforced** (`T-CTSet-Sealed-Reject`) — closing the "comment not enforced" half for the shape axis; **field mutability** (reassign a present field → variance) is **M7's** (readonly⇒covariant / mutable⇒invariant, replacing the unconditional-CEq-invariance). M6 guarantees each field has **one fixed type at the seal** (the precondition M7's variance rule needs); M6 does not decide the variance. |
+| **record-width-invariance** | `v5-gaps.md` — `T-CSub-Record-Width` treats named fields invariant (via `CEq`), blocking literal widening and other covariant cases through record subtyping | **M7** | The **field-variance rule** (M7 §3): a `readonly` field decomposes via `CSub` (covariant), so `{readonly tag: "leaf"} <: {readonly tag: string}` and every readonly-covariant case succeeds (M7 §3.3); a **mutable** field still decomposes via `CEq` — correctly, because it is writable (the TypeScript-array hole is closed by construction, M7 §3.2). Attribute-driven obligation reducing to M1 `<:`, not a per-case widening special case. |
+| **Y4** | `v5-gaps.md` — module export uses per-field `CSub` to dodge `T-CSub-Record-Width`'s `CEq` invariance; substrate workaround in gen-pass (`constrain.lua:2543-2580`) | **M7** | Same field-variance rule (M7 §3, §8): the gen-pass per-field-`CSub` was the *symptom* of the missing variance rule (manually emitting covariant obligations the all-`CEq` substrate refused). With §3 in the substrate, the workaround is **deleted** and the gen-pass emits a plain record `CSub` — the substrate produces the right per-field obligation. Workaround moved from gen-pass back into the principled substrate rule. |
+| **Y6** *(field-variance axis)* | `v5-gaps.md` — same root, rule side: the "fields are mutable in v5.0 → invariant" comment the rule doesn't enforce or check | **M7** | M7 closes the **field-variance half** of Y6 (M6 closed the shape half): the unenforced comment becomes the **enforced, attribute-conditional** §3 rule — a **mutable** field IS invariant (`CEq`), but the rule **checks `readonly`** and makes a readonly field covariant (`CSub`). Precondition (one fixed type per field at the seal) is M6's guarantee. |
+| **prefix-scoping** *(record/field-descriptor axis)* | `v5-gaps.md` — field-name encodings (`$idx_N`/`$pos_N`/`$opt_`/`$ro_`/`$spread_`/`$computed_`/`$opaque_`) → structured field descriptors (NOT scoped) | **M7** | The **three-region `TRecord` with structured descriptors** (M7 §1, §4.4, §8): `$opt_x`→`fields.x.optional`, `$ro_x`→`fields.x.readonly` (real booleans on the `Field` descriptor); `$idx_N`→an `indexes[]` entry; `$opaque_K`→a single-key index `{key=Const(K)}`; `$pos_N`/`"1".."n"`→`TPack` (M3, not a record); `$spread_`→M3 pack `rest`. Subtyping reads `fld.readonly` (a boolean dispatched on `tag`), never a name prefix. (The *type-name* axis — `$LitInt`/`$Idx`/`$Unit` — is closed by M1/M11/Spec-C, not M7; M7 closes the field-descriptor axis only.) |
 
 (R3 and G11 share the same root and the same fix; bounds-spec-gap, R1, and G9
 likewise share the missing-bounds-substrate root; all are kept separate per the
@@ -128,3 +132,26 @@ the phase-enforced "no field added/re-typed after seal." M6 **finalizes no
 record-width / field-mutability / attribute rules** — those are M7, which
 reconciles its field-variance rules (the *other* half of Y6) with M6's phase
 ordering and the §5 lookup.)
+
+M7's closures — record-width-invariance, Y4, the field-variance half of Y6, and
+the record/field-descriptor axis of prefix-scoping — all sit on one substrate,
+the **three-region `TRecord` (`fields`/`indexes`/`row`) with the attribute-driven
+field-variance rule**: record-width-invariance and the Y6 field-variance half are
+the rule itself (`readonly`⇒covariant via `CSub`, mutable⇒invariant via `CEq`, the
+**supertype's modifier governs**, replacing the v5 unconditional-`CEq`-invariance
+workaround); Y4 is the deletion of the gen-pass per-field-`CSub` symptom once the
+rule is in the substrate; and the prefix-scoping record axis is the structured
+`Field`/`Index` descriptors (real `optional`/`readonly` booleans) retiring the
+`$opt_`/`$ro_`/`$idx_`/`$opaque_` key-mangles. M7 **adopts the v5 "Spec C"
+TLiteral/TRecord three-region node** (commit `7a627c26`) as its realization and
+generalizes Spec C's literal-pair widening to the whole field axis. The **indexer
+`{[K]:V}` is kept a distinct region from the open-row `...`** (the CLAUDE.md hard
+rule, M7 §1.2/§5.1 — neither subsumes the other), with named-fields-plus-indexer
+mixtures (named fields shadow the indexer, M7 §5.5) and indexer subtyping (key
+contravariant, value per its `readonly`, M7 §5.3). M7 **decides the field-attribute
+semantic model** (optional = presence/domain-agreement; readonly = variance) and
+**defers the surface sigil/syntax** (`@`/`#`, attribute arguments, arena layout,
+`$EachField` view) to a UX batch (M7 §4.5) — it does not invent a sigil
+normatively. M7 **redefines no M6 phase rule**: its variance rule applies only to a
+**Sealed** record, on M6's guarantee of one fixed type per field at the seal (the
+two halves of the Y6 split — M6 the shape axis, M7 the field-variance axis).
