@@ -136,7 +136,8 @@ single `lua_State` and differ only by env table.
 | Frozen primitive metatables | Implemented + regression-tested | `lib/sandbox/init.lua` sets `__metatable=false` on the string metatable at module load; audit test verifies `getmetatable("")` is the sentinel and `setmetatable` on a string raises — both from inside and outside a sandbox env. `getmetatable(0)`/`(true)`/`(nil)` return `nil` on LuaJIT so there is no primitive metatable to freeze |
 | Cap closures (not mutable tables) | Implemented for most caps | Per-cap review still worth doing |
 | Crash containment (`pcall` around handler) | Implemented + regression-tested | `lib/platform/daemon/init.lua`'s `invoke_app_handler` `xpcall`-wraps every app handler dispatch; failures produce a fixed 500 "internal server error" response (the error text is operator-visible only, via the optional `on_handler_error` callback). Tests in `daemon_test.lua` cover throwing handlers, the callback payload, cache retention across failures, and `assert(false)` crashes |
-| CPU quota (instruction count) | Planned | `while true do end` in a handler blocks the daemon request thread with no budget, no yielding, no kill |
+| CPU quota (instruction count) | **Ship-blocker** for untrusted-app channel | `while true do end` in a handler blocks the daemon request thread with no budget, no yielding, no kill. `sandbox.run` accepts `opts.budget` (a `debug.sethook` instruction-count hook) but `app_loader.lua`'s `run_entry` invokes apps with no budget today — trivially-reachable DoS for any installed app. Must land before any PNG/archive-from-strangers distribution channel goes live. Build plan: build-order step 3. |
+| Memory quota per app | Not built — see Non-goals | Sandboxed app can allocate unbounded memory (e.g. `("x"):rep(1e9)`). LuaJIT exposes no per-env GC cap; tier-1 answer is the same as for object-size limits — don't try. Becomes load-bearing only if the untrusted-distribution channel ships without OS-level process isolation (see Non-goals — OS hardening). |
 | Separate `lua_State` per app | Not built | All apps share one state; any future FFI escape sees every other app's memory |
 
 "Audit-pending" items are things the current code most likely gets right but
@@ -281,11 +282,27 @@ answered.
   oversight — operator-grantable FFI is by-design for apps we ship; the
   sandbox is for apps installed from elsewhere. If first-party code is
   compromised, the threat model has bigger problems than FFI scope.
-- **Operating system hardening.** Seccomp, Landlock, pledge, AppArmor,
-  unveil — none are wired. The daemon trusts the host OS. An operator
-  running the daemon inside a container / VM / user namespace is welcome
-  to add these layers externally. Bundling them inside the daemon makes
-  the vendorable-pure-Lua story fall apart.
+- **OS-level isolation for first-party / operator-installed apps.** Seccomp,
+  Landlock, App Sandbox, AppContainer — none are wired for the current
+  use case (user's own apps and apps installed from trusted sources). The
+  daemon trusts the host OS; operators running inside a container or VM
+  may add these layers externally.
+
+  **This is use-dependent.** A future *untrusted, socially-distributed
+  app channel* — PNG/archive apps from strangers — is the maximal-adversarial
+  case and changes the calculus. At that point, OS-level isolation per
+  untrusted app (child process + seccomp/Landlock on Linux, App Sandbox on
+  macOS, AppContainer/job objects on Windows) becomes the only credible
+  defense-in-depth against (a) the JIT-miscompilation risk already
+  accepted above and (b) the shared-`lua_State` blast radius noted in the
+  implementation-status table — both of which let a single escape become
+  total. Bundling OS isolation inside the daemon is a reasonable design
+  for that channel (it no longer needs to be purely external); the
+  mechanism options are per-untrusted-app child process with platform
+  syscall filtering. Track in the build order when the untrusted-distribution
+  channel is being designed. Memory DoS in the untrusted-channel case also
+  reduces to this: a per-process memory ceiling from the OS is simpler and
+  more reliable than any Lua-level counter.
 
 ### Security properties we don't offer (and what covers them instead)
 
