@@ -1,6 +1,6 @@
 missing_field.lua:2:1: error: missing field `y`
   2 | local v = { x = 1 }
       ^^^^^
-missing_field.lua:2:1: error: cannot use a type application where a primitive type is required
+missing_field.lua:2:1: error: cannot use a literal type where a primitive type is required
   2 | local v = { x = 1 }
       ^^^^^

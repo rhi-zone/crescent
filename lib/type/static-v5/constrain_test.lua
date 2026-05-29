@@ -359,7 +359,8 @@ T.describe("v5 constrain — effect propagation", function()
         --: V5Type | nil
         local io_write = nil
         if io_rec ~= nil and io_rec.tag == "record" then
-            io_write = io_rec.fields["write"]
+            local fld = io_rec.fields["write"]
+            if fld ~= nil then io_write = fld.type end
         end
         T.ok(io_write ~= nil, "io.write field declared in stdlib")
         if io_write ~= nil then
@@ -429,7 +430,8 @@ T.describe("v5 constrain — effect propagation", function()
         --: V5Type | nil
         local os_exit = nil
         if os_rec ~= nil and os_rec.tag == "record" then
-            os_exit = os_rec.fields["exit"]
+            local fld = os_rec.fields["exit"]
+            if fld ~= nil then os_exit = fld.type end
         end
         T.ok(os_exit ~= nil, "os.exit field declared in stdlib")
         if os_exit ~= nil then

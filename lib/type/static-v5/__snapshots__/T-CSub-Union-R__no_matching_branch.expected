@@ -1,3 +1,3 @@
-union_r.lua:2:1: error: cannot use a type application where a primitive type is required
+union_r.lua:2:1: error: cannot use a literal type where a primitive type is required
   2 | local x = 42
       ^^^^^

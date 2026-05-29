@@ -34,6 +34,19 @@ local _ = subst_mod -- alias reachable for sigs
 --: (string) -> Provenance
 local function prov(name) return op_sem.prov("fixture", 1, name) end
 
+-- mkrec(bare): build a closed three-region TRecord from a bare { [name]: V5Type }
+-- map (each value wrapped as a non-optional, non-readonly TField).  Test
+-- ergonomics for the Spec C shape.
+--: ({ [string]: V5Type }) -> V5Type
+local function mkrec(bare)
+	local fields = {} --[[: { [string]: TField } ]]
+	for k, v in pairs(bare) do
+		if v ~= nil then fields[k] = types_mod.field(v, false, false) end
+	end
+	return types_mod.record(fields)
+end
+local _ = mkrec
+
 -- Walk-equals on two V5Types under their respective substitutions.
 --: (V5Type, V5Type) -> boolean
 local function walk_equal(a, b) return types_mod.equal(a, b) end
@@ -278,228 +291,12 @@ T.describe("op_sem parity: fixture 5 — let-poly CInst", function()
 	end)
 end)
 
--- ─── Fixture 6: multi-return via positional Record CSub ─────────────────
--- Source: `local a, b = f()` where f : () -> (number, number).
--- Real shape post-Phase-1/3:
---   producer ret = Record({"1"=number, "2"=number})
---   consumer destructuring emits CSub(τ_call_ret, Record({"1"=?a, "2"=?b}))
--- Phase 3 positional dispatch unifies each position covariantly.
--- (Spec gap closed: no CMultiReturn needed; positional Record handles it.)
-
-T.describe("op_sem parity: fixture 6 — multi-return positional Record CSub", function()
-	T.it("CSub(Record{1=number,2=number}, Record{1=?a,2=?b}) unifies a,b=number", function()
-		local number = types_mod.const("number") --[[: V5Type ]]
-
-		-- EXEC
-		local exec = op_sem.new_state()
-		local a = subst_mod.fresh(exec.subst, "open")
-		local b = subst_mod.fresh(exec.subst, "open")
-		local prod_ret = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
-		local dest_rec = types_mod.record({ ["1"] = types_mod.uvar(a), ["2"] = types_mod.uvar(b) }) --[[: V5Type ]]
-		op_sem.emit(exec, constraint_mod.sub(prod_ret, dest_rec, prov("call-ret")))
-		op_sem.run(exec)
-		local ra_exec = op_sem.resolve(exec, a)
-		local rb_exec = op_sem.resolve(exec, b)
-
-		-- DOCS — T-CSub-Record-Width positional branch
-		local docs = op_sem.new_state()
-		local a2 = subst_mod.fresh(docs.subst, "open")
-		local b2 = subst_mod.fresh(docs.subst, "open")
-		local prod_ret2 = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
-		local dest_rec2 = types_mod.record({ ["1"] = types_mod.uvar(a2), ["2"] = types_mod.uvar(b2) }) --[[: V5Type ]]
-		op_sem.rule_T_CSub_Record_Width(docs, prod_ret2, dest_rec2, prov("call-ret"))
-		-- The positional branch emits CSub(number, ?a) and CSub(number, ?b).
-		-- Drive the emitted sub constraints manually.
-		while docs.head <= docs.tail do
-			local c = docs.worklist[docs.head]
-			docs.worklist[docs.head] = nil
-			docs.head = docs.head + 1
-			if c ~= nil then op_sem.step(docs, c) end
-		end
-		-- Spec A: lower bounds coalesce at S-Quiesce, not eagerly.  Drive
-		-- quiescence (worklist already drained) so ?a/?b materialize.
-		op_sem.run(docs)
-		local ra_docs = op_sem.resolve(docs, a2)
-		local rb_docs = op_sem.resolve(docs, b2)
-
-		T.ok(walk_equal(ra_exec, number), "exec a = number")
-		T.ok(walk_equal(rb_exec, number), "exec b = number")
-		T.ok(walk_equal(ra_docs, number), "docs a = number")
-		T.ok(walk_equal(rb_docs, number), "docs b = number")
-		T.eq(op_sem.error_count(exec), 0, "exec no errors")
-		T.eq(op_sem.error_count(docs), 0, "docs no errors")
-	end)
-end)
-
--- ─── Fixture 6a: nil-pad under-arity ─────────────────────────────────────
--- `local a, b, c = f()` where f returns 2 values.
--- CSub(Record{1=number,2=number}, Record{1=?a,2=?b,3=?c})
--- Position 3 on the producer side is missing → padded with Const("nil").
--- Expect: a=number, b=number, c=nil.
-
-T.describe("op_sem parity: fixture 6a — nil-pad under-arity", function()
-	T.it("CSub(2-ret, 3-dest) nil-pads position 3 to Const(nil)", function()
-		local number = types_mod.const("number") --[[: V5Type ]]
-		local nilty  = types_mod.const("nil") --[[: V5Type ]]
-
-		-- EXEC
-		local exec = op_sem.new_state()
-		local a = subst_mod.fresh(exec.subst, "open")
-		local b = subst_mod.fresh(exec.subst, "open")
-		local c = subst_mod.fresh(exec.subst, "open")
-		local prod2 = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
-		local dest3 = types_mod.record({ ["1"] = types_mod.uvar(a), ["2"] = types_mod.uvar(b), ["3"] = types_mod.uvar(c) }) --[[: V5Type ]]
-		op_sem.emit(exec, constraint_mod.sub(prod2, dest3, prov("6a-call")))
-		op_sem.run(exec)
-		local ra_exec = op_sem.resolve(exec, a)
-		local rb_exec = op_sem.resolve(exec, b)
-		local rc_exec = op_sem.resolve(exec, c)
-
-		-- DOCS
-		local docs = op_sem.new_state()
-		local a2 = subst_mod.fresh(docs.subst, "open")
-		local b2 = subst_mod.fresh(docs.subst, "open")
-		local c2 = subst_mod.fresh(docs.subst, "open")
-		local prod2d = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
-		local dest3d = types_mod.record({ ["1"] = types_mod.uvar(a2), ["2"] = types_mod.uvar(b2), ["3"] = types_mod.uvar(c2) }) --[[: V5Type ]]
-		op_sem.rule_T_CSub_Record_Width(docs, prod2d, dest3d, prov("6a-call"))
-		while docs.head <= docs.tail do
-			local cv = docs.worklist[docs.head]
-			docs.worklist[docs.head] = nil
-			docs.head = docs.head + 1
-			if cv ~= nil then op_sem.step(docs, cv) end
-		end
-		op_sem.run(docs)  -- Spec A: lower bounds coalesce at S-Quiesce.
-		local ra_docs = op_sem.resolve(docs, a2)
-		local rb_docs = op_sem.resolve(docs, b2)
-		local rc_docs = op_sem.resolve(docs, c2)
-
-		T.ok(walk_equal(ra_exec, number), "exec a = number")
-		T.ok(walk_equal(rb_exec, number), "exec b = number")
-		T.ok(walk_equal(rc_exec, nilty),  "exec c = nil (nil-pad)")
-		T.ok(walk_equal(ra_docs, number), "docs a = number")
-		T.ok(walk_equal(rb_docs, number), "docs b = number")
-		T.ok(walk_equal(rc_docs, nilty),  "docs c = nil (nil-pad)")
-		T.eq(op_sem.error_count(exec), 0, "exec no errors")
-		T.eq(op_sem.error_count(docs), 0, "docs no errors")
-	end)
-end)
-
--- ─── Fixture 6b: over-arity (caller wants 1, producer returns 2) ─────────
--- `local a = f()` where f returns 2 values.
--- CSub(Record{1=number,2=number}, Record{1=?a})
--- Only position "1" is constrained; position "2" on the dest side is
--- missing → padded with Const("nil") on the dest side, but this
--- CSub(number, nil) will fire an error (number is not sub of nil).
--- Wait — the positional dispatch takes max(na,nb) positions, pads
--- whichever is shorter.  Over-arity: producer wider, dest narrower.
--- dest["2"] is nil → padded to Const("nil").  CSub(number, nil) → error.
--- But the Lua idiom `local a = f()` discards extra returns BEFORE
--- subtyping; the gen pass would emit CSub(Record{1=number}, Record{1=?a})
--- (truncated by gen, not by op_sem).  For this fixture we exercise
--- ONLY the op_sem behaviour: feeding a 2-wide producer into a 1-wide
--- dest IS an error if both are positional, because the missing dest
--- position pads to nil and number </: nil.
--- This documents the semantic boundary: arity truncation is gen-pass work.
--- op_sem enforces covariance strictly on its padded range.
--- We feed a truncated CSub(Record{1=number}, Record{1=?a}) to get the
--- clean no-error over-arity path that gen would actually emit.
-
-T.describe("op_sem parity: fixture 6b — over-arity (gen-truncated)", function()
-	T.it("CSub(1-ret, 1-dest) — gen truncates before op_sem, no error", function()
-		local number = types_mod.const("number") --[[: V5Type ]]
-
-		-- EXEC
-		local exec = op_sem.new_state()
-		local a = subst_mod.fresh(exec.subst, "open")
-		local prod1 = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
-		local dest1 = types_mod.record({ ["1"] = types_mod.uvar(a) }) --[[: V5Type ]]
-		op_sem.emit(exec, constraint_mod.sub(prod1, dest1, prov("6b-call")))
-		op_sem.run(exec)
-		local ra_exec = op_sem.resolve(exec, a)
-
-		-- DOCS
-		local docs = op_sem.new_state()
-		local a2 = subst_mod.fresh(docs.subst, "open")
-		local prod1d = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
-		local dest1d = types_mod.record({ ["1"] = types_mod.uvar(a2) }) --[[: V5Type ]]
-		op_sem.rule_T_CSub_Record_Width(docs, prod1d, dest1d, prov("6b-call"))
-		while docs.head <= docs.tail do
-			local cv = docs.worklist[docs.head]
-			docs.worklist[docs.head] = nil
-			docs.head = docs.head + 1
-			if cv ~= nil then op_sem.step(docs, cv) end
-		end
-		op_sem.run(docs)  -- Spec A: lower bounds coalesce at S-Quiesce.
-		local ra_docs = op_sem.resolve(docs, a2)
-
-		T.ok(walk_equal(ra_exec, number), "exec a = number")
-		T.ok(walk_equal(ra_docs, number), "docs a = number")
-		T.eq(op_sem.error_count(exec), 0, "exec no errors")
-		T.eq(op_sem.error_count(docs), 0, "docs no errors")
-	end)
-end)
-
--- ─── Fixture 6c: empty record → () -> () vacuous ─────────────────────────
--- `f()` where f : () -> () (returns nothing).
--- CSub(Record{}, Record{}) must succeed vacuously (n=0 loop, 0 sub emitted).
-
-T.describe("op_sem parity: fixture 6c — empty positional record", function()
-	T.it("CSub(Record{}, Record{}) succeeds vacuously", function()
-		local exec = op_sem.new_state()
-		local empty_a = types_mod.record({}) --[[: V5Type ]]
-		local empty_b = types_mod.record({}) --[[: V5Type ]]
-		op_sem.emit(exec, constraint_mod.sub(empty_a, empty_b, prov("6c-empty")))
-		op_sem.run(exec)
-
-		local docs = op_sem.new_state()
-		local empty_c = types_mod.record({}) --[[: V5Type ]]
-		local empty_d = types_mod.record({}) --[[: V5Type ]]
-		op_sem.rule_T_CSub_Record_Width(docs, empty_c, empty_d, prov("6c-empty"))
-
-		T.eq(op_sem.error_count(exec), 0, "exec no errors")
-		T.eq(op_sem.error_count(docs), 0, "docs no errors")
-	end)
-end)
-
--- ─── Fixture 6d: single-return unification ───────────────────────────────
--- `local a = f()` where f : () -> int (one return, gen emits full Record).
--- CSub(Record{1=number}, Record{1=?a}) → ?a = number.
-
-T.describe("op_sem parity: fixture 6d — single-return Record CSub", function()
-	T.it("CSub(Record{1=number}, Record{1=?a}) unifies ?a = number", function()
-		local number = types_mod.const("number") --[[: V5Type ]]
-
-		-- EXEC
-		local exec = op_sem.new_state()
-		local a = subst_mod.fresh(exec.subst, "open")
-		local prod = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
-		local dest = types_mod.record({ ["1"] = types_mod.uvar(a) }) --[[: V5Type ]]
-		op_sem.emit(exec, constraint_mod.sub(prod, dest, prov("6d-call")))
-		op_sem.run(exec)
-		local ra_exec = op_sem.resolve(exec, a)
-
-		-- DOCS
-		local docs = op_sem.new_state()
-		local a2 = subst_mod.fresh(docs.subst, "open")
-		local prodd = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
-		local destd = types_mod.record({ ["1"] = types_mod.uvar(a2) }) --[[: V5Type ]]
-		op_sem.rule_T_CSub_Record_Width(docs, prodd, destd, prov("6d-call"))
-		while docs.head <= docs.tail do
-			local cv = docs.worklist[docs.head]
-			docs.worklist[docs.head] = nil
-			docs.head = docs.head + 1
-			if cv ~= nil then op_sem.step(docs, cv) end
-		end
-		op_sem.run(docs)  -- Spec A: lower bounds coalesce at S-Quiesce.
-		local ra_docs = op_sem.resolve(docs, a2)
-
-		T.ok(walk_equal(ra_exec, number), "exec a = number")
-		T.ok(walk_equal(ra_docs, number), "docs a = number")
-		T.eq(op_sem.error_count(exec), 0, "exec no errors")
-		T.eq(op_sem.error_count(docs), 0, "docs no errors")
-	end)
-end)
+-- ─── Fixtures 6 / 6a–6d RETIRED (Spec C) ────────────────────────────────
+-- These exercised multi-return as POSITIONAL RECORDS (`Record{"1"=…,"2"=…}`)
+-- through the now-deleted positional branch of T-CSub-Record-Width.  Spec C
+-- retires positional records: multi-return sequences are TPack (Spec B).  The
+-- equivalent alignment/arity behaviour is covered by the independent-parity
+-- pack fixtures F-B1..F-B10 (op_sem_independent_parity_test.lua).
 
 -- ─── Fixture 7: circular require (DRIVER-LEVEL, not constraint-level) ──
 -- Per the spec doc + log items 3,4,8: circular require is rejected at
@@ -539,7 +336,7 @@ T.describe("op_sem parity: fixture 9 — CHKT Reduce for Functor<Maybe>", functi
 		-- Define Maybe := \alpha. Record{ tag: string, val: alpha }
 		local string_ty = types_mod.const("string") --[[: V5Type ]]
 		local var0 = types_mod.var(0) --[[: V5Type ]]
-		local maybe_body = types_mod.record({ tag = string_ty, val = var0 }) --[[: V5Type ]]
+		local maybe_body = mkrec({ tag = string_ty, val = var0 }) --[[: V5Type ]]
 		local maybe_lambda = types_mod.lambda("*", maybe_body) --[[: V5Type ]]
 		local int_ty = types_mod.const("number") --[[: V5Type ]]
 
@@ -571,7 +368,7 @@ T.describe("op_sem parity: fixture 9 — CHKT Reduce for Functor<Maybe>", functi
 		local rr_docs = op_sem.resolve(docs, r2)
 
 		-- The expected shape: Record{ tag: string, val: int }.
-		local expected = types_mod.record({ tag = string_ty, val = int_ty }) --[[: V5Type ]]
+		local expected = mkrec({ tag = string_ty, val = int_ty }) --[[: V5Type ]]
 		T.ok(walk_equal(rr_exec, expected), "exec r = Maybe<int>")
 		T.ok(walk_equal(rr_docs, expected), "docs r = Maybe<int>")
 		T.eq(op_sem.error_count(exec), 0, "exec no errors")
@@ -696,7 +493,7 @@ T.describe("op_sem parity: fixture 12 — HOUnify wakes on head rigidification",
 		local string_ty = types_mod.const("string") --[[: V5Type ]]
 		local var0 = types_mod.var(0) --[[: V5Type ]]
 		-- Maybe := \alpha. Record{ tag: string, val: alpha }
-		local maybe_body = types_mod.record({ tag = string_ty, val = var0 }) --[[: V5Type ]]
+		local maybe_body = mkrec({ tag = string_ty, val = var0 }) --[[: V5Type ]]
 		local maybe_lambda = types_mod.lambda("*", maybe_body) --[[: V5Type ]]
 
 		-- EXEC.  CHKT first (with App arg → out of Miller, parks);
@@ -719,7 +516,7 @@ T.describe("op_sem parity: fixture 12 — HOUnify wakes on head rigidification",
 		op_sem.run(exec)
 		-- After wake & reduce: ?r should be Record{tag:string, val: App(?G, int)}.
 		local rr_exec = op_sem.resolve(exec, r)
-		local expected = types_mod.record({ tag = string_ty,
+		local expected = mkrec({ tag = string_ty,
 			val = types_mod.app(types_mod.uvar(g), int_ty) }) --[[: V5Type ]]
 
 		T.ok(op_sem.error_count(exec) == 0, "exec resolves cleanly after wake")
@@ -739,7 +536,7 @@ T.describe("op_sem parity: fixture 12b — HOUnify parks then wakes", function()
 		local int_ty = types_mod.const("number") --[[: V5Type ]]
 		local string_ty = types_mod.const("string") --[[: V5Type ]]
 		local var0 = types_mod.var(0) --[[: V5Type ]]
-		local maybe_body = types_mod.record({ tag = string_ty, val = var0 }) --[[: V5Type ]]
+		local maybe_body = mkrec({ tag = string_ty, val = var0 }) --[[: V5Type ]]
 		local maybe_lambda = types_mod.lambda("*", maybe_body) --[[: V5Type ]]
 
 		local exec = op_sem.new_state()
@@ -763,7 +560,7 @@ T.describe("op_sem parity: fixture 12b — HOUnify parks then wakes", function()
 		T.ok(exec.reactivations >= 1, "HOUnify reactivated after head rigidified")
 		-- ?r should resolve to the reduced shape.
 		local rr_exec = op_sem.resolve(exec, r)
-		local expected = types_mod.record({ tag = string_ty,
+		local expected = mkrec({ tag = string_ty,
 			val = types_mod.app(types_mod.uvar(g), int_ty) }) --[[: V5Type ]]
 		T.ok(walk_equal(rr_exec, expected), "?r reduces to Maybe-of-App(?G,int) after wake")
 		-- Note: errs_before includes the T-HOUnify-Stuck from first
@@ -984,8 +781,8 @@ T.describe("op_sem variance: fixture 16 — T-CSub-Record-Width", function()
 		op_sem.variance.reset()
 		local int_ty = types_mod.const("int") --[[: V5Type ]]
 		local str_ty = types_mod.const("str") --[[: V5Type ]]
-		local wide = types_mod.record({ x = int_ty, y = str_ty }) --[[: V5Type ]]
-		local narrow = types_mod.record({ x = int_ty }) --[[: V5Type ]]
+		local wide = mkrec({ x = int_ty, y = str_ty }) --[[: V5Type ]]
+		local narrow = mkrec({ x = int_ty }) --[[: V5Type ]]
 
 		local exec = op_sem.new_state()
 		op_sem.emit(exec, constraint_mod.sub(wide, narrow, prov("width-ok")))
@@ -997,8 +794,8 @@ T.describe("op_sem variance: fixture 16 — T-CSub-Record-Width", function()
 		op_sem.variance.reset()
 		local int_ty = types_mod.const("int") --[[: V5Type ]]
 		local str_ty = types_mod.const("str") --[[: V5Type ]]
-		local wide = types_mod.record({ x = int_ty, y = str_ty }) --[[: V5Type ]]
-		local narrow = types_mod.record({ x = int_ty }) --[[: V5Type ]]
+		local wide = mkrec({ x = int_ty, y = str_ty }) --[[: V5Type ]]
+		local narrow = mkrec({ x = int_ty }) --[[: V5Type ]]
 
 		local exec = op_sem.new_state()
 		op_sem.emit(exec, constraint_mod.sub(narrow, wide, prov("width-bad")))
@@ -1021,8 +818,8 @@ T.describe("op_sem variance: fixture 16 — T-CSub-Record-Width", function()
 		-- T-CEq-Const — emitted by the T-CSub-Record-Width subgoal — NOT
 		-- T-CSub-Const-Var.  This is the explicit divergence from the
 		-- TypeScript-array unsoundness path.
-		local r_int = types_mod.record({ x = int_ty }) --[[: V5Type ]]
-		local r_str = types_mod.record({ x = str_ty }) --[[: V5Type ]]
+		local r_int = mkrec({ x = int_ty }) --[[: V5Type ]]
+		local r_str = mkrec({ x = str_ty }) --[[: V5Type ]]
 
 		local exec = op_sem.new_state()
 		op_sem.emit(exec, constraint_mod.sub(r_int, r_str, prov("invar")))
@@ -1147,8 +944,9 @@ T.describe("op_sem CRow: fixture 19 — CRowExtend binds open-row record", funct
 		op_sem.run(exec)
 		T.eq(op_sem.error_count(exec), 0, "CRowExtend on open row: no errors")
 		-- After extend, rec.fields["x"] should be int_ty.
-		T.ok(rec.fields["x"] ~= nil, "field x added to record")
-		T.ok(walk_equal(rec.fields["x"] or int_ty, int_ty), "field x = int")
+		local fx = rec.fields["x"]
+		T.ok(fx ~= nil, "field x added to record")
+		T.ok(walk_equal((fx ~= nil and fx.type) or int_ty, int_ty), "field x = int")
 	end)
 
 	T.it("CRowExtend lookup equates existing field type", function()
@@ -1157,7 +955,8 @@ T.describe("op_sem CRow: fixture 19 — CRowExtend binds open-row record", funct
 		local rv = types_mod.rowvar(2) --[[: V5Type ]]
 		local int_ty = types_mod.const("int") --[[: V5Type ]]
 		local str_ty = types_mod.const("str") --[[: V5Type ]]
-		local rec = types_mod.record_open({ x = int_ty }, rv) --[[: V5Type ]]
+		local recf = { x = types_mod.field(int_ty, false, false) } --[[: { [string]: TField } ]]
+		local rec = types_mod.record_open(recf, rv) --[[: V5Type ]]
 		op_sem.emit(exec, constraint_mod.row_extend(rec, "x", str_ty, prov("extend-x-lookup")))
 		op_sem.run(exec)
 		-- Should produce a CEq(int, str) mismatch.
@@ -1178,7 +977,7 @@ T.describe("op_sem CRow: fixture 20 — CRowExtend on closed record", function()
 		local exec = op_sem.new_state()
 		-- Closed record: row = nil (via types_mod.record).
 		local int_ty = types_mod.const("int") --[[: V5Type ]]
-		local rec = types_mod.record({ y = int_ty }) --[[: V5Type ]]
+		local rec = mkrec({ y = int_ty }) --[[: V5Type ]]
 		local str_ty = types_mod.const("str") --[[: V5Type ]]
 		op_sem.emit(exec, constraint_mod.row_extend(rec, "x", str_ty, prov("extend-closed")))
 		op_sem.run(exec)
@@ -1211,7 +1010,7 @@ T.describe("op_sem CRow: fixture 21 — CRowLacks parks while open, succeeds whe
 	T.it("CRowLacks on closed record with key present errors", function()
 		local exec = op_sem.new_state()
 		local int_ty = types_mod.const("int") --[[: V5Type ]]
-		local rec = types_mod.record({ z = int_ty }) --[[: V5Type ]]
+		local rec = mkrec({ z = int_ty }) --[[: V5Type ]]
 		op_sem.emit(exec, constraint_mod.row_lacks(rec, "z", prov("lacks-z-fail")))
 		op_sem.run(exec)
 		local found = false
@@ -1224,28 +1023,27 @@ T.describe("op_sem CRow: fixture 21 — CRowLacks parks while open, succeeds whe
 end)
 
 -- ─── Fixture 22 (risk): positional record + CRowExtend → closed-extend ERROR ──
--- Positional records are closed by construction (row = nil).
--- CRowExtend on a positional record must ERROR with T-CRowExtend-Closed.
--- This is the soundness floor: positional records NEVER grow row tails.
+-- A closed record (row = nil) cannot grow.  CRowExtend on a closed record must
+-- ERROR with T-CRowExtend-Closed.  (Spec C retires positional records; this
+-- soundness floor is tested with an ordinary closed named record.)
 
-T.describe("op_sem CRow: fixture 22 — positional record stays closed", function()
-	T.it("positional record + CRowExtend errors as T-CRowExtend-Closed", function()
+T.describe("op_sem CRow: fixture 22 — closed record stays closed", function()
+	T.it("closed record + CRowExtend errors as T-CRowExtend-Closed", function()
 		local exec = op_sem.new_state()
-		-- Positional record: keys "1", "2" — closed by types_mod.arrow/record construction.
 		local int_ty = types_mod.const("int") --[[: V5Type ]]
 		local str_ty = types_mod.const("str") --[[: V5Type ]]
-		local pos_rec = types_mod.record({ ["1"] = int_ty, ["2"] = str_ty }) --[[: V5Type ]]
+		local closed_rec = mkrec({ a = int_ty, b = str_ty }) --[[: V5Type ]]
 		-- Attempt to add a new named key via CRowExtend.
 		local bool_ty = types_mod.const("bool") --[[: V5Type ]]
-		op_sem.emit(exec, constraint_mod.row_extend(pos_rec, "name", bool_ty, prov("pos-extend")))
+		op_sem.emit(exec, constraint_mod.row_extend(closed_rec, "name", bool_ty, prov("closed-extend")))
 		op_sem.run(exec)
 		local found = false
 		for i = 1, #exec.errors do
 			local e = exec.errors[i]
 			if e ~= nil and e.rule == "T-CRowExtend-Closed" then found = true end
 		end
-		T.ok(found, "positional record cannot extend: T-CRowExtend-Closed fired")
-		T.ok(pos_rec.row == nil, "positional record row remains nil (closed)")
+		T.ok(found, "closed record cannot extend: T-CRowExtend-Closed fired")
+		T.ok(closed_rec.row == nil, "closed record row remains nil")
 	end)
 end)
 

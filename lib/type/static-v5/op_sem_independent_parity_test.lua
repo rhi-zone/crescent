@@ -32,6 +32,37 @@ local op_sem_alt     = require("lib.type.static-v5.op_sem_alt")
 --: (string) -> Provenance
 local function prov(name) return op_sem.prov("fixture", 1, name) end
 
+-- mkrec(bare): build a closed three-region TRecord (Spec C) from a bare
+-- { [name]: V5Type } map (each value wrapped as a non-optional, non-readonly
+-- TField).  ro(bare): same but every field readonly.  idxrec(key, value, ro):
+-- a record carrying a single index signature.
+--: ({ [string]: V5Type }) -> V5Type
+local function mkrec(bare)
+	local fields = {} --[[: { [string]: TField } ]]
+	for k, v in pairs(bare) do
+		if v ~= nil then fields[k] = types_mod.field(v, false, false) end
+	end
+	return types_mod.record(fields)
+end
+--: ({ [string]: V5Type }) -> V5Type
+local function ro(bare)
+	local fields = {} --[[: { [string]: TField } ]]
+	for k, v in pairs(bare) do
+		if v ~= nil then fields[k] = types_mod.field(v, false, true) end
+	end
+	return types_mod.record(fields)
+end
+--: (V5Type, V5Type, boolean) -> V5Type
+local function idxrec(key, value, readonly)
+	local idxs = {} --[[: TIndex[] ]]
+	idxs[1] = types_mod.index(key, value, readonly)
+	local empty_fields = {} --[[: { [string]: TField } ]]
+	return types_mod.record_full(empty_fields, idxs, nil)
+end
+local _ = mkrec
+local _ = ro
+local _ = idxrec
+
 -- Sort a list of error rule labels (so multiset compare is order-stable).
 --: (OpSemError[]) -> string[]
 local function error_rules(errs)
@@ -262,166 +293,9 @@ T.describe("indep parity: fixture 5 — let-poly CInst", function()
 	end)
 end)
 
--- ════════════════════════════════════════════════════════════════════
--- Fixture 6: multi-return positional Record CSub
--- ════════════════════════════════════════════════════════════════════
--- `local a, b = f()` where f : () -> (number, number).
--- CSub(Record{1=number,2=number}, Record{1=?a,2=?b}) unifies a,b=number.
--- (Spec gap closed: positional Record dispatch from Phase 3 handles this.)
-T.describe("indep parity: fixture 6 — multi-return positional Record CSub", function()
-	T.it("CSub(Record{1=number,2=number}, Record{1=?a,2=?b}) — both agree", function()
-		local number = types_mod.const("number") --[[: V5Type ]]
-
-		local exec = fresh_state()
-		local a = subst_mod.fresh(exec.subst, "open")
-		local b = subst_mod.fresh(exec.subst, "open")
-		local prod = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
-		local dest = types_mod.record({ ["1"] = types_mod.uvar(a), ["2"] = types_mod.uvar(b) }) --[[: V5Type ]]
-		op_sem.emit(exec, constraint_mod.sub(prod, dest, prov("6-call")))
-		op_sem.run(exec)
-
-		local alt = fresh_state()
-		local a2 = subst_mod.fresh(alt.subst, "open")
-		local b2 = subst_mod.fresh(alt.subst, "open")
-		local prod2 = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
-		local dest2 = types_mod.record({ ["1"] = types_mod.uvar(a2), ["2"] = types_mod.uvar(b2) }) --[[: V5Type ]]
-		op_sem.emit(alt, constraint_mod.sub(prod2, dest2, prov("6-call")))
-		op_sem_alt.run(alt)
-
-		local rex_fixture6_a = op_sem.resolve(exec, a) --[[: V5Type ]]
-		local ralt_fixture6_a = op_sem_alt.resolve(alt, a2) --[[: V5Type ]]
-		assert_resolve_eq("fixture6.a", rex_fixture6_a, ralt_fixture6_a)
-		local rex_fixture6_b = op_sem.resolve(exec, b) --[[: V5Type ]]
-		local ralt_fixture6_b = op_sem_alt.resolve(alt, b2) --[[: V5Type ]]
-		assert_resolve_eq("fixture6.b", rex_fixture6_b, ralt_fixture6_b)
-		assert_state_parity("fixture6", exec, alt)
-	end)
-end)
-
--- ════════════════════════════════════════════════════════════════════
--- Fixture 6a: nil-pad under-arity
--- ════════════════════════════════════════════════════════════════════
--- `local a, b, c = f()` where f returns 2 values.
--- CSub(Record{1=number,2=number}, Record{1=?a,2=?b,3=?c})
--- Position 3 on producer is absent → padded with Const("nil").
--- Expect: a=number, b=number, c=nil; no errors.
-T.describe("indep parity: fixture 6a — nil-pad under-arity", function()
-	T.it("CSub(2-ret, 3-dest) nil-pads position 3 — both agree", function()
-		local number = types_mod.const("number") --[[: V5Type ]]
-		local nilty  = types_mod.const("nil") --[[: V5Type ]]
-
-		local exec = fresh_state()
-		local a = subst_mod.fresh(exec.subst, "open")
-		local b = subst_mod.fresh(exec.subst, "open")
-		local c = subst_mod.fresh(exec.subst, "open")
-		local prod2 = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
-		local dest3 = types_mod.record({ ["1"] = types_mod.uvar(a), ["2"] = types_mod.uvar(b), ["3"] = types_mod.uvar(c) }) --[[: V5Type ]]
-		op_sem.emit(exec, constraint_mod.sub(prod2, dest3, prov("6a-call")))
-		op_sem.run(exec)
-
-		local alt = fresh_state()
-		local a2 = subst_mod.fresh(alt.subst, "open")
-		local b2 = subst_mod.fresh(alt.subst, "open")
-		local c2 = subst_mod.fresh(alt.subst, "open")
-		local prod2a = types_mod.record({ ["1"] = number, ["2"] = number }) --[[: V5Type ]]
-		local dest3a = types_mod.record({ ["1"] = types_mod.uvar(a2), ["2"] = types_mod.uvar(b2), ["3"] = types_mod.uvar(c2) }) --[[: V5Type ]]
-		op_sem.emit(alt, constraint_mod.sub(prod2a, dest3a, prov("6a-call")))
-		op_sem_alt.run(alt)
-
-		local rex_6a_a = op_sem.resolve(exec, a) --[[: V5Type ]]
-		local ralt_6a_a = op_sem_alt.resolve(alt, a2) --[[: V5Type ]]
-		assert_resolve_eq("fixture6a.a", rex_6a_a, ralt_6a_a)
-		local rex_6a_b = op_sem.resolve(exec, b) --[[: V5Type ]]
-		local ralt_6a_b = op_sem_alt.resolve(alt, b2) --[[: V5Type ]]
-		assert_resolve_eq("fixture6a.b", rex_6a_b, ralt_6a_b)
-		local rex_6a_c = op_sem.resolve(exec, c) --[[: V5Type ]]
-		local ralt_6a_c = op_sem_alt.resolve(alt, c2) --[[: V5Type ]]
-		assert_resolve_eq("fixture6a.c", rex_6a_c, ralt_6a_c)
-		T.ok(types_mod.equal(rex_6a_c, nilty), "exec c resolves to nil")
-		T.ok(types_mod.equal(ralt_6a_c, nilty), "alt c resolves to nil")
-		assert_state_parity("fixture6a", exec, alt)
-	end)
-end)
-
--- ════════════════════════════════════════════════════════════════════
--- Fixture 6b: over-arity (gen-truncated)
--- ════════════════════════════════════════════════════════════════════
--- `local a = f()` where f returns 2 values. Gen truncates ret to 1
--- before emitting CSub, so op_sem sees CSub(Record{1=number}, Record{1=?a}).
--- Expect: a=number; no errors.
-T.describe("indep parity: fixture 6b — over-arity gen-truncated", function()
-	T.it("CSub(1-ret, 1-dest) — both agree, no error", function()
-		local number = types_mod.const("number") --[[: V5Type ]]
-
-		local exec = fresh_state()
-		local a = subst_mod.fresh(exec.subst, "open")
-		local prod1 = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
-		local dest1 = types_mod.record({ ["1"] = types_mod.uvar(a) }) --[[: V5Type ]]
-		op_sem.emit(exec, constraint_mod.sub(prod1, dest1, prov("6b-call")))
-		op_sem.run(exec)
-
-		local alt = fresh_state()
-		local a2 = subst_mod.fresh(alt.subst, "open")
-		local prod1a = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
-		local dest1a = types_mod.record({ ["1"] = types_mod.uvar(a2) }) --[[: V5Type ]]
-		op_sem.emit(alt, constraint_mod.sub(prod1a, dest1a, prov("6b-call")))
-		op_sem_alt.run(alt)
-
-		local rex_6b_a = op_sem.resolve(exec, a) --[[: V5Type ]]
-		local ralt_6b_a = op_sem_alt.resolve(alt, a2) --[[: V5Type ]]
-		assert_resolve_eq("fixture6b.a", rex_6b_a, ralt_6b_a)
-		assert_state_parity("fixture6b", exec, alt)
-	end)
-end)
-
--- ════════════════════════════════════════════════════════════════════
--- Fixture 6c: empty record vacuous
--- ════════════════════════════════════════════════════════════════════
--- f : () -> () — both sides are Record{}.
--- CSub(Record{}, Record{}) must succeed with 0 sub constraints emitted.
-T.describe("indep parity: fixture 6c — empty positional record", function()
-	T.it("CSub(Record{}, Record{}) — vacuous, both agree", function()
-		local exec = fresh_state()
-		op_sem.emit(exec, constraint_mod.sub(types_mod.record({}), types_mod.record({}), prov("6c")))
-		op_sem.run(exec)
-
-		local alt = fresh_state()
-		op_sem.emit(alt, constraint_mod.sub(types_mod.record({}), types_mod.record({}), prov("6c")))
-		op_sem_alt.run(alt)
-
-		assert_state_parity("fixture6c", exec, alt)
-	end)
-end)
-
--- ════════════════════════════════════════════════════════════════════
--- Fixture 6d: single-return Record CSub
--- ════════════════════════════════════════════════════════════════════
--- `local a = f()` where f : () -> int (one return).
--- CSub(Record{1=number}, Record{1=?a}) → ?a = number.
-T.describe("indep parity: fixture 6d — single-return Record CSub", function()
-	T.it("CSub(Record{1=number}, Record{1=?a}) — both agree", function()
-		local number = types_mod.const("number") --[[: V5Type ]]
-
-		local exec = fresh_state()
-		local a = subst_mod.fresh(exec.subst, "open")
-		local prod = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
-		local dest = types_mod.record({ ["1"] = types_mod.uvar(a) }) --[[: V5Type ]]
-		op_sem.emit(exec, constraint_mod.sub(prod, dest, prov("6d-call")))
-		op_sem.run(exec)
-
-		local alt = fresh_state()
-		local a2 = subst_mod.fresh(alt.subst, "open")
-		local proda = types_mod.record({ ["1"] = number }) --[[: V5Type ]]
-		local desta = types_mod.record({ ["1"] = types_mod.uvar(a2) }) --[[: V5Type ]]
-		op_sem.emit(alt, constraint_mod.sub(proda, desta, prov("6d-call")))
-		op_sem_alt.run(alt)
-
-		local rex_6d_a = op_sem.resolve(exec, a) --[[: V5Type ]]
-		local ralt_6d_a = op_sem_alt.resolve(alt, a2) --[[: V5Type ]]
-		assert_resolve_eq("fixture6d.a", rex_6d_a, ralt_6d_a)
-		assert_state_parity("fixture6d", exec, alt)
-	end)
-end)
+-- Fixtures 6 / 6a–6d RETIRED (Spec C): multi-return positional records are
+-- retired in favour of TPack (Spec B); the alignment/arity behaviour is covered
+-- by the pack fixtures F-B1..F-B10 below.
 
 -- ════════════════════════════════════════════════════════════════════
 -- Fixture 7: empty constraint set
@@ -496,7 +370,7 @@ T.describe("indep parity: fixture 9 — CHKT Reduce", function()
 	T.it("Maybe lambda + CHKT(?F, [int], ?r) reduces identically", function()
 		local string_ty = types_mod.const("string") --[[: V5Type ]]
 		local var0 = types_mod.var(0) --[[: V5Type ]]
-		local maybe_body = types_mod.record({ tag = string_ty, val = var0 }) --[[: V5Type ]]
+		local maybe_body = mkrec({ tag = string_ty, val = var0 }) --[[: V5Type ]]
 		local maybe_lambda = types_mod.lambda("*", maybe_body) --[[: V5Type ]]
 		local int_ty = types_mod.const("number") --[[: V5Type ]]
 
@@ -584,7 +458,7 @@ T.describe("indep parity: fixture 12 — HOUnify wakes on rigid head", function(
 		local int_ty = types_mod.const("number") --[[: V5Type ]]
 		local string_ty = types_mod.const("string") --[[: V5Type ]]
 		local var0 = types_mod.var(0) --[[: V5Type ]]
-		local maybe_body = types_mod.record({ tag = string_ty, val = var0 }) --[[: V5Type ]]
+		local maybe_body = mkrec({ tag = string_ty, val = var0 }) --[[: V5Type ]]
 		local maybe_lambda = types_mod.lambda("*", maybe_body) --[[: V5Type ]]
 
 		local exec = fresh_state()
@@ -741,8 +615,8 @@ T.describe("indep parity: fixture 16a — width subtyping ok", function()
 		op_sem.variance.reset()
 		local int_ty = types_mod.const("int") --[[: V5Type ]]
 		local str_ty = types_mod.const("str") --[[: V5Type ]]
-		local wide = types_mod.record({ x = int_ty, y = str_ty }) --[[: V5Type ]]
-		local narrow = types_mod.record({ x = int_ty }) --[[: V5Type ]]
+		local wide = mkrec({ x = int_ty, y = str_ty }) --[[: V5Type ]]
+		local narrow = mkrec({ x = int_ty }) --[[: V5Type ]]
 
 		local exec = fresh_state()
 		op_sem.emit(exec, constraint_mod.sub(wide, narrow, prov("width-ok"))); op_sem.run(exec)
@@ -760,8 +634,8 @@ T.describe("indep parity: fixture 16b — narrow </: wide", function()
 		op_sem.variance.reset()
 		local int_ty = types_mod.const("int") --[[: V5Type ]]
 		local str_ty = types_mod.const("str") --[[: V5Type ]]
-		local wide = types_mod.record({ x = int_ty, y = str_ty }) --[[: V5Type ]]
-		local narrow = types_mod.record({ x = int_ty }) --[[: V5Type ]]
+		local wide = mkrec({ x = int_ty, y = str_ty }) --[[: V5Type ]]
+		local narrow = mkrec({ x = int_ty }) --[[: V5Type ]]
 
 		local exec = fresh_state()
 		op_sem.emit(exec, constraint_mod.sub(narrow, wide, prov("width-bad"))); op_sem.run(exec)
@@ -779,8 +653,8 @@ T.describe("indep parity: fixture 16c — invariant field types", function()
 		op_sem.variance.reset()
 		local int_ty = types_mod.const("int") --[[: V5Type ]]
 		local str_ty = types_mod.const("str") --[[: V5Type ]]
-		local r_int = types_mod.record({ x = int_ty }) --[[: V5Type ]]
-		local r_str = types_mod.record({ x = str_ty }) --[[: V5Type ]]
+		local r_int = mkrec({ x = int_ty }) --[[: V5Type ]]
+		local r_str = mkrec({ x = str_ty }) --[[: V5Type ]]
 
 		local exec = fresh_state()
 		op_sem.emit(exec, constraint_mod.sub(r_int, r_str, prov("invar"))); op_sem.run(exec)
@@ -878,12 +752,12 @@ T.describe("indep parity: fixture 20 — CRowExtend on closed record", function(
 		local str_ty = types_mod.const("str") --[[: V5Type ]]
 
 		local exec = fresh_state()
-		local rec1 = types_mod.record({ y = int_ty }) --[[: V5Type ]]
+		local rec1 = mkrec({ y = int_ty }) --[[: V5Type ]]
 		op_sem.emit(exec, constraint_mod.row_extend(rec1, "x", str_ty, prov("extend-closed")))
 		op_sem.run(exec)
 
 		local alt = fresh_state()
-		local rec2 = types_mod.record({ y = int_ty }) --[[: V5Type ]]
+		local rec2 = mkrec({ y = int_ty }) --[[: V5Type ]]
 		op_sem.emit(alt, constraint_mod.row_extend(rec2, "x", str_ty, prov("extend-closed")))
 		op_sem_alt.run(alt)
 
@@ -930,22 +804,23 @@ end)
 
 -- ════════════════════════════════════════════════════════════════════
 -- Fixture 22 (risk): positional record + CRowExtend → closed-extend ERROR
--- Positional records are closed by construction; must never grow row tails.
+-- A closed record (row = nil) must never grow a row tail (Spec C retires
+-- positional records; the soundness floor is tested with a closed named record).
 -- ════════════════════════════════════════════════════════════════════
-T.describe("indep parity: fixture 22 — positional record stays closed", function()
-	T.it("CRowExtend on positional record errors in both interpreters", function()
+T.describe("indep parity: fixture 22 — closed record stays closed", function()
+	T.it("CRowExtend on closed record errors in both interpreters", function()
 		local int_ty = types_mod.const("int") --[[: V5Type ]]
 		local str_ty = types_mod.const("str") --[[: V5Type ]]
 		local bool_ty = types_mod.const("bool") --[[: V5Type ]]
 
 		local exec = fresh_state()
-		local pos1 = types_mod.record({ ["1"] = int_ty, ["2"] = str_ty }) --[[: V5Type ]]
-		op_sem.emit(exec, constraint_mod.row_extend(pos1, "name", bool_ty, prov("pos-extend")))
+		local pos1 = mkrec({ a = int_ty, b = str_ty }) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.row_extend(pos1, "name", bool_ty, prov("closed-extend")))
 		op_sem.run(exec)
 
 		local alt = fresh_state()
-		local pos2 = types_mod.record({ ["1"] = int_ty, ["2"] = str_ty }) --[[: V5Type ]]
-		op_sem.emit(alt, constraint_mod.row_extend(pos2, "name", bool_ty, prov("pos-extend")))
+		local pos2 = mkrec({ a = int_ty, b = str_ty }) --[[: V5Type ]]
+		op_sem.emit(alt, constraint_mod.row_extend(pos2, "name", bool_ty, prov("closed-extend")))
 		op_sem_alt.run(alt)
 
 		assert_state_parity("fixture22", exec, alt)
@@ -959,7 +834,7 @@ T.describe("indep parity: fixture 22 — positional record stays closed", functi
 			local e = alt.errors[i]
 			if e ~= nil and e.rule == "T-CRowExtend-Closed" then alt_found = true end
 		end
-		T.ok(exec_found, "exec: positional record rejected CRowExtend (T-CRowExtend-Closed)")
+		T.ok(exec_found, "exec: closed record rejected CRowExtend (T-CRowExtend-Closed)")
 		T.ok(alt_found, "alt: positional record rejected CRowExtend (T-CRowExtend-Closed)")
 	end)
 end)
@@ -1537,6 +1412,243 @@ T.describe("indep parity: pack F-B10 — open-pack alignment FUZZ (doc gap #3)",
 				return {}
 			end
 			run_both("packB10.trial" .. trial, build)
+		end
+	end)
+end)
+
+-- ════════════════════════════════════════════════════════════════════
+-- Spec C — TLiteral + TRecord three-region + unit (Phase 2.3)
+-- ════════════════════════════════════════════════════════════════════
+
+-- lit(base, value): a TLiteral helper.  Returns V5Type.
+--: (string, integer | number | string | boolean) -> V5Type
+local function lit(base, value) return types_mod.literal(base, value) end
+
+-- ─── F-C1: literal <: literal (same singleton) ───────────────────────────
+T.describe("indep parity: F-C1 — literal <: literal", function()
+	T.it("42 <: 42 holds; 42 <: 43 rejects (both interpreters)", function()
+		run_both("FC1.ok", function(st)
+			op_sem.emit(st, C.sub(lit("integer", 42), lit("integer", 42), prov("lit-refl")))
+			return {}
+		end)
+		run_both("FC1.bad", function(st)
+			op_sem.emit(st, C.sub(lit("integer", 42), lit("integer", 43), prov("lit-distinct")))
+			return {}
+		end)
+	end)
+end)
+
+-- ─── F-C2: literal <: const via base_widens (incl. 42 <: number) ─────────
+T.describe("indep parity: F-C2 — literal widening", function()
+	T.it("42<:integer, 42<:number, \"GET\"<:string, true<:boolean", function()
+		run_both("FC2.int", function(st)
+			op_sem.emit(st, C.sub(lit("integer", 42), k("integer"), prov("w1")))
+			return {}
+		end)
+		run_both("FC2.num", function(st)
+			op_sem.emit(st, C.sub(lit("integer", 42), k("number"), prov("w2")))
+			return {}
+		end)
+		run_both("FC2.str", function(st)
+			op_sem.emit(st, C.sub(lit("string", "GET"), k("string"), prov("w3")))
+			return {}
+		end)
+		run_both("FC2.bool", function(st)
+			op_sem.emit(st, C.sub(lit("boolean", true), k("boolean"), prov("w4")))
+			return {}
+		end)
+		run_both("FC2.numlit", function(st)
+			op_sem.emit(st, C.sub(lit("number", 1.5), k("number"), prov("w5")))
+			return {}
+		end)
+	end)
+end)
+
+-- ─── F-C3: const <: literal NEVER ────────────────────────────────────────
+T.describe("indep parity: F-C3 — const </: literal", function()
+	T.it("integer </: 42; string </: \"GET\" (both reject)", function()
+		run_both("FC3.int", function(st)
+			op_sem.emit(st, C.sub(k("integer"), lit("integer", 42), prov("nw1")))
+			return {}
+		end)
+		run_both("FC3.str", function(st)
+			op_sem.emit(st, C.sub(k("string"), lit("string", "GET"), prov("nw2")))
+			return {}
+		end)
+	end)
+end)
+
+-- ─── F-C4: T-CEq-Literal match / mismatch ────────────────────────────────
+T.describe("indep parity: F-C4 — T-CEq-Literal", function()
+	T.it("CEq(42,42) clean; CEq(42,43) and CEq(1:int, 1.0:num) mismatch", function()
+		run_both("FC4.ok", function(st)
+			local a = lit("integer", 42) --[[: V5Type ]]
+			local b = lit("integer", 42) --[[: V5Type ]]
+			op_sem.emit(st, C.eq(a, b, prov("eq-ok")))
+			return {}
+		end)
+		run_both("FC4.valbad", function(st)
+			local a = lit("integer", 42) --[[: V5Type ]]
+			local b = lit("integer", 43) --[[: V5Type ]]
+			op_sem.emit(st, C.eq(a, b, prov("eq-val")))
+			return {}
+		end)
+		-- base distinguishes 1 (integer) from 1.0 (number) though Lua 1 == 1.0.
+		run_both("FC4.basebad", function(st)
+			local a = lit("integer", 1) --[[: V5Type ]]
+			local b = lit("number", 1.0) --[[: V5Type ]]
+			op_sem.emit(st, C.eq(a, b, prov("eq-base")))
+			return {}
+		end)
+		-- literal vs its base atom under CEq is a MISMATCH (literal ≠ const).
+		run_both("FC4.litvsconst", function(st)
+			local a = lit("integer", 42) --[[: V5Type ]]
+			op_sem.emit(st, C.eq(a, k("integer"), prov("eq-litconst")))
+			return {}
+		end)
+	end)
+end)
+
+-- ─── F-C5: readonly-covariant vs mutable-invariant record subtyping ──────
+T.describe("indep parity: F-C5 — record field variance", function()
+	T.it("readonly field covariant; mutable field invariant", function()
+		-- readonly x: integer  <:  readonly x: number   (covariant) — OK
+		run_both("FC5.ro-cov-ok", function(st)
+			local a = ro({ x = k("integer") }) --[[: V5Type ]]
+			local b = ro({ x = k("number") }) --[[: V5Type ]]
+			op_sem.emit(st, C.sub(a, b, prov("ro-cov")))
+			return {}
+		end)
+		-- mutable x: integer  <:  mutable x: number   (invariant) — REJECT
+		run_both("FC5.mut-inv-bad", function(st)
+			local a = mkrec({ x = k("integer") }) --[[: V5Type ]]
+			local b = mkrec({ x = k("number") }) --[[: V5Type ]]
+			op_sem.emit(st, C.sub(a, b, prov("mut-inv")))
+			return {}
+		end)
+		-- mutable x: integer  <:  mutable x: integer  (invariant, equal) — OK
+		run_both("FC5.mut-eq-ok", function(st)
+			local a = mkrec({ x = k("integer") }) --[[: V5Type ]]
+			local b = mkrec({ x = k("integer") }) --[[: V5Type ]]
+			op_sem.emit(st, C.sub(a, b, prov("mut-eq")))
+			return {}
+		end)
+	end)
+end)
+
+-- ─── F-C6: index-signature equality + variance ───────────────────────────
+T.describe("indep parity: F-C6 — index signatures", function()
+	T.it("{[string]:integer} = {[string]:integer}; mutable index invariant; readonly covariant", function()
+		-- CEq of identical index records.
+		run_both("FC6.eq", function(st)
+			local a = idxrec(k("string"), k("integer"), false) --[[: V5Type ]]
+			local b = idxrec(k("string"), k("integer"), false) --[[: V5Type ]]
+			op_sem.emit(st, C.eq(a, b, prov("idx-eq")))
+			return {}
+		end)
+		-- mutable {[string]:integer} </: {[string]:number} (invariant index value).
+		run_both("FC6.mut-bad", function(st)
+			local a = idxrec(k("string"), k("integer"), false) --[[: V5Type ]]
+			local b = idxrec(k("string"), k("number"), false) --[[: V5Type ]]
+			op_sem.emit(st, C.sub(a, b, prov("idx-mut")))
+			return {}
+		end)
+		-- readonly {[string]:integer} <: {[string]:number} (covariant index value).
+		run_both("FC6.ro-ok", function(st)
+			local a = idxrec(k("string"), k("integer"), true) --[[: V5Type ]]
+			local b = idxrec(k("string"), k("number"), true) --[[: V5Type ]]
+			op_sem.emit(st, C.sub(a, b, prov("idx-ro")))
+			return {}
+		end)
+	end)
+end)
+
+-- ─── F-C7: optional-field domain agreement under CEq ─────────────────────
+T.describe("indep parity: F-C7 — optional attribute identity", function()
+	T.it("CEq distinguishes optional from required field", function()
+		local opt = types_mod.record({ x = types_mod.field(k("integer"), true, false) }) --[[: V5Type ]]
+		local req = types_mod.record({ x = types_mod.field(k("integer"), false, false) }) --[[: V5Type ]]
+		-- Same attributes → clean.
+		run_both("FC7.same", function(st)
+			local a = types_mod.record({ x = types_mod.field(k("integer"), true, false) }) --[[: V5Type ]]
+			local b = types_mod.record({ x = types_mod.field(k("integer"), true, false) }) --[[: V5Type ]]
+			op_sem.emit(st, C.eq(a, b, prov("opt-same")))
+			return {}
+		end)
+		-- Differing optional attribute → mismatch in both interpreters.
+		run_both("FC7.diff", function(st)
+			op_sem.emit(st, C.eq(opt, req, prov("opt-diff")))
+			return {}
+		end)
+	end)
+end)
+
+-- ─── F-C8: unit primitive ────────────────────────────────────────────────
+T.describe("indep parity: F-C8 — unit primitive", function()
+	T.it("unit <: unit; never <: unit; unit <: unknown; unit </: nil", function()
+		run_both("FC8.refl", function(st)
+			op_sem.emit(st, C.sub(k("unit"), k("unit"), prov("u1")))
+			return {}
+		end)
+		run_both("FC8.bottom", function(st)
+			op_sem.emit(st, C.sub(k("never"), k("unit"), prov("u2")))
+			return {}
+		end)
+		run_both("FC8.top", function(st)
+			op_sem.emit(st, C.sub(k("unit"), k("unknown"), prov("u3")))
+			return {}
+		end)
+		-- unit is unrelated to nil (it is the absence of a value, not nil).
+		run_both("FC8.notnil", function(st)
+			op_sem.emit(st, C.sub(k("unit"), k("nil"), prov("u4")))
+			return {}
+		end)
+	end)
+end)
+
+-- ─── F-C9: ZERO `$`-string-matches in the interpretation path ────────────
+-- The Spec C success criterion: no literal/record/unit `$`-encoding name is
+-- matched in the interpretation path (op_sem.lua, op_sem_alt.lua, the types.lua
+-- walkers).  We scan the source of those modules for `"$X"` comparisons /
+-- prefix tests against the retired encodings.  Permanent type-level intrinsics
+-- ($Require/$Opaque/$FfiC/$GlobalScope/$Throw/$Catch/$EachField/$PatternReturn/
+-- $FindReturn) and the tuple-spread marker $Spread are NOT part of the
+-- literal/record interpretation path and are not searched for here — the test
+-- targets ONLY the retired literal/record/unit names.
+T.describe("indep parity: F-C9 — no `$`-string-matches in interpretation path", function()
+	T.it("op_sem.lua / op_sem_alt.lua / types.lua walkers contain zero retired `$`-encoding matches", function()
+		local retired = {
+			"$Lit", "$LitInt", "$LitNum", "$LitBool", "$LitStr",
+			"$idx", "$opt_", "$ro_", "$opaque", "$computed", "$pos_", "$spread_",
+			"$Unit", "$Idx",
+		} --[[: string[] ]]
+		local files = {
+			"lib/type/static-v5/op_sem.lua",
+			"lib/type/static-v5/op_sem_alt.lua",
+			"lib/type/experiments/v5_perf/types.lua",
+		} --[[: string[] ]]
+		for fi = 1, #files do
+			local path = files[fi]
+			if path ~= nil then
+				local fh = io.open(path, "r")
+				T.ok(fh ~= nil, "open " .. path)
+				if fh ~= nil then
+					local src_opt = fh:read("*a")
+					fh:close()
+					local src = src_opt or "" --[[: string ]]
+					for ri = 1, #retired do
+						local name = retired[ri]
+						if name ~= nil then
+							-- Match a quoted occurrence ("$X") — the only way a name
+							-- enters a comparison or prefix test in Lua source.
+							local needle = "\"" .. name --[[: string ]]
+							local found = src:find(needle, 1, true)
+							T.ok(found == nil,
+								path .. " must not match retired encoding " .. name)
+						end
+					end
+				end
+			end
 		end
 	end)
 end)

@@ -66,28 +66,28 @@ end)
 -- ── Literal types ────────────────────────────────────────────────────────────
 
 T.describe("literals", function()
+    local lit = types_mod.literal
     T.it("string literal double-quote", function()
-        assert_eq('"hello"', app(con("$LitStr"), con("hello")))
+        assert_eq('"hello"', lit("string", "hello"))
     end)
     T.it("string literal single-quote", function()
-        assert_eq("'world'", app(con("$LitStr"), con("world")))
+        assert_eq("'world'", lit("string", "world"))
     end)
     T.it("integer literal 0", function()
-        -- Sanity: scan_number_lit on "0" must yield $LitInt(0), not the
-        -- old silent fallback value of 0 from `tonumber(...) or 0`.
-        assert_eq("0", app(con("$LitInt"), con("0")))
+        -- Sanity: scan_number_lit on "0" must yield literal(integer, 0).
+        assert_eq("0", lit("integer", 0))
     end)
     T.it("integer literal 42", function()
-        assert_eq("42", app(con("$LitInt"), con("42")))
+        assert_eq("42", lit("integer", 42))
     end)
     T.it("float literal 3.14", function()
-        assert_eq("3.14", app(con("$LitNum"), con("3.14")))
+        assert_eq("3.14", lit("number", 3.14))
     end)
     T.it("true literal", function()
-        assert_eq("true", app(con("$LitBool"), con("true")))
+        assert_eq("true", lit("boolean", true))
     end)
     T.it("false literal", function()
-        assert_eq("false", app(con("$LitBool"), con("false")))
+        assert_eq("false", lit("boolean", false))
     end)
 end)
 
@@ -254,7 +254,8 @@ T.describe("record types", function()
             local fx = got.fields["x"]
             T.ok(fx ~= nil, "has field x")
             if fx ~= nil then
-                T.ok(types_mod.equal(fx, con("number")), "x: number")
+                T.ok(types_mod.equal(fx.type, con("number")), "x: number")
+                T.ok(not fx.optional and not fx.readonly, "x: not optional/readonly")
             end
         end
     end)
@@ -274,18 +275,34 @@ T.describe("record types", function()
             T.ok(got.fields["x"] ~= nil, "has field x")
         end
     end)
-    T.it("index signature [string]: T stores indexer", function()
+    T.it("index signature [string]: T stores an indexes[] entry", function()
         local got = pt("{ [string]: number }")
         T.ok(got.tag == "record", "record")
         if got.tag == "record" then
-            T.ok(got.fields["$idx_1"] ~= nil, "has $idx_1 field")
+            T.eq(#got.indexes, 1, "one index signature")
+            local ix = got.indexes[1]
+            if ix ~= nil then
+                T.ok(types_mod.equal(ix.key, con("string")), "index key string")
+                T.ok(types_mod.equal(ix.value, con("number")), "index value number")
+            end
         end
     end)
-    T.it("optional field x?: T stores as $opt_x", function()
+    T.it("optional field x?: T stores fields.x.optional", function()
         local got = pt("{ x?: number }")
         T.ok(got.tag == "record", "record")
         if got.tag == "record" then
-            T.ok(got.fields["$opt_x"] ~= nil, "has $opt_x field")
+            local fx = got.fields["x"]
+            T.ok(fx ~= nil, "has field x")
+            if fx ~= nil then T.ok(fx.optional, "x is optional") end
+        end
+    end)
+    T.it("readonly field stores fields.x.readonly", function()
+        local got = pt("{ readonly x: number }")
+        T.ok(got.tag == "record", "record")
+        if got.tag == "record" then
+            local fx = got.fields["x"]
+            T.ok(fx ~= nil, "has field x")
+            if fx ~= nil then T.ok(fx.readonly, "x is readonly") end
         end
     end)
     T.it("semicolon-separated fields", function()
@@ -538,9 +555,17 @@ end)
 -- ── Array sugar and postfix ───────────────────────────────────────────────────
 
 T.describe("postfix", function()
-    T.it("string[] parses as $Idx app", function()
+    T.it("string[] parses as a record with an integer index signature", function()
         local got = pt("string[]")
-        T.eq(got.tag, "app", "app")
+        T.eq(got.tag, "record", "record")
+        if got.tag == "record" then
+            T.eq(#got.indexes, 1, "one index signature")
+            local ix = got.indexes[1]
+            if ix ~= nil then
+                T.ok(types_mod.equal(ix.key, con("integer")), "index key integer")
+                T.ok(types_mod.equal(ix.value, con("string")), "index value string")
+            end
+        end
     end)
     T.it("T? is handled without crash", function()
         local st = ann.new_state()

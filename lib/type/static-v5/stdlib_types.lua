@@ -45,6 +45,18 @@ local function tc(name)   return types_mod.const(name)  end
 --: (string) -> V5Type
 local function eff(name)  return types_mod.effect(name) end
 
+-- named_record(bare): build a closed TRecord (Spec C three-region shape) from a
+-- bare { [name]: V5Type } map, wrapping each value as a non-optional,
+-- non-readonly TField.  No index signatures.
+--: ({ [string]: V5Type }) -> V5Type
+local function named_record(bare)
+    local fields = {} --[[: { [string]: TField } ]]
+    for k, v in pairs(bare) do
+        if v ~= nil then fields[k] = types_mod.field(v, false, false) end
+    end
+    return types_mod.record(fields)
+end
+
 --: (string, V5Type) -> V5Type
 local function eff_apply1(name, arg)
     --: V5Type
@@ -174,7 +186,7 @@ function M.decls()
         lines = io_lines,
         open  = io_open,
     }
-    d["io"] = types_mod.record(io_fields)
+    d["io"] = named_record(io_fields)
 
     -- ── os library ─────────────────────────────────────────────────────────
 
@@ -198,7 +210,7 @@ function M.decls()
         clock = os_clock,
         date  = os_date,
     }
-    d["os"] = types_mod.record(os_fields)
+    d["os"] = named_record(os_fields)
 
     -- ── coroutine library ───────────────────────────────────────────────────
     -- 5.F3: coroutine.create/resume/yield are fully special-cased in the
@@ -239,7 +251,7 @@ function M.decls()
         wrap   = coro_wrap,
         status = coro_status,
     }
-    d["coroutine"] = types_mod.record(coro_fields)
+    d["coroutine"] = named_record(coro_fields)
 
     return d
 end

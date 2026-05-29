@@ -22,14 +22,17 @@ local M = {}
 --:: TApp          = { tag: "app", f: V5Type, a: V5Type }
 --:: TLambda       = { tag: "lambda", k: string, b: V5Type }
 --:: TConst        = { tag: "const", name: string }
+--:: TLiteral      = { tag: "literal", base: string, value: unknown }
 --:: TRowVar       = { tag: "rowvar", id: integer }
---:: TRecord       = { tag: "record", fields: { [string]: V5Type }, row: TRowVar | nil }
+--:: TField        = { type: V5Type, optional: boolean, readonly: boolean }
+--:: TIndex        = { key: V5Type, value: V5Type, readonly: boolean }
+--:: TRecord       = { tag: "record", fields: { [string]: TField }, indexes: TIndex[], row: TRowVar | nil }
 --:: TPackVar      = { tag: "packvar", id: integer }
 --:: TPack         = { tag: "pack", items: V5Type[], rest: TPackVar | nil }
 --:: TArrow        = { tag: "arrow", args: TPack, ret: TPack }
 --:: TUnion        = { tag: "union", xs: V5Type[] }
 --:: TIntersection = { tag: "intersection", parts: V5Type[] }
---:: V5Type        = TUVar | TVarBnd | TApp | TLambda | TConst | TRowVar | TRecord | TPackVar | TPack | TArrow | TUnion | TIntersection
+--:: V5Type        = TUVar | TVarBnd | TApp | TLambda | TConst | TLiteral | TRowVar | TRecord | TPackVar | TPack | TArrow | TUnion | TIntersection
 
 --: (integer) -> V5Type
 function M.uvar(id) return { tag = "uvar", id = id } end
@@ -41,12 +44,36 @@ function M.app(f, a) return { tag = "app", f = f, a = a } end
 function M.lambda(k, b) return { tag = "lambda", k = k, b = b } end
 --: (string) -> V5Type
 function M.const(name) return { tag = "const", name = name } end
+-- literal(base, value): a singleton literal type (Spec C).  base is one of
+-- "integer" | "number" | "string" | "boolean"; value is the Lua inhabitant.
+-- A literal is a leaf atom (like const) — shift/instantiate return it unchanged,
+-- equal compares base+value, collect_uvars contributes nothing.
+--: (string, unknown) -> V5Type
+function M.literal(base, value) return { tag = "literal", base = base, value = value } end
 --: (integer) -> V5Type
 function M.rowvar(id) return { tag = "rowvar", id = id } end
---: ({ [string]: V5Type }) -> V5Type
-function M.record(fields) return { tag = "record", fields = fields, row = nil } end
---: ({ [string]: V5Type }, TRowVar) -> V5Type
-function M.record_open(fields, row) return { tag = "record", fields = fields, row = row } end
+-- field(type, optional, readonly): a TField record attribute carrier.
+--: (V5Type, boolean, boolean) -> TField
+function M.field(type, optional, readonly)
+	return { type = type, optional = optional, readonly = readonly }
+end
+-- index(key, value, readonly): a TIndex index-signature entry.
+--: (V5Type, V5Type, boolean) -> TIndex
+function M.index(key, value, readonly)
+	return { key = key, value = value, readonly = readonly }
+end
+-- record(fields): a closed record whose `fields` is a { [string]: TField } map,
+-- with no index signatures.  Three-region shape (Spec C).
+--: ({ [string]: TField }) -> V5Type
+function M.record(fields) return { tag = "record", fields = fields, indexes = {}, row = nil } end
+-- record_open(fields, row): an open record (row var) with no index signatures.
+--: ({ [string]: TField }, TRowVar) -> V5Type
+function M.record_open(fields, row) return { tag = "record", fields = fields, indexes = {}, row = row } end
+-- record_full(fields, indexes, row): the full three-region constructor.
+--: ({ [string]: TField }, TIndex[], TRowVar | nil) -> V5Type
+function M.record_full(fields, indexes, row)
+	return { tag = "record", fields = fields, indexes = indexes, row = row }
+end
 --: (V5Type[]) -> V5Type
 function M.intersection(parts) return { tag = "intersection", parts = parts } end
 -- pack(items, rest): a TPack node.  `rest` is nil (closed: exact arity #items)
@@ -134,7 +161,7 @@ end
 -- when β-reducing. Eager shift on bind.
 --: (V5Type, integer, integer) -> V5Type
 function M.shift(t, d, cutoff)
-	if t.tag == "uvar" or t.tag == "const" or t.tag == "rowvar" or t.tag == "packvar" then
+	if t.tag == "uvar" or t.tag == "const" or t.tag == "literal" or t.tag == "rowvar" or t.tag == "packvar" then
 		return t
 	elseif t.tag == "var" then
 		if t.i >= cutoff then return { tag = "var", i = t.i + d } end
@@ -144,14 +171,23 @@ function M.shift(t, d, cutoff)
 	elseif t.tag == "lambda" then
 		return { tag = "lambda", k = t.k, b = M.shift(t.b, d, cutoff + 1) }
 	elseif t.tag == "record" then
-		local out = {} --[[: { [string]: V5Type } ]]
+		-- Three-region: shift each field's `.type` (scalar attrs copied) and each
+		-- index's key/value; `row` is a gensym TRowVar, never shifted.
+		local out = {} --[[: { [string]: TField } ]]
 		for fk, fv in pairs(t.fields) do
 			if fv ~= nil then
-				local sh = M.shift(fv, d, cutoff) --[[: V5Type ]]
-				out[fk] = sh
+				local sh = M.shift(fv.type, d, cutoff) --[[: V5Type ]]
+				out[fk] = { type = sh, optional = fv.optional, readonly = fv.readonly }
 			end
 		end
-		return { tag = "record", fields = out, row = t.row }
+		local idxs = {} --[[: TIndex[] ]]
+		for i = 1, #t.indexes do
+			local ix = t.indexes[i]
+			if ix ~= nil then
+				idxs[i] = { key = M.shift(ix.key, d, cutoff), value = M.shift(ix.value, d, cutoff), readonly = ix.readonly }
+			end
+		end
+		return { tag = "record", fields = out, indexes = idxs, row = t.row }
 	elseif t.tag == "pack" then
 		return M.shift_pack(t, d, cutoff)
 	elseif t.tag == "arrow" then
@@ -191,7 +227,7 @@ end
 -- decrementing outer indices. Used by β.
 --: (V5Type, V5Type, integer) -> V5Type
 function M.instantiate(body, arg, depth)
-	if body.tag == "uvar" or body.tag == "const" or body.tag == "rowvar" or body.tag == "packvar" then
+	if body.tag == "uvar" or body.tag == "const" or body.tag == "literal" or body.tag == "rowvar" or body.tag == "packvar" then
 		return body
 	elseif body.tag == "var" then
 		if body.i == depth then return M.shift(arg, depth, 0) end
@@ -202,11 +238,21 @@ function M.instantiate(body, arg, depth)
 	elseif body.tag == "lambda" then
 		return { tag = "lambda", k = body.k, b = M.instantiate(body.b, arg, depth + 1) }
 	elseif body.tag == "record" then
-		local out = {} --[[: { [string]: V5Type } ]]
+		local out = {} --[[: { [string]: TField } ]]
 		for fk, fv in pairs(body.fields) do
-			if fv ~= nil then local sh = M.instantiate(fv, arg, depth) --[[: V5Type ]]; out[fk] = sh end
+			if fv ~= nil then
+				local sh = M.instantiate(fv.type, arg, depth) --[[: V5Type ]]
+				out[fk] = { type = sh, optional = fv.optional, readonly = fv.readonly }
+			end
 		end
-		return { tag = "record", fields = out, row = body.row }
+		local idxs = {} --[[: TIndex[] ]]
+		for i = 1, #body.indexes do
+			local ix = body.indexes[i]
+			if ix ~= nil then
+				idxs[i] = { key = M.instantiate(ix.key, arg, depth), value = M.instantiate(ix.value, arg, depth), readonly = ix.readonly }
+			end
+		end
+		return { tag = "record", fields = out, indexes = idxs, row = body.row }
 	elseif body.tag == "pack" then
 		return M.instantiate_pack(body, arg, depth)
 	elseif body.tag == "arrow" then
@@ -237,6 +283,14 @@ function M.equal(a, b)
 	if a.tag == "uvar" and b.tag == "uvar" then return a.id == b.id end
 	if a.tag == "var" and b.tag == "var" then return a.i == b.i end
 	if a.tag == "const" and b.tag == "const" then return a.name == b.name end
+	-- Literal equality: same singleton.  `base` is compared FIRST because Lua
+	-- `1 == 1.0` is true, so the integer literal 1 and the number literal 1.0
+	-- are kept distinct by base, not value.
+	if a.tag == "literal" and b.tag == "literal" then
+		if a.base ~= b.base then return false end
+		if a.value == b.value then return true end
+		return false
+	end
 	if a.tag == "rowvar" and b.tag == "rowvar" then return a.id == b.id end
 	if a.tag == "packvar" and b.tag == "packvar" then return a.id == b.id end
 	if a.tag == "app" and b.tag == "app" then
@@ -249,10 +303,23 @@ function M.equal(a, b)
 	end
 	if a.tag == "record" and b.tag == "record" then
 		local af, bf = a.fields, b.fields
+		-- Domains must match exactly (both directions).
 		for k, _ in pairs(af) do if bf[k] == nil then return false end end
-		for k, v in pairs(bf) do
-			local av = af[k]
-			if av == nil or not M.equal(av, v) then return false end
+		for k, _ in pairs(bf) do if af[k] == nil then return false end end
+		for k, av in pairs(af) do
+			local bv = bf[k]
+			if bv == nil then return false end
+			-- Attributes are part of identity (per-field optional/readonly).
+			if av.optional ~= bv.optional or av.readonly ~= bv.readonly then return false end
+			if not M.equal(av.type, bv.type) then return false end
+		end
+		-- Index lists: same length, pairwise equal on key+value+readonly.
+		if #a.indexes ~= #b.indexes then return false end
+		for i = 1, #a.indexes do
+			local ia, ib = a.indexes[i], b.indexes[i]
+			if ia.readonly ~= ib.readonly then return false end
+			if not M.equal(ia.key, ib.key) then return false end
+			if not M.equal(ia.value, ib.value) then return false end
 		end
 		-- Compare row extension: both nil (closed) or same rowvar id.
 		if a.row == nil and b.row == nil then return true end
@@ -292,7 +359,13 @@ function M.collect_uvars(t, acc)
 		M.collect_uvars(t.f, acc); M.collect_uvars(t.a, acc)
 	elseif t.tag == "lambda" then M.collect_uvars(t.b, acc)
 	elseif t.tag == "record" then
-		for _, fv in pairs(t.fields) do M.collect_uvars(fv, acc) end
+		for _, fv in pairs(t.fields) do M.collect_uvars(fv.type, acc) end
+		for i = 1, #t.indexes do
+			local ix = t.indexes[i]
+			M.collect_uvars(ix.key, acc)
+			M.collect_uvars(ix.value, acc)
+		end
+		-- `row` is a TRowVar, not a UVar; contributes nothing.
 	elseif t.tag == "pack" then
 		for i = 1, #t.items do M.collect_uvars(t.items[i], acc) end
 		-- A TPackVar contributes no UVar; its bound contents (in pack_bindings)

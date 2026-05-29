@@ -257,11 +257,23 @@ function M.walk(s, t)
 		local sb = M.walk(s, t.b) --[[: V5Type ]]
 		return { tag = "lambda", k = t.k, b = sb }
 	elseif t.tag == "record" then
-		local out = {} --[[: { [string]: V5Type } ]]
+		-- Three-region: walk each field's `.type` (attrs copied) and each index's
+		-- key/value; `row` is a TRowVar, returned as-is.
+		local out = {} --[[: { [string]: TField } ]]
 		for fk, fv in pairs(t.fields) do
-			if fv ~= nil then local sh = M.walk(s, fv) --[[: V5Type ]]; out[fk] = sh end
+			if fv ~= nil then
+				local sh = M.walk(s, fv.type) --[[: V5Type ]]
+				out[fk] = { type = sh, optional = fv.optional, readonly = fv.readonly }
+			end
 		end
-		return { tag = "record", fields = out, row = t.row }
+		local idxs = {} --[[: TIndex[] ]]
+		for i = 1, #t.indexes do
+			local ix = t.indexes[i]
+			if ix ~= nil then
+				idxs[i] = { key = M.walk(s, ix.key), value = M.walk(s, ix.value), readonly = ix.readonly }
+			end
+		end
+		return { tag = "record", fields = out, indexes = idxs, row = t.row }
 	elseif t.tag == "pack" then
 		return M.walk_pack(s, t)
 	elseif t.tag == "arrow" then

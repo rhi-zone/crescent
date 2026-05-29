@@ -162,9 +162,14 @@ T.describe("op_sem 5.F4-residual: record width reduction", function()
 		local int_ty = types_mod.const("integer") --[[: V5Type ]]
 		local str_ty = types_mod.const("string")  --[[: V5Type ]]
 		-- Wider: {x: integer, y: string}
-		local wide = types_mod.record({ x = int_ty, y = str_ty }) --[[: V5Type ]]
+		local wf = {
+			x = types_mod.field(int_ty, false, false),
+			y = types_mod.field(str_ty, false, false),
+		} --[[: { [string]: TField } ]]
+		local wide = types_mod.record(wf) --[[: V5Type ]]
 		-- Narrower: {x: integer}
-		local narrow = types_mod.record({ x = int_ty }) --[[: V5Type ]]
+		local nf = { x = types_mod.field(int_ty, false, false) } --[[: { [string]: TField } ]]
+		local narrow = types_mod.record(nf) --[[: V5Type ]]
 		local uu1 = types_mod.uvar(u) --[[: V5Type ]]
 		local uu2 = types_mod.uvar(u) --[[: V5Type ]]
 		op_sem.emit(st, constraint_mod.sub(uu1, wide,   prov("u<:wide")))

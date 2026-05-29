@@ -130,40 +130,29 @@ end
 -- holding `$Lit*` knowledge); Spec C will swap that backing without touching
 -- `atomic_sub`.
 
--- widens_to(a, name): atom `a` widens to the base atom `name`.  ONLY site that
--- inspects literal encodings; abstracts the integer<:number + literal edges.
+-- widens_to(a, name): atom `a` widens to the base atom `name`.  Spec C backing:
+-- tag-dispatch on `a.tag == "literal"` reading `a.base` (NO `$`-name matching).
+-- A literal widens to its base; an integer-based literal also widens to number.
+-- The const arm carries the bare integer<:number lattice edge.
 --: (V5Type, string) -> boolean
 local function widens_to(a, name)
 	if a.tag == "const" then
 		if a.name == "integer" then return name == "number" end
-		if a.name == "true" or a.name == "false" then return name == "boolean" end
 		return false
 	end
-	if a.tag == "app" then
-		local h = a.f
-		if h ~= nil and h.tag == "const" then
-			if h.name == "$Lit" then return name == "string" end
-			if h.name == "$LitInt" then return name == "integer" or name == "number" end
-			if h.name == "$LitNum" then return name == "number" end
-			if h.name == "true" or h.name == "false" then return name == "boolean" end
-		end
+	if a.tag == "literal" then
+		if a.base == name then return true end
+		if a.base == "integer" and name == "number" then return true end
+		return false
 	end
 	return false
 end
 
--- A leaf the atomic lattice handles: a const, or a literal-encoding app head.
+-- A leaf the atomic lattice handles: a const or a literal (both base atoms).
+-- Pure tag-dispatch (Spec C) — no `$`-name matching.
 --: (V5Type) -> boolean
 local function is_atom(t)
-	if t.tag == "const" then return true end
-	if t.tag == "app" then
-		local h = t.f
-		if h ~= nil and h.tag == "const" then
-			local n = h.name
-			return n == "$Lit" or n == "$LitInt" or n == "$LitNum"
-				or n == "true" or n == "false"
-		end
-	end
-	return false
+	return t.tag == "const" or t.tag == "literal"
 end
 
 -- atomic_sub(a, b): decidable base-lattice judgment.  bottom/top/refl/widen.
@@ -364,6 +353,26 @@ function M.rule_T_CEq_Const(st, a, b, prov)
 	end
 end
 
+-- T-CEq-Literal (Spec C).  Two literals are equal iff base AND value agree.
+-- `base` distinguishes 1 (integer) from 1.0 (number) since Lua `1 == 1.0`.
+-- A literal vs a non-literal head reaches T-CEq-Mismatch (tags differ): a literal
+-- is only a SUBTYPE of its base, never equal to it.
+--: (AltState, V5Type, V5Type, Provenance) -> nil
+function M.rule_T_CEq_Literal(st, a, b, prov)
+	local _ = prov
+	local da = subst_mod.deref(st.subst, a) --[[: V5Type ]]
+	local db = subst_mod.deref(st.subst, b) --[[: V5Type ]]
+	if da.tag ~= "literal" or db.tag ~= "literal" then return end
+	if da.base ~= db.base then
+		record_error(st, "T-CEq-Literal", "literal base mismatch " .. da.base .. " vs " .. db.base)
+		return
+	end
+	if da.value ~= db.value then
+		record_error(st, "T-CEq-Literal",
+			"literal value mismatch " .. tostring(da.value) .. " vs " .. tostring(db.value))
+	end
+end
+
 -- ── TPack substrate (Spec B), independently encoded ─────────────────────────
 -- Pack-var bindings live in st.subst.pack_bindings (single-rest invariant).
 
@@ -448,47 +457,16 @@ function M.rule_T_CEq_Arrow(st, a, b, prov)
 	emit(st, constraint_mod.eq(da.ret, db.ret, prov))
 end
 
--- is_positional: true iff record fields are exactly the string keys "1".."n"
--- for some n >= 0, contiguous with no gaps and no non-numeric keys.
--- Independent encoding from op_sem.lua per the alternate-interpreter mandate.
---: (V5Type) -> boolean
-local function is_positional(r)
-	if r.tag ~= "record" then return false end
-	local n = 0
-	for _ in pairs(r.fields) do n = n + 1 end
-	for i = 1, n do
-		if r.fields[tostring(i)] == nil then return false end
-	end
-	return true
-end
-
+-- T-CEq-Record (Spec C, three-region).  Domains, per-field attributes, index
+-- lists, and rows must all agree; field types and index key/value pairs are
+-- equated.  Positional records are retired (TPack owns sequences) — no
+-- positional branch.
 --: (AltState, V5Type, V5Type, Provenance) -> nil
 function M.rule_T_CEq_Record(st, a, b, prov)
 	local da = subst_mod.deref(st.subst, a) --[[: V5Type ]]
 	local db = subst_mod.deref(st.subst, b) --[[: V5Type ]]
 	if da.tag ~= "record" or db.tag ~= "record" then return end
-	local a_pos = is_positional(da)
-	local b_pos = is_positional(db)
-	if a_pos and b_pos then
-		-- Positional branch: eq is strict on arity (no nil-pad for eq).
-		local na, nb = 0, 0
-		for _ in pairs(da.fields) do na = na + 1 end
-		for _ in pairs(db.fields) do nb = nb + 1 end
-		if na ~= nb then
-			record_error(st, "T-CEq-Record", "positional arity mismatch: " .. na .. " vs " .. nb)
-			return
-		end
-		for i = 1, na do
-			local va = da.fields[tostring(i)]
-			local vb = db.fields[tostring(i)]
-			if va ~= nil and vb ~= nil then
-				emit(st, constraint_mod.eq(va, vb, prov))
-			end
-		end
-		return
-	end
-	-- Mixed shapes (one positional, one named): fall through to named-key rule.
-	-- Domain check.
+	-- Domain agreement.
 	for k, _v in pairs(da.fields) do
 		if db.fields[k] == nil then
 			record_error(st, "T-CEq-Record", "missing field " .. k)
@@ -501,11 +479,41 @@ function M.rule_T_CEq_Record(st, a, b, prov)
 			return
 		end
 	end
-	for k, va in pairs(da.fields) do
-		local vb = db.fields[k]
-		if va ~= nil and vb ~= nil then
-			emit(st, constraint_mod.eq(va, vb, prov))
+	-- Per-field attribute agreement, then equate types.
+	for k, fa in pairs(da.fields) do
+		local fb = db.fields[k]
+		if fb ~= nil then
+			if fa.optional ~= fb.optional or fa.readonly ~= fb.readonly then
+				record_error(st, "T-CEq-Record", "field attribute mismatch: " .. k)
+				return
+			end
+			emit(st, constraint_mod.eq(fa.type, fb.type, prov))
 		end
+	end
+	-- Index lists: equal length, pairwise key+value equality (readonly agreement).
+	if #da.indexes ~= #db.indexes then
+		record_error(st, "T-CEq-Record", "index count mismatch: " .. #da.indexes .. " vs " .. #db.indexes)
+		return
+	end
+	for i = 1, #da.indexes do
+		local ia, ib = da.indexes[i], db.indexes[i]
+		if ia ~= nil and ib ~= nil then
+			if ia.readonly ~= ib.readonly then
+				record_error(st, "T-CEq-Record", "index attribute mismatch")
+				return
+			end
+			emit(st, constraint_mod.eq(ia.key, ib.key, prov))
+			emit(st, constraint_mod.eq(ia.value, ib.value, prov))
+		end
+	end
+	-- Row agreement: both nil, or both TRowVar with equal id.
+	local ar, br = da.row, db.row
+	if (ar == nil) ~= (br == nil) then
+		record_error(st, "T-CEq-Record", "row disagreement (open vs closed)")
+		return
+	end
+	if ar ~= nil and br ~= nil and ar.id ~= br.id then
+		record_error(st, "T-CEq-Record", "row var id disagreement")
 	end
 end
 
@@ -550,6 +558,7 @@ local function step_ceq(st, a, b, prov)
 		M.rule_T_CEq_Mismatch(st, da, db, prov); return
 	end
 	if da.tag == "const" then M.rule_T_CEq_Const(st, da, db, prov); return end
+	if da.tag == "literal" then M.rule_T_CEq_Literal(st, da, db, prov); return end
 	if da.tag == "arrow" then M.rule_T_CEq_Arrow(st, da, db, prov); return end
 	if da.tag == "pack" then M.rule_T_CEq_Pack(st, da, db, prov); return end
 	if da.tag == "record" then M.rule_T_CEq_Record(st, da, db, prov); return end
@@ -795,48 +804,82 @@ function M.rule_T_CSub_App_Struct(st, a, b, prov)
 	emit(st, constraint_mod.eq(da.a, db.a, prov))
 end
 
+-- alt_field_subgoal: the ONE variance rule (Spec C), shared by named fields and
+-- index sigs.  The SUPERTYPE modifier governs: readonly ⇒ covariant (CSub);
+-- mutable (default) ⇒ invariant (CEq).
+--: (AltState, V5Type, V5Type, boolean, Provenance) -> nil
+local function alt_field_subgoal(st, sub_type, super_type, super_readonly, prov)
+	if super_readonly then
+		emit(st, constraint_mod.sub(sub_type, super_type, prov))   -- covariant
+	else
+		emit(st, constraint_mod.eq(sub_type, super_type, prov))    -- invariant
+	end
+end
+
+-- T-CSub-Record (Spec C, three-region).  Width subtyping with the one variance
+-- rule, optional-presence checks, and index-signature subtyping (keys
+-- contravariant, values per the readonly/mutable rule).  No positional branch.
 --: (AltState, V5Type, V5Type, Provenance) -> nil
 function M.rule_T_CSub_Record_Width(st, a, b, prov)
 	local da = subst_mod.deref(st.subst, a) --[[: V5Type ]]
 	local db = subst_mod.deref(st.subst, b) --[[: V5Type ]]
 	if da.tag ~= "record" or db.tag ~= "record" then return end
-	local a_pos = is_positional(da)
-	local b_pos = is_positional(db)
-	if a_pos and b_pos then
-		-- Positional covariant branch (Arrow returns).
-		-- Nil-pad policy: only iterate up to nb (supertype's field count).
-		--   - Slots 1..min(na,nb): sub(a.fields[i], b.fields[i]) — covariant.
-		--   - Slots na+1..nb: a's missing slots nil-padded; sub(nil, b.fields[i]).
-		--   - Slots nb+1..na: truncation — b does not require them; skip.
-		-- This matches Lua multi-return semantics: extra callee returns are
-		-- silently discarded when fewer LHS slots are requested.
-		local na, nb = 0, 0
-		for _ in pairs(da.fields) do na = na + 1 end
-		for _ in pairs(db.fields) do nb = nb + 1 end
-		local nil_type = types_mod.const("nil")
-		for i = 1, nb do
-			local va = da.fields[tostring(i)] or nil_type
-			local vb = db.fields[tostring(i)]
-			if vb ~= nil then
-				emit(st, constraint_mod.sub(va, vb, prov))
+	-- (1) Named-field obligations (per supertype field k).
+	for k, fb in pairs(db.fields) do
+		local fa = da.fields[k]
+		if fa ~= nil then
+			if fa.optional and not fb.optional then
+				record_error(st, "T-CSub-Record-Width",
+					"optional field cannot satisfy required field: " .. k)
+			else
+				alt_field_subgoal(st, fa.type, fb.type, fb.readonly, prov)
+			end
+		else
+			if fb.optional then
+				-- OK: supertype optional field may be absent.
+			else
+				-- Required field missing: covered by a string-keyed subtype index?
+				local covered = false
+				for j = 1, #da.indexes do
+					local ix = da.indexes[j]
+					if ix ~= nil and ix.key.tag == "const" and ix.key.name == "string" then
+						alt_field_subgoal(st, ix.value, fb.type, fb.readonly, prov)
+						covered = true
+						break
+					end
+				end
+				if not covered then
+					record_error(st, "T-CSub-Record-Width", "supertype demands missing field " .. k)
+				end
 			end
 		end
-		return
 	end
-	-- Mixed shapes (one positional, one named): fall through to named-key rule.
-	-- dom(G) ⊆ dom(F)  where da=F (sub), db=G (sup).
-	for k, _v in pairs(db.fields) do
-		if da.fields[k] == nil then
-			record_error(st, "T-CSub-Record-Width", "supertype demands missing field " .. k)
-			return
+	-- (2) Index-signature obligations (per supertype index).  Keys contravariant;
+	-- values per readonly/mutable variance.
+	for i = 1, #db.indexes do
+		local ixb = db.indexes[i]
+		if ixb ~= nil then
+			local witnessed = false
+			if ixb.key.tag == "const" and ixb.key.name == "string" then
+				for _k, fa in pairs(da.fields) do
+					alt_field_subgoal(st, fa.type, ixb.value, ixb.readonly, prov)
+					witnessed = true
+				end
+			end
+			for j = 1, #da.indexes do
+				local ixa = da.indexes[j]
+				if ixa ~= nil then
+					emit(st, constraint_mod.sub(ixb.key, ixa.key, prov))  -- key contra
+					alt_field_subgoal(st, ixa.value, ixb.value, ixb.readonly, prov)
+					witnessed = true
+				end
+			end
+			if not witnessed and da.row == nil then
+				record_error(st, "T-CSub-Record-Width", "no witness for required index signature")
+			end
 		end
 	end
-	for k, vb in pairs(db.fields) do
-		local va = da.fields[k]
-		if va ~= nil and vb ~= nil then
-			emit(st, constraint_mod.eq(va, vb, prov))
-		end
-	end
+	-- (3) Subtype-only fields forgotten (width); open supertype row absorbs surplus.
 end
 
 --: (AltState, V5Type, V5Type, Provenance) -> nil
@@ -1021,7 +1064,7 @@ function M.rule_T_CTOpen(st, tv, prov)
 	local cur = subst_mod.binding(st.subst, tv)
 	if cur ~= nil then return end -- idempotent
 	-- Phase preserved (already Open by default).
-	bind_and_wake(st, tv, types_mod.record({} --[[: { [string]: V5Type } ]]))
+	bind_and_wake(st, tv, types_mod.record({} --[[: { [string]: TField } ]]))
 end
 
 --: (AltState, integer, string, V5Type, Provenance) -> nil
@@ -1029,8 +1072,8 @@ function M.rule_T_CTSet_Open_Fresh(st, tv, key, ty, prov)
 	local _ = prov
 	if subst_mod.binding(st.subst, tv) ~= nil then return end
 	if subst_mod.phase(st.subst, tv) ~= "open" then return end
-	local fields = {} --[[: { [string]: V5Type } ]]
-	fields[key] = ty
+	local fields = {} --[[: { [string]: TField } ]]
+	fields[key] = types_mod.field(ty, false, false)
 	bind_and_wake(st, tv, types_mod.record(fields))
 end
 
@@ -1044,7 +1087,7 @@ function M.rule_T_CTSet_Open_Extend(st, tv, key, ty, prov)
 	-- The binding is monotone (no overwrite); to extend we mutate the
 	-- field table in place.  This matches the substrate's "single source
 	-- of truth" guarantee — the bound record IS the row.
-	cur.fields[key] = ty
+	cur.fields[key] = types_mod.field(ty, false, false)
 	-- Field extension is an observable change to ?t; wake watchers.
 	local r = subst_mod.find(st.subst, tv)
 	wake(st, r)
@@ -1058,7 +1101,7 @@ function M.rule_T_CTSet_Open_Equate(st, tv, key, ty, prov)
 	if subst_mod.phase(st.subst, tv) ~= "open" then return end
 	local existing = cur.fields[key]
 	if existing == nil then return end
-	emit(st, constraint_mod.eq(existing, ty, prov))
+	emit(st, constraint_mod.eq(existing.type, ty, prov))
 end
 
 --: (AltState, integer, string, V5Type, Provenance) -> nil
@@ -1086,8 +1129,8 @@ local function step_tset(st, tv, key, ty, prov)
 	-- ?t bound to a non-record under Open: degenerate; defer to a CEq.
 	if cur == nil then return end
 	local cur_nn = cur --[[: V5Type ]]
-	local fields = {} --[[: { [string]: V5Type } ]]
-	fields[key] = ty
+	local fields = {} --[[: { [string]: TField } ]]
+	fields[key] = types_mod.field(ty, false, false)
 	local rec = types_mod.record(fields) --[[: V5Type ]]
 	emit(st, constraint_mod.eq(cur_nn, rec, prov))
 end
@@ -1157,19 +1200,19 @@ function M.rule_T_CRowExtend(st, record_ty, key, field_ty, prov)
 		-- Open row.
 		if rec.fields[key] ~= nil then
 			-- Lookup: equate existing with field_ty.
-			local existing = rec.fields[key] --[[: V5Type ]]
-			emit(st, constraint_mod.eq(existing, field_ty, prov))
+			local existing = rec.fields[key] --[[: TField ]]
+			emit(st, constraint_mod.eq(existing.type, field_ty, prov))
 			return "done"
 		end
 		-- Bind: extend the record's field table.
-		rec.fields[key] = field_ty
+		rec.fields[key] = types_mod.field(field_ty, false, false)
 		return "done"
 	end
 	-- Closed row.
 	if rec.fields[key] ~= nil then
 		-- Key already present: equate.
-		local existing = rec.fields[key] --[[: V5Type ]]
-		emit(st, constraint_mod.eq(existing, field_ty, prov))
+		local existing = rec.fields[key] --[[: TField ]]
+		emit(st, constraint_mod.eq(existing.type, field_ty, prov))
 		return "done"
 	end
 	-- Closed and missing: error.
@@ -1267,7 +1310,7 @@ function M.rule_T_CMCall_Sealed_Field(st, tv, key, ret, prov)
 	if cur == nil or cur.tag ~= "record" then return end
 	local f_opt = cur.fields[key]
 	if f_opt == nil then return end
-	local f = f_opt --[[: V5Type ]]
+	local f = f_opt.type --[[: V5Type ]]
 	if f.tag ~= "arrow" then
 		-- Per spec: "F[k] = Arrow(_, [τ_ret, ...])".  Non-arrow field is
 		-- not addressed by an explicit rule; treat as missing for v5.0.
@@ -1443,14 +1486,21 @@ local function abstract_body(st, t, derefs_args)
 			local rb = rewrite(x.b) --[[: V5Type ]]
 			return types_mod.lambda(x.k, rb)
 		elseif x.tag == "record" then
-			local out = {} --[[: { [string]: V5Type } ]]
+			local out = {} --[[: { [string]: TField } ]]
 			for k, v in pairs(x.fields) do
 				if v ~= nil then
-					local rv = rewrite(v) --[[: V5Type ]]
-					out[k] = rv
+					local rv = rewrite(v.type) --[[: V5Type ]]
+					out[k] = { type = rv, optional = v.optional, readonly = v.readonly }
 				end
 			end
-			return types_mod.record(out)
+			local idxs = {} --[[: TIndex[] ]]
+			for i = 1, #x.indexes do
+				local ix = x.indexes[i]
+				if ix ~= nil then
+					idxs[i] = { key = rewrite(ix.key), value = rewrite(ix.value), readonly = ix.readonly }
+				end
+			end
+			return types_mod.record_full(out, idxs, x.row)
 		elseif x.tag == "pack" then
 			return rewrite_pack(x)
 		elseif x.tag == "arrow" then
@@ -1636,10 +1686,14 @@ local function struct_sub(a, b)
 	if types_mod.equal(a, b) then return true end
 	if a.tag == "record" and b.tag == "record" then
 		if b.row ~= nil then return false end
+		-- Index signatures present: punt (cheap path covers named-field width only).
+		if #a.indexes ~= 0 or #b.indexes ~= 0 then return false end
 		for k, bv in pairs(b.fields) do
 			local av = a.fields[k]
 			if av == nil then return false end
-			if not struct_sub(av, bv) then return false end
+			-- readonly supertype ⇒ covariant; mutable ⇒ requires both directions.
+			if not struct_sub(av.type, bv.type) then return false end
+			if not bv.readonly and not struct_sub(bv.type, av.type) then return false end
 		end
 		return true
 	end

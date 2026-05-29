@@ -141,9 +141,9 @@ local T_UNKNOWN = types_mod.const("unknown")
 --: V5Type
 local T_STRING = types_mod.const("string")
 --: V5Type
-local T_LIT_TRUE = types_mod.const("true")
+local T_LIT_TRUE = types_mod.literal("boolean", true)
 --: V5Type
-local T_LIT_FALSE = types_mod.const("false")
+local T_LIT_FALSE = types_mod.literal("boolean", false)
 --: V5Type
 local T_COROUTINE = types_mod.const("Coroutine")
 
@@ -277,17 +277,28 @@ resolve_aliases_impl = function(t, aliases, subst, visited, depth)
         local ra = resolve_aliases_impl(t_a, aliases, subst, visited, depth + 1)
         return types_mod.app(rf, ra)
     elseif t.tag == "record" then
-        --: { tag: string, fields: { [string]: V5Type }, row: { id: integer, tag: "rowvar" } | nil, ... }
         local tr = t
-        local out = {} --[[: { [string]: V5Type } ]]
+        -- Three-region (Spec C): recurse field `.type` (attrs copied) and index
+        -- key/value; `row` carried through.
+        local out = {} --[[: { [string]: TField } ]]
         for fk, fv in pairs(tr.fields) do
             if fv ~= nil then
-                out[fk] = resolve_aliases_impl(fv, aliases, subst, visited, depth + 1)
+                local rt = resolve_aliases_impl(fv.type, aliases, subst, visited, depth + 1)
+                out[fk] = { type = rt, optional = fv.optional, readonly = fv.readonly }
             end
         end
-        --: { id: integer, tag: "rowvar" } | nil
-        local tr_row = tr.row
-        return { tag = "record", fields = out, row = tr_row }
+        local idxs = {} --[[: TIndex[] ]]
+        for i = 1, #tr.indexes do
+            local ix = tr.indexes[i]
+            if ix ~= nil then
+                idxs[i] = {
+                    key = resolve_aliases_impl(ix.key, aliases, subst, visited, depth + 1),
+                    value = resolve_aliases_impl(ix.value, aliases, subst, visited, depth + 1),
+                    readonly = ix.readonly,
+                }
+            end
+        end
+        return types_mod.record_full(out, idxs, tr.row)
     elseif t.tag == "pack" then
         --: { tag: string, items: V5Type[], rest: { id: integer, tag: "packvar" } | nil }
         local tp = t
@@ -520,24 +531,23 @@ local function build_pcall_ret(fn_ty)
         end
     end
 
-    -- Build true-branch record: { "1"=true, "2"=R1, "3"=R2, ... }
-    -- Use tostring(n) rather than literal "1"/"2" to avoid the typechecker
-    -- treating string-literal numeric keys as positional record fields.
-    local true_fields = {} --[[: { [string]: V5Type } ]]
-    true_fields[tostring(1)] = T_LIT_T
+    -- Build true-branch pack: (true, R1, R2, ...).  Per Spec B/C, multi-return
+    -- sequences are TPack, not positional records.
+    local true_items = {} --[[: V5Type[] ]]
+    true_items[1] = T_LIT_T
     for i = 1, #inner_rets do
         local r = inner_rets[i]
-        if r ~= nil then true_fields[tostring(i + 1)] = r end
+        if r ~= nil then true_items[i + 1] = r end
     end
     --: V5Type
-    local true_branch = types_mod.record(true_fields)
+    local true_branch = types_mod.pack(true_items, nil)
 
-    -- Build false-branch record: { "1"=false, "2"=E }
-    local false_fields = {} --[[: { [string]: V5Type } ]]
-    false_fields[tostring(1)] = T_LIT_F
-    false_fields[tostring(2)] = throw_err_ty
+    -- Build false-branch pack: (false, E).
+    local false_items = {} --[[: V5Type[] ]]
+    false_items[1] = T_LIT_F
+    false_items[2] = throw_err_ty
     --: V5Type
-    local false_branch = types_mod.record(false_fields)
+    local false_branch = types_mod.pack(false_items, nil)
 
     --: V5Type[]
     local branches = {}
@@ -976,13 +986,13 @@ local function resolve_callee_eager(ctx, nid)
         local rec_id = tostring(ty)
         if visited_records[rec_id] then return nil end
         visited_records[rec_id] = true
-        --: { [string]: V5Type }
+        --: { [string]: TField }
         local fields = ty.fields
         local field_name = path[i]
         if field_name == nil then return nil end
-        local next_ty = fields[field_name]
-        if next_ty == nil then return nil end
-        ty = next_ty
+        local next_fld = fields[field_name]
+        if next_fld == nil then return nil end
+        ty = next_fld.type
     end
 
     -- Final type must be a concrete arrow for effect extraction to work.
@@ -1002,50 +1012,35 @@ gen_expr = function(ctx, nid)
         local lit_kind = n.data[0]
         if lit_kind == LIT_NIL     then return T_NIL end
         if lit_kind == LIT_BOOLEAN then
+            -- TLiteral (Spec C): { base="boolean", value=true|false }.
             --: V5Type
-            local bty = types_mod.const(n.data[1] == 1 and "true" or "false")
+            local bty = types_mod.literal("boolean", n.data[1] == 1)
             return bty
         end
         if lit_kind == LIT_STRING  then
             local s = intern_str(ctx, n.data[1])
             --: V5Type
-            local f = types_mod.const("$Lit")
-            --: V5Type
-            local a = types_mod.const(s)
-            --: V5Type
-            local r = types_mod.app(f, a)
+            local r = types_mod.literal("string", s)
             return r
         end
         if lit_kind == LIT_INTEGER then
             --: V5Type
-            local f = types_mod.const("$LitInt")
-            --: V5Type
-            local a = types_mod.const(tostring(n.data[1]))
-            --: V5Type
-            local r = types_mod.app(f, a)
+            local r = types_mod.literal("integer", n.data[1])
             return r
         end
         if lit_kind == LIT_NUMBER  then
             local num = i32x2_to_double(n.data[1], n.data[2])
             -- Integer-valued float literals (e.g. `1`, `42`, `0xFF`) are stored as
             -- LIT_NUMBER by the v4 parser (it doesn't distinguish integer from float
-            -- syntax).  Promote to $LitInt<N> when the value is integer-valued and
-            -- fits in a safe integer range so that arithmetic refinement works.
+            -- syntax).  Treat as an integer literal when the value is integer-valued
+            -- and fits in a safe integer range so that arithmetic refinement works.
             if num == math.floor(num) and num >= -(2^53) and num <= 2^53 then
                 --: V5Type
-                local fi = types_mod.const("$LitInt")
-                --: V5Type
-                local ai = types_mod.const(tostring(math.floor(num)))
-                --: V5Type
-                local ri = types_mod.app(fi, ai)
+                local ri = types_mod.literal("integer", math.floor(num))
                 return ri
             end
             --: V5Type
-            local f = types_mod.const("$LitNum")
-            --: V5Type
-            local a = types_mod.const(tostring(num))
-            --: V5Type
-            local r = types_mod.app(f, a)
+            local r = types_mod.literal("number", num)
             return r
         end
         return T_UNKNOWN
@@ -1165,32 +1160,25 @@ gen_expr = function(ctx, nid)
         emit(ctx, C.sub(left,  T_NUMBER, prov))
         emit(ctx, C.sub(right, T_NUMBER, prov))
         -- Local structural integer check: does t structurally subtype integer?
-        -- Handles: T_INTEGER itself, $LitInt<N> (app of $LitInt), and
-        -- intersection types where at least one part is integer.
+        -- Handles: T_INTEGER itself, integer-based TLiteral (and integer-valued
+        -- number TLiteral), and intersection types where one part is integer.
         -- Two-step declaration so the body can recurse on itself.
         local is_integer_ty --[[: (V5Type) -> boolean ]]
         --: (V5Type) -> boolean
         is_integer_ty = function(t)
             if t == nil then return false end
             if t.tag == "const" and t.name == "integer" then return true end
-            -- $LitInt<N>: App(Const("$LitInt"), Const(N))
-            -- $LitNum<N> where N is integer-valued: parser emits all numeric
-            -- literals as $LitNum; distinguish integer-valued ones by checking
-            -- whether the string representation parses to an integer float.
-            if t.tag == "app" then
-                --: { tag: string, name: string, ... } | nil
-                local hd = t.f
-                if hd ~= nil and hd.tag == "const" then
-                    if hd.name == "$LitInt" then return true end
-                    if hd.name == "$LitNum" then
-                        -- Check if the stored value is integer-valued.
-                        local arg = t.a
-                        if arg ~= nil and arg.tag == "const" then
-                            local n = tonumber(arg.name)
-                            if n ~= nil and n == math.floor(n) then return true end
-                        end
-                    end
+            -- TLiteral (Spec C): an integer-based literal is integer; a number-based
+            -- literal whose value is integer-valued is also integer (the parser
+            -- already maps integer-valued numeric literals to base "integer", but
+            -- accept a number-based integer-valued literal too).
+            if t.tag == "literal" then
+                if t.base == "integer" then return true end
+                if t.base == "number" then
+                    local v = t.value
+                    if type(v) == "number" and v == math.floor(v) then return true end
                 end
+                return false
             end
             -- Intersection: any part being integer makes the whole integer.
             if t.tag == "intersection" then
@@ -1334,22 +1322,13 @@ gen_expr = function(ctx, nid)
                 if send_ty ~= nil then
                     emit(ctx, C.sub(send_ty, s_ty, prov_inferred(ctx, n.line, n.col)))
                 end
-                -- Build (true,Y) | (true,R) | (false,string).
-                local tf1 = {} --[[: { [string]: V5Type } ]]
-                tf1[tostring(1)] = T_LIT_TRUE
-                tf1[tostring(2)] = y_ty
+                -- Build (true,Y) | (true,R) | (false,string) as TPacks (Spec B/C).
                 --: V5Type
-                local tb1 = types_mod.record(tf1)
-                local tf2 = {} --[[: { [string]: V5Type } ]]
-                tf2[tostring(1)] = T_LIT_TRUE
-                tf2[tostring(2)] = r_ty
+                local tb1 = types_mod.pack({ T_LIT_TRUE, y_ty }, nil)
                 --: V5Type
-                local tb2 = types_mod.record(tf2)
-                local ff  = {} --[[: { [string]: V5Type } ]]
-                ff[tostring(1)]  = T_LIT_FALSE
-                ff[tostring(2)]  = T_STRING
+                local tb2 = types_mod.pack({ T_LIT_TRUE, r_ty }, nil)
                 --: V5Type
-                local fb = types_mod.record(ff)
+                local fb = types_mod.pack({ T_LIT_FALSE, T_STRING }, nil)
                 --: V5Type[]
                 local branches = {}
                 branches[1] = tb1
@@ -1357,16 +1336,11 @@ gen_expr = function(ctx, nid)
                 branches[3] = fb
                 return types_mod.union(branches)
             else
-                -- Fallback: co is uvar or bare thread — return (boolean, unknown).
-                local tf = {} --[[: { [string]: V5Type } ]]
-                tf[tostring(1)] = T_LIT_TRUE
+                -- Fallback: co is uvar or bare thread — return (true) | (false, unknown).
                 --: V5Type
-                local tbf = types_mod.record(tf)
-                local ff = {} --[[: { [string]: V5Type } ]]
-                ff[tostring(1)] = T_LIT_FALSE
-                ff[tostring(2)] = T_UNKNOWN
+                local tbf = types_mod.pack({ T_LIT_TRUE }, nil)
                 --: V5Type
-                local fbf = types_mod.record(ff)
+                local fbf = types_mod.pack({ T_LIT_FALSE, T_UNKNOWN }, nil)
                 --: V5Type[]
                 local branches = {}
                 branches[1] = tbf
@@ -1458,10 +1432,11 @@ gen_expr = function(ctx, nid)
         local function eager_method_ty(rec, mstr)
             if rec.tag ~= "record" then return nil end
             if rec.row ~= nil then return nil end
-            --: { [string]: V5Type }
+            --: { [string]: TField }
             local rf = rec.fields
-            local cm = rf[mstr]
-            if cm == nil then return nil end
+            local fld = rf[mstr]
+            if fld == nil then return nil end
+            local cm = fld.type
             if cm.tag ~= "arrow" then return nil end
             return cm
         end
@@ -1549,25 +1524,21 @@ gen_expr_multi = function(ctx, nid, n_slots)
             -- Spread its positional fields into slots 1..n_slots.
             local ty = gen_expr(ctx, nid)
             local out = {} --[[: V5Type[] ]]
-            -- Helper: extract field i from a positional record or union of records.
+            -- Helper: extract slot i from a TPack or union of TPacks (Spec B/C
+            -- multi-return shape).  pcall/coroutine specials return packs / unions
+            -- of packs; slot i is items[i] (T_NIL when absent).
             --: (V5Type, integer) -> V5Type
             local function field_i(t, i)
-                local k = tostring(i)
-                if t.tag == "record" then
-                    return t.fields[k] or T_NIL
+                if t.tag == "pack" then
+                    return t.items[i] or T_NIL
                 end
                 if t.tag == "union" then
                     local parts = {} --[[: V5Type[] ]]
                     for bi = 1, #t.xs do
                         local br = t.xs[bi]
                         if br ~= nil then
-                            if br.tag == "record" then
-                                local v = br.fields[k]
-                                if v ~= nil then
-                                    parts[#parts + 1] = v
-                                else
-                                    parts[#parts + 1] = T_NIL
-                                end
+                            if br.tag == "pack" then
+                                parts[#parts + 1] = br.items[i] or T_NIL
                             else
                                 parts[#parts + 1] = T_NIL
                             end
@@ -1582,7 +1553,7 @@ gen_expr_multi = function(ctx, nid, n_slots)
                     local uv = types_mod.union(parts)
                     return uv
                 end
-                -- Not a record or union: slot 1 = ty itself, others = nil.
+                -- Not a pack or union: slot 1 = ty itself, others = nil.
                 if i == 1 then return t end
                 return T_NIL
             end
@@ -1628,10 +1599,11 @@ gen_expr_multi = function(ctx, nid, n_slots)
         local function eager_method_ty_multi(rec, mstr)
             if rec.tag ~= "record" then return nil end
             if rec.row ~= nil then return nil end
-            --: { [string]: V5Type }
+            --: { [string]: TField }
             local rf = rec.fields
-            local cm = rf[mstr]
-            if cm == nil then return nil end
+            local fld = rf[mstr]
+            if fld == nil then return nil end
+            local cm = fld.type
             if cm.tag ~= "arrow" then return nil end
             return cm
         end
@@ -1667,8 +1639,13 @@ end
 --: (V5Ctx, integer) -> V5Type
 gen_table_expr = function(ctx, nid)
     local n = ctx.nodes:get(nid)
-    local fields = {} --[[: { [string]: V5Type } ]]
-    local pos_idx = 1
+    -- Three-region TRecord (Spec C): named entries → TField; positional entries
+    -- (array part) → an integer-keyed index signature whose value is the union
+    -- of positional element types; computed keys → conservatively a string-keyed
+    -- index signature (the resolved key type decides region; v5.0 uses string).
+    local fields = {} --[[: { [string]: TField } ]]
+    local pos_vals = {} --[[: V5Type[] ]]
+    local computed_vals = {} --[[: V5Type[] ]]
     local fs = n.data[0]
     local fl = n.data[1]
     for i = fs, fs + fl - 1 do
@@ -1678,20 +1655,28 @@ gen_table_expr = function(ctx, nid)
         local field_kind = fn.data[2]
 
         if field_kind == TFIELD_POSITIONAL then
-            fields[tostring(pos_idx)] = val_ty
-            pos_idx = pos_idx + 1
+            pos_vals[#pos_vals + 1] = val_ty
         elseif field_kind == TFIELD_NAMED then
             local key_str = intern_str(ctx, fn.data[0])
-            fields[key_str] = val_ty
+            fields[key_str] = types_mod.field(val_ty, false, false)
         else
             -- TFIELD_COMPUTED
             gen_expr(ctx, fn.data[0])
-            local key = "$computed_" .. tostring(pos_idx)
-            fields[key] = val_ty
-            pos_idx = pos_idx + 1
+            computed_vals[#computed_vals + 1] = val_ty
         end
     end
-    return types_mod.record(fields)
+    local indexes = {} --[[: TIndex[] ]]
+    if #pos_vals > 0 then
+        local kty = types_mod.const("integer") --[[: V5Type ]]
+        local vty = types_mod.union(pos_vals) --[[: V5Type ]]
+        indexes[#indexes + 1] = types_mod.index(kty, vty, false)
+    end
+    if #computed_vals > 0 then
+        local kty = types_mod.const("string") --[[: V5Type ]]
+        local vty = types_mod.union(computed_vals) --[[: V5Type ]]
+        indexes[#indexes + 1] = types_mod.index(kty, vty, false)
+    end
+    return types_mod.record_full(fields, indexes, nil)
 end
 
 -- ── Function body ─────────────────────────────────────────────────────────────
@@ -2281,30 +2266,15 @@ gen_stmt = function(ctx, nid)
         end
 
         -- Extract the first index-signature key/value from a record type.
-        -- Returns (key_ty, val_ty) or (nil, nil) if none found.
-        -- Index entries are stored as fields["$idx_N"] =
-        --   App(App(Const("$Idx"), key_ty), val_ty)  by ann.lua.
+        -- Returns (key_ty, val_ty) or (nil, nil) if none found.  Index signatures
+        -- are first-class TIndex entries in `rec_ty.indexes` (Spec C).
         --: (V5Type) -> (V5Type | nil, V5Type | nil)
         local function extract_idx(rec_ty)
             if rec_ty == nil or rec_ty.tag ~= "record" then return nil, nil end
-            --: { [string]: V5Type }
-            local rf = rec_ty.fields
-            for fname2, v in pairs(rf) do
-                if fname2:sub(1, 5) == "$idx_" and v ~= nil and v.tag == "app" then
-                    -- v.f is the inner App; v.a is the value type V.
-                    --: V5Type | nil
-                    local inner = v.f
-                    if inner ~= nil and inner.tag == "app" then
-                        -- inner.f is the head Const("$Idx"); inner.a is the key type K.
-                        --: V5Type | nil
-                        local head = inner.f
-                        if head ~= nil and head.tag == "const" then
-                            if head.name == "$Idx" then
-                                return inner.a, v.a
-                            end
-                        end
-                    end
-                end
+            local ixs = rec_ty.indexes
+            for i = 1, #ixs do
+                local ix = ixs[i]
+                if ix ~= nil then return ix.key, ix.value end
             end
             return nil, nil
         end
@@ -2640,23 +2610,24 @@ function M.generate(source, filename, opts)
                         .. ": module export error: binding '" .. fname
                         .. "' declared in module type but not defined at top level"
                 else
-                    -- Field present: emit covariant CSub.
+                    -- Field present: emit covariant CSub (against the declared
+                    -- field's type — fdecl_ty is a TField).
                     --: V5Type
                     local fav = factual_ty
                     --: V5Type
-                    local fdv = fdecl_ty
+                    local fdv = fdecl_ty.type
                     emit(ctx, C.sub(fav, fdv, mprov))
                 end
             end
         else
             -- Declared type is not a record: build actual record and emit
             -- a single CSub — the solver's own record-width rule will handle it.
-            local actual_fields = {} --[[: { [string]: V5Type } ]]
+            local actual_fields = {} --[[: { [string]: TField } ]]
             for bname, bty in pairs(ctx.scope) do
                 if not decl_names[bname] then
                     --: V5Type
                     local btv = bty
-                    actual_fields[bname] = btv
+                    actual_fields[bname] = types_mod.field(btv, false, false)
                 end
             end
             --: V5Type

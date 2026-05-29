@@ -257,22 +257,21 @@ local function parse_primary(s, state)
     if not b0 then scan_error(s, "unexpected end of type") end
     local b = b0
 
-    -- String literal: "foo" or 'foo'
+    -- String literal: "foo" or 'foo'  → TLiteral (Spec C).
     if b == B_DQUOT or b == B_SQUOT then
         local str = scan_string_lit(s)
         s.depth = s.depth - 1
-        -- Represent as App(Const("$LitStr"), Const(str))
-        return types_mod.app(types_mod.const("$LitStr"), types_mod.const(str))
+        return types_mod.literal("string", str)
     end
 
-    -- Number literal
+    -- Number literal → TLiteral (Spec C); integer-valued → base "integer".
     if is_digit(b) then
         local num = scan_number_lit(s)
         s.depth = s.depth - 1
         if num % 1 == 0 then
-            return types_mod.app(types_mod.const("$LitInt"), types_mod.const(tostring(math.floor(num))))
+            return types_mod.literal("integer", math.floor(num))
         else
-            return types_mod.app(types_mod.const("$LitNum"), types_mod.const(tostring(num)))
+            return types_mod.literal("number", num)
         end
     end
 
@@ -351,9 +350,9 @@ local function parse_primary(s, state)
                 s.depth = s.depth - 1
                 return types_mod.arrow({}, { ret })
             end
-            -- Empty tuple / unit type
+            -- Empty tuple / unit type → the `unit` primitive (Spec C).
             s.depth = s.depth - 1
-            return types_mod.const("$Unit")
+            return types_mod.const("unit")
         end
         -- Parse items (named or bare)
         local items = {} --[[: V5Type[] ]]
@@ -394,7 +393,7 @@ local function parse_primary(s, state)
             end
             -- Unpack tuple return into multi-return list
             local rets = {} --[[: V5Type[] ]]
-            if ret.tag == "const" and ret.name == "$Unit" then
+            if ret.tag == "const" and ret.name == "unit" then
                 -- empty tuple = void, rets stays empty
             else
                 rets = { ret }
@@ -421,21 +420,20 @@ local function parse_primary(s, state)
         return types_mod.pack(tup_items, nil)
     end
 
-    -- Record / table type: { ... }
+    -- Record / table type: { ... }  → three-region TRecord (Spec C).
     if b == byte("{") then
         advance(s)
-        local fields = {} --[[: { [string]: V5Type } ]]
+        local fields = {} --[[: { [string]: TField } ]]
+        local indexes = {} --[[: TIndex[] ]]
+        local pos_vals = {} --[[: V5Type[] ]]
         local row_id = -1  -- set to fresh ID when bare ... seen (open table)
-        -- Indexers: stored as $idx_N fields to distinguish from named fields.
-        -- e.g. { [string]: T } → fields["$idx_string"] = T  (for Phase 5.B to handle)
-        local idx_count = 0
         if peek(s) ~= byte("}") then
             while true do
                 local fb = peek(s)
                 if fb == byte("[") then
-                    -- Indexer: [K]: V
+                    -- Indexer: [K]: V  → an indexes[] entry { key = K, value = V }.
                     advance(s)
-                    -- Check for opaque key (bare word not a primitive)
+                    -- Check for opaque key (bare word not a primitive).
                     local save_bracket = s.pos
                     local bracket_word = scan_word(s)
                     skip_ws(s)
@@ -445,41 +443,38 @@ local function parse_primary(s, state)
                         advance(s)  -- consume ']'
                         expect_char(s, ":")
                         local val_type = parse_type(s, state)
-                        -- Opaque key: store as $opaque_KEY = val
-                        fields["$opaque_" .. bracket_word] = val_type
+                        -- Opaque key: a single-key index signature (key = Const(K)).
+                        indexes[#indexes + 1] =
+                            types_mod.index(types_mod.const(bracket_word), val_type, false)
                     else
                         s.pos = save_bracket
                         local key_type = parse_type(s, state)
                         expect_char(s, "]")
                         expect_char(s, ":")
                         local val_type = parse_type(s, state)
-                        -- Store indexer by key type tag for Phase 5.B
-                        idx_count = idx_count + 1
-                        -- Pair key+val as an App node under a synthetic field name
-                        fields["$idx_" .. tostring(idx_count)] =
-                            types_mod.app(types_mod.app(types_mod.const("$Idx"), key_type), val_type)
+                        indexes[#indexes + 1] = types_mod.index(key_type, val_type, false)
                     end
                 elseif fb == byte(".") and s.pos + 2 <= s.len
                     and sub(s.src, s.pos, s.pos + 2) == "..." then
                     s.pos = s.pos + 3
                     local nb = peek(s)
                     if nb == byte("}") or nb == byte(",") or nb == byte(";") or not nb then
-                        -- Bare ...: open-table row variable
+                        -- Bare ...: open-table row variable.
                         row_id = fresh_rowvar_id(state)
                         break
                     else
-                        -- ...T: spread base type
+                        -- ...T: record spread.  Spec C defers record spread to Spec
+                        -- B's TPack rest; the v5.0 surface lowers it conservatively
+                        -- to a string-keyed index signature over the spread base.
                         local inner = parse_type(s, state)
-                        -- Store as $spread_N field
-                        idx_count = idx_count + 1
-                        fields["$spread_" .. tostring(idx_count)] =
-                            types_mod.app(types_mod.const("$Spread"), inner)
+                        indexes[#indexes + 1] =
+                            types_mod.index(types_mod.const("string"), inner, false)
                     end
                 elseif fb and is_ident_start(fb) then
                     -- Named field: [readonly] name[?]: type
                     local save_pos = s.pos
                     local word = scan_word(s)
-                    -- Check for 'readonly' modifier
+                    -- Check for 'readonly' modifier.
                     local fname
                     local is_readonly = false
                     if word == "readonly" then
@@ -498,23 +493,18 @@ local function parse_primary(s, state)
                         local optional = opt_char(s, "?")
                         expect_char(s, ":")
                         local ftype = parse_type(s, state)
-                        -- Encode optional/readonly in field name for Phase 5.B
-                        local key = fname or ""
-                        if optional then key = "$opt_" .. key end
-                        if is_readonly then key = "$ro_" .. key end
-                        fields[key] = ftype
+                        -- Optional/readonly are real attributes on the TField.
+                        fields[fname or ""] = types_mod.field(ftype, optional, is_readonly)
                     else
-                        -- Positional type entry
+                        -- Positional type entry (array element).
                         s.pos = save_pos
                         local val_type = parse_type(s, state)
-                        idx_count = idx_count + 1
-                        fields["$pos_" .. tostring(idx_count)] = val_type
+                        pos_vals[#pos_vals + 1] = val_type
                     end
                 elseif fb and fb ~= byte("}") and fb ~= byte(",") and fb ~= byte(";") then
-                    -- Positional type starting with non-ident char
+                    -- Positional type starting with non-ident char.
                     local val_type = parse_type(s, state)
-                    idx_count = idx_count + 1
-                    fields["$pos_" .. tostring(idx_count)] = val_type
+                    pos_vals[#pos_vals + 1] = val_type
                 else
                     break
                 end
@@ -523,12 +513,18 @@ local function parse_primary(s, state)
         end
         expect_char(s, "}")
         s.depth = s.depth - 1
+        -- Positional entries → one integer-keyed index signature (value = union of
+        -- the positional element types).  Positional records are retired (Spec C).
+        if #pos_vals > 0 then
+            indexes[#indexes + 1] =
+                types_mod.index(types_mod.const("integer"), types_mod.union(pos_vals), false)
+        end
         if row_id >= 0 then
             -- Construct rowvar inline so the checker sees TRowVar shape directly.
             local rv = { tag = "rowvar", id = row_id }
-            return types_mod.record_open(fields, rv)
+            return types_mod.record_full(fields, indexes, rv)
         end
-        return types_mod.record(fields)
+        return types_mod.record_full(fields, indexes, nil)
     end
 
     -- Spread: ...T
@@ -549,14 +545,14 @@ local function parse_primary(s, state)
             scan_error(s, "'typeof' is not yet supported in v5 annotations")
         end
 
-        -- true / false literals
+        -- true / false literals → TLiteral (Spec C).
         if word == "true" then
             s.depth = s.depth - 1
-            return types_mod.app(types_mod.const("$LitBool"), types_mod.const("true"))
+            return types_mod.literal("boolean", true)
         end
         if word == "false" then
             s.depth = s.depth - 1
-            return types_mod.app(types_mod.const("$LitBool"), types_mod.const("false"))
+            return types_mod.literal("boolean", false)
         end
 
         -- Primitives
@@ -607,8 +603,10 @@ local function parse_postfix(s, state)
             advance(s)
             if peek(s) == byte("]") then
                 advance(s)
-                -- T[] → { [integer]: T }
-                ty = types_mod.app(types_mod.app(types_mod.const("$Idx"), types_mod.const("integer")), ty)
+                -- T[] → { [integer]: T } as a three-region TRecord (Spec C).
+                local idxs = {} --[[: TIndex[] ]]
+                idxs[1] = types_mod.index(types_mod.const("integer"), ty, false)
+                ty = types_mod.record_full({} --[[: { [string]: TField } ]], idxs, nil)
             else
                 -- T[K] index-access is not yet supported in v5 annotations
                 scan_error(s, "'T[K]' index-access is not yet supported in v5 annotations")

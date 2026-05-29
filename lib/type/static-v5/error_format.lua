@@ -47,6 +47,10 @@ local function show(ty)
     local tag = ty.tag
     if tag == "const" then
         return tostring(ty.name)
+    elseif tag == "literal" then
+        -- A TLiteral renders as its inhabitant (strings quoted).
+        if ty.base == "string" then return "\"" .. tostring(ty.value) .. "\"" end
+        return tostring(ty.value)
     elseif tag == "uvar" then
         return "?" .. tostring(ty.id)
     elseif tag == "var" then
@@ -61,15 +65,28 @@ local function show(ty)
         end
         return "(" .. table.concat(parts, ", ") .. ") -> " .. show(ty.ret)
     elseif tag == "record" then
+        -- Three-region: named fields (with optional/readonly modifiers) then
+        -- index signatures.
         local parts = {} --[[: { [integer]: string } ]]
         local n = 0
         local fields = ty.fields
         if fields ~= nil then
             for k, v in pairs(fields) do
                 n = n + 1
-                --: V5Type | nil
-                local vv = v
-                parts[n] = tostring(k) .. ": " .. show(vv)
+                local pre = v.readonly and "readonly " or ""
+                local opt = v.optional and "?" or ""
+                parts[n] = pre .. tostring(k) .. opt .. ": " .. show(v.type)
+            end
+        end
+        local idxs = ty.indexes
+        if idxs ~= nil then
+            for i = 1, #idxs do
+                local ix = idxs[i]
+                if ix ~= nil then
+                    n = n + 1
+                    local pre = ix.readonly and "readonly " or ""
+                    parts[n] = pre .. "[" .. show(ix.key) .. "]: " .. show(ix.value)
+                end
             end
         end
         local body = table.concat(parts, ", ")
@@ -104,6 +121,7 @@ M.show = show
 --: (string) -> string
 local function tag_label(t)
     if t == "const" then return "a primitive type"
+    elseif t == "literal" then return "a literal type"
     elseif t == "arrow" then return "a function"
     elseif t == "record" then return "a record"
     elseif t == "union" then return "a union"
