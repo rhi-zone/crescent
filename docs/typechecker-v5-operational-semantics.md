@@ -382,7 +382,27 @@ The solver state `⟨σ, W, I⟩` is extended to `⟨σ, W, I, B, C⟩` where:
 | `B.lower : Root → Set<Type>` | per-root **lower-bound set** (`bind_lower`). `L ∈ B.lower[r]` means `L <: α` for every α with `find(α)=r`. |
 | `B.upper : Root → Set<Type>` | per-root **upper-bound set** (`bind_upper`). `U ∈ B.upper[r]` means `α <: U`. |
 | `B.edge_up : Root → Set<Root>`   | **bound-graph out-edges**: `r' ∈ B.edge_up[r]` iff edge `α → β` recorded (α∈r, β∈r'), i.e. `α <: β`. α's uppers flow to β; β's lowers flow to α. |
+| `B.edge_down : Root → Set<Root>` | **bound-graph in-edges** (the dual of `edge_up`, referenced by **T-CEq-UU-Bounds** "and dually edge_down"): `r ∈ B.edge_down[r']` iff edge `α → β` recorded (α∈r, β∈r'). Maintained alongside `edge_up` so lower-bound propagation can walk predecessors without a graph search. |
 | `C : Set<Hash>` | the **subtyping termination cache** (§"Bound-add with cache"). A hash is in `C` iff that `CSub(L,U)` obligation has been discharged-or-assumed. |
+
+**Bound-flow polarity — CORRECTION (P2.1 implementation, 2026-05-29).** The
+prose above and in **T-CSub-TVar-Flow** states "α's uppers flow to β; β's lowers
+flow to α" for an edge `α → β` (`α <: β`). That polarity is **inverted** and is
+unsound: it never propagates a *lower* of α forward to β, so the transitive
+obligation `L <: α <: β ⇒ L <: β` is silently dropped (observed concretely: a
+multi-return value flowing through an intermediate tvar lost its conflict with a
+later annotation, producing a missed error). The **normative, sound** direction
+— the standard simple-sub / MLstruct §3.2 closure this section explicitly
+derives from — is the opposite:
+
+> For an edge `α → β` (`α <: β`): a **lower** `L` of α flows **forward** to β
+> (`L <: α <: β ⇒ L <: β`); an **upper** `U` of β flows **backward** to α
+> (`α <: β <: U ⇒ α <: U`).
+
+Both P2.1 interpreters implement this sound direction (op_sem `add_upper`/
+`add_lower`; op_sem_alt `push_upper`/`push_lower`). The prose's "α's uppers flow
+to β; β's lowers flow to α" should be read as the inverted statement of the same
+two transitive closures and is superseded by the block-quoted rule above.
 
 All four are **canonical in `subst.lua`** (the decided design: `bind_lower` /
 `bind_upper` maps + the edge map live in the substitution), keyed by root, and

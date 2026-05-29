@@ -96,7 +96,6 @@ end
 -- Build a fresh state and seed via op_sem.emit (which is just `n+=1,
 -- worklist[n]=c` — works for both interpreters because the state
 -- shape is shared).
---: () -> AltState
 local function fresh_state() return op_sem.new_state() end
 
 -- ════════════════════════════════════════════════════════════════════
@@ -1093,6 +1092,254 @@ T.describe("indep parity: fixture 29 — F2 enforcement on stuck member", functi
 		end
 		T.ok(exec_found, "fixture29: exec F2 enforcement fires")
 		T.ok(alt_found, "fixture29: alt F2 enforcement fires")
+	end)
+end)
+
+-- ════════════════════════════════════════════════════════════════════
+-- Spec A — simple-sub bounds fixtures (P2.1).  Exercise the bound graph
+-- B = {lower, upper, edge_up, edge_down} + the termination cache C across
+-- BOTH independently-encoded interpreters.  The prior ~80 fixtures never
+-- hit these paths (CSub-TVar previously routed to CEq).
+-- ════════════════════════════════════════════════════════════════════
+
+-- Count entries in the termination cache C of a state.
+--: ({ [string]: boolean }) -> integer
+local function cache_size(c)
+	local n = 0
+	for _k in pairs(c) do n = n + 1 end
+	return n
+end
+
+-- ─── Fixture 30: multi-bound — one uvar with several upper bounds ────────
+-- CSub(?u, number) + CSub(?u, unknown).  number <: unknown so ⋂ uppers
+-- reduces to number; both interpreters coalesce identically.
+T.describe("indep parity: fixture 30 — multi-bound (meet of uppers)", function()
+	T.it("CSub(?u, number) + CSub(?u, unknown) coalesce identically", function()
+		local number = types_mod.const("number") --[[: V5Type ]]
+		local unknown = types_mod.const("unknown") --[[: V5Type ]]
+		local exec = fresh_state()
+		local u = subst_mod.fresh(exec.subst, "open")
+		op_sem.emit(exec, constraint_mod.sub(types_mod.uvar(u), number, prov("u<:num")))
+		op_sem.emit(exec, constraint_mod.sub(types_mod.uvar(u), unknown, prov("u<:unk")))
+		op_sem.run(exec)
+		local alt = fresh_state()
+		local u2 = subst_mod.fresh(alt.subst, "open")
+		op_sem.emit(alt, constraint_mod.sub(types_mod.uvar(u2), number, prov("u<:num")))
+		op_sem.emit(alt, constraint_mod.sub(types_mod.uvar(u2), unknown, prov("u<:unk")))
+		op_sem_alt.run(alt)
+		assert_state_parity("fixture30", exec, alt)
+		local ru = op_sem.resolve(exec, u) --[[: V5Type ]]
+		local ra = op_sem_alt.resolve(alt, u2) --[[: V5Type ]]
+		assert_resolve_eq("fixture30.u", ru, ra)
+		T.ok(types_mod.equal(ru, number), "exec ?u coalesces to number (unknown dropped)")
+	end)
+end)
+
+-- ─── Fixture 31: transitive — integer <: ?a <: ?b <: number ──────────────
+-- The flow edges carry integer up to number; the lattice accepts it.
+T.describe("indep parity: fixture 31 — transitive bound chain", function()
+	T.it("integer <: ?a <: ?b <: number resolves with no errors in both", function()
+		local integer = types_mod.const("integer") --[[: V5Type ]]
+		local number = types_mod.const("number") --[[: V5Type ]]
+		local exec = fresh_state()
+		local a = subst_mod.fresh(exec.subst, "open")
+		local b = subst_mod.fresh(exec.subst, "open")
+		op_sem.emit(exec, constraint_mod.sub(integer, types_mod.uvar(a), prov("int<:a")))
+		op_sem.emit(exec, constraint_mod.sub(types_mod.uvar(a), types_mod.uvar(b), prov("a<:b")))
+		op_sem.emit(exec, constraint_mod.sub(types_mod.uvar(b), number, prov("b<:num")))
+		op_sem.run(exec)
+		local alt = fresh_state()
+		local a2 = subst_mod.fresh(alt.subst, "open")
+		local b2 = subst_mod.fresh(alt.subst, "open")
+		op_sem.emit(alt, constraint_mod.sub(integer, types_mod.uvar(a2), prov("int<:a")))
+		op_sem.emit(alt, constraint_mod.sub(types_mod.uvar(a2), types_mod.uvar(b2), prov("a<:b")))
+		op_sem.emit(alt, constraint_mod.sub(types_mod.uvar(b2), number, prov("b<:num")))
+		op_sem_alt.run(alt)
+		assert_state_parity("fixture31", exec, alt)
+		T.eq(op_sem.error_count(exec), 0, "exec: transitive chain clean")
+		T.eq(op_sem_alt.error_count(alt), 0, "alt: transitive chain clean")
+	end)
+end)
+
+-- ─── Fixture 32: polar — same uvar at a lower AND an upper ───────────────
+-- integer <: ?u <: number.  Eager cross-emission discharges
+-- CSub(integer, number) (lattice ok); the coalesced face must agree.
+T.describe("indep parity: fixture 32 — polar (lower + upper on one var)", function()
+	T.it("integer <: ?u <: number coalesces identically in both", function()
+		local integer = types_mod.const("integer") --[[: V5Type ]]
+		local number = types_mod.const("number") --[[: V5Type ]]
+		local exec = fresh_state()
+		local u = subst_mod.fresh(exec.subst, "open")
+		op_sem.emit(exec, constraint_mod.sub(integer, types_mod.uvar(u), prov("int<:u")))
+		op_sem.emit(exec, constraint_mod.sub(types_mod.uvar(u), number, prov("u<:num")))
+		op_sem.run(exec)
+		local alt = fresh_state()
+		local u2 = subst_mod.fresh(alt.subst, "open")
+		op_sem.emit(alt, constraint_mod.sub(integer, types_mod.uvar(u2), prov("int<:u")))
+		op_sem.emit(alt, constraint_mod.sub(types_mod.uvar(u2), number, prov("u<:num")))
+		op_sem_alt.run(alt)
+		assert_state_parity("fixture32", exec, alt)
+		local ru = op_sem.resolve(exec, u) --[[: V5Type ]]
+		local ra = op_sem_alt.resolve(alt, u2) --[[: V5Type ]]
+		assert_resolve_eq("fixture32.u", ru, ra)
+		T.eq(op_sem.error_count(exec), 0, "exec: compatible polar bounds clean")
+		T.eq(op_sem_alt.error_count(alt), 0, "alt: compatible polar bounds clean")
+	end)
+end)
+
+-- ─── Fixture 32b: polar conflict — integer <: ?u <: string errors ────────
+T.describe("indep parity: fixture 32b — polar conflict surfaces", function()
+	T.it("integer <: ?u <: string errors in both interpreters", function()
+		local integer = types_mod.const("integer") --[[: V5Type ]]
+		local strty = types_mod.const("string") --[[: V5Type ]]
+		local exec = fresh_state()
+		local u = subst_mod.fresh(exec.subst, "open")
+		op_sem.emit(exec, constraint_mod.sub(integer, types_mod.uvar(u), prov("int<:u")))
+		op_sem.emit(exec, constraint_mod.sub(types_mod.uvar(u), strty, prov("u<:str")))
+		op_sem.run(exec)
+		local alt = fresh_state()
+		local u2 = subst_mod.fresh(alt.subst, "open")
+		op_sem.emit(alt, constraint_mod.sub(integer, types_mod.uvar(u2), prov("int<:u")))
+		op_sem.emit(alt, constraint_mod.sub(types_mod.uvar(u2), strty, prov("u<:str")))
+		op_sem_alt.run(alt)
+		assert_state_parity("fixture32b", exec, alt)
+		T.ok(op_sem.error_count(exec) > 0, "exec: conflict surfaces")
+		T.ok(op_sem_alt.error_count(alt) > 0, "alt: conflict surfaces")
+	end)
+end)
+
+-- ─── Fixture 33: var-flow — CSub(?a,?b) edge, then bind propagates ───────
+-- integer flows through a→b's edge and b's concrete upper, exercising the
+-- forward lower-propagation that closes the transitive obligation.
+T.describe("indep parity: fixture 33 — var-flow then bind propagates", function()
+	T.it("CSub(?a,?b) edge + concrete bounds resolve identically", function()
+		local integer = types_mod.const("integer") --[[: V5Type ]]
+		local exec = fresh_state()
+		local a = subst_mod.fresh(exec.subst, "open")
+		local b = subst_mod.fresh(exec.subst, "open")
+		op_sem.emit(exec, constraint_mod.sub(types_mod.uvar(a), types_mod.uvar(b), prov("a<:b")))
+		op_sem.emit(exec, constraint_mod.sub(types_mod.uvar(b), integer, prov("b<:int")))
+		op_sem.emit(exec, constraint_mod.sub(integer, types_mod.uvar(a), prov("int<:a")))
+		op_sem.run(exec)
+		local alt = fresh_state()
+		local a2 = subst_mod.fresh(alt.subst, "open")
+		local b2 = subst_mod.fresh(alt.subst, "open")
+		op_sem.emit(alt, constraint_mod.sub(types_mod.uvar(a2), types_mod.uvar(b2), prov("a<:b")))
+		op_sem.emit(alt, constraint_mod.sub(types_mod.uvar(b2), integer, prov("b<:int")))
+		op_sem.emit(alt, constraint_mod.sub(integer, types_mod.uvar(a2), prov("int<:a")))
+		op_sem_alt.run(alt)
+		assert_state_parity("fixture33", exec, alt)
+		local rae = op_sem.resolve(exec, a) --[[: V5Type ]]
+		local raa = op_sem_alt.resolve(alt, a2) --[[: V5Type ]]
+		assert_resolve_eq("fixture33.a", rae, raa)
+		T.eq(op_sem.error_count(exec), 0, "exec: var-flow clean")
+		T.eq(op_sem_alt.error_count(alt), 0, "alt: var-flow clean")
+	end)
+end)
+
+-- ─── Fixture 34: cyclic-bound — ?a <: ?b and ?b <: ?a (no CEq merge) ─────
+-- The bound graph has a 2-cycle of edges; the cache C cuts the otherwise
+-- infinite re-emission.  Assert bounded steps + state parity.
+T.describe("indep parity: fixture 34 — cyclic bound graph terminates", function()
+	T.it("?a <: ?b and ?b <: ?a terminate via cache C in both", function()
+		local exec = fresh_state()
+		local a = subst_mod.fresh(exec.subst, "open")
+		local b = subst_mod.fresh(exec.subst, "open")
+		op_sem.emit(exec, constraint_mod.sub(types_mod.uvar(a), types_mod.uvar(b), prov("a<:b")))
+		op_sem.emit(exec, constraint_mod.sub(types_mod.uvar(b), types_mod.uvar(a), prov("b<:a")))
+		op_sem.run(exec)
+		local alt = fresh_state()
+		local a2 = subst_mod.fresh(alt.subst, "open")
+		local b2 = subst_mod.fresh(alt.subst, "open")
+		op_sem.emit(alt, constraint_mod.sub(types_mod.uvar(a2), types_mod.uvar(b2), prov("a<:b")))
+		op_sem.emit(alt, constraint_mod.sub(types_mod.uvar(b2), types_mod.uvar(a2), prov("b<:a")))
+		op_sem_alt.run(alt)
+		assert_state_parity("fixture34", exec, alt)
+		T.ok(exec.steps < 100, "exec terminated in bounded steps (" .. exec.steps .. ")")
+		T.ok(alt.steps < 100, "alt terminated in bounded steps (" .. alt.steps .. ")")
+		T.eq(op_sem.error_count(exec), 0, "exec: cyclic edges clean")
+		T.eq(op_sem_alt.error_count(alt), 0, "alt: cyclic edges clean")
+	end)
+end)
+
+-- ─── Fixture 35: adversarial mutually-recursive concrete bounds ──────────
+-- A web of edges (a→b→c→a) plus concrete bounds drives transitive
+-- re-emission.  Without the cache this diverges; with it both terminate
+-- and the cache demonstrably short-circuits (one re-emission per key).
+T.describe("indep parity: fixture 35 — adversarial mutually-recursive bounds", function()
+	T.it("mutually-recursive bound graph terminates + cache short-circuits", function()
+		local integer = types_mod.const("integer") --[[: V5Type ]]
+		local number = types_mod.const("number") --[[: V5Type ]]
+		local exec = fresh_state()
+		local a = subst_mod.fresh(exec.subst, "open")
+		local b = subst_mod.fresh(exec.subst, "open")
+		local c = subst_mod.fresh(exec.subst, "open")
+		op_sem.emit(exec, constraint_mod.sub(types_mod.uvar(a), types_mod.uvar(b), prov("a<:b")))
+		op_sem.emit(exec, constraint_mod.sub(types_mod.uvar(b), types_mod.uvar(c), prov("b<:c")))
+		op_sem.emit(exec, constraint_mod.sub(types_mod.uvar(c), types_mod.uvar(a), prov("c<:a")))
+		op_sem.emit(exec, constraint_mod.sub(integer, types_mod.uvar(a), prov("int<:a")))
+		op_sem.emit(exec, constraint_mod.sub(types_mod.uvar(c), number, prov("c<:num")))
+		op_sem.run(exec)
+		local alt = fresh_state()
+		local a2 = subst_mod.fresh(alt.subst, "open")
+		local b2 = subst_mod.fresh(alt.subst, "open")
+		local c2 = subst_mod.fresh(alt.subst, "open")
+		op_sem.emit(alt, constraint_mod.sub(types_mod.uvar(a2), types_mod.uvar(b2), prov("a<:b")))
+		op_sem.emit(alt, constraint_mod.sub(types_mod.uvar(b2), types_mod.uvar(c2), prov("b<:c")))
+		op_sem.emit(alt, constraint_mod.sub(types_mod.uvar(c2), types_mod.uvar(a2), prov("c<:a")))
+		op_sem.emit(alt, constraint_mod.sub(integer, types_mod.uvar(a2), prov("int<:a")))
+		op_sem.emit(alt, constraint_mod.sub(types_mod.uvar(c2), number, prov("c<:num")))
+		op_sem_alt.run(alt)
+		assert_state_parity("fixture35", exec, alt)
+		T.ok(exec.steps < 200, "exec terminated in bounded steps (" .. exec.steps .. ")")
+		T.ok(alt.steps < 200, "alt terminated in bounded steps (" .. alt.steps .. ")")
+		T.ok(exec.sub_emits < 100, "exec sub re-emissions bounded (" .. exec.sub_emits .. ")")
+		T.ok(alt.sub_emits < 100, "alt sub re-emissions bounded (" .. alt.sub_emits .. ")")
+		local ec = cache_size(exec.subcache)
+		local ac = cache_size(alt.subcache)
+		T.ok(ec > 0, "exec cache C populated (short-circuit active)")
+		T.ok(ac > 0, "alt cache C populated (short-circuit active)")
+		-- Each re-emitted obligation recorded exactly one key before enqueue,
+		-- so the cache bounds re-emission: sub_emits == cache size.
+		T.eq(exec.sub_emits, ec, "exec: one re-emission per cache key")
+		T.eq(alt.sub_emits, ac, "alt: one re-emission per cache key")
+	end)
+end)
+
+-- ─── Fixture 36: cyclic bound resolved by CEq merge (T-CEq-UU-Bounds) ────
+-- ?a<:?b, ?b<:?a, then CEq(?a,?b) merges roots; the merge reconciliation
+-- folds both bound sets + edges and re-establishes closure, cache-guarded.
+T.describe("indep parity: fixture 36 — cyclic bound then CEq merge", function()
+	T.it("?a<:?b, ?b<:?a, CEq(?a,?b) merge reconciles in both", function()
+		local integer = types_mod.const("integer") --[[: V5Type ]]
+		local exec = fresh_state()
+		local a = subst_mod.fresh(exec.subst, "open")
+		local b = subst_mod.fresh(exec.subst, "open")
+		local ua = types_mod.uvar(a) --[[: V5Type ]]
+		local ub = types_mod.uvar(b) --[[: V5Type ]]
+		op_sem.emit(exec, constraint_mod.sub(ua, ub, prov("a<:b")))
+		op_sem.emit(exec, constraint_mod.sub(ub, ua, prov("b<:a")))
+		op_sem.emit(exec, constraint_mod.sub(integer, ua, prov("int<:a")))
+		op_sem.emit(exec, constraint_mod.eq(ua, ub, prov("a=b")))
+		op_sem.run(exec)
+		local alt = fresh_state()
+		local a2 = subst_mod.fresh(alt.subst, "open")
+		local b2 = subst_mod.fresh(alt.subst, "open")
+		local ua2 = types_mod.uvar(a2) --[[: V5Type ]]
+		local ub2 = types_mod.uvar(b2) --[[: V5Type ]]
+		op_sem.emit(alt, constraint_mod.sub(ua2, ub2, prov("a<:b")))
+		op_sem.emit(alt, constraint_mod.sub(ub2, ua2, prov("b<:a")))
+		op_sem.emit(alt, constraint_mod.sub(integer, ua2, prov("int<:a")))
+		op_sem.emit(alt, constraint_mod.eq(ua2, ub2, prov("a=b")))
+		op_sem_alt.run(alt)
+		assert_state_parity("fixture36", exec, alt)
+		T.ok(exec.steps < 100, "exec terminated bounded (" .. exec.steps .. ")")
+		T.ok(alt.steps < 100, "alt terminated bounded (" .. alt.steps .. ")")
+		local rae = op_sem.resolve(exec, a) --[[: V5Type ]]
+		local raa = op_sem_alt.resolve(alt, a2) --[[: V5Type ]]
+		assert_resolve_eq("fixture36.a", rae, raa)
+		T.eq(op_sem.error_count(exec), 0, "exec: merge clean")
+		T.eq(op_sem_alt.error_count(alt), 0, "alt: merge clean")
 	end)
 end)
 

@@ -94,7 +94,8 @@ M.variance    = variance_mod
 --:: ErrorDetails = { tag: "const_mismatch", a_name: string, b_name: string } | { tag: "missing_field", field: string } | { tag: "extra_field", field: string } | { tag: "effect_not_permitted", effect: V5Type, container: V5Type | nil } | { tag: "kind_mismatch", a_tag: string, b_tag: string } | { tag: "no_matching_branch", value_ty: V5Type, union_ty: V5Type } | { tag: "arrow_arity_mismatch", expected: integer, got: integer } | { tag: "record_arity_mismatch", expected: integer, got: integer } | { tag: "head_mismatch", a_name: string, b_name: string } | { tag: "closed_extend", field: string } | { tag: "row_already_contains", field: string } | { tag: "occurs_check", a_name: string } | { tag: "intersection_arity_mismatch", expected: integer, got: integer } | { tag: "all_parts_unresolved" } | { tag: "sealed_field_set", field: string } | { tag: "missing_method", method: string } | { tag: "not_a_record", found_tag: string } | { tag: "ambiguous_constructor" } | { tag: "hkt_arity_mismatch", expected: integer, got: integer }
 --:: OpSemError = { rule: string, msg: string, prov: Provenance | nil, details: ErrorDetails | nil }
 --:: OpSemTrace = { rule: string, msg: string }
---:: OpSemState = { subst: Subst, worklist: OpSemConstraint[], head: integer, tail: integer, inert: { [integer]: OpSemConstraint }, errors: OpSemError[], trace: OpSemTrace[], reactivations: integer, steps: integer, row_watchers: { [integer]: { [integer]: boolean } }, upper_bounds: { [integer]: V5Type[] }, lower_bounds: { [integer]: V5Type[] } }
+--:: OpSemBounds = { lower: { [integer]: V5Type[] }, upper: { [integer]: V5Type[] }, edge_up: { [integer]: { [integer]: boolean } }, edge_down: { [integer]: { [integer]: boolean } } }
+--:: OpSemState = { subst: Subst, worklist: OpSemConstraint[], head: integer, tail: integer, inert: { [integer]: OpSemConstraint }, errors: OpSemError[], trace: OpSemTrace[], reactivations: integer, steps: integer, row_watchers: { [integer]: { [integer]: boolean } }, bounds: OpSemBounds, subcache: { [string]: boolean }, sub_emits: integer }
 
 --: () -> OpSemState
 function M.new_state()
@@ -109,8 +110,18 @@ function M.new_state()
 		reactivations = 0,
 		steps         = 0,
 		row_watchers  = {} --[[: { [integer]: { [integer]: boolean } } ]],
-		upper_bounds  = {} --[[: { [integer]: V5Type[] } ]],
-		lower_bounds  = {} --[[: { [integer]: V5Type[] } ]],
+		-- Spec A simple-sub bound-graph B = {lower, upper, edge_up}, keyed by
+		-- union-find root.  `subcache` is the mandatory structural-hash
+		-- termination cache C; `sub_emits` counts re-emitted CSub obligations
+		-- (observability for the termination assertions).
+		bounds        = {
+			lower     = {} --[[: { [integer]: V5Type[] } ]],
+			upper     = {} --[[: { [integer]: V5Type[] } ]],
+			edge_up   = {} --[[: { [integer]: { [integer]: boolean } } ]],
+			edge_down = {} --[[: { [integer]: { [integer]: boolean } } ]],
+		},
+		subcache      = {} --[[: { [string]: boolean } ]],
+		sub_emits     = 0,
 	}
 end
 
@@ -199,10 +210,96 @@ local function wake_rowvar(st, rv_id)
 	end
 end
 
--- Bound-tracking helpers.  Bounds live in side tables on OpSemState keyed
--- by the uvar's union-find root id (so unioned uvars share bounds).
--- Dedupe is by types_mod.equal — concrete bounds usually appear in fixed
--- shapes from a single annotation, so the O(n) scan is acceptable.
+-- ────────────────────────────────────────────────────────────────────────────
+-- Spec A — atomic_subtype (the single primitive lattice)
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- The base-type subtyping facts (never <: anything, anything <: unknown,
+-- integer <: number, literal widening) are specified ONCE here as a relation
+-- consulted everywhere.  Per the spec's "Abstract lattice consultation":
+-- atomic_subtype is written against ABSTRACT predicates (is_never, is_unknown,
+-- eq_atom, base_widens).  The literal-encoding recognizer is ISOLATED inside
+-- base_widens only — Spec C will flip that backing to tag-dispatch with NO
+-- change to atomic_subtype.
+
+--: (V5Type) -> boolean
+local function is_never(a)
+	if a.tag ~= "const" then return false end
+	return a.name == "never"
+end
+--: (V5Type) -> boolean
+local function is_unknown(b)
+	if b.tag ~= "const" then return false end
+	return b.name == "unknown"
+end
+--: (V5Type, V5Type) -> boolean
+local function eq_atom(a, b) return types_mod.equal(a, b) end
+
+-- base_widens(a, name_b): does atom `a` widen to the base atom named `name_b`?
+-- This is the SOLE site holding the concrete literal encoding (the `$Lit*`
+-- recognizer + the integer<:number / bool-literal edges).  atomic_subtype
+-- never inspects `$`-names; it only calls base_widens.
+--: (V5Type, string) -> boolean
+local function base_widens(a, name_b)
+	if a.tag == "const" then
+		-- integer <: number (primitive numeric widening).
+		if a.name == "integer" and name_b == "number" then return true end
+		-- boolean literal constants widen to boolean.
+		if (a.name == "true" or a.name == "false") and name_b == "boolean" then return true end
+		return false
+	end
+	if a.tag == "app" then
+		local af = a.f
+		if af ~= nil and af.tag == "const" then
+			local fn = af.name
+			if fn == "$Lit" and name_b == "string" then return true end
+			if fn == "$LitInt" and (name_b == "integer" or name_b == "number") then return true end
+			if fn == "$LitNum" and name_b == "number" then return true end
+			if (fn == "true" or fn == "false") and name_b == "boolean" then return true end
+		end
+	end
+	return false
+end
+
+-- atomic_subtype(a, b): the decidable base-lattice judgment.  Holds iff a is
+-- bottom, b is top, a = b, or a widens to b through the primitive lattice.
+-- Written purely against the abstract predicates above.
+--: (V5Type, V5Type) -> boolean
+local function atomic_subtype(a, b)
+	if is_never(a) then return true end
+	if is_unknown(b) then return true end
+	if eq_atom(a, b) then return true end
+	if b.tag == "const" and base_widens(a, b.name) then return true end
+	return false
+end
+
+M.atomic_subtype = atomic_subtype
+
+-- is_lattice_atom(t): does the atomic lattice treat `t` as a leaf?  A const is
+-- always a leaf; a literal-encoding app (head is a `$Lit*`/bool-literal const)
+-- is a leaf too.  This recognizer is ISOLATED here (same boundary as
+-- base_widens); Spec C flips it to tag-dispatch with no change to callers.
+--: (V5Type) -> boolean
+local function is_lattice_atom(t)
+	if t.tag == "const" then return true end
+	if t.tag == "app" then
+		local af = t.f
+		if af ~= nil and af.tag == "const" then
+			local fn = af.name
+			return fn == "$Lit" or fn == "$LitInt" or fn == "$LitNum"
+				or fn == "true" or fn == "false"
+		end
+	end
+	return false
+end
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Spec A — bound-graph B + termination cache C
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- B = { lower, upper, edge_up }, keyed by union-find root.  C = subcache.
+-- Set membership / dedup is modulo types.equal after deref.
+
 --: (V5Type[], V5Type) -> boolean
 local function bounds_contains(xs, t)
 	for i = 1, #xs do
@@ -212,20 +309,89 @@ local function bounds_contains(xs, t)
 	return false
 end
 
---: (OpSemState, integer, V5Type) -> nil
-local function add_upper_bound(st, tv_id, ty)
-	local root = subst_mod.find(st.subst, tv_id)
-	local list = st.upper_bounds[root]
-	if list == nil then list = {} --[[: V5Type[] ]]; st.upper_bounds[root] = list end
-	if not bounds_contains(list, ty) then list[#list + 1] = ty end
+-- Add a type to a per-root bound set; returns true iff newly added.
+--: ({ [integer]: V5Type[] }, integer, V5Type) -> boolean
+local function bound_set_add(map, root, ty)
+	local list = map[root]
+	if list == nil then list = {} --[[: V5Type[] ]]; map[root] = list end
+	if bounds_contains(list, ty) then return false end
+	list[#list + 1] = ty
+	return true
 end
 
---: (OpSemState, integer, V5Type) -> nil
-local function add_lower_bound(st, tv_id, ty)
-	local root = subst_mod.find(st.subst, tv_id)
-	local list = st.lower_bounds[root]
-	if list == nil then list = {} --[[: V5Type[] ]]; st.lower_bounds[root] = list end
-	if not bounds_contains(list, ty) then list[#list + 1] = ty end
+-- key(L, U) = structural head hash.  head = top-level tag, plus for a uvar
+-- leaf its union-find root id, so two uvars sharing a root collide and a uvar
+-- vs a different root do not.  (Spec A §"Bound-add with cache".)
+--: (OpSemState, V5Type) -> string
+local function head_key(st, t)
+	local d = subst_mod.deref(st.subst, t) --[[: V5Type ]]
+	if d.tag == "uvar" then return "uvar#" .. tostring(subst_mod.find(st.subst, d.id)) end
+	if d.tag == "const" then return "const:" .. d.name end
+	return d.tag
+end
+
+--: (OpSemState, V5Type, V5Type) -> string
+local function sub_key(st, l, u) return head_key(st, l) .. "<:" .. head_key(st, u) end
+
+-- Cache-guarded re-emission of CSub(L, U): record the key BEFORE the obligation
+-- enters W (S-Sub-CacheMiss "record before recursion"); a key already present
+-- discharges via S-Sub-CacheHit (emit nothing).  This is the termination
+-- protocol — cyclic bound-graphs re-encounter their own key and stop.
+--: (OpSemState, V5Type, V5Type, Provenance) -> nil
+local function emit_sub_cached(st, l, u, prov)
+	local k = sub_key(st, l, u)
+	if st.subcache[k] then return end
+	st.subcache[k] = true
+	st.sub_emits = st.sub_emits + 1
+	M.emit(st, constraint_mod.sub(l, u, prov))
+end
+
+-- Bound propagation directions (standard simple-sub / MLstruct §3.2 closure,
+-- which the spec derives from).  For an edge α → β (meaning α <: β):
+--   • a LOWER L of α satisfies L <: α <: β, so L flows FORWARD to β's lowers.
+--   • an UPPER U of β satisfies α <: β <: U, so U flows BACKWARD to α's uppers.
+-- (The spec's prose §"State" inverts these polarities — "α's uppers flow to β;
+-- β's lowers flow to α" — which loses transitive lowers and is unsound; we
+-- implement the sound MLstruct direction the same section cites.  See the
+-- handoff note.)  Bound-set dedup terminates the walk; the cache the re-emit.
+--: (OpSemState, integer, V5Type, Provenance) -> nil
+local function add_upper(st, r, ty, prov)
+	if not bound_set_add(st.bounds.upper, r, ty) then return end
+	local lowers = st.bounds.lower[r]
+	if lowers ~= nil then
+		for i = 1, #lowers do
+			local lo = lowers[i]
+			if lo ~= nil then emit_sub_cached(st, lo, ty, prov) end
+		end
+	end
+	-- Upper flows BACKWARD to predecessors (α where α → r).
+	local pred = st.bounds.edge_down[r] --[[: { [integer]: boolean } | nil ]]
+	if pred ~= nil then
+		for p in pairs(pred) do
+			local pr = p --[[: integer ]]
+			add_upper(st, pr, ty, prov)
+		end
+	end
+end
+
+--: (OpSemState, integer, V5Type, Provenance) -> nil
+local function add_lower(st, r, ty, prov)
+	if not bound_set_add(st.bounds.lower, r, ty) then return end
+	local uppers = st.bounds.upper[r]
+	if uppers ~= nil then
+		for i = 1, #uppers do
+			local up = uppers[i]
+			if up ~= nil then emit_sub_cached(st, ty, up, prov) end
+		end
+	end
+	-- Lower flows FORWARD to successors (β where r → β).
+	local succ = st.bounds.edge_up[r] --[[: { [integer]: boolean } | nil ]]
+	if succ ~= nil then
+		for s in pairs(succ) do
+			local sr = s --[[: integer ]]
+			add_lower(st, sr, ty, prov)
+		end
+	end
 end
 
 --: (OpSemConstraint, Subst) -> { [integer]: boolean }
@@ -315,8 +481,57 @@ function M.rule_T_CEq_UU(st, a, b, prov)
 	-- internal: dispatcher guarantees both are uvar; fires only on solver bug
 	if b.tag ~= "uvar" then err(st, "T-CEq-UU", "precondition b must be uvar"); return "error" end
 	if a.id == b.id then trace(st, "T-CEq-UU", "refl"); return "done" end
-	local _w, loser = subst_mod.union(st.subst, a.id, b.id)
-	if loser ~= nil then wake(st, loser) end
+	local winner, loser = subst_mod.union(st.subst, a.id, b.id)
+	if loser ~= nil then
+		-- T-CEq-UU-Bounds: fold loser's bound sets + edges into winner, then
+		-- re-establish closure across the joined cross-pairs (cache-guarded;
+		-- cannot loop on a cyclic graph).  Equality is stronger than mutual
+		-- subtyping, so the directional edge between the two collapses to a
+		-- self-loop and is dropped.
+		local B = st.bounds
+		-- Snapshot loser's bounds, then clear its entries.
+		local loser_lowers = {} --[[: V5Type[] ]]
+		local ll = B.lower[loser]
+		if ll ~= nil then for i = 1, #ll do loser_lowers[i] = ll[i] end; B.lower[loser] = nil end
+		local loser_uppers = {} --[[: V5Type[] ]]
+		local lu = B.upper[loser]
+		if lu ~= nil then for i = 1, #lu do loser_uppers[i] = lu[i] end; B.upper[loser] = nil end
+		-- Migrate out-edges (edge_up) and in-edges (edge_down); fix the
+		-- neighbors' back-references from loser to winner.
+		local le_up = B.edge_up[loser]
+		if le_up ~= nil then
+			local we = B.edge_up[winner]
+			if we == nil then we = {} --[[: { [integer]: boolean } ]]; B.edge_up[winner] = we end
+			for r in pairs(le_up) do
+				we[r] = true
+				local rd = B.edge_down[r]
+				if rd ~= nil then rd[loser] = nil; rd[winner] = true end
+			end
+			B.edge_up[loser] = nil
+		end
+		local le_dn = B.edge_down[loser]
+		if le_dn ~= nil then
+			local wd = B.edge_down[winner]
+			if wd == nil then wd = {} --[[: { [integer]: boolean } ]]; B.edge_down[winner] = wd end
+			for r in pairs(le_dn) do
+				wd[r] = true
+				local ru = B.edge_up[r]
+				if ru ~= nil then ru[loser] = nil; ru[winner] = true end
+			end
+			B.edge_down[loser] = nil
+		end
+		-- Drop the self-loop the merge induces.
+		local we2 = B.edge_up[winner]
+		if we2 ~= nil then we2[winner] = nil end
+		local wd2 = B.edge_down[winner]
+		if wd2 ~= nil then wd2[winner] = nil end
+		-- Re-add loser's bounds into the winner via the edge-aware adders: this
+		-- both records the cross-pair obligations and propagates them across the
+		-- now-merged component.
+		for i = 1, #loser_lowers do local v = loser_lowers[i]; if v ~= nil then add_lower(st, winner, v, prov) end end
+		for i = 1, #loser_uppers do local v = loser_uppers[i]; if v ~= nil then add_upper(st, winner, v, prov) end end
+		wake(st, loser)
+	end
 	trace(st, "T-CEq-UU", "union")
 	return "done"
 end
@@ -339,6 +554,23 @@ function M.rule_T_CEq_Bind_L(st, a, b, prov)
 	if subst_mod.bind(st.subst, a.id, b) then
 		wake(st, a.id)
 		wake_head(st, a.id)
+	end
+	-- T-CEq-Bind-L-Bounds: honor accumulated bounds on the root.  Verify every
+	-- lower L <: b and every upper b <: U by emitting cache-guarded CSubs.  The
+	-- bound sets are retained (still valid facts about the now-concrete root).
+	local lowers = st.bounds.lower[root]
+	if lowers ~= nil then
+		for i = 1, #lowers do
+			local lb = lowers[i]
+			if lb ~= nil then emit_sub_cached(st, lb, b, prov) end
+		end
+	end
+	local uppers = st.bounds.upper[root]
+	if uppers ~= nil then
+		for i = 1, #uppers do
+			local ub = uppers[i]
+			if ub ~= nil then emit_sub_cached(st, b, ub, prov) end
+		end
 	end
 	trace(st, "T-CEq-Bind-L", "bound")
 	return "done"
@@ -511,33 +743,68 @@ function M.rule_T_CSub_Refl(st, a, b, prov)
 	return "done"
 end
 
--- T-CSub-TVar.  Either side is an unbound UVar.
---
--- v5.0 discipline:
---   (a) ra=uvar, rb=concrete → PARK watching ra.  When ra is later bound
---       (e.g. by a CRowExtend-Lookup CEq), the sub is retried with the
---       concrete type.  At S-Quiesce, any still-parked csub with unbound
---       ra gets ra bound to rb (upper-bound assignment).
---   (b) ra=concrete, rb=uvar → emit CEq to bind rb := ra (lower bound).
---   (c) Both uvars           → emit CEq (symmetric).
+-- T-CSub-TVar.  At least one side is an unbound UVar.  Spec A simple-sub: the
+-- three cases are DONE-with-re-emission (never park).  Each maintains the
+-- bound-graph closure by re-emitting cache-guarded cross obligations.
+--   Upper:  α <: T (T non-uvar)  — add T to upper[r]; ∀ L∈lower[r]: CSub(L,T).
+--   Lower:  T <: α (T non-uvar)  — add T to lower[r]; ∀ U∈upper[r]: CSub(T,U).
+--   Flow:   α <: β (distinct)    — record edge r_α→r_β; flow β's lowers into
+--                                  α's lowers and α's uppers into β's uppers;
+--                                  re-emit the cross-product the flow creates.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CSub_TVar(st, a, b, prov)
+	local B = st.bounds
 	if a.tag == "uvar" and b.tag ~= "uvar" then
-		-- Park: wait for a to be bound, then retry sub(a_bound, b).
-		-- Record `b` as an upper bound of a; at S-Quiesce the uvar binds to
-		-- the meet (intersection) of accumulated upper bounds.
-		add_upper_bound(st, a.id, b)
-		trace(st, "T-CSub-TVar", "ra=uvar → park watching ra=" .. tostring(a.id))
-		return "stuck"
+		-- T-CSub-TVar-Upper.
+		local r = subst_mod.find(st.subst, a.id)
+		add_upper(st, r, b, prov)
+		trace(st, "T-CSub-TVar-Upper", "upper of " .. tostring(r))
+		return "done"
 	end
 	if b.tag == "uvar" and a.tag ~= "uvar" then
-		-- Record `a` as a lower bound of b for later verification, then
-		-- fall through to the CEq route (preserves existing behavior).
-		add_lower_bound(st, b.id, a)
+		-- T-CSub-TVar-Lower.
+		local r = subst_mod.find(st.subst, b.id)
+		add_lower(st, r, a, prov)
+		trace(st, "T-CSub-TVar-Lower", "lower of " .. tostring(r))
+		return "done"
 	end
-	-- rb=uvar (and ra concrete), or both uvars: route to CEq.
-	M.emit(st, constraint_mod.eq(a, b, prov))
-	trace(st, "T-CSub-TVar", "routed to CEq")
+	-- Both uvars: T-CSub-TVar-Flow.
+	-- internal: dispatcher guarantees both are uvar here; fires only on solver bug
+	if a.tag ~= "uvar" or b.tag ~= "uvar" then
+		err(st, "T-CSub-TVar-Flow", "precondition: both uvar"); return "error"
+	end
+	local ra = subst_mod.find(st.subst, a.id)
+	local rb = subst_mod.find(st.subst, b.id)
+	if ra == rb then
+		-- Reflexive (subsumed by T-CSub-Refl): no change.
+		trace(st, "T-CSub-TVar-Flow", "reflexive")
+		return "done"
+	end
+	-- Record directional edge r_α → r_β (and the dual in-edge).
+	local ea = B.edge_up[ra]
+	if ea == nil then ea = {} --[[: { [integer]: boolean } ]]; B.edge_up[ra] = ea end
+	ea[rb] = true
+	local ed = B.edge_down[rb]
+	if ed == nil then ed = {} --[[: { [integer]: boolean } ]]; B.edge_down[rb] = ed end
+	ed[ra] = true
+	-- Flow α's lowers FORWARD into β (L <: α <: β ⇒ L <: β) and β's uppers
+	-- BACKWARD into α (α <: β <: U ⇒ α <: U).  add_lower(rb,…)/add_upper(ra,…)
+	-- propagate transitively across the component and re-emit every new cross
+	-- obligation; bound-set dedup + the cache terminate it.
+	local a_lowers = B.lower[ra]
+	if a_lowers ~= nil then
+		-- Snapshot: add_lower may mutate B.lower[rb]; iterate the source list.
+		local snap = {} --[[: V5Type[] ]]
+		for i = 1, #a_lowers do snap[i] = a_lowers[i] end
+		for i = 1, #snap do local v = snap[i]; if v ~= nil then add_lower(st, rb, v, prov) end end
+	end
+	local b_uppers = B.upper[rb]
+	if b_uppers ~= nil then
+		local snap = {} --[[: V5Type[] ]]
+		for i = 1, #b_uppers do snap[i] = b_uppers[i] end
+		for i = 1, #snap do local v = snap[i]; if v ~= nil then add_upper(st, ra, v, prov) end end
+	end
+	trace(st, "T-CSub-TVar-Flow", tostring(ra) .. "→" .. tostring(rb))
 	return "done"
 end
 
@@ -573,19 +840,9 @@ function M.rule_T_CSub_Const_Var(st, a, b, prov)
 	if a.tag ~= "const" or b.tag ~= "const" then
 		err(st, "T-CSub-Const-Var", "precondition: both const"); return "error"
 	end
-	if a.name ~= b.name then
-		-- Primitive lattice: integer <: number (integer ⊆ numbers).
-		if a.name == "integer" and b.name == "number" then
-			trace(st, "T-CSub-Const-Var", "integer <: number")
-			return "done"
-		end
-		err(st, "T-CSub-Const-Var",
-			"const name mismatch: " .. a.name .. " vs " .. b.name,
-			prov, { tag = "const_mismatch", a_name = a.name, b_name = b.name })
-		return "error"
-	end
-	trace(st, "T-CSub-Const-Var", a.name)
-	return "done"
+	-- Spec A: the const-vs-const lattice (including integer <: number) is the
+	-- single atomic_subtype relation — no inline lattice facts here.
+	return M.rule_T_CSub_Atomic(st, a, b, prov)
 end
 
 -- Walk a left-associated App chain to extract the head Const name and its
@@ -755,22 +1012,27 @@ function M.rule_T_CSub_Mismatch(st, a, b, prov)
 	return "error"
 end
 
--- T-CSub-Top.  `unknown` is the top type: anything subtypes it.
+-- T-CSub-Atomic.  Both sides deref to atoms (no decomposable structure); the
+-- relation is decided by ONE atomic_subtype call.  Subsumes the former
+-- T-CSub-Top / T-CSub-Never / T-CSub-LitWiden / T-CSub-Const-Var atom facts —
+-- they are now all a single lattice consultation (Spec A).
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
-function M.rule_T_CSub_Top(st, ra, rb, prov)
-	-- Precondition (caller checks): rb is const("unknown").
-	local _ = ra; local _ = prov  -- suppress unused warnings
-	trace(st, "T-CSub-Top", "sub const=unknown (top type)")
-	return "done"
-end
-
--- T-CSub-Never.  `never` is the bottom type: it subtypes anything.
---: (OpSemState, V5Type, V5Type, Provenance) -> string
-function M.rule_T_CSub_Never(st, ra, rb, prov)
-	-- Precondition (caller checks): ra is const("never").
-	local _ = rb; local _ = prov  -- suppress unused warnings
-	trace(st, "T-CSub-Never", "sub const=never (bottom type)")
-	return "done"
+function M.rule_T_CSub_Atomic(st, ra, rb, prov)
+	if atomic_subtype(ra, rb) then
+		trace(st, "T-CSub-Atomic", "")
+		return "done"
+	end
+	-- ¬atomic_subtype(a, b) ⇒ error("not a subtype").  Const-vs-const reports a
+	-- const_mismatch (preserves the prior error shape); else generic.
+	if ra.tag == "const" and rb.tag == "const" then
+		err(st, "T-CSub-Const-Var",
+			"const name mismatch: " .. ra.name .. " vs " .. rb.name,
+			prov, { tag = "const_mismatch", a_name = ra.name, b_name = rb.name })
+		return "error"
+	end
+	err(st, "T-CSub-Atomic", "not a subtype", prov,
+		{ tag = "kind_mismatch", a_tag = ra.tag, b_tag = rb.tag })
+	return "error"
 end
 
 -- CSub dispatcher.  Order matters: Refl first (cheap fast path), then TVar
@@ -786,48 +1048,12 @@ local function step_csub(st, ra, rb, prov)
 	if ra.tag == "uvar" or rb.tag == "uvar" then
 		return M.rule_T_CSub_TVar(st, ra, rb, prov)
 	end
-	-- Top type: unknown is a supertype of everything.
-	if rb.tag == "const" and rb.name == "unknown" then
-		return M.rule_T_CSub_Top(st, ra, rb, prov)
-	end
-	-- Bottom type: never is a subtype of everything.
-	if ra.tag == "const" and ra.name == "never" then
-		return M.rule_T_CSub_Never(st, ra, rb, prov)
-	end
-	-- Literal widening: $Lit<S> <: string, $LitInt<N> <: integer | number,
-	-- $LitNum<N> <: number.  These rules let annotated function parameters
-	-- of type `string`/`number`/`integer` accept literal-typed call-site args.
-	if ra.tag == "app" and rb.tag == "const" then
-		local ra_f = ra.f
-		if ra_f ~= nil and ra_f.tag == "const" then
-			local fname = ra_f.name
-			if fname == "$Lit" and rb.name == "string" then
-				trace(st, "T-CSub-LitWiden", "$Lit<S> <: string")
-				return "done"
-			end
-			if fname == "$LitInt" and (rb.name == "integer" or rb.name == "number") then
-				trace(st, "T-CSub-LitWiden", "$LitInt<N> <: " .. rb.name)
-				return "done"
-			end
-			if fname == "$LitNum" and rb.name == "number" then
-				trace(st, "T-CSub-LitWiden", "$LitNum<N> <: number")
-				return "done"
-			end
-			-- true / false literals subtype boolean.
-			if (ra_f.name == "true" or ra_f.name == "false") and rb.name == "boolean" then
-				trace(st, "T-CSub-LitWiden", "bool literal <: boolean")
-				return "done"
-			end
-		end
-		-- const("true") / const("false") <: boolean handled below in same-const branch,
-		-- but for safety also handle TApp where head is "true"/"false" here.
-	end
-	-- Boolean literal constants: const("true") <: boolean, const("false") <: boolean.
-	if ra.tag == "const" and rb.tag == "const" then
-		if (ra.name == "true" or ra.name == "false") and rb.name == "boolean" then
-			trace(st, "T-CSub-LitWiden", "bool const <: boolean")
-			return "done"
-		end
+	-- T-CSub-Atomic (Spec A): bottom/top edges, plus both-atom lattice
+	-- (integer<:number, literal widening, const reflexivity) are ONE relation.
+	-- `never <: anything` and `anything <: unknown` hold regardless of the other
+	-- side's structure; otherwise both sides must be lattice atoms.
+	if is_never(ra) or is_unknown(rb) or (is_lattice_atom(ra) and is_lattice_atom(rb)) then
+		return M.rule_T_CSub_Atomic(st, ra, rb, prov)
 	end
 	-- Union dispatch (L takes priority over R; both can apply if both sides
 	-- are unions — emit per-branch sub from L, the recursive call will see
@@ -1680,30 +1906,13 @@ end
 -- it returns false (conservative) for any shape it cannot cheaply decide.
 --: (V5Type, V5Type) -> boolean
 local function structurally_subtype(a, b)
-	-- Reflexivity.
+	-- Atom case (Spec A): bottom/top edges + primitive widening (integer<:number,
+	-- literal widening, const reflexivity) are the single atomic_subtype relation.
+	if is_never(a) or is_unknown(b) or (is_lattice_atom(a) and is_lattice_atom(b)) then
+		return atomic_subtype(a, b)
+	end
+	-- Reflexivity for non-atom shapes.
 	if types_mod.equal(a, b) then return true end
-	-- Top type: everything subtypes unknown.
-	if b.tag == "const" and b.name == "unknown" then return true end
-	-- Bottom type: never subtypes everything.
-	if a.tag == "const" and a.name == "never" then return true end
-	-- Primitive lattice: integer <: number.
-	if a.tag == "const" and b.tag == "const" then
-		if a.name == "integer" and b.name == "number" then return true end
-		-- Boolean literal consts subtype boolean.
-		if (a.name == "true" or a.name == "false") and b.name == "boolean" then return true end
-		return false
-	end
-	-- Literal widening: $LitInt<N> <: integer / number; $LitNum<N> <: number.
-	if a.tag == "app" and b.tag == "const" then
-		local af = a.f
-		if af ~= nil and af.tag == "const" then
-			local fn = af.name
-			if fn == "$LitInt" and (b.name == "integer" or b.name == "number") then return true end
-			if fn == "$LitNum" and b.name == "number" then return true end
-			if (fn == "true" or fn == "false") and b.name == "boolean" then return true end
-		end
-		return false
-	end
 	-- Record width: a <: b iff a has at least all fields of b and each shared
 	-- field satisfies structural subtyping.  Open row in b is conservative (punt).
 	if a.tag == "record" and b.tag == "record" then
@@ -1767,6 +1976,82 @@ local function reduce_intersection(xs)
 	return types_mod.intersection(reduced)
 end
 
+-- reduce_union(xs) is the dual simplifier for the POSITIVE face (⋃ lowers):
+-- an element e_i is dropped iff some other e_j subsumes it
+-- (structurally_subtype(e_i, e_j) — e_j is the wider type), e.g.
+-- `integer | number → number`.  Applied only at coalescing.
+--: (V5Type[]) -> V5Type
+local function reduce_union(xs)
+	local n = #xs
+	local keep = {} --[[: boolean[] ]]
+	for i = 1, n do keep[i] = true end
+	for i = 1, n do
+		if keep[i] then
+			for j = 1, n do
+				if i ~= j and keep[j] then
+					-- xs[i] <: xs[j] → drop xs[i] (xs[j] is wider, dominates the union).
+					local xi, xj = xs[i], xs[j]
+					if xi ~= nil and xj ~= nil and structurally_subtype(xi, xj) then
+						keep[i] = false
+					end
+				end
+			end
+		end
+	end
+	local reduced = {} --[[: V5Type[] ]]
+	for i = 1, n do
+		if keep[i] then
+			local v = xs[i]
+			if v ~= nil then reduced[#reduced + 1] = v end
+		end
+	end
+	if #reduced == 1 then
+		local r = reduced[1]
+		if r ~= nil then return r end
+	end
+	return types_mod.union(reduced)
+end
+
+-- S-Quiesce polar coalescing (Spec A §"S-Quiesce — polar coalescing").  Each
+-- root still UNBOUND but carrying bounds is materialized into σ by polarity:
+--   • uppers present (negative face dominates) → bind to ⋂ B.upper[r]
+--   • only lowers present (positive face)      → bind to ⋃ B.lower[r]
+--   • neither                                  → left unbound (free var)
+-- The `reduce_intersection`/`reduce_union` simplifiers drop dominated bounds
+-- ONLY here.  The ⋃lowers ⊆ ⋂uppers invariant is already enforced eagerly by
+-- the on-add cross-emission, so it is not re-checked.  Polarity note: full
+-- positive/negative occurrence inference is unbuilt substrate; this picks the
+-- consumed (upper) face when uppers exist, else the produced (lower) face —
+-- a faithful materialization that any conflict has already surfaced through.
+--: (OpSemState) -> nil
+local function coalesce_bounds(st)
+	local B = st.bounds
+	-- Collect candidate roots (those with any bound), dedup via a set.
+	local roots = {} --[[: { [integer]: boolean } ]]
+	for r in pairs(B.upper) do roots[r] = true end
+	for r in pairs(B.lower) do roots[r] = true end
+	for r in pairs(roots) do
+		local root = subst_mod.find(st.subst, r)
+		if subst_mod.binding(st.subst, root) == nil then
+			local uppers = B.upper[root]
+			local lowers = B.lower[root]
+			--: V5Type | nil
+			local coalesced = nil
+			if uppers ~= nil and #uppers > 0 then
+				coalesced = reduce_intersection(uppers)
+			elseif lowers ~= nil and #lowers > 0 then
+				coalesced = reduce_union(lowers)
+			end
+			if coalesced ~= nil then
+				if subst_mod.bind(st.subst, root, coalesced) then
+					wake(st, root); wake_head(st, root)
+				end
+				trace(st, "S-Quiesce-Coalesce", "root=" .. tostring(root) .. " → " .. coalesced.tag)
+			end
+		end
+	end
+end
+
 -- S-Step / S-Park / S-Wake / S-Quiesce.
 --: (OpSemState) -> nil
 function M.run(st)
@@ -1784,13 +2069,28 @@ function M.run(st)
 			if status == "stuck" then park(st, c) end
 		end
 	end
-	-- S-Quiesce: report inert constraints as stuck errors.
-	-- HOUnify gets the dedicated T-HOUnify-Stuck rule (ambiguous
-	-- constructor variable); CRowLacks still parked means the row var was
-	-- never closed — soundness floor violation; others get generic error.
-	-- CSub with ra=uvar still parked: no competing binding appeared; apply
-	-- upper-bound assignment (bind ra := rb) per the v5.0 defaulting rule,
-	-- matching the intent of the original T-CSub-TVar CEq route.
+	-- S-Quiesce polar coalescing (Spec A): materialize unbound roots that carry
+	-- bounds into σ BEFORE reporting inert constraints, since coalescing may
+	-- bind a root and wake a parked constraint (e.g. a CMethodCall).
+	coalesce_bounds(st)
+	-- Drain anything coalescing woke; coalescing can in turn produce more
+	-- bound-add re-emission, but the cache C guarantees this terminates.
+	while st.head <= st.tail do
+		local h = st.head
+		local cw = st.worklist[h]
+		st.worklist[h] = nil
+		st.head = h + 1
+		if cw ~= nil then
+			local status = M.step(st, cw)
+			if status == "stuck" then park(st, cw) end
+		end
+	end
+	st.head = 1; st.tail = 0
+	-- S-Quiesce: report inert constraints as stuck errors.  CSub never parks
+	-- under Spec A (the three T-CSub-TVar cases are done-with-re-emission), so
+	-- no csub appears here.  HOUnify gets the dedicated T-HOUnify-Stuck rule;
+	-- CRowLacks still parked means the row var was never closed (soundness
+	-- floor); others get a generic error.
 	for _cid, c in pairs(st.inert) do
 		if c.tag == "hounify" then
 			M.rule_T_HOUnify_Stuck(st, c)
@@ -1815,80 +2115,6 @@ function M.run(st)
 				err(st, "S-Quiesce-CIntersectionMember",
 					"CIntersectionMember stuck on unbound uvar (effect never inferred)",
 					c.prov, nil)
-			end
-		elseif c.tag == "csub" then
-			-- Parked csub: ra=uvar was never bound by a competing constraint.
-			-- Materialize as the meet (intersection) of accumulated upper
-			-- bounds — preserves principal-type semantics when multiple
-			-- CSub demands accumulated on the same uvar.  A single bound is
-			-- equivalent to the prior CEq(ra, rb) behavior.  Conflicting
-			-- bounds (e.g. integer & string) surface as real errors via
-			-- existing intersection-reduction rules.  Lower bounds are
-			-- verified against the resolved type after binding.
-			local cc_a_raw = c.a  -- .a is V5Type on ConstraintSub
-			local cc_b_raw = c.b  -- .b is V5Type on ConstraintSub
-			local cc_p_raw = c.prov
-			--: V5Type | nil
-			local cc_a = as_v5type(cc_a_raw)
-			--: V5Type | nil
-			local cc_b = as_v5type(cc_b_raw)
-			if cc_a == nil or cc_b == nil or cc_p_raw == nil then
-				-- internal: csub constraint missing required fields; fires only on solver bug
-				err(st, "S-Quiesce", "csub missing fields (tag=csub)")
-			else
-				local ra2 = subst_mod.deref(st.subst, cc_a) --[[: V5Type ]]
-				local rb2 = subst_mod.deref(st.subst, cc_b) --[[: V5Type ]]
-				--: Provenance
-				local prov2 = cc_p_raw
-				if ra2.tag == "uvar" then
-					-- Still unbound: bind to meet of upper bounds.
-					local root = subst_mod.find(st.subst, ra2.id)
-					local uppers = st.upper_bounds[root]
-					if uppers == nil then
-						-- Bounds already drained by a prior parked-csub on the
-						-- same uvar; the meet has been emitted, nothing to do.
-						trace(st, "S-Quiesce-CSub-TVar", "bounds already drained for uvar=" .. tostring(root))
-					elseif #uppers == 0 then
-						-- Shouldn't happen (park populated bounds).
-						M.emit(st, constraint_mod.eq(ra2, rb2, prov2))
-						trace(st, "S-Quiesce-CSub-TVar", "defaulting uvar to upper bound (no bounds tracked)")
-						st.upper_bounds[root] = nil
-					elseif #uppers == 1 then
-						local u1 = uppers[1]
-						if u1 ~= nil then
-							M.emit(st, constraint_mod.eq(ra2, u1, prov2))
-							trace(st, "S-Quiesce-CSub-TVar", "single upper bound")
-						end
-						st.upper_bounds[root] = nil
-					else
-						-- Multiple upper bounds → meet, with compatible-bound reduction
-						-- (e.g. integer & number collapses to integer).
-						local meet = reduce_intersection(uppers) --[[: V5Type ]]
-						M.emit(st, constraint_mod.eq(ra2, meet, prov2))
-						trace(st, "S-Quiesce-CSub-TVar",
-							"meet of " .. tostring(#uppers) .. " upper bounds (reduced to " .. tostring(meet.tag) .. ")")
-						st.upper_bounds[root] = nil
-					end
-					-- Verify lower bounds against the (about-to-be) resolved type.
-					local lowers = st.lower_bounds[root]
-					if lowers ~= nil then
-						for i = 1, #lowers do
-							local lb = lowers[i]
-							if lb ~= nil then
-								M.emit(st, constraint_mod.sub(lb, ra2, prov2))
-							end
-						end
-						st.lower_bounds[root] = nil
-					end
-				else
-					-- ra was bound between park and quiescence (possible if multiple
-					-- passes are needed); retry the sub constraint.
-					local status = step_csub(st, ra2, rb2, prov2)
-					if status == "stuck" then
-						-- internal: constraint still stuck after retry; fires only on solver bug
-					err(st, "S-Quiesce", "stuck constraint (tag=csub) after quiescence retry")
-					end
-				end
 			end
 		else
 			-- internal: unknown constraint tag still stuck at quiescence; fires only on solver bug

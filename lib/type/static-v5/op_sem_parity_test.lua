@@ -316,6 +316,9 @@ T.describe("op_sem parity: fixture 6 — multi-return positional Record CSub", f
 			docs.head = docs.head + 1
 			if c ~= nil then op_sem.step(docs, c) end
 		end
+		-- Spec A: lower bounds coalesce at S-Quiesce, not eagerly.  Drive
+		-- quiescence (worklist already drained) so ?a/?b materialize.
+		op_sem.run(docs)
 		local ra_docs = op_sem.resolve(docs, a2)
 		local rb_docs = op_sem.resolve(docs, b2)
 
@@ -366,6 +369,7 @@ T.describe("op_sem parity: fixture 6a — nil-pad under-arity", function()
 			docs.head = docs.head + 1
 			if cv ~= nil then op_sem.step(docs, cv) end
 		end
+		op_sem.run(docs)  -- Spec A: lower bounds coalesce at S-Quiesce.
 		local ra_docs = op_sem.resolve(docs, a2)
 		local rb_docs = op_sem.resolve(docs, b2)
 		local rc_docs = op_sem.resolve(docs, c2)
@@ -426,6 +430,7 @@ T.describe("op_sem parity: fixture 6b — over-arity (gen-truncated)", function(
 			docs.head = docs.head + 1
 			if cv ~= nil then op_sem.step(docs, cv) end
 		end
+		op_sem.run(docs)  -- Spec A: lower bounds coalesce at S-Quiesce.
 		local ra_docs = op_sem.resolve(docs, a2)
 
 		T.ok(walk_equal(ra_exec, number), "exec a = number")
@@ -486,6 +491,7 @@ T.describe("op_sem parity: fixture 6d — single-return Record CSub", function()
 			docs.head = docs.head + 1
 			if cv ~= nil then op_sem.step(docs, cv) end
 		end
+		op_sem.run(docs)  -- Spec A: lower bounds coalesce at S-Quiesce.
 		local ra_docs = op_sem.resolve(docs, a2)
 
 		T.ok(walk_equal(ra_exec, number), "exec a = number")
