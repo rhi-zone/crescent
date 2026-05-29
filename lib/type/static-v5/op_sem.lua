@@ -327,6 +327,20 @@ local function head_key(st, t)
 	local d = subst_mod.deref(st.subst, t) --[[: V5Type ]]
 	if d.tag == "uvar" then return "uvar#" .. tostring(subst_mod.find(st.subst, d.id)) end
 	if d.tag == "const" then return "const:" .. d.name end
+	-- Spec B: the pack head extends to ⟨"pack", #items, rest-id-or-nil⟩.  Per-item
+	-- head hashes are appended so two packs of equal arity but different leading
+	-- heads do not collide (needed for arrow bound-graph termination).
+	if d.tag == "pack" then
+		local s = types_mod.pack_head_key(d)
+		for i = 1, #d.items do
+			local it = d.items[i]
+			if it ~= nil then s = s .. "|" .. head_key(st, it) end
+		end
+		return s
+	end
+	if d.tag == "arrow" then
+		return "arrow[" .. head_key(st, d.args) .. "][" .. head_key(st, d.ret) .. "]"
+	end
 	return d.tag
 end
 
@@ -598,22 +612,116 @@ function M.rule_T_CEq_Const(st, a, b, prov)
 	return "done"
 end
 
--- T-CEq-Arrow.
+-- ────────────────────────────────────────────────────────────────────────────
+-- TPack CEq / CSub (Spec B) — arity-aware, length-polymorphic, splice
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- Packs carry the multi-return / vararg / tuple sequences inside arrows.  The
+-- substitution-time splice (`deref_pack`) resolves bound `rest` TPackVars before
+-- the rules run, so the rules below see packs whose `rest` is nil or an UNBOUND
+-- TPackVar.  Pack-var bindings live in st.subst.pack_bindings (set by the
+-- OpenL/OpenR/OpenBoth rules — union with TRowVar's storage model).
+
+-- Resolve a pack through pack_bindings (splice), then return its items + rest.
+--: (OpSemState, V5Type) -> V5Type
+local function resolve_pack(st, p)
+	return types_mod.deref_pack(p, st.subst.pack_bindings)
+end
+
+-- Bind a TPackVar id to a pack (single-rest invariant: id is unbound here).
+--: (OpSemState, integer, V5Type) -> nil
+local function bind_packvar(st, id, p) st.subst.pack_bindings[id] = p end
+
+-- T-CEq-Pack.  Spec B: Closed/OpenL/OpenR/OpenBoth.
+--: (OpSemState, V5Type, V5Type, Provenance) -> string
+function M.rule_T_CEq_Pack(st, a, b, prov)
+	local pa = resolve_pack(st, a) --[[: V5Type ]]
+	local pb = resolve_pack(st, b) --[[: V5Type ]]
+	-- internal: dispatcher routes here only for packs; fires only on solver bug
+	if pa.tag ~= "pack" or pb.tag ~= "pack" then
+		err(st, "T-CEq-Pack", "precondition: both pack"); return "error"
+	end
+	local n, m = #pa.items, #pb.items
+	local ra, rb = pa.rest, pb.rest
+	-- Equate the shared prefix (min n m).
+	local k = n
+	if m < k then k = m end
+	for i = 1, k do
+		local av, bv = pa.items[i], pb.items[i]
+		if av ~= nil and bv ~= nil then M.emit(st, constraint_mod.eq(av, bv, prov)) end
+	end
+	if ra == nil and rb == nil then
+		-- T-CEq-Pack-Closed: equal arity required.
+		if n ~= m then
+			err(st, "T-CEq-Pack-Closed", "pack arity mismatch: " .. n .. " vs " .. m,
+				prov, { tag = "record_arity_mismatch", expected = m, got = n })
+			return "error"
+		end
+		trace(st, "T-CEq-Pack-Closed", "n=" .. n)
+		return "done"
+	end
+	if ra ~= nil and rb == nil then
+		-- T-CEq-Pack-OpenL: LHS open, RHS closed.  Need m >= n.
+		if m < n then
+			err(st, "T-CEq-Pack-OpenL", "LHS demands more fixed positions: " .. n .. " > " .. m,
+				prov, { tag = "record_arity_mismatch", expected = m, got = n })
+			return "error"
+		end
+		local tail = {} --[[: V5Type[] ]]
+		for i = n + 1, m do local v = pb.items[i]; if v ~= nil then tail[#tail + 1] = v end end
+		bind_packvar(st, ra.id, types_mod.pack(tail, nil))
+		trace(st, "T-CEq-Pack-OpenL", "bind " .. ra.id)
+		return "done"
+	end
+	if ra == nil and rb ~= nil then
+		-- T-CEq-Pack-OpenR: mirror.  Need n >= m.
+		if n < m then
+			err(st, "T-CEq-Pack-OpenR", "RHS demands more fixed positions: " .. m .. " > " .. n,
+				prov, { tag = "record_arity_mismatch", expected = m, got = n })
+			return "error"
+		end
+		local tail = {} --[[: V5Type[] ]]
+		for i = m + 1, n do local v = pa.items[i]; if v ~= nil then tail[#tail + 1] = v end end
+		bind_packvar(st, rb.id, types_mod.pack(tail, nil))
+		trace(st, "T-CEq-Pack-OpenR", "bind " .. rb.id)
+		return "done"
+	end
+	-- T-CEq-Pack-OpenBoth: both open.  Align by min(n,m); bind the SHORTER rest
+	-- to pack(surplus_items, longer_rest), then equate the two rests (when both
+	-- are still open after the prefix surplus is absorbed).
+	-- internal: ra/rb both non-nil in this branch; fires only on solver bug
+	if ra == nil or rb == nil then err(st, "T-CEq-Pack-OpenBoth", "precondition: both open"); return "error" end
+	if n == m then
+		-- Equal prefix arity: equate the two rests directly (union in pack_bindings).
+		bind_packvar(st, ra.id, types_mod.pack({}, rb))
+		trace(st, "T-CEq-Pack-OpenBoth", "equal-prefix rests " .. ra.id .. "=" .. rb.id)
+		return "done"
+	end
+	if n > m then
+		-- LHS longer: surplus pa.items[m+1..n] prepend to RHS rest.  Bind shorter
+		-- (rb) to pack(surplus, ra).
+		local surplus = {} --[[: V5Type[] ]]
+		for i = m + 1, n do local v = pa.items[i]; if v ~= nil then surplus[#surplus + 1] = v end end
+		bind_packvar(st, rb.id, types_mod.pack(surplus, ra))
+		trace(st, "T-CEq-Pack-OpenBoth", "L-surplus bind " .. rb.id)
+		return "done"
+	end
+	-- m > n: RHS longer.  Bind shorter (ra) to pack(surplus, rb).
+	local surplus = {} --[[: V5Type[] ]]
+	for i = n + 1, m do local v = pb.items[i]; if v ~= nil then surplus[#surplus + 1] = v end end
+	bind_packvar(st, ra.id, types_mod.pack(surplus, rb))
+	trace(st, "T-CEq-Pack-OpenBoth", "R-surplus bind " .. ra.id)
+	return "done"
+end
+
+-- T-CEq-Arrow.  Args + ret are packs; emit CEq on both via the pack rule.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CEq_Arrow(st, a, b, prov)
 	-- internal: dispatcher routes here only when both are arrow; fires only on solver bug
 	if a.tag ~= "arrow" or b.tag ~= "arrow" then
 		err(st, "T-CEq-Arrow", "precondition: both arrow"); return "error"
 	end
-	if #a.args ~= #b.args then
-		err(st, "T-CEq-Arrow", "arity mismatch", prov,
-			{ tag = "arrow_arity_mismatch", expected = #b.args, got = #a.args })
-		return "error"
-	end
-	for i = 1, #a.args do
-		local av, bv = a.args[i], b.args[i]
-		if av ~= nil and bv ~= nil then M.emit(st, constraint_mod.eq(av, bv, prov)) end
-	end
+	M.emit(st, constraint_mod.eq(a.args, b.args, prov))
 	M.emit(st, constraint_mod.eq(a.ret, b.ret, prov))
 	trace(st, "T-CEq-Arrow", "")
 	return "done"
@@ -718,6 +826,7 @@ local function step_ceq(st, ra, rb, prov)
 	if ra.tag ~= rb.tag then return M.rule_T_CEq_Mismatch(st, ra, rb, prov) end
 	if ra.tag == "const" then return M.rule_T_CEq_Const(st, ra, rb, prov) end
 	if ra.tag == "arrow" then return M.rule_T_CEq_Arrow(st, ra, rb, prov) end
+	if ra.tag == "pack" then return M.rule_T_CEq_Pack(st, ra, rb, prov) end
 	if ra.tag == "record" then return M.rule_T_CEq_Record(st, ra, rb, prov) end
 	if ra.tag == "app" then return M.rule_T_CEq_App(st, ra, rb, prov) end
 	return M.rule_T_CEq_Mismatch(st, ra, rb, prov)
@@ -808,27 +917,144 @@ function M.rule_T_CSub_TVar(st, a, b, prov)
 	return "done"
 end
 
--- T-CSub-Arrow.  Contra in args, co in rets.
+-- subgoal(v, x, y): co → CSub(x,y); contra → CSub(y,x).
+--: (OpSemState, string, V5Type, V5Type, Provenance) -> nil
+local function pack_subgoal(st, v, x, y, prov)
+	if v == "contra" then
+		M.emit(st, constraint_mod.sub(y, x, prov))
+	else
+		M.emit(st, constraint_mod.sub(x, y, prov))
+	end
+end
+
+-- T-CSub-Pack.  Positional, length-polymorphic subtyping with a variance `v`
+-- carried from the enclosing arrow position.  Align by min(n,m): aligned
+-- positions emit subgoal(v); the surplus prefix + the rests are reconciled by
+-- the same prefix-alignment as T-CEq-Pack-OpenBoth (surplus → shorter rest),
+-- but emitting CSub_v (not CEq) on aligned surplus positions.
+--
+-- CONTRAVARIANT (arrow args): closed-vs-closed of different arity is a rejection
+-- (a function of n args is not one of m args).  COVARIANT (arrow ret): closed
+-- packs are length-polymorphic with Lua multi-return adjustment — the supertype
+-- (caller's expected ret) may request MORE slots (missing callee returns adjust
+-- to nil) or FEWER (surplus callee returns are truncated/discarded).  This is
+-- the v4 record-width nil-pad/truncate soundness floor for the ret position; it
+-- is NOT pure pack subtyping (the spec prose states closed-vs-closed arity
+-- mismatch rejects, which is the contravariant reading).  See doc note B/§ret.
+--: (OpSemState, V5Type, V5Type, string, Provenance) -> string
+function M.rule_T_CSub_Pack(st, a, b, v, prov)
+	local pa = resolve_pack(st, a) --[[: V5Type ]]
+	local pb = resolve_pack(st, b) --[[: V5Type ]]
+	-- internal: dispatcher routes here only for packs; fires only on solver bug
+	if pa.tag ~= "pack" or pb.tag ~= "pack" then
+		err(st, "T-CSub-Pack", "precondition: both pack"); return "error"
+	end
+	local n, m = #pa.items, #pb.items
+	local ra, rb = pa.rest, pb.rest
+	-- Both closed.
+	if ra == nil and rb == nil then
+		if v == "co" then
+			-- Covariant ret: Lua multi-return adjustment.  Iterate up to m (the
+			-- supertype's requested slots); missing LHS (subtype) slots adjust to
+			-- nil; surplus subtype slots beyond m are truncated.
+			local nil_ty = types_mod.const("nil")
+			for i = 1, m do
+				local av = pa.items[i] or nil_ty
+				local bv = pb.items[i]
+				if bv ~= nil then M.emit(st, constraint_mod.sub(av, bv, prov)) end
+			end
+			trace(st, "T-CSub-Pack", "co closed n=" .. n .. " m=" .. m)
+			return "done"
+		end
+		-- Contravariant args: strict arity.  An arity mismatch here is a function
+		-- arg-count mismatch — report it as arrow_arity_mismatch (the args pack
+		-- is the only contravariant pack position).
+		for i = 1, n do
+			local av, bv = pa.items[i], pb.items[i]
+			if av ~= nil and bv ~= nil then pack_subgoal(st, v, av, bv, prov) end
+		end
+		if n ~= m then
+			err(st, "T-CSub-Pack", "arg arity mismatch: " .. n .. " vs " .. m,
+				prov, { tag = "arrow_arity_mismatch", expected = m, got = n })
+			return "error"
+		end
+		trace(st, "T-CSub-Pack", "contra closed n=" .. n)
+		return "done"
+	end
+	-- Open cases: align the shared prefix by min(n,m).
+	local k = n
+	if m < k then k = m end
+	for i = 1, k do
+		local av, bv = pa.items[i], pb.items[i]
+		if av ~= nil and bv ~= nil then pack_subgoal(st, v, av, bv, prov) end
+	end
+	-- LHS open, RHS closed: need m >= n (LHS tail absorbs surplus); surplus
+	-- RHS positions m+1..? do not exist — but LHS fixed positions beyond m would
+	-- be unmatched, so require m >= n; bind LHS rest to RHS surplus (none here
+	-- when m==n) — no further aligned subgoals (k already covered min).
+	if ra ~= nil and rb == nil then
+		if m < n then
+			err(st, "T-CSub-Pack", "LHS open demands more fixed positions: " .. n .. " > " .. m,
+				prov, { tag = "record_arity_mismatch", expected = m, got = n })
+			return "error"
+		end
+		-- RHS surplus positions n+1..m: aligned against LHS rest tail (no fixed
+		-- LHS items remain), so the LHS open tail absorbs them — emit subgoal(v)
+		-- between a fresh view is unnecessary; the open tail is unconstrained.
+		trace(st, "T-CSub-Pack", "open-L n=" .. n .. " m=" .. m)
+		return "done"
+	end
+	-- RHS open, LHS closed/longer: closed LHS <: open RHS when n >= m (open tail
+	-- absorbs LHS surplus n positions m+1..n).
+	if ra == nil and rb ~= nil then
+		if n < m then
+			err(st, "T-CSub-Pack", "RHS open demands more fixed positions: " .. m .. " > " .. n,
+				prov, { tag = "record_arity_mismatch", expected = m, got = n })
+			return "error"
+		end
+		-- LHS surplus n+1..n absorbed by RHS open tail; bind RHS rest to the
+		-- surplus so a later equate sees it (positional, variance-respecting).
+		local tail = {} --[[: V5Type[] ]]
+		for i = m + 1, n do local x = pa.items[i]; if x ~= nil then tail[#tail + 1] = x end end
+		bind_packvar(st, rb.id, types_mod.pack(tail, nil))
+		trace(st, "T-CSub-Pack", "open-R n=" .. n .. " m=" .. m)
+		return "done"
+	end
+	-- Both open: align prefix surplus into shorter rest (same as OpenBoth), the
+	-- aligned-surplus positions emit subgoal(v).
+	-- internal: ra/rb both non-nil here; fires only on solver bug
+	if ra == nil or rb == nil then err(st, "T-CSub-Pack", "precondition: both open"); return "error" end
+	if n == m then
+		bind_packvar(st, ra.id, types_mod.pack({}, rb))
+		trace(st, "T-CSub-Pack", "open-both equal-prefix")
+		return "done"
+	end
+	if n > m then
+		local surplus = {} --[[: V5Type[] ]]
+		for i = m + 1, n do local x = pa.items[i]; if x ~= nil then surplus[#surplus + 1] = x end end
+		bind_packvar(st, rb.id, types_mod.pack(surplus, ra))
+		trace(st, "T-CSub-Pack", "open-both L-surplus")
+		return "done"
+	end
+	local surplus = {} --[[: V5Type[] ]]
+	for i = n + 1, m do local x = pb.items[i]; if x ~= nil then surplus[#surplus + 1] = x end end
+	bind_packvar(st, ra.id, types_mod.pack(surplus, rb))
+	trace(st, "T-CSub-Pack", "open-both R-surplus")
+	return "done"
+end
+
+-- T-CSub-Arrow.  Contra in args pack, co in ret pack — delegate to T-CSub-Pack.
 --: (OpSemState, V5Type, V5Type, Provenance) -> string
 function M.rule_T_CSub_Arrow(st, a, b, prov)
 	-- internal: dispatcher routes here only when both are arrow; fires only on solver bug
 	if a.tag ~= "arrow" or b.tag ~= "arrow" then
 		err(st, "T-CSub-Arrow", "precondition: both arrow"); return "error"
 	end
-	if #a.args ~= #b.args then
-		err(st, "T-CSub-Arrow", "arity mismatch", prov,
-			{ tag = "arrow_arity_mismatch", expected = #b.args, got = #a.args })
-		return "error"
-	end
-	for i = 1, #a.args do
-		local av, bv = a.args[i], b.args[i]
-		if av ~= nil and bv ~= nil then
-			-- contravariant in args: B_i <: A_i.
-			M.emit(st, constraint_mod.sub(bv, av, prov))
-		end
-	end
-	-- covariant in ret: delegate to positional Record rules (Phase 3).
-	M.emit(st, constraint_mod.sub(a.ret, b.ret, prov))
+	-- args contravariant, ret covariant.
+	local sa = M.rule_T_CSub_Pack(st, a.args, b.args, "contra", prov)
+	if sa == "error" then return "error" end
+	local sr = M.rule_T_CSub_Pack(st, a.ret, b.ret, "co", prov)
+	if sr == "error" then return "error" end
 	trace(st, "T-CSub-Arrow", "")
 	return "done"
 end
@@ -1341,10 +1567,11 @@ function M.rule_T_CMCall_Sealed_Field(st, tv, key, ret, prov)
 	local m = mraw --[[: V5Type ]]
 	-- internal: field found but is not callable (type inconsistency); fires only on solver bug
 	if m.tag ~= "arrow" then err(st, "T-CMCall-Sealed-Field", "field is not callable"); return "error" end
-	local r1raw = m.ret.fields["1"]
-	-- internal: arrow has no return slots; fires only on solver bug
-	if r1raw == nil then err(st, "T-CMCall-Sealed-Field", "arrow with zero rets"); return "error" end
-	local r1 = r1raw --[[: V5Type ]]
+	-- ret is a pack; the method's first return is items[1].  Arity-0 ret (a void
+	-- method) yields `never` (no value to bind) rather than an error.
+	local r1raw = m.ret.items[1]
+	local never_ty = types_mod.const("never") --[[: V5Type ]]
+	local r1 = r1raw or never_ty --[[: V5Type ]]
 	local lhs = types_mod.uvar(ret) --[[: V5Type ]]
 	M.emit(st, constraint_mod.eq(lhs, r1, prov))
 	trace(st, "T-CMCall-Sealed-Field", key)
@@ -1628,11 +1855,26 @@ local function miller_check(s, args, result_walked)
 	return allowed
 end
 
+-- Forward-declared (mutually recursive with abstract_sub_pack_local).
+local abstract_sub
+
+-- abstract_sub over a TPack: returns a TPack (so it populates an arrow's
+-- args/ret without an unprovable narrowing cast).
+--: ({ [integer]: integer }, TPack) -> TPack
+local function abstract_sub_pack_local(map, p)
+	local items = {} --[[: V5Type[] ]]
+	for i = 1, #p.items do
+		local v = p.items[i]
+		if v ~= nil and abstract_sub ~= nil then local s2 = abstract_sub(map, v) --[[: V5Type ]]; items[i] = s2 end
+	end
+	return { tag = "pack", items = items, rest = p.rest }
+end
+
 -- Walker for abstract_body: replaces UVar(id) with Var(map[id]).
 -- Recursive; does NOT cross nested Lambdas (returns unchanged, since
 -- caller guards via contains_lambda).
 --: ({ [integer]: integer }, V5Type) -> V5Type
-local function abstract_sub(map, t)
+abstract_sub = function(map, t)
 	if t.tag == "uvar" then
 		local idx = map[t.id]
 		if idx ~= nil then return types_mod.var(idx) end
@@ -1649,14 +1891,15 @@ local function abstract_sub(map, t)
 			if fv ~= nil then local s2 = abstract_sub(map, fv) --[[: V5Type ]]; out[fk] = s2 end
 		end
 		return types_mod.record(out)
-	elseif t.tag == "arrow" then
-		local aargs = {} --[[: V5Type[] ]]
-		for i = 1, #t.args do
-			local v = t.args[i]
-			if v ~= nil then local s2 = abstract_sub(map, v) --[[: V5Type ]]; aargs[i] = s2 end
+	elseif t.tag == "pack" then
+		local items = {} --[[: V5Type[] ]]
+		for i = 1, #t.items do
+			local v = t.items[i]
+			if v ~= nil then local s2 = abstract_sub(map, v) --[[: V5Type ]]; items[i] = s2 end
 		end
-		local aret = abstract_sub(map, t.ret) --[[: V5Type ]]
-		return { tag = "arrow", args = aargs, ret = aret }
+		return { tag = "pack", items = items, rest = t.rest }
+	elseif t.tag == "arrow" then
+		return { tag = "arrow", args = abstract_sub_pack_local(map, t.args), ret = abstract_sub_pack_local(map, t.ret) }
 	elseif t.tag == "union" then
 		local xs = {} --[[: V5Type[] ]]
 		for i = 1, #t.xs do
@@ -1702,9 +1945,12 @@ local function contains_lambda(t)
 		for _, fv in pairs(t.fields) do if contains_lambda(fv) then return true end end
 		return false
 	end
+	if t.tag == "pack" then
+		for i = 1, #t.items do if contains_lambda(t.items[i]) then return true end end
+		return false
+	end
 	if t.tag == "arrow" then
-		for i = 1, #t.args do if contains_lambda(t.args[i]) then return true end end
-		return contains_lambda(t.ret)
+		return contains_lambda(t.args) or contains_lambda(t.ret)
 	end
 	if t.tag == "union" then
 		for i = 1, #t.xs do if contains_lambda(t.xs[i]) then return true end end
@@ -1924,17 +2170,33 @@ local function structurally_subtype(a, b)
 		end
 		return true
 	end
-	-- Arrow: contravariant args, covariant ret.
+	-- Pack: positional, with a variance carried by the caller.  Conservative:
+	-- both closed equal arity, aligned positions structurally relate under the
+	-- given variance (open packs punt to false).
+	if a.tag == "pack" and b.tag == "pack" then
+		return false -- packs only compared via arrow (with explicit variance) below
+	end
+	-- Arrow: contravariant args pack, covariant ret pack.  Both packs closed and
+	-- equal arity for the cheap structural decision; open packs punt to false.
 	if a.tag == "arrow" and b.tag == "arrow" then
-		if #a.args ~= #b.args then return false end
-		for i = 1, #a.args do
-			local ai, bi = a.args[i], b.args[i]
+		local aa, ba = a.args, b.args
+		local ar, br = a.ret, b.ret
+		if aa.rest ~= nil or ba.rest ~= nil or ar.rest ~= nil or br.rest ~= nil then return false end
+		if #aa.items ~= #ba.items then return false end
+		if #ar.items ~= #br.items then return false end
+		for i = 1, #aa.items do
+			local ai, bi = aa.items[i], ba.items[i]
 			if ai == nil or bi == nil then return false end
 			-- contravariant: b_arg <: a_arg
 			if not structurally_subtype(bi, ai) then return false end
 		end
-		-- covariant ret (both are records)
-		return structurally_subtype(a.ret, b.ret)
+		for i = 1, #ar.items do
+			local ai, bi = ar.items[i], br.items[i]
+			if ai == nil or bi == nil then return false end
+			-- covariant ret
+			if not structurally_subtype(ai, bi) then return false end
+		end
+		return true
 	end
 	return false
 end

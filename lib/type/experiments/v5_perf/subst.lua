@@ -21,7 +21,11 @@ M.SEALED = "sealed"
 
 --:: Phase    = string
 --:: WatchSet = { [integer]: boolean }
---:: Subst    = { parent: { [integer]: integer }, bind_type: { [integer]: V5Type }, bind_phase: { [integer]: Phase }, watchers: { [integer]: WatchSet }, head_watchers: { [integer]: WatchSet }, next_id: integer }
+--:: Subst    = { parent: { [integer]: integer }, bind_type: { [integer]: V5Type }, bind_phase: { [integer]: Phase }, watchers: { [integer]: WatchSet }, head_watchers: { [integer]: WatchSet }, pack_bindings: { [integer]: V5Type }, next_id: integer }
+
+-- pack_bindings: TPackVar id -> bound TPack (Spec B).  Stored on the
+-- substitution exactly as the row-var bindings are; the pack CEq/CSub rules in
+-- the op-sem bind it (single-rest invariant) and `types.deref_pack` splices it.
 
 -- head_watchers: separate parked-map keyed by tvar id, holding constraint ids
 -- that should be woken when the tvar's binding's HEAD (top-level constructor
@@ -38,6 +42,7 @@ function M.new()
 		bind_phase    = {} --[[: { [integer]: Phase } ]],
 		watchers      = {} --[[: { [integer]: WatchSet } ]],
 		head_watchers = {} --[[: { [integer]: WatchSet } ]],
+		pack_bindings = {} --[[: { [integer]: V5Type } ]],
 		next_id       = 1,
 	}
 end
@@ -192,6 +197,43 @@ function M.head_is_rigid(s, tvar_id)
 	return true
 end
 
+-- walk_pack(s, p): splice p's bound `rest` TPackVars through pack_bindings
+-- (flattening their items), then walk each resolved item.  Returns a TPack.
+-- Mirrors types.deref_pack but recurses M.walk into items for reporting.
+--: (Subst, TPack) -> TPack
+function M.walk_pack(s, p)
+	-- Splice the rest chain first (collect raw items in order).
+	local raw = {} --[[: V5Type[] ]]
+	for i = 1, #p.items do
+		local v = p.items[i]
+		if v ~= nil then raw[#raw + 1] = v end
+	end
+	--: TPackVar | nil
+	local rest = p.rest
+	local seen = {} --[[: { [integer]: boolean } ]]
+	local pb = s.pack_bindings
+	while rest ~= nil do
+		local bnd_opt = pb[rest.id] --[[: V5Type | nil ]]
+		if bnd_opt == nil then break end
+		if seen[rest.id] then break end
+		seen[rest.id] = true
+		local bnd = bnd_opt --[[: V5Type ]]
+		if bnd.tag ~= "pack" then break end
+		for i = 1, #bnd.items do
+			local v = bnd.items[i]
+			if v ~= nil then raw[#raw + 1] = v end
+		end
+		rest = bnd.rest
+	end
+	-- Walk each spliced item.
+	local items = {} --[[: V5Type[] ]]
+	for i = 1, #raw do
+		local v = raw[i]
+		if v ~= nil then local sh = M.walk(s, v) --[[: V5Type ]]; items[i] = sh end
+	end
+	return { tag = "pack", items = items, rest = rest }
+end
+
 -- Walk: replace every UVar in t with its current binding (recursively).
 -- Used only at quiescence / for reporting. Allocates fresh nodes.
 --: (Subst, V5Type) -> V5Type
@@ -204,8 +246,8 @@ function M.walk(s, t)
 			return { tag = "uvar", id = r }
 		end
 		return M.walk(s, b)
-	elseif t.tag == "rowvar" then
-		-- Row variables are not in the uvar substitution map; return as-is.
+	elseif t.tag == "rowvar" or t.tag == "packvar" then
+		-- Row / pack variables are not in the uvar substitution map; return as-is.
 		return t
 	elseif t.tag == "app" then
 		local sf = M.walk(s, t.f) --[[: V5Type ]]
@@ -220,14 +262,10 @@ function M.walk(s, t)
 			if fv ~= nil then local sh = M.walk(s, fv) --[[: V5Type ]]; out[fk] = sh end
 		end
 		return { tag = "record", fields = out, row = t.row }
+	elseif t.tag == "pack" then
+		return M.walk_pack(s, t)
 	elseif t.tag == "arrow" then
-		local args = {} --[[: V5Type[] ]]
-		for i = 1, #t.args do
-			local v = t.args[i]
-			if v ~= nil then local sh = M.walk(s, v) --[[: V5Type ]]; args[i] = sh end
-		end
-		local ret = M.walk(s, t.ret) --[[: V5Type ]]
-		return { tag = "arrow", args = args, ret = ret }
+		return { tag = "arrow", args = M.walk_pack(s, t.args), ret = M.walk_pack(s, t.ret) }
 	elseif t.tag == "union" then
 		local xs = {} --[[: V5Type[] ]]
 		for i = 1, #t.xs do

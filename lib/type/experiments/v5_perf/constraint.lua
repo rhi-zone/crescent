@@ -66,16 +66,20 @@ local function key_of(t)
 		if t.row ~= nil then s = s .. ";rv:" .. tostring(t.row.id) end
 		return s .. "}"
 	end
-	if t.tag == "arrow" then
-		local s = "Ar("
-		for i = 1, #t.args do
-			local v = t.args[i]
+	if t.tag == "pack" then
+		local s = "Pk("
+		for i = 1, #t.items do
+			local v = t.items[i]
 			if v ~= nil then
 				if i > 1 then s = s .. "," end
 				s = s .. key_of(v)
 			end
 		end
-		return s .. ")->" .. key_of(t.ret)
+		if t.rest ~= nil then s = s .. ";pv:" .. tostring(t.rest.id) end
+		return s .. ")"
+	end
+	if t.tag == "arrow" then
+		return "Ar(" .. key_of(t.args) .. ")->" .. key_of(t.ret)
 	end
 	if t.tag == "union" then
 		local s = "Un["

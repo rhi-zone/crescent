@@ -180,8 +180,8 @@ T.describe("v5 constrain", function()
             local b = c.b
             if b == nil or b.tag ~= "arrow" then return false end
             local ret = b.ret
-            if ret == nil or ret.tag ~= "record" then return false end
-            return ret.fields["2"] ~= nil
+            if ret == nil or ret.tag ~= "pack" then return false end
+            return ret.items[2] ~= nil
         end)
         T.ok(found2, "csub with 2-slot expected arrow ret found")
     end)
@@ -197,8 +197,8 @@ T.describe("v5 constrain", function()
             local b = c.b
             if b == nil or b.tag ~= "arrow" then return false end
             local ret = b.ret
-            if ret == nil or ret.tag ~= "record" then return false end
-            return ret.fields["1"] ~= nil and ret.fields["2"] == nil
+            if ret == nil or ret.tag ~= "pack" then return false end
+            return ret.items[1] ~= nil and ret.items[2] == nil
         end)
         T.ok(found1, "csub with 1-slot expected arrow ret found")
     end)
@@ -366,8 +366,8 @@ T.describe("v5 constrain — effect propagation", function()
             -- io.write is an arrow; its return should contain !io.
             T.ok(io_write.tag == "arrow", "io.write is an arrow type")
             local ret = io_write.ret
-            if ret ~= nil and ret.tag == "record" then
-                local ret1 = ret.fields["1"]
+            if ret ~= nil and ret.tag == "pack" then
+                local ret1 = ret.items[1]
                 if ret1 ~= nil then
                     local effs = constrain.extract_effects(ret1)
                     T.ok(#effs >= 1, "io.write return has at least one effect")
@@ -383,7 +383,7 @@ T.describe("v5 constrain — effect propagation", function()
                     T.fail("io.write return[1] is nil")
                 end
             else
-                T.fail("io.write ret is not a record")
+                T.fail("io.write ret is not a pack")
             end
         end
     end)
@@ -395,8 +395,8 @@ T.describe("v5 constrain — effect propagation", function()
         if error_fn ~= nil then
             T.ok(error_fn.tag == "arrow", "error is an arrow type")
             local ret = error_fn.ret
-            if ret ~= nil and ret.tag == "record" then
-                local ret1 = ret.fields["1"]
+            if ret ~= nil and ret.tag == "pack" then
+                local ret1 = ret.items[1]
                 if ret1 ~= nil then
                     local effs = constrain.extract_effects(ret1)
                     T.ok(#effs >= 1, "error return has at least one effect")
@@ -417,7 +417,7 @@ T.describe("v5 constrain — effect propagation", function()
                     T.fail("error return[1] is nil")
                 end
             else
-                T.fail("error ret is not a record")
+                T.fail("error ret is not a pack")
             end
         end
     end)

@@ -1351,8 +1351,28 @@ where `subgoal(co, x, y) = CSub(x, y)`, `subgoal(contra, x, y) = CSub(y, x)`,
 and `tail-obligations` reconcile the surplus prefix and the `rest`s by the same
 prefix-alignment as **T-CEq-Pack-OpenBoth** but emitting `CSub_v` (not `CEq`)
 on aligned positions. A closed pack is a subtype of an open pack of no greater
-fixed arity (the open tail absorbs the surplus); a closed pack is **not** a
-subtype of a closed pack of different arity (rejection).
+fixed arity (the open tail absorbs the surplus).
+
+**Closed-vs-closed arity by variance (NORMATIVE CORRECTION, Phase 2.2).** The
+prose above originally stated, unqualified, that "a closed pack is **not** a
+subtype of a closed pack of different arity (rejection)." That reading is sound
+**only for the contravariant (arrow-args) position** — a function of `n`
+parameters is not one of `m ≠ n` parameters. For the **covariant (arrow-ret)**
+position it contradicts the cited authority: Lua multi-return adjustment (the v4
+`T-CSub-Record-Width` positional nil-pad / truncate, the documented soundness
+floor). A callee returning `(A_1..A_n)` is usable where the caller requests
+`(B_1..B_m)`: surplus callee returns (`n > m`) are **truncated**, and missing
+callee returns (`n < m`) **adjust to `nil`**. The implementation therefore
+splits the closed-closed case on variance:
+
+- `v = contra` (args): arity must match exactly; `n ≠ m` ⇒ rejection
+  (`arrow_arity_mismatch`).
+- `v = co` (ret): iterate `i ∈ 1..m`; emit `CSub(A_i or nil, B_i)` (nil-pad the
+  short side, truncate the long side beyond `m`). No arity rejection.
+
+Both interpreters encode this identically. (Following the cited authority over
+the unqualified prose, per the Phase-2.1 precedent that the spec prose has
+carried soundness errors vs. its sources.)
 
 **Arrow rules updated.** **T-CEq-Arrow** / **T-CSub-Arrow** now read `args` and
 `ret` as packs: emit `CEq`/`CSub_contra` on `args` packs and `CEq`/`CSub_co` on

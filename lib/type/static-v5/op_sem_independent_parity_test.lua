@@ -1343,4 +1343,202 @@ T.describe("indep parity: fixture 36 — cyclic bound then CEq merge", function(
 	end)
 end)
 
+-- ════════════════════════════════════════════════════════════════════
+-- Spec B — TPack parity fixtures (Phase 2.2)
+-- ════════════════════════════════════════════════════════════════════
+--
+-- These exercise the TPack CEq/CSub rules across both interpreters: closed
+-- equal-arity, OpenL/OpenR tail-binding, OpenBoth prefix-align, splice
+-- (R↦pack / R↦never), arrow CSub contra-args / co-ret through packs, pack-arity
+-- rejection, deeply-nested pack-in-pack-in-arrow (op-sem doc gap #2), and an
+-- open-pack alignment FUZZ (op-sem doc gap #3) across the two encoders.
+
+local C = constraint_mod
+local function k(s) return types_mod.const(s) end
+
+-- Run identical emissions (built by `build(st)` returning a list of tvar ids to
+-- compare) on both interpreters; assert state + resolution parity.
+--: (string, (AltState) -> integer[]) -> nil
+local function run_both(label, build)
+	local exec = fresh_state()
+	local ids_e = build(exec)
+	op_sem.run(exec)
+	local alt = fresh_state()
+	local ids_a = build(alt)
+	op_sem_alt.run(alt)
+	assert_state_parity(label, exec, alt)
+	T.eq(#ids_e, #ids_a, label .. ": tracked-id count diverges")
+	for i = 1, #ids_e do
+		local ie = ids_e[i]
+		local ia = ids_a[i]
+		if ie ~= nil and ia ~= nil then
+			local re = op_sem.resolve(exec, ie) --[[: V5Type ]]
+			local ra = op_sem_alt.resolve(alt, ia) --[[: V5Type ]]
+			assert_resolve_eq(label .. ".id" .. i, re, ra)
+		end
+	end
+end
+
+T.describe("indep parity: pack F-B1 — closed equal-arity arrow CEq", function()
+	T.it("(?x, num) -> str  ≡  (int, num) -> ?y  binds ?x=int, ?y=str", function()
+		run_both("packB1", function(st)
+			local x = subst_mod.fresh(st.subst, "open")
+			local y = subst_mod.fresh(st.subst, "open")
+			local ar1 = types_mod.arrow({ types_mod.uvar(x), k("number") }, { k("string") }) --[[: V5Type ]]
+			local ar2 = types_mod.arrow({ k("integer"), k("number") }, { types_mod.uvar(y) }) --[[: V5Type ]]
+			op_sem.emit(st, C.eq(ar1, ar2, prov("arr-ceq")))
+			return { x, y }
+		end)
+	end)
+end)
+
+T.describe("indep parity: pack F-B2 — OpenL tail-binding via CEq", function()
+	T.it("pack([?a], R) ≡ pack([int, str, bool]) binds ?a=int, R↦[str,bool]", function()
+		run_both("packB2", function(st)
+			local a = subst_mod.fresh(st.subst, "open")
+			local pl = types_mod.pack({ types_mod.uvar(a) }, types_mod.packvar(9001)) --[[: V5Type ]]
+			local pr = types_mod.pack({ k("integer"), k("string"), k("true") }, nil) --[[: V5Type ]]
+			op_sem.emit(st, C.eq(pl, pr, prov("openL")))
+			return { a }
+		end)
+	end)
+end)
+
+T.describe("indep parity: pack F-B3 — OpenR tail-binding via CEq", function()
+	T.it("pack([int, str, bool]) ≡ pack([?b], R)", function()
+		run_both("packB3", function(st)
+			local b = subst_mod.fresh(st.subst, "open")
+			local pl = types_mod.pack({ k("integer"), k("string"), k("true") }, nil) --[[: V5Type ]]
+			local pr = types_mod.pack({ types_mod.uvar(b) }, types_mod.packvar(9002)) --[[: V5Type ]]
+			op_sem.emit(st, C.eq(pl, pr, prov("openR")))
+			return { b }
+		end)
+	end)
+end)
+
+T.describe("indep parity: pack F-B4 — OpenBoth prefix-align surplus → shorter rest", function()
+	T.it("pack([?a, ?b], R1) ≡ pack([int], R2) prefix-aligns by min", function()
+		run_both("packB4", function(st)
+			local a = subst_mod.fresh(st.subst, "open")
+			local bb = subst_mod.fresh(st.subst, "open")
+			local pl = types_mod.pack({ types_mod.uvar(a), types_mod.uvar(bb) }, types_mod.packvar(9003)) --[[: V5Type ]]
+			local pr = types_mod.pack({ k("integer") }, types_mod.packvar(9004)) --[[: V5Type ]]
+			op_sem.emit(st, C.eq(pl, pr, prov("openBoth")))
+			return { a }
+		end)
+	end)
+end)
+
+T.describe("indep parity: pack F-B5 — splice R↦pack then equate", function()
+	T.it("(true, ...R) with R↦[int, str] splices into closed [true,int,str]", function()
+		run_both("packB5", function(st)
+			-- Pre-bind R (id 9005) to [int, str] in pack_bindings, then CEq an
+			-- open pack (true, ...R) against a fresh uvar tuple to observe splice.
+			st.subst.pack_bindings[9005] = types_mod.pack({ k("integer"), k("string") }, nil)
+			local u1 = subst_mod.fresh(st.subst, "open")
+			local u2 = subst_mod.fresh(st.subst, "open")
+			local u3 = subst_mod.fresh(st.subst, "open")
+			local open = types_mod.pack({ k("true") }, types_mod.packvar(9005)) --[[: V5Type ]]
+			local target = types_mod.pack({ types_mod.uvar(u1), types_mod.uvar(u2), types_mod.uvar(u3) }, nil) --[[: V5Type ]]
+			op_sem.emit(st, C.eq(open, target, prov("splice")))
+			return { u1, u2, u3 }
+		end)
+	end)
+end)
+
+T.describe("indep parity: pack F-B6 — splice R↦never (empty pack)", function()
+	T.it("(true, ...R) with R↦[] collapses to closed [true]", function()
+		run_both("packB6", function(st)
+			st.subst.pack_bindings[9006] = types_mod.pack({}, nil)
+			local u1 = subst_mod.fresh(st.subst, "open")
+			local open = types_mod.pack({ k("true") }, types_mod.packvar(9006)) --[[: V5Type ]]
+			local target = types_mod.pack({ types_mod.uvar(u1) }, nil) --[[: V5Type ]]
+			op_sem.emit(st, C.eq(open, target, prov("splice-never")))
+			return { u1 }
+		end)
+	end)
+end)
+
+T.describe("indep parity: pack F-B7 — arrow CSub contra-args / co-ret", function()
+	T.it("(num)->?r <: (int)->str  emits int<:num (contra) and ?r adjust to str", function()
+		run_both("packB7", function(st)
+			local r = subst_mod.fresh(st.subst, "open")
+			local sub_arr = types_mod.arrow({ k("number") }, { types_mod.uvar(r) }) --[[: V5Type ]]
+			local sup_arr = types_mod.arrow({ k("integer") }, { k("string") }) --[[: V5Type ]]
+			op_sem.emit(st, C.sub(sub_arr, sup_arr, prov("arr-csub")))
+			return { r }
+		end)
+	end)
+end)
+
+T.describe("indep parity: pack F-B8 — pack-arity rejection (contra args)", function()
+	T.it("(int, int)->num <: (int)->num rejects on arg arity", function()
+		run_both("packB8", function(st)
+			local sub_arr = types_mod.arrow({ k("integer"), k("integer") }, { k("number") }) --[[: V5Type ]]
+			local sup_arr = types_mod.arrow({ k("integer") }, { k("number") }) --[[: V5Type ]]
+			op_sem.emit(st, C.sub(sub_arr, sup_arr, prov("arity-reject")))
+			return {}
+		end)
+	end)
+end)
+
+T.describe("indep parity: pack F-B9 — deeply-nested pack-in-pack-in-arrow (doc gap #2)", function()
+	T.it("arrow whose arg is an arrow whose ret is a tuple decomposes identically", function()
+		run_both("packB9", function(st)
+			local x = subst_mod.fresh(st.subst, "open")
+			-- inner arrow: (?x) -> (int, str)  [ret is a 2-tuple pack]
+			local inner_sub = types_mod.arrow({ types_mod.uvar(x) }, { k("integer"), k("string") }) --[[: V5Type ]]
+			local inner_sup = types_mod.arrow({ k("number") }, { k("integer"), k("string") }) --[[: V5Type ]]
+			-- outer arrow: (inner) -> num.  CSub contra on the arg (inner arrows),
+			-- which re-derives variance into the nested packs.
+			local outer_sub = types_mod.arrow({ inner_sub }, { k("number") }) --[[: V5Type ]]
+			local outer_sup = types_mod.arrow({ inner_sup }, { k("number") }) --[[: V5Type ]]
+			op_sem.emit(st, C.sub(outer_sub, outer_sup, prov("nested")))
+			return { x }
+		end)
+	end)
+end)
+
+T.describe("indep parity: pack F-B10 — open-pack alignment FUZZ (doc gap #3)", function()
+	T.it("randomized open/closed pack CEq pairs agree across both encoders", function()
+		-- Deterministic seed so failures replay.  Both interpreters see the SAME
+		-- emissions per trial (build closures construct fresh nodes each call).
+		local seed = tonumber(os.getenv("FUZZ_SEED") or "") or 0xB12A2
+		math.randomseed(seed)
+		local atoms = { "integer", "string", "true", "false", "number", "nil" }
+		for trial = 1, 60 do
+			--: () -> integer
+			local function rint(n) return math.floor(math.random() * n) end
+			local na = rint(4)          -- 0..3 fixed LHS items
+			local nb = rint(4)          -- 0..3 fixed RHS items
+			local la_open = math.random() < 0.5
+			local lb_open = math.random() < 0.5
+			-- Snapshot the choices so both interpreters build identical packs.
+			local la_atoms = {} --[[: string[] ]]
+			for i = 1, na do la_atoms[i] = atoms[1 + rint(#atoms)] end
+			local lb_atoms = {} --[[: string[] ]]
+			for i = 1, nb do lb_atoms[i] = atoms[1 + rint(#atoms)] end
+			--: (AltState) -> integer[]
+			local function build(st)
+				local _ = st
+				local items_a = {} --[[: V5Type[] ]]
+				for i = 1, na do local nm = la_atoms[i]; if nm ~= nil then items_a[i] = k(nm) end end
+				local items_b = {} --[[: V5Type[] ]]
+				for i = 1, nb do local nm = lb_atoms[i]; if nm ~= nil then items_b[i] = k(nm) end end
+				--: { id: integer, tag: "packvar" } | nil
+				local ra = nil
+				if la_open then ra = types_mod.packvar(90100 + trial) end
+				--: { id: integer, tag: "packvar" } | nil
+				local rb = nil
+				if lb_open then rb = types_mod.packvar(90200 + trial) end
+				local pa = types_mod.pack(items_a, ra) --[[: V5Type ]]
+				local pb = types_mod.pack(items_b, rb) --[[: V5Type ]]
+				op_sem.emit(st, C.eq(pa, pb, prov("fuzz" .. trial)))
+				return {}
+			end
+			run_both("packB10.trial" .. trial, build)
+		end
+	end)
+end)
+
 return true

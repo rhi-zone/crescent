@@ -205,6 +205,19 @@ local function head_token(st, t)
 	local d = subst_mod.deref(st.subst, t) --[[: V5Type ]]
 	if d.tag == "uvar" then return "v" .. tostring(subst_mod.find(st.subst, d.id)) end
 	if d.tag == "const" then return "k:" .. d.name end
+	-- Spec B: the pack head extends to ⟨"pack", #items, rest-id-or-nil⟩ plus the
+	-- per-item heads; an arrow folds in its args + ret pack heads.
+	if d.tag == "pack" then
+		local s = types_mod.pack_head_key(d)
+		for i = 1, #d.items do
+			local it = d.items[i]
+			if it ~= nil then s = s .. "|" .. head_token(st, it) end
+		end
+		return s
+	end
+	if d.tag == "arrow" then
+		return "arrow[" .. head_token(st, d.args) .. "][" .. head_token(st, d.ret) .. "]"
+	end
 	return d.tag
 end
 
@@ -351,19 +364,87 @@ function M.rule_T_CEq_Const(st, a, b, prov)
 	end
 end
 
+-- ── TPack substrate (Spec B), independently encoded ─────────────────────────
+-- Pack-var bindings live in st.subst.pack_bindings (single-rest invariant).
+
+-- Resolve a pack through the splice (deref_pack), returning items + rest.
+--: (AltState, V5Type) -> V5Type
+local function pack_resolve(st, p)
+	return types_mod.deref_pack(p, st.subst.pack_bindings)
+end
+
+-- Bind a pack-var id to a pack.
+--: (AltState, integer, V5Type) -> nil
+local function pack_bind(st, id, p)
+	st.subst.pack_bindings[id] = p
+end
+
+-- Build a closed pack of items[lo..hi] (inclusive, compacted).
+--: (V5Type[], integer, integer) -> V5Type
+local function slice_pack(items, lo, hi)
+	local out = {} --[[: V5Type[] ]]
+	for i = lo, hi do local v = items[i]; if v ~= nil then out[#out + 1] = v end end
+	return types_mod.pack(out, nil)
+end
+
+-- T-CEq-Pack (Closed / OpenL / OpenR / OpenBoth).  Prefix aligned by min(n,m).
+--: (AltState, V5Type, V5Type, Provenance) -> nil
+function M.rule_T_CEq_Pack(st, a, b, prov)
+	local pa = pack_resolve(st, a) --[[: V5Type ]]
+	local pb = pack_resolve(st, b) --[[: V5Type ]]
+	if pa.tag ~= "pack" or pb.tag ~= "pack" then return end
+	local n = #pa.items
+	local m = #pb.items
+	local lo = n
+	if m < lo then lo = m end
+	for i = 1, lo do
+		local xa = pa.items[i]; local xb = pb.items[i]
+		if xa ~= nil and xb ~= nil then emit(st, constraint_mod.eq(xa, xb, prov)) end
+	end
+	local ar = pa.rest
+	local br = pb.rest
+	-- Both closed.
+	if ar == nil and br == nil then
+		if n ~= m then record_error(st, "T-CEq-Pack-Closed", "pack arity mismatch") end
+		return
+	end
+	-- LHS open, RHS closed.
+	if ar ~= nil and br == nil then
+		if m < n then record_error(st, "T-CEq-Pack-OpenL", "LHS demands more fixed positions"); return end
+		pack_bind(st, ar.id, slice_pack(pb.items, n + 1, m))
+		return
+	end
+	-- RHS open, LHS closed.
+	if ar == nil and br ~= nil then
+		if n < m then record_error(st, "T-CEq-Pack-OpenR", "RHS demands more fixed positions"); return end
+		pack_bind(st, br.id, slice_pack(pa.items, m + 1, n))
+		return
+	end
+	-- Both open: prefix-align by min, surplus prefix → shorter rest.
+	if ar == nil or br == nil then return end
+	if n == m then
+		pack_bind(st, ar.id, types_mod.pack({}, br))
+		return
+	end
+	if n > m then
+		-- LHS longer: surplus pa[m+1..n] prepend to RHS rest; bind shorter (br).
+		local surplus = {} --[[: V5Type[] ]]
+		for i = m + 1, n do local v = pa.items[i]; if v ~= nil then surplus[#surplus + 1] = v end end
+		pack_bind(st, br.id, types_mod.pack(surplus, ar))
+		return
+	end
+	-- RHS longer.
+	local surplus = {} --[[: V5Type[] ]]
+	for i = n + 1, m do local v = pb.items[i]; if v ~= nil then surplus[#surplus + 1] = v end end
+	pack_bind(st, ar.id, types_mod.pack(surplus, br))
+end
+
 --: (AltState, V5Type, V5Type, Provenance) -> nil
 function M.rule_T_CEq_Arrow(st, a, b, prov)
 	local da = subst_mod.deref(st.subst, a) --[[: V5Type ]]
 	local db = subst_mod.deref(st.subst, b) --[[: V5Type ]]
 	if da.tag ~= "arrow" or db.tag ~= "arrow" then return end
-	if #da.args ~= #db.args then
-		record_error(st, "T-CEq-Arrow", "arrow arity mismatch")
-		return
-	end
-	for i = 1, #da.args do
-		local xa = da.args[i]; local xb = db.args[i]
-		if xa ~= nil and xb ~= nil then emit(st, constraint_mod.eq(xa, xb, prov)) end
-	end
+	emit(st, constraint_mod.eq(da.args, db.args, prov))
 	emit(st, constraint_mod.eq(da.ret, db.ret, prov))
 end
 
@@ -470,6 +551,7 @@ local function step_ceq(st, a, b, prov)
 	end
 	if da.tag == "const" then M.rule_T_CEq_Const(st, da, db, prov); return end
 	if da.tag == "arrow" then M.rule_T_CEq_Arrow(st, da, db, prov); return end
+	if da.tag == "pack" then M.rule_T_CEq_Pack(st, da, db, prov); return end
 	if da.tag == "record" then M.rule_T_CEq_Record(st, da, db, prov); return end
 	if da.tag == "app" then M.rule_T_CEq_App(st, da, db, prov); return end
 	if da.tag == "lambda" then
@@ -571,22 +653,85 @@ function M.rule_T_CSub_TVar(st, a, b, prov)
 	end
 end
 
+-- T-CSub-Pack (Spec B): positional, length-polymorphic; variance `v` carried
+-- from the arrow site ("co"|"contra").  Prefix aligned by min(n,m); surplus +
+-- rests reconciled identically to T-CEq-Pack-OpenBoth (surplus → shorter rest).
+-- v "co": Lua multi-return adjustment on closed ret packs (nil-pad short /
+-- truncate long); v "contra": strict arity on closed arg packs.  Open packs are
+-- length-polymorphic (open tail absorbs surplus).
+--: (AltState, V5Type, V5Type, string, Provenance) -> nil
+function M.rule_T_CSub_Pack(st, a, b, v, prov)
+	local pa = pack_resolve(st, a) --[[: V5Type ]]
+	local pb = pack_resolve(st, b) --[[: V5Type ]]
+	if pa.tag ~= "pack" or pb.tag ~= "pack" then return end
+	local n = #pa.items
+	local m = #pb.items
+	local ar = pa.rest
+	local br = pb.rest
+	-- Both closed.
+	if ar == nil and br == nil then
+		if v == "co" then
+			-- Covariant ret: iterate supertype's m slots; pad missing sub slots
+			-- with nil; truncate surplus sub slots beyond m.
+			local nil_ty = types_mod.const("nil")
+			for i = 1, m do
+				local xa = pa.items[i] or nil_ty
+				local xb = pb.items[i]
+				if xb ~= nil then emit(st, constraint_mod.sub(xa, xb, prov)) end
+			end
+			return
+		end
+		-- Contravariant args: strict.
+		for i = 1, n do
+			local xa = pa.items[i]; local xb = pb.items[i]
+			if xa ~= nil and xb ~= nil then emit(st, constraint_mod.sub(xb, xa, prov)) end
+		end
+		if n ~= m then record_error(st, "T-CSub-Pack", "pack arity mismatch") end
+		return
+	end
+	-- Open cases: align shared prefix by min(n,m).
+	local lo = n
+	if m < lo then lo = m end
+	for i = 1, lo do
+		local xa = pa.items[i]; local xb = pb.items[i]
+		if xa ~= nil and xb ~= nil then
+			if v == "contra" then emit(st, constraint_mod.sub(xb, xa, prov))
+			else emit(st, constraint_mod.sub(xa, xb, prov)) end
+		end
+	end
+	if ar ~= nil and br == nil then
+		if m < n then record_error(st, "T-CSub-Pack", "LHS open demands more fixed positions") end
+		return
+	end
+	if ar == nil and br ~= nil then
+		if n < m then record_error(st, "T-CSub-Pack", "RHS open demands more fixed positions"); return end
+		pack_bind(st, br.id, slice_pack(pa.items, m + 1, n))
+		return
+	end
+	if ar == nil or br == nil then return end
+	if n == m then
+		pack_bind(st, ar.id, types_mod.pack({}, br))
+		return
+	end
+	if n > m then
+		local surplus = {} --[[: V5Type[] ]]
+		for i = m + 1, n do local x = pa.items[i]; if x ~= nil then surplus[#surplus + 1] = x end end
+		pack_bind(st, br.id, types_mod.pack(surplus, ar))
+		return
+	end
+	local surplus = {} --[[: V5Type[] ]]
+	for i = n + 1, m do local x = pb.items[i]; if x ~= nil then surplus[#surplus + 1] = x end end
+	pack_bind(st, ar.id, types_mod.pack(surplus, br))
+end
+
 --: (AltState, V5Type, V5Type, Provenance) -> nil
 function M.rule_T_CSub_Arrow(st, a, b, prov)
 	local da = subst_mod.deref(st.subst, a) --[[: V5Type ]]
 	local db = subst_mod.deref(st.subst, b) --[[: V5Type ]]
 	if da.tag ~= "arrow" or db.tag ~= "arrow" then return end
-	if #da.args ~= #db.args then
-		record_error(st, "T-CSub-Arrow", "arrow arity mismatch")
-		return
-	end
-	-- Contra args: A_i is supertype of B_i  ->  CSub(B_i, A_i).
-	for i = 1, #da.args do
-		local xa = da.args[i]; local xb = db.args[i]
-		if xa ~= nil and xb ~= nil then emit(st, constraint_mod.sub(xb, xa, prov)) end
-	end
-	-- Co ret: delegate to positional Record rules (Phase 3).
-	emit(st, constraint_mod.sub(da.ret, db.ret, prov))
+	-- args contravariant, ret covariant — via the pack rule.
+	M.rule_T_CSub_Pack(st, da.args, db.args, "contra", prov)
+	M.rule_T_CSub_Pack(st, da.ret, db.ret, "co", prov)
 end
 
 -- T-CSub-Atomic (Spec A): both sides atoms — decide via the single atomic_sub.
@@ -769,6 +914,10 @@ local function step_csub(st, a, b, prov)
 	end
 	if da.tag == "arrow" and db.tag == "arrow" then
 		M.rule_T_CSub_Arrow(st, da, db, prov); return
+	end
+	-- Bare pack CSub (defensive; packs normally arise inside arrows): covariant.
+	if da.tag == "pack" and db.tag == "pack" then
+		M.rule_T_CSub_Pack(st, da, db, "co", prov); return
 	end
 	if da.tag == "record" and db.tag == "record" then
 		M.rule_T_CSub_Record_Width(st, da, db, prov); return
@@ -1125,12 +1274,10 @@ function M.rule_T_CMCall_Sealed_Field(st, tv, key, ret, prov)
 		record_error(st, "T-CMCall-Sealed-Field", "field is not arrow: " .. key)
 		return
 	end
-	local first_ret = f.ret.fields["1"]
-	if first_ret == nil then
-		record_error(st, "T-CMCall-Sealed-Field", "arrow has no returns: " .. key)
-		return
-	end
-	local fr = first_ret --[[: V5Type ]]
+	-- ret is a pack; first return is items[1].  Arity-0 ret yields `never`.
+	local first_ret = f.ret.items[1]
+	local never_ty = types_mod.const("never") --[[: V5Type ]]
+	local fr = first_ret or never_ty --[[: V5Type ]]
 	local ur = types_mod.uvar(ret) --[[: V5Type ]]
 	emit(st, constraint_mod.eq(ur, fr, prov))
 end
@@ -1263,8 +1410,20 @@ local function abstract_body(st, t, derefs_args)
 			repl[d.id] = v
 		end
 	end
+	-- Forward-declared (mutually recursive with rewrite_pack).
+	local rewrite
+	-- rewrite over a TPack → TPack (so it populates arrow args/ret cleanly).
+	--: (TPack) -> TPack
+	local function rewrite_pack(p)
+		local items = {} --[[: V5Type[] ]]
+		for i = 1, #p.items do
+			local v = p.items[i]
+			if v ~= nil and rewrite ~= nil then local rv = rewrite(v) --[[: V5Type ]]; items[i] = rv end
+		end
+		return { tag = "pack", items = items, rest = p.rest }
+	end
 	--: (V5Type) -> V5Type
-	local function rewrite(x)
+	rewrite = function(x)
 		if x.tag == "uvar" then
 			local r = repl[x.id]
 			if r ~= nil then return r end
@@ -1292,17 +1451,10 @@ local function abstract_body(st, t, derefs_args)
 				end
 			end
 			return types_mod.record(out)
+		elseif x.tag == "pack" then
+			return rewrite_pack(x)
 		elseif x.tag == "arrow" then
-			local a = {} --[[: V5Type[] ]]
-			for i = 1, #x.args do
-				local v = x.args[i]
-				if v ~= nil then
-					local rv = rewrite(v) --[[: V5Type ]]
-					a[i] = rv
-				end
-			end
-			local rret = rewrite(x.ret) --[[: V5Type ]]
-			return { tag = "arrow", args = a, ret = rret }
+			return { tag = "arrow", args = rewrite_pack(x.args), ret = rewrite_pack(x.ret) }
 		elseif x.tag == "union" then
 			local xs = {} --[[: V5Type[] ]]
 			for i = 1, #x.xs do
@@ -1492,13 +1644,23 @@ local function struct_sub(a, b)
 		return true
 	end
 	if a.tag == "arrow" and b.tag == "arrow" then
-		if #a.args ~= #b.args then return false end
-		for i = 1, #a.args do
-			local ai = a.args[i]; local bi = b.args[i]
+		local aa, ba = a.args, b.args
+		local ar, br = a.ret, b.ret
+		-- Conservative: only closed equal-arity packs decide cheaply; open punts.
+		if aa.rest ~= nil or ba.rest ~= nil or ar.rest ~= nil or br.rest ~= nil then return false end
+		if #aa.items ~= #ba.items then return false end
+		if #ar.items ~= #br.items then return false end
+		for i = 1, #aa.items do
+			local ai = aa.items[i]; local bi = ba.items[i]
 			if ai == nil or bi == nil then return false end
 			if not struct_sub(bi, ai) then return false end  -- contravariant
 		end
-		return struct_sub(a.ret, b.ret)
+		for i = 1, #ar.items do
+			local ai = ar.items[i]; local bi = br.items[i]
+			if ai == nil or bi == nil then return false end
+			if not struct_sub(ai, bi) then return false end  -- covariant
+		end
+		return true
 	end
 	return false
 end

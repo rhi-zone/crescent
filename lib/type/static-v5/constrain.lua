@@ -288,14 +288,28 @@ resolve_aliases_impl = function(t, aliases, subst, visited, depth)
         --: { id: integer, tag: "rowvar" } | nil
         local tr_row = tr.row
         return { tag = "record", fields = out, row = tr_row }
-    elseif t.tag == "arrow" then
-        --: { tag: string, args: V5Type[], ret: V5Type }
-        local ta = t
-        local args = {} --[[: V5Type[] ]]
-        for i, v in ipairs(ta.args) do
-            if v ~= nil then args[i] = resolve_aliases_impl(v, aliases, subst, visited, depth + 1) end
+    elseif t.tag == "pack" then
+        --: { tag: string, items: V5Type[], rest: { id: integer, tag: "packvar" } | nil }
+        local tp = t
+        local pitems = {} --[[: V5Type[] ]]
+        for i, v in ipairs(tp.items) do
+            if v ~= nil then pitems[i] = resolve_aliases_impl(v, aliases, subst, visited, depth + 1) end
         end
-        return { tag = "arrow", args = args, ret = resolve_aliases_impl(ta.ret, aliases, subst, visited, depth + 1) }
+        return { tag = "pack", items = pitems, rest = tp.rest }
+    elseif t.tag == "arrow" then
+        --: { tag: string, args: { tag: "pack", items: V5Type[], rest: { id: integer, tag: "packvar" } | nil }, ret: { tag: "pack", items: V5Type[], rest: { id: integer, tag: "packvar" } | nil } }
+        local ta = t
+        local args_items = {} --[[: V5Type[] ]]
+        for i, v in ipairs(ta.args.items) do
+            if v ~= nil then args_items[i] = resolve_aliases_impl(v, aliases, subst, visited, depth + 1) end
+        end
+        local ret_items = {} --[[: V5Type[] ]]
+        for i, v in ipairs(ta.ret.items) do
+            if v ~= nil then ret_items[i] = resolve_aliases_impl(v, aliases, subst, visited, depth + 1) end
+        end
+        return { tag = "arrow",
+                 args = { tag = "pack", items = args_items, rest = ta.args.rest },
+                 ret  = { tag = "pack", items = ret_items, rest = ta.ret.rest } }
     elseif t.tag == "union" then
         --: { tag: string, xs: V5Type[] }
         local tu = t
@@ -397,14 +411,14 @@ local function extract_effects(ty)
     return out
 end
 
--- Return the first return type of an arrow (field "1" of its ret record), or nil.
+-- Return the first return type of an arrow (items[1] of its ret pack), or nil.
 --: (V5Type) -> V5Type | nil
 local function arrow_ret1(ty)
     if ty.tag ~= "arrow" then return nil end
     local ret = ty.ret
     if ret == nil then return nil end
-    if ret.tag ~= "record" then return nil end
-    return ret.fields["1"]
+    if ret.tag ~= "pack" then return nil end
+    return ret.items[1]
 end
 
 -- ── pcall discriminated-union builder ────────────────────────────────────────
@@ -444,13 +458,15 @@ local function build_pcall_ret(fn_ty)
     local throw_err_ty = T_STR  -- E in !throw<E>; default = string
 
     if fn_ty ~= nil and fn_ty.tag == "arrow" then
-        -- Walk positional return fields.
+        -- Walk positional return items (the ret pack).
         local ret_rec = fn_ty.ret
-        if ret_rec ~= nil and ret_rec.tag == "record" then
+        if ret_rec ~= nil and ret_rec.tag == "pack" then
+            local ret_items = ret_rec.items
             local i = 1
             while true do
-                local rv = ret_rec.fields[tostring(i)]
-                if rv == nil then break end
+                local rv_opt = ret_items[i] --[[: V5Type | nil ]]
+                if rv_opt == nil then break end
+                local rv = rv_opt --[[: V5Type ]]
                 -- Extract non-effect return fields as positional returns.
                 if not types_mod.is_effect(rv) then
                     inner_rets[#inner_rets + 1] = rv
@@ -473,8 +489,8 @@ local function build_pcall_ret(fn_ty)
                 end
                 i = i + 1
             end
-            -- Also scan a top-level intersection (arrow ret field "1" = nil & !throw & !io).
-            local ret1 = ret_rec.fields["1"]
+            -- Also scan a top-level intersection (arrow ret item 1 = nil & !throw & !io).
+            local ret1 = ret_rec.items[1]
             if ret1 ~= nil and ret1.tag == "intersection" then
                 -- Re-run on intersection parts; clear inner_rets accumulated above.
                 inner_rets = {}
@@ -565,12 +581,14 @@ local function build_coroutine_create_ret(ctx, fn_ty)
 
     if fn_ty ~= nil and fn_ty.tag == "arrow" then
         local ret_rec = fn_ty.ret
-        if ret_rec ~= nil and ret_rec.tag == "record" then
-            -- Scan all positional return fields for effects.
+        if ret_rec ~= nil and ret_rec.tag == "pack" then
+            -- Scan all positional return items for effects.
+            local ret_items = ret_rec.items
             local i = 1
             while true do
-                local rv = ret_rec.fields[tostring(i)]
-                if rv == nil then break end
+                local rv_opt = ret_items[i] --[[: V5Type | nil ]]
+                if rv_opt == nil then break end
+                local rv = rv_opt --[[: V5Type ]]
                 if types_mod.is_effect(rv) then
                     -- Walk to the effect head.
                     local head = rv
@@ -595,9 +613,9 @@ local function build_coroutine_create_ret(ctx, fn_ty)
                 end
                 i = i + 1
             end
-            -- Also check a top-level intersection in field "1".
+            -- Also check a top-level intersection in item 1.
             if not found_yield then
-                local ret1 = ret_rec.fields["1"]
+                local ret1 = ret_rec.items[1]
                 if ret1 ~= nil and ret1.tag == "intersection" then
                     local parts = ret1.parts
                     non_yield_effs = {}
@@ -1679,26 +1697,24 @@ end
 -- ── Function body ─────────────────────────────────────────────────────────────
 
 -- Extract the annotated return type from an arrow type.
--- The result comes from `arrow.ret.fields["1"]` which is `V5Type | nil`.
--- Extracted into a helper so that the nil-narrowing works correctly:
--- assigning a local declared `nil` conditionally causes the checker to lose
--- narrowing context, but a function return of `V5Type | nil` narrows correctly.
+-- The result comes from `arrow.ret.items[1]` (the ret pack) which is
+-- `V5Type | nil`.  Extracted into a helper so the nil-narrowing works.
 --: (V5Type | nil) -> V5Type | nil
 local function extract_ann_ret(ann_ty)
     if ann_ty ~= nil and ann_ty.tag == "arrow" then
         local ret_rec = ann_ty.ret
-        if ret_rec ~= nil and ret_rec.tag == "record" then
-            return ret_rec.fields["1"]
+        if ret_rec ~= nil and ret_rec.tag == "pack" then
+            return ret_rec.items[1]
         end
     end
     return nil
 end
 
--- Extract annotated parameter types from an arrow type.
+-- Extract annotated parameter types from an arrow type (the args pack items).
 --: (V5Type | nil) -> V5Type[] | nil
 local function extract_ann_args(ann_ty)
     if ann_ty ~= nil and ann_ty.tag == "arrow" then
-        return ann_ty.args
+        return ann_ty.args.items
     end
     return nil
 end
@@ -1945,11 +1961,11 @@ local function spread_last_expr(ctx, nid)
         return out
     end
 
-    -- Count positional ret fields ("1", "2", ...) from the arrow's ret record.
+    -- Count positional ret items from the arrow's ret pack.
     local n_slots = 0
     local ret_rec = callee_ty.ret
-    if ret_rec ~= nil and ret_rec.tag == "record" then
-        while ret_rec.fields[tostring(n_slots + 1)] ~= nil do
+    if ret_rec ~= nil and ret_rec.tag == "pack" then
+        while ret_rec.items[n_slots + 1] ~= nil do
             n_slots = n_slots + 1
         end
     end

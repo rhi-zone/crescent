@@ -24,10 +24,12 @@ local M = {}
 --:: TConst        = { tag: "const", name: string }
 --:: TRowVar       = { tag: "rowvar", id: integer }
 --:: TRecord       = { tag: "record", fields: { [string]: V5Type }, row: TRowVar | nil }
---:: TArrow        = { tag: "arrow", args: V5Type[], ret: V5Type }
+--:: TPackVar      = { tag: "packvar", id: integer }
+--:: TPack         = { tag: "pack", items: V5Type[], rest: TPackVar | nil }
+--:: TArrow        = { tag: "arrow", args: TPack, ret: TPack }
 --:: TUnion        = { tag: "union", xs: V5Type[] }
 --:: TIntersection = { tag: "intersection", parts: V5Type[] }
---:: V5Type        = TUVar | TVarBnd | TApp | TLambda | TConst | TRowVar | TRecord | TArrow | TUnion | TIntersection
+--:: V5Type        = TUVar | TVarBnd | TApp | TLambda | TConst | TRowVar | TRecord | TPackVar | TPack | TArrow | TUnion | TIntersection
 
 --: (integer) -> V5Type
 function M.uvar(id) return { tag = "uvar", id = id } end
@@ -47,14 +49,37 @@ function M.record(fields) return { tag = "record", fields = fields, row = nil } 
 function M.record_open(fields, row) return { tag = "record", fields = fields, row = row } end
 --: (V5Type[]) -> V5Type
 function M.intersection(parts) return { tag = "intersection", parts = parts } end
+-- pack(items, rest): a TPack node.  `rest` is nil (closed: exact arity #items)
+-- or a TPackVar (open: matches #items positions then a tail bound to the var).
+-- The one-open-pack invariant (a sequence has at most one open segment) is an
+-- invariant of the data type — a TPack carries a single optional `rest`.
+--: (V5Type[], TPackVar | nil) -> V5Type
+function M.pack(items, rest) return { tag = "pack", items = items, rest = rest } end
+-- packvar(id): a pack metavariable (open-tail position).  Ids are gensym like
+-- UVar / TRowVar; they do NOT participate in De Bruijn (shift/instantiate leave
+-- packvar ids unchanged).  Bound in a separate `pack_bindings` map.
+--: (integer) -> V5Type
+function M.packvar(id) return { tag = "packvar", id = id } end
+-- arrow(args_list, rets_list): build an arrow whose `args` and `ret` are CLOSED
+-- packs over the given positional lists (the common fixed-arity case).  An
+-- explicit open arrow is built directly with `M.pack(list, packvar)`.
 --: (V5Type[], V5Type[]) -> V5Type
-function M.arrow(args, rets_list)
-	local fields = {} --[[: { [string]: V5Type } ]]
+function M.arrow(args_list, rets_list)
+	local args_items = {} --[[: V5Type[] ]]
+	for i = 1, #args_list do
+		local v = args_list[i]
+		if v ~= nil then args_items[i] = v end
+	end
+	local ret_items = {} --[[: V5Type[] ]]
 	for i = 1, #rets_list do
 		local v = rets_list[i]
-		if v ~= nil then fields[tostring(i)] = v end
+		if v ~= nil then ret_items[i] = v end
 	end
-	return { tag = "arrow", args = args, ret = { tag = "record", fields = fields, row = nil } }
+	return {
+		tag = "arrow",
+		args = { tag = "pack", items = args_items, rest = nil },
+		ret  = { tag = "pack", items = ret_items, rest = nil },
+	}
 end
 --: (V5Type[]) -> V5Type
 function M.union(xs) return { tag = "union", xs = xs } end
@@ -92,11 +117,24 @@ function M.is_effect(t)
 	return M.is_effect_head(cur)
 end
 
+-- shift_pack(p, d, cutoff): shift each item of a TPack at cutoff; the rest
+-- TPackVar id is a gensym (like UVar) and is preserved unchanged.  Returns a
+-- TPack (so it can populate an arrow's args/ret without an unprovable cast).
+--: (TPack, integer, integer) -> TPack
+function M.shift_pack(p, d, cutoff)
+	local items = {} --[[: V5Type[] ]]
+	for i = 1, #p.items do
+		local v = p.items[i]
+		if v ~= nil then local sh = M.shift(v, d, cutoff) --[[: V5Type ]]; items[i] = sh end
+	end
+	return { tag = "pack", items = items, rest = p.rest }
+end
+
 -- shift(t, d, cutoff): add d to every Var index >= cutoff. Used under binders
 -- when β-reducing. Eager shift on bind.
 --: (V5Type, integer, integer) -> V5Type
 function M.shift(t, d, cutoff)
-	if t.tag == "uvar" or t.tag == "const" or t.tag == "rowvar" then
+	if t.tag == "uvar" or t.tag == "const" or t.tag == "rowvar" or t.tag == "packvar" then
 		return t
 	elseif t.tag == "var" then
 		if t.i >= cutoff then return { tag = "var", i = t.i + d } end
@@ -114,14 +152,10 @@ function M.shift(t, d, cutoff)
 			end
 		end
 		return { tag = "record", fields = out, row = t.row }
+	elseif t.tag == "pack" then
+		return M.shift_pack(t, d, cutoff)
 	elseif t.tag == "arrow" then
-		local args = {} --[[: V5Type[] ]]
-		for i = 1, #t.args do
-			local v = t.args[i]
-			if v ~= nil then local sh = M.shift(v, d, cutoff) --[[: V5Type ]]; args[i] = sh end
-		end
-		local ret = M.shift(t.ret, d, cutoff) --[[: V5Type ]]
-		return { tag = "arrow", args = args, ret = ret }
+		return { tag = "arrow", args = M.shift_pack(t.args, d, cutoff), ret = M.shift_pack(t.ret, d, cutoff) }
 	elseif t.tag == "union" then
 		local xs = {} --[[: V5Type[] ]]
 		for i = 1, #t.xs do
@@ -140,11 +174,24 @@ function M.shift(t, d, cutoff)
 	error("shift: unreachable")
 end
 
+-- instantiate_pack(p, arg, depth): instantiate each item of a TPack; the rest
+-- TPackVar is preserved (capture binding is a substitution/evaluation concern,
+-- not relocated by instantiate).  Returns a TPack.
+--: (TPack, V5Type, integer) -> TPack
+function M.instantiate_pack(p, arg, depth)
+	local items = {} --[[: V5Type[] ]]
+	for i = 1, #p.items do
+		local v = p.items[i]
+		if v ~= nil then local sh = M.instantiate(v, arg, depth) --[[: V5Type ]]; items[i] = sh end
+	end
+	return { tag = "pack", items = items, rest = p.rest }
+end
+
 -- instantiate(body, arg, depth): substitute Var(depth) := arg in body,
 -- decrementing outer indices. Used by β.
 --: (V5Type, V5Type, integer) -> V5Type
 function M.instantiate(body, arg, depth)
-	if body.tag == "uvar" or body.tag == "const" or body.tag == "rowvar" then
+	if body.tag == "uvar" or body.tag == "const" or body.tag == "rowvar" or body.tag == "packvar" then
 		return body
 	elseif body.tag == "var" then
 		if body.i == depth then return M.shift(arg, depth, 0) end
@@ -160,14 +207,10 @@ function M.instantiate(body, arg, depth)
 			if fv ~= nil then local sh = M.instantiate(fv, arg, depth) --[[: V5Type ]]; out[fk] = sh end
 		end
 		return { tag = "record", fields = out, row = body.row }
+	elseif body.tag == "pack" then
+		return M.instantiate_pack(body, arg, depth)
 	elseif body.tag == "arrow" then
-		local args = {} --[[: V5Type[] ]]
-		for i = 1, #body.args do
-			local v = body.args[i]
-			if v ~= nil then local sh = M.instantiate(v, arg, depth) --[[: V5Type ]]; args[i] = sh end
-		end
-		local ret = M.instantiate(body.ret, arg, depth) --[[: V5Type ]]
-		return { tag = "arrow", args = args, ret = ret }
+		return { tag = "arrow", args = M.instantiate_pack(body.args, arg, depth), ret = M.instantiate_pack(body.ret, arg, depth) }
 	elseif body.tag == "union" then
 		local xs = {} --[[: V5Type[] ]]
 		for i = 1, #body.xs do
@@ -195,6 +238,7 @@ function M.equal(a, b)
 	if a.tag == "var" and b.tag == "var" then return a.i == b.i end
 	if a.tag == "const" and b.tag == "const" then return a.name == b.name end
 	if a.tag == "rowvar" and b.tag == "rowvar" then return a.id == b.id end
+	if a.tag == "packvar" and b.tag == "packvar" then return a.id == b.id end
 	if a.tag == "app" and b.tag == "app" then
 		if not M.equal(a.f, b.f) then return false end
 		return M.equal(a.a, b.a)
@@ -215,9 +259,16 @@ function M.equal(a, b)
 		if a.row == nil or b.row == nil then return false end
 		return a.row.id == b.row.id
 	end
+	if a.tag == "pack" and b.tag == "pack" then
+		if #a.items ~= #b.items then return false end
+		for i = 1, #a.items do if not M.equal(a.items[i], b.items[i]) then return false end end
+		-- rest agreement: both nil (closed) or both TPackVar with equal id.
+		if a.rest == nil and b.rest == nil then return true end
+		if a.rest == nil or b.rest == nil then return false end
+		return a.rest.id == b.rest.id
+	end
 	if a.tag == "arrow" and b.tag == "arrow" then
-		if #a.args ~= #b.args then return false end
-		for i = 1, #a.args do if not M.equal(a.args[i], b.args[i]) then return false end end
+		if not M.equal(a.args, b.args) then return false end
 		return M.equal(a.ret, b.ret)
 	end
 	if a.tag == "union" and b.tag == "union" then
@@ -242,14 +293,69 @@ function M.collect_uvars(t, acc)
 	elseif t.tag == "lambda" then M.collect_uvars(t.b, acc)
 	elseif t.tag == "record" then
 		for _, fv in pairs(t.fields) do M.collect_uvars(fv, acc) end
+	elseif t.tag == "pack" then
+		for i = 1, #t.items do M.collect_uvars(t.items[i], acc) end
+		-- A TPackVar contributes no UVar; its bound contents (in pack_bindings)
+		-- are walked at substitution time, not from the syntactic AST.
 	elseif t.tag == "arrow" then
-		for i = 1, #t.args do M.collect_uvars(t.args[i], acc) end
+		M.collect_uvars(t.args, acc)
 		M.collect_uvars(t.ret, acc)
 	elseif t.tag == "union" then
 		for i = 1, #t.xs do M.collect_uvars(t.xs[i], acc) end
 	elseif t.tag == "intersection" then
 		for i = 1, #t.parts do M.collect_uvars(t.parts[i], acc) end
 	end
+end
+
+-- deref_pack(p, pack_bindings): the substitution-time splice.  Walk `p`,
+-- replacing a bound `rest` TPackVar by its binding and FLATTENING (splicing) the
+-- binding's items into p.items, recursively, until `rest` is nil (closed) or an
+-- unbound TPackVar.  `pack_bindings` is `{ [packvar-id]: TPack }`.
+--
+-- Example: pack([true], rest=R) with R ↦ pack([int, str], nil)
+--   becomes pack([true, int, str], nil).  R ↦ pack([], nil) (empty / never)
+--   collapses to pack([true], nil).  A binding may itself be open, in which
+--   case the resolved rest carries through (the new `rest` is the binding's
+--   own rest, which we then continue to resolve).
+--: (V5Type, { [integer]: V5Type }) -> V5Type
+function M.deref_pack(p, pack_bindings)
+	if p.tag ~= "pack" then return p end
+	local items = {} --[[: V5Type[] ]]
+	for i = 1, #p.items do
+		local v = p.items[i]
+		if v ~= nil then items[#items + 1] = v end
+	end
+	--: TPackVar | nil
+	local rest = p.rest
+	-- Guard against a (malformed) cyclic binding by bounding the splice depth to
+	-- the number of distinct bindings encountered.
+	local seen = {} --[[: { [integer]: boolean } ]]
+	while rest ~= nil do
+		local bnd = pack_bindings[rest.id]
+		if bnd == nil then break end
+		if seen[rest.id] then break end
+		seen[rest.id] = true
+		if bnd.tag ~= "pack" then break end
+		for i = 1, #bnd.items do
+			local v = bnd.items[i]
+			if v ~= nil then items[#items + 1] = v end
+		end
+		rest = bnd.rest
+	end
+	return { tag = "pack", items = items, rest = rest }
+end
+
+-- pack_head_key(p): the structural head token for the Spec A termination cache,
+-- extended to packs as ⟨"pack", #items, rest-id-or-nil⟩.  The per-item head
+-- hashes are appended by the caller (op_sem head_key) — this returns only the
+-- pack's own head token.
+--: (V5Type) -> string
+function M.pack_head_key(p)
+	if p.tag ~= "pack" then return p.tag end
+	local rest = p.rest
+	local rid = "nil"
+	if rest ~= nil then rid = tostring(rest.id) end
+	return "pack#" .. tostring(#p.items) .. "#" .. rid
 end
 
 return M

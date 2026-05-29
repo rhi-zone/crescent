@@ -410,14 +410,15 @@ local function parse_primary(s, state)
             s.depth = s.depth - 1
             return result
         end
-        -- Multiple items → tuple (no arrow)
-        local tup_fields = {} --[[: { [string]: V5Type } ]]
+        -- Multiple items → tuple type.  Per Spec B, a bare tuple `(A, B)` is a
+        -- closed TPack `pack([A, B], nil)` (not a positional record).
+        local tup_items = {} --[[: V5Type[] ]]
         for i = 1, #items do
             local v = items[i]
-            if v ~= nil then tup_fields[tostring(i)] = v end
+            if v ~= nil then tup_items[i] = v end
         end
         s.depth = s.depth - 1
-        return { tag = "record", fields = tup_fields, row = nil }
+        return types_mod.pack(tup_items, nil)
     end
 
     -- Record / table type: { ... }

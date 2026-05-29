@@ -174,28 +174,28 @@ T.describe("function types", function()
         local got = pt("() -> string")
         T.ok(got.tag == "arrow", "is arrow")
         if got.tag == "arrow" then
-            T.eq(#got.args, 0, "no params")
+            T.eq(#got.args.items, 0, "no params")
         end
     end)
     T.it("single param (string) -> number", function()
         local got = pt("(string) -> number")
         T.ok(got.tag == "arrow", "is arrow")
         if got.tag == "arrow" then
-            T.eq(#got.args, 1, "one param")
+            T.eq(#got.args.items, 1, "one param")
         end
     end)
     T.it("two param (string, number) -> boolean", function()
         local got = pt("(string, number) -> boolean")
         T.ok(got.tag == "arrow", "is arrow")
         if got.tag == "arrow" then
-            T.eq(#got.args, 2, "two params")
+            T.eq(#got.args.items, 2, "two params")
         end
     end)
     T.it("named params (x: number, y: number) -> number", function()
         local got = pt("(x: number, y: number) -> number")
         T.ok(got.tag == "arrow", "is arrow")
         if got.tag == "arrow" then
-            T.eq(#got.args, 2, "two params")
+            T.eq(#got.args.items, 2, "two params")
         end
     end)
     T.it("bare right-associative arrow string -> number", function()
@@ -205,7 +205,7 @@ T.describe("function types", function()
         local got = pt("((string) -> number) -> boolean")
         T.ok(got.tag == "arrow", "is arrow")
         if got.tag == "arrow" then
-            local p = got.args[1]
+            local p = got.args.items[1]
             T.ok(p ~= nil, "has first param")
             if p ~= nil then
                 T.eq(p.tag, "arrow", "param is arrow")
@@ -217,9 +217,9 @@ T.describe("function types", function()
         T.ok(got.tag == "arrow", "is arrow")
         if got.tag == "arrow" then
             local ret = got.ret
-            T.ok(ret.tag == "record", "ret is record")
-            if ret.tag == "record" then
-                local r1 = ret.fields["1"]
+            T.ok(ret.tag == "pack", "ret is pack")
+            if ret.tag == "pack" then
+                local r1 = ret.items[1]
                 T.ok(r1 ~= nil, "has return slot")
                 if r1 ~= nil then
                     T.eq(r1.tag, "app", "spread is app")
@@ -330,9 +330,9 @@ T.describe("effect types", function()
         T.ok(got.tag == "arrow", "arrow")
         if got.tag == "arrow" then
             local ret = got.ret
-            T.ok(ret.tag == "record", "ret is record")
-            if ret.tag == "record" then
-                local r1 = ret.fields["1"]
+            T.ok(ret.tag == "pack", "ret is pack")
+            if ret.tag == "pack" then
+                local r1 = ret.items[1]
                 T.ok(r1 ~= nil, "has return slot")
                 if r1 ~= nil then
                     T.ok(types_mod.is_effect_head(r1), "return is effect head")
