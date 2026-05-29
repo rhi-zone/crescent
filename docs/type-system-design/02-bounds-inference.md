@@ -264,12 +264,34 @@ the principled treatment that M1 §5.3 mandated in place of meet-of-uppers.
 - An empty lower set coalesces to **`never`** (`⊥`); an empty upper set to
   **`unknown`** (`⊤`) — the lattice top/bottom (M1 §1.1).
 
-**Polarity** is the standard simple-sub assignment: a position is **positive** if
-reached through an even number of contravariant (function-argument) flips from a
-producing occurrence, **negative** otherwise. Arrow arguments flip polarity (M1
-§3.1 contravariant args); arrow returns and covariant constructor positions
-preserve it. This polarity is the *same* polarity M1's structural decomposition
-already threads; M2 reuses it, it is not a second notion.
+**Polarity (normative — same weight as M1's parity pins).** A position is
+**positive** if reached through an **even** number of enclosing **contravariant
+flips** from a producing occurrence, **negative** if **odd**. The contravariant
+flips are exactly two kinds: **(a) arrow-argument positions** (M1 §3.1
+contravariant args) **and (b) `Neg`/complement occurrences** — negation is
+contravariant (`A <: B ⟺ ¬B <: ¬A`, M1 §3.2), so each enclosing `~`/complement
+is a flip on equal footing with an arrow argument. Arrow returns and covariant
+constructor positions preserve polarity. This polarity is the *same* polarity M1's
+structural decomposition already threads; M2 reuses it, it is not a second notion.
+
+**Consequence (coalescing against the opposite polar face).** A variable reached
+through an **odd** number of `~`/complement occurrences is in **negative**
+position and therefore coalesces against the **opposite** polar face: an
+occurrence that would otherwise be positive (`⋃ B.lower[r]`) coalesces instead to
+`⋂ B.upper[r]` when nested under one `~`, and a would-be-negative occurrence
+coalesces to `⋃ B.lower[r]` — each additional `~` flips the face again.
+
+**Scope of the parity rule (the M1 §3.2 move-across case).** A `¬τ` **bound
+value** produced by M1's §3.2 move-across rule (e.g. `τ₁ ∧ ¬τ₂` recorded as a
+*lower* of `α`) raises **no** polarity question for the variable that **owns** the
+bound: that variable owns a lower, so it is in positive position and coalesces to
+`⋃ B.lower[r]` as usual — the leading `¬` lives *inside the bound value*, not on a
+path to the owning variable. The parity rule above applies only to a variable
+**nested inside** such a `¬τ` (i.e. a variable on a path that passes through the
+complement): that nested variable is reached through one `~` and so coalesces
+against the opposite face per the consequence above. Internal-vs-user-written
+makes no difference — parity is **structural** over arrow-args + `Neg`, not
+sensitive to how the `¬τ` arose.
 
 ### 5.2 Generalization points and levels
 
@@ -599,15 +621,17 @@ are kept as separate items per the `v5-gaps.md` rule against consolidation.)
    costs a redundant re-check, never an unsound accept); deferred to M12 where
    lattice-closure-under-μ is specified in full.
 
-3. **Polarity of a variable reached only through `Neg`.** **GENUINE FORK.** §5.1's
-   polarity is "even/odd contravariant flips from a producing occurrence". A
-   variable that appears **only inside a `~τ` bound** (produced by the §3.2
-   move-across rule) has a polarity determined by whether `Neg` counts as a
-   polarity flip. The principled answer (semantic subtyping: complement is
-   contravariant — it flips polarity) is M2's lean, but the move-across rule's
-   bounds are an *internal* artifact, not a user-written occurrence, so it is
-   worth confirming the flip does not mis-coalesce an internal `¬τ` lower into the
-   wrong face. This is a real fork because getting it wrong is **unsound at
-   coalescing** (it would publish the wrong polar face), unlike forks 1–2. Flagged
-   for the reviewer; M2 leans "`Neg` flips polarity" but does not unilaterally
-   close it given the soundness stakes.
+3. **Polarity of a variable reached only through `Neg`.** **RESOLVED — pinned in
+   §5.1.** Negation is contravariant (`A <: B ⟺ ¬B <: ¬A`, M1 §3.2), so a `Neg`/
+   complement occurrence is a polarity flip on equal footing with an arrow
+   argument; §5.1 now pins polarity normatively as the parity of enclosing
+   contravariant flips over **(a) arrow-args AND (b) `Neg`**. A variable reached
+   through an odd number of `~` is therefore negative and coalesces against the
+   opposite polar face. The earlier internal-vs-user-written concern is answered:
+   **parity is structural** — it counts the `Neg` occurrences on the path
+   regardless of whether the `¬τ` was user-written or produced by the §3.2
+   move-across rule, so there is no fork. §5.1 also clarifies that a `¬τ` *bound
+   value* raises no polarity question for the variable that **owns** the bound
+   (it owns a lower → positive → `⋃lowers`); the parity rule applies only to a
+   variable **nested inside** the `¬τ`. The soundness stake that made this a fork
+   is discharged by the structural rule.
