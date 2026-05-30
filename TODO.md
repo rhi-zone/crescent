@@ -2601,3 +2601,4 @@ Backlog from the foundations session captured in `docs/foundations/pedagogy-and-
 - [ ] Decide and execute the disposition of the v5 typechecker and `docs/type-system-design/` (the 19-axis plan), now superseded by the plural per-question approach — formal retirement/cleanup.
 - [ ] Build checker #2: pick the next property-question (candidates: table shapes, integer/float) and write its standalone checker.
 - [ ] Land the deferred sub-checkers from checker #1: integer/float distinction, table shapes, literal refinement, generics, intersections, match types, multi-return.
+- [ ] Finish flattening `lib/check_kind` — the refactor into per-node-kind handler functions over an explicit `ctx` is mid-done but `ctx` has no explicit type annotation, so the checker can't unify its shape across handler call sites and emits ~26 typecheck errors; add an explicit `ctx` type, re-verify tests + typecheck, then integrate.
