@@ -8,6 +8,7 @@ local intern_mod = require("lib.type.static.intern")
 local ann_mod = require("lib.type.static-v6.ann")
 local diag    = require("lib.type.static-v6.diagnostics")
 local env_mod = require("lib.type.static-v6.env")
+local pack_result = require("lib.type.static-v6.pack_result")
 local subtype = require("lib.type.static-v6.subtype")
 local types   = require("lib.type.static-v6.types")
 
@@ -23,6 +24,9 @@ local M = {}
 --:: ComplementType = { tag: "complement", of: StaticType }
 --:: Pack = { items: { [integer]: StaticType }, rest: StaticType | nil }
 --:: ArrowType = { tag: "arrow", params: Pack, returns: Pack, effects: unknown }
+--:: PackResultSingle = { tag: "single", pack: Pack }
+--:: PackResultUnion = { tag: "union", alternatives: { [integer]: Pack } }
+--:: PackResult = PackResultSingle | PackResultUnion
 --:: RecordType = { tag: "record" }
 --:: NominalType = { tag: "nominal", name: string }
 --:: VarType = { tag: "var", id: integer }
@@ -160,6 +164,11 @@ local function push_type(out, typ)
     out[#out + 1] = typ
 end
 
+--: (PackResult) -> StaticType
+local function result_to_scalar(result)
+    return pack_result.to_scalar(result) or types.unknown()
+end
+
 --: (StaticType, { [integer]: ArrowType }) -> boolean
 local function collect_arrow_branches(typ, out)
     if typ.tag == "arrow" then
@@ -175,7 +184,7 @@ local function collect_arrow_branches(typ, out)
     return false
 end
 
---: (Ctx, ASTNode, ArrowType, { [integer]: StaticType }, boolean) -> { [integer]: StaticType } | nil
+--: (Ctx, ASTNode, ArrowType, { [integer]: StaticType }, boolean) -> Pack | nil
 local function check_arrow_call_pack(ctx, n, callee, args, emit_errors)
     local params = callee.params
     local returns = callee.returns
@@ -211,7 +220,7 @@ local function check_arrow_call_pack(ctx, n, callee, args, emit_errors)
             return nil
         end
     end
-    return returns.items
+    return returns
 end
 
 --: (Ctx, ASTNode, StaticType, integer, integer) -> StaticType
@@ -224,37 +233,28 @@ local function check_call_against_arrow(ctx, n, callee, arg_start, arg_len)
     if callee.tag == "arrow" then
         local returns = check_arrow_call_pack(ctx, n, callee, args, true)
         if returns == nil then return types.unknown() end
-        if #returns ~= 1 then
-            add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 expression calls require exactly one return for now", n)
-            return types.unknown()
-        end
-        return returns[1]
+        return result_to_scalar(pack_result.single(returns))
     end
     local branches = {} --: { [integer]: ArrowType }
     if not collect_arrow_branches(callee, branches) then
         add_error(ctx, "CANNOT_CALL", "cannot call non-function type " .. types.tostring(callee), n)
         return types.unknown()
     end
-    local returns = {} --: { [integer]: StaticType }
+    local returns = {} --: { [integer]: Pack }
     for _, branch in ipairs(branches) do
         local branch_returns = check_arrow_call_pack(ctx, n, branch, args, false)
         if branch_returns ~= nil then
-            if #branch_returns ~= 1 then
-                add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 overloaded expression calls require one return per matching branch", n)
-                return types.unknown()
-            end
-            returns[#returns + 1] = branch_returns[1]
+            returns[#returns + 1] = branch_returns
         end
     end
     if #returns == 0 then
         add_error(ctx, "NO_MATCHING_OVERLOAD", "no overload branch accepts argument pack", n)
         return types.unknown()
     end
-    if #returns == 1 then return returns[1] end
-    return types.union(returns)
+    return result_to_scalar(pack_result.union(returns))
 end
 
---: (Ctx, ASTNode) -> { [integer]: StaticType } | nil
+--: (Ctx, ASTNode) -> PackResult | nil
 local function check_final_call_pack(ctx, n)
     if n.kind ~= NODE_CALL_EXPR then return nil end
     local callee = check_expr(ctx, n.data[0])
@@ -263,37 +263,24 @@ local function check_final_call_pack(ctx, n)
         push_type(args, check_expr(ctx, ctx.lists:get(n.data[1] + i - 1)))
     end
     if callee.tag == "arrow" then
-        return check_arrow_call_pack(ctx, n, callee, args, true) or { types.unknown() }
+        local pack = check_arrow_call_pack(ctx, n, callee, args, true)
+        return pack_result.single(pack or { items = { types.unknown() }, rest = nil })
     end
     local branches = {} --: { [integer]: ArrowType }
     if not collect_arrow_branches(callee, branches) then
         add_error(ctx, "CANNOT_CALL", "cannot call non-function type " .. types.tostring(callee), n)
-        return { types.unknown() }
+        return pack_result.from_items({ types.unknown() })
     end
-    local matches = {} --: { [integer]: { [integer]: StaticType } }
+    local matches = {} --: { [integer]: Pack }
     for _, branch in ipairs(branches) do
         local branch_returns = check_arrow_call_pack(ctx, n, branch, args, false)
         if branch_returns ~= nil then matches[#matches + 1] = branch_returns end
     end
     if #matches == 0 then
         add_error(ctx, "NO_MATCHING_OVERLOAD", "no overload branch accepts argument pack", n)
-        return { types.unknown() }
+        return pack_result.from_items({ types.unknown() })
     end
-    if #matches == 1 then return matches[1] end
-    local len = #matches[1]
-    for _, pack in ipairs(matches) do
-        if #pack ~= len then
-            add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 overloaded pack calls require matching return arity", n)
-            return { types.unknown() }
-        end
-    end
-    local out = {} --: { [integer]: StaticType }
-    for i = 1, len do
-        local members = {} --: { [integer]: StaticType }
-        for _, pack in ipairs(matches) do push_type(members, pack[i]) end
-        push_type(out, #members == 1 and members[1] or types.union(members))
-    end
-    return out
+    return pack_result.union(matches)
 end
 
 --: (Ctx, integer, integer, integer) -> { [integer]: StaticType }
@@ -309,7 +296,8 @@ local function adjust_local_rhs(ctx, expr_start, expr_len, target_len)
         if i == expr_len then
             local pack = check_final_call_pack(ctx, expr)
             if pack ~= nil then
-                for _, item in ipairs(pack) do push_type(values, item) end
+                local adjusted = pack_result.adjust_to_arity(pack, target_len - #values)
+                for _, item in ipairs(adjusted) do push_type(values, item) end
             else
                 local value = check_expr(ctx, expr_id)
                 push_type(values, value)
@@ -317,7 +305,7 @@ local function adjust_local_rhs(ctx, expr_start, expr_len, target_len)
         else
             local pack = check_final_call_pack(ctx, expr)
             if pack ~= nil then
-                push_type(values, pack[1] or types.atom("nil"))
+                push_type(values, result_to_scalar(pack))
             else
                 local value = check_expr(ctx, expr_id)
                 push_type(values, value)
@@ -356,13 +344,9 @@ local function check_return_stmt(ctx, n, returns)
         add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function returns do not admit open return packs yet", n)
         return
     end
-    if rl ~= #want then
-        add_error(ctx, "FUNCTION_ARITY_MISMATCH",
-            "return arity " .. tostring(rl) .. " does not match annotation arity " .. tostring(#want), n)
-        return
-    end
-    for i = 1, rl do
-        local producer = check_expr(ctx, ctx.lists:get(rs + i - 1))
+    local producers = adjust_local_rhs(ctx, rs, rl, #want)
+    for i = 1, #want do
+        local producer = producers[i]
         local consumer = want[i]
         local obligation = env_mod.require_subtype(ctx.env, producer, consumer, "return", "function return", {
             file = ctx.filename,
@@ -552,7 +536,7 @@ local function check_local(ctx, n)
         local expr = ctx.nodes:get(expr_id)
         local pack = check_final_call_pack(ctx, expr)
         if pack ~= nil then
-            producer = pack[1] or types.atom("nil")
+            producer = result_to_scalar(pack)
         else
             producer = check_expr(ctx, expr_id)
         end

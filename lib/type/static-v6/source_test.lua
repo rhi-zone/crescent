@@ -271,7 +271,10 @@ T.describe("v6 source M1", function()
 
         res = check("--: () -> (number, string)\nlocal function bad() return 1 end\n")
         T.eq(res.ok, false)
-        T.eq(res.diagnostics[1].code, "FUNCTION_ARITY_MISMATCH")
+        T.eq(res.diagnostics[1].code, "TYPE_MISMATCH")
+
+        res = check("--: () -> (number, nil)\nlocal function pads() return 1 end\n")
+        T.eq(res.ok, true)
     end)
 
     T.it("adjusts local multi-binding rhs packs", function()

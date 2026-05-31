@@ -94,6 +94,12 @@ The collapse is sound as a widening in some movement sites, but it is not the
 semantic result of the call and must not happen before a movement site demands
 slots.
 
+This is the pack instance of a broader correlation rule. Tables have the same
+problem after projection: reading or destructuring fields can lose the
+relationship between fields unless a separate fact domain preserves it. v6
+therefore treats PackResult as the first concrete case of "correlated producer
+alternatives," not as a pack-only trick.
+
 ### Arrow
 
 Core arrow shape:
@@ -260,6 +266,8 @@ These remain genuinely open and must not be papered over:
 
 - whether pack correlation can be tracked after destructuring locals, or whether
   destructuring is the explicit correlation-loss boundary;
+- how table field projection/destructuring preserves or deliberately loses
+  correlation between fields of the same identity;
 - how to represent a consumer that accepts a union of whole packs without making
   packs lattice elements;
 - whether effects are dedicated arrow rows or an arrow-intersection discipline;
