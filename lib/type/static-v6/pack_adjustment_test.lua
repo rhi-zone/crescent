@@ -36,13 +36,13 @@ local cases = {
     {
         name = "call expands final argument call",
         src = "g(f())\n",
-        first_code = "FEATURE_NOT_ADMITTED",
+        first_code = "UNDECLARED_BINDING",
         final = "g(f()) expands f only because it is the final argument",
     },
     {
         name = "parenthesized call argument collapses",
         src = "g((f()))\n",
-        first_code = "FEATURE_NOT_ADMITTED",
+        first_code = "UNDECLARED_BINDING",
         final = "g((f())) collapses f to one result",
     },
     {

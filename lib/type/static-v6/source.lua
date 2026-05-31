@@ -50,6 +50,7 @@ local NODE_CAST_EXPR = defs.NODE_CAST_EXPR
 local NODE_FUNC_EXPR = defs.NODE_FUNC_EXPR
 local NODE_RETURN_STMT = defs.NODE_RETURN_STMT
 local NODE_CALL_EXPR = defs.NODE_CALL_EXPR
+local NODE_EXPR_STMT = defs.NODE_EXPR_STMT
 
 --: (Ctx, string, string, ASTNode | nil) -> CheckDiag
 local function add_error(ctx, code, message, node)
@@ -440,6 +441,7 @@ check_stmt = function(ctx, nid)
     consume_decl_ann(ctx, n.line)
     if kind == NODE_LOCAL_STMT then check_local(ctx, n); return end
     if kind == NODE_ASSIGN_STMT then check_assign(ctx, n); return end
+    if kind == NODE_EXPR_STMT then check_expr(ctx, n.data[0]); return end
     add_error(ctx, "FEATURE_NOT_ADMITTED", "statement node not admitted in v6 M1: " .. tostring(kind), n)
 end
 

@@ -147,6 +147,6 @@ Initial M2 implementation scope:
 - exact fixed parameter arity;
 - straight-line function bodies ending in an explicit `return`;
 - fixed-arity monomorphic calls into known arrow values;
+- expression-statement calls;
 - no overloads, varargs, open packs, local-function declarations, global
-  function declarations, expression-statement calls, methods, or return-path
-  analysis yet.
+  function declarations, methods, or return-path analysis yet.
