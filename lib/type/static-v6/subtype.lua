@@ -104,6 +104,25 @@ local function subtype_intersection_left(a, b, opts)
     return no(types.tostring(a) .. " does not provide a part usable as " .. types.tostring(b), a, b, opts and opts.site)
 end
 
+--: (Pack, Pack, CheckOpts | nil, string) -> (boolean, CheckDiag | nil)
+local function subtype_pack(a, b, opts, site)
+    if a.rest ~= nil or b.rest ~= nil then
+        return false, diag.new("FEATURE_NOT_ADMITTED",
+            "v6 arrow subtyping does not admit open packs yet at " .. site,
+            { producer = a, consumer = b, site = opts and opts.site })
+    end
+    if #a.items ~= #b.items then
+        return false, diag.new("FUNCTION_ARITY_MISMATCH",
+            "pack arity " .. tostring(#a.items) .. " does not match " .. tostring(#b.items) .. " at " .. site,
+            { producer = a, consumer = b, site = opts and opts.site })
+    end
+    for i = 1, #a.items do
+        local yes, err = is_subtype_impl(a.items[i], b.items[i], opts)
+        if not yes then return false, err end
+    end
+    return ok()
+end
+
 --: (StaticType, StaticType, CheckOpts | nil) -> (boolean, CheckDiag | nil)
 is_subtype_impl = function(a, b, opts)
     local na, erra = normalize.normalize(a, opts)
@@ -137,6 +156,18 @@ is_subtype_impl = function(a, b, opts)
         end
         if definitely_disjoint(a, excluded) then return ok() end
         return no(types.tostring(a) .. " is not proven disjoint from " .. types.tostring(excluded), a, b, opts and opts.site)
+    end
+    if a.tag == "arrow" and b.tag == "arrow" then
+        local aparams = a.params
+        local bparams = b.params
+        local areturns = a.returns
+        local breturns = b.returns
+        if aparams == nil or bparams == nil or areturns == nil or breturns == nil then
+            return false, diag.new("INTERNAL_TYPECHECKER_ERROR", "arrow type missing pack", { producer = a, consumer = b })
+        end
+        local params_ok, params_err = subtype_pack(bparams, aparams, opts, "arrow parameters")
+        if not params_ok then return false, params_err end
+        return subtype_pack(areturns, breturns, opts, "arrow returns")
     end
     if is_literal_sub_atom(a, b) then return ok() end
     if is_atom_sub_atom(a, b) then return ok() end

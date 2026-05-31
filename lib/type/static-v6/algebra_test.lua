@@ -98,6 +98,25 @@ T.describe("v6 algebra + subtyping", function()
         assert_not_sub(both, ty.atom("boolean"))
     end)
 
+    T.it("arrow subtyping is contravariant in params and covariant in returns", function()
+        local any_number_to_integer = ty.arrow(
+            v6.packs.pack({ ty.atom("number") }),
+            v6.packs.pack({ ty.atom("integer") })
+        )
+        local integer_to_number = ty.arrow(
+            v6.packs.pack({ ty.atom("integer") }),
+            v6.packs.pack({ ty.atom("number") })
+        )
+        assert_sub(any_number_to_integer, integer_to_number)
+        assert_not_sub(integer_to_number, any_number_to_integer)
+    end)
+
+    T.it("arrow subtyping rejects arity mismatch", function()
+        local one = ty.arrow(v6.packs.pack({ ty.atom("number") }), v6.packs.pack({ ty.atom("number") }))
+        local two = ty.arrow(v6.packs.pack({ ty.atom("number"), ty.atom("number") }), v6.packs.pack({ ty.atom("number") }))
+        assert_not_sub(one, two, "FUNCTION_ARITY_MISMATCH")
+    end)
+
     T.it("complement basics", function()
         assert_sub(ty.atom("string"), ty.complement(ty.atom("number")))
         assert_not_sub(ty.atom("string"), ty.complement(ty.atom("string")))
