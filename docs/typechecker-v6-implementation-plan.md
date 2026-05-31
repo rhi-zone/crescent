@@ -738,6 +738,7 @@ Before M2:
   values nil-pad, and how varargs/rest interact.
 - Exact union-right subtype behavior for consumer unions, because call
   acceptance and overload matching depend on it.
+- Current M2 blockers are tracked in `docs/typechecker-v6-m2-blockers.md`.
 
 Before M4:
 
