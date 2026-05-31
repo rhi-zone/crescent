@@ -8,6 +8,7 @@ local intern_mod = require("lib.type.static.intern")
 local ann_mod = require("lib.type.static-v6.ann")
 local diag    = require("lib.type.static-v6.diagnostics")
 local env_mod = require("lib.type.static-v6.env")
+local subtype = require("lib.type.static-v6.subtype")
 local types   = require("lib.type.static-v6.types")
 
 local M = {}
@@ -154,44 +155,90 @@ end
 local check_expr
 local check_stmt
 
---: (Ctx, ASTNode, StaticType, integer, integer) -> StaticType
-local function check_call_against_arrow(ctx, n, callee, arg_start, arg_len)
-    if callee.tag == "unknown" then return types.unknown() end
-    if callee.tag ~= "arrow" then
-        add_error(ctx, "CANNOT_CALL", "cannot call non-function type " .. types.tostring(callee), n)
-        return types.unknown()
+--: (StaticType, { [integer]: ArrowType }) -> boolean
+local function collect_arrow_branches(typ, out)
+    if typ.tag == "arrow" then
+        out[#out + 1] = typ
+        return true
     end
+    if typ.tag == "intersection" then
+        for _, member in ipairs(typ.members) do
+            if not collect_arrow_branches(member, out) then return false end
+        end
+        return true
+    end
+    return false
+end
+
+--: (Ctx, ASTNode, ArrowType, { [integer]: StaticType }, boolean) -> StaticType | nil
+local function check_arrow_call(ctx, n, callee, args, emit_errors)
     local params = callee.params
     local returns = callee.returns
     if params == nil or returns == nil then
-        add_error(ctx, "INTERNAL_TYPECHECKER_ERROR", "arrow type missing pack", n)
-        return types.unknown()
+        if emit_errors then add_error(ctx, "INTERNAL_TYPECHECKER_ERROR", "arrow type missing pack", n) end
+        return nil
     end
     if params.rest ~= nil or returns.rest ~= nil then
-        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 calls do not admit open packs yet", n)
-        return types.unknown()
+        if emit_errors then add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 calls do not admit open packs yet", n) end
+        return nil
     end
-    if arg_len ~= #params.items then
-        add_error(ctx, "FUNCTION_ARITY_MISMATCH",
-            "call arity " .. tostring(arg_len) .. " does not match parameter arity " .. tostring(#params.items), n)
-        return types.unknown()
+    if #args ~= #params.items then
+        if emit_errors then
+            add_error(ctx, "FUNCTION_ARITY_MISMATCH",
+                "call arity " .. tostring(#args) .. " does not match parameter arity " .. tostring(#params.items), n)
+        end
+        return nil
     end
     if #returns.items ~= 1 then
-        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 expression calls require exactly one return for now", n)
-        return types.unknown()
+        if emit_errors then add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 expression calls require exactly one return for now", n) end
+        return nil
     end
-    for i = 1, arg_len do
-        local producer = check_expr(ctx, ctx.lists:get(arg_start + i - 1))
+    for i = 1, #args do
+        local producer = args[i]
         local consumer = params.items[i]
-        local obligation = env_mod.require_subtype(ctx.env, producer, consumer, "call argument", "call argument", {
-            file = ctx.filename,
-            line = n.line,
-            column = n.col,
-        })
-        local ok, err = env_mod.discharge_obligation(obligation)
-        if not ok and err then ctx.diagnostics[#ctx.diagnostics + 1] = err end
+        local ok, err = subtype.is_subtype(producer, consumer, { site = "call argument", term_budget = 256 })
+        if not ok then
+            if emit_errors and err then
+                local details = err.details
+                if type(details) ~= "table" then details = {} end
+                details.span = details.span or { file = ctx.filename, line = n.line, column = n.col }
+                details.obligation_reason = "call argument"
+                details.obligation_site = "call argument"
+                err.details = details
+                ctx.diagnostics[#ctx.diagnostics + 1] = err
+            end
+            return nil
+        end
     end
     return returns.items[1]
+end
+
+--: (Ctx, ASTNode, StaticType, integer, integer) -> StaticType
+local function check_call_against_arrow(ctx, n, callee, arg_start, arg_len)
+    if callee.tag == "unknown" then return types.unknown() end
+    local args = {} --: { [integer]: StaticType }
+    for i = 1, arg_len do
+        args[#args + 1] = check_expr(ctx, ctx.lists:get(arg_start + i - 1))
+    end
+    if callee.tag == "arrow" then
+        return check_arrow_call(ctx, n, callee, args, true) or types.unknown()
+    end
+    local branches = {} --: { [integer]: ArrowType }
+    if not collect_arrow_branches(callee, branches) then
+        add_error(ctx, "CANNOT_CALL", "cannot call non-function type " .. types.tostring(callee), n)
+        return types.unknown()
+    end
+    local returns = {} --: { [integer]: StaticType }
+    for _, branch in ipairs(branches) do
+        local ret = check_arrow_call(ctx, n, branch, args, false)
+        if ret ~= nil then returns[#returns + 1] = ret end
+    end
+    if #returns == 0 then
+        add_error(ctx, "NO_MATCHING_OVERLOAD", "no overload branch accepts argument pack", n)
+        return types.unknown()
+    end
+    if #returns == 1 then return returns[1] end
+    return types.union(returns)
 end
 
 --: (Env) -> Env
@@ -237,8 +284,8 @@ local function check_return_stmt(ctx, n, returns)
     end
 end
 
---: (Ctx, integer, integer, integer, integer, integer, ArrowType, ASTNode, string | nil) -> boolean
-local function check_func_body_against(ctx, ps, pl, bs, bl, flags, arrow, owner, self_name)
+--: (Ctx, integer, integer, integer, integer, integer, ArrowType, ASTNode, string | nil, StaticType | nil) -> boolean
+local function check_func_body_against(ctx, ps, pl, bs, bl, flags, arrow, owner, self_name, self_type)
     if flags % (defs.FLAG_VARARG * 2) >= defs.FLAG_VARARG then
         add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function literals do not admit varargs yet", owner)
         return true
@@ -276,7 +323,7 @@ local function check_func_body_against(ctx, ps, pl, bs, bl, flags, arrow, owner,
         diagnostics = ctx.diagnostics,
     }
     if self_name ~= nil then
-        env_mod.bind(nested.env, self_name, arrow, {
+        env_mod.bind(nested.env, self_name, self_type or arrow, {
             file = ctx.filename,
             line = owner.line,
             column = owner.col,
@@ -298,11 +345,24 @@ local function check_func_body_against(ctx, ps, pl, bs, bl, flags, arrow, owner,
     return true
 end
 
---: (Ctx, integer, ArrowType, ASTNode) -> boolean
+--: (Ctx, integer, integer, integer, integer, integer, StaticType, ASTNode, string | nil) -> boolean
+local function check_func_type_against(ctx, ps, pl, bs, bl, flags, typ, owner, self_name)
+    local branches = {} --: { [integer]: ArrowType }
+    if not collect_arrow_branches(typ, branches) then
+        add_error(ctx, "TYPE_MISMATCH", "function annotation must be an arrow or intersection of arrows", owner)
+        return true
+    end
+    for _, branch in ipairs(branches) do
+        check_func_body_against(ctx, ps, pl, bs, bl, flags, branch, owner, self_name, typ)
+    end
+    return true
+end
+
+--: (Ctx, integer, StaticType, ASTNode) -> boolean
 local function check_func_expr_against(ctx, nid, arrow, owner)
     local n = ctx.nodes:get(nid)
     if n.kind ~= NODE_FUNC_EXPR then return false end
-    return check_func_body_against(ctx, n.data[0], n.data[1], n.data[2], n.data[3], n.flags, arrow, n, nil)
+    return check_func_type_against(ctx, n.data[0], n.data[1], n.data[2], n.data[3], n.flags, arrow, n, nil)
 end
 
 --: (Ctx, integer) -> StaticType
@@ -374,7 +434,7 @@ local function check_local(ctx, n)
     end
     local ann_ty = parse_type_ann(ctx, n.line, n)
     local name = intern_str(ctx, ctx.lists:get(ns))
-    if ann_ty and ann_ty.tag == "arrow" and el == 1 then
+    if ann_ty and (ann_ty.tag == "arrow" or ann_ty.tag == "intersection") and el == 1 then
         local expr_id = ctx.lists:get(es)
         local diag_start = #ctx.diagnostics
         if check_func_expr_against(ctx, expr_id, ann_ty, n) then
@@ -460,12 +520,12 @@ local function check_func_decl(ctx, n)
         add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 local function declarations require an arrow annotation", n)
         return
     end
-    if ann_ty.tag ~= "arrow" then
-        add_error(ctx, "TYPE_MISMATCH", "local function annotation must be an arrow type", n)
+    if ann_ty.tag ~= "arrow" and ann_ty.tag ~= "intersection" then
+        add_error(ctx, "TYPE_MISMATCH", "local function annotation must be an arrow or intersection of arrows", n)
         return
     end
     local diag_start = #ctx.diagnostics
-    check_func_body_against(ctx, n.data[1], n.data[2], n.data[3], n.data[4], n.flags, ann_ty, n, name)
+    check_func_type_against(ctx, n.data[1], n.data[2], n.data[3], n.data[4], n.flags, ann_ty, n, name)
     if #ctx.diagnostics == diag_start then
         env_mod.bind(ctx.env, name, ann_ty, { file = ctx.filename, line = n.line, column = n.col })
     end

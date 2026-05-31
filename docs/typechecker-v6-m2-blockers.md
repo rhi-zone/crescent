@@ -28,7 +28,8 @@ Fixture status:
 
 ## Union-Right And Overload Matching
 
-Status: subtype-pinned, call implementation blocking.
+Status: implemented for fixed-arity intersection-of-arrow overloads; broader
+call implementation blocking.
 
 Current subtype behavior accepts concrete `A <: B | C` if any branch accepts and
 requires every producer branch in `A | B <: C` to satisfy the consumer. M2 calls
@@ -44,9 +45,8 @@ Fixture status:
 
 - Subtype tests now pin concrete producers against union consumers and union
   producers against union consumers.
-- Call-level fixtures are still required once function/call syntax is admitted.
-- Tests showing ambiguous overload return union are still required once
-  overloads exist.
+- Call-level tests now pin overload branch matching and ambiguous overload
+  return unions for fixed-arity intersection-of-arrow overloads.
 
 ## Mutable Binding Assignment
 
@@ -145,6 +145,7 @@ Initial M2 implementation scope:
 
 - annotated function literals assigned to locals;
 - annotated local function declarations with identifier names;
+- intersection-of-arrow overload annotations checked branch-by-branch;
 - exact fixed parameter arity;
 - straight-line function bodies ending in an explicit `return`;
 - fixed-arity monomorphic calls into known arrow values;
