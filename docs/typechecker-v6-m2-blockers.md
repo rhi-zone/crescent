@@ -73,7 +73,7 @@ must not be built until the current-value/slot distinction is explicit.
 
 ## Unsupported Expression Recovery
 
-Status: blocking for exports/modules.
+Status: pinned for M1, implementation blocking for exports/modules.
 
 Current M1 behavior emits `FEATURE_NOT_ADMITTED` and often returns `unknown` so
 checking can continue. This is useful for multiple diagnostics, but it can leave
@@ -83,6 +83,8 @@ Pinned for now:
 
 - If `ok == false`, exported environment facts are debugging artifacts only.
 - No driver/module/cache layer may consume facts from a failed check.
+- `source.check_string` exposes `facts_valid`; it is true exactly when `ok` is
+  true.
 
 Open before module/export work:
 
@@ -90,7 +92,8 @@ Open before module/export work:
   `unknown`.
 - Whether statements containing unsupported expressions should suppress binding
   installation.
-- Whether partial facts should be hidden from public results when `ok == false`.
+- Whether partial facts should be hidden from public results when `ok == false`,
+  rather than retained as debug artifacts behind `facts_valid == false`.
 
 ## Unsafe Boundary Severity
 
