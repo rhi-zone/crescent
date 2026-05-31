@@ -293,7 +293,15 @@ end
 local function check_unused_annotations(ctx)
     local anns = ctx.annotations
     if not anns then return end
-    for key, r in pairs(anns) do
+    local keys = {} --: { [integer]: integer | number }
+    for key, _r in pairs(anns) do
+        if key >= 0 and not ctx.used_annotations[key] then
+            keys[#keys + 1] = key
+        end
+    end
+    table.sort(keys)
+    for _, key in ipairs(keys) do
+        local r = anns[key]
         if key >= 0 and not ctx.used_annotations[key] then
             if r.kind == defs.ANN_DECL then
                 ctx.used_annotations[key] = true
@@ -304,9 +312,15 @@ local function check_unused_annotations(ctx)
                 })
             elseif r.kind == defs.ANN_TYPE then
                 local _typ, err = ann_mod.parse_annotation(ctx.ann_state, r.content)
+                ctx.used_annotations[key] = true
                 if err then
-                    ctx.used_annotations[key] = true
                     add_error_span(ctx, "ANNOTATION_PARSE_ERROR", err, {
+                        file = ctx.filename,
+                        line = r.line or key,
+                        column = r.col,
+                    })
+                else
+                    add_error_span(ctx, "ANNOTATION_NOT_ATTACHED", "type annotation is not attached to an admitted source form", {
                         file = ctx.filename,
                         line = r.line or key,
                         column = r.col,

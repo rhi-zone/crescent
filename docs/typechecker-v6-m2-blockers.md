@@ -105,19 +105,21 @@ Open before CLI:
 
 ## Unused Valid Annotations
 
-Status: blocking before broad source support.
+Status: pinned for M1.
 
 Current M1 policy:
 
 - Malformed unused `--:` annotations are errors.
 - `--::` declarations are errors because declarations are not admitted in M1.
-- Valid unattached `--:` annotations are ignored.
+- Valid unattached `--:` annotations are `ANNOTATION_NOT_ATTACHED` errors.
+- Source-line annotation consumption is one-shot and global per check.
+- Cast annotations are exempt from orphan-source checks because the parser stores
+  them under synthetic negative keys consumed by `NODE_CAST_EXPR`.
 
 Open before broader statement support:
 
-- Whether valid unattached annotations should be warnings/errors.
-- Whether annotation consumption should be one-shot globally or scoped per
-  declaration form.
+- Whether future declaration forms need scoped annotation lookup beyond M1's
+  one-shot source-line policy.
 
 ## M2 Entry Gate
 
