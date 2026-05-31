@@ -102,6 +102,18 @@ T.describe("v6 source M1", function()
         T.eq(res.env.bindings.s.base, "string")
     end)
 
+    T.it("adjusts assignment rhs packs against existing slot claims", function()
+        local res = check("--: () -> (number, string)\nlocal function pair() return 1, 'x' end\nlocal a = 0 --: number\nlocal b = '' --: string\na, b = pair()\n")
+        T.eq(res.ok, true)
+
+        res = check("--: () -> (number, string)\nlocal function pair() return 1, 'x' end\nlocal a = 0 --: number\nlocal b = 0 --: number\na, b = pair()\n")
+        T.eq(res.ok, false)
+        T.eq(res.diagnostics[1].code, "TYPE_MISMATCH")
+
+        res = check("--: () -> (number, string)\nlocal function pair() return 1, 'x' end\nlocal a = 0 --: number\na = pair()\n")
+        T.eq(res.ok, true)
+    end)
+
     T.it("checks checked casts and records force casts", function()
         local res = check("local x = --[[: string]] 's'\n")
         T.eq(res.ok, true)

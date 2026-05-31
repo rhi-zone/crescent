@@ -577,26 +577,33 @@ local function check_assign(ctx, n)
     local tl = n.data[1]
     local es = n.data[2]
     local el = n.data[3]
-    if tl ~= 1 or el ~= 1 then
-        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M1 admits only 1:1 assignments", n)
+    if tl < 1 then
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M1 assignment has no targets", n)
         return
     end
-    local target_id = ctx.lists:get(ts)
-    local target = ctx.nodes:get(target_id)
-    if target.kind ~= NODE_IDENTIFIER then
-        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M1 assignment target must be an identifier", target)
-        return
+    local names = {} --: { [integer]: string }
+    local consumers = {} --: { [integer]: StaticType }
+    for i = 1, tl do
+        local target_id = ctx.lists:get(ts + i - 1)
+        local target = ctx.nodes:get(target_id)
+        if target.kind ~= NODE_IDENTIFIER then
+            add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M1 assignment target must be an identifier", target)
+            return
+        end
+        local name = intern_str(ctx, target.data[0])
+        local consumer = env_mod.lookup(ctx.env, name)
+        if not consumer then
+            add_error(ctx, "UNDECLARED_BINDING", "assignment to undeclared binding '" .. name .. "'", target)
+            return
+        end
+        names[#names + 1] = name
+        consumers[#consumers + 1] = consumer
     end
-    local name = intern_str(ctx, target.data[0])
-    local consumer = env_mod.lookup(ctx.env, name)
-    if not consumer then
-        add_error(ctx, "UNDECLARED_BINDING", "assignment to undeclared binding '" .. name .. "'", target)
-        return
-    end
-    local producer = check_expr(ctx, ctx.lists:get(es))
-    local ann_ty = parse_type_ann(ctx, n.line, n)
+    local producers = adjust_local_rhs(ctx, es, el, tl)
+    local ann_ty = nil
+    if tl == 1 then ann_ty = parse_type_ann(ctx, n.line, n) end
     if ann_ty then
-        local ann_obligation = env_mod.require_subtype(ctx.env, producer, ann_ty,
+        local ann_obligation = env_mod.require_subtype(ctx.env, producers[1], ann_ty,
             "assignment annotation", "assignment annotation", {
                 file = ctx.filename,
                 line = n.line,
@@ -605,13 +612,15 @@ local function check_assign(ctx, n)
         local ann_ok, ann_err = env_mod.discharge_obligation(ann_obligation)
         if not ann_ok and ann_err then ctx.diagnostics[#ctx.diagnostics + 1] = ann_err end
     end
-    local obligation = env_mod.require_subtype(ctx.env, producer, consumer, "assignment", "assignment", {
-        file = ctx.filename,
-        line = n.line,
-        column = n.col,
-    })
-    local ok, err = env_mod.discharge_obligation(obligation)
-    if not ok and err then ctx.diagnostics[#ctx.diagnostics + 1] = err end
+    for i = 1, tl do
+        local obligation = env_mod.require_subtype(ctx.env, producers[i], consumers[i], "assignment", "assignment", {
+            file = ctx.filename,
+            line = n.line,
+            column = n.col,
+        })
+        local ok, err = env_mod.discharge_obligation(obligation)
+        if not ok and err then ctx.diagnostics[#ctx.diagnostics + 1] = err end
+    end
 end
 
 --: (Ctx, ASTNode) -> nil
