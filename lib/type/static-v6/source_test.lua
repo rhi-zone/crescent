@@ -226,6 +226,13 @@ T.describe("v6 source M1", function()
         T.eq(res.diagnostics[1].details.obligation_reason, "call argument")
     end)
 
+    T.it("expands final call arguments while probing overload branches", function()
+        local res = check("--: () -> (number, string)\nlocal function pair() return 1, 'x' end\nlocal take = --[[:! ((number) -> number) & ((number, string) -> string)]] nil\nlocal out = take(pair())\n")
+        T.eq(res.ok, true)
+        T.eq(res.sound, false)
+        T.eq(res.env.bindings.out.tag, "union")
+    end)
+
     T.it("checks annotated local function declarations", function()
         local res = check("--: (number) -> number\nlocal function id(x) return x end\nlocal y = id(1)\n")
         T.eq(res.ok, true)

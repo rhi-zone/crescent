@@ -224,21 +224,25 @@ local function check_arrow_call_pack(ctx, n, callee, args, emit_errors)
     return returns
 end
 
+--: (Ctx, ASTNode, ArrowType, integer, integer, boolean) -> Pack | nil
+local function check_arrow_call_exprs(ctx, n, callee, arg_start, arg_len, emit_errors)
+    local params = callee.params
+    if params == nil then
+        if emit_errors then add_error(ctx, "INTERNAL_TYPECHECKER_ERROR", "arrow type missing parameter pack", n) end
+        return nil
+    end
+    local args = adjust_expr_list(ctx, arg_start, arg_len, #params.items)
+    return check_arrow_call_pack(ctx, n, callee, args, emit_errors)
+end
+
 --: (Ctx, ASTNode, StaticType, integer, integer) -> StaticType
 local function check_call_against_arrow(ctx, n, callee, arg_start, arg_len)
     if callee.tag == "unknown" then return types.unknown() end
     if callee.tag == "arrow" then
-        local params = callee.params
-        if params == nil then
-            add_error(ctx, "INTERNAL_TYPECHECKER_ERROR", "arrow type missing parameter pack", n)
-            return types.unknown()
-        end
-        local args = adjust_expr_list(ctx, arg_start, arg_len, #params.items)
-        local returns = check_arrow_call_pack(ctx, n, callee, args, true)
+        local returns = check_arrow_call_exprs(ctx, n, callee, arg_start, arg_len, true)
         if returns == nil then return types.unknown() end
         return result_to_scalar(pack_result.single(returns))
     end
-    local args = adjust_expr_list(ctx, arg_start, arg_len, arg_len)
     local branches = {} --: { [integer]: ArrowType }
     if not collect_arrow_branches(callee, branches) then
         add_error(ctx, "CANNOT_CALL", "cannot call non-function type " .. types.tostring(callee), n)
@@ -246,7 +250,7 @@ local function check_call_against_arrow(ctx, n, callee, arg_start, arg_len)
     end
     local returns = {} --: { [integer]: Pack }
     for _, branch in ipairs(branches) do
-        local branch_returns = check_arrow_call_pack(ctx, n, branch, args, false)
+        local branch_returns = check_arrow_call_exprs(ctx, n, branch, arg_start, arg_len, false)
         if branch_returns ~= nil then
             returns[#returns + 1] = branch_returns
         end
@@ -263,16 +267,9 @@ local function check_final_call_pack(ctx, n)
     if n.kind ~= NODE_CALL_EXPR then return nil end
     local callee = check_expr(ctx, n.data[0])
     if callee.tag == "arrow" then
-        local params = callee.params
-        if params == nil then
-            add_error(ctx, "INTERNAL_TYPECHECKER_ERROR", "arrow type missing parameter pack", n)
-            return pack_result.from_items({ types.unknown() })
-        end
-        local args = adjust_expr_list(ctx, n.data[1], n.data[2], #params.items)
-        local pack = check_arrow_call_pack(ctx, n, callee, args, true)
+        local pack = check_arrow_call_exprs(ctx, n, callee, n.data[1], n.data[2], true)
         return pack_result.single(pack or { items = { types.unknown() }, rest = nil })
     end
-    local args = adjust_expr_list(ctx, n.data[1], n.data[2], n.data[2])
     local branches = {} --: { [integer]: ArrowType }
     if not collect_arrow_branches(callee, branches) then
         add_error(ctx, "CANNOT_CALL", "cannot call non-function type " .. types.tostring(callee), n)
@@ -280,7 +277,7 @@ local function check_final_call_pack(ctx, n)
     end
     local matches = {} --: { [integer]: Pack }
     for _, branch in ipairs(branches) do
-        local branch_returns = check_arrow_call_pack(ctx, n, branch, args, false)
+        local branch_returns = check_arrow_call_exprs(ctx, n, branch, n.data[1], n.data[2], false)
         if branch_returns ~= nil then matches[#matches + 1] = branch_returns end
     end
     if #matches == 0 then
