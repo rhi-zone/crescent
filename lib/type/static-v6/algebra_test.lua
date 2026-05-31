@@ -69,6 +69,22 @@ T.describe("v6 algebra + subtyping", function()
         assert_not_sub(mixed, ty.atom("number"))
     end)
 
+    T.it("union right admits concrete producers branchwise", function()
+        local string_or_number = ty.union({ ty.atom("string"), ty.atom("number") })
+        assert_sub(ty.atom("string"), string_or_number)
+        assert_sub(ty.atom("integer"), string_or_number)
+        assert_not_sub(ty.atom("boolean"), string_or_number)
+    end)
+
+    T.it("union producer to union consumer requires every producer branch to match", function()
+        local string_or_integer = ty.union({ ty.atom("string"), ty.atom("integer") })
+        local string_or_number = ty.union({ ty.atom("string"), ty.atom("number") })
+        assert_sub(string_or_integer, string_or_number)
+
+        local string_or_boolean = ty.union({ ty.atom("string"), ty.atom("boolean") })
+        assert_not_sub(string_or_boolean, string_or_number)
+    end)
+
     T.it("intersection right requires all consumer parts", function()
         local both = ty.intersection({ ty.atom("number"), ty.unknown() })
         assert_sub(ty.atom("integer"), both)

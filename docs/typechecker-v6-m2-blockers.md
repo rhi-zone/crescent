@@ -28,10 +28,11 @@ Fixture status:
 
 ## Union-Right And Overload Matching
 
-Status: blocking.
+Status: subtype-pinned, call implementation blocking.
 
-Current subtype behavior accepts `A <: B | C` if any branch accepts. M2 calls
-and M3 overloads need this pinned for argument checking:
+Current subtype behavior accepts concrete `A <: B | C` if any branch accepts and
+requires every producer branch in `A | B <: C` to satisfy the consumer. M2 calls
+and M3 overloads must preserve this for argument checking:
 
 - A concrete producer may satisfy a union consumer by matching one branch.
 - A union producer must satisfy the consumer for every branch.
@@ -39,10 +40,13 @@ and M3 overloads need this pinned for argument checking:
   argument pack; return the union of matching returns.
 - Do not pick the first overload branch.
 
-Required before code:
+Fixture status:
 
-- Tests showing union arguments to monomorphic calls.
-- Tests showing ambiguous overload return union, once overloads exist.
+- Subtype tests now pin concrete producers against union consumers and union
+  producers against union consumers.
+- Call-level fixtures are still required once function/call syntax is admitted.
+- Tests showing ambiguous overload return union are still required once
+  overloads exist.
 
 ## Mutable Binding Assignment
 
