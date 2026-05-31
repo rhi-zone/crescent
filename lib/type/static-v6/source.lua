@@ -59,6 +59,13 @@ local function add_error(ctx, code, message, node)
     return d
 end
 
+--: (Ctx, string, string, Span | nil) -> CheckDiag
+local function add_error_span(ctx, code, message, span)
+    local d = diag.new(code, message, { span = span })
+    ctx.diagnostics[#ctx.diagnostics + 1] = d
+    return d
+end
+
 --: (Ctx, integer) -> string
 local function intern_str(ctx, id)
     local s = intern_mod.get(ctx.pool, id)
@@ -88,7 +95,11 @@ local function consume_decl_ann(ctx, line)
     local r = anns[line]
     if r and r.kind == defs.ANN_DECL then
         ctx.used_annotations[line] = true
-        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M1 declarations are not admitted yet", nil)
+        add_error_span(ctx, "FEATURE_NOT_ADMITTED", "v6 M1 declarations are not admitted yet", {
+            file = ctx.filename,
+            line = r.line or line,
+            column = r.col,
+        })
         return true
     end
     return false
@@ -100,7 +111,11 @@ local function parse_type_ann(ctx, line, node)
     if not r then return nil end
     local typ, err = ann_mod.parse_annotation(ctx.ann_state, r.content)
     if err then
-        add_error(ctx, "ANNOTATION_PARSE_ERROR", err, node)
+        add_error_span(ctx, "ANNOTATION_PARSE_ERROR", err, {
+            file = ctx.filename,
+            line = r.line or line,
+            column = r.col,
+        })
         return nil
     end
     return typ
@@ -116,10 +131,19 @@ local function parse_cast_ann(ctx, id, node)
     end
     local typ, err = ann_mod.parse_annotation(ctx.ann_state, r.content)
     if err then
-        add_error(ctx, "ANNOTATION_PARSE_ERROR", err, node)
+        add_error_span(ctx, "ANNOTATION_PARSE_ERROR", err, {
+            file = ctx.filename,
+            line = r.line or node.line,
+            column = r.col or node.col,
+        })
         return nil
     end
     return typ
+end
+
+--: (integer) -> boolean
+local function has_force_cast_flag(flags)
+    return (flags % (defs.FLAG_FORCE_CAST * 2)) >= defs.FLAG_FORCE_CAST
 end
 
 local check_expr
@@ -155,7 +179,7 @@ check_expr = function(ctx, nid)
         local inner = check_expr(ctx, n.data[0])
         local target = parse_cast_ann(ctx, n.data[1], n)
         if not target then return inner end
-        if n.flags == defs.FLAG_FORCE_CAST then
+        if has_force_cast_flag(n.flags) then
             env_mod.record_unsafe_boundary(ctx.env, target, "force cast", "source force cast", {
                 file = ctx.filename,
                 line = n.line,
@@ -265,10 +289,50 @@ local function check_block(ctx, start, len)
     end
 end
 
+--: (Ctx) -> nil
+local function check_unused_annotations(ctx)
+    local anns = ctx.annotations
+    if not anns then return end
+    for key, r in pairs(anns) do
+        if key >= 0 and not ctx.used_annotations[key] then
+            if r.kind == defs.ANN_DECL then
+                ctx.used_annotations[key] = true
+                add_error_span(ctx, "FEATURE_NOT_ADMITTED", "v6 M1 declarations are not admitted yet", {
+                    file = ctx.filename,
+                    line = r.line or key,
+                    column = r.col,
+                })
+            elseif r.kind == defs.ANN_TYPE then
+                local _typ, err = ann_mod.parse_annotation(ctx.ann_state, r.content)
+                if err then
+                    ctx.used_annotations[key] = true
+                    add_error_span(ctx, "ANNOTATION_PARSE_ERROR", err, {
+                        file = ctx.filename,
+                        line = r.line or key,
+                        column = r.col,
+                    })
+                end
+            end
+        end
+    end
+end
+
 --: (string, string | nil) -> Result
 function M.check_string(source, filename)
     filename = filename or "<string>"
-    local pr = parse_mod.parse(source, filename)
+    local parsed_ok, pr_or_err = pcall(function()
+        return parse_mod.parse(source, filename)
+    end)
+    if not parsed_ok then
+        return {
+            ok = false,
+            env = env_mod.new(),
+            diagnostics = {
+                diag.new("PARSE_ERROR", tostring(pr_or_err), { span = { file = filename } }),
+            },
+        }
+    end
+    local pr = pr_or_err
     local root = pr.root
     local root_node = pr.nodes:get(root)
     local root_kind = root_node.kind
@@ -292,6 +356,7 @@ function M.check_string(source, filename)
     else
         check_block(ctx, root_node.data[0], root_node.data[1])
     end
+    check_unused_annotations(ctx)
     return { ok = #diagnostics == 0, env = env, diagnostics = diagnostics }
 end
 

@@ -34,6 +34,7 @@ local function attach_obligation_context(err, obligation)
     details.obligation_reason = obligation.reason
     details.obligation_span = obligation.span
     details.obligation_site = obligation.site
+    details.span = details.span or obligation.span
     details.producer = details.producer or obligation.producer
     details.consumer = details.consumer or obligation.consumer
     err.details = details
@@ -91,6 +92,8 @@ end
 
 --: (Obligation) -> (boolean, CheckDiag | nil)
 function M.discharge_obligation(obligation)
+    if obligation.discharged then return true, nil end
+    if obligation.diagnostic then return false, obligation.diagnostic end
     local ok, err = subtype.is_subtype(obligation.producer, obligation.consumer, {
         site = obligation.site,
         term_budget = 256,
