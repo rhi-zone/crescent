@@ -2599,6 +2599,7 @@ Backlog from the foundations session captured in `docs/foundations/pedagogy-and-
 - [ ] Resolve the two open foundational questions: the precise statement of "coverage", and whether leaf-oracle-as-meter is acceptable.
 - [ ] Fix the stale comment in `lib/type/static/defs.lua` claiming `NODE_LITERAL` stores kind/value in `data[2]`/`data[3]` — the parser actually writes `data[0]`/`data[1]`.
 - [ ] Decide and execute the disposition of the v5 typechecker and `docs/type-system-design/` (the 19-axis plan), now superseded by the plural per-question approach — formal retirement/cleanup.
+- [ ] Pin v6 from `docs/typechecker-v6-plan.md`: value-movement matrix first, then implement thin verticals beside v4; v5 is research input, not the foundation.
 - [ ] Build checker #2: pick the next property-question (candidates: table shapes, integer/float) and write its standalone checker.
 - [ ] Land the deferred sub-checkers from checker #1: integer/float distinction, table shapes, literal refinement, generics, intersections, match types, multi-return.
 - [ ] Finish flattening `lib/check_kind` — the refactor into per-node-kind handler functions over an explicit `ctx` is mid-done but `ctx` has no explicit type annotation, so the checker can't unify its shape across handler call sites and emits ~26 typecheck errors; add an explicit `ctx` type, re-verify tests + typecheck, then integrate.

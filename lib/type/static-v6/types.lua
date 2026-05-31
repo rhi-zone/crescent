@@ -1,0 +1,170 @@
+-- lib/type/static-v6/types.lua
+-- Core v6 type constructors and structural helpers.
+
+local M = {}
+
+--:: AtomType = { tag: "atom", name: string }
+--:: LiteralType = { tag: "literal", base: string, value: unknown }
+--:: UnknownType = { tag: "unknown" }
+--:: NeverType = { tag: "never" }
+--:: AnyType = { tag: "any" }
+--:: UnionType = { tag: "union", members: { [integer]: StaticType } }
+--:: IntersectionType = { tag: "intersection", members: { [integer]: StaticType } }
+--:: ComplementType = { tag: "complement", of: StaticType }
+--:: ArrowType = { tag: "arrow", params: unknown, returns: unknown, effects: unknown }
+--:: RecordType = { tag: "record" }
+--:: NominalType = { tag: "nominal", name: string }
+--:: VarType = { tag: "var", id: integer }
+--:: StaticType = AtomType | LiteralType | UnknownType | NeverType | AnyType | UnionType | IntersectionType | ComplementType | ArrowType | RecordType | NominalType | VarType
+
+local ATOMS = {
+    ["nil"] = true,
+    boolean = true,
+    integer = true,
+    number = true,
+    string = true,
+    thread = true,
+    userdata = true,
+    cdata = true,
+}
+
+M.ATOMS = ATOMS
+
+--: (string) -> StaticType
+function M.atom(name)
+    if not ATOMS[name] then
+        error("unknown atom: " .. tostring(name))
+    end
+    return { tag = "atom", name = name }
+end
+
+--: (string, unknown) -> StaticType
+function M.literal(base, value)
+    if not ATOMS[base] or base == "nil" then
+        error("invalid literal base: " .. tostring(base))
+    end
+    return { tag = "literal", base = base, value = value }
+end
+
+--: () -> StaticType
+function M.unknown()
+    return { tag = "unknown" }
+end
+
+--: () -> StaticType
+function M.never()
+    return { tag = "never" }
+end
+
+--: () -> StaticType
+function M.any()
+    return { tag = "any" }
+end
+
+--: ({ [integer]: StaticType }) -> StaticType
+function M.union(members)
+    return { tag = "union", members = members or {} }
+end
+
+--: ({ [integer]: StaticType }) -> StaticType
+function M.intersection(members)
+    return { tag = "intersection", members = members or {} }
+end
+
+--: (StaticType) -> StaticType
+function M.complement(of)
+    return { tag = "complement", of = of }
+end
+
+--: (unknown, unknown, unknown | nil) -> StaticType
+function M.arrow(params, returns, effects)
+    return { tag = "arrow", params = params, returns = returns, effects = effects }
+end
+
+--: ({ [integer]: unknown }, unknown | nil) -> unknown
+function M.pack(items, rest)
+    return { items = items or {}, rest = rest }
+end
+
+--: (StaticType) -> string | nil
+local function scalar_key(t)
+    if t.tag == "atom" then
+        return "atom:" .. t.name
+    end
+    if t.tag == "literal" then
+        return "literal:" .. t.base .. ":" .. tostring(t.value)
+    end
+    if t.tag == "unknown" then return "unknown" end
+    if t.tag == "never" then return "never" end
+    if t.tag == "any" then return "any" end
+    return nil
+end
+
+--: (StaticType) -> string
+function M.key(t)
+    local k = scalar_key(t)
+    if k then return k end
+    if t.tag == "complement" then
+        return "complement(" .. M.key(t.of) .. ")"
+    end
+    if t.tag == "union" or t.tag == "intersection" then
+        local parts = {}
+        for i, m in ipairs(t.members) do parts[i] = M.key(m) end
+        table.sort(parts)
+        return t.tag .. "(" .. table.concat(parts, ",") .. ")"
+    end
+    if t.tag == "arrow" then
+        return "arrow"
+    end
+    if t.tag == "record" then
+        return "record"
+    end
+    if t.tag == "nominal" then
+        return "nominal:" .. tostring(t.name)
+    end
+    if t.tag == "var" then
+        return "var:" .. tostring(t.id)
+    end
+    return tostring(t.tag)
+end
+
+--: (StaticType, StaticType) -> boolean
+function M.equal(a, b)
+    return M.key(a) == M.key(b)
+end
+
+--: (StaticType) -> string
+function M.tostring(t)
+    if t.tag == "atom" then
+        return t.name
+    end
+    if t.tag == "literal" then
+        if t.base == "string" then return string.format("%q", t.value) end
+        return tostring(t.value)
+    end
+    if t.tag == "unknown" then return "unknown" end
+    if t.tag == "never" then return "never" end
+    if t.tag == "any" then return "any" end
+    if t.tag == "complement" then
+        return "~" .. M.tostring(t.of)
+    end
+    if t.tag == "union" then
+        local parts = {}
+        for i, m in ipairs(t.members) do parts[i] = M.tostring(m) end
+        return table.concat(parts, " | ")
+    end
+    if t.tag == "intersection" then
+        local parts = {}
+        for i, m in ipairs(t.members) do parts[i] = M.tostring(m) end
+        return table.concat(parts, " & ")
+    end
+    if t.tag == "arrow" then return "<arrow>" end
+    if t.tag == "record" then return "<record>" end
+    if t.tag == "nominal" then
+        return t.name
+    end
+    if t.tag == "var" then return "?" .. tostring(t.id) end
+    return "<" .. tostring(t.tag) .. ">"
+end
+
+return M
