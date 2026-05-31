@@ -49,6 +49,7 @@ local NODE_CHUNK = defs.NODE_CHUNK
 local NODE_CAST_EXPR = defs.NODE_CAST_EXPR
 local NODE_FUNC_EXPR = defs.NODE_FUNC_EXPR
 local NODE_RETURN_STMT = defs.NODE_RETURN_STMT
+local NODE_CALL_EXPR = defs.NODE_CALL_EXPR
 
 --: (Ctx, string, string, ASTNode | nil) -> CheckDiag
 local function add_error(ctx, code, message, node)
@@ -150,6 +151,46 @@ end
 
 local check_expr
 local check_stmt
+
+--: (Ctx, ASTNode, StaticType, integer, integer) -> StaticType
+local function check_call_against_arrow(ctx, n, callee, arg_start, arg_len)
+    if callee.tag == "unknown" then return types.unknown() end
+    if callee.tag ~= "arrow" then
+        add_error(ctx, "CANNOT_CALL", "cannot call non-function type " .. types.tostring(callee), n)
+        return types.unknown()
+    end
+    local params = callee.params
+    local returns = callee.returns
+    if params == nil or returns == nil then
+        add_error(ctx, "INTERNAL_TYPECHECKER_ERROR", "arrow type missing pack", n)
+        return types.unknown()
+    end
+    if params.rest ~= nil or returns.rest ~= nil then
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 calls do not admit open packs yet", n)
+        return types.unknown()
+    end
+    if arg_len ~= #params.items then
+        add_error(ctx, "FUNCTION_ARITY_MISMATCH",
+            "call arity " .. tostring(arg_len) .. " does not match parameter arity " .. tostring(#params.items), n)
+        return types.unknown()
+    end
+    if #returns.items ~= 1 then
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 expression calls require exactly one return for now", n)
+        return types.unknown()
+    end
+    for i = 1, arg_len do
+        local producer = check_expr(ctx, ctx.lists:get(arg_start + i - 1))
+        local consumer = params.items[i]
+        local obligation = env_mod.require_subtype(ctx.env, producer, consumer, "call argument", "call argument", {
+            file = ctx.filename,
+            line = n.line,
+            column = n.col,
+        })
+        local ok, err = env_mod.discharge_obligation(obligation)
+        if not ok and err then ctx.diagnostics[#ctx.diagnostics + 1] = err end
+    end
+    return returns.items[1]
+end
 
 --: (Env) -> Env
 local function child_env(parent)
@@ -297,6 +338,11 @@ check_expr = function(ctx, nid)
         local ok, err = env_mod.discharge_obligation(obligation)
         if not ok and err then ctx.diagnostics[#ctx.diagnostics + 1] = err; return inner end
         return target
+    end
+
+    if kind == NODE_CALL_EXPR then
+        local callee = check_expr(ctx, n.data[0])
+        return check_call_against_arrow(ctx, n, callee, n.data[1], n.data[2])
     end
 
     add_error(ctx, "FEATURE_NOT_ADMITTED", "expression node not admitted in v6 M1: " .. tostring(kind), n)

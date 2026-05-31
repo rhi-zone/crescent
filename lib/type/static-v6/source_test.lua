@@ -157,6 +157,27 @@ T.describe("v6 source M1", function()
         T.eq(res.diagnostics[1].code, "FEATURE_NOT_ADMITTED")
     end)
 
+    T.it("checks fixed monomorphic calls into known arrows", function()
+        local res = check("--: (number) -> number\nlocal id = function(x) return x end\nlocal y = id(1)\n")
+        T.eq(res.ok, true)
+        T.eq(res.env.bindings.y.name, "number")
+
+        res = check("--: (number) -> number\nlocal id = function(x) return x end\nlocal y = id('s')\n")
+        T.eq(res.ok, false)
+        T.eq(res.diagnostics[1].code, "TYPE_MISMATCH")
+        T.eq(res.diagnostics[1].details.obligation_reason, "call argument")
+    end)
+
+    T.it("rejects unsupported call shapes instead of guessing", function()
+        local res = check("--: (number) -> number\nlocal id = function(x) return x end\nlocal y = id(1, 2)\n")
+        T.eq(res.ok, false)
+        T.eq(res.diagnostics[1].code, "FUNCTION_ARITY_MISMATCH")
+
+        res = check("local n = 1\nlocal y = n()\n")
+        T.eq(res.ok, false)
+        T.eq(res.diagnostics[1].code, "CANNOT_CALL")
+    end)
+
     T.it("rejects multi-binding shapes instead of guessing Lua adjustment", function()
         local res = check("local a, b = 1, 2\n")
         T.eq(res.ok, false)
