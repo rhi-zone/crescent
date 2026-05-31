@@ -152,9 +152,20 @@ T.describe("v6 source M1", function()
         T.eq(res.ok, false)
         T.eq(res.diagnostics[1].code, "FUNCTION_ARITY_MISMATCH")
 
-        res = check("--: (number) -> number\nlocal bad = function(x) local y = x return y end\n")
+        res = check("--: (number) -> number\nlocal bad = function(x) local y = x end\n")
         T.eq(res.ok, false)
         T.eq(res.diagnostics[1].code, "FEATURE_NOT_ADMITTED")
+    end)
+
+    T.it("checks straight-line function bodies before final return", function()
+        local res = check("--: (number) -> number\nlocal f = function(x) local y = x y = 2 return y end\n")
+        T.eq(res.ok, true)
+        T.eq(res.env.bindings.f.tag, "arrow")
+
+        res = check("--: (number) -> number\nlocal f = function(x)\nlocal y --: string\nreturn y\nend\n")
+        T.eq(res.ok, false)
+        T.eq(res.env.bindings.f, nil)
+        T.eq(res.diagnostics[1].code, "TYPE_MISMATCH")
     end)
 
     T.it("checks fixed monomorphic calls into known arrows", function()

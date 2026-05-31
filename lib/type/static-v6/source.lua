@@ -257,14 +257,14 @@ local function check_func_expr_against(ctx, nid, arrow, owner)
     end
     local bs = n.data[2]
     local bl = n.data[3]
-    if bl ~= 1 then
-        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 admits only single-return function bodies for now", n)
+    if bl < 1 then
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function body must end with an explicit return for now", n)
         return true
     end
-    local ret_id = ctx.lists:get(bs)
+    local ret_id = ctx.lists:get(bs + bl - 1)
     local ret = ctx.nodes:get(ret_id)
     if ret.kind ~= NODE_RETURN_STMT then
-        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function body must be a single return statement for now", ret)
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function body must end with a return statement for now", ret)
         return true
     end
 
@@ -286,6 +286,9 @@ local function check_func_expr_against(ctx, nid, arrow, owner)
             line = n.line,
             column = n.col,
         })
+    end
+    for i = 0, bl - 2 do
+        check_stmt(nested, ctx.lists:get(bs + i))
     end
     check_return_stmt(nested, ret, arrow.returns)
     merge_child_effects(ctx.env, nested.env)
