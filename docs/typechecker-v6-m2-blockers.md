@@ -144,9 +144,10 @@ M2 implementation may begin only after:
 Initial M2 implementation scope:
 
 - annotated function literals assigned to locals;
+- annotated local function declarations with identifier names;
 - exact fixed parameter arity;
 - straight-line function bodies ending in an explicit `return`;
 - fixed-arity monomorphic calls into known arrow values;
 - expression-statement calls;
-- no overloads, varargs, open packs, local-function declarations, global
+- no overloads, varargs, open packs, global function declarations, field/method
   function declarations, methods, or return-path analysis yet.

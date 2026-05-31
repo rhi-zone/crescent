@@ -51,6 +51,7 @@ local NODE_FUNC_EXPR = defs.NODE_FUNC_EXPR
 local NODE_RETURN_STMT = defs.NODE_RETURN_STMT
 local NODE_CALL_EXPR = defs.NODE_CALL_EXPR
 local NODE_EXPR_STMT = defs.NODE_EXPR_STMT
+local NODE_FUNC_DECL = defs.NODE_FUNC_DECL
 
 --: (Ctx, string, string, ASTNode | nil) -> CheckDiag
 local function add_error(ctx, code, message, node)
@@ -236,30 +237,24 @@ local function check_return_stmt(ctx, n, returns)
     end
 end
 
---: (Ctx, integer, ArrowType, ASTNode) -> boolean
-local function check_func_expr_against(ctx, nid, arrow, owner)
-    local n = ctx.nodes:get(nid)
-    if n.kind ~= NODE_FUNC_EXPR then return false end
-    if n.flags % (defs.FLAG_VARARG * 2) >= defs.FLAG_VARARG then
-        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function literals do not admit varargs yet", n)
+--: (Ctx, integer, integer, integer, integer, integer, ArrowType, ASTNode, string | nil) -> boolean
+local function check_func_body_against(ctx, ps, pl, bs, bl, flags, arrow, owner, self_name)
+    if flags % (defs.FLAG_VARARG * 2) >= defs.FLAG_VARARG then
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function literals do not admit varargs yet", owner)
         return true
     end
     local params = arrow.params
     if params.rest ~= nil then
-        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function literals do not admit open parameter packs yet", n)
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function literals do not admit open parameter packs yet", owner)
         return true
     end
-    local ps = n.data[0]
-    local pl = n.data[1]
     if pl ~= #params.items then
         add_error(ctx, "FUNCTION_ARITY_MISMATCH",
             "function parameter arity " .. tostring(pl) .. " does not match annotation arity " .. tostring(#params.items), owner)
         return true
     end
-    local bs = n.data[2]
-    local bl = n.data[3]
     if bl < 1 then
-        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function body must end with an explicit return for now", n)
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function body must end with an explicit return for now", owner)
         return true
     end
     local ret_id = ctx.lists:get(bs + bl - 1)
@@ -280,12 +275,19 @@ local function check_func_expr_against(ctx, nid, arrow, owner)
         env = child_env(ctx.env),
         diagnostics = ctx.diagnostics,
     }
+    if self_name ~= nil then
+        env_mod.bind(nested.env, self_name, arrow, {
+            file = ctx.filename,
+            line = owner.line,
+            column = owner.col,
+        })
+    end
     for i = 1, pl do
         local name = intern_str(ctx, ctx.lists:get(ps + i - 1))
         env_mod.bind(nested.env, name, params.items[i], {
             file = ctx.filename,
-            line = n.line,
-            column = n.col,
+            line = owner.line,
+            column = owner.col,
         })
     end
     for i = 0, bl - 2 do
@@ -294,6 +296,13 @@ local function check_func_expr_against(ctx, nid, arrow, owner)
     check_return_stmt(nested, ret, arrow.returns)
     merge_child_effects(ctx.env, nested.env)
     return true
+end
+
+--: (Ctx, integer, ArrowType, ASTNode) -> boolean
+local function check_func_expr_against(ctx, nid, arrow, owner)
+    local n = ctx.nodes:get(nid)
+    if n.kind ~= NODE_FUNC_EXPR then return false end
+    return check_func_body_against(ctx, n.data[0], n.data[1], n.data[2], n.data[3], n.flags, arrow, n, nil)
 end
 
 --: (Ctx, integer) -> StaticType
@@ -434,6 +443,34 @@ local function check_assign(ctx, n)
     if not ok and err then ctx.diagnostics[#ctx.diagnostics + 1] = err end
 end
 
+--: (Ctx, ASTNode) -> nil
+local function check_func_decl(ctx, n)
+    if n.flags % (defs.FLAG_LOCAL * 2) < defs.FLAG_LOCAL then
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 admits only local function declarations for now", n)
+        return
+    end
+    local name_node = ctx.nodes:get(n.data[0])
+    if name_node.kind ~= NODE_IDENTIFIER then
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 local function name must be an identifier", name_node)
+        return
+    end
+    local name = intern_str(ctx, name_node.data[0])
+    local ann_ty = parse_type_ann(ctx, n.line, n)
+    if not ann_ty then
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 local function declarations require an arrow annotation", n)
+        return
+    end
+    if ann_ty.tag ~= "arrow" then
+        add_error(ctx, "TYPE_MISMATCH", "local function annotation must be an arrow type", n)
+        return
+    end
+    local diag_start = #ctx.diagnostics
+    check_func_body_against(ctx, n.data[1], n.data[2], n.data[3], n.data[4], n.flags, ann_ty, n, name)
+    if #ctx.diagnostics == diag_start then
+        env_mod.bind(ctx.env, name, ann_ty, { file = ctx.filename, line = n.line, column = n.col })
+    end
+end
+
 --: (Ctx, integer) -> nil
 check_stmt = function(ctx, nid)
     local n = ctx.nodes:get(nid)
@@ -441,6 +478,7 @@ check_stmt = function(ctx, nid)
     consume_decl_ann(ctx, n.line)
     if kind == NODE_LOCAL_STMT then check_local(ctx, n); return end
     if kind == NODE_ASSIGN_STMT then check_assign(ctx, n); return end
+    if kind == NODE_FUNC_DECL then check_func_decl(ctx, n); return end
     if kind == NODE_EXPR_STMT then check_expr(ctx, n.data[0]); return end
     add_error(ctx, "FEATURE_NOT_ADMITTED", "statement node not admitted in v6 M1: " .. tostring(kind), n)
 end
