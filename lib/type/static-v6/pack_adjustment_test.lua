@@ -1,8 +1,10 @@
 -- lib/type/static-v6/pack_adjustment_test.lua
 -- Fixtures for Lua pack-adjustment movement sites.
 --
--- M1 does not implement calls/returns/multi-bindings. These tests pin the
--- movement-site cases so later M2 work cannot silently guess Lua adjustment.
+-- These tests pin movement-site cases so M2 work cannot silently guess Lua
+-- adjustment. Some local-binding cases are now implemented; call/return cases
+-- still fail before adjustment because their surrounding forms are unsupported
+-- or their callees are undeclared.
 
 if not package.path:find("./?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
@@ -12,7 +14,7 @@ local T = require("lib.test.assert")
 
 local source = require("lib.type.static-v6.source")
 
---:: PackAdjustmentCase = { name: string, src: string, first_code: string, final: string }
+--:: PackAdjustmentCase = { name: string, src: string, first_code: string | nil, final: string }
 
 local cases = {
     {
@@ -24,13 +26,13 @@ local cases = {
     {
         name = "multi-local expands final sole call",
         src = "local a, b = f()\n",
-        first_code = "FEATURE_NOT_ADMITTED",
+        first_code = "UNDECLARED_BINDING",
         final = "local a, b = f() expands f because it is the only final RHS",
     },
     {
         name = "multi-local adjusts non-final call and expands final call",
         src = "local a, b = f(), g()\n",
-        first_code = "FEATURE_NOT_ADMITTED",
+        first_code = "UNDECLARED_BINDING",
         final = "local a, b = f(), g() adjusts f to one result and expands g",
     },
     {
@@ -54,13 +56,13 @@ local cases = {
     {
         name = "missing values pad at movement sites only",
         src = "local a, b = 1\n",
-        first_code = "FEATURE_NOT_ADMITTED",
+        first_code = nil,
         final = "missing values nil-pad only at Lua movement sites that pad",
     },
     {
         name = "explicit nil positions remain explicit",
         src = "local a, b = nil, f()\n",
-        first_code = "FEATURE_NOT_ADMITTED",
+        first_code = "UNDECLARED_BINDING",
         final = "explicit nil positions in packs must not collapse",
     },
 }
@@ -69,8 +71,12 @@ T.describe("v6 pack adjustment fixtures", function()
     for _, case in ipairs(cases) do
         T.it(case.name, function()
             local res = source.check_string(case.src, "pack_adjustment_test.lua")
-            T.eq(res.ok, false)
-            T.eq(res.diagnostics[1].code, case.first_code)
+            if case.first_code == nil then
+                T.eq(res.ok, true)
+            else
+                T.eq(res.ok, false)
+                T.eq(res.diagnostics[1].code, case.first_code)
+            end
             T.ok(case.final)
         end)
     end

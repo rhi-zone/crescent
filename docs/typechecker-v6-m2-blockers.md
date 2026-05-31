@@ -6,7 +6,7 @@ or function body checking until these are pinned.
 
 ## Lua Pack Adjustment
 
-Status: fixture-pinned, implementation blocking.
+Status: implemented for local bindings; broader movement sites still blocking.
 
 The pack constructor is structural only. Lua adjustment happens only at movement
 sites. M2 must pin the movement-site matrix before implementing calls:
@@ -23,8 +23,9 @@ sites. M2 must pin the movement-site matrix before implementing calls:
 Fixture status:
 
 - A `pack_adjustment_test.lua` fixture file with these cases as expected
-  behavior now exists under `lib/type/static-v6/`. M1 still marks the cases
-  unsupported instead of guessing adjustment.
+  behavior now exists under `lib/type/static-v6/`. Local binding movement is
+  implemented for fixed packs; calls, returns, and assignments outside locals
+  remain narrower.
 
 ## Union-Right And Overload Matching
 
@@ -147,6 +148,7 @@ Initial M2 implementation scope:
 - annotated local function declarations with identifier names;
 - intersection-of-arrow overload annotations checked branch-by-branch;
 - fixed multi-return packs in arrow annotations and function returns;
+- Lua local-binding pack adjustment for fixed packs;
 - exact fixed parameter arity;
 - straight-line function bodies ending in an explicit `return`;
 - fixed-arity monomorphic calls into known arrow values;

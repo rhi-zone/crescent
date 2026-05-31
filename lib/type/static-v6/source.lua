@@ -155,6 +155,11 @@ end
 local check_expr
 local check_stmt
 
+--: ({ [integer]: StaticType }, StaticType) -> nil
+local function push_type(out, typ)
+    out[#out + 1] = typ
+end
+
 --: (StaticType, { [integer]: ArrowType }) -> boolean
 local function collect_arrow_branches(typ, out)
     if typ.tag == "arrow" then
@@ -170,8 +175,8 @@ local function collect_arrow_branches(typ, out)
     return false
 end
 
---: (Ctx, ASTNode, ArrowType, { [integer]: StaticType }, boolean) -> StaticType | nil
-local function check_arrow_call(ctx, n, callee, args, emit_errors)
+--: (Ctx, ASTNode, ArrowType, { [integer]: StaticType }, boolean) -> { [integer]: StaticType } | nil
+local function check_arrow_call_pack(ctx, n, callee, args, emit_errors)
     local params = callee.params
     local returns = callee.returns
     if params == nil or returns == nil then
@@ -187,10 +192,6 @@ local function check_arrow_call(ctx, n, callee, args, emit_errors)
             add_error(ctx, "FUNCTION_ARITY_MISMATCH",
                 "call arity " .. tostring(#args) .. " does not match parameter arity " .. tostring(#params.items), n)
         end
-        return nil
-    end
-    if #returns.items ~= 1 then
-        if emit_errors then add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 expression calls require exactly one return for now", n) end
         return nil
     end
     for i = 1, #args do
@@ -210,7 +211,7 @@ local function check_arrow_call(ctx, n, callee, args, emit_errors)
             return nil
         end
     end
-    return returns.items[1]
+    return returns.items
 end
 
 --: (Ctx, ASTNode, StaticType, integer, integer) -> StaticType
@@ -221,7 +222,13 @@ local function check_call_against_arrow(ctx, n, callee, arg_start, arg_len)
         args[#args + 1] = check_expr(ctx, ctx.lists:get(arg_start + i - 1))
     end
     if callee.tag == "arrow" then
-        return check_arrow_call(ctx, n, callee, args, true) or types.unknown()
+        local returns = check_arrow_call_pack(ctx, n, callee, args, true)
+        if returns == nil then return types.unknown() end
+        if #returns ~= 1 then
+            add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 expression calls require exactly one return for now", n)
+            return types.unknown()
+        end
+        return returns[1]
     end
     local branches = {} --: { [integer]: ArrowType }
     if not collect_arrow_branches(callee, branches) then
@@ -230,8 +237,14 @@ local function check_call_against_arrow(ctx, n, callee, arg_start, arg_len)
     end
     local returns = {} --: { [integer]: StaticType }
     for _, branch in ipairs(branches) do
-        local ret = check_arrow_call(ctx, n, branch, args, false)
-        if ret ~= nil then returns[#returns + 1] = ret end
+        local branch_returns = check_arrow_call_pack(ctx, n, branch, args, false)
+        if branch_returns ~= nil then
+            if #branch_returns ~= 1 then
+                add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 overloaded expression calls require one return per matching branch", n)
+                return types.unknown()
+            end
+            returns[#returns + 1] = branch_returns[1]
+        end
     end
     if #returns == 0 then
         add_error(ctx, "NO_MATCHING_OVERLOAD", "no overload branch accepts argument pack", n)
@@ -239,6 +252,57 @@ local function check_call_against_arrow(ctx, n, callee, arg_start, arg_len)
     end
     if #returns == 1 then return returns[1] end
     return types.union(returns)
+end
+
+--: (Ctx, ASTNode) -> { [integer]: StaticType } | nil
+local function check_final_call_pack(ctx, n)
+    if n.kind ~= NODE_CALL_EXPR then return nil end
+    local callee = check_expr(ctx, n.data[0])
+    if callee.tag == "arrow" then
+        local args = {} --: { [integer]: StaticType }
+        for i = 1, n.data[2] do
+            push_type(args, check_expr(ctx, ctx.lists:get(n.data[1] + i - 1)))
+        end
+        return check_arrow_call_pack(ctx, n, callee, args, true) or { types.unknown() }
+    else
+        add_error(ctx, "CANNOT_CALL", "cannot call non-function type " .. types.tostring(callee), n)
+        return { types.unknown() }
+    end
+end
+
+--: (Ctx, integer, integer, integer) -> { [integer]: StaticType }
+local function adjust_local_rhs(ctx, expr_start, expr_len, target_len)
+    local values = {} --: { [integer]: StaticType }
+    if expr_len == 0 then
+        while #values < target_len do push_type(values, types.atom("nil")) end
+        return values
+    end
+    for i = 1, expr_len do
+        local expr_id = ctx.lists:get(expr_start + i - 1)
+        local expr = ctx.nodes:get(expr_id)
+        if i == expr_len then
+            local pack = check_final_call_pack(ctx, expr)
+            if pack ~= nil then
+                for _, item in ipairs(pack) do push_type(values, item) end
+            else
+                local value = check_expr(ctx, expr_id)
+                push_type(values, value)
+            end
+        else
+            local pack = check_final_call_pack(ctx, expr)
+            if pack ~= nil then
+                push_type(values, pack[1] or types.atom("nil"))
+            else
+                local value = check_expr(ctx, expr_id)
+                push_type(values, value)
+            end
+        end
+    end
+    local adjusted = {} --: { [integer]: StaticType }
+    for i = 1, target_len do
+        push_type(adjusted, values[i] or types.atom("nil"))
+    end
+    return adjusted
 end
 
 --: (Env) -> Env
@@ -428,8 +492,20 @@ local function check_local(ctx, n)
     local nl = n.data[1]
     local es = n.data[2]
     local el = n.data[3]
-    if nl ~= 1 or el > 1 then
-        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M1 admits only 1:1 local bindings", n)
+    if nl < 1 then
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M1 local binding has no names", n)
+        return
+    end
+    if nl > 1 then
+        local values = adjust_local_rhs(ctx, es, el, nl)
+        for i = 1, nl do
+            local name = intern_str(ctx, ctx.lists:get(ns + i - 1))
+            env_mod.bind(ctx.env, name, values[i], { file = ctx.filename, line = n.line, column = n.col })
+        end
+        return
+    end
+    if el > 1 then
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M1 admits only 1:1 annotated or single-name local bindings", n)
         return
     end
     local ann_ty = parse_type_ann(ctx, n.line, n)
