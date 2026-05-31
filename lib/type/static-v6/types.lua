@@ -11,7 +11,8 @@ local M = {}
 --:: UnionType = { tag: "union", members: { [integer]: StaticType } }
 --:: IntersectionType = { tag: "intersection", members: { [integer]: StaticType } }
 --:: ComplementType = { tag: "complement", of: StaticType }
---:: ArrowType = { tag: "arrow", params: unknown, returns: unknown, effects: unknown }
+--:: Pack = { items: { [integer]: StaticType }, rest: StaticType | nil }
+--:: ArrowType = { tag: "arrow", params: Pack, returns: Pack, effects: unknown }
 --:: RecordType = { tag: "record" }
 --:: NominalType = { tag: "nominal", name: string }
 --:: VarType = { tag: "var", id: integer }
@@ -76,14 +77,18 @@ function M.complement(of)
     return { tag = "complement", of = of }
 end
 
---: (unknown, unknown, unknown | nil) -> StaticType
+--: (Pack, Pack, unknown | nil) -> StaticType
 function M.arrow(params, returns, effects)
     return { tag = "arrow", params = params, returns = returns, effects = effects }
 end
 
---: ({ [integer]: unknown }, unknown | nil) -> unknown
-function M.pack(items, rest)
-    return { items = items or {}, rest = rest }
+--: (Pack) -> string
+local function pack_key(pack)
+    local parts = {}
+    for i, item in ipairs(pack.items) do parts[i] = M.key(item) end
+    local rest = pack.rest
+    if rest then parts[#parts + 1] = "..." .. M.key(rest) end
+    return "pack(" .. table.concat(parts, ",") .. ")"
 end
 
 --: (StaticType) -> string | nil
@@ -114,7 +119,7 @@ function M.key(t)
         return t.tag .. "(" .. table.concat(parts, ",") .. ")"
     end
     if t.tag == "arrow" then
-        return "arrow"
+        return "arrow(" .. pack_key(t.params) .. ")->" .. pack_key(t.returns)
     end
     if t.tag == "record" then
         return "record"
