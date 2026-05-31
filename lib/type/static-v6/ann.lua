@@ -183,6 +183,7 @@ end
 
 local parse_type
 local parse_union
+local parse_return_pack
 
 --: (StaticType) -> Pack
 local function result_pack(t)
@@ -220,8 +221,9 @@ local function parse_primary(s)
             expect_char(s, ")")
         end
         if opt_text(s, "->") then
-            local ret = parse_type(s)
-            return types.arrow(packs.pack(items), result_pack(ret))
+            local returns = parse_return_pack(s)
+            if returns == nil then scan_error(s, "missing return pack") end
+            return types.arrow(packs.pack(items), returns)
         end
         if #items == 1 then return items[1] end
         scan_error(s, "tuple types are not admitted in v6 M1 annotations")
@@ -259,6 +261,22 @@ parse_union = function(s)
     end
     if #out == 1 then return out[1] end
     return types.union(out)
+end
+
+--: (Scanner) -> Pack
+parse_return_pack = function(s)
+    if opt_char(s, "(") then
+        local items = {} --: { [integer]: StaticType }
+        if not opt_char(s, ")") then
+            items[#items + 1] = parse_type(s)
+            while opt_char(s, ",") do
+                items[#items + 1] = parse_type(s)
+            end
+            expect_char(s, ")")
+        end
+        return packs.pack(items)
+    end
+    return result_pack(parse_type(s))
 end
 
 --: (Scanner) -> StaticType

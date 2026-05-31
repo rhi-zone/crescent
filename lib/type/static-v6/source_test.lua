@@ -252,6 +252,16 @@ T.describe("v6 source M1", function()
         T.eq(res.diagnostics[1].code, "NO_MATCHING_OVERLOAD")
     end)
 
+    T.it("checks multi-return function annotations", function()
+        local res = check("--: () -> (number, string)\nlocal function pair() return 1, 'x' end\n")
+        T.eq(res.ok, true)
+        T.eq(#res.env.bindings.pair.returns.items, 2)
+
+        res = check("--: () -> (number, string)\nlocal function bad() return 1 end\n")
+        T.eq(res.ok, false)
+        T.eq(res.diagnostics[1].code, "FUNCTION_ARITY_MISMATCH")
+    end)
+
     T.it("rejects multi-binding shapes instead of guessing Lua adjustment", function()
         local res = check("local a, b = 1, 2\n")
         T.eq(res.ok, false)

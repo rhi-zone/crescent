@@ -146,6 +146,7 @@ Initial M2 implementation scope:
 - annotated function literals assigned to locals;
 - annotated local function declarations with identifier names;
 - intersection-of-arrow overload annotations checked branch-by-branch;
+- fixed multi-return packs in arrow annotations and function returns;
 - exact fixed parameter arity;
 - straight-line function bodies ending in an explicit `return`;
 - fixed-arity monomorphic calls into known arrow values;
