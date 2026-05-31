@@ -47,6 +47,8 @@ local NODE_ASSIGN_STMT = defs.NODE_ASSIGN_STMT
 local NODE_LOCAL_STMT = defs.NODE_LOCAL_STMT
 local NODE_CHUNK = defs.NODE_CHUNK
 local NODE_CAST_EXPR = defs.NODE_CAST_EXPR
+local NODE_FUNC_EXPR = defs.NODE_FUNC_EXPR
+local NODE_RETURN_STMT = defs.NODE_RETURN_STMT
 
 --: (Ctx, string, string, ASTNode | nil) -> CheckDiag
 local function add_error(ctx, code, message, node)
@@ -149,6 +151,106 @@ end
 local check_expr
 local check_stmt
 
+--: (Env) -> Env
+local function child_env(parent)
+    local child = env_mod.new()
+    for name, typ in pairs(parent.bindings) do
+        child.bindings[name] = typ
+    end
+    return child
+end
+
+--: (Env, Env) -> nil
+local function merge_child_effects(parent, child)
+    for _, boundary in ipairs(child.unsafe_boundaries) do
+        parent.unsafe_boundaries[#parent.unsafe_boundaries + 1] = boundary
+    end
+end
+
+--: (Ctx, ASTNode, Pack) -> nil
+local function check_return_stmt(ctx, n, returns)
+    local rs = n.data[0]
+    local rl = n.data[1]
+    local want = returns.items
+    if returns.rest ~= nil then
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function returns do not admit open return packs yet", n)
+        return
+    end
+    if rl ~= #want then
+        add_error(ctx, "FUNCTION_ARITY_MISMATCH",
+            "return arity " .. tostring(rl) .. " does not match annotation arity " .. tostring(#want), n)
+        return
+    end
+    for i = 1, rl do
+        local producer = check_expr(ctx, ctx.lists:get(rs + i - 1))
+        local consumer = want[i]
+        local obligation = env_mod.require_subtype(ctx.env, producer, consumer, "return", "function return", {
+            file = ctx.filename,
+            line = n.line,
+            column = n.col,
+        })
+        local ok, err = env_mod.discharge_obligation(obligation)
+        if not ok and err then ctx.diagnostics[#ctx.diagnostics + 1] = err end
+    end
+end
+
+--: (Ctx, integer, ArrowType, ASTNode) -> boolean
+local function check_func_expr_against(ctx, nid, arrow, owner)
+    local n = ctx.nodes:get(nid)
+    if n.kind ~= NODE_FUNC_EXPR then return false end
+    if n.flags % (defs.FLAG_VARARG * 2) >= defs.FLAG_VARARG then
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function literals do not admit varargs yet", n)
+        return true
+    end
+    local params = arrow.params
+    if params.rest ~= nil then
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function literals do not admit open parameter packs yet", n)
+        return true
+    end
+    local ps = n.data[0]
+    local pl = n.data[1]
+    if pl ~= #params.items then
+        add_error(ctx, "FUNCTION_ARITY_MISMATCH",
+            "function parameter arity " .. tostring(pl) .. " does not match annotation arity " .. tostring(#params.items), owner)
+        return true
+    end
+    local bs = n.data[2]
+    local bl = n.data[3]
+    if bl ~= 1 then
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 admits only single-return function bodies for now", n)
+        return true
+    end
+    local ret_id = ctx.lists:get(bs)
+    local ret = ctx.nodes:get(ret_id)
+    if ret.kind ~= NODE_RETURN_STMT then
+        add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function body must be a single return statement for now", ret)
+        return true
+    end
+
+    local nested = {
+        filename = ctx.filename,
+        nodes = ctx.nodes,
+        lists = ctx.lists,
+        pool = ctx.pool,
+        annotations = ctx.annotations,
+        used_annotations = ctx.used_annotations,
+        ann_state = ctx.ann_state,
+        env = child_env(ctx.env),
+        diagnostics = ctx.diagnostics,
+    }
+    for i = 1, pl do
+        local name = intern_str(ctx, ctx.lists:get(ps + i - 1))
+        env_mod.bind(nested.env, name, params.items[i], {
+            file = ctx.filename,
+            line = n.line,
+            column = n.col,
+        })
+    end
+    check_return_stmt(nested, ret, arrow.returns)
+    merge_child_effects(ctx.env, nested.env)
+    return true
+end
+
 --: (Ctx, integer) -> StaticType
 check_expr = function(ctx, nid)
     local n = ctx.nodes:get(nid)
@@ -211,10 +313,20 @@ local function check_local(ctx, n)
         add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M1 admits only 1:1 local bindings", n)
         return
     end
+    local ann_ty = parse_type_ann(ctx, n.line, n)
     local name = intern_str(ctx, ctx.lists:get(ns))
+    if ann_ty and ann_ty.tag == "arrow" and el == 1 then
+        local expr_id = ctx.lists:get(es)
+        local diag_start = #ctx.diagnostics
+        if check_func_expr_against(ctx, expr_id, ann_ty, n) then
+            if #ctx.diagnostics == diag_start then
+                env_mod.bind(ctx.env, name, ann_ty, { file = ctx.filename, line = n.line, column = n.col })
+            end
+            return
+        end
+    end
     local producer = types.atom("nil") --: StaticType
     if el == 1 then producer = check_expr(ctx, ctx.lists:get(es)) end
-    local ann_ty = parse_type_ann(ctx, n.line, n)
     if ann_ty then
         local consumer = ann_ty
         local ok, _fact, err = env_mod.bind_checked(ctx.env, name, producer, consumer,

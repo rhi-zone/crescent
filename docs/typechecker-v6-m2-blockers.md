@@ -140,3 +140,11 @@ M2 implementation may begin only after:
 - union-right call behavior is fixture-pinned;
 - slot-claim assignment policy is accepted for functions;
 - failed source checks are not used as module/export facts.
+
+Initial M2 implementation scope:
+
+- annotated function literals assigned to locals;
+- exact fixed parameter arity;
+- single explicit `return` body;
+- no calls, overloads, varargs, open packs, local-function declarations, global
+  function declarations, or return-path analysis yet.
