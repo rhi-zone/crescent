@@ -39,7 +39,7 @@ local M = {}
 --:: AnnState = {}
 --:: Env = { bindings: { [string]: StaticType }, binding_facts: { [integer]: BindingFact }, obligations: { [integer]: Obligation }, unsafe_boundaries: { [integer]: UnsafeBoundary } }
 --:: Ctx = { filename: string, nodes: ASTNodeArena, lists: ListPool, pool: InternPool, annotations: { [integer]: RawAnn } | nil, used_annotations: { [integer]: boolean }, ann_state: AnnState, env: Env, diagnostics: { [integer]: CheckDiag } }
---:: Result = { ok: boolean, facts_valid: boolean, env: Env, diagnostics: { [integer]: CheckDiag } }
+--:: Result = { ok: boolean, sound: boolean, facts_valid: boolean, env: Env, diagnostics: { [integer]: CheckDiag } }
 
 local NODE_LITERAL = defs.NODE_LITERAL
 local NODE_IDENTIFIER = defs.NODE_IDENTIFIER
@@ -340,6 +340,7 @@ function M.check_string(source, filename)
     if not parsed_ok then
         return {
             ok = false,
+            sound = false,
             facts_valid = false,
             env = env_mod.new(),
             diagnostics = {
@@ -373,7 +374,9 @@ function M.check_string(source, filename)
     end
     check_unused_annotations(ctx)
     local ok_ = #diagnostics == 0
-    return { ok = ok_, facts_valid = ok_, env = env, diagnostics = diagnostics }
+    local sound = false
+    if ok_ and #env.unsafe_boundaries == 0 then sound = true end
+    return { ok = ok_, sound = sound, facts_valid = sound, env = env, diagnostics = diagnostics }
 end
 
 return M

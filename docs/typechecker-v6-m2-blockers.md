@@ -97,19 +97,22 @@ Open before module/export work:
 
 ## Unsafe Boundary Severity
 
-Status: blocking before CLI/default mode.
+Status: pinned for v6 CLI; broader modes still open.
 
 Current policy:
 
 - Force casts record `unsafe_boundaries`.
 - Force casts do not make `ok` false.
 - Normal subtype use of `any` still fails with `UNSAFE_ANY_BOUNDARY`.
+- `sound` and `facts_valid` are false when unsafe boundaries exist.
+- The v6 CLI is strict-sound by default: unsafe boundaries are reported as
+  `UNSAFE_BOUNDARY` and cause exit code 1.
 
 Open before CLI:
 
-- Whether unsafe boundaries are warnings, errors, or audit events per mode.
-- Whether `ok` should mean "sound with no unsafe boundaries" or "no hard
-  failures".
+- Whether future non-strict or audit-only modes should exist.
+- Whether `ok` should remain "no hard failures" after v6 becomes the default, or
+  whether default-mode naming should expose only `sound`.
 
 ## Unused Valid Annotations
 

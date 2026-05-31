@@ -57,6 +57,13 @@ T.describe("v6 CLI", function()
         T.eq(caps._out[1], "orphan.lua:1:1: ANNOTATION_NOT_ATTACHED: type annotation is not attached to an admitted source form\n")
     end)
 
+    T.it("fails strict-sound checks on unsafe boundaries", function()
+        local caps = caps_for({ ["unsafe.lua"] = "local x = --[[:! string]] 1\n" })
+        local code = cli.run({ "unsafe.lua" }, caps)
+        T.eq(code, 1)
+        T.eq(caps._out[1], "unsafe.lua:1:27: UNSAFE_BOUNDARY: unsafe boundary admitted by force cast\n")
+    end)
+
     T.it("reports read errors as diagnostics", function()
         local caps = caps_for({})
         local code = cli.run({ "missing.lua" }, caps)

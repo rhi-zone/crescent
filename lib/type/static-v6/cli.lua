@@ -16,6 +16,7 @@ local M = {}
 --:: V6CliOpts = { files: string[] }
 --:: Span = { file: string | nil, line: integer | nil, column: integer | nil, ... }
 --:: CheckDiag = { code: string, message: string, details: unknown, ... }
+--:: UnsafeBoundary = { kind: "unsafe_boundary", type: unknown, site: string, reason: string, span: Span | nil, ... }
 
 --: (string[]) -> (V6CliOpts | nil, string | nil)
 local function parse_argv(argv)
@@ -68,6 +69,15 @@ local function format_diagnostic(path, d)
     return where .. ": " .. tostring(d.code) .. ": " .. tostring(d.message)
 end
 
+--: (string, UnsafeBoundary) -> CheckDiag
+local function unsafe_boundary_diagnostic(path, boundary)
+    return {
+        code = "UNSAFE_BOUNDARY",
+        message = "unsafe boundary admitted by " .. tostring(boundary.site or "unknown site"),
+        details = { span = boundary.span or { file = path }, boundary = boundary },
+    }
+end
+
 --: (string, V6CliCaps) -> { diagnostics: CheckDiag[] }
 local function check_one(path, caps)
     local src, ferr = caps.read_file(path)
@@ -83,7 +93,14 @@ local function check_one(path, caps)
         }
     end
     local result = source_mod.check_string(src, path)
-    return { diagnostics = result.diagnostics }
+    local diagnostics = {} --: { [integer]: CheckDiag }
+    for _, d in ipairs(result.diagnostics) do
+        diagnostics[#diagnostics + 1] = d
+    end
+    for _, boundary in ipairs(result.env.unsafe_boundaries) do
+        diagnostics[#diagnostics + 1] = unsafe_boundary_diagnostic(path, boundary)
+    end
+    return { diagnostics = diagnostics }
 end
 
 --: (string[], V6CliCaps) -> integer
