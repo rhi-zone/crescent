@@ -138,7 +138,7 @@ Movement sites are the only places where domains convert.
 | local binding | `PackResult` | adjusts to the declared or inferred local list |
 | assignment | `PackResult` | adjusts to target list arity, then checks each target |
 | return | `PackResult` | checks against current function return `Pack` |
-| call arguments | argument expression list | builds a `Pack` for the callee params |
+| call arguments | argument expression list | adjusts to callee parameter arity, discarding surplus values and padding missing fixed parameters with `nil` |
 | overload call | `Type` callee + arg `Pack` | returns `PackResult` over matching branch returns |
 | annotation/cast | `Type` or `PackResult` | emits proof obligation or unsafe boundary |
 

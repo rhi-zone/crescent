@@ -158,6 +158,7 @@ end
 
 local check_expr
 local check_stmt
+local adjust_expr_list
 
 --: ({ [integer]: StaticType }, StaticType) -> nil
 local function push_type(out, typ)
@@ -226,15 +227,18 @@ end
 --: (Ctx, ASTNode, StaticType, integer, integer) -> StaticType
 local function check_call_against_arrow(ctx, n, callee, arg_start, arg_len)
     if callee.tag == "unknown" then return types.unknown() end
-    local args = {} --: { [integer]: StaticType }
-    for i = 1, arg_len do
-        args[#args + 1] = check_expr(ctx, ctx.lists:get(arg_start + i - 1))
-    end
     if callee.tag == "arrow" then
+        local params = callee.params
+        if params == nil then
+            add_error(ctx, "INTERNAL_TYPECHECKER_ERROR", "arrow type missing parameter pack", n)
+            return types.unknown()
+        end
+        local args = adjust_expr_list(ctx, arg_start, arg_len, #params.items)
         local returns = check_arrow_call_pack(ctx, n, callee, args, true)
         if returns == nil then return types.unknown() end
         return result_to_scalar(pack_result.single(returns))
     end
+    local args = adjust_expr_list(ctx, arg_start, arg_len, arg_len)
     local branches = {} --: { [integer]: ArrowType }
     if not collect_arrow_branches(callee, branches) then
         add_error(ctx, "CANNOT_CALL", "cannot call non-function type " .. types.tostring(callee), n)
@@ -258,14 +262,17 @@ end
 local function check_final_call_pack(ctx, n)
     if n.kind ~= NODE_CALL_EXPR then return nil end
     local callee = check_expr(ctx, n.data[0])
-    local args = {} --: { [integer]: StaticType }
-    for i = 1, n.data[2] do
-        push_type(args, check_expr(ctx, ctx.lists:get(n.data[1] + i - 1)))
-    end
     if callee.tag == "arrow" then
+        local params = callee.params
+        if params == nil then
+            add_error(ctx, "INTERNAL_TYPECHECKER_ERROR", "arrow type missing parameter pack", n)
+            return pack_result.from_items({ types.unknown() })
+        end
+        local args = adjust_expr_list(ctx, n.data[1], n.data[2], #params.items)
         local pack = check_arrow_call_pack(ctx, n, callee, args, true)
         return pack_result.single(pack or { items = { types.unknown() }, rest = nil })
     end
+    local args = adjust_expr_list(ctx, n.data[1], n.data[2], n.data[2])
     local branches = {} --: { [integer]: ArrowType }
     if not collect_arrow_branches(callee, branches) then
         add_error(ctx, "CANNOT_CALL", "cannot call non-function type " .. types.tostring(callee), n)
@@ -284,7 +291,7 @@ local function check_final_call_pack(ctx, n)
 end
 
 --: (Ctx, integer, integer, integer) -> { [integer]: StaticType }
-local function adjust_local_rhs(ctx, expr_start, expr_len, target_len)
+adjust_expr_list = function(ctx, expr_start, expr_len, target_len)
     local values = {} --: { [integer]: StaticType }
     if expr_len == 0 then
         while #values < target_len do push_type(values, types.atom("nil")) end
@@ -344,7 +351,7 @@ local function check_return_stmt(ctx, n, returns)
         add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 function returns do not admit open return packs yet", n)
         return
     end
-    local producers = adjust_local_rhs(ctx, rs, rl, #want)
+    local producers = adjust_expr_list(ctx, rs, rl, #want)
     for i = 1, #want do
         local producer = producers[i]
         local consumer = want[i]
@@ -507,7 +514,7 @@ local function check_local(ctx, n)
         return
     end
     if nl > 1 then
-        local values = adjust_local_rhs(ctx, es, el, nl)
+        local values = adjust_expr_list(ctx, es, el, nl)
         for i = 1, nl do
             local name = intern_str(ctx, ctx.lists:get(ns + i - 1))
             env_mod.bind(ctx.env, name, values[i], { file = ctx.filename, line = n.line, column = n.col })
@@ -583,7 +590,7 @@ local function check_assign(ctx, n)
         names[#names + 1] = name
         consumers[#consumers + 1] = consumer
     end
-    local producers = adjust_local_rhs(ctx, es, el, tl)
+    local producers = adjust_expr_list(ctx, es, el, tl)
     local ann_ty = nil
     if tl == 1 then ann_ty = parse_type_ann(ctx, n.line, n) end
     if ann_ty then

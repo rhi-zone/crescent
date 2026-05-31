@@ -2,9 +2,9 @@
 -- Fixtures for Lua pack-adjustment movement sites.
 --
 -- These tests pin movement-site cases so M2 work cannot silently guess Lua
--- adjustment. Some local-binding cases are now implemented; call/return cases
--- still fail before adjustment because their surrounding forms are unsupported
--- or their callees are undeclared.
+-- adjustment. Local-binding, assignment, return, and monomorphic call-argument
+-- cases are implemented; parenthesized-call collapse still requires AST support
+-- because the current parser does not preserve grouping.
 
 if not package.path:find("./?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path

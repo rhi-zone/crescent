@@ -193,8 +193,12 @@ T.describe("v6 source M1", function()
 
     T.it("rejects unsupported call shapes instead of guessing", function()
         local res = check("--: (number) -> number\nlocal id = function(x) return x end\nlocal y = id(1, 2)\n")
+        T.eq(res.ok, true)
+        T.eq(res.env.bindings.y.name, "number")
+
+        res = check("--: (number) -> number\nlocal id = function(x) return x end\nlocal y = id()\n")
         T.eq(res.ok, false)
-        T.eq(res.diagnostics[1].code, "FUNCTION_ARITY_MISMATCH")
+        T.eq(res.diagnostics[1].code, "TYPE_MISMATCH")
 
         res = check("local n = 1\nlocal y = n()\n")
         T.eq(res.ok, false)
@@ -206,6 +210,17 @@ T.describe("v6 source M1", function()
         T.eq(res.ok, true)
 
         res = check("--: (number) -> number\nlocal id = function(x) return x end\nid('s')\n")
+        T.eq(res.ok, false)
+        T.eq(res.diagnostics[1].code, "TYPE_MISMATCH")
+        T.eq(res.diagnostics[1].details.obligation_reason, "call argument")
+    end)
+
+    T.it("expands final call arguments at call movement sites", function()
+        local res = check("--: () -> (number, string)\nlocal function pair() return 1, 'x' end\n--: (number, string) -> number\nlocal function take(a, b) return a end\nlocal n = take(pair())\n")
+        T.eq(res.ok, true)
+        T.eq(res.env.bindings.n.name, "number")
+
+        res = check("--: () -> (number, string)\nlocal function pair() return 1, 'x' end\n--: (string, string) -> string\nlocal function take(a, b) return a end\nlocal n = take(pair())\n")
         T.eq(res.ok, false)
         T.eq(res.diagnostics[1].code, "TYPE_MISMATCH")
         T.eq(res.diagnostics[1].details.obligation_reason, "call argument")
