@@ -286,6 +286,16 @@ T.describe("v6 source M1", function()
         T.eq(res.env.bindings.b.base, "number")
     end)
 
+    T.it("adjusts single local call results to one value", function()
+        local res = check("--: () -> (number, string)\nlocal function pair() return 1, 'x' end\nlocal a = pair()\n")
+        T.eq(res.ok, true)
+        T.eq(res.env.bindings.a.name, "number")
+
+        res = check("--: () -> ()\nlocal function none() return end\nlocal a = none()\n")
+        T.eq(res.ok, true)
+        T.eq(res.env.bindings.a.name, "nil")
+    end)
+
     T.it("rejects unsupported annotated multi-binding shapes instead of guessing", function()
         local res = check("local a, b = 1, 2\n")
         T.eq(res.ok, true)

@@ -258,16 +258,42 @@ end
 local function check_final_call_pack(ctx, n)
     if n.kind ~= NODE_CALL_EXPR then return nil end
     local callee = check_expr(ctx, n.data[0])
+    local args = {} --: { [integer]: StaticType }
+    for i = 1, n.data[2] do
+        push_type(args, check_expr(ctx, ctx.lists:get(n.data[1] + i - 1)))
+    end
     if callee.tag == "arrow" then
-        local args = {} --: { [integer]: StaticType }
-        for i = 1, n.data[2] do
-            push_type(args, check_expr(ctx, ctx.lists:get(n.data[1] + i - 1)))
-        end
         return check_arrow_call_pack(ctx, n, callee, args, true) or { types.unknown() }
-    else
+    end
+    local branches = {} --: { [integer]: ArrowType }
+    if not collect_arrow_branches(callee, branches) then
         add_error(ctx, "CANNOT_CALL", "cannot call non-function type " .. types.tostring(callee), n)
         return { types.unknown() }
     end
+    local matches = {} --: { [integer]: { [integer]: StaticType } }
+    for _, branch in ipairs(branches) do
+        local branch_returns = check_arrow_call_pack(ctx, n, branch, args, false)
+        if branch_returns ~= nil then matches[#matches + 1] = branch_returns end
+    end
+    if #matches == 0 then
+        add_error(ctx, "NO_MATCHING_OVERLOAD", "no overload branch accepts argument pack", n)
+        return { types.unknown() }
+    end
+    if #matches == 1 then return matches[1] end
+    local len = #matches[1]
+    for _, pack in ipairs(matches) do
+        if #pack ~= len then
+            add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 overloaded pack calls require matching return arity", n)
+            return { types.unknown() }
+        end
+    end
+    local out = {} --: { [integer]: StaticType }
+    for i = 1, len do
+        local members = {} --: { [integer]: StaticType }
+        for _, pack in ipairs(matches) do push_type(members, pack[i]) end
+        push_type(out, #members == 1 and members[1] or types.union(members))
+    end
+    return out
 end
 
 --: (Ctx, integer, integer, integer) -> { [integer]: StaticType }
@@ -521,7 +547,16 @@ local function check_local(ctx, n)
         end
     end
     local producer = types.atom("nil") --: StaticType
-    if el == 1 then producer = check_expr(ctx, ctx.lists:get(es)) end
+    if el == 1 then
+        local expr_id = ctx.lists:get(es)
+        local expr = ctx.nodes:get(expr_id)
+        local pack = check_final_call_pack(ctx, expr)
+        if pack ~= nil then
+            producer = pack[1] or types.atom("nil")
+        else
+            producer = check_expr(ctx, expr_id)
+        end
+    end
     if ann_ty then
         local consumer = ann_ty
         local ok, _fact, err = env_mod.bind_checked(ctx.env, name, producer, consumer,
