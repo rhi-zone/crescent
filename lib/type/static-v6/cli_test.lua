@@ -50,6 +50,13 @@ T.describe("v6 CLI", function()
         T.eq(caps._out[1], "bad.lua:2:1: TYPE_MISMATCH: \"s\" is not a subtype of number\n")
     end)
 
+    T.it("formats unattached annotations with source location", function()
+        local caps = caps_for({ ["orphan.lua"] = "--: number\n" })
+        local code = cli.run({ "orphan.lua" }, caps)
+        T.eq(code, 1)
+        T.eq(caps._out[1], "orphan.lua:1:1: ANNOTATION_NOT_ATTACHED: type annotation is not attached to an admitted source form\n")
+    end)
+
     T.it("reports read errors as diagnostics", function()
         local caps = caps_for({})
         local code = cli.run({ "missing.lua" }, caps)
