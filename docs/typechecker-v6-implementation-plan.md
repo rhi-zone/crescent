@@ -736,6 +736,9 @@ Before M2:
 
 - Precise Lua pack semantics: where extra returns are discarded, where missing
   values nil-pad, and how varargs/rest interact.
+- Represent call and overload returns as `PackResult` unions of whole packs
+  before any movement site performs arity adjustment or intentional
+  correlation-losing widening.
 - Exact union-right subtype behavior for consumer unions, because call
   acceptance and overload matching depend on it.
 - Current M2 blockers are tracked in `docs/typechecker-v6-m2-blockers.md`.

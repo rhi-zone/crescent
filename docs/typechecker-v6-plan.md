@@ -644,9 +644,11 @@ them.
 
 ### Overload Ambiguity
 
-If a call matches multiple overload branches, the result claim is the union of
-all matching branch return claims and the effect claim is the join of all
-matching branch effects if effects are enabled.
+If a call matches multiple overload branches, the result claim is a union of
+whole matching branch return packs, as specified by
+`docs/typechecker-v6-kernel-synthesis.md`'s `PackResult` domain. It is not a
+slotwise union of return positions. The effect claim is the join of all matching
+branch effects if effects are enabled.
 
 Reason: this is deterministic, sound, and avoids an arbitrary first-match rule.
 If the union result is too imprecise for the caller, the caller narrows or
