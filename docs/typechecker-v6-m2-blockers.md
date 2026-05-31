@@ -6,7 +6,7 @@ or function body checking until these are pinned.
 
 ## Lua Pack Adjustment
 
-Status: blocking.
+Status: fixture-pinned, implementation blocking.
 
 The pack constructor is structural only. Lua adjustment happens only at movement
 sites. M2 must pin the movement-site matrix before implementing calls:
@@ -20,10 +20,11 @@ sites. M2 must pin the movement-site matrix before implementing calls:
 - missing values nil-pad only at Lua movement sites that actually pad.
 - explicit nil positions in packs must not collapse.
 
-Required before code:
+Fixture status:
 
 - A `pack_adjustment_test.lua` fixture file with these cases as expected
-  behavior, even if initially marked unsupported by the source checker.
+  behavior now exists under `lib/type/static-v6/`. M1 still marks the cases
+  unsupported instead of guessing adjustment.
 
 ## Union-Right And Overload Matching
 
