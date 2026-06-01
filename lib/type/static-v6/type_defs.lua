@@ -17,6 +17,12 @@
 --:: NominalType = { tag: "nominal", name: string }
 --:: VarType = { tag: "var", id: integer }
 --:: StaticType = AtomType | LiteralType | UnknownType | NeverType | AnyType | UnionType | IntersectionType | ComplementType | ArrowType | RecordType | NominalType | VarType
+--:: IdentityId = integer
+--:: IdentityPhase = "open" | "sealed" | "escaped"
+--:: ValueClaimWithoutIdentity = { type: StaticType }
+--:: ValueClaimWithIdentity = { type: StaticType, identity: IdentityId }
+--:: ValueClaim = ValueClaimWithoutIdentity | ValueClaimWithIdentity
+--:: TableState = { id: IdentityId, phase: IdentityPhase, own_record: RecordType, metatable: ValueClaim | nil, escaped_reason: string | nil }
 
 --:: PackResultSingle = { tag: "single", pack: Pack }
 --:: PackResultUnion = { tag: "union", alternatives: { [integer]: Pack } }
@@ -24,11 +30,11 @@
 
 --:: Span = { file: string | nil, line: integer | nil, column: integer | nil, ... }
 --:: CheckDiag = { code: string, message: string, details: unknown, ... }
---:: Obligation = { kind: "obligation", producer: StaticType, consumer: StaticType, site: string, reason: string, span: Span | nil, discharged: boolean, diagnostic: CheckDiag | nil, ... }
---:: BindingFact = { kind: "binding", symbol: string, type: StaticType, span: Span | nil, ... }
---:: ExprFact = { kind: "expr", expr: string, type: StaticType, span: Span | nil, ... }
---:: UnsafeBoundary = { kind: "unsafe_boundary", type: StaticType, site: string, reason: string, span: Span | nil, ... }
---:: Env = { bindings: { [string]: StaticType }, binding_facts: { [integer]: BindingFact }, obligations: { [integer]: Obligation }, unsafe_boundaries: { [integer]: UnsafeBoundary } }
+--:: Obligation = { kind: "obligation", producer: StaticType, consumer: StaticType, site: string, reason: string, span: Span | nil, discharged: boolean, diagnostic: CheckDiag | nil }
+--:: BindingFact = { kind: "binding", symbol: string, type: StaticType, claim: ValueClaim, span: Span | nil }
+--:: ExprFact = { kind: "expr", expr: string, type: StaticType, claim: ValueClaim, span: Span | nil }
+--:: UnsafeBoundary = { kind: "unsafe_boundary", type: StaticType, site: string, reason: string, span: Span | nil }
+--:: Env = { bindings: { [string]: StaticType }, binding_claims: { [string]: ValueClaim }, binding_facts: { [integer]: BindingFact }, obligations: { [integer]: Obligation }, unsafe_boundaries: { [integer]: UnsafeBoundary }, identities: { [integer]: TableState }, next_identity_id: integer }
 
 --:: CheckOpts = { term_budget: integer, site: string, ... }
 

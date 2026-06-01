@@ -12,8 +12,8 @@ local facts = require("lib.type.static-v6.facts")
 local env   = require("lib.type.static-v6.env")
 
 --:: require "lib.type.static-v6.type_defs"
---:: FactsModule = { obligation: (StaticType, StaticType, string, string, Span | nil) -> Obligation, binding: (string, StaticType, Span | nil) -> BindingFact, unsafe_boundary: (StaticType, string, string, Span | nil) -> UnsafeBoundary }
---:: EnvModule = { new: () -> table, bind: (table, string, StaticType, Span | nil) -> BindingFact, bind_checked: (table, string, StaticType, StaticType, string, string, Span | nil) -> (boolean, BindingFact | nil, CheckDiag | nil), lookup: (table, string) -> StaticType | nil, require_subtype: (table, StaticType, StaticType, string, string, Span | nil) -> Obligation, record_unsafe_boundary: (table, StaticType, string, string, Span | nil) -> UnsafeBoundary, discharge_obligation: (Obligation) -> (boolean, CheckDiag | nil), discharge_all: (table) -> (boolean, { [integer]: CheckDiag }) }
+--:: FactsModule = { obligation: (StaticType, StaticType, string, string, Span | nil) -> Obligation, value_claim: (StaticType) -> ValueClaim, identity_claim: (StaticType, IdentityId) -> ValueClaim, binding: (string, StaticType, Span | nil) -> BindingFact, binding_claim: (string, ValueClaim, Span | nil) -> BindingFact, unsafe_boundary: (StaticType, string, string, Span | nil) -> UnsafeBoundary }
+--:: EnvModule = { new: () -> table, bind: (table, string, StaticType, Span | nil) -> BindingFact, bind_claim: (table, string, ValueClaim, Span | nil) -> BindingFact, bind_checked: (table, string, StaticType, StaticType, string, string, Span | nil) -> (boolean, BindingFact | nil, CheckDiag | nil), lookup: (table, string) -> StaticType | nil, lookup_claim: (table, string) -> ValueClaim | nil, require_subtype: (table, StaticType, StaticType, string, string, Span | nil) -> Obligation, record_unsafe_boundary: (table, StaticType, string, string, Span | nil) -> UnsafeBoundary, discharge_obligation: (Obligation) -> (boolean, CheckDiag | nil), discharge_all: (table) -> (boolean, { [integer]: CheckDiag }) }
 
 --: (unknown, string) -> nil
 local function assert_type(v, want)
@@ -118,6 +118,20 @@ T.describe("v6 facts + env", function()
         T.eq(count_type.tag, "atom")
         T.eq(count_type.name, "number")
         T.eq(#root.binding_facts, 1)
+        T.eq(root.binding_facts[1], fact)
+    end)
+
+    T.it("keeps value claims beside legacy binding types", function()
+        local root = env.new()
+        local span = { file = "facts_env_test.lua", line = 126, column = 15 }
+        local claim = facts.identity_claim(ty.record({}, {}, "closed"), 7)
+        local fact = env.bind_claim(root, "tbl", claim, span)
+
+        T.eq(fact.type.tag, "record")
+        T.eq(fact.claim, claim)
+        T.eq(env.lookup(root, "tbl"), claim.type)
+        T.eq(env.lookup_claim(root, "tbl"), claim)
+        T.eq(root.binding_claims.tbl.identity, 7)
         T.eq(root.binding_facts[1], fact)
     end)
 

@@ -26,23 +26,38 @@ end
 function M.new()
     return {
         bindings = {},
+        binding_claims = {},
         binding_facts = {},
         obligations = {},
         unsafe_boundaries = {},
+        identities = {},
+        next_identity_id = 0,
     }
+end
+
+--: (Env, string, ValueClaim, Span | nil) -> BindingFact
+function M.bind_claim(env, symbol, claim, span)
+    env.bindings[symbol] = claim.type
+    env.binding_claims[symbol] = claim
+    local fact = facts.binding_claim(symbol, claim, span)
+    env.binding_facts[#env.binding_facts + 1] = fact
+    return fact
 end
 
 --: (Env, string, StaticType, Span | nil) -> BindingFact
 function M.bind(env, symbol, typ, span)
-    env.bindings[symbol] = typ
-    local fact = facts.binding(symbol, typ, span)
-    env.binding_facts[#env.binding_facts + 1] = fact
-    return fact
+    local claim = facts.value_claim(typ) --: ValueClaim
+    return M.bind_claim(env, symbol, claim, span)
 end
 
 --: (Env, string) -> StaticType | nil
 function M.lookup(env, symbol)
     return env.bindings[symbol]
+end
+
+--: (Env, string) -> ValueClaim | nil
+function M.lookup_claim(env, symbol)
+    return env.binding_claims[symbol]
 end
 
 --: (Env, Obligation) -> Obligation
@@ -61,7 +76,8 @@ function M.bind_checked(env, symbol, producer, consumer, site, reason, span)
     local obligation = M.require_subtype(env, producer, consumer, site, reason, span)
     local ok, err = M.discharge_obligation(obligation)
     if not ok then return false, nil, err end
-    return true, M.bind(env, symbol, consumer, span), nil
+    local claim = facts.value_claim(consumer) --: ValueClaim
+    return true, M.bind_claim(env, symbol, claim, span), nil
 end
 
 --: (Env, StaticType, string, string, Span | nil) -> UnsafeBoundary

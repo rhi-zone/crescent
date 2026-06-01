@@ -5,6 +5,21 @@ local M = {}
 
 --:: require "lib.type.static-v6.type_defs"
 
+--: (StaticType) -> ValueClaim
+function M.value_claim(typ)
+    return {
+        type = typ,
+    }
+end
+
+--: (StaticType, IdentityId) -> ValueClaim
+function M.identity_claim(typ, identity)
+    return {
+        type = typ,
+        identity = identity,
+    }
+end
+
 --: (StaticType, StaticType, string, string, Span | nil) -> Obligation
 function M.obligation(producer, consumer, site, reason, span)
     return {
@@ -19,24 +34,36 @@ function M.obligation(producer, consumer, site, reason, span)
     }
 end
 
---: (string, StaticType, Span | nil) -> BindingFact
-function M.binding(symbol, typ, span)
+--: (string, ValueClaim, Span | nil) -> BindingFact
+function M.binding_claim(symbol, claim, span)
     return {
         kind = "binding",
         symbol = symbol,
-        type = typ,
+        type = claim.type,
+        claim = claim,
+        span = span,
+    }
+end
+
+--: (string, StaticType, Span | nil) -> BindingFact
+function M.binding(symbol, typ, span)
+    return M.binding_claim(symbol, M.value_claim(typ), span)
+end
+
+--: (string, ValueClaim, Span | nil) -> ExprFact
+function M.expr_claim(expr, claim, span)
+    return {
+        kind = "expr",
+        expr = expr,
+        type = claim.type,
+        claim = claim,
         span = span,
     }
 end
 
 --: (string, StaticType, Span | nil) -> ExprFact
 function M.expr(expr, typ, span)
-    return {
-        kind = "expr",
-        expr = expr,
-        type = typ,
-        span = span,
-    }
+    return M.expr_claim(expr, M.value_claim(typ), span)
 end
 
 --: (StaticType, string, string, Span | nil) -> UnsafeBoundary
