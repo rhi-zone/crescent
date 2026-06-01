@@ -41,6 +41,44 @@ The first kernel does not admit:
 
 Those features may be added only by extending the kernel.
 
+## Kernel Primitive Cutouts
+
+v7's "no name magic" rule means behavior must not depend on the syntactic name
+of a callee. It does not mean the kernel has no primitives.
+
+Some Lua operations cannot be represented as ordinary pure arrows because they
+perform state transitions in the checker model. These are explicit primitive
+cutouts. They are few, named with a `$` prefix, and audited as exceptions to the
+ordinary declared-arrow path.
+
+Initial primitive cutout:
+
+```text
+$SetMetatable(table_identity, metatable_claim)
+```
+
+This is not the name `setmetatable`. It is a kernel operation. A stdlib
+declaration may bind the runtime value named `setmetatable` to this primitive
+capability, and aliases of that value carry the capability. The checker must not
+dispatch on the textual callee name.
+
+Rules for primitive cutouts:
+
+- every primitive cutout must correspond to a named kernel judgment or
+  `IdentityStep`;
+- every use must be visible in certificates;
+- ordinary user functions cannot silently acquire primitive behavior by name;
+- adding a primitive is a soundness-design event, not an implementation shortcut.
+
+Certificate shape:
+
+```text
+PrimitiveCallNode(primitive = "$SetMetatable", args = ..., before = Γ, after = Γ')
+```
+
+The verifier checks the primitive's kernel rule. It does not trust the frontend
+because the callee text happened to be `setmetatable`.
+
 ## Deferred Feature Classification
 
 The excluded features are not all the same kind of thing. v7 should classify
@@ -739,7 +777,7 @@ The table identity state is not a type.
 
 ```text
 TableState =
-  open(own_record)
+  open(own_record, metatable?)
   sealed(own_record, metatable?)
   escaped(own_record?, reason)
 ```
@@ -752,6 +790,7 @@ Operations:
 ```text
 fresh_table         : Store -> id, Store
 write_open_field    : id, key, ValueClaim -> Store -> Store or error
+set_metatable       : id, ValueClaim -> Store -> Store or error
 seal                : id -> Store -> RecordClaim or error
 read_field          : id, key -> Store -> ValueClaim or error
 write_sealed_field  : id, key, ValueClaim -> Store -> Store or error
@@ -762,6 +801,7 @@ Rules:
 
 - fresh table literals create open identities;
 - direct writes to open identities extend or equate their own record;
+- `$SetMetatable` fixes the metatable on an open unescaped identity;
 - any observation requiring a stable value type seals first;
 - sealed identities reject absent-field writes and readonly writes;
 - escaped identities cannot be extended;
@@ -784,12 +824,25 @@ Open write:
 
 ```text
 IdentityStep(Γ, write(id, key, claim)) =>
-  Γ[identities[id] = open(record + key)]
+  Γ[identities[id] = open(record + key, metatable?)]
 ```
 
 requires `id` to be open and unescaped. If `key` already exists, the new claim
 must be equal to the existing field type. If `key` is new, the field is added to
 the construction record.
+
+Set metatable:
+
+```text
+IdentityStep(Γ, $SetMetatable(id, mt_claim)) =>
+  Γ[identities[id] = open(record, mt_claim)]
+```
+
+requires `id` to be open, fresh/unescaped, and not already bound to a different
+metatable. `$SetMetatable` fixes the metatable but does not by itself seal the
+own-field construction record. Observation, annotation, return, unknown call, or
+escape seals later. This differs from "dispatch on a function named
+setmetatable"; the rule fires only for the `$SetMetatable` primitive capability.
 
 Seal:
 
