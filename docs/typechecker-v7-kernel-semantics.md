@@ -912,6 +912,70 @@ Steps:
 
 This last rule prevents losing facts from overloaded assertion signatures.
 
+### Template Calls
+
+The first kernel does not infer exported shape-extension summaries for ordinary
+functions.
+
+For a function body such as:
+
+```lua
+function foo(x)
+  x.foo = 1
+end
+```
+
+the internal field write is still a normal identity/fact transition. The
+question is whether that transition becomes a reusable callable summary.
+Exporting the summary is risky because it must quantify over caller identities,
+alias invalidation, allowed writes, overload branches, and postconditions.
+
+The initial admitted alternative is an explicit template function:
+
+```lua
+--:: template
+function foo(x)
+  x.foo = 1
+end
+```
+
+Template calls are checked by instantiating the body at the call site against
+the actual argument facts:
+
+```text
+TemplateCallCheck(Γ, foo, args) => Γ', PackAlt
+```
+
+Rules:
+
+- template functions are not first-class values unless a later rule
+  monomorphizes or summarizes them;
+- each call rechecks the body in a context where parameters are aliases of the
+  actual argument claims;
+- field writes in the body use `IdentityStep` on the caller's identities;
+- internal postconditions become ordinary caller-context fact transitions;
+- no exported mutation/postcondition summary is inferred from the template.
+
+This supports local construction patterns:
+
+```lua
+local t = {}
+foo(t)       -- body checked with t's fresh open identity; may extend t.foo
+```
+
+without pretending that `foo` has a general arrow type that creates `foo` for
+all possible table arguments.
+
+Non-template functions may still be given stricter precondition types, for
+example:
+
+```text
+foo : <T <: { foo: integer, ... }>(x: T) -> nil
+```
+
+That type requires an existing writable `foo` field. It does not claim that the
+function extends arbitrary table shapes.
+
 ### Return
 
 A return statement consumes a `PackAlt` against the current function return
