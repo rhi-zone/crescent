@@ -185,6 +185,44 @@ If the guard function has runtime behavior such as throwing, IO, or mutation,
 that behavior is an ordinary arrow effect once effects are admitted. The
 predicate-exporting part is still a fact transition, not itself an effect.
 
+Assertion signatures are the same category: fact transitions, not value types.
+
+Example shape:
+
+```text
+asserts(place, Predicate)
+asserts(place is Type)
+```
+
+An assertion function does not return a boolean guard result. Instead, if the
+call returns normally, the continuation receives the asserted fact. If the
+assertion fails at runtime, control does not continue normally.
+
+Therefore the signature has two semantic components:
+
+- a normal-continuation fact transition;
+- a possible nonlocal exit on failure.
+
+In the first kernel, the fact transition may be admitted only after the
+assertion implementation is verified or the assertion function is marked as a
+trusted/unsafe boundary. The failure behavior is represented as "does not return
+normally on failed predicate" in the assertion rule. If a full effect system is
+later admitted, that failure behavior can also be reflected as a typed effect
+such as `throws(E)` or `exits`, but the narrowing part remains a fact
+transition.
+
+Soundness condition:
+
+```text
+If assert_p(x) returns normally, then Predicate(x) holds on the continuation.
+```
+
+This is the assertion analogue of a boolean guard's true-branch condition:
+
+```text
+If guard_p(x) returns true, then Predicate(x) holds on the true edge.
+```
+
 ### Type Assertions
 
 There are two different constructs that should not be conflated.
