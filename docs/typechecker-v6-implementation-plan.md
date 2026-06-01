@@ -1,5 +1,11 @@
 # Typechecker v6 Implementation Plan
 
+Status: gated by `docs/typechecker-soundness-validation.md`.
+
+If the project adopts a proof-producing or mechanized-kernel-first checker, that
+is v7, not v6. In that case this document is prototype/research input only; it
+must not be treated as the implementation plan for the soundness-fatal checker.
+
 This document decomposes `docs/typechecker-v6-plan.md` into executable work.
 The design rule is the same as the spec: every task must reduce to value claims,
 movement sites, proof obligations, and facts. If a task cannot name those, it is
