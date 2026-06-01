@@ -6,6 +6,7 @@ return {
     types = require("lib.type.static-v6.types"),
     normalize = require("lib.type.static-v6.normalize"),
     packs = require("lib.type.static-v6.packs"),
+    calls = require("lib.type.static-v6.calls"),
     source = require("lib.type.static-v6.source"),
     subtype = require("lib.type.static-v6.subtype"),
     diagnostics = require("lib.type.static-v6.diagnostics"),

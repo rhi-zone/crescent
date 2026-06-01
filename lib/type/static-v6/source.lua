@@ -6,10 +6,10 @@ local defs       = require("lib.type.static.defs")
 local intern_mod = require("lib.type.static.intern")
 
 local ann_mod = require("lib.type.static-v6.ann")
+local calls   = require("lib.type.static-v6.calls")
 local diag    = require("lib.type.static-v6.diagnostics")
 local env_mod = require("lib.type.static-v6.env")
 local pack_result = require("lib.type.static-v6.pack_result")
-local subtype = require("lib.type.static-v6.subtype")
 local types   = require("lib.type.static-v6.types")
 
 local M = {}
@@ -149,121 +149,47 @@ local function result_to_scalar(result)
     return pack_result.to_scalar(result) or types.unknown()
 end
 
---: (StaticType, { [integer]: ArrowType }) -> boolean
-local function collect_arrow_branches(typ, out)
-    if typ.tag == "arrow" then
-        out[#out + 1] = typ
-        return true
-    end
-    if typ.tag == "intersection" then
-        for _, member in ipairs(typ.members) do
-            if not collect_arrow_branches(member, out) then return false end
-        end
-        return true
-    end
-    return false
+--: (Ctx, ASTNode, CheckDiag) -> nil
+local function add_call_diagnostic(ctx, n, err)
+    local details = err.details
+    if type(details) ~= "table" then details = {} end
+    details.span = details.span or { file = ctx.filename, line = n.line, column = n.col }
+    details.obligation_reason = "call argument"
+    details.obligation_site = "call argument"
+    err.details = details
+    ctx.diagnostics[#ctx.diagnostics + 1] = err
 end
 
---: (Ctx, ASTNode, ArrowType, { [integer]: StaticType }, boolean) -> Pack | nil
-local function check_arrow_call_pack(ctx, n, callee, args, emit_errors)
-    local params = callee.params
-    local returns = callee.returns
-    if params == nil or returns == nil then
-        if emit_errors then add_error(ctx, "INTERNAL_TYPECHECKER_ERROR", "arrow type missing pack", n) end
-        return nil
-    end
-    if params.rest ~= nil or returns.rest ~= nil then
-        if emit_errors then add_error(ctx, "FEATURE_NOT_ADMITTED", "v6 M2 calls do not admit open packs yet", n) end
-        return nil
-    end
-    if #args ~= #params.items then
-        if emit_errors then
-            add_error(ctx, "FUNCTION_ARITY_MISMATCH",
-                "call arity " .. tostring(#args) .. " does not match parameter arity " .. tostring(#params.items), n)
-        end
-        return nil
-    end
-    for i = 1, #args do
-        local producer = args[i]
-        local consumer = params.items[i]
-        local ok, err = subtype.is_subtype(producer, consumer, { site = "call argument", term_budget = 256 })
-        if not ok then
-            if emit_errors and err then
-                local details = err.details
-                if type(details) ~= "table" then details = {} end
-                details.span = details.span or { file = ctx.filename, line = n.line, column = n.col }
-                details.obligation_reason = "call argument"
-                details.obligation_site = "call argument"
-                err.details = details
-                ctx.diagnostics[#ctx.diagnostics + 1] = err
-            end
-            return nil
-        end
-    end
-    return returns
+--: (Ctx, ASTNode, string, string) -> nil
+local function add_call_error(ctx, n, code, message)
+    add_error(ctx, code, message, n)
 end
 
---: (Ctx, ASTNode, ArrowType, integer, integer, boolean) -> Pack | nil
-local function check_arrow_call_exprs(ctx, n, callee, arg_start, arg_len, emit_errors)
-    local params = callee.params
-    if params == nil then
-        if emit_errors then add_error(ctx, "INTERNAL_TYPECHECKER_ERROR", "arrow type missing parameter pack", n) end
-        return nil
-    end
-    local args = adjust_expr_list(ctx, arg_start, arg_len, #params.items)
-    return check_arrow_call_pack(ctx, n, callee, args, emit_errors)
+--: (Ctx, ASTNode, StaticType, integer, integer) -> PackResult
+local function check_call_pack(ctx, n, callee, arg_start, arg_len)
+    local checked = calls.check(callee, function(arity)
+        return adjust_expr_list(ctx, arg_start, arg_len, arity)
+    end)
+    local result = checked.result
+    if checked.ok and result then return result end
+    local diagnostic = checked.diagnostic
+    if diagnostic then add_call_diagnostic(ctx, n, diagnostic) end
+    local code = checked.code
+    local message = checked.message
+    if code and message then add_call_error(ctx, n, code, message) end
+    return pack_result.from_items({ types.unknown() })
 end
 
 --: (Ctx, ASTNode, StaticType, integer, integer) -> StaticType
 local function check_call_against_arrow(ctx, n, callee, arg_start, arg_len)
-    if callee.tag == "unknown" then return types.unknown() end
-    if callee.tag == "arrow" then
-        local returns = check_arrow_call_exprs(ctx, n, callee, arg_start, arg_len, true)
-        if returns == nil then return types.unknown() end
-        return result_to_scalar(pack_result.single(returns))
-    end
-    local branches = {} --: { [integer]: ArrowType }
-    if not collect_arrow_branches(callee, branches) then
-        add_error(ctx, "CANNOT_CALL", "cannot call non-function type " .. types.tostring(callee), n)
-        return types.unknown()
-    end
-    local returns = {} --: { [integer]: Pack }
-    for _, branch in ipairs(branches) do
-        local branch_returns = check_arrow_call_exprs(ctx, n, branch, arg_start, arg_len, false)
-        if branch_returns ~= nil then
-            returns[#returns + 1] = branch_returns
-        end
-    end
-    if #returns == 0 then
-        add_error(ctx, "NO_MATCHING_OVERLOAD", "no overload branch accepts argument pack", n)
-        return types.unknown()
-    end
-    return result_to_scalar(pack_result.union(returns))
+    return result_to_scalar(check_call_pack(ctx, n, callee, arg_start, arg_len))
 end
 
 --: (Ctx, ASTNode) -> PackResult | nil
 local function check_final_call_pack(ctx, n)
     if n.kind ~= NODE_CALL_EXPR then return nil end
-    local callee = check_expr(ctx, n.data[0])
-    if callee.tag == "arrow" then
-        local pack = check_arrow_call_exprs(ctx, n, callee, n.data[1], n.data[2], true)
-        return pack_result.single(pack or { items = { types.unknown() }, rest = nil })
-    end
-    local branches = {} --: { [integer]: ArrowType }
-    if not collect_arrow_branches(callee, branches) then
-        add_error(ctx, "CANNOT_CALL", "cannot call non-function type " .. types.tostring(callee), n)
-        return pack_result.from_items({ types.unknown() })
-    end
-    local matches = {} --: { [integer]: Pack }
-    for _, branch in ipairs(branches) do
-        local branch_returns = check_arrow_call_exprs(ctx, n, branch, n.data[1], n.data[2], false)
-        if branch_returns ~= nil then matches[#matches + 1] = branch_returns end
-    end
-    if #matches == 0 then
-        add_error(ctx, "NO_MATCHING_OVERLOAD", "no overload branch accepts argument pack", n)
-        return pack_result.from_items({ types.unknown() })
-    end
-    return pack_result.union(matches)
+    local callee = check_expr(ctx, n.data[0]) --: StaticType
+    return check_call_pack(ctx, n, callee, n.data[1], n.data[2])
 end
 
 --: (Ctx, integer, integer) -> PackResult
@@ -401,7 +327,7 @@ end
 --: (Ctx, integer, integer, integer, integer, integer, StaticType, ASTNode, string | nil) -> boolean
 local function check_func_type_against(ctx, ps, pl, bs, bl, flags, typ, owner, self_name)
     local branches = {} --: { [integer]: ArrowType }
-    if not collect_arrow_branches(typ, branches) then
+    if not calls.collect_arrow_branches(typ, branches) then
         add_error(ctx, "TYPE_MISMATCH", "function annotation must be an arrow or intersection of arrows", owner)
         return true
     end
