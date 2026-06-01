@@ -17,6 +17,9 @@ v6 may remain useful as research input or disposable prototype code, but it is
 not evidence for v7 soundness unless its accepted programs can be justified by
 the v7 kernel/certificate rules.
 
+The initial v7 semantic kernel draft is
+`docs/typechecker-v7-kernel-semantics.md`.
+
 ## Premise
 
 Unsoundness is fatal. A checker that accepts an unsound program because a feature
