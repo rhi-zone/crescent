@@ -41,6 +41,23 @@ function M.alternatives(result)
     return result.alternatives
 end
 
+--: ({ [integer]: StaticType }, PackResult) -> PackResult
+function M.prepend_items(prefix, result)
+    if #prefix == 0 then return result end
+    local out = {} --: { [integer]: Pack }
+    for _, pack in ipairs(M.alternatives(result)) do
+        local items = {} --: { [integer]: StaticType }
+        for _, item in ipairs(prefix) do
+            items[#items + 1] = item
+        end
+        for _, item in ipairs(pack.items) do
+            items[#items + 1] = item
+        end
+        out[#out + 1] = packs.pack(items, pack.rest)
+    end
+    return M.union(out)
+end
+
 --: ({ [integer]: StaticType }) -> StaticType
 local function union_or_single(members)
     if #members == 0 then return types.atom("nil") end

@@ -158,6 +158,7 @@ end
 
 local check_expr
 local check_stmt
+local expr_list_result
 local adjust_expr_list
 
 --: ({ [integer]: StaticType }, StaticType) -> nil
@@ -287,21 +288,16 @@ local function check_final_call_pack(ctx, n)
     return pack_result.union(matches)
 end
 
---: (Ctx, integer, integer, integer) -> { [integer]: StaticType }
-adjust_expr_list = function(ctx, expr_start, expr_len, target_len)
+--: (Ctx, integer, integer) -> PackResult
+expr_list_result = function(ctx, expr_start, expr_len)
     local values = {} --: { [integer]: StaticType }
-    if expr_len == 0 then
-        while #values < target_len do push_type(values, types.atom("nil")) end
-        return values
-    end
     for i = 1, expr_len do
         local expr_id = ctx.lists:get(expr_start + i - 1)
         local expr = ctx.nodes:get(expr_id)
         if i == expr_len then
             local pack = check_final_call_pack(ctx, expr)
             if pack ~= nil then
-                local adjusted = pack_result.adjust_to_arity(pack, target_len - #values)
-                for _, item in ipairs(adjusted) do push_type(values, item) end
+                return pack_result.prepend_items(values, pack)
             else
                 local value = check_expr(ctx, expr_id)
                 push_type(values, value)
@@ -316,11 +312,12 @@ adjust_expr_list = function(ctx, expr_start, expr_len, target_len)
             end
         end
     end
-    local adjusted = {} --: { [integer]: StaticType }
-    for i = 1, target_len do
-        push_type(adjusted, values[i] or types.atom("nil"))
-    end
-    return adjusted
+    return pack_result.from_items(values)
+end
+
+--: (Ctx, integer, integer, integer) -> { [integer]: StaticType }
+adjust_expr_list = function(ctx, expr_start, expr_len, target_len)
+    return pack_result.adjust_to_arity(expr_list_result(ctx, expr_start, expr_len), target_len)
 end
 
 --: (Env) -> Env
