@@ -41,15 +41,100 @@ The first kernel does not admit:
 
 Those features may be added only by extending the kernel.
 
-## Type-Level Primitive Cutouts
+## Type-Level Intrinsics And Primitive Cutouts
+
+`$Foo` is the reserved annotation/type-level namespace. It is not one semantic
+category by itself. v7 admits a `$` form only after specifying its kind, inputs,
+outputs, failure mode, certificate obligation, and whether it is pure
+type-level computation or a trusted bridge to runtime/checker state.
+
+Historical `$` names fall into three categories:
+
+- semantic intrinsics with a contract;
+- primitive cutouts that authorize a non-arrow kernel transition;
+- retired implementation encodings that v7 must not copy.
+
+Retired encodings such as `$Lit`, `$LitInt`, `$LitNum`, `$LitBool`, `$Unit`,
+`$idx_N`, `$pos_N`, `$opt_`, `$ro_`, `$spread_`, `$computed_`, and `$opaque_`
+are not intrinsics in v7. They were string encodings of structure that belongs
+in typed AST nodes or field descriptors.
+
+### Intrinsic Admission Rule
+
+An intrinsic is admissible only if it has a contract of this form:
+
+```text
+IntrinsicSpec = {
+  name,
+  kind,
+  args,
+  result,
+  preconditions,
+  reduction,
+  failure,
+  certificate_node
+}
+```
+
+The contract is part of the kernel, not an implementation note. If the checker
+has code for a `$Foo` name but the kernel has no `IntrinsicSpec`, then `$Foo` is
+not admitted in v7.
+
+Initial admitted type-level intrinsics are conservative and may be expanded one
+by one:
+
+```text
+$Require<T>
+$Opaque<T>
+$Opaque<T, U>
+$FfiC
+$GlobalScope
+$Throw<...Msg>
+$Catch<T, Default?>
+$EachField<T, F>
+$PatternReturn<P>
+$FindReturn<P>
+```
+
+Names that existed as temporary implementation helpers but are now expressible
+by match/types should not be admitted unless a new proof shows they are needed:
+
+```text
+$Keys<T>
+$Values<T>
+$IpairsValues<T>
+$EachUnion<T, F>
+$PcallReturn<F>
+$PairsReturn<T>
+$IpairsReturn<T>
+```
+
+These may still be useful examples for deriving library aliases, but v7 should
+prefer ordinary type-level constructs when they have a complete contract.
+
+`$Name` is not admitted. The current repository evidence only identifies it as
+"string literal of declaration name" in a TODO inventory, without an
+implementation contract or a documented semantic use. Admitting it would require
+answering at least:
+
+- which declaration's name is observed;
+- whether aliases, imports, augmentation, and shadowing change the result;
+- whether it is hygienic under module boundaries;
+- whether it depends on source syntax rather than semantic binding identity;
+- what certificate proves the name literal.
+
+Until those are specified, `$Name` is a stale/proposed intrinsic, not part of the
+kernel.
+
+### Primitive Callable Cutouts
 
 v7's "no name magic" rule means behavior must not depend on the syntactic name
 of a callee. It does not mean the kernel has no primitives.
 
 Some Lua operations cannot be represented as ordinary pure arrows because they
 perform state transitions in the checker model. These are explicit primitive
-capability types. They are few, named with a `$` prefix, and audited as
-exceptions to the ordinary declared-arrow path.
+callable cutouts. They are few, use the reserved `$` type-level namespace, and
+are audited as exceptions to the ordinary declared-arrow path.
 
 Initial primitive capability type:
 
