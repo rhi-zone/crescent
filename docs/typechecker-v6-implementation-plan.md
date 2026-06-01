@@ -377,6 +377,10 @@ Delegation:
 
 Owner: table construction, record observations, reads, writes, alias/seal rules.
 
+Design:
+
+- `docs/typechecker-v6-records-identity-design.md`
+
 Files:
 
 - `records.lua`
@@ -386,6 +390,11 @@ Files:
 
 Tasks:
 
+- Introduce `ValueClaim` as the source/env movement-site claim carrying
+  `StaticType` plus optional `identity_id`; do not add open table identities to
+  `StaticType`.
+- Keep construction-phase openness (`TableState.phase`) distinct from structural
+  row openness (`RecordType.row`).
 - Add record subtyping with field/index variance.
 - Model fresh table identities and open construction phase.
 - Extend direct writes to fresh unescaped identities.
