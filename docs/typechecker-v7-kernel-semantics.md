@@ -952,6 +952,10 @@ Rules:
   monomorphizes or summarizes them;
 - each call rechecks the body in a context where parameters are aliases of the
   actual argument claims;
+- an optional template signature may be used as a fast precheck or expected
+  parameter/return shape, but it is not an exported mutation summary;
+- passing the optional signature is not sufficient for acceptance: the
+  instantiated body still has to check against the actual caller facts;
 - field writes in the body use `IdentityStep` on the caller's identities;
 - internal postconditions become ordinary caller-context fact transitions;
 - no exported mutation/postcondition summary is inferred from the template.
@@ -975,6 +979,12 @@ foo : <T <: { foo: integer, ... }>(x: T) -> nil
 
 That type requires an existing writable `foo` field. It does not claim that the
 function extends arbitrary table shapes.
+
+Template signatures are therefore a shortcut path for fast rejection and better
+errors, not a trust boundary. If a template signature says the call is
+impossible, the checker may reject without instantiating the body. If it says
+the call is possible, the checker still instantiates the body unless a later
+certificate rule proves the signature is a complete summary.
 
 ### Return
 
