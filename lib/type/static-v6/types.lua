@@ -13,7 +13,9 @@ local M = {}
 --:: ComplementType = { tag: "complement", of: StaticType }
 --:: Pack = { items: { [integer]: StaticType }, rest: StaticType | nil }
 --:: ArrowType = { tag: "arrow", params: Pack, returns: Pack, effects: unknown }
---:: RecordType = { tag: "record" }
+--:: Field = { type: StaticType, optional: boolean, readonly: boolean }
+--:: Index = { key: StaticType, value: StaticType, readonly: boolean }
+--:: RecordType = { tag: "record", fields: { [string]: Field }, indexes: { [integer]: Index }, row: string }
 --:: NominalType = { tag: "nominal", name: string }
 --:: VarType = { tag: "var", id: integer }
 --:: StaticType = AtomType | LiteralType | UnknownType | NeverType | AnyType | UnionType | IntersectionType | ComplementType | ArrowType | RecordType | NominalType | VarType
@@ -82,6 +84,25 @@ function M.arrow(params, returns, effects)
     return { tag = "arrow", params = params, returns = returns, effects = effects }
 end
 
+--: (StaticType, boolean | nil, boolean | nil) -> Field
+function M.field(typ, optional, readonly)
+    return { type = typ, optional = optional == true, readonly = readonly == true }
+end
+
+--: (StaticType, StaticType, boolean | nil) -> Index
+function M.index(key, value, readonly)
+    return { key = key, value = value, readonly = readonly == true }
+end
+
+--: ({ [string]: Field } | nil, { [integer]: Index } | nil, string | nil) -> StaticType
+function M.record(fields, indexes, row)
+    row = row or "closed"
+    if row ~= "closed" and row ~= "open" then
+        error("record row must be 'closed' or 'open'")
+    end
+    return { tag = "record", fields = fields or {}, indexes = indexes or {}, row = row }
+end
+
 --: (Pack) -> string
 local function pack_key(pack)
     local parts = {}
@@ -89,6 +110,37 @@ local function pack_key(pack)
     local rest = pack.rest
     if rest then parts[#parts + 1] = "..." .. M.key(rest) end
     return "pack(" .. table.concat(parts, ",") .. ")"
+end
+
+--: (Field) -> string
+local function field_key(field)
+    local flags = ""
+    if field.optional then flags = flags .. "?" end
+    if field.readonly then flags = flags .. "!" end
+    return flags .. M.key(field.type)
+end
+
+--: (Index) -> string
+local function index_key(index)
+    local flags = ""
+    if index.readonly then flags = "!" end
+    return flags .. "[" .. M.key(index.key) .. "]=" .. M.key(index.value)
+end
+
+--: (RecordType) -> string
+local function record_key(record)
+    local parts = {} --: { [integer]: string }
+    parts[#parts + 1] = "row:" .. record.row
+    local names = {} --: { [integer]: string }
+    for name, _field in pairs(record.fields) do names[#names + 1] = name end
+    table.sort(names)
+    for _, name in ipairs(names) do
+        parts[#parts + 1] = "field:" .. name .. "=" .. field_key(record.fields[name])
+    end
+    for _, index in ipairs(record.indexes) do
+        parts[#parts + 1] = "index:" .. index_key(index)
+    end
+    return "record(" .. table.concat(parts, ",") .. ")"
 end
 
 --: (StaticType) -> string | nil
@@ -122,7 +174,7 @@ function M.key(t)
         return "arrow(" .. pack_key(t.params) .. ")->" .. pack_key(t.returns)
     end
     if t.tag == "record" then
-        return "record"
+        return record_key(t)
     end
     if t.tag == "nominal" then
         return "nominal:" .. tostring(t.name)
@@ -164,7 +216,27 @@ function M.tostring(t)
         return table.concat(parts, " & ")
     end
     if t.tag == "arrow" then return "<arrow>" end
-    if t.tag == "record" then return "<record>" end
+    if t.tag == "record" then
+        local parts = {} --: { [integer]: string }
+        local names = {} --: { [integer]: string }
+        for name, _field in pairs(t.fields) do names[#names + 1] = name end
+        table.sort(names)
+        for _, name in ipairs(names) do
+            local field = t.fields[name]
+            local suffix = ""
+            if field.optional then suffix = "?" end
+            local prefix = ""
+            if field.readonly then prefix = "readonly " end
+            parts[#parts + 1] = prefix .. name .. suffix .. ": " .. M.tostring(field.type)
+        end
+        for _, index in ipairs(t.indexes) do
+            local prefix = ""
+            if index.readonly then prefix = "readonly " end
+            parts[#parts + 1] = prefix .. "[" .. M.tostring(index.key) .. "]: " .. M.tostring(index.value)
+        end
+        if t.row == "open" then parts[#parts + 1] = "..." end
+        return "{ " .. table.concat(parts, ", ") .. " }"
+    end
     if t.tag == "nominal" then
         return t.name
     end

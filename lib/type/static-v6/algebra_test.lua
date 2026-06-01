@@ -18,12 +18,14 @@ local v6 = require("lib.type.static-v6")
 --:: ComplementType = { tag: "complement", of: StaticType }
 --:: Pack = { items: { [integer]: StaticType }, rest: StaticType | nil }
 --:: ArrowType = { tag: "arrow", params: Pack, returns: Pack, effects: unknown }
---:: RecordType = { tag: "record" }
+--:: Field = { type: StaticType, optional: boolean, readonly: boolean }
+--:: Index = { key: StaticType, value: StaticType, readonly: boolean }
+--:: RecordType = { tag: "record", fields: { [string]: Field }, indexes: { [integer]: Index }, row: string }
 --:: NominalType = { tag: "nominal", name: string }
 --:: VarType = { tag: "var", id: integer }
 --:: StaticType = AtomType | LiteralType | UnknownType | NeverType | AnyType | UnionType | IntersectionType | ComplementType | ArrowType | RecordType | NominalType | VarType
 --:: CheckDiag = { code: string, message: string, details: unknown, ... }
---:: TypesModule = { atom: (string) -> StaticType, literal: (string, unknown) -> StaticType, unknown: () -> StaticType, never: () -> StaticType, any: () -> StaticType, union: ({ [integer]: StaticType }) -> StaticType, intersection: ({ [integer]: StaticType }) -> StaticType, complement: (StaticType) -> StaticType, tostring: (StaticType) -> string }
+--:: TypesModule = { atom: (string) -> StaticType, literal: (string, unknown) -> StaticType, unknown: () -> StaticType, never: () -> StaticType, any: () -> StaticType, union: ({ [integer]: StaticType }) -> StaticType, intersection: ({ [integer]: StaticType }) -> StaticType, complement: (StaticType) -> StaticType, field: (StaticType, boolean | nil, boolean | nil) -> Field, index: (StaticType, StaticType, boolean | nil) -> Index, record: ({ [string]: Field } | nil, { [integer]: Index } | nil, string | nil) -> StaticType, key: (StaticType) -> string, tostring: (StaticType) -> string }
 --:: SubtypeModule = { is_subtype: (StaticType, StaticType, { term_budget: integer, site: string }) -> (boolean, CheckDiag | nil) }
 --:: NormalizeModule = { normalize: (StaticType, { term_budget: integer, site: string } | nil) -> (StaticType | nil, CheckDiag | nil) }
 
@@ -151,5 +153,21 @@ T.describe("v6 algebra + subtyping", function()
         local got, err = norm.normalize(ty.union(members), { site = "test", term_budget = 3 })
         T.eq(got, nil, "no type when over budget")
         T.eq(err.code, "TYPE_COMPLEXITY_LIMIT", "complexity diagnostic")
+    end)
+
+    T.it("records have structural keys and display without subtyping behavior", function()
+        local rec = ty.record({
+            name = ty.field(ty.atom("string"), false, true),
+            age = ty.field(ty.atom("number"), true, false),
+        }, {
+            ty.index(ty.atom("string"), ty.unknown(), true),
+        }, "open")
+
+        T.eq(rec.tag, "record")
+        T.eq(rec.row, "open")
+        T.ok(ty.key(rec):find("field:age", 1, true) ~= nil)
+        T.ok(ty.key(rec):find("field:name", 1, true) ~= nil)
+        T.ok(ty.tostring(rec):find("readonly name: string", 1, true) ~= nil)
+        T.ok(ty.tostring(rec):find("age?: number", 1, true) ~= nil)
     end)
 end)
