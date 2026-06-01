@@ -54,7 +54,7 @@ They do not belong in `Type`.
 If admitted, effects extend arrows:
 
 ```text
-arrow(params: Pack, effects: Effect, returns: Pack)
+arrow(params: Pack, effects: Effect, returns: Pack, post: Postcondition)
 ```
 
 The first effect system must answer:
@@ -187,21 +187,69 @@ predicate-exporting part is still a fact transition, not itself an effect.
 
 Assertion signatures are the same category: fact transitions, not value types.
 
-Example shape:
+Kernel shape:
 
 ```text
-asserts(place, Predicate)
-asserts(place is Type)
+AssertSig(place, Predicate)
+AssertTypeSig(place, Type)        -- sugar for AssertSig(place, HasType(place, Type))
 ```
 
-An assertion function does not return a boolean guard result. Instead, if the
-call returns normally, the continuation receives the asserted fact. If the
-assertion fails at runtime, control does not continue normally.
+Surface syntax may look like `asserts x is T`, but the kernel should not encode
+that as `asserts(place is Type)`. `is` belongs to the predicate syntax, not to
+function application.
+
+An assertion signature is a type-level contract for a function. It does not mean
+the type checker executes the assertion. It means: if a call to a function with
+this signature returns normally, the continuation may assume the asserted
+predicate. If the assertion fails at runtime, control does not continue normally.
 
 Therefore the signature has two semantic components:
 
 - a normal-continuation fact transition;
 - a possible nonlocal exit on failure.
+
+Assertion signatures are not return types and cannot be intersected with value
+types. A function type such as:
+
+```text
+() -> (T & asserts x is U)
+```
+
+is ill-kinded in the kernel: `T` classifies a returned value, while
+`asserts x is U` classifies a continuation fact transition.
+
+The kernel form is an arrow with both a return pack and a postcondition:
+
+```text
+arrow(params: Pack, returns: Pack, post: Postcondition)
+Postcondition = true | assert(place, Predicate) | post_and(Postcondition, Postcondition)
+```
+
+Surface syntax may choose a compact spelling, but the semantic shape must keep
+returned values and continuation facts in separate fields. Intersecting them
+would let ordinary value-type algebra manipulate control-flow facts, which is a
+category error and a likely unsoundness source.
+
+Multiple assertion signatures are conjunctions in the postcondition domain, not
+repeated return-type suffixes. A surface spelling such as:
+
+```text
+() -> T asserts x is U asserts y is V
+```
+
+would elaborate to:
+
+```text
+arrow(
+  params = pack([]),
+  returns = pack([T]),
+  post = post_and(assert(x, HasType(x, U)), assert(y, HasType(y, V)))
+)
+```
+
+The postcondition conjunction is not `T & ...`; it combines facts that must all
+hold on the normal continuation. If either assertion cannot be proved for a user
+function body, the assertion signature is not exported.
 
 In the first kernel, the fact transition may be admitted only after the
 assertion implementation is verified or the assertion function is marked as a
@@ -302,12 +350,22 @@ Type T =
   userdata
   cdata
   literal(base, value)
-  arrow(params: Pack, returns: Pack)
+  arrow(params: Pack, returns: Pack, post: Postcondition)
   record(fields, indexes, row)
   nominal(name)
   union(T, T)
   intersection(T, T)
   complement(T)
+```
+
+`Postcondition` classifies normal-continuation fact transitions attached to an
+arrow. It is not a value type.
+
+```text
+Postcondition Q =
+  true
+  assert(place, Predicate)
+  post_and(Q, Q)
 ```
 
 `Pack` classifies value lists.
@@ -365,13 +423,14 @@ Selected clauses:
 Arrow denotation is intentionally abstract in the first kernel:
 
 ```text
-function(f) ∈ [[arrow(P, R)]]σ
+function(f) ∈ [[arrow(P, R, Q)]]σ
 ```
 
 means that calling `f` with any argument list in `[[P]]σ` either produces a
-return list in `[[R]]σ` or reaches an explicit unsafe/runtime boundary admitted
-by the operational semantics. The checker proves this for user functions by
-checking their bodies under the arrow. Trusted external functions require an
+return list in `[[R]]σ` and establishes postcondition `Q` on the normal
+continuation, or reaches an explicit unsafe/runtime boundary admitted by the
+operational semantics. The checker proves this for user functions by checking
+their bodies under the arrow. Trusted external functions require an
 unsafe/trusted certificate boundary.
 
 Record denotation is also store-indexed:
@@ -421,6 +480,105 @@ Type equality is both directions:
 A = B  iff  A <: B and B <: A
 ```
 
+## Kernel Judgments
+
+The prose rules above must eventually become judgments. The initial judgment
+set is:
+
+```text
+WFType(Δ, T)                         -- T is a well-formed value type
+WFPack(Δ, P)                         -- P is a well-formed value-list type
+WFPost(Δ, Q)                         -- Q is a well-formed postcondition
+Sub(Δ, T1, T2)                       -- T1 <: T2
+EqType(Δ, T1, T2)                    -- T1 = T2
+PackMove(Δ, dir, PackAlt, Pack)      -- value-list movement succeeds
+ExprSynth(Γ, e) => Claim             -- synthesize expression claim
+ExprCheck(Γ, e, T) => Proof          -- check expression against T
+StmtCheck(Γ, s) => Γ'                -- statement fact transition
+CallCheck(Γ, callee, args) => PackAlt, Postcondition
+PostApply(Γ, Q) => Γ'                -- apply normal-continuation facts
+GuardValid(Γ, f, Predicate)          -- true returns prove predicate
+AssertValid(Γ, f, Postcondition)     -- normal returns prove postcondition
+IdentityStep(Γ, op) => Γ'            -- table identity transition
+CertOK(kernel, cert, claim)          -- certificate validates claim
+```
+
+`Δ` is the type-level context. In the first kernel it is mostly empty because
+rank-N, HKTs, and type-level variables are not admitted. It exists so later
+extensions have a named place to add binders instead of modifying every
+judgment ad hoc.
+
+`Γ` is the term/fact context:
+
+```text
+Γ = {
+  bindings: symbol -> ValueClaim,
+  flow: edge/place -> ValueClaim,
+  identities: id -> TableState,
+  unsafe: UnsafeBoundary*
+}
+```
+
+All checker behavior must be expressible as one of these judgments or as an
+explicit extension to this list.
+
+### Well-Formedness
+
+Well-formedness is the first anti-ad-hoc barrier.
+
+Rules:
+
+- packs are well-formed only if every item/rest is a well-formed `Type`;
+- postconditions are well-formed only if their places are in scope and their
+  predicates are well-formed;
+- `arrow(P, R, Q)` is well-formed only if `P`, `R`, and `Q` are well-formed;
+- `record(F, I, row)` is well-formed only if every field/index component is a
+  well-formed `Type`;
+- `Pack` and `Postcondition` are not well-formed as `Type`;
+- effects, HKTs, rank-N binders, and refinement predicates are not well-formed
+  until admitted by an extension.
+
+This is where `T & asserts x is U` is rejected: the right operand is not a
+`Type`, so the intersection is ill-formed.
+
+### Subtyping And Equality Judgments
+
+`Sub(Δ, A, B)` is defined only for well-formed value types.
+
+`EqType(Δ, A, B)` is `Sub(Δ, A, B)` and `Sub(Δ, B, A)`.
+
+Arrow subtyping:
+
+```text
+Sub(Δ, arrow(Pa, Ra, Qa), arrow(Pb, Rb, Qb))
+```
+
+requires:
+
+- `PackMove(Δ, contra, one(Pb), Pa)` for parameters;
+- `PackMove(Δ, co, one(Ra), Rb)` for returns;
+- `PostImplies(Δ, Qa, Qb)` for postconditions.
+
+`PostImplies(Qa, Qb)` means every fact guaranteed by the producer's normal
+continuation is sufficient for the consumer's expected postcondition. For the
+initial kernel:
+
+```text
+PostImplies(Q, true)
+PostImplies(assert(p, A), assert(p, B)) if PredicateImplies(A, B)
+PostImplies(post_and(A, B), A)
+PostImplies(post_and(A, B), B)
+PostImplies(Q, post_and(A, B)) if PostImplies(Q, A) and PostImplies(Q, B)
+```
+
+Predicate implication is initially limited to type predicates:
+
+```text
+PredicateImplies(HasType(place, A), HasType(place, B)) if Sub(A, B)
+```
+
+No other predicate implication is admitted until specified.
+
 ## Pack Interaction
 
 Packs interact only at value-list movement sites.
@@ -459,6 +617,58 @@ pack(["ok" | "err", number | string])
 The latter is an admitted widening only at a named correlation-loss movement
 site, if such a site is added to the kernel.
 
+### Pack Movement Judgment
+
+`PackMove(Δ, dir, A, P)` consumes a `PackAlt` producer `A` at a movement site
+expecting pack `P`.
+
+Alternative rule:
+
+```text
+PackMove(Δ, dir, either(A, B), P)
+  iff PackMove(Δ, dir, A, P) and PackMove(Δ, dir, B, P)
+```
+
+Closed scalar list adjustment is a helper inside `PackMove`, not a general type
+operation:
+
+```text
+adjust(pack([A1..An], nil), m)[i] =
+  Ai   when i <= n
+  nil  when i > n
+```
+
+Covariant return movement:
+
+```text
+PackMove(Δ, co, one(pack([A1..An], nil)), pack([B1..Bm], nil))
+  iff for each i in 1..m, Sub(Δ, adjust(A, m)[i], Bi)
+```
+
+Surplus producer returns are ignored by the adjustment.
+
+Contravariant parameter movement:
+
+```text
+PackMove(Δ, contra, one(pack([A1..An], nil)), pack([B1..Bm], nil))
+  iff n = m and for each i in 1..n, Sub(Δ, Bi, Ai)
+```
+
+Open packs, varargs, and rest interaction are not admitted until the rest rules
+are mechanized. A checker may reject them before that point.
+
+Scalar extraction is also a named movement:
+
+```text
+ScalarOf(either(A, B)) = union(ScalarOf(A), ScalarOf(B))
+ScalarOf(one(pack([], nil))) = nil
+ScalarOf(one(pack([A1..An], rest))) = A1
+```
+
+This is an explicit correlation-loss site. It is allowed for scalar expression
+contexts, not for return-pack checking or destructuring that claims to preserve
+correlation.
+
 ## Records
 
 A record type is:
@@ -489,6 +699,39 @@ Record subtyping is structural decomposition:
 
 This is a rule over sealed record observations. It is not a rule over open table
 construction states.
+
+### Record Subtyping Judgment
+
+`Sub(Δ, record(Fa, Ia, rowa), record(Fb, Ib, rowb))` decomposes into named-field
+and index obligations.
+
+Named fields:
+
+- for every `k` in `Fb`, if `Fa[k]` exists, check presence/modifier/value rules;
+- if `Fb[k]` is optional and absent from `Fa`, accept;
+- if `Fb[k]` is required and absent from `Fa`, a covering subtype indexer may
+  satisfy it;
+- otherwise reject.
+
+Field value rule for subtype field `a` and supertype field `b`:
+
+```text
+if b.optional = false then a.optional must be false
+if b.readonly = false then a.readonly must be false
+if b.readonly = true  then Sub(Δ, a.type, b.type)
+if b.readonly = false then EqType(Δ, a.type, b.type)
+```
+
+Index rule:
+
+```text
+Sub(Δ, super_index.key, sub_index.key)      -- key contravariance
+Sub(Δ, sub_index.value, super_index.value)  -- readonly value covariance
+EqType(Δ, sub_index.value, super_index.value) -- mutable value invariance
+```
+
+Row openness affects unknown extra fields only. It does not grant write
+permission and does not type arbitrary keys.
 
 ## Table Identity
 
@@ -524,6 +767,63 @@ Rules:
 - escaped identities cannot be extended;
 - writes and escapes invalidate dependent flow facts for aliases of the same
   identity.
+
+### Identity Transition Judgment
+
+`IdentityStep(Γ, op) => Γ'` is the only judgment that can change table identity
+facts.
+
+Fresh:
+
+```text
+IdentityStep(Γ, fresh_table) =>
+  Γ[identities[id] = open(empty_record)]
+```
+
+Open write:
+
+```text
+IdentityStep(Γ, write(id, key, claim)) =>
+  Γ[identities[id] = open(record + key)]
+```
+
+requires `id` to be open and unescaped. If `key` already exists, the new claim
+must be equal to the existing field type. If `key` is new, the field is added to
+the construction record.
+
+Seal:
+
+```text
+IdentityStep(Γ, seal(id)) =>
+  Γ[identities[id] = sealed(record)]
+```
+
+returns a `ValueClaim` whose type is the sealed `record` and whose identity is
+`id`.
+
+Sealed write:
+
+```text
+IdentityStep(Γ, write(id, key, claim)) => Γ'
+```
+
+requires:
+
+- `id` is sealed;
+- `key` exists;
+- field is mutable;
+- `claim.type` equals the field type;
+- field/alias facts for `id` are invalidated in `Γ'`.
+
+Escape:
+
+```text
+IdentityStep(Γ, escape(id, reason)) =>
+  Γ[identities[id] = escaped(record?, reason)]
+```
+
+invalidates field/alias facts for `id` and prevents further construction
+extension.
 
 ## Claims, Facts, And Obligations
 
@@ -588,6 +888,30 @@ To call a value with callee claim `C` and argument producer `A`:
 For an overload declaration, the implementation body must be checked under every
 declared arrow branch before the overloaded claim is exported.
 
+Call judgment sketch:
+
+```text
+CallCheck(Γ, callee, args) => PackAlt, Q
+```
+
+Steps:
+
+1. `ExprSynth(Γ, callee) => C`.
+2. Collect arrow branches from `C.type`. For the first kernel, branches are
+   either a single `arrow` or an intersection of arrows.
+3. For each branch `arrow(P, R, Q)`:
+   - compute argument producer `A` from the argument expression list;
+   - require `PackMove(Δ, contra, A, P)`;
+   - if successful, include `R` in the result alternatives and `Q` in the
+     matching postconditions.
+4. If no branch matches, reject.
+5. If multiple branches match, return `PackAlt` over whole return packs and
+   postcondition disjunction is not admitted. Until postcondition disjunction is
+   specified, multiple matching branches must have equivalent postconditions or
+   the call is rejected.
+
+This last rule prevents losing facts from overloaded assertion signatures.
+
 ### Return
 
 A return statement consumes a `PackAlt` against the current function return
@@ -599,6 +923,39 @@ until the return movement site.
 A guard claim is exported only if every true-return path proves the predicate.
 Guard-produced flow facts are scoped to the true edge and invalidated by writes,
 alias escapes, and calls that may mutate relevant identities.
+
+Guard validity:
+
+```text
+GuardValid(Γ, f, Predicate)
+```
+
+requires every path that returns literal `true` from `f` to prove `Predicate` in
+that path's fact context. Paths returning `false` do not need to prove the
+predicate. Paths that do not return normally do not export the predicate.
+
+Assertion validity:
+
+```text
+AssertValid(Γ, f, Q)
+```
+
+requires every normal return path from `f` to prove postcondition `Q`.
+Non-returning failure paths do not need to prove `Q`, but they also cannot reach
+the normal continuation.
+
+Postcondition application:
+
+```text
+PostApply(Γ, true) = Γ
+PostApply(Γ, assert(place, HasType(place, T))) =
+  Γ with place narrowed to current_type(place) & T
+PostApply(Γ, post_and(A, B)) =
+  PostApply(PostApply(Γ, A), B)
+```
+
+Fact application can fail if the place is not stable, not in scope, or its
+identity-dependent fact has been invalidated.
 
 ### Unsafe Boundary
 
@@ -623,6 +980,81 @@ The certificate checker must verify at least:
 
 The certificate checker does not infer missing rules. If the proof object omits
 a required step, validation fails.
+
+### Certificate Node Families
+
+Certificates are DAGs. Nodes reference prior nodes by ID and contain enough data
+for the verifier to replay the kernel rule deterministically.
+
+Minimum node families:
+
+```text
+WFTypeNode(T)
+WFPackNode(P)
+WFPostNode(Q)
+SubNode(producer: Type, consumer: Type, rule, premises: proof*)
+EqNode(left: Type, right: Type, sub_lr: proof, sub_rl: proof)
+PackMoveNode(dir, producer: PackAlt, consumer: Pack, premises: proof*)
+ExprNode(expr_id, claim: ValueClaim, rule, premises: proof*)
+StmtNode(stmt_id, before: ContextId, after: ContextId, rule, premises: proof*)
+CallNode(callee_expr, arg_exprs, result: PackAlt, post: Postcondition, premises: proof*)
+PostNode(post: Postcondition, before: ContextId, after: ContextId, premises: proof*)
+IdentityNode(op, before: ContextId, after: ContextId, premises: proof*)
+GuardNode(function_id, predicate: Predicate, true_return_proofs: proof*)
+AssertNode(function_id, post: Postcondition, normal_return_proofs: proof*)
+UnsafeNode(site, exported_claim, boundary_kind)
+```
+
+The verifier checks node-local correctness only. It must not search for a
+different overload branch, invent a missing subtype proof, or reinterpret an
+unsafe node as a proof.
+
+Required determinism:
+
+- every referenced type, pack, postcondition, expression, statement, and context
+  has a stable ID;
+- normalization, if used, is either part of the kernel or represented by an
+  explicit proof node;
+- budget failure is not a certificate node for success;
+- unsafe nodes are accepted only where the kernel allows an unsafe/trusted
+  boundary.
+
+### Certificate Examples
+
+Checked annotation:
+
+```text
+ExprNode(e, claim = A, ...)
+WFTypeNode(T)
+SubNode(A.type, T, ...)
+StmtNode(local x: T = e, before = Γ, after = Γ[x -> { type = T }], ...)
+```
+
+Overload declaration:
+
+```text
+WFTypeNode(arrow(P1, R1, Q1))
+WFTypeNode(arrow(P2, R2, Q2))
+StmtNode(body checked under arrow(P1, R1, Q1), ...)
+StmtNode(body checked under arrow(P2, R2, Q2), ...)
+ExprNode(f, claim = intersection(arrow(P1, R1, Q1), arrow(P2, R2, Q2)), ...)
+```
+
+Assertion call:
+
+```text
+CallNode(assert_string, { x }, result = one(pack([])), post = assert(x, HasType(x, string)), ...)
+PostNode(assert(x, HasType(x, string)), before = Γ, after = Γ[x -> Γ[x] & string], ...)
+```
+
+Table seal:
+
+```text
+IdentityNode(fresh_table, Γ0, Γ1, ...)
+IdentityNode(write(id, "tag", "ok"), Γ1, Γ2, ...)
+IdentityNode(seal(id), Γ2, Γ3, ...)
+ExprNode(t, claim = { type = record({ tag = "ok" }, [], closed), identity = id }, ...)
+```
 
 ## Proof Targets
 
