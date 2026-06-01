@@ -20,6 +20,9 @@ the v7 kernel/certificate rules.
 The initial v7 semantic kernel draft is
 `docs/typechecker-v7-kernel-semantics.md`.
 
+Existing-system mining and the ad-hocness filter for importing semantics are in
+`docs/typechecker-v7-semantic-mining.md`.
+
 ## Premise
 
 Unsoundness is fatal. A checker that accepts an unsound program because a feature

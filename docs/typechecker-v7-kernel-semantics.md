@@ -14,6 +14,9 @@ This document defines the first semantic objects: runtime values, value types,
 packs, subtyping, claims, and movement sites. It intentionally does not define a
 production checker architecture.
 
+Semantic mining notes and the ad-hocness filter for importing existing
+type-system ideas live in `docs/typechecker-v7-semantic-mining.md`.
+
 ## Scope
 
 The first kernel admits only the constructs required to expose the historical
