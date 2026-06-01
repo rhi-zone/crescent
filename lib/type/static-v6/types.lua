@@ -3,22 +3,7 @@
 
 local M = {}
 
---:: AtomType = { tag: "atom", name: string }
---:: LiteralType = { tag: "literal", base: string, value: unknown }
---:: UnknownType = { tag: "unknown" }
---:: NeverType = { tag: "never" }
---:: AnyType = { tag: "any" }
---:: UnionType = { tag: "union", members: { [integer]: StaticType } }
---:: IntersectionType = { tag: "intersection", members: { [integer]: StaticType } }
---:: ComplementType = { tag: "complement", of: StaticType }
---:: Pack = { items: { [integer]: StaticType }, rest: StaticType | nil }
---:: ArrowType = { tag: "arrow", params: Pack, returns: Pack, effects: unknown }
---:: Field = { type: StaticType, optional: boolean, readonly: boolean }
---:: Index = { key: StaticType, value: StaticType, readonly: boolean }
---:: RecordType = { tag: "record", fields: { [string]: Field }, indexes: { [integer]: Index }, row: string }
---:: NominalType = { tag: "nominal", name: string }
---:: VarType = { tag: "var", id: integer }
---:: StaticType = AtomType | LiteralType | UnknownType | NeverType | AnyType | UnionType | IntersectionType | ComplementType | ArrowType | RecordType | NominalType | VarType
+--:: require "lib.type.static-v6.type_defs"
 
 local ATOMS = {
     ["nil"] = true,

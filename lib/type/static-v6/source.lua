@@ -14,37 +14,13 @@ local types   = require("lib.type.static-v6.types")
 
 local M = {}
 
---:: AtomType = { tag: "atom", name: string }
---:: LiteralType = { tag: "literal", base: string, value: unknown }
---:: UnknownType = { tag: "unknown" }
---:: NeverType = { tag: "never" }
---:: AnyType = { tag: "any" }
---:: UnionType = { tag: "union", members: { [integer]: StaticType } }
---:: IntersectionType = { tag: "intersection", members: { [integer]: StaticType } }
---:: ComplementType = { tag: "complement", of: StaticType }
---:: Pack = { items: { [integer]: StaticType }, rest: StaticType | nil }
---:: ArrowType = { tag: "arrow", params: Pack, returns: Pack, effects: unknown }
---:: PackResultSingle = { tag: "single", pack: Pack }
---:: PackResultUnion = { tag: "union", alternatives: { [integer]: Pack } }
---:: PackResult = PackResultSingle | PackResultUnion
---:: Field = { type: StaticType, optional: boolean, readonly: boolean }
---:: Index = { key: StaticType, value: StaticType, readonly: boolean }
---:: RecordType = { tag: "record", fields: { [string]: Field }, indexes: { [integer]: Index }, row: string }
---:: NominalType = { tag: "nominal", name: string }
---:: VarType = { tag: "var", id: integer }
---:: StaticType = AtomType | LiteralType | UnknownType | NeverType | AnyType | UnionType | IntersectionType | ComplementType | ArrowType | RecordType | NominalType | VarType
---:: CheckDiag = { code: string, message: string, details: unknown, ... }
---:: Span = { file: string | nil, line: integer | nil, column: integer | nil, ... }
---:: Obligation = { kind: "obligation", producer: StaticType, consumer: StaticType, site: string, reason: string, span: Span | nil, discharged: boolean, diagnostic: CheckDiag | nil, ... }
---:: BindingFact = { kind: "binding", symbol: string, type: StaticType, span: Span | nil, ... }
---:: UnsafeBoundary = { kind: "unsafe_boundary", type: StaticType, site: string, reason: string, span: Span | nil, ... }
+--:: require "lib.type.static-v6.type_defs"
 --:: RawAnn = { kind: integer, content: string, line: integer | nil, col: integer | nil, force_cast: boolean | nil, ... }
 --:: ListPool = { get: (ListPool, integer) -> integer, ... }
 --:: ASTNode = { kind: integer, flags: integer, line: integer, col: integer, data: { [integer]: integer, ... } }
 --:: ASTNodeArena = { get: (ASTNodeArena, integer) -> ASTNode, ... }
 --:: InternPool = { ... }
 --:: AnnState = {}
---:: Env = { bindings: { [string]: StaticType }, binding_facts: { [integer]: BindingFact }, obligations: { [integer]: Obligation }, unsafe_boundaries: { [integer]: UnsafeBoundary } }
 --:: Ctx = { filename: string, nodes: ASTNodeArena, lists: ListPool, pool: InternPool, annotations: { [integer]: RawAnn } | nil, used_annotations: { [integer]: boolean }, ann_state: AnnState, env: Env, diagnostics: { [integer]: CheckDiag } }
 --:: Result = { ok: boolean, sound: boolean, facts_valid: boolean, env: Env, diagnostics: { [integer]: CheckDiag } }
 

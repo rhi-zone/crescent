@@ -14,9 +14,7 @@ local M = {}
 
 --:: V6CliCaps = { read_file: (path: string) -> (string | nil, string | nil), write_out: (msg: string) -> nil, write_err: (msg: string) -> nil, is_tty: ((unknown) -> boolean) | nil }
 --:: V6CliOpts = { files: string[] }
---:: Span = { file: string | nil, line: integer | nil, column: integer | nil, ... }
---:: CheckDiag = { code: string, message: string, details: unknown, ... }
---:: UnsafeBoundary = { kind: "unsafe_boundary", type: unknown, site: string, reason: string, span: Span | nil, ... }
+--:: require "lib.type.static-v6.type_defs"
 
 --: (string[]) -> (V6CliOpts | nil, string | nil)
 local function parse_argv(argv)

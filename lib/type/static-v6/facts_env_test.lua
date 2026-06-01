@@ -11,14 +11,9 @@ local ty    = require("lib.type.static-v6.types")
 local facts = require("lib.type.static-v6.facts")
 local env   = require("lib.type.static-v6.env")
 
---:: CheckDiag = { code: string, message: string, details: unknown, ... }
---:: StaticType = { tag: string, ... }
---:: Span = { file: string | nil, line: integer | nil, column: integer | nil, ... }
---:: Obligation = { kind: string, producer: StaticType, consumer: StaticType, site: string, span: Span | nil, reason: string, discharged: boolean | nil, diagnostic: CheckDiag | nil, ... }
---:: BindingFact = { kind: string, symbol: string, type: StaticType, span: Span | nil, ... }
---:: UnsafeBoundaryFact = { kind: string, type: StaticType, site: string, reason: string, span: Span | nil, ... }
---:: FactsModule = { obligation: (StaticType, StaticType, string, string, Span | nil) -> Obligation, binding: (string, StaticType, Span | nil) -> BindingFact, unsafe_boundary: (StaticType, string, string, Span | nil) -> UnsafeBoundaryFact }
---:: EnvModule = { new: () -> table, bind: (table, string, StaticType, Span | nil) -> BindingFact, bind_checked: (table, string, StaticType, StaticType, string, string, Span | nil) -> (boolean, BindingFact | nil, CheckDiag | nil), lookup: (table, string) -> StaticType | nil, require_subtype: (table, StaticType, StaticType, string, string, Span | nil) -> Obligation, record_unsafe_boundary: (table, StaticType, string, string, Span | nil) -> UnsafeBoundaryFact, discharge_obligation: (Obligation) -> (boolean, CheckDiag | nil), discharge_all: (table) -> (boolean, { [integer]: CheckDiag }) }
+--:: require "lib.type.static-v6.type_defs"
+--:: FactsModule = { obligation: (StaticType, StaticType, string, string, Span | nil) -> Obligation, binding: (string, StaticType, Span | nil) -> BindingFact, unsafe_boundary: (StaticType, string, string, Span | nil) -> UnsafeBoundary }
+--:: EnvModule = { new: () -> table, bind: (table, string, StaticType, Span | nil) -> BindingFact, bind_checked: (table, string, StaticType, StaticType, string, string, Span | nil) -> (boolean, BindingFact | nil, CheckDiag | nil), lookup: (table, string) -> StaticType | nil, require_subtype: (table, StaticType, StaticType, string, string, Span | nil) -> Obligation, record_unsafe_boundary: (table, StaticType, string, string, Span | nil) -> UnsafeBoundary, discharge_obligation: (Obligation) -> (boolean, CheckDiag | nil), discharge_all: (table) -> (boolean, { [integer]: CheckDiag }) }
 
 --: (unknown, string) -> nil
 local function assert_type(v, want)

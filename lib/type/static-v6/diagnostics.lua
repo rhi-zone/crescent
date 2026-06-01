@@ -3,7 +3,7 @@
 
 local M = {}
 
---:: CheckDiag = { code: string, message: string, details: unknown, ... }
+--:: require "lib.type.static-v6.type_defs"
 
 --: (string, string, unknown | nil) -> CheckDiag
 function M.new(code, message, details)
