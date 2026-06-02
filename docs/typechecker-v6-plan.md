@@ -1,5 +1,13 @@
 # Typechecker v6 Design
 
+Status: v6 is prototype/research input for the v7 soundness-fatal checker.
+If work targets a proof-producing or mechanized-kernel-first checker, use
+`docs/typechecker-soundness-validation.md`,
+`docs/typechecker-v7-kernel-semantics.md`, and
+`docs/typechecker-v7-consolidation-audit.md` as authority. Any v6 rule must be
+restated as a v7 kernel rule with certificate obligations before it is
+implementation guidance for v7.
+
 v4 is the running checker. v5 is research material. v6 is a new line: derive
 the full checker from the Lua value universe and the ways values move through
 programs, then implement it as thin vertical slices that integrate into one

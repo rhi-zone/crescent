@@ -15,7 +15,8 @@ packs, subtyping, claims, and movement sites. It intentionally does not define a
 production checker architecture.
 
 Semantic mining notes and the ad-hocness filter for importing existing
-type-system ideas live in `docs/typechecker-v7-semantic-mining.md`.
+type-system ideas live in `docs/typechecker-v7-semantic-mining.md`. The current
+cross-document authority map is `docs/typechecker-v7-consolidation-audit.md`.
 
 ## Scope
 
@@ -32,9 +33,9 @@ failure points:
 - overload declarations;
 - explicit unsafe boundaries.
 
-The first kernel does not admit:
+The first kernel does not yet admit:
 
-- effects;
+- full effect rows beyond any explicitly admitted error/exit effect;
 - HKTs;
 - refinement types beyond guard-exported facts;
 - metatable precision beyond the table-identity seam;
@@ -83,21 +84,21 @@ The contract is part of the kernel, not an implementation note. If the checker
 has code for a `$Foo` name but the kernel has no `IntrinsicSpec`, then `$Foo` is
 not admitted in v7.
 
-Initial admitted type-level intrinsics are conservative and may be expanded one
-by one:
+Intrinsic admission status:
 
-```text
-$Require<T>
-$Opaque<T>
-$Opaque<T, U>
-$FfiC
-$GlobalScope
-$Throw<...Msg>
-$Catch<T, Default?>
-$EachField<T, F>
-$PatternReturn<P>
-$FindReturn<P>
-```
+| Intrinsic | v7 status |
+|-----------|-----------|
+| `$Opaque<T>` / `$Opaque<T, U>` | Candidate value-type constructor. Blocked on a stable nominal-origin rule, view proof, and certificate node. |
+| `$Require<T>` | Candidate trusted module bridge. Blocked on `ModuleEnv`, interface provenance, and certificate boundary. |
+| `$FfiC` | Candidate trusted FFI bridge. Blocked on an external-declaration environment and missing-symbol semantics. |
+| `$GlobalScope` | Candidate trusted declaration-scope bridge. Blocked on explicit declaration-environment provenance. |
+| `$Throw<...Msg>` / `$Catch<T, Default?>` | Candidate type-level control/diagnostic operator. Blocked on committed-path reduction semantics. |
+| `$EachField<T, F>` | Candidate record/type-level fold. Blocked on field-descriptor kind/gather semantics; if HKTs remain excluded, `F` must be a restricted named type-level function form. |
+| `$PatternReturn<P>` / `$FindReturn<P>` | Candidate domain-specific evaluators. Blocked on a specified Lua-pattern grammar subset and conservative fallback proof. |
+
+This table means "known candidates with existing Crescent precedent," not
+"already admitted by the first kernel." The first kernel may reject all of them
+until their `IntrinsicSpec` entries are written.
 
 Names that existed as temporary implementation helpers but are now expressible
 by match/types should not be admitted unless a new proof shows they are needed:
@@ -178,6 +179,21 @@ them before admitting any of them.
 
 Effects are properties of computations, not properties of single runtime values.
 They do not belong in `Type`.
+
+Existing Crescent design history treats runtime errors as an effect: `error(msg)`
+raises a `throws(E)`/`!throw<E>` effect, and `pcall` discharges that effect into a
+success/failure return pack. v7 has not yet decided whether the first kernel
+admits this minimal error effect immediately or defers all effect rows. This is
+a load-bearing fork, not a settled exclusion.
+
+Before the kernel types `error`, `pcall`, assertion failure behavior, or any
+function contract that distinguishes total from possibly-throwing computation,
+it must choose one of:
+
+- admit a minimal `throws(E)` effect on arrows with composition, subtyping,
+  discharge, and certificate rules;
+- explicitly state that totality/throwing is outside the first soundness theorem
+  and reject effect-sensitive stdlib contracts until the effect extension lands.
 
 If admitted, effects extend arrows:
 

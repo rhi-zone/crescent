@@ -1,7 +1,19 @@
 # Unified type-system design
 
-This directory is the **single canonical design** for crescent's type system.
-It supersedes the two prior, unreconciled lineages:
+Status: this directory is the canonical design for the pre-v7 unified
+v5/v6 lineage. It is historical/research input for v7, not the authority for
+the proof-producing or mechanized-kernel-first checker. For v7 work, start with
+`docs/typechecker-soundness-validation.md`,
+`docs/typechecker-v7-kernel-semantics.md`,
+`docs/typechecker-v7-semantic-mining.md`, and
+`docs/typechecker-v7-consolidation-audit.md`.
+
+If this directory conflicts with v7 docs, v7 owns the active soundness-fatal
+rule. If this directory contains a feature v7 excludes, the feature is mined
+evidence only until admitted by v7 kernel rules and certificate obligations.
+
+Within the pre-v7 lineage, this directory is the **single canonical design** for
+crescent's type system. It supersedes the two prior, unreconciled lineages:
 
 - the **rewrite-design lineage** (`docs/typechecker-rewrite-design.md`) — a
   clean-room set-theoretic design (first-class complement, RDNF, MLstruct-style

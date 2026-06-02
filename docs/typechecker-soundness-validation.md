@@ -23,6 +23,22 @@ The initial v7 semantic kernel draft is
 Existing-system mining and the ad-hocness filter for importing semantics are in
 `docs/typechecker-v7-semantic-mining.md`.
 
+Current cross-document authority and known conflicts are tracked in
+`docs/typechecker-v7-consolidation-audit.md`.
+
+## Document Authority
+
+For v7:
+
+- this document owns the version line, trust model, and acceptance bar;
+- `docs/typechecker-v7-kernel-semantics.md` owns admitted semantics and kernel
+  judgments;
+- `docs/typechecker-v7-semantic-mining.md` owns candidate/mined semantics and
+  the ad-hocness filter;
+- `docs/typechecker-v7-consolidation-audit.md` owns the current source hierarchy
+  and conflict list;
+- v4/v5/v6 docs are research inputs unless a rule is restated in the v7 kernel.
+
 ## Premise
 
 Unsoundness is fatal. A checker that accepts an unsound program because a feature
