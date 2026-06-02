@@ -81,10 +81,10 @@ unsoundness:
 - flow facts and user-defined guards;
 - unsafe boundaries.
 
-Features outside the kernel are not admitted by default. Effects, HKTs,
-refinement types, metatables beyond the core identity model, and module/stdlib
-precision require separate admission only after their interaction with this
-kernel is specified.
+Features outside the kernel are not admitted by default. Contextual control
+effects, HKTs, refinement types, metatables beyond the core identity model, and
+module/stdlib precision require separate admission only after their interaction
+with this kernel is specified.
 
 ## Validation Options
 

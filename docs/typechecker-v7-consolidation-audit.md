@@ -132,18 +132,29 @@ not proof-producing kernel specs.
 Resolution: add a status banner that scopes "canonical" to the pre-v7 unified
 design lineage.
 
-### Error Effects Are A Real Admission Fork
+### Contextual Control Effects Are A Real Admission Fork
 
 `docs/type-system-design/05-effects.md` and the README present effects as
 designed. The v7 kernel has not admitted full effect rows yet, but the older M5
 design clearly treats runtime errors as an effect: `error(msg)` produces
 `!throw<E>`, and `pcall` discharges that effect into a success/failure pack.
+The same shape applies to `yield`: coroutine bodies may suspend with `Y` and
+resume as `S`, and `coroutine.create` discharges that into
+`Coroutine<Y, S, R>`.
 
 Resolution: v7 must not casually exclude errors from the effect story. Before
 typing `error`, `pcall`, assertion failure behavior, or totality-sensitive
 function contracts, v7 must either admit a minimal `throws(E)` effect with
 composition/discharge/certificate rules or explicitly state that throwing is
 outside the first soundness theorem.
+
+The current v7 framing is **contextual control flow**, not a generic side-effect
+bucket:
+
+- `throws(E)` and `yields(Y, S)` are plausible initial effects;
+- IO authority is modeled as explicit runtime cap values, not an `io` effect;
+- table mutation is modeled first by identity transitions, not by a `mutates`
+  row.
 
 ### Setmetatable Semantics Diverge
 

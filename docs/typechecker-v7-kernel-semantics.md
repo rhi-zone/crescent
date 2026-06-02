@@ -175,10 +175,27 @@ because the callee text happened to be `setmetatable`.
 The excluded features are not all the same kind of thing. v7 should classify
 them before admitting any of them.
 
-### Effects
+### Contextual Control Effects
 
 Effects are properties of computations, not properties of single runtime values.
-They do not belong in `Type`.
+They do not belong in `Type`. In v7, the useful initial framing is narrower:
+effects are **contextual control-flow summaries**.
+
+A contextual control effect records that running a computation may interact with
+its dynamic evaluation context instead of simply returning a value list to its
+direct caller. The motivating cases are:
+
+- `throws(E)`: exits normal control and can be discharged by `pcall`;
+- `yields(Y, S)`: suspends to a coroutine resumer with `Y` and later resumes as
+  `S`, then can be discharged by `coroutine.create` into `Coroutine<Y, S, R>`.
+
+This framing intentionally does not make "anything observable" an effect.
+Capabilities such as IO are runtime values. If a function can read a file
+because it receives an `FsCap`, the authority is already represented by the
+parameter type. An `io` effect is not admitted as an authority mechanism.
+Table mutation is currently modeled by table identity transitions, not by a
+`mutates` effect. Mutation effects may be reconsidered only for general
+references/regions after the table-identity model is exhausted.
 
 Existing Crescent design history treats runtime errors as an effect: `error(msg)`
 raises a `throws(E)`/`!throw<E>` effect, and `pcall` discharges that effect into a
@@ -195,13 +212,13 @@ it must choose one of:
 - explicitly state that totality/throwing is outside the first soundness theorem
   and reject effect-sensitive stdlib contracts until the effect extension lands.
 
-If admitted, effects extend arrows:
+If admitted, contextual control effects extend arrows:
 
 ```text
 arrow(params: Pack, effects: Effect, returns: Pack, post: Postcondition)
 ```
 
-The first effect system must answer:
+The first contextual-control effect system must answer:
 
 - how effects compose through calls and sequencing;
 - how effects are discharged or handled;
@@ -210,15 +227,13 @@ The first effect system must answer:
 - whether effect polymorphism exists;
 - whether effect inference is allowed or annotations are required.
 
-Untyped effects are labels such as `throws`, `io`, or `mutates`.
+Untyped effects are labels such as `throws` or `yields`.
 
 Typed effects carry payloads:
 
 ```text
 throws(E)
-yields(Pack)
-mutates(region)
-requires(capability)
+yields(Y, S)
 ```
 
 Typed effects are more than labels. They introduce new semantic domains whose
@@ -230,9 +245,9 @@ Effect unsoundness examples:
 
 - treating a throwing function as total;
 - losing the payload type of a thrown error;
+- losing the yielded value type or resume-send type of a coroutine body;
 - selecting an overload branch while ignoring that only some branches perform a
-  required effect;
-- allowing a typed mutation effect to escape its region.
+  required control effect.
 
 ### Mutation Of References
 
@@ -256,17 +271,17 @@ Required rules:
 - mutable views are invariant;
 - escaping references lose precision or require region/capability proof.
 
-Reference mutation may also be represented as a typed effect:
+Reference mutation may later be represented as a typed effect:
 
 ```text
 mutates(region)
 reads(region)
 ```
 
-That is an extension decision. The core rule is that mutation must be accounted
-for either by explicit state transition rules or by typed effects whose
-semantics include those transitions. It cannot be a side effect hidden in a
-function type.
+That is a deferred extension decision and is outside the initial contextual
+control-effect set. The core rule is that mutation must be accounted for either
+by explicit state transition rules or by typed effects whose semantics include
+those transitions. It cannot be a side effect hidden in a function type.
 
 ### Rank-N Polymorphism
 

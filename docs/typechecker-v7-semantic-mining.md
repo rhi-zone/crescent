@@ -272,10 +272,11 @@ Ad-hocness warning: modeling effects as strings or special return slots
 recreates the v5 failure mode. Effect labels need kinding, payload subtyping,
 composition, and discharge rules.
 
-v7 import rule: full effects remain candidate work until admitted as a dedicated
-arrow component with row well-formedness and certificate nodes. Runtime errors
-are the likely first effect to consider: if v7 types `error`/`pcall` precisely,
-it needs at least `throws(E)` plus a discharge rule.
+v7 import rule: do not import effects as a generic side-effect bucket. The
+initial v7 effect frame is contextual control flow: `throws(E)` for `error` /
+`pcall`, and `yields(Y, S)` for coroutine/async suspension. IO authority is a
+runtime cap value, not an effect. Table mutation is modeled first by identity
+transitions, not by a `mutates` row.
 
 Primary reference:
 
@@ -349,8 +350,8 @@ The safe import order is:
 4. module/declaration/FFI environments before `$Require`, `$GlobalScope`, and
    `$FfiC`;
 5. proof-producing guards/assertions before assertion signatures in stdlib;
-6. errors/effects only after an arrow effect component and at least the
-   `throws(E)` composition/discharge semantics exist;
+6. contextual control effects only after an arrow effect component and
+   `throws(E)` / `yields(Y, S)` composition/discharge semantics exist;
 7. HKTs/rank-N only after kinds, quantifiers, skolemization, and escape checks.
 
 Any reversed dependency is an ad-hocness warning.
