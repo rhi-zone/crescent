@@ -18,7 +18,9 @@ For v7 work, read documents in this order:
    judgments, and certificate obligations.
 3. `docs/typechecker-v7-semantic-mining.md` — how existing systems and older
    Crescent semantics may be imported without reintroducing ad-hoc rules.
-4. This document — current consolidation status and known conflicts.
+4. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+   recommended v7 classifications.
+5. This document — current consolidation status and known conflicts.
 
 Older docs are research inputs:
 
@@ -187,3 +189,5 @@ as v7 authority.
    module names.
 5. Audit `docs/type-system.md` for stale claims about `any`, force casts, and
    current soundness gaps before using it as v7 philosophy input.
+6. Work through `docs/typechecker-v7-missing-feature-audit.md` from highest-risk
+   missing classification to lowest.

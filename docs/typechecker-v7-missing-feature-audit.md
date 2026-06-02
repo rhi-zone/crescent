@@ -1,0 +1,110 @@
+# Typechecker v7 Missing Feature Audit
+
+This audit mines v4/v5/design documents for features that are not yet admitted,
+not yet classified, or not yet precise enough in the v7 kernel.
+
+It is an audit, not an admission list. A feature remains outside v7 until the
+kernel has well-formedness rules, semantic rules, failure behavior, soundness
+obligations, and certificate nodes for it.
+
+## Classification Legend
+
+- **Admitted core:** already represented by the first v7 kernel.
+- **Candidate core extension:** likely needed for a full checker, but not yet
+  specified.
+- **Contextual-control effect:** belongs to the `throws`/`yields` effect frame.
+- **Trusted bridge:** depends on module, FFI, declaration, filesystem, or runtime
+  environment state.
+- **Type-level computation:** belongs in match/intrinsic/kinding machinery.
+- **Surface/directive feature:** parser or annotation surface; must elaborate to
+  kernel rules.
+- **Deferred power feature:** useful but not first-kernel material.
+- **Reject / unsafe boundary:** do not model as sound unless explicit trusted
+  boundary exists.
+
+## Feature Matrix
+
+| Feature | Source evidence | v7 status | Why it matters | Ad-hocness risk | Recommended v7 classification |
+|---|---|---|---|---|---|
+| Caps-first stdlib / optional caps prelude | `docs/typechecker-v4-stdlib-design.md` §1.2; CLAUDE caps-first; subagent audit | v7 says caps are runtime values but has no stdlib-loading/profile rule. | Prevents ambient `io`/`os`/`debug` authority from leaking into every checked library while still allowing app-level opt-in profiles. | High if modeled as `io`/`os` effects, ambient globals, or implicit checker defaults. | Candidate trusted environment/profile feature: default profile excludes ambient caps; optional profile declares caps explicitly as runtime values. |
+| Operators and structural metamethod lookup | `docs/v5-gaps.md` P6; `docs/typechecker-v5-constraints.md` C2; `lib/type/static/CLAUDE.md` solver rules; `docs/typechecker-ast-walker-design.md` operator sections | Barely covered. v7 has "operator application" as a movement site only in older v6 docs, not a kernel rule. | Arithmetic/comparison/concat/logical/unary operations and user numeric/string-like types are ordinary Lua semantics. | Per-operator predicates, hardcoded `is_numeric` tests, or method-name dispatch repeat the v4/v5 ad-hoc path. | Candidate core extension: operator judgment over primitive/metamethod tables, with no name-keyed fallbacks. |
+| Numeric tower and literal integer/float distinction | `docs/v5-gaps.md` parser-int-float; `docs/type-system.md` literal semantics; TODO tuple/numeric entries | v7 has `integer <: number` and literals, but not LuaJIT/Lua-version numeric target policy. | `1`, `1.0`, integer arithmetic, `%`, `/`, bit ops, and Lua 5.4 integer semantics differ. | Treating integer-valued floats as integers is unsound for target-specific semantics. | Candidate core extension or target profile: numeric literal kinding plus target-specific operator rules. |
+| `type(x)` narrowing | `docs/typechecker-v4-stdlib-design.md` §1.1/§2; `TODO.md` de-specialcase builtins | v7 has guards/facts but no primitive predicate contract for Lua `type`. | `if type(x) == "string"` is core Lua narrowing. | Dispatching on callee name `type` is name magic. | Candidate core extension: declared/trusted primitive predicate or verified stdlib guard, with certificate node. |
+| Truthiness and boolean control-flow narrowing | `docs/typechecker-v5-constraints.md` D11; TODO narrowing entries | Partially covered by flow facts and guards, but not specified as rules. | `if x then`, `if not x then return`, `and`/`or` shape dominates Lua code. | Local branch hacks can lose alias invalidation or nil/false precision. | Admitted-core gap: add explicit truthiness predicate rules and join/invalidation rules. |
+| `and` / `or` expression typing | TODO entries around `C_OR`; typechecker references | Not specified in v7 movement sites. | Lua idioms use `x or fallback` and `cond and a or b`; these are value-producing control flow. | Treating as boolean operators loses returned value types; treating as union too early loses flow facts. | Candidate core extension: expression-level control-flow movement preserving first-value semantics. |
+| For-in iterator protocol | `docs/v5-gaps.md` P6/Y1; `docs/typechecker-v4-stdlib-design.md` `pairs`/`ipairs`; TODO for-in entries | Not represented in v7. | `pairs`, `ipairs`, and custom iterators are central Lua constructs. | Name-keyed `pairs`/`ipairs` handlers were a known v5 failure. | Candidate core extension: generic iterator protocol over returned iterator/state/control triple; stdlib declarations consume it. |
+| Numeric for loop typing | `docs/v5-gaps.md` P6; v5 gen-pass entries | Not represented in v7. | Loop variables and bounds have numeric obligations. | Easy to silently widen loop variable to `unknown` or `number`. | Candidate core extension: statement rule emitting numeric subtype obligations. |
+| Method dispatch with `:` | `docs/v5-gaps.md` P6; `docs/type-system-design/06-setmetatable-construction.md`; `docs/typechecker-v5-constraints.md` D9 | v7 has call and table identity, but no method-call lowering rule. | Lua method calls are syntax for self-passing plus field/metatable lookup. | Special-casing `obj:method` separately from field-read/call creates inconsistent semantics. | Candidate core extension: lower to field/index lookup plus argument-pack rule; metatable lookup stays deferred. |
+| Metatable `__index` chain walking | `docs/v5-gaps.md` G6; `docs/type-system-design/06-setmetatable-construction.md`; consolidation audit | v7 explicitly defers metatable precision beyond table identity. | Class-like OO in real corpus depends on `__index`. | Chain walking can become name-keyed/cyclic/unterminating; setmetatable sealing fork unresolved. | Deferred core extension: structural, terminating metatable-index judgment after setmetatable fork is decided. |
+| `setmetatable` seal semantics | `docs/type-system-design/06-setmetatable-construction.md`; v7 consolidation audit | v7 has `$SetMetatable` cutout but currently fixes metatable without sealing. | Construction-phase table typing and OO idioms depend on this. | Conflicting rules between v7 and M6 can make table identity unsound. | Load-bearing design fork: decide in v7 before implementing metatable precision. |
+| Raw operations (`rawget`, `rawset`, `rawequal`, `rawlen`) | `docs/typechecker-v4-stdlib-design.md` stdlib scope | Not classified. | Raw ops bypass metamethods and interact with table identity/indexers. | Treating them as ordinary field ops may incorrectly include metatable behavior. | Candidate core/stdlib extension: raw table observation/write primitives over identity/record state. |
+| `select` | `docs/typechecker-v4-stdlib-design.md` §2; `TODO.md` de-specialcase builtins | Not represented. | Vararg manipulation is common and affects pack precision. | Literal-`"#"` branch and index-tail branch invite name/literal special cases. | Candidate pack extension: stdlib declaration over packs plus literal overloads; reject until pack generics are specified. |
+| Varargs and open packs | v7 kernel says open packs/rest not admitted until mechanized; `docs/type-system-design/03-variadic-packs.md`; `docs/v5-gaps.md` G17 | v7 has closed-pack rules and defers open/rest. | Needed for real Lua calls, `pcall`, iterators, `select`, vararg functions. | Approximating unknown arity as scalar `unknown` loses soundness/precision. | Candidate core extension: rest-pack movement, pack variables, variadic generics. |
+| Last-position multi-return spread | `docs/v5-gaps.md` P5/Y3; TODO multi-return entries | Partially covered by pack movement, but not statement-level rule. | `return f()` and `a,b = f()` are central Lua semantics. | Flattening to positional records or slotwise unions loses correlation. | Admitted-core gap: add expression-list expansion rules over `PackAlt`. |
+| `pcall` / `xpcall` | `docs/typechecker-v4-stdlib-design.md`; `docs/type-system-design/05-effects.md`; `docs/v5-gaps.md` P2/G17/Y1 | Reclassified as contextual-control effect candidate. | Needed for error handling and many force casts. | Name-keyed pcall handlers were a known failure; flat boolean/unknown result is too weak. | Contextual-control effect: `throws(E)` discharge plus pack-correlated success/failure result. |
+| `error` / assertion failure | `docs/typechecker-v4-stdlib-design.md`; `docs/type-system-design/05-effects.md`; v7 effects section | Reclassified as contextual-control effect candidate. | Distinguishes normal return from nonlocal exit; `assert` narrowing depends on normal continuation. | Modeling as `never` only ignores enclosing arrow totality; modeling as return type is wrong. | Contextual-control effect or explicit outside-theorem boundary; decide before stdlib precision. |
+| Coroutines / async / `yield` | `docs/type-system-design/05-effects.md`; `docs/typechecker-roadmap.md` F2; `docs/v5-gaps.md` 5.F3 residual | Reclassified as contextual-control effect candidate. | Precise `Coroutine<Y,S,R>` requires carrying yield/resume protocol from body to `create` and `resume`. | Scope-stack inspection and name-keyed coroutine handlers were v5 failure modes. | Contextual-control effect: `yields(Y,S)` discharged by `coroutine.create` into `Coroutine<Y,S,R>`. |
+| Module declarations and exports | `docs/typechecker-v5-constraints.md` D12/D14; `docs/v5-gaps.md` P4; `docs/type-system-design/README.md` M14 | v7 treats module IO/require resolution as not admitted; `$Require` is candidate trusted bridge. | Full checker must type `M = {}; M.foo = ...; return M` and cross-file imports. | Loader/cache side effects and `unknown` fallback can silently erase checking. | Trusted bridge plus module-boundary rule: certified module interface environment before `$Require`. |
+| `--:: require` declaration import | v5 gaps P4; user discussion; current v4 docs | Not separately classified from `$Require`. | Declaration imports are per-module, not global; needed to avoid duplicate types. | Treating annotations as global or file-local incorrectly causes duplication/visibility bugs. | Surface/directive feature elaborating to module declaration environment, not runtime require. |
+| `_G` / `$GlobalScope` | `lib/type/static/CLAUDE.md`; TODO; semantic mining | Candidate trusted bridge. | `_G` should reflect explicit declarations without ambient globals. | Easy to reintroduce ambient fallback or load-order dependence. | Trusted declaration bridge with certificate of declaration environment; no fallback indexer. |
+| FFI `cdef`, `ffi.C`, `ffi.load` | `docs/typechecker-v5-constraints.md` D13; `docs/typechecker-v4-stdlib-design.md`; semantic mining | Candidate trusted bridge. | LuaJIT FFI is core to Crescent libraries. | C parser approximation, file-local state, and missing-symbol semantics are trusted-boundary risks. | Trusted FFI declaration environment; `$FfiC` only projects certified/parsed declarations. |
+| Target-specific stdlib profiles | `docs/typechecker-v4-stdlib-design.md` caps stdlib; TODO multi-target support | Not classified. | LuaJIT/Lua 5.1/5.4 and caps policies change globals, numerics, FFI, coroutine behavior. | One ambient stdlib file hides target assumptions. | Trusted environment/profile feature; target profile is checker input and certificate context. |
+| Ambient IO / OS / debug globals | `docs/typechecker-v4-stdlib-design.md` §1.2; CLAUDE caps-first | Covered by caps-first stdlib/profile item above, but worth keeping as a negative case. | Sound caps-first checking requires absence of ambient authority. | Adding `io`/`os` globals for convenience violates sandboxability. | Reject by default; optional trusted application profile may declare them explicitly as cap values. |
+| Opaque / newtype / unseal | `CONTEXT.md`; `docs/opaque-two-arg-spec.md`; `docs/v5-gaps.md` P5/Y10; semantic mining | `$Opaque` candidate; newtype/unseal not in kernel. | Nominal abstraction and module privacy depend on stable identities and scoped unsealing. | Call-site identity hacks or global unseal can break abstraction. | Type-level/nominal extension: stable origin IDs, scoped unseal, module boundary rules. |
+| `augment` declarations | `docs/v5-gaps.md` P5/Y10; v4 implementation docs | Not classified. | Used to merge fields into existing type bindings. | Mutating aliases post-hoc can violate phase/order assumptions. | Surface/directive feature; elaborate to explicit type-binding extension with order/provenance rules, or defer. |
+| Templates | v7 template section; v5 gaps P3 | Partially specified in v7. | Needed for call-site body instantiation and construction helpers. | Can become implicit mutation summaries if generalized carelessly. | Candidate core extension already started; needs certificate shape and first-class restrictions pinned. |
+| Generic function body checking / skolemization | `docs/v5-gaps.md` P6; `docs/type-system-design/13` rank-N module | v7 excludes rank-N but needs generic body checking policy. | Generic signatures must be checked for all instantiations, not by example. | Free typevars absorbing body constraints cause unsound acceptance. | Candidate core extension: rank-1 generics with skolems/escape checks before rank-N. |
+| HKTs / kinds | roadmap F1; `docs/type-system-design/04-hkt-kinds.md`; v5 gaps G1-G5/G10 | v7 defers HKTs/kinds but `$EachField` and generic aliases pressure it. | Needed for type constructors and higher-order type functions. | Admitting constructor variables without kinding reintroduces ad-hoc application. | Deferred power feature; required before arbitrary type-level function parameters. |
+| Match types | `lib/type/static/CLAUDE.md`; `docs/type-system-design/08`; v5 gaps P5 | v7 mining prefers match substrate but kernel has no match rules. | Replaces helper intrinsics, enables `Keys`, `PairsReturn`, transformations. | Eager/speculative evaluation with diagnostics or wrong suspension can be unsound. | Type-level computation extension: match well-formedness, partition, suspension/rejection, correlation rules. |
+| Pattern types / capture sigil | v5 gaps P5; `lib/type/static/CLAUDE.md` capture and pattern notes | Not classified. | Needed for match aliases and type-level destructuring. | Bare-name capture fallback and field-order-dependent captures were known footguns. | Type-level computation surface; admit only explicit `%` capture and deterministic patterns. |
+| `$Throw` / `$Catch` type-level diagnostics | `docs/throw-catch-types-spec.md`; semantic mining | Candidate intrinsic, distinct from runtime `throws(E)`. | Useful for authored type-level contract errors. | Diagnostic side effects during speculative type evaluation are order-sensitive. | Type-level computation extension with committed-path diagnostics, not runtime effect. |
+| Indexed access `T[K]` | `docs/type-system-design/11`; TODO FFI/accessor entries | Not in v7 kernel except record read operations. | Needed for `T[K]` aliases, FFI maps, metatable/indexer reasoning. | Hardcoding `$IndexAccess` or string encodings repeats prefix-scoping failure. | Candidate type-level computation/core record operation with distribution and bounded deferral. |
+| Record field attributes: optional / readonly | `docs/type-system-design/07-records.md`; v7 records include fields with flags | Partially admitted. v7 has flags and subtyping sketch, but no surface/directive mapping. | Optional/readonly determine width and variance. | Prefix encodings like `$opt_`/`$ro_` are retired; mutable/covariant confusion is unsound. | Admitted-core gap: finish field presence/write/read rules and surface mapping. |
+| Indexers vs open rows | CLAUDE hard rule; v7 records section | Partially admitted. | Distinguishes unknown extra named fields from typed dynamic keys. | Treating `...` and `[K]:V` as interchangeable causes false acceptance. | Admitted-core gap: add explicit read/write/indexer movement rules and tests. |
+| Recursive types / μ | `docs/type-system-design/12`; TODO recursive type issues | v7 Type domain lacks μ. | Real data structures and aliases can be recursive. | Naive expansion causes nontermination; hash-consing/guarding required. | Deferred/core extension: equi- or iso-recursive rule with guarded expansion and certificate normalization. |
+| Type aliases, scoped names, and shadowing | many docs; prefix-scoping; v5 gaps | v7 has no type-binding environment beyond `Δ` placeholder. | All annotation/type-level syntax depends on scoped aliases. | Treating aliases as global caused previous duplication/confusion. | Surface/type-environment extension: scoped type bindings, module-local aliases, import rules. |
+| Overload ambiguity and branch selection | v7 call rules cover basic overloads | Partially admitted. | Need deterministic rejection/acceptance when multiple branches match, especially with posts/effects. | First-match semantics can hide unsound branch facts. | Admitted-core gap: add ambiguity rules for return packs, postconditions, and effects. |
+| Assertion signatures / runtime asserts | v7 covers postconditions but not stdlib `assert` fully | Partially admitted. | `assert(x)` narrows and may throw. | Treating assertion as pure narrowing ignores failure; treating as return type is wrong. | Fact transition plus contextual-control failure effect once `throws` admitted. |
+| Type assertions / force casts | v7 covers checked/force assertions | Partially admitted. | Existing corpus has many force casts; auditability matters. | Force casts as inference sources or silent proof are unsound. | Unsafe boundary: certificate `UnsafeNode`, never inference source. |
+| `unknown` movement restrictions | v7 asks open question; v5 constraints A2 | Not settled. | `unknown` as denotational top can still be misused as producer. | Allowing `unknown <: T` silently makes it `any`. | Load-bearing core decision: separate denotation top from movement restriction judgment. |
+| `any` | v7 says not in Type; v5 constraints say no any | Mostly admitted as unsafe boundary. | Existing docs/code still have explicit any; must be auditable. | Letting any into sound algebra invalidates theorem. | Unsafe boundary only; grep-able certificate/audit event. |
+| Error diagnostics / provenance | v5 gaps G5/Y8/Y9; soundness validation certificate nodes | v7 certificate docs mention stable IDs, not diagnostic provenance. | Proof failures and user errors need source mapping without storing spans in types. | Adding spans to type nodes pollutes semantics; losing provenance blocks usable errors. | Implementation/certificate adjunct: source provenance on obligations/nodes, not in Type. |
+| LSP/hover/go-to-def | TODO LSP entries | Not semantic. | Important tooling but not soundness kernel. | Can accidentally rely on checker side effects like pending require metadata. | Defer as implementation layer over certified facts. |
+
+## Highest-Risk Missing Classifications
+
+1. **Unknown movement restriction.** v7 currently asks whether `unknown` is a
+   denotational top with separate movement restrictions. This must be decided
+   before implementation, because it affects every annotation, call, cast, and
+   bridge fallback.
+2. **Open/rest packs.** Closed packs are not enough for Lua. `pcall`,
+   `coroutine.resume`, iterators, `select`, and varargs all depend on pack
+   variables/rest movement.
+3. **Contextual-control effects.** `throws(E)` and `yields(Y,S)` are needed for
+   precise `error`/`pcall` and coroutine/async semantics. They should not expand
+   into `io`/cap/mutation effects by default.
+4. **Module/declaration environments.** `$Require`, `--:: require`,
+   `$GlobalScope`, and module exports all need one environment/certificate story
+   or duplication/name-scope bugs will recur.
+5. **Metatable fork.** v7 and M6 currently differ on whether `setmetatable`
+   seals construction. Metatable precision and method dispatch depend on this.
+6. **Match/type-level computation substrate.** v7 wants to avoid helper
+   intrinsics, but that requires real match semantics, capture rules, and
+   suspension/rejection behavior.
+7. **Operator/metamethod semantics.** A full checker cannot punt on operators,
+   but per-operator local predicates are a known rewrite trigger.
+
+## Immediate Consolidation Recommendations
+
+1. Add a v7 section for `unknown` movement: decide "top denotation, restricted
+   concrete consumption" or another explicit rule.
+2. Promote open/rest packs from "open question" to the next core-spec task.
+3. Add a contextual-control effects mini-spec for `throws(E)` and
+   `yields(Y,S)` before typing `error`, `pcall`, or `coroutine`.
+4. Create `ModuleEnv` / `DeclEnv` placeholders in the kernel before writing
+   `$Require` or `$GlobalScope` `IntrinsicSpec`s.
+5. Decide the `setmetatable` seal fork before importing M6 `__index` walking.
+6. Write a match-type admission spec before adding `$EachField` or deleting
+   helper intrinsics.
+7. Add operator/metamethod lookup to the mining queue as a separate substrate,
+   not as stdlib-name special cases.

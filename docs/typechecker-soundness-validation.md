@@ -26,6 +26,9 @@ Existing-system mining and the ad-hocness filter for importing semantics are in
 Current cross-document authority and known conflicts are tracked in
 `docs/typechecker-v7-consolidation-audit.md`.
 
+Mined missing features and recommended v7 classifications are tracked in
+`docs/typechecker-v7-missing-feature-audit.md`.
+
 ## Document Authority
 
 For v7:
@@ -35,6 +38,8 @@ For v7:
   judgments;
 - `docs/typechecker-v7-semantic-mining.md` owns candidate/mined semantics and
   the ad-hocness filter;
+- `docs/typechecker-v7-missing-feature-audit.md` owns the current mined feature
+  gap list;
 - `docs/typechecker-v7-consolidation-audit.md` owns the current source hierarchy
   and conflict list;
 - v4/v5/v6 docs are research inputs unless a rule is restated in the v7 kernel.
