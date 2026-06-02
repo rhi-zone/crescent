@@ -2,6 +2,9 @@
 
 This document records the current soundness bar for the checker effort.
 
+For the current v7 entry point, source order, and decision queue, start with
+`docs/typechecker-v7.md`.
+
 ## Version Line
 
 If the checker is built around a mechanized kernel or proof-producing
@@ -33,6 +36,7 @@ Mined missing features and recommended v7 classifications are tracked in
 
 For v7:
 
+- `docs/typechecker-v7.md` owns the entry point and decision queue;
 - this document owns the version line, trust model, and acceptance bar;
 - `docs/typechecker-v7-kernel-semantics.md` owns admitted semantics and kernel
   judgments;

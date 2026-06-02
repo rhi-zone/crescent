@@ -3,6 +3,9 @@
 This document starts the v7 semantic kernel. It is the prose target for later
 mechanization and certificate checking.
 
+For the current v7 entry point and ordered decision queue, start with
+`docs/typechecker-v7.md`.
+
 v7 is not "v6 with more tests." v7 means:
 
 - unsoundness is fatal;

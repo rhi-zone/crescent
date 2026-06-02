@@ -2,6 +2,7 @@
 
 Status: v6 is prototype/research input for the v7 soundness-fatal checker.
 If work targets a proof-producing or mechanized-kernel-first checker, use
+`docs/typechecker-v7.md`,
 `docs/typechecker-soundness-validation.md`,
 `docs/typechecker-v7-kernel-semantics.md`, and
 `docs/typechecker-v7-consolidation-audit.md` as authority. Any v6 rule must be

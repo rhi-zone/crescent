@@ -3,6 +3,9 @@
 This document records the current source hierarchy for the typechecker design
 after the v7 soundness turn.
 
+For the current v7 entry point and ordered decision queue, start with
+`docs/typechecker-v7.md`.
+
 It does not supersede older design material by deletion. Older v4/v5/v6 docs
 remain useful evidence and design input, but they are not the authority for the
 soundness-fatal checker unless their rules are restated as v7 kernel rules with
@@ -12,15 +15,16 @@ certificate obligations.
 
 For v7 work, read documents in this order:
 
-1. `docs/typechecker-soundness-validation.md` — the trust model and acceptance
+1. `docs/typechecker-v7.md` — entry point and ordered decision queue.
+2. `docs/typechecker-soundness-validation.md` — the trust model and acceptance
    bar.
-2. `docs/typechecker-v7-kernel-semantics.md` — admitted kernel objects,
+3. `docs/typechecker-v7-kernel-semantics.md` — admitted kernel objects,
    judgments, and certificate obligations.
-3. `docs/typechecker-v7-semantic-mining.md` — how existing systems and older
+4. `docs/typechecker-v7-semantic-mining.md` — how existing systems and older
    Crescent semantics may be imported without reintroducing ad-hoc rules.
-4. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+5. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-5. This document — current consolidation status and known conflicts.
+6. This document — current consolidation status and known conflicts.
 
 Older docs are research inputs:
 

@@ -3,6 +3,7 @@
 Status: this directory is the canonical design for the pre-v7 unified
 v5/v6 lineage. It is historical/research input for v7, not the authority for
 the proof-producing or mechanized-kernel-first checker. For v7 work, start with
+`docs/typechecker-v7.md`,
 `docs/typechecker-soundness-validation.md`,
 `docs/typechecker-v7-kernel-semantics.md`,
 `docs/typechecker-v7-semantic-mining.md`, and
