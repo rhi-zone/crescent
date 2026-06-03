@@ -227,11 +227,14 @@ Open construction facts are not records and must not be fed to record subtyping.
 Some runtime values authorize checker-level transitions that are not ordinary
 pure arrows. `setmetatable` is the motivating case.
 
-This derives a primitive capability type or equivalent explicit capability
-metadata. It does not derive source-name dispatch.
+This derives primitive capabilities as value types. It does not derive
+source-name dispatch.
 
-Open design choice: whether primitive capabilities live in `Type` as
-`primitive_cap(name)` or in separate claim metadata.
+Decision direction: primitive capabilities live in `Type` as
+`primitive_cap(name)`. Claim metadata may track provenance, but primitive call
+authority is a visible value-type claim.
+
+See `docs/typechecker-v7-design-pass-primitive-capabilities.md`.
 
 ## Derived Feature Families
 
@@ -341,13 +344,10 @@ See `docs/typechecker-v7-design-pass-places.md`.
 
 Primitive callable behavior must be typed without name magic.
 
-Fork:
+Decision direction: represent primitive capabilities as value types,
+`primitive_cap(name)`, not hidden claim metadata.
 
-- represent capabilities as value types;
-- represent capabilities as claim metadata.
-
-The design must choose before `$SetMetatable` or other primitive cutouts are
-admitted.
+See `docs/typechecker-v7-design-pass-primitive-capabilities.md`.
 
 ### Setmetatable
 
@@ -394,8 +394,7 @@ primitive category or reject the feature.
 The next pass should not write a full spec. It should resolve the design forks
 in dependency order:
 
-1. Are primitive capabilities types or metadata?
-2. Is the full arrow effectful from the start?
-3. What is the `set_metatable` model?
-4. What are the first-order limits, if any, of generics and type-level
+1. Is the full arrow effectful from the start?
+2. What is the `set_metatable` model?
+3. What are the first-order limits, if any, of generics and type-level
    computation?

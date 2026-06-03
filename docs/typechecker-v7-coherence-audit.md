@@ -107,10 +107,10 @@ argument has no stable caller place.
 `$SetMetatable` was used as a callee type in certificates, but the `Type`
 grammar had no primitive capability constructor.
 
-Resolution: primitive cutouts need a first-class type form such as
-`primitive_cap(name)` with WF, denotation/call semantics, and certificates, or
-they must move outside `Type` into explicit capability metadata. A raw string in
-`PrimitiveCallNode` is not coherent.
+Resolution status: the primitive-capability design pass chooses first-class
+value types, represented as `primitive_cap(name)`, rather than hidden claim
+metadata. The remaining work is detailed `PrimitiveSpec` transcription and
+certificate validation for each primitive.
 
 ### Setmetatable Seal Fork
 
@@ -146,7 +146,7 @@ The coherent admission order is:
 1. `unknown` movement and concrete-consumption restrictions.
 2. Closed-pack hygiene: no admitted rest until rest movement exists.
 3. Arrow postcondition binders.
-4. Primitive capability type or capability metadata.
+4. Primitive capability specs.
 5. Table identity read/write/indexer judgments.
 6. The `set_metatable` seal/fix fork.
 7. Minimal contextual effects: `throws(E)` and possibly `yields(Y, S)`.

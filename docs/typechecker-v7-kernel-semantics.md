@@ -145,7 +145,7 @@ perform state transitions in the checker model. These are explicit primitive
 callable cutouts. They are few, use the reserved `$` type-level namespace, and
 are audited as exceptions to the ordinary declared-arrow path.
 
-Proposed initial primitive capability type:
+Primitive capability type:
 
 ```text
 primitive_cap("$SetMetatable")
@@ -175,10 +175,11 @@ The verifier checks that the callee has the primitive capability type and that
 the named operation follows the kernel rule. It does not trust the frontend
 because the callee text happened to be `setmetatable`.
 
-The exact `set_metatable` identity transition remains blocked on the
-seal-versus-fix fork. Until v7 closes that fork, this primitive capability is a
-reserved cutout shape, not permission to implement metatable lookup or
-constructor sealing behavior.
+The capability representation is chosen: primitive capabilities are value
+types, not hidden claim metadata. The exact `set_metatable` identity transition
+remains blocked on the seal-versus-fix fork. Until v7 closes that fork, this
+primitive capability is a reserved cutout shape, not permission to implement
+metatable lookup or constructor sealing behavior.
 
 ## Deferred Feature Classification
 
@@ -564,7 +565,7 @@ ordinary pack rest.
 
 `primitive_cap(name)` classifies a trusted callable primitive capability. It is
 admitted only for names with a primitive cutout contract. It is not source-name
-dispatch.
+dispatch and not hidden `ValueClaim` metadata.
 
 `Pack` classifies value lists.
 
@@ -698,6 +699,7 @@ ExprSynth(Γ, e) => Claim             -- synthesize expression claim
 ExprCheck(Γ, e, T) => Proof          -- check expression against T
 StmtCheck(Γ, s) => Γ'                -- statement fact transition
 CallCheck(Γ, callee, args) => PackAlt, Postcondition
+PrimitiveCallCheck(Γ, callee_claim, args) => Γ', PackAlt, Postcondition
 PostApply(Γ, Q) => Γ'                -- apply normal-continuation facts
 GuardValid(Γ, f, Predicate)          -- true returns prove predicate
 AssertValid(Γ, f, Postcondition)     -- normal returns prove postcondition
@@ -1305,6 +1307,7 @@ PackMoveNode(dir, producer: PackAlt, consumer: Pack, premises: proof*)
 ExprNode(expr_id, claim: ValueClaim, rule, premises: proof*)
 StmtNode(stmt_id, before: ContextId, after: ContextId, rule, premises: proof*)
 CallNode(callee_expr, arg_exprs, result: PackAlt, post: Postcondition, premises: proof*)
+PrimitiveCallNode(callee_type: primitive_cap(name), op, args, before: ContextId, after: ContextId, result: PackAlt, post: Postcondition, premises: proof*)
 PostNode(post: Postcondition, before: ContextId, after: ContextId, premises: proof*)
 IdentityNode(op, before: ContextId, after: ContextId, premises: proof*)
 GuardNode(function_id, predicate: Predicate, true_return_proofs: proof*)
