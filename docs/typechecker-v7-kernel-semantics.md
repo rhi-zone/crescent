@@ -1365,8 +1365,8 @@ These are not admitted yet:
 
 - whether complement is mechanized as set complement directly or via a bounded
   normal form;
-- whether `unknown` should be a denotational top only, with a separate movement
-  restriction judgment for concrete consumers;
+- the exact per-operation transcription of the unknown movement decision from
+  `docs/typechecker-v7-design-pass-unknown.md`;
 - the exact operational semantics for functions before recursion and closures
   are admitted;
 - the minimal table/metatable semantics needed for real Crescent code;

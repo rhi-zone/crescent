@@ -318,13 +318,12 @@ These are first-principles forks, not implementation TODOs.
 `unknown` derives naturally as denotational top. It does not automatically
 derive permission to consume an unknown value as a concrete type.
 
-Fork:
+Decision direction: `unknown` is denotational top, and elimination is governed
+by each operation's domain. Operations defined for all values may consume
+`unknown`; concrete operations require prior narrowing or an explicit unsafe
+boundary.
 
-- treat `unknown` purely as top, with ordinary subtyping only;
-- add a separate movement restriction for concrete consumption;
-- require explicit narrowing or unsafe boundary before concrete use.
-
-The design must choose before modules, FFI, casts, and fallback behavior.
+See `docs/typechecker-v7-design-pass-unknown.md`.
 
 ### Parameter Places
 
@@ -396,10 +395,9 @@ primitive category or reject the feature.
 The next pass should not write a full spec. It should resolve the design forks
 in dependency order:
 
-1. What exactly is `unknown` allowed to do?
-2. What is the binder/place model?
-3. Are primitive capabilities types or metadata?
-4. Is the full arrow effectful from the start?
-5. What is the `set_metatable` model?
-6. What are the first-order limits, if any, of generics and type-level
+1. What is the binder/place model?
+2. Are primitive capabilities types or metadata?
+3. Is the full arrow effectful from the start?
+4. What is the `set_metatable` model?
+5. What are the first-order limits, if any, of generics and type-level
    computation?

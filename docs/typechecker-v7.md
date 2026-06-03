@@ -15,15 +15,17 @@ Read in this order:
    acceptance bar.
 2. `docs/typechecker-v7-first-principles.md` — pre-spec derivation of the
    checker's semantic primitives and design forks.
-3. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
+3. `docs/typechecker-v7-design-pass-unknown.md` — first refinement pass,
+   deciding unknown movement from operation domains.
+4. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
    consistent whole, plus blocking semantic seams.
-4. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
+5. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
    judgments, and certificate obligations.
-5. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
+6. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
    older Crescent designs or external systems without reintroducing ad-hocness.
-6. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+7. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-7. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
+8. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
    and lineage status.
 
 Older v4/v5/v6 docs are research input only. If they conflict with v7, v7 owns
@@ -59,28 +61,25 @@ Not yet admitted:
 
 Work these before implementation verticals:
 
-1. **`unknown` movement.** Decide whether `unknown` is denotational top with a
-   separate concrete-consumption restriction, or another explicit rule. This
-   affects calls, annotations, casts, and all trusted bridges.
+1. **Place/binder model.** Decide how facts and postconditions name stable
+   places after `unknown` refinement.
 2. **Open/rest packs.** Closed packs are insufficient for Lua. Varargs,
    `pcall`, `coroutine.resume`, iterators, `select`, and spread returns need a
    pack-variable/rest story.
-3. **Arrow postcondition binders.** Decide how assertion postconditions bind
-   parameter places before assertion function types become certificate-valid.
-4. **Primitive capabilities.** Decide whether primitive cutouts such as
+3. **Primitive capabilities.** Decide whether primitive cutouts such as
    `$SetMetatable` are first-class `Type` constructors or external capability
    metadata.
-5. **Contextual control effects.** Specify at least `throws(E)` and
+4. **Contextual control effects.** Specify at least `throws(E)` and
    `yields(Y, S)` or explicitly defer precise `error`/`pcall`/coroutine typing.
    Do not generalize this into IO/cap/mutation effects by default.
-6. **Module/declaration environments.** Define `ModuleEnv`/`DeclEnv` before
+5. **Module/declaration environments.** Define `ModuleEnv`/`DeclEnv` before
    admitting `$Require`, `--:: require`, `$GlobalScope`, or module exports.
-7. **Setmetatable fork.** Decide whether `set_metatable` seals construction or
+6. **Setmetatable fork.** Decide whether `set_metatable` seals construction or
    only fixes metatable state. `__index` chain walking depends on this.
-8. **Match/type-level computation.** Specify match evaluation, captures,
+7. **Match/type-level computation.** Specify match evaluation, captures,
    suspension/rejection, and field descriptors before admitting `$EachField` or
    deleting helper intrinsics.
-9. **Operator/metamethod substrate.** Define operator application through
+8. **Operator/metamethod substrate.** Define operator application through
    primitive/metamethod lookup, not per-operator predicates or name-keyed
    handlers.
 

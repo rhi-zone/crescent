@@ -66,17 +66,18 @@ obligations, and certificate nodes for it.
 | Overload ambiguity and branch selection | v7 call rules cover basic overloads | Partially admitted. | Need deterministic rejection/acceptance when multiple branches match, especially with posts/effects. | First-match semantics can hide unsound branch facts. | Admitted-core gap: add ambiguity rules for return packs, postconditions, and effects. |
 | Assertion signatures / runtime asserts | v7 covers postconditions but not stdlib `assert` fully | Partially admitted. | `assert(x)` narrows and may throw. | Treating assertion as pure narrowing ignores failure; treating as return type is wrong. | Fact transition plus contextual-control failure effect once `throws` admitted. |
 | Type assertions / force casts | v7 covers checked/force assertions | Partially admitted. | Existing corpus has many force casts; auditability matters. | Force casts as inference sources or silent proof are unsound. | Unsafe boundary: certificate `UnsafeNode`, never inference source. |
-| `unknown` movement restrictions | v7 asks open question; v5 constraints A2 | Not settled. | `unknown` as denotational top can still be misused as producer. | Allowing `unknown <: T` silently makes it `any`. | Load-bearing core decision: separate denotation top from movement restriction judgment. |
+| `unknown` movement restrictions | v7 design pass chooses domain-governed elimination. | Direction chosen; kernel transcription pending. | `unknown` as denotational top can still be misused if operations add fallback branches. | Allowing concrete consumption silently makes it `any`. | Every operation must state its domain; unknown may move only through preservation, total observation, proven refinement, or unsafe boundary. |
 | `any` | v7 says not in Type; v5 constraints say no any | Mostly admitted as unsafe boundary. | Existing docs/code still have explicit any; must be auditable. | Letting any into sound algebra invalidates theorem. | Unsafe boundary only; grep-able certificate/audit event. |
 | Error diagnostics / provenance | v5 gaps G5/Y8/Y9; soundness validation certificate nodes | v7 certificate docs mention stable IDs, not diagnostic provenance. | Proof failures and user errors need source mapping without storing spans in types. | Adding spans to type nodes pollutes semantics; losing provenance blocks usable errors. | Implementation/certificate adjunct: source provenance on obligations/nodes, not in Type. |
 | LSP/hover/go-to-def | TODO LSP entries | Not semantic. | Important tooling but not soundness kernel. | Can accidentally rely on checker side effects like pending require metadata. | Defer as implementation layer over certified facts. |
 
 ## Highest-Risk Missing Classifications
 
-1. **Unknown movement restriction.** v7 currently asks whether `unknown` is a
-   denotational top with separate movement restrictions. This must be decided
-   before implementation, because it affects every annotation, call, cast, and
-   bridge fallback.
+1. **Unknown movement transcription.** v7 now chooses `unknown` as denotational
+   top with operation-domain-governed elimination. The remaining work is to
+   transcribe that decision into each movement and operation judgment before
+   implementation, because it affects every annotation, call, cast, and bridge
+   fallback.
 2. **Open/rest packs.** Closed packs are not enough for Lua. `pcall`,
    `coroutine.resume`, iterators, `select`, and varargs all depend on pack
    variables/rest movement.
