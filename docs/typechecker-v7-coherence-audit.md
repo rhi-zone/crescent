@@ -72,14 +72,15 @@ and pack-adjustment semantics are mechanized.
 
 ### Contextual Effects
 
-`throws(E)` and `yields(Y, S)` are the right shape for contextual control flow,
-but they are not yet integrated into arrows, sequencing, subtyping, overload
-selection, or certificates.
+`throws(E)` and `yields(Y, S)` are the chosen initial contextual-control
+effects. They still need detailed sequencing, subtyping, overload-selection,
+discharge, and certificate rules.
 
-Resolution: until the effect extension lands, v7 can prove only normal-return
-partial correctness. Precise `error`, `pcall`, coroutine yield/resume, assertion
-failure behavior, and totality-sensitive contracts remain rejected or trusted
-unsafe boundaries.
+Resolution status: the effects design pass chooses effectful arrows for the
+full design, with `pure` as the empty effect. The remaining work is detailed
+kernel transcription for sequencing, subtyping, overload alternatives,
+discharge, and certificates. Precise `pcall` and coroutine APIs still also
+depend on open/rest packs.
 
 ### Assertion Failure
 
@@ -149,7 +150,7 @@ The coherent admission order is:
 4. Primitive capability specs.
 5. Table identity read/write/indexer judgments.
 6. The `set_metatable` seal/fix fork.
-7. Minimal contextual effects: `throws(E)` and possibly `yields(Y, S)`.
+7. Detailed contextual-effect transcription and discharge rules.
 8. Open/rest packs and pack variables.
 9. Module/declaration/FFI environments and trusted bridge certificates.
 10. Match/type-level computation and field-descriptor folds.

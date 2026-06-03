@@ -210,29 +210,20 @@ references/regions after the table-identity model is exhausted.
 
 Existing Crescent design history treats runtime errors as an effect: `error(msg)`
 raises a `throws(E)`/`!throw<E>` effect, and `pcall` discharges that effect into a
-success/failure return pack. v7 has not yet decided whether the first kernel
-admits this minimal error effect immediately or defers all effect rows. This is
-a load-bearing fork, not a settled exclusion.
+success/failure return pack. v7 now chooses effectful arrows for the full
+architecture. A pure-only kernel may still be staged as a proof subset, but it
+is not the full checker design.
 
-Before the kernel types `error`, `pcall`, assertion failure behavior, or any
-function contract that distinguishes total from possibly-throwing computation,
-it must choose one of:
-
-- admit a minimal `throws(E)` effect on arrows with composition, subtyping,
-  discharge, and certificate rules;
-- explicitly state that totality/throwing is outside the first soundness theorem
-  and reject effect-sensitive stdlib contracts until the effect extension lands.
-
-In the contextual-effect extension, arrows become:
+Full arrows are:
 
 ```text
 arrow(params: BinderPack, effects: Effect, returns: Pack, post: Postcondition)
 ```
 
-The first-kernel `Type` grammar below does not include this effect slot. Until
-the extension is admitted, effect-sensitive stdlib contracts must be rejected or
-treated as explicit trusted boundaries; they must not be silently encoded as
-ordinary arrows.
+The pure subset uses `effects = pure`. Until non-pure effects have composition,
+subtyping, discharge, and certificate rules, effect-sensitive stdlib contracts
+must be rejected or treated as explicit trusted boundaries; they must not be
+silently encoded as normal-return-only arrows.
 
 The first contextual-control effect system must answer:
 
@@ -396,7 +387,7 @@ is ill-kinded in the kernel: `T` classifies a returned value, while
 The kernel form is an arrow with both a return pack and a postcondition:
 
 ```text
-arrow(params: BinderPack, returns: Pack, post: Postcondition)
+arrow(params: BinderPack, effects: Effect, returns: Pack, post: Postcondition)
 Postcondition = true | assert(place, Predicate) | post_and(Postcondition, Postcondition)
 ```
 
@@ -417,6 +408,7 @@ would elaborate to:
 ```text
 arrow(
   params = binder_pack([]),
+  effects = pure,
   returns = pack([T]),
   post = post_and(assert(param(x), HasType(param(x), U)), assert(param(y), HasType(param(y), V)))
 )
@@ -528,7 +520,7 @@ Type T =
   cdata
   literal(base, value)
   primitive_cap(name)
-  arrow(params: BinderPack, returns: Pack, post: Postcondition)
+  arrow(params: BinderPack, effects: Effect, returns: Pack, post: Postcondition)
   record(fields, indexes, row)
   nominal(name)
   union(T, T)
@@ -562,6 +554,21 @@ ParamBinding =
 
 Non-empty binder rest is reserved for the open-pack extension, matching
 ordinary pack rest.
+
+`Effect` classifies contextual control behavior.
+
+```text
+Effect E =
+  pure
+  throws(Type)
+  yields(yield: Pack, resume: Pack)
+  effect_union(E, E)
+  effect_var(name)
+```
+
+`pure` is the empty effect. `throws` and `yields` are admitted as full-design
+forms; a staged first mechanized kernel may restrict well-formed arrows to
+`effects = pure` until effect rules are mechanized.
 
 `primitive_cap(name)` classifies a trusted callable primitive capability. It is
 admitted only for names with a primitive cutout contract. It is not source-name
@@ -624,17 +631,16 @@ Selected clauses:
 Arrow denotation is intentionally abstract in the first kernel:
 
 ```text
-function(f) ∈ [[arrow(BP, R, Q)]]σ
+function(f) ∈ [[arrow(BP, E, R, Q)]]σ
 ```
 
 means normal-return partial correctness: when calling `f` with any argument
 list in the value-list denotation of `BP` returns normally, the return list is
 in `[[R]]σ` and
 postcondition `Q` holds on the normal continuation. Nonlocal exits such as
-throwing or yielding are not modeled by first-kernel arrows. They require the
-contextual-effect extension or an explicit unsafe/trusted certificate boundary.
-The checker proves ordinary user-function arrows by checking their bodies under
-the arrow.
+throwing or yielding must be included in `E`, discharged by an enclosing rule,
+or represented by an explicit unsafe/trusted certificate boundary. The checker
+proves ordinary user-function arrows by checking their bodies under the arrow.
 
 Record denotation is also store-indexed:
 
@@ -691,6 +697,7 @@ set is:
 ```text
 WFType(Δ, T)                         -- T is a well-formed value type
 WFPack(Δ, P)                         -- P is a well-formed value-list type
+WFEffect(Δ, E)                       -- E is a well-formed contextual effect
 WFPost(Δ, places, Q)                 -- Q is a well-formed postcondition over places
 Sub(Δ, T1, T2)                       -- T1 <: T2
 EqType(Δ, T1, T2)                    -- T1 = T2
@@ -698,8 +705,8 @@ PackMove(Δ, dir, PackAlt, Pack)      -- value-list movement succeeds
 ExprSynth(Γ, e) => Claim             -- synthesize expression claim
 ExprCheck(Γ, e, T) => Proof          -- check expression against T
 StmtCheck(Γ, s) => Γ'                -- statement fact transition
-CallCheck(Γ, callee, args) => PackAlt, Postcondition
-PrimitiveCallCheck(Γ, callee_claim, args) => Γ', PackAlt, Postcondition
+CallCheck(Γ, callee, args) => Effect, PackAlt, Postcondition
+PrimitiveCallCheck(Γ, callee_claim, args) => Γ', Effect, PackAlt, Postcondition
 PostApply(Γ, Q) => Γ'                -- apply normal-continuation facts
 GuardValid(Γ, f, Predicate)          -- true returns prove predicate
 AssertValid(Γ, f, Postcondition)     -- normal returns prove postcondition
@@ -738,12 +745,14 @@ Rules:
   admitted;
 - postconditions are well-formed only if their places are in the arrow's
   parameter/place context and their predicates are well-formed;
-- `arrow(BP, R, Q)` is well-formed only if `BP`, `R`, and `Q` are well-formed;
+- `arrow(BP, E, R, Q)` is well-formed only if `BP`, `E`, `R`, and `Q` are
+  well-formed;
 - `record(F, I, row)` is well-formed only if every field/index component is a
   well-formed `Type`;
 - `Pack` and `Postcondition` are not well-formed as `Type`;
-- effects, HKTs, rank-N binders, non-empty pack rests, and refinement
-  predicates are not well-formed until admitted by an extension.
+- non-pure effects, HKTs, rank-N binders, non-empty pack rests, and refinement
+  predicates may be restricted by staged proof subsets until their rules are
+  mechanized.
 
 Arrow parameter places use binder packs as the current design direction. Source
 annotation names are binder syntax only and desugar to binder IDs. They are not
@@ -761,12 +770,13 @@ This is where `T & asserts x is U` is rejected: the right operand is not a
 Arrow subtyping:
 
 ```text
-Sub(Δ, arrow(BPa, Ra, Qa), arrow(BPb, Rb, Qb))
+Sub(Δ, arrow(BPa, Ea, Ra, Qa), arrow(BPb, Eb, Rb, Qb))
 ```
 
 requires:
 
 - `PackMove(Δ, contra, one(pack_types(BPb)), pack_types(BPa))` for parameters;
+- `EffectSub(Δ, Ea, Eb)` for contextual effects;
 - `PackMove(Δ, co, one(Ra), Rb)` for returns;
 - `PostImplies(Δ, Qa, Qb)` for postconditions after alpha-renaming binder IDs.
 
@@ -1124,7 +1134,7 @@ declared arrow branch before the overloaded claim is exported.
 Call judgment sketch:
 
 ```text
-CallCheck(Γ, callee, args) => PackAlt, Q
+CallCheck(Γ, callee, args) => E, PackAlt, Q
 ```
 
 Steps:
@@ -1132,17 +1142,18 @@ Steps:
 1. `ExprSynth(Γ, callee) => C`.
 2. Collect arrow branches from `C.type`. For the first kernel, branches are
    either a single `arrow` or an intersection of arrows.
-3. For each branch `arrow(BP, R, Q)`:
+3. For each branch `arrow(BP, E, R, Q)`:
    - compute argument producer `A` from the argument expression list;
    - require `PackMove(Δ, contra, A, pack_types(BP))`;
    - substitute parameter places in `Q` with stable caller places where
      available;
-   - if successful, include `R` in the result alternatives and the substituted
-     or explicitly weakened `Q` in the matching postconditions.
+   - if successful, include `E`, `R`, and the substituted or explicitly
+     weakened `Q` in the matching branch results.
 4. If no branch matches, reject.
 5. If multiple branches match, return `PackAlt` over whole return packs and
-   postcondition disjunction is not admitted. Until postcondition disjunction is
-   specified, multiple matching branches must have equivalent postconditions or
+   preserve or reject effect/postcondition alternatives without losing branch
+   correlation. Until effect and postcondition disjunction are specified,
+   multiple matching branches must have equivalent effects and postconditions or
    the call is rejected.
 
 This last rule prevents losing facts from overloaded assertion signatures.
@@ -1306,8 +1317,8 @@ EqNode(left: Type, right: Type, sub_lr: proof, sub_rl: proof)
 PackMoveNode(dir, producer: PackAlt, consumer: Pack, premises: proof*)
 ExprNode(expr_id, claim: ValueClaim, rule, premises: proof*)
 StmtNode(stmt_id, before: ContextId, after: ContextId, rule, premises: proof*)
-CallNode(callee_expr, arg_exprs, result: PackAlt, post: Postcondition, premises: proof*)
-PrimitiveCallNode(callee_type: primitive_cap(name), op, args, before: ContextId, after: ContextId, result: PackAlt, post: Postcondition, premises: proof*)
+CallNode(callee_expr, arg_exprs, effect: Effect, result: PackAlt, post: Postcondition, premises: proof*)
+PrimitiveCallNode(callee_type: primitive_cap(name), op, args, before: ContextId, after: ContextId, effect: Effect, result: PackAlt, post: Postcondition, premises: proof*)
 PostNode(post: Postcondition, before: ContextId, after: ContextId, premises: proof*)
 IdentityNode(op, before: ContextId, after: ContextId, premises: proof*)
 GuardNode(function_id, predicate: Predicate, true_return_proofs: proof*)
@@ -1343,11 +1354,11 @@ StmtNode(local x: T = e, before = Γ, after = Γ[x -> { type = T }], ...)
 Overload declaration:
 
 ```text
-WFTypeNode(arrow(BP1, R1, Q1))
-WFTypeNode(arrow(BP2, R2, Q2))
-StmtNode(body checked under arrow(BP1, R1, Q1), ...)
-StmtNode(body checked under arrow(BP2, R2, Q2), ...)
-ExprNode(f, claim = intersection(arrow(BP1, R1, Q1), arrow(BP2, R2, Q2)), ...)
+WFTypeNode(arrow(BP1, E1, R1, Q1))
+WFTypeNode(arrow(BP2, E2, R2, Q2))
+StmtNode(body checked under arrow(BP1, E1, R1, Q1), ...)
+StmtNode(body checked under arrow(BP2, E2, R2, Q2), ...)
+ExprNode(f, claim = intersection(arrow(BP1, E1, R1, Q1), arrow(BP2, E2, R2, Q2)), ...)
 ```
 
 Assertion call:

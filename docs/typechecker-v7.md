@@ -21,15 +21,17 @@ Read in this order:
    deciding semantic places and binder-aware arrows for facts.
 5. `docs/typechecker-v7-design-pass-primitive-capabilities.md` — third
    refinement pass, deciding primitive capabilities as value types.
-6. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
+6. `docs/typechecker-v7-design-pass-effects.md` — fourth refinement pass,
+   deciding full arrows are effectful with contextual-control effects.
+7. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
    consistent whole, plus blocking semantic seams.
-7. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
+8. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
    judgments, and certificate obligations.
-8. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
+9. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
    older Crescent designs or external systems without reintroducing ad-hocness.
-9. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+10. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-10. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
+11. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
    and lineage status.
 
 Older v4/v5/v6 docs are research input only. If they conflict with v7, v7 owns
@@ -65,20 +67,17 @@ Not yet admitted:
 
 Work these before implementation verticals:
 
-1. **Contextual control effects.** Specify at least `throws(E)` and
-   `yields(Y, S)` or explicitly defer precise `error`/`pcall`/coroutine typing.
-   Do not generalize this into IO/cap/mutation effects by default.
-2. **Open/rest packs.** Closed packs are insufficient for Lua. Varargs,
+1. **Open/rest packs.** Closed packs are insufficient for Lua. Varargs,
    `pcall`, `coroutine.resume`, iterators, `select`, and spread returns need a
    pack-variable/rest story.
-3. **Module/declaration environments.** Define `ModuleEnv`/`DeclEnv` before
+2. **Module/declaration environments.** Define `ModuleEnv`/`DeclEnv` before
    admitting `$Require`, `--:: require`, `$GlobalScope`, or module exports.
-4. **Setmetatable fork.** Decide whether `set_metatable` seals construction or
+3. **Setmetatable fork.** Decide whether `set_metatable` seals construction or
    only fixes metatable state. `__index` chain walking depends on this.
-5. **Match/type-level computation.** Specify match evaluation, captures,
+4. **Match/type-level computation.** Specify match evaluation, captures,
    suspension/rejection, and field descriptors before admitting `$EachField` or
    deleting helper intrinsics.
-6. **Operator/metamethod substrate.** Define operator application through
+5. **Operator/metamethod substrate.** Define operator application through
    primitive/metamethod lookup, not per-operator predicates or name-keyed
    handlers.
 

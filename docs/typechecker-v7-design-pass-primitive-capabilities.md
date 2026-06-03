@@ -81,7 +81,7 @@ callable only through the primitive-call judgment.
 Primitive calls are explicit movement sites:
 
 ```text
-PrimitiveCallCheck(Γ, callee_claim, args) => Γ', PackAlt, Postcondition
+PrimitiveCallCheck(Γ, callee_claim, args) => Γ', Effect, PackAlt, Postcondition
 ```
 
 Requirements:

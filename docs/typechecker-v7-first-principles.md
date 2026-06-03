@@ -367,12 +367,11 @@ operators.
 Throws and yields derive as contextual control, but the proof kernel might stage
 them later.
 
-Fork:
+Decision direction: the full arrow is effectful from the start. `pure` is the
+empty contextual-control effect. A pure-only mechanized kernel can be a staged
+proof subset, but not the full architecture.
 
-- include minimal effects in the core arrow from the start;
-- define a normal-return-only kernel first and prove effects as an extension.
-
-The full checker needs effects either way.
+See `docs/typechecker-v7-design-pass-effects.md`.
 
 ## Coherence Criterion
 
@@ -394,7 +393,6 @@ primitive category or reject the feature.
 The next pass should not write a full spec. It should resolve the design forks
 in dependency order:
 
-1. Is the full arrow effectful from the start?
-2. What is the `set_metatable` model?
-3. What are the first-order limits, if any, of generics and type-level
+1. What is the `set_metatable` model?
+2. What are the first-order limits, if any, of generics and type-level
    computation?

@@ -81,9 +81,11 @@ obligations, and certificate nodes for it.
 2. **Open/rest packs.** Closed packs are not enough for Lua. `pcall`,
    `coroutine.resume`, iterators, `select`, and varargs all depend on pack
    variables/rest movement.
-3. **Contextual-control effects.** `throws(E)` and `yields(Y,S)` are needed for
-   precise `error`/`pcall` and coroutine/async semantics. They should not expand
-   into `io`/cap/mutation effects by default.
+3. **Contextual-control effect transcription.** v7 now chooses effectful arrows
+   for the full design, with `throws(E)` and `yields(Y,S)` as the initial
+   contextual-control effects. Remaining work is sequencing, subtyping,
+   overload, discharge, and certificate rules. They should not expand into
+   `io`/cap/mutation effects by default.
 4. **Module/declaration environments.** `$Require`, `--:: require`,
    `$GlobalScope`, and module exports all need one environment/certificate story
    or duplication/name-scope bugs will recur.
