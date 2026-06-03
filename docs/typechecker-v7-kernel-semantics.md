@@ -290,10 +290,22 @@ control-effect set. The core rule is that mutation must be accounted for either
 by explicit state transition rules or by typed effects whose semantics include
 those transitions. It cannot be a side effect hidden in a function type.
 
-### Rank-N Polymorphism
+### Generics, Rank-N, And Type-Level Computation
 
-Rank-N polymorphism is not an effect. It is a quantifier/scoping extension to the
-type language and typing judgments.
+Generics and type-level computation are quantifier, kinding, and reduction
+extensions to the type language and typing judgments.
+
+v7 chooses rank-1 generics plus kinded first-order type-level computation as the
+next full-design layer. HKTs and rank-N remain later extensions.
+
+Rank-1 generics require:
+
+- declaration-level `forall`;
+- bounded type parameters;
+- skolemization for checking generic bodies;
+- instantiation for using generic values;
+- escape checks so skolems do not leak;
+- certificate nodes for `forall` introduction and elimination.
 
 Admitting rank-N requires:
 
@@ -308,13 +320,13 @@ polymorphic. It also interacts with mutation because storing a polymorphic value
 in a mutable location is usually restricted by a value restriction or equivalent
 capability rule.
 
-The first kernel therefore excludes rank-N. Monomorphic arrows are enough to
-validate calls, packs, records, identity, and guards.
+Rank-N remains excluded. Monomorphic and rank-1 arrows are enough for the next
+design layer.
 
 ### HKTs
 
 HKTs are not effects. They are a kind system and type-level computation
-extension.
+extension beyond the chosen first-order layer.
 
 Admitting HKTs requires:
 
@@ -329,9 +341,11 @@ HKTs interact with records and effects if they can construct record types,
 effect rows, or pack types. They also interact with complement/normalization if
 type-level reduction must happen before emptiness decisions.
 
-The first kernel excludes HKTs. If later admitted, the kind checker becomes a
-precondition for the value-type denotation: only kind-`Type` terms can enter
-`Type`.
+The next layer admits base kinds `Type`, `Pack`, `Effect`, `FieldDescriptor`,
+and named first-order `TypeFn(arg_kinds..., result_kind)`. Arbitrary
+higher-kinded type variables remain excluded. If HKTs are later admitted, the
+kind checker becomes a precondition for the value-type denotation: only
+kind-`Type` terms can enter `Type`.
 
 ### Type Guards
 
@@ -705,6 +719,9 @@ WFType(Δ, T)                         -- T is a well-formed value type
 WFPack(Δ, P)                         -- P is a well-formed value-list type
 WFEffect(Δ, E)                       -- E is a well-formed contextual effect
 WFPost(Δ, places, Q)                 -- Q is a well-formed postcondition over places
+WFKind(Δ, K)                         -- K is a well-formed kind
+WFTypeLevel(Δ, term, K)              -- type-level term has kind K
+TypeReduce(Δ, term) => term          -- deterministic type-level reduction
 Sub(Δ, T1, T2)                       -- T1 <: T2
 EqType(Δ, T1, T2)                    -- T1 = T2
 PackMove(Δ, kind, PackAlt, target)   -- value-list movement succeeds
@@ -1374,7 +1391,11 @@ WFPackNode(P)
 WFPostNode(places, Q)
 SubNode(producer: Type, consumer: Type, rule, premises: proof*)
 EqNode(left: Type, right: Type, sub_lr: proof, sub_rl: proof)
-PackMoveNode(dir, producer: PackAlt, consumer: Pack, premises: proof*)
+PackMoveNode(kind, producer: PackAlt, target, premises: proof*)
+KindNode(term, kind, premises: proof*)
+TypeReduceNode(input, output, rule, premises: proof*)
+ForallIntroNode(decl_id, skolem_context, body_proof)
+ForallElimNode(generic_id, args, bound_proofs)
 ExprNode(expr_id, claim: ValueClaim, rule, premises: proof*)
 StmtNode(stmt_id, before: ContextId, after: ContextId, rule, premises: proof*)
 CallNode(callee_expr, arg_exprs, effect: Effect, result: PackAlt, post: Postcondition, premises: proof*)

@@ -333,6 +333,13 @@ HKTs do not derive automatically. If field folds or match types require higher
 kinds, either HKTs must be admitted as a primitive design commitment or the
 feature must use restricted first-order type-level functions.
 
+Decision direction: admit rank-1 generics plus kinded first-order type-level
+computation now. HKTs and rank-N remain later extensions. Field folds use
+restricted named `TypeFn` declarations over `FieldDescriptor`, not arbitrary
+higher-kinded variables.
+
+See `docs/typechecker-v7-design-pass-generics-typelevel.md`.
+
 ## Design Forks
 
 These are first-principles forks, not implementation TODOs.
@@ -411,5 +418,5 @@ primitive category or reject the feature.
 The next pass should not write a full spec. It should resolve the design forks
 in dependency order:
 
-1. What are the first-order limits, if any, of generics and type-level
-   computation?
+1. What is the operator/metamethod substrate?
+2. What is the final certificate schema?

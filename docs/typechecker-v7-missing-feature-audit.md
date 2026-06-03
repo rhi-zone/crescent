@@ -53,10 +53,10 @@ obligations, and certificate nodes for it.
 | Opaque / newtype / unseal | `CONTEXT.md`; `docs/opaque-two-arg-spec.md`; `docs/v5-gaps.md` P5/Y10; semantic mining | `$Opaque` candidate; newtype/unseal not in kernel. | Nominal abstraction and module privacy depend on stable identities and scoped unsealing. | Call-site identity hacks or global unseal can break abstraction. | Type-level/nominal extension: stable origin IDs, scoped unseal, module boundary rules. |
 | `augment` declarations | `docs/v5-gaps.md` P5/Y10; v4 implementation docs | Not classified. | Used to merge fields into existing type bindings. | Mutating aliases post-hoc can violate phase/order assumptions. | Surface/directive feature; elaborate to explicit type-binding extension with order/provenance rules, or defer. |
 | Templates | v7 template section; v5 gaps P3 | Partially specified in v7. | Needed for call-site body instantiation and construction helpers. | Can become implicit mutation summaries if generalized carelessly. | Candidate core extension already started; needs certificate shape and first-class restrictions pinned. |
-| Generic function body checking / skolemization | `docs/v5-gaps.md` P6; `docs/type-system-design/13` rank-N module | v7 excludes rank-N but needs generic body checking policy. | Generic signatures must be checked for all instantiations, not by example. | Free typevars absorbing body constraints cause unsound acceptance. | Candidate core extension: rank-1 generics with skolems/escape checks before rank-N. |
-| HKTs / kinds | roadmap F1; `docs/type-system-design/04-hkt-kinds.md`; v5 gaps G1-G5/G10 | v7 defers HKTs/kinds but `$EachField` and generic aliases pressure it. | Needed for type constructors and higher-order type functions. | Admitting constructor variables without kinding reintroduces ad-hoc application. | Deferred power feature; required before arbitrary type-level function parameters. |
-| Match types | `lib/type/static/CLAUDE.md`; `docs/type-system-design/08`; v5 gaps P5 | v7 mining prefers match substrate but kernel has no match rules. | Replaces helper intrinsics, enables `Keys`, `PairsReturn`, transformations. | Eager/speculative evaluation with diagnostics or wrong suspension can be unsound. | Type-level computation extension: match well-formedness, partition, suspension/rejection, correlation rules. |
-| Pattern types / capture sigil | v5 gaps P5; `lib/type/static/CLAUDE.md` capture and pattern notes | Not classified. | Needed for match aliases and type-level destructuring. | Bare-name capture fallback and field-order-dependent captures were known footguns. | Type-level computation surface; admit only explicit `%` capture and deterministic patterns. |
+| Generic function body checking / skolemization | `docs/v5-gaps.md` P6; `docs/type-system-design/13` rank-N module | Direction chosen: rank-1 generics with skolems/escape checks. | Generic signatures must be checked for all instantiations, not by example. | Free typevars absorbing body constraints cause unsound acceptance. | Core extension: rank-1 generics with `forall` intro/elim certificates before rank-N. |
+| HKTs / kinds | roadmap F1; `docs/type-system-design/04-hkt-kinds.md`; v5 gaps G1-G5/G10 | Boundary chosen: base kinds plus first-order named `TypeFn`; arbitrary HKTs deferred. | Needed for type constructors and higher-order type functions. | Admitting constructor variables without kinding reintroduces ad-hoc application. | Defer arbitrary HKTs; allow restricted named first-order type functions. |
+| Match types | `lib/type/static/CLAUDE.md`; `docs/type-system-design/08`; v5 gaps P5 | Direction chosen: kinded first-order match substrate. | Replaces helper intrinsics, enables `Keys`, `PairsReturn`, transformations. | Eager/speculative evaluation with diagnostics or wrong suspension can be unsound. | Type-level computation extension: match well-formedness, partition, suspension/rejection, correlation rules. |
+| Pattern types / capture sigil | v5 gaps P5; `lib/type/static/CLAUDE.md` capture and pattern notes | Direction chosen: match/type-level surface only after kinded patterns. | Needed for match aliases and type-level destructuring. | Bare-name capture fallback and field-order-dependent captures were known footguns. | Type-level computation surface; admit only explicit `%` capture and deterministic patterns. |
 | `$Throw` / `$Catch` type-level diagnostics | `docs/throw-catch-types-spec.md`; semantic mining | Candidate intrinsic, distinct from runtime `throws(E)`. | Useful for authored type-level contract errors. | Diagnostic side effects during speculative type evaluation are order-sensitive. | Type-level computation extension with committed-path diagnostics, not runtime effect. |
 | Indexed access `T[K]` | `docs/type-system-design/11`; TODO FFI/accessor entries | Not in v7 kernel except record read operations. | Needed for `T[K]` aliases, FFI maps, metatable/indexer reasoning. | Hardcoding `$IndexAccess` or string encodings repeats prefix-scoping failure. | Candidate type-level computation/core record operation with distribution and bounded deferral. |
 | Record field attributes: optional / readonly | `docs/type-system-design/07-records.md`; v7 records include fields with flags | Partially admitted. v7 has flags and subtyping sketch, but no surface/directive mapping. | Optional/readonly determine width and variance. | Prefix encodings like `$opt_`/`$ro_` are retired; mutable/covariant confusion is unsound. | Admitted-core gap: finish field presence/write/read rules and surface mapping. |
@@ -92,9 +92,10 @@ obligations, and certificate nodes for it.
 5. **Metatable lookup transcription.** v7 now chooses built-in lookup and
    assignment relations with dependency invalidation. Remaining work is detailed
    rule transcription, target protected-metatable behavior, and certificates.
-6. **Match/type-level computation substrate.** v7 wants to avoid helper
-   intrinsics, but that requires real match semantics, capture rules, and
-   suspension/rejection behavior.
+6. **Type-level computation transcription.** v7 now chooses rank-1 generics and
+   kinded first-order type-level computation. Remaining work is detailed rules
+   for skolemization, match reduction, field descriptors, recursive aliases, and
+   certificates.
 7. **Operator/metamethod semantics.** A full checker cannot punt on operators,
    but per-operator local predicates are a known rewrite trigger.
 
@@ -110,7 +111,7 @@ obligations, and certificate nodes for it.
    `$FfiC` `IntrinsicSpec`s.
 5. Transcribe metatable lookup/assignment judgments before importing M6
    `__index` walking.
-6. Write a match-type admission spec before adding `$EachField` or deleting
-   helper intrinsics.
+6. Transcribe rank-1 generics and first-order type-level computation before
+   adding `$EachField` or deleting helper intrinsics.
 7. Add operator/metamethod lookup to the mining queue as a separate substrate,
    not as stdlib-name special cases.

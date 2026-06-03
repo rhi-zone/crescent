@@ -139,9 +139,10 @@ an implementation rule for arbitrary table operations.
 Examples using `<T <: ...>` imply rank-1 bounded generics, while the first
 kernel says type-level variables are not admitted.
 
-Resolution: either admit rank-1 bounded generics with skolemization, escape
-checks, WF rules, and certificates, or keep generic examples clearly marked as
-future extension examples.
+Resolution status: the generics/type-level pass chooses rank-1 generics plus
+kinded first-order type-level computation for the next full-design layer. The
+remaining work is detailed kernel transcription for skolemization, kinding,
+match reduction, field descriptors, recursive aliases, and certificates.
 
 ## Dependency Order
 
@@ -156,7 +157,7 @@ The coherent admission order is:
 7. Detailed contextual-effect transcription and discharge rules.
 8. Open/rest packs and pack variables.
 9. Module/declaration/FFI environments and trusted bridge certificates.
-10. Match/type-level computation and field-descriptor folds.
+10. Rank-1 generics and first-order type-level computation transcription.
 11. Operator and metamethod semantics.
 12. Stdlib profiles.
 
@@ -171,7 +172,8 @@ The following shortcuts are explicitly incoherent for v7:
 - typing coroutine yield/resume precisely without `yields(Y, S)` and open packs;
 - admitting `$Require`, `$GlobalScope`, or `$FfiC` outside the explicit
   environment/provenance model;
-- admitting `$EachField<T, F>` with arbitrary `F` while HKTs remain excluded;
+- admitting `$EachField<T, F>` with arbitrary higher-kinded `F` while HKTs
+  remain excluded;
 - implementing metatable `__index` lookup through source-name special cases
   instead of table identity lookup relations;
 - treating IO as an effect while the design says IO authority is a runtime
