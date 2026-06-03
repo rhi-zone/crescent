@@ -169,8 +169,8 @@ The following shortcuts are explicitly incoherent for v7:
 
 - typing `pcall` precisely without both rest packs and `throws(E)` discharge;
 - typing coroutine yield/resume precisely without `yields(Y, S)` and open packs;
-- admitting `$Require` without `ModuleEnv`, provenance, and trusted-boundary
-  certificate nodes;
+- admitting `$Require`, `$GlobalScope`, or `$FfiC` outside the explicit
+  environment/provenance model;
 - admitting `$EachField<T, F>` with arbitrary `F` while HKTs remain excluded;
 - implementing metatable `__index` lookup through source-name special cases
   instead of table identity lookup relations;

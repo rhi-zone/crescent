@@ -94,9 +94,9 @@ Intrinsic admission status:
 | Intrinsic | v7 status |
 |-----------|-----------|
 | `$Opaque<T>` / `$Opaque<T, U>` | Candidate value-type constructor. Blocked on a stable nominal-origin rule, view proof, and certificate node. |
-| `$Require<T>` | Candidate trusted module bridge. Blocked on `ModuleEnv`, interface provenance, and certificate boundary. |
-| `$FfiC` | Candidate trusted FFI bridge. Blocked on an external-declaration environment and missing-symbol semantics. |
-| `$GlobalScope` | Candidate trusted declaration-scope bridge. Blocked on explicit declaration-environment provenance. |
+| `$Require<T>` | Trusted module bridge over `ModuleEnv`. Blocked on detailed `IntrinsicSpec`, but the environment/provenance model is chosen. |
+| `$FfiC` | Trusted FFI bridge over `FfiEnv`. Blocked on detailed `IntrinsicSpec`, C declaration trust/parsing, and missing-symbol semantics. |
+| `$GlobalScope` | Trusted declaration-scope bridge over `DeclEnv`/`StdlibProfile`. Blocked on detailed `IntrinsicSpec`; no ambient fallback globals. |
 | `$Throw<...Msg>` / `$Catch<T, Default?>` | Candidate type-level control/diagnostic operator. Blocked on committed-path reduction semantics. |
 | `$EachField<T, F>` | Candidate record/type-level fold. Blocked on field-descriptor kind/gather semantics; if HKTs remain excluded, `F` must be a restricted named type-level function form. |
 | `$PatternReturn<P>` / `$FindReturn<P>` | Candidate domain-specific evaluators. Blocked on a specified Lua-pattern grammar subset and conservative fallback proof. |
@@ -732,12 +732,21 @@ judgment ad hoc.
   bindings: symbol -> ValueClaim,
   flow: edge/place -> ValueClaim,
   identities: id -> TableState,
+  target: TargetProfile,
+  stdlib: StdlibProfile,
+  modules: ModuleEnv,
+  declarations: DeclEnv,
+  ffi: FfiEnv,
   unsafe: UnsafeBoundary*
 }
 ```
 
 All checker behavior must be expressible as one of these judgments or as an
 explicit extension to this list.
+
+Environment entries are immutable for a certificate. `ModuleEnv`, `DeclEnv`,
+`FfiEnv`, `StdlibProfile`, and `TargetProfile` introduce external claims only
+with provenance and trust kind. They are not ambient mutable checker state.
 
 ### Well-Formedness
 
@@ -1374,6 +1383,8 @@ PostNode(post: Postcondition, before: ContextId, after: ContextId, premises: pro
 IdentityNode(op, before: ContextId, after: ContextId, premises: proof*)
 GuardNode(function_id, predicate: Predicate, true_return_proofs: proof*)
 AssertNode(function_id, post: Postcondition, normal_return_proofs: proof*)
+EnvNode(env_kind, key, exported_claim, provenance, trust_kind)
+ModuleNode(module_id, interface_claim, provenance, premises: proof*)
 UnsafeNode(site, exported_claim, boundary_kind)
 ```
 

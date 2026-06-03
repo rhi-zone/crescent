@@ -290,6 +290,13 @@ Module and declaration typing derives from trusted or checked boundaries.
 ordinary type computation. They need environments, provenance, missing-symbol
 semantics, and certificate boundaries.
 
+Decision direction: external claims enter through explicit immutable
+environments with provenance: `TargetProfile`, `StdlibProfile`, `ModuleEnv`,
+`DeclEnv`, and `FfiEnv`. Runtime require, annotation require, stdlib profiles,
+globals, and FFI all elaborate to those environments or trusted boundary nodes.
+
+See `docs/typechecker-v7-design-pass-module-provenance.md`.
+
 ### Metatables And Operators
 
 Metatable lookup derives from table identity plus operation lookup.

@@ -29,15 +29,17 @@ Read in this order:
    deciding setmetatable fixes metatable state without sealing construction.
 9. `docs/typechecker-v7-design-pass-metatable-lookup.md` — seventh refinement
    pass, deciding metatable lookup/assignment relations and invalidation.
-10. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
+10. `docs/typechecker-v7-design-pass-module-provenance.md` — eighth refinement
+   pass, deciding explicit environments and provenance for external claims.
+11. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
    consistent whole, plus blocking semantic seams.
-11. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
+12. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
    judgments, and certificate obligations.
-12. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
+13. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
    older Crescent designs or external systems without reintroducing ad-hocness.
-13. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+14. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-14. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
+15. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
    and lineage status.
 
 Older v4/v5/v6 docs are research input only. If they conflict with v7, v7 owns
@@ -73,15 +75,12 @@ Not yet admitted:
 
 Work these before implementation verticals:
 
-1. **Module/declaration environments.** Define `ModuleEnv`/`DeclEnv` before
-   admitting `$Require`, `--:: require`, `$GlobalScope`, or module exports.
-2. **Module/declaration/stdlib provenance.** Define how target profiles,
-   primitive capability values, imports, and FFI declarations enter the
-   certificate.
-3. **Match/type-level computation.** Specify match evaluation, captures,
+1. **Match/type-level computation.** Specify match evaluation, captures,
    suspension/rejection, and field descriptors before admitting `$EachField` or
    deleting helper intrinsics.
-4. **Operator/metamethod substrate.** Define operator application through
+2. **Generics/kinds/type-level functions.** Decide the first-order versus HKT
+   boundary before admitting arbitrary field folds or higher-order type aliases.
+3. **Operator/metamethod substrate.** Define operator application through
    primitive/metamethod lookup, not per-operator predicates or name-keyed
    handlers.
 

@@ -35,8 +35,8 @@ a kernel contract.
 
 ### `$Require<T>`
 
-Current contract: a literal string module name maps to a declared module or CRI
-export type; nonliteral or unresolved modules return `unknown`.
+Historical contract: a literal string module name maps to a declared module or
+CRI export type; nonliteral or unresolved modules return `unknown`.
 
 v7 classification: trusted module-interface bridge, not pure type computation.
 
@@ -47,9 +47,11 @@ Ad-hocness risks:
 - unresolved modules returning `unknown` is safe only if `unknown` cannot be
   silently consumed as concrete structure.
 
-v7 admission condition: `$Require` needs a module environment in the kernel
-context and a certificate node proving that the interface used for a module name
-matches the checked artifact or an explicit trusted boundary.
+v7 decision: `$Require` projects from `ModuleEnv` with provenance. The old
+unresolved-module-to-`unknown` behavior is rejected as recovery widening.
+Admission still needs a detailed `IntrinsicSpec` and a certificate node proving
+that the interface used for a module name matches the checked artifact or an
+explicit trusted boundary.
 
 ### `$Opaque<T>` / `$Opaque<T, U>`
 
