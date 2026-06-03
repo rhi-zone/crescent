@@ -24,6 +24,9 @@ The target profile may be conservative. It may reject runtime-valid programs
 when a static rule is not yet specified. It must not accept a program unless the
 accepted claim is sound for the selected runtime target.
 
+The concrete target table is transcribed in
+`docs/typechecker-v7-luajit51-target-table.md`.
+
 ## Target Profile Schema
 
 ```text
@@ -166,7 +169,7 @@ mod    -> "__mod"
 pow    -> "__pow"
 unm    -> "__unm"
 concat -> "__concat"
-len    -> "__len"       -- only if the selected LuaJIT behavior supports it
+len    -> "__len"       -- only in target profiles that support table __len
 eq     -> "__eq"
 lt     -> "__lt"
 le     -> "__le"
@@ -182,6 +185,9 @@ source-token-specific lookup outside `OpCheck`, `CallCheck`, `LookupField`, or
 If LuaJIT compatibility for a key is uncertain or version-dependent, the first
 profile must either pin the exact behavior or reject the dependent feature until
 verified.
+
+The concrete `luajit51-crescent` table pins table `__len` as unsupported by the
+probed runtime.
 
 ## Equality Policy
 
@@ -295,8 +301,11 @@ getmetatable : primitive_cap("$GetMetatable")
 rawget       : primitive_cap("$RawGet")
 rawset       : primitive_cap("$RawSet")
 rawequal     : primitive_cap("$RawEqual")
-rawlen       : primitive_cap("$RawLen")
 ```
+
+It must not bind `rawlen` by default because the probed LuaJIT 5.1 runtime has
+no `rawlen` global. `$RawLen` remains a candidate primitive for other target
+profiles.
 
 The target profile does not make these names ambient. If a program shadows
 `setmetatable`, it shadows an ordinary binding. Primitive behavior follows the
@@ -326,11 +335,9 @@ length rules are specified.
 
 ## Remaining Work
 
-1. Transcribe exact LuaJIT operator tables, including string coercion choices
-   and version-specific metamethod support.
-2. Specify table length proofs for fresh/sealed array-like table states.
-3. Add `clear_metatable(id)` if metatable clearing is worth supporting.
-4. Define default and caps-enabled `StdlibProfile` variants for the LuaJIT
+1. Specify table length proofs for fresh/sealed array-like table states.
+2. Add `clear_metatable(id)` if metatable clearing is worth supporting.
+3. Define default and caps-enabled `StdlibProfile` variants for the LuaJIT
    target.
-5. Add stale-certificate tests that replay a proof under a different target
+4. Add stale-certificate tests that replay a proof under a different target
    digest and reject it.

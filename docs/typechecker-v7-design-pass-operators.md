@@ -196,9 +196,11 @@ primitive_cap("$RawGet")
 primitive_cap("$RawSet")
 ```
 
-The stdlib profile may bind the runtime names `rawequal`, `rawlen`, `rawget`,
-and `rawset` to these capabilities. Aliases of those values preserve capability
-behavior. The checker must not inspect the callee's source name.
+Target stdlib profiles may bind runtime raw-operation names to these
+capabilities when the target exposes them. For example, Lua 5.4-like profiles
+may bind `rawlen`; `luajit51-crescent/default` does not. Aliases of capability
+values preserve capability behavior. The checker must not inspect the callee's
+source name.
 
 Raw operations bypass metamethod lookup, but they still depend on target
 primitive semantics and table identity state. They also still participate in
