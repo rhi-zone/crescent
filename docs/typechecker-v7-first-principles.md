@@ -431,3 +431,8 @@ order:
    Decision: `OpCheck` with primitive/metamethod/raw cases; `and`/`or` use
    separate truthiness/control-flow rules.
 2. What is the final certificate schema?
+   Decision: finite replay DAG with immutable context inputs, interned terms,
+   typed node families, root claims, explicit dependencies, and visible
+   unsafe/trusted boundary nodes.
+
+See `docs/typechecker-v7-design-pass-certificates.md`.

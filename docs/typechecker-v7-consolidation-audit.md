@@ -192,8 +192,8 @@ as v7 authority.
    `$Opaque` because it is closest to a pure type constructor.
 2. Specify metatable-aware field read/write semantics after the v7/M6
    setmetatable fork decision.
-3. Add a small certificate schema document or move certificate node definitions
-   out of the long kernel doc once they grow.
+3. Define the minimal first replay subset: exact node payloads, canonical term
+   serialization, and stale-input rejection tests.
 4. Create a v7 TODO list that references kernel sections instead of older v5/v6
    module names.
 5. Audit `docs/type-system.md` for stale claims about `any`, force casts, and

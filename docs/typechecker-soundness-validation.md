@@ -152,6 +152,11 @@ The verifier must be deterministic. It should not infer overload branches,
 invent facts, widen types, or repair missing proof steps. It only checks that the
 certificate follows the kernel rules.
 
+The v7 certificate architecture is specified in
+`docs/typechecker-v7-design-pass-certificates.md`: immutable context inputs,
+interned term tables, typed node families, explicit roots, dependency tracking,
+and visible unsafe/trusted boundary nodes.
+
 ## Optional Modes
 
 Proof checking can be optional operationally, but it cannot change semantics.

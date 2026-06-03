@@ -1413,6 +1413,12 @@ the boundary explicitly. Unsafe boundaries are not type rules.
 An accepted program must be explainable as a finite proof DAG whose nodes are
 instances of kernel rules.
 
+The cross-cutting certificate architecture is chosen in
+`docs/typechecker-v7-design-pass-certificates.md`. This section records the
+kernel-level obligations and current node-family sketch; the dedicated pass owns
+the replay DAG shape, context inputs, roots, dependency policy, and unsafe
+boundary visibility.
+
 The certificate checker must verify at least:
 
 - every exported annotation has a discharged subtype obligation;
@@ -1435,32 +1441,32 @@ for the verifier to replay the kernel rule deterministically.
 Minimum node families:
 
 ```text
-WFTypeNode(T)
-WFPackNode(P)
-WFPostNode(places, Q)
-SubNode(producer: Type, consumer: Type, rule, premises: proof*)
-EqNode(left: Type, right: Type, sub_lr: proof, sub_rl: proof)
-PackMoveNode(kind, producer: PackAlt, target, premises: proof*)
-KindNode(term, kind, premises: proof*)
-TypeReduceNode(input, output, rule, premises: proof*)
-ForallIntroNode(decl_id, skolem_context, body_proof)
-ForallElimNode(generic_id, args, bound_proofs)
-ExprNode(expr_id, claim: ValueClaim, rule, premises: proof*)
-StmtNode(stmt_id, before: ContextId, after: ContextId, rule, premises: proof*)
-CallNode(callee_expr, arg_exprs, effect: Effect, result: PackAlt, post: Postcondition, premises: proof*)
-PrimitiveCallNode(callee_type: primitive_cap(name), op, args, before: ContextId, after: ContextId, effect: Effect, result: PackAlt, post: Postcondition, premises: proof*)
-PostNode(post: Postcondition, before: ContextId, after: ContextId, premises: proof*)
-IdentityNode(op, before: ContextId, after: ContextId, premises: proof*)
-GuardNode(function_id, predicate: Predicate, true_return_proofs: proof*)
-AssertNode(function_id, post: Postcondition, normal_return_proofs: proof*)
-EnvNode(env_kind, key, exported_claim, provenance, trust_kind)
-ModuleNode(module_id, interface_claim, provenance, premises: proof*)
-UnsafeNode(site, exported_claim, boundary_kind)
+WFNode(...)
+SubNode(...)
+KindNode(...)
+ReduceNode(...)
+ExprNode(...)
+StmtNode(...)
+CallNode(...)
+OpNode(...)
+ControlFlowNode(...)
+PostNode(...)
+IdentityNode(...)
+MetatableNode(...)
+PrimitiveCallNode(...)
+GenericNode(...)
+GuardNode(...)
+AssertNode(...)
+EnvNode(...)
+ModuleNode(...)
+UnsafeNode(...)
+RootNode(...)
 ```
 
-The verifier checks node-local correctness only. It must not search for a
-different overload branch, invent a missing subtype proof, or reinterpret an
-unsafe node as a proof.
+Each family contains exact `rule` names whose payloads are specified by the
+admitted kernel rule. The verifier checks node-local correctness only. It must
+not search for a different overload branch, invent a missing subtype proof, or
+reinterpret an unsafe node as a proof.
 
 Required determinism:
 
@@ -1478,7 +1484,7 @@ Checked annotation:
 
 ```text
 ExprNode(e, claim = A, ...)
-WFTypeNode(T)
+WFNode(kind = type, term = T)
 SubNode(A.type, T, ...)
 StmtNode(local x: T = e, before = Γ, after = Γ[x -> { type = T }], ...)
 ```
@@ -1486,8 +1492,8 @@ StmtNode(local x: T = e, before = Γ, after = Γ[x -> { type = T }], ...)
 Overload declaration:
 
 ```text
-WFTypeNode(arrow(BP1, E1, R1, Q1))
-WFTypeNode(arrow(BP2, E2, R2, Q2))
+WFNode(kind = type, term = arrow(BP1, E1, R1, Q1))
+WFNode(kind = type, term = arrow(BP2, E2, R2, Q2))
 StmtNode(body checked under arrow(BP1, E1, R1, Q1), ...)
 StmtNode(body checked under arrow(BP2, E2, R2, Q2), ...)
 ExprNode(f, claim = intersection(arrow(BP1, E1, R1, Q1), arrow(BP2, E2, R2, Q2)), ...)

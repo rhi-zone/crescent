@@ -291,5 +291,5 @@ rank-1 generics plus kinded first-order type-level computation now; HKTs and
 rank-N remain later extensions
 ```
 
-The following pass chooses operator/metamethod semantics. After that, the main
-remaining cross-cutting blocker is the detailed certificate schema.
+The following passes choose operator/metamethod semantics and then the
+cross-cutting certificate schema.
