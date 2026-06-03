@@ -132,12 +132,14 @@ Flow typing is about facts over stable places:
 
 - local bindings;
 - parameters;
+- upvalue cells;
 - fields of known identities;
 - destructured positions;
 - possibly imported declarations.
 
-A fact is not a type. A fact is a scoped claim that may be invalidated by
-mutation, alias escape, calls, or control-flow joins.
+A fact is not a type. A fact is a scoped claim about a semantic place, not a
+source expression or source spelling. It may be invalidated by mutation, alias
+escape, calls, or control-flow joins.
 
 Type guards and assertion signatures derive from fact transitions. Their
 runtime failure behavior, if any, belongs to control semantics, not to the fact
@@ -330,13 +332,10 @@ See `docs/typechecker-v7-design-pass-unknown.md`.
 Postconditions require stable places. Function types need a way to bind those
 places.
 
-Fork:
+Decision direction: facts target semantic places, arrows bind parameter places,
+and call sites substitute parameter places with stable caller places.
 
-- binder packs;
-- positional parameter places;
-- named binders in annotation syntax.
-
-The design must choose before assertion signatures are fully specified.
+See `docs/typechecker-v7-design-pass-places.md`.
 
 ### Primitive Capabilities
 
@@ -395,9 +394,8 @@ primitive category or reject the feature.
 The next pass should not write a full spec. It should resolve the design forks
 in dependency order:
 
-1. What is the binder/place model?
-2. Are primitive capabilities types or metadata?
-3. Is the full arrow effectful from the start?
-4. What is the `set_metatable` model?
-5. What are the first-order limits, if any, of generics and type-level
+1. Are primitive capabilities types or metadata?
+2. Is the full arrow effectful from the start?
+3. What is the `set_metatable` model?
+4. What are the first-order limits, if any, of generics and type-level
    computation?

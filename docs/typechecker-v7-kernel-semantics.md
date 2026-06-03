@@ -225,7 +225,7 @@ it must choose one of:
 In the contextual-effect extension, arrows become:
 
 ```text
-arrow(params: Pack, effects: Effect, returns: Pack, post: Postcondition)
+arrow(params: BinderPack, effects: Effect, returns: Pack, post: Postcondition)
 ```
 
 The first-kernel `Type` grammar below does not include this effect slot. Until
@@ -395,7 +395,7 @@ is ill-kinded in the kernel: `T` classifies a returned value, while
 The kernel form is an arrow with both a return pack and a postcondition:
 
 ```text
-arrow(params: Pack, returns: Pack, post: Postcondition)
+arrow(params: BinderPack, returns: Pack, post: Postcondition)
 Postcondition = true | assert(place, Predicate) | post_and(Postcondition, Postcondition)
 ```
 
@@ -415,15 +415,17 @@ would elaborate to:
 
 ```text
 arrow(
-  params = pack([]),
+  params = binder_pack([]),
   returns = pack([T]),
-  post = post_and(assert(x, HasType(x, U)), assert(y, HasType(y, V)))
+  post = post_and(assert(param(x), HasType(param(x), U)), assert(param(y), HasType(param(y), V)))
 )
 ```
 
 The postcondition conjunction is not `T & ...`; it combines facts that must all
-hold on the normal continuation. If either assertion cannot be proved for a user
-function body, the assertion signature is not exported.
+hold on the normal continuation. The `x` and `y` names above are surface
+parameter binders that elaborate to semantic parameter IDs. If either assertion
+cannot be proved for a user function body, the assertion signature is not
+exported.
 
 In the first kernel, the fact transition may be admitted only after the
 assertion implementation is verified or the assertion function is marked as a
@@ -525,7 +527,7 @@ Type T =
   cdata
   literal(base, value)
   primitive_cap(name)
-  arrow(params: Pack, returns: Pack, post: Postcondition)
+  arrow(params: BinderPack, returns: Pack, post: Postcondition)
   record(fields, indexes, row)
   nominal(name)
   union(T, T)
@@ -542,6 +544,23 @@ Postcondition Q =
   assert(place, Predicate)
   post_and(Q, Q)
 ```
+
+`place` is a semantic place, not a source expression or free source name. Arrow
+postconditions may mention parameter places bound by the arrow's `BinderPack`.
+At call sites, parameter places are substituted with stable caller places when
+available. If no stable caller place exists, the postcondition may be weakened
+but not exported as a caller fact.
+
+```text
+BinderPack =
+  binder_pack(items: ParamBinding*, rest: none)
+
+ParamBinding =
+  { id: param_id, type: Type }
+```
+
+Non-empty binder rest is reserved for the open-pack extension, matching
+ordinary pack rest.
 
 `primitive_cap(name)` classifies a trusted callable primitive capability. It is
 admitted only for names with a primitive cutout contract. It is not source-name
@@ -604,11 +623,12 @@ Selected clauses:
 Arrow denotation is intentionally abstract in the first kernel:
 
 ```text
-function(f) ∈ [[arrow(P, R, Q)]]σ
+function(f) ∈ [[arrow(BP, R, Q)]]σ
 ```
 
 means normal-return partial correctness: when calling `f` with any argument
-list in `[[P]]σ` returns normally, the return list is in `[[R]]σ` and
+list in the value-list denotation of `BP` returns normally, the return list is
+in `[[R]]σ` and
 postcondition `Q` holds on the normal continuation. Nonlocal exits such as
 throwing or yielding are not modeled by first-kernel arrows. They require the
 contextual-effect extension or an explicit unsafe/trusted certificate boundary.
@@ -716,17 +736,16 @@ Rules:
   admitted;
 - postconditions are well-formed only if their places are in the arrow's
   parameter/place context and their predicates are well-formed;
-- `arrow(P, R, Q)` is well-formed only if `P`, `R`, and `Q` are well-formed;
+- `arrow(BP, R, Q)` is well-formed only if `BP`, `R`, and `Q` are well-formed;
 - `record(F, I, row)` is well-formed only if every field/index component is a
   well-formed `Type`;
 - `Pack` and `Postcondition` are not well-formed as `Type`;
 - effects, HKTs, rank-N binders, non-empty pack rests, and refinement
   predicates are not well-formed until admitted by an extension.
 
-The first kernel has not yet chosen the concrete representation of arrow
-parameter places. It may use binder packs, positional parameter places, or
-another explicit scheme, but postconditions must not refer to unbound source
-names.
+Arrow parameter places use binder packs as the current design direction. Source
+annotation names are binder syntax only and desugar to binder IDs. They are not
+semantic source-name facts.
 
 This is where `T & asserts x is U` is rejected: the right operand is not a
 `Type`, so the intersection is ill-formed.
@@ -740,14 +759,14 @@ This is where `T & asserts x is U` is rejected: the right operand is not a
 Arrow subtyping:
 
 ```text
-Sub(Δ, arrow(Pa, Ra, Qa), arrow(Pb, Rb, Qb))
+Sub(Δ, arrow(BPa, Ra, Qa), arrow(BPb, Rb, Qb))
 ```
 
 requires:
 
-- `PackMove(Δ, contra, one(Pb), Pa)` for parameters;
+- `PackMove(Δ, contra, one(pack_types(BPb)), pack_types(BPa))` for parameters;
 - `PackMove(Δ, co, one(Ra), Rb)` for returns;
-- `PostImplies(Δ, Qa, Qb)` for postconditions.
+- `PostImplies(Δ, Qa, Qb)` for postconditions after alpha-renaming binder IDs.
 
 `PostImplies(Qa, Qb)` means every fact guaranteed by the producer's normal
 continuation is sufficient for the consumer's expected postcondition. For the
@@ -1111,11 +1130,13 @@ Steps:
 1. `ExprSynth(Γ, callee) => C`.
 2. Collect arrow branches from `C.type`. For the first kernel, branches are
    either a single `arrow` or an intersection of arrows.
-3. For each branch `arrow(P, R, Q)`:
+3. For each branch `arrow(BP, R, Q)`:
    - compute argument producer `A` from the argument expression list;
-   - require `PackMove(Δ, contra, A, P)`;
-   - if successful, include `R` in the result alternatives and `Q` in the
-     matching postconditions.
+   - require `PackMove(Δ, contra, A, pack_types(BP))`;
+   - substitute parameter places in `Q` with stable caller places where
+     available;
+   - if successful, include `R` in the result alternatives and the substituted
+     or explicitly weakened `Q` in the matching postconditions.
 4. If no branch matches, reject.
 5. If multiple branches match, return `PackAlt` over whole return packs and
    postcondition disjunction is not admitted. Until postcondition disjunction is
@@ -1319,18 +1340,18 @@ StmtNode(local x: T = e, before = Γ, after = Γ[x -> { type = T }], ...)
 Overload declaration:
 
 ```text
-WFTypeNode(arrow(P1, R1, Q1))
-WFTypeNode(arrow(P2, R2, Q2))
-StmtNode(body checked under arrow(P1, R1, Q1), ...)
-StmtNode(body checked under arrow(P2, R2, Q2), ...)
-ExprNode(f, claim = intersection(arrow(P1, R1, Q1), arrow(P2, R2, Q2)), ...)
+WFTypeNode(arrow(BP1, R1, Q1))
+WFTypeNode(arrow(BP2, R2, Q2))
+StmtNode(body checked under arrow(BP1, R1, Q1), ...)
+StmtNode(body checked under arrow(BP2, R2, Q2), ...)
+ExprNode(f, claim = intersection(arrow(BP1, R1, Q1), arrow(BP2, R2, Q2)), ...)
 ```
 
 Assertion call:
 
 ```text
-CallNode(assert_string, { x }, result = one(pack([])), post = assert(x, HasType(x, string)), ...)
-PostNode(assert(x, HasType(x, string)), before = Γ, after = Γ[x -> Γ[x] & string], ...)
+CallNode(assert_string, { x }, result = one(pack([])), post = assert(local(slot_x), HasType(local(slot_x), string)), ...)
+PostNode(assert(local(slot_x), HasType(local(slot_x), string)), before = Γ, after = Γ[slot_x -> Γ[slot_x] & string], ...)
 ```
 
 Table seal:

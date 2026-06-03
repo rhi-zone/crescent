@@ -94,12 +94,13 @@ non-returning behavior is outside the theorem.
 
 ### Postcondition Binders
 
-Postconditions mention places, but an arrow type currently stores only parameter
-types, not parameter binders or positional places.
+Postconditions mention places. Before the place/binder pass, arrow types stored
+only parameter types, not parameter binders or positional places.
 
-Resolution: before assertion function types are independently well-formed,
-arrows need binder-aware parameter packs or a positional place convention such
-as parameter slots. `WFPost` must check under that arrow-place context.
+Resolution status: the place/binder design pass chooses semantic places plus
+binder-aware arrows. The remaining work is kernel transcription and certificate
+detail, especially call-site substitution and explicit weakening when an actual
+argument has no stable caller place.
 
 ### Primitive Capabilities
 
