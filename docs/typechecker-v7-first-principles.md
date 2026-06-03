@@ -445,3 +445,11 @@ See `docs/typechecker-v7-design-pass-certificates.md`.
    transcribed.
 
 See `docs/typechecker-v7-design-pass-target-profile.md`.
+
+4. How do stdlib bindings enter?
+   Decision: explicit `StdlibProfile` variants. `luajit51-crescent/core` is the
+   library default and excludes ambient output/process/debug/native-load
+   authority; FFI, app, and debug capabilities enter through separate selected
+   profiles.
+
+See `docs/typechecker-v7-design-pass-stdlib-profile.md`.

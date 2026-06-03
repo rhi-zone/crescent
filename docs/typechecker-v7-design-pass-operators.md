@@ -198,7 +198,7 @@ primitive_cap("$RawSet")
 
 Target stdlib profiles may bind runtime raw-operation names to these
 capabilities when the target exposes them. For example, Lua 5.4-like profiles
-may bind `rawlen`; `luajit51-crescent/default` does not. Aliases of capability
+may bind `rawlen`; `luajit51-crescent/core` does not. Aliases of capability
 values preserve capability behavior. The checker must not inspect the callee's
 source name.
 

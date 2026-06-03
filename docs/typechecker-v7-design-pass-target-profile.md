@@ -293,7 +293,7 @@ surface dialects might differ, but v7's Lua profile treats it as fixed.
 
 ## Stdlib Boundary
 
-`StdlibProfile("luajit51-crescent/default")` may bind names such as:
+`StdlibProfile("luajit51-crescent/core")` may bind names such as:
 
 ```text
 setmetatable : primitive_cap("$SetMetatable")
@@ -303,7 +303,7 @@ rawset       : primitive_cap("$RawSet")
 rawequal     : primitive_cap("$RawEqual")
 ```
 
-It must not bind `rawlen` by default because the probed LuaJIT 5.1 runtime has
+It must not bind `rawlen` because the probed LuaJIT 5.1 runtime has
 no `rawlen` global. `$RawLen` remains a candidate primitive for other target
 profiles.
 

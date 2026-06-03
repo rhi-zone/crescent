@@ -60,6 +60,10 @@ as separate target profiles with separate certificate digests.
 The first concrete LuaJIT target table now records observed operator,
 metamethod, protected-metatable, raw-operation, and cdata boundary behavior.
 
+Stdlib bindings enter through explicit `StdlibProfile` variants. The library
+default is `luajit51-crescent/core`; FFI, app/process authority, and debug
+authority are separate profile inputs.
+
 ### Architecture Bar
 
 Organic growth is the failure mode. "Thin verticals" are acceptable only as
@@ -204,7 +208,8 @@ as v7 authority.
 4. Complete remaining `luajit51-crescent` target details: numeric-string
    grammar, exact integer preservation, table length proofs, and cdata operator
    families.
-5. Define default and caps-enabled LuaJIT `StdlibProfile` variants.
+5. Transcribe exact `luajit51-crescent/core` binding types after dependent
+   effect, pack, primitive, intrinsic, and environment rules are admitted.
 6. Create a v7 TODO list that references kernel sections instead of older v5/v6
    module names.
 7. Audit `docs/type-system.md` for stale claims about `any`, force casts, and

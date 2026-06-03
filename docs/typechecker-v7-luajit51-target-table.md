@@ -140,7 +140,7 @@ Sparse or escaped table length may be rejected or widened to `integer` only if
 the target length rule is specified for the table state. Exact length claims
 require stable contiguous table evidence.
 
-There is no default `$RawLen` stdlib binding for `luajit51-crescent/default`.
+There is no `$RawLen` stdlib binding for `luajit51-crescent/core`.
 
 ## Equality
 
@@ -295,7 +295,7 @@ Runtime LuaJIT permits:
 setmetatable(t, nil)
 ```
 
-v7 rejects this in `luajit51-crescent/default` until `clear_metatable(id)` is
+v7 rejects this in `luajit51-crescent/core` until `clear_metatable(id)` is
 specified. This is a deliberate conservative gap.
 
 ## Raw Operations
