@@ -18,13 +18,15 @@ For v7 work, read documents in this order:
 1. `docs/typechecker-v7.md` — entry point and ordered decision queue.
 2. `docs/typechecker-soundness-validation.md` — the trust model and acceptance
    bar.
-3. `docs/typechecker-v7-kernel-semantics.md` — admitted kernel objects,
+3. `docs/typechecker-v7-coherence-audit.md` — whole-design consistency audit,
+   blocking seams, and dependency order.
+4. `docs/typechecker-v7-kernel-semantics.md` — admitted kernel objects,
    judgments, and certificate obligations.
-4. `docs/typechecker-v7-semantic-mining.md` — how existing systems and older
+5. `docs/typechecker-v7-semantic-mining.md` — how existing systems and older
    Crescent semantics may be imported without reintroducing ad-hoc rules.
-5. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+6. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-6. This document — current consolidation status and known conflicts.
+7. This document — current consolidation status and known conflicts.
 
 Older docs are research inputs:
 
@@ -85,8 +87,9 @@ Current v7 classification:
   semantics.
 - `$PatternReturn` and `$FindReturn` require a specified Lua-pattern subset and
   conservative fallback.
-- `$SetMetatable` is not an operation name. It is a proposed primitive callable
-  cutout whose call authorizes the `set_metatable` identity transition.
+- `$SetMetatable` is not an operation name. It is a proposed primitive
+  capability name represented as `primitive_cap("$SetMetatable")`; its exact
+  `set_metatable` identity transition is blocked on the seal-versus-fix fork.
 - `$Name` is not admitted.
 
 Retired `$` encodings stay retired: `$Lit*`, `$Unit`, `$idx_*`, `$pos_*`,

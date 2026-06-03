@@ -5,6 +5,8 @@ mechanization and certificate checking.
 
 For the current v7 entry point and ordered decision queue, start with
 `docs/typechecker-v7.md`.
+For the current whole-design consistency audit, read
+`docs/typechecker-v7-coherence-audit.md`.
 
 v7 is not "v6 with more tests." v7 means:
 
@@ -38,7 +40,7 @@ failure points:
 
 The first kernel does not yet admit:
 
-- full effect rows beyond any explicitly admitted error/exit effect;
+- contextual control effects such as `throws(E)` or `yields(Y, S)`;
 - HKTs;
 - refinement types beyond guard-exported facts;
 - metatable precision beyond the table-identity seam;
@@ -143,17 +145,17 @@ perform state transitions in the checker model. These are explicit primitive
 callable cutouts. They are few, use the reserved `$` type-level namespace, and
 are audited as exceptions to the ordinary declared-arrow path.
 
-Initial primitive capability type:
+Proposed initial primitive capability type:
 
 ```text
-$SetMetatable
+primitive_cap("$SetMetatable")
 ```
 
-This is not the name `setmetatable`, and it is not an operation term. It is
-type-level syntax for a trusted callable capability. A stdlib declaration may
-assign the runtime value named `setmetatable` the type `$SetMetatable`, and
-aliases of that value carry the same type. The checker must not dispatch on the
-textual callee name.
+This is not the name `setmetatable`, and it is not an operation term. It is a
+value type for a trusted callable capability. A stdlib declaration may assign
+the runtime value named `setmetatable` the type `primitive_cap("$SetMetatable")`,
+and aliases of that value carry the same type. The checker must not dispatch on
+the textual callee name.
 
 Rules for primitive cutouts:
 
@@ -166,12 +168,17 @@ Rules for primitive cutouts:
 Certificate shape:
 
 ```text
-PrimitiveCallNode(callee_type = "$SetMetatable", op = set_metatable, args = ..., before = Γ, after = Γ')
+PrimitiveCallNode(callee_type = primitive_cap("$SetMetatable"), op = set_metatable, args = ..., before = Γ, after = Γ')
 ```
 
 The verifier checks that the callee has the primitive capability type and that
 the named operation follows the kernel rule. It does not trust the frontend
 because the callee text happened to be `setmetatable`.
+
+The exact `set_metatable` identity transition remains blocked on the
+seal-versus-fix fork. Until v7 closes that fork, this primitive capability is a
+reserved cutout shape, not permission to implement metatable lookup or
+constructor sealing behavior.
 
 ## Deferred Feature Classification
 
@@ -215,11 +222,16 @@ it must choose one of:
 - explicitly state that totality/throwing is outside the first soundness theorem
   and reject effect-sensitive stdlib contracts until the effect extension lands.
 
-If admitted, contextual control effects extend arrows:
+In the contextual-effect extension, arrows become:
 
 ```text
 arrow(params: Pack, effects: Effect, returns: Pack, post: Postcondition)
 ```
+
+The first-kernel `Type` grammar below does not include this effect slot. Until
+the extension is admitted, effect-sensitive stdlib contracts must be rejected or
+treated as explicit trusted boundaries; they must not be silently encoded as
+ordinary arrows.
 
 The first contextual-control effect system must answer:
 
@@ -512,6 +524,7 @@ Type T =
   userdata
   cdata
   literal(base, value)
+  primitive_cap(name)
   arrow(params: Pack, returns: Pack, post: Postcondition)
   record(fields, indexes, row)
   nominal(name)
@@ -530,14 +543,20 @@ Postcondition Q =
   post_and(Q, Q)
 ```
 
+`primitive_cap(name)` classifies a trusted callable primitive capability. It is
+admitted only for names with a primitive cutout contract. It is not source-name
+dispatch.
+
 `Pack` classifies value lists.
 
 ```text
 Pack P = pack(items: Type*, rest: Type?)
 ```
 
-The optional `rest` means zero or more additional values of that type. There is
-one terminal rest position only. A pack is not a value type.
+The `rest` field is reserved for the open-pack extension. In the first kernel,
+well-formed packs must have `rest = nil`. Once admitted, a non-empty `rest`
+means zero or more additional values of that type, with one terminal rest
+position only. A pack is not a value type.
 
 `PackAlt` classifies correlated alternatives of whole value lists.
 
@@ -577,7 +596,7 @@ Selected clauses:
 [[intersection(A, B)]]σ     = [[A]]σ ∩ [[B]]σ
 [[complement(A)]]σ          = Value \ [[A]]σ
 [[pack([T1..Tn], nil)]]σ    = lists [v1..vn] where vi ∈ [[Ti]]σ
-[[pack([T1..Tn], R)]]σ      = lists [v1..vn, r1..rk] where vi ∈ [[Ti]]σ and rj ∈ [[R]]σ
+[[pack([T1..Tn], R)]]σ      = reserved extension clause; not WF in the first kernel
 [[one(P)]]σ                 = [[P]]σ
 [[either(A, B)]]σ           = [[A]]σ ∪ [[B]]σ
 ```
@@ -588,12 +607,13 @@ Arrow denotation is intentionally abstract in the first kernel:
 function(f) ∈ [[arrow(P, R, Q)]]σ
 ```
 
-means that calling `f` with any argument list in `[[P]]σ` either produces a
-return list in `[[R]]σ` and establishes postcondition `Q` on the normal
-continuation, or reaches an explicit unsafe/runtime boundary admitted by the
-operational semantics. The checker proves this for user functions by checking
-their bodies under the arrow. Trusted external functions require an
-unsafe/trusted certificate boundary.
+means normal-return partial correctness: when calling `f` with any argument
+list in `[[P]]σ` returns normally, the return list is in `[[R]]σ` and
+postcondition `Q` holds on the normal continuation. Nonlocal exits such as
+throwing or yielding are not modeled by first-kernel arrows. They require the
+contextual-effect extension or an explicit unsafe/trusted certificate boundary.
+The checker proves ordinary user-function arrows by checking their bodies under
+the arrow.
 
 Record denotation is also store-indexed:
 
@@ -650,7 +670,7 @@ set is:
 ```text
 WFType(Δ, T)                         -- T is a well-formed value type
 WFPack(Δ, P)                         -- P is a well-formed value-list type
-WFPost(Δ, Q)                         -- Q is a well-formed postcondition
+WFPost(Δ, places, Q)                 -- Q is a well-formed postcondition over places
 Sub(Δ, T1, T2)                       -- T1 <: T2
 EqType(Δ, T1, T2)                    -- T1 = T2
 PackMove(Δ, dir, PackAlt, Pack)      -- value-list movement succeeds
@@ -690,15 +710,23 @@ Well-formedness is the first anti-ad-hoc barrier.
 
 Rules:
 
-- packs are well-formed only if every item/rest is a well-formed `Type`;
-- postconditions are well-formed only if their places are in scope and their
-  predicates are well-formed;
+- packs are well-formed only if every item is a well-formed `Type` and
+  `rest = nil`;
+- non-empty pack `rest` is not well-formed until the open-pack extension is
+  admitted;
+- postconditions are well-formed only if their places are in the arrow's
+  parameter/place context and their predicates are well-formed;
 - `arrow(P, R, Q)` is well-formed only if `P`, `R`, and `Q` are well-formed;
 - `record(F, I, row)` is well-formed only if every field/index component is a
   well-formed `Type`;
 - `Pack` and `Postcondition` are not well-formed as `Type`;
-- effects, HKTs, rank-N binders, and refinement predicates are not well-formed
-  until admitted by an extension.
+- effects, HKTs, rank-N binders, non-empty pack rests, and refinement
+  predicates are not well-formed until admitted by an extension.
+
+The first kernel has not yet chosen the concrete representation of arrow
+parameter places. It may use binder packs, positional parameter places, or
+another explicit scheme, but postconditions must not refer to unbound source
+names.
 
 This is where `T & asserts x is U` is rejected: the right operand is not a
 `Type`, so the intersection is ill-formed.
@@ -925,8 +953,9 @@ Rules:
 
 - fresh table literals create open identities;
 - direct writes to open identities extend or equate their own record;
-- `set_metatable`, authorized by a callee of type `$SetMetatable`, fixes the
-  metatable on an open unescaped identity;
+- `set_metatable`, authorized by a callee of type
+  `primitive_cap("$SetMetatable")`, fixes the metatable on an open unescaped
+  identity in the provisional no-seal rule;
 - any observation requiring a stable value type seals first;
 - sealed identities reject absent-field writes and readonly writes;
 - escaped identities cannot be extended;
@@ -964,17 +993,21 @@ IdentityStep(Γ, set_metatable(id, mt_claim)) =>
 ```
 
 requires `id` to be open, fresh/unescaped, and not already bound to a different
-metatable. The `set_metatable` operation fixes the metatable but does not by
-itself seal the own-field construction record. Observation, annotation, return,
-unknown call, or escape seals later. This differs from "dispatch on a function
-named setmetatable"; the rule is authorized by the callee's `$SetMetatable`
-type-level capability.
+metatable. The provisional `set_metatable` operation fixes the metatable but
+does not by itself seal the own-field construction record. Observation,
+annotation, return, unknown call, or escape seals later. This differs from
+"dispatch on a function named setmetatable"; the rule is authorized by the
+callee's `primitive_cap("$SetMetatable")` type-level capability.
+
+This rule is not final admission of metatable semantics. If v7 chooses
+seal-on-setmetatable instead, this transition and its certificate examples must
+change before `__index`, method dispatch, or constructor templates are admitted.
 
 Seal:
 
 ```text
 IdentityStep(Γ, seal(id)) =>
-  Γ[identities[id] = sealed(record)]
+  Γ[identities[id] = sealed(record, metatable?)]
 ```
 
 returns a `ValueClaim` whose type is the sealed `record` and whose identity is
@@ -1244,7 +1277,7 @@ Minimum node families:
 ```text
 WFTypeNode(T)
 WFPackNode(P)
-WFPostNode(Q)
+WFPostNode(places, Q)
 SubNode(producer: Type, consumer: Type, rule, premises: proof*)
 EqNode(left: Type, right: Type, sub_lr: proof, sub_rl: proof)
 PackMoveNode(dir, producer: PackAlt, consumer: Pack, premises: proof*)
