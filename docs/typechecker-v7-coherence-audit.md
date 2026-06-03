@@ -62,13 +62,14 @@ folds.
 
 ### Rest Packs
 
-Rest packs were simultaneously described as part of `Pack` and as not admitted.
-That makes varargs, `pcall`, iterators, `select`, and coroutine APIs unsafe to
+Rest packs were previously described as part of `Pack` and as not admitted.
+That made varargs, `pcall`, iterators, `select`, and coroutine APIs unsafe to
 implement.
 
-Resolution: the first kernel may reserve a `rest` field in the data model, but
-`WFPack` rejects non-empty rest until rest movement rules, certificate nodes,
-and pack-adjustment semantics are mechanized.
+Resolution status: the pack design pass chooses full packs with
+closed/rest/variable tails and splits pack movement by semantic movement kind.
+The remaining work is detailed transcription for rest tails, pack variables,
+varargs, expression-list spread, and certificates.
 
 ### Contextual Effects
 
@@ -145,7 +146,7 @@ future extension examples.
 The coherent admission order is:
 
 1. `unknown` movement and concrete-consumption restrictions.
-2. Closed-pack hygiene: no admitted rest until rest movement exists.
+2. Detailed pack movement transcription for rest tails and pack variables.
 3. Arrow postcondition binders.
 4. Primitive capability specs.
 5. Table identity read/write/indexer judgments.

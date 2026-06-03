@@ -168,7 +168,7 @@ Rules for primitive cutouts:
 Certificate shape:
 
 ```text
-PrimitiveCallNode(callee_type = primitive_cap("$SetMetatable"), op = set_metatable, args = ..., before = Γ, after = Γ')
+PrimitiveCallNode(callee_type = primitive_cap("$SetMetatable"), op = set_metatable, args = ..., before = Γ, after = Γ', effect = pure, ...)
 ```
 
 The verifier checks that the callee has the primitive capability type and that
@@ -577,13 +577,18 @@ dispatch and not hidden `ValueClaim` metadata.
 `Pack` classifies value lists.
 
 ```text
-Pack P = pack(items: Type*, rest: Type?)
+Pack P = pack(items: Type*, tail: PackTail)
+
+PackTail =
+  closed
+  rest(Type)
+  var(pack_var)
 ```
 
-The `rest` field is reserved for the open-pack extension. In the first kernel,
-well-formed packs must have `rest = nil`. Once admitted, a non-empty `rest`
-means zero or more additional values of that type, with one terminal rest
-position only. A pack is not a value type.
+The full design admits closed, homogeneous-rest, and pack-variable tails. A
+staged first mechanized kernel may restrict well-formed packs to
+`tail = closed`, but the full checker must support rest and variable tails. A
+pack is not a value type.
 
 `PackAlt` classifies correlated alternatives of whole value lists.
 
@@ -622,8 +627,9 @@ Selected clauses:
 [[union(A, B)]]σ            = [[A]]σ ∪ [[B]]σ
 [[intersection(A, B)]]σ     = [[A]]σ ∩ [[B]]σ
 [[complement(A)]]σ          = Value \ [[A]]σ
-[[pack([T1..Tn], nil)]]σ    = lists [v1..vn] where vi ∈ [[Ti]]σ
-[[pack([T1..Tn], R)]]σ      = reserved extension clause; not WF in the first kernel
+[[pack([T1..Tn], closed)]]σ = lists [v1..vn] where vi ∈ [[Ti]]σ
+[[pack([T1..Tn], rest(R))]]σ = lists [v1..vn, r1..rk] where vi ∈ [[Ti]]σ and rj ∈ [[R]]σ
+[[pack([T1..Tn], var(P))]]σ = lists with prefix [v1..vn] followed by a list in [[P]]σ
 [[one(P)]]σ                 = [[P]]σ
 [[either(A, B)]]σ           = [[A]]σ ∪ [[B]]σ
 ```
@@ -701,7 +707,7 @@ WFEffect(Δ, E)                       -- E is a well-formed contextual effect
 WFPost(Δ, places, Q)                 -- Q is a well-formed postcondition over places
 Sub(Δ, T1, T2)                       -- T1 <: T2
 EqType(Δ, T1, T2)                    -- T1 = T2
-PackMove(Δ, dir, PackAlt, Pack)      -- value-list movement succeeds
+PackMove(Δ, kind, PackAlt, target)   -- value-list movement succeeds
 ExprSynth(Γ, e) => Claim             -- synthesize expression claim
 ExprCheck(Γ, e, T) => Proof          -- check expression against T
 StmtCheck(Γ, s) => Γ'                -- statement fact transition
@@ -739,10 +745,8 @@ Well-formedness is the first anti-ad-hoc barrier.
 
 Rules:
 
-- packs are well-formed only if every item is a well-formed `Type` and
-  `rest = nil`;
-- non-empty pack `rest` is not well-formed until the open-pack extension is
-  admitted;
+- packs are well-formed only if every item is a well-formed `Type` and the tail
+  is `closed`, a well-formed `rest(Type)`, or an in-scope pack variable;
 - postconditions are well-formed only if their places are in the arrow's
   parameter/place context and their predicates are well-formed;
 - `arrow(BP, E, R, Q)` is well-formed only if `BP`, `E`, `R`, and `Q` are
@@ -750,7 +754,7 @@ Rules:
 - `record(F, I, row)` is well-formed only if every field/index component is a
   well-formed `Type`;
 - `Pack` and `Postcondition` are not well-formed as `Type`;
-- non-pure effects, HKTs, rank-N binders, non-empty pack rests, and refinement
+- non-pure effects, HKTs, rank-N binders, pack variables, and refinement
   predicates may be restricted by staged proof subsets until their rules are
   mechanized.
 
@@ -775,9 +779,10 @@ Sub(Δ, arrow(BPa, Ea, Ra, Qa), arrow(BPb, Eb, Rb, Qb))
 
 requires:
 
-- `PackMove(Δ, contra, one(pack_types(BPb)), pack_types(BPa))` for parameters;
+- `PackMove(Δ, arrow_param_subtype, one(pack_types(BPb)), pack_types(BPa))`
+  for parameters;
 - `EffectSub(Δ, Ea, Eb)` for contextual effects;
-- `PackMove(Δ, co, one(Ra), Rb)` for returns;
+- `PackMove(Δ, return_to_decl, one(Ra), Rb)` for returns;
 - `PostImplies(Δ, Qa, Qb)` for postconditions after alpha-renaming binder IDs.
 
 `PostImplies(Qa, Qb)` means every fact guaranteed by the producer's normal
@@ -804,35 +809,50 @@ No other predicate implication is admitted until specified.
 
 Packs interact only at value-list movement sites.
 
-Pack subtyping is not ordinary type subtyping. It is parameterized by the
-movement direction:
+Pack movement is not ordinary type subtyping. It is parameterized by the
+semantic movement kind:
 
 ```text
-P <:pack[co] Q      -- producer returns usable as consumer returns
-P <:pack[contra] Q  -- callee parameter pack substitutability
+scalar
+return_to_decl
+call_args_to_params
+destructure_to_slots
+arrow_param_subtype
+pack_subtype_co
 ```
 
-Closed covariant return packs use Lua return adjustment:
+Direction-only `co`/`contra` movement is not enough for the full checker. Lua
+call adjustment, return adjustment, destructuring, scalar extraction, and arrow
+parameter substitutability are different semantic operations.
+
+Return-to-declaration movement uses Lua return adjustment:
 
 - surplus produced values may be discarded;
 - missing produced values are `nil`;
-- each consumed slot must be satisfied after that adjustment.
+- each consumed slot must be satisfied after that adjustment;
+- rest tails consume or check all remaining produced values.
 
-Closed contravariant parameter packs require exact arity unless an explicit rest
-is present. A function that accepts a different fixed number of parameters is
-not substitutable.
+Call-argument movement uses Lua call adjustment:
+
+- missing arguments become `nil`;
+- surplus arguments are discarded unless captured by a rest/vararg parameter;
+- each formal slot must be satisfied after adjustment.
+
+Arrow parameter subtyping is separate: a producer function may stand in for an
+expected function only if every argument list accepted by the expected function
+is accepted by the producer function.
 
 `PackAlt` preserves whole-list correlation until a movement site consumes it.
 For example:
 
 ```text
-either(pack(["ok", number]), pack(["err", string]))
+either(pack(["ok", number], closed), pack(["err", string], closed))
 ```
 
 is not the same as:
 
 ```text
-pack(["ok" | "err", number | string])
+pack(["ok" | "err", number | string], closed)
 ```
 
 The latter is an admitted widening only at a named correlation-loss movement
@@ -840,21 +860,21 @@ site, if such a site is added to the kernel.
 
 ### Pack Movement Judgment
 
-`PackMove(Δ, dir, A, P)` consumes a `PackAlt` producer `A` at a movement site
-expecting pack `P`.
+`PackMove(Δ, kind, A, target)` consumes a `PackAlt` producer `A` at a movement
+site. The `target` shape depends on the movement kind.
 
 Alternative rule:
 
 ```text
-PackMove(Δ, dir, either(A, B), P)
-  iff PackMove(Δ, dir, A, P) and PackMove(Δ, dir, B, P)
+PackMove(Δ, kind, either(A, B), target)
+  iff PackMove(Δ, kind, A, target) and PackMove(Δ, kind, B, target)
 ```
 
 Closed scalar list adjustment is a helper inside `PackMove`, not a general type
 operation:
 
 ```text
-adjust(pack([A1..An], nil), m)[i] =
+adjust(pack([A1..An], closed), m)[i] =
   Ai   when i <= n
   nil  when i > n
 ```
@@ -862,28 +882,29 @@ adjust(pack([A1..An], nil), m)[i] =
 Covariant return movement:
 
 ```text
-PackMove(Δ, co, one(pack([A1..An], nil)), pack([B1..Bm], nil))
+PackMove(Δ, return_to_decl, one(pack([A1..An], closed)), pack([B1..Bm], closed))
   iff for each i in 1..m, Sub(Δ, adjust(A, m)[i], Bi)
 ```
 
 Surplus producer returns are ignored by the adjustment.
 
-Contravariant parameter movement:
+Fixed call-argument movement:
 
 ```text
-PackMove(Δ, contra, one(pack([A1..An], nil)), pack([B1..Bm], nil))
-  iff n = m and for each i in 1..n, Sub(Δ, Bi, Ai)
+PackMove(Δ, call_args_to_params, one(pack([A1..An], closed)), pack([B1..Bm], closed))
+  iff for each i in 1..m, Sub(Δ, adjust(A, m)[i], Bi)
 ```
 
-Open packs, varargs, and rest interaction are not admitted until the rest rules
-are mechanized. A checker may reject them before that point.
+Arrow parameter subtyping and rest/variable-tail movement require additional
+rules. A staged checker may reject those forms until mechanized, but the full
+design admits them.
 
 Scalar extraction is also a named movement:
 
 ```text
 ScalarOf(either(A, B)) = union(ScalarOf(A), ScalarOf(B))
-ScalarOf(one(pack([], nil))) = nil
-ScalarOf(one(pack([A1..An], rest))) = A1
+ScalarOf(one(pack([], closed))) = nil
+ScalarOf(one(pack([A1..An], tail))) = A1
 ```
 
 This is an explicit correlation-loss site. It is allowed for scalar expression
@@ -1144,7 +1165,7 @@ Steps:
    either a single `arrow` or an intersection of arrows.
 3. For each branch `arrow(BP, E, R, Q)`:
    - compute argument producer `A` from the argument expression list;
-   - require `PackMove(Δ, contra, A, pack_types(BP))`;
+   - require `PackMove(Δ, call_args_to_params, A, pack_types(BP))`;
    - substitute parameter places in `Q` with stable caller places where
      available;
    - if successful, include `E`, `R`, and the substituted or explicitly
@@ -1364,7 +1385,7 @@ ExprNode(f, claim = intersection(arrow(BP1, E1, R1, Q1), arrow(BP2, E2, R2, Q2))
 Assertion call:
 
 ```text
-CallNode(assert_string, { x }, result = one(pack([])), post = assert(local(slot_x), HasType(local(slot_x), string)), ...)
+CallNode(assert_string, { x }, effect = pure, result = one(pack([], closed)), post = assert(local(slot_x), HasType(local(slot_x), string)), ...)
 PostNode(assert(local(slot_x), HasType(local(slot_x), string)), before = Γ, after = Γ[slot_x -> Γ[slot_x] & string], ...)
 ```
 

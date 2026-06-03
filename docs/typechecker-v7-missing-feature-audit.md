@@ -39,7 +39,7 @@ obligations, and certificate nodes for it.
 | `setmetatable` seal semantics | `docs/type-system-design/06-setmetatable-construction.md`; v7 consolidation audit | v7 has `$SetMetatable` cutout but currently fixes metatable without sealing. | Construction-phase table typing and OO idioms depend on this. | Conflicting rules between v7 and M6 can make table identity unsound. | Load-bearing design fork: decide in v7 before implementing metatable precision. |
 | Raw operations (`rawget`, `rawset`, `rawequal`, `rawlen`) | `docs/typechecker-v4-stdlib-design.md` stdlib scope | Not classified. | Raw ops bypass metamethods and interact with table identity/indexers. | Treating them as ordinary field ops may incorrectly include metatable behavior. | Candidate core/stdlib extension: raw table observation/write primitives over identity/record state. |
 | `select` | `docs/typechecker-v4-stdlib-design.md` §2; `TODO.md` de-specialcase builtins | Not represented. | Vararg manipulation is common and affects pack precision. | Literal-`"#"` branch and index-tail branch invite name/literal special cases. | Candidate pack extension: stdlib declaration over packs plus literal overloads; reject until pack generics are specified. |
-| Varargs and open packs | v7 kernel says open packs/rest not admitted until mechanized; `docs/type-system-design/03-variadic-packs.md`; `docs/v5-gaps.md` G17 | v7 has closed-pack rules and defers open/rest. | Needed for real Lua calls, `pcall`, iterators, `select`, vararg functions. | Approximating unknown arity as scalar `unknown` loses soundness/precision. | Candidate core extension: rest-pack movement, pack variables, variadic generics. |
+| Varargs and open packs | v7 pack design pass chooses closed/rest/variable tails and movement kinds; `docs/type-system-design/03-variadic-packs.md`; `docs/v5-gaps.md` G17 | Direction chosen; detailed transcription pending. | Needed for real Lua calls, `pcall`, iterators, `select`, vararg functions. | Approximating unknown arity as scalar `unknown` loses soundness/precision. | Core design: rest-pack movement, pack variables, variadic generics, and expression-list spread rules. |
 | Last-position multi-return spread | `docs/v5-gaps.md` P5/Y3; TODO multi-return entries | Partially covered by pack movement, but not statement-level rule. | `return f()` and `a,b = f()` are central Lua semantics. | Flattening to positional records or slotwise unions loses correlation. | Admitted-core gap: add expression-list expansion rules over `PackAlt`. |
 | `pcall` / `xpcall` | `docs/typechecker-v4-stdlib-design.md`; `docs/type-system-design/05-effects.md`; `docs/v5-gaps.md` P2/G17/Y1 | Reclassified as contextual-control effect candidate. | Needed for error handling and many force casts. | Name-keyed pcall handlers were a known failure; flat boolean/unknown result is too weak. | Contextual-control effect: `throws(E)` discharge plus pack-correlated success/failure result. |
 | `error` / assertion failure | `docs/typechecker-v4-stdlib-design.md`; `docs/type-system-design/05-effects.md`; v7 effects section | Reclassified as contextual-control effect candidate. | Distinguishes normal return from nonlocal exit; `assert` narrowing depends on normal continuation. | Modeling as `never` only ignores enclosing arrow totality; modeling as return type is wrong. | Contextual-control effect or explicit outside-theorem boundary; decide before stdlib precision. |
@@ -78,9 +78,9 @@ obligations, and certificate nodes for it.
    transcribe that decision into each movement and operation judgment before
    implementation, because it affects every annotation, call, cast, and bridge
    fallback.
-2. **Open/rest packs.** Closed packs are not enough for Lua. `pcall`,
-   `coroutine.resume`, iterators, `select`, and varargs all depend on pack
-   variables/rest movement.
+2. **Open/rest pack transcription.** v7 now chooses closed/rest/variable tails
+   and movement kinds. Remaining work is detailed rules for rest tails, pack
+   variables, varargs, expression-list spread, and certificate nodes.
 3. **Contextual-control effect transcription.** v7 now chooses effectful arrows
    for the full design, with `throws(E)` and `yields(Y,S)` as the initial
    contextual-control effects. Remaining work is sequencing, subtyping,

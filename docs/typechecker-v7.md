@@ -23,15 +23,17 @@ Read in this order:
    refinement pass, deciding primitive capabilities as value types.
 6. `docs/typechecker-v7-design-pass-effects.md` — fourth refinement pass,
    deciding full arrows are effectful with contextual-control effects.
-7. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
+7. `docs/typechecker-v7-design-pass-packs.md` — fifth refinement pass, deciding
+   open/rest packs and movement kinds.
+8. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
    consistent whole, plus blocking semantic seams.
-8. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
+9. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
    judgments, and certificate obligations.
-9. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
+10. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
    older Crescent designs or external systems without reintroducing ad-hocness.
-10. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+11. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-11. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
+12. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
    and lineage status.
 
 Older v4/v5/v6 docs are research input only. If they conflict with v7, v7 owns
@@ -44,7 +46,7 @@ Admitted or actively sketched:
 
 - value-set algebra: literals, atoms, unions, intersections, complement,
   `unknown`, `never`;
-- closed value-list packs and correlated `PackAlt`;
+- value-list packs with closed/rest/variable tails and correlated `PackAlt`;
 - arrows with return packs and normal-continuation postconditions;
 - records as sealed observations of table identities;
 - table identity states and transitions;
@@ -54,7 +56,7 @@ Admitted or actively sketched:
 
 Not yet admitted:
 
-- open/rest packs and pack variables;
+- detailed rest/pack-variable movement transcription;
 - contextual control effects such as `throws(E)` and `yields(Y, S)`;
 - module/declaration/FFI environments;
 - match-type evaluation and field-descriptor folds;
@@ -67,17 +69,14 @@ Not yet admitted:
 
 Work these before implementation verticals:
 
-1. **Open/rest packs.** Closed packs are insufficient for Lua. Varargs,
-   `pcall`, `coroutine.resume`, iterators, `select`, and spread returns need a
-   pack-variable/rest story.
+1. **Setmetatable fork.** Decide whether `set_metatable` seals construction or
+   only fixes metatable state. `__index` chain walking depends on this.
 2. **Module/declaration environments.** Define `ModuleEnv`/`DeclEnv` before
    admitting `$Require`, `--:: require`, `$GlobalScope`, or module exports.
-3. **Setmetatable fork.** Decide whether `set_metatable` seals construction or
-   only fixes metatable state. `__index` chain walking depends on this.
-4. **Match/type-level computation.** Specify match evaluation, captures,
+3. **Match/type-level computation.** Specify match evaluation, captures,
    suspension/rejection, and field descriptors before admitting `$EachField` or
    deleting helper intrinsics.
-5. **Operator/metamethod substrate.** Define operator application through
+4. **Operator/metamethod substrate.** Define operator application through
    primitive/metamethod lookup, not per-operator predicates or name-keyed
    handlers.
 

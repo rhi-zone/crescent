@@ -182,13 +182,17 @@ A pack classifies runtime value lists.
 
 Required pack forms derive from Lua call/return behavior:
 
-- fixed lists;
-- homogeneous rest;
-- pack variables;
+- fixed prefixes;
+- closed tails;
+- homogeneous rest tails;
+- pack-variable tails;
 - correlated alternatives.
 
-Design pressure: real Lua requires open/rest packs. A checker can start with
-closed packs for proof development, but a full checker cannot stop there.
+Decision direction: full v7 packs have fixed prefixes plus closed/rest/variable
+tails, and pack movement is split by semantic movement kind rather than only
+covariant/contravariant direction.
+
+See `docs/typechecker-v7-design-pass-packs.md`.
 
 ### Arrow
 
