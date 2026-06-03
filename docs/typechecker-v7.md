@@ -48,9 +48,9 @@ Read in this order:
    the vendored LuaJIT 5.1 runtime: source operators, metamethod dispatch,
    equality/order restrictions, protected metatables, raw operations, and cdata
    boundaries.
-16. `docs/typechecker-v7-design-pass-stdlib-profile.md` — thirteenth refinement
-   pass, deciding explicit LuaJIT stdlib profile variants and separating core,
-   FFI, app authority, and debug authority.
+16. `docs/typechecker-v7-minimal-replay-subset.md` — first verifier prototype
+   slice, deciding MR0's admitted rules, certificate payload families, roots,
+   primitive calls, and explicit exclusions.
 17. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
    consistent whole, plus blocking semantic seams.
 18. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
@@ -87,17 +87,17 @@ Not yet admitted:
 - module/declaration/FFI environments;
 - match-type evaluation and field-descriptor folds;
 - HKTs, rank-N polymorphism, recursive types, and full kinding;
-- detailed operator target tables and truthiness/control-flow transcription;
-- target-specific stdlib profiles.
+- exact table length proofs, cdata operators, and numeric-string grammar;
+- external declaration/import bridge specs for globals, modules, and FFI.
 
 ## Decision Queue
 
 Work these before implementation verticals:
 
-1. **Minimal replay subset.** Pick the smallest closed set of kernel rules and
-   certificate payloads for a first verifier prototype.
-2. **Minimal replay subset.** Convert the smallest closed set of admitted rules
-   into exact certificate payloads for a verifier prototype.
+1. **MR0 payload transcription.** Turn the minimal replay subset into concrete
+   verifier data structures and canonical serialization.
+2. **MR0 adversarial examples.** Write small accepted/rejected programs that
+   exercise every admitted MR0 node family.
 
 ## Admission Rule
 

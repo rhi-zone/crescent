@@ -43,7 +43,6 @@ Certificate context is immutable.
 ```text
 ContextInputs = {
   TargetProfile,
-  StdlibProfile,
   ModuleEnv,
   DeclEnv,
   FfiEnv,
@@ -63,9 +62,9 @@ InputRef = {
 }
 ```
 
-Changing a target profile, stdlib profile, declaration file, module interface,
-FFI declaration, or source digest invalidates dependent certificates. The
-checker must not silently reuse a certificate under a different context.
+Changing a target profile, declaration file, module interface, FFI declaration,
+or source digest invalidates dependent certificates. The checker must not
+silently reuse a certificate under a different context.
 
 ## Term Table
 

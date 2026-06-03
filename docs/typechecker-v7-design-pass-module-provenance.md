@@ -1,14 +1,14 @@
 # Typechecker v7 Design Pass: Modules, Declarations, And Provenance
 
 This is an iterative first-principles pass. It is pre-spec design work, but it
-chooses the direction for modules, declaration imports, target stdlib profiles,
-and FFI provenance.
+chooses the direction for modules, declaration imports, target profiles, and FFI
+provenance.
 
 ## Question
 
 How do external claims enter the checker?
 
-The checker needs declarations for modules, stdlib bindings, primitive
+The checker needs declarations for modules, project/global bindings, primitive
 capability values, FFI symbols, and imported annotations. Those claims are not
 proved from the current file's syntax. If they enter through hidden global state,
 loader side effects, or fallback `unknown`, the design becomes ad hoc.
@@ -35,7 +35,6 @@ Choose explicit environment objects as certificate inputs:
 
 ```text
 TargetProfile
-StdlibProfile
 ModuleEnv
 DeclEnv
 FfiEnv
@@ -56,26 +55,10 @@ The target profile fixes runtime dialect assumptions:
 - coroutine API shape;
 - FFI availability;
 - protected metatable behavior;
-- stdlib profile selection.
+- no concrete stdlib declaration set.
 
 Target-specific semantics must be visible in certificates. A proof under
 LuaJIT is not automatically a proof under Lua 5.4.
-
-### StdlibProfile
-
-The stdlib profile binds initial global values.
-
-It may introduce primitive capability values:
-
-```text
-setmetatable : primitive_cap("$SetMetatable")
-getmetatable : primitive_cap("$GetMetatable")
-rawget       : primitive_cap("$RawGet")
-rawset       : primitive_cap("$RawSet")
-```
-
-Caps-first policy belongs here. Ambient `io`, `os`, `debug`, and FFI authority
-are absent unless the selected profile explicitly provides capability values.
 
 ### ModuleEnv
 
@@ -105,7 +88,7 @@ The declaration environment contains annotation-side declarations:
 - explicit global declarations;
 - module-local type aliases;
 - augmentation declarations, if admitted later;
-- primitive/stdlib declarations selected by profile.
+- primitive declarations selected by project/driver config.
 
 Declarations are per module. They are not global by default.
 
@@ -161,7 +144,7 @@ It must not synthesize ambient globals by scanning checker state.
 
 Requirements:
 
-- selected `StdlibProfile`;
+- explicit `DeclEnv`;
 - explicit global declarations;
 - no undeclared fallback indexer;
 - certificate node listing the environment snapshot.
@@ -191,7 +174,6 @@ CheckModule(module_id, source, imports) => ModuleInterface
 The body checks under:
 
 - selected `TargetProfile`;
-- selected `StdlibProfile`;
 - imported `ModuleEnv` entries;
 - module-local `DeclEnv`;
 - optional `FfiEnv`.
@@ -286,8 +268,8 @@ Rejected:
 globals exist because the checker knows Lua
 ```
 
-Reason: target and stdlib profiles must be certificate inputs. Ambient defaults
-hide authority and target assumptions.
+Reason: concrete stdlib declaration sets are external config, not kernel
+semantics. Ambient defaults hide authority and target assumptions.
 
 ## Adversarial Review
 
@@ -328,8 +310,8 @@ Choose:
 
 ```text
 external claims enter through explicit immutable environments with provenance;
-runtime require, annotation require, stdlib profiles, globals, and FFI all
-elaborate to those environments or trusted boundary nodes
+runtime require, annotation require, globals, and FFI all elaborate to those
+environments or trusted boundary nodes
 ```
 
 The next design pass should tackle type-level computation and generics/HKTs, or

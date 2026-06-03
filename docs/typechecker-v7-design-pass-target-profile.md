@@ -65,8 +65,8 @@ It does not mean:
 Runtime availability is split:
 
 - `TargetProfile` owns runtime semantic rules;
-- `StdlibProfile` owns which runtime values are in scope and their declared
-  types;
+- external declaration/config inputs own which runtime values are in scope and
+  their declared types;
 - `FfiEnv` owns C declarations and symbols.
 
 ## Scalar And Numeric Policy
@@ -93,7 +93,7 @@ admitted after transcription:
 
 - integer literals without fractional syntax;
 - bit operations returning signed 32-bit integral numeric values;
-- selected floor/truncation-like stdlib declarations;
+- selected floor/truncation-like external declarations;
 - constant-folded arithmetic only when exactness and range are proven.
 
 Rejected shortcuts:
@@ -152,7 +152,7 @@ truthy = complement(nil | false)
 ```
 
 This is stable enough to be a profile constant. `TruthinessNode` can replay it
-without consulting stdlib declarations.
+without consulting external declarations.
 
 `and` and `or` use this truthiness policy but are not primitive operators.
 
@@ -240,8 +240,8 @@ For `luajit51-crescent`:
 - otherwise it returns the actual metatable claim when visible;
 - public `setmetatable` capability rejects if the current metatable has a
   protected `__metatable` field;
-- debug capabilities that bypass protection are not in the default stdlib
-  profile and require explicit capability/trust decisions.
+- debug capabilities that bypass protection require explicit capability/trust
+  decisions.
 
 The kernel may still track internal metatable identity for soundness and
 dependency invalidation. The public observation returned by `$GetMetatable` is
@@ -293,7 +293,7 @@ surface dialects might differ, but v7's Lua profile treats it as fixed.
 
 ## Stdlib Boundary
 
-`StdlibProfile("luajit51-crescent/core")` may bind names such as:
+An external declaration environment may bind names such as:
 
 ```text
 setmetatable : primitive_cap("$SetMetatable")
@@ -303,9 +303,9 @@ rawset       : primitive_cap("$RawSet")
 rawequal     : primitive_cap("$RawEqual")
 ```
 
-It must not bind `rawlen` because the probed LuaJIT 5.1 runtime has
-no `rawlen` global. `$RawLen` remains a candidate primitive for other target
-profiles.
+For the probed LuaJIT 5.1 runtime, declarations should not bind `rawlen` as a
+runtime global because the target has no `rawlen` global. `$RawLen` remains a
+candidate primitive for other target profiles.
 
 The target profile does not make these names ambient. If a program shadows
 `setmetatable`, it shadows an ordinary binding. Primitive behavior follows the
@@ -337,7 +337,5 @@ length rules are specified.
 
 1. Specify table length proofs for fresh/sealed array-like table states.
 2. Add `clear_metatable(id)` if metatable clearing is worth supporting.
-3. Define default and caps-enabled `StdlibProfile` variants for the LuaJIT
-   target.
-4. Add stale-certificate tests that replay a proof under a different target
+3. Add stale-certificate tests that replay a proof under a different target
    digest and reject it.

@@ -140,7 +140,8 @@ Sparse or escaped table length may be rejected or widened to `integer` only if
 the target length rule is specified for the table state. Exact length claims
 require stable contiguous table evidence.
 
-There is no `$RawLen` stdlib binding for `luajit51-crescent/core`.
+There is no LuaJIT 5.1 runtime `rawlen` global for an external declaration set
+to bind.
 
 ## Equality
 
@@ -285,7 +286,7 @@ Kernel behavior:
 - internal metatable state remains tracked for soundness;
 - public `$GetMetatable` returns the protected public value;
 - public `$SetMetatable` rejects protected targets;
-- debug bypasses are not in the default stdlib profile.
+- debug bypasses require explicit external declarations/trust.
 
 ## Metatable Clearing
 
@@ -295,8 +296,8 @@ Runtime LuaJIT permits:
 setmetatable(t, nil)
 ```
 
-v7 rejects this in `luajit51-crescent/core` until `clear_metatable(id)` is
-specified. This is a deliberate conservative gap.
+v7 rejects this until `clear_metatable(id)` is specified. This is a deliberate
+conservative gap.
 
 ## Raw Operations
 
@@ -314,7 +315,7 @@ LuaJIT 5.1 does not expose:
 rawlen
 ```
 
-Default stdlib capability bindings:
+External declaration environments may bind:
 
 ```text
 rawget   : primitive_cap("$RawGet")
@@ -322,7 +323,7 @@ rawset   : primitive_cap("$RawSet")
 rawequal : primitive_cap("$RawEqual")
 ```
 
-No default binding:
+No LuaJIT 5.1 runtime global:
 
 ```text
 rawlen
@@ -365,7 +366,7 @@ Target-dependent nodes include:
 - `MetamethodNode`;
 - `PrimitiveCallNode` for raw/get/set metatable operations;
 - table length proof nodes;
-- stdlib profile import nodes.
+- external declaration import nodes.
 
 ## Remaining Unknowns
 

@@ -147,7 +147,7 @@ itself.
 
 ### Trusted Boundaries
 
-Modules, declarations, FFI, target stdlib profiles, unchecked casts, and legacy
+Modules, declarations, FFI, target profiles, unchecked casts, and legacy
 escape hatches can introduce claims not proved inside the program.
 
 These are not type rules. They are trusted boundaries. A sound checker can allow
@@ -291,9 +291,9 @@ ordinary type computation. They need environments, provenance, missing-symbol
 semantics, and certificate boundaries.
 
 Decision direction: external claims enter through explicit immutable
-environments with provenance: `TargetProfile`, `StdlibProfile`, `ModuleEnv`,
-`DeclEnv`, and `FfiEnv`. Runtime require, annotation require, stdlib profiles,
-globals, and FFI all elaborate to those environments or trusted boundary nodes.
+environments with provenance: `TargetProfile`, `ModuleEnv`, `DeclEnv`, and
+`FfiEnv`. Runtime require, annotation require, globals, and FFI all elaborate to
+those environments or trusted boundary nodes.
 
 See `docs/typechecker-v7-design-pass-module-provenance.md`.
 
@@ -446,10 +446,11 @@ See `docs/typechecker-v7-design-pass-certificates.md`.
 
 See `docs/typechecker-v7-design-pass-target-profile.md`.
 
-4. How do stdlib bindings enter?
-   Decision: explicit `StdlibProfile` variants. `luajit51-crescent/core` is the
-   library default and excludes ambient output/process/debug/native-load
-   authority; FFI, app, and debug capabilities enter through separate selected
-   profiles.
+4. What is the first verifier slice?
+   Decision: MR0 includes literals, scalar annotations, closed-pack calls,
+   overload export checking, explicit unsafe boundaries, fresh table identity
+   writes, sealed record observations, and a tiny primitive-capability set. It
+   excludes effects, modules, FFI, metatable dispatch, open packs, and type-level
+   computation.
 
-See `docs/typechecker-v7-design-pass-stdlib-profile.md`.
+See `docs/typechecker-v7-minimal-replay-subset.md`.

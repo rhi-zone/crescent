@@ -325,7 +325,7 @@ production a substrate rule.
 
 Residual risk: stdlib functions like `select`, `pcall`, and `resume` may tempt
 special-case handlers. They must be expressed through pack variables, effects,
-and primitive/stdlib declarations.
+and primitive/external declarations.
 
 ### Completeness Lens
 

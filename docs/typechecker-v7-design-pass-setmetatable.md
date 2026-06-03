@@ -161,7 +161,8 @@ primitive_cap("$SetMetatable")
 ```
 
 The runtime binding named `setmetatable` may have that type through a target
-stdlib profile. Aliases preserve the capability. Shadowing does not acquire it.
+external declaration input. Aliases preserve the capability. Shadowing does not
+acquire it.
 
 ## Interaction With Operators And Methods
 

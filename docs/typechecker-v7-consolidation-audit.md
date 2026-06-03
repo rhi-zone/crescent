@@ -60,9 +60,15 @@ as separate target profiles with separate certificate digests.
 The first concrete LuaJIT target table now records observed operator,
 metamethod, protected-metatable, raw-operation, and cdata boundary behavior.
 
-Stdlib bindings enter through explicit `StdlibProfile` variants. The library
-default is `luajit51-crescent/core`; FFI, app/process authority, and debug
-authority are separate profile inputs.
+Stdlib bindings are not checker-core semantics and are not part of the v7
+semantic spec as a concrete declaration set. They enter, if selected by a
+project or driver, through external declaration environment inputs with
+provenance, the same category as other checked/trusted declarations.
+
+The first verifier slice is MR0: literals, scalar annotations, closed-pack
+calls, overload export checking, explicit unsafe boundaries, fresh table
+identity writes, sealed record observations, and a tiny primitive-capability
+set.
 
 ### Architecture Bar
 
@@ -208,11 +214,13 @@ as v7 authority.
 4. Complete remaining `luajit51-crescent` target details: numeric-string
    grammar, exact integer preservation, table length proofs, and cdata operator
    families.
-5. Transcribe exact `luajit51-crescent/core` binding types after dependent
-   effect, pack, primitive, intrinsic, and environment rules are admitted.
-6. Create a v7 TODO list that references kernel sections instead of older v5/v6
+5. Turn MR0 into concrete verifier payloads and canonical serialization.
+6. Specify the external declaration environment interface enough for project
+   globals files, module declarations, and trusted primitive values to be
+   certificate inputs without becoming kernel rules.
+7. Create a v7 TODO list that references kernel sections instead of older v5/v6
    module names.
-7. Audit `docs/type-system.md` for stale claims about `any`, force casts, and
+8. Audit `docs/type-system.md` for stale claims about `any`, force casts, and
    current soundness gaps before using it as v7 philosophy input.
-8. Work through `docs/typechecker-v7-missing-feature-audit.md` from highest-risk
+9. Work through `docs/typechecker-v7-missing-feature-audit.md` from highest-risk
    missing classification to lowest.

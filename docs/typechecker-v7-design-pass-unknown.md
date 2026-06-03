@@ -148,7 +148,7 @@ It cannot appear as "the checker got confused".
 
 ### Trusted Boundaries Stay Contained
 
-FFI, modules, dynamic require, and target stdlib declarations may expose
+FFI, modules, dynamic require, and external declarations may expose
 `unknown` when the boundary cannot prove a stronger claim. Users must narrow or
 force before concrete use.
 

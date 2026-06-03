@@ -26,13 +26,13 @@ obligations, and certificate nodes for it.
 
 | Feature | Source evidence | v7 status | Why it matters | Ad-hocness risk | Recommended v7 classification |
 |---|---|---|---|---|---|
-| Caps-first stdlib / optional caps prelude | `docs/typechecker-v4-stdlib-design.md` §1.2; CLAUDE caps-first; subagent audit | Direction chosen: explicit LuaJIT stdlib profile variants; `core` excludes output/process/debug/native-load authority. | Prevents ambient `io`/`os`/`debug` authority from leaking into every checked library while still allowing app-level opt-in profiles. | High if modeled as `io`/`os` effects, ambient globals, or implicit checker defaults. | Trusted environment/profile feature: default profile excludes ambient caps; optional profiles declare caps explicitly as runtime values. |
+| Caps-first stdlib / optional caps prelude | `docs/typechecker-v4-stdlib-design.md` §1.2; CLAUDE caps-first; subagent audit | Direction corrected: stdlib is not checker core and concrete stdlib declaration sets are outside the v7 semantic spec. | Prevents ambient `io`/`os`/`debug` authority from leaking into every checked library while still allowing app-level opt-in declarations. | High if modeled as `io`/`os` effects, ambient globals, implicit checker defaults, or kernel rules. | External declaration input only; selected declarations carry provenance and trust, but v7 does not specify a concrete stdlib set. |
 | Operators and structural metamethod lookup | `docs/v5-gaps.md` P6; `docs/typechecker-v5-constraints.md` C2; `lib/type/static/CLAUDE.md` solver rules; `docs/typechecker-ast-walker-design.md` operator sections | Direction chosen: `OpCheck` derives through target-profile primitive rules, metatable lookup plus call, or explicit raw primitive capabilities; LuaJIT target table now records first concrete rows. | Arithmetic/comparison/concat/unary operations and user numeric/string-like types are ordinary Lua semantics. | Per-operator predicates, hardcoded `is_numeric` tests, or method-name dispatch repeat the v4/v5 ad-hoc path. | Core extension chosen; remaining work is certificates, exact table-length proofs, and FFI/cdata operators. |
 | Numeric tower and literal integer/float distinction | `docs/v5-gaps.md` parser-int-float; `docs/type-system.md` literal semantics; TODO tuple/numeric entries | Direction chosen: first target is `luajit51-crescent`; `integer` is a semantic refinement, while ordinary arithmetic widens unless a profile rule proves integer preservation. | `1`, `1.0`, integer arithmetic, `%`, `/`, bit ops, and Lua 5.4 integer semantics differ. | Treating integer-valued floats as integers is unsound for target-specific semantics. | Target-profile extension chosen; remaining work is exact integer-preservation and numeric-string conversion transcription. |
 | `type(x)` narrowing | `docs/typechecker-v4-stdlib-design.md` §1.1/§2; `TODO.md` de-specialcase builtins | Direction chosen: stdlib may bind `type` to a primitive predicate-capable value or trusted guard declaration; shadowed names do not narrow. | `if type(x) == "string"` is core Lua narrowing. | Dispatching on callee name `type` is name magic. | Candidate core extension: primitive predicate spec for the `type` binding, with certificate node. |
 | Truthiness and boolean control-flow narrowing | `docs/typechecker-v5-constraints.md` D11; TODO narrowing entries | Direction chosen: explicit `Truthiness` rule with Lua falsey/truthy facts under target profile. | `if x then`, `if not x then return`, and short-circuit expressions dominate Lua code. | Local branch hacks can lose alias invalidation or nil/false precision. | Core extension chosen; remaining work is detailed join/invalidation and certificate transcription. |
 | `and` / `or` expression typing | TODO entries around `C_OR`; typechecker references | Direction chosen: separate `AndExpr`/`OrExpr` control-flow judgments, not `OpCheck`. | Lua idioms use `x or fallback` and `cond and a or b`; these are value-producing control flow. | Treating as boolean operators loses returned value types; treating as union too early loses flow facts. | Core extension chosen; preserve first-value semantics and branch facts. |
-| For-in iterator protocol | `docs/v5-gaps.md` P6/Y1; `docs/typechecker-v4-stdlib-design.md` `pairs`/`ipairs`; TODO for-in entries | Not represented in v7. | `pairs`, `ipairs`, and custom iterators are central Lua constructs. | Name-keyed `pairs`/`ipairs` handlers were a known v5 failure. | Candidate core extension: generic iterator protocol over returned iterator/state/control triple; stdlib declarations consume it. |
+| For-in iterator protocol | `docs/v5-gaps.md` P6/Y1; `docs/typechecker-v4-stdlib-design.md` `pairs`/`ipairs`; TODO for-in entries | Not represented in v7. | `pairs`, `ipairs`, and custom iterators are central Lua constructs. | Name-keyed `pairs`/`ipairs` handlers were a known v5 failure. | Candidate core extension: generic iterator protocol over returned iterator/state/control triple; external declarations may consume it. |
 | Numeric for loop typing | `docs/v5-gaps.md` P6; v5 gen-pass entries | Not represented in v7. | Loop variables and bounds have numeric obligations. | Easy to silently widen loop variable to `unknown` or `number`. | Candidate core extension: statement rule emitting numeric subtype obligations. |
 | Method dispatch with `:` | `docs/v5-gaps.md` P6; `docs/type-system-design/06-setmetatable-construction.md`; `docs/typechecker-v5-constraints.md` D9 | Direction chosen: lower through lookup plus call. | Lua method calls are syntax for self-passing plus field/metatable lookup. | Special-casing `obj:method` separately from field-read/call creates inconsistent semantics. | Core extension: lower to `LookupField(obj, method)` plus call with self argument. |
 | Metatable `__index` chain walking | `docs/v5-gaps.md` G6; `docs/type-system-design/06-setmetatable-construction.md`; consolidation audit | Direction chosen: built-in lookup relation with dependencies. | Class-like OO in real corpus depends on `__index`. | Chain walking can become name-keyed/cyclic/unterminating; unknown `__newindex` can make post-setmetatable writes unsafe. | Core extension: structural, terminating metatable-index judgment with dependency invalidation. |
@@ -46,9 +46,9 @@ obligations, and certificate nodes for it.
 | Coroutines / async / `yield` | `docs/type-system-design/05-effects.md`; `docs/typechecker-roadmap.md` F2; `docs/v5-gaps.md` 5.F3 residual | Reclassified as contextual-control effect candidate. | Precise `Coroutine<Y,S,R>` requires carrying yield/resume protocol from body to `create` and `resume`. | Scope-stack inspection and name-keyed coroutine handlers were v5 failure modes. | Contextual-control effect: `yields(Y,S)` discharged by `coroutine.create` into `Coroutine<Y,S,R>`. |
 | Module declarations and exports | `docs/typechecker-v5-constraints.md` D12/D14; `docs/v5-gaps.md` P4; `docs/type-system-design/README.md` M14 | Direction chosen: `ModuleEnv` with provenance/trust kind. | Full checker must type `M = {}; M.foo = ...; return M` and cross-file imports. | Loader/cache side effects and `unknown` fallback can silently erase checking. | Trusted or checked module-boundary rule over immutable `ModuleEnv`; unresolved modules reject unless unsafe. |
 | `--:: require` declaration import | v5 gaps P4; user discussion; current v4 docs | Direction chosen: annotation import edge into `DeclEnv`/`ModuleEnv`. | Declaration imports are per-module, not global; needed to avoid duplicate types. | Treating annotations as global or file-local incorrectly causes duplication/visibility bugs. | Surface/directive feature elaborating to module declaration environment, not runtime require. |
-| `_G` / `$GlobalScope` | `lib/type/static/CLAUDE.md`; TODO; semantic mining | Direction chosen: bridge over explicit `DeclEnv`/`StdlibProfile`. | `_G` should reflect explicit declarations without ambient globals. | Easy to reintroduce ambient fallback or load-order dependence. | Trusted declaration bridge with certificate of declaration environment; no fallback indexer. |
+| `_G` / `$GlobalScope` | `lib/type/static/CLAUDE.md`; TODO; semantic mining | Direction chosen: bridge over explicit `DeclEnv`. | `_G` should reflect explicit declarations without ambient globals. | Easy to reintroduce ambient fallback or load-order dependence. | Trusted declaration bridge with certificate of declaration environment; no fallback indexer. |
 | FFI `cdef`, `ffi.C`, `ffi.load` | `docs/typechecker-v5-constraints.md` D13; `docs/typechecker-v4-stdlib-design.md`; semantic mining | Direction chosen: `FfiEnv` with provenance/trust kind. | LuaJIT FFI is core to Crescent libraries. | C parser approximation, file-local state, and missing-symbol semantics are trusted-boundary risks. | Trusted FFI declaration environment; `$FfiC` only projects certified/parsed declarations. |
-| Target-specific stdlib profiles | `docs/typechecker-v4-stdlib-design.md` caps stdlib; TODO multi-target support | Direction chosen: `TargetProfile("luajit51-crescent")` first, with `core`, `ffi`, `app`, and `debug` `StdlibProfile` variants. | LuaJIT/Lua 5.1/5.4 and caps policies change globals, numerics, FFI, coroutine behavior. | One ambient stdlib file hides target assumptions. | Trusted environment/profile feature; target and stdlib profiles are checker inputs and certificate context. |
+| Concrete stdlib declaration sets | `docs/typechecker-v4-stdlib-design.md` caps stdlib; TODO multi-target support | Reframed: target profiles are semantic inputs; concrete stdlib declaration sets are project/driver config outside v7 spec. | LuaJIT/Lua 5.1/5.4 and caps policies change globals, numerics, FFI, coroutine behavior. | One ambient stdlib file hides target assumptions; putting stdlib in spec makes it look like kernel semantics. | External declaration input with provenance; no concrete stdlib declaration set in v7 semantic spec. |
 | Ambient IO / OS / debug globals | `docs/typechecker-v4-stdlib-design.md` §1.2; CLAUDE caps-first | Covered by caps-first stdlib/profile item above, but worth keeping as a negative case. | Sound caps-first checking requires absence of ambient authority. | Adding `io`/`os` globals for convenience violates sandboxability. | Reject by default; optional trusted application profile may declare them explicitly as cap values. |
 | Opaque / newtype / unseal | `CONTEXT.md`; `docs/opaque-two-arg-spec.md`; `docs/v5-gaps.md` P5/Y10; semantic mining | `$Opaque` candidate; newtype/unseal not in kernel. | Nominal abstraction and module privacy depend on stable identities and scoped unsealing. | Call-site identity hacks or global unseal can break abstraction. | Type-level/nominal extension: stable origin IDs, scoped unseal, module boundary rules. |
 | `augment` declarations | `docs/v5-gaps.md` P5/Y10; v4 implementation docs | Not classified. | Used to merge fields into existing type bindings. | Mutating aliases post-hoc can violate phase/order assumptions. | Surface/directive feature; elaborate to explicit type-binding extension with order/provenance rules, or defer. |
@@ -87,8 +87,8 @@ obligations, and certificate nodes for it.
    overload, discharge, and certificate rules. They should not expand into
    `io`/cap/mutation effects by default.
 4. **Module/provenance transcription.** v7 now chooses explicit immutable
-   environments with provenance for modules, declarations, stdlib profiles, and
-   FFI. Remaining work is detailed bridge specs and certificate rules.
+   environments with provenance for modules, declarations, and FFI. Remaining
+   work is detailed bridge specs and certificate rules.
 5. **Metatable lookup transcription.** v7 now chooses built-in lookup and
    assignment relations with dependency invalidation. Remaining work is detailed
    rule transcription, target protected-metatable behavior, and certificates.
@@ -102,11 +102,9 @@ obligations, and certificate nodes for it.
    truthiness/short-circuit rules, `__call` integration, and certificates.
 8. **Target table completion.** v7 now chooses `luajit51-crescent` and has a
    first concrete target table. Remaining work is numeric-string grammar,
-   exact integer preservation, table length proofs, cdata operators, and
-   stdlib-profile binding types.
-9. **Stdlib profile transcription.** v7 now chooses explicit LuaJIT profile
-   variants. Remaining work is exact binding types and primitive/intrinsic specs
-   for core, FFI, app, and debug profiles.
+   exact integer preservation, table length proofs, and cdata operators.
+9. **External declaration interface.** v7 should specify how checked/trusted
+   declaration inputs enter certificates without specifying a concrete stdlib.
 
 ## Immediate Consolidation Recommendations
 
@@ -115,9 +113,8 @@ obligations, and certificate nodes for it.
 2. Promote open/rest packs from "open question" to the next core-spec task.
 3. Add a contextual-control effects mini-spec for `throws(E)` and
    `yields(Y,S)` before typing `error`, `pcall`, or `coroutine`.
-4. Transcribe `ModuleEnv`, `DeclEnv`, `FfiEnv`, `StdlibProfile`, and
-   `TargetProfile` bridge rules before writing `$Require`, `$GlobalScope`, or
-   `$FfiC` `IntrinsicSpec`s.
+4. Transcribe `ModuleEnv`, `DeclEnv`, `FfiEnv`, and `TargetProfile` bridge rules
+   before writing `$Require`, `$GlobalScope`, or `$FfiC` `IntrinsicSpec`s.
 5. Transcribe metatable lookup/assignment judgments before importing M6
    `__index` walking.
 6. Transcribe rank-1 generics and first-order type-level computation before
@@ -126,5 +123,5 @@ obligations, and certificate nodes for it.
    substrate, not as stdlib-name special cases.
 8. Complete remaining `luajit51-crescent` target tables before relying on
    unresolved precision in implementation.
-9. Transcribe `luajit51-crescent/core` bindings only after the dependent effect,
-   pack, primitive, intrinsic, and environment rules exist.
+9. Specify external declaration input replay before relying on globals files,
+   external declarations or trusted primitive values.

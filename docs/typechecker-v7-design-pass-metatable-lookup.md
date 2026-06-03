@@ -185,7 +185,7 @@ It does not dispatch by source name and does not seal own-field construction.
 Decision direction after the target-profile pass: under `luajit51-crescent`,
 public `$SetMetatable` rejects when the current metatable has a stable protected
 `__metatable` field. Debug capabilities that bypass this are not in the default
-stdlib profile.
+external declaration input.
 
 Metatable clearing with `setmetatable(t, nil)` remains outside v7 until a
 `clear_metatable(id)` identity transition and certificate rule are specified.
@@ -327,5 +327,5 @@ only through primitive capabilities, never by source-name dispatch
 ```
 
 The next design pass should tackle module/declaration environments, because
-primitive capability values, stdlib profiles, FFI declarations, and imports all
+primitive capability values, external declarations, FFI declarations, and imports all
 need provenance.

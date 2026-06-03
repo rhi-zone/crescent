@@ -64,7 +64,7 @@ in the arrow type and certificate.
 ```
 
 Normal Lua code cannot synthesize such a token. It can only receive one through
-a trusted boundary, such as a target stdlib profile or declaration environment.
+a trusted boundary, such as an external declaration environment.
 
 Subtyping:
 
@@ -155,18 +155,19 @@ setmetatable(t, mt)
 
 does not acquire primitive behavior. The function's source name is irrelevant.
 
-## Interaction With Modules And Stdlib Profiles
+## Interaction With Modules And External Declarations
 
-Target stdlib profiles introduce primitive capability values through trusted
-boundaries:
+External declaration environments introduce primitive capability values through
+trusted boundaries:
 
 ```text
-StdlibProfile(lua51).binding("setmetatable") =
+DeclEnv.binding("setmetatable") =
   primitive_cap("$SetMetatable")
 ```
 
-Alternative profiles may omit or replace the binding. The primitive authority
-comes from the profile certificate, not from a hardcoded global name.
+Alternative declaration inputs may omit or replace the binding. The primitive
+authority comes from the declaration certificate, not from a hardcoded global
+name.
 
 Modules may import and re-export primitive capability values only if provenance
 tracks the trusted source.
