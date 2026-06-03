@@ -358,13 +358,12 @@ See `docs/typechecker-v7-design-pass-primitive-capabilities.md`.
 Both plausible models derive from table identity, but they have different
 constructor semantics.
 
-Fork:
+Decision direction: `set_metatable` fixes metatable state and does not by
+itself seal own-field construction. Later reads and writes must be
+metatable-aware; if the checker cannot prove raw own-field behavior after a
+metatable is installed, it rejects rather than pretending the table sealed.
 
-- `set_metatable` fixes metatable and leaves own-field construction open;
-- `set_metatable` seals own-field construction immediately.
-
-The design must choose before `__index`, method dispatch, or metatable-based
-operators.
+See `docs/typechecker-v7-design-pass-setmetatable.md`.
 
 ### Effects In The Core
 
@@ -397,6 +396,5 @@ primitive category or reject the feature.
 The next pass should not write a full spec. It should resolve the design forks
 in dependency order:
 
-1. What is the `set_metatable` model?
-2. What are the first-order limits, if any, of generics and type-level
+1. What are the first-order limits, if any, of generics and type-level
    computation?

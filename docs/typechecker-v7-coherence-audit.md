@@ -116,12 +116,13 @@ certificate validation for each primitive.
 
 ### Setmetatable Seal Fork
 
-The kernel currently sketches "fix metatable without sealing own-field
+The kernel previously sketched "fix metatable without sealing own-field
 construction"; older M6 sketches "seal on setmetatable". Both cannot be active.
 
-Resolution: no metatable lookup, `__index`, method dispatch, or constructor
-template semantics should be admitted until the fork is closed. The current
-kernel rule is provisional unless v7 explicitly chooses it.
+Resolution status: the setmetatable design pass chooses "fix metatable without
+sealing own-field construction". The remaining work is metatable-aware field
+read/write semantics, especially `__index`, `__newindex`, raw operations,
+method dispatch, and operator lookup.
 
 ### Record Indexers And Writes
 

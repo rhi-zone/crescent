@@ -129,13 +129,10 @@ It authorizes:
 IdentityStep(set_metatable(id, mt_claim))
 ```
 
-The exact transition remains blocked on the seal-versus-fix fork:
-
-- fix metatable and keep own-field construction open;
-- seal own-field construction immediately.
-
-Until that fork is closed, `$SetMetatable` is a reserved primitive capability
-shape, not an admitted full metatable semantics.
+The setmetatable design pass chooses the transition direction: fix metatable
+state and keep own-field construction open. `$SetMetatable` authorizes that
+identity transition, but it does not by itself admit full metatable lookup,
+`__newindex`, or method/operator semantics.
 
 ## Interaction With Aliasing
 

@@ -176,10 +176,10 @@ the named operation follows the kernel rule. It does not trust the frontend
 because the callee text happened to be `setmetatable`.
 
 The capability representation is chosen: primitive capabilities are value
-types, not hidden claim metadata. The exact `set_metatable` identity transition
-remains blocked on the seal-versus-fix fork. Until v7 closes that fork, this
-primitive capability is a reserved cutout shape, not permission to implement
-metatable lookup or constructor sealing behavior.
+types, not hidden claim metadata. The `set_metatable` fork is also chosen:
+setting a metatable fixes metatable state and does not by itself seal own-field
+construction. Metatable lookup and `__newindex` assignment semantics still need
+separate rules before metatable-backed reads/writes are admitted.
 
 ## Deferred Feature Classification
 
@@ -1007,7 +1007,7 @@ Rules:
 - direct writes to open identities extend or equate their own record;
 - `set_metatable`, authorized by a callee of type
   `primitive_cap("$SetMetatable")`, fixes the metatable on an open unescaped
-  identity in the provisional no-seal rule;
+  identity without sealing own-field construction;
 - any observation requiring a stable value type seals first;
 - sealed identities reject absent-field writes and readonly writes;
 - escaped identities cannot be extended;
@@ -1045,15 +1045,17 @@ IdentityStep(Γ, set_metatable(id, mt_claim)) =>
 ```
 
 requires `id` to be open, fresh/unescaped, and not already bound to a different
-metatable. The provisional `set_metatable` operation fixes the metatable but
-does not by itself seal the own-field construction record. Observation,
-annotation, return, unknown call, or escape seals later. This differs from
-"dispatch on a function named setmetatable"; the rule is authorized by the
-callee's `primitive_cap("$SetMetatable")` type-level capability.
+metatable. The `set_metatable` operation fixes the metatable but does not by
+itself seal the own-field construction record. Observation, annotation, return,
+unknown call, or escape seals later. This differs from "dispatch on a function
+named setmetatable"; the rule is authorized by the callee's
+`primitive_cap("$SetMetatable")` type-level capability.
 
-This rule is not final admission of metatable semantics. If v7 chooses
-seal-on-setmetatable instead, this transition and its certificate examples must
-change before `__index`, method dispatch, or constructor templates are admitted.
+After metatable state is fixed, later field writes must use assignment
+semantics that account for possible `__newindex`. Until those rules are
+admitted, a checker may accept only existing-own-field writes, writes proven to
+be raw own-field writes, or explicit raw-operation primitives. It must not
+blindly extend absent own fields after an unknown metatable is installed.
 
 Seal:
 

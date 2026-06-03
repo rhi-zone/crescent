@@ -87,9 +87,9 @@ Current v7 classification:
   semantics.
 - `$PatternReturn` and `$FindReturn` require a specified Lua-pattern subset and
   conservative fallback.
-- `$SetMetatable` is not an operation name. It is a proposed primitive
-  capability name represented as `primitive_cap("$SetMetatable")`; its exact
-  `set_metatable` identity transition is blocked on the seal-versus-fix fork.
+- `$SetMetatable` is not an operation name. It is a primitive capability name
+  represented as `primitive_cap("$SetMetatable")`; `set_metatable` fixes
+  metatable state without sealing own-field construction.
 - `$Name` is not admitted.
 
 Retired `$` encodings stay retired: `$Lit*`, `$Unit`, `$idx_*`, `$pos_*`,
@@ -167,13 +167,14 @@ bucket:
 
 ### Setmetatable Semantics Diverge
 
-The unified design's M6 treats `setmetatable` as sealing construction. The v7
-kernel currently says the primitive `set_metatable` fixes metatable state on an
-open identity but does not by itself seal own-field construction.
+The unified design's M6 treats `setmetatable` as sealing construction. v7 now
+chooses a different semantic model: the primitive `set_metatable` fixes
+metatable state on an open identity but does not by itself seal own-field
+construction.
 
-Resolution: this is a real design fork. v7 currently owns the active rule. If
-M6's seal-on-setmetatable rule is preferred, v7 must be amended explicitly and
-certificate examples updated.
+Resolution: v7 owns the active rule. Post-setmetatable reads and writes must be
+metatable-aware; if `__newindex`/`__index` behavior is unknown, the checker
+rejects rather than pretending the table sealed.
 
 ### Current v4 Typechecker Docs Are Operational, Not Normative For v7
 
@@ -189,7 +190,8 @@ as v7 authority.
 
 1. Write `IntrinsicSpec` sections for one intrinsic at a time, starting with
    `$Opaque` because it is closest to a pure type constructor.
-2. Decide the v7/M6 setmetatable fork explicitly.
+2. Specify metatable-aware field read/write semantics after the v7/M6
+   setmetatable fork decision.
 3. Add a small certificate schema document or move certificate node definitions
    out of the long kernel doc once they grow.
 4. Create a v7 TODO list that references kernel sections instead of older v5/v6

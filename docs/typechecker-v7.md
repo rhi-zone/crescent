@@ -25,15 +25,17 @@ Read in this order:
    deciding full arrows are effectful with contextual-control effects.
 7. `docs/typechecker-v7-design-pass-packs.md` — fifth refinement pass, deciding
    open/rest packs and movement kinds.
-8. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
+8. `docs/typechecker-v7-design-pass-setmetatable.md` — sixth refinement pass,
+   deciding setmetatable fixes metatable state without sealing construction.
+9. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
    consistent whole, plus blocking semantic seams.
-9. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
+10. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
    judgments, and certificate obligations.
-10. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
+11. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
    older Crescent designs or external systems without reintroducing ad-hocness.
-11. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+12. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-12. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
+13. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
    and lineage status.
 
 Older v4/v5/v6 docs are research input only. If they conflict with v7, v7 owns
@@ -69,10 +71,11 @@ Not yet admitted:
 
 Work these before implementation verticals:
 
-1. **Setmetatable fork.** Decide whether `set_metatable` seals construction or
-   only fixes metatable state. `__index` chain walking depends on this.
-2. **Module/declaration environments.** Define `ModuleEnv`/`DeclEnv` before
+1. **Module/declaration environments.** Define `ModuleEnv`/`DeclEnv` before
    admitting `$Require`, `--:: require`, `$GlobalScope`, or module exports.
+2. **Metatable lookup and assignment.** Specify `__index`, `__newindex`, method
+   lowering, and raw operations before admitting method dispatch or metamethod
+   operators.
 3. **Match/type-level computation.** Specify match evaluation, captures,
    suspension/rejection, and field descriptors before admitting `$EachField` or
    deleting helper intrinsics.
