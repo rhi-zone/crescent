@@ -70,6 +70,9 @@ calls, overload export checking, explicit unsafe boundaries, fresh table
 identity writes, sealed record observations, and a tiny primitive-capability
 set.
 
+MR0 now has concrete payload schemas, canonical serialization rules, replay
+order, and adversarial fixture requirements in `docs/typechecker-v7-mr0-payloads.md`.
+
 ### Architecture Bar
 
 Organic growth is the failure mode. "Thin verticals" are acceptable only as
@@ -214,7 +217,9 @@ as v7 authority.
 4. Complete remaining `luajit51-crescent` target details: numeric-string
    grammar, exact integer preservation, table length proofs, and cdata operator
    families.
-5. Turn MR0 into concrete verifier payloads and canonical serialization.
+5. Implement a standalone MR0 verifier spike against
+   `docs/typechecker-v7-mr0-payloads.md`, without connecting it to v4/v6
+   inference.
 6. Specify the external declaration environment interface enough for project
    globals files, module declarations, and trusted primitive values to be
    certificate inputs without becoming kernel rules.

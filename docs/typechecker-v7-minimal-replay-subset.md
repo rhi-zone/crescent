@@ -5,6 +5,9 @@ This document defines the first verifier prototype slice.
 The subset is intentionally small. Its purpose is to prove that v7's certificate
 architecture can constrain accepted claims before the full Lua checker exists.
 
+Concrete payload schemas and fixtures are in
+`docs/typechecker-v7-mr0-payloads.md`.
+
 ## Decision
 
 The first replay subset is:

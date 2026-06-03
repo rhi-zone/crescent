@@ -51,15 +51,18 @@ Read in this order:
 16. `docs/typechecker-v7-minimal-replay-subset.md` — first verifier prototype
    slice, deciding MR0's admitted rules, certificate payload families, roots,
    primitive calls, and explicit exclusions.
-17. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
+17. `docs/typechecker-v7-mr0-payloads.md` — concrete MR0 certificate envelope,
+   canonical serialization, payload schemas, replay algorithm, and adversarial
+   fixtures.
+18. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
    consistent whole, plus blocking semantic seams.
-18. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
+19. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
    judgments, and certificate obligations.
-19. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
+20. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
    older Crescent designs or external systems without reintroducing ad-hocness.
-20. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+21. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-21. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
+22. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
    and lineage status.
 
 Older v4/v5/v6 docs are research input only. If they conflict with v7, v7 owns
@@ -94,10 +97,10 @@ Not yet admitted:
 
 Work these before implementation verticals:
 
-1. **MR0 payload transcription.** Turn the minimal replay subset into concrete
-   verifier data structures and canonical serialization.
-2. **MR0 adversarial examples.** Write small accepted/rejected programs that
-   exercise every admitted MR0 node family.
+1. **MR0 executable verifier spike.** Implement a small standalone verifier for
+   MR0 certificates, without connecting it to v4 or v6 inference.
+2. **MR0 fixture corpus.** Materialize the accepted/rejected examples from the
+   MR0 payload doc as certificate fixtures.
 
 ## Admission Rule
 

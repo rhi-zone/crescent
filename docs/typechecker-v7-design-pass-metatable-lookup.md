@@ -146,7 +146,7 @@ bypass metamethod dispatch, not bypass soundness accounting.
 
 `getmetatable` is not semantically special by name.
 
-The target stdlib may bind the runtime value named `getmetatable` to:
+An external declaration input may bind the runtime value named `getmetatable` to:
 
 ```text
 primitive_cap("$GetMetatable")
