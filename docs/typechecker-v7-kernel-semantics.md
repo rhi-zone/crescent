@@ -513,9 +513,10 @@ Value v      =
 ValueList vs = finite sequence of Value
 ```
 
-`integer(i)` is also a `number`. The exact LuaJIT numeric representation is not
-the first kernel's concern; the only pinned lattice edge is
-`integer <: number`.
+`integer(i)` is also a `number`. The generic kernel pins only
+`integer <: number`. The first concrete target profile,
+`luajit51-crescent`, treats `integer` as a semantic refinement of Lua numeric
+values, not as a Lua 5.3+ runtime tag.
 
 Tables are identities. A table value is `table(id)`, not a structural record.
 Records are observations of table identities after the checker has established a
@@ -606,6 +607,10 @@ OrExpr(Γ, lhs, rhs) => Γ', ValueClaim
 For Lua-like targets, `falsey = nil | false` and
 `truthy = complement(nil | false)`. These rules must preserve branch facts long
 enough to type the right-hand expression and compute the value-producing result.
+
+The first concrete target profile is `luajit51-crescent`; its profile document
+owns the exact primitive operator, equality, truthiness, raw operation, length,
+and protected-metatable policies used by these judgments.
 
 ```text
 BinderPack =

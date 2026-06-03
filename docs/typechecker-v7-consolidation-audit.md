@@ -53,6 +53,10 @@ proof-producing checker is v7.
 v6 implementation progress is not evidence for v7 soundness unless the accepted
 programs can be justified by v7 kernel/certificate rules.
 
+The first concrete v7 target profile is `luajit51-crescent`, matching the
+vendored runtime and current LuaJIT/FFI surface. Other Lua versions must enter
+as separate target profiles with separate certificate digests.
+
 ### Architecture Bar
 
 Organic growth is the failure mode. "Thin verticals" are acceptable only as
@@ -194,9 +198,11 @@ as v7 authority.
    setmetatable fork decision.
 3. Define the minimal first replay subset: exact node payloads, canonical term
    serialization, and stale-input rejection tests.
-4. Create a v7 TODO list that references kernel sections instead of older v5/v6
+4. Transcribe exact `luajit51-crescent` target tables for operators, length,
+   string coercion, equality, and protected metatables.
+5. Create a v7 TODO list that references kernel sections instead of older v5/v6
    module names.
-5. Audit `docs/type-system.md` for stale claims about `any`, force casts, and
+6. Audit `docs/type-system.md` for stale claims about `any`, force casts, and
    current soundness gaps before using it as v7 philosophy input.
-6. Work through `docs/typechecker-v7-missing-feature-audit.md` from highest-risk
+7. Work through `docs/typechecker-v7-missing-feature-audit.md` from highest-risk
    missing classification to lowest.

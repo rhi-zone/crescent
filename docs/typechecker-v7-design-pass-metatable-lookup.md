@@ -158,12 +158,13 @@ The primitive spec observes table metatable state:
 PrimitiveSpec("$GetMetatable").transition = observe_metatable
 ```
 
-If Lua's protected `__metatable` behavior is modeled, the primitive spec must
-include it. Until then, target profiles may choose to reject protected
-metatable observation or treat it as an unsafe/trusted boundary.
+Decision direction after the target-profile pass: `luajit51-crescent` models
+public protected-metatable behavior. If the actual metatable has a stable
+`__metatable` field, public `$GetMetatable` returns that protected value rather
+than the internal metatable. The kernel may still track the internal metatable
+state for lookup dependencies and invalidation.
 
-UNRESOLVED: exact handling of `__metatable` protection and target-profile
-differences.
+See `docs/typechecker-v7-design-pass-target-profile.md`.
 
 ## Setmetatable
 
@@ -181,11 +182,16 @@ IdentityStep(set_metatable(id, mt_claim))
 
 It does not dispatch by source name and does not seal own-field construction.
 
-If Lua's protected-metatable rejection is modeled, `set_metatable` must reject
-when the current metatable has a protected `__metatable` field, according to the
-target profile.
+Decision direction after the target-profile pass: under `luajit51-crescent`,
+public `$SetMetatable` rejects when the current metatable has a stable protected
+`__metatable` field. Debug capabilities that bypass this are not in the default
+stdlib profile.
 
-UNRESOLVED: exact protected-metatable semantics.
+Metatable clearing with `setmetatable(t, nil)` remains outside v7 until a
+`clear_metatable(id)` identity transition and certificate rule are specified.
+The first LuaJIT profile conservatively rejects it.
+
+See `docs/typechecker-v7-design-pass-target-profile.md`.
 
 ## Invalidation
 

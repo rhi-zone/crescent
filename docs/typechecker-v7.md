@@ -40,15 +40,19 @@ Read in this order:
 13. `docs/typechecker-v7-design-pass-certificates.md` — eleventh refinement
    pass, deciding the replay DAG, context inputs, node families, roots, and
    unsafe/trusted boundary handling.
-14. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
+14. `docs/typechecker-v7-design-pass-target-profile.md` — twelfth refinement
+   pass, deciding LuaJIT 5.1/Crescent as the first concrete target profile and
+   making numeric, operator, truthiness, raw, and protected-metatable behavior
+   explicit profile input.
+15. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
    consistent whole, plus blocking semantic seams.
-15. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
+16. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
    judgments, and certificate obligations.
-16. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
+17. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
    older Crescent designs or external systems without reintroducing ad-hocness.
-17. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+18. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-18. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
+19. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
    and lineage status.
 
 Older v4/v5/v6 docs are research input only. If they conflict with v7, v7 owns
@@ -85,8 +89,8 @@ Work these before implementation verticals:
 
 1. **Minimal replay subset.** Pick the smallest closed set of kernel rules and
    certificate payloads for a first verifier prototype.
-2. **Target profile tables.** Transcribe the first supported Lua target's
-   operator, truthiness, equality, length, and protected-metatable behavior.
+2. **Target table transcription.** Fill in exact LuaJIT operator/string-coercion,
+   length, and metamethod support tables for `luajit51-crescent`.
 
 ## Admission Rule
 

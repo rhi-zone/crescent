@@ -436,3 +436,12 @@ order:
    unsafe/trusted boundary nodes.
 
 See `docs/typechecker-v7-design-pass-certificates.md`.
+
+3. What is the first target profile?
+   Decision: `TargetProfile("luajit51-crescent")` is the first concrete target.
+   It owns numeric, primitive operator, equality, truthiness, raw operation, and
+   protected-metatable behavior as certificate-visible input. The first profile
+   may conservatively reject runtime-valid LuaJIT behavior until exact rules are
+   transcribed.
+
+See `docs/typechecker-v7-design-pass-target-profile.md`.
