@@ -120,9 +120,10 @@ The kernel previously sketched "fix metatable without sealing own-field
 construction"; older M6 sketches "seal on setmetatable". Both cannot be active.
 
 Resolution status: the setmetatable design pass chooses "fix metatable without
-sealing own-field construction". The remaining work is metatable-aware field
-read/write semantics, especially `__index`, `__newindex`, raw operations,
-method dispatch, and operator lookup.
+sealing own-field construction". The metatable lookup pass then chooses
+built-in lookup/assignment relations over table identity state, with
+`getmetatable`, `setmetatable`, and raw operations exposed only through
+primitive capabilities.
 
 ### Record Indexers And Writes
 
@@ -171,8 +172,8 @@ The following shortcuts are explicitly incoherent for v7:
 - admitting `$Require` without `ModuleEnv`, provenance, and trusted-boundary
   certificate nodes;
 - admitting `$EachField<T, F>` with arbitrary `F` while HKTs remain excluded;
-- implementing metatable `__index` lookup before the setmetatable fork is
-  resolved;
+- implementing metatable `__index` lookup through source-name special cases
+  instead of table identity lookup relations;
 - treating IO as an effect while the design says IO authority is a runtime
   capability value;
 - recovering from missing semantics by widening to `unknown` or `any`;

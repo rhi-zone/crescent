@@ -983,7 +983,7 @@ The table identity state is not a type.
 TableState =
   open(own_record, metatable?)
   sealed(own_record, metatable?)
-  escaped(own_record?, reason)
+  escaped(own_record?, metatable?, reason)
 ```
 
 Open table identities are construction facts. They are not lattice values and
@@ -995,9 +995,12 @@ Operations:
 fresh_table         : Store -> id, Store
 write_open_field    : id, key, ValueClaim -> Store -> Store or error
 set_metatable       : id, ValueClaim -> Store -> Store or error
+get_metatable       : id -> Store -> ValueClaim or nil or error
 seal                : id -> Store -> RecordClaim or error
-read_field          : id, key -> Store -> ValueClaim or error
-write_sealed_field  : id, key, ValueClaim -> Store -> Store or error
+lookup_field        : id, key -> Store -> ValueClaim or error
+assign_field        : id, key, ValueClaim -> Store -> Store or error
+raw_lookup_field    : id, key -> Store -> ValueClaim or error
+raw_assign_field    : id, key, ValueClaim -> Store -> Store or error
 escape              : id, reason -> Store -> Store
 ```
 
@@ -1009,7 +1012,10 @@ Rules:
   `primitive_cap("$SetMetatable")`, fixes the metatable on an open unescaped
   identity without sealing own-field construction;
 - any observation requiring a stable value type seals first;
-- sealed identities reject absent-field writes and readonly writes;
+- ordinary field reads use `lookup_field`, which may consult `__index`;
+- ordinary field writes use `assign_field`, which may consult `__newindex`;
+- raw field operations bypass metatable dispatch but still invalidate facts;
+- sealed identities reject invalid own-field writes and readonly writes;
 - escaped identities cannot be extended;
 - writes and escapes invalidate dependent flow facts for aliases of the same
   identity.
@@ -1057,6 +1063,28 @@ admitted, a checker may accept only existing-own-field writes, writes proven to
 be raw own-field writes, or explicit raw-operation primitives. It must not
 blindly extend absent own fields after an unknown metatable is installed.
 
+Metatable lookup and assignment:
+
+```text
+LookupField(Γ, id, key) => ValueClaim
+AssignField(Γ, id, key, claim) => Γ'
+RawLookupField(Γ, id, key) => ValueClaim
+RawAssignField(Γ, id, key, claim) => Γ'
+```
+
+`LookupField` first checks own fields, then follows a proven `__index` table or
+function path. `AssignField` writes existing own fields, extends open own fields
+only when raw behavior or absence of applicable `__newindex` is proved, and
+otherwise follows a proven `__newindex` table or function path. Cyclic,
+unknown, escaped, or budget-exhausted lookup rejects.
+
+These judgments record dependencies on the receiver identity, metatable state,
+traversed metatable identities, and observed `__index`/`__newindex` fields.
+Writes to any dependency invalidate lookup-derived facts. `getmetatable`,
+`setmetatable`, `rawget`, and `rawset` are not source-name special cases; target
+profiles may expose them as primitive capability values whose specs call these
+judgments.
+
 Seal:
 
 ```text
@@ -1085,7 +1113,7 @@ Escape:
 
 ```text
 IdentityStep(Γ, escape(id, reason)) =>
-  Γ[identities[id] = escaped(record?, reason)]
+  Γ[identities[id] = escaped(record?, metatable?, reason)]
 ```
 
 invalidates field/alias facts for `id` and prevents further construction

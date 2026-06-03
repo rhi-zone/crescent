@@ -34,10 +34,10 @@ obligations, and certificate nodes for it.
 | `and` / `or` expression typing | TODO entries around `C_OR`; typechecker references | Not specified in v7 movement sites. | Lua idioms use `x or fallback` and `cond and a or b`; these are value-producing control flow. | Treating as boolean operators loses returned value types; treating as union too early loses flow facts. | Candidate core extension: expression-level control-flow movement preserving first-value semantics. |
 | For-in iterator protocol | `docs/v5-gaps.md` P6/Y1; `docs/typechecker-v4-stdlib-design.md` `pairs`/`ipairs`; TODO for-in entries | Not represented in v7. | `pairs`, `ipairs`, and custom iterators are central Lua constructs. | Name-keyed `pairs`/`ipairs` handlers were a known v5 failure. | Candidate core extension: generic iterator protocol over returned iterator/state/control triple; stdlib declarations consume it. |
 | Numeric for loop typing | `docs/v5-gaps.md` P6; v5 gen-pass entries | Not represented in v7. | Loop variables and bounds have numeric obligations. | Easy to silently widen loop variable to `unknown` or `number`. | Candidate core extension: statement rule emitting numeric subtype obligations. |
-| Method dispatch with `:` | `docs/v5-gaps.md` P6; `docs/type-system-design/06-setmetatable-construction.md`; `docs/typechecker-v5-constraints.md` D9 | v7 has call and table identity, but no method-call lowering rule. | Lua method calls are syntax for self-passing plus field/metatable lookup. | Special-casing `obj:method` separately from field-read/call creates inconsistent semantics. | Candidate core extension: lower to field/index lookup plus argument-pack rule; metatable lookup stays deferred. |
-| Metatable `__index` chain walking | `docs/v5-gaps.md` G6; `docs/type-system-design/06-setmetatable-construction.md`; consolidation audit | v7 explicitly defers metatable precision beyond table identity. | Class-like OO in real corpus depends on `__index`. | Chain walking can become name-keyed/cyclic/unterminating; unknown `__newindex` can make post-setmetatable writes unsafe. | Deferred core extension: structural, terminating metatable-index judgment after setmetatable no-seal decision. |
+| Method dispatch with `:` | `docs/v5-gaps.md` P6; `docs/type-system-design/06-setmetatable-construction.md`; `docs/typechecker-v5-constraints.md` D9 | Direction chosen: lower through lookup plus call. | Lua method calls are syntax for self-passing plus field/metatable lookup. | Special-casing `obj:method` separately from field-read/call creates inconsistent semantics. | Core extension: lower to `LookupField(obj, method)` plus call with self argument. |
+| Metatable `__index` chain walking | `docs/v5-gaps.md` G6; `docs/type-system-design/06-setmetatable-construction.md`; consolidation audit | Direction chosen: built-in lookup relation with dependencies. | Class-like OO in real corpus depends on `__index`. | Chain walking can become name-keyed/cyclic/unterminating; unknown `__newindex` can make post-setmetatable writes unsafe. | Core extension: structural, terminating metatable-index judgment with dependency invalidation. |
 | `setmetatable` seal semantics | `docs/type-system-design/06-setmetatable-construction.md`; v7 setmetatable pass | Decision chosen: fixes metatable without sealing. | Construction-phase table typing and OO idioms depend on this. | Allowing absent-field extension after unknown `__newindex` would be unsound. | Kernel direction: setmetatable fixes metatable state; later writes must prove raw/own-field semantics or reject. |
-| Raw operations (`rawget`, `rawset`, `rawequal`, `rawlen`) | `docs/typechecker-v4-stdlib-design.md` stdlib scope | Not classified. | Raw ops bypass metamethods and interact with table identity/indexers. | Treating them as ordinary field ops may incorrectly include metatable behavior. | Candidate core/stdlib extension: raw table observation/write primitives over identity/record state. |
+| Raw operations (`rawget`, `rawset`, `rawequal`, `rawlen`) | `docs/typechecker-v4-stdlib-design.md` stdlib scope | Direction chosen: raw lookup/assignment primitives bypass metamethods but not invalidation. | Raw ops bypass metamethods and interact with table identity/indexers. | Treating them as ordinary field ops may incorrectly include metatable behavior. | Core/stdlib extension: raw table observation/write primitives over identity/record state. |
 | `select` | `docs/typechecker-v4-stdlib-design.md` §2; `TODO.md` de-specialcase builtins | Not represented. | Vararg manipulation is common and affects pack precision. | Literal-`"#"` branch and index-tail branch invite name/literal special cases. | Candidate pack extension: stdlib declaration over packs plus literal overloads; reject until pack generics are specified. |
 | Varargs and open packs | v7 pack design pass chooses closed/rest/variable tails and movement kinds; `docs/type-system-design/03-variadic-packs.md`; `docs/v5-gaps.md` G17 | Direction chosen; detailed transcription pending. | Needed for real Lua calls, `pcall`, iterators, `select`, vararg functions. | Approximating unknown arity as scalar `unknown` loses soundness/precision. | Core design: rest-pack movement, pack variables, variadic generics, and expression-list spread rules. |
 | Last-position multi-return spread | `docs/v5-gaps.md` P5/Y3; TODO multi-return entries | Partially covered by pack movement, but not statement-level rule. | `return f()` and `a,b = f()` are central Lua semantics. | Flattening to positional records or slotwise unions loses correlation. | Admitted-core gap: add expression-list expansion rules over `PackAlt`. |
@@ -89,9 +89,9 @@ obligations, and certificate nodes for it.
 4. **Module/declaration environments.** `$Require`, `--:: require`,
    `$GlobalScope`, and module exports all need one environment/certificate story
    or duplication/name-scope bugs will recur.
-5. **Metatable lookup and assignment.** v7 now chooses setmetatable as
-   metatable-state fixing without sealing. Remaining work is `__index`,
-   `__newindex`, raw operations, method dispatch, and operator lookup.
+5. **Metatable lookup transcription.** v7 now chooses built-in lookup and
+   assignment relations with dependency invalidation. Remaining work is detailed
+   rule transcription, target protected-metatable behavior, and certificates.
 6. **Match/type-level computation substrate.** v7 wants to avoid helper
    intrinsics, but that requires real match semantics, capture rules, and
    suspension/rejection behavior.
@@ -107,7 +107,8 @@ obligations, and certificate nodes for it.
    `yields(Y,S)` before typing `error`, `pcall`, or `coroutine`.
 4. Create `ModuleEnv` / `DeclEnv` placeholders in the kernel before writing
    `$Require` or `$GlobalScope` `IntrinsicSpec`s.
-5. Decide the `setmetatable` seal fork before importing M6 `__index` walking.
+5. Transcribe metatable lookup/assignment judgments before importing M6
+   `__index` walking.
 6. Write a match-type admission spec before adding `$EachField` or deleting
    helper intrinsics.
 7. Add operator/metamethod lookup to the mining queue as a separate substrate,

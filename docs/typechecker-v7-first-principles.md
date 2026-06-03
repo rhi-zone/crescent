@@ -302,6 +302,14 @@ Operators should be specified as operation application:
 
 This prevents per-operator ad-hoc predicates.
 
+Decision direction: metatable semantics are built-in lookup/assignment
+relations over table identity state. `getmetatable`, `setmetatable`, and raw
+operations expose or bypass those relations only through primitive capability
+values, never by source-name dispatch. Mutation of receiver, metatable, or
+traversed tables invalidates dependent lookup facts.
+
+See `docs/typechecker-v7-design-pass-metatable-lookup.md`.
+
 ### Generics And Type-Level Computation
 
 Generics derive from parametric reasoning, not from substitution convenience.
