@@ -13,15 +13,17 @@ Read in this order:
 
 1. `docs/typechecker-soundness-validation.md` — trust model, version line, and
    acceptance bar.
-2. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
+2. `docs/typechecker-v7-first-principles.md` — pre-spec derivation of the
+   checker's semantic primitives and design forks.
+3. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
    consistent whole, plus blocking semantic seams.
-3. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
+4. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
    judgments, and certificate obligations.
-4. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
+5. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
    older Crescent designs or external systems without reintroducing ad-hocness.
-5. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+6. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-6. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
+7. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
    and lineage status.
 
 Older v4/v5/v6 docs are research input only. If they conflict with v7, v7 owns
