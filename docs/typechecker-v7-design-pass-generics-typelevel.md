@@ -291,6 +291,5 @@ rank-1 generics plus kinded first-order type-level computation now; HKTs and
 rank-N remain later extensions
 ```
 
-The next design pass should tackle operator/metamethod semantics or the detailed
-certificate schema, depending on whether runtime coverage or proof format is the
-next bottleneck.
+The following pass chooses operator/metamethod semantics. After that, the main
+remaining cross-cutting blocker is the detailed certificate schema.

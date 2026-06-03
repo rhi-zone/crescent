@@ -34,15 +34,18 @@ Read in this order:
 11. `docs/typechecker-v7-design-pass-generics-typelevel.md` — ninth refinement
    pass, deciding rank-1 generics and first-order type-level computation before
    HKTs/rank-N.
-12. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
+12. `docs/typechecker-v7-design-pass-operators.md` — tenth refinement pass,
+   deciding operator application through primitive/metamethod operation
+   judgments, with `and`/`or` split into control-flow expression rules.
+13. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
    consistent whole, plus blocking semantic seams.
-13. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
+14. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
    judgments, and certificate obligations.
-14. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
+15. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
    older Crescent designs or external systems without reintroducing ad-hocness.
-15. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+16. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-16. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
+17. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
    and lineage status.
 
 Older v4/v5/v6 docs are research input only. If they conflict with v7, v7 owns
@@ -70,18 +73,14 @@ Not yet admitted:
 - module/declaration/FFI environments;
 - match-type evaluation and field-descriptor folds;
 - HKTs, rank-N polymorphism, recursive types, and full kinding;
-- metatable precision beyond the table-identity seam;
-- operator/metamethod semantics;
+- detailed operator target tables and truthiness/control-flow transcription;
 - target-specific stdlib profiles.
 
 ## Decision Queue
 
 Work these before implementation verticals:
 
-1. **Operator/metamethod substrate.** Define operator application through
-   primitive/metamethod lookup, not per-operator predicates or name-keyed
-   handlers.
-2. **Certificate schema.** Consolidate node families after the major semantic
+1. **Certificate schema.** Consolidate node families after the major semantic
    categories are stable enough to replay.
 
 ## Admission Rule

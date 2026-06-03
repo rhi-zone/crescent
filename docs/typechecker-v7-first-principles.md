@@ -317,6 +317,15 @@ traversed tables invalidates dependent lookup facts.
 
 See `docs/typechecker-v7-design-pass-metatable-lookup.md`.
 
+Decision direction: operator semantics are a single operation judgment over
+typed operands. The primitive case uses target-profile operation tables. The
+metamethod case uses the metatable lookup relation and ordinary call checking.
+Raw operations are primitive capabilities that bypass metamethod dispatch but
+not dependency tracking. `and` and `or` are not overloadable operators; they are
+value-producing control-flow expression rules over truthiness facts.
+
+See `docs/typechecker-v7-design-pass-operators.md`.
+
 ### Generics And Type-Level Computation
 
 Generics derive from parametric reasoning, not from substitution convenience.
@@ -415,8 +424,10 @@ primitive category or reject the feature.
 
 ## Next Design Work
 
-The next pass should not write a full spec. It should resolve the design forks
-in dependency order:
+The remaining pre-spec work should continue resolving design forks in dependency
+order:
 
 1. What is the operator/metamethod substrate?
+   Decision: `OpCheck` with primitive/metamethod/raw cases; `and`/`or` use
+   separate truthiness/control-flow rules.
 2. What is the final certificate schema?

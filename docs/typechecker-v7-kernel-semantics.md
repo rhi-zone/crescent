@@ -181,6 +181,11 @@ setting a metatable fixes metatable state and does not by itself seal own-field
 construction. Metatable lookup and `__newindex` assignment semantics still need
 separate rules before metatable-backed reads/writes are admitted.
 
+Operator and raw primitive capabilities follow the same no-name-magic rule.
+Runtime values such as `rawequal` or `rawlen` may have primitive capability
+types in `StdlibProfile`, but the checker verifies the capability type, not the
+source callee name.
+
 ## Deferred Feature Classification
 
 The excluded features are not all the same kind of thing. v7 should classify
@@ -557,6 +562,50 @@ postconditions may mention parameter places bound by the arrow's `BinderPack`.
 At call sites, parameter places are substituted with stable caller places when
 available. If no stable caller place exists, the postcondition may be weakened
 but not exported as a caller fact.
+
+## Operator And Control-Flow Expression Domains
+
+Overloadable Lua operators use one semantic judgment:
+
+```text
+OpCheck(Γ, op, operands) => Γ', Effect, ValueClaim, Postcondition
+```
+
+`op` is a semantic tag such as `add`, `concat`, `len`, `eq`, `lt`, or `le`.
+`OpCheck` derives through exactly one of:
+
+- `TargetProfile.primitive_op(op, operand_types)`;
+- `MetamethodLookup(Γ, op, operands)` followed by ordinary call checking;
+- an explicit raw primitive capability rule when the operation is a raw bypass.
+
+Metamethod keys such as `__add` and `__eq` live in `TargetProfile` as runtime
+semantics. They are not source-name dispatch hooks. `__call` is integrated into
+callable-candidate collection for the call judgment, not represented as an
+ordinary value-producing operator.
+
+Certificate shape:
+
+```text
+OpNode(op, operands, case, target_profile_id, dependencies, before, after, effect, result, post)
+MetamethodLookupNode(op, operands, key, dependencies, callable_claim)
+```
+
+Equality can export flow facts only when the certificate proves primitive total
+equality and absence of applicable equality metamethod behavior for the compared
+alternatives. Otherwise equality merely produces a boolean-like value claim.
+
+`and` and `or` are not overloadable operators. They use expression-level
+control-flow judgments:
+
+```text
+Truthiness(Γ, value) => true_edge_fact, false_edge_fact
+AndExpr(Γ, lhs, rhs) => Γ', ValueClaim
+OrExpr(Γ, lhs, rhs) => Γ', ValueClaim
+```
+
+For Lua-like targets, `falsey = nil | false` and
+`truthy = complement(nil | false)`. These rules must preserve branch facts long
+enough to type the right-hand expression and compute the value-producing result.
 
 ```text
 BinderPack =

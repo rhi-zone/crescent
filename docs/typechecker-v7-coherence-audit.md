@@ -159,7 +159,8 @@ The coherent admission order is:
 9. Module/declaration/FFI environments and trusted bridge certificates.
 10. Rank-1 generics and first-order type-level computation transcription.
 11. Operator and metamethod semantics.
-12. Stdlib profiles.
+12. Truthiness and short-circuit expression transcription.
+13. Stdlib profiles.
 
 Some later work can be specified in parallel, but implementation must not admit
 a later feature unless its dependencies are already kernel rules.
@@ -176,6 +177,10 @@ The following shortcuts are explicitly incoherent for v7:
   remain excluded;
 - implementing metatable `__index` lookup through source-name special cases
   instead of table identity lookup relations;
+- implementing operators through per-token local predicates instead of
+  `OpCheck` primitive/metamethod/raw cases;
+- treating `and` and `or` as boolean-only operators instead of value-producing
+  control-flow expressions;
 - treating IO as an effect while the design says IO authority is a runtime
   capability value;
 - recovering from missing semantics by widening to `unknown` or `any`;
