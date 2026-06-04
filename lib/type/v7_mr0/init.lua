@@ -10,7 +10,7 @@ local SUPPORTED_VERSION = "v7-mr0"
 --:: MR0Map = { ... }
 --:: MR0List = { [integer]: unknown, ... }
 --:: MR0Term = { term_id: string, sort: string, payload: unknown, ... }
---:: MR0Inputs = { type?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, ... }
+--:: MR0Inputs = { type?: string, pack?: string, source_pack?: string, target_pack?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, callee_claim?: string, arg_pack?: string, arrow?: string, ... }
 --:: MR0Node = { node_id: string, family: string, rule: string, inputs?: MR0Inputs, outputs: unknown, premises?: { [integer]: string, ... }, ... }
 --:: MR0Root = { proof: string, ... }
 --:: MR0Cert = { version: string, target: { id: string, ... }, terms: { [integer]: MR0Term, ... } | nil, nodes: { [integer]: MR0Node, ... } | nil, roots: { [integer]: MR0Root, ... }, ... }
@@ -83,6 +83,56 @@ local function is_intersection(t)
 	return is_array(t.arms)
 end
 
+--: (unknown) -> ({ [integer]: unknown, ... } | nil)
+local function pack_items(p)
+	if type(p) ~= "table" then return nil end
+	if p.tag ~= "pack" then return nil end
+	if p.rest ~= nil then return nil end
+	local items = p.items
+	if type(items) ~= "table" then return nil end
+	if not is_array(items) then return nil end
+	local out = {}
+	for _, item in ipairs(items) do
+		out[#out + 1] = item
+	end
+	return out
+end
+
+--: (unknown) -> boolean
+local function is_closed_pack(p)
+	return pack_items(p) ~= nil
+end
+
+--: (unknown) -> (unknown, unknown, string | nil)
+local function arrow_parts(t)
+	if type(t) ~= "table" then return nil, nil, "arrow type must be table" end
+	if t.tag ~= "arrow" then return nil, nil, "call_arrow needs arrow type" end
+	local params = t.params
+	local returns = t.returns
+	if not is_closed_pack(params) then return nil, nil, "arrow params must be closed pack" end
+	if not is_closed_pack(returns) then return nil, nil, "arrow returns must be closed pack" end
+	if t.effect ~= "pure" then return nil, nil, "MR0 arrow effect must be pure" end
+	if t.post ~= true then return nil, nil, "MR0 arrow post must be true" end
+	return params, returns, nil
+end
+
+--: (unknown) -> (unknown, string | nil)
+local function value_claim_type(claim)
+	if type(claim) ~= "table" then return nil, "value claim must be table" end
+	local typ = claim.type
+	if typ == nil then return nil, "value claim missing type" end
+	return typ, nil
+end
+
+--: (unknown) -> (unknown, string | nil)
+local function pack_claim_pack(claim)
+	if type(claim) ~= "table" then return nil, "pack claim must be table" end
+	local pack = claim.pack
+	if pack == nil then return nil, "pack claim missing pack" end
+	if not is_closed_pack(pack) then return nil, "pack claim is not closed" end
+	return pack, nil
+end
+
 --: (unknown) -> (boolean | nil, string | nil)
 local function validate_type(t)
 	local tag = type_tag(t)
@@ -109,6 +159,22 @@ local function validate_type(t)
 		if type(arms) ~= "table" then return false, "compound type arms must be table" end
 		for _, arm in ipairs(arms) do
 			local ok, msg = validate_type(arm)
+			if not ok then return nil, msg end
+		end
+		return true
+	end
+	if tag == "arrow" then
+		local params, returns, arrow_msg = arrow_parts(t)
+		if not params then return false, arrow_msg end
+		local params_items = pack_items(params)
+		local returns_items = pack_items(returns)
+		if not params_items or not returns_items then return false, "arrow packs must be closed" end
+		for _, item in ipairs(params_items) do
+			local ok, msg = validate_type(item)
+			if not ok then return nil, msg end
+		end
+		for _, item in ipairs(returns_items) do
+			local ok, msg = validate_type(item)
 			if not ok then return nil, msg end
 		end
 		return true
@@ -152,6 +218,37 @@ local function term_payload(st, id, expected_sort)
 	return entry.payload
 end
 
+--: (MR0State, string) -> (unknown, string | nil)
+local function pack_payload(st, id)
+	local p, msg = term_payload(st, id, "pack")
+	if not p then return nil, msg end
+	if not is_closed_pack(p) then return nil, "pack term is not closed pack" end
+	return p
+end
+
+--: (MR0State, string) -> (unknown, string | nil)
+local function type_payload(st, id)
+	return term_payload(st, id, "type")
+end
+
+--: (MR0State, string) -> (unknown, string | nil)
+local function value_claim_payload(st, id)
+	local claim, msg = term_payload(st, id, "value_claim")
+	if not claim then return nil, msg end
+	local _, claim_msg = value_claim_type(claim)
+	if claim_msg then return nil, claim_msg end
+	return claim
+end
+
+--: (MR0State, string) -> (unknown, string | nil)
+local function pack_claim_payload(st, id)
+	local claim, msg = term_payload(st, id, "pack_claim")
+	if not claim then return nil, msg end
+	local _, claim_msg = pack_claim_pack(claim)
+	if claim_msg then return nil, claim_msg end
+	return claim
+end
+
 --: (unknown, string) -> (string | nil, string | nil)
 local function require_term_id(id, field)
 	if type(id) ~= "string" then return nil, "missing term input " .. field end
@@ -178,6 +275,19 @@ local function replay_wf(st, node)
 		if not t then return err(msg) end
 		local ok, why = validate_type(t)
 		if not ok then return err(why) end
+		return true, { ok = true }
+	elseif node.rule == "wf_pack_closed" then
+		local inputs = node.inputs or {}
+		local pack_id, id_msg = require_term_id(inputs.pack, "pack")
+		if not pack_id then return err(id_msg) end
+		local p, msg = pack_payload(st, pack_id)
+		if not p then return err(msg) end
+		local items = pack_items(p)
+		if not items then return err("pack term is not closed pack") end
+		for _, item in ipairs(items) do
+			local ok, why = validate_type(item)
+			if not ok then return err(why) end
+		end
 		return true, { ok = true }
 	end
 	return err("unsupported WFNode rule " .. tostring(node.rule))
@@ -228,6 +338,102 @@ local function replay_sub(st, node)
 	return err("unsupported SubNode rule " .. tostring(node.rule))
 end
 
+--: (MR0State, string, unknown, unknown) -> (boolean | nil, string | nil)
+local function premise_matches_slot(st, premise_id, source_item, target_item)
+	local premise = st.nodes[premise_id]
+	if not premise then return nil, "unknown slot premise " .. premise_id end
+	if tostring(premise.family) ~= "SubNode" then return nil, "slot premise is not SubNode" end
+	if not st.accepted[premise_id] then return nil, "slot premise is not accepted" end
+	local inputs = premise.inputs or {}
+	local producer_id, producer_msg = require_term_id(inputs.producer or inputs.a, "producer")
+	if not producer_id then return nil, producer_msg end
+	local consumer_id, consumer_msg = require_term_id(inputs.consumer or inputs.b, "consumer")
+	if not consumer_id then return nil, consumer_msg end
+	local producer, pmsg = type_payload(st, producer_id)
+	if not producer then return nil, pmsg end
+	local consumer, cmsg = type_payload(st, consumer_id)
+	if not consumer then return nil, cmsg end
+	if not same(producer, source_item) then return nil, "slot premise producer mismatch" end
+	if not same(consumer, target_item) then return nil, "slot premise consumer mismatch" end
+	return true
+end
+
+--: (MR0State, MR0Node) -> (boolean | nil, unknown)
+local function replay_pack_move(st, node)
+	if node.rule ~= "closed_exact" and node.rule ~= "closed_call_adjust" then
+		return err("unsupported PackMoveNode rule " .. tostring(node.rule))
+	end
+
+	local inputs = node.inputs or {}
+	local source_id, source_msg = require_term_id(inputs.source_pack, "source_pack")
+	if not source_id then return err(source_msg) end
+	local target_id, target_msg = require_term_id(inputs.target_pack, "target_pack")
+	if not target_id then return err(target_msg) end
+	local source, smsg = pack_payload(st, source_id)
+	if not source then return err(smsg) end
+	local target, tmsg = pack_payload(st, target_id)
+	if not target then return err(tmsg) end
+	local source_items = pack_items(source)
+	local target_items = pack_items(target)
+	if not source_items or not target_items then return err("pack move requires closed packs") end
+	if #source_items ~= #target_items then return err("closed pack length mismatch") end
+	if #(node.premises or {}) ~= #source_items then return err("closed pack move needs one premise per slot") end
+	for i = 1, #source_items do
+		local ok, msg = premise_matches_slot(st, node.premises[i], source_items[i], target_items[i])
+		if not ok then return err(msg) end
+	end
+	return true, { ok = true }
+end
+
+--: (MR0State, MR0Node) -> (boolean | nil, unknown)
+local function replay_call(st, node)
+	if node.rule ~= "call_arrow" then
+		return err("unsupported CallNode rule " .. tostring(node.rule))
+	end
+	local inputs = node.inputs or {}
+	local callee_id, callee_msg = require_term_id(inputs.callee_claim, "callee_claim")
+	if not callee_id then return err(callee_msg) end
+	local arg_id, arg_msg = require_term_id(inputs.arg_pack, "arg_pack")
+	if not arg_id then return err(arg_msg) end
+	local arrow_id, arrow_msg = require_term_id(inputs.arrow, "arrow")
+	if not arrow_id then return err(arrow_msg) end
+
+	local callee, cmsg = value_claim_payload(st, callee_id)
+	if not callee then return err(cmsg) end
+	local args, amsg = pack_claim_payload(st, arg_id)
+	if not args then return err(amsg) end
+	local arrow, tmsg = type_payload(st, arrow_id)
+	if not arrow then return err(tmsg) end
+	local ok_type, type_msg = validate_type(arrow)
+	if not ok_type then return err(type_msg) end
+	local params, returns, arrow_msg = arrow_parts(arrow)
+	if not params then return err(arrow_msg) end
+	local callee_type, callee_type_msg = value_claim_type(callee)
+	if callee_type_msg then return err(callee_type_msg) end
+	local arg_pack, arg_pack_msg = pack_claim_pack(args)
+	if arg_pack_msg then return err(arg_pack_msg) end
+	if not same(callee_type, arrow) then return err("callee claim does not match arrow") end
+	if not same(arg_pack, params) then return err("argument pack does not match arrow params source") end
+	if #(node.premises or {}) ~= 1 then return err("call_arrow needs exactly one pack movement premise") end
+	local move = st.nodes[node.premises[1]]
+	if not move or tostring(move.family) ~= "PackMoveNode" then return err("call_arrow premise is not PackMoveNode") end
+	if move.rule ~= "closed_call_adjust" and move.rule ~= "closed_exact" then return err("call_arrow premise is not call pack movement") end
+	if not same(move.outputs, { ok = true }) then return err("call_arrow pack movement output mismatch") end
+	local move_inputs = move.inputs or {}
+	local move_source_id, move_source_msg = require_term_id(move_inputs.source_pack, "source_pack")
+	if not move_source_id then return err(move_source_msg) end
+	local move_target_id, move_target_msg = require_term_id(move_inputs.target_pack, "target_pack")
+	if not move_target_id then return err(move_target_msg) end
+	local move_source, move_source_payload_msg = pack_payload(st, move_source_id)
+	if not move_source then return err(move_source_payload_msg) end
+	local move_target, move_target_payload_msg = pack_payload(st, move_target_id)
+	if not move_target then return err(move_target_payload_msg) end
+	if not same(move_source, arg_pack) then return err("call_arrow pack movement source mismatch") end
+	if not same(move_target, params) then return err("call_arrow pack movement target mismatch") end
+
+	return true, { result_pack = { pack = returns }, effect = "pure", post = true }
+end
+
 --: (string, unknown) -> { type: unknown, ... }
 local function literal_claim(base, value)
 	local out = { type = { tag = "literal", base = base, value = value } }
@@ -272,6 +478,8 @@ local FAMILY = {
 	WFNode = replay_wf,
 	SubNode = replay_sub,
 	ExprNode = replay_expr,
+	PackMoveNode = replay_pack_move,
+	CallNode = replay_call,
 	UnsafeNode = replay_unsafe,
 } --: { [string]: ReplayFn }
 

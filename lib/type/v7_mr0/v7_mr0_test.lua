@@ -118,9 +118,9 @@ T.describe("type.v7_mr0 verifier spike", function()
 	T.it("rejects unsupported MR0 rules instead of guessing", function()
 		local ok, err = mr0.verify(cert({
 			{
-				node_id = "n_call",
-				family = "CallNode",
-				rule = "call_arrow",
+				node_id = "n_generic",
+				family = "GenericNode",
+				rule = "overload_export_all_branches",
 				inputs = {},
 				outputs = {},
 			},

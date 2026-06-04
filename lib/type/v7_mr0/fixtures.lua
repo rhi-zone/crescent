@@ -3,7 +3,7 @@
 -- These are semantic certificate fixtures, not source-code fixtures. A rejected
 -- fixture is useful when it pins an MR0 boundary the verifier must not infer.
 
---:: MR0FixtureInputs = { type?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, primitive_name?: string, ... }
+--:: MR0FixtureInputs = { type?: string, pack?: string, source_pack?: string, target_pack?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, primitive_name?: string, callee_claim?: string, arg_pack?: string, arrow?: string, ... }
 --:: MR0FixtureNode = { node_id: string, family: string, rule: string, inputs?: MR0FixtureInputs, outputs: unknown, premises?: { [integer]: string, ... }, ... }
 --:: MR0FixtureTerm = { term_id: string, sort: string, payload: unknown, ... }
 --:: MR0FixtureRoot = { kind: string, subject: string, proof: string, ... }
@@ -34,6 +34,28 @@ local union_ab = {
 			{ tag = "literal", base = "string", value = "b" },
 		},
 	},
+}
+local pack_integer_payload = { tag = "pack", items = { "integer" } }
+local pack_number_payload = { tag = "pack", items = { "number" } }
+local arrow_integer_to_number_payload = {
+	tag = "arrow",
+	params = pack_integer_payload,
+	returns = pack_number_payload,
+	effect = "pure",
+	post = true,
+}
+local pack_integer = { term_id = "t_pack_integer", sort = "pack", payload = pack_integer_payload }
+local pack_number = { term_id = "t_pack_number", sort = "pack", payload = pack_number_payload }
+local arrow_integer_to_number = { term_id = "t_arrow_integer_number", sort = "type", payload = arrow_integer_to_number_payload }
+local callee_integer_to_number = {
+	term_id = "t_callee_integer_number",
+	sort = "value_claim",
+	payload = { type = arrow_integer_to_number_payload },
+}
+local args_integer = {
+	term_id = "t_args_integer",
+	sort = "pack_claim",
+	payload = { pack = pack_integer_payload },
 }
 
 --: ({ [integer]: MR0FixtureNode, ... }, { [integer]: MR0FixtureRoot, ... } | nil, { [integer]: MR0FixtureTerm, ... } | nil) -> MR0FixtureCert
@@ -125,6 +147,46 @@ M.cases = {
 			},
 		}, { { kind = "unsafe_export", subject = "setmetatable_alias", proof = "n_decl" } }, { setmetatable_cap })),
 
+	accept("closed function call replays named pack movement",
+		"`function f(x: integer): number return x end` starts with a closed call over an explicit arrow and pack move.",
+		cert({
+			{
+				node_id = "n_arg_sub",
+				family = "SubNode",
+				rule = "refl",
+				inputs = { producer = "t_integer", consumer = "t_integer" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_args_move",
+				family = "PackMoveNode",
+				rule = "closed_call_adjust",
+				inputs = { source_pack = "t_pack_integer", target_pack = "t_pack_integer" },
+				premises = { "n_arg_sub" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_call",
+				family = "CallNode",
+				rule = "call_arrow",
+				inputs = {
+					callee_claim = "t_callee_integer_number",
+					arg_pack = "t_args_integer",
+					arrow = "t_arrow_integer_number",
+				},
+				premises = { "n_args_move" },
+				outputs = { result_pack = { pack = pack_number_payload }, effect = "pure", post = true },
+			},
+		}, { { kind = "function_signature_export", subject = "f", proof = "n_call" } }, {
+			integer,
+			number,
+			pack_integer,
+			pack_number,
+			arrow_integer_to_number,
+			callee_integer_to_number,
+			args_integer,
+		})),
+
 	reject("integer annotation rejects non-integer number literal",
 		"`local x: integer = 1.5` cannot use literal-to-base because the literal base is number.",
 		"literal base",
@@ -168,14 +230,119 @@ M.cases = {
 			return c
 		end)()),
 
-	reject("closed function call replay is not implemented in spike",
-		"CallNode is in MR0's design, but not admitted by this verifier until pack/call replay lands.",
-		"unsupported node family",
+	reject("closed function call without pack movement rejects",
+		"`call_arrow` must name the pack movement proof; the verifier must not infer it.",
+		"pack movement premise",
 		cert({
 			{
 				node_id = "n_call",
 				family = "CallNode",
 				rule = "call_arrow",
+				inputs = {
+					callee_claim = "t_callee_integer_number",
+					arg_pack = "t_args_integer",
+					arrow = "t_arrow_integer_number",
+				},
+				outputs = { result_pack = { pack = pack_number_payload }, effect = "pure", post = true },
+			},
+		}, nil, {
+			pack_integer,
+			pack_number,
+			arrow_integer_to_number,
+			callee_integer_to_number,
+			args_integer,
+		})),
+
+	reject("closed function call output mismatch rejects",
+		"`call_arrow` recomputes the result pack from the arrow; certificate output cannot choose another pack.",
+		"output mismatch",
+		cert({
+			{
+				node_id = "n_arg_sub",
+				family = "SubNode",
+				rule = "refl",
+				inputs = { producer = "t_integer", consumer = "t_integer" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_args_move",
+				family = "PackMoveNode",
+				rule = "closed_call_adjust",
+				inputs = { source_pack = "t_pack_integer", target_pack = "t_pack_integer" },
+				premises = { "n_arg_sub" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_call_bad_output",
+				family = "CallNode",
+				rule = "call_arrow",
+				inputs = {
+					callee_claim = "t_callee_integer_number",
+					arg_pack = "t_args_integer",
+					arrow = "t_arrow_integer_number",
+				},
+				premises = { "n_args_move" },
+				outputs = { result_pack = { pack = pack_integer_payload }, effect = "pure", post = true },
+			},
+		}, nil, {
+			integer,
+			number,
+			pack_integer,
+			pack_number,
+			arrow_integer_to_number,
+			callee_integer_to_number,
+			args_integer,
+		})),
+
+	reject("closed function call pack movement target mismatch rejects",
+		"`call_arrow` must verify that the named pack movement targets the arrow parameter pack.",
+		"target mismatch",
+		cert({
+			{
+				node_id = "n_arg_sub",
+				family = "SubNode",
+				rule = "integer_to_number",
+				inputs = { producer = "t_integer", consumer = "t_number" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_args_move_wrong_target",
+				family = "PackMoveNode",
+				rule = "closed_call_adjust",
+				inputs = { source_pack = "t_pack_integer", target_pack = "t_pack_number" },
+				premises = { "n_arg_sub" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_call_wrong_move",
+				family = "CallNode",
+				rule = "call_arrow",
+				inputs = {
+					callee_claim = "t_callee_integer_number",
+					arg_pack = "t_args_integer",
+					arrow = "t_arrow_integer_number",
+				},
+				premises = { "n_args_move_wrong_target" },
+				outputs = { result_pack = { pack = pack_number_payload }, effect = "pure", post = true },
+			},
+		}, nil, {
+			integer,
+			number,
+			pack_integer,
+			pack_number,
+			arrow_integer_to_number,
+			callee_integer_to_number,
+			args_integer,
+		})),
+
+	reject("overload call replay is not implemented in spike",
+		"`call_overload` needs explicit matching branch payloads before it can be admitted.",
+		"unsupported CallNode rule",
+		cert({
+			{
+				node_id = "n_call_overload",
+				family = "CallNode",
+				rule = "call_overload",
 				inputs = {},
 				outputs = {},
 			},

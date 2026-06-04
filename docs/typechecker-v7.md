@@ -127,17 +127,21 @@ Current code:
 Currently replayed:
 
 - `WFNode(wf_type)`;
+- `WFNode(wf_pack_closed)`;
 - `SubNode(refl | never_left | unknown_right | literal_to_base |
   integer_to_number | union_right_arm)`;
+- `PackMoveNode(closed_exact | closed_call_adjust)`;
+- `CallNode(call_arrow)`;
 - literal `ExprNode` rules;
 - `UnsafeNode(force_claim | trusted_decl_value)`;
 - root acceptance by prior accepted proof.
 
 Currently rejected as boundary, even if present in the MR0 design doc:
 
-- closed packs, calls, overload exports, statement replay, table identity replay,
-  primitive capability calls, metatable lookup/assignment, `type` predicate
-  narrowing, `require`, and canonical digest validation.
+- overload calls, overload exports, statement replay, table identity replay,
+  primitive capability calls, metatable lookup/assignment, closed return
+  adjustment, `type` predicate narrowing, `require`, and canonical digest
+  validation.
 
 ## Admission Rule
 
