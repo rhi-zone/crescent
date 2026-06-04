@@ -10,7 +10,7 @@ local SUPPORTED_VERSION = "v7-mr0"
 --:: MR0Map = { ... }
 --:: MR0List = { [integer]: unknown, ... }
 --:: MR0Term = { term_id: string, sort: string, payload: unknown, ... }
---:: MR0Inputs = { type?: string, pack?: string, source_pack?: string, target_pack?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, callee_claim?: string, arg_pack?: string, arrow?: string, ... }
+--:: MR0Inputs = { type?: string, pack?: string, source_pack?: string, target_pack?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, callee_claim?: string, arg_pack?: string, arrow?: string, expr_pack?: string, expected_pack?: string, pack_move_node?: string, ... }
 --:: MR0Node = { node_id: string, family: string, rule: string, inputs?: MR0Inputs, outputs: unknown, premises?: { [integer]: string, ... }, ... }
 --:: MR0Root = { proof: string, ... }
 --:: MR0Cert = { version: string, target: { id: string, ... }, terms: { [integer]: MR0Term, ... } | nil, nodes: { [integer]: MR0Node, ... } | nil, roots: { [integer]: MR0Root, ... }, ... }
@@ -360,7 +360,7 @@ end
 
 --: (MR0State, MR0Node) -> (boolean | nil, unknown)
 local function replay_pack_move(st, node)
-	if node.rule ~= "closed_exact" and node.rule ~= "closed_call_adjust" then
+	if node.rule ~= "closed_exact" and node.rule ~= "closed_call_adjust" and node.rule ~= "closed_return_adjust" then
 		return err("unsupported PackMoveNode rule " .. tostring(node.rule))
 	end
 
@@ -383,6 +383,27 @@ local function replay_pack_move(st, node)
 		if not ok then return err(msg) end
 	end
 	return true, { ok = true }
+end
+
+--: (MR0State, string, unknown, unknown) -> (boolean | nil, string | nil)
+local function pack_move_matches(st, move_id, source_pack, target_pack)
+	local move = st.nodes[move_id]
+	if not move then return nil, "unknown pack movement " .. move_id end
+	if tostring(move.family) ~= "PackMoveNode" then return nil, "premise is not PackMoveNode" end
+	if not st.accepted[move_id] then return nil, "pack movement is not accepted" end
+	if not same(move.outputs, { ok = true }) then return nil, "pack movement output mismatch" end
+	local move_inputs = move.inputs or {}
+	local move_source_id, move_source_msg = require_term_id(move_inputs.source_pack, "source_pack")
+	if not move_source_id then return nil, move_source_msg end
+	local move_target_id, move_target_msg = require_term_id(move_inputs.target_pack, "target_pack")
+	if not move_target_id then return nil, move_target_msg end
+	local move_source, move_source_payload_msg = pack_payload(st, move_source_id)
+	if not move_source then return nil, move_source_payload_msg end
+	local move_target, move_target_payload_msg = pack_payload(st, move_target_id)
+	if not move_target then return nil, move_target_payload_msg end
+	if not same(move_source, source_pack) then return nil, "pack movement source mismatch" end
+	if not same(move_target, target_pack) then return nil, "pack movement target mismatch" end
+	return true
 end
 
 --: (MR0State, MR0Node) -> (boolean | nil, unknown)
@@ -414,24 +435,44 @@ local function replay_call(st, node)
 	if arg_pack_msg then return err(arg_pack_msg) end
 	if not same(callee_type, arrow) then return err("callee claim does not match arrow") end
 	if not same(arg_pack, params) then return err("argument pack does not match arrow params source") end
-	if #(node.premises or {}) ~= 1 then return err("call_arrow needs exactly one pack movement premise") end
-	local move = st.nodes[node.premises[1]]
+	local premises = node.premises or {}
+	if #premises ~= 1 then return err("call_arrow needs exactly one pack movement premise") end
+	local move_id = premises[1]
+	if type(move_id) ~= "string" then return err("call_arrow pack movement premise must be string") end
+	local move = st.nodes[move_id]
 	if not move or tostring(move.family) ~= "PackMoveNode" then return err("call_arrow premise is not PackMoveNode") end
 	if move.rule ~= "closed_call_adjust" and move.rule ~= "closed_exact" then return err("call_arrow premise is not call pack movement") end
-	if not same(move.outputs, { ok = true }) then return err("call_arrow pack movement output mismatch") end
-	local move_inputs = move.inputs or {}
-	local move_source_id, move_source_msg = require_term_id(move_inputs.source_pack, "source_pack")
-	if not move_source_id then return err(move_source_msg) end
-	local move_target_id, move_target_msg = require_term_id(move_inputs.target_pack, "target_pack")
-	if not move_target_id then return err(move_target_msg) end
-	local move_source, move_source_payload_msg = pack_payload(st, move_source_id)
-	if not move_source then return err(move_source_payload_msg) end
-	local move_target, move_target_payload_msg = pack_payload(st, move_target_id)
-	if not move_target then return err(move_target_payload_msg) end
-	if not same(move_source, arg_pack) then return err("call_arrow pack movement source mismatch") end
-	if not same(move_target, params) then return err("call_arrow pack movement target mismatch") end
+	local move_ok, move_msg = pack_move_matches(st, move_id, arg_pack, params)
+	if not move_ok then return err("call_arrow " .. tostring(move_msg)) end
 
 	return true, { result_pack = { pack = returns }, effect = "pure", post = true }
+end
+
+--: (MR0State, MR0Node) -> (boolean | nil, unknown)
+local function replay_stmt(st, node)
+	if node.rule ~= "return_closed" then
+		return err("unsupported StmtNode rule " .. tostring(node.rule))
+	end
+	local inputs = node.inputs or {}
+	local expr_pack_id, expr_pack_msg = require_term_id(inputs.expr_pack, "expr_pack")
+	if not expr_pack_id then return err(expr_pack_msg) end
+	local expected_pack_id, expected_pack_msg = require_term_id(inputs.expected_pack, "expected_pack")
+	if not expected_pack_id then return err(expected_pack_msg) end
+	local move_id, move_id_msg = require_term_id(inputs.pack_move_node, "pack_move_node")
+	if not move_id then return err(move_id_msg) end
+
+	local expr_claim, expr_claim_msg = pack_claim_payload(st, expr_pack_id)
+	if not expr_claim then return err(expr_claim_msg) end
+	local expr_pack, expr_pack_payload_msg = pack_claim_pack(expr_claim)
+	if expr_pack_payload_msg then return err(expr_pack_payload_msg) end
+	local expected_pack, expected_payload_msg = pack_payload(st, expected_pack_id)
+	if not expected_pack then return err(expected_payload_msg) end
+	local move = st.nodes[move_id]
+	if not move or tostring(move.family) ~= "PackMoveNode" then return err("return_closed premise is not PackMoveNode") end
+	if move.rule ~= "closed_return_adjust" and move.rule ~= "closed_exact" then return err("return_closed premise is not return pack movement") end
+	local move_ok, move_msg = pack_move_matches(st, move_id, expr_pack, expected_pack)
+	if not move_ok then return err("return_closed " .. tostring(move_msg)) end
+	return true, { ok = true }
 end
 
 --: (string, unknown) -> { type: unknown, ... }
@@ -480,6 +521,7 @@ local FAMILY = {
 	ExprNode = replay_expr,
 	PackMoveNode = replay_pack_move,
 	CallNode = replay_call,
+	StmtNode = replay_stmt,
 	UnsafeNode = replay_unsafe,
 } --: { [string]: ReplayFn }
 

@@ -3,7 +3,7 @@
 -- These are semantic certificate fixtures, not source-code fixtures. A rejected
 -- fixture is useful when it pins an MR0 boundary the verifier must not infer.
 
---:: MR0FixtureInputs = { type?: string, pack?: string, source_pack?: string, target_pack?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, primitive_name?: string, callee_claim?: string, arg_pack?: string, arrow?: string, ... }
+--:: MR0FixtureInputs = { type?: string, pack?: string, source_pack?: string, target_pack?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, primitive_name?: string, callee_claim?: string, arg_pack?: string, arrow?: string, expr_pack?: string, expected_pack?: string, pack_move_node?: string, ... }
 --:: MR0FixtureNode = { node_id: string, family: string, rule: string, inputs?: MR0FixtureInputs, outputs: unknown, premises?: { [integer]: string, ... }, ... }
 --:: MR0FixtureTerm = { term_id: string, sort: string, payload: unknown, ... }
 --:: MR0FixtureRoot = { kind: string, subject: string, proof: string, ... }
@@ -54,6 +54,11 @@ local callee_integer_to_number = {
 }
 local args_integer = {
 	term_id = "t_args_integer",
+	sort = "pack_claim",
+	payload = { pack = pack_integer_payload },
+}
+local return_integer = {
+	term_id = "t_return_integer",
 	sort = "pack_claim",
 	payload = { pack = pack_integer_payload },
 }
@@ -185,6 +190,44 @@ M.cases = {
 			arrow_integer_to_number,
 			callee_integer_to_number,
 			args_integer,
+		})),
+
+	accept("closed return replays named return movement",
+		"`return x` in an integer-to-number function is justified by a named return pack movement.",
+		cert({
+			{
+				node_id = "n_ret_sub",
+				family = "SubNode",
+				rule = "integer_to_number",
+				inputs = { producer = "t_integer", consumer = "t_number" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_ret_move",
+				family = "PackMoveNode",
+				rule = "closed_return_adjust",
+				inputs = { source_pack = "t_pack_integer", target_pack = "t_pack_number" },
+				premises = { "n_ret_sub" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_return",
+				family = "StmtNode",
+				rule = "return_closed",
+				inputs = {
+					expr_pack = "t_return_integer",
+					expected_pack = "t_pack_number",
+					pack_move_node = "n_ret_move",
+				},
+				premises = { "n_ret_move" },
+				outputs = { ok = true },
+			},
+		}, { { kind = "function_signature_export", subject = "return-body", proof = "n_return" } }, {
+			integer,
+			number,
+			pack_integer,
+			pack_number,
+			return_integer,
 		})),
 
 	reject("integer annotation rejects non-integer number literal",
@@ -333,6 +376,45 @@ M.cases = {
 			arrow_integer_to_number,
 			callee_integer_to_number,
 			args_integer,
+		})),
+
+	reject("closed return pack movement target mismatch rejects",
+		"`return_closed` must verify that the named pack movement targets the expected return pack.",
+		"target mismatch",
+		cert({
+			{
+				node_id = "n_ret_sub",
+				family = "SubNode",
+				rule = "refl",
+				inputs = { producer = "t_integer", consumer = "t_integer" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_ret_move_wrong_target",
+				family = "PackMoveNode",
+				rule = "closed_return_adjust",
+				inputs = { source_pack = "t_pack_integer", target_pack = "t_pack_integer" },
+				premises = { "n_ret_sub" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_return_wrong_move",
+				family = "StmtNode",
+				rule = "return_closed",
+				inputs = {
+					expr_pack = "t_return_integer",
+					expected_pack = "t_pack_number",
+					pack_move_node = "n_ret_move_wrong_target",
+				},
+				premises = { "n_ret_move_wrong_target" },
+				outputs = { ok = true },
+			},
+		}, nil, {
+			integer,
+			number,
+			pack_integer,
+			pack_number,
+			return_integer,
 		})),
 
 	reject("overload call replay is not implemented in spike",

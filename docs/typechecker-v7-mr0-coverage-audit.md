@@ -11,8 +11,9 @@ Implemented replay families:
 - `WFNode(wf_pack_closed)`;
 - `SubNode(refl | never_left | unknown_right | literal_to_base |
   integer_to_number | union_right_arm)`;
-- `PackMoveNode(closed_exact | closed_call_adjust)`;
+- `PackMoveNode(closed_exact | closed_call_adjust | closed_return_adjust)`;
 - `CallNode(call_arrow)`;
+- `StmtNode(return_closed)`;
 - literal `ExprNode` rules;
 - `UnsafeNode(force_claim | trusted_decl_value)`;
 - root validation by accepted proof.
@@ -21,7 +22,7 @@ Implemented fixture stance:
 
 - accepted fixtures cover scalar annotations, named union-right introduction,
   explicit trusted primitive-capability boundaries, and closed arrow calls with
-  named pack movement;
+  named pack movement, and closed returns with named return movement;
 - rejected fixtures pin boundary behavior for overload calls, overload export,
   identity replay, primitive calls, predicate narrowing, imports, missing call
   pack movement, and call output mismatch.
@@ -30,9 +31,10 @@ Implemented fixture stance:
 
 `WFNode`:
 
-- Missing `wf_pack_closed`, `wf_effect_pure`, `wf_post_true`, and `wf_context`.
-- These are small but should be implemented only with the payload family that
-  consumes them, otherwise they become inert green checks.
+- `wf_type` and `wf_pack_closed` are implemented.
+- Missing `wf_effect_pure`, `wf_post_true`, and `wf_context`.
+- The missing rules are small but should be implemented only with the payload
+  family that consumes them, otherwise they become inert green checks.
 
 `SubNode`:
 
@@ -49,15 +51,15 @@ Implemented fixture stance:
 
 `StmtNode`:
 
-- Entire family missing.
-- `return_closed` depends on closed pack movement, but statement replay should
-  not be implemented before pack claims have a stable verifier representation.
+- `return_closed` is implemented.
+- Local inference, local annotation, local assignment, and field assignment are
+  still missing.
 
 `PackMoveNode`:
 
-- `closed_exact` and `closed_call_adjust` are implemented.
-- `closed_return_adjust` is still missing because it should be introduced with
-  statement return replay.
+- `closed_exact`, `closed_call_adjust`, and `closed_return_adjust` are
+  implemented as exact closed-pack movement with named slot premises.
+- Missing-value and surplus-value adjustment are still not admitted.
 
 `CallNode`:
 
@@ -129,14 +131,30 @@ Implemented replay rules:
 Adversarial fixtures now reject missing pack-move premises, mismatched call
 outputs, pack-move target mismatches, and overload calls.
 
+## Implemented Return Slice
+
+`StmtNode(return_closed)` is now admitted by the table-native MR0 verifier.
+
+Replay rule:
+
+- `return_closed` consumes an existing `pack_claim`, an expected pack term, and a
+  named `PackMoveNode`.
+- The named pack movement must already be accepted, must have source equal to
+  the returned pack claim, and must have target equal to the expected return
+  pack.
+- The node output is recomputed as `{ ok = true }`.
+
+Adversarial fixtures reject return pack-move target mismatches.
+
 ## Next Implementation Slice
 
-Choose between statement return replay and canonical serialization.
+Choose between local/context replay and canonical serialization.
 
-Statement return replay is the smallest semantic continuation if the goal is to
-accept the full `function f(x: integer): number return x end` fixture. Canonical
-serialization is the smaller trust-boundary continuation if the goal is to
-accept certificates from disk instead of in-memory fixtures.
+Local/context replay is the smallest semantic continuation if the goal is to tie
+`return_closed` to an actual parameter binding and eventually accept the full
+`function f(x: integer): number return x end` fixture. Canonical serialization is
+the smaller trust-boundary continuation if the goal is to accept certificates
+from disk instead of in-memory fixtures.
 
 Do not implement primitive capability calls next; they depend on identity replay
 and would otherwise be a disguised special case.
