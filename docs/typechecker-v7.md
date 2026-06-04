@@ -97,10 +97,45 @@ Not yet admitted:
 
 Work these before implementation verticals:
 
-1. **MR0 executable verifier spike.** Implement a small standalone verifier for
-   MR0 certificates, without connecting it to v4 or v6 inference.
-2. **MR0 fixture corpus.** Materialize the accepted/rejected examples from the
-   MR0 payload doc as certificate fixtures.
+1. **MR0 replay coverage audit.** Compare
+   `docs/typechecker-v7-mr0-payloads.md` against `lib/type/v7_mr0/` and decide
+   the next payload family to admit. Do not implement a family just because a
+   fixture mentions it.
+2. **Closed pack and call replay.** Candidate next family: `PackMoveNode` plus
+   `CallNode`, because this is the smallest step that turns the accepted
+   `function f(x: integer): number return x end` fixture from a boundary reject
+   into a real accepted certificate.
+3. **Canonical serialization and digest checks.** The current verifier accepts
+   table-native certificates. Before trusting external certificates, implement
+   canonical serialization, term/context ID recomputation, and target/source
+   digest validation.
+
+## Implementation Status
+
+Current code:
+
+- `lib/type/v7_mr0/init.lua` is a standalone MR0 replay verifier. It is not
+  connected to v4/v5/v6 inference and does not search for missing proofs.
+- `lib/type/v7_mr0/fixtures.lua` is the initial semantic fixture corpus. It
+  includes accepted fixtures for implemented replay rules and rejected boundary
+  fixtures for MR0 payload families the verifier must not guess yet.
+- `lib/type/v7_mr0/v7_mr0_test.lua` runs the corpus plus focused verifier
+  checks.
+
+Currently replayed:
+
+- `WFNode(wf_type)`;
+- `SubNode(refl | never_left | unknown_right | literal_to_base |
+  integer_to_number | union_right_arm)`;
+- literal `ExprNode` rules;
+- `UnsafeNode(force_claim | trusted_decl_value)`;
+- root acceptance by prior accepted proof.
+
+Currently rejected as boundary, even if present in the MR0 design doc:
+
+- closed packs, calls, overload exports, statement replay, table identity replay,
+  primitive capability calls, metatable lookup/assignment, `type` predicate
+  narrowing, `require`, and canonical digest validation.
 
 ## Admission Rule
 

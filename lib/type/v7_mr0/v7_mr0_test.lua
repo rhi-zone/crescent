@@ -1,5 +1,6 @@
 local T = require("lib.test.assert")
 local mr0 = require("lib.type.v7_mr0")
+local fixtures = require("lib.type.v7_mr0.fixtures")
 
 --:: MR0TestInputs = { type?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, ... }
 --:: MR0TestNode = { node_id: string, family: string, rule: string, inputs?: MR0TestInputs, outputs: unknown, premises?: { [integer]: string, ... }, ... }
@@ -41,6 +42,23 @@ local union_ab = {
 local lit_a = { term_id = "t_lit_a", sort = "type", payload = { tag = "literal", base = "string", value = "a" } }
 
 T.describe("type.v7_mr0 verifier spike", function()
+	T.describe("fixture corpus", function()
+		for _, fixture in ipairs(fixtures.cases) do
+			T.it(fixture.expect .. "s " .. fixture.name, function()
+				local ok, err = mr0.verify(fixture.cert)
+				if fixture.expect == "accept" then
+					T.ok(ok, err)
+				else
+					T.fail(ok)
+					if fixture.contains then
+						local msg = tostring(err)
+						T.ok(msg:find(fixture.contains, 1, true) ~= nil, msg)
+					end
+				end
+			end)
+		end
+	end)
+
 	T.it("accepts literal integer annotation through integer <: number", function()
 		local ok, err = mr0.verify(cert({
 			{
