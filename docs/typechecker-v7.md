@@ -54,15 +54,17 @@ Read in this order:
 17. `docs/typechecker-v7-mr0-payloads.md` — concrete MR0 certificate envelope,
    canonical serialization, payload schemas, replay algorithm, and adversarial
    fixtures.
-18. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
+18. `docs/typechecker-v7-mr0-coverage-audit.md` — implementation coverage audit
+   for the table-native MR0 verifier and the next payload family.
+19. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
    consistent whole, plus blocking semantic seams.
-19. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
+20. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
    judgments, and certificate obligations.
-20. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
+21. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
    older Crescent designs or external systems without reintroducing ad-hocness.
-21. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+22. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-22. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
+23. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
    and lineage status.
 
 Older v4/v5/v6 docs are research input only. If they conflict with v7, v7 owns
