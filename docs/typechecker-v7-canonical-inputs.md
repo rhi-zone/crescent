@@ -1,0 +1,215 @@
+# Typechecker v7 Canonical Inputs
+
+This document specifies the M2 boundary for deterministic MR0 certificate
+inputs.
+
+Canonicalization is not a type rule. It is the input-integrity layer that makes
+certificate replay reproducible and reviewable. The verifier may run without
+strict IDs for hand-written fixtures, but external certificates should be
+accepted only when their IDs and digests match the canonical semantic payloads.
+
+## Scope
+
+This spec covers the MR0 payloads admitted so far:
+
+- terms;
+- immutable MR0 contexts;
+- replay nodes;
+- roots;
+- certificate envelopes.
+
+It does not choose a source parser, annotation elaborator, package format, or
+stdlib profile. Those are producers of certificate inputs, not kernel semantics.
+
+## Canonical Value Encoding
+
+The canonical serializer is a deterministic tree encoding over the semantic
+payload shape:
+
+- `nil`;
+- booleans;
+- strings;
+- integer numbers;
+- arrays with dense integer keys from `1..n`;
+- maps with string keys sorted lexicographically.
+
+Rejected:
+
+- non-integer numbers;
+- sparse arrays;
+- mixed numeric/string table keys;
+- function/thread/userdata values;
+- host-object identity;
+- metatables.
+
+The integer-only numeric rule is intentional. Lua number spelling, infinities,
+NaN, signed zero, cdata numerics, and target-specific integer width need a
+separate numeric encoding decision before they can become digest input.
+
+## Term IDs
+
+Terms are content-addressed by sort and payload:
+
+```text
+term_id = "t:" .. sha256(canonical({
+  sort = term.sort,
+  payload = term.payload
+}))
+```
+
+The term ID excludes `term_id` itself and any fixture/display metadata.
+
+Current implementation status:
+
+- `canonical.term_id(sort, payload)` exists;
+- verifier `strict_ids` checks terms only;
+- non-integer numeric payloads are rejected in strict mode.
+
+## Context IDs
+
+MR0 context IDs are content-addressed over the immutable semantic context:
+
+```text
+context_id = "c:" .. sha256(canonical({
+  locals = context.locals,
+  identities = context.identities or {},
+  live_facts = context.live_facts or {},
+  dependencies = context.dependencies or {}
+}))
+```
+
+The context ID excludes:
+
+- `context_id`;
+- source scope names;
+- source file positions;
+- fixture metadata.
+
+For the current MR0 local-read subset, `identities`, `live_facts`, and
+`dependencies` must be empty. They are still included in the digest shape so
+future context extensions cannot alias older IDs.
+
+## Node IDs
+
+Replay nodes are content-addressed by the replay rule and declared proof
+interface:
+
+```text
+node_id = "n:" .. sha256(canonical({
+  family = node.family,
+  rule = node.rule,
+  inputs = node.inputs or {},
+  premises = node.premises or {},
+  outputs = node.outputs
+}))
+```
+
+The node ID excludes:
+
+- `node_id`;
+- comments;
+- source locations;
+- display labels;
+- dependency metadata that is not a replay premise.
+
+Including `outputs` is deliberate. A node's claim is part of what replay checks.
+If two nodes share rule/input/premises but assert different outputs, they must
+not collide.
+
+Premises are ordered where the rule gives them order. For example:
+
+- `PackMoveNode` premises are one subtyping proof per slot;
+- `PackNode(values_closed)` premises are one value producer per claim;
+- `StmtNode(return_closed)` premises include the expression-pack producer and
+  return pack movement.
+
+Rules that require unordered premise sets must introduce their own normalized
+payload shape before they can be admitted.
+
+## Root IDs And Certificate Digest
+
+Roots are not currently content-addressed individually. They are part of the
+certificate digest:
+
+```text
+certificate_digest = sha256(canonical({
+  version = cert.version,
+  target = cert.target,
+  sources = cert.sources or {},
+  declarations = cert.declarations or {},
+  terms = cert.terms or {},
+  contexts = cert.contexts or {},
+  nodes = cert.nodes or {},
+  roots = cert.roots
+}))
+```
+
+External certificates should carry this digest out-of-band or in an envelope
+field excluded from the digest projection.
+
+## External Certificate Boundary
+
+M2 separates two concepts:
+
+- semantic canonical projection;
+- concrete wire format.
+
+The semantic projection above is mandatory. The concrete file format is still
+open. Acceptable wire formats must:
+
+- decode only the canonical value domain or reject before replay;
+- preserve array order exactly;
+- preserve string map keys exactly;
+- not expose host-object identity;
+- not infer omitted semantic fields except where this spec names a default;
+- round-trip to the same canonical projection.
+
+The verifier should eventually expose two entry points:
+
+- `verify_table(cert, opts)` for in-process fixture tables;
+- `verify_external(bytes, opts)` for decoded external certificate files.
+
+`verify_external` must validate the certificate digest and strict IDs before
+replay.
+
+## Strictness Levels
+
+Implementation may stage strictness:
+
+- `strict_terms`: verify all term IDs.
+- `strict_contexts`: verify all context IDs.
+- `strict_nodes`: verify all node IDs.
+- `strict_certificate`: verify the full certificate digest.
+
+The final external-certificate mode should enable all of them.
+
+The current option name `strict_ids` is term-only historical shorthand. Before
+external certificates are admitted, it should either become strict-all or be
+split into explicit strictness flags.
+
+## Malformed-Input Corpus
+
+M2 needs fixtures that reject:
+
+- non-canonical term IDs;
+- non-canonical context IDs;
+- non-canonical node IDs;
+- duplicate IDs with different payloads;
+- duplicate IDs with identical payloads;
+- sparse arrays in inputs/premises/roots;
+- non-string map keys;
+- non-integer numeric literals;
+- roots whose proof IDs are missing;
+- `function_signature_export` roots whose proof is not a function node;
+- certificates whose digest excludes a replay-relevant field.
+
+## Design Blocks
+
+Non-integer numeric canonicalization remains a design block. It affects literal
+types, target profiles, cdata boundaries, and digest stability. Until it is
+specified, external strict mode must reject non-integer numeric payloads rather
+than canonicalize them by host formatting.
+
+The concrete external wire format is also open. This is a lower-risk decision
+than numeric encoding because the semantic canonical projection is independent
+of the wire format.

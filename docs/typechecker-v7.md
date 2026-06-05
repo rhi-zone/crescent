@@ -56,22 +56,24 @@ Read in this order:
 18. `docs/typechecker-v7-mr0-payloads.md` — concrete MR0 certificate envelope,
    canonical serialization, payload schemas, replay algorithm, and adversarial
    fixtures.
-19. `docs/typechecker-v7-mr0-coverage-audit.md` — implementation coverage audit
+19. `docs/typechecker-v7-canonical-inputs.md` — canonical term/context/node IDs,
+   certificate digests, external certificate boundary, and strictness staging.
+20. `docs/typechecker-v7-mr0-coverage-audit.md` — implementation coverage audit
    for the table-native MR0 verifier and the next payload family.
-20. `docs/typechecker-v7-mr0-contexts.md` — MR0 place/context/local-read rules
+21. `docs/typechecker-v7-mr0-contexts.md` — MR0 place/context/local-read rules
    for source-independent function body certificates.
-21. `docs/typechecker-v7-mr0-function-body.md` — MR0 source-independent
+22. `docs/typechecker-v7-mr0-function-body.md` — MR0 source-independent
    function body, parameter context, function value, and function-export root
    replay.
-22. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
+23. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
    consistent whole, plus blocking semantic seams.
-23. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
+24. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
    judgments, and certificate obligations.
-24. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
+25. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
    older Crescent designs or external systems without reintroducing ad-hocness.
-25. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+26. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-26. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
+27. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
    and lineage status.
 
 Older v4/v5/v6 docs are research input only. If they conflict with v7, v7 owns
