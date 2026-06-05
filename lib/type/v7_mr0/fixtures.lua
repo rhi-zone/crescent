@@ -3,11 +3,12 @@
 -- These are semantic certificate fixtures, not source-code fixtures. A rejected
 -- fixture is useful when it pins an MR0 boundary the verifier must not infer.
 
---:: MR0FixtureInputs = { type?: string, pack?: string, source_pack?: string, target_pack?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, primitive_name?: string, callee_claim?: string, arg_pack?: string, arrow?: string, expr_pack?: string, expected_pack?: string, pack_move_node?: string, ... }
+--:: MR0FixtureInputs = { type?: string, pack?: string, source_pack?: string, target_pack?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, primitive_name?: string, callee_claim?: string, arg_pack?: string, arrow?: string, expr_pack?: string, expected_pack?: string, pack_move_node?: string, expr_pack_node?: string, context?: string, place?: string, claims?: { [integer]: string, ... }, ... }
 --:: MR0FixtureNode = { node_id: string, family: string, rule: string, inputs?: MR0FixtureInputs, outputs: unknown, premises?: { [integer]: string, ... }, ... }
 --:: MR0FixtureTerm = { term_id: string, sort: string, payload: unknown, ... }
+--:: MR0FixtureContext = { context_id: string, locals: { [string]: unknown, ... }, identities: { ... } | nil, live_facts: { ... } | nil, dependencies: { ... } | nil, ... }
 --:: MR0FixtureRoot = { kind: string, subject: string, proof: string, ... }
---:: MR0FixtureCert = { version: string, target: { id: string, ... }, terms: { [integer]: MR0FixtureTerm, ... } | nil, nodes: { [integer]: MR0FixtureNode, ... }, roots: { [integer]: MR0FixtureRoot, ... }, ... }
+--:: MR0FixtureCert = { version: string, target: { id: string, ... }, terms: { [integer]: MR0FixtureTerm, ... } | nil, contexts: { [integer]: MR0FixtureContext, ... } | nil, nodes: { [integer]: MR0FixtureNode, ... }, roots: { [integer]: MR0FixtureRoot, ... }, ... }
 --:: MR0Fixture = { name: string, expect: "accept" | "reject", reason: string, contains: string | nil, cert: MR0FixtureCert }
 
 local M = {}
@@ -46,6 +47,10 @@ local arrow_integer_to_number_payload = {
 }
 local pack_integer = { term_id = "t_pack_integer", sort = "pack", payload = pack_integer_payload }
 local pack_number = { term_id = "t_pack_number", sort = "pack", payload = pack_number_payload }
+local place_p0 = { term_id = "t_place_p0", sort = "place", payload = { tag = "local", id = "p0" } }
+local place_p1 = { term_id = "t_place_p1", sort = "place", payload = { tag = "local", id = "p1" } }
+local claim_integer = { term_id = "t_claim_integer", sort = "value_claim", payload = { type = "integer" } }
+local claim_number = { term_id = "t_claim_number", sort = "value_claim", payload = { type = "number" } }
 local arrow_integer_to_number = { term_id = "t_arrow_integer_number", sort = "type", payload = arrow_integer_to_number_payload }
 local callee_integer_to_number = {
 	term_id = "t_callee_integer_number",
@@ -62,9 +67,30 @@ local return_integer = {
 	sort = "pack_claim",
 	payload = { pack = pack_integer_payload },
 }
+local context_p0_integer = {
+	context_id = "c_p0_integer",
+	locals = { p0 = { type = "integer" } },
+	identities = {},
+	live_facts = {},
+	dependencies = {},
+}
+local context_p0_number = {
+	context_id = "c_p0_number",
+	locals = { p0 = { type = "number" } },
+	identities = {},
+	live_facts = {},
+	dependencies = {},
+}
+local context_p0_integer_with_fact = {
+	context_id = "c_p0_integer_with_fact",
+	locals = { p0 = { type = "integer" } },
+	identities = {},
+	live_facts = { narrowed = true },
+	dependencies = {},
+}
 
---: ({ [integer]: MR0FixtureNode, ... }, { [integer]: MR0FixtureRoot, ... } | nil, { [integer]: MR0FixtureTerm, ... } | nil) -> MR0FixtureCert
-local function cert(nodes, roots, terms)
+--: ({ [integer]: MR0FixtureNode, ... }, { [integer]: MR0FixtureRoot, ... } | nil, { [integer]: MR0FixtureTerm, ... } | nil, { [integer]: MR0FixtureContext, ... } | nil) -> MR0FixtureCert
+local function cert(nodes, roots, terms, contexts)
 	local last_node = nodes[#nodes]
 	local proof = last_node and last_node.node_id or "<missing>"
 	return {
@@ -73,7 +99,7 @@ local function cert(nodes, roots, terms)
 		sources = { { source_id = "fixture", digest = "test-source" } },
 		declarations = {},
 		terms = terms or {},
-		contexts = {},
+		contexts = contexts or {},
 		nodes = nodes,
 		roots = roots or { { kind = "local_annotation", subject = "fixture", proof = proof } },
 	}
@@ -196,6 +222,21 @@ M.cases = {
 		"`return x` in an integer-to-number function is justified by a named return pack movement.",
 		cert({
 			{
+				node_id = "n_read_p0",
+				family = "ExprNode",
+				rule = "local_read",
+				inputs = { context = "c_p0_integer", place = "t_place_p0" },
+				outputs = { claim = { type = "integer" } },
+			},
+			{
+				node_id = "n_return_values",
+				family = "PackNode",
+				rule = "values_closed",
+				inputs = { claims = { "t_claim_integer" } },
+				premises = { "n_read_p0" },
+				outputs = { claim = { pack = pack_integer_payload } },
+			},
+			{
 				node_id = "n_ret_sub",
 				family = "SubNode",
 				rule = "integer_to_number",
@@ -218,8 +259,9 @@ M.cases = {
 					expr_pack = "t_return_integer",
 					expected_pack = "t_pack_number",
 					pack_move_node = "n_ret_move",
+					expr_pack_node = "n_return_values",
 				},
-				premises = { "n_ret_move" },
+				premises = { "n_return_values", "n_ret_move" },
 				outputs = { ok = true },
 			},
 		}, { { kind = "function_signature_export", subject = "return-body", proof = "n_return" } }, {
@@ -227,8 +269,114 @@ M.cases = {
 			number,
 			pack_integer,
 			pack_number,
+			place_p0,
+			claim_integer,
 			return_integer,
-		})),
+		}, { context_p0_integer })),
+
+	reject("local read of missing place rejects",
+		"`local_read` uses stable place IDs and must not fall back to source-name lookup or unknown.",
+		"missing place",
+		cert({
+			{
+				node_id = "n_missing_read",
+				family = "ExprNode",
+				rule = "local_read",
+				inputs = { context = "c_p0_integer", place = "t_place_p1" },
+				outputs = { claim = { type = "integer" } },
+			},
+		}, nil, { place_p1 }, { context_p0_integer })),
+
+	reject("context with live facts rejects in MR0",
+		"Fact-bearing contexts require invalidation and transition semantics before replay can admit them.",
+		"live_facts",
+		cert({
+			{
+				node_id = "n_fact_context",
+				family = "WFNode",
+				rule = "wf_context",
+				inputs = { context = "c_p0_integer_with_fact" },
+				outputs = { ok = true },
+			},
+		}, nil, {}, { context_p0_integer_with_fact })),
+
+	reject("values_closed requires producer claim correspondence",
+		"`values_closed` must not build an integer pack from an unrelated number-valued producer node.",
+		"claim premise mismatch",
+		cert({
+			{
+				node_id = "n_read_number",
+				family = "ExprNode",
+				rule = "local_read",
+				inputs = { context = "c_p0_number", place = "t_place_p0" },
+				outputs = { claim = { type = "number" } },
+			},
+			{
+				node_id = "n_values_bad_claim",
+				family = "PackNode",
+				rule = "values_closed",
+				inputs = { claims = { "t_claim_integer" } },
+				premises = { "n_read_number" },
+				outputs = { claim = { pack = pack_integer_payload } },
+			},
+		}, nil, { place_p0, claim_integer }, { context_p0_number })),
+
+	reject("return_closed requires expression pack producer correspondence",
+		"`return_closed` must not cite an integer pack term while naming a number-pack producer.",
+		"expr pack producer mismatch",
+		cert({
+			{
+				node_id = "n_read_number_for_return",
+				family = "ExprNode",
+				rule = "local_read",
+				inputs = { context = "c_p0_number", place = "t_place_p0" },
+				outputs = { claim = { type = "number" } },
+			},
+			{
+				node_id = "n_values_number_for_return",
+				family = "PackNode",
+				rule = "values_closed",
+				inputs = { claims = { "t_claim_number" } },
+				premises = { "n_read_number_for_return" },
+				outputs = { claim = { pack = pack_number_payload } },
+			},
+			{
+				node_id = "n_ret_sub_for_mismatch",
+				family = "SubNode",
+				rule = "integer_to_number",
+				inputs = { producer = "t_integer", consumer = "t_number" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_ret_move_for_mismatch",
+				family = "PackMoveNode",
+				rule = "closed_return_adjust",
+				inputs = { source_pack = "t_pack_integer", target_pack = "t_pack_number" },
+				premises = { "n_ret_sub_for_mismatch" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_return_expr_mismatch",
+				family = "StmtNode",
+				rule = "return_closed",
+				inputs = {
+					expr_pack = "t_return_integer",
+					expected_pack = "t_pack_number",
+					pack_move_node = "n_ret_move_for_mismatch",
+					expr_pack_node = "n_values_number_for_return",
+				},
+				premises = { "n_values_number_for_return", "n_ret_move_for_mismatch" },
+				outputs = { ok = true },
+			},
+		}, nil, {
+			integer,
+			number,
+			pack_integer,
+			pack_number,
+			place_p0,
+			claim_number,
+			return_integer,
+		}, { context_p0_number })),
 
 	reject("integer annotation rejects non-integer number literal",
 		"`local x: integer = 1.5` cannot use literal-to-base because the literal base is number.",
@@ -383,6 +531,21 @@ M.cases = {
 		"target mismatch",
 		cert({
 			{
+				node_id = "n_read_p0_wrong_target",
+				family = "ExprNode",
+				rule = "local_read",
+				inputs = { context = "c_p0_integer", place = "t_place_p0" },
+				outputs = { claim = { type = "integer" } },
+			},
+			{
+				node_id = "n_values_wrong_target",
+				family = "PackNode",
+				rule = "values_closed",
+				inputs = { claims = { "t_claim_integer" } },
+				premises = { "n_read_p0_wrong_target" },
+				outputs = { claim = { pack = pack_integer_payload } },
+			},
+			{
 				node_id = "n_ret_sub",
 				family = "SubNode",
 				rule = "refl",
@@ -405,8 +568,9 @@ M.cases = {
 					expr_pack = "t_return_integer",
 					expected_pack = "t_pack_number",
 					pack_move_node = "n_ret_move_wrong_target",
+					expr_pack_node = "n_values_wrong_target",
 				},
-				premises = { "n_ret_move_wrong_target" },
+				premises = { "n_values_wrong_target", "n_ret_move_wrong_target" },
 				outputs = { ok = true },
 			},
 		}, nil, {
@@ -414,8 +578,10 @@ M.cases = {
 			number,
 			pack_integer,
 			pack_number,
+			place_p0,
+			claim_integer,
 			return_integer,
-		})),
+		}, { context_p0_integer })),
 
 	reject("overload call replay is not implemented in spike",
 		"`call_overload` needs explicit matching branch payloads before it can be admitted.",

@@ -64,6 +64,9 @@ Current verifier:
 - closed arrow call replay;
 - closed return replay;
 - literal expression claims;
+- immutable context entries for MR0;
+- local place reads;
+- closed value-list pack construction with producer correspondence;
 - unsafe/trusted boundary nodes;
 - roots over accepted proofs;
 - canonical term IDs for canonicalizable terms.
@@ -74,12 +77,19 @@ Primary docs:
 - `docs/typechecker-v7-mr0-payloads.md`
 - `docs/typechecker-v7-mr0-coverage-audit.md`
 
+Closed in this slice:
+
+1. Table-native `ContextEntry` indexing for immutable MR0 contexts.
+2. `ExprNode(local_read)` over stable local place IDs.
+3. `PackNode(values_closed)` and `StmtNode(return_closed)` producer
+   correspondence, so return replay is tied to a value producer rather than an
+   arbitrary prebuilt `pack_claim`.
+
 Current next step:
 
-1. Implement table-native `ContextEntry` indexing and canonical context IDs only
-   for the closed subset needed by local reads.
-2. Add fixtures tying `return_closed` to a parameter/local place rather than an
-   arbitrary prebuilt `pack_claim`.
+1. Specify `docs/typechecker-v7-mr0-function-body.md`.
+2. Define the smallest function-value/body/export certificate that connects
+   parameter binder places, body replay, and exported arrow claims.
 
 Why this next: it connects the existing call/return substrate to actual binding
 facts without touching tables, modules, effects, or inference.
@@ -108,9 +118,10 @@ or parse source. It proves the kernel can connect:
 Required subdocs:
 
 - `docs/typechecker-v7-mr0-contexts.md` for places, contexts, local reads, and
-  binder claims. Status: spec ready for the MR0 local-read subset.
+  closed value-list/return producer correspondence. Status: verifier slice for
+  the MR0 local-read subset.
 - `docs/typechecker-v7-mr0-function-body.md` for function-value/body/export
-  replay.
+  replay. Status: design blocked.
 
 Do not implement:
 

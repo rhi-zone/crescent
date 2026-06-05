@@ -12,11 +12,12 @@ local SUPPORTED_VERSION = "v7-mr0"
 --:: MR0Map = { ... }
 --:: MR0List = { [integer]: unknown, ... }
 --:: MR0Term = { term_id: string, sort: string, payload: unknown, ... }
---:: MR0Inputs = { type?: string, pack?: string, source_pack?: string, target_pack?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, callee_claim?: string, arg_pack?: string, arrow?: string, expr_pack?: string, expected_pack?: string, pack_move_node?: string, ... }
+--:: MR0Context = { context_id: string, locals: { [string]: unknown, ... }, identities: MR0Map | nil, live_facts: MR0Map | nil, dependencies: MR0Map | nil, ... }
+--:: MR0Inputs = { type?: string, pack?: string, source_pack?: string, target_pack?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, callee_claim?: string, arg_pack?: string, arrow?: string, expr_pack?: string, expected_pack?: string, pack_move_node?: string, expr_pack_node?: string, context?: string, place?: string, claims?: { [integer]: string, ... }, ... }
 --:: MR0Node = { node_id: string, family: string, rule: string, inputs?: MR0Inputs, outputs: unknown, premises?: { [integer]: string, ... }, ... }
 --:: MR0Root = { proof: string, ... }
---:: MR0Cert = { version: string, target: { id: string, ... }, terms: { [integer]: MR0Term, ... } | nil, nodes: { [integer]: MR0Node, ... } | nil, roots: { [integer]: MR0Root, ... }, ... }
---:: MR0State = { terms: { [string]: MR0Term, ... }, nodes: { [string]: MR0Node, ... }, accepted: { [string]: boolean, ... }, outputs: { [string]: unknown, ... } }
+--:: MR0Cert = { version: string, target: { id: string, ... }, terms: { [integer]: MR0Term, ... } | nil, contexts: { [integer]: MR0Context, ... } | nil, nodes: { [integer]: MR0Node, ... } | nil, roots: { [integer]: MR0Root, ... }, ... }
+--:: MR0State = { terms: { [string]: MR0Term, ... }, contexts: { [string]: MR0Context, ... }, nodes: { [string]: MR0Node, ... }, accepted: { [string]: boolean, ... }, outputs: { [string]: unknown, ... } }
 --:: ReplayFn = (st: MR0State, node: MR0Node) -> (boolean | nil, unknown)
 --:: VerifyOpts = { strict_ids?: boolean, ... }
 
@@ -34,6 +35,13 @@ local function is_array(t)
 		if n < 1 or n % 1 ~= 0 then return false end
 	end
 	return true
+end
+
+--: (unknown) -> boolean
+local function is_empty_map(t)
+	if t == nil then return true end
+	if type(t) ~= "table" then return false end
+	return next(t) == nil
 end
 
 --: (unknown, unknown) -> boolean
@@ -136,6 +144,15 @@ local function pack_claim_pack(claim)
 	return pack, nil
 end
 
+--: (unknown) -> (unknown, string | nil)
+local function place_local_id(place)
+	if type(place) ~= "table" then return nil, "place must be table" end
+	if place.tag ~= "local" then return nil, "MR0 only admits local places" end
+	local id = place.id
+	if type(id) ~= "string" then return nil, "local place missing id" end
+	return id, nil
+end
+
 --: (unknown) -> (boolean | nil, string | nil)
 local function validate_type(t)
 	local tag = type_tag(t)
@@ -201,14 +218,40 @@ end
 local function mk_state(cert)
 	local terms, msg = index_by_id(cert.terms, "term_id")
 	if not terms then return nil, msg end
+	local contexts, msg_contexts = index_by_id(cert.contexts, "context_id")
+	if not contexts then return nil, msg_contexts end
 	local nodes, msg2 = index_by_id(cert.nodes, "node_id")
 	if not nodes then return nil, msg2 end
 	return {
 		terms = terms,
+		contexts = contexts,
 		nodes = nodes,
 		accepted = {},
 		outputs = {},
 	}
+end
+
+--: (unknown) -> (boolean | nil, string | nil)
+local function validate_value_claim(claim)
+	local typ, msg = value_claim_type(claim)
+	if msg then return nil, msg end
+	local ok, why = validate_type(typ)
+	if not ok then return nil, why end
+	return true
+end
+
+--: (MR0Context) -> (boolean | nil, string | nil)
+local function validate_context(ctx)
+	if type(ctx.locals) ~= "table" then return nil, "context locals must be table" end
+	if not is_empty_map(ctx.identities) then return nil, "MR0 context identities must be empty" end
+	if not is_empty_map(ctx.live_facts) then return nil, "MR0 context live_facts must be empty" end
+	if not is_empty_map(ctx.dependencies) then return nil, "MR0 context dependencies must be empty" end
+	for place_id, claim in pairs(ctx.locals) do
+		if type(place_id) ~= "string" then return nil, "context local key must be string" end
+		local ok, msg = validate_value_claim(claim)
+		if not ok then return nil, "context local " .. place_id .. ": " .. tostring(msg) end
+	end
+	return true
 end
 
 --: (MR0Cert) -> (boolean | nil, string | nil)
@@ -257,12 +300,40 @@ local function value_claim_payload(st, id)
 	return claim
 end
 
+--: (MR0State, string) -> (MR0Context | nil, string | nil)
+local function context_payload(st, id)
+	local ctx = st.contexts[id]
+	if not ctx then return nil, "unknown context " .. id end
+	local ok, msg = validate_context(ctx)
+	if not ok then return nil, msg end
+	return ctx
+end
+
+--: (MR0State, string) -> (unknown, string | nil)
+local function place_payload(st, id)
+	local place, msg = term_payload(st, id, "place")
+	if not place then return nil, msg end
+	local _, place_msg = place_local_id(place)
+	if place_msg then return nil, place_msg end
+	return place
+end
+
 --: (MR0State, string) -> (unknown, string | nil)
 local function pack_claim_payload(st, id)
 	local claim, msg = term_payload(st, id, "pack_claim")
 	if not claim then return nil, msg end
 	local _, claim_msg = pack_claim_pack(claim)
 	if claim_msg then return nil, claim_msg end
+	return claim
+end
+
+--: (MR0State, string) -> (unknown, string | nil)
+local function accepted_node_claim(st, id)
+	if not st.accepted[id] then return nil, "claim producer is not accepted: " .. tostring(id) end
+	local output = st.outputs[id]
+	if type(output) ~= "table" then return nil, "claim producer output must be table" end
+	local claim = output.claim
+	if claim == nil then return nil, "claim producer output missing claim" end
 	return claim
 end
 
@@ -305,6 +376,13 @@ local function replay_wf(st, node)
 			local ok, why = validate_type(item)
 			if not ok then return err(why) end
 		end
+		return true, { ok = true }
+	elseif node.rule == "wf_context" then
+		local inputs = node.inputs or {}
+		local context_id, id_msg = require_term_id(inputs.context, "context")
+		if not context_id then return err(id_msg) end
+		local _, msg = context_payload(st, context_id)
+		if msg then return err(msg) end
 		return true, { ok = true }
 	end
 	return err("unsupported WFNode rule " .. tostring(node.rule))
@@ -466,6 +544,32 @@ local function replay_call(st, node)
 end
 
 --: (MR0State, MR0Node) -> (boolean | nil, unknown)
+local function replay_pack_node(st, node)
+	if node.rule ~= "values_closed" then
+		return err("unsupported PackNode rule " .. tostring(node.rule))
+	end
+	local inputs = node.inputs or {}
+	local claim_ids = inputs.claims
+	if type(claim_ids) ~= "table" then return err("values_closed needs claims") end
+	local premises = node.premises or {}
+	if #premises ~= #claim_ids then return err("values_closed needs one premise per claim") end
+	local items = {}
+	for i, claim_id in ipairs(claim_ids) do
+		local claim, claim_msg = value_claim_payload(st, claim_id)
+		if not claim then return err(claim_msg) end
+		local produced_claim, produced_msg = accepted_node_claim(st, premises[i])
+		if not produced_claim then return err(produced_msg) end
+		if not same(produced_claim, claim) then return err("values_closed claim premise mismatch") end
+		local typ, type_msg = value_claim_type(claim)
+		if type_msg then return err(type_msg) end
+		local ok, why = validate_type(typ)
+		if not ok then return err(why) end
+		items[#items + 1] = typ
+	end
+	return true, { claim = { pack = { tag = "pack", items = items } } }
+end
+
+--: (MR0State, MR0Node) -> (boolean | nil, unknown)
 local function replay_stmt(st, node)
 	if node.rule ~= "return_closed" then
 		return err("unsupported StmtNode rule " .. tostring(node.rule))
@@ -477,9 +581,14 @@ local function replay_stmt(st, node)
 	if not expected_pack_id then return err(expected_pack_msg) end
 	local move_id, move_id_msg = require_term_id(inputs.pack_move_node, "pack_move_node")
 	if not move_id then return err(move_id_msg) end
+	local expr_pack_node, expr_pack_node_msg = require_term_id(inputs.expr_pack_node, "expr_pack_node")
+	if not expr_pack_node then return err(expr_pack_node_msg) end
 
 	local expr_claim, expr_claim_msg = pack_claim_payload(st, expr_pack_id)
 	if not expr_claim then return err(expr_claim_msg) end
+	local produced_expr_claim, produced_expr_msg = accepted_node_claim(st, expr_pack_node)
+	if not produced_expr_claim then return err(produced_expr_msg) end
+	if not same(produced_expr_claim, expr_claim) then return err("return_closed expr pack producer mismatch") end
 	local expr_pack, expr_pack_payload_msg = pack_claim_pack(expr_claim)
 	if expr_pack_payload_msg then return err(expr_pack_payload_msg) end
 	local expected_pack, expected_payload_msg = pack_payload(st, expected_pack_id)
@@ -499,7 +608,7 @@ local function literal_claim(base, value)
 end
 
 --: (MR0State, MR0Node) -> (boolean | nil, unknown)
-local function replay_expr(_, node)
+local function replay_expr(st, node)
 	local inputs = node.inputs or {}
 	if node.rule == "literal_integer" then
 		local value = inputs.value
@@ -518,6 +627,23 @@ local function replay_expr(_, node)
 		return true, { claim = literal_claim("boolean", inputs.value) }
 	elseif node.rule == "literal_nil" then
 		return true, { claim = { type = "nil" } }
+	elseif node.rule == "local_read" then
+		local context_id, context_msg = require_term_id(inputs.context, "context")
+		if not context_id then return err(context_msg) end
+		local place_id, place_msg = require_term_id(inputs.place, "place")
+		if not place_id then return err(place_msg) end
+		local ctx, ctx_msg = context_payload(st, context_id)
+		if not ctx then return err(ctx_msg) end
+		local place, place_payload_msg = place_payload(st, place_id)
+		if not place then return err(place_payload_msg) end
+		local local_id, local_msg = place_local_id(place)
+		if local_msg then return err(local_msg) end
+		if type(local_id) ~= "string" then return err("local place id must be string") end
+		local claim = ctx.locals[local_id]
+		if claim == nil then return err("local_read missing place " .. local_id) end
+		local ok, claim_msg = validate_value_claim(claim)
+		if not ok then return err(claim_msg) end
+		return true, { claim = claim }
 	end
 	return err("unsupported ExprNode rule " .. tostring(node.rule))
 end
@@ -537,6 +663,7 @@ local FAMILY = {
 	SubNode = replay_sub,
 	ExprNode = replay_expr,
 	PackMoveNode = replay_pack_move,
+	PackNode = replay_pack_node,
 	CallNode = replay_call,
 	StmtNode = replay_stmt,
 	UnsafeNode = replay_unsafe,

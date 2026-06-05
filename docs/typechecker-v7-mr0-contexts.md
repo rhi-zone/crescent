@@ -105,7 +105,7 @@ read rules unless a later rule specifies them.
 
 Replay checks:
 
-- the context term has sort `context`;
+- the context ID names a certificate context entry;
 - `locals` is a map from string place IDs to value claims;
 - every local value claim has a well-formed MR0 type;
 - `identities`, `live_facts`, and `dependencies` are empty tables if present.
@@ -141,11 +141,40 @@ where `claims` is an ordered list of term IDs of sort `value_claim`.
 Replay checks:
 
 - every input claim term exists and is sort `value_claim`;
+- the node has exactly one premise per input claim;
+- each premise is accepted and outputs a `claim`;
+- each premise output claim exactly equals the corresponding input claim term;
 - every claim contains a well-formed type;
 - output is exactly `{ pack = { tag = "pack", items = [claim.type...], rest = nil } }`.
 
 This is not expression-list spread. It is the closed scalar value-list
 constructor. Multi-return spread and `PackAlt` remain outside MR0.
+
+The explicit claim terms are stable certificate names. They do not authorize a
+pack by themselves. Producer correspondence is required so a return cannot cite
+an unrelated predeclared pack claim.
+
+## Connecting To Return
+
+`StmtNode(rule = return_closed, inputs = { expr_pack, expected_pack, pack_move_node, expr_pack_node }, outputs = { ok })`
+
+Replay checks:
+
+- `expr_pack` names a term of sort `pack_claim`;
+- `expr_pack_node` names an accepted producer whose output claim exactly equals
+  the `expr_pack` term;
+- `expected_pack` names a closed pack term;
+- `pack_move_node` names an accepted `closed_return_adjust` or `closed_exact`
+  pack movement from the expression pack to the expected pack.
+
+This preserves a source-independent chain:
+
+```text
+local_read -> values_closed -> return_closed
+```
+
+The verifier still does not infer expression lists or return adjustment. It only
+checks the named chain is internally coherent.
 
 ## Adversarial Fixtures
 
@@ -165,6 +194,8 @@ Rejected:
 - context local whose value claim has an unsupported type;
 - `values_closed` output that chooses a different pack;
 - `values_closed` over a non-`value_claim` term.
+- `values_closed` whose premise produces a different value claim;
+- `return_closed` whose expression-pack producer does not match `expr_pack`.
 
 ## Mechanization Note
 
