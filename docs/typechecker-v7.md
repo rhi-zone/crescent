@@ -58,15 +58,17 @@ Read in this order:
    fixtures.
 19. `docs/typechecker-v7-mr0-coverage-audit.md` — implementation coverage audit
    for the table-native MR0 verifier and the next payload family.
-20. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
+20. `docs/typechecker-v7-mr0-contexts.md` — MR0 place/context/local-read rules
+   for source-independent function body certificates.
+21. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
    consistent whole, plus blocking semantic seams.
-21. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
+22. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
    judgments, and certificate obligations.
-22. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
+23. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
    older Crescent designs or external systems without reintroducing ad-hocness.
-23. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+24. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-24. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
+25. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
    and lineage status.
 
 Older v4/v5/v6 docs are research input only. If they conflict with v7, v7 owns
@@ -107,10 +109,12 @@ Current active frontier:
 M0 -> M1: context/local replay for source-independent function body certificates
 ```
 
-Immediate next document:
+Immediate implementation:
 
 ```text
-docs/typechecker-v7-mr0-contexts.md
+ContextEntry indexing
+ExprNode(local_read)
+PackNode(values_closed)
 ```
 
 ## Implementation Status

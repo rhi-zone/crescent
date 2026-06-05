@@ -76,10 +76,9 @@ Primary docs:
 
 Current next step:
 
-1. Specify MR0 context/local payloads enough to replay `ExprNode(local_read)`.
-2. Implement table-native `ContextEntry` indexing and canonical context IDs only
+1. Implement table-native `ContextEntry` indexing and canonical context IDs only
    for the closed subset needed by local reads.
-3. Add fixtures tying `return_closed` to a parameter/local place rather than an
+2. Add fixtures tying `return_closed` to a parameter/local place rather than an
    arbitrary prebuilt `pack_claim`.
 
 Why this next: it connects the existing call/return substrate to actual binding
@@ -109,7 +108,7 @@ or parse source. It proves the kernel can connect:
 Required subdocs:
 
 - `docs/typechecker-v7-mr0-contexts.md` for places, contexts, local reads, and
-  binder claims.
+  binder claims. Status: spec ready for the MR0 local-read subset.
 - `docs/typechecker-v7-mr0-function-body.md` for function-value/body/export
   replay.
 
@@ -299,13 +298,7 @@ Current active frontier:
 M0 -> M1: context/local replay for source-independent function body certificates
 ```
 
-Immediate next document:
-
-```text
-docs/typechecker-v7-mr0-contexts.md
-```
-
-Immediate implementation after that document:
+Immediate implementation:
 
 ```text
 ContextEntry indexing
