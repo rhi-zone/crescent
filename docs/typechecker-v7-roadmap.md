@@ -136,8 +136,8 @@ Do not implement:
 
 ### M2: Canonical Inputs And External Certificates
 
-Status: **Spec partially ready; numeric and wire-format choices remain design
-blocked.**
+Status: **Verifier slice in progress; non-integer numeric encoding remains
+design blocked.**
 
 Goal: move from in-memory table fixtures to external, deterministic certificate
 files.
@@ -149,6 +149,8 @@ Already done:
 - SHA-256 context IDs in optional strict context mode.
 - SHA-256 node IDs in optional strict node mode.
 - SHA-256 certificate digests with out-of-band expected-digest verification.
+- JSON external certificate entry point with mandatory expected digest and strict
+  term/context/node IDs.
 - `docs/typechecker-v7-canonical-inputs.md` for semantic projection,
   context/node ID shape, certificate digest shape, strictness staging, and
   malformed-input corpus targets.
@@ -157,14 +159,12 @@ Missing:
 
 - non-integer numeric canonical encoding;
 - target/source/declaration digest validation;
-- external certificate format/parser;
-- malformed-input test corpus.
+- expanded malformed-input test corpus.
 
 Required subdoc:
 
 - `docs/typechecker-v7-canonical-inputs.md`. Status: spec ready for integer-only
-  table-native MR0; design blocked for non-integer numeric payloads and concrete
-  external wire format.
+  table-native/JSON MR0; design blocked for non-integer numeric payloads.
 
 Design constraint: never use host `tostring(number)` as semantic digest input.
 Numeric payloads need a target-stable encoding.

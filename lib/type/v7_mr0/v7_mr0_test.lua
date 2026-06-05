@@ -1,6 +1,7 @@
 local T = require("lib.test.assert")
 local mr0 = require("lib.type.v7_mr0")
 local canonical = require("lib.type.v7_mr0.canonical")
+local json = require("lib.format.json")
 local fixtures = require("lib.type.v7_mr0.fixtures")
 
 --:: MR0TestInputs = { type?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, context?: string, ... }
@@ -355,5 +356,50 @@ T.describe("type.v7_mr0 verifier spike", function()
 		T.fail(ok)
 		local msg = tostring(err)
 		T.ok(msg:find("certificate digest mismatch", 1, true) ~= nil, msg)
+	end)
+
+	T.it("accepts external JSON with expected digest and strict ids", function()
+		local integer_id = canonical.term_id("type", "integer")
+		T.ok(integer_id, "integer term id")
+		local node = {
+			family = "WFNode",
+			rule = "wf_type",
+			inputs = { type = integer_id },
+			outputs = { ok = true },
+		}
+		local node_id = canonical.node_id(node)
+		T.ok(node_id, "node id")
+		node.node_id = node_id
+		local c = {
+			version = "v7-mr0",
+			target = { id = "luajit51-crescent", digest = "test-target" },
+			terms = { { term_id = integer_id, sort = "type", payload = "integer" } },
+			nodes = { node },
+			roots = { { kind = "local_annotation", subject = "x", proof = node_id } },
+		}
+		local digest = canonical.certificate_digest(c)
+		T.ok(digest, "certificate digest")
+		local bytes, encode_err = json.encode(c)
+		T.ok(bytes, encode_err)
+		if type(bytes) ~= "string" then
+			T.fail(bytes)
+			return
+		end
+		local ok, err = mr0.verify_external_json(bytes, { expected_digest = digest })
+		T.ok(ok, err)
+	end)
+
+	T.it("rejects external JSON without expected digest", function()
+		local ok, err = mr0.verify_external_json("{}", {})
+		T.fail(ok)
+		local msg = tostring(err)
+		T.ok(msg:find("expected_digest", 1, true) ~= nil, msg)
+	end)
+
+	T.it("rejects external JSON null", function()
+		local ok, err = mr0.verify_external_json("null", { expected_digest = "unused" })
+		T.fail(ok)
+		local msg = tostring(err)
+		T.ok(msg:find("object", 1, true) ~= nil or msg:find("null", 1, true) ~= nil, msg)
 	end)
 end)

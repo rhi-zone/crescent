@@ -4,6 +4,7 @@
 -- v7 MR0 certificate model from docs/typechecker-v7-mr0-payloads.md.
 
 local canonical = require("lib.type.v7_mr0.canonical")
+local json = require("lib.format.json")
 
 local M = {}
 
@@ -24,6 +25,19 @@ local SUPPORTED_VERSION = "v7-mr0"
 --: (unknown) -> (nil, string)
 local function err(msg)
 	return nil, tostring(msg)
+end
+
+--: (unknown) -> (boolean | nil, string | nil)
+local function reject_json_null(value)
+	if value == json.null then return nil, "external certificate JSON null is not admitted" end
+	if type(value) ~= "table" then return true end
+	for k, v in pairs(value) do
+		local ok_key, msg_key = reject_json_null(k)
+		if not ok_key then return nil, msg_key end
+		local ok_value, msg_value = reject_json_null(v)
+		if not ok_value then return nil, msg_value end
+	end
+	return true
 end
 
 --: (unknown) -> boolean
@@ -879,6 +893,25 @@ function M.verify(cert, opts)
 	end
 
 	return true
+end
+
+M.verify_table = M.verify
+
+--: (string, VerifyOpts) -> (boolean | nil, string | nil)
+function M.verify_external_json(bytes, opts)
+	if not opts or not opts.expected_digest then return err("external JSON certificate needs expected_digest") end
+	local cert, decode_msg = json.decode(bytes)
+	if cert == nil then return err("external JSON certificate decode failed: " .. tostring(decode_msg)) end
+	if type(cert) ~= "table" then return err("external JSON certificate must decode to object") end
+	local ok_json, json_msg = reject_json_null(cert)
+	if not ok_json then return err(json_msg) end
+	local cert_checked = cert --[[: MR0Cert]]
+	return M.verify(cert_checked, {
+		expected_digest = opts.expected_digest,
+		strict_ids = true,
+		strict_context_ids = true,
+		strict_node_ids = true,
+	})
 end
 
 return M

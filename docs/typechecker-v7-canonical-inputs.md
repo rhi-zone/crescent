@@ -154,8 +154,38 @@ M2 separates two concepts:
 - semantic canonical projection;
 - concrete wire format.
 
-The semantic projection above is mandatory. The concrete file format is still
-open. Acceptable wire formats must:
+The semantic projection above is mandatory.
+
+The first authoritative external wire format is JSON:
+
+```text
+MIME: application/vnd.crescent.typecert.v7-mr0+json
+Extension: .crtypecert.json
+Top-level value: certificate object
+```
+
+JSON is chosen as the interchange/debug format because certificates are audit
+artifacts. Humans and tools should be able to diff them without a Crescent
+runtime.
+
+The JSON subset is schema-directed:
+
+- top-level `terms`, `contexts`, `nodes`, and `roots` are arrays;
+- replay maps such as `inputs`, `outputs`, `locals`, `target`, and `claim`
+  are objects;
+- omitted optional fields use the defaults named by this spec;
+- JSON `null` is rejected.
+
+JSON `null` is rejected because Lua cannot store `nil` in arrays/maps without
+changing the semantic shape. MR0 payloads that need a nil type already spell it
+as the string atom `"nil"` or an explicit tagged payload, not JSON null.
+
+The existing Lua JSON decoder, like normal Lua APIs, represents both `{}` and
+`[]` as an empty table. Therefore external JSON must be interpreted through the
+certificate schema before digest/replay. Empty-container kind is not semantic by
+itself; the field position supplies the kind.
+
+Acceptable wire formats must:
 
 - decode only the canonical value domain or reject before replay;
 - preserve array order exactly;
@@ -167,10 +197,28 @@ open. Acceptable wire formats must:
 The verifier should eventually expose two entry points:
 
 - `verify_table(cert, opts)` for in-process fixture tables;
-- `verify_external(bytes, opts)` for decoded external certificate files.
+- `verify_external_json(bytes, opts)` for JSON certificate bytes.
 
-`verify_external` must validate the certificate digest and strict IDs before
-replay.
+`verify_external_json` must validate the certificate digest and strict IDs before
+replay. The expected digest is supplied out-of-band; an in-file digest field is
+metadata and is excluded from the certificate digest projection.
+
+## Binary Cache Format
+
+A LuaJIT-optimized binary certificate encoding is allowed later, but it is not
+the first authoritative external format.
+
+Binary encodings are cache formats unless they satisfy the same obligations as
+JSON:
+
+- decode to the same schema-directed semantic projection;
+- produce exactly the same `certificate_digest`;
+- reject unsupported numeric and host-object payloads;
+- not introduce replay behavior that JSON certificates cannot express.
+
+This keeps performance engineering separate from the soundness/review boundary.
+An implementation may store binary certificates beside JSON certificates, but
+the JSON projection remains the portable interchange form.
 
 ## Strictness Levels
 
@@ -210,6 +258,6 @@ types, target profiles, cdata boundaries, and digest stability. Until it is
 specified, external strict mode must reject non-integer numeric payloads rather
 than canonicalize them by host formatting.
 
-The concrete external wire format is also open. This is a lower-risk decision
-than numeric encoding because the semantic canonical projection is independent
-of the wire format.
+The concrete external wire format decision for MR0 is JSON. A binary cache
+format remains open and must be proven equivalent to the JSON semantic
+projection before it is admitted.
