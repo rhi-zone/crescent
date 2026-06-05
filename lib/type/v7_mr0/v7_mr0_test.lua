@@ -402,4 +402,81 @@ T.describe("type.v7_mr0 verifier spike", function()
 		local msg = tostring(err)
 		T.ok(msg:find("object", 1, true) ~= nil or msg:find("null", 1, true) ~= nil, msg)
 	end)
+
+	T.it("rejects malformed external JSON", function()
+		local ok, err = mr0.verify_external_json("{", { expected_digest = "unused" })
+		T.fail(ok)
+		local msg = tostring(err)
+		T.ok(msg:find("decode failed", 1, true) ~= nil, msg)
+	end)
+
+	T.it("rejects external JSON with nested null", function()
+		local ok, err = mr0.verify_external_json([[{"version":null}]], { expected_digest = "unused" })
+		T.fail(ok)
+		local msg = tostring(err)
+		T.ok(msg:find("JSON null", 1, true) ~= nil, msg)
+	end)
+
+	T.it("external JSON rejects noncanonical term ids", function()
+		local node = {
+			family = "WFNode",
+			rule = "wf_type",
+			inputs = { type = "t_integer" },
+			outputs = { ok = true },
+		}
+		local node_id = canonical.node_id(node)
+		T.ok(node_id, "node id")
+		node.node_id = node_id
+		local c = {
+			version = "v7-mr0",
+			target = { id = "luajit51-crescent", digest = "test-target" },
+			terms = { { term_id = "t_integer", sort = "type", payload = "integer" } },
+			nodes = { node },
+			roots = { { kind = "local_annotation", subject = "x", proof = node_id } },
+		}
+		local digest = canonical.certificate_digest(c)
+		T.ok(digest, "certificate digest")
+		local bytes, encode_err = json.encode(c)
+		T.ok(bytes, encode_err)
+		if type(bytes) ~= "string" then
+			T.fail(bytes)
+			return
+		end
+		local ok, err = mr0.verify_external_json(bytes, { expected_digest = digest })
+		T.fail(ok)
+		local msg = tostring(err)
+		T.ok(msg:find("term id mismatch", 1, true) ~= nil, msg)
+	end)
+
+	T.it("external JSON rejects noncanonical node ids", function()
+		local integer_id = canonical.term_id("type", "integer")
+		T.ok(integer_id, "integer term id")
+		local c = {
+			version = "v7-mr0",
+			target = { id = "luajit51-crescent", digest = "test-target" },
+			terms = { { term_id = integer_id, sort = "type", payload = "integer" } },
+			nodes = {
+				{
+					node_id = "n_bad",
+					family = "WFNode",
+					rule = "wf_type",
+					inputs = { type = integer_id },
+					outputs = { ok = true },
+				},
+			},
+			roots = { { kind = "local_annotation", subject = "x", proof = "n_bad" } },
+		}
+		local digest = canonical.certificate_digest(c)
+		T.ok(digest, "certificate digest")
+		local bytes, encode_err = json.encode(c)
+		T.ok(bytes, encode_err)
+		if type(bytes) ~= "string" then
+			T.fail(bytes)
+			return
+		end
+		local ok, err = mr0.verify_external_json(bytes, { expected_digest = digest })
+		T.fail(ok)
+		local msg = tostring(err)
+		T.ok(msg:find("node id mismatch", 1, true) ~= nil, msg)
+	end)
 end)
