@@ -109,15 +109,15 @@ The authoritative recursive plan is `docs/typechecker-v7-roadmap.md`.
 Current active frontier:
 
 ```text
-M1: source-independent function body/export replay
+M2: canonical inputs and external certificate boundary
 ```
 
 Immediate implementation:
 
 ```text
-BinderNode(closed_params_context)
-FunctionNode(closed_arrow_body)
-kind-aware function_signature_export roots
+context IDs
+node/certificate canonical payloads
+external certificate file parser and malformed-input corpus
 ```
 
 ## Implementation Status
@@ -146,15 +146,18 @@ Currently replayed:
 - literal `ExprNode` rules;
 - `ExprNode(local_read)`;
 - `PackNode(values_closed)`;
+- `BinderNode(closed_params_context)`;
+- `FunctionNode(closed_arrow_body)`;
 - `UnsafeNode(force_claim | trusted_decl_value)`;
-- root acceptance by prior accepted proof.
+- root acceptance by prior accepted proof, with kind-aware
+  `function_signature_export` validation;
 - optional strict term-ID validation via canonical payload digests.
 
 Currently rejected as boundary, even if present in the MR0 design doc:
 
-- overload calls, overload exports, non-return statement replay, function-value
-  replay, table identity replay, primitive capability calls, metatable
-  lookup/assignment, `type` predicate narrowing, `require`, and non-integer
+- overload calls, overload exports, non-return statement replay, table identity
+  replay, primitive capability calls, metatable lookup/assignment, `type`
+  predicate narrowing, `require`, external certificate files, and non-integer
   numeric canonicalization.
 
 ## Admission Rule

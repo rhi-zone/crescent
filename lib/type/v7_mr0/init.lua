@@ -13,7 +13,7 @@ local SUPPORTED_VERSION = "v7-mr0"
 --:: MR0List = { [integer]: unknown, ... }
 --:: MR0Term = { term_id: string, sort: string, payload: unknown, ... }
 --:: MR0Context = { context_id: string, locals: { [string]: unknown, ... }, identities: MR0Map | nil, live_facts: MR0Map | nil, dependencies: MR0Map | nil, ... }
---:: MR0Inputs = { type?: string, pack?: string, source_pack?: string, target_pack?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, callee_claim?: string, arg_pack?: string, arrow?: string, expr_pack?: string, expected_pack?: string, pack_move_node?: string, expr_pack_node?: string, context?: string, place?: string, claims?: { [integer]: string, ... }, ... }
+--:: MR0Inputs = { type?: string, pack?: string, source_pack?: string, target_pack?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, callee_claim?: string, arg_pack?: string, arrow?: string, expr_pack?: string, expected_pack?: string, pack_move_node?: string, expr_pack_node?: string, context?: string, place?: string, claims?: { [integer]: string, ... }, params_pack?: string, places?: { [integer]: string, ... }, param_context_node?: string, body_node?: string, ... }
 --:: MR0Node = { node_id: string, family: string, rule: string, inputs?: MR0Inputs, outputs: unknown, premises?: { [integer]: string, ... }, ... }
 --:: MR0Root = { proof: string, ... }
 --:: MR0Cert = { version: string, target: { id: string, ... }, terms: { [integer]: MR0Term, ... } | nil, contexts: { [integer]: MR0Context, ... } | nil, nodes: { [integer]: MR0Node, ... } | nil, roots: { [integer]: MR0Root, ... }, ... }
@@ -337,6 +337,16 @@ local function accepted_node_claim(st, id)
 	return claim
 end
 
+--: (MR0State, string, string, string | nil) -> (MR0Node | nil, string | nil)
+local function accepted_node(st, id, family, rule)
+	if not st.accepted[id] then return nil, "node is not accepted: " .. tostring(id) end
+	local node = st.nodes[id]
+	if not node then return nil, "unknown node " .. tostring(id) end
+	if node.family ~= family then return nil, "node family mismatch for " .. tostring(id) end
+	if rule and node.rule ~= rule then return nil, "node rule mismatch for " .. tostring(id) end
+	return node
+end
+
 --: (unknown, string) -> (string | nil, string | nil)
 local function require_term_id(id, field)
 	if type(id) ~= "string" then return nil, "missing term input " .. field end
@@ -543,6 +553,51 @@ local function replay_call(st, node)
 	return true, { result_pack = { pack = returns }, effect = "pure", post = true }
 end
 
+--: ({ [string]: unknown, ... }) -> integer
+local function map_count(t)
+	local n = 0
+	for _ in pairs(t) do
+		n = n + 1
+	end
+	return n
+end
+
+--: (MR0State, MR0Node) -> (boolean | nil, unknown)
+local function replay_binder(st, node)
+	if node.rule ~= "closed_params_context" then
+		return err("unsupported BinderNode rule " .. tostring(node.rule))
+	end
+	local inputs = node.inputs or {}
+	local context_id, context_msg = require_term_id(inputs.context, "context")
+	if not context_id then return err(context_msg) end
+	local params_pack_id, params_msg = require_term_id(inputs.params_pack, "params_pack")
+	if not params_pack_id then return err(params_msg) end
+	local places = inputs.places
+	if type(places) ~= "table" then return err("closed_params_context needs places") end
+	local ctx, ctx_msg = context_payload(st, context_id)
+	if not ctx then return err(ctx_msg) end
+	local params_pack, pack_msg = pack_payload(st, params_pack_id)
+	if not params_pack then return err(pack_msg) end
+	local params = pack_items(params_pack)
+	if not params then return err("params_pack must be closed") end
+	if #places ~= #params then return err("parameter place length mismatch") end
+	if map_count(ctx.locals) ~= #places then return err("parameter context has extra locals") end
+	local seen = {}
+	for i, place_id in ipairs(places) do
+		local place, place_msg = place_payload(st, place_id)
+		if not place then return err(place_msg) end
+		local local_id, local_msg = place_local_id(place)
+		if local_msg then return err(local_msg) end
+		if type(local_id) ~= "string" then return err("local place id must be string") end
+		if seen[local_id] then return err("duplicate parameter place") end
+		seen[local_id] = true
+		local claim = ctx.locals[local_id]
+		if claim == nil then return err("parameter context missing place " .. local_id) end
+		if not same(claim, { type = params[i] }) then return err("parameter context claim mismatch") end
+	end
+	return true, { ok = true }
+end
+
 --: (MR0State, MR0Node) -> (boolean | nil, unknown)
 local function replay_pack_node(st, node)
 	if node.rule ~= "values_closed" then
@@ -567,6 +622,57 @@ local function replay_pack_node(st, node)
 		items[#items + 1] = typ
 	end
 	return true, { claim = { pack = { tag = "pack", items = items } } }
+end
+
+--: (MR0State, string, unknown) -> (boolean | nil, string | nil)
+local function binder_matches_params(st, binder_id, params)
+	local binder, binder_msg = accepted_node(st, binder_id, "BinderNode", "closed_params_context")
+	if not binder then return nil, binder_msg end
+	local inputs = binder.inputs or {}
+	local pack_id, pack_msg = require_term_id(inputs.params_pack, "params_pack")
+	if not pack_id then return nil, pack_msg end
+	local pack, payload_msg = pack_payload(st, pack_id)
+	if not pack then return nil, payload_msg end
+	if not same(pack, params) then return nil, "function parameter context mismatch" end
+	return true
+end
+
+--: (MR0State, string, unknown) -> (boolean | nil, string | nil)
+local function body_matches_returns(st, body_id, returns)
+	local body, body_msg = accepted_node(st, body_id, "StmtNode", "return_closed")
+	if not body then return nil, body_msg end
+	local inputs = body.inputs or {}
+	local expected_id, expected_msg = require_term_id(inputs.expected_pack, "expected_pack")
+	if not expected_id then return nil, expected_msg end
+	local expected, payload_msg = pack_payload(st, expected_id)
+	if not expected then return nil, payload_msg end
+	if not same(expected, returns) then return nil, "function body return pack mismatch" end
+	return true
+end
+
+--: (MR0State, MR0Node) -> (boolean | nil, unknown)
+local function replay_function(st, node)
+	if node.rule ~= "closed_arrow_body" then
+		return err("unsupported FunctionNode rule " .. tostring(node.rule))
+	end
+	local inputs = node.inputs or {}
+	local arrow_id, arrow_id_msg = require_term_id(inputs.arrow, "arrow")
+	if not arrow_id then return err(arrow_id_msg) end
+	local binder_id, binder_id_msg = require_term_id(inputs.param_context_node, "param_context_node")
+	if not binder_id then return err(binder_id_msg) end
+	local body_id, body_id_msg = require_term_id(inputs.body_node, "body_node")
+	if not body_id then return err(body_id_msg) end
+	local arrow, arrow_msg = type_payload(st, arrow_id)
+	if not arrow then return err(arrow_msg) end
+	local ok_type, type_msg = validate_type(arrow)
+	if not ok_type then return err(type_msg) end
+	local params, returns, parts_msg = arrow_parts(arrow)
+	if not params then return err(parts_msg) end
+	local binder_ok, binder_msg = binder_matches_params(st, binder_id, params)
+	if not binder_ok then return err(binder_msg) end
+	local body_ok, body_msg = body_matches_returns(st, body_id, returns)
+	if not body_ok then return err(body_msg) end
+	return true, { claim = { type = arrow } }
 end
 
 --: (MR0State, MR0Node) -> (boolean | nil, unknown)
@@ -662,9 +768,11 @@ local FAMILY = {
 	WFNode = replay_wf,
 	SubNode = replay_sub,
 	ExprNode = replay_expr,
+	BinderNode = replay_binder,
 	PackMoveNode = replay_pack_move,
 	PackNode = replay_pack_node,
 	CallNode = replay_call,
+	FunctionNode = replay_function,
 	StmtNode = replay_stmt,
 	UnsafeNode = replay_unsafe,
 } --: { [string]: ReplayFn }
@@ -681,6 +789,27 @@ local function replay_node(st, node)
 		return err("node output mismatch for " .. tostring(node.node_id))
 	end
 	return true, output
+end
+
+--: (MR0State, MR0Root) -> (boolean | nil, string | nil)
+local function validate_root(st, root)
+	if not st.accepted[root.proof] then
+		return nil, "root references unaccepted proof " .. tostring(root.proof)
+	end
+	if root.kind == "function_signature_export" then
+		local node, node_msg = accepted_node(st, root.proof, "FunctionNode", "closed_arrow_body")
+		if not node then return nil, node_msg end
+		local output = st.outputs[root.proof]
+		if type(output) ~= "table" then return nil, "function export output must be table" end
+		local claim = output.claim
+		local typ, claim_msg = value_claim_type(claim)
+		if claim_msg then return nil, claim_msg end
+		if type_tag(typ) ~= "arrow" then return nil, "function export claim is not arrow" end
+		local ok, typ_msg = validate_type(typ)
+		if not ok then return nil, typ_msg end
+		local _ = node
+	end
+	return true
 end
 
 --: (MR0Cert, VerifyOpts | nil) -> (boolean | nil, string | nil)
@@ -704,9 +833,8 @@ function M.verify(cert, opts)
 	end
 
 	for _, root in ipairs(cert.roots) do
-		if not st.accepted[root.proof] then
-			return err("root references unaccepted proof " .. tostring(root.proof))
-		end
+		local ok, root_msg = validate_root(st, root)
+		if not ok then return err(root_msg) end
 	end
 
 	return true

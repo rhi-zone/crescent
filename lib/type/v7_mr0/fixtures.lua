@@ -3,7 +3,7 @@
 -- These are semantic certificate fixtures, not source-code fixtures. A rejected
 -- fixture is useful when it pins an MR0 boundary the verifier must not infer.
 
---:: MR0FixtureInputs = { type?: string, pack?: string, source_pack?: string, target_pack?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, primitive_name?: string, callee_claim?: string, arg_pack?: string, arrow?: string, expr_pack?: string, expected_pack?: string, pack_move_node?: string, expr_pack_node?: string, context?: string, place?: string, claims?: { [integer]: string, ... }, ... }
+--:: MR0FixtureInputs = { type?: string, pack?: string, source_pack?: string, target_pack?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, primitive_name?: string, callee_claim?: string, arg_pack?: string, arrow?: string, expr_pack?: string, expected_pack?: string, pack_move_node?: string, expr_pack_node?: string, context?: string, place?: string, claims?: { [integer]: string, ... }, params_pack?: string, places?: { [integer]: string, ... }, param_context_node?: string, body_node?: string, ... }
 --:: MR0FixtureNode = { node_id: string, family: string, rule: string, inputs?: MR0FixtureInputs, outputs: unknown, premises?: { [integer]: string, ... }, ... }
 --:: MR0FixtureTerm = { term_id: string, sort: string, payload: unknown, ... }
 --:: MR0FixtureContext = { context_id: string, locals: { [string]: unknown, ... }, identities: { ... } | nil, live_facts: { ... } | nil, dependencies: { ... } | nil, ... }
@@ -208,7 +208,7 @@ M.cases = {
 				premises = { "n_args_move" },
 				outputs = { result_pack = { pack = pack_number_payload }, effect = "pure", post = true },
 			},
-		}, { { kind = "function_signature_export", subject = "f", proof = "n_call" } }, {
+		}, { { kind = "call_replay", subject = "f(1)", proof = "n_call" } }, {
 			integer,
 			number,
 			pack_integer,
@@ -264,7 +264,156 @@ M.cases = {
 				premises = { "n_return_values", "n_ret_move" },
 				outputs = { ok = true },
 			},
-		}, { { kind = "function_signature_export", subject = "return-body", proof = "n_return" } }, {
+		}, { { kind = "return_replay", subject = "return-body", proof = "n_return" } }, {
+			integer,
+			number,
+			pack_integer,
+			pack_number,
+			place_p0,
+			claim_integer,
+			return_integer,
+		}, { context_p0_integer })),
+
+	accept("closed function body exports arrow claim",
+		"`function f(x: integer): number return x end` exports a function value only through a body proof.",
+		cert({
+			{
+				node_id = "n_params",
+				family = "BinderNode",
+				rule = "closed_params_context",
+				inputs = { context = "c_p0_integer", params_pack = "t_pack_integer", places = { "t_place_p0" } },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_body_read",
+				family = "ExprNode",
+				rule = "local_read",
+				inputs = { context = "c_p0_integer", place = "t_place_p0" },
+				outputs = { claim = { type = "integer" } },
+			},
+			{
+				node_id = "n_body_values",
+				family = "PackNode",
+				rule = "values_closed",
+				inputs = { claims = { "t_claim_integer" } },
+				premises = { "n_body_read" },
+				outputs = { claim = { pack = pack_integer_payload } },
+			},
+			{
+				node_id = "n_body_ret_sub",
+				family = "SubNode",
+				rule = "integer_to_number",
+				inputs = { producer = "t_integer", consumer = "t_number" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_body_ret_move",
+				family = "PackMoveNode",
+				rule = "closed_return_adjust",
+				inputs = { source_pack = "t_pack_integer", target_pack = "t_pack_number" },
+				premises = { "n_body_ret_sub" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_body_return",
+				family = "StmtNode",
+				rule = "return_closed",
+				inputs = {
+					expr_pack = "t_return_integer",
+					expected_pack = "t_pack_number",
+					pack_move_node = "n_body_ret_move",
+					expr_pack_node = "n_body_values",
+				},
+				premises = { "n_body_values", "n_body_ret_move" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_function",
+				family = "FunctionNode",
+				rule = "closed_arrow_body",
+				inputs = {
+					arrow = "t_arrow_integer_number",
+					param_context_node = "n_params",
+					body_node = "n_body_return",
+				},
+				premises = { "n_params", "n_body_return" },
+				outputs = { claim = { type = arrow_integer_to_number_payload } },
+			},
+		}, { { kind = "function_signature_export", subject = "f", proof = "n_function" } }, {
+			integer,
+			number,
+			pack_integer,
+			pack_number,
+			place_p0,
+			claim_integer,
+			return_integer,
+			arrow_integer_to_number,
+		}, { context_p0_integer })),
+
+	reject("parameter context must match arrow params",
+		"A function body cannot export `integer -> number` using a context where `p0` is number.",
+		"parameter context claim mismatch",
+		cert({
+			{
+				node_id = "n_bad_params",
+				family = "BinderNode",
+				rule = "closed_params_context",
+				inputs = { context = "c_p0_number", params_pack = "t_pack_integer", places = { "t_place_p0" } },
+				outputs = { ok = true },
+			},
+		}, nil, {
+			pack_integer,
+			place_p0,
+		}, { context_p0_number })),
+
+	reject("function export root must point at function proof",
+		"A return proof is not a function value proof, even when the body itself is accepted.",
+		"node family mismatch",
+		cert({
+			{
+				node_id = "n_root_read",
+				family = "ExprNode",
+				rule = "local_read",
+				inputs = { context = "c_p0_integer", place = "t_place_p0" },
+				outputs = { claim = { type = "integer" } },
+			},
+			{
+				node_id = "n_root_values",
+				family = "PackNode",
+				rule = "values_closed",
+				inputs = { claims = { "t_claim_integer" } },
+				premises = { "n_root_read" },
+				outputs = { claim = { pack = pack_integer_payload } },
+			},
+			{
+				node_id = "n_root_ret_sub",
+				family = "SubNode",
+				rule = "integer_to_number",
+				inputs = { producer = "t_integer", consumer = "t_number" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_root_ret_move",
+				family = "PackMoveNode",
+				rule = "closed_return_adjust",
+				inputs = { source_pack = "t_pack_integer", target_pack = "t_pack_number" },
+				premises = { "n_root_ret_sub" },
+				outputs = { ok = true },
+			},
+			{
+				node_id = "n_root_return",
+				family = "StmtNode",
+				rule = "return_closed",
+				inputs = {
+					expr_pack = "t_return_integer",
+					expected_pack = "t_pack_number",
+					pack_move_node = "n_root_ret_move",
+					expr_pack_node = "n_root_values",
+				},
+				premises = { "n_root_values", "n_root_ret_move" },
+				outputs = { ok = true },
+			},
+		}, { { kind = "function_signature_export", subject = "bad", proof = "n_root_return" } }, {
 			integer,
 			number,
 			pack_integer,
