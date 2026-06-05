@@ -13,58 +13,60 @@ Read in this order:
 
 1. `docs/typechecker-soundness-validation.md` — trust model, version line, and
    acceptance bar.
-2. `docs/typechecker-v7-first-principles.md` — pre-spec derivation of the
+2. `docs/typechecker-v7-roadmap.md` — recursive roadmap from proof-producing
+   vision down to the current next slice.
+3. `docs/typechecker-v7-first-principles.md` — pre-spec derivation of the
    checker's semantic primitives and design forks.
-3. `docs/typechecker-v7-design-pass-unknown.md` — first refinement pass,
+4. `docs/typechecker-v7-design-pass-unknown.md` — first refinement pass,
    deciding unknown movement from operation domains.
-4. `docs/typechecker-v7-design-pass-places.md` — second refinement pass,
+5. `docs/typechecker-v7-design-pass-places.md` — second refinement pass,
    deciding semantic places and binder-aware arrows for facts.
-5. `docs/typechecker-v7-design-pass-primitive-capabilities.md` — third
+6. `docs/typechecker-v7-design-pass-primitive-capabilities.md` — third
    refinement pass, deciding primitive capabilities as value types.
-6. `docs/typechecker-v7-design-pass-effects.md` — fourth refinement pass,
+7. `docs/typechecker-v7-design-pass-effects.md` — fourth refinement pass,
    deciding full arrows are effectful with contextual-control effects.
-7. `docs/typechecker-v7-design-pass-packs.md` — fifth refinement pass, deciding
+8. `docs/typechecker-v7-design-pass-packs.md` — fifth refinement pass, deciding
    open/rest packs and movement kinds.
-8. `docs/typechecker-v7-design-pass-setmetatable.md` — sixth refinement pass,
+9. `docs/typechecker-v7-design-pass-setmetatable.md` — sixth refinement pass,
    deciding setmetatable fixes metatable state without sealing construction.
-9. `docs/typechecker-v7-design-pass-metatable-lookup.md` — seventh refinement
+10. `docs/typechecker-v7-design-pass-metatable-lookup.md` — seventh refinement
    pass, deciding metatable lookup/assignment relations and invalidation.
-10. `docs/typechecker-v7-design-pass-module-provenance.md` — eighth refinement
+11. `docs/typechecker-v7-design-pass-module-provenance.md` — eighth refinement
    pass, deciding explicit environments and provenance for external claims.
-11. `docs/typechecker-v7-design-pass-generics-typelevel.md` — ninth refinement
+12. `docs/typechecker-v7-design-pass-generics-typelevel.md` — ninth refinement
    pass, deciding rank-1 generics and first-order type-level computation before
    HKTs/rank-N.
-12. `docs/typechecker-v7-design-pass-operators.md` — tenth refinement pass,
+13. `docs/typechecker-v7-design-pass-operators.md` — tenth refinement pass,
    deciding operator application through primitive/metamethod operation
    judgments, with `and`/`or` split into control-flow expression rules.
-13. `docs/typechecker-v7-design-pass-certificates.md` — eleventh refinement
+14. `docs/typechecker-v7-design-pass-certificates.md` — eleventh refinement
    pass, deciding the replay DAG, context inputs, node families, roots, and
    unsafe/trusted boundary handling.
-14. `docs/typechecker-v7-design-pass-target-profile.md` — twelfth refinement
+15. `docs/typechecker-v7-design-pass-target-profile.md` — twelfth refinement
    pass, deciding LuaJIT 5.1/Crescent as the first concrete target profile and
    making numeric, operator, truthiness, raw, and protected-metatable behavior
    explicit profile input.
-15. `docs/typechecker-v7-luajit51-target-table.md` — concrete target table for
+16. `docs/typechecker-v7-luajit51-target-table.md` — concrete target table for
    the vendored LuaJIT 5.1 runtime: source operators, metamethod dispatch,
    equality/order restrictions, protected metatables, raw operations, and cdata
    boundaries.
-16. `docs/typechecker-v7-minimal-replay-subset.md` — first verifier prototype
+17. `docs/typechecker-v7-minimal-replay-subset.md` — first verifier prototype
    slice, deciding MR0's admitted rules, certificate payload families, roots,
    primitive calls, and explicit exclusions.
-17. `docs/typechecker-v7-mr0-payloads.md` — concrete MR0 certificate envelope,
+18. `docs/typechecker-v7-mr0-payloads.md` — concrete MR0 certificate envelope,
    canonical serialization, payload schemas, replay algorithm, and adversarial
    fixtures.
-18. `docs/typechecker-v7-mr0-coverage-audit.md` — implementation coverage audit
+19. `docs/typechecker-v7-mr0-coverage-audit.md` — implementation coverage audit
    for the table-native MR0 verifier and the next payload family.
-19. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
+20. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
    consistent whole, plus blocking semantic seams.
-20. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
+21. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
    judgments, and certificate obligations.
-21. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
+22. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
    older Crescent designs or external systems without reintroducing ad-hocness.
-22. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+23. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-23. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
+24. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
    and lineage status.
 
 Older v4/v5/v6 docs are research input only. If they conflict with v7, v7 owns
@@ -97,20 +99,19 @@ Not yet admitted:
 
 ## Decision Queue
 
-Work these before implementation verticals:
+The authoritative recursive plan is `docs/typechecker-v7-roadmap.md`.
 
-1. **MR0 replay coverage audit.** Compare
-   `docs/typechecker-v7-mr0-payloads.md` against `lib/type/v7_mr0/` and decide
-   the next payload family to admit. Do not implement a family just because a
-   fixture mentions it.
-2. **Closed pack and call replay.** Candidate next family: `PackMoveNode` plus
-   `CallNode`, because this is the smallest step that turns the accepted
-   `function f(x: integer): number return x end` fixture from a boundary reject
-   into a real accepted certificate.
-3. **Canonical serialization and digest checks.** The current verifier accepts
-   table-native certificates. Before trusting external certificates, implement
-   canonical serialization, term/context ID recomputation, and target/source
-   digest validation.
+Current active frontier:
+
+```text
+M0 -> M1: context/local replay for source-independent function body certificates
+```
+
+Immediate next document:
+
+```text
+docs/typechecker-v7-mr0-contexts.md
+```
 
 ## Implementation Status
 
