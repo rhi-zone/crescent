@@ -30,21 +30,36 @@ payload shape:
 - booleans;
 - strings;
 - integer numbers;
+- non-integer Lua numbers encoded by IEEE-754 binary64 runtime bits;
 - arrays with dense integer keys from `1..n`;
 - maps with string keys sorted lexicographically.
 
 Rejected:
 
-- non-integer numbers;
+- NaN;
 - sparse arrays;
 - mixed numeric/string table keys;
 - function/thread/userdata values;
 - host-object identity;
 - metatables.
 
-The integer-only numeric rule is intentional. Lua number spelling, infinities,
-NaN, signed zero, cdata numerics, and target-specific integer width need a
-separate numeric encoding decision before they can become digest input.
+Numeric encoding is by runtime value identity, not source spelling. Integer Lua
+numbers use the existing integer encoding. Non-integer Lua numbers use the
+target runtime's IEEE-754 binary64 bit pattern:
+
+```text
+number 0.5   -> f:3fe0000000000000
+number -0.0  -> f:8000000000000000
+number +inf  -> f:7ff0000000000000
+number -inf  -> f:fff0000000000000
+```
+
+NaN is rejected because NaN has many payload bit patterns and does not compare
+equal to itself. If a future target needs NaN as a source/runtime fact, it must
+introduce an explicit target-profile payload rather than smuggling host NaN
+identity through canonicalization.
+
+Cdata numerics are not Lua numbers and remain outside MR0 canonical values.
 
 ## Term IDs
 
@@ -63,7 +78,8 @@ Current implementation status:
 
 - `canonical.term_id(sort, payload)` exists;
 - verifier `strict_ids` checks terms only;
-- non-integer numeric payloads are rejected in strict mode.
+- non-integer Lua numeric payloads are encoded as binary64 runtime bits;
+- NaN payloads are rejected in strict mode.
 
 ## Context IDs
 
@@ -253,10 +269,10 @@ M2 needs fixtures that reject:
 
 ## Design Blocks
 
-Non-integer numeric canonicalization remains a design block. It affects literal
-types, target profiles, cdata boundaries, and digest stability. Until it is
-specified, external strict mode must reject non-integer numeric payloads rather
-than canonicalize them by host formatting.
+NaN and cdata numeric canonicalization remain design blocks. They affect target
+profiles, equality/order facts, and digest stability. Until they are specified,
+external strict mode must reject them rather than canonicalize them by host
+formatting or host object identity.
 
 The concrete external wire format decision for MR0 is JSON. A binary cache
 format remains open and must be proven equivalent to the JSON semantic

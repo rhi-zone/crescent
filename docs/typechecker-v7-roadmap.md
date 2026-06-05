@@ -136,8 +136,8 @@ Do not implement:
 
 ### M2: Canonical Inputs And External Certificates
 
-Status: **Verifier slice in progress; non-integer numeric encoding remains
-design blocked.**
+Status: **Verifier slice in progress; NaN/cdata numeric encoding remains design
+blocked.**
 
 Goal: move from in-memory table fixtures to external, deterministic certificate
 files.
@@ -151,20 +151,22 @@ Already done:
 - SHA-256 certificate digests with out-of-band expected-digest verification.
 - JSON external certificate entry point with mandatory expected digest and strict
   term/context/node IDs.
+- non-integer Lua numbers encoded by IEEE-754 binary64 runtime bits.
 - `docs/typechecker-v7-canonical-inputs.md` for semantic projection,
   context/node ID shape, certificate digest shape, strictness staging, and
   malformed-input corpus targets.
 
 Missing:
 
-- non-integer numeric canonical encoding;
+- NaN and cdata numeric canonical encoding;
 - target/source/declaration digest validation;
 - expanded malformed-input test corpus.
 
 Required subdoc:
 
-- `docs/typechecker-v7-canonical-inputs.md`. Status: spec ready for integer-only
-  table-native/JSON MR0; design blocked for non-integer numeric payloads.
+- `docs/typechecker-v7-canonical-inputs.md`. Status: spec ready for
+  table-native/JSON MR0 including binary64 Lua numbers; design blocked for NaN
+  and cdata numeric payloads.
 
 Design constraint: never use host `tostring(number)` as semantic digest input.
 Numeric payloads need a target-stable encoding.

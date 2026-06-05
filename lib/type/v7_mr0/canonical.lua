@@ -5,10 +5,16 @@
 -- been specified yet.
 
 local crypto = require("lib.cryptography")
+local ffi = require("ffi")
+local bit = require("bit")
 
 local M = {}
 
 --:: CanonResult = string | nil
+
+ffi.cdef[[
+typedef union { double d; uint64_t u; } crescent_type_v7_f64;
+]]
 
 --: (unknown) -> boolean
 local function is_array(t)
@@ -36,6 +42,22 @@ local function push(out, s)
 	out[#out + 1] = s
 end
 
+--: (number) -> string
+local function double_bits_hex(n)
+	local u = ffi.new("crescent_type_v7_f64")
+	u.d = n
+	local bits = u.u
+	local lo = tonumber(ffi.cast("uint32_t", bits))
+	local hi = tonumber(ffi.cast("uint32_t", bit.rshift(bits, 32)))
+	return string.format("%08x%08x", hi, lo)
+end
+
+--: (number) -> boolean
+local function is_negative_zero(n)
+	if n ~= 0 then return false end
+	return 1 / n < 0
+end
+
 --: ({ [integer]: string, ... }, unknown) -> (boolean | nil, string | nil)
 local function encode_into(out, value)
 	if type(value) == "nil" then
@@ -51,11 +73,16 @@ local function encode_into(out, value)
 		return true
 	elseif type(value) == "number" then
 		local n = value
-		if n % 1 ~= 0 then
-			return nil, "canonical MR0 numbers must be integers until numeric literal encoding is specified"
+		if n ~= n then
+			return nil, "canonical MR0 numbers do not admit NaN"
 		end
-		push(out, "i")
-		push(out, tostring(n))
+		if n % 1 == 0 and not is_negative_zero(n) then
+			push(out, "i")
+			push(out, tostring(n))
+		else
+			push(out, "f")
+			push(out, double_bits_hex(n))
+		end
 		return true
 	elseif type(value) == "table" then
 		local t = value
