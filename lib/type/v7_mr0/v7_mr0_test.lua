@@ -94,6 +94,21 @@ T.describe("type.v7_mr0 verifier spike", function()
 			T.ok(tostring(id_a):find("^n:%x%x%x%x") ~= nil, tostring(id_a))
 		end)
 
+		T.it("computes certificate digests from semantic envelope fields", function()
+			local c = cert({
+				{
+					node_id = "n_wf",
+					family = "WFNode",
+					rule = "wf_type",
+					inputs = { type = "t_integer" },
+					outputs = { ok = true },
+				},
+			}, nil, { integer })
+			local digest, err = canonical.certificate_digest(c)
+			T.ok(digest, err)
+			T.ok(tostring(digest):find("^%x%x%x%x") ~= nil, tostring(digest))
+		end)
+
 		T.it("rejects non-integer numeric payloads until numeric encoding is specified", function()
 			local encoded, err = canonical.serialize({ tag = "literal", base = "number", value = 1.5 })
 			T.eq(encoded, nil)
@@ -309,5 +324,36 @@ T.describe("type.v7_mr0 verifier spike", function()
 		T.fail(ok)
 		local msg = tostring(err)
 		T.ok(msg:find("node id mismatch", 1, true) ~= nil, msg)
+	end)
+
+	T.it("accepts matching expected certificate digest", function()
+		local c = cert({
+			{
+				node_id = "n_wf",
+				family = "WFNode",
+				rule = "wf_type",
+				inputs = { type = "t_integer" },
+				outputs = { ok = true },
+			},
+		}, nil, { integer })
+		local digest = canonical.certificate_digest(c)
+		T.ok(digest, "certificate digest")
+		local ok, err = mr0.verify(c, { expected_digest = digest })
+		T.ok(ok, err)
+	end)
+
+	T.it("rejects mismatched expected certificate digest", function()
+		local ok, err = mr0.verify(cert({
+			{
+				node_id = "n_wf",
+				family = "WFNode",
+				rule = "wf_type",
+				inputs = { type = "t_integer" },
+				outputs = { ok = true },
+			},
+		}, nil, { integer }), { expected_digest = "bad" })
+		T.fail(ok)
+		local msg = tostring(err)
+		T.ok(msg:find("certificate digest mismatch", 1, true) ~= nil, msg)
 	end)
 end)

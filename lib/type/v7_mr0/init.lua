@@ -19,7 +19,7 @@ local SUPPORTED_VERSION = "v7-mr0"
 --:: MR0Cert = { version: string, target: { id: string, ... }, terms: { [integer]: MR0Term, ... } | nil, contexts: { [integer]: MR0Context, ... } | nil, nodes: { [integer]: MR0Node, ... } | nil, roots: { [integer]: MR0Root, ... }, ... }
 --:: MR0State = { terms: { [string]: MR0Term, ... }, contexts: { [string]: MR0Context, ... }, nodes: { [string]: MR0Node, ... }, accepted: { [string]: boolean, ... }, outputs: { [string]: unknown, ... } }
 --:: ReplayFn = (st: MR0State, node: MR0Node) -> (boolean | nil, unknown)
---:: VerifyOpts = { strict_ids?: boolean, strict_context_ids?: boolean, strict_node_ids?: boolean, ... }
+--:: VerifyOpts = { strict_ids?: boolean, strict_context_ids?: boolean, strict_node_ids?: boolean, expected_digest?: string, ... }
 
 --: (unknown) -> (nil, string)
 local function err(msg)
@@ -845,6 +845,11 @@ function M.verify(cert, opts)
 	if cert.version ~= SUPPORTED_VERSION then return err("unsupported certificate version") end
 	if cert.target.id ~= "luajit51-crescent" then return err("missing luajit51-crescent target") end
 	if #cert.roots == 0 then return err("certificate has no roots") end
+	if opts and opts.expected_digest then
+		local digest, digest_msg = canonical.certificate_digest(cert)
+		if not digest then return err("certificate is not canonicalizable: " .. tostring(digest_msg)) end
+		if digest ~= opts.expected_digest then return err("certificate digest mismatch") end
+	end
 	if opts and opts.strict_ids then
 		local ok, msg = validate_term_ids(cert)
 		if not ok then return err(msg) end
