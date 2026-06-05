@@ -60,15 +60,18 @@ Read in this order:
    for the table-native MR0 verifier and the next payload family.
 20. `docs/typechecker-v7-mr0-contexts.md` — MR0 place/context/local-read rules
    for source-independent function body certificates.
-21. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
+21. `docs/typechecker-v7-mr0-function-body.md` — MR0 source-independent
+   function body, parameter context, function value, and function-export root
+   replay.
+22. `docs/typechecker-v7-coherence-audit.md` — whether the current design is a
    consistent whole, plus blocking semantic seams.
-22. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
+23. `docs/typechecker-v7-kernel-semantics.md` — current semantic kernel,
    judgments, and certificate obligations.
-23. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
+24. `docs/typechecker-v7-semantic-mining.md` — rules for importing semantics from
    older Crescent designs or external systems without reintroducing ad-hocness.
-24. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+25. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-25. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
+26. `docs/typechecker-v7-consolidation-audit.md` — source hierarchy, conflicts,
    and lineage status.
 
 Older v4/v5/v6 docs are research input only. If they conflict with v7, v7 owns
@@ -106,15 +109,15 @@ The authoritative recursive plan is `docs/typechecker-v7-roadmap.md`.
 Current active frontier:
 
 ```text
-M0 -> M1: context/local replay for source-independent function body certificates
+M1: source-independent function body/export replay
 ```
 
 Immediate implementation:
 
 ```text
-ContextEntry indexing
-ExprNode(local_read)
-PackNode(values_closed)
+BinderNode(closed_params_context)
+FunctionNode(closed_arrow_body)
+kind-aware function_signature_export roots
 ```
 
 ## Implementation Status
@@ -141,6 +144,8 @@ Currently replayed:
 - `CallNode(call_arrow)`;
 - `StmtNode(return_closed)`;
 - literal `ExprNode` rules;
+- `ExprNode(local_read)`;
+- `PackNode(values_closed)`;
 - `UnsafeNode(force_claim | trusted_decl_value)`;
 - root acceptance by prior accepted proof.
 - optional strict term-ID validation via canonical payload digests.
@@ -148,9 +153,9 @@ Currently replayed:
 Currently rejected as boundary, even if present in the MR0 design doc:
 
 - overload calls, overload exports, non-return statement replay, function-value
-  replay, local/context replay, table identity replay, primitive capability
-  calls, metatable lookup/assignment, `type` predicate narrowing, `require`, and
-  non-integer numeric canonicalization.
+  replay, table identity replay, primitive capability calls, metatable
+  lookup/assignment, `type` predicate narrowing, `require`, and non-integer
+  numeric canonicalization.
 
 ## Admission Rule
 

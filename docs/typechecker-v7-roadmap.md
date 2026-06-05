@@ -87,9 +87,9 @@ Closed in this slice:
 
 Current next step:
 
-1. Specify `docs/typechecker-v7-mr0-function-body.md`.
-2. Define the smallest function-value/body/export certificate that connects
-   parameter binder places, body replay, and exported arrow claims.
+1. Implement `BinderNode(closed_params_context)`.
+2. Implement `FunctionNode(closed_arrow_body)`.
+3. Add kind-aware validation for `function_signature_export` roots.
 
 Why this next: it connects the existing call/return substrate to actual binding
 facts without touching tables, modules, effects, or inference.
@@ -121,7 +121,7 @@ Required subdocs:
   closed value-list/return producer correspondence. Status: verifier slice for
   the MR0 local-read subset.
 - `docs/typechecker-v7-mr0-function-body.md` for function-value/body/export
-  replay. Status: design blocked.
+  replay. Status: spec ready.
 
 Do not implement:
 
