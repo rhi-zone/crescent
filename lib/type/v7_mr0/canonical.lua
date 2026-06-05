@@ -113,4 +113,43 @@ function M.term_id(sort, payload)
 	return "t:" .. digest
 end
 
+--: ({ locals: unknown, identities?: unknown, live_facts?: unknown, dependencies?: unknown, ... }) -> (string | nil, string | nil)
+function M.context_id(context)
+	local digest, msg = M.digest({
+		locals = context.locals,
+		identities = context.identities or {},
+		live_facts = context.live_facts or {},
+		dependencies = context.dependencies or {},
+	})
+	if not digest then return nil, msg end
+	return "c:" .. digest
+end
+
+--: ({ family: string, rule: string, inputs?: unknown, premises?: unknown, outputs: unknown, ... }) -> (string | nil, string | nil)
+function M.node_id(node)
+	local digest, msg = M.digest({
+		family = node.family,
+		rule = node.rule,
+		inputs = node.inputs or {},
+		premises = node.premises or {},
+		outputs = node.outputs,
+	})
+	if not digest then return nil, msg end
+	return "n:" .. digest
+end
+
+--: ({ version: string, target: unknown, sources?: unknown, declarations?: unknown, terms?: unknown, contexts?: unknown, nodes?: unknown, roots: unknown, ... }) -> (string | nil, string | nil)
+function M.certificate_digest(cert)
+	return M.digest({
+		version = cert.version,
+		target = cert.target,
+		sources = cert.sources or {},
+		declarations = cert.declarations or {},
+		terms = cert.terms or {},
+		contexts = cert.contexts or {},
+		nodes = cert.nodes or {},
+		roots = cert.roots,
+	})
+end
+
 return M

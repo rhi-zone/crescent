@@ -19,7 +19,7 @@ local SUPPORTED_VERSION = "v7-mr0"
 --:: MR0Cert = { version: string, target: { id: string, ... }, terms: { [integer]: MR0Term, ... } | nil, contexts: { [integer]: MR0Context, ... } | nil, nodes: { [integer]: MR0Node, ... } | nil, roots: { [integer]: MR0Root, ... }, ... }
 --:: MR0State = { terms: { [string]: MR0Term, ... }, contexts: { [string]: MR0Context, ... }, nodes: { [string]: MR0Node, ... }, accepted: { [string]: boolean, ... }, outputs: { [string]: unknown, ... } }
 --:: ReplayFn = (st: MR0State, node: MR0Node) -> (boolean | nil, unknown)
---:: VerifyOpts = { strict_ids?: boolean, ... }
+--:: VerifyOpts = { strict_ids?: boolean, strict_context_ids?: boolean, strict_node_ids?: boolean, ... }
 
 --: (unknown) -> (nil, string)
 local function err(msg)
@@ -263,6 +263,34 @@ local function validate_term_ids(cert)
 		end
 		if term.term_id ~= expected then
 			return nil, "term id mismatch for " .. tostring(term.term_id) .. ", expected " .. expected
+		end
+	end
+	return true
+end
+
+--: (MR0Cert) -> (boolean | nil, string | nil)
+local function validate_context_ids(cert)
+	for _, ctx in ipairs(cert.contexts or {}) do
+		local expected, msg = canonical.context_id(ctx)
+		if not expected then
+			return nil, "context " .. tostring(ctx.context_id) .. " is not canonicalizable: " .. tostring(msg)
+		end
+		if ctx.context_id ~= expected then
+			return nil, "context id mismatch for " .. tostring(ctx.context_id) .. ", expected " .. expected
+		end
+	end
+	return true
+end
+
+--: (MR0Cert) -> (boolean | nil, string | nil)
+local function validate_node_ids(cert)
+	for _, node in ipairs(cert.nodes or {}) do
+		local expected, msg = canonical.node_id(node)
+		if not expected then
+			return nil, "node " .. tostring(node.node_id) .. " is not canonicalizable: " .. tostring(msg)
+		end
+		if node.node_id ~= expected then
+			return nil, "node id mismatch for " .. tostring(node.node_id) .. ", expected " .. expected
 		end
 	end
 	return true
@@ -819,6 +847,14 @@ function M.verify(cert, opts)
 	if #cert.roots == 0 then return err("certificate has no roots") end
 	if opts and opts.strict_ids then
 		local ok, msg = validate_term_ids(cert)
+		if not ok then return err(msg) end
+	end
+	if opts and opts.strict_context_ids then
+		local ok, msg = validate_context_ids(cert)
+		if not ok then return err(msg) end
+	end
+	if opts and opts.strict_node_ids then
+		local ok, msg = validate_node_ids(cert)
 		if not ok then return err(msg) end
 	end
 

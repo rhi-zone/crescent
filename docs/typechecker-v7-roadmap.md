@@ -146,6 +146,8 @@ Already done:
 
 - deterministic table-native serialization;
 - SHA-256 term IDs in strict mode.
+- SHA-256 context IDs in optional strict context mode.
+- SHA-256 node IDs in optional strict node mode.
 - `docs/typechecker-v7-canonical-inputs.md` for semantic projection,
   context/node ID shape, certificate digest shape, strictness staging, and
   malformed-input corpus targets.
@@ -153,8 +155,7 @@ Already done:
 Missing:
 
 - non-integer numeric canonical encoding;
-- context ID implementation;
-- node ID implementation;
+- certificate digest implementation/enforcement;
 - target/source/declaration digest validation;
 - external certificate format/parser;
 - malformed-input test corpus.

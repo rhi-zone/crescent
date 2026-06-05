@@ -117,8 +117,7 @@ M2: canonical inputs and external certificate boundary
 Immediate implementation:
 
 ```text
-context IDs
-node/certificate canonical payloads
+certificate digest implementation/enforcement
 external certificate file parser and malformed-input corpus
 ```
 

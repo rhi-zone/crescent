@@ -3,14 +3,15 @@ local mr0 = require("lib.type.v7_mr0")
 local canonical = require("lib.type.v7_mr0.canonical")
 local fixtures = require("lib.type.v7_mr0.fixtures")
 
---:: MR0TestInputs = { type?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, ... }
+--:: MR0TestInputs = { type?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, context?: string, ... }
 --:: MR0TestNode = { node_id: string, family: string, rule: string, inputs?: MR0TestInputs, outputs: unknown, premises?: { [integer]: string, ... }, ... }
 --:: MR0TestTerm = { term_id: string, sort: string, payload: unknown, ... }
+--:: MR0TestContext = { context_id: string, locals: { [string]: unknown, ... }, identities: { ... } | nil, live_facts: { ... } | nil, dependencies: { ... } | nil, ... }
 --:: MR0TestRoot = { kind: string, subject: string, proof: string, ... }
---:: MR0TestCert = { version: string, target: { id: string, ... }, terms: { [integer]: MR0TestTerm, ... } | nil, nodes: { [integer]: MR0TestNode, ... }, roots: { [integer]: MR0TestRoot, ... }, ... }
+--:: MR0TestCert = { version: string, target: { id: string, ... }, terms: { [integer]: MR0TestTerm, ... } | nil, contexts: { [integer]: MR0TestContext, ... } | nil, nodes: { [integer]: MR0TestNode, ... }, roots: { [integer]: MR0TestRoot, ... }, ... }
 
---: ({ [integer]: MR0TestNode, ... }, { [integer]: MR0TestRoot, ... } | nil, { [integer]: MR0TestTerm, ... } | nil) -> MR0TestCert
-local function cert(nodes, roots, terms)
+--: ({ [integer]: MR0TestNode, ... }, { [integer]: MR0TestRoot, ... } | nil, { [integer]: MR0TestTerm, ... } | nil, { [integer]: MR0TestContext, ... } | nil) -> MR0TestCert
+local function cert(nodes, roots, terms, contexts)
 	local last_node = nodes[#nodes]
 	local proof = last_node and last_node.node_id or "<missing>"
 	return {
@@ -19,7 +20,7 @@ local function cert(nodes, roots, terms)
 		sources = { { source_id = "test", digest = "test-source" } },
 		declarations = {},
 		terms = terms or {},
-		contexts = {},
+		contexts = contexts or {},
 		nodes = nodes,
 		roots = roots or { { kind = "local_annotation", subject = "x", proof = proof } },
 	}
@@ -59,6 +60,38 @@ T.describe("type.v7_mr0 verifier spike", function()
 			T.ok(id, err)
 			local id_s = tostring(id)
 			T.ok(id_s:find("^t:%x%x%x%x") ~= nil, id_s)
+		end)
+
+		T.it("computes content-addressed context ids with empty defaults", function()
+			local a = { locals = { p0 = { type = "integer" } } }
+			local b = { locals = { p0 = { type = "integer" } }, identities = {}, live_facts = {}, dependencies = {} }
+			local id_a, err_a = canonical.context_id(a)
+			local id_b, err_b = canonical.context_id(b)
+			T.ok(id_a, err_a)
+			T.ok(id_b, err_b)
+			T.eq(id_a, id_b)
+			T.ok(tostring(id_a):find("^c:%x%x%x%x") ~= nil, tostring(id_a))
+		end)
+
+		T.it("computes node ids from replay interface including outputs", function()
+			local a = {
+				family = "WFNode",
+				rule = "wf_type",
+				inputs = { type = "t_integer" },
+				outputs = { ok = true },
+			}
+			local b = {
+				family = "WFNode",
+				rule = "wf_type",
+				inputs = { type = "t_integer" },
+				outputs = { ok = false },
+			}
+			local id_a, err_a = canonical.node_id(a)
+			local id_b, err_b = canonical.node_id(b)
+			T.ok(id_a, err_a)
+			T.ok(id_b, err_b)
+			T.ok(id_a ~= id_b, tostring(id_a) .. " should differ from " .. tostring(id_b))
+			T.ok(tostring(id_a):find("^n:%x%x%x%x") ~= nil, tostring(id_a))
 		end)
 
 		T.it("rejects non-integer numeric payloads until numeric encoding is specified", function()
@@ -213,5 +246,68 @@ T.describe("type.v7_mr0 verifier spike", function()
 		T.fail(ok)
 		local msg = tostring(err)
 		T.ok(msg:find("term id mismatch", 1, true) ~= nil, msg)
+	end)
+
+	T.it("strict context mode accepts canonical context ids", function()
+		local ctx = { locals = {}, identities = {}, live_facts = {}, dependencies = {} }
+		local context_id = canonical.context_id(ctx)
+		T.ok(context_id, "context id")
+		ctx.context_id = context_id
+		local ok, err = mr0.verify(cert({
+			{
+				node_id = "n_wf_context",
+				family = "WFNode",
+				rule = "wf_context",
+				inputs = { context = context_id },
+				outputs = { ok = true },
+			},
+		}, nil, {}, { ctx }), { strict_context_ids = true })
+		T.ok(ok, err)
+	end)
+
+	T.it("strict context mode rejects mismatched context ids", function()
+		local ok, err = mr0.verify(cert({
+			{
+				node_id = "n_wf_context",
+				family = "WFNode",
+				rule = "wf_context",
+				inputs = { context = "c_bad" },
+				outputs = { ok = true },
+			},
+		}, nil, {}, {
+			{ context_id = "c_bad", locals = {}, identities = {}, live_facts = {}, dependencies = {} },
+		}), { strict_context_ids = true })
+		T.fail(ok)
+		local msg = tostring(err)
+		T.ok(msg:find("context id mismatch", 1, true) ~= nil, msg)
+	end)
+
+	T.it("strict node mode accepts canonical node ids", function()
+		local node = {
+			family = "WFNode",
+			rule = "wf_type",
+			inputs = { type = "t_integer" },
+			outputs = { ok = true },
+		}
+		local node_id = canonical.node_id(node)
+		T.ok(node_id, "node id")
+		node.node_id = node_id
+		local ok, err = mr0.verify(cert({ node }, nil, { integer }), { strict_node_ids = true })
+		T.ok(ok, err)
+	end)
+
+	T.it("strict node mode rejects mismatched node ids", function()
+		local ok, err = mr0.verify(cert({
+			{
+				node_id = "n_bad",
+				family = "WFNode",
+				rule = "wf_type",
+				inputs = { type = "t_integer" },
+				outputs = { ok = true },
+			},
+		}, nil, { integer }), { strict_node_ids = true })
+		T.fail(ok)
+		local msg = tostring(err)
+		T.ok(msg:find("node id mismatch", 1, true) ~= nil, msg)
 	end)
 end)
