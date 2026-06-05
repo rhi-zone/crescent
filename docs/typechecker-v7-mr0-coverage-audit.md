@@ -17,6 +17,7 @@ Implemented replay families:
 - literal `ExprNode` rules;
 - `UnsafeNode(force_claim | trusted_decl_value)`;
 - root validation by accepted proof.
+- optional strict term-ID validation for canonicalizable table-native terms.
 
 Implemented fixture stance:
 
@@ -82,9 +83,14 @@ Implemented fixture stance:
 
 Canonical serialization and digest checks:
 
-- Entire layer missing.
-- This is required before accepting external certificate files, but not before
-  table-native verifier fixtures. Keep the distinction explicit.
+- Table-native canonical serialization and SHA-256 term IDs are implemented.
+- Strict mode can validate `term_id = "t:" .. sha256(canonical(sort, payload))`.
+- Non-integer numeric payloads are not canonicalizable yet because MR0 has not
+  specified a target-stable numeric literal encoding. This is deliberate:
+  inventing `tostring(number)` as a digest input would bake host formatting into
+  the trust boundary.
+- Source/declaration/context/target digest validation and external certificate
+  file parsing are still missing.
 
 ## Implemented Follow-Up Slice
 
@@ -155,6 +161,10 @@ Local/context replay is the smallest semantic continuation if the goal is to tie
 `function f(x: integer): number return x end` fixture. Canonical serialization is
 the smaller trust-boundary continuation if the goal is to accept certificates
 from disk instead of in-memory fixtures.
+
+The first canonicalization slice is now present, so the remaining trust-boundary
+work is external certificate parsing plus target/source/declaration/context
+digest validation.
 
 Do not implement primitive capability calls next; they depend on identity replay
 and would otherwise be a disguised special case.

@@ -3,6 +3,8 @@
 -- This module intentionally does not infer. It replays a small subset of the
 -- v7 MR0 certificate model from docs/typechecker-v7-mr0-payloads.md.
 
+local canonical = require("lib.type.v7_mr0.canonical")
+
 local M = {}
 
 local SUPPORTED_VERSION = "v7-mr0"
@@ -16,6 +18,7 @@ local SUPPORTED_VERSION = "v7-mr0"
 --:: MR0Cert = { version: string, target: { id: string, ... }, terms: { [integer]: MR0Term, ... } | nil, nodes: { [integer]: MR0Node, ... } | nil, roots: { [integer]: MR0Root, ... }, ... }
 --:: MR0State = { terms: { [string]: MR0Term, ... }, nodes: { [string]: MR0Node, ... }, accepted: { [string]: boolean, ... }, outputs: { [string]: unknown, ... } }
 --:: ReplayFn = (st: MR0State, node: MR0Node) -> (boolean | nil, unknown)
+--:: VerifyOpts = { strict_ids?: boolean, ... }
 
 --: (unknown) -> (nil, string)
 local function err(msg)
@@ -206,6 +209,20 @@ local function mk_state(cert)
 		accepted = {},
 		outputs = {},
 	}
+end
+
+--: (MR0Cert) -> (boolean | nil, string | nil)
+local function validate_term_ids(cert)
+	for _, term in ipairs(cert.terms or {}) do
+		local expected, msg = canonical.term_id(term.sort, term.payload)
+		if not expected then
+			return nil, "term " .. tostring(term.term_id) .. " is not canonicalizable: " .. tostring(msg)
+		end
+		if term.term_id ~= expected then
+			return nil, "term id mismatch for " .. tostring(term.term_id) .. ", expected " .. expected
+		end
+	end
+	return true
 end
 
 --: (MR0State, string, string | nil) -> (unknown, string | nil)
@@ -539,11 +556,15 @@ local function replay_node(st, node)
 	return true, output
 end
 
---: (MR0Cert) -> (boolean | nil, string | nil)
-function M.verify(cert)
+--: (MR0Cert, VerifyOpts | nil) -> (boolean | nil, string | nil)
+function M.verify(cert, opts)
 	if cert.version ~= SUPPORTED_VERSION then return err("unsupported certificate version") end
 	if cert.target.id ~= "luajit51-crescent" then return err("missing luajit51-crescent target") end
 	if #cert.roots == 0 then return err("certificate has no roots") end
+	if opts and opts.strict_ids then
+		local ok, msg = validate_term_ids(cert)
+		if not ok then return err(msg) end
+	end
 
 	local st, msg = mk_state(cert)
 	if not st then return err(msg) end

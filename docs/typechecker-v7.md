@@ -118,6 +118,8 @@ Current code:
 
 - `lib/type/v7_mr0/init.lua` is a standalone MR0 replay verifier. It is not
   connected to v4/v5/v6 inference and does not search for missing proofs.
+- `lib/type/v7_mr0/canonical.lua` provides deterministic table-native
+  serialization and SHA-256 term IDs for canonicalizable MR0 payloads.
 - `lib/type/v7_mr0/fixtures.lua` is the initial semantic fixture corpus. It
   includes accepted fixtures for implemented replay rules and rejected boundary
   fixtures for MR0 payload families the verifier must not guess yet.
@@ -136,13 +138,14 @@ Currently replayed:
 - literal `ExprNode` rules;
 - `UnsafeNode(force_claim | trusted_decl_value)`;
 - root acceptance by prior accepted proof.
+- optional strict term-ID validation via canonical payload digests.
 
 Currently rejected as boundary, even if present in the MR0 design doc:
 
 - overload calls, overload exports, non-return statement replay, function-value
   replay, local/context replay, table identity replay, primitive capability
   calls, metatable lookup/assignment, `type` predicate narrowing, `require`, and
-  canonical digest validation.
+  non-integer numeric canonicalization.
 
 ## Admission Rule
 

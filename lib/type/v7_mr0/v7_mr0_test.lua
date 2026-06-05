@@ -1,5 +1,6 @@
 local T = require("lib.test.assert")
 local mr0 = require("lib.type.v7_mr0")
+local canonical = require("lib.type.v7_mr0.canonical")
 local fixtures = require("lib.type.v7_mr0.fixtures")
 
 --:: MR0TestInputs = { type?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, ... }
@@ -42,6 +43,32 @@ local union_ab = {
 local lit_a = { term_id = "t_lit_a", sort = "type", payload = { tag = "literal", base = "string", value = "a" } }
 
 T.describe("type.v7_mr0 verifier spike", function()
+	T.describe("canonical payloads", function()
+		T.it("serializes maps independent of insertion order", function()
+			local a = { b = 2, a = { "x", true } }
+			local b = { a = { "x", true }, b = 2 }
+			local sa, ea = canonical.serialize(a)
+			local sb, eb = canonical.serialize(b)
+			T.ok(sa, ea)
+			T.ok(sb, eb)
+			T.eq(sa, sb)
+		end)
+
+		T.it("computes content-addressed term ids", function()
+			local id, err = canonical.term_id("type", "integer")
+			T.ok(id, err)
+			local id_s = tostring(id)
+			T.ok(id_s:find("^t:%x%x%x%x") ~= nil, id_s)
+		end)
+
+		T.it("rejects non-integer numeric payloads until numeric encoding is specified", function()
+			local encoded, err = canonical.serialize({ tag = "literal", base = "number", value = 1.5 })
+			T.eq(encoded, nil)
+			local msg = tostring(err)
+			T.ok(msg:find("numeric literal encoding", 1, true) ~= nil, msg)
+		end)
+	end)
+
 	T.describe("fixture corpus", function()
 		for _, fixture in ipairs(fixtures.cases) do
 			T.it(fixture.expect .. "s " .. fixture.name, function()
@@ -152,5 +179,39 @@ T.describe("type.v7_mr0 verifier spike", function()
 		T.fail(ok)
 		local msg = tostring(err)
 		T.ok(msg:find("target", 1, true) ~= nil, msg)
+	end)
+
+	T.it("strict mode accepts canonical term ids", function()
+		local integer_id = canonical.term_id("type", "integer")
+		T.ok(integer_id, "integer term id")
+		local ok, err = mr0.verify(cert({
+			{
+				node_id = "n_wf",
+				family = "WFNode",
+				rule = "wf_type",
+				inputs = { type = integer_id },
+				outputs = { ok = true },
+			},
+		}, nil, {
+			{ term_id = integer_id, sort = "type", payload = "integer" },
+		}), { strict_ids = true })
+		T.ok(ok, err)
+	end)
+
+	T.it("strict mode rejects mismatched term ids", function()
+		local ok, err = mr0.verify(cert({
+			{
+				node_id = "n_wf",
+				family = "WFNode",
+				rule = "wf_type",
+				inputs = { type = "t_integer" },
+				outputs = { ok = true },
+			},
+		}, nil, {
+			{ term_id = "t_integer", sort = "type", payload = "integer" },
+		}), { strict_ids = true })
+		T.fail(ok)
+		local msg = tostring(err)
+		T.ok(msg:find("term id mismatch", 1, true) ~= nil, msg)
 	end)
 end)
