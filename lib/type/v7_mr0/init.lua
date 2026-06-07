@@ -17,10 +17,10 @@ local SUPPORTED_VERSION = "v7-mr0"
 --:: MR0Inputs = { type?: string, pack?: string, source_pack?: string, target_pack?: string, producer?: string, consumer?: string, a?: string, b?: string, arm_index?: integer, value?: unknown, exported_claim?: unknown, callee_claim?: string, arg_pack?: string, arrow?: string, expr_pack?: string, expected_pack?: string, pack_move_node?: string, expr_pack_node?: string, context?: string, place?: string, claims?: { [integer]: string, ... }, params_pack?: string, places?: { [integer]: string, ... }, param_context_node?: string, body_node?: string, ... }
 --:: MR0Node = { node_id: string, family: string, rule: string, inputs?: MR0Inputs, outputs: unknown, premises?: { [integer]: string, ... }, ... }
 --:: MR0Root = { proof: string, ... }
---:: MR0Cert = { version: string, target: { id: string, ... }, terms: { [integer]: MR0Term, ... } | nil, contexts: { [integer]: MR0Context, ... } | nil, nodes: { [integer]: MR0Node, ... } | nil, roots: { [integer]: MR0Root, ... }, ... }
+--:: MR0Cert = { version: string, target: { id: string, digest?: string, ... }, sources?: { [integer]: MR0Map, ... }, declarations?: { [integer]: MR0Map, ... }, terms: { [integer]: MR0Term, ... } | nil, contexts: { [integer]: MR0Context, ... } | nil, nodes: { [integer]: MR0Node, ... } | nil, roots: { [integer]: MR0Root, ... }, ... }
 --:: MR0State = { terms: { [string]: MR0Term, ... }, contexts: { [string]: MR0Context, ... }, nodes: { [string]: MR0Node, ... }, accepted: { [string]: boolean, ... }, outputs: { [string]: unknown, ... } }
 --:: ReplayFn = (st: MR0State, node: MR0Node) -> (boolean | nil, unknown)
---:: VerifyOpts = { strict_ids?: boolean, strict_context_ids?: boolean, strict_node_ids?: boolean, expected_digest?: string, ... }
+--:: VerifyOpts = { strict_ids?: boolean, strict_context_ids?: boolean, strict_node_ids?: boolean, strict_input_digests?: boolean, expected_digest?: string, ... }
 
 --: (unknown) -> (nil, string)
 local function err(msg)
@@ -305,6 +305,30 @@ local function validate_node_ids(cert)
 		end
 		if node.node_id ~= expected then
 			return nil, "node id mismatch for " .. tostring(node.node_id) .. ", expected " .. expected
+		end
+	end
+	return true
+end
+
+--: (MR0Cert) -> (boolean | nil, string | nil)
+local function validate_input_digests(cert)
+	local target_digest, target_msg = canonical.target_digest(cert.target)
+	if not target_digest then return nil, "target is not canonicalizable: " .. tostring(target_msg) end
+	if cert.target.digest ~= target_digest then
+		return nil, "target digest mismatch for " .. tostring(cert.target.id) .. ", expected " .. target_digest
+	end
+	for _, source in ipairs(cert.sources or {}) do
+		local digest, msg = canonical.source_digest(source)
+		if not digest then return nil, "source " .. tostring(source.source_id) .. " is not canonicalizable: " .. tostring(msg) end
+		if source.digest ~= digest then
+			return nil, "source digest mismatch for " .. tostring(source.source_id) .. ", expected " .. digest
+		end
+	end
+	for _, decl in ipairs(cert.declarations or {}) do
+		local digest, msg = canonical.declaration_digest(decl)
+		if not digest then return nil, "declaration " .. tostring(decl.decl_id) .. " is not canonicalizable: " .. tostring(msg) end
+		if decl.digest ~= digest then
+			return nil, "declaration digest mismatch for " .. tostring(decl.decl_id) .. ", expected " .. digest
 		end
 	end
 	return true
@@ -876,6 +900,10 @@ function M.verify(cert, opts)
 		local ok, msg = validate_node_ids(cert)
 		if not ok then return err(msg) end
 	end
+	if opts and opts.strict_input_digests then
+		local ok, msg = validate_input_digests(cert)
+		if not ok then return err(msg) end
+	end
 
 	local st, msg = mk_state(cert)
 	if not st then return err(msg) end
@@ -911,6 +939,7 @@ function M.verify_external_json(bytes, opts)
 		strict_ids = true,
 		strict_context_ids = true,
 		strict_node_ids = true,
+		strict_input_digests = true,
 	})
 end
 

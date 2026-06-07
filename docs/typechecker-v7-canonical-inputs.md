@@ -163,6 +163,50 @@ certificate_digest = sha256(canonical({
 External certificates should carry this digest out-of-band or in an envelope
 field excluded from the digest projection.
 
+## Target, Source, And Declaration Digests
+
+External JSON certificates validate input digests before replay.
+
+Target digest:
+
+```text
+target.digest = "target:" .. sha256(canonical({
+  id = target.id,
+  table_digest = target.table_digest
+}))
+```
+
+The target digest commits to the target profile identity and the target table
+digest named by the certificate. It excludes display/provenance metadata.
+
+Source digest:
+
+```text
+source.digest = "source:" .. sha256(canonical({
+  source_id = source.source_id,
+  content = source.content
+}))
+```
+
+`path_hint` is deliberately excluded. It is diagnostic/provenance metadata and
+must not affect semantic equality. If a certificate does not carry source bytes,
+this digest only commits to the source identity declared inside the certificate;
+checking bytes on disk is a driver/elaborator responsibility, not replay.
+
+Declaration digest:
+
+```text
+declaration.digest = "decl:" .. sha256(canonical({
+  decl_id = declaration.decl_id,
+  entries = declaration.entries or {},
+  trust_kind = declaration.trust_kind
+}))
+```
+
+Declaration provenance may be attached later, but provenance cannot authorize
+new claims. Replay-relevant trusted entries and trust kind are what the digest
+commits to.
+
 ## External Certificate Boundary
 
 M2 separates two concepts:
@@ -219,6 +263,10 @@ The verifier should eventually expose two entry points:
 replay. The expected digest is supplied out-of-band; an in-file digest field is
 metadata and is excluded from the certificate digest projection.
 
+External JSON also enables target/source/declaration digest validation. In-process
+fixtures may keep using placeholder digests unless a strict option asks for
+these checks.
+
 ## Binary Cache Format
 
 A LuaJIT-optimized binary certificate encoding is allowed later, but it is not
@@ -258,6 +306,9 @@ M2 needs fixtures that reject:
 - non-canonical term IDs;
 - non-canonical context IDs;
 - non-canonical node IDs;
+- target digest mismatch;
+- source digest mismatch;
+- declaration digest mismatch;
 - duplicate IDs with different payloads;
 - duplicate IDs with identical payloads;
 - sparse arrays in inputs/premises/roots;

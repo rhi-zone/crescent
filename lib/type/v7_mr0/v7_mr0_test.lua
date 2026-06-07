@@ -44,6 +44,30 @@ local union_ab = {
 }
 local lit_a = { term_id = "t_lit_a", sort = "type", payload = { tag = "literal", base = "string", value = "a" } }
 
+--: ({ id: string, digest?: string, table_digest?: unknown, ... }) -> { id: string, digest?: string, table_digest?: unknown, ... }
+local function with_target_digest(target)
+	local digest = canonical.target_digest(target)
+	T.ok(digest, "target digest")
+	target.digest = digest
+	return target
+end
+
+--: ({ source_id: string, digest?: string, content?: unknown, path_hint?: string, ... }) -> { source_id: string, digest?: string, content?: unknown, path_hint?: string, ... }
+local function with_source_digest(source)
+	local digest = canonical.source_digest(source)
+	T.ok(digest, "source digest")
+	source.digest = digest
+	return source
+end
+
+--: ({ decl_id: string, digest?: string, entries?: unknown, trust_kind?: unknown, ... }) -> { decl_id: string, digest?: string, entries?: unknown, trust_kind?: unknown, ... }
+local function with_declaration_digest(decl)
+	local digest = canonical.declaration_digest(decl)
+	T.ok(digest, "declaration digest")
+	decl.digest = digest
+	return decl
+end
+
 T.describe("type.v7_mr0 verifier spike", function()
 	T.describe("canonical payloads", function()
 		T.it("serializes maps independent of insertion order", function()
@@ -397,7 +421,11 @@ T.describe("type.v7_mr0 verifier spike", function()
 		node.node_id = node_id
 		local c = {
 			version = "v7-mr0",
-			target = { id = "luajit51-crescent", digest = "test-target" },
+			target = with_target_digest({ id = "luajit51-crescent", table_digest = "test-target-table" }),
+			sources = { with_source_digest({ source_id = "fixture", content = "local x = 1", path_hint = "fixture.lua" }) },
+			declarations = {
+				with_declaration_digest({ decl_id = "empty-decls", entries = {}, trust_kind = "empty" }),
+			},
 			terms = { { term_id = integer_id, sort = "type", payload = "integer" } },
 			nodes = { node },
 			roots = { { kind = "local_annotation", subject = "x", proof = node_id } },
@@ -454,7 +482,7 @@ T.describe("type.v7_mr0 verifier spike", function()
 		node.node_id = node_id
 		local c = {
 			version = "v7-mr0",
-			target = { id = "luajit51-crescent", digest = "test-target" },
+			target = with_target_digest({ id = "luajit51-crescent", table_digest = "test-target-table" }),
 			terms = { { term_id = "t_integer", sort = "type", payload = "integer" } },
 			nodes = { node },
 			roots = { { kind = "local_annotation", subject = "x", proof = node_id } },
@@ -478,7 +506,7 @@ T.describe("type.v7_mr0 verifier spike", function()
 		T.ok(integer_id, "integer term id")
 		local c = {
 			version = "v7-mr0",
-			target = { id = "luajit51-crescent", digest = "test-target" },
+			target = with_target_digest({ id = "luajit51-crescent", table_digest = "test-target-table" }),
 			terms = { { term_id = integer_id, sort = "type", payload = "integer" } },
 			nodes = {
 				{
@@ -503,5 +531,106 @@ T.describe("type.v7_mr0 verifier spike", function()
 		T.fail(ok)
 		local msg = tostring(err)
 		T.ok(msg:find("node id mismatch", 1, true) ~= nil, msg)
+	end)
+
+	T.it("external JSON rejects target digest mismatch", function()
+		local integer_id = canonical.term_id("type", "integer")
+		T.ok(integer_id, "integer term id")
+		local node = {
+			family = "WFNode",
+			rule = "wf_type",
+			inputs = { type = integer_id },
+			outputs = { ok = true },
+		}
+		local node_id = canonical.node_id(node)
+		T.ok(node_id, "node id")
+		node.node_id = node_id
+		local c = {
+			version = "v7-mr0",
+			target = { id = "luajit51-crescent", digest = "target:bad", table_digest = "test-target-table" },
+			terms = { { term_id = integer_id, sort = "type", payload = "integer" } },
+			nodes = { node },
+			roots = { { kind = "local_annotation", subject = "x", proof = node_id } },
+		}
+		local digest = canonical.certificate_digest(c)
+		T.ok(digest, "certificate digest")
+		local bytes, encode_err = json.encode(c)
+		T.ok(bytes, encode_err)
+		if type(bytes) ~= "string" then
+			T.fail(bytes)
+			return
+		end
+		local ok, err = mr0.verify_external_json(bytes, { expected_digest = digest })
+		T.fail(ok)
+		local msg = tostring(err)
+		T.ok(msg:find("target digest mismatch", 1, true) ~= nil, msg)
+	end)
+
+	T.it("external JSON rejects source digest mismatch", function()
+		local integer_id = canonical.term_id("type", "integer")
+		T.ok(integer_id, "integer term id")
+		local node = {
+			family = "WFNode",
+			rule = "wf_type",
+			inputs = { type = integer_id },
+			outputs = { ok = true },
+		}
+		local node_id = canonical.node_id(node)
+		T.ok(node_id, "node id")
+		node.node_id = node_id
+		local c = {
+			version = "v7-mr0",
+			target = with_target_digest({ id = "luajit51-crescent", table_digest = "test-target-table" }),
+			sources = { { source_id = "fixture", digest = "source:bad", content = "local x = 1" } },
+			terms = { { term_id = integer_id, sort = "type", payload = "integer" } },
+			nodes = { node },
+			roots = { { kind = "local_annotation", subject = "x", proof = node_id } },
+		}
+		local digest = canonical.certificate_digest(c)
+		T.ok(digest, "certificate digest")
+		local bytes, encode_err = json.encode(c)
+		T.ok(bytes, encode_err)
+		if type(bytes) ~= "string" then
+			T.fail(bytes)
+			return
+		end
+		local ok, err = mr0.verify_external_json(bytes, { expected_digest = digest })
+		T.fail(ok)
+		local msg = tostring(err)
+		T.ok(msg:find("source digest mismatch", 1, true) ~= nil, msg)
+	end)
+
+	T.it("external JSON rejects declaration digest mismatch", function()
+		local integer_id = canonical.term_id("type", "integer")
+		T.ok(integer_id, "integer term id")
+		local node = {
+			family = "WFNode",
+			rule = "wf_type",
+			inputs = { type = integer_id },
+			outputs = { ok = true },
+		}
+		local node_id = canonical.node_id(node)
+		T.ok(node_id, "node id")
+		node.node_id = node_id
+		local c = {
+			version = "v7-mr0",
+			target = with_target_digest({ id = "luajit51-crescent", table_digest = "test-target-table" }),
+			declarations = { { decl_id = "decls", digest = "decl:bad", entries = {}, trust_kind = "empty" } },
+			terms = { { term_id = integer_id, sort = "type", payload = "integer" } },
+			nodes = { node },
+			roots = { { kind = "local_annotation", subject = "x", proof = node_id } },
+		}
+		local digest = canonical.certificate_digest(c)
+		T.ok(digest, "certificate digest")
+		local bytes, encode_err = json.encode(c)
+		T.ok(bytes, encode_err)
+		if type(bytes) ~= "string" then
+			T.fail(bytes)
+			return
+		end
+		local ok, err = mr0.verify_external_json(bytes, { expected_digest = digest })
+		T.fail(ok)
+		local msg = tostring(err)
+		T.ok(msg:find("declaration digest mismatch", 1, true) ~= nil, msg)
 	end)
 end)

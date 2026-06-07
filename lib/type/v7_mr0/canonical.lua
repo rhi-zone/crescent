@@ -168,6 +168,37 @@ function M.node_id(node)
 	return "n:" .. digest
 end
 
+--: ({ id: string, table_digest?: unknown, ... }) -> (string | nil, string | nil)
+function M.target_digest(target)
+	local digest, msg = M.digest({
+		id = target.id,
+		table_digest = target.table_digest,
+	})
+	if not digest then return nil, msg end
+	return "target:" .. digest
+end
+
+--: ({ source_id: string, content?: unknown, ... }) -> (string | nil, string | nil)
+function M.source_digest(source)
+	local digest, msg = M.digest({
+		source_id = source.source_id,
+		content = source.content,
+	})
+	if not digest then return nil, msg end
+	return "source:" .. digest
+end
+
+--: ({ decl_id: string, entries?: unknown, trust_kind?: unknown, ... }) -> (string | nil, string | nil)
+function M.declaration_digest(decl)
+	local digest, msg = M.digest({
+		decl_id = decl.decl_id,
+		entries = decl.entries or {},
+		trust_kind = decl.trust_kind,
+	})
+	if not digest then return nil, msg end
+	return "decl:" .. digest
+end
+
 --: ({ version: string, target: unknown, sources?: unknown, declarations?: unknown, terms?: unknown, contexts?: unknown, nodes?: unknown, roots: unknown, ... }) -> (string | nil, string | nil)
 function M.certificate_digest(cert)
 	return M.digest({

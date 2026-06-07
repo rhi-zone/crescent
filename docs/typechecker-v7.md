@@ -117,7 +117,6 @@ M2: canonical inputs and external certificate boundary
 Immediate implementation:
 
 ```text
-target/source/declaration digest validation
 expanded malformed-input corpus
 ```
 

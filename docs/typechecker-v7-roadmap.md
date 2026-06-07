@@ -152,6 +152,7 @@ Already done:
 - JSON external certificate entry point with mandatory expected digest and strict
   term/context/node IDs.
 - non-integer Lua numbers encoded by IEEE-754 binary64 runtime bits.
+- target/source/declaration digest validation for external JSON certificates.
 - `docs/typechecker-v7-canonical-inputs.md` for semantic projection,
   context/node ID shape, certificate digest shape, strictness staging, and
   malformed-input corpus targets.
@@ -159,7 +160,6 @@ Already done:
 Missing:
 
 - NaN and cdata numeric canonical encoding;
-- target/source/declaration digest validation;
 - expanded malformed-input test corpus.
 
 Required subdoc:
