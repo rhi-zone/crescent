@@ -206,10 +206,11 @@ The next work is design, not implementation:
 4. Instantiate a small System F subset as the second theory. Current draft:
    `docs/typechecker-framework-system-f.md`.
 5. Audit whether the v7 MR0 verifier is an instance of the framework or a
-   theory-specific prototype that should remain isolated.
+   theory-specific prototype that should remain isolated. Current audit:
+   `docs/typechecker-framework-v7-mr0-audit.md`.
 
-Implementation starts only after STLC can be written as a theory without
-Crescent-specific concepts.
+Implementation starts only after STLC and System F can be written as theories
+without Crescent-specific concepts.
 
 ## Non-Goals
 
