@@ -217,7 +217,8 @@ readiness:
 
 1. Specify the concrete external format for framework theory specs and
    certificates. Implementation plan:
-   `docs/typechecker-framework-implementation-plan.md`.
+   `docs/typechecker-framework-implementation-plan.md`. Current format spec:
+   `docs/typechecker-framework-format.md`.
 2. Specify the minimal first implementation slice for the derivation checker.
 3. Define table-native accepted/rejected fixtures for a combinator fragment.
 4. Define table-native accepted/rejected fixtures for the STLC theory.

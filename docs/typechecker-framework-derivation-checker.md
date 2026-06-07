@@ -52,7 +52,8 @@ deterministic.
 1. Validate the theory spec.
 2. Canonicalize the theory spec and compute its digest.
 3. Validate certificate envelopes and framework-version compatibility.
-4. Validate category, symbol, term, binder, context, judgment, and root shapes.
+4. Validate category, term, binder, bound-reference, context-role, judgment,
+   and root shapes.
 5. Canonicalize certificate objects and check all declared digests.
 6. Topologically order evidence nodes by premise dependencies.
 7. Replay each evidence node.
@@ -86,7 +87,6 @@ The framework checks:
 
 - every object has a known tag;
 - every referenced theory ID and version matches the selected theory spec;
-- every symbol belongs to a declared namespace;
 - every term head exists and receives fields matching its schema;
 - every scoped field binds only declared binder schemas;
 - every bound reference resolves to an in-scope binder;
@@ -122,7 +122,7 @@ It rejects:
 - unordered map encodings when the external format claims canonical form;
 - unknown tags;
 - non-canonical numeric spellings;
-- unresolved symbolic references;
+- unresolved references;
 - alpha-unstable binder encodings;
 - digest mismatches.
 
@@ -219,7 +219,6 @@ The framework admits only structural conditions whose meaning is independent of
 theory semantics:
 
 - category equality;
-- symbol freshness within a declared namespace and scope;
 - binder identity equality after alpha-normalization;
 - binder identity inequality after alpha-normalization;
 - alpha-equivalence;
@@ -320,7 +319,7 @@ Minimum diagnostic categories:
 
 - malformed theory spec;
 - malformed certificate object;
-- unknown symbol/category/head/judgment/rule/oracle/root;
+- unknown category/head/judgment/rule/oracle/root;
 - scope or binder error;
 - canonicalization or digest mismatch;
 - dependency cycle;

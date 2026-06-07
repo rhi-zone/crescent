@@ -12,7 +12,7 @@ Crescent theory without baking any of those systems into the framework.
 Framework-owned concepts:
 
 - theories;
-- symbols;
+- namespaces and bound references;
 - syntactic categories;
 - binders and scopes;
 - terms;
@@ -83,21 +83,25 @@ Flow:      Expr, Ty, Fact, Place
 The framework only checks that a term inhabits the category claimed by its head
 and by the enclosing rule schema. Category meaning is theory-local.
 
-## Symbols
+## Namespaces And References
 
-Symbols are globally named theory declarations or locally bound variables.
+The framework owns namespaces for references. F0 only represents local bound
+references directly.
 
 ```text
-Symbol {
+BoundRef {
   namespace,
-  name,
-  category
+  binder_id
 }
 ```
 
-Namespaces are framework-level so unrelated categories cannot accidentally share
-meaning. A theory may choose simple namespaces such as `term_var` and `type_var`,
-or richer namespaces such as `class`, `method`, `field`, and `effect_label`.
+Namespaces are framework-level so unrelated binders cannot accidentally share
+meaning. A theory may choose simple namespaces such as `term_var` and
+`type_var`, or richer namespaces such as `class`, `method`, `field`, and
+`effect_label`.
+
+F0 has no separate global `Symbol` value. Global declarations should be encoded
+as ordinary theory terms, enum/literal fields, or future format extensions.
 
 ## Terms
 
@@ -124,7 +128,7 @@ TermHead {
 Fields may contain:
 
 - literals admitted by the theory spec;
-- symbols;
+- bound references;
 - subterms;
 - lists of subterms;
 - binders;
@@ -300,7 +304,6 @@ language-specific typing rule.
 Allowed structural conditions are narrow framework-known checks only:
 
 - category equality;
-- symbol freshness;
 - binder identity equality;
 - binder identity inequality;
 - alpha-equivalence;
@@ -364,7 +367,7 @@ Roots state which accepted claims matter.
 ```text
 Root {
   root_kind,
-  claim_node_id
+  node_id
 }
 ```
 
@@ -377,8 +380,9 @@ declaration_is_safe
 class_table_well_formed
 ```
 
-Root kinds are theory-declared. The framework checks that each root points to an
-accepted evidence node with the judgment shape required by that root schema.
+Root kinds are theory-declared. The framework checks that each root's `node_id`
+points to an accepted evidence node with the judgment shape required by that
+root schema.
 
 ## Oracles
 

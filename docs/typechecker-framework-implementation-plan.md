@@ -78,6 +78,8 @@ Acceptance bar:
 
 No derivation replay is required in F0.
 
+Current spec: `docs/typechecker-framework-format.md`.
+
 ### F1: Canonical Serialization
 
 Implement canonical serialization for the F0 object model.
