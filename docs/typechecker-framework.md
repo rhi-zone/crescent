@@ -200,6 +200,7 @@ The next work is design, not implementation:
    binders, contexts, evidence nodes, roots, and oracle nodes. Current draft:
    `docs/typechecker-framework-data-model.md`.
 2. Specify the minimal derivation checker independent of any concrete theory.
+   Current draft: `docs/typechecker-framework-derivation-checker.md`.
 3. Instantiate STLC as the first theory.
 4. Instantiate a small System F subset as the second theory.
 5. Audit whether the v7 MR0 verifier is an instance of the framework or a

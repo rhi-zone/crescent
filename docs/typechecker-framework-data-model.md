@@ -274,7 +274,7 @@ Allowed structural conditions are narrow framework-known checks only:
 - category equality;
 - symbol freshness;
 - alpha-equivalence;
-- capture-avoiding substitution of bound references into syntax;
+- explicit syntactic substitution checks over bound references;
 - literal equality;
 - list length equality;
 - digest equality.
@@ -283,6 +283,11 @@ No semantic lookup is a framework side condition. Context lookup, substitution
 lemmas, overload candidate selection, subtyping, reduction, field lookup,
 inheritance, flow-fact movement, and heap updates must be represented as
 ordinary theory judgments with evidence, or as explicit oracle nodes.
+
+Syntactic substitution checks must name `source`, `binder`, `replacement`, and
+`expected_result`. The framework verifies only alpha-stable structural traversal
+and capture avoidance. Beta, reduction, substitution lemmas, and definitional
+equality remain theory judgments or oracles.
 
 ## Evidence Nodes
 
@@ -375,6 +380,19 @@ certificate; they bind inspectable payloads to cache keys and root digests. A
 future binary encoding may optimize this, but the external interchange format
 should remain deterministic and inspectable.
 
+The first oracle result format is exact-claim only:
+
+```text
+OracleResult {
+  claim,
+  claim_digest
+}
+```
+
+The checker verifies that `claim` is byte-for-byte the node claim after
+canonicalization. Richer oracle result mappings require a separate declarative
+mapping language whose syntax is canonicalized into the theory digest.
+
 ## Canonical Serialization
 
 Canonical serialization is framework-owned for:
@@ -401,9 +419,10 @@ JSON is acceptable as the first external certificate format. A binary encoding
 may be added later only if it is a byte-for-byte canonical encoding of the same
 abstract data model.
 
-## First Validation Target
+## First Full Validation Target
 
-The first concrete theory should be STLC.
+The first full concrete theory should be STLC, after the derivation checker has
+binder replay and lookup-as-evidence.
 
 STLC must require no framework changes beyond ordinary declarations for:
 
