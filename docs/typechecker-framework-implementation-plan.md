@@ -156,6 +156,8 @@ Acceptance bar:
 - rejects binder capture;
 - rejects context lookup unless represented as evidence.
 
+Current spec: `docs/typechecker-framework-binder-replay.md`.
+
 ### F5: System F Replay
 
 Use the same checker to replay the System F subset.
