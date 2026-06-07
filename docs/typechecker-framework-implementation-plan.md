@@ -190,6 +190,8 @@ Acceptance bar:
 - every Crescent rule is a theory rule schema;
 - every non-structural computation is evidence or an oracle.
 
+Current spec: `docs/typechecker-framework-crescent-spike.md`.
+
 ## Commit Strategy
 
 Each milestone should be committed independently:

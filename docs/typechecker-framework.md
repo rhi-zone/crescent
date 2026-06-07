@@ -230,7 +230,9 @@ readiness:
    Binder replay spec: `docs/typechecker-framework-binder-replay.md`.
 6. Define System F replay fixtures. System F replay spec:
    `docs/typechecker-framework-system-f-replay.md`.
-7. Only then start `lib/type/framework/` implementation.
+7. Define the tiny Crescent theory spike. Crescent spike spec:
+   `docs/typechecker-framework-crescent-spike.md`.
+8. Only then start `lib/type/framework/` implementation.
 
 ## Non-Goals
 
