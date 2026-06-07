@@ -1,0 +1,426 @@
+# Typechecker Framework Data Model
+
+This document refines `docs/typechecker-framework.md` into the first concrete
+framework-level data model.
+
+The data model is intentionally type-system-agnostic. It must be able to host
+STLC, System F, nominal OO sketches, structural flow sketches, and eventually a
+Crescent theory without baking any of those systems into the framework.
+
+## Boundary
+
+Framework-owned concepts:
+
+- theories;
+- symbols;
+- syntactic categories;
+- binders and scopes;
+- terms;
+- contexts;
+- judgments;
+- rule schemas;
+- evidence nodes;
+- roots;
+- explicit oracle nodes;
+- canonical serialization.
+
+Theory-owned concepts:
+
+- which categories exist;
+- which term heads exist;
+- which judgments exist;
+- which rules are admitted;
+- which oracle kinds are admissible;
+- what theorem or soundness obligation the accepted roots are meant to support.
+
+Frontend-owned concepts:
+
+- parsing;
+- inference;
+- overload resolution;
+- constraint solving;
+- source spans;
+- user-facing diagnostics beyond replay failure.
+
+## Theory Spec
+
+A theory spec is declarative input to the framework:
+
+```text
+TheorySpec {
+  theory_id,
+  version,
+  categories,
+  term_heads,
+  context_schemas,
+  judgment_schemas,
+  rule_schemas,
+  oracle_schemas,
+  root_schemas
+}
+```
+
+The framework does not assume that a theory has a category named `Type`, a
+subtyping judgment, effects, classes, rows, unions, or records. If those exist,
+they are ordinary theory declarations.
+
+Theory IDs and versions are part of certificate digests. Changing any rule,
+category, binder convention, or oracle policy changes the accepted evidence
+language.
+
+## Categories
+
+A category is a syntactic class.
+
+Examples from possible theories:
+
+```text
+STLC:       Term, Ty
+System F:  Term, Ty, Kind
+OO sketch: Expr, ClassName, MethodSig, ClassTable
+Flow:      Expr, Ty, Fact, Place
+```
+
+The framework only checks that a term inhabits the category claimed by its head
+and by the enclosing rule schema. Category meaning is theory-local.
+
+## Symbols
+
+Symbols are globally named theory declarations or locally bound variables.
+
+```text
+Symbol {
+  namespace,
+  name,
+  category
+}
+```
+
+Namespaces are framework-level so unrelated categories cannot accidentally share
+meaning. A theory may choose simple namespaces such as `term_var` and `type_var`,
+or richer namespaces such as `class`, `method`, `field`, and `effect_label`.
+
+## Terms
+
+A term is a category-indexed tree.
+
+```text
+Term {
+  category,
+  head,
+  fields
+}
+```
+
+Each `head` is declared by the theory:
+
+```text
+TermHead {
+  name,
+  result_category,
+  field_schemas
+}
+```
+
+Fields may contain:
+
+- literals admitted by the theory spec;
+- symbols;
+- subterms;
+- lists of subterms;
+- binders;
+- scoped subterms.
+
+The framework checks structural well-formedness. It does not reduce, compare,
+subtype, normalize, or evaluate terms unless those operations are represented by
+theory judgments and evidence.
+
+## Binders And Scope
+
+Binders are framework-level because alpha-equivalence and capture-avoiding
+substitution are cross-cutting requirements.
+
+The framework represents scoped fields explicitly:
+
+```text
+Scoped {
+  binders,
+  body
+}
+```
+
+A binder declares:
+
+```text
+Binder {
+  namespace,
+  category,
+  fields
+}
+```
+
+`fields` are checked against a theory-declared binder schema. A binder may have
+no annotation, one type annotation, a pattern shape, a telescope tail, module
+metadata, or any other theory-owned metadata. The framework owns only the
+binding identity, namespace, category, and scope boundary.
+
+Examples:
+
+```text
+lambda: Scoped([x : term_var annotated by Ty], body : Term)
+forall: Scoped([A : type_var annotated by Kind], body : Ty)
+```
+
+Canonical serialization must be alpha-stable. The first implementation should
+use a canonical binder index form internally, even if frontends use source names
+for diagnostics.
+
+## Contexts
+
+Contexts are theory-declared structures. The framework provides a simple
+sequence-shaped context representation because many theories need it, but
+sequence behavior is not semantic by itself.
+
+```text
+Context {
+  shape,
+  fields
+}
+
+ContextShape {
+  name,
+  fields
+}
+```
+
+Examples:
+
+```text
+term_binding(x, Ty)
+type_binding(A, Kind)
+class_decl(C, ClassInfo)
+flow_fact(place, Fact)
+heap_cell(location, Ty)
+```
+
+For a sequence-shaped context, the framework can check only structural facts:
+entry shape, field categories, binder scope, and literal equality. It does not
+decide lookup, weakening, exchange, inheritance, fact join, heap update, class
+table search, flow merge, or environment priority. Those are theory judgments
+with evidence or explicit oracle boundaries.
+
+## Judgments
+
+A judgment schema declares a family of claims.
+
+```text
+JudgmentSchema {
+  name,
+  parameters
+}
+```
+
+Examples:
+
+```text
+WF(ctx, term)
+HasType(ctx, expr, ty)
+Subtype(ctx, left_ty, right_ty)
+Reduces(ctx, from, to)
+Assignable(ctx, place, value_ty, next_ctx)
+```
+
+The framework treats these as opaque predicates with typed parameters. It only
+knows how to check that a concrete claim matches the declared schema.
+
+## Rule Schemas
+
+A rule schema is a declarative constructor for evidence.
+
+```text
+RuleSchema {
+  name,
+  conclusion_pattern,
+  premise_patterns,
+  structural_conditions
+}
+```
+
+Rule schemas may use metavariables. The framework matches the conclusion claim
+and premises against rule patterns under an explicit metavariable discipline.
+
+```text
+Metavariable {
+  name,
+  category,
+  mode
+}
+```
+
+Modes:
+
+- `input`: must be fixed by the conclusion or an earlier premise;
+- `output`: may be produced by a premise and used by later premises or the
+  conclusion;
+- `fresh`: generated by the rule subject to freshness constraints.
+
+Repeated metavariable occurrences impose syntactic equality after
+alpha-normalization. If a relation cannot be expressed by pattern matching,
+freshness, or premise ordering, it must be a separate judgment with evidence or
+an oracle.
+
+Allowed structural conditions are narrow framework-known checks only:
+
+- category equality;
+- symbol freshness;
+- alpha-equivalence;
+- capture-avoiding substitution of bound references into syntax;
+- literal equality;
+- list length equality;
+- digest equality.
+
+No semantic lookup is a framework side condition. Context lookup, substitution
+lemmas, overload candidate selection, subtyping, reduction, field lookup,
+inheritance, flow-fact movement, and heap updates must be represented as
+ordinary theory judgments with evidence, or as explicit oracle nodes.
+
+## Evidence Nodes
+
+Evidence is a DAG of claims.
+
+```text
+EvidenceNode {
+  node_id,
+  theory_id,
+  judgment,
+  claim,
+  justification
+}
+```
+
+`justification` is one of:
+
+```text
+RuleApplication {
+  rule_name,
+  premise_node_ids
+}
+
+OracleApplication {
+  oracle_kind,
+  input_payload,
+  input_digest,
+  result_payload,
+  result_digest,
+  trust_policy
+}
+```
+
+Rule applications are checked by replaying the declared rule schema. Oracle
+applications are accepted only if the theory declares that oracle kind for the
+target judgment and the active trust policy admits it.
+
+The framework never treats a missing premise as a request to infer one.
+
+## Roots
+
+Roots state which accepted claims matter.
+
+```text
+Root {
+  root_kind,
+  claim_node_id
+}
+```
+
+Examples:
+
+```text
+program_has_type
+module_exports
+declaration_is_safe
+class_table_well_formed
+```
+
+Root kinds are theory-declared. The framework checks that each root points to an
+accepted evidence node with the judgment shape required by that root schema.
+
+## Oracles
+
+An oracle is an explicit trust boundary, not a side condition.
+
+```text
+OracleSchema {
+  oracle_kind,
+  allowed_judgments,
+  input_schema,
+  result_schema,
+  trust_policy_schema
+}
+```
+
+Examples:
+
+```text
+SMTValidity
+ExternalDeclaration
+HostRuntimeFact
+LegacyCheckerResult
+UserUnsafeAssertion
+```
+
+Each oracle application must carry enough digested input to make the trusted
+claim auditable and cache-safe. Digests do not replace payloads in the external
+certificate; they bind inspectable payloads to cache keys and root digests. A
+future binary encoding may optimize this, but the external interchange format
+should remain deterministic and inspectable.
+
+## Canonical Serialization
+
+Canonical serialization is framework-owned for:
+
+- theory specs;
+- terms;
+- contexts;
+- claims;
+- evidence nodes;
+- roots;
+- oracle applications.
+
+Requirements:
+
+- deterministic map ordering;
+- explicit tags for every sum variant;
+- alpha-stable binder encoding;
+- no implicit numeric widening;
+- no host-language table identity;
+- digest includes theory ID and version;
+- digest includes the selected root set.
+
+JSON is acceptable as the first external certificate format. A binary encoding
+may be added later only if it is a byte-for-byte canonical encoding of the same
+abstract data model.
+
+## First Validation Target
+
+The first concrete theory should be STLC.
+
+STLC must require no framework changes beyond ordinary declarations for:
+
+- categories `Term` and `Ty`;
+- term heads for variables, lambdas, applications, and arrows;
+- context entries for term variables;
+- judgments for well-formed types and typing;
+- rules for variable lookup, arrow introduction, and arrow elimination.
+
+If STLC needs a framework feature not listed here, that feature is probably a
+real framework primitive. If STLC needs a Crescent-specific concept, the data
+model is already wrong.
+
+## Open Problems
+
+- Whether rule schemas need a stronger pattern language before System F.
+- How much substitution machinery should be framework-owned beyond
+  capture-avoidance and alpha-equivalence.
+- Whether oracle trust policies are framework-global or theory-local with a
+  framework-defined shape.

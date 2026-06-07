@@ -31,10 +31,15 @@ Frontend
   source parser/elaborator that emits theory-specific evidence
 ```
 
-Only the framework and the selected theory rules are trusted. Frontends,
-inference engines, solvers, annotation parsers, and IDE integrations are
-evidence producers. They may be useful and complex, but they are not trusted for
-soundness.
+Only the framework checker and the selected declarative theory spec are trusted
+by default. Frontends, inference engines, solvers, annotation parsers, and IDE
+integrations are evidence producers. They may be useful and complex, but they
+are not trusted for soundness.
+
+If a theory needs non-structural computation that cannot be expressed as
+declarative rules, that computation must appear as evidence-producing code whose
+outputs are checked, or as an explicit oracle/trusted plugin boundary declared
+by the theory.
 
 ## Framework Responsibilities
 
@@ -114,8 +119,8 @@ The framework checks that:
 - every referenced symbol has the declared category;
 - every premise proves the judgment required by the rule schema;
 - binders and substitutions are well-scoped;
-- rule-specific side conditions are discharged by the theory checker or by an
-  explicit trusted oracle;
+- side conditions are framework-structural, proven by premise judgments, or
+  discharged by an explicit trusted oracle;
 - roots point at accepted evidence.
 
 The framework does not search for missing proofs unless a theory explicitly
@@ -192,7 +197,8 @@ framework experiment or a Crescent-theory instance.
 The next work is design, not implementation:
 
 1. Specify the framework data model: categories, judgments, rules, terms,
-   binders, contexts, evidence nodes, roots, and oracle nodes.
+   binders, contexts, evidence nodes, roots, and oracle nodes. Current draft:
+   `docs/typechecker-framework-data-model.md`.
 2. Specify the minimal derivation checker independent of any concrete theory.
 3. Instantiate STLC as the first theory.
 4. Instantiate a small System F subset as the second theory.
