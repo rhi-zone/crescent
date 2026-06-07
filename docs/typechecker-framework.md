@@ -228,7 +228,9 @@ readiness:
 4. Define table-native accepted/rejected fixtures for a combinator fragment.
 5. Define table-native accepted/rejected fixtures for the STLC theory.
    Binder replay spec: `docs/typechecker-framework-binder-replay.md`.
-6. Only then start `lib/type/framework/` implementation.
+6. Define System F replay fixtures. System F replay spec:
+   `docs/typechecker-framework-system-f-replay.md`.
+7. Only then start `lib/type/framework/` implementation.
 
 ## Non-Goals
 

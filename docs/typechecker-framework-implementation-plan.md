@@ -169,6 +169,8 @@ Acceptance bar:
 - rejects capture-prone substitution unless alpha-renamed structurally;
 - rejects hidden definitional equality.
 
+Current spec: `docs/typechecker-framework-system-f-replay.md`.
+
 ### F6: Crescent Theory Spike
 
 Only after F5, define a tiny Crescent theory fixture set.
