@@ -138,8 +138,9 @@ For each rule:
 - conclusion judgment must match the rule's declared judgment;
 - premise judgments must name declared judgments;
 - patterns may reference only declared metavariables;
-- structural conditions may reference only declared metavariables or fields
-  selected by patterns.
+- structural condition operands must be explicit `operand_meta` or
+  `operand_field` objects;
+- structural condition operands may reference only declared metavariables.
 
 F2 checks pattern shape but does not perform rule replay or determine whether a
 rule is sound.
@@ -177,17 +178,22 @@ F0/F2 do not admit variadic scoped openings.
 
 Validate condition operands by tag:
 
-- `cond_category_eq`: operands name category metavariables;
-- `cond_binder_eq`: operands name binder metavariables;
-- `cond_binder_neq`: operands name binder metavariables;
-- `cond_alpha_eq`: operands name syntax metavariables;
-- `cond_subst`: source/replacement/expected_result name syntax
-  metavariables, binder names a binder metavariable;
-- `cond_literal_eq`: operands name scalar metavariables or literal fields;
-- `cond_list_len_eq`: operands name list metavariables or list fields;
-- `cond_digest_eq`: operands name digest scalar fields.
+- `operand_meta.name` names a declared metavariable;
+- `operand_field.base` names a declared metavariable;
+- `operand_field.path` is a non-empty dense array of strings;
+- `cond_category_eq`: operands are category-compatible;
+- `cond_binder_eq`: operands are binder-compatible;
+- `cond_binder_neq`: operands are binder-compatible;
+- `cond_alpha_eq`: operands are syntax-compatible;
+- `cond_subst`: source/replacement/expected_result are syntax-compatible,
+  binder is binder-compatible;
+- `cond_literal_eq`: operands are scalar-compatible;
+- `cond_list_len_eq`: operands are list-compatible;
+- `cond_digest_eq`: operands are digest-scalar-compatible.
 
-F2 does not execute conditions.
+F2 does not execute conditions. For `operand_field`, F2 does not prove that
+the selected path exists for every future match; it validates only the explicit
+operand shape and declared base metavariable.
 
 ## Oracle Declaration Validation
 

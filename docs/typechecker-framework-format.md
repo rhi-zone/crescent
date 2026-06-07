@@ -424,18 +424,25 @@ optional fields, or unordered matching.
 
 ```text
 StructuralCondition =
-  { tag = "cond_category_eq", left: string, right: string }
-| { tag = "cond_binder_eq", left: string, right: string }
-| { tag = "cond_binder_neq", left: string, right: string }
-| { tag = "cond_alpha_eq", left: string, right: string }
-| { tag = "cond_subst", source: string, binder: string, replacement: string, expected_result: string }
-| { tag = "cond_literal_eq", left: string, right: string }
-| { tag = "cond_list_len_eq", left: string, right: string }
-| { tag = "cond_digest_eq", left: string, right: string }
+  { tag = "cond_category_eq", left: ConditionOperand, right: ConditionOperand }
+| { tag = "cond_binder_eq", left: ConditionOperand, right: ConditionOperand }
+| { tag = "cond_binder_neq", left: ConditionOperand, right: ConditionOperand }
+| { tag = "cond_alpha_eq", left: ConditionOperand, right: ConditionOperand }
+| { tag = "cond_subst", source: ConditionOperand, binder: ConditionOperand, replacement: ConditionOperand, expected_result: ConditionOperand }
+| { tag = "cond_literal_eq", left: ConditionOperand, right: ConditionOperand }
+| { tag = "cond_list_len_eq", left: ConditionOperand, right: ConditionOperand }
+| { tag = "cond_digest_eq", left: ConditionOperand, right: ConditionOperand }
+
+ConditionOperand =
+  { tag = "operand_meta", name: string }
+| { tag = "operand_field", base: string, path: string[] }
 ```
 
-Condition operands are metavariable names or named object fields selected by a
-rule pattern.
+`operand_meta` names a rule metavariable. `operand_field` selects a nested
+field from the value bound to a metavariable by a rule pattern. `path` is an
+ordered sequence of object/term field names; F2 validates only the operand
+shape and base metavariable existence, while F3+ decides whether the path is
+valid for a matched value.
 
 ## Evidence Nodes
 

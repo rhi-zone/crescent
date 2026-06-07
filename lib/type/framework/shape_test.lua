@@ -172,4 +172,111 @@ T.describe("type.framework shape validation", function()
 		T.eq(indexes, nil)
 		T.ok(has_error(errors, "expected judgment has_type"), table.concat(errors or {}, "\n"))
 	end)
+
+	T.it("accepts explicit structural condition operands", function()
+		local theory = base_theory()
+		theory.rules = {
+			{
+				tag = "rule",
+				name = "unit",
+				judgment = "has_type",
+				metavariables = {
+					{ tag = "metavariable", name = "ty", kind = "category", category = "Ty", mode = "input" },
+				},
+				conclusion = {
+					tag = "claim_pattern",
+					judgment = "has_type",
+					args = {
+						ctx = { tag = "p_term", head = "EmptyCtx", fields = {} },
+						term = { tag = "p_term", head = "UnitTerm", fields = {} },
+						type = { tag = "p_meta", name = "ty" },
+					},
+				},
+				premises = {},
+				structural_conditions = {
+					{
+						tag = "cond_category_eq",
+						left = { tag = "operand_meta", name = "ty" },
+						right = { tag = "operand_meta", name = "ty" },
+					},
+				},
+			},
+		}
+		local indexes, errors = shape.validate_theory(theory)
+		T.ok(indexes, table.concat(errors or {}, "\n"))
+	end)
+
+	T.it("rejects legacy string structural condition operands", function()
+		local theory = base_theory()
+		theory.rules = {
+			{
+				tag = "rule",
+				name = "bad_operand",
+				judgment = "has_type",
+				metavariables = {
+					{ tag = "metavariable", name = "ty", kind = "category", category = "Ty", mode = "input" },
+				},
+				conclusion = theory.roots[1].required_claim_pattern,
+				premises = {},
+				structural_conditions = {
+					{ tag = "cond_category_eq", left = "ty", right = "ty" },
+				},
+			},
+		}
+		local indexes, errors = shape.validate_theory(theory)
+		T.eq(indexes, nil)
+		T.ok(has_error(errors, "expected table"), table.concat(errors or {}, "\n"))
+	end)
+
+	T.it("rejects direct operand metavariables with the wrong kind", function()
+		local theory = base_theory()
+		theory.rules = {
+			{
+				tag = "rule",
+				name = "bad_kind",
+				judgment = "has_type",
+				metavariables = {
+					{ tag = "metavariable", name = "b", kind = "binder", namespace = "term_var", mode = "input" },
+				},
+				conclusion = theory.roots[1].required_claim_pattern,
+				premises = {},
+				structural_conditions = {
+					{
+						tag = "cond_category_eq",
+						left = { tag = "operand_meta", name = "b" },
+						right = { tag = "operand_meta", name = "b" },
+					},
+				},
+			},
+		}
+		local indexes, errors = shape.validate_theory(theory)
+		T.eq(indexes, nil)
+		T.ok(has_error(errors, "expected category metavariable"), table.concat(errors or {}, "\n"))
+	end)
+
+	T.it("rejects field operands with empty paths", function()
+		local theory = base_theory()
+		theory.rules = {
+			{
+				tag = "rule",
+				name = "bad_field_path",
+				judgment = "has_type",
+				metavariables = {
+					{ tag = "metavariable", name = "term", kind = "category", category = "Tm", mode = "input" },
+				},
+				conclusion = theory.roots[1].required_claim_pattern,
+				premises = {},
+				structural_conditions = {
+					{
+						tag = "cond_literal_eq",
+						left = { tag = "operand_field", base = "term", path = {} },
+						right = { tag = "operand_field", base = "term", path = { "tag" } },
+					},
+				},
+			},
+		}
+		local indexes, errors = shape.validate_theory(theory)
+		T.eq(indexes, nil)
+		T.ok(has_error(errors, "path must be non-empty"), table.concat(errors or {}, "\n"))
+	end)
 end)

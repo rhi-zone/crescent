@@ -49,6 +49,17 @@ local PATTERN_TAGS = {
 	p_enum = true,
 }
 
+local CONDITION_TAGS = {
+	cond_category_eq = true,
+	cond_binder_eq = true,
+	cond_binder_neq = true,
+	cond_alpha_eq = true,
+	cond_subst = true,
+	cond_literal_eq = true,
+	cond_list_len_eq = true,
+	cond_digest_eq = true,
+}
+
 local function new_state()
 	return { errors = {} }
 end
@@ -326,6 +337,27 @@ local function expect_metavariable(st, mvs, name, kind, path)
 	end
 end
 
+local function validate_condition_operand(st, operand, path, mvs, direct_kind)
+	if not table_ok(st, operand, path) then return end
+	if operand.tag == "operand_meta" then
+		check_fields(st, operand, path, { "tag", "name" })
+		expect_metavariable(st, mvs, operand.name, direct_kind, path .. ".name")
+	elseif operand.tag == "operand_field" then
+		check_fields(st, operand, path, { "tag", "base", "path" })
+		expect_metavariable(st, mvs, operand.base, nil, path .. ".base")
+		if expect_array(st, operand, "path", path) then
+			if #operand.path == 0 then err(st, path .. ".path", "field operand path must be non-empty") end
+			for i, segment in ipairs(operand.path) do
+				if type(segment) ~= "string" then
+					err(st, path .. ".path[" .. i .. "]", "expected string")
+				end
+			end
+		end
+	else
+		err(st, path .. ".tag", "unknown condition operand tag")
+	end
+end
+
 local function validate_pattern_map(st, fields, expected_names, path, indexes, mvs)
 	if not table_ok(st, fields, path) then return end
 	if #fields > 0 and is_array(fields) then
@@ -457,6 +489,33 @@ local function validate_premise(st, premise, path, indexes, mvs)
 	end
 end
 
+local function validate_structural_condition(st, condition, path, mvs)
+	if not table_ok(st, condition, path) then return end
+	if type(condition.tag) ~= "string" or not CONDITION_TAGS[condition.tag] then
+		err(st, path .. ".tag", "unknown structural condition tag")
+		return
+	end
+	if condition.tag == "cond_subst" then
+		check_fields(st, condition, path, { "tag", "source", "binder", "replacement", "expected_result" })
+		validate_condition_operand(st, condition.source, path .. ".source", mvs, nil)
+		validate_condition_operand(st, condition.binder, path .. ".binder", mvs, "binder")
+		validate_condition_operand(st, condition.replacement, path .. ".replacement", mvs, nil)
+		validate_condition_operand(st, condition.expected_result, path .. ".expected_result", mvs, nil)
+	else
+		check_fields(st, condition, path, { "tag", "left", "right" })
+		local kind = nil
+		if condition.tag == "cond_category_eq" then
+			kind = "category"
+		elseif condition.tag == "cond_binder_eq" or condition.tag == "cond_binder_neq" then
+			kind = "binder"
+		elseif condition.tag == "cond_literal_eq" or condition.tag == "cond_digest_eq" then
+			kind = "scalar"
+		end
+		validate_condition_operand(st, condition.left, path .. ".left", mvs, kind)
+		validate_condition_operand(st, condition.right, path .. ".right", mvs, kind)
+	end
+end
+
 local function validate_rules(st, theory, indexes)
 	for i, rule in ipairs(theory.rules) do
 		local path = "theory.rules[" .. i .. "]"
@@ -475,7 +534,11 @@ local function validate_rules(st, theory, indexes)
 				validate_premise(st, premise, path .. ".premises[" .. j .. "]", indexes, mvs)
 			end
 		end
-		expect_array(st, rule, "structural_conditions", path)
+		if expect_array(st, rule, "structural_conditions", path) then
+			for j, condition in ipairs(rule.structural_conditions) do
+				validate_structural_condition(st, condition, path .. ".structural_conditions[" .. j .. "]", mvs)
+			end
+		end
 	end
 end
 
