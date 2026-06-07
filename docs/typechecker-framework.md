@@ -219,10 +219,12 @@ readiness:
    certificates. Implementation plan:
    `docs/typechecker-framework-implementation-plan.md`. Current format spec:
    `docs/typechecker-framework-format.md`.
-2. Specify the minimal first implementation slice for the derivation checker.
-3. Define table-native accepted/rejected fixtures for a combinator fragment.
-4. Define table-native accepted/rejected fixtures for the STLC theory.
-5. Only then start `lib/type/framework/` implementation.
+2. Specify canonical serialization for the F0 object model. Current spec:
+   `docs/typechecker-framework-canonicalization.md`.
+3. Specify the minimal first implementation slice for the derivation checker.
+4. Define table-native accepted/rejected fixtures for a combinator fragment.
+5. Define table-native accepted/rejected fixtures for the STLC theory.
+6. Only then start `lib/type/framework/` implementation.
 
 ## Non-Goals
 

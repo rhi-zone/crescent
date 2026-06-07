@@ -262,8 +262,8 @@ The checker rejects:
 - roots that depend on rejected or unchecked nodes.
 
 Topological replay is an implementation strategy, not certificate semantics.
-The canonical root digest must be independent of source ordering when node IDs
-and dependency edges are the same.
+The canonical root digest must be independent of source ordering and
+artifact-local node labels.
 
 ## Evidence Identity
 
@@ -274,18 +274,18 @@ An evidence node digest includes:
 
 - framework version;
 - theory digest;
-- node ID policy;
 - judgment digest;
 - claim digest;
 - justification tag;
 - rule name or oracle kind;
-- ordered premise edge list;
+- ordered premise evidence digest list;
 - oracle input and result payload digests, if any.
 
 Premise order is semantically significant unless the rule schema declares an
 explicit commutative premise set. Duplicate premise references are rejected in
 the first checker. Rejected nodes and unreachable accepted nodes do not affect a
-root digest. A root-set digest sorts accepted root digests canonically.
+root digest. Artifact-local `node_id` labels do not affect semantic evidence or
+root digests. A root-set digest sorts accepted root digests canonically.
 
 ## Root Validation
 

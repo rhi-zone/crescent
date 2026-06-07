@@ -96,6 +96,8 @@ Acceptance bar:
 F1 should reuse lessons from `lib/type/v7_mr0/canonical.lua`, not its MR0 object
 model.
 
+Current spec: `docs/typechecker-framework-canonicalization.md`.
+
 ### F2: Shape Validator
 
 Implement theory and certificate shape validation.
