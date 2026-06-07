@@ -203,7 +203,8 @@ The next work is design, not implementation:
    Current draft: `docs/typechecker-framework-derivation-checker.md`.
 3. Instantiate STLC as the first theory. Current draft:
    `docs/typechecker-framework-stlc.md`.
-4. Instantiate a small System F subset as the second theory.
+4. Instantiate a small System F subset as the second theory. Current draft:
+   `docs/typechecker-framework-system-f.md`.
 5. Audit whether the v7 MR0 verifier is an instance of the framework or a
    theory-specific prototype that should remain isolated.
 
