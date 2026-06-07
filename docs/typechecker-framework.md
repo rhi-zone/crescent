@@ -192,25 +192,36 @@ framework document, then define or refine a theory.
 No new v7 MR0 feature should be implemented unless it is explicitly framed as a
 framework experiment or a Crescent-theory instance.
 
-## Immediate Roadmap
+## Completed First Pass
 
-The next work is design, not implementation:
+The first framework design pass produced:
 
-1. Specify the framework data model: categories, judgments, rules, terms,
-   binders, contexts, evidence nodes, roots, and oracle nodes. Current draft:
+1. Framework data model:
    `docs/typechecker-framework-data-model.md`.
-2. Specify the minimal derivation checker independent of any concrete theory.
-   Current draft: `docs/typechecker-framework-derivation-checker.md`.
-3. Instantiate STLC as the first theory. Current draft:
+2. Framework derivation checker:
+   `docs/typechecker-framework-derivation-checker.md`.
+3. STLC validation theory:
    `docs/typechecker-framework-stlc.md`.
-4. Instantiate a small System F subset as the second theory. Current draft:
+4. System F validation theory:
    `docs/typechecker-framework-system-f.md`.
-5. Audit whether the v7 MR0 verifier is an instance of the framework or a
-   theory-specific prototype that should remain isolated. Current audit:
+5. v7 MR0 framework audit:
    `docs/typechecker-framework-v7-mr0-audit.md`.
 
 Implementation starts only after STLC and System F can be written as theories
 without Crescent-specific concepts.
+
+## Next Roadmap
+
+The next work is still design-first, but it can now target implementation
+readiness:
+
+1. Specify the concrete external format for framework theory specs and
+   certificates. Implementation plan:
+   `docs/typechecker-framework-implementation-plan.md`.
+2. Specify the minimal first implementation slice for the derivation checker.
+3. Define table-native accepted/rejected fixtures for a combinator fragment.
+4. Define table-native accepted/rejected fixtures for the STLC theory.
+5. Only then start `lib/type/framework/` implementation.
 
 ## Non-Goals
 
