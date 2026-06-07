@@ -70,7 +70,8 @@ The framework checks:
 - term heads reference declared categories;
 - binder schemas reference declared namespaces and categories;
 - context shapes reference declared field schemas;
-- judgment schemas reference declared categories or framework scalar kinds;
+- judgment schemas reference declared categories, context shapes,
+  binder-reference sorts, or framework scalar kinds;
 - rule schemas reference declared judgments;
 - rule metavariables have declared categories and modes;
 - oracle schemas reference declared judgments;
@@ -89,6 +90,7 @@ The framework checks:
 - every term head exists and receives fields matching its schema;
 - every scoped field binds only declared binder schemas;
 - every bound reference resolves to an in-scope binder;
+- every claim scope is well formed;
 - every context matches a declared context shape;
 - every claim matches a declared judgment schema;
 - every evidence node has a unique ID;
@@ -166,8 +168,10 @@ The checker:
    constraints.
 7. Checks repeated metavariable occurrences by alpha-normalized syntactic
    equality.
-8. Checks narrow framework structural conditions.
-9. Accepts the node if all premises are already accepted and all checks pass.
+8. Opens scoped fields only where the rule schema declares scoped destructuring,
+   and checks selected premise claims under the extended binder scope.
+9. Checks narrow framework structural conditions.
+10. Accepts the node if all premises are already accepted and all checks pass.
 
 Rule replay is deterministic. If more than one match is possible, the rule
 schema is ambiguous and the certificate is rejected unless the theory has
@@ -216,6 +220,8 @@ theory semantics:
 
 - category equality;
 - symbol freshness within a declared namespace and scope;
+- binder identity equality after alpha-normalization;
+- binder identity inequality after alpha-normalization;
 - alpha-equivalence;
 - explicit syntactic substitution checks;
 - literal equality;
@@ -290,7 +296,8 @@ Each root schema declares:
 RootSchema {
   root_kind,
   required_judgment,
-  required_claim_pattern
+  required_claim_pattern,
+  scope_policy
 }
 ```
 
@@ -298,6 +305,7 @@ The checker accepts a root only if:
 
 - the root kind is declared;
 - the referenced evidence node is accepted;
+- the node claim scope satisfies the root scope policy;
 - the node judgment matches the root schema;
 - the node claim matches the root claim pattern;
 - every oracle dependency is admitted by the active trust policy;

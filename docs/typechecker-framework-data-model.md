@@ -220,6 +220,9 @@ JudgmentSchema {
 }
 ```
 
+Parameters may reference declared categories, context shapes, binder-reference
+sorts, and framework scalar kinds.
+
 Examples:
 
 ```text
@@ -232,6 +235,21 @@ Assignable(ctx, place, value_ty, next_ctx)
 
 The framework treats these as opaque predicates with typed parameters. It only
 knows how to check that a concrete claim matches the declared schema.
+
+Concrete claims are scoped objects:
+
+```text
+Claim {
+  scope,
+  judgment,
+  arguments
+}
+```
+
+`scope` is an ordered binder environment. Bound references in claim arguments
+must resolve in that scope or in a nested scoped term. Root schemas may require
+closed claims; premise evidence may be open under binders introduced by scoped
+rule-pattern destructuring.
 
 ## Rule Schemas
 
@@ -269,10 +287,23 @@ alpha-normalization. If a relation cannot be expressed by pattern matching,
 freshness, or premise ordering, it must be a separate judgment with evidence or
 an oracle.
 
+Rule patterns may destructure scoped fields:
+
+```text
+open scoped_field as (binder, body) in premise_patterns
+```
+
+The opened binder extends the scope of the selected premise patterns. Reusing
+that binder metavariable elsewhere in the rule imposes binder-identity equality
+after alpha-normalization. This is framework-owned scope plumbing, not a
+language-specific typing rule.
+
 Allowed structural conditions are narrow framework-known checks only:
 
 - category equality;
 - symbol freshness;
+- binder identity equality;
+- binder identity inequality;
 - alpha-equivalence;
 - explicit syntactic substitution checks over bound references;
 - literal equality;
