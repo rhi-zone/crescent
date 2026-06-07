@@ -136,6 +136,8 @@ Acceptance bar:
 - rejects unknown rule names;
 - rejects ambiguous or unsupported pattern forms.
 
+Current spec: `docs/typechecker-framework-first-order-replay.md`.
+
 ### F4: Binder And Scoped Claim Replay
 
 Add:

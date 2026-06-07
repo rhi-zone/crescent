@@ -223,6 +223,8 @@ readiness:
    `docs/typechecker-framework-canonicalization.md`.
 3. Specify the minimal first implementation slice for the derivation checker.
    Shape-validator spec: `docs/typechecker-framework-shape-validator.md`.
+   First-order replay spec:
+   `docs/typechecker-framework-first-order-replay.md`.
 4. Define table-native accepted/rejected fixtures for a combinator fragment.
 5. Define table-native accepted/rejected fixtures for the STLC theory.
 6. Only then start `lib/type/framework/` implementation.
