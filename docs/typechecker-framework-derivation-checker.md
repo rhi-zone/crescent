@@ -21,11 +21,11 @@ CheckInput {
 
 `framework_version` selects the framework data model and canonical encoding.
 
-`theory_spec` declares categories, term heads, context shapes, judgment schemas,
-rule schemas, oracle schemas, and root schemas.
+`theory_spec` declares categories, term heads, context-role categories,
+judgment schemas, rule schemas, oracle schemas, and root schemas.
 
-`certificate` contains terms, contexts, claims, evidence nodes, oracle payloads,
-and roots.
+`certificate` contains terms, claims, evidence nodes, oracle payloads, and
+roots. Contexts are ordinary terms whose category has role `context`.
 
 `trust_policy` selects which declared oracle kinds are admissible for this run.
 
@@ -69,9 +69,9 @@ The framework checks:
 - category names are unique;
 - term heads reference declared categories;
 - binder schemas reference declared namespaces and categories;
-- context shapes reference declared field schemas;
-- judgment schemas reference declared categories, context shapes,
-  binder-reference sorts, or framework scalar kinds;
+- categories marked with role `context` have ordinary declared term heads;
+- judgment schemas reference declared categories, binder-reference sorts, or
+  framework scalar kinds;
 - rule schemas reference declared judgments;
 - rule metavariables have declared categories and modes;
 - oracle schemas reference declared judgments;
@@ -91,7 +91,8 @@ The framework checks:
 - every scoped field binds only declared binder schemas;
 - every bound reference resolves to an in-scope binder;
 - every claim scope is well formed;
-- every context matches a declared context shape;
+- every context-role value is an ordinary well-formed term of a category marked
+  `context`;
 - every claim matches a declared judgment schema;
 - every evidence node has a unique ID;
 - every premise reference points to an existing evidence node;
@@ -110,7 +111,6 @@ The checker computes canonical forms for:
 
 - theory spec;
 - terms;
-- contexts;
 - claims;
 - evidence nodes;
 - oracle payloads;
@@ -355,7 +355,7 @@ The first derivation checker prototype should accept only:
 - one theory spec loaded from a canonical external file;
 - categories;
 - term heads without binders;
-- sequence-shaped contexts only as opaque structured claim parameters;
+- context-role terms only as opaque structured claim parameters;
 - judgment schemas;
 - rule schemas with `input` metavariables only;
 - first-order constructor patterns with fixed-arity fields only;
@@ -366,7 +366,8 @@ The first derivation checker prototype should accept only:
 This is enough to validate a tiny combinator fragment before adding STLC
 binders. STLC should be the first real theory after binder replay is present.
 The first slice must not claim to validate context extension, lookup, weakening,
-or exchange; those require explicit replayed judgments.
+or exchange; context-role terms are just syntax until explicit judgments replay
+those relations.
 
 ## Open Problems
 

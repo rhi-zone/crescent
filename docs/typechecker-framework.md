@@ -48,7 +48,7 @@ The framework may define:
 - symbols and namespaces;
 - syntactic categories;
 - binders and scopes;
-- contexts;
+- context roles for theory-declared syntax;
 - judgments;
 - rule schemas;
 - derivation/evidence DAGs;

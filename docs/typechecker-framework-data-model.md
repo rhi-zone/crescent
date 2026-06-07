@@ -16,7 +16,7 @@ Framework-owned concepts:
 - syntactic categories;
 - binders and scopes;
 - terms;
-- contexts;
+- context roles for theory-declared syntax;
 - judgments;
 - rule schemas;
 - evidence nodes;
@@ -52,7 +52,6 @@ TheorySpec {
   version,
   categories,
   term_heads,
-  context_schemas,
   judgment_schemas,
   rule_schemas,
   oracle_schemas,
@@ -177,20 +176,19 @@ for diagnostics.
 
 ## Contexts
 
-Contexts are theory-declared structures. The framework provides a simple
-sequence-shaped context representation because many theories need it, but
-sequence behavior is not semantic by itself.
+Contexts are not a separate framework object system.
+
+A context is an ordinary theory-declared category whose term heads are marked
+with the role `context`. This keeps contexts, heaps, class tables, flow fact
+sets, typing environments, and module environments inside the same syntax,
+matching, binder, and canonicalization machinery as all other theory objects.
 
 ```text
-Context {
-  shape,
-  fields
-}
+Category TypingContext { role = context }
 
-ContextShape {
-  name,
-  fields
-}
+CtxEmpty : TypingContext
+CtxExtend(prev : TypingContext, var : BoundRef(term_var), ty : Ty)
+  : TypingContext
 ```
 
 Examples:
@@ -203,11 +201,11 @@ flow_fact(place, Fact)
 heap_cell(location, Ty)
 ```
 
-For a sequence-shaped context, the framework can check only structural facts:
-entry shape, field categories, binder scope, and literal equality. It does not
-decide lookup, weakening, exchange, inheritance, fact join, heap update, class
-table search, flow merge, or environment priority. Those are theory judgments
-with evidence or explicit oracle boundaries.
+For context-role categories, the framework can check only ordinary syntactic
+facts: term head, field categories, binder scope, and literal equality. It does
+not decide lookup, weakening, exchange, inheritance, fact join, heap update,
+class table search, flow merge, or environment priority. Those are theory
+judgments with evidence or explicit oracle boundaries.
 
 ## Judgments
 
@@ -220,8 +218,9 @@ JudgmentSchema {
 }
 ```
 
-Parameters may reference declared categories, context shapes, binder-reference
-sorts, and framework scalar kinds.
+Parameters may reference declared categories, binder-reference sorts, and
+framework scalar kinds. Contexts are referenced through their declared category,
+not through a separate parameter kind.
 
 Examples:
 
@@ -430,7 +429,6 @@ Canonical serialization is framework-owned for:
 
 - theory specs;
 - terms;
-- contexts;
 - claims;
 - evidence nodes;
 - roots;
@@ -457,9 +455,9 @@ binder replay and lookup-as-evidence.
 
 STLC must require no framework changes beyond ordinary declarations for:
 
-- categories `Term` and `Ty`;
+- categories `Term`, `Ty`, and `TypingContext`;
 - term heads for variables, lambdas, applications, and arrows;
-- context entries for term variables;
+- context-role term heads for empty and extended typing contexts;
 - judgments for well-formed types and typing;
 - rules for variable lookup, arrow introduction, and arrow elimination.
 

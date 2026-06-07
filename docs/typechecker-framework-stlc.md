@@ -41,10 +41,9 @@ theorems.
 TheorySpec {
   theory_id = "framework.stlc.v0",
   version = "0",
-  categories = [Ty, Term],
+  categories = [Ty, Term, TypingContext],
   namespaces = [term_var],
   term_heads = [...],
-  context_schemas = [TypingContext],
   judgment_schemas = [WFTy, HasType, Lookup],
   rule_schemas = [...],
   oracle_schemas = [],
@@ -60,11 +59,15 @@ rule evidence.
 ```text
 Category Ty
 Category Term
+Category TypingContext { role = context }
 ```
 
 `Ty` is the category of STLC types.
 
 `Term` is the category of STLC terms.
+
+`TypingContext` is an ordinary category marked with the framework role
+`context`.
 
 The framework does not know that either category is a "type" or an "expression"
 outside this theory.
@@ -107,7 +110,7 @@ an ordinary field of `TmLam`, and the binder identity is scoped over `body`.
 
 ## Context
 
-The STLC context is a theory-declared inductive structure:
+The STLC context is a theory-declared inductive syntax category:
 
 ```text
 CtxEmpty : TypingContext
@@ -119,8 +122,9 @@ CtxExtend {
 } : TypingContext
 ```
 
-The framework checks only that this is well-formed structured data. Lookup is
-not a framework side condition; it is the `Lookup` judgment below.
+The framework checks only that this is a well-formed term of the
+`TypingContext` category. Lookup is not a framework side condition; it is the
+`Lookup` judgment below.
 
 The context uses binder references rather than source names. Those binder
 references must resolve in the surrounding claim scope. Source names may exist
