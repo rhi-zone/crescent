@@ -16,6 +16,8 @@ local function base_theory()
 		},
 		term_heads = {
 			{ tag = "term_head", name = "TyUnit", result_category = "Ty", fields = {} },
+			{ tag = "term_head", name = "UnitTerm", result_category = "Tm", fields = {} },
+			{ tag = "term_head", name = "EmptyCtx", result_category = "Ctx", fields = {} },
 			{
 				tag = "term_head",
 				name = "Lam",
@@ -59,7 +61,15 @@ local function base_theory()
 				tag = "root_decl",
 				root_kind = "program_type",
 				required_judgment = "has_type",
-				required_claim_pattern = { tag = "claim_pattern", judgment = "has_type", args = {} },
+				required_claim_pattern = {
+					tag = "claim_pattern",
+					judgment = "has_type",
+					args = {
+						ctx = { tag = "p_term", head = "EmptyCtx", fields = {} },
+						term = { tag = "p_term", head = "UnitTerm", fields = {} },
+						type = { tag = "p_term", head = "TyUnit", fields = {} },
+					},
+				},
 				scope_policy = "closed",
 			},
 		},
@@ -118,9 +128,48 @@ T.describe("type.framework shape validation", function()
 
 	T.it("rejects malformed scoped binder references", function()
 		local theory = base_theory()
-		theory.term_heads[2].fields[1].binders[1].schema = "missing_binding"
+		theory.term_heads[4].fields[1].binders[1].schema = "missing_binding"
 		local indexes, errors = shape.validate_theory(theory)
 		T.eq(indexes, nil)
 		T.ok(has_error(errors, "unknown binder schema missing_binding"), table.concat(errors or {}, "\n"))
+	end)
+
+	T.it("rejects root claim patterns with missing judgment arguments", function()
+		local theory = base_theory()
+		theory.roots[1].required_claim_pattern.args.type = nil
+		local indexes, errors = shape.validate_theory(theory)
+		T.eq(indexes, nil)
+		T.ok(has_error(errors, "missing pattern field"), table.concat(errors or {}, "\n"))
+	end)
+
+	T.it("rejects rule conclusions for the wrong judgment", function()
+		local theory = base_theory()
+		theory.judgments[#theory.judgments + 1] = {
+			tag = "judgment",
+			name = "is_type",
+			params = {
+				{ tag = "field_category", name = "type", category = "Ty" },
+			},
+		}
+		theory.rules = {
+			{
+				tag = "rule",
+				name = "bad",
+				judgment = "has_type",
+				metavariables = {},
+				conclusion = {
+					tag = "claim_pattern",
+					judgment = "is_type",
+					args = {
+						type = { tag = "p_term", head = "TyUnit", fields = {} },
+					},
+				},
+				premises = {},
+				structural_conditions = {},
+			},
+		}
+		local indexes, errors = shape.validate_theory(theory)
+		T.eq(indexes, nil)
+		T.ok(has_error(errors, "expected judgment has_type"), table.concat(errors or {}, "\n"))
 	end)
 end)

@@ -37,6 +37,18 @@ local METAVARIABLE_KINDS = {
 	scalar = true,
 }
 
+local PATTERN_TAGS = {
+	p_meta = true,
+	p_term = true,
+	p_scoped = true,
+	p_list = true,
+	p_object = true,
+	p_bound_ref = true,
+	p_binder_ref = true,
+	p_literal = true,
+	p_enum = true,
+}
+
 local function new_state()
 	return { errors = {} }
 end
@@ -156,6 +168,9 @@ local function validate_field_list(st, fields, path, indexes)
 	end
 end
 
+local validate_pattern
+local validate_claim_pattern
+
 validate_field_schema = function(st, field, path, indexes)
 	if not table_ok(st, field, path) then return end
 	if type(field.tag) ~= "string" or not FIELD_SCHEMA_TAGS[field.tag] then
@@ -267,7 +282,8 @@ local function validate_judgments(st, theory, indexes)
 end
 
 local function validate_metavariables(st, rule, path, indexes)
-	if not expect_array(st, rule, "metavariables", path) then return end
+	local mvs = {}
+	if not expect_array(st, rule, "metavariables", path) then return mvs end
 	local seen = {}
 	for i, mv in ipairs(rule.metavariables) do
 		local mpath = path .. ".metavariables[" .. i .. "]"
@@ -276,6 +292,7 @@ local function validate_metavariables(st, rule, path, indexes)
 		if expect_string(st, mv, "name", mpath) then
 			if seen[mv.name] then err(st, mpath .. ".name", "duplicate metavariable " .. mv.name) end
 			seen[mv.name] = true
+			mvs[mv.name] = mv
 		end
 		if expect_string(st, mv, "kind", mpath) and not METAVARIABLE_KINDS[mv.kind] then
 			err(st, mpath .. ".kind", "unknown metavariable kind " .. mv.kind)
@@ -293,6 +310,151 @@ local function validate_metavariables(st, rule, path, indexes)
 			end
 		end
 	end
+	return mvs
+end
+
+local function expect_metavariable(st, mvs, name, kind, path)
+	if type(name) ~= "string" then
+		err(st, path, "expected metavariable name")
+		return
+	end
+	local mv = mvs and mvs[name]
+	if not mv then
+		err(st, path, "unknown metavariable " .. name)
+	elseif kind and mv.kind ~= kind then
+		err(st, path, "expected " .. kind .. " metavariable")
+	end
+end
+
+local function validate_pattern_map(st, fields, expected_names, path, indexes, mvs)
+	if not table_ok(st, fields, path) then return end
+	if #fields > 0 and is_array(fields) then
+		err(st, path, "expected string-keyed pattern map")
+		return
+	end
+	for key in pairs(fields) do
+		if type(key) ~= "string" then err(st, path, "pattern map keys must be strings") end
+	end
+	for name in pairs(expected_names) do
+		if fields[name] == nil then err(st, path .. "." .. name, "missing pattern field") end
+	end
+	for name, value in pairs(fields) do
+		if not expected_names[name] then
+			err(st, path .. "." .. tostring(name), "unknown pattern field")
+		else
+			validate_pattern(st, value, path .. "." .. name, indexes, mvs)
+		end
+	end
+end
+
+validate_pattern = function(st, pattern, path, indexes, mvs)
+	if not table_ok(st, pattern, path) then return end
+	if type(pattern.tag) ~= "string" or not PATTERN_TAGS[pattern.tag] then
+		err(st, path .. ".tag", "unknown pattern tag")
+		return
+	end
+	if pattern.tag == "p_meta" then
+		check_fields(st, pattern, path, { "tag", "name" })
+		expect_metavariable(st, mvs, pattern.name, nil, path .. ".name")
+	elseif pattern.tag == "p_term" then
+		check_fields(st, pattern, path, { "tag", "head", "fields" })
+		if expect_string(st, pattern, "head", path) then
+			local head = indexes.term_heads[pattern.head]
+			if not head then
+				err(st, path .. ".head", "unknown term head " .. pattern.head)
+			else
+				local expected = {}
+				for _, field in ipairs(head.fields) do
+					expected[field.name] = true
+				end
+				validate_pattern_map(st, pattern.fields, expected, path .. ".fields", indexes, mvs)
+			end
+		end
+	elseif pattern.tag == "p_scoped" then
+		check_fields(st, pattern, path, { "tag", "binders", "body" })
+		if expect_array(st, pattern, "binders", path) then
+			for i, name in ipairs(pattern.binders) do
+				expect_metavariable(st, mvs, name, "binder", path .. ".binders[" .. i .. "]")
+			end
+		end
+		validate_pattern(st, pattern.body, path .. ".body", indexes, mvs)
+	elseif pattern.tag == "p_list" then
+		check_fields(st, pattern, path, { "tag", "items" })
+		if expect_array(st, pattern, "items", path) then
+			for i, item in ipairs(pattern.items) do
+				validate_pattern(st, item, path .. ".items[" .. i .. "]", indexes, mvs)
+			end
+		end
+	elseif pattern.tag == "p_object" then
+		check_fields(st, pattern, path, { "tag", "fields" })
+		if table_ok(st, pattern.fields, path .. ".fields") then
+			for key, value in pairs(pattern.fields) do
+				if type(key) ~= "string" then
+					err(st, path .. ".fields", "object pattern keys must be strings")
+				else
+					validate_pattern(st, value, path .. ".fields." .. key, indexes, mvs)
+				end
+			end
+		end
+	elseif pattern.tag == "p_bound_ref" then
+		check_fields(st, pattern, path, { "tag", "name" })
+		expect_metavariable(st, mvs, pattern.name, "bound_ref", path .. ".name")
+	elseif pattern.tag == "p_binder_ref" then
+		check_fields(st, pattern, path, { "tag", "name" })
+		expect_metavariable(st, mvs, pattern.name, "binder", path .. ".name")
+	elseif pattern.tag == "p_literal" then
+		check_fields(st, pattern, path, { "tag", "value" })
+		local tv = type(pattern.value)
+		if tv == "number" then
+			if pattern.value ~= pattern.value or pattern.value == math.huge or pattern.value == -math.huge or pattern.value % 1 ~= 0 then
+				err(st, path .. ".value", "literal pattern must be an F1 integer, string, or boolean")
+			end
+		elseif tv ~= "string" and tv ~= "boolean" then
+			err(st, path .. ".value", "literal pattern must be an F1 integer, string, or boolean")
+		end
+	elseif pattern.tag == "p_enum" then
+		check_fields(st, pattern, path, { "tag", "value" })
+		expect_string(st, pattern, "value", path)
+	end
+end
+
+validate_claim_pattern = function(st, pattern, path, indexes, mvs, expected_judgment)
+	if not table_ok(st, pattern, path) then return end
+	check_fields(st, pattern, path, { "tag", "judgment", "args" })
+	if pattern.tag ~= "claim_pattern" then err(st, path .. ".tag", "expected claim_pattern") end
+	if expect_string(st, pattern, "judgment", path) then
+		local judgment = indexes.judgments[pattern.judgment]
+		if not judgment then
+			err(st, path .. ".judgment", "unknown judgment " .. pattern.judgment)
+		elseif expected_judgment and pattern.judgment ~= expected_judgment then
+			err(st, path .. ".judgment", "expected judgment " .. expected_judgment)
+		else
+			local expected = {}
+			for _, param in ipairs(judgment.params) do
+				expected[param.name] = true
+			end
+			validate_pattern_map(st, pattern.args, expected, path .. ".args", indexes, mvs)
+		end
+	end
+end
+
+local function validate_premise(st, premise, path, indexes, mvs)
+	check_fields(st, premise, path, { "tag", "claim" }, { "scope_from" })
+	if premise.tag ~= "premise_pattern" then err(st, path .. ".tag", "expected premise_pattern") end
+	validate_claim_pattern(st, premise.claim, path .. ".claim", indexes, mvs, nil)
+	if premise.scope_from ~= nil then
+		local spath = path .. ".scope_from"
+		local scope_from = premise.scope_from
+		check_fields(st, scope_from, spath, { "tag", "source_metavariable", "binder_metavariables", "body_metavariable" })
+		if scope_from.tag ~= "scoped_open" then err(st, spath .. ".tag", "expected scoped_open") end
+		expect_metavariable(st, mvs, scope_from.source_metavariable, "scoped", spath .. ".source_metavariable")
+		expect_metavariable(st, mvs, scope_from.body_metavariable, nil, spath .. ".body_metavariable")
+		if expect_array(st, scope_from, "binder_metavariables", spath) then
+			for i, name in ipairs(scope_from.binder_metavariables) do
+				expect_metavariable(st, mvs, name, "binder", spath .. ".binder_metavariables[" .. i .. "]")
+			end
+		end
+	end
 end
 
 local function validate_rules(st, theory, indexes)
@@ -306,8 +468,13 @@ local function validate_rules(st, theory, indexes)
 		if expect_string(st, rule, "judgment", path) and not indexes.judgments[rule.judgment] then
 			err(st, path .. ".judgment", "unknown judgment " .. rule.judgment)
 		end
-		validate_metavariables(st, rule, path, indexes)
-		expect_array(st, rule, "premises", path)
+		local mvs = validate_metavariables(st, rule, path, indexes)
+		validate_claim_pattern(st, rule.conclusion, path .. ".conclusion", indexes, mvs, rule.judgment)
+		if expect_array(st, rule, "premises", path) then
+			for j, premise in ipairs(rule.premises) do
+				validate_premise(st, premise, path .. ".premises[" .. j .. "]", indexes, mvs)
+			end
+		end
 		expect_array(st, rule, "structural_conditions", path)
 	end
 end
@@ -351,6 +518,7 @@ local function validate_roots(st, theory, indexes)
 		if root.scope_policy ~= "closed" and root.scope_policy ~= "open" then
 			err(st, path .. ".scope_policy", "expected closed or open")
 		end
+		validate_claim_pattern(st, root.required_claim_pattern, path .. ".required_claim_pattern", indexes, {}, root.required_judgment)
 	end
 end
 
