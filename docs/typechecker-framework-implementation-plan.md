@@ -115,6 +115,8 @@ Acceptance bar:
 
 No rule replay is required in F2.
 
+Current spec: `docs/typechecker-framework-shape-validator.md`.
+
 ### F3: First-Order Rule Replay
 
 Implement rule replay for the first implementation slice:
