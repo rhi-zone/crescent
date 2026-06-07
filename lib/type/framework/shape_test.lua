@@ -1,0 +1,126 @@
+local T = require("lib.test.assert")
+local shape = require("lib.type.framework.shape")
+
+local function base_theory()
+	return {
+		tag = "theory_spec",
+		theory_id = "test",
+		version = "0",
+		namespaces = {
+			{ tag = "namespace", name = "term_var" },
+		},
+		categories = {
+			{ tag = "category", name = "Ty" },
+			{ tag = "category", name = "Tm" },
+			{ tag = "category", name = "Ctx", role = "context" },
+		},
+		term_heads = {
+			{ tag = "term_head", name = "TyUnit", result_category = "Ty", fields = {} },
+			{
+				tag = "term_head",
+				name = "Lam",
+				result_category = "Tm",
+				fields = {
+					{
+						tag = "field_scoped",
+						name = "body",
+						binders = { { tag = "binder_schema_ref", schema = "term_binding" } },
+						body = { tag = "field_category", name = "body", category = "Tm" },
+					},
+				},
+			},
+		},
+		binder_schemas = {
+			{
+				tag = "binder_schema",
+				name = "term_binding",
+				namespace = "term_var",
+				category = "Tm",
+				fields = {
+					{ tag = "field_category", name = "type", category = "Ty" },
+				},
+			},
+		},
+		judgments = {
+			{
+				tag = "judgment",
+				name = "has_type",
+				params = {
+					{ tag = "field_category", name = "ctx", category = "Ctx" },
+					{ tag = "field_category", name = "term", category = "Tm" },
+					{ tag = "field_category", name = "type", category = "Ty" },
+				},
+			},
+		},
+		rules = {},
+		oracles = {},
+		roots = {
+			{
+				tag = "root_decl",
+				root_kind = "program_type",
+				required_judgment = "has_type",
+				required_claim_pattern = { tag = "claim_pattern", judgment = "has_type", args = {} },
+				scope_policy = "closed",
+			},
+		},
+	}
+end
+
+local function has_error(errors, needle)
+	for _, e in ipairs(errors or {}) do
+		if tostring(e):find(needle, 1, true) then return true end
+	end
+	return false
+end
+
+T.describe("type.framework shape validation", function()
+	T.it("accepts a theory declaration graph without replaying rules", function()
+		local indexes, errors = shape.validate_theory(base_theory())
+		T.ok(indexes, table.concat(errors or {}, "\n"))
+		T.ok(indexes.categories.Ty ~= nil)
+		T.ok(indexes.term_heads.Lam ~= nil)
+		T.ok(indexes.roots.program_type ~= nil)
+	end)
+
+	T.it("rejects duplicate declaration names", function()
+		local theory = base_theory()
+		theory.categories[#theory.categories + 1] = { tag = "category", name = "Ty" }
+		local indexes, errors = shape.validate_theory(theory)
+		T.eq(indexes, nil)
+		T.ok(has_error(errors, "duplicate name Ty"), table.concat(errors or {}, "\n"))
+	end)
+
+	T.it("rejects theories with no declared root kind", function()
+		local theory = base_theory()
+		theory.roots = {}
+		local indexes, errors = shape.validate_theory(theory)
+		T.eq(indexes, nil)
+		T.ok(has_error(errors, "at least one root kind"), table.concat(errors or {}, "\n"))
+	end)
+
+	T.it("rejects field schemas that reference missing categories", function()
+		local theory = base_theory()
+		theory.term_heads[1].fields = {
+			{ tag = "field_category", name = "bad", category = "Missing" },
+		}
+		local indexes, errors = shape.validate_theory(theory)
+		T.eq(indexes, nil)
+		T.ok(has_error(errors, "unknown category Missing"), table.concat(errors or {}, "\n"))
+	end)
+
+	T.it("rejects unknown semantic fields outside meta", function()
+		local theory = base_theory()
+		theory.term_heads[1].surprise = true
+		local indexes, errors = shape.validate_theory(theory)
+		T.eq(indexes, nil)
+		T.ok(has_error(errors, "unknown field"), table.concat(errors or {}, "\n"))
+	end)
+
+	T.it("rejects malformed scoped binder references", function()
+		local theory = base_theory()
+		theory.term_heads[2].fields[1].binders[1].schema = "missing_binding"
+		local indexes, errors = shape.validate_theory(theory)
+		T.eq(indexes, nil)
+		T.ok(has_error(errors, "unknown binder schema missing_binding"), table.concat(errors or {}, "\n"))
+	end)
+end)
