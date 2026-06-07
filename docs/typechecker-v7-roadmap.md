@@ -1,6 +1,16 @@
 # Typechecker v7 Roadmap
 
-This is the recursive planning document for v7.
+This is the historical/prototype roadmap for v7.
+
+It is no longer the active top-level typechecker roadmap. Active work starts at
+`docs/typechecker-framework.md`, which reframes the goal as a type-system
+agnostic framework. v7 remains useful as a Crescent-specific prototype and as
+evidence about certificate replay, canonicalization, and premature
+theory-specific commitments.
+
+Do not continue this roadmap by default. New work should either update the
+framework roadmap or explicitly state why a v7 MR0 change is a framework
+experiment.
 
 It is not a feature wishlist. It exists to keep the work from degrading into
 organic growth. Every implementation slice should either close an item here or
@@ -315,26 +325,19 @@ Required subdocs:
 Design constraint: do not try to verify the production checker first. Verify the
 kernel/replayer and keep elaboration untrusted.
 
-## Active Frontier
+## Frozen Frontier
 
-Current active frontier:
-
-```text
-M0 -> M1: context/local replay for source-independent function body certificates
-```
-
-Immediate implementation:
+This was the active v7 frontier before the framework pivot. It is retained only
+as historical state for v7 prototype work, not as the current top-level queue.
 
 ```text
-ContextEntry indexing
-ExprNode(local_read)
-pack_claim construction for local read result
-fixtures connecting parameter place -> local_read -> return_closed
+M2: canonical inputs and external certificate boundary
 ```
 
-Stop and escalate if any of these become unclear:
+Former immediate implementation:
 
-- whether places are identifiers, paths, or structured values in MR0;
-- whether context IDs must be canonical before local-read replay;
-- how binder parameter claims become context locals;
-- whether local reads depend on mutation/invalidation in the MR0 subset.
+```text
+expanded malformed-input corpus
+```
+
+New active work starts at `docs/typechecker-framework.md`.

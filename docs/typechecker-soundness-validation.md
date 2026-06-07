@@ -2,13 +2,17 @@
 
 This document records the current soundness bar for the checker effort.
 
-For the current v7 entry point, source order, and decision queue, start with
-`docs/typechecker-v7.md`.
+For the active type-system-agnostic framework direction, start with
+`docs/typechecker-framework.md`.
+
+The v7 documents are retained as Crescent-specific proof-producing prototype
+material, not as the top-level architecture.
 
 ## Version Line
 
-If the checker is built around a mechanized kernel or proof-producing
-acceptance, it is not v6. It is a new architecture line: **v7**.
+If the checker is built around a type-system-agnostic framework, it is not v6
+or v7-as-top-level. v7 is now a Crescent-specific prototype line under the
+framework direction.
 
 Reason: v6 is currently a direct implementation prototype beside v4. A
 proof-producing or mechanized-kernel-first checker changes the trust model,
@@ -16,9 +20,9 @@ acceptance pipeline, artifact format, and definition of implementation
 completeness. Treating that as "v6 with stricter tests" would hide the most
 important design decision.
 
-v6 may remain useful as research input or disposable prototype code, but it is
-not evidence for v7 soundness unless its accepted programs can be justified by
-the v7 kernel/certificate rules.
+v6 and v7 may remain useful as research input or disposable prototype code, but
+they are not evidence for framework soundness unless their accepted programs can
+be justified by an explicit theory and framework-checked evidence.
 
 The initial v7 semantic kernel draft is
 `docs/typechecker-v7-kernel-semantics.md`.
@@ -34,19 +38,19 @@ Mined missing features and recommended v7 classifications are tracked in
 
 ## Document Authority
 
-For v7:
+For active framework work:
 
-- `docs/typechecker-v7.md` owns the entry point and decision queue;
+- `docs/typechecker-framework.md` owns the entry point and top-level direction;
 - this document owns the version line, trust model, and acceptance bar;
-- `docs/typechecker-v7-kernel-semantics.md` owns admitted semantics and kernel
-  judgments;
+- concrete theory documents own admitted semantics and kernel judgments;
 - `docs/typechecker-v7-semantic-mining.md` owns candidate/mined semantics and
   the ad-hocness filter;
 - `docs/typechecker-v7-missing-feature-audit.md` owns the current mined feature
   gap list;
 - `docs/typechecker-v7-consolidation-audit.md` owns the current source hierarchy
   and conflict list;
-- v4/v5/v6 docs are research inputs unless a rule is restated in the v7 kernel.
+- v4/v5/v6/v7 docs are research inputs unless a rule is restated in a theory
+  under the framework.
 
 ## Premise
 

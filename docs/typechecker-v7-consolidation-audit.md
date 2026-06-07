@@ -1,32 +1,37 @@
 # Typechecker v7 Consolidation Audit
 
-This document records the current source hierarchy for the typechecker design
-after the v7 soundness turn.
+This document records the source hierarchy for the v7 prototype line after the
+v7 soundness turn.
 
-For the current v7 entry point and ordered decision queue, start with
-`docs/typechecker-v7.md`.
+For active typechecker architecture work, start with
+`docs/typechecker-framework.md`.
 
-It does not supersede older design material by deletion. Older v4/v5/v6 docs
-remain useful evidence and design input, but they are not the authority for the
-soundness-fatal checker unless their rules are restated as v7 kernel rules with
-certificate obligations.
+v7 is now research/prototype input for a future Crescent theory, not the
+top-level authority.
 
-## Current Source Hierarchy
+It does not supersede older design material by deletion. Older v4/v5/v6/v7 docs
+remain useful evidence and design input, but they are not authority for new
+framework work unless their rules are restated as theory rules with framework
+evidence obligations.
 
-For v7 work, read documents in this order:
+## v7 Source Hierarchy
 
-1. `docs/typechecker-v7.md` — entry point and ordered decision queue.
-2. `docs/typechecker-soundness-validation.md` — the trust model and acceptance
+For historical v7/Crescent-prototype work, read documents in this order:
+
+1. `docs/typechecker-framework.md` — current top-level framework direction.
+2. `docs/typechecker-v7.md` — v7 prototype entry point and ordered decision
+   queue.
+3. `docs/typechecker-soundness-validation.md` — the trust model and acceptance
    bar.
-3. `docs/typechecker-v7-coherence-audit.md` — whole-design consistency audit,
+4. `docs/typechecker-v7-coherence-audit.md` — whole-design consistency audit,
    blocking seams, and dependency order.
-4. `docs/typechecker-v7-kernel-semantics.md` — admitted kernel objects,
+5. `docs/typechecker-v7-kernel-semantics.md` — admitted kernel objects,
    judgments, and certificate obligations.
-5. `docs/typechecker-v7-semantic-mining.md` — how existing systems and older
+6. `docs/typechecker-v7-semantic-mining.md` — how existing systems and older
    Crescent semantics may be imported without reintroducing ad-hoc rules.
-6. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
+7. `docs/typechecker-v7-missing-feature-audit.md` — mined feature gaps and
    recommended v7 classifications.
-7. This document — current consolidation status and known conflicts.
+8. This document — current consolidation status and known conflicts.
 
 Older docs are research inputs:
 
@@ -38,20 +43,22 @@ Older docs are research inputs:
 - `docs/soundness-audit.md`
 - current v4 implementation docs under `lib/type/static/`
 
-If an older doc conflicts with v7, v7 wins for new soundness-fatal work. If v7
-is silent, the older doc may motivate a v7 extension but does not admit the
-feature by itself.
+If an older doc conflicts with `docs/typechecker-framework.md`, the framework
+direction wins for new work. If the framework is silent, older docs may motivate
+a theory extension but do not admit the feature by themselves.
 
 ## Consolidated Decisions
 
 ### Version Line
 
 v4 is the running checker. v5 and the unified type-system design are research
-lineages. v6 is a direct implementation/prototype line. A mechanized or
-proof-producing checker is v7.
+lineages. v6 is a direct implementation/prototype line. v7 is the
+Crescent-specific mechanized/proof-producing prototype line under the current
+type-system-agnostic framework direction.
 
-v6 implementation progress is not evidence for v7 soundness unless the accepted
-programs can be justified by v7 kernel/certificate rules.
+v6 or v7 implementation progress is not evidence for framework-level soundness
+unless the accepted programs can be justified by explicit theory rules and
+framework-checkable evidence obligations.
 
 The first concrete v7 target profile is `luajit51-crescent`, matching the
 vendored runtime and current LuaJIT/FFI surface. Other Lua versions must enter
@@ -144,11 +151,11 @@ declared branch.
 ### v6 Plan Reads Like The Active Path
 
 `docs/typechecker-v6-plan.md` still describes v6 as a coherent implementation
-target. For v7 work it must be treated as research/prototype input. Any v6 rule
-that survives must be copied or restated into the v7 kernel.
+target. For new framework work it must be treated as research/prototype input.
+Any v6 rule that survives must be copied or restated into a framework theory.
 
 Resolution: add a status banner and avoid implementing from v6 docs directly
-when the task is v7.
+when the task targets the framework.
 
 ### Unified Type-System Design Reads Like Canonical Current Design
 
@@ -192,9 +199,10 @@ chooses a different semantic model: the primitive `set_metatable` fixes
 metatable state on an open identity but does not by itself seal own-field
 construction.
 
-Resolution: v7 owns the active rule. Post-setmetatable reads and writes must be
+Resolution in the v7 prototype: post-setmetatable reads and writes must be
 metatable-aware; if `__newindex`/`__index` behavior is unknown, the checker
-rejects rather than pretending the table sealed.
+rejects rather than pretending the table sealed. A future Crescent theory under
+the framework must restate or replace this rule explicitly.
 
 ### Current v4 Typechecker Docs Are Operational, Not Normative For v7
 

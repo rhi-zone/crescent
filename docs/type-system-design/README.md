@@ -1,17 +1,18 @@
 # Unified type-system design
 
-Status: this directory is the canonical design for the pre-v7 unified
-v5/v6 lineage. It is historical/research input for v7, not the authority for
-the proof-producing or mechanized-kernel-first checker. For v7 work, start with
-`docs/typechecker-v7.md`,
-`docs/typechecker-soundness-validation.md`,
-`docs/typechecker-v7-kernel-semantics.md`,
-`docs/typechecker-v7-semantic-mining.md`, and
-`docs/typechecker-v7-consolidation-audit.md`.
+Status: this directory is the canonical design for the pre-framework unified
+v5/v6 lineage. It is historical/research input, not the authority for active
+typechecker architecture. For new architecture work, start with
+`docs/typechecker-framework.md`.
 
-If this directory conflicts with v7 docs, v7 owns the active soundness-fatal
-rule. If this directory contains a feature v7 excludes, the feature is mined
-evidence only until admitted by v7 kernel rules and certificate obligations.
+The v7 documents are also prototype/research input now. Use them for
+Crescent-specific proof-producing replay experiments, not as the top-level
+authority.
+
+If this directory conflicts with `docs/typechecker-framework.md`, the framework
+document owns the active direction. If this directory contains a feature the
+framework has not modeled yet, the feature is mined evidence only until admitted
+by a theory inside the framework.
 
 Within the pre-v7 lineage, this directory is the **single canonical design** for
 crescent's type system. It supersedes the two prior, unreconciled lineages:

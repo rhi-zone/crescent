@@ -3,8 +3,11 @@
 This document audits v7 as a semantic whole. It is not a source index and it is
 not an implementation plan.
 
-For the current v7 entry point and ordered decision queue, start with
-`docs/typechecker-v7.md`.
+For active typechecker architecture work, start with
+`docs/typechecker-framework.md`.
+
+This audit applies to the v7/Crescent prototype line, not to the new
+type-system-agnostic framework as a whole.
 
 ## Verdict
 

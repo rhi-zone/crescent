@@ -3,8 +3,10 @@
 This document starts the v7 semantic kernel. It is the prose target for later
 mechanization and certificate checking.
 
-For the current v7 entry point and ordered decision queue, start with
-`docs/typechecker-v7.md`.
+For active typechecker architecture work, start with
+`docs/typechecker-framework.md`.
+
+This document is retained as the v7/Crescent prototype semantic kernel.
 For the current whole-design consistency audit, read
 `docs/typechecker-v7-coherence-audit.md`.
 
