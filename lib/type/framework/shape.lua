@@ -5,6 +5,8 @@
 
 local M = {}
 
+M.FRAMEWORK_VERSION = "0"
+
 local FIELD_SCHEMA_TAGS = {
 	field_category = true,
 	field_bound_ref = true,
@@ -181,6 +183,7 @@ end
 
 local validate_pattern
 local validate_claim_pattern
+local validate_value
 
 validate_field_schema = function(st, field, path, indexes)
 	if not table_ok(st, field, path) then return end
@@ -585,6 +588,307 @@ local function validate_roots(st, theory, indexes)
 	end
 end
 
+local function exact_field_names(st, fields, expected, path)
+	if not table_ok(st, fields, path) then return false end
+	if #fields > 0 and is_array(fields) then
+		err(st, path, "expected string-keyed field map")
+		return false
+	end
+	for name in pairs(expected) do
+		if fields[name] == nil then err(st, path .. "." .. name, "missing field") end
+	end
+	for name in pairs(fields) do
+		if type(name) ~= "string" then
+			err(st, path, "field map keys must be strings")
+		elseif not expected[name] then
+			err(st, path .. "." .. name, "unknown field")
+		end
+	end
+	return true
+end
+
+local function find_binder(scope_stack, binder_id)
+	for frame_i = #scope_stack, 1, -1 do
+		local frame = scope_stack[frame_i]
+		local binder = frame[binder_id]
+		if binder then return binder end
+	end
+	return nil
+end
+
+local function validate_literal_value(st, schema, value, path)
+	local kind = schema.literal_kind
+	local tv = type(value)
+	if kind == "string" then
+		if tv ~= "string" then err(st, path, "expected string literal") end
+	elseif kind == "boolean" then
+		if tv ~= "boolean" then err(st, path, "expected boolean literal") end
+	elseif kind == "integer" then
+		if tv ~= "number" or value ~= value or value == math.huge or value == -math.huge or value % 1 ~= 0 then
+			err(st, path, "expected integer literal")
+		end
+	elseif kind == "number" then
+		if tv ~= "number" or value ~= value or value == math.huge or value == -math.huge then
+			err(st, path, "expected finite number literal")
+		end
+	end
+end
+
+local function validate_binder_value(st, binder, path, indexes, scope_stack, frame)
+	check_fields(st, binder, path, { "tag", "binder_id", "schema", "fields" })
+	if binder.tag ~= "binder" then err(st, path .. ".tag", "expected binder") end
+	expect_string(st, binder, "binder_id", path)
+	local schema = nil
+	if expect_string(st, binder, "schema", path) then
+		schema = indexes.binder_schemas[binder.schema]
+		if not schema then err(st, path .. ".schema", "unknown binder schema " .. binder.schema) end
+	end
+	if type(binder.binder_id) == "string" and frame then
+		if frame[binder.binder_id] then
+			err(st, path .. ".binder_id", "duplicate binder_id " .. binder.binder_id .. " in scope frame")
+		else
+			frame[binder.binder_id] = binder
+		end
+	end
+	if schema then
+		local expected = {}
+		for _, field in ipairs(schema.fields) do
+			expected[field.name] = field
+		end
+		if exact_field_names(st, binder.fields, expected, path .. ".fields") then
+			for name, field_schema in pairs(expected) do
+				if binder.fields[name] ~= nil then
+					validate_value(st, field_schema, binder.fields[name], path .. ".fields." .. name, indexes, scope_stack)
+				end
+			end
+		end
+	end
+end
+
+local function validate_binder_frame(st, binders, path, indexes, scope_stack)
+	local frame = {}
+	if expect_array(st, { binders = binders }, "binders", path) then
+		for i, binder in ipairs(binders) do
+			validate_binder_value(st, binder, path .. ".binders[" .. i .. "]", indexes, scope_stack, frame)
+		end
+	end
+	return frame
+end
+
+local function validate_term_value(st, value, path, indexes, scope_stack)
+	check_fields(st, value, path, { "tag", "head", "fields" })
+	if value.tag ~= "term" then err(st, path .. ".tag", "expected term") end
+	local head = nil
+	if expect_string(st, value, "head", path) then
+		head = indexes.term_heads[value.head]
+		if not head then err(st, path .. ".head", "unknown term head " .. value.head) end
+	end
+	if head then
+		local expected = {}
+		for _, field in ipairs(head.fields) do
+			expected[field.name] = field
+		end
+		if exact_field_names(st, value.fields, expected, path .. ".fields") then
+			for name, schema in pairs(expected) do
+				if value.fields[name] ~= nil then
+					validate_value(st, schema, value.fields[name], path .. ".fields." .. name, indexes, scope_stack)
+				end
+			end
+		end
+	end
+end
+
+validate_value = function(st, schema, value, path, indexes, scope_stack)
+	if schema.tag == "field_category" then
+		if not table_ok(st, value, path) then return end
+		if value.tag ~= "term" then
+			err(st, path .. ".tag", "expected term")
+			return
+		end
+		local head = indexes.term_heads[value.head]
+		if head and head.result_category ~= schema.category then
+			err(st, path .. ".head", "term head category mismatch: expected " .. schema.category)
+		end
+		validate_term_value(st, value, path, indexes, scope_stack)
+	elseif schema.tag == "field_bound_ref" then
+		if not table_ok(st, value, path) then return end
+		check_fields(st, value, path, { "tag", "binder_id", "namespace" })
+		if value.tag ~= "bound_ref" then err(st, path .. ".tag", "expected bound_ref") end
+		expect_string(st, value, "binder_id", path)
+		if expect_string(st, value, "namespace", path) and not indexes.namespaces[value.namespace] then
+			err(st, path .. ".namespace", "unknown namespace " .. value.namespace)
+		end
+		if type(value.binder_id) == "string" then
+			local binder = find_binder(scope_stack, value.binder_id)
+			if not binder then
+				err(st, path .. ".binder_id", "unresolved bound reference " .. value.binder_id)
+			else
+				local binder_schema = indexes.binder_schemas[binder.schema]
+				if binder_schema and value.namespace ~= binder_schema.namespace then
+					err(st, path .. ".namespace", "binder namespace mismatch")
+				end
+			end
+		end
+	elseif schema.tag == "field_binder" then
+		validate_binder_value(st, value, path, indexes, scope_stack, nil)
+		if type(value) == "table" and value.schema ~= schema.binder_schema then
+			err(st, path .. ".schema", "expected binder schema " .. schema.binder_schema)
+		end
+	elseif schema.tag == "field_scoped" then
+		if not table_ok(st, value, path) then return end
+		check_fields(st, value, path, { "tag", "binders", "body" })
+		if value.tag ~= "scoped" then err(st, path .. ".tag", "expected scoped") end
+		local frame = validate_binder_frame(st, value.binders, path, indexes, scope_stack)
+		local expected_count = #schema.binders
+		if type(value.binders) == "table" and is_array(value.binders) and #value.binders ~= expected_count then
+			err(st, path .. ".binders", "expected " .. expected_count .. " binders")
+		end
+		if type(value.binders) == "table" and is_array(value.binders) then
+			for i, binder in ipairs(value.binders) do
+				local expected_ref = schema.binders[i]
+				if expected_ref and type(binder) == "table" and binder.schema ~= expected_ref.schema then
+					err(st, path .. ".binders[" .. i .. "].schema", "expected binder schema " .. expected_ref.schema)
+				end
+			end
+		end
+		scope_stack[#scope_stack + 1] = frame
+		validate_value(st, schema.body, value.body, path .. ".body", indexes, scope_stack)
+		scope_stack[#scope_stack] = nil
+	elseif schema.tag == "field_list" then
+		if not table_ok(st, value, path) then return end
+		if not is_array(value) then
+			err(st, path, "expected dense array")
+			return
+		end
+		for i, item in ipairs(value) do
+			validate_value(st, schema.item, item, path .. "[" .. i .. "]", indexes, scope_stack)
+		end
+	elseif schema.tag == "field_literal" then
+		validate_literal_value(st, schema, value, path)
+	elseif schema.tag == "field_enum" then
+		if type(value) ~= "string" then
+			err(st, path, "expected enum string")
+		else
+			local ok = false
+			for _, choice in ipairs(schema.values) do
+				if value == choice then ok = true end
+			end
+			if not ok then err(st, path, "unknown enum value " .. value) end
+		end
+	elseif schema.tag == "field_object" then
+		if not table_ok(st, value, path) then return end
+		check_fields(st, value, path, { "tag", "fields" })
+		if value.tag ~= "object" then err(st, path .. ".tag", "expected object") end
+		local expected = {}
+		for _, field in ipairs(schema.fields) do
+			expected[field.name] = field
+		end
+		if exact_field_names(st, value.fields, expected, path .. ".fields") then
+			for name, field_schema in pairs(expected) do
+				if value.fields[name] ~= nil then
+					validate_value(st, field_schema, value.fields[name], path .. ".fields." .. name, indexes, scope_stack)
+				end
+			end
+		end
+	end
+end
+
+local function validate_claim(st, claim, path, indexes)
+	if not table_ok(st, claim, path) then return end
+	check_fields(st, claim, path, { "tag", "scope", "judgment", "args" })
+	if claim.tag ~= "claim" then err(st, path .. ".tag", "expected claim") end
+	local scope_stack = {}
+	local frame = validate_binder_frame(st, claim.scope, path .. ".scope", indexes, scope_stack)
+	scope_stack[#scope_stack + 1] = frame
+	local judgment = nil
+	if expect_string(st, claim, "judgment", path) then
+		judgment = indexes.judgments[claim.judgment]
+		if not judgment then err(st, path .. ".judgment", "unknown judgment " .. claim.judgment) end
+	end
+	if judgment then
+		local expected = {}
+		for _, param in ipairs(judgment.params) do
+			expected[param.name] = param
+		end
+		if exact_field_names(st, claim.args, expected, path .. ".args") then
+			for name, schema in pairs(expected) do
+				if claim.args[name] ~= nil then
+					validate_value(st, schema, claim.args[name], path .. ".args." .. name, indexes, scope_stack)
+				end
+			end
+		end
+	end
+	scope_stack[#scope_stack] = nil
+end
+
+local function index_evidence_nodes(st, certificate)
+	local nodes = {}
+	if expect_array(st, certificate, "evidence", "certificate") then
+		for i, node in ipairs(certificate.evidence) do
+			if type(node) == "table" and type(node.node_id) == "string" then
+				if nodes[node.node_id] then
+					err(st, "certificate.evidence[" .. i .. "].node_id", "duplicate evidence node_id " .. node.node_id)
+				else
+					nodes[node.node_id] = node
+				end
+			end
+		end
+	end
+	return nodes
+end
+
+local function validate_evidence_node(st, node, path, theory, indexes, nodes)
+	check_fields(st, node, path, { "tag", "node_id", "theory_id", "judgment", "claim", "justification" })
+	if node.tag ~= "evidence" then err(st, path .. ".tag", "expected evidence") end
+	expect_string(st, node, "node_id", path)
+	if expect_string(st, node, "theory_id", path) and node.theory_id ~= theory.theory_id then
+		err(st, path .. ".theory_id", "certificate theory mismatch")
+	end
+	expect_string(st, node, "judgment", path)
+	validate_claim(st, node.claim, path .. ".claim", indexes)
+	if type(node.claim) == "table" and node.judgment ~= node.claim.judgment then
+		err(st, path .. ".judgment", "evidence judgment must match claim judgment")
+	end
+	local app = node.justification
+	if table_ok(st, app, path .. ".justification") then
+		if app.tag == "rule_application" then
+			check_fields(st, app, path .. ".justification", { "tag", "rule", "premises" })
+			if expect_string(st, app, "rule", path .. ".justification") and not indexes.rules[app.rule] then
+				err(st, path .. ".justification.rule", "unknown rule " .. app.rule)
+			end
+			if expect_array(st, app, "premises", path .. ".justification") then
+				for i, premise_id in ipairs(app.premises) do
+					if type(premise_id) ~= "string" then
+						err(st, path .. ".justification.premises[" .. i .. "]", "expected evidence node_id string")
+					elseif not nodes[premise_id] then
+						err(st, path .. ".justification.premises[" .. i .. "]", "unknown premise node_id " .. premise_id)
+					end
+				end
+			end
+		elseif app.tag == "oracle_application" then
+			err(st, path .. ".justification.tag", "oracle applications are not admitted in this checker slice")
+		else
+			err(st, path .. ".justification.tag", "unknown justification tag")
+		end
+	end
+end
+
+local function validate_certificate_roots(st, certificate, indexes, nodes)
+	if expect_array(st, certificate, "roots", "certificate") then
+		for i, root in ipairs(certificate.roots) do
+			local path = "certificate.roots[" .. i .. "]"
+			check_fields(st, root, path, { "tag", "root_kind", "node_id" })
+			if root.tag ~= "root" then err(st, path .. ".tag", "expected root") end
+			if expect_string(st, root, "root_kind", path) and not indexes.roots[root.root_kind] then
+				err(st, path .. ".root_kind", "unknown root kind " .. root.root_kind)
+			end
+			if expect_string(st, root, "node_id", path) and not nodes[root.node_id] then
+				err(st, path .. ".node_id", "unknown evidence node_id " .. root.node_id)
+			end
+		end
+	end
+end
+
 --: (table) -> (table | nil, { string, ... } | nil)
 function M.validate_theory(theory)
 	local st = new_state()
@@ -643,6 +947,41 @@ function M.validate_theory(theory)
 
 	if #st.errors > 0 then return nil, st.errors end
 	return indexes
+end
+
+--: (table, table) -> (table | nil, { string, ... } | nil)
+function M.validate_certificate(theory, certificate)
+	local indexes, theory_errors = M.validate_theory(theory)
+	if not indexes then return nil, theory_errors end
+	local st = new_state()
+	check_fields(st, certificate, "certificate", {
+		"tag", "framework_version", "theory_id", "theory_version", "evidence", "roots",
+	}, { "terms" })
+	if certificate.tag ~= "certificate" then err(st, "certificate.tag", "expected certificate") end
+	if expect_string(st, certificate, "framework_version", "certificate")
+		and certificate.framework_version ~= M.FRAMEWORK_VERSION then
+		err(st, "certificate.framework_version", "unsupported framework version " .. certificate.framework_version)
+	end
+	if expect_string(st, certificate, "theory_id", "certificate") and certificate.theory_id ~= theory.theory_id then
+		err(st, "certificate.theory_id", "theory_id does not match selected theory")
+	end
+	if expect_string(st, certificate, "theory_version", "certificate") and certificate.theory_version ~= theory.version then
+		err(st, "certificate.theory_version", "theory_version does not match selected theory")
+	end
+	if certificate.terms ~= nil and expect_array(st, certificate, "terms", "certificate") then
+		for i, term in ipairs(certificate.terms) do
+			validate_term_value(st, term, "certificate.terms[" .. i .. "]", indexes, {})
+		end
+	end
+	local nodes = index_evidence_nodes(st, certificate)
+	validate_certificate_roots(st, certificate, indexes, nodes)
+	if type(certificate.evidence) == "table" and is_array(certificate.evidence) then
+		for i, node in ipairs(certificate.evidence) do
+			validate_evidence_node(st, node, "certificate.evidence[" .. i .. "]", theory, indexes, nodes)
+		end
+	end
+	if #st.errors > 0 then return nil, st.errors end
+	return { indexes = indexes }
 end
 
 return M
