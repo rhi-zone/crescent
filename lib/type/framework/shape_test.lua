@@ -193,6 +193,14 @@ T.describe("type.framework shape validation", function()
 		T.ok(has_error(errors, "missing pattern field"), table.concat(errors or {}, "\n"))
 	end)
 
+	T.it("accepts implicit metavariables in root claim patterns", function()
+		local theory = base_theory()
+		theory.roots[1].required_claim_pattern.args.term = { tag = "p_meta", name = "term" }
+		theory.roots[1].required_claim_pattern.args.type = { tag = "p_meta", name = "type" }
+		local indexes, errors = shape.validate_theory(theory)
+		T.ok(indexes, table.concat(errors or {}, "\n"))
+	end)
+
 	T.it("rejects rule conclusions for the wrong judgment", function()
 		local theory = base_theory()
 		theory.judgments[#theory.judgments + 1] = {

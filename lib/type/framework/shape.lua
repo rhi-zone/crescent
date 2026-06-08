@@ -361,7 +361,7 @@ local function validate_condition_operand(st, operand, path, mvs, direct_kind)
 	end
 end
 
-local function validate_pattern_map(st, fields, expected_names, path, indexes, mvs)
+local function validate_pattern_map(st, fields, expected_names, path, indexes, mvs, allow_implicit_metas)
 	if not table_ok(st, fields, path) then return end
 	if #fields > 0 and is_array(fields) then
 		err(st, path, "expected string-keyed pattern map")
@@ -377,12 +377,12 @@ local function validate_pattern_map(st, fields, expected_names, path, indexes, m
 		if not expected_names[name] then
 			err(st, path .. "." .. tostring(name), "unknown pattern field")
 		else
-			validate_pattern(st, value, path .. "." .. name, indexes, mvs)
+			validate_pattern(st, value, path .. "." .. name, indexes, mvs, allow_implicit_metas)
 		end
 	end
 end
 
-validate_pattern = function(st, pattern, path, indexes, mvs)
+validate_pattern = function(st, pattern, path, indexes, mvs, allow_implicit_metas)
 	if not table_ok(st, pattern, path) then return end
 	if type(pattern.tag) ~= "string" or not PATTERN_TAGS[pattern.tag] then
 		err(st, path .. ".tag", "unknown pattern tag")
@@ -390,7 +390,11 @@ validate_pattern = function(st, pattern, path, indexes, mvs)
 	end
 	if pattern.tag == "p_meta" then
 		check_fields(st, pattern, path, { "tag", "name" })
-		expect_metavariable(st, mvs, pattern.name, nil, path .. ".name")
+		if not allow_implicit_metas then
+			expect_metavariable(st, mvs, pattern.name, nil, path .. ".name")
+		else
+			expect_string(st, pattern, "name", path)
+		end
 	elseif pattern.tag == "p_term" then
 		check_fields(st, pattern, path, { "tag", "head", "fields" })
 		if expect_string(st, pattern, "head", path) then
@@ -402,7 +406,7 @@ validate_pattern = function(st, pattern, path, indexes, mvs)
 				for _, field in ipairs(head.fields) do
 					expected[field.name] = true
 				end
-				validate_pattern_map(st, pattern.fields, expected, path .. ".fields", indexes, mvs)
+				validate_pattern_map(st, pattern.fields, expected, path .. ".fields", indexes, mvs, allow_implicit_metas)
 			end
 		end
 	elseif pattern.tag == "p_scoped" then
@@ -412,12 +416,12 @@ validate_pattern = function(st, pattern, path, indexes, mvs)
 				expect_metavariable(st, mvs, name, "binder", path .. ".binders[" .. i .. "]")
 			end
 		end
-		validate_pattern(st, pattern.body, path .. ".body", indexes, mvs)
+		validate_pattern(st, pattern.body, path .. ".body", indexes, mvs, allow_implicit_metas)
 	elseif pattern.tag == "p_list" then
 		check_fields(st, pattern, path, { "tag", "items" })
 		if expect_array(st, pattern, "items", path) then
 			for i, item in ipairs(pattern.items) do
-				validate_pattern(st, item, path .. ".items[" .. i .. "]", indexes, mvs)
+				validate_pattern(st, item, path .. ".items[" .. i .. "]", indexes, mvs, allow_implicit_metas)
 			end
 		end
 	elseif pattern.tag == "p_object" then
@@ -427,7 +431,7 @@ validate_pattern = function(st, pattern, path, indexes, mvs)
 				if type(key) ~= "string" then
 					err(st, path .. ".fields", "object pattern keys must be strings")
 				else
-					validate_pattern(st, value, path .. ".fields." .. key, indexes, mvs)
+					validate_pattern(st, value, path .. ".fields." .. key, indexes, mvs, allow_implicit_metas)
 				end
 			end
 		end
@@ -453,7 +457,7 @@ validate_pattern = function(st, pattern, path, indexes, mvs)
 	end
 end
 
-validate_claim_pattern = function(st, pattern, path, indexes, mvs, expected_judgment)
+validate_claim_pattern = function(st, pattern, path, indexes, mvs, expected_judgment, allow_implicit_metas)
 	if not table_ok(st, pattern, path) then return end
 	check_fields(st, pattern, path, { "tag", "judgment", "args" })
 	if pattern.tag ~= "claim_pattern" then err(st, path .. ".tag", "expected claim_pattern") end
@@ -468,7 +472,7 @@ validate_claim_pattern = function(st, pattern, path, indexes, mvs, expected_judg
 			for _, param in ipairs(judgment.params) do
 				expected[param.name] = true
 			end
-			validate_pattern_map(st, pattern.args, expected, path .. ".args", indexes, mvs)
+			validate_pattern_map(st, pattern.args, expected, path .. ".args", indexes, mvs, allow_implicit_metas)
 		end
 	end
 end
@@ -476,7 +480,7 @@ end
 local function validate_premise(st, premise, path, indexes, mvs)
 	check_fields(st, premise, path, { "tag", "claim" }, { "scope_from" })
 	if premise.tag ~= "premise_pattern" then err(st, path .. ".tag", "expected premise_pattern") end
-	validate_claim_pattern(st, premise.claim, path .. ".claim", indexes, mvs, nil)
+	validate_claim_pattern(st, premise.claim, path .. ".claim", indexes, mvs, nil, false)
 	if premise.scope_from ~= nil then
 		local spath = path .. ".scope_from"
 		local scope_from = premise.scope_from
@@ -531,7 +535,7 @@ local function validate_rules(st, theory, indexes)
 			err(st, path .. ".judgment", "unknown judgment " .. rule.judgment)
 		end
 		local mvs = validate_metavariables(st, rule, path, indexes)
-		validate_claim_pattern(st, rule.conclusion, path .. ".conclusion", indexes, mvs, rule.judgment)
+		validate_claim_pattern(st, rule.conclusion, path .. ".conclusion", indexes, mvs, rule.judgment, false)
 		if expect_array(st, rule, "premises", path) then
 			for j, premise in ipairs(rule.premises) do
 				validate_premise(st, premise, path .. ".premises[" .. j .. "]", indexes, mvs)
@@ -584,7 +588,7 @@ local function validate_roots(st, theory, indexes)
 		if root.scope_policy ~= "closed" and root.scope_policy ~= "open" then
 			err(st, path .. ".scope_policy", "expected closed or open")
 		end
-		validate_claim_pattern(st, root.required_claim_pattern, path .. ".required_claim_pattern", indexes, {}, root.required_judgment)
+		validate_claim_pattern(st, root.required_claim_pattern, path .. ".required_claim_pattern", indexes, {}, root.required_judgment, true)
 	end
 end
 
