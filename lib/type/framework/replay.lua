@@ -43,27 +43,38 @@ local function structural_key(value)
 	return encoded
 end
 
-local function same_value(a, b, indexes)
-	local ak, amsg = alpha.key(a, indexes, {})
+local function snapshot_scope(scope_stack)
+	local out = {}
+	for i, frame in ipairs(scope_stack or {}) do
+		out[i] = frame
+	end
+	return out
+end
+
+local function value_key(value, indexes, scope_stack)
+	local ak, amsg = alpha.key(value, indexes, scope_stack or {})
 	if not ak then
-		ak, amsg = structural_key(a)
+		ak, amsg = structural_key(value)
 	end
+	return ak, amsg
+end
+
+local function same_value(a, b, indexes, a_scope, b_scope)
+	local ak, amsg = value_key(a, indexes, a_scope)
 	if not ak then return false, amsg end
-	local bk, bmsg = alpha.key(b, indexes, {})
-	if not bk then
-		bk, bmsg = structural_key(b)
-	end
+	local bk, bmsg = value_key(b, indexes, b_scope)
 	if not bk then return false, bmsg end
 	return ak == bk
 end
 
-local function bind_meta(bindings, name, value, indexes)
+local function bind_meta(bindings, name, value, indexes, scope_stack)
 	local prior = bindings[name]
 	if prior == nil then
-		bindings[name] = value
+		bindings[name] = { tag = "value_binding", value = value, scope_stack = snapshot_scope(scope_stack) }
 		return true
 	end
-	local ok, msg = same_value(prior, value, indexes)
+	if prior.tag ~= "value_binding" then return false, "metavariable kind mismatch" end
+	local ok, msg = same_value(prior.value, value, indexes, prior.scope_stack, scope_stack)
 	if not ok then return false, msg or "repeated metavariable mismatch" end
 	return true
 end
@@ -123,7 +134,7 @@ end
 
 match_pattern = function(pattern, value, path, bindings, errors, indexes, scope_stack)
 	if pattern.tag == "p_meta" then
-		local ok, msg = bind_meta(bindings, pattern.name, value, indexes)
+		local ok, msg = bind_meta(bindings, pattern.name, value, indexes, scope_stack)
 		if not ok then err(errors, path, msg or "metavariable mismatch") end
 	elseif pattern.tag == "p_term" then
 		if type(value) ~= "table" or value.tag ~= "term" then
@@ -237,7 +248,7 @@ local function rule_supported(rule, path, errors)
 	end
 	for i, premise in ipairs(rule.premises) do
 		if premise.scope_from ~= nil then
-			err(errors, path .. ".premises[" .. i .. "].scope_from", "F3 does not admit scoped premise opening")
+			err(errors, path .. ".premises[" .. i .. "].scope_from", "scope_from replay needs contextual open-node semantics")
 		end
 	end
 	for i, condition in ipairs(rule.structural_conditions) do
@@ -252,15 +263,30 @@ local function resolve_operand(operand, bindings)
 	if type(value) == "table" and value.tag == "binder_binding" then return value end
 	if type(value) == "table" and value.tag == "bound_ref_binding" then return value end
 	if operand.tag == "operand_meta" then return value end
+	if type(value) == "table" and value.tag == "value_binding" then
+		value = { tag = "value_binding", value = value.value, scope_stack = snapshot_scope(value.scope_stack) }
+	end
 	for _, segment in ipairs(operand.path) do
 		if type(value) ~= "table" then return nil end
-		if value.tag == "term" or value.tag == "object" then
-			value = value.fields and value.fields[segment]
+		local raw = value.tag == "value_binding" and value.value or value
+		if type(raw) ~= "table" then return nil end
+		if raw.tag == "term" or raw.tag == "object" then
+			raw = raw.fields and raw.fields[segment]
 		else
-			value = value[segment]
+			raw = raw[segment]
+		end
+		if value.tag == "value_binding" then
+			value = { tag = "value_binding", value = raw, scope_stack = value.scope_stack }
+		else
+			value = raw
 		end
 	end
 	return value
+end
+
+local function operand_raw(value)
+	if type(value) == "table" and value.tag == "value_binding" then return value.value, value.scope_stack end
+	return value, nil
 end
 
 local function check_conditions(conditions, bindings, path, errors, indexes)
@@ -269,19 +295,23 @@ local function check_conditions(conditions, bindings, path, errors, indexes)
 		if condition.tag == "cond_category_eq" or condition.tag == "cond_literal_eq" then
 			local left = resolve_operand(condition.left, bindings)
 			local right = resolve_operand(condition.right, bindings)
-			local ok = left ~= nil and right ~= nil and same_value(left, right, indexes)
+			local left_raw, left_scope = operand_raw(left)
+			local right_raw, right_scope = operand_raw(right)
+			local ok = left_raw ~= nil and right_raw ~= nil and same_value(left_raw, right_raw, indexes, left_scope, right_scope)
 			if not ok then err(errors, cpath, "condition equality failed") end
 		elseif condition.tag == "cond_list_len_eq" then
-			local left = resolve_operand(condition.left, bindings)
-			local right = resolve_operand(condition.right, bindings)
+			local left = operand_raw(resolve_operand(condition.left, bindings))
+			local right = operand_raw(resolve_operand(condition.right, bindings))
 			if type(left) ~= "table" or type(right) ~= "table" or #left ~= #right then
 				err(errors, cpath, "list length condition failed")
 			end
 		elseif condition.tag == "cond_digest_eq" then
-			local left = resolve_operand(condition.left, bindings)
-			local right = resolve_operand(condition.right, bindings)
-			local ld = left ~= nil and canonical.digest(left) or nil
-			local rd = right ~= nil and canonical.digest(right) or nil
+			local left, left_scope = operand_raw(resolve_operand(condition.left, bindings))
+			local right, right_scope = operand_raw(resolve_operand(condition.right, bindings))
+			local lk = left ~= nil and value_key(left, indexes, left_scope) or nil
+			local rk = right ~= nil and value_key(right, indexes, right_scope) or nil
+			local ld = lk ~= nil and canonical.digest(lk) or nil
+			local rd = rk ~= nil and canonical.digest(rk) or nil
 			if ld == nil or rd == nil or ld ~= rd then err(errors, cpath, "digest condition failed") end
 		elseif condition.tag == "cond_binder_eq" or condition.tag == "cond_binder_neq" then
 			local left = resolve_operand(condition.left, bindings)
@@ -297,7 +327,9 @@ local function check_conditions(conditions, bindings, path, errors, indexes)
 		elseif condition.tag == "cond_alpha_eq" then
 			local left = resolve_operand(condition.left, bindings)
 			local right = resolve_operand(condition.right, bindings)
-			local ok = left ~= nil and right ~= nil and same_value(left, right, indexes)
+			local left_raw, left_scope = operand_raw(left)
+			local right_raw, right_scope = operand_raw(right)
+			local ok = left_raw ~= nil and right_raw ~= nil and same_value(left_raw, right_raw, indexes, left_scope, right_scope)
 			if not ok then err(errors, cpath, "alpha equality condition failed") end
 		end
 	end
