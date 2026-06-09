@@ -9,6 +9,7 @@ local canonical = require("lib.type.framework.canonical")
 local shape = require("lib.type.framework.shape")
 
 local M = {}
+local BINDER_ENTRY_CACHE = {}
 
 local UNSUPPORTED_CONDITIONS = {
 	cond_binder_eq = true,
@@ -19,6 +20,24 @@ local UNSUPPORTED_CONDITIONS = {
 
 local function err(errors, path, msg)
 	errors[#errors + 1] = path .. ": " .. msg
+end
+
+local function binder_namespace(indexes, binder)
+	local schema = indexes.binder_schemas[binder.schema]
+	return schema and schema.namespace or nil
+end
+
+local function resolve_bound_ref(scope_stack, ref)
+	for depth = 0, #scope_stack - 1 do
+		local frame = scope_stack[#scope_stack - depth]
+		for index, entry in ipairs(frame) do
+			if entry.binder.binder_id == ref.binder_id then
+				if entry.namespace ~= ref.namespace then return nil, "binder namespace mismatch" end
+				return entry, depth, index
+			end
+		end
+	end
+	return nil, "unresolved bound reference " .. tostring(ref.binder_id)
 end
 
 local function structural_key(value)
@@ -54,12 +73,50 @@ end
 
 local match_pattern
 
-local function match_field_map(pattern_fields, value_fields, path, bindings, errors, indexes)
+local function bind_binder(bindings, name, entry)
+	local prior = bindings[name]
+	if prior == nil then
+		bindings[name] = { tag = "binder_binding", entry = entry }
+		return true
+	end
+	if prior.tag ~= "binder_binding" or prior.entry ~= entry then
+		return false, "binder metavariable mismatch"
+	end
+	return true
+end
+
+local function binder_entry_for_value(bindings, binder, indexes)
+	local cache = bindings[BINDER_ENTRY_CACHE]
+	if not cache then
+		cache = {}
+		bindings[BINDER_ENTRY_CACHE] = cache
+	end
+	local entry = cache[binder]
+	if not entry then
+		entry = { binder = binder, namespace = binder_namespace(indexes, binder) }
+		cache[binder] = entry
+	end
+	return entry
+end
+
+local function bind_bound_ref(bindings, name, entry)
+	local prior = bindings[name]
+	if prior == nil then
+		bindings[name] = { tag = "bound_ref_binding", entry = entry }
+		return true
+	end
+	if prior.tag ~= "bound_ref_binding" or prior.entry ~= entry then
+		return false, "bound reference metavariable mismatch"
+	end
+	return true
+end
+
+local function match_field_map(pattern_fields, value_fields, path, bindings, errors, indexes, scope_stack)
 	for name in pairs(pattern_fields) do
 		if value_fields[name] == nil then
 			err(errors, path .. "." .. name, "missing candidate field")
 		else
-			match_pattern(pattern_fields[name], value_fields[name], path .. "." .. name, bindings, errors, indexes)
+			match_pattern(pattern_fields[name], value_fields[name], path .. "." .. name, bindings, errors, indexes, scope_stack)
 		end
 	end
 	for name in pairs(value_fields) do
@@ -67,7 +124,7 @@ local function match_field_map(pattern_fields, value_fields, path, bindings, err
 	end
 end
 
-match_pattern = function(pattern, value, path, bindings, errors, indexes)
+match_pattern = function(pattern, value, path, bindings, errors, indexes, scope_stack)
 	if pattern.tag == "p_meta" then
 		local ok, msg = bind_meta(bindings, pattern.name, value, indexes)
 		if not ok then err(errors, path, msg or "metavariable mismatch") end
@@ -80,7 +137,26 @@ match_pattern = function(pattern, value, path, bindings, errors, indexes)
 			err(errors, path .. ".head", "expected term head " .. pattern.head)
 			return
 		end
-		match_field_map(pattern.fields, value.fields or {}, path .. ".fields", bindings, errors, indexes)
+		match_field_map(pattern.fields, value.fields or {}, path .. ".fields", bindings, errors, indexes, scope_stack)
+	elseif pattern.tag == "p_scoped" then
+		if type(value) ~= "table" or value.tag ~= "scoped" then
+			err(errors, path, "expected scoped value")
+			return
+		end
+		if #value.binders ~= #pattern.binders then
+			err(errors, path .. ".binders", "scoped binder count mismatch")
+			return
+		end
+		local frame = {}
+		for i, binder in ipairs(value.binders) do
+			local entry = { binder = binder, namespace = binder_namespace(indexes, binder) }
+			frame[#frame + 1] = entry
+			local ok, msg = bind_binder(bindings, pattern.binders[i], entry)
+			if not ok then err(errors, path .. ".binders[" .. i .. "]", msg) end
+		end
+		scope_stack[#scope_stack + 1] = frame
+		match_pattern(pattern.body, value.body, path .. ".body", bindings, errors, indexes, scope_stack)
+		scope_stack[#scope_stack] = nil
 	elseif pattern.tag == "p_list" then
 		if type(value) ~= "table" or value.tag ~= nil then
 			err(errors, path, "expected list")
@@ -91,14 +167,39 @@ match_pattern = function(pattern, value, path, bindings, errors, indexes)
 			return
 		end
 		for i, item in ipairs(pattern.items) do
-			match_pattern(item, value[i], path .. "[" .. i .. "]", bindings, errors, indexes)
+			match_pattern(item, value[i], path .. "[" .. i .. "]", bindings, errors, indexes, scope_stack)
 		end
 	elseif pattern.tag == "p_object" then
 		if type(value) ~= "table" or value.tag ~= "object" then
 			err(errors, path, "expected object")
 			return
 		end
-		match_field_map(pattern.fields, value.fields or {}, path .. ".fields", bindings, errors, indexes)
+		match_field_map(pattern.fields, value.fields or {}, path .. ".fields", bindings, errors, indexes, scope_stack)
+	elseif pattern.tag == "p_binder_ref" then
+		if type(value) ~= "table" or value.tag ~= "binder" then
+			err(errors, path, "expected binder")
+			return
+		end
+		local entry = binder_entry_for_value(bindings, value, indexes)
+		local ok, msg = bind_binder(bindings, pattern.name, entry)
+		if not ok then err(errors, path, msg) end
+	elseif pattern.tag == "p_bound_ref" then
+		if type(value) ~= "table" or value.tag ~= "bound_ref" then
+			err(errors, path, "expected bound_ref")
+			return
+		end
+		local entry, msg = resolve_bound_ref(scope_stack, value)
+		if not entry then
+			err(errors, path, msg or "unresolved bound reference")
+			return
+		end
+		local binder_binding = bindings[pattern.name]
+		if binder_binding and binder_binding.tag == "binder_binding" then
+			if binder_binding.entry ~= entry then err(errors, path, "bound reference binder mismatch") end
+		else
+			local ok, bind_msg = bind_bound_ref(bindings, pattern.name, entry)
+			if not ok then err(errors, path, bind_msg) end
+		end
 	elseif pattern.tag == "p_literal" then
 		if value ~= pattern.value then err(errors, path, "literal mismatch") end
 	elseif pattern.tag == "p_enum" then
@@ -106,6 +207,14 @@ match_pattern = function(pattern, value, path, bindings, errors, indexes)
 	else
 		err(errors, path, "unsupported pattern form " .. tostring(pattern.tag))
 	end
+end
+
+local function claim_scope_frame(claim, indexes)
+	local frame = {}
+	for _, binder in ipairs(claim.scope or {}) do
+		frame[#frame + 1] = { binder = binder, namespace = binder_namespace(indexes, binder) }
+	end
+	return frame
 end
 
 local function match_claim(pattern, claim, path, bindings, errors, indexes)
@@ -116,16 +225,17 @@ local function match_claim(pattern, claim, path, bindings, errors, indexes)
 	if type(claim.scope) == "table" and #claim.scope > 0 then
 		err(errors, path .. ".scope", "F3 does not admit open claims")
 	end
-	match_field_map(pattern.args, claim.args or {}, path .. ".args", bindings, errors, indexes)
+	local scope_stack = {}
+	if type(claim.scope) == "table" and #claim.scope > 0 then
+		scope_stack[#scope_stack + 1] = claim_scope_frame(claim, indexes)
+	end
+	match_field_map(pattern.args, claim.args or {}, path .. ".args", bindings, errors, indexes, scope_stack)
 end
 
 local function rule_supported(rule, path, errors)
 	for i, mv in ipairs(rule.metavariables) do
 		if mv.mode ~= "input" then
 			err(errors, path .. ".metavariables[" .. i .. "].mode", "F3 supports input metavariables only")
-		end
-		if mv.kind == "binder" or mv.kind == "bound_ref" or mv.kind == "scoped" then
-			err(errors, path .. ".metavariables[" .. i .. "].kind", "unsupported F3 metavariable kind " .. mv.kind)
 		end
 	end
 	for i, premise in ipairs(rule.premises) do

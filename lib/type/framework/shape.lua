@@ -340,6 +340,22 @@ local function expect_metavariable(st, mvs, name, kind, path)
 	end
 end
 
+local function expect_metavariable_one_of(st, mvs, name, kinds, path)
+	if type(name) ~= "string" then
+		err(st, path, "expected metavariable name")
+		return
+	end
+	local mv = mvs and mvs[name]
+	if not mv then
+		err(st, path, "unknown metavariable " .. name)
+		return
+	end
+	for _, kind in ipairs(kinds) do
+		if mv.kind == kind then return end
+	end
+	err(st, path, "expected " .. table.concat(kinds, " or ") .. " metavariable")
+end
+
 local function validate_condition_operand(st, operand, path, mvs, direct_kind)
 	if not table_ok(st, operand, path) then return end
 	if operand.tag == "operand_meta" then
@@ -437,7 +453,7 @@ validate_pattern = function(st, pattern, path, indexes, mvs, allow_implicit_meta
 		end
 	elseif pattern.tag == "p_bound_ref" then
 		check_fields(st, pattern, path, { "tag", "name" })
-		expect_metavariable(st, mvs, pattern.name, "bound_ref", path .. ".name")
+		expect_metavariable_one_of(st, mvs, pattern.name, { "bound_ref", "binder" }, path .. ".name")
 	elseif pattern.tag == "p_binder_ref" then
 		check_fields(st, pattern, path, { "tag", "name" })
 		expect_metavariable(st, mvs, pattern.name, "binder", path .. ".name")

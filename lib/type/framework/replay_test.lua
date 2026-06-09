@@ -364,14 +364,14 @@ T.describe("type.framework F3 replay", function()
 		T.ok(has_error(errors, "repeated metavariable mismatch"), table.concat(errors or {}, "\n"))
 	end)
 
-	T.it("rejects unsupported scoped F3 rules", function()
+	T.it("rejects non-input metavariables", function()
 		local theory = combinator_theory()
 		theory.rules[1].metavariables = {
-			{ tag = "metavariable", name = "s", kind = "scoped", mode = "input" },
+			{ tag = "metavariable", name = "s", kind = "category", category = "Term", mode = "output" },
 		}
 		local result, errors = replay.replay(theory, app_certificate())
 		T.eq(result, nil)
-		T.ok(has_error(errors, "unsupported F3 metavariable kind scoped"), table.concat(errors or {}, "\n"))
+		T.ok(has_error(errors, "input metavariables only"), table.concat(errors or {}, "\n"))
 	end)
 
 	T.it("uses alpha equality for repeated metavariable matches", function()
@@ -390,5 +390,141 @@ T.describe("type.framework F3 replay", function()
 		T.ok(a, table.concat(ae or {}, "\n"))
 		T.ok(b, table.concat(be or {}, "\n"))
 		T.eq(a.root_digests[1], b.root_digests[1])
+	end)
+
+	T.it("matches scoped binders and bound references by lexical identity", function()
+		local theory = scoped_theory()
+		theory.rules[#theory.rules + 1] = {
+			tag = "rule",
+			name = "identity_lam",
+			judgment = "HasType",
+			metavariables = {
+				{ tag = "metavariable", name = "x", kind = "binder", namespace = "term_var", mode = "input" },
+			},
+			conclusion = {
+				tag = "claim_pattern",
+				judgment = "HasType",
+				args = {
+					term = p_term("Lam", {
+						body = {
+							tag = "p_scoped",
+							binders = { "x" },
+							body = p_term("Var", {
+								ref = { tag = "p_bound_ref", name = "x" },
+							}),
+						},
+					}),
+					ty = p_term("TyUnit"),
+				},
+			},
+			premises = {},
+			structural_conditions = {},
+		}
+		local result, errors = replay.replay(theory, scoped_certificate("id_lam", "identity_lam", term("Lam", {
+			body = scoped_identity("source_name_does_not_matter"),
+		})))
+		T.ok(result, table.concat(errors or {}, "\n"))
+	end)
+
+	T.it("rejects bound references to a different scoped binder", function()
+		local theory = scoped_theory()
+		theory.term_heads[#theory.term_heads + 1] = {
+			tag = "term_head",
+			name = "Two",
+			result_category = "Term",
+			fields = {
+				{
+					tag = "field_scoped",
+					name = "body",
+					binders = {
+						{ tag = "binder_schema_ref", schema = "term_binding" },
+						{ tag = "binder_schema_ref", schema = "term_binding" },
+					},
+					body = { tag = "field_category", name = "body", category = "Term" },
+				},
+			},
+		}
+		theory.rules[#theory.rules + 1] = {
+			tag = "rule",
+			name = "bad_two",
+			judgment = "HasType",
+			metavariables = {
+				{ tag = "metavariable", name = "x", kind = "binder", namespace = "term_var", mode = "input" },
+				{ tag = "metavariable", name = "y", kind = "binder", namespace = "term_var", mode = "input" },
+			},
+			conclusion = {
+				tag = "claim_pattern",
+				judgment = "HasType",
+				args = {
+					term = p_term("Two", {
+						body = {
+							tag = "p_scoped",
+							binders = { "x", "y" },
+							body = p_term("Var", {
+								ref = { tag = "p_bound_ref", name = "x" },
+							}),
+						},
+					}),
+					ty = p_term("TyUnit"),
+				},
+			},
+			premises = {},
+			structural_conditions = {},
+		}
+		local bad = term("Two", {
+			body = {
+				tag = "scoped",
+				binders = {
+					{ tag = "binder", binder_id = "x", schema = "term_binding", fields = {} },
+					{ tag = "binder", binder_id = "y", schema = "term_binding", fields = {} },
+				},
+				body = term("Var", {
+					ref = { tag = "bound_ref", binder_id = "y", namespace = "term_var" },
+				}),
+			},
+		})
+		local result, errors = replay.replay(theory, scoped_certificate("bad_two", "bad_two", bad))
+		T.eq(result, nil)
+		T.ok(has_error(errors, "bound reference binder mismatch"), table.concat(errors or {}, "\n"))
+	end)
+
+	T.it("matches repeated explicit binder values with p_binder_ref", function()
+		local theory = scoped_theory()
+		theory.term_heads[#theory.term_heads + 1] = {
+			tag = "term_head",
+			name = "BinderPair",
+			result_category = "Term",
+			fields = {
+				{ tag = "field_binder", name = "left", binder_schema = "term_binding" },
+				{ tag = "field_binder", name = "right", binder_schema = "term_binding" },
+			},
+		}
+		theory.rules[#theory.rules + 1] = {
+			tag = "rule",
+			name = "same_binder_pair",
+			judgment = "HasType",
+			metavariables = {
+				{ tag = "metavariable", name = "b", kind = "binder", namespace = "term_var", mode = "input" },
+			},
+			conclusion = {
+				tag = "claim_pattern",
+				judgment = "HasType",
+				args = {
+					term = p_term("BinderPair", {
+						left = { tag = "p_binder_ref", name = "b" },
+						right = { tag = "p_binder_ref", name = "b" },
+					}),
+					ty = p_term("TyUnit"),
+				},
+			},
+			premises = {},
+			structural_conditions = {},
+		}
+		local b = { tag = "binder", binder_id = "x", schema = "term_binding", fields = {} }
+		local result, errors = replay.replay(theory, scoped_certificate("binder_pair", "same_binder_pair", term("BinderPair", {
+			left = b,
+			right = b,
+		})))
+		T.ok(result, table.concat(errors or {}, "\n"))
 	end)
 end)

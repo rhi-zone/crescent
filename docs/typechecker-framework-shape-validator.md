@@ -155,7 +155,8 @@ F2 validates that:
 - `p_scoped.binders` names binder metavariables;
 - `p_list.items` are valid patterns;
 - `p_object.fields` have unique names;
-- `p_bound_ref.name` names a `bound_ref` metavariable;
+- `p_bound_ref.name` names a `bound_ref` metavariable, or a `binder`
+  metavariable when matching a reference to that binder;
 - `p_binder_ref.name` names a `binder` metavariable;
 - `p_literal.value` is in the F1 initial value domain;
 - `p_enum.value` is a string.

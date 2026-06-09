@@ -414,8 +414,10 @@ Pattern =
 | { tag = "p_enum", value: string }
 ```
 
-`p_binder_ref` refers to a binder metavariable. `p_bound_ref` refers to a
-bound-reference metavariable.
+`p_binder_ref` refers to a binder metavariable and matches a binder value.
+`p_bound_ref` matches a bound reference. Its `name` may refer either to a
+bound-reference metavariable, or to a binder metavariable when the pattern means
+"a reference to this binder".
 
 F0 list and object patterns are fixed shape. They do not admit rest fields,
 optional fields, or unordered matching.
