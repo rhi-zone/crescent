@@ -3,6 +3,9 @@
 The ecosystem's north star, beneath the architectural rules in `CLAUDE.md` and
 the scope in `batteries.md`.
 
+For the coequal project value axes and the status language used for design
+claims, see `project-values.md`.
+
 ## Make the computer small
 
 The whole machine should be knowable end-to-end. Not "small codebase" — small as

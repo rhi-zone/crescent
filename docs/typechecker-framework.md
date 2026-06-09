@@ -1,6 +1,10 @@
 # Typechecker Framework
 
-This is the new top-level direction for typechecker work.
+This is the current framework track for typechecker work.
+
+Status: adopted as an implementation/research track, provisional as an
+architecture story. It is not a claim that Crescent has a single main value; see
+`docs/project-values.md`.
 
 The goal is not another Crescent typechecker version. The goal is a
 type-system-agnostic framework for specifying and checking type-system theories.
@@ -207,8 +211,8 @@ The first framework design pass produced:
 5. v7 MR0 framework audit:
    `docs/typechecker-framework-v7-mr0-audit.md`.
 
-Implementation starts only after STLC and System F can be written as theories
-without Crescent-specific concepts.
+This pass is not a proof that the framework is the right final architecture.
+It records the current track and its falsification tests.
 
 ## Next Roadmap
 
@@ -232,7 +236,9 @@ readiness:
    `docs/typechecker-framework-system-f-replay.md`.
 7. Define the tiny Crescent theory spike. Crescent spike spec:
    `docs/typechecker-framework-crescent-spike.md`.
-8. Only then start `lib/type/framework/` implementation.
+8. Iterate on `lib/type/framework/` only when the next implementation step is a
+   consequence of the current framework track rather than a new semantic
+   primitive in disguise.
 
 ## Non-Goals
 
