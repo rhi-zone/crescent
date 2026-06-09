@@ -117,6 +117,32 @@ function M.key(value, indexes, scope_stack)
 	return canonical.serialize(normalized)
 end
 
+function M.normalize_claim(claim, indexes)
+	local scope_stack = {}
+	local frame, normalized_scope, msg = binder_frame(claim.scope or {}, indexes, scope_stack)
+	if msg then return nil, msg end
+	scope_stack[#scope_stack + 1] = frame
+	local args = {}
+	for key, value in pairs(claim.args or {}) do
+		local normalized, arg_msg = normalize_inner(value, indexes, scope_stack)
+		if arg_msg then return nil, arg_msg end
+		args[key] = normalized
+	end
+	scope_stack[#scope_stack] = nil
+	return {
+		tag = "claim",
+		scope = normalized_scope,
+		judgment = claim.judgment,
+		args = args,
+	}
+end
+
+function M.claim_key(claim, indexes)
+	local normalized, msg = M.normalize_claim(claim, indexes)
+	if msg then return nil, msg end
+	return canonical.serialize(normalized)
+end
+
 function M.equal(a, b, indexes)
 	local ak, amsg = M.key(a, indexes, {})
 	if not ak then return nil, amsg end

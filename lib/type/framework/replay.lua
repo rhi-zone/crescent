@@ -1,8 +1,10 @@
--- F3 first-order rule replay for framework certificates.
+-- Framework rule replay.
 --
--- This module assumes F2 shape validation succeeds. It intentionally rejects
--- binders, scoped destructuring, non-input metavariables, and oracles.
+-- The initial replay subset is F3, with alpha-aware equality/root digests added
+-- as F4 substrate. It still rejects scoped premise opening, substitution, and
+-- oracles.
 
+local alpha = require("lib.type.framework.alpha")
 local canonical = require("lib.type.framework.canonical")
 local shape = require("lib.type.framework.shape")
 
@@ -25,33 +27,39 @@ local function structural_key(value)
 	return encoded
 end
 
-local function same_value(a, b)
-	local ak, amsg = structural_key(a)
+local function same_value(a, b, indexes)
+	local ak, amsg = alpha.key(a, indexes, {})
+	if not ak then
+		ak, amsg = structural_key(a)
+	end
 	if not ak then return false, amsg end
-	local bk, bmsg = structural_key(b)
+	local bk, bmsg = alpha.key(b, indexes, {})
+	if not bk then
+		bk, bmsg = structural_key(b)
+	end
 	if not bk then return false, bmsg end
 	return ak == bk
 end
 
-local function bind_meta(bindings, name, value)
+local function bind_meta(bindings, name, value, indexes)
 	local prior = bindings[name]
 	if prior == nil then
 		bindings[name] = value
 		return true
 	end
-	local ok, msg = same_value(prior, value)
+	local ok, msg = same_value(prior, value, indexes)
 	if not ok then return false, msg or "repeated metavariable mismatch" end
 	return true
 end
 
 local match_pattern
 
-local function match_field_map(pattern_fields, value_fields, path, bindings, errors)
+local function match_field_map(pattern_fields, value_fields, path, bindings, errors, indexes)
 	for name in pairs(pattern_fields) do
 		if value_fields[name] == nil then
 			err(errors, path .. "." .. name, "missing candidate field")
 		else
-			match_pattern(pattern_fields[name], value_fields[name], path .. "." .. name, bindings, errors)
+			match_pattern(pattern_fields[name], value_fields[name], path .. "." .. name, bindings, errors, indexes)
 		end
 	end
 	for name in pairs(value_fields) do
@@ -59,9 +67,9 @@ local function match_field_map(pattern_fields, value_fields, path, bindings, err
 	end
 end
 
-match_pattern = function(pattern, value, path, bindings, errors)
+match_pattern = function(pattern, value, path, bindings, errors, indexes)
 	if pattern.tag == "p_meta" then
-		local ok, msg = bind_meta(bindings, pattern.name, value)
+		local ok, msg = bind_meta(bindings, pattern.name, value, indexes)
 		if not ok then err(errors, path, msg or "metavariable mismatch") end
 	elseif pattern.tag == "p_term" then
 		if type(value) ~= "table" or value.tag ~= "term" then
@@ -72,7 +80,7 @@ match_pattern = function(pattern, value, path, bindings, errors)
 			err(errors, path .. ".head", "expected term head " .. pattern.head)
 			return
 		end
-		match_field_map(pattern.fields, value.fields or {}, path .. ".fields", bindings, errors)
+		match_field_map(pattern.fields, value.fields or {}, path .. ".fields", bindings, errors, indexes)
 	elseif pattern.tag == "p_list" then
 		if type(value) ~= "table" or value.tag ~= nil then
 			err(errors, path, "expected list")
@@ -83,14 +91,14 @@ match_pattern = function(pattern, value, path, bindings, errors)
 			return
 		end
 		for i, item in ipairs(pattern.items) do
-			match_pattern(item, value[i], path .. "[" .. i .. "]", bindings, errors)
+			match_pattern(item, value[i], path .. "[" .. i .. "]", bindings, errors, indexes)
 		end
 	elseif pattern.tag == "p_object" then
 		if type(value) ~= "table" or value.tag ~= "object" then
 			err(errors, path, "expected object")
 			return
 		end
-		match_field_map(pattern.fields, value.fields or {}, path .. ".fields", bindings, errors)
+		match_field_map(pattern.fields, value.fields or {}, path .. ".fields", bindings, errors, indexes)
 	elseif pattern.tag == "p_literal" then
 		if value ~= pattern.value then err(errors, path, "literal mismatch") end
 	elseif pattern.tag == "p_enum" then
@@ -100,7 +108,7 @@ match_pattern = function(pattern, value, path, bindings, errors)
 	end
 end
 
-local function match_claim(pattern, claim, path, bindings, errors)
+local function match_claim(pattern, claim, path, bindings, errors, indexes)
 	if claim.judgment ~= pattern.judgment then
 		err(errors, path .. ".judgment", "expected judgment " .. pattern.judgment)
 		return
@@ -108,7 +116,7 @@ local function match_claim(pattern, claim, path, bindings, errors)
 	if type(claim.scope) == "table" and #claim.scope > 0 then
 		err(errors, path .. ".scope", "F3 does not admit open claims")
 	end
-	match_field_map(pattern.args, claim.args or {}, path .. ".args", bindings, errors)
+	match_field_map(pattern.args, claim.args or {}, path .. ".args", bindings, errors, indexes)
 end
 
 local function rule_supported(rule, path, errors)
@@ -146,13 +154,13 @@ local function resolve_operand(operand, bindings)
 	return value
 end
 
-local function check_conditions(conditions, bindings, path, errors)
+local function check_conditions(conditions, bindings, path, errors, indexes)
 	for i, condition in ipairs(conditions) do
 		local cpath = path .. "[" .. i .. "]"
 		if condition.tag == "cond_category_eq" or condition.tag == "cond_literal_eq" then
 			local left = resolve_operand(condition.left, bindings)
 			local right = resolve_operand(condition.right, bindings)
-			local ok = left ~= nil and right ~= nil and same_value(left, right)
+			local ok = left ~= nil and right ~= nil and same_value(left, right, indexes)
 			if not ok then err(errors, cpath, "condition equality failed") end
 		elseif condition.tag == "cond_list_len_eq" then
 			local left = resolve_operand(condition.left, bindings)
@@ -231,15 +239,15 @@ function M.replay(theory, certificate)
 		end
 
 		local bindings = {}
-		match_claim(rule.conclusion, node.claim, "evidence." .. node_id .. ".claim", bindings, errors)
+		match_claim(rule.conclusion, node.claim, "evidence." .. node_id .. ".claim", bindings, errors, indexes)
 		for i, premise in ipairs(rule.premises) do
 			local premise_id = app.premises[i]
 			local premise_node = premise_id and nodes[premise_id]
 			if premise_node then
-				match_claim(premise.claim, premise_node.claim, "evidence." .. node_id .. ".premise_claims[" .. i .. "]", bindings, errors)
+				match_claim(premise.claim, premise_node.claim, "evidence." .. node_id .. ".premise_claims[" .. i .. "]", bindings, errors, indexes)
 			end
 		end
-		check_conditions(rule.structural_conditions, bindings, "evidence." .. node_id .. ".conditions", errors)
+		check_conditions(rule.structural_conditions, bindings, "evidence." .. node_id .. ".conditions", errors, indexes)
 
 		if #errors == before then
 			status[node_id] = "accepted"
@@ -262,8 +270,14 @@ function M.replay(theory, certificate)
 				err(errors, "certificate.roots[" .. i .. "].scope_policy", "closed root has open claim")
 			end
 			local bindings = {}
-			match_claim(root_decl.required_claim_pattern, node.claim, "certificate.roots[" .. i .. "].claim", bindings, errors)
-			local digest, digest_err = canonical.prefixed_digest("root", { root = root, claim = node.claim })
+			match_claim(root_decl.required_claim_pattern, node.claim, "certificate.roots[" .. i .. "].claim", bindings, errors, indexes)
+			local normalized_claim, normalize_err = alpha.normalize_claim(node.claim, indexes)
+			local digest, digest_err
+			if normalized_claim then
+				digest, digest_err = canonical.prefixed_digest("root", { root_kind = root.root_kind, claim = normalized_claim })
+			else
+				digest_err = normalize_err
+			end
 			if digest then
 				root_digests[#root_digests + 1] = digest
 			else

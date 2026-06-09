@@ -212,6 +212,110 @@ local function has_error(errors, needle)
 	return false
 end
 
+local function scoped_identity(id)
+	return {
+		tag = "scoped",
+		binders = {
+			{ tag = "binder", binder_id = id, schema = "term_binding", fields = {} },
+		},
+		body = term("Var", {
+			ref = { tag = "bound_ref", binder_id = id, namespace = "term_var" },
+		}),
+	}
+end
+
+local function scoped_theory()
+	local theory = combinator_theory()
+	theory.namespaces = {
+		{ tag = "namespace", name = "term_var" },
+	}
+	theory.binder_schemas = {
+		{ tag = "binder_schema", name = "term_binding", namespace = "term_var", category = "Term", fields = {} },
+	}
+	theory.term_heads[#theory.term_heads + 1] = {
+		tag = "term_head",
+		name = "Var",
+		result_category = "Term",
+		fields = {
+			{ tag = "field_bound_ref", name = "ref", namespace = "term_var" },
+		},
+	}
+	theory.term_heads[#theory.term_heads + 1] = {
+		tag = "term_head",
+		name = "Lam",
+		result_category = "Term",
+		fields = {
+			{
+				tag = "field_scoped",
+				name = "body",
+				binders = { { tag = "binder_schema_ref", schema = "term_binding" } },
+				body = { tag = "field_category", name = "body", category = "Term" },
+			},
+		},
+	}
+	theory.term_heads[#theory.term_heads + 1] = {
+		tag = "term_head",
+		name = "Pair",
+		result_category = "Term",
+		fields = {
+			{ tag = "field_category", name = "left", category = "Term" },
+			{ tag = "field_category", name = "right", category = "Term" },
+		},
+	}
+	theory.rules[#theory.rules + 1] = {
+		tag = "rule",
+		name = "same_pair",
+		judgment = "HasType",
+		metavariables = {
+			{ tag = "metavariable", name = "x", kind = "category", category = "Term", mode = "input" },
+		},
+		conclusion = {
+			tag = "claim_pattern",
+			judgment = "HasType",
+			args = {
+				term = p_term("Pair", { left = p_meta("x"), right = p_meta("x") }),
+				ty = p_term("TyUnit"),
+			},
+		},
+		premises = {},
+		structural_conditions = {},
+	}
+	theory.rules[#theory.rules + 1] = {
+		tag = "rule",
+		name = "any_term",
+		judgment = "HasType",
+		metavariables = {
+			{ tag = "metavariable", name = "x", kind = "category", category = "Term", mode = "input" },
+		},
+		conclusion = {
+			tag = "claim_pattern",
+			judgment = "HasType",
+			args = {
+				term = p_meta("x"),
+				ty = p_term("TyUnit"),
+			},
+		},
+		premises = {},
+		structural_conditions = {},
+	}
+	return theory
+end
+
+local function scoped_certificate(id, rule, term_value)
+	return {
+		tag = "certificate",
+		framework_version = shape.FRAMEWORK_VERSION,
+		theory_id = "comb",
+		theory_version = "0",
+		evidence = {
+			evidence(id, claim(term_value, term("TyUnit")), rule),
+		},
+		roots = {
+			{ tag = "root", root_kind = "program_type", node_id = id },
+		},
+	}
+end
+
 T.describe("type.framework F3 replay", function()
 	T.it("accepts an ordered first-order combinator derivation", function()
 		local result, errors = replay.replay(combinator_theory(), app_certificate())
@@ -268,5 +372,23 @@ T.describe("type.framework F3 replay", function()
 		local result, errors = replay.replay(theory, app_certificate())
 		T.eq(result, nil)
 		T.ok(has_error(errors, "unsupported F3 metavariable kind scoped"), table.concat(errors or {}, "\n"))
+	end)
+
+	T.it("uses alpha equality for repeated metavariable matches", function()
+		local pair = term("Pair", {
+			left = term("Lam", { body = scoped_identity("x") }),
+			right = term("Lam", { body = scoped_identity("y") }),
+		})
+		local result, errors = replay.replay(scoped_theory(), scoped_certificate("pair", "same_pair", pair))
+		T.ok(result, table.concat(errors or {}, "\n"))
+	end)
+
+	T.it("computes alpha-stable root digests", function()
+		local theory = scoped_theory()
+		local a, ae = replay.replay(theory, scoped_certificate("a", "any_term", term("Lam", { body = scoped_identity("x") })))
+		local b, be = replay.replay(theory, scoped_certificate("b", "any_term", term("Lam", { body = scoped_identity("y") })))
+		T.ok(a, table.concat(ae or {}, "\n"))
+		T.ok(b, table.concat(be or {}, "\n"))
+		T.eq(a.root_digests[1], b.root_digests[1])
 	end)
 end)
