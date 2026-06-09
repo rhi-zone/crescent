@@ -12,9 +12,6 @@ local M = {}
 local BINDER_ENTRY_CACHE = {}
 
 local UNSUPPORTED_CONDITIONS = {
-	cond_binder_eq = true,
-	cond_binder_neq = true,
-	cond_alpha_eq = true,
 	cond_subst = true,
 }
 
@@ -252,6 +249,8 @@ end
 
 local function resolve_operand(operand, bindings)
 	local value = bindings[operand.name or operand.base]
+	if type(value) == "table" and value.tag == "binder_binding" then return value end
+	if type(value) == "table" and value.tag == "bound_ref_binding" then return value end
 	if operand.tag == "operand_meta" then return value end
 	for _, segment in ipairs(operand.path) do
 		if type(value) ~= "table" then return nil end
@@ -284,6 +283,22 @@ local function check_conditions(conditions, bindings, path, errors, indexes)
 			local ld = left ~= nil and canonical.digest(left) or nil
 			local rd = right ~= nil and canonical.digest(right) or nil
 			if ld == nil or rd == nil or ld ~= rd then err(errors, cpath, "digest condition failed") end
+		elseif condition.tag == "cond_binder_eq" or condition.tag == "cond_binder_neq" then
+			local left = resolve_operand(condition.left, bindings)
+			local right = resolve_operand(condition.right, bindings)
+			local same = type(left) == "table" and type(right) == "table"
+				and left.tag == "binder_binding" and right.tag == "binder_binding"
+				and left.entry == right.entry
+			if condition.tag == "cond_binder_eq" and not same then
+				err(errors, cpath, "binder equality condition failed")
+			elseif condition.tag == "cond_binder_neq" and same then
+				err(errors, cpath, "binder inequality condition failed")
+			end
+		elseif condition.tag == "cond_alpha_eq" then
+			local left = resolve_operand(condition.left, bindings)
+			local right = resolve_operand(condition.right, bindings)
+			local ok = left ~= nil and right ~= nil and same_value(left, right, indexes)
+			if not ok then err(errors, cpath, "alpha equality condition failed") end
 		end
 	end
 end

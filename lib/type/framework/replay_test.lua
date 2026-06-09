@@ -527,4 +527,94 @@ T.describe("type.framework F3 replay", function()
 		})))
 		T.ok(result, table.concat(errors or {}, "\n"))
 	end)
+
+	T.it("checks binder equality and inequality conditions", function()
+		local theory = scoped_theory()
+		theory.rules[#theory.rules + 1] = {
+			tag = "rule",
+			name = "binder_eq_lam",
+			judgment = "HasType",
+			metavariables = {
+				{ tag = "metavariable", name = "x", kind = "binder", namespace = "term_var", mode = "input" },
+			},
+			conclusion = {
+				tag = "claim_pattern",
+				judgment = "HasType",
+				args = {
+					term = p_term("Lam", {
+						body = {
+							tag = "p_scoped",
+							binders = { "x" },
+							body = p_term("Var", {
+								ref = { tag = "p_bound_ref", name = "x" },
+							}),
+						},
+					}),
+					ty = p_term("TyUnit"),
+				},
+			},
+			premises = {},
+			structural_conditions = {
+				{
+					tag = "cond_binder_eq",
+					left = { tag = "operand_meta", name = "x" },
+					right = { tag = "operand_meta", name = "x" },
+				},
+			},
+		}
+		local ok_result, ok_errors = replay.replay(theory, scoped_certificate("binder_eq", "binder_eq_lam", term("Lam", {
+			body = scoped_identity("x"),
+		})))
+		T.ok(ok_result, table.concat(ok_errors or {}, "\n"))
+
+		theory.rules[#theory.rules].structural_conditions[1].tag = "cond_binder_neq"
+		local bad_result, bad_errors = replay.replay(theory, scoped_certificate("binder_neq", "binder_eq_lam", term("Lam", {
+			body = scoped_identity("x"),
+		})))
+		T.eq(bad_result, nil)
+		T.ok(has_error(bad_errors, "binder inequality condition failed"), table.concat(bad_errors or {}, "\n"))
+	end)
+
+	T.it("checks alpha equality conditions", function()
+		local theory = scoped_theory()
+		theory.rules[#theory.rules + 1] = {
+			tag = "rule",
+			name = "alpha_pair",
+			judgment = "HasType",
+			metavariables = {
+				{ tag = "metavariable", name = "left", kind = "category", category = "Term", mode = "input" },
+				{ tag = "metavariable", name = "right", kind = "category", category = "Term", mode = "input" },
+			},
+			conclusion = {
+				tag = "claim_pattern",
+				judgment = "HasType",
+				args = {
+					term = p_term("Pair", { left = p_meta("left"), right = p_meta("right") }),
+					ty = p_term("TyUnit"),
+				},
+			},
+			premises = {},
+			structural_conditions = {
+				{
+					tag = "cond_alpha_eq",
+					left = { tag = "operand_meta", name = "left" },
+					right = { tag = "operand_meta", name = "right" },
+				},
+			},
+		}
+		local good = term("Pair", {
+			left = term("Lam", { body = scoped_identity("x") }),
+			right = term("Lam", { body = scoped_identity("y") }),
+		})
+		local ok_result, ok_errors = replay.replay(theory, scoped_certificate("alpha_good", "alpha_pair", good))
+		T.ok(ok_result, table.concat(ok_errors or {}, "\n"))
+
+		local bad = term("Pair", {
+			left = term("Lam", { body = scoped_identity("x") }),
+			right = term("TmUnit"),
+		})
+		local bad_result, bad_errors = replay.replay(theory, scoped_certificate("alpha_bad", "alpha_pair", bad))
+		T.eq(bad_result, nil)
+		T.ok(has_error(bad_errors, "alpha equality condition failed"), table.concat(bad_errors or {}, "\n"))
+	end)
 end)
