@@ -260,7 +260,8 @@ These are design tests, not product checkers:
 
 1. Propositional logic: claims and evidence with no programs.
 2. Untyped lambda calculus: artifact structure, binding, alpha-equivalence, and
-   simple evaluation claims.
+   simple evaluation claims. Current pass:
+   `docs/agnostic-static-analysis-lambda.md`.
 3. STLC: hosted `type` vocabulary without making types substrate primitives.
 4. Definite assignment: graph/dataflow claims with fixed-point evidence.
 5. Capability reachability: graph claims with explicit authority boundaries.
