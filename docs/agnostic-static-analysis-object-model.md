@@ -354,3 +354,6 @@ object model, including:
 - accepted/rejected/unknown examples;
 - one adversarial example that tries to smuggle a typechecker concept into the
   substrate.
+
+Current propositional validation pass:
+`docs/agnostic-static-analysis-prop-logic.md`.
