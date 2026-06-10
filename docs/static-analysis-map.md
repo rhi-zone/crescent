@@ -109,6 +109,7 @@ implementation shape by default.
 ## Agnostic Static Analysis
 
 The active design direction is a fully agnostic static-analysis substrate.
+Entry point: `docs/agnostic-static-analysis-design.md`.
 
 It is not a Crescent checker first. It should be able to host static semantics
 for very small calculi, for conventional typed languages, and eventually for
