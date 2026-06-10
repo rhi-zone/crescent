@@ -299,4 +299,6 @@ The next design pass should define the object model:
 - trust summaries;
 - serialization boundaries.
 
+Current object-model pass: `docs/agnostic-static-analysis-object-model.md`.
+
 No Crescent feature work should start before that object model exists.
