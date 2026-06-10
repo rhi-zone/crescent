@@ -15,7 +15,7 @@ The current map is:
 - `v6`: design exploration, not an implementation target.
 - `v7_mr0`: prototype residue, not a product direction.
 - `framework`: rejected proof/evidence direction, retained as prior art.
-- `Crescent static semantics`: future Crescent checker design, not yet written.
+- `agnostic static analysis`: active design direction, not yet implemented.
 
 No artifact becomes canonical merely because code exists for it.
 
@@ -102,26 +102,42 @@ Limits:
 - not a source of Crescent semantics;
 - not automatically the right architecture just because it is more general.
 
-New framework implementation work should not happen. If the project later wants
-a framework-like substrate, it needs a fresh design that does not inherit this
-artifact's assumptions, terminology, or implementation shape by default.
+New framework implementation work should not happen. The active agnostic static
+analysis direction must not inherit this artifact's assumptions, terminology, or
+implementation shape by default.
 
-## Crescent Static Semantics
+## Agnostic Static Analysis
 
-The Crescent static semantics is the future design for checking Crescent code.
+The active design direction is a fully agnostic static-analysis substrate.
+
+It is not a Crescent checker first. It should be able to host static semantics
+for very small calculi, for conventional typed languages, and eventually for
+Crescent/Lua. Crescent is a client and stress test, not the defining center.
 
 Authority:
 
-- should define Crescent-specific judgments, effects, tables, mutation,
-  metatables, modules, annotations, guards, overloads, and escapes;
-- should use v4/v5/v6/v7 material only as evidence, not authority.
+- should be designed from first principles rather than from v4/v5/v7/framework
+  implementation residue;
+- should treat v4/v5/v6/v7/framework material as evidence, examples,
+  counterexamples, and prior decisions, not authority;
+- should make language-specific semantics explicit as hosted definitions rather
+  than built into the substrate.
 
 Limits:
 
 - not yet designed;
-- should not be backfilled from framework implementation details;
-- should not inherit v7 terminology unless that terminology is independently
-  justified.
+- not the existing `lib/type/framework/`;
+- not a universal inference engine by assumption;
+- not allowed to smuggle Crescent-specific rules into the substrate.
+
+## Crescent Static Semantics
+
+Crescent static semantics is a later hosted design, not the root direction.
+
+It may eventually define Crescent-specific judgments, effects, tables,
+mutation, metatables, modules, annotations, guards, overloads, and escapes. It
+should be designed against the agnostic substrate only after that substrate's
+shape is clear enough to avoid another ad-hoc checker.
 
 ## Working Rule
 
@@ -131,10 +147,9 @@ Use this status language:
 
 - `patch v4`: fix the running checker.
 - `mine prior art`: read v4/v5/v6/v7 for decisions or failures.
-- `design Crescent static semantics`: make a Crescent-specific static semantics
-  decision.
-- `new substrate`: write a fresh first-principles design before any general
-  proof/static-semantics implementation.
+- `design agnostic static analysis`: work on the first-principles substrate.
+- `design Crescent static semantics`: make a Crescent-specific hosted-semantics
+  decision only after the substrate boundary is clear.
 
 If the work cannot be named as one of those, stop and write the missing framing
 first.

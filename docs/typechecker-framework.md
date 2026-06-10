@@ -7,8 +7,13 @@ not as the current Crescent typechecker direction, and it is not a claim that
 Crescent has a single main value; see `docs/project-values.md` and
 `docs/static-analysis-map.md`.
 
-The goal is not another Crescent typechecker version. The goal is a
-type-system-agnostic framework for specifying and checking type-system theories.
+This experiment's goal was not another Crescent typechecker version. Its goal
+was a type-system-agnostic framework for specifying and checking type-system
+theories.
+
+That goal statement is historical. The current agnostic static-analysis design
+must be derived separately; it must not inherit this experiment's representation
+or terminology by default.
 
 The framework must be usable, in principle, for:
 
