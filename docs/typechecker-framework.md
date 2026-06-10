@@ -1,10 +1,11 @@
 # Typechecker Framework
 
-This is the current framework track for typechecker work.
+This is a rejected proof/evidence framework experiment for typechecker work.
 
-Status: adopted as an implementation/research track, provisional as an
-architecture story. It is not a claim that Crescent has a single main value; see
-`docs/project-values.md`.
+Status: rejected as the static-analysis direction. It is retained as prior art,
+not as the current Crescent typechecker direction, and it is not a claim that
+Crescent has a single main value; see `docs/project-values.md` and
+`docs/static-analysis-map.md`.
 
 The goal is not another Crescent typechecker version. The goal is a
 type-system-agnostic framework for specifying and checking type-system theories.
@@ -181,7 +182,7 @@ wrong.
 
 ## Relationship To v7
 
-v7 is no longer the top-level direction.
+v7 and this framework experiment are rejected as top-level directions.
 
 The v7 documents and `lib/type/v7_mr0/` are retained as prototype material:
 
@@ -190,11 +191,9 @@ The v7 documents and `lib/type/v7_mr0/` are retained as prototype material:
 - examples of what a Crescent theory might eventually need;
 - examples of premature theory-specific commitment.
 
-They are not the authority for new design work. New work should start from this
-framework document, then define or refine a theory.
+They are not the authority for new design work.
 
-No new v7 MR0 feature should be implemented unless it is explicitly framed as a
-framework experiment or a Crescent-theory instance.
+No new v7 MR0 or framework feature should be implemented.
 
 ## Completed First Pass
 
@@ -212,12 +211,11 @@ The first framework design pass produced:
    `docs/typechecker-framework-v7-mr0-audit.md`.
 
 This pass is not a proof that the framework is the right final architecture.
-It records the current track and its falsification tests.
+It records a rejected prototype and its falsification tests.
 
 ## Next Roadmap
 
-The next work is still design-first, but it can now target implementation
-readiness:
+This roadmap is retained as prototype history, not active direction:
 
 1. Specify the concrete external format for framework theory specs and
    certificates. Implementation plan:
@@ -236,9 +234,8 @@ readiness:
    `docs/typechecker-framework-system-f-replay.md`.
 7. Define the tiny Crescent theory spike. Crescent spike spec:
    `docs/typechecker-framework-crescent-spike.md`.
-8. Iterate on `lib/type/framework/` only when the next implementation step is a
-   consequence of the current framework track rather than a new semantic
-   primitive in disguise.
+8. Do not continue `lib/type/framework/` implementation without a later
+   first-principles re-adoption note.
 
 ## Non-Goals
 
