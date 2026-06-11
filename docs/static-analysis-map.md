@@ -131,23 +131,37 @@ Authority:
   than built into the substrate.
 
 Current status: the object model is settled
-(`docs/agnostic-static-analysis-object-model.md`), the propositional and
-untyped-lambda validation passes are written, and **mechanization has landed**.
-The code lives in `lib/type/analysis/`: the substrate (`init.lua`), two
-independent hosted semantics (`prop.lua` = `prop.logic.min`, `lambda.lua` =
-`lambda.untyped.min`), and tests (`prop_test.lua`, `lambda_test.lua`,
-`substrate_test.lua`) that mechanize every worked example plus the
-un-falsifiable-on-paper probes (claim identity, scheduling order-independence,
-cycle termination, unknown propagation, adversarial smuggling). Mechanization
-findings are recorded in the object-model and two validation docs. Next: a
-cyclic/fixpoint-evidence probe before STLC, then STLC against running code. See
-"Next Pass" in `docs/agnostic-static-analysis-design.md`.
+(`docs/agnostic-static-analysis-object-model.md`), the propositional,
+untyped-lambda, and cyclic/fixpoint-evidence validation passes are written, and
+**mechanization has landed**. The code lives in `lib/type/analysis/`: the
+substrate (`init.lua`), three independent hosted semantics (`prop.lua` =
+`prop.logic.min`, `lambda.lua` = `lambda.untyped.min`, `dataflow.lua` =
+`dataflow.reach.min`), and tests (`prop_test.lua`, `lambda_test.lua`,
+`dataflow_test.lua`, `substrate_test.lua`, 108 assertions) that mechanize every
+worked example plus the un-falsifiable-on-paper probes (claim identity,
+scheduling order-independence, cycle termination, unknown propagation,
+adversarial smuggling, fixpoint witnessing). Mechanization findings are recorded
+in the object-model and three validation docs. The cyclic/fixpoint rung
+(`docs/agnostic-static-analysis-fixpoint.md`) confirmed a fixpoint is hostable as
+a post-hoc witness with **no substrate change**. Next: STLC against running code.
+See "Next Pass" in `docs/agnostic-static-analysis-design.md`.
+
+Rung status (ladder, design doc):
+
+- 1 propositional — mechanized.
+- 2 untyped lambda — mechanized.
+- 3 cyclic/fixpoint-evidence — mechanized (`dataflow.reach.min`); substrate
+  unchanged, witness model holds.
+- 4 STLC — next.
+- 5+ definite assignment, capability reachability, store sketch, Crescent slice —
+  not started.
 
 Limits:
 
-- only the propositional and lambda rungs are mechanized (cyclic-fixpoint and
-  STLC rungs are next); non-termination-safety is in place, but full
-  fixpoint/cyclic-evidence *acceptance* is a later rung;
+- the propositional, lambda, and cyclic/fixpoint rungs are mechanized (STLC is
+  next); fixpoint *acceptance* via post-hoc witnesses is now demonstrated
+  (`dataflow.reach.min`), and the substrate hosts mutually-dependent claims
+  without accepting circular justification;
 - not the existing `lib/type/framework/`;
 - not a universal inference engine by assumption;
 - not allowed to smuggle Crescent-specific rules into the substrate.

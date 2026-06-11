@@ -333,10 +333,19 @@ to date.
    dependency is a *side condition*) is noted in the lambda doc as a future-pass
    finding.
 
-5. **Untouched.** How are graph/fixed-point analyses represented without baking
-   in one solver? Deferred to the cyclic/fixpoint-evidence probe (ladder rung 3),
-   which is scheduled before STLC precisely so this is answered before anything
-   builds on acyclic-evidence assumptions.
+5. **Answered.** How are graph/fixed-point analyses represented without baking
+   in one solver? Answered by the cyclic/fixpoint-evidence probe (ladder rung 3,
+   `docs/agnostic-static-analysis-fixpoint.md`): a fixpoint is a **post-hoc
+   witness**. An untrusted producer proposes a whole assignment; the hosted
+   checker verifies *local consistency* of that assignment at every node against
+   the transfer rule, reading asserted values from the witness payload — never
+   consuming neighbour claims as premises. That check is acyclic even though the
+   nodes are mutually dependent, so the substrate needed no change: every
+   dependency points at the single witness, an `A -> B -> A` edge never appears,
+   and cycle-detection-as-error stays correct (an *unwitnessed* evidence cycle is
+   exactly a missing base case). Mechanized in `lib/type/analysis/dataflow.lua`
+   (`dataflow.reach.min`), 36 assertions, no solver/lattice/widening vocabulary
+   in the substrate.
 
 6. **Answered.** What is the distinction between a failed claim, an unknown
    claim, and a trusted claim? Answered in the object model's "Analysis State"
@@ -372,14 +381,22 @@ The plan:
    object-model doc (arg-schema item) and the two validation docs (Mechanization
    Findings sections).
 
-2. **Insert a cyclic/fixpoint-evidence probe before STLC.** A minimal example
-   where evidence for a claim depends on itself. Every example through the lambda
-   rung relies on acyclic evidence; a fixpoint witness breaks that assumption.
-   Discovering this after STLC would invalidate the STLC pass — substrate before
-   consumers — so the probe runs first.
+2. **Insert a cyclic/fixpoint-evidence probe before STLC. — DONE.** Built in
+   `lib/type/analysis/dataflow.lua` (`dataflow.reach.min`) +
+   `dataflow_test.lua`, validated in
+   `docs/agnostic-static-analysis-fixpoint.md`. The smallest semantics that
+   exerts the pressure is forward reachability over a tiny explicit graph: a
+   cycle `a -> b -> a` makes `reachable(a)` and `reachable(b)` genuinely mutually
+   dependent. The rung confirmed the design's bet against running code: a
+   fixpoint is a post-hoc witness over a whole assignment, checked for local
+   consistency at every node (acyclic), with each per-node claim projecting the
+   single accepted witness. The substrate was **not changed** — `A -> B -> A`
+   never appears as a dependency edge, and cycle-detection-as-error stays correct.
+   72 prior assertions preserved; 36 added (108 total).
 
-3. **STLC follows, written against running code.** Only after the cyclic probe
-   does not force special pleading, and against the running substrate rather than
+3. **STLC follows, written against running code.** Now unblocked: the cyclic
+   probe did not force special pleading and did not change the acyclic-evidence
+   assumptions the checker relies on. Written against the running substrate, not
    on paper.
 
 No Crescent feature work should start before this sequence does not force
