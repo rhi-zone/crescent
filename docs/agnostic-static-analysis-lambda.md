@@ -568,7 +568,12 @@ falsified one paper assumption and confirmed the rest:
 
 ## Next Pass
 
-The next validation pass should be STLC only after the object model survives
-this binding pressure. STLC may introduce hosted `type` claims, but it must not
-promote `type`, `context`, `binder`, substitution, or derivation replay into
-substrate primitives by default.
+STLC was the next validation pass and is now mechanized
+(`docs/agnostic-static-analysis-stlc.md`, `lib/type/analysis/stlc.lua`). It
+introduced hosted `type` claims, typing contexts, and deep derivation trees
+without promoting `type`, `context`, `binder`, or derivation replay into
+substrate primitives — substrate unchanged. The remaining concern this rung
+flagged (binders interacting with typing contexts) is resolved there: contexts
+are hosted data inside claim args, and structural substrate claim identity is the
+correct notion for context-dependent judgments. The rung after STLC is a tiny
+Crescent slice, not another synthetic calculus.

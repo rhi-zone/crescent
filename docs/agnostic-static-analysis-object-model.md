@@ -368,6 +368,31 @@ posed, by running them rather than reasoning about them:
    than trusting their shape. The adversarial `type_of`-as-a-Prop probe is
    rejected by exactly this parser, with no substrate special-casing.
 
+4. **STLC closes the open item: no schema mechanism and no claim-identity
+   override is needed; two hosted identity notions coexist over the one
+   structural substrate identity.** The STLC rung
+   (`docs/agnostic-static-analysis-stlc.md`) put hosted `type` vocabulary and
+   typing contexts inside claim args — the pressure this open item named. Two
+   findings settle it. (a) **Types and contexts parse-not-cast like every prior
+   grammar.** Arrow types and context lists are `ArgValue` data validated at the
+   checker boundary (`stlc.lua` `parse_type`/`parse_ctx`); the substrate stored no
+   `Type`/`Context`/`Judgment` object kind (asserted by walking the state). (b)
+   **Structural substrate identity is the *right* notion for context-dependent
+   judgments — the complement of the alpha case.** For terms, structural identity
+   is *finer* than hosted alpha-equivalence, and the hosted checker reconciles the
+   gap in its own evidence (lambda's alpha-normal-form comparison; STLC simply
+   derives each alpha-variant judgment independently and never asks the substrate
+   to merge them). For typing contexts, structural identity *equals* the hosted
+   notion: two judgments are the same fact iff their Γ is structurally the same
+   ordered list (binding order and shadowing are significant, and the substrate
+   gets this for free). So the divergence this item worried about is real for one
+   hosted notion (alpha) and absent for another (contexts/types), and **both live
+   over the single structural substrate identity without the substrate learning
+   either**. The chosen resolution stands: structural wins at the substrate;
+   any finer hosted identity is reconciled inside the hosted checker's evidence,
+   never by a substrate schema or identity-override mechanism. Do not add one on
+   STLC's account.
+
 ## What Is Not In The Substrate Yet
 
 These are intentionally absent:

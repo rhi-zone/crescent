@@ -340,7 +340,7 @@ to date.
    "Design Obligation: Hosted-Checker Trust"). Everything else is checked
    evidence or an explicit trusted-oracle boundary.
 
-4. **Partially.** How are binders represented without inheriting the rejected
+4. **Answered.** How are binders represented without inheriting the rejected
    framework's representation? Settled: binders are not substrate primitives;
    the lambda pass keeps binding entirely hosted (source labels in the artifact,
    evidence-local representation in the checker). Mechanization answered the rest:
@@ -352,7 +352,12 @@ to date.
    `accepted_claim` `Dependency` edges, visible in the result's
    `dependency_graph`; the unrole'd-edge limitation (the edge does not say the
    dependency is a *side condition*) is noted in the lambda doc as a future-pass
-   finding.
+   finding. The STLC rung (`docs/agnostic-static-analysis-stlc.md`) closed the
+   remaining concern — binders interacting with typing contexts: a typing context
+   Γ is hosted data inside claim args (no substrate context slot; `Claim.scope`
+   was removed for this), context extension Γ,x:A is a cross-claim relation, and
+   structural substrate claim identity is exactly the right notion for
+   context-dependent judgments. No substrate change.
 
 5. **Answered.** How are graph/fixed-point analyses represented without baking
    in one solver? Answered by the cyclic/fixpoint-evidence probe (ladder rung 3,
@@ -415,16 +420,27 @@ The plan:
    never appears as a dependency edge, and cycle-detection-as-error stays correct.
    72 prior assertions preserved; 36 added (108 total).
 
-3. **STLC follows, written against running code.** Now unblocked: the cyclic
-   probe did not force special pleading and did not change the acyclic-evidence
-   assumptions the checker relies on. Written against the running substrate, not
-   on paper.
+3. **STLC. — DONE.** Built in `lib/type/analysis/stlc.lua` (`stlc.min`) +
+   `stlc_test.lua` (45 assertions), validated in
+   `docs/agnostic-static-analysis-stlc.md`. The first hosted `type` vocabulary,
+   typing contexts, and deep derivation trees — all hosted, **substrate
+   unchanged**. Types and contexts ride `ArgValue` claim args; the typing rules
+   (var/abs/app) are evidence methods; abs/app consume previously-accepted
+   `has_type` premises, so derivations nest (a three-level abs/abs/app/var tree is
+   accepted). Findings: structural substrate claim identity is exactly right for
+   context-dependent judgments (the `Claim.scope` removal is vindicated); the
+   arg-schema open item needs no schema mechanism and no identity override — alpha
+   (finer than structural, reconciled in evidence) and structural type/context
+   identity coexist over the one structural substrate identity. 108 prior
+   assertions preserved (153 total).
 
-4. **After STLC: tiny Crescent slice, not more synthetic rungs.** No further
-   synthetic rungs are scheduled after STLC. The next rung is a small but real
-   subset of Crescent/Lua semantics checked over actual files in `lib/`. See
-   "First Validation Ladder" for the rationale and the acceptance/falsification
-   corpus.
+4. **After STLC: tiny Crescent slice, not more synthetic rungs.** Now unblocked —
+   STLC forced no special pleading and no substrate change. No further synthetic
+   rungs are scheduled. The next rung is a small but real subset of Crescent/Lua
+   semantics checked over actual files in `lib/`. It inherits STLC's position:
+   structural substrate claim identity carries hosted types and contexts with no
+   arg-schema or identity-override mechanism. See "First Validation Ladder" for
+   the rationale and the acceptance/falsification corpus.
 
 No Crescent feature work should start before this sequence does not force
 special pleading.

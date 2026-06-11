@@ -132,20 +132,24 @@ Authority:
 
 Current status: the object model is settled
 (`docs/agnostic-static-analysis-object-model.md`), the propositional,
-untyped-lambda, and cyclic/fixpoint-evidence validation passes are written, and
-**mechanization has landed**. The code lives in `lib/type/analysis/`: the
-substrate (`init.lua`), three independent hosted semantics (`prop.lua` =
-`prop.logic.min`, `lambda.lua` = `lambda.untyped.min`, `dataflow.lua` =
-`dataflow.reach.min`), and tests (`prop_test.lua`, `lambda_test.lua`,
-`dataflow_test.lua`, `substrate_test.lua`, 108 assertions) that mechanize every
-worked example plus the un-falsifiable-on-paper probes (claim identity,
-scheduling order-independence, cycle termination, unknown propagation,
-adversarial smuggling, fixpoint witnessing). Mechanization findings are recorded
-in the object-model and three validation docs. The cyclic/fixpoint rung
-(`docs/agnostic-static-analysis-fixpoint.md`) confirmed a fixpoint is hostable as
-a post-hoc witness with **no substrate change**. Next: STLC against running code.
-After STLC: tiny Crescent slice (ladder compressed — no further synthetic rungs).
-See "Next Pass" in `docs/agnostic-static-analysis-design.md`.
+untyped-lambda, cyclic/fixpoint-evidence, and STLC validation passes are written,
+and **mechanization has landed through STLC**. The code lives in
+`lib/type/analysis/`: the substrate (`init.lua`), four independent hosted
+semantics (`prop.lua` = `prop.logic.min`, `lambda.lua` = `lambda.untyped.min`,
+`dataflow.lua` = `dataflow.reach.min`, `stlc.lua` = `stlc.min`), and tests
+(`prop_test.lua`, `lambda_test.lua`, `dataflow_test.lua`, `stlc_test.lua`,
+`substrate_test.lua`, 153 assertions) that mechanize every worked example plus
+the un-falsifiable-on-paper probes (claim identity, scheduling
+order-independence, cycle termination, unknown propagation, adversarial
+smuggling, fixpoint witnessing, deep derivation trees, claim-identity-under-
+context). Mechanization findings are recorded in the object-model and four
+validation docs. The STLC rung (`docs/agnostic-static-analysis-stlc.md`)
+introduced the first hosted `type` vocabulary, typing contexts, and deep
+derivation trees with **no substrate change** — types and contexts ride
+`ArgValue` claim args, and structural substrate claim identity is exactly right
+for context-dependent judgments. Next: tiny Crescent slice (ladder compressed —
+no further synthetic rungs). See "Next Pass" in
+`docs/agnostic-static-analysis-design.md`.
 
 Rung status (ladder, design doc):
 
@@ -153,17 +157,18 @@ Rung status (ladder, design doc):
 - 2 untyped lambda — mechanized.
 - 3 cyclic/fixpoint-evidence — mechanized (`dataflow.reach.min`); substrate
   unchanged, witness model holds.
-- 4 STLC — next.
-- 5 tiny Crescent slice — not started. (Capability-reachability and
-  imperative-store pressure absorbed here from the real target; ladder
-  compressed after STLC.)
+- 4 STLC — mechanized (`stlc.min`); substrate unchanged. Hosted `type`
+  vocabulary, typing contexts, and deep evidence trees all hosted; arg-schema
+  open item closed (no schema mechanism, no identity override needed).
+- 5 tiny Crescent slice — next. (Capability-reachability and imperative-store
+  pressure absorbed here from the real target; ladder compressed after STLC.)
 
 Limits:
 
-- the propositional, lambda, and cyclic/fixpoint rungs are mechanized (STLC is
-  next); fixpoint *acceptance* via post-hoc witnesses is now demonstrated
-  (`dataflow.reach.min`), and the substrate hosts mutually-dependent claims
-  without accepting circular justification;
+- the propositional, lambda, cyclic/fixpoint, and STLC rungs are mechanized (the
+  tiny Crescent slice is next); fixpoint *acceptance* via post-hoc witnesses is
+  demonstrated (`dataflow.reach.min`), and the substrate hosts mutually-dependent
+  claims without accepting circular justification;
 - not the existing `lib/type/framework/`;
 - not a universal inference engine by assumption;
 - not allowed to smuggle Crescent-specific rules into the substrate.
