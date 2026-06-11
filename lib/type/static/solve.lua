@@ -705,6 +705,31 @@ local function solve_sub(ctx, c)
     -- Widen actual literals before constraining
     local widened = widen_for_sub(ctx, actual)
 
+    -- Checked-cast sites (`--[[: T]] expr`) must CHECK assignability without
+    -- binding free inference variables. The destructive `unify` below is the
+    -- solver's binding mechanism (regular assignment / back-propagation needs
+    -- it), and it is bidirectional: when the cast actual (`widened`) is an
+    -- unannotated param's free `TAG_VAR`, unify binds that var to the asserted
+    -- type — turning the cast into an inference source, which is unsound (a
+    -- checked or force cast must never inject inference facts; see TODO
+    -- "solve.lua:579 — destructive unify on checked-cast sites"). The
+    -- unsoundness arises only when the *actual* is a free var: with a concrete
+    -- actual, `unify` only ever binds vars inside `expected`, which for a cast
+    -- is the user-written asserted type (carrying no free inference vars). So
+    -- intercept exactly the free-var-actual case and defer it — park on the var
+    -- and re-check once a producer (e.g. caller arg inference for the param)
+    -- resolves it — rather than binding (the bug) or eagerly erroring (a false
+    -- positive when a caller would resolve the param compatibly). Every other
+    -- cast case keeps the original `unify` path verbatim, so its diagnostics
+    -- (including the "must be narrowed" guidance for `unknown`→`any`) are
+    -- preserved.
+    if constrain.sub_is_cast(c) then
+        local wt = ctx.types:get(find(ctx, widened))
+        if wt.tag == TAG_VAR or wt.tag == TAG_ROWVAR then
+            return await(ctx, c, find(ctx, widened))
+        end
+    end
+
     local ok, err = unify_mod.unify(ctx, widened, expected)
     if not ok then
         -- "might also be" message for unions
