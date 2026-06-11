@@ -276,11 +276,32 @@ These are design tests, not product checkers:
    witness breaks that assumption, and discovering it after STLC would
    invalidate the STLC pass. Substrate before consumers (see "Next Pass").
 4. STLC: hosted `type` vocabulary without making types substrate primitives.
-5. Definite assignment: graph/dataflow claims with fixed-point evidence.
-6. Capability reachability: graph claims with explicit authority boundaries.
-7. Imperative store sketch: mutation, invalidation, and dependency tracking.
-8. Tiny Crescent slice: only after the previous tests do not force special
-   pleading.
+   This rung is genuinely load-bearing: it introduces the first hosted `type`
+   vocabulary, contexts, and the arg-schema pressure.
+5. Tiny Crescent slice: a small but real subset of Crescent/Lua semantics
+   checked over actual files in `lib/`. Capability-reachability and
+   imperative-store pressure — previously scheduled as separate synthetic rungs
+   — are absorbed here, because the real target generates them naturally.
+
+The compression from the original eight-rung ladder to five rungs is a
+deliberate bet. Synthetic rungs have unbounded appetite: there is always one
+more clean calculus to validate first. The test for whether the substrate is
+overengineered is empirical — time-to-first-real-Crescent-claim. Compressing
+the ladder makes the bet falsifiable at the target instead of comfortable in
+toys.
+
+The legacy checker's fire corpus — the stack-overflow triggers (`lib/hamt`,
+`lib/fp/maybe`, `lib/fp/either`), the boolean-narrowing gap in
+`v7_mr0/canonical.lua`, the `$PairsReturn` leak (now fixed), the
+cast-as-inference-source hole at `solve.lua:579` — becomes the slice's
+**acceptance/falsification corpus**: if the slice cannot produce a correct
+claim where v4 fails, the substrate is not ready.
+
+Methodological rule: the corpus orders the *tests*, never the *design*. The
+slice's semantics is designed whole, derived from the value universe (the v6
+principle: start from what values the language can produce, not from what the
+legacy checker happened to implement). The legacy fire map is a fact about the
+legacy architecture, not about the domain.
 
 If a step requires adding a substrate primitive that is only meaningful for
 Crescent, the design has failed.
@@ -398,6 +419,12 @@ The plan:
    probe did not force special pleading and did not change the acyclic-evidence
    assumptions the checker relies on. Written against the running substrate, not
    on paper.
+
+4. **After STLC: tiny Crescent slice, not more synthetic rungs.** No further
+   synthetic rungs are scheduled after STLC. The next rung is a small but real
+   subset of Crescent/Lua semantics checked over actual files in `lib/`. See
+   "First Validation Ladder" for the rationale and the acceptance/falsification
+   corpus.
 
 No Crescent feature work should start before this sequence does not force
 special pleading.

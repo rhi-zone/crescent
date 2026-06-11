@@ -144,6 +144,7 @@ adversarial smuggling, fixpoint witnessing). Mechanization findings are recorded
 in the object-model and three validation docs. The cyclic/fixpoint rung
 (`docs/agnostic-static-analysis-fixpoint.md`) confirmed a fixpoint is hostable as
 a post-hoc witness with **no substrate change**. Next: STLC against running code.
+After STLC: tiny Crescent slice (ladder compressed — no further synthetic rungs).
 See "Next Pass" in `docs/agnostic-static-analysis-design.md`.
 
 Rung status (ladder, design doc):
@@ -153,8 +154,9 @@ Rung status (ladder, design doc):
 - 3 cyclic/fixpoint-evidence — mechanized (`dataflow.reach.min`); substrate
   unchanged, witness model holds.
 - 4 STLC — next.
-- 5+ definite assignment, capability reachability, store sketch, Crescent slice —
-  not started.
+- 5 tiny Crescent slice — not started. (Capability-reachability and
+  imperative-store pressure absorbed here from the real target; ladder
+  compressed after STLC.)
 
 Limits:
 
