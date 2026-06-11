@@ -326,6 +326,48 @@ matters — and how a hosted semantics is allowed to override claim identity —
 known divergence the mechanization must probe, not something the prose can
 settle.
 
+#### Mechanization findings (lib/type/analysis)
+
+The mechanization (`lib/type/analysis/`) settled the open questions this gap
+posed, by running them rather than reasoning about them:
+
+1. **Claim identity is purely structural; symmetry is hosted business.** The
+   substrate decides claim identity by serializing `(semantics, predicate, args)`
+   canonically (`init.lua`, `claim_key`/`_serialize`) and never consults a hosted
+   semantics for a finer/coarser notion. So `alpha_eq(t1, t2)` and
+   `alpha_eq(t2, t1)` are **distinct** substrate claims even though the lambda
+   semantics regards them as the same fact (`substrate_test.lua`, the
+   claim-identity probe asserts `claim_key(c12) ~= claim_key(c21)`). This is the
+   substrate behavior the object model implies — the substrate must not impose a
+   hosted equivalence it does not understand — and the lambda checker handles
+   symmetry inside its own evidence (alpha-normal-form comparison), never by
+   asking the substrate to treat swapped args as one claim. Recorded here as the
+   chosen resolution of the structural-vs-hosted-identity divergence: structural
+   wins at the substrate; hosted identity lives in the hosted checker.
+
+2. **`unknown` (TS-unknown) is the wrong substrate type for opaque args.** The
+   first attempt typed `Claim.args` as `unknown`. The Crescent typechecker then
+   forbids *both* checked-casting away from `unknown` (it is not a subtype of any
+   record) *and* force-casting away from it (force casts past `unknown` are a hard
+   error). A hosted semantics literally could not read its own args back. The fix
+   is the `ArgValue` type (`init.lua`): "arbitrary serializable data" —
+   `nil | boolean | number | string | { [string]: ArgValue } | { [integer]:
+   ArgValue }`. This is the honest substrate boundary: args are *data the
+   substrate can serialize and compare*, never functions/threads. It is not a lazy
+   permissive alias — it states exactly what the substrate needs and nothing
+   about the hosted grammar.
+
+3. **The opaque-data boundary forces hosted semantics to *parse*, not cast — and
+   that is what the trust obligation wanted.** Even from `ArgValue`, the
+   typechecker rejects a force cast of an index-signature table down to a
+   named-field record. So a hosted checker cannot blind-cast `args` into its
+   grammar; it must validate and reconstruct (`prop.lua` `parse_prop`,
+   `lambda.lua` `parse_term`) via `type()`-narrowing and tag-dispatch, returning
+   `nil` on malformed input. This is *stronger* than a cast and is precisely the
+   hosted-checker trust discipline: the checker validates its own inputs rather
+   than trusting their shape. The adversarial `type_of`-as-a-Prop probe is
+   rejected by exactly this parser, with no substrate special-casing.
+
 ## What Is Not In The Substrate Yet
 
 These are intentionally absent:

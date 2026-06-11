@@ -522,6 +522,50 @@ checker contract, not a wish list. For that reason `congruence` is deliberately
 absent until a later validation pass specifies evaluation contexts or a
 concrete strategy rule.
 
+## Mechanization Findings (lib/type/analysis)
+
+The lambda rung was mechanized (`lib/type/analysis/lambda.lua`,
+`lambda_test.lua`). Every worked example above is a test. The mechanization
+falsified one paper assumption and confirmed the rest:
+
+- **A required-but-not-yet-accepted input must yield `unknown` (retry), never
+  `rejected`.** This is the falsification. The paper hand-orders evidence so the
+  capture-avoidance `free_in` discharge is always available when `beta_step`
+  runs. The first mechanized `beta_step` returned `rejected` when the discharge
+  claim was present but not yet accepted — which made the result *order-
+  dependent*: it passed when the substrate's `pairs()` sweep happened to accept
+  the `free_var_scan` evidence first, and failed otherwise. The fix distinguishes
+  three cases for each colliding binder: discharge present and accepted →
+  discharged; present but not yet accepted → return `unknown` so the worklist
+  retries; absent entirely → `rejected` (contract unsatisfiable). With that fix,
+  shuffled submission orders yield identical results (asserted across orders in
+  `substrate_test.lua` and over 60 randomized in-process iterations). This is
+  exactly the scheduling property the design said paper passes cannot falsify
+  because the author hand-orders the inputs.
+
+- **The capture-avoidance cross-evidence dependency records cleanly, as the doc
+  predicted.** `beta_step` consumes the `free_in("y", arg)` claim produced by a
+  *separate* `free_var_scan`, and the result's `dependency_graph` carries the
+  `accepted_claim` edge from `c_step` to `c_arg_fy` (asserted in
+  `lambda_test.lua`). The capture-avoiding reduction produces `lam y1. y`, alpha-
+  equal to the doc's target and correctly *not* alpha-equal to the naive
+  capturing `lam y. y`.
+
+- **The unrole'd-dependency observation holds.** `Dependency.kind =
+  accepted_claim` records *that* `c_step` depends on `c_arg_fy` but not the
+  *role* (capture-avoidance side condition vs structural premise). For
+  `lambda.untyped.min` the pinned registry contract names the role, so the coarse
+  edge is acceptable, as the paper said. A hosted semantics with many distinct
+  side-condition kinds would want a role on the edge; that remains a future-pass
+  finding, not a defect here.
+
+- **The substrate never stored a binder or scope object.** An adversarial test
+  walks every Id stored in the analysis state after running the alpha example and
+  asserts each lives in a substrate-owned space (`artifact`/`claim`/`ev`/`trust`/
+  `observation`) — never `binder` or `scope`. The lambda checker keeps de-Bruijn-
+  free alpha-normalization, substitution, and the fresh-name supply entirely
+  evidence-local.
+
 ## Next Pass
 
 The next validation pass should be STLC only after the object model survives

@@ -331,6 +331,38 @@ This pass forces two distinctions that the object model should preserve:
 It also keeps trust summaries transitive: accepting a conjunction through two
 trusted axioms carries both trust dependencies.
 
+## Mechanization Findings (lib/type/analysis)
+
+Mechanized in `lib/type/analysis/prop.lua` + `prop_test.lua`; every worked
+example above is a test. Findings:
+
+- **Contradiction-as-policy is real, not explosion.** The `contradiction` method
+  rejects the *requested* goal claim and records an inconsistency diagnostic; it
+  does not accept an arbitrary `B`. The probe accepts `holds(A)` and
+  `holds(not A)` by axiom (both genuinely accepted), then asserts the unrelated
+  goal `holds(Z)` carrying contradiction evidence is **rejected**, never
+  accepted (`prop_test.lua`). The substrate has no contradiction rule — it only
+  reports the evidence outcome the hosted checker returned.
+
+- **`rejected` evidence ≠ rejected claim truth, and both differ from
+  `unknown`.** The substrate classifies a requested claim `rejected` only when it
+  has evidence and *all* of it was refused; otherwise (no accepting evidence, no
+  all-refused set) it is `unknown`. The multi-level unknown-propagation probe
+  (`substrate_test.lua`) shows an unavailable premise leaving the whole chain
+  `unknown` with nothing rejected, distinct from a checked-and-refused
+  `and_elim` leaving its claim `rejected`.
+
+- **`unknown` is never consumed as proof.** A `modus_ponens` whose implication
+  premise has no evidence cannot accept the consequent — the consequent stays
+  `unknown` (`substrate_test.lua`). The checker tests `ctx.is_accepted(input)`,
+  which is true only for claims in the accepted set, never for unknown ones.
+
+- **The registry is a contract, not a wish list.** A claim predicate not listed
+  for the semantics, or an evidence method not admitted by the version, makes the
+  whole `CheckRequest` ill-formed — `check` returns `(nil, errmsg)` rather than
+  silently treating it as unknown (`prop_test.lua`, the `telepathy`-method and
+  `has_type`-predicate probes).
+
 ## Next Pass
 
 The next validation pass should use untyped lambda calculus only if this

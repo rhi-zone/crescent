@@ -130,17 +130,24 @@ Authority:
 - should make language-specific semantics explicit as hosted definitions rather
   than built into the substrate.
 
-Current plan: the object model is settled
-(`docs/agnostic-static-analysis-object-model.md`), and the propositional and
-untyped-lambda validation passes are written. Mechanization starts next at the
-lambda rung (a small Lua substrate plus the `lambda.untyped.min` checker, with
-tests as the spec), then a cyclic/fixpoint-evidence probe inserted before STLC,
-then STLC written against running code. See "Next Pass" in
-`docs/agnostic-static-analysis-design.md`.
+Current status: the object model is settled
+(`docs/agnostic-static-analysis-object-model.md`), the propositional and
+untyped-lambda validation passes are written, and **mechanization has landed**.
+The code lives in `lib/type/analysis/`: the substrate (`init.lua`), two
+independent hosted semantics (`prop.lua` = `prop.logic.min`, `lambda.lua` =
+`lambda.untyped.min`), and tests (`prop_test.lua`, `lambda_test.lua`,
+`substrate_test.lua`) that mechanize every worked example plus the
+un-falsifiable-on-paper probes (claim identity, scheduling order-independence,
+cycle termination, unknown propagation, adversarial smuggling). Mechanization
+findings are recorded in the object-model and two validation docs. Next: a
+cyclic/fixpoint-evidence probe before STLC, then STLC against running code. See
+"Next Pass" in `docs/agnostic-static-analysis-design.md`.
 
 Limits:
 
-- mechanization not yet started (lambda rung is next);
+- only the propositional and lambda rungs are mechanized (cyclic-fixpoint and
+  STLC rungs are next); non-termination-safety is in place, but full
+  fixpoint/cyclic-evidence *acceptance* is a later rung;
 - not the existing `lib/type/framework/`;
 - not a universal inference engine by assumption;
 - not allowed to smuggle Crescent-specific rules into the substrate.

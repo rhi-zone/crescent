@@ -302,9 +302,12 @@ to date.
    composition of a claim database and a dependency tracker, with checking
    *delegated* to per-semantics hosted checkers. The substrate is not itself the
    proof checker; it stores claims/evidence/dependencies and routes checking to
-   the registered checker. What remains is the mechanized confirmation that this
-   composition holds up — and the checker-trust obligation it creates (see the
-   object model's "Design Obligation: Hosted-Checker Trust").
+   the registered checker. The mechanization confirmed the composition holds: the
+   checker is a worklist fixpoint over the accepted set (order-independent),
+   detects evidence cycles (terminating with a diagnostic, never looping), and
+   aggregates dependencies and trust as first-class records. The checker-trust
+   obligation is honored by `unverified_checker_trust`, attached to every accepted
+   claim's trust summary while checkers are hand-written Lua.
 
 3. **Answered now.** What must be trusted in the first implementation slice? The
    trusted base is: the substrate code itself (identity, dependency recording,
@@ -319,10 +322,16 @@ to date.
 4. **Partially.** How are binders represented without inheriting the rejected
    framework's representation? Settled: binders are not substrate primitives;
    the lambda pass keeps binding entirely hosted (source labels in the artifact,
-   evidence-local representation in the checker). What mechanization must still
-   answer is the in-evidence representation choice and how cross-evidence binding
-   dependencies (e.g. a `not_free_in` claim consumed by a beta step) are recorded
-   in `Dependency`.
+   evidence-local representation in the checker). Mechanization answered the rest:
+   the in-evidence representation is source-named terms with positional
+   alpha-normalization and a fresh-name supply (`lambda.lua`), entirely
+   evidence-local — an adversarial test confirms no `binder`/`scope` Id is ever
+   stored in the substrate. Cross-evidence binding dependencies (the `free_in`
+   claim a beta step consumes for capture avoidance) record as ordinary
+   `accepted_claim` `Dependency` edges, visible in the result's
+   `dependency_graph`; the unrole'd-edge limitation (the edge does not say the
+   dependency is a *side condition*) is noted in the lambda doc as a future-pass
+   finding.
 
 5. **Untouched.** How are graph/fixed-point analyses represented without baking
    in one solver? Deferred to the cyclic/fixpoint-evidence probe (ladder rung 3),
@@ -348,13 +357,20 @@ validation ladder is written on paper.
 
 The plan:
 
-1. **Mechanize at the lambda rung now.** Build a small Lua substrate (claim
-   database + dependency tracker per open question 2) plus the
-   `lambda.untyped.min` checker, with tests. Tests are the spec. Paper-only
-   validation cannot falsify the properties that matter here — claim identity,
-   evidence scheduling and cycle detection, and unknown-propagation — because the
-   author hand-orders the inputs and so never exercises the cases that break.
-   Running code with tests does.
+1. **Mechanize at the lambda rung now. — DONE.** Built in `lib/type/analysis/`:
+   the substrate (`init.lua`: claim database + dependency tracker + worklist
+   checker with cycle detection), and two independent hosted semantics —
+   `prop.logic.min` (`prop.lua`) and `lambda.untyped.min` (`lambda.lua`) — proving
+   the registry hosts more than one. Tests (`prop_test.lua`, `lambda_test.lua`,
+   `substrate_test.lua`, 72 assertions) mechanize every worked example from both
+   validation docs plus the probes the reviews flagged as un-falsifiable on
+   paper. The properties paper passes could not falsify *were* exercised and one
+   was falsified: a `beta_step` whose capture-avoidance discharge was present but
+   not-yet-accepted originally returned `rejected`, making results order-
+   dependent; the fix returns `unknown` (retry) in that case, and shuffled
+   submission orders now yield identical results. Findings recorded in the
+   object-model doc (arg-schema item) and the two validation docs (Mechanization
+   Findings sections).
 
 2. **Insert a cyclic/fixpoint-evidence probe before STLC.** A minimal example
    where evidence for a claim depends on itself. Every example through the lambda
