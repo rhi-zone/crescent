@@ -154,9 +154,17 @@ AnalysisUnit {
   observations,
   claims,
   evidence,
-  trusted_boundaries
+  trust_boundaries
 }
 ```
+
+This sketch is superseded by `AnalysisState` in
+`docs/agnostic-static-analysis-object-model.md`. The object-model pass moved two
+fields to `CheckRequest` because they are request parameters, not persistent
+state: `semantics_id` (the registry selects the semantics) and `inputs`. The
+trust-collection field is named `trust_boundaries` in both docs; the earlier
+`trusted_boundaries` spelling is dropped. Read `AnalysisState` as the live
+object; this is the originating sketch.
 
 The accepted output is:
 
@@ -262,44 +270,101 @@ These are design tests, not product checkers:
 2. Untyped lambda calculus: artifact structure, binding, alpha-equivalence, and
    simple evaluation claims. Current pass:
    `docs/agnostic-static-analysis-lambda.md`.
-3. STLC: hosted `type` vocabulary without making types substrate primitives.
-4. Definite assignment: graph/dataflow claims with fixed-point evidence.
-5. Capability reachability: graph claims with explicit authority boundaries.
-6. Imperative store sketch: mutation, invalidation, and dependency tracking.
-7. Tiny Crescent slice: only after the previous tests do not force special
+3. Cyclic/fixpoint-evidence probe: a minimal example where evidence for a claim
+   depends on itself (a fixpoint witness). This sits before STLC deliberately.
+   Every example through the lambda rung relies on acyclic evidence; a fixpoint
+   witness breaks that assumption, and discovering it after STLC would
+   invalidate the STLC pass. Substrate before consumers (see "Next Pass").
+4. STLC: hosted `type` vocabulary without making types substrate primitives.
+5. Definite assignment: graph/dataflow claims with fixed-point evidence.
+6. Capability reachability: graph claims with explicit authority boundaries.
+7. Imperative store sketch: mutation, invalidation, and dependency tracking.
+8. Tiny Crescent slice: only after the previous tests do not force special
    pleading.
 
 If a step requires adding a substrate primitive that is only meaningful for
 Crescent, the design has failed.
 
+Mechanization is not deferred to the end of this ladder. It starts now, at the
+lambda rung (see "Next Pass").
+
 ## Open Questions
 
-These are load-bearing and should be answered before implementation:
+These are load-bearing. Status reflects the object-model and validation passes
+to date.
 
-1. What is the smallest concrete object model for artifacts, observations,
-   claims, and evidence?
-2. Is the substrate a proof checker, a dependency tracker, a claim database, or
-   a composition of those?
-3. What must be trusted in the first implementation slice?
-4. How are binders represented without inheriting the rejected framework's
-   representation?
-5. How are graph/fixed-point analyses represented without baking in one solver?
-6. What is the distinction between a failed claim, an unknown claim, and a
-   trusted claim?
-7. What is the smallest validation semantics worth mechanizing first?
+1. **Answered.** What is the smallest concrete object model for artifacts,
+   observations, claims, and evidence? Answered by the object-model pass
+   (`docs/agnostic-static-analysis-object-model.md`).
+
+2. **Partially.** Is the substrate a proof checker, a dependency tracker, a
+   claim database, or a composition of those? The decision is now made: it is a
+   composition of a claim database and a dependency tracker, with checking
+   *delegated* to per-semantics hosted checkers. The substrate is not itself the
+   proof checker; it stores claims/evidence/dependencies and routes checking to
+   the registered checker. What remains is the mechanized confirmation that this
+   composition holds up — and the checker-trust obligation it creates (see the
+   object model's "Design Obligation: Hosted-Checker Trust").
+
+3. **Answered now.** What must be trusted in the first implementation slice? The
+   trusted base is: the substrate code itself (identity, dependency recording,
+   result bookkeeping); structural comparison of claim args (the substrate's
+   notion of claim identity); artifact reads (content fetched via `content_ref`);
+   and each registered hosted checker's verdict. The last item is the load-
+   bearing gap — a hosted checker is arbitrary Lua, so its verdict is a trusted
+   boundary that must be visible until checkers are mechanized (object model,
+   "Design Obligation: Hosted-Checker Trust"). Everything else is checked
+   evidence or an explicit trusted-oracle boundary.
+
+4. **Partially.** How are binders represented without inheriting the rejected
+   framework's representation? Settled: binders are not substrate primitives;
+   the lambda pass keeps binding entirely hosted (source labels in the artifact,
+   evidence-local representation in the checker). What mechanization must still
+   answer is the in-evidence representation choice and how cross-evidence binding
+   dependencies (e.g. a `not_free_in` claim consumed by a beta step) are recorded
+   in `Dependency`.
+
+5. **Untouched.** How are graph/fixed-point analyses represented without baking
+   in one solver? Deferred to the cyclic/fixpoint-evidence probe (ladder rung 3),
+   which is scheduled before STLC precisely so this is answered before anything
+   builds on acyclic-evidence assumptions.
+
+6. **Answered.** What is the distinction between a failed claim, an unknown
+   claim, and a trusted claim? Answered in the object model's "Analysis State"
+   result-classes section: the trichotomy classifies evidence outcomes, not
+   hosted truth.
+
+7. **Answered, then superseded.** What is the smallest validation semantics
+   worth mechanizing first? The propositional pass answered this on paper. That
+   answer is now superseded by the decision to begin mechanization at the lambda
+   rung (see "Next Pass"): paper-only validation of propositional logic cannot
+   falsify the properties mechanization must test.
 
 ## Next Pass
 
-The next design pass should define the object model:
+The object model exists (`docs/agnostic-static-analysis-object-model.md`).
+Mechanization starts now, at the lambda rung — not after the rest of the
+validation ladder is written on paper.
 
-- identity and naming;
-- artifact references;
-- claim syntax;
-- evidence syntax;
-- dependency records;
-- trust summaries;
-- serialization boundaries.
+The plan:
 
-Current object-model pass: `docs/agnostic-static-analysis-object-model.md`.
+1. **Mechanize at the lambda rung now.** Build a small Lua substrate (claim
+   database + dependency tracker per open question 2) plus the
+   `lambda.untyped.min` checker, with tests. Tests are the spec. Paper-only
+   validation cannot falsify the properties that matter here — claim identity,
+   evidence scheduling and cycle detection, and unknown-propagation — because the
+   author hand-orders the inputs and so never exercises the cases that break.
+   Running code with tests does.
 
-No Crescent feature work should start before that object model exists.
+2. **Insert a cyclic/fixpoint-evidence probe before STLC.** A minimal example
+   where evidence for a claim depends on itself. Every example through the lambda
+   rung relies on acyclic evidence; a fixpoint witness breaks that assumption.
+   Discovering this after STLC would invalidate the STLC pass — substrate before
+   consumers — so the probe runs first.
+
+3. **STLC follows, written against running code.** Only after the cyclic probe
+   does not force special pleading, and against the running substrate rather than
+   on paper.
+
+No Crescent feature work should start before this sequence does not force
+special pleading.

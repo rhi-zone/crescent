@@ -245,13 +245,24 @@ Inputs:
 
 - accepted `well_formed(source)`;
 - accepted `well_formed(target)`;
-- optional accepted `not_free_in` claims needed by the hosted substitution
-  algorithm if it uses source-name capture checks;
+- the `not_free_in` claims the registry pins for this semantics version (see
+  below);
 - artifact content for both terms.
 
 The hosted checker may alpha-rename internally before substitution. If it
 cannot prove capture avoidance under its chosen representation, the evidence
 rejects.
+
+The `not_free_in` inputs are not "optional, if the checker uses source-name
+capture checks". A registry contract must pin the input requirements per
+semantics version, not leave them contingent on the checker's internal
+representation. A consumer scheduling evidence cannot see inside the checker, so
+"depends on how the checker is written" is not a contract it can satisfy. For
+`lambda.untyped.min` version `0`, the pinned rule is: `beta_step` requires an
+accepted `not_free_in(name, source)` for every name that occurs free in the
+argument and is bound by a lambda the substitution descends under. Capture
+avoidance is thereby a checkable cross-evidence dependency, produced by a
+separate `free_var_scan`, not an internal detail of the substitution code.
 
 Dependencies:
 
@@ -336,6 +347,76 @@ Result:
 ```text
 accepted: c_source, c_target, c_step
 ```
+
+### Beta With Capture Avoidance
+
+This example forces the cross-evidence dependency the pinned `beta_step`
+contract exists for.
+
+Artifacts:
+
+```text
+source = app(lam("x", lam("y", var("x"))), var("y"))
+target = lam("y1", var("y"))
+```
+
+The redex is `(λx. λy. x) y`. Beta substitutes `x := y` into `λy. x`. Naive
+substitution would yield `λy. y`: the free `y` from the argument is captured by
+the inner binder `y`. The correct capture-avoiding result alpha-renames the
+inner binder to a fresh name, here `y1`, giving `λy1. y` where the body `y` is
+the free argument variable, still free.
+
+The hosted checker must alpha-rename. Under the pinned contract, because the
+argument `var("y")` is free with name `y` and the substitution descends under a
+lambda binding `y`, `beta_step` requires an accepted `not_free_in` discharge for
+the renamed binder — and consumes a `free_in("y", arg)` claim establishing the
+collision that forces the rename. That free-variable fact is produced by
+*separate* evidence (`free_var_scan`), not by the substitution step itself.
+
+Claims:
+
+```text
+c_source = well_formed(source)
+c_target = well_formed(target)
+c_arg_fy = free_in("y", arg_ref)        -- arg_ref is the var("y") subterm
+c_step   = steps_to(source, target)
+```
+
+Evidence:
+
+```text
+e_source = artifact_shape_check(c_source)
+e_target = artifact_shape_check(c_target)
+e_arg_fy = free_var_scan(c_arg_fy)
+e_step   = beta_step(c_step, inputs = [e_source, e_target, e_arg_fy])
+```
+
+Result:
+
+```text
+accepted: c_source, c_target, c_arg_fy, c_step
+dependencies(c_step): [
+  c_source, c_target,
+  c_arg_fy,                      -- cross-evidence free-variable dependency
+  artifact(source), artifact(target)
+]
+```
+
+The `c_arg_fy` entry in `dependencies(c_step)` is the load-bearing point: the
+capture-avoidance obligation is discharged by a claim from a different evidence
+object, recorded as an accepted-claim dependency, not hidden inside the
+substitution code.
+
+Design pressure: the `Dependency` shape expresses this cleanly because the
+free-variable fact is itself a claim, and `Dependency.kind = accepted_claim`
+already covers "this step relies on another accepted claim". What `Dependency`
+does *not* express is the *role* the dependency plays — that `c_arg_fy` is a
+capture-avoidance side condition rather than a structural premise. The substrate
+records that `c_step` depends on `c_arg_fy`, but not *why*. For `lambda.untyped.min`
+that is acceptable because the pinned registry contract names the role; a hosted
+semantics with many distinct side-condition kinds may find the unrole'd
+dependency edge too coarse for diagnostics. That is a finding for the
+mechanization to probe, not a defect of this pass.
 
 ### Unknown Is Not Negative
 

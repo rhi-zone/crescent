@@ -106,6 +106,12 @@ New framework implementation work should not happen. The active agnostic static
 analysis direction must not inherit this artifact's assumptions, terminology, or
 implementation shape by default.
 
+Why it was rejected, what it had validated, and the substrate-independent
+findings the agnostic direction must preserve:
+`docs/typechecker-framework-postmortem.md`. The short version: rejected on
+judgment of premature theory-specific commitment, not on a demonstrated defect —
+it reached its STLC-capable binder-replay milestone with tests.
+
 ## Agnostic Static Analysis
 
 The active design direction is a fully agnostic static-analysis substrate.
@@ -124,9 +130,17 @@ Authority:
 - should make language-specific semantics explicit as hosted definitions rather
   than built into the substrate.
 
+Current plan: the object model is settled
+(`docs/agnostic-static-analysis-object-model.md`), and the propositional and
+untyped-lambda validation passes are written. Mechanization starts next at the
+lambda rung (a small Lua substrate plus the `lambda.untyped.min` checker, with
+tests as the spec), then a cyclic/fixpoint-evidence probe inserted before STLC,
+then STLC written against running code. See "Next Pass" in
+`docs/agnostic-static-analysis-design.md`.
+
 Limits:
 
-- not yet designed;
+- mechanization not yet started (lambda rung is next);
 - not the existing `lib/type/framework/`;
 - not a universal inference engine by assumption;
 - not allowed to smuggle Crescent-specific rules into the substrate.

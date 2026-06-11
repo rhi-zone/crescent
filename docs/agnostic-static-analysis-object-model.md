@@ -89,8 +89,7 @@ does not know whether `node_head`, `edge`, `declares`, `writes`, or
 
 - `checked`: derivable from artifact content by a checker;
 - `trusted`: admitted by a visible trust boundary;
-- `assumed`: local hypothesis scoped to a larger evidence object;
-- `derived`: accepted from other observations or claims.
+- `assumed`: local hypothesis scoped to a larger evidence object.
 
 ### Claim
 
@@ -102,17 +101,16 @@ Claim {
   semantics,
   predicate,
   args,
-  scope?,
   subject_artifacts
 }
 ```
 
 `semantics` names the hosted static semantics that owns the claim predicate.
 
-`scope` is intentionally opaque in the substrate. It may later host lexical
-scope, path conditions, dataflow point, module context, proof assumptions, or
-other analysis-local context. The substrate only preserves it as part of claim
-identity and dependency tracking.
+Any analysis-local context a hosted semantics needs (lexical scope, path
+condition, dataflow point, module context, proof assumption) is encoded inside
+`args`. The substrate does not reserve a separate context slot; see "What Is Not
+In The Substrate Yet".
 
 ### Evidence
 
@@ -184,11 +182,17 @@ TrustBoundary {
   id,
   kind,
   issuer,
-  scope,
+  covers,
   payload_digest?,
   policy
 }
 ```
+
+`covers` is the region or subject the trust grant applies to: the artifact,
+declaration, claim predicate family, or analysis context that this boundary
+admits without full checking. (It was previously named `scope`; renamed to avoid
+collision with the removed `Claim.scope` field, which meant something
+unrelated.)
 
 Examples:
 
@@ -205,6 +209,15 @@ and auditable.
 
 ## Analysis State
 
+`AnalysisState` supersedes the design doc's sketch `AnalysisUnit`
+(`docs/agnostic-static-analysis-design.md`, "Core Shape"). It is the same object
+refined: two fields moved off it because they describe a check request, not a
+persistent analysis state. `semantics_id` and `inputs` now live on
+`CheckRequest` (the registry selects the semantics, and inputs are request
+parameters), so they are not state fields. The trust-collection field is named
+`trust_boundaries` here and in the design doc; earlier drafts wrote
+`trusted_boundaries`, which is dropped.
+
 The state of an analysis run is:
 
 ```text
@@ -220,11 +233,21 @@ AnalysisState {
 }
 ```
 
-The substrate distinguishes three result classes:
+The substrate distinguishes three result classes. This section answers open
+question 6 in the design doc (failed vs unknown vs trusted claim):
 
 - `accepted`: evidence was checked or explicitly trusted under policy;
-- `rejected`: evidence failed, or a counterexample was accepted;
+- `rejected`: evidence was checked and refused — it failed, or a counterexample
+  was accepted;
 - `unknown`: no accepted evidence exists and no rejection proof exists.
+
+This trichotomy classifies *evidence outcomes*, not hosted truth. `rejected`
+means "evidence was checked and refused", never "the claim is false". The
+propositional pass discovered the boundary that fixes this: whether a hosted
+contradiction makes a *claim* rejected is hosted policy, never a substrate rule
+(see `docs/agnostic-static-analysis-prop-logic.md`, `contradiction`). The
+substrate only reports what happened to the evidence; hosted semantics decide
+what that means for truth.
 
 `unknown` is not `accepted`. It cannot be consumed as proof by another claim
 unless a hosted semantics explicitly admits unknown-as-input through a visible
@@ -284,6 +307,25 @@ The first implementation may encode each `checker` as ordinary Lua code. A
 later mechanized version may encode some entries in a proof assistant. The
 object model should support both without changing accepted-claim semantics.
 
+### Open item: claim-arg schemas vs structural identity
+
+`SemanticsEntry` has no slot for the *shape* of claim arguments. Hosted
+semantics define recursive value grammars for their args in prose — the
+propositional pass defines `Prop`, the lambda pass defines `LamTerm` — but the
+substrate has no arg-schema mechanism and instead compares args structurally for
+claim identity. This is a named gap, not a proposal: do not invent a schema
+mechanism here.
+
+The divergence the gap creates is structural-identity-vs-hosted-identity. The
+substrate's structural comparison treats `lam("x", var("x"))` and
+`lam("y", var("y"))` as distinct claim args, but the lambda semantics treats
+them as alpha-equal. A hosted semantics whose notion of claim identity is finer
+or coarser than structural equality (alpha-equality being the canonical case)
+will not get the identity it expects from the substrate by default. Whether that
+matters — and how a hosted semantics is allowed to override claim identity — is a
+known divergence the mechanization must probe, not something the prose can
+settle.
+
 ## What Is Not In The Substrate Yet
 
 These are intentionally absent:
@@ -302,6 +344,64 @@ These are intentionally absent:
 
 They are not rejected. They are withheld until a validation semantics forces
 them to become substrate-level rather than hosted vocabulary.
+
+### Removed: Claim.scope
+
+An earlier draft gave `Claim` an opaque `scope?` slot, documented as a future
+home for lexical scope, path conditions, dataflow point, module context, and
+proof assumptions. Review found this is a withheld primitive in disguise: those
+documented tenants are exactly the hosted vocabulary this design withholds, and
+neither validation pass (propositional, lambda) uses the slot. Hosted semantics
+already encode any such context inside `args` — both passes do. The slot is
+removed.
+
+The rule: if a future validation pass forces a context slot, it must be
+justified then, as universal to all static analysis. It does not get
+pre-reserved. A speculative slot whose only tenants are hosted concepts is
+withheld vocabulary, not substrate.
+
+### Removed: Observation.support derived
+
+An earlier draft listed `derived` ("accepted from other observations or claims")
+as a fourth `Observation.support` value. It is removed under the same
+withhold-until-forced discipline. `derived` overlaps with the Claim+Evidence
+machinery — an observation accepted from other claims is a claim with evidence,
+not a new support kind — and neither validation pass exercised it. The remaining
+support values (`checked`, `trusted`, `assumed`) are the ones the passes use.
+
+## Design Obligation: Hosted-Checker Trust
+
+The substrate trusts each hosted checker's verdict. A checker is arbitrary Lua
+(`SemanticsEntry.checker`). This is the structural hole the agnostic direction
+must watch: ad-hoc accumulation — the documented root cause of the v1→v4
+failure — can relocate *inside* a checker, where the substrate cannot see it. A
+checker that quietly special-cases, or runs unchecked inference and reports
+"accepted", launders untrusted computation through the substrate's trust.
+
+The rejected framework had a structural defense here that these docs initially
+dropped: only the framework checker and the declarative theory spec were
+trusted; everything else was checked evidence or an explicit oracle boundary
+(`docs/typechecker-framework.md`, "Core Distinction"). The agnostic substrate
+must re-state that defense for checkers explicitly, applying the design doc's own
+non-negotiable — *inference engines and solvers are untrusted producers unless
+their outputs are checked* — to checkers themselves.
+
+Obligations:
+
+- Hosted checkers must be small and auditable, driven by declarative rule data
+  wherever a rule can be data.
+- Any computation that cannot be declarative must appear either as evidence
+  whose outputs the checker checks, or as an explicit trusted-oracle boundary
+  recorded in the trust summary. It must not hide inside the checker as
+  unaccounted-for "the checker just knows this".
+- Every trust summary must carry a slot for "verdict produced by an unverified
+  hosted checker" until checkers are mechanized. While a checker is hand-written
+  Lua, its verdicts are a trusted boundary, and that trust must be visible in the
+  same way every other trusted boundary is.
+
+This obligation is the reason mechanization starts now rather than after more
+paper passes: a paper checker cannot be audited for the failure it is meant to
+prevent.
 
 ## First Concrete Validation
 
