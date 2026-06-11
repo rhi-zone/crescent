@@ -173,6 +173,17 @@ Limits:
 - not a universal inference engine by assumption;
 - not allowed to smuggle Crescent-specific rules into the substrate.
 
+## Acceptance/Falsification Corpus
+
+`lib/type/analysis/corpus/` — kernel-agnostic fixture set for the tiny Crescent
+slice rung (ladder step 5). Eleven minimal self-contained `.lua` fixtures encoding
+documented legacy-checker failures with expected-correct verdicts; `corpus.md`
+is the manifest with source fire references, feature families, and actual
+legacy-checker verdicts from `bin/cr check`. Five fixtures expose REMAINS gaps
+(active in current checker); six are FIXED regression guards. The corpus orders
+the slice's tests, never its design. See `docs/agnostic-static-analysis-design.md`
+§"First Validation Ladder" for the methodological rule.
+
 ## Crescent Static Semantics
 
 Crescent static semantics is a later hosted design, not the root direction.

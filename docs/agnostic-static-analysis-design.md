@@ -297,6 +297,11 @@ cast-as-inference-source hole at `solve.lua:579` — becomes the slice's
 **acceptance/falsification corpus**: if the slice cannot produce a correct
 claim where v4 fails, the substrate is not ready.
 
+The corpus is mechanized in `lib/type/analysis/corpus/` (11 fixtures,
+`corpus.md` manifest). Five gaps remain active in the current checker (REMAINS);
+six are fixed regression guards (FIXED). Legacy verdicts were obtained from
+actual `bin/cr check` runs; see `corpus.md` for the full table.
+
 Methodological rule: the corpus orders the *tests*, never the *design*. The
 slice's semantics is designed whole, derived from the value universe (the v6
 principle: start from what values the language can produce, not from what the

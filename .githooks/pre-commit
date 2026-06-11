@@ -29,8 +29,13 @@ cd "$repo_root"
 mapfile -t staged < <(
   git diff --cached --name-only --diff-filter=ACMR \
     | grep -E '^lib/.*\.lua$' \
+    | grep -vE '^lib/type/analysis/corpus/' \
     || true
 )
+# lib/type/analysis/corpus/ is explicitly exempt: it is an acceptance/
+# falsification corpus of known checker gaps. Fixtures are deliberately
+# written to exercise errors; they must not be held to the zero-new-errors
+# bar. See lib/type/analysis/corpus/corpus.md for the methodology.
 
 if [ "${#staged[@]}" -eq 0 ]; then
   exit 0
