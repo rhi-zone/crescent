@@ -1064,7 +1064,7 @@ full `bin/cr test lib/type/analysis/` green at 4677 (4607 prior intact + 70).
 Findings recorded in §9.4. **Pass 3** (narrowing) and **Pass 4** (corpus +
 for-in/numeric-for) remain.
 
-**Pass 3 — The flow-narrowing layer.** Build `narrow_guard` (§4) as a separate pass:
+**Pass 3 — The flow-narrowing layer. ✅ DONE (2026-06-12).** Build `narrow_guard` (§4) as a separate pass:
 the `narrows` claim form, the v1 guard recognizers (truthy, `type(x)==`, literal-eq,
 tag-discriminant, `and`/`or`/`not` composition), the positive-decomposition truthy
 refinement and sound-wider falsy approximation. Wire refinements into synthesis via
@@ -1073,6 +1073,37 @@ refinement and sound-wider falsy approximation. Wire refinements into synthesis 
 *claims* with visible dependency edges (not checker state — adversarial check);
 falsy-branch soundness probe (kernel §5.4: enumerate `lib/` falsy sites, confirm v1
 approximation is wider-never-unsound).
+
+*Mechanized:* `lib/type/analysis/slice_narrow.lua` (the pure refinement core: the
+`Guard` grammar for the five v1 forms + and/or/not, `refine(guard, x, T)`
+computing the positive-decomposition truthy refinement — drop non-matching union
+members / pick the positive atom / select tag-admitting members — and the
+sound-wider falsy approximation, with the nil-guard's exact two-sided positivity;
+imports slice_ty + slice_subtype only, NOT the substrate), the `narrows` claim
+builder + `narrow_guard` evidence method + guard decoder in
+`lib/type/analysis/crescent_slice.lua` (the evidence re-derives both branch
+refinements from the one accepted `has_type` pre-guard premise and the guard
+artifact, checks the asserted `(T_true, T_false)` structurally, and records
+`accepted_claim`/`artifact_content` deps — Γ-fed, never mutable state), guard
+recognition in `lib/type/analysis/crescent_slice_parse.lua`
+(`recognize_guard(expr)` mapping an if/elseif/while test expression to a portable
+Guard, operand-order symmetric), and tests:
+`lib/type/analysis/slice_narrow_test.lua` (32 assertions: per-form units, nil-guard
+exact two-sided, tag-field μ-unfold selection, and/or/not composition, the explicit
+falsy-sound-wider-NOT-exact-complement probe) + 40 new assertions in
+`crescent_slice_test.lua` (the §6.1 nil-guard derivation, the tag discriminant §6.2,
+`and`-composition of the boolean-narrowing shape, a worked multi-branch if/elseif
+derivation, the §5.4 falsy-soundness assertion that a complement falsy is REJECTED,
+and the adversarial substrate-agnosticism checks: a foreign-semantics `narrows`
+claim does not route; `narrow_guard` cannot evidence a `has_type` claim; the
+substrate stores no narrowing/flow object kind after a derivation; the guard rides
+an ordinary `syntax_tree` artifact). Gates met: narrowing is derived CLAIMS with
+visible dependency edges, not checker state (adversarial walk passes); the
+falsy-branch soundness probe holds (the v1 approximation is wider, and a
+complement-precise falsy is a rejection, fencing kernel §5.4). `bin/cr check` clean
+on every new/modified file; full `bin/cr test lib/type/analysis/` green at 4749
+(4677 prior intact + 72). Findings in §9.5. **Pass 4** (corpus + for-in/numeric-for)
+remains.
 
 **Pass 4 — Corpus validation + `for-in pairs`/numeric-`for` + non-regression.**
 Add the `for-in pairs`/`ipairs` and numeric-`for` syntax handling (§5.2). Run all 11
@@ -1316,6 +1347,94 @@ strain was entirely in the *encoding* of types-as-args (resolved by the portable
 codec) and the *framing* of generic instantiation (resolved by keeping free
 tyvars portable), never against the substrate's shape.
 
+### 9.5 Mechanization findings — Pass 3 (the flow-narrowing layer)
+
+Recorded honestly per the prompt. None crosses the fence; all are
+spec-tightenings forced by the mechanization, resolved conservatively, now
+load-bearing. The deferral fence (no complement) held throughout — and is now
+*tested as a fence*, not merely respected.
+
+- **The `narrow_guard` premise is the pre-guard type, and Γ must agree with it
+  (sharpest Pass-3 finding).** §4.2 frames the input as `has_type(Γ, x_node, T)` —
+  "the synthesized pre-guard type of x." Mechanization found this needs THREE
+  coherence checks the prose left implicit, all enforced: (1) the premise context
+  must equal the conclusion's Γ (the refinement is *of* the pre-guard context);
+  (2) the refined variable `x` must be bound in Γ; and (3) `x`'s binding in Γ must
+  EQUAL the premise's asserted type `T` — otherwise a producer could feed a
+  `has_type` for an *unrelated* node/type and claim a refinement of `x`. With all
+  three, the narrowing is genuinely Γ-fed: the downstream truthy-branch synthesis
+  runs under `extend(Γ, x, T_true)` and the rule guarantees `T_true` was computed
+  from `x`'s actual pre-guard binding. This is a tightening of §4.2's
+  single-premise framing, not a contradiction — the premise alone underdetermines
+  *which* variable's binding `T` is, so the Γ-agreement check pins it.
+
+- **Operand-order symmetry of comparisons is an adapter responsibility, not a
+  refinement-core one.** §4.1 lists `x == "GET"` and `x.tag == "leaf"` with the
+  variable on the left, but real Lua writes `"GET" == x` and `NODE_LEAF == n.kind`
+  freely. Resolution: `recognize_guard` (the adapter) normalizes operand order by a
+  rank heuristic (the var/index/`type()`-call operand becomes the refining side),
+  so the pure `refine` core never sees orientation. This keeps the core's Guard
+  grammar canonical (one shape per form) and the symmetry localized to the
+  frontend, where it belongs. Recorded because the naive "left operand is the
+  variable" reading would silently miss half the corpus's guards.
+
+- **`type(x) == "<name>"` member-matching must enumerate the literal SUBKINDS, and
+  must NOT match `unknown`.** §4.1's `type(x) == "string"` truthy = "the `string`
+  member of the union `T`." Mechanization found "the string member" is really "every
+  union member whose runtime `type()` is `"string"`" — which includes `lit_str`
+  singletons, and for `"number"` includes `integer`/`lit_int`/`lit_num`, for
+  `"table"` includes `rec`/`rec_with_indexer`/`indexer`, etc. (the §1 subkind
+  lattice surfacing in narrowing). Critically, an `unknown` member is NOT matched
+  (it could be any runtime kind — keeping it on the truthy branch would be an
+  *unsound* narrow) and NOT dropped either (it stays via the falsy sound-wider T);
+  the positive decomposition only keeps members it can *prove* match. Recorded
+  because "the string member" undercounts the matching set and over-trusts
+  `unknown`.
+
+- **`x == lit` against an impossible target narrows truthy to `never`, not to the
+  bare singleton.** §4.1 gives `x == "GET"` truthy = `lit_str("GET")`. Mechanization
+  found this is only correct when `"GET"` is a *possible* value of `T` (`lit <: T`);
+  when it is not (e.g. `x : integer` guarded `x == "GET"`), the truthy branch is
+  unreachable and its refinement is `never` (the empty type), not a spurious
+  `lit_str("GET")` that contradicts `T`. The rule checks `lit <: T` and yields
+  `never` on failure. This is a soundness tightening (it never invents a value `T`
+  cannot hold); `never` correctly marks the dead branch.
+
+- **The tag discriminant unfolds a μ union-member ONCE before reading its tag
+  field.** §4.1's tag form selects "the union members whose `tag` field admits the
+  literal." Mechanization found that in the discriminated-union / hamt idiom a
+  union member is frequently *itself* a μ (the recursive arm), so `member_admits_tag`
+  unfolds a `mu` member one step (and distributes over a post-unfold union) before
+  inspecting fields — otherwise the recursive arm is never matched and the
+  discriminant silently drops it. This reuses the Pass-1 equirecursive `unfold`; no
+  new machinery. Recorded because the flat "members whose tag field admits" reading
+  misses μ-wrapped arms.
+
+- **The falsy fence is now a TEST, not just a discipline (the §5.4 probe,
+  realized).** Kernel §5.4 asks for an enumeration confirming the v1 falsy
+  approximation is "wider, never unsound." Mechanization realizes this as an
+  *executable* assertion: for `type(x)=="string"` over `string | number`, the
+  checker ACCEPTS the falsy refinement `string | number` (the sound-wider T) and
+  REJECTS the complement-precise falsy `number`. So an attempt to smuggle complement
+  precision in — even a *correct* `~string` — is a rejection, because the rule
+  re-derives the sound-wider T and the asserted exact-complement does not match. The
+  fence is enforced by construction: there is no code path that produces `T & ~Atom`,
+  and a claim asserting it cannot be evidenced. The ONE form whose complementary
+  branch is exact — the nil-guard — is exact *positively* (the `nil` member is a
+  union member, dropped or kept by the same positive operation), so it needs no
+  complement and is not an exception to the fence.
+
+**What buckled in the substrate during Pass 3: nothing** — the narrowing layer is a
+pure consumer of the unchanged claim database. `init.lua` is byte-for-byte
+unchanged; refinements are `narrows` claims with `narrow_guard` evidence and
+`accepted_claim`/`artifact_content` dependency edges — never checker-internal
+mutable state, confirmed by the adversarial walk (no `narrowing`/`flow`/`judgment`
+id space appears; the guard rides an ordinary `syntax_tree` artifact). The
+`narrows`/`narrow_guard` registry entries reserved by Pass 2 needed no change. The
+strain was entirely in the *precision* of the sound approximations (recorded above)
+and the *coherence checks* binding a refinement to its pre-guard Γ, never against
+the substrate's shape.
+
 ---
 
 ## 10. Next Pass
@@ -1336,12 +1455,24 @@ the first pass that imports the substrate — and it forced **no** substrate cha
 (`init.lua` byte-for-byte unchanged), exactly as §9 predicted on the STLC
 precedent. Findings in §9.4.
 
-**Next: Pass 3** (§8) — the flow-narrowing layer (`narrow_guard`, the `narrows`
-claim form, the v1 guard recognizers, positive-decomposition truthy / sound-wider
-falsy), wired into synthesis via Γ-extension. Then **Pass 4** — corpus validation
-+ `for-in pairs`/`ipairs` + numeric-`for`. Nothing in Pass 2 precludes them: the
-node grammar reserves `narrows`/`narrow_guard` in the registry (unimplemented
-until Pass 3), and the adapter's annotation/alias environment is corpus-ready.
+**Pass 3 is DONE** (2026-06-12): the flow-narrowing layer — the `narrows` claim
+builder + `narrow_guard` evidence method + guard decoder in `crescent_slice.lua`,
+the pure refinement core `slice_narrow.lua` (the `Guard` grammar, the five v1
+forms + and/or/not, positive-decomposition truthy / sound-wider falsy, the
+nil-guard's exact two-sided positivity, tag-field μ-unfold selection), and guard
+recognition (`recognize_guard`) in `crescent_slice_parse.lua`, with
+`slice_narrow_test.lua` (32 assertions) + 40 new in `crescent_slice_test.lua`.
+Refinements are derived `narrows` CLAIMS with visible dependency edges, Γ-fed into
+synthesis by `extend`; the falsy fence is enforced as a TEST (a complement-precise
+falsy is rejected). The substrate was again **not** touched (`init.lua`
+byte-for-byte unchanged); the Pass-2-reserved `narrows`/`narrow_guard` registry
+entries needed no change. Full `bin/cr test lib/type/analysis/` green at 4749
+(4677 prior intact + 72). Findings in §9.5.
+
+**Next: Pass 4** (§8) — corpus validation + `for-in pairs`/`ipairs` +
+numeric-`for`. Nothing in Pass 3 precludes it: the adapter's annotation/alias
+environment is corpus-ready, and the narrowing layer wires into the branch-body Γ
+exactly as the corpus's discriminated-union fixtures need.
 
 This is the ladder's final rung. When it lands, the agnostic substrate has been
 validated from propositional logic through a real Crescent slice without a single

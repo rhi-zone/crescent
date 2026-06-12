@@ -23,6 +23,7 @@ local A = require("lib.type.analysis")
 local G = require("lib.type.analysis.slice_ty")
 local TA = require("lib.type.analysis.slice_ty_arg")
 local SUB = require("lib.type.analysis.slice_subtype")
+local NAR = require("lib.type.analysis.slice_narrow")
 
 local M = {}
 
@@ -186,6 +187,17 @@ end
 function M.well_typed_type_claim(id, ty)
 	return A.claim({ id = id, semantics = M.ID, predicate = "well_typed_type",
 		args = { type = TA.encode(ty) } })
+end
+
+-- Build a narrows(Γ, guard_ref, x, T_true, T_false) claim (§2.2). The flow layer's
+-- positive claim: under Γ, the guard in `guard_ref` refines variable `x` to T_true
+-- on the truthy path and T_false on the falsy path. Γ is a raw SliceCtx; x is the
+-- refined variable name; T_true/T_false are interned Ty (encoded to portable form).
+--: (Id, SliceCtx, Id, string, Ty, Ty) -> Claim
+function M.narrows_claim(id, ctx, guard_ref, x, t_true, t_false)
+	return A.claim({ id = id, semantics = M.ID, predicate = "narrows",
+		args = { ctx = raw_ctx_to_arg(ctx), guard = { space = guard_ref.space, key = guard_ref.key },
+			x = x, t_true = TA.encode(t_true), t_false = TA.encode(t_false) } })
 end
 
 -- ── Structural Ty identity via the interner ──────────────────────────────────
@@ -367,6 +379,57 @@ local function read_subtype(cc, ref)
 	return { a = a, b = b }
 end
 
+-- ── Guard decoding (the narrowing layer's syntax → refinement input) ─────────
+--
+-- A Guard node (slice_narrow.lua) rides an artifact as portable data: its `lit`
+-- fields are PTy (literal singletons of the comparison). decode_guard re-interns
+-- every embedded `lit` to a Ty so the pure `NAR.refine` can run; it validates the
+-- guard shape (parse-not-cast) and returns nil on any malformed node. The decoded
+-- tree mirrors the Guard grammar with `lit` fields swapped to interned Ty.
+local decode_guard --[[: (unknown) -> Guard | nil ]]
+
+--: (unknown) -> Guard | nil
+decode_guard = function(node)
+	if type(node) ~= "table" then return nil end
+	local g = node.g
+	if type(g) ~= "string" then return nil end
+	if g == "not" then
+		local inner = decode_guard(node.inner)
+		if not inner then return nil end
+		return { g = "not", inner = inner }
+	end
+	if g == "and" or g == "or" then
+		local l = decode_guard(node.left)
+		local r = decode_guard(node.right)
+		if not l or not r then return nil end
+		return { g = g, left = l, right = r }
+	end
+	local var = node.var
+	if type(var) ~= "string" then return nil end
+	if g == "truthy" then return { g = "truthy", var = var } end
+	if g == "nil_eq" then return { g = "nil_eq", var = var, eq = node.eq == true } end
+	if g == "type_eq" then
+		local tyname = node.tyname
+		if type(tyname) ~= "string" then return nil end
+		return { g = "type_eq", var = var, tyname = tyname }
+	end
+	if g == "lit_eq" then
+		local lit = TA.decode(node.lit)
+		if not lit then return nil end
+		return { g = "lit_eq", var = var, lit = lit }
+	end
+	if g == "tag_eq" then
+		local field = node.field
+		if type(field) ~= "string" then return nil end
+		local lit = TA.decode(node.lit)
+		if not lit then return nil end
+		return { g = "tag_eq", var = var, field = field, lit = lit }
+	end
+	return nil
+end
+
+M.decode_guard = decode_guard
+
 -- ── The hosted checker ───────────────────────────────────────────────────────
 --
 -- Each evidence method re-derives its conclusion from the artifact node + premise
@@ -413,6 +476,55 @@ function M.checker(cc, claim, ev)
 			return cc.REJECTED, "not a subtype" .. detail, nil, nil
 		end
 		return cc.ACCEPTED, nil, {}, { trust_note() }
+	end
+
+	-- ── narrows (the flow-narrowing layer, §4) ───────────────────────────────
+	if predicate == "narrows" then
+		if method ~= "narrow_guard" then
+			return cc.UNKNOWN, "unknown narrows method: " .. tostring(method), nil, nil
+		end
+		-- args: ctx (Γ), guard (artifact ref), x (refined var), t_true, t_false.
+		local nctx = parse_ctx(args.ctx)
+		local gref = arg_id(args.guard)
+		local x = args.x
+		local want_true = TA.decode(args.t_true)
+		local want_false = TA.decode(args.t_false)
+		if not nctx then return cc.REJECTED, "narrows context is malformed", nil, nil end
+		if not gref then return cc.REJECTED, "narrows missing guard ref", nil, nil end
+		if type(x) ~= "string" then return cc.REJECTED, "narrows missing refined variable name", nil, nil end
+		if not want_true or not want_false then return cc.REJECTED, "narrows missing/malformed refinement type", nil, nil end
+		-- premise: has_type(Γ, x_node, T) — the synthesized PRE-GUARD type of x.
+		-- (The producer supplies the one has_type premise establishing T; it must be
+		--  a has_type whose asserted type is the pre-guard type of the refined var.)
+		if #ev.inputs ~= 1 then return cc.REJECTED, "narrow_guard requires one has_type premise (the pre-guard type of x)", nil, nil end
+		local prem = ev.inputs[1]
+		if not cc.is_accepted(prem) then return cc.UNKNOWN, nil, nil, nil end
+		local pr = read_typing(cc, prem, "has_type")
+		if not pr then return cc.REJECTED, "narrow_guard premise is not a has_type claim", nil, nil end
+		-- premise context must equal this claim's context (the pre-guard Γ).
+		if A._serialize(ctx_to_arg(nctx)) ~= A._serialize(ctx_to_arg(pr.ctx)) then
+			return cc.REJECTED, "narrow_guard premise context must match the conclusion's", nil, nil
+		end
+		-- the refined variable must be bound to the premise's type in Γ (the premise
+		-- establishes x's pre-guard type; it must agree with x's binding).
+		local bound = ctx_lookup(nctx, x)
+		if not bound then return cc.REJECTED, "narrow_guard: refined variable '" .. x .. "' not bound in context", nil, nil end
+		if not ty_eq(bound, pr.type) then
+			return cc.REJECTED, "narrow_guard: premise type is not the pre-guard type of '" .. x .. "'", nil, nil
+		end
+		-- parse the guard syntax and run the pure refinement.
+		local gnode = node_of(cc, gref)
+		local guard = decode_guard(gnode)
+		if not guard then return cc.REJECTED, "narrow_guard: guard syntax is malformed or outside v1", nil, nil end
+		local t_true, t_false = NAR.refine(guard, x, pr.type)
+		if not t_true or not t_false then return cc.REJECTED, "narrow_guard: guard does not refine '" .. x .. "'", nil, nil end
+		if not ty_eq(t_true, want_true) then
+			return cc.REJECTED, "narrow_guard: asserted truthy refinement does not match the positive decomposition", nil, nil
+		end
+		if not ty_eq(t_false, want_false) then
+			return cc.REJECTED, "narrow_guard: asserted falsy refinement does not match the sound-wider approximation", nil, nil
+		end
+		return cc.ACCEPTED, nil, { dep_claim(claim.id, prem), dep_artifact(claim.id, gref) }, { trust_note() }
 	end
 
 	-- ── has_type / checks_against ────────────────────────────────────────────

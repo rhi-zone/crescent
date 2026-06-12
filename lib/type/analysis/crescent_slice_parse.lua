@@ -22,6 +22,7 @@
 -- returned as (nil, errmsg); the adapter never throws for malformed input.
 
 local G = require("lib.type.analysis.slice_ty")
+local TA = require("lib.type.analysis.slice_ty_arg")
 
 local M = {}
 
@@ -395,5 +396,165 @@ function M.scan_annotation(line)
 	end
 	return nil
 end
+
+-- ── Guard recognition (the flow-narrowing layer's frontend, §4.1) ────────────
+--
+-- `recognize_guard(expr)` maps an if/elseif/while test EXPRESSION node into a
+-- portable Guard node (slice_narrow.lua's grammar) that the `narrow_guard`
+-- evidence method consumes — or nil if the expression is not one of the five v1
+-- guard forms (or their and/or/not composition). Guards ride artifacts as
+-- portable data, so each comparison literal is emitted as a PTy (TA.encode).
+--
+-- The expression node grammar this recognizer reads (a small comparison subset of
+-- the slice node grammar — the adapter lowers if/elseif tests into it):
+--   { t="var",  name }
+--   { t="lit",  lit, v }                                 -- as in crescent_slice.lua
+--   { t="index", obj, field }                            -- x.field (static key)
+--   { t="call", fn={t="var",name="type"}, args={ x } }   -- type(x)
+--   { t="cmp",  op="eq"|"ne", left, right }              -- a == b / a ~= b
+--   { t="andor", op="and"|"or"|"not", left, right? }     -- composition
+--
+-- Recognized forms (target variable is the var operand):
+--   truthy   : a bare `var`           → { g="truthy", var }
+--   nil-eq   : `var == nil` / `~= nil` → { g="nil_eq", var, eq }
+--   type-eq  : `type(var) == "string"` → { g="type_eq", var, tyname }
+--   lit-eq   : `var == <literal>`      → { g="lit_eq", var, lit=PTy }
+--   tag-eq   : `var.field == <literal>`→ { g="tag_eq", var, field, lit=PTy }
+--   not g    : `not <guard>`           → { g="not", inner }
+--   g and h  : `<guard> and <guard>`   → { g="and", left, right }
+--   g or h   : `<guard> or <guard>`    → { g="or", left, right }
+-- Either operand of a comparison may be the variable (the literal side is
+-- symmetric: `0 == x` recognizes the same as `x == 0`).
+
+-- A literal expression node → its singleton Ty (for PTy emission), or nil.
+--: (unknown) -> Ty | nil
+local function lit_node_to_ty(node)
+	if type(node) ~= "table" then return nil end
+	if node.t ~= "lit" then return nil end
+	local lit, v = node.lit, node.v
+	if lit == "nil" then return G.nil_() end
+	if lit == "bool" and type(v) == "boolean" then return G.lit_bool(v) end
+	if lit == "int" and type(v) == "number" then return G.lit_int(v) end
+	if lit == "num" and type(v) == "number" then return G.lit_num(v) end
+	if lit == "str" and type(v) == "string" then return G.lit_str(v) end
+	return nil
+end
+
+-- Is `node` the literal `nil`?
+--: (unknown) -> boolean
+local function is_nil_lit(node)
+	if type(node) ~= "table" then return false end
+	if node.t ~= "lit" then return false end
+	return node.lit == "nil"
+end
+
+-- A `type(x)` call → the variable name x, or nil.
+--: (unknown) -> string | nil
+local function type_call_var(node)
+	if type(node) ~= "table" then return nil end
+	if node.t ~= "call" then return nil end
+	local fn = node.fn
+	if type(fn) ~= "table" then return nil end
+	if fn.t ~= "var" or fn.name ~= "type" then return nil end
+	local args = node.args
+	if type(args) ~= "table" then return nil end
+	if #args ~= 1 then return nil end
+	local a = args[1]
+	if type(a) ~= "table" then return nil end
+	if a.t ~= "var" then return nil end
+	local nm = a.name
+	if type(nm) ~= "string" then return nil end
+	return nm
+end
+
+local recognize_guard --[[: (unknown) -> unknown ]]
+
+-- Recognize a comparison `op` (eq/ne) of `lhs`/`rhs` as an atomic guard, or nil.
+-- `eq_truthy` is true when the comparison being TRUE makes the predicate hold
+-- (`==` for the truthy reading; `~=` flips it to a `not` of the `==` guard).
+--: (unknown, unknown, boolean) -> unknown
+local function recognize_cmp(lhs, rhs, is_eq)
+	-- normalize so the "interesting" operand (var / index / type-call) is `a`.
+	--: (unknown) -> integer
+	local function rank(n)
+		if type(n) ~= "table" then return 0 end
+		if n.t == "var" or n.t == "index" or n.t == "call" then return 2 end
+		return 1 -- literal
+	end
+	local a, b = lhs, rhs
+	if rank(b) > rank(a) then a, b = rhs, lhs end
+
+	-- `type(x) == "string"` (b must be a string literal naming the runtime type).
+	local tv = type_call_var(a)
+	if tv and type(b) == "table" and b.t == "lit" and b.lit == "str" and type(b.v) == "string" then
+		local g = { g = "type_eq", var = tv, tyname = b.v } --[[: unknown ]]
+		if is_eq then return g end
+		return { g = "not", inner = g }
+	end
+
+	-- `x == nil` / `x ~= nil` (nil-eq: the one form whose falsy branch is positive).
+	if type(a) == "table" and a.t == "var" and type(a.name) == "string" and is_nil_lit(b) then
+		-- is_eq=true ⇒ `x == nil` ⇒ nil_eq with eq=true; is_eq=false ⇒ `x ~= nil`.
+		return { g = "nil_eq", var = a.name, eq = is_eq }
+	end
+
+	-- `x.field == <literal>` (tag-field discriminant).
+	if type(a) == "table" and a.t == "index" and type(a.field) == "string" then
+		local obj = a.obj
+		if type(obj) == "table" and obj.t == "var" and type(obj.name) == "string" then
+			local lit = lit_node_to_ty(b)
+			if lit then
+				local g = { g = "tag_eq", var = obj.name, field = a.field, lit = TA.encode(lit) } --[[: unknown ]]
+				if is_eq then return g end
+				return { g = "not", inner = g }
+			end
+		end
+	end
+
+	-- `x == <literal>` (literal-eq singleton narrowing).
+	if type(a) == "table" and a.t == "var" and type(a.name) == "string" then
+		local lit = lit_node_to_ty(b)
+		if lit and not is_nil_lit(b) then
+			local g = { g = "lit_eq", var = a.name, lit = TA.encode(lit) } --[[: unknown ]]
+			if is_eq then return g end
+			return { g = "not", inner = g }
+		end
+	end
+
+	return nil
+end
+
+--: (unknown) -> unknown
+recognize_guard = function(expr)
+	if type(expr) ~= "table" then return nil end
+	local t = expr.t
+	if t == "var" and type(expr.name) == "string" then
+		return { g = "truthy", var = expr.name }
+	end
+	if t == "cmp" then
+		local op = expr.op
+		if op == "eq" then return recognize_cmp(expr.left, expr.right, true) end
+		if op == "ne" then return recognize_cmp(expr.left, expr.right, false) end
+		return nil
+	end
+	if t == "andor" then
+		local op = expr.op
+		if op == "not" then
+			local inner = recognize_guard(expr.left)
+			if not inner then return nil end
+			return { g = "not", inner = inner }
+		end
+		if op == "and" or op == "or" then
+			local l = recognize_guard(expr.left)
+			local r = recognize_guard(expr.right)
+			if not l or not r then return nil end
+			return { g = op, left = l, right = r }
+		end
+		return nil
+	end
+	return nil
+end
+
+M.recognize_guard = recognize_guard
 
 return M
