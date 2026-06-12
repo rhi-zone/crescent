@@ -1000,7 +1000,7 @@ Ordered substrate-before-consumers. Each pass is sized for one agent and ends wi
 a commit; the slice's hosted checker lives in `lib/type/analysis/crescent_slice.lua`
 (+ `crescent_slice_test.lua`), importing the unchanged substrate.
 
-**Pass 1 — The `Ty` grammar + hash-consing + the subtype relation + its fuzz.**
+**Pass 1 — The `Ty` grammar + hash-consing + the subtype relation + its fuzz. ✅ DONE (2026-06-12).**
 *Substrate-before-consumers: this is the foundation every later pass calls.*
 Build the `Ty` constructors, the hash-cons interner (structural tid identity,
 including `mu`/`tyvar`), and `subtype(A, B) -> (bool, Counterexample?)` per §3 with
@@ -1010,6 +1010,17 @@ termination-under-fuzz with `FUZZ_SEED` replay) and the §5.1 performance benchm
 (adversarial corpus types + widest `lib/` unions, timeout-30). No claims/evidence
 yet — this is a pure, independently-tested function. Gate: all fuzz invariants
 hold; benchmark clears timeout-30; results to `docs/perf/log.md`.
+
+*Mechanized:* `lib/type/analysis/slice_ty.lua` (grammar + hash-cons interner,
+de-Bruijn-indexed equirecursive μ so alpha-equivalent μ types share a tid),
+`lib/type/analysis/slice_subtype.lua` (`is_subtype` / witnessed `subtype`),
+`lib/type/analysis/slice_subtype_test.lua` (interner identity + every subtype rule
+family + the §6.2 worked μ example + the §3.5 fuzz invariants; seeded `FUZZ_SEED`
+default `0xC0FFEE`, 4454 assertions), `lib/type/analysis/slice_subtype_bench.lua`
+(§5.1 benchmark). Gates met: all fuzz invariants hold; benchmark clears timeout-30
+with ~20000× headroom on the worst query (`docs/perf/log.md`, 2026-06-12 entry); the
+153 prior analysis assertions are intact (full suite 4607). `bin/cr check` is clean
+on every new file. Findings recorded in §9.3.
 
 **Pass 2 — Synthesis evidence methods + the `crescent.slice.v1` registry entry.**
 Register the semantics (§2.1). Build the parser-frontend adapter (Lua syntax →
@@ -1128,17 +1139,102 @@ the substrate hosts with no new object kind; the strain was entirely against the
 *kernel's deferral fence* (where it held) and the *precision* of sound
 approximations (where it is recorded), never against the substrate's shape.
 
+### 9.3 Mechanization findings — Pass 1 (the `Ty` grammar + subtype relation)
+
+Recorded honestly per the prompt: places where the §3 spec was ambiguous or
+under-determined and the mechanization had to make a conservative call. None
+crosses the fence; all are spec-tightening, not spec-contradiction. Each was
+resolved in the most conservative direction and is now load-bearing in the
+implementation.
+
+- **μ contractiveness is an implicit well-formedness precondition (sharpest
+  finding).** §3.3 states "every μ has a non-recursive arm (`Leaf`, `nil`)" as the
+  reason no unwitnessed recursion occurs. The fuzz exposed that this is not just a
+  property of the *corpus* types — it is a **well-formedness requirement on the
+  grammar**. A *non-contractive* μ — one whose bound variable occurs **unguarded**,
+  i.e. as a bare union member (`μX.(nil | X)`) rather than under a constructor
+  (`μX.(nil | {next: X})`), or whose body is `never` (`μX.never`) — is outside the
+  slice grammar. For such a type the cycle-guarded coinductive relation reads the
+  μ as **top** (the greatest fixed point of an unguarded recursion), which is *not*
+  what the type is meant to denote (`μX.(nil|X)` is semantically `nil`; `μX.never`
+  is `never`). This is sound for the *defined* (contractive) fragment but the
+  relation does not detect ill-formed input. **Resolution:** contractiveness is
+  recorded as a precondition of `well_typed_type` (§2.2) — a μ is well-formed iff
+  every occurrence of its bound variable is guarded under a `rec`/`indexer`/`fn`
+  constructor. The fuzz generator only emits contractive μ (its recursive arm is
+  always under a constructor). Pass 2's `type_shape_check` must enforce
+  contractiveness when it validates `well_typed_type(μ...)`. The §3.3 phrase "every
+  μ has a non-recursive arm" is hereby read as "every μ is contractive," which is
+  the precise statement. (This is a *new* well-formedness obligation the value-
+  universe derivation did not surface, only the fuzz did — the rung's data.)
+
+- **`inter <: union` requires trying BOTH "exists" decompositions (transitivity
+  completeness).** §3.2 says the relation is "decided by the structure of `B`
+  first," and lists `B = union → A <: some member` and `A = inter → some member <:
+  B` as separate rules. Taken literally as an ordered cascade that commits to the
+  first matching rule, this is **incomplete**: for `(a ∩ b) <: (c ∪ d)` where the
+  intersection is below the union via an *intersected member* (e.g. `(fn ∩ U) <: U`
+  through the `A=inter` rule) but **no single union member of `B` dominates the
+  whole intersection**, committing to the `B=union` rule alone returns a wrong
+  `false`, and transitivity sampling falsifies. **Resolution:** the two "exists"
+  rules are both attempted — a `false` from `B=union` falls through to the
+  `A=inter` rule before the relation gives up. The "decide by `B` first" framing is
+  read as a *for-all*-rules-first ordering (`A=union`, `B=inter` decompose before
+  the exists rules), not a single-rule commitment. This is the sound completion of
+  the fragment; it adds no acceptance the full lattice would reject (it only stops
+  rejecting pairs that genuinely hold).
+
+- **Top/bottom law ordering relative to μ-unfold and connectives.** §3.2 lists the
+  always-true (`B=unknown`, `A=never`) and always-false (`A=unknown`/`B≠unknown`,
+  `B=never`/`A≠never`) laws together "before these" structural rules. Mechanization
+  found the always-**false** laws must come *after* μ-unfold and connective
+  decomposition: a μ may unfold to a bottom (`μX.never` reaches `never`), and an
+  intersection may be empty via a bottom member, so a premature `B=never → false`
+  cuts off the decomposition that would correctly decide `inter <: never` or
+  `μX.never <: never`. The always-**true** laws are safe first (they hold
+  regardless of shape). **Resolution:** always-true laws → μ-unfold → connective
+  decomposition → always-false laws → primitive/structural rules. Sound and total.
+
+- **`rec_with_indexer` named fields are governed by the rec part, not the index
+  signature.** §3.2 says `rec_with_indexer` "decomposes to the conjunction of its
+  `rec` part and its `indexer` part." Mechanization clarified that a field B *names*
+  in its rec part is checked **only** against B's named-field type — the index
+  signature applies solely to keys B does *not* name. (Otherwise a record with
+  `tag: string` and an `{[string]: number}` indexer would wrongly require its own
+  `tag` field to satisfy `string <: number`.) This is the standard TypeScript
+  reading and is implicit in "conjunction of the rec part and the indexer part";
+  recorded because the naive decomposition over-constrains.
+
+- **Substrate/tooling note (not a spec finding): `--::` declarations are
+  single-line.** The annotation parser does not support multi-line `--::` alias
+  continuation, and cross-module type *aliases* do not share nominal identity
+  across `require` (only structural inference unifies). Mechanization keeps each
+  alias on one line and uses generic helper signatures (`<T>(...) -> {ty: T, ...}`)
+  so field-constructor helpers unify with the interner's field type across the
+  module boundary without force casts. This is a tooling constraint on how the
+  slice is *written*, not a property of the slice's semantics.
+
+**What buckled in the substrate during Pass 1: nothing** — Pass 1 is a pure,
+self-contained function pair (`slice_ty` + `slice_subtype`) that does not import
+the substrate (`init.lua` untouched), exactly as §10 predicted.
+
 ---
 
 ## 10. Next Pass
 
 Mechanization, in the four passes of §8, against this document — no further design
-decisions required. Pass 1 (the `Ty` grammar + hash-consed subtype relation + its
-fuzz and performance benchmark) is the substrate-before-consumers foundation and
-goes first. The slice imports the unchanged substrate (`lib/type/analysis/init.lua`);
-if mechanization forces a substrate change, that is a finding to record here and in
-the object-model doc, never a silent edit — but §9 predicts none, on the STLC
-precedent.
+decisions required. **Pass 1 is DONE** (2026-06-12): the `Ty` grammar + hash-consed
+interner + the subtype relation + its fuzz invariants + the §5.1 performance
+benchmark, all in `lib/type/analysis/slice_{ty,subtype}.lua` (+ `_test`/`_bench`),
+with findings in §9.3 and benchmark numbers in `docs/perf/log.md`. The substrate was
+not touched, as predicted.
+
+**Next: Pass 2** (§8) — the synthesis/checking evidence methods + the
+`crescent.slice.v1` registry entry, the parser-frontend adapter, `trusted_signature`
+and `instantiate_witness`. This is the first pass that imports the substrate
+(`lib/type/analysis/init.lua`); if mechanization forces a substrate change, that is
+a finding to record here and in the object-model doc, never a silent edit — but §9
+predicts none, on the STLC precedent.
 
 This is the ladder's final rung. When it lands, the agnostic substrate has been
 validated from propositional logic through a real Crescent slice without a single

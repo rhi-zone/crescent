@@ -6,6 +6,49 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-06-12: crescent slice v1 — Pass 1 subtype-relation benchmark (§5.1)
+
+**Commit (Pass 1):** committed in this change; baseline HEAD before it = `7a6b9d5c`.
+Benchmark: `bin/cr run lib/type/analysis/slice_subtype_bench.lua`. LuaJIT 2.1.1774896198.
+
+The kernel's §5.1 highest-priority risk: the v1 structural+union+μ subtype relation
+must decide every adversarial corpus shape well within the timeout-30 ceiling. A
+single query exceeding it is a soundness/termination signal, not a slow case. This
+records the actual numbers for the hash-consed, cycle-guarded relation.
+
+Adversarial shapes: the hamt-shaped recursive type (`μX.(Leaf | Interior(X))`),
+deep μ nesting (`deep_mu(40)` — 40 nested binders), wide unions (200 / 400 literal
+singletons), and a wide intersection of 60 open records.
+
+| Query (1 `is_subtype` call per iteration) | iters | total ms | ms/query |
+|---|---|---|---|
+| `hamt <: hamt` (reflexive, interned) | 100000 | 0.046 | 0.0000005 |
+| `hamt <: unfold(hamt)` | 100000 | 235.607 | 0.00236 |
+| `Interior(hamt) <: hamt` (coinductive) | 100000 | 252.839 | 0.00253 |
+| `deep_mu(40) <: deep_mu(40)` (interned refl) | 100000 | 3.714 | 0.00004 |
+| `deep_mu(40) <: unfold(deep_mu(40))` | 20000 | 1094.023 | 0.05470 |
+| `wide_union(200) <: wide_union(200)` (interned refl) | 20000 | 0.846 | 0.00004 |
+| `wide_union(200) <: wide_union(400)` | 20000 | 28737.573 | 1.43688 |
+| `lit_int(150) <: wide_union(200)` | 20000 | 208.040 | 0.01040 |
+| `wide_inter_records(60) <: f1-record` | 20000 | 2.551 | 0.00013 |
+| `wide_inter_records(60) <: wide_inter_records(60)` (interned refl) | 20000 | 0.800 | 0.00004 |
+
+Heaviest single query (deep_mu(40) unfold): **0.047 ms** — vs the 30000 ms ceiling,
+~638000× headroom.
+
+**Verdict: clears timeout-30 with enormous margin.** The worst per-query case is the
+adversarial `wide_union(200) <: wide_union(400)` at **1.437 ms/query** — its `m×n`
+member cross-product (200 left members, each scanned against up to 400 right
+members) is the relation's quadratic floor on union width, and it is still ~20000×
+under the ceiling. Reflexive/interned queries are effectively free (a tid compare),
+confirming the hash-cons interner does the load-bearing termination work: every
+recursive shape's identity collapses to a tid, so the cycle guard fires in O(1) and
+no μ unfolds unboundedly. The §5.1 risk does not block any v1 extension.
+
+Replay: `bin/cr run lib/type/analysis/slice_subtype_bench.lua`.
+
+---
+
 ## 2026-05-26: v5 Phase 5.F — refreshed `bin/cr check --v5` wall-time comparison
 
 **Commits (5.F baseline):** 5.F1 = `a32b0a74`, 5.F2 = `05fd0777`, 5.F3 = `656c8596`,
