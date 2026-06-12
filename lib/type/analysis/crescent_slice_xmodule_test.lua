@@ -164,6 +164,29 @@ T.describe("xmodule: resolve assembles the cross-module alias env", function()
 		T.eq(#r.errors, 0, "no export error for the forward-sibling reference")
 	end)
 
+	-- A MUTUAL alias family inside one exporting module (Bekić, §6.13). `Node` is a
+	-- union over `Branch`, and `Branch` references `Node` — a genuine cycle. The
+	-- import pass groups the family (one SCC) and Bekić-elaborates it, so every
+	-- member resolves and imports under its bare name.
+	T.it("a mutual alias family inside an exporting module resolves (Bekić elaboration)", function()
+		local rf = mem_reader({
+			["lib/tree.lua"] = '--:: Node = Leaf | Branch\n'
+				.. '--:: Leaf = { tag: "leaf", v: integer }\n'
+				.. '--:: Branch = { tag: "branch", kids: { [integer]: Node } }\nreturn {}\n',
+		})
+		local r = XM.resolve('--:: require "lib.tree"\n', { read_file = rf })
+		T.ok(r.env.Node ~= nil, "Node (cyclic family head) imported")
+		T.ok(r.env.Branch ~= nil, "Branch (cyclic family member) imported")
+		T.ok(r.env.Leaf ~= nil, "Leaf imported")
+		T.eq(#r.errors, 0, "no export error for the mutual family")
+		-- the imported family is well-formed and subtypes through the cycle.
+		local SUB = require("lib.type.analysis.slice_subtype")
+		local TA2 = require("lib.type.analysis.slice_ty_arg")
+		T.ok(r.env.Node ~= nil and TA2.well_formed(r.env.Node), "Node is well-formed")
+		T.ok(r.env.Branch ~= nil and r.env.Node ~= nil and SUB.is_subtype(r.env.Branch, r.env.Node),
+			"Branch <: Node (member into parent union, through the cycle)")
+	end)
+
 	T.it("a dynamic require still yields a dynamic-require marker, even with a cap", function()
 		local rf = mem_reader({})
 		local r = XM.resolve("local m = require(x)\n", { read_file = rf })

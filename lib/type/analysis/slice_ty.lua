@@ -527,9 +527,36 @@ function M.unfold(mu_ty)
 	end, 0)
 end
 
--- ── Introspection ────────────────────────────────────────────────────────────
+-- ── De Bruijn tyvar + free-variable shift (Bekić elaboration support, §6.13) ──
+--
+-- Mutual-recursive alias FAMILIES are resolved at declaration time by Bekić-style
+-- elaboration into NESTED single-binder μ (docs §6.13): the existing single-binder
+-- μ suffices, no grammar/relation/codec change. The elaboration nests one μ per
+-- family member; a member whose binder turns out VACUOUS (its variable never
+-- occurs — e.g. a `HamtInterior` reachable only FROM `HamtNode`, never from
+-- itself) must COLLAPSE to its body, since a non-occurring μ is ill-formed
+-- (slice_ty_arg `well_formed` condition (b)) and denotes its body verbatim.
+-- Collapsing drops a de Bruijn level, so every FREE tyvar pointing past the
+-- dropped binder shifts down by one. These two helpers (a public de-Bruijn tyvar
+-- constructor and a free-variable shift) give the elaborator exactly that, with no
+-- new grammar.
 
---: (Ty, Ty) -> boolean
-function M.equal(a, b) return a.tid == b.tid end
+-- Intern a de Bruijn tyvar at index `i` (1 = nearest enclosing μ binder). Public
+-- form of the internal `tyvar_db` — the elaborator builds shifted tyvars with it.
+--: (integer) -> Ty
+function M.tyvar(i) return tyvar_db(i) end
+
+-- Shift every FREE tyvar in `ty` by `delta` (free = idx exceeds the binders
+-- crossed from the root of `ty`). μ-bound occurrences (idx within the local
+-- binders) are untouched. Used to drop a collapsed vacuous binder (delta = -1):
+-- references that crossed the removed level decrement; local references do not.
+--: (Ty, integer) -> Ty
+function M.shift_free(ty, delta)
+	return rebuild(ty, function(tv, binders)
+		local i = tv.idx or 1
+		if i > binders then return tyvar_db(i + delta) end
+		return tv
+	end, 0)
+end
 
 return M

@@ -176,51 +176,81 @@ local function import_top_level_aliases(env, origin, src, modpath)
 		end
 		idx = idx + span
 	end
-	-- topo order over the batch (indices into `decls`).
-	local order = P.alias_decl_order(decls)
-	for _, oi in ipairs(order) do
-		local dname = decls[oi].name --: string
-		local dbody = decls[oi].body --: string
-		do
-			-- F1: collision detection — check before installing.
-			local existing = env[dname] --[[: Ty | nil ]]
-			local orig_mod = origin[dname] --[[: string | nil ]]
-			if existing ~= nil and orig_mod ~= nil and orig_mod ~= modpath then
-				-- parse the new body into a candidate Ty using a fresh copy of env
-				-- so that parsing side effects don't corrupt the shared env.
-				local probe_env = {} --[[: AliasEnv ]]
-				for k2, v2 in pairs(env) do probe_env[k2] = v2 end
-				local candidate = P.declare_alias(probe_env, dname, dbody)
-				if candidate then
-					local new_ty = probe_env[dname] --[[: Ty | nil ]]
-					-- same tid: dedupe silently (same interned Ty, no conflict).
-					if new_ty ~= nil and new_ty == existing then
-						-- identical: skip (already present, same type).
-					else
-						errors[#errors + 1] = {
-							module = modpath, name = dname,
-							err = "collision: name '" .. dname .. "' already imported from '"
-								.. orig_mod .. "' with a different type; re-imported by '"
-								.. modpath .. "' with an incompatible type (tid mismatch)",
-						}
-					end
+	-- Install one alias body `dname = dbody` into `env`, applying F1 collision
+	-- detection. `install` performs the actual binding (so the family path can
+	-- elaborate the WHOLE family while still gating each member through F1). It is
+	-- called only when there is NO cross-exporter collision; on collision it records
+	-- the error and is not called.
+	--: (string, string, () -> (boolean, string | nil)) -> nil
+	local function install_with_f1(dname, dbody, install)
+		local existing = env[dname] --[[: Ty | nil ]]
+		local orig_mod = origin[dname] --[[: string | nil ]]
+		if existing ~= nil and orig_mod ~= nil and orig_mod ~= modpath then
+			-- parse the new body into a candidate Ty using a fresh copy of env so
+			-- that parsing side effects don't corrupt the shared env.
+			local probe_env = {} --[[: AliasEnv ]]
+			for k2, v2 in pairs(env) do probe_env[k2] = v2 end
+			local candidate = P.declare_alias(probe_env, dname, dbody)
+			if candidate then
+				local new_ty = probe_env[dname] --[[: Ty | nil ]]
+				if new_ty ~= nil and new_ty == existing then
+					-- identical: skip (already present, same type).
 				else
-					-- the new body itself is malformed; still a collision (report the error).
 					errors[#errors + 1] = {
 						module = modpath, name = dname,
 						err = "collision: name '" .. dname .. "' already imported from '"
-							.. orig_mod .. "'; re-import from '" .. modpath .. "' is also malformed",
+							.. orig_mod .. "' with a different type; re-imported by '"
+							.. modpath .. "' with an incompatible type (tid mismatch)",
 					}
 				end
 			else
-				-- no collision: install normally.
-				local r, e = P.declare_alias(env, dname, dbody)
-				if r then
-					names[#names + 1] = dname
-					if origin[dname] == nil then origin[dname] = modpath end
-				else
-					errors[#errors + 1] = { module = modpath, name = dname, err = e or "alias error" }
-				end
+				errors[#errors + 1] = {
+					module = modpath, name = dname,
+					err = "collision: name '" .. dname .. "' already imported from '"
+						.. orig_mod .. "'; re-import from '" .. modpath .. "' is also malformed",
+				}
+			end
+		else
+			local ok, e = install()
+			if ok then
+				names[#names + 1] = dname
+				if origin[dname] == nil then origin[dname] = modpath end
+			else
+				errors[#errors + 1] = { module = modpath, name = dname, err = e or "alias error" }
+			end
+		end
+	end
+
+	-- dependency-ordered GROUPS over the batch (each group is an SCC, in topo
+	-- order). A size-1 group installs via `declare_alias`; a mutual-recursive family
+	-- (size ≥2) Bekić-elaborates as a unit (§6.13), each member still F1-gated.
+	local groups = P.alias_decl_groups(decls)
+	for _, group in ipairs(groups) do
+		if #group == 1 then
+			local d = decls[group[1]]
+			install_with_f1(d.name, d.body, function()
+				local r, e = P.declare_alias(env, d.name, d.body)
+				return r ~= nil, e
+			end)
+		else
+			-- Bekić family. Elaborate the whole family into a fresh staging env (so a
+			-- collision on one member does not half-install the family), then F1-gate
+			-- each member, copying the elaborated Ty into the shared env on success.
+			local fmembers = {} --[[: { [integer]: { name: string, body: string } } ]]
+			for _, gi in ipairs(group) do fmembers[#fmembers + 1] = { name = decls[gi].name, body = decls[gi].body } end
+			local staging = {} --[[: AliasEnv ]]
+			for k2, v2 in pairs(env) do staging[k2] = v2 end
+			local fres = P.elaborate_family(staging, fmembers)
+			for _, gi in ipairs(group) do
+				local d = decls[gi]
+				install_with_f1(d.name, d.body, function()
+					local r = fres[d.name]
+					if r and r.ok then
+						env[d.name] = staging[d.name]
+						return true, nil
+					end
+					return false, (r and r.err) or "family member unresolved"
+				end)
 			end
 		end
 	end

@@ -574,37 +574,44 @@ end
 -- strictly-correct generalization is to declare each alias AFTER the siblings it
 -- references — a topological order over the intra-batch dependency graph. This is
 -- pure graph topology, not a name-keyed handler: an acyclic dependency set is
--- reordered so every forward reference resolves; a GENUINE cycle (a mutually-
--- recursive family `A` body names `B`, `B` body names `A` — the multi-binder-μ
--- substrate gap, §9.19 deferral) is left in SOURCE order, producing the SAME
--- honest forward-reference error as today. Self-reference (`A` names `A`) is NOT a
--- batch dependency — `declare_alias` already binds it via μ — so it is excluded
--- from the edge set.
+-- reordered so every forward reference resolves.
 --
--- Topo order is computed by DFS post-order with on-stack cycle detection. A node
--- on a cycle is emitted in its arrival position (source order among the cycle), so
--- its forward edge into a not-yet-declared cycle member still errors honestly. The
--- ORIGINAL source order is the tie-break for independent aliases, so a batch with
--- no forward references reproduces today's behavior byte-for-byte.
+-- A GENUINE cycle (a mutually-recursive family `A` body names `B`, `B` body names
+-- `A`) is no longer left to error: it is resolved at DECLARATION time by BEKIĆ
+-- ELABORATION into nested single-binder μ (§6.13, increment 9). Bekić's theorem
+-- says a system of simultaneous recursive equations reduces to nested single
+-- fixpoints — so the EXISTING single-binder μ suffices with no grammar, codec, or
+-- subtype-relation change. The SCCs of the dependency graph ARE the Bekić families;
+-- each member elaborates to a closed nested-μ Ty (see `elaborate_family`). The de
+-- Bruijn hash-consing makes alpha-equivalent unfoldings share a tid, so two
+-- references to the same family member from different elaboration paths intern to
+-- the SAME tid (equirecursive identity — the load-bearing property, verified in
+-- increment-9.md). Self-reference (`A` names `A`) is a single-binder μ already
+-- handled by `declare_alias`, so it is a size-1 SCC, not a family.
+--
+-- Topo order is computed by DFS post-order over the CONDENSATION (each SCC is one
+-- node): independent aliases and acyclic dependencies keep source order (a batch
+-- with no cycle reproduces today's byte-for-byte behavior); a cyclic SCC is
+-- elaborated as a unit when its turn comes (after the acyclic siblings it depends
+-- on are in scope).
 
 --:: AliasDecl = { name: string, body: string }
 
--- The pure DEPENDENCY ORDER over a batch of alias decls: returns the input indices
--- in an order where each alias follows the (acyclic) siblings it references. A
--- cycle member keeps its source position. Used by `declare_aliases_ordered` (the
--- in-file path) and by the cross-module import pass (`crescent_slice_xmodule`).
---: (AliasDecl[]) -> integer[]
-function M.alias_decl_order(decls)
+-- The intra-batch dependency edges: input index → list of input indices it
+-- references (sibling names in its body, EXCLUDING self — a self-reference is the
+-- single-binder μ `declare_alias` already binds, so it is a size-1 SCC, never a
+-- family edge). Shared by the order pass and the SCC pass so the edge set is
+-- defined in exactly one place.
+--: (AliasDecl[]) -> ({ [integer]: integer[] }, { [string]: integer })
+local function batch_edges(decls)
 	local n = #decls
-	-- index map: declared name → its FIRST input index (source-order, first wins,
-	-- matching the most-recent-wins shadowing rule which keeps the earliest slot).
+	-- declared name → FIRST input index (source-order, first wins, matching the
+	-- most-recent-wins shadowing rule which keeps the earliest slot).
 	local idx_of = {} --[[: { [string]: integer } ]]
 	for i = 1, n do
 		local nm = decls[i].name
 		if idx_of[nm] == nil then idx_of[nm] = i end
 	end
-	-- edges: input index → list of intra-batch input indices it depends on
-	-- (sibling names in its body, excluding self).
 	local deps = {} --[[: { [integer]: integer[] } ]]
 	for i = 1, n do
 		local d = decls[i]
@@ -619,16 +626,26 @@ function M.alias_decl_order(decls)
 		end
 		deps[i] = list
 	end
+	return deps, idx_of
+end
+
+-- The pure DEPENDENCY ORDER over a batch of alias decls: returns the input indices
+-- in an order where each alias follows the (acyclic) siblings it references. A
+-- cycle member keeps its source position. Retained for callers that need a flat
+-- order (the previous behavior); SCC-aware callers use `alias_decl_groups`.
+--: (AliasDecl[]) -> integer[]
+function M.alias_decl_order(decls)
+	local n = #decls
+	local deps = batch_edges(decls)
 	-- DFS post-order with on-stack detection. `state`: nil=unvisited, 1=on-stack,
-	-- 2=done. A back-edge (dependency currently on-stack) is a cycle: we do NOT
-	-- recurse through it, so the cycle member keeps its source position and errors
-	-- honestly when declared before its not-yet-present dependency.
+	-- 2=done. A back-edge (dependency currently on-stack) is not recursed through,
+	-- so a cycle member keeps its source position; tie-break is source order.
 	local order = {} --[[: integer[] ]]
 	local state = {} --[[: { [integer]: integer } ]]
 	--: (integer) -> nil
 	local function visit(i)
 		if state[i] == 2 then return end
-		if state[i] == 1 then return end -- on-stack: cycle back-edge, do not recurse
+		if state[i] == 1 then return end
 		state[i] = 1
 		local dl = deps[i]
 		for k = 1, #dl do visit(dl[k]) end
@@ -639,23 +656,351 @@ function M.alias_decl_order(decls)
 	return order
 end
 
--- Declare a batch of aliases into `env` in dependency order (via `alias_decl_order`).
+-- The DEPENDENCY ORDER over the CONDENSATION: returns a list of GROUPS, each group
+-- a list of input indices forming one strongly-connected component, the groups in
+-- topological order (a group follows the acyclic siblings it depends on). A size-1
+-- group is an ordinary alias (or a self-recursive single-binder μ); a size-≥2 group
+-- is a Bekić family (`elaborate_family`). Computed by Tarjan's SCC algorithm, which
+-- emits components in reverse-topological order; we reverse to dependency order.
+-- Within a group, indices are kept in source order (the tie-break that reproduces
+-- today's flat order for an acyclic batch). Self-edges are already excluded from
+-- the edge set, so a non-cyclic batch yields all size-1 groups.
+--: (AliasDecl[]) -> integer[][]
+function M.alias_decl_groups(decls)
+	local n = #decls
+	local deps = batch_edges(decls)
+	-- Tarjan's strongly-connected-components.
+	local index = {} --[[: { [integer]: integer } ]]
+	local low = {} --[[: { [integer]: integer } ]]
+	local onstack = {} --[[: { [integer]: boolean } ]]
+	local stack = {} --[[: integer[] ]]
+	-- stack pointer (top index); avoids nil-assignment to clear the stack.
+	local sp = 0 --: integer
+	local counter = 0 --: integer
+	local comps = {} --[[: integer[][] ]] -- reverse-topological order
+	--: (integer) -> nil
+	local function strong(v)
+		counter = counter + 1
+		index[v] = counter
+		low[v] = counter
+		sp = sp + 1
+		stack[sp] = v
+		onstack[v] = true
+		local dl = deps[v]
+		for k = 1, #dl do
+			local w = dl[k]
+			if index[w] == nil then
+				strong(w)
+				if low[w] < low[v] then low[v] = low[w] end
+			elseif onstack[w] then
+				if index[w] < low[v] then low[v] = index[w] end
+			end
+		end
+		if low[v] == index[v] then
+			local comp = {} --[[: integer[] ]]
+			while true do
+				local w = stack[sp]
+				sp = sp - 1
+				onstack[w] = false
+				comp[#comp + 1] = w
+				if w == v then break end
+			end
+			-- sort component by source order (ascending input index).
+			for a = 2, #comp do
+				local key = comp[a]
+				local b = a - 1
+				while b >= 1 and comp[b] > key do comp[b + 1] = comp[b]; b = b - 1 end
+				comp[b + 1] = key
+			end
+			comps[#comps + 1] = comp
+		end
+	end
+	for i = 1, n do if index[i] == nil then strong(i) end end
+	-- Tarjan finishes a component only AFTER the components it depends on, so its
+	-- natural emission order IS dependency order (a sink — no dependencies — is
+	-- emitted first). That is exactly the declaration order we want, so no reversal.
+	return comps
+end
+
+-- ── Bekić family elaboration (mutual-recursive alias families → nested μ, §6.13) ─
+--
+-- A mutually-recursive family (SCC of size ≥2) is resolved into nested single-
+-- binder μ by Bekić's theorem: each member's solution is a μ over its body, with
+-- every sibling reference replaced by ITS solution (recursively), and a reference
+-- to a member whose binder is already OPEN (on the elaboration path) bound to that
+-- binder's variable. This is a pure declaration-time elaboration — the grammar,
+-- codec, and subtype relation are byte-for-byte unchanged.
+--
+-- `elaborate(name, open)` where `open` maps an in-scope (binder-open) family member
+-- name to its placeholder tyvar:
+--   - if `name` is already open → return its placeholder (the back-edge: bind to
+--     the enclosing binder's variable);
+--   - else build a μ binding `name`; inside, parse `name`'s body with an alias env
+--     where every family member resolves via `elaborate(member, open ∪ {name})`
+--     and non-family names resolve via `ambient`.
+-- The recursion terminates: each step either hits an open member (base case) or
+-- opens a new one, and the family is finite. The de Bruijn interner shares
+-- alpha-equivalent unfoldings, so the same member reached via different paths
+-- interns to the SAME tid (equirecursive identity).
+--
+-- A nested member binder may be VACUOUS (its variable never occurs — e.g.
+-- `HamtInterior` is reachable only FROM `HamtNode`, never recursively from itself).
+-- A non-occurring μ is ill-formed (`well_formed` (b)) and denotes its body, so it
+-- COLLAPSES: drop the binder and shift free tyvars down a level (`G.shift_free`).
+-- This collapse is also what keeps a STAR family (`Expr = A | B | … ` where each
+-- member references only `Expr`) LINEAR rather than exponential — each member's
+-- inner binder is vacuous and folds away, leaving one μ.
+--
+-- Returns (env | nil, per-name result map). The result map is keyed by member NAME
+-- → { ok, err?, construct? }. On success each member is installed into `env`.
+
+-- Does the de-Bruijn body reference its OWN (outermost) binder? Walks tracking the
+-- binders crossed; a `tyvar(idx)` with idx == crossed + 1 is the binder itself.
+--: (Ty) -> boolean
+local function binder_occurs(body)
+	local found = false --: boolean
+	local walk --[[: (Ty, integer) -> nil ]]
+	--: (Ty, integer) -> nil
+	walk = function(ty, crossed)
+		if found then return end
+		local k = ty.kind
+		if k == "tyvar" then
+			if (ty.idx or 1) == crossed + 1 then found = true end
+		elseif k == "mu" then
+			walk(ty.body or G.never(), crossed + 1)
+		elseif k == "union" or k == "inter" then
+			local ms = ty.members or {}
+			for i = 1, #ms do walk(ms[i], crossed) end
+		elseif k == "rec" or k == "rec_with_indexer" then
+			local fs = ty.fields or {}
+			for i = 1, #fs do walk(fs[i].ty, crossed) end
+			if k == "rec_with_indexer" then
+				walk(ty.key or G.never(), crossed)
+				walk(ty.val or G.never(), crossed)
+			end
+		elseif k == "indexer" then
+			walk(ty.key or G.never(), crossed)
+			walk(ty.val or G.never(), crossed)
+		elseif k == "fn" then
+			local p = ty.params or ({ fixed = {} } --[[: Params ]])
+			local r = ty.ret or ({ fixed = {} } --[[: Ret ]])
+			for i = 1, #p.fixed do walk(p.fixed[i], crossed) end
+			if p.vararg ~= nil then walk(p.vararg, crossed) end
+			for i = 1, #r.fixed do walk(r.fixed[i], crossed) end
+			if r.vararg ~= nil then walk(r.vararg, crossed) end
+		elseif k == "tuple" then
+			local fx = ty.fixed or {}
+			for i = 1, #fx do walk(fx[i], crossed) end
+			if ty.vararg ~= nil then walk(ty.vararg, crossed) end
+		end
+	end
+	walk(body, 0)
+	return found
+end
+
+-- Elaborate one family member as a μ, collapsing a vacuous binder. `build` is the
+-- μ body builder (`G.mu`'s callback). Returns the member's Ty.
+--: (string, (Ty) -> Ty) -> Ty
+local function mu_or_collapse(name, build)
+	local probe = G.mu(name, build)
+	-- probe is a μ; its body is de Bruijn over THIS binder (index 1). If the binder
+	-- never occurs, the μ is vacuous: drop it and shift free tyvars down a level.
+	local body = probe.body or G.never() --[[: Ty ]]
+	if binder_occurs(body) then return probe end
+	return G.shift_free(body, -1)
+end
+
+-- The Bekić family-size bound. Bekić elaboration nests one μ per member, so for a
+-- DENSE family (many members cross-referencing many others) the elaborated TYPE is
+-- exponentially large even though the elaboration does only O(N²) parse calls — the
+-- distinct nestings do not share in the interner. The corpus's real families are all
+-- SPARSE (stars/chains) and small: the max in-file family is N=12 (`v5_perf/types`,
+-- a star that collapses to one μ); every acceptance-corpus family is N≤3. A family
+-- ABOVE this bound is left as the honest forward-reference error (the pre-increment
+-- behavior — these never resolved before either), so termination is guaranteed and
+-- no real corpus family is affected. Un-defer for very-large dense families: an
+-- iterative/vector-μ elaboration whose type size is polynomial (§9.21).
+local BEKIC_FAMILY_MAX = 16 --: integer
+
+-- Elaborate a mutual-recursive family into `env`. `members` is the family's decls
+-- (in source order); `ambient` is the alias env for non-family names. Returns the
+-- per-name result map; on a parse/well-formedness failure of any member, that
+-- member's result carries the error (and the member is NOT installed). A family
+-- larger than `BEKIC_FAMILY_MAX` is left as an honest forward-reference error.
+--: (AliasEnv, AliasDecl[]) -> { [string]: { ok: boolean, err?: string, construct?: string } }
+function M.elaborate_family(env, members)
+	-- name → decl (first wins, matching the shadowing rule).
+	local by_name = {} --[[: { [string]: AliasDecl } ]]
+	local order = {} --[[: string[] ]]
+	for i = 1, #members do
+		local m = members[i]
+		if by_name[m.name] == nil then
+			by_name[m.name] = m
+			order[#order + 1] = m.name
+		end
+	end
+	-- Over-size families: keep the honest forward-reference error (termination bound).
+	if #order > BEKIC_FAMILY_MAX then
+		local results = {} --[[: { [string]: { ok: boolean, err?: string, construct?: string } } ]]
+		for i = 1, #order do
+			local name = order[i]
+			if name ~= nil then
+				results[name] = { ok = false, construct = "unknown-type-name",
+					err = "mutual alias family of size " .. tostring(#order) .. " exceeds the Bekić elaboration bound ("
+						.. tostring(BEKIC_FAMILY_MAX) .. "); forward reference left unresolved (§9.21)" }
+			end
+		end
+		return results
+	end
+	-- For each member, the SET of family siblings it actually references in its body
+	-- (so a body's elaboration touches only the members it names, not all N — the
+	-- difference between linear and blow-up on a sparse family). Computed once.
+	local refs_of = {} --[[: { [string]: string[] } ]]
+	for i = 1, #order do
+		local nm = order[i]
+		if nm ~= nil then
+			local decl = by_name[nm]
+			local seen = {} --[[: { [string]: boolean } ]]
+			local list = {} --[[: string[] ]]
+			if decl ~= nil then
+				for tok in decl.body:gmatch("[%a_][%w_]*") do
+					if by_name[tok] ~= nil and not seen[tok] then
+						seen[tok] = true
+						list[#list + 1] = tok
+					end
+				end
+			end
+			refs_of[nm] = list
+		end
+	end
+
+	local fail_name --: string | nil
+	local fail_err --: string | nil
+	local fail_construct --: string | nil
+	-- Elaborate ONE member as the root of its own nested-μ solution. `open` maps an
+	-- on-stack member name → its open binder's placeholder; a reference to an on-stack
+	-- member is a true back-edge (the equirecursive cycle) and resolves to that
+	-- placeholder. A reference to an off-stack member nests a fresh μ for it.
+	--
+	-- Termination + polynomiality: within ONE root elaboration, `seen` memoizes each
+	-- member's sub-solution so it is built at most ONCE per root (placeholders held by
+	-- a cached subtree stay sentinels until their binder closes, so reuse at a deeper
+	-- nesting re-interns the de Bruijn indices correctly — `close_over` rewrites by
+	-- depth at each enclosing μ). A body recurses only into the siblings it NAMES
+	-- (`refs_of`). Per-root work is O(N · body-size); across N roots, O(N²). The
+	-- elaborated TYPE can still be large for a dense family, which is why
+	-- `BEKIC_FAMILY_MAX` bounds the family size up front.
+	local root_elaborate --[[: (string) -> Ty ]]
+	--: (string, { [string]: Ty | nil }, { [string]: Ty }) -> Ty
+	local function elaborate(name, open, seen)
+		local bound = open[name]
+		if bound ~= nil then return bound end -- on-stack: back-edge to the open binder
+		local hit = seen[name]
+		if hit ~= nil then return hit end
+		local result = mu_or_collapse(name, function(placeholder)
+			open[name] = placeholder
+			-- the alias env the parser sees for THIS member's body: only the siblings it
+			-- references resolve (on-stack → their open binder, else a nested elaboration);
+			-- everything else comes from ambient. A fresh table per body.
+			local aenv = {} --[[: AliasEnv ]]
+			for k, v in pairs(env) do aenv[k] = v end
+			local rs = refs_of[name] or {}
+			for r = 1, #rs do
+				local fam = rs[r] --: string
+				aenv[fam] = elaborate(fam, open, seen)
+			end
+			local decl = by_name[name] --[[: AliasDecl | nil ]]
+			local dbody = decl ~= nil and decl.body or "never" --: string
+			local ty, e, c = M.parse_type_ann(dbody, aenv)
+			open[name] = nil
+			if not ty then
+				if fail_name == nil then fail_name = name; fail_err = e; fail_construct = c end
+				return G.never()
+			end
+			return ty
+		end)
+		seen[name] = result
+		return result
+	end
+	--: (string) -> Ty
+	root_elaborate = function(name) return elaborate(name, {}, {}) end
+	local results = {} --[[: { [string]: { ok: boolean, err?: string, construct?: string } } ]]
+	-- elaborate each member from a fresh (empty) open set: a member used as a TOP-
+	-- LEVEL name is the full nested-μ solution for that member.
+	local solved = {} --[[: { [string]: Ty } ]]
+	for i = 1, #order do
+		local name = order[i]
+		if name ~= nil then solved[name] = root_elaborate(name) end
+	end
+	-- a parse failure in ANY member taints the whole family (the bodies are mutually
+	-- dependent): report the failure on the offending member, mark every member
+	-- failed (none installed), so the caller's per-line attribution still lands.
+	if fail_name ~= nil then
+		local fn = fail_name --: string
+		for i = 1, #order do
+			local name = order[i]
+			if name ~= nil then
+				local res = { ok = false } --[[: { ok: boolean, err?: string, construct?: string } ]]
+				if name == fn then
+					res.err = fail_err or "family member parse failed"
+					if fail_construct ~= nil then res.construct = fail_construct end
+				else
+					res.err = "mutual family member '" .. name .. "' unresolved: sibling '"
+						.. fn .. "' failed to parse"
+				end
+				results[name] = res
+			end
+		end
+		return results
+	end
+	-- well-formedness gate (same precondition as `declare_alias`): a degenerate
+	-- elaboration (non-contractive) is rejected, never silently bound.
+	for i = 1, #order do
+		local name = order[i]
+		local ty = name ~= nil and solved[name] or nil --[[: Ty | nil ]]
+		if name ~= nil and ty ~= nil then
+			if not TA.well_formed(ty) then
+				results[name] = { ok = false,
+					err = "mutual alias family member '" .. name .. "' is not well-formed (non-contractive μ)" }
+			else
+				env[name] = ty
+				results[name] = { ok = true }
+			end
+		end
+	end
+	return results
+end
+
+-- Declare a batch of aliases into `env`, resolving forward-sibling references by
+-- dependency order and MUTUAL-RECURSIVE families by Bekić elaboration (§6.13).
 -- Returns, per INPUT index, `{ ok, err?, construct? }` so the caller attributes a
--- failure to the right source line. The env is mutated in place. Backward and
--- forward acyclic references both resolve; a cyclic reference errors honestly on
--- the member whose dependency is not yet in env (unchanged source-order behavior).
+-- failure to the right source line. The env is mutated in place. Acyclic references
+-- (backward and forward) resolve via topo order; a cyclic SCC is elaborated as a
+-- family. A batch with no cycle reproduces the previous flat-order behavior.
 --: (AliasEnv, AliasDecl[]) -> { [integer]: { ok: boolean, err?: string, construct?: string } }
 function M.declare_aliases_ordered(env, decls)
-	local order = M.alias_decl_order(decls)
+	local groups = M.alias_decl_groups(decls)
 	local results = {} --[[: { [integer]: { ok: boolean, err?: string, construct?: string } } ]]
-	for k = 1, #order do
-		local i = order[k]
-		local d = decls[i]
-		local r, e, c = M.declare_alias(env, d.name, d.body)
-		local res = { ok = r ~= nil } --[[: { ok: boolean, err?: string, construct?: string } ]]
-		if e ~= nil then res.err = e end
-		if c ~= nil then res.construct = c end
-		results[i] = res
+	for g = 1, #groups do
+		local group = groups[g]
+		if #group == 1 then
+			local i = group[1]
+			local d = decls[i]
+			local r, e, c = M.declare_alias(env, d.name, d.body)
+			local res = { ok = r ~= nil } --[[: { ok: boolean, err?: string, construct?: string } ]]
+			if e ~= nil then res.err = e end
+			if c ~= nil then res.construct = c end
+			results[i] = res
+		else
+			-- a mutual-recursive family: Bekić-elaborate as a unit.
+			local members = {} --[[: AliasDecl[] ]]
+			for k = 1, #group do members[#members + 1] = decls[group[k]] end
+			local byname = M.elaborate_family(env, members)
+			for k = 1, #group do
+				local i = group[k]
+				results[i] = byname[decls[i].name] or { ok = false, err = "family elaboration produced no result" }
+			end
+		end
 	end
 	return results
 end

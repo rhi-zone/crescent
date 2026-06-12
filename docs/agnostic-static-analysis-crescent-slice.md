@@ -2415,11 +2415,13 @@ as §6.11 (the change is the ORDER aliases are fed to it, not the per-alias mach
 A genuine mutual cycle (`A ↔ B`) cannot be broken by ordering: whichever member is
 declared first names a not-yet-present sibling and errors, exactly as today. The
 dependency-ordering pass therefore NEVER silently binds a cyclic family to a wrong
-type — it produces the SAME honest forward-reference error. This is the executable
-fence (a `declare_aliases_ordered` test asserts `A ↔ B` errors honestly, NOT
-resolves). The principled fix for cyclic families is a **multi-binder μ** (a system of
-mutually-recursive type equations), a slice_ty substrate gap recorded §9.19 with the
-now-measured trigger (55 refs / 21 files), never hardcoded.
+type — it produced the SAME honest forward-reference error at increment 8. **This fence
+is now CROSSED by increment 9 (§6.13):** the principled fix for cyclic families is NOT
+a new substrate but **Bekić elaboration** — a mutual family resolves at declaration
+time into nested single-binder μ, the existing substrate. A `declare_aliases_ordered`
+test now asserts `A ↔ B` Bekić-elaborates (both members well-formed, subtyping through
+the cycle), superseding the increment-8 honest-error assertion. (§9.19 recorded the
+multi-binder-μ deferral with the trigger 55 refs / 21 files; §9.21 records its closure.)
 
 ### 6.12.4 Mechanization surface
 
@@ -2430,6 +2432,72 @@ Three seams, mirroring the import/scan split:
 | Order + batch-declare | `crescent_slice_parse.lua` | `alias_decl_order(decls)` (pure topo) + `declare_aliases_ordered(env, decls)` (declare in that order, per-input-index results) |
 | In-file aliases | `crescent_slice_lower.lua` | `scan_source` COLLECTS alias decls (with source line), then batch-declares in dependency order; failure markers attributed by line |
 | Cross-module aliases | `crescent_slice_xmodule.lua` | `import_top_level_aliases` collects this module's batch and installs in `alias_decl_order`; the F1 cross-exporter collision check is unaffected by intra-module reordering |
+
+## 6.13 Increment v2.9 — mutual (cyclic) alias families via Bekić elaboration
+
+§6.12.3 fenced genuine mutual cycles (`A ↔ B`) as the multi-binder-μ substrate gap
+(55 cyclic refs / 21 files). Increment 9 UN-defers it — and the principled fix is NOT
+a new substrate. **Bekić's theorem** reduces a system of simultaneous fixpoints to
+NESTED single fixpoints: for `μ(X,Y).(F, G)`, the solution is
+`X = μX.F(X, μY.G(X,Y))`, `Y = μY.G(μX.F(X,Y), Y)`. The EXISTING single-binder de
+Bruijn μ therefore suffices; the mutual family resolves at DECLARATION time by
+elaborating each member into a closed nested-μ Ty. **Grammar, codec, subtype relation,
+and well-formedness gate stay byte-for-byte unchanged** — the change is purely a new
+declaration-time elaboration in the alias machinery.
+
+### 6.13.1 The derived whole (the SCCs are the Bekić families)
+
+The dependency-graph pass already exists (§6.12). Its **strongly-connected components**
+ARE the Bekić families: a size-1 SCC is an ordinary alias (or a self-recursive
+single-binder μ); a size-≥2 SCC is a mutual family. `alias_decl_groups` computes the
+SCCs (Tarjan, emitted in dependency order) so a family is elaborated only after the
+acyclic siblings it depends on are in scope. `elaborate_family` solves the family:
+`elaborate(name, open)` builds a μ binding `name`, parses its body with every sibling
+resolved to ITS elaboration (recursively, under the extended open set), and binds a
+reference to an already-open member to that binder's variable (the back-edge). The de
+Bruijn hash-consing makes alpha-equivalent unfoldings SHARE a tid, so the same member
+reached via two elaboration paths interns to the SAME tid — **equirecursive identity**,
+the load-bearing property (verified: re-elaborating a family yields identical tids).
+
+### 6.13.2 Vacuous-binder collapse — why the elaboration is LINEAR, not exponential
+
+Bekić is worst-case exponential in family size on DENSE mutual cross-reference. The
+corpus families are not dense: they are **stars** (a parent union over members that
+each reference only the parent — `Expr` N=12, `HamtNode`/`Interior`, `DiceNode`/its
+members) or short chains (N=2: `Machine`/`Instance`, `Func`/`Block`). A star's nested
+member binders are VACUOUS — e.g. when elaborating `HamtNode`, the nested `Interior`
+binder's variable never occurs (Interior is reachable FROM HamtNode, never recursively
+from itself). A non-occurring μ is ill-formed (`well_formed` (b)) and denotes its body
+verbatim, so it **collapses**: drop the binder, shift free tyvars down a level
+(`G.shift_free`). This collapse is both the correctness fix (the gate would otherwise
+reject the family) AND what keeps a star LINEAR — each vacuous inner binder folds away,
+leaving ONE μ for the parent. Measured: `expr`/`v5_perf-types` (N=12) under 0.03s,
+`hamt`/`dice` under 0.1s; no subtype-memo pressure (the elaborated shapes are the same μ
+the relation always handled).
+
+The exponential case is a DENSE family: the elaboration is O(N²) parse calls (each member
+built once per root, memoized), but the elaborated TYPE size is exponential when distinct
+nestings do not share in the interner. It surfaced on a 31-member transitive cross-module
+DOM family (`lib.js_types`). `BEKIC_FAMILY_MAX = 16` bounds the family size — above it the
+honest forward-reference error remains (pre-increment behavior). The max in-file family is
+N=12 (a star) and every acceptance-corpus family is N≤3, so the bound never affects a real
+family. Un-defer for very-large dense families: a polynomial iterative/vector-μ
+elaboration (§9.21).
+
+### 6.13.3 Substrate addition (minimal, no grammar change)
+
+Two pure helpers in `slice_ty.lua`, both expressed over the existing `rebuild`:
+`M.tyvar(i)` (a public de-Bruijn tyvar constructor) and `M.shift_free(ty, delta)` (shift
+every FREE tyvar by `delta`, leaving μ-bound occurrences untouched). They give the
+elaborator the vacuous-binder collapse with NO new Ty kind, NO grammar/relation change.
+
+### 6.13.4 Mechanization surface
+
+| Seam | File | Change |
+|---|---|---|
+| Substrate | `slice_ty.lua` | `M.tyvar(i)` (public de-Bruijn tyvar) + `M.shift_free(ty, delta)` (free-var shift), both over `rebuild` |
+| Families | `crescent_slice_parse.lua` | `alias_decl_groups` (Tarjan SCC, dependency order) + `elaborate_family` (Bekić nested-μ, vacuous-binder collapse); `declare_aliases_ordered` elaborates size-≥2 groups |
+| Cross-module | `crescent_slice_xmodule.lua` | the import pass iterates GROUPS; a family Bekić-elaborates into a staging env, each member still F1-gated against cross-exporter collisions |
 
 ---
 
@@ -4692,6 +4760,66 @@ change; no test change (the case can never arise).
 | Forward-sibling alias resolution | 8 | Intact |
 
 **No regressions.** e2e CHECKED-CLEAN 27 → 27; all 6501 prior assertions pass.
+
+### 9.21 Mechanization findings — slice v2 increment 9 (§6.13, mutual alias families via Bekić)
+
+Full report `docs/artifacts/typechecker-run-2026-06-12/increment-9.md`. Un-defers the
+§9.19 cyclic-family deferral (55 cyclic refs / 21 files). **The Bekić candidate WORKED:**
+a mutual family resolves at declaration time into nested single-binder μ — the existing
+substrate, NO grammar/codec/subtype-relation change. The SCCs of the §6.12 dependency
+graph ARE the Bekić families (`alias_decl_groups`, Tarjan); `elaborate_family` solves
+each into a closed nested-μ Ty.
+
+**Correctness (verified on the real corpus families).** Sampled the 21 files' cycles:
+every mutual occurrence is GUARDED (under a record field / indexer / fn), and the
+families are STARS (`Expr` N=12, `HamtNode`/`Interior`, `DiceNode`/members) or short
+chains (N=2: `Machine`/`Instance`, `Func`/`Block`). Equirecursive identity holds — the
+de Bruijn hash-consing makes two references to the same member from different
+elaboration paths intern to the SAME tid (re-elaborating a family yields identical
+tids). Subtyping through the cycle holds (`Branch <: Node`, `NegNode <: DiceNode`,
+`HamtInterior <: HamtNode`).
+
+**The one subtlety — vacuous-binder collapse.** A star's nested member binder is
+VACUOUS (e.g. `Interior` reachable only FROM `HamtNode`, never recursively). A
+non-occurring μ is ill-formed (`well_formed` (b)) and denotes its body, so it collapses:
+drop the binder, shift free tyvars down (`G.shift_free`, new). This is BOTH the
+correctness fix (the gate would otherwise reject) AND what keeps Bekić LINEAR rather
+than exponential on stars — each vacuous inner binder folds away, leaving one μ.
+
+**The termination bound — Bekić's exponential type size is real.** The elaboration does
+O(N²) parse calls (each member built once per root, memoized), but the elaborated TYPE
+can be exponentially large for a DENSE family — distinct nestings do not share in the
+interner. This MATERIALIZED in validation: a **31-member transitive cross-module family**
+(the DOM type hierarchy from `lib.js_types` — `AnyEvent` as a 19-way union cross-linked
+with `Node`/`Element`/`Document`/`Window`) ran >30s and hung the survey. Fix:
+`BEKIC_FAMILY_MAX = 16`. The **max in-file family across `lib/` is N=12** (`v5_perf/types`,
+a star) and every acceptance-corpus family is N≤3, so the bound never affects a real
+family; a family above it keeps the honest forward-reference error (the pre-increment
+behavior — these never resolved before). A complexity guard with a measured rationale,
+not a result hardcode. Un-defer: polynomial iterative/vector-μ elaboration for very-large
+dense families.
+
+**Substrate addition (minimal).** `slice_ty.lua`: `M.tyvar(i)` (public de-Bruijn tyvar)
+and `M.shift_free(ty, delta)`, both over the existing `rebuild`. No new Ty kind.
+
+**Validation.** Full `bin/cr test lib/type/analysis/` green at **10938 assertions**
+(6521 baseline + new family unit tests + a Bekić-family fuzz invariant generating 2–3-node
+guarded families and checking well-formedness, reflexivity, μ-unfold-equivalence, and
+member-into-parent subtyping — 5654 → 10054 subtype-fuzz assertions — plus a termination-
+bound test). `timeout 30 bin/cr check` clean (0 errors, 0 warnings) on the three touched
+lib files. Corpus: `fixture_hamt_recursion` (the `HamtNode`/`Leaf`/`Interior` mutual
+family) moved OUT-OF-SUBSET → CLEAN. Annotation survey: **CHECKED-CLEAN 489 → 503 (+14)**,
+**OUT-OF-SUBSET 240 → 225 (−15)**, **`unknown-type-name` 151 → 136 (−15)**, **0 timeouts**.
+e2e CHECKED-CLEAN 27 → 27 / FINDINGS 15 → 15 unchanged: the family files (dice, hamt, expr)
+stay OUT-OF-SUBSET on their DOMINANT statement-form boundaries (`dynamic-index`,
+`multi-assign`, `multi-return`), unrelated to alias resolution — the alias batch now clears
+but the next boundary is a statement-lowering form, as §9.18/§9.19 already named. Perf:
+family files check in <0.03s; survey 0 timeouts; no subtype-memo pressure.
+
+**Deferral closed.** The multi-binder-μ substrate gap (§9.19) is CLOSED — and closed
+WITHOUT new substrate, by Bekić elaboration, for every real corpus family (N≤12 sparse).
+No multi-binder μ / vector-μ was needed; the only residue is a complexity bound on
+very-large dense families (un-defer recorded above).
 
 ### 10.8 Slice v2 increment 8 — DONE (dependency-ordered alias declaration) (2026-06-12)
 

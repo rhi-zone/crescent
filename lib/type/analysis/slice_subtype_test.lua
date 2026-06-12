@@ -18,6 +18,8 @@ local T   = require("lib.test.assert")
 local gen = require("lib.test.gen")
 local G   = require("lib.type.analysis.slice_ty")
 local S   = require("lib.type.analysis.slice_subtype")
+local P   = require("lib.type.analysis.crescent_slice_parse")
+local TA  = require("lib.type.analysis.slice_ty_arg")
 
 -- `Ty`, `Field`, `Rows` are the grammar aliases declared in slice_ty.lua and made
 -- visible here by requiring it (the same cross-module-alias visibility stlc_test
@@ -458,6 +460,62 @@ T.describe("slice_subtype fuzz invariants (§3.5)", function()
 				-- a μ whose body never used the binder normalizes away; still count it
 				-- toward progress so the loop terminates.
 				count = count + 1
+			end
+		end
+	end)
+
+	-- Mutual-recursive FAMILIES via Bekić elaboration (§6.13, increment 9). Generate
+	-- small 2–3-node families (a `Parent = MemberA | MemberB` union over members that
+	-- each reference `Parent` through a record/indexer field), elaborate them via
+	-- `P.elaborate_family`, and assert the μ invariants hold on the result: every
+	-- member is well-formed, reflexive (T <: T through the cycle), μ-unfold-equivalent,
+	-- and a member is a subtype of the parent union it belongs to.
+	T.it("Bekić mutual families: well-formed, reflexive, μ-unfold-equivalent  [" .. seed_note .. "]", function()
+		local count = 0 --: integer
+		while count < FUZZ_N do
+			count = count + 1
+			local n = rng:int(2, 3) -- number of non-parent members
+			-- build member bodies that each reference Parent under a guarding constructor.
+			local member_names = {} --[[: { [integer]: string } ]]
+			local decls = {} --[[: { [integer]: { name: string, body: string } } ]]
+			local parent_body = "" --: string
+			for i = 1, n do
+				local nm = "M" .. tostring(i)
+				member_names[#member_names + 1] = nm
+				parent_body = parent_body == "" and nm or (parent_body .. " | " .. nm)
+				-- guard the Parent reference under a record field or an indexer.
+				local body = "" --: string
+				if rng:bool() then
+					body = "{ tag: " .. tostring(i) .. ", kid: Parent }"
+				else
+					body = "{ tag: " .. tostring(i) .. ", kids: { [integer]: Parent } }"
+				end
+				decls[#decls + 1] = { name = nm, body = body }
+			end
+			decls[#decls + 1] = { name = "Parent", body = parent_body }
+			local env = {} --[[: { [string]: Ty } ]]
+			local res = P.declare_aliases_ordered(env, decls)
+			-- every member resolved.
+			local all_ok = true --: boolean
+			for i = 1, #decls do if not (res[i] and res[i].ok) then all_ok = false end end
+			T.ok(all_ok, "every family member resolves via Bekić elaboration")
+			local parent = env["Parent"] --[[: Ty | nil ]]
+			if parent ~= nil then
+				T.ok(TA.well_formed(parent), "Parent is well-formed (contractive nested μ)")
+				T.ok(S.is_subtype(parent, parent), "Parent <: Parent (reflexivity through the cycle)")
+				if parent.kind == "mu" then
+					local u = G.unfold(parent)
+					T.ok(S.is_subtype(parent, u), "Parent <: unfold(Parent)")
+					T.ok(S.is_subtype(u, parent), "unfold(Parent) <: Parent")
+				end
+				-- each member is a subtype of the parent union it belongs to.
+				for i = 1, #member_names do
+					local m = env[member_names[i]] --[[: Ty | nil ]]
+					if m ~= nil then
+						T.ok(TA.well_formed(m), member_names[i] .. " is well-formed")
+						T.ok(S.is_subtype(m, parent), member_names[i] .. " <: Parent (sibling into parent union)")
+					end
+				end
 			end
 		end
 	end)

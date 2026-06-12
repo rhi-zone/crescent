@@ -1236,18 +1236,54 @@ T.describe("audit round 1 — finding 1: well-formedness is a load-bearing preco
 		T.ok(res[1].ok and res[2].ok, "backward-ref batch unchanged")
 	end)
 
-	-- FENCE: a genuine mutually-recursive family (A names B, B names A) is the
-	-- multi-binder-μ substrate gap. Dependency ordering cannot break the cycle, so it
-	-- still errors honestly — NOT silently bound to a wrong type (§9.19 deferral).
-	T.it("declare_aliases_ordered errors honestly on a genuine mutual cycle (A <-> B)", function()
+	-- BEKIĆ FAMILIES (§6.13, slice v2 increment 9). A genuine mutually-recursive
+	-- family (`A` names `B`, `B` names `A`) is no longer the fence — it is resolved at
+	-- declaration time by Bekić elaboration into nested single-binder μ. Both members
+	-- bind to well-formed, contractive μ types; each member is a subtype of itself
+	-- THROUGH the cycle, and a member is usable where its sibling's field type expects
+	-- it (the field is the sibling, equirecursively).
+	T.it("declare_aliases_ordered Bekić-elaborates a 2-node mutual cycle (A <-> B)", function()
 		local env = {} --[[: { [string]: Ty } ]]
+		local ST = require("lib.type.analysis.slice_subtype")
 		local decls = {
 			{ name = "A", body = "{ b: B }" },
 			{ name = "B", body = "{ a: A }" },
 		}
 		local res = P.declare_aliases_ordered(env, decls)
-		T.fail(res[1].ok and res[2].ok, "a true mutual cycle is NOT silently resolved")
-		T.ok(not res[1].ok or not res[2].ok, "at least one cycle member errors honestly")
+		T.ok(res[1].ok and res[2].ok, "both family members resolve via Bekić elaboration")
+		local A, B = env["A"], env["B"]
+		T.ok(A ~= nil and B ~= nil, "both bound")
+		T.ok(A ~= nil and TA.well_formed(A), "A is well-formed (contractive nested μ)")
+		T.ok(B ~= nil and TA.well_formed(B), "B is well-formed (contractive nested μ)")
+		-- reflexivity through the cycle.
+		T.ok(A ~= nil and ST.subtype(A, A), "A <: A through the cycle")
+		-- B's `a` field has type A; A's `b` field has type B. Use B where A's `b` field
+		-- type (B) expects it: B <: B (the field type), trivially; the load-bearing
+		-- check is that the field RESOLVED to the equirecursive sibling, not unknown.
+		T.ok(B ~= nil and B.kind == "mu", "B elaborated to a μ (cyclic), not a flat record")
+	end)
+
+	-- A 3-node mutual cycle (a star: a parent union over members that each reference
+	-- the parent) elaborates linearly — each member's inner binder is vacuous and
+	-- collapses, leaving one μ for the parent.
+	T.it("declare_aliases_ordered Bekić-elaborates a 3-node family (parent-union cycle)", function()
+		local env = {} --[[: { [string]: Ty } ]]
+		local ST = require("lib.type.analysis.slice_subtype")
+		local decls = {
+			{ name = "Node", body = "Leaf | Branch" },
+			{ name = "Leaf", body = "{ tag: \"leaf\", v: integer }" },
+			{ name = "Branch", body = "{ tag: \"branch\", kids: { [integer]: Node } }" },
+		}
+		local res = P.declare_aliases_ordered(env, decls)
+		T.ok(res[1].ok and res[2].ok and res[3].ok, "all three family members resolve")
+		local Node, Branch = env["Node"], env["Branch"]
+		T.ok(Node ~= nil and TA.well_formed(Node), "Node well-formed")
+		T.ok(Branch ~= nil and TA.well_formed(Branch), "Branch well-formed")
+		-- Branch is a member of the Node union → Branch <: Node.
+		T.ok(Node ~= nil and Branch ~= nil and ST.subtype(Branch, Node), "Branch <: Node (sibling into parent union)")
+		-- Leaf is also a member → Leaf <: Node.
+		local Leaf = env["Leaf"]
+		T.ok(Node ~= nil and Leaf ~= nil and ST.subtype(Leaf, Node), "Leaf <: Node")
 	end)
 
 	T.it("alias_decl_order places a dependency before its dependent", function()
@@ -1260,6 +1296,29 @@ T.describe("audit round 1 — finding 1: well-formedness is a load-bearing preco
 		local pos = {} --[[: { [integer]: integer } ]]
 		for k, i in ipairs(order) do pos[i] = k end
 		T.ok(pos[2] < pos[1], "Q is ordered before P (its dependent)")
+	end)
+
+	-- TERMINATION BOUND (§9.21). Bekić nests one μ per member, so a DENSE family's
+	-- elaborated type is exponentially large even at O(N²) parse calls; a family above
+	-- `BEKIC_FAMILY_MAX` (16) is left as the honest forward-reference error rather than
+	-- hang. The corpus's real families are all sparse stars/chains ≤12, so the bound
+	-- never affects them — this guards against a pathological transitive cross-module
+	-- family (the 31-member DOM hierarchy from `lib.js_types`).
+	T.it("an over-size mutual family stays an honest error (Bekić family-size bound)", function()
+		local env = {} --[[: { [string]: Ty } ]]
+		local decls = {} --[[: { [integer]: { name: string, body: string } } ]]
+		-- a dense 20-member cycle: each member references the next, last → first.
+		local NN = 20 --: integer
+		for i = 1, NN do
+			local nxt = (i % NN) + 1
+			decls[#decls + 1] = { name = "Big" .. tostring(i), body = "{ next: Big" .. tostring(nxt) .. " }" }
+		end
+		local res = P.declare_aliases_ordered(env, decls)
+		-- every member errors honestly (unresolved forward reference), none silently bound.
+		local all_err = true --: boolean
+		for i = 1, NN do if res[i] and res[i].ok then all_err = false end end
+		T.ok(all_err, "an over-size family is left unresolved, not silently bound")
+		T.ok(res[1] ~= nil and res[1].construct == "unknown-type-name", "tagged the forward-reference boundary")
 	end)
 
 	-- The degenerate non-occurring-binder case (decided + documented in §9.7):

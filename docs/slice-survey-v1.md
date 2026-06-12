@@ -17,9 +17,9 @@ file is CHECKED-CLEAN when all its annotations sit inside v1.
 
 | Class | Files | Share |
 |---|--:|--:|
-| CHECKED-CLEAN | 489 | 56.4% |
-| CHECKED-FINDINGS | 23 | 2.7% |
-| OUT-OF-SUBSET | 240 | 27.7% |
+| CHECKED-CLEAN | 503 | 58.0% |
+| CHECKED-FINDINGS | 24 | 2.8% |
+| OUT-OF-SUBSET | 225 | 26.0% |
 | NO-ANNOTATION | 115 | 13.3% |
 | TIMEOUT | 0 | 0.0% |
 | PARSE-FAIL/OTHER | 0 | 0.0% |
@@ -38,7 +38,7 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 
 | Construct | Files |
 |---|--:|
-| `unknown-type-name` | 151 |
+| `unknown-type-name` | 136 |
 | `trailing-tokens` | 38 |
 | `generic-application` | 36 |
 | `intrinsic-dollar` | 25 |
@@ -51,34 +51,27 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 |---|--:|
 | `trailing-tokens` | 38 |
 | `generic-application` | 36 |
-| `unknown-type-name:Ctx` | 26 |
+| `unknown-type-name:Ctx` | 28 |
 | `intrinsic-dollar` | 25 |
 | `cdata` | 17 |
 | `unknown-type-name:V4Type` | 12 |
 | `unknown-type-name:StaticType` | 10 |
-| `unknown-type-name:V5Type` | 10 |
-| `unknown-type-name:Ty` | 8 |
-| `unknown-type-name:V5Constraint` | 8 |
 | `unknown-type-name:Pack` | 7 |
 | `unknown-type-name:File` | 5 |
 | `unknown-type-name:Node` | 5 |
 | `unknown-type-name:ai_request` | 5 |
 | `unknown-type-name:AnyEvent` | 4 |
 | `unknown-type-name:CheckDiag` | 4 |
-| `unknown-type-name:Field` | 4 |
 | `unknown-type-name:Scope` | 4 |
-| `unknown-type-name:Subst` | 4 |
 | `unknown-type-name:Thread` | 4 |
 | `unknown-type-name:ai_provider` | 4 |
-| `unknown-type-name:AliasEnv` | 3 |
+| `unknown-type-name:Field` | 3 |
 | `unknown-type-name:InternPool` | 3 |
 | `unknown-type-name:KeyEntry` | 3 |
 | `unknown-type-name:ListPool` | 3 |
 | `unknown-type-name:POpenFn` | 3 |
 | `unknown-type-name:PackResult` | 3 |
-| `unknown-type-name:Primitive` | 3 |
 | `unknown-type-name:Rng` | 3 |
-| `unknown-type-name:TPack` | 3 |
 | `unknown-type-name:TypeSlotArena` | 3 |
 | `unknown-type-name:ai_embed_many_request` | 3 |
 | `unknown-type-name:ai_embed_request` | 3 |
@@ -89,18 +82,11 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:CharacterBookEntry` | 2 |
 | `unknown-type-name:Element` | 2 |
 | `unknown-type-name:Env` | 2 |
-| `unknown-type-name:ErrorDetails` | 2 |
 | `unknown-type-name:Event` | 2 |
-| `unknown-type-name:Guard` | 2 |
 | `unknown-type-name:HTMLCanvasElement` | 2 |
 | `unknown-type-name:HTMLElement` | 2 |
-| `unknown-type-name:OpSemConstraint` | 2 |
 | `unknown-type-name:OpSemError` | 2 |
-| `unknown-type-name:OpSemState` | 2 |
-| `unknown-type-name:PTy` | 2 |
 | `unknown-type-name:RecordType` | 2 |
-| `unknown-type-name:SliceCtx` | 2 |
-| `unknown-type-name:TField` | 2 |
 | `unknown-type-name:Text` | 2 |
 | `unknown-type-name:ai_image_request` | 2 |
 | `unknown-type-name:AQObj` | 1 |
@@ -108,9 +94,6 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:AbortSignal` | 1 |
 | `unknown-type-name:ActorCtxShape` | 1 |
 | `unknown-type-name:ActorRecord` | 1 |
-| `unknown-type-name:AltBinds` | 1 |
-| `unknown-type-name:AltScheme` | 1 |
-| `unknown-type-name:AltState` | 1 |
 | `unknown-type-name:AnnResult` | 1 |
 | `unknown-type-name:AnnState` | 1 |
 | `unknown-type-name:Arb` | 1 |
@@ -144,7 +127,6 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:ConstraintCallable` | 1 |
 | `unknown-type-name:ConstraintCheckArgs` | 1 |
 | `unknown-type-name:ConstraintCompare` | 1 |
-| `unknown-type-name:ConstraintEq` | 1 |
 | `unknown-type-name:ConstraintEscapeCheck` | 1 |
 | `unknown-type-name:ConstraintHktDecompose` | 1 |
 | `unknown-type-name:ConstraintIndex` | 1 |
@@ -159,7 +141,6 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:DataTransferItem` | 1 |
 | `unknown-type-name:DataTransferItemList` | 1 |
 | `unknown-type-name:DbRef` | 1 |
-| `unknown-type-name:DecodeMemo` | 1 |
 | `unknown-type-name:Delete` | 1 |
 | `unknown-type-name:Deque` | 1 |
 | `unknown-type-name:DiagEntry` | 1 |
@@ -174,12 +155,12 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:DtEl` | 1 |
 | `unknown-type-name:DynamicLibrary` | 1 |
 | `unknown-type-name:ErrEntry` | 1 |
+| `unknown-type-name:ErrorDetails` | 1 |
 | `unknown-type-name:EventT` | 1 |
 | `unknown-type-name:EventTarget` | 1 |
 | `unknown-type-name:ExecManifestEntry` | 1 |
 | `unknown-type-name:Expr` | 1 |
 | `unknown-type-name:ExprCall` | 1 |
-| `unknown-type-name:ExtractResult` | 1 |
 | `unknown-type-name:FieldEntry` | 1 |
 | `unknown-type-name:FieldEntryArena` | 1 |
 | `unknown-type-name:FlowContent` | 1 |
@@ -202,12 +183,10 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:IdName` | 1 |
 | `unknown-type-name:ImgEl` | 1 |
 | `unknown-type-name:ImgElement` | 1 |
-| `unknown-type-name:ImportPassResult` | 1 |
 | `unknown-type-name:Index` | 1 |
 | `unknown-type-name:Insert` | 1 |
 | `unknown-type-name:Instance` | 1 |
 | `unknown-type-name:KVPair` | 1 |
-| `unknown-type-name:LC` | 1 |
 | `unknown-type-name:LamLam` | 1 |
 | `unknown-type-name:LamTerm` | 1 |
 | `unknown-type-name:LegendEl` | 1 |
@@ -218,7 +197,6 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:LoopObj` | 1 |
 | `unknown-type-name:LoopTimers` | 1 |
 | `unknown-type-name:LossFn` | 1 |
-| `unknown-type-name:LowerOpts` | 1 |
 | `unknown-type-name:Machine` | 1 |
 | `unknown-type-name:MakeApiOpts` | 1 |
 | `unknown-type-name:MetaEl` | 1 |
@@ -230,14 +208,18 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:NumMatrix` | 1 |
 | `unknown-type-name:Obligation` | 1 |
 | `unknown-type-name:OkEnvelope` | 1 |
+| `unknown-type-name:OpSemConstraint` | 1 |
+| `unknown-type-name:OpSemState` | 1 |
 | `unknown-type-name:OptionEl` | 1 |
 | `unknown-type-name:OptionElement` | 1 |
 | `unknown-type-name:PField` | 1 |
 | `unknown-type-name:PLAnd` | 1 |
+| `unknown-type-name:PTy` | 1 |
 | `unknown-type-name:PackResultSingle` | 1 |
 | `unknown-type-name:Params` | 1 |
 | `unknown-type-name:PickAlias` | 1 |
 | `unknown-type-name:PickDirect` | 1 |
+| `unknown-type-name:Primitive` | 1 |
 | `unknown-type-name:Projection` | 1 |
 | `unknown-type-name:Promise` | 1 |
 | `unknown-type-name:Prop` | 1 |
@@ -245,11 +227,9 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:RecvEntry` | 1 |
 | `unknown-type-name:Result` | 1 |
 | `unknown-type-name:Ret` | 1 |
-| `unknown-type-name:RetMember` | 1 |
 | `unknown-type-name:Rope` | 1 |
 | `unknown-type-name:Router` | 1 |
 | `unknown-type-name:RouterInstance` | 1 |
-| `unknown-type-name:RunCaches` | 1 |
 | `unknown-type-name:RunExOpts` | 1 |
 | `unknown-type-name:RunOpts` | 1 |
 | `unknown-type-name:SchedObj` | 1 |
@@ -261,9 +241,6 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:SendEntry` | 1 |
 | `unknown-type-name:SendQ` | 1 |
 | `unknown-type-name:SessionEntry` | 1 |
-| `unknown-type-name:SliceBinding` | 1 |
-| `unknown-type-name:Solver` | 1 |
-| `unknown-type-name:SolverError` | 1 |
 | `unknown-type-name:Span` | 1 |
 | `unknown-type-name:SpanEl` | 1 |
 | `unknown-type-name:SpanElement` | 1 |
@@ -279,6 +256,8 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:SystemShape` | 1 |
 | `unknown-type-name:TApp` | 1 |
 | `unknown-type-name:TEachNever` | 1 |
+| `unknown-type-name:TField` | 1 |
+| `unknown-type-name:TPack` | 1 |
 | `unknown-type-name:TabSpec` | 1 |
 | `unknown-type-name:Task` | 1 |
 | `unknown-type-name:TdEl` | 1 |
@@ -293,6 +272,7 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:TwoQFifoQ` | 1 |
 | `unknown-type-name:TwoQLruQ` | 1 |
 | `unknown-type-name:TwoQNode` | 1 |
+| `unknown-type-name:Ty` | 1 |
 | `unknown-type-name:TyArrow` | 1 |
 | `unknown-type-name:Type` | 1 |
 | `unknown-type-name:TypeSlot` | 1 |
@@ -303,8 +283,8 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:V4Arm` | 1 |
 | `unknown-type-name:V4Fn` | 1 |
 | `unknown-type-name:V4Var` | 1 |
-| `unknown-type-name:V5Ctx` | 1 |
-| `unknown-type-name:V5Scheme` | 1 |
+| `unknown-type-name:V5Directive` | 1 |
+| `unknown-type-name:V5Type` | 1 |
 | `unknown-type-name:ValueClaim` | 1 |
 | `unknown-type-name:ValueClaimWithoutIdentity` | 1 |
 | `unknown-type-name:WalkerEnv` | 1 |
@@ -329,14 +309,14 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 
 | Rank | Construct | Files | Example file |
 |--:|---|--:|---|
-| 1 | `unknown-type-name` | 151 | `lib/actor/init.lua` |
+| 1 | `unknown-type-name` | 136 | `lib/actor/init.lua` |
 | 2 | `trailing-tokens` | 38 | `lib/ansi/init.lua` |
 | 3 | `generic-application` | 36 | `lib/ai/providers/google.lua` |
 | 4 | `intrinsic-dollar` | 25 | `lib/crypto/system.lua` |
 | 5 | `cdata` | 17 | `lib/actor/init.lua` |
 | 6 | `bare-table (use a record/indexer)` | 2 | `lib/type/framework/canonical.lua` |
 
-## CHECKED-FINDINGS (23 files)
+## CHECKED-FINDINGS (24 files)
 
 Files fully within v1 syntax whose annotations the checker REJECTED with no
 out-of-subset construct tag. Each is a real annotation defect, a slice
@@ -462,11 +442,16 @@ diagnostics per file.
 - L5: `--: (((string) -> nil, () -> nil) -> (string) -> nil, integer, unknown | nil) -> nil`
   - expected `,` or `)` in tuple
 
+### `lib/type/analysis/slice_subtype_bench.lua`
+
+- L21: `--: <T>(string, T, boolean | nil) -> { key: string, ty: T, optional: boolean, readonly: boolean }`
+  - unexpected token in type: '<'
+
 ## What v2 should build first (a reading of the histogram)
 
 Demand-ordered, no design — design happens against this doc separately.
 
-1. **`unknown-type-name`** — blocks 151 files (17.4% of corpus).
+1. **`unknown-type-name`** — blocks 136 files (15.7% of corpus).
 2. **`trailing-tokens`** — blocks 38 files (4.4% of corpus).
 3. **`generic-application`** — blocks 36 files (4.2% of corpus).
 4. **`intrinsic-dollar`** — blocks 25 files (2.9% of corpus).

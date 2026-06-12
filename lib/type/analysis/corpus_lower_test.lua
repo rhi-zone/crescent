@@ -190,16 +190,15 @@ T.describe("corpus e2e: fixture_table_construction_widening — empty-fresh-tabl
 	end)
 end)
 
-T.describe("corpus e2e: fixture_hamt_recursion — forward alias boundary", function()
-	T.it("named param `node: HamtNode` now lowers (v2.1); the forward-alias ref is the §5 boundary", function()
+T.describe("corpus e2e: fixture_hamt_recursion — mutual alias family (Bekić)", function()
+	T.it("the HamtNode/Interior mutual family now lowers CLEAN (Bekić elaboration, §6.13)", function()
 		local o = lower_fixture("hamt_recursion")
-		-- v2.1: `node: HamtNode` (named param) is now IN subset (§6.5.1). The fixture
-		-- remains OUT-OF-SUBSET on the FORWARD-referenced alias: `Interior`
-		-- references `HamtNode` before its own `--::` line, and the per-file alias
-		-- env is built top-to-bottom, so the name is unresolved at that point. A
-		-- two-pass alias env is increment-2 work, not this increment.
-		T.eq(o.expected, "OUT-OF-SUBSET", "a forward-referenced alias is outside §5 (single-pass alias env)")
-		T.ok(has_construct(o, "unknown-type-name"), "marked the unresolved forward-alias boundary")
+		-- increment 9: `HamtNode = Leaf | Interior` and `Interior = { children: { [_]:
+		-- HamtNode } }` form a mutual cycle. Bekić elaboration resolves the family into
+		-- nested single-binder μ at declaration time, so the forward-referenced sibling
+		-- now resolves — the fixture clears its former unknown-type-name boundary.
+		T.eq(o.expected, "CLEAN", "the mutual alias family resolves via Bekić elaboration")
+		T.eq(#o.constructs, 0, "no out-of-subset markers (the cycle is fully resolved)")
 		assert_sound(o)
 	end)
 end)
@@ -253,8 +252,12 @@ end)
 
 -- ── The headline assertion: the honest split ─────────────────────────────────
 
-T.describe("corpus e2e: the honest 11-fixture split under real lowering (v2.7)", function()
-	T.it("7 CLEAN, 0 FINDINGS, 4 OUT-OF-SUBSET, 0 rejections anywhere", function()
+T.describe("corpus e2e: the honest 11-fixture split under real lowering (v2.8)", function()
+	T.it("8 CLEAN, 0 FINDINGS, 3 OUT-OF-SUBSET, 0 rejections anywhere", function()
+		-- v2.8 (§6.13, Bekić families): hamt_recursion moved OUT-OF-SUBSET → CLEAN — its
+		-- mutual alias family (`HamtNode = Leaf | Interior`, `Interior` names `HamtNode`)
+		-- now resolves via Bekić elaboration into nested single-binder μ at declaration
+		-- time, clearing the former forward-alias (unknown-type-name) boundary.
 		-- v2.7 (§6.11, field-path narrowing): coinductive moved FINDINGS → CLEAN —
 		-- `if node.left then tree_sum(node.left)` now refines the PATH (the opaque-name
 		-- truthy decomposition), closing the §9.8 deferral. With it gone there are zero
@@ -284,9 +287,9 @@ T.describe("corpus e2e: the honest 11-fixture split under real lowering (v2.7)",
 			elseif o.expected == "FINDINGS" then findings = findings + 1 end
 			total_rej = total_rej + o.rej
 		end
-		T.eq(clean, 7, "7 fixtures fully within §5 (the v2.6 six + coinductive via field-path narrowing, §6.11)")
+		T.eq(clean, 8, "8 fixtures fully within §5 (the v2.7 seven + hamt mutual family via Bekić, §6.13)")
 		T.eq(findings, 0, "0 findings — the coinductive field-path-narrow finding closed (§6.11)")
-		T.eq(oos, 4, "4 fixtures hit a real §5 boundary (stdlib/forward-alias/cast/assignment-in-branch)")
+		T.eq(oos, 3, "3 fixtures hit a real §5 boundary (stdlib/cast/assignment-in-branch)")
 		T.eq(total_rej, 0, "ZERO rejections across all 11 — every in-subset claim the lowering emits is sound")
 	end)
 end)
