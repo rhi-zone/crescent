@@ -983,6 +983,103 @@ local function ctx_set_field(ctx, obj_name, field, fty, mod_table_aliases)
 	return true
 end
 
+-- ── Field-path narrowing support (§6.11) ─────────────────────────────────────
+--
+-- A guard target that contains a '.' is a depth-1 field PATH `"x.f"` (the opaque
+-- refinement-target NAME, §6.11.1), not a bare variable. `path_split` returns
+-- (base, field) for such a name, or nil for a plain variable.
+
+--: (string) -> (string | nil, string | nil)
+local function path_split(name)
+	local dot = name:find(".", 1, true)
+	if not dot then return nil, nil end
+	-- depth-1 only: a single dot, no further dots in the field (§6.11.1 depth bound).
+	local base = name:sub(1, dot - 1)
+	local field = name:sub(dot + 1)
+	if base == "" or field == "" or field:find(".", 1, true) then return nil, nil end
+	return base, field
+end
+
+-- The pre-guard type of a depth-1 path `"x.f"` under `ctx`: `index_result(typeof x,
+-- f)`. Returns nil when the base is unbound or the field read is out-of-subset
+-- (in which case the path is not narrowable and the guard falls back to no-op).
+--: (SliceCtx, string) -> Ty | nil
+local function path_pre_type(ctx, name)
+	local base, field = path_split(name)
+	if not base or not field then return nil end
+	local bty = ctx_get(ctx, base)
+	if not bty then return nil end
+	return S.index_result(bty, field, nil)
+end
+
+-- ── The invalidation boundary (§6.11.2, the soundness fence) ─────────────────
+--
+-- A path refinement `x.f` dies after any statement that can mutate the path or
+-- alias the base. WITHOUT escape/effect analysis (v1 has neither) the sound-
+-- conservative rule is: invalidate after (1) ANY call/method-call — a callee may
+-- hold the base and mutate `x.f` through it or an upvalue — and (2) ANY assignment
+-- — a write through the base, or through any lvalue that could alias the base
+-- (§6.11.3). `node_has_call` scans an arbitrary statement/expr subtree for a
+-- call/methodcall; `stmt_invalidates_paths` is the predicate the block walker
+-- applies AFTER lowering each statement.
+
+local node_has_call --[[: (unknown) -> boolean ]]
+
+--: (unknown) -> boolean
+node_has_call = function(n)
+	if type(n) ~= "table" then return false end
+	local k = n.k or n.t
+	if k == "call" or k == "methodcall" then return true end
+	for _, v in pairs(n) do
+		if type(v) == "table" and node_has_call(v) then return true end
+	end
+	return false
+end
+
+-- Does statement `s` invalidate live path refinements (§6.11.2)? True for any
+-- assignment (write-through, possibly aliased) and any statement whose subtree
+-- contains a call (the callee may mutate the path). A `local` is itself an alias
+-- (`local y = x`) but does not mutate; the later write through the alias is an
+-- `assign` and is caught there — so a plain `local` invalidates only if its RHS
+-- contains a call. Compound statements (if/while/for/do) are caught by the call
+-- scan over their nested bodies (a nested call/write can mutate the outer path).
+--: (unknown) -> boolean
+local function stmt_invalidates_paths(s)
+	if type(s) ~= "table" then return false end
+	if (s.k or s.t) == "assign" then return true end
+	return node_has_call(s)
+end
+
+-- Drop every live path refinement (any ctx entry whose name is a depth-1 path) from
+-- `ctx`, in place, by shadowing it back to its un-refined declared field type — or,
+-- when the path is no longer typable, removing the entry view by re-binding nil is
+-- not possible in the append-only ctx, so we re-bind to the declared field type
+-- read from the (un-refined) base. Pragmatically: append a fresh entry binding the
+-- path name to its declared pre-type, so a subsequent read falls back. If the base
+-- is unbound (path untypable now), bind the path to its original declared type if
+-- recoverable; otherwise the most-recent live refinement is simply superseded by a
+-- declared-type entry. This is the invalidate-AFTER discipline (§6.11.2).
+--: (SliceCtx) -> nil
+local function invalidate_paths(ctx)
+	-- collect the live path names (dotted, most-recent-wins already handled by ctx_get).
+	local seen = {} --[[: { [string]: boolean } ]]
+	local names = {} --[[: { [integer]: string } ]]
+	for i = #ctx, 1, -1 do
+		local nm = ctx[i].name
+		if type(nm) == "string" and nm:find(".", 1, true) and not seen[nm] then
+			seen[nm] = true
+			names[#names + 1] = nm
+		end
+	end
+	for _, nm in ipairs(names) do
+		-- re-bind the path to its DECLARED field type (read through the un-refined
+		-- base), shadowing the refinement. If the base is gone, bind `unknown` (the
+		-- sound wider fallback — a subsequent read must narrow), never the refinement.
+		local declared = path_pre_type(ctx, nm)
+		ctx[#ctx + 1] = { name = nm, type = TA.encode(declared or G.unknown()) }
+	end
+end
+
 -- The lowering result accumulators ride a `LC` (lowering context) table threaded
 -- through the walk: builder, requested-claim list, marker list, alias env,
 -- trusted-boundary id (one shared stdlib boundary), and the current SliceCtx.
@@ -1116,6 +1213,25 @@ local function synth_index_expr(lc, ctx, e)
 	local v = view(e)
 	local field = v and v.field
 	if type(field) ~= "string" then return nil, nil end
+	-- §6.11 field-path narrowing: a read `x.f` whose path `"x.f"` is bound in Γ (a
+	-- live path refinement) synthesizes the REFINED type, not the declared field
+	-- type. The binding is dropped at the soundness boundary (invalidation, §6.11.2),
+	-- so its presence here means the refinement is still live.
+	do
+		local ov = view(v.obj)
+		local oname = ov and ov.name
+		if ov and ov.k == "name" and type(oname) == "string" then
+			local path = oname .. "." .. field
+			local refined = ctx_get(ctx, path)
+			if refined then
+				local rnid = lc.b.node({ t = "var", name = path })
+				local rcid = lc.b.fresh_claim("pathvar")
+				A.add_claim(lc.state, S.has_type_claim(rcid, ctx, rnid, refined))
+				A.add_evidence(lc.state, A.evidence({ id = lc.b.fresh_ev("pathvar"), claim = rcid, method = "synth_var" }))
+				return refined, rcid
+			end
+		end
+	end
 	local oty, ocid = synth_expr(lc, ctx, v.obj)
 	if not oty or not ocid then return nil, nil end
 	-- the object node id is the artifact the premise claim references.
@@ -2190,9 +2306,27 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 			if gnode then
 				local var = guard_var(gnode)
 				if var then
-					local pre = ctx_get(ctx, var)
+					-- a field PATH target (`"x.f"`, §6.11) gets its pre-type from
+					-- index_result and is bound as a synthetic Γ entry; a bare variable
+					-- reads its binding directly. The narrows premise/claim run under a
+					-- Γ that contains the path binding (the narrow_guard evidence looks
+					-- the target up by name, opaque to path-vs-var).
+					local is_path = var:find(".", 1, true) ~= nil
+					local pre --[[: Ty | nil ]]
+					local guard_ctx = ctx
+					if is_path then
+						pre = path_pre_type(ctx, var)
+						if pre then
+							guard_ctx = {} --[[: SliceCtx ]]
+							for i = 1, #ctx do guard_ctx[i] = ctx[i] end
+							guard_ctx[#guard_ctx + 1] = { name = var, type = TA.encode(pre) }
+							body_ctx[#body_ctx + 1] = { name = var, type = TA.encode(pre) }
+						end
+					else
+						pre = ctx_get(ctx, var)
+					end
 					if pre then
-						local t_true = emit_narrows(lc, ctx, gnode, var, pre)
+						local t_true = emit_narrows(lc, guard_ctx, gnode, var, pre)
 						if t_true then
 							-- refine the body context: var : T_true (shadowing).
 							body_ctx[#body_ctx + 1] = { name = var, type = TA.encode(t_true) }
@@ -2472,6 +2606,12 @@ lower_block = function(lc, ctx, blk, ret_ty)
 		else
 			lower_stmt(lc, ctx, s, ret_ty)
 		end
+		-- §6.11.2 invalidation: a path refinement dies AFTER any statement that can
+		-- mutate the path or alias the base (any call/any write). The read inside the
+		-- statement already used the live refinement (happens-before the call); the
+		-- next statement falls back to the declared field type. Variable refinements
+		-- are unaffected (they shadow on rebind, handled elsewhere).
+		if stmt_invalidates_paths(s) then invalidate_paths(ctx) end
 	end
 end
 

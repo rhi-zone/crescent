@@ -721,6 +721,27 @@ local function is_nil_lit(node)
 	return node.lit == "nil"
 end
 
+-- A depth-1 field-path target `x.f` (an `index` over a bare `var`) → the path
+-- string `"x.f"` (the opaque refinement-target NAME, §6.11.1). The narrowing core
+-- treats this exactly as a variable name; the lowering binds it as a synthetic Γ
+-- entry and synthesizes its pre-type via index_result. Depth >1 (`x.f.g`) returns
+-- nil — the §6.11.1 depth-1 bound (depth-2 is a §9.18 deferral). Returns nil for a
+-- non-index node or a non-bare-var base.
+--: (unknown) -> string | nil
+local function path_of(node)
+	if type(node) ~= "table" then return nil end
+	if node.t ~= "index" then return nil end
+	local field = node.field
+	if type(field) ~= "string" then return nil end
+	local obj = node.obj
+	if type(obj) ~= "table" then return nil end
+	local oname = obj.name
+	if obj.t ~= "var" or type(oname) ~= "string" then return nil end
+	return oname .. "." .. field
+end
+
+M.path_of = path_of
+
 -- A `type(x)` call → the variable name x, or nil.
 --: (unknown) -> string | nil
 local function type_call_var(node)
@@ -771,6 +792,15 @@ local function recognize_cmp(lhs, rhs, is_eq)
 		return { g = "nil_eq", var = a.name, eq = is_eq }
 	end
 
+	-- `x.f == nil` / `x.f ~= nil` (field-path nil-eq, §6.11): the refinement target is
+	-- the PATH `"x.f"` (an opaque name), not the object `x`. A nil literal is
+	-- unambiguous — it is never a tag discriminant — so a nil comparison against a
+	-- depth-1 path is always a path nil-eq, refining the path itself.
+	do
+		local p = path_of(a)
+		if p and is_nil_lit(b) then return { g = "nil_eq", var = p, eq = is_eq } end
+	end
+
 	-- `x.field == <literal>` (tag-field discriminant).
 	if type(a) == "table" and a.t == "index" and type(a.field) == "string" then
 		local obj = a.obj
@@ -803,6 +833,12 @@ recognize_guard = function(expr)
 	local t = expr.t
 	if t == "var" and type(expr.name) == "string" then
 		return { g = "truthy", var = expr.name }
+	end
+	-- bare field-path truthy `if x.f` (§6.11): refine the PATH `"x.f"` (opaque name).
+	-- This is the dominant corpus idiom (`if node.left`, `if opts_t.title and …`).
+	if t == "index" then
+		local p = path_of(expr)
+		if p then return { g = "truthy", var = p } end
 	end
 	if t == "cmp" then
 		local op = expr.op

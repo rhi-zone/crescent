@@ -159,20 +159,20 @@ T.describe("corpus e2e: fixture_pairs_return_leak — empty-fresh-table dynamic 
 	end)
 end)
 
-T.describe("corpus e2e: fixture_coinductive_recursive_types — field-path narrowing finding", function()
-	T.it("operators (v2.3) unblock `s + ...`; the residual finding is the field-path-narrow type-mismatch", function()
+T.describe("corpus e2e: fixture_coinductive_recursive_types — field-path narrowing CLEAN (§6.11)", function()
+	T.it("v2.7: `if node.left then tree_sum(node.left)` narrows the PATH — the fixture is whole-file CLEAN", function()
 		local o = lower_fixture("coinductive_recursive_types")
-		-- v2.3: `s + tree_sum(...)` no longer hits the operator boundary (operator
-		-- typing landed, §6.7.1). With `+` in subset, the lowering now REACHES the
-		-- `tree_sum(node.left)` call — and `node.left : TreeNode | nil` legitimately
-		-- fails `<: TreeNode` because v1 narrows a VARIABLE binding, not a FIELD PATH
-		-- (`if node.left then` does not refine `node.left`, §9.8). So the fixture
-		-- reclassifies OUT-OF-SUBSET → FINDINGS: an honest type-mismatch from the
-		-- field-path-narrowing deferral, NOT a checker soundness bug — every
-		-- REQUESTED claim still accepts (0 rejections). Field-path narrowing is the
-		-- recorded un-defer trigger.
-		T.eq(o.expected, "FINDINGS", "field-path narrowing is still deferred (the honest type-mismatch)")
-		T.ok(has_construct(o, "type-mismatch"), "marked the field-path-narrow type-mismatch")
+		-- v2.7 (§6.11, field-path narrowing): `if node.left then` now refines the
+		-- PATH `node.left : TreeNode | nil` → `TreeNode` (the opaque-name truthy
+		-- decomposition over the μ-unfolded field type). `tree_sum(node.left)` reads
+		-- the refined `TreeNode` (the path read inside the call argument, before any
+		-- invalidation), so `TreeNode <: TreeNode` holds. The §9.8 deferral whose
+		-- trigger fired on this exact fixture is closed: FINDINGS → CLEAN, 0 markers,
+		-- 0 rejections. The soundness boundary (the refinement dies after any
+		-- call/write) is the §9.18 invalidation fence; here the guarded read precedes
+		-- the call within the same statement, so it reads the live refinement.
+		T.eq(o.expected, "CLEAN", "field-path narrowing closes the boundary — whole-file CLEAN")
+		T.eq(#o.constructs, 0, "no out-of-subset markers")
 		assert_sound(o)
 	end)
 end)
@@ -253,8 +253,12 @@ end)
 
 -- ── The headline assertion: the honest split ─────────────────────────────────
 
-T.describe("corpus e2e: the honest 11-fixture split under real lowering (v2.6)", function()
-	T.it("6 CLEAN, 1 FINDINGS, 4 OUT-OF-SUBSET, 0 rejections anywhere", function()
+T.describe("corpus e2e: the honest 11-fixture split under real lowering (v2.7)", function()
+	T.it("7 CLEAN, 0 FINDINGS, 4 OUT-OF-SUBSET, 0 rejections anywhere", function()
+		-- v2.7 (§6.11, field-path narrowing): coinductive moved FINDINGS → CLEAN —
+		-- `if node.left then tree_sum(node.left)` now refines the PATH (the opaque-name
+		-- truthy decomposition), closing the §9.8 deferral. With it gone there are zero
+		-- findings.
 		-- v2.6 (§6.10, the empty-fresh-table dynamic write): pairs_return_leak and
 		-- table_construction_widening BOTH moved OUT-OF-SUBSET → CLEAN — the
 		-- `merged = {}; merged[k] = v` / `insns = {}; insns[i] = {...}` fresh-table
@@ -262,8 +266,7 @@ T.describe("corpus e2e: the honest 11-fixture split under real lowering (v2.6)",
 		-- `unknown`, no constraint to violate; sound because the empty-rec READ rule
 		-- never admits a value). Both fixtures' headers require acceptance.
 		-- v2.5 had moved closure_param_typing → CLEAN (the §6.5.5 return-site tuple);
-		-- v2.3 had moved boolean_narrowing → CLEAN (operators) and coinductive →
-		-- FINDINGS (the field-path-narrow type-mismatch, the sole remaining finding).
+		-- v2.3 had moved boolean_narrowing → CLEAN (operators).
 		-- These fixtures lower WITHOUT the injected stdlib cap (no `{ stdlib = true }`),
 		-- so tonumber/cast_not_inference_source stay OUT-OF-SUBSET on unbound stdlib
 		-- names — the caps-first posture (the cap is the survey's, not a default global).
@@ -281,9 +284,9 @@ T.describe("corpus e2e: the honest 11-fixture split under real lowering (v2.6)",
 			elseif o.expected == "FINDINGS" then findings = findings + 1 end
 			total_rej = total_rej + o.rej
 		end
-		T.eq(clean, 6, "6 fixtures fully within §5 (local_return_narrowing, union_alias, boolean_narrowing, closure_param_typing, pairs_return_leak, table_construction_widening)")
-		T.eq(findings, 1, "1 fixture (coinductive) hits the field-path-narrow type-mismatch finding")
-		T.eq(oos, 4, "4 fixtures hit a real §5 boundary (stdlib/forward-alias/cast/field-path)")
+		T.eq(clean, 7, "7 fixtures fully within §5 (the v2.6 six + coinductive via field-path narrowing, §6.11)")
+		T.eq(findings, 0, "0 findings — the coinductive field-path-narrow finding closed (§6.11)")
+		T.eq(oos, 4, "4 fixtures hit a real §5 boundary (stdlib/forward-alias/cast/assignment-in-branch)")
 		T.eq(total_rej, 0, "ZERO rejections across all 11 — every in-subset claim the lowering emits is sound")
 	end)
 end)
@@ -983,5 +986,129 @@ return { f = f }
 		-- Both sides are recognized; the and-guard narrows x to string.
 		T.eq(o.expected, "CLEAN", "x and flag (both recognized) narrows x to string")
 		assert_sound(o)
+	end)
+end)
+
+-- ── Field-path narrowing (§6.11, the §9.8 deferral) ──────────────────────────
+
+T.describe("slice v2.7: field-path narrowing — the positive cases", function()
+	T.it("bare truthy path `if o.title then return o.title` is CLEAN", function()
+		local o = lower_src([[
+--:: O = { title: string | nil }
+--: (O) -> string
+local function f(o)
+  if o.title then return o.title end
+  return ""
+end
+return { f = f }
+]], false)
+		-- `if o.title then` refines the PATH `o.title : string | nil` → `string`; the
+		-- guarded read `o.title` synthesizes `string`, so `<: string` (the return) holds.
+		T.eq(o.expected, "CLEAN", "bare-truthy field-path narrowing accepted")
+		T.eq(#o.constructs, 0, "no out-of-subset markers")
+		assert_sound(o)
+	end)
+
+	T.it("and-guard path `if o.title and o.title ~= \"\"` (the rehype_meta idiom) is CLEAN", function()
+		local o = lower_src([[
+--:: O = { title: string | nil }
+--: (O) -> string
+local function f(o)
+  if o.title and o.title ~= "" then return o.title end
+  return ""
+end
+return { f = f }
+]], false)
+		-- The dominant round-4 corpus idiom: the truthy `o.title` conjunct (the and-left)
+		-- narrows the path; the `~= ""` conjunct is unrecognized but the and-relaxation
+		-- (§9.17) keeps the recognized side.
+		T.eq(o.expected, "CLEAN", "and-guard field-path narrowing accepted (rehype_meta idiom)")
+		assert_sound(o)
+	end)
+
+	T.it("path narrowed inside a call argument (the coinductive shape) is CLEAN", function()
+		local o = lower_src([[
+--:: N = { left: N | nil }
+--: (N) -> integer
+local function sz(n)
+  local s = 1
+  if n.left then s = s + sz(n.left) end
+  return s
+end
+return { sz = sz }
+]], false)
+		-- `if n.left then s = s + sz(n.left)` — the path read `n.left` is the call
+		-- argument, synthesized as the refined `N` BEFORE the call's invalidation
+		-- applies (the read happens-before the call). `sz(n.left)` accepts.
+		T.eq(o.expected, "CLEAN", "field-path read inside a call argument reads the live refinement")
+		assert_sound(o)
+	end)
+end)
+
+T.describe("slice v2.7: field-path narrowing — the INVALIDATION fence (§6.11.2 soundness)", function()
+	-- These tests make the soundness boundary EXECUTABLE: a path refinement DIES
+	-- after any call / write / alias-write, so a read AFTER such a statement falls
+	-- back to the declared (wider) field type and the program is correctly rejected.
+
+	T.it("refinement DIES after a call: read of o.f after a call re-widens (FINDINGS)", function()
+		local o = lower_src([[
+--:: O = { f: string | nil }
+--: (O, (string) -> nil) -> string
+local function g(o, emit)
+  if o.f then
+    emit("x")
+    return o.f
+  end
+  return ""
+end
+return { g = g }
+]], false)
+		-- `emit("x")` is a call that may mutate `o.f` (no escape analysis); the path
+		-- refinement dies, so `return o.f` re-reads `string | nil`, which is NOT a
+		-- subtype of the `-> string` return: a type-mismatch (the sound rejection).
+		T.eq(o.expected, "FINDINGS", "the refinement dies after a call — the post-call read is correctly rejected")
+		T.ok(has_construct(o, "type-mismatch"), "the soundness fence rejects the re-widened read")
+	end)
+
+	T.it("refinement DIES after a write-through (o.f = ...) — the post-write read re-widens (FINDINGS)", function()
+		local o = lower_src([[
+--:: O = { f: string | nil, g: string | nil }
+--: (O) -> string
+local function h(o)
+  if o.f then
+    o.g = nil
+    return o.f
+  end
+  return ""
+end
+return { h = h }
+]], false)
+		-- `o.g = nil` is a write through the base; v1 cannot prove it leaves `o.f`
+		-- unchanged (a write-through-any-lvalue invalidates all path refinements), so
+		-- `return o.f` re-reads `string | nil` and is correctly rejected.
+		T.eq(o.expected, "FINDINGS", "the refinement dies after a write-through — post-write read rejected")
+		T.ok(has_construct(o, "type-mismatch"), "the soundness fence rejects the re-widened read")
+	end)
+
+	T.it("refinement DIES after an alias write (local y = o; y.f = nil) — §6.11.3 worked example (FINDINGS)", function()
+		local o = lower_src([[
+--:: O = { f: string | nil }
+--: (O) -> string
+local function k(o)
+  local y = o
+  if o.f then
+    y.f = nil
+    return o.f
+  end
+  return ""
+end
+return { k = k }
+]], false)
+		-- The §6.11.3 aliasing worked example: `y` aliases `o`, so `y.f = nil` mutates
+		-- `o.f`. v1 cannot decide `y == o`; the conservative any-write-through-any-lvalue
+		-- rule covers it — `y.f = nil` drops the `o.f` refinement, and `return o.f`
+		-- re-reads `string | nil`, correctly rejecting the unsound `-> string`.
+		T.eq(o.expected, "FINDINGS", "the refinement dies after an alias write — the unsound read is rejected")
+		T.ok(has_construct(o, "type-mismatch"), "the alias-write soundness fence rejects the re-widened read")
 	end)
 end)

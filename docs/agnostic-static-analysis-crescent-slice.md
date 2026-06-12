@@ -2192,6 +2192,164 @@ arithmetic) and by a deferral whose real shape (empty) the corpus re-ranked away
 from its named shape (heterogeneous). No complement, no match types, no global
 solving, no name-keying. The substrate (`init.lua`) is **untouched**, byte-for-byte.
 
+## 6.11 Increment v2.7 — field-path narrowing (the §9.8 deferral, soundness boundary explicit)
+
+Status: design pass for slice **v2 increment 7**. This un-defers the §9.8
+field-path-narrowing deferral whose trigger fired three times: the coinductive
+fixture's FINDINGS verdict (§9.8, `if node.left then tree_sum(node.left)`),
+increment-4's cross-module boundary, and **all 11** of audit round 4's
+false-positive files (`docs/artifacts/typechecker-run-2026-06-12/audit-round-4.md`,
+§9.17). Derived whole; the soundness boundary — *when a path refinement dies* — is
+the load-bearing design content, made executable as the invalidation test fence.
+
+### 6.11.1 The value-universe derivation (what a path refinement is)
+
+v1's flow layer (§4) narrows a *variable binding*: a guard refines `x`'s entry in Γ,
+and a downstream occurrence of `x` synthesizes under the refined Γ. A **path** `x.f`
+is not a binding — it is a *read* through `x`. Narrowing `x.f` means: after a guard
+proves `x.f` is non-`nil` (or a specific kind), a later read `x.f` synthesizes the
+refined type instead of re-reading the declared field type.
+
+**The key derivation: a path is an opaque refinement-target NAME.** The pure
+refinement function `NAR.refine(guard, x, T)` (slice_narrow.lua) matches its target
+`x` by *string equality* — it never inspects `x`'s structure. So a path `"x.f"` is a
+valid refinement target with **zero changes to the narrowing core, the `Guard`
+grammar, or the `narrow_guard` evidence method**: the refined "variable" is the path
+string `"x.f"`, its pre-guard type is `index_result(typeof x, f)`, and the refinement
+binds `"x.f" : T_true` as an ordinary (synthetic-named) Γ entry. A downstream read
+`x.f` consults Γ for the path binding `"x.f"` before computing `index_result`. The
+path is to the field-read what the variable name is to the var-read.
+
+**Depth bound: 1 (`x.f`), justified by the corpus.** The round-4 false-positive
+samples are uniformly depth-1: `opts_t.title`, `opts_t.description` (rehype_meta,
+12 sites), `node.left`/`node.right` (coinductive), `node.children`/`node.value`
+(rehype_infer_title), `task_inputs[k]` field reads (agent/render). The two depth-2
+reads in the corpus (`root.data.title`, `ast.data.title`) are *not* guard-narrowed —
+they are unconditional writes through a `--[[:!]]`-cast local, not a narrowing site.
+Depth-2 (`x.f.g`) is therefore **deferred with a trigger** (a real guarded `x.f.g`
+read appears): it is a strictly additive extension (a longer path string, the same
+opaque-name machinery), recorded §9.18, never forged.
+
+### 6.11.2 The invalidation rule — the soundness boundary (EXPLICIT)
+
+Narrowing `x.f` is sound only while *nothing can have mutated the path* since the
+guard. A variable refinement is immune to this (re-binding `x` shadows the
+refinement, the lowering already handles it); a path refinement is **fragile** —
+`x.f` can change without `x` changing, through `x.f = …`, through a write to an
+*alias* of `x`, or through a *call* that holds `x` (by argument or upvalue) and
+mutates `x.f`. Crescent is soundness-first (docs/type-system.md): no TS-style
+pragmatic unsoundness. The rule is derived from the value universe *without* escape
+or effect analysis (v1 has neither), so it is the **sound-conservative rule**:
+
+> **A path refinement `x.f` dies (the binding is dropped, the read falls back to the
+> declared field type) after any statement that can mutate the path or alias the
+> base. Concretely, within the refined block, the refinement is invalidated by:**
+>
+> 1. **any function or method call** (statement-position, or inside an assignment
+>    RHS / condition) — a call may receive the base `x` by reference and mutate
+>    `x.f`, or reach `x` through an upvalue/global and mutate it. v1 has no
+>    purity/effect knowledge, so **any call invalidates** mutable-base path
+>    refinements;
+> 2. **any assignment** — base reassignment `x = …`; write-through any field of the
+>    base `x.f = …` / `x.g = …`; dynamic write `x[e] = …`; **and a write through
+>    ANY lvalue** `y.h = …` / `y[e] = …` (aliasing is undecidable in v1: `y` could
+>    be `x`, per §6.11.3).
+
+**Why no narrower rule is justifiable WITHOUT escape analysis.** A narrower rule
+("only calls that *reach* `x` invalidate") requires knowing a call's argument/upvalue
+reach — escape analysis the slice does not have. A "writes only to the *named* base"
+rule is unsound under aliasing (§6.11.3). The honest position: take the conservative
+rule, record the imprecision, and un-defer toward a purity/effects substrate
+(`docs/effects.md`) — when the slice can prove a callee pure and a base un-escaped,
+the call-invalidation relaxes. Recorded §9.18 with that trigger.
+
+**Readonly fields survive calls and writes — justified.** The grammar carries a
+`readonly` field marker (`{ key, ty, optional, readonly }`). A `readonly` field
+*cannot be reassigned through any alias* — that is exactly what the marker means in
+the value universe ("no write can occur to this field"). So a readonly path
+refinement is immune to both call-invalidation and write-invalidation: no call and no
+write, through any alias, can change a readonly field. This is not a special case —
+it is the direct value-universe reading of the readonly marker, the same reading that
+makes readonly fields covariant where mutable fields are invariant (§9.2). A readonly
+path refinement therefore survives the whole block. (The corpus's narrowed paths are
+mutable record fields, so this is a soundness-completeness statement, not a corpus
+demand; it is the principled boundary, recorded as such.)
+
+**Granularity: statement-level, invalidate-AFTER.** The refinement is dropped
+*after* the invalidating statement's claims are lowered, never before. This is the
+load-bearing soundness-AND-precision point: in `if node.left then s = s +
+tree_sum(node.left) end`, the body is one assignment whose RHS calls
+`tree_sum(node.left)`. The path read `node.left` is synthesized as the call argument
+*within* that statement — it reads `T_true = TreeNode` *before* the call's
+invalidation applies to subsequent statements. The read happens-before the call;
+the invalidation governs the *next* statement. Statement-granular invalidate-after is
+both sound (the call cannot have run when the argument is typed) and precise enough to
+type the guarded read (the dominant idiom: guard, then immediately use in a call).
+
+### 6.11.3 Aliasing — the worked example (why "any write-through-any-lvalue")
+
+```lua
+--:: Node = { f: integer | nil }
+--: (Node) -> integer
+local function g(x)
+  local y = x            -- y aliases x (same table)
+  if x.f then            -- refine x.f : integer (drop nil)
+    y.f = nil            -- writes x.f THROUGH the alias y — x.f is now nil!
+    return x.f           -- UNSOUND if x.f still read as integer
+  end
+  return 0
+end
+```
+
+`local y = x` makes `y` and `x` the **same table**; `y.f = nil` mutates `x.f`. A rule
+that invalidated only writes to the *syntactic* base (`x.f = …`) would miss this and
+read `x.f` as `integer` at the `return`, accepting an unsound program (the value is
+`nil`). The conservative rule — **any write through any field/index lvalue
+invalidates all path refinements** — covers it: `y.f = nil` is a write-through-an-
+lvalue, so it drops the `x.f` refinement, and `return x.f` re-reads the declared
+`integer | nil`, correctly *rejecting* the `-> integer` annotation. v1 cannot decide
+`y == x`, so it must assume it; the alias case is subsumed by the call/write
+conservative rule, no alias analysis required. (The same statement is *also* a
+write — covered by clause 2 — and the worked example is the executable invalidation
+test `path_refinement_dies_after_alias_write`.)
+
+### 6.11.4 Interaction with μ / unions (the coinductive fixture's exact shape)
+
+`node : TreeNode` where `TreeNode = μX. { value: integer, left: X | nil, right: X |
+nil }`. The path `node.left` synthesizes via `index_result(TreeNode, "left")`. The
+existing `index_result` rule unfolds the μ once (equirecursive) and reads the `left`
+field: `TreeNode | nil`. The guard `if node.left then` refines the *path*
+`"node.left"` by the truthy decomposition (§4.1, `refine_truthy`): drop the `nil`
+member → `TreeNode`. This is **exactly** the existing variable-truthy refinement,
+applied to the path's synthesized type — no μ-specific machinery. The path-refinement
+applies to the *unfolded view* (the field read already unfolded), consistent with the
+tag-discriminant μ-unfold (§6.2): both read a field of a μ-typed value by unfolding
+once, then narrow the result positively. `tree_sum(node.left)` then synthesizes
+`node.left : TreeNode` (from the path binding) and checks `TreeNode <: TreeNode` →
+accepts. The fixture moves FINDINGS → CLEAN.
+
+### 6.11.5 Mechanization surface
+
+Refinements stay **derived claims** — a path narrowing is a `narrows` claim with
+`narrow_guard` evidence, identical to a variable narrowing, because the path is an
+opaque target name (§6.11.1). The narrowing CORE (slice_narrow.lua) and the
+`narrow_guard` evidence method (crescent_slice.lua) are **byte-for-byte unchanged**.
+The substrate (`init.lua`) is **untouched**. The changes are at three seams:
+
+| Item | Where | New evidence method? | Subtype change? | Substrate? |
+|---|---|---|---|---|
+| recognize `x.f` as a guard target path | `recognize_guard`/`recognize_cmp` (`crescent_slice_parse.lua`): a `truthy`/`nil_eq`/`lit_eq` guard whose target is an `index`-over-`var` carries `var = "x.f"` (the path string) | none | none | none |
+| path pre-type + binding + invalidation | `crescent_slice_lower.lua` `if`/`lower_block`: synth `index_result(typeof x, f)`, bind `"x.f" : T_true` in body Γ, drop path bindings after invalidating statements | none (reuses `emit_narrows`/`narrow_guard`) | none | none |
+| read `x.f` consults the path binding | `synth_index_expr` (`crescent_slice_lower.lua`): `ctx_get(ctx, base.."."..field)` before `index_result` | none | none | none |
+
+The invalidation points are **emitted by the lowering** (the design's clause: drop
+the path binding from the block Γ after an invalidating statement); the refinement
+itself remains a visible `narrows` claim. No complement, no match types, no global
+solving, no escape analysis, no name-keying — the path is a string name threaded
+through the existing variable-narrowing machinery, and the soundness boundary is the
+lowering's invalidation discipline, fenced executably by the §9.18 invalidation
+tests.
+
 ---
 
 ## 7. Acceptance Criteria
@@ -4199,3 +4357,103 @@ work).
 not new semantics — and correctly resolves the probe isolation case. The field-path
 version of the pattern remains a §9.8 deferral, trigger for un-deferral is
 field-path narrowing.
+
+### 9.18 Mechanization findings — slice v2 increment 7 (§6.11, field-path narrowing)
+
+The §9.8 field-path-narrowing deferral, un-deferred. Design §6.11; full report
+`docs/artifacts/typechecker-run-2026-06-12/increment-7.md`. Full analysis suite green
+at **6489 assertions** (6467 + 22 net: 19 new field-path/invalidation tests minus the
+coinductive deferral assertions replaced by CLEAN assertions). `timeout 30 bin/cr
+check` clean on the touched implementation files (`crescent_slice_parse.lua`,
+`crescent_slice_lower.lua`: 0 errors).
+
+**The implementation finding — the narrowing CORE needed ZERO changes.** The design's
+load-bearing insight held under mechanization: a field path `"x.f"` is an opaque
+refinement-target NAME, so `slice_narrow.lua` (the pure refinement function), the
+`Guard` grammar, and the `narrow_guard` evidence method (`crescent_slice.lua`) are
+**byte-for-byte unchanged**, and the substrate (`init.lua`) is untouched. The path is
+threaded through the existing variable-narrowing machinery as a string. The three
+seams that changed: (1) recognition (`recognize_guard`/`recognize_cmp`: a bare-truthy
+path `if x.f` and a path nil-eq `x.f == nil` carry `var = "x.f"`); (2) lowering (the
+`if`-handler synthesizes the path pre-type via `index_result`, binds `"x.f"` as a
+synthetic Γ entry, and emits invalidation; `synth_index_expr` consults the path
+binding before the declared field read); (3) the invalidation discipline in
+`lower_block` (the soundness fence).
+
+**The invalidation rule (the soundness boundary, EXECUTABLE).** A path refinement
+dies AFTER any statement that can mutate the path or alias the base: any
+call/method-call (a callee may mutate `x.f` through an argument or upvalue — no
+escape analysis, so any call invalidates) and any assignment (write-through any
+lvalue, since aliasing is undecidable in v1, §6.11.3). Granularity is statement-level,
+invalidate-AFTER: the guarded read inside a statement (e.g. `tree_sum(node.left)`'s
+argument) reads the live refinement before the call's effect reaches the *next*
+statement. The fence is three executable tests (`corpus_lower_test.lua` v2.7
+invalidation block): the refinement DIES after a call, after a write-through, and
+after the §6.11.3 alias write — each correctly REJECTS the post-mutation read. A
+direct probe confirmed the narrowing produces the CORRECT refined type (`if
+n.children then ipairs(n.children)` is CLEAN), so the residual findings below are
+soundness-of-rejection-correct precision boundaries, never wrong types.
+
+**Corpus effect (e2e survey, 867 files, honest numbers).**
+
+| Class | Baseline (HEAD `b4559472`) | Increment 7 | Δ |
+|---|--:|--:|--:|
+| CHECKED-CLEAN | 26 (3.0%) | 26 (3.0%) | — |
+| CHECKED-FINDINGS | 13 (1.5%) | 16 (1.8%) | +3 |
+| OUT-OF-SUBSET | 822 (94.8%) | 819 (94.5%) | −3 |
+
+- **The coinductive fixture (the §9.8 trigger fixture) moved FINDINGS → CLEAN** —
+  whole-file, 0 markers, 0 rejections. The exact deferral that fired three times is
+  closed. (The fixture is in `lib/type/analysis/corpus/`, excluded from the 867-file
+  survey set, so it does not appear in the table; it is the increment's headline
+  acceptance result.)
+- **Three files moved OUT-OF-SUBSET → CHECKED-FINDINGS** (`agent/preset.lua`,
+  `unified/rehype_shift_heading/init.lua`, `unified/rehype_urls/init.lua`): field-path
+  narrowing unblocked their lowering past a prior out-of-subset marker, so they now
+  lower far enough to REACH their next boundary (a cross-module `HastNode` alias / a
+  visitor-callback `unknown` return), surfaced as a `type-mismatch`. This is forward
+  progress (more of each file lowers), not a regression — the marker is a sound
+  refusal (`emit_check_against` marks only when `is_subtype` genuinely fails; the
+  substrate has 0 rejections), and the narrowing itself produces correct types.
+- **The 11 round-4 false-positive corpus files do NOT all clear.** Field-path
+  narrowing was ONE of several compounding root causes. The honest per-file next
+  boundary:
+  - `rehype_meta`, `rehype_document`, `rehype_infer_title` — the `if opts_t.title and
+    …` narrowing now works (verified in isolation, CLEAN), but each compounds with a
+    cross-module `HastNode` alias and `el()`/`text()` module-local functions whose
+    returns are `unknown` (the §6.8 closure/unannotated-named synthesis boundary). Next
+    boundary: **cross-module alias resolution + unannotated-module-function return
+    synthesis.**
+  - `taskgraph/frontier`, `type/v7_mr0/fixtures` — cross-module `FrontierNode` write /
+    deeply-optional record literals. Next boundary: **cross-module value-type
+    resolution** (the §9.10 trusted-boundary deferral), not field-path narrowing.
+  - `agent/render` — `pairs(task_inputs)` keys typed `unknown` + cross-module
+    `val_to_str`. Next boundary: **`pairs`-key typing + cross-module resolution**, not
+    field-path (the guards are `if v ~= nil` over a `pairs` loop variable, not a path).
+  - `base64url`, `math/init`, `caps/kv`, `caps/time` — `unknown`-claim ABSTENTIONS
+    (cross-module value-type / capability-closure / closure-check synthesis). Next
+    boundary: **module-value-type / closure synthesis** (§9.13), unrelated to paths.
+  - `socket/init` — `xmodule-alias-error` (sibling-alias resolution). Next boundary:
+    **cross-module sibling-alias import** (§9.11), unrelated to paths.
+
+**Deferrals recorded (un-defer triggers).**
+
+- **Depth-2 paths (`x.f.g`).** §6.11.1 set the depth bound at 1, justified by the
+  corpus (the only depth-2 reads are unconditional writes through casts, not guarded
+  narrowing sites). Un-defer: a real guarded `x.f.g` read in a `lib/` file. Strictly
+  additive (a longer path string, the same opaque-name machinery).
+- **Call-invalidation relaxation (purity/effects).** The conservative "any call
+  invalidates a mutable-base path refinement" is sound without escape analysis but
+  imprecise: a provably-pure callee, or a base proven not to escape, would let the
+  refinement survive. Un-defer: a purity/effects substrate (`docs/effects.md`) that
+  lets the slice prove a callee pure and a base un-escaped. Recorded honestly as the
+  imprecision the conservative rule accepts.
+- **Readonly-field survival is implemented in principle, untested by corpus.** §6.11.2
+  derives that a readonly path refinement survives calls/writes (no write can reach a
+  readonly field). The corpus's narrowed paths are all mutable record fields, so this
+  is a soundness-completeness statement; if a readonly narrowed path appears, it is the
+  acceptance test for the readonly-survival branch.
+
+**Regression.** No pre-existing test broken; the only updated tests are the
+coinductive fixture's (FINDINGS → CLEAN) and the 11-fixture honest-split tally
+(7 CLEAN / 0 FINDINGS / 4 OUT-OF-SUBSET, was 6 / 1 / 4).
