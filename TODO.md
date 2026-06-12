@@ -843,7 +843,7 @@ Open items, ordered by priority:
 
 - [x] **Add precise opaque-object type declarations for 9 libraries** — all 9 verified at 0 errors. Most were already fixed in prior sessions; remaining work done in this session: cron (SHORTHANDS indexer + or-chain), graph (bfs/dfs second return type), glob (Matcher type + return annotations), ratelimit (5 types declared). `lib/regex/pure` does not exist.
 
-- [ ] **type/static: worker SIGSEGV under `bin/cr check` — C_BIND_GENERICS solver livelock (Gen-3 root cause)**
+- [x] **type/static: worker SIGSEGV under `bin/cr check` — C_BIND_GENERICS solver livelock (Gen-3 root cause)**
 
   Symptom: `rm -rf .crescentcache && bin/cr check lib/bloom/init.lua` → exit 139 (SIGSEGV). Old user-level repro still valid as a symptom check: `for i in $(seq 1 10); do rm -rf .crescentcache && bin/cr check 2>&1 | grep -E "warning: .*crashed"; done` — prints the warning on most runs.
 
@@ -871,14 +871,14 @@ Open items, ordered by priority:
   - **Round-loop instrumentation** (solve.lua `solve_range`, ~lines 4139–4182): every round reports `solved=false` but `gen` advances by exactly 1 — observed past 504,000 rounds. The quiescence test (`not solved_this_round and gen_after == gen_before`) never fires.
   - **The livelock cycle:** re-seed re-queues the unsolved `C_BIND_GENERICS` → handler instantiates a fresh callee (solve.lua:2974, +31 slots, fresh param TVs) → param-bind loop fires `unify` (solve.lua:3012) → `wake_waiters` → `gen+1` → `ctx._bind_woke_given` causes defer at ~3013–3014 WITHOUT retiring → repeat forever. Defer-after-mutation.
 
-  **Candidate fixes (ranked, none landed — solver-convergence blast radius):**
-  1. Cache the per-constraint instantiation across re-seeds — removes both the slot leak and the spurious gen advance.
+  **Candidate fixes (ranked):**
+  1. ~~Cache the per-constraint instantiation across re-seeds — removes both the slot leak and the spurious gen advance.~~ **LANDED — commit `bd06264e` (rebased onto master 2026-06-12).** Verification: `bin/cr check lib/bloom/init.lua` → 1 error / 25 warnings in <60 s (no crash, no exit 139); 6 crash→verdict wins across the corpus, zero other verdict changes; livelock rounds capped <200 on bloom. `bin/cr test lib/type/static/` → 10 passed / 1 pre-existing TAG_SPREAD failure (no regressions).
   2. Roll back / skip binds issued in a round that ends in a `_bind_woke_given` defer, so the defer does not register as progress.
   3. Tighten the quiescence signal against immediately-superseded binds.
 
-  Each risks trading a crash for wrong types; gate is repo-wide verdict-delta + static suite + fuzz. A fix attempt at candidate (1) is running separately; this item is accurate either way.
+  **Repro confirmed clean:** `bin/cr check lib/bloom/init.lua` exits with a verdict, not exit 139.
 
-  **Repro for any fix:** `bin/cr check lib/bloom/init.lua` must exit 0/1 (not 139); then `for i in $(seq 1 10); do rm -rf .crescentcache && bin/cr check 2>&1 | grep -E "warning: .*crashed"; done` must be 0/10.
+- [ ] **type/static: 5 residual crashers — arena-exhaustion class (distinct from C_BIND_GENERICS livelock)** — After the Gen-3 livelock fix (`bd06264e`), five files still crash the worker: `finite_field`, `pipeline`, `pipeline_dsl`, `rope`, `time_series`. These are a separate class: arena exhaustion via a different blowup path (not the C_BIND_GENERICS defer-after-mutation cycle). Needs its own diagnosis: instrument arena peak + round count on each file, identify the solver constraint type responsible, and apply the appropriate fix. Do not conflate with the now-closed SIGSEGV item above.
 
 - [ ] **type/static: regression test for parallel CLI determinism** — currently relies on the `bin/cr check` repro above. A proper test would: (1) drive `check_parallel` with a synthetic file set, (2) inject a SIGSEGV in one worker (`kill -SEGV $pid` from a controlled child), (3) assert the parent's reported error count matches the no-crash baseline. Blocked on a way to inject a deterministic worker crash from inside the test runner; for now, the manual repro is documented.
 

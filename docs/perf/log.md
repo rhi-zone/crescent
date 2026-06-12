@@ -6,6 +6,23 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-06-12: C_BIND_GENERICS livelock fix — full-tree parallel cold check (8× speedup)
+
+Baseline: `ec390737` (pre-fix). Fix: `bd06264e` (per-constraint instantiation cache in `lib/type/static/solve.lua`).
+
+Mechanism: the `C_BIND_GENERICS` handler was re-instantiating a fresh callee on every re-seed (defer-after-mutation cycle), advancing `gen` without retiring the constraint and growing the arena by ~31 TypeSlots/call. >1 M calls on `lib/bloom/init.lua` alone → arena exhaustion → SIGSEGV. The fix caches the instantiated callee per constraint across re-seeds, breaking the livelock; rounds cap <200 on bloom.
+
+| Measurement | Baseline (`ec390737`) | Fix (`bd06264e`) |
+|---|---|---|
+| Full-tree parallel cold check (`bin/cr check`) | 167–185 s | 20–22 s |
+| `bin/cr check lib/bloom/init.lua` | crash (exit 139) | verdict in <60 s (1 error / 25 warnings) |
+| `bin/cr test lib/type/static/` | 10 passed / 1 pre-existing TAG_SPREAD failure | 10 passed / 1 pre-existing TAG_SPREAD failure (no regressions) |
+| Corpus verdict changes | — | 6 crash→verdict wins; zero other verdict changes |
+
+Speedup: ~8× (167–185 s → 20–22 s) on the full-tree parallel cold-check path, driven entirely by eliminating the livelock's arena growth and associated swap pressure.
+
+---
+
 ## 2026-06-12: crescent slice v1 — audit round 1, finding 4 (subtype memoization)
 
 Benchmark: `bin/cr run lib/type/analysis/slice_subtype_bench.lua`. LuaJIT 2.1.1774896198.
