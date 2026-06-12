@@ -207,14 +207,22 @@ Rung status (ladder, design doc):
   order) is led by named parameters (266 files), cross-module/unresolved type
   aliases (232), `self` parameters (128), and `T[]` array shorthand (88). The survey
   is a reusable measurement tool, re-run after every v2 increment.
-  **End-to-end survey (Pass 5, `slice_survey.lua --e2e`): 0.3% CHECKED-CLEAN** (3
-  files), 98.6% OUT-OF-SUBSET, 1 TIMEOUT over 865 files — the honest collapse from
-  the annotation-only 26.6% once the §5 *statement* subset is also required. Two
-  high-value findings: a parser non-termination on real code (FIXED with a
-  progress guard) and a substrate-scaling TIMEOUT on a 713-claim file (RECORDED).
-  The statement-lowering demand ranking (operator typing, global/module model,
-  unannotated-function inference, assignment forms) is v2's §6 build order (§9.8,
-  `docs/slice-survey-v1.md` "v1 end-to-end").
+  **End-to-end survey (`slice_survey.lua --e2e`): 0.6% CHECKED-CLEAN** (5 files),
+  98.7% OUT-OF-SUBSET, **0 TIMEOUT** over 868 files. The whole-file CLEAN number is
+  gated by each file's LAST out-of-subset construct; the load-bearing delta is the
+  CONSTRUCT histogram. **Slice v2 increment 3** (§6.7) landed the top of that
+  histogram — operator typing (`synth_binop`/`synth_unop`, metatable-free; the
+  metatable cases are out-of-subset deferrals, never errors), assignment forms
+  (multi-assign/swap/indexer-write), method calls (`o:m()` desugar), unannotated
+  functions (params `unknown`, body-synthesized return), and an injected stdlib cap
+  (caps-first). `operator-concat`/`operator-arith`/`method-call`/named-`unannotated-
+  function` all DROPPED OUT of the ranking; the new front is globals
+  (`unbound-name:package`/`require`/`table`), assignment/multi-return forms, and
+  anonymous closures. Two new evidence methods only; substrate untouched. The
+  `require`-returns-module-VALUE-type synthesis + broader globals model is the
+  dependency-honest TAIL (§9.12/§10.4). Earlier findings: a parser non-termination
+  (FIXED) and a substrate-scaling TIMEOUT (FIXED, content-addressed keys). See
+  `docs/slice-survey-v1.md` "after v2 increment 3".
 
 Limits:
 

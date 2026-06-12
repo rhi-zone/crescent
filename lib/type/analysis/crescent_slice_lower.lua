@@ -435,11 +435,35 @@ local function new_parser(toks, anns_by_line)
 					base = { k = "indexdyn", obj = base, key = ke }
 				end
 			elseif s.kind == ":" then
-				-- method call o:m(...) — out-of-subset (no method-call synth in v1).
+				-- method call o:m(args) desugars to o.m(o, args) (§6.7.5). We build a
+				-- `methodcall` node carrying the receiver, method name, and args; the
+				-- synth layer prepends the receiver as the first argument.
 				advance()
 				local nm = peek()
-				if nm.kind == "name" then advance() end
-				return oos("method-call", s.line, ":" .. (nm.text or ""))
+				if nm.kind ~= "name" then return oos("method-call", s.line, ":") end
+				advance()
+				local recv = base --[[: unknown ]]
+				-- the call arguments. Lua method calls always carry an arg list (or a
+				-- single string/table arg).
+				local mn = peek()
+				local margs = {} --[[: { [integer]: unknown } ]]
+				if mn.kind == "(" then
+					advance()
+					if not check(")") then
+						while true do
+							margs[#margs + 1] = parse_expr()
+							if not accept(",") then break end
+						end
+					end
+					if not accept(")") then return oos("method-call", s.line, "(") end
+				elseif mn.kind == "string" then
+					advance(); margs[1] = { k = "str", v = mn.text }
+				elseif mn.kind == "{" then
+					margs[1] = parse_table()
+				else
+					return oos("method-call", s.line, ":" .. nm.text)
+				end
+				base = { k = "methodcall", recv = recv, method = nm.text, args = margs }
 			elseif s.kind == "(" then
 				advance()
 				local args = {} --[[: { [integer]: unknown } ]]
@@ -727,7 +751,7 @@ local function new_parser(toks, anns_by_line)
 				end
 				return { k = "assign", targets = targets, values = values, sig = sig_for(line) }
 			end
-			if type(first) == "table" and (first.k == "call") then
+			if type(first) == "table" and (first.k == "call" or first.k == "methodcall") then
 				return { k = "callstmt", call = first }
 			end
 			return oos("exprstmt", line, t.text)
@@ -931,7 +955,7 @@ end
 --::   to?: unknown, step?: unknown, iter?: unknown, call?: unknown,
 --::   else_body?: unknown,
 --::   g?: string, inner?: unknown, eq?: boolean, tyname?: string, lit?: unknown,
---::   test?: unknown,
+--::   test?: unknown, recv?: unknown, method?: string, operand?: unknown,
 --:: }
 
 -- Narrow an `unknown` AST node to the typed `LV` view, or nil if not a table.
@@ -1212,6 +1236,24 @@ local function synth_call_expr(lc, ctx, e)
 	return result, cid
 end
 
+-- Lower a method call `o:m(a1..an)` by desugaring to `o.m(o, a1..an)` (§6.7.5).
+-- The receiver `o` is synthesized once; the method `m` is read off `o`'s type
+-- (synth_index), yielding the method's fn type whose first param is `self`; the
+-- call then checks `o ⇐ self` and each `ai ⇐ Pi`. Returns (R.fixed[1], cid).
+--: (LC, SliceCtx, unknown) -> (Ty | nil, Id | nil)
+local function synth_methodcall_expr(lc, ctx, e)
+	local v = view(e)
+	if not v then return nil, nil end
+	local method = v.method
+	if type(method) ~= "string" then return nil, nil end
+	-- desugar: o.m is an index node; the call prepends o as the first argument.
+	local index_ast = { k = "index", obj = v.recv, field = method }
+	local prepended = { v.recv } --[[: { [integer]: unknown } ]]
+	for _, a in ipairs(v.args or {}) do prepended[#prepended + 1] = a end
+	local call_ast = { k = "call", fn = index_ast, args = prepended }
+	return synth_call_expr(lc, ctx, call_ast)
+end
+
 -- Lower a cast expression. A checked cast `--[[: T]]` emits check_cast; a force
 -- cast `--[[:! T]]` emits a trusted_signature boundary. Returns (T, claim_id).
 --: (LC, SliceCtx, unknown) -> (Ty | nil, Id | nil)
@@ -1271,38 +1313,59 @@ synth_expr = function(lc, ctx, e)
 	if k == "index" then return synth_index_expr(lc, ctx, e) end
 	if k == "cast" then return synth_cast_expr(lc, ctx, e) end
 	if k == "call" then return synth_call_expr(lc, ctx, e) end
+	if k == "methodcall" then return synth_methodcall_expr(lc, ctx, e) end
 	if k == "table" then return synth_table_expr(lc, ctx, e) end
 	if k == "unop" and v.op == "not" then return synth_andor_expr(lc, ctx, e) end
 	if k == "binop" and (v.op == "and" or v.op == "or") then return synth_andor_expr(lc, ctx, e) end
 	if k == "binop" then
-		-- arithmetic / comparison / concat. Comparisons ⇒ boolean; arithmetic over
-		-- numbers ⇒ number; concat ⇒ string. v1 models the result coarsely (no
-		-- operator-metamethod dispatch, §1.4) — adequate for guards/returns.
+		-- arithmetic / comparison / concat / equality (§6.7.1). The result kind is
+		-- fixed by the operator + the operand kinds (metatable-free). A
+		-- metatable-dependent operand is an out-of-subset DEFERRAL (operator-metamethod-*),
+		-- never a type-error claim — v1 cannot know the metatable.
 		local op = v.op or "?"
-		-- still synthesize operands so they stay in-subset (markers propagate).
-		local _, lcid = synth_expr(lc, ctx, v.left)
-		local _, rcid = synth_expr(lc, ctx, v.right)
-		local _ = lcid; local _ = rcid
-		if op == "==" or op == "~=" or op == "<" or op == ">" or op == "<=" or op == ">=" then
-			-- a comparison result is boolean; emit it as a fresh boolean literal-like
-			-- has_type via synth (no dedicated node) — we model it as a var-free
-			-- boolean by an out-of-subset-free path: a `not`-style boolean node.
-			local nid = lc.b.node({ t = "andor", op = "not" })
-			local cid = lc.b.fresh_claim("cmp")
-			A.add_claim(lc.state, S.has_type_claim(cid, ctx, nid, G.boolean()))
-			A.add_evidence(lc.state, A.evidence({ id = lc.b.fresh_ev("cmp"), claim = cid, method = "synth_and_or_not" }))
-			return G.boolean(), cid
-		end
-		if op == ".." then
-			-- concat ⇒ string; model as a string literal-typed node is unsound, so
-			-- record as out-of-subset (string from concat needs a synth rule v1
-			-- lacks — operator typing is §1.4). Honest marker.
-			mark(lc, { line = 0, construct = "operator-concat", text = ".." })
+		local lty, lcid = synth_expr(lc, ctx, v.left)
+		local rty, rcid = synth_expr(lc, ctx, v.right)
+		if not lty or not rty or not lcid or not rcid then return nil, nil end
+		local result = S.binop_result(op, lty, rty)
+		if not result then
+			-- operand outside the metatable-free core: deferral, tagged by family.
+			local fam --[[: string ]]
+			if op == ".." then fam = "concat"
+			elseif op == "<" or op == "<=" or op == ">" or op == ">=" then fam = "compare"
+			else fam = "arith" end
+			mark(lc, { line = 0, construct = "operator-metamethod-" .. fam, text = op })
 			return nil, nil
 		end
-		-- arithmetic. v1 has no numeric operator synth rule; mark it (honest).
-		mark(lc, { line = 0, construct = "operator-arith:" .. op, text = op })
-		return nil, nil
+		local lpc = lc.state.claims[A.idk(lcid)]
+		local rpc = lc.state.claims[A.idk(rcid)]
+		local lref = lpc and lpc.args and lpc.args.node --[[: unknown ]]
+		local rref = rpc and rpc.args and rpc.args.node --[[: unknown ]]
+		local nid = lc.b.node({ t = "binop", op = op, left = lref, right = rref })
+		local cid = lc.b.fresh_claim("binop")
+		A.add_claim(lc.state, S.has_type_claim(cid, ctx, nid, result))
+		A.add_evidence(lc.state, A.evidence({ id = lc.b.fresh_ev("binop"), claim = cid,
+			method = "synth_binop", inputs = { lcid, rcid } }))
+		return result, cid
+	end
+	if k == "unop" and (v.op == "#" or v.op == "-") then
+		-- unary length `#` / minus `-` (§6.7.1). `not` is handled by synth_andor_expr.
+		local op = v.op
+		local oty, ocid = synth_expr(lc, ctx, v.expr)
+		if not oty or not ocid then return nil, nil end
+		local result = S.unop_result(op, oty)
+		if not result then
+			local fam = op == "#" and "len" or "unm"
+			mark(lc, { line = 0, construct = "operator-metamethod-" .. fam, text = op })
+			return nil, nil
+		end
+		local opc = lc.state.claims[A.idk(ocid)]
+		local oref = opc and opc.args and opc.args.node --[[: unknown ]]
+		local nid = lc.b.node({ t = "unop", op = op, operand = oref })
+		local cid = lc.b.fresh_claim("unop")
+		A.add_claim(lc.state, S.has_type_claim(cid, ctx, nid, result))
+		A.add_evidence(lc.state, A.evidence({ id = lc.b.fresh_ev("unop"), claim = cid,
+			method = "synth_unop", inputs = { ocid } }))
+		return result, cid
 	end
 	if k == "func" then
 		-- a bare anonymous function used in an expression position WITHOUT a
@@ -1450,6 +1513,50 @@ local function guard_var(guard_node)
 	return nil
 end
 
+-- Flatten an RHS value list into positional slots (§6.7.4 width rule). Each value
+-- 1..n-1 contributes ONE slot (its single-value type); the LAST value contributes
+-- its full multi-return tuple when it is a call to a known multi-return fn (the
+-- §6.5.5 Ret tuple), else one slot. Returns a slot array `{ { ty, cid? } }` (cid is
+-- present for slots backed by a synthesized claim; tuple-expanded slots beyond
+-- slot 1 carry only `ty`). Returns nil if any value is out-of-subset.
+--: (LC, SliceCtx, { [integer]: unknown }) -> ({ [integer]: { ty: Ty, cid: Id | nil } }) | nil
+local function flatten_values(lc, ctx, values)
+	local slots = {} --[[: { [integer]: { ty: Ty, cid: Id | nil } } ]]
+	local n = #values
+	for i = 1, n do
+		local val = values[i]
+		local vv = view(val)
+		local is_last = (i == n)
+		-- the last value, when a call to a multi-return fn, expands to its Ret tuple.
+		if is_last and vv and vv.k == "call" then
+			local fnv = view(vv.fn)
+			local fname = fnv and fnv.name
+			local fty = type(fname) == "string" and ctx_get(ctx, fname) or nil
+			if fty and fty.kind == "fn" then
+				local vty, vcid = synth_call_expr(lc, ctx, val)
+				if not vty or not vcid then return nil end
+				local ret = fty.ret or ({ fixed = {} } --[[: Ret ]])
+				if #ret.fixed <= 1 then
+					slots[#slots + 1] = { ty = vty, cid = vcid }
+				else
+					slots[#slots + 1] = { ty = ret.fixed[1], cid = vcid }
+					for j = 2, #ret.fixed do
+						slots[#slots + 1] = { ty = ret.fixed[j], cid = nil }
+					end
+				end
+				goto continue
+			end
+		end
+		do
+			local vty, vcid = synth_expr(lc, ctx, val)
+			if not vty or not vcid then return nil end
+			slots[#slots + 1] = { ty = vty, cid = vcid }
+		end
+		::continue::
+	end
+	return slots
+end
+
 --: (LC, SliceCtx, unknown, Ty | nil) -> nil
 local function lower_stmt(lc, ctx, s, ret_ty)
 	local sv = view(s)
@@ -1499,49 +1606,59 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 			end
 			return
 		end
-		-- multi-assignment `local a, b = f()`: bind from the call's multi-return Ret.
-		-- v1's synth_call returns slot 1; multi-slot binding is modeled by reading
-		-- the callee's declared Ret for slot i. Only the single-call RHS form is
-		-- handled; anything else marks out-of-subset.
-		local call = view(values[1])
-		if #values == 1 and call and call.k == "call" then
-			-- synth the callee to read Ret.
-			local fnv = view(call.fn)
-			local fname = fnv and fnv.name
-			local fty = type(fname) == "string" and ctx_get(ctx, fname) or nil
-			if fty and fty.kind == "fn" then
-				local ret = fty.ret or ({ fixed = {} } --[[: Ret ]])
-				-- lower the call (slot 1) for evidence; bind each name from Ret slots.
-				local _, ccid = synth_call_expr(lc, ctx, values[1])
-				if ccid then lc.requested[#lc.requested + 1] = ccid end
+		-- multi-name `local a, b = e1, e2` / `local a, b = f()` (§6.7.4): flatten the
+		-- RHS value list into positional slots (the last value expands to its
+		-- multi-return tuple), then bind each name to its slot type. Absent slots
+		-- bind nil (the surplus-target rule). Values evaluated under the pre-decl Γ.
+		if #values >= 1 then
+			local slots = flatten_values(lc, ctx, values)
+			if slots then
 				for i = 1, #names do
 					local nm = names[i]
 					if type(nm) == "string" then
-						local slot = ret.fixed[i] or G.nil_()
-						ctx[#ctx + 1] = { name = nm, type = TA.encode(slot) }
+						local slot = slots[i]
+						local sty = slot and slot.ty or G.nil_()
+						if slot and slot.cid then lc.requested[#lc.requested + 1] = slot.cid end
+						ctx[#ctx + 1] = { name = nm, type = TA.encode(sty) }
 					end
 				end
 				return
 			end
 		end
-		-- unmodeled multi-assignment.
+		-- the RHS list had an out-of-subset value: bind nothing further.
 		mark(lc, { line = 0, construct = "multi-assign", text = "local a, b = ..." })
 		return
 
 	elseif k == "localfunc" or k == "funcdecl" then
-		-- a function definition. v1 requires the `--:` signature (§7.1). Without it,
-		-- mark out-of-subset (unannotated function synthesis is the §10 edge).
+		-- a function definition. ANNOTATED (`--:`): params from the signature, body
+		-- checked against the declared return. UNANNOTATED (§6.7.3): params synthesize
+		-- as `unknown` (forcing narrowing per the posture), the return is synthesized
+		-- from the body. A method def's implicit `self` is an ordinary first param
+		-- (§6.7.5): from the signature's first param when annotated, else `unknown`.
 		local fsig = sv.sig
-		if type(fsig) ~= "string" then
-			mark(lc, { line = 0, construct = "unannotated-function", text = "function " .. tostring(sv.name) })
-			return
+		local annotated = type(fsig) == "string"
+		local fty --[[: Ty | nil ]]
+		-- the declared params (annotated) or synthesized `unknown` params (unannotated).
+		local params --[[: Params ]] = { fixed = {} }
+		local fret --[[: Ret ]] = { fixed = {} }
+		if type(fsig) == "string" then
+			local parsed = ann_type(lc, fsig, 0)
+			if parsed == nil then return end
+			local p = parsed --[[: Ty ]]
+			if p.kind ~= "fn" then
+				mark(lc, { line = 0, construct = "function-sig-not-fn", text = fsig })
+				return
+			end
+			fty = p
+			if p.params then params = p.params end
+			if p.ret then fret = p.ret end
 		end
-		local fty = ann_type(lc, fsig, 0)
-		if not fty or fty.kind ~= "fn" then
-			if fty then mark(lc, { line = 0, construct = "function-sig-not-fn", text = sv.sig }) end
-			return
-		end
-		-- bind the function name in the OUTER context (so later calls resolve).
+		-- the declared `self` slot for a method (annotated sigs include `self: T`).
+		local self_off = 0 --: integer
+		if sv.is_method then self_off = 1 end
+		-- bind the function name in the OUTER context (so later calls resolve). For
+		-- the unannotated case, bind fn(unknown^n, unknown) — a usable conservative
+		-- shape (callers get `unknown` results, forcing narrowing).
 		local fname --[[: string | nil ]]
 		local tgtv = view(sv.target)
 		local svname = sv.name
@@ -1550,32 +1667,51 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 		if k == "localfunc" and type(svname) == "string" then fname = svname
 		elseif tgtv and tgtv.k == "name" and type(tname) == "string" then fname = tname
 		elseif tgtv and tgtv.k == "index" and type(tfield) == "string" then fname = tfield end
-		if fname then ctx[#ctx + 1] = { name = fname, type = TA.encode(fty) } end
-		-- check the body under Γ extended with the params (each param : declared type).
-		local params = fty.params or ({ fixed = {} } --[[: Params ]])
-		if sv.is_method then
-			-- a method def carries an implicit `self` first param — out-of-subset
-			-- (v1 params are positional; the survey tags self separately).
-			mark(lc, { line = 0, construct = "named-param-self", text = "self" })
-		end
+		-- build the body context extended with the params.
 		local body_ctx = {} --[[: SliceCtx ]]
 		for i = 1, #ctx do body_ctx[i] = ctx[i] end
+		if sv.is_method then
+			-- `self` is the first positional param (§6.7.5): annotated sig supplies its
+			-- type as params.fixed[1]; unannotated ⇒ unknown.
+			local self_ty --[[: Ty ]] = G.unknown()
+			local p1 = params.fixed[1]
+			if annotated and p1 then self_ty = p1 end
+			body_ctx[#body_ctx + 1] = { name = "self", type = TA.encode(self_ty) }
+		end
 		for i, p0 in ipairs(sv.params or {}) do
 			local pname = p0.name
-			local pty = params.fixed[i]
+			local pty --[[: Ty | nil ]]
+			if annotated then pty = params.fixed[i + self_off] else pty = G.unknown() end
 			if type(pname) ~= "string" then
 				-- skip
-			elseif not pty then
+			elseif annotated and not pty then
 				mark(lc, { line = 0, construct = "param-arity", text = pname })
 			else
-				body_ctx[#body_ctx + 1] = { name = pname, type = TA.encode(pty) }
+				body_ctx[#body_ctx + 1] = { name = pname, type = TA.encode(pty or G.unknown()) }
 			end
 		end
-		local rty --[[: Ty ]]
-		local ret = fty.ret or ({ fixed = {} } --[[: Ret ]])
-		local r0 = ret.fixed[1]
-		if r0 then rty = r0 else rty = G.nil_() end
-		lower_block(lc, body_ctx, sv.body, rty)
+		if fty ~= nil then
+			local f = fty --[[: Ty ]]
+			if fname then ctx[#ctx + 1] = { name = fname, type = TA.encode(f) } end
+			-- `local function f` is in scope inside its OWN body (Lua's recursive
+			-- binding: `local f; f = function...`); bind it in body_ctx too.
+			if fname and k == "localfunc" then body_ctx[#body_ctx + 1] = { name = fname, type = TA.encode(f) } end
+			local rty --[[: Ty ]]
+			local r0 = fret.fixed[1]
+			if r0 then rty = r0 else rty = G.nil_() end
+			lower_block(lc, body_ctx, sv.body, rty)
+		else
+			-- unannotated: bind fn(unknown^n, unknown) in the outer ctx; lower the body
+			-- in SYNTHESIS mode (ret_ty = nil) — returns request their value claims,
+			-- not checked against a declared return (the return is body-synthesized).
+			local pn = #(sv.params or {}) + self_off
+			local pfixed = {} --[[: Ty[] ]]
+			for i = 1, pn do pfixed[i] = G.unknown() end
+			local ufty = G.fn({ fixed = pfixed }, { fixed = { G.unknown() } })
+			if fname then ctx[#ctx + 1] = { name = fname, type = TA.encode(ufty) } end
+			if fname and k == "localfunc" then body_ctx[#body_ctx + 1] = { name = fname, type = TA.encode(ufty) } end
+			lower_block(lc, body_ctx, sv.body, nil)
+		end
 		return
 
 	elseif k == "return" then
@@ -1700,8 +1836,8 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 		return
 
 	elseif k == "callstmt" then
-		-- a call in statement position: synth it (effects/typecheck its args).
-		local _, ccid = synth_call_expr(lc, ctx, sv.call)
+		-- a call/method-call in statement position: synth it (typecheck its args).
+		local _, ccid = synth_expr(lc, ctx, sv.call)
 		if ccid then lc.requested[#lc.requested + 1] = ccid end
 		return
 
@@ -1735,7 +1871,60 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 				lc.requested[#lc.requested + 1] = vcid
 				return
 			elseif tgt and tgt.k == "indexdyn" then
+				-- dynamic-key write `t[e] = v` (§6.7.4). Over an indexer-typed table
+				-- (`{ [K]: V }`), check `e ⇐ K` and `v ⇐ V` (the index-signature write
+				-- rule). Over a closed rec (no element type), it stays out-of-subset.
+				local oty = synth_expr(lc, ctx, tgt.obj)
+				if oty then
+					local kty = S.index_result(oty, nil, G.unknown())
+					-- kty non-nil ⇒ the object admits a dynamic key (indexer/open). We
+					-- need the element type V: probe with the key's own type.
+					local key_ty, key_cid = synth_expr(lc, ctx, tgt.key)
+					if key_ty and key_cid then
+						local vty2 = S.index_result(oty, nil, key_ty)
+						if vty2 then
+							local vpc = lc.state.claims[A.idk(vcid)]
+							local vref = vpc and vpc.args and vpc.args.node --[[: unknown ]]
+							local caid = emit_check_against(lc, ctx, vcid, vref, vty, vty2)
+							if caid then lc.requested[#lc.requested + 1] = caid end
+							return
+						end
+					end
+					local _ = kty
+				end
 				mark(lc, { line = 0, construct = "dynamic-index-assign", text = "t[e] = v" })
+				return
+			end
+		end
+		-- multi-target assignment `a, b = e1, e2` / swap `a, b = b, a` (§6.7.4): the
+		-- parallel rule — RHS values synthesized under the PRE-assignment Γ, zipped
+		-- positionally to targets. v1 is flow-insensitive, so reassigning a local
+		-- just requests the value claim; a field/indexer target checks the write.
+		if #targets >= 1 and #values >= 1 then
+			local slots = flatten_values(lc, ctx, values)
+			if slots then
+				for i = 1, #targets do
+					local tgt = view(targets[i])
+					local slot = slots[i]
+					if slot and slot.cid then
+						if tgt and tgt.k == "name" then
+							lc.requested[#lc.requested + 1] = slot.cid
+						elseif tgt and tgt.k == "index" and type(tgt.field) == "string" then
+							local oty = synth_expr(lc, ctx, tgt.obj)
+							local fty = oty and S.index_result(oty, tgt.field, nil) or nil
+							if fty then
+								local spc = lc.state.claims[A.idk(slot.cid)]
+								local sref = spc and spc.args and spc.args.node --[[: unknown ]]
+								local caid = emit_check_against(lc, ctx, slot.cid, sref, slot.ty, fty)
+								if caid then lc.requested[#lc.requested + 1] = caid end
+							else
+								mark(lc, { line = 0, construct = "field-assign", text = "t.f = v" })
+							end
+						else
+							mark(lc, { line = 0, construct = "assign-target", text = "complex target" })
+						end
+					end
+				end
 				return
 			end
 		end
@@ -1801,6 +1990,70 @@ lower_block = function(lc, ctx, blk, ret_ty)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- §6.7.2 Stdlib model (injected capability, NEVER a `_G`/`io` reach)
+-- ════════════════════════════════════════════════════════════════════════════
+--
+-- A small, EXPLICIT stdlib-cap table: the handful of stdlib names the corpus's
+-- checked syntax reaches, each as an ordinary `Ty` binding in the top-level Γ.
+-- Caps-first (§6.7.2, CLAUDE.md "No ambient globals by default"): the stdlib model
+-- is INJECTED via `opts.stdlib`; absent the cap, these names stay
+-- `unbound-name:*`, never a silent global. `default_stdlib()` is the model a
+-- caller (the survey, tests) may inject; the library never reads `_G`.
+--
+-- These are metatable-free, monomorphic signatures of the metatable-free core.
+-- The generic stdlib callees (pairs/ipairs) are NOT here — they are the special
+-- loop forms (§5.2). tonumber returns `number | nil` (the parse-failure union).
+-- Builds in the CURRENT interner generation (no reset): the caller is responsible
+-- for the generation (M.lower builds it after its own G.reset()).
+--: () -> { [string]: Ty }
+function M.default_stdlib()
+	local num = G.number()
+	local int = G.integer()
+	local str = G.string()
+	local num_or_nil = G.union({ num, G.nil_() })
+	--: (Ty[], Ty) -> Ty
+	local function fn1(params, ret) return G.fn({ fixed = params }, { fixed = { ret } }) end
+	local str_or_nil = G.union({ str, G.nil_() })
+	-- string.* (the subset the corpus reaches), each also callable as a method
+	-- (`s:sub(...)`) since method-call desugars to `string.sub(s, ...)` — but the
+	-- receiver-as-first-arg form means a method on a string value reads the field off
+	-- the STRING type, not the `string` library table. v1 models string method calls
+	-- via the `string` library table only (the `("x"):m()` receiver-field form is a
+	-- metatable lookup, out-of-subset); these are the `string.m(...)` library calls.
+	local string_rec = G.rec({
+		{ key = "sub", ty = fn1({ str, int, int }, str), optional = false, readonly = false },
+		{ key = "format", ty = G.fn({ fixed = { str }, vararg = G.unknown() }, { fixed = { str } }), optional = false, readonly = false },
+		{ key = "rep", ty = fn1({ str, int }, str), optional = false, readonly = false },
+		{ key = "lower", ty = fn1({ str }, str), optional = false, readonly = false },
+		{ key = "upper", ty = fn1({ str }, str), optional = false, readonly = false },
+		{ key = "len", ty = fn1({ str }, int), optional = false, readonly = false },
+		{ key = "byte", ty = fn1({ str, int }, int), optional = false, readonly = false },
+		{ key = "char", ty = G.fn({ fixed = {}, vararg = int }, { fixed = { str } }), optional = false, readonly = false },
+		{ key = "find", ty = G.fn({ fixed = { str, str }, vararg = G.unknown() }, { fixed = { G.union({ int, G.nil_() }), G.union({ int, G.nil_() }) } }), optional = false, readonly = false },
+		{ key = "match", ty = G.fn({ fixed = { str, str }, vararg = G.unknown() }, { fixed = { str_or_nil } }), optional = false, readonly = false },
+		{ key = "gsub", ty = G.fn({ fixed = { str, str }, vararg = G.unknown() }, { fixed = { str, int } }), optional = false, readonly = false },
+		{ key = "gmatch", ty = fn1({ str, str }, G.func()), optional = false, readonly = false },
+		{ key = "reverse", ty = fn1({ str }, str), optional = false, readonly = false },
+	}, "open")
+	-- math.* subset: floor, ceil, abs, max, min, sqrt, huge.
+	local math_rec = G.rec({
+		{ key = "floor", ty = fn1({ num }, int), optional = false, readonly = false },
+		{ key = "ceil", ty = fn1({ num }, int), optional = false, readonly = false },
+		{ key = "abs", ty = fn1({ num }, num), optional = false, readonly = false },
+		{ key = "sqrt", ty = fn1({ num }, num), optional = false, readonly = false },
+		{ key = "max", ty = G.fn({ fixed = { num }, vararg = num }, { fixed = { num } }), optional = false, readonly = false },
+		{ key = "min", ty = G.fn({ fixed = { num }, vararg = num }, { fixed = { num } }), optional = false, readonly = false },
+		{ key = "huge", ty = num, optional = false, readonly = false },
+	}, "open")
+	return {
+		tonumber = fn1({ G.unknown() }, num_or_nil),
+		tostring = fn1({ G.unknown() }, str),
+		["string"] = string_rec,
+		["math"] = math_rec,
+	}
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- §6. Public entry: lower(source, filename) -> LowerResult
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -1811,7 +2064,7 @@ end
 -- TrustBoundary per module + a Dependency from each requested claim to that
 -- boundary) are added to the state. CAPS-FIRST: with no `read_file`, cross-module
 -- imports resolve to no aliases — never a reach for `io`.
---: (string, string, ({ read_file?: (string) -> (string | nil, string | nil) } | nil)) -> (LowerResult | nil, string | nil)
+--: (string, string, ({ read_file?: (string) -> (string | nil, string | nil), stdlib?: boolean | { [string]: Ty } } | nil)) -> (LowerResult | nil, string | nil)
 function M.lower(source, filename, opts)
 	G.reset()
 	local _ = filename
@@ -1862,6 +2115,25 @@ function M.lower(source, filename, opts)
 	local b = new_builder(state)
 	local lc = { b = b, requested = {}, markers = {}, aliases = scan.aliases,
 		stdlib_tb = tb.id, state = state } --[[: LC ]]
+	-- §6.7.2 stdlib cap: when `opts.stdlib` is requested, seed the top-level Γ with
+	-- the injected stdlib bindings (built AFTER this file's G.reset() so the tids are
+	-- in the current interner generation). Caps-first: absent the opt, no globals.
+	local top_ctx = {} --[[: SliceCtx ]]
+	if opts and opts.stdlib then
+		local sl = opts.stdlib
+		local model --[[: { [string]: Ty } ]] = {}
+		if sl == true then model = M.default_stdlib()
+		elseif type(sl) == "table" then model = sl --[[: { [string]: Ty } ]] end
+		-- re-intern under the current generation by encode→decode round-trip is not
+		-- needed: default_stdlib() built them in this generation. A caller-supplied
+		-- model must also be built in-generation; we encode each binding defensively.
+		local names = {} --[[: { [integer]: string } ]]
+		for n in pairs(model) do names[#names + 1] = n end
+		table.sort(names)
+		for _, n in ipairs(names) do
+			top_ctx[#top_ctx + 1] = { name = n, type = TA.encode(model[n]) }
+		end
+	end
 	-- carry the scan-phase + import-pass markers (alias errors, dynamic requires).
 	for _, m2 in ipairs(scan.markers) do lc.markers[#lc.markers + 1] = m2 end
 	for _, m3 in ipairs(imp.markers) do lc.markers[#lc.markers + 1] = m3 end
@@ -1869,7 +2141,7 @@ function M.lower(source, filename, opts)
 		lc.markers[#lc.markers + 1] = { line = 0, construct = "xmodule-alias-error",
 			text = er.module .. ":" .. er.name .. ": " .. er.err }
 	end
-	lower_block(lc, {}, chunk, nil)
+	lower_block(lc, top_ctx, chunk, nil)
 
 	-- 4b. cross-module dependency records (§6.6.3): every requested claim was checked
 	--     under the cross-module alias env, so each rides the cross_module_alias trust

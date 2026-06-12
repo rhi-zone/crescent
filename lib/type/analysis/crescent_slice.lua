@@ -576,6 +576,85 @@ end
 
 M.ipairs_kv = ipairs_kv
 
+-- ── Operator typing (§6.7.1, metatable-free) ─────────────────────────────────
+--
+-- Each operator's result kind is fixed by the operand KINDS when no metatable
+-- participates (the §1.4 metatable deferral binds: metatable-dependent operands
+-- are out-of-subset at the LOWERING, never an error claim here — this layer only
+-- types the in-core case). These pure helpers return the result Ty, or nil when
+-- an operand is outside the metatable-free core (the lowering then emits the
+-- `operator-metamethod-*` deferral marker). No name-keying: the dispatch is over
+-- the operator string and the structural operand kinds only.
+
+--: (Ty) -> boolean
+local function is_num(t) return SUB.is_subtype(t, G.number()) end
+--: (Ty) -> boolean
+local function is_int(t) return SUB.is_subtype(t, G.integer()) end
+--: (Ty) -> boolean
+local function is_str(t) return SUB.is_subtype(t, G.string()) end
+--: (Ty) -> boolean
+local function is_table_kind(t)
+	local k = t.kind
+	if k == "mu" then return is_table_kind(G.unfold(t)) end
+	return k == "rec" or k == "indexer" or k == "rec_with_indexer"
+end
+
+-- binop_result(op, L, R): the result type of `L op R`, or nil if out-of-core.
+--: (string, Ty, Ty) -> Ty | nil
+local function binop_result(op, lty, rty)
+	if op == "==" or op == "~=" then
+		-- equality is total over any two values (metatable-blind absent __eq); boolean.
+		return G.boolean()
+	end
+	if op == "<" or op == "<=" or op == ">" or op == ">=" then
+		-- order comparisons: both numbers OR both strings (compatible primitive pairs).
+		if (is_num(lty) and is_num(rty)) or (is_str(lty) and is_str(rty)) then
+			return G.boolean()
+		end
+		return nil
+	end
+	if op == ".." then
+		-- concat: each operand string|number; result is the base string type.
+		local sn = G.union({ G.string(), G.number() })
+		if SUB.is_subtype(lty, sn) and SUB.is_subtype(rty, sn) then return G.string() end
+		return nil
+	end
+	if op == "/" or op == "^" then
+		-- division / exponentiation: always number (real-valued).
+		if is_num(lty) and is_num(rty) then return G.number() end
+		return nil
+	end
+	if op == "+" or op == "-" or op == "*" or op == "%" then
+		if not is_num(lty) or not is_num(rty) then return nil end
+		-- integer iff BOTH operands integer-valued; else number.
+		if is_int(lty) and is_int(rty) then return G.integer() end
+		return G.number()
+	end
+	return nil
+end
+
+M.binop_result = binop_result
+
+-- unop_result(op, T): the result of `op T` for unary `#` / `-`. (`not` is the
+-- existing synth_and_or_not rule; it is not routed here.)
+--: (string, Ty) -> Ty | nil
+local function unop_result(op, ty)
+	if op == "#" then
+		-- length over a string or a table ⇒ integer.
+		if is_str(ty) or is_table_kind(ty) then return G.integer() end
+		return nil
+	end
+	if op == "-" then
+		-- unary minus: integer if operand integer-valued, else number.
+		if is_int(ty) then return G.integer() end
+		if is_num(ty) then return G.number() end
+		return nil
+	end
+	return nil
+end
+
+M.unop_result = unop_result
+
 -- ── Dependency helpers ───────────────────────────────────────────────────────
 
 --: (Id, Id) -> Dependency
@@ -1224,6 +1303,64 @@ function M.checker(cc, claim, ev)
 			return cc.REJECTED, "synth_numeric_for_var: the numeric-for control variable is integer | number", nil, nil
 		end
 		return accept({}, { trust_note() })
+
+	-- ── synth_binop (binary operator typing, §6.7.1) ──
+	-- node: { t="binop", op=<string>, left=NodeRef, right=NodeRef }. Premises: the
+	-- two operand has_type claims. The result kind is fixed by the operator + the
+	-- operand kinds (metatable-free; the metatable-dependent case never reaches here
+	-- — the lowering emits the operator-metamethod-* deferral instead).
+	elseif method == "synth_binop" then
+		if node.t ~= "binop" then return cc.REJECTED, "synth_binop applied to a non-binop node", nil, nil end
+		local op = node.op
+		if type(op) ~= "string" then return cc.REJECTED, "synth_binop: missing operator", nil, nil end
+		if #ev.inputs ~= 2 then return cc.REJECTED, "synth_binop requires two has_type premises (the operands)", nil, nil end
+		local lp, rp = ev.inputs[1], ev.inputs[2]
+		if not (cc.is_accepted(lp) and cc.is_accepted(rp)) then return cc.UNKNOWN, nil, nil, nil end
+		local lpr = read_typing(cc, lp, "has_type")
+		local rpr = read_typing(cc, rp, "has_type")
+		if not lpr or not rpr then return cc.REJECTED, "synth_binop premise is not a has_type claim", nil, nil end
+		if ctx_canon_key(cc, ctx) ~= ctx_canon_key(cc, lpr.ctx) or ctx_canon_key(cc, ctx) ~= ctx_canon_key(cc, rpr.ctx) then
+			return cc.REJECTED, "synth_binop premise context must match the conclusion's", nil, nil
+		end
+		local lref, rref = arg_id(node.left), arg_id(node.right)
+		if not lref or lref.space ~= lpr.node.space or lref.key ~= lpr.node.key then
+			return cc.REJECTED, "synth_binop left premise is not the left operand", nil, nil
+		end
+		if not rref or rref.space ~= rpr.node.space or rref.key ~= rpr.node.key then
+			return cc.REJECTED, "synth_binop right premise is not the right operand", nil, nil
+		end
+		local res = binop_result(op, lpr.type, rpr.type)
+		if not res then return cc.REJECTED, "synth_binop: operands are outside the metatable-free core for '" .. op .. "'", nil, nil end
+		if not ty_eq(res, want_ty) then
+			return cc.REJECTED, "synth_binop: asserted type does not match the operator's result kind", nil, nil
+		end
+		return accept({ dep_claim(claim.id, lp), dep_claim(claim.id, rp) }, { trust_note() })
+
+	-- ── synth_unop (unary `#` / `-` typing, §6.7.1) ──
+	-- node: { t="unop", op="#"|"-", operand=NodeRef }. Premise: the operand has_type.
+	elseif method == "synth_unop" then
+		if node.t ~= "unop" then return cc.REJECTED, "synth_unop applied to a non-unop node", nil, nil end
+		local op = node.op
+		if type(op) ~= "string" then return cc.REJECTED, "synth_unop: missing operator", nil, nil end
+		if op ~= "#" and op ~= "-" then return cc.REJECTED, "synth_unop: operator must be # or - (not is synth_and_or_not)", nil, nil end
+		if #ev.inputs ~= 1 then return cc.REJECTED, "synth_unop requires one has_type premise (the operand)", nil, nil end
+		local prem = ev.inputs[1]
+		if not cc.is_accepted(prem) then return cc.UNKNOWN, nil, nil, nil end
+		local pr = read_typing(cc, prem, "has_type")
+		if not pr then return cc.REJECTED, "synth_unop premise is not a has_type claim", nil, nil end
+		if ctx_canon_key(cc, ctx) ~= ctx_canon_key(cc, pr.ctx) then
+			return cc.REJECTED, "synth_unop premise context must match the conclusion's", nil, nil
+		end
+		local oref = arg_id(node.operand)
+		if not oref or oref.space ~= pr.node.space or oref.key ~= pr.node.key then
+			return cc.REJECTED, "synth_unop premise is not the operand", nil, nil
+		end
+		local res = unop_result(op, pr.type)
+		if not res then return cc.REJECTED, "synth_unop: operand is outside the metatable-free core for unary '" .. op .. "'", nil, nil end
+		if not ty_eq(res, want_ty) then
+			return cc.REJECTED, "synth_unop: asserted type does not match the operator's result kind", nil, nil
+		end
+		return accept({ dep_claim(claim.id, prem) }, { trust_note() })
 	end
 
 	-- (trusted_signature is handled before the decode preamble above — see the
@@ -1243,6 +1380,7 @@ function M.register(registry)
 		evidence_methods = {
 			"synth_lit", "synth_var", "synth_call", "synth_table", "synth_index",
 			"synth_function", "synth_and_or_not",
+			"synth_binop", "synth_unop",
 			"check_against", "check_cast",
 			"subtype_witness", "instantiate_witness", "narrow_guard",
 			"synth_loop_var", "synth_numeric_for_var",

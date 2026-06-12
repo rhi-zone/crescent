@@ -262,7 +262,9 @@ local function survey_file_e2e(path)
 	-- inject the read_file cap so cross-module aliases (§6.6) resolve in lowered
 	-- annotations too (the e2e path is dominated by statement-lowering gaps, but the
 	-- annotation resolution is the honest, complete behavior).
-	local res = L.lower(src, path, { read_file = read_file }) --[[: { requested: { [integer]: { space: string, key: string } }, expected: string, markers: { [integer]: { line: integer, construct: string, text: string } }, state: AnalysisState } | nil ]]
+	-- inject the §6.7.2 stdlib cap so stdlib calls (tonumber/string.sub/math.floor)
+	-- type via the injected model (caps-first: never a `_G` reach).
+	local res = L.lower(src, path, { read_file = read_file, stdlib = true }) --[[: { requested: { [integer]: { space: string, key: string } }, expected: string, markers: { [integer]: { line: integer, construct: string, text: string } }, state: AnalysisState } | nil ]]
 	if not res then
 		return { path = path, class = "PARSE-FAIL/OTHER", diags = {
 			{ line = 0, text = "", err = "lower failed" } }, constructs = {}, n_ann = 0 }

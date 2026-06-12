@@ -755,3 +755,93 @@ its aliases as Observations, the cross-artifact hop as a `cross_module_alias`
 TrustBoundary, and each consuming claim's reliance as a Dependency with a populated
 `invalidation` field — all via the EXISTING substrate API. No new object kind, no
 new claim predicate, no new evidence method, no `init.lua` change. See §9.10.
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     AFTER v2 INCREMENT 3 — appended by hand. Records the end-to-end
+     statement-coverage front delta (operator typing, assignments, method calls,
+     unannotated functions, the injected stdlib cap). This is an END-TO-END
+     (--e2e) delta; the GENERATED annotation survey at the top is unchanged by
+     increment 3 (it is statement-lowering, not annotation-grammar, work).
+════════════════════════════════════════════════════════════════════════════ -->
+
+## After v2 increment 3 (the end-to-end statement-coverage front)
+
+Slice v2 increment 3 (`docs/agnostic-static-analysis-crescent-slice.md` §6.7)
+landed the measured top of the **end-to-end** histogram: operator typing
+(`synth_binop`/`synth_unop`, metatable-free, §6.7.1), assignment forms
+(multi-assign / swap / indexer-typed dynamic-key write, §6.7.4), method calls
+(`o:m(args)` desugar to `o.m(o, args)`, §6.7.5), unannotated functions (params
+`unknown`, return body-synthesized, §6.7.3), and the injected stdlib cap
+(`tonumber`/`string`/`math`, caps-first, §6.7.2). Two new evidence methods only
+(`synth_binop`, `synth_unop`); everything else is lowering reach over existing
+methods. Substrate untouched (`init.lua` byte-for-byte).
+
+**End-to-end survey re-run** (`--e2e`, 868 files, per-file budget 5s, the survey
+now injects the §6.7.2 stdlib cap):
+
+| Class | after v2 incr 2 (substrate pass) | after v2 increment 3 |
+|---|--:|--:|
+| CHECKED-CLEAN | 5 (0.6%) | 5 (0.6%) |
+| CHECKED-FINDINGS | 0 | 0 |
+| OUT-OF-SUBSET | 855 (98.7%) | 856 (98.7%) |
+| NO-ANNOTATION | 6 (0.7%) | 6 (0.7%) |
+| TIMEOUT | 0 | 0 |
+
+**The whole-file CHECKED-CLEAN headline stays at 5 (0.6%) — and that is the
+honest, load-bearing finding of this increment.** A file is whole-file CLEAN only
+when EVERY checked statement is in-subset; the e2e metric is gated by the LAST
+out-of-subset construct in each file. The increment moved the *construct
+histogram* dramatically — but the long tail of GLOBALS, ANONYMOUS CLOSURES, and
+multi-return/dynamic-key forms still leaves at least one out-of-subset construct
+in nearly every real `lib/` file. The construct demand ranking is the real delta:
+
+| Rank | after incr 2 | files | after incr 3 | files | what moved |
+|--:|---|--:|---|--:|---|
+| top | `operator-concat` | 702 | `unbound-name:package` | 683 | operators GONE; globals now the front |
+| | `operator-arith:+` | 286 | `field-assign` | 514 | arith typed; assignment forms surface deeper |
+| | `method-call` | 214 | `dynamic-index` | 500 | method calls GONE (desugared) |
+| | `unannotated-function` | 471 | `multi-assign` | 435 | named funcs GONE; multi-assign reaches further |
+| | `named-param` | (gone incr 1) | `multi-return` | 429 | return-tuple statement form is the next item |
+
+Operators (`operator-concat`/`operator-arith:+`), `method-call`, and
+`unannotated-function` (named) have all DROPPED OUT of the top ranking. The
+residual `operator-metamethod-arith` (177) and `operator-metamethod-len` (125) are
+the GENUINE metatable-dependent operand cases (table + table, `#` on a non-string
+non-table) — out-of-subset **deferrals** with un-defer triggers (§1.4 posture),
+NOT type-error claims. The new front is:
+
+1. **Globals / module access** — `unbound-name:package` (683), `require` (409),
+   `table` (324), `setmetatable` (223), `pcall` (140). The injected stdlib cap
+   covers `tonumber`/`string`/`math`; the broader global model and
+   `require(...)`-returns-the-module-VALUE-type synthesis (§6.7.2's M-table
+   convention over the exporting module) is the dependency-honest TAIL of this
+   increment, recorded below.
+2. **Assignment / multi-return statement forms** — `field-assign` (514),
+   `dynamic-index` (500) / `dynamic-index-assign` (412) over non-indexer tables,
+   `multi-assign` (435), `multi-return` (429, the return-statement tuple form).
+3. **Anonymous closures** — `unannotated-closure` (393): an unannotated `function(x)
+   … end` in EXPRESSION position (distinct from the unannotated NAMED functions
+   this increment closed — those bind `unknown` params + body-synthesized return).
+   The §10 local-inference edge for the *expression-position* closure remains.
+
+**Corpus fixture movements** (the load-bearing `corpus_lower_test`, which lowers
+WITHOUT the stdlib cap — caps-first):
+
+- `boolean_narrowing` OUT-OF-SUBSET → **CLEAN**: `n == 0 and 1 / n < 0` types as
+  `boolean` (operators landed; `/` ⇒ number, `<`/`==` ⇒ boolean, `boolean and
+  boolean` ⇒ boolean).
+- `coinductive_recursive_types` OUT-OF-SUBSET → **FINDINGS**: operators unblocked
+  `s + tree_sum(...)`, so the lowering now REACHES the `tree_sum(node.left)` call —
+  and `node.left : TreeNode | nil` legitimately fails `<: TreeNode` because v1
+  narrows a VARIABLE, not a FIELD PATH (`if node.left then` does not refine
+  `node.left`). An HONEST type-mismatch from the field-path-narrowing deferral, NOT
+  a soundness bug: every REQUESTED claim still accepts (0 rejections). Field-path
+  narrowing is the recorded un-defer trigger.
+- `tonumber_return_type` is **CLEAN with the stdlib cap injected** (the survey path)
+  and stays OUT-OF-SUBSET without it (the corpus-test path) — the caps-first
+  posture made visible.
+
+The honest corpus split under real lowering moved **2 CLEAN / 9 OUT-OF-SUBSET → 3
+CLEAN / 1 FINDINGS / 7 OUT-OF-SUBSET**, 0 rejections anywhere. Full analysis suite
+green at 6282 assertions (6226 + 56 new); 0 TIMEOUT in the e2e survey; the touched
+files typecheck clean. Findings in §9.12.

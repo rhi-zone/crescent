@@ -1382,6 +1382,325 @@ no new evidence method, **no `init.lua` change.** This is the design's predictio
 discharged: cross-module resolution is a *consumer* of the multi-artifact model, not
 an extension of it.
 
+## 6.7 Increment v2.3 — the end-to-end statement-coverage front
+
+Status: design pass for slice **v2 increment 3**, the measured top of the *end-to-end*
+(statement-lowering) survey histogram (`docs/slice-survey-v1.md`, "v1 end-to-end"):
+operator typing (`operator-concat` 702 files, `operator-arith` 286), module/`require`
+access (`unbound-name:package` 681, `unbound-name:require` 396), unannotated-function
+handling (471), assignment forms (`assign` 696, `field-assign` 440, `multi-assign`
+312), and method calls (`method-call` 214). These are the largest gap between the slice
+and a checker one can point at an arbitrary `lib/` file: end-to-end CHECKED-CLEAN sits
+at 0.6% (5 files), ~99% out-of-subset, dominated entirely by these statement forms.
+
+Each addition below is derived **whole from Lua's value universe** (the v6 principle),
+metatable-free for v1 (the §1.4 metatable deferral binds), then its mechanization
+surface is named. The kernel fence (§3, ratified) binds: no complement, no match
+types, no global solving, no HKT, no new subtype machinery beyond the existing
+structural relation. The no-special-casing hard constraint binds: every rule is a
+value-universe derivation expressed as an evidence method the substrate routes blind,
+never a name-keyed handler. The dependency-honest order — operators and assignments
+before module access (module access *consumes* operator/assignment typing in real
+bodies) — is the landing order if the scope must be split.
+
+### 6.7.1 Operator typing — derived from Lua's evaluation semantics (metatable-free)
+
+**Value-universe derivation.** A Lua operator is a value-to-value function whose
+result kind is fixed by the operand kinds *when no metatable participates*. v1 types
+the metatable-free core exactly and tags the metatable-dependent operands as
+out-of-subset (a *deferral*, never an error claim — v1 cannot know the metatable, so
+claiming a type error would be unsound). The derivation pins each result from what the
+LuaJIT VM actually produces:
+
+- **Arithmetic `+ - * / % ^`.** Over `number`/`integer` operands the result is a
+  number. The integer-vs-number result rule, pinned from the LuaJIT 5.1 value
+  universe (the Crescent target):
+  - LuaJIT 5.1 numbers are IEEE doubles; there is no separate integer *runtime* tag
+    (unlike Lua 5.3). The slice's `integer` is a *type-level subkind* (`integer <:
+    number`, §1.2), describing integer-*valued* doubles.
+  - `/` and `^` **always** produce `number` (division and exponentiation are
+    real-valued: `4 / 2` is the double `2.0`, `2 ^ 2` is `4.0` — integer-valued, but
+    the operator's *type* is `number` because the universe does not guarantee an
+    integer-valued result for arbitrary operands, e.g. `1 / 3`). Decision: `/` and
+    `^` synthesize `number` unconditionally. Justified: the result kind is `number`
+    for *all* operand pairs; narrowing to `integer` would be unsound.
+  - `+ - * %` over two `integer`-typed operands synthesize `integer` (integer-valued
+    operands under these operators yield integer-valued results — `3 + 4`, `7 % 3`,
+    `3 * 4`, `5 - 2` are all integer-valued doubles). If *either* operand is a
+    non-integer `number`, the result is `number`. Decision: `+ - * %` synthesize
+    `integer` iff both operands are `<: integer`, else `number`. (Literal operands
+    `lit_int`/`lit_num` are `<: integer`/`<: number` respectively, so `1 + 2`
+    synthesizes `integer` — precise enough for the corpus's index arithmetic, without
+    a constant-folding rule, which is out of scope: v1 does not fold `1 + 2` to
+    `lit_int(3)`, only to `integer`.)
+  - Operands must each be `<: number`. A `lit_int`/`lit_num`/`integer`/`number`
+    operand qualifies. Anything else (a `string`, a `rec`, a `union` not `<: number`)
+    is the **metatable-dependent** case: tagged `operator-metamethod-arith`
+    (deferral + trigger: a corpus fixture whose checked syntax dispatches arithmetic
+    through a metamethod), never a type-error claim.
+- **Concat `..`.** Over `string|number` operands the result is `string` (Lua coerces
+  a number operand to its string form). Decision: each operand must be `<:
+  union(string, number)` (a `lit_str`, `string`, `lit_int`, `lit_num`, `integer`,
+  `number`, or a union of these qualifies); the result is `string`. A non-string,
+  non-number operand is `operator-metamethod-concat` (deferral). The result is the
+  base `string` type, never a `lit_str` (v1 does not fold concatenation).
+- **Order comparisons `< <= > >=`.** The universe permits these only over
+  *compatible primitive pairs*: two numbers, or two strings (Lua errors at runtime on
+  mixed or table operands without `__lt`/`__le`). Decision: both operands must be `<:
+  number`, **or** both `<: string`; the result is `boolean`. Mixed (one number, one
+  string) or non-primitive operands are `operator-metamethod-compare` (deferral —
+  v1 cannot know the operands carry comparison metamethods). Result `boolean`.
+- **Equality `== ~=`.** The universe permits these over *any* two values (Lua's `==`
+  never errors; absent `__eq` it is identity/primitive equality). Decision: operands
+  are unrestricted (each merely synthesized to keep it in-subset); the result is
+  `boolean`. The narrowing layer (§4) already consumes `==`/`~=` guards (`lit_eq`,
+  `nil_eq`, `tag_eq`); this rule supplies the *expression* type `boolean` for
+  `==`/`~=` used in non-guard position (e.g. `return a == b`).
+- **Length `#`.** Over `string` or `table` (`rec`/`indexer`/`rec_with_indexer`/an
+  open row) the result is `integer` (a length is a non-negative integer-valued
+  count). Decision: operand `<: string` OR operand is a table kind ⇒ `integer`. A
+  non-string non-table operand is `operator-metamethod-len` (deferral). Result
+  `integer`.
+- **Unary minus `-`.** Over `number`/`integer` ⇒ same kind as the operand
+  (`-x : integer` if `x <: integer`, else `number`). Non-numeric ⇒
+  `operator-metamethod-unm` (deferral).
+- **Unary `not`.** Over *any* value ⇒ `boolean` (Lua's `not` is total and
+  metatable-blind: `not v` is `false` for truthy `v`, `true` for `nil`/`false`).
+  This is the EXISTING `synth_and_or_not` `not` rule (§2.3), already implemented —
+  the operator front merely routes `#`/`-` here is NOT it; `not` stays where it is.
+
+**Why this is metatable-free-honest.** Every "deferral" branch is the case where a
+*metatable* could change the result kind. v1 has no metatable types (§1.4), so it
+*cannot* claim the result type — but it also must not claim a type *error*, because a
+metatable might make the operation legal. The tag is therefore `operator-metamethod-*`
+(out-of-subset deferral with an un-defer trigger), exactly the §1.4 posture, never an
+`operator-type-error`. This is the sole sound v1 reading. The result-type rules above
+are precisely the rewrite-design's operator typing with the metamethod arms elided —
+monotone, like every prior increment.
+
+**Mechanization surface.** One new evidence method `synth_binop` (binary operators)
+and one `synth_unop` (unary `#`/`-`; `not` stays in `synth_and_or_not`). Both are
+pure derivations over the operand types (read from premise `has_type` claims), keyed
+**only** by the operator string and the structural operand kinds — no name-keying.
+The lowering's existing `synth_expr` `binop`/`unop` arms (which currently mark every
+arithmetic/concat as out-of-subset) are replaced by emission of these methods when
+the operands are in the metatable-free core, and the `operator-metamethod-*` marker
+otherwise. The result type for `/`,`^` is unconditional `number`; for `+,-,*,%` is
+`integer`-if-both-`<:integer`-else-`number`; for `..` is `string`; for comparisons /
+equality is `boolean`; for `#` is `integer`.
+
+### 6.7.2 Module/`require` access — the M-table convention as module-type synthesis
+
+**Value-universe derivation.** A Lua module is a *value* — the table a file `return`s.
+The dominant convention (`docs/conventions.md`): `local M = {}` … `function M.f(...)`
+… `return M`. The module's value type is therefore the `rec` synthesized from the
+assignments to `M` (each `function M.f` / `M.f = …` adds a field). A consumer's
+`local x = require("lib.y")` binds `x` to `lib.y`'s *module value type*, making
+`x.f(...)` a checkable field access + call. This is the value-universe-faithful
+reading: `require` returns the required file's returned value, whose type is the
+M-table `rec`.
+
+This extends the increment-2 cross-module machinery (`crescent_slice_xmodule.lua`),
+which already reads a required module's *aliases* across the artifact boundary. The
+extension: also synthesize and export the module's **value type** (the M-table `rec`),
+alongside its aliases. The exporting file's M-table synthesis is the source; the
+entry's `require` binds the result.
+
+**The M-table synthesis rule (pure, derived).** Over the exporting module's lowered
+statements, accumulate a `rec` field set:
+- `local M = {}` (or `local M = { … }`) establishes the module table local and its
+  initial fields.
+- `function M.f(params) … end` with a `--:` signature adds field `f : fn(P, R)` (the
+  signature's type). Without a signature, field `f` is added with the
+  unannotated-function synthesized type (§6.7.3) — the module type reflects what
+  *exists*, annotated or not.
+- `M.f = <expr>` adds field `f : typeof <expr>` (synthesized).
+- `return M` (or `return { f = …, … }`) fixes the module value type to the
+  accumulated `rec` (closed row — a module exports exactly its assigned fields). A
+  `return <table-literal>` synthesizes directly via `synth_table` (§2.3).
+
+Only the **statically resolvable** require resolves: `require("lib.y")` /
+`require "lib.y"` with a *string-literal* argument. A dynamic/computed require
+(`require(var)`, `require(prefix .. name)`) stays tagged `dynamic-require` (the
+existing marker), un-deferred when a corpus fixture forces it. The module-path → file
+helper and the read-file cap are the increment-2 ones, reused.
+
+**Stdlib `require`/`package` and global stdlib.** `require` *itself*, `package`, and
+the stdlib globals (`string`, `math`, `table`, `tostring`, `tonumber`, `pairs`,
+`ipairs`, `io`, `os`) are not module values synthesized from source — they are the
+*explicit stdlib declarations* (§2.5, CLAUDE.md "No ambient globals by default";
+`tonumber`/`string.sub`/`math.floor` already exist as trusted signatures in the
+hand-built corpus). Decision for v1: a small, **explicit, injected stdlib-cap table**
+(a `{ [name]: Ty }` of the handful the corpus's checked syntax reaches —
+`tonumber`, `tostring`, `string` (a `rec` of `sub`/`format`/…), `math` (a `rec` of
+`floor`/`max`/…), `pairs`/`ipairs` (already special loop forms), `table`) is bound
+into the lowering's top-level Γ as ordinary `trusted_signature`-backed bindings, NOT
+reached from `_G` (caps-first: the stdlib model is injected via `opts.stdlib`, never
+an `io`/`_G` reach; absent the cap, these names stay `unbound-name:*`, never a silent
+global). This makes `tonumber(s)`, `string.sub(s,i,j)`, `math.floor(x)` synthesize
+their declared return types via the EXISTING `synth_call` + `trusted_signature`
+methods — no new method. This is the §9.8 "no stdlib/global model" gap closed *as an
+injected capability*, the only fence-honest way. `require` is bound as a special
+form recognized by the lowering (a `require("lit")` call resolves to the module type),
+not a value in Γ — because its return type is *path-dependent*, which no fixed `fn`
+type expresses; the lowering resolves it at the call site (like the cross-module
+import pass), recording a `cross_module_value` trust boundary.
+
+**Mechanization surface.** No new evidence method (the M-table `rec` is a synthesized
+type bound in Γ; field access + call use existing `synth_index`/`synth_call`). A new
+pure `synth_module_type(exporting_lowered)` helper in `crescent_slice_xmodule.lua`
+that walks the exporting file's statements and accumulates the `rec`. The lowering's
+`require("lit")` recognition binds the resolved module type; the injected `opts.stdlib`
+cap binds stdlib names. One new trust-boundary tag `cross_module_value` (uses the
+existing `A.trust_boundary`). Substrate untouched.
+
+### 6.7.3 Unannotated functions — synthesize params `unknown`, return from the body
+
+**Value-universe derivation.** A function value exists whether or not it carries a
+`--:` annotation. v1's §7.1 *prefers* annotations (and the kernel §5.2 measurement
+keeps the annotation gap a lint concern), but the checker must type what *exists*. The
+value-universe reading of a `local function f(a, b) … end` with no signature: each
+parameter's type is **`unknown`** (the function makes no static promise about its
+inputs — the caller-side narrowing posture: a body that uses `a` without narrowing is
+itself out-of-subset, which is the correct pressure, not an error), and the return is
+**synthesized from the body** (the union across `return` paths, exactly the annotated
+`synth_function` return-join, but *driving* the return type rather than checking
+against a declared one).
+
+- **Params ⇒ `unknown`.** Each param binds `name : unknown` in the body Γ. This
+  forces narrowing (the §1.3 `unknown` posture): a body that reads `a.field` without
+  first narrowing `a` hits `synth_index` on `unknown` → out-of-subset (no field on
+  `unknown`), which is the honest "this body needs an annotation to check" signal —
+  NOT a soundness hole. The function still *types* (its `fn(unknown.., R)` shape is
+  synthesized); the body coverage is what may fall out of subset.
+- **Return ⇒ body synthesis.** The function's `R` is the union of the synthesized
+  types of each `return e` (and `nil` for a fall-through path / a bare `return`),
+  joined — the existing return-join logic, run in *synthesis* mode (no declared `R`
+  to check against). A body with no `return` synthesizes `R = ()` (the empty return).
+- **Module-boundary unannotated functions.** A `function M.f(...)` with no signature
+  is the same: params `unknown`, return body-synthesized, AND the synthesized
+  `fn(unknown.., R)` surfaces as field `f` in the module type (§6.7.2). The
+  conventions doc says boundaries *should* be annotated; the checker still types what
+  exists, and the annotation-gap measurement (kernel §5.2) stays a lint concern, not
+  a checker hole.
+
+**Why `unknown` not a fresh inference variable.** v1 has no global solving / no
+parametric inference (§1.4, fenced). A fresh unification variable for an unannotated
+param is precisely the global-solving the fence excludes. `unknown` is the
+fence-honest choice: it is sound (the caller must narrow), it needs no solver, and it
+makes the annotation pressure *visible* (an unannotated body that depends on its
+param shape falls out of subset, demanding the annotation the conventions want). This
+is the §10 local-inference edge resolved by the posture, not by a solver.
+
+**Mechanization surface.** The existing `synth_function` evidence method already
+checks a body against a declared `R`. For the unannotated case, the lowering binds
+each param `: unknown`, lowers the body in *synthesis* mode, and joins the return
+types into `R` — emitting the same `synth_function` premises but with the
+lowering-computed `R` (the producer supplies `R`; the checker validates the body
+checks against it, unchanged). No new evidence method; the lowering's `localfunc`/
+`funcdecl` arm gains the no-signature branch (replacing the current
+`unannotated-function` marker). The return-join is a pure helper.
+
+### 6.7.4 Assignment forms — multiple assignment, swap, field/index chains
+
+**Value-universe derivation.** Lua's assignment is a *parallel* binding of a target
+list to a value list, with the multi-return tuple machinery (§6.5.5,
+`fea86aa1`) supplying the width rules: the value list is flattened (the *last* value
+expands to its full multi-return tuple; earlier values contribute one each), then
+assigned positionally to the targets; surplus targets bind `nil`, surplus values are
+dropped.
+
+- **Multiple assignment `a, b = f()`** (already partially handled): the RHS multi-
+  return `R` supplies slots positionally (`a : R.fixed[1]`, `b : R.fixed[2]`, absent
+  ⇒ `nil`). The width rule generalizes to `a, b = e1, e2` (each `ei` a single value)
+  and `a, b, c = e1, f()` (the *last* expression expands to its tuple; earlier
+  contribute one). This is the §6.5.5 tuple-flatten rule applied to the assignment
+  target list.
+- **Swap `a, b = b, a`**: a pure case of the parallel rule — the RHS values are
+  synthesized under the *pre-assignment* Γ (Lua evaluates the whole RHS before any
+  binding), so `a, b = b, a` binds `a : typeof b`, `b : typeof a` with no temporary.
+  v1's flow-insensitivity makes this trivially correct: the targets' new types are
+  the RHS slot types, computed once. No special swap rule — it is the parallel rule.
+- **Field/index assignment chains `t.k = v`, `t.a.b = v`, `t[i] = v`**: a *write*
+  checks `v ⇐ field-type` (the existing `assign` field-write rule, §5.2,
+  flow-insensitive sound treatment). The chain `t.a.b = v` synthesizes `t.a`'s type
+  (an `index` read), then checks `v ⇐ (t.a).b`-field-type. An integer-literal /
+  static-string dynamic key `t[1] = v` / `t["k"] = v` is a static field write
+  (already handled as `index`); a *dynamic* key `t[e] = v` with a non-literal `e`
+  over an `indexer(K, V)` table checks `e ⇐ K` and `v ⇐ V` (the index-signature
+  write rule) — this closes the `dynamic-index-assign` marker for the
+  *indexer-typed* case (e.g. `merged[k] = v` where `merged : { [string]: integer }`),
+  while a dynamic key over a *closed rec* stays out-of-subset (no element type to
+  check against).
+- **Compound lowering.** Lua 5.1 has no `+=`; "compound" here is the multi-target /
+  multi-value flatten above. No `+=` desugaring is needed (the target does not exist
+  in the language).
+
+**Width rules (pinned from the multi-return tuple machinery).** Flatten the value
+list: values `1..n-1` contribute their single (multi-return-collapsed) type; value
+`n` contributes its full tuple (`R.fixed` ++ vararg) if it is a multi-return call,
+else its single type. Zip against the target list: target `i` gets flattened-value
+`i`, or `nil` if the flattened list is shorter. This is exactly the §6.5.5 `Ret`
+tuple semantics lifted to the assignment-statement target list — ONE width rule,
+shared with the local-declaration multi-bind.
+
+**Mechanization surface.** No new evidence method (assignments emit
+`check_against` for field/indexer writes and bind target types in Γ; the multi-bind
+draws from the existing multi-return `Ret`). The lowering's `local` (multi-name) and
+`assign` (multi-target) arms gain the shared flatten-and-zip helper; the `assign` arm
+gains the indexer-typed dynamic-key write branch (check `e ⇐ K`, `v ⇐ V`). The
+field-chain `t.a.b = v` reuses `synth_index` for the object path. Substrate untouched.
+
+### 6.7.5 Method calls `o:m(args)` — desugar to `o.m(o, args)`
+
+**Value-universe derivation.** The universe makes `o:m(a)` *exactly* `o.m(o, a)` —
+method-call sugar passes the receiver as the first positional argument (§6.5.2 pinned
+`self` as an ordinary named first parameter for this reason). So a method call
+desugars, at lowering time, to: synthesize `o`'s type, read field `m` off it
+(`synth_index` → the method's `fn` type, whose first param is `self`), then a
+`synth_call` with `o` prepended to the argument list. The named-`self`-param machinery
+from increment 1 (§6.5.2) is consumed directly: the method's `fn` type already carries
+`self : T` as `params.fixed[1]`, so the desugared call checks `o ⇐ self-param-type`
+as its first argument — no `self`-specific rule.
+
+- `o:m(a1..an)` ⇒ `synth_index(o, "m")` yields `fn((self_T, P1..Pn), R)`; the call
+  checks `o ⇐ self_T` and `ai ⇐ Pi`, synthesizing `R.fixed[1]`. Identical to
+  `o.m(o, a1..an)` — the desugaring is literal.
+- Receiver `o` is synthesized once and its node reused for both the field-access
+  object and the first argument (Lua evaluates `o` once for `o:m()`).
+- A method definition `function o:m(...)` (the def side) desugars to a first
+  parameter `self` — already handled as `is_method` in the lowering (currently
+  marked `named-param-self`); the increment turns that marker into the actual
+  `self`-prepended param binding (§6.5.2's "ordinary named first param"), so the body
+  binds `self : <receiver-type>`. Since v1 does not synthesize a receiver type from
+  an enclosing module (the §9.2 cross-statement-store deferral), the method def's
+  `self` type comes from the `--:` signature's first param (`self: T`) when present;
+  an unannotated method `self` is `unknown` (§6.7.3).
+
+**Mechanization surface.** No new evidence method (method call = `synth_index` +
+`synth_call`, both existing). The lowering's `parse_suffixed` `:` arm (currently
+emitting the `method-call` out-of-subset marker) builds a desugared call node
+(receiver prepended to args); `synth_call_expr` types it. The method-def `is_method`
+arm prepends the `self` param binding. Substrate untouched.
+
+### 6.7.6 Mechanization surface summary
+
+| Item | Where | New evidence method? | Subtype change? | Substrate? |
+|---|---|---|---|---|
+| operator typing | lowering `binop`/`unop` arms; `synth_binop`/`synth_unop` in `crescent_slice` | `synth_binop`, `synth_unop` (pure, operand-kind-keyed) | none | none |
+| module/`require` access | `synth_module_type` in `crescent_slice_xmodule`; lowering `require` recognition + injected `opts.stdlib` cap | none (reuses `synth_index`/`synth_call`/`trusted_signature`) | none | none (existing trust boundary) |
+| unannotated functions | lowering `localfunc`/`funcdecl` no-sig branch + return-join helper | none (reuses `synth_function` with producer-supplied `R`) | none | none |
+| assignment forms | lowering `local`/`assign` flatten-and-zip + indexer-write branch | none (reuses `check_against`) | none | none |
+| method calls | lowering `:` desugar to `o.m(o, …)` | none (reuses `synth_index`+`synth_call`) | none | none |
+
+**The fence holds.** Two new evidence methods (`synth_binop`, `synth_unop`), both pure
+value-universe derivations over operand kinds — no complement, no match types, no
+global solving, no HKT, no name-keying. Everything else is lowering reach over the
+EXISTING methods. The metatable-dependent operator cases are out-of-subset *deferrals*
+with un-defer triggers (§1.4 posture), never type-error claims. Unannotated params are
+`unknown` (the fence-honest non-solver choice), not fresh inference variables. The
+substrate is untouched (`init.lua` byte-for-byte), as every prior pass predicted.
+
 ---
 
 ## 7. Acceptance Criteria
@@ -2720,3 +3039,116 @@ digest; the lower-level dependency invalidation string contains `"digest:"`.
   which is a future increment. The round 2 audit did not find a case where the
   over-broad recording hides an actual soundness gap; the recorded boundaries are
   still auditable.
+
+### 9.12 Mechanization findings — slice v2 increment 3 (§6.7, the e2e statement front)
+
+Increment 3 landed the §6.7 items in the dependency-honest order (operators +
+assignments + method calls + unannotated functions + the injected stdlib cap). The
+findings, each resolved without crossing the ratified fence (no complement, match
+types, global solving, HKT) and with no `init.lua` change:
+
+- **Two new evidence methods, both pure operand-kind derivations.** `synth_binop`
+  and `synth_unop` (§6.7.1) are the increment's only new vocabulary. Each is keyed
+  ONLY by the operator string and the structural operand kinds — no name-keying, no
+  special case. The result-type rules are pinned from the LuaJIT 5.1 value universe:
+  `/` and `^` always synthesize `number` (real-valued); `+ - * %` synthesize
+  `integer` iff both operands are `<: integer`, else `number`; `..` over
+  `string|number` ⇒ `string`; order comparisons over compatible primitive pairs ⇒
+  `boolean`; `==`/`~=` over anything ⇒ `boolean`; `#` over string/table ⇒ `integer`;
+  unary `-` preserves the operand's integer/number kind. The metatable-dependent
+  operand cases (table + table, `#` on a non-string non-table, mixed-type comparison)
+  are out-of-subset **deferrals** (`operator-metamethod-*`) with un-defer triggers —
+  NEVER type-error claims, because v1 cannot know the metatable (the §1.4 posture).
+
+- **`local function` recursion was a latent bug the operator front exposed.** Before
+  operators, `s + tree_sum(node.left)` was blocked at `+` BEFORE the recursive call
+  was looked up, so `tree_sum`'s self-reference was never resolved. With `+` in
+  subset, the lowering reached the call and `tree_sum` was `unbound-name`. Root cause:
+  a `local function f` is in scope inside its OWN body (Lua's `local f; f = function…`
+  desugaring), but the lowering bound the name only in the OUTER context. Fixed by
+  binding the function name in the body context too (annotated and unannotated). A
+  genuine finding the prior subset masked — exactly the "something unexpected is a
+  signal" discipline.
+
+- **The honest type-mismatch surfaced by reaching further.** `coinductive_recursive_
+  types` moved OUT-OF-SUBSET → FINDINGS: operators unblocked the body, so the lowering
+  now reaches `tree_sum(node.left)` where `node.left : TreeNode | nil` legitimately
+  fails `<: TreeNode`. v1 narrows a VARIABLE binding, not a FIELD PATH (`if node.left
+  then` does not refine `node.left`). This is the field-path-narrowing deferral
+  (§9.8), now a visible `type-mismatch` finding rather than a hidden operator block —
+  every REQUESTED claim still accepts (0 rejections). The fixture's expected verdict
+  was updated honestly; the field-path narrow is the recorded un-defer trigger, NOT
+  bent.
+
+- **Unannotated functions: `unknown` params, not fresh inference variables.** §6.7.3
+  binds each unannotated param `: unknown` and synthesizes the return from the body.
+  `unknown` is the fence-honest choice: a fresh unification variable would be the
+  global solving the fence excludes; `unknown` is sound (the caller/body must narrow)
+  and makes the annotation pressure VISIBLE (an unannotated body that depends on its
+  param shape falls out of subset, demanding the annotation the conventions want).
+  This resolves the §10 local-inference edge for NAMED functions by posture, not by a
+  solver. The expression-position ANONYMOUS closure (`unannotated-closure`, 393 files)
+  remains the residual local-inference edge.
+
+- **The stdlib model is an INJECTED capability, never a `_G` reach.** §6.7.2's stdlib
+  cap (`tonumber`/`tostring`/`string`/`math` as ordinary `Ty` bindings) is injected
+  via `opts.stdlib`; absent the cap, the names stay `unbound-name:*` (caps-first,
+  CLAUDE.md "No ambient globals by default"). The corpus test lowers WITHOUT the cap
+  (so `tonumber_return_type`/`cast_not_inference_source` stay OUT-OF-SUBSET on unbound
+  names); the survey injects it (so they type). The cap is built in the current
+  interner generation (after `M.lower`'s `G.reset()`), and `default_stdlib()` is the
+  model a caller may inject — the library itself never reads `_G`/`io`.
+
+- **Method calls are a literal desugaring, consuming the increment-1 `self` machinery.**
+  §6.7.5: `o:m(args)` lowers to `o.m(o, args)` — `synth_index(o, "m")` + `synth_call`
+  with `o` prepended, checking `o ⇐ self-param-type`. No method-call evidence method,
+  no `self`-specific rule; `self` is the ordinary named first param (§6.5.2). The
+  receiver is synthesized once.
+
+- **The whole-file CHECKED-CLEAN headline (5, 0.6%) is gated by the file's LAST
+  out-of-subset construct.** This is the honest, load-bearing finding: the construct
+  HISTOGRAM moved dramatically (operators, method-calls, named-function inference all
+  dropped out of the top ranking), but a file goes whole-file CLEAN only when EVERY
+  statement is in-subset, and the long tail of GLOBALS (`package`/`require`/`table`/
+  `setmetatable`/`pcall`), ANONYMOUS CLOSURES, and multi-return/dynamic-key forms
+  still leaves at least one out-of-subset construct in nearly every real `lib/` file.
+  The e2e number moving requires the GLOBALS model and `require`-returns-module-VALUE-
+  type synthesis too — the dependency-honest TAIL recorded in §10.4.
+
+### 10.4 Slice v2 increment 3 — DONE (operators + assignments + methods + unannotated + stdlib cap), module-value-type TAIL recorded (2026-06-12)
+
+Increment 3 (§6.7) landed the e2e statement-coverage front in the dependency-honest
+order. Design grew first (§6.7, each item derived whole from the value universe),
+then the mechanization in the same commit: `synth_binop`/`synth_unop` + the pure
+`binop_result`/`unop_result` operator-typing helpers in `crescent_slice.lua`
+(registered, no `init.lua` change); the lowering reach in `crescent_slice_lower.lua`
+(operator emission, multi-assign/swap flatten-and-zip, indexer-typed dynamic-key
+write, `o:m()` desugar, unannotated-function `unknown`-param + body-synthesized
+return, the injected `opts.stdlib` cap + `M.default_stdlib()`); the survey injects
+the stdlib cap (`slice_survey.lua --e2e`); unit + e2e tests
+(`crescent_slice_test.lua` +27, `corpus_lower_test.lua` +26, 6282 total).
+
+**Survey re-run headlines** (`docs/slice-survey-v1.md`, "after v2 increment 3",
+`--e2e`): whole-file CHECKED-CLEAN stays **5 (0.6%)** with **0 TIMEOUT** — gated by
+each file's LAST out-of-subset construct (§9.12 final finding). The CONSTRUCT
+histogram is the real delta: `operator-concat` (702) and `operator-arith:+` (286)
+GONE, `method-call` (214) GONE (desugared), `unannotated-function` (named) dropped
+out; the new front is globals (`unbound-name:package` 683, `require` 409, `table`
+324, `setmetatable` 223), assignment/multi-return forms (`field-assign` 514,
+`dynamic-index` 500, `multi-assign` 435, `multi-return` 429), and anonymous closures
+(`unannotated-closure` 393). The residual `operator-metamethod-*` (302 across arith/
+len) are the GENUINE metatable cases — deferrals, not errors. Corpus split moved 2/9
+CLEAN/OUT → **3 CLEAN / 1 FINDINGS / 7 OUT-OF-SUBSET**, 0 rejections.
+
+**The dependency-honest TAIL (recorded, not crossed).** The §6.7.2 `require`-returns-
+the-module-VALUE-type synthesis (the M-table convention: lower the exporting module,
+accumulate its `rec` from `function M.f` / `M.f = …` assignments, bind the result so
+`x.f(...)` is cross-module callable) and the broader globals model (`package`,
+`table`, `setmetatable`, `pcall`, …) are the LARGEST remaining e2e blockers and the
+module-access half of the increment scope. They are recorded as the next pass's
+substrate need: cross-module module-VALUE-type synthesis requires recursively lowering
+the exporting module within the existing acyclic-import pass (a consumer of the
+multi-artifact model, like §6.6's alias resolution — no new substrate), and the
+globals model is more explicit-stdlib-declaration cap surface (§6.7.2). Landing them
+is what moves the whole-file e2e CHECKED-CLEAN number off 0.6%. The fence held
+throughout; the substrate (`init.lua`) was again **not** touched.

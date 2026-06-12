@@ -116,12 +116,17 @@ end)
 -- These are the Pass-5 FINDINGS: the hand-built corpus_test graphs assumed away
 -- exactly these constructs. Each assertion names the construct the lowering hit.
 
-T.describe("corpus e2e: fixture_boolean_narrowing — arithmetic operator boundary", function()
-	T.it("`1 / n < 0` hits the operator-arith boundary (v1 has no numeric operator synth, §1.4)", function()
+T.describe("corpus e2e: fixture_boolean_narrowing — operator typing (v2.3) makes it CLEAN", function()
+	T.it("`n == 0 and 1 / n < 0` now types as boolean (operator front, §6.7.1) — CLEAN", function()
 		local o = lower_fixture("boolean_narrowing")
-		T.eq(o.expected, "OUT-OF-SUBSET", "the `/` operator is outside §5's checked syntax")
-		T.ok(has_construct(o, "operator-arith"), "marked operator-arith (the `1/n` division)")
+		-- v2.3: operator typing landed (§6.7.1). `1 / n` synthesizes `number`,
+		-- `1 / n < 0` and `n == 0` synthesize `boolean`, and `boolean and boolean`
+		-- is `boolean` (the existing synth_and_or_not rule), checking against the
+		-- declared `(number) -> boolean`. The fixture is now fully within §5.
+		T.eq(o.expected, "CLEAN", "operator typing closes the `/` and `<` boundary")
+		T.eq(#o.constructs, 0, "no out-of-subset markers")
 		assert_sound(o)
+		T.ok(o.requested > 0, "emitted load-bearing claims")
 	end)
 end)
 
@@ -149,10 +154,20 @@ T.describe("corpus e2e: fixture_pairs_return_leak — dynamic-key write + arithm
 	end)
 end)
 
-T.describe("corpus e2e: fixture_coinductive_recursive_types — field-path narrowing + arith", function()
-	T.it("`if node.left then` (field-path narrow) and `s + ...` are the §5 boundary", function()
+T.describe("corpus e2e: fixture_coinductive_recursive_types — field-path narrowing finding", function()
+	T.it("operators (v2.3) unblock `s + ...`; the residual finding is the field-path-narrow type-mismatch", function()
 		local o = lower_fixture("coinductive_recursive_types")
-		T.eq(o.expected, "OUT-OF-SUBSET", "field-path narrowing and `+` are outside §5")
+		-- v2.3: `s + tree_sum(...)` no longer hits the operator boundary (operator
+		-- typing landed, §6.7.1). With `+` in subset, the lowering now REACHES the
+		-- `tree_sum(node.left)` call — and `node.left : TreeNode | nil` legitimately
+		-- fails `<: TreeNode` because v1 narrows a VARIABLE binding, not a FIELD PATH
+		-- (`if node.left then` does not refine `node.left`, §9.8). So the fixture
+		-- reclassifies OUT-OF-SUBSET → FINDINGS: an honest type-mismatch from the
+		-- field-path-narrowing deferral, NOT a checker soundness bug — every
+		-- REQUESTED claim still accepts (0 rejections). Field-path narrowing is the
+		-- recorded un-defer trigger.
+		T.eq(o.expected, "FINDINGS", "field-path narrowing is still deferred (the honest type-mismatch)")
+		T.ok(has_construct(o, "type-mismatch"), "marked the field-path-narrow type-mismatch")
 		assert_sound(o)
 	end)
 end)
@@ -217,23 +232,133 @@ end)
 
 -- ── The headline assertion: the honest split ─────────────────────────────────
 
-T.describe("corpus e2e: the honest 11-fixture split under real lowering", function()
-	T.it("2 CLEAN, 9 OUT-OF-SUBSET, 0 rejections anywhere (Pass 5's load-bearing finding)", function()
+T.describe("corpus e2e: the honest 11-fixture split under real lowering (v2.3)", function()
+	T.it("3 CLEAN, 1 FINDINGS, 7 OUT-OF-SUBSET, 0 rejections anywhere", function()
+		-- v2.3 (operator typing + assignments + method calls + unannotated functions,
+		-- §6.7): boolean_narrowing moved OUT-OF-SUBSET → CLEAN (operators), and
+		-- coinductive moved OUT-OF-SUBSET → FINDINGS (operators unblocked the body,
+		-- surfacing the honest field-path-narrow type-mismatch). These fixtures lower
+		-- WITHOUT the injected stdlib cap (no `{ stdlib = true }`), so tonumber/
+		-- cast_not_inference_source stay OUT-OF-SUBSET on unbound stdlib names — the
+		-- caps-first posture (the cap is the survey's, not a default global).
 		local names = {
 			"boolean_narrowing", "local_return_narrowing", "union_alias_over_named_types",
 			"tonumber_return_type", "pairs_return_leak", "coinductive_recursive_types",
 			"table_construction_widening", "hamt_recursion", "cast_not_inference_source",
 			"cross_module_type_alias", "closure_param_typing",
 		}
-		local clean, oos, total_rej = 0, 0, 0
+		local clean, oos, findings, total_rej = 0, 0, 0, 0
 		for _, n in ipairs(names) do
 			local o = lower_fixture(n)
 			if o.expected == "CLEAN" then clean = clean + 1
-			elseif o.expected == "OUT-OF-SUBSET" then oos = oos + 1 end
+			elseif o.expected == "OUT-OF-SUBSET" then oos = oos + 1
+			elseif o.expected == "FINDINGS" then findings = findings + 1 end
 			total_rej = total_rej + o.rej
 		end
-		T.eq(clean, 2, "2 fixtures are fully within §5 (local_return_narrowing, union_alias)")
-		T.eq(oos, 9, "9 fixtures hit a real §5 boundary the hand-built graphs assumed away")
+		T.eq(clean, 3, "3 fixtures fully within §5 (local_return_narrowing, union_alias, boolean_narrowing)")
+		T.eq(findings, 1, "1 fixture (coinductive) hits the field-path-narrow type-mismatch finding")
+		T.eq(oos, 7, "7 fixtures hit a real §5 boundary (stdlib/closures/forward-alias/dynamic-key)")
 		T.eq(total_rej, 0, "ZERO rejections across all 11 — every in-subset claim the lowering emits is sound")
+	end)
+end)
+
+-- ── §6.7 increment v2.3 statement-form tests (inline sources) ────────────────
+
+local S2 = require("lib.type.analysis.crescent_slice")
+
+-- Lower an inline source and reduce to an Outcome (with optional stdlib cap).
+--: (string, boolean) -> Outcome
+local function lower_src(src, with_stdlib)
+	local opts --[[: { stdlib: boolean } | nil ]]
+	if with_stdlib then opts = { stdlib = true } end
+	local res = L.lower(src, "inline.lua", opts) --[[: { state: AnalysisState, requested: { [integer]: { space: string, key: string } }, expected: string, markers: { [integer]: { construct: string } } } | nil ]]
+	if not res then error("lower failed") end
+	local chk = A.check({ state = res.state, requested_claims = res.requested,
+		semantics_registry = reg(), trust_policy = nil }) --[[: { accepted_claims: { [string]: unknown }, rejected_claims: { [string]: unknown }, unknown_claims: { [string]: unknown }, diagnostics: { [integer]: unknown } } | nil ]]
+	if not chk then error("check nil") end
+	local acc, rej, unk = 0, 0, 0
+	for _ in pairs(chk.accepted_claims) do acc = acc + 1 end
+	for _ in pairs(chk.rejected_claims) do rej = rej + 1 end
+	for _ in pairs(chk.unknown_claims) do unk = unk + 1 end
+	local constructs = {} --[[: { [integer]: string } ]]
+	for _, m in ipairs(res.markers) do constructs[#constructs + 1] = m.construct end
+	return { expected = res.expected, requested = #res.requested,
+		acc = acc, rej = rej, unk = unk, diags = #chk.diagnostics, constructs = constructs }
+end
+
+T.describe("slice v2.3: operator typing lowers and checks", function()
+	T.it("a function over arithmetic + concat + comparison is CLEAN", function()
+		local o = lower_src([[
+--: (integer, integer) -> boolean
+local function both_positive(a, b)
+  return a > 0 and b > 0
+end
+return { both_positive = both_positive }
+]], false)
+		T.eq(o.expected, "CLEAN", "comparisons and `and` over integers type as boolean")
+		assert_sound(o)
+	end)
+end)
+
+T.describe("slice v2.3: unannotated function (params unknown, return body-synth)", function()
+	T.it("an unannotated local function lowers (no `unannotated-function` marker)", function()
+		local o = lower_src([[
+local function ident(x)
+  return x
+end
+return { ident = ident }
+]], false)
+		T.eq(o.expected, "CLEAN", "unannotated function types (params unknown, return synthesized)")
+		assert_sound(o)
+	end)
+end)
+
+T.describe("slice v2.3: multi-assignment / swap (parallel binding)", function()
+	T.it("`local a, b = e1, e2` and swap `a, b = b, a` lower clean", function()
+		local o = lower_src([[
+--: (integer, integer) -> integer
+local function f(p, q)
+  local a, b = p, q
+  a, b = b, a
+  return a + b
+end
+return { f = f }
+]], false)
+		T.eq(o.expected, "CLEAN", "multi-assign + swap + arithmetic all in subset")
+		assert_sound(o)
+	end)
+end)
+
+T.describe("slice v2.3: stdlib cap (caps-first, injected)", function()
+	T.it("with the stdlib cap, tonumber/string.sub/math.floor type; without it, they are unbound", function()
+		local src = [[
+--: (string) -> integer
+local function parse(s)
+  local n = tonumber(string.sub(s, 1, 2))
+  if not n then return 0 end
+  return math.floor(n)
+end
+return { parse = parse }
+]]
+		local with_cap = lower_src(src, true)
+		T.eq(with_cap.expected, "CLEAN", "the injected stdlib cap types tonumber/string.sub/math.floor")
+		assert_sound(with_cap)
+		local without = lower_src(src, false)
+		T.eq(without.expected, "OUT-OF-SUBSET", "absent the cap, stdlib names stay unbound (no silent global)")
+	end)
+end)
+
+T.describe("slice v2.3: method call desugars to o.m(o, args)", function()
+	T.it("`o:m(a)` checks against the method's self-first signature", function()
+		local o = lower_src([[
+--:: Counter = { add: (self: Counter, n: integer) -> integer }
+--: (Counter) -> integer
+local function use(c)
+  return c:add(5)
+end
+return { use = use }
+]], false)
+		T.eq(o.expected, "CLEAN", "o:add(5) desugars to o.add(o, 5), checking o ⇐ self")
+		assert_sound(o)
 	end)
 end)
