@@ -935,8 +935,12 @@ end
 -- this is a no-op and returns false — the caller falls back to the ordinary binding.
 -- The rebinding appends a fresh, shadowing ctx entry (most-recent-wins), so the
 -- accumulated module type is what a later `return M` / cross-module require reads.
---: (SliceCtx, string, string, Ty) -> boolean
-local function ctx_set_field(ctx, obj_name, field, fty)
+-- §9.14 F3 (simple alias): when `mod_table_aliases` maps `obj_name → orig`, the
+-- field accumulation is ALSO applied to `orig` (e.g. `local A = M; A.f = …`
+-- propagates to M so `return M` includes `f`). Only the trivially-trackable single-
+-- direct-alias form is covered; conditional/nested alias analysis is a deferral.
+--: (SliceCtx, string, string, Ty, ({ [string]: string }) | nil) -> boolean
+local function ctx_set_field(ctx, obj_name, field, fty, mod_table_aliases)
 	local cur = ctx_get(ctx, obj_name)
 	if not cur or cur.kind ~= "rec" then return false end
 	local fields = {} --[[: { [integer]: { key: string, ty: Ty, optional: boolean, readonly: boolean } } ]]
@@ -954,13 +958,35 @@ local function ctx_set_field(ctx, obj_name, field, fty)
 	end
 	local new_rec = G.rec(fields, cur.rows or "closed")
 	ctx[#ctx + 1] = { name = obj_name, type = TA.encode(new_rec) }
+	-- §9.14 F3 alias propagation: if obj_name is a direct alias of another rec-local,
+	-- mirror the field accumulation onto the original name too.
+	local orig = mod_table_aliases and mod_table_aliases[obj_name]
+	if orig and type(orig) == "string" then
+		local orig_cur = ctx_get(ctx, orig)
+		if orig_cur and orig_cur.kind == "rec" then
+			local orig_fields = {} --[[: { [integer]: { key: string, ty: Ty, optional: boolean, readonly: boolean } } ]]
+			local orig_replaced = false --: boolean
+			for _, f in ipairs(orig_cur.fields or {}) do
+				if f.key == field then
+					orig_fields[#orig_fields + 1] = { key = field, ty = fty, optional = false, readonly = false }
+					orig_replaced = true
+				else
+					orig_fields[#orig_fields + 1] = { key = f.key, ty = f.ty, optional = f.optional, readonly = f.readonly }
+				end
+			end
+			if not orig_replaced then
+				orig_fields[#orig_fields + 1] = { key = field, ty = fty, optional = false, readonly = false }
+			end
+			ctx[#ctx + 1] = { name = orig, type = TA.encode(G.rec(orig_fields, orig_cur.rows or "closed")) }
+		end
+	end
 	return true
 end
 
 -- The lowering result accumulators ride a `LC` (lowering context) table threaded
 -- through the walk: builder, requested-claim list, marker list, alias env,
 -- trusted-boundary id (one shared stdlib boundary), and the current SliceCtx.
---:: LC = { b: Builder, requested: { [integer]: Id }, markers: { [integer]: LowerMarker }, aliases: AliasEnv, stdlib_tb: Id, state: AnalysisState, return_premise_sink?: { [integer]: { [integer]: Id } }, func_depth?: integer, module_ret_ty?: Ty, resolve_module_type?: (string) -> (Ty | nil) }
+--:: LC = { b: Builder, requested: { [integer]: Id }, markers: { [integer]: LowerMarker }, aliases: AliasEnv, stdlib_tb: Id, state: AnalysisState, return_premise_sink?: { [integer]: { [integer]: Id } }, func_depth?: integer, module_ret_ty?: Ty, resolve_module_type?: (string) -> (Ty | nil), mod_table_aliases?: { [string]: string } }
 
 -- A typed VIEW over an AST node (`unknown` at the seam). Each consumer narrows
 -- its `unknown` node to `LV` via the `view` helper, then reads concretely-typed
@@ -1647,8 +1673,8 @@ end
 -- and the closure value's `fn(.. , unknown)` shape forces callers to narrow. The
 -- precise body-synthesized JOIN (§6.8) is a deferral recorded in §9.13 — `unknown`
 -- is sound and matches the existing named-unannotated treatment.
---: (LC, SliceCtx, unknown, { [integer]: Ty }, Ret | nil) -> (Ty | nil, Id | nil)
-local function build_closure(lc, ctx, e, param_tys, decl_ret)
+--: (LC, SliceCtx, unknown, { [integer]: Ty }, Ret | nil, Ty | nil) -> (Ty | nil, Id | nil)
+local function build_closure(lc, ctx, e, param_tys, decl_ret, fty_override)
 	local v = view(e)
 	if not v then return nil, nil end
 	-- the return slot the body's returns are checked against.
@@ -1661,7 +1687,14 @@ local function build_closure(lc, ctx, e, param_tys, decl_ret)
 	if decl_ret then fret = decl_ret end
 	local params --[[: Params ]] = { fixed = fixed }
 	if v.vararg then params.vararg = G.unknown() end
-	local fty = G.fn(params, fret)
+	-- §6.8.3 F2 fix: when check-mode supplies an override fn type (e.g. `want` from
+	-- the expected slot), use it as the has_type claim's type. This makes the claim
+	-- carry the EXPECTED fn type exactly, so the outer check_against wrapper emits
+	-- subtype(want, want) which holds trivially and the substrate's check_against rule
+	-- sees spr.type == sub.a == want (no mismatch). The substrate's synth_function
+	-- verifier does not reject because it only iterates over params_node (the closure's
+	-- DECLARED params), so under-declared params don't cause a pfixed[i] not-found.
+	local fty = fty_override or G.fn(params, fret)
 	-- the function node carries its named params so the checker can rebuild Γ_ext
 	-- exactly (the `synth_function` contract: node.params is `{ {name}, ... }`).
 	local pnodes = {} --[[: { [integer]: { name: string } } ]]
@@ -1726,7 +1759,16 @@ check_func_expr = function(lc, ctx, e, want)
 	for i = 1, nparams do
 		param_tys[i] = wparams.fixed[i] or wparams.vararg or G.unknown()
 	end
-	return build_closure(lc, ctx, e, param_tys, wret)
+	-- §6.8.3: the closure's VALUE TYPE is `want` exactly (the spec pin). Pass `want`
+	-- as the fn-type override so build_closure emits has_type(ctx, node, want) — the
+	-- check_against wrapper then emits subtype(want, want) which holds trivially, and
+	-- the substrate's check_against rule sees spr.type == sub.a == want (no mismatch).
+	-- The body is still verified under the closure's DECLARED params (body_ctx only
+	-- binds the params the closure names); the synth_function verifier does not reject
+	-- under-declared params because it only iterates over params_node's length.
+	local fty, cid = build_closure(lc, ctx, e, param_tys, wret, want)
+	if not fty or not cid then return nil, nil end
+	return want, cid
 end
 
 -- The mode switch (§6.8 check-mode closure typing). To check `e ⇐ want`: when `e`
@@ -1801,6 +1843,18 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 				-- unannotated: bind the synthesized type.
 				lc.requested[#lc.requested + 1] = vcid
 				ctx[#ctx + 1] = { name = name, type = TA.encode(vty) }
+				-- §9.14 F3 (simple alias): detect `local A = M` where M is a rec-typed
+				-- local. Record A → M in mod_table_aliases so ctx_set_field(A, f, …)
+				-- propagates field accumulation onto M too (so `return M` includes fields
+				-- set via `A.f = …`). Only the trivial single-direct-alias form; no alias
+				-- chain, no conditional, no wrapped form — those stay §9.14 deferrals.
+				local valv = view(val)
+				local srcname = valv and valv.name
+				if valv and valv.k == "name" and type(srcname) == "string"
+					and vty.kind == "rec" and (lc.func_depth or 0) == 0 then
+					if lc.mod_table_aliases == nil then lc.mod_table_aliases = {} end
+					lc.mod_table_aliases[name] = srcname
+				end
 			end
 			return
 		end
@@ -1911,7 +1965,7 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 			local accumulated = false --: boolean
 			if mod_member then
 				local mm = mod_member --[[: { obj: string, field: string } ]]
-				accumulated = ctx_set_field(ctx, mm.obj, mm.field, f)
+				accumulated = ctx_set_field(ctx, mm.obj, mm.field, f, lc.mod_table_aliases)
 			end
 			if fname and not accumulated then ctx[#ctx + 1] = { name = fname, type = TA.encode(f) } end
 			-- `local function f` is in scope inside its OWN body (Lua's recursive
@@ -1934,7 +1988,7 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 			local accumulated = false --: boolean
 			if mod_member then
 				local mm = mod_member --[[: { obj: string, field: string } ]]
-				accumulated = ctx_set_field(ctx, mm.obj, mm.field, ufty)
+				accumulated = ctx_set_field(ctx, mm.obj, mm.field, ufty, lc.mod_table_aliases)
 			end
 			if fname and not accumulated then ctx[#ctx + 1] = { name = fname, type = TA.encode(ufty) } end
 			if fname and k == "localfunc" then body_ctx[#body_ctx + 1] = { name = fname, type = TA.encode(ufty) } end
@@ -2110,7 +2164,7 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 					local dt = declared --[[: Ty ]]
 					local _, caid = check_expr(lc, ctx, values[1], dt)
 					if caid then lc.requested[#lc.requested + 1] = caid end
-					ctx_set_field(ctx, oname0 --[[: string ]], tgt_field --[[: string ]], dt)
+					ctx_set_field(ctx, oname0 --[[: string ]], tgt_field --[[: string ]], dt, lc.mod_table_aliases)
 					return
 				end
 			end
@@ -2140,7 +2194,7 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 				local oname2 = objv2 and objv2.name
 				if objv2 and objv2.k == "name" and type(oname2) == "string" then
 					local oname = oname2 --[[: string ]]
-					if ctx_set_field(ctx, oname, tfield2, vty) then
+					if ctx_set_field(ctx, oname, tfield2, vty, lc.mod_table_aliases) then
 						lc.requested[#lc.requested + 1] = vcid
 						return
 					end
@@ -2148,8 +2202,19 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 				mark(lc, { line = 0, construct = "field-assign", text = "t.f = v" })
 				return
 			elseif tgt and tgt.k == "name" then
-				-- reassigning a local: v1 is flow-insensitive; just request the value.
+				-- reassigning a local: rebind the name to the RHS type so that a later
+				-- `return M` (module-value-type capture) reads the POST-rebind type.
+				-- F1 fix: `M = {}` after field accumulation must reset M's rec; the old
+				-- accumulated fields must not survive into the module return.
+				-- Care: this only fires for top-level (non-branch) stmts because
+				-- lower_block passes body_ctx (a copy) for if/while/for bodies, so the
+				-- rebind inside a branch stays local to that branch's copy — the parent
+				-- ctx's M is unchanged (the conditional-rebind case; §9.14 deferral).
 				lc.requested[#lc.requested + 1] = vcid
+				local tname = tgt.name
+				if type(tname) == "string" then
+					ctx[#ctx + 1] = { name = tname, type = TA.encode(vty) }
+				end
 				return
 			elseif tgt and tgt.k == "indexdyn" then
 				-- dynamic-key write `t[e] = v` (§6.7.4). Over an indexer-typed table

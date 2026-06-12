@@ -200,6 +200,11 @@ Rung status (ladder, design doc):
   detection between exporters; F2 mutual-alias claim retracted, §6.6.4 corrected;
   F3 malformed-path hardening; F4 content digest in dependency records), 33 new
   regression tests, 6226 total (§9.11).
+  **Adversarial audit round 3 (2026-06-12): 1 unsound + 2 precision fixed** (F1
+  module-table rebind resets accumulated rec; F2 fewer-param closure into wider fn
+  slot now accepted — arity decision pinned in §6.8.3; F3 trivial direct-alias
+  propagation fixed, conditional/wrapped forms remain documented deferrals), 46 new
+  regression tests, 6374 total (§9.14).
   **Survey pass landed (2026-06-12): `slice_survey.lua` over the 864-file real `lib/`
   corpus** (`docs/slice-survey-v1.md`) — 26.6% CHECKED-CLEAN, 1.6% CHECKED-FINDINGS,
   58.4% OUT-OF-SUBSET, 13.3% NO-ANNOTATION, 0 timeouts/crashes. The annotation

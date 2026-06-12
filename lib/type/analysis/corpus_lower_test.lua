@@ -553,3 +553,218 @@ return { run = run }
 		assert_sound(o)
 	end)
 end)
+
+-- ── §9.14 audit-round-3 regression tests ────────────────────────────────────
+
+-- F1: module-table reassignment must reset the accumulated rec (was: stale fields
+-- cross the require boundary as phantom fields — unsound).
+
+T.describe("audit-round-3 F1: module-table rebind resets accumulation", function()
+	T.it("M = {} after M.f accumulation: consumer call on phantom field is NOT CLEAN", function()
+		-- The exporting module rebinds M to a fresh empty table AFTER accumulating f.
+		-- At runtime lib.f does not exist; the checker must not accept lib.f(1).
+		-- Post-fix: the module value type is {} (the rebound table), not {f: ...}.
+		local exp = [[
+local M = {}
+--: (integer) -> integer
+function M.f(x) return x + 1 end
+M = {}
+return M
+]]
+		local entry = [[
+--: () -> integer
+local function run()
+  local lib = require("lib.re")
+  return lib.f(1)
+end
+return { run = run }
+]]
+		local o = lower_with_modules(entry, { ["lib/re.lua"] = exp }, false)
+		-- Post-fix: either FINDINGS (type-mismatch on phantom call) or OUT-OF-SUBSET
+		-- (no-such-field honest boundary). CLEAN is the unsound pre-fix behaviour.
+		T.ok(o.expected ~= "CLEAN", "phantom-field cross-require is NOT CLEAN after F1 fix")
+		assert_sound(o)
+	end)
+
+	T.it("M = N (rebind to another table): consumer reads N's fields, not M's accumulated ones", function()
+		-- M accumulates f; then M is rebound to N which has g. The export has g only.
+		local exp = [[
+local M = {}
+--: (integer) -> integer
+function M.f(x) return x + 1 end
+--: { g: integer }
+local N = { g = 5 }
+M = N
+return M
+]]
+		local entry = [[
+--: () -> integer
+local function run()
+  local lib = require("lib.re2")
+  return lib.f(1)
+end
+return { run = run }
+]]
+		local o = lower_with_modules(entry, { ["lib/re2.lua"] = exp }, false)
+		T.ok(o.expected ~= "CLEAN", "phantom-field f is NOT CLEAN when M was rebound to N (which has g, not f)")
+		assert_sound(o)
+	end)
+
+	T.it("M = {} before ANY accumulation: module exports empty table (no fields)", function()
+		-- Rebind before accumulation — module truly has no fields.
+		local exp = [[
+local M = {}
+M = {}
+--: (integer) -> integer
+function M.f(x) return x + 1 end
+return M
+]]
+		-- Here f IS added after the rebind, so it should be present.
+		local entry = [[
+--: () -> integer
+local function run()
+  local lib = require("lib.re3")
+  return lib.f(1)
+end
+return { run = run }
+]]
+		local o = lower_with_modules(entry, { ["lib/re3.lua"] = exp }, false)
+		-- f is added AFTER the rebind, so it should accumulate onto the new M.
+		T.eq(o.expected, "CLEAN", "f accumulated AFTER rebind IS present in the module type")
+		assert_sound(o)
+	end)
+
+	T.it("no reassignment: plain M.f accumulation still yields CLEAN (regression guard)", function()
+		local exp = [[
+local M = {}
+--: (integer) -> integer
+function M.f(x) return x + 1 end
+return M
+]]
+		local entry = [[
+--: () -> integer
+local function run()
+  local lib = require("lib.mathx2")
+  return lib.f(1)
+end
+return { run = run }
+]]
+		local o = lower_with_modules(entry, { ["lib/mathx2.lua"] = exp }, false)
+		T.eq(o.expected, "CLEAN", "plain accumulation without rebind still works (F1 fix does not regress)")
+		assert_sound(o)
+	end)
+end)
+
+-- F2: fewer-param closure flowing into a wider fn slot must be CLEAN (not rejected).
+-- A closure with FEWER declared params than the expected fn type is valid Lua —
+-- extra call args are discarded at runtime. check_func_expr must accept it.
+
+T.describe("audit-round-3 F2: fewer-param closure into wider fn slot is valid Lua", function()
+	T.it("1-param closure into (integer,integer)->nil slot: valid — must be CLEAN", function()
+		local src = [[
+--: ((integer, integer) -> nil) -> nil
+local function apply(f) return nil end
+--: () -> nil
+local function main()
+  return apply(function(a) return nil end)
+end
+return { main = main }
+]]
+		local o = lower_src(src, false)
+		T.eq(o.expected, "CLEAN", "1-param closure into 2-param slot is valid Lua (extra args discarded)")
+		assert_sound(o)
+	end)
+
+	T.it("0-param closure into (integer)->nil slot: valid — must be CLEAN", function()
+		local src = [[
+--: ((integer) -> nil) -> nil
+local function call_f(f) return nil end
+--: () -> nil
+local function main()
+  return call_f(function() return nil end)
+end
+return { main = main }
+]]
+		local o = lower_src(src, false)
+		T.eq(o.expected, "CLEAN", "0-param closure into 1-param slot is valid Lua")
+		assert_sound(o)
+	end)
+
+	T.it("exact-arity closure still CLEAN (F2 fix must not break exact case)", function()
+		local src = [[
+--: ((integer) -> nil) -> nil
+local function apply(f) return nil end
+--: () -> nil
+local function main()
+  return apply(function(a) return nil end)
+end
+return { main = main }
+]]
+		local o = lower_src(src, false)
+		T.eq(o.expected, "CLEAN", "exact-arity closure still CLEAN after F2 fix")
+		assert_sound(o)
+	end)
+
+	T.it("MORE-params closure into (integer)->nil: rejected (closure needs a param the slot doesn't supply)", function()
+		local src = [[
+--: ((integer) -> nil) -> nil
+local function apply(f) return nil end
+--: () -> nil
+local function main()
+  return apply(function(a, b) return nil end)
+end
+return { main = main }
+]]
+		local o = lower_src(src, false)
+		-- The closure declares MORE params than the expected type supplies.
+		-- This stays a type-mismatch finding (the spec rejection).
+		T.ok(o.expected == "FINDINGS" or o.expected == "OUT-OF-SUBSET",
+			"more-params closure is correctly rejected (not a CLEAN false-accept)")
+	end)
+end)
+
+-- F3: simple direct alias `local A = M; A.f = …` propagates into M's rec.
+
+T.describe("audit-round-3 F3: simple alias A = M propagates field accumulation to M", function()
+	T.it("local A = M; A.f = …; return M — f is accessible cross-module", function()
+		local exp = [[
+local M = {}
+local A = M
+--: (integer) -> integer
+function A.f(x) return x + 1 end
+return M
+]]
+		local entry = [[
+--: () -> integer
+local function run()
+  local lib = require("lib.aliasmod")
+  return lib.f(1)
+end
+return { run = run }
+]]
+		local o = lower_with_modules(entry, { ["lib/aliasmod.lua"] = exp }, false)
+		T.eq(o.expected, "CLEAN", "field added via a direct alias propagates to M (F3 trivial case)")
+		assert_sound(o)
+	end)
+
+	T.it("direct alias A = M; A.f assignment form too", function()
+		local exp = [[
+local M = {}
+local A = M
+--: (integer) -> integer
+A.inc = function(x) return x + 1 end
+return M
+]]
+		local entry = [[
+--: () -> integer
+local function run()
+  local lib = require("lib.aliasmod2")
+  return lib.inc(7)
+end
+return { run = run }
+]]
+		local o = lower_with_modules(entry, { ["lib/aliasmod2.lua"] = exp }, false)
+		T.eq(o.expected, "CLEAN", "A.f = fn assignment via direct alias propagates to M (F3 trivial case)")
+		assert_sound(o)
+	end)
+end)

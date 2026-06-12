@@ -1826,6 +1826,20 @@ check_expr (the mode switch):
     otherwise                                    → synth(e) then subtype(synth(e), want)
 ```
 
+**§6.8.3 ARITY DECISION (audit round 3, F2 fix, §9.14).** A closure with FEWER declared
+params than the expected fn type is **valid Lua** — extra call args are discarded at
+runtime. `check_func_expr` accepts arity-less-or-equal: it pushes only the params the
+closure DECLARES (the body context is extended with exactly those params), and uses the
+EXPECTED fn type `want` as the closure's fn type for the `has_type` claim (the
+`fty_override` parameter of `build_closure`). This makes the substrate's
+`check_against` wrapper trivially hold — `subtype(want, want)` — without requiring
+`subtype(under-declared-arity, want)` which would be false. The `synth_function`
+verifier does not reject because it iterates over `params_node` (the closure's declared
+params), not over `pfixed`; under-declared params simply leave those param slots unbound
+in the body context (they receive runtime values that are discarded). A closure with
+MORE declared params than the expected type stays a rejection (`type-mismatch` marker:
+`closure expects more params than the annotated type supplies`).
+
 This is spec'd in §6.8 as **check-mode closure typing**: the bidirectional spine's
 inference boundary, applied to a closure's parameters. The closure's `has_type` claim
 carries `synth_function` evidence (the EXISTING method — node `t="function"` with named
@@ -3427,3 +3441,112 @@ CHECKED-CLEAN number broke off the increment-3 floor of 5 (0.6%) — the GLOBALS
 `require`-returns-the-module-VALUE-type synthesis, and check-mode closures together are
 what move it. The fence held throughout; the substrate (`init.lua`) was again **not**
 touched.
+
+---
+
+### 9.14 Adversarial audit round 3 — increment 3/4 surface (2026-06-12)
+
+Full findings, reproductions, and survivals: `docs/artifacts/typechecker-run-2026-06-12/audit-round-3.md`.
+
+#### F1 [unsound — FIXED]: module-table reassignment ignored; stale rec crosses the require boundary
+
+**Root cause.** The name-target assignment path (`M = <expr>`) requested the RHS value
+claim but did not rebind `M` in the `SliceCtx`. The accumulated shadow rec from `function
+M.f` / `M.f = …` remained the active binding for `M`; a later `return M` captured the
+stale rec as the module value type, and a consumer's `lib.f(1)` was accepted for a
+runtime nil-call.
+
+**Fix.** `lower_stmt` assign branch, `tgt.k == "name"` path (line ~2200 in
+`crescent_slice_lower.lua`): after requesting the RHS value claim, push a new `ctx` entry
+rebinding the name to the RHS type. A post-rebind `return M` now reads the post-rebind
+type (the reset empty table `{}`, or whatever the RHS synthesizes).
+
+**Regression tests** (`corpus_lower_test.lua`, "audit-round-3 F1" suite):
+- `M = {}` after `M.f` accumulation: consumer `lib.f(1)` is no longer CLEAN (becomes
+  OUT-OF-SUBSET or FINDINGS — the phantom-field acceptance is gone).
+- `M = N` (rebind to another table with `g`, not `f`): `lib.f(1)` is no longer CLEAN.
+- `M = {}` BEFORE accumulation, then `M.f` added: `lib.f(1)` is still CLEAN (fields
+  added AFTER the rebind accumulate correctly onto the new binding).
+- Plain accumulation without rebind: CLEAN (regression guard, no regressions).
+
+**Survival.** The fix only affects top-level (non-branch) assignment to a name target.
+Inside an if/while/for body, `lower_block` passes a COPY of the context (`body_ctx`);
+a rebind inside a branch is local to that copy and does not propagate to the parent
+context. This leaves the **conditional-rebind case** (e.g. `if cond then M = {} end`)
+still using the pre-branch `M` type for `return M` — the join machinery to merge branch
+outcomes does not exist in v1. Status: recorded deferral. Un-defer trigger: a context-
+join pass at the end of each if/while/for block (no solver required, just a meet over
+the name's post-branch candidates; out-of-scope for v1's posture of `unknown` at joins).
+
+#### F2 [precision — FIXED]: fewer-param closure into a wider fn slot over-rejected
+
+**Root cause.** `check_func_expr` called `build_closure` which constructed the fn type
+from only the closure's DECLARED params (fewer than `want`'s fixed params). The outer
+`check_expr` wrapper then called `emit_check_against(scid, inner_fty, want)` where
+`inner_fty ≠ want`, so `subtype(inner_fty, want)` failed even though the code is correct
+Lua (extra call args are discarded at runtime).
+
+**Fix.** Pass `want` as the `fty_override` parameter of `build_closure` (new optional 6th
+parameter). `build_closure` emits `has_type(ctx, node, want)` (the full expected type)
+rather than the inner under-arity type. The outer `check_against` wrapper then emits
+`subtype(want, want)` which holds trivially, and the substrate's `check_against` rule
+sees `spr.type == sub.a == want`. The body is still verified under the closure's
+DECLARED params only (the `synth_function` verifier iterates over `params_node`, not
+`pfixed`, so under-declared params are simply absent from the body context — correct
+Lua: undeclared extra args are discarded). The arity decision is pinned in §6.8.3:
+fewer params → accepted; more params → `type-mismatch` rejection (the extra declared
+params would receive `nil` at runtime against a slot that doesn't supply them —
+rejecting here is the sound posture; a future `nil`-admitting-widening pass could relax
+it, but that requires a `nil | T` analysis pass that v1 does not have).
+
+**Regression tests** (`corpus_lower_test.lua`, "audit-round-3 F2" suite):
+- 1-param closure into `(integer, integer) -> nil` slot: CLEAN (was FINDINGS pre-fix).
+- 0-param closure into `(integer) -> nil` slot: CLEAN (was FINDINGS pre-fix).
+- Exact-arity closure: still CLEAN (no regression).
+- More-params closure: still FINDINGS/OUT-OF-SUBSET (the rejection path is preserved).
+
+#### F3 [precision — PARTIAL FIX]: aliased / conditional / wrapped exports under-populate the module type
+
+Three forms — aliased exports (`local A = M; A.f = …; return M`), conditional exports
+(`if cond then function M.f … end`), and wrapped returns (`return setmetatable(M, {})`)
+— all degrade to OUT-OF-SUBSET (safe: under-populates rather than over-accepts). This
+is a precision gap, not unsoundness.
+
+**Trivial alias case fixed.** `local A = M; A.f = …; return M` — the single-direct-alias
+form is now tracked. When `local A = <name>` is lowered at module top level (`func_depth
+== 0`) and the RHS name's type is a `rec`, `A → M` is recorded in `lc.mod_table_aliases`.
+`ctx_set_field` (now with an optional 5th `mod_table_aliases` parameter) mirrors each
+field accumulation onto the aliased original: `ctx_set_field(ctx, "A", "f", …)` also
+pushes a new binding for `M` with `f` added. A later `return M` then reads the
+propagated rec. All four `ctx_set_field` call sites updated.
+
+**Regression tests** (`corpus_lower_test.lua`, "audit-round-3 F3" suite):
+- `local A = M; function A.f(x) … end; return M`: consumer `lib.f(1)` is CLEAN.
+- `local A = M; A.inc = function(x) … end; return M`: consumer `lib.inc(7)` is CLEAN.
+
+**Surviving deferrals** (recorded with un-defer triggers; §9.14):
+
+| Case | Status | Un-defer trigger |
+|---|---|---|
+| Conditional rebind: `if cond then M = {} end; return M` | deferral | context-join pass at if/while/for block exit |
+| Conditional export: `if cond then function M.f … end; return M` | deferral | same context-join pass |
+| Aliased conditional export: `local A = M; if cond then A.f = … end; return M` | deferral | same context-join pass |
+| Wrapped return: `return setmetatable(M, {})` | deferral (out-of-subset, safe) | `setmetatable` generic-identity type (`§6.8.1` deferral) |
+| Alias chain: `local A = M; local B = A; B.f = …; return M` | deferral | alias chain analysis |
+
+#### Survivals (from the audit report)
+
+All survivals from `docs/artifacts/typechecker-run-2026-06-12/audit-round-3.md` held
+through the fix pass:
+
+- Operators (§6.7.1): all sound (integer/number class split, chain propagation, `..`,
+  comparison and equality, `#`, unary `-`). No regression.
+- Stdlib declaration soundness (§9.13): all sound-loose, no nil flow-through. No regression.
+- Module-type cache and cycles (§6.8.2): no poisoning, no staleness, honest cycles.
+  No regression.
+- Check-mode closures (the non-F2 cases): direct-arg check-mode, closure-via-local
+  (synth path), closure into `unknown`-typed slot, union-of-fn slot (precision
+  deferral, documented), nested closures, more-params rejection, recursion through
+  a closure — all held.
+- Round-1 / round-2 regression spot-checks: collision detection, two-module same-field,
+  recursive-alias typed field, well-formedness gate, subtype DAG memoization — all held.
