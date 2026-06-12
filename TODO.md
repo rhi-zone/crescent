@@ -843,25 +843,42 @@ Open items, ordered by priority:
 
 - [x] **Add precise opaque-object type declarations for 9 libraries** — all 9 verified at 0 errors. Most were already fixed in prior sessions; remaining work done in this session: cron (SHORTHANDS indexer + or-chain), graph (bfs/dfs second return type), glob (Matcher type + return annotations), ratelimit (5 types declared). `lib/regex/pure` does not exist.
 
-- [ ] **type/static: worker SIGSEGV under `bin/cr check` is runaway `env.lua` `instantiate` — NOT a LuaJIT fork/JIT bug** — DIAGNOSIS PINNED (bounded-stabilization session 2026-06-12). The prior framing ("upstream of crescent / LuaJIT trace compiler / fork×mcode interaction") is **wrong** — ruled out below. Root cause: `instantiate_inner` in `lib/type/static/env.lua` re-instantiates shared sub-types exponentially, growing the per-ctx `TypeSlot`/`FieldEntry` FFI arena (`arena.lua`) without bound until either (a) the array allocation legitimately exceeds LuaJIT's max ctype-array size and throws the catchable `arena.lua:48/58 ct_arr: "size of C type is unknown or too large"`, or (b) the ~2 GB+ allocation OOM/segfaults the process (the masked "worker crashed" warning).
+- [ ] **type/static: worker SIGSEGV under `bin/cr check` — C_BIND_GENERICS solver livelock (Gen-3 root cause)**
 
-  **Mechanism (precise):** `M.instantiate` (env.lua:547) starts a fresh `seen = {}`. In the `TAG_TABLE` arm, `instantiate_inner` (env.lua:353) memoizes a table via `seen[tid]` ONLY for the duration of that table's own recursion, then **clears it** with `seen[tid] = nil` at env.lua:450. So a sub-type reachable by multiple paths through a DAG (diamond-shaped generic type) is fully re-instantiated on each path — exponential in the DAG's sharing depth. The `mapping` (generic-var) table persists for the whole call, but the structural `seen` memo does not, so structural sharing is not preserved. Observed: arena grew 512 → 16 777 216 → 33 554 432 `TypeSlot`s (32 B each → 2 GB+) before throwing. Traceback at the blowup: `solve2.lua simplify → solve.lua:2999 → env.lua:549 instantiate → instantiate_inner (442 make_table → 467 → 336, recursive)`.
+  Symptom: `rm -rf .crescentcache && bin/cr check lib/bloom/init.lua` → exit 139 (SIGSEGV). Old user-level repro still valid as a symptom check: `for i in $(seq 1 10); do rm -rf .crescentcache && bin/cr check 2>&1 | grep -E "warning: .*crashed"; done` — prints the warning on most runs.
 
-  **Reproducible on a SINGLE file, no fork involved:** `rm -rf .crescentcache && bin/cr check lib/bloom/init.lua` → exit 139 (SIGSEGV). `bin/cr check --summary lib/bloom/init.lua` (sequential, njobs=1) → the catchable `ct_arr` error. The full-tree run crashes in-flight on `lib/bloom/init.lua` (47th file alphabetically). The parallel "0–4 workers crash" is just this same blowup hitting whichever worker(s) got bloom (and other affected files) in their bucket, plus the replay child re-hitting it ("replay child also crashed; results incomplete").
+  ---
 
-  **Ruled out (with evidence):**
-  - *Fork × JIT mcode interaction* — REFUTED. The bug reproduces in the **sequential, single-process** path (`--summary`, njobs=1, no `fork()`).
-  - *`jit.off()` + `jit.flush()` in forked workers* — INEFFECTIVE. Tried (predecessor's uncommitted patch); 7 workers still crashed WITH it applied (vs 8 without — within run-to-run variance) and it added a measured ~29 % wall-time regression (185 s → 239 s full-tree). Discarded — it treats a non-JIT symptom.
-  - *Vendored LuaJIT binary defect* — REFUTED. A minimal fork + ctype-array-growth repro (16 children each growing `ASTNode[?]` arrays under JIT warmup) runs 3/3 clean. The arena ctype is valid at the failure (`ffi.sizeof(ct)` succeeds); it is `new_cap` that is genuinely huge.
+  **~~Gen-1 (REFUTED): Fork × JIT mcode interaction~~**
+  ~~The original framing attributed the crash to LuaJIT trace-compiler mcode and fork interactions: `RIP` landing in anonymous RX mcode regions after fork suggested JIT-compiled code was the culprit. Ruled out by: (a) the bug reproduces in the sequential, single-process path (`--summary`, njobs=1, no `fork()`); (b) a minimal fork+ctype-array-growth repro (16 children growing `ASTNode[?]` arrays under JIT warmup) runs 3/3 clean; (c) with JIT disabled, crashes still occur — `RIP` was a red herring.~~
 
-  **Independent corroboration (core-dump forensics + instrumentation, second investigation):**
-  - *Core-dump instruction-level confirmation:* with JIT disabled, every crash lands at the same instruction in the vendored binary (`luajit-bin+0x53537`, `mov (%r8),%eax` — FFI cdata→TValue load), with `r8` pointing into unmapped memory. This is a dangling FFI pointer into a freed/realloc'd arena backing array, not a JIT-compiler defect. With JIT on, `RIP` lands in anonymous RX mcode regions — a red herring that originally motivated the fork×JIT framing and is now ruled out.
-  - *`waitpid`-status instrumentation splits the "worker crashed" warning:* the conflated warning resolves to ~3–4 genuine `SIGSEGV` exits plus ~4–5 catchable Lua-error exits (`arena.lua` `ct_arr: "size of C type is unknown or too large"`) per full-tree run. Two distinct symptom paths, one arena-blowup cause.
-  - *`jit.off()+jit.flush()` in workers — measured and rejected:* implemented and benchmarked; result: 4 SIGSEGVs with the patch vs 3 without (no statistically meaningful improvement), plus ~29 % wall-time cost (185 s → 239 s full-tree). Do not resurrect this patch.
+  ---
 
-  **Principled fix (NOT a runner-level patch — it is a solver/substrate change):** make `instantiate` preserve structural sharing — persist the `seen[tid] → result_id` memo for the whole `instantiate` call (do not clear it at env.lua:450), so each distinct sub-type is instantiated at most once per call (the standard cycle-guard + memoization pattern already adopted elsewhere; see the related "stack overflows in parallel workers under structural cycle work" item above — same root family). The clearing was presumably added to bound memory for cyclic types; the correct form keeps the memo and relies on the pre-registered `result_id` (env.lua:367) to break cycles, which it already does. This needs its own correctness verification (fuzz invariant: `instantiate` of a shared-DAG type must terminate and preserve sharing; parity that diagnostics on bloom/proto/prolog/protocol_buffer/hamt are unchanged once it terminates) and is out of scope for a "narrowest runner fix," hence pinned here. Repro for the fix: `bin/cr check lib/bloom/init.lua` must exit 0/1 (not 139), then `for i in $(seq 1 10); do rm -rf .crescentcache && bin/cr check 2>&1 | grep -E "warning: .*crashed"; done` must be 0/10.
+  **~~Gen-2 (REFUTED by Gen-3 measurement): Intra-`instantiate` exponential DAG copying~~**
+  ~~Root cause pinned (session 2026-06-12): `instantiate_inner` (env.lua:353) memoizes a table entry via `seen[tid]` only for the duration of that table's own recursion, then clears it (`seen[tid] = nil`, env.lua:450). A sub-type reachable via multiple paths through a generic DAG is fully re-instantiated on each path — exponential in DAG sharing depth. Observed arena growth: 512 → 16 777 216 → 33 554 432 TypeSlots (32 B each → 2 GB+) before throwing. The blowup manifests as either a catchable `arena.lua ct_arr: "size of C type is unknown or too large"` (sequential path) or a SIGSEGV from a dangling FFI pointer into a freed/realloc'd backing array (parallel path).~~
 
-  Old user-level repro (still valid as a symptom check): `for i in $(seq 1 10); do rm -rf .crescentcache && bin/cr check 2>&1 | grep -E "warning: .*crashed"; done` — prints the warning on most runs.
+  ~~Corroborating evidence (second investigation, core-dump forensics):~~
+  - ~~Core dump: with JIT disabled, crash lands at `luajit-bin+0x53537` `mov (%r8),%eax` (FFI cdata→TValue load), `r8` into unmapped memory — dangling pointer into a realloc'd arena.~~
+  - ~~`waitpid` instrumentation: ~3–4 genuine SIGSEGV exits + ~4–5 catchable Lua-error exits per full-tree run — two symptom paths, one blowup cause.~~
+  - ~~`jit.off()+jit.flush()` in workers: 4 SIGSEGVs with vs 3 without (noise); +29 % wall-time (185 s → 239 s). Rejected — treats a non-JIT symptom. Do not resurrect.~~
+
+  ~~Proposed fix: persist `seen[tid] → result_id` for the entire `instantiate` call (do not clear at env.lua:450); cycle safety comes from the pre-registered `result_id` at env.lua:367.~~
+
+  **Gen-3 (current, measured — third investigation):** the arena blowup is a **C_BIND_GENERICS solver livelock**, not intra-`instantiate` exponential copying.
+
+  - **A/B on the Gen-2 "persist seen" fix (env.lua:450):** arena peak IDENTICAL with and without — 67,108,864 TypeSlots both ways on lib/bloom/init.lua. Per-`instantiate` growth is a constant 31 slots/call, never exponential. The Gen-2 mechanism does not occur. (The `seen`-persist remains a valid standalone micro-optimization but does not affect the crash.)
+  - **Blowup is the call count:** >1,080,000 `instantiate` calls × 31 slots = arena exhaustion.
+  - **Round-loop instrumentation** (solve.lua `solve_range`, ~lines 4139–4182): every round reports `solved=false` but `gen` advances by exactly 1 — observed past 504,000 rounds. The quiescence test (`not solved_this_round and gen_after == gen_before`) never fires.
+  - **The livelock cycle:** re-seed re-queues the unsolved `C_BIND_GENERICS` → handler instantiates a fresh callee (solve.lua:2974, +31 slots, fresh param TVs) → param-bind loop fires `unify` (solve.lua:3012) → `wake_waiters` → `gen+1` → `ctx._bind_woke_given` causes defer at ~3013–3014 WITHOUT retiring → repeat forever. Defer-after-mutation.
+
+  **Candidate fixes (ranked, none landed — solver-convergence blast radius):**
+  1. Cache the per-constraint instantiation across re-seeds — removes both the slot leak and the spurious gen advance.
+  2. Roll back / skip binds issued in a round that ends in a `_bind_woke_given` defer, so the defer does not register as progress.
+  3. Tighten the quiescence signal against immediately-superseded binds.
+
+  Each risks trading a crash for wrong types; gate is repo-wide verdict-delta + static suite + fuzz. A fix attempt at candidate (1) is running separately; this item is accurate either way.
+
+  **Repro for any fix:** `bin/cr check lib/bloom/init.lua` must exit 0/1 (not 139); then `for i in $(seq 1 10); do rm -rf .crescentcache && bin/cr check 2>&1 | grep -E "warning: .*crashed"; done` must be 0/10.
 
 - [ ] **type/static: regression test for parallel CLI determinism** — currently relies on the `bin/cr check` repro above. A proper test would: (1) drive `check_parallel` with a synthetic file set, (2) inject a SIGSEGV in one worker (`kill -SEGV $pid` from a controlled child), (3) assert the parent's reported error count matches the no-crash baseline. Blocked on a way to inject a deterministic worker crash from inside the test runner; for now, the manual repro is documented.
 
