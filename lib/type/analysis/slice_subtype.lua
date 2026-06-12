@@ -57,6 +57,31 @@ local function find_field(fields, key)
 	return nil
 end
 
+-- Forward declaration of the cycle-guarded recursive worker (defined below).
+local sub --[[: (Ty, Ty, { [string]: boolean | nil }, { [string]: boolean | nil }) -> boolean ]]
+
+-- Tuple/return subtype: pointwise COVARIANT on fixed elements, with the
+-- droppable-extra-returns arity interplay (§3.2, §6.5.5). `A` may produce MORE
+-- fixed values than `B` needs (longer tuple <: shorter prefix); `A` must produce
+-- at least `B`'s fixed count unless `A` has a vararg covering the remainder.
+-- Varargs covariant on the tail when both present. This ONE helper backs both the
+-- `fn` return rule and the standalone `tuple` constructor — there is no second
+-- tuple-subtype rule.
+--: (Ty[], Ty | nil, Ty[], Ty | nil, { [string]: boolean | nil }, { [string]: boolean | nil }) -> boolean
+local function tuple_sub(a_fixed, a_var, b_fixed, b_var, seen, memo)
+	for i = 1, #b_fixed do
+		local a_el --[[: Ty | nil ]]
+		if i <= #a_fixed then a_el = a_fixed[i] else a_el = a_var end
+		if a_el == nil then return false end -- A produces fewer values than B promises
+		if not sub(a_el, b_fixed[i], seen, memo) then return false end
+	end
+	if a_var ~= nil and b_var ~= nil then
+		if not sub(a_var, b_var, seen, memo) then return false end
+	end
+	return true
+end
+M._tuple_sub = tuple_sub
+
 -- ── The relation ─────────────────────────────────────────────────────────────
 
 -- Cycle-guard stack: maps "tidA:tidB" -> true for pairs currently being decided.
@@ -79,7 +104,6 @@ end
 -- writes its definite verdict. Non-μ descents never touch `seen`, so caching
 -- their shared-subterm results is unconditionally sound. The contravariant-
 -- recursion / memo-poisoning tests guard this argument.
-local sub --[[: (Ty, Ty, { [string]: boolean | nil }, { [string]: boolean | nil }) -> boolean ]]
 local decide --[[: (Ty, Ty, { [string]: boolean | nil }, { [string]: boolean | nil }) -> boolean ]]
 
 -- Memoizing wrapper: reflexivity, the coinductive-hypothesis short-circuit, then
@@ -227,20 +251,20 @@ decide = function(a, b, seen, memo)
 		if pbv ~= nil and pav ~= nil then
 			if not sub(pbv, pav, seen, memo) then return false end
 		end
-		-- return: covariant, pointwise on the return tuple. A may return MORE than
-		-- B needs (extra returns are droppable), so A's tuple is <: a shorter prefix.
-		for i = 1, #rb.fixed do
-			if i > #ra.fixed then return false end  -- A returns fewer than B promises
-			if not sub(ra.fixed[i], rb.fixed[i], seen, memo) then return false end
-		end
-		local rbv, rav = rb.vararg, ra.vararg
-		if rbv ~= nil and rav ~= nil then
-			if not sub(rav, rbv, seen, memo) then return false end
-		end
-		return true
+		-- return: covariant return tuple (the shared tuple_sub rule, §6.5.5).
+		return tuple_sub(ra.fixed, ra.vararg, rb.fixed, rb.vararg, seen, memo)
 	end
 	-- (A = a specific fn shape <: the untyped function top.)
 	if ak == "fn" and bk == "function" then return true end
+
+	-- (Tuples: covariant return/spread, the shared tuple_sub rule. §6.5.5.)
+	-- `tuple <: union` / `union <: union` need no rule here — they are the union
+	-- decomposition above; a tuple is just an atom to it. Only `tuple <: tuple` is
+	-- new. A scalar vs a ≥2 tuple, or a tuple vs a non-tuple, falls through to the
+	-- final `false` (no constructor-pair match) — sound, no special case.
+	if ak == "tuple" and bk == "tuple" then
+		return tuple_sub(a.fixed or {}, a.vararg, b.fixed or {}, b.vararg, seen, memo)
+	end
 
 	-- (Records: width + depth + optional + open-row. §3.2.)
 	if (ak == "rec" or ak == "rec_with_indexer") and (bk == "rec" or bk == "rec_with_indexer") then

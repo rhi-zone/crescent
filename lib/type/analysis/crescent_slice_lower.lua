@@ -798,9 +798,13 @@ local function scan_source(src)
 	for ln in (src .. "\n"):gmatch("(.-)\n") do lines[#lines + 1] = ln end
 
 	-- First pass: declare aliases in source order (so a later alias can reference
-	-- an earlier one). Record signature directives by line.
-	for idx = 1, #lines do
-		local d = P.scan_annotation(lines[idx])
+	-- an earlier one). Record signature directives by line. Multi-line `--::`
+	-- continuations are joined (§6.5.6); `consumed` is how many source lines the
+	-- directive spanned, so they are not re-scanned as separate (failing) lines.
+	local idx = 1 --: integer
+	while idx <= #lines do
+		local d, consumed = P.scan_annotation_at(lines, idx)
+		local span = (consumed > 0 and consumed or 1) --: integer
 		if d and d.kind == "alias" and d.name ~= nil and d.body ~= nil then
 			local r, e, c = P.declare_alias(aliases, d.name, d.body)
 			observations[#observations + 1] = { kind = "alias", name = d.name, body = d.body, line = idx }
@@ -810,8 +814,8 @@ local function scan_source(src)
 				local _ = e
 			end
 		elseif d and d.kind == "sig" and d.body ~= nil then
-			-- attach to the next statement-bearing line.
-			local target = idx + 1
+			-- attach to the next statement-bearing line (after this directive's span).
+			local target = idx + span
 			while target <= #lines do
 				local nd = P.scan_annotation(lines[target])
 				local blank = lines[target]:match("^%s*$")
@@ -821,6 +825,7 @@ local function scan_source(src)
 			anns_by_line[target] = d.body
 			observations[#observations + 1] = { kind = "sig", body = d.body, line = idx, attaches = target }
 		end
+		idx = idx + span
 	end
 
 	return { aliases = aliases, anns_by_line = anns_by_line, observations = observations, markers = markers }

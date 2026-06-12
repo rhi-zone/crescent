@@ -41,7 +41,7 @@ local M = {}
 --   { k="tyvar", var="X" }                  (free reference to an enclosing mu var)
 --
 --:: PField = { key: string, ty: PTy, optional?: boolean, readonly?: boolean }
---:: PTy = { k: string, n?: number, s?: string, b?: boolean, params?: { fixed: PTy[], vararg?: PTy }, ret?: { fixed: PTy[], vararg?: PTy }, fields?: PField[], rows?: string, key?: PTy, val?: PTy, members?: PTy[], var?: string, body?: PTy }
+--:: PTy = { k: string, n?: number, s?: string, b?: boolean, params?: { fixed: PTy[], vararg?: PTy }, ret?: { fixed: PTy[], vararg?: PTy }, fields?: PField[], rows?: string, key?: PTy, val?: PTy, members?: PTy[], var?: string, body?: PTy, fixed?: PTy[], vararg?: PTy }
 
 -- ── Encode: interned Ty -> portable PTy ──────────────────────────────────────
 --
@@ -93,6 +93,13 @@ local function encode(ty, binders)
 	end
 	if k == "indexer" then
 		return { k = "indexer", key = encode(ty.key or G.never(), binders), val = encode(ty.val or G.never(), binders) }
+	end
+	if k == "tuple" then
+		local fixed = ty.fixed or {}
+		local fs = {} --[[: PTy[] ]]
+		for i = 1, #fixed do fs[i] = encode(fixed[i], binders) end
+		local va = ty.vararg --[[: Ty | nil ]]
+		return { k = "tuple", fixed = fs, vararg = va ~= nil and encode(va, binders) or nil }
 	end
 	if k == "union" or k == "inter" then
 		local ms = ty.members or {}
@@ -225,6 +232,27 @@ decode = function(v, env)
 		return G.indexer(ik, iv)
 	end
 
+	if k == "tuple" then
+		local vfixed = v.fixed
+		if type(vfixed) ~= "table" then return nil end
+		local fs = {} --[[: Ty[] ]]
+		for i = 1, #vfixed do
+			local d = decode(vfixed[i], env)
+			if not d then return nil end
+			fs[i] = d
+		end
+		local va --[[: Ty | nil ]]
+		if v.vararg ~= nil then
+			va = decode(v.vararg, env)
+			if not va then return nil end
+		end
+		-- a canonical tuple has ≥2 fixed elements OR a vararg (a one-fixed no-vararg
+		-- form should have normalized to its element; reject the non-canonical shape
+		-- as malformed producer input, parse-not-cast).
+		if #fs < 2 and va == nil then return nil end
+		return G.tuple(fs, va)
+	end
+
 	if k == "union" or k == "inter" then
 		local vmembers = v.members
 		if type(vmembers) ~= "table" then return nil end
@@ -337,6 +365,15 @@ subst_pty = function(v, subst, bound)
 	end
 	if k == "indexer" then
 		return { k = "indexer", key = subst_pty(v.key, subst, bound), val = subst_pty(v.val, subst, bound) }
+	end
+	if k == "tuple" then
+		local fixed = v.fixed
+		local fs = {} --[[: { [integer]: unknown } ]]
+		if type(fixed) == "table" then
+			for i = 1, #fixed do fs[i] = subst_pty(fixed[i], subst, bound) end
+		end
+		local va = v.vararg ~= nil and subst_pty(v.vararg, subst, bound) or nil
+		return { k = "tuple", fixed = fs, vararg = va }
 	end
 	if k == "union" or k == "inter" then
 		local members = v.members
@@ -477,6 +514,17 @@ check_contractive = function(ty, unguarded, occurred, depth)
 		for i = 1, #ms do
 			if not check_contractive(ms[i], unguarded, occurred, depth) then return false end
 		end
+		return true
+	end
+	-- A `tuple` is a value-spread, not a width-guarding constructor: a bound var as
+	-- a bare tuple element stays unguarded (like a union member). Pass `unguarded`
+	-- through unchanged.
+	if k == "tuple" then
+		local fixed = ty.fixed or {}
+		for i = 1, #fixed do
+			if not check_contractive(fixed[i], unguarded, occurred, depth) then return false end
+		end
+		if ty.vararg ~= nil and not check_contractive(ty.vararg, unguarded, occurred, depth) then return false end
 		return true
 	end
 	-- Primitives / literals: no children, trivially contractive.

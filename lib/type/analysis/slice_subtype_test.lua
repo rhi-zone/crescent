@@ -244,6 +244,37 @@ T.describe("slice_subtype rules", function()
 		T.ok(S.is_subtype(Interior, HamtNode), "Interior(HamtNode) <: HamtNode (coinductive)")
 	end)
 
+	T.it("tuple covariance, droppable extra returns, vararg (§6.5.5)", function()
+		-- pointwise covariant: (1, "x") <: (int, str).
+		local t_lit = G.tuple({ G.lit_int(1), G.lit_str("x") }, nil)
+		local t_base = G.tuple({ G.integer(), G.string() }, nil)
+		T.ok(S.is_subtype(t_lit, t_base), "(1,\"x\") <: (int,str) covariant")
+		T.fail(S.is_subtype(t_base, t_lit), "(int,str) </: (1,\"x\")")
+		-- longer tuple <: shorter prefix (extra returns droppable).
+		local t_abc = G.tuple({ G.integer(), G.string(), G.boolean() }, nil)
+		local t_ab  = G.tuple({ G.integer(), G.string() }, nil)
+		T.ok(S.is_subtype(t_abc, t_ab), "(int,str,bool) <: (int,str) (extra returns droppable)")
+		T.fail(S.is_subtype(t_ab, t_abc), "(int,str) </: (int,str,bool) (A produces fewer)")
+		-- vararg tail covers B's extra fixed.
+		local t_var = G.tuple({ G.integer() }, G.string())
+		local t_two = G.tuple({ G.integer(), G.string() }, nil)
+		T.ok(S.is_subtype(t_var, t_two), "(int, ...str) <: (int, str) (vararg covers the fixed tail)")
+	end)
+
+	T.it("union-of-tuples exists-forall + scalar/tuple incomparability (§6.5.5)", function()
+		local ok_t  = G.tuple({ G.string(), G.string() }, nil)
+		local err_t = G.tuple({ G.nil_(), G.string() }, nil)
+		local narrow = G.union({ ok_t, err_t })
+		local wider  = G.union({ ok_t, err_t, G.tuple({ G.integer(), G.string() }, nil) })
+		T.ok(S.is_subtype(narrow, wider), "union-of-tuples <: wider union (exists-forall)")
+		T.fail(S.is_subtype(wider, narrow), "wider </: narrow")
+		T.ok(S.is_subtype(ok_t, narrow), "a tuple <: a union containing it")
+		-- scalar vs ≥2 tuple, tuple vs non-tuple: both false (no special case).
+		local t2 = G.tuple({ G.integer(), G.string() }, nil)
+		T.fail(S.is_subtype(G.integer(), t2), "scalar </: a 2-tuple")
+		T.fail(S.is_subtype(t2, G.integer()), "2-tuple </: scalar")
+	end)
+
 	T.it("witness variant returns a counterexample on rejection", function()
 		local ok, ce = S.subtype(G.string(), G.integer())
 		T.fail(ok, "string </: integer")
@@ -321,6 +352,14 @@ local function gen_ty(rng, depth, tv)
 	elseif pick == 8 then
 		return G.indexer(rng:bool() and G.string() or G.integer(), gen_ty(rng, depth - 1, tv))
 	elseif pick == 9 then
+		if rng:bool() then
+			-- a return-position tuple (§6.5.5): 2-3 fixed elements (a one-element
+			-- tuple normalizes away, so always emit ≥2 to exercise the constructor).
+			local nf = rng:int(2, 3)
+			local fx = {} --[[: { [integer]: Ty } ]]
+			for _ = 1, nf do fx[#fx + 1] = gen_ty(rng, depth - 1, tv) end
+			return G.tuple(fx, rng:int(1, 4) == 1 and gen_ty(rng, depth - 1, tv) or nil)
+		end
 		-- function
 		local np = rng:int(0, 2)
 		local fixed = {} --[[: { [integer]: Ty } ]]
@@ -438,6 +477,30 @@ T.describe("slice_subtype fuzz invariants (§3.5)", function()
 			local lhs2 = S.is_subtype(a, G.inter({ b, c }))
 			local rhs2 = S.is_subtype(a, b) and S.is_subtype(a, c)
 			T.eq(lhs2, rhs2, "A <: B&C  ⇔  A<:B ∧ A<:C")
+		end
+	end)
+
+	T.it("tuple-union exists-forall + reflexivity  [" .. seed_note .. "]", function()
+		-- Build unions of generated tuples and check the exists-forall law holds:
+		-- union(ts) <: U  ⇔  every t in ts is <: some member of U. This is the
+		-- value-or-error idiom's relation (§6.5.5), fuzzed over generated tuples.
+		--: () -> Ty
+		local function gen_tuple()
+			local nf = rng:int(2, 3)
+			local fx = {} --[[: { [integer]: Ty } ]]
+			for _ = 1, nf do fx[#fx + 1] = gen_ty(rng, rng:int(0, 2), nil) end
+			return G.tuple(fx, nil)
+		end
+		for _ = 1, FUZZ_N do
+			local a, b, c = gen_tuple(), gen_tuple(), gen_tuple()
+			-- reflexivity on tuples.
+			T.ok(S.is_subtype(a, a), "tuple reflexivity")
+			-- a <: a|b ; a|b <: c ⇔ a<:c ∧ b<:c (the union law over tuple members).
+			T.ok(S.is_subtype(a, G.union({ a, b })), "tuple <: union containing it")
+			local u = G.union({ a, b })
+			local lhs = S.is_subtype(u, c)
+			local rhs = S.is_subtype(a, c) and S.is_subtype(b, c)
+			T.eq(lhs, rhs, "(ta|tb) <: tc ⇔ ta<:tc ∧ tb<:tc")
 		end
 	end)
 

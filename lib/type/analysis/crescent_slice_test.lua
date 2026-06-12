@@ -870,6 +870,210 @@ T.describe("crescent.slice.v1: parser-frontend adapter (annotation type grammar)
 	end)
 end)
 
+T.describe("crescent.slice.v2.1: named parameters (§6.5.1) — names ride, subtyping ignores", function()
+	local SUB = require("lib.type.analysis.slice_subtype")
+
+	T.it("parses `(a: number, b: string) -> boolean` with names on Params", function()
+		G.reset()
+		local t = P.parse_type_ann("(a: number, b: string) -> boolean", {})
+		if not t then T.fail(true, "parse failed"); return end
+		T.eq(t.kind, "fn", "named params parse as a fn type")
+		local p = t.params or ({ fixed = {} } --[[: Params ]])
+		T.eq(#p.fixed, 2, "two positional params")
+		local f1 = p.fixed[1]
+		T.eq(f1 and f1.kind, "number", "first param type")
+		local names = p.names or ({} --[[: { [integer]: string | nil } ]])
+		T.eq(names[1], "a", "first param name carried")
+		T.eq(names[2], "b", "second param name carried")
+	end)
+
+	T.it("subtype is NAME-BLIND: name-only differences share a tid", function()
+		G.reset()
+		local fa = P.parse_type_ann("(a: number) -> number", {})
+		local fb = P.parse_type_ann("(b: number) -> number", {})
+		local fbare = P.parse_type_ann("(number) -> number", {})
+		T.eq(fa and fa.tid, fb and fb.tid, "name-only difference interns to the same tid")
+		T.eq(fa and fa.tid, fbare and fbare.tid, "named and unnamed param types share a tid")
+		T.ok(fa and fb and SUB.is_subtype(fa, fb), "name-blind: fa <: fb")
+	end)
+
+	T.it("mixes named and bare positional slots", function()
+		G.reset()
+		local t = P.parse_type_ann("(number, b: string) -> nil", {})
+		if not t then T.fail(true, "parse failed"); return end
+		local p = t.params or ({ fixed = {} } --[[: Params ]])
+		local names = p.names or ({} --[[: { [integer]: string | nil } ]])
+		T.eq(names[1], nil, "first slot bare (no name)")
+		T.eq(names[2], "b", "second slot named")
+	end)
+end)
+
+T.describe("crescent.slice.v2.1: `self` parameter (§6.5.2) — an ordinary named first param", function()
+	T.it("parses `(self: HamtNode) -> integer` as a named first param", function()
+		G.reset()
+		local aliases = {} --[[: { [string]: Ty } ]]
+		P.declare_alias(aliases, "HamtNode", "{ kind: integer }")
+		local t = P.parse_type_ann("(self: HamtNode) -> integer", aliases)
+		if not t then T.fail(true, "parse failed"); return end
+		T.eq(t.kind, "fn", "self-method signature parses")
+		local p = t.params or ({ fixed = {} } --[[: Params ]])
+		local names = p.names or ({} --[[: { [integer]: string | nil } ]])
+		T.eq(names[1], "self", "self is the first param's name")
+		local f1 = p.fixed[1]
+		T.eq(f1 and f1.kind, "rec", "self's type is the annotation (HamtNode), no special-casing")
+	end)
+
+	T.it("`self` is name-blind like any param (no self-specific rule)", function()
+		G.reset()
+		local fself = P.parse_type_ann("(self: number) -> number", {})
+		local fother = P.parse_type_ann("(this: number) -> number", {})
+		T.eq(fself and fself.tid, fother and fother.tid, "self vs this: name-only ⇒ same tid")
+	end)
+end)
+
+T.describe("crescent.slice.v2.1: `T[]` and `{ T }` shorthand (§6.5.3/§6.5.4)", function()
+	T.it("`T[]` desugars to indexer(integer, T)", function()
+		G.reset()
+		local t = P.parse_type_ann("string[]", {})
+		T.eq(t and t.kind, "indexer", "T[] ⇒ indexer")
+		T.eq(t and t.key and t.key.kind, "integer", "key is integer")
+		T.eq(t and t.val and t.val.kind, "string", "value is the element type")
+	end)
+
+	T.it("`{ T }` desugars to the IDENTICAL canonical form as `T[]`", function()
+		G.reset()
+		local arr = P.parse_type_ann("string[]", {})
+		local lst = P.parse_type_ann("{ string }", {})
+		T.ok(arr ~= nil and lst ~= nil, "both parse")
+		T.eq(arr and arr.tid, lst and lst.tid, "`{ T }` and `T[]` share a tid (one canonical form)")
+	end)
+
+	T.it("`{ Listener }` over an alias is a list of that alias", function()
+		G.reset()
+		local aliases = {} --[[: { [string]: Ty } ]]
+		P.declare_alias(aliases, "Listener", "(string) -> nil")
+		local t = P.parse_type_ann("{ Listener }", aliases)
+		T.eq(t and t.kind, "indexer", "{ Listener } ⇒ indexer(integer, Listener)")
+		T.eq(t and t.val and t.val.kind, "fn", "element is the Listener fn type")
+	end)
+
+	T.it("`T[][]` nests, and `{ [K]: V }` / `{ f: T }` still take precedence", function()
+		G.reset()
+		local nested = P.parse_type_ann("integer[][]", {})
+		T.eq(nested and nested.kind, "indexer", "outer indexer")
+		T.eq(nested and nested.val and nested.val.kind, "indexer", "inner indexer")
+		local idx = P.parse_type_ann("{ [string]: number }", {})
+		T.eq(idx and idx.kind, "indexer", "index signature unchanged")
+		local rec = P.parse_type_ann("{ name: string }", {})
+		T.eq(rec and rec.kind, "rec", "named-field record unchanged")
+	end)
+
+	T.it("rejects a multi-element `{ A, B }` (not a v1 table type)", function()
+		G.reset()
+		local t, e = P.parse_type_ann("{ string, number }", {})
+		T.fail(t, "{ A, B } is rejected")
+		T.ok(e and e:find("single type"), "error explains the single-element rule")
+	end)
+end)
+
+T.describe("crescent.slice.v2.1: union-of-multi-return-tuples (§6.5.5)", function()
+	local SUB = require("lib.type.analysis.slice_subtype")
+
+	T.it("parses `(string) -> (string, string) | (nil, string)` as a union of tuples", function()
+		G.reset()
+		local t = P.parse_type_ann("(string) -> (string, string) | (nil, string)", {})
+		if not t then T.fail(true, "parse failed"); return end
+		T.eq(t.kind, "fn", "the value-or-error return parses")
+		local r = t.ret or ({ fixed = {} } --[[: Ret ]])
+		T.eq(#r.fixed, 1, "the return is a single value (a union)")
+		local rv = r.fixed[1]
+		T.eq(rv and rv.kind, "union", "the return value is a union")
+		local ms = (rv and rv.members) or ({} --[[: Ty[] ]])
+		local saw_tuple = false --: boolean
+		for _, m in ipairs(ms) do if m.kind == "tuple" then saw_tuple = true end end
+		T.ok(saw_tuple, "the union has tuple members")
+	end)
+
+	T.it("a single `(A, B)` return keeps the legacy multi-return slot shape", function()
+		G.reset()
+		local t = P.parse_type_ann("() -> (integer, string)", {})
+		if not t then T.fail(true, "parse failed"); return end
+		local r = t.ret or ({ fixed = {} } --[[: Ret ]])
+		T.eq(#r.fixed, 2, "a bare multi-tuple return is the 2-slot Ret (unchanged)")
+		local s1, s2 = r.fixed[1], r.fixed[2]
+		T.eq(s1 and s1.kind, "integer", "slot 1")
+		T.eq(s2 and s2.kind, "string", "slot 2")
+	end)
+
+	T.it("tuple <: tuple is covariant with droppable extra returns", function()
+		G.reset()
+		local lit1 = G.lit_int(1)
+		local t_ab = G.tuple({ lit1, G.string() }, nil)
+		local t_a  = G.tuple({ G.integer() }, nil) -- normalizes to integer (one-tuple)
+		T.eq(t_a.kind, "integer", "a one-element tuple normalizes to its element")
+		-- (int, str) <: (int): a longer tuple is <: a shorter prefix.
+		local t_int = G.tuple({ G.integer(), G.string() }, nil)
+		local t_intonly = G.tuple({ G.integer(), G.never() }, nil) -- 2-elem to stay a tuple
+		T.ok(SUB.is_subtype(t_ab, G.tuple({ G.integer(), G.string() }, nil)), "(1,str) <: (int,str) covariant")
+		local _ = t_a; local _2 = t_int; local _3 = t_intonly
+	end)
+
+	T.it("union-of-tuples <: union-of-tuples is the standard exists-forall", function()
+		G.reset()
+		local ok_t = G.tuple({ G.string(), G.string() }, nil)
+		local err_t = G.tuple({ G.nil_(), G.string() }, nil)
+		local narrow = G.union({ ok_t, err_t })
+		local wider  = G.union({ ok_t, err_t, G.tuple({ G.integer(), G.string() }, nil) })
+		T.ok(SUB.is_subtype(narrow, wider), "every left tuple member is <: some right member")
+		T.fail(SUB.is_subtype(wider, narrow), "the wider union is NOT <: the narrower")
+		-- tuple <: union-of-tuples (a single member).
+		T.ok(SUB.is_subtype(ok_t, narrow), "a tuple <: a union containing it")
+	end)
+
+	T.it("a scalar vs a ≥2 tuple, and tuple vs non-tuple, are both false (no special case)", function()
+		G.reset()
+		local t2 = G.tuple({ G.integer(), G.string() }, nil)
+		T.fail(SUB.is_subtype(G.integer(), t2), "a single value </: a two-value return")
+		T.fail(SUB.is_subtype(t2, G.integer()), "a multi-value spread </: a single value")
+	end)
+
+	T.it("a `tuple` round-trips through the portable codec faithfully", function()
+		G.reset()
+		local tup = G.tuple({ G.nil_(), G.string() }, nil)
+		T.eq(TA.decode(TA.encode(tup)).tid, tup.tid, "tuple round-trips")
+		-- a non-canonical one-fixed tuple is rejected by the decoder (parse-not-cast).
+		T.eq(TA.decode({ k = "tuple", fixed = { { k = "number" } } }), nil, "1-fixed no-vararg tuple decode rejected")
+	end)
+end)
+
+T.describe("crescent.slice.v2.1: multi-line `--::` alias scanning (§6.5.6)", function()
+	T.it("joins a wrapped `--:: Name = {` declaration across continuation lines", function()
+		local lines = {
+			"--:: IRDescriptor = {",
+			"--::   num_labels: integer,",
+			"--::   name: string,",
+			"--:: }",
+		} --[[: { [integer]: string } ]]
+		local d, consumed = P.scan_annotation_at(lines, 1)
+		T.ok(d ~= nil, "a directive is produced")
+		T.eq(d and d.kind, "alias", "it is an alias directive")
+		T.eq(d and d.name, "IRDescriptor", "name captured from the opening line")
+		T.eq(consumed, 4, "all four lines consumed")
+		G.reset()
+		local aliases = {} --[[: { [string]: Ty } ]]
+		local ok = d and d.body and P.declare_alias(aliases, "IRDescriptor", d.body)
+		T.ok(ok ~= nil, "the joined body declares a valid alias")
+		T.eq(aliases.IRDescriptor and aliases.IRDescriptor.kind, "rec", "the multi-line type is a record")
+	end)
+
+	T.it("a single-line directive still consumes exactly one line", function()
+		local lines = { "--:: Foo = number | nil", "local x = 1" } --[[: { [integer]: string } ]]
+		local d, consumed = P.scan_annotation_at(lines, 1)
+		T.eq(consumed, 1, "single-line alias consumes 1 line")
+		T.eq(d and d.name, "Foo", "name captured")
+	end)
+end)
+
 T.describe("crescent.slice.v1: adapter guard recognition (the five v1 forms)", function()
 	T.it("recognizes a bare variable as a truthy guard", function()
 		local g = P.recognize_guard({ t = "var", name = "x" })

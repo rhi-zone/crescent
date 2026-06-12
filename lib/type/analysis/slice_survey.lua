@@ -74,21 +74,25 @@ end
 local function extract_annotations(path)
 	local fh = io.open(path, "r")
 	if not fh then return nil, "cannot open file" end
-	local anns = {} --[[: { [integer]: Ann } ]]
-	local ln = 0 --: integer
-	for line in fh:lines() do
-		ln = ln + 1
-		local sline = tostring(line) --: string
-		local d = P.scan_annotation(sline)
-		if d then
-			local trimmed = sline:gsub("^%s+", "") --: string
-			anns[#anns + 1] = {
-				kind = d.kind, name = d.name, body = d.body,
-				line = ln, text = trimmed,
-			}
-		end
-	end
+	local lines = {} --[[: { [integer]: string } ]]
+	for line in fh:lines() do lines[#lines + 1] = tostring(line) end
 	fh:close()
+	local anns = {} --[[: { [integer]: Ann } ]]
+	local idx = 1 --: integer
+	while idx <= #lines do
+		-- multi-line `--::` continuations are joined (§6.5.6); `consumed` is the
+		-- number of source lines the directive spanned.
+		local d, consumed = P.scan_annotation_at(lines, idx)
+		if d then
+			local trimmed = lines[idx]:gsub("^%s+", "") --: string
+			local ann = { kind = d.kind, line = idx, text = trimmed } --[[: Ann ]]
+			local dn, db = d.name, d.body
+			if dn ~= nil then ann.name = dn end
+			if db ~= nil then ann.body = db end
+			anns[#anns + 1] = ann
+		end
+		idx = idx + (consumed > 0 and consumed or 1)
+	end
 	return anns
 end
 

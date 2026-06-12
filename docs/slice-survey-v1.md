@@ -13,13 +13,13 @@ lowering, so this survey measures ANNOTATION-grammar conformance — every
 `--:`/`--::` annotation parsed through `parse_type_ann`/`declare_alias`. A
 file is CHECKED-CLEAN when all its annotations sit inside v1.
 
-## Headline split (864 files)
+## Headline split (866 files)
 
 | Class | Files | Share |
 |---|--:|--:|
-| CHECKED-CLEAN | 230 | 26.6% |
-| CHECKED-FINDINGS | 14 | 1.6% |
-| OUT-OF-SUBSET | 505 | 58.4% |
+| CHECKED-CLEAN | 483 | 55.8% |
+| CHECKED-FINDINGS | 11 | 1.3% |
+| OUT-OF-SUBSET | 257 | 29.7% |
 | NO-ANNOTATION | 115 | 13.3% |
 | TIMEOUT | 0 | 0.0% |
 | PARSE-FAIL/OTHER | 0 | 0.0% |
@@ -38,144 +38,127 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 
 | Construct | Files |
 |---|--:|
-| `named-param` | 266 |
-| `unknown-type-name` | 232 |
-| `named-param-self` | 128 |
-| `array-postfix` | 88 |
-| `generic-application` | 27 |
+| `unknown-type-name` | 172 |
+| `generic-application` | 36 |
+| `trailing-tokens` | 35 |
 | `intrinsic-dollar` | 25 |
-| `trailing-tokens` | 23 |
-| `cdata` | 13 |
+| `cdata` | 17 |
 | `bare-table (use a record/indexer)` | 2 |
 
 ### Raw histogram (per distinct tag, unknown-type-name names expanded)
 
 | Construct | Files |
 |---|--:|
-| `named-param` | 266 |
-| `named-param-self` | 128 |
-| `array-postfix` | 88 |
-| `generic-application` | 27 |
+| `generic-application` | 36 |
+| `trailing-tokens` | 35 |
+| `unknown-type-name:Ctx` | 26 |
 | `intrinsic-dollar` | 25 |
-| `trailing-tokens` | 23 |
-| `unknown-type-name:Ctx` | 16 |
-| `cdata` | 13 |
+| `cdata` | 17 |
+| `unknown-type-name:V4Type` | 12 |
 | `unknown-type-name:StaticType` | 10 |
 | `unknown-type-name:V5Type` | 10 |
-| `unknown-type-name:V4Type` | 9 |
+| `unknown-type-name:V5Constraint` | 8 |
 | `unknown-type-name:Pack` | 7 |
+| `unknown-type-name:SemanticsRegistry` | 7 |
 | `unknown-type-name:Ty` | 7 |
-| `unknown-type-name:V5Constraint` | 7 |
-| `unknown-type-name:SemanticsRegistry` | 6 |
+| `unknown-type-name:Id` | 6 |
+| `unknown-type-name:CheckContext` | 5 |
+| `unknown-type-name:File` | 5 |
 | `unknown-type-name:HostedChecker` | 5 |
-| `unknown-type-name:Id` | 5 |
-| `unknown-type-name:CheckContext` | 4 |
+| `unknown-type-name:Node` | 5 |
+| `unknown-type-name:ai_request` | 5 |
+| `unknown-type-name:AnyEvent` | 4 |
+| `unknown-type-name:CardData` | 4 |
 | `unknown-type-name:CheckDiag` | 4 |
 | `unknown-type-name:Field` | 4 |
-| `unknown-type-name:Graph` | 4 |
-| `unknown-type-name:Node` | 4 |
 | `unknown-type-name:Scope` | 4 |
 | `unknown-type-name:Subst` | 4 |
-| `unknown-type-name:ai_request` | 4 |
-| `unknown-type-name:CardData` | 3 |
+| `unknown-type-name:Thread` | 4 |
 | `unknown-type-name:Context` | 3 |
-| `unknown-type-name:File` | 3 |
-| `unknown-type-name:Index` | 3 |
+| `unknown-type-name:Graph` | 3 |
+| `unknown-type-name:InternPool` | 3 |
 | `unknown-type-name:KeyEntry` | 3 |
 | `unknown-type-name:Lens` | 3 |
 | `unknown-type-name:ListPool` | 3 |
+| `unknown-type-name:POpenFn` | 3 |
 | `unknown-type-name:PackResult` | 3 |
+| `unknown-type-name:Primitive` | 3 |
+| `unknown-type-name:Rng` | 3 |
 | `unknown-type-name:TPack` | 3 |
 | `unknown-type-name:TaskDef` | 3 |
-| `unknown-type-name:Thread` | 3 |
 | `unknown-type-name:TypeSlotArena` | 3 |
 | `unknown-type-name:ai_embed_many_request` | 3 |
 | `unknown-type-name:ai_embed_request` | 3 |
-| `unknown-type-name:epoll` | 3 |
-| `unknown-type-name:http_request` | 3 |
+| `unknown-type-name:ai_message` | 3 |
+| `unknown-type-name:ai_provider` | 3 |
+| `unknown-type-name:ai_response` | 3 |
+| `unknown-type-name:ai_tool` | 3 |
 | `bare-table (use a record/indexer)` | 2 |
 | `unknown-type-name:ASTNodeArena` | 2 |
-| `unknown-type-name:Base64Module` | 2 |
-| `unknown-type-name:Claim` | 2 |
+| `unknown-type-name:AgentSet` | 2 |
+| `unknown-type-name:AliasEnv` | 2 |
+| `unknown-type-name:AnalysisState` | 2 |
+| `unknown-type-name:CharacterBook` | 2 |
+| `unknown-type-name:CharacterBookEntry` | 2 |
+| `unknown-type-name:DiagEntry` | 2 |
+| `unknown-type-name:Element` | 2 |
 | `unknown-type-name:Env` | 2 |
 | `unknown-type-name:ErrCtx` | 2 |
 | `unknown-type-name:ErrorDetails` | 2 |
-| `unknown-type-name:ExecutorFn` | 2 |
-| `unknown-type-name:ExecutorRegistry` | 2 |
+| `unknown-type-name:Event` | 2 |
 | `unknown-type-name:Guard` | 2 |
-| `unknown-type-name:HelpSchema` | 2 |
-| `unknown-type-name:InternPool` | 2 |
-| `unknown-type-name:JsonModule` | 2 |
+| `unknown-type-name:HTMLCanvasElement` | 2 |
+| `unknown-type-name:HTMLElement` | 2 |
+| `unknown-type-name:Index` | 2 |
 | `unknown-type-name:OpSemConstraint` | 2 |
 | `unknown-type-name:OpSemError` | 2 |
 | `unknown-type-name:OpSemState` | 2 |
-| `unknown-type-name:POpenFn` | 2 |
 | `unknown-type-name:PTy` | 2 |
 | `unknown-type-name:RecordType` | 2 |
-| `unknown-type-name:Scaffold` | 2 |
-| `unknown-type-name:Select` | 2 |
-| `unknown-type-name:Stream` | 2 |
+| `unknown-type-name:SelfCap` | 2 |
+| `unknown-type-name:SliceCtx` | 2 |
 | `unknown-type-name:TField` | 2 |
 | `unknown-type-name:Text` | 2 |
 | `unknown-type-name:ai_image_request` | 2 |
-| `unknown-type-name:ai_provider` | 2 |
-| `unknown-type-name:ai_response` | 2 |
-| `unknown-type-name:ai_tool` | 2 |
-| `unknown-type-name:http_req` | 2 |
-| `unknown-type-name:http_response` | 2 |
-| `unknown-type-name:AQDoneCb` | 1 |
 | `unknown-type-name:AQObj` | 1 |
-| `unknown-type-name:AQTask` | 1 |
+| `unknown-type-name:AQState` | 1 |
+| `unknown-type-name:AbortSignal` | 1 |
 | `unknown-type-name:ActorCtxShape` | 1 |
 | `unknown-type-name:ActorRecord` | 1 |
-| `unknown-type-name:AgentCaps` | 1 |
-| `unknown-type-name:AgentSet` | 1 |
-| `unknown-type-name:AliasEnv` | 1 |
 | `unknown-type-name:AltBinds` | 1 |
 | `unknown-type-name:AltScheme` | 1 |
 | `unknown-type-name:AltState` | 1 |
-| `unknown-type-name:AnalysisState` | 1 |
 | `unknown-type-name:AnnResult` | 1 |
 | `unknown-type-name:AnnState` | 1 |
-| `unknown-type-name:ArithCmpFn` | 1 |
+| `unknown-type-name:Arb` | 1 |
 | `unknown-type-name:ArrowPackCheck` | 1 |
 | `unknown-type-name:ArrowType` | 1 |
 | `unknown-type-name:Binding` | 1 |
 | `unknown-type-name:Block` | 1 |
-| `unknown-type-name:BuildDayZeroCapImplsOpts` | 1 |
-| `unknown-type-name:CBOnChange` | 1 |
+| `unknown-type-name:Builder` | 1 |
+| `unknown-type-name:CFG` | 1 |
 | `unknown-type-name:CFieldDesc` | 1 |
-| `unknown-type-name:COOMatrix` | 1 |
-| `unknown-type-name:CSRMatrix` | 1 |
 | `unknown-type-name:CTypeDesc` | 1 |
-| `unknown-type-name:Cache` | 1 |
 | `unknown-type-name:CallCheck` | 1 |
 | `unknown-type-name:CapDecl` | 1 |
 | `unknown-type-name:Caps` | 1 |
 | `unknown-type-name:CdeclLexState` | 1 |
 | `unknown-type-name:CdeclParser` | 1 |
 | `unknown-type-name:ChanObj` | 1 |
-| `unknown-type-name:CheckFn` | 1 |
+| `unknown-type-name:ChannelT` | 1 |
 | `unknown-type-name:CheckOpts` | 1 |
-| `unknown-type-name:CheckRequest` | 1 |
 | `unknown-type-name:Child` | 1 |
 | `unknown-type-name:CircleEl` | 1 |
 | `unknown-type-name:CircuitShape` | 1 |
 | `unknown-type-name:Cite` | 1 |
-| `unknown-type-name:CiteCommand` | 1 |
-| `unknown-type-name:CiteEntry` | 1 |
+| `unknown-type-name:Claim` | 1 |
+| `unknown-type-name:ClassName` | 1 |
 | `unknown-type-name:Cls` | 1 |
 | `unknown-type-name:ClsRange` | 1 |
-| `unknown-type-name:Cmp` | 1 |
-| `unknown-type-name:Col` | 1 |
 | `unknown-type-name:ColorObj` | 1 |
-| `unknown-type-name:CombineFn` | 1 |
-| `unknown-type-name:CompareIoCaps` | 1 |
-| `unknown-type-name:CompressModule` | 1 |
 | `unknown-type-name:ConcatNode` | 1 |
-| `unknown-type-name:Config` | 1 |
+| `unknown-type-name:CondT` | 1 |
 | `unknown-type-name:Conn` | 1 |
-| `unknown-type-name:Constraint` | 1 |
 | `unknown-type-name:ConstraintArith` | 1 |
 | `unknown-type-name:ConstraintBindGenerics` | 1 |
 | `unknown-type-name:ConstraintBound` | 1 |
@@ -193,206 +176,142 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:ConstraintReturn` | 1 |
 | `unknown-type-name:ConstraintSub` | 1 |
 | `unknown-type-name:ConstraintUnify` | 1 |
-| `unknown-type-name:CorpusOpts` | 1 |
-| `unknown-type-name:CryptoModule` | 1 |
-| `unknown-type-name:DB` | 1 |
-| `unknown-type-name:DFA` | 1 |
-| `unknown-type-name:DOKMatrix` | 1 |
 | `unknown-type-name:DashCaps` | 1 |
-| `unknown-type-name:DateFn` | 1 |
-| `unknown-type-name:DayZeroCaps` | 1 |
-| `unknown-type-name:Db` | 1 |
+| `unknown-type-name:DataTransferItem` | 1 |
+| `unknown-type-name:DataTransferItemList` | 1 |
 | `unknown-type-name:DbRef` | 1 |
-| `unknown-type-name:DbStmtRaw` | 1 |
-| `unknown-type-name:DeclDirTypeAlias` | 1 |
 | `unknown-type-name:Delete` | 1 |
-| `unknown-type-name:DenseGrid` | 1 |
 | `unknown-type-name:Dependency` | 1 |
 | `unknown-type-name:Deque` | 1 |
-| `unknown-type-name:DiagEntry` | 1 |
 | `unknown-type-name:DiceNode` | 1 |
-| `unknown-type-name:DispatcherObj` | 1 |
 | `unknown-type-name:DivEl` | 1 |
 | `unknown-type-name:DivElement` | 1 |
 | `unknown-type-name:Dnf` | 1 |
 | `unknown-type-name:DnfDisjunct` | 1 |
+| `unknown-type-name:Document` | 1 |
 | `unknown-type-name:DomCtor` | 1 |
 | `unknown-type-name:Dropped` | 1 |
 | `unknown-type-name:DtEl` | 1 |
 | `unknown-type-name:DynamicLibrary` | 1 |
-| `unknown-type-name:Element` | 1 |
-| `unknown-type-name:EnvReader` | 1 |
-| `unknown-type-name:EvalSpline` | 1 |
-| `unknown-type-name:Event` | 1 |
-| `unknown-type-name:EventStoreImpl` | 1 |
-| `unknown-type-name:Evidence` | 1 |
+| `unknown-type-name:ErrEntry` | 1 |
+| `unknown-type-name:EventT` | 1 |
+| `unknown-type-name:EventTarget` | 1 |
 | `unknown-type-name:ExecGraph` | 1 |
 | `unknown-type-name:ExecManifestEntry` | 1 |
+| `unknown-type-name:ExecutorFn` | 1 |
+| `unknown-type-name:ExecutorRegistry` | 1 |
 | `unknown-type-name:Expr` | 1 |
 | `unknown-type-name:ExprCall` | 1 |
 | `unknown-type-name:ExtractResult` | 1 |
-| `unknown-type-name:FetchApiFn` | 1 |
 | `unknown-type-name:FieldEntry` | 1 |
 | `unknown-type-name:FieldEntryArena` | 1 |
-| `unknown-type-name:FileResult` | 1 |
 | `unknown-type-name:FlowContent` | 1 |
-| `unknown-type-name:ForkHttpRequest` | 1 |
-| `unknown-type-name:FormField` | 1 |
 | `unknown-type-name:Frontier` | 1 |
-| `unknown-type-name:FsRouterOpts` | 1 |
-| `unknown-type-name:FsmConfig` | 1 |
-| `unknown-type-name:FsmStateConfig` | 1 |
 | `unknown-type-name:Func` | 1 |
-| `unknown-type-name:GateFn` | 1 |
-| `unknown-type-name:GdCallback` | 1 |
-| `unknown-type-name:GeneticOpts` | 1 |
-| `unknown-type-name:Goal` | 1 |
 | `unknown-type-name:GraphT` | 1 |
 | `unknown-type-name:H1El` | 1 |
 | `unknown-type-name:H1Element` | 1 |
 | `unknown-type-name:HTMLAudioElement` | 1 |
-| `unknown-type-name:HTMLCanvasElement` | 1 |
-| `unknown-type-name:HTMLElement` | 1 |
 | `unknown-type-name:HTMLFormElement` | 1 |
 | `unknown-type-name:HTMLInputElement` | 1 |
 | `unknown-type-name:HTMLSelectElement` | 1 |
 | `unknown-type-name:HTMLTextAreaElement` | 1 |
 | `unknown-type-name:HTMLVideoElement` | 1 |
 | `unknown-type-name:HamtInterior` | 1 |
+| `unknown-type-name:HamtMap` | 1 |
 | `unknown-type-name:HamtNode` | 1 |
 | `unknown-type-name:Heap` | 1 |
 | `unknown-type-name:HeapEntry` | 1 |
 | `unknown-type-name:HelpFlag` | 1 |
 | `unknown-type-name:HelpNode` | 1 |
-| `unknown-type-name:HelpSubcommand` | 1 |
-| `unknown-type-name:HostBridgeOpts` | 1 |
-| `unknown-type-name:HttpHandlerFn` | 1 |
+| `unknown-type-name:HelpSchema` | 1 |
 | `unknown-type-name:HubImpl` | 1 |
-| `unknown-type-name:I` | 1 |
 | `unknown-type-name:IRDescriptor` | 1 |
+| `unknown-type-name:IdName` | 1 |
 | `unknown-type-name:ImgEl` | 1 |
 | `unknown-type-name:ImgElement` | 1 |
-| `unknown-type-name:Implicant` | 1 |
 | `unknown-type-name:Insert` | 1 |
-| `unknown-type-name:InstallLockdownOpts` | 1 |
-| `unknown-type-name:InstructTemplate` | 1 |
-| `unknown-type-name:Interval` | 1 |
+| `unknown-type-name:Instance` | 1 |
 | `unknown-type-name:KVPair` | 1 |
-| `unknown-type-name:KdTree` | 1 |
-| `unknown-type-name:KvCaps` | 1 |
-| `unknown-type-name:L2TSCtx` | 1 |
+| `unknown-type-name:LC` | 1 |
 | `unknown-type-name:LamLam` | 1 |
 | `unknown-type-name:LamTerm` | 1 |
-| `unknown-type-name:Layer` | 1 |
-| `unknown-type-name:LeafTaskDef` | 1 |
 | `unknown-type-name:LegendEl` | 1 |
 | `unknown-type-name:LexState` | 1 |
 | `unknown-type-name:LiEl` | 1 |
 | `unknown-type-name:LiElement` | 1 |
-| `unknown-type-name:LiveQuery` | 1 |
 | `unknown-type-name:LjSocket` | 1 |
 | `unknown-type-name:LlmCallOpts` | 1 |
-| `unknown-type-name:LlmCap` | 1 |
-| `unknown-type-name:LlmHttpClient` | 1 |
 | `unknown-type-name:LlmMessage` | 1 |
 | `unknown-type-name:LoopObj` | 1 |
 | `unknown-type-name:LoopTimers` | 1 |
-| `unknown-type-name:LsRng` | 1 |
+| `unknown-type-name:LossFn` | 1 |
+| `unknown-type-name:LowerResult` | 1 |
 | `unknown-type-name:Machine` | 1 |
-| `unknown-type-name:Matcher` | 1 |
-| `unknown-type-name:Matrix` | 1 |
 | `unknown-type-name:MetaEl` | 1 |
 | `unknown-type-name:MetaElement` | 1 |
+| `unknown-type-name:MethodFn` | 1 |
 | `unknown-type-name:ModelRef` | 1 |
-| `unknown-type-name:MountPackOpts` | 1 |
-| `unknown-type-name:NFA` | 1 |
 | `unknown-type-name:NegNode` | 1 |
 | `unknown-type-name:Net` | 1 |
 | `unknown-type-name:NumMatrix` | 1 |
 | `unknown-type-name:Obligation` | 1 |
-| `unknown-type-name:Observable` | 1 |
-| `unknown-type-name:Observation` | 1 |
 | `unknown-type-name:OkEnvelope` | 1 |
 | `unknown-type-name:OptionEl` | 1 |
 | `unknown-type-name:OptionElement` | 1 |
+| `unknown-type-name:PField` | 1 |
 | `unknown-type-name:PLAnd` | 1 |
 | `unknown-type-name:PackResultSingle` | 1 |
 | `unknown-type-name:Params` | 1 |
 | `unknown-type-name:PickAlias` | 1 |
 | `unknown-type-name:PickDirect` | 1 |
-| `unknown-type-name:PidOpts` | 1 |
-| `unknown-type-name:PluralRule` | 1 |
-| `unknown-type-name:PopenFile` | 1 |
-| `unknown-type-name:PresenceImpl` | 1 |
-| `unknown-type-name:PresetSpec` | 1 |
-| `unknown-type-name:Primitive` | 1 |
+| `unknown-type-name:Projection` | 1 |
 | `unknown-type-name:Promise` | 1 |
 | `unknown-type-name:Prop` | 1 |
+| `unknown-type-name:Props` | 1 |
 | `unknown-type-name:Provenance` | 1 |
-| `unknown-type-name:Quadtree` | 1 |
-| `unknown-type-name:RNG` | 1 |
-| `unknown-type-name:ReachGraph` | 1 |
-| `unknown-type-name:RealmBridgeOpts` | 1 |
 | `unknown-type-name:RecvEntry` | 1 |
-| `unknown-type-name:RegexModule` | 1 |
-| `unknown-type-name:Regexp` | 1 |
-| `unknown-type-name:RejectFn` | 1 |
-| `unknown-type-name:Report` | 1 |
-| `unknown-type-name:Res` | 1 |
-| `unknown-type-name:ResolveFn` | 1 |
 | `unknown-type-name:Result` | 1 |
-| `unknown-type-name:ResultEnvelope` | 1 |
-| `unknown-type-name:RetryOpts` | 1 |
-| `unknown-type-name:Ring` | 1 |
-| `unknown-type-name:Rng` | 1 |
-| `unknown-type-name:RngObj` | 1 |
+| `unknown-type-name:Ret` | 1 |
+| `unknown-type-name:RetMember` | 1 |
+| `unknown-type-name:Rope` | 1 |
 | `unknown-type-name:Router` | 1 |
 | `unknown-type-name:RouterInstance` | 1 |
-| `unknown-type-name:RuleFn` | 1 |
-| `unknown-type-name:RunBootstrapOpts` | 1 |
+| `unknown-type-name:RunExOpts` | 1 |
+| `unknown-type-name:RunOpts` | 1 |
 | `unknown-type-name:RunTaskFn` | 1 |
-| `unknown-type-name:SAOpts` | 1 |
-| `unknown-type-name:SMTPObj` | 1 |
+| `unknown-type-name:Scaffold` | 1 |
 | `unknown-type-name:ScanResult` | 1 |
 | `unknown-type-name:SchedObj` | 1 |
-| `unknown-type-name:Schedule` | 1 |
 | `unknown-type-name:Schema` | 1 |
 | `unknown-type-name:SectionEl` | 1 |
 | `unknown-type-name:SectionElement` | 1 |
-| `unknown-type-name:SelfCap` | 1 |
-| `unknown-type-name:SemanticsEntry` | 1 |
+| `unknown-type-name:Select` | 1 |
+| `unknown-type-name:SemaphoreT` | 1 |
 | `unknown-type-name:SendEntry` | 1 |
 | `unknown-type-name:SendQ` | 1 |
-| `unknown-type-name:Series` | 1 |
 | `unknown-type-name:SessionEntry` | 1 |
-| `unknown-type-name:Sha256Module` | 1 |
 | `unknown-type-name:SliceBinding` | 1 |
-| `unknown-type-name:SliceCtx` | 1 |
 | `unknown-type-name:Solver` | 1 |
 | `unknown-type-name:SolverError` | 1 |
-| `unknown-type-name:Some` | 1 |
 | `unknown-type-name:Span` | 1 |
 | `unknown-type-name:SpanEl` | 1 |
 | `unknown-type-name:SpanElement` | 1 |
-| `unknown-type-name:SparseGrid` | 1 |
-| `unknown-type-name:SqlConn` | 1 |
 | `unknown-type-name:SqliteConn` | 1 |
+| `unknown-type-name:SqliteStmt` | 1 |
 | `unknown-type-name:SqlitexDatabase` | 1 |
+| `unknown-type-name:SqlitexModel` | 1 |
 | `unknown-type-name:StTerm` | 1 |
 | `unknown-type-name:StTmLam` | 1 |
 | `unknown-type-name:State` | 1 |
 | `unknown-type-name:SubImpl` | 1 |
-| `unknown-type-name:SubscribeFn` | 1 |
-| `unknown-type-name:SuffixArray` | 1 |
 | `unknown-type-name:SupervisorShape` | 1 |
 | `unknown-type-name:SystemShape` | 1 |
 | `unknown-type-name:TApp` | 1 |
 | `unknown-type-name:TEachNever` | 1 |
 | `unknown-type-name:TPackVar` | 1 |
 | `unknown-type-name:TabSpec` | 1 |
-| `unknown-type-name:TarLoader` | 1 |
 | `unknown-type-name:Task` | 1 |
-| `unknown-type-name:Tbl` | 1 |
 | `unknown-type-name:TdEl` | 1 |
 | `unknown-type-name:TdElement` | 1 |
 | `unknown-type-name:TheadEl` | 1 |
@@ -403,185 +322,118 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:TrEl` | 1 |
 | `unknown-type-name:TrElement` | 1 |
 | `unknown-type-name:TrackedGraph` | 1 |
-| `unknown-type-name:Tree` | 1 |
-| `unknown-type-name:TreeNode` | 1 |
 | `unknown-type-name:TwoQ` | 1 |
 | `unknown-type-name:TwoQFifoQ` | 1 |
 | `unknown-type-name:TwoQLruQ` | 1 |
 | `unknown-type-name:TwoQNode` | 1 |
 | `unknown-type-name:TyArrow` | 1 |
 | `unknown-type-name:Type` | 1 |
+| `unknown-type-name:TypeNode` | 1 |
 | `unknown-type-name:TypeSlot` | 1 |
-| `unknown-type-name:UiPrimitives` | 1 |
 | `unknown-type-name:UnifyDetail` | 1 |
 | `unknown-type-name:UnionType` | 1 |
 | `unknown-type-name:UnsafeBoundary` | 1 |
 | `unknown-type-name:Update` | 1 |
 | `unknown-type-name:V4Arm` | 1 |
 | `unknown-type-name:V4Fn` | 1 |
-| `unknown-type-name:V4IoCaps` | 1 |
 | `unknown-type-name:V4Var` | 1 |
-| `unknown-type-name:V5CliCaps` | 1 |
-| `unknown-type-name:V5CliOpts` | 1 |
 | `unknown-type-name:V5Ctx` | 1 |
-| `unknown-type-name:V5Directive` | 1 |
 | `unknown-type-name:V5Scheme` | 1 |
-| `unknown-type-name:V6CliCaps` | 1 |
-| `unknown-type-name:ValidateOpts` | 1 |
-| `unknown-type-name:ValidationError` | 1 |
-| `unknown-type-name:Validator` | 1 |
-| `unknown-type-name:ValidatorFn` | 1 |
 | `unknown-type-name:ValueClaim` | 1 |
 | `unknown-type-name:ValueClaimWithoutIdentity` | 1 |
-| `unknown-type-name:VarNode` | 1 |
-| `unknown-type-name:Vector` | 1 |
-| `unknown-type-name:Version` | 1 |
 | `unknown-type-name:WalkerEnv` | 1 |
-| `unknown-type-name:WatchFn` | 1 |
-| `unknown-type-name:WsHandler` | 1 |
-| `unknown-type-name:WsHttpRequest` | 1 |
-| `unknown-type-name:ai_message` | 1 |
 | `unknown-type-name:ai_tool_call` | 1 |
-| `unknown-type-name:app_handler_fn` | 1 |
-| `unknown-type-name:daemon_opts` | 1 |
+| `unknown-type-name:db` | 1 |
 | `unknown-type-name:file_info` | 1 |
-| `unknown-type-name:find_predicate` | 1 |
 | `unknown-type-name:fuse_memory_entry` | 1 |
 | `unknown-type-name:google_embedding` | 1 |
+| `unknown-type-name:http_req` | 1 |
+| `unknown-type-name:http_request` | 1 |
+| `unknown-type-name:http_response` | 1 |
 | `unknown-type-name:http_stream` | 1 |
 | `unknown-type-name:inotify` | 1 |
-| `unknown-type-name:loader_opts` | 1 |
-| `unknown-type-name:mcp` | 1 |
-| `unknown-type-name:mcp_package` | 1 |
-| `unknown-type-name:minimax_game` | 1 |
-| `unknown-type-name:minimax_order_fn` | 1 |
-| `unknown-type-name:multimap` | 1 |
+| `unknown-type-name:matrix` | 1 |
 | `unknown-type-name:mustache_compiled` | 1 |
 | `unknown-type-name:mustache_template` | 1 |
 | `unknown-type-name:mustache_token` | 1 |
 | `unknown-type-name:openai_message_in` | 1 |
-| `unknown-type-name:openapi_operation` | 1 |
-| `unknown-type-name:openapi_schema` | 1 |
 | `unknown-type-name:openapi_spec` | 1 |
-| `unknown-type-name:policy` | 1 |
+| `unknown-type-name:server_client` | 1 |
+| `unknown-type-name:server_socket` | 1 |
 | `unknown-type-name:sqlite` | 1 |
-| `unknown-type-name:watcher` | 1 |
-| `unknown-type-name:web_app` | 1 |
-| `unknown-type-name:web_cors_opts` | 1 |
-| `unknown-type-name:web_logger_opts` | 1 |
-| `unknown-type-name:web_middleware` | 1 |
-| `unknown-type-name:web_response` | 1 |
-| `unknown-type-name:ws_sock` | 1 |
+| `unknown-type-name:v` | 1 |
+| `unknown-type-name:ws_epoll` | 1 |
+| `unknown-type-name:x` | 1 |
 
 ## Top-20 most-blocking constructs (one example file each)
 
 | Rank | Construct | Files | Example file |
 |--:|---|--:|---|
-| 1 | `named-param` | 266 | `lib/agent/leaf.lua` |
-| 2 | `unknown-type-name` | 232 | `lib/actor/init.lua` |
-| 3 | `named-param-self` | 128 | `lib/aho_corasick/init.lua` |
-| 4 | `array-postfix` | 88 | `lib/agent/set.lua` |
-| 5 | `generic-application` | 27 | `lib/ai/providers/google.lua` |
-| 6 | `intrinsic-dollar` | 25 | `lib/crypto/system.lua` |
-| 7 | `trailing-tokens` | 23 | `lib/ansi/init.lua` |
-| 8 | `cdata` | 13 | `lib/actor/init.lua` |
-| 9 | `bare-table (use a record/indexer)` | 2 | `lib/type/framework/canonical.lua` |
+| 1 | `unknown-type-name` | 172 | `lib/actor/init.lua` |
+| 2 | `generic-application` | 36 | `lib/ai/providers/google.lua` |
+| 3 | `trailing-tokens` | 35 | `lib/ansi/init.lua` |
+| 4 | `intrinsic-dollar` | 25 | `lib/crypto/system.lua` |
+| 5 | `cdata` | 17 | `lib/actor/init.lua` |
+| 6 | `bare-table (use a record/indexer)` | 2 | `lib/type/framework/canonical.lua` |
 
-## CHECKED-FINDINGS (14 files)
+## CHECKED-FINDINGS (11 files)
 
 Files fully within v1 syntax whose annotations the checker REJECTED with no
 out-of-subset construct tag. Each is a real annotation defect, a slice
 precision gap, or an annotation gap (not classified here). First 3
 diagnostics per file.
 
-### `lib/asm/ir.lua`
+### `lib/automata_2d/init.lua`
 
-- L27: `--:: IRDescriptor = {`
-  - unterminated table type
-- L37: `--:: Kernel = {`
-  - unterminated table type
-
-### `lib/check_kind/init.lua`
-
-- L71: `--: (string, string | nil) -> { result: unknown, errs: unknown } | (nil, string)`
-  - a multi-element tuple is only valid as function params/return
-
-### `lib/compress/system.lua`
-
-- L74: `--:: ZlibLib = {`
-  - unterminated table type
-
-### `lib/dotenv/init.lua`
-
-- L189: `--: ((string) -> (string | nil, string | nil), { string }, { existing: boolean | nil, env_fn: ((string) -> string | nil) | nil } | nil) -> ({ [string]: string } | nil, string | nil)`
-  - expected `:` after field name 'string'
-
-### `lib/ed25519/init.lua`
-
-- L51: `--: (string | nil) -> (string, string) | (nil, string)`
-  - a multi-element tuple is only valid as function params/return
-
-### `lib/event/init.lua`
-
-- L46: `--: ({ Listener }, Listener) -> ()`
-  - expected `:` after field name 'Listener'
-
-### `lib/finite_field/init.lua`
-
-- L58: `--:: PrimeElem = { val: () -> integer, add: (PrimeElem) -> PrimeElem, sub: (PrimeElem) -> PrimeElem, mul: (PrimeElem) -> PrimeElem, div: (PrimeElem) -> PrimeElem | (nil, string), inv: () -> PrimeElem | nil, neg: () -> PrimeElem, pow: (integer) -> PrimeElem | (nil, string), eq: (PrimeElem) -> boolean }`
-  - a multi-element tuple is only valid as function params/return
-- L178: `--:: GF2nElem = { val: () -> integer, add: (GF2nElem) -> GF2nElem, sub: (GF2nElem) -> GF2nElem, mul: (GF2nElem) -> GF2nElem, div: (GF2nElem) -> GF2nElem | (nil, string), inv: () -> GF2nElem | nil, pow: (integer) -> GF2nElem, eq: (GF2nElem) -> boolean }`
-  - a multi-element tuple is only valid as function params/return
-
-### `lib/formats/ccv2/ccv2_types.lua`
-
-- L5: `--:: CardData = {`
-  - unterminated table type
-- L23: `--:: CharacterBook = {`
-  - unterminated table type
-- L33: `--:: CharacterBookEntry = {`
-  - unterminated table type
+- L148: `--: (DenseGrid, { [integer]: { integer, integer } }) -> nil`
+  - `{ T }` list shorthand must be a single type; `{ A, B }` is not a v1 table type
+- L309: `--: (SparseGrid, { [integer]: { integer, integer } }) -> nil`
+  - `{ T }` list shorthand must be a single type; `{ A, B }` is not a v1 table type
 
 ### `lib/https/init.lua`
 
 - L20: `--: (http_request) -> ((() -> string | nil, string | nil) | nil, (() -> nil) | nil) | (nil, string | nil)`
   - a multi-element tuple is only valid as function params/return
 
-### `lib/nat_lang/init.lua`
+### `lib/interpolation_curves/init.lua`
 
-- L17: `--: (string) -> { string }`
-  - expected `:` after field name 'string'
-- L50: `--: (string) -> { string }`
-  - expected `:` after field name 'string'
-- L60: `--: (string) -> { string }`
-  - expected `:` after field name 'string'
+- L746: `--: ({{number,number}}, (CurveOpts | nil)) -> (Spline | nil, string | nil)`
+  - `{ T }` list shorthand must be a single type; `{ A, B }` is not a v1 table type
 
-### `lib/pem/init.lua`
+### `lib/knn/init.lua`
 
-- L35: `--: (string) -> { { label: string, data: string } } | (nil, string)`
-  - unexpected token in table type: '{'
-- L126: `--: (string) -> { label: string, data: string } | (nil, string)`
-  - a multi-element tuple is only valid as function params/return
-- L143: `--: (string, string, { line_length: number | nil } | nil) -> string | (nil, string)`
-  - a multi-element tuple is only valid as function params/return
+- L67: `--: (self: KnnIndex, batch: {{unknown, {[number]: number}}}) -> ()`
+  - `{ T }` list shorthand must be a single type; `{ A, B }` is not a v1 table type
 
-### `lib/platform/apps/charactercardv2/lib/formats/ccv2/ccv2_types.lua`
+### `lib/mud_cp/client.lua`
 
-- L5: `--:: CardData = {`
-  - unterminated table type
-- L23: `--:: CharacterBook = {`
-  - unterminated table type
-- L33: `--:: CharacterBookEntry = {`
-  - unterminated table type
+- L9: `--: (cb: (string) -> nil, mcp_cb: (type: string, value: unknown) -> nil) -> ((string) -> nil, ((string) -> nil) -> (string) -> nil)`
+  - expected `,` or `)` in tuple
 
-### `lib/platform/platform_types.lua`
+### `lib/mud_cp/package_client.lua`
 
-- L20: `--:: CapDecl = {`
-  - unterminated table type
-- L45: `--:: EntryDef = {`
-  - unterminated table type
-- L56: `--:: Manifest = {`
-  - unterminated table type
+- L14: `--: (cb: (string) -> nil, packages: mcp_package[] | nil) -> ((string) -> nil, ((string) -> nil) -> (string) -> nil)`
+  - expected `,` or `)` in tuple
+
+### `lib/pairing_heap/init.lua`
+
+- L188: `--: (self: Heap) -> {{unknown, unknown}}`
+  - `{ T }` list shorthand must be a single type; `{ A, B }` is not a v1 table type
+
+### `lib/query_builder/init.lua`
+
+- L21: `--: <T: { [string]: unknown, ... }>(T) -> T`
+  - unexpected token in type: '<'
+
+### `lib/rate_limiter/init.lua`
+
+- L455: `--: <O>(factory: (opts: O) -> unknown, opts: O) -> (KeyedLimiter | nil, string | nil)`
+  - unexpected token in type: '<'
+
+### `lib/reactive_store/init.lua`
+
+- L162: `--: ({ get_state: (self: unknown) -> unknown, dispatch: (self: unknown, action: unknown) -> unknown, ... }, { [integer]: (unknown) -> (unknown) -> (unknown) -> unknown, ... }, (unknown) -> unknown) -> (unknown) -> unknown`
+  - expected `,` or `}` in table type
 
 ### `lib/tcp/server.lua`
 
@@ -592,16 +444,71 @@ diagnostics per file.
 
 Demand-ordered, no design — design happens against this doc separately.
 
-1. **`named-param`** — blocks 266 files (30.8% of corpus).
-2. **`unknown-type-name`** — blocks 232 files (26.9% of corpus).
-3. **`named-param-self`** — blocks 128 files (14.8% of corpus).
-4. **`array-postfix`** — blocks 88 files (10.2% of corpus).
-5. **`generic-application`** — blocks 27 files (3.1% of corpus).
-6. **`intrinsic-dollar`** — blocks 25 files (2.9% of corpus).
-7. **`trailing-tokens`** — blocks 23 files (2.7% of corpus).
-8. **`cdata`** — blocks 13 files (1.5% of corpus).
-9. **`bare-table (use a record/indexer)`** — blocks 2 files (0.2% of corpus).
+1. **`unknown-type-name`** — blocks 172 files (19.9% of corpus).
+2. **`generic-application`** — blocks 36 files (4.2% of corpus).
+3. **`trailing-tokens`** — blocks 35 files (4.0% of corpus).
+4. **`intrinsic-dollar`** — blocks 25 files (2.9% of corpus).
+5. **`cdata`** — blocks 17 files (2.0% of corpus).
+6. **`bare-table (use a record/indexer)`** — blocks 2 files (0.2% of corpus).
 
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     AFTER v2 INCREMENT 1 — appended by hand. The GENERATED content above is the
+     ANNOTATION-grammar survey RE-RUN after slice v2 increment 1 landed (named
+     params, `self`, `T[]`, `{ T }` list shorthand, multi-line `--::` aliases,
+     union-of-multi-return-tuples). The figures above ARE the post-increment
+     numbers; this block records the delta from the v1 baseline.
+════════════════════════════════════════════════════════════════════════════ -->
+
+## After v2 increment 1 (annotation survey delta)
+
+Slice v2 increment 1 (`docs/agnostic-static-analysis-crescent-slice.md` §6.5)
+landed the annotation-grammar reach the v1 histogram ranked at the top. Re-running
+the annotation survey:
+
+| Metric | v1 baseline | after v2 increment 1 |
+|---|--:|--:|
+| CHECKED-CLEAN | 230 (26.6%) | **483 (55.8%)** |
+| CHECKED-FINDINGS | 14 (1.6%) | 11 (1.3%) |
+| OUT-OF-SUBSET | 505 (58.4%) | **257 (29.7%)** |
+| NO-ANNOTATION | 115 (13.3%) | 115 (13.3%) |
+
+**CHECKED-CLEAN more than doubled (26.6% → 55.8%); OUT-OF-SUBSET halved (58.4% →
+29.7%).** The increment closed the measured top of the demand histogram:
+
+- `named-param` (266 files) and `named-param-self` (128) — **gone**: named/`self`
+  parameters now parse, names riding `Params` interner-invisibly (§6.5.1/§6.5.2).
+- `array-postfix` `T[]` (88 files) — **gone**: desugars to `{ [integer]: T }`
+  (§6.5.3); `{ T }` list shorthand desugars to the identical canonical form
+  (§6.5.4).
+- The CHECKED-FINDINGS sub-patterns the v1 survey flagged — multi-line `--::`
+  table aliases, union-of-multi-return-tuples `(A, B) | (nil, string)`, and
+  `{ T }` list shorthand — are all **resolved** (the ed25519/finite_field/pem/
+  nat_lang/event/asm-ir/platform-types/ccv2 findings cleared).
+
+**The new #1 demand is `unknown-type-name` (172 files): cross-module / unresolved
+type aliases — explicitly INCREMENT 2's headline item.** It is NOT an
+annotation-grammar gap; it is the `require`-boundary / cross-module alias
+resolution the slice trusts rather than checks (§2.5, §9.2). The residual
+CHECKED-FINDINGS (11 files) are new, deeper residue surfaced by the increased
+reach — none a checker soundness bug:
+
+1. **2-element tuple-as-table-element** `{ [integer]: { A, B } }` /  `{{A, B}}`
+   (`lib/automata_2d`, `lib/interpolation_curves`, `lib/knn`, `lib/pairing_heap`):
+   `{ A, B }` as a *table element type* is a positional tuple-TYPE; v1 admits
+   tuples only in function param/return position (§6.5.4/§6.5.5), so `{ A, B }` as
+   a record/list element is rejected. → increment 2 (a tuple-type in table
+   position, distinct from the return-position tuple this increment added).
+2. **generic type application in annotations** `<T>(...)` / `<O>(...)`
+   (`lib/query_builder`, `lib/rate_limiter`) — the fenced `generic-application`
+   construct (§1.4), unchanged.
+3. **deeply nested function types in tuples** (`lib/mud_cp`, `lib/reactive_store`,
+   `lib/tcp/server`) — `expected , or )` on a nested `(...) -> (...)` inside a
+   tuple; an adapter parse-recovery gap, recorded for increment 2.
+
+The demand front for increment 2 is therefore: **cross-module / unresolved alias
+resolution (172 files, the dominant remaining annotation-grammar gap)**, then
+generic application, then the tuple-type-in-table-position residue.
 
 <!-- ════════════════════════════════════════════════════════════════════════
      v1 END-TO-END (Pass 5) — appended by hand; the generated content above is
@@ -702,3 +609,23 @@ annotation survey ranked the type-grammar work.
    (§9.3 finding 5) surfacing on wrapped `--:: Name = {` declarations — an
    `alias-error`, not a checker soundness gap. Same residue the annotation survey
    recorded; the end-to-end pass inherits it unchanged.
+
+## v1 end-to-end — after v2 increment 1
+
+Re-running the end-to-end (`--e2e`) survey after increment 1:
+
+| Class | v1 baseline | after v2 increment 1 |
+|---|--:|--:|
+| CHECKED-CLEAN | 3 (0.3%) | **5 (0.6%)** |
+| OUT-OF-SUBSET | 853 (98.6%) | 854 (98.6%) |
+| TIMEOUT | 1 | 1 |
+
+CHECKED-CLEAN rose 3 → 5: named/`self` parameters now lower in statement bodies
+(a body that references its parameters by name is in §5's reach). The end-to-end
+ranking is otherwise unchanged — it is dominated by STATEMENT-lowering gaps
+(operators `..`/`+`, global/module access `require`/`package`,
+unannotated-function inference, assignment forms, method calls), which increment 1
+did not touch (it is annotation-grammar + frontend reach, not operator/global/
+statement typing). `named-param` has dropped OUT of the end-to-end top ranking (it
+was #9 at 232 files; now lowered). The statement-lowering gaps remain the e2e
+build order for later increments.

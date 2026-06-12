@@ -144,6 +144,7 @@ local function new_type_parser(toks, aliases)
 	end
 
 	local parse_union --[[: () -> Ty | nil ]]
+	local parse_return --[[: () -> { fixed: Ty[], vararg?: Ty } | nil ]]
 
 	--: () -> Ty | nil
 	local function fail(m) err = m; return nil end
@@ -165,6 +166,28 @@ local function new_type_parser(toks, aliases)
 		local idx_key --: Ty | nil
 		local idx_val --: Ty | nil
 		if accept("}") then return G.rec(fields, "closed") end
+		-- `{ T }` LIST SHORTHAND (§6.5.4) — a single BARE type (no `key:`, no `[K]:`,
+		-- no `...`) followed by `}` desugars to `{ [integer]: T }` = the IDENTICAL
+		-- target as `T[]` (§6.5.3): one canonical list form. Detect it by lookahead:
+		-- the body does NOT start with `[` or `...`, and is NOT an `ident`/`string`
+		-- immediately followed by `:` or `?` (which would be a named field).
+		do
+			local t0, t1 = toks[pos], toks[pos + 1]
+			local starts_field = t0 ~= nil and (t0.kind == "ident" or t0.kind == "string")
+				and t1 ~= nil and (t1.kind == ":" or t1.kind == "?")
+			local starts_index = t0 ~= nil and (t0.kind == "[" or t0.kind == "ellipsis")
+			if t0 ~= nil and not starts_field and not starts_index then
+				local elem = parse_union()
+				if not elem then return nil end
+				if accept("}") then
+					-- single bare type → list. (A multi-element `{ A, B }` is rejected:
+					-- not a record, not a v1 tuple-type — tuples live only in fn
+					-- param/return position, §6.5.4.)
+					return G.indexer(G.integer(), elem)
+				end
+				return fail("`{ T }` list shorthand must be a single type; `{ A, B }` is not a v1 table type")
+			end
+		end
 		while true do
 			local t = peek()
 			if not t then return fail("unterminated table type") end
@@ -208,10 +231,16 @@ local function new_type_parser(toks, aliases)
 		return G.rec(fields, rows)
 	end
 
-	-- Parse a parameter/return tuple inside `(...)`. Returns { fixed, vararg }.
-	--: () -> { fixed: Ty[], vararg?: Ty } | nil
+	-- Parse a parameter/return tuple inside `(...)`. Returns { fixed, vararg, names }.
+	-- NAMED PARAMETERS (`name: T`, incl. `self: T`) are now IN v1 (§6.5.1/§6.5.2):
+	-- the name rides `names` (positional, parallel to `fixed`) and is interner-
+	-- invisible — subtyping ignores it. `self` is an ordinary named first param,
+	-- no special case. A slot may be named or bare; a bare slot's name is nil.
+	--: () -> { fixed: Ty[], vararg?: Ty, names?: { [integer]: string | nil } } | nil
 	local function parse_tuple()
 		local fixed = {} --[[: Ty[] ]]
+		local names = {} --[[: { [integer]: string | nil } ]]
+		local any_name = false --: boolean
 		local vararg --: Ty | nil
 		if accept(")") then return { fixed = fixed } end
 		while true do
@@ -222,27 +251,31 @@ local function new_type_parser(toks, aliases)
 				if not accept(")") then fail("expected `)` after vararg"); return nil end
 				break
 			end
-			-- NAMED PARAMETER (`name: T`, incl. `self: T`) — an out-of-subset form:
-			-- v1 params are positional. Detect `ident :` lookahead and tag.
+			-- named parameter `name: T`: consume `ident :` then the type. Disambiguate
+			-- from a record-type atom `{...}` or a grouped type — a leading `ident`
+			-- directly followed by `:` is a parameter name (a bare type never has a
+			-- top-level `:` here).
+			local pname --: string | nil
 			do
 				local t0, t1 = toks[pos], toks[pos + 1]
 				if t0 and t0.kind == "ident" and t1 and t1.kind == ":" then
-					if t0.text == "self" then
-						fail_c("named/self parameter outside v1: '" .. t0.text .. ":'", "named-param-self")
-						return nil
-					end
-					fail_c("named parameter outside v1: '" .. t0.text .. ":'", "named-param")
-					return nil
+					pname = t0.text
+					bump() -- ident
+					bump() -- ':'
+					any_name = true
 				end
 			end
 			local ty = parse_union()
 			if not ty then return nil end
 			fixed[#fixed + 1] = ty
+			names[#fixed] = pname
 			if accept(")") then break end
 			if not accept(",") then fail("expected `,` or `)` in tuple"); return nil end
 		end
-		if vararg ~= nil then return { fixed = fixed, vararg = vararg } end
-		return { fixed = fixed }
+		local out = { fixed = fixed } --[[: { fixed: Ty[], vararg?: Ty, names?: { [integer]: string | nil } } ]]
+		if vararg ~= nil then out.vararg = vararg end
+		if any_name then out.names = names end
+		return out
 	end
 
 	-- Atom: primitives, literals, named aliases, `( ... )` (group / function
@@ -273,15 +306,7 @@ local function new_type_parser(toks, aliases)
 			if not tup then return nil end
 			-- a `( ... ) -> R` function, or a parenthesized group / return tuple.
 			if accept("arrow") then
-				-- return: either `( ... )` tuple or a single type.
-				local rtup --: { fixed: Ty[], vararg?: Ty } | nil
-				if accept("(") then
-					rtup = parse_tuple()
-				else
-					local rt = parse_union()
-					if not rt then return nil end
-					rtup = { fixed = { rt } }
-				end
+				local rtup = parse_return()
 				if not rtup then return nil end
 				return G.fn(tup, rtup)
 			end
@@ -327,13 +352,21 @@ local function new_type_parser(toks, aliases)
 		local a = parse_atom()
 		if not a then return nil end
 		while accept("?") do a = G.union({ a, G.nil_() }) end
-		-- `T[]` ARRAY SHORTHAND — an out-of-subset form. v1 spells arrays as the
-		-- index signature `{ [integer]: T }`, not `T[]` (§5.1). Detect `[ ]` (empty
-		-- brackets) after a type and tag it.
-		local t0, t1 = toks[pos], toks[pos + 1]
-		if t0 and t0.kind == "[" and t1 and t1.kind == "]" then
-			return fail_c("`T[]` array shorthand outside v1 (use `{ [integer]: T }`)", "array-postfix")
+		-- `T[]` ARRAY SHORTHAND (§6.5.3) — desugars to `{ [integer]: T }` =
+		-- `indexer(integer, T)`, the single canonical array form post-parse. `T[][]`
+		-- nests. This is pure grammar sugar; no new constructor, no subtype rule.
+		while true do
+			local t0, t1 = toks[pos], toks[pos + 1]
+			if t0 and t0.kind == "[" and t1 and t1.kind == "]" then
+				bump() -- '['
+				bump() -- ']'
+				a = G.indexer(G.integer(), a)
+			else
+				break
+			end
 		end
+		-- a `?` may also follow the array postfix (`T[]?`).
+		while accept("?") do a = G.union({ a, G.nil_() }) end
 		return a
 	end
 
@@ -369,6 +402,72 @@ local function new_type_parser(toks, aliases)
 			return G.union(members)
 		end
 		return a
+	end
+
+	-- Parse a function RETURN position (after `->`). This is the one place a
+	-- multi-element tuple may appear as a UNION MEMBER (§6.5.5): the value-or-error
+	-- idiom `(A, B) | (nil, string)`. A return is a `|`-separated list of return
+	-- MEMBERS; each member is either a parenthesized return-shape `( T1, T2, ... )`
+	-- (≥2 elements ⇒ a `tuple`; exactly 1 ⇒ that type; 0 ⇒ the empty `()` return)
+	-- or a bare type (`parse_inter`, so the member binds tighter than the `|`).
+	--
+	-- A single member that is a bare multi-element parenthesized tuple keeps the
+	-- legacy simple multi-return shape `{ fixed = {T1, T2} }` (so existing call-site
+	-- slot inference is unchanged). Any union of members collapses to a single
+	-- return value `{ fixed = { union([...]) } }` whose members are tuples/types.
+	--:: RetMember = { is_simple: boolean, tup?: { fixed: Ty[], vararg?: Ty, names?: { [integer]: string | nil } }, ty?: Ty }
+	--: () -> RetMember | nil
+	local function parse_return_member()
+		-- a parenthesized return-shape.
+		if accept("(") then
+			local tup = parse_tuple()
+			if not tup then return nil end
+			-- normalize: 1 fixed, no vararg ⇒ the element itself; else a tuple/empty.
+			if #tup.fixed == 1 and not tup.vararg then
+				local only = tup.fixed[1] --[[: Ty ]]
+				return { is_simple = false, ty = only } --[[: RetMember ]]
+			end
+			return { is_simple = true, tup = tup } --[[: RetMember ]]
+		end
+		local t = parse_inter()
+		if not t then return nil end
+		return { is_simple = false, ty = t } --[[: RetMember ]]
+	end
+
+	--: () -> { fixed: Ty[], vararg?: Ty } | nil
+	parse_return = function()
+		local first = parse_return_member()
+		if not first then return nil end
+		-- single member, no `|`: keep the legacy shape (a return position carries no
+		-- parameter names, so drop any `names` the tuple parser attached).
+		if not (peek() and peek().kind == "|") then
+			local ftup = first.tup
+			if first.is_simple and ftup ~= nil then
+				local out = { fixed = ftup.fixed } --[[: { fixed: Ty[], vararg?: Ty } ]]
+				local fv = ftup.vararg
+				if fv ~= nil then out.vararg = fv end
+				return out
+			end
+			local ty0 = first.ty or G.never() --[[: Ty ]]
+			return { fixed = { ty0 } }
+		end
+		-- a union of return members: each member becomes a Ty (a multi-element tuple
+		-- member is the `tuple` constructor), unioned into one return value.
+		--: (RetMember) -> Ty
+		local function member_ty(m)
+			if m.is_simple and m.tup ~= nil then
+				local tp = m.tup
+				return G.tuple(tp.fixed, tp.vararg)
+			end
+			return m.ty or G.never()
+		end
+		local members = { member_ty(first) } --[[: Ty[] ]]
+		while accept("|") do
+			local m = parse_return_member()
+			if not m then return nil end
+			members[#members + 1] = member_ty(m)
+		end
+		return { fixed = { G.union(members) } }
 	end
 
 	return {
@@ -486,6 +585,78 @@ function M.scan_annotation(line)
 		return { kind = "sig", body = sig }
 	end
 	return nil
+end
+
+-- Bracket-balance of a type-body fragment: (opens − closes) over `{`/`}`/`(`/`)`,
+-- ignoring brackets inside string literals. A positive balance means the directive
+-- continues on the next line (§6.5.6 multi-line `--::`).
+--: (string) -> integer
+local function bracket_balance(s)
+	local bal = 0 --: integer
+	local i = 1 --: integer
+	local n = #s
+	while i <= n do
+		local c = s:sub(i, i)
+		if c == '"' or c == "'" then
+			local q = c
+			i = i + 1
+			while i <= n and s:sub(i, i) ~= q do i = i + 1 end
+		elseif c == "{" or c == "(" then
+			bal = bal + 1
+		elseif c == "}" or c == ")" then
+			bal = bal - 1
+		end
+		i = i + 1
+	end
+	return bal
+end
+
+-- Strip the leading `--::` / `--:` directive marker from a CONTINUATION line,
+-- returning just the body fragment (or nil if the line is not a `--`-annotation
+-- continuation). Used to join wrapped multi-line aliases.
+--: (string) -> string | nil
+local function continuation_body(line)
+	local b = line:match("^%s*%-%-::%s?(.*)$")
+	if b ~= nil then return b end
+	b = line:match("^%s*%-%-:%s?(.*)$")
+	if b ~= nil then return b end
+	return nil
+end
+
+-- Scan an annotation directive starting at `lines[idx]`, JOINING multi-line `--::`
+-- (or `--:`) continuations when the directive's body has unbalanced brackets
+-- (§6.5.6). Returns (directive | nil, lines_consumed): a single-line directive
+-- consumes 1; a wrapped one consumes the continuation lines too. The joined body
+-- is what `parse_type_ann` / `declare_alias` always expected — the type grammar
+-- parser is unchanged; this is purely a frontend tokenization reach.
+--: ({ [integer]: string }, integer) -> (AnnDirective | nil, integer)
+function M.scan_annotation_at(lines, idx)
+	local first = lines[idx]
+	if type(first) ~= "string" then return nil, 1 end
+	local d = M.scan_annotation(first)
+	if d == nil then return nil, 1 end
+	local body = d.body
+	if type(body) ~= "string" then return d, 1 end
+	-- already balanced (or no opening bracket) → single line.
+	if bracket_balance(body) <= 0 then return d, 1 end
+	-- consume continuation lines until the brackets balance.
+	local joined = body --: string
+	local consumed = 1 --: integer
+	local j = idx + 1 --: integer
+	while j <= #lines and bracket_balance(joined) > 0 do
+		local frag = continuation_body(lines[j])
+		if frag == nil then break end -- not a continuation; stop (leaves unbalanced)
+		joined = joined .. " " .. frag
+		consumed = consumed + 1
+		j = j + 1
+	end
+	if d.kind == "alias" then
+		local out = { kind = "alias", body = joined } --[[: AnnDirective ]]
+		local nm = d.name
+		if nm ~= nil then out.name = nm end
+		return out, consumed
+	end
+	return { kind = "sig", body = joined }, consumed
 end
 
 -- ── Guard recognition (the flow-narrowing layer's frontend, §4.1) ────────────

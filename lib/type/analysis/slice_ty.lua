@@ -31,13 +31,17 @@ local M = {}
 -- (`--::` declarations must each be a single line — multiline continuation is
 -- not supported by the annotation parser.)
 --
---:: TyKind = "nil" | "boolean" | "number" | "integer" | "string" | "function" | "unknown" | "never" | "lit_bool" | "lit_int" | "lit_num" | "lit_str" | "fn" | "rec" | "indexer" | "rec_with_indexer" | "union" | "inter" | "mu" | "tyvar"
+--:: TyKind = "nil" | "boolean" | "number" | "integer" | "string" | "function" | "unknown" | "never" | "lit_bool" | "lit_int" | "lit_num" | "lit_str" | "fn" | "rec" | "indexer" | "rec_with_indexer" | "union" | "inter" | "mu" | "tyvar" | "tuple"
 --:: Field  = { key: string, ty: Ty, optional: boolean, readonly: boolean }
---:: Params = { fixed: Ty[], vararg?: Ty }
+-- `names` (when present) carries the i-th parameter's annotation name (or nil for
+-- an unnamed slot). Names are NOT part of the interner's structural key (§6.5.1),
+-- so two `fn` types differing only in parameter names share a tid — which is how
+-- the subtype relation comes to ignore names for free (tid identity ⇒ name-blind).
+--:: Params = { fixed: Ty[], vararg?: Ty, names?: { [integer]: string | nil } }
 --:: Ret    = { fixed: Ty[], vararg?: Ty }
 --:: Rows   = "closed" | "open"
 --:: Indexer = { key: Ty, val: Ty }
---:: Ty = { tid: integer, kind: TyKind, b?: boolean, n?: number, s?: string, params?: Params, ret?: Ret, fields?: Field[], rows?: Rows, key?: Ty, val?: Ty, members?: Ty[], body?: Ty, idx?: integer }
+--:: Ty = { tid: integer, kind: TyKind, b?: boolean, n?: number, s?: string, params?: Params, ret?: Ret, fields?: Field[], rows?: Rows, key?: Ty, val?: Ty, members?: Ty[], body?: Ty, idx?: integer, fixed?: Ty[], vararg?: Ty }
 
 -- ── Interner state ───────────────────────────────────────────────────────────
 --
@@ -160,18 +164,52 @@ end
 -- Params/Ret are return/parameter tuples with an optional trailing vararg spread
 -- (§1.2). A multi-return `() -> (A, B)` is `ret = { fixed = {A, B} }`.
 
+-- Normalize a param record. `names` is carried through VERBATIM but never enters
+-- the structural key — it is diagnostic/binding metadata (§6.5.1), so name-only
+-- differences intern to the same tid.
 --: (Params) -> Params
-local function norm_pr(pr)
-	return { fixed = pr.fixed or {}, vararg = pr.vararg }
+local function norm_params(pr)
+	local out = { fixed = pr.fixed or {}, vararg = pr.vararg } --[[: Params ]]
+	local nm = pr.names
+	if nm ~= nil then out.names = nm end
+	return out
+end
+
+-- Normalize a return record (no names — return slots are positional only).
+--: (Ret) -> Ret
+local function norm_ret(r)
+	return { fixed = r.fixed or {}, vararg = r.vararg }
 end
 
 --: (Params, Ret) -> Ty
 function M.fn(params, ret)
-	local p = norm_pr(params)
-	local r = norm_pr(ret)
+	local p = norm_params(params)
+	local r = norm_ret(ret)
+	-- KEY EXCLUDES p.names (§6.5.1): names are interner-invisible.
 	local key = "FN:" .. tids(p.fixed) .. "|" .. opt_tid(p.vararg)
 		.. ">" .. tids(r.fixed) .. "|" .. opt_tid(r.vararg)
 	return intern(key, { kind = "fn", params = p, ret = r, tid = 0 })
+end
+
+-- ── Tuple (return-position multi-value spread, §6.5.5) ────────────────────────
+--
+-- A `tuple` denotes the sequence of values a `return` produces — the multi-value
+-- spread Lua's calling convention produces/consumes. It is NOT a table (tables are
+-- rec/indexer); it appears ONLY as a union member in function return position and
+-- as the normalized form of a multi-element Ret. A single-element tuple normalizes
+-- to its element (a one-value return is just that value); an empty tuple with no
+-- vararg is the `() ` return shape kept as a tuple only when explicitly built.
+--: (Ty[], Ty | nil) -> Ty
+function M.tuple(fixed, vararg)
+	fixed = fixed or {}
+	-- normalize: a one-fixed, no-vararg tuple IS its single element (the universe
+	-- does not distinguish `return a` from a one-tuple).
+	if #fixed == 1 and vararg == nil then
+		local only = fixed[1]
+		if only ~= nil then return only end
+	end
+	local key = "TUP:" .. tids(fixed) .. "|" .. opt_tid(vararg)
+	return intern(key, { kind = "tuple", fixed = fixed, vararg = vararg, tid = 0 })
 end
 
 -- ── Records / indexers ───────────────────────────────────────────────────────
@@ -423,6 +461,11 @@ local function rebuild(node, xf, binders)
 		end
 	elseif kind == "indexer" then
 		return M.indexer(rebuild(get_key(node), xf, binders), rebuild(get_val(node), xf, binders))
+	elseif kind == "tuple" then
+		local fixed = node.fixed or {}
+		local nf = {} --[[: Ty[] ]]
+		for i = 1, #fixed do nf[#nf + 1] = rebuild(fixed[i], xf, binders) end
+		return M.tuple(nf, node.vararg and rebuild(node.vararg, xf, binders) or nil)
 	elseif kind == "union" or kind == "inter" then
 		local ms = get_members(node)
 		local nm = {} --[[: Ty[] ]]

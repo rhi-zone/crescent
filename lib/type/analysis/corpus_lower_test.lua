@@ -166,12 +166,16 @@ T.describe("corpus e2e: fixture_table_construction_widening — dynamic-key writ
 	end)
 end)
 
-T.describe("corpus e2e: fixture_hamt_recursion — forward alias + named params", function()
-	T.it("`node: HamtNode` (named param) and the forward alias ref are the §5 boundary", function()
+T.describe("corpus e2e: fixture_hamt_recursion — forward alias boundary", function()
+	T.it("named param `node: HamtNode` now lowers (v2.1); the forward-alias ref is the §5 boundary", function()
 		local o = lower_fixture("hamt_recursion")
-		T.eq(o.expected, "OUT-OF-SUBSET", "named parameters + forward-referenced alias are outside §5")
-		T.ok(has_construct(o, "named-param") or has_construct(o, "unknown-type-name"),
-			"marked the named-param / unresolved-alias boundary")
+		-- v2.1: `node: HamtNode` (named param) is now IN subset (§6.5.1). The fixture
+		-- remains OUT-OF-SUBSET on the FORWARD-referenced alias: `Interior`
+		-- references `HamtNode` before its own `--::` line, and the per-file alias
+		-- env is built top-to-bottom, so the name is unresolved at that point. A
+		-- two-pass alias env is increment-2 work, not this increment.
+		T.eq(o.expected, "OUT-OF-SUBSET", "a forward-referenced alias is outside §5 (single-pass alias env)")
+		T.ok(has_construct(o, "unknown-type-name"), "marked the unresolved forward-alias boundary")
 		assert_sound(o)
 	end)
 end)
@@ -186,11 +190,18 @@ T.describe("corpus e2e: fixture_cast_not_inference_source — concat operator bo
 	end)
 end)
 
-T.describe("corpus e2e: fixture_cross_module_type_alias — named params", function()
-	T.it("`cb: () -> nil, epoll: Epoll | nil` (named params) is the §5 boundary", function()
+T.describe("corpus e2e: fixture_cross_module_type_alias — unannotated closure boundary", function()
+	T.it("named params now lower (v2.1); the next §5 boundary is the unannotated closure", function()
 		local o = lower_fixture("cross_module_type_alias")
-		T.eq(o.expected, "OUT-OF-SUBSET", "named parameters are outside §5 (v1 params are positional)")
-		T.ok(has_construct(o, "named-param"), "marked named-param")
+		-- v2.1: named parameters (`cb: () -> nil, epoll: Epoll | nil`) are now IN
+		-- subset (§6.5.1), so that boundary is gone. The fixture remains
+		-- OUT-OF-SUBSET on the NEXT boundary: an unannotated closure in expression
+		-- position (the §10 local-inference edge) and a cross-module `require` field
+		-- the in-file form does not declare.
+		T.eq(o.expected, "OUT-OF-SUBSET", "an unannotated closure is outside §5")
+		T.ok(has_construct(o, "unannotated-closure") or has_construct(o, "no-such-field"),
+			"marked the unannotated-closure / require-boundary edge, NOT named-param")
+		T.ok(not has_construct(o, "named-param"), "named-param is no longer a boundary (v2.1 lowers it)")
 		assert_sound(o)
 	end)
 end)

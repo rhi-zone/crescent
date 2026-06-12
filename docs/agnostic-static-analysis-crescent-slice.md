@@ -929,6 +929,254 @@ counterevidence path).
 
 ---
 
+## 6.5 Increment v2.1 — annotation-grammar reach + union-of-return-tuples
+
+Status: design pass for slice **v2 increment 1**, derived against the two surveys
+(`docs/slice-survey-v1.md`: the annotation-grammar survey's out-of-subset histogram
+and the end-to-end survey's CHECKED-FINDINGS). This section grows the design FIRST,
+whole, from the value universe and the ratified kernel fence
+(`docs/decisions/kernel-recommendation.md` §3 — no complement, no match types, no
+global solving, no HKT). It is **monotone** over §1–§5: every addition is either a
+pure annotation-grammar desugaring (a parser change, no lattice change) or a single
+new value-universe-justified constructor with its subtype rule slotted into THE one
+relation (§3). Nothing here crosses the fence.
+
+The increment closes the measured top of the demand histogram. Each item below is
+derived, then its mechanization surface (grammar / PTy / lowering / subtype / codec)
+is named. The demand-ordered scope: named parameters (266 files), `self` (128),
+`T[]` array shorthand (88), `{ T }` list shorthand (the CHECKED-FINDINGS gap),
+multi-line `--::` aliases (the "unterminated table type" finding), and
+union-of-multi-return-tuples `(A, B) | (nil, string)` (the dominant error-return
+idiom). **Out of this increment** (recorded as increment 2's headline): cross-module
+/ unresolved type aliases (232 files) — a multi-artifact / `require`-boundary
+extension, not an annotation-grammar reach.
+
+### 6.5.1 Named parameters `name: T` — names ride `Params`, subtyping ignores them
+
+**Value-universe derivation.** A Lua function value consumes a *positional*
+parameter tuple; the parameter *names* are local bindings inside the body, never
+part of the value's call ABI. So a parameter name is **diagnostic and binding
+metadata**, not a type-algebra distinction: `(a: number) -> number` and
+`(b: number) -> number` describe the *same* function values and must be the same
+type. This is exactly TypeScript's rule (parameter names are ignored in function
+subtyping) and the only sound reading of the universe.
+
+**Grammar + PTy.** `Params.fixed` stays a positional `Ty[]`. A parallel optional
+`Params.names: (string | nil)[]` carries the i-th parameter's name when the
+annotation supplied one (`nil` for an unnamed positional slot, and for the vararg).
+Names are **NOT part of the interner's structural key** (§3.1) — two `fn` types
+differing only in parameter names intern to the SAME tid, which is precisely how the
+subtype relation comes to ignore them *for free* (tid identity ⇒ name-blind). The
+portable `PTy` `fn` node carries `params.names` so the name survives the codec for
+diagnostics/lowering, but since names are not in the structural key, the
+encode/decode round-trip is name-faithful without affecting claim identity.
+
+**Lowering.** A named param `name: T` binds `name : T` in the function body's Γ
+(the `synth_function` context extension, §2.3) — this is the reach that lets the
+end-to-end frontend type a body that references its parameters by name. An unnamed
+positional param annotation binds nothing (the body must not reference it; if it
+does, that is an out-of-subset unannotated-reference, unchanged).
+
+**Subtype relation: no change.** Because names are interner-invisible, `subtype`
+already ignores them. This is the cleanest possible discharge of "subtype relation
+ignores names (structural)": there is no name-stripping step, no special case — the
+names simply never enter the structural key.
+
+### 6.5.2 `self` parameter — an ordinary named first parameter
+
+**Decision (justified from the value universe).** `self` is **an ordinary named
+first parameter**, treated identically to §6.5.1's `name: T`, with `name = "self"`.
+There is no `self`-specific type rule, no implicit receiver binding, no special
+case in the relation or the gen-pass.
+
+**Why this is the right v1 treatment.** The value universe makes `o:m(a)` exactly
+`o.m(o, a)` — method-call sugar desugars to passing the receiver as the first
+positional argument. So `self` *is* the first positional parameter; its type is
+whatever the annotation declares (`self: HamtNode` ⇒ first param type `HamtNode`),
+and it binds the name `self` in the body. The annotation grammar always supplies a
+type for `self` (it is written `self: T`), so the "default the receiver type when
+statically known, else `unknown`" question the prompt raised **does not arise in the
+annotation-grammar reach** — the annotation IS the type. (A bare `self` with no
+annotation would be the unannotated-parameter case, already out-of-subset and
+unchanged; v1 does not synthesize a receiver type from an enclosing module, because
+that is cross-statement store inference the slice defers, §9.2.) Treating `self` as
+an ordinary named param is therefore the value-universe-faithful, no-special-case
+choice: the survey's separate `named-param-self` tag was a *measurement* distinction
+(to size the method-signature population), never a semantic one. Both `named-param`
+and `named-param-self` are closed by the SAME mechanism.
+
+### 6.5.3 `T[]` array shorthand — pure desugaring to `indexer(integer, T)`
+
+**Derivation.** `T[]` is sugar; the universe has no "array" value kind distinct from
+a table used as an integer-keyed map. v1 already spells arrays `{ [integer]: T }` =
+`indexer(integer, T)` (§1.3). `T[]` desugars to that **at parse time**; no new
+constructor, no PTy change, no subtype rule. The desugaring is in `parse_postfix`
+(§5.1's grammar): after parsing an atom (and its `?` postfixes), an empty bracket
+pair `[]` rewrites the type to `G.indexer(G.integer(), T)`. `T[][]` nests
+(`indexer(integer, indexer(integer, T))`). This is the single canonical array form
+post-parse.
+
+### 6.5.4 `{ T }` list shorthand — identical canonical form (decided: YES)
+
+**Decision.** `{ T }` (a table-type body that is a single *bare* type with no
+`key:` and no `[K]:`) desugars to the **identical** target as `T[]`:
+`indexer(integer, T)`. `{ T }` and `T[]` are the same type post-parse — one
+canonical form. This is the recommended resolution of the CHECKED-FINDINGS gap (the
+`{ string }`, `{ Listener }` annotations that failed with "expected `:` after field
+name"). Justification: both spellings denote "a list of `T`" = an integer-keyed
+table of `T`, which the universe produces identically; keeping two distinct internal
+forms would be a gratuitous asymmetry (the "collapse asymmetries to primitives"
+principle). The parser's `parse_table_type` gains one case: if the first token after
+`{` parses as a type (not an `ident :` field, not `[K]:`, not `...`) and is followed
+by `}`, the body is a list shorthand. A multi-element `{ A, B }` is **rejected** (a
+list shorthand is single-element; `{ A, B }` is neither a record nor a tuple-type in
+v1 — tuples live only in function param/return position, §1.3, now §6.5.5). Note the
+grammar disambiguation: `{ [K]: V }` (index signature) and `{ key: T }` (record) are
+unchanged and take precedence; only a leading bare-type triggers the list reading.
+
+### 6.5.5 Union-of-multi-return-tuples — the one type-algebra growth
+
+This is the increment's only lattice growth — a new constructor — and the survey's
+dominant error-return idiom: `(A, B) | (nil, string)`, the Lua "return the value, or
+`nil` plus an error message" convention. It is derived from the value universe, not
+from the fixtures.
+
+**Value-universe derivation.** A Lua `return` statement genuinely produces *one of
+several return shapes*: the success path returns `(value)` or `(value1, value2)`;
+the error path returns `(nil, "message")`. A single call site `local a, b = f()`
+therefore binds `(a, b)` to one member of a **union of return tuples**. The function
+type's *return position* must admit this union. v1 already models a single multi-
+return as a return-position tuple (`Ret = { fixed, vararg }`, §1.2); the universe now
+forces the return to be a *union whose members are tuples*. This is real algebra
+growth (not sugar): the lattice must close return-position tuples under union.
+
+**Grammar: the `tuple` constructor.** A tuple is currently implicit — it exists only
+as the `Ret`/`Params` record, never as a first-class `Ty`. To let a *union member* be
+a multi-element tuple, v1 admits a new constructor:
+
+```text
+  | tuple(fixed: [Ty], vararg: Ty | nil)   -- a positional return/spread tuple
+```
+
+A `tuple` is a **return-position-only** value-shape: it denotes the sequence of
+values a `return` produces. It is NOT a table (a table is `rec`/`indexer`); it is the
+multi-value spread Lua's calling convention produces and consumes. Its sole roles:
+(a) a member of a `union` in function *return* position, and (b) the normalized form
+of a multi-element `Ret`. A single-element tuple `tuple([A])` normalizes to `A`
+(a one-value return is just that value — the universe does not distinguish `return a`
+from a one-tuple), so `tuple` only ever has 0 or ≥2 fixed elements (or a vararg). The
+interner keys it structurally exactly like `fn`'s tuples (`tids(fixed)|opt_tid(vararg)`).
+
+Justification from the universe and the fence: this is the *minimal* constructor that
+expresses the idiom. It is admitted because the universe **produces** multi-value
+return sequences and **discriminates** between alternative ones at a call site — the
+§1.1 admission rule. It needs no complement, no match type, no global solve, no HKT:
+the subtype rule below is the standard structural exists-forall for unions of tuples.
+
+**Where it appears.** Only inside a function's `Ret` (and, symmetrically, a vararg
+spread). `Ret` becomes: `Ret = { fixed, vararg }` as before for the simple case, OR
+the return is a `union` whose members are `tuple`/non-tuple types. Concretely the
+parser, on seeing `(A, B) | (nil, string)` in return position, builds
+`union([ tuple([A, B]), tuple([nil, string]) ])`. A return of `T | (nil, string)`
+(value-or-error where the success is a single value) builds
+`union([ T, tuple([nil, string]) ])` — a union mixing a scalar member and a tuple
+member, which is well-formed (a one-value return vs a two-value return).
+
+**Subtype rule (spec).** The relation (§3.2) gains the `tuple` constructor pair,
+slotted with the other structural rules:
+
+- **`tuple(Fa, va) <: tuple(Fb, vb)`** — pointwise **covariant** on fixed elements
+  (a return tuple is produced, hence covariant, exactly like `Ret`), with the same
+  arity interplay as function returns: `A` may produce MORE fixed values than `B`
+  needs (extra returns are droppable), so a longer tuple is `<:` a shorter prefix;
+  `A` must produce at least `B`'s fixed count (unless `A` has a vararg tail covering
+  the remainder). Varargs: covariant on the tail element when both present. This is
+  *identical* to the existing `fn`-return rule (§3.2), lifted to the standalone
+  constructor — the `fn` return check is refactored to call the same `tuple_sub`
+  helper, so there is ONE tuple-subtype rule, not two.
+- **`tuple <: union`** and **`union <: union`** — these need NO new rule: they are the
+  EXISTING union decomposition (§3.2: `B = union → A <: some member`;
+  `A = union → every member <: B`). A `tuple` is just another atom to the union
+  rules. So **union-of-tuples `<:` union-of-tuples is the standard exists-forall**
+  the relation already implements: `(A,B)|(nil,str) <: (A,B)|(nil,str)|(C)` holds
+  because each left tuple member is `<:` some right member. `tuple <: union-of-tuples`
+  is `A <: some member`. `union-of-tuples <: union-of-tuples` is the conjunction over
+  left members of (disjunction over right members). **The only genuinely new code is
+  the `tuple <: tuple` pair**; everything else is the union machinery already proven.
+- **A bare value vs a tuple**: `A <: tuple([B])` never arises (one-tuples normalize
+  to `A`); `A <: tuple([B, C])` (a scalar against a ≥2 tuple) is **false** (a single
+  value cannot satisfy a two-value return), and `tuple([B, C]) <: A` for non-tuple
+  `A` is **false** (a multi-value spread is not a single value). These fall out of
+  the constructor-pair dispatch returning `false` for unmatched pairs — no special
+  case.
+- **`integer <: number` / literals / records / fns / μ**: unchanged. A `tuple` may
+  contain any `Ty` (including a μ or a union), so the rule recurses through `sub`
+  normally, participating in the cycle guard and memo like every other constructor.
+
+**Arity interplay with spreads (explicit).** A vararg in a tuple
+(`tuple([A], vararg=B)`) means "A followed by zero or more B" — the Lua
+`return a, table.unpack(rest)` shape. The `tuple_sub` rule handles it exactly as the
+`fn`-return vararg: B's fixed prefix must be covered by A's fixed-or-vararg, and a
+present vararg on both sides is covariant on the tail. No new arity logic beyond
+what the `fn` return already specifies; the refactor *shares* it.
+
+**Codec (PTy).** A new portable node `{ k="tuple", fixed=[PTy..], vararg=PTy? }`,
+encoded/decoded symmetrically with `fn`'s tuples and validated parse-not-cast (a
+`tuple` with fewer than 2 fixed and no vararg is rejected by the decoder — it should
+have normalized to its single element or to the empty case, so the non-canonical form
+is malformed input). Well-formedness (`type_shape_check`): a `tuple`'s elements are
+checked recursively; a `tuple` nested *inside a table field or another tuple's
+non-return position* is **ill-formed** (a tuple is return-position-only) — but in v1
+the parser only ever constructs a `tuple` in return position, so this is a decoder
+guard against a malformed producer, not a parser path.
+
+**Narrowing interplay — deferred to increment 2 (recorded, not rushed).** The
+idiom's *consumer* is `local ok, err = f(); if not ok then ... end` — multi-return
+destructuring followed by a guard on the first slot. v1's narrowing (§4) refines a
+single variable's binding; narrowing `ok` to drop the success tuple and select the
+`(nil, string)` member is **multi-return-aware narrowing** (the guard on slot 1
+refines the *joint* tuple). No §6.5 fixture *requires* it (the fixtures exercise the
+return-position *annotation* and the subtype relation, not the destructuring-narrow
+consumer), so per the prompt this is **recorded as increment 2's narrowing item**,
+not built here. The relation and the annotation grammar land in this increment; the
+flow-narrowing consumer follows when a fixture demands it.
+
+### 6.5.6 Multi-line `--::` alias scanning
+
+**Derivation (a scanner reach, not a semantics change).** The CHECKED-FINDINGS
+"unterminated table type" diagnostics (`lib/asm/ir.lua`, `lib/platform/platform_types.lua`,
+the ccv2 type files) are all wrapped `--:: Name = {` declarations whose body spans
+several `--::` continuation lines. The slice's annotation *semantics* already handle
+the full type; only the line *scanner* (`scan_annotation`, the survey's
+`extract_annotations`) assumed one directive per line. The reach is purely lexical:
+when a `--::` (or `--:`) directive's body has an *unbalanced* `{`/`(` (more opens than
+closes) or ends mid-type, the scanner **consumes subsequent `--::` continuation
+lines**, concatenating their bodies (stripping the leading `--::`/`--:` and
+whitespace) until the brackets balance and the type is complete. The concrete syntax
+is exactly the two real examples checked: `--:: Name = {` then `--::   field: T,`
+lines then `--:: }`. This is a frontend tokenization fix; the type grammar parser
+(`parse_type_ann`) is unchanged — it receives the joined single-line body it always
+expected. Recorded honestly: this corrects the §9.3-finding-5 "single-line only"
+constraint, which was a *scanner* limitation, never a semantic one.
+
+### 6.5.7 Mechanization surface summary
+
+| Item | Grammar/parser | PTy codec | Subtype | Lowering | Tests |
+|---|---|---|---|---|---|
+| Named params | `Params.names` (interner-invisible) | `fn.params.names` | none (tid-blind) | bind name in body Γ | parse + codec round-trip + name-blind subtype |
+| `self` | same as named (`name="self"`) | same | none | same | one `self:T` parse test |
+| `T[]` | desugar in `parse_postfix` | none | none | none | parse → `indexer(integer,T)` |
+| `{ T }` | desugar in `parse_table_type` | none | none | none | parse → identical to `T[]` |
+| union-of-tuples | `tuple` ctor; parser builds union in return pos | `{k="tuple",...}` | NEW `tuple<:tuple`; reuse union | call-site slot draw unchanged | unit + fuzz (tuple-union generator) + codec |
+| multi-line `--::` | scanner continuation in `scan_annotation`/`extract_annotations` | none | none | none | multi-line alias parse |
+
+The fence holds: five of six items are annotation-grammar desugaring or scanner
+reach (zero lattice change); the sixth (`tuple`) is one value-universe-justified
+constructor whose subtype rule is the standard structural covariance + the EXISTING
+union exists-forall. No complement, no match types, no global solving, no HKT.
+
+---
+
 ## 7. Acceptance Criteria
 
 ### 7.1 Per-fixture acceptance mapping
@@ -1777,14 +2025,26 @@ records `pos` before each `parse_statement` and force-advances one token if it d
 not move (the standard recursive-descent recovery invariant). The hand-built corpus
 never exercised the parser, so this class was invisible until Pass 5.
 
-**High-value finding 2 — substrate scaling (RECORDED, the 1 survey TIMEOUT).**
-`lib/type/v7_mr0/init.lua` lowers to 713 requested claims; `A.check`'s fixpoint
-worklist (it re-sweeps every pending evidence object each round, O(sweeps ×
-evidence)) exceeds the 5s per-file budget on a graph that large. This is a
-**substrate performance** characteristic, not a lowering or soundness defect — the
-per-file budget correctly isolates it as a single TIMEOUT rather than hanging the
-survey. Recorded for a future substrate worklist-indexing optimization; out of
-Pass 5 scope. `init.lua` was again **not** touched.
+**High-value finding 2 — substrate scaling (FIXED in the substrate loop; residual
+TIMEOUT now hosted-checker-bound).** `lib/type/v7_mr0/init.lua` lowers to 713
+requested claims (2724 claims/evidence). Pass 5 recorded `A.check`'s fixpoint as
+re-sweeping every pending evidence object each round (O(sweeps × evidence)) and
+left it for a future optimization. That optimization landed (`perf(analysis)`,
+`docs/perf/log.md` 2026-06-12): `A.check` is now a **dependency-driven worklist**
+— when an evidence accepts its claim it re-queues only the evidence whose declared
+inputs reference that claim (a `dependents` index built once over all input edges),
+sound because every hosted checker reads accepted-ness solely through its own input
+Ids; plus per-check **memoization** of structural claim keys (each deep-args
+serialize happens once, not once per accepted-ness probe). A synthetic reverse-order
+chain — the adversarial case for a re-sweep — is now linear (5 000 claims: 5.26s →
+0.011s, ~460×); the real file dropped 21.6s → 14.5s. Both refinements are pure
+substrate vocabulary and behavior-identical: all 4906 assertions across the six
+hosted semantics pass unchanged. The file nonetheless **stays the survey's 1
+TIMEOUT** because its remaining 14.5s splits ~5.3s substrate (the structural-identity
+serialization floor for 2724 deep args) and ~8.5s **inside the hosted slice checker**
+(repeated `parse_ctx`/`parse_type`/`subtype` per call). The substrate loop is no
+longer the bottleneck; the residual cost is a hosted-semantics follow-up the
+substrate must not reach into.
 
 **The end-to-end survey headline:** **0.3% CHECKED-CLEAN** (3 files) ·
 0.3% CHECKED-FINDINGS · 98.6% OUT-OF-SUBSET · 0.6% NO-ANNOTATION · 1 TIMEOUT, over
@@ -1795,6 +2055,94 @@ end-to-end construct ranking (`operator-concat`/`operator-arith`,
 `method-call`, `multi-assign`, `named-param`) is slice-v2's statement-lowering build
 order, the way §10.1 ranked the type-grammar work. Full numbers + the findings in
 `docs/slice-survey-v1.md` ("v1 end-to-end" section).
+
+### 9.9 Mechanization findings — slice v2 increment 1 (§6.5)
+
+Recorded honestly per the prompt. The increment landed the six §6.5 items; the
+findings below are the spec-tightenings the mechanization forced, each resolved
+without crossing the ratified fence (no complement, match types, global solving,
+HKT). The annotation survey's CHECKED-CLEAN more than doubled (26.6% → 55.8%) and
+OUT-OF-SUBSET halved (58.4% → 29.7%); the e2e CHECKED-CLEAN rose 3 → 5
+(`docs/slice-survey-v1.md`, "after v2 increment 1").
+
+- **Names are interner-INVISIBLE, which discharges name-blind subtyping for free
+  (the sharpest, cleanest finding).** §6.5.1's "subtyping ignores names" was
+  realized not by a name-stripping step in the relation but by EXCLUDING `names`
+  from the interner's structural key (`M.fn`). Two `fn` types differing only in
+  parameter names therefore intern to the SAME tid, so `subtype` ignores them
+  *structurally* — there is no special case, no name comparison, nowhere for a
+  name to leak into the algebra. `self` is then literally an ordinary named first
+  param (`name="self"`), so the survey's separate `named-param-self` tag closed by
+  the identical mechanism — confirming it was a *measurement* split, never a
+  semantic one (§6.5.2). The codec carries names in the portable `fn` node for
+  diagnostics/lowering without affecting claim identity (names are not in the key).
+
+- **`{ T }` and `T[]` collapse to ONE canonical form, and a multi-element
+  `{ A, B }` is rejected — which surfaced the tuple-type-in-table-position gap.**
+  Both spellings desugar to `indexer(integer, T)` and intern to the same tid
+  (§6.5.3/§6.5.4 — "collapse asymmetries to primitives"). The decision to reject
+  `{ A, B }` (a positional tuple as a *table element*) is what made the survey's
+  residual CHECKED-FINDINGS honest: real code writes `{ [integer]: { A, B } }` and
+  `{{A, B}}` (a 2-tuple as a list element), which v1 admits ONLY in fn
+  param/return position (the return-position `tuple` of §6.5.5), NOT as a table
+  element. This is a *new, deeper* residue the increased reach exposed — recorded
+  as increment 2's "tuple-type in table position" item, distinct from the
+  return-position tuple this increment added. It is a grammar gap, not a soundness
+  gap: rejecting the unsupported element form is sound (wider rejection).
+
+- **The `tuple` constructor needed NO new union machinery — only `tuple <: tuple`.**
+  §6.5.5's union-of-multi-return-tuples decomposed cleanly: `tuple <: union`,
+  `union <: union`, and `tuple <: union-of-tuples` are all the EXISTING union
+  exists-forall (a `tuple` is just another atom to the union rules). The only new
+  code is the `tuple <: tuple` covariant rule — and it shares the SAME helper
+  (`tuple_sub`) the `fn`-return rule was refactored to call, so there is one
+  tuple-subtype rule, not two. A one-element tuple normalizes to its element at
+  construction (`G.tuple`), so the constructor only ever holds 0 or ≥2 fixed (or a
+  vararg); the codec rejects a non-canonical one-fixed-no-vararg tuple
+  (parse-not-cast). Scalar-vs-tuple and tuple-vs-non-tuple incomparability falls
+  out of the constructor-pair dispatch returning `false` — no special case. The
+  fuzz generator was extended to emit tuples and tuple unions; the exists-forall and
+  reflexivity laws hold across the seeded run (5654 subtype assertions, up from 4454).
+
+- **Multi-line `--::` was a SCANNER reach, not a semantics change (corrects §9.3
+  finding 5).** The "unterminated table type" CHECKED-FINDINGS were all wrapped
+  `--:: Name = {` declarations; the type-grammar parser always handled the full
+  type — only the line scanner assumed one directive per line. The fix
+  (`scan_annotation_at`) joins continuation lines while the directive's brackets
+  are unbalanced (string-literal-aware balance), feeding `parse_type_ann` the
+  joined single-line body it always expected. Both consumers (the survey's
+  `extract_annotations` and the lowering's first pass) skip the consumed
+  continuation lines so they are not re-scanned as separate failing directives.
+  This corrects §9.3 finding 5's "single-line only" claim — it was always a
+  scanner limitation, never a slice-semantics property.
+
+- **Corpus verdict deltas (honest, recorded).** Under real lowering, two fixtures
+  moved off the `named-param` boundary: `cross_module_type_alias` (named params now
+  lower; the NEXT boundary is the unannotated closure + a cross-module `require`
+  field) and `hamt_recursion` (named param `node: HamtNode` now lowers; the NEXT
+  boundary is the FORWARD-referenced alias — `Interior` references `HamtNode` before
+  its `--::` line, a single-pass-alias-env gap recorded for increment 2). Both stay
+  OUT-OF-SUBSET on a deeper, real §5 boundary; the corpus_lower_test verdict
+  assertions were updated to the new boundary (the split is still 2 CLEAN / 9
+  OUT-OF-SUBSET / 0 rejections — the soundness invariant held).
+
+**Out of this increment, recorded as increment 2's headline:** cross-module /
+unresolved type-alias resolution — the new survey #1 at **172 files** (down from
+232: some files were *also* blocked on named-param and are now clean, isolating the
+alias demand). It is a `require`-boundary / multi-artifact extension (§2.5, §9.2), not
+an annotation-grammar reach; the slice trusts cross-module aliases rather than
+checking them, and a checked relation needs the required module's artifact in the
+same `CheckRequest`. Also deferred to increment 2 (a fixture demanded none here):
+multi-return-aware narrowing for the `local ok, err = f(); if not ok` consumer
+(§6.5.5) — the relation and annotation grammar landed; the flow-narrowing consumer
+follows when a fixture forces it.
+
+**What buckled in the substrate during increment 1: nothing** — every change is in
+the slice modules (`slice_ty`, `slice_subtype`, `slice_ty_arg`, `crescent_slice_parse`,
+`crescent_slice_lower`, `slice_survey`); `init.lua` is byte-for-byte unchanged across
+all five passes AND this increment. The full analysis suite is green at 6157
+(4905 prior intact + the increment's units/codec/fuzz). `bin/cr check` is clean on
+every touched file.
 
 ---
 
@@ -1938,3 +2286,30 @@ shorthand** (`{ string }`, `{ Listener }` — `lib/nat_lang/init.lua`,
 `lib/event/init.lua`). All three are grammar/adapter gaps recorded for v2, not
 slice precision failures. Full per-file list with diagnostics in
 `docs/slice-survey-v1.md`.
+
+### 10.2 Slice v2 increment 1 — DONE (2026-06-12)
+
+Increment 1 (§6.5) landed the annotation-grammar + frontend reach the histogram
+ranked at the top: named parameters, `self`, `T[]` array shorthand, `{ T }` list
+shorthand, multi-line `--::` aliases, and union-of-multi-return-tuples. Design grew
+first (§6.5, derived whole), then the mechanization in the same commit:
+`slice_ty.lua` (the `tuple` constructor + name-bearing `Params`), `slice_subtype.lua`
+(the `tuple_sub` helper backing both `fn`-return and the new `tuple <: tuple` rule),
+`slice_ty_arg.lua` (the `tuple` codec node + well-formedness), `crescent_slice_parse.lua`
+(named-param parsing, `T[]`/`{ T }` desugar, return-position union-of-tuples,
+multi-line `scan_annotation_at`), and the two scanner consumers
+(`crescent_slice_lower.lua`, `slice_survey.lua`). The three CHECKED-FINDINGS
+sub-patterns §10.1 flagged (multi-line aliases, union-of-tuples, `{ T }` list) are
+all resolved; findings in §9.9.
+
+**Survey re-run headlines** (`docs/slice-survey-v1.md`, "after v2 increment 1"):
+annotation CHECKED-CLEAN **26.6% → 55.8%** (230 → 483 files), OUT-OF-SUBSET **58.4%
+→ 29.7%**; e2e CHECKED-CLEAN 3 → 5. The new annotation-survey #1 is
+`unknown-type-name` (172 files) — **cross-module / unresolved type aliases, the
+explicit increment-2 headline item** (a `require`-boundary / multi-artifact
+extension, not an annotation-grammar reach). The ratified fence held throughout: no
+complement, match types, global solving, or HKT; five of six items are
+desugaring/scanner reach (zero lattice change) and the sixth (`tuple`) is one
+value-universe-justified constructor whose subtype rule is covariance + the existing
+union exists-forall. The substrate (`init.lua`) was again **not** touched. Full
+analysis suite green at 6157.
