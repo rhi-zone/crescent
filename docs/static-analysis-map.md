@@ -187,6 +187,13 @@ Rung status (ladder, design doc):
   a hard precondition; `lit_int` integer validation; `unknown` narrowing; subtype
   DAG memoization; `instantiate_witness` callee binding), each a permanent
   regression test (§9.7).
+  **Survey pass landed (2026-06-12): `slice_survey.lua` over the 864-file real `lib/`
+  corpus** (`docs/slice-survey-v1.md`) — 26.6% CHECKED-CLEAN, 1.6% CHECKED-FINDINGS,
+  58.4% OUT-OF-SUBSET, 13.3% NO-ANNOTATION, 0 timeouts/crashes. The annotation
+  adapter now emits out-of-subset construct tags; the demand histogram (v2's build
+  order) is led by named parameters (266 files), cross-module/unresolved type
+  aliases (232), `self` parameters (128), and `T[]` array shorthand (88). The survey
+  is a reusable measurement tool, re-run after every v2 increment.
 
 Limits:
 

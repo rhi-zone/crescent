@@ -34,7 +34,10 @@ local M = {}
 
 --:: TyTok = { kind: string, text: string }
 
---: (string) -> (TyTok[] | nil, string | nil)
+-- Returns (toks, nil, nil) or (nil, errmsg, construct_tag | nil). The construct
+-- tag classifies a recognizable out-of-subset lexeme (`$`-intrinsic) so the
+-- survey histogram ranks it; nil for an ordinary lexer error.
+--: (string) -> (TyTok[] | nil, string | nil, string | nil)
 local function lex_type(src)
 	local toks = {} --[[: TyTok[] ]]
 	local i = 1 --: integer
@@ -58,7 +61,7 @@ local function lex_type(src)
 			local q = c
 			local j = i + 1
 			while j <= n and src:sub(j, j) ~= q do j = j + 1 end
-			if j > n then return nil, "unterminated string literal in type" end
+			if j > n then return nil, "unterminated string literal in type", nil end
 			toks[#toks + 1] = { kind = "string", text = src:sub(i + 1, j - 1) }
 			i = j + 1
 		elseif src:sub(i, i + 1) == "->" then
@@ -72,8 +75,12 @@ local function lex_type(src)
 			if punct:find(c, 1, true) then
 				toks[#toks + 1] = { kind = c, text = c }
 				i = i + 1
+			elseif c == "$" then
+				-- a `$`-intrinsic (type-level intrinsic: `$Require<T>`, `$PairsReturn`,
+				-- …) — an out-of-subset construct (§1.4 type-expression forms).
+				return nil, "type-level `$`-intrinsic outside v1", "intrinsic-dollar"
 			else
-				return nil, "unexpected character in type: '" .. c .. "'"
+				return nil, "unexpected character in type: '" .. c .. "'", nil
 			end
 		end
 	end
@@ -99,11 +106,31 @@ local PRIMS = {
 	string = true, ["function"] = true, unknown = true, never = true,
 }
 
+-- Names that are well-known type-grammar constructs OUTSIDE the v1 subset. When
+-- the parser rejects an annotation, it classifies the blocking construct so the
+-- survey (slice_survey.lua) can build a demand-ranked histogram. This is
+-- error-reporting instrumentation ONLY — it never changes what the parser
+-- ACCEPTS; an out-of-subset name still rejects, it is merely TAGGED on the way
+-- out. (docs/agnostic-static-analysis-crescent-slice.md §1.4 deferral list.)
+local OUT_OF_SUBSET_NAMES = {
+	-- forbidden / absent value-or-lattice kinds (§1.4)
+	["any"] = "any (forbidden)",
+	["table"] = "bare-table (use a record/indexer)",
+	["fn"] = "bare-fn-name (use `function` or `(P)->R`)",
+	["cdata"] = "cdata",
+	["userdata"] = "userdata",
+	["thread"] = "thread",
+	-- type-expression forms with no v1 constructor (§1.4)
+	["typeof"] = "typeof",
+	["keyof"] = "keyof",
+}
+
 -- Parser state is a closure over the token list and a cursor.
---: (TyTok[], AliasEnv) -> { parse: () -> (Ty | nil, string | nil) }
+--: (TyTok[], AliasEnv) -> { parse: () -> (Ty | nil, string | nil, string | nil) }
 local function new_type_parser(toks, aliases)
 	local pos = 1 --: integer
 	local err --: string | nil
+	local construct --: string | nil
 
 	--: () -> TyTok | nil
 	local function peek() return toks[pos] end
@@ -120,6 +147,13 @@ local function new_type_parser(toks, aliases)
 
 	--: () -> Ty | nil
 	local function fail(m) err = m; return nil end
+	-- fail AND record the blocking out-of-subset construct tag (first one wins).
+	--: (string, string) -> Ty | nil
+	local function fail_c(m, c)
+		if not construct then construct = c end
+		err = m
+		return nil
+	end
 
 	-- Parse a record/index-signature body after `{`. Distinguishes `{ [K]: V }`
 	-- (index signature → indexer) from `{ f: T, ... }` (record, open if `...`).
@@ -187,6 +221,19 @@ local function new_type_parser(toks, aliases)
 				vararg = vt
 				if not accept(")") then fail("expected `)` after vararg"); return nil end
 				break
+			end
+			-- NAMED PARAMETER (`name: T`, incl. `self: T`) — an out-of-subset form:
+			-- v1 params are positional. Detect `ident :` lookahead and tag.
+			do
+				local t0, t1 = toks[pos], toks[pos + 1]
+				if t0 and t0.kind == "ident" and t1 and t1.kind == ":" then
+					if t0.text == "self" then
+						fail_c("named/self parameter outside v1: '" .. t0.text .. ":'", "named-param-self")
+						return nil
+					end
+					fail_c("named parameter outside v1: '" .. t0.text .. ":'", "named-param")
+					return nil
+				end
 			end
 			local ty = parse_union()
 			if not ty then return nil end
@@ -258,9 +305,18 @@ local function new_type_parser(toks, aliases)
 			end
 			if name == "true" then return G.lit_bool(true) end
 			if name == "false" then return G.lit_bool(false) end
+			-- GENERIC APPLICATION `Name<...>` — an out-of-subset form (no v1 type
+			-- constructor for parametric instantiation in annotations, §1.4).
+			if peek() and peek().kind == "<" then
+				return fail_c("generic type application outside v1: '" .. name .. "<...>'", "generic-application")
+			end
 			local a = aliases[name]
 			if a then return a end
-			return fail("unknown type name: '" .. name .. "'")
+			local oos = OUT_OF_SUBSET_NAMES[name]
+			if oos then
+				return fail_c("type construct outside v1: " .. oos, oos)
+			end
+			return fail_c("unknown type name: '" .. name .. "'", "unknown-type-name:" .. name)
 		end
 		return fail("unexpected token in type: '" .. t.text .. "'")
 	end
@@ -271,6 +327,13 @@ local function new_type_parser(toks, aliases)
 		local a = parse_atom()
 		if not a then return nil end
 		while accept("?") do a = G.union({ a, G.nil_() }) end
+		-- `T[]` ARRAY SHORTHAND — an out-of-subset form. v1 spells arrays as the
+		-- index signature `{ [integer]: T }`, not `T[]` (§5.1). Detect `[ ]` (empty
+		-- brackets) after a type and tag it.
+		local t0, t1 = toks[pos], toks[pos + 1]
+		if t0 and t0.kind == "[" and t1 and t1.kind == "]" then
+			return fail_c("`T[]` array shorthand outside v1 (use `{ [integer]: T }`)", "array-postfix")
+		end
 		return a
 	end
 
@@ -309,11 +372,21 @@ local function new_type_parser(toks, aliases)
 	end
 
 	return {
-		--: () -> (Ty | nil, string | nil)
+		--: () -> (Ty | nil, string | nil, string | nil)
 		parse = function()
 			local r = parse_union()
-			if not r then return nil, err or "type parse failed" end
-			if pos <= #toks then return nil, "trailing tokens in type" end
+			if not r then return nil, err or "type parse failed", construct end
+			if pos <= #toks then
+				-- trailing tokens: classify a few recognizable out-of-subset tails.
+				local t = toks[pos]
+				if t and t.kind == "<" then
+					return nil, "trailing tokens in type (generic application)", "generic-application"
+				end
+				if t and t.kind == ":" then
+					return nil, "trailing tokens in type (named element)", "named-param"
+				end
+				return nil, "trailing tokens in type", "trailing-tokens"
+			end
 			return r
 		end,
 	}
@@ -321,10 +394,14 @@ end
 
 -- Parse a v1 type annotation string into an interned Ty, given the alias
 -- environment. Returns (Ty, nil) or (nil, errmsg).
---: (string, AliasEnv) -> (Ty | nil, string | nil)
+-- Returns (Ty, nil, nil) on success, or (nil, errmsg, construct_tag | nil) on
+-- failure. `construct_tag` is the out-of-subset construct that blocked the parse
+-- (named-param, generic-application, cdata, …) when the failure is a recognizable
+-- v1-subset boundary; nil for an ordinary malformed-annotation error.
+--: (string, AliasEnv) -> (Ty | nil, string | nil, string | nil)
 function M.parse_type_ann(src, aliases)
-	local toks, lerr = lex_type(src)
-	if not toks then return nil, lerr end
+	local toks, lerr, lconstruct = lex_type(src)
+	if not toks then return nil, lerr, lconstruct end
 	local p = new_type_parser(toks, aliases or {})
 	return p.parse()
 end
@@ -350,34 +427,35 @@ local function name_occurs(body, name)
 	return false
 end
 
---: (AliasEnv, string, string) -> (AliasEnv | nil, string | nil)
+--: (AliasEnv, string, string) -> (AliasEnv | nil, string | nil, string | nil)
 function M.declare_alias(aliases, name, body)
 	if name_occurs(body, name) then
 		-- recursive: bind Name to the μ binder while parsing the body.
 		local perr --: string | nil
+		local pconstruct --: string | nil
 		local mu = G.mu(name, function(placeholder)
 			local prev = aliases[name]
 			aliases[name] = placeholder
-			local ty, e = M.parse_type_ann(body, aliases)
+			local ty, e, c = M.parse_type_ann(body, aliases)
 			aliases[name] = prev
-			if not ty then perr = e; return G.never() end
+			if not ty then perr = e; pconstruct = c; return G.never() end
 			return ty
 		end)
-		if perr then return nil, perr end
+		if perr then return nil, perr, pconstruct end
 		-- well-formedness is a hard precondition of admitting an alias (audit round 1,
 		-- finding 1): a non-contractive recursive alias (`T = number | T`, `T = T?`,
 		-- `T = T`) reads as top in the subtype relation and must be rejected at the
 		-- declaration site, per the (nil, errmsg) convention — never silently bound.
 		if not TA.well_formed(mu) then
-			return nil, "recursive alias '" .. name .. "' is not well-formed: its variable occurs unguarded (non-contractive μ)"
+			return nil, "recursive alias '" .. name .. "' is not well-formed: its variable occurs unguarded (non-contractive μ)", nil
 		end
 		aliases[name] = mu
 		return aliases
 	end
-	local ty, e = M.parse_type_ann(body, aliases)
-	if not ty then return nil, e end
+	local ty, e, c = M.parse_type_ann(body, aliases)
+	if not ty then return nil, e, c end
 	if not TA.well_formed(ty) then
-		return nil, "alias '" .. name .. "' is not well-formed (non-contractive or degenerate μ)"
+		return nil, "alias '" .. name .. "' is not well-formed (non-contractive or degenerate μ)", nil
 	end
 	aliases[name] = ty
 	return aliases

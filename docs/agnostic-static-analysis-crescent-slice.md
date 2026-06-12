@@ -1724,3 +1724,67 @@ target. No further mechanization passes remain; future work is *un-deferral* of 
 fenced extensions (complement / RDNF / match types / row polymorphism / parametric
 polymorphism / `cdata`/`userdata`/`thread` / metatables) each behind its written
 §1.4 / §3.4 trigger, never a substrate rewrite.
+
+### 10.1 Survey pass — DONE (2026-06-12): the v2 demand ranking
+
+The survey pass drove the slice's parser-frontend adapter over the **whole real
+`lib/` corpus** (864 `.lua` files, excluding `*_test.lua` and
+`lib/type/analysis/corpus/`) and produced the demand-ranked report
+`docs/slice-survey-v1.md`. The runner is `lib/type/analysis/slice_survey.lua` — a
+reusable measurement tool, re-run after every v2 increment.
+
+**What the survey measures.** The slice adapter consumes real source text at one
+seam: the annotation type grammar (`--:` / `--::`). v1 has no whole-Lua-statement
+lowering (the corpus_test hand-builds derivations), so the survey is an
+*annotation-grammar conformance* survey — every annotation parsed through
+`parse_type_ann` / `declare_alias`, the file classified by whether all its
+annotations sit inside v1. This is the honest, substrate-supported reading of
+"drive the slice checker over the corpus."
+
+**Headline split (864 files).** 26.6% CHECKED-CLEAN · 1.6% CHECKED-FINDINGS ·
+58.4% OUT-OF-SUBSET · 13.3% NO-ANNOTATION · **0 timeouts, 0 crashes** (the
+audit-fixed hang class has no survivor on real code; per-file budget 5s, total
+runtime ~0.3s).
+
+**Adapter instrumentation (error reporting only).** The survey extended the
+adapter's *failure paths* to emit a **construct tag** per out-of-subset rejection
+— it never changed what the adapter accepts. New tags: `named-param` /
+`named-param-self` (positional-only params in v1), `generic-application`
+(`Name<…>`), `array-postfix` (`T[]` shorthand; v1 spells arrays
+`{ [integer]: T }`), `intrinsic-dollar` (`$Require`/`$PairsReturn`), `cdata` /
+`userdata` / `thread`, and `unknown-type-name:X` (a name the per-file alias env
+did not resolve — overwhelmingly a cross-module / imported / `declare`d alias).
+The full analysis suite stayed green (4835 assertions) across the change.
+
+**The demand histogram (slice v2's build order, collapsed view).**
+
+| Rank | Construct | Files | Share |
+|--:|---|--:|--:|
+| 1 | named parameters (`name: T`) | 266 | 30.8% |
+| 2 | cross-module / unresolved type alias | 232 | 26.9% |
+| 3 | `self` parameter | 128 | 14.8% |
+| 4 | `T[]` array shorthand | 88 | 10.2% |
+| 5 | generic application (`Name<…>`) | 27 | 3.1% |
+| 6 | `$`-intrinsic | 25 | 2.9% |
+| 7 | trailing tokens (misc) | 23 | 2.7% |
+| 8 | `cdata` | 13 | 1.5% |
+
+Reading it (demand only, no design): named/`self` parameters (1+3 = 394 files) and
+cross-module alias resolution (232) dominate; `T[]` array shorthand (88) is the
+largest pure-grammar gap. These four are the v2 demand front. Each is currently a
+v1 deferral — named params and `T[]` are annotation-grammar surface (parser
+extensions, no lattice change), cross-module aliases are §2.5's trusted-boundary
+form generalized, `$`-intrinsics and generics touch §1.4's fenced extensions. The
+survey does not design these; it ranks them.
+
+**CHECKED-FINDINGS (14 files) — genuine residue.** After construct-tagging, the
+findings reduce to three real sub-patterns, none of which is a checker soundness
+bug: (1) **multi-line `--::` table aliases** (the single-line-scan limitation,
+§9.3 finding 5, surfacing on wrapped declarations — `lib/asm/ir.lua`,
+`lib/platform/platform_types.lua`, the ccv2 type files); (2) **union-of-multi-
+return-tuples** (`(A, B) | (nil, string)`, the pervasive error-return idiom —
+`lib/ed25519/init.lua`, `lib/finite_field/init.lua`); (3) **`{ T }` list/set
+shorthand** (`{ string }`, `{ Listener }` — `lib/nat_lang/init.lua`,
+`lib/event/init.lua`). All three are grammar/adapter gaps recorded for v2, not
+slice precision failures. Full per-file list with diagnostics in
+`docs/slice-survey-v1.md`.
