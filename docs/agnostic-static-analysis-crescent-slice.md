@@ -1140,6 +1140,53 @@ lib/type/analysis/` green at 4789 (4749 prior intact + 40); `bin/cr check` clean
 (0 errors) on every touched file; the substrate (`init.lua`) was again **not**
 touched. Findings in §9.6.
 
+**Pass 5 — The statement-lowering frontend (source text → claim/evidence graph). ✅ DONE (2026-06-12).**
+The survey pass (§10.1, `docs/slice-survey-v1.md`) honestly exposed that the corpus
+fixtures were validated via *hand-built* derivations: the §5 syntax subset was
+specced but never wired from source text. Pass 5 closes that — the missing driver
+that turns a real Lua source file into the slice's artifact + claim/evidence graph
+end-to-end. `lib/type/analysis/crescent_slice_lower.lua`: given (source, filename)
+it produces (state, requested claims, observations, expected-verdict, markers) ready
+for the substrate's `CheckRequest`. Scope is exactly §5's subset (local decls with
+`--:`, function defs, calls/multi-returns, table constructors, field/index
+access+assign, if/elseif with the five guard forms incl. post-guard fall-through
+narrowing, for-in pairs/ipairs, numeric-for, while/repeat, `--::` aliases,
+checked/force casts). Out-of-subset statements emit a **construct-tagged marker**
+(consistent with the survey's tags) — never a silent skip (silent skips manufacture
+false CLEAN verdicts).
+
+*Mechanized:* `lib/type/analysis/crescent_slice_lower.lua` (a self-contained §5
+statement lexer + recursive-descent parser producing the slice node grammar
+DIRECTLY, plus the lowering pass that walks it under a typing context and emits
+claims targeting the EXISTING evidence methods — no new method added; reuses
+`parse_type_ann`/`declare_alias`/`recognize_guard` from the adapter),
+`lib/type/analysis/corpus_lower_test.lua` (70 assertions: all 11 fixtures
+source-text → lower → substrate check → verdict), and the end-to-end survey mode
+(`slice_survey.lua --e2e`, `M.run_e2e`/`survey_file_e2e`).
+
+**Parser-reuse decision (the prompt required this explicitly):** the production Lua
+parser `lib/type/static/parse.lua` is **NOT reused**. It emits flat bit-packed
+`ASTNode` records into an FFI arena keyed by `defs`/`intern`/`lex`, and carries
+`--:`/`--::` annotations on a SEPARATE comment stream — consuming it read-only would
+import all of that coupling for a syntax subset far smaller than full Lua. The
+low-coupling choice (CLAUDE.md "Keep coupling low") is a focused statement
+lexer+parser in the slice namespace. No legacy checker semantics enter; only §5
+syntax is reproduced.
+
+**The fixture finding (the point of the pass).** Under real lowering, **2 of 11**
+fixtures are CLEAN (`local_return_narrowing`, `union_alias_over_named_types`); the
+other **9 are OUT-OF-SUBSET** — and *every* in-subset claim the lowering emits
+ACCEPTS (0 rejections, 0 unknowns, 0 diagnostics across all 11). The divergence
+from the hand-built corpus_test is the rung's data: the hand-built graphs silently
+**assumed away** exactly the §5 boundaries real source hits — stdlib calls
+(`tonumber`/`string.sub`/`math.floor`/`pairs`), arithmetic/concat operators
+(`1/n`, `s+v`, `..`), named parameters (`node: HamtNode`), `t[e] = v` dynamic-key
+writes, unannotated closures, and field-path narrowing (`if node.left then`). Each
+is a real §5 deferral (§1.4 / §7.1), traced to root cause in §9.8 — none is a
+checker soundness gap. The hand-built `corpus_test.lua` is retained as a unit test
+of the evidence methods (it asserts they accept the IDEALIZED graph); the
+load-bearing corpus assertion is now the lowered path. Findings in §9.8.
+
 Each pass: commit on completion (`feat(analysis): crescent slice v1 — <pass>`),
 benchmark results (pass 1) to `docs/perf/log.md`, findings recorded in this doc's
 Mechanization Findings section (added by the passes).
@@ -1670,6 +1717,85 @@ prior `instantiate_witness` tests were updated to supply the now-required callee
 premise (they asserted accept/reject behavior that the finding-5 fix re-grounds on
 the callee's true type — called out in the commit message).
 
+### 9.8 Mechanization findings — Pass 5 (the statement-lowering frontend)
+
+**The lowering is sound; the divergence is at the §5 boundary, not in the checker.**
+Across all 11 fixtures driven source-text → lower → substrate check, the substrate
+ACCEPTS every claim the lowering emits — 0 rejections, 0 unknowns, 0 diagnostics.
+The lowering only emits a claim after it has itself verified the form is in-subset
+and the subtype/narrow obligation holds; anything else becomes a construct-tagged
+marker. So the honest split (2 CLEAN, 9 OUT-OF-SUBSET) is purely a *coverage* fact
+about §5's statement subset, not a precision or soundness fact about the checker.
+
+**Per-fixture divergence from the hand-built corpus_test, each chased to root.**
+
+- `boolean_narrowing` → OUT-OF-SUBSET on `operator-arith` (`1 / n < 0`). v1 has no
+  numeric-operator synth rule (§1.4 metamethod deferral). The hand-built graph used
+  a pre-typed `b : boolean` instead of the division — assuming the operator away.
+- `tonumber_return_type` → OUT-OF-SUBSET on `unbound-name:tonumber/string/math`.
+  The hand-built graph injected trusted stdlib signatures; real lowering has no
+  stdlib/global model (caps-first: globals are not ambient, CLAUDE.md).
+- `pairs_return_leak` → OUT-OF-SUBSET on `dynamic-index-assign` (`merged[k] = v`)
+  and `operator-arith` (`s + v`). The `for _, v in pairs(t)` loop-var binding DID
+  lower and accept (the in-subset part works); the leak vanishes by construction.
+- `coinductive_recursive_types` → OUT-OF-SUBSET on field-path narrowing
+  (`if node.left then`) + `+`. v1's narrowing refines a *variable* binding (§4); a
+  field-PATH guard (`node.left`) needs path narrowing v1 does not have. Without it,
+  `tree_sum(node.left)` legitimately fails `TreeNode|nil <: TreeNode` — an honest
+  type-mismatch marker, not a bug.
+- `table_construction_widening` → OUT-OF-SUBSET on `dynamic-index-assign`
+  (`insns[1] = {...}`). §5.1's write-checking is the static-field form; the
+  integer-dynamic-key write needs a premise the 1-form rule lacks.
+- `hamt_recursion` → OUT-OF-SUBSET on `named-param` (`node: HamtNode`) and a
+  forward-referenced alias (`Interior` references `HamtNode` before its declaration;
+  the per-file alias env is built top-to-bottom, so the μ is only formed at
+  `HamtNode`'s own line). Both are real v1 deferrals (named params are the survey's
+  #1 demand; forward aliases need a two-pass alias env).
+- `cast_not_inference_source` → OUT-OF-SUBSET on `operator-concat`
+  (`tostring(n) .. ":"`) + unbound `tostring`.
+- `cross_module_type_alias` → OUT-OF-SUBSET on `named-param`
+  (`cb: () -> nil, epoll: Epoll | nil`).
+- `closure_param_typing` → OUT-OF-SUBSET on `unannotated-closure` (the inner
+  `function(s) ... end` lambdas). v1 function *synthesis* requires a declared `fn`
+  type (§7.1); an unannotated closure in expression position is the §10
+  local-inference edge.
+
+**Post-guard fall-through narrowing was the one lowering mechanism Pass 5 had to
+build** to make `local_return_narrowing` CLEAN: `if not task then return end`
+narrows the *rest of the block* by the guard's FALSY refinement (the §6.1 worked
+example, step 3). The lowering detects a single-clause `if` whose body
+unconditionally exits and applies `narrow_guard`'s falsy branch to the enclosing
+context. This is principled (it IS §6.1), not a fixture carve-out.
+
+**High-value finding 1 — parser non-termination on real code (FIXED).** The
+end-to-end survey (the first time the *parser* ran over real `lib/`) hung
+indefinitely on `lib/actor/init.lua`. Root cause: a statement emitting an
+out-of-subset marker (method call in an `if` test; a stray `then` reached as a
+statement start) could return WITHOUT consuming the confusing token, so
+`parse_block`'s loop spun forever. Fixed with a **progress guard** — `parse_block`
+records `pos` before each `parse_statement` and force-advances one token if it did
+not move (the standard recursive-descent recovery invariant). The hand-built corpus
+never exercised the parser, so this class was invisible until Pass 5.
+
+**High-value finding 2 — substrate scaling (RECORDED, the 1 survey TIMEOUT).**
+`lib/type/v7_mr0/init.lua` lowers to 713 requested claims; `A.check`'s fixpoint
+worklist (it re-sweeps every pending evidence object each round, O(sweeps ×
+evidence)) exceeds the 5s per-file budget on a graph that large. This is a
+**substrate performance** characteristic, not a lowering or soundness defect — the
+per-file budget correctly isolates it as a single TIMEOUT rather than hanging the
+survey. Recorded for a future substrate worklist-indexing optimization; out of
+Pass 5 scope. `init.lua` was again **not** touched.
+
+**The end-to-end survey headline:** **0.3% CHECKED-CLEAN** (3 files) ·
+0.3% CHECKED-FINDINGS · 98.6% OUT-OF-SUBSET · 0.6% NO-ANNOTATION · 1 TIMEOUT, over
+865 files. The collapse from the annotation-only 26.6% to 0.3% is honest data: the
+§5 *statement* subset is far narrower than the annotation grammar alone. The
+end-to-end construct ranking (`operator-concat`/`operator-arith`,
+`unbound-name:require/package`, `unannotated-function`, `assign`/`field-assign`,
+`method-call`, `multi-assign`, `named-param`) is slice-v2's statement-lowering build
+order, the way §10.1 ranked the type-grammar work. Full numbers + the findings in
+`docs/slice-survey-v1.md` ("v1 end-to-end" section).
+
 ---
 
 ## 10. Next Pass
@@ -1716,14 +1842,33 @@ fixture-keyed handler entered the checker. The substrate was again **not** touch
 (`init.lua` byte-for-byte unchanged across all four passes). Full `bin/cr test
 lib/type/analysis/` green at 4789 (4749 prior intact + 40). Findings in §9.6.
 
-**All four mechanization passes are complete.** This is the ladder's final rung, and
+**Pass 5 is DONE** (2026-06-12): the statement-lowering frontend
+(`crescent_slice_lower.lua`) — the missing driver that turns real Lua source text
+into the slice's artifact + claim/evidence graph end-to-end, the gap the survey
+honestly exposed. All 11 fixtures now drive source-text → lower → substrate check
+(`corpus_lower_test.lua`, 70 assertions, the load-bearing corpus assertion);
+`corpus_test.lua`'s hand-built derivations are retained as evidence-method unit
+tests. The §5 statement subset is reproduced with a self-contained lexer+parser
+(the production `lib/type/static/parse.lua` was NOT reused — too coupled to its FFI
+arena; decision in §8 Pass 5). Under real lowering 2/11 fixtures are CLEAN and 9/11
+OUT-OF-SUBSET with 0 rejections anywhere — the honest data the hand-built graphs
+had assumed away (§9.8). Two high-value findings: a parser non-termination on real
+code (FIXED with a progress guard) and a substrate-scaling TIMEOUT on a 713-claim
+file (RECORDED). Full `bin/cr test lib/type/analysis/` green at 4905 (4835 prior +
+70). The substrate (`init.lua`) was again **not** touched. Findings in §9.8; the
+end-to-end survey headline in §10.1 / `docs/slice-survey-v1.md`.
+
+**All five mechanization passes are complete.** This is the ladder's final rung, and
 it has landed: the agnostic substrate is validated from propositional logic through
-a real Crescent slice without a single Crescent-specific substrate primitive — the
-design doc's falsifiable bet (time-to-first-real-Crescent-claim) settled at the
-target. No further mechanization passes remain; future work is *un-deferral* of the
-fenced extensions (complement / RDNF / match types / row polymorphism / parametric
-polymorphism / `cdata`/`userdata`/`thread` / metatables) each behind its written
-§1.4 / §3.4 trigger, never a substrate rewrite.
+a real Crescent slice — now driven from actual source text, not hand-built graphs —
+without a single Crescent-specific substrate primitive. The design doc's falsifiable
+bet (time-to-first-real-Crescent-claim) settled at the target. No further
+mechanization passes remain; future work is *un-deferral* of the fenced extensions
+(complement / RDNF / match types / row polymorphism / parametric polymorphism /
+`cdata`/`userdata`/`thread` / metatables) and the §9.8-ranked statement-lowering
+gaps (operator typing, global/module model, unannotated-function inference, the
+assignment forms), each behind its written §1.4 / §3.4 trigger or the demand
+ranking, never a substrate rewrite.
 
 ### 10.1 Survey pass — DONE (2026-06-12): the v2 demand ranking
 
@@ -1733,13 +1878,18 @@ The survey pass drove the slice's parser-frontend adapter over the **whole real
 `docs/slice-survey-v1.md`. The runner is `lib/type/analysis/slice_survey.lua` — a
 reusable measurement tool, re-run after every v2 increment.
 
-**What the survey measures.** The slice adapter consumes real source text at one
-seam: the annotation type grammar (`--:` / `--::`). v1 has no whole-Lua-statement
-lowering (the corpus_test hand-builds derivations), so the survey is an
-*annotation-grammar conformance* survey — every annotation parsed through
-`parse_type_ann` / `declare_alias`, the file classified by whether all its
-annotations sit inside v1. This is the honest, substrate-supported reading of
-"drive the slice checker over the corpus."
+**What the survey measures (two modes since Pass 5).** The *default* mode is an
+**annotation-grammar conformance** survey: the slice adapter consumes the `--:` /
+`--::` seam, every annotation parsed through `parse_type_ann` / `declare_alias`, the
+file classified by whether all its annotations sit inside v1. (At the time this
+section was first written, v1 had no whole-Lua-statement lowering — the corpus_test
+hand-built derivations — so this was the only honest reading.) **Pass 5 added the
+`--e2e` mode** (`slice_survey.lua --e2e`, `M.run_e2e`): the full statement-lowering
+frontend driven over the corpus — source text → lower → substrate check — which is
+CHECKED-CLEAN only when a file's annotations AND its checked statements both sit
+inside §5. The end-to-end headline and its findings are in §9.8 and the
+"v1 end-to-end" section of `docs/slice-survey-v1.md`; the annotation-only numbers
+below are the prior measurement, kept as-is.
 
 **Headline split (864 files).** 26.6% CHECKED-CLEAN · 1.6% CHECKED-FINDINGS ·
 58.4% OUT-OF-SUBSET · 13.3% NO-ANNOTATION · **0 timeouts, 0 crashes** (the

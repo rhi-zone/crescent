@@ -182,14 +182,109 @@ end
 
 M.survey_file = survey_file
 
+-- ── END-TO-END survey (Pass 5: drive the statement-lowering frontend) ────────
+--
+-- The annotation-grammar survey above measures only the `--:`/`--::` seam. The
+-- END-TO-END survey drives the full statement-lowering frontend
+-- (crescent_slice_lower) over each file: source text → lower → substrate check.
+-- A file is CHECKED-CLEAN here only when its ANNOTATIONS *and* its CHECKED
+-- STATEMENTS both sit inside v1 (the lowering emits 0 out-of-subset markers and
+-- every requested claim accepts). This is the honest end-to-end number — expected
+-- to be MUCH lower than the annotation-only 26.6%, because the statement subset
+-- (§5) is far narrower than the annotation grammar alone.
+--
+-- Classification mirrors the annotation survey, over the lowering's verdict:
+--   CHECKED-CLEAN    : lower → 0 markers, every requested claim accepted.
+--   CHECKED-FINDINGS : a rejection/unknown claim, or a non-construct marker
+--                      (a real lowering finding — these are chased, never papered).
+--   OUT-OF-SUBSET    : >=1 construct-tagged marker (a statement form outside §5).
+--   NO-ANNOTATION    : no annotations AND no requested claims (nothing checked).
+--   PARSE-FAIL/OTHER : the lexer/parser could not process the file.
+
+local L = require("lib.type.analysis.crescent_slice_lower")
+local A = require("lib.type.analysis")
+local S = require("lib.type.analysis.crescent_slice")
+
+--: () -> SemanticsRegistry
+local function e2e_reg()
+	local r = A.new_registry()
+	S.register(r)
+	return r
+end
+
+-- Survey one file end-to-end (lower + check). Returns a FileResult whose
+-- `constructs` carries the lowering's out-of-subset marker tags (the e2e demand
+-- ranking) and whose `diags` carries the first rejections/findings.
+--: (string) -> FileResult
+local function survey_file_e2e(path)
+	local fh = io.open(path, "r")
+	if not fh then
+		return { path = path, class = "PARSE-FAIL/OTHER", diags = {
+			{ line = 0, text = "", err = "cannot open file" } }, constructs = {}, n_ann = 0 }
+	end
+	local src0 = fh:read("*a")
+	fh:close()
+	if type(src0) ~= "string" then
+		return { path = path, class = "PARSE-FAIL/OTHER", diags = {
+			{ line = 0, text = "", err = "empty read" } }, constructs = {}, n_ann = 0 }
+	end
+	local src = src0 --[[: string ]]
+	local res = L.lower(src, path) --[[: { requested: { [integer]: { space: string, key: string } }, expected: string, markers: { [integer]: { line: integer, construct: string, text: string } }, state: AnalysisState } | nil ]]
+	if not res then
+		return { path = path, class = "PARSE-FAIL/OTHER", diags = {
+			{ line = 0, text = "", err = "lower failed" } }, constructs = {}, n_ann = 0 }
+	end
+	-- run the substrate check; count rejections/unknowns (a real finding).
+	local chk = A.check({ state = res.state, requested_claims = res.requested,
+		semantics_registry = e2e_reg(), trust_policy = nil }) --[[: { accepted_claims: { [string]: unknown }, rejected_claims: { [string]: unknown }, unknown_claims: { [string]: unknown } } | nil ]]
+	local rej, unk = 0, 0
+	if chk then
+		for _ in pairs(chk.rejected_claims) do rej = rej + 1 end
+		for _ in pairs(chk.unknown_claims) do unk = unk + 1 end
+	end
+	-- partition markers into construct tags vs plain findings.
+	local constructs = {} --[[: { [string]: boolean } ]]
+	local diags = {} --[[: Diag[] ]]
+	local has_construct = false --: boolean
+	local has_finding = (rej > 0 or unk > 0) --: boolean
+	for _, m in ipairs(res.markers) do
+		local c = m.construct --: string
+		local is_finding = c:find("error$") ~= nil or c == "type-mismatch" or c:find("%-fail$") ~= nil
+		if is_finding then
+			has_finding = true
+			if #diags < 3 then diags[#diags + 1] = { line = m.line, text = m.text, err = c } end
+		else
+			constructs[c] = true
+			has_construct = true
+			if #diags < 3 then
+				local d = { line = m.line, text = m.text, err = c } --[[: Diag ]]
+				d.construct = c
+				diags[#diags + 1] = d
+			end
+		end
+	end
+	if rej > 0 or unk > 0 then
+		if #diags < 3 then diags[#diags + 1] = { line = 0, text = "", err = rej .. " rejected, " .. unk .. " unknown claims" } end
+	end
+	local n_req = #res.requested --: integer
+	local class = "CHECKED-CLEAN" --: string
+	if has_construct then class = "OUT-OF-SUBSET"
+	elseif has_finding then class = "CHECKED-FINDINGS"
+	elseif n_req == 0 then class = "NO-ANNOTATION"
+	else class = "CHECKED-CLEAN" end
+	return { path = path, class = class, diags = diags, constructs = constructs, n_ann = n_req }
+end
+
+M.survey_file_e2e = survey_file_e2e
+
 -- ── per-file timeout discipline ──────────────────────────────────────────────
 -- Run survey_file under a wall-clock budget. LuaJIT has no preemptive kill, so we
 -- bound via a debug hook that errors after the budget elapses; a genuine hang in
 -- the (pure, total) parser would be a high-value finding and is surfaced as
 -- TIMEOUT. The hook checks os.clock() every N instructions.
 
---: (string, number) -> FileResult
-local function survey_file_timed(path, budget_s)
+--: (string, number, (string) -> FileResult) -> FileResult
+local function survey_file_timed(path, budget_s, fn)
 	local start = os.clock()
 	local timed_out = false --: boolean
 	-- result captured by upvalue (avoids casting pcall's unknown return).
@@ -202,7 +297,7 @@ local function survey_file_timed(path, budget_s)
 		end
 	end
 	--: () -> nil
-	local function run() captured = survey_file(path) end
+	local function run() captured = fn(path) end
 	debug.sethook(hook, "", 100000)
 	local ok, res = pcall(run)
 	debug.sethook()
@@ -219,14 +314,15 @@ end
 
 --:: Report = { results: FileResult[], by_class: { [string]: integer }, histogram: { [string]: integer }, total: integer }
 
---: () -> Report
-function M.run()
+-- Run a survey over the corpus with the given per-file survey function.
+--: ((string) -> FileResult) -> Report
+local function run_with(fn)
 	local files = list_corpus()
 	local results = {} --[[: { [integer]: FileResult } ]]
 	local by_class = {} --[[: { [string]: integer } ]]
 	local histogram = {} --[[: { [string]: integer } ]] -- construct -> file count
 	for _, path in ipairs(files) do
-		local r = survey_file_timed(path, 5.0)
+		local r = survey_file_timed(path, 5.0, fn)
 		results[#results + 1] = r
 		by_class[r.class] = (by_class[r.class] or 0) + 1
 		for c in pairs(r.constructs) do
@@ -235,6 +331,14 @@ function M.run()
 	end
 	return { results = results, by_class = by_class, histogram = histogram, total = #files }
 end
+
+-- The ANNOTATION-grammar survey (the prior measurement; §10.1).
+--: () -> Report
+function M.run() return run_with(survey_file) end
+
+-- The END-TO-END survey (Pass 5: statement-lowering frontend over the corpus).
+--: () -> Report
+function M.run_e2e() return run_with(survey_file_e2e) end
 
 -- ── markdown / text rendering ────────────────────────────────────────────────
 
@@ -438,15 +542,24 @@ end
 
 --: ({ [integer]: string }) -> nil
 function M.main(argv)
-	local rep = M.run()
-	local md = (argv and argv[1] == "--md")
+	-- mode selection: --e2e drives the statement-lowering frontend (Pass 5);
+	-- default is the annotation-grammar survey (§10.1).
+	local e2e = false --: boolean
+	local md = false --: boolean
+	if argv then
+		for _, a in ipairs(argv) do
+			if a == "--e2e" then e2e = true end
+			if a == "--md" then md = true end
+		end
+	end
+	local rep = e2e and M.run_e2e() or M.run()
 	if md then
 		io.write(M.render_md(rep))
 		return
 	end
 	-- terse stdout summary (default).
 	local total = rep.total
-	io.write("slice survey v1 — " .. total .. " files\n")
+	io.write((e2e and "slice survey v1 (END-TO-END) — " or "slice survey v1 — ") .. total .. " files\n")
 	local order = { "CHECKED-CLEAN", "CHECKED-FINDINGS", "OUT-OF-SUBSET", "NO-ANNOTATION", "TIMEOUT", "PARSE-FAIL/OTHER" }
 	for _, c in ipairs(order) do
 		local n = rep.by_class[c] or 0

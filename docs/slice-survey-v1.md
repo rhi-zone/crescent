@@ -602,3 +602,93 @@ Demand-ordered, no design — design happens against this doc separately.
 8. **`cdata`** — blocks 13 files (1.5% of corpus).
 9. **`bare-table (use a record/indexer)`** — blocks 2 files (0.2% of corpus).
 
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     v1 END-TO-END (Pass 5) — appended by hand; the generated content above is
+     the ANNOTATION-grammar survey (the prior measurement, §10.1). This section
+     records the END-TO-END measurement: the statement-lowering frontend
+     (crescent_slice_lower) driven over the same corpus. Re-run:
+       bin/cr run lib/type/analysis/slice_survey.lua --e2e
+════════════════════════════════════════════════════════════════════════════ -->
+
+## v1 end-to-end (Pass 5: the statement-lowering frontend)
+
+The section above measures only the `--:`/`--::` annotation seam. **Pass 5** built
+the missing driver — `lib/type/analysis/crescent_slice_lower.lua` — that lowers a
+real Lua source file's **statements** (§5's subset) into the slice's artifact +
+claim/evidence graph, then runs it through the substrate. This is the honest
+end-to-end measurement: a file is CHECKED-CLEAN only when its annotations **and**
+its checked statements both sit inside v1 (0 out-of-subset markers, every requested
+claim accepted).
+
+**End-to-end headline split (865 files, per-file budget 5s).**
+
+| Class | Files | Share |
+|---|--:|--:|
+| CHECKED-CLEAN | 3 | 0.3% |
+| CHECKED-FINDINGS | 3 | 0.3% |
+| OUT-OF-SUBSET | 853 | 98.6% |
+| NO-ANNOTATION | 5 | 0.6% |
+| TIMEOUT | 1 | 0.1% |
+| PARSE-FAIL/OTHER | 0 | 0.0% |
+
+The CHECKED-CLEAN number collapses from the annotation-only **26.6%** to **0.3%**.
+This is honest data, not a regression: the §5 **statement** subset is far narrower
+than the annotation grammar alone. A file passes the annotation survey if every
+`--:`/`--::` type parses; it passes the end-to-end survey only if every *checked
+statement* is also in-subset — and real `lib/` code is saturated with operators
+(`+`, `..`), stdlib/global access (`require`, `package`, `tostring`), method calls
+(`o:m()`), `t[e] = v` writes, multi-assignment, and unannotated closures, none of
+which §5 admits.
+
+**The end-to-end out-of-subset construct ranking (collapsed, most-blocking first).**
+
+| Rank | Construct | Files | What it is |
+|--:|---|--:|---|
+| 1 | `expr` / `exprstmt` | 740 / 723 | an expression/statement form outside §5's node grammar |
+| 2 | `paren` | 700 | a parenthesized sub-expression the lowering does not yet thread |
+| 3 | `operator-concat` | 698 | `..` string concatenation (no operator synth, §1.4) |
+| 4 | `assign` / `field-assign` | 696 / 430 | assignment forms beyond a single in-subset record write |
+| 5 | `if` | 692 | an `if` whose test/body reaches an out-of-subset form |
+| 6 | `unbound-name:package` / `require` | 681 / 393 | module/global access (no global model; caps-first, §CLAUDE) |
+| 7 | `unannotated-function` | 464 | a function definition without a `--:` signature (§7.1 requires one) |
+| 8 | `multi-assign` | 241 | `local a, b = ...` beyond the single multi-return-call slot form |
+| 9 | `named-param` | 232 | `name: T` parameters (positional-only in v1; the annotation survey's #1 too) |
+| 10 | `method-call` | 214 | `o:m(...)` (no method-call synth rule) |
+| 11 | `operator-arith:+` | 202 | numeric `+` (no operator synth, §1.4) |
+
+Read it (demand only, no design): the v1 statement subset's largest gaps are
+**operator typing** (`..`, `+` — §1.4 metamethod deferral), **global/module access**
+(`require`/`package` — needs a caps/global model), **unannotated-function inference**
+(the §10 local-inference edge), and **assignment forms** (multi-assign,
+field-path/dynamic-key writes). These rank the §6-statement-lowering work the way the
+annotation survey ranked the type-grammar work.
+
+**Findings (chased to root cause, per the no-papering rule).**
+
+1. **Parser non-termination on real code (FIXED).** The first corpus file
+   (`lib/actor/init.lua`) hung the statement parser indefinitely. Root cause: a
+   statement that emits an out-of-subset marker (e.g. a method call inside an `if`
+   test, or a stray `then` reached as a statement start) could return **without
+   consuming the token that confused it**, so `parse_block`'s loop spun forever on
+   the unconsumed token. Fixed with a **progress guard**: `parse_block` records
+   `pos` before each `parse_statement` and force-advances one token when it did not
+   move — the standard recursive-descent recovery invariant. This was a genuine
+   high-value finding the hand-built corpus never exercised (it never ran the
+   parser).
+
+2. **Substrate scaling on large graphs (RECORDED, surfaced as the 1 TIMEOUT).**
+   `lib/type/v7_mr0/init.lua` lowers to 713 requested claims; the substrate's
+   `A.check` fixpoint (which re-sweeps every pending evidence object each round)
+   exceeds the 5s per-file budget on a graph that large. This is a **substrate
+   performance** characteristic (O(sweeps × evidence) worklist), not a lowering or
+   soundness defect — the per-file budget correctly isolates it as a single
+   TIMEOUT rather than hanging the survey. Recorded for a future substrate
+   worklist-indexing optimization; out of Pass 5 scope.
+
+3. **Multi-line `--::` table aliases (the 3 CHECKED-FINDINGS).** All three
+   CHECKED-FINDINGS (`lib/formats/ccv2/ccv2_types.lua` and its app mirror,
+   `lib/platform/platform_types.lua`) are the **single-line-scan limitation**
+   (§9.3 finding 5) surfacing on wrapped `--:: Name = {` declarations — an
+   `alias-error`, not a checker soundness gap. Same residue the annotation survey
+   recorded; the end-to-end pass inherits it unchanged.

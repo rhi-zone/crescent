@@ -148,15 +148,18 @@ introduced the first hosted `type` vocabulary, typing contexts, and deep
 derivation trees with **no substrate change** — types and contexts ride
 `ArgValue` claim args, and structural substrate claim identity is exactly right
 for context-dependent judgments. The tiny Crescent slice (ladder rung 5, the
-final rung) is now **fully mechanized** (all four passes DONE, 2026-06-12) in
+final rung) is now **fully mechanized** (all five passes DONE, 2026-06-12) in
 `lib/type/analysis/{slice_ty,slice_subtype,slice_ty_arg,crescent_slice,
-crescent_slice_parse,slice_narrow}.lua` (+ tests), per
+crescent_slice_parse,slice_narrow,crescent_slice_lower}.lua` (+ tests), per
 `docs/agnostic-static-analysis-crescent-slice.md` (`crescent.slice.v1`, the first
-consumer of the ratified kernel). The §7 corpus grading run
-(`lib/type/analysis/corpus_test.lua`) Accepts all 11 fixtures (0 errors), matching
-every Expected Verdict, with no fixture-keyed carve-out and no substrate change.
-**Mechanization through the whole ladder is complete**; `lib/type/analysis/`
-now also holds the slice's six modules and a subtype benchmark.
+consumer of the ratified kernel). **Pass 5** added the statement-lowering frontend
+(`crescent_slice_lower.lua`): real Lua source text → artifact + claim/evidence
+graph end-to-end, the gap the survey exposed. The load-bearing corpus run is now
+the lowered path (`corpus_lower_test.lua`): 2/11 fixtures CLEAN, 9/11 OUT-OF-SUBSET
+with 0 rejections anywhere — the honest data the hand-built `corpus_test.lua`
+(retained as evidence-method unit tests) had assumed away. No substrate change
+across any pass. **Mechanization through the whole ladder is complete**;
+`lib/type/analysis/` now holds the slice's seven modules and a subtype benchmark.
 
 Rung status (ladder, design doc):
 
@@ -167,7 +170,7 @@ Rung status (ladder, design doc):
 - 4 STLC — mechanized (`stlc.min`); substrate unchanged. Hosted `type`
   vocabulary, typing contexts, and deep evidence trees all hosted; arg-schema
   open item closed (no schema mechanism, no identity override needed).
-- 5 tiny Crescent slice — **mechanized** (all four passes DONE, 2026-06-12;
+- 5 tiny Crescent slice — **mechanized** (all five passes DONE, 2026-06-12;
   `docs/agnostic-static-analysis-crescent-slice.md`, `crescent.slice.v1`). First
   consumer of the ratified kernel (`docs/decisions/kernel-recommendation.md`):
   bidirectional synth/check spine, ONE cycle-guarded equirecursive (hash-consed μ)
@@ -176,10 +179,16 @@ Rung status (ladder, design doc):
   `for-in` decided (`pairs`/`ipairs` + numeric included, general iterator protocol
   deferred). Capability-reachability and imperative-store pressure absorbed here
   (stores handled flow-insensitively by check-against-declared-element-type).
+  **Pass 5 added the statement-lowering frontend** (`crescent_slice_lower.lua`):
+  source text → claim/evidence graph end-to-end, §5 subset only, out-of-subset
+  statements construct-tagged (never silently skipped). The production Lua parser
+  was NOT reused (too coupled to its FFI arena); a focused §5 lexer+parser instead.
   Code in `lib/type/analysis/{slice_ty,slice_subtype,slice_ty_arg,crescent_slice,
-  crescent_slice_parse,slice_narrow}.lua` (+ tests + `slice_subtype_bench.lua`).
-  **Corpus result: all 11 fixtures Accept (0 errors), matching every Expected
-  Verdict** (`corpus_test.lua`, the §7 grading run); the five legacy REMAINS gaps
+  crescent_slice_parse,slice_narrow,crescent_slice_lower}.lua` (+ tests +
+  `slice_subtype_bench.lua`).
+  **Corpus result (Pass 4, hand-built): all 11 fixtures Accept (0 errors)**
+  (`corpus_test.lua`, the §7 grading run, now an evidence-method unit test); the five
+  legacy REMAINS gaps
   (boolean `and`, closure return-slot, table-widening, redundant-cast, hamt
   tag-narrow) all closed, the six FIXED guards held. The substrate (`init.lua`) was
   **not touched** across any pass — the ladder's falsifiable bet settled at target.
@@ -194,6 +203,14 @@ Rung status (ladder, design doc):
   order) is led by named parameters (266 files), cross-module/unresolved type
   aliases (232), `self` parameters (128), and `T[]` array shorthand (88). The survey
   is a reusable measurement tool, re-run after every v2 increment.
+  **End-to-end survey (Pass 5, `slice_survey.lua --e2e`): 0.3% CHECKED-CLEAN** (3
+  files), 98.6% OUT-OF-SUBSET, 1 TIMEOUT over 865 files — the honest collapse from
+  the annotation-only 26.6% once the §5 *statement* subset is also required. Two
+  high-value findings: a parser non-termination on real code (FIXED with a
+  progress guard) and a substrate-scaling TIMEOUT on a 713-claim file (RECORDED).
+  The statement-lowering demand ranking (operator typing, global/module model,
+  unannotated-function inference, assignment forms) is v2's §6 build order (§9.8,
+  `docs/slice-survey-v1.md` "v1 end-to-end").
 
 Limits:
 
