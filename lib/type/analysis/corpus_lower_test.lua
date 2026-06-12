@@ -205,27 +205,37 @@ T.describe("corpus e2e: fixture_cast_not_inference_source — concat operator bo
 	end)
 end)
 
-T.describe("corpus e2e: fixture_cross_module_type_alias — unannotated closure boundary", function()
-	T.it("named params now lower (v2.1); the next §5 boundary is the unannotated closure", function()
+T.describe("corpus e2e: fixture_cross_module_type_alias — field-path-narrow boundary", function()
+	T.it("v2.4: closures lower; the next §5 boundary is field-path narrowing", function()
 		local o = lower_fixture("cross_module_type_alias")
-		-- v2.1: named parameters (`cb: () -> nil, epoll: Epoll | nil`) are now IN
-		-- subset (§6.5.1), so that boundary is gone. The fixture remains
-		-- OUT-OF-SUBSET on the NEXT boundary: an unannotated closure in expression
-		-- position (the §10 local-inference edge) and a cross-module `require` field
-		-- the in-file form does not declare.
-		T.eq(o.expected, "OUT-OF-SUBSET", "an unannotated closure is outside §5")
-		T.ok(has_construct(o, "unannotated-closure") or has_construct(o, "no-such-field"),
-			"marked the unannotated-closure / require-boundary edge, NOT named-param")
+		-- v2.4 (§6.8): the inner `wait = function() end` closure now lowers
+		-- (expression-position closure synthesis). The fixture remains OUT-OF-SUBSET
+		-- on the NEXT boundary: `ep = epoll` rebinds, the nil-guard narrows the
+		-- VARIABLE `ep`, and after the assignment-inside-if `ep.wait()` reads `wait`
+		-- off a binding the v1 flow layer does not refine to the post-assignment
+		-- record (field-path / assignment-in-branch narrowing, §9.8). An honest
+		-- `no-such-field` boundary, NOT a soundness bug — every requested claim holds.
+		T.eq(o.expected, "OUT-OF-SUBSET", "field-path / assignment-in-branch narrowing is outside §5")
+		T.ok(has_construct(o, "no-such-field") or has_construct(o, "unbound-name"),
+			"marked the field-path-narrow boundary, NOT unannotated-closure")
+		T.ok(not has_construct(o, "unannotated-closure"), "the inner closure now lowers (v2.4)")
 		T.ok(not has_construct(o, "named-param"), "named-param is no longer a boundary (v2.1 lowers it)")
 		assert_sound(o)
 	end)
 end)
 
-T.describe("corpus e2e: fixture_closure_param_typing — unannotated closures", function()
-	T.it("the inner `function(s) ... end` closures (unannotated) are the §5 boundary", function()
+T.describe("corpus e2e: fixture_closure_param_typing — closures lower, multi-return boundary", function()
+	T.it("v2.4: the inner `function(s) ... end` closures lower; multi-return is the boundary", function()
 		local o = lower_fixture("closure_param_typing")
-		T.eq(o.expected, "OUT-OF-SUBSET", "unannotated closures are outside §5 (function synth needs a declared fn type)")
-		T.ok(has_construct(o, "unannotated-closure"), "marked unannotated-closure")
+		-- v2.4 (§6.8): the unannotated `function() return nil end` and the typed
+		-- closure `function(s) return { kind = "a" } end` (flowing into the annotated
+		-- `(Signal) -> Node` slot via CHECK-mode) now lower. The fixture remains
+		-- OUT-OF-SUBSET on the NEXT boundary: `return node, function() end` is a
+		-- multi-return statement form (the return-tuple §6.7.4 statement, recorded as
+		-- the next e2e front), distinct from the closures which are now in-subset.
+		T.eq(o.expected, "OUT-OF-SUBSET", "multi-return statement form is outside §5")
+		T.ok(has_construct(o, "multi-return"), "marked the multi-return boundary")
+		T.ok(not has_construct(o, "unannotated-closure"), "the closures now lower (v2.4)")
 		assert_sound(o)
 	end)
 end)
@@ -359,6 +369,187 @@ end
 return { use = use }
 ]], false)
 		T.eq(o.expected, "CLEAN", "o:add(5) desugars to o.add(o, 5), checking o ⇐ self")
+		assert_sound(o)
+	end)
+end)
+
+-- ── §6.8 increment v2.4: expression-position closures ────────────────────────
+
+T.describe("slice v2.4: synthesis-mode closure (params unknown, return synthesized)", function()
+	T.it("an anonymous `function() return 1 end` in expression position lowers clean", function()
+		local o = lower_src([[
+local mk = function() return 1 end
+return { mk = mk }
+]], false)
+		T.eq(o.expected, "CLEAN", "a bare anonymous closure synthesizes (params unknown, return body-synthesized)")
+		T.ok(not has_construct(o, "unannotated-closure"), "no unannotated-closure marker (v2.4)")
+		assert_sound(o)
+	end)
+end)
+
+T.describe("slice v2.4: check-mode closure (expected param types pushed inward)", function()
+	T.it("a closure flowing into an annotated callback slot checks under the pushed param types", function()
+		-- the higher-order call `apply(function(n) return n end)` flows the closure
+		-- into the `(integer) -> integer` callback param; check-mode pushes `integer`
+		-- onto the closure's `n`, and the body `return n` checks against the return.
+		local o = lower_src([[
+--: ((integer) -> integer) -> integer
+local function apply(cb)
+  return cb(2)
+end
+--: () -> integer
+local function run()
+  return apply(function(n) return n end)
+end
+return { run = run }
+]], false)
+		T.eq(o.expected, "CLEAN", "check-mode pushes the callback param type onto the closure")
+		T.ok(not has_construct(o, "unannotated-closure"), "no unannotated-closure marker")
+		assert_sound(o)
+	end)
+end)
+
+T.describe("slice v2.4: a closure bound to an annotated local checks under check-mode", function()
+	T.it("`local f --: (integer) -> integer = function(x) return x end` checks", function()
+		local o = lower_src([[
+--: () -> integer
+local function run()
+  --: (integer) -> integer
+  local f = function(x) return x end
+  return f(3)
+end
+return { run = run }
+]], false)
+		T.eq(o.expected, "CLEAN", "the annotated-local boundary routes the closure through check-mode")
+		assert_sound(o)
+	end)
+end)
+
+-- ── §6.7.2 increment v2.4: stdlib globals model (injected cap) ────────────────
+
+T.describe("slice v2.4: extended stdlib globals (type/setmetatable/pcall/table/package)", function()
+	T.it("with the cap, type/pcall/table.insert/package.loaded resolve; without it, unbound", function()
+		local src = [[
+--: (unknown) -> string
+local function describe(v)
+  local t = type(v)
+  local ok, _ = pcall(describe, v)
+  if ok then return t end
+  return t
+end
+return { describe = describe }
+]]
+		local with_cap = lower_src(src, true)
+		T.eq(with_cap.expected, "CLEAN", "type/pcall resolve via the injected stdlib cap")
+		assert_sound(with_cap)
+		local without = lower_src(src, false)
+		T.eq(without.expected, "OUT-OF-SUBSET", "absent the cap, type/pcall stay unbound (caps-first)")
+	end)
+end)
+
+-- ── §6.7.2 increment v2.4: require returns the module's value type ────────────
+
+-- Lower an entry source with a read_file cap that serves a fixed map of module
+-- sources (the cross-module require test harness).
+--: (string, { [string]: string }, boolean) -> Outcome
+local function lower_with_modules(entry, modules, with_stdlib)
+	--: (string) -> (string | nil, string | nil)
+	local function read_file(path)
+		local s = modules[path]
+		if s == nil then return nil, "no such module" end
+		return s, nil
+	end
+	local opts --[[: { read_file: (string) -> (string | nil, string | nil), stdlib?: boolean } ]] = { read_file = read_file }
+	if with_stdlib then opts.stdlib = true end
+	local res = L.lower(entry, "entry.lua", opts) --[[: { state: AnalysisState, requested: { [integer]: { space: string, key: string } }, expected: string, markers: { [integer]: { construct: string } } } | nil ]]
+	if not res then error("lower failed") end
+	local chk = A.check({ state = res.state, requested_claims = res.requested,
+		semantics_registry = reg(), trust_policy = nil }) --[[: { accepted_claims: { [string]: unknown }, rejected_claims: { [string]: unknown }, unknown_claims: { [string]: unknown }, diagnostics: { [integer]: unknown } } | nil ]]
+	if not chk then error("check nil") end
+	local acc, rej, unk = 0, 0, 0
+	for _ in pairs(chk.accepted_claims) do acc = acc + 1 end
+	for _ in pairs(chk.rejected_claims) do rej = rej + 1 end
+	for _ in pairs(chk.unknown_claims) do unk = unk + 1 end
+	local constructs = {} --[[: { [integer]: string } ]]
+	for _, m in ipairs(res.markers) do constructs[#constructs + 1] = m.construct end
+	return { expected = res.expected, requested = #res.requested,
+		acc = acc, rej = rej, unk = unk, diags = #chk.diagnostics, constructs = constructs }
+end
+
+T.describe("slice v2.4: require(\"lib.x\") binds the module's synthesized value type", function()
+	T.it("`x.f(...)` cross-module is checkable against the M-table rec", function()
+		local exp = [[
+local M = {}
+--: (integer) -> integer
+function M.add(x) return x + 1 end
+--: (integer) -> integer
+function M.dbl(x) return x * 2 end
+return M
+]]
+		local entry = [[
+--: () -> integer
+local function run()
+  local lib = require("lib.mathx")
+  return lib.add(lib.dbl(3))
+end
+return { run = run }
+]]
+		local o = lower_with_modules(entry, { ["lib/mathx.lua"] = exp }, false)
+		T.eq(o.expected, "CLEAN", "the M-table fields add/dbl flow across the require boundary")
+		assert_sound(o)
+	end)
+
+	T.it("a require to a module whose field does NOT exist is an honest no-such-field", function()
+		local exp = [[
+local M = {}
+--: (integer) -> integer
+function M.add(x) return x + 1 end
+return M
+]]
+		local entry = [[
+--: () -> integer
+local function run()
+  local lib = require("lib.mathx")
+  return lib.missing(3)
+end
+return { run = run }
+]]
+		local o = lower_with_modules(entry, { ["lib/mathx.lua"] = exp }, false)
+		T.eq(o.expected, "OUT-OF-SUBSET", "reading an absent module field is an honest boundary")
+		T.ok(has_construct(o, "no-such-field"), "marked no-such-field on the missing member")
+		assert_sound(o)
+	end)
+
+	T.it("a require to a non-readable / non-lib module falls through (no silent success)", function()
+		local entry = [[
+local lib = require("lib.absent")
+return {}
+]]
+		local o = lower_with_modules(entry, {}, false)
+		-- `lib.absent` is unreadable → the require does not resolve to a module type;
+		-- `local lib = require(...)` binds nothing (the call stays unbound-name:require).
+		T.ok(o.expected ~= "CLEAN" or o.requested == 0,
+			"an unresolved require never silently types as a module value")
+		assert_sound(o)
+	end)
+
+	T.it("M.f = expr assignment accumulates into the module type too", function()
+		local exp = [[
+local M = {}
+--: (integer) -> integer
+M.inc = function(x) return x + 1 end
+return M
+]]
+		local entry = [[
+--: () -> integer
+local function run()
+  local lib = require("lib.assignmod")
+  return lib.inc(7)
+end
+return { run = run }
+]]
+		local o = lower_with_modules(entry, { ["lib/assignmod.lua"] = exp }, false)
+		T.eq(o.expected, "CLEAN", "M.f = function(...) accumulates field f into the module rec")
 		assert_sound(o)
 	end)
 end)

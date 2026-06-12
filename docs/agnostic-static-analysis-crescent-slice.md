@@ -1703,6 +1703,154 @@ substrate is untouched (`init.lua` byte-for-byte), as every prior pass predicted
 
 ---
 
+## 6.8 Increment v2.4 — the globals model + module-value-type synthesis + unannotated closures
+
+Status: design pass for slice **v2 increment 4**, the measured new e2e front after
+increment 3 (`docs/slice-survey-v1.md` after-increment-3: `unbound-name:package` 683
+files, `require` 409, `table` 324, `unannotated-closure` 393) and the **§10.4 tail**
+increment 3 recorded (the `require`-returns-the-module-VALUE-type synthesis). Each
+item is derived whole from the value universe and the no-ambient-globals posture
+(`docs/type-system.md`; CLAUDE.md "No ambient globals by default" / "Caps-first,
+everywhere"): the slice assumes NO global name is ambient — every name is a local, a
+`require`, or an **explicit stdlib declaration injected as a capability**, never `_G`.
+
+### 6.8.1 The stdlib declaration set — extend the injected cap to the corpus's demand
+
+**Posture derivation.** Increment 3 established the injected `opts.stdlib` cap (§6.7.2):
+a `{ [name]: Ty }` of stdlib names bound into the top-level Γ as ordinary
+`trusted_signature`-backed bindings, NEVER reached from `_G`. Increment 4 *extends the
+set* to the names the corpus's checked syntax actually reaches — the survey's
+unbound-name histogram IS the demand list. The SHAPES are ported from the legacy
+checker's `lib/type/static/stdlib_types.lua` (read for the shapes, NOT imported — no
+legacy machinery crosses the boundary); each is expressed in the **slice grammar**.
+
+The set added (each in the metatable-free core): `type`, `print`, `error`, `rawequal`,
+`rawlen`, `collectgarbage` (precise, in-fence); `package`, `table`, `os`, `io` as
+**records** (open recs + indexers — `package = { path: string, loaded: { [string]:
+unknown }, ... }`; `table = { insert, remove, concat, sort, unpack, maxn }`; `os`/`io`
+as **cap-shaped surfaces** the library never reaches, only the injected model
+supplies); and the extended `math` (`random`/`pi`/`sin`/`log`/`pow`/`fmod`).
+
+**Where the true type needs out-of-fence features → soundest in-fence approximation +
+recorded deferral.** The slice grammar has NO generics (`forall`), NO match types, NO
+meta-spread, NO intersection-overload resolution at call sites — but the legacy
+signatures use all four. Each such name is declared as the **soundest in-fence
+approximation** (an `unknown` where the true type would refine), recorded in §9.13 with
+the precise type it should eventually have:
+
+| Name | True type (legacy) | v1 in-fence approximation | What is lost (§9.13 deferral) |
+|---|---|---|---|
+| `pcall` | `<F: (...P)->R, P, R>(f: F, ...P) -> ...PcallReturn<F>` | `(function, ...unknown) -> (boolean, unknown)` | variadic generics + the `PcallReturn` match type (the `(true, ...R) \| (false, string)` shape) |
+| `xpcall` | same + handler | `(function, function, ...unknown) -> (boolean, unknown)` | same |
+| `assert` | `<T>(val: T, ...) -> T` | `(unknown, ...unknown) -> unknown` | the `T -> T` identity refinement (a generic) |
+| `setmetatable` | `<T, MT>(T, MT) -> T & MT & { #...MT }` | `(unknown, unknown) -> unknown` | generic + intersection + meta-spread |
+| `getmetatable` | `<T>(T) -> MetaOf<T>` | `(unknown) -> unknown` | the `MetaOf` match type |
+| `rawget`/`rawset` | `<T>(T, k) -> Values<T> \| nil` / `-> T` | `(unknown, unknown[, unknown]) -> unknown` | the `Values<T>` match type |
+| `select` | `("#" -> integer) & ((integer, ...) -> unknown)` | `(unknown, ...unknown) -> unknown` | the intersection-overload |
+| `next` | `<T>(T, Keys<T> \| nil) -> (Keys<T> \| nil, Values<T> \| nil)` | `(unknown, ...unknown) -> unknown` | the `Keys`/`Values` match types |
+| `unpack` | `<V>({ [integer]: V, ... }, i?, j?) -> ...V` | `(unknown, ...integer) -> unknown` | generic + the vararg-spread return |
+| `string.find`/`match`/`gmatch` | `$FindReturn<P>` / `$PatternReturn<P>` | fixed `(int\|nil, int\|nil)` / `string\|nil` / `() -> ...` | the pattern-literal-driven capture arity (already a §9.8 deferral, inherited) |
+
+`pcall`/coroutine **effect machinery stays out** (the `$Throw`/`$Catch` intrinsics and
+the `thread` value kind, §1.4 fence). The approximations are **sound** — an `unknown`
+result forces the caller to narrow; an over-narrow approximation would be the
+violation, and there is none. `pairs`/`ipairs` remain the special loop forms (§5.2),
+not values in the cap.
+
+### 6.8.2 `require` returns the module's VALUE type — the §10.4 tail, lifted to exports
+
+**Value-universe derivation (§6.7.2, now realized).** A Lua module is the *value* a file
+`return`s; its type is the synthesized type of that returned value (the M-table `rec`
+under the `local M = {} … function M.f … return M` convention). A consumer's
+`local x = require("lib.y")` binds `x` to lib.y's module value type, making `x.f(...)` a
+checkable cross-module field-access + call.
+
+**M-table synthesis (the accumulation rule).** Increment 3 synthesized a module type for
+the ENTRY file only when it `return`s a table literal. Increment 4 lifts this to the
+real convention: as the exporting module's statements lower, each `function M.f` /
+`M.f = <expr>` **accumulates** field `f` into the table-local `M`'s record (rebinding
+`M` to the grown rec, most-recent-wins), and the top-level `return M` (captured at
+`func_depth == 0`) fixes the module's exported value type. An annotated `function M.f`
+contributes `f : fn(P, R)` (the signature); an annotated `M.f = <closure>` checks the
+closure against the sig (check-mode, §6.8.3) and contributes the sig; an unannotated one
+contributes `fn(unknown.., unknown)` (the module type reflects what *exists*, §6.7.3).
+
+**Flow through the xmodule machinery, with digest records.** The module type is computed
+by **recursively lowering the exporting module** within the existing acyclic-import pass
+(`crescent_slice_xmodule.lua`'s cap-injected reader, §6.6) — a consumer of the
+multi-artifact object model, exactly like §6.6's alias resolution, **no new substrate**.
+Because each recursive lower runs its own interner generation, the module type is
+computed BEFORE the entry interns anything and carried as a **portable PTy** (the
+`slice_ty_arg` encoding), which the entry decodes in its own generation at the `require`
+call site. The resolution rides a `cross_module_value` trust boundary (the existing
+`A.trust_boundary`), with the increment-2 digest records for staleness.
+
+**Only statically-resolvable, only `lib.`.** `require("lib.y")` / `require "lib.y"` with
+a *string-literal* argument resolves; a dynamic/computed require stays `dynamic-require`
+(the existing marker). A non-`lib.` path (`bit`, `ffi`) contributes no module type (it is
+a trusted FFI/external boundary, not a slice-checked module). An unreadable or
+out-of-subset-returning module does NOT resolve — the `require` falls through to the
+ordinary unbound-name path, **never a silent success**.
+
+**Cycles: `unknown` with a tag (honest, terminating).** A `_mod_visited` set on the
+resolution stack breaks require cycles: a module already being resolved resolves to
+`unknown` (the documented cyclic-require tag) — honest and terminating, the existing
+visited-set discipline (§6.6.4). A depth cap bounds deep require chains (perf +
+termination), the same fence-honest "wider, never unsound" posture.
+
+### 6.8.3 Unannotated closures — check-mode closure typing (bidirectionality's move)
+
+**Value-universe derivation.** An anonymous `function(a, b) … end` in expression position
+is a function value whether or not it carries an annotation. The §6.7.3 unannotated-NAMED
+rule (params `unknown`, return body-synthesized) extends to expression closures
+directly — that is **synthesis mode**. The new construction is **check mode**: when the
+closure *flows into an annotated slot* (a callback parameter of a known `fn` type, an
+annotated `local`, an annotated `M.f = closure`), the CHECKING mode pushes the expected
+fn type's **param types onto the closure params** — bidirectionality's signature move,
+already the kernel's shape (the `check_against` mode-switch, §2.3), now applied to the
+closure's parameter binding rather than only its return.
+
+```text
+synth_func_expr (synthesis mode):  function(a,b) … end ⇒ fn(unknown, unknown, R)
+    params bind `unknown`; return R = unknown (the §6.7.3 fence-honest choice — a fresh
+    inference variable would be the global solving the fence excludes; the body's returns
+    check `<: unknown`, always holds; the closure value forces callers to narrow).
+
+check_func_expr (check mode, against expected fn(P, R')):
+    push P.fixed[i] onto param i (the expected param types flow inward);
+    check the body's returns against R' (the declared return);
+    the closure's value type is the expected fn type exactly.
+
+check_expr (the mode switch):
+    e is a `func` node AND want is an `fn` type  → check_func_expr (push params inward)
+    otherwise                                    → synth(e) then subtype(synth(e), want)
+```
+
+This is spec'd in §6.8 as **check-mode closure typing**: the bidirectional spine's
+inference boundary, applied to a closure's parameters. The closure's `has_type` claim
+carries `synth_function` evidence (the EXISTING method — node `t="function"` with named
+params, each return a `checks_against` premise under the param-extended Γ), so the
+substrate verifies it exactly as a statement func-def's body; no new evidence method.
+
+### 6.8.4 Mechanization surface summary
+
+| Item | Where | New evidence method? | Subtype change? | Substrate? |
+|---|---|---|---|---|
+| stdlib globals model | `default_stdlib()` extended in `crescent_slice_lower`; injected `opts.stdlib` cap | none (`trusted_signature` bindings in Γ) | none | none |
+| `require`→module value type | `compute_module_types` (recursive lower → portable PTy) + `resolve_module_type` + `ctx_set_field` M-table accumulation in `crescent_slice_lower` | none (reuses `synth_index`/`synth_call`/`trusted_signature`) | none | none (existing trust boundary) |
+| check-mode closures | `synth_func_expr`/`check_func_expr`/`check_expr` + `build_closure` in `crescent_slice_lower` | none (reuses `synth_function` with producer-supplied premises) | none | none |
+
+**The fence holds.** ZERO new evidence methods this increment — every item is lowering
+reach over the EXISTING methods (`trusted_signature` for stdlib + require boundaries,
+`synth_function` for closures, `synth_index`/`synth_call` for cross-module access). No
+complement, no match types, no global solving, no HKT, no name-keying. The stdlib model
+is an **injected capability** (caps-first), never a `_G` reach. Unannotated closure
+params/returns are `unknown` (the fence-honest non-solver choice), not fresh inference
+variables. Module types flow through the EXISTING multi-artifact xmodule machinery (a
+consumer, like §6.6). The substrate (`init.lua`) is **untouched**, byte-for-byte.
+
+---
+
 ## 7. Acceptance Criteria
 
 ### 7.1 Per-fixture acceptance mapping
@@ -3152,3 +3300,130 @@ multi-artifact model, like §6.6's alias resolution — no new substrate), and t
 globals model is more explicit-stdlib-declaration cap surface (§6.7.2). Landing them
 is what moves the whole-file e2e CHECKED-CLEAN number off 0.6%. The fence held
 throughout; the substrate (`init.lua`) was again **not** touched.
+
+### 9.13 Mechanization findings — slice v2 increment 4 (§6.8, globals + module-value-types + closures)
+
+Increment 4 landed the §6.8 items in the dependency-honest order (stdlib globals +
+expression-position closures first, then `require`-returns-the-module-VALUE-type). Each
+resolved without crossing the ratified fence (no complement, match types, global
+solving, HKT) and with **ZERO new evidence methods** and **no `init.lua` change**.
+
+- **ZERO new evidence methods — the increment is pure lowering reach.** The stdlib
+  globals are `trusted_signature` bindings in Γ; the `require`→module-type resolution is
+  `synth_index`/`synth_call`/`trusted_signature` over a synthesized `rec`; the closures
+  use the EXISTING `synth_function` method (node `t="function"`, named params, each
+  return a `checks_against` premise under the param-extended Γ — verified by the
+  substrate exactly as a statement func-def body). The whole increment is lowering reach,
+  the cleanest fence-honest shape a pass has had.
+
+- **Check-mode closures are bidirectionality's signature move, applied to parameters.**
+  §6.8.3: a `func` node flowing into an annotated `fn` slot routes through `check_expr`
+  → `check_func_expr`, which pushes the expected param types onto the closure params (the
+  CHECKING mode flowing inward). The mode switch is the kernel's `check_against` shape;
+  the closure's value type is the expected fn type exactly. A closure in synthesis
+  position binds params `unknown` and a `unknown` return (the §6.7.3 fence-honest
+  non-solver choice — a fresh inference variable would be the global solving the fence
+  excludes). The body-synthesized return JOIN (§6.8) is the residual precision deferral:
+  v1 uses `unknown`, matching the existing named-unannotated treatment; the precise join
+  un-defers with a local-return-type-collection pass (no solver, just a sink).
+
+- **The stdlib model is an INJECTED capability, extended to the corpus demand — never a
+  `_G` reach.** §6.8.1: the cap grew from increment 3's `tonumber`/`tostring`/`string`/
+  `math` to cover `type`/`print`/`error`/`package`/`table`/`os`/`io`/`pcall`/`assert`/
+  `setmetatable`/`select`/`next`/`rawget`/`rawset`/… The corpus test lowers WITHOUT the
+  cap (so the names stay `unbound-name:*` — caps-first); the survey injects it. The
+  out-of-fence signatures (variadic generics, match types, meta-spread, intersection
+  overloads) are declared as the **soundest in-fence approximation** (`unknown` where the
+  true type refines), each a recorded deferral with its precise eventual type (§6.8.1
+  table). The approximations are sound — an `unknown` forces the caller to narrow; an
+  over-narrow one would be the violation, and there is none.
+
+- **STDLIB-APPROXIMATION DEFERRALS RECORDED** (the precise type each should eventually
+  have, all blocked on the §1.4-fenced features): `pcall`/`xpcall` →
+  `<F:(...P)->R,P,R>(f:F,...P) -> ...PcallReturn<F>` (variadic generics + the
+  `(true,...R)|(false,string)` match type); `assert` → `<T>(T,...) -> T` (generic
+  identity refinement); `setmetatable` → `<T,MT>(T,MT) -> T & MT & {#...MT}` (generic +
+  intersection + meta-spread); `getmetatable` → `<T>(T) -> MetaOf<T>` (match type);
+  `rawget`/`rawset`/`next` → the `Keys<T>`/`Values<T>` match types; `select` → the
+  `("#")->integer & ((integer,...)->unknown)` intersection-overload; `unpack` →
+  `<V>(...) -> ...V` (generic + vararg-spread return); `string.find`/`match`/`gmatch` →
+  the `$FindReturn<P>`/`$PatternReturn<P>` pattern-literal capture-arity intrinsics
+  (inherited §9.8 deferral). `pcall`/coroutine **effect machinery stays out** (the
+  `$Throw`/`$Catch` intrinsics + the `thread` value kind, the §1.4 fence).
+
+- **`require` returns the module's VALUE type — the §10.4 tail, realized through the
+  EXISTING xmodule machinery.** §6.8.2: a static `require("lib.y")` resolves to the
+  exporting module's synthesized M-table `rec`, accumulated as `function M.f` / `M.f = …`
+  grow the table-local `M`'s record (the `ctx_set_field` accumulation rule) and fixed by
+  the top-level `return M` (captured at `func_depth == 0`). The module type is computed by
+  **recursively lowering the exporting module** within the cap-injected acyclic-import
+  pass — a consumer of the multi-artifact model, like §6.6's alias resolution, NO new
+  substrate. Because each recursive lower runs its own interner generation, the module
+  type is carried as a **portable PTy** and decoded in the entry's generation at the
+  `require` call site; the resolution rides a `cross_module_value` trust boundary. Cycles
+  resolve to `unknown` (the honest, terminating cyclic-require tag via the `_mod_visited`
+  set); a depth cap bounds deep chains. A non-lib / unreadable / out-of-subset-returning
+  module does NOT resolve — the `require` falls through to the unbound-name path, never a
+  silent success.
+
+- **TIMEOUT root cause found and fixed (the "something unexpected is a signal"
+  discipline).** The first un-memoized draft of the recursive module-type precompute
+  re-lowered each transitively-required module from scratch at every diamond node, so a
+  require-heavy file (`lib/type/static/check.lua`) fanned out exponentially under the
+  depth-6 bound and took **74.76s** — far over the 5s per-file budget, i.e. a termination
+  bug, not a slow case (CLAUDE.md timeout rule). Root cause: NO cross-module memoization
+  in the precompute. Fixed with a **shared PTy cache** keyed by module path, threaded
+  through the whole recursion (`_mod_cache`), so each distinct module's value type is
+  computed at most once per top-level entry. `check.lua` dropped **74.76s → 0.79s
+  (~95×)**; the survey's TIMEOUTs cleared. PTy is generation-independent, so the shared
+  cache is sound across the recursion's distinct interner generations.
+
+- **The whole-file CHECKED-CLEAN headline finally broke off the increment-3 floor.** The
+  e2e gate (every checked statement in-subset) had been pinned at 5 (0.6%) through
+  increment 3 by the GLOBALS + closures + require tail. Increment 4 lands exactly that
+  tail: **CHECKED-CLEAN 5 → 22 (0.6% → 2.5%), ~4.4× — with 0 TIMEOUT** (after the
+  shared-cache perf fix; the un-memoized draft had spiked to 21 timeouts before it). The
+  construct histogram's new front is the assignment / multi-return
+  statement family (`dynamic-index`, `multi-return`, `dynamic-index-assign`,
+  `multi-assign`) and the remaining `unbound-name:require` (the non-lib / dynamic /
+  out-of-subset-returning requires that legitimately do not resolve), plus the genuine
+  `operator-metamethod-*` deferrals — the dependency-honest next front.
+
+### 10.5 Slice v2 increment 4 — DONE (globals model + module-value-type synthesis + unannotated closures) (2026-06-12)
+
+Increment 4 (§6.8) landed the measured new e2e front and the §10.4 module-value-type
+tail in the dependency-honest order (stdlib globals + closures, then require-module-
+types). Design grew first (§6.8, each item derived whole from the value universe + the
+no-ambient-globals posture), then the mechanization in the same commit, all in
+`crescent_slice_lower.lua` (NO `init.lua` change, ZERO new evidence methods):
+
+- the extended `default_stdlib()` (`type`/`print`/`error`/`package`/`table`/`os`/`io`/
+  `pcall`/`assert`/`setmetatable`/… as injected `opts.stdlib` cap bindings, §6.8.1, with
+  the out-of-fence approximations recorded in §9.13);
+- expression-position closures: `synth_func_expr` (synthesis mode, params `unknown`),
+  `check_func_expr` (check mode, expected param types pushed inward), `check_expr` (the
+  mode switch), `build_closure` (the shared body-builder emitting `synth_function`
+  evidence), wired into call-args / annotated-locals / annotated `M.f = closure` (§6.8.3);
+- `require`→module-value-type: `compute_module_types` (recursive lower → portable PTy,
+  shared-cache memoized), `resolve_module_type` (decode in the entry generation),
+  `ctx_set_field` (M-table accumulation over `function M.f` / `M.f = …`), module-return
+  capture at `func_depth == 0` (§6.8.2);
+- unit + e2e tests (`corpus_lower_test.lua` +46: synthesis/check-mode closures,
+  annotated-local closures, extended stdlib, cross-module require-value-type with a
+  fixed-module read_file harness, M-table accumulation, honest no-such-field /
+  unresolved-require boundaries). Full analysis suite green at 6328 assertions
+  (6282 + 46); `timeout 30 bin/cr check` clean on the one touched lib file
+  (`crescent_slice_lower.lua`).
+
+**Survey re-run headlines** (`docs/slice-survey-v1.md`, "after v2 increment 4", `--e2e`,
+867 files): whole-file **CHECKED-CLEAN 5 → 22 (0.6% → 2.5%), ~4.4×**, CHECKED-FINDINGS
+0 → 6, OUT-OF-SUBSET 856 → 833, **TIMEOUT 0** (the shared-cache perf fix cleared the 21
+the un-memoized draft introduced). The construct histogram's new front: the assignment /
+multi-return statement family (`dynamic-index` 589, `multi-return` 482,
+`dynamic-index-assign` 477, `multi-assign` 466), the residual `unbound-name:require`
+(224 — the non-lib / dynamic / out-of-subset-returning requires that do not resolve),
+and the genuine `operator-metamethod-*` deferrals (202/160/136). The whole-file
+CHECKED-CLEAN number broke off the increment-3 floor of 5 (0.6%) — the GLOBALS model,
+`require`-returns-the-module-VALUE-type synthesis, and check-mode closures together are
+what move it. The fence held throughout; the substrate (`init.lua`) was again **not**
+touched.

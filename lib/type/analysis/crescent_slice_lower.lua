@@ -63,7 +63,7 @@ local M = {}
 --   markers       : { line, construct, text }[]  the out-of-subset markers.
 --:: LowerMarker = { line: integer, construct: string, text: string }
 --:: ImportRecord = { module: string, path: string, names: string[], form: string, digest: string }
---:: LowerResult = { state: AnalysisState, requested: Id[], observations: { [integer]: unknown }, expected: string, markers: { [integer]: LowerMarker }, aliases: AliasEnv, signatures: { [string]: Ty }, imports: { [integer]: ImportRecord }, dependencies: { [integer]: Dependency } }
+--:: LowerResult = { state: AnalysisState, requested: Id[], observations: { [integer]: unknown }, expected: string, markers: { [integer]: LowerMarker }, aliases: AliasEnv, signatures: { [string]: Ty }, imports: { [integer]: ImportRecord }, dependencies: { [integer]: Dependency }, module_ret_ty?: Ty }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- §1. The statement lexer (a focused Lua tokenizer over the v1 subset)
@@ -928,10 +928,39 @@ local function ctx_get(ctx, name)
 	return nil
 end
 
+-- §6.7.2 M-table accumulation: rebind `obj_name` to its record extended with field
+-- `field : fty` (replacing an existing field of the same name). Only fires when
+-- `obj_name`'s current binding is a `rec` (the module-table-local convention
+-- `local M = {} ... function M.f`). When it is not a rec (`M` not a known table),
+-- this is a no-op and returns false — the caller falls back to the ordinary binding.
+-- The rebinding appends a fresh, shadowing ctx entry (most-recent-wins), so the
+-- accumulated module type is what a later `return M` / cross-module require reads.
+--: (SliceCtx, string, string, Ty) -> boolean
+local function ctx_set_field(ctx, obj_name, field, fty)
+	local cur = ctx_get(ctx, obj_name)
+	if not cur or cur.kind ~= "rec" then return false end
+	local fields = {} --[[: { [integer]: { key: string, ty: Ty, optional: boolean, readonly: boolean } } ]]
+	local replaced = false --: boolean
+	for _, f in ipairs(cur.fields or {}) do
+		if f.key == field then
+			fields[#fields + 1] = { key = field, ty = fty, optional = false, readonly = false }
+			replaced = true
+		else
+			fields[#fields + 1] = { key = f.key, ty = f.ty, optional = f.optional, readonly = f.readonly }
+		end
+	end
+	if not replaced then
+		fields[#fields + 1] = { key = field, ty = fty, optional = false, readonly = false }
+	end
+	local new_rec = G.rec(fields, cur.rows or "closed")
+	ctx[#ctx + 1] = { name = obj_name, type = TA.encode(new_rec) }
+	return true
+end
+
 -- The lowering result accumulators ride a `LC` (lowering context) table threaded
 -- through the walk: builder, requested-claim list, marker list, alias env,
 -- trusted-boundary id (one shared stdlib boundary), and the current SliceCtx.
---:: LC = { b: Builder, requested: { [integer]: Id }, markers: { [integer]: LowerMarker }, aliases: AliasEnv, stdlib_tb: Id, state: AnalysisState }
+--:: LC = { b: Builder, requested: { [integer]: Id }, markers: { [integer]: LowerMarker }, aliases: AliasEnv, stdlib_tb: Id, state: AnalysisState, return_premise_sink?: { [integer]: { [integer]: Id } }, func_depth?: integer, module_ret_ty?: Ty, resolve_module_type?: (string) -> (Ty | nil) }
 
 -- A typed VIEW over an AST node (`unknown` at the seam). Each consumer narrows
 -- its `unknown` node to `LV` via the `view` helper, then reads concretely-typed
@@ -990,6 +1019,17 @@ end
 -- has_type claim. Returns (ty, claim_id) or (nil, nil) when out-of-subset (a
 -- marker is emitted). `ctx` is the SliceCtx in scope.
 local synth_expr --[[: (LC, SliceCtx, unknown) -> (Ty | nil, Id | nil) ]]
+
+-- Forward declarations for the expression-position closure rules (§6.8). Defined
+-- after `lower_block` (they lower a closure body). `synth_func_expr` is the
+-- SYNTHESIS-mode rule (params `unknown`, return body-synthesized); `check_func_expr`
+-- is the CHECK-mode rule (the expected fn type's param types are pushed onto the
+-- closure params — bidirectionality's signature move). `check_expr` is the mode
+-- switch: it routes a `func` node against an `fn` expected type into check-mode,
+-- and everything else through synth + subtype.
+local synth_func_expr --[[: (LC, SliceCtx, unknown) -> (Ty | nil, Id | nil) ]]
+local check_func_expr --[[: (LC, SliceCtx, unknown, Ty) -> (Ty | nil, Id | nil) ]]
+local check_expr --[[: (LC, SliceCtx, unknown, Ty) -> (Ty | nil, Id | nil) ]]
 
 -- Lower a literal expression to a slice node + has_type claim. Returns
 -- (ty, claim_id).
@@ -1196,6 +1236,38 @@ local function synth_call_expr(lc, ctx, e)
 	local v = view(e)
 	if not v then return nil, nil end
 	local fn = v.fn
+	-- §6.7.2 `require("lib.y")` recognition: a static string-literal require resolves
+	-- to the required module's synthesized VALUE type (the M-table rec). This is a
+	-- path-dependent type no fixed `fn` in Γ expresses, so the lowering resolves it at
+	-- the call site (like the cross-module alias pass), recording a `cross_module_value`
+	-- trust boundary. Only fires when `require` is NOT a local binding (an in-file
+	-- `local require = ...` shadow stays the ordinary call). A dynamic/non-lib require
+	-- falls through to the ordinary path (→ unbound-name / dynamic-require marker).
+	do
+		local fnv = view(fn)
+		if fnv and fnv.k == "name" and fnv.name == "require" and not ctx_get(ctx, "require") then
+			local args = v.args or {}
+			local a1 = view(args[1])
+			local a1v = a1 and a1.v
+			if a1 and a1.k == "str" and type(a1v) == "string" and #args == 1 then
+				local modpath = a1v --[[: string ]]
+				local resolve = lc.resolve_module_type
+				local modty --[[: Ty | nil ]]
+				if resolve then modty = resolve(modpath) end
+				if modty then
+					local nid = lc.b.node({ t = "require", module = modpath })
+					local cid = lc.b.fresh_claim("require")
+					A.add_claim(lc.state, S.has_type_claim(cid, ctx, nid, modty))
+					A.add_evidence(lc.state, A.evidence({ id = lc.b.fresh_ev("require"), claim = cid,
+						method = "trusted_signature", result = { trust = lc.stdlib_tb } }))
+					return modty, cid
+				end
+				-- a require that did not resolve to a slice module type (non-lib path,
+				-- unreadable, cyclic, or its return type out-of-subset): fall through to
+				-- the ordinary unbound-name path below — never a silent success.
+			end
+		end
+	end
 	-- determine the callee type.
 	local fty, fcid = synth_expr(lc, ctx, fn)
 	if not fty or not fcid then return nil, nil end
@@ -1210,10 +1282,6 @@ local function synth_call_expr(lc, ctx, e)
 	local arg_refs = {} --[[: { [integer]: unknown } ]]
 	local inputs = { fcid } --[[: { [integer]: Id } ]]
 	for i, ae in ipairs(v.args or {}) do
-		local aty, acid = synth_expr(lc, ctx, ae)
-		if not aty or not acid then return nil, nil end
-		local apc = lc.state.claims[A.idk(acid)]
-		local aref = apc and apc.args and apc.args.node --[[: unknown ]]
 		local wp0 --[[: Ty | nil ]]
 		if i <= #params.fixed then wp0 = params.fixed[i] else wp0 = params.vararg end
 		if not wp0 then
@@ -1221,7 +1289,11 @@ local function synth_call_expr(lc, ctx, e)
 			return nil, nil
 		end
 		local want_param = wp0 --[[: Ty ]]
-		local caid = emit_check_against(lc, ctx, acid, aref, aty, want_param)
+		-- CHECK-mode for a closure argument flowing into an annotated callback param
+		-- (§6.8): `check_expr` routes a `func` node against the expected `fn` param
+		-- type into check-mode (the param types are pushed inward). All other args go
+		-- through the same `check_expr` (synth + subtype), so this is uniform.
+		local _, caid = check_expr(lc, ctx, ae, want_param)
 		if not caid then return nil, nil end
 		arg_refs[#arg_refs + 1] = true
 		inputs[#inputs + 1] = caid
@@ -1368,11 +1440,12 @@ synth_expr = function(lc, ctx, e)
 		return result, cid
 	end
 	if k == "func" then
-		-- a bare anonymous function used in an expression position WITHOUT a
-		-- surrounding annotation cannot be synthesized in v1 (function synthesis
-		-- requires the declared fn type, §7.1). Mark it.
-		mark(lc, { line = 0, construct = "unannotated-closure", text = "function(...)" })
-		return nil, nil
+		-- an anonymous function in expression position (§6.8). SYNTHESIS mode: params
+		-- bind `unknown` (the §6.7.3 unannotated-named rule extended to expression
+		-- closures), the return is synthesized from the body. When this closure flows
+		-- into an annotated slot, the caller routes it through `check_func_expr`
+		-- (check-mode) instead, pushing the expected param types onto the params.
+		return synth_func_expr(lc, ctx, e)
 	end
 	if k == "indexdyn" then
 		mark(lc, { line = 0, construct = "dynamic-index", text = "t[expr]" })
@@ -1557,6 +1630,134 @@ local function flatten_values(lc, ctx, values)
 	return slots
 end
 
+-- ── Expression-position closures (§6.8) ──────────────────────────────────────
+--
+-- Shared body-builder for an anonymous `function(p1..pn) ... end`. `param_tys` is
+-- the per-parameter type list (each `unknown` in synthesis mode, or the expected
+-- fn type's param type in check mode); `decl_ret` is the declared return tuple in
+-- check mode, or nil for synthesis mode. Returns the closure's `fn` type and its
+-- has_type claim id (with `synth_function` evidence, verified by the hosted checker:
+-- node `t="function"`, params named, and each return checked against the return
+-- slot under the param-extended Γ).
+--
+-- The closure's return type: in CHECK mode the declared return; in SYNTHESIS mode
+-- `unknown` (the §6.7.3 fence-honest choice already used for unannotated NAMED
+-- functions — a fresh inference variable would be the global solving the fence
+-- excludes). The body's returns therefore check against `unknown` (always holds),
+-- and the closure value's `fn(.. , unknown)` shape forces callers to narrow. The
+-- precise body-synthesized JOIN (§6.8) is a deferral recorded in §9.13 — `unknown`
+-- is sound and matches the existing named-unannotated treatment.
+--: (LC, SliceCtx, unknown, { [integer]: Ty }, Ret | nil) -> (Ty | nil, Id | nil)
+local function build_closure(lc, ctx, e, param_tys, decl_ret)
+	local v = view(e)
+	if not v then return nil, nil end
+	-- the return slot the body's returns are checked against.
+	local rty --[[: Ty ]] = G.unknown()
+	if decl_ret then rty = decl_ret.fixed[1] or G.nil_() end
+	-- the closure's fn type: param_tys as fixed params, rty as the single return slot.
+	local fixed = {} --[[: { [integer]: Ty } ]]
+	for i = 1, #(v.params or {}) do fixed[i] = param_tys[i] or G.unknown() end
+	local fret --[[: Ret ]] = { fixed = { rty } }
+	if decl_ret then fret = decl_ret end
+	local params --[[: Params ]] = { fixed = fixed }
+	if v.vararg then params.vararg = G.unknown() end
+	local fty = G.fn(params, fret)
+	-- the function node carries its named params so the checker can rebuild Γ_ext
+	-- exactly (the `synth_function` contract: node.params is `{ {name}, ... }`).
+	local pnodes = {} --[[: { [integer]: { name: string } } ]]
+	-- body context: extend with the parameters (vararg params are not bound by name).
+	local body_ctx = {} --[[: SliceCtx ]]
+	for i = 1, #ctx do body_ctx[i] = ctx[i] end
+	for i, p0 in ipairs(v.params or {}) do
+		local pname = p0.name
+		if type(pname) == "string" then
+			local pty = param_tys[i] or G.unknown()
+			pnodes[#pnodes + 1] = { name = pname }
+			body_ctx[#body_ctx + 1] = { name = pname, type = TA.encode(pty) }
+		end
+	end
+	-- lower the body with `ret_ty = rty`: each `return e` emits a
+	-- `checks_against(Γ_ext, e, rty)` claim. A return-premise sink captures those
+	-- claim ids so they become the `synth_function` evidence inputs (the contract:
+	-- one return premise per return path, under the extended Γ).
+	local stack = lc.return_premise_sink or ({} --[[: { [integer]: { [integer]: Id } } ]])
+	lc.return_premise_sink = stack
+	local sink = {} --[[: { [integer]: Id } ]]
+	stack[#stack + 1] = sink
+	lc.func_depth = (lc.func_depth or 0) + 1
+	lower_block(lc, body_ctx, v.body, rty)
+	lc.func_depth = (lc.func_depth or 1) - 1
+	stack[#stack] = nil
+	local nid = lc.b.node({ t = "function", params = pnodes,
+		vararg = v.vararg and true or false })
+	local cid = lc.b.fresh_claim("func")
+	A.add_claim(lc.state, S.has_type_claim(cid, ctx, nid, fty))
+	A.add_evidence(lc.state, A.evidence({ id = lc.b.fresh_ev("func"), claim = cid,
+		method = "synth_function", inputs = sink }))
+	return fty, cid
+end
+
+-- SYNTHESIS-mode closure: params bind `unknown`, the return is body-synthesized.
+synth_func_expr = function(lc, ctx, e)
+	local v = view(e)
+	if not v then return nil, nil end
+	local param_tys = {} --[[: { [integer]: Ty } ]]
+	for i = 1, #(v.params or {}) do param_tys[i] = G.unknown() end
+	return build_closure(lc, ctx, e, param_tys, nil)
+end
+
+-- CHECK-mode closure (§6.8): the expected `fn` type `want` pushes its param types
+-- onto the closure's params (bidirectionality's signature move), and the body's
+-- returns are checked against `want`'s return. The closure's fn type is `want`.
+check_func_expr = function(lc, ctx, e, want)
+	local v = view(e)
+	if not v or want.kind ~= "fn" then return nil, nil end
+	local wparams = want.params or ({ fixed = {} } --[[: Params ]])
+	local wret = want.ret or ({ fixed = {} } --[[: Ret ]])
+	local nparams = #(v.params or {})
+	-- arity: the closure may declare FEWER params than expected (Lua ignores extra
+	-- arguments) but not MORE fixed params than the expected type supplies (unless it
+	-- has a vararg). A mismatch is an honest type-mismatch finding, not a crash.
+	if nparams > #wparams.fixed and not (wparams.vararg) then
+		mark(lc, { line = 0, construct = "type-mismatch", text = "closure expects more params than the annotated type supplies" })
+		return nil, nil
+	end
+	local param_tys = {} --[[: { [integer]: Ty } ]]
+	for i = 1, nparams do
+		param_tys[i] = wparams.fixed[i] or wparams.vararg or G.unknown()
+	end
+	return build_closure(lc, ctx, e, param_tys, wret)
+end
+
+-- The mode switch (§6.8 check-mode closure typing). To check `e ⇐ want`: when `e`
+-- is a `func` node and `want` is an `fn` type, route into CHECK-mode closure typing
+-- (push the expected param types inward). Otherwise synthesize `e` and require
+-- `subtype(synth(e), want)` — the ordinary `check_against` boundary. Returns
+-- (value_ty, claim_id) where claim_id is a checks_against claim (or the closure's
+-- has_type for the check-mode closure path), or (nil, nil) with a marker.
+check_expr = function(lc, ctx, e, want)
+	local v = view(e)
+	local scid --[[: Id | nil ]]
+	local sty --[[: Ty | nil ]]
+	if v and v.k == "func" and want.kind == "fn" then
+		-- CHECK-mode closure: build it with the expected param types pushed inward.
+		-- Its has_type is the synth premise; the check_against boundary below wraps it
+		-- (subtype(want, want) holds trivially) so the result is a `checks_against`
+		-- claim a caller (call-arg / local / return) can use uniformly.
+		sty, scid = check_func_expr(lc, ctx, e, want)
+	else
+		sty, scid = synth_expr(lc, ctx, e)
+	end
+	if not sty or not scid then return nil, nil end
+	local spc = lc.state.claims[A.idk(scid)]
+	local sref = spc and spc.args and spc.args.node --[[: unknown ]]
+	local caid = emit_check_against(lc, ctx, scid, sref, sty, want)
+	if not caid then return nil, nil end
+	return want, caid
+end
+
+M.check_expr = check_expr
+
 --: (LC, SliceCtx, unknown, Ty | nil) -> nil
 local function lower_stmt(lc, ctx, s, ret_ty)
 	local sv = view(s)
@@ -1581,25 +1782,22 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 				ctx[#ctx + 1] = { name = name, type = TA.encode(decl_ty or G.nil_()) }
 				return
 			end
-			local vty, vcid = synth_expr(lc, ctx, val)
-			if not vty or not vcid then
-				-- value out-of-subset: bind the annotation if present (so later
-				-- statements stay in-subset), else stop binding (name unbound).
-				if decl_ty then
-					local dt0 = decl_ty --[[: Ty ]]
-					ctx[#ctx + 1] = { name = name, type = TA.encode(dt0) }
-				end
-				return
-			end
 			if decl_ty then
 				local dt = decl_ty --[[: Ty ]]
 				-- annotated local: CHECK value ⇐ decl_ty (inference boundary), bind decl_ty.
-				local vpc = lc.state.claims[A.idk(vcid)]
-				local vref = vpc and vpc.args and vpc.args.node --[[: unknown ]]
-				local caid = emit_check_against(lc, ctx, vcid, vref, vty, dt)
+				-- `check_expr` routes a `func` value against an `fn` annotation into
+				-- check-mode closure typing (§6.8); all other values go synth + subtype.
+				local _, caid = check_expr(lc, ctx, val, dt)
 				if caid then lc.requested[#lc.requested + 1] = caid end
 				ctx[#ctx + 1] = { name = name, type = TA.encode(dt) }
-			else
+				return
+			end
+			local vty, vcid = synth_expr(lc, ctx, val)
+			if not vty or not vcid then
+				-- value out-of-subset (unannotated): stop binding (name unbound).
+				return
+			end
+			do
 				-- unannotated: bind the synthesized type.
 				lc.requested[#lc.requested + 1] = vcid
 				ctx[#ctx + 1] = { name = name, type = TA.encode(vty) }
@@ -1660,13 +1858,28 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 		-- the unannotated case, bind fn(unknown^n, unknown) — a usable conservative
 		-- shape (callers get `unknown` results, forcing narrowing).
 		local fname --[[: string | nil ]]
+		-- a module-table member target `function M.f(...)`: `mod_member` carries the
+		-- table-local name `M` and the field `f`. The function type is ACCUMULATED into
+		-- `M`'s record (§6.7.2 M-table synthesis) rather than binding a global `f`.
+		local mod_member --[[: { obj: string, field: string } | nil ]]
 		local tgtv = view(sv.target)
 		local svname = sv.name
 		local tname = tgtv and tgtv.name
 		local tfield = tgtv and tgtv.field
 		if k == "localfunc" and type(svname) == "string" then fname = svname
 		elseif tgtv and tgtv.k == "name" and type(tname) == "string" then fname = tname
-		elseif tgtv and tgtv.k == "index" and type(tfield) == "string" then fname = tfield end
+		elseif tgtv and tgtv.k == "index" and type(tfield) == "string" then
+			local tf = tfield --[[: string ]]
+			fname = tf
+			local objv = view(tgtv.obj)
+			if objv and objv.k == "name" then
+				local oname = objv.name
+				if type(oname) == "string" then
+					local on = oname --[[: string ]]
+					mod_member = { obj = on, field = tf } --[[: { obj: string, field: string } ]]
+				end
+			end
+		end
 		-- build the body context extended with the params.
 		local body_ctx = {} --[[: SliceCtx ]]
 		for i = 1, #ctx do body_ctx[i] = ctx[i] end
@@ -1692,14 +1905,24 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 		end
 		if fty ~= nil then
 			local f = fty --[[: Ty ]]
-			if fname then ctx[#ctx + 1] = { name = fname, type = TA.encode(f) } end
+			-- §6.7.2: a `function M.f` target accumulates field `f` into the module table
+			-- `M`'s record (so a later `return M` exports it); a plain `function f` / a
+			-- non-rec target binds the name directly.
+			local accumulated = false --: boolean
+			if mod_member then
+				local mm = mod_member --[[: { obj: string, field: string } ]]
+				accumulated = ctx_set_field(ctx, mm.obj, mm.field, f)
+			end
+			if fname and not accumulated then ctx[#ctx + 1] = { name = fname, type = TA.encode(f) } end
 			-- `local function f` is in scope inside its OWN body (Lua's recursive
 			-- binding: `local f; f = function...`); bind it in body_ctx too.
 			if fname and k == "localfunc" then body_ctx[#body_ctx + 1] = { name = fname, type = TA.encode(f) } end
 			local rty --[[: Ty ]]
 			local r0 = fret.fixed[1]
 			if r0 then rty = r0 else rty = G.nil_() end
+			lc.func_depth = (lc.func_depth or 0) + 1
 			lower_block(lc, body_ctx, sv.body, rty)
+			lc.func_depth = (lc.func_depth or 1) - 1
 		else
 			-- unannotated: bind fn(unknown^n, unknown) in the outer ctx; lower the body
 			-- in SYNTHESIS mode (ret_ty = nil) — returns request their value claims,
@@ -1708,9 +1931,16 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 			local pfixed = {} --[[: Ty[] ]]
 			for i = 1, pn do pfixed[i] = G.unknown() end
 			local ufty = G.fn({ fixed = pfixed }, { fixed = { G.unknown() } })
-			if fname then ctx[#ctx + 1] = { name = fname, type = TA.encode(ufty) } end
+			local accumulated = false --: boolean
+			if mod_member then
+				local mm = mod_member --[[: { obj: string, field: string } ]]
+				accumulated = ctx_set_field(ctx, mm.obj, mm.field, ufty)
+			end
+			if fname and not accumulated then ctx[#ctx + 1] = { name = fname, type = TA.encode(ufty) } end
 			if fname and k == "localfunc" then body_ctx[#body_ctx + 1] = { name = fname, type = TA.encode(ufty) } end
+			lc.func_depth = (lc.func_depth or 0) + 1
 			lower_block(lc, body_ctx, sv.body, nil)
+			lc.func_depth = (lc.func_depth or 1) - 1
 		end
 		return
 
@@ -1728,9 +1958,23 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 			local vpc = lc.state.claims[A.idk(vcid)]
 			local vref = vpc and vpc.args and vpc.args.node --[[: unknown ]]
 			local caid = emit_check_against(lc, ctx, vcid, vref, vty, rt)
-			if caid then lc.requested[#lc.requested + 1] = caid end
+			if caid then
+				lc.requested[#lc.requested + 1] = caid
+				-- when this return is inside a closure body being built (§6.8), the
+				-- return-premise sink captures the checks_against claim id so it becomes
+				-- a `synth_function` evidence input (the return-premise contract).
+				local sink = lc.return_premise_sink and lc.return_premise_sink[#lc.return_premise_sink]
+				if sink then sink[#sink + 1] = caid end
+			end
 		else
 			lc.requested[#lc.requested + 1] = vcid
+			-- MODULE-VALUE-TYPE capture (§6.7.2): a `return <expr>` at the module top
+			-- level (not inside ANY function body, func_depth == 0) fixes the module's
+			-- exported value type — the type a consumer's `require("this")` binds. The
+			-- FIRST top-level return wins (Lua modules return exactly once).
+			if (lc.func_depth or 0) == 0 and lc.module_ret_ty == nil then
+				lc.module_ret_ty = vty
+			end
 		end
 		if #values > 1 then
 			mark(lc, { line = 0, construct = "multi-return", text = "return a, b" })
@@ -1848,19 +2092,56 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 		-- writes are marked.
 		local targets = sv.targets or {}
 		local values = sv.values or {}
+		-- a `--:` annotation on a `M.f = <expr>` assignment (the corpus convention for an
+		-- annotated module-table member) gives the field's DECLARED type: check the value
+		-- ⇐ the sig (check-mode, so a closure value flows the sig's params inward, §6.8)
+		-- and accumulate the SIG type into the module rec (§6.7.2), not the synthesized
+		-- one. Only for a single field-target with a parseable fn/Ty sig.
+		local asig = sv.sig
+		if #targets == 1 and #values == 1 and type(asig) == "string" then
+			local tgt = view(targets[1])
+			local tgt_field = tgt and tgt.field
+			local objv = tgt and view(tgt.obj)
+			local oname0 = objv and objv.name
+			if tgt and tgt.k == "index" and type(tgt_field) == "string"
+				and objv and objv.k == "name" and type(oname0) == "string" then
+				local declared = ann_type(lc, asig, 0)
+				if declared then
+					local dt = declared --[[: Ty ]]
+					local _, caid = check_expr(lc, ctx, values[1], dt)
+					if caid then lc.requested[#lc.requested + 1] = caid end
+					ctx_set_field(ctx, oname0 --[[: string ]], tgt_field --[[: string ]], dt)
+					return
+				end
+			end
+		end
 		if #targets == 1 and #values == 1 then
 			local tgt = view(targets[1])
 			local vty, vcid = synth_expr(lc, ctx, values[1])
 			if not vty or not vcid then return end
-			if tgt and tgt.k == "index" and type(tgt.field) == "string" then
+			local tgt_field = tgt and tgt.field
+			if tgt and tgt.k == "index" and type(tgt_field) == "string" then
+				local tfield2 = tgt_field --[[: string ]]
 				local oty = synth_expr(lc, ctx, tgt.obj)
 				if oty then
-					local fty = S.index_result(oty, tgt.field, nil)
+					local fty = S.index_result(oty, tfield2, nil)
 					if fty then
 						local vpc = lc.state.claims[A.idk(vcid)]
 						local vref = vpc and vpc.args and vpc.args.node --[[: unknown ]]
 						local caid = emit_check_against(lc, ctx, vcid, vref, vty, fty)
 						if caid then lc.requested[#lc.requested + 1] = caid end
+						return
+					end
+				end
+				-- §6.7.2 M-table accumulation: `M.f = <expr>` where `M` is a table-local
+				-- rec ADDS field `f : typeof <expr>` to the module type (the module table
+				-- grows by assignment). Only when the object is a bare name bound to a rec.
+				local objv2 = view(tgt.obj)
+				local oname2 = objv2 and objv2.name
+				if objv2 and objv2.k == "name" and type(oname2) == "string" then
+					local oname = oname2 --[[: string ]]
+					if ctx_set_field(ctx, oname, tfield2, vty) then
+						lc.requested[#lc.requested + 1] = vcid
 						return
 					end
 				end
@@ -2043,13 +2324,88 @@ function M.default_stdlib()
 		{ key = "sqrt", ty = fn1({ num }, num), optional = false, readonly = false },
 		{ key = "max", ty = G.fn({ fixed = { num }, vararg = num }, { fixed = { num } }), optional = false, readonly = false },
 		{ key = "min", ty = G.fn({ fixed = { num }, vararg = num }, { fixed = { num } }), optional = false, readonly = false },
+		{ key = "random", ty = G.fn({ fixed = {}, vararg = int }, { fixed = { num } }), optional = false, readonly = false },
 		{ key = "huge", ty = num, optional = false, readonly = false },
+		{ key = "pi", ty = num, optional = false, readonly = false },
+		{ key = "sin", ty = fn1({ num }, num), optional = false, readonly = false },
+		{ key = "cos", ty = fn1({ num }, num), optional = false, readonly = false },
+		{ key = "exp", ty = fn1({ num }, num), optional = false, readonly = false },
+		{ key = "log", ty = G.fn({ fixed = { num }, vararg = num }, { fixed = { num } }), optional = false, readonly = false },
+		{ key = "pow", ty = G.fn({ fixed = { num, num } }, { fixed = { num } }), optional = false, readonly = false },
+		{ key = "fmod", ty = G.fn({ fixed = { num, num } }, { fixed = { num } }), optional = false, readonly = false },
+	}, "open")
+	-- ── globals that need out-of-fence features → soundest in-fence approximation ──
+	-- Each is recorded in §9.13 with the precise type it should eventually have. The
+	-- slice grammar has NO generics (no `forall`), NO match types, NO meta-spread, NO
+	-- intersection-overload resolution at call sites, so the legacy signatures (which
+	-- use all of these) are approximated by `unknown`-typed params/returns where the
+	-- true type would refine. These are SOUND (the caller must narrow an `unknown`),
+	-- never unsound: an over-narrow approximation would be the violation.
+	local unk = G.unknown() --[[: Ty ]]
+	local bool = G.boolean()
+	local idx_str_unk = G.indexer(str, unk) --[[: Ty ]] -- { [string]: unknown }
+	-- a callable top: any function value (used where a fn arg is variadic-generic).
+	local anyfn = G.func()
+	local function vfn(ret) return G.fn({ fixed = {}, vararg = unk }, { fixed = { ret } }) end
+	-- package: an open record of the documented fields (in-fence: open rec + indexer).
+	local package_rec = G.rec({
+		{ key = "path", ty = str, optional = false, readonly = false },
+		{ key = "cpath", ty = str, optional = false, readonly = false },
+		{ key = "config", ty = str, optional = false, readonly = false },
+		{ key = "loaded", ty = idx_str_unk, optional = false, readonly = false },
+		{ key = "preload", ty = idx_str_unk, optional = false, readonly = false },
+	}, "open")
+	-- table.*: the generic element types collapse to `unknown` (no generics, §9.13).
+	local table_rec = G.rec({
+		{ key = "insert", ty = G.fn({ fixed = { unk }, vararg = unk }, { fixed = {} }), optional = false, readonly = false },
+		{ key = "remove", ty = G.fn({ fixed = { unk }, vararg = int }, { fixed = { unk } }), optional = false, readonly = false },
+		{ key = "concat", ty = G.fn({ fixed = { unk }, vararg = unk }, { fixed = { str } }), optional = false, readonly = false },
+		{ key = "sort", ty = G.fn({ fixed = { unk }, vararg = anyfn }, { fixed = {} }), optional = false, readonly = false },
+		{ key = "unpack", ty = G.fn({ fixed = { unk }, vararg = int }, { fixed = { unk } }), optional = false, readonly = false },
+		{ key = "maxn", ty = fn1({ unk }, int), optional = false, readonly = false },
+	}, "open")
+	-- os.*: a cap-shaped surface declared as an injected model (caps-first, §9.13).
+	local os_rec = G.rec({
+		{ key = "time", ty = vfn(int), optional = false, readonly = false },
+		{ key = "clock", ty = G.fn({ fixed = {} }, { fixed = { num } }), optional = false, readonly = false },
+		{ key = "date", ty = G.fn({ fixed = {}, vararg = unk }, { fixed = { str } }), optional = false, readonly = false },
+		{ key = "getenv", ty = fn1({ str }, str_or_nil), optional = false, readonly = false },
+		{ key = "exit", ty = vfn(G.never()), optional = false, readonly = false },
+	}, "open")
+	-- io.*: a cap-shaped surface (the library NEVER reaches `io`; the model is the
+	-- injected cap a caller supplies, §9.13).
+	local io_rec = G.rec({
+		{ key = "open", ty = G.fn({ fixed = { str }, vararg = str }, { fixed = { unk, str_or_nil } }), optional = false, readonly = false },
+		{ key = "write", ty = vfn(unk), optional = false, readonly = false },
+		{ key = "read", ty = vfn(str_or_nil), optional = false, readonly = false },
 	}, "open")
 	return {
-		tonumber = fn1({ G.unknown() }, num_or_nil),
-		tostring = fn1({ G.unknown() }, str),
+		-- precise, in-fence
+		tonumber = G.fn({ fixed = { unk }, vararg = int }, { fixed = { num_or_nil } }),
+		tostring = fn1({ unk }, str),
+		["type"] = fn1({ unk }, str),
+		print = G.fn({ fixed = {}, vararg = unk }, { fixed = {} }),
+		error = G.fn({ fixed = { unk }, vararg = int }, { fixed = { G.never() } }),
+		rawequal = G.fn({ fixed = { unk, unk } }, { fixed = { bool } }),
+		rawlen = fn1({ unk }, int),
+		collectgarbage = G.fn({ fixed = {}, vararg = unk }, { fixed = { G.union({ num, bool }) } }),
 		["string"] = string_rec,
 		["math"] = math_rec,
+		["package"] = package_rec,
+		["table"] = table_rec,
+		["os"] = os_rec,
+		["io"] = io_rec,
+		-- approximations (out-of-fence true type recorded in §9.13)
+		assert = G.fn({ fixed = { unk }, vararg = unk }, { fixed = { unk } }),
+		pcall = G.fn({ fixed = { anyfn }, vararg = unk }, { fixed = { bool, unk } }),
+		xpcall = G.fn({ fixed = { anyfn, anyfn }, vararg = unk }, { fixed = { bool, unk } }),
+		setmetatable = G.fn({ fixed = { unk, unk } }, { fixed = { unk } }),
+		getmetatable = fn1({ unk }, unk),
+		rawget = G.fn({ fixed = { unk, unk } }, { fixed = { unk } }),
+		rawset = G.fn({ fixed = { unk, unk, unk } }, { fixed = { unk } }),
+		select = G.fn({ fixed = { unk }, vararg = unk }, { fixed = { unk } }),
+		next = G.fn({ fixed = { unk }, vararg = unk }, { fixed = { unk } }),
+		unpack = G.fn({ fixed = { unk }, vararg = int }, { fixed = { unk } }),
 	}
 end
 
@@ -2064,8 +2420,87 @@ end
 -- TrustBoundary per module + a Dependency from each requested claim to that
 -- boundary) are added to the state. CAPS-FIRST: with no `read_file`, cross-module
 -- imports resolve to no aliases — never a reach for `io`.
---: (string, string, ({ read_file?: (string) -> (string | nil, string | nil), stdlib?: boolean | { [string]: Ty } } | nil)) -> (LowerResult | nil, string | nil)
+--:: LowerOpts = { read_file?: (string) -> (string | nil, string | nil), stdlib?: boolean | { [string]: Ty }, module_value?: boolean, _mod_visited?: { [string]: boolean }, _mod_depth?: integer, _mod_cache?: { [string]: PTy } }
+
+-- §6.7.2 module-value-type precompute. For each statically-resolvable `lib.` value
+-- require in `source`, recursively lower the exporting module and capture its
+-- exported VALUE type (the M-table `rec` / the table it returns), encoded as a
+-- PORTABLE PTy keyed by module path. This runs BEFORE the parent interns anything,
+-- so the recursive lowers' own `G.reset()` cannot corrupt the parent generation;
+-- the parent decodes each PTy in its own generation at the `require` call site.
+--
+-- CYCLES (§6.7.2): a `_mod_visited` set on `opts` breaks require cycles — a module
+-- already on the resolution stack resolves to `unknown` (honest + terminating), the
+-- documented cyclic-require tag. A depth cap (`_mod_depth`) bounds deep chains.
+-- CAPS-FIRST: with no `read_file` cap, no module types are computed (returns {}).
+--: (string, LowerOpts | nil) -> { [string]: PTy }
+local function compute_module_types(source, opts)
+	local out = {} --[[: { [string]: PTy } ]]
+	local read_file = opts and opts.read_file --[[: ((string) -> (string | nil, string | nil)) | nil ]]
+	if not read_file then return out end
+	local depth = 0 --: integer
+	if opts and opts._mod_depth then depth = opts._mod_depth end
+	if depth >= 6 then return out end -- bound deep require chains (perf + termination)
+	local visited = (opts and opts._mod_visited) or ({} --[[: { [string]: boolean } ]])
+	-- PERF (§9.13 timeout root cause): a SHARED PTy cache keyed by module path, threaded
+	-- through the whole recursion, so each distinct module's value type is computed at
+	-- most ONCE per top-level entry. Without it, a diamond dependency re-lowers shared
+	-- modules exponentially (the depth-6 fan-out), which timed out require-heavy files.
+	local cache --[[: { [string]: PTy } ]] = {}
+	if opts and opts._mod_cache then cache = opts._mod_cache end
+	local triggers = XM.collect_imports(source)
+	for _, t in ipairs(triggers) do
+		local tmod = t.module --[[: string | nil ]]
+		if tmod ~= nil and not t.dynamic and out[tmod] == nil
+			and (tmod:sub(1, 4) == "lib." or tmod == "lib")
+			and XM.valid_modpath_segments(tmod) then
+			local cached = cache[tmod]
+			if cached ~= nil then
+				out[tmod] = cached
+			elseif visited[tmod] then
+				-- a require cycle: resolve the cyclic module's value type to `unknown`
+				-- (honest + terminating), the documented cyclic-require tag.
+				out[tmod] = TA.encode(G.unknown())
+			else
+				local rf = read_file --[[: (string) -> (string | nil, string | nil) ]]
+				local msrc = XM.read_module(tmod, rf)
+				if msrc ~= nil then
+					local m2 = msrc --[[: string ]]
+					local sub_visited = {} --[[: { [string]: boolean } ]]
+					for k2 in pairs(visited) do sub_visited[k2] = true end
+					sub_visited[tmod] = true
+					local sub_opts = {
+						read_file = read_file,
+						module_value = true, _mod_visited = sub_visited,
+						_mod_depth = depth + 1, _mod_cache = cache,
+					} --[[: LowerOpts ]]
+					if opts and opts.stdlib then sub_opts.stdlib = opts.stdlib end
+					local sub = M.lower(m2, tmod, sub_opts)
+					-- the exporting module's exported value type, re-encoded as portable
+					-- PTy (a fresh interner generation produced it). When the module has
+					-- no in-subset top-level return, no type is recorded (the require
+					-- falls through to the unbound-name path — never a silent success).
+					if sub ~= nil then
+						local mrt = sub.module_ret_ty
+						if mrt ~= nil then
+							local p = TA.encode(mrt)
+							out[tmod] = p
+							cache[tmod] = p
+						end
+					end
+				end
+			end
+		end
+	end
+	return out
+end
+
+--: (string, string, (LowerOpts | nil)) -> (LowerResult | nil, string | nil)
 function M.lower(source, filename, opts)
+	-- §6.7.2 module-value-type precompute (BEFORE the parent's G.reset()/interning):
+	-- recursively resolve required modules' value types to portable PTy. The parent
+	-- decodes each at the `require` call site, in its own generation.
+	local mod_ptys = compute_module_types(source, opts)
 	G.reset()
 	local _ = filename
 	-- 0. cross-module import pass (§6.6) — assemble the imported alias base env.
@@ -2115,6 +2550,15 @@ function M.lower(source, filename, opts)
 	local b = new_builder(state)
 	local lc = { b = b, requested = {}, markers = {}, aliases = scan.aliases,
 		stdlib_tb = tb.id, state = state } --[[: LC ]]
+	-- §6.7.2 `require("lib.y")` resolution: decode the precomputed module-value PTy in
+	-- THIS generation. The closure is the only path the `require` recognizer uses, so
+	-- absent a precomputed type (non-lib / unresolved / cyclic-unknown), the require
+	-- falls through to the unbound-name path — never a silent success.
+	lc.resolve_module_type = function(modpath)
+		local pty = mod_ptys[modpath]
+		if pty == nil then return nil end
+		return TA.decode(pty)
+	end
 	-- §6.7.2 stdlib cap: when `opts.stdlib` is requested, seed the top-level Γ with
 	-- the injected stdlib bindings (built AFTER this file's G.reset() so the tids are
 	-- in the current interner generation). Caps-first: absent the opt, no globals.
@@ -2197,6 +2641,8 @@ function M.lower(source, filename, opts)
 		imports = imports_out,
 		dependencies = dependencies,
 	} --[[: LowerResult ]]
+	local mrt = lc.module_ret_ty
+	if mrt ~= nil then result.module_ret_ty = mrt end
 	return result
 end
 

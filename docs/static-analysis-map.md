@@ -220,9 +220,18 @@ Rung status (ladder, design doc):
   (`unbound-name:package`/`require`/`table`), assignment/multi-return forms, and
   anonymous closures. Two new evidence methods only; substrate untouched. The
   `require`-returns-module-VALUE-type synthesis + broader globals model is the
-  dependency-honest TAIL (§9.12/§10.4). Earlier findings: a parser non-termination
-  (FIXED) and a substrate-scaling TIMEOUT (FIXED, content-addressed keys). See
-  `docs/slice-survey-v1.md` "after v2 increment 3".
+  dependency-honest TAIL (§9.12/§10.4). **Slice v2 increment 4** (§6.8) landed exactly
+  that tail — the extended stdlib globals cap, expression-position closures with
+  check-mode typing (the expected `fn` param types pushed inward), and
+  `require("lib.y")`-returns-the-module-VALUE-type synthesis (the M-table `rec`
+  accumulated over `function M.f`/`M.f = …`, resolved by recursively lowering the
+  exporting module through the existing xmodule machinery, shared-PTy-cache memoized).
+  ZERO new evidence methods. The whole-file **e2e CHECKED-CLEAN broke off the
+  increment-3 floor: 5 → 22 (0.6% → 2.5%), ~4.4×, 0 TIMEOUT**. A timeout root cause
+  (un-memoized recursive precompute, `check.lua` 74.76s → 0.79s after a shared cache)
+  was found and fixed. Earlier findings: a parser non-termination (FIXED) and a
+  substrate-scaling TIMEOUT (FIXED, content-addressed keys). See
+  `docs/slice-survey-v1.md` "after v2 increment 4".
 
 Limits:
 

@@ -845,3 +845,91 @@ The honest corpus split under real lowering moved **2 CLEAN / 9 OUT-OF-SUBSET �
 CLEAN / 1 FINDINGS / 7 OUT-OF-SUBSET**, 0 rejections anywhere. Full analysis suite
 green at 6282 assertions (6226 + 56 new); 0 TIMEOUT in the e2e survey; the touched
 files typecheck clean. Findings in §9.12.
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     AFTER v2 INCREMENT 4 — appended by hand. Records the end-to-end delta from
+     the globals model + module-value-type synthesis + unannotated closures
+     (§6.8). END-TO-END (--e2e) delta; the GENERATED annotation survey at the top
+     is unchanged by increment 4 (it is statement-lowering, not annotation-grammar,
+     work). Re-run: bin/cr run lib/type/analysis/slice_survey.lua --e2e
+════════════════════════════════════════════════════════════════════════════ -->
+
+## After v2 increment 4 (globals model + module-value-type synthesis + unannotated closures)
+
+Slice v2 increment 4 (`docs/agnostic-static-analysis-crescent-slice.md` §6.8)
+landed the measured new e2e front and the §10.4 module-value-type TAIL: the
+extended stdlib globals cap (`type`/`print`/`error`/`package`/`table`/`os`/`io`/
+`pcall`/`assert`/`setmetatable`/`select`/`next`/`rawget`/… as injected `opts.stdlib`
+bindings, §6.8.1), expression-position closures with **check-mode** typing (the
+expected `fn` param types pushed onto the closure params, §6.8.3), and
+`require("lib.y")`-returns-the-module-VALUE-type synthesis (the M-table `rec`
+accumulated over `function M.f` / `M.f = …`, resolved by recursively lowering the
+exporting module through the existing cap-injected xmodule machinery, §6.8.2).
+**ZERO new evidence methods** — the whole increment is lowering reach over the
+existing methods. Substrate untouched (`init.lua` byte-for-byte).
+
+**End-to-end survey re-run** (`--e2e`, 867 files, per-file budget 5s, the survey
+injects the §6.8.1 stdlib cap and the §6.8.2 read_file cap):
+
+| Class | after v2 increment 3 | after v2 increment 4 |
+|---|--:|--:|
+| CHECKED-CLEAN | 5 (0.6%) | **22 (2.5%)** |
+| CHECKED-FINDINGS | 0 | 6 (0.7%) |
+| OUT-OF-SUBSET | 856 (98.7%) | **833 (96.1%)** |
+| NO-ANNOTATION | 6 (0.7%) | 6 (0.7%) |
+| TIMEOUT | 0 | **0** |
+
+**The whole-file CHECKED-CLEAN headline finally broke off the increment-3 floor:
+5 → 22 (0.6% → 2.5%), ~4.4×.** This is THE headline of the increment — the e2e
+gate (every checked statement in-subset) had been pinned at 5 by the GLOBALS +
+anonymous-closures + require tail through increment 3, and increment 4 lands exactly
+that tail, so files saturated with stdlib calls, in-`lib/` requires, and callback
+closures now go whole-file CLEAN. CHECKED-FINDINGS rose 0 → 6 (deeper boundaries
+surfaced by the increased reach — e.g. a resolved-require module whose later field
+access is an honest field-path-narrow type-mismatch; none a checker soundness bug).
+
+**TIMEOUT root cause found and fixed (the "something unexpected is a signal"
+discipline).** The first un-memoized draft of the recursive module-type precompute
+re-lowered each transitively-required module from scratch at every diamond node, so
+a require-heavy file (`lib/type/static/check.lua`) fanned out exponentially under the
+depth-6 bound — **74.76s**, far over the 5s budget (a termination bug, not a slow
+case) — and the survey spiked to **21 TIMEOUTs**. Root cause: NO cross-module
+memoization. Fixed with a **shared PTy cache** keyed by module path, threaded through
+the whole recursion: each distinct module's value type is computed at most once per
+top-level entry. `check.lua` dropped **74.76s → 0.79s (~95×)**; the survey's TIMEOUTs
+cleared **21 → 0**.
+
+**The construct demand ranking is the new e2e front** (most-blocking first):
+
+| Rank | after incr 3 | files | after incr 4 | files | what moved |
+|--:|---|--:|---|--:|---|
+| top | `unbound-name:package` | 683 | `dynamic-index` | 589 | globals GONE (stdlib cap + require); assignment/index forms now the front |
+| | `field-assign` | 514 | `multi-return` | 482 | the return-tuple statement form |
+| | `dynamic-index` | 500 | `dynamic-index-assign` | 477 | dynamic-key writes over non-indexer tables |
+| | `multi-assign` | 435 | `multi-assign` | 466 | multi-target assignment reaching further |
+| | `unannotated-closure` | 393 | `unbound-name:require` | 224 | closures GONE; residual non-lib/dynamic requires |
+
+`unbound-name:package`/`table`/`setmetatable`/`pcall` (the globals front), and
+`unannotated-closure` (393) have all DROPPED OUT of the top ranking — the stdlib cap
+covers the globals and check-mode closures lower the anonymous functions.
+`unbound-name:require` fell 409 → 224: the in-`lib/` static requires now resolve to
+their module value type; the 224 residue is the non-lib (`bit`/`ffi`), dynamic
+(`require(var)`), and out-of-subset-returning requires that legitimately do not
+resolve (never a silent success). The residual `operator-metamethod-arith` (202),
+`operator-metamethod-len` (160), `operator-metamethod-concat` (136) are the GENUINE
+metatable-dependent operand cases — out-of-subset **deferrals** with un-defer
+triggers (§1.4 posture), NOT type-error claims. The new dependency-honest front is the
+**assignment / multi-return statement family** (`dynamic-index`, `multi-return`,
+`dynamic-index-assign`, `multi-assign`).
+
+**Corpus fixture movements** (the load-bearing `corpus_lower_test`, which lowers
+WITHOUT the stdlib cap — caps-first): the two closure-boundary fixtures moved off
+the `unannotated-closure` marker — `closure_param_typing` now lowers its closures
+(both the synthesis-mode `function() return nil end` and the check-mode
+`function(s) return { kind = "a" } end` flowing into the `(Signal) -> Node` slot)
+and hits the NEXT boundary `multi-return` (the `return node, function() end`
+statement form); `cross_module_type_alias`'s inner `wait = function() end` closure
+lowers, leaving the field-path / assignment-in-branch narrowing boundary
+(`no-such-field`). 0 rejections anywhere. Full analysis suite green at 6328
+assertions (6282 + 46 new); 0 TIMEOUT in the e2e survey; the touched lib file
+typechecks clean. Findings in §9.13.
