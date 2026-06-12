@@ -1197,6 +1197,71 @@ T.describe("audit round 1 — finding 1: well-formedness is a load-bearing preco
 		T.ok(env["List"] ~= nil and TA.well_formed(env["List"]), "the bound alias is contractive")
 	end)
 
+	-- Forward-sibling alias references (§6.12, slice v2 increment 8). An alias whose
+	-- body names a SIBLING declared LATER in the same batch resolves under dependency
+	-- ordering — the strictly-correct generalization of source order. A GENUINE mutual
+	-- cycle keeps source order and still errors honestly (the multi-binder-μ deferral,
+	-- §9.19).
+	T.it("declare_aliases_ordered resolves a forward-sibling reference (server_socket -> server_client)", function()
+		local env = {} --[[: { [string]: Ty } ]]
+		local decls = {
+			{ name = "server_socket", body = "{ fd: integer, peer: server_client | nil }" },
+			{ name = "server_client", body = "{ fd: integer }" },
+		}
+		local res = P.declare_aliases_ordered(env, decls)
+		T.ok(res[1].ok, "server_socket (forward ref) declares cleanly")
+		T.ok(res[2].ok, "server_client declares cleanly")
+		T.ok(env["server_socket"] ~= nil and env["server_client"] ~= nil, "both bound")
+	end)
+
+	T.it("declare_aliases_ordered resolves a parent-union forward reference (Expr = ExprCall | ExprNeg)", function()
+		local env = {} --[[: { [string]: Ty } ]]
+		local decls = {
+			{ name = "Expr", body = "ExprCall | ExprNeg" },
+			{ name = "ExprCall", body = "{ kind: \"call\", n: integer }" },
+			{ name = "ExprNeg", body = "{ kind: \"neg\", n: integer }" },
+		}
+		local res = P.declare_aliases_ordered(env, decls)
+		T.ok(res[1].ok and res[2].ok and res[3].ok, "all three declare under dependency ordering")
+		T.ok(env["Expr"] ~= nil, "the parent-union alias is bound")
+	end)
+
+	T.it("declare_aliases_ordered keeps source order for an independent batch (no forward refs)", function()
+		local env = {} --[[: { [string]: Ty } ]]
+		local decls = {
+			{ name = "A", body = "{ x: integer }" },
+			{ name = "B", body = "{ y: A }" }, -- backward ref, already resolved by source order
+		}
+		local res = P.declare_aliases_ordered(env, decls)
+		T.ok(res[1].ok and res[2].ok, "backward-ref batch unchanged")
+	end)
+
+	-- FENCE: a genuine mutually-recursive family (A names B, B names A) is the
+	-- multi-binder-μ substrate gap. Dependency ordering cannot break the cycle, so it
+	-- still errors honestly — NOT silently bound to a wrong type (§9.19 deferral).
+	T.it("declare_aliases_ordered errors honestly on a genuine mutual cycle (A <-> B)", function()
+		local env = {} --[[: { [string]: Ty } ]]
+		local decls = {
+			{ name = "A", body = "{ b: B }" },
+			{ name = "B", body = "{ a: A }" },
+		}
+		local res = P.declare_aliases_ordered(env, decls)
+		T.fail(res[1].ok and res[2].ok, "a true mutual cycle is NOT silently resolved")
+		T.ok(not res[1].ok or not res[2].ok, "at least one cycle member errors honestly")
+	end)
+
+	T.it("alias_decl_order places a dependency before its dependent", function()
+		local decls = {
+			{ name = "P", body = "Q | nil" },
+			{ name = "Q", body = "{ n: integer }" },
+		}
+		local order = P.alias_decl_order(decls)
+		-- Q (index 2) must come before P (index 1) since P depends on Q.
+		local pos = {} --[[: { [integer]: integer } ]]
+		for k, i in ipairs(order) do pos[i] = k end
+		T.ok(pos[2] < pos[1], "Q is ordered before P (its dependent)")
+	end)
+
 	-- The degenerate non-occurring-binder case (decided + documented in §9.7):
 	-- a μ whose variable never occurs (μX.never, μX.number) is rejected as
 	-- ill-formed — it should be written as its body directly.

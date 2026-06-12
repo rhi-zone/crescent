@@ -150,6 +150,20 @@ T.describe("xmodule: resolve assembles the cross-module alias env", function()
 		T.eq(#r.imports, 0, "no import records")
 	end)
 
+	-- Forward-sibling references INSIDE one exporting module (§6.12, increment 8):
+	-- `server_socket` is declared BEFORE `server_client` but its body names it. The
+	-- import pass installs the module's aliases in dependency order, so both resolve.
+	T.it("a forward-sibling reference inside an exporting module resolves (dependency order)", function()
+		local rf = mem_reader({
+			["lib/sock.lua"] = '--:: server_socket = { fd: integer, peer: server_client | nil }\n'
+				.. '--:: server_client = { fd: integer }\nreturn {}\n',
+		})
+		local r = XM.resolve('--:: require "lib.sock"\n', { read_file = rf })
+		T.ok(r.env.server_socket ~= nil, "server_socket (forward ref) imported")
+		T.ok(r.env.server_client ~= nil, "server_client imported")
+		T.eq(#r.errors, 0, "no export error for the forward-sibling reference")
+	end)
+
 	T.it("a dynamic require still yields a dynamic-require marker, even with a cap", function()
 		local rf = mem_reader({})
 		local r = XM.resolve("local m = require(x)\n", { read_file = rf })

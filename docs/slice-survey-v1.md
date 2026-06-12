@@ -18,8 +18,8 @@ file is CHECKED-CLEAN when all its annotations sit inside v1.
 | Class | Files | Share |
 |---|--:|--:|
 | CHECKED-CLEAN | 489 | 56.4% |
-| CHECKED-FINDINGS | 22 | 2.5% |
-| OUT-OF-SUBSET | 241 | 27.8% |
+| CHECKED-FINDINGS | 23 | 2.7% |
+| OUT-OF-SUBSET | 240 | 27.7% |
 | NO-ANNOTATION | 115 | 13.3% |
 | TIMEOUT | 0 | 0.0% |
 | PARSE-FAIL/OTHER | 0 | 0.0% |
@@ -38,7 +38,7 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 
 | Construct | Files |
 |---|--:|
-| `unknown-type-name` | 152 |
+| `unknown-type-name` | 151 |
 | `trailing-tokens` | 38 |
 | `generic-application` | 36 |
 | `intrinsic-dollar` | 25 |
@@ -57,14 +57,14 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:V4Type` | 12 |
 | `unknown-type-name:StaticType` | 10 |
 | `unknown-type-name:V5Type` | 10 |
+| `unknown-type-name:Ty` | 8 |
 | `unknown-type-name:V5Constraint` | 8 |
 | `unknown-type-name:Pack` | 7 |
-| `unknown-type-name:Ty` | 7 |
 | `unknown-type-name:File` | 5 |
 | `unknown-type-name:Node` | 5 |
 | `unknown-type-name:ai_request` | 5 |
 | `unknown-type-name:AnyEvent` | 4 |
-| `unknown-type-name:CardData` | 4 |
+| `unknown-type-name:CheckDiag` | 4 |
 | `unknown-type-name:Field` | 4 |
 | `unknown-type-name:Scope` | 4 |
 | `unknown-type-name:Subst` | 4 |
@@ -84,6 +84,7 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:ai_embed_request` | 3 |
 | `bare-table (use a record/indexer)` | 2 |
 | `unknown-type-name:ASTNodeArena` | 2 |
+| `unknown-type-name:CardData` | 2 |
 | `unknown-type-name:CharacterBook` | 2 |
 | `unknown-type-name:CharacterBookEntry` | 2 |
 | `unknown-type-name:Element` | 2 |
@@ -111,6 +112,7 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:AltScheme` | 1 |
 | `unknown-type-name:AltState` | 1 |
 | `unknown-type-name:AnnResult` | 1 |
+| `unknown-type-name:AnnState` | 1 |
 | `unknown-type-name:Arb` | 1 |
 | `unknown-type-name:ArrowPackCheck` | 1 |
 | `unknown-type-name:ArrowType` | 1 |
@@ -124,6 +126,7 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:CdeclParser` | 1 |
 | `unknown-type-name:ChanObj` | 1 |
 | `unknown-type-name:ChannelT` | 1 |
+| `unknown-type-name:CheckOpts` | 1 |
 | `unknown-type-name:Child` | 1 |
 | `unknown-type-name:CircleEl` | 1 |
 | `unknown-type-name:CircuitShape` | 1 |
@@ -215,7 +218,7 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:LoopObj` | 1 |
 | `unknown-type-name:LoopTimers` | 1 |
 | `unknown-type-name:LossFn` | 1 |
-| `unknown-type-name:LowerResult` | 1 |
+| `unknown-type-name:LowerOpts` | 1 |
 | `unknown-type-name:Machine` | 1 |
 | `unknown-type-name:MakeApiOpts` | 1 |
 | `unknown-type-name:MetaEl` | 1 |
@@ -261,6 +264,7 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 | `unknown-type-name:SliceBinding` | 1 |
 | `unknown-type-name:Solver` | 1 |
 | `unknown-type-name:SolverError` | 1 |
+| `unknown-type-name:Span` | 1 |
 | `unknown-type-name:SpanEl` | 1 |
 | `unknown-type-name:SpanElement` | 1 |
 | `unknown-type-name:SqliteConn` | 1 |
@@ -325,14 +329,14 @@ imported / `declare`d alias). **This is slice v2's demand ranking.**
 
 | Rank | Construct | Files | Example file |
 |--:|---|--:|---|
-| 1 | `unknown-type-name` | 152 | `lib/actor/init.lua` |
+| 1 | `unknown-type-name` | 151 | `lib/actor/init.lua` |
 | 2 | `trailing-tokens` | 38 | `lib/ansi/init.lua` |
 | 3 | `generic-application` | 36 | `lib/ai/providers/google.lua` |
 | 4 | `intrinsic-dollar` | 25 | `lib/crypto/system.lua` |
 | 5 | `cdata` | 17 | `lib/actor/init.lua` |
 | 6 | `bare-table (use a record/indexer)` | 2 | `lib/type/framework/canonical.lua` |
 
-## CHECKED-FINDINGS (22 files)
+## CHECKED-FINDINGS (23 files)
 
 Files fully within v1 syntax whose annotations the checker REJECTED with no
 out-of-subset construct tag. Each is a real annotation defect, a slice
@@ -352,6 +356,11 @@ diagnostics per file.
   - `{ T }` list shorthand must be a single type; `{ A, B }` is not a v1 table type
 - L309: `--: (SparseGrid, { [integer]: { integer, integer } }) -> nil`
   - `{ T }` list shorthand must be a single type; `{ A, B }` is not a v1 table type
+
+### `lib/formats/ccv2/card.lua`
+
+- L14: `--:: require "lib.formats.ccv2.ccv2_types"`
+  - empty signature directive
 
 ### `lib/http/router/static_full_404.lua`
 
@@ -387,6 +396,11 @@ diagnostics per file.
 
 - L188: `--: (self: Heap) -> {{unknown, unknown}}`
   - `{ T }` list shorthand must be a single type; `{ A, B }` is not a v1 table type
+
+### `lib/platform/apps/charactercardv2/lib/formats/ccv2/card.lua`
+
+- L14: `--:: require "lib.formats.ccv2.ccv2_types"`
+  - empty signature directive
 
 ### `lib/platform/apps/system_dashboard/server.lua`
 
@@ -448,673 +462,14 @@ diagnostics per file.
 - L5: `--: (((string) -> nil, () -> nil) -> (string) -> nil, integer, unknown | nil) -> nil`
   - expected `,` or `)` in tuple
 
-### `lib/type/static-v6/diagnostics.lua`
-
-- L6: `--:: require "lib.type.static-v6.type_defs"`
-  - empty signature directive
-
 ## What v2 should build first (a reading of the histogram)
 
 Demand-ordered, no design — design happens against this doc separately.
 
-1. **`unknown-type-name`** — blocks 152 files (17.5% of corpus).
+1. **`unknown-type-name`** — blocks 151 files (17.4% of corpus).
 2. **`trailing-tokens`** — blocks 38 files (4.4% of corpus).
 3. **`generic-application`** — blocks 36 files (4.2% of corpus).
 4. **`intrinsic-dollar`** — blocks 25 files (2.9% of corpus).
 5. **`cdata`** — blocks 17 files (2.0% of corpus).
 6. **`bare-table (use a record/indexer)`** — blocks 2 files (0.2% of corpus).
 
-
-<!-- ════════════════════════════════════════════════════════════════════════
-     HISTORY — appended by hand. The GENERATED content above is the ANNOTATION-
-     grammar survey RE-RUN after slice v2 **increment 2** landed (cross-module
-     type-alias resolution); the figures above ARE the post-increment-2 numbers.
-     The blocks below record the running history: increment 1's delta from the v1
-     baseline, then increment 2's delta from increment 1 (the "After v2 increment 2"
-     block near the end).
-════════════════════════════════════════════════════════════════════════════ -->
-
-## After v2 increment 1 (annotation survey delta)
-
-Slice v2 increment 1 (`docs/agnostic-static-analysis-crescent-slice.md` §6.5)
-landed the annotation-grammar reach the v1 histogram ranked at the top. Re-running
-the annotation survey:
-
-| Metric | v1 baseline | after v2 increment 1 |
-|---|--:|--:|
-| CHECKED-CLEAN | 230 (26.6%) | **483 (55.8%)** |
-| CHECKED-FINDINGS | 14 (1.6%) | 11 (1.3%) |
-| OUT-OF-SUBSET | 505 (58.4%) | **257 (29.7%)** |
-| NO-ANNOTATION | 115 (13.3%) | 115 (13.3%) |
-
-**CHECKED-CLEAN more than doubled (26.6% → 55.8%); OUT-OF-SUBSET halved (58.4% →
-29.7%).** The increment closed the measured top of the demand histogram:
-
-- `named-param` (266 files) and `named-param-self` (128) — **gone**: named/`self`
-  parameters now parse, names riding `Params` interner-invisibly (§6.5.1/§6.5.2).
-- `array-postfix` `T[]` (88 files) — **gone**: desugars to `{ [integer]: T }`
-  (§6.5.3); `{ T }` list shorthand desugars to the identical canonical form
-  (§6.5.4).
-- The CHECKED-FINDINGS sub-patterns the v1 survey flagged — multi-line `--::`
-  table aliases, union-of-multi-return-tuples `(A, B) | (nil, string)`, and
-  `{ T }` list shorthand — are all **resolved** (the ed25519/finite_field/pem/
-  nat_lang/event/asm-ir/platform-types/ccv2 findings cleared).
-
-**The new #1 demand is `unknown-type-name` (172 files): cross-module / unresolved
-type aliases — explicitly INCREMENT 2's headline item.** It is NOT an
-annotation-grammar gap; it is the `require`-boundary / cross-module alias
-resolution the slice trusts rather than checks (§2.5, §9.2). The residual
-CHECKED-FINDINGS (11 files) are new, deeper residue surfaced by the increased
-reach — none a checker soundness bug:
-
-1. **2-element tuple-as-table-element** `{ [integer]: { A, B } }` /  `{{A, B}}`
-   (`lib/automata_2d`, `lib/interpolation_curves`, `lib/knn`, `lib/pairing_heap`):
-   `{ A, B }` as a *table element type* is a positional tuple-TYPE; v1 admits
-   tuples only in function param/return position (§6.5.4/§6.5.5), so `{ A, B }` as
-   a record/list element is rejected. → increment 2 (a tuple-type in table
-   position, distinct from the return-position tuple this increment added).
-2. **generic type application in annotations** `<T>(...)` / `<O>(...)`
-   (`lib/query_builder`, `lib/rate_limiter`) — the fenced `generic-application`
-   construct (§1.4), unchanged.
-3. **deeply nested function types in tuples** (`lib/mud_cp`, `lib/reactive_store`,
-   `lib/tcp/server`) — `expected , or )` on a nested `(...) -> (...)` inside a
-   tuple; an adapter parse-recovery gap, recorded for increment 2.
-
-The demand front for increment 2 is therefore: **cross-module / unresolved alias
-resolution (172 files, the dominant remaining annotation-grammar gap)**, then
-generic application, then the tuple-type-in-table-position residue.
-
-<!-- ════════════════════════════════════════════════════════════════════════
-     v1 END-TO-END (Pass 5) — appended by hand; the generated content above is
-     the ANNOTATION-grammar survey (the prior measurement, §10.1). This section
-     records the END-TO-END measurement: the statement-lowering frontend
-     (crescent_slice_lower) driven over the same corpus. Re-run:
-       bin/cr run lib/type/analysis/slice_survey.lua --e2e
-════════════════════════════════════════════════════════════════════════════ -->
-
-## v1 end-to-end (Pass 5: the statement-lowering frontend)
-
-The section above measures only the `--:`/`--::` annotation seam. **Pass 5** built
-the missing driver — `lib/type/analysis/crescent_slice_lower.lua` — that lowers a
-real Lua source file's **statements** (§5's subset) into the slice's artifact +
-claim/evidence graph, then runs it through the substrate. This is the honest
-end-to-end measurement: a file is CHECKED-CLEAN only when its annotations **and**
-its checked statements both sit inside v1 (0 out-of-subset markers, every requested
-claim accepted).
-
-**End-to-end headline split (865 files, per-file budget 5s).**
-
-| Class | Files | Share |
-|---|--:|--:|
-| CHECKED-CLEAN | 3 | 0.3% |
-| CHECKED-FINDINGS | 3 | 0.3% |
-| OUT-OF-SUBSET | 853 | 98.6% |
-| NO-ANNOTATION | 5 | 0.6% |
-| TIMEOUT | 1 | 0.1% |
-| PARSE-FAIL/OTHER | 0 | 0.0% |
-
-The CHECKED-CLEAN number collapses from the annotation-only **26.6%** to **0.3%**.
-This is honest data, not a regression: the §5 **statement** subset is far narrower
-than the annotation grammar alone. A file passes the annotation survey if every
-`--:`/`--::` type parses; it passes the end-to-end survey only if every *checked
-statement* is also in-subset — and real `lib/` code is saturated with operators
-(`+`, `..`), stdlib/global access (`require`, `package`, `tostring`), method calls
-(`o:m()`), `t[e] = v` writes, multi-assignment, and unannotated closures, none of
-which §5 admits.
-
-**The end-to-end out-of-subset construct ranking (collapsed, most-blocking first).**
-
-| Rank | Construct | Files | What it is |
-|--:|---|--:|---|
-| 1 | `expr` / `exprstmt` | 740 / 723 | an expression/statement form outside §5's node grammar |
-| 2 | `paren` | 700 | a parenthesized sub-expression the lowering does not yet thread |
-| 3 | `operator-concat` | 698 | `..` string concatenation (no operator synth, §1.4) |
-| 4 | `assign` / `field-assign` | 696 / 430 | assignment forms beyond a single in-subset record write |
-| 5 | `if` | 692 | an `if` whose test/body reaches an out-of-subset form |
-| 6 | `unbound-name:package` / `require` | 681 / 393 | module/global access (no global model; caps-first, §CLAUDE) |
-| 7 | `unannotated-function` | 464 | a function definition without a `--:` signature (§7.1 requires one) |
-| 8 | `multi-assign` | 241 | `local a, b = ...` beyond the single multi-return-call slot form |
-| 9 | `named-param` | 232 | `name: T` parameters (positional-only in v1; the annotation survey's #1 too) |
-| 10 | `method-call` | 214 | `o:m(...)` (no method-call synth rule) |
-| 11 | `operator-arith:+` | 202 | numeric `+` (no operator synth, §1.4) |
-
-Read it (demand only, no design): the v1 statement subset's largest gaps are
-**operator typing** (`..`, `+` — §1.4 metamethod deferral), **global/module access**
-(`require`/`package` — needs a caps/global model), **unannotated-function inference**
-(the §10 local-inference edge), and **assignment forms** (multi-assign,
-field-path/dynamic-key writes). These rank the §6-statement-lowering work the way the
-annotation survey ranked the type-grammar work.
-
-**Findings (chased to root cause, per the no-papering rule).**
-
-1. **Parser non-termination on real code (FIXED).** The first corpus file
-   (`lib/actor/init.lua`) hung the statement parser indefinitely. Root cause: a
-   statement that emits an out-of-subset marker (e.g. a method call inside an `if`
-   test, or a stray `then` reached as a statement start) could return **without
-   consuming the token that confused it**, so `parse_block`'s loop spun forever on
-   the unconsumed token. Fixed with a **progress guard**: `parse_block` records
-   `pos` before each `parse_statement` and force-advances one token when it did not
-   move — the standard recursive-descent recovery invariant. This was a genuine
-   high-value finding the hand-built corpus never exercised (it never ran the
-   parser).
-
-2. **Large-graph scaling — substrate loop fixed; residual TIMEOUT now
-   hosted-checker-bound.** `lib/type/v7_mr0/init.lua` lowers to 713 requested
-   claims (2724 claims/evidence) and remains the survey's single TIMEOUT against
-   the 5s per-file budget — but the root cause has moved. The substrate's `A.check`
-   fixpoint was originally O(sweeps × evidence) (it re-swept every pending evidence
-   each round) **and** re-serialized deep claim args on every accepted-ness probe.
-   Both are now fixed (`perf(analysis)`, `docs/perf/log.md` 2026-06-12): the loop is
-   a dependency-driven worklist that re-queues only the dependents of a
-   newly-accepted claim, and structural keys are memoized per check. A synthetic
-   reverse-order chain confirms the loop is now linear (5 000 claims: 5.26s →
-   0.011s, ~460×); the real file dropped 21.6s → 14.5s. The remaining 14.5s splits
-   ~5.3s substrate (the one-time structural serialization of 2724 deep claim args —
-   the floor imposed by structural claim identity) and ~8.5s **inside the hosted
-   slice checker** (repeated `parse_ctx`/`parse_type`/`subtype` on claim args). So
-   the TIMEOUT is no longer a substrate-loop defect; it is a hosted-semantics
-   performance follow-up (memoize the slice checker's per-call arg parsing/subtype
-   work), which the substrate must not reach into. Out of substrate scope; recorded
-   for the slice semantics.
-
-   **Update (2026-06-12, hosted-checker pass; `perf(analysis)`, `docs/perf/log.md`).**
-   The hosted-semantics follow-up landed. Profiling the hosted layer corrected the
-   prior guess: the cost was repeated `TA.decode` of shared PTy claim args (203k
-   calls) and repeated context serialization for Γ-equality (`A._serialize` 1.7k
-   calls, ~4.1s) — `subtype` was negligible (518 calls), so no subtype memo was
-   built. Per-run memoization (decode keyed on arg-table identity; a Γ canonical key
-   built from interned `(name, tid)` pairs instead of decode→re-encode→serialize)
-   cut the lowered `v7_mr0` check **14.5s → ~5.5s (~2.5×)**, eliminating the hosted
-   layer's instrumented cost (`_serialize` 1.7k → 0 calls). The residual ~5.5s was
-   then the SUBSTRATE structural-serialization floor (the substrate's own `claim_key`
-   over 2724 deep claim args).
-
-   **Update (2026-06-12, substrate pass; `perf(analysis)`, `docs/perf/log.md`) —
-   TIMEOUT CLEARED.** The substrate floor is now removed. `claim_key`'s serializer
-   takes an optional per-check content-address intern table that memoizes each arg
-   SUBTREE's serialization by table identity, so a subtree reached more than once
-   (the same encoded type recurring across ~49-binding contexts and across claims)
-   serializes once for the whole check rather than once per containing claim. On the
-   lowered `v7_mr0` arg trees this collapses ~8.05M structural table visits to ~188k
-   distinct tables (~43× fewer serializations); the cold single `A.check` drops
-   **5.5s → 0.70s (~7.9×)**. Claim identity is unchanged — the interned serialization
-   is byte-identical to the un-interned one, so two claims are the same claim iff
-   their structural serialization is equal, exactly as before (the STLC/substrate
-   claim-identity probes and all shuffled-order tests are the guard, all green). With
-   the file now well under the 5s budget, the survey's **single TIMEOUT clears: 1 →
-   0** (full e2e re-run, 866 files, 0 TIMEOUT). The large-graph scaling finding is
-   fully resolved end-to-end: worklist (loop), hosted memoization (semantics layer),
-   and content-addressed keys (substrate floor) together.
-
-3. **Multi-line `--::` table aliases (the 3 CHECKED-FINDINGS).** All three
-   CHECKED-FINDINGS (`lib/formats/ccv2/ccv2_types.lua` and its app mirror,
-   `lib/platform/platform_types.lua`) are the **single-line-scan limitation**
-   (§9.3 finding 5) surfacing on wrapped `--:: Name = {` declarations — an
-   `alias-error`, not a checker soundness gap. Same residue the annotation survey
-   recorded; the end-to-end pass inherits it unchanged.
-
-## v1 end-to-end — after v2 increment 1
-
-Re-running the end-to-end (`--e2e`) survey after increment 1:
-
-| Class | v1 baseline | after v2 increment 1 | after substrate pass |
-|---|--:|--:|--:|
-| CHECKED-CLEAN | 3 (0.3%) | **5 (0.6%)** | 5 (0.6%) |
-| OUT-OF-SUBSET | 853 (98.6%) | 854 (98.6%) | **855 (98.7%)** |
-| TIMEOUT | 1 | 1 | **0** |
-
-CHECKED-CLEAN rose 3 → 5: named/`self` parameters now lower in statement bodies
-(a body that references its parameters by name is in §5's reach). The end-to-end
-ranking is otherwise unchanged — it is dominated by STATEMENT-lowering gaps
-(operators `..`/`+`, global/module access `require`/`package`,
-unannotated-function inference, assignment forms, method calls), which increment 1
-did not touch (it is annotation-grammar + frontend reach, not operator/global/
-statement typing). `named-param` has dropped OUT of the end-to-end top ranking (it
-was #9 at 232 files; now lowered). The statement-lowering gaps remain the e2e
-build order for later increments.
-
-**After the substrate content-addressed-key pass (finding 2 update):** the single
-TIMEOUT clears (`lib/type/v7_mr0/init.lua` now checks in ~0.70s vs the 5s budget).
-It does not become CHECKED-CLEAN — the file is saturated with out-of-subset
-statement forms — so it reclassifies TIMEOUT → OUT-OF-SUBSET (853→855 across both
-passes). The survey now has **zero TIMEOUT**: no remaining file exceeds the per-file
-budget, and the e2e headline is entirely statement-lowering-bound, with no
-performance residue in the substrate or hosted layers.
-
-<!-- ════════════════════════════════════════════════════════════════════════
-     AFTER v2 INCREMENT 2 — appended by hand. Records the cross-module type-alias
-     resolution delta (the GENERATED content at the top of this file is now the
-     post-increment-2 annotation survey).
-════════════════════════════════════════════════════════════════════════════ -->
-
-## After v2 increment 2 (cross-module type-alias resolution)
-
-Slice v2 increment 2 (`docs/agnostic-static-analysis-crescent-slice.md` §6.6)
-landed cross-module type-alias resolution — the measured #1 demand. The resolver
-(`crescent_slice_xmodule.lua`) imports a required module's top-level `--::` aliases
-into the entry file's annotation scope, via two triggers both present in real
-`lib/` source: the `--:: require "lib.x"` type-only directive (the dominant idiom,
-48 files) and the value-`require("lib.x")` form (the original fixture's
-tcp_client+epoll shape). Imported aliases enter under their bare declared names
-(flat, unqualified — the only form the corpus uses). Caps-first: the file reader is
-an injected `read_file` capability, never an `io` reach inside the library.
-
-**Annotation survey re-run** (the generated top of this file):
-
-| Metric | after v2 increment 1 | after v2 increment 2 |
-|---|--:|--:|
-| CHECKED-CLEAN | 483 (55.8%) | **489 (56.4%)** |
-| CHECKED-FINDINGS | 11 (1.3%) | 22 (2.5%) |
-| OUT-OF-SUBSET | 257 (29.7%) | **241 (27.8%)** |
-| NO-ANNOTATION | 115 (13.3%) | 115 (13.3%) |
-| `unknown-type-name` files | 172 | **152** |
-
-**`unknown-type-name` collapsed 172 → 152 (−20 files); OUT-OF-SUBSET fell
-29.7% → 27.8%.** Honest numbers, not a hand-wave: the resolution fires exactly for
-the files whose unresolved name is a *resolvable cross-module idiom* — a name
-declared as a TOP-LEVEL `--::` alias in a module the file `require`s (the
-`--:: require` directive resolves the whole taskgraph cluster: `combinators.lua`
-now sees `TaskDef`, `TaskNode`, `Graph`, `Context`, … by bare name). The **152
-residue is genuine**, as the increment-1 block anticipated:
-
-- Names with NO `--:: require` / value-require source — they rely on the legacy
-  checker's own deeper-scope `--:: require`-into-non-required-module or `declare`
-  mechanisms, OR are defined locally-but-out-of-subset. `lib/actor/init.lua` (the
-  former #1 example) has **0** cross-module imports — its `unknown-type-name` is a
-  `cdata`-adjacent / `declare`d type, not a require-resolvable alias.
-- `Ctx` (26 files, the largest single name) is referenced in `lib/type/static/`
-  rules files whose requires do NOT top-level-export a `Ctx` alias — it is resolved
-  by the legacy checker through a path the slice's top-level-alias import does not
-  reach. Genuine residue, recorded honestly, not forced.
-
-The CHECKED-FINDINGS rise (11 → 22) is the *expected* consequence of resolving
-names: a previously-`unknown-type-name` (OUT-OF-SUBSET) file whose alias now
-resolves can surface a deeper annotation finding (e.g. the tuple-type-in-table
-residue the increment-1 block flagged) — it moved from OUT-OF-SUBSET to
-CHECKED-FINDINGS because its blocking unknown-name is gone. None is a checker
-soundness bug.
-
-**End-to-end survey** (`--e2e`): the cross-module read cap is now injected into the
-lowering driver, so lowered annotations resolve cross-module too. CHECKED-CLEAN is
-unchanged (5) — the e2e path is dominated by STATEMENT-lowering gaps (operators
-`..`/`+`, global/module access `require`/`package`, unannotated-function inference,
-assignment forms), which cross-module *alias* resolution does not touch. The e2e
-ranking is otherwise unchanged.
-
-**The true cross-module fixture** (the tcp_client+epoll pattern the original
-`fixture_cross_module_type_alias.lua` named but could only approximate in-file) is
-now a two-file corpus fixture (`corpus/xmod/tcp_client.lua` + `corpus/xmod/epoll.lua`):
-`Epoll` is declared in the exporting module and referenced by bare name in the
-entry's annotation, resolving across the `require` boundary with the resolution
-recorded as a visible `cross_module_alias` trust boundary. End-to-end assertions in
-`crescent_slice_xmodule_test.lua` (36 assertions).
-
-**Substrate untouched.** Cross-module resolution is a pure consumer of the
-multi-artifact object model: the exporting module's source enters as an Artifact,
-its aliases as Observations, the cross-artifact hop as a `cross_module_alias`
-TrustBoundary, and each consuming claim's reliance as a Dependency with a populated
-`invalidation` field — all via the EXISTING substrate API. No new object kind, no
-new claim predicate, no new evidence method, no `init.lua` change. See §9.10.
-
-<!-- ════════════════════════════════════════════════════════════════════════
-     AFTER v2 INCREMENT 3 — appended by hand. Records the end-to-end
-     statement-coverage front delta (operator typing, assignments, method calls,
-     unannotated functions, the injected stdlib cap). This is an END-TO-END
-     (--e2e) delta; the GENERATED annotation survey at the top is unchanged by
-     increment 3 (it is statement-lowering, not annotation-grammar, work).
-════════════════════════════════════════════════════════════════════════════ -->
-
-## After v2 increment 3 (the end-to-end statement-coverage front)
-
-Slice v2 increment 3 (`docs/agnostic-static-analysis-crescent-slice.md` §6.7)
-landed the measured top of the **end-to-end** histogram: operator typing
-(`synth_binop`/`synth_unop`, metatable-free, §6.7.1), assignment forms
-(multi-assign / swap / indexer-typed dynamic-key write, §6.7.4), method calls
-(`o:m(args)` desugar to `o.m(o, args)`, §6.7.5), unannotated functions (params
-`unknown`, return body-synthesized, §6.7.3), and the injected stdlib cap
-(`tonumber`/`string`/`math`, caps-first, §6.7.2). Two new evidence methods only
-(`synth_binop`, `synth_unop`); everything else is lowering reach over existing
-methods. Substrate untouched (`init.lua` byte-for-byte).
-
-**End-to-end survey re-run** (`--e2e`, 868 files, per-file budget 5s, the survey
-now injects the §6.7.2 stdlib cap):
-
-| Class | after v2 incr 2 (substrate pass) | after v2 increment 3 |
-|---|--:|--:|
-| CHECKED-CLEAN | 5 (0.6%) | 5 (0.6%) |
-| CHECKED-FINDINGS | 0 | 0 |
-| OUT-OF-SUBSET | 855 (98.7%) | 856 (98.7%) |
-| NO-ANNOTATION | 6 (0.7%) | 6 (0.7%) |
-| TIMEOUT | 0 | 0 |
-
-**The whole-file CHECKED-CLEAN headline stays at 5 (0.6%) — and that is the
-honest, load-bearing finding of this increment.** A file is whole-file CLEAN only
-when EVERY checked statement is in-subset; the e2e metric is gated by the LAST
-out-of-subset construct in each file. The increment moved the *construct
-histogram* dramatically — but the long tail of GLOBALS, ANONYMOUS CLOSURES, and
-multi-return/dynamic-key forms still leaves at least one out-of-subset construct
-in nearly every real `lib/` file. The construct demand ranking is the real delta:
-
-| Rank | after incr 2 | files | after incr 3 | files | what moved |
-|--:|---|--:|---|--:|---|
-| top | `operator-concat` | 702 | `unbound-name:package` | 683 | operators GONE; globals now the front |
-| | `operator-arith:+` | 286 | `field-assign` | 514 | arith typed; assignment forms surface deeper |
-| | `method-call` | 214 | `dynamic-index` | 500 | method calls GONE (desugared) |
-| | `unannotated-function` | 471 | `multi-assign` | 435 | named funcs GONE; multi-assign reaches further |
-| | `named-param` | (gone incr 1) | `multi-return` | 429 | return-tuple statement form is the next item |
-
-Operators (`operator-concat`/`operator-arith:+`), `method-call`, and
-`unannotated-function` (named) have all DROPPED OUT of the top ranking. The
-residual `operator-metamethod-arith` (177) and `operator-metamethod-len` (125) are
-the GENUINE metatable-dependent operand cases (table + table, `#` on a non-string
-non-table) — out-of-subset **deferrals** with un-defer triggers (§1.4 posture),
-NOT type-error claims. The new front is:
-
-1. **Globals / module access** — `unbound-name:package` (683), `require` (409),
-   `table` (324), `setmetatable` (223), `pcall` (140). The injected stdlib cap
-   covers `tonumber`/`string`/`math`; the broader global model and
-   `require(...)`-returns-the-module-VALUE-type synthesis (§6.7.2's M-table
-   convention over the exporting module) is the dependency-honest TAIL of this
-   increment, recorded below.
-2. **Assignment / multi-return statement forms** — `field-assign` (514),
-   `dynamic-index` (500) / `dynamic-index-assign` (412) over non-indexer tables,
-   `multi-assign` (435), `multi-return` (429, the return-statement tuple form).
-3. **Anonymous closures** — `unannotated-closure` (393): an unannotated `function(x)
-   … end` in EXPRESSION position (distinct from the unannotated NAMED functions
-   this increment closed — those bind `unknown` params + body-synthesized return).
-   The §10 local-inference edge for the *expression-position* closure remains.
-
-**Corpus fixture movements** (the load-bearing `corpus_lower_test`, which lowers
-WITHOUT the stdlib cap — caps-first):
-
-- `boolean_narrowing` OUT-OF-SUBSET → **CLEAN**: `n == 0 and 1 / n < 0` types as
-  `boolean` (operators landed; `/` ⇒ number, `<`/`==` ⇒ boolean, `boolean and
-  boolean` ⇒ boolean).
-- `coinductive_recursive_types` OUT-OF-SUBSET → **FINDINGS**: operators unblocked
-  `s + tree_sum(...)`, so the lowering now REACHES the `tree_sum(node.left)` call —
-  and `node.left : TreeNode | nil` legitimately fails `<: TreeNode` because v1
-  narrows a VARIABLE, not a FIELD PATH (`if node.left then` does not refine
-  `node.left`). An HONEST type-mismatch from the field-path-narrowing deferral, NOT
-  a soundness bug: every REQUESTED claim still accepts (0 rejections). Field-path
-  narrowing is the recorded un-defer trigger.
-- `tonumber_return_type` is **CLEAN with the stdlib cap injected** (the survey path)
-  and stays OUT-OF-SUBSET without it (the corpus-test path) — the caps-first
-  posture made visible.
-
-The honest corpus split under real lowering moved **2 CLEAN / 9 OUT-OF-SUBSET → 3
-CLEAN / 1 FINDINGS / 7 OUT-OF-SUBSET**, 0 rejections anywhere. Full analysis suite
-green at 6282 assertions (6226 + 56 new); 0 TIMEOUT in the e2e survey; the touched
-files typecheck clean. Findings in §9.12.
-
-<!-- ════════════════════════════════════════════════════════════════════════
-     AFTER v2 INCREMENT 4 — appended by hand. Records the end-to-end delta from
-     the globals model + module-value-type synthesis + unannotated closures
-     (§6.8). END-TO-END (--e2e) delta; the GENERATED annotation survey at the top
-     is unchanged by increment 4 (it is statement-lowering, not annotation-grammar,
-     work). Re-run: bin/cr run lib/type/analysis/slice_survey.lua --e2e
-════════════════════════════════════════════════════════════════════════════ -->
-
-## After v2 increment 4 (globals model + module-value-type synthesis + unannotated closures)
-
-Slice v2 increment 4 (`docs/agnostic-static-analysis-crescent-slice.md` §6.8)
-landed the measured new e2e front and the §10.4 module-value-type TAIL: the
-extended stdlib globals cap (`type`/`print`/`error`/`package`/`table`/`os`/`io`/
-`pcall`/`assert`/`setmetatable`/`select`/`next`/`rawget`/… as injected `opts.stdlib`
-bindings, §6.8.1), expression-position closures with **check-mode** typing (the
-expected `fn` param types pushed onto the closure params, §6.8.3), and
-`require("lib.y")`-returns-the-module-VALUE-type synthesis (the M-table `rec`
-accumulated over `function M.f` / `M.f = …`, resolved by recursively lowering the
-exporting module through the existing cap-injected xmodule machinery, §6.8.2).
-**ZERO new evidence methods** — the whole increment is lowering reach over the
-existing methods. Substrate untouched (`init.lua` byte-for-byte).
-
-**End-to-end survey re-run** (`--e2e`, 867 files, per-file budget 5s, the survey
-injects the §6.8.1 stdlib cap and the §6.8.2 read_file cap):
-
-| Class | after v2 increment 3 | after v2 increment 4 |
-|---|--:|--:|
-| CHECKED-CLEAN | 5 (0.6%) | **22 (2.5%)** |
-| CHECKED-FINDINGS | 0 | 6 (0.7%) |
-| OUT-OF-SUBSET | 856 (98.7%) | **833 (96.1%)** |
-| NO-ANNOTATION | 6 (0.7%) | 6 (0.7%) |
-| TIMEOUT | 0 | **0** |
-
-**The whole-file CHECKED-CLEAN headline finally broke off the increment-3 floor:
-5 → 22 (0.6% → 2.5%), ~4.4×.** This is THE headline of the increment — the e2e
-gate (every checked statement in-subset) had been pinned at 5 by the GLOBALS +
-anonymous-closures + require tail through increment 3, and increment 4 lands exactly
-that tail, so files saturated with stdlib calls, in-`lib/` requires, and callback
-closures now go whole-file CLEAN. CHECKED-FINDINGS rose 0 → 6 (deeper boundaries
-surfaced by the increased reach — e.g. a resolved-require module whose later field
-access is an honest field-path-narrow type-mismatch; none a checker soundness bug).
-
-**TIMEOUT root cause found and fixed (the "something unexpected is a signal"
-discipline).** The first un-memoized draft of the recursive module-type precompute
-re-lowered each transitively-required module from scratch at every diamond node, so
-a require-heavy file (`lib/type/static/check.lua`) fanned out exponentially under the
-depth-6 bound — **74.76s**, far over the 5s budget (a termination bug, not a slow
-case) — and the survey spiked to **21 TIMEOUTs**. Root cause: NO cross-module
-memoization. Fixed with a **shared PTy cache** keyed by module path, threaded through
-the whole recursion: each distinct module's value type is computed at most once per
-top-level entry. `check.lua` dropped **74.76s → 0.79s (~95×)**; the survey's TIMEOUTs
-cleared **21 → 0**.
-
-**The construct demand ranking is the new e2e front** (most-blocking first):
-
-| Rank | after incr 3 | files | after incr 4 | files | what moved |
-|--:|---|--:|---|--:|---|
-| top | `unbound-name:package` | 683 | `dynamic-index` | 589 | globals GONE (stdlib cap + require); assignment/index forms now the front |
-| | `field-assign` | 514 | `multi-return` | 482 | the return-tuple statement form |
-| | `dynamic-index` | 500 | `dynamic-index-assign` | 477 | dynamic-key writes over non-indexer tables |
-| | `multi-assign` | 435 | `multi-assign` | 466 | multi-target assignment reaching further |
-| | `unannotated-closure` | 393 | `unbound-name:require` | 224 | closures GONE; residual non-lib/dynamic requires |
-
-`unbound-name:package`/`table`/`setmetatable`/`pcall` (the globals front), and
-`unannotated-closure` (393) have all DROPPED OUT of the top ranking — the stdlib cap
-covers the globals and check-mode closures lower the anonymous functions.
-`unbound-name:require` fell 409 → 224: the in-`lib/` static requires now resolve to
-their module value type; the 224 residue is the non-lib (`bit`/`ffi`), dynamic
-(`require(var)`), and out-of-subset-returning requires that legitimately do not
-resolve (never a silent success). The residual `operator-metamethod-arith` (202),
-`operator-metamethod-len` (160), `operator-metamethod-concat` (136) are the GENUINE
-metatable-dependent operand cases — out-of-subset **deferrals** with un-defer
-triggers (§1.4 posture), NOT type-error claims. The new dependency-honest front is the
-**assignment / multi-return statement family** (`dynamic-index`, `multi-return`,
-`dynamic-index-assign`, `multi-assign`).
-
-**Corpus fixture movements** (the load-bearing `corpus_lower_test`, which lowers
-WITHOUT the stdlib cap — caps-first): the two closure-boundary fixtures moved off
-the `unannotated-closure` marker — `closure_param_typing` now lowers its closures
-(both the synthesis-mode `function() return nil end` and the check-mode
-`function(s) return { kind = "a" } end` flowing into the `(Signal) -> Node` slot)
-and hits the NEXT boundary `multi-return` (the `return node, function() end`
-statement form); `cross_module_type_alias`'s inner `wait = function() end` closure
-lowers, leaving the field-path / assignment-in-branch narrowing boundary
-(`no-such-field`). 0 rejections anywhere. Full analysis suite green at 6328
-assertions (6282 + 46 new); 0 TIMEOUT in the e2e survey; the touched lib file
-typechecks clean. Findings in §9.13.
-
-<!-- ════════════════════════════════════════════════════════════════════════
-     AFTER v2 INCREMENT 5 — appended by hand. Records the end-to-end delta from
-     the multi-return / dynamic-index statement family (§6.9). END-TO-END (--e2e)
-     delta; the GENERATED annotation survey at the top is unchanged by increment 5
-     (it is statement-lowering, not annotation-grammar, work).
-     Re-run: bin/cr run lib/type/analysis/slice_survey.lua --e2e
-════════════════════════════════════════════════════════════════════════════ -->
-
-## After v2 increment 5 (the multi-return / dynamic-index statement family)
-
-Slice v2 increment 5 (`docs/agnostic-static-analysis-crescent-slice.md` §6.9)
-landed the measured top of the e2e histogram after increment 4 (`dynamic-index`
-589 files, `multi-return` 482, `dynamic-index-assign` 477, `multi-assign` 466).
-**Diagnosis first** (sampled 15 real sites/tag across `lib/`): the tag names hid
-the residual sub-shapes — `dynamic-index` was overwhelmingly `t[expr]` READS the
-lowering rejected wholesale (never reaching `index_result`); `multi-return` was
-the `return a, b` STATEMENT (the §6.5.5 `tuple`'s first statement producer);
-`multi-assign`'s residue was the **method-call / call last RHS value**
-(`n, err = r:read()`) `flatten_values` never spread; `dynamic-index-assign`'s
-residue was the **closed-rec dynamic write**. The increment closes each from the
-value universe: one new `index_result` RESULT rule (closed rec under a dynamic key
-⇒ `union(fields) | nil`, the closed-row dual of the open-row `unknown`), one new
-evidence method (`synth_tuple`, the dual of `synth_table` for the return-position
-value sequence — the §6.9 design was corrected from "zero new methods" to this one
-when the substrate showed a tuple needs a synthesis rule, recorded honestly), and
-lowering reach for the rest. **No substrate change** (`init.lua` byte-for-byte).
-
-**End-to-end survey re-run** (`--e2e`, 868 files, per-file budget 5s, the survey
-injects the stdlib + read_file caps):
-
-| Class | after v2 increment 4 | after v2 increment 5 |
-|---|--:|--:|
-| CHECKED-CLEAN | 22 (2.5%) | **25 (2.9%)** |
-| CHECKED-FINDINGS | 6 (0.7%) | 9 (1.0%) |
-| OUT-OF-SUBSET | 833 (96.1%) | **828 (95.4%)** |
-| NO-ANNOTATION | 6 (0.7%) | 6 (0.7%) |
-| TIMEOUT | 0 | **0** |
-
-**The whole-file CHECKED-CLEAN headline rose 22 → 25 (2.5% → 2.9%).** The honest,
-load-bearing finding: this is a smaller whole-file jump than increment 4's 5 → 22,
-because the e2e gate is the LAST out-of-subset construct in each file, and the
-multi-return / dynamic-index family files are SATURATED with several remaining
-blockers each — closing this family moves the *construct histogram* far more than
-the whole-file gate. The per-construct demand (files in which the tag blocks ≥1
-construct) is where the real movement shows:
-
-| Construct | after incr 4 | after incr 5 | delta |
-|---|--:|--:|--:|
-| `dynamic-index` (read) | 589 | **512** | −77 |
-| `multi-return` (statement) | 482 | **317** | −165 |
-| `dynamic-index-assign` | 477 | 482 | +5 (deeper reach) |
-| `multi-assign` | 466 | **450** | −16 |
-
-`multi-return` fell hardest (−165): the `return a, b` statement is now in-subset
-wherever its values are. `dynamic-index` reads fell −77 (the indexer / closed-rec
-reads that resolve; the residue is reads over `unknown`/`call-non-function`
-objects). `dynamic-index-assign` rose slightly (+5) — the increased reach lowers
-MORE statements before hitting a dynamic write, surfacing the marker in files that
-previously blocked earlier; the homogeneous closed-rec write IS now in-subset
-(corpus tests), and the heterogeneous case is the recorded §9.15 deferral. The new
-e2e front (most-blocking after this family) is `call-non-function` (259, calling an
-`unknown`-typed value), `iterate-non-table` / `general-iterator` (211 / 118, the
-`for in pairs(t)` generic-for over non-table or with a stdlib iterator), and the
-string-method `no-such-field:sub`/`gsub`/`match` (182 / 125 / 108, `s:sub(...)` on
-`unknown` — a stdlib-string-method-on-a-value follow-up).
-
-**Corpus fixture movements** (the load-bearing `corpus_lower_test`, WITHOUT the
-stdlib cap — caps-first): `closure_param_typing` moved OUT-OF-SUBSET → **CLEAN** —
-`return node, function() end` now lowers (the §6.5.5 tuple built at the return
-site), which was its LAST boundary; `with_scope` is unannotated (capture path), and
-v1's loose synthesis types the closure args without rejection. The honest 11-fixture
-split moved **3 CLEAN / 1 FINDINGS / 7 OUT-OF-SUBSET → 4 CLEAN / 1 FINDINGS / 6
-OUT-OF-SUBSET**, 0 rejections anywhere. New direct sub-form tests (inline sources):
-dynamic-index read over an indexer (CLEAN), over a closed rec ⇒ `union(fields)|nil`
-(CLEAN), multi-return statement checked against a declared tuple return and against
-a §6.5.5 union-of-tuples member (CLEAN), multi-assign spreading a call return
-(CLEAN) and a METHOD-CALL return (the dominant `n, err = r:read()` idiom, CLEAN),
-and dynamic-index write over a homogeneous closed rec (CLEAN) vs a heterogeneous one
-(OUT-OF-SUBSET, the §9.15 deferral). Full analysis suite green at 6421 assertions
-(6374 + 47 new); 0 TIMEOUT in the e2e survey; both touched lib files typecheck clean.
-Findings in §9.15.
-
-<!-- ════════════════════════════════════════════════════════════════════════
-     AFTER v2 INCREMENT 6 — appended by hand. END-TO-END (--e2e) delta from the
-     empty-fresh-table dynamic write (§6.10). The GENERATED annotation survey at the
-     top is unchanged (this is statement-lowering, not annotation-grammar, work).
-     Re-run: bin/cr run lib/type/analysis/slice_survey.lua --e2e
-════════════════════════════════════════════════════════════════════════════ -->
-
-## After v2 increment 6 (the empty-fresh-table dynamic write)
-
-Slice v2 increment 6 (`docs/agnostic-static-analysis-crescent-slice.md` §6.10)
-burned down the §9.15 deferrals gating the histogram top after increment 5
-(`dynamic-index` 512, `dynamic-index-assign` 482, `multi-assign` 450,
-`multi-return` 317). **Diagnosis first, and the diagnosis was the load-bearing
-result.** A per-MARKER reason histogram (the increment-5 harness extended to report
-each marker's FIRING REASON, not just its tag) contradicted the framing of the three
-named deferrals:
-
-- **`dynamic-index-assign` (3869 markers)** is **2548 EMPTY closed-rec writes**
-  (`out = {}; out[k] = v`, the fresh-table build idiom) — NOT the heterogeneous case
-  the §9.15.4 deferral named (≈1 site). The empty case is the work.
-- **`multi-assign` (2440)** is ~1560 `local x,y = f(args)` where the producer fn IS
-  recovered but the CALL synth-fails on an ARGUMENT or an `unknown` callee — the
-  assignment mechanism landed in increment 5; the marker is downstream
-  argument-expression coverage.
-- **`multi-return` (1815)** is `return a, b` where a VALUE expression
-  (`name`/`binop`/`call`) is out-of-subset — downstream value-expression coverage.
-  The `return f()` spread (§9.15.5) occurs **0 times** in the corpus.
-- **`dynamic-index` read indexer-union-key residue** is overwhelmingly
-  `union{integer, number}` — a soundly-rejected `number` key into an `[integer]`
-  array; the gap is UPSTREAM integer-preserving arithmetic, not an index rule.
-
-The increment landed the ONE sound in-fence item: the empty-fresh-table dynamic
-write. `index_write_target` over an empty closed rec returns `unknown` (no declared
-field ⇒ no constraint; sound because the empty-rec READ rule admits nothing, so the
-accepted write licenses no unsound read — the WRITE dual of the open-row rule). ONE
-branch in ONE function. **No substrate change** (`init.lua` byte-for-byte).
-
-**End-to-end survey re-run** (`--e2e`, 867 files, per-file budget 5s, stdlib +
-read_file caps injected):
-
-| Class | after v2 increment 5 | after v2 increment 6 |
-|---|--:|--:|
-| CHECKED-CLEAN | 25 (2.9%) | **26 (3.0%)** |
-| CHECKED-FINDINGS | 9 (1.0%) | 13 (1.5%) |
-| OUT-OF-SUBSET | 827 (95.4%) | **822 (94.8%)** |
-| NO-ANNOTATION | 6 (0.7%) | 6 (0.7%) |
-| TIMEOUT | 0 | **0** |
-
-**The CONSTRUCT-histogram delta is the honest progress measure** (the whole-file
-gate is the LAST out-of-subset construct per file, so a single rule that is rarely a
-file's last blocker moves the gate by +1 but the histogram far more):
-
-| Construct | after incr 5 (files) | after incr 6 (files) | delta |
-|---|--:|--:|--:|
-| `dynamic-index-assign` | 482 (#2) | **282 (#4)** | −200 files |
-
-The per-MARKER count for `dynamic-index-assign` fell **3869 → 1321 (−2548)** —
-exactly the empty-rec writes, now in-subset. The whole-file CHECKED-CLEAN rose 25 →
-26 (the empty-rec write was the LAST blocker in only one additional file). The
-CHECKED-FINDINGS rise (9 → 13) is REACH, not regression: four files whose last
-out-of-subset construct was the empty-rec write now lower past it and surface their
-PRE-EXISTING downstream findings (recursive-type / field-path-narrowing
-type-mismatches, the §9.8 family); the one file with a rejection
-(`lib/unified/rehype_meta/init.lua`) already had `rej=1, unk=1` at HEAD — the change
-did not introduce it.
-
-**Corpus fixture movements** (`corpus_lower_test`): `pairs_return_leak`
-(`merged = {}; merged[k] = v`) and `table_construction_widening`
-(`insns = {}; insns[i] = {...}`) BOTH moved OUT-OF-SUBSET → **CLEAN** (the
-empty-fresh-table write was their last boundary; both fixtures' headers require
-acceptance). The honest 11-fixture split moved **4 CLEAN / 1 FINDINGS / 6
-OUT-OF-SUBSET → 6 CLEAN / 1 FINDINGS / 4 OUT-OF-SUBSET**, 0 rejections anywhere. New
-inline sub-form test: empty-rec dynamic write (`out = {}; out[s] = 1`, CLEAN). Full
-analysis suite green at 6427 assertions (6421 + 6 net); 0 TIMEOUT; the touched lib
-file typechecks clean (0 errors, no regression). Findings in §9.16.
-
-## v1 end-to-end — after round 4 fixes (§9.17)
-
-Two fixes from the adversarial audit round 4 (`docs/artifacts/typechecker-run-2026-06-12/audit-round-4.md`).
-
-| Class | after v2 increment 6 | after round 4 fixes |
-|---|--:|--:|
-| CHECKED-CLEAN | 26 (3.0%) | **26 (3.0%)** |
-| CHECKED-FINDINGS | 13 (1.5%) | **13 (1.5%)** |
-| OUT-OF-SUBSET | 822 (94.8%) | **822 (94.8%)** |
-| NO-ANNOTATION | 6 (0.7%) | 6 (0.7%) |
-| TIMEOUT | 0 | **0** |
-
-**CHECKED-FINDINGS unchanged at 13.** The 11 false-positive corpus files from the
-round-4 audit all retain CHECKED-FINDINGS after the fixes — their remaining root
-causes are the §9.8 field-path-narrowing deferral or cross-module alias-resolution
-precision gaps, not the bare-variable `and`-guard gap that was fixed. The bare-variable
-fix correctly resolves the probe isolation case (B5a/B5b/B5c now CLEAN), but the actual
-corpus files use FIELD PATHS (`opts_t.title`, etc.) which remain the §9.8 deferral.
-The 2 ANNOTATION-GAP files are unchanged (recorded, not checker work).
-
-**New corpus fixtures** added: `fixture_rec_with_indexer_dynamic_read` (CLEAN — the
-sound `string | integer` annotation accepts), `fixture_and_guard_narrows_left` (CLEAN
-— `if s and s ~= ""` narrows `s` to `string`). Both confirm the fixes land correctly.
-
-**Analysis suite:** 6467 assertions (6427 + 40 net); 0 TIMEOUT; all touched lib
-files typecheck clean (0 errors, no regression). Findings in §9.17.

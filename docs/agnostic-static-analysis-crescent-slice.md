@@ -2350,6 +2350,86 @@ through the existing variable-narrowing machinery, and the soundness boundary is
 lowering's invalidation discipline, fenced executably by the §9.18 invalidation
 tests.
 
+## 6.12 Increment v2.8 — dependency-ordered alias declaration (forward-sibling refs)
+
+Status: design pass for slice **v2 increment 8**. This un-defers the §9.8 / §9.11
+two-phase-alias deferral ("forward/mutual alias references require two-phase
+name-installation-then-parse"), whose trigger has now FIRED with measured demand.
+
+### 6.12.1 The measured demand (diagnose-first)
+
+Both frontiers re-measured against HEAD `9f396092`. The PRECISION frontier (the 16
+e2e CHECKED-FINDINGS files) holds two concrete, deterministic alias-resolution gaps
+its first diagnostics name: `lib/socket/init.lua` carries an `xmodule-alias-error`
+(`server_socket`'s body names `server_client`, declared LATER), and
+`lib/tcp/client.lua` carries one too (via `lib/ljsocket`). Probing the whole corpus
+for the FORM — an alias whose body names a SIBLING alias declared later in the same
+batch — found **154 forward-sibling references across 29 files**, split by a cycle
+test into:
+
+- **63 PURE-FORWARD (acyclic) references across 16 files** — aliases declared out of
+  dependency order with NO cycle (`server_socket → server_client`; the
+  `Expr = ExprCall | ExprNeg | …` parent-union family where the members sit below the
+  union; `DiceNode`/`NegNode`, `HamtNode`/`HamtInterior`, `Block`/`Func`, …). These
+  are the increment's target.
+- **55 CYCLIC (mutual) references across 21 files** — genuine mutually-recursive
+  families (`A` body names `B`, `B` body names `A`). A single-binder equirecursive μ
+  (slice_ty's μ is de Bruijn, one binder) cannot express a multi-equation family;
+  this is a substrate gap, deferred honestly (§9.19).
+
+This ranked FIRST over the coverage frontier's top forms (`dynamic-index` 510,
+`multi-assign` 452, `multi-return` 317 — each a major statement-lowering undertaking
+whose residue increments 5/6 already traced to upstream precision) on the
+soundness-value × demand product: it is a PRECISION fix (it converts an honest
+forward-reference ERROR into the CORRECT resolved type — never a wrong type), it is
+the literal §9.8/§9.11 named deferral, and it clears the largest *named* precision
+form measured. A competing precision candidate — the tuple type `{ A, B }`
+(`ljsocket`'s `timeout_connected`) — has ≈1 corpus site and is deferred (§9.19).
+
+### 6.12.2 The derived whole (no special-casing)
+
+Source order is just ONE valid order: it resolves a BACKWARD reference (a later alias
+naming an earlier one) but not a FORWARD one. The strictly-correct generalization is
+to declare each alias AFTER the siblings it references — a **topological order over
+the intra-batch dependency graph**. This is pure graph topology, not a name-keyed
+handler:
+
+1. **Edge set.** For each alias decl, its body's standalone-identifier tokens that
+   name another decl in the SAME batch (excluding self — a self-reference is already
+   bound by `declare_alias`'s μ placeholder, §6.11/§9.7, so it is NOT a batch edge).
+2. **Order.** DFS post-order with on-stack cycle detection. A back-edge (a dependency
+   currently on the DFS stack) is NOT recursed through, so a cycle member keeps its
+   source position. Independent aliases tie-break on source order, so a batch with no
+   forward references reproduces today's declaration order byte-for-byte.
+3. **Declaration.** Declare in that order via the unchanged per-alias `declare_alias`
+   (μ for self-recursion, well-formedness gate, `(nil, errmsg)` on failure). Failures
+   are attributed back to the SOURCE LINE via an input-index ↔ line map, so a marker
+   still points at the right place under the reorder.
+
+`declare_alias` itself is **byte-for-byte unchanged** — the same load-bearing pattern
+as §6.11 (the change is the ORDER aliases are fed to it, not the per-alias machinery).
+
+### 6.12.3 The soundness boundary — the cyclic family stays an honest error
+
+A genuine mutual cycle (`A ↔ B`) cannot be broken by ordering: whichever member is
+declared first names a not-yet-present sibling and errors, exactly as today. The
+dependency-ordering pass therefore NEVER silently binds a cyclic family to a wrong
+type — it produces the SAME honest forward-reference error. This is the executable
+fence (a `declare_aliases_ordered` test asserts `A ↔ B` errors honestly, NOT
+resolves). The principled fix for cyclic families is a **multi-binder μ** (a system of
+mutually-recursive type equations), a slice_ty substrate gap recorded §9.19 with the
+now-measured trigger (55 refs / 21 files), never hardcoded.
+
+### 6.12.4 Mechanization surface
+
+Three seams, mirroring the import/scan split:
+
+| Seam | File | Change |
+|---|---|---|
+| Order + batch-declare | `crescent_slice_parse.lua` | `alias_decl_order(decls)` (pure topo) + `declare_aliases_ordered(env, decls)` (declare in that order, per-input-index results) |
+| In-file aliases | `crescent_slice_lower.lua` | `scan_source` COLLECTS alias decls (with source line), then batch-declares in dependency order; failure markers attributed by line |
+| Cross-module aliases | `crescent_slice_xmodule.lua` | `import_top_level_aliases` collects this module's batch and installs in `alias_decl_order`; the F1 cross-exporter collision check is unaffected by intra-module reordering |
+
 ---
 
 ## 7. Acceptance Criteria
@@ -4457,3 +4537,102 @@ soundness-of-rejection-correct precision boundaries, never wrong types.
 **Regression.** No pre-existing test broken; the only updated tests are the
 coinductive fixture's (FINDINGS → CLEAN) and the 11-fixture honest-split tally
 (7 CLEAN / 0 FINDINGS / 4 OUT-OF-SUBSET, was 6 / 1 / 4).
+
+### 9.19 Mechanization findings — slice v2 increment 8 (§6.12, dependency-ordered alias declaration)
+
+The §9.8 / §9.11 two-phase-alias deferral, un-deferred for its ACYCLIC case. Design
+§6.12; full report `docs/artifacts/typechecker-run-2026-06-12/increment-8.md`. Full
+analysis suite green at **6501 assertions** (6489 + 12 new). `timeout 30 bin/cr check`
+clean on the three touched implementation files (`crescent_slice_parse.lua`,
+`crescent_slice_lower.lua`, `crescent_slice_xmodule.lua`: 0 errors; lower's 20
+warnings are pre-existing nested-closure signature notes, unchanged from HEAD).
+
+**The diagnosis ranked dependency-ordered alias declaration FIRST.** Probing the
+corpus for the forward-sibling FORM (an alias whose body names a sibling declared
+later in the same batch) found **154 references across 29 files**, split by a cycle
+test into **63 pure-forward (acyclic) refs / 16 files** (the target) and **55 cyclic
+(mutual) refs / 21 files** (the multi-binder-μ substrate gap, deferred below). It beat
+the coverage-frontier top forms (`dynamic-index` 510, `multi-assign` 452,
+`multi-return` 317) on soundness-value × demand: a precision fix converting an honest
+forward-reference ERROR into the CORRECT resolved type, the literal §9.8/§9.11 named
+deferral, largest named precision form measured.
+
+**The implementation finding — `declare_alias` needed ZERO changes.** The derived
+whole (§6.12.2) held: a forward-sibling reference is a DECLARATION-ORDER problem, not a
+per-alias-machinery problem. `alias_decl_order` (pure DFS topo, on-stack cycle
+detection) feeds the unchanged `declare_alias` in dependency order;
+`declare_aliases_ordered` attributes per-input-index results back to source lines.
+Self-reference is excluded from the batch edge set (it is already μ-bound), and an
+independent batch reproduces source order byte-for-byte. Wired into BOTH the in-file
+path (`scan_source`) and the cross-module import path (`import_top_level_aliases`,
+collision check unaffected by intra-module reorder).
+
+**The soundness fence (EXECUTABLE).** A genuine mutual cycle (`A ↔ B`) is NOT silently
+resolved — whichever member declares first names a not-yet-present sibling and errors
+honestly, the SAME behavior as today. A `declare_aliases_ordered` test asserts the
+cycle errors (`T.fail(res[1].ok and res[2].ok)`); the forward-sibling and parent-union
+tests assert clean resolution; an `alias_decl_order` test asserts a dependency
+precedes its dependent. Cross-module: a test imports a module whose `server_socket`
+forward-references `server_client` and asserts `#errors == 0`.
+
+**Corpus effect (e2e survey, 867 files, honest numbers).**
+
+| Class | Increment 7 | Increment 8 | Δ |
+|---|--:|--:|--:|
+| CHECKED-CLEAN | 26 | 27 | +1 |
+| CHECKED-FINDINGS | 16 | 15 | −1 |
+| OUT-OF-SUBSET | 819 | 817 | −2 |
+| NO-ANNOTATION | 6 | 8 | +2 |
+
+- **`lib/socket/init.lua` moved FINDINGS → CLEAN** (rej=0, unk=0, 0 markers): it
+  imports `lib/socket/server.lua`, whose `server_socket → server_client` forward
+  reference now resolves under dependency ordering, clearing the `xmodule-alias-error`
+  that was its only finding. This is the +1 CHECKED-CLEAN and the −1 CHECKED-FINDINGS.
+- **Two files moved OUT-OF-SUBSET → NO-ANNOTATION** (+2 / −2): their own alias batch
+  now resolves cleanly, so the markers that had blocked them are gone and no requested
+  claim remains. Forward progress — alias resolution no longer blocks them.
+- **Annotation-grammar survey** (`docs/slice-survey-v1.md`, regenerated): CHECKED-CLEAN
+  489 (unchanged — the annotation survey parses each annotation against a FLAT env, so
+  the batch-ordering benefit surfaces in the e2e path, not here), `unknown-type-name`
+  collapsed bucket 152 → 151, OUT-OF-SUBSET 241 → 240.
+- **The non-clearing findings files are unchanged in cause** — their next boundaries
+  (cross-module `HastNode`/`FrontierNode` value-type resolution, `el()`/`text()`
+  unannotated-function returns, `pairs`-key typing, capability-closure synthesis,
+  module-value-type abstention) are all unrelated to forward-sibling alias ordering, as
+  §9.18 already named. `lib/tcp/client.lua` still errors via `lib/ljsocket`'s
+  `LjSocket` — but the cause is the **tuple type `{ A, B }`** (`timeout_connected`), a
+  SEPARATE deferral (below), confirmed by `LjSocket`'s `alias-error` being
+  `{ T } list shorthand must be a single type`, not a forward reference.
+
+**Deferrals recorded (un-defer triggers).**
+
+- **Cyclic (mutual) alias families — multi-binder μ.** A genuine mutually-recursive
+  family (`A` names `B`, `B` names `A`) cannot be ordered into resolution; slice_ty's μ
+  is single-binder (de Bruijn, one variable), so a family of N mutually-recursive
+  equations is a substrate gap. Measured trigger has fired: **55 cyclic refs across 21
+  files** (`Expr`/its members where members reference back into `Expr`, `Machine`/
+  `Instance`, `CFG`/`Func`, …). Un-defer: a multi-binder μ in slice_ty (a system of
+  simultaneous recursive type equations) that lets a family resolve as one fixed point.
+  NOT hardcoded — the cyclic case keeps the honest error until the substrate exists.
+- **Tuple type `{ A, B }` (fixed positional/heterogeneous list).** ≈1 corpus site
+  (`ljsocket`'s `timeout_connected: { string | nil, string | integer | nil }`), which
+  blocks `LjSocket` and, transitively, `tcp/client`. The parser rejects a brace group
+  with a top-level comma and no `key:`/`[K]:` as "list shorthand must be a single
+  type." Un-defer: implement the `tuple` Ty kind at the annotation-grammar seam (the
+  kind already exists in slice_ty for function params/returns; it needs to be admitted
+  as a standalone table type). Low demand; deferred behind the cyclic-family substrate.
+
+**Regression.** No pre-existing test broken. The 12 new tests are forward-sibling
+resolution (`server_socket`/`Expr`-union), the independent-batch source-order
+invariant, the mutual-cycle honest-error fence, the `alias_decl_order` precedence
+assertion, and the cross-module forward-sibling import.
+
+### 10.8 Slice v2 increment 8 — DONE (dependency-ordered alias declaration) (2026-06-12)
+
+Un-deferred the §9.8/§9.11 two-phase-alias deferral for its acyclic case (§6.12,
+§9.19). Forward-sibling alias references resolve under a topological declaration order
+(pure graph topology, `declare_alias` unchanged); genuine mutual cycles stay an honest
+error behind the multi-binder-μ substrate deferral. e2e: CHECKED-CLEAN 26 → 27,
+CHECKED-FINDINGS 16 → 15, OUT-OF-SUBSET 819 → 817 (`lib/socket/init.lua` FINDINGS →
+CLEAN). Suite green at 6501 assertions. Survey re-run headlines:
+`docs/slice-survey-v1.md`, "after v2 increment 8".

@@ -829,22 +829,24 @@ local function scan_source(src, base_aliases)
 	local lines = {} --[[: { [integer]: string } ]]
 	for ln in (src .. "\n"):gmatch("(.-)\n") do lines[#lines + 1] = ln end
 
-	-- First pass: declare aliases in source order (so a later alias can reference
-	-- an earlier one). Record signature directives by line. Multi-line `--::`
-	-- continuations are joined (§6.5.6); `consumed` is how many source lines the
-	-- directive spanned, so they are not re-scanned as separate (failing) lines.
+	-- First pass: COLLECT alias declarations (with their source line), then declare
+	-- them as a batch in DEPENDENCY order (§6.12): source order resolves a backward
+	-- reference, but a FORWARD-sibling reference (an alias whose body names a sibling
+	-- declared later) needs the dependency reordered first. `declare_aliases_ordered`
+	-- topo-sorts the acyclic dependencies; a genuine mutually-recursive family keeps
+	-- source order and errors honestly (the multi-binder-μ deferral, §9.19). Record
+	-- signature directives by line. Multi-line `--::` continuations are joined
+	-- (§6.5.6); `consumed` is how many source lines the directive spanned.
+	local alias_decls = {} --[[: { [integer]: { name: string, body: string } } ]]
+	local alias_lines = {} --[[: { [integer]: integer } ]] -- input index → source line
 	local idx = 1 --: integer
 	while idx <= #lines do
 		local d, consumed = P.scan_annotation_at(lines, idx)
 		local span = (consumed > 0 and consumed or 1) --: integer
 		if d and d.kind == "alias" and d.name ~= nil and d.body ~= nil then
-			local r, e, c = P.declare_alias(aliases, d.name, d.body)
+			alias_decls[#alias_decls + 1] = { name = d.name, body = d.body }
+			alias_lines[#alias_decls] = idx
 			observations[#observations + 1] = { kind = "alias", name = d.name, body = d.body, line = idx }
-			if not r then
-				local txt = (lines[idx]:gsub("^%s+", "")) --[[: string ]]
-				markers[#markers + 1] = { line = idx, construct = c or "alias-error", text = txt }
-				local _ = e
-			end
 		elseif d and d.kind == "sig" and d.body ~= nil then
 			-- attach to the next statement-bearing line (after this directive's span).
 			local target = idx + span
@@ -858,6 +860,19 @@ local function scan_source(src, base_aliases)
 			observations[#observations + 1] = { kind = "sig", body = d.body, line = idx, attaches = target }
 		end
 		idx = idx + span
+	end
+
+	-- Declare the collected aliases in dependency order; attribute each failure to
+	-- its source line (the input index ↔ line map preserves attribution under the
+	-- topo reorder).
+	local res = P.declare_aliases_ordered(aliases, alias_decls)
+	for i = 1, #alias_decls do
+		local r = res[i]
+		if r and not r.ok then
+			local ln = alias_lines[i] --: integer
+			local txt = (lines[ln]:gsub("^%s+", "")) --[[: string ]]
+			markers[#markers + 1] = { line = ln, construct = r.construct or "alias-error", text = txt }
+		end
 	end
 
 	return { aliases = aliases, anns_by_line = anns_by_line, observations = observations, markers = markers }

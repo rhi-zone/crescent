@@ -560,6 +560,106 @@ function M.declare_alias(aliases, name, body)
 	return aliases
 end
 
+-- ── Dependency-ordered batch alias declaration (forward-sibling refs, §6.12) ──
+--
+-- `scan_source` / the cross-module import pass declare a file's `--::` aliases
+-- ONE AT A TIME in SOURCE order. That resolves a backward reference (a later alias
+-- naming an earlier one) but FAILS a FORWARD-sibling reference — an alias whose
+-- body names a sibling declared LATER in the same batch (`server_socket.accept ->
+-- server_client`, `Expr = ExprCall | ...` with `ExprCall` below it). Measured
+-- demand: 63 pure-forward (acyclic) references across 16 `lib/` files (the §9.8 /
+-- §9.11 two-phase deferral's now-fired trigger).
+--
+-- THE DERIVED WHOLE (no special-casing). Source order is just ONE valid order; the
+-- strictly-correct generalization is to declare each alias AFTER the siblings it
+-- references — a topological order over the intra-batch dependency graph. This is
+-- pure graph topology, not a name-keyed handler: an acyclic dependency set is
+-- reordered so every forward reference resolves; a GENUINE cycle (a mutually-
+-- recursive family `A` body names `B`, `B` body names `A` — the multi-binder-μ
+-- substrate gap, §9.19 deferral) is left in SOURCE order, producing the SAME
+-- honest forward-reference error as today. Self-reference (`A` names `A`) is NOT a
+-- batch dependency — `declare_alias` already binds it via μ — so it is excluded
+-- from the edge set.
+--
+-- Topo order is computed by DFS post-order with on-stack cycle detection. A node
+-- on a cycle is emitted in its arrival position (source order among the cycle), so
+-- its forward edge into a not-yet-declared cycle member still errors honestly. The
+-- ORIGINAL source order is the tie-break for independent aliases, so a batch with
+-- no forward references reproduces today's behavior byte-for-byte.
+
+--:: AliasDecl = { name: string, body: string }
+
+-- The pure DEPENDENCY ORDER over a batch of alias decls: returns the input indices
+-- in an order where each alias follows the (acyclic) siblings it references. A
+-- cycle member keeps its source position. Used by `declare_aliases_ordered` (the
+-- in-file path) and by the cross-module import pass (`crescent_slice_xmodule`).
+--: (AliasDecl[]) -> integer[]
+function M.alias_decl_order(decls)
+	local n = #decls
+	-- index map: declared name → its FIRST input index (source-order, first wins,
+	-- matching the most-recent-wins shadowing rule which keeps the earliest slot).
+	local idx_of = {} --[[: { [string]: integer } ]]
+	for i = 1, n do
+		local nm = decls[i].name
+		if idx_of[nm] == nil then idx_of[nm] = i end
+	end
+	-- edges: input index → list of intra-batch input indices it depends on
+	-- (sibling names in its body, excluding self).
+	local deps = {} --[[: { [integer]: integer[] } ]]
+	for i = 1, n do
+		local d = decls[i]
+		local seen = {} --[[: { [string]: boolean } ]]
+		local list = {} --[[: integer[] ]]
+		for tok in d.body:gmatch("[%a_][%w_]*") do
+			local j = idx_of[tok]
+			if j ~= nil and tok ~= d.name and not seen[tok] then
+				seen[tok] = true
+				list[#list + 1] = j
+			end
+		end
+		deps[i] = list
+	end
+	-- DFS post-order with on-stack detection. `state`: nil=unvisited, 1=on-stack,
+	-- 2=done. A back-edge (dependency currently on-stack) is a cycle: we do NOT
+	-- recurse through it, so the cycle member keeps its source position and errors
+	-- honestly when declared before its not-yet-present dependency.
+	local order = {} --[[: integer[] ]]
+	local state = {} --[[: { [integer]: integer } ]]
+	--: (integer) -> nil
+	local function visit(i)
+		if state[i] == 2 then return end
+		if state[i] == 1 then return end -- on-stack: cycle back-edge, do not recurse
+		state[i] = 1
+		local dl = deps[i]
+		for k = 1, #dl do visit(dl[k]) end
+		state[i] = 2
+		order[#order + 1] = i
+	end
+	for i = 1, n do visit(i) end
+	return order
+end
+
+-- Declare a batch of aliases into `env` in dependency order (via `alias_decl_order`).
+-- Returns, per INPUT index, `{ ok, err?, construct? }` so the caller attributes a
+-- failure to the right source line. The env is mutated in place. Backward and
+-- forward acyclic references both resolve; a cyclic reference errors honestly on
+-- the member whose dependency is not yet in env (unchanged source-order behavior).
+--: (AliasEnv, AliasDecl[]) -> { [integer]: { ok: boolean, err?: string, construct?: string } }
+function M.declare_aliases_ordered(env, decls)
+	local order = M.alias_decl_order(decls)
+	local results = {} --[[: { [integer]: { ok: boolean, err?: string, construct?: string } } ]]
+	for k = 1, #order do
+		local i = order[k]
+		local d = decls[i]
+		local r, e, c = M.declare_alias(env, d.name, d.body)
+		local res = { ok = r ~= nil } --[[: { ok: boolean, err?: string, construct?: string } ]]
+		if e ~= nil then res.err = e end
+		if c ~= nil then res.construct = c end
+		results[i] = res
+	end
+	return results
+end
+
 -- ── Annotation line scanning (`--:` / `--::`) ────────────────────────────────
 --
 -- Pull annotation directives out of a source line. Returns one of:

@@ -157,6 +157,14 @@ local function import_top_level_aliases(env, origin, src, modpath)
 	for ln in (src .. "\n"):gmatch("(.-)\n") do lines[#lines + 1] = ln end
 	local names = {} --[[: string[] ]]
 	local errors = {} --[[: ExportError[] ]]
+	-- Collect this module's alias decls in source order, then install them in
+	-- DEPENDENCY order (§6.12): a forward-sibling reference inside ONE exporting
+	-- module (`A`'s body names `B` declared below it) needs `B` installed first.
+	-- The topo order is computed over THIS module's batch only; the per-name
+	-- collision check (F1) against names imported from OTHER modules is unaffected by
+	-- intra-module reordering. A genuine mutual cycle keeps source order and errors
+	-- honestly (the §9.19 multi-binder-μ deferral, same as the in-file case).
+	local decls = {} --[[: { [integer]: { name: string, body: string } } ]]
 	local idx = 1 --: integer
 	while idx <= #lines do
 		local d, consumed = P.scan_annotation_at(lines, idx)
@@ -164,6 +172,16 @@ local function import_top_level_aliases(env, origin, src, modpath)
 		local dname = d and d.name --[[: string | nil ]]
 		local dbody = d and d.body --[[: string | nil ]]
 		if d and d.kind == "alias" and dname ~= nil and dbody ~= nil then
+			decls[#decls + 1] = { name = dname, body = dbody }
+		end
+		idx = idx + span
+	end
+	-- topo order over the batch (indices into `decls`).
+	local order = P.alias_decl_order(decls)
+	for _, oi in ipairs(order) do
+		local dname = decls[oi].name --: string
+		local dbody = decls[oi].body --: string
+		do
 			-- F1: collision detection — check before installing.
 			local existing = env[dname] --[[: Ty | nil ]]
 			local orig_mod = origin[dname] --[[: string | nil ]]
@@ -205,7 +223,6 @@ local function import_top_level_aliases(env, origin, src, modpath)
 				end
 			end
 		end
-		idx = idx + span
 	end
 	return names, errors
 end
